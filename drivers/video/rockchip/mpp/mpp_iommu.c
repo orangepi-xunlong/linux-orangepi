@@ -272,14 +272,14 @@ fail:
 int mpp_dma_unmap_kernel(struct mpp_dma_session *dma,
 			 struct mpp_dma_buffer *buffer)
 {
-	void *vaddr = buffer->vaddr;
+	struct iosys_map map = IOSYS_MAP_INIT_VADDR(buffer->vaddr);
 	struct dma_buf *dmabuf = buffer->dmabuf;
 
-	if (IS_ERR_OR_NULL(vaddr) ||
+	if (IS_ERR_OR_NULL(map.vaddr) ||
 	    IS_ERR_OR_NULL(dmabuf))
 		return -EINVAL;
 
-	dma_buf_vunmap(dmabuf, vaddr);
+	dma_buf_vunmap(dmabuf, &map);
 	buffer->vaddr = NULL;
 
 	dma_buf_end_cpu_access(dmabuf, DMA_FROM_DEVICE);
@@ -291,7 +291,7 @@ int mpp_dma_map_kernel(struct mpp_dma_session *dma,
 		       struct mpp_dma_buffer *buffer)
 {
 	int ret;
-	void *vaddr;
+	struct iosys_map map;
 	struct dma_buf *dmabuf = buffer->dmabuf;
 
 	if (IS_ERR_OR_NULL(dmabuf))
@@ -303,14 +303,13 @@ int mpp_dma_map_kernel(struct mpp_dma_session *dma,
 		goto failed_access;
 	}
 
-	vaddr = dma_buf_vmap(dmabuf);
-	if (!vaddr) {
+	ret = dma_buf_vmap(dmabuf, &map);
+	if (ret) {
 		dev_dbg(dma->dev, "can't vmap the dma buffer\n");
-		ret = -EIO;
 		goto failed_vmap;
 	}
 
-	buffer->vaddr = vaddr;
+	buffer->vaddr = map.vaddr;
 
 	return 0;
 

@@ -558,7 +558,7 @@ static int fill_scaling_list_pps(struct rkvdec_task *task,
 				 int pps_info_size, int sub_addr_offset)
 {
 	struct dma_buf *dmabuf = NULL;
-	void *vaddr = NULL;
+	struct iosys_map map;
 	u8 *pps = NULL;
 	u32 scaling_fd = 0;
 	int ret = 0;
@@ -573,16 +573,15 @@ static int fill_scaling_list_pps(struct rkvdec_task *task,
 	ret = dma_buf_begin_cpu_access(dmabuf, DMA_FROM_DEVICE);
 	if (ret) {
 		mpp_err("can't access the pps buffer\n");
-		goto done;
+		goto access_failed;
 	}
 
-	vaddr = dma_buf_vmap(dmabuf);
-	if (!vaddr) {
+	ret = dma_buf_vmap(dmabuf, &map);
+	if (ret) {
 		mpp_err("can't access the pps buffer\n");
-		ret = -EIO;
-		goto done;
+		goto vmap_failed;
 	}
-	pps = vaddr + offset;
+	pps = map.vaddr + offset;
 	/* NOTE: scaling buffer in pps, have no offset */
 	memcpy(&scaling_fd, pps + base, sizeof(scaling_fd));
 	scaling_fd = le32_to_cpu(scaling_fd);
@@ -596,7 +595,7 @@ static int fill_scaling_list_pps(struct rkvdec_task *task,
 		if (IS_ERR(mem_region)) {
 			mpp_err("scaling list fd %d attach failed\n", scaling_fd);
 			ret = PTR_ERR(mem_region);
-			goto done;
+			goto task_fd_failed;
 		}
 
 		tmp = mem_region->iova & 0xffffffff;
@@ -610,9 +609,11 @@ static int fill_scaling_list_pps(struct rkvdec_task *task,
 			memcpy(pps + base, &tmp, sizeof(tmp));
 	}
 
-done:
-	dma_buf_vunmap(dmabuf, vaddr);
+task_fd_failed:
+	dma_buf_vunmap(dmabuf, &map);
+vmap_failed:
 	dma_buf_end_cpu_access(dmabuf, DMA_FROM_DEVICE);
+access_failed:
 	dma_buf_put(dmabuf);
 
 	return ret;
