@@ -121,22 +121,13 @@ static int csi2_dphy_update_sensor_mbus(struct v4l2_subdev *sd)
 		return ret;
 
 	sensor->mbus = mbus;
-	switch (mbus.flags & V4L2_MBUS_CSI2_LANES) {
-	case V4L2_MBUS_CSI2_1_LANE:
-		sensor->lanes = 1;
-		break;
-	case V4L2_MBUS_CSI2_2_LANE:
-		sensor->lanes = 2;
-		break;
-	case V4L2_MBUS_CSI2_3_LANE:
-		sensor->lanes = 3;
-		break;
-	case V4L2_MBUS_CSI2_4_LANE:
-		sensor->lanes = 4;
-		break;
-	default:
-		return -EINVAL;
-	}
+
+	if (mbus.type == V4L2_MBUS_CSI2_DPHY ||
+	    mbus.type == V4L2_MBUS_CSI2_CPHY)
+		sensor->lanes = mbus.bus.mipi_csi2.num_data_lanes;
+	else if (mbus.type == V4L2_MBUS_CCP2)
+		sensor->lanes = mbus.bus.mipi_csi1.data_lane;
+
 	if (dphy->drv_data->vendor == PHY_VENDOR_INNO) {
 		ret = v4l2_subdev_call(sensor_sd, core, ioctl,
 				       RKMODULE_GET_BUS_CONFIG, &bus_config);
@@ -491,32 +482,16 @@ static int rockchip_csi2_dphy_fwnode_parse(struct device *dev,
 		return -EINVAL;
 	}
 
-	if (vep->bus_type == V4L2_MBUS_CSI2_DPHY) {
+	if (vep->bus_type == V4L2_MBUS_CSI2_DPHY ||
+	    vep->bus_type == V4L2_MBUS_CSI2_CPHY) {
 		config->type = V4L2_MBUS_CSI2_DPHY;
-		config->flags = vep->bus.mipi_csi2.flags;
+		config->bus.mipi_csi2.flags = vep->bus.mipi_csi2.flags;
 		s_asd->lanes = vep->bus.mipi_csi2.num_data_lanes;
 	} else if (vep->bus_type == V4L2_MBUS_CCP2) {
 		config->type = V4L2_MBUS_CCP2;
 		s_asd->lanes = vep->bus.mipi_csi1.data_lane;
 	} else {
 		dev_err(dev, "Only CSI2 type is currently supported\n");
-		return -EINVAL;
-	}
-
-	switch (s_asd->lanes) {
-	case 1:
-		config->flags |= V4L2_MBUS_CSI2_1_LANE;
-		break;
-	case 2:
-		config->flags |= V4L2_MBUS_CSI2_2_LANE;
-		break;
-	case 3:
-		config->flags |= V4L2_MBUS_CSI2_3_LANE;
-		break;
-	case 4:
-		config->flags |= V4L2_MBUS_CSI2_4_LANE;
-		break;
-	default:
 		return -EINVAL;
 	}
 
