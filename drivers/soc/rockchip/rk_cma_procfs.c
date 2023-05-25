@@ -47,11 +47,12 @@ static void cma_procfs_show_bitmap(struct seq_file *s, struct cma *cma)
 
 static u64 cma_procfs_used_get(struct cma *cma)
 {
+	unsigned long flags;
 	unsigned long used;
 
-	mutex_lock(&cma->lock);
+	spin_lock_irqsave(&cma->lock, flags);
 	used = bitmap_weight(cma->bitmap, (int)cma_bitmap_maxno(cma));
-	mutex_unlock(&cma->lock);
+	spin_unlock_irqrestore(&cma->lock, flags);
 
 	return (u64)used << cma->order_per_bit;
 }
