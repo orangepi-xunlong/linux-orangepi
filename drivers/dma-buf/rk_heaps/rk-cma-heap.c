@@ -113,10 +113,9 @@ static struct sg_table *rk_cma_heap_map_dma_buf(struct dma_buf_attachment *attac
 {
 	struct rk_cma_heap_attachment *a = attachment->priv;
 	struct sg_table *table = &a->table;
-	int attrs = attachment->dma_map_attrs;
 	int ret;
 
-	ret = dma_map_sgtable(attachment->dev, table, direction, attrs);
+	ret = dma_map_sgtable(attachment->dev, table, direction, 0);
 	if (ret)
 		return ERR_PTR(-ENOMEM);
 	a->mapped = true;
@@ -128,10 +127,9 @@ static void rk_cma_heap_unmap_dma_buf(struct dma_buf_attachment *attachment,
 				      enum dma_data_direction direction)
 {
 	struct rk_cma_heap_attachment *a = attachment->priv;
-	int attrs = attachment->dma_map_attrs;
 
 	a->mapped = false;
-	dma_unmap_sgtable(attachment->dev, table, direction, attrs);
+	dma_unmap_sgtable(attachment->dev, table, direction, 0);
 }
 
 static int
@@ -238,31 +236,35 @@ static void *rk_cma_heap_do_vmap(struct rk_cma_heap_buffer *buffer)
 	return vaddr;
 }
 
-static void *rk_cma_heap_vmap(struct dma_buf *dmabuf)
+static int rk_cma_heap_vmap(struct dma_buf *dmabuf, struct iosys_map *map)
 {
 	struct rk_cma_heap_buffer *buffer = dmabuf->priv;
 	void *vaddr;
+	int ret = 0;
 
 	mutex_lock(&buffer->lock);
 	if (buffer->vmap_cnt) {
 		buffer->vmap_cnt++;
-		vaddr = buffer->vaddr;
+		iosys_map_set_vaddr(map, buffer->vaddr);
 		goto out;
 	}
 
 	vaddr = rk_cma_heap_do_vmap(buffer);
-	if (IS_ERR(vaddr))
+	if (IS_ERR(vaddr)) {
+		ret = PTR_ERR(vaddr);
 		goto out;
+	}
 
 	buffer->vaddr = vaddr;
 	buffer->vmap_cnt++;
+	iosys_map_set_vaddr(map, buffer->vaddr);
 out:
 	mutex_unlock(&buffer->lock);
 
-	return vaddr;
+	return ret;
 }
 
-static void rk_cma_heap_vunmap(struct dma_buf *dmabuf, void *vaddr)
+static void rk_cma_heap_vunmap(struct dma_buf *dmabuf, struct iosys_map *map)
 {
 	struct rk_cma_heap_buffer *buffer = dmabuf->priv;
 
@@ -272,6 +274,7 @@ static void rk_cma_heap_vunmap(struct dma_buf *dmabuf, void *vaddr)
 		buffer->vaddr = NULL;
 	}
 	mutex_unlock(&buffer->lock);
+	iosys_map_clear(map);
 }
 
 static void rk_cma_heap_remove_dmabuf_list(struct dma_buf *dmabuf)
@@ -411,8 +414,10 @@ static const struct dma_buf_ops rk_cma_heap_buf_ops = {
 	.unmap_dma_buf = rk_cma_heap_unmap_dma_buf,
 	.begin_cpu_access = rk_cma_heap_dma_buf_begin_cpu_access,
 	.end_cpu_access = rk_cma_heap_dma_buf_end_cpu_access,
+#ifdef CONFIG_DMABUF_PARTIAL
 	.begin_cpu_access_partial = rk_cma_heap_dma_buf_begin_cpu_access_partial,
 	.end_cpu_access_partial = rk_cma_heap_dma_buf_end_cpu_access_partial,
+#endif
 	.mmap = rk_cma_heap_mmap,
 	.vmap = rk_cma_heap_vmap,
 	.vunmap = rk_cma_heap_vunmap,
@@ -655,11 +660,12 @@ static void cma_procfs_show_bitmap(struct seq_file *s, struct cma *cma)
 
 static u64 cma_procfs_used_get(struct cma *cma)
 {
+	unsigned long flags;
 	unsigned long used;
 
-	mutex_lock(&cma->lock);
+	spin_lock_irqsave(&cma->lock, flags);
 	used = bitmap_weight(cma->bitmap, (int)cma_bitmap_maxno(cma));
-	mutex_unlock(&cma->lock);
+	spin_unlock_irqrestore(&cma->lock, flags);
 
 	return (u64)used << cma->order_per_bit;
 }
