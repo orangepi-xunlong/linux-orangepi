@@ -3168,7 +3168,7 @@ static int vop2_wb_encoder_atomic_check(struct drm_encoder *encoder,
 	}
 
 	if ((fb->width > cstate->mode.hdisplay) ||
-	    ((fb->height != cstate->mode.vdisplay) &&
+	    ((fb->height < cstate->mode.vdisplay) &&
 	    (fb->height != (cstate->mode.vdisplay >> 1)))) {
 		DRM_DEBUG_KMS("Invalid framebuffer size %ux%u, Only support x scale down and 1/2 y scale down\n",
 				fb->width, fb->height);
@@ -4980,19 +4980,19 @@ static void vop2_win_atomic_update(struct vop2_win *win, struct drm_rect *src, s
 		}
 	}
 
-	if (dst->x1 + dsp_w > adjusted_mode->hdisplay) {
+	if (dst->x1 + dsp_w > adjusted_mode->crtc_hdisplay) {
 		DRM_ERROR("vp%d %s dest->x1[%d] + dsp_w[%d] exceed mode hdisplay[%d]\n",
-			  vp->id, win->name, dst->x1, dsp_w, adjusted_mode->hdisplay);
-		dsp_w = adjusted_mode->hdisplay - dst->x1;
+			  vp->id, win->name, dst->x1, dsp_w, adjusted_mode->crtc_hdisplay);
+		dsp_w = adjusted_mode->crtc_hdisplay - dst->x1;
 		if (dsp_w < 4)
 			dsp_w = 4;
 		actual_w = dsp_w * actual_w / drm_rect_width(dst);
 	}
 	dsp_h = drm_rect_height(dst);
-	if (dst->y1 + dsp_h > adjusted_mode->vdisplay) {
+	if (dst->y1 + dsp_h > adjusted_mode->crtc_vdisplay) {
 		DRM_ERROR("vp%d %s dest->y1[%d] + dsp_h[%d] exceed mode vdisplay[%d]\n",
-			  vp->id, win->name, dst->y1, dsp_h, adjusted_mode->vdisplay);
-		dsp_h = adjusted_mode->vdisplay - dst->y1;
+			  vp->id, win->name, dst->y1, dsp_h, adjusted_mode->crtc_vdisplay);
+		dsp_h = adjusted_mode->crtc_vdisplay - dst->y1;
 		if (dsp_h < 4)
 			dsp_h = 4;
 		actual_h = dsp_h * actual_h / drm_rect_height(dst);
@@ -6500,10 +6500,31 @@ static bool vop2_crtc_mode_fixup(struct drm_crtc *crtc,
 				 struct drm_display_mode *adj_mode)
 {
 	struct vop2_video_port *vp = to_vop2_video_port(crtc);
+	struct vop2 *vop2 = vp->vop2;
 	struct drm_connector *connector;
 	struct drm_connector_list_iter conn_iter;
 	struct drm_crtc_state *new_crtc_state = container_of(mode, struct drm_crtc_state, mode);
 	struct rockchip_crtc_state *vcstate = to_rockchip_crtc_state(new_crtc_state);
+
+	/*
+	 * For RK3568 and RK3588, the hactive of video timing must
+	 * be 4-pixel aligned.
+	 */
+	if (vop2->version == VOP_VERSION_RK3568 || vop2->version == VOP_VERSION_RK3588) {
+		if (adj_mode->hdisplay % 4) {
+			u16 old_hdisplay = adj_mode->hdisplay;
+			u16 align;
+
+			align = 4 - (adj_mode->hdisplay % 4);
+			adj_mode->hdisplay += align;
+			adj_mode->hsync_start += align;
+			adj_mode->hsync_end += align;
+			adj_mode->htotal += align;
+
+			DRM_WARN("VP%d: hactive need to be aligned with 4-pixel, %d -> %d\n",
+				 vp->id, old_hdisplay, adj_mode->hdisplay);
+		}
+	}
 
 	drm_mode_set_crtcinfo(adj_mode, CRTC_INTERLACE_HALVE_V | CRTC_STEREO_DOUBLE);
 
@@ -7462,6 +7483,7 @@ static void vop2_crtc_atomic_enable(struct drm_crtc *crtc, struct drm_atomic_sta
 
 		VOP_CTRL_SET(vop2, rgb_en, 1);
 		VOP_CTRL_SET(vop2, rgb_mux, vp_data->id);
+		VOP_CTRL_SET(vop2, rgb_pin_pol, val);
 		VOP_GRF_SET(vop2, sys_grf, grf_dclk_inv, dclk_inv);
 	}
 

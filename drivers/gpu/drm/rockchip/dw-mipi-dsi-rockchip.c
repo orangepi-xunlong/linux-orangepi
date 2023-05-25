@@ -603,36 +603,20 @@ static void dw_mipi_dsi_phy_power_off(void *priv_data)
 	dsi->phy_enabled = false;
 }
 
-static int
-dw_mipi_dsi_get_lane_mbps(void *priv_data, const struct drm_display_mode *mode,
-			  unsigned long mode_flags, u32 lanes, u32 format,
-			  unsigned int *lane_mbps)
+static unsigned int dw_mipi_dsi_calculate_lane_mpbs(struct dw_mipi_dsi_rockchip *dsi,
+						    const struct drm_display_mode *mode,
+						    u32 lanes, int bpp)
 {
-	struct dw_mipi_dsi_rockchip *dsi = priv_data;
 	struct device *dev = dsi->dev;
-	int bpp;
-	unsigned long mpclk, tmp;
 	unsigned int target_mbps = 1000;
 	unsigned int max_mbps;
-	unsigned long best_freq = 0;
-	unsigned long fvco_min, fvco_max, fin, fout;
-	unsigned int min_prediv, max_prediv;
-	unsigned int _prediv, best_prediv;
-	unsigned long _fbdiv, best_fbdiv;
-	unsigned long min_delta = ULONG_MAX;
-	unsigned long target_pclk, hs_clk_rate;
 	unsigned int value;
-	int ret;
+	unsigned long mpclk, tmp;
+
+	if (dsi->is_slave)
+		return dsi->lane_mbps;
 
 	max_mbps = dsi->cdata->max_bit_rate_per_lane / USEC_PER_SEC;
-	dsi->format = format;
-	bpp = mipi_dsi_pixel_format_to_bpp(dsi->format);
-	if (bpp < 0) {
-		DRM_DEV_ERROR(dsi->dev,
-			      "failed to get bpp for pixel format %d\n",
-			      dsi->format);
-		return bpp;
-	}
 
 	/* optional override of the desired bandwidth */
 	if (!of_property_read_u32(dev->of_node, "rockchip,lane-rate", &value)) {
@@ -651,6 +635,39 @@ dw_mipi_dsi_get_lane_mbps(void *priv_data, const struct drm_display_mode *mode,
 			}
 		}
 	}
+
+	if (dsi->slave)
+		dsi->slave->lane_mbps = target_mbps;
+
+	return target_mbps;
+}
+
+static int
+dw_mipi_dsi_get_lane_mbps(void *priv_data, const struct drm_display_mode *mode,
+			  unsigned long mode_flags, u32 lanes, u32 format,
+			  unsigned int *lane_mbps)
+{
+	struct dw_mipi_dsi_rockchip *dsi = priv_data;
+	unsigned long best_freq = 0;
+	unsigned long fvco_min, fvco_max, fin, fout;
+	unsigned int min_prediv, max_prediv;
+	unsigned int _prediv, best_prediv;
+	unsigned long _fbdiv, best_fbdiv;
+	unsigned long min_delta = ULONG_MAX;
+	unsigned long target_pclk, hs_clk_rate;
+	unsigned int target_mbps;
+	int bpp, ret;
+
+	dsi->format = format;
+	bpp = mipi_dsi_pixel_format_to_bpp(dsi->format);
+	if (bpp < 0) {
+		DRM_DEV_ERROR(dsi->dev,
+			      "failed to get bpp for pixel format %d\n",
+			      dsi->format);
+		return bpp;
+	}
+
+	target_mbps = dw_mipi_dsi_calculate_lane_mpbs(dsi, mode, lanes, bpp);
 
 	/* for external phy only a the mipi_dphy_config is necessary */
 	if (dsi->phy) {
@@ -864,6 +881,7 @@ dw_mipi_dsi_encoder_atomic_check(struct drm_encoder *encoder,
 	else
 		s->bus_format = MEDIA_BUS_FMT_RGB888_1X24;
 
+	s->bus_flags = info->bus_flags;
 	/* rk356x series drive mipi pixdata on posedge */
 	if (dsi->cdata->soc_type == RK3568) {
 		s->bus_flags &= ~DRM_BUS_FLAG_PIXDATA_DRIVE_NEGEDGE;
@@ -1069,13 +1087,6 @@ static int dw_mipi_dsi_rockchip_bind(struct device *dev,
 	struct device *second;
 	int ret;
 
-	ret = drm_of_find_panel_or_bridge(dsi->dev->of_node, 1, 0,
-					  &dsi->panel, &dsi->bridge);
-	if (ret) {
-		dev_err(dsi->dev, "failed to find panel or bridge: %d\n", ret);
-		return ret;
-	}
-
 	second = dw_mipi_dsi_rockchip_find_second(dsi);
 	if (IS_ERR(second))
 		return PTR_ERR(second);
@@ -1095,6 +1106,13 @@ static int dw_mipi_dsi_rockchip_bind(struct device *dev,
 
 	if (dsi->is_slave)
 		return 0;
+
+	ret = drm_of_find_panel_or_bridge(dsi->dev->of_node, 1, -1,
+					  &dsi->panel, &dsi->bridge);
+	if (ret) {
+		dev_err(dsi->dev, "failed to find panel or bridge: %d\n", ret);
+		return ret;
+	}
 
 	ret = clk_prepare_enable(dsi->pllref_clk);
 	if (ret) {
@@ -1151,7 +1169,6 @@ static const struct component_ops dw_mipi_dsi_rockchip_ops = {
 
 static int dw_mipi_dsi_rockchip_component_add(struct dw_mipi_dsi_rockchip *dsi)
 {
-	struct device *second;
 	int ret;
 
 	mutex_lock(&dsi->usage_mutex);
@@ -1172,21 +1189,6 @@ static int dw_mipi_dsi_rockchip_component_add(struct dw_mipi_dsi_rockchip *dsi)
 		goto out;
 	}
 
-	second = dw_mipi_dsi_rockchip_find_second(dsi);
-	if (IS_ERR(second)) {
-		ret = PTR_ERR(second);
-		goto out;
-	}
-	if (second) {
-		ret = component_add(second, &dw_mipi_dsi_rockchip_ops);
-		if (ret) {
-			DRM_DEV_ERROR(second,
-				      "Failed to register component: %d\n",
-				      ret);
-			goto out;
-		}
-	}
-
 	return 0;
 
 out:
@@ -1198,12 +1200,6 @@ out:
 
 static int dw_mipi_dsi_rockchip_component_del(struct dw_mipi_dsi_rockchip *dsi)
 {
-	struct device *second;
-
-	second = dw_mipi_dsi_rockchip_find_second(dsi);
-	if (second && !IS_ERR(second))
-		component_del(second, &dw_mipi_dsi_rockchip_ops);
-
 	component_del(dsi->dev, &dw_mipi_dsi_rockchip_ops);
 
 	mutex_lock(&dsi->usage_mutex);

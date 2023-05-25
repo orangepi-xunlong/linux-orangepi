@@ -5,6 +5,12 @@
  * Copyright (C) 2023 Rockchip Electronics Co., Ltd.
  *
  * V1.0.00 first version.
+ * V1.1.00 support Frame synchronization, stream on speed optimization.
+ * V1.2.00 enable lock gpio for hotplug irq.
+ *         add i2c regmap for debug.
+ *         support modes enable select.
+ *         auto initial deskew enable configure.
+ *         frame sync period enable configure.
  *
  */
 
@@ -23,6 +29,7 @@
 #include <linux/version.h>
 #include <linux/compat.h>
 #include <linux/rk-camera-module.h>
+#include <linux/of_graph.h>
 #include <media/media-entity.h>
 #include <media/v4l2-async.h>
 #include <media/v4l2-ctrls.h>
@@ -31,15 +38,13 @@
 #include <media/v4l2-fwnode.h>
 #include <media/v4l2-subdev.h>
 
-#define DRIVER_VERSION			KERNEL_VERSION(1, 0x00, 0x00)
+#define DRIVER_VERSION			KERNEL_VERSION(1, 0x02, 0x00)
 
 #ifndef V4L2_CID_DIGITAL_GAIN
 #define V4L2_CID_DIGITAL_GAIN		V4L2_CID_GAIN
 #endif
 
 #define MAX96712_LINK_FREQ_1000MHZ	1000000000UL
-/* pixel rate = link frequency * 2 * lanes / BITS_PER_SAMPLE */
-#define MAX96712_PIXEL_RATE		(MAX96712_LINK_FREQ_1000MHZ * 2LL * 4LL / 8LL)
 #define MAX96712_XVCLK_FREQ		25000000
 
 #define MAX96712_CHIP_ID		0xA0
@@ -59,25 +64,24 @@
 #define MAX96712_LOCK_STATE_LINK_B	BIT(1)
 #define MAX96712_LOCK_STATE_LINK_C	BIT(2)
 #define MAX96712_LOCK_STATE_LINK_D	BIT(3)
-#define MAX96712_LOCK_STATE_MASK	0x0F /*0x01: Link A, 0x0F: Link A/B/C/D */
+#define MAX96712_LOCK_STATE_MASK	0x0F /* 0x01: Link A, 0x0F: Link A/B/C/D */
+
+#define MAX96712_FORCE_ALL_CLOCK_EN	0 /* 1: enable, 0: disable */
 
 #define REG_NULL			0xFFFF
 
-#define MAX96712_LANES			4
-#define MAX96712_BITS_PER_SAMPLE	8
-
 #define OF_CAMERA_PINCTRL_STATE_DEFAULT	"rockchip,camera_default"
 #define OF_CAMERA_PINCTRL_STATE_SLEEP	"rockchip,camera_sleep"
+
+#define MAX96712_NAME			"max96712"
 
 #define MAX96712_REG_VALUE_08BIT	1
 #define MAX96712_REG_VALUE_16BIT	2
 #define MAX96712_REG_VALUE_24BIT	3
 
-#define MAX96712_NAME			"max96712"
-#define MAX96712_MEDIA_BUS_FMT		MEDIA_BUS_FMT_UYVY8_2X8
-
 #define MAX96712_I2C_ADDR		(0x29)
 #define MAX96717_I2C_ADDR		(0x40)
+#define CAMERA_I2C_ADDR			(0x30)
 
 #define MAX96712_GET_BIT(x, bit)	((x & (1 << bit)) >> bit)
 #define MAX96712_GET_BIT_M_TO_N(x, m, n)	\
@@ -111,6 +115,7 @@ struct max96712_mode {
 	u32 vts_def;
 	u32 exp_def;
 	u32 link_freq_idx;
+	u32 bus_fmt;
 	u32 bpp;
 	const struct regval *reg_list;
 	u32 vc[PAD_MAX];
@@ -122,6 +127,7 @@ struct max96712 {
 	struct gpio_desc *power_gpio;
 	struct gpio_desc *reset_gpio;
 	struct gpio_desc *pwdn_gpio;
+	struct gpio_desc *lock_gpio;
 	struct regulator_bulk_data supplies[MAX96712_NUM_SUPPLIES];
 
 	struct pinctrl *pinctrl;
@@ -139,21 +145,35 @@ struct max96712 {
 	struct v4l2_ctrl *pixel_rate;
 	struct v4l2_ctrl *link_freq;
 	struct v4l2_ctrl *test_pattern;
+	struct v4l2_fwnode_endpoint bus_cfg;
 
 	struct mutex mutex;
 	bool streaming;
 	bool power_on;
 	bool hot_plug;
 	u8 is_reset;
+	int hot_plug_irq;
 	enum max96712_rx_rate rx_rate;
+	u32 link_mask;
+	const struct max96712_mode *supported_modes;
 	const struct max96712_mode *cur_mode;
+	u32 cfg_modes_num;
 	u32 module_index;
+	u32 auto_init_deskew_mask;
+	u32 frame_sync_period;
 	const char *module_facing;
 	const char *module_name;
 	const char *len_name;
+	struct regmap *regmap;
 };
 
-static const struct regval max96712_mipi_1920x1440_30fps[] = {
+static const struct regmap_config max96712_regmap_config = {
+	.reg_bits = 16,
+	.val_bits = 8,
+	.max_register = 0x1F17,
+};
+
+static const struct regval max96712_mipi_4lane_1920x1440_30fps[] = {
 	// Link A/B/C/D all use GMSL2, and disabled
 	{ 0x29, 0x0006, 0xf0, 0x00 }, // Link A/B/C/D: select GMSL2, Disabled
 	// Disable MIPI CSI output
@@ -171,8 +191,8 @@ static const struct regval max96712_mipi_1920x1440_30fps[] = {
 	{ 0x29, 0x1645, 0x00, 0x00 }, // Disable SSC
 	{ 0x29, 0x1745, 0x00, 0x0a }, // Disable SSC
 	// Video Pipe Selection
-	{ 0x29, 0x00F0, 0x62, 0x00 }, // GMSL2 Phy A -> Pipe Z ->  Pipe 0 ; GMSL2 Phy B -> Pipe Z -> Pipe 1
-	{ 0x29, 0x00F1, 0xea, 0x00 }, // GMSL2 Phy C -> Pipe Z ->  Pipe 2 ; GMSL2 Phy D -> Pipe Z -> Pipe 3
+	{ 0x29, 0x00F0, 0x62, 0x00 }, // GMSL2 Phy A -> Pipe Z -> Pipe 0; GMSL2 Phy B -> Pipe Z -> Pipe 1
+	{ 0x29, 0x00F1, 0xea, 0x00 }, // GMSL2 Phy C -> Pipe Z -> Pipe 2; GMSL2 Phy D -> Pipe Z -> Pipe 3
 	{ 0x29, 0x00F4, 0x0f, 0x00 }, // Enable all 4 Pipes
 	// Send YUV422, FS, and FE from Pipe 0 to Controller 1
 	{ 0x29, 0x090B, 0x07, 0x00 }, // Enable 0/1/2 SRC/DST Mappings
@@ -215,15 +235,12 @@ static const struct regval max96712_mipi_1920x1440_30fps[] = {
 	{ 0x29, 0x09D1, 0x01, 0x00 }, // SRC2 VC = 0, DT = Frame End
 	{ 0x29, 0x09D2, 0xc1, 0x00 }, // DST2 VC = 3, DT = Frame End
 	// MIPI PHY Setting
-	{ 0x29, 0x08A0, 0x24, 0x00 }, // force_clk0_en: DPHY0 enabled as clock, MIPI PHY Mode: 2x4 mode
+	{ 0x29, 0x08A0, 0x24, 0x00 }, // DPHY0 enabled as clock, MIPI PHY Mode: 2x4 mode
 	// Set Lane Mapping for 4-lane port A
 	{ 0x29, 0x08A3, 0xe4, 0x00 }, // PHY1 D1->D3, D0->D2; PHY0 D1->D1, D0->D0
 	// Set 4 lane D-PHY, 2bit VC
 	{ 0x29, 0x090A, 0xc0, 0x00 }, // MIPI PHY 0: 4 lanes, DPHY, 2bit VC
 	{ 0x29, 0x094A, 0xc0, 0x00 }, // MIPI PHY 1: 4 lanes, DPHY, 2bit VC
-	// D-PHY Deskew Initial Calibration Control
-	{ 0x29, 0x0903, 0x80, 0x00 }, // MIPI PHY 0: Auto intial deskew on
-	{ 0x29, 0x0943, 0x80, 0x00 }, // MIPI PHY 1: Auto intial deskew on
 	// Turn on MIPI PHYs
 	{ 0x29, 0x08A2, 0x30, 0x00 }, // Enable MIPI PHY 0/1
 	// Hold DPLL in reset (config_soft_rst_n = 0) before changing the rate
@@ -235,15 +252,6 @@ static const struct regval max96712_mipi_1920x1440_30fps[] = {
 	// Release reset to DPLL (config_soft_rst_n = 1)
 	{ 0x29, 0x1C00, 0xf5, 0x00 },
 	{ 0x29, 0x1D00, 0xf5, 0x00 },
-	// Frame Synchronization (FSYNC)
-	{ 0x29, 0x04A2, 0x00, 0x00 }, // Master link Video 0 for frame sync generation
-	{ 0x29, 0x04AA, 0x00, 0x00 }, // Disable Vsync-Fsync overlap window
-	{ 0x29, 0x04AB, 0x00, 0x00 }, // Disable Vsync-Fsync overlap window
-	{ 0x29, 0x04A7, 0x0c, 0x00 }, // FSYNC_PERIOD_H, Set FSYNC period to 25M/30 clock cycles. PCLK = 25MHz. Sync freq = 30Hz
-	{ 0x29, 0x04A6, 0xb7, 0x00 }, // FSYNC_PERIOD_M
-	{ 0x29, 0x04A5, 0x35, 0x00 }, // FSYNC_PERIOD_L
-	{ 0x29, 0x04AF, 0xcf, 0x00 }, // FSYNC is GMSL2 type, use osc for fsync, include all links/pipes in fsync gen
-	{ 0x29, 0x04A0, 0x02, 0x00 }, // MFP2, VS not gen internally, GPIO not used to gen fsync, auto mode
 	// YUV422 8bit software override for all pipes since connected GMSL1 is under parallel mode
 	{ 0x29, 0x040B, 0x80, 0x00 }, // pipe 0 bpp=0x10: Datatypes = 0x22, 0x1E, 0x2E
 	{ 0x29, 0x040E, 0x5e, 0x00 }, // pipe 0 DT=0x1E: YUV422 8-bit
@@ -261,7 +269,7 @@ static const struct regval max96712_mipi_1920x1440_30fps[] = {
 	{ 0x29, REG_NULL, 0x00, 0x00 },
 };
 
-static const struct max96712_mode supported_modes[] = {
+static const struct max96712_mode supported_modes_4lane[] = {
 	{
 		.width = 1920,
 		.height = 1440,
@@ -269,9 +277,10 @@ static const struct max96712_mode supported_modes[] = {
 			.numerator = 10000,
 			.denominator = 300000,
 		},
-		.reg_list = max96712_mipi_1920x1440_30fps,
+		.reg_list = max96712_mipi_4lane_1920x1440_30fps,
 		.link_freq_idx = 0,
-		.bpp = 8,
+		.bus_fmt = MEDIA_BUS_FMT_UYVY8_2X8,
+		.bpp = 16,
 		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_0,
 		.vc[PAD1] = V4L2_MBUS_CSI2_CHANNEL_1,
 		.vc[PAD2] = V4L2_MBUS_CSI2_CHANNEL_2,
@@ -331,7 +340,9 @@ static int max96712_write_array(struct i2c_client *client,
 					regs[i].i2c_addr, regs[i].addr,
 					MAX96712_REG_VALUE_08BIT,
 					regs[i].val);
-		msleep(regs[i].delay);
+
+		if (regs[i].delay != 0)
+			msleep(regs[i].delay);
 	}
 
 	return ret;
@@ -374,6 +385,11 @@ static int max96712_read_reg(struct i2c_client *client,
 
 	*val = be32_to_cpu(data_be);
 
+#if 0
+	dev_info(&client->dev, "addr(0x%02x) read reg(0x%04x, 0x%02x)\n", \
+		client_addr, reg, *val);
+#endif
+
 	return 0;
 }
 
@@ -400,7 +416,7 @@ static int max96712_check_link_lock_state(struct max96712 *max96712)
 {
 	struct i2c_client *client = max96712->client;
 	struct device *dev = &max96712->client->dev;
-	u8 id = 0, lock = 0, lock_state = 0;
+	u8 id = 0, lock = 0, lock_state = 0, link_mask = 0;
 	int ret, count;
 
 	ret = max96712_read_reg(client, MAX96712_I2C_ADDR,
@@ -413,8 +429,31 @@ static int max96712_check_link_lock_state(struct max96712 *max96712)
 
 	dev_info(dev, "Detected MAX96712 chipid: %02x\n", id);
 
-	// Link A ~ Link D Transmitter Rate: 187.5Mbps, Receiver Rate: 6Gbps
-	if (max96712->rx_rate == MAX96712_RX_RATE_6GBPS) {
+	/* IF VDD = 1.2V: Enable REG_ENABLE and REG_MNL
+	 *	CTRL0: Enable REG_ENABLE
+	 *	CTRL2: Enable REG_MNL
+	 */
+	max96712_update_reg_bits(client, MAX96712_I2C_ADDR,
+				0x0017, BIT(2), BIT(2));
+	max96712_update_reg_bits(client, MAX96712_I2C_ADDR,
+				0x0019, BIT(4), BIT(4));
+
+	// CSI output disabled
+	max96712_write_reg(client, MAX96712_I2C_ADDR, 0x040B,
+				MAX96712_REG_VALUE_08BIT, 0x00);
+
+	// All links select GMSL2 mode and disable at beginning.
+	max96712_write_reg(client, MAX96712_I2C_ADDR, 0x0006,
+				MAX96712_REG_VALUE_08BIT, 0xf0);
+
+	if (max96712->rx_rate == MAX96712_RX_RATE_3GBPS) {
+		// Link A ~ Link D Transmitter Rate: 187.5Mbps, Receiver Rate: 3Gbps
+		max96712_write_reg(client, MAX96712_I2C_ADDR, 0x0010,
+					MAX96712_REG_VALUE_08BIT, 0x11);
+		max96712_write_reg(client, MAX96712_I2C_ADDR, 0x0011,
+					MAX96712_REG_VALUE_08BIT, 0x11);
+	} else {
+		// Link A ~ Link D Transmitter Rate: 187.5Mbps, Receiver Rate: 6Gbps
 		max96712_write_reg(client, MAX96712_I2C_ADDR, 0x0010,
 					MAX96712_REG_VALUE_08BIT, 0x22);
 		max96712_write_reg(client, MAX96712_I2C_ADDR, 0x0011,
@@ -422,10 +461,11 @@ static int max96712_check_link_lock_state(struct max96712 *max96712)
 	}
 
 	// Link A ~ Link D One-Shot Reset
+	link_mask = max96712->link_mask;
 	max96712_write_reg(client, MAX96712_I2C_ADDR, 0x0018,
-				MAX96712_REG_VALUE_08BIT, 0x0f);
+				MAX96712_REG_VALUE_08BIT, link_mask);
 	max96712_write_reg(client, MAX96712_I2C_ADDR, 0x0006,
-				MAX96712_REG_VALUE_08BIT, 0xff);
+				MAX96712_REG_VALUE_08BIT, 0xf0 | link_mask);
 	msleep(50);
 	for (count = 0; count < 20; count++) {
 		if ((lock_state & MAX96712_LOCK_STATE_LINK_A) == 0) {
@@ -464,7 +504,7 @@ static int max96712_check_link_lock_state(struct max96712 *max96712)
 			}
 		}
 
-		if ((lock_state & MAX96712_LOCK_STATE_MASK) == MAX96712_LOCK_STATE_MASK) {
+		if ((lock_state & max96712->link_mask) == max96712->link_mask) {
 			dev_info(dev, "All Links are locked: 0x%x\n", lock_state);
 #if 0
 			ret = max96712_read_reg(client, MAX96717_I2C_ADDR,
@@ -486,32 +526,221 @@ static int max96712_check_link_lock_state(struct max96712 *max96712)
 	return -ENODEV;
 }
 
+static u8 max96712_get_lock_state(struct max96712 *max96712)
+{
+	struct i2c_client *client = max96712->client;
+	struct device *dev = &max96712->client->dev;
+	u8 lock = 0, lock_state = 0;
+
+	if (max96712->link_mask & MAX96712_LOCK_STATE_LINK_A) {
+		max96712_read_reg(client, MAX96712_I2C_ADDR, 0x001a,
+				MAX96712_REG_VALUE_08BIT, &lock);
+		if (lock & BIT(3)) {
+			lock_state |= MAX96712_LOCK_STATE_LINK_A;
+			dev_info(dev, "LinkA locked\n");
+		}
+	}
+
+	if (max96712->link_mask & MAX96712_LOCK_STATE_LINK_B) {
+		max96712_read_reg(client, MAX96712_I2C_ADDR, 0x000a,
+				MAX96712_REG_VALUE_08BIT, &lock);
+		if (lock & BIT(3)) {
+			lock_state |= MAX96712_LOCK_STATE_LINK_B;
+			dev_info(dev, "LinkB locked\n");
+		}
+	}
+
+	if (max96712->link_mask & MAX96712_LOCK_STATE_LINK_C) {
+		max96712_read_reg(client, MAX96712_I2C_ADDR, 0x000b,
+				MAX96712_REG_VALUE_08BIT, &lock);
+		if (lock & BIT(3)) {
+			lock_state |= MAX96712_LOCK_STATE_LINK_C;
+			dev_info(dev, "LinkC locked\n");
+		}
+	}
+
+	if (max96712->link_mask & MAX96712_LOCK_STATE_LINK_D) {
+		max96712_read_reg(client, MAX96712_I2C_ADDR, 0x000c,
+				MAX96712_REG_VALUE_08BIT, &lock);
+		if (lock & BIT(3)) {
+			lock_state |= MAX96712_LOCK_STATE_LINK_D;
+			dev_info(dev, "LinkD locked\n");
+		}
+	}
+
+	return lock_state;
+}
+
+static irqreturn_t max96712_hot_plug_detect_irq_handler(int irq, void *dev_id)
+{
+	struct max96712 *max96712 = dev_id;
+	struct device *dev = &max96712->client->dev;
+	u8 lock_state = 0;
+
+	if (max96712->streaming) {
+		lock_state = max96712_get_lock_state(max96712);
+		if (lock_state == max96712->link_mask) {
+			dev_info(dev, "serializer plug in, lock_state = 0x%02x\n", lock_state);
+		} else {
+			dev_info(dev, "serializer plug out, lock_state = 0x%02x\n", lock_state);
+		}
+	}
+
+	return IRQ_HANDLED;
+}
+
+static int max96712_auto_init_deskew(struct i2c_client *client, u32 deskew_mask)
+{
+	int ret = 0;
+
+	dev_info(&client->dev, "Auto initial deskew: deskew_mask = 0x%02x\n", deskew_mask);
+
+	// D-PHY Deskew Initial Calibration Control
+	if (deskew_mask & BIT(0)) // MIPI PHY0
+		ret |= max96712_write_reg(client, MAX96712_I2C_ADDR,
+			0x0903,
+			MAX96712_REG_VALUE_08BIT,
+			0x80);
+
+	if (deskew_mask & BIT(1)) // MIPI PHY1
+		ret |= max96712_write_reg(client, MAX96712_I2C_ADDR,
+			0x0943,
+			MAX96712_REG_VALUE_08BIT,
+			0x80);
+
+	if (deskew_mask & BIT(2)) // MIPI PHY2
+		ret |= max96712_write_reg(client, MAX96712_I2C_ADDR,
+			0x0983,
+			MAX96712_REG_VALUE_08BIT,
+			0x80);
+
+	if (deskew_mask & BIT(3)) // MIPI PHY3
+		ret |= max96712_write_reg(client, MAX96712_I2C_ADDR,
+			0x09C3,
+			MAX96712_REG_VALUE_08BIT,
+			0x80);
+
+	return ret;
+}
+
+static int max96712_frame_sync_period(struct i2c_client *client, u32 period)
+{
+	u32 pclk, fsync_peroid;
+	u8 fsync_peroid_h, fsync_peroid_m, fsync_peroid_l;
+	int ret = 0;
+
+	if (period == 0)
+		return 0;
+
+	dev_info(&client->dev, "Frame sync period = %d\n", period);
+
+#if 1 // TODO: Sensor
+	// SC320AT slave mode enable
+	ret |= max96712_write_reg(client, 0x30,
+		0x3222,
+		MAX96712_REG_VALUE_08BIT,
+		0x01);
+	// Increase the allowable error range of the trigger signal
+	ret |= max96712_write_reg(client, 0x30,
+		0x32e2,
+		MAX96712_REG_VALUE_08BIT,
+		0x19);
+#endif
+
+	// Master link Video 0 for frame sync generation
+	ret |= max96712_write_reg(client, MAX96712_I2C_ADDR,
+		0x04A2,
+		MAX96712_REG_VALUE_08BIT,
+		0x00);
+	// Disable Vsync-Fsync overlap window
+	ret |= max96712_write_reg(client, MAX96712_I2C_ADDR,
+		0x04AA,
+		MAX96712_REG_VALUE_08BIT,
+		0x00);
+	ret |= max96712_write_reg(client, MAX96712_I2C_ADDR,
+		0x04AB,
+		MAX96712_REG_VALUE_08BIT,
+		0x00);
+
+	// Set FSYNC period to 25M/30 clock cycles. PCLK = 25MHz. Sync freq = 30Hz
+	pclk = 25 * 1000 * 1000;
+	fsync_peroid = DIV_ROUND_UP(pclk, period) - 1;
+	fsync_peroid_l = (fsync_peroid >> 0) & 0xFF;
+	fsync_peroid_m = (fsync_peroid >> 8) & 0xFF;
+	fsync_peroid_h = (fsync_peroid >> 16) & 0xFF;
+	dev_info(&client->dev, "Frame sync period: H = 0x%02x, M = 0x%02x, L = 0x%02x\n",
+			fsync_peroid_h, fsync_peroid_m, fsync_peroid_l);
+	// FSYNC_PERIOD_H
+	ret |= max96712_write_reg(client, MAX96712_I2C_ADDR,
+		0x04A7,
+		MAX96712_REG_VALUE_08BIT,
+		fsync_peroid_h);
+	// FSYNC_PERIOD_M
+	ret |= max96712_write_reg(client, MAX96712_I2C_ADDR,
+		0x04A6,
+		MAX96712_REG_VALUE_08BIT,
+		fsync_peroid_m);
+	// FSYNC_PERIOD_L
+	ret |= max96712_write_reg(client, MAX96712_I2C_ADDR,
+		0x04A5,
+		MAX96712_REG_VALUE_08BIT,
+		fsync_peroid_l);
+
+	// FSYNC is GMSL2 type, use osc for fsync, include all links/pipes in fsync gen
+	ret |= max96712_write_reg(client, MAX96712_I2C_ADDR,
+		0x04AF,
+		MAX96712_REG_VALUE_08BIT,
+		0xcf);
+
+	// FSYNC_TX_ID: set 4 to match MFP4 on serializer side
+	ret |= max96712_write_reg(client, MAX96712_I2C_ADDR,
+		0x04B1,
+		MAX96712_REG_VALUE_08BIT,
+		0x20);
+
+#if 1 // TODO: Serializer
+	// Enable GPIO_RX_EN on serializer MFP4
+	ret |= max96712_write_reg(client, 0x40,
+		0x02CA,
+		MAX96712_REG_VALUE_08BIT,
+		0x84);
+#endif
+
+	// MFP2, VS not gen internally, GPIO not used to gen fsync, manual mode
+	ret |= max96712_write_reg(client, MAX96712_I2C_ADDR,
+		0x04A0,
+		MAX96712_REG_VALUE_08BIT,
+		0x04);
+
+	return ret;
+}
+
 static int max96712_mipi_enable(struct i2c_client *client, bool enable)
 {
 	int ret = 0;
 
 	if (enable) {
-		/* Force all MIPI clocks running */
-		ret |= max96712_write_reg(client, MAX96712_I2C_ADDR,
-				MAX96712_REG_CTRL_MODE,
-				MAX96712_REG_VALUE_08BIT,
-				MAX96712_MODE_STREAMING);
-		/* CSI output enabled */
-		ret |= max96712_write_reg(client, MAX96712_I2C_ADDR,
-				0x40B,
-				MAX96712_REG_VALUE_08BIT,
-				0x02);
+#if MAX96712_FORCE_ALL_CLOCK_EN
+		// Force all MIPI clocks running
+		ret |= max96712_update_reg_bits(client,
+				MAX96712_I2C_ADDR,
+				0x08A0, BIT(7), BIT(7));
+#endif
+		// CSI output enabled
+		ret |= max96712_update_reg_bits(client,
+				MAX96712_I2C_ADDR,
+				0x040B, BIT(1), BIT(1));
 	} else {
-		/* Normal mode */
-		ret |= max96712_write_reg(client, MAX96712_I2C_ADDR,
-				MAX96712_REG_CTRL_MODE,
-				MAX96712_REG_VALUE_08BIT,
-				MAX96712_MODE_SW_STANDBY);
-		/* CSI output disabled */
-		ret |= max96712_write_reg(client, MAX96712_I2C_ADDR,
-				0x40B,
-				MAX96712_REG_VALUE_08BIT,
-				0x00);
+#if MAX96712_FORCE_ALL_CLOCK_EN
+		// Normal mode
+		ret |= max96712_update_reg_bits(client,
+				MAX96712_I2C_ADDR,
+				0x08A0, BIT(7), 0x00);
+#endif
+		// CSI output disabled
+		ret |= max96712_update_reg_bits(client,
+				MAX96712_I2C_ADDR,
+				0x040B, BIT(1), 0x00);
 	}
 
 	return ret;
@@ -525,7 +754,7 @@ static int max96712_get_reso_dist(const struct max96712_mode *mode,
 }
 
 static const struct max96712_mode *
-max96712_find_best_fit(struct v4l2_subdev_format *fmt)
+max96712_find_best_fit(struct max96712 *max96712, struct v4l2_subdev_format *fmt)
 {
 	struct v4l2_mbus_framefmt *framefmt = &fmt->format;
 	int dist;
@@ -533,15 +762,16 @@ max96712_find_best_fit(struct v4l2_subdev_format *fmt)
 	int cur_best_fit_dist = -1;
 	unsigned int i;
 
-	for (i = 0; i < ARRAY_SIZE(supported_modes); i++) {
-		dist = max96712_get_reso_dist(&supported_modes[i], framefmt);
-		if (cur_best_fit_dist == -1 || dist < cur_best_fit_dist) {
+	for (i = 0; i < max96712->cfg_modes_num; i++) {
+		dist = max96712_get_reso_dist(&max96712->supported_modes[i], framefmt);
+		if ((cur_best_fit_dist == -1 || dist < cur_best_fit_dist)
+				&& (max96712->supported_modes[i].bus_fmt == framefmt->code)) {
 			cur_best_fit_dist = dist;
 			cur_best_fit = i;
 		}
 	}
 
-	return &supported_modes[cur_best_fit];
+	return &max96712->supported_modes[cur_best_fit];
 }
 
 static int max96712_set_fmt(struct v4l2_subdev *sd,
@@ -550,11 +780,14 @@ static int max96712_set_fmt(struct v4l2_subdev *sd,
 {
 	struct max96712 *max96712 = v4l2_get_subdevdata(sd);
 	const struct max96712_mode *mode;
+	u64 pixel_rate = 0;
+	u8 data_lanes;
 
 	mutex_lock(&max96712->mutex);
 
-	mode = max96712_find_best_fit(fmt);
-	fmt->format.code = MAX96712_MEDIA_BUS_FMT;
+	mode = max96712_find_best_fit(max96712, fmt);
+
+	fmt->format.code = mode->bus_fmt;
 	fmt->format.width = mode->width;
 	fmt->format.height = mode->height;
 	fmt->format.field = V4L2_FIELD_NONE;
@@ -570,6 +803,17 @@ static int max96712_set_fmt(struct v4l2_subdev *sd,
 			mutex_unlock(&max96712->mutex);
 			return -EBUSY;
 		}
+
+		max96712->cur_mode = mode;
+
+		__v4l2_ctrl_s_ctrl(max96712->link_freq, mode->link_freq_idx);
+		/* pixel rate = link frequency * 2 * lanes / BITS_PER_SAMPLE */
+		data_lanes = max96712->bus_cfg.bus.mipi_csi2.num_data_lanes;
+		pixel_rate = (u32)link_freq_items[mode->link_freq_idx] / mode->bpp * 2 * data_lanes;
+		__v4l2_ctrl_s_ctrl_int64(max96712->pixel_rate, pixel_rate);
+
+		dev_info(&max96712->client->dev, "mipi_freq_idx = %d\n", mode->link_freq_idx);
+		dev_info(&max96712->client->dev, "pixel_rate = %lld\n", pixel_rate);
 	}
 
 	mutex_unlock(&max96712->mutex);
@@ -595,7 +839,7 @@ static int max96712_get_fmt(struct v4l2_subdev *sd,
 	} else {
 		fmt->format.width = mode->width;
 		fmt->format.height = mode->height;
-		fmt->format.code = MAX96712_MEDIA_BUS_FMT;
+		fmt->format.code = mode->bus_fmt;
 		fmt->format.field = V4L2_FIELD_NONE;
 		if (fmt->pad < PAD_MAX && fmt->pad >= PAD0)
 			fmt->reserved[0] = mode->vc[fmt->pad];
@@ -611,9 +855,12 @@ static int max96712_enum_mbus_code(struct v4l2_subdev *sd,
 				   struct v4l2_subdev_state *sd_state,
 				   struct v4l2_subdev_mbus_code_enum *code)
 {
+	struct max96712 *max96712 = v4l2_get_subdevdata(sd);
+	const struct max96712_mode *mode = max96712->cur_mode;
+
 	if (code->index != 0)
 		return -EINVAL;
-	code->code = MAX96712_MEDIA_BUS_FMT;
+	code->code = mode->bus_fmt;
 
 	return 0;
 }
@@ -622,16 +869,18 @@ static int max96712_enum_frame_sizes(struct v4l2_subdev *sd,
 				     struct v4l2_subdev_state *sd_state,
 				     struct v4l2_subdev_frame_size_enum *fse)
 {
-	if (fse->index >= ARRAY_SIZE(supported_modes))
+	struct max96712 *max96712 = v4l2_get_subdevdata(sd);
+
+	if (fse->index >= max96712->cfg_modes_num)
 		return -EINVAL;
 
-	if (fse->code != MAX96712_MEDIA_BUS_FMT)
+	if (fse->code != max96712->supported_modes[fse->index].bus_fmt)
 		return -EINVAL;
 
-	fse->min_width  = supported_modes[fse->index].width;
-	fse->max_width  = supported_modes[fse->index].width;
-	fse->max_height = supported_modes[fse->index].height;
-	fse->min_height = supported_modes[fse->index].height;
+	fse->min_width  = max96712->supported_modes[fse->index].width;
+	fse->max_width  = max96712->supported_modes[fse->index].width;
+	fse->max_height = max96712->supported_modes[fse->index].height;
+	fse->min_height = max96712->supported_modes[fse->index].height;
 
 	return 0;
 }
@@ -690,21 +939,12 @@ static long max96712_ioctl(struct v4l2_subdev *sd, unsigned int cmd, void *arg)
 		max96712_get_module_inf(max96712, (struct rkmodule_inf *)arg);
 		break;
 	case RKMODULE_SET_QUICK_STREAM:
-
 		stream = *((u32 *)arg);
 
 		if (stream)
-			ret = max96712_write_reg(max96712->client,
-						 MAX96712_I2C_ADDR,
-						 MAX96712_REG_CTRL_MODE,
-						 MAX96712_REG_VALUE_08BIT,
-						 MAX96712_MODE_STREAMING);
+			ret = max96712_mipi_enable(max96712->client, true);
 		else
-			ret = max96712_write_reg(max96712->client,
-						 MAX96712_I2C_ADDR,
-						 MAX96712_REG_CTRL_MODE,
-						 MAX96712_REG_VALUE_08BIT,
-						 MAX96712_MODE_SW_STANDBY);
+			ret = max96712_mipi_enable(max96712->client, false);
 		break;
 	case RKMODULE_GET_VICAP_RST_INFO:
 		max96712_get_vicap_rst_inf(
@@ -715,8 +955,6 @@ static long max96712_ioctl(struct v4l2_subdev *sd, unsigned int cmd, void *arg)
 			max96712, *(struct rkmodule_vicap_reset_info *)arg);
 		break;
 	case RKMODULE_GET_START_STREAM_SEQ:
-		// +*(int *)arg = RKMODULE_START_STREAM_FRONT;
-		// *(int *)arg = RKMODULE_START_STREAM_BEHIND;
 		break;
 	default:
 		ret = -ENOIOCTLCMD;
@@ -837,10 +1075,27 @@ static int __max96712_start_stream(struct max96712 *max96712)
 	if (ret)
 		return ret;
 
+	if (max96712->hot_plug_irq > 0)
+		enable_irq(max96712->hot_plug_irq);
+
 	ret = max96712_write_array(max96712->client,
 				   max96712->cur_mode->reg_list);
 	if (ret)
 		return ret;
+
+	if (max96712->auto_init_deskew_mask != 0) {
+		ret = max96712_auto_init_deskew(max96712->client,
+					max96712->auto_init_deskew_mask);
+		if (ret)
+			return ret;
+	}
+
+	if (max96712->frame_sync_period != 0) {
+		ret = max96712_frame_sync_period(max96712->client,
+					max96712->frame_sync_period);
+		if (ret)
+			return ret;
+	}
 
 	/* In case these controls are set before streaming */
 	mutex_unlock(&max96712->mutex);
@@ -855,6 +1110,9 @@ static int __max96712_start_stream(struct max96712 *max96712)
 
 static int __max96712_stop_stream(struct max96712 *max96712)
 {
+	if (max96712->hot_plug_irq > 0)
+		disable_irq(max96712->hot_plug_irq);
+
 	return max96712_mipi_enable(max96712->client, false);
 }
 
@@ -970,7 +1228,6 @@ static int __max96712_power_on(struct max96712 *max96712)
 	if (!IS_ERR(max96712->pwdn_gpio))
 		gpiod_set_value_cansleep(max96712->pwdn_gpio, 1);
 
-
 	/* 8192 cycles prior to first SCCB transaction */
 	delay_us = max96712_cal_delay(8192);
 	usleep_range(delay_us, delay_us * 2);
@@ -1033,13 +1290,13 @@ static int max96712_open(struct v4l2_subdev *sd, struct v4l2_subdev_fh *fh)
 	struct max96712 *max96712 = v4l2_get_subdevdata(sd);
 	struct v4l2_mbus_framefmt *try_fmt =
 		v4l2_subdev_get_try_format(sd, fh->state, 0);
-	const struct max96712_mode *def_mode = &supported_modes[0];
+	const struct max96712_mode *def_mode = &max96712->supported_modes[0];
 
 	mutex_lock(&max96712->mutex);
 	/* Initialize try_fmt */
 	try_fmt->width = def_mode->width;
 	try_fmt->height = def_mode->height;
-	try_fmt->code = MAX96712_MEDIA_BUS_FMT;
+	try_fmt->code = def_mode->bus_fmt;
 	try_fmt->field = V4L2_FIELD_NONE;
 
 	mutex_unlock(&max96712->mutex);
@@ -1054,13 +1311,15 @@ max96712_enum_frame_interval(struct v4l2_subdev *sd,
 			     struct v4l2_subdev_state *sd_state,
 			     struct v4l2_subdev_frame_interval_enum *fie)
 {
-	if (fie->index >= ARRAY_SIZE(supported_modes))
+	struct max96712 *max96712 = v4l2_get_subdevdata(sd);
+
+	if (fie->index >= max96712->cfg_modes_num)
 		return -EINVAL;
 
-	fie->code = MAX96712_MEDIA_BUS_FMT;
-	fie->width = supported_modes[fie->index].width;
-	fie->height = supported_modes[fie->index].height;
-	fie->interval = supported_modes[fie->index].max_fps;
+	fie->code = max96712->supported_modes[fie->index].bus_fmt;
+	fie->width = max96712->supported_modes[fie->index].width;
+	fie->height = max96712->supported_modes[fie->index].height;
+	fie->interval = max96712->supported_modes[fie->index].max_fps;
 
 	return 0;
 }
@@ -1068,9 +1327,30 @@ max96712_enum_frame_interval(struct v4l2_subdev *sd,
 static int max96712_g_mbus_config(struct v4l2_subdev *sd, unsigned int pad,
 				  struct v4l2_mbus_config *config)
 {
+	struct max96712 *max96712 = v4l2_get_subdevdata(sd);
+	u32 val = 0;
+	u8 data_lanes = max96712->bus_cfg.bus.mipi_csi2.num_data_lanes;
+
+	val |= V4L2_MBUS_CSI2_CONTINUOUS_CLOCK;
+	val |= 1 << (data_lanes - 1);
+	switch (data_lanes) {
+	case 4:
+		val |= V4L2_MBUS_CSI2_CHANNEL_3;
+		fallthrough;
+	case 3:
+		val |= V4L2_MBUS_CSI2_CHANNEL_2;
+		fallthrough;
+	case 2:
+		val |= V4L2_MBUS_CSI2_CHANNEL_1;
+		fallthrough;
+	case 1:
+	default:
+		val |= V4L2_MBUS_CSI2_CHANNEL_0;
+		break;
+	}
+
 	config->type = V4L2_MBUS_CSI2_DPHY;
-	config->flags = V4L2_MBUS_CSI2_4_LANE | V4L2_MBUS_CSI2_CHANNELS |
-			V4L2_MBUS_CSI2_CONTINUOUS_CLOCK;
+	config->flags = val;
 
 	return 0;
 }
@@ -1134,6 +1414,8 @@ static int max96712_initialize_controls(struct max96712 *max96712)
 {
 	const struct max96712_mode *mode;
 	struct v4l2_ctrl_handler *handler;
+	u64 pixel_rate;
+	u8 data_lanes;
 	int ret;
 
 	handler = &max96712->ctrl_handler;
@@ -1144,14 +1426,20 @@ static int max96712_initialize_controls(struct max96712 *max96712)
 		return ret;
 	handler->lock = &max96712->mutex;
 
-	max96712->link_freq = v4l2_ctrl_new_int_menu(
-		handler, NULL, V4L2_CID_LINK_FREQ, 1, 0, link_freq_items);
+	max96712->link_freq = v4l2_ctrl_new_int_menu(handler, NULL,
+				V4L2_CID_LINK_FREQ,
+				ARRAY_SIZE(link_freq_items) - 1, 0,
+				link_freq_items);
+	__v4l2_ctrl_s_ctrl(max96712->link_freq, mode->link_freq_idx);
+	dev_info(&max96712->client->dev, "mipi_freq_idx = %d\n", mode->link_freq_idx);
 
+	/* pixel rate = link frequency * 2 * lanes / BITS_PER_SAMPLE */
+	data_lanes = max96712->bus_cfg.bus.mipi_csi2.num_data_lanes;
+	pixel_rate = (u32)link_freq_items[mode->link_freq_idx] / mode->bpp * 2 * data_lanes;
 	max96712->pixel_rate =
 		v4l2_ctrl_new_std(handler, NULL, V4L2_CID_PIXEL_RATE, 0,
-				  MAX96712_PIXEL_RATE, 1, MAX96712_PIXEL_RATE);
-
-	__v4l2_ctrl_s_ctrl(max96712->link_freq, mode->link_freq_idx);
+				  pixel_rate, 1, pixel_rate);
+	dev_info(&max96712->client->dev, "pixel_rate = %lld\n", pixel_rate);
 
 	if (handler->error) {
 		ret = handler->error;
@@ -1182,6 +1470,53 @@ static int max96712_configure_regulators(struct max96712 *max96712)
 				       max96712->supplies);
 }
 
+static int max96712_parse_dt(struct max96712 *max96712)
+{
+	struct device *dev = &max96712->client->dev;
+	struct device_node *node = dev->of_node;
+	u8 mipi_data_lanes = max96712->bus_cfg.bus.mipi_csi2.num_data_lanes;
+	int ret = 0;
+
+	/* max96712 link Receiver Rate */
+	ret = of_property_read_u32(node, "link-rx-rate",
+				   &max96712->rx_rate);
+	if (ret)
+		max96712->rx_rate = MAX96712_RX_RATE_6GBPS;
+	else
+		dev_info(dev, "link-rx-rate property: %d\n", max96712->rx_rate);
+	dev_info(dev, "max96712 link receiver rate: %d\n", max96712->rx_rate);
+
+	/* max96712 link mask: bit0 - LinkA, bit1 - LinkB, bit2 - LinkC, bit3 - LinkD */
+	ret = of_property_read_u32(node, "link-mask",
+				   &max96712->link_mask);
+	if (ret) {
+		/* default link mask */
+		if (mipi_data_lanes == 4)
+			max96712->link_mask = 0x0F; /* Link A/B/C/D */
+		else
+			max96712->link_mask = 0x03; /* Link A/B */
+	} else {
+		dev_info(dev, "link-mask property: %d\n", max96712->link_mask);
+	}
+	dev_info(dev, "max96712 link mask: 0x%02x\n", max96712->link_mask);
+
+	/* auto initial deskew mask */
+	ret = of_property_read_u32(node, "auto-init-deskew-mask",
+			   &max96712->auto_init_deskew_mask);
+	if (ret)
+		max96712->auto_init_deskew_mask = 0x0F; // 0x0F: default enable all
+	dev_info(dev, "max96712 auto init deskew mask: 0x%02x\n", max96712->auto_init_deskew_mask);
+
+	/* FSYNC period config */
+	ret = of_property_read_u32(node, "frame-sync-period",
+			   &max96712->frame_sync_period);
+	if (ret)
+		max96712->frame_sync_period = 0; // 0: disable (default)
+	dev_info(dev, "max96712 frame sync period: %d\n", max96712->frame_sync_period);
+
+	return 0;
+}
+
 static int max96712_probe(struct i2c_client *client,
 			  const struct i2c_device_id *id)
 {
@@ -1189,7 +1524,9 @@ static int max96712_probe(struct i2c_client *client,
 	struct device_node *node = dev->of_node;
 	struct max96712 *max96712;
 	struct v4l2_subdev *sd;
+	struct device_node *endpoint;
 	char facing[2];
+	u8 mipi_data_lanes;
 	int ret;
 
 	dev_info(dev, "driver version: %02x.%02x.%02x", DRIVER_VERSION >> 16,
@@ -1212,10 +1549,38 @@ static int max96712_probe(struct i2c_client *client,
 		return -EINVAL;
 	}
 
+	max96712->regmap = devm_regmap_init_i2c(client, &max96712_regmap_config);
+	if (IS_ERR(max96712->regmap)) {
+		dev_err(dev, "Failed to regmap initialize I2C\n");
+		return PTR_ERR(max96712->regmap);
+	}
+
 	max96712->client = client;
 	i2c_set_clientdata(client, max96712);
 
-	max96712->cur_mode = &supported_modes[0];
+	endpoint = of_graph_get_next_endpoint(dev->of_node, NULL);
+	if (!endpoint) {
+		dev_err(dev, "Failed to get endpoint\n");
+		return -EINVAL;
+	}
+
+	ret = v4l2_fwnode_endpoint_parse(of_fwnode_handle(endpoint),
+		&max96712->bus_cfg);
+	if (ret) {
+		dev_err(dev, "Failed to get bus config\n");
+		return -EINVAL;
+	}
+	mipi_data_lanes = max96712->bus_cfg.bus.mipi_csi2.num_data_lanes;
+	dev_info(dev, "max96712 data lanes %d\n", mipi_data_lanes);
+
+	if (mipi_data_lanes == 4) {
+		max96712->supported_modes = supported_modes_4lane;
+		max96712->cfg_modes_num = ARRAY_SIZE(supported_modes_4lane);
+	} else {
+		dev_err(dev, "Not support mipi data lane: %d\n", mipi_data_lanes);
+		return -EINVAL;
+	}
+	max96712->cur_mode = &max96712->supported_modes[0];
 
 	max96712->power_gpio = devm_gpiod_get(dev, "power", GPIOD_OUT_LOW);
 	if (IS_ERR(max96712->power_gpio))
@@ -1228,6 +1593,10 @@ static int max96712_probe(struct i2c_client *client,
 	max96712->pwdn_gpio = devm_gpiod_get(dev, "pwdn", GPIOD_OUT_LOW);
 	if (IS_ERR(max96712->pwdn_gpio))
 		dev_warn(dev, "Failed to get pwdn-gpios\n");
+
+	max96712->lock_gpio = devm_gpiod_get(dev, "lock", GPIOD_IN);
+	if (IS_ERR(max96712->lock_gpio))
+		dev_warn(dev, "Failed to get lock-gpios\n");
 
 	ret = max96712_configure_regulators(max96712);
 	if (ret) {
@@ -1248,8 +1617,7 @@ static int max96712_probe(struct i2c_client *client,
 			dev_err(dev, "could not get sleep pinstate\n");
 	}
 
-	/* max96712 link Receiver Rate */
-	max96712->rx_rate = MAX96712_RX_RATE_6GBPS;
+	max96712_parse_dt(max96712);
 
 	mutex_init(&max96712->mutex);
 
@@ -1294,6 +1662,23 @@ static int max96712_probe(struct i2c_client *client,
 	if (ret) {
 		dev_err(dev, "v4l2 async register subdev failed\n");
 		goto err_clean_entity;
+	}
+
+	if (!IS_ERR(max96712->lock_gpio)) {
+		max96712->hot_plug_irq = gpiod_to_irq(max96712->lock_gpio);
+		if (max96712->hot_plug_irq < 0)
+			dev_err(dev, "failed to get hot plug irq\n");
+
+		ret = devm_request_threaded_irq(dev,
+				max96712->hot_plug_irq,
+				NULL,
+				max96712_hot_plug_detect_irq_handler,
+				IRQF_TRIGGER_FALLING | IRQF_TRIGGER_RISING | IRQF_ONESHOT,
+				"max96712_hot_plug",
+				max96712);
+		if (ret)
+			dev_err(dev, "failed to request hot plug irq (%d)\n", ret);
+		disable_irq(max96712->hot_plug_irq);
 	}
 
 	pm_runtime_set_active(dev);

@@ -2647,6 +2647,7 @@ static void dw_hdmi_qp_bridge_atomic_disable(struct drm_bridge *bridge,
 
 	if (hdmi->phy.ops->disable && !hdmi->frl_switch) {
 		hdmi_writel(hdmi, 0, FLT_CONFIG0);
+		hdmi_writel(hdmi, 0, SCRAMB_CONFIG0);
 		/* set sink frl mode disable */
 		if (hdmi->curr_conn && dw_hdmi_support_scdc(hdmi, &hdmi->curr_conn->display_info))
 			drm_scdc_writeb(hdmi->ddc, 0x31, 0);
@@ -3282,7 +3283,8 @@ __dw_hdmi_probe(struct platform_device *pdev,
 	hdmi_writel(hdmi, 0, MAINUNIT_0_INT_MASK_N);
 	hdmi_writel(hdmi, 0, MAINUNIT_1_INT_MASK_N);
 	hdmi_writel(hdmi, 428571429, TIMER_BASE_CONFIG0);
-	if ((hdmi_readl(hdmi, CMU_STATUS) & DISPLAY_CLK_MONITOR) == DISPLAY_CLK_LOCKED) {
+	if (hdmi->phy.ops->read_hpd(hdmi, hdmi->phy.data) == connector_status_connected &&
+	    hdmi_readl(hdmi, I2CM_INTERFACE_CONTROL0)) {
 		hdmi->initialized = true;
 		hdmi->disabled = false;
 	}
@@ -3367,6 +3369,28 @@ __dw_hdmi_probe(struct platform_device *pdev,
 		goto err_aud;
 	}
 
+	irq = platform_get_irq(pdev, 0);
+	if (irq < 0) {
+		ret = irq;
+		goto err_aud;
+	}
+
+	hdmi->avp_irq = irq;
+	ret = devm_request_threaded_irq(dev, hdmi->avp_irq,
+					dw_hdmi_qp_avp_hardirq,
+					dw_hdmi_qp_avp_irq, IRQF_SHARED,
+					dev_name(dev), hdmi);
+	if (ret)
+		goto err_aud;
+
+	irq = platform_get_irq(pdev, 1);
+	if (irq < 0) {
+		ret = irq;
+		goto err_aud;
+	}
+
+	cec.irq = irq;
+
 	if (of_property_read_bool(np, "cec-enable")) {
 		hdmi->cec_enable = true;
 		cec.hdmi = hdmi;
@@ -3377,28 +3401,6 @@ __dw_hdmi_probe(struct platform_device *pdev,
 		pdevinfo.dma_mask = 0;
 		hdmi->cec = platform_device_register_full(&pdevinfo);
 	}
-
-	irq = platform_get_irq(pdev, 0);
-	if (irq < 0) {
-		ret = irq;
-		goto err_cec;
-	}
-
-	hdmi->avp_irq = irq;
-	ret = devm_request_threaded_irq(dev, hdmi->avp_irq,
-					dw_hdmi_qp_avp_hardirq,
-					dw_hdmi_qp_avp_irq, IRQF_SHARED,
-					dev_name(dev), hdmi);
-	if (ret)
-		goto err_cec;
-
-	irq = platform_get_irq(pdev, 1);
-	if (irq < 0) {
-		ret = irq;
-		goto err_cec;
-	}
-
-	cec.irq = irq;
 
 	irq = platform_get_irq(pdev, 2);
 	if (irq < 0) {

@@ -217,6 +217,7 @@ struct plat_stmmacenet_data {
 	int rx_fifo_size;
 	int dma_tx_size;
 	int dma_rx_size;
+	int flow_ctrl;
 	u32 host_dma_width;
 	u32 rx_queues_to_use;
 	u32 tx_queues_to_use;

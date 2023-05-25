@@ -665,6 +665,20 @@ void rkisp_trigger_read_back(struct rkisp_device *dev, u8 dma2frm, u32 mode, boo
 	rkisp_config_cmsk(dev);
 	rkisp_stream_frame_start(dev, 0);
 	if (!hw->is_single && !is_try) {
+		/* multi sensor need to reset isp resize mode if scale up */
+		val = 0;
+		if (rkisp_read(dev, ISP3X_MAIN_RESIZE_CTRL, true) & 0xf0)
+			val |= BIT(3);
+		if (dev->isp_ver != ISP_V32_L &&
+		    rkisp_read(dev, ISP3X_SELF_RESIZE_CTRL, true) & 0xf0)
+			val |= BIT(4);
+		if (rkisp_read(dev, ISP32_BP_RESIZE_CTRL, true) & 0xf0)
+			val |= BIT(12);
+		if (val) {
+			writel(val, hw->base_addr + CIF_IRCL);
+			writel(0, hw->base_addr + CIF_IRCL);
+		}
+
 		rkisp_update_regs(dev, CTRL_VI_ISP_PATH, SUPER_IMP_COLOR_CR);
 		rkisp_update_regs(dev, DUAL_CROP_M_H_OFFS, ISP3X_DUAL_CROP_FBC_V_SIZE);
 		rkisp_update_regs(dev, ISP_ACQ_H_OFFS, DUAL_CROP_CTRL);
@@ -2853,7 +2867,6 @@ static int rkisp_isp_sd_s_stream(struct v4l2_subdev *sd, int on)
 	struct rkisp_hw_dev *hw_dev = isp_dev->hw_dev;
 
 	if (!on) {
-		rkisp_stop_3a_run(isp_dev);
 		if (IS_HDR_RDBK(isp_dev->rd_mode)) {
 			struct rkisp_stream *s;
 			int i;
@@ -2872,6 +2885,7 @@ static int rkisp_isp_sd_s_stream(struct v4l2_subdev *sd, int on)
 		atomic_dec(&hw_dev->refcnt);
 		rkisp_params_stream_stop(&isp_dev->params_vdev);
 		atomic_set(&isp_dev->isp_sdev.frm_sync_seq, 0);
+		rkisp_stop_3a_run(isp_dev);
 		return 0;
 	}
 

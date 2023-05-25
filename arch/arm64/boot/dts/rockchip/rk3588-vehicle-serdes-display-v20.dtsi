@@ -5,6 +5,14 @@
  */
 
 / {
+	lt7911d {
+		compatible = "lontium,lt7911d-fb-notifier";
+		reset-gpios = <&gpio0 RK_PD2 GPIO_ACTIVE_LOW>,
+			      <&gpio4 RK_PA7 GPIO_ACTIVE_LOW>,
+			      <&gpio3 RK_PD4 GPIO_ACTIVE_LOW>,
+			      <&gpio3 RK_PD2 GPIO_ACTIVE_LOW>;
+	};
+
 	dsi2lvds_backlight1: dsi2lvds_backlight1 {
 		compatible = "pwm-backlight";
 		brightness-levels = <
@@ -275,10 +283,6 @@
 	dp2lvds_panel0 {
 		compatible = "simple-panel";
 		backlight = <&dp2lvds_backlight0>;
-		prepare-delay-ms = <120>;
-		enable-delay-ms = <120>;
-		unprepare-delay-ms = <120>;
-		disable-delay-ms = <120>;
 		status = "okay";
 
 		panel-timing {
@@ -307,10 +311,6 @@
 	dp2lvds_panel1 {
 		compatible = "simple-panel";
 		backlight = <&dp2lvds_backlight1>;
-		prepare-delay-ms = <120>;
-		enable-delay-ms = <120>;
-		unprepare-delay-ms = <120>;
-		disable-delay-ms = <120>;
 		status = "okay";
 
 		panel-timing {
@@ -339,10 +339,6 @@
 	edp2lvds_panel0 {
 		compatible = "simple-panel";
 		backlight = <&edp2lvds_backlight0>;
-		prepare-delay-ms = <120>;
-		enable-delay-ms = <120>;
-		unprepare-delay-ms = <120>;
-		disable-delay-ms = <120>;
 		status = "okay";
 
 		panel-timing {
@@ -371,10 +367,6 @@
 	edp2lvds_panel1 {
 		compatible = "simple-panel";
 		backlight = <&edp2lvds_backlight1>;
-		prepare-delay-ms = <120>;
-		enable-delay-ms = <120>;
-		unprepare-delay-ms = <120>;
-		disable-delay-ms = <120>;
 		status = "okay";
 
 		panel-timing {
@@ -615,36 +607,6 @@
 	pinctrl-0 = <&bl5_enable_pin>;
 	enable-gpios = <&gpio1 RK_PA6 GPIO_ACTIVE_HIGH>;
 	status = "okay";
-};
-
-&gpio0 {
-	i2c5-serdes-reset {
-		gpio-hog;
-		gpios = <26 GPIO_ACTIVE_HIGH>;
-		output-high;
-	};
-};
-
-&gpio4 {
-	i2c7-serdes-reset {
-		gpio-hog;
-		gpios = <7 GPIO_ACTIVE_HIGH>;
-		output-high;
-	};
-};
-
-&gpio3 {
-	i2c4-serdes-reset {
-		gpio-hog;
-		gpios = <28 GPIO_ACTIVE_HIGH>;
-		output-high;
-	};
-
-	i2c8-serdes-reset {
-		gpio-hog;
-		gpios = <26 GPIO_ACTIVE_HIGH>;
-		output-high;
-	};
 };
 
 &hdmi0 {
@@ -894,8 +856,8 @@
 			0013 001a
 			0014 000a
 			0021 0008
-			0023 0003
-			0024 0003
+			0023 0009
+			0024 0009
 			002a 0018
 			002d 0018
 			0030 0018
@@ -1068,8 +1030,8 @@
 			0013 001a
 			0014 000a
 			0021 0008
-			0023 0003
-			0024 0003
+			0023 0009
+			0024 0009
 			002a 0018
 			002e 0004
 			002d 0018
@@ -1472,8 +1434,8 @@
 			0013 001a
 			0014 000a
 			0021 0008
-			0023 0003
-			0024 0003
+			0023 0009
+			0024 0009
 			002a 0018
 			002d 0018
 			0030 0018
@@ -1648,8 +1610,8 @@
 			0013 001a
 			0014 000a
 			0021 0008
-			0023 0003
-			0024 0003
+			0023 0009
+			0024 0009
 			002a 0018
 			002d 0018
 			0030 0018
