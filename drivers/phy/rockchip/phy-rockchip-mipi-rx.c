@@ -794,22 +794,11 @@ static int mipidphy_update_sensor_mbus(struct v4l2_subdev *sd)
 		return ret;
 
 	sensor->mbus = mbus;
-	switch (mbus.flags & V4L2_MBUS_CSI2_LANES) {
-	case V4L2_MBUS_CSI2_1_LANE:
-		sensor->lanes = 1;
-		break;
-	case V4L2_MBUS_CSI2_2_LANE:
-		sensor->lanes = 2;
-		break;
-	case V4L2_MBUS_CSI2_3_LANE:
-		sensor->lanes = 3;
-		break;
-	case V4L2_MBUS_CSI2_4_LANE:
-		sensor->lanes = 4;
-		break;
-	default:
-		return -EINVAL;
-	}
+	if (mbus.type == V4L2_MBUS_CSI2_DPHY ||
+	    mbus.type == V4L2_MBUS_CSI2_CPHY)
+		sensor->lanes = mbus.bus.mipi_csi2.num_data_lanes;
+	else if (mbus.type == V4L2_MBUS_CCP2)
+		sensor->lanes = mbus.bus.mipi_csi1.data_lane;
 
 	return 0;
 }
@@ -1414,10 +1403,10 @@ static int csi_mipidphy_stream_on(struct mipidphy_priv *priv,
 		write_csiphy_reg(priv, CSIPHY_CTRL_DIG_RST, 0x1e);
 		write_csiphy_reg(priv, CSIPHY_CTRL_DIG_RST, 0x1f);
 		if (drv_data->chip_id == CHIP_ID_RK3326S) {
-			if (sensor->mbus.flags & V4L2_MBUS_CSI2_CONTINUOUS_CLOCK)
-				clk_mode = 0x03;
-			else if (sensor->mbus.flags & V4L2_MBUS_CSI2_NONCONTINUOUS_CLOCK)
+			if (sensor->mbus.bus.mipi_csi2.flags & V4L2_MBUS_CSI2_NONCONTINUOUS_CLOCK)
 				clk_mode = 0;
+			else
+				clk_mode = 0x03;
 			write_csiphy_reg(priv, CSIPHY_CLK_MODE, clk_mode);
 		}
 	} else {
@@ -1708,7 +1697,7 @@ static int rockchip_mipidphy_fwnode_parse(struct device *dev,
 
 	if (vep->bus_type == V4L2_MBUS_CSI2_DPHY) {
 		config->type = V4L2_MBUS_CSI2_DPHY;
-		config->flags = vep->bus.mipi_csi2.flags;
+		config->bus.mipi_csi2.flags = vep->bus.mipi_csi2.flags;
 		s_asd->lanes = vep->bus.mipi_csi2.num_data_lanes;
 	} else if (vep->bus_type == V4L2_MBUS_CCP2) {
 		/* V4L2_MBUS_CCP2 for lvds */
@@ -1716,23 +1705,6 @@ static int rockchip_mipidphy_fwnode_parse(struct device *dev,
 		s_asd->lanes = vep->bus.mipi_csi1.data_lane;
 	} else {
 		dev_err(dev, "Only CSI2 and CCP2 bus type is currently supported\n");
-		return -EINVAL;
-	}
-
-	switch (s_asd->lanes) {
-	case 1:
-		config->flags |= V4L2_MBUS_CSI2_1_LANE;
-		break;
-	case 2:
-		config->flags |= V4L2_MBUS_CSI2_2_LANE;
-		break;
-	case 3:
-		config->flags |= V4L2_MBUS_CSI2_3_LANE;
-		break;
-	case 4:
-		config->flags |= V4L2_MBUS_CSI2_4_LANE;
-		break;
-	default:
 		return -EINVAL;
 	}
 
