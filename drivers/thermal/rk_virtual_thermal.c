@@ -19,6 +19,7 @@
 #include <linux/module.h>
 #include <linux/of.h>
 #include <linux/of_address.h>
+#include <linux/panic_notifier.h>
 #include <linux/platform_device.h>
 #include <linux/thermal.h>
 #include <linux/timer.h>
@@ -708,18 +709,18 @@ static int estimate_temp_internal(void)
 	return temp;
 }
 
-static int virtual_thermal_set_trips(void *_sensor, int low, int high)
+static int virtual_thermal_set_trips(struct thermal_zone_device *tz, int low, int high)
 {
 	return 0;
 }
 
-static int virtual_thermal_get_temp(void *_sensor, int *out_temp)
+static int virtual_thermal_get_temp(struct thermal_zone_device *tz, int *out_temp)
 {
 	*out_temp = estimate_temp_internal();
 	return 0;
 }
 
-static const struct thermal_zone_of_device_ops virtual_of_thermal_ops = {
+static const struct thermal_zone_device_ops virtual_of_thermal_ops = {
 	.get_temp = virtual_thermal_get_temp,
 	.set_trips = virtual_thermal_set_trips,
 };
@@ -855,9 +856,9 @@ static int virtual_thermal_probe(struct platform_device *pdev)
 		dev_warn(&pdev->dev, "failed to get vpu's clock: %d\n", ret);
 	}
 
-	ctx->tzd = devm_thermal_zone_of_sensor_register(&pdev->dev, 0,
-						NULL,
-						&virtual_of_thermal_ops);
+	ctx->tzd = devm_thermal_of_zone_register(&pdev->dev, 0,
+						 NULL,
+						 &virtual_of_thermal_ops);
 	if (IS_ERR(ctx->tzd)) {
 		ret = PTR_ERR(ctx->tzd);
 		dev_err(&pdev->dev, "failed to register sensor 0: %d\n", ret);
