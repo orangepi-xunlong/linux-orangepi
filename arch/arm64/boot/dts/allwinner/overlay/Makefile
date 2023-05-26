@@ -56,7 +56,8 @@ dtbo-$(CONFIG_ARCH_SUNXI) += \
 	sun50i-h616-i2c4.dtbo \
 	sun50i-h616-pwm12.dtbo \
 	sun50i-h616-pwm34.dtbo \
-	sun50i-h616-spi-spidev.dtbo
+	sun50i-h616-spi-spidev.dtbo \
+	sun50i-h616-w1-gpio.dtbo
 
 scr-$(CONFIG_ARCH_SUNXI) += \
 	sun50i-a64-fixup.scr \
