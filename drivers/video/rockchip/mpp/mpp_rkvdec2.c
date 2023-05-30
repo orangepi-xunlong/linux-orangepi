@@ -1426,7 +1426,7 @@ static int rkvdec2_alloc_rcbbuf(struct platform_device *pdev, struct rkvdec2_dev
 		return -EINVAL;
 	}
 	/* alloc reserve iova for rcb */
-	ret = iommu_dma_reserve_iova(dev, iova, rcb_size);
+	ret = mpp_iommu_reserve_iova(dec->mpp.iommu_info, iova, rcb_size);
 	if (ret) {
 		dev_err(dev, "alloc rcb iova error.\n");
 		return ret;

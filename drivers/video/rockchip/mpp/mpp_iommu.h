@@ -14,6 +14,19 @@
 #include <linux/iommu.h>
 #include <linux/dma-mapping.h>
 #include <linux/interrupt.h>
+#include <linux/iova.h>
+
+enum iommu_dma_cookie_type {
+	IOMMU_DMA_IOVA_COOKIE,
+	IOMMU_DMA_MSI_COOKIE,
+};
+
+/* Keep in mind: member order must keep align with struct iommu_dma_cookie */
+struct mpp_iommu_dma_cookie {
+	enum iommu_dma_cookie_type type;
+	/* Full allocator for IOMMU_DMA_IOVA_COOKIE */
+	struct iova_domain iovad;
+};
 
 struct mpp_dma_buffer {
 	/* link to dma session buffer list */
@@ -122,6 +135,7 @@ int mpp_av1_iommu_enable(struct device *dev);
 
 int mpp_iommu_dev_activate(struct mpp_iommu_info *info, struct mpp_dev *dev);
 int mpp_iommu_dev_deactivate(struct mpp_iommu_info *info, struct mpp_dev *dev);
+int mpp_iommu_reserve_iova(struct mpp_iommu_info *info, dma_addr_t iova, size_t size);
 
 static inline int mpp_iommu_down_read(struct mpp_iommu_info *info)
 {
