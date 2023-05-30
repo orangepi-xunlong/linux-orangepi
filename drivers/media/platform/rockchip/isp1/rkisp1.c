@@ -350,16 +350,15 @@ static int rkisp1_config_isp(struct rkisp1_device *dev)
 	/* Set up input acquisition properties */
 	if (sensor && (sensor->mbus.type == V4L2_MBUS_BT656 ||
 		sensor->mbus.type == V4L2_MBUS_PARALLEL)) {
-		if (sensor->mbus.flags &
-			V4L2_MBUS_PCLK_SAMPLE_RISING)
+		if (sensor->mbus.bus.parallel.flags & V4L2_MBUS_PCLK_SAMPLE_RISING)
 			signal = CIF_ISP_ACQ_PROP_POS_EDGE;
 	}
 
 	if (sensor && sensor->mbus.type == V4L2_MBUS_PARALLEL) {
-		if (sensor->mbus.flags & V4L2_MBUS_VSYNC_ACTIVE_LOW)
+		if (sensor->mbus.bus.parallel.flags & V4L2_MBUS_VSYNC_ACTIVE_LOW)
 			signal |= CIF_ISP_ACQ_PROP_VSYNC_LOW;
 
-		if (sensor->mbus.flags & V4L2_MBUS_HSYNC_ACTIVE_LOW)
+		if (sensor->mbus.bus.parallel.flags & V4L2_MBUS_HSYNC_ACTIVE_LOW)
 			signal |= CIF_ISP_ACQ_PROP_HSYNC_LOW;
 	}
 
@@ -451,26 +450,7 @@ static int rkisp1_config_mipi(struct rkisp1_device *dev)
 	u32 emd_vc, emd_dt;
 	int lanes, ret, i;
 
-	/*
-	 * sensor->mbus is set in isp or d-phy notifier_bound function
-	 */
-	switch (sensor->mbus.flags & V4L2_MBUS_CSI2_LANES) {
-	case V4L2_MBUS_CSI2_4_LANE:
-		lanes = 4;
-		break;
-	case V4L2_MBUS_CSI2_3_LANE:
-		lanes = 3;
-		break;
-	case V4L2_MBUS_CSI2_2_LANE:
-		lanes = 2;
-		break;
-	case V4L2_MBUS_CSI2_1_LANE:
-		lanes = 1;
-		break;
-	default:
-		return -EINVAL;
-	}
-
+	lanes = sensor->mbus.bus.mipi_csi2.num_data_lanes;
 	emd_vc = 0xFF;
 	emd_dt = 0;
 	dev->hdr_sensor = NULL;

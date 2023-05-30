@@ -516,7 +516,6 @@ static int rkisp1_fwnode_parse(struct device *dev,
 {
 	struct rkisp1_async_subdev *rk_asd =
 			container_of(asd, struct rkisp1_async_subdev, asd);
-	struct v4l2_mbus_config_parallel *bus = &vep->bus.parallel;
 
 	/*
 	 * MIPI sensor is linked with a mipi dphy and its media bus config can
@@ -526,7 +525,6 @@ static int rkisp1_fwnode_parse(struct device *dev,
 	    vep->bus_type != V4L2_MBUS_PARALLEL)
 		return 0;
 
-	rk_asd->mbus.flags = bus->flags;
 	rk_asd->mbus.type = vep->bus_type;
 
 	return 0;
@@ -984,54 +982,32 @@ static int rkisp1_plat_probe(struct platform_device *pdev)
 
 	match_data = match->data;
 	isp_dev->mipi_irq = -1;
-	res = platform_get_resource_byname(pdev, IORESOURCE_IRQ,
-					   match_data->irqs[0].name);
-	if (res) {
-		/* there are irq names in dts */
-		for (i = 0; i < match_data->num_irqs; i++) {
-			irq = platform_get_irq_byname(pdev,
-						      match_data->irqs[i].name);
-			if (irq < 0) {
-				dev_err(dev, "no irq %s in dts\n",
-					match_data->irqs[i].name);
-				return irq;
-			}
-
-			if (!strcmp(match_data->irqs[i].name, "mipi_irq"))
-				isp_dev->mipi_irq = irq;
-
-			ret = devm_request_irq(dev, irq,
-					       match_data->irqs[i].irq_hdl,
-					       IRQF_SHARED,
-					       dev_driver_string(dev),
-					       dev);
-			if (ret < 0) {
-				dev_err(dev, "request %s failed: %d\n",
-					match_data->irqs[i].name,
-					ret);
-				return ret;
-			}
-
-			if (isp_dev->mipi_irq == irq)
-				disable_irq(isp_dev->mipi_irq);
-		}
-	} else {
-		/* no irq names in dts */
-		irq = platform_get_irq(pdev, 0);
+	/* there are irq names in dts */
+	for (i = 0; i < match_data->num_irqs; i++) {
+		irq = platform_get_irq_byname(pdev, match_data->irqs[i].name);
 		if (irq < 0) {
-			dev_err(dev, "no isp irq in dts\n");
+			dev_err(dev, "no irq %s in dts\n",
+				match_data->irqs[i].name);
 			return irq;
 		}
 
+		if (!strcmp(match_data->irqs[i].name, "mipi_irq"))
+			isp_dev->mipi_irq = irq;
+
 		ret = devm_request_irq(dev, irq,
-				       rkisp1_irq_handler,
+				       match_data->irqs[i].irq_hdl,
 				       IRQF_SHARED,
 				       dev_driver_string(dev),
 				       dev);
 		if (ret < 0) {
-			dev_err(dev, "request irq failed: %d\n", ret);
+			dev_err(dev, "request %s failed: %d\n",
+				match_data->irqs[i].name,
+				ret);
 			return ret;
 		}
+
+		if (isp_dev->mipi_irq == irq)
+			disable_irq(isp_dev->mipi_irq);
 	}
 
 	for (i = 0; i < match_data->num_clks; i++) {
