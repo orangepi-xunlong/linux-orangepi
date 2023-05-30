@@ -1721,9 +1721,6 @@ static int rkvenc_devfreq_init(struct mpp_dev *mpp)
 	struct rkvenc_dev *enc = to_rkvenc_dev(mpp);
 	struct clk *clk_core = enc->core_clk_info.clk;
 	struct device *dev = mpp->dev;
-	struct opp_table *reg_table = NULL;
-	struct opp_table *clk_table = NULL;
-	const char *const reg_names[] = { "venc", "mem" };
 	int ret = 0;
 
 	if (!clk_core)
@@ -1731,18 +1728,22 @@ static int rkvenc_devfreq_init(struct mpp_dev *mpp)
 
 	if (of_find_property(dev->of_node, "venc-supply", NULL) &&
 	    of_find_property(dev->of_node, "mem-supply", NULL)) {
-		reg_table = dev_pm_opp_set_regulators(dev, reg_names, 2);
-		if (IS_ERR(reg_table))
-			return PTR_ERR(reg_table);
+		const char *const reg_names[] = { "venc", "mem", NULL };
+
+		ret = dev_pm_opp_set_regulators(dev, reg_names);
+		if (ret)
+			return ret;
 	} else {
-		reg_table = dev_pm_opp_set_regulators(dev, reg_names, 1);
-		if (IS_ERR(reg_table))
-			return PTR_ERR(reg_table);
+		const char *const reg_names[] = { "venc", NULL };
+
+		ret = dev_pm_opp_set_regulators(dev, reg_names);
+		if (ret)
+			return ret;
 	}
 
-	clk_table = dev_pm_opp_set_clkname(dev, "clk_core");
-	if (IS_ERR(clk_table))
-		return PTR_ERR(clk_table);
+	ret = dev_pm_opp_set_clkname(dev, "clk_core");
+	if (ret)
+		return ret;
 
 	rockchip_get_opp_data(rockchip_rkvenc_of_match, &enc->opp_info);
 	ret = rockchip_init_opp_table(dev, &enc->opp_info, "leakage", "venc");
