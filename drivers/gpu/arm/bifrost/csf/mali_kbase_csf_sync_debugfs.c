@@ -637,6 +637,7 @@ static void kbasep_csf_dump_active_queue_sync_info(struct seq_file *file, struct
 		case GPU_CSF_SYNC_SET64_OPCODE:
 		case GPU_CSF_SYNC_WAIT64_OPCODE:
 			instr_is_64_bit = true;
+			break;
 		default:
 			break;
 		}
@@ -663,7 +664,7 @@ static void kbasep_csf_dump_active_queue_sync_info(struct seq_file *file, struct
 			break;
 		case GPU_CSF_CALL_OPCODE:
 			nr_calls++;
-			/* Fallthrough */
+			break;
 		default:
 			/* Unrecognized command, skip past it */
 			break;
