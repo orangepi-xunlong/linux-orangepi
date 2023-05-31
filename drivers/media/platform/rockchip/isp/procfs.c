@@ -1006,19 +1006,22 @@ static void rkisp_proc_dump_mem(struct rkisp_device *dev)
 
 		if (p->buf_3dnr_iir[0].mem_priv) {
 			if (!p->buf_3dnr_iir[0].is_need_vaddr)
-				p->buf_3dnr_iir[0].vaddr = g_ops->vaddr(p->buf_3dnr_iir[0].mem_priv);
+				p->buf_3dnr_iir[0].vaddr =
+					g_ops->vaddr(NULL, p->buf_3dnr_iir[0].mem_priv);
 			iir_addr = p->buf_3dnr_iir[0].vaddr;
 			iir_size = p->buf_3dnr_iir[0].size;
 		}
 		if (p->buf_3dnr_cur[0].mem_priv) {
 			if (!p->buf_3dnr_cur[0].is_need_vaddr)
-				p->buf_3dnr_cur[0].vaddr = g_ops->vaddr(p->buf_3dnr_cur[0].mem_priv);
+				p->buf_3dnr_cur[0].vaddr =
+					g_ops->vaddr(NULL, p->buf_3dnr_cur[0].mem_priv);
 			cur_addr = p->buf_3dnr_cur[0].vaddr;
 			cur_size = p->buf_3dnr_cur[0].size;
 		}
 		if (p->buf_3dnr_ds[0].mem_priv) {
 			if (!p->buf_3dnr_ds[0].is_need_vaddr)
-				p->buf_3dnr_ds[0].vaddr = g_ops->vaddr(p->buf_3dnr_ds[0].mem_priv);
+				p->buf_3dnr_ds[0].vaddr =
+					g_ops->vaddr(NULL, p->buf_3dnr_ds[0].mem_priv);
 			ds_addr = p->buf_3dnr_ds[0].vaddr;
 			ds_size = p->buf_3dnr_ds[0].size;
 		}

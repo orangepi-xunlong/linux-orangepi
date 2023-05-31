@@ -187,26 +187,7 @@ static int csi_config(struct rkisp_csi_device *csi)
 	u32 emd_vc, emd_dt, mipi_ctrl;
 	int lanes, ret, i;
 
-	/*
-	 * sensor->mbus is set in isp or d-phy notifier_bound function
-	 */
-	switch (sensor->mbus.flags & V4L2_MBUS_CSI2_LANES) {
-	case V4L2_MBUS_CSI2_4_LANE:
-		lanes = 4;
-		break;
-	case V4L2_MBUS_CSI2_3_LANE:
-		lanes = 3;
-		break;
-	case V4L2_MBUS_CSI2_2_LANE:
-		lanes = 2;
-		break;
-	case V4L2_MBUS_CSI2_1_LANE:
-		lanes = 1;
-		break;
-	default:
-		return -EINVAL;
-	}
-
+	lanes = sensor->mbus.bus.mipi_csi2.num_data_lanes;
 	emd_vc = 0xFF;
 	emd_dt = 0;
 	dev->hdr.sensor = NULL;

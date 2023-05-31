@@ -615,7 +615,6 @@ static int rkisp_fwnode_parse(struct device *dev,
 {
 	struct rkisp_async_subdev *rk_asd =
 			container_of(asd, struct rkisp_async_subdev, asd);
-	struct v4l2_mbus_config_parallel *bus = &vep->bus.parallel;
 
 	/*
 	 * MIPI sensor is linked with a mipi dphy and its media bus config can
@@ -625,7 +624,6 @@ static int rkisp_fwnode_parse(struct device *dev,
 	    vep->bus_type != V4L2_MBUS_PARALLEL)
 		return 0;
 
-	rk_asd->mbus.flags = bus->flags;
 	rk_asd->mbus.type = vep->bus_type;
 
 	return 0;

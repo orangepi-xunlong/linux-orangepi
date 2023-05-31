@@ -278,13 +278,7 @@ static int bridge_start_stream(struct v4l2_subdev *sd)
 	if (ret < 0)
 		goto stop_bridge;
 
-	ret = media_pipeline_start(&sd->entity, &dev->ispdev->pipe.pipe);
-	if (ret < 0)
-		goto pipe_stream_off;
-
 	return 0;
-pipe_stream_off:
-	dev->ispdev->pipe.set_stream(&dev->ispdev->pipe, false);
 stop_bridge:
 	dev->ops->stop(dev);
 close_pipe:
@@ -307,7 +301,6 @@ static int bridge_stop_stream(struct v4l2_subdev *sd)
 	struct rkisp_bridge_device *dev = v4l2_get_subdevdata(sd);
 
 	dev->ops->stop(dev);
-	media_pipeline_stop(&sd->entity);
 	dev->ispdev->pipe.set_stream(&dev->ispdev->pipe, false);
 	dev->ispdev->pipe.close(&dev->ispdev->pipe);
 	bridge_destroy_buf(dev);

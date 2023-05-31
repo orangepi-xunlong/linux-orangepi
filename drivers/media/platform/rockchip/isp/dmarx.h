@@ -43,7 +43,8 @@ struct rkisp_dmarx_frame {
 struct rkisp_rx_buf_pool {
 	struct rkisp_buffer buf;
 	struct rkisp_rx_buf *dbufs;
-	void *mem_priv;
+	struct dma_buf_attachment *dba;
+	struct sg_table *sgt;
 };
 
 /*

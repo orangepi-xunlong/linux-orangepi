@@ -1575,7 +1575,7 @@ static void rkisp_stop_streaming(struct vb2_queue *queue)
 	if (stream->id == RKISP_STREAM_MP ||
 	    stream->id == RKISP_STREAM_SP) {
 		/* call to the other devices */
-		media_pipeline_stop(&node->vdev.entity);
+		video_device_pipeline_stop(&node->vdev);
 		ret = dev->pipe.set_stream(&dev->pipe, false);
 		if (ret < 0)
 			v4l2_err(v4l2_dev,
@@ -1709,7 +1709,7 @@ rkisp_start_streaming(struct vb2_queue *queue, unsigned int count)
 		if (ret < 0)
 			goto stop_stream;
 
-		ret = media_pipeline_start(&node->vdev.entity, &dev->pipe.pipe);
+		ret = video_device_pipeline_start(&node->vdev, &dev->pipe.pipe);
 		if (ret < 0) {
 			v4l2_err(&dev->v4l2_dev,
 				 "start pipeline failed %d\n", ret);

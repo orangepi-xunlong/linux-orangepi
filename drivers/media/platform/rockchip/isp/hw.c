@@ -263,86 +263,40 @@ static irqreturn_t isp_irq_hdl(int irq, void *ctx)
 	return IRQ_HANDLED;
 }
 
-static irqreturn_t irq_handler(int irq, void *ctx)
-{
-	struct device *dev = ctx;
-	struct rkisp_hw_dev *hw_dev = dev_get_drvdata(dev);
-	struct rkisp_device *isp = hw_dev->isp[hw_dev->cur_dev_id];
-	unsigned int mis_val, mis_3a = 0;
-
-	mis_val = readl(hw_dev->base_addr + CIF_ISP_MIS);
-	if (hw_dev->isp_ver >= ISP_V20)
-		mis_3a = readl(hw_dev->base_addr + ISP_ISP3A_MIS);
-	if (mis_val || mis_3a)
-		rkisp_isp_isr(mis_val, mis_3a, isp);
-
-	mis_val = readl(hw_dev->base_addr + CIF_MIPI_MIS);
-	if (mis_val)
-		rkisp_mipi_isr(mis_val, isp);
-
-	mis_val = readl(hw_dev->base_addr + CIF_MI_MIS);
-	if (mis_val)
-		rkisp_mi_isr(mis_val, isp);
-
-	return IRQ_HANDLED;
-}
-
 int rkisp_register_irq(struct rkisp_hw_dev *hw_dev)
 {
 	const struct isp_match_data *match_data = hw_dev->match_data;
 	struct platform_device *pdev = hw_dev->pdev;
 	struct device *dev = &pdev->dev;
-	struct resource *res;
 	int i, ret, irq;
 
-	res = platform_get_resource_byname(pdev, IORESOURCE_IRQ,
-					   match_data->irqs[0].name);
-	if (res) {
-		/* there are irq names in dts */
-		for (i = 0; i < match_data->num_irqs; i++) {
-			irq = platform_get_irq_byname(pdev, match_data->irqs[i].name);
-			if (irq < 0) {
-				dev_err(dev, "no irq %s in dts\n",
-					match_data->irqs[i].name);
-				return irq;
-			}
-
-			if (!strcmp(match_data->irqs[i].name, "mipi_irq"))
-				hw_dev->mipi_irq = irq;
-
-			ret = devm_request_irq(dev, irq,
-					       match_data->irqs[i].irq_hdl,
-					       IRQF_SHARED,
-					       dev_driver_string(dev),
-					       dev);
-			if (ret < 0) {
-				dev_err(dev, "request %s failed: %d\n",
-					match_data->irqs[i].name, ret);
-				return ret;
-			}
-
-			if (hw_dev->mipi_irq == irq &&
-			    (hw_dev->isp_ver == ISP_V12 ||
-			     hw_dev->isp_ver == ISP_V13))
-				disable_irq(hw_dev->mipi_irq);
-		}
-	} else {
-		/* no irq names in dts */
-		irq = platform_get_irq(pdev, 0);
+	/* there are irq names in dts */
+	for (i = 0; i < match_data->num_irqs; i++) {
+		irq = platform_get_irq_byname(pdev, match_data->irqs[i].name);
 		if (irq < 0) {
-			dev_err(dev, "no isp irq in dts\n");
+			dev_err(dev, "no irq %s in dts\n",
+				match_data->irqs[i].name);
 			return irq;
 		}
 
+		if (!strcmp(match_data->irqs[i].name, "mipi_irq"))
+			hw_dev->mipi_irq = irq;
+
 		ret = devm_request_irq(dev, irq,
-				       irq_handler,
+				       match_data->irqs[i].irq_hdl,
 				       IRQF_SHARED,
 				       dev_driver_string(dev),
 				       dev);
 		if (ret < 0) {
-			dev_err(dev, "request irq failed: %d\n", ret);
+			dev_err(dev, "request %s failed: %d\n",
+				match_data->irqs[i].name, ret);
 			return ret;
 		}
+
+		if (hw_dev->mipi_irq == irq &&
+		    (hw_dev->isp_ver == ISP_V12 ||
+		     hw_dev->isp_ver == ISP_V13))
+			disable_irq(hw_dev->mipi_irq);
 	}
 
 	return 0;
