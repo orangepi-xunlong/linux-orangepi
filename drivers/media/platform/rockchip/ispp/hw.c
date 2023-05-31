@@ -339,29 +339,24 @@ static int rkispp_hw_probe(struct platform_device *pdev)
 	}
 
 	rkispp_monitor = device_property_read_bool(dev, "rockchip,restart-monitor-en");
-	res = platform_get_resource_byname(pdev, IORESOURCE_IRQ,
-					   match_data->irqs[0].name);
-	if (res) {
-		/* there are irq names in dts */
-		for (i = 0; i < match_data->num_irqs; i++) {
-			irq = platform_get_irq_byname(pdev,
-						      match_data->irqs[i].name);
-			if (irq < 0) {
-				dev_err(dev, "no irq %s in dts\n",
-					match_data->irqs[i].name);
-				ret = irq;
-				goto err;
-			}
-			ret = devm_request_irq(dev, irq,
-					       match_data->irqs[i].irq_hdl,
-					       IRQF_SHARED,
-					       dev_driver_string(dev),
-					       dev);
-			if (ret < 0) {
-				dev_err(dev, "request %s failed: %d\n",
-					match_data->irqs[i].name, ret);
-				goto err;
-			}
+	/* there are irq names in dts */
+	for (i = 0; i < match_data->num_irqs; i++) {
+		irq = platform_get_irq_byname(pdev, match_data->irqs[i].name);
+		if (irq < 0) {
+			dev_err(dev, "no irq %s in dts\n",
+				match_data->irqs[i].name);
+			ret = irq;
+			goto err;
+		}
+		ret = devm_request_irq(dev, irq,
+				       match_data->irqs[i].irq_hdl,
+				       IRQF_SHARED,
+				       dev_driver_string(dev),
+				       dev);
+		if (ret < 0) {
+			dev_err(dev, "request %s failed: %d\n",
+				match_data->irqs[i].name, ret);
+			goto err;
 		}
 	}
 

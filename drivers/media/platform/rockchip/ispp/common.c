@@ -3,6 +3,7 @@
 
 #include <media/videobuf2-dma-contig.h>
 #include <linux/delay.h>
+#include <linux/iosys-map.h>
 #include <linux/of_platform.h>
 #include <linux/slab.h>
 #include "dev.h"
@@ -62,10 +63,24 @@ void rkispp_update_regs(struct rkispp_device *dev, u32 start, u32 end)
 	}
 }
 
+static void rkispp_init_dummy_vb2(struct rkispp_device *dev,
+				  struct rkispp_dummy_buffer *buf)
+{
+	unsigned long attrs = buf->is_need_vaddr ? 0 : DMA_ATTR_NO_KERNEL_MAPPING;
+
+	memset(&buf->vb2_queue, 0, sizeof(buf->vb2_queue));
+	memset(&buf->vb, 0, sizeof(buf->vb));
+	buf->vb2_queue.gfp_flags = GFP_KERNEL | GFP_DMA32;
+	buf->vb2_queue.dma_dir = DMA_BIDIRECTIONAL;
+	if (dev->hw_dev->is_dma_contig)
+		attrs |= DMA_ATTR_FORCE_CONTIGUOUS;
+	buf->vb2_queue.dma_attrs = attrs;
+	buf->vb.vb2_queue = &buf->vb2_queue;
+}
+
 int rkispp_allow_buffer(struct rkispp_device *dev,
 			struct rkispp_dummy_buffer *buf)
 {
-	unsigned long attrs = buf->is_need_vaddr ? 0 : DMA_ATTR_NO_KERNEL_MAPPING;
 	const struct vb2_mem_ops *g_ops = dev->hw_dev->mem_ops;
 	struct sg_table  *sg_tbl;
 	void *mem_priv;
@@ -75,12 +90,9 @@ int rkispp_allow_buffer(struct rkispp_device *dev,
 		ret = -EINVAL;
 		goto err;
 	}
-
-	if (dev->hw_dev->is_dma_contig)
-		attrs |= DMA_ATTR_FORCE_CONTIGUOUS;
+	rkispp_init_dummy_vb2(dev, buf);
 	buf->size = PAGE_ALIGN(buf->size);
-	mem_priv = g_ops->alloc(dev->hw_dev->dev, attrs, buf->size,
-				DMA_BIDIRECTIONAL, GFP_KERNEL | GFP_DMA32);
+	mem_priv = g_ops->alloc(&buf->vb, dev->hw_dev->dev, buf->size);
 	if (IS_ERR_OR_NULL(mem_priv)) {
 		ret = -ENOMEM;
 		goto err;
@@ -88,16 +100,16 @@ int rkispp_allow_buffer(struct rkispp_device *dev,
 
 	buf->mem_priv = mem_priv;
 	if (dev->hw_dev->is_dma_sg_ops) {
-		sg_tbl = (struct sg_table *)g_ops->cookie(mem_priv);
+		sg_tbl = (struct sg_table *)g_ops->cookie(&buf->vb, mem_priv);
 		buf->dma_addr = sg_dma_address(sg_tbl->sgl);
 		g_ops->prepare(mem_priv);
 	} else {
-		buf->dma_addr = *((dma_addr_t *)g_ops->cookie(mem_priv));
+		buf->dma_addr = *((dma_addr_t *)g_ops->cookie(&buf->vb, mem_priv));
 	}
 	if (buf->is_need_vaddr)
-		buf->vaddr = g_ops->vaddr(mem_priv);
+		buf->vaddr = g_ops->vaddr(&buf->vb, mem_priv);
 	if (buf->is_need_dbuf) {
-		buf->dbuf = g_ops->get_dmabuf(mem_priv, O_RDWR);
+		buf->dbuf = g_ops->get_dmabuf(&buf->vb, mem_priv, O_RDWR);
 		if (buf->is_need_dmafd) {
 			buf->dma_fd = dma_buf_fd(buf->dbuf, O_CLOEXEC);
 			if (buf->dma_fd < 0) {
@@ -255,7 +267,6 @@ static int rkispp_find_regbuf_by_stat(struct rkispp_hw_dev *hw, struct rkisp_isp
 
 static void rkispp_free_pool(struct rkispp_hw_dev *hw)
 {
-	const struct vb2_mem_ops *g_ops = hw->mem_ops;
 	struct rkispp_isp_buf_pool *buf;
 	int i, j;
 
@@ -270,12 +281,23 @@ static void rkispp_free_pool(struct rkispp_hw_dev *hw)
 			dev_info(hw->dev, "%s dbufs[%d]:0x%p\n",
 				 __func__, i, buf->dbufs);
 		for (j = 0; j < hw->pool[0].group_buf_max; j++) {
-			if (buf->mem_priv[j]) {
-				g_ops->unmap_dmabuf(buf->mem_priv[j]);
-				g_ops->detach_dmabuf(buf->mem_priv[j]);
-				dma_buf_put(buf->dbufs->dbuf[j]);
-				buf->mem_priv[j] = NULL;
+			if (!buf->dba[j])
+				continue;
+			if (buf->vaddr[j]) {
+				struct iosys_map map = IOSYS_MAP_INIT_VADDR(buf->vaddr[j]);
+
+				dma_buf_vunmap(buf->dbufs->dbuf[j], &map);
+				buf->vaddr[j] = NULL;
 			}
+			if (buf->sgt[j]) {
+				dma_buf_unmap_attachment(buf->dba[j],
+							 buf->sgt[j],
+							 DMA_BIDIRECTIONAL);
+				buf->sgt[j] = NULL;
+			}
+			dma_buf_detach(buf->dbufs->dbuf[j], buf->dba[j]);
+			dma_buf_put(buf->dbufs->dbuf[j]);
+			buf->dba[j] = NULL;
 		}
 		buf->dbufs = NULL;
 	}
@@ -286,11 +308,11 @@ static void rkispp_free_pool(struct rkispp_hw_dev *hw)
 
 static int rkispp_init_pool(struct rkispp_hw_dev *hw, struct rkisp_ispp_buf *dbufs)
 {
-	const struct vb2_mem_ops *g_ops = hw->mem_ops;
 	struct rkispp_isp_buf_pool *pool;
-	struct sg_table	 *sg_tbl;
+	struct dma_buf_attachment *dba;
+	struct sg_table	*sgt;
+	struct iosys_map map;
 	int i, ret = 0;
-	void *mem;
 
 	INIT_LIST_HEAD(&hw->list);
 	/* init dma buf pool */
@@ -305,24 +327,22 @@ static int rkispp_init_pool(struct rkispp_hw_dev *hw, struct rkisp_ispp_buf *dbu
 		dev_info(hw->dev, "%s dbufs[%d]:0x%p\n",
 			 __func__, i, dbufs);
 	for (i = 0; i < hw->pool[0].group_buf_max; i++) {
-		mem = g_ops->attach_dmabuf(hw->dev, dbufs->dbuf[i],
-			dbufs->dbuf[i]->size, DMA_BIDIRECTIONAL);
-		if (IS_ERR(mem)) {
-			ret = PTR_ERR(mem);
+		dba = dma_buf_attach(dbufs->dbuf[i], hw->dev);
+		if (IS_ERR(dba)) {
+			ret = PTR_ERR(dba);
 			goto err;
 		}
-		pool->mem_priv[i] = mem;
-		ret = g_ops->map_dmabuf(mem);
-		if (ret)
+		pool->dba[i] = dba;
+		sgt = dma_buf_map_attachment(dba, DMA_BIDIRECTIONAL);
+		if (IS_ERR(sgt)) {
+			ret = PTR_ERR(sgt);
 			goto err;
-		if (hw->is_dma_sg_ops) {
-			sg_tbl = (struct sg_table *)g_ops->cookie(mem);
-			pool->dma[i] = sg_dma_address(sg_tbl->sgl);
-		} else {
-			pool->dma[i] = *((dma_addr_t *)g_ops->cookie(mem));
 		}
+		pool->sgt[i] = sgt;
+		pool->dma[i] = sg_dma_address(sgt->sgl);
 		get_dma_buf(dbufs->dbuf[i]);
-		pool->vaddr[i] = g_ops->vaddr(mem);
+		ret = dma_buf_vmap(dbufs->dbuf[i], &map);
+		pool->vaddr[i] = ret ? NULL : map.vaddr;
 		if (rkispp_debug)
 			dev_info(hw->dev, "%s dma[%d]:0x%x\n",
 				 __func__, i, (u32)pool->dma[i]);

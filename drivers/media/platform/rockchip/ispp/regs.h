@@ -365,7 +365,7 @@
 #define GLB_SOFT_RST_NR			BIT(9)
 #define GLB_SOFT_RST_TNR		BIT(8)
 #define RST_PROTECT_DIS			BIT(1)
-#define GLB_SOFT_RST_ALL		BIT(0)
+#define GLB_SOFT_RST_ALL		((u32)BIT(0))
 
 /* ISPP_CLKGATE */
 #define GATE_DIS_ALL			0xff

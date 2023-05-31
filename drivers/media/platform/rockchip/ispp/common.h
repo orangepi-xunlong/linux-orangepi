@@ -47,7 +47,8 @@ enum rkispp_event_cmd {
 
 struct rkispp_isp_buf_pool {
 	struct rkisp_ispp_buf *dbufs;
-	void *mem_priv[GROUP_BUF_MAX];
+	struct dma_buf_attachment *dba[GROUP_BUF_MAX];
+	struct sg_table *sgt[GROUP_BUF_MAX];
 	dma_addr_t dma[GROUP_BUF_MAX];
 	void *vaddr[GROUP_BUF_MAX];
 	u8 group_buf_max;
@@ -70,6 +71,8 @@ struct rkispp_buffer {
 };
 
 struct rkispp_dummy_buffer {
+	struct vb2_buffer vb;
+	struct vb2_queue vb2_queue;
 	struct list_head list;
 	struct dma_buf *dbuf;
 	dma_addr_t dma_addr;
