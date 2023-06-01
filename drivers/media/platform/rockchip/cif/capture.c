@@ -717,22 +717,10 @@ cif_input_fmt *get_input_fmt(struct v4l2_subdev *sd, struct v4l2_rect *rect,
 		fmt.format.width = ch_info.width;
 		fmt.format.height = ch_info.height;
 		fmt.format.code = ch_info.bus_fmt;
-		switch (ch_info.vc) {
-		case V4L2_MBUS_CSI2_CHANNEL_3:
-			csi_info->vc = 3;
-			break;
-		case V4L2_MBUS_CSI2_CHANNEL_2:
-			csi_info->vc = 2;
-			break;
-		case V4L2_MBUS_CSI2_CHANNEL_1:
-			csi_info->vc = 1;
-			break;
-		case V4L2_MBUS_CSI2_CHANNEL_0:
-			csi_info->vc = 0;
-			break;
-		default:
+		if (ch_info.vc >= 0 && ch_info.vc <= 3)
+			csi_info->vc = ch_info.vc;
+		else
 			csi_info->vc = 0xff;
-		}
 		if (ch_info.bus_fmt == MEDIA_BUS_FMT_SPD_2X8 ||
 		    ch_info.bus_fmt == MEDIA_BUS_FMT_EBD_1X8) {
 			if (ch_info.data_type > 0)
@@ -2875,45 +2863,6 @@ static int rkcif_assign_new_buffer_pingpong_rockit(struct rkcif_stream *stream,
 	return ret;
 }
 
-static void rkcif_csi_get_vc_num(struct rkcif_device *dev,
-				 unsigned int mbus_flags)
-{
-	int i, vc_num = 0;
-
-	for (i = 0; i < RKCIF_MAX_CSI_CHANNEL; i++) {
-		if (mbus_flags & V4L2_MBUS_CSI2_CHANNEL_0) {
-			dev->channels[vc_num].vc = vc_num;
-			vc_num++;
-			mbus_flags ^= V4L2_MBUS_CSI2_CHANNEL_0;
-			continue;
-		}
-		if (mbus_flags & V4L2_MBUS_CSI2_CHANNEL_1) {
-			dev->channels[vc_num].vc = vc_num;
-			vc_num++;
-			mbus_flags ^= V4L2_MBUS_CSI2_CHANNEL_1;
-			continue;
-		}
-
-		if (mbus_flags & V4L2_MBUS_CSI2_CHANNEL_2) {
-			dev->channels[vc_num].vc = vc_num;
-			vc_num++;
-			mbus_flags ^= V4L2_MBUS_CSI2_CHANNEL_2;
-			continue;
-		}
-
-		if (mbus_flags & V4L2_MBUS_CSI2_CHANNEL_3) {
-			dev->channels[vc_num].vc = vc_num;
-			vc_num++;
-			mbus_flags ^= V4L2_MBUS_CSI2_CHANNEL_3;
-			continue;
-		}
-	}
-
-	dev->num_channels = vc_num ? vc_num : 1;
-	if (dev->num_channels == 1)
-		dev->channels[0].vc = 0;
-}
-
 static void rkcif_csi_set_lvds_sav_eav(struct rkcif_stream *stream,
 				       struct csi_channel_info *channel)
 {
@@ -3586,7 +3535,6 @@ static int rkcif_csi_stream_start(struct rkcif_stream *stream, unsigned int mode
 {
 	struct rkcif_device *dev = stream->cifdev;
 	struct rkcif_sensor_info *active_sensor = dev->active_sensor;
-	unsigned int flags = active_sensor->mbus.flags;
 	enum v4l2_mbus_type mbus_type = active_sensor->mbus.type;
 	struct csi_channel_info *channel;
 	u32 ret = 0;
@@ -3599,8 +3547,6 @@ static int rkcif_csi_stream_start(struct rkcif_stream *stream, unsigned int mode
 		stream->is_in_vblank = false;
 		stream->is_change_toisp = false;
 	}
-
-	rkcif_csi_get_vc_num(dev, flags);
 
 	channel = &dev->channels[stream->id];
 	channel->id = stream->id;
@@ -4032,7 +3978,7 @@ void rkcif_buf_queue(struct vb2_buffer *vb)
 			dbufs->type = BUF_LONG;
 		else if (stream->cifdev->hdr.hdr_mode == HDR_X3 && stream->id == 1)
 			dbufs->type = BUF_MIDDLE;
-		cifbuf->dbuf = hw_dev->mem_ops->get_dmabuf(vb->planes[0].mem_priv, O_RDWR);
+		cifbuf->dbuf = hw_dev->mem_ops->get_dmabuf(vb, vb->planes[0].mem_priv, O_RDWR);
 		if (cifbuf->dbuf)
 			dbufs->dbuf = cifbuf->dbuf;
 		list_add_tail(&dbufs->list, &stream->rx_buf_head_vicap);
@@ -4449,7 +4395,7 @@ void rkcif_do_stop_stream(struct rkcif_stream *stream,
 			stream->stopping = false;
 		}
 
-		media_pipeline_stop(&node->vdev.entity);
+		video_device_pipeline_stop(&node->vdev);
 		ret = dev->pipe.set_stream(&dev->pipe, false);
 		if (ret < 0)
 			v4l2_err(v4l2_dev, "pipeline stream-off failed error:%d\n",
@@ -4669,7 +4615,7 @@ static u32 rkcif_determine_input_mode_rk3588(struct rkcif_stream *stream)
 		switch (stream->cif_fmt_in->fmt_type) {
 		case CIF_FMT_TYPE_YUV:
 			if (sensor_info->mbus.type == V4L2_MBUS_BT656) {
-				if ((sensor_info->mbus.flags & CIF_DVP_PCLK_DUAL_EDGE) == CIF_DVP_PCLK_DUAL_EDGE)
+				if ((sensor_info->mbus.bus.parallel.flags & CIF_DVP_PCLK_DUAL_EDGE) == CIF_DVP_PCLK_DUAL_EDGE)
 					mode = INPUT_BT1120_YUV422;
 				else
 					mode = INPUT_BT656_YUV422;
@@ -4978,31 +4924,12 @@ int rkcif_update_sensor_info(struct rkcif_stream *stream)
 		return -ENODEV;
 	}
 
-	if (terminal_sensor->mbus.type == V4L2_MBUS_CSI2_DPHY ||
-	    terminal_sensor->mbus.type == V4L2_MBUS_CSI2_CPHY ||
-	    terminal_sensor->mbus.type == V4L2_MBUS_CCP2) {
-		switch (terminal_sensor->mbus.flags & V4L2_MBUS_CSI2_LANES) {
-		case V4L2_MBUS_CSI2_1_LANE:
-			terminal_sensor->lanes = 1;
-			break;
-		case V4L2_MBUS_CSI2_2_LANE:
-			terminal_sensor->lanes = 2;
-			break;
-		case V4L2_MBUS_CSI2_3_LANE:
-			terminal_sensor->lanes = 3;
-			break;
-		case V4L2_MBUS_CSI2_4_LANE:
-			terminal_sensor->lanes = 4;
-			break;
-		default:
-			v4l2_err(&stream->cifdev->v4l2_dev, "%s:get sd:%s lane num failed!\n",
-				 __func__,
-				 terminal_sensor->sd ?
-				 terminal_sensor->sd->name : "null");
-			return -EINVAL;
-		}
-	}
 
+	if (terminal_sensor->mbus.type == V4L2_MBUS_CSI2_DPHY ||
+	    terminal_sensor->mbus.type == V4L2_MBUS_CSI2_CPHY)
+		terminal_sensor->lanes = terminal_sensor->mbus.bus.mipi_csi2.num_data_lanes;
+	else if (terminal_sensor->mbus.type == V4L2_MBUS_CCP2)
+		terminal_sensor->lanes = terminal_sensor->mbus.bus.mipi_csi1.data_lane;
 	return ret;
 }
 
@@ -5131,7 +5058,7 @@ static int rkcif_stream_start(struct rkcif_stream *stream, unsigned int mode)
 	if (dma_state)
 		return 0;
 
-	mbus_flags = mbus->flags;
+	mbus_flags = mbus->bus.parallel.flags;
 	if ((mbus_flags & CIF_DVP_PCLK_DUAL_EDGE) == CIF_DVP_PCLK_DUAL_EDGE) {
 		bt1120_edge_mode = (dev->chip_id < CHIP_RK3588_CIF ?
 			BT1120_CLOCK_DOUBLE_EDGES : BT1120_CLOCK_DOUBLE_EDGES_RK3588);
@@ -5669,7 +5596,7 @@ int rkcif_do_start_stream(struct rkcif_stream *stream, unsigned int mode)
 		goto runtime_put;
 
 	if (stream->cur_stream_mode == RKCIF_STREAM_MODE_NONE) {
-		ret = media_pipeline_start(&node->vdev.entity, &dev->pipe.pipe);
+		ret = video_device_pipeline_start(&node->vdev, &dev->pipe.pipe);
 		if (ret < 0) {
 			v4l2_err(&dev->v4l2_dev, "start pipeline failed %d\n",
 				 ret);

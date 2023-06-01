@@ -125,25 +125,7 @@ static void csi2_update_sensor_info(struct csi2_dev *csi2)
 		csi2->dsi_input_en = 0;
 	}
 
-	csi2->bus.flags = mbus.flags;
-	switch (csi2->bus.flags & V4L2_MBUS_CSI2_LANES) {
-	case V4L2_MBUS_CSI2_1_LANE:
-		csi2->bus.num_data_lanes = 1;
-		break;
-	case V4L2_MBUS_CSI2_2_LANE:
-		csi2->bus.num_data_lanes = 2;
-		break;
-	case V4L2_MBUS_CSI2_3_LANE:
-		csi2->bus.num_data_lanes = 3;
-		break;
-	case V4L2_MBUS_CSI2_4_LANE:
-		csi2->bus.num_data_lanes = 4;
-		break;
-	default:
-		v4l2_warn(&csi2->sd, "lane num is invalid\n");
-		csi2->bus.num_data_lanes = 0;
-		break;
-	}
+	csi2->bus = mbus.bus.mipi_csi2;
 
 }
 
@@ -500,8 +482,8 @@ static int csi2_g_mbus_config(struct v4l2_subdev *sd, unsigned int pad_id,
 	ret = v4l2_subdev_call(sensor_sd, pad, get_mbus_config, 0, mbus);
 	if (ret) {
 		mbus->type = V4L2_MBUS_CSI2_DPHY;
-		mbus->flags = csi2->bus.flags;
-		mbus->flags |= BIT(csi2->bus.num_data_lanes - 1);
+		mbus->bus.mipi_csi2.flags = csi2->bus.flags;
+		mbus->bus.mipi_csi2.flags |= BIT(csi2->bus.num_data_lanes - 1);
 	}
 
 	return 0;
@@ -637,16 +619,6 @@ static int csi2_parse_endpoint(struct device *dev,
 			       struct v4l2_fwnode_endpoint *vep,
 			       struct v4l2_async_subdev *asd)
 {
-	struct v4l2_subdev *sd = dev_get_drvdata(dev);
-	struct csi2_dev *csi2 = sd_to_dev(sd);
-
-	if (vep->base.port != 0) {
-		dev_err(dev, "The csi host node needs to parse port 0\n");
-		return -EINVAL;
-	}
-
-	csi2->bus = vep->bus.mipi_csi2;
-
 	return 0;
 }
 

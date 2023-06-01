@@ -7,10 +7,24 @@
 #include "dev.h"
 #include "common.h"
 
+static void rkcif_init_dummy_vb2(struct rkcif_device *dev,
+				struct rkcif_dummy_buffer *buf)
+{
+	unsigned long attrs = buf->is_need_vaddr ? 0 : DMA_ATTR_NO_KERNEL_MAPPING;
+
+	memset(&buf->vb2_queue, 0, sizeof(struct vb2_queue));
+	memset(&buf->vb, 0, sizeof(struct vb2_buffer));
+	buf->vb2_queue.gfp_flags = GFP_KERNEL | GFP_DMA32;
+	buf->vb2_queue.dma_dir = DMA_BIDIRECTIONAL;
+	if (dev->hw_dev->is_dma_contig)
+		attrs |= DMA_ATTR_FORCE_CONTIGUOUS;
+	buf->vb2_queue.dma_attrs = attrs;
+	buf->vb.vb2_queue = &buf->vb2_queue;
+}
+
 int rkcif_alloc_buffer(struct rkcif_device *dev,
 		       struct rkcif_dummy_buffer *buf)
 {
-	unsigned long attrs = buf->is_need_vaddr ? 0 : DMA_ATTR_NO_KERNEL_MAPPING;
 	const struct vb2_mem_ops *g_ops = dev->hw_dev->mem_ops;
 	struct sg_table	 *sg_tbl;
 	void *mem_priv;
@@ -21,11 +35,10 @@ int rkcif_alloc_buffer(struct rkcif_device *dev,
 		goto err;
 	}
 
-	if (dev->hw_dev->is_dma_contig)
-		attrs |= DMA_ATTR_FORCE_CONTIGUOUS;
+	rkcif_init_dummy_vb2(dev, buf);
+
 	buf->size = PAGE_ALIGN(buf->size);
-	mem_priv = g_ops->alloc(dev->hw_dev->dev, attrs, buf->size,
-				DMA_BIDIRECTIONAL, GFP_KERNEL | GFP_DMA32);
+	mem_priv = g_ops->alloc(&buf->vb, dev->hw_dev->dev, buf->size);
 	if (IS_ERR_OR_NULL(mem_priv)) {
 		ret = -ENOMEM;
 		goto err;
@@ -33,16 +46,16 @@ int rkcif_alloc_buffer(struct rkcif_device *dev,
 
 	buf->mem_priv = mem_priv;
 	if (dev->hw_dev->is_dma_sg_ops) {
-		sg_tbl = (struct sg_table *)g_ops->cookie(mem_priv);
+		sg_tbl = (struct sg_table *)g_ops->cookie(&buf->vb, mem_priv);
 		buf->dma_addr = sg_dma_address(sg_tbl->sgl);
 		g_ops->prepare(mem_priv);
 	} else {
-		buf->dma_addr = *((dma_addr_t *)g_ops->cookie(mem_priv));
+		buf->dma_addr = *((dma_addr_t *)g_ops->cookie(&buf->vb, mem_priv));
 	}
 	if (buf->is_need_vaddr)
-		buf->vaddr = g_ops->vaddr(mem_priv);
+		buf->vaddr = g_ops->vaddr(&buf->vb, mem_priv);
 	if (buf->is_need_dbuf) {
-		buf->dbuf = g_ops->get_dmabuf(mem_priv, O_RDWR);
+		buf->dbuf = g_ops->get_dmabuf(&buf->vb, mem_priv, O_RDWR);
 		if (buf->is_need_dmafd) {
 			buf->dma_fd = dma_buf_fd(buf->dbuf, O_CLOEXEC);
 			if (buf->dma_fd < 0) {

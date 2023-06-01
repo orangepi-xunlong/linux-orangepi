@@ -108,11 +108,6 @@ static int sditf_g_mbus_config(struct v4l2_subdev *sd, unsigned int pad_id,
 	if (cif_dev->active_sensor) {
 		sensor_sd = cif_dev->active_sensor->sd;
 		return v4l2_subdev_call(sensor_sd, pad, get_mbus_config, 0, config);
-	} else {
-		config->type = V4L2_MBUS_CSI2_DPHY;
-		config->flags = V4L2_MBUS_CSI2_CHANNEL_0 |
-				V4L2_MBUS_CSI2_CONTINUOUS_CLOCK;
-		return 0;
 	}
 
 	return -EINVAL;
@@ -945,30 +940,13 @@ static int sditf_fwnode_parse(struct device *dev,
 	if (vep->bus_type == V4L2_MBUS_CSI2_DPHY ||
 	    vep->bus_type == V4L2_MBUS_CSI2_CPHY) {
 		config->type = vep->bus_type;
-		config->flags = vep->bus.mipi_csi2.flags;
+		config->bus.mipi_csi2.flags = vep->bus.mipi_csi2.flags;
 		s_asd->lanes = vep->bus.mipi_csi2.num_data_lanes;
 	} else if (vep->bus_type == V4L2_MBUS_CCP2) {
 		config->type = vep->bus_type;
 		s_asd->lanes = vep->bus.mipi_csi1.data_lane;
 	} else {
 		dev_err(dev, "type is not supported\n");
-		return -EINVAL;
-	}
-
-	switch (s_asd->lanes) {
-	case 1:
-		config->flags |= V4L2_MBUS_CSI2_1_LANE;
-		break;
-	case 2:
-		config->flags |= V4L2_MBUS_CSI2_2_LANE;
-		break;
-	case 3:
-		config->flags |= V4L2_MBUS_CSI2_3_LANE;
-		break;
-	case 4:
-		config->flags |= V4L2_MBUS_CSI2_4_LANE;
-		break;
-	default:
 		return -EINVAL;
 	}
 

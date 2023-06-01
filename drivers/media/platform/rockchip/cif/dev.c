@@ -1503,26 +1503,11 @@ static int subdev_notifier_complete(struct v4l2_async_notifier *notifier)
 			}
 		}
 
-		if (sensor->mbus.type == V4L2_MBUS_CCP2 ||
-		    sensor->mbus.type == V4L2_MBUS_CSI2_DPHY ||
+		if (sensor->mbus.type == V4L2_MBUS_CSI2_DPHY ||
 		    sensor->mbus.type == V4L2_MBUS_CSI2_CPHY) {
-
-			switch (sensor->mbus.flags & V4L2_MBUS_CSI2_LANES) {
-			case V4L2_MBUS_CSI2_1_LANE:
-				sensor->lanes = 1;
-				break;
-			case V4L2_MBUS_CSI2_2_LANE:
-				sensor->lanes = 2;
-				break;
-			case V4L2_MBUS_CSI2_3_LANE:
-				sensor->lanes = 3;
-				break;
-			case V4L2_MBUS_CSI2_4_LANE:
-				sensor->lanes = 4;
-				break;
-			default:
-				sensor->lanes = 1;
-			}
+			sensor->lanes = sensor->mbus.bus.mipi_csi2.num_data_lanes;
+		} else if (sensor->mbus.type == V4L2_MBUS_CCP2) {
+			sensor->lanes = sensor->mbus.bus.mipi_csi1.data_lane;
 		}
 
 		if (sensor->mbus.type == V4L2_MBUS_CCP2) {
@@ -1620,7 +1605,6 @@ static int rkcif_fwnode_parse(struct device *dev,
 {
 	struct rkcif_async_subdev *rk_asd =
 			container_of(asd, struct rkcif_async_subdev, asd);
-	struct v4l2_mbus_config_parallel *bus = &vep->bus.parallel;
 
 	if (vep->bus_type != V4L2_MBUS_BT656 &&
 	    vep->bus_type != V4L2_MBUS_PARALLEL &&
@@ -1630,16 +1614,6 @@ static int rkcif_fwnode_parse(struct device *dev,
 		return 0;
 
 	rk_asd->mbus.type = vep->bus_type;
-
-	if (vep->bus_type == V4L2_MBUS_CSI2_DPHY ||
-	    vep->bus_type == V4L2_MBUS_CSI2_CPHY) {
-		rk_asd->mbus.flags = vep->bus.mipi_csi2.flags;
-		rk_asd->lanes = vep->bus.mipi_csi2.num_data_lanes;
-	} else if (vep->bus_type == V4L2_MBUS_CCP2) {
-		rk_asd->lanes = vep->bus.mipi_csi1.data_lane;
-	} else {
-		rk_asd->mbus.flags = bus->flags;
-	}
 
 	return 0;
 }

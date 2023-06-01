@@ -248,7 +248,7 @@ static void rkcif_show_format(struct rkcif_device *dev, struct seq_file *f)
 	struct v4l2_rect *rect = &sensor->raw_rect;
 	struct v4l2_subdev_frame_interval *interval = &sensor->fi;
 	struct v4l2_subdev_selection *sel = &sensor->selection;
-	u32 i, mbus_flags;
+	u32 mbus_flags;
 	u64 fps, timestamp0, timestamp1;
 	unsigned long flags;
 	u32 time_val = 0;
@@ -260,9 +260,9 @@ static void rkcif_show_format(struct rkcif_device *dev, struct seq_file *f)
 		seq_puts(f, "Input Info:\n");
 
 		seq_printf(f, "\tsrc subdev:%s\n", sensor->sd->name);
-		mbus_flags = sensor->mbus.flags;
 		if (sensor->mbus.type == V4L2_MBUS_PARALLEL ||
 		    sensor->mbus.type == V4L2_MBUS_BT656) {
+			mbus_flags = sensor->mbus.bus.parallel.flags;
 			seq_printf(f, "\tinterface:%s\n",
 				   sensor->mbus.type == V4L2_MBUS_PARALLEL ? "BT601" : "BT656/BT1120");
 			seq_printf(f, "\thref_pol:%s\n",
@@ -275,16 +275,6 @@ static void rkcif_show_format(struct rkcif_device *dev, struct seq_file *f)
 				   sensor->mbus.type == V4L2_MBUS_CSI2_CPHY ? "mipi csi2 cphy" :
 				   sensor->mbus.type == V4L2_MBUS_CCP2 ? "lvds" : "unknown");
 			seq_printf(f, "\tlanes:%d\n", sensor->lanes);
-			seq_puts(f, "\tvc channel:");
-			if (mbus_flags & V4L2_MBUS_CSI2_CHANNELS) {
-				for (i = 0; i < 4; i++) {
-					if ((mbus_flags >> (4 + i)) & 0x1)
-						seq_printf(f, " %d", i);
-				}
-				seq_puts(f, "\n");
-			} else {
-				seq_puts(f, "unknown\n");
-			}
 		}
 
 		seq_printf(f, "\thdr mode: %s\n",

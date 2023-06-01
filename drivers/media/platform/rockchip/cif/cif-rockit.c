@@ -12,6 +12,8 @@
 static struct rockit_rkcif_cfg *rockit_rkcif_cfg;
 
 struct rkcif_rockit_buffer {
+	struct vb2_buffer vb;
+	struct vb2_queue vb2_queue;
 	struct rkcif_buffer cif_buf;
 	struct dma_buf *dmabuf;
 	void *mpi_mem;
@@ -23,6 +25,21 @@ struct rkcif_rockit_buffer {
 		void *vaddr;
 	};
 };
+
+static void rkcif_init_rockit_vb2(struct rkcif_device *dev,
+				struct rkcif_rockit_buffer *buf)
+{
+	unsigned long attrs = DMA_ATTR_NO_KERNEL_MAPPING;
+
+	memset(&buf->vb2_queue, 0, sizeof(struct vb2_queue));
+	memset(&buf->vb, 0, sizeof(struct vb2_buffer));
+	buf->vb2_queue.gfp_flags = GFP_KERNEL | GFP_DMA32;
+	buf->vb2_queue.dma_dir = DMA_BIDIRECTIONAL;
+	if (dev->hw_dev->is_dma_contig)
+		attrs |= DMA_ATTR_FORCE_CONTIGUOUS;
+	buf->vb2_queue.dma_attrs = attrs;
+	buf->vb.vb2_queue = &buf->vb2_queue;
+}
 
 static struct rkcif_stream *rkcif_rockit_get_stream(struct rockit_rkcif_cfg *input_rockit_cfg)
 {
@@ -131,11 +148,12 @@ int rkcif_rockit_buf_queue(struct rockit_rkcif_cfg *input_rockit_cfg)
 
 		rkcif_buf = stream_cfg->rkcif_buff[i];
 		rkcif_buf->mpi_buf = input_rockit_cfg->mpibuf;
+		rkcif_init_rockit_vb2(stream->cifdev, rkcif_buf);
 
-		mem = g_ops->attach_dmabuf(stream->cifdev->hw_dev->dev,
+		mem = g_ops->attach_dmabuf(&rkcif_buf->vb,
+					   stream->cifdev->hw_dev->dev,
 					   input_rockit_cfg->buf,
-					   input_rockit_cfg->buf->size,
-					   DMA_BIDIRECTIONAL);
+					   input_rockit_cfg->buf->size);
 		if (IS_ERR(mem))
 			pr_err("the g_ops->attach_dmabuf is error!\n");
 
@@ -147,10 +165,10 @@ int rkcif_rockit_buf_queue(struct rockit_rkcif_cfg *input_rockit_cfg)
 			pr_err("the g_ops->map_dmabuf is error!\n");
 
 		if (stream->cifdev->hw_dev->is_dma_sg_ops) {
-			sg_tbl = (struct sg_table *)g_ops->cookie(mem);
+			sg_tbl = (struct sg_table *)g_ops->cookie(&rkcif_buf->vb, mem);
 			rkcif_buf->buff_addr = sg_dma_address(sg_tbl->sgl);
 		} else {
-			rkcif_buf->buff_addr = *((u32 *)g_ops->cookie(mem));
+			rkcif_buf->buff_addr = *((u32 *)g_ops->cookie(&rkcif_buf->vb, mem));
 		}
 		get_dma_buf(input_rockit_cfg->buf);
 	} else {
