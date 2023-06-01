@@ -5750,7 +5750,7 @@ static const struct ov50c40_mode supported_modes_dphy[] = {
 		.reg_list = ov50c40_10bit_4096x3072_dphy_30fps_regs,
 		.hdr_mode = NO_HDR,
 		.spd = &ov50c40_spd,
-		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_0,
+		.vc[PAD0] = 0,
 	},
 	{
 		.bus_fmt = MEDIA_BUS_FMT_SGBRG10_1X10,
@@ -5768,7 +5768,7 @@ static const struct ov50c40_mode supported_modes_dphy[] = {
 		.reg_list = ov50c40_10bit_8192x6144_dphy_12fps_regs,
 		.hdr_mode = NO_HDR,
 		.spd = &ov50c40_spd,
-		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_0,
+		.vc[PAD0] = 0,
 	},
 #ifdef DEBUG
 	{
@@ -5787,7 +5787,7 @@ static const struct ov50c40_mode supported_modes_dphy[] = {
 		.reg_list = ov50c40_10bit_4096x3072_dphy_regs,
 		.hdr_mode = NO_HDR,
 		.spd = &ov50c40_spd,
-		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_0,
+		.vc[PAD0] = 0,
 	},
 	{
 		.bus_fmt = MEDIA_BUS_FMT_SGBRG10_1X10,
@@ -5805,7 +5805,7 @@ static const struct ov50c40_mode supported_modes_dphy[] = {
 		.reg_list = ov50c40_10bit_8192x6144_dphy_regs,
 		.hdr_mode = NO_HDR,
 		.spd = &ov50c40_spd,
-		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_0,
+		.vc[PAD0] = 0,
 	},
 	{
 		.bus_fmt = MEDIA_BUS_FMT_SGBRG10_1X10,
@@ -5822,7 +5822,7 @@ static const struct ov50c40_mode supported_modes_dphy[] = {
 		.bpp = 10,
 		.reg_list = ov50c40_10bit_4096x3072_dphy_30fps_nopd_regs,
 		.hdr_mode = NO_HDR,
-		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_0,
+		.vc[PAD0] = 0,
 	},
 #endif
 };
@@ -5844,7 +5844,7 @@ static const struct ov50c40_mode supported_modes_cphy[] = {
 		.reg_list = ov50c40_10bit_4096x3072_cphy_regs,
 		.hdr_mode = NO_HDR,
 		.spd = &ov50c40_spd,
-		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_0,
+		.vc[PAD0] = 0,
 	},
 	{
 		.bus_fmt = MEDIA_BUS_FMT_SGBRG10_1X10,
@@ -5862,7 +5862,7 @@ static const struct ov50c40_mode supported_modes_cphy[] = {
 		.reg_list = ov50c40_10bit_4096x3072_cphy_30fps_regs,
 		.hdr_mode = NO_HDR,
 		.spd = &ov50c40_spd,
-		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_0,
+		.vc[PAD0] = 0,
 	},
 	{
 		.bus_fmt = MEDIA_BUS_FMT_SGBRG10_1X10,
@@ -5880,7 +5880,7 @@ static const struct ov50c40_mode supported_modes_cphy[] = {
 		.reg_list = ov50c40_10bit_8192x6144_cphy_12fps_regs,
 		.hdr_mode = NO_HDR,
 		.spd = &ov50c40_spd,
-		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_0,
+		.vc[PAD0] = 0,
 	},
 };
 
@@ -6146,15 +6146,9 @@ static int ov50c40_g_mbus_config(struct v4l2_subdev *sd, unsigned int pad_id,
 				struct v4l2_mbus_config *config)
 {
 	struct ov50c40 *ov50c40 = to_ov50c40(sd);
-	u32 lane_num = ov50c40->bus_cfg.bus.mipi_csi2.num_data_lanes;
-	u32 val = 0;
-
-	val = 1 << (lane_num - 1) |
-		V4L2_MBUS_CSI2_CHANNEL_0 |
-		V4L2_MBUS_CSI2_CONTINUOUS_CLOCK;
 
 	config->type = ov50c40->bus_cfg.bus_type;
-	config->flags = val;
+	config->bus.mipi_csi2 = ov50c40->bus_cfg.bus.mipi_csi2;
 
 	return 0;
 }
@@ -6260,7 +6254,7 @@ static int ov50c40_get_channel_info(struct ov50c40 *ov50c40, struct rkmodule_cha
 		return -EINVAL;
 
 	if (ch_info->index == ov50c40->spd_id && mode->spd) {
-		ch_info->vc = V4L2_MBUS_CSI2_CHANNEL_1;
+		ch_info->vc = 1;
 		ch_info->width = mode->spd->width;
 		ch_info->height = mode->spd->height;
 		ch_info->bus_fmt = mode->spd->bus_fmt;

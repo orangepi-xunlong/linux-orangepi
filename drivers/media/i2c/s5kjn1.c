@@ -870,7 +870,7 @@ static const struct s5kjn1_mode supported_modes_dphy[] = {
 		.reg_list = s5kjn1_10bit_4080x3072_dphy_30fps_regs,
 		.hdr_mode = NO_HDR,
 		.spd = &s5kjn1_spd,
-		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_0,
+		.vc[PAD0] = 0,
 	},
 	{
 		.bus_fmt = MEDIA_BUS_FMT_SGRBG10_1X10,
@@ -887,7 +887,7 @@ static const struct s5kjn1_mode supported_modes_dphy[] = {
 		.bpp = 10,
 		.reg_list = s5kjn1_10bit_8128x6144_dphy_10fps_regs,
 		.hdr_mode = NO_HDR,
-		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_0,
+		.vc[PAD0] = 0,
 	},
 };
 
@@ -1208,15 +1208,9 @@ static int s5kjn1_g_mbus_config(struct v4l2_subdev *sd, unsigned int pad_id,
 				struct v4l2_mbus_config *config)
 {
 	struct s5kjn1 *s5kjn1 = to_s5kjn1(sd);
-	u32 lane_num = s5kjn1->bus_cfg.bus.mipi_csi2.num_data_lanes;
-	u32 val = 0;
-
-	val = 1 << (lane_num - 1) |
-		V4L2_MBUS_CSI2_CHANNEL_0 |
-		V4L2_MBUS_CSI2_CONTINUOUS_CLOCK;
 
 	config->type = s5kjn1->bus_cfg.bus_type;
-	config->flags = val;
+	config->bus.mipi_csi2 = s5kjn1->bus_cfg.bus.mipi_csi2;
 
 	return 0;
 }
@@ -1322,7 +1316,7 @@ static int s5kjn1_get_channel_info(struct s5kjn1 *s5kjn1, struct rkmodule_channe
 		return -EINVAL;
 
 	if (ch_info->index == s5kjn1->spd_id && mode->spd) {
-		ch_info->vc = V4L2_MBUS_CSI2_CHANNEL_1;
+		ch_info->vc = 1;
 		ch_info->width = mode->spd->width;
 		ch_info->height = mode->spd->height;
 		ch_info->bus_fmt = mode->spd->bus_fmt;

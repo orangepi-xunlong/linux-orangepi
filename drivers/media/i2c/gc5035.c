@@ -972,9 +972,7 @@ static int sensor_g_mbus_config(struct v4l2_subdev *sd, unsigned int pad_id,
 
 	if (2 == sensor->lane_num) {
 		config->type = V4L2_MBUS_CSI2_DPHY;
-		config->flags = V4L2_MBUS_CSI2_2_LANE |
-						V4L2_MBUS_CSI2_CHANNEL_0 |
-						V4L2_MBUS_CSI2_CONTINUOUS_CLOCK;
+		config->bus.mipi_csi2.num_data_lanes = sensor->lane_num;
 	} else {
 		dev_err(&sensor->client->dev,
 				"unsupported lane_num(%d)\n", sensor->lane_num);

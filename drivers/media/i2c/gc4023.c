@@ -383,7 +383,7 @@ static const struct gc4023_mode supported_modes[] = {
 		.bus_fmt = MEDIA_BUS_FMT_SRGGB10_1X10,
 		.reg_list = gc4023_linear10bit_2560x1440_regs,
 		.hdr_mode = NO_HDR,
-		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_0,
+		.vc[PAD0] = 0,
 	},
 };
 
@@ -728,22 +728,8 @@ static int gc4023_g_frame_interval(struct v4l2_subdev *sd,
 static int gc4023_g_mbus_config(struct v4l2_subdev *sd, unsigned int pad_id,
 				struct v4l2_mbus_config *config)
 {
-	struct gc4023 *gc4023 = to_gc4023(sd);
-	const struct gc4023_mode *mode = gc4023->cur_mode;
-	u32 val = 0;
-
-	if (mode->hdr_mode == NO_HDR)
-		val = 1 << (GC4023_LANES - 1) |
-		V4L2_MBUS_CSI2_CHANNEL_0 |
-		V4L2_MBUS_CSI2_CONTINUOUS_CLOCK;
-	if (mode->hdr_mode == HDR_X2)
-		val = 1 << (GC4023_LANES - 1) |
-		V4L2_MBUS_CSI2_CHANNEL_0 |
-		V4L2_MBUS_CSI2_CONTINUOUS_CLOCK |
-		V4L2_MBUS_CSI2_CHANNEL_1;
-
 	config->type = V4L2_MBUS_CSI2_DPHY;
-	config->flags = val;
+	config->bus.mipi_csi2.num_data_lanes = GC4023_LANES;
 
 	return 0;
 }

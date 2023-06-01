@@ -252,7 +252,7 @@ static const struct sc210iot_mode supported_modes[] = {
 		.reg_list = sc210iot_1080p_liner_30fps_settings,
 		.reg_num = ARRAY_SIZE(sc210iot_1080p_liner_30fps_settings),
 		.hdr_mode = NO_HDR,
-		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_0,
+		.vc[PAD0] = 0,
 	},
 };
 
@@ -782,13 +782,8 @@ static int sc210iot_g_frame_interval(struct v4l2_subdev *sd,
 static int sc210iot_g_mbus_config(struct v4l2_subdev *sd, unsigned int pad_id,
 				struct v4l2_mbus_config *config)
 {
-	struct sc210iot *sc210iot = to_sc210iot(sd);
-
-	u32 val = 1 << (SC210IOT_LANES - 1) | V4L2_MBUS_CSI2_CHANNEL_0 |
-		  V4L2_MBUS_CSI2_CONTINUOUS_CLOCK;
 	config->type = V4L2_MBUS_CSI2_DPHY;
-	config->flags = (sc210iot->cur_mode->hdr_mode == NO_HDR) ?
-			val : (val | V4L2_MBUS_CSI2_CHANNEL_1);
+	config->bus.mipi_csi2.num_data_lanes = SC210IOT_LANES;
 	return 0;
 }
 

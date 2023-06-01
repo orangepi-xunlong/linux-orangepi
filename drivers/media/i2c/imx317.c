@@ -1186,14 +1186,10 @@ static int imx317_enum_frame_interval(struct v4l2_subdev *sd,
 static int imx317_g_mbus_config(struct v4l2_subdev *sd, unsigned int pad_id,
 				struct v4l2_mbus_config *config)
 {
-	u32 val = 0;
 	struct imx317 *imx317 = to_imx317(sd);
 
-	val = 1 << (imx317->lane_num - 1) |
-	      V4L2_MBUS_CSI2_CHANNEL_0 |
-	      V4L2_MBUS_CSI2_CONTINUOUS_CLOCK;
 	config->type = V4L2_MBUS_CSI2_DPHY;
-	config->flags = val;
+	config->bus.mipi_csi2.num_data_lanes = imx317->lane_num;
 
 	return 0;
 }

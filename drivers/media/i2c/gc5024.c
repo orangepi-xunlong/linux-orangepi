@@ -870,7 +870,7 @@ static int gc5024_open(struct v4l2_subdev *sd, struct v4l2_subdev_fh *fh)
 }
 #endif
 
-static int sensor_g_mbus_config(struct v4l2_subdev *sd,
+static int sensor_g_mbus_config(struct v4l2_subdev *sd, unsigned int pad,
 				struct v4l2_mbus_config *config)
 {
 	struct gc5024 *sensor = to_gc5024(sd);
@@ -879,10 +879,8 @@ static int sensor_g_mbus_config(struct v4l2_subdev *sd,
 	dev_info(dev, "%s(%d) enter!\n", __func__, __LINE__);
 
 	if (2 == sensor->lane_num) {
-		config->type = V4L2_MBUS_CSI2;
-		config->flags = V4L2_MBUS_CSI2_2_LANE |
-				V4L2_MBUS_CSI2_CHANNEL_0 |
-				V4L2_MBUS_CSI2_CONTINUOUS_CLOCK;
+		config->type = V4L2_MBUS_CSI2_DPHY;
+		config->bus.mipi_csi2.num_data_lanes = sensor->lane_num;
 	} else {
 		dev_err(&sensor->client->dev,
 				"unsupported lane_num(%d)\n", sensor->lane_num);
@@ -926,7 +924,6 @@ static const struct v4l2_subdev_core_ops gc5024_core_ops = {
 };
 
 static const struct v4l2_subdev_video_ops gc5024_video_ops = {
-	.g_mbus_config = sensor_g_mbus_config,
 	.s_stream = gc5024_s_stream,
 	.g_frame_interval = gc5024_g_frame_interval,
 };
@@ -937,6 +934,7 @@ static const struct v4l2_subdev_pad_ops gc5024_pad_ops = {
 	.enum_frame_interval = gc5024_enum_frame_interval,
 	.get_fmt = gc5024_get_fmt,
 	.set_fmt = gc5024_set_fmt,
+	.get_mbus_config = sensor_g_mbus_config,
 };
 
 static const struct v4l2_subdev_ops gc5024_subdev_ops = {

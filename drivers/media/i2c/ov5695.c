@@ -1162,13 +1162,8 @@ static int ov5695_enum_frame_interval(struct v4l2_subdev *sd,
 static int ov5695_g_mbus_config(struct v4l2_subdev *sd, unsigned int pad_id,
 				struct v4l2_mbus_config *config)
 {
-	u32 val = 0;
-
-	val = 1 << (OV5695_LANES - 1) |
-	      V4L2_MBUS_CSI2_CHANNEL_0 |
-	      V4L2_MBUS_CSI2_CONTINUOUS_CLOCK;
 	config->type = V4L2_MBUS_CSI2_DPHY;
-	config->flags = val;
+	config->bus.mipi_csi2.num_data_lanes = OV5695_LANES;
 
 	return 0;
 }

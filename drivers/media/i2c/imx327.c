@@ -874,14 +874,12 @@ static int imx327_g_mbus_config(struct v4l2_subdev *sd, unsigned int pad_id,
 				struct v4l2_mbus_config *config)
 {
 	struct imx327 *imx327 = to_imx327(sd);
-	u32 val = 0;
 
-	val = 1 << (IMX327_4LANES - 1) |
-			V4L2_MBUS_CSI2_CHANNEL_0 |
-			V4L2_MBUS_CSI2_CONTINUOUS_CLOCK;
 	config->type = imx327->bus_cfg.bus_type;
-	config->flags = val;
-
+	if (imx327->bus_cfg.bus_type == V4L2_MBUS_CCP2)
+		config->bus.mipi_csi1 = imx327->bus_cfg.bus.mipi_csi1;
+	else if (imx327->bus_cfg.bus_type == V4L2_MBUS_CSI2_DPHY)
+		config->bus.mipi_csi2 = imx327->bus_cfg.bus.mipi_csi2;
 	return 0;
 }
 

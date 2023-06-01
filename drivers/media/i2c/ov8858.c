@@ -2867,16 +2867,9 @@ static int ov8858_g_mbus_config(struct v4l2_subdev *sd, unsigned int pad_id,
 
 	dev_info(dev, "%s(%d) enter!\n", __func__, __LINE__);
 
-	if (2 == sensor->lane_num) {
+	if (2 == sensor->lane_num || 4 == sensor->lane_num) {
 		config->type = V4L2_MBUS_CSI2_DPHY;
-		config->flags = V4L2_MBUS_CSI2_2_LANE |
-				V4L2_MBUS_CSI2_CHANNEL_0 |
-				V4L2_MBUS_CSI2_CONTINUOUS_CLOCK;
-	} else if (4 == sensor->lane_num) {
-		config->type = V4L2_MBUS_CSI2_DPHY;
-		config->flags = V4L2_MBUS_CSI2_4_LANE |
-				V4L2_MBUS_CSI2_CHANNEL_0 |
-				V4L2_MBUS_CSI2_CONTINUOUS_CLOCK;
+		config->bus.mipi_csi2.num_data_lanes = sensor->lane_num;
 	} else {
 		dev_err(&sensor->client->dev,
 			"unsupported lane_num(%d)\n", sensor->lane_num);

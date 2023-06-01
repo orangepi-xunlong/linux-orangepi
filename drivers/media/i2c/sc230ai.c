@@ -554,7 +554,7 @@ static const struct sc230ai_mode supported_modes[] = {
 		.hdr_mode = NO_HDR,
 		.bpp = 10,
 		.mipi_freq_idx = 1,
-		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_0,
+		.vc[PAD0] = 0,
 	}, {
 		.width = 640,
 		.height = 480,
@@ -570,7 +570,7 @@ static const struct sc230ai_mode supported_modes[] = {
 		.hdr_mode = NO_HDR,
 		.bpp = 10,
 		.mipi_freq_idx = 1,
-		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_0,
+		.vc[PAD0] = 0,
 	},
 };
 
@@ -899,19 +899,8 @@ static int sc230ai_g_frame_interval(struct v4l2_subdev *sd,
 static int sc230ai_g_mbus_config(struct v4l2_subdev *sd, unsigned int pad_id,
 				 struct v4l2_mbus_config *config)
 {
-	struct sc230ai *sc230ai = to_sc230ai(sd);
-	const struct sc230ai_mode *mode = sc230ai->cur_mode;
-	u32 val = 1 << (SC230AI_LANES - 1) |
-		V4L2_MBUS_CSI2_CHANNEL_0 |
-		V4L2_MBUS_CSI2_CONTINUOUS_CLOCK;
-
-	if (mode->hdr_mode != NO_HDR)
-		val |= V4L2_MBUS_CSI2_CHANNEL_1;
-	if (mode->hdr_mode == HDR_X3)
-		val |= V4L2_MBUS_CSI2_CHANNEL_2;
-
 	config->type = V4L2_MBUS_CSI2_DPHY;
-	config->flags = val;
+	config->bus.mipi_csi2.num_data_lanes = SC230AI_LANES;
 
 	return 0;
 }

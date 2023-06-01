@@ -903,16 +903,11 @@ static int jx_h65_enum_frame_interval(struct v4l2_subdev *sd,
 	return 0;
 }
 
-static int jx_h65_g_mbus_config(struct v4l2_subdev *sd,
+static int jx_h65_g_mbus_config(struct v4l2_subdev *sd, unsigned int pad,
 				struct v4l2_mbus_config *config)
 {
-	u32 val = 0;
-
-	val = 1 << (JX_H65_LANES - 1) |
-	      V4L2_MBUS_CSI2_CHANNEL_0 |
-	      V4L2_MBUS_CSI2_CONTINUOUS_CLOCK;
-	config->type = V4L2_MBUS_CSI2;
-	config->flags = val;
+	config->type = V4L2_MBUS_CSI2_DPHY;
+	config->bus.mipi_csi2.num_data_lanes = JX_H65_LANES;
 
 	return 0;
 }
@@ -939,7 +934,6 @@ static const struct v4l2_subdev_core_ops jx_h65_core_ops = {
 static const struct v4l2_subdev_video_ops jx_h65_video_ops = {
 	.s_stream = jx_h65_s_stream,
 	.g_frame_interval = jx_h65_g_frame_interval,
-	.g_mbus_config = jx_h65_g_mbus_config,
 };
 
 static const struct v4l2_subdev_pad_ops jx_h65_pad_ops = {
@@ -948,6 +942,7 @@ static const struct v4l2_subdev_pad_ops jx_h65_pad_ops = {
 	.enum_frame_interval = jx_h65_enum_frame_interval,
 	.get_fmt = jx_h65_get_fmt,
 	.set_fmt = jx_h65_set_fmt,
+	.get_mbus_config = jx_h65_g_mbus_config,
 };
 
 static const struct v4l2_subdev_ops jx_h65_subdev_ops = {

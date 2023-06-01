@@ -289,7 +289,7 @@ static const struct gc1084_mode supported_modes[] = {
 		.reg_list = gc1084_1280x720_liner_settings,
 		.reg_num = ARRAY_SIZE(gc1084_1280x720_liner_settings),
 		.hdr_mode = NO_HDR,
-		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_0,
+		.vc[PAD0] = 0,
 	},
 };
 
@@ -847,13 +847,8 @@ static int gc1084_g_frame_interval(struct v4l2_subdev *sd,
 static int gc1084_g_mbus_config(struct v4l2_subdev *sd, unsigned int pad_id,
 				struct v4l2_mbus_config *config)
 {
-	struct gc1084 *gc1084 = to_gc1084(sd);
-	u32 val = 1 << (GC1084_LANES - 1) | V4L2_MBUS_CSI2_CHANNEL_0 |
-		  V4L2_MBUS_CSI2_CONTINUOUS_CLOCK;
-
 	config->type = V4L2_MBUS_CSI2_DPHY;
-	config->flags = (gc1084->cur_mode->hdr_mode == NO_HDR) ?
-			val : (val | V4L2_MBUS_CSI2_CHANNEL_1);
+	config->bus.mipi_csi2.num_data_lanes = GC1084_LANES;
 
 	return 0;
 }

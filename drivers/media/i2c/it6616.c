@@ -3641,26 +3641,7 @@ static int it6616_g_mbus_config(struct v4l2_subdev *sd,
 	struct it6616 *it6616 = to_it6616(sd);
 
 	cfg->type = V4L2_MBUS_CSI2_DPHY;
-	cfg->flags = V4L2_MBUS_CSI2_NONCONTINUOUS_CLOCK |
-			V4L2_MBUS_CSI2_CHANNEL_0;
-
-	switch (it6616->csi_lanes_in_use) {
-	case 1:
-		cfg->flags |= V4L2_MBUS_CSI2_1_LANE;
-		break;
-	case 2:
-		cfg->flags |= V4L2_MBUS_CSI2_2_LANE;
-		break;
-	case 3:
-		cfg->flags |= V4L2_MBUS_CSI2_3_LANE;
-		break;
-	case 4:
-		cfg->flags |= V4L2_MBUS_CSI2_4_LANE;
-		break;
-
-	default:
-		return -EINVAL;
-	}
+	cfg->bus.mipi_csi2.num_data_lanes = it6616->csi_lanes_in_use;
 
 	return 0;
 }

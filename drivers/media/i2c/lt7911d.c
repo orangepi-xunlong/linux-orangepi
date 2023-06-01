@@ -725,26 +725,7 @@ static int lt7911d_g_mbus_config(struct v4l2_subdev *sd,
 	struct lt7911d_state *lt7911d = to_state(sd);
 
 	cfg->type = V4L2_MBUS_CSI2_DPHY;
-	cfg->flags = V4L2_MBUS_CSI2_NONCONTINUOUS_CLOCK |
-			V4L2_MBUS_CSI2_CHANNEL_0;
-
-	switch (lt7911d->csi_lanes_in_use) {
-	case 1:
-		cfg->flags |= V4L2_MBUS_CSI2_1_LANE;
-		break;
-	case 2:
-		cfg->flags |= V4L2_MBUS_CSI2_2_LANE;
-		break;
-	case 3:
-		cfg->flags |= V4L2_MBUS_CSI2_3_LANE;
-		break;
-	case 4:
-		cfg->flags |= V4L2_MBUS_CSI2_4_LANE;
-		break;
-
-	default:
-		return -EINVAL;
-	}
+	cfg->bus.mipi_csi2 = lt7911d->bus;
 
 	return 0;
 }

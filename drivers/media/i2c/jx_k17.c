@@ -289,7 +289,7 @@ static const struct jx_k17_mode supported_modes[] = {
 		.reg_list = jx_k17_2560x1440_2lane_regs,
 		.bus_fmt = MEDIA_BUS_FMT_SRGGB10_1X10,
 		.hdr_mode = NO_HDR,
-		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_0,
+		.vc[PAD0] = 0,
 	},
 };
 
@@ -540,21 +540,8 @@ static int jx_k17_g_mbus_config(struct v4l2_subdev *sd,
 				unsigned int pad_id,
 				struct v4l2_mbus_config *config)
 {
-	struct jx_k17 *jx_k17 = to_jx_k17(sd);
-	const struct jx_k17_mode *mode = jx_k17->cur_mode;
-	u32 val;
-
-	val = 1 << (JX_K17_LANES - 1) |
-		V4L2_MBUS_CSI2_CHANNEL_0 |
-		V4L2_MBUS_CSI2_CONTINUOUS_CLOCK;
-
-	if (mode->hdr_mode != NO_HDR)
-		val |= V4L2_MBUS_CSI2_CHANNEL_1;
-	if (mode->hdr_mode == HDR_X3)
-		val |= V4L2_MBUS_CSI2_CHANNEL_2;
-
 	config->type = V4L2_MBUS_CSI2_DPHY;
-	config->flags = val;
+	config->bus.mipi_csi2.num_data_lanes = JX_K17_LANES;
 
 	return 0;
 }

@@ -1383,11 +1383,11 @@ static int gc2155_runtime_suspend(struct device *dev)
 	return 0;
 }
 
-static int gc2155_g_mbus_config(struct v4l2_subdev *sd,
+static int gc2155_g_mbus_config(struct v4l2_subdev *sd, unsigned int pad,
 				struct v4l2_mbus_config *config)
 {
 	config->type = V4L2_MBUS_PARALLEL;
-	config->flags = V4L2_MBUS_HSYNC_ACTIVE_HIGH |
+	config->bus.parallel.flags = V4L2_MBUS_HSYNC_ACTIVE_HIGH |
 			V4L2_MBUS_VSYNC_ACTIVE_LOW |
 			V4L2_MBUS_PCLK_SAMPLE_RISING;
 
@@ -1510,7 +1510,6 @@ static const struct v4l2_subdev_core_ops gc2155_core_ops = {
 
 static const struct v4l2_subdev_video_ops gc2155_video_ops = {
 	.s_stream = gc2155_s_stream,
-	.g_mbus_config = gc2155_g_mbus_config,
 	.g_frame_interval = gc2155_g_frame_interval,
 	.s_frame_interval = gc2155_s_frame_interval,
 };
@@ -1521,6 +1520,7 @@ static const struct v4l2_subdev_pad_ops gc2155_pad_ops = {
 	.enum_frame_interval = gc2155_enum_frame_interval,
 	.get_fmt = gc2155_get_fmt,
 	.set_fmt = gc2155_set_fmt,
+	.get_mbus_config = gc2155_g_mbus_config,
 };
 
 static const struct v4l2_subdev_ops gc2155_subdev_ops = {

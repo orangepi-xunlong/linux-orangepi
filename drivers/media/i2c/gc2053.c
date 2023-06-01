@@ -336,7 +336,7 @@ static const struct gc2053_mode supported_modes[] = {
 		.vts_def = 0x465,
 		.reg_list = gc2053_1920x1080_regs_2lane,
 		.hdr_mode = NO_HDR,
-		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_0,
+		.vc[PAD0] = 0,
 	},
 };
 
@@ -1141,19 +1141,11 @@ static int gc2053_g_frame_interval(struct v4l2_subdev *sd,
 static int gc2053_g_mbus_config(struct v4l2_subdev *sd, unsigned int pad_id,
 				struct v4l2_mbus_config *config)
 {
-	struct gc2053 *gc2053 = to_gc2053(sd);
-	const struct gc2053_mode *mode = gc2053->cur_mode;
-	u32 val = 0;
-
-	if (mode->hdr_mode == NO_HDR)
-		val = 1 << (GC2053_LANES - 1) |
-		V4L2_MBUS_CSI2_CHANNEL_0 |
-		V4L2_MBUS_CSI2_CONTINUOUS_CLOCK;
-
 	config->type = V4L2_MBUS_CSI2_DPHY;
-	config->flags = val;
+	config->bus.mipi_csi2.num_data_lanes = GC2053_LANES;
 	return 0;
 }
+
 static int gc2053_enum_mbus_code(struct v4l2_subdev *sd,
 				 struct v4l2_subdev_state *sd_state,
 				 struct v4l2_subdev_mbus_code_enum *code)

@@ -60,6 +60,19 @@ config VIDEO_AR0521
 	  To compile this driver as a module, choose M here: the
 	  module will be called ar0521.
 
+config VIDEO_BF3925
+	tristate "BYD BF3925 sensor support"
+	depends on I2C && VIDEO_DEV
+	select MEDIA_CONTROLLER
+	select VIDEO_V4L2_SUBDEV_API
+	select V4L2_FWNODE
+	help
+	  This is a Video4Linux2 sensor driver for the BYD
+	  BF3925 camera.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called BF3925.
+
 config VIDEO_GC02M2
 	tristate "GalaxyCore GC02M2 sensor support"
 	depends on I2C && VIDEO_DEV
@@ -72,6 +85,45 @@ config VIDEO_GC02M2
 
 	  To compile this driver as a module, choose M here: the
 	  module will be called gc02m2.
+
+config VIDEO_GC0312
+	tristate "GalaxyCore GC0312 sensor support"
+	depends on I2C && VIDEO_DEV
+	depends on MEDIA_CAMERA_SUPPORT
+	select MEDIA_CONTROLLER
+	select VIDEO_V4L2_SUBDEV_API
+	select V4L2_FWNODE
+	help
+	  Support for the GalaxyCore GC0312 sensor.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called GC0312.
+
+config VIDEO_GC0329
+	tristate "GalaxyCore GC0329 sensor support"
+	depends on I2C && VIDEO_DEV
+	depends on MEDIA_CAMERA_SUPPORT
+	select MEDIA_CONTROLLER
+	select VIDEO_V4L2_SUBDEV_API
+	select V4L2_FWNODE
+	help
+	  Support for the GalaxyCore GC0329 sensor.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called GC0329.
+
+config VIDEO_GC0403
+	tristate "GalaxyCore GC0403 sensor support"
+	depends on I2C && VIDEO_DEV
+	depends on MEDIA_CAMERA_SUPPORT
+	select MEDIA_CONTROLLER
+	select VIDEO_V4L2_SUBDEV_API
+	select V4L2_FWNODE
+	help
+	  Support for the GalaxyCore GC0403 sensor.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called GC0403.
 
 config VIDEO_GC08A3
 	tristate "GalaxyCore GC08A3 sensor support"
@@ -98,6 +150,19 @@ config VIDEO_GC1084
 
 	  To compile this driver as a module, choose M here: the
 	  module will be called gc1084.
+
+config VIDEO_GC2035
+	tristate "GalaxyCore GC2035 sensor support"
+	depends on I2C && VIDEO_DEV
+	depends on MEDIA_CAMERA_SUPPORT
+	select MEDIA_CONTROLLER
+	select VIDEO_V4L2_SUBDEV_API
+	select V4L2_FWNODE
+	help
+	  Support for the GalaxyCore GC2035 sensor.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called GC2035.
 
 config VIDEO_GC2053
 	tristate "GalaxyCore GC2053 sensor support"
@@ -137,6 +202,45 @@ config VIDEO_GC2145
 
 	  To compile this driver as a module, choose M here: the
 	  module will be called gc2145.
+
+config VIDEO_GC2155
+	tristate "GalaxyCore GC2155 sensor support"
+	depends on I2C && VIDEO_DEV
+	depends on MEDIA_CAMERA_SUPPORT
+	select MEDIA_CONTROLLER
+	select VIDEO_V4L2_SUBDEV_API
+	select V4L2_FWNODE
+	help
+	  Support for the GalaxyCore GC2155 sensor.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called GC2155.
+
+config VIDEO_GC2355
+	tristate "GalaxyCore GC2355 sensor support"
+	depends on I2C && VIDEO_DEV
+	depends on MEDIA_CAMERA_SUPPORT
+	select MEDIA_CONTROLLER
+	select VIDEO_V4L2_SUBDEV_API
+	select V4L2_FWNODE
+	help
+	  Support for the GalaxyCore GC2355 sensor.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called GC2355.
+
+config VIDEO_GC2375H
+	tristate "GalaxyCore GC2375H sensor support"
+	depends on I2C && VIDEO_DEV
+	depends on MEDIA_CAMERA_SUPPORT
+	select MEDIA_CONTROLLER
+	select VIDEO_V4L2_SUBDEV_API
+	select V4L2_FWNODE
+	help
+	  Support for the GalaxyCore GC2375H sensor.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called GC2375H.
 
 config VIDEO_GC2385
 	tristate "GalaxyCore GC2385 sensor support"
@@ -215,6 +319,19 @@ config VIDEO_GC4C33
 
 	  To compile this driver as a module, choose M here: the
 	  module will be called gc4C33.
+
+config VIDEO_GC5024
+	tristate "GalaxyCore GC5024 sensor support"
+	depends on I2C && VIDEO_DEV
+	depends on MEDIA_CAMERA_SUPPORT
+	select MEDIA_CONTROLLER
+	select VIDEO_V4L2_SUBDEV_API
+	select V4L2_FWNODE
+	help
+	  Support for the GalaxyCore GC5024 sensor.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called gc5024.
 
 config VIDEO_GC5025
 	tristate "GalaxyCore GC5025 sensor support"
@@ -594,6 +711,42 @@ config VIDEO_IMX586
 
 	  To compile this driver as a module, choose M here: the
 	  module will be called imx586.
+
+config VIDEO_JX_F37
+	tristate "Soi JX_F37 sensor support"
+	depends on I2C && VIDEO_DEV
+	select MEDIA_CONTROLLER
+	select VIDEO_V4L2_SUBDEV_API
+	help
+	  This is a Video4Linux2 sensor driver for the Soi
+	  JX_F37 camera.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called jx_f37.
+
+config VIDEO_JX_H62
+	tristate "Soi JX_H62 sensor support"
+	depends on I2C && VIDEO_DEV
+	select MEDIA_CONTROLLER
+	select VIDEO_V4L2_SUBDEV_API
+	help
+	  This is a Video4Linux2 sensor driver for the Soi
+	  JX_H62 camera.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called jx_h62.
+
+config VIDEO_JX_H65
+	tristate "Soi JX_H65 sensor support"
+	depends on I2C && VIDEO_DEV
+	select MEDIA_CONTROLLER
+	select VIDEO_V4L2_SUBDEV_API
+	help
+	  This is a Video4Linux2 sensor driver for the Soi
+	  JX_H65 camera.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called jx_h65.
 
 config VIDEO_JX_K17
 	tristate "Soi JX_K17 sensor support"

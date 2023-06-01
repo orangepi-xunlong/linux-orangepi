@@ -238,10 +238,10 @@ static struct tp2855_mode supported_modes[] = {
 		.global_reg_list = common_setting_594M_1080p_25fps_regs,
 		.mipi_freq_idx = 0,
 		.bpp = 8,
-		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_0,
-		.vc[PAD1] = V4L2_MBUS_CSI2_CHANNEL_1,
-		.vc[PAD2] = V4L2_MBUS_CSI2_CHANNEL_2,
-		.vc[PAD3] = V4L2_MBUS_CSI2_CHANNEL_3,
+		.vc[PAD0] = 0,
+		.vc[PAD1] = 1,
+		.vc[PAD2] = 2,
+		.vc[PAD3] = 3,
 	},
 	{
 		.bus_fmt = MEDIA_BUS_FMT_UYVY8_2X8,
@@ -254,10 +254,10 @@ static struct tp2855_mode supported_modes[] = {
 		.global_reg_list = common_setting_297M_720p_25fps_regs,
 		.mipi_freq_idx = 1,
 		.bpp = 8,
-		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_0,
-		.vc[PAD1] = V4L2_MBUS_CSI2_CHANNEL_1,
-		.vc[PAD2] = V4L2_MBUS_CSI2_CHANNEL_2,
-		.vc[PAD3] = V4L2_MBUS_CSI2_CHANNEL_3,
+		.vc[PAD0] = 0,
+		.vc[PAD1] = 1,
+		.vc[PAD2] = 2,
+		.vc[PAD3] = 3,
 	}
 };
 
@@ -477,12 +477,11 @@ static int tp2855_enum_frame_sizes(struct v4l2_subdev *sd,
 	return 0;
 }
 
-static int tp2855_g_mbus_config(struct v4l2_subdev *sd,
+static int tp2855_g_mbus_config(struct v4l2_subdev *sd, unsigned int pad_id,
 				 struct v4l2_mbus_config *cfg)
 {
-	cfg->type = V4L2_MBUS_CSI2;
-	cfg->flags = V4L2_MBUS_CSI2_4_LANE |
-		     V4L2_MBUS_CSI2_CHANNELS;
+	cfg->type = V4L2_MBUS_CSI2_DPHY;
+	cfg->bus.mipi_csi2.num_data_lanes = 4;
 
 	return 0;
 }
@@ -878,7 +877,6 @@ static const struct v4l2_subdev_internal_ops tp2855_internal_ops = {
 
 static const struct v4l2_subdev_video_ops tp2855_video_ops = {
 	.s_stream = tp2855_stream,
-	.g_mbus_config = tp2855_g_mbus_config,
 };
 
 static const struct v4l2_subdev_pad_ops tp2855_subdev_pad_ops = {
@@ -886,6 +884,7 @@ static const struct v4l2_subdev_pad_ops tp2855_subdev_pad_ops = {
 	.enum_frame_size = tp2855_enum_frame_sizes,
 	.get_fmt = tp2855_get_fmt,
 	.set_fmt = tp2855_set_fmt,
+	.get_mbus_config = tp2855_g_mbus_config,
 };
 
 static const struct v4l2_subdev_core_ops tp2855_core_ops = {
@@ -1112,4 +1111,4 @@ module_exit(sensor_mod_exit);
 
 MODULE_AUTHOR("Vicent Chi <vicent.chi@rock-chips.com>");
 MODULE_DESCRIPTION("tp2855 sensor driver");
-MODULE_LICENSE("GPL v2");
+MODULE_LICENSE("GPL");

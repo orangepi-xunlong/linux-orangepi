@@ -915,7 +915,7 @@ static const struct ov16a10_mode supported_modes[] = {
 		.reg_list = ov16a10_4656x3496_30fps_regs,
 		.link_freq_idx = 0,
 		.hdr_mode = NO_HDR,
-		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_0,
+		.vc[PAD0] = 0,
 	},
 	{
 		.width = 2328,
@@ -931,7 +931,7 @@ static const struct ov16a10_mode supported_modes[] = {
 		.reg_list = ov16a10_2328x1748_30fps_regs,
 		.link_freq_idx = 0,
 		.hdr_mode = NO_HDR,
-		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_0,
+		.vc[PAD0] = 0,
 	},
 };
 
@@ -1611,17 +1611,8 @@ static int ov16a10_enum_frame_interval(struct v4l2_subdev *sd,
 static int ov16a10_g_mbus_config(struct v4l2_subdev *sd, unsigned int pad,
 				struct v4l2_mbus_config *config)
 {
-	if (2 == OV16A10_LANES) {
-		config->type = V4L2_MBUS_CSI2_DPHY;
-		config->flags = V4L2_MBUS_CSI2_2_LANE |
-				V4L2_MBUS_CSI2_CHANNEL_0 |
-				V4L2_MBUS_CSI2_CONTINUOUS_CLOCK;
-	} else if (4 == OV16A10_LANES) {
-		config->type = V4L2_MBUS_CSI2_DPHY;
-		config->flags = V4L2_MBUS_CSI2_4_LANE |
-				V4L2_MBUS_CSI2_CHANNEL_0 |
-				V4L2_MBUS_CSI2_CONTINUOUS_CLOCK;
-	}
+	config->type = V4L2_MBUS_CSI2_DPHY;
+	config->bus.mipi_csi2.num_data_lanes  = OV16A10_LANES;
 
 	return 0;
 }

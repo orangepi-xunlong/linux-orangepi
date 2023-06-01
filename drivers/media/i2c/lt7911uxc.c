@@ -936,15 +936,9 @@ static int lt7911uxc_g_mbus_config(struct v4l2_subdev *sd,
 			unsigned int pad, struct v4l2_mbus_config *cfg)
 {
 	struct lt7911uxc *lt7911uxc = to_lt7911uxc(sd);
-	u32 lane_num = lt7911uxc->bus_cfg.bus.mipi_csi2.num_data_lanes;
-	u32 val = 0;
-
-	val = 1 << (lane_num - 1) |
-		V4L2_MBUS_CSI2_CHANNEL_0 |
-		V4L2_MBUS_CSI2_CONTINUOUS_CLOCK;
 
 	cfg->type = lt7911uxc->bus_cfg.bus_type;
-	cfg->flags = val;
+	cfg->bus.mipi_csi2 = lt7911uxc->bus_cfg.bus.mipi_csi2;
 
 	return 0;
 }

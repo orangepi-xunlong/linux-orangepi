@@ -1014,12 +1014,9 @@ static int thcv244_g_mbus_config(struct v4l2_subdev *sd, unsigned int pad,
 				struct v4l2_mbus_config *config)
 {
 	struct thcv244 *thcv244 = to_thcv244(sd);
-	u32 lane_num = thcv244->bus_cfg.bus.mipi_csi2.num_data_lanes;
 
 	config->type = V4L2_MBUS_CSI2_DPHY;
-	config->flags = 1 << (lane_num - 1) |
-			V4L2_MBUS_CSI2_CHANNELS |
-			V4L2_MBUS_CSI2_CONTINUOUS_CLOCK;
+	config->bus.mipi_csi2 = thcv244->bus_cfg.bus.mipi_csi2;
 
 	return 0;
 }

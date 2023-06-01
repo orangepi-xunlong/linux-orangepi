@@ -436,7 +436,7 @@ static const struct gc2093_mode supported_modes[] = {
 		.reg_list = gc2093_1080p_liner_settings,
 		.reg_num = ARRAY_SIZE(gc2093_1080p_liner_settings),
 		.hdr_mode = NO_HDR,
-		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_0,
+		.vc[PAD0] = 0,
 	},
 	{
 		.width = 1920,
@@ -452,10 +452,10 @@ static const struct gc2093_mode supported_modes[] = {
 		.reg_list = gc2093_1080p_hdr_settings,
 		.reg_num = ARRAY_SIZE(gc2093_1080p_hdr_settings),
 		.hdr_mode = HDR_X2,
-		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_1,
-		.vc[PAD1] = V4L2_MBUS_CSI2_CHANNEL_0,//L->csi wr0
-		.vc[PAD2] = V4L2_MBUS_CSI2_CHANNEL_1,
-		.vc[PAD3] = V4L2_MBUS_CSI2_CHANNEL_1,//M->csi wr2
+		.vc[PAD0] = 1,
+		.vc[PAD1] = 0,//L->csi wr0
+		.vc[PAD2] = 1,
+		.vc[PAD3] = 1,//M->csi wr2
 	},
 };
 
@@ -1159,13 +1159,8 @@ static int gc2093_g_frame_interval(struct v4l2_subdev *sd,
 static int gc2093_g_mbus_config(struct v4l2_subdev *sd, unsigned int pad_id,
 				struct v4l2_mbus_config *config)
 {
-	struct gc2093 *gc2093 = to_gc2093(sd);
-	u32 val = 1 << (GC2093_LANES - 1) | V4L2_MBUS_CSI2_CHANNEL_0 |
-		  V4L2_MBUS_CSI2_CONTINUOUS_CLOCK;
-
 	config->type = V4L2_MBUS_CSI2_DPHY;
-	config->flags = (gc2093->cur_mode->hdr_mode == NO_HDR) ?
-			val : (val | V4L2_MBUS_CSI2_CHANNEL_1);
+	config->bus.mipi_csi2.num_data_lanes = GC2093_LANES;
 
 	return 0;
 }

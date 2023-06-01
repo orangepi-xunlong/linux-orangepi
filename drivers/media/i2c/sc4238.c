@@ -94,7 +94,7 @@
 #define SC4238_REG_VALUE_16BIT		2
 #define SC4238_REG_VALUE_24BIT		3
 
-#define SC4238_LANES			V4L2_MBUS_CSI2_4_LANE
+#define SC4238_LANES			4
 
 #define OF_CAMERA_PINCTRL_STATE_DEFAULT	"rockchip,camera_default"
 #define OF_CAMERA_PINCTRL_STATE_SLEEP	"rockchip,camera_sleep"
@@ -1355,7 +1355,7 @@ static const struct sc4238_mode supported_modes[] = {
 		.vts_def = 0x0752,
 		.reg_list = sc4238_linear10bit_2688x1520_regs,
 		.hdr_mode = NO_HDR,
-		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_0,
+		.vc[PAD0] = 0,
 		.link_freq = 0, /* an index in link_freq[] */
 		.pixel_rate = PIXEL_RATE_WITH_200M,
 	},
@@ -1374,10 +1374,10 @@ static const struct sc4238_mode supported_modes[] = {
 		/*.vts_def = 0x0c18,*/
 		.reg_list = sc4238_hdr10bit_2688x1520_regs,
 		.hdr_mode = HDR_X2,
-		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_1,
-		.vc[PAD1] = V4L2_MBUS_CSI2_CHANNEL_0,//L->csi wr0
-		.vc[PAD2] = V4L2_MBUS_CSI2_CHANNEL_1,
-		.vc[PAD3] = V4L2_MBUS_CSI2_CHANNEL_1,//M->csi wr2
+		.vc[PAD0] = 1,
+		.vc[PAD1] = 0,//L->csi wr0
+		.vc[PAD2] = 1,
+		.vc[PAD3] = 1,//M->csi wr2
 		.link_freq = 1, /* an index in link_freq[] */
 		.pixel_rate = PIXEL_RATE_WITH_360M,
 	},
@@ -1394,7 +1394,7 @@ static const struct sc4238_mode supported_modes[] = {
 		.vts_def = 0x061a,
 		.reg_list = sc4238_linear12bit_2688x1520_regs,
 		.hdr_mode = NO_HDR,
-		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_0,
+		.vc[PAD0] = 0,
 		.link_freq = 0, /* an index in link_freq[] */
 		.pixel_rate = PIXEL_RATE_WITH_200M,
 	},
@@ -1411,7 +1411,7 @@ static const struct sc4238_mode supported_modes[] = {
 		.vts_def = 0x061a,
 		.reg_list = sc4238_linear12bit_2560x1440_regs,
 		.hdr_mode = NO_HDR,
-		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_0,
+		.vc[PAD0] = 0,
 		.link_freq = 0, /* an index in link_freq[] */
 		.pixel_rate = PIXEL_RATE_WITH_200M,
 	},
@@ -1680,22 +1680,8 @@ static int sc4238_g_frame_interval(struct v4l2_subdev *sd,
 static int sc4238_g_mbus_config(struct v4l2_subdev *sd, unsigned int pad_id,
 				struct v4l2_mbus_config *config)
 {
-	struct sc4238 *sc4238 = to_sc4238(sd);
-	const struct sc4238_mode *mode = sc4238->cur_mode;
-	u32 val = 0;
-
-	if (mode->hdr_mode == NO_HDR)
-		val = SC4238_LANES |
-		V4L2_MBUS_CSI2_CHANNEL_0 |
-		V4L2_MBUS_CSI2_CONTINUOUS_CLOCK;
-	if (mode->hdr_mode == HDR_X2)
-		val = SC4238_LANES |
-		V4L2_MBUS_CSI2_CHANNEL_0 |
-		V4L2_MBUS_CSI2_CONTINUOUS_CLOCK |
-		V4L2_MBUS_CSI2_CHANNEL_1;
-
 	config->type = V4L2_MBUS_CSI2_DPHY;
-	config->flags = val;
+	config->bus.mipi_csi2.num_data_lanes = SC4238_LANES;
 
 	return 0;
 }

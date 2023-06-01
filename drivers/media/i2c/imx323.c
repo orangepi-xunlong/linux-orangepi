@@ -708,7 +708,7 @@ static int imx323_g_mbus_config(struct v4l2_subdev *sd, unsigned int pad_id,
 				struct v4l2_mbus_config *config)
 {
 	config->type = V4L2_MBUS_BT656;
-	config->flags = V4L2_MBUS_HSYNC_ACTIVE_HIGH |
+	config->bus.parallel.flags = V4L2_MBUS_HSYNC_ACTIVE_HIGH |
 			V4L2_MBUS_VSYNC_ACTIVE_HIGH |
 			V4L2_MBUS_PCLK_SAMPLE_FALLING;
 	return 0;

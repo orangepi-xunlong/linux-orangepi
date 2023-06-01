@@ -465,7 +465,7 @@ static const struct OV4686_mode supported_modes[] = {
 		.vts_def = 0x0612,
 		.reg_list = OV4686_linear_regs,
 		.hdr_mode = NO_HDR,
-		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_0,
+		.vc[PAD0] = 0,
 	}, {
 		.width = 2688,
 		.height = 1520,
@@ -478,10 +478,10 @@ static const struct OV4686_mode supported_modes[] = {
 		.vts_def = 0x0612,
 		.reg_list = OV4686_hdr_x2_regs,
 		.hdr_mode = HDR_X2,
-		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_1,
-		.vc[PAD1] = V4L2_MBUS_CSI2_CHANNEL_0,//L->csi wr0
-		.vc[PAD2] = V4L2_MBUS_CSI2_CHANNEL_1,
-		.vc[PAD3] = V4L2_MBUS_CSI2_CHANNEL_1,//M->csi wr2
+		.vc[PAD0] = 1,
+		.vc[PAD1] = 0,//L->csi wr0
+		.vc[PAD2] = 1,
+		.vc[PAD3] = 1,//M->csi wr2
 	},
 };
 
@@ -726,19 +726,8 @@ static int OV4686_g_frame_interval(struct v4l2_subdev *sd,
 static int OV4686_g_mbus_config(struct v4l2_subdev *sd, unsigned int pad_id,
 				struct v4l2_mbus_config *config)
 {
-	struct OV4686 *OV4686 = to_OV4686(sd);
-	const struct OV4686_mode *mode = OV4686->cur_mode;
-	u32 val = 1 << (OV4686_LANES - 1) |
-		V4L2_MBUS_CSI2_CHANNEL_0 |
-		V4L2_MBUS_CSI2_CONTINUOUS_CLOCK;
-
-	if (mode->hdr_mode != NO_HDR)
-		val |= V4L2_MBUS_CSI2_CHANNEL_1;
-	if (mode->hdr_mode == HDR_X3)
-		val |= V4L2_MBUS_CSI2_CHANNEL_2;
-
 	config->type = V4L2_MBUS_CSI2_DPHY;
-	config->flags = val;
+	config->bus.mipi_csi2.num_data_lanes = OV4686_LANES;
 
 	return 0;
 }

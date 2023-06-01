@@ -290,7 +290,7 @@ static const struct ov02b10_mode supported_modes[] = {
 		.vts_def = 0x04c4,
 		.reg_list = ov02b10_linear10bit_1600x1200_regs,
 		.hdr_mode = NO_HDR,
-		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_0,
+		.vc[PAD0] = 0,
 	},
 };
 
@@ -534,22 +534,8 @@ static int ov02b10_g_frame_interval(struct v4l2_subdev *sd,
 static int ov02b10_g_mbus_config(struct v4l2_subdev *sd, unsigned int pad_id,
 				struct v4l2_mbus_config *config)
 {
-	struct ov02b10 *ov02b10 = to_ov02b10(sd);
-	const struct ov02b10_mode *mode = ov02b10->cur_mode;
-	u32 val = 0;
-
-	if (mode->hdr_mode == NO_HDR)
-		val = 1 << (OV02B10_LANES - 1) |
-		V4L2_MBUS_CSI2_CHANNEL_0 |
-		V4L2_MBUS_CSI2_CONTINUOUS_CLOCK;
-	if (mode->hdr_mode == HDR_X2)
-		val = 1 << (OV02B10_LANES - 1) |
-		V4L2_MBUS_CSI2_CHANNEL_0 |
-		V4L2_MBUS_CSI2_CONTINUOUS_CLOCK |
-		V4L2_MBUS_CSI2_CHANNEL_1;
-
 	config->type = V4L2_MBUS_CSI2_DPHY;
-	config->flags = val;
+	config->bus.mipi_csi2.num_data_lanes  = OV02B10_LANES;
 
 	return 0;
 }

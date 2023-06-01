@@ -476,7 +476,7 @@ static const struct sc3336_mode supported_modes[] = {
 		.hdr_mode = NO_HDR,
 		.xvclk_freq = 27000000,
 		.link_freq_idx = 0,
-		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_0,
+		.vc[PAD0] = 0,
 	},
 	{
 		.width = 2304,
@@ -493,7 +493,7 @@ static const struct sc3336_mode supported_modes[] = {
 		.hdr_mode = NO_HDR,
 		.xvclk_freq = 24000000,
 		.link_freq_idx = 1,
-		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_0,
+		.vc[PAD0] = 0,
 	}
 };
 
@@ -830,20 +830,9 @@ static int sc3336_g_mbus_config(struct v4l2_subdev *sd,
 				unsigned int pad_id,
 				struct v4l2_mbus_config *config)
 {
-	struct sc3336 *sc3336 = to_sc3336(sd);
-	const struct sc3336_mode *mode = sc3336->cur_mode;
-
-	u32 val = 1 << (SC3336_LANES - 1) |
-		V4L2_MBUS_CSI2_CHANNEL_0 |
-		V4L2_MBUS_CSI2_CONTINUOUS_CLOCK;
-
-	if (mode->hdr_mode != NO_HDR)
-		val |= V4L2_MBUS_CSI2_CHANNEL_1;
-	if (mode->hdr_mode == HDR_X3)
-		val |= V4L2_MBUS_CSI2_CHANNEL_2;
 
 	config->type = V4L2_MBUS_CSI2_DPHY;
-	config->flags = val;
+	config->bus.mipi_csi2.num_data_lanes = SC3336_LANES;
 
 	return 0;
 }

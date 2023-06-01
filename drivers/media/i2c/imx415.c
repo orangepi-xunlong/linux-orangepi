@@ -778,7 +778,7 @@ static const struct imx415_mode supported_modes[] = {
 		.hdr_mode = NO_HDR,
 		.mipi_freq_idx = 1,
 		.bpp = 10,
-		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_0,
+		.vc[PAD0] = 0,
 	},
 	{
 		.bus_fmt = MEDIA_BUS_FMT_SGBRG10_1X10,
@@ -800,10 +800,10 @@ static const struct imx415_mode supported_modes[] = {
 		.hdr_mode = HDR_X2,
 		.mipi_freq_idx = 2,
 		.bpp = 10,
-		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_1,
-		.vc[PAD1] = V4L2_MBUS_CSI2_CHANNEL_0,//L->csi wr0
-		.vc[PAD2] = V4L2_MBUS_CSI2_CHANNEL_1,
-		.vc[PAD3] = V4L2_MBUS_CSI2_CHANNEL_1,//M->csi wr2
+		.vc[PAD0] = 1,
+		.vc[PAD1] = 0,//L->csi wr0
+		.vc[PAD2] = 1,
+		.vc[PAD3] = 1,//M->csi wr2
 	},
 	{
 		.bus_fmt = MEDIA_BUS_FMT_SGBRG10_1X10,
@@ -825,10 +825,10 @@ static const struct imx415_mode supported_modes[] = {
 		.hdr_mode = HDR_X3,
 		.mipi_freq_idx = 2,
 		.bpp = 10,
-		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_2,
-		.vc[PAD1] = V4L2_MBUS_CSI2_CHANNEL_1,//M->csi wr0
-		.vc[PAD2] = V4L2_MBUS_CSI2_CHANNEL_0,//L->csi wr0
-		.vc[PAD3] = V4L2_MBUS_CSI2_CHANNEL_2,//S->csi wr2
+		.vc[PAD0] = 2,
+		.vc[PAD1] = 1,//M->csi wr0
+		.vc[PAD2] = 0,//L->csi wr0
+		.vc[PAD3] = 2,//S->csi wr2
 	},
 	{
 		.bus_fmt = MEDIA_BUS_FMT_SGBRG10_1X10,
@@ -850,10 +850,10 @@ static const struct imx415_mode supported_modes[] = {
 		.hdr_mode = HDR_X3,
 		.mipi_freq_idx = 3,
 		.bpp = 10,
-		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_2,
-		.vc[PAD1] = V4L2_MBUS_CSI2_CHANNEL_1,//M->csi wr0
-		.vc[PAD2] = V4L2_MBUS_CSI2_CHANNEL_0,//L->csi wr0
-		.vc[PAD3] = V4L2_MBUS_CSI2_CHANNEL_2,//S->csi wr2
+		.vc[PAD0] = 2,
+		.vc[PAD1] = 1,//M->csi wr0
+		.vc[PAD2] = 0,//L->csi wr0
+		.vc[PAD3] = 2,//S->csi wr2
 	},
 	{
 		/* 1H period = (1100 clock) = (1100 * 1 / 74.25MHz) */
@@ -872,7 +872,7 @@ static const struct imx415_mode supported_modes[] = {
 		.hdr_mode = NO_HDR,
 		.mipi_freq_idx = 1,
 		.bpp = 12,
-		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_0,
+		.vc[PAD0] = 0,
 	},
 	{
 		.bus_fmt = MEDIA_BUS_FMT_SGBRG12_1X12,
@@ -894,10 +894,10 @@ static const struct imx415_mode supported_modes[] = {
 		.hdr_mode = HDR_X2,
 		.mipi_freq_idx = 3,
 		.bpp = 12,
-		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_1,
-		.vc[PAD1] = V4L2_MBUS_CSI2_CHANNEL_0,//L->csi wr0
-		.vc[PAD2] = V4L2_MBUS_CSI2_CHANNEL_1,
-		.vc[PAD3] = V4L2_MBUS_CSI2_CHANNEL_1,//M->csi wr2
+		.vc[PAD0] = 1,
+		.vc[PAD1] = 0,//L->csi wr0
+		.vc[PAD2] = 1,
+		.vc[PAD3] = 1,//M->csi wr2
 	},
 	{
 		.bus_fmt = MEDIA_BUS_FMT_SGBRG12_1X12,
@@ -919,10 +919,10 @@ static const struct imx415_mode supported_modes[] = {
 		.hdr_mode = HDR_X3,
 		.mipi_freq_idx = 3,
 		.bpp = 12,
-		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_2,
-		.vc[PAD1] = V4L2_MBUS_CSI2_CHANNEL_1,//M->csi wr0
-		.vc[PAD2] = V4L2_MBUS_CSI2_CHANNEL_0,//L->csi wr0
-		.vc[PAD3] = V4L2_MBUS_CSI2_CHANNEL_2,//S->csi wr2
+		.vc[PAD0] = 2,
+		.vc[PAD1] = 1,//M->csi wr0
+		.vc[PAD2] = 0,//L->csi wr0
+		.vc[PAD3] = 2,//S->csi wr2
 	},
 	{
 		.bus_fmt = MEDIA_BUS_FMT_SGBRG12_1X12,
@@ -940,7 +940,7 @@ static const struct imx415_mode supported_modes[] = {
 		.hdr_mode = NO_HDR,
 		.mipi_freq_idx = 0,
 		.bpp = 12,
-		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_0,
+		.vc[PAD0] = 0,
 	},
 	{
 		.bus_fmt = MEDIA_BUS_FMT_SGBRG12_1X12,
@@ -962,10 +962,10 @@ static const struct imx415_mode supported_modes[] = {
 		.hdr_mode = HDR_X2,
 		.mipi_freq_idx = 1,
 		.bpp = 12,
-		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_1,
-		.vc[PAD1] = V4L2_MBUS_CSI2_CHANNEL_0,//L->csi wr0
-		.vc[PAD2] = V4L2_MBUS_CSI2_CHANNEL_1,
-		.vc[PAD3] = V4L2_MBUS_CSI2_CHANNEL_1,//M->csi wr2
+		.vc[PAD0] = 1,
+		.vc[PAD1] = 0,//L->csi wr0
+		.vc[PAD2] = 1,
+		.vc[PAD3] = 1,//M->csi wr2
 	},
 };
 
@@ -1224,19 +1224,8 @@ static int imx415_g_frame_interval(struct v4l2_subdev *sd,
 static int imx415_g_mbus_config(struct v4l2_subdev *sd, unsigned int pad_id,
 				struct v4l2_mbus_config *config)
 {
-	struct imx415 *imx415 = to_imx415(sd);
-	const struct imx415_mode *mode = imx415->cur_mode;
-	u32 val = 0;
-
-	val = 1 << (IMX415_4LANES - 1) |
-	      V4L2_MBUS_CSI2_CHANNEL_0 |
-	      V4L2_MBUS_CSI2_CONTINUOUS_CLOCK;
-	if (mode->hdr_mode != NO_HDR)
-		val |= V4L2_MBUS_CSI2_CHANNEL_1;
-	if (mode->hdr_mode == HDR_X3)
-		val |= V4L2_MBUS_CSI2_CHANNEL_2;
 	config->type = V4L2_MBUS_CSI2_DPHY;
-	config->flags = val;
+	config->bus.mipi_csi2.num_data_lanes = IMX415_4LANES;
 
 	return 0;
 }

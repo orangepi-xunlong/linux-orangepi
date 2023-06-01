@@ -1216,7 +1216,7 @@ static int rk628_bt1120_g_mbus_config(struct v4l2_subdev *sd,
 				      struct v4l2_mbus_config *cfg)
 {
 	cfg->type = V4L2_MBUS_BT656;
-	cfg->flags = V4L2_MBUS_HSYNC_ACTIVE_HIGH |
+	cfg->bus.parallel.flags = V4L2_MBUS_HSYNC_ACTIVE_HIGH |
 				V4L2_MBUS_VSYNC_ACTIVE_HIGH |
 				V4L2_MBUS_PCLK_SAMPLE_RISING;
 

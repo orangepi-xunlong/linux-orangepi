@@ -1768,7 +1768,7 @@ static const struct imx378_mode supported_modes[] = {
 		.bus_fmt = MEDIA_BUS_FMT_SRGGB10_1X10,
 		.reg_list = imx378_linear_10_3840x2160_regs,
 		.hdr_mode = NO_HDR,
-		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_0,
+		.vc[PAD0] = 0,
 	}, {
 		.width = 4056,
 		.height = 3040,
@@ -1782,7 +1782,7 @@ static const struct imx378_mode supported_modes[] = {
 		.bus_fmt = MEDIA_BUS_FMT_SRGGB10_1X10,
 		.reg_list = imx378_linear_10_4056x3040_regs,
 		.hdr_mode = NO_HDR,
-		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_0,
+		.vc[PAD0] = 0,
 	}, {
 		.width = 2028,
 		.height = 1520,
@@ -1796,7 +1796,7 @@ static const struct imx378_mode supported_modes[] = {
 		.bus_fmt = MEDIA_BUS_FMT_SRGGB12_1X12,
 		.reg_list = imx378_linear_12_2028x1520_regs,
 		.hdr_mode = NO_HDR,
-		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_0,
+		.vc[PAD0] = 0,
 	}, {
 		.width = 4056,
 		.height = 3040,
@@ -1810,7 +1810,7 @@ static const struct imx378_mode supported_modes[] = {
 		.bus_fmt = MEDIA_BUS_FMT_SRGGB12_1X12,
 		.reg_list = imx378_linear_12_4056x3040_regs,
 		.hdr_mode = NO_HDR,
-		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_0,
+		.vc[PAD0] = 0,
 	},
 };
 
@@ -2091,23 +2091,8 @@ static int imx378_g_frame_interval(struct v4l2_subdev *sd,
 static int imx378_g_mbus_config(struct v4l2_subdev *sd, unsigned int pad_id,
 				struct v4l2_mbus_config *config)
 {
-	struct imx378 *imx378 = to_imx378(sd);
-	const struct imx378_mode *mode = imx378->cur_mode;
-	u32 val = 0;
-
-	if (mode->hdr_mode == NO_HDR)
-		val = 1 << (IMX378_LANES - 1) |
-		V4L2_MBUS_CSI2_CHANNEL_0 |
-		V4L2_MBUS_CSI2_CONTINUOUS_CLOCK;
-
-	if (mode->hdr_mode == HDR_X2)
-		val = 1 << (IMX378_LANES - 1) |
-		V4L2_MBUS_CSI2_CHANNEL_0 |
-		V4L2_MBUS_CSI2_CONTINUOUS_CLOCK |
-		V4L2_MBUS_CSI2_CHANNEL_1;
-
 	config->type = V4L2_MBUS_CSI2_DPHY;
-	config->flags = val;
+	config->bus.mipi_csi2.num_data_lanes = IMX378_LANES;
 
 	return 0;
 }

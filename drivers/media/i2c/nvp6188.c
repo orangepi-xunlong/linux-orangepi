@@ -812,10 +812,10 @@ static struct nvp6188_mode supported_modes[] = {
 		.global_reg_list = common_setting_1458M_regs,
 		.mipi_freq_idx = 0,
 		.bpp = 8,
-		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_0,
-		.vc[PAD1] = V4L2_MBUS_CSI2_CHANNEL_1,
-		.vc[PAD2] = V4L2_MBUS_CSI2_CHANNEL_2,
-		.vc[PAD3] = V4L2_MBUS_CSI2_CHANNEL_3,
+		.vc[PAD0] = 0,
+		.vc[PAD1] = 1,
+		.vc[PAD2] = 2,
+		.vc[PAD3] = 3,
 	},
 	{
 		.bus_fmt = MEDIA_BUS_FMT_UYVY8_2X8,
@@ -828,10 +828,10 @@ static struct nvp6188_mode supported_modes[] = {
 		.global_reg_list = common_setting_1458M_regs,
 		.mipi_freq_idx = 0,
 		.bpp = 8,
-		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_0,
-		.vc[PAD1] = V4L2_MBUS_CSI2_CHANNEL_1,
-		.vc[PAD2] = V4L2_MBUS_CSI2_CHANNEL_2,
-		.vc[PAD3] = V4L2_MBUS_CSI2_CHANNEL_3,
+		.vc[PAD0] = 0,
+		.vc[PAD1] = 1,
+		.vc[PAD2] = 2,
+		.vc[PAD3] = 3,
 	},
 	{
 		.bus_fmt = MEDIA_BUS_FMT_UYVY8_2X8,
@@ -844,10 +844,10 @@ static struct nvp6188_mode supported_modes[] = {
 		.global_reg_list = common_setting_1458M_regs,
 		.mipi_freq_idx = 0,
 		.bpp = 8,
-		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_0,
-		.vc[PAD1] = V4L2_MBUS_CSI2_CHANNEL_1,
-		.vc[PAD2] = V4L2_MBUS_CSI2_CHANNEL_2,
-		.vc[PAD3] = V4L2_MBUS_CSI2_CHANNEL_3,
+		.vc[PAD0] = 0,
+		.vc[PAD1] = 1,
+		.vc[PAD2] = 2,
+		.vc[PAD3] = 3,
 	},
 };
 
@@ -1123,8 +1123,7 @@ static int nvp6188_g_mbus_config(struct v4l2_subdev *sd, unsigned int pad_id,
 				 struct v4l2_mbus_config *cfg)
 {
 	cfg->type = V4L2_MBUS_CSI2_DPHY;
-	cfg->flags = V4L2_MBUS_CSI2_4_LANE |
-		     V4L2_MBUS_CSI2_CHANNELS;
+	cfg->bus.mipi_csi2.num_data_lanes = 4;
 
 	return 0;
 }
@@ -2840,7 +2839,6 @@ static struct snd_soc_component_driver nvp6188_codec_driver = {
 	.idle_bias_on		= 1,
 	.use_pmdown_time	= 1,
 	.endianness		= 1,
-	.non_legacy_dai_naming	= 1,
 };
 
 static int check_chip_id(struct i2c_client *client){

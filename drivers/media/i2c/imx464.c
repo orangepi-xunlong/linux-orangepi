@@ -1365,7 +1365,7 @@ static const struct IMX464_mode supported_modes[] = {
 		.mclk = 37125000,
 		.reg_list = IMX464_linear_10bit_2688x1520_regs,
 		.hdr_mode = NO_HDR,
-		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_0,
+		.vc[PAD0] = 0,
 	},
 	{
 		.bus_fmt = MEDIA_BUS_FMT_SRGGB10_1X10,
@@ -1383,10 +1383,10 @@ static const struct IMX464_mode supported_modes[] = {
 		.mclk = 37125000,
 		.reg_list = IMX464_hdr_2x_10bit_2688x1520_regs,
 		.hdr_mode = HDR_X2,
-		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_1,
-		.vc[PAD1] = V4L2_MBUS_CSI2_CHANNEL_0,//L->csi wr0
-		.vc[PAD2] = V4L2_MBUS_CSI2_CHANNEL_1,
-		.vc[PAD3] = V4L2_MBUS_CSI2_CHANNEL_1,//M->csi wr2
+		.vc[PAD0] = 1,
+		.vc[PAD1] = 0,//L->csi wr0
+		.vc[PAD2] = 1,
+		.vc[PAD3] = 1,//M->csi wr2
 	},
 	{
 		.bus_fmt = MEDIA_BUS_FMT_SRGGB10_1X10,
@@ -1412,10 +1412,10 @@ static const struct IMX464_mode supported_modes[] = {
 		.mclk = 37125000,
 		.reg_list = IMX464_hdr_3x_10bit_2688x1520_regs,
 		.hdr_mode = HDR_X3,
-		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_2,
-		.vc[PAD1] = V4L2_MBUS_CSI2_CHANNEL_1,//M->csi wr0
-		.vc[PAD2] = V4L2_MBUS_CSI2_CHANNEL_0,//L->csi wr1
-		.vc[PAD3] = V4L2_MBUS_CSI2_CHANNEL_2,//S->csi wr2
+		.vc[PAD0] = 2,
+		.vc[PAD1] = 1,//M->csi wr0
+		.vc[PAD2] = 0,//L->csi wr1
+		.vc[PAD3] = 2,//S->csi wr2
 	},
 };
 
@@ -1436,7 +1436,7 @@ static const struct IMX464_mode supported_modes_2lane[] = {
 		.mclk = 24000000,
 		.reg_list = IMX464_linear_10bit_2688x1520_2lane_regs,
 		.hdr_mode = NO_HDR,
-		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_0,
+		.vc[PAD0] = 0,
 	},
 	{
 		.bus_fmt = MEDIA_BUS_FMT_SRGGB10_1X10,
@@ -1454,10 +1454,10 @@ static const struct IMX464_mode supported_modes_2lane[] = {
 		.mclk = 24000000,
 		.reg_list = IMX464_hdr_2x_10bit_2688x1520_2lane_regs,
 		.hdr_mode = HDR_X2,
-		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_1,
-		.vc[PAD1] = V4L2_MBUS_CSI2_CHANNEL_0,//L->csi wr0
-		.vc[PAD2] = V4L2_MBUS_CSI2_CHANNEL_1,
-		.vc[PAD3] = V4L2_MBUS_CSI2_CHANNEL_1,//M->csi wr2
+		.vc[PAD0] = 1,
+		.vc[PAD1] = 0,//L->csi wr0
+		.vc[PAD2] = 1,
+		.vc[PAD3] = 1,//M->csi wr2
 	},
 };
 
@@ -1695,29 +1695,10 @@ static int IMX464_g_mbus_config(struct v4l2_subdev *sd, unsigned int pad_id,
 				struct v4l2_mbus_config *config)
 {
 	struct IMX464 *IMX464 = to_IMX464(sd);
-	const struct IMX464_mode *mode = IMX464->cur_mode;
-	u32 val = 0;
 	u32 lane_num = IMX464->bus_cfg.bus.mipi_csi2.num_data_lanes;
 
-	if (mode->hdr_mode == NO_HDR) {
-		val = 1 << (lane_num - 1) |
-		V4L2_MBUS_CSI2_CHANNEL_0 |
-		V4L2_MBUS_CSI2_CONTINUOUS_CLOCK;
-	}
-	if (mode->hdr_mode == HDR_X2)
-		val = 1 << (lane_num - 1) |
-		V4L2_MBUS_CSI2_CHANNEL_0 |
-		V4L2_MBUS_CSI2_CONTINUOUS_CLOCK |
-		V4L2_MBUS_CSI2_CHANNEL_1;
-	if (mode->hdr_mode == HDR_X3)
-		val = 1 << (lane_num - 1) |
-		V4L2_MBUS_CSI2_CHANNEL_0 |
-		V4L2_MBUS_CSI2_CONTINUOUS_CLOCK |
-		V4L2_MBUS_CSI2_CHANNEL_1 |
-		V4L2_MBUS_CSI2_CHANNEL_2;
-
 	config->type = V4L2_MBUS_CSI2_DPHY;
-	config->flags = val;
+	config->bus.mipi_csi2.num_data_lanes = lane_num;
 
 	return 0;
 }

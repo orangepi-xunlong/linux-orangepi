@@ -842,11 +842,11 @@ static int gc0329_open(struct v4l2_subdev *sd, struct v4l2_subdev_fh *fh)
 }
 #endif
 
-static int gc0329_g_mbus_config(struct v4l2_subdev *sd,
+static int gc0329_g_mbus_config(struct v4l2_subdev *sd,  unsigned int pad,
 				struct v4l2_mbus_config *config)
 {
 	config->type = V4L2_MBUS_PARALLEL;
-	config->flags = V4L2_MBUS_HSYNC_ACTIVE_HIGH |
+	config->bus.parallel.flags = V4L2_MBUS_HSYNC_ACTIVE_HIGH |
 			V4L2_MBUS_VSYNC_ACTIVE_HIGH |
 			V4L2_MBUS_PCLK_SAMPLE_RISING;
 
@@ -920,7 +920,6 @@ static const struct v4l2_subdev_core_ops gc0329_subdev_core_ops = {
 
 static const struct v4l2_subdev_video_ops gc0329_subdev_video_ops = {
 	.s_stream = gc0329_s_stream,
-	.g_mbus_config = gc0329_g_mbus_config,
 	.g_frame_interval = gc0329_g_frame_interval,
 	.s_frame_interval = gc0329_s_frame_interval,
 };
@@ -931,6 +930,7 @@ static const struct v4l2_subdev_pad_ops gc0329_subdev_pad_ops = {
 	.enum_frame_interval = gc0329_enum_frame_interval,
 	.get_fmt = gc0329_get_fmt,
 	.set_fmt = gc0329_set_fmt,
+	.get_mbus_config = gc0329_g_mbus_config,
 };
 
 #ifdef CONFIG_VIDEO_V4L2_SUBDEV_API

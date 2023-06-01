@@ -378,7 +378,7 @@ static const struct jx_f37_mode supported_modes[] = {
 		.vts_def = 0x0465,
 		.reg_list = jx_f37_1080p_linear_1lane_30fps,
 		.hdr_mode = NO_HDR,
-		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_0,
+		.vc[PAD0] = 0,
 	},
 	{
 		.width = 1920,
@@ -392,10 +392,10 @@ static const struct jx_f37_mode supported_modes[] = {
 		.vts_def = 0x08ca,
 		.reg_list = jx_f37_1080p_hdr_1lane_15fps,
 		.hdr_mode = HDR_X2,
-		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_1,
-		.vc[PAD1] = V4L2_MBUS_CSI2_CHANNEL_0,//L->csi wr0
-		.vc[PAD2] = V4L2_MBUS_CSI2_CHANNEL_1,
-		.vc[PAD3] = V4L2_MBUS_CSI2_CHANNEL_1,//M->csi wr2
+		.vc[PAD0] = 1,
+		.vc[PAD1] = 0,//L->csi wr0
+		.vc[PAD2] = 1,
+		.vc[PAD3] = 1,//M->csi wr2
 	},
 };
 
@@ -932,25 +932,11 @@ static int jx_f37_g_frame_interval(struct v4l2_subdev *sd,
 	return 0;
 }
 
-static int jx_f37_g_mbus_config(struct v4l2_subdev *sd,
+static int jx_f37_g_mbus_config(struct v4l2_subdev *sd, unsigned int pad,
 				struct v4l2_mbus_config *config)
 {
-	struct jx_f37 *jx_f37 = to_jx_f37(sd);
-	const struct jx_f37_mode *mode = jx_f37->cur_mode;
-	u32 val = 0;
-
-	if (mode->hdr_mode == NO_HDR)
-		val = 1 << (JX_F37_LANES - 1) |
-		      V4L2_MBUS_CSI2_CHANNEL_0 |
-		      V4L2_MBUS_CSI2_CONTINUOUS_CLOCK;
-	else if (mode->hdr_mode == HDR_X2)
-		val = 1 << (JX_F37_LANES - 1) |
-		      V4L2_MBUS_CSI2_CHANNEL_0 |
-		      V4L2_MBUS_CSI2_CONTINUOUS_CLOCK |
-		      V4L2_MBUS_CSI2_CHANNEL_1;
-
-	config->type = V4L2_MBUS_CSI2;
-	config->flags = val;
+	config->type = V4L2_MBUS_CSI2_DPHY;
+	config->bus.mipi_csi2.num_data_lanes = JX_F37_LANES;
 
 	return 0;
 }
@@ -1213,7 +1199,6 @@ static const struct v4l2_subdev_core_ops jx_f37_core_ops = {
 static const struct v4l2_subdev_video_ops jx_f37_video_ops = {
 	.s_stream = jx_f37_s_stream,
 	.g_frame_interval = jx_f37_g_frame_interval,
-	.g_mbus_config = jx_f37_g_mbus_config,
 };
 
 static const struct v4l2_subdev_pad_ops jx_f37_pad_ops = {
@@ -1222,6 +1207,7 @@ static const struct v4l2_subdev_pad_ops jx_f37_pad_ops = {
 	.enum_frame_interval = jx_f37_enum_frame_interval,
 	.get_fmt = jx_f37_get_fmt,
 	.set_fmt = jx_f37_set_fmt,
+	.get_mbus_config = jx_f37_g_mbus_config,
 };
 
 static const struct v4l2_subdev_ops jx_f37_subdev_ops = {

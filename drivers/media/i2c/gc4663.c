@@ -564,7 +564,7 @@ static const struct gc4663_mode supported_modes[] = {
 		.bus_fmt = MEDIA_BUS_FMT_SGRBG10_1X10,
 		.reg_list = gc4663_linear10bit_2560x1440_regs,
 		.hdr_mode = NO_HDR,
-		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_0,
+		.vc[PAD0] = 0,
 	}, {
 		.width = 2560,
 		.height = 1440,
@@ -578,10 +578,10 @@ static const struct gc4663_mode supported_modes[] = {
 		.bus_fmt = MEDIA_BUS_FMT_SGRBG10_1X10,
 		.reg_list = gc4663_hdr10bit_2560x1440_regs,
 		.hdr_mode = HDR_X2,
-		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_1,
-		.vc[PAD1] = V4L2_MBUS_CSI2_CHANNEL_0,//L->csi wr0
-		.vc[PAD2] = V4L2_MBUS_CSI2_CHANNEL_1,
-		.vc[PAD3] = V4L2_MBUS_CSI2_CHANNEL_1,//M->csi wr2
+		.vc[PAD0] = 1,
+		.vc[PAD1] = 0,//L->csi wr0
+		.vc[PAD2] = 1,
+		.vc[PAD3] = 1,//M->csi wr2
 	},
 };
 
@@ -1007,22 +1007,8 @@ static int gc4663_g_frame_interval(struct v4l2_subdev *sd,
 static int gc4663_g_mbus_config(struct v4l2_subdev *sd, unsigned int pad_id,
 				struct v4l2_mbus_config *config)
 {
-	struct gc4663 *gc4663 = to_gc4663(sd);
-	const struct gc4663_mode *mode = gc4663->cur_mode;
-	u32 val = 0;
-
-	if (mode->hdr_mode == NO_HDR)
-		val = 1 << (GC4663_LANES - 1) |
-		V4L2_MBUS_CSI2_CHANNEL_0 |
-		V4L2_MBUS_CSI2_CONTINUOUS_CLOCK;
-	if (mode->hdr_mode == HDR_X2)
-		val = 1 << (GC4663_LANES - 1) |
-		V4L2_MBUS_CSI2_CHANNEL_0 |
-		V4L2_MBUS_CSI2_CONTINUOUS_CLOCK |
-		V4L2_MBUS_CSI2_CHANNEL_1;
-
 	config->type = V4L2_MBUS_CSI2_DPHY;
-	config->flags = val;
+	config->bus.mipi_csi2.num_data_lanes = GC4663_LANES;
 
 	return 0;
 }

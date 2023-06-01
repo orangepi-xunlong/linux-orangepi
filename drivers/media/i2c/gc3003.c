@@ -741,7 +741,7 @@ static const struct gc3003_mode supported_modes[] = {
 		.stream_on_reg_list = gc3003_stream_on_regs,
 		.stand_by_reg_list = gc3003_stand_by_regs,
 		.hdr_mode = NO_HDR,
-		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_0,
+		.vc[PAD0] = 0,
 	},
 	{
 		.width = 320,
@@ -758,7 +758,7 @@ static const struct gc3003_mode supported_modes[] = {
 		.stream_on_reg_list = gc3003_stream_on_regs,
 		.stand_by_reg_list = gc3003_stand_by_regs,
 		.hdr_mode = NO_HDR,
-		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_0,
+		.vc[PAD0] = 0,
 	},
 	{
 		.width = 1920,
@@ -775,7 +775,7 @@ static const struct gc3003_mode supported_modes[] = {
 		.stream_on_reg_list = gc3003_stream_on_regs,
 		.stand_by_reg_list = gc3003_stand_by_regs,
 		.hdr_mode = NO_HDR,
-		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_0,
+		.vc[PAD0] = 0,
 	},
 };
 
@@ -1063,17 +1063,8 @@ static int gc3003_g_frame_interval(struct v4l2_subdev *sd,
 static int gc3003_g_mbus_config(struct v4l2_subdev *sd, unsigned int pad_id,
 				struct v4l2_mbus_config *config)
 {
-	struct gc3003 *gc3003 = to_gc3003(sd);
-	const struct gc3003_mode *mode = gc3003->cur_mode;
-	u32 val = 0;
-
-	if (mode->hdr_mode == NO_HDR)
-		val = 1 << (GC3003_LANES - 1) |
-		V4L2_MBUS_CSI2_CHANNEL_0 |
-		V4L2_MBUS_CSI2_CONTINUOUS_CLOCK;
-
 	config->type = V4L2_MBUS_CSI2_DPHY;
-	config->flags = val;
+	config->bus.mipi_csi2.num_data_lanes = GC3003_LANES;
 
 	return 0;
 }

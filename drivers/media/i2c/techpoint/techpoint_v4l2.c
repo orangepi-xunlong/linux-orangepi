@@ -504,18 +504,12 @@ static int techpoint_g_mbus_config(struct v4l2_subdev *sd,
 
 	if (techpoint->input_type == TECHPOINT_DVP_BT1120) {
 		cfg->type = V4L2_MBUS_BT656;
-		cfg->flags = RKMODULE_CAMERA_BT656_CHANNELS |
+		cfg->bus.parallel.flags = RKMODULE_CAMERA_BT656_CHANNELS |
 			     V4L2_MBUS_PCLK_SAMPLE_RISING |
 			     V4L2_MBUS_PCLK_SAMPLE_FALLING;
 	} else if (techpoint->input_type == TECHPOINT_MIPI) {
 		cfg->type = V4L2_MBUS_CSI2_DPHY;
-		if (techpoint->data_lanes == 4) {
-			cfg->flags = V4L2_MBUS_CSI2_4_LANE | V4L2_MBUS_CSI2_CHANNELS;
-		} else if (techpoint->data_lanes == 2) {
-			cfg->flags = V4L2_MBUS_CSI2_2_LANE |
-				     V4L2_MBUS_CSI2_CHANNEL_0 |
-				     V4L2_MBUS_CSI2_CHANNEL_1;
-		}
+		cfg->bus.mipi_csi2.num_data_lanes = techpoint->data_lanes;
 	}
 
 	return 0;
@@ -937,7 +931,6 @@ static const struct snd_soc_component_driver techpoint_codec_driver = {
 	.idle_bias_on		= 1,
 	.use_pmdown_time	= 1,
 	.endianness		= 1,
-	.non_legacy_dai_naming	= 1,
 };
 
 static int tp2833_audio_config_rmpos(struct i2c_client *client,

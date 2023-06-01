@@ -684,7 +684,7 @@ static const struct imx258_mode supported_modes[] = {
 		.spd = &imx258_full_spd,
 		.ebd = &imx258_full_ebd,
 		.hdr_mode = NO_HDR,
-		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_0,
+		.vc[PAD0] = 0,
 	},
 	{
 		.bus_fmt = MEDIA_BUS_FMT_SBGGR10_1X10,
@@ -701,7 +701,7 @@ static const struct imx258_mode supported_modes[] = {
 		.spd = NULL,
 		.ebd = NULL,
 		.hdr_mode = NO_HDR,
-		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_0,
+		.vc[PAD0] = 0,
 	},
 };
 
@@ -896,13 +896,13 @@ static int imx258_get_fmt(struct v4l2_subdev *sd,
 			fmt->format.height = mode->spd->height;
 			fmt->format.code = mode->spd->bus_fmt;
 			//Set the vc channel to be consistent with the valid data
-			fmt->reserved[0] = V4L2_MBUS_CSI2_CHANNEL_0;
+			fmt->reserved[0] = 0;
 		} else if (fmt->pad == imx258->ebd_id && mode->ebd) {
 			fmt->format.width = mode->ebd->width;
 			fmt->format.height = mode->ebd->height;
 			fmt->format.code = mode->ebd->bus_fmt;
 			//Set the vc channel to be consistent with the valid data
-			fmt->reserved[0] = V4L2_MBUS_CSI2_CHANNEL_0;
+			fmt->reserved[0] = 0;
 		}
 	}
 	mutex_unlock(&imx258->mutex);
@@ -1592,13 +1592,9 @@ static int imx258_enum_frame_interval(struct v4l2_subdev *sd,
 static int imx258_g_mbus_config(struct v4l2_subdev *sd, unsigned int pad_id,
 				struct v4l2_mbus_config *config)
 {
-	u32 val = 0;
 
-	val = 1 << (IMX258_LANES - 1) |
-	      V4L2_MBUS_CSI2_CHANNEL_0 |
-	      V4L2_MBUS_CSI2_CONTINUOUS_CLOCK;
 	config->type = V4L2_MBUS_CSI2_DPHY;
-	config->flags = val;
+	config->bus.mipi_csi2.num_data_lanes = IMX258_LANES;
 
 	return 0;
 }

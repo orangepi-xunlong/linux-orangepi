@@ -282,7 +282,7 @@ static const struct sc501ai_mode supported_modes[] = {
 		.reg_list = sc501ai_linear_10_2880x1616_regs,
 		.mipi_freq_idx = 0,
 		.bpp = 10,
-		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_0,
+		.vc[PAD0] = 0,
 	},
 };
 
@@ -509,12 +509,9 @@ static int sc501ai_g_frame_interval(struct v4l2_subdev *sd,
 static int sc501ai_g_mbus_config(struct v4l2_subdev *sd, unsigned int pad,
 				 struct v4l2_mbus_config *config)
 {
-	u32 val = 1 << (SC501AI_LANES - 1) |
-		  V4L2_MBUS_CSI2_CHANNEL_0 |
-		  V4L2_MBUS_CSI2_CONTINUOUS_CLOCK;
 
 	config->type = V4L2_MBUS_CSI2_DPHY;
-	config->flags = val;
+	config->bus.mipi_csi2.num_data_lanes = SC501AI_LANES;
 
 	return 0;
 }

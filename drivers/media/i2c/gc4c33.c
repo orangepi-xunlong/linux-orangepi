@@ -1108,7 +1108,7 @@ static const struct gc4c33_mode supported_modes[] = {
 		.reg_list = gc4c33_linear10bit_2560x1440_regs,
 		.bus_fmt = MEDIA_BUS_FMT_SRGGB10_1X10,
 		.hdr_mode = NO_HDR,
-		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_0,
+		.vc[PAD0] = 0,
 	}, {
 		.width = 1920,
 		.height = 1080,
@@ -1122,7 +1122,7 @@ static const struct gc4c33_mode supported_modes[] = {
 		.reg_list = gc4c33_linear10bit_1920x1080_regs,
 		.bus_fmt = MEDIA_BUS_FMT_SRGGB10_1X10,
 		.hdr_mode = NO_HDR,
-		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_0,
+		.vc[PAD0] = 0,
 	}, {
 		.width = 1280,
 		.height = 720,
@@ -1136,7 +1136,7 @@ static const struct gc4c33_mode supported_modes[] = {
 		.reg_list = gc4c33_linear10bit_1280x720_regs,
 		.bus_fmt = MEDIA_BUS_FMT_SRGGB10_1X10,
 		.hdr_mode = NO_HDR,
-		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_0,
+		.vc[PAD0] = 0,
 	},
 };
 
@@ -1518,19 +1518,8 @@ static int gc4c33_g_frame_interval(struct v4l2_subdev *sd,
 static int gc4c33_g_mbus_config(struct v4l2_subdev *sd, unsigned int pad_id,
 				struct v4l2_mbus_config *config)
 {
-	struct gc4c33 *gc4c33 = to_gc4c33(sd);
-	const struct gc4c33_mode *mode = gc4c33->cur_mode;
-	u32 val = 1 << (GC4C33_LANES - 1) |
-		V4L2_MBUS_CSI2_CHANNEL_0 |
-		V4L2_MBUS_CSI2_CONTINUOUS_CLOCK;
-
-	if (mode->hdr_mode != NO_HDR)
-		val |= V4L2_MBUS_CSI2_CHANNEL_1;
-	if (mode->hdr_mode == HDR_X3)
-		val |= V4L2_MBUS_CSI2_CHANNEL_2;
-
 	config->type = V4L2_MBUS_CSI2_DPHY;
-	config->flags = val;
+	config->bus.mipi_csi2.num_data_lanes = GC4C33_LANES;
 
 	return 0;
 }

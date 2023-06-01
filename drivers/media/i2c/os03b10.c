@@ -300,7 +300,7 @@ static const struct os03b10_mode supported_modes[] = {
 		.vts_def = 0x052d,
 		.reg_list = os03b10_linear10bit_2304x1296_regs,
 		.hdr_mode = NO_HDR,
-		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_0,
+		.vc[PAD0] = 0,
 	},
 };
 
@@ -541,17 +541,8 @@ static int os03b10_g_frame_interval(struct v4l2_subdev *sd,
 static int os03b10_g_mbus_config(struct v4l2_subdev *sd, unsigned int pad,
 				 struct v4l2_mbus_config *config)
 {
-	struct os03b10 *os03b10 = to_os03b10(sd);
-	const struct os03b10_mode *mode = os03b10->cur_mode;
-	u32 val = 0;
-
-	if (mode->hdr_mode == NO_HDR)
-		val = 1 << (OS03B10_LANES - 1) |
-		      V4L2_MBUS_CSI2_CHANNEL_0 |
-		      V4L2_MBUS_CSI2_CONTINUOUS_CLOCK;
-
 	config->type = V4L2_MBUS_CSI2_DPHY;
-	config->flags = val;
+	config->bus.mipi_csi2.num_data_lanes  = OS03B10_LANES;
 
 	return 0;
 }

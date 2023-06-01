@@ -282,14 +282,10 @@ static int sensor_g_mbus_config(struct v4l2_subdev *sd, unsigned int pad_id,
 				struct v4l2_mbus_config *config)
 {
 	struct sensor *sensor = to_sensor(sd);
-	u32 val = 0;
 	u32 lane_num = sensor->bus_config.bus.lanes;
 
-	val = 1 << (lane_num - 1) |
-	      V4L2_MBUS_CSI2_CHANNEL_0 |
-	      V4L2_MBUS_CSI2_CONTINUOUS_CLOCK;
 	config->type = sensor->bus_config.bus.bus_type;
-	config->flags = val;
+	config->bus.mipi_csi2.num_data_lanes = lane_num;
 
 	return 0;
 }

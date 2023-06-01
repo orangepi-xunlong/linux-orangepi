@@ -535,7 +535,7 @@ static const struct imx334_mode supported_modes[] = {
 		.vclk_freq = IMX334_XVCLK_FREQ_37,
 		.bpp = 10,
 		.mipi_freq_idx = 0,
-		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_0,
+		.vc[PAD0] = 0,
 	}, {
 		.width = 3864,
 		.height = 2180,
@@ -553,10 +553,10 @@ static const struct imx334_mode supported_modes[] = {
 		.vclk_freq = IMX334_XVCLK_FREQ_37,
 		.bpp = 10,
 		.mipi_freq_idx = 2,
-		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_1,
-		.vc[PAD1] = V4L2_MBUS_CSI2_CHANNEL_0,//L->csi wr0
-		.vc[PAD2] = V4L2_MBUS_CSI2_CHANNEL_1,
-		.vc[PAD3] = V4L2_MBUS_CSI2_CHANNEL_1,//M->csi wr2
+		.vc[PAD0] = 1,
+		.vc[PAD1] = 0,//L->csi wr0
+		.vc[PAD2] = 1,
+		.vc[PAD3] = 1,//M->csi wr2
 	}, {
 		.width = 3864,
 		.height = 2180,
@@ -574,7 +574,7 @@ static const struct imx334_mode supported_modes[] = {
 		.vclk_freq = IMX334_XVCLK_FREQ_37,
 		.bpp = 12,
 		.mipi_freq_idx = 1,
-		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_0,
+		.vc[PAD0] = 0,
 	}, {
 		.width = 3864,
 		.height = 2180,
@@ -592,10 +592,10 @@ static const struct imx334_mode supported_modes[] = {
 		.vclk_freq = IMX334_XVCLK_FREQ_74,
 		.bpp = 12,
 		.mipi_freq_idx = 2,
-		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_1,
-		.vc[PAD1] = V4L2_MBUS_CSI2_CHANNEL_0,//L->csi wr0
-		.vc[PAD2] = V4L2_MBUS_CSI2_CHANNEL_1,
-		.vc[PAD3] = V4L2_MBUS_CSI2_CHANNEL_1,//M->csi wr2
+		.vc[PAD0] = 1,
+		.vc[PAD1] = 0,//L->csi wr0
+		.vc[PAD2] = 1,
+		.vc[PAD3] = 1,//M->csi wr2
 	},
 };
 
@@ -851,15 +851,7 @@ static int imx334_g_frame_interval(struct v4l2_subdev *sd,
 static int imx334_g_mbus_config(struct v4l2_subdev *sd, unsigned int pad_id,
 				struct v4l2_mbus_config *config)
 {
-	struct imx334 *imx334 = to_imx334(sd);
-	const struct imx334_mode *mode = imx334->cur_mode;
-	u32 val = 0;
-
-	val = 1 << (IMX334_LANES - 1) |
-	      V4L2_MBUS_CSI2_CHANNEL_0 |
-	      V4L2_MBUS_CSI2_CONTINUOUS_CLOCK;
-
-	config->flags = (mode->hdr_mode == NO_HDR) ? val : (val | V4L2_MBUS_CSI2_CHANNEL_1);
+	config->bus.mipi_csi2.num_data_lanes = IMX334_LANES;
 	config->type = V4L2_MBUS_CSI2_DPHY;
 	return 0;
 }

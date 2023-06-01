@@ -3817,7 +3817,7 @@ static const struct ov2775_mode supported_modes[] = {
 		.bpp = 12,
 		.lane = 4,
 		.reg_list = ov2775_linear12bit_init_tab_1920_1080,
-		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_0,
+		.vc[PAD0] = 0,
 	},
 	{
 		.bus_fmt = MEDIA_BUS_FMT_SBGGR12_1X12,
@@ -3834,10 +3834,10 @@ static const struct ov2775_mode supported_modes[] = {
 		.bpp = 12,
 		.lane = 4,
 		.reg_list = ov2775_hdr12bit_init_tab_1920_1080,
-		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_1,
-		.vc[PAD1] = V4L2_MBUS_CSI2_CHANNEL_0,
-		.vc[PAD2] = V4L2_MBUS_CSI2_CHANNEL_1,
-		.vc[PAD3] = V4L2_MBUS_CSI2_CHANNEL_1,
+		.vc[PAD0] = 1,
+		.vc[PAD1] = 0,
+		.vc[PAD2] = 1,
+		.vc[PAD3] = 1,
 	},
 };
 
@@ -4178,25 +4178,14 @@ static void ov2775_get_hcg_reg(u32 gain, u32 *again_reg, u32 *dgain_reg)
 	}
 }
 
-static int ov2775_g_mbus_config(struct v4l2_subdev *sd,
+static int ov2775_g_mbus_config(struct v4l2_subdev *sd, unsigned int pad,
 				struct v4l2_mbus_config *config)
 {
 	struct ov2775 *ov2775 = to_ov2775(sd);
 	const struct ov2775_mode *mode = ov2775->cur_mode;
-	u32 val = 0;
 
-	if (mode->hdr_mode == NO_HDR)
-		val = 1 << (mode->lane - 1) |
-		V4L2_MBUS_CSI2_CHANNEL_0 |
-		V4L2_MBUS_CSI2_CONTINUOUS_CLOCK;
-	if (mode->hdr_mode == HDR_X2)
-		val = 1 << (mode->lane - 1) |
-		V4L2_MBUS_CSI2_CHANNEL_0 |
-		V4L2_MBUS_CSI2_CONTINUOUS_CLOCK |
-		V4L2_MBUS_CSI2_CHANNEL_1;
-
-	config->type = V4L2_MBUS_CSI2;
-	config->flags = val;
+	config->type = V4L2_MBUS_CSI2_DPHY;
+	config->bus.mipi_csi2.num_data_lanes = mode->lane;
 
 	return 0;
 }
@@ -4770,7 +4759,6 @@ static const struct v4l2_subdev_internal_ops ov2775_internal_ops = {
 static const struct v4l2_subdev_video_ops ov2775_video_ops = {
 	.s_stream = ov2775_s_stream,
 	.g_frame_interval = ov2775_g_frame_interval,
-	.g_mbus_config = ov2775_g_mbus_config,
 };
 
 static const struct v4l2_subdev_pad_ops ov2775_pad_ops = {
@@ -4779,6 +4767,7 @@ static const struct v4l2_subdev_pad_ops ov2775_pad_ops = {
 	.enum_frame_interval = ov2775_enum_frame_interval,
 	.get_fmt = ov2775_get_fmt,
 	.set_fmt = ov2775_set_fmt,
+	.get_mbus_config = ov2775_g_mbus_config,
 };
 
 static const struct v4l2_subdev_core_ops ov2775_core_ops = {

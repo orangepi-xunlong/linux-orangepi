@@ -422,7 +422,7 @@ static const struct sc401ai_mode supported_modes[] = {
 		.reg_list = sc401ai_linear_10_2560x1440_4lane_regs,
 		.hdr_mode = NO_HDR,
 		.mipi_freq_idx = 0,
-		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_0,
+		.vc[PAD0] = 0,
 	},
 	{
 		.width = 2560,
@@ -438,7 +438,7 @@ static const struct sc401ai_mode supported_modes[] = {
 		.reg_list = sc401ai_linear_10_2560x1440_2lane_regs,
 		.hdr_mode = NO_HDR,
 		.mipi_freq_idx = 1,
-		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_0,
+		.vc[PAD0] = 0,
 	},
 };
 
@@ -808,20 +808,9 @@ static int sc401ai_g_mbus_config(struct v4l2_subdev *sd,
 				struct v4l2_mbus_config *config)
 {
 	struct sc401ai *sc401ai = to_sc401ai(sd);
-	const struct sc401ai_mode *mode = sc401ai->cur_mode;
-	u32 val = 0;
-
-	val = 1 << (sc401ai->lane_num - 1) |
-		V4L2_MBUS_CSI2_CHANNEL_0 |
-		V4L2_MBUS_CSI2_CONTINUOUS_CLOCK;
-
-	if (mode->hdr_mode != NO_HDR)
-		val |= V4L2_MBUS_CSI2_CHANNEL_1;
-	if (mode->hdr_mode == HDR_X3)
-		val |= V4L2_MBUS_CSI2_CHANNEL_2;
 
 	config->type = V4L2_MBUS_CSI2_DPHY;
-	config->flags = val;
+	config->bus.mipi_csi2.num_data_lanes = sc401ai->lane_num;
 
 	return 0;
 }

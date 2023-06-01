@@ -1043,14 +1043,10 @@ static int sc132gs_enum_frame_interval(struct v4l2_subdev *sd,
 static int sc132gs_g_mbus_config(struct v4l2_subdev *sd, unsigned int pad_id,
 				struct v4l2_mbus_config *config)
 {
-	u32 val = 0;
 	struct sc132gs *sc132gs = to_sc132gs(sd);
 
-	val = 1 << (sc132gs->cur_mode->lanes - 1) |
-	      V4L2_MBUS_CSI2_CHANNEL_0 |
-	      V4L2_MBUS_CSI2_CONTINUOUS_CLOCK;
 	config->type = V4L2_MBUS_CSI2_DPHY;
-	config->flags = val;
+	config->bus.mipi_csi2.num_data_lanes = sc132gs->cur_mode->lanes;
 
 	return 0;
 }

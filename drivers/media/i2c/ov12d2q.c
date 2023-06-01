@@ -1943,7 +1943,7 @@ static const struct ov12d2q_mode supported_modes[] = {
 		.vts_def = 0x0570,
 		.reg_list = ov12d2q_2256x1256_regs,
 		.hdr_mode = NO_HDR,
-		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_0,
+		.vc[PAD0] = 0,
 	},
 	{
 		.bus_fmt = MEDIA_BUS_FMT_SBGGR10_1X10,
@@ -1958,7 +1958,7 @@ static const struct ov12d2q_mode supported_modes[] = {
 		.vts_def = 0x0ae0,
 		.reg_list = ov12d2q_4512x2512_regs,
 		.hdr_mode = NO_HDR,
-		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_0,
+		.vc[PAD0] = 0,
 	},
 };
 
@@ -2224,22 +2224,8 @@ static int ov12d2q_g_frame_interval(struct v4l2_subdev *sd,
 static int ov12d2q_g_mbus_config(struct v4l2_subdev *sd, unsigned int pad_id,
 				struct v4l2_mbus_config *config)
 {
-	struct ov12d2q *ov12d2q = to_ov12d2q(sd);
-	const struct ov12d2q_mode *mode = ov12d2q->cur_mode;
-	u32 val = 0;
-
-	if (mode->hdr_mode == NO_HDR)
-		val = 1 << (OV12D2Q_LANES - 1) |
-		V4L2_MBUS_CSI2_CHANNEL_0 |
-		V4L2_MBUS_CSI2_CONTINUOUS_CLOCK;
-	if (mode->hdr_mode == HDR_X2)
-		val = 1 << (OV12D2Q_LANES - 1) |
-		V4L2_MBUS_CSI2_CHANNEL_0 |
-		V4L2_MBUS_CSI2_CONTINUOUS_CLOCK |
-		V4L2_MBUS_CSI2_CHANNEL_1;
-
 	config->type = V4L2_MBUS_CSI2_DPHY;
-	config->flags = val;
+	config->bus.mipi_csi2.num_data_lanes = OV12D2Q_LANES;
 
 	return 0;
 }

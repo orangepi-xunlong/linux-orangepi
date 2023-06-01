@@ -7590,7 +7590,7 @@ static const struct ov2718_mode supported_modes[] = {
 		.vts_def = 0x0466,
 		.hdr_mode = NO_HDR,
 		.reg_list = ov2718_linear12bit_init_tab_1920_1080,
-		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_0,
+		.vc[PAD0] = 0,
 	},
 	{
 		.bus_fmt = MEDIA_BUS_FMT_SBGGR12_1X12,
@@ -7605,10 +7605,10 @@ static const struct ov2718_mode supported_modes[] = {
 		.vts_def = 0x0466,
 		.hdr_mode = HDR_X2,
 		.reg_list = ov2718_hdr12bit_init_tab_1920_1080,
-		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_1,
-		.vc[PAD1] = V4L2_MBUS_CSI2_CHANNEL_0,
-		.vc[PAD2] = V4L2_MBUS_CSI2_CHANNEL_1,
-		.vc[PAD3] = V4L2_MBUS_CSI2_CHANNEL_1,
+		.vc[PAD0] = 1,
+		.vc[PAD1] = 0,
+		.vc[PAD2] = 1,
+		.vc[PAD3] = 1,
 	},
 	{
 		.bus_fmt = MEDIA_BUS_FMT_SBGGR10_1X10,
@@ -7623,7 +7623,7 @@ static const struct ov2718_mode supported_modes[] = {
 		.vts_def = 0x0466,
 		.hdr_mode = NO_HDR,
 		.reg_list = ov2718_linear10bit_init_tab_1920_1080,
-		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_0,
+		.vc[PAD0] = 0,
 	},
 	{
 		.bus_fmt = MEDIA_BUS_FMT_SBGGR10_1X10,
@@ -7638,10 +7638,10 @@ static const struct ov2718_mode supported_modes[] = {
 		.vts_def = 0x0466,
 		.hdr_mode = HDR_X2,
 		.reg_list = ov2718_hdr10bit_init_tab_1920_1080,
-		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_1,
-		.vc[PAD1] = V4L2_MBUS_CSI2_CHANNEL_0,
-		.vc[PAD2] = V4L2_MBUS_CSI2_CHANNEL_1,
-		.vc[PAD3] = V4L2_MBUS_CSI2_CHANNEL_1,
+		.vc[PAD0] = 1,
+		.vc[PAD1] = 0,
+		.vc[PAD2] = 1,
+		.vc[PAD3] = 1,
 	}
 };
 
@@ -7991,22 +7991,8 @@ static void ov2718_get_hcg_reg(u32 gain, u32 *again_reg, u32 *dgain_reg)
 static int ov2718_g_mbus_config(struct v4l2_subdev *sd, unsigned int pad_id,
 				struct v4l2_mbus_config *config)
 {
-	struct ov2718 *ov2718 = to_ov2718(sd);
-	const struct ov2718_mode *mode = ov2718->cur_mode;
-	u32 val = 0;
-
-	if (mode->hdr_mode == NO_HDR)
-		val = 1 << (OV2718_LANES - 1) |
-		V4L2_MBUS_CSI2_CHANNEL_0 |
-		V4L2_MBUS_CSI2_CONTINUOUS_CLOCK;
-	if (mode->hdr_mode == HDR_X2)
-		val = 1 << (OV2718_LANES - 1) |
-		V4L2_MBUS_CSI2_CHANNEL_0 |
-		V4L2_MBUS_CSI2_CONTINUOUS_CLOCK |
-		V4L2_MBUS_CSI2_CHANNEL_1;
-
 	config->type = V4L2_MBUS_CSI2_DPHY;
-	config->flags = val;
+	config->bus.mipi_csi2.num_data_lanes = OV2718_LANES;
 
 	return 0;
 }

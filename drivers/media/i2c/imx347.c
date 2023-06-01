@@ -702,7 +702,7 @@ static const struct imx347_mode supported_modes[] = {
 		.vts_def = 0x07bc,
 		.reg_list = imx347_linear_10bit_2688x1520_regs,
 		.hdr_mode = NO_HDR,
-		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_0,
+		.vc[PAD0] = 0,
 		.bpp = 10,
 	},
 	{
@@ -718,10 +718,10 @@ static const struct imx347_mode supported_modes[] = {
 		.vts_def = 0x07bc * 2,
 		.reg_list = imx347_hdr_2x_10bit_2688x1520_regs,
 		.hdr_mode = HDR_X2,
-		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_1,
-		.vc[PAD1] = V4L2_MBUS_CSI2_CHANNEL_0,//L->csi wr0
-		.vc[PAD2] = V4L2_MBUS_CSI2_CHANNEL_1,
-		.vc[PAD3] = V4L2_MBUS_CSI2_CHANNEL_1,//M->csi wr2
+		.vc[PAD0] = 1,
+		.vc[PAD1] = 0,//L->csi wr0
+		.vc[PAD2] = 1,
+		.vc[PAD3] = 1,//M->csi wr2
 		.bpp = 10,
 	},
 	{
@@ -737,7 +737,7 @@ static const struct imx347_mode supported_modes[] = {
 		.vts_def = 0x0A6B,
 		.reg_list = imx347_linear_12bit_2688x1520_regs,
 		.hdr_mode = NO_HDR,
-		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_0,
+		.vc[PAD0] = 0,
 		.bpp = 12,
 	},
 	{
@@ -753,10 +753,10 @@ static const struct imx347_mode supported_modes[] = {
 		.vts_def = 0x0640 * 2,
 		.reg_list = imx347_hdr_2x_12bit_2688x1520_regs,
 		.hdr_mode = HDR_X2,
-		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_1,
-		.vc[PAD1] = V4L2_MBUS_CSI2_CHANNEL_0,//L->csi wr0
-		.vc[PAD2] = V4L2_MBUS_CSI2_CHANNEL_1,
-		.vc[PAD3] = V4L2_MBUS_CSI2_CHANNEL_1,//M->csi wr2
+		.vc[PAD0] = 1,
+		.vc[PAD1] = 0,//L->csi wr0
+		.vc[PAD2] = 1,
+		.vc[PAD3] = 1,//M->csi wr2
 		.bpp = 12,
 	},
 };
@@ -1023,26 +1023,17 @@ static int imx347_g_mbus_config(struct v4l2_subdev *sd, unsigned int pad_id,
 {
 	struct imx347 *imx347 = to_imx347(sd);
 	const struct imx347_mode *mode = imx347->cur_mode;
-	u32 val = 0;
 
 	if (mode->hdr_mode == NO_HDR) {
 		if (mode->bus_fmt == MEDIA_BUS_FMT_SRGGB10_1X10)
-			val = 1 << (IMX347_2LANES - 1) |
-			V4L2_MBUS_CSI2_CHANNEL_0 |
-			V4L2_MBUS_CSI2_CONTINUOUS_CLOCK;
+			config->bus.mipi_csi2.num_data_lanes = IMX347_2LANES;
 		else
-			val = 1 << (IMX347_4LANES - 1) |
-			V4L2_MBUS_CSI2_CHANNEL_0 |
-			V4L2_MBUS_CSI2_CONTINUOUS_CLOCK;
+			config->bus.mipi_csi2.num_data_lanes = IMX347_4LANES;
 	}
 	if (mode->hdr_mode == HDR_X2)
-		val = 1 << (IMX347_4LANES - 1) |
-		V4L2_MBUS_CSI2_CHANNEL_0 |
-		V4L2_MBUS_CSI2_CONTINUOUS_CLOCK |
-		V4L2_MBUS_CSI2_CHANNEL_1;
+		config->bus.mipi_csi2.num_data_lanes = IMX347_4LANES;
 
 	config->type = V4L2_MBUS_CSI2_DPHY;
-	config->flags = val;
 
 	return 0;
 }

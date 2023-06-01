@@ -1149,11 +1149,11 @@ static int lt8619c_g_mbus_config(struct v4l2_subdev *sd, unsigned int pad,
 
 	cfg->type = V4L2_MBUS_BT656;
 	if (lt8619c->clk_ddrmode_en) {
-		cfg->flags = RKMODULE_CAMERA_BT656_CHANNELS |
+		cfg->bus.parallel.flags = RKMODULE_CAMERA_BT656_CHANNELS |
 			V4L2_MBUS_PCLK_SAMPLE_RISING |
 			V4L2_MBUS_PCLK_SAMPLE_FALLING;
 	} else {
-		cfg->flags = RKMODULE_CAMERA_BT656_CHANNELS |
+		cfg->bus.parallel.flags = RKMODULE_CAMERA_BT656_CHANNELS |
 			V4L2_MBUS_PCLK_SAMPLE_RISING;
 	}
 

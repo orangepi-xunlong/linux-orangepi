@@ -812,7 +812,7 @@ static const struct imx586_mode supported_modes[] = {
 		.reg_list = imx586_linear_10bit_4000x3000_30fps_nopd_regs,
 		.hdr_mode = NO_HDR,
 		.mipi_freq_idx = 0,
-		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_0,
+		.vc[PAD0] = 0,
 	},
 	{
 		.width = 8000,
@@ -829,7 +829,7 @@ static const struct imx586_mode supported_modes[] = {
 		.reg_list = imx586_linear_10bit_full_raw_6fps_regs,
 		.hdr_mode = NO_HDR,
 		.mipi_freq_idx = 0,
-		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_0,
+		.vc[PAD0] = 0,
 	},
 	{
 		.width = 8000,
@@ -846,7 +846,7 @@ static const struct imx586_mode supported_modes[] = {
 		.reg_list = imx586_linear_10bit_full_remosaic_6fps_regs,
 		.hdr_mode = NO_HDR,
 		.mipi_freq_idx = 0,
-		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_0,
+		.vc[PAD0] = 0,
 	},
 	{
 		.width = 8000,
@@ -863,7 +863,7 @@ static const struct imx586_mode supported_modes[] = {
 		.reg_list = imx586_linear_10bit_full_remosaic_10fps_regs,
 		.hdr_mode = NO_HDR,
 		.mipi_freq_idx = 1,
-		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_0,
+		.vc[PAD0] = 0,
 	},
 };
 
@@ -1141,23 +1141,8 @@ static int imx586_g_frame_interval(struct v4l2_subdev *sd,
 static int imx586_g_mbus_config(struct v4l2_subdev *sd, unsigned int pad_id,
 				struct v4l2_mbus_config *config)
 {
-	struct imx586 *imx586 = to_imx586(sd);
-	const struct imx586_mode *mode = imx586->cur_mode;
-	u32 val = 0;
-
-	if (mode->hdr_mode == NO_HDR)
-		val = 1 << (IMX586_LANES - 1) |
-		V4L2_MBUS_CSI2_CHANNEL_0 |
-		V4L2_MBUS_CSI2_CONTINUOUS_CLOCK;
-
-	if (mode->hdr_mode == HDR_X2)
-		val = 1 << (IMX586_LANES - 1) |
-		V4L2_MBUS_CSI2_CHANNEL_0 |
-		V4L2_MBUS_CSI2_CONTINUOUS_CLOCK |
-		V4L2_MBUS_CSI2_CHANNEL_1;
-
 	config->type = V4L2_MBUS_CSI2_DPHY;
-	config->flags = val;
+	config->bus.mipi_csi2.num_data_lanes = IMX586_LANES;
 
 	return 0;
 }
@@ -1264,7 +1249,7 @@ static int imx586_get_channel_info(struct imx586 *imx586, struct rkmodule_channe
 		return -EINVAL;
 
 	if (ch_info->index == imx586->spd_id && mode->spd) {
-		ch_info->vc = V4L2_MBUS_CSI2_CHANNEL_0;
+		ch_info->vc = 0;
 		ch_info->width = mode->spd->width;
 		ch_info->height = mode->spd->height;
 		ch_info->bus_fmt = mode->spd->bus_fmt;

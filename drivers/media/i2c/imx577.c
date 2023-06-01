@@ -962,7 +962,7 @@ static const struct imx577_mode supported_modes[] = {
 		.reg_list = imx577_linear_10bit_4056x3040_30fps_regs,
 		.hdr_mode = NO_HDR,
 		.link_freq_idx = 1,
-		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_0,
+		.vc[PAD0] = 0,
 	},
 	{
 		.width = 4056,
@@ -979,10 +979,10 @@ static const struct imx577_mode supported_modes[] = {
 		.reg_list = imx577_hdr2_10bit_4056x3040_30fps_regs,
 		.link_freq_idx = 0,
 		.hdr_mode = HDR_X2,
-		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_1,
-		.vc[PAD1] = V4L2_MBUS_CSI2_CHANNEL_0,//L->csi wr0
-		.vc[PAD2] = V4L2_MBUS_CSI2_CHANNEL_1,
-		.vc[PAD3] = V4L2_MBUS_CSI2_CHANNEL_1,//M->csi wr2
+		.vc[PAD0] = 1,
+		.vc[PAD1] = 0,//L->csi wr0
+		.vc[PAD2] = 1,
+		.vc[PAD3] = 1,//M->csi wr2
 	},
 	{
 		.width = 4056,
@@ -999,7 +999,7 @@ static const struct imx577_mode supported_modes[] = {
 		.reg_list = imx577_linear_10bit_4056x3040_60fps_regs,
 		.hdr_mode = NO_HDR,
 		.link_freq_idx = 0,
-		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_0,
+		.vc[PAD0] = 0,
 	},
 	{
 		.width = 4056,
@@ -1016,7 +1016,7 @@ static const struct imx577_mode supported_modes[] = {
 		.reg_list = imx577_linear_12bit_4056x3040_40fps_regs,
 		.hdr_mode = NO_HDR,
 		.link_freq_idx = 0,
-		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_0,
+		.vc[PAD0] = 0,
 	},
 };
 
@@ -1931,18 +1931,9 @@ static int imx577_g_mbus_config(struct v4l2_subdev *sd, unsigned int pad,
 				struct v4l2_mbus_config *config)
 {
 	struct imx577 *imx577 = to_imx577(sd);
-	const struct imx577_mode *mode = imx577->cur_mode;
-	u32 lane_num = imx577->bus_cfg.bus.mipi_csi2.num_data_lanes;
-	u32 val = 0;
-
-	val = 1 << (lane_num - 1) |
-		V4L2_MBUS_CSI2_CHANNEL_0 |
-		V4L2_MBUS_CSI2_CONTINUOUS_CLOCK;
-	if (mode->hdr_mode != NO_HDR)
-		val |= V4L2_MBUS_CSI2_CHANNEL_1;
 
 	config->type = V4L2_MBUS_CSI2_DPHY;
-	config->flags = val;
+	config->bus.mipi_csi2 = imx577->bus_cfg.bus.mipi_csi2;
 
 	return 0;
 }

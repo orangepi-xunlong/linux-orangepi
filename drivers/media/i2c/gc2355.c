@@ -822,16 +822,12 @@ static int gc2355_enum_frame_interval(struct v4l2_subdev *sd,
 	return 0;
 }
 
-static int gc2355_g_mbus_config(struct v4l2_subdev *sd,
+static int gc2355_g_mbus_config(struct v4l2_subdev *sd, unsigned int pad,
 				struct v4l2_mbus_config *config)
 {
-	u32 val = 0;
 
-	val = 1 << (GC2355_LANES - 1) |
-	      V4L2_MBUS_CSI2_CHANNEL_0 |
-	      V4L2_MBUS_CSI2_CONTINUOUS_CLOCK;
-	config->type = V4L2_MBUS_CSI2;
-	config->flags = val;
+	config->type = V4L2_MBUS_CSI2_DPHY;
+	config->bus.mipi_csi2.num_data_lanes = GC2355_LANES;
 
 	return 0;
 }
@@ -857,7 +853,6 @@ static const struct v4l2_subdev_core_ops gc2355_core_ops = {
 static const struct v4l2_subdev_video_ops gc2355_video_ops = {
 	.s_stream = gc2355_s_stream,
 	.g_frame_interval = gc2355_g_frame_interval,
-	.g_mbus_config = gc2355_g_mbus_config,
 };
 
 static const struct v4l2_subdev_pad_ops gc2355_pad_ops = {
@@ -866,6 +861,7 @@ static const struct v4l2_subdev_pad_ops gc2355_pad_ops = {
 	.enum_frame_interval = gc2355_enum_frame_interval,
 	.get_fmt = gc2355_get_fmt,
 	.set_fmt = gc2355_set_fmt,
+	.get_mbus_config = gc2355_g_mbus_config,
 };
 
 static const struct v4l2_subdev_ops gc2355_subdev_ops = {

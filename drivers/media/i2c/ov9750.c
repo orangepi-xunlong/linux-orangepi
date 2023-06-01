@@ -932,16 +932,11 @@ static int ov9750_enum_frame_interval(struct v4l2_subdev *sd,
 	return 0;
 }
 
-static int ov9750_g_mbus_config(struct v4l2_subdev *sd,
+static int ov9750_g_mbus_config(struct v4l2_subdev *sd, unsigned int pad,
 				struct v4l2_mbus_config *config)
 {
-	u32 val = 0;
-
-	val = 1 << (OV9750_LANES - 1) |
-	      V4L2_MBUS_CSI2_CHANNEL_0 |
-	      V4L2_MBUS_CSI2_CONTINUOUS_CLOCK;
-	config->type = V4L2_MBUS_CSI2;
-	config->flags = val;
+	config->type = V4L2_MBUS_CSI2_DPHY;
+	config->bus.mipi_csi2.num_data_lanes = OV9750_LANES;
 
 	return 0;
 }
@@ -968,7 +963,6 @@ static const struct v4l2_subdev_core_ops ov9750_core_ops = {
 static const struct v4l2_subdev_video_ops ov9750_video_ops = {
 	.s_stream = ov9750_s_stream,
 	.g_frame_interval = ov9750_g_frame_interval,
-	.g_mbus_config = ov9750_g_mbus_config,
 };
 
 static const struct v4l2_subdev_pad_ops ov9750_pad_ops = {
@@ -977,6 +971,7 @@ static const struct v4l2_subdev_pad_ops ov9750_pad_ops = {
 	.enum_frame_interval = ov9750_enum_frame_interval,
 	.get_fmt = ov9750_get_fmt,
 	.set_fmt = ov9750_set_fmt,
+	.get_mbus_config = ov9750_g_mbus_config,
 };
 
 static const struct v4l2_subdev_ops ov9750_subdev_ops = {

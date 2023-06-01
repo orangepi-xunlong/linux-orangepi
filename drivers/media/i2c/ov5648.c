@@ -1087,16 +1087,11 @@ static int ov5648_enum_frame_interval(struct v4l2_subdev *sd,
 	return 0;
 }
 
-static int ov5648_g_mbus_config(struct v4l2_subdev *sd,
+static int ov5648_g_mbus_config(struct v4l2_subdev *sd, unsigned int pad,
 				struct v4l2_mbus_config *config)
 {
-	u32 val = 0;
-
-	val = 1 << (OV5648_LANES - 1) |
-	      V4L2_MBUS_CSI2_CHANNEL_0 |
-	      V4L2_MBUS_CSI2_CONTINUOUS_CLOCK;
-	config->type = V4L2_MBUS_CSI2;
-	config->flags = val;
+	config->type = V4L2_MBUS_CSI2_DPHY;
+	config->bus.mipi_csi2.num_data_lanes = OV5648_LANES;
 
 	return 0;
 }
@@ -1123,7 +1118,6 @@ static const struct v4l2_subdev_core_ops ov5648_core_ops = {
 static const struct v4l2_subdev_video_ops ov5648_video_ops = {
 	.s_stream = ov5648_s_stream,
 	.g_frame_interval = ov5648_g_frame_interval,
-	.g_mbus_config = ov5648_g_mbus_config,
 };
 
 static const struct v4l2_subdev_pad_ops ov5648_pad_ops = {
@@ -1132,6 +1126,7 @@ static const struct v4l2_subdev_pad_ops ov5648_pad_ops = {
 	.enum_frame_interval = ov5648_enum_frame_interval,
 	.get_fmt = ov5648_get_fmt,
 	.set_fmt = ov5648_set_fmt,
+	.get_mbus_config = ov5648_g_mbus_config,
 };
 
 static const struct v4l2_subdev_ops ov5648_subdev_ops = {
