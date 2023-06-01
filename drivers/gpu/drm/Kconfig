@@ -43,7 +43,7 @@ config DRM_EDID
 
 config DRM_IGNORE_IOTCL_PERMIT
 	bool "Ignore drm ioctl permission"
-	depends on DRM && ANDROID && NO_GKI
+	depends on DRM && NO_GKI
 
 config DRM_MIPI_DSI
 	bool
