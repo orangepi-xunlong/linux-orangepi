@@ -67,6 +67,7 @@ dtbo-$(CONFIG_ARCH_ROCKCHIP) += \
 	rk3588-spi4-m1-cs1-spidev.dtbo \
 	rk3588-spi4-m1-cs0-cs1-spidev.dtbo \
 	rk3588-spi4-m2-cs0-spidev.dtbo \
+	rk3588-disable-led.dtbo \
 	rk3588-opi5plus-disable-leds.dtbo
 
 scr-$(CONFIG_ARCH_ROCKCHIP) += \
