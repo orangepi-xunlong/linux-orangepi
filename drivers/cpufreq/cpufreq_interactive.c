@@ -1031,7 +1031,7 @@ gov_attr_wo(boostpulse);
 gov_attr_rw(boostpulse_duration);
 gov_attr_rw(io_is_busy);
 
-static struct attribute *interactive_attributes[] = {
+static struct attribute *interactive_attrs[] = {
 	&target_loads.attr,
 	&above_hispeed_delay.attr,
 	&hispeed_freq.attr,
@@ -1045,9 +1045,10 @@ static struct attribute *interactive_attributes[] = {
 	&io_is_busy.attr,
 	NULL
 };
+ATTRIBUTE_GROUPS(interactive);
 
 static struct kobj_type interactive_tunables_ktype = {
-	.default_attrs = interactive_attributes,
+	.default_groups = interactive_groups,
 	.sysfs_ops = &governor_sysfs_ops,
 };
 
