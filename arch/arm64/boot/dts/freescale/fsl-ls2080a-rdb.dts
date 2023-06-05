@@ -1,170 +1,94 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
 /*
  * Device Tree file for Freescale LS2080a RDB Board.
  *
- * Copyright (C) 2015, Freescale Semiconductor
+ * Copyright 2016 Freescale Semiconductor, Inc.
+ * Copyright 2017 NXP
  *
+ * Abhimanyu Saini <abhimanyu.saini@nxp.com>
  * Bhupesh Sharma <bhupesh.sharma@freescale.com>
  *
- * This file is dual-licensed: you can use it either under the terms
- * of the GPLv2 or the X11 license, at your option. Note that this dual
- * licensing only applies to this file, and not this project as a
- * whole.
- *
- *  a) This library is free software; you can redistribute it and/or
- *     modify it under the terms of the GNU General Public License as
- *     published by the Free Software Foundation; either version 2 of the
- *     License, or (at your option) any later version.
- *
- *     This library is distributed in the hope that it will be useful,
- *     but WITHOUT ANY WARRANTY; without even the implied warranty of
- *     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *     GNU General Public License for more details.
- *
- * Or, alternatively,
- *
- *  b) Permission is hereby granted, free of charge, to any person
- *     obtaining a copy of this software and associated documentation
- *     files (the "Software"), to deal in the Software without
- *     restriction, including without limitation the rights to use,
- *     copy, modify, merge, publish, distribute, sublicense, and/or
- *     sell copies of the Software, and to permit persons to whom the
- *     Software is furnished to do so, subject to the following
- *     conditions:
- *
- *     The above copyright notice and this permission notice shall be
- *     included in all copies or substantial portions of the Software.
- *
- *     THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
- *     EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES
- *     OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
- *     NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
- *     HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
- *     WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- *     FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
- *     OTHER DEALINGS IN THE SOFTWARE.
  */
 
 /dts-v1/;
 
-/include/ "fsl-ls2080a.dtsi"
+#include "fsl-ls2080a.dtsi"
+#include "fsl-ls208xa-rdb.dtsi"
+#include <dt-bindings/interrupt-controller/arm-gic.h>
 
 / {
 	model = "Freescale Layerscape 2080a RDB Board";
 	compatible = "fsl,ls2080a-rdb", "fsl,ls2080a";
-
-	aliases {
-		serial0 = &serial0;
-		serial1 = &serial1;
-	};
 
 	chosen {
 		stdout-path = "serial1:115200n8";
 	};
 };
 
-&esdhc {
-	status = "okay";
+&dpmac5 {
+	phy-handle = <&mdio2_phy1>;
+	phy-connection-type = "10gbase-r";
 };
 
-&ifc {
-	status = "okay";
-	#address-cells = <2>;
-	#size-cells = <1>;
-	ranges = <0x0 0x0 0x5 0x80000000 0x08000000
-		  0x2 0x0 0x5 0x30000000 0x00010000
-		  0x3 0x0 0x5 0x20000000 0x00010000>;
-
-	nor@0,0 {
-		#address-cells = <1>;
-		#size-cells = <1>;
-		compatible = "cfi-flash";
-		reg = <0x0 0x0 0x8000000>;
-		bank-width = <2>;
-		device-width = <1>;
-	};
-
-	nand@2,0 {
-	     compatible = "fsl,ifc-nand";
-	     reg = <0x2 0x0 0x10000>;
-	};
-
-	cpld@3,0 {
-	     reg = <0x3 0x0 0x10000>;
-	     compatible = "fsl,ls2080aqds-fpga", "fsl,fpga-qixis";
-	};
-
+&dpmac6 {
+	phy-handle = <&mdio2_phy2>;
+	phy-connection-type = "10gbase-r";
 };
 
-&i2c0 {
-	status = "okay";
-	pca9547@75 {
-		compatible = "nxp,pca9547";
-		reg = <0x75>;
-		#address-cells = <1>;
-		#size-cells = <0>;
-		status = "disabled";
-		i2c@1 {
-			#address-cells = <1>;
-			#size-cells = <0>;
-			reg = <0x01>;
-			rtc@68 {
-				compatible = "dallas,ds3232";
-				reg = <0x68>;
-			};
-		};
-
-		i2c@3 {
-			#address-cells = <1>;
-			#size-cells = <0>;
-			reg = <0x3>;
-
-			adt7481@4c {
-				compatible = "adi,adt7461";
-				reg = <0x4c>;
-			};
-		};
-	};
+&dpmac7 {
+	phy-handle = <&mdio2_phy3>;
+	phy-connection-type = "10gbase-r";
 };
 
-&i2c1 {
+&dpmac8 {
+	phy-handle = <&mdio2_phy4>;
+	phy-connection-type = "10gbase-r";
+};
+
+&emdio1 {
 	status = "disabled";
-};
 
-&i2c2 {
-	status = "disabled";
-};
+	/* CS4340 PHYs */
+	mdio1_phy1: emdio1-phy@10 {
+		reg = <0x10>;
+	};
 
-&i2c3 {
-	status = "disabled";
-};
+	mdio1_phy2: emdio1-phy@11 {
+		reg = <0x11>;
+	};
 
-&dspi {
-	status = "okay";
-	dflash0: n25q512a {
-		#address-cells = <1>;
-		#size-cells = <1>;
-		compatible = "st,m25p80";
-		spi-max-frequency = <3000000>;
-		reg = <0>;
+	mdio1_phy3: emdio1-phy@12 {
+		reg = <0x12>;
+	};
+
+	mdio1_phy4: emdio1-phy@13 {
+		reg = <0x13>;
 	};
 };
 
-&qspi {
-	status = "disabled";
-};
+&emdio2 {
+	/* AQR405 PHYs */
+	mdio2_phy1: emdio2-phy@0 {
+		compatible = "ethernet-phy-ieee802.3-c45";
+		interrupts = <GIC_SPI 1 IRQ_TYPE_LEVEL_HIGH>;
+		reg = <0x0>;
+	};
 
-&sata0 {
-	status = "okay";
-};
+	mdio2_phy2: emdio2-phy@1 {
+		compatible = "ethernet-phy-ieee802.3-c45";
+		interrupts = <GIC_SPI 2 IRQ_TYPE_LEVEL_HIGH>;
+		reg = <0x1>;
+	};
 
-&sata1 {
-	status = "okay";
-};
+	mdio2_phy3: emdio2-phy@2 {
+		compatible = "ethernet-phy-ieee802.3-c45";
+		interrupts = <GIC_SPI 4 IRQ_TYPE_LEVEL_HIGH>;
+		reg = <0x2>;
+	};
 
-&usb0 {
-	status = "okay";
-};
-
-&usb1 {
-	status = "okay";
+	mdio2_phy4: emdio2-phy@3 {
+		compatible = "ethernet-phy-ieee802.3-c45";
+		interrupts = <GIC_SPI 5 IRQ_TYPE_LEVEL_HIGH>;
+		reg = <0x3>;
+	};
 };

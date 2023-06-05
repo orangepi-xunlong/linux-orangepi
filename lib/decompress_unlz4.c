@@ -1,11 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Wrapper for decompressing LZ4-compressed kernel, initramfs, and initrd
  *
  * Copyright (C) 2013, LG Electronics, Kyungsik Lee <kyungsik.lee@lge.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #ifdef STATIC
@@ -72,7 +69,7 @@ STATIC inline int INIT unlz4(u8 *input, long in_len,
 		error("NULL input pointer and missing fill function");
 		goto exit_1;
 	} else {
-		inp = large_malloc(lz4_compressbound(uncomp_chunksize));
+		inp = large_malloc(LZ4_compressBound(uncomp_chunksize));
 		if (!inp) {
 			error("Could not allocate input buffer");
 			goto exit_1;
@@ -115,6 +112,9 @@ STATIC inline int INIT unlz4(u8 *input, long in_len,
 				error("data corrupted");
 				goto exit_2;
 			}
+		} else if (size < 4) {
+			/* empty or end-of-file */
+			goto exit_3;
 		}
 
 		chunksize = get_unaligned_le32(inp);
@@ -128,6 +128,10 @@ STATIC inline int INIT unlz4(u8 *input, long in_len,
 			continue;
 		}
 
+		if (!fill && chunksize == 0) {
+			/* empty or end-of-file */
+			goto exit_3;
+		}
 
 		if (posp)
 			*posp += 4;
@@ -136,7 +140,7 @@ STATIC inline int INIT unlz4(u8 *input, long in_len,
 			inp += 4;
 			size -= 4;
 		} else {
-			if (chunksize > lz4_compressbound(uncomp_chunksize)) {
+			if (chunksize > LZ4_compressBound(uncomp_chunksize)) {
 				error("chunk length is longer than allocated");
 				goto exit_2;
 			}
@@ -152,11 +156,14 @@ STATIC inline int INIT unlz4(u8 *input, long in_len,
 			out_len -= dest_len;
 		} else
 			dest_len = out_len;
-		ret = lz4_decompress(inp, &chunksize, outp, dest_len);
+
+		ret = LZ4_decompress_fast(inp, outp, dest_len);
+		chunksize = ret;
 #else
 		dest_len = uncomp_chunksize;
-		ret = lz4_decompress_unknownoutputsize(inp, chunksize, outp,
-				&dest_len);
+
+		ret = LZ4_decompress_safe(inp, outp, chunksize, dest_len);
+		dest_len = ret;
 #endif
 		if (ret < 0) {
 			error("Decoding failed");
@@ -184,6 +191,7 @@ STATIC inline int INIT unlz4(u8 *input, long in_len,
 		}
 	}
 
+exit_3:
 	ret = 0;
 exit_2:
 	if (!input)

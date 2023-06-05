@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * TCP NV: TCP with Congestion Avoidance
  *
@@ -24,7 +25,6 @@
  * 1) Add mechanism to deal with reverse congestion.
  */
 
-#include <linux/mm.h>
 #include <linux/module.h>
 #include <linux/math64.h>
 #include <net/tcp.h>
@@ -39,7 +39,7 @@
  * nv_cong_dec_mult	Decrease cwnd by X% (30%) of congestion when detected
  * nv_ssthresh_factor	On congestion set ssthresh to this * <desired cwnd> / 8
  * nv_rtt_factor	RTT averaging factor
- * nv_loss_dec_factor	Decrease cwnd by this (50%) when losses occur
+ * nv_loss_dec_factor	Decrease cwnd to this (80%) when losses occur
  * nv_dec_eval_min_calls	Wait this many RTT measurements before dec cwnd
  * nv_inc_eval_min_calls	Wait this many RTT measurements before inc cwnd
  * nv_ssthresh_eval_min_calls	Wait this many RTT measurements before stopping
@@ -61,7 +61,7 @@ static int nv_min_cwnd __read_mostly = 2;
 static int nv_cong_dec_mult __read_mostly = 30 * 128 / 100; /* = 30% */
 static int nv_ssthresh_factor __read_mostly = 8; /* = 1 */
 static int nv_rtt_factor __read_mostly = 128; /* = 1/2*old + 1/2*new */
-static int nv_loss_dec_factor __read_mostly = 512; /* => 50% */
+static int nv_loss_dec_factor __read_mostly = 819; /* => 80% */
 static int nv_cwnd_growth_rate_neg __read_mostly = 8;
 static int nv_cwnd_growth_rate_pos __read_mostly; /* 0 => fixed like Reno */
 static int nv_dec_eval_min_calls __read_mostly = 60;
@@ -86,7 +86,6 @@ struct tcpnv {
 				 * < 0 => less than 1 packet/RTT */
 	u8  available8;
 	u16 available16;
-	u32 loss_cwnd;	/* cwnd at last loss */
 	u8  nv_allow_cwnd_growth:1, /* whether cwnd can grow */
 		nv_reset:1,	    /* whether to reset values */
 		nv_catchup:1;	    /* whether we are growing because
@@ -102,6 +101,11 @@ struct tcpnv {
 	u32 nv_last_rtt;	/* last rtt */
 	u32 nv_min_rtt;		/* active min rtt. Used to determine slope */
 	u32 nv_min_rtt_new;	/* min rtt for future use */
+	u32 nv_base_rtt;        /* If non-zero it represents the threshold for
+				 * congestion */
+	u32 nv_lower_bound_rtt; /* Used in conjunction with nv_base_rtt. It is
+				 * set to 80% of nv_base_rtt. It helps reduce
+				 * unfairness between flows */
 	u32 nv_rtt_max_rate;	/* max rate seen during current RTT */
 	u32 nv_rtt_start_seq;	/* current RTT ends when packet arrives
 				 * acking beyond nv_rtt_start_seq */
@@ -121,7 +125,6 @@ static inline void tcpnv_reset(struct tcpnv *ca, struct sock *sk)
 	struct tcp_sock *tp = tcp_sk(sk);
 
 	ca->nv_reset = 0;
-	ca->loss_cwnd = 0;
 	ca->nv_no_cong_cnt = 0;
 	ca->nv_rtt_cnt = 0;
 	ca->nv_last_rtt = 0;
@@ -134,8 +137,23 @@ static inline void tcpnv_reset(struct tcpnv *ca, struct sock *sk)
 static void tcpnv_init(struct sock *sk)
 {
 	struct tcpnv *ca = inet_csk_ca(sk);
+	int base_rtt;
 
 	tcpnv_reset(ca, sk);
+
+	/* See if base_rtt is available from socket_ops bpf program.
+	 * It is meant to be used in environments, such as communication
+	 * within a datacenter, where we have reasonable estimates of
+	 * RTTs
+	 */
+	base_rtt = tcp_call_bpf(sk, BPF_SOCK_OPS_BASE_RTT, 0, NULL);
+	if (base_rtt > 0) {
+		ca->nv_base_rtt = base_rtt;
+		ca->nv_lower_bound_rtt = (base_rtt * 205) >> 8; /* 80% */
+	} else {
+		ca->nv_base_rtt = 0;
+		ca->nv_lower_bound_rtt = 0;
+	}
 
 	ca->nv_allow_cwnd_growth = 1;
 	ca->nv_min_rtt_reset_jiffies = jiffies + 2 * HZ;
@@ -144,6 +162,19 @@ static void tcpnv_init(struct sock *sk)
 	ca->nv_min_cwnd = NV_MIN_CWND;
 	ca->nv_catchup = 0;
 	ca->cwnd_growth_factor = 0;
+}
+
+/* If provided, apply upper (base_rtt) and lower (lower_bound_rtt)
+ * bounds to RTT.
+ */
+inline u32 nv_get_bounded_rtt(struct tcpnv *ca, u32 val)
+{
+	if (ca->nv_lower_bound_rtt > 0 && val < ca->nv_lower_bound_rtt)
+		return ca->nv_lower_bound_rtt;
+	else if (ca->nv_base_rtt > 0 && val > ca->nv_base_rtt)
+		return ca->nv_base_rtt;
+	else
+		return val;
 }
 
 static void tcpnv_cong_avoid(struct sock *sk, u32 ack, u32 acked)
@@ -166,10 +197,10 @@ static void tcpnv_cong_avoid(struct sock *sk, u32 ack, u32 acked)
 	}
 
 	if (ca->cwnd_growth_factor < 0) {
-		cnt = tp->snd_cwnd << -ca->cwnd_growth_factor;
+		cnt = tcp_snd_cwnd(tp) << -ca->cwnd_growth_factor;
 		tcp_cong_avoid_ai(tp, cnt, acked);
 	} else {
-		cnt = max(4U, tp->snd_cwnd >> ca->cwnd_growth_factor);
+		cnt = max(4U, tcp_snd_cwnd(tp) >> ca->cwnd_growth_factor);
 		tcp_cong_avoid_ai(tp, cnt, acked);
 	}
 }
@@ -177,17 +208,8 @@ static void tcpnv_cong_avoid(struct sock *sk, u32 ack, u32 acked)
 static u32 tcpnv_recalc_ssthresh(struct sock *sk)
 {
 	const struct tcp_sock *tp = tcp_sk(sk);
-	struct tcpnv *ca = inet_csk_ca(sk);
 
-	ca->loss_cwnd = tp->snd_cwnd;
-	return max((tp->snd_cwnd * nv_loss_dec_factor) >> 10, 2U);
-}
-
-static u32 tcpnv_undo_cwnd(struct sock *sk)
-{
-	struct tcpnv *ca = inet_csk_ca(sk);
-
-	return max(tcp_sk(sk)->snd_cwnd, ca->loss_cwnd);
+	return max((tcp_snd_cwnd(tp) * nv_loss_dec_factor) >> 10, 2U);
 }
 
 static void tcpnv_state(struct sock *sk, u8 new_state)
@@ -220,7 +242,7 @@ static void tcpnv_acked(struct sock *sk, const struct ack_sample *sample)
 	struct tcp_sock *tp = tcp_sk(sk);
 	struct tcpnv *ca = inet_csk_ca(sk);
 	unsigned long now = jiffies;
-	s64 rate64 = 0;
+	u64 rate64;
 	u32 rate, max_win, cwnd_by_slope;
 	u32 avg_rtt;
 	u32 bytes_acked = 0;
@@ -235,7 +257,7 @@ static void tcpnv_acked(struct sock *sk, const struct ack_sample *sample)
 		return;
 
 	/* Stop cwnd growth if we were in catch up mode */
-	if (ca->nv_catchup && tp->snd_cwnd >= nv_min_cwnd) {
+	if (ca->nv_catchup && tcp_snd_cwnd(tp) >= nv_min_cwnd) {
 		ca->nv_catchup = 0;
 		ca->nv_allow_cwnd_growth = 0;
 	}
@@ -262,8 +284,9 @@ static void tcpnv_acked(struct sock *sk, const struct ack_sample *sample)
 	}
 
 	/* rate in 100's bits per second */
-	rate64 = ((u64)sample->in_flight) * 8000000;
-	rate = (u32)div64_u64(rate64, (u64)(avg_rtt ?: 1) * 100);
+	rate64 = ((u64)sample->in_flight) * 80000;
+	do_div(rate64, avg_rtt ?: 1);
+	rate = (u32)rate64;
 
 	/* Remember the maximum rate seen during this RTT
 	 * Note: It may be more than one RTT. This function should be
@@ -275,6 +298,9 @@ static void tcpnv_acked(struct sock *sk, const struct ack_sample *sample)
 	/* We have valid information, increment counter */
 	if (ca->nv_eval_call_cnt < 255)
 		ca->nv_eval_call_cnt++;
+
+	/* Apply bounds to rtt. Only used to update min_rtt */
+	avg_rtt = nv_get_bounded_rtt(ca, avg_rtt);
 
 	/* update min rtt if necessary */
 	if (avg_rtt < ca->nv_min_rtt)
@@ -345,7 +371,7 @@ static void tcpnv_acked(struct sock *sk, const struct ack_sample *sample)
 		 * if cwnd < max_win, grow cwnd
 		 * else leave the same
 		 */
-		if (tp->snd_cwnd > max_win) {
+		if (tcp_snd_cwnd(tp) > max_win) {
 			/* there is congestion, check that it is ok
 			 * to make a CA decision
 			 * 1. We should have at least nv_dec_eval_min_calls
@@ -372,20 +398,20 @@ static void tcpnv_acked(struct sock *sk, const struct ack_sample *sample)
 			ca->nv_allow_cwnd_growth = 0;
 			tp->snd_ssthresh =
 				(nv_ssthresh_factor * max_win) >> 3;
-			if (tp->snd_cwnd - max_win > 2) {
+			if (tcp_snd_cwnd(tp) - max_win > 2) {
 				/* gap > 2, we do exponential cwnd decrease */
 				int dec;
 
-				dec = max(2U, ((tp->snd_cwnd - max_win) *
+				dec = max(2U, ((tcp_snd_cwnd(tp) - max_win) *
 					       nv_cong_dec_mult) >> 7);
-				tp->snd_cwnd -= dec;
+				tcp_snd_cwnd_set(tp, tcp_snd_cwnd(tp) - dec);
 			} else if (nv_cong_dec_mult > 0) {
-				tp->snd_cwnd = max_win;
+				tcp_snd_cwnd_set(tp, max_win);
 			}
 			if (ca->cwnd_growth_factor > 0)
 				ca->cwnd_growth_factor = 0;
 			ca->nv_no_cong_cnt = 0;
-		} else if (tp->snd_cwnd <= max_win - nv_pad_buffer) {
+		} else if (tcp_snd_cwnd(tp) <= max_win - nv_pad_buffer) {
 			/* There is no congestion, grow cwnd if allowed*/
 			if (ca->nv_eval_call_cnt < nv_inc_eval_min_calls)
 				return;
@@ -418,14 +444,14 @@ static void tcpnv_acked(struct sock *sk, const struct ack_sample *sample)
 		 * (it wasn't before, if it is now is because nv
 		 *  decreased it).
 		 */
-		if (tp->snd_cwnd < nv_min_cwnd)
-			tp->snd_cwnd = nv_min_cwnd;
+		if (tcp_snd_cwnd(tp) < nv_min_cwnd)
+			tcp_snd_cwnd_set(tp, nv_min_cwnd);
 	}
 }
 
 /* Extract info for Tcp socket info provided via netlink */
-size_t tcpnv_get_info(struct sock *sk, u32 ext, int *attr,
-		      union tcp_cc_info *info)
+static size_t tcpnv_get_info(struct sock *sk, u32 ext, int *attr,
+			     union tcp_cc_info *info)
 {
 	const struct tcpnv *ca = inet_csk_ca(sk);
 
@@ -440,14 +466,13 @@ size_t tcpnv_get_info(struct sock *sk, u32 ext, int *attr,
 	}
 	return 0;
 }
-EXPORT_SYMBOL_GPL(tcpnv_get_info);
 
 static struct tcp_congestion_ops tcpnv __read_mostly = {
 	.init		= tcpnv_init,
 	.ssthresh	= tcpnv_recalc_ssthresh,
 	.cong_avoid	= tcpnv_cong_avoid,
 	.set_state	= tcpnv_state,
-	.undo_cwnd	= tcpnv_undo_cwnd,
+	.undo_cwnd	= tcp_reno_undo_cwnd,
 	.pkts_acked     = tcpnv_acked,
 	.get_info	= tcpnv_get_info,
 

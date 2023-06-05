@@ -1,15 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2014, Sony Mobile Communications AB.
  * Copyright (c) 2012-2013, The Linux Foundation. All rights reserved.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 and
- * only version 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include <linux/module.h>
@@ -156,41 +148,41 @@ static const struct rpm_reg_parts rpm8960_ncp_parts = {
 /*
  * Physically available PMIC regulator voltage ranges
  */
-static const struct regulator_linear_range pldo_ranges[] = {
+static const struct linear_range pldo_ranges[] = {
 	REGULATOR_LINEAR_RANGE( 750000,   0,  59, 12500),
 	REGULATOR_LINEAR_RANGE(1500000,  60, 123, 25000),
 	REGULATOR_LINEAR_RANGE(3100000, 124, 160, 50000),
 };
 
-static const struct regulator_linear_range nldo_ranges[] = {
+static const struct linear_range nldo_ranges[] = {
 	REGULATOR_LINEAR_RANGE( 750000,   0,  63, 12500),
 };
 
-static const struct regulator_linear_range nldo1200_ranges[] = {
+static const struct linear_range nldo1200_ranges[] = {
 	REGULATOR_LINEAR_RANGE( 375000,   0,  59,  6250),
 	REGULATOR_LINEAR_RANGE( 750000,  60, 123, 12500),
 };
 
-static const struct regulator_linear_range smps_ranges[] = {
+static const struct linear_range smps_ranges[] = {
 	REGULATOR_LINEAR_RANGE( 375000,   0,  29, 12500),
 	REGULATOR_LINEAR_RANGE( 750000,  30,  89, 12500),
 	REGULATOR_LINEAR_RANGE(1500000,  90, 153, 25000),
 };
 
-static const struct regulator_linear_range ftsmps_ranges[] = {
+static const struct linear_range ftsmps_ranges[] = {
 	REGULATOR_LINEAR_RANGE( 350000,   0,   6, 50000),
 	REGULATOR_LINEAR_RANGE( 700000,   7,  63, 12500),
 	REGULATOR_LINEAR_RANGE(1500000,  64, 100, 50000),
 };
 
-static const struct regulator_linear_range smb208_ranges[] = {
+static const struct linear_range smb208_ranges[] = {
 	REGULATOR_LINEAR_RANGE( 375000,   0,  29, 12500),
 	REGULATOR_LINEAR_RANGE( 750000,  30,  89, 12500),
 	REGULATOR_LINEAR_RANGE(1500000,  90, 153, 25000),
 	REGULATOR_LINEAR_RANGE(3100000, 154, 234, 25000),
 };
 
-static const struct regulator_linear_range ncp_ranges[] = {
+static const struct linear_range ncp_ranges[] = {
 	REGULATOR_LINEAR_RANGE(1500000,   0,  31, 50000),
 };
 
@@ -415,7 +407,7 @@ static int rpm_reg_set_load(struct regulator_dev *rdev, int load_uA)
 	return ret;
 }
 
-static struct regulator_ops uV_ops = {
+static const struct regulator_ops uV_ops = {
 	.list_voltage = regulator_list_voltage_linear_range,
 
 	.set_voltage_sel = rpm_reg_set_uV_sel,
@@ -428,7 +420,7 @@ static struct regulator_ops uV_ops = {
 	.set_load = rpm_reg_set_load,
 };
 
-static struct regulator_ops mV_ops = {
+static const struct regulator_ops mV_ops = {
 	.list_voltage = regulator_list_voltage_linear_range,
 
 	.set_voltage_sel = rpm_reg_set_mV_sel,
@@ -441,7 +433,7 @@ static struct regulator_ops mV_ops = {
 	.set_load = rpm_reg_set_load,
 };
 
-static struct regulator_ops switch_ops = {
+static const struct regulator_ops switch_ops = {
 	.enable = rpm_reg_switch_enable,
 	.disable = rpm_reg_switch_disable,
 	.is_enabled = rpm_reg_is_enabled,
@@ -606,16 +598,6 @@ static const struct qcom_rpm_reg pm8921_smps = {
 	.desc.linear_ranges = smps_ranges,
 	.desc.n_linear_ranges = ARRAY_SIZE(smps_ranges),
 	.desc.n_voltages = 154,
-	.desc.ops = &uV_ops,
-	.parts = &rpm8960_smps_parts,
-	.supports_force_mode_auto = true,
-	.supports_force_mode_bypass = false,
-};
-
-static const struct qcom_rpm_reg pm8921_ftsmps = {
-	.desc.linear_ranges = ftsmps_ranges,
-	.desc.n_linear_ranges = ARRAY_SIZE(ftsmps_ranges),
-	.desc.n_voltages = 101,
 	.desc.ops = &uV_ops,
 	.parts = &rpm8960_smps_parts,
 	.supports_force_mode_auto = true,
@@ -820,6 +802,12 @@ static const struct rpm_regulator_data rpm_pm8018_regulators[] = {
 };
 
 static const struct rpm_regulator_data rpm_pm8058_regulators[] = {
+	{ "s0",   QCOM_RPM_PM8058_SMPS0,  &pm8058_smps, "vdd_s0" },
+	{ "s1",   QCOM_RPM_PM8058_SMPS1,  &pm8058_smps, "vdd_s1" },
+	{ "s2",   QCOM_RPM_PM8058_SMPS2,  &pm8058_smps, "vdd_s2" },
+	{ "s3",   QCOM_RPM_PM8058_SMPS3,  &pm8058_smps, "vdd_s3" },
+	{ "s4",   QCOM_RPM_PM8058_SMPS4,  &pm8058_smps, "vdd_s4" },
+
 	{ "l0",   QCOM_RPM_PM8058_LDO0,   &pm8058_nldo, "vdd_l0_l1_lvs"	},
 	{ "l1",   QCOM_RPM_PM8058_LDO1,   &pm8058_nldo, "vdd_l0_l1_lvs" },
 	{ "l2",   QCOM_RPM_PM8058_LDO2,   &pm8058_pldo, "vdd_l2_l11_l12" },
@@ -847,12 +835,6 @@ static const struct rpm_regulator_data rpm_pm8058_regulators[] = {
 	{ "l24",  QCOM_RPM_PM8058_LDO24,  &pm8058_nldo, "vdd_l23_l24_l25" },
 	{ "l25",  QCOM_RPM_PM8058_LDO25,  &pm8058_nldo, "vdd_l23_l24_l25" },
 
-	{ "s0",   QCOM_RPM_PM8058_SMPS0,  &pm8058_smps, "vdd_s0" },
-	{ "s1",   QCOM_RPM_PM8058_SMPS1,  &pm8058_smps, "vdd_s1" },
-	{ "s2",   QCOM_RPM_PM8058_SMPS2,  &pm8058_smps, "vdd_s2" },
-	{ "s3",   QCOM_RPM_PM8058_SMPS3,  &pm8058_smps, "vdd_s3" },
-	{ "s4",   QCOM_RPM_PM8058_SMPS4,  &pm8058_smps, "vdd_s4" },
-
 	{ "lvs0", QCOM_RPM_PM8058_LVS0, &pm8058_switch, "vdd_l0_l1_lvs" },
 	{ "lvs1", QCOM_RPM_PM8058_LVS1, &pm8058_switch, "vdd_l0_l1_lvs" },
 
@@ -861,6 +843,12 @@ static const struct rpm_regulator_data rpm_pm8058_regulators[] = {
 };
 
 static const struct rpm_regulator_data rpm_pm8901_regulators[] = {
+	{ "s0",   QCOM_RPM_PM8901_SMPS0, &pm8901_ftsmps, "vdd_s0" },
+	{ "s1",   QCOM_RPM_PM8901_SMPS1, &pm8901_ftsmps, "vdd_s1" },
+	{ "s2",   QCOM_RPM_PM8901_SMPS2, &pm8901_ftsmps, "vdd_s2" },
+	{ "s3",   QCOM_RPM_PM8901_SMPS3, &pm8901_ftsmps, "vdd_s3" },
+	{ "s4",   QCOM_RPM_PM8901_SMPS4, &pm8901_ftsmps, "vdd_s4" },
+
 	{ "l0",   QCOM_RPM_PM8901_LDO0, &pm8901_nldo, "vdd_l0" },
 	{ "l1",   QCOM_RPM_PM8901_LDO1, &pm8901_pldo, "vdd_l1" },
 	{ "l2",   QCOM_RPM_PM8901_LDO2, &pm8901_pldo, "vdd_l2" },
@@ -868,12 +856,6 @@ static const struct rpm_regulator_data rpm_pm8901_regulators[] = {
 	{ "l4",   QCOM_RPM_PM8901_LDO4, &pm8901_pldo, "vdd_l4" },
 	{ "l5",   QCOM_RPM_PM8901_LDO5, &pm8901_pldo, "vdd_l5" },
 	{ "l6",   QCOM_RPM_PM8901_LDO6, &pm8901_pldo, "vdd_l6" },
-
-	{ "s0",   QCOM_RPM_PM8901_SMPS0, &pm8901_ftsmps, "vdd_s0" },
-	{ "s1",   QCOM_RPM_PM8901_SMPS1, &pm8901_ftsmps, "vdd_s1" },
-	{ "s2",   QCOM_RPM_PM8901_SMPS2, &pm8901_ftsmps, "vdd_s2" },
-	{ "s3",   QCOM_RPM_PM8901_SMPS3, &pm8901_ftsmps, "vdd_s3" },
-	{ "s4",   QCOM_RPM_PM8901_SMPS4, &pm8901_ftsmps, "vdd_s4" },
 
 	{ "lvs0", QCOM_RPM_PM8901_LVS0, &pm8901_switch, "lvs0_in" },
 	{ "lvs1", QCOM_RPM_PM8901_LVS1, &pm8901_switch, "lvs1_in" },
@@ -933,12 +915,21 @@ static const struct rpm_regulator_data rpm_pm8921_regulators[] = {
 	{ }
 };
 
+static const struct rpm_regulator_data rpm_smb208_regulators[] = {
+	{ "s1a",  QCOM_RPM_SMB208_S1a, &smb208_smps, "vin_s1a" },
+	{ "s1b",  QCOM_RPM_SMB208_S1b, &smb208_smps, "vin_s1b" },
+	{ "s2a",  QCOM_RPM_SMB208_S2a, &smb208_smps, "vin_s2a" },
+	{ "s2b",  QCOM_RPM_SMB208_S2b, &smb208_smps, "vin_s2b" },
+	{ }
+};
+
 static const struct of_device_id rpm_of_match[] = {
 	{ .compatible = "qcom,rpm-pm8018-regulators",
 		.data = &rpm_pm8018_regulators },
 	{ .compatible = "qcom,rpm-pm8058-regulators", .data = &rpm_pm8058_regulators },
 	{ .compatible = "qcom,rpm-pm8901-regulators", .data = &rpm_pm8901_regulators },
 	{ .compatible = "qcom,rpm-pm8921-regulators", .data = &rpm_pm8921_regulators },
+	{ .compatible = "qcom,rpm-smb208-regulators", .data = &rpm_smb208_regulators },
 	{ }
 };
 MODULE_DEVICE_TABLE(of, rpm_of_match);
@@ -959,6 +950,11 @@ static int rpm_reg_probe(struct platform_device *pdev)
 	}
 
 	match = of_match_device(rpm_of_match, &pdev->dev);
+	if (!match) {
+		dev_err(&pdev->dev, "failed to match device\n");
+		return -ENODEV;
+	}
+
 	for (reg = match->data; reg->name; reg++) {
 		vreg = devm_kmalloc(&pdev->dev, sizeof(*vreg), GFP_KERNEL);
 		if (!vreg)

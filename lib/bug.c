@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
   Generic support for BUG()
 
@@ -5,8 +6,7 @@
 
   CONFIG_BUG - emit BUG traps.  Nothing happens without this.
   CONFIG_GENERIC_BUG - enable this code.
-  CONFIG_GENERIC_BUG_RELATIVE_POINTERS - use 32-bit pointers relative to
-	the containing struct bug_entry for bug_addr and file.
+  CONFIG_GENERIC_BUG_RELATIVE_POINTERS - use 32-bit relative pointers for bug_addr and file
   CONFIG_DEBUG_BUGVERBOSE - emit full file+line information for each BUG
 
   CONFIG_BUG and CONFIG_DEBUG_BUGVERBOSE are potentially user-settable
@@ -45,15 +45,18 @@
 #include <linux/kernel.h>
 #include <linux/bug.h>
 #include <linux/sched.h>
+#include <linux/rculist.h>
+#include <linux/ftrace.h>
+#include <linux/context_tracking.h>
 
-extern const struct bug_entry __start___bug_table[], __stop___bug_table[];
+extern struct bug_entry __start___bug_table[], __stop___bug_table[];
 
 static inline unsigned long bug_addr(const struct bug_entry *bug)
 {
-#ifndef CONFIG_GENERIC_BUG_RELATIVE_POINTERS
-	return bug->bug_addr;
+#ifdef CONFIG_GENERIC_BUG_RELATIVE_POINTERS
+	return (unsigned long)&bug->bug_addr_disp + bug->bug_addr_disp;
 #else
-	return (unsigned long)bug + bug->bug_addr_disp;
+	return bug->bug_addr;
 #endif
 }
 
@@ -61,10 +64,10 @@ static inline unsigned long bug_addr(const struct bug_entry *bug)
 /* Updates are protected by module mutex */
 static LIST_HEAD(module_bug_list);
 
-static const struct bug_entry *module_find_bug(unsigned long bugaddr)
+static struct bug_entry *module_find_bug(unsigned long bugaddr)
 {
 	struct module *mod;
-	const struct bug_entry *bug = NULL;
+	struct bug_entry *bug = NULL;
 
 	rcu_read_lock_sched();
 	list_for_each_entry_rcu(mod, &module_bug_list, bug_list) {
@@ -87,8 +90,6 @@ void module_bug_finalize(const Elf_Ehdr *hdr, const Elf_Shdr *sechdrs,
 {
 	char *secstrings;
 	unsigned int i;
-
-	lockdep_assert_held(&module_mutex);
 
 	mod->bug_table = NULL;
 	mod->num_bugs = 0;
@@ -115,21 +116,36 @@ void module_bug_finalize(const Elf_Ehdr *hdr, const Elf_Shdr *sechdrs,
 
 void module_bug_cleanup(struct module *mod)
 {
-	lockdep_assert_held(&module_mutex);
 	list_del_rcu(&mod->bug_list);
 }
 
 #else
 
-static inline const struct bug_entry *module_find_bug(unsigned long bugaddr)
+static inline struct bug_entry *module_find_bug(unsigned long bugaddr)
 {
 	return NULL;
 }
 #endif
 
-const struct bug_entry *find_bug(unsigned long bugaddr)
+void bug_get_file_line(struct bug_entry *bug, const char **file,
+		       unsigned int *line)
 {
-	const struct bug_entry *bug;
+#ifdef CONFIG_DEBUG_BUGVERBOSE
+#ifdef CONFIG_GENERIC_BUG_RELATIVE_POINTERS
+	*file = (const char *)&bug->file_disp + bug->file_disp;
+#else
+	*file = bug->file;
+#endif
+	*line = bug->line;
+#else
+	*file = NULL;
+	*line = 0;
+#endif
+}
+
+struct bug_entry *find_bug(unsigned long bugaddr)
+{
+	struct bug_entry *bug;
 
 	for (bug = __start___bug_table; bug < __stop___bug_table; ++bug)
 		if (bugaddr == bug_addr(bug))
@@ -138,32 +154,45 @@ const struct bug_entry *find_bug(unsigned long bugaddr)
 	return module_find_bug(bugaddr);
 }
 
-enum bug_trap_type report_bug(unsigned long bugaddr, struct pt_regs *regs)
+static enum bug_trap_type __report_bug(unsigned long bugaddr, struct pt_regs *regs)
 {
-	const struct bug_entry *bug;
+	struct bug_entry *bug;
 	const char *file;
-	unsigned line, warning;
+	unsigned line, warning, once, done;
 
 	if (!is_valid_bugaddr(bugaddr))
 		return BUG_TRAP_TYPE_NONE;
 
 	bug = find_bug(bugaddr);
+	if (!bug)
+		return BUG_TRAP_TYPE_NONE;
 
-	file = NULL;
-	line = 0;
-	warning = 0;
+	disable_trace_on_warning();
 
-	if (bug) {
-#ifdef CONFIG_DEBUG_BUGVERBOSE
-#ifndef CONFIG_GENERIC_BUG_RELATIVE_POINTERS
-		file = bug->file;
-#else
-		file = (const char *)bug + bug->file_disp;
-#endif
-		line = bug->line;
-#endif
-		warning = (bug->flags & BUGFLAG_WARNING) != 0;
+	bug_get_file_line(bug, &file, &line);
+
+	warning = (bug->flags & BUGFLAG_WARNING) != 0;
+	once = (bug->flags & BUGFLAG_ONCE) != 0;
+	done = (bug->flags & BUGFLAG_DONE) != 0;
+
+	if (warning && once) {
+		if (done)
+			return BUG_TRAP_TYPE_WARN;
+
+		/*
+		 * Since this is the only store, concurrency is not an issue.
+		 */
+		bug->flags |= BUGFLAG_DONE;
 	}
+
+	/*
+	 * BUG() and WARN_ON() families don't print a custom debug message
+	 * before triggering the exception handler, so we must add the
+	 * "cut here" line now. WARN() issues its own "cut here" before the
+	 * extra debugging message it writes before triggering the handler.
+	 */
+	if ((bug->flags & BUGFLAG_NO_CUT_HERE) == 0)
+		printk(KERN_DEFAULT CUT_HERE);
 
 	if (warning) {
 		/* this is a WARN_ON rather than BUG/BUG_ON */
@@ -172,8 +201,6 @@ enum bug_trap_type report_bug(unsigned long bugaddr, struct pt_regs *regs)
 		return BUG_TRAP_TYPE_WARN;
 	}
 
-	printk(KERN_DEFAULT "------------[ cut here ]------------\n");
-
 	if (file)
 		pr_crit("kernel BUG at %s:%u!\n", file, line);
 	else
@@ -181,4 +208,39 @@ enum bug_trap_type report_bug(unsigned long bugaddr, struct pt_regs *regs)
 			(void *)bugaddr);
 
 	return BUG_TRAP_TYPE_BUG;
+}
+
+enum bug_trap_type report_bug(unsigned long bugaddr, struct pt_regs *regs)
+{
+	enum bug_trap_type ret;
+	bool rcu = false;
+
+	rcu = warn_rcu_enter();
+	ret = __report_bug(bugaddr, regs);
+	warn_rcu_exit(rcu);
+
+	return ret;
+}
+
+static void clear_once_table(struct bug_entry *start, struct bug_entry *end)
+{
+	struct bug_entry *bug;
+
+	for (bug = start; bug < end; bug++)
+		bug->flags &= ~BUGFLAG_DONE;
+}
+
+void generic_bug_clear_once(void)
+{
+#ifdef CONFIG_MODULES
+	struct module *mod;
+
+	rcu_read_lock_sched();
+	list_for_each_entry_rcu(mod, &module_bug_list, bug_list)
+		clear_once_table(mod->bug_table,
+				 mod->bug_table + mod->num_bugs);
+	rcu_read_unlock_sched();
+#endif
+
+	clear_once_table(__start___bug_table, __stop___bug_table);
 }

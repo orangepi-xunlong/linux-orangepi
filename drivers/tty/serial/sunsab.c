@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /* sunsab.c: ASYNC Driver for the SIEMENS SAB82532 DUSCC.
  *
  * Copyright (C) 1997  Eddie C. Dost  (ecd@skynet.be)
@@ -34,14 +35,10 @@
 #include <linux/init.h>
 #include <linux/of_device.h>
 
-#include <asm/io.h>
+#include <linux/io.h>
 #include <asm/irq.h>
 #include <asm/prom.h>
 #include <asm/setup.h>
-
-#if defined(CONFIG_SERIAL_SUNSAB_CONSOLE) && defined(CONFIG_MAGIC_SYSRQ)
-#define SUPPORT_SYSRQ
-#endif
 
 #include <linux/serial_core.h>
 #include <linux/sunserialcore.h>
@@ -684,27 +681,23 @@ static void sunsab_convert_to_sab(struct uart_sunsab_port *up, unsigned int cfla
 				  unsigned int quot)
 {
 	unsigned char dafo;
-	int bits, n, m;
+	int n, m;
 
 	/* Byte size and parity */
 	switch (cflag & CSIZE) {
-	      case CS5: dafo = SAB82532_DAFO_CHL5; bits = 7; break;
-	      case CS6: dafo = SAB82532_DAFO_CHL6; bits = 8; break;
-	      case CS7: dafo = SAB82532_DAFO_CHL7; bits = 9; break;
-	      case CS8: dafo = SAB82532_DAFO_CHL8; bits = 10; break;
+	      case CS5: dafo = SAB82532_DAFO_CHL5; break;
+	      case CS6: dafo = SAB82532_DAFO_CHL6; break;
+	      case CS7: dafo = SAB82532_DAFO_CHL7; break;
+	      case CS8: dafo = SAB82532_DAFO_CHL8; break;
 	      /* Never happens, but GCC is too dumb to figure it out */
-	      default:  dafo = SAB82532_DAFO_CHL5; bits = 7; break;
+	      default:  dafo = SAB82532_DAFO_CHL5; break;
 	}
 
-	if (cflag & CSTOPB) {
+	if (cflag & CSTOPB)
 		dafo |= SAB82532_DAFO_STOP;
-		bits++;
-	}
 
-	if (cflag & PARENB) {
+	if (cflag & PARENB)
 		dafo |= SAB82532_DAFO_PARE;
-		bits++;
-	}
 
 	if (cflag & PARODD) {
 		dafo |= SAB82532_DAFO_PAR_ODD;
@@ -779,7 +772,7 @@ static void sunsab_convert_to_sab(struct uart_sunsab_port *up, unsigned int cfla
 
 /* port->lock is not held.  */
 static void sunsab_set_termios(struct uart_port *port, struct ktermios *termios,
-			       struct ktermios *old)
+			       const struct ktermios *old)
 {
 	struct uart_sunsab_port *up =
 		container_of(port, struct uart_sunsab_port, port);
@@ -819,7 +812,7 @@ static int sunsab_verify_port(struct uart_port *port, struct serial_struct *ser)
 	return -EINVAL;
 }
 
-static struct uart_ops sunsab_pops = {
+static const struct uart_ops sunsab_pops = {
 	.tx_empty	= sunsab_tx_empty,
 	.set_mctrl	= sunsab_set_mctrl,
 	.get_mctrl	= sunsab_get_mctrl,
@@ -849,7 +842,7 @@ static struct uart_sunsab_port *sunsab_ports;
 
 #ifdef CONFIG_SERIAL_SUNSAB_CONSOLE
 
-static void sunsab_console_putchar(struct uart_port *port, int c)
+static void sunsab_console_putchar(struct uart_port *port, unsigned char c)
 {
 	struct uart_sunsab_port *up =
 		container_of(port, struct uart_sunsab_port, port);
@@ -889,7 +882,7 @@ static int sunsab_console_setup(struct console *con, char *options)
 	 * though...
 	 */
 	if (up->port.type != PORT_SUNSAB)
-		return -1;
+		return -EINVAL;
 
 	printk("Console: ttyS%d (SAB82532)\n",
 	       (sunsab_reg.minor - 64) + con->index);
@@ -984,6 +977,7 @@ static int sunsab_init_one(struct uart_sunsab_port *up,
 
 	up->port.fifosize = SAB82532_XMIT_FIFO_SIZE;
 	up->port.iotype = UPIO_MEM;
+	up->port.has_sysrq = IS_ENABLED(CONFIG_SERIAL_SUNSAB_CONSOLE);
 
 	writeb(SAB82532_IPC_IC_ACT_LOW, &up->regs->w.ipc);
 
@@ -1124,8 +1118,9 @@ static int __init sunsab_init(void)
 	}
 
 	if (num_channels) {
-		sunsab_ports = kzalloc(sizeof(struct uart_sunsab_port) *
-				       num_channels, GFP_KERNEL);
+		sunsab_ports = kcalloc(num_channels,
+				       sizeof(struct uart_sunsab_port),
+				       GFP_KERNEL);
 		if (!sunsab_ports)
 			return -ENOMEM;
 
@@ -1138,7 +1133,13 @@ static int __init sunsab_init(void)
 		}
 	}
 
-	return platform_driver_register(&sab_driver);
+	err = platform_driver_register(&sab_driver);
+	if (err) {
+		kfree(sunsab_ports);
+		sunsab_ports = NULL;
+	}
+
+	return err;
 }
 
 static void __exit sunsab_exit(void)

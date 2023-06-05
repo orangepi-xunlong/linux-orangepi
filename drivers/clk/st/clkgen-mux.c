@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * clkgen-mux.c: ST GEN-MUX Clock driver
  *
@@ -5,15 +6,10 @@
  *
  * Authors: Stephen Gallimore <stephen.gallimore@st.com>
  *	    Pankaj Dev <pankaj.dev@st.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
  */
 
 #include <linux/slab.h>
+#include <linux/io.h>
 #include <linux/of_address.h>
 #include <linux/clk.h>
 #include <linux/clk-provider.h>
@@ -60,11 +56,21 @@ static void __init st_of_clkgen_mux_setup(struct device_node *np,
 	void __iomem *reg;
 	const char **parents;
 	int num_parents = 0;
+	struct device_node *parent_np;
 
+	/*
+	 * First check for reg property within the node to keep backward
+	 * compatibility, then if reg doesn't exist look at the parent node
+	 */
 	reg = of_iomap(np, 0);
 	if (!reg) {
-		pr_err("%s: Failed to get base address\n", __func__);
-		return;
+		parent_np = of_get_parent(np);
+		reg = of_iomap(parent_np, 0);
+		of_node_put(parent_np);
+		if (!reg) {
+			pr_err("%s: Failed to get base address\n", __func__);
+			return;
+		}
 	}
 
 	parents = clkgen_mux_get_parents(np, &num_parents);

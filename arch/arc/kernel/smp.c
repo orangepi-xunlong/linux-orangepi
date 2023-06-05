@@ -1,9 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2004, 2007-2010, 2011-2012 Synopsys, Inc. (www.synopsys.com)
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  *
  * RajeshwarR: Dec 11, 2007
  *   -- Added support for Inter Processor Interrupts
@@ -13,7 +10,7 @@
  */
 
 #include <linux/spinlock.h>
-#include <linux/sched.h>
+#include <linux/sched/mm.h>
 #include <linux/interrupt.h>
 #include <linux/profile.h>
 #include <linux/mm.h>
@@ -23,23 +20,63 @@
 #include <linux/cpumask.h>
 #include <linux/reboot.h>
 #include <linux/irqdomain.h>
+#include <linux/export.h>
+#include <linux/of_fdt.h>
+
 #include <asm/processor.h>
 #include <asm/setup.h>
 #include <asm/mach_desc.h>
 
 #ifndef CONFIG_ARC_HAS_LLSC
 arch_spinlock_t smp_atomic_ops_lock = __ARCH_SPIN_LOCK_UNLOCKED;
-arch_spinlock_t smp_bitops_lock = __ARCH_SPIN_LOCK_UNLOCKED;
+
+EXPORT_SYMBOL_GPL(smp_atomic_ops_lock);
 #endif
 
 struct plat_smp_ops  __weak plat_smp_ops;
 
-/* XXX: per cpu ? Only needed once in early seconday boot */
+/* XXX: per cpu ? Only needed once in early secondary boot */
 struct task_struct *secondary_idle_tsk;
 
 /* Called from start_kernel */
 void __init smp_prepare_boot_cpu(void)
 {
+}
+
+static int __init arc_get_cpu_map(const char *name, struct cpumask *cpumask)
+{
+	unsigned long dt_root = of_get_flat_dt_root();
+	const char *buf;
+
+	buf = of_get_flat_dt_prop(dt_root, name, NULL);
+	if (!buf)
+		return -EINVAL;
+
+	if (cpulist_parse(buf, cpumask))
+		return -EINVAL;
+
+	return 0;
+}
+
+/*
+ * Read from DeviceTree and setup cpu possible mask. If there is no
+ * "possible-cpus" property in DeviceTree pretend all [0..NR_CPUS-1] exist.
+ */
+static void __init arc_init_cpu_possible(void)
+{
+	struct cpumask cpumask;
+
+	if (arc_get_cpu_map("possible-cpus", &cpumask)) {
+		pr_warn("Failed to get possible-cpus from dtb, pretending all %u cpus exist\n",
+			NR_CPUS);
+
+		cpumask_setall(&cpumask);
+	}
+
+	if (!cpumask_test_cpu(0, &cpumask))
+		panic("Master cpu (cpu[0]) is missed in cpu possible mask!");
+
+	init_cpu_possible(&cpumask);
 }
 
 /*
@@ -53,10 +90,7 @@ void __init smp_prepare_boot_cpu(void)
  */
 void __init smp_init_cpus(void)
 {
-	unsigned int i;
-
-	for (i = 0; i < NR_CPUS; i++)
-		set_cpu_possible(i, true);
+	arc_init_cpu_possible();
 
 	if (plat_smp_ops.init_early_smp)
 		plat_smp_ops.init_early_smp();
@@ -65,16 +99,12 @@ void __init smp_init_cpus(void)
 /* called from init ( ) =>  process 1 */
 void __init smp_prepare_cpus(unsigned int max_cpus)
 {
-	int i;
-
 	/*
 	 * if platform didn't set the present map already, do it now
 	 * boot cpu is set to present already by init/main.c
 	 */
-	if (num_present_cpus() <= 1) {
-		for (i = 0; i < max_cpus; i++)
-			set_cpu_present(i, true);
-	}
+	if (num_present_cpus() <= 1)
+		init_cpu_present(cpu_possible_mask);
 }
 
 void __init smp_cpus_done(unsigned int max_cpus)
@@ -139,8 +169,8 @@ void start_kernel_secondary(void)
 	/* MMU, Caches, Vector Table, Interrupts etc */
 	setup_processor();
 
-	atomic_inc(&mm->mm_users);
-	atomic_inc(&mm->mm_count);
+	mmget(mm);
+	mmgrab(mm);
 	current->active_mm = mm;
 	cpumask_set_cpu(cpu, mm_cpumask(mm));
 
@@ -157,7 +187,6 @@ void start_kernel_secondary(void)
 	pr_info("## CPU%u LIVE ##: Executing Code...\n", cpu);
 
 	local_irq_enable();
-	preempt_disable();
 	cpu_startup_entry(CPUHP_AP_ONLINE_IDLE);
 }
 
@@ -194,21 +223,13 @@ int __cpu_up(unsigned int cpu, struct task_struct *idle)
 	}
 
 	if (!cpu_online(cpu)) {
-		pr_info("Timeout: CPU%u FAILED to comeup !!!\n", cpu);
+		pr_info("Timeout: CPU%u FAILED to come up !!!\n", cpu);
 		return -1;
 	}
 
 	secondary_idle_tsk = NULL;
 
 	return 0;
-}
-
-/*
- * not supported here
- */
-int setup_profiling_timer(unsigned int multiplier)
-{
-	return -EINVAL;
 }
 
 /*****************************************************************************/
@@ -245,14 +266,14 @@ static void ipi_send_msg_one(int cpu, enum ipi_msg_type msg)
 	 * and read back old value
 	 */
 	do {
-		new = old = ACCESS_ONCE(*ipi_data_ptr);
+		new = old = *ipi_data_ptr;
 		new |= 1U << msg;
 	} while (cmpxchg(ipi_data_ptr, old, new) != old);
 
 	/*
 	 * Call the platform specific IPI kick function, but avoid if possible:
 	 * Only do so if there's no pending msg from other concurrent sender(s).
-	 * Otherwise, recevier will see this msg as well when it takes the
+	 * Otherwise, receiver will see this msg as well when it takes the
 	 * IPI corresponding to that msg. This is true, even if it is already in
 	 * IPI handler, because !@old means it has not yet dequeued the msg(s)
 	 * so @new msg can be a free-loader
@@ -364,7 +385,7 @@ irqreturn_t do_IPI(int irq, void *dev_id)
  * API called by platform code to hookup arch-common ISR to their IPI IRQ
  *
  * Note: If IPI is provided by platform (vs. say ARC MCIP), their intc setup/map
- * function needs to call call irq_set_percpu_devid() for IPI IRQ, otherwise
+ * function needs to call irq_set_percpu_devid() for IPI IRQ, otherwise
  * request_percpu_irq() below will fail
  */
 static DEFINE_PER_CPU(int, ipi_dev);

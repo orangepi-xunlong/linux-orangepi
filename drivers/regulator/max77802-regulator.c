@@ -1,32 +1,20 @@
-/*
- * max77802.c - Regulator driver for the Maxim 77802
- *
- * Copyright (C) 2013-2014 Google, Inc
- * Simon Glass <sjg@chromium.org>
- *
- * Copyright (C) 2012 Samsung Electronics
- * Chiwoong Byun <woong.byun@samsung.com>
- * Jonghwa Lee <jonghwa3.lee@samsung.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * This driver is based on max8997.c
- */
+// SPDX-License-Identifier: GPL-2.0+
+//
+// max77802.c - Regulator driver for the Maxim 77802
+//
+// Copyright (C) 2013-2014 Google, Inc
+// Simon Glass <sjg@chromium.org>
+//
+// Copyright (C) 2012 Samsung Electronics
+// Chiwoong Byun <woong.byun@samsung.com>
+// Jonghwa Lee <jonghwa3.lee@samsung.com>
+//
+// This driver is based on max8997.c
 
 #include <linux/kernel.h>
 #include <linux/bug.h>
 #include <linux/err.h>
-#include <linux/gpio.h>
 #include <linux/slab.h>
-#include <linux/gpio/consumer.h>
 #include <linux/module.h>
 #include <linux/platform_device.h>
 #include <linux/regulator/driver.h>
@@ -55,15 +43,14 @@
 #define MAX77802_OFF_PWRREQ		0x1
 #define MAX77802_LP_PWRREQ		0x2
 
-/* MAX77802 has two register formats: 2-bit and 4-bit */
-static const unsigned int ramp_table_77802_2bit[] = {
+static const unsigned int max77802_buck234_ramp_table[] = {
 	12500,
 	25000,
 	50000,
 	100000,
 };
 
-static unsigned int ramp_table_77802_4bit[] = {
+static const unsigned int max77802_buck16_ramp_table[] = {
 	1000,	2000,	3030,	4000,
 	5000,	5880,	7140,	8330,
 	9090,	10000,	11110,	12500,
@@ -107,9 +94,11 @@ static int max77802_set_suspend_disable(struct regulator_dev *rdev)
 {
 	unsigned int val = MAX77802_OFF_PWRREQ;
 	struct max77802_regulator_prv *max77802 = rdev_get_drvdata(rdev);
-	int id = rdev_get_id(rdev);
+	unsigned int id = rdev_get_id(rdev);
 	int shift = max77802_get_opmode_shift(id);
 
+	if (WARN_ON_ONCE(id >= ARRAY_SIZE(max77802->opmode)))
+		return -EINVAL;
 	max77802->opmode[id] = val;
 	return regmap_update_bits(rdev->regmap, rdev->desc->enable_reg,
 				  rdev->desc->enable_mask, val << shift);
@@ -123,7 +112,7 @@ static int max77802_set_suspend_disable(struct regulator_dev *rdev)
 static int max77802_set_mode(struct regulator_dev *rdev, unsigned int mode)
 {
 	struct max77802_regulator_prv *max77802 = rdev_get_drvdata(rdev);
-	int id = rdev_get_id(rdev);
+	unsigned int id = rdev_get_id(rdev);
 	unsigned int val;
 	int shift = max77802_get_opmode_shift(id);
 
@@ -140,6 +129,9 @@ static int max77802_set_mode(struct regulator_dev *rdev, unsigned int mode)
 		return -EINVAL;
 	}
 
+	if (WARN_ON_ONCE(id >= ARRAY_SIZE(max77802->opmode)))
+		return -EINVAL;
+
 	max77802->opmode[id] = val;
 	return regmap_update_bits(rdev->regmap, rdev->desc->enable_reg,
 				  rdev->desc->enable_mask, val << shift);
@@ -148,8 +140,10 @@ static int max77802_set_mode(struct regulator_dev *rdev, unsigned int mode)
 static unsigned max77802_get_mode(struct regulator_dev *rdev)
 {
 	struct max77802_regulator_prv *max77802 = rdev_get_drvdata(rdev);
-	int id = rdev_get_id(rdev);
+	unsigned int id = rdev_get_id(rdev);
 
+	if (WARN_ON_ONCE(id >= ARRAY_SIZE(max77802->opmode)))
+		return -EINVAL;
 	return max77802_map_mode(max77802->opmode[id]);
 }
 
@@ -173,9 +167,12 @@ static int max77802_set_suspend_mode(struct regulator_dev *rdev,
 				     unsigned int mode)
 {
 	struct max77802_regulator_prv *max77802 = rdev_get_drvdata(rdev);
-	int id = rdev_get_id(rdev);
+	unsigned int id = rdev_get_id(rdev);
 	unsigned int val;
 	int shift = max77802_get_opmode_shift(id);
+
+	if (WARN_ON_ONCE(id >= ARRAY_SIZE(max77802->opmode)))
+		return -EINVAL;
 
 	/*
 	 * If the regulator has been disabled for suspend
@@ -222,9 +219,11 @@ static int max77802_set_suspend_mode(struct regulator_dev *rdev,
 static int max77802_enable(struct regulator_dev *rdev)
 {
 	struct max77802_regulator_prv *max77802 = rdev_get_drvdata(rdev);
-	int id = rdev_get_id(rdev);
+	unsigned int id = rdev_get_id(rdev);
 	int shift = max77802_get_opmode_shift(id);
 
+	if (WARN_ON_ONCE(id >= ARRAY_SIZE(max77802->opmode)))
+		return -EINVAL;
 	if (max77802->opmode[id] == MAX77802_OFF_PWRREQ)
 		max77802->opmode[id] = MAX77802_OPMODE_NORMAL;
 
@@ -233,62 +232,10 @@ static int max77802_enable(struct regulator_dev *rdev)
 				  max77802->opmode[id] << shift);
 }
 
-static int max77802_find_ramp_value(struct regulator_dev *rdev,
-				    const unsigned int limits[], int size,
-				    unsigned int ramp_delay)
-{
-	int i;
-
-	for (i = 0; i < size; i++) {
-		if (ramp_delay <= limits[i])
-			return i;
-	}
-
-	/* Use maximum value for no ramp control */
-	dev_warn(&rdev->dev, "%s: ramp_delay: %d not supported, setting 100000\n",
-		 rdev->desc->name, ramp_delay);
-	return size - 1;
-}
-
-/* Used for BUCKs 2-4 */
-static int max77802_set_ramp_delay_2bit(struct regulator_dev *rdev,
-					int ramp_delay)
-{
-	int id = rdev_get_id(rdev);
-	unsigned int ramp_value;
-
-	if (id > MAX77802_BUCK4) {
-			dev_warn(&rdev->dev,
-				 "%s: regulator: ramp delay not supported\n",
-				 rdev->desc->name);
-		return -EINVAL;
-	}
-	ramp_value = max77802_find_ramp_value(rdev, ramp_table_77802_2bit,
-				ARRAY_SIZE(ramp_table_77802_2bit), ramp_delay);
-
-	return regmap_update_bits(rdev->regmap, rdev->desc->enable_reg,
-				  MAX77802_RAMP_RATE_MASK_2BIT,
-				  ramp_value << MAX77802_RAMP_RATE_SHIFT_2BIT);
-}
-
-/* For BUCK1, 6 */
-static int max77802_set_ramp_delay_4bit(struct regulator_dev *rdev,
-					    int ramp_delay)
-{
-	unsigned int ramp_value;
-
-	ramp_value = max77802_find_ramp_value(rdev, ramp_table_77802_4bit,
-				ARRAY_SIZE(ramp_table_77802_4bit), ramp_delay);
-
-	return regmap_update_bits(rdev->regmap, rdev->desc->enable_reg,
-				  MAX77802_RAMP_RATE_MASK_4BIT,
-				  ramp_value << MAX77802_RAMP_RATE_SHIFT_4BIT);
-}
-
 /*
  * LDOs 2, 4-19, 22-35
  */
-static struct regulator_ops max77802_ldo_ops_logic1 = {
+static const struct regulator_ops max77802_ldo_ops_logic1 = {
 	.list_voltage		= regulator_list_voltage_linear,
 	.map_voltage		= regulator_map_voltage_linear,
 	.is_enabled		= regulator_is_enabled_regmap,
@@ -304,7 +251,7 @@ static struct regulator_ops max77802_ldo_ops_logic1 = {
 /*
  * LDOs 1, 20, 21, 3
  */
-static struct regulator_ops max77802_ldo_ops_logic2 = {
+static const struct regulator_ops max77802_ldo_ops_logic2 = {
 	.list_voltage		= regulator_list_voltage_linear,
 	.map_voltage		= regulator_map_voltage_linear,
 	.is_enabled		= regulator_is_enabled_regmap,
@@ -319,7 +266,7 @@ static struct regulator_ops max77802_ldo_ops_logic2 = {
 };
 
 /* BUCKS 1, 6 */
-static struct regulator_ops max77802_buck_16_dvs_ops = {
+static const struct regulator_ops max77802_buck_16_dvs_ops = {
 	.list_voltage		= regulator_list_voltage_linear,
 	.map_voltage		= regulator_map_voltage_linear,
 	.is_enabled		= regulator_is_enabled_regmap,
@@ -328,12 +275,12 @@ static struct regulator_ops max77802_buck_16_dvs_ops = {
 	.get_voltage_sel	= regulator_get_voltage_sel_regmap,
 	.set_voltage_sel	= regulator_set_voltage_sel_regmap,
 	.set_voltage_time_sel	= regulator_set_voltage_time_sel,
-	.set_ramp_delay		= max77802_set_ramp_delay_4bit,
+	.set_ramp_delay		= regulator_set_ramp_delay_regmap,
 	.set_suspend_disable	= max77802_set_suspend_disable,
 };
 
 /* BUCKs 2-4 */
-static struct regulator_ops max77802_buck_234_ops = {
+static const struct regulator_ops max77802_buck_234_ops = {
 	.list_voltage		= regulator_list_voltage_linear,
 	.map_voltage		= regulator_map_voltage_linear,
 	.is_enabled		= regulator_is_enabled_regmap,
@@ -342,13 +289,13 @@ static struct regulator_ops max77802_buck_234_ops = {
 	.get_voltage_sel	= regulator_get_voltage_sel_regmap,
 	.set_voltage_sel	= regulator_set_voltage_sel_regmap,
 	.set_voltage_time_sel	= regulator_set_voltage_time_sel,
-	.set_ramp_delay		= max77802_set_ramp_delay_2bit,
+	.set_ramp_delay		= regulator_set_ramp_delay_regmap,
 	.set_suspend_disable	= max77802_set_suspend_disable,
 	.set_suspend_mode	= max77802_set_suspend_mode,
 };
 
 /* BUCKs 5, 7-10 */
-static struct regulator_ops max77802_buck_dvs_ops = {
+static const struct regulator_ops max77802_buck_dvs_ops = {
 	.list_voltage		= regulator_list_voltage_linear,
 	.map_voltage		= regulator_map_voltage_linear,
 	.is_enabled		= regulator_is_enabled_regmap,
@@ -357,7 +304,6 @@ static struct regulator_ops max77802_buck_dvs_ops = {
 	.get_voltage_sel	= regulator_get_voltage_sel_regmap,
 	.set_voltage_sel	= regulator_set_voltage_sel_regmap,
 	.set_voltage_time_sel	= regulator_set_voltage_time_sel,
-	.set_ramp_delay		= max77802_set_ramp_delay_2bit,
 	.set_suspend_disable	= max77802_set_suspend_disable,
 };
 
@@ -421,6 +367,10 @@ static struct regulator_ops max77802_buck_dvs_ops = {
 	.vsel_mask	= MAX77802_DVS_VSEL_MASK,			\
 	.enable_reg	= MAX77802_REG_BUCK ## num ## CTRL,		\
 	.enable_mask	= MAX77802_OPMODE_MASK,				\
+	.ramp_reg	= MAX77802_REG_BUCK ## num ## CTRL,		\
+	.ramp_mask	= MAX77802_RAMP_RATE_MASK_4BIT,			\
+	.ramp_delay_table = max77802_buck16_ramp_table,			\
+	.n_ramp_values	= ARRAY_SIZE(max77802_buck16_ramp_table),	\
 	.of_map_mode	= max77802_map_mode,				\
 }
 
@@ -443,6 +393,10 @@ static struct regulator_ops max77802_buck_dvs_ops = {
 	.enable_reg	= MAX77802_REG_BUCK ## num ## CTRL1,		\
 	.enable_mask	= MAX77802_OPMODE_MASK <<			\
 				MAX77802_OPMODE_BUCK234_SHIFT,		\
+	.ramp_reg	= MAX77802_REG_BUCK ## num ## CTRL1,		\
+	.ramp_mask	= MAX77802_RAMP_RATE_MASK_2BIT,			\
+	.ramp_delay_table = max77802_buck234_ramp_table,		\
+	.n_ramp_values	= ARRAY_SIZE(max77802_buck234_ramp_table),	\
 	.of_map_mode	= max77802_map_mode,				\
 }
 
@@ -553,7 +507,7 @@ static int max77802_pmic_probe(struct platform_device *pdev)
 
 	for (i = 0; i < MAX77802_REG_MAX; i++) {
 		struct regulator_dev *rdev;
-		int id = regulators[i].id;
+		unsigned int id = regulators[i].id;
 		int shift = max77802_get_opmode_shift(id);
 		int ret;
 
@@ -571,10 +525,12 @@ static int max77802_pmic_probe(struct platform_device *pdev)
 		 * the hardware reports OFF as the regulator operating mode.
 		 * Default to operating mode NORMAL in that case.
 		 */
-		if (val == MAX77802_STATUS_OFF)
-			max77802->opmode[id] = MAX77802_OPMODE_NORMAL;
-		else
-			max77802->opmode[id] = val;
+		if (id < ARRAY_SIZE(max77802->opmode)) {
+			if (val == MAX77802_STATUS_OFF)
+				max77802->opmode[id] = MAX77802_OPMODE_NORMAL;
+			else
+				max77802->opmode[id] = val;
+		}
 
 		rdev = devm_regulator_register(&pdev->dev,
 					       &regulators[i], &config);

@@ -1,23 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /* OMAP SSI driver.
  *
  * Copyright (C) 2010 Nokia Corporation. All rights reserved.
  * Copyright (C) 2014 Sebastian Reichel <sre@kernel.org>
  *
  * Contact: Carlos Chinea <carlos.chinea@nokia.com>
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * version 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA
- * 02110-1301 USA
  */
 
 #include <linux/compiler.h>
@@ -48,7 +35,7 @@
 static DEFINE_IDA(platform_omap_ssi_ida);
 
 #ifdef CONFIG_DEBUG_FS
-static int ssi_debug_show(struct seq_file *m, void *p __maybe_unused)
+static int ssi_regs_show(struct seq_file *m, void *p __maybe_unused)
 {
 	struct hsi_controller *ssi = m->private;
 	struct omap_ssi_controller *omap_ssi = hsi_controller_drvdata(ssi);
@@ -63,7 +50,7 @@ static int ssi_debug_show(struct seq_file *m, void *p __maybe_unused)
 	return 0;
 }
 
-static int ssi_debug_gdd_show(struct seq_file *m, void *p __maybe_unused)
+static int ssi_gdd_regs_show(struct seq_file *m, void *p __maybe_unused)
 {
 	struct hsi_controller *ssi = m->private;
 	struct omap_ssi_controller *omap_ssi = hsi_controller_drvdata(ssi);
@@ -117,29 +104,8 @@ static int ssi_debug_gdd_show(struct seq_file *m, void *p __maybe_unused)
 	return 0;
 }
 
-static int ssi_regs_open(struct inode *inode, struct file *file)
-{
-	return single_open(file, ssi_debug_show, inode->i_private);
-}
-
-static int ssi_gdd_regs_open(struct inode *inode, struct file *file)
-{
-	return single_open(file, ssi_debug_gdd_show, inode->i_private);
-}
-
-static const struct file_operations ssi_regs_fops = {
-	.open		= ssi_regs_open,
-	.read		= seq_read,
-	.llseek		= seq_lseek,
-	.release	= single_release,
-};
-
-static const struct file_operations ssi_gdd_regs_fops = {
-	.open		= ssi_gdd_regs_open,
-	.read		= seq_read,
-	.llseek		= seq_lseek,
-	.release	= single_release,
-};
+DEFINE_SHOW_ATTRIBUTE(ssi_regs);
+DEFINE_SHOW_ATTRIBUTE(ssi_gdd_regs);
 
 static int ssi_debug_add_ctrl(struct hsi_controller *ssi)
 {
@@ -330,11 +296,11 @@ static int ssi_clk_event(struct notifier_block *nb, unsigned long event,
 		break;
 	case ABORT_RATE_CHANGE:
 		dev_dbg(&ssi->device, "abort rate change\n");
-		/* Fall through */
+		fallthrough;
 	case POST_RATE_CHANGE:
 		dev_dbg(&ssi->device, "post rate change (%lu -> %lu)\n",
 			clk_data->old_rate, clk_data->new_rate);
-		omap_ssi->fck_rate = DIV_ROUND_CLOSEST(clk_data->new_rate, 1000); /* KHz */
+		omap_ssi->fck_rate = DIV_ROUND_CLOSEST(clk_data->new_rate, 1000); /* kHz */
 
 		for (i = 0; i < ssi->num_ports; i++) {
 			omap_port = omap_ssi->port[i];
@@ -384,14 +350,12 @@ static int ssi_add_controller(struct hsi_controller *ssi,
 	int err;
 
 	omap_ssi = devm_kzalloc(&ssi->device, sizeof(*omap_ssi), GFP_KERNEL);
-	if (!omap_ssi) {
-		dev_err(&pd->dev, "not enough memory for omap ssi\n");
+	if (!omap_ssi)
 		return -ENOMEM;
-	}
 
 	err = ida_simple_get(&platform_omap_ssi_ida, 0, 0, GFP_KERNEL);
 	if (err < 0)
-		goto out_err;
+		return err;
 	ssi->id = err;
 
 	ssi->owner = THIS_MODULE;
@@ -406,10 +370,8 @@ static int ssi_add_controller(struct hsi_controller *ssi,
 	if (err < 0)
 		goto out_err;
 	err = platform_get_irq_byname(pd, "gdd_mpu");
-	if (err < 0) {
-		dev_err(&pd->dev, "GDD IRQ resource missing\n");
+	if (err < 0)
 		goto out_err;
-	}
 	omap_ssi->gdd_irq = err;
 	tasklet_init(&omap_ssi->gdd_tasklet, ssi_gdd_tasklet,
 							(unsigned long)ssi);
@@ -421,8 +383,8 @@ static int ssi_add_controller(struct hsi_controller *ssi,
 		goto out_err;
 	}
 
-	omap_ssi->port = devm_kzalloc(&ssi->device,
-		sizeof(struct omap_ssi_port *) * ssi->num_ports, GFP_KERNEL);
+	omap_ssi->port = devm_kcalloc(&ssi->device, ssi->num_ports,
+				      sizeof(*omap_ssi->port), GFP_KERNEL);
 	if (!omap_ssi->port) {
 		err = -ENOMEM;
 		goto out_err;
@@ -462,16 +424,16 @@ static int ssi_hw_init(struct hsi_controller *ssi)
 	struct omap_ssi_controller *omap_ssi = hsi_controller_drvdata(ssi);
 	int err;
 
-	err = pm_runtime_get_sync(ssi->device.parent);
+	err = pm_runtime_resume_and_get(ssi->device.parent);
 	if (err < 0) {
 		dev_err(&ssi->device, "runtime PM failed %d\n", err);
 		return err;
 	}
-	/* Reseting GDD */
+	/* Resetting GDD */
 	writel_relaxed(SSI_SWRESET, omap_ssi->gdd + SSI_GDD_GRST_REG);
-	/* Get FCK rate in KHz */
+	/* Get FCK rate in kHz */
 	omap_ssi->fck_rate = DIV_ROUND_CLOSEST(ssi_get_clk_rate(ssi), 1000);
-	dev_dbg(&ssi->device, "SSI fck rate %lu KHz\n", omap_ssi->fck_rate);
+	dev_dbg(&ssi->device, "SSI fck rate %lu kHz\n", omap_ssi->fck_rate);
 
 	writel_relaxed(SSI_CLK_AUTOGATING_ON, omap_ssi->sys + SSI_GDD_GCR_REG);
 	omap_ssi->gdd_gcr = SSI_CLK_AUTOGATING_ON;
@@ -540,8 +502,10 @@ static int ssi_probe(struct platform_device *pd)
 	platform_set_drvdata(pd, ssi);
 
 	err = ssi_add_controller(ssi, pd);
-	if (err < 0)
+	if (err < 0) {
+		hsi_put_controller(ssi);
 		goto out1;
+	}
 
 	pm_runtime_enable(&pd->dev);
 
@@ -562,6 +526,7 @@ static int ssi_probe(struct platform_device *pd)
 		if (!childpdev) {
 			err = -ENODEV;
 			dev_err(&pd->dev, "failed to create ssi controller port\n");
+			of_node_put(child);
 			goto out3;
 		}
 	}
@@ -573,9 +538,9 @@ out3:
 	device_for_each_child(&pd->dev, NULL, ssi_remove_ports);
 out2:
 	ssi_remove_controller(ssi);
+	pm_runtime_disable(&pd->dev);
 out1:
 	platform_set_drvdata(pd, NULL);
-	pm_runtime_disable(&pd->dev);
 
 	return err;
 }
@@ -666,7 +631,13 @@ static int __init ssi_init(void) {
 	if (ret)
 		return ret;
 
-	return platform_driver_register(&ssi_port_pdriver);
+	ret = platform_driver_register(&ssi_port_pdriver);
+	if (ret) {
+		platform_driver_unregister(&ssi_pdriver);
+		return ret;
+	}
+
+	return 0;
 }
 module_init(ssi_init);
 

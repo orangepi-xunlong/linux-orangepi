@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /dts-v1/;
 
 #include "dove.dtsi"
@@ -78,7 +79,7 @@
 	status = "okay";
 
 	/* spi0.0: 2M Flash Macronix MX25L1605D */
-	spi-flash@0 {
+	flash@0 {
 		compatible = "st,m25l1605d";
 		spi-max-frequency = <86000000>;
 		reg = <0>;
@@ -88,7 +89,7 @@
 &pcie {
 	status = "okay";
 	/* Fresco Logic USB3.0 xHCI controller */
-	pcie-port@0 {
+	pcie@1 {
 		status = "okay";
 		reset-gpios = <&gpio0 26 1>;
 		reset-delay-us = <20000>;
@@ -96,7 +97,7 @@
 		pinctrl-names = "default";
 	};
 	/* Mini-PCIe slot */
-	pcie-port@1 {
+	pcie@2 {
 		status = "okay";
 		reset-gpios = <&gpio0 25 1>;
 	};

@@ -1,12 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Verify the signature on a PKCS#7 message.
  *
  * Copyright (C) 2012 Red Hat, Inc. All Rights Reserved.
  * Written by David Howells (dhowells@redhat.com)
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public Licence
- * as published by the Free Software Foundation; either version
- * 2 of the Licence, or (at your option) any later version.
  */
 
 #define pr_fmt(fmt) "PKCS7: "fmt
@@ -16,6 +12,7 @@
 #include <linux/err.h>
 #include <linux/asn1.h>
 #include <crypto/hash.h>
+#include <crypto/hash_info.h>
 #include <crypto/public_key.h>
 #include "pkcs7_parser.h"
 
@@ -32,6 +29,10 @@ static int pkcs7_digest(struct pkcs7_message *pkcs7,
 	int ret;
 
 	kenter(",%u,%s", sinfo->index, sinfo->sig->hash_algo);
+
+	/* The digest was calculated already. */
+	if (sig->digest)
+		return 0;
 
 	if (!sinfo->sig->hash_algo)
 		return -ENOPKG;
@@ -56,14 +57,10 @@ static int pkcs7_digest(struct pkcs7_message *pkcs7,
 		goto error_no_desc;
 
 	desc->tfm   = tfm;
-	desc->flags = CRYPTO_TFM_REQ_MAY_SLEEP;
 
 	/* Digest the message [RFC2315 9.3] */
-	ret = crypto_shash_init(desc);
-	if (ret < 0)
-		goto error;
-	ret = crypto_shash_finup(desc, pkcs7->data, pkcs7->data_len,
-				 sig->digest);
+	ret = crypto_shash_digest(desc, pkcs7->data, pkcs7->data_len,
+				  sig->digest);
 	if (ret < 0)
 		goto error;
 	pr_devel("MsgDigest = [%*ph]\n", 8, sig->digest);
@@ -82,16 +79,16 @@ static int pkcs7_digest(struct pkcs7_message *pkcs7,
 		}
 
 		if (sinfo->msgdigest_len != sig->digest_size) {
-			pr_debug("Sig %u: Invalid digest size (%u)\n",
-				 sinfo->index, sinfo->msgdigest_len);
+			pr_warn("Sig %u: Invalid digest size (%u)\n",
+				sinfo->index, sinfo->msgdigest_len);
 			ret = -EBADMSG;
 			goto error;
 		}
 
 		if (memcmp(sig->digest, sinfo->msgdigest,
 			   sinfo->msgdigest_len) != 0) {
-			pr_debug("Sig %u: Message digest doesn't match\n",
-				 sinfo->index);
+			pr_warn("Sig %u: Message digest doesn't match\n",
+				sinfo->index);
 			ret = -EKEYREJECTED;
 			goto error;
 		}
@@ -125,6 +122,33 @@ error_no_desc:
 	return ret;
 }
 
+int pkcs7_get_digest(struct pkcs7_message *pkcs7, const u8 **buf, u32 *len,
+		     enum hash_algo *hash_algo)
+{
+	struct pkcs7_signed_info *sinfo = pkcs7->signed_infos;
+	int i, ret;
+
+	/*
+	 * This function doesn't support messages with more than one signature.
+	 */
+	if (sinfo == NULL || sinfo->next != NULL)
+		return -EBADMSG;
+
+	ret = pkcs7_digest(pkcs7, sinfo);
+	if (ret)
+		return ret;
+
+	*buf = sinfo->sig->digest;
+	*len = sinfo->sig->digest_size;
+
+	i = match_string(hash_algo_name, HASH_ALGO__LAST,
+			 sinfo->sig->hash_algo);
+	if (i >= 0)
+		*hash_algo = i;
+
+	return 0;
+}
+
 /*
  * Find the key (X.509 certificate) to use to verify a PKCS#7 message.  PKCS#7
  * uses the issuer's name and the issuing certificate serial number for
@@ -149,12 +173,6 @@ static int pkcs7_find_key(struct pkcs7_message *pkcs7,
 			continue;
 		pr_devel("Sig %u: Found cert serial match X.509[%u]\n",
 			 sinfo->index, certix);
-
-		if (strcmp(x509->pub->pkey_algo, sinfo->sig->pkey_algo) != 0) {
-			pr_warn("Sig %u: X.509 algo and PKCS#7 sig algo don't match\n",
-				sinfo->index);
-			continue;
-		}
 
 		sinfo->signer = x509;
 		return 0;
@@ -190,8 +208,17 @@ static int pkcs7_verify_sig_chain(struct pkcs7_message *pkcs7,
 			 x509->subject,
 			 x509->raw_serial_size, x509->raw_serial);
 		x509->seen = true;
-		if (x509->unsupported_key)
-			goto unsupported_crypto_in_x509;
+
+		if (x509->blacklisted) {
+			/* If this cert is blacklisted, then mark everything
+			 * that depends on this as blacklisted too.
+			 */
+			sinfo->blacklisted = true;
+			for (p = sinfo->signer; p != x509; p = p->signer)
+				p->blacklisted = true;
+			pr_debug("- blacklisted\n");
+			return 0;
+		}
 
 		pr_debug("- issuer %s\n", x509->issuer);
 		sig = x509->sig;
@@ -209,7 +236,7 @@ static int pkcs7_verify_sig_chain(struct pkcs7_message *pkcs7,
 			 * authority.
 			 */
 			if (x509->unsupported_sig)
-				goto unsupported_crypto_in_x509;
+				goto unsupported_sig_in_x509;
 			x509->signer = x509;
 			pr_debug("- self-signed\n");
 			return 0;
@@ -273,7 +300,7 @@ static int pkcs7_verify_sig_chain(struct pkcs7_message *pkcs7,
 		might_sleep();
 	}
 
-unsupported_crypto_in_x509:
+unsupported_sig_in_x509:
 	/* Just prune the certificate chain at this point if we lack some
 	 * crypto module to go further.  Note, however, we don't want to set
 	 * sinfo->unsupported_crypto as the signed info block may still be
@@ -357,17 +384,18 @@ static int pkcs7_verify_one(struct pkcs7_message *pkcs7,
  *
  *  (*) -EBADMSG if some part of the message was invalid, or:
  *
- *  (*) -ENOPKG if none of the signature chains are verifiable because suitable
- *	crypto modules couldn't be found, or:
+ *  (*) 0 if a signature chain passed verification, or:
  *
- *  (*) 0 if all the signature chains that don't incur -ENOPKG can be verified
- *	(note that a signature chain may be of zero length), or:
+ *  (*) -EKEYREJECTED if a blacklisted key was encountered, or:
+ *
+ *  (*) -ENOPKG if none of the signature chains are verifiable because suitable
+ *	crypto modules couldn't be found.
  */
 int pkcs7_verify(struct pkcs7_message *pkcs7,
 		 enum key_being_used_for usage)
 {
 	struct pkcs7_signed_info *sinfo;
-	int enopkg = -ENOPKG;
+	int actual_ret = -ENOPKG;
 	int ret;
 
 	kenter("");
@@ -412,6 +440,11 @@ int pkcs7_verify(struct pkcs7_message *pkcs7,
 
 	for (sinfo = pkcs7->signed_infos; sinfo; sinfo = sinfo->next) {
 		ret = pkcs7_verify_one(pkcs7, sinfo);
+		if (sinfo->blacklisted) {
+			if (actual_ret == -ENOPKG)
+				actual_ret = -EKEYREJECTED;
+			continue;
+		}
 		if (ret < 0) {
 			if (ret == -ENOPKG) {
 				sinfo->unsupported_crypto = true;
@@ -420,11 +453,11 @@ int pkcs7_verify(struct pkcs7_message *pkcs7,
 			kleave(" = %d", ret);
 			return ret;
 		}
-		enopkg = 0;
+		actual_ret = 0;
 	}
 
-	kleave(" = %d", enopkg);
-	return enopkg;
+	kleave(" = %d", actual_ret);
+	return actual_ret;
 }
 EXPORT_SYMBOL_GPL(pkcs7_verify);
 
@@ -445,7 +478,7 @@ int pkcs7_supply_detached_data(struct pkcs7_message *pkcs7,
 			       const void *data, size_t datalen)
 {
 	if (pkcs7->data) {
-		pr_debug("Data already supplied\n");
+		pr_warn("Data already supplied\n");
 		return -EINVAL;
 	}
 	pkcs7->data = data;

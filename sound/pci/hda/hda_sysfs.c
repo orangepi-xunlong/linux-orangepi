@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * sysfs interface for HD-audio codec
  *
@@ -14,7 +15,7 @@
 #include <linux/string.h>
 #include <linux/export.h>
 #include <sound/core.h>
-#include "hda_codec.h"
+#include <sound/hda_codec.h>
 #include "hda_local.h"
 #include <sound/hda_hwdep.h>
 #include <sound/minors.h>
@@ -32,7 +33,7 @@ static ssize_t power_on_acct_show(struct device *dev,
 {
 	struct hda_codec *codec = dev_get_drvdata(dev);
 	snd_hda_update_power_acct(codec);
-	return sprintf(buf, "%u\n", jiffies_to_msecs(codec->power_on_acct));
+	return sysfs_emit(buf, "%u\n", jiffies_to_msecs(codec->power_on_acct));
 }
 
 static ssize_t power_off_acct_show(struct device *dev,
@@ -41,7 +42,7 @@ static ssize_t power_off_acct_show(struct device *dev,
 {
 	struct hda_codec *codec = dev_get_drvdata(dev);
 	snd_hda_update_power_acct(codec);
-	return sprintf(buf, "%u\n", jiffies_to_msecs(codec->power_off_acct));
+	return sysfs_emit(buf, "%u\n", jiffies_to_msecs(codec->power_off_acct));
 }
 
 static DEVICE_ATTR_RO(power_on_acct);
@@ -54,7 +55,7 @@ static ssize_t type##_show(struct device *dev,			\
 			   char *buf)				\
 {								\
 	struct hda_codec *codec = dev_get_drvdata(dev);		\
-	return sprintf(buf, "0x%x\n", codec->field);		\
+	return sysfs_emit(buf, "0x%x\n", codec->field);		\
 }
 
 #define CODEC_INFO_STR_SHOW(type, field)			\
@@ -63,8 +64,8 @@ static ssize_t type##_show(struct device *dev,			\
 					char *buf)		\
 {								\
 	struct hda_codec *codec = dev_get_drvdata(dev);		\
-	return sprintf(buf, "%s\n",				\
-		       codec->field ? codec->field : "");	\
+	return sysfs_emit(buf, "%s\n",				\
+			  codec->field ? codec->field : "");	\
 }
 
 CODEC_INFO_SHOW(vendor_id, core.vendor_id);
@@ -80,12 +81,12 @@ static ssize_t pin_configs_show(struct hda_codec *codec,
 				struct snd_array *list,
 				char *buf)
 {
+	const struct hda_pincfg *pin;
 	int i, len = 0;
 	mutex_lock(&codec->user_mutex);
-	for (i = 0; i < list->used; i++) {
-		struct hda_pincfg *pin = snd_array_elem(list, i);
-		len += sprintf(buf + len, "0x%02x 0x%08x\n",
-			       pin->nid, pin->cfg);
+	snd_array_for_each(list, i, pin) {
+		len += sysfs_emit_at(buf, len, "0x%02x 0x%08x\n",
+				     pin->nid, pin->cfg);
 	}
 	mutex_unlock(&codec->user_mutex);
 	return len;
@@ -138,7 +139,7 @@ static int reconfig_codec(struct hda_codec *codec)
 			   "The codec is being used, can't reconfigure.\n");
 		goto error;
 	}
-	err = snd_hda_codec_configure(codec);
+	err = device_reprobe(hda_codec_dev(codec));
 	if (err < 0)
 		goto error;
 	err = snd_card_register(codec->card);
@@ -217,13 +218,12 @@ static ssize_t init_verbs_show(struct device *dev,
 			       char *buf)
 {
 	struct hda_codec *codec = dev_get_drvdata(dev);
+	const struct hda_verb *v;
 	int i, len = 0;
 	mutex_lock(&codec->user_mutex);
-	for (i = 0; i < codec->init_verbs.used; i++) {
-		struct hda_verb *v = snd_array_elem(&codec->init_verbs, i);
-		len += snprintf(buf + len, PAGE_SIZE - len,
-				"0x%02x 0x%03x 0x%04x\n",
-				v->nid, v->verb, v->param);
+	snd_array_for_each(&codec->init_verbs, i, v) {
+		len += sysfs_emit_at(buf, len, "0x%02x 0x%03x 0x%04x\n",
+				     v->nid, v->verb, v->param);
 	}
 	mutex_unlock(&codec->user_mutex);
 	return len;
@@ -267,12 +267,12 @@ static ssize_t hints_show(struct device *dev,
 			  char *buf)
 {
 	struct hda_codec *codec = dev_get_drvdata(dev);
+	const struct hda_hint *hint;
 	int i, len = 0;
 	mutex_lock(&codec->user_mutex);
-	for (i = 0; i < codec->hints.used; i++) {
-		struct hda_hint *hint = snd_array_elem(&codec->hints, i);
-		len += snprintf(buf + len, PAGE_SIZE - len,
-				"%s = %s\n", hint->key, hint->val);
+	snd_array_for_each(&codec->hints, i, hint) {
+		len += sysfs_emit_at(buf, len, "%s = %s\n",
+				     hint->key, hint->val);
 	}
 	mutex_unlock(&codec->user_mutex);
 	return len;
@@ -280,10 +280,10 @@ static ssize_t hints_show(struct device *dev,
 
 static struct hda_hint *get_hint(struct hda_codec *codec, const char *key)
 {
+	struct hda_hint *hint;
 	int i;
 
-	for (i = 0; i < codec->hints.used; i++) {
-		struct hda_hint *hint = snd_array_elem(&codec->hints, i);
+	snd_array_for_each(&codec->hints, i, hint) {
 		if (!strcmp(hint->key, key))
 			return hint;
 	}
@@ -374,8 +374,6 @@ static ssize_t user_pin_configs_show(struct device *dev,
 	struct hda_codec *codec = dev_get_drvdata(dev);
 	return pin_configs_show(codec, &codec->user_pins, buf);
 }
-
-#define MAX_PIN_CONFIGS		32
 
 static int parse_user_pin_configs(struct hda_codec *codec, const char *buf)
 {
@@ -610,7 +608,7 @@ struct hda_patch_item {
 	void (*parser)(char *buf, struct hda_bus *bus, struct hda_codec **retc);
 };
 
-static struct hda_patch_item patch_items[NUM_LINE_MODES] = {
+static const struct hda_patch_item patch_items[NUM_LINE_MODES] = {
 	[LINE_MODE_CODEC] = {
 		.tag = "[codec]",
 		.parser = parse_codec_mode,
@@ -761,7 +759,7 @@ static struct attribute *hda_dev_attrs[] = {
 	NULL
 };
 
-static struct attribute_group hda_dev_attr_group = {
+static const struct attribute_group hda_dev_attr_group = {
 	.attrs	= hda_dev_attrs,
 };
 
@@ -783,13 +781,13 @@ void snd_hda_sysfs_init(struct hda_codec *codec)
 void snd_hda_sysfs_clear(struct hda_codec *codec)
 {
 #ifdef CONFIG_SND_HDA_RECONFIG
+	struct hda_hint *hint;
 	int i;
 
 	/* clear init verbs */
 	snd_array_free(&codec->init_verbs);
 	/* clear hints */
-	for (i = 0; i < codec->hints.used; i++) {
-		struct hda_hint *hint = snd_array_elem(&codec->hints, i);
+	snd_array_for_each(&codec->hints, i, hint) {
 		kfree(hint->key); /* we don't need to free hint->val */
 	}
 	snd_array_free(&codec->hints);

@@ -20,11 +20,13 @@
 #include <linux/kernel.h>
 #include <linux/pagemap.h>
 #include <linux/agp_backend.h>
+#include <linux/iommu.h>
 #include <linux/delay.h>
 #include <asm/smp.h>
 #include "agp.h"
 #include "intel-agp.h"
 #include <drm/intel-gtt.h>
+#include <asm/set_memory.h>
 
 /*
  * If we have Intel graphics, we're not going to have anything other than
@@ -79,7 +81,7 @@ static struct _intel_private {
 	unsigned int needs_dmar : 1;
 	phys_addr_t gma_bus_addr;
 	/*  Size of memory reserved for graphics by the BIOS */
-	unsigned int stolen_size;
+	resource_size_t stolen_size;
 	/* Total number of gtt entries. */
 	unsigned int gtt_total_entries;
 	/* Part of the gtt that is mappable by the cpu, for those chips where
@@ -109,8 +111,8 @@ static int intel_gtt_map_memory(struct page **pages,
 	for_each_sg(st->sgl, sg, num_entries, i)
 		sg_set_page(sg, pages[i], PAGE_SIZE, 0);
 
-	if (!pci_map_sg(intel_private.pcidev,
-			st->sgl, st->nents, PCI_DMA_BIDIRECTIONAL))
+	if (!dma_map_sg(&intel_private.pcidev->dev, st->sgl, st->nents,
+			DMA_BIDIRECTIONAL))
 		goto err;
 
 	return 0;
@@ -125,8 +127,8 @@ static void intel_gtt_unmap_memory(struct scatterlist *sg_list, int num_sg)
 	struct sg_table st;
 	DBG("try unmapping %lu pages\n", (unsigned long)mem->page_count);
 
-	pci_unmap_sg(intel_private.pcidev, sg_list,
-		     num_sg, PCI_DMA_BIDIRECTIONAL);
+	dma_unmap_sg(&intel_private.pcidev->dev, sg_list, num_sg,
+		     DMA_BIDIRECTIONAL);
 
 	st.sgl = sg_list;
 	st.orig_nents = st.nents = num_sg;
@@ -301,10 +303,12 @@ static int intel_gtt_setup_scratch_page(void)
 	set_pages_uc(page, 1);
 
 	if (intel_private.needs_dmar) {
-		dma_addr = pci_map_page(intel_private.pcidev, page, 0,
-				    PAGE_SIZE, PCI_DMA_BIDIRECTIONAL);
-		if (pci_dma_mapping_error(intel_private.pcidev, dma_addr))
+		dma_addr = dma_map_page(&intel_private.pcidev->dev, page, 0,
+					PAGE_SIZE, DMA_BIDIRECTIONAL);
+		if (dma_mapping_error(&intel_private.pcidev->dev, dma_addr)) {
+			__free_page(page);
 			return -EINVAL;
+		}
 
 		intel_private.scratch_page_dma = dma_addr;
 	} else
@@ -332,21 +336,13 @@ static void i810_write_entry(dma_addr_t addr, unsigned int entry,
 	writel_relaxed(addr | pte_flags, intel_private.gtt + entry);
 }
 
-static const struct aper_size_info_fixed intel_fake_agp_sizes[] = {
-	{32, 8192, 3},
-	{64, 16384, 4},
-	{128, 32768, 5},
-	{256, 65536, 6},
-	{512, 131072, 7},
-};
-
-static unsigned int intel_gtt_stolen_size(void)
+static resource_size_t intel_gtt_stolen_size(void)
 {
 	u16 gmch_ctrl;
 	u8 rdct;
 	int local = 0;
 	static const int ddt[4] = { 0, 16, 32, 64 };
-	unsigned int stolen_size = 0;
+	resource_size_t stolen_size = 0;
 
 	if (INTEL_GTT_GEN == 1)
 		return 0; /* no stolen mem on i81x */
@@ -424,8 +420,8 @@ static unsigned int intel_gtt_stolen_size(void)
 	}
 
 	if (stolen_size > 0) {
-		dev_info(&intel_private.bridge_dev->dev, "detected %dK %s memory\n",
-		       stolen_size / KB(1), local ? "local" : "stolen");
+		dev_info(&intel_private.bridge_dev->dev, "detected %lluK %s memory\n",
+		       (u64)stolen_size / KB(1), local ? "local" : "stolen");
 	} else {
 		dev_info(&intel_private.bridge_dev->dev,
 		       "no pre-allocated video memory detected\n");
@@ -556,9 +552,9 @@ static void intel_gtt_teardown_scratch_page(void)
 {
 	set_pages_wb(intel_private.scratch_page, 1);
 	if (intel_private.needs_dmar)
-		pci_unmap_page(intel_private.pcidev,
-			       intel_private.scratch_page_dma,
-			       PAGE_SIZE, PCI_DMA_BIDIRECTIONAL);
+		dma_unmap_page(&intel_private.pcidev->dev,
+			       intel_private.scratch_page_dma, PAGE_SIZE,
+			       DMA_BIDIRECTIONAL);
 	__free_page(intel_private.scratch_page);
 }
 
@@ -577,18 +573,15 @@ static void intel_gtt_cleanup(void)
  */
 static inline int needs_ilk_vtd_wa(void)
 {
-#ifdef CONFIG_INTEL_IOMMU
 	const unsigned short gpu_devid = intel_private.pcidev->device;
 
-	/* Query intel_iommu to see if we need the workaround. Presumably that
-	 * was loaded first.
+	/*
+	 * Query iommu subsystem to see if we need the workaround. Presumably
+	 * that was loaded first.
 	 */
-	if ((gpu_devid == PCI_DEVICE_ID_INTEL_IRONLAKE_D_IG ||
-	     gpu_devid == PCI_DEVICE_ID_INTEL_IRONLAKE_M_IG) &&
-	     intel_iommu_gfx_mapped)
-		return 1;
-#endif
-	return 0;
+	return ((gpu_devid == PCI_DEVICE_ID_INTEL_IRONLAKE_D_IG ||
+		 gpu_devid == PCI_DEVICE_ID_INTEL_IRONLAKE_M_IG) &&
+		device_iommu_mapped(&intel_private.pcidev->dev));
 }
 
 static bool intel_gtt_can_wc(void)
@@ -670,6 +663,14 @@ static int intel_gtt_init(void)
 }
 
 #if IS_ENABLED(CONFIG_AGP_INTEL)
+static const struct aper_size_info_fixed intel_fake_agp_sizes[] = {
+	{32, 8192, 3},
+	{64, 16384, 4},
+	{128, 32768, 5},
+	{256, 65536, 6},
+	{512, 131072, 7},
+};
+
 static int intel_fake_agp_fetch_size(void)
 {
 	int num_sizes = ARRAY_SIZE(intel_fake_agp_sizes);
@@ -740,7 +741,7 @@ static void i830_write_entry(dma_addr_t addr, unsigned int entry,
 	writel_relaxed(addr | pte_flags, intel_private.gtt + entry);
 }
 
-bool intel_enable_gtt(void)
+bool intel_gmch_enable_gtt(void)
 {
 	u8 __iomem *reg;
 
@@ -783,7 +784,7 @@ bool intel_enable_gtt(void)
 
 	return true;
 }
-EXPORT_SYMBOL(intel_enable_gtt);
+EXPORT_SYMBOL(intel_gmch_enable_gtt);
 
 static int i830_setup(void)
 {
@@ -817,8 +818,8 @@ static int intel_fake_agp_free_gatt_table(struct agp_bridge_data *bridge)
 
 static int intel_fake_agp_configure(void)
 {
-	if (!intel_enable_gtt())
-	    return -EIO;
+	if (!intel_gmch_enable_gtt())
+		return -EIO;
 
 	intel_private.clear_fake_agp = true;
 	agp_bridge->gart_bus_addr = intel_private.gma_bus_addr;
@@ -840,19 +841,20 @@ static bool i830_check_flags(unsigned int flags)
 	return false;
 }
 
-void intel_gtt_insert_page(dma_addr_t addr,
-			   unsigned int pg,
-			   unsigned int flags)
+void intel_gmch_gtt_insert_page(dma_addr_t addr,
+				unsigned int pg,
+				unsigned int flags)
 {
 	intel_private.driver->write_entry(addr, pg, flags);
+	readl(intel_private.gtt + pg);
 	if (intel_private.driver->chipset_flush)
 		intel_private.driver->chipset_flush();
 }
-EXPORT_SYMBOL(intel_gtt_insert_page);
+EXPORT_SYMBOL(intel_gmch_gtt_insert_page);
 
-void intel_gtt_insert_sg_entries(struct sg_table *st,
-				 unsigned int pg_start,
-				 unsigned int flags)
+void intel_gmch_gtt_insert_sg_entries(struct sg_table *st,
+				      unsigned int pg_start,
+				      unsigned int flags)
 {
 	struct scatterlist *sg;
 	unsigned int len, m;
@@ -870,17 +872,17 @@ void intel_gtt_insert_sg_entries(struct sg_table *st,
 			j++;
 		}
 	}
-	wmb();
+	readl(intel_private.gtt + j - 1);
 	if (intel_private.driver->chipset_flush)
 		intel_private.driver->chipset_flush();
 }
-EXPORT_SYMBOL(intel_gtt_insert_sg_entries);
+EXPORT_SYMBOL(intel_gmch_gtt_insert_sg_entries);
 
 #if IS_ENABLED(CONFIG_AGP_INTEL)
-static void intel_gtt_insert_pages(unsigned int first_entry,
-				   unsigned int num_entries,
-				   struct page **pages,
-				   unsigned int flags)
+static void intel_gmch_gtt_insert_pages(unsigned int first_entry,
+					unsigned int num_entries,
+					struct page **pages,
+					unsigned int flags)
 {
 	int i, j;
 
@@ -900,7 +902,7 @@ static int intel_fake_agp_insert_entries(struct agp_memory *mem,
 	if (intel_private.clear_fake_agp) {
 		int start = intel_private.stolen_size / PAGE_SIZE;
 		int end = intel_private.gtt_mappable_entries;
-		intel_gtt_clear_range(start, end - start);
+		intel_gmch_gtt_clear_range(start, end - start);
 		intel_private.clear_fake_agp = false;
 	}
 
@@ -929,12 +931,12 @@ static int intel_fake_agp_insert_entries(struct agp_memory *mem,
 		if (ret != 0)
 			return ret;
 
-		intel_gtt_insert_sg_entries(&st, pg_start, type);
+		intel_gmch_gtt_insert_sg_entries(&st, pg_start, type);
 		mem->sg_list = st.sgl;
 		mem->num_sg = st.nents;
 	} else
-		intel_gtt_insert_pages(pg_start, mem->page_count, mem->pages,
-				       type);
+		intel_gmch_gtt_insert_pages(pg_start, mem->page_count, mem->pages,
+					    type);
 
 out:
 	ret = 0;
@@ -944,7 +946,7 @@ out_err:
 }
 #endif
 
-void intel_gtt_clear_range(unsigned int first_entry, unsigned int num_entries)
+void intel_gmch_gtt_clear_range(unsigned int first_entry, unsigned int num_entries)
 {
 	unsigned int i;
 
@@ -954,7 +956,7 @@ void intel_gtt_clear_range(unsigned int first_entry, unsigned int num_entries)
 	}
 	wmb();
 }
-EXPORT_SYMBOL(intel_gtt_clear_range);
+EXPORT_SYMBOL(intel_gmch_gtt_clear_range);
 
 #if IS_ENABLED(CONFIG_AGP_INTEL)
 static int intel_fake_agp_remove_entries(struct agp_memory *mem,
@@ -963,7 +965,7 @@ static int intel_fake_agp_remove_entries(struct agp_memory *mem,
 	if (mem->page_count == 0)
 		return 0;
 
-	intel_gtt_clear_range(pg_start, mem->page_count);
+	intel_gmch_gtt_clear_range(pg_start, mem->page_count);
 
 	if (intel_private.needs_dmar) {
 		intel_gtt_unmap_memory(mem->sg_list, mem->num_sg);
@@ -1086,7 +1088,7 @@ static void intel_i9xx_setup_flush(void)
 	}
 
 	if (intel_private.ifp_resource.start)
-		intel_private.i9xx_flush_page = ioremap_nocache(intel_private.ifp_resource.start, PAGE_SIZE);
+		intel_private.i9xx_flush_page = ioremap(intel_private.ifp_resource.start, PAGE_SIZE);
 	if (!intel_private.i9xx_flush_page)
 		dev_err(&intel_private.pcidev->dev,
 			"can't ioremap flush page - no chipset flushing\n");
@@ -1104,6 +1106,7 @@ static void i9xx_cleanup(void)
 
 static void i9xx_chipset_flush(void)
 {
+	wmb();
 	if (intel_private.i9xx_flush_page)
 		writel(1, intel_private.i9xx_flush_page);
 }
@@ -1404,13 +1407,16 @@ int intel_gmch_probe(struct pci_dev *bridge_pdev, struct pci_dev *gpu_pdev,
 
 	dev_info(&bridge_pdev->dev, "Intel %s Chipset\n", intel_gtt_chipsets[i].name);
 
-	mask = intel_private.driver->dma_mask_size;
-	if (pci_set_dma_mask(intel_private.pcidev, DMA_BIT_MASK(mask)))
-		dev_err(&intel_private.pcidev->dev,
-			"set gfx device dma mask %d-bit failed!\n", mask);
-	else
-		pci_set_consistent_dma_mask(intel_private.pcidev,
-					    DMA_BIT_MASK(mask));
+	if (bridge) {
+		mask = intel_private.driver->dma_mask_size;
+		if (dma_set_mask(&intel_private.pcidev->dev, DMA_BIT_MASK(mask)))
+			dev_err(&intel_private.pcidev->dev,
+				"set gfx device dma mask %d-bit failed!\n",
+				mask);
+		else
+			dma_set_coherent_mask(&intel_private.pcidev->dev,
+					      DMA_BIT_MASK(mask));
+	}
 
 	if (intel_gtt_init() != 0) {
 		intel_gmch_remove();
@@ -1422,22 +1428,22 @@ int intel_gmch_probe(struct pci_dev *bridge_pdev, struct pci_dev *gpu_pdev,
 }
 EXPORT_SYMBOL(intel_gmch_probe);
 
-void intel_gtt_get(u64 *gtt_total, size_t *stolen_size,
-		   phys_addr_t *mappable_base, u64 *mappable_end)
+void intel_gmch_gtt_get(u64 *gtt_total,
+			phys_addr_t *mappable_base,
+			resource_size_t *mappable_end)
 {
 	*gtt_total = intel_private.gtt_total_entries << PAGE_SHIFT;
-	*stolen_size = intel_private.stolen_size;
 	*mappable_base = intel_private.gma_bus_addr;
 	*mappable_end = intel_private.gtt_mappable_entries << PAGE_SHIFT;
 }
-EXPORT_SYMBOL(intel_gtt_get);
+EXPORT_SYMBOL(intel_gmch_gtt_get);
 
-void intel_gtt_chipset_flush(void)
+void intel_gmch_gtt_flush(void)
 {
 	if (intel_private.driver->chipset_flush)
 		intel_private.driver->chipset_flush();
 }
-EXPORT_SYMBOL(intel_gtt_chipset_flush);
+EXPORT_SYMBOL(intel_gmch_gtt_flush);
 
 void intel_gmch_remove(void)
 {

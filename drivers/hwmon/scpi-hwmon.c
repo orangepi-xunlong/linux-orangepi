@@ -1,21 +1,14 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * System Control and Power Interface(SCPI) based hwmon sensor driver
  *
  * Copyright (C) 2015 ARM Ltd.
  * Punit Agrawal <punit.agrawal@arm.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
- * This program is distributed "as is" WITHOUT ANY WARRANTY of any
- * kind, whether express or implied; without even the implied warranty
- * of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- * GNU General Public License for more details.
  */
 
 #include <linux/hwmon.h>
 #include <linux/module.h>
+#include <linux/of_device.h>
 #include <linux/platform_device.h>
 #include <linux/scpi_protocol.h>
 #include <linux/slab.h>
@@ -23,6 +16,7 @@
 #include <linux/thermal.h>
 
 struct sensor_data {
+	unsigned int scale;
 	struct scpi_sensor_info info;
 	struct device_attribute dev_attr_input;
 	struct device_attribute dev_attr_label;
@@ -44,9 +38,33 @@ struct scpi_sensors {
 	const struct attribute_group *groups[2];
 };
 
-static int scpi_read_temp(void *dev, int *temp)
+static const u32 gxbb_scpi_scale[] = {
+	[TEMPERATURE]	= 1,		/* (celsius)		*/
+	[VOLTAGE]	= 1000,		/* (millivolts)		*/
+	[CURRENT]	= 1000,		/* (milliamperes)	*/
+	[POWER]		= 1000000,	/* (microwatts)		*/
+	[ENERGY]	= 1000000,	/* (microjoules)	*/
+};
+
+static const u32 scpi_scale[] = {
+	[TEMPERATURE]	= 1000,		/* (millicelsius)	*/
+	[VOLTAGE]	= 1000,		/* (millivolts)		*/
+	[CURRENT]	= 1000,		/* (milliamperes)	*/
+	[POWER]		= 1000000,	/* (microwatts)		*/
+	[ENERGY]	= 1000000,	/* (microjoules)	*/
+};
+
+static void scpi_scale_reading(u64 *value, struct sensor_data *sensor)
 {
-	struct scpi_thermal_zone *zone = dev;
+	if (scpi_scale[sensor->info.class] != sensor->scale) {
+		*value *= scpi_scale[sensor->info.class];
+		do_div(*value, sensor->scale);
+	}
+}
+
+static int scpi_read_temp(struct thermal_zone_device *tz, int *temp)
+{
+	struct scpi_thermal_zone *zone = tz->devdata;
 	struct scpi_sensors *scpi_sensors = zone->scpi_sensors;
 	struct scpi_ops *scpi_ops = scpi_sensors->scpi_ops;
 	struct sensor_data *sensor = &scpi_sensors->data[zone->sensor_id];
@@ -56,6 +74,8 @@ static int scpi_read_temp(void *dev, int *temp)
 	ret = scpi_ops->sensor_get_value(sensor->info.sensor_id, &value);
 	if (ret)
 		return ret;
+
+	scpi_scale_reading(&value, sensor);
 
 	*temp = value;
 	return 0;
@@ -77,6 +97,17 @@ scpi_show_sensor(struct device *dev, struct device_attribute *attr, char *buf)
 	if (ret)
 		return ret;
 
+	scpi_scale_reading(&value, sensor);
+
+	/*
+	 * Temperature sensor values are treated as signed values based on
+	 * observation even though that is not explicitly specified, and
+	 * because an unsigned u64 temperature does not really make practical
+	 * sense especially when the temperature is below zero degrees Celsius.
+	 */
+	if (sensor->info.class == TEMPERATURE)
+		return sprintf(buf, "%lld\n", (s64)value);
+
 	return sprintf(buf, "%llu\n", value);
 }
 
@@ -90,13 +121,21 @@ scpi_show_label(struct device *dev, struct device_attribute *attr, char *buf)
 	return sprintf(buf, "%s\n", sensor->info.name);
 }
 
-static struct thermal_zone_of_device_ops scpi_sensor_ops = {
+static const struct thermal_zone_device_ops scpi_sensor_ops = {
 	.get_temp = scpi_read_temp,
 };
+
+static const struct of_device_id scpi_of_match[] = {
+	{.compatible = "arm,scpi-sensors", .data = &scpi_scale},
+	{.compatible = "amlogic,meson-gxbb-scpi-sensors", .data = &gxbb_scpi_scale},
+	{},
+};
+MODULE_DEVICE_TABLE(of, scpi_of_match);
 
 static int scpi_hwmon_probe(struct platform_device *pdev)
 {
 	u16 nr_sensors, i;
+	const u32 *scale;
 	int num_temp = 0, num_volt = 0, num_current = 0, num_power = 0;
 	int num_energy = 0;
 	struct scpi_ops *scpi_ops;
@@ -130,6 +169,12 @@ static int scpi_hwmon_probe(struct platform_device *pdev)
 		return -ENOMEM;
 
 	scpi_sensors->scpi_ops = scpi_ops;
+
+	scale = of_device_get_match_data(&pdev->dev);
+	if (!scale) {
+		dev_err(&pdev->dev, "Unable to initialize scpi-hwmon data\n");
+		return -ENODEV;
+	}
 
 	for (i = 0, idx = 0; i < nr_sensors; i++) {
 		struct sensor_data *sensor = &scpi_sensors->data[idx];
@@ -178,11 +223,13 @@ static int scpi_hwmon_probe(struct platform_device *pdev)
 			continue;
 		}
 
-		sensor->dev_attr_input.attr.mode = S_IRUGO;
+		sensor->scale = scale[sensor->info.class];
+
+		sensor->dev_attr_input.attr.mode = 0444;
 		sensor->dev_attr_input.show = scpi_show_sensor;
 		sensor->dev_attr_input.attr.name = sensor->input;
 
-		sensor->dev_attr_label.attr.mode = S_IRUGO;
+		sensor->dev_attr_label.attr.mode = 0444;
 		sensor->dev_attr_label.show = scpi_show_label;
 		sensor->dev_attr_label.attr.name = sensor->label;
 
@@ -228,30 +275,22 @@ static int scpi_hwmon_probe(struct platform_device *pdev)
 
 		zone->sensor_id = i;
 		zone->scpi_sensors = scpi_sensors;
-		z = devm_thermal_zone_of_sensor_register(dev,
-							 sensor->info.sensor_id,
-							 zone,
-							 &scpi_sensor_ops);
+		z = devm_thermal_of_zone_register(dev,
+						  sensor->info.sensor_id,
+						  zone,
+						  &scpi_sensor_ops);
 		/*
 		 * The call to thermal_zone_of_sensor_register returns
 		 * an error for sensors that are not associated with
 		 * any thermal zones or if the thermal subsystem is
 		 * not configured.
 		 */
-		if (IS_ERR(z)) {
+		if (IS_ERR(z))
 			devm_kfree(dev, zone);
-			continue;
-		}
 	}
 
 	return 0;
 }
-
-static const struct of_device_id scpi_of_match[] = {
-	{.compatible = "arm,scpi-sensors"},
-	{},
-};
-MODULE_DEVICE_TABLE(of, scpi_of_match);
 
 static struct platform_driver scpi_hwmon_platdrv = {
 	.driver = {

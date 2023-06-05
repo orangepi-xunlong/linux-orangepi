@@ -1,34 +1,28 @@
+// SPDX-License-Identifier: GPL-2.0
 #include <string.h>
 #include "tests/tests.h"
 #include "arch-tests.h"
 
-struct test arch_tests[] = {
-	{
-		.desc = "x86 rdpmc test",
-		.func = test__rdpmc,
-	},
-	{
-		.desc = "Test converting perf time to TSC",
-		.func = test__perf_time_to_tsc,
-	},
+#ifdef HAVE_AUXTRACE_SUPPORT
+DEFINE_SUITE("x86 instruction decoder - new instructions", insn_x86);
+DEFINE_SUITE("Intel PT packet decoder", intel_pt_pkt_decoder);
+#endif
+#if defined(__x86_64__)
+DEFINE_SUITE("x86 bp modify", bp_modify);
+#endif
+DEFINE_SUITE("x86 Sample parsing", x86_sample_parsing);
+
+struct test_suite *arch_tests[] = {
 #ifdef HAVE_DWARF_UNWIND_SUPPORT
-	{
-		.desc = "Test dwarf unwind",
-		.func = test__dwarf_unwind,
-	},
+	&suite__dwarf_unwind,
 #endif
 #ifdef HAVE_AUXTRACE_SUPPORT
-	{
-		.desc = "Test x86 instruction decoder - new instructions",
-		.func = test__insn_x86,
-	},
+	&suite__insn_x86,
+	&suite__intel_pt_pkt_decoder,
 #endif
-	{
-		.desc = "Test intel cqm nmi context read",
-		.func = test__intel_cqm_count_nmi_context,
-	},
-	{
-		.func = NULL,
-	},
-
+#if defined(__x86_64__)
+	&suite__bp_modify,
+#endif
+	&suite__x86_sample_parsing,
+	NULL,
 };

@@ -1,18 +1,9 @@
-/******************************************************************************
+// SPDX-License-Identifier: GPL-2.0
+/*
  * Copyright(c) 2008 - 2010 Realtek Corporation. All rights reserved.
  *
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * The full GNU General Public License is included in this distribution in the
- * file called LICENSE.
- *
- * Contact Information:
- * wlanfae <wlanfae@realtek.com>
-******************************************************************************/
-
+ * Contact Information: wlanfae <wlanfae@realtek.com>
+ */
 #include "rtl_core.h"
 #include "r8192E_hw.h"
 #include "r8192E_cmdpkt.h"
@@ -20,7 +11,6 @@
 bool rtl92e_send_cmd_pkt(struct net_device *dev, u32 type, const void *data,
 			 u32 len)
 {
-
 	bool				rt_status = true;
 	struct r8192_priv *priv = rtllib_priv(dev);
 	u16				frag_length = 0, frag_offset = 0;
@@ -30,8 +20,6 @@ bool rtl92e_send_cmd_pkt(struct net_device *dev, u32 type, const void *data,
 	u8				bLastIniPkt;
 
 	struct tx_fwinfo_8190pci *pTxFwInfo = NULL;
-
-	RT_TRACE(COMP_CMDPKT, "%s(),buffer_len is %d\n", __func__, len);
 
 	do {
 		if ((len - frag_offset) > CMDPACKET_FRAG_SIZE) {
@@ -49,7 +37,7 @@ bool rtl92e_send_cmd_pkt(struct net_device *dev, u32 type, const void *data,
 		else
 			skb = dev_alloc_skb(frag_length + 4);
 
-		if (skb == NULL) {
+		if (!skb) {
 			rt_status = false;
 			goto Failed;
 		}
@@ -68,11 +56,10 @@ bool rtl92e_send_cmd_pkt(struct net_device *dev, u32 type, const void *data,
 			memset(pTxFwInfo, 0, sizeof(struct tx_fwinfo_8190pci));
 			memset(pTxFwInfo, 0x12, 8);
 		} else {
-			tcb_desc->txbuf_size = (u16)frag_length;
+			tcb_desc->txbuf_size = frag_length;
 		}
 
-		seg_ptr = skb_put(skb, frag_length);
-		memcpy(seg_ptr, data, (u32)frag_length);
+		skb_put_data(skb, data, frag_length);
 
 		if (type == DESC_PACKET_TYPE_INIT &&
 		    (!priv->rtllib->check_nic_enough_desc(dev, TXCMD_QUEUE) ||

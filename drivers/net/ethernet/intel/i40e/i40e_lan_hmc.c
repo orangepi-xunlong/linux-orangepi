@@ -1,29 +1,7 @@
-/*******************************************************************************
- *
- * Intel Ethernet Controller XL710 Family Linux Driver
- * Copyright(c) 2013 - 2014 Intel Corporation.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * You should have received a copy of the GNU General Public License along
- * with this program.  If not, see <http://www.gnu.org/licenses/>.
- *
- * The full GNU General Public License is included in this distribution in
- * the file called "COPYING".
- *
- * Contact Information:
- * e1000-devel Mailing List <e1000-devel@lists.sourceforge.net>
- * Intel Corporation, 5200 N.E. Elam Young Parkway, Hillsboro, OR 97124-6497
- *
- ******************************************************************************/
+// SPDX-License-Identifier: GPL-2.0
+/* Copyright(c) 2013 - 2018 Intel Corporation. */
 
+#include "i40e.h"
 #include "i40e_osdep.h"
 #include "i40e_register.h"
 #include "i40e_type.h"
@@ -96,12 +74,12 @@ static u64 i40e_calculate_l2fpm_size(u32 txq_num, u32 rxq_num,
  * Assumptions:
  *   - HMC Resource Profile has been selected before calling this function.
  **/
-i40e_status i40e_init_lan_hmc(struct i40e_hw *hw, u32 txq_num,
-					u32 rxq_num, u32 fcoe_cntx_num,
-					u32 fcoe_filt_num)
+int i40e_init_lan_hmc(struct i40e_hw *hw, u32 txq_num,
+		      u32 rxq_num, u32 fcoe_cntx_num,
+		      u32 fcoe_filt_num)
 {
 	struct i40e_hmc_obj_info *obj, *full_obj;
-	i40e_status ret_code = 0;
+	int ret_code = 0;
 	u64 l2fpm_size;
 	u32 size_exp;
 
@@ -251,11 +229,11 @@ init_lan_hmc_out:
  *	1. caller can deallocate the memory used by pd after this function
  *	   returns.
  **/
-static i40e_status i40e_remove_pd_page(struct i40e_hw *hw,
-						 struct i40e_hmc_info *hmc_info,
-						 u32 idx)
+static int i40e_remove_pd_page(struct i40e_hw *hw,
+			       struct i40e_hmc_info *hmc_info,
+			       u32 idx)
 {
-	i40e_status ret_code = 0;
+	int ret_code = 0;
 
 	if (!i40e_prep_remove_pd_page(hmc_info, idx))
 		ret_code = i40e_remove_pd_page_new(hw, hmc_info, idx, true);
@@ -278,11 +256,11 @@ static i40e_status i40e_remove_pd_page(struct i40e_hw *hw,
  *	1. caller can deallocate the memory used by backing storage after this
  *	   function returns.
  **/
-static i40e_status i40e_remove_sd_bp(struct i40e_hw *hw,
-					       struct i40e_hmc_info *hmc_info,
-					       u32 idx)
+static int i40e_remove_sd_bp(struct i40e_hw *hw,
+			     struct i40e_hmc_info *hmc_info,
+			     u32 idx)
 {
-	i40e_status ret_code = 0;
+	int ret_code = 0;
 
 	if (!i40e_prep_remove_sd_bp(hmc_info, idx))
 		ret_code = i40e_remove_sd_bp_new(hw, hmc_info, idx, true);
@@ -298,15 +276,15 @@ static i40e_status i40e_remove_sd_bp(struct i40e_hw *hw,
  * This will allocate memory for PDs and backing pages and populate
  * the sd and pd entries.
  **/
-static i40e_status i40e_create_lan_hmc_object(struct i40e_hw *hw,
-				struct i40e_hmc_lan_create_obj_info *info)
+static int i40e_create_lan_hmc_object(struct i40e_hw *hw,
+				      struct i40e_hmc_lan_create_obj_info *info)
 {
-	i40e_status ret_code = 0;
 	struct i40e_hmc_sd_entry *sd_entry;
 	u32 pd_idx1 = 0, pd_lmt1 = 0;
 	u32 pd_idx = 0, pd_lmt = 0;
 	bool pd_error = false;
 	u32 sd_idx, sd_lmt;
+	int ret_code = 0;
 	u64 sd_size;
 	u32 i, j;
 
@@ -457,13 +435,13 @@ exit:
  * - This function will be called after i40e_init_lan_hmc() and before
  *   any LAN/FCoE HMC objects can be created.
  **/
-i40e_status i40e_configure_lan_hmc(struct i40e_hw *hw,
-					     enum i40e_hmc_model model)
+int i40e_configure_lan_hmc(struct i40e_hw *hw,
+			   enum i40e_hmc_model model)
 {
 	struct i40e_hmc_lan_create_obj_info info;
-	i40e_status ret_code = 0;
 	u8 hmc_fn_id = hw->hmc.hmc_fn_id;
 	struct i40e_hmc_obj_info *obj;
+	int ret_code = 0;
 
 	/* Initialize part of the create object info struct */
 	info.hmc_info = &hw->hmc;
@@ -533,7 +511,7 @@ configure_lan_hmc_out:
 }
 
 /**
- * i40e_delete_hmc_object - remove hmc objects
+ * i40e_delete_lan_hmc_object - remove hmc objects
  * @hw: pointer to the HW structure
  * @info: pointer to i40e_hmc_delete_obj_info struct
  *
@@ -542,13 +520,13 @@ configure_lan_hmc_out:
  * caller should deallocate memory allocated previously for
  * book-keeping information about PDs and backing storage.
  **/
-static i40e_status i40e_delete_lan_hmc_object(struct i40e_hw *hw,
-				struct i40e_hmc_lan_delete_obj_info *info)
+static int i40e_delete_lan_hmc_object(struct i40e_hw *hw,
+				      struct i40e_hmc_lan_delete_obj_info *info)
 {
-	i40e_status ret_code = 0;
 	struct i40e_hmc_pd_table *pd_table;
 	u32 pd_idx, pd_lmt, rel_pd_idx;
 	u32 sd_idx, sd_lmt;
+	int ret_code = 0;
 	u32 i, j;
 
 	if (NULL == info) {
@@ -654,10 +632,10 @@ exit:
  * This must be called by drivers as they are shutting down and being
  * removed from the OS.
  **/
-i40e_status i40e_shutdown_lan_hmc(struct i40e_hw *hw)
+int i40e_shutdown_lan_hmc(struct i40e_hw *hw)
 {
 	struct i40e_hmc_lan_delete_obj_info info;
-	i40e_status ret_code;
+	int ret_code;
 
 	info.hmc_info = &hw->hmc;
 	info.rsrc_type = I40E_HMC_LAN_FULL;
@@ -681,7 +659,7 @@ i40e_status i40e_shutdown_lan_hmc(struct i40e_hw *hw)
 
 #define I40E_HMC_STORE(_struct, _ele)		\
 	offsetof(struct _struct, _ele),		\
-	FIELD_SIZEOF(struct _struct, _ele)
+	sizeof_field(struct _struct, _ele)
 
 struct i40e_context_ele {
 	u16 offset;
@@ -937,9 +915,9 @@ static void i40e_write_qword(u8 *hmc_bits,
  * @context_bytes: pointer to the context bit array (DMA memory)
  * @hmc_type: the type of HMC resource
  **/
-static i40e_status i40e_clear_hmc_context(struct i40e_hw *hw,
-					u8 *context_bytes,
-					enum i40e_hmc_lan_rsrc_type hmc_type)
+static int i40e_clear_hmc_context(struct i40e_hw *hw,
+				  u8 *context_bytes,
+				  enum i40e_hmc_lan_rsrc_type hmc_type)
 {
 	/* clean the bit array */
 	memset(context_bytes, 0, (u32)hw->hmc.hmc_obj[hmc_type].size);
@@ -953,9 +931,9 @@ static i40e_status i40e_clear_hmc_context(struct i40e_hw *hw,
  * @ce_info:  a description of the struct to be filled
  * @dest:     the struct to be filled
  **/
-static i40e_status i40e_set_hmc_context(u8 *context_bytes,
-					struct i40e_context_ele *ce_info,
-					u8 *dest)
+static int i40e_set_hmc_context(u8 *context_bytes,
+				struct i40e_context_ele *ce_info,
+				u8 *dest)
 {
 	int f;
 
@@ -986,7 +964,7 @@ static i40e_status i40e_set_hmc_context(u8 *context_bytes,
 
 /**
  * i40e_hmc_get_object_va - retrieves an object's virtual address
- * @hmc_info: pointer to i40e_hmc_info struct
+ * @hw: the hardware struct, from which we obtain the i40e_hmc_info pointer
  * @object_base: pointer to u64 to get the va
  * @rsrc_type: the hmc resource type
  * @obj_idx: hmc object index
@@ -995,18 +973,18 @@ static i40e_status i40e_set_hmc_context(u8 *context_bytes,
  * base pointer.  This function is used for LAN Queue contexts.
  **/
 static
-i40e_status i40e_hmc_get_object_va(struct i40e_hmc_info *hmc_info,
-					u8 **object_base,
-					enum i40e_hmc_lan_rsrc_type rsrc_type,
-					u32 obj_idx)
+int i40e_hmc_get_object_va(struct i40e_hw *hw, u8 **object_base,
+			   enum i40e_hmc_lan_rsrc_type rsrc_type,
+			   u32 obj_idx)
 {
+	struct i40e_hmc_info *hmc_info = &hw->hmc;
 	u32 obj_offset_in_sd, obj_offset_in_pd;
-	i40e_status ret_code = 0;
 	struct i40e_hmc_sd_entry *sd_entry;
 	struct i40e_hmc_pd_entry *pd_entry;
 	u32 pd_idx, pd_lmt, rel_pd_idx;
 	u64 obj_offset_in_fpm;
 	u32 sd_idx, sd_lmt;
+	int ret_code = 0;
 
 	if (NULL == hmc_info) {
 		ret_code = I40E_ERR_BAD_PTR;
@@ -1064,13 +1042,13 @@ exit:
  * @hw:    the hardware struct
  * @queue: the queue we care about
  **/
-i40e_status i40e_clear_lan_tx_queue_context(struct i40e_hw *hw,
-						      u16 queue)
+int i40e_clear_lan_tx_queue_context(struct i40e_hw *hw,
+				    u16 queue)
 {
-	i40e_status err;
 	u8 *context_bytes;
+	int err;
 
-	err = i40e_hmc_get_object_va(&hw->hmc, &context_bytes,
+	err = i40e_hmc_get_object_va(hw, &context_bytes,
 				     I40E_HMC_LAN_TX, queue);
 	if (err < 0)
 		return err;
@@ -1084,14 +1062,14 @@ i40e_status i40e_clear_lan_tx_queue_context(struct i40e_hw *hw,
  * @queue: the queue we care about
  * @s:     the struct to be filled
  **/
-i40e_status i40e_set_lan_tx_queue_context(struct i40e_hw *hw,
-						    u16 queue,
-						    struct i40e_hmc_obj_txq *s)
+int i40e_set_lan_tx_queue_context(struct i40e_hw *hw,
+				  u16 queue,
+				  struct i40e_hmc_obj_txq *s)
 {
-	i40e_status err;
 	u8 *context_bytes;
+	int err;
 
-	err = i40e_hmc_get_object_va(&hw->hmc, &context_bytes,
+	err = i40e_hmc_get_object_va(hw, &context_bytes,
 				     I40E_HMC_LAN_TX, queue);
 	if (err < 0)
 		return err;
@@ -1105,13 +1083,13 @@ i40e_status i40e_set_lan_tx_queue_context(struct i40e_hw *hw,
  * @hw:    the hardware struct
  * @queue: the queue we care about
  **/
-i40e_status i40e_clear_lan_rx_queue_context(struct i40e_hw *hw,
-						      u16 queue)
+int i40e_clear_lan_rx_queue_context(struct i40e_hw *hw,
+				    u16 queue)
 {
-	i40e_status err;
 	u8 *context_bytes;
+	int err;
 
-	err = i40e_hmc_get_object_va(&hw->hmc, &context_bytes,
+	err = i40e_hmc_get_object_va(hw, &context_bytes,
 				     I40E_HMC_LAN_RX, queue);
 	if (err < 0)
 		return err;
@@ -1125,14 +1103,14 @@ i40e_status i40e_clear_lan_rx_queue_context(struct i40e_hw *hw,
  * @queue: the queue we care about
  * @s:     the struct to be filled
  **/
-i40e_status i40e_set_lan_rx_queue_context(struct i40e_hw *hw,
-						    u16 queue,
-						    struct i40e_hmc_obj_rxq *s)
+int i40e_set_lan_rx_queue_context(struct i40e_hw *hw,
+				  u16 queue,
+				  struct i40e_hmc_obj_rxq *s)
 {
-	i40e_status err;
 	u8 *context_bytes;
+	int err;
 
-	err = i40e_hmc_get_object_va(&hw->hmc, &context_bytes,
+	err = i40e_hmc_get_object_va(hw, &context_bytes,
 				     I40E_HMC_LAN_RX, queue);
 	if (err < 0)
 		return err;

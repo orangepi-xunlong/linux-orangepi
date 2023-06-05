@@ -1,21 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /* 
  *    Interfaces to retrieve and set PDC Stable options (firmware)
  *
  *    Copyright (C) 2005-2006 Thibaut VARENE <varenet@parisc-linux.org>
- *
- *    This program is free software; you can redistribute it and/or modify
- *    it under the terms of the GNU General Public License, version 2, as
- *    published by the Free Software Foundation.
- *
- *    This program is distributed in the hope that it will be useful,
- *    but WITHOUT ANY WARRANTY; without even the implied warranty of
- *    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *    GNU General Public License for more details.
- *
- *    You should have received a copy of the GNU General Public License
- *    along with this program; if not, write to the Free Software
- *    Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
- *
  *
  *    DEV NOTE: the PDC Procedures reference states that:
  *    "A minimum of 96 bytes of Stable Storage is required. Providing more than
@@ -27,7 +14,7 @@
  *    all) PA-RISC machines should have them. Anyway, for safety reasons, the
  *    following code can deal with just 96 bytes of Stable Storage, and all
  *    sizes between 96 and 192 bytes (provided they are multiple of struct
- *    device_path size, eg: 128, 160 and 192) to provide full information.
+ *    pdc_module_path size, eg: 128, 160 and 192) to provide full information.
  *    One last word: there's one path we can always count on: the primary path.
  *    Anything above 224 bytes is used for 'osdep2' OS-dependent storage area.
  *
@@ -68,7 +55,7 @@
 
 #include <asm/pdc.h>
 #include <asm/page.h>
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 #include <asm/hardware.h>
 
 #define PDCS_VERSION	"0.30"
@@ -101,7 +88,7 @@ struct pdcspath_entry {
 	short ready;			/* entry record is valid if != 0 */
 	unsigned long addr;		/* entry address in stable storage */
 	char *name;			/* entry name */
-	struct device_path devpath;	/* device path in parisc representation */
+	struct pdc_module_path devpath;	/* device path in parisc representation */
 	struct device *dev;		/* corresponding device */
 	struct kobject kobj;
 };
@@ -151,7 +138,7 @@ struct pdcspath_attribute paths_attr_##_name = { \
 static int
 pdcspath_fetch(struct pdcspath_entry *entry)
 {
-	struct device_path *devpath;
+	struct pdc_module_path *devpath;
 
 	if (!entry)
 		return -EINVAL;
@@ -166,7 +153,7 @@ pdcspath_fetch(struct pdcspath_entry *entry)
 		return -EIO;
 		
 	/* Find the matching device.
-	   NOTE: hardware_path overlays with device_path, so the nice cast can
+	   NOTE: hardware_path overlays with pdc_module_path, so the nice cast can
 	   be used */
 	entry->dev = hwpath_to_device((struct hardware_path *)devpath);
 
@@ -192,7 +179,7 @@ pdcspath_fetch(struct pdcspath_entry *entry)
 static void
 pdcspath_store(struct pdcspath_entry *entry)
 {
-	struct device_path *devpath;
+	struct pdc_module_path *devpath;
 
 	BUG_ON(!entry);
 
@@ -234,7 +221,7 @@ static ssize_t
 pdcspath_hwpath_read(struct pdcspath_entry *entry, char *buf)
 {
 	char *out = buf;
-	struct device_path *devpath;
+	struct pdc_module_path *devpath;
 	short i;
 
 	if (!entry || !buf)
@@ -249,11 +236,11 @@ pdcspath_hwpath_read(struct pdcspath_entry *entry, char *buf)
 		return -ENODATA;
 	
 	for (i = 0; i < 6; i++) {
-		if (devpath->bc[i] >= 128)
+		if (devpath->path.bc[i] < 0)
 			continue;
-		out += sprintf(out, "%u/", (unsigned char)devpath->bc[i]);
+		out += sprintf(out, "%d/", devpath->path.bc[i]);
 	}
-	out += sprintf(out, "%u\n", (unsigned char)devpath->mod);
+	out += sprintf(out, "%u\n", (unsigned char)devpath->path.mod);
 	
 	return out - buf;
 }
@@ -309,12 +296,12 @@ pdcspath_hwpath_write(struct pdcspath_entry *entry, const char *buf, size_t coun
 	for (i=5; ((temp = strrchr(in, '/'))) && (temp-in > 0) && (likely(i)); i--) {
 		hwpath.bc[i] = simple_strtoul(temp+1, NULL, 10);
 		in[temp-in] = '\0';
-		DPRINTK("%s: bc[%d]: %d\n", __func__, i, hwpath.bc[i]);
+		DPRINTK("%s: bc[%d]: %d\n", __func__, i, hwpath.path.bc[i]);
 	}
 	
 	/* Store the final field */		
 	hwpath.bc[i] = simple_strtoul(in, NULL, 10);
-	DPRINTK("%s: bc[%d]: %d\n", __func__, i, hwpath.bc[i]);
+	DPRINTK("%s: bc[%d]: %d\n", __func__, i, hwpath.path.bc[i]);
 	
 	/* Now we check that the user isn't trying to lure us */
 	if (!(dev = hwpath_to_device((struct hardware_path *)&hwpath))) {
@@ -333,11 +320,11 @@ pdcspath_hwpath_write(struct pdcspath_entry *entry, const char *buf, size_t coun
 	
 	/* Update the symlink to the real device */
 	sysfs_remove_link(&entry->kobj, "device");
+	write_unlock(&entry->rw_lock);
+
 	ret = sysfs_create_link(&entry->kobj, &entry->dev->kobj, "device");
 	WARN_ON(ret);
 
-	write_unlock(&entry->rw_lock);
-	
 	printk(KERN_INFO PDCS_PREFIX ": changed \"%s\" path to \"%s\"\n",
 		entry->name, buf);
 	
@@ -355,7 +342,7 @@ static ssize_t
 pdcspath_layer_read(struct pdcspath_entry *entry, char *buf)
 {
 	char *out = buf;
-	struct device_path *devpath;
+	struct pdc_module_path *devpath;
 	short i;
 
 	if (!entry || !buf)
@@ -495,11 +482,12 @@ static struct attribute *paths_subsys_attrs[] = {
 	&paths_attr_layer.attr,
 	NULL,
 };
+ATTRIBUTE_GROUPS(paths_subsys);
 
 /* Specific kobject type for our PDC paths */
 static struct kobj_type ktype_pdcspath = {
 	.sysfs_ops = &pdcspath_attr_ops,
-	.default_attrs = paths_subsys_attrs,
+	.default_groups = paths_subsys_groups,
 };
 
 /* We hard define the 4 types of path we expect to find */
@@ -559,7 +547,7 @@ static ssize_t pdcs_auto_read(struct kobject *kobj,
 	pathentry = &pdcspath_entry_primary;
 
 	read_lock(&pathentry->rw_lock);
-	out += sprintf(out, "%s\n", (pathentry->devpath.flags & knob) ?
+	out += sprintf(out, "%s\n", (pathentry->devpath.path.flags & knob) ?
 					"On" : "Off");
 	read_unlock(&pathentry->rw_lock);
 
@@ -606,8 +594,8 @@ static ssize_t pdcs_timer_read(struct kobject *kobj,
 
 	/* print the timer value in seconds */
 	read_lock(&pathentry->rw_lock);
-	out += sprintf(out, "%u\n", (pathentry->devpath.flags & PF_TIMER) ?
-				(1 << (pathentry->devpath.flags & PF_TIMER)) : 0);
+	out += sprintf(out, "%u\n", (pathentry->devpath.path.flags & PF_TIMER) ?
+				(1 << (pathentry->devpath.path.flags & PF_TIMER)) : 0);
 	read_unlock(&pathentry->rw_lock);
 
 	return out - buf;
@@ -776,7 +764,7 @@ static ssize_t pdcs_auto_write(struct kobject *kobj,
 	
 	/* Be nice to the existing flag record */
 	read_lock(&pathentry->rw_lock);
-	flags = pathentry->devpath.flags;
+	flags = pathentry->devpath.path.flags;
 	read_unlock(&pathentry->rw_lock);
 	
 	DPRINTK("%s: flags before: 0x%X\n", __func__, flags);
@@ -797,7 +785,7 @@ static ssize_t pdcs_auto_write(struct kobject *kobj,
 	write_lock(&pathentry->rw_lock);
 	
 	/* Change the path entry flags first */
-	pathentry->devpath.flags = flags;
+	pathentry->devpath.path.flags = flags;
 		
 	/* Now, dive in. Write back to the hardware */
 	pdcspath_store(pathentry);
@@ -954,7 +942,7 @@ static struct attribute *pdcs_subsys_attrs[] = {
 	NULL,
 };
 
-static struct attribute_group pdcs_attr_group = {
+static const struct attribute_group pdcs_attr_group = {
 	.attrs = pdcs_subsys_attrs,
 };
 
@@ -992,12 +980,15 @@ pdcs_register_pathentries(void)
 		entry->kobj.kset = paths_kset;
 		err = kobject_init_and_add(&entry->kobj, &ktype_pdcspath, NULL,
 					   "%s", entry->name);
-		if (err)
+		if (err) {
+			kobject_put(&entry->kobj);
 			return err;
+		}
 
 		/* kobject is now registered */
 		write_lock(&entry->rw_lock);
 		entry->ready = 2;
+		write_unlock(&entry->rw_lock);
 		
 		/* Add a nice symlink to the real device */
 		if (entry->dev) {
@@ -1005,7 +996,6 @@ pdcs_register_pathentries(void)
 			WARN_ON(err);
 		}
 
-		write_unlock(&entry->rw_lock);
 		kobject_uevent(&entry->kobj, KOBJ_ADD);
 	}
 	

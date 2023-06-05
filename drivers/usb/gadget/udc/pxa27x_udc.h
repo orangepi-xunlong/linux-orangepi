@@ -1,14 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0+
 /*
  * linux/drivers/usb/gadget/pxa27x_udc.h
  * Intel PXA27x on-chip full speed USB device controller
  *
  * Inspired by original driver by Frank Becker, David Brownell, and others.
  * Copyright (C) 2008 Robert Jarzmik
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
  */
 
 #ifndef __LINUX_USB_GADGET_PXA27X_H
@@ -330,7 +326,7 @@ struct udc_usb_ep {
  * @addr: usb endpoint number
  * @config: configuration in which this endpoint is active
  * @interface: interface in which this endpoint is active
- * @alternate: altsetting in which this endpoitn is active
+ * @alternate: altsetting in which this endpoint is active
  * @fifo_size: max packet size in the endpoint fifo
  * @type: endpoint type (bulk, iso, int, ...)
  * @udccsr_value: save register of UDCCSR0 for suspend/resume
@@ -444,7 +440,6 @@ struct udc_stats {
  * @last_interface: UDC interface of the last SET_INTERFACE host request
  * @last_alternate: UDC altsetting of the last SET_INTERFACE host request
  * @udccsr0: save of udccsr0 in case of suspend
- * @debugfs_root: root entry of debug filesystem
  * @debugfs_state: debugfs entry for "udcstate"
  * @debugfs_queues: debugfs entry for "queues"
  * @debugfs_eps: debugfs entry for "epstate"
@@ -477,12 +472,6 @@ struct pxa_udc {
 
 #ifdef CONFIG_PM
 	unsigned				udccsr0;
-#endif
-#ifdef CONFIG_USB_GADGET_DEBUG_FS
-	struct dentry				*debugfs_root;
-	struct dentry				*debugfs_state;
-	struct dentry				*debugfs_queues;
-	struct dentry				*debugfs_eps;
 #endif
 };
 #define to_pxa(g)	(container_of((g), struct pxa_udc, gadget))

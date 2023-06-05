@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * -- <linux/cdrom.h>
  * General header file for linux CD-ROM drivers 
@@ -12,6 +13,7 @@
 
 #include <linux/fs.h>		/* not really needed, later.. */
 #include <linux/list.h>
+#include <scsi/scsi_common.h>
 #include <uapi/linux/cdrom.h>
 
 struct packet_command
@@ -20,7 +22,7 @@ struct packet_command
 	unsigned char 		*buffer;
 	unsigned int 		buflen;
 	int			stat;
-	struct request_sense	*sense;
+	struct scsi_sense_hdr	*sshdr;
 	unsigned char		data_direction;
 	int			quiet;
 	int			timeout;
@@ -36,7 +38,7 @@ struct packet_command
 
 /* Uniform cdrom data structures for cdrom.c */
 struct cdrom_device_info {
-	struct cdrom_device_ops  *ops;  /* link to device_ops */
+	const struct cdrom_device_ops *ops; /* link to device_ops */
 	struct list_head list;		/* linked list of all device_info */
 	struct gendisk *disk;		/* matching block layer disk */
 	void *handle;		        /* driver-dependent data */
@@ -62,6 +64,7 @@ struct cdrom_device_info {
 	int for_data;
 	int (*exit)(struct cdrom_device_info *);
 	int mrw_mode_page;
+	__s64 last_media_change_ms;
 };
 
 struct cdrom_device_ops {
@@ -71,11 +74,9 @@ struct cdrom_device_ops {
 	int (*drive_status) (struct cdrom_device_info *, int);
 	unsigned int (*check_events) (struct cdrom_device_info *cdi,
 				      unsigned int clearing, int slot);
-	int (*media_changed) (struct cdrom_device_info *, int);
 	int (*tray_move) (struct cdrom_device_info *, int);
 	int (*lock_door) (struct cdrom_device_info *, int);
 	int (*select_speed) (struct cdrom_device_info *, int);
-	int (*select_disc) (struct cdrom_device_info *, int);
 	int (*get_last_session) (struct cdrom_device_info *,
 				 struct cdrom_multisession *);
 	int (*get_mcn) (struct cdrom_device_info *,
@@ -85,13 +86,19 @@ struct cdrom_device_ops {
 	/* play stuff */
 	int (*audio_ioctl) (struct cdrom_device_info *,unsigned int, void *);
 
-/* driver specifications */
-	const int capability;   /* capability flags */
-	int n_minors;           /* number of active minor devices */
 	/* handle uniform packets for scsi type devices (scsi,atapi) */
 	int (*generic_packet) (struct cdrom_device_info *,
 			       struct packet_command *);
+	int (*read_cdda_bpc)(struct cdrom_device_info *cdi, void __user *ubuf,
+			       u32 lba, u32 nframes, u8 *last_sense);
+/* driver specifications */
+	const int capability;   /* capability flags */
 };
+
+int cdrom_multisession(struct cdrom_device_info *cdi,
+		struct cdrom_multisession *info);
+int cdrom_read_tocentry(struct cdrom_device_info *cdi,
+		struct cdrom_tocentry *entry);
 
 /* the general block_device operations structure: */
 extern int cdrom_open(struct cdrom_device_info *cdi, struct block_device *bdev,
@@ -101,9 +108,8 @@ extern int cdrom_ioctl(struct cdrom_device_info *cdi, struct block_device *bdev,
 		       fmode_t mode, unsigned int cmd, unsigned long arg);
 extern unsigned int cdrom_check_events(struct cdrom_device_info *cdi,
 				       unsigned int clearing);
-extern int cdrom_media_changed(struct cdrom_device_info *);
 
-extern int register_cdrom(struct cdrom_device_info *cdi);
+extern int register_cdrom(struct gendisk *disk, struct cdrom_device_info *cdi);
 extern void unregister_cdrom(struct cdrom_device_info *cdi);
 
 typedef struct {
@@ -123,6 +129,8 @@ extern int cdrom_mode_sense(struct cdrom_device_info *cdi,
 			    int page_code, int page_control);
 extern void init_cdrom_command(struct packet_command *cgc,
 			       void *buffer, int len, int type);
+extern int cdrom_dummy_generic_packet(struct cdrom_device_info *cdi,
+				      struct packet_command *cgc);
 
 /* The SCSI spec says there could be 256 slots. */
 #define CDROM_MAX_SLOTS	256

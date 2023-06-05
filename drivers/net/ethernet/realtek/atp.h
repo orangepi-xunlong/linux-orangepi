@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /* Linux header file for the ATP pocket ethernet adapter. */
 /* v1.09 8/9/2000 becker@scyld.com. */
 
@@ -253,10 +254,6 @@ static inline void write_word_mode0(short ioaddr, unsigned short value)
 #define EE_CLK_LOW	0x16
 #define EE_DATA_WRITE	0x01	/* EEPROM chip data in. */
 #define EE_DATA_READ	0x08	/* EEPROM chip data out. */
-
-/* Delay between EEPROM clock transitions. */
-#define eeprom_delay(ticks) \
-do { int _i = 40; while (--_i > 0) { __SLOW_DOWN_IO; } } while (0)
 
 /* The EEPROM commands include the alway-set leading bit. */
 #define EE_WRITE_CMD(offset)	(((5 << 6) + (offset)) << 17)

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* -------------------------------------------------------------------------
  * Copyright (C) 2014-2015, Intel Corporation
  *
@@ -5,15 +6,6 @@
  *  gslX68X.c
  *  Copyright (C) 2010-2015, Shanghai Sileadinc Co.Ltd
  *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
  * -------------------------------------------------------------------------
  */
 
@@ -28,7 +20,9 @@
 #include <linux/input/mt.h>
 #include <linux/input/touchscreen.h>
 #include <linux/pm.h>
+#include <linux/pm_runtime.h>
 #include <linux/irq.h>
+#include <linux/regulator/consumer.h>
 
 #include <asm/unaligned.h>
 
@@ -55,7 +49,7 @@
 #define SILEAD_POINT_Y_MSB_OFF	0x01
 #define SILEAD_POINT_X_OFF	0x02
 #define SILEAD_POINT_X_MSB_OFF	0x03
-#define SILEAD_TOUCH_ID_MASK	0xF0
+#define SILEAD_EXTRA_DATA_MASK	0xF0
 
 #define SILEAD_CMD_SLEEP_MIN	10000
 #define SILEAD_CMD_SLEEP_MAX	20000
@@ -73,6 +67,8 @@ struct silead_ts_data {
 	struct i2c_client *client;
 	struct gpio_desc *gpio_power;
 	struct input_dev *input;
+	struct input_dev *pen_input;
+	struct regulator_bulk_data regulators[2];
 	char fw_name[64];
 	struct touchscreen_properties prop;
 	u32 max_fingers;
@@ -80,12 +76,48 @@ struct silead_ts_data {
 	struct input_mt_pos pos[SILEAD_MAX_FINGERS];
 	int slots[SILEAD_MAX_FINGERS];
 	int id[SILEAD_MAX_FINGERS];
+	u32 efi_fw_min_max[4];
+	bool efi_fw_min_max_set;
+	bool pen_supported;
+	bool pen_down;
+	u32 pen_x_res;
+	u32 pen_y_res;
+	int pen_up_count;
 };
 
 struct silead_fw_data {
 	u32 offset;
 	u32 val;
 };
+
+static void silead_apply_efi_fw_min_max(struct silead_ts_data *data)
+{
+	struct input_absinfo *absinfo_x = &data->input->absinfo[ABS_MT_POSITION_X];
+	struct input_absinfo *absinfo_y = &data->input->absinfo[ABS_MT_POSITION_Y];
+
+	if (!data->efi_fw_min_max_set)
+		return;
+
+	absinfo_x->minimum = data->efi_fw_min_max[0];
+	absinfo_x->maximum = data->efi_fw_min_max[1];
+	absinfo_y->minimum = data->efi_fw_min_max[2];
+	absinfo_y->maximum = data->efi_fw_min_max[3];
+
+	if (data->prop.invert_x) {
+		absinfo_x->maximum -= absinfo_x->minimum;
+		absinfo_x->minimum = 0;
+	}
+
+	if (data->prop.invert_y) {
+		absinfo_y->maximum -= absinfo_y->minimum;
+		absinfo_y->minimum = 0;
+	}
+
+	if (data->prop.swap_x_y) {
+		swap(absinfo_x->minimum, absinfo_y->minimum);
+		swap(absinfo_x->maximum, absinfo_y->maximum);
+	}
+}
 
 static int silead_ts_request_input_dev(struct silead_ts_data *data)
 {
@@ -102,10 +134,14 @@ static int silead_ts_request_input_dev(struct silead_ts_data *data)
 	input_set_abs_params(data->input, ABS_MT_POSITION_X, 0, 4095, 0, 0);
 	input_set_abs_params(data->input, ABS_MT_POSITION_Y, 0, 4095, 0, 0);
 	touchscreen_parse_properties(data->input, true, &data->prop);
+	silead_apply_efi_fw_min_max(data);
 
 	input_mt_init_slots(data->input, data->max_fingers,
 			    INPUT_MT_DIRECT | INPUT_MT_DROP_UNUSED |
 			    INPUT_MT_TRACK);
+
+	if (device_property_read_bool(dev, "silead,home-button"))
+		input_set_capability(data->input, EV_KEY, KEY_LEFTMETA);
 
 	data->input->name = SILEAD_TS_NAME;
 	data->input->phys = "input/ts";
@@ -114,6 +150,40 @@ static int silead_ts_request_input_dev(struct silead_ts_data *data)
 	error = input_register_device(data->input);
 	if (error) {
 		dev_err(dev, "Failed to register input device: %d\n", error);
+			return error;
+	}
+
+	return 0;
+}
+
+static int silead_ts_request_pen_input_dev(struct silead_ts_data *data)
+{
+	struct device *dev = &data->client->dev;
+	int error;
+
+	if (!data->pen_supported)
+		return 0;
+
+	data->pen_input = devm_input_allocate_device(dev);
+	if (!data->pen_input)
+		return -ENOMEM;
+
+	input_set_abs_params(data->pen_input, ABS_X, 0, 4095, 0, 0);
+	input_set_abs_params(data->pen_input, ABS_Y, 0, 4095, 0, 0);
+	input_set_capability(data->pen_input, EV_KEY, BTN_TOUCH);
+	input_set_capability(data->pen_input, EV_KEY, BTN_TOOL_PEN);
+	set_bit(INPUT_PROP_DIRECT, data->pen_input->propbit);
+	touchscreen_parse_properties(data->pen_input, false, &data->prop);
+	input_abs_set_res(data->pen_input, ABS_X, data->pen_x_res);
+	input_abs_set_res(data->pen_input, ABS_Y, data->pen_y_res);
+
+	data->pen_input->name = SILEAD_TS_NAME " pen";
+	data->pen_input->phys = "input/pen";
+	data->input->id.bustype = BUS_I2C;
+
+	error = input_register_device(data->pen_input);
+	if (error) {
+		dev_err(dev, "Failed to register pen input device: %d\n", error);
 		return error;
 	}
 
@@ -131,13 +201,53 @@ static void silead_ts_set_power(struct i2c_client *client,
 	}
 }
 
+static bool silead_ts_handle_pen_data(struct silead_ts_data *data, u8 *buf)
+{
+	u8 *coord = buf + SILEAD_POINT_DATA_LEN;
+	struct input_mt_pos pos;
+
+	if (!data->pen_supported || buf[2] != 0x00 || buf[3] != 0x00)
+		return false;
+
+	if (buf[0] == 0x00 && buf[1] == 0x00 && data->pen_down) {
+		data->pen_up_count++;
+		if (data->pen_up_count == 6) {
+			data->pen_down = false;
+			goto sync;
+		}
+		return true;
+	}
+
+	if (buf[0] == 0x01 && buf[1] == 0x08) {
+		touchscreen_set_mt_pos(&pos, &data->prop,
+			get_unaligned_le16(&coord[SILEAD_POINT_X_OFF]) & 0xfff,
+			get_unaligned_le16(&coord[SILEAD_POINT_Y_OFF]) & 0xfff);
+
+		input_report_abs(data->pen_input, ABS_X, pos.x);
+		input_report_abs(data->pen_input, ABS_Y, pos.y);
+
+		data->pen_up_count = 0;
+		data->pen_down = true;
+		goto sync;
+	}
+
+	return false;
+
+sync:
+	input_report_key(data->pen_input, BTN_TOOL_PEN, data->pen_down);
+	input_report_key(data->pen_input, BTN_TOUCH, data->pen_down);
+	input_sync(data->pen_input);
+	return true;
+}
+
 static void silead_ts_read_data(struct i2c_client *client)
 {
 	struct silead_ts_data *data = i2c_get_clientdata(client);
 	struct input_dev *input = data->input;
 	struct device *dev = &client->dev;
 	u8 *bufp, buf[SILEAD_TS_DATA_LEN];
-	int touch_nr, error, i;
+	int touch_nr, softbutton, error, i;
+	bool softbutton_pressed = false;
 
 	error = i2c_smbus_read_i2c_block_data(client, SILEAD_REG_DATA,
 					      SILEAD_TS_DATA_LEN, buf);
@@ -146,21 +256,43 @@ static void silead_ts_read_data(struct i2c_client *client)
 		return;
 	}
 
-	touch_nr = buf[0];
-	if (touch_nr > data->max_fingers) {
+	if (buf[0] > data->max_fingers) {
 		dev_warn(dev, "More touches reported then supported %d > %d\n",
-			 touch_nr, data->max_fingers);
-		touch_nr = data->max_fingers;
+			 buf[0], data->max_fingers);
+		buf[0] = data->max_fingers;
 	}
 
+	if (silead_ts_handle_pen_data(data, buf))
+		goto sync; /* Pen is down, release all previous touches */
+
+	touch_nr = 0;
 	bufp = buf + SILEAD_POINT_DATA_LEN;
-	for (i = 0; i < touch_nr; i++, bufp += SILEAD_POINT_DATA_LEN) {
-		/* Bits 4-7 are the touch id */
-		data->id[i] = (bufp[SILEAD_POINT_X_MSB_OFF] &
-			       SILEAD_TOUCH_ID_MASK) >> 4;
-		touchscreen_set_mt_pos(&data->pos[i], &data->prop,
+	for (i = 0; i < buf[0]; i++, bufp += SILEAD_POINT_DATA_LEN) {
+		softbutton = (bufp[SILEAD_POINT_Y_MSB_OFF] &
+			      SILEAD_EXTRA_DATA_MASK) >> 4;
+
+		if (softbutton) {
+			/*
+			 * For now only respond to softbutton == 0x01, some
+			 * tablets *without* a capacative button send 0x04
+			 * when crossing the edges of the screen.
+			 */
+			if (softbutton == 0x01)
+				softbutton_pressed = true;
+
+			continue;
+		}
+
+		/*
+		 * Bits 4-7 are the touch id, note not all models have
+		 * hardware touch ids so atm we don't use these.
+		 */
+		data->id[touch_nr] = (bufp[SILEAD_POINT_X_MSB_OFF] &
+				      SILEAD_EXTRA_DATA_MASK) >> 4;
+		touchscreen_set_mt_pos(&data->pos[touch_nr], &data->prop,
 			get_unaligned_le16(&bufp[SILEAD_POINT_X_OFF]) & 0xfff,
 			get_unaligned_le16(&bufp[SILEAD_POINT_Y_OFF]) & 0xfff);
+		touch_nr++;
 	}
 
 	input_mt_assign_slots(input, data->slots, data->pos, touch_nr, 0);
@@ -175,7 +307,9 @@ static void silead_ts_read_data(struct i2c_client *client)
 			data->pos[i].y, data->id[i], data->slots[i]);
 	}
 
+sync:
 	input_mt_sync_frame(input);
+	input_report_key(input, KEY_LEFTMETA, softbutton_pressed);
 	input_sync(input);
 }
 
@@ -263,17 +397,56 @@ static int silead_ts_load_fw(struct i2c_client *client)
 {
 	struct device *dev = &client->dev;
 	struct silead_ts_data *data = i2c_get_clientdata(client);
-	unsigned int fw_size, i;
-	const struct firmware *fw;
+	const struct firmware *fw = NULL;
 	struct silead_fw_data *fw_data;
+	unsigned int fw_size, i;
 	int error;
 
 	dev_dbg(dev, "Firmware file name: %s", data->fw_name);
 
-	error = request_firmware(&fw, data->fw_name, dev);
+	/*
+	 * Unfortunately, at the time of writing this comment, we have been unable to
+	 * get permission from Silead, or from device OEMs, to distribute the necessary
+	 * Silead firmware files in linux-firmware.
+	 *
+	 * On a whole bunch of devices the UEFI BIOS code contains a touchscreen driver,
+	 * which contains an embedded copy of the firmware. The fw-loader code has a
+	 * "platform" fallback mechanism, which together with info on the firmware
+	 * from drivers/platform/x86/touchscreen_dmi.c will use the firmware from the
+	 * UEFI driver when the firmware is missing from /lib/firmware. This makes the
+	 * touchscreen work OOTB without users needing to manually download the firmware.
+	 *
+	 * The firmware bundled with the original Windows/Android is usually newer then
+	 * the firmware in the UEFI driver and it is better calibrated. This better
+	 * calibration can lead to significant differences in the reported min/max
+	 * coordinates.
+	 *
+	 * To deal with this we first try to load the firmware without "platform"
+	 * fallback. If that fails we retry with "platform" fallback and if that
+	 * succeeds we apply an (optional) set of alternative min/max values from the
+	 * "silead,efi-fw-min-max" property.
+	 */
+	error = firmware_request_nowarn(&fw, data->fw_name, dev);
 	if (error) {
-		dev_err(dev, "Firmware request error %d\n", error);
-		return error;
+		error = firmware_request_platform(&fw, data->fw_name, dev);
+		if (error) {
+			dev_err(dev, "Firmware request error %d\n", error);
+			return error;
+		}
+
+		error = device_property_read_u32_array(dev, "silead,efi-fw-min-max",
+						       data->efi_fw_min_max,
+						       ARRAY_SIZE(data->efi_fw_min_max));
+		if (!error)
+			data->efi_fw_min_max_set = true;
+
+		/* The EFI (platform) embedded fw does not have pen support */
+		if (data->pen_supported) {
+			dev_warn(dev, "Warning loading '%s' from filesystem failed, using EFI embedded copy.\n",
+				 data->fw_name);
+			dev_warn(dev, "Warning pen support is known to be broken in the EFI embedded fw version\n");
+			data->pen_supported = false;
+		}
 	}
 
 	fw_size = fw->size / sizeof(*fw_data);
@@ -317,10 +490,8 @@ static int silead_ts_get_id(struct i2c_client *client)
 
 	error = i2c_smbus_read_i2c_block_data(client, SILEAD_REG_ID,
 					      sizeof(chip_id), (u8 *)&chip_id);
-	if (error < 0) {
-		dev_err(&client->dev, "Chip ID read error %d\n", error);
+	if (error < 0)
 		return error;
-	}
 
 	data->chip_id = le32_to_cpu(chip_id);
 	dev_info(&client->dev, "Silead chip ID: 0x%8X", data->chip_id);
@@ -333,12 +504,49 @@ static int silead_ts_setup(struct i2c_client *client)
 	int error;
 	u32 status;
 
+	/*
+	 * Some buggy BIOS-es bring up the chip in a stuck state where it
+	 * blocks the I2C bus. The following steps are necessary to
+	 * unstuck the chip / bus:
+	 * 1. Turn off the Silead chip.
+	 * 2. Try to do an I2C transfer with the chip, this will fail in
+	 *    response to which the I2C-bus-driver will call:
+	 *    i2c_recover_bus() which will unstuck the I2C-bus. Note the
+	 *    unstuck-ing of the I2C bus only works if we first drop the
+	 *    chip off the bus by turning it off.
+	 * 3. Turn the chip back on.
+	 *
+	 * On the x86/ACPI systems were this problem is seen, step 1. and
+	 * 3. require making ACPI calls and dealing with ACPI Power
+	 * Resources. The workaround below runtime-suspends the chip to
+	 * turn it off, leaving it up to the ACPI subsystem to deal with
+	 * this.
+	 */
+
+	if (device_property_read_bool(&client->dev,
+				      "silead,stuck-controller-bug")) {
+		pm_runtime_set_active(&client->dev);
+		pm_runtime_enable(&client->dev);
+		pm_runtime_allow(&client->dev);
+
+		pm_runtime_suspend(&client->dev);
+
+		dev_warn(&client->dev, FW_BUG "Stuck I2C bus: please ignore the next 'controller timed out' error\n");
+		silead_ts_get_id(client);
+
+		/* The forbid will also resume the device */
+		pm_runtime_forbid(&client->dev);
+		pm_runtime_disable(&client->dev);
+	}
+
 	silead_ts_set_power(client, SILEAD_POWER_OFF);
 	silead_ts_set_power(client, SILEAD_POWER_ON);
 
 	error = silead_ts_get_id(client);
-	if (error)
+	if (error) {
+		dev_err(&client->dev, "Chip ID read error %d\n", error);
 		return error;
+	}
 
 	error = silead_ts_init(client);
 	if (error)
@@ -396,6 +604,10 @@ static void silead_ts_read_props(struct i2c_client *client)
 			 "silead/%s", str);
 	else
 		dev_dbg(dev, "Firmware file name read error. Using default.");
+
+	data->pen_supported = device_property_read_bool(dev, "silead,pen-supported");
+	device_property_read_u32(dev, "silead,pen-resolution-x", &data->pen_x_res);
+	device_property_read_u32(dev, "silead,pen-resolution-y", &data->pen_y_res);
 }
 
 #ifdef CONFIG_ACPI
@@ -433,6 +645,13 @@ static int silead_ts_set_default_fw_name(struct silead_ts_data *data,
 }
 #endif
 
+static void silead_disable_regulator(void *arg)
+{
+	struct silead_ts_data *data = arg;
+
+	regulator_bulk_disable(ARRAY_SIZE(data->regulators), data->regulators);
+}
+
 static int silead_ts_probe(struct i2c_client *client,
 			   const struct i2c_device_id *id)
 {
@@ -461,9 +680,29 @@ static int silead_ts_probe(struct i2c_client *client,
 
 	silead_ts_read_props(client);
 
-	/* We must have the IRQ provided by DT or ACPI subsytem */
+	/* We must have the IRQ provided by DT or ACPI subsystem */
 	if (client->irq <= 0)
 		return -ENODEV;
+
+	data->regulators[0].supply = "vddio";
+	data->regulators[1].supply = "avdd";
+	error = devm_regulator_bulk_get(dev, ARRAY_SIZE(data->regulators),
+					data->regulators);
+	if (error)
+		return error;
+
+	/*
+	 * Enable regulators at probe and disable them at remove, we need
+	 * to keep the chip powered otherwise it forgets its firmware.
+	 */
+	error = regulator_bulk_enable(ARRAY_SIZE(data->regulators),
+				      data->regulators);
+	if (error)
+		return error;
+
+	error = devm_add_action_or_reset(dev, silead_disable_regulator, data);
+	if (error)
+		return error;
 
 	/* Power GPIO pin */
 	data->gpio_power = devm_gpiod_get_optional(dev, "power", GPIOD_OUT_LOW);
@@ -478,6 +717,10 @@ static int silead_ts_probe(struct i2c_client *client,
 		return error;
 
 	error = silead_ts_request_input_dev(data);
+	if (error)
+		return error;
+
+	error = silead_ts_request_pen_input_dev(data);
 	if (error)
 		return error;
 
@@ -497,6 +740,7 @@ static int __maybe_unused silead_ts_suspend(struct device *dev)
 {
 	struct i2c_client *client = to_i2c_client(dev);
 
+	disable_irq(client->irq);
 	silead_ts_set_power(client, SILEAD_POWER_OFF);
 	return 0;
 }
@@ -504,13 +748,21 @@ static int __maybe_unused silead_ts_suspend(struct device *dev)
 static int __maybe_unused silead_ts_resume(struct device *dev)
 {
 	struct i2c_client *client = to_i2c_client(dev);
+	bool second_try = false;
 	int error, status;
 
 	silead_ts_set_power(client, SILEAD_POWER_ON);
 
+ retry:
 	error = silead_ts_reset(client);
 	if (error)
 		return error;
+
+	if (second_try) {
+		error = silead_ts_load_fw(client);
+		if (error)
+			return error;
+	}
 
 	error = silead_ts_startup(client);
 	if (error)
@@ -518,9 +770,16 @@ static int __maybe_unused silead_ts_resume(struct device *dev)
 
 	status = silead_ts_get_status(client);
 	if (status != SILEAD_STATUS_OK) {
+		if (!second_try) {
+			second_try = true;
+			dev_dbg(dev, "Reloading firmware after unsuccessful resume\n");
+			goto retry;
+		}
 		dev_err(dev, "Resume error, status: 0x%02x\n", status);
 		return -ENODEV;
 	}
+
+	enable_irq(client->irq);
 
 	return 0;
 }
@@ -546,9 +805,24 @@ static const struct acpi_device_id silead_ts_acpi_match[] = {
 	{ "GSL3675", 0 },
 	{ "GSL3692", 0 },
 	{ "MSSL1680", 0 },
+	{ "MSSL0001", 0 },
+	{ "MSSL0002", 0 },
+	{ "MSSL0017", 0 },
 	{ }
 };
 MODULE_DEVICE_TABLE(acpi, silead_ts_acpi_match);
+#endif
+
+#ifdef CONFIG_OF
+static const struct of_device_id silead_ts_of_match[] = {
+	{ .compatible = "silead,gsl1680" },
+	{ .compatible = "silead,gsl1688" },
+	{ .compatible = "silead,gsl3670" },
+	{ .compatible = "silead,gsl3675" },
+	{ .compatible = "silead,gsl3692" },
+	{ },
+};
+MODULE_DEVICE_TABLE(of, silead_ts_of_match);
 #endif
 
 static struct i2c_driver silead_ts_driver = {
@@ -557,6 +831,7 @@ static struct i2c_driver silead_ts_driver = {
 	.driver = {
 		.name = SILEAD_TS_NAME,
 		.acpi_match_table = ACPI_PTR(silead_ts_acpi_match),
+		.of_match_table = of_match_ptr(silead_ts_of_match),
 		.pm = &silead_ts_pm,
 	},
 };

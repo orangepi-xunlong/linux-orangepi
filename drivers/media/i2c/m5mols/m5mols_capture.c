@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 
 /*
  * The Capture code for Fujitsu M-5MOLS ISP
@@ -7,11 +8,6 @@
  *
  * Copyright (C) 2009 Samsung Electronics Co., Ltd.
  * Author: Dongsoo Nathaniel Kim <dongsoo45.kim@samsung.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
  */
 
 #include <linux/i2c.h>
@@ -19,7 +15,6 @@
 #include <linux/irq.h>
 #include <linux/interrupt.h>
 #include <linux/delay.h>
-#include <linux/gpio.h>
 #include <linux/regulator/consumer.h>
 #include <linux/videodev2.h>
 #include <media/v4l2-ctrls.h>
@@ -33,6 +28,10 @@
 
 /**
  * m5mols_read_rational - I2C read of a rational number
+ * @sd: sub-device, as pointed by struct v4l2_subdev
+ * @addr_num: numerator register
+ * @addr_den: denominator register
+ * @val: place to store the division result
  *
  * Read numerator and denominator from registers @addr_num and @addr_den
  * respectively and return the division result in @val.
@@ -53,6 +52,7 @@ static int m5mols_read_rational(struct v4l2_subdev *sd, u32 addr_num,
 
 /**
  * m5mols_capture_info - Gather captured image information
+ * @info: M-5MOLS driver data structure
  *
  * For now it gathers only EXIF information and file size.
  */

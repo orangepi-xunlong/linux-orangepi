@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Junction temperature thermal driver for Maxim Max77620.
  *
@@ -5,10 +6,6 @@
  *
  * Author: Laxman Dewangan <ldewangan@nvidia.com>
  *	   Mallikarjun Kasoju <mkasoju@nvidia.com>
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
  */
 
 #include <linux/irq.h>
@@ -36,7 +33,7 @@ struct max77620_therm_info {
 /**
  * max77620_thermal_read_temp: Read PMIC die temperatue.
  * @data:	Device specific data.
- * temp:	Temperature in millidegrees Celsius
+ * @temp:	Temperature in millidegrees Celsius
  *
  * The actual temperature of PMIC die is not available from PMIC.
  * PMIC only tells the status if it has crossed or not the threshold level
@@ -47,9 +44,9 @@ struct max77620_therm_info {
  * Return 0 on success otherwise error number to show reason of failure.
  */
 
-static int max77620_thermal_read_temp(void *data, int *temp)
+static int max77620_thermal_read_temp(struct thermal_zone_device *tz, int *temp)
 {
-	struct max77620_therm_info *mtherm = data;
+	struct max77620_therm_info *mtherm = tz->devdata;
 	unsigned int val;
 	int ret;
 
@@ -69,7 +66,7 @@ static int max77620_thermal_read_temp(void *data, int *temp)
 	return 0;
 }
 
-static const struct thermal_zone_of_device_ops max77620_thermal_ops = {
+static const struct thermal_zone_device_ops max77620_thermal_ops = {
 	.get_temp = max77620_thermal_read_temp,
 };
 
@@ -112,14 +109,12 @@ static int max77620_thermal_probe(struct platform_device *pdev)
 	}
 
 	/*
-	 * Drop any current reference to a device-tree node and get a
-	 * reference to the parent's node which will be balanced on reprobe or
-	 * on platform-device release.
+	 * The reference taken to the parent's node which will be balanced on
+	 * reprobe or on platform-device release.
 	 */
-	of_node_put(pdev->dev.of_node);
-	pdev->dev.of_node = of_node_get(pdev->dev.parent->of_node);
+	device_set_of_node_from_dev(&pdev->dev, pdev->dev.parent);
 
-	mtherm->tz_device = devm_thermal_zone_of_sensor_register(&pdev->dev, 0,
+	mtherm->tz_device = devm_thermal_of_zone_register(&pdev->dev, 0,
 				mtherm, &max77620_thermal_ops);
 	if (IS_ERR(mtherm->tz_device)) {
 		ret = PTR_ERR(mtherm->tz_device);
@@ -155,6 +150,7 @@ static struct platform_device_id max77620_thermal_devtype[] = {
 	{ .name = "max77620-thermal", },
 	{},
 };
+MODULE_DEVICE_TABLE(platform, max77620_thermal_devtype);
 
 static struct platform_driver max77620_thermal_driver = {
 	.driver = {

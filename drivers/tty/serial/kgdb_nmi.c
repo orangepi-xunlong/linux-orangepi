@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * KGDB NMI serial console
  *
@@ -6,10 +7,6 @@
  *		  Colin Cross <ccross@android.com>
  * Copyright 2012 Linaro Ltd.
  *		  Anton Vorontsov <anton.vorontsov@linaro.org>
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 as published
- * by the Free Software Foundation.
  */
 
 #include <linux/kernel.h>
@@ -53,7 +50,7 @@ static int kgdb_nmi_console_setup(struct console *co, char *options)
 	 * I/O utilities that messages sent to the console will automatically
 	 * be displayed on the dbg_io.
 	 */
-	dbg_io_ops->is_console = true;
+	dbg_io_ops->cons = co;
 
 	return 0;
 }
@@ -118,10 +115,10 @@ static void kgdb_tty_recv(int ch)
 static int kgdb_nmi_poll_one_knock(void)
 {
 	static int n;
-	int c = -1;
+	int c;
 	const char *magic = kgdb_nmi_magic;
 	size_t m = strlen(magic);
-	bool printch = 0;
+	bool printch = false;
 
 	c = dbg_io_ops->read_char();
 	if (c == NO_POLL_CHAR)
@@ -133,7 +130,7 @@ static int kgdb_nmi_poll_one_knock(void)
 		n = (n + 1) % m;
 		if (!n)
 			return 1;
-		printch = 1;
+		printch = true;
 	} else {
 		n = 0;
 	}
@@ -191,9 +188,9 @@ bool kgdb_nmi_poll_knock(void)
  * The tasklet is cheap, it does not cause wakeups when reschedules itself,
  * instead it waits for the next tick.
  */
-static void kgdb_nmi_tty_receiver(unsigned long data)
+static void kgdb_nmi_tty_receiver(struct timer_list *t)
 {
-	struct kgdb_nmi_tty_priv *priv = (void *)data;
+	struct kgdb_nmi_tty_priv *priv = from_timer(priv, t, timer);
 	char ch;
 
 	priv->timer.expires = jiffies + (HZ/100);
@@ -244,7 +241,7 @@ static int kgdb_nmi_tty_install(struct tty_driver *drv, struct tty_struct *tty)
 		return -ENOMEM;
 
 	INIT_KFIFO(priv->fifo);
-	setup_timer(&priv->timer, kgdb_nmi_tty_receiver, (unsigned long)priv);
+	timer_setup(&priv->timer, kgdb_nmi_tty_receiver, 0);
 	tty_port_init(&priv->port);
 	priv->port.ops = &kgdb_nmi_tty_port_ops;
 	tty->driver_data = priv;
@@ -301,7 +298,7 @@ static void kgdb_nmi_tty_hangup(struct tty_struct *tty)
 	tty_port_hangup(&priv->port);
 }
 
-static int kgdb_nmi_tty_write_room(struct tty_struct *tty)
+static unsigned int kgdb_nmi_tty_write_room(struct tty_struct *tty)
 {
 	/* Actually, we can handle any amount as we use polled writes. */
 	return 2048;
@@ -333,17 +330,16 @@ int kgdb_register_nmi_console(void)
 	if (!arch_kgdb_ops.enable_nmi)
 		return 0;
 
-	kgdb_nmi_tty_driver = alloc_tty_driver(1);
-	if (!kgdb_nmi_tty_driver) {
+	kgdb_nmi_tty_driver = tty_alloc_driver(1, TTY_DRIVER_REAL_RAW);
+	if (IS_ERR(kgdb_nmi_tty_driver)) {
 		pr_err("%s: cannot allocate tty\n", __func__);
-		return -ENOMEM;
+		return PTR_ERR(kgdb_nmi_tty_driver);
 	}
 	kgdb_nmi_tty_driver->driver_name	= "ttyNMI";
 	kgdb_nmi_tty_driver->name		= "ttyNMI";
 	kgdb_nmi_tty_driver->num		= 1;
 	kgdb_nmi_tty_driver->type		= TTY_DRIVER_TYPE_SERIAL;
 	kgdb_nmi_tty_driver->subtype		= SERIAL_TYPE_NORMAL;
-	kgdb_nmi_tty_driver->flags		= TTY_DRIVER_REAL_RAW;
 	kgdb_nmi_tty_driver->init_termios	= tty_std_termios;
 	tty_termios_encode_baud_rate(&kgdb_nmi_tty_driver->init_termios,
 				     KGDB_NMI_BAUD, KGDB_NMI_BAUD);
@@ -359,7 +355,7 @@ int kgdb_register_nmi_console(void)
 
 	return 0;
 err_drv_reg:
-	put_tty_driver(kgdb_nmi_tty_driver);
+	tty_driver_kref_put(kgdb_nmi_tty_driver);
 	return ret;
 }
 EXPORT_SYMBOL_GPL(kgdb_register_nmi_console);
@@ -376,10 +372,8 @@ int kgdb_unregister_nmi_console(void)
 	if (ret)
 		return ret;
 
-	ret = tty_unregister_driver(kgdb_nmi_tty_driver);
-	if (ret)
-		return ret;
-	put_tty_driver(kgdb_nmi_tty_driver);
+	tty_unregister_driver(kgdb_nmi_tty_driver);
+	tty_driver_kref_put(kgdb_nmi_tty_driver);
 
 	return 0;
 }

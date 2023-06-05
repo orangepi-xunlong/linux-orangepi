@@ -351,9 +351,23 @@ static int b53_mdio_probe(struct mdio_device *mdiodev)
 static void b53_mdio_remove(struct mdio_device *mdiodev)
 {
 	struct b53_device *dev = dev_get_drvdata(&mdiodev->dev);
-	struct dsa_switch *ds = dev->ds;
 
-	dsa_unregister_switch(ds);
+	if (!dev)
+		return;
+
+	b53_switch_remove(dev);
+}
+
+static void b53_mdio_shutdown(struct mdio_device *mdiodev)
+{
+	struct b53_device *dev = dev_get_drvdata(&mdiodev->dev);
+
+	if (!dev)
+		return;
+
+	b53_switch_shutdown(dev);
+
+	dev_set_drvdata(&mdiodev->dev, NULL);
 }
 
 static const struct of_device_id b53_of_match[] = {
@@ -373,23 +387,13 @@ MODULE_DEVICE_TABLE(of, b53_of_match);
 static struct mdio_driver b53_mdio_driver = {
 	.probe	= b53_mdio_probe,
 	.remove	= b53_mdio_remove,
+	.shutdown = b53_mdio_shutdown,
 	.mdiodrv.driver = {
 		.name = "bcm53xx",
 		.of_match_table = b53_of_match,
 	},
 };
-
-static int __init b53_mdio_driver_register(void)
-{
-	return mdio_driver_register(&b53_mdio_driver);
-}
-module_init(b53_mdio_driver_register);
-
-static void __exit b53_mdio_driver_unregister(void)
-{
-	mdio_driver_unregister(&b53_mdio_driver);
-}
-module_exit(b53_mdio_driver_unregister);
+mdio_module_driver(b53_mdio_driver);
 
 MODULE_DESCRIPTION("B53 MDIO access driver");
 MODULE_LICENSE("Dual BSD/GPL");

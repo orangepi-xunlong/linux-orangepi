@@ -1,25 +1,8 @@
+/* SPDX-License-Identifier: MIT */
 /******************************************************************************
  * elfnote.h
  *
  * Definitions used for the Xen ELF notes.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to
- * deal in the Software without restriction, including without limitation the
- * rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
- * sell copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
  *
  * Copyright (c) 2006, Ian Campbell, XenSource Ltd.
  */
@@ -193,18 +176,18 @@
 #define XEN_ELFNOTE_SUPPORTED_FEATURES 17
 
 /*
- * The number of the highest elfnote defined.
+ * Physical entry point into the kernel.
+ *
+ * 32bit entry point into the kernel. When requested to launch the
+ * guest kernel in a HVM container, Xen will use this entry point to
+ * launch the guest in 32bit protected mode with paging disabled.
+ * Ignored otherwise.
  */
-#define XEN_ELFNOTE_MAX XEN_ELFNOTE_SUPPORTED_FEATURES
-
-#endif /* __XEN_PUBLIC_ELFNOTE_H__ */
+#define XEN_ELFNOTE_PHYS32_ENTRY 18
 
 /*
- * Local variables:
- * mode: C
- * c-set-style: "BSD"
- * c-basic-offset: 4
- * tab-width: 4
- * indent-tabs-mode: nil
- * End:
+ * The number of the highest elfnote defined.
  */
+#define XEN_ELFNOTE_MAX XEN_ELFNOTE_PHYS32_ENTRY
+
+#endif /* __XEN_PUBLIC_ELFNOTE_H__ */

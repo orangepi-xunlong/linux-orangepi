@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Xilinx SPI controller driver (master mode only)
  *
@@ -8,9 +9,6 @@
  * Copyright (c) 2009 Intel Corporation
  * 2002-2007 (c) MontaVista Software, Inc.
 
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/module.h>
@@ -381,6 +379,7 @@ static int xilinx_spi_find_buffer_size(struct xilinx_spi *xspi)
 }
 
 static const struct of_device_id xilinx_spi_of_match[] = {
+	{ .compatible = "xlnx,axi-quad-spi-1.00.a", },
 	{ .compatible = "xlnx,xps-spi-2.00.a", },
 	{ .compatible = "xlnx,xps-spi-2.00.b", },
 	{}
@@ -392,7 +391,7 @@ static int xilinx_spi_probe(struct platform_device *pdev)
 	struct xilinx_spi *xspi;
 	struct xspi_platform_data *pdata;
 	struct resource *res;
-	int ret, num_cs = 0, bits_per_word = 8;
+	int ret, num_cs = 0, bits_per_word;
 	struct spi_master *master;
 	u32 tmp;
 	u8 i;
@@ -404,6 +403,11 @@ static int xilinx_spi_probe(struct platform_device *pdev)
 	} else {
 		of_property_read_u32(pdev->dev.of_node, "xlnx,num-ss-bits",
 					  &num_cs);
+		ret = of_property_read_u32(pdev->dev.of_node,
+					   "xlnx,num-transfer-bits",
+					   &bits_per_word);
+		if (ret)
+			bits_per_word = 8;
 	}
 
 	if (!num_cs) {
@@ -417,7 +421,7 @@ static int xilinx_spi_probe(struct platform_device *pdev)
 		return -EINVAL;
 	}
 
-	master = spi_alloc_master(&pdev->dev, sizeof(struct xilinx_spi));
+	master = devm_spi_alloc_master(&pdev->dev, sizeof(struct xilinx_spi));
 	if (!master)
 		return -ENODEV;
 
@@ -435,10 +439,8 @@ static int xilinx_spi_probe(struct platform_device *pdev)
 
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	xspi->regs = devm_ioremap_resource(&pdev->dev, res);
-	if (IS_ERR(xspi->regs)) {
-		ret = PTR_ERR(xspi->regs);
-		goto put_master;
-	}
+	if (IS_ERR(xspi->regs))
+		return PTR_ERR(xspi->regs);
 
 	master->bus_num = pdev->id;
 	master->num_chipselect = num_cs;
@@ -468,14 +470,13 @@ static int xilinx_spi_probe(struct platform_device *pdev)
 
 	xspi->irq = platform_get_irq(pdev, 0);
 	if (xspi->irq < 0 && xspi->irq != -ENXIO) {
-		ret = xspi->irq;
-		goto put_master;
+		return xspi->irq;
 	} else if (xspi->irq >= 0) {
 		/* Register for SPI Interrupt */
 		ret = devm_request_irq(&pdev->dev, xspi->irq, xilinx_spi_irq, 0,
 				dev_name(&pdev->dev), xspi);
 		if (ret)
-			goto put_master;
+			return ret;
 	}
 
 	/* SPI controller initializations */
@@ -484,11 +485,10 @@ static int xilinx_spi_probe(struct platform_device *pdev)
 	ret = spi_bitbang_start(&xspi->bitbang);
 	if (ret) {
 		dev_err(&pdev->dev, "spi_bitbang_start FAILED\n");
-		goto put_master;
+		return ret;
 	}
 
-	dev_info(&pdev->dev, "at 0x%08llX mapped to 0x%p, irq=%d\n",
-		(unsigned long long)res->start, xspi->regs, xspi->irq);
+	dev_info(&pdev->dev, "at %pR, irq=%d\n", res, xspi->irq);
 
 	if (pdata) {
 		for (i = 0; i < pdata->num_devices; i++)
@@ -497,11 +497,6 @@ static int xilinx_spi_probe(struct platform_device *pdev)
 
 	platform_set_drvdata(pdev, master);
 	return 0;
-
-put_master:
-	spi_master_put(master);
-
-	return ret;
 }
 
 static int xilinx_spi_remove(struct platform_device *pdev)

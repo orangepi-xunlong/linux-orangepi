@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-1.0+ WITH Linux-syscall-note */
 /*
  * include/linux/serial_reg.h
  *
@@ -61,6 +62,7 @@
  * ST16C654:	 8  16  56  60		 8  16  32  56	PORT_16654
  * TI16C750:	 1  16  32  56		xx  xx  xx  xx	PORT_16750
  * TI16C752:	 8  16  56  60		 8  16  32  56
+ * OX16C950:	16  32 112 120		16  32  64 112	PORT_16C950
  * Tegra:	 1   4   8  14		16   8   4   1	PORT_TEGRA
  */
 #define UART_FCR_R_TRIG_00	0x00
@@ -137,7 +139,7 @@
 #define UART_LSR_PE		0x04 /* Parity error indicator */
 #define UART_LSR_OE		0x02 /* Overrun error indicator */
 #define UART_LSR_DR		0x01 /* Receiver data ready */
-#define UART_LSR_BRK_ERROR_BITS	0x1E /* BI, FE, PE, OE bits */
+#define UART_LSR_BRK_ERROR_BITS	(UART_LSR_BI|UART_LSR_FE|UART_LSR_PE|UART_LSR_OE)
 
 #define UART_MSR	6	/* In:  Modem Status Register */
 #define UART_MSR_DCD		0x80 /* Data Carrier Detect */
@@ -148,7 +150,7 @@
 #define UART_MSR_TERI		0x04 /* Trailing edge ring indicator */
 #define UART_MSR_DDSR		0x02 /* Delta DSR */
 #define UART_MSR_DCTS		0x01 /* Delta CTS */
-#define UART_MSR_ANY_DELTA	0x0F /* Any of the delta bits! */
+#define UART_MSR_ANY_DELTA	(UART_MSR_DDCD|UART_MSR_TERI|UART_MSR_DDSR|UART_MSR_DCTS)
 
 #define UART_SCR	7	/* I/O: Scratch Register */
 
@@ -157,6 +159,7 @@
  */
 #define UART_DLL	0	/* Out: Divisor Latch Low */
 #define UART_DLM	1	/* Out: Divisor Latch High */
+#define UART_DIV_MAX	0xFFFF	/* Max divisor value */
 
 /*
  * LCR=0xBF (or DLAB=1 for 16C660)
@@ -327,6 +330,14 @@
 #define SERIAL_RSA_BAUD_BASE (921600)
 #define SERIAL_RSA_BAUD_BASE_LO (SERIAL_RSA_BAUD_BASE / 8)
 
+/* Extra registers for TI DA8xx/66AK2x */
+#define UART_DA830_PWREMU_MGMT	12
+
+/* PWREMU_MGMT register bits */
+#define UART_DA830_PWREMU_MGMT_FREE	(1 << 0)  /* Free-running mode */
+#define UART_DA830_PWREMU_MGMT_URRST	(1 << 13) /* Receiver reset/enable */
+#define UART_DA830_PWREMU_MGMT_UTRST	(1 << 14) /* Transmitter reset/enable */
+
 /*
  * Extra serial register definitions for the internal UARTs
  * in TI OMAP processors.
@@ -357,24 +368,6 @@
 #define UART_OMAP_MDR1_FIR_MODE		0x05	/* FIR mode */
 #define UART_OMAP_MDR1_CIR_MODE		0x06	/* CIR mode */
 #define UART_OMAP_MDR1_DISABLE		0x07	/* Disable (default state) */
-
-/*
- * These are definitions for the Exar XR17V35X and XR17(C|D)15X
- */
-#define UART_EXAR_8XMODE	0x88	/* 8X sampling rate select */
-#define UART_EXAR_SLEEP		0x8b	/* Sleep mode */
-#define UART_EXAR_DVID		0x8d	/* Device identification */
-
-#define UART_EXAR_FCTR		0x08	/* Feature Control Register */
-#define UART_FCTR_EXAR_IRDA	0x08	/* IrDa data encode select */
-#define UART_FCTR_EXAR_485	0x10	/* Auto 485 half duplex dir ctl */
-#define UART_FCTR_EXAR_TRGA	0x00	/* FIFO trigger table A */
-#define UART_FCTR_EXAR_TRGB	0x60	/* FIFO trigger table B */
-#define UART_FCTR_EXAR_TRGC	0x80	/* FIFO trigger table C */
-#define UART_FCTR_EXAR_TRGD	0xc0	/* FIFO trigger table D programmable */
-
-#define UART_EXAR_TXTRG		0x0a	/* Tx FIFO trigger level write-only */
-#define UART_EXAR_RXTRG		0x0b	/* Rx FIFO trigger level write-only */
 
 /*
  * These are definitions for the Altera ALTR_16550_F32/F64/F128

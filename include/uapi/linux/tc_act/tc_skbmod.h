@@ -1,23 +1,18 @@
+/* SPDX-License-Identifier: GPL-2.0+ WITH Linux-syscall-note */
 /*
  * Copyright (c) 2016, Jamal Hadi Salim
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
-*/
+ */
 
 #ifndef __LINUX_TC_SKBMOD_H
 #define __LINUX_TC_SKBMOD_H
 
 #include <linux/pkt_cls.h>
 
-#define TCA_ACT_SKBMOD 15
-
 #define SKBMOD_F_DMAC	0x1
 #define SKBMOD_F_SMAC	0x2
 #define SKBMOD_F_ETYPE	0x4
 #define SKBMOD_F_SWAPMAC 0x8
+#define SKBMOD_F_ECN	0x10
 
 struct tc_skbmod {
 	tc_gen;

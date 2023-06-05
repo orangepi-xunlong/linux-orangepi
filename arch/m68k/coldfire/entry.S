@@ -31,7 +31,6 @@
 #include <asm/thread_info.h>
 #include <asm/errno.h>
 #include <asm/setup.h>
-#include <asm/segment.h>
 #include <asm/asm-offsets.h>
 #include <asm/entry.h>
 
@@ -51,7 +50,6 @@ sw_usp:
 .globl system_call
 .globl resume
 .globl ret_from_exception
-.globl ret_from_signal
 .globl sys_call_table
 .globl inthandler
 
@@ -92,14 +90,14 @@ ENTRY(system_call)
 	jbsr	syscall_trace_enter
 	RESTORE_SWITCH_STACK
 	addql	#4,%sp
+	addql	#1,%d0
+	jeq	ret_from_exception
 	movel	%d3,%a0
 	jbsr	%a0@
 	movel	%d0,%sp@(PT_OFF_D0)		/* save the return value */
 	subql	#4,%sp			/* dummy return address */
 	SAVE_SWITCH_STACK
 	jbsr	syscall_trace_leave
-
-ret_from_signal:
 	RESTORE_SWITCH_STACK
 	addql	#4,%sp
 
@@ -108,7 +106,7 @@ ret_from_exception:
 	btst	#5,%sp@(PT_OFF_SR)	/* check if returning to kernel */
 	jeq	Luser_return		/* if so, skip resched, signals */
 
-#ifdef CONFIG_PREEMPT
+#ifdef CONFIG_PREEMPTION
 	movel	%sp,%d1			/* get thread_info pointer */
 	andl	#-THREAD_SIZE,%d1	/* at base of kernel stack */
 	movel	%d1,%a0

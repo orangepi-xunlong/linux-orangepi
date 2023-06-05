@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  *  Copyright (C) 1991, 1992, 1993, 1994  Linus Torvalds
  *
@@ -9,7 +10,7 @@
 #include <linux/types.h>
 #include <linux/termios.h>
 #include <linux/errno.h>
-#include <linux/sched.h>
+#include <linux/sched/signal.h>
 #include <linux/kernel.h>
 #include <linux/major.h>
 #include <linux/tty.h>
@@ -20,9 +21,11 @@
 #include <linux/bitops.h>
 #include <linux/mutex.h>
 #include <linux/compat.h>
+#include <linux/termios_internal.h>
+#include "tty.h"
 
 #include <asm/io.h>
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 
 #undef TTY_DEBUG_WAIT_UNTIL_SENT
 
@@ -52,12 +55,11 @@
  *	to be no queue on the device.
  */
 
-int tty_chars_in_buffer(struct tty_struct *tty)
+unsigned int tty_chars_in_buffer(struct tty_struct *tty)
 {
 	if (tty->ops->chars_in_buffer)
 		return tty->ops->chars_in_buffer(tty);
-	else
-		return 0;
+	return 0;
 }
 EXPORT_SYMBOL(tty_chars_in_buffer);
 
@@ -72,7 +74,7 @@ EXPORT_SYMBOL(tty_chars_in_buffer);
  *	returned and data may be lost as there will be no flow control.
  */
  
-int tty_write_room(struct tty_struct *tty)
+unsigned int tty_write_room(struct tty_struct *tty)
 {
 	if (tty->ops->write_room)
 		return tty->ops->write_room(tty);
@@ -94,28 +96,6 @@ void tty_driver_flush_buffer(struct tty_struct *tty)
 		tty->ops->flush_buffer(tty);
 }
 EXPORT_SYMBOL(tty_driver_flush_buffer);
-
-/**
- *	tty_throttle		-	flow control
- *	@tty: terminal
- *
- *	Indicate that a tty should stop transmitting data down the stack.
- *	Takes the termios rwsem to protect against parallel throttle/unthrottle
- *	and also to ensure the driver can consistently reference its own
- *	termios data at this point when implementing software flow control.
- */
-
-void tty_throttle(struct tty_struct *tty)
-{
-	down_write(&tty->termios_rwsem);
-	/* check TTY_THROTTLED first so it indicates our state */
-	if (!test_and_set_bit(TTY_THROTTLED, &tty->flags) &&
-	    tty->ops->throttle)
-		tty->ops->throttle(tty);
-	tty->flow_change = 0;
-	up_write(&tty->termios_rwsem);
-}
-EXPORT_SYMBOL(tty_throttle);
 
 /**
  *	tty_unthrottle		-	flow control
@@ -145,10 +125,11 @@ EXPORT_SYMBOL(tty_unthrottle);
  *	tty_throttle_safe	-	flow control
  *	@tty: terminal
  *
- *	Similar to tty_throttle() but will only attempt throttle
- *	if tty->flow_change is TTY_THROTTLE_SAFE. Prevents an accidental
- *	throttle due to race conditions when throttling is conditional
- *	on factors evaluated prior to throttling.
+ *	Indicate that a tty should stop transmitting data down the stack.
+ *	tty_throttle_safe will only attempt throttle if tty->flow_change is
+ *	TTY_THROTTLE_SAFE. Prevents an accidental throttle due to race
+ *	conditions when throttling is conditional on factors evaluated prior to
+ *	throttling.
  *
  *	Returns 0 if tty is throttled (or was already throttled)
  */
@@ -239,7 +220,7 @@ EXPORT_SYMBOL(tty_wait_until_sent);
  *		Termios Helper Methods
  */
 
-static void unset_locked_termios(struct tty_struct *tty, struct ktermios *old)
+static void unset_locked_termios(struct tty_struct *tty, const struct ktermios *old)
 {
 	struct ktermios *termios = &tty->termios;
 	struct ktermios *locked  = &tty->termios_locked;
@@ -258,228 +239,6 @@ static void unset_locked_termios(struct tty_struct *tty, struct ktermios *old)
 	/* FIXME: What should we do for i/ospeed */
 }
 
-/*
- * Routine which returns the baud rate of the tty
- *
- * Note that the baud_table needs to be kept in sync with the
- * include/asm/termbits.h file.
- */
-static const speed_t baud_table[] = {
-	0, 50, 75, 110, 134, 150, 200, 300, 600, 1200, 1800, 2400, 4800,
-	9600, 19200, 38400, 57600, 115200, 230400, 460800,
-#ifdef __sparc__
-	76800, 153600, 307200, 614400, 921600
-#else
-	500000, 576000, 921600, 1000000, 1152000, 1500000, 2000000,
-	2500000, 3000000, 3500000, 4000000
-#endif
-};
-
-#ifndef __sparc__
-static const tcflag_t baud_bits[] = {
-	B0, B50, B75, B110, B134, B150, B200, B300, B600,
-	B1200, B1800, B2400, B4800, B9600, B19200, B38400,
-	B57600, B115200, B230400, B460800, B500000, B576000,
-	B921600, B1000000, B1152000, B1500000, B2000000, B2500000,
-	B3000000, B3500000, B4000000
-};
-#else
-static const tcflag_t baud_bits[] = {
-	B0, B50, B75, B110, B134, B150, B200, B300, B600,
-	B1200, B1800, B2400, B4800, B9600, B19200, B38400,
-	B57600, B115200, B230400, B460800, B76800, B153600,
-	B307200, B614400, B921600
-};
-#endif
-
-static int n_baud_table = ARRAY_SIZE(baud_table);
-
-/**
- *	tty_termios_baud_rate
- *	@termios: termios structure
- *
- *	Convert termios baud rate data into a speed. This should be called
- *	with the termios lock held if this termios is a terminal termios
- *	structure. May change the termios data. Device drivers can call this
- *	function but should use ->c_[io]speed directly as they are updated.
- *
- *	Locking: none
- */
-
-speed_t tty_termios_baud_rate(struct ktermios *termios)
-{
-	unsigned int cbaud;
-
-	cbaud = termios->c_cflag & CBAUD;
-
-#ifdef BOTHER
-	/* Magic token for arbitrary speed via c_ispeed/c_ospeed */
-	if (cbaud == BOTHER)
-		return termios->c_ospeed;
-#endif
-	if (cbaud & CBAUDEX) {
-		cbaud &= ~CBAUDEX;
-
-		if (cbaud < 1 || cbaud + 15 > n_baud_table)
-			termios->c_cflag &= ~CBAUDEX;
-		else
-			cbaud += 15;
-	}
-	return cbaud >= n_baud_table ? 0 : baud_table[cbaud];
-}
-EXPORT_SYMBOL(tty_termios_baud_rate);
-
-/**
- *	tty_termios_input_baud_rate
- *	@termios: termios structure
- *
- *	Convert termios baud rate data into a speed. This should be called
- *	with the termios lock held if this termios is a terminal termios
- *	structure. May change the termios data. Device drivers can call this
- *	function but should use ->c_[io]speed directly as they are updated.
- *
- *	Locking: none
- */
-
-speed_t tty_termios_input_baud_rate(struct ktermios *termios)
-{
-#ifdef IBSHIFT
-	unsigned int cbaud = (termios->c_cflag >> IBSHIFT) & CBAUD;
-
-	if (cbaud == B0)
-		return tty_termios_baud_rate(termios);
-
-	/* Magic token for arbitrary speed via c_ispeed*/
-	if (cbaud == BOTHER)
-		return termios->c_ispeed;
-
-	if (cbaud & CBAUDEX) {
-		cbaud &= ~CBAUDEX;
-
-		if (cbaud < 1 || cbaud + 15 > n_baud_table)
-			termios->c_cflag &= ~(CBAUDEX << IBSHIFT);
-		else
-			cbaud += 15;
-	}
-	return cbaud >= n_baud_table ? 0 : baud_table[cbaud];
-#else
-	return tty_termios_baud_rate(termios);
-#endif
-}
-EXPORT_SYMBOL(tty_termios_input_baud_rate);
-
-/**
- *	tty_termios_encode_baud_rate
- *	@termios: ktermios structure holding user requested state
- *	@ispeed: input speed
- *	@ospeed: output speed
- *
- *	Encode the speeds set into the passed termios structure. This is
- *	used as a library helper for drivers so that they can report back
- *	the actual speed selected when it differs from the speed requested
- *
- *	For maximal back compatibility with legacy SYS5/POSIX *nix behaviour
- *	we need to carefully set the bits when the user does not get the
- *	desired speed. We allow small margins and preserve as much of possible
- *	of the input intent to keep compatibility.
- *
- *	Locking: Caller should hold termios lock. This is already held
- *	when calling this function from the driver termios handler.
- *
- *	The ifdefs deal with platforms whose owners have yet to update them
- *	and will all go away once this is done.
- */
-
-void tty_termios_encode_baud_rate(struct ktermios *termios,
-				  speed_t ibaud, speed_t obaud)
-{
-	int i = 0;
-	int ifound = -1, ofound = -1;
-	int iclose = ibaud/50, oclose = obaud/50;
-	int ibinput = 0;
-
-	if (obaud == 0)			/* CD dropped 		  */
-		ibaud = 0;		/* Clear ibaud to be sure */
-
-	termios->c_ispeed = ibaud;
-	termios->c_ospeed = obaud;
-
-#ifdef BOTHER
-	/* If the user asked for a precise weird speed give a precise weird
-	   answer. If they asked for a Bfoo speed they may have problems
-	   digesting non-exact replies so fuzz a bit */
-
-	if ((termios->c_cflag & CBAUD) == BOTHER)
-		oclose = 0;
-	if (((termios->c_cflag >> IBSHIFT) & CBAUD) == BOTHER)
-		iclose = 0;
-	if ((termios->c_cflag >> IBSHIFT) & CBAUD)
-		ibinput = 1;	/* An input speed was specified */
-#endif
-	termios->c_cflag &= ~CBAUD;
-
-	/*
-	 *	Our goal is to find a close match to the standard baud rate
-	 *	returned. Walk the baud rate table and if we get a very close
-	 *	match then report back the speed as a POSIX Bxxxx value by
-	 *	preference
-	 */
-
-	do {
-		if (obaud - oclose <= baud_table[i] &&
-		    obaud + oclose >= baud_table[i]) {
-			termios->c_cflag |= baud_bits[i];
-			ofound = i;
-		}
-		if (ibaud - iclose <= baud_table[i] &&
-		    ibaud + iclose >= baud_table[i]) {
-			/* For the case input == output don't set IBAUD bits
-			   if the user didn't do so */
-			if (ofound == i && !ibinput)
-				ifound  = i;
-#ifdef IBSHIFT
-			else {
-				ifound = i;
-				termios->c_cflag |= (baud_bits[i] << IBSHIFT);
-			}
-#endif
-		}
-	} while (++i < n_baud_table);
-
-	/*
-	 *	If we found no match then use BOTHER if provided or warn
-	 *	the user their platform maintainer needs to wake up if not.
-	 */
-#ifdef BOTHER
-	if (ofound == -1)
-		termios->c_cflag |= BOTHER;
-	/* Set exact input bits only if the input and output differ or the
-	   user already did */
-	if (ifound == -1 && (ibaud != obaud || ibinput))
-		termios->c_cflag |= (BOTHER << IBSHIFT);
-#else
-	if (ifound == -1 || ofound == -1)
-		pr_warn_once("tty: Unable to return correct speed data as your architecture needs updating.\n");
-#endif
-}
-EXPORT_SYMBOL_GPL(tty_termios_encode_baud_rate);
-
-/**
- *	tty_encode_baud_rate		-	set baud rate of the tty
- *	@ibaud: input baud rate
- *	@obad: output baud rate
- *
- *	Update the current termios data for the tty with the new speed
- *	settings. The caller must hold the termios_rwsem for the tty in
- *	question.
- */
-
-void tty_encode_baud_rate(struct tty_struct *tty, speed_t ibaud, speed_t obaud)
-{
-	tty_termios_encode_baud_rate(&tty->termios, ibaud, obaud);
-}
-EXPORT_SYMBOL_GPL(tty_encode_baud_rate);
-
 /**
  *	tty_termios_copy_hw	-	copy hardware settings
  *	@new: New termios
@@ -491,7 +250,7 @@ EXPORT_SYMBOL_GPL(tty_encode_baud_rate);
  *	in some cases where only minimal reconfiguration is supported
  */
 
-void tty_termios_copy_hw(struct ktermios *new, struct ktermios *old)
+void tty_termios_copy_hw(struct ktermios *new, const struct ktermios *old)
 {
 	/* The bits a dumb device handles in software. Smart devices need
 	   to always provide a set_termios method */
@@ -511,7 +270,7 @@ EXPORT_SYMBOL(tty_termios_copy_hw);
  *	between the two termios structures, or a speed change is needed.
  */
 
-int tty_termios_hw_change(struct ktermios *a, struct ktermios *b)
+int tty_termios_hw_change(const struct ktermios *a, const struct ktermios *b)
 {
 	if (a->c_ispeed != b->c_ispeed || a->c_ospeed != b->c_ospeed)
 		return 1;
@@ -520,6 +279,53 @@ int tty_termios_hw_change(struct ktermios *a, struct ktermios *b)
 	return 0;
 }
 EXPORT_SYMBOL(tty_termios_hw_change);
+
+/**
+ *	tty_get_char_size	-	get size of a character
+ *	@cflag: termios cflag value
+ *
+ *	Get the size (in bits) of a character depending on @cflag's %CSIZE
+ *	setting.
+ */
+unsigned char tty_get_char_size(unsigned int cflag)
+{
+	switch (cflag & CSIZE) {
+	case CS5:
+		return 5;
+	case CS6:
+		return 6;
+	case CS7:
+		return 7;
+	case CS8:
+	default:
+		return 8;
+	}
+}
+EXPORT_SYMBOL_GPL(tty_get_char_size);
+
+/**
+ *	tty_get_frame_size	-	get size of a frame
+ *	@cflag: termios cflag value
+ *
+ *	Get the size (in bits) of a frame depending on @cflag's %CSIZE, %CSTOPB,
+ *	and %PARENB setting. The result is a sum of character size, start and
+ *	stop bits -- one bit each -- second stop bit (if set), and parity bit
+ *	(if set).
+ */
+unsigned char tty_get_frame_size(unsigned int cflag)
+{
+	unsigned char bits = 2 + tty_get_char_size(cflag);
+
+	if (cflag & CSTOPB)
+		bits++;
+	if (cflag & PARENB)
+		bits++;
+	if (cflag & ADDRB)
+		bits++;
+
+	return bits;
+}
+EXPORT_SYMBOL_GPL(tty_get_frame_size);
 
 /**
  *	tty_set_termios		-	update termios values
@@ -550,6 +356,8 @@ int tty_set_termios(struct tty_struct *tty, struct ktermios *new_termios)
 	old_termios = tty->termios;
 	tty->termios = *new_termios;
 	unset_locked_termios(tty, &old_termios);
+	/* Reset any ADDRB changes, ADDRB is changed through ->rs485_config() */
+	tty->termios.c_cflag ^= (tty->termios.c_cflag ^ old_termios.c_cflag) & ADDRB;
 
 	if (tty->ops->set_termios)
 		tty->ops->set_termios(tty, &old_termios);
@@ -566,6 +374,80 @@ int tty_set_termios(struct tty_struct *tty, struct ktermios *new_termios)
 	return 0;
 }
 EXPORT_SYMBOL_GPL(tty_set_termios);
+
+
+/*
+ * Translate a "termio" structure into a "termios". Ugh.
+ */
+__weak int user_termio_to_kernel_termios(struct ktermios *termios,
+						struct termio __user *termio)
+{
+	struct termio v;
+
+	if (copy_from_user(&v, termio, sizeof(struct termio)))
+		return -EFAULT;
+
+	termios->c_iflag = (0xffff0000 & termios->c_iflag) | v.c_iflag;
+	termios->c_oflag = (0xffff0000 & termios->c_oflag) | v.c_oflag;
+	termios->c_cflag = (0xffff0000 & termios->c_cflag) | v.c_cflag;
+	termios->c_lflag = (0xffff0000 & termios->c_lflag) | v.c_lflag;
+	termios->c_line = (0xffff0000 & termios->c_lflag) | v.c_line;
+	memcpy(termios->c_cc, v.c_cc, NCC);
+	return 0;
+}
+
+/*
+ * Translate a "termios" structure into a "termio". Ugh.
+ */
+__weak int kernel_termios_to_user_termio(struct termio __user *termio,
+						struct ktermios *termios)
+{
+	struct termio v;
+	memset(&v, 0, sizeof(struct termio));
+	v.c_iflag = termios->c_iflag;
+	v.c_oflag = termios->c_oflag;
+	v.c_cflag = termios->c_cflag;
+	v.c_lflag = termios->c_lflag;
+	v.c_line = termios->c_line;
+	memcpy(v.c_cc, termios->c_cc, NCC);
+	return copy_to_user(termio, &v, sizeof(struct termio));
+}
+
+#ifdef TCGETS2
+__weak int user_termios_to_kernel_termios(struct ktermios *k,
+						 struct termios2 __user *u)
+{
+	return copy_from_user(k, u, sizeof(struct termios2));
+}
+__weak int kernel_termios_to_user_termios(struct termios2 __user *u,
+						 struct ktermios *k)
+{
+	return copy_to_user(u, k, sizeof(struct termios2));
+}
+__weak int user_termios_to_kernel_termios_1(struct ktermios *k,
+						   struct termios __user *u)
+{
+	return copy_from_user(k, u, sizeof(struct termios));
+}
+__weak int kernel_termios_to_user_termios_1(struct termios __user *u,
+						   struct ktermios *k)
+{
+	return copy_to_user(u, k, sizeof(struct termios));
+}
+
+#else
+
+__weak int user_termios_to_kernel_termios(struct ktermios *k,
+						 struct termios __user *u)
+{
+	return copy_from_user(k, u, sizeof(struct termios));
+}
+__weak int kernel_termios_to_user_termios(struct termios __user *u,
+						 struct ktermios *k)
+{
+	return copy_to_user(u, k, sizeof(struct termios));
+}
+#endif /* TCGETS2 */
 
 /**
  *	set_termios		-	set termios values for a tty
@@ -618,21 +500,42 @@ static int set_termios(struct tty_struct *tty, void __user *arg, int opt)
 	tmp_termios.c_ispeed = tty_termios_input_baud_rate(&tmp_termios);
 	tmp_termios.c_ospeed = tty_termios_baud_rate(&tmp_termios);
 
-	ld = tty_ldisc_ref(tty);
+	if (opt & (TERMIOS_FLUSH|TERMIOS_WAIT)) {
+retry_write_wait:
+		retval = wait_event_interruptible(tty->write_wait, !tty_chars_in_buffer(tty));
+		if (retval < 0)
+			return retval;
 
-	if (ld != NULL) {
-		if ((opt & TERMIOS_FLUSH) && ld->ops->flush_buffer)
-			ld->ops->flush_buffer(tty);
-		tty_ldisc_deref(ld);
+		if (tty_write_lock(tty, 0) < 0)
+			goto retry_write_wait;
+
+		/* Racing writer? */
+		if (tty_chars_in_buffer(tty)) {
+			tty_write_unlock(tty);
+			goto retry_write_wait;
+		}
+
+		ld = tty_ldisc_ref(tty);
+		if (ld != NULL) {
+			if ((opt & TERMIOS_FLUSH) && ld->ops->flush_buffer)
+				ld->ops->flush_buffer(tty);
+			tty_ldisc_deref(ld);
+		}
+
+		if ((opt & TERMIOS_WAIT) && tty->ops->wait_until_sent) {
+			tty->ops->wait_until_sent(tty, 0);
+			if (signal_pending(current)) {
+				tty_write_unlock(tty);
+				return -ERESTARTSYS;
+			}
+		}
+
+		tty_set_termios(tty, &tmp_termios);
+
+		tty_write_unlock(tty);
+	} else {
+		tty_set_termios(tty, &tmp_termios);
 	}
-
-	if (opt & TERMIOS_WAIT) {
-		tty_wait_until_sent(tty, 0);
-		if (signal_pending(current))
-			return -ERESTARTSYS;
-	}
-
-	tty_set_termios(tty, &tmp_termios);
 
 	/* FIXME: Arguably if tmp_termios == tty->termios AND the
 	   actual requested termios was not tmp_termios then we may
@@ -663,51 +566,6 @@ static int get_termio(struct tty_struct *tty, struct termio __user *termio)
 		return -EFAULT;
 	return 0;
 }
-
-
-#ifdef TCGETX
-
-/**
- *	set_termiox	-	set termiox fields if possible
- *	@tty: terminal
- *	@arg: termiox structure from user
- *	@opt: option flags for ioctl type
- *
- *	Implement the device calling points for the SYS5 termiox ioctl
- *	interface in Linux
- */
-
-static int set_termiox(struct tty_struct *tty, void __user *arg, int opt)
-{
-	struct termiox tnew;
-	struct tty_ldisc *ld;
-
-	if (tty->termiox == NULL)
-		return -EINVAL;
-	if (copy_from_user(&tnew, arg, sizeof(struct termiox)))
-		return -EFAULT;
-
-	ld = tty_ldisc_ref(tty);
-	if (ld != NULL) {
-		if ((opt & TERMIOS_FLUSH) && ld->ops->flush_buffer)
-			ld->ops->flush_buffer(tty);
-		tty_ldisc_deref(ld);
-	}
-	if (opt & TERMIOS_WAIT) {
-		tty_wait_until_sent(tty, 0);
-		if (signal_pending(current))
-			return -ERESTARTSYS;
-	}
-
-	down_write(&tty->termios_rwsem);
-	if (tty->ops->set_termiox)
-		tty->ops->set_termiox(tty, &tnew);
-	up_write(&tty->termios_rwsem);
-	return 0;
-}
-
-#endif
-
 
 #ifdef TIOCGETP
 /*
@@ -804,10 +662,8 @@ static int set_sgttyb(struct tty_struct *tty, struct sgttyb __user *sgttyb)
 	termios.c_cc[VKILL] = tmp.sg_kill;
 	set_sgflags(&termios, tmp.sg_flags);
 	/* Try and encode into Bfoo format */
-#ifdef BOTHER
 	tty_termios_encode_baud_rate(&termios, termios.c_ispeed,
 						termios.c_ospeed);
-#endif
 	up_write(&tty->termios_rwsem);
 	tty_set_termios(tty, &termios);
 	return 0;
@@ -917,7 +773,6 @@ static int tty_change_softcar(struct tty_struct *tty, int arg)
 /**
  *	tty_mode_ioctl		-	mode related ioctls
  *	@tty: tty for the ioctl
- *	@file: file pointer for the tty
  *	@cmd: command
  *	@arg: ioctl argument
  *
@@ -926,15 +781,12 @@ static int tty_change_softcar(struct tty_struct *tty, int arg)
  *	consistent mode setting.
  */
 
-int tty_mode_ioctl(struct tty_struct *tty, struct file *file,
-			unsigned int cmd, unsigned long arg)
+int tty_mode_ioctl(struct tty_struct *tty, unsigned int cmd, unsigned long arg)
 {
 	struct tty_struct *real_tty;
 	void __user *p = (void __user *)arg;
 	int ret = 0;
 	struct ktermios kterm;
-
-	BUG_ON(file == NULL);
 
 	if (tty->driver->type == TTY_DRIVER_TYPE_PTY &&
 	    tty->driver->subtype == PTY_TYPE_MASTER)
@@ -1036,24 +888,12 @@ int tty_mode_ioctl(struct tty_struct *tty, struct file *file,
 		return ret;
 #endif
 #ifdef TCGETX
-	case TCGETX: {
-		struct termiox ktermx;
-		if (real_tty->termiox == NULL)
-			return -EINVAL;
-		down_read(&real_tty->termios_rwsem);
-		memcpy(&ktermx, real_tty->termiox, sizeof(struct termiox));
-		up_read(&real_tty->termios_rwsem);
-		if (copy_to_user(p, &ktermx, sizeof(struct termiox)))
-			ret = -EFAULT;
-		return ret;
-	}
+	case TCGETX:
 	case TCSETX:
-		return set_termiox(real_tty, p, 0);
 	case TCSETXW:
-		return set_termiox(real_tty, p, TERMIOS_WAIT);
 	case TCSETXF:
-		return set_termiox(real_tty, p, TERMIOS_FLUSH);
-#endif		
+		return -ENOTTY;
+#endif
 	case TIOCGSOFTCAR:
 		copy_termios(real_tty, &kterm);
 		ret = put_user((kterm.c_cflag & CLOCAL) ? 1 : 0,
@@ -1087,7 +927,7 @@ static int __tty_perform_flush(struct tty_struct *tty, unsigned long arg)
 			ld->ops->flush_buffer(tty);
 			tty_unthrottle(tty);
 		}
-		/* fall through */
+		fallthrough;
 	case TCOFLUSH:
 		tty_driver_flush_buffer(tty);
 		break;
@@ -1112,8 +952,8 @@ int tty_perform_flush(struct tty_struct *tty, unsigned long arg)
 }
 EXPORT_SYMBOL_GPL(tty_perform_flush);
 
-int n_tty_ioctl_helper(struct tty_struct *tty, struct file *file,
-		       unsigned int cmd, unsigned long arg)
+int n_tty_ioctl_helper(struct tty_struct *tty, unsigned int cmd,
+		unsigned long arg)
 {
 	int retval;
 
@@ -1124,20 +964,20 @@ int n_tty_ioctl_helper(struct tty_struct *tty, struct file *file,
 			return retval;
 		switch (arg) {
 		case TCOOFF:
-			spin_lock_irq(&tty->flow_lock);
-			if (!tty->flow_stopped) {
-				tty->flow_stopped = 1;
+			spin_lock_irq(&tty->flow.lock);
+			if (!tty->flow.tco_stopped) {
+				tty->flow.tco_stopped = true;
 				__stop_tty(tty);
 			}
-			spin_unlock_irq(&tty->flow_lock);
+			spin_unlock_irq(&tty->flow.lock);
 			break;
 		case TCOON:
-			spin_lock_irq(&tty->flow_lock);
-			if (tty->flow_stopped) {
-				tty->flow_stopped = 0;
+			spin_lock_irq(&tty->flow.lock);
+			if (tty->flow.tco_stopped) {
+				tty->flow.tco_stopped = false;
 				__start_tty(tty);
 			}
-			spin_unlock_irq(&tty->flow_lock);
+			spin_unlock_irq(&tty->flow.lock);
 			break;
 		case TCIOFF:
 			if (STOP_CHAR(tty) != __DISABLED_CHAR)
@@ -1158,23 +998,7 @@ int n_tty_ioctl_helper(struct tty_struct *tty, struct file *file,
 		return __tty_perform_flush(tty, arg);
 	default:
 		/* Try the mode commands */
-		return tty_mode_ioctl(tty, file, cmd, arg);
+		return tty_mode_ioctl(tty, cmd, arg);
 	}
 }
 EXPORT_SYMBOL(n_tty_ioctl_helper);
-
-#ifdef CONFIG_COMPAT
-long n_tty_compat_ioctl_helper(struct tty_struct *tty, struct file *file,
-					unsigned int cmd, unsigned long arg)
-{
-	switch (cmd) {
-	case TIOCGLCKTRMIOS:
-	case TIOCSLCKTRMIOS:
-		return tty_mode_ioctl(tty, file, cmd, (unsigned long) compat_ptr(arg));
-	default:
-		return -ENOIOCTLCMD;
-	}
-}
-EXPORT_SYMBOL(n_tty_compat_ioctl_helper);
-#endif
-

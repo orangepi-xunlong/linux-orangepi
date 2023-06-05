@@ -1,8 +1,12 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _ASM_S390_CLP_H
 #define _ASM_S390_CLP_H
 
 /* CLP common request & response block size */
 #define CLP_BLK_SIZE			PAGE_SIZE
+
+/* Call Logical Processor - Command Code */
+#define CLP_SLPC		0x0001
 
 #define CLP_LPS_BASE	0
 #define CLP_LPS_PCI	2

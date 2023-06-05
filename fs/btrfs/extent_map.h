@@ -1,21 +1,33 @@
-#ifndef __EXTENTMAP__
-#define __EXTENTMAP__
+/* SPDX-License-Identifier: GPL-2.0 */
+
+#ifndef BTRFS_EXTENT_MAP_H
+#define BTRFS_EXTENT_MAP_H
 
 #include <linux/rbtree.h>
+#include <linux/refcount.h>
 
 #define EXTENT_MAP_LAST_BYTE ((u64)-4)
 #define EXTENT_MAP_HOLE ((u64)-3)
 #define EXTENT_MAP_INLINE ((u64)-2)
+/* used only during fiemap calls */
 #define EXTENT_MAP_DELALLOC ((u64)-1)
 
-/* bits for the flags field */
-#define EXTENT_FLAG_PINNED 0 /* this entry not yet on disk, don't free it */
-#define EXTENT_FLAG_COMPRESSED 1
-#define EXTENT_FLAG_VACANCY 2 /* no file extent item found */
-#define EXTENT_FLAG_PREALLOC 3 /* pre-allocated extent */
-#define EXTENT_FLAG_LOGGING 4 /* Logging this extent */
-#define EXTENT_FLAG_FILLING 5 /* Filling in a preallocated extent */
-#define EXTENT_FLAG_FS_MAPPING 6 /* filesystem extent mapping type */
+/* bits for the extent_map::flags field */
+enum {
+	/* this entry not yet on disk, don't free it */
+	EXTENT_FLAG_PINNED,
+	EXTENT_FLAG_COMPRESSED,
+	/* pre-allocated extent */
+	EXTENT_FLAG_PREALLOC,
+	/* Logging this extent */
+	EXTENT_FLAG_LOGGING,
+	/* Filling in a preallocated extent */
+	EXTENT_FLAG_FILLING,
+	/* filesystem extent mapping type */
+	EXTENT_FLAG_FS_MAPPING,
+	/* This em is merged from two or more physically adjacent ems */
+	EXTENT_FLAG_MERGED,
+};
 
 struct extent_map {
 	struct rb_node rb_node;
@@ -30,27 +42,28 @@ struct extent_map {
 	u64 ram_bytes;
 	u64 block_start;
 	u64 block_len;
+
+	/*
+	 * Generation of the extent map, for merged em it's the highest
+	 * generation of all merged ems.
+	 * For non-merged extents, it's from btrfs_file_extent_item::generation.
+	 */
 	u64 generation;
 	unsigned long flags;
-	union {
-		struct block_device *bdev;
-
-		/*
-		 * used for chunk mappings
-		 * flags & EXTENT_FLAG_FS_MAPPING must be set
-		 */
-		struct map_lookup *map_lookup;
-	};
-	atomic_t refs;
+	/* Used for chunk mappings, flag EXTENT_FLAG_FS_MAPPING must be set */
+	struct map_lookup *map_lookup;
+	refcount_t refs;
 	unsigned int compress_type;
 	struct list_head list;
 };
 
 struct extent_map_tree {
-	struct rb_root map;
+	struct rb_root_cached map;
 	struct list_head modified_extents;
 	rwlock_t lock;
 };
+
+struct btrfs_inode;
 
 static inline int extent_map_in_tree(const struct extent_map *em)
 {
@@ -74,9 +87,11 @@ static inline u64 extent_map_block_end(struct extent_map *em)
 void extent_map_tree_init(struct extent_map_tree *tree);
 struct extent_map *lookup_extent_mapping(struct extent_map_tree *tree,
 					 u64 start, u64 len);
+struct extent_map *btrfs_next_extent_map(const struct extent_map_tree *tree,
+					 const struct extent_map *em);
 int add_extent_mapping(struct extent_map_tree *tree,
 		       struct extent_map *em, int modified);
-int remove_extent_mapping(struct extent_map_tree *tree, struct extent_map *em);
+void remove_extent_mapping(struct extent_map_tree *tree, struct extent_map *em);
 void replace_extent_mapping(struct extent_map_tree *tree,
 			    struct extent_map *cur,
 			    struct extent_map *new,
@@ -85,9 +100,19 @@ void replace_extent_mapping(struct extent_map_tree *tree,
 struct extent_map *alloc_extent_map(void);
 void free_extent_map(struct extent_map *em);
 int __init extent_map_init(void);
-void extent_map_exit(void);
+void __cold extent_map_exit(void);
 int unpin_extent_cache(struct extent_map_tree *tree, u64 start, u64 len, u64 gen);
 void clear_em_logging(struct extent_map_tree *tree, struct extent_map *em);
 struct extent_map *search_extent_mapping(struct extent_map_tree *tree,
 					 u64 start, u64 len);
+int btrfs_add_extent_mapping(struct btrfs_fs_info *fs_info,
+			     struct extent_map_tree *em_tree,
+			     struct extent_map **em_in, u64 start, u64 len);
+void btrfs_drop_extent_map_range(struct btrfs_inode *inode,
+				 u64 start, u64 end,
+				 bool skip_pinned);
+int btrfs_replace_extent_map_range(struct btrfs_inode *inode,
+				   struct extent_map *new_em,
+				   bool modified);
+
 #endif

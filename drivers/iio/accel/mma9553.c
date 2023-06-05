@@ -1,15 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Freescale MMA9553L Intelligent Pedometer driver
  * Copyright (c) 2014, Intel Corporation.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
  */
 
 #include <linux/module.h>
@@ -925,7 +917,7 @@ static const struct iio_enum mma9553_calibgender_enum = {
 
 static const struct iio_chan_spec_ext_info mma9553_ext_info[] = {
 	IIO_ENUM("calibgender", IIO_SHARED_BY_TYPE, &mma9553_calibgender_enum),
-	IIO_ENUM_AVAILABLE("calibgender", &mma9553_calibgender_enum),
+	IIO_ENUM_AVAILABLE("calibgender", IIO_SHARED_BY_TYPE, &mma9553_calibgender_enum),
 	{},
 };
 
@@ -987,7 +979,6 @@ static const struct iio_chan_spec mma9553_channels[] = {
 };
 
 static const struct iio_info mma9553_info = {
-	.driver_module = THIS_MODULE,
 	.read_raw = mma9553_read_raw,
 	.write_raw = mma9553_write_raw,
 	.read_event_config = mma9553_read_event_config,
@@ -1112,7 +1103,6 @@ static int mma9553_probe(struct i2c_client *client,
 	if (ret < 0)
 		return ret;
 
-	indio_dev->dev.parent = &client->dev;
 	indio_dev->channels = mma9553_channels;
 	indio_dev->num_channels = ARRAY_SIZE(mma9553_channels);
 	indio_dev->name = name;
@@ -1144,18 +1134,21 @@ static int mma9553_probe(struct i2c_client *client,
 	ret = iio_device_register(indio_dev);
 	if (ret < 0) {
 		dev_err(&client->dev, "unable to register iio device\n");
-		goto out_poweroff;
+		goto err_pm_cleanup;
 	}
 
 	dev_dbg(&indio_dev->dev, "Registered device %s\n", name);
 	return 0;
 
+err_pm_cleanup:
+	pm_runtime_dont_use_autosuspend(&client->dev);
+	pm_runtime_disable(&client->dev);
 out_poweroff:
 	mma9551_set_device_state(client, false);
 	return ret;
 }
 
-static int mma9553_remove(struct i2c_client *client)
+static void mma9553_remove(struct i2c_client *client)
 {
 	struct iio_dev *indio_dev = i2c_get_clientdata(client);
 	struct mma9553_data *data = iio_priv(indio_dev);
@@ -1164,16 +1157,12 @@ static int mma9553_remove(struct i2c_client *client)
 
 	pm_runtime_disable(&client->dev);
 	pm_runtime_set_suspended(&client->dev);
-	pm_runtime_put_noidle(&client->dev);
 
 	mutex_lock(&data->mutex);
 	mma9551_set_device_state(data->client, false);
 	mutex_unlock(&data->mutex);
-
-	return 0;
 }
 
-#ifdef CONFIG_PM
 static int mma9553_runtime_suspend(struct device *dev)
 {
 	struct iio_dev *indio_dev = i2c_get_clientdata(to_i2c_client(dev));
@@ -1205,9 +1194,7 @@ static int mma9553_runtime_resume(struct device *dev)
 
 	return 0;
 }
-#endif
 
-#ifdef CONFIG_PM_SLEEP
 static int mma9553_suspend(struct device *dev)
 {
 	struct iio_dev *indio_dev = i2c_get_clientdata(to_i2c_client(dev));
@@ -1233,12 +1220,10 @@ static int mma9553_resume(struct device *dev)
 
 	return ret;
 }
-#endif
 
 static const struct dev_pm_ops mma9553_pm_ops = {
-	SET_SYSTEM_SLEEP_PM_OPS(mma9553_suspend, mma9553_resume)
-	SET_RUNTIME_PM_OPS(mma9553_runtime_suspend,
-			   mma9553_runtime_resume, NULL)
+	SYSTEM_SLEEP_PM_OPS(mma9553_suspend, mma9553_resume)
+	RUNTIME_PM_OPS(mma9553_runtime_suspend, mma9553_runtime_resume, NULL)
 };
 
 static const struct acpi_device_id mma9553_acpi_match[] = {
@@ -1259,7 +1244,7 @@ static struct i2c_driver mma9553_driver = {
 	.driver = {
 		   .name = MMA9553_DRV_NAME,
 		   .acpi_match_table = ACPI_PTR(mma9553_acpi_match),
-		   .pm = &mma9553_pm_ops,
+		   .pm = pm_ptr(&mma9553_pm_ops),
 		   },
 	.probe = mma9553_probe,
 	.remove = mma9553_remove,
@@ -1271,3 +1256,4 @@ module_i2c_driver(mma9553_driver);
 MODULE_AUTHOR("Irina Tirdea <irina.tirdea@intel.com>");
 MODULE_LICENSE("GPL v2");
 MODULE_DESCRIPTION("MMA9553L pedometer platform driver");
+MODULE_IMPORT_NS(IIO_MMA9551);

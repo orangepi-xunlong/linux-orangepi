@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 #include <xen/xen.h>
 #include <xen/events.h>
 #include <xen/grant_table.h>
@@ -14,7 +15,6 @@
 #include <xen/xen-ops.h>
 #include <asm/xen/hypervisor.h>
 #include <asm/xen/hypercall.h>
-#include <asm/xen/xen-ops.h>
 #include <asm/system_misc.h>
 #include <asm/efi.h>
 #include <linux/interrupt.h>
@@ -29,14 +29,16 @@
 #include <linux/cpu.h>
 #include <linux/console.h>
 #include <linux/pvclock_gtod.h>
+#include <linux/reboot.h>
 #include <linux/time64.h>
 #include <linux/timekeeping.h>
 #include <linux/timekeeper_internal.h>
 #include <linux/acpi.h>
+#include <linux/virtio_anchor.h>
 
 #include <linux/mm.h>
 
-struct start_info _xen_start_info;
+static struct start_info _xen_start_info;
 struct start_info *xen_start_info = &_xen_start_info;
 EXPORT_SYMBOL(xen_start_info);
 
@@ -58,29 +60,13 @@ unsigned long xen_released_pages;
 struct xen_memory_region xen_extra_mem[XEN_EXTRA_MEM_MAX_REGIONS] __initdata;
 
 static __read_mostly unsigned int xen_events_irq;
+static __read_mostly phys_addr_t xen_grant_frames;
 
-int xen_remap_domain_gfn_array(struct vm_area_struct *vma,
-			       unsigned long addr,
-			       xen_pfn_t *gfn, int nr,
-			       int *err_ptr, pgprot_t prot,
-			       unsigned domid,
-			       struct page **pages)
-{
-	return xen_xlate_remap_gfn_array(vma, addr, gfn, nr, err_ptr,
-					 prot, domid, pages);
-}
-EXPORT_SYMBOL_GPL(xen_remap_domain_gfn_array);
+#define GRANT_TABLE_INDEX   0
+#define EXT_REGION_INDEX    1
 
-/* Not used by XENFEAT_auto_translated guests. */
-int xen_remap_domain_gfn_range(struct vm_area_struct *vma,
-                              unsigned long addr,
-                              xen_pfn_t gfn, int nr,
-                              pgprot_t prot, unsigned domid,
-                              struct page **pages)
-{
-	return -ENOSYS;
-}
-EXPORT_SYMBOL_GPL(xen_remap_domain_gfn_range);
+uint32_t xen_start_flags;
+EXPORT_SYMBOL(xen_start_flags);
 
 int xen_unmap_domain_gfn_range(struct vm_area_struct *vma,
 			       int nr, struct page **pages)
@@ -170,7 +156,7 @@ static int xen_starting_cpu(unsigned int cpu)
 	pr_info("Xen: initializing cpu%d\n", cpu);
 	vcpup = per_cpu_ptr(xen_vcpu_info, cpu);
 
-	info.mfn = virt_to_gfn(vcpup);
+	info.mfn = percpu_to_gfn(vcpup);
 	info.offset = xen_offset_in_page(vcpup);
 
 	err = HYPERVISOR_vcpu_op(VCPUOP_register_vcpu_info, xen_vcpu_nr(cpu),
@@ -178,7 +164,8 @@ static int xen_starting_cpu(unsigned int cpu)
 	BUG_ON(err);
 	per_cpu(xen_vcpu, cpu) = vcpup;
 
-	xen_setup_runstate_info(cpu);
+	if (!xen_kernel_unmapped_at_usr())
+		xen_setup_runstate_info(cpu);
 
 after_register_vcpu_info:
 	enable_percpu_irq(xen_events_irq, 0);
@@ -191,20 +178,31 @@ static int xen_dying_cpu(unsigned int cpu)
 	return 0;
 }
 
-static void xen_restart(enum reboot_mode reboot_mode, const char *cmd)
+void xen_reboot(int reason)
 {
-	struct sched_shutdown r = { .reason = SHUTDOWN_reboot };
+	struct sched_shutdown r = { .reason = reason };
 	int rc;
+
 	rc = HYPERVISOR_sched_op(SCHEDOP_shutdown, &r);
 	BUG_ON(rc);
 }
 
+static int xen_restart(struct notifier_block *nb, unsigned long action,
+		       void *data)
+{
+	xen_reboot(SHUTDOWN_reboot);
+
+	return NOTIFY_DONE;
+}
+
+static struct notifier_block xen_restart_nb = {
+	.notifier_call = xen_restart,
+	.priority = 192,
+};
+
 static void xen_power_off(void)
 {
-	struct sched_shutdown r = { .reason = SHUTDOWN_poweroff };
-	int rc;
-	rc = HYPERVISOR_sched_op(SCHEDOP_shutdown, &r);
-	BUG_ON(rc);
+	xen_reboot(SHUTDOWN_poweroff);
 }
 
 static irqreturn_t xen_arm_callback(int irq, void *arg)
@@ -257,7 +255,6 @@ static int __init fdt_find_hyper_node(unsigned long node, const char *uname,
  * see Documentation/devicetree/bindings/arm/xen.txt for the
  * documentation of the Xen Device Tree format.
  */
-#define GRANT_TABLE_PHYSADDR 0
 void __init xen_early_init(void)
 {
 	of_scan_flat_dt(fdt_find_hyper_node, NULL);
@@ -278,9 +275,7 @@ void __init xen_early_init(void)
 	xen_setup_features();
 
 	if (xen_feature(XENFEAT_dom0))
-		xen_start_info->flags |= SIF_INITDOMAIN|SIF_PRIVILEGED;
-	else
-		xen_start_info->flags &= ~(SIF_INITDOMAIN|SIF_PRIVILEGED);
+		xen_start_flags |= SIF_INITDOMAIN|SIF_PRIVILEGED;
 
 	if (!console_set_on_cmdline && !xen_initial_domain())
 		add_preferred_console("hvc", 0, NULL);
@@ -310,9 +305,118 @@ static void __init xen_acpi_guest_init(void)
 #endif
 }
 
+#ifdef CONFIG_XEN_UNPOPULATED_ALLOC
+/*
+ * A type-less specific Xen resource which contains extended regions
+ * (unused regions of guest physical address space provided by the hypervisor).
+ */
+static struct resource xen_resource = {
+	.name = "Xen unused space",
+};
+
+int __init arch_xen_unpopulated_init(struct resource **res)
+{
+	struct device_node *np;
+	struct resource *regs, *tmp_res;
+	uint64_t min_gpaddr = -1, max_gpaddr = 0;
+	unsigned int i, nr_reg = 0;
+	int rc;
+
+	if (!xen_domain())
+		return -ENODEV;
+
+	if (!acpi_disabled)
+		return -ENODEV;
+
+	np = of_find_compatible_node(NULL, NULL, "xen,xen");
+	if (WARN_ON(!np))
+		return -ENODEV;
+
+	/* Skip region 0 which is reserved for grant table space */
+	while (of_get_address(np, nr_reg + EXT_REGION_INDEX, NULL, NULL))
+		nr_reg++;
+
+	if (!nr_reg) {
+		pr_err("No extended regions are found\n");
+		of_node_put(np);
+		return -EINVAL;
+	}
+
+	regs = kcalloc(nr_reg, sizeof(*regs), GFP_KERNEL);
+	if (!regs) {
+		of_node_put(np);
+		return -ENOMEM;
+	}
+
+	/*
+	 * Create resource from extended regions provided by the hypervisor to be
+	 * used as unused address space for Xen scratch pages.
+	 */
+	for (i = 0; i < nr_reg; i++) {
+		rc = of_address_to_resource(np, i + EXT_REGION_INDEX, &regs[i]);
+		if (rc)
+			goto err;
+
+		if (max_gpaddr < regs[i].end)
+			max_gpaddr = regs[i].end;
+		if (min_gpaddr > regs[i].start)
+			min_gpaddr = regs[i].start;
+	}
+
+	xen_resource.start = min_gpaddr;
+	xen_resource.end = max_gpaddr;
+
+	/*
+	 * Mark holes between extended regions as unavailable. The rest of that
+	 * address space will be available for the allocation.
+	 */
+	for (i = 1; i < nr_reg; i++) {
+		resource_size_t start, end;
+
+		/* There is an overlap between regions */
+		if (regs[i - 1].end + 1 > regs[i].start) {
+			rc = -EINVAL;
+			goto err;
+		}
+
+		/* There is no hole between regions */
+		if (regs[i - 1].end + 1 == regs[i].start)
+			continue;
+
+		start = regs[i - 1].end + 1;
+		end = regs[i].start - 1;
+
+		tmp_res = kzalloc(sizeof(*tmp_res), GFP_KERNEL);
+		if (!tmp_res) {
+			rc = -ENOMEM;
+			goto err;
+		}
+
+		tmp_res->name = "Unavailable space";
+		tmp_res->start = start;
+		tmp_res->end = end;
+
+		rc = insert_resource(&xen_resource, tmp_res);
+		if (rc) {
+			pr_err("Cannot insert resource %pR (%d)\n", tmp_res, rc);
+			kfree(tmp_res);
+			goto err;
+		}
+	}
+
+	*res = &xen_resource;
+
+err:
+	of_node_put(np);
+	kfree(regs);
+	return rc;
+}
+#endif
+
 static void __init xen_dt_guest_init(void)
 {
 	struct device_node *xen_node;
+	struct resource res;
 
 	xen_node = of_find_compatible_node(NULL, NULL, "xen,xen");
 	if (!xen_node) {
@@ -321,16 +425,27 @@ static void __init xen_dt_guest_init(void)
 	}
 
 	xen_events_irq = irq_of_parse_and_map(xen_node, 0);
+
+	if (of_address_to_resource(xen_node, GRANT_TABLE_INDEX, &res)) {
+		pr_err("Xen grant table region is not found\n");
+		of_node_put(xen_node);
+		return;
+	}
+	of_node_put(xen_node);
+	xen_grant_frames = res.start;
 }
 
 static int __init xen_guest_init(void)
 {
 	struct xen_add_to_physmap xatp;
 	struct shared_info *shared_info_page = NULL;
-	int cpu;
+	int rc, cpu;
 
 	if (!xen_domain())
 		return 0;
+
+	if (IS_ENABLED(CONFIG_XEN_VIRTIO))
+		virtio_set_mem_acc_cb(xen_virtio_mem_acc);
 
 	if (!acpi_disabled)
 		xen_acpi_guest_init();
@@ -380,16 +495,18 @@ static int __init xen_guest_init(void)
 	for_each_possible_cpu(cpu)
 		per_cpu(xen_vcpu_id, cpu) = cpu;
 
-	xen_auto_xlat_grant_frames.count = gnttab_max_grant_frames();
-	if (xen_xlate_map_ballooned_pages(&xen_auto_xlat_grant_frames.pfn,
-					  &xen_auto_xlat_grant_frames.vaddr,
-					  xen_auto_xlat_grant_frames.count)) {
+	if (!xen_grant_frames) {
+		xen_auto_xlat_grant_frames.count = gnttab_max_grant_frames();
+		rc = xen_xlate_map_ballooned_pages(&xen_auto_xlat_grant_frames.pfn,
+										   &xen_auto_xlat_grant_frames.vaddr,
+										   xen_auto_xlat_grant_frames.count);
+	} else
+		rc = gnttab_setup_auto_xlat_frames(xen_grant_frames);
+	if (rc) {
 		free_percpu(xen_vcpu_info);
-		return -ENOMEM;
+		return rc;
 	}
 	gnttab_init();
-	if (!xen_initial_domain())
-		xenbus_probe(NULL);
 
 	/*
 	 * Making sure board specific code will not set up ops for
@@ -406,13 +523,14 @@ static int __init xen_guest_init(void)
 		return -EINVAL;
 	}
 
-	xen_time_setup_guest();
+	if (!xen_kernel_unmapped_at_usr())
+		xen_time_setup_guest();
 
 	if (xen_initial_domain())
 		pvclock_gtod_register_notifier(&xen_pvclock_gtod_notifier);
 
 	return cpuhp_setup_state(CPUHP_AP_ARM_XEN_STARTING,
-				 "AP_ARM_XEN_STARTING", xen_starting_cpu,
+				 "arm/xen:starting", xen_starting_cpu,
 				 xen_dying_cpu);
 }
 early_initcall(xen_guest_init);
@@ -423,7 +541,7 @@ static int __init xen_pm_init(void)
 		return -ENODEV;
 
 	pm_power_off = xen_power_off;
-	arm_pm_restart = xen_restart;
+	register_restart_handler(&xen_restart_nb);
 	if (!xen_initial_domain()) {
 		struct timespec64 ts;
 		xen_read_wallclock(&ts);
@@ -453,8 +571,8 @@ EXPORT_SYMBOL_GPL(HYPERVISOR_hvm_op);
 EXPORT_SYMBOL_GPL(HYPERVISOR_memory_op);
 EXPORT_SYMBOL_GPL(HYPERVISOR_physdev_op);
 EXPORT_SYMBOL_GPL(HYPERVISOR_vcpu_op);
-EXPORT_SYMBOL_GPL(HYPERVISOR_tmem_op);
-EXPORT_SYMBOL_GPL(HYPERVISOR_platform_op);
+EXPORT_SYMBOL_GPL(HYPERVISOR_platform_op_raw);
 EXPORT_SYMBOL_GPL(HYPERVISOR_multicall);
 EXPORT_SYMBOL_GPL(HYPERVISOR_vm_assist);
+EXPORT_SYMBOL_GPL(HYPERVISOR_dm_op);
 EXPORT_SYMBOL_GPL(privcmd_call);

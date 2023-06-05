@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /* Kernel module help for sparc64.
  *
  * Copyright (C) 2001 Rusty Russell.
@@ -207,9 +208,6 @@ int module_finalize(const Elf_Ehdr *hdr,
 		    const Elf_Shdr *sechdrs,
 		    struct module *me)
 {
-	/* make jump label nops */
-	jump_label_apply_nops(me);
-
 	do_patch_sections(hdr, sechdrs);
 
 	/* Cheetah's I-cache is fully coherent.  */

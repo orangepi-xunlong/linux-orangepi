@@ -1,11 +1,6 @@
-CFLAGS += -iquote../../../../include/uapi -Wall
-peeksiginfo: peeksiginfo.c
+# SPDX-License-Identifier: GPL-2.0-only
+CFLAGS += -std=c99 -pthread -iquote../../../../include/uapi -Wall
 
-all: peeksiginfo
-
-clean:
-	rm -f peeksiginfo
-
-TEST_PROGS := peeksiginfo
+TEST_GEN_PROGS := get_syscall_info peeksiginfo vmaccess
 
 include ../lib.mk

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  *  linux/arch/m68k/mm/fault.c
  *
@@ -11,45 +12,43 @@
 #include <linux/interrupt.h>
 #include <linux/module.h>
 #include <linux/uaccess.h>
+#include <linux/perf_event.h>
 
 #include <asm/setup.h>
 #include <asm/traps.h>
-#include <asm/pgalloc.h>
 
 extern void die_if_kernel(char *, struct pt_regs *, long);
 
 int send_fault_sig(struct pt_regs *regs)
 {
-	siginfo_t siginfo = { 0, 0, 0, };
+	int signo, si_code;
+	void __user *addr;
 
-	siginfo.si_signo = current->thread.signo;
-	siginfo.si_code = current->thread.code;
-	siginfo.si_addr = (void *)current->thread.faddr;
-	pr_debug("send_fault_sig: %p,%d,%d\n", siginfo.si_addr,
-		 siginfo.si_signo, siginfo.si_code);
+	signo = current->thread.signo;
+	si_code = current->thread.code;
+	addr = (void __user *)current->thread.faddr;
+	pr_debug("send_fault_sig: %p,%d,%d\n", addr, signo, si_code);
 
 	if (user_mode(regs)) {
-		force_sig_info(siginfo.si_signo,
-			       &siginfo, current);
+		force_sig_fault(signo, si_code, addr);
 	} else {
-		if (handle_kernel_fault(regs))
+		if (fixup_exception(regs))
 			return -1;
 
-		//if (siginfo.si_signo == SIGBUS)
-		//	force_sig_info(siginfo.si_signo,
-		//		       &siginfo, current);
+		//if (signo == SIGBUS)
+		//	force_sig_fault(si_signo, si_code, addr);
 
 		/*
 		 * Oops. The kernel tried to access some bad page. We'll have to
 		 * terminate things with extreme prejudice.
 		 */
-		if ((unsigned long)siginfo.si_addr < PAGE_SIZE)
+		if ((unsigned long)addr < PAGE_SIZE)
 			pr_alert("Unable to handle kernel NULL pointer dereference");
 		else
 			pr_alert("Unable to handle kernel access");
-		pr_cont(" at virtual address %p\n", siginfo.si_addr);
+		pr_cont(" at virtual address %p\n", addr);
 		die_if_kernel("Oops", regs, 0 /*error_code*/);
-		do_exit(SIGKILL);
+		make_task_dead(SIGKILL);
 	}
 
 	return 1;
@@ -71,8 +70,8 @@ int do_page_fault(struct pt_regs *regs, unsigned long address,
 {
 	struct mm_struct *mm = current->mm;
 	struct vm_area_struct * vma;
-	int fault;
-	unsigned int flags = FAULT_FLAG_ALLOW_RETRY | FAULT_FLAG_KILLABLE;
+	vm_fault_t fault;
+	unsigned int flags = FAULT_FLAG_DEFAULT;
 
 	pr_debug("do page fault:\nregs->sr=%#x, regs->pc=%#lx, address=%#lx, %ld, %p\n",
 		regs->sr, regs->pc, address, error_code, mm ? mm->pgd : NULL);
@@ -86,14 +85,14 @@ int do_page_fault(struct pt_regs *regs, unsigned long address,
 
 	if (user_mode(regs))
 		flags |= FAULT_FLAG_USER;
+
+	perf_sw_event(PERF_COUNT_SW_PAGE_FAULTS, 1, regs, address);
 retry:
-	down_read(&mm->mmap_sem);
+	mmap_read_lock(mm);
 
 	vma = find_vma(mm, address);
 	if (!vma)
 		goto map_err;
-	if (vma->vm_flags & VM_IO)
-		goto acc_err;
 	if (vma->vm_start <= address)
 		goto good_area;
 	if (!(vma->vm_flags & VM_GROWSDOWN))
@@ -117,7 +116,7 @@ good_area:
 	pr_debug("do_page_fault: good_area\n");
 	switch (error_code & 3) {
 		default:	/* 3: write, present */
-			/* fall through */
+			fallthrough;
 		case 2:		/* write, not present */
 			if (!(vma->vm_flags & VM_WRITE))
 				goto acc_err;
@@ -126,7 +125,7 @@ good_area:
 		case 1:		/* read, present */
 			goto acc_err;
 		case 0:		/* read, not present */
-			if (!(vma->vm_flags & (VM_READ | VM_EXEC | VM_WRITE)))
+			if (unlikely(!vma_is_accessible(vma)))
 				goto acc_err;
 	}
 
@@ -136,10 +135,14 @@ good_area:
 	 * the fault.
 	 */
 
-	fault = handle_mm_fault(vma, address, flags);
-	pr_debug("handle_mm_fault returns %d\n", fault);
+	fault = handle_mm_fault(vma, address, flags, regs);
+	pr_debug("handle_mm_fault returns %x\n", fault);
 
-	if ((fault & VM_FAULT_RETRY) && fatal_signal_pending(current))
+	if (fault_signal_pending(fault, regs))
+		return 0;
+
+	/* The fault is fully completed (including releasing mmap lock) */
+	if (fault & VM_FAULT_COMPLETED)
 		return 0;
 
 	if (unlikely(fault & VM_FAULT_ERROR)) {
@@ -152,33 +155,19 @@ good_area:
 		BUG();
 	}
 
-	/*
-	 * Major/minor page fault accounting is only done on the
-	 * initial attempt. If we go through a retry, it is extremely
-	 * likely that the page will be found in page cache at that point.
-	 */
-	if (flags & FAULT_FLAG_ALLOW_RETRY) {
-		if (fault & VM_FAULT_MAJOR)
-			current->maj_flt++;
-		else
-			current->min_flt++;
-		if (fault & VM_FAULT_RETRY) {
-			/* Clear FAULT_FLAG_ALLOW_RETRY to avoid any risk
-			 * of starvation. */
-			flags &= ~FAULT_FLAG_ALLOW_RETRY;
-			flags |= FAULT_FLAG_TRIED;
+	if (fault & VM_FAULT_RETRY) {
+		flags |= FAULT_FLAG_TRIED;
 
-			/*
-			 * No need to up_read(&mm->mmap_sem) as we would
-			 * have already released it in __lock_page_or_retry
-			 * in mm/filemap.c.
-			 */
+		/*
+		 * No need to mmap_read_unlock(mm) as we would
+		 * have already released it in __lock_page_or_retry
+		 * in mm/filemap.c.
+		 */
 
-			goto retry;
-		}
+		goto retry;
 	}
 
-	up_read(&mm->mmap_sem);
+	mmap_read_unlock(mm);
 	return 0;
 
 /*
@@ -186,7 +175,7 @@ good_area:
  * us unable to handle the page fault gracefully.
  */
 out_of_memory:
-	up_read(&mm->mmap_sem);
+	mmap_read_unlock(mm);
 	if (!user_mode(regs))
 		goto no_context;
 	pagefault_out_of_memory();
@@ -215,6 +204,6 @@ acc_err:
 	current->thread.faddr = address;
 
 send_sig:
-	up_read(&mm->mmap_sem);
+	mmap_read_unlock(mm);
 	return send_fault_sig(regs);
 }

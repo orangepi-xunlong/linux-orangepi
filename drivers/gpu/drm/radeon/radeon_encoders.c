@@ -23,19 +23,19 @@
  * Authors: Dave Airlie
  *          Alex Deucher
  */
-#include <drm/drmP.h>
+
+#include <linux/pci.h>
+
 #include <drm/drm_crtc_helper.h>
+#include <drm/drm_device.h>
 #include <drm/radeon_drm.h>
+
+#include <acpi/video.h>
+
 #include "radeon.h"
+#include "radeon_atombios.h"
+#include "radeon_legacy_encoders.h"
 #include "atom.h"
-
-extern void
-radeon_legacy_backlight_init(struct radeon_encoder *radeon_encoder,
-			     struct drm_connector *drm_connector);
-extern void
-radeon_atom_backlight_init(struct radeon_encoder *radeon_encoder,
-			   struct drm_connector *drm_connector);
-
 
 static uint32_t radeon_encoder_clones(struct drm_encoder *encoder)
 {
@@ -169,7 +169,7 @@ static void radeon_encoder_add_backlight(struct radeon_encoder *radeon_encoder,
 		return;
 
 	if (radeon_backlight == 0) {
-		return;
+		use_bl = false;
 	} else if (radeon_backlight == 1) {
 		use_bl = true;
 	} else if (radeon_backlight == -1) {
@@ -195,6 +195,13 @@ static void radeon_encoder_add_backlight(struct radeon_encoder *radeon_encoder,
 		else
 			radeon_legacy_backlight_init(radeon_encoder, connector);
 	}
+
+	/*
+	 * If there is no native backlight device (which may happen even when
+	 * use_bl==true) try registering an ACPI video backlight device instead.
+	 */
+	if (!rdev->mode_info.bl_encoder)
+		acpi_video_register_backlight();
 }
 
 void
@@ -211,7 +218,7 @@ radeon_link_encoder_connector(struct drm_device *dev)
 		list_for_each_entry(encoder, &dev->mode_config.encoder_list, head) {
 			radeon_encoder = to_radeon_encoder(encoder);
 			if (radeon_encoder->devices & radeon_connector->devices) {
-				drm_mode_connector_attach_encoder(connector, encoder);
+				drm_connector_attach_encoder(connector, encoder);
 				if (radeon_encoder->devices & (ATOM_DEVICE_LCD_SUPPORT))
 					radeon_encoder_add_backlight(radeon_encoder, connector);
 			}
@@ -246,16 +253,7 @@ radeon_get_connector_for_encoder(struct drm_encoder *encoder)
 
 	list_for_each_entry(connector, &dev->mode_config.connector_list, head) {
 		radeon_connector = to_radeon_connector(connector);
-		if (radeon_encoder->is_mst_encoder) {
-			struct radeon_encoder_mst *mst_enc;
-
-			if (!radeon_connector->is_mst_connector)
-				continue;
-
-			mst_enc = radeon_encoder->enc_priv;
-			if (mst_enc->connector == radeon_connector->mst_port)
-				return connector;
-		} else if (radeon_encoder->active_device & radeon_connector->devices)
+		if (radeon_encoder->active_device & radeon_connector->devices)
 			return connector;
 	}
 	return NULL;
@@ -401,9 +399,6 @@ bool radeon_dig_monitor_is_duallink(struct drm_encoder *encoder,
 	case DRM_MODE_CONNECTOR_DVID:
 	case DRM_MODE_CONNECTOR_HDMIA:
 	case DRM_MODE_CONNECTOR_DisplayPort:
-		if (radeon_connector->is_mst_connector)
-			return false;
-
 		dig_connector = radeon_connector->con_priv;
 		if ((dig_connector->dp_sink_type == CONNECTOR_OBJECT_ID_DISPLAYPORT) ||
 		    (dig_connector->dp_sink_type == CONNECTOR_OBJECT_ID_eDP))

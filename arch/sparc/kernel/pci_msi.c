@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /* pci_msi.c: Sparc64 MSI support common layer.
  *
  * Copyright (C) 2007 David S. Miller (davem@davemloft.net)
@@ -145,13 +146,13 @@ static int sparc64_setup_msi_irq(unsigned int *irq_p,
 	msiqid = pick_msiq(pbm);
 
 	err = ops->msi_setup(pbm, msiqid, msi,
-			     (entry->msi_attrib.is_64 ? 1 : 0));
+			     (entry->pci.msi_attrib.is_64 ? 1 : 0));
 	if (err)
 		goto out_msi_free;
 
 	pbm->msi_irq_table[msi - pbm->msi_first] = *irq_p;
 
-	if (entry->msi_attrib.is_64) {
+	if (entry->pci.msi_attrib.is_64) {
 		msg.address_hi = pbm->msi64_start >> 32;
 		msg.address_lo = pbm->msi64_start & 0xffffffff;
 	} else {
@@ -190,8 +191,8 @@ static void sparc64_teardown_msi_irq(unsigned int irq,
 			break;
 	}
 	if (i >= pbm->msi_num) {
-		printk(KERN_ERR "%s: teardown: No MSI for irq %u\n",
-		       pbm->name, irq);
+		pci_err(pdev, "%s: teardown: No MSI for irq %u\n", pbm->name,
+			irq);
 		return;
 	}
 
@@ -200,9 +201,9 @@ static void sparc64_teardown_msi_irq(unsigned int irq,
 
 	err = ops->msi_teardown(pbm, msi_num);
 	if (err) {
-		printk(KERN_ERR "%s: teardown: ops->teardown() on MSI %u, "
-		       "irq %u, gives error %d\n",
-		       pbm->name, msi_num, irq, err);
+		pci_err(pdev, "%s: teardown: ops->teardown() on MSI %u, "
+			"irq %u, gives error %d\n", pbm->name, msi_num, irq,
+			err);
 		return;
 	}
 

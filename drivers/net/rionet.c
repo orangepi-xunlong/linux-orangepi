@@ -1,13 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * rionet - Ethernet driver over RapidIO messaging services
  *
  * Copyright 2005 MontaVista Software, Inc.
  * Matt Porter <mporter@kernel.crashing.org>
- *
- * This program is free software; you can redistribute  it and/or modify it
- * under  the terms of  the GNU General  Public License as published by the
- * Free Software Foundation;  either version 2 of the  License, or (at your
- * option) any later version.
  */
 
 #include <linux/module.h>
@@ -113,7 +109,7 @@ static int rionet_rx_clean(struct net_device *ndev)
 		skb_put(rnet->rx_skb[i], RIO_MAX_MSG_SIZE);
 		rnet->rx_skb[i]->protocol =
 		    eth_type_trans(rnet->rx_skb[i], ndev);
-		error = netif_rx(rnet->rx_skb[i]);
+		error = __netif_rx(rnet->rx_skb[i]);
 
 		if (error == NET_RX_DROP) {
 			ndev->stats.rx_dropped++;
@@ -170,7 +166,8 @@ static int rionet_queue_tx_msg(struct sk_buff *skb, struct net_device *ndev,
 	return 0;
 }
 
-static int rionet_start_xmit(struct sk_buff *skb, struct net_device *ndev)
+static netdev_tx_t rionet_start_xmit(struct sk_buff *skb,
+				     struct net_device *ndev)
 {
 	int i;
 	struct rionet_private *rnet = netdev_priv(ndev);
@@ -201,7 +198,7 @@ static int rionet_start_xmit(struct sk_buff *skb, struct net_device *ndev)
 				rionet_queue_tx_msg(skb, ndev,
 					nets[rnet->mport->id].active[i]);
 				if (count)
-					atomic_inc(&skb->users);
+					refcount_inc(&skb->users);
 				count++;
 			}
 	} else if (RIONET_MAC_MATCH(eth->h_dest)) {
@@ -446,10 +443,10 @@ static void rionet_get_drvinfo(struct net_device *ndev,
 {
 	struct rionet_private *rnet = netdev_priv(ndev);
 
-	strlcpy(info->driver, DRV_NAME, sizeof(info->driver));
-	strlcpy(info->version, DRV_VERSION, sizeof(info->version));
-	strlcpy(info->fw_version, "n/a", sizeof(info->fw_version));
-	strlcpy(info->bus_info, rnet->mport->name, sizeof(info->bus_info));
+	strscpy(info->driver, DRV_NAME, sizeof(info->driver));
+	strscpy(info->version, DRV_VERSION, sizeof(info->version));
+	strscpy(info->fw_version, "n/a", sizeof(info->fw_version));
+	strscpy(info->bus_info, rnet->mport->name, sizeof(info->bus_info));
 }
 
 static u32 rionet_get_msglevel(struct net_device *ndev)
@@ -466,17 +463,6 @@ static void rionet_set_msglevel(struct net_device *ndev, u32 value)
 	rnet->msg_enable = value;
 }
 
-static int rionet_change_mtu(struct net_device *ndev, int new_mtu)
-{
-	if ((new_mtu < 68) || (new_mtu > RIONET_MAX_MTU)) {
-		printk(KERN_ERR "%s: Invalid MTU size %d\n",
-		       ndev->name, new_mtu);
-		return -EINVAL;
-	}
-	ndev->mtu = new_mtu;
-	return 0;
-}
-
 static const struct ethtool_ops rionet_ethtool_ops = {
 	.get_drvinfo = rionet_get_drvinfo,
 	.get_msglevel = rionet_get_msglevel,
@@ -488,7 +474,6 @@ static const struct net_device_ops rionet_netdev_ops = {
 	.ndo_open		= rionet_open,
 	.ndo_stop		= rionet_close,
 	.ndo_start_xmit		= rionet_start_xmit,
-	.ndo_change_mtu		= rionet_change_mtu,
 	.ndo_validate_addr	= eth_validate_addr,
 	.ndo_set_mac_address	= eth_mac_addr,
 };
@@ -497,6 +482,7 @@ static int rionet_setup_netdev(struct rio_mport *mport, struct net_device *ndev)
 {
 	int rc = 0;
 	struct rionet_private *rnet;
+	u8 addr[ETH_ALEN];
 	u16 device_id;
 	const size_t rionet_active_bytes = sizeof(void *) *
 				RIO_MAX_ROUTE_ENTRIES(mport->sys_size);
@@ -516,15 +502,19 @@ static int rionet_setup_netdev(struct rio_mport *mport, struct net_device *ndev)
 
 	/* Set the default MAC address */
 	device_id = rio_local_get_device_id(mport);
-	ndev->dev_addr[0] = 0x00;
-	ndev->dev_addr[1] = 0x01;
-	ndev->dev_addr[2] = 0x00;
-	ndev->dev_addr[3] = 0x01;
-	ndev->dev_addr[4] = device_id >> 8;
-	ndev->dev_addr[5] = device_id & 0xff;
+	addr[0] = 0x00;
+	addr[1] = 0x01;
+	addr[2] = 0x00;
+	addr[3] = 0x01;
+	addr[4] = device_id >> 8;
+	addr[5] = device_id & 0xff;
+	eth_hw_addr_set(ndev, addr);
 
 	ndev->netdev_ops = &rionet_netdev_ops;
 	ndev->mtu = RIONET_MAX_MTU;
+	/* MTU range: 68 - 4082 */
+	ndev->min_mtu = ETH_MIN_MTU;
+	ndev->max_mtu = RIONET_MAX_MTU;
 	ndev->features = NETIF_F_LLTX;
 	SET_NETDEV_DEV(ndev, &mport->dev);
 	ndev->ethtool_ops = &rionet_ethtool_ops;

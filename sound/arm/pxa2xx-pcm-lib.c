@@ -1,8 +1,4 @@
-/*
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- */
+// SPDX-License-Identifier: GPL-2.0-only
 
 #include <linux/slab.h>
 #include <linux/module.h>
@@ -16,8 +12,6 @@
 #include <sound/pxa2xx-lib.h>
 #include <sound/dmaengine_pcm.h>
 
-#include "pxa2xx-pcm.h"
-
 static const struct snd_pcm_hardware pxa2xx_pcm_hardware = {
 	.info			= SNDRV_PCM_INFO_MMAP |
 				  SNDRV_PCM_INFO_MMAP_VALID |
@@ -25,8 +19,8 @@ static const struct snd_pcm_hardware pxa2xx_pcm_hardware = {
 				  SNDRV_PCM_INFO_PAUSE |
 				  SNDRV_PCM_INFO_RESUME,
 	.formats		= SNDRV_PCM_FMTBIT_S16_LE |
-					SNDRV_PCM_FMTBIT_S24_LE |
-					SNDRV_PCM_FMTBIT_S32_LE,
+				  SNDRV_PCM_FMTBIT_S24_LE |
+				  SNDRV_PCM_FMTBIT_S32_LE,
 	.period_bytes_min	= 32,
 	.period_bytes_max	= 8192 - 32,
 	.periods_min		= 1,
@@ -35,8 +29,8 @@ static const struct snd_pcm_hardware pxa2xx_pcm_hardware = {
 	.fifo_size		= 32,
 };
 
-int __pxa2xx_pcm_hw_params(struct snd_pcm_substream *substream,
-				struct snd_pcm_hw_params *params)
+int pxa2xx_pcm_hw_params(struct snd_pcm_substream *substream,
+			 struct snd_pcm_hw_params *params)
 {
 	struct dma_chan *chan = snd_dmaengine_pcm_get_chan(substream);
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
@@ -44,7 +38,7 @@ int __pxa2xx_pcm_hw_params(struct snd_pcm_substream *substream,
 	struct dma_slave_config config;
 	int ret;
 
-	dma_params = snd_soc_dai_get_dma_data(rtd->cpu_dai, substream);
+	dma_params = snd_soc_dai_get_dma_data(asoc_rtd_to_cpu(rtd, 0), substream);
 	if (!dma_params)
 		return 0;
 
@@ -53,25 +47,16 @@ int __pxa2xx_pcm_hw_params(struct snd_pcm_substream *substream,
 		return ret;
 
 	snd_dmaengine_pcm_set_config_from_dai_data(substream,
-			snd_soc_dai_get_dma_data(rtd->cpu_dai, substream),
+			snd_soc_dai_get_dma_data(asoc_rtd_to_cpu(rtd, 0), substream),
 			&config);
 
 	ret = dmaengine_slave_config(chan, &config);
 	if (ret)
 		return ret;
 
-	snd_pcm_set_runtime_buffer(substream, &substream->dma_buffer);
-
 	return 0;
 }
-EXPORT_SYMBOL(__pxa2xx_pcm_hw_params);
-
-int __pxa2xx_pcm_hw_free(struct snd_pcm_substream *substream)
-{
-	snd_pcm_set_runtime_buffer(substream, NULL);
-	return 0;
-}
-EXPORT_SYMBOL(__pxa2xx_pcm_hw_free);
+EXPORT_SYMBOL(pxa2xx_pcm_hw_params);
 
 int pxa2xx_pcm_trigger(struct snd_pcm_substream *substream, int cmd)
 {
@@ -86,13 +71,13 @@ pxa2xx_pcm_pointer(struct snd_pcm_substream *substream)
 }
 EXPORT_SYMBOL(pxa2xx_pcm_pointer);
 
-int __pxa2xx_pcm_prepare(struct snd_pcm_substream *substream)
+int pxa2xx_pcm_prepare(struct snd_pcm_substream *substream)
 {
 	return 0;
 }
-EXPORT_SYMBOL(__pxa2xx_pcm_prepare);
+EXPORT_SYMBOL(pxa2xx_pcm_prepare);
 
-int __pxa2xx_pcm_open(struct snd_pcm_substream *substream)
+int pxa2xx_pcm_open(struct snd_pcm_substream *substream)
 {
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
 	struct snd_pcm_runtime *runtime = substream->runtime;
@@ -101,7 +86,7 @@ int __pxa2xx_pcm_open(struct snd_pcm_substream *substream)
 
 	runtime->hw = pxa2xx_pcm_hardware;
 
-	dma_params = snd_soc_dai_get_dma_data(rtd->cpu_dai, substream);
+	dma_params = snd_soc_dai_get_dma_data(asoc_rtd_to_cpu(rtd, 0), substream);
 	if (!dma_params)
 		return 0;
 
@@ -125,61 +110,85 @@ int __pxa2xx_pcm_open(struct snd_pcm_substream *substream)
 	if (ret < 0)
 		return ret;
 
-	return snd_dmaengine_pcm_open_request_chan(substream,
-					pxad_filter_fn,
-					dma_params->filter_data);
+	return snd_dmaengine_pcm_open(
+		substream, dma_request_slave_channel(asoc_rtd_to_cpu(rtd, 0)->dev,
+						     dma_params->chan_name));
 }
-EXPORT_SYMBOL(__pxa2xx_pcm_open);
+EXPORT_SYMBOL(pxa2xx_pcm_open);
 
-int __pxa2xx_pcm_close(struct snd_pcm_substream *substream)
+int pxa2xx_pcm_close(struct snd_pcm_substream *substream)
 {
 	return snd_dmaengine_pcm_close_release_chan(substream);
 }
-EXPORT_SYMBOL(__pxa2xx_pcm_close);
+EXPORT_SYMBOL(pxa2xx_pcm_close);
 
-int pxa2xx_pcm_mmap(struct snd_pcm_substream *substream,
-	struct vm_area_struct *vma)
+int pxa2xx_pcm_preallocate_dma_buffer(struct snd_pcm *pcm)
 {
-	struct snd_pcm_runtime *runtime = substream->runtime;
-	return dma_mmap_wc(substream->pcm->card->dev, vma, runtime->dma_area,
-			   runtime->dma_addr, runtime->dma_bytes);
-}
-EXPORT_SYMBOL(pxa2xx_pcm_mmap);
-
-int pxa2xx_pcm_preallocate_dma_buffer(struct snd_pcm *pcm, int stream)
-{
-	struct snd_pcm_substream *substream = pcm->streams[stream].substream;
-	struct snd_dma_buffer *buf = &substream->dma_buffer;
 	size_t size = pxa2xx_pcm_hardware.buffer_bytes_max;
-	buf->dev.type = SNDRV_DMA_TYPE_DEV;
-	buf->dev.dev = pcm->card->dev;
-	buf->private_data = NULL;
-	buf->area = dma_alloc_wc(pcm->card->dev, size, &buf->addr, GFP_KERNEL);
-	if (!buf->area)
-		return -ENOMEM;
-	buf->bytes = size;
-	return 0;
+
+	return snd_pcm_set_fixed_buffer_all(pcm, SNDRV_DMA_TYPE_DEV_WC,
+					    pcm->card->dev, size);
 }
 EXPORT_SYMBOL(pxa2xx_pcm_preallocate_dma_buffer);
 
-void pxa2xx_pcm_free_dma_buffers(struct snd_pcm *pcm)
+int pxa2xx_soc_pcm_new(struct snd_soc_component *component,
+		       struct snd_soc_pcm_runtime *rtd)
 {
-	struct snd_pcm_substream *substream;
-	struct snd_dma_buffer *buf;
-	int stream;
+	struct snd_card *card = rtd->card->snd_card;
+	struct snd_pcm *pcm = rtd->pcm;
+	int ret;
 
-	for (stream = 0; stream < 2; stream++) {
-		substream = pcm->streams[stream].substream;
-		if (!substream)
-			continue;
-		buf = &substream->dma_buffer;
-		if (!buf->area)
-			continue;
-		dma_free_wc(pcm->card->dev, buf->bytes, buf->area, buf->addr);
-		buf->area = NULL;
-	}
+	ret = dma_coerce_mask_and_coherent(card->dev, DMA_BIT_MASK(32));
+	if (ret)
+		return ret;
+
+	return pxa2xx_pcm_preallocate_dma_buffer(pcm);
 }
-EXPORT_SYMBOL(pxa2xx_pcm_free_dma_buffers);
+EXPORT_SYMBOL(pxa2xx_soc_pcm_new);
+
+int pxa2xx_soc_pcm_open(struct snd_soc_component *component,
+			struct snd_pcm_substream *substream)
+{
+	return pxa2xx_pcm_open(substream);
+}
+EXPORT_SYMBOL(pxa2xx_soc_pcm_open);
+
+int pxa2xx_soc_pcm_close(struct snd_soc_component *component,
+			 struct snd_pcm_substream *substream)
+{
+	return pxa2xx_pcm_close(substream);
+}
+EXPORT_SYMBOL(pxa2xx_soc_pcm_close);
+
+int pxa2xx_soc_pcm_hw_params(struct snd_soc_component *component,
+			     struct snd_pcm_substream *substream,
+			     struct snd_pcm_hw_params *params)
+{
+	return pxa2xx_pcm_hw_params(substream, params);
+}
+EXPORT_SYMBOL(pxa2xx_soc_pcm_hw_params);
+
+int pxa2xx_soc_pcm_prepare(struct snd_soc_component *component,
+			   struct snd_pcm_substream *substream)
+{
+	return pxa2xx_pcm_prepare(substream);
+}
+EXPORT_SYMBOL(pxa2xx_soc_pcm_prepare);
+
+int pxa2xx_soc_pcm_trigger(struct snd_soc_component *component,
+			   struct snd_pcm_substream *substream, int cmd)
+{
+	return pxa2xx_pcm_trigger(substream, cmd);
+}
+EXPORT_SYMBOL(pxa2xx_soc_pcm_trigger);
+
+snd_pcm_uframes_t
+pxa2xx_soc_pcm_pointer(struct snd_soc_component *component,
+		       struct snd_pcm_substream *substream)
+{
+	return pxa2xx_pcm_pointer(substream);
+}
+EXPORT_SYMBOL(pxa2xx_soc_pcm_pointer);
 
 MODULE_AUTHOR("Nicolas Pitre");
 MODULE_DESCRIPTION("Intel PXA2xx sound library");

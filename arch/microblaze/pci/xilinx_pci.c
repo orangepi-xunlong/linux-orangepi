@@ -27,7 +27,7 @@
 #define PCI_HOST_ENABLE_CMD (PCI_COMMAND_SERR | PCI_COMMAND_PARITY | \
 				PCI_COMMAND_MASTER | PCI_COMMAND_MEMORY)
 
-static struct of_device_id xilinx_pci_match[] = {
+static const struct of_device_id xilinx_pci_match[] = {
 	{ .compatible = "xlnx,plbv46-pci-1.03.a", },
 	{}
 };
@@ -157,6 +157,7 @@ void __init xilinx_pci_init(void)
 
 	/* Set the max bus number to 255, and bus/subbus no's to 0 */
 	pci_reg = of_iomap(pci_node, 0);
+	WARN_ON(!pci_reg);
 	out_be32(pci_reg + XPLB_PCI_BUS, 0x000000ff);
 	iounmap(pci_reg);
 

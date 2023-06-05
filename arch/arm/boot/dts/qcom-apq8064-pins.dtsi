@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 
 &tlmm_pinmux {
 	sdc4_gpios: sdc4-gpios {
@@ -75,7 +76,7 @@
 		pinconf {
 			pins = "gpio20", "gpio21";
 			drive-strength = <2>;
-			bias-disable = <0>;
+			bias-disable;
 		};
 	};
 
@@ -115,7 +116,7 @@
 		pinconf {
 			pins = "gpio24", "gpio25";
 			drive-strength = <2>;
-			bias-disable = <0>;
+			bias-disable;
 		};
 	};
 
@@ -140,7 +141,7 @@
 		pinconf {
 			pins = "gpio8", "gpio9";
 			drive-strength = <2>;
-			bias-disable = <0>;
+			bias-disable;
 		};
 	};
 
@@ -165,7 +166,7 @@
 		pinconf {
 			pins = "gpio12", "gpio13";
 			drive-strength = <2>;
-			bias-disable = <0>;
+			bias-disable;
 		};
 	};
 
@@ -228,7 +229,7 @@
 		pinconf {
 			pins = "gpio16", "gpio17";
 			drive-strength = <2>;
-			bias-disable = <0>;
+			bias-disable;
 		};
 	};
 
@@ -281,7 +282,44 @@
 		pinconf {
 			pins = "gpio84", "gpio85";
 			drive-strength = <2>;
-			bias-disable = <0>;
+			bias-disable;
+		};
+	};
+
+	riva_fm_pin_a: riva-fm-active {
+		pins = "gpio14", "gpio15";
+		function = "riva_fm";
+	};
+
+	riva_bt_pin_a: riva-bt-active {
+		pins = "gpio16", "gpio17";
+		function = "riva_bt";
+	};
+
+	riva_wlan_pin_a: riva-wlan-active {
+		pins = "gpio64", "gpio65", "gpio66", "gpio67", "gpio68";
+		function = "riva_wlan";
+
+		drive-strength = <6>;
+		bias-pull-down;
+	};
+
+	hdmi_pinctrl: hdmi-pinctrl {
+		mux {
+			pins = "gpio70", "gpio71", "gpio72";
+			function = "hdmi";
+		};
+
+		pinconf_ddc {
+			pins = "gpio70", "gpio71";
+			bias-pull-up;
+			drive-strength = <2>;
+		};
+
+		pinconf_hpd {
+			pins = "gpio72";
+			bias-pull-down;
+			drive-strength = <16>;
 		};
 	};
 };

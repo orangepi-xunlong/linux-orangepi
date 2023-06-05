@@ -1,23 +1,12 @@
-/******************************************************************************
+// SPDX-License-Identifier: GPL-2.0
+/*
  * Copyright(c) 2008 - 2010 Realtek Corporation. All rights reserved.
  *
  * Based on the r8180 driver, which is:
  * Copyright 2004-2005 Andrea Merello <andrea.merello@gmail.com>, et al.
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of version 2 of the GNU General Public License as
- * published by the Free Software Foundation.
  *
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * The full GNU General Public License is included in this distribution in the
- * file called LICENSE.
- *
- * Contact Information:
- * wlanfae <wlanfae@realtek.com>
- *****************************************************************************/
+ * Contact Information: wlanfae <wlanfae@realtek.com>
+ */
 #include "rtl_ps.h"
 #include "rtl_core.h"
 #include "r8192E_phy.h"
@@ -32,16 +21,12 @@ static void _rtl92e_hw_sleep(struct net_device *dev)
 	unsigned long flags = 0;
 
 	spin_lock_irqsave(&priv->rf_ps_lock, flags);
-	if (priv->RFChangeInProgress) {
+	if (priv->rf_change_in_progress) {
 		spin_unlock_irqrestore(&priv->rf_ps_lock, flags);
-		RT_TRACE(COMP_DBG,
-			 "_rtl92e_hw_sleep(): RF Change in progress!\n");
 		return;
 	}
 	spin_unlock_irqrestore(&priv->rf_ps_lock, flags);
-	RT_TRACE(COMP_DBG, "%s()============>come to sleep down\n", __func__);
-
-	rtl92e_set_rf_state(dev, eRfSleep, RF_CHANGE_BY_PS);
+	rtl92e_set_rf_state(dev, rf_sleep, RF_CHANGE_BY_PS);
 }
 
 void rtl92e_hw_sleep_wq(void *data)
@@ -59,17 +44,14 @@ void rtl92e_hw_wakeup(struct net_device *dev)
 	unsigned long flags = 0;
 
 	spin_lock_irqsave(&priv->rf_ps_lock, flags);
-	if (priv->RFChangeInProgress) {
+	if (priv->rf_change_in_progress) {
 		spin_unlock_irqrestore(&priv->rf_ps_lock, flags);
-		RT_TRACE(COMP_DBG,
-			 "rtl92e_hw_wakeup(): RF Change in progress!\n");
 		schedule_delayed_work(&priv->rtllib->hw_wakeup_wq,
 				      msecs_to_jiffies(10));
 		return;
 	}
 	spin_unlock_irqrestore(&priv->rf_ps_lock, flags);
-	RT_TRACE(COMP_PS, "%s()============>come to wake up\n", __func__);
-	rtl92e_set_rf_state(dev, eRfOn, RF_CHANGE_BY_PS);
+	rtl92e_set_rf_state(dev, rf_on, RF_CHANGE_BY_PS);
 }
 
 void rtl92e_hw_wakeup_wq(void *data)
@@ -121,15 +103,10 @@ static void _rtl92e_ps_update_rf_state(struct net_device *dev)
 	struct rt_pwr_save_ctrl *pPSC = (struct rt_pwr_save_ctrl *)
 					&(priv->rtllib->PowerSaveControl);
 
-	RT_TRACE(COMP_PS, "_rtl92e_ps_update_rf_state() --------->\n");
 	pPSC->bSwRfProcessing = true;
-
-	RT_TRACE(COMP_PS, "_rtl92e_ps_update_rf_state(): Set RF to %s.\n",
-		 pPSC->eInactivePowerState == eRfOff ? "OFF" : "ON");
 	rtl92e_set_rf_state(dev, pPSC->eInactivePowerState, RF_CHANGE_BY_IPS);
 
 	pPSC->bSwRfProcessing = false;
-	RT_TRACE(COMP_PS, "_rtl92e_ps_update_rf_state() <---------\n");
 }
 
 void rtl92e_ips_enter(struct net_device *dev)
@@ -137,15 +114,14 @@ void rtl92e_ips_enter(struct net_device *dev)
 	struct r8192_priv *priv = rtllib_priv(dev);
 	struct rt_pwr_save_ctrl *pPSC = (struct rt_pwr_save_ctrl *)
 					&(priv->rtllib->PowerSaveControl);
-	enum rt_rf_power_state rtState;
+	enum rt_rf_power_state rt_state;
 
 	if (pPSC->bInactivePs) {
-		rtState = priv->rtllib->eRFPowerState;
-		if (rtState == eRfOn && !pPSC->bSwRfProcessing &&
+		rt_state = priv->rtllib->rf_power_state;
+		if (rt_state == rf_on && !pPSC->bSwRfProcessing &&
 			(priv->rtllib->state != RTLLIB_LINKED) &&
 			(priv->rtllib->iw_mode != IW_MODE_MASTER)) {
-			RT_TRACE(COMP_PS, "rtl92e_ips_enter(): Turn off RF.\n");
-			pPSC->eInactivePowerState = eRfOff;
+			pPSC->eInactivePowerState = rf_off;
 			priv->isRFOff = true;
 			priv->bInPowerSaveMode = true;
 			_rtl92e_ps_update_rf_state(dev);
@@ -158,14 +134,13 @@ void rtl92e_ips_leave(struct net_device *dev)
 	struct r8192_priv *priv = rtllib_priv(dev);
 	struct rt_pwr_save_ctrl *pPSC = (struct rt_pwr_save_ctrl *)
 					&(priv->rtllib->PowerSaveControl);
-	enum rt_rf_power_state rtState;
+	enum rt_rf_power_state rt_state;
 
 	if (pPSC->bInactivePs) {
-		rtState = priv->rtllib->eRFPowerState;
-		if (rtState != eRfOn  && !pPSC->bSwRfProcessing &&
-		    priv->rtllib->RfOffReason <= RF_CHANGE_BY_IPS) {
-			RT_TRACE(COMP_PS, "rtl92e_ips_leave(): Turn on RF.\n");
-			pPSC->eInactivePowerState = eRfOn;
+		rt_state = priv->rtllib->rf_power_state;
+		if (rt_state != rf_on  && !pPSC->bSwRfProcessing &&
+		    priv->rtllib->rf_off_reason <= RF_CHANGE_BY_IPS) {
+			pPSC->eInactivePowerState = rf_on;
 			priv->bInPowerSaveMode = false;
 			_rtl92e_ps_update_rf_state(dev);
 		}
@@ -187,13 +162,13 @@ void rtl92e_ips_leave_wq(void *data)
 void rtl92e_rtllib_ips_leave_wq(struct net_device *dev)
 {
 	struct r8192_priv *priv = (struct r8192_priv *)rtllib_priv(dev);
-	enum rt_rf_power_state rtState;
+	enum rt_rf_power_state rt_state;
 
-	rtState = priv->rtllib->eRFPowerState;
+	rt_state = priv->rtllib->rf_power_state;
 
 	if (priv->rtllib->PowerSaveControl.bInactivePs) {
-		if (rtState == eRfOff) {
-			if (priv->rtllib->RfOffReason > RF_CHANGE_BY_IPS) {
+		if (rt_state == rf_off) {
+			if (priv->rtllib->rf_off_reason > RF_CHANGE_BY_IPS) {
 				netdev_warn(dev, "%s(): RF is OFF.\n",
 					    __func__);
 				return;
@@ -221,7 +196,6 @@ static bool _rtl92e_ps_set_mode(struct net_device *dev, u8 rtPsMode)
 	if (priv->rtllib->iw_mode == IW_MODE_ADHOC)
 		return false;
 
-	RT_TRACE(COMP_LPS, "%s(): set ieee->ps = %x\n", __func__, rtPsMode);
 	if (!priv->ps_force)
 		priv->rtllib->ps = rtPsMode;
 	if (priv->rtllib->sta_sleep != LPS_IS_WAKE &&
@@ -232,8 +206,6 @@ static bool _rtl92e_ps_set_mode(struct net_device *dev, u8 rtPsMode)
 		priv->rtllib->sta_sleep = LPS_IS_WAKE;
 
 		spin_lock_irqsave(&(priv->rtllib->mgmt_tx_lock), flags);
-		RT_TRACE(COMP_DBG,
-			 "LPS leave: notify AP we are awaked ++++++++++ SendNullFunctionData\n");
 		rtllib_sta_ps_send_null_frame(priv->rtllib, 0);
 		spin_unlock_irqrestore(&(priv->rtllib->mgmt_tx_lock), flags);
 	}
@@ -247,12 +219,6 @@ void rtl92e_leisure_ps_enter(struct net_device *dev)
 	struct rt_pwr_save_ctrl *pPSC = (struct rt_pwr_save_ctrl *)
 					&(priv->rtllib->PowerSaveControl);
 
-	RT_TRACE(COMP_PS, "rtl92e_leisure_ps_enter()...\n");
-	RT_TRACE(COMP_PS,
-		 "pPSC->bLeisurePs = %d, ieee->ps = %d,pPSC->LpsIdleCount is %d,RT_CHECK_FOR_HANG_PERIOD is %d\n",
-		 pPSC->bLeisurePs, priv->rtllib->ps, pPSC->LpsIdleCount,
-		 RT_CHECK_FOR_HANG_PERIOD);
-
 	if (!((priv->rtllib->iw_mode == IW_MODE_INFRA) &&
 	    (priv->rtllib->state == RTLLIB_LINKED))
 	    || (priv->rtllib->iw_mode == IW_MODE_ADHOC) ||
@@ -263,10 +229,6 @@ void rtl92e_leisure_ps_enter(struct net_device *dev)
 		if (pPSC->LpsIdleCount >= RT_CHECK_FOR_HANG_PERIOD) {
 
 			if (priv->rtllib->ps == RTLLIB_PS_DISABLED) {
-
-				RT_TRACE(COMP_LPS,
-					 "rtl92e_leisure_ps_enter(): Enter 802.11 power save mode...\n");
-
 				if (!pPSC->bFwCtrlLPS) {
 					if (priv->rtllib->SetFwCmdHandler)
 						priv->rtllib->SetFwCmdHandler(
@@ -286,22 +248,15 @@ void rtl92e_leisure_ps_leave(struct net_device *dev)
 	struct rt_pwr_save_ctrl *pPSC = (struct rt_pwr_save_ctrl *)
 					&(priv->rtllib->PowerSaveControl);
 
-
-	RT_TRACE(COMP_PS, "rtl92e_leisure_ps_leave()...\n");
-	RT_TRACE(COMP_PS, "pPSC->bLeisurePs = %d, ieee->ps = %d\n",
-		pPSC->bLeisurePs, priv->rtllib->ps);
-
 	if (pPSC->bLeisurePs) {
 		if (priv->rtllib->ps != RTLLIB_PS_DISABLED) {
-			RT_TRACE(COMP_LPS,
-				 "rtl92e_leisure_ps_leave(): Busy Traffic , Leave 802.11 power save..\n");
 			_rtl92e_ps_set_mode(dev, RTLLIB_PS_DISABLED);
 
 			if (!pPSC->bFwCtrlLPS) {
 				if (priv->rtllib->SetFwCmdHandler)
 					priv->rtllib->SetFwCmdHandler(dev,
 							 FW_CMD_LPS_LEAVE);
-		    }
+			}
 		}
 	}
 }

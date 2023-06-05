@@ -1,23 +1,21 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright 2015 Freescale Semiconductor, Inc.
  *
  * Freescale DCU drm device driver
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
  */
 
 #include <linux/regmap.h>
 
-#include <drm/drmP.h>
+#include <drm/drm_atomic.h>
 #include <drm/drm_atomic_helper.h>
 #include <drm/drm_crtc.h>
-#include <drm/drm_crtc_helper.h>
-#include <drm/drm_fb_cma_helper.h>
-#include <drm/drm_gem_cma_helper.h>
+#include <drm/drm_fb_dma_helper.h>
+#include <drm/drm_fourcc.h>
+#include <drm/drm_framebuffer.h>
+#include <drm/drm_gem_dma_helper.h>
 #include <drm/drm_plane_helper.h>
+#include <drm/drm_probe_helper.h>
 
 #include "fsl_dcu_drm_drv.h"
 #include "fsl_dcu_drm_plane.h"
@@ -37,14 +35,16 @@ static int fsl_dcu_drm_plane_index(struct drm_plane *plane)
 }
 
 static int fsl_dcu_drm_plane_atomic_check(struct drm_plane *plane,
-					  struct drm_plane_state *state)
+					  struct drm_atomic_state *state)
 {
-	struct drm_framebuffer *fb = state->fb;
+	struct drm_plane_state *new_plane_state = drm_atomic_get_new_plane_state(state,
+										 plane);
+	struct drm_framebuffer *fb = new_plane_state->fb;
 
-	if (!state->fb || !state->crtc)
+	if (!new_plane_state->fb || !new_plane_state->crtc)
 		return 0;
 
-	switch (fb->pixel_format) {
+	switch (fb->format->format) {
 	case DRM_FORMAT_RGB565:
 	case DRM_FORMAT_RGB888:
 	case DRM_FORMAT_XRGB8888:
@@ -61,7 +61,7 @@ static int fsl_dcu_drm_plane_atomic_check(struct drm_plane *plane,
 }
 
 static void fsl_dcu_drm_plane_atomic_disable(struct drm_plane *plane,
-					     struct drm_plane_state *old_state)
+					     struct drm_atomic_state *state)
 {
 	struct fsl_dcu_drm_device *fsl_dev = plane->dev->dev_private;
 	unsigned int value;
@@ -77,13 +77,14 @@ static void fsl_dcu_drm_plane_atomic_disable(struct drm_plane *plane,
 }
 
 static void fsl_dcu_drm_plane_atomic_update(struct drm_plane *plane,
-					    struct drm_plane_state *old_state)
+					    struct drm_atomic_state *state)
 
 {
 	struct fsl_dcu_drm_device *fsl_dev = plane->dev->dev_private;
-	struct drm_plane_state *state = plane->state;
+	struct drm_plane_state *new_state = drm_atomic_get_new_plane_state(state,
+									   plane);
 	struct drm_framebuffer *fb = plane->state->fb;
-	struct drm_gem_cma_object *gem;
+	struct drm_gem_dma_object *gem;
 	unsigned int alpha = DCU_LAYER_AB_NONE, bpp;
 	int index;
 
@@ -94,9 +95,9 @@ static void fsl_dcu_drm_plane_atomic_update(struct drm_plane *plane,
 	if (index < 0)
 		return;
 
-	gem = drm_fb_cma_get_gem_obj(fb, 0);
+	gem = drm_fb_dma_get_gem_obj(fb, 0);
 
-	switch (fb->pixel_format) {
+	switch (fb->format->format) {
 	case DRM_FORMAT_RGB565:
 		bpp = FSL_DCU_RGB565;
 		break;
@@ -105,19 +106,19 @@ static void fsl_dcu_drm_plane_atomic_update(struct drm_plane *plane,
 		break;
 	case DRM_FORMAT_ARGB8888:
 		alpha = DCU_LAYER_AB_WHOLE_FRAME;
-		/* fall-through */
+		fallthrough;
 	case DRM_FORMAT_XRGB8888:
 		bpp = FSL_DCU_ARGB8888;
 		break;
 	case DRM_FORMAT_ARGB4444:
 		alpha = DCU_LAYER_AB_WHOLE_FRAME;
-		/* fall-through */
+		fallthrough;
 	case DRM_FORMAT_XRGB4444:
 		bpp = FSL_DCU_ARGB4444;
 		break;
 	case DRM_FORMAT_ARGB1555:
 		alpha = DCU_LAYER_AB_WHOLE_FRAME;
-		/* fall-through */
+		fallthrough;
 	case DRM_FORMAT_XRGB1555:
 		bpp = FSL_DCU_ARGB1555;
 		break;
@@ -129,13 +130,13 @@ static void fsl_dcu_drm_plane_atomic_update(struct drm_plane *plane,
 	}
 
 	regmap_write(fsl_dev->regmap, DCU_CTRLDESCLN(index, 1),
-		     DCU_LAYER_HEIGHT(state->crtc_h) |
-		     DCU_LAYER_WIDTH(state->crtc_w));
+		     DCU_LAYER_HEIGHT(new_state->crtc_h) |
+		     DCU_LAYER_WIDTH(new_state->crtc_w));
 	regmap_write(fsl_dev->regmap, DCU_CTRLDESCLN(index, 2),
-		     DCU_LAYER_POSY(state->crtc_y) |
-		     DCU_LAYER_POSX(state->crtc_x));
+		     DCU_LAYER_POSY(new_state->crtc_y) |
+		     DCU_LAYER_POSX(new_state->crtc_x));
 	regmap_write(fsl_dev->regmap,
-		     DCU_CTRLDESCLN(index, 3), gem->paddr);
+		     DCU_CTRLDESCLN(index, 3), gem->dma_addr);
 	regmap_write(fsl_dev->regmap, DCU_CTRLDESCLN(index, 4),
 		     DCU_LAYER_EN |
 		     DCU_LAYER_TRANS(0xff) |
@@ -170,16 +171,10 @@ static const struct drm_plane_helper_funcs fsl_dcu_drm_plane_helper_funcs = {
 	.atomic_update = fsl_dcu_drm_plane_atomic_update,
 };
 
-static void fsl_dcu_drm_plane_destroy(struct drm_plane *plane)
-{
-	drm_plane_cleanup(plane);
-	kfree(plane);
-}
-
 static const struct drm_plane_funcs fsl_dcu_drm_plane_funcs = {
 	.atomic_duplicate_state = drm_atomic_helper_plane_duplicate_state,
 	.atomic_destroy_state = drm_atomic_helper_plane_destroy_state,
-	.destroy = fsl_dcu_drm_plane_destroy,
+	.destroy = drm_plane_helper_destroy,
 	.disable_plane = drm_atomic_helper_disable_plane,
 	.reset = drm_atomic_helper_plane_reset,
 	.update_plane = drm_atomic_helper_update_plane,
@@ -224,7 +219,7 @@ struct drm_plane *fsl_dcu_drm_primary_create_plane(struct drm_device *dev)
 				       &fsl_dcu_drm_plane_funcs,
 				       fsl_dcu_drm_plane_formats,
 				       ARRAY_SIZE(fsl_dcu_drm_plane_formats),
-				       DRM_PLANE_TYPE_PRIMARY, NULL);
+				       NULL, DRM_PLANE_TYPE_PRIMARY, NULL);
 	if (ret) {
 		kfree(primary);
 		primary = NULL;

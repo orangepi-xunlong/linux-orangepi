@@ -1,23 +1,18 @@
+/* SPDX-License-Identifier: GPL-2.0+ */
 /*
  * OF helpers for the GPIO API
  *
  * Copyright (c) 2007-2008  MontaVista Software, Inc.
  *
  * Author: Anton Vorontsov <avorontsov@ru.mvista.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
  */
 
 #ifndef __LINUX_OF_GPIO_H
 #define __LINUX_OF_GPIO_H
 
 #include <linux/compiler.h>
-#include <linux/kernel.h>
-#include <linux/errno.h>
-#include <linux/gpio.h>
+#include <linux/gpio/driver.h>
+#include <linux/gpio.h>		/* FIXME: Shouldn't be here */
 #include <linux/of.h>
 
 struct device_node;
@@ -30,9 +25,16 @@ struct device_node;
 enum of_gpio_flags {
 	OF_GPIO_ACTIVE_LOW = 0x1,
 	OF_GPIO_SINGLE_ENDED = 0x2,
+	OF_GPIO_OPEN_DRAIN = 0x4,
+	OF_GPIO_TRANSITORY = 0x8,
+	OF_GPIO_PULL_UP = 0x10,
+	OF_GPIO_PULL_DOWN = 0x20,
+	OF_GPIO_PULL_DISABLE = 0x40,
 };
 
 #ifdef CONFIG_OF_GPIO
+
+#include <linux/kernel.h>
 
 /*
  * OF GPIO chip for memory mapped banks
@@ -48,7 +50,7 @@ static inline struct of_mm_gpio_chip *to_of_mm_gpio_chip(struct gpio_chip *gc)
 	return container_of(gc, struct of_mm_gpio_chip, gc);
 }
 
-extern int of_get_named_gpio_flags(struct device_node *np,
+extern int of_get_named_gpio_flags(const struct device_node *np,
 		const char *list_name, int index, enum of_gpio_flags *flags);
 
 extern int of_mm_gpiochip_add_data(struct device_node *np,
@@ -61,26 +63,17 @@ static inline int of_mm_gpiochip_add(struct device_node *np,
 }
 extern void of_mm_gpiochip_remove(struct of_mm_gpio_chip *mm_gc);
 
-extern int of_gpio_simple_xlate(struct gpio_chip *gc,
-				const struct of_phandle_args *gpiospec,
-				u32 *flags);
-
 #else /* CONFIG_OF_GPIO */
 
+#include <linux/errno.h>
+
 /* Drivers may not strictly depend on the GPIO support, so let them link. */
-static inline int of_get_named_gpio_flags(struct device_node *np,
+static inline int of_get_named_gpio_flags(const struct device_node *np,
 		const char *list_name, int index, enum of_gpio_flags *flags)
 {
 	if (flags)
 		*flags = 0;
 
-	return -ENOSYS;
-}
-
-static inline int of_gpio_simple_xlate(struct gpio_chip *gc,
-				       const struct of_phandle_args *gpiospec,
-				       u32 *flags)
-{
 	return -ENOSYS;
 }
 
@@ -106,7 +99,8 @@ static inline int of_gpio_simple_xlate(struct gpio_chip *gc,
  * The above example defines four GPIOs, two of which are not specified.
  * This function will return '4'
  */
-static inline int of_gpio_named_count(struct device_node *np, const char* propname)
+static inline int of_gpio_named_count(const struct device_node *np,
+				      const char *propname)
 {
 	return of_count_phandle_with_args(np, propname, "#gpio-cells");
 }
@@ -117,12 +111,12 @@ static inline int of_gpio_named_count(struct device_node *np, const char* propna
  *
  * Same as of_gpio_named_count, but hard coded to use the 'gpios' property
  */
-static inline int of_gpio_count(struct device_node *np)
+static inline int of_gpio_count(const struct device_node *np)
 {
 	return of_gpio_named_count(np, "gpios");
 }
 
-static inline int of_get_gpio_flags(struct device_node *np, int index,
+static inline int of_get_gpio_flags(const struct device_node *np, int index,
 		      enum of_gpio_flags *flags)
 {
 	return of_get_named_gpio_flags(np, "gpios", index, flags);
@@ -137,7 +131,7 @@ static inline int of_get_gpio_flags(struct device_node *np, int index,
  * Returns GPIO number to use with Linux generic GPIO API, or one of the errno
  * value on the error condition.
  */
-static inline int of_get_named_gpio(struct device_node *np,
+static inline int of_get_named_gpio(const struct device_node *np,
                                    const char *propname, int index)
 {
 	return of_get_named_gpio_flags(np, propname, index, NULL);
@@ -151,7 +145,7 @@ static inline int of_get_named_gpio(struct device_node *np,
  * Returns GPIO number to use with Linux generic GPIO API, or one of the errno
  * value on the error condition.
  */
-static inline int of_get_gpio(struct device_node *np, int index)
+static inline int of_get_gpio(const struct device_node *np, int index)
 {
 	return of_get_gpio_flags(np, index, NULL);
 }

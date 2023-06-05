@@ -127,6 +127,16 @@ static void octeon_irq_free_cd(struct irq_domain *d, unsigned int irq)
 static int octeon_irq_force_ciu_mapping(struct irq_domain *domain,
 					int irq, int line, int bit)
 {
+	struct device_node *of_node;
+	int ret;
+
+	of_node = irq_domain_get_of_node(domain);
+	if (!of_node)
+		return -EINVAL;
+	ret = irq_alloc_desc_at(irq, of_node_to_nid(of_node));
+	if (ret < 0)
+		return ret;
+
 	return irq_domain_associate(domain, irq, line << 6 | bit);
 }
 
@@ -263,7 +273,7 @@ static int next_cpu_for_irq(struct irq_data *data)
 
 #ifdef CONFIG_SMP
 	int cpu;
-	struct cpumask *mask = irq_data_get_affinity_mask(data);
+	const struct cpumask *mask = irq_data_get_affinity_mask(data);
 	int weight = cpumask_weight(mask);
 	struct octeon_ciu_chip_data *cd = irq_data_get_irq_chip_data(data);
 
@@ -758,7 +768,7 @@ static void octeon_irq_cpu_offline_ciu(struct irq_data *data)
 {
 	int cpu = smp_processor_id();
 	cpumask_t new_affinity;
-	struct cpumask *mask = irq_data_get_affinity_mask(data);
+	const struct cpumask *mask = irq_data_get_affinity_mask(data);
 
 	if (!cpumask_test_cpu(cpu, mask))
 		return;
@@ -814,7 +824,7 @@ static int octeon_irq_ciu_set_affinity(struct irq_data *data,
 			pen = &per_cpu(octeon_irq_ciu1_en_mirror, cpu);
 
 		if (cpumask_test_cpu(cpu, dest) && enable_one) {
-			enable_one = 0;
+			enable_one = false;
 			__set_bit(cd->bit, pen);
 		} else {
 			__clear_bit(cd->bit, pen);
@@ -1180,8 +1190,8 @@ static int octeon_irq_gpio_xlat(struct irq_domain *d,
 		type = IRQ_TYPE_LEVEL_LOW;
 		break;
 	default:
-		pr_err("Error: (%s) Invalid irq trigger specification: %x\n",
-		       node->name,
+		pr_err("Error: (%pOFn) Invalid irq trigger specification: %x\n",
+		       node,
 		       trigger);
 		type = IRQ_TYPE_LEVEL_LOW;
 		break;
@@ -1274,13 +1284,13 @@ static int octeon_irq_gpio_map(struct irq_domain *d,
 	return r;
 }
 
-static struct irq_domain_ops octeon_irq_domain_ciu_ops = {
+static const struct irq_domain_ops octeon_irq_domain_ciu_ops = {
 	.map = octeon_irq_ciu_map,
 	.unmap = octeon_irq_free_cd,
 	.xlate = octeon_irq_ciu_xlat,
 };
 
-static struct irq_domain_ops octeon_irq_domain_gpio_ops = {
+static const struct irq_domain_ops octeon_irq_domain_gpio_ops = {
 	.map = octeon_irq_gpio_map,
 	.unmap = octeon_irq_free_cd,
 	.xlate = octeon_irq_gpio_xlat,
@@ -1405,7 +1415,7 @@ static void octeon_irq_init_ciu2_percpu(void)
 	 * completed.
 	 *
 	 * There are 9 registers and 3 IPX levels with strides 0x1000
-	 * and 0x200 respectivly.  Use loops to clear them.
+	 * and 0x200 respectively.  Use loops to clear them.
 	 */
 	for (regx = 0; regx <= 0x8000; regx += 0x1000) {
 		for (ipx = 0; ipx <= 0x400; ipx += 0x200)
@@ -1444,7 +1454,7 @@ static void octeon_irq_setup_secondary_ciu2(void)
 static int __init octeon_irq_init_ciu(
 	struct device_node *ciu_node, struct device_node *parent)
 {
-	unsigned int i, r;
+	int i, r;
 	struct irq_chip *chip;
 	struct irq_chip *chip_edge;
 	struct irq_chip *chip_mbox;
@@ -1505,10 +1515,20 @@ static int __init octeon_irq_init_ciu(
 			goto err;
 	}
 
+	r = irq_alloc_desc_at(OCTEON_IRQ_MBOX0, -1);
+	if (r < 0) {
+		pr_err("Failed to allocate desc for %s\n", "OCTEON_IRQ_MBOX0");
+		goto err;
+	}
 	r = octeon_irq_set_ciu_mapping(
 		OCTEON_IRQ_MBOX0, 0, 32, 0, chip_mbox, handle_percpu_irq);
 	if (r)
 		goto err;
+	r = irq_alloc_desc_at(OCTEON_IRQ_MBOX1, -1);
+	if (r < 0) {
+		pr_err("Failed to allocate desc for %s\n", "OCTEON_IRQ_MBOX1");
+		goto err;
+	}
 	r = octeon_irq_set_ciu_mapping(
 		OCTEON_IRQ_MBOX1, 0, 33, 0, chip_mbox, handle_percpu_irq);
 	if (r)
@@ -1546,6 +1566,11 @@ static int __init octeon_irq_init_ciu(
 	if (r)
 		goto err;
 
+	r = irq_alloc_descs(OCTEON_IRQ_WDOG0, OCTEON_IRQ_WDOG0, 16, -1);
+	if (r < 0) {
+		pr_err("Failed to allocate desc for %s\n", "OCTEON_IRQ_WDOGx");
+		goto err;
+	}
 	/* CIU_1 */
 	for (i = 0; i < 16; i++) {
 		r = octeon_irq_set_ciu_mapping(
@@ -1959,7 +1984,7 @@ static int octeon_irq_ciu2_map(struct irq_domain *d,
 	return 0;
 }
 
-static struct irq_domain_ops octeon_irq_domain_ciu2_ops = {
+static const struct irq_domain_ops octeon_irq_domain_ciu2_ops = {
 	.map = octeon_irq_ciu2_map,
 	.unmap = octeon_irq_free_cd,
 	.xlate = octeon_irq_ciu2_xlat,
@@ -2193,12 +2218,15 @@ static int octeon_irq_cib_map(struct irq_domain *d,
 	struct octeon_irq_cib_chip_data *cd;
 
 	if (hw >= host_data->max_bits) {
-		pr_err("ERROR: %s mapping %u is to big!\n",
+		pr_err("ERROR: %s mapping %u is too big!\n",
 		       irq_domain_get_of_node(d)->name, (unsigned)hw);
 		return -EINVAL;
 	}
 
 	cd = kzalloc(sizeof(*cd), GFP_KERNEL);
+	if (!cd)
+		return -ENOMEM;
+
 	cd->host_data = host_data;
 	cd->bit = hw;
 
@@ -2208,7 +2236,7 @@ static int octeon_irq_cib_map(struct irq_domain *d,
 	return 0;
 }
 
-static struct irq_domain_ops octeon_irq_domain_cib_ops = {
+static const struct irq_domain_ops octeon_irq_domain_cib_ops = {
 	.map = octeon_irq_cib_map,
 	.unmap = octeon_irq_free_cd,
 	.xlate = octeon_irq_cib_xlat,
@@ -2271,8 +2299,8 @@ static int __init octeon_irq_init_cib(struct device_node *ciu_node,
 
 	parent_irq = irq_of_parse_and_map(ciu_node, 0);
 	if (!parent_irq) {
-		pr_err("ERROR: Couldn't acquire parent_irq for %s\n",
-			ciu_node->name);
+		pr_err("ERROR: Couldn't acquire parent_irq for %pOFn\n",
+			ciu_node);
 		return -EINVAL;
 	}
 
@@ -2283,7 +2311,7 @@ static int __init octeon_irq_init_cib(struct device_node *ciu_node,
 
 	addr = of_get_address(ciu_node, 0, NULL, NULL);
 	if (!addr) {
-		pr_err("ERROR: Couldn't acquire reg(0) %s\n", ciu_node->name);
+		pr_err("ERROR: Couldn't acquire reg(0) %pOFn\n", ciu_node);
 		return -EINVAL;
 	}
 	host_data->raw_reg = (u64)phys_to_virt(
@@ -2291,7 +2319,7 @@ static int __init octeon_irq_init_cib(struct device_node *ciu_node,
 
 	addr = of_get_address(ciu_node, 1, NULL, NULL);
 	if (!addr) {
-		pr_err("ERROR: Couldn't acquire reg(1) %s\n", ciu_node->name);
+		pr_err("ERROR: Couldn't acquire reg(1) %pOFn\n", ciu_node);
 		return -EINVAL;
 	}
 	host_data->en_reg = (u64)phys_to_virt(
@@ -2299,8 +2327,8 @@ static int __init octeon_irq_init_cib(struct device_node *ciu_node,
 
 	r = of_property_read_u32(ciu_node, "cavium,max-bits", &val);
 	if (r) {
-		pr_err("ERROR: Couldn't read cavium,max-bits from %s\n",
-			ciu_node->name);
+		pr_err("ERROR: Couldn't read cavium,max-bits from %pOFn\n",
+			ciu_node);
 		return r;
 	}
 	host_data->max_bits = val;
@@ -2483,8 +2511,8 @@ void octeon_irq_ciu3_mask_ack(struct irq_data *data)
 }
 
 #ifdef CONFIG_SMP
-int octeon_irq_ciu3_set_affinity(struct irq_data *data,
-				 const struct cpumask *dest, bool force)
+static int octeon_irq_ciu3_set_affinity(struct irq_data *data,
+					const struct cpumask *dest, bool force)
 {
 	union cvmx_ciu3_iscx_ctl isc_ctl;
 	union cvmx_ciu3_iscx_w1c isc_w1c;
@@ -2560,7 +2588,7 @@ static int octeon_irq_ciu3_map(struct irq_domain *d,
 	return octeon_irq_ciu3_mapx(d, virq, hw, &octeon_irq_chip_ciu3);
 }
 
-static struct irq_domain_ops octeon_dflt_domain_ciu3_ops = {
+static const struct irq_domain_ops octeon_dflt_domain_ciu3_ops = {
 	.map = octeon_irq_ciu3_map,
 	.unmap = octeon_irq_free_cd,
 	.xlate = octeon_irq_ciu3_xlat,
@@ -2591,7 +2619,10 @@ static void octeon_irq_ciu3_ip2(void)
 		else
 			hw = intsn;
 
-		ret = handle_domain_irq(domain, hw, NULL);
+		irq_enter();
+		ret = generic_handle_domain_irq(domain, hw);
+		irq_exit();
+
 		if (ret < 0) {
 			union cvmx_ciu3_iscx_w1c isc_w1c;
 			u64 isc_w1c_addr = ciu3_addr + CIU3_ISC_W1C(intsn);
@@ -2965,3 +2996,12 @@ void octeon_fixup_irqs(void)
 }
 
 #endif /* CONFIG_HOTPLUG_CPU */
+
+struct irq_domain *octeon_irq_get_block_domain(int node, uint8_t block)
+{
+	struct octeon_ciu3_info *ciu3_info;
+
+	ciu3_info = octeon_ciu3_info_per_node[node & CVMX_NODE_MASK];
+	return ciu3_info->domain[block];
+}
+EXPORT_SYMBOL(octeon_irq_get_block_domain);

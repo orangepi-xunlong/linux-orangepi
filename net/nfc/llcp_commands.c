@@ -1,18 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright (C) 2011  Intel Corporation. All rights reserved.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, see <http://www.gnu.org/licenses/>.
  */
 
 #define pr_fmt(fmt) "llcp: %s: " fmt, __func__
@@ -27,7 +15,7 @@
 #include "nfc.h"
 #include "llcp.h"
 
-static u8 llcp_tlv_length[LLCP_TLV_MAX] = {
+static const u8 llcp_tlv_length[LLCP_TLV_MAX] = {
 	0,
 	1, /* VERSION */
 	2, /* MIUX */
@@ -41,7 +29,7 @@ static u8 llcp_tlv_length[LLCP_TLV_MAX] = {
 
 };
 
-static u8 llcp_tlv8(u8 *tlv, u8 type)
+static u8 llcp_tlv8(const u8 *tlv, u8 type)
 {
 	if (tlv[0] != type || tlv[1] != llcp_tlv_length[tlv[0]])
 		return 0;
@@ -49,7 +37,7 @@ static u8 llcp_tlv8(u8 *tlv, u8 type)
 	return tlv[2];
 }
 
-static u16 llcp_tlv16(u8 *tlv, u8 type)
+static u16 llcp_tlv16(const u8 *tlv, u8 type)
 {
 	if (tlv[0] != type || tlv[1] != llcp_tlv_length[tlv[0]])
 		return 0;
@@ -58,37 +46,37 @@ static u16 llcp_tlv16(u8 *tlv, u8 type)
 }
 
 
-static u8 llcp_tlv_version(u8 *tlv)
+static u8 llcp_tlv_version(const u8 *tlv)
 {
 	return llcp_tlv8(tlv, LLCP_TLV_VERSION);
 }
 
-static u16 llcp_tlv_miux(u8 *tlv)
+static u16 llcp_tlv_miux(const u8 *tlv)
 {
 	return llcp_tlv16(tlv, LLCP_TLV_MIUX) & 0x7ff;
 }
 
-static u16 llcp_tlv_wks(u8 *tlv)
+static u16 llcp_tlv_wks(const u8 *tlv)
 {
 	return llcp_tlv16(tlv, LLCP_TLV_WKS);
 }
 
-static u16 llcp_tlv_lto(u8 *tlv)
+static u16 llcp_tlv_lto(const u8 *tlv)
 {
 	return llcp_tlv8(tlv, LLCP_TLV_LTO);
 }
 
-static u8 llcp_tlv_opt(u8 *tlv)
+static u8 llcp_tlv_opt(const u8 *tlv)
 {
 	return llcp_tlv8(tlv, LLCP_TLV_OPT);
 }
 
-static u8 llcp_tlv_rw(u8 *tlv)
+static u8 llcp_tlv_rw(const u8 *tlv)
 {
 	return llcp_tlv8(tlv, LLCP_TLV_RW) & 0xf;
 }
 
-u8 *nfc_llcp_build_tlv(u8 type, u8 *value, u8 value_length, u8 *tlv_length)
+u8 *nfc_llcp_build_tlv(u8 type, const u8 *value, u8 value_length, u8 *tlv_length)
 {
 	u8 *tlv, length;
 
@@ -142,7 +130,7 @@ struct nfc_llcp_sdp_tlv *nfc_llcp_build_sdres_tlv(u8 tid, u8 sap)
 	return sdres;
 }
 
-struct nfc_llcp_sdp_tlv *nfc_llcp_build_sdreq_tlv(u8 tid, char *uri,
+struct nfc_llcp_sdp_tlv *nfc_llcp_build_sdreq_tlv(u8 tid, const char *uri,
 						  size_t uri_len)
 {
 	struct nfc_llcp_sdp_tlv *sdreq;
@@ -202,9 +190,10 @@ void nfc_llcp_free_sdp_tlv_list(struct hlist_head *head)
 }
 
 int nfc_llcp_parse_gb_tlv(struct nfc_llcp_local *local,
-			  u8 *tlv_array, u16 tlv_array_len)
+			  const u8 *tlv_array, u16 tlv_array_len)
 {
-	u8 *tlv = tlv_array, type, length, offset = 0;
+	const u8 *tlv = tlv_array;
+	u8 type, length, offset = 0;
 
 	pr_debug("TLV array length %d\n", tlv_array_len);
 
@@ -251,9 +240,10 @@ int nfc_llcp_parse_gb_tlv(struct nfc_llcp_local *local,
 }
 
 int nfc_llcp_parse_connection_tlv(struct nfc_llcp_sock *sock,
-				  u8 *tlv_array, u16 tlv_array_len)
+				  const u8 *tlv_array, u16 tlv_array_len)
 {
-	u8 *tlv = tlv_array, type, length, offset = 0;
+	const u8 *tlv = tlv_array;
+	u8 type, length, offset = 0;
 
 	pr_debug("TLV array length %d\n", tlv_array_len);
 
@@ -302,12 +292,12 @@ static struct sk_buff *llcp_add_header(struct sk_buff *pdu,
 
 	pr_debug("header 0x%x 0x%x\n", header[0], header[1]);
 
-	memcpy(skb_put(pdu, LLCP_HEADER_SIZE), header, LLCP_HEADER_SIZE);
+	skb_put_data(pdu, header, LLCP_HEADER_SIZE);
 
 	return pdu;
 }
 
-static struct sk_buff *llcp_add_tlv(struct sk_buff *pdu, u8 *tlv,
+static struct sk_buff *llcp_add_tlv(struct sk_buff *pdu, const u8 *tlv,
 				    u8 tlv_length)
 {
 	/* XXX Add an skb length check */
@@ -315,7 +305,7 @@ static struct sk_buff *llcp_add_tlv(struct sk_buff *pdu, u8 *tlv,
 	if (tlv == NULL)
 		return NULL;
 
-	memcpy(skb_put(pdu, tlv_length), tlv, tlv_length);
+	skb_put_data(pdu, tlv, tlv_length);
 
 	return pdu;
 }
@@ -347,8 +337,6 @@ int nfc_llcp_send_disconnect(struct nfc_llcp_sock *sock)
 	struct nfc_dev *dev;
 	struct nfc_llcp_local *local;
 
-	pr_debug("Sending DISC\n");
-
 	local = sock->local;
 	if (local == NULL)
 		return -ENODEV;
@@ -371,8 +359,6 @@ int nfc_llcp_send_symm(struct nfc_dev *dev)
 	struct sk_buff *skb;
 	struct nfc_llcp_local *local;
 	u16 size = 0;
-
-	pr_debug("Sending SYMM\n");
 
 	local = nfc_llcp_find_local(dev);
 	if (local == NULL)
@@ -401,14 +387,13 @@ int nfc_llcp_send_connect(struct nfc_llcp_sock *sock)
 {
 	struct nfc_llcp_local *local;
 	struct sk_buff *skb;
-	u8 *service_name_tlv = NULL, service_name_tlv_length;
-	u8 *miux_tlv = NULL, miux_tlv_length;
-	u8 *rw_tlv = NULL, rw_tlv_length, rw;
+	const u8 *service_name_tlv = NULL;
+	const u8 *miux_tlv = NULL;
+	const u8 *rw_tlv = NULL;
+	u8 service_name_tlv_length, miux_tlv_length,  rw_tlv_length, rw;
 	int err;
 	u16 size = 0;
 	__be16 miux;
-
-	pr_debug("Sending CONNECT\n");
 
 	local = sock->local;
 	if (local == NULL)
@@ -477,13 +462,12 @@ int nfc_llcp_send_cc(struct nfc_llcp_sock *sock)
 {
 	struct nfc_llcp_local *local;
 	struct sk_buff *skb;
-	u8 *miux_tlv = NULL, miux_tlv_length;
-	u8 *rw_tlv = NULL, rw_tlv_length, rw;
+	const u8 *miux_tlv = NULL;
+	const u8 *rw_tlv = NULL;
+	u8 miux_tlv_length, rw_tlv_length, rw;
 	int err;
 	u16 size = 0;
 	__be16 miux;
-
-	pr_debug("Sending CC\n");
 
 	local = sock->local;
 	if (local == NULL)
@@ -573,7 +557,7 @@ int nfc_llcp_send_snl_sdres(struct nfc_llcp_local *local,
 		return PTR_ERR(skb);
 
 	hlist_for_each_entry_safe(sdp, n, tlv_list, node) {
-		memcpy(skb_put(skb, sdp->tlv_len), sdp->tlv, sdp->tlv_len);
+		skb_put_data(skb, sdp->tlv, sdp->tlv_len);
 
 		hlist_del(&sdp->node);
 
@@ -605,8 +589,7 @@ int nfc_llcp_send_snl_sdreq(struct nfc_llcp_local *local,
 	hlist_for_each_entry_safe(sdreq, n, tlv_list, node) {
 		pr_debug("tid %d for %s\n", sdreq->tid, sdreq->uri);
 
-		memcpy(skb_put(skb, sdreq->tlv_len), sdreq->tlv,
-		       sdreq->tlv_len);
+		skb_put_data(skb, sdreq->tlv, sdreq->tlv_len);
 
 		hlist_del(&sdreq->node);
 
@@ -646,7 +629,7 @@ int nfc_llcp_send_dm(struct nfc_llcp_local *local, u8 ssap, u8 dsap, u8 reason)
 
 	skb = llcp_add_header(skb, dsap, ssap, LLCP_PDU_DM);
 
-	memcpy(skb_put(skb, 1), &reason, 1);
+	skb_put_data(skb, &reason, 1);
 
 	skb_queue_head(&local->tx_queue, skb);
 
@@ -717,7 +700,7 @@ int nfc_llcp_send_i_frame(struct nfc_llcp_sock *sock,
 		skb_put(pdu, LLCP_SEQUENCE_SIZE);
 
 		if (likely(frag_len > 0))
-			memcpy(skb_put(pdu, frag_len), msg_ptr, frag_len);
+			skb_put_data(pdu, msg_ptr, frag_len);
 
 		skb_queue_tail(&sock->tx_queue, pdu);
 
@@ -786,7 +769,7 @@ int nfc_llcp_send_ui_frame(struct nfc_llcp_sock *sock, u8 ssap, u8 dsap,
 		pdu = llcp_add_header(pdu, dsap, ssap, LLCP_PDU_UI);
 
 		if (likely(frag_len > 0))
-			memcpy(skb_put(pdu, frag_len), msg_ptr, frag_len);
+			skb_put_data(pdu, msg_ptr, frag_len);
 
 		/* No need to check for the peer RW for UI frames */
 		skb_queue_tail(&local->tx_queue, pdu);

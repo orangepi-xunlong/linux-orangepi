@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: (GPL-2.0 OR BSD-3-Clause)
 /*
  * sisusb - usb kernel driver for SiS315(E) based USB2VGA dongles
  *
@@ -43,10 +44,8 @@
 #include <linux/spinlock.h>
 
 #include "sisusb.h"
-
-#ifdef INCL_SISUSB_CON
-
 #include "sisusb_init.h"
+#include "sisusb_tables.h"
 
 /*********************************************/
 /*         POINTER INITIALIZATION            */
@@ -954,5 +953,3 @@ int SiSUSBSetVESAMode(struct SiS_Private *SiS_Pr, unsigned short VModeNo)
 
 	return SiSUSBSetMode(SiS_Pr, ModeNo);
 }
-
-#endif /* INCL_SISUSB_CON */

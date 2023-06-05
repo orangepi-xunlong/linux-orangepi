@@ -1,17 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Xilinx SLCR driver
  *
  * Copyright (c) 2011-2013 Xilinx Inc.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version
- * 2 of the License, or (at your option) any later version.
- *
- * You should have received a copy of the GNU General Public
- * License along with this program; if not, write to the Free
- * Software Foundation, Inc., 675 Mass Ave, Cambridge, MA
- * 02139, USA.
  */
 
 #include <linux/io.h>
@@ -222,6 +213,7 @@ int __init zynq_early_slcr_init(void)
 	zynq_slcr_regmap = syscon_regmap_lookup_by_compatible("xlnx,zynq-slcr");
 	if (IS_ERR(zynq_slcr_regmap)) {
 		pr_err("%s: failed to find zynq-slcr\n", __func__);
+		of_node_put(np);
 		return -ENODEV;
 	}
 
@@ -233,7 +225,7 @@ int __init zynq_early_slcr_init(void)
 
 	register_restart_handler(&zynq_slcr_restart_nb);
 
-	pr_info("%s mapped to %p\n", np->name, zynq_slcr_base);
+	pr_info("%pOFn mapped to %p\n", np, zynq_slcr_base);
 
 	of_node_put(np);
 

@@ -1,49 +1,8 @@
+/* SPDX-License-Identifier: GPL-2.0 or BSD-3-Clause */
 /*
- * Copyright(c) 2015, 2016 Intel Corporation.
- *
- * This file is provided under a dual BSD/GPLv2 license.  When using or
- * redistributing this file, you may do so under either license.
- *
- * GPL LICENSE SUMMARY
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of version 2 of the GNU General Public License as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- *
- * BSD LICENSE
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- *
- *  - Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- *  - Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- *  - Neither the name of Intel Corporation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *
+ * Copyright(c) 2015 - 2017 Intel Corporation.
  */
+
 #ifndef _HFI1_MAD_H
 #define _HFI1_MAD_H
 
@@ -115,7 +74,7 @@ struct opa_mad_notice_attr {
 			__be32	lid;		/* LID where change occurred */
 			__be32	new_cap_mask;	/* new capability mask */
 			__be16	reserved2;
-			__be16	cap_mask;
+			__be16	cap_mask3;
 			__be16	change_flags;	/* low 4 bits only */
 		} __packed ntc_144;
 
@@ -165,7 +124,7 @@ struct opa_mad_notice_attr {
 		} __packed ntc_2048;
 
 	};
-	u8	class_data[0];
+	u8	class_data[];
 };
 
 #define IB_VLARB_LOWPRI_0_31    1
@@ -180,6 +139,15 @@ struct opa_mad_notice_attr {
 #define OPA_VLARB_PREEMPT_MATRIX     3
 
 #define IB_PMA_PORT_COUNTERS_CONG       cpu_to_be16(0xFF00)
+#define LINK_SPEED_25G		1
+#define LINK_SPEED_12_5G	2
+#define LINK_WIDTH_DEFAULT	4
+#define DECIMAL_FACTORING	1000
+/*
+ * The default link width is multiplied by 1000
+ * to get accurate value after division.
+ */
+#define FACTOR_LINK_WIDTH	(LINK_WIDTH_DEFAULT * DECIMAL_FACTORING)
 
 struct ib_pma_portcounters_cong {
 	u8 reserved;
@@ -239,7 +207,7 @@ struct opa_hfi1_cong_log_event_internal {
 	u8 sl;
 	u8 svc_type;
 	u32 rlid;
-	s64 timestamp; /* wider than 32 bits to detect 32 bit rollover */
+	u64 timestamp; /* wider than 32 bits to detect 32 bit rollover */
 };
 
 struct opa_hfi1_cong_log_event {
@@ -427,6 +395,43 @@ struct sc2vlnt {
 		    COUNTER_MASK(1, 3) | \
 		    COUNTER_MASK(1, 4))
 
-void hfi1_event_pkey_change(struct hfi1_devdata *dd, u8 port);
+void hfi1_event_pkey_change(struct hfi1_devdata *dd, u32 port);
+void hfi1_handle_trap_timer(struct timer_list *t);
+u16 tx_link_width(u16 link_width);
+u64 get_xmit_wait_counters(struct hfi1_pportdata *ppd, u16 link_width,
+			   u16 link_speed, int vl);
+/**
+ * get_link_speed - determine whether 12.5G or 25G speed
+ * @link_speed: the speed of active link
+ * @return: Return 2 if link speed identified as 12.5G
+ * or return 1 if link speed is 25G.
+ *
+ * The function indirectly calculate required link speed
+ * value for convert_xmit_counter function. If the link
+ * speed is 25G, the function return as 1 as it is required
+ * by xmit counter conversion formula :-( 25G / link_speed).
+ * This conversion will provide value 1 if current
+ * link speed is 25G or 2 if 12.5G.This is done to avoid
+ * 12.5 float number conversion.
+ */
+static inline u16 get_link_speed(u16 link_speed)
+{
+	return (link_speed == 1) ?
+		 LINK_SPEED_12_5G : LINK_SPEED_25G;
+}
 
+/**
+ * convert_xmit_counter - calculate flit times for given xmit counter
+ * value
+ * @xmit_wait_val: current xmit counter value
+ * @link_width: width of active link
+ * @link_speed: speed of active link
+ * @return: return xmit counter value in flit times.
+ */
+static inline u64 convert_xmit_counter(u64 xmit_wait_val, u16 link_width,
+				       u16 link_speed)
+{
+	return (xmit_wait_val * 2 * (FACTOR_LINK_WIDTH / link_width)
+		 * link_speed) / DECIMAL_FACTORING;
+}
 #endif				/* _HFI1_MAD_H */

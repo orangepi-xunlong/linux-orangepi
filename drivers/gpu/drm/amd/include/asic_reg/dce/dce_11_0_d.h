@@ -4544,6 +4544,15 @@
 #define mmDP6_DP_DPHY_PRBS_CNTL                                                 0x54b5
 #define mmDP7_DP_DPHY_PRBS_CNTL                                                 0x56b5
 #define mmDP8_DP_DPHY_PRBS_CNTL                                                 0x57b5
+#define mmDP_DPHY_SCRAM_CNTL                                                    0x4ab6
+#define mmDP0_DP_DPHY_SCRAM_CNTL                                                0x4ab6
+#define mmDP1_DP_DPHY_SCRAM_CNTL                                                0x4bb6
+#define mmDP2_DP_DPHY_SCRAM_CNTL                                                0x4cb6
+#define mmDP3_DP_DPHY_SCRAM_CNTL                                                0x4db6
+#define mmDP4_DP_DPHY_SCRAM_CNTL                                                0x4eb6
+#define mmDP5_DP_DPHY_SCRAM_CNTL                                                0x4fb6
+#define mmDP6_DP_DPHY_SCRAM_CNTL                                                0x54b6
+#define mmDP8_DP_DPHY_SCRAM_CNTL                                                0x56b6
 #define mmDP_DPHY_BS_SR_SWAP_CNTL                                               0x4adc
 #define mmDP0_DP_DPHY_BS_SR_SWAP_CNTL                                           0x4adc
 #define mmDP1_DP_DPHY_BS_SR_SWAP_CNTL                                           0x4bdc
@@ -6972,6 +6981,7 @@
 #define ixAZALIA_F0_CODEC_PIN_CONTROL_RESPONSE_PIN_SENSE                        0x23
 #define ixAZALIA_F0_CODEC_PIN_CONTROL_WIDGET_CONTROL                            0x24
 #define ixAZALIA_F0_CODEC_PIN_CONTROL_CHANNEL_SPEAKER                           0x25
+#define ixAZALIA_F0_CODEC_PIN_CONTROL_ACP_DATA                                  0x27
 #define ixAZALIA_F0_CODEC_PIN_CONTROL_AUDIO_DESCRIPTOR0                         0x28
 #define ixAZALIA_F0_CODEC_PIN_CONTROL_AUDIO_DESCRIPTOR1                         0x29
 #define ixAZALIA_F0_CODEC_PIN_CONTROL_AUDIO_DESCRIPTOR2                         0x2a

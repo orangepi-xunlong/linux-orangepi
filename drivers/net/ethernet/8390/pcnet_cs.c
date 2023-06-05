@@ -49,7 +49,7 @@
 
 #include <asm/io.h>
 #include <asm/byteorder.h>
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 
 #define PCNET_CMD	0x00
 #define PCNET_DATAPORT	0x10	/* NatSemi-defined port window offset. */
@@ -66,7 +66,6 @@
 #define PCNET_RDC_TIMEOUT (2*HZ/100)	/* Max wait in jiffies for Tx RDC */
 
 static const char *if_names[] = { "auto", "10baseT", "10base2"};
-static u32 pcnet_msg_enable;
 
 /*====================================================================*/
 
@@ -99,7 +98,7 @@ static int pcnet_open(struct net_device *dev);
 static int pcnet_close(struct net_device *dev);
 static int ei_ioctl(struct net_device *dev, struct ifreq *rq, int cmd);
 static irqreturn_t ei_irq_wrapper(int irq, void *dev_id);
-static void ei_watchdog(u_long arg);
+static void ei_watchdog(struct timer_list *t);
 static void pcnet_reset_8390(struct net_device *dev);
 static int set_config(struct net_device *dev, struct ifmap *map);
 static int setup_shmem_window(struct pcmcia_device *link, int start_pg,
@@ -224,10 +223,9 @@ static const struct net_device_ops pcnet_netdev_ops = {
 	.ndo_set_config		= set_config,
 	.ndo_start_xmit 	= ei_start_xmit,
 	.ndo_get_stats		= ei_get_stats,
-	.ndo_do_ioctl 		= ei_ioctl,
+	.ndo_eth_ioctl		= ei_ioctl,
 	.ndo_set_rx_mode	= ei_set_multicast_list,
 	.ndo_tx_timeout 	= ei_tx_timeout,
-	.ndo_change_mtu		= eth_change_mtu,
 	.ndo_set_mac_address 	= eth_mac_addr,
 	.ndo_validate_addr	= eth_validate_addr,
 #ifdef CONFIG_NET_POLL_CONTROLLER
@@ -280,6 +278,7 @@ static struct hw_info *get_hwinfo(struct pcmcia_device *link)
 {
     struct net_device *dev = link->priv;
     u_char __iomem *base, *virt;
+    u8 addr[ETH_ALEN];
     int i, j;
 
     /* Allocate a small memory window */
@@ -291,6 +290,11 @@ static struct hw_info *get_hwinfo(struct pcmcia_device *link)
 
     virt = ioremap(link->resource[2]->start,
 	    resource_size(link->resource[2]));
+    if (unlikely(!virt)) {
+	    pcmcia_release_window(link, link->resource[2]);
+	    return NULL;
+    }
+
     for (i = 0; i < NR_INFO; i++) {
 	pcmcia_map_mem_page(link, link->resource[2],
 		hw_info[i].offset & ~(resource_size(link->resource[2])-1));
@@ -299,7 +303,8 @@ static struct hw_info *get_hwinfo(struct pcmcia_device *link)
 	    (readb(base+2) == hw_info[i].a1) &&
 	    (readb(base+4) == hw_info[i].a2)) {
 		for (j = 0; j < 6; j++)
-		    dev->dev_addr[j] = readb(base + (j<<1));
+			addr[j] = readb(base + (j<<1));
+		eth_hw_addr_set(dev, addr);
 		break;
 	}
     }
@@ -321,6 +326,7 @@ static struct hw_info *get_prom(struct pcmcia_device *link)
 {
     struct net_device *dev = link->priv;
     unsigned int ioaddr = dev->base_addr;
+    u8 addr[ETH_ALEN];
     u_char prom[32];
     int i, j;
 
@@ -359,7 +365,8 @@ static struct hw_info *get_prom(struct pcmcia_device *link)
     }
     if ((i < NR_INFO) || ((prom[28] == 0x57) && (prom[30] == 0x57))) {
 	for (j = 0; j < 6; j++)
-	    dev->dev_addr[j] = prom[j<<1];
+	    addr[j] = prom[j<<1];
+	eth_hw_addr_set(dev, addr);
 	return (i < NR_INFO) ? hw_info+i : &default_info;
     }
     return NULL;
@@ -374,6 +381,7 @@ static struct hw_info *get_prom(struct pcmcia_device *link)
 static struct hw_info *get_dl10019(struct pcmcia_device *link)
 {
     struct net_device *dev = link->priv;
+    u8 addr[ETH_ALEN];
     int i;
     u_char sum;
 
@@ -382,7 +390,8 @@ static struct hw_info *get_dl10019(struct pcmcia_device *link)
     if (sum != 0xff)
 	return NULL;
     for (i = 0; i < 6; i++)
-	dev->dev_addr[i] = inb_p(dev->base_addr + 0x14 + i);
+	addr[i] = inb_p(dev->base_addr + 0x14 + i);
+    eth_hw_addr_set(dev, addr);
     i = inb(dev->base_addr + 0x1f);
     return ((i == 0x91)||(i == 0x99)) ? &dl10022_info : &dl10019_info;
 }
@@ -397,6 +406,7 @@ static struct hw_info *get_ax88190(struct pcmcia_device *link)
 {
     struct net_device *dev = link->priv;
     unsigned int ioaddr = dev->base_addr;
+    u8 addr[ETH_ALEN];
     int i, j;
 
     /* Not much of a test, but the alternatives are messy */
@@ -410,9 +420,10 @@ static struct hw_info *get_ax88190(struct pcmcia_device *link)
 
     for (i = 0; i < 6; i += 2) {
 	j = inw(ioaddr + PCNET_DATAPORT);
-	dev->dev_addr[i] = j & 0xff;
-	dev->dev_addr[i+1] = j >> 8;
+	addr[i] = j & 0xff;
+	addr[i+1] = j >> 8;
     }
+    eth_hw_addr_set(dev, addr);
     return NULL;
 }
 
@@ -427,6 +438,7 @@ static struct hw_info *get_ax88190(struct pcmcia_device *link)
 static struct hw_info *get_hwired(struct pcmcia_device *link)
 {
     struct net_device *dev = link->priv;
+    u8 addr[ETH_ALEN];
     int i;
 
     for (i = 0; i < 6; i++)
@@ -435,7 +447,8 @@ static struct hw_info *get_hwired(struct pcmcia_device *link)
 	return NULL;
 
     for (i = 0; i < 6; i++)
-	dev->dev_addr[i] = hw_addr[i];
+	addr[i] = hw_addr[i];
+    eth_hw_addr_set(dev, addr);
 
     return &default_info;
 } /* get_hwired */
@@ -557,7 +570,6 @@ static int pcnet_config(struct pcmcia_device *link)
     int start_pg, stop_pg, cm_offset;
     int has_shmem = 0;
     struct hw_info *local_hw_info;
-    struct ei_device *ei_local;
 
     dev_dbg(&link->dev, "pcnet_config\n");
 
@@ -607,8 +619,6 @@ static int pcnet_config(struct pcmcia_device *link)
 	mii_phy_probe(dev);
 
     SET_NETDEV_DEV(dev, &link->dev);
-    ei_local = netdev_priv(dev);
-    ei_local->msg_enable = pcnet_msg_enable;
 
     if (register_netdev(dev) != 0) {
 	pr_notice("register_netdev() failed\n");
@@ -918,7 +928,7 @@ static int pcnet_open(struct net_device *dev)
 
     info->phy_id = info->eth_phy;
     info->link_status = 0x00;
-    setup_timer(&info->watchdog, ei_watchdog, (u_long)dev);
+    timer_setup(&info->watchdog, ei_watchdog, 0);
     mod_timer(&info->watchdog, jiffies + HZ);
 
     return ei_open(dev);
@@ -1007,10 +1017,10 @@ static irqreturn_t ei_irq_wrapper(int irq, void *dev_id)
     return ret;
 }
 
-static void ei_watchdog(u_long arg)
+static void ei_watchdog(struct timer_list *t)
 {
-    struct net_device *dev = (struct net_device *)arg;
-    struct pcnet_dev *info = PRIV(dev);
+    struct pcnet_dev *info = from_timer(info, t, watchdog);
+    struct net_device *dev = info->p_dev->priv;
     unsigned int nic_base = dev->base_addr;
     unsigned int mii_addr = nic_base + DLINK_GPIO;
     u_short link;
@@ -1108,6 +1118,7 @@ static int ei_ioctl(struct net_device *dev, struct ifreq *rq, int cmd)
     switch (cmd) {
     case SIOCGMIIPHY:
 	data->phy_id = info->phy_id;
+	fallthrough;
     case SIOCGMIIREG:		/* Read MII PHY register. */
 	data->val_out = mdio_read(mii_addr, data->phy_id, data->reg_num & 0x1f);
 	return 0;
@@ -1177,8 +1188,10 @@ static void dma_block_input(struct net_device *dev, int count,
     outb_p(E8390_RREAD+E8390_START, nic_base + PCNET_CMD);
 
     insw(nic_base + PCNET_DATAPORT,buf,count>>1);
-    if (count & 0x01)
-	buf[count-1] = inb(nic_base + PCNET_DATAPORT), xfer_count++;
+    if (count & 0x01) {
+	buf[count-1] = inb(nic_base + PCNET_DATAPORT);
+	xfer_count++;
+    }
 
     /* This was for the ALPHA version only, but enough people have been
        encountering problems that it is still here. */
@@ -1427,6 +1440,11 @@ static int setup_shmem_window(struct pcmcia_device *link, int start_pg,
     /* Try scribbling on the buffer */
     info->base = ioremap(link->resource[3]->start,
 			resource_size(link->resource[3]));
+    if (unlikely(!info->base)) {
+	    ret = -ENOMEM;
+	    goto failed;
+    }
+
     for (i = 0; i < (TX_PAGES<<8); i += 2)
 	__raw_writew((i>>1), info->base+offset+i);
     udelay(100);
@@ -1519,7 +1537,7 @@ static const struct pcmcia_device_id pcnet_ids[] = {
 	PCMCIA_DEVICE_PROD_ID12("ACCTON", "EN2216-PCMCIA-ETHERNET", 0xdfc6b5b2, 0x5542bfff),
 	PCMCIA_DEVICE_PROD_ID12("Allied Telesis, K.K.", "CentreCOM LA100-PCM-T V2 100/10M LAN PC Card", 0xbb7fbdd7, 0xcd91cc68),
 	PCMCIA_DEVICE_PROD_ID12("Allied Telesis K.K.", "LA100-PCM V2", 0x36634a66, 0xc6d05997),
-  	PCMCIA_DEVICE_PROD_ID12("Allied Telesis, K.K.", "CentreCOM LA-PCM_V2", 0xbb7fBdd7, 0x28e299f8),
+	PCMCIA_DEVICE_PROD_ID12("Allied Telesis, K.K.", "CentreCOM LA-PCM_V2", 0xbb7fBdd7, 0x28e299f8),
 	PCMCIA_DEVICE_PROD_ID12("Allied Telesis K.K.", "LA-PCM V3", 0x36634a66, 0x62241d96),
 	PCMCIA_DEVICE_PROD_ID12("AmbiCom", "AMB8010", 0x5070a7f9, 0x82f96e96),
 	PCMCIA_DEVICE_PROD_ID12("AmbiCom", "AMB8610", 0x5070a7f9, 0x86741224),

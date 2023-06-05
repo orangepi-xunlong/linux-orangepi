@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0+
 /*
  * ti-adc161s626.c - Texas Instruments ADC161S626 1-channel differential ADC
  *
@@ -5,20 +6,12 @@
  *  adc141s626 - 14-bit ADC
  *  adc161s626 - 16-bit ADC
  *
- * Copyright (C) 2016 Matt Ranostay <mranostay@gmail.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- * GNU General Public License for more details.
+ * Copyright (C) 2016-2018
+ * Author: Matt Ranostay <matt.ranostay@konsulko.com>
  */
 
 #include <linux/module.h>
+#include <linux/mod_devicetable.h>
 #include <linux/init.h>
 #include <linux/err.h>
 #include <linux/spi/spi.h>
@@ -27,6 +20,7 @@
 #include <linux/iio/buffer.h>
 #include <linux/iio/trigger_consumer.h>
 #include <linux/iio/triggered_buffer.h>
+#include <linux/regulator/consumer.h>
 
 #define TI_ADC_DRV_NAME	"ti-adc161s626"
 
@@ -39,7 +33,9 @@ static const struct iio_chan_spec ti_adc141s626_channels[] = {
 	{
 		.type = IIO_VOLTAGE,
 		.channel = 0,
-		.info_mask_separate = BIT(IIO_CHAN_INFO_RAW),
+		.info_mask_separate = BIT(IIO_CHAN_INFO_RAW) |
+				      BIT(IIO_CHAN_INFO_SCALE) |
+				      BIT(IIO_CHAN_INFO_OFFSET),
 		.scan_index = 0,
 		.scan_type = {
 			.sign = 's',
@@ -54,7 +50,9 @@ static const struct iio_chan_spec ti_adc161s626_channels[] = {
 	{
 		.type = IIO_VOLTAGE,
 		.channel = 0,
-		.info_mask_separate = BIT(IIO_CHAN_INFO_RAW),
+		.info_mask_separate = BIT(IIO_CHAN_INFO_RAW) |
+				      BIT(IIO_CHAN_INFO_SCALE) |
+				      BIT(IIO_CHAN_INFO_OFFSET),
 		.scan_index = 0,
 		.scan_type = {
 			.sign = 's',
@@ -68,10 +66,12 @@ static const struct iio_chan_spec ti_adc161s626_channels[] = {
 struct ti_adc_data {
 	struct iio_dev *indio_dev;
 	struct spi_device *spi;
+	struct regulator *ref;
+
 	u8 read_size;
 	u8 shift;
 
-	u8 buffer[16] ____cacheline_aligned;
+	u8 buffer[16] __aligned(IIO_DMA_MINALIGN);
 };
 
 static int ti_adc_read_measurement(struct ti_adc_data *data,
@@ -135,26 +135,44 @@ static int ti_adc_read_raw(struct iio_dev *indio_dev,
 	struct ti_adc_data *data = iio_priv(indio_dev);
 	int ret;
 
-	if (mask != IIO_CHAN_INFO_RAW)
-		return -EINVAL;
+	switch (mask) {
+	case IIO_CHAN_INFO_RAW:
+		ret = iio_device_claim_direct_mode(indio_dev);
+		if (ret)
+			return ret;
 
-	ret = iio_device_claim_direct_mode(indio_dev);
-	if (ret)
-		return ret;
+		ret = ti_adc_read_measurement(data, chan, val);
+		iio_device_release_direct_mode(indio_dev);
 
-	ret = ti_adc_read_measurement(data, chan, val);
-	iio_device_release_direct_mode(indio_dev);
+		if (ret)
+			return ret;
 
-	if (!ret)
 		return IIO_VAL_INT;
+	case IIO_CHAN_INFO_SCALE:
+		ret = regulator_get_voltage(data->ref);
+		if (ret < 0)
+			return ret;
+
+		*val = ret / 1000;
+		*val2 = chan->scan_type.realbits;
+
+		return IIO_VAL_FRACTIONAL_LOG2;
+	case IIO_CHAN_INFO_OFFSET:
+		*val = 1 << (chan->scan_type.realbits - 1);
+		return IIO_VAL_INT;
+	}
 
 	return 0;
 }
 
 static const struct iio_info ti_adc_info = {
-	.driver_module = THIS_MODULE,
 	.read_raw = ti_adc_read_raw,
 };
+
+static void ti_adc_reg_disable(void *reg)
+{
+	regulator_disable(reg);
+}
 
 static int ti_adc_probe(struct spi_device *spi)
 {
@@ -167,11 +185,8 @@ static int ti_adc_probe(struct spi_device *spi)
 		return -ENOMEM;
 
 	indio_dev->info = &ti_adc_info;
-	indio_dev->dev.parent = &spi->dev;
-	indio_dev->dev.of_node = spi->dev.of_node;
 	indio_dev->name = TI_ADC_DRV_NAME;
 	indio_dev->modes = INDIO_DIRECT_MODE;
-	spi_set_drvdata(spi, indio_dev);
 
 	data = iio_priv(indio_dev);
 	data->spi = spi;
@@ -191,31 +206,25 @@ static int ti_adc_probe(struct spi_device *spi)
 		break;
 	}
 
-	ret = iio_triggered_buffer_setup(indio_dev, NULL,
-					 ti_adc_trigger_handler, NULL);
+	data->ref = devm_regulator_get(&spi->dev, "vdda");
+	if (IS_ERR(data->ref))
+		return PTR_ERR(data->ref);
+
+	ret = regulator_enable(data->ref);
+	if (ret < 0)
+		return ret;
+
+	ret = devm_add_action_or_reset(&spi->dev, ti_adc_reg_disable,
+				       data->ref);
 	if (ret)
 		return ret;
 
-	ret = iio_device_register(indio_dev);
+	ret = devm_iio_triggered_buffer_setup(&spi->dev, indio_dev, NULL,
+					      ti_adc_trigger_handler, NULL);
 	if (ret)
-		goto error_unreg_buffer;
+		return ret;
 
-	return 0;
-
-error_unreg_buffer:
-	iio_triggered_buffer_cleanup(indio_dev);
-
-	return ret;
-}
-
-static int ti_adc_remove(struct spi_device *spi)
-{
-	struct iio_dev *indio_dev = spi_get_drvdata(spi);
-
-	iio_device_unregister(indio_dev);
-	iio_triggered_buffer_cleanup(indio_dev);
-
-	return 0;
+	return devm_iio_device_register(&spi->dev, indio_dev);
 }
 
 static const struct of_device_id ti_adc_dt_ids[] = {
@@ -235,14 +244,13 @@ MODULE_DEVICE_TABLE(spi, ti_adc_id);
 static struct spi_driver ti_adc_driver = {
 	.driver = {
 		.name	= TI_ADC_DRV_NAME,
-		.of_match_table = of_match_ptr(ti_adc_dt_ids),
+		.of_match_table = ti_adc_dt_ids,
 	},
 	.probe		= ti_adc_probe,
-	.remove		= ti_adc_remove,
 	.id_table	= ti_adc_id,
 };
 module_spi_driver(ti_adc_driver);
 
-MODULE_AUTHOR("Matt Ranostay <mranostay@gmail.com>");
+MODULE_AUTHOR("Matt Ranostay <matt.ranostay@konsulko.com>");
 MODULE_DESCRIPTION("Texas Instruments ADC1x1S 1-channel differential ADC");
 MODULE_LICENSE("GPL");

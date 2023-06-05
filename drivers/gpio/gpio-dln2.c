@@ -1,11 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Driver for the Diolan DLN-2 USB-GPIO adapter
  *
  * Copyright (c) 2014 Intel Corporation
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as
- * published by the Free Software Foundation, version 2.
  */
 
 #include <linux/kernel.h>
@@ -15,7 +12,6 @@
 #include <linux/irqdomain.h>
 #include <linux/irq.h>
 #include <linux/irqchip/chained_irq.h>
-#include <linux/gpio.h>
 #include <linux/gpio/driver.h>
 #include <linux/platform_device.h>
 #include <linux/mfd/dln2.h>
@@ -204,9 +200,9 @@ static int dln2_gpio_get_direction(struct gpio_chip *chip, unsigned offset)
 	struct dln2_gpio *dln2 = gpiochip_get_data(chip);
 
 	if (test_bit(offset, dln2->output_enabled))
-		return GPIOF_DIR_OUT;
+		return GPIO_LINE_DIRECTION_OUT;
 
-	return GPIOF_DIR_IN;
+	return GPIO_LINE_DIRECTION_IN;
 }
 
 static int dln2_gpio_get(struct gpio_chip *chip, unsigned int offset)
@@ -218,7 +214,7 @@ static int dln2_gpio_get(struct gpio_chip *chip, unsigned int offset)
 	if (dir < 0)
 		return dir;
 
-	if (dir == GPIOF_DIR_IN)
+	if (dir == GPIO_LINE_DIRECTION_IN)
 		return dln2_gpio_pin_get_in_val(dln2, offset);
 
 	return dln2_gpio_pin_get_out_val(dln2, offset);
@@ -272,12 +268,16 @@ static int dln2_gpio_direction_output(struct gpio_chip *chip, unsigned offset,
 	return dln2_gpio_set_direction(chip, offset, DLN2_GPIO_DIRECTION_OUT);
 }
 
-static int dln2_gpio_set_debounce(struct gpio_chip *chip, unsigned offset,
-				  unsigned debounce)
+static int dln2_gpio_set_config(struct gpio_chip *chip, unsigned offset,
+				unsigned long config)
 {
 	struct dln2_gpio *dln2 = gpiochip_get_data(chip);
-	__le32 duration = cpu_to_le32(debounce);
+	__le32 duration;
 
+	if (pinconf_to_config_param(config) != PIN_CONFIG_INPUT_DEBOUNCE)
+		return -ENOTSUPP;
+
+	duration = cpu_to_le32(pinconf_to_config_argument(config));
 	return dln2_transfer_tx(dln2->pdev, DLN2_GPIO_SET_DEBOUNCE,
 				&duration, sizeof(duration));
 }
@@ -305,6 +305,7 @@ static void dln2_irq_unmask(struct irq_data *irqd)
 	struct dln2_gpio *dln2 = gpiochip_get_data(gc);
 	int pin = irqd_to_hwirq(irqd);
 
+	gpiochip_enable_irq(gc, pin);
 	set_bit(pin, dln2->unmasked_irqs);
 }
 
@@ -315,6 +316,7 @@ static void dln2_irq_mask(struct irq_data *irqd)
 	int pin = irqd_to_hwirq(irqd);
 
 	clear_bit(pin, dln2->unmasked_irqs);
+	gpiochip_disable_irq(gc, pin);
 }
 
 static int dln2_irq_set_type(struct irq_data *irqd, unsigned type)
@@ -383,19 +385,21 @@ static void dln2_irq_bus_unlock(struct irq_data *irqd)
 	mutex_unlock(&dln2->irq_lock);
 }
 
-static struct irq_chip dln2_gpio_irqchip = {
+static const struct irq_chip dln2_irqchip = {
 	.name = "dln2-irq",
 	.irq_mask = dln2_irq_mask,
 	.irq_unmask = dln2_irq_unmask,
 	.irq_set_type = dln2_irq_set_type,
 	.irq_bus_lock = dln2_irq_bus_lock,
 	.irq_bus_sync_unlock = dln2_irq_bus_unlock,
+	.flags = IRQCHIP_IMMUTABLE,
+	GPIOCHIP_IRQ_RESOURCE_HELPERS,
 };
 
 static void dln2_gpio_event(struct platform_device *pdev, u16 echo,
 			    const void *data, int len)
 {
-	int pin, irq;
+	int pin, ret;
 
 	const struct {
 		__le16 count;
@@ -416,30 +420,27 @@ static void dln2_gpio_event(struct platform_device *pdev, u16 echo,
 		return;
 	}
 
-	irq = irq_find_mapping(dln2->gpio.irqdomain, pin);
-	if (!irq) {
-		dev_err(dln2->gpio.parent, "pin %d not mapped to IRQ\n", pin);
-		return;
-	}
-
 	switch (dln2->irq_type[pin]) {
 	case DLN2_GPIO_EVENT_CHANGE_RISING:
-		if (event->value)
-			generic_handle_irq(irq);
+		if (!event->value)
+			return;
 		break;
 	case DLN2_GPIO_EVENT_CHANGE_FALLING:
-		if (!event->value)
-			generic_handle_irq(irq);
+		if (event->value)
+			return;
 		break;
-	default:
-		generic_handle_irq(irq);
 	}
+
+	ret = generic_handle_domain_irq(dln2->gpio.irq.domain, pin);
+	if (unlikely(ret))
+		dev_err(dln2->gpio.parent, "pin %d not mapped to IRQ\n", pin);
 }
 
 static int dln2_gpio_probe(struct platform_device *pdev)
 {
 	struct dln2_gpio *dln2;
 	struct device *dev = &pdev->dev;
+	struct gpio_irq_chip *girq;
 	int pins;
 	int ret;
 
@@ -467,7 +468,6 @@ static int dln2_gpio_probe(struct platform_device *pdev)
 	dln2->gpio.base = -1;
 	dln2->gpio.ngpio = pins;
 	dln2->gpio.can_sleep = true;
-	dln2->gpio.irq_not_threaded = true;
 	dln2->gpio.set = dln2_gpio_set;
 	dln2->gpio.get = dln2_gpio_get;
 	dln2->gpio.request = dln2_gpio_request;
@@ -475,20 +475,22 @@ static int dln2_gpio_probe(struct platform_device *pdev)
 	dln2->gpio.get_direction = dln2_gpio_get_direction;
 	dln2->gpio.direction_input = dln2_gpio_direction_input;
 	dln2->gpio.direction_output = dln2_gpio_direction_output;
-	dln2->gpio.set_debounce = dln2_gpio_set_debounce;
+	dln2->gpio.set_config = dln2_gpio_set_config;
+
+	girq = &dln2->gpio.irq;
+	gpio_irq_chip_set_chip(girq, &dln2_irqchip);
+	/* The event comes from the outside so no parent handler */
+	girq->parent_handler = NULL;
+	girq->num_parents = 0;
+	girq->parents = NULL;
+	girq->default_type = IRQ_TYPE_NONE;
+	girq->handler = handle_simple_irq;
 
 	platform_set_drvdata(pdev, dln2);
 
 	ret = devm_gpiochip_add_data(dev, &dln2->gpio, dln2);
 	if (ret < 0) {
 		dev_err(dev, "failed to add gpio chip: %d\n", ret);
-		return ret;
-	}
-
-	ret = gpiochip_irqchip_add(&dln2->gpio, &dln2_gpio_irqchip, 0,
-				   handle_simple_irq, IRQ_TYPE_NONE);
-	if (ret < 0) {
-		dev_err(dev, "failed to add irq chip: %d\n", ret);
 		return ret;
 	}
 

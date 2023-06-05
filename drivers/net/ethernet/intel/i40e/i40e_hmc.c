@@ -1,29 +1,7 @@
-/*******************************************************************************
- *
- * Intel Ethernet Controller XL710 Family Linux Driver
- * Copyright(c) 2013 - 2014 Intel Corporation.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * You should have received a copy of the GNU General Public License along
- * with this program.  If not, see <http://www.gnu.org/licenses/>.
- *
- * The full GNU General Public License is included in this distribution in
- * the file called "COPYING".
- *
- * Contact Information:
- * e1000-devel Mailing List <e1000-devel@lists.sourceforge.net>
- * Intel Corporation, 5200 N.E. Elam Young Parkway, Hillsboro, OR 97124-6497
- *
- ******************************************************************************/
+// SPDX-License-Identifier: GPL-2.0
+/* Copyright(c) 2013 - 2018 Intel Corporation. */
 
+#include "i40e.h"
 #include "i40e_osdep.h"
 #include "i40e_register.h"
 #include "i40e_status.h"
@@ -39,17 +17,17 @@
  * @type: what type of segment descriptor we're manipulating
  * @direct_mode_sz: size to alloc in direct mode
  **/
-i40e_status i40e_add_sd_table_entry(struct i40e_hw *hw,
-					      struct i40e_hmc_info *hmc_info,
-					      u32 sd_index,
-					      enum i40e_sd_entry_type type,
-					      u64 direct_mode_sz)
+int i40e_add_sd_table_entry(struct i40e_hw *hw,
+			    struct i40e_hmc_info *hmc_info,
+			    u32 sd_index,
+			    enum i40e_sd_entry_type type,
+			    u64 direct_mode_sz)
 {
 	enum i40e_memory_type mem_type __attribute__((unused));
 	struct i40e_hmc_sd_entry *sd_entry;
 	bool dma_mem_alloc_done = false;
+	int ret_code = I40E_SUCCESS;
 	struct i40e_dma_mem mem;
-	i40e_status ret_code = I40E_SUCCESS;
 	u64 alloc_len;
 
 	if (NULL == hmc_info->sd_table.sd_entry) {
@@ -128,19 +106,19 @@ exit:
  *	   aligned on 4K boundary and zeroed memory.
  *	2. It should be 4K in size.
  **/
-i40e_status i40e_add_pd_table_entry(struct i40e_hw *hw,
-					      struct i40e_hmc_info *hmc_info,
-					      u32 pd_index,
-					      struct i40e_dma_mem *rsrc_pg)
+int i40e_add_pd_table_entry(struct i40e_hw *hw,
+			    struct i40e_hmc_info *hmc_info,
+			    u32 pd_index,
+			    struct i40e_dma_mem *rsrc_pg)
 {
-	i40e_status ret_code = 0;
 	struct i40e_hmc_pd_table *pd_table;
 	struct i40e_hmc_pd_entry *pd_entry;
 	struct i40e_dma_mem mem;
 	struct i40e_dma_mem *page = &mem;
 	u32 sd_idx, rel_pd_idx;
-	u64 *pd_addr;
+	int ret_code = 0;
 	u64 page_desc;
+	u64 *pd_addr;
 
 	if (pd_index / I40E_HMC_PD_CNT_IN_SD >= hmc_info->sd_table.sd_cnt) {
 		ret_code = I40E_ERR_INVALID_PAGE_DESC_INDEX;
@@ -197,7 +175,6 @@ exit:
  * @hw: pointer to our HW structure
  * @hmc_info: pointer to the HMC configuration information structure
  * @idx: the page index
- * @is_pf: distinguishes a VF from a PF
  *
  * This function:
  *	1. Marks the entry in pd tabe (for paged address mode) or in sd table
@@ -208,15 +185,15 @@ exit:
  *	1. Caller can deallocate the memory used by backing storage after this
  *	   function returns.
  **/
-i40e_status i40e_remove_pd_bp(struct i40e_hw *hw,
-					struct i40e_hmc_info *hmc_info,
-					u32 idx)
+int i40e_remove_pd_bp(struct i40e_hw *hw,
+		      struct i40e_hmc_info *hmc_info,
+		      u32 idx)
 {
-	i40e_status ret_code = 0;
 	struct i40e_hmc_pd_entry *pd_entry;
 	struct i40e_hmc_pd_table *pd_table;
 	struct i40e_hmc_sd_entry *sd_entry;
 	u32 sd_idx, rel_pd_idx;
+	int ret_code = 0;
 	u64 *pd_addr;
 
 	/* calculate index */
@@ -264,11 +241,11 @@ exit:
  * @hmc_info: pointer to the HMC configuration information structure
  * @idx: the page index
  **/
-i40e_status i40e_prep_remove_sd_bp(struct i40e_hmc_info *hmc_info,
-					     u32 idx)
+int i40e_prep_remove_sd_bp(struct i40e_hmc_info *hmc_info,
+			   u32 idx)
 {
-	i40e_status ret_code = 0;
 	struct i40e_hmc_sd_entry *sd_entry;
+	int ret_code = 0;
 
 	/* get the entry and decrease its ref counter */
 	sd_entry = &hmc_info->sd_table.sd_entry[idx];
@@ -292,9 +269,9 @@ exit:
  * @idx: the page index
  * @is_pf: used to distinguish between VF and PF
  **/
-i40e_status i40e_remove_sd_bp_new(struct i40e_hw *hw,
-					    struct i40e_hmc_info *hmc_info,
-					    u32 idx, bool is_pf)
+int i40e_remove_sd_bp_new(struct i40e_hw *hw,
+			  struct i40e_hmc_info *hmc_info,
+			  u32 idx, bool is_pf)
 {
 	struct i40e_hmc_sd_entry *sd_entry;
 
@@ -313,11 +290,11 @@ i40e_status i40e_remove_sd_bp_new(struct i40e_hw *hw,
  * @hmc_info: pointer to the HMC configuration information structure
  * @idx: segment descriptor index to find the relevant page descriptor
  **/
-i40e_status i40e_prep_remove_pd_page(struct i40e_hmc_info *hmc_info,
-					       u32 idx)
+int i40e_prep_remove_pd_page(struct i40e_hmc_info *hmc_info,
+			     u32 idx)
 {
-	i40e_status ret_code = 0;
 	struct i40e_hmc_sd_entry *sd_entry;
+	int ret_code = 0;
 
 	sd_entry = &hmc_info->sd_table.sd_entry[idx];
 
@@ -341,9 +318,9 @@ exit:
  * @idx: segment descriptor index to find the relevant page descriptor
  * @is_pf: used to distinguish between VF and PF
  **/
-i40e_status i40e_remove_pd_page_new(struct i40e_hw *hw,
-					      struct i40e_hmc_info *hmc_info,
-					      u32 idx, bool is_pf)
+int i40e_remove_pd_page_new(struct i40e_hw *hw,
+			    struct i40e_hmc_info *hmc_info,
+			    u32 idx, bool is_pf)
 {
 	struct i40e_hmc_sd_entry *sd_entry;
 

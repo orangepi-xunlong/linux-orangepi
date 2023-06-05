@@ -1,20 +1,76 @@
+# SPDX-License-Identifier: GPL-2.0
 
-CFLAGS += -I. -g -O2 -Wall -D_LGPL_SOURCE
-LDFLAGS += -lpthread -lurcu
-TARGETS = main
-OFILES = main.o radix-tree.o linux.o test.o tag_check.o find_next_bit.o \
-	 regression1.o regression2.o regression3.o multiorder.o \
-	 iteration_check.o
+CFLAGS += -I. -I../../include -g -Og -Wall -D_LGPL_SOURCE -fsanitize=address \
+	  -fsanitize=undefined
+LDFLAGS += -fsanitize=address -fsanitize=undefined
+LDLIBS+= -lpthread -lurcu
+TARGETS = main idr-test multiorder xarray maple
+CORE_OFILES := xarray.o radix-tree.o idr.o linux.o test.o find_bit.o bitmap.o \
+			 slab.o maple.o
+OFILES = main.o $(CORE_OFILES) regression1.o regression2.o regression3.o \
+	 regression4.o tag_check.o multiorder.o idr-test.o iteration_check.o \
+	 iteration_check_2.o benchmark.o
 
-targets: $(TARGETS)
+ifndef SHIFT
+	SHIFT=3
+endif
+
+ifeq ($(BUILD), 32)
+	CFLAGS += -m32
+	LDFLAGS += -m32
+LONG_BIT := 32
+endif
+
+ifndef LONG_BIT
+LONG_BIT := $(shell getconf LONG_BIT)
+endif
+
+targets: generated/map-shift.h generated/bit-length.h $(TARGETS)
 
 main:	$(OFILES)
-	$(CC) $(CFLAGS) $(LDFLAGS) $(OFILES) -o main
+
+idr-test.o: ../../../lib/test_ida.c
+idr-test: idr-test.o $(CORE_OFILES)
+
+xarray: $(CORE_OFILES)
+
+maple: $(CORE_OFILES)
+
+multiorder: multiorder.o $(CORE_OFILES)
 
 clean:
-	$(RM) -f $(TARGETS) *.o radix-tree.c
+	$(RM) $(TARGETS) *.o radix-tree.c idr.c generated/map-shift.h generated/bit-length.h
 
-$(OFILES): *.h */*.h ../../../include/linux/radix-tree.h ../../include/linux/*.h
+vpath %.c ../../lib
+
+$(OFILES): Makefile *.h */*.h generated/map-shift.h generated/bit-length.h \
+	../../include/linux/*.h \
+	../../include/asm/*.h \
+	../../../include/linux/xarray.h \
+	../../../include/linux/maple_tree.h \
+	../../../include/linux/radix-tree.h \
+	../../../include/linux/idr.h
 
 radix-tree.c: ../../../lib/radix-tree.c
 	sed -e 's/^static //' -e 's/__always_inline //' -e 's/inline //' < $< > $@
+
+idr.c: ../../../lib/idr.c
+	sed -e 's/^static //' -e 's/__always_inline //' -e 's/inline //' < $< > $@
+
+xarray.o: ../../../lib/xarray.c ../../../lib/test_xarray.c
+
+maple.o: ../../../lib/maple_tree.c ../../../lib/test_maple_tree.c
+
+generated/map-shift.h:
+	@if ! grep -qws $(SHIFT) generated/map-shift.h; then		\
+		echo "#define XA_CHUNK_SHIFT $(SHIFT)" >		\
+				generated/map-shift.h;			\
+	fi
+
+generated/bit-length.h: FORCE
+	@if ! grep -qws CONFIG_$(LONG_BIT)BIT generated/bit-length.h; then   \
+		echo "Generating $@";                                        \
+		echo "#define CONFIG_$(LONG_BIT)BIT 1" > $@;                 \
+	fi
+
+FORCE: ;

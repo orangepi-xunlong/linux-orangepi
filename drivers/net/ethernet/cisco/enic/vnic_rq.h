@@ -1,20 +1,7 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright 2008-2010 Cisco Systems, Inc.  All rights reserved.
  * Copyright 2007 Nuova Systems, Inc.  All rights reserved.
- *
- * This program is free software; you may redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; version 2 of the License.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
- * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
- * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
- * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
- * BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
- * ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
- * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
  */
 
 #ifndef _VNIC_RQ_H_
@@ -92,9 +79,6 @@ struct vnic_rq {
 	struct vnic_rq_buf *to_clean;
 	void *os_buf_head;
 	unsigned int pkts_outstanding;
-#ifdef CONFIG_NET_RX_BUSY_POLL
-	atomic_t bpoll_state;
-#endif /* CONFIG_NET_RX_BUSY_POLL */
 };
 
 static inline unsigned int vnic_rq_desc_avail(struct vnic_rq *rq)
@@ -206,81 +190,6 @@ static inline int vnic_rq_fill(struct vnic_rq *rq,
 
 	return 0;
 }
-
-#ifdef CONFIG_NET_RX_BUSY_POLL
-static inline void enic_busy_poll_init_lock(struct vnic_rq *rq)
-{
-	atomic_set(&rq->bpoll_state, ENIC_POLL_STATE_IDLE);
-}
-
-static inline bool enic_poll_lock_napi(struct vnic_rq *rq)
-{
-	int rc = atomic_cmpxchg(&rq->bpoll_state, ENIC_POLL_STATE_IDLE,
-				ENIC_POLL_STATE_NAPI);
-
-	return (rc == ENIC_POLL_STATE_IDLE);
-}
-
-static inline void enic_poll_unlock_napi(struct vnic_rq *rq,
-					 struct napi_struct *napi)
-{
-	WARN_ON(atomic_read(&rq->bpoll_state) != ENIC_POLL_STATE_NAPI);
-	napi_gro_flush(napi, false);
-	atomic_set(&rq->bpoll_state, ENIC_POLL_STATE_IDLE);
-}
-
-static inline bool enic_poll_lock_poll(struct vnic_rq *rq)
-{
-	int rc = atomic_cmpxchg(&rq->bpoll_state, ENIC_POLL_STATE_IDLE,
-				ENIC_POLL_STATE_POLL);
-
-	return (rc == ENIC_POLL_STATE_IDLE);
-}
-
-
-static inline void enic_poll_unlock_poll(struct vnic_rq *rq)
-{
-	WARN_ON(atomic_read(&rq->bpoll_state) != ENIC_POLL_STATE_POLL);
-	atomic_set(&rq->bpoll_state, ENIC_POLL_STATE_IDLE);
-}
-
-static inline bool enic_poll_busy_polling(struct vnic_rq *rq)
-{
-	return atomic_read(&rq->bpoll_state) & ENIC_POLL_STATE_POLL;
-}
-
-#else
-
-static inline void enic_busy_poll_init_lock(struct vnic_rq *rq)
-{
-}
-
-static inline bool enic_poll_lock_napi(struct vnic_rq *rq)
-{
-	return true;
-}
-
-static inline bool enic_poll_unlock_napi(struct vnic_rq *rq,
-					 struct napi_struct *napi)
-{
-	return false;
-}
-
-static inline bool enic_poll_lock_poll(struct vnic_rq *rq)
-{
-	return false;
-}
-
-static inline bool enic_poll_unlock_poll(struct vnic_rq *rq)
-{
-	return false;
-}
-
-static inline bool enic_poll_ll_polling(struct vnic_rq *rq)
-{
-	return false;
-}
-#endif /* CONFIG_NET_RX_BUSY_POLL */
 
 void vnic_rq_free(struct vnic_rq *rq);
 int vnic_rq_alloc(struct vnic_dev *vdev, struct vnic_rq *rq, unsigned int index,

@@ -12,8 +12,12 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 
-#include "bpf_load.h"
-#include "libbpf.h"
+#include <bpf/bpf.h>
+
+#include <bpf/libbpf.h>
+#include "bpf_insn.h"
+#include "sock_example.h"
+#include "bpf_util.h"
 
 #define BPF_F_PIN	(1 << 0)
 #define BPF_F_GET	(1 << 1)
@@ -26,6 +30,8 @@
 #define BPF_M_UNSPEC	0
 #define BPF_M_MAP	1
 #define BPF_M_PROG	2
+
+char bpf_log_buf[BPF_LOG_BUF_SIZE];
 
 static void usage(void)
 {
@@ -41,25 +47,30 @@ static void usage(void)
 	printf("       -h          Display this help.\n");
 }
 
-static int bpf_map_create(void)
-{
-	return bpf_create_map(BPF_MAP_TYPE_ARRAY, sizeof(uint32_t),
-			      sizeof(uint32_t), 1024, 0);
-}
-
 static int bpf_prog_create(const char *object)
 {
-	static const struct bpf_insn insns[] = {
+	static struct bpf_insn insns[] = {
 		BPF_MOV64_IMM(BPF_REG_0, 1),
 		BPF_EXIT_INSN(),
 	};
+	size_t insns_cnt = ARRAY_SIZE(insns);
+	struct bpf_object *obj;
+	int err;
 
 	if (object) {
-		assert(!load_bpf_file((char *)object));
-		return prog_fd[0];
+		obj = bpf_object__open_file(object, NULL);
+		assert(!libbpf_get_error(obj));
+		err = bpf_object__load(obj);
+		assert(!err);
+		return bpf_program__fd(bpf_object__next_program(obj, NULL));
 	} else {
-		return bpf_prog_load(BPF_PROG_TYPE_SOCKET_FILTER,
-				     insns, sizeof(insns), "GPL", 0);
+		LIBBPF_OPTS(bpf_prog_load_opts, opts,
+			.log_buf = bpf_log_buf,
+			.log_size = BPF_LOG_BUF_SIZE,
+		);
+
+		return bpf_prog_load(BPF_PROG_TYPE_SOCKET_FILTER, NULL, "GPL",
+				     insns, insns_cnt, &opts);
 	}
 }
 
@@ -69,7 +80,8 @@ static int bpf_do_map(const char *file, uint32_t flags, uint32_t key,
 	int fd, ret;
 
 	if (flags & BPF_F_PIN) {
-		fd = bpf_map_create();
+		fd = bpf_map_create(BPF_MAP_TYPE_ARRAY, NULL, sizeof(uint32_t),
+				    sizeof(uint32_t), 1024, NULL);
 		printf("bpf: map fd:%d (%s)\n", fd, strerror(errno));
 		assert(fd > 0);
 
@@ -83,12 +95,12 @@ static int bpf_do_map(const char *file, uint32_t flags, uint32_t key,
 	}
 
 	if ((flags & BPF_F_KEY_VAL) == BPF_F_KEY_VAL) {
-		ret = bpf_update_elem(fd, &key, &value, 0);
+		ret = bpf_map_update_elem(fd, &key, &value, 0);
 		printf("bpf: fd:%d u->(%u:%u) ret:(%d,%s)\n", fd, key, value,
 		       ret, strerror(errno));
 		assert(ret == 0);
 	} else if (flags & BPF_F_KEY) {
-		ret = bpf_lookup_elem(fd, &key, &value);
+		ret = bpf_map_lookup_elem(fd, &key, &value);
 		printf("bpf: fd:%d l->(%u):%u ret:(%d,%s)\n", fd, key, value,
 		       ret, strerror(errno));
 		assert(ret == 0);

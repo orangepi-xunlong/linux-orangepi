@@ -30,13 +30,16 @@
  *    Gareth Hughes <gareth@valinux.com>
  */
 
-#include <linux/module.h>
-
-#include <drm/drmP.h>
-#include <drm/i810_drm.h>
 #include "i810_drv.h"
 
+#include <linux/module.h>
+#include <linux/pci.h>
+
+#include <drm/drm_drv.h>
+#include <drm/drm_file.h>
 #include <drm/drm_pciids.h>
+#include <drm/i810_drm.h>
+
 
 static struct pci_device_id pciidlist[] = {
 	i810_PCI_IDS
@@ -49,9 +52,7 @@ static const struct file_operations i810_driver_fops = {
 	.unlocked_ioctl = drm_ioctl,
 	.mmap = drm_legacy_mmap,
 	.poll = drm_poll,
-#ifdef CONFIG_COMPAT
 	.compat_ioctl = drm_compat_ioctl,
-#endif
 	.llseek = noop_llseek,
 };
 
@@ -61,8 +62,6 @@ static struct drm_driver driver = {
 	.load = i810_driver_load,
 	.lastclose = i810_driver_lastclose,
 	.preclose = i810_driver_preclose,
-	.set_busid = drm_pci_set_busid,
-	.device_is_agp = i810_driver_device_is_agp,
 	.dma_quiescent = i810_driver_dma_quiescent,
 	.ioctls = i810_ioctls,
 	.fops = &i810_driver_fops,
@@ -86,12 +85,12 @@ static int __init i810_init(void)
 		return -EINVAL;
 	}
 	driver.num_ioctls = i810_max_ioctl;
-	return drm_pci_init(&driver, &i810_pci_driver);
+	return drm_legacy_pci_init(&driver, &i810_pci_driver);
 }
 
 static void __exit i810_exit(void)
 {
-	drm_pci_exit(&driver, &i810_pci_driver);
+	drm_legacy_pci_exit(&driver, &i810_pci_driver);
 }
 
 module_init(i810_init);

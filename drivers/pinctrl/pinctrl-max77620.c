@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * MAX77620 pin control driver.
  *
@@ -6,21 +7,19 @@
  * Author:
  *	Chaitanya Bandi <bandik@nvidia.com>
  *	Laxman Dewangan <ldewangan@nvidia.com>
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
  */
 
 #include <linux/mfd/max77620.h>
+#include <linux/mod_devicetable.h>
 #include <linux/module.h>
-#include <linux/of.h>
+#include <linux/platform_device.h>
+#include <linux/property.h>
+#include <linux/regmap.h>
+
 #include <linux/pinctrl/pinctrl.h>
 #include <linux/pinctrl/pinconf-generic.h>
 #include <linux/pinctrl/pinconf.h>
 #include <linux/pinctrl/pinmux.h>
-#include <linux/platform_device.h>
-#include <linux/regmap.h>
 
 #include "core.h"
 #include "pinconf.h"
@@ -418,11 +417,9 @@ static int max77620_pinconf_set(struct pinctrl_dev *pctldev,
 						 MAX77620_REG_GPIO0 + pin,
 						 MAX77620_CNFG_GPIO_DRV_MASK,
 						 val);
-			if (ret < 0) {
-				dev_err(dev, "Reg 0x%02x update failed %d\n",
-					MAX77620_REG_GPIO0 + pin, ret);
-				return ret;
-			}
+			if (ret)
+				goto report_update_failure;
+
 			mpci->pin_info[pin].drv_type = val ?
 				MAX77620_PIN_PP_DRV : MAX77620_PIN_OD_DRV;
 			break;
@@ -433,11 +430,9 @@ static int max77620_pinconf_set(struct pinctrl_dev *pctldev,
 						 MAX77620_REG_GPIO0 + pin,
 						 MAX77620_CNFG_GPIO_DRV_MASK,
 						 val);
-			if (ret < 0) {
-				dev_err(dev, "Reg 0x%02x update failed %d\n",
-					MAX77620_REG_GPIO0 + pin, ret);
-				return ret;
-			}
+			if (ret)
+				goto report_update_failure;
+
 			mpci->pin_info[pin].drv_type = val ?
 				MAX77620_PIN_PP_DRV : MAX77620_PIN_OD_DRV;
 			break;
@@ -534,6 +529,11 @@ static int max77620_pinconf_set(struct pinctrl_dev *pctldev,
 	}
 
 	return 0;
+
+report_update_failure:
+	dev_err(dev, "Reg 0x%02x update failed %d\n",
+		MAX77620_REG_GPIO0 + pin, ret);
+	return ret;
 }
 
 static const struct pinconf_ops max77620_pinconf_ops = {
@@ -553,12 +553,13 @@ static int max77620_pinctrl_probe(struct platform_device *pdev)
 	struct max77620_pctrl_info *mpci;
 	int i;
 
+	device_set_node(&pdev->dev, dev_fwnode(pdev->dev.parent));
+
 	mpci = devm_kzalloc(&pdev->dev, sizeof(*mpci), GFP_KERNEL);
 	if (!mpci)
 		return -ENOMEM;
 
 	mpci->dev = &pdev->dev;
-	mpci->dev->of_node = pdev->dev.parent->of_node;
 	mpci->rmap = max77620->rmap;
 
 	mpci->pins = max77620_pins_desc;
@@ -667,5 +668,4 @@ module_platform_driver(max77620_pinctrl_driver);
 MODULE_DESCRIPTION("MAX77620/MAX20024 pin control driver");
 MODULE_AUTHOR("Chaitanya Bandi<bandik@nvidia.com>");
 MODULE_AUTHOR("Laxman Dewangan<ldewangan@nvidia.com>");
-MODULE_ALIAS("platform:max77620-pinctrl");
 MODULE_LICENSE("GPL v2");

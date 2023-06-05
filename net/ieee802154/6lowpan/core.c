@@ -47,6 +47,7 @@
 #include <linux/module.h>
 #include <linux/netdevice.h>
 #include <linux/ieee802154.h>
+#include <linux/if_arp.h>
 
 #include <net/ipv6.h>
 
@@ -54,7 +55,7 @@
 
 static int open_count;
 
-static struct header_ops lowpan_header_ops = {
+static const struct header_ops lowpan_header_ops = {
 	.create	= lowpan_header_create,
 };
 
@@ -110,14 +111,16 @@ static void lowpan_setup(struct net_device *ldev)
 	/* We need an ipv6hdr as minimum len when calling xmit */
 	ldev->hard_header_len	= sizeof(struct ipv6hdr);
 	ldev->flags		= IFF_BROADCAST | IFF_MULTICAST;
+	ldev->priv_flags	|= IFF_NO_QUEUE;
 
 	ldev->netdev_ops	= &lowpan_netdev_ops;
 	ldev->header_ops	= &lowpan_header_ops;
-	ldev->destructor	= free_netdev;
+	ldev->needs_free_netdev	= true;
 	ldev->features		|= NETIF_F_NETNS_LOCAL;
 }
 
-static int lowpan_validate(struct nlattr *tb[], struct nlattr *data[])
+static int lowpan_validate(struct nlattr *tb[], struct nlattr *data[],
+			   struct netlink_ext_ack *extack)
 {
 	if (tb[IFLA_ADDRESS]) {
 		if (nla_len(tb[IFLA_ADDRESS]) != IEEE802154_ADDR_LEN)
@@ -127,7 +130,8 @@ static int lowpan_validate(struct nlattr *tb[], struct nlattr *data[])
 }
 
 static int lowpan_newlink(struct net *src_net, struct net_device *ldev,
-			  struct nlattr *tb[], struct nlattr *data[])
+			  struct nlattr *tb[], struct nlattr *data[],
+			  struct netlink_ext_ack *extack)
 {
 	struct net_device *wdev;
 	int ret;
@@ -154,7 +158,7 @@ static int lowpan_newlink(struct net *src_net, struct net_device *ldev,
 
 	lowpan_802154_dev(ldev)->wdev = wdev;
 	/* Set the lowpan hardware address to the wpan hardware address. */
-	memcpy(ldev->dev_addr, wdev->dev_addr, IEEE802154_ADDR_LEN);
+	__dev_addr_set(ldev, wdev->dev_addr, IEEE802154_ADDR_LEN);
 	/* We need headroom for possible wpan_dev_hard_header call and tailroom
 	 * for encryption/fcs handling. The lowpan interface will replace
 	 * the IPv6 header with 6LoWPAN header. At worst case the 6LoWPAN

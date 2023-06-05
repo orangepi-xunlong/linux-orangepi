@@ -436,8 +436,7 @@ static const struct v4l2_subdev_ops ths8200_ops = {
 	.pad = &ths8200_pad_ops,
 };
 
-static int ths8200_probe(struct i2c_client *client,
-			 const struct i2c_device_id *id)
+static int ths8200_probe(struct i2c_client *client)
 {
 	struct ths8200_state *state;
 	struct v4l2_subdev *sd;
@@ -469,7 +468,7 @@ static int ths8200_probe(struct i2c_client *client,
 	return 0;
 }
 
-static int ths8200_remove(struct i2c_client *client)
+static void ths8200_remove(struct i2c_client *client)
 {
 	struct v4l2_subdev *sd = i2c_get_clientdata(client);
 	struct ths8200_state *decoder = to_state(sd);
@@ -479,11 +478,9 @@ static int ths8200_remove(struct i2c_client *client)
 
 	ths8200_s_power(sd, false);
 	v4l2_async_unregister_subdev(&decoder->sd);
-
-	return 0;
 }
 
-static struct i2c_device_id ths8200_id[] = {
+static const struct i2c_device_id ths8200_id[] = {
 	{ "ths8200", 0 },
 	{},
 };
@@ -502,7 +499,7 @@ static struct i2c_driver ths8200_driver = {
 		.name = "ths8200",
 		.of_match_table = of_match_ptr(ths8200_of_match),
 	},
-	.probe = ths8200_probe,
+	.probe_new = ths8200_probe,
 	.remove = ths8200_remove,
 	.id_table = ths8200_id,
 };

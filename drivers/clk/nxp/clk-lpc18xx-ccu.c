@@ -1,15 +1,13 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Clk driver for NXP LPC18xx/LPC43xx Clock Control Unit (CCU)
  *
  * Copyright (C) 2015 Joachim Eastwood <manabian@gmail.com>
- *
- * This file is licensed under the terms of the GNU General Public
- * License version 2. This program is licensed "as is" without any
- * warranty of any kind, whether express or implied.
  */
 
 #include <linux/clk.h>
 #include <linux/clk-provider.h>
+#include <linux/io.h>
 #include <linux/kernel.h>
 #include <linux/of.h>
 #include <linux/of_address.h>
@@ -142,7 +140,7 @@ static int lpc18xx_ccu_gate_endisable(struct clk_hw *hw, bool enable)
 	 * Divider field is write only, so divider stat field must
 	 * be read so divider field can be set accordingly.
 	 */
-	val = clk_readl(gate->reg);
+	val = readl(gate->reg);
 	if (val & LPC18XX_CCU_DIVSTAT)
 		val |= LPC18XX_CCU_DIV;
 
@@ -155,12 +153,12 @@ static int lpc18xx_ccu_gate_endisable(struct clk_hw *hw, bool enable)
 		 * and the next write should clear the RUN bit.
 		 */
 		val |= LPC18XX_CCU_AUTO;
-		clk_writel(val, gate->reg);
+		writel(val, gate->reg);
 
 		val &= ~LPC18XX_CCU_RUN;
 	}
 
-	clk_writel(val, gate->reg);
+	writel(val, gate->reg);
 
 	return 0;
 }
@@ -277,12 +275,15 @@ static void __init lpc18xx_ccu_init(struct device_node *np)
 	}
 
 	clk_data = kzalloc(sizeof(*clk_data), GFP_KERNEL);
-	if (!clk_data)
+	if (!clk_data) {
+		iounmap(reg_base);
 		return;
+	}
 
 	clk_data->num = of_property_count_strings(np, "clock-names");
 	clk_data->name = kcalloc(clk_data->num, sizeof(char *), GFP_KERNEL);
 	if (!clk_data->name) {
+		iounmap(reg_base);
 		kfree(clk_data);
 		return;
 	}

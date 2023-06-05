@@ -1,43 +1,80 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  Copyright © 2014 Broadcom
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
+
+#include <drm/drm_drv.h>
 
 #include <linux/seq_file.h>
 #include <linux/circ_buf.h>
 #include <linux/ctype.h>
 #include <linux/debugfs.h>
-#include <drm/drmP.h>
+#include <linux/platform_device.h>
 
 #include "vc4_drv.h"
 #include "vc4_regs.h"
 
-static const struct drm_info_list vc4_debugfs_list[] = {
-	{"bo_stats", vc4_bo_stats_debugfs, 0},
-	{"dpi_regs", vc4_dpi_debugfs_regs, 0},
-	{"hdmi_regs", vc4_hdmi_debugfs_regs, 0},
-	{"hvs_regs", vc4_hvs_debugfs_regs, 0},
-	{"crtc0_regs", vc4_crtc_debugfs_regs, 0, (void *)(uintptr_t)0},
-	{"crtc1_regs", vc4_crtc_debugfs_regs, 0, (void *)(uintptr_t)1},
-	{"crtc2_regs", vc4_crtc_debugfs_regs, 0, (void *)(uintptr_t)2},
-	{"v3d_ident", vc4_v3d_debugfs_ident, 0},
-	{"v3d_regs", vc4_v3d_debugfs_regs, 0},
-};
-
-#define VC4_DEBUGFS_ENTRIES ARRAY_SIZE(vc4_debugfs_list)
-
-int
+/*
+ * Called at drm_dev_register() time on each of the minors registered
+ * by the DRM device, to attach the debugfs files.
+ */
+void
 vc4_debugfs_init(struct drm_minor *minor)
 {
-	return drm_debugfs_create_files(vc4_debugfs_list, VC4_DEBUGFS_ENTRIES,
-					minor->debugfs_root, minor);
+	struct vc4_dev *vc4 = to_vc4_dev(minor->dev);
+	struct drm_device *drm = &vc4->base;
+
+	drm_WARN_ON(drm, vc4_hvs_debugfs_init(minor));
+
+	if (vc4->v3d) {
+		drm_WARN_ON(drm, vc4_bo_debugfs_init(minor));
+		drm_WARN_ON(drm, vc4_v3d_debugfs_init(minor));
+	}
 }
 
-void
-vc4_debugfs_cleanup(struct drm_minor *minor)
+static int vc4_debugfs_regset32(struct seq_file *m, void *unused)
 {
-	drm_debugfs_remove_files(vc4_debugfs_list, VC4_DEBUGFS_ENTRIES, minor);
+	struct drm_info_node *node = (struct drm_info_node *)m->private;
+	struct drm_device *drm = node->minor->dev;
+	struct debugfs_regset32 *regset = node->info_ent->data;
+	struct drm_printer p = drm_seq_file_printer(m);
+	int idx;
+
+	if (!drm_dev_enter(drm, &idx))
+		return -ENODEV;
+
+	drm_print_regset32(&p, regset);
+
+	drm_dev_exit(idx);
+
+	return 0;
+}
+
+int vc4_debugfs_add_file(struct drm_minor *minor,
+			 const char *name,
+			 int (*show)(struct seq_file*, void*),
+			 void *data)
+{
+	struct drm_device *dev = minor->dev;
+	struct dentry *root = minor->debugfs_root;
+	struct drm_info_list *file;
+
+	file = drmm_kzalloc(dev, sizeof(*file), GFP_KERNEL);
+	if (!file)
+		return -ENOMEM;
+
+	file->name = name;
+	file->show = show;
+	file->data = data;
+
+	drm_debugfs_create_files(file, 1, root, minor);
+
+	return 0;
+}
+
+int vc4_debugfs_add_regset32(struct drm_minor *minor,
+			     const char *name,
+			     struct debugfs_regset32 *regset)
+{
+	return vc4_debugfs_add_file(minor, name, vc4_debugfs_regset32, regset);
 }

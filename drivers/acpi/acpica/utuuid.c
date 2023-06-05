@@ -1,45 +1,11 @@
+// SPDX-License-Identifier: BSD-3-Clause OR GPL-2.0
 /******************************************************************************
  *
  * Module Name: utuuid -- UUID support functions
  *
+ * Copyright (C) 2000 - 2022, Intel Corp.
+ *
  *****************************************************************************/
-
-/*
- * Copyright (C) 2000 - 2016, Intel Corp.
- * All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions, and the following disclaimer,
- *    without modification.
- * 2. Redistributions in binary form must reproduce at minimum a disclaimer
- *    substantially similar to the "NO WARRANTY" disclaimer below
- *    ("Disclaimer") and any redistribution must be conditioned upon
- *    including a substantially similar Disclaimer requirement for further
- *    binary redistribution.
- * 3. Neither the names of the above-listed copyright holders nor the names
- *    of any contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
- *
- * Alternatively, this software may be distributed under the terms of the
- * GNU General Public License ("GPL") version 2 as published by the Free
- * Software Foundation.
- *
- * NO WARRANTY
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTIBILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * HOLDERS OR CONTRIBUTORS BE LIABLE FOR SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
- * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
- * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
- * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
- * STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING
- * IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGES.
- */
 
 #include <acpi/acpi.h>
 #include "accommon.h"
@@ -94,5 +60,46 @@ void acpi_ut_convert_string_to_uuid(char *in_string, u8 *uuid_buffer)
 					      [acpi_gbl_map_to_uuid_offset[i] +
 					       1]);
 	}
+}
+
+/*******************************************************************************
+ *
+ * FUNCTION:    acpi_ut_convert_uuid_to_string
+ *
+ * PARAMETERS:  uuid_buffer         - 16-byte UUID buffer
+ *              out_string          - 36-byte formatted UUID string
+ *
+ * RETURN:      Status
+ *
+ * DESCRIPTION: Convert 16-byte UUID buffer to 36-byte formatted UUID string
+ *              out_string must be 37 bytes to include null terminator.
+ *
+ ******************************************************************************/
+
+acpi_status acpi_ut_convert_uuid_to_string(char *uuid_buffer, char *out_string)
+{
+	u32 i;
+
+	if (!uuid_buffer || !out_string) {
+		return (AE_BAD_PARAMETER);
+	}
+
+	for (i = 0; i < UUID_BUFFER_LENGTH; i++) {
+		out_string[acpi_gbl_map_to_uuid_offset[i]] =
+		    acpi_ut_hex_to_ascii_char(uuid_buffer[i], 4);
+
+		out_string[acpi_gbl_map_to_uuid_offset[i] + 1] =
+		    acpi_ut_hex_to_ascii_char(uuid_buffer[i], 0);
+	}
+
+	/* Insert required hyphens (dashes) */
+
+	out_string[UUID_HYPHEN1_OFFSET] =
+	    out_string[UUID_HYPHEN2_OFFSET] =
+	    out_string[UUID_HYPHEN3_OFFSET] =
+	    out_string[UUID_HYPHEN4_OFFSET] = '-';
+
+	out_string[UUID_STRING_LENGTH] = 0;	/* Null terminate */
+	return (AE_OK);
 }
 #endif

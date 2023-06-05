@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  *  Copyright (C) 1995, 1996  Gero Kuhlmann <gero@gkminix.han.de>
  *
@@ -87,7 +88,13 @@
 #define NFS_ROOT		"/tftpboot/%s"
 
 /* Default NFSROOT mount options. */
-#define NFS_DEF_OPTIONS		"vers=2,udp,rsize=4096,wsize=4096"
+#if defined(CONFIG_NFS_V2)
+#define NFS_DEF_OPTIONS		"vers=2,tcp,rsize=4096,wsize=4096"
+#elif defined(CONFIG_NFS_V3)
+#define NFS_DEF_OPTIONS		"vers=3,tcp,rsize=4096,wsize=4096"
+#else
+#define NFS_DEF_OPTIONS		"vers=4,tcp,rsize=4096,wsize=4096"
+#endif
 
 /* Parameters passed from the kernel command line */
 static char nfs_root_parms[NFS_MAXPATHLEN + 1] __initdata = "";
@@ -132,7 +139,7 @@ static int __init nfs_root_setup(char *line)
 	ROOT_DEV = Root_NFS;
 
 	if (line[0] == '/' || line[0] == ',' || (line[0] >= '0' && line[0] <= '9')) {
-		strlcpy(nfs_root_parms, line, sizeof(nfs_root_parms));
+		strscpy(nfs_root_parms, line, sizeof(nfs_root_parms));
 	} else {
 		size_t n = strlen(line) + sizeof(NFS_ROOT) - 1;
 		if (n >= sizeof(nfs_root_parms))

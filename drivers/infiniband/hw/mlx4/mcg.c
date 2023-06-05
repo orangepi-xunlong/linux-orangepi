@@ -209,7 +209,7 @@ static struct mcast_group *mcast_insert(struct mlx4_ib_demux_ctx *ctx,
 static int send_mad_to_wire(struct mlx4_ib_demux_ctx *ctx, struct ib_mad *mad)
 {
 	struct mlx4_ib_dev *dev = ctx->dev;
-	struct ib_ah_attr	ah_attr;
+	struct rdma_ah_attr	ah_attr;
 	unsigned long flags;
 
 	spin_lock_irqsave(&dev->sm_lock, flags);
@@ -231,20 +231,20 @@ static int send_mad_to_slave(int slave, struct mlx4_ib_demux_ctx *ctx,
 	struct mlx4_ib_dev *dev = ctx->dev;
 	struct ib_mad_agent *agent = dev->send_agent[ctx->port - 1][1];
 	struct ib_wc wc;
-	struct ib_ah_attr ah_attr;
+	struct rdma_ah_attr ah_attr;
 
 	/* Our agent might not yet be registered when mads start to arrive */
 	if (!agent)
 		return -EAGAIN;
 
-	ib_query_ah(dev->sm_ah[ctx->port - 1], &ah_attr);
+	rdma_query_ah(dev->sm_ah[ctx->port - 1], &ah_attr);
 
 	if (ib_find_cached_pkey(&dev->ib_dev, ctx->port, IB_DEFAULT_PKEY_FULL, &wc.pkey_index))
 		return -EINVAL;
 	wc.sl = 0;
 	wc.dlid_path_bits = 0;
 	wc.port_num = ctx->port;
-	wc.slid = ah_attr.dlid;  /* opensm lid */
+	wc.slid = rdma_ah_get_dlid(&ah_attr);  /* opensm lid */
 	wc.src_qp = 1;
 	return mlx4_ib_send_to_slave(dev, slave, ctx->port, IB_QPT_GSI, &wc, NULL, mad);
 }
@@ -673,7 +673,7 @@ static void mlx4_ib_mcg_work_handler(struct work_struct *work)
 			if (!list_empty(&group->pending_list))
 				req = list_first_entry(&group->pending_list,
 						struct mcast_req, group_list);
-			if ((method == IB_MGMT_METHOD_GET_RESP)) {
+			if (method == IB_MGMT_METHOD_GET_RESP) {
 					if (req) {
 						send_reply_to_slave(req->func, group, &req->sa_mad, status);
 						--group->func[req->func].num_pend_reqs;
@@ -808,8 +808,7 @@ static ssize_t sysfs_show_group(struct device *dev,
 		struct device_attribute *attr, char *buf);
 
 static struct mcast_group *acquire_group(struct mlx4_ib_demux_ctx *ctx,
-					 union ib_gid *mgid, int create,
-					 gfp_t gfp_mask)
+					 union ib_gid *mgid, int create)
 {
 	struct mcast_group *group, *cur_group;
 	int is_mgid0;
@@ -825,7 +824,7 @@ static struct mcast_group *acquire_group(struct mlx4_ib_demux_ctx *ctx,
 	if (!create)
 		return ERR_PTR(-ENOENT);
 
-	group = kzalloc(sizeof *group, gfp_mask);
+	group = kzalloc(sizeof(*group), GFP_KERNEL);
 	if (!group)
 		return ERR_PTR(-ENOMEM);
 
@@ -892,7 +891,7 @@ int mlx4_ib_mcg_demux_handler(struct ib_device *ibdev, int port, int slave,
 	case IB_MGMT_METHOD_GET_RESP:
 	case IB_SA_METHOD_DELETE_RESP:
 		mutex_lock(&ctx->mcg_table_lock);
-		group = acquire_group(ctx, &rec->mgid, 0, GFP_KERNEL);
+		group = acquire_group(ctx, &rec->mgid, 0);
 		mutex_unlock(&ctx->mcg_table_lock);
 		if (IS_ERR(group)) {
 			if (mad->mad_hdr.method == IB_MGMT_METHOD_GET_RESP) {
@@ -945,6 +944,7 @@ int mlx4_ib_mcg_multiplex_handler(struct ib_device *ibdev, int port,
 	switch (sa_mad->mad_hdr.method) {
 	case IB_MGMT_METHOD_SET:
 		may_create = 1;
+		fallthrough;
 	case IB_SA_METHOD_DELETE:
 		req = kzalloc(sizeof *req, GFP_KERNEL);
 		if (!req)
@@ -954,7 +954,7 @@ int mlx4_ib_mcg_multiplex_handler(struct ib_device *ibdev, int port,
 		req->sa_mad = *sa_mad;
 
 		mutex_lock(&ctx->mcg_table_lock);
-		group = acquire_group(ctx, &rec->mgid, may_create, GFP_KERNEL);
+		group = acquire_group(ctx, &rec->mgid, may_create);
 		mutex_unlock(&ctx->mcg_table_lock);
 		if (IS_ERR(group)) {
 			kfree(req);
@@ -988,53 +988,63 @@ int mlx4_ib_mcg_multiplex_handler(struct ib_device *ibdev, int port,
 }
 
 static ssize_t sysfs_show_group(struct device *dev,
-		struct device_attribute *attr, char *buf)
+				struct device_attribute *attr, char *buf)
 {
 	struct mcast_group *group =
 		container_of(attr, struct mcast_group, dentry);
 	struct mcast_req *req = NULL;
-	char pending_str[40];
 	char state_str[40];
-	ssize_t len = 0;
-	int f;
+	char pending_str[40];
+	int len;
+	int i;
+	u32 hoplimit;
 
 	if (group->state == MCAST_IDLE)
-		sprintf(state_str, "%s", get_state_string(group->state));
+		scnprintf(state_str, sizeof(state_str), "%s",
+			  get_state_string(group->state));
 	else
-		sprintf(state_str, "%s(TID=0x%llx)",
-				get_state_string(group->state),
-				be64_to_cpu(group->last_req_tid));
-	if (list_empty(&group->pending_list)) {
-		sprintf(pending_str, "No");
-	} else {
-		req = list_first_entry(&group->pending_list, struct mcast_req, group_list);
-		sprintf(pending_str, "Yes(TID=0x%llx)",
-				be64_to_cpu(req->sa_mad.mad_hdr.tid));
-	}
-	len += sprintf(buf + len, "%1d [%02d,%02d,%02d] %4d %4s %5s     ",
-			group->rec.scope_join_state & 0xf,
-			group->members[2], group->members[1], group->members[0],
-			atomic_read(&group->refcount),
-			pending_str,
-			state_str);
-	for (f = 0; f < MAX_VFS; ++f)
-		if (group->func[f].state == MCAST_MEMBER)
-			len += sprintf(buf + len, "%d[%1x] ",
-					f, group->func[f].join_state);
+		scnprintf(state_str, sizeof(state_str), "%s(TID=0x%llx)",
+			  get_state_string(group->state),
+			  be64_to_cpu(group->last_req_tid));
 
-	len += sprintf(buf + len, "\t\t(%4hx %4x %2x %2x %2x %2x %2x "
-		"%4x %4x %2x %2x)\n",
-		be16_to_cpu(group->rec.pkey),
-		be32_to_cpu(group->rec.qkey),
-		(group->rec.mtusel_mtu & 0xc0) >> 6,
-		group->rec.mtusel_mtu & 0x3f,
-		group->rec.tclass,
-		(group->rec.ratesel_rate & 0xc0) >> 6,
-		group->rec.ratesel_rate & 0x3f,
-		(be32_to_cpu(group->rec.sl_flowlabel_hoplimit) & 0xf0000000) >> 28,
-		(be32_to_cpu(group->rec.sl_flowlabel_hoplimit) & 0x0fffff00) >> 8,
-		be32_to_cpu(group->rec.sl_flowlabel_hoplimit) & 0x000000ff,
-		group->rec.proxy_join);
+	if (list_empty(&group->pending_list)) {
+		scnprintf(pending_str, sizeof(pending_str), "No");
+	} else {
+		req = list_first_entry(&group->pending_list, struct mcast_req,
+				       group_list);
+		scnprintf(pending_str, sizeof(pending_str), "Yes(TID=0x%llx)",
+			  be64_to_cpu(req->sa_mad.mad_hdr.tid));
+	}
+
+	len = sysfs_emit(buf, "%1d [%02d,%02d,%02d] %4d %4s %5s     ",
+			 group->rec.scope_join_state & 0xf,
+			 group->members[2],
+			 group->members[1],
+			 group->members[0],
+			 atomic_read(&group->refcount),
+			 pending_str,
+			 state_str);
+
+	for (i = 0; i < MAX_VFS; i++) {
+		if (group->func[i].state == MCAST_MEMBER)
+			len += sysfs_emit_at(buf, len, "%d[%1x] ", i,
+					     group->func[i].join_state);
+	}
+
+	hoplimit = be32_to_cpu(group->rec.sl_flowlabel_hoplimit);
+	len += sysfs_emit_at(buf, len,
+			     "\t\t(%4hx %4x %2x %2x %2x %2x %2x %4x %4x %2x %2x)\n",
+			     be16_to_cpu(group->rec.pkey),
+			     be32_to_cpu(group->rec.qkey),
+			     (group->rec.mtusel_mtu & 0xc0) >> 6,
+			     (group->rec.mtusel_mtu & 0x3f),
+			     group->rec.tclass,
+			     (group->rec.ratesel_rate & 0xc0) >> 6,
+			     (group->rec.ratesel_rate & 0x3f),
+			     (hoplimit & 0xf0000000) >> 28,
+			     (hoplimit & 0x0fffff00) >> 8,
+			     (hoplimit & 0x000000ff),
+			     group->rec.proxy_join);
 
 	return len;
 }
@@ -1091,7 +1101,7 @@ static void _mlx4_ib_mcg_port_cleanup(struct mlx4_ib_demux_ctx *ctx, int destroy
 		if (!count)
 			break;
 
-		msleep(1);
+		usleep_range(1000, 2000);
 	} while (time_after(end, jiffies));
 
 	flush_workqueue(ctx->mcg_wq);
@@ -1143,7 +1153,6 @@ void mlx4_ib_mcg_port_cleanup(struct mlx4_ib_demux_ctx *ctx, int destroy_wq)
 	work = kmalloc(sizeof *work, GFP_KERNEL);
 	if (!work) {
 		ctx->flushing = 0;
-		mcg_warn("failed allocating work for cleanup\n");
 		return;
 	}
 
@@ -1203,10 +1212,8 @@ static int push_deleteing_req(struct mcast_group *group, int slave)
 		return 0;
 
 	req = kzalloc(sizeof *req, GFP_KERNEL);
-	if (!req) {
-		mcg_warn_group(group, "failed allocation - may leave stall groups\n");
+	if (!req)
 		return -ENOMEM;
-	}
 
 	if (!list_empty(&group->func[slave].pending)) {
 		pend_req = list_entry(group->func[slave].pending.prev, struct mcast_req, group_list);

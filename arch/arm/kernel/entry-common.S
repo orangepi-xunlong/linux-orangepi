@@ -1,11 +1,8 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  *  linux/arch/arm/kernel/entry-common.S
  *
  *  Copyright (C) 2000 Russell King
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <asm/assembler.h>
@@ -13,39 +10,54 @@
 #include <asm/ftrace.h>
 #include <asm/unwind.h>
 #include <asm/memory.h>
-
-#ifdef CONFIG_NEED_RET_TO_USER
-#include <mach/entry-macro.S>
-#else
-	.macro  arch_ret_to_user, tmp1, tmp2
-	.endm
+#ifdef CONFIG_AEABI
+#include <asm/unistd-oabi.h>
 #endif
+
+	.equ	NR_syscalls, __NR_syscalls
+
+	.macro  arch_ret_to_user, tmp
+#ifdef CONFIG_ARCH_IOP32X
+	mrc	p15, 0, \tmp, c15, c1, 0
+	tst	\tmp, #(1 << 6)
+	bicne	\tmp, \tmp, #(1 << 6)
+	mcrne	p15, 0, \tmp, c15, c1, 0	@ Disable cp6 access
+#endif
+	.endm
 
 #include "entry-header.S"
 
+saved_psr	.req	r8
+#if defined(CONFIG_TRACE_IRQFLAGS) || defined(CONFIG_CONTEXT_TRACKING_USER)
+saved_pc	.req	r9
+#define TRACE(x...) x
+#else
+saved_pc	.req	lr
+#define TRACE(x...)
+#endif
 
+	.section .entry.text,"ax",%progbits
 	.align	5
-#if !(IS_ENABLED(CONFIG_TRACE_IRQFLAGS) || IS_ENABLED(CONFIG_CONTEXT_TRACKING))
+#if !(IS_ENABLED(CONFIG_TRACE_IRQFLAGS) || IS_ENABLED(CONFIG_CONTEXT_TRACKING_USER) || \
+	IS_ENABLED(CONFIG_DEBUG_RSEQ))
 /*
  * This is the fast syscall return path.  We do as little as possible here,
  * such as avoiding writing r0 to the stack.  We only use this path if we
- * have tracing and context tracking disabled - the overheads from those
- * features make this path too inefficient.
+ * have tracing, context tracking and rseq debug disabled - the overheads
+ * from those features make this path too inefficient.
  */
 ret_fast_syscall:
 __ret_fast_syscall:
  UNWIND(.fnstart	)
  UNWIND(.cantunwind	)
 	disable_irq_notrace			@ disable interrupts
-	ldr	r2, [tsk, #TI_ADDR_LIMIT]
-	cmp	r2, #TASK_SIZE
-	blne	addr_limit_check_failed
 	ldr	r1, [tsk, #TI_FLAGS]		@ re-check for syscall tracing
-	tst	r1, #_TIF_SYSCALL_WORK | _TIF_WORK_MASK
+	movs	r1, r1, lsl #16
 	bne	fast_work_pending
 
+
 	/* perform architecture specific actions before user return */
-	arch_ret_to_user r1, lr
+	arch_ret_to_user r1
 
 	restore_user_regs fast = 1, offset = S_OFF
  UNWIND(.fnend		)
@@ -57,21 +69,24 @@ fast_work_pending:
 	/* fall through to work_pending */
 #else
 /*
- * The "replacement" ret_fast_syscall for when tracing or context tracking
- * is enabled.  As we will need to call out to some C functions, we save
- * r0 first to avoid needing to save registers around each C function call.
+ * The "replacement" ret_fast_syscall for when tracing, context tracking,
+ * or rseq debug is enabled.  As we will need to call out to some C functions,
+ * we save r0 first to avoid needing to save registers around each C function
+ * call.
  */
 ret_fast_syscall:
 __ret_fast_syscall:
  UNWIND(.fnstart	)
  UNWIND(.cantunwind	)
 	str	r0, [sp, #S_R0 + S_OFF]!	@ save returned r0
+#if IS_ENABLED(CONFIG_DEBUG_RSEQ)
+	/* do_rseq_syscall needs interrupts enabled. */
+	mov	r0, sp				@ 'regs'
+	bl	do_rseq_syscall
+#endif
 	disable_irq_notrace			@ disable interrupts
-	ldr	r2, [tsk, #TI_ADDR_LIMIT]
-	cmp	r2, #TASK_SIZE
-	blne	addr_limit_check_failed
 	ldr	r1, [tsk, #TI_FLAGS]		@ re-check for syscall tracing
-	tst	r1, #_TIF_SYSCALL_WORK | _TIF_WORK_MASK
+	movs	r1, r1, lsl #16
 	beq	no_work_pending
  UNWIND(.fnend		)
 ENDPROC(ret_fast_syscall)
@@ -100,19 +115,22 @@ ENDPROC(ret_fast_syscall)
  */
 ENTRY(ret_to_user)
 ret_slow_syscall:
+#if IS_ENABLED(CONFIG_DEBUG_RSEQ)
+	/* do_rseq_syscall needs interrupts enabled. */
+	enable_irq_notrace			@ enable interrupts
+	mov	r0, sp				@ 'regs'
+	bl	do_rseq_syscall
+#endif
 	disable_irq_notrace			@ disable interrupts
 ENTRY(ret_to_user_from_irq)
-	ldr	r2, [tsk, #TI_ADDR_LIMIT]
-	cmp	r2, #TASK_SIZE
-	blne	addr_limit_check_failed
 	ldr	r1, [tsk, #TI_FLAGS]
-	tst	r1, #_TIF_WORK_MASK
+	movs	r1, r1, lsl #16
 	bne	slow_work_pending
 no_work_pending:
 	asm_trace_hardirqs_on save = 0
 
 	/* perform architecture specific actions before user return */
-	arch_ret_to_user r1, lr
+	arch_ret_to_user r1
 	ct_user_enter save = 0
 
 	restore_user_regs fast = 0, offset = 0
@@ -132,26 +150,34 @@ ENTRY(ret_from_fork)
 	b	ret_slow_syscall
 ENDPROC(ret_from_fork)
 
-	.equ NR_syscalls,0
-#define CALL(x) .equ NR_syscalls,NR_syscalls+1
-#include "calls.S"
-
-/*
- * Ensure that the system call table is equal to __NR_syscalls,
- * which is the value the rest of the system sees
- */
-.ifne NR_syscalls - __NR_syscalls
-.error "__NR_syscalls is not equal to the size of the syscall table"
-.endif
-
-#undef CALL
-#define CALL(x) .long x
-
 /*=============================================================================
  * SWI handler
  *-----------------------------------------------------------------------------
  */
 
+	.align	5
+#ifdef CONFIG_HARDEN_BRANCH_HISTORY
+ENTRY(vector_bhb_loop8_swi)
+	sub	sp, sp, #PT_REGS_SIZE
+	stmia	sp, {r0 - r12}
+	mov	r8, #8
+1:	b	2f
+2:	subs	r8, r8, #1
+	bne	1b
+	dsb	nsh
+	isb
+	b	3f
+ENDPROC(vector_bhb_loop8_swi)
+
+	.align	5
+ENTRY(vector_bhb_bpiall_swi)
+	sub	sp, sp, #PT_REGS_SIZE
+	stmia	sp, {r0 - r12}
+	mcr	p15, 0, r8, c7, c5, 6	@ BPIALL
+	isb
+	b	3f
+ENDPROC(vector_bhb_bpiall_swi)
+#endif
 	.align	5
 ENTRY(vector_swi)
 #ifdef CONFIG_CPU_V7M
@@ -159,20 +185,23 @@ ENTRY(vector_swi)
 #else
 	sub	sp, sp, #PT_REGS_SIZE
 	stmia	sp, {r0 - r12}			@ Calling r0 - r12
+3:
  ARM(	add	r8, sp, #S_PC		)
  ARM(	stmdb	r8, {sp, lr}^		)	@ Calling sp, lr
  THUMB(	mov	r8, sp			)
  THUMB(	store_user_sp_lr r8, r10, S_SP	)	@ calling sp, lr
-	mrs	r8, spsr			@ called from non-FIQ mode, so ok.
-	str	lr, [sp, #S_PC]			@ Save calling PC
-	str	r8, [sp, #S_PSR]		@ Save CPSR
+	mrs	saved_psr, spsr			@ called from non-FIQ mode, so ok.
+ TRACE(	mov	saved_pc, lr		)
+	str	saved_pc, [sp, #S_PC]		@ Save calling PC
+	str	saved_psr, [sp, #S_PSR]		@ Save CPSR
 	str	r0, [sp, #S_OLD_R0]		@ Save OLD_R0
 #endif
+	reload_current r10, ip
 	zero_fp
-	alignment_trap r10, ip, __cr_alignment
-	enable_irq
-	ct_user_exit
-	get_thread_info tsk
+	alignment_trap r10, ip, cr_alignment
+	asm_trace_hardirqs_on save=0
+	enable_irq_notrace
+	ct_user_exit save=0
 
 	/*
 	 * Get the system call number.
@@ -185,11 +214,11 @@ ENTRY(vector_swi)
 	 * value to determine if it is an EABI or an old ABI call.
 	 */
 #ifdef CONFIG_ARM_THUMB
-	tst	r8, #PSR_T_BIT
+	tst	saved_psr, #PSR_T_BIT
 	movne	r10, #0				@ no thumb OABI emulation
- USER(	ldreq	r10, [lr, #-4]		)	@ get SWI instruction
+ USER(	ldreq	r10, [saved_pc, #-4]	)	@ get SWI instruction
 #else
- USER(	ldr	r10, [lr, #-4]		)	@ get SWI instruction
+ USER(	ldr	r10, [saved_pc, #-4]	)	@ get SWI instruction
 #endif
  ARM_BE8(rev	r10, r10)			@ little endian instruction
 
@@ -200,16 +229,19 @@ ENTRY(vector_swi)
 	 */
 #elif defined(CONFIG_ARM_THUMB)
 	/* Legacy ABI only, possibly thumb mode. */
-	tst	r8, #PSR_T_BIT			@ this is SPSR from save_user_regs
+	tst	saved_psr, #PSR_T_BIT		@ this is SPSR from save_user_regs
 	addne	scno, r7, #__NR_SYSCALL_BASE	@ put OS number in
- USER(	ldreq	scno, [lr, #-4]		)
+ USER(	ldreq	scno, [saved_pc, #-4]	)
 
 #else
 	/* Legacy ABI only. */
- USER(	ldr	scno, [lr, #-4]		)	@ get SWI instruction
+ USER(	ldr	scno, [saved_pc, #-4]	)	@ get SWI instruction
 #endif
 
+	/* saved_psr and saved_pc are now dead */
+
 	uaccess_disable tbl
+	get_thread_info tsk
 
 	adr	tbl, sys_call_table		@ load syscall table pointer
 
@@ -221,12 +253,22 @@ ENTRY(vector_swi)
 	 * get the old ABI syscall table address.
 	 */
 	bics	r10, r10, #0xff000000
+	strne	r10, [tsk, #TI_ABI_SYSCALL]
+	streq	scno, [tsk, #TI_ABI_SYSCALL]
 	eorne	scno, r10, #__NR_OABI_SYSCALL_BASE
 	ldrne	tbl, =sys_oabi_call_table
 #elif !defined(CONFIG_AEABI)
 	bic	scno, scno, #0xff000000		@ mask off SWI op-code
+	str	scno, [tsk, #TI_ABI_SYSCALL]
 	eor	scno, scno, #__NR_SYSCALL_BASE	@ check OS number
+#else
+	str	scno, [tsk, #TI_ABI_SYSCALL]
 #endif
+	/*
+	 * Reload the registers that may have been corrupted on entry to
+	 * the syscall assembly (by tracing or context tracking.)
+	 */
+ TRACE(	ldmia	sp, {r0 - r3}		)
 
 local_restart:
 	ldr	r10, [tsk, #TI_FLAGS]		@ check for syscall tracing
@@ -254,18 +296,19 @@ local_restart:
 	 * current task.
 	 */
 9001:
-	sub	lr, lr, #4
+	sub	lr, saved_pc, #4
 	str	lr, [sp, #S_PC]
+	get_thread_info tsk
 	b	ret_fast_syscall
 #endif
 ENDPROC(vector_swi)
+	.ltorg
 
 	/*
 	 * This is the really slow path.  We're going to be doing
 	 * context switches, and waiting for our parent to respond.
 	 */
 __sys_trace:
-	mov	r1, scno
 	add	r0, sp, #S_OFF
 	bl	syscall_trace_enter
 	mov	scno, r0
@@ -273,6 +316,11 @@ __sys_trace:
 	cmp	scno, #-1			@ skip the syscall?
 	bne	2b
 	add	sp, sp, #S_OFF			@ restore stack
+
+__sys_trace_return_nosave:
+	enable_irq_notrace
+	mov	r0, sp
+	bl	syscall_trace_exit
 	b	ret_slow_syscall
 
 __sys_trace_return:
@@ -281,36 +329,47 @@ __sys_trace_return:
 	bl	syscall_trace_exit
 	b	ret_slow_syscall
 
-__sys_trace_return_nosave:
-	enable_irq_notrace
-	mov	r0, sp
-	bl	syscall_trace_exit
-	b	ret_slow_syscall
+	.macro	syscall_table_start, sym
+	.equ	__sys_nr, 0
+	.type	\sym, #object
+ENTRY(\sym)
+	.endm
 
-	.align	5
-#ifdef CONFIG_ALIGNMENT_TRAP
-	.type	__cr_alignment, #object
-__cr_alignment:
-	.word	cr_alignment
-#endif
-	.ltorg
+	.macro	syscall, nr, func
+	.ifgt	__sys_nr - \nr
+	.error	"Duplicated/unorded system call entry"
+	.endif
+	.rept	\nr - __sys_nr
+	.long	sys_ni_syscall
+	.endr
+	.long	\func
+	.equ	__sys_nr, \nr + 1
+	.endm
+
+	.macro	syscall_table_end, sym
+	.ifgt	__sys_nr - __NR_syscalls
+	.error	"System call table too big"
+	.endif
+	.rept	__NR_syscalls - __sys_nr
+	.long	sys_ni_syscall
+	.endr
+	.size	\sym, . - \sym
+	.endm
+
+#define __SYSCALL_WITH_COMPAT(nr, native, compat)	__SYSCALL(nr, native)
+#define __SYSCALL(nr, func) syscall nr, func
 
 /*
  * This is the syscall table declaration for native ABI syscalls.
  * With EABI a couple syscalls are obsolete and defined as sys_ni_syscall.
  */
-#define ABI(native, compat) native
+	syscall_table_start sys_call_table
 #ifdef CONFIG_AEABI
-#define OBSOLETE(syscall) sys_ni_syscall
+#include <calls-eabi.S>
 #else
-#define OBSOLETE(syscall) syscall
+#include <calls-oabi.S>
 #endif
-
-	.type	sys_call_table, #object
-ENTRY(sys_call_table)
-#include "calls.S"
-#undef ABI
-#undef OBSOLETE
+	syscall_table_end sys_call_table
 
 /*============================================================================
  * Special system call wrappers
@@ -325,7 +384,7 @@ sys_syscall:
 		movhs	scno, #0
 		csdb
 #endif
-		stmloia	sp, {r5, r6}		@ shuffle args
+		stmialo	sp, {r5, r6}		@ shuffle args
 		movlo	r0, r1
 		movlo	r1, r2
 		movlo	r2, r3
@@ -363,17 +422,8 @@ ENDPROC(sys_fstatfs64_wrapper)
  * offset, we return EINVAL.
  */
 sys_mmap2:
-#if PAGE_SHIFT > 12
-		tst	r5, #PGOFF_MASK
-		moveq	r5, r5, lsr #PAGE_SHIFT - 12
-		streq	r5, [sp, #4]
-		beq	sys_mmap_pgoff
-		mov	r0, #-EINVAL
-		ret	lr
-#else
 		str	r5, [sp, #4]
 		b	sys_mmap_pgoff
-#endif
 ENDPROC(sys_mmap2)
 
 #ifdef CONFIG_OABI_COMPAT
@@ -415,14 +465,11 @@ ENDPROC(sys_oabi_readahead)
  * Let's declare a second syscall table for old ABI binaries
  * using the compatibility syscall entries.
  */
-#define ABI(native, compat) compat
-#define OBSOLETE(syscall) syscall
-
-	.type	sys_oabi_call_table, #object
-ENTRY(sys_oabi_call_table)
-#include "calls.S"
-#undef ABI
-#undef OBSOLETE
+	syscall_table_start sys_oabi_call_table
+#undef __SYSCALL_WITH_COMPAT
+#define __SYSCALL_WITH_COMPAT(nr, native, compat)	__SYSCALL(nr, compat)
+#include <calls-oabi.S>
+	syscall_table_end sys_oabi_call_table
 
 #endif
 

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * APEI Boot Error Record Table (BERT) support
  *
@@ -16,9 +17,6 @@
  *
  * For more information about BERT, please refer to ACPI Specification
  * version 4.0, section 17.3.1
- *
- * This file is licensed under GPLv2.
- *
  */
 
 #include <linux/kernel.h>
@@ -32,35 +30,52 @@
 #undef pr_fmt
 #define pr_fmt(fmt) "BERT: " fmt
 
+#define ACPI_BERT_PRINT_MAX_RECORDS 5
+#define ACPI_BERT_PRINT_MAX_LEN 1024
+
 static int bert_disable;
 
+/*
+ * Print "all" the error records in the BERT table, but avoid huge spam to
+ * the console if the BIOS included oversize records, or too many records.
+ * Skipping some records here does not lose anything because the full
+ * data is available to user tools in:
+ *	/sys/firmware/acpi/tables/data/BERT
+ */
 static void __init bert_print_all(struct acpi_bert_region *region,
 				  unsigned int region_len)
 {
 	struct acpi_hest_generic_status *estatus =
 		(struct acpi_hest_generic_status *)region;
 	int remain = region_len;
+	int printed = 0, skipped = 0;
 	u32 estatus_len;
 
-	if (!estatus->block_status)
-		return;
-
-	while (remain > sizeof(struct acpi_bert_region)) {
-		if (cper_estatus_check(estatus)) {
-			pr_err(FW_BUG "Invalid error record.\n");
-			return;
-		}
-
+	while (remain >= sizeof(struct acpi_bert_region)) {
 		estatus_len = cper_estatus_len(estatus);
 		if (remain < estatus_len) {
 			pr_err(FW_BUG "Truncated status block (length: %u).\n",
 			       estatus_len);
-			return;
+			break;
 		}
 
-		pr_info_once("Error records from previous boot:\n");
+		/* No more error records. */
+		if (!estatus->block_status)
+			break;
 
-		cper_estatus_print(KERN_INFO HW_ERR, estatus);
+		if (cper_estatus_check(estatus)) {
+			pr_err(FW_BUG "Invalid error record.\n");
+			break;
+		}
+
+		if (estatus_len < ACPI_BERT_PRINT_MAX_LEN &&
+		    printed < ACPI_BERT_PRINT_MAX_RECORDS) {
+			pr_info_once("Error records from previous boot:\n");
+			cper_estatus_print(KERN_INFO HW_ERR, estatus);
+			printed++;
+		} else {
+			skipped++;
+		}
 
 		/*
 		 * Because the boot error source is "one-time polled" type,
@@ -70,19 +85,21 @@ static void __init bert_print_all(struct acpi_bert_region *region,
 		estatus->block_status = 0;
 
 		estatus = (void *)estatus + estatus_len;
-		/* No more error records. */
-		if (!estatus->block_status)
-			return;
-
 		remain -= estatus_len;
 	}
+
+	if (skipped)
+		pr_info(HW_ERR "Skipped %d error records\n", skipped);
+
+	if (printed + skipped)
+		pr_info("Total records found: %d\n", printed + skipped);
 }
 
 static int __init setup_bert_disable(char *str)
 {
 	bert_disable = 1;
 
-	return 0;
+	return 1;
 }
 __setup("bert_disable", setup_bert_disable);
 
@@ -97,6 +114,7 @@ static int __init bert_check_table(struct acpi_table_bert *bert_tab)
 
 static int __init bert_init(void)
 {
+	struct apei_resources bert_resources;
 	struct acpi_bert_region *boot_error_region;
 	struct acpi_table_bert *bert_tab;
 	unsigned int region_len;
@@ -123,17 +141,18 @@ static int __init bert_init(void)
 	rc = bert_check_table(bert_tab);
 	if (rc) {
 		pr_err(FW_BUG "table invalid.\n");
-		return rc;
+		goto out_put_bert_tab;
 	}
 
 	region_len = bert_tab->region_length;
-	if (!request_mem_region(bert_tab->address, region_len, "APEI BERT")) {
-		pr_err("Can't request iomem region <%016llx-%016llx>.\n",
-		       (unsigned long long)bert_tab->address,
-		       (unsigned long long)bert_tab->address + region_len - 1);
-		return -EIO;
-	}
-
+	apei_resources_init(&bert_resources);
+	rc = apei_resources_add(&bert_resources, bert_tab->address,
+				region_len, true);
+	if (rc)
+		goto out_put_bert_tab;
+	rc = apei_resources_request(&bert_resources, "APEI BERT");
+	if (rc)
+		goto out_fini;
 	boot_error_region = ioremap_cache(bert_tab->address, region_len);
 	if (boot_error_region) {
 		bert_print_all(boot_error_region, region_len);
@@ -142,7 +161,11 @@ static int __init bert_init(void)
 		rc = -ENOMEM;
 	}
 
-	release_mem_region(bert_tab->address, region_len);
+	apei_resources_release(&bert_resources);
+out_fini:
+	apei_resources_fini(&bert_resources);
+out_put_bert_tab:
+	acpi_put_table((struct acpi_table_header *)bert_tab);
 
 	return rc;
 }

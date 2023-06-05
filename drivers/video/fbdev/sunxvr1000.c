@@ -33,8 +33,8 @@ static int gfb_get_props(struct gfb_info *gp)
 	gp->depth = of_getintprop_default(gp->of_node, "depth", 32);
 
 	if (!gp->width || !gp->height) {
-		printk(KERN_ERR "gfb: Critical properties missing for %s\n",
-		       gp->of_node->full_name);
+		printk(KERN_ERR "gfb: Critical properties missing for %pOF\n",
+		       gp->of_node);
 		return -EINVAL;
 	}
 
@@ -59,7 +59,7 @@ static int gfb_setcolreg(unsigned regno,
 	return 0;
 }
 
-static struct fb_ops gfb_ops = {
+static const struct fb_ops gfb_ops = {
 	.owner			= THIS_MODULE,
 	.fb_setcolreg		= gfb_setcolreg,
 	.fb_fillrect		= cfb_fillrect,
@@ -80,7 +80,7 @@ static int gfb_set_fbinfo(struct gfb_info *gp)
 	info->pseudo_palette = gp->pseudo_palette;
 
 	/* Fill fix common fields */
-	strlcpy(info->fix.id, "gfb", sizeof(info->fix.id));
+	strscpy(info->fix.id, "gfb", sizeof(info->fix.id));
         info->fix.smem_start = gp->fb_base_phys;
         info->fix.smem_len = gp->fb_size;
         info->fix.type = FB_TYPE_PACKED_PIXELS;
@@ -121,7 +121,6 @@ static int gfb_probe(struct platform_device *op)
 
 	info = framebuffer_alloc(sizeof(struct gfb_info), &op->dev);
 	if (!info) {
-		printk(KERN_ERR "gfb: Cannot allocate fb_info\n");
 		err = -ENOMEM;
 		goto err_out;
 	}
@@ -151,12 +150,12 @@ static int gfb_probe(struct platform_device *op)
 	if (err)
 		goto err_unmap_fb;
 
-	printk("gfb: Found device at %s\n", dp->full_name);
+	printk("gfb: Found device at %pOF\n", dp);
 
 	err = register_framebuffer(info);
 	if (err < 0) {
-		printk(KERN_ERR "gfb: Could not register framebuffer %s\n",
-		       dp->full_name);
+		printk(KERN_ERR "gfb: Could not register framebuffer %pOF\n",
+		       dp);
 		goto err_unmap_fb;
 	}
 

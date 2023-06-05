@@ -1,23 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * coretemp.c - Linux kernel module for hardware monitoring
  *
  * Copyright (C) 2007 Rudolf Marek <r.marek@assembler.cz>
  *
  * Inspired from many hwmon drivers
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; version 2 of the License.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
- * 02110-1301 USA.
  */
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
@@ -51,16 +38,13 @@ static int force_tjmax;
 module_param_named(tjmax, force_tjmax, int, 0444);
 MODULE_PARM_DESC(tjmax, "TjMax value in degrees Celsius");
 
+#define PKG_SYSFS_ATTR_NO	1	/* Sysfs attribute for package temp */
 #define BASE_SYSFS_ATTR_NO	2	/* Sysfs Base attr no for coretemp */
 #define NUM_REAL_CORES		128	/* Number of Real cores per cpu */
 #define CORETEMP_NAME_LENGTH	19	/* String Length of attrs */
 #define MAX_CORE_ATTRS		4	/* Maximum no of basic attrs */
 #define TOTAL_ATTRS		(MAX_CORE_ATTRS + 1)
 #define MAX_CORE_DATA		(NUM_REAL_CORES + BASE_SYSFS_ATTR_NO)
-
-#define TO_PHYS_ID(cpu)		(cpu_data(cpu).phys_proc_id)
-#define TO_CORE_ID(cpu)		(cpu_data(cpu).cpu_core_id)
-#define TO_ATTR_NO(cpu)		(TO_CORE_ID(cpu) + BASE_SYSFS_ATTR_NO)
 
 #ifdef CONFIG_SMP
 #define for_each_sibling(i, cpu) \
@@ -102,20 +86,19 @@ struct temp_data {
 
 /* Platform Data per Physical CPU */
 struct platform_data {
-	struct device *hwmon_dev;
-	u16 phys_proc_id;
-	struct temp_data *core_data[MAX_CORE_DATA];
+	struct device		*hwmon_dev;
+	u16			pkg_id;
+	u16			cpu_map[NUM_REAL_CORES];
+	struct ida		ida;
+	struct cpumask		cpumask;
+	struct temp_data	*core_data[MAX_CORE_DATA];
 	struct device_attribute name_attr;
 };
 
-struct pdev_entry {
-	struct list_head list;
-	struct platform_device *pdev;
-	u16 phys_proc_id;
-};
-
-static LIST_HEAD(pdev_list);
-static DEFINE_MUTEX(pdev_list_mutex);
+/* Keep track of how many zone pointers we allocated in init() */
+static int max_zones __read_mostly;
+/* Array of zone pointers. Serialized by cpu hotplug lock */
+static struct platform_device **zone_devices;
 
 static ssize_t show_label(struct device *dev,
 				struct device_attribute *devattr, char *buf)
@@ -125,7 +108,7 @@ static ssize_t show_label(struct device *dev,
 	struct temp_data *tdata = pdata->core_data[attr->index];
 
 	if (tdata->is_pkg_data)
-		return sprintf(buf, "Physical id %u\n", pdata->phys_proc_id);
+		return sprintf(buf, "Package id %u\n", pdata->pkg_id);
 
 	return sprintf(buf, "Core %u\n", tdata->cpu_core_id);
 }
@@ -138,7 +121,9 @@ static ssize_t show_crit_alarm(struct device *dev,
 	struct platform_data *pdata = dev_get_drvdata(dev);
 	struct temp_data *tdata = pdata->core_data[attr->index];
 
+	mutex_lock(&tdata->update_lock);
 	rdmsr_on_cpu(tdata->cpu, tdata->status_reg, &eax, &edx);
+	mutex_unlock(&tdata->update_lock);
 
 	return sprintf(buf, "%d\n", (eax >> 5) & 1);
 }
@@ -181,7 +166,7 @@ static ssize_t show_temp(struct device *dev,
 		 * really help at all.
 		 */
 		tdata->temp = tdata->tjmax - ((eax >> 16) & 0x7f) * 1000;
-		tdata->valid = 1;
+		tdata->valid = true;
 		tdata->last_updated = jiffies;
 	}
 
@@ -247,7 +232,8 @@ static int adjust_tjmax(struct cpuinfo_x86 *c, u32 id, struct device *dev)
 	int err;
 	u32 eax, edx;
 	int i;
-	struct pci_dev *host_bridge = pci_get_bus_and_slot(0, PCI_DEVFN(0, 0));
+	u16 devfn = PCI_DEVFN(0, 0);
+	struct pci_dev *host_bridge = pci_get_domain_bus_and_slot(0, 0, devfn);
 
 	/*
 	 * Explicit tjmax table entries override heuristics.
@@ -256,10 +242,13 @@ static int adjust_tjmax(struct cpuinfo_x86 *c, u32 id, struct device *dev)
 	 */
 	if (host_bridge && host_bridge->vendor == PCI_VENDOR_ID_INTEL) {
 		for (i = 0; i < ARRAY_SIZE(tjmax_pci_table); i++) {
-			if (host_bridge->device == tjmax_pci_table[i].device)
+			if (host_bridge->device == tjmax_pci_table[i].device) {
+				pci_dev_put(host_bridge);
 				return tjmax_pci_table[i].tjmax;
+			}
 		}
 	}
+	pci_dev_put(host_bridge);
 
 	for (i = 0; i < ARRAY_SIZE(tjmax_table); i++) {
 		if (strstr(c->x86_model_id, tjmax_table[i].id))
@@ -407,7 +396,7 @@ static int create_core_attrs(struct temp_data *tdata, struct device *dev,
 			 "temp%d_%s", attr_no, suffixes[i]);
 		sysfs_attr_init(&tdata->sd_attrs[i].dev_attr.attr);
 		tdata->sd_attrs[i].dev_attr.attr.name = tdata->attr_name[i];
-		tdata->sd_attrs[i].dev_attr.attr.mode = S_IRUGO;
+		tdata->sd_attrs[i].dev_attr.attr.mode = 0444;
 		tdata->sd_attrs[i].dev_attr.show = rd_ptr[i];
 		tdata->sd_attrs[i].index = attr_no;
 		tdata->attrs[i] = &tdata->sd_attrs[i].dev_attr.attr;
@@ -435,18 +424,10 @@ static int chk_ucode_version(unsigned int cpu)
 
 static struct platform_device *coretemp_get_pdev(unsigned int cpu)
 {
-	u16 phys_proc_id = TO_PHYS_ID(cpu);
-	struct pdev_entry *p;
+	int id = topology_logical_die_id(cpu);
 
-	mutex_lock(&pdev_list_mutex);
-
-	list_for_each_entry(p, &pdev_list, list)
-		if (p->phys_proc_id == phys_proc_id) {
-			mutex_unlock(&pdev_list_mutex);
-			return p->pdev;
-		}
-
-	mutex_unlock(&pdev_list_mutex);
+	if (id >= 0 && id < max_zones)
+		return zone_devices[id];
 	return NULL;
 }
 
@@ -462,7 +443,7 @@ static struct temp_data *init_temp_data(unsigned int cpu, int pkg_flag)
 							MSR_IA32_THERM_STATUS;
 	tdata->is_pkg_data = pkg_flag;
 	tdata->cpu = cpu;
-	tdata->cpu_core_id = TO_CORE_ID(cpu);
+	tdata->cpu_core_id = topology_core_id(cpu);
 	tdata->attr_size = MAX_CORE_ATTRS;
 	mutex_init(&tdata->update_lock);
 	return tdata;
@@ -475,7 +456,7 @@ static int create_core_data(struct platform_device *pdev, unsigned int cpu,
 	struct platform_data *pdata = platform_get_drvdata(pdev);
 	struct cpuinfo_x86 *c = &cpu_data(cpu);
 	u32 eax, edx;
-	int err, attr_no;
+	int err, index, attr_no;
 
 	/*
 	 * Find attr number for sysfs:
@@ -483,24 +464,26 @@ static int create_core_data(struct platform_device *pdev, unsigned int cpu,
 	 * The attr number is always core id + 2
 	 * The Pkgtemp will always show up as temp1_*, if available
 	 */
-	attr_no = pkg_flag ? 1 : TO_ATTR_NO(cpu);
+	if (pkg_flag) {
+		attr_no = PKG_SYSFS_ATTR_NO;
+	} else {
+		index = ida_alloc(&pdata->ida, GFP_KERNEL);
+		if (index < 0)
+			return index;
+		pdata->cpu_map[index] = topology_core_id(cpu);
+		attr_no = index + BASE_SYSFS_ATTR_NO;
+	}
 
-	if (attr_no > MAX_CORE_DATA - 1)
-		return -ERANGE;
-
-	/*
-	 * Provide a single set of attributes for all HT siblings of a core
-	 * to avoid duplicate sensors (the processor ID and core ID of all
-	 * HT siblings of a core are the same).
-	 * Skip if a HT sibling of this core is already registered.
-	 * This is not an error.
-	 */
-	if (pdata->core_data[attr_no] != NULL)
-		return 0;
+	if (attr_no > MAX_CORE_DATA - 1) {
+		err = -ERANGE;
+		goto ida_free;
+	}
 
 	tdata = init_temp_data(cpu, pkg_flag);
-	if (!tdata)
-		return -ENOMEM;
+	if (!tdata) {
+		err = -ENOMEM;
+		goto ida_free;
+	}
 
 	/* Test if we can access the status register */
 	err = rdmsr_safe_on_cpu(cpu, tdata->status_reg, &eax, &edx);
@@ -536,151 +519,94 @@ static int create_core_data(struct platform_device *pdev, unsigned int cpu,
 exit_free:
 	pdata->core_data[attr_no] = NULL;
 	kfree(tdata);
+ida_free:
+	if (!pkg_flag)
+		ida_free(&pdata->ida, index);
 	return err;
 }
 
-static void coretemp_add_core(unsigned int cpu, int pkg_flag)
+static void
+coretemp_add_core(struct platform_device *pdev, unsigned int cpu, int pkg_flag)
 {
-	struct platform_device *pdev = coretemp_get_pdev(cpu);
-	int err;
-
-	if (!pdev)
-		return;
-
-	err = create_core_data(pdev, cpu, pkg_flag);
-	if (err)
+	if (create_core_data(pdev, cpu, pkg_flag))
 		dev_err(&pdev->dev, "Adding Core %u failed\n", cpu);
 }
 
-static void coretemp_remove_core(struct platform_data *pdata,
-				 int indx)
+static void coretemp_remove_core(struct platform_data *pdata, int indx)
 {
 	struct temp_data *tdata = pdata->core_data[indx];
+
+	/* if we errored on add then this is already gone */
+	if (!tdata)
+		return;
 
 	/* Remove the sysfs attributes */
 	sysfs_remove_group(&pdata->hwmon_dev->kobj, &tdata->attr_group);
 
 	kfree(pdata->core_data[indx]);
 	pdata->core_data[indx] = NULL;
+
+	if (indx >= BASE_SYSFS_ATTR_NO)
+		ida_free(&pdata->ida, indx - BASE_SYSFS_ATTR_NO);
 }
 
-static int coretemp_probe(struct platform_device *pdev)
+static int coretemp_device_add(int zoneid)
 {
-	struct device *dev = &pdev->dev;
+	struct platform_device *pdev;
 	struct platform_data *pdata;
+	int err;
 
-	/* Initialize the per-package data structures */
-	pdata = devm_kzalloc(dev, sizeof(struct platform_data), GFP_KERNEL);
+	/* Initialize the per-zone data structures */
+	pdata = kzalloc(sizeof(*pdata), GFP_KERNEL);
 	if (!pdata)
 		return -ENOMEM;
 
-	pdata->phys_proc_id = pdev->id;
-	platform_set_drvdata(pdev, pdata);
+	pdata->pkg_id = zoneid;
+	ida_init(&pdata->ida);
 
-	pdata->hwmon_dev = devm_hwmon_device_register_with_groups(dev, DRVNAME,
-								  pdata, NULL);
-	return PTR_ERR_OR_ZERO(pdata->hwmon_dev);
-}
-
-static int coretemp_remove(struct platform_device *pdev)
-{
-	struct platform_data *pdata = platform_get_drvdata(pdev);
-	int i;
-
-	for (i = MAX_CORE_DATA - 1; i >= 0; --i)
-		if (pdata->core_data[i])
-			coretemp_remove_core(pdata, i);
-
-	return 0;
-}
-
-static struct platform_driver coretemp_driver = {
-	.driver = {
-		.name = DRVNAME,
-	},
-	.probe = coretemp_probe,
-	.remove = coretemp_remove,
-};
-
-static int coretemp_device_add(unsigned int cpu)
-{
-	int err;
-	struct platform_device *pdev;
-	struct pdev_entry *pdev_entry;
-
-	mutex_lock(&pdev_list_mutex);
-
-	pdev = platform_device_alloc(DRVNAME, TO_PHYS_ID(cpu));
+	pdev = platform_device_alloc(DRVNAME, zoneid);
 	if (!pdev) {
 		err = -ENOMEM;
-		pr_err("Device allocation failed\n");
-		goto exit;
-	}
-
-	pdev_entry = kzalloc(sizeof(struct pdev_entry), GFP_KERNEL);
-	if (!pdev_entry) {
-		err = -ENOMEM;
-		goto exit_device_put;
+		goto err_free_pdata;
 	}
 
 	err = platform_device_add(pdev);
-	if (err) {
-		pr_err("Device addition failed (%d)\n", err);
-		goto exit_device_free;
-	}
+	if (err)
+		goto err_put_dev;
 
-	pdev_entry->pdev = pdev;
-	pdev_entry->phys_proc_id = pdev->id;
-
-	list_add_tail(&pdev_entry->list, &pdev_list);
-	mutex_unlock(&pdev_list_mutex);
-
+	platform_set_drvdata(pdev, pdata);
+	zone_devices[zoneid] = pdev;
 	return 0;
 
-exit_device_free:
-	kfree(pdev_entry);
-exit_device_put:
+err_put_dev:
 	platform_device_put(pdev);
-exit:
-	mutex_unlock(&pdev_list_mutex);
+err_free_pdata:
+	kfree(pdata);
 	return err;
 }
 
-static void coretemp_device_remove(unsigned int cpu)
+static void coretemp_device_remove(int zoneid)
 {
-	struct pdev_entry *p, *n;
-	u16 phys_proc_id = TO_PHYS_ID(cpu);
+	struct platform_device *pdev = zone_devices[zoneid];
+	struct platform_data *pdata = platform_get_drvdata(pdev);
 
-	mutex_lock(&pdev_list_mutex);
-	list_for_each_entry_safe(p, n, &pdev_list, list) {
-		if (p->phys_proc_id != phys_proc_id)
-			continue;
-		platform_device_unregister(p->pdev);
-		list_del(&p->list);
-		kfree(p);
-	}
-	mutex_unlock(&pdev_list_mutex);
+	ida_destroy(&pdata->ida);
+	kfree(pdata);
+	platform_device_unregister(pdev);
 }
 
-static bool is_any_core_online(struct platform_data *pdata)
+static int coretemp_cpu_online(unsigned int cpu)
 {
-	int i;
-
-	/* Find online cores, except pkgtemp data */
-	for (i = MAX_CORE_DATA - 1; i >= 0; --i) {
-		if (pdata->core_data[i] &&
-			!pdata->core_data[i]->is_pkg_data) {
-			return true;
-		}
-	}
-	return false;
-}
-
-static void get_core_online(unsigned int cpu)
-{
-	struct cpuinfo_x86 *c = &cpu_data(cpu);
 	struct platform_device *pdev = coretemp_get_pdev(cpu);
-	int err;
+	struct cpuinfo_x86 *c = &cpu_data(cpu);
+	struct platform_data *pdata;
+
+	/*
+	 * Don't execute this on resume as the offline callback did
+	 * not get executed on suspend.
+	 */
+	if (cpuhp_tasks_frozen)
+		return 0;
 
 	/*
 	 * CPUID.06H.EAX[0] indicates whether the CPU has thermal
@@ -688,12 +614,15 @@ static void get_core_online(unsigned int cpu)
 	 * without thermal sensors will be filtered out.
 	 */
 	if (!cpu_has(c, X86_FEATURE_DTHERM))
-		return;
+		return -ENODEV;
 
-	if (!pdev) {
+	pdata = platform_get_drvdata(pdev);
+	if (!pdata->hwmon_dev) {
+		struct device *hwmon;
+
 		/* Check the microcode version of the CPU */
 		if (chk_ucode_version(cpu))
-			return;
+			return -EINVAL;
 
 		/*
 		 * Alright, we have DTS support.
@@ -701,97 +630,107 @@ static void get_core_online(unsigned int cpu)
 		 * online. So, initialize per-pkg data structures and
 		 * then bring this core online.
 		 */
-		err = coretemp_device_add(cpu);
-		if (err)
-			return;
+		hwmon = hwmon_device_register_with_groups(&pdev->dev, DRVNAME,
+							  pdata, NULL);
+		if (IS_ERR(hwmon))
+			return PTR_ERR(hwmon);
+		pdata->hwmon_dev = hwmon;
+
 		/*
 		 * Check whether pkgtemp support is available.
 		 * If so, add interfaces for pkgtemp.
 		 */
 		if (cpu_has(c, X86_FEATURE_PTS))
-			coretemp_add_core(cpu, 1);
+			coretemp_add_core(pdev, cpu, 1);
 	}
+
 	/*
-	 * Physical CPU device already exists.
-	 * So, just add interfaces for this core.
+	 * Check whether a thread sibling is already online. If not add the
+	 * interface for this CPU core.
 	 */
-	coretemp_add_core(cpu, 0);
+	if (!cpumask_intersects(&pdata->cpumask, topology_sibling_cpumask(cpu)))
+		coretemp_add_core(pdev, cpu, 0);
+
+	cpumask_set_cpu(cpu, &pdata->cpumask);
+	return 0;
 }
 
-static void put_core_offline(unsigned int cpu)
+static int coretemp_cpu_offline(unsigned int cpu)
 {
-	int i, indx;
-	struct platform_data *pdata;
 	struct platform_device *pdev = coretemp_get_pdev(cpu);
+	struct platform_data *pd;
+	struct temp_data *tdata;
+	int i, indx = -1, target;
+
+	/* No need to tear down any interfaces for suspend */
+	if (cpuhp_tasks_frozen)
+		return 0;
 
 	/* If the physical CPU device does not exist, just return */
-	if (!pdev)
-		return;
+	pd = platform_get_drvdata(pdev);
+	if (!pd->hwmon_dev)
+		return 0;
 
-	pdata = platform_get_drvdata(pdev);
-
-	indx = TO_ATTR_NO(cpu);
-
-	/* The core id is too big, just return */
-	if (indx > MAX_CORE_DATA - 1)
-		return;
-
-	if (pdata->core_data[indx] && pdata->core_data[indx]->cpu == cpu)
-		coretemp_remove_core(pdata, indx);
-
-	/*
-	 * If a HT sibling of a core is taken offline, but another HT sibling
-	 * of the same core is still online, register the alternate sibling.
-	 * This ensures that exactly one set of attributes is provided as long
-	 * as at least one HT sibling of a core is online.
-	 */
-	for_each_sibling(i, cpu) {
-		if (i != cpu) {
-			get_core_online(i);
-			/*
-			 * Display temperature sensor data for one HT sibling
-			 * per core only, so abort the loop after one such
-			 * sibling has been found.
-			 */
+	for (i = 0; i < NUM_REAL_CORES; i++) {
+		if (pd->cpu_map[i] == topology_core_id(cpu)) {
+			indx = i + BASE_SYSFS_ATTR_NO;
 			break;
 		}
 	}
+
+	/* Too many cores and this core is not populated, just return */
+	if (indx < 0)
+		return 0;
+
+	tdata = pd->core_data[indx];
+
+	cpumask_clear_cpu(cpu, &pd->cpumask);
+
 	/*
-	 * If all cores in this pkg are offline, remove the device.
-	 * coretemp_device_remove calls unregister_platform_device,
-	 * which in turn calls coretemp_remove. This removes the
-	 * pkgtemp entry and does other clean ups.
+	 * If this is the last thread sibling, remove the CPU core
+	 * interface, If there is still a sibling online, transfer the
+	 * target cpu of that core interface to it.
 	 */
-	if (!is_any_core_online(pdata))
-		coretemp_device_remove(cpu);
-}
-
-static int coretemp_cpu_callback(struct notifier_block *nfb,
-				 unsigned long action, void *hcpu)
-{
-	unsigned int cpu = (unsigned long) hcpu;
-
-	switch (action) {
-	case CPU_ONLINE:
-	case CPU_DOWN_FAILED:
-		get_core_online(cpu);
-		break;
-	case CPU_DOWN_PREPARE:
-		put_core_offline(cpu);
-		break;
+	target = cpumask_any_and(&pd->cpumask, topology_sibling_cpumask(cpu));
+	if (target >= nr_cpu_ids) {
+		coretemp_remove_core(pd, indx);
+	} else if (tdata && tdata->cpu == cpu) {
+		mutex_lock(&tdata->update_lock);
+		tdata->cpu = target;
+		mutex_unlock(&tdata->update_lock);
 	}
-	return NOTIFY_OK;
+
+	/*
+	 * If all cores in this pkg are offline, remove the interface.
+	 */
+	tdata = pd->core_data[PKG_SYSFS_ATTR_NO];
+	if (cpumask_empty(&pd->cpumask)) {
+		if (tdata)
+			coretemp_remove_core(pd, PKG_SYSFS_ATTR_NO);
+		hwmon_device_unregister(pd->hwmon_dev);
+		pd->hwmon_dev = NULL;
+		return 0;
+	}
+
+	/*
+	 * Check whether this core is the target for the package
+	 * interface. We need to assign it to some other cpu.
+	 */
+	if (tdata && tdata->cpu == cpu) {
+		target = cpumask_first(&pd->cpumask);
+		mutex_lock(&tdata->update_lock);
+		tdata->cpu = target;
+		mutex_unlock(&tdata->update_lock);
+	}
+	return 0;
 }
-
-static struct notifier_block coretemp_cpu_notifier __refdata = {
-	.notifier_call = coretemp_cpu_callback,
-};
-
 static const struct x86_cpu_id __initconst coretemp_ids[] = {
-	{ X86_VENDOR_INTEL, X86_FAMILY_ANY, X86_MODEL_ANY, X86_FEATURE_DTHERM },
+	X86_MATCH_VENDOR_FEATURE(INTEL, X86_FEATURE_DTHERM, NULL),
 	{}
 };
 MODULE_DEVICE_TABLE(x86cpu, coretemp_ids);
+
+static enum cpuhp_state coretemp_hp_online;
 
 static int __init coretemp_init(void)
 {
@@ -805,54 +744,44 @@ static int __init coretemp_init(void)
 	if (!x86_match_cpu(coretemp_ids))
 		return -ENODEV;
 
-	err = platform_driver_register(&coretemp_driver);
-	if (err)
-		goto exit;
+	max_zones = topology_max_packages() * topology_max_die_per_package();
+	zone_devices = kcalloc(max_zones, sizeof(struct platform_device *),
+			      GFP_KERNEL);
+	if (!zone_devices)
+		return -ENOMEM;
 
-	cpu_notifier_register_begin();
-	for_each_online_cpu(i)
-		get_core_online(i);
-
-#ifndef CONFIG_HOTPLUG_CPU
-	if (list_empty(&pdev_list)) {
-		cpu_notifier_register_done();
-		err = -ENODEV;
-		goto exit_driver_unreg;
+	for (i = 0; i < max_zones; i++) {
+		err = coretemp_device_add(i);
+		if (err)
+			goto outzone;
 	}
-#endif
 
-	__register_hotcpu_notifier(&coretemp_cpu_notifier);
-	cpu_notifier_register_done();
+	err = cpuhp_setup_state(CPUHP_AP_ONLINE_DYN, "hwmon/coretemp:online",
+				coretemp_cpu_online, coretemp_cpu_offline);
+	if (err < 0)
+		goto outzone;
+	coretemp_hp_online = err;
 	return 0;
 
-#ifndef CONFIG_HOTPLUG_CPU
-exit_driver_unreg:
-	platform_driver_unregister(&coretemp_driver);
-#endif
-exit:
+outzone:
+	while (i--)
+		coretemp_device_remove(i);
+	kfree(zone_devices);
 	return err;
 }
+module_init(coretemp_init)
 
 static void __exit coretemp_exit(void)
 {
-	struct pdev_entry *p, *n;
+	int i;
 
-	cpu_notifier_register_begin();
-	__unregister_hotcpu_notifier(&coretemp_cpu_notifier);
-	mutex_lock(&pdev_list_mutex);
-	list_for_each_entry_safe(p, n, &pdev_list, list) {
-		platform_device_unregister(p->pdev);
-		list_del(&p->list);
-		kfree(p);
-	}
-	mutex_unlock(&pdev_list_mutex);
-	cpu_notifier_register_done();
-	platform_driver_unregister(&coretemp_driver);
+	cpuhp_remove_state(coretemp_hp_online);
+	for (i = 0; i < max_zones; i++)
+		coretemp_device_remove(i);
+	kfree(zone_devices);
 }
+module_exit(coretemp_exit)
 
 MODULE_AUTHOR("Rudolf Marek <r.marek@assembler.cz>");
 MODULE_DESCRIPTION("Intel Core temperature monitor");
 MODULE_LICENSE("GPL");
-
-module_init(coretemp_init)
-module_exit(coretemp_exit)

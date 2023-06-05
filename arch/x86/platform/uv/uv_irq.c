@@ -35,8 +35,8 @@ static void uv_program_mmr(struct irq_cfg *cfg, struct uv_irq_2_mmr_pnode *info)
 	mmr_value = 0;
 	entry = (struct uv_IO_APIC_route_entry *)&mmr_value;
 	entry->vector		= cfg->vector;
-	entry->delivery_mode	= apic->irq_delivery_mode;
-	entry->dest_mode	= apic->irq_dest_mode;
+	entry->delivery_mode	= apic->delivery_mode;
+	entry->dest_mode	= apic->dest_mode_logical;
 	entry->polarity		= 0;
 	entry->trigger		= 0;
 	entry->mask		= 0;
@@ -46,11 +46,6 @@ static void uv_program_mmr(struct irq_cfg *cfg, struct uv_irq_2_mmr_pnode *info)
 }
 
 static void uv_noop(struct irq_data *data) { }
-
-static void uv_ack_apic(struct irq_data *data)
-{
-	ack_APIC_irq();
-}
 
 static int
 uv_set_irq_affinity(struct irq_data *data, const struct cpumask *mask,
@@ -73,7 +68,7 @@ static struct irq_chip uv_irq_chip = {
 	.name			= "UV-CORE",
 	.irq_mask		= uv_noop,
 	.irq_unmask		= uv_noop,
-	.irq_eoi		= uv_ack_apic,
+	.irq_eoi		= apic_ack_irq,
 	.irq_set_affinity	= uv_set_irq_affinity,
 };
 
@@ -95,15 +90,15 @@ static int uv_domain_alloc(struct irq_domain *domain, unsigned int virq,
 
 	ret = irq_domain_alloc_irqs_parent(domain, virq, nr_irqs, arg);
 	if (ret >= 0) {
-		if (info->uv_limit == UV_AFFINITY_CPU)
+		if (info->uv.limit == UV_AFFINITY_CPU)
 			irq_set_status_flags(virq, IRQ_NO_BALANCING);
 		else
 			irq_set_status_flags(virq, IRQ_MOVE_PCNTXT);
 
-		chip_data->pnode = uv_blade_to_pnode(info->uv_blade);
-		chip_data->offset = info->uv_offset;
+		chip_data->pnode = uv_blade_to_pnode(info->uv.blade);
+		chip_data->offset = info->uv.offset;
 		irq_domain_set_info(domain, virq, virq, &uv_irq_chip, chip_data,
-				    handle_percpu_irq, NULL, info->uv_name);
+				    handle_percpu_irq, NULL, info->uv.name);
 	} else {
 		kfree(chip_data);
 	}
@@ -127,10 +122,11 @@ static void uv_domain_free(struct irq_domain *domain, unsigned int virq,
  * Re-target the irq to the specified CPU and enable the specified MMR located
  * on the specified blade to allow the sending of MSIs to the specified CPU.
  */
-static void uv_domain_activate(struct irq_domain *domain,
-			       struct irq_data *irq_data)
+static int uv_domain_activate(struct irq_domain *domain,
+			      struct irq_data *irq_data, bool reserve)
 {
 	uv_program_mmr(irqd_cfg(irq_data), irq_data->chip_data);
+	return 0;
 }
 
 /*
@@ -160,13 +156,22 @@ static struct irq_domain *uv_get_irq_domain(void)
 {
 	static struct irq_domain *uv_domain;
 	static DEFINE_MUTEX(uv_lock);
+	struct fwnode_handle *fn;
 
 	mutex_lock(&uv_lock);
-	if (uv_domain == NULL) {
-		uv_domain = irq_domain_add_tree(NULL, &uv_domain_ops, NULL);
-		if (uv_domain)
-			uv_domain->parent = x86_vector_domain;
-	}
+	if (uv_domain)
+		goto out;
+
+	fn = irq_domain_alloc_named_fwnode("UV-CORE");
+	if (!fn)
+		goto out;
+
+	uv_domain = irq_domain_create_tree(fn, &uv_domain_ops, NULL);
+	if (uv_domain)
+		uv_domain->parent = x86_vector_domain;
+	else
+		irq_domain_free_fwnode(fn);
+out:
 	mutex_unlock(&uv_lock);
 
 	return uv_domain;
@@ -188,10 +193,10 @@ int uv_setup_irq(char *irq_name, int cpu, int mmr_blade,
 
 	init_irq_alloc_info(&info, cpumask_of(cpu));
 	info.type = X86_IRQ_ALLOC_TYPE_UV;
-	info.uv_limit = limit;
-	info.uv_blade = mmr_blade;
-	info.uv_offset = mmr_offset;
-	info.uv_name = irq_name;
+	info.uv.limit = limit;
+	info.uv.blade = mmr_blade;
+	info.uv.offset = mmr_offset;
+	info.uv.name = irq_name;
 
 	return irq_domain_alloc_irqs(domain, 1,
 				     uv_blade_to_memory_nid(mmr_blade), &info);

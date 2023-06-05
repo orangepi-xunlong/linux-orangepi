@@ -1,22 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0+
 /*
  * Copyright (c) 1996, 2003 VIA Networking Technologies, Inc.
  * All rights reserved.
  *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License along
- * with this program; if not, write to the Free Software Foundation, Inc.,
- * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
- *
- * File: card.c
  * Purpose: Provide functions to setup NIC operation mode
  * Functions:
  *      s_vSafeResetTx - Rest Tx
@@ -24,24 +10,20 @@
  *      CARDvUpdateBasicTopRate - Update BasicTopRate
  *      CARDbAddBasicRate - Add to BasicRateSet
  *      CARDbIsOFDMinBasicRate - Check if any OFDM rate is in BasicRateSet
- *      CARDvSetLoopbackMode - Set Loopback mode
- *      CARDbSoftwareReset - Sortware reset NIC
  *      CARDqGetTSFOffset - Calculate TSFOffset
- *      CARDbGetCurrentTSF - Read Current NIC TSF counter
+ *      vt6655_get_current_tsf - Read Current NIC TSF counter
  *      CARDqGetNextTBTT - Calculate Next Beacon TSF counter
  *      CARDvSetFirstNextTBTT - Set NIC Beacon time
  *      CARDvUpdateNextTBTT - Sync. NIC Beacon time
  *      CARDbRadioPowerOff - Turn Off NIC Radio Power
- *      CARDbRadioPowerOn - Turn On NIC Radio Power
  *
  * Revision History:
  *      06-10-2003 Bryan YC Fan:  Re-write codes to support VT3253 spec.
- *      08-26-2003 Kyle Hsu:      Modify the defination type of dwIoBase.
+ *      08-26-2003 Kyle Hsu:      Modify the definition type of iobase.
  *      09-01-2003 Bryan YC Fan:  Add vUpdateIFS().
  *
  */
 
-#include "tmacro.h"
 #include "card.h"
 #include "baseband.h"
 #include "mac.h"
@@ -73,14 +55,15 @@ static const unsigned short cwRXBCNTSFOff[MAX_RATE] = {
 
 /*---------------------  Static Functions  --------------------------*/
 
-static
-void
-s_vCalculateOFDMRParameter(
-	unsigned char byRate,
-	u8 bb_type,
-	unsigned char *pbyTxRate,
-	unsigned char *pbyRsvTime
-);
+static void vt6655_mac_set_bb_type(void __iomem *iobase, u32 mask)
+{
+	u32 reg_value;
+
+	reg_value = ioread32(iobase + MAC_REG_ENCFG);
+	reg_value = reg_value & ~ENCFG_BBTYPE_MASK;
+	reg_value = reg_value | mask;
+	iowrite32(reg_value, iobase + MAC_REG_ENCFG);
+}
 
 /*---------------------  Export Functions  --------------------------*/
 
@@ -97,16 +80,12 @@ s_vCalculateOFDMRParameter(
  *
  * Return Value: none
  */
-static
-void
-s_vCalculateOFDMRParameter(
-	unsigned char byRate,
-	u8 bb_type,
-	unsigned char *pbyTxRate,
-	unsigned char *pbyRsvTime
-)
+static void s_vCalculateOFDMRParameter(unsigned char rate,
+				       u8 bb_type,
+				       unsigned char *pbyTxRate,
+				       unsigned char *pbyRsvTime)
 {
-	switch (byRate) {
+	switch (rate) {
 	case RATE_6M:
 		if (bb_type == BB_TYPE_11A) { /* 5GHZ */
 			*pbyTxRate = 0x9B;
@@ -209,87 +188,34 @@ bool CARDbSetPhyParameter(struct vnt_private *priv, u8 bb_type)
 	unsigned char bySlot = 0;
 	unsigned char bySIFS = 0;
 	unsigned char byDIFS = 0;
-	unsigned char byData;
 	int i;
 
 	/* Set SIFS, DIFS, EIFS, SlotTime, CwMin */
 	if (bb_type == BB_TYPE_11A) {
-		if (priv->byRFType == RF_AIROHA7230) {
-			/* AL7230 use single PAPE and connect to PAPE_2.4G */
-			MACvSetBBType(priv->PortOffset, BB_TYPE_11G);
-			priv->abyBBVGA[0] = 0x20;
-			priv->abyBBVGA[2] = 0x10;
-			priv->abyBBVGA[3] = 0x10;
-			BBbReadEmbedded(priv, 0xE7, &byData);
-			if (byData == 0x1C)
-				BBbWriteEmbedded(priv, 0xE7, priv->abyBBVGA[0]);
-
-		} else if (priv->byRFType == RF_UW2452) {
-			MACvSetBBType(priv->PortOffset, BB_TYPE_11A);
-			priv->abyBBVGA[0] = 0x18;
-			BBbReadEmbedded(priv, 0xE7, &byData);
-			if (byData == 0x14) {
-				BBbWriteEmbedded(priv, 0xE7, priv->abyBBVGA[0]);
-				BBbWriteEmbedded(priv, 0xE1, 0x57);
-			}
-		} else {
-			MACvSetBBType(priv->PortOffset, BB_TYPE_11A);
-		}
-		BBbWriteEmbedded(priv, 0x88, 0x03);
+		vt6655_mac_set_bb_type(priv->port_offset, BB_TYPE_11A);
+		bb_write_embedded(priv, 0x88, 0x03);
 		bySlot = C_SLOT_SHORT;
 		bySIFS = C_SIFS_A;
 		byDIFS = C_SIFS_A + 2 * C_SLOT_SHORT;
 		byCWMaxMin = 0xA4;
 	} else if (bb_type == BB_TYPE_11B) {
-		MACvSetBBType(priv->PortOffset, BB_TYPE_11B);
-		if (priv->byRFType == RF_AIROHA7230) {
-			priv->abyBBVGA[0] = 0x1C;
-			priv->abyBBVGA[2] = 0x00;
-			priv->abyBBVGA[3] = 0x00;
-			BBbReadEmbedded(priv, 0xE7, &byData);
-			if (byData == 0x20)
-				BBbWriteEmbedded(priv, 0xE7, priv->abyBBVGA[0]);
-
-		} else if (priv->byRFType == RF_UW2452) {
-			priv->abyBBVGA[0] = 0x14;
-			BBbReadEmbedded(priv, 0xE7, &byData);
-			if (byData == 0x18) {
-				BBbWriteEmbedded(priv, 0xE7, priv->abyBBVGA[0]);
-				BBbWriteEmbedded(priv, 0xE1, 0xD3);
-			}
-		}
-		BBbWriteEmbedded(priv, 0x88, 0x02);
+		vt6655_mac_set_bb_type(priv->port_offset, BB_TYPE_11B);
+		bb_write_embedded(priv, 0x88, 0x02);
 		bySlot = C_SLOT_LONG;
 		bySIFS = C_SIFS_BG;
-		byDIFS = C_SIFS_BG + 2*C_SLOT_LONG;
+		byDIFS = C_SIFS_BG + 2 * C_SLOT_LONG;
 		byCWMaxMin = 0xA5;
 	} else { /* PK_TYPE_11GA & PK_TYPE_11GB */
-		MACvSetBBType(priv->PortOffset, BB_TYPE_11G);
-		if (priv->byRFType == RF_AIROHA7230) {
-			priv->abyBBVGA[0] = 0x1C;
-			priv->abyBBVGA[2] = 0x00;
-			priv->abyBBVGA[3] = 0x00;
-			BBbReadEmbedded(priv, 0xE7, &byData);
-			if (byData == 0x20)
-				BBbWriteEmbedded(priv, 0xE7, priv->abyBBVGA[0]);
-
-		} else if (priv->byRFType == RF_UW2452) {
-			priv->abyBBVGA[0] = 0x14;
-			BBbReadEmbedded(priv, 0xE7, &byData);
-			if (byData == 0x18) {
-				BBbWriteEmbedded(priv, 0xE7, priv->abyBBVGA[0]);
-				BBbWriteEmbedded(priv, 0xE1, 0xD3);
-			}
-		}
-		BBbWriteEmbedded(priv, 0x88, 0x08);
+		vt6655_mac_set_bb_type(priv->port_offset, BB_TYPE_11G);
+		bb_write_embedded(priv, 0x88, 0x08);
 		bySIFS = C_SIFS_BG;
 
-		if (priv->bShortSlotTime) {
+		if (priv->short_slot_time) {
 			bySlot = C_SLOT_SHORT;
 			byDIFS = C_SIFS_BG + 2 * C_SLOT_SHORT;
 		} else {
 			bySlot = C_SLOT_LONG;
-			byDIFS = C_SIFS_BG + 2*C_SLOT_LONG;
+			byDIFS = C_SIFS_BG + 2 * C_SLOT_LONG;
 		}
 
 		byCWMaxMin = 0xa4;
@@ -318,26 +244,25 @@ bool CARDbSetPhyParameter(struct vnt_private *priv, u8 bb_type)
 
 	if (priv->bySIFS != bySIFS) {
 		priv->bySIFS = bySIFS;
-		VNSvOutPortB(priv->PortOffset + MAC_REG_SIFS, priv->bySIFS);
+		iowrite8(priv->bySIFS, priv->port_offset + MAC_REG_SIFS);
 	}
 	if (priv->byDIFS != byDIFS) {
 		priv->byDIFS = byDIFS;
-		VNSvOutPortB(priv->PortOffset + MAC_REG_DIFS, priv->byDIFS);
+		iowrite8(priv->byDIFS, priv->port_offset + MAC_REG_DIFS);
 	}
 	if (priv->byEIFS != C_EIFS) {
 		priv->byEIFS = C_EIFS;
-		VNSvOutPortB(priv->PortOffset + MAC_REG_EIFS, priv->byEIFS);
+		iowrite8(priv->byEIFS, priv->port_offset + MAC_REG_EIFS);
 	}
 	if (priv->bySlot != bySlot) {
 		priv->bySlot = bySlot;
-		VNSvOutPortB(priv->PortOffset + MAC_REG_SLOT, priv->bySlot);
+		iowrite8(priv->bySlot, priv->port_offset + MAC_REG_SLOT);
 
-		BBvSetShortSlotTime(priv);
+		bb_set_short_slot_time(priv);
 	}
 	if (priv->byCWMaxMin != byCWMaxMin) {
 		priv->byCWMaxMin = byCWMaxMin;
-		VNSvOutPortB(priv->PortOffset + MAC_REG_CWMAXMIN0,
-			     priv->byCWMaxMin);
+		iowrite8(priv->byCWMaxMin, priv->port_offset + MAC_REG_CWMAXMIN0);
 	}
 
 	priv->byPacketType = CARDbyGetPktType(priv);
@@ -368,18 +293,16 @@ bool CARDbUpdateTSF(struct vnt_private *priv, unsigned char byRxRate,
 	u64 local_tsf;
 	u64 qwTSFOffset = 0;
 
-	CARDbGetCurrentTSF(priv, &local_tsf);
+	local_tsf = vt6655_get_current_tsf(priv);
 
 	if (qwBSSTimestamp != local_tsf) {
 		qwTSFOffset = CARDqGetTSFOffset(byRxRate, qwBSSTimestamp,
 						local_tsf);
 		/* adjust TSF, HW's TSF add TSF Offset reg */
-		VNSvOutPortD(priv->PortOffset + MAC_REG_TSFOFST,
-			     (u32)qwTSFOffset);
-		VNSvOutPortD(priv->PortOffset + MAC_REG_TSFOFST + 4,
-			     (u32)(qwTSFOffset >> 32));
-		MACvRegBitsOn(priv->PortOffset, MAC_REG_TFTCTL,
-			      TFTCTL_TSFSYNCEN);
+		qwTSFOffset =  le64_to_cpu(qwTSFOffset);
+		iowrite32((u32)qwTSFOffset, priv->port_offset + MAC_REG_TSFOFST);
+		iowrite32((u32)(qwTSFOffset >> 32), priv->port_offset + MAC_REG_TSFOFST + 4);
+		vt6655_mac_reg_bits_on(priv->port_offset, MAC_REG_TFTCTL, TFTCTL_TSFSYNCEN);
 	}
 	return true;
 }
@@ -400,20 +323,20 @@ bool CARDbUpdateTSF(struct vnt_private *priv, unsigned char byRxRate,
 bool CARDbSetBeaconPeriod(struct vnt_private *priv,
 			  unsigned short wBeaconInterval)
 {
-	u64 qwNextTBTT = 0;
+	u64 qwNextTBTT;
 
-	CARDbGetCurrentTSF(priv, &qwNextTBTT); /* Get Local TSF counter */
+	qwNextTBTT = vt6655_get_current_tsf(priv); /* Get Local TSF counter */
 
 	qwNextTBTT = CARDqGetNextTBTT(qwNextTBTT, wBeaconInterval);
 
 	/* set HW beacon interval */
-	VNSvOutPortW(priv->PortOffset + MAC_REG_BI, wBeaconInterval);
+	iowrite16(wBeaconInterval, priv->port_offset + MAC_REG_BI);
 	priv->wBeaconInterval = wBeaconInterval;
 	/* Set NextTBTT */
-	VNSvOutPortD(priv->PortOffset + MAC_REG_NEXTTBTT, (u32)qwNextTBTT);
-	VNSvOutPortD(priv->PortOffset + MAC_REG_NEXTTBTT + 4,
-		     (u32)(qwNextTBTT >> 32));
-	MACvRegBitsOn(priv->PortOffset, MAC_REG_TFTCTL, TFTCTL_TBTTSYNCEN);
+	qwNextTBTT =  le64_to_cpu(qwNextTBTT);
+	iowrite32((u32)qwNextTBTT, priv->port_offset + MAC_REG_NEXTTBTT);
+	iowrite32((u32)(qwNextTBTT >> 32), priv->port_offset + MAC_REG_NEXTTBTT + 4);
+	vt6655_mac_reg_bits_on(priv->port_offset, MAC_REG_TFTCTL, TFTCTL_TBTTSYNCEN);
 
 	return true;
 }
@@ -427,132 +350,71 @@ bool CARDbSetBeaconPeriod(struct vnt_private *priv,
  *  Out:
  *      none
  *
- * Return Value: true if success; otherwise false
  */
-bool CARDbRadioPowerOff(struct vnt_private *priv)
+void CARDbRadioPowerOff(struct vnt_private *priv)
 {
-	bool bResult = true;
-
-	if (priv->bRadioOff)
-		return true;
+	if (priv->radio_off)
+		return;
 
 	switch (priv->byRFType) {
 	case RF_RFMD2959:
-		MACvWordRegBitsOff(priv->PortOffset, MAC_REG_SOFTPWRCTL,
-				   SOFTPWRCTL_TXPEINV);
-		MACvWordRegBitsOn(priv->PortOffset, MAC_REG_SOFTPWRCTL,
-				  SOFTPWRCTL_SWPE1);
+		vt6655_mac_word_reg_bits_off(priv->port_offset, MAC_REG_SOFTPWRCTL,
+					     SOFTPWRCTL_TXPEINV);
+		vt6655_mac_word_reg_bits_on(priv->port_offset, MAC_REG_SOFTPWRCTL,
+					    SOFTPWRCTL_SWPE1);
 		break;
 
 	case RF_AIROHA:
 	case RF_AL2230S:
-	case RF_AIROHA7230:
-		MACvWordRegBitsOff(priv->PortOffset, MAC_REG_SOFTPWRCTL,
-				   SOFTPWRCTL_SWPE2);
-		MACvWordRegBitsOff(priv->PortOffset, MAC_REG_SOFTPWRCTL,
-				   SOFTPWRCTL_SWPE3);
+		vt6655_mac_word_reg_bits_off(priv->port_offset, MAC_REG_SOFTPWRCTL,
+					     SOFTPWRCTL_SWPE2);
+		vt6655_mac_word_reg_bits_off(priv->port_offset, MAC_REG_SOFTPWRCTL,
+					     SOFTPWRCTL_SWPE3);
 		break;
 	}
 
-	MACvRegBitsOff(priv->PortOffset, MAC_REG_HOSTCR, HOSTCR_RXON);
+	vt6655_mac_reg_bits_off(priv->port_offset, MAC_REG_HOSTCR, HOSTCR_RXON);
 
-	BBvSetDeepSleep(priv, priv->byLocalID);
+	bb_set_deep_sleep(priv, priv->local_id);
 
-	priv->bRadioOff = true;
+	priv->radio_off = true;
 	pr_debug("chester power off\n");
-	MACvRegBitsOn(priv->PortOffset, MAC_REG_GPIOCTL0,
-		      LED_ACTSET);  /* LED issue */
-	return bResult;
+	vt6655_mac_reg_bits_on(priv->port_offset, MAC_REG_GPIOCTL0, LED_ACTSET);  /* LED issue */
 }
 
-/*
- * Description: Turn on Radio power
- *
- * Parameters:
- *  In:
- *      priv         - The adapter to be turned on
- *  Out:
- *      none
- *
- * Return Value: true if success; otherwise false
- */
-bool CARDbRadioPowerOn(struct vnt_private *priv)
-{
-	bool bResult = true;
-
-	pr_debug("chester power on\n");
-	if (priv->bRadioControlOff) {
-		if (priv->bHWRadioOff)
-			pr_debug("chester bHWRadioOff\n");
-		if (priv->bRadioControlOff)
-			pr_debug("chester bRadioControlOff\n");
-		return false; }
-
-	if (!priv->bRadioOff) {
-		pr_debug("chester pbRadioOff\n");
-		return true; }
-
-	BBvExitDeepSleep(priv, priv->byLocalID);
-
-	MACvRegBitsOn(priv->PortOffset, MAC_REG_HOSTCR, HOSTCR_RXON);
-
-	switch (priv->byRFType) {
-	case RF_RFMD2959:
-		MACvWordRegBitsOn(priv->PortOffset, MAC_REG_SOFTPWRCTL,
-				  SOFTPWRCTL_TXPEINV);
-		MACvWordRegBitsOff(priv->PortOffset, MAC_REG_SOFTPWRCTL,
-				   SOFTPWRCTL_SWPE1);
-		break;
-
-	case RF_AIROHA:
-	case RF_AL2230S:
-	case RF_AIROHA7230:
-		MACvWordRegBitsOn(priv->PortOffset, MAC_REG_SOFTPWRCTL,
-				  (SOFTPWRCTL_SWPE2 | SOFTPWRCTL_SWPE3));
-		break;
-	}
-
-	priv->bRadioOff = false;
-	pr_debug("chester power on\n");
-	MACvRegBitsOff(priv->PortOffset, MAC_REG_GPIOCTL0,
-		       LED_ACTSET); /* LED issue */
-	return bResult;
-}
-
-void
-CARDvSafeResetTx(
-	struct vnt_private *priv
-)
+void CARDvSafeResetTx(struct vnt_private *priv)
 {
 	unsigned int uu;
 	struct vnt_tx_desc *pCurrTD;
 
 	/* initialize TD index */
-	priv->apTailTD[0] = priv->apCurrTD[0] = &(priv->apTD0Rings[0]);
-	priv->apTailTD[1] = priv->apCurrTD[1] = &(priv->apTD1Rings[0]);
+	priv->apTailTD[0] = &priv->apTD0Rings[0];
+	priv->apCurrTD[0] = &priv->apTD0Rings[0];
+
+	priv->apTailTD[1] = &priv->apTD1Rings[0];
+	priv->apCurrTD[1] = &priv->apTD1Rings[0];
 
 	for (uu = 0; uu < TYPE_MAXTD; uu++)
 		priv->iTDUsed[uu] = 0;
 
 	for (uu = 0; uu < priv->opts.tx_descs[0]; uu++) {
-		pCurrTD = &(priv->apTD0Rings[uu]);
+		pCurrTD = &priv->apTD0Rings[uu];
 		pCurrTD->td0.owner = OWNED_BY_HOST;
 		/* init all Tx Packet pointer to NULL */
 	}
 	for (uu = 0; uu < priv->opts.tx_descs[1]; uu++) {
-		pCurrTD = &(priv->apTD1Rings[uu]);
+		pCurrTD = &priv->apTD1Rings[uu];
 		pCurrTD->td0.owner = OWNED_BY_HOST;
 		/* init all Tx Packet pointer to NULL */
 	}
 
 	/* set MAC TD pointer */
-	MACvSetCurrTXDescAddr(TYPE_TXDMA0, priv, priv->td0_pool_dma);
+	vt6655_mac_set_curr_tx_desc_addr(TYPE_TXDMA0, priv, priv->td0_pool_dma);
 
-	MACvSetCurrTXDescAddr(TYPE_AC0DMA, priv, priv->td1_pool_dma);
+	vt6655_mac_set_curr_tx_desc_addr(TYPE_AC0DMA, priv, priv->td1_pool_dma);
 
 	/* set MAC Beacon TX pointer */
-	MACvSetCurrBCNTxDescAddr(priv->PortOffset,
-				 (priv->tx_beacon_dma));
+	iowrite32((u32)priv->tx_beacon_dma, priv->port_offset + MAC_REG_BCNDMAPTR);
 }
 
 /*
@@ -567,21 +429,18 @@ CARDvSafeResetTx(
  *
  * Return Value: none
  */
-void
-CARDvSafeResetRx(
-	struct vnt_private *priv
-)
+void CARDvSafeResetRx(struct vnt_private *priv)
 {
 	unsigned int uu;
 	struct vnt_rx_desc *pDesc;
 
 	/* initialize RD index */
-	priv->pCurrRD[0] = &(priv->aRD0Ring[0]);
-	priv->pCurrRD[1] = &(priv->aRD1Ring[0]);
+	priv->pCurrRD[0] = &priv->aRD0Ring[0];
+	priv->pCurrRD[1] = &priv->aRD1Ring[0];
 
 	/* init state, all RD is chip's */
 	for (uu = 0; uu < priv->opts.rx_descs0; uu++) {
-		pDesc = &(priv->aRD0Ring[uu]);
+		pDesc = &priv->aRD0Ring[uu];
 		pDesc->rd0.res_count = cpu_to_le16(priv->rx_buf_sz);
 		pDesc->rd0.owner = OWNED_BY_NIC;
 		pDesc->rd1.req_count = cpu_to_le16(priv->rx_buf_sz);
@@ -589,19 +448,19 @@ CARDvSafeResetRx(
 
 	/* init state, all RD is chip's */
 	for (uu = 0; uu < priv->opts.rx_descs1; uu++) {
-		pDesc = &(priv->aRD1Ring[uu]);
+		pDesc = &priv->aRD1Ring[uu];
 		pDesc->rd0.res_count = cpu_to_le16(priv->rx_buf_sz);
 		pDesc->rd0.owner = OWNED_BY_NIC;
 		pDesc->rd1.req_count = cpu_to_le16(priv->rx_buf_sz);
 	}
 
 	/* set perPkt mode */
-	MACvRx0PerPktMode(priv->PortOffset);
-	MACvRx1PerPktMode(priv->PortOffset);
+	iowrite32(RX_PERPKT, priv->port_offset + MAC_REG_RXDMACTL0);
+	iowrite32(RX_PERPKT, priv->port_offset + MAC_REG_RXDMACTL1);
 	/* set MAC RD pointer */
-	MACvSetCurrRx0DescAddr(priv, priv->rd0_pool_dma);
+	vt6655_mac_set_curr_rx_0_desc_addr(priv, priv->rd0_pool_dma);
 
-	MACvSetCurrRx1DescAddr(priv, priv->rd1_pool_dma);
+	vt6655_mac_set_curr_rx_1_desc_addr(priv, priv->rd1_pool_dma);
 }
 
 /*
@@ -650,19 +509,19 @@ static unsigned short CARDwGetOFDMControlRate(struct vnt_private *priv,
 	pr_debug("BASIC RATE: %X\n", priv->basic_rates);
 
 	if (!CARDbIsOFDMinBasicRate((void *)priv)) {
-		pr_debug("CARDwGetOFDMControlRate:(NO OFDM) %d\n", wRateIdx);
+		pr_debug("%s:(NO OFDM) %d\n", __func__, wRateIdx);
 		if (wRateIdx > RATE_24M)
 			wRateIdx = RATE_24M;
 		return wRateIdx;
 	}
 	while (ui > RATE_11M) {
 		if (priv->basic_rates & ((u32)0x1 << ui)) {
-			pr_debug("CARDwGetOFDMControlRate : %d\n", ui);
+			pr_debug("%s : %d\n", __func__, ui);
 			return (unsigned short)ui;
 		}
 		ui--;
 	}
-	pr_debug("CARDwGetOFDMControlRate: 6M\n");
+	pr_debug("%s: 6M\n", __func__);
 	return (unsigned short)RATE_24M;
 }
 
@@ -686,7 +545,7 @@ void CARDvSetRSPINF(struct vnt_private *priv, u8 bb_type)
 	spin_lock_irqsave(&priv->lock, flags);
 
 	/* Set to Page1 */
-	MACvSelectPage1(priv->PortOffset);
+	VT6655_MAC_SELECT_PAGE1(priv->port_offset);
 
 	/* RSPINF_b_1 */
 	vnt_get_phy_field(priv, 14,
@@ -696,7 +555,7 @@ void CARDvSetRSPINF(struct vnt_private *priv, u8 bb_type)
 	 /* swap over to get correct write order */
 	swap(phy.swap[0], phy.swap[1]);
 
-	VNSvOutPortD(priv->PortOffset + MAC_REG_RSPINF_B_1, phy.field_write);
+	iowrite32(phy.field_write, priv->port_offset + MAC_REG_RSPINF_B_1);
 
 	/* RSPINF_b_2 */
 	vnt_get_phy_field(priv, 14,
@@ -705,7 +564,7 @@ void CARDvSetRSPINF(struct vnt_private *priv, u8 bb_type)
 
 	swap(phy.swap[0], phy.swap[1]);
 
-	VNSvOutPortD(priv->PortOffset + MAC_REG_RSPINF_B_2, phy.field_write);
+	iowrite32(phy.field_write, priv->port_offset + MAC_REG_RSPINF_B_2);
 
 	/* RSPINF_b_5 */
 	vnt_get_phy_field(priv, 14,
@@ -714,7 +573,7 @@ void CARDvSetRSPINF(struct vnt_private *priv, u8 bb_type)
 
 	swap(phy.swap[0], phy.swap[1]);
 
-	VNSvOutPortD(priv->PortOffset + MAC_REG_RSPINF_B_5, phy.field_write);
+	iowrite32(phy.field_write, priv->port_offset + MAC_REG_RSPINF_B_5);
 
 	/* RSPINF_b_11 */
 	vnt_get_phy_field(priv, 14,
@@ -723,81 +582,68 @@ void CARDvSetRSPINF(struct vnt_private *priv, u8 bb_type)
 
 	swap(phy.swap[0], phy.swap[1]);
 
-	VNSvOutPortD(priv->PortOffset + MAC_REG_RSPINF_B_11, phy.field_write);
+	iowrite32(phy.field_write, priv->port_offset + MAC_REG_RSPINF_B_11);
 
 	/* RSPINF_a_6 */
 	s_vCalculateOFDMRParameter(RATE_6M,
 				   bb_type,
 				   &byTxRate,
 				   &byRsvTime);
-	VNSvOutPortW(priv->PortOffset + MAC_REG_RSPINF_A_6,
-		     MAKEWORD(byTxRate, byRsvTime));
+	iowrite16(MAKEWORD(byTxRate, byRsvTime), priv->port_offset + MAC_REG_RSPINF_A_6);
 	/* RSPINF_a_9 */
 	s_vCalculateOFDMRParameter(RATE_9M,
 				   bb_type,
 				   &byTxRate,
 				   &byRsvTime);
-	VNSvOutPortW(priv->PortOffset + MAC_REG_RSPINF_A_9,
-		     MAKEWORD(byTxRate, byRsvTime));
+	iowrite16(MAKEWORD(byTxRate, byRsvTime), priv->port_offset + MAC_REG_RSPINF_A_9);
 	/* RSPINF_a_12 */
 	s_vCalculateOFDMRParameter(RATE_12M,
 				   bb_type,
 				   &byTxRate,
 				   &byRsvTime);
-	VNSvOutPortW(priv->PortOffset + MAC_REG_RSPINF_A_12,
-		     MAKEWORD(byTxRate, byRsvTime));
+	iowrite16(MAKEWORD(byTxRate, byRsvTime), priv->port_offset + MAC_REG_RSPINF_A_12);
 	/* RSPINF_a_18 */
 	s_vCalculateOFDMRParameter(RATE_18M,
 				   bb_type,
 				   &byTxRate,
 				   &byRsvTime);
-	VNSvOutPortW(priv->PortOffset + MAC_REG_RSPINF_A_18,
-		     MAKEWORD(byTxRate, byRsvTime));
+	iowrite16(MAKEWORD(byTxRate, byRsvTime), priv->port_offset + MAC_REG_RSPINF_A_18);
 	/* RSPINF_a_24 */
 	s_vCalculateOFDMRParameter(RATE_24M,
 				   bb_type,
 				   &byTxRate,
 				   &byRsvTime);
-	VNSvOutPortW(priv->PortOffset + MAC_REG_RSPINF_A_24,
-		     MAKEWORD(byTxRate, byRsvTime));
+	iowrite16(MAKEWORD(byTxRate, byRsvTime), priv->port_offset + MAC_REG_RSPINF_A_24);
 	/* RSPINF_a_36 */
-	s_vCalculateOFDMRParameter(CARDwGetOFDMControlRate(
-							   (void *)priv,
+	s_vCalculateOFDMRParameter(CARDwGetOFDMControlRate((void *)priv,
 							   RATE_36M),
 				   bb_type,
 				   &byTxRate,
 				   &byRsvTime);
-	VNSvOutPortW(priv->PortOffset + MAC_REG_RSPINF_A_36,
-		     MAKEWORD(byTxRate, byRsvTime));
+	iowrite16(MAKEWORD(byTxRate, byRsvTime), priv->port_offset + MAC_REG_RSPINF_A_36);
 	/* RSPINF_a_48 */
-	s_vCalculateOFDMRParameter(CARDwGetOFDMControlRate(
-							   (void *)priv,
+	s_vCalculateOFDMRParameter(CARDwGetOFDMControlRate((void *)priv,
 							   RATE_48M),
 				   bb_type,
 				   &byTxRate,
 				   &byRsvTime);
-	VNSvOutPortW(priv->PortOffset + MAC_REG_RSPINF_A_48,
-		     MAKEWORD(byTxRate, byRsvTime));
+	iowrite16(MAKEWORD(byTxRate, byRsvTime), priv->port_offset + MAC_REG_RSPINF_A_48);
 	/* RSPINF_a_54 */
-	s_vCalculateOFDMRParameter(CARDwGetOFDMControlRate(
-							   (void *)priv,
+	s_vCalculateOFDMRParameter(CARDwGetOFDMControlRate((void *)priv,
 							   RATE_54M),
 				   bb_type,
 				   &byTxRate,
 				   &byRsvTime);
-	VNSvOutPortW(priv->PortOffset + MAC_REG_RSPINF_A_54,
-		     MAKEWORD(byTxRate, byRsvTime));
+	iowrite16(MAKEWORD(byTxRate, byRsvTime), priv->port_offset + MAC_REG_RSPINF_A_54);
 	/* RSPINF_a_72 */
-	s_vCalculateOFDMRParameter(CARDwGetOFDMControlRate(
-							   (void *)priv,
+	s_vCalculateOFDMRParameter(CARDwGetOFDMControlRate((void *)priv,
 							   RATE_54M),
 				   bb_type,
 				   &byTxRate,
 				   &byRsvTime);
-	VNSvOutPortW(priv->PortOffset + MAC_REG_RSPINF_A_72,
-		     MAKEWORD(byTxRate, byRsvTime));
+	iowrite16(MAKEWORD(byTxRate, byRsvTime), priv->port_offset + MAC_REG_RSPINF_A_72);
 	/* Set to Page0 */
-	MACvSelectPage0(priv->PortOffset);
+	VT6655_MAC_SELECT_PAGE0(priv->port_offset);
 
 	spin_unlock_irqrestore(&priv->lock, flags);
 }
@@ -849,54 +695,6 @@ unsigned char CARDbyGetPktType(struct vnt_private *priv)
 }
 
 /*
- * Description: Set NIC Loopback mode
- *
- * Parameters:
- *  In:
- *      priv         - The adapter to be set
- *      wLoopbackMode   - Loopback mode to be set
- *  Out:
- *      none
- *
- * Return Value: none
- */
-void CARDvSetLoopbackMode(struct vnt_private *priv,
-			  unsigned short wLoopbackMode)
-{
-	switch (wLoopbackMode) {
-	case CARD_LB_NONE:
-	case CARD_LB_MAC:
-	case CARD_LB_PHY:
-		break;
-	default:
-		break;
-	}
-	/* set MAC loopback */
-	MACvSetLoopbackMode(priv, LOBYTE(wLoopbackMode));
-	/* set Baseband loopback */
-}
-
-/*
- * Description: Software Reset NIC
- *
- * Parameters:
- *  In:
- *      priv         - The adapter to be reset
- *  Out:
- *      none
- *
- * Return Value: none
- */
-bool CARDbSoftwareReset(struct vnt_private *priv)
-{
-	/* reset MAC */
-	if (!MACbSafeSoftwareReset(priv))
-		return false;
-
-	return true;
-}
-
-/*
  * Description: Calculate TSF offset of two TSF input
  *              Get TSF Offset from RxBCN's TSF and local TSF
  *
@@ -912,16 +710,13 @@ bool CARDbSoftwareReset(struct vnt_private *priv)
  */
 u64 CARDqGetTSFOffset(unsigned char byRxRate, u64 qwTSF1, u64 qwTSF2)
 {
-	u64 qwTSFOffset = 0;
 	unsigned short wRxBcnTSFOffst;
 
-	wRxBcnTSFOffst = cwRXBCNTSFOff[byRxRate%MAX_RATE];
+	wRxBcnTSFOffst = cwRXBCNTSFOff[byRxRate % MAX_RATE];
 
 	qwTSF2 += (u64)wRxBcnTSFOffst;
 
-	qwTSFOffset = qwTSF1 - qwTSF2;
-
-	return qwTSFOffset;
+	return qwTSF1 - qwTSF2;
 }
 
 /*
@@ -932,28 +727,28 @@ u64 CARDqGetTSFOffset(unsigned char byRxRate, u64 qwTSF1, u64 qwTSF2)
  *  In:
  *      priv         - The adapter to be read
  *  Out:
- *      qwCurrTSF       - Current TSF counter
+ *      none
  *
- * Return Value: true if success; otherwise false
+ * Return Value: Current TSF counter
  */
-bool CARDbGetCurrentTSF(struct vnt_private *priv, u64 *pqwCurrTSF)
+u64 vt6655_get_current_tsf(struct vnt_private *priv)
 {
-	void __iomem *dwIoBase = priv->PortOffset;
+	void __iomem *iobase = priv->port_offset;
 	unsigned short ww;
-	unsigned char byData;
+	unsigned char data;
+	u32 low, high;
 
-	MACvRegBitsOn(dwIoBase, MAC_REG_TFTCTL, TFTCTL_TSFCNTRRD);
+	vt6655_mac_reg_bits_on(iobase, MAC_REG_TFTCTL, TFTCTL_TSFCNTRRD);
 	for (ww = 0; ww < W_MAX_TIMEOUT; ww++) {
-		VNSvInPortB(dwIoBase + MAC_REG_TFTCTL, &byData);
-		if (!(byData & TFTCTL_TSFCNTRRD))
+		data = ioread8(iobase + MAC_REG_TFTCTL);
+		if (!(data & TFTCTL_TSFCNTRRD))
 			break;
 	}
 	if (ww == W_MAX_TIMEOUT)
-		return false;
-	VNSvInPortD(dwIoBase + MAC_REG_TSFCNTR, (u32 *)pqwCurrTSF);
-	VNSvInPortD(dwIoBase + MAC_REG_TSFCNTR + 4, (u32 *)pqwCurrTSF + 1);
-
-	return true;
+		return 0;
+	low = ioread32(iobase + MAC_REG_TSFCNTR);
+	high = ioread32(iobase + MAC_REG_TSFCNTR + 4);
+	return le64_to_cpu(low + ((u64)high << 32));
 }
 
 /*
@@ -989,7 +784,7 @@ u64 CARDqGetNextTBTT(u64 qwTSF, unsigned short wBeaconInterval)
  *
  * Parameters:
  *  In:
- *      dwIoBase        - IO Base
+ *      iobase          - IO Base
  *      wBeaconInterval - Beacon Interval
  *  Out:
  *      none
@@ -999,16 +794,17 @@ u64 CARDqGetNextTBTT(u64 qwTSF, unsigned short wBeaconInterval)
 void CARDvSetFirstNextTBTT(struct vnt_private *priv,
 			   unsigned short wBeaconInterval)
 {
-	void __iomem *dwIoBase = priv->PortOffset;
-	u64 qwNextTBTT = 0;
+	void __iomem *iobase = priv->port_offset;
+	u64 qwNextTBTT;
 
-	CARDbGetCurrentTSF(priv, &qwNextTBTT); /* Get Local TSF counter */
+	qwNextTBTT = vt6655_get_current_tsf(priv); /* Get Local TSF counter */
 
 	qwNextTBTT = CARDqGetNextTBTT(qwNextTBTT, wBeaconInterval);
 	/* Set NextTBTT */
-	VNSvOutPortD(dwIoBase + MAC_REG_NEXTTBTT, (u32)qwNextTBTT);
-	VNSvOutPortD(dwIoBase + MAC_REG_NEXTTBTT + 4, (u32)(qwNextTBTT >> 32));
-	MACvRegBitsOn(dwIoBase, MAC_REG_TFTCTL, TFTCTL_TBTTSYNCEN);
+	qwNextTBTT =  le64_to_cpu(qwNextTBTT);
+	iowrite32((u32)qwNextTBTT, iobase + MAC_REG_NEXTTBTT);
+	iowrite32((u32)(qwNextTBTT >> 32), iobase + MAC_REG_NEXTTBTT + 4);
+	vt6655_mac_reg_bits_on(iobase, MAC_REG_TFTCTL, TFTCTL_TBTTSYNCEN);
 }
 
 /*
@@ -1028,12 +824,13 @@ void CARDvSetFirstNextTBTT(struct vnt_private *priv,
 void CARDvUpdateNextTBTT(struct vnt_private *priv, u64 qwTSF,
 			 unsigned short wBeaconInterval)
 {
-	void __iomem *dwIoBase = priv->PortOffset;
+	void __iomem *iobase = priv->port_offset;
 
 	qwTSF = CARDqGetNextTBTT(qwTSF, wBeaconInterval);
 	/* Set NextTBTT */
-	VNSvOutPortD(dwIoBase + MAC_REG_NEXTTBTT, (u32)qwTSF);
-	VNSvOutPortD(dwIoBase + MAC_REG_NEXTTBTT + 4, (u32)(qwTSF >> 32));
-	MACvRegBitsOn(dwIoBase, MAC_REG_TFTCTL, TFTCTL_TBTTSYNCEN);
+	qwTSF =  le64_to_cpu(qwTSF);
+	iowrite32((u32)qwTSF, iobase + MAC_REG_NEXTTBTT);
+	iowrite32((u32)(qwTSF >> 32), iobase + MAC_REG_NEXTTBTT + 4);
+	vt6655_mac_reg_bits_on(iobase, MAC_REG_TFTCTL, TFTCTL_TBTTSYNCEN);
 	pr_debug("Card:Update Next TBTT[%8llx]\n", qwTSF);
 }

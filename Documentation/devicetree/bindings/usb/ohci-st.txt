@@ -15,12 +15,12 @@ See: Documentation/devicetree/bindings/clock/clock-bindings.txt
 
  - resets		: phandle to the powerdown and reset controller for the USB IP
  - reset-names		: should be "power" and "softreset".
-See: Documentation/devicetree/bindings/reset/st,sti-powerdown.txt
+See: Documentation/devicetree/bindings/reset/st,stih407-powerdown.yaml
 See: Documentation/devicetree/bindings/reset/reset.txt
 
 Example:
 
-	ohci0: usb@0xfe1ffc00 {
+	ohci0: usb@fe1ffc00 {
 		compatible = "st,st-ohci-300x";
 		reg = <0xfe1ffc00 0x100>;
 		interrupts = <GIC_SPI 149 IRQ_TYPE_NONE>;
@@ -29,7 +29,6 @@ Example:
 		clock-names = "ic", "clk48";
 		phys = <&usb2_phy>;
 		phy-names = "usb";
-		status = "okay";
 
 		resets = <&powerdown STIH416_USB0_POWERDOWN>,
 			 <&softreset STIH416_USB0_SOFTRESET>;

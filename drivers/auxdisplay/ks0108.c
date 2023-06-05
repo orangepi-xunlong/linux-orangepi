@@ -1,26 +1,12 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  *    Filename: ks0108.c
  *     Version: 0.1.0
  * Description: ks0108 LCD Controller driver
- *     License: GPLv2
  *     Depends: parport
  *
- *      Author: Copyright (C) Miguel Ojeda Sandonis
+ *      Author: Copyright (C) Miguel Ojeda <ojeda@kernel.org>
  *        Date: 2006-10-31
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License version 2 as
- *  published by the Free Software Foundation.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
- *
  */
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
@@ -29,10 +15,7 @@
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/delay.h>
-#include <linux/fs.h>
-#include <linux/io.h>
 #include <linux/parport.h>
-#include <linux/uaccess.h>
 #include <linux/ks0108.h>
 
 #define KS0108_NAME "ks0108"
@@ -42,11 +25,11 @@
  */
 
 static unsigned int ks0108_port = CONFIG_KS0108_PORT;
-module_param(ks0108_port, uint, S_IRUGO);
+module_param(ks0108_port, uint, 0444);
 MODULE_PARM_DESC(ks0108_port, "Parallel port where the LCD is connected");
 
 static unsigned int ks0108_delay = CONFIG_KS0108_DELAY;
-module_param(ks0108_delay, uint, S_IRUGO);
+module_param(ks0108_delay, uint, 0444);
 MODULE_PARM_DESC(ks0108_delay, "Delay between each control writing (microseconds)");
 
 /*
@@ -181,21 +164,9 @@ static struct parport_driver ks0108_parport_driver = {
 	.detach = ks0108_parport_detach,
 	.devmodel = true,
 };
-
-static int __init ks0108_init(void)
-{
-	return parport_register_driver(&ks0108_parport_driver);
-}
-
-static void __exit ks0108_exit(void)
-{
-	parport_unregister_driver(&ks0108_parport_driver);
-}
-
-module_init(ks0108_init);
-module_exit(ks0108_exit);
+module_parport_driver(ks0108_parport_driver);
 
 MODULE_LICENSE("GPL v2");
-MODULE_AUTHOR("Miguel Ojeda Sandonis <miguel.ojeda.sandonis@gmail.com>");
+MODULE_AUTHOR("Miguel Ojeda <ojeda@kernel.org>");
 MODULE_DESCRIPTION("ks0108 LCD Controller driver");
 

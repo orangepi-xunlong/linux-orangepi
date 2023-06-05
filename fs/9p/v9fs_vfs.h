@@ -1,24 +1,9 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * V9FS VFS extensions.
  *
  *  Copyright (C) 2004 by Eric Van Hensbergen <ericvh@gmail.com>
  *  Copyright (C) 2002 by Ron Minnich <rminnich@lanl.gov>
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License version 2
- *  as published by the Free Software Foundation.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to:
- *  Free Software Foundation
- *  51 Franklin Street, Fifth Floor
- *  Boston, MA  02111-1301  USA
- *
  */
 #ifndef FS_9P_V9FS_VFS_H
 #define FS_9P_V9FS_VFS_H
@@ -58,10 +43,11 @@ extern const struct file_operations v9fs_mmap_file_operations_dotl;
 extern struct kmem_cache *v9fs_inode_cache;
 
 struct inode *v9fs_alloc_inode(struct super_block *sb);
-void v9fs_destroy_inode(struct inode *inode);
-struct inode *v9fs_get_inode(struct super_block *sb, umode_t mode, dev_t);
+void v9fs_free_inode(struct inode *inode);
+struct inode *v9fs_get_inode(struct super_block *sb, umode_t mode,
+			     dev_t rdev);
 int v9fs_init_inode(struct v9fs_session_info *v9ses,
-		    struct inode *inode, umode_t mode, dev_t);
+		    struct inode *inode, umode_t mode, dev_t rdev);
 void v9fs_evict_inode(struct inode *inode);
 ino_t v9fs_qid2ino(struct p9_qid *qid);
 void v9fs_stat2inode(struct p9_wstat *stat, struct inode *inode,
@@ -74,7 +60,8 @@ void v9fs_inode2stat(struct inode *inode, struct p9_wstat *stat);
 int v9fs_uflags2omode(int uflags, int extended);
 
 void v9fs_blank_wstat(struct p9_wstat *wstat);
-int v9fs_vfs_setattr_dotl(struct dentry *, struct iattr *);
+int v9fs_vfs_setattr_dotl(struct user_namespace *mnt_userns,
+			  struct dentry *dentry, struct iattr *iattr);
 int v9fs_file_fsync_dotl(struct file *filp, loff_t start, loff_t end,
 			 int datasync);
 int v9fs_refresh_inode(struct p9_fid *fid, struct inode *inode);
@@ -82,9 +69,9 @@ int v9fs_refresh_inode_dotl(struct p9_fid *fid, struct inode *inode);
 static inline void v9fs_invalidate_inode_attr(struct inode *inode)
 {
 	struct v9fs_inode *v9inode;
+
 	v9inode = V9FS_I(inode);
 	v9inode->cache_validity |= V9FS_INO_INVALID_ATTR;
-	return;
 }
 
 int v9fs_open_to_dotl_flags(int flags);

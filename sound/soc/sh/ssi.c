@@ -1,14 +1,11 @@
-/*
- * Serial Sound Interface (I2S) support for SH7760/SH7780
- *
- * Copyright (c) 2007 Manuel Lauss <mano@roarinelk.homelinux.net>
- *
- *  licensed under the terms outlined in the file COPYING at the root
- *  of the linux kernel sources.
- *
- * dont forget to set IPSEL/OMSEL register bits (in your board code) to
- * enable SSI output pins!
- */
+// SPDX-License-Identifier: GPL-2.0
+//
+// Serial Sound Interface (I2S) support for SH7760/SH7780
+//
+// Copyright (c) 2007 Manuel Lauss <mano@roarinelk.homelinux.net>
+//
+// dont forget to set IPSEL/OMSEL register bits (in your board code) to
+// enable SSI output pins!
 
 /*
  * LIMITATIONS:
@@ -294,20 +291,20 @@ static int ssi_set_fmt(struct snd_soc_dai *dai, unsigned int fmt)
 		return -EINVAL;
 	}
 
-	switch (fmt & SND_SOC_DAIFMT_MASTER_MASK) {
-	case SND_SOC_DAIFMT_CBM_CFM:
+	switch (fmt & SND_SOC_DAIFMT_CLOCK_PROVIDER_MASK) {
+	case SND_SOC_DAIFMT_BC_FC:
 		break;
-	case SND_SOC_DAIFMT_CBS_CFM:
+	case SND_SOC_DAIFMT_BP_FC:
 		ssicr |= CR_SCK_MASTER;
 		break;
-	case SND_SOC_DAIFMT_CBM_CFS:
+	case SND_SOC_DAIFMT_BC_FP:
 		ssicr |= CR_SWS_MASTER;
 		break;
-	case SND_SOC_DAIFMT_CBS_CFS:
+	case SND_SOC_DAIFMT_BP_FP:
 		ssicr |= CR_SWS_MASTER | CR_SCK_MASTER;
 		break;
 	default:
-		pr_debug("ssi: invalid master/slave configuration\n");
+		pr_debug("ssi: invalid master/secondary configuration\n");
 		return -EINVAL;
 	}
 
@@ -380,7 +377,8 @@ static struct snd_soc_dai_driver sh4_ssi_dai[] = {
 };
 
 static const struct snd_soc_component_driver sh4_ssi_component = {
-	.name		= "sh4-ssi",
+	.name			= "sh4-ssi",
+	.legacy_dai_naming	= 1,
 };
 
 static int sh4_soc_dai_probe(struct platform_device *pdev)
@@ -400,6 +398,6 @@ static struct platform_driver sh4_ssi_driver = {
 
 module_platform_driver(sh4_ssi_driver);
 
-MODULE_LICENSE("GPL");
+MODULE_LICENSE("GPL v2");
 MODULE_DESCRIPTION("SuperH onchip SSI (I2S) audio driver");
 MODULE_AUTHOR("Manuel Lauss <mano@roarinelk.homelinux.net>");

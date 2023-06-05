@@ -84,39 +84,16 @@ struct usnic_ib_qp_grp_flow {
 	char				dentry_name[32];
 };
 
-static const struct
-usnic_vnic_res_spec min_transport_spec[USNIC_TRANSPORT_MAX] = {
-	{ /*USNIC_TRANSPORT_UNKNOWN*/
-		.resources = {
-			{.type = USNIC_VNIC_RES_TYPE_EOL,	.cnt = 0,},
-		},
-	},
-	{ /*USNIC_TRANSPORT_ROCE_CUSTOM*/
-		.resources = {
-			{.type = USNIC_VNIC_RES_TYPE_WQ,	.cnt = 1,},
-			{.type = USNIC_VNIC_RES_TYPE_RQ,	.cnt = 1,},
-			{.type = USNIC_VNIC_RES_TYPE_CQ,	.cnt = 1,},
-			{.type = USNIC_VNIC_RES_TYPE_EOL,	.cnt = 0,},
-		},
-	},
-	{ /*USNIC_TRANSPORT_IPV4_UDP*/
-		.resources = {
-			{.type = USNIC_VNIC_RES_TYPE_WQ,	.cnt = 1,},
-			{.type = USNIC_VNIC_RES_TYPE_RQ,	.cnt = 1,},
-			{.type = USNIC_VNIC_RES_TYPE_CQ,	.cnt = 1,},
-			{.type = USNIC_VNIC_RES_TYPE_EOL,	.cnt = 0,},
-		},
-	},
-};
+extern const struct usnic_vnic_res_spec min_transport_spec[USNIC_TRANSPORT_MAX];
 
 const char *usnic_ib_qp_grp_state_to_string(enum ib_qp_state state);
 int usnic_ib_qp_grp_dump_hdr(char *buf, int buf_sz);
 int usnic_ib_qp_grp_dump_rows(void *obj, char *buf, int buf_sz);
-struct usnic_ib_qp_grp *
-usnic_ib_qp_grp_create(struct usnic_fwd_dev *ufdev, struct usnic_ib_vf *vf,
-			struct usnic_ib_pd *pd,
-			struct usnic_vnic_res_spec *res_spec,
-			struct usnic_transport_spec *trans_spec);
+int usnic_ib_qp_grp_create(struct usnic_ib_qp_grp *qp,
+			   struct usnic_fwd_dev *ufdev, struct usnic_ib_vf *vf,
+			   struct usnic_ib_pd *pd,
+			   struct usnic_vnic_res_spec *res_spec,
+			   struct usnic_transport_spec *trans_spec);
 void usnic_ib_qp_grp_destroy(struct usnic_ib_qp_grp *qp_grp);
 int usnic_ib_qp_grp_modify(struct usnic_ib_qp_grp *qp_grp,
 				enum ib_qp_state new_state,

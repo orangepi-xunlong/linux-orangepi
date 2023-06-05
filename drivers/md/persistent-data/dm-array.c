@@ -68,8 +68,8 @@ static int array_block_check(struct dm_block_validator *v,
 					       CSUM_XOR));
 	if (csum_disk != bh_le->csum) {
 		DMERR_LIMIT("array_block_check failed: csum %u != wanted %u",
-			    (unsigned) le32_to_cpu(csum_disk),
-			    (unsigned) le32_to_cpu(bh_le->csum));
+			    (unsigned int) le32_to_cpu(csum_disk),
+			    (unsigned int) le32_to_cpu(bh_le->csum));
 		return -EILSEQ;
 	}
 
@@ -94,7 +94,7 @@ static struct dm_block_validator array_validator = {
  * index - The index into _this_ specific block.
  */
 static void *element_at(struct dm_array_info *info, struct array_block *ab,
-			unsigned index)
+			unsigned int index)
 {
 	unsigned char *entry = (unsigned char *) (ab + 1);
 
@@ -108,12 +108,10 @@ static void *element_at(struct dm_array_info *info, struct array_block *ab,
  * in an array block.
  */
 static void on_entries(struct dm_array_info *info, struct array_block *ab,
-		       void (*fn)(void *, const void *))
+		       void (*fn)(void *, const void *, unsigned int))
 {
-	unsigned i, nr_entries = le32_to_cpu(ab->nr_entries);
-
-	for (i = 0; i < nr_entries; i++)
-		fn(info->value_type.context, element_at(info, ab, i));
+	unsigned int nr_entries = le32_to_cpu(ab->nr_entries);
+	fn(info->value_type.context, element_at(info, ab, 0), nr_entries);
 }
 
 /*
@@ -173,21 +171,20 @@ static int alloc_ablock(struct dm_array_info *info, size_t size_of_block,
  * the current number of entries.
  */
 static void fill_ablock(struct dm_array_info *info, struct array_block *ab,
-			const void *value, unsigned new_nr)
+			const void *value, unsigned int new_nr)
 {
-	unsigned i;
-	uint32_t nr_entries;
+	uint32_t nr_entries, delta, i;
 	struct dm_btree_value_type *vt = &info->value_type;
 
 	BUG_ON(new_nr > le32_to_cpu(ab->max_entries));
 	BUG_ON(new_nr < le32_to_cpu(ab->nr_entries));
 
 	nr_entries = le32_to_cpu(ab->nr_entries);
-	for (i = nr_entries; i < new_nr; i++) {
-		if (vt->inc)
-			vt->inc(vt->context, value);
+	delta = new_nr - nr_entries;
+	if (vt->inc)
+		vt->inc(vt->context, value, delta);
+	for (i = nr_entries; i < new_nr; i++)
 		memcpy(element_at(info, ab, i), value, vt->size);
-	}
 	ab->nr_entries = cpu_to_le32(new_nr);
 }
 
@@ -197,19 +194,18 @@ static void fill_ablock(struct dm_array_info *info, struct array_block *ab,
  * entries.
  */
 static void trim_ablock(struct dm_array_info *info, struct array_block *ab,
-			unsigned new_nr)
+			unsigned int new_nr)
 {
-	unsigned i;
-	uint32_t nr_entries;
+	uint32_t nr_entries, delta;
 	struct dm_btree_value_type *vt = &info->value_type;
 
 	BUG_ON(new_nr > le32_to_cpu(ab->max_entries));
 	BUG_ON(new_nr > le32_to_cpu(ab->nr_entries));
 
 	nr_entries = le32_to_cpu(ab->nr_entries);
-	for (i = nr_entries; i > new_nr; i--)
-		if (vt->dec)
-			vt->dec(vt->context, element_at(info, ab, i - 1));
+	delta = nr_entries - new_nr;
+	if (vt->dec)
+		vt->dec(vt->context, element_at(info, ab, new_nr - 1), delta);
 	ab->nr_entries = cpu_to_le32(new_nr);
 }
 
@@ -251,7 +247,7 @@ static void unlock_ablock(struct dm_array_info *info, struct dm_block *block)
  * / max_entries).
  */
 static int lookup_ablock(struct dm_array_info *info, dm_block_t root,
-			 unsigned index, struct dm_block **block,
+			 unsigned int index, struct dm_block **block,
 			 struct array_block **ab)
 {
 	int r;
@@ -299,7 +295,7 @@ static int __shadow_ablock(struct dm_array_info *info, dm_block_t b,
  * The shadow op will often be a noop.  Only insert if it really
  * copied data.
  */
-static int __reinsert_ablock(struct dm_array_info *info, unsigned index,
+static int __reinsert_ablock(struct dm_array_info *info, unsigned int index,
 			     struct dm_block *block, dm_block_t b,
 			     dm_block_t *root)
 {
@@ -325,7 +321,7 @@ static int __reinsert_ablock(struct dm_array_info *info, unsigned index,
  * for both the current root block, and the new one.
  */
 static int shadow_ablock(struct dm_array_info *info, dm_block_t *root,
-			 unsigned index, struct dm_block **block,
+			 unsigned int index, struct dm_block **block,
 			 struct array_block **ab)
 {
 	int r;
@@ -350,7 +346,7 @@ static int shadow_ablock(struct dm_array_info *info, dm_block_t *root,
  */
 static int insert_new_ablock(struct dm_array_info *info, size_t size_of_block,
 			     uint32_t max_entries,
-			     unsigned block_index, uint32_t nr,
+			     unsigned int block_index, uint32_t nr,
 			     const void *value, dm_block_t *root)
 {
 	int r;
@@ -369,8 +365,8 @@ static int insert_new_ablock(struct dm_array_info *info, size_t size_of_block,
 }
 
 static int insert_full_ablocks(struct dm_array_info *info, size_t size_of_block,
-			       unsigned begin_block, unsigned end_block,
-			       unsigned max_entries, const void *value,
+			       unsigned int begin_block, unsigned int end_block,
+			       unsigned int max_entries, const void *value,
 			       dm_block_t *root)
 {
 	int r = 0;
@@ -406,20 +402,20 @@ struct resize {
 	/*
 	 * Maximum nr entries in an array block.
 	 */
-	unsigned max_entries;
+	unsigned int max_entries;
 
 	/*
 	 * nr of completely full blocks in the array.
 	 *
 	 * 'old' refers to before the resize, 'new' after.
 	 */
-	unsigned old_nr_full_blocks, new_nr_full_blocks;
+	unsigned int old_nr_full_blocks, new_nr_full_blocks;
 
 	/*
 	 * Number of entries in the final block.  0 iff only full blocks in
 	 * the array.
 	 */
-	unsigned old_nr_entries_in_last_block, new_nr_entries_in_last_block;
+	unsigned int old_nr_entries_in_last_block, new_nr_entries_in_last_block;
 
 	/*
 	 * The default value used when growing the array.
@@ -434,8 +430,8 @@ struct resize {
  * begin_index - the index of the first array block to remove.
  * end_index - the one-past-the-end value.  ie. this block is not removed.
  */
-static int drop_blocks(struct resize *resize, unsigned begin_index,
-		       unsigned end_index)
+static int drop_blocks(struct resize *resize, unsigned int begin_index,
+		       unsigned int end_index)
 {
 	int r;
 
@@ -453,8 +449,8 @@ static int drop_blocks(struct resize *resize, unsigned begin_index,
 /*
  * Calculates how many blocks are needed for the array.
  */
-static unsigned total_nr_blocks_needed(unsigned nr_full_blocks,
-				       unsigned nr_entries_in_last_block)
+static unsigned int total_nr_blocks_needed(unsigned int nr_full_blocks,
+				       unsigned int nr_entries_in_last_block)
 {
 	return nr_full_blocks + (nr_entries_in_last_block ? 1 : 0);
 }
@@ -465,7 +461,7 @@ static unsigned total_nr_blocks_needed(unsigned nr_full_blocks,
 static int shrink(struct resize *resize)
 {
 	int r;
-	unsigned begin, end;
+	unsigned int begin, end;
 	struct dm_block *block;
 	struct array_block *ab;
 
@@ -531,7 +527,7 @@ static int grow_add_tail_block(struct resize *resize)
 static int grow_needs_more_blocks(struct resize *resize)
 {
 	int r;
-	unsigned old_nr_blocks = resize->old_nr_full_blocks;
+	unsigned int old_nr_blocks = resize->old_nr_full_blocks;
 
 	if (resize->old_nr_entries_in_last_block > 0) {
 		old_nr_blocks++;
@@ -573,16 +569,17 @@ static int grow(struct resize *resize)
  * These are the value_type functions for the btree elements, which point
  * to array blocks.
  */
-static void block_inc(void *context, const void *value)
+static void block_inc(void *context, const void *value, unsigned int count)
 {
-	__le64 block_le;
+	const __le64 *block_le = value;
 	struct dm_array_info *info = context;
+	unsigned int i;
 
-	memcpy(&block_le, value, sizeof(block_le));
-	dm_tm_inc(info->btree_info.tm, le64_to_cpu(block_le));
+	for (i = 0; i < count; i++, block_le++)
+		dm_tm_inc(info->btree_info.tm, le64_to_cpu(*block_le));
 }
 
-static void block_dec(void *context, const void *value)
+static void __block_dec(void *context, const void *value)
 {
 	int r;
 	uint64_t b;
@@ -619,6 +616,13 @@ static void block_dec(void *context, const void *value)
 	}
 
 	dm_tm_dec(info->btree_info.tm, b);
+}
+
+static void block_dec(void *context, const void *value, unsigned int count)
+{
+	unsigned int i;
+	for (i = 0; i < count; i++, value += sizeof(__le64))
+		__block_dec(context, value);
 }
 
 static int block_equal(void *context, const void *value1, const void *value2)
@@ -696,24 +700,23 @@ int dm_array_resize(struct dm_array_info *info, dm_block_t root,
 EXPORT_SYMBOL_GPL(dm_array_resize);
 
 static int populate_ablock_with_values(struct dm_array_info *info, struct array_block *ab,
-				       value_fn fn, void *context, unsigned base, unsigned new_nr)
+				       value_fn fn, void *context,
+				       unsigned int base, unsigned int new_nr)
 {
 	int r;
-	unsigned i;
-	uint32_t nr_entries;
+	unsigned int i;
 	struct dm_btree_value_type *vt = &info->value_type;
 
 	BUG_ON(le32_to_cpu(ab->nr_entries));
 	BUG_ON(new_nr > le32_to_cpu(ab->max_entries));
 
-	nr_entries = le32_to_cpu(ab->nr_entries);
 	for (i = 0; i < new_nr; i++) {
 		r = fn(base + i, element_at(info, ab, i), context);
 		if (r)
 			return r;
 
 		if (vt->inc)
-			vt->inc(vt->context, element_at(info, ab, i));
+			vt->inc(vt->context, element_at(info, ab, i), 1);
 	}
 
 	ab->nr_entries = cpu_to_le32(new_nr);
@@ -726,7 +729,7 @@ int dm_array_new(struct dm_array_info *info, dm_block_t *root,
 	int r;
 	struct dm_block *block;
 	struct array_block *ab;
-	unsigned block_index, end_block, size_of_block, max_entries;
+	unsigned int block_index, end_block, size_of_block, max_entries;
 
 	r = dm_array_empty(info, root);
 	if (r)
@@ -774,7 +777,7 @@ int dm_array_get_value(struct dm_array_info *info, dm_block_t root,
 	struct dm_block *block;
 	struct array_block *ab;
 	size_t size_of_block;
-	unsigned entry, max_entries;
+	unsigned int entry, max_entries;
 
 	size_of_block = dm_bm_block_size(dm_tm_get_bm(info->btree_info.tm));
 	max_entries = calc_max_entries(info->value_type.size, size_of_block);
@@ -802,8 +805,8 @@ static int array_set_value(struct dm_array_info *info, dm_block_t root,
 	struct dm_block *block;
 	struct array_block *ab;
 	size_t size_of_block;
-	unsigned max_entries;
-	unsigned entry;
+	unsigned int max_entries;
+	unsigned int entry;
 	void *old_value;
 	struct dm_btree_value_type *vt = &info->value_type;
 
@@ -824,9 +827,9 @@ static int array_set_value(struct dm_array_info *info, dm_block_t root,
 	old_value = element_at(info, ab, entry);
 	if (vt->dec &&
 	    (!vt->equal || !vt->equal(vt->context, old_value, value))) {
-		vt->dec(vt->context, old_value);
+		vt->dec(vt->context, old_value, 1);
 		if (vt->inc)
-			vt->inc(vt->context, value);
+			vt->inc(vt->context, value, 1);
 	}
 
 	memcpy(old_value, value, info->value_type.size);
@@ -859,9 +862,9 @@ static int walk_ablock(void *context, uint64_t *keys, void *leaf)
 	struct walk_info *wi = context;
 
 	int r;
-	unsigned i;
+	unsigned int i;
 	__le64 block_le;
-	unsigned nr_entries, max_entries;
+	unsigned int nr_entries, max_entries;
 	struct dm_block *block;
 	struct array_block *ab;
 
@@ -977,6 +980,27 @@ int dm_array_cursor_next(struct dm_array_cursor *c)
 	return 0;
 }
 EXPORT_SYMBOL_GPL(dm_array_cursor_next);
+
+int dm_array_cursor_skip(struct dm_array_cursor *c, uint32_t count)
+{
+	int r;
+
+	do {
+		uint32_t remaining = le32_to_cpu(c->ab->nr_entries) - c->index;
+
+		if (count < remaining) {
+			c->index += count;
+			return 0;
+		}
+
+		count -= remaining;
+		r = dm_array_cursor_next(c);
+
+	} while (!r);
+
+	return r;
+}
+EXPORT_SYMBOL_GPL(dm_array_cursor_skip);
 
 void dm_array_cursor_get_value(struct dm_array_cursor *c, void **value_le)
 {

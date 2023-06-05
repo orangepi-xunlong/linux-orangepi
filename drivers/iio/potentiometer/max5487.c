@@ -1,12 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * max5487.c - Support for MAX5487, MAX5488, MAX5489 digital potentiometers
  *
  * Copyright (C) 2016 Cristina-Gabriela Moraru <cristina.moraru09@gmail.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
  */
 #include <linux/module.h>
 #include <linux/spi/spi.h>
@@ -83,7 +79,6 @@ static int max5487_write_raw(struct iio_dev *indio_dev,
 static const struct iio_info max5487_info = {
 	.read_raw = max5487_read_raw,
 	.write_raw = max5487_write_raw,
-	.driver_module = THIS_MODULE,
 };
 
 static int max5487_spi_probe(struct spi_device *spi)
@@ -97,7 +92,7 @@ static int max5487_spi_probe(struct spi_device *spi)
 	if (!indio_dev)
 		return -ENOMEM;
 
-	dev_set_drvdata(&spi->dev, indio_dev);
+	spi_set_drvdata(spi, indio_dev);
 	data = iio_priv(indio_dev);
 
 	data->spi = spi;
@@ -105,7 +100,6 @@ static int max5487_spi_probe(struct spi_device *spi)
 
 	indio_dev->info = &max5487_info;
 	indio_dev->name = id->name;
-	indio_dev->dev.parent = &spi->dev;
 	indio_dev->modes = INDIO_DIRECT_MODE;
 	indio_dev->channels = max5487_channels;
 	indio_dev->num_channels = ARRAY_SIZE(max5487_channels);
@@ -118,14 +112,17 @@ static int max5487_spi_probe(struct spi_device *spi)
 	return iio_device_register(indio_dev);
 }
 
-static int max5487_spi_remove(struct spi_device *spi)
+static void max5487_spi_remove(struct spi_device *spi)
 {
-	struct iio_dev *indio_dev = dev_get_drvdata(&spi->dev);
+	struct iio_dev *indio_dev = spi_get_drvdata(spi);
+	int ret;
 
 	iio_device_unregister(indio_dev);
 
 	/* save both wiper regs to NV regs */
-	return max5487_write_cmd(spi, MAX5487_COPY_AB_TO_NV);
+	ret = max5487_write_cmd(spi, MAX5487_COPY_AB_TO_NV);
+	if (ret)
+		dev_warn(&spi->dev, "Failed to save wiper regs to NV regs\n");
 }
 
 static const struct spi_device_id max5487_id[] = {
@@ -147,7 +144,6 @@ MODULE_DEVICE_TABLE(acpi, max5487_acpi_match);
 static struct spi_driver max5487_driver = {
 	.driver = {
 		.name = "max5487",
-		.owner = THIS_MODULE,
 		.acpi_match_table = ACPI_PTR(max5487_acpi_match),
 	},
 	.id_table = max5487_id,

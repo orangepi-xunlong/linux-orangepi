@@ -26,10 +26,22 @@
 #include <core/client.h>
 #include <core/gpuobj.h>
 #include <subdev/fb.h>
-#include <subdev/instmem.h>
 
 #include <nvif/cl0002.h>
 #include <nvif/unpack.h>
+
+static const struct nvkm_object_func nvkm_dmaobj_func;
+struct nvkm_dmaobj *
+nvkm_dmaobj_search(struct nvkm_client *client, u64 handle)
+{
+	struct nvkm_object *object;
+
+	object = nvkm_object_search(client, handle, &nvkm_dmaobj_func);
+	if (IS_ERR(object))
+		return (void *)object;
+
+	return nvkm_dmaobj(object);
+}
 
 static int
 nvkm_dmaobj_bind(struct nvkm_object *base, struct nvkm_gpuobj *gpuobj,
@@ -42,10 +54,7 @@ nvkm_dmaobj_bind(struct nvkm_object *base, struct nvkm_gpuobj *gpuobj,
 static void *
 nvkm_dmaobj_dtor(struct nvkm_object *base)
 {
-	struct nvkm_dmaobj *dmaobj = nvkm_dmaobj(base);
-	if (!RB_EMPTY_NODE(&dmaobj->rb))
-		rb_erase(&dmaobj->rb, &dmaobj->object.client->dmaroot);
-	return dmaobj;
+	return nvkm_dmaobj(base);
 }
 
 static const struct nvkm_object_func
@@ -62,11 +71,7 @@ nvkm_dmaobj_ctor(const struct nvkm_dmaobj_func *func, struct nvkm_dma *dma,
 	union {
 		struct nv_dma_v0 v0;
 	} *args = *pdata;
-	struct nvkm_device *device = dma->engine.subdev.device;
-	struct nvkm_client *client = oclass->client;
 	struct nvkm_object *parent = oclass->parent;
-	struct nvkm_instmem *instmem = device->imem;
-	struct nvkm_fb *fb = device->fb;
 	void *data = *pdata;
 	u32 size = *psize;
 	int ret = -ENOSYS;
@@ -74,7 +79,6 @@ nvkm_dmaobj_ctor(const struct nvkm_dmaobj_func *func, struct nvkm_dma *dma,
 	nvkm_object_ctor(&nvkm_dmaobj_func, oclass, &dmaobj->object);
 	dmaobj->func = func;
 	dmaobj->dma = dma;
-	RB_CLEAR_NODE(&dmaobj->rb);
 
 	nvif_ioctl(parent, "create dma size %d\n", *psize);
 	if (!(ret = nvif_unpack(ret, &data, &size, args->v0, 0, 0, true))) {
@@ -100,23 +104,13 @@ nvkm_dmaobj_ctor(const struct nvkm_dmaobj_func *func, struct nvkm_dma *dma,
 		dmaobj->target = NV_MEM_TARGET_VM;
 		break;
 	case NV_DMA_V0_TARGET_VRAM:
-		if (!client->super) {
-			if (dmaobj->limit >= fb->ram->size - instmem->reserved)
-				return -EACCES;
-			if (device->card_type >= NV_50)
-				return -EACCES;
-		}
 		dmaobj->target = NV_MEM_TARGET_VRAM;
 		break;
 	case NV_DMA_V0_TARGET_PCI:
-		if (!client->super)
-			return -EACCES;
 		dmaobj->target = NV_MEM_TARGET_PCI;
 		break;
 	case NV_DMA_V0_TARGET_PCI_US:
 	case NV_DMA_V0_TARGET_AGP:
-		if (!client->super)
-			return -EACCES;
 		dmaobj->target = NV_MEM_TARGET_PCI_NOSNOOP;
 		break;
 	default:

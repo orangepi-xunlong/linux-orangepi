@@ -33,11 +33,10 @@ nv1a_fb = {
 	.tile.fini = nv10_fb_tile_fini,
 	.tile.prog = nv10_fb_tile_prog,
 	.ram_new = nv1a_ram_new,
-	.memtype_valid = nv04_fb_memtype_valid,
 };
 
 int
-nv1a_fb_new(struct nvkm_device *device, int index, struct nvkm_fb **pfb)
+nv1a_fb_new(struct nvkm_device *device, enum nvkm_subdev_type type, int inst, struct nvkm_fb **pfb)
 {
-	return nvkm_fb_new_(&nv1a_fb, device, index, pfb);
+	return nvkm_fb_new_(&nv1a_fb, device, type, inst, pfb);
 }

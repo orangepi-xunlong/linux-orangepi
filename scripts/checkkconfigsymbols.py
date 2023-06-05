@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0-only
 
 """Find Kconfig symbols that are referenced but not defined."""
 
-# (c) 2014-2016 Valentin Rothberg <valentinrothberg@gmail.com>
+# (c) 2014-2017 Valentin Rothberg <valentinrothberg@gmail.com>
 # (c) 2014 Stefan Hengelein <stefan.hengelein@fau.de>
 #
-# Licensed under the terms of the GNU GPL License version 2
 
 
 import argparse
@@ -24,7 +24,7 @@ SYMBOL = r"(?:\w*[A-Z0-9]\w*){2,}"
 DEF = r"^\s*(?:menu){,1}config\s+(" + SYMBOL + r")\s*"
 EXPR = r"(?:" + OPERATORS + r"|\s|" + SYMBOL + r")+"
 DEFAULT = r"default\s+.*?(?:if\s.+){,1}"
-STMT = r"^\s*(?:if|select|depends\s+on|(?:" + DEFAULT + r"))\s+" + EXPR
+STMT = r"^\s*(?:if|select|imply|depends\s+on|(?:" + DEFAULT + r"))\s+" + EXPR
 SOURCE_SYMBOL = r"(?:\W|\b)+[D]{,1}CONFIG_(" + SYMBOL + r")"
 
 # regex objects
@@ -34,7 +34,6 @@ REGEX_SOURCE_SYMBOL = re.compile(SOURCE_SYMBOL)
 REGEX_KCONFIG_DEF = re.compile(DEF)
 REGEX_KCONFIG_EXPR = re.compile(EXPR)
 REGEX_KCONFIG_STMT = re.compile(STMT)
-REGEX_KCONFIG_HELP = re.compile(r"^\s+(help|---help---)\s*$")
 REGEX_FILTER_SYMBOLS = re.compile(r"[A-Za-z0-9]$")
 REGEX_NUMERIC = re.compile(r"0[xX][0-9a-fA-F]+|[0-9]+")
 REGEX_QUOTES = re.compile("(\"(.*?)\")")
@@ -88,7 +87,7 @@ def parse_options():
     if args.commit and args.diff:
         sys.exit("Please specify only one option at once.")
 
-    if args.diff and not re.match(r"^[\w\-\.]+\.\.[\w\-\.]+$", args.diff):
+    if args.diff and not re.match(r"^[\w\-\.\^]+\.\.[\w\-\.\^]+$", args.diff):
         sys.exit("Please specify valid input in the following format: "
                  "\'commit1..commit2\'")
 
@@ -102,6 +101,9 @@ def parse_options():
                      "continue.")
 
     if args.commit:
+        if args.commit.startswith('HEAD'):
+            sys.exit("The --commit option can't use the HEAD ref")
+
         args.find = False
 
     if args.ignore:
@@ -113,7 +115,7 @@ def parse_options():
     return args
 
 
-def main():
+def print_undefined_symbols():
     """Main function of this module."""
     args = parse_options()
 
@@ -269,7 +271,7 @@ def find_sims(symbol, ignore, defined=[]):
     """Return a list of max. ten Kconfig symbols that are string-similar to
     @symbol."""
     if defined:
-        return sorted(difflib.get_close_matches(symbol, set(defined), 10))
+        return difflib.get_close_matches(symbol, set(defined), 10)
 
     pool = Pool(cpu_count(), init_worker)
     kfiles = []
@@ -284,7 +286,7 @@ def find_sims(symbol, ignore, defined=[]):
     for res in pool.map(parse_kconfig_files, arglist):
         defined.extend(res[0])
 
-    return sorted(difflib.get_close_matches(symbol, set(defined), 10))
+    return difflib.get_close_matches(symbol, set(defined), 10)
 
 
 def get_files():
@@ -329,7 +331,7 @@ def check_symbols_helper(pool, ignore):
         if REGEX_FILE_KCONFIG.match(gitfile):
             kconfig_files.append(gitfile)
         else:
-            if ignore and not re.match(ignore, gitfile):
+            if ignore and re.match(ignore, gitfile):
                 continue
             # add source files that do not match the ignore pattern
             source_files.append(gitfile)
@@ -432,7 +434,6 @@ def parse_kconfig_file(kfile):
     lines = []
     defined = []
     references = []
-    skip = False
 
     if not os.path.exists(kfile):
         return defined, references
@@ -448,12 +449,6 @@ def parse_kconfig_file(kfile):
         if REGEX_KCONFIG_DEF.match(line):
             symbol_def = REGEX_KCONFIG_DEF.findall(line)
             defined.append(symbol_def[0])
-            skip = False
-        elif REGEX_KCONFIG_HELP.match(line):
-            skip = True
-        elif skip:
-            # ignore content of help messages
-            pass
         elif REGEX_KCONFIG_STMT.match(line):
             line = REGEX_QUOTES.sub("", line)
             symbols = get_symbols_in_line(line)
@@ -470,6 +465,17 @@ def parse_kconfig_file(kfile):
                 references.append(symbol)
 
     return defined, references
+
+
+def main():
+    try:
+        print_undefined_symbols()
+    except BrokenPipeError:
+        # Python flushes standard streams on exit; redirect remaining output
+        # to devnull to avoid another BrokenPipeError at shutdown
+        devnull = os.open(os.devnull, os.O_WRONLY)
+        os.dup2(devnull, sys.stdout.fileno())
+        sys.exit(1)  # Python exits with error code 1 on EPIPE
 
 
 if __name__ == "__main__":

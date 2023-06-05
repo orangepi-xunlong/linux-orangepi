@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * Intel Ethernet Controller XL710 Family Linux Driver
- * Copyright(c) 2013 - 2014 Intel Corporation.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * You should have received a copy of the GNU General Public License along
- * with this program.  If not, see <http://www.gnu.org/licenses/>.
- *
- * The full GNU General Public License is included in this distribution in
- * the file called "COPYING".
- *
- * Contact Information:
- * e1000-devel Mailing List <e1000-devel@lists.sourceforge.net>
- * Intel Corporation, 5200 N.E. Elam Young Parkway, Hillsboro, OR 97124-6497
- *
- ******************************************************************************/
+/* SPDX-License-Identifier: GPL-2.0 */
+/* Copyright(c) 2013 - 2018 Intel Corporation. */
 
 #ifndef _I40E_LAN_HMC_H_
 #define _I40E_LAN_HMC_H_
@@ -160,22 +137,22 @@ struct i40e_hmc_lan_delete_obj_info {
 	u32 count;
 };
 
-i40e_status i40e_init_lan_hmc(struct i40e_hw *hw, u32 txq_num,
-					u32 rxq_num, u32 fcoe_cntx_num,
-					u32 fcoe_filt_num);
-i40e_status i40e_configure_lan_hmc(struct i40e_hw *hw,
-					     enum i40e_hmc_model model);
-i40e_status i40e_shutdown_lan_hmc(struct i40e_hw *hw);
+int i40e_init_lan_hmc(struct i40e_hw *hw, u32 txq_num,
+		      u32 rxq_num, u32 fcoe_cntx_num,
+		      u32 fcoe_filt_num);
+int i40e_configure_lan_hmc(struct i40e_hw *hw,
+			   enum i40e_hmc_model model);
+int i40e_shutdown_lan_hmc(struct i40e_hw *hw);
 
-i40e_status i40e_clear_lan_tx_queue_context(struct i40e_hw *hw,
-						      u16 queue);
-i40e_status i40e_set_lan_tx_queue_context(struct i40e_hw *hw,
-						    u16 queue,
-						    struct i40e_hmc_obj_txq *s);
-i40e_status i40e_clear_lan_rx_queue_context(struct i40e_hw *hw,
-						      u16 queue);
-i40e_status i40e_set_lan_rx_queue_context(struct i40e_hw *hw,
-						    u16 queue,
-						    struct i40e_hmc_obj_rxq *s);
+int i40e_clear_lan_tx_queue_context(struct i40e_hw *hw,
+				    u16 queue);
+int i40e_set_lan_tx_queue_context(struct i40e_hw *hw,
+				  u16 queue,
+				  struct i40e_hmc_obj_txq *s);
+int i40e_clear_lan_rx_queue_context(struct i40e_hw *hw,
+				    u16 queue);
+int i40e_set_lan_rx_queue_context(struct i40e_hw *hw,
+				  u16 queue,
+				  struct i40e_hmc_obj_rxq *s);
 
 #endif /* _I40E_LAN_HMC_H_ */

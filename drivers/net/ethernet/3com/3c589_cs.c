@@ -23,7 +23,6 @@
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
 #define DRV_NAME	"3c589_cs"
-#define DRV_VERSION	"1.162-ac"
 
 #include <linux/module.h>
 #include <linux/kernel.h>
@@ -163,7 +162,7 @@ static void tc589_release(struct pcmcia_device *link);
 
 static u16 read_eeprom(unsigned int ioaddr, int index);
 static void tc589_reset(struct net_device *dev);
-static void media_check(unsigned long arg);
+static void media_check(struct timer_list *t);
 static int el3_config(struct net_device *dev, struct ifmap *map);
 static int el3_open(struct net_device *dev);
 static netdev_tx_t el3_start_xmit(struct sk_buff *skb,
@@ -173,7 +172,7 @@ static void update_stats(struct net_device *dev);
 static struct net_device_stats *el3_get_stats(struct net_device *dev);
 static int el3_rx(struct net_device *dev);
 static int el3_close(struct net_device *dev);
-static void el3_tx_timeout(struct net_device *dev);
+static void el3_tx_timeout(struct net_device *dev, unsigned int txqueue);
 static void set_rx_mode(struct net_device *dev);
 static void set_multicast_list(struct net_device *dev);
 static const struct ethtool_ops netdev_ethtool_ops;
@@ -188,7 +187,6 @@ static const struct net_device_ops el3_netdev_ops = {
 	.ndo_set_config		= el3_config,
 	.ndo_get_stats		= el3_get_stats,
 	.ndo_set_rx_mode	= set_multicast_list,
-	.ndo_change_mtu		= eth_change_mtu,
 	.ndo_set_mac_address	= eth_mac_addr,
 	.ndo_validate_addr	= eth_validate_addr,
 };
@@ -197,6 +195,7 @@ static int tc589_probe(struct pcmcia_device *link)
 {
 	struct el3_private *lp;
 	struct net_device *dev;
+	int ret;
 
 	dev_dbg(&link->dev, "3c589_attach()\n");
 
@@ -220,7 +219,15 @@ static int tc589_probe(struct pcmcia_device *link)
 
 	dev->ethtool_ops = &netdev_ethtool_ops;
 
-	return tc589_config(link);
+	ret = tc589_config(link);
+	if (ret)
+		goto err_free_netdev;
+
+	return 0;
+
+err_free_netdev:
+	free_netdev(dev);
+	return ret;
 }
 
 static void tc589_detach(struct pcmcia_device *link)
@@ -239,8 +246,8 @@ static void tc589_detach(struct pcmcia_device *link)
 static int tc589_config(struct pcmcia_device *link)
 {
 	struct net_device *dev = link->priv;
-	__be16 *phys_addr;
 	int ret, i, j, multi = 0, fifo;
+	__be16 addr[ETH_ALEN / 2];
 	unsigned int ioaddr;
 	static const char * const ram_split[] = {"5:3", "3:1", "1:1", "3:5"};
 	u8 *buf;
@@ -248,7 +255,6 @@ static int tc589_config(struct pcmcia_device *link)
 
 	dev_dbg(&link->dev, "3c589_config\n");
 
-	phys_addr = (__be16 *)dev->dev_addr;
 	/* Is this a 3c562? */
 	if (link->manf_id != MANFID_3COM)
 		dev_info(&link->dev, "hmmm, is this really a 3Com card??\n");
@@ -287,18 +293,19 @@ static int tc589_config(struct pcmcia_device *link)
 	len = pcmcia_get_tuple(link, 0x88, &buf);
 	if (buf && len >= 6) {
 		for (i = 0; i < 3; i++)
-			phys_addr[i] = htons(le16_to_cpu(buf[i*2]));
+			addr[i] = htons(le16_to_cpu(buf[i*2]));
 		kfree(buf);
 	} else {
 		kfree(buf); /* 0 < len < 6 */
 		for (i = 0; i < 3; i++)
-			phys_addr[i] = htons(read_eeprom(ioaddr, i));
-		if (phys_addr[0] == htons(0x6060)) {
+			addr[i] = htons(read_eeprom(ioaddr, i));
+		if (addr[0] == htons(0x6060)) {
 			dev_err(&link->dev, "IO port conflict at 0x%03lx-0x%03lx\n",
 					dev->base_addr, dev->base_addr+15);
 			goto failed;
 		}
 	}
+	eth_hw_addr_set(dev, (u8 *)addr);
 
 	/* The address and resource configuration register aren't loaded from
 	 * the EEPROM and *must* be set to 0 and IRQ3 for the PCMCIA version.
@@ -482,8 +489,7 @@ static void tc589_reset(struct net_device *dev)
 static void netdev_get_drvinfo(struct net_device *dev,
 			       struct ethtool_drvinfo *info)
 {
-	strlcpy(info->driver, DRV_NAME, sizeof(info->driver));
-	strlcpy(info->version, DRV_VERSION, sizeof(info->version));
+	strscpy(info->driver, DRV_NAME, sizeof(info->driver));
 	snprintf(info->bus_info, sizeof(info->bus_info),
 		"PCMCIA 0x%lx", dev->base_addr);
 }
@@ -518,7 +524,7 @@ static int el3_open(struct net_device *dev)
 	netif_start_queue(dev);
 
 	tc589_reset(dev);
-	setup_timer(&lp->media, media_check, (unsigned long)dev);
+	timer_setup(&lp->media, media_check, 0);
 	mod_timer(&lp->media, jiffies + HZ);
 
 	dev_dbg(&link->dev, "%s: opened, status %4.4x.\n",
@@ -527,7 +533,7 @@ static int el3_open(struct net_device *dev)
 	return 0;
 }
 
-static void el3_tx_timeout(struct net_device *dev)
+static void el3_tx_timeout(struct net_device *dev, unsigned int txqueue)
 {
 	unsigned int ioaddr = dev->base_addr;
 
@@ -677,10 +683,10 @@ static irqreturn_t el3_interrupt(int irq, void *dev_id)
 	return IRQ_RETVAL(handled);
 }
 
-static void media_check(unsigned long arg)
+static void media_check(struct timer_list *t)
 {
-	struct net_device *dev = (struct net_device *)(arg);
-	struct el3_private *lp = netdev_priv(dev);
+	struct el3_private *lp = from_timer(lp, t, media);
+	struct net_device *dev = lp->p_dev->priv;
 	unsigned int ioaddr = dev->base_addr;
 	u16 media, errs;
 	unsigned long flags;

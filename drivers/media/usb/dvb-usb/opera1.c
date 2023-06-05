@@ -1,13 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /* DVB USB framework compliant Linux driver for the Opera1 DVB-S Card
 *
 * Copyright (C) 2006 Mario Hlawitschka (dh1pa@amsat.org)
 * Copyright (C) 2006 Marco Gittler (g.marco@freenet.de)
 *
-*	This program is free software; you can redistribute it and/or modify it
-*	under the terms of the GNU General Public License as published by the Free
-*	Software Foundation, version 2.
-*
-* see Documentation/dvb/README.dvb-usb for more information
+* see Documentation/driver-api/media/drivers/dvb-usb.rst for more information
 */
 
 #define DVB_USB_LOG_PREFIX "opera"
@@ -428,10 +425,15 @@ static int opera1_rc_query(struct dvb_usb_device *dev, u32 * event, int *state)
 	return 0;
 }
 
+enum {
+	CYPRESS_OPERA1_COLD,
+	OPERA1_WARM,
+};
+
 static struct usb_device_id opera1_table[] = {
-	{USB_DEVICE(USB_VID_CYPRESS, USB_PID_OPERA1_COLD)},
-	{USB_DEVICE(USB_VID_OPERA1, USB_PID_OPERA1_WARM)},
-	{}
+	DVB_USB_DEV(CYPRESS, CYPRESS_OPERA1_COLD),
+	DVB_USB_DEV(OPERA1, OPERA1_WARM),
+	{ }
 };
 
 MODULE_DEVICE_TABLE(usb, opera1_table);
@@ -453,8 +455,7 @@ static int opera1_xilinx_load_firmware(struct usb_device *dev,
 	info("start downloading fpga firmware %s",filename);
 
 	if ((ret = request_firmware(&fw, filename, &dev->dev)) != 0) {
-		err("did not find the firmware file. (%s) "
-			"Please see linux/Documentation/dvb/ for more details on firmware-problems.",
+		err("did not find the firmware file '%s'. You can use <kernel_dir>/scripts/get_dvb_firmware to get the firmware",
 			filename);
 		return ret;
 	} else {
@@ -544,8 +545,8 @@ static struct dvb_usb_device_properties opera1_properties = {
 	.num_device_descs = 1,
 	.devices = {
 		{"Opera1 DVB-S USB2.0",
-			{&opera1_table[0], NULL},
-			{&opera1_table[1], NULL},
+			{&opera1_table[CYPRESS_OPERA1_COLD], NULL},
+			{&opera1_table[OPERA1_WARM], NULL},
 		},
 	}
 };

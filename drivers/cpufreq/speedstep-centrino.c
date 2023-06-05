@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * cpufreq driver for Enhanced SpeedStep, as found in Intel's Pentium
  * M (part of the Centrino chipset).
@@ -394,9 +395,9 @@ static int centrino_cpu_init(struct cpufreq_policy *policy)
 
 	policy->cpuinfo.transition_latency = 10000;
 						/* 10uS transition latency */
+	policy->freq_table = per_cpu(centrino_model, policy->cpu)->op_points;
 
-	return cpufreq_table_validate_and_show(policy,
-		per_cpu(centrino_model, policy->cpu)->op_points);
+	return 0;
 }
 
 static int centrino_cpu_exit(struct cpufreq_policy *policy)
@@ -412,7 +413,7 @@ static int centrino_cpu_exit(struct cpufreq_policy *policy)
 }
 
 /**
- * centrino_setpolicy - set a new CPUFreq policy
+ * centrino_target - set a new CPUFreq policy
  * @policy: new policy
  * @index: index of target frequency
  *
@@ -519,18 +520,12 @@ static struct cpufreq_driver centrino_driver = {
  * or ASCII model IDs.
  */
 static const struct x86_cpu_id centrino_ids[] = {
-	{ X86_VENDOR_INTEL, 6, 9, X86_FEATURE_EST },
-	{ X86_VENDOR_INTEL, 6, 13, X86_FEATURE_EST },
-	{ X86_VENDOR_INTEL, 6, 13, X86_FEATURE_EST },
-	{ X86_VENDOR_INTEL, 6, 13, X86_FEATURE_EST },
-	{ X86_VENDOR_INTEL, 15, 3, X86_FEATURE_EST },
-	{ X86_VENDOR_INTEL, 15, 4, X86_FEATURE_EST },
+	X86_MATCH_VENDOR_FAM_MODEL_FEATURE(INTEL,  6,  9, X86_FEATURE_EST, NULL),
+	X86_MATCH_VENDOR_FAM_MODEL_FEATURE(INTEL,  6, 13, X86_FEATURE_EST, NULL),
+	X86_MATCH_VENDOR_FAM_MODEL_FEATURE(INTEL, 15,  3, X86_FEATURE_EST, NULL),
+	X86_MATCH_VENDOR_FAM_MODEL_FEATURE(INTEL, 15,  4, X86_FEATURE_EST, NULL),
 	{}
 };
-#if 0
-/* Autoload or not? Do not for now. */
-MODULE_DEVICE_TABLE(x86cpu, centrino_ids);
-#endif
 
 /**
  * centrino_init - initializes the Enhanced SpeedStep CPUFreq driver

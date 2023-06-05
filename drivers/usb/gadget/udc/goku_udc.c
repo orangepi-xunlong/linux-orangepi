@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Toshiba TC86C001 ("Goku-S") USB Device Controller driver
  *
@@ -5,10 +6,6 @@
  *      by Stuart Lynne, Tom Rushworth, and Bruce Balden
  * Copyright (C) 2002 Toshiba Corporation
  * Copyright (C) 2003 MontaVista Software (source@mvista.com)
- *
- * This file is licensed under the terms of the GNU General Public
- * License version 2.  This program is licensed "as is" without any
- * warranty of any kind, whether express or implied.
  */
 
 /*
@@ -127,11 +124,18 @@ goku_ep_enable(struct usb_ep *_ep, const struct usb_endpoint_descriptor *desc)
 	mode = 0;
 	max = get_unaligned_le16(&desc->wMaxPacketSize);
 	switch (max) {
-	case 64:	mode++;
-	case 32:	mode++;
-	case 16:	mode++;
-	case 8:		mode <<= 3;
-			break;
+	case 64:
+		mode++;
+		fallthrough;
+	case 32:
+		mode++;
+		fallthrough;
+	case 16:
+		mode++;
+		fallthrough;
+	case 8:
+		mode <<= 3;
+		break;
 	default:
 		return -EINVAL;
 	}
@@ -549,12 +553,12 @@ static int start_dma(struct goku_ep *ep, struct goku_request *req)
 
 		master &= ~MST_R_BITS;
 		if (unlikely(req->req.length == 0))
-			master = MST_RD_ENA | MST_RD_EOPB;
+			master |= MST_RD_ENA | MST_RD_EOPB;
 		else if ((req->req.length % ep->ep.maxpacket) != 0
 					|| req->req.zero)
-			master = MST_RD_ENA | MST_EOPB_ENA;
+			master |= MST_RD_ENA | MST_EOPB_ENA;
 		else
-			master = MST_RD_ENA | MST_EOPB_DIS;
+			master |= MST_RD_ENA | MST_EOPB_DIS;
 
 		ep->dev->int_enable |= INT_MSTRDEND;
 
@@ -805,7 +809,7 @@ static void nuke(struct goku_ep *ep, int status)
 /* dequeue JUST ONE request */
 static int goku_dequeue(struct usb_ep *_ep, struct usb_request *_req)
 {
-	struct goku_request	*req;
+	struct goku_request	*req = NULL, *iter;
 	struct goku_ep		*ep;
 	struct goku_udc		*dev;
 	unsigned long		flags;
@@ -829,11 +833,13 @@ static int goku_dequeue(struct usb_ep *_ep, struct usb_request *_req)
 	spin_lock_irqsave(&dev->lock, flags);
 
 	/* make sure it's actually queued on this endpoint */
-	list_for_each_entry (req, &ep->queue, queue) {
-		if (&req->req == _req)
-			break;
+	list_for_each_entry(iter, &ep->queue, queue) {
+		if (&iter->req != _req)
+			continue;
+		req = iter;
+		break;
 	}
-	if (&req->req != _req) {
+	if (!req) {
 		spin_unlock_irqrestore (&dev->lock, flags);
 		return -EINVAL;
 	}
@@ -968,7 +974,7 @@ static void goku_fifo_flush(struct usb_ep *_ep)
 		command(regs, COMMAND_FIFO_CLEAR, ep->num);
 }
 
-static struct usb_ep_ops goku_ep_ops = {
+static const struct usb_ep_ops goku_ep_ops = {
 	.enable		= goku_ep_enable,
 	.disable	= goku_ep_disable,
 
@@ -1240,22 +1246,6 @@ done:
 	local_irq_restore(flags);
 	return 0;
 }
-
-/*
- * seq_file wrappers for procfile show routines.
- */
-static int udc_proc_open(struct inode *inode, struct file *file)
-{
-	return single_open(file, udc_proc_read, PDE_DATA(file_inode(file)));
-}
-
-static const struct file_operations udc_proc_fops = {
-	.open		= udc_proc_open,
-	.read		= seq_read,
-	.llseek		= seq_lseek,
-	.release	= single_release,
-};
-
 #endif	/* CONFIG_USB_GADGET_DEBUG_FILES */
 
 /*-------------------------------------------------------------------------*/
@@ -1385,7 +1375,6 @@ static int goku_udc_start(struct usb_gadget *g,
 	struct goku_udc	*dev = to_goku_udc(g);
 
 	/* hook up the driver */
-	driver->driver.bus = NULL;
 	dev->driver = driver;
 
 	/*
@@ -1772,6 +1761,7 @@ static int goku_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		goto err;
 	}
 
+	pci_set_drvdata(pdev, dev);
 	spin_lock_init(&dev->lock);
 	dev->pdev = pdev;
 	dev->gadget.ops = &goku_ops;
@@ -1797,7 +1787,7 @@ static int goku_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	}
 	dev->got_region = 1;
 
-	base = ioremap_nocache(resource, len);
+	base = ioremap(resource, len);
 	if (base == NULL) {
 		DBG(dev, "can't map memory\n");
 		retval = -EFAULT;
@@ -1805,7 +1795,6 @@ static int goku_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	}
 	dev->regs = (struct goku_udc_regs __iomem *) base;
 
-	pci_set_drvdata(pdev, dev);
 	INFO(dev, "%s\n", driver_desc);
 	INFO(dev, "version: " DRIVER_VERSION " %s\n", dmastr());
 	INFO(dev, "irq %d, pci mem %p\n", pdev->irq, base);
@@ -1825,7 +1814,7 @@ static int goku_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 
 
 #ifdef CONFIG_USB_GADGET_DEBUG_FILES
-	proc_create_data(proc_node_name, 0, NULL, &udc_proc_fops, dev);
+	proc_create_single_data(proc_node_name, 0, NULL, udc_proc_read, dev);
 #endif
 
 	retval = usb_add_gadget_udc_release(&pdev->dev, &dev->gadget,
@@ -1859,7 +1848,7 @@ static const struct pci_device_id pci_ids[] = { {
 MODULE_DEVICE_TABLE (pci, pci_ids);
 
 static struct pci_driver goku_pci_driver = {
-	.name =		(char *) driver_name,
+	.name =		driver_name,
 	.id_table =	pci_ids,
 
 	.probe =	goku_probe,

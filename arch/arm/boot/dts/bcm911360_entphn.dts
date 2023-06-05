@@ -39,17 +39,18 @@
 	model = "Cygnus Enterprise Phone (BCM911360_ENTPHN)";
 	compatible = "brcm,bcm11360", "brcm,cygnus";
 
-	chosen {
-		stdout-path = &uart3;
-		bootargs = "console=ttyS0,115200";
+	aliases {
+		serial0 = &uart3;
 	};
 
-	gpio_keys {
-		compatible = "gpio-keys";
-		#address-cells = <1>;
-		#size-cells = <0>;
+	chosen {
+		stdout-path = "serial0:115200n8";
+	};
 
-		hook {
+	gpio-keys {
+		compatible = "gpio-keys";
+
+		button-hook {
 			label = "HOOK";
 			linux,code = <KEY_O>;
 			gpios = <&gpio_asiu 48 0>;
@@ -57,12 +58,32 @@
 	};
 };
 
+&eth0 {
+	status = "okay";
+};
+
+&mdio {
+	status = "okay";
+};
+
+&switch {
+	status = "okay";
+};
+
+&v3d {
+	assigned-clocks =
+		<&mipipll BCM_CYGNUS_MIPIPLL>,
+		<&mipipll BCM_CYGNUS_MIPIPLL_CH2_V3D>;
+	assigned-clock-rates = <525000000>, <300000000>;
+	status = "okay";
+};
+
 &uart3 {
 	status = "okay";
 };
 
-&nand {
-	nandcs@1 {
+&nand_controller {
+	nand@1 {
 		compatible = "brcm,nandcs";
 		reg = <0>;
 		nand-on-flash-bbt;

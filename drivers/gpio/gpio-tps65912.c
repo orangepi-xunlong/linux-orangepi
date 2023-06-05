@@ -1,23 +1,15 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * GPIO driver for TI TPS65912x PMICs
  *
  * Copyright (C) 2015 Texas Instruments Incorporated - http://www.ti.com/
  *	Andrew F. Davis <afd@ti.com>
  *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
- * This program is distributed "as is" WITHOUT ANY WARRANTY of any
- * kind, whether expressed or implied; without even the implied warranty
- * of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License version 2 for more details.
- *
  * Based on the Arizona GPIO driver and the previous TPS65912 driver by
  * Margarita Olaya Cabrera <magi@slimlogic.co.uk>
  */
 
-#include <linux/gpio.h>
+#include <linux/gpio/driver.h>
 #include <linux/module.h>
 #include <linux/platform_device.h>
 
@@ -40,9 +32,9 @@ static int tps65912_gpio_get_direction(struct gpio_chip *gc,
 		return ret;
 
 	if (val & GPIO_CFG_MASK)
-		return GPIOF_DIR_OUT;
+		return GPIO_LINE_DIRECTION_OUT;
 	else
-		return GPIOF_DIR_IN;
+		return GPIO_LINE_DIRECTION_IN;
 }
 
 static int tps65912_gpio_direction_input(struct gpio_chip *gc, unsigned offset)
@@ -107,7 +99,6 @@ static int tps65912_gpio_probe(struct platform_device *pdev)
 {
 	struct tps65912 *tps = dev_get_drvdata(pdev->dev.parent);
 	struct tps65912_gpio *gpio;
-	int ret;
 
 	gpio = devm_kzalloc(&pdev->dev, sizeof(*gpio), GFP_KERNEL);
 	if (!gpio)
@@ -117,16 +108,7 @@ static int tps65912_gpio_probe(struct platform_device *pdev)
 	gpio->gpio_chip = template_chip;
 	gpio->gpio_chip.parent = tps->dev;
 
-	ret = devm_gpiochip_add_data(&pdev->dev, &gpio->gpio_chip,
-				     gpio);
-	if (ret < 0) {
-		dev_err(&pdev->dev, "Could not register gpiochip, %d\n", ret);
-		return ret;
-	}
-
-	platform_set_drvdata(pdev, gpio);
-
-	return 0;
+	return devm_gpiochip_add_data(&pdev->dev, &gpio->gpio_chip, gpio);
 }
 
 static const struct platform_device_id tps65912_gpio_id_table[] = {

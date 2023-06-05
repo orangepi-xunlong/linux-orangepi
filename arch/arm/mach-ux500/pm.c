@@ -1,12 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) ST-Ericsson SA 2010-2013
  * Author: Rickard Andersson <rickard.andersson@stericsson.com> for
  *         ST-Ericsson.
  * Author: Daniel Lezcano <daniel.lezcano@linaro.org> for Linaro.
  * Author: Ulf Hansson <ulf.hansson@linaro.org> for Linaro.
- *
- * License terms: GNU General Public License (GPL) version 2
- *
  */
 
 #include <linux/kernel.h>
@@ -19,7 +17,6 @@
 #include <linux/of_address.h>
 
 #include "db8500-regs.h"
-#include "pm_domains.h"
 
 /* ARM WFI Standby signal register */
 #define PRCM_ARM_WFI_STANDBY    (prcmu_base + 0x130)
@@ -203,7 +200,4 @@ void __init ux500_pm_init(u32 phy_base, u32 size)
 
 	/* Set up ux500 suspend callbacks. */
 	suspend_set_ops(UX500_SUSPEND_OPS);
-
-	/* Initialize ux500 power domains */
-	ux500_pm_domains_init();
 }

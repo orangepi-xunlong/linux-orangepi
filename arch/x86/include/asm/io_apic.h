@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _ASM_X86_IO_APIC_H
 #define _ASM_X86_IO_APIC_H
 
@@ -11,15 +12,6 @@
  *
  * Copyright (C) 1997, 1998, 1999, 2000 Ingo Molnar
  */
-
-/* I/O Unit Redirection Table */
-#define IO_APIC_REDIR_VECTOR_MASK	0x000FF
-#define IO_APIC_REDIR_DEST_LOGICAL	0x00800
-#define IO_APIC_REDIR_DEST_PHYSICAL	0x00000
-#define IO_APIC_REDIR_SEND_PENDING	(1 << 12)
-#define IO_APIC_REDIR_REMOTE_IRR	(1 << 14)
-#define IO_APIC_REDIR_LEVEL_TRIGGER	(1 << 15)
-#define IO_APIC_REDIR_MASKED		(1 << 16)
 
 /*
  * The structure of the IO-APIC:
@@ -64,52 +56,39 @@ union IO_APIC_reg_03 {
 };
 
 struct IO_APIC_route_entry {
-	__u32	vector		:  8,
-		delivery_mode	:  3,	/* 000: FIXED
-					 * 001: lowest prio
-					 * 111: ExtINT
-					 */
-		dest_mode	:  1,	/* 0: physical, 1: logical */
-		delivery_status	:  1,
-		polarity	:  1,
-		irr		:  1,
-		trigger		:  1,	/* 0: edge, 1: level */
-		mask		:  1,	/* 0: enabled, 1: disabled */
-		__reserved_2	: 15;
-
-	__u32	__reserved_3	: 24,
-		dest		:  8;
-} __attribute__ ((packed));
-
-struct IR_IO_APIC_route_entry {
-	__u64	vector		: 8,
-		zero		: 3,
-		index2		: 1,
-		delivery_status : 1,
-		polarity	: 1,
-		irr		: 1,
-		trigger		: 1,
-		mask		: 1,
-		reserved	: 31,
-		format		: 1,
-		index		: 15;
+	union {
+		struct {
+			u64	vector			:  8,
+				delivery_mode		:  3,
+				dest_mode_logical	:  1,
+				delivery_status		:  1,
+				active_low		:  1,
+				irr			:  1,
+				is_level		:  1,
+				masked			:  1,
+				reserved_0		: 15,
+				reserved_1		: 17,
+				virt_destid_8_14	:  7,
+				destid_0_7		:  8;
+		};
+		struct {
+			u64	ir_shared_0		:  8,
+				ir_zero			:  3,
+				ir_index_15		:  1,
+				ir_shared_1		:  5,
+				ir_reserved_0		: 31,
+				ir_format		:  1,
+				ir_index_0_14		: 15;
+		};
+		struct {
+			u64	w1			: 32,
+				w2			: 32;
+		};
+	};
 } __attribute__ ((packed));
 
 struct irq_alloc_info;
 struct ioapic_domain_cfg;
-
-#define IOAPIC_AUTO			-1
-#define IOAPIC_EDGE			0
-#define IOAPIC_LEVEL			1
-
-#define IOAPIC_MASKED			1
-#define IOAPIC_UNMASKED			0
-
-#define IOAPIC_POL_HIGH			0
-#define IOAPIC_POL_LOW			1
-
-#define IOAPIC_DEST_MODE_PHYSICAL	0
-#define IOAPIC_DEST_MODE_LOGICAL	1
 
 #define	IOAPIC_MAP_ALLOC		0x1
 #define	IOAPIC_MAP_CHECK		0x2
@@ -182,17 +161,17 @@ extern void disable_ioapic_support(void);
 
 extern void __init io_apic_init_mappings(void);
 extern unsigned int native_io_apic_read(unsigned int apic, unsigned int reg);
-extern void native_disable_io_apic(void);
+extern void native_restore_boot_irq_mode(void);
 
 static inline unsigned int io_apic_read(unsigned int apic, unsigned int reg)
 {
-	return x86_io_apic_ops.read(apic, reg);
+	return x86_apic_ops.io_apic_read(apic, reg);
 }
 
 extern void setup_IO_APIC(void);
 extern void enable_IO_APIC(void);
-extern void disable_IO_APIC(void);
-extern void setup_ioapic_dest(void);
+extern void clear_IO_APIC(void);
+extern void restore_boot_irq_mode(void);
 extern int IO_APIC_get_PCI_irq_vector(int bus, int devfn, int pin);
 extern void print_IO_APICs(void);
 #else  /* !CONFIG_X86_IO_APIC */
@@ -228,11 +207,11 @@ static inline void mp_save_irq(struct mpc_intsrc *m) { }
 static inline void disable_ioapic_support(void) { }
 static inline void io_apic_init_mappings(void) { }
 #define native_io_apic_read		NULL
-#define native_disable_io_apic		NULL
+#define native_restore_boot_irq_mode	NULL
 
 static inline void setup_IO_APIC(void) { }
 static inline void enable_IO_APIC(void) { }
-static inline void setup_ioapic_dest(void) { }
+static inline void restore_boot_irq_mode(void) { }
 
 #endif
 

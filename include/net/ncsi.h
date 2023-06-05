@@ -1,5 +1,8 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef __NET_NCSI_H
 #define __NET_NCSI_H
+
+#include <linux/types.h>
 
 /*
  * The NCSI device states seen from external. More NCSI device states are
@@ -28,12 +31,24 @@ struct ncsi_dev {
 };
 
 #ifdef CONFIG_NET_NCSI
+int ncsi_vlan_rx_add_vid(struct net_device *dev, __be16 proto, u16 vid);
+int ncsi_vlan_rx_kill_vid(struct net_device *dev, __be16 proto, u16 vid);
 struct ncsi_dev *ncsi_register_dev(struct net_device *dev,
 				   void (*notifier)(struct ncsi_dev *nd));
 int ncsi_start_dev(struct ncsi_dev *nd);
 void ncsi_stop_dev(struct ncsi_dev *nd);
 void ncsi_unregister_dev(struct ncsi_dev *nd);
 #else /* !CONFIG_NET_NCSI */
+static inline int ncsi_vlan_rx_add_vid(struct net_device *dev, __be16 proto, u16 vid)
+{
+	return -EINVAL;
+}
+
+static inline int ncsi_vlan_rx_kill_vid(struct net_device *dev, __be16 proto, u16 vid)
+{
+	return -EINVAL;
+}
+
 static inline struct ncsi_dev *ncsi_register_dev(struct net_device *dev,
 					void (*notifier)(struct ncsi_dev *nd))
 {

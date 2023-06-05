@@ -1,15 +1,10 @@
-/*
- * imx50 pinctrl driver based on imx pinmux core
- *
- * Copyright (C) 2013 Greg Ungerer <gerg@uclinux.org>
- * Copyright (C) 2012 Freescale Semiconductor, Inc.
- * Copyright (C) 2012 Linaro, Inc.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- */
+// SPDX-License-Identifier: GPL-2.0+
+//
+// imx50 pinctrl driver based on imx pinmux core
+//
+// Copyright (C) 2013 Greg Ungerer <gerg@uclinux.org>
+// Copyright (C) 2012 Freescale Semiconductor, Inc.
+// Copyright (C) 2012 Linaro, Inc.
 
 #include <linux/err.h>
 #include <linux/init.h>
@@ -385,7 +380,7 @@ static const struct pinctrl_pin_desc imx50_pinctrl_pads[] = {
 	IMX_PINCTRL_PIN(MX50_PAD_EIM_CRE),
 };
 
-static struct imx_pinctrl_soc_info imx50_pinctrl_info = {
+static const struct imx_pinctrl_soc_info imx50_pinctrl_info = {
 	.pins = imx50_pinctrl_pads,
 	.npins = ARRAY_SIZE(imx50_pinctrl_pads),
 	.gpr_compatible = "fsl,imx50-iomuxc-gpr",
@@ -404,7 +399,8 @@ static int imx50_pinctrl_probe(struct platform_device *pdev)
 static struct platform_driver imx50_pinctrl_driver = {
 	.driver = {
 		.name = "imx50-pinctrl",
-		.of_match_table = of_match_ptr(imx50_pinctrl_of_match),
+		.of_match_table = imx50_pinctrl_of_match,
+		.suppress_bind_attrs = true,
 	},
 	.probe = imx50_pinctrl_probe,
 };

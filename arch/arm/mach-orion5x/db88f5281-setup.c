@@ -1,13 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * arch/arm/mach-orion5x/db88f5281-setup.c
  *
  * Marvell Orion-2 Development Board Setup
  *
  * Maintainer: Tzachi Perelstein <tzachi@marvell.com>
- *
- * This file is licensed under the terms of the GNU General Public
- * License version 2.  This program is licensed "as is" without any
- * warranty of any kind, whether express or implied.
  */
 #include <linux/gpio.h>
 #include <linux/kernel.h>
@@ -16,7 +13,7 @@
 #include <linux/pci.h>
 #include <linux/irq.h>
 #include <linux/mtd/physmap.h>
-#include <linux/mtd/nand.h>
+#include <linux/mtd/rawnand.h>
 #include <linux/timer.h>
 #include <linux/mv643xx_eth.h>
 #include <linux/i2c.h>
@@ -172,7 +169,7 @@ static struct platform_device db88f5281_nand_flash = {
 static void __iomem *db88f5281_7seg;
 static struct timer_list db88f5281_timer;
 
-static void db88f5281_7seg_event(unsigned long data)
+static void db88f5281_7seg_event(struct timer_list *unused)
 {
 	static int count = 0;
 	writel(0, db88f5281_7seg + (count << 4));
@@ -189,7 +186,7 @@ static int __init db88f5281_7seg_init(void)
 			printk(KERN_ERR "Failed to ioremap db88f5281_7seg\n");
 			return -EIO;
 		}
-		setup_timer(&db88f5281_timer, db88f5281_7seg_event, 0);
+		timer_setup(&db88f5281_timer, db88f5281_7seg_event, 0);
 		mod_timer(&db88f5281_timer, jiffies + 2 * HZ);
 	}
 

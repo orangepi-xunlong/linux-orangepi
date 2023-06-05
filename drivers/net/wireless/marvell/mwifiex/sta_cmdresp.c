@@ -1,20 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
- * Marvell Wireless LAN device driver: station command response handling
+ * NXP Wireless LAN device driver: station command response handling
  *
- * Copyright (C) 2011-2014, Marvell International Ltd.
- *
- * This software file (the "File") is distributed by Marvell International
- * Ltd. under the terms of the GNU General Public License Version 2, June 1991
- * (the "License").  You may use, redistribute and/or modify this File in
- * accordance with the terms and conditions of the License, a copy of which
- * is available by writing to the Free Software Foundation, Inc.,
- * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA or on the
- * worldwide web at http://www.gnu.org/licenses/old-licenses/gpl-2.0.txt.
- *
- * THE FILE IS DISTRIBUTED AS-IS, WITHOUT WARRANTY OF ANY KIND, AND THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE
- * ARE EXPRESSLY DISCLAIMED.  The License provides additional details about
- * this warranty disclaimer.
+ * Copyright 2011-2020 NXP
  */
 
 #include "decl.h"
@@ -46,7 +34,6 @@ mwifiex_process_cmdresp_error(struct mwifiex_private *priv,
 {
 	struct mwifiex_adapter *adapter = priv->adapter;
 	struct host_cmd_ds_802_11_ps_mode_enh *pm;
-	unsigned long flags;
 
 	mwifiex_dbg(adapter, ERROR,
 		    "CMD_RESP: cmd %#x error, result=%#x\n",
@@ -70,11 +57,7 @@ mwifiex_process_cmdresp_error(struct mwifiex_private *priv,
 		break;
 	case HostCmd_CMD_802_11_SCAN:
 	case HostCmd_CMD_802_11_SCAN_EXT:
-		mwifiex_cancel_pending_scan_cmd(adapter);
-
-		spin_lock_irqsave(&adapter->mwifiex_cmd_lock, flags);
-		adapter->scan_processing = false;
-		spin_unlock_irqrestore(&adapter->mwifiex_cmd_lock, flags);
+		mwifiex_cancel_scan(adapter);
 		break;
 
 	case HostCmd_CMD_MAC_CONTROL:
@@ -91,9 +74,9 @@ mwifiex_process_cmdresp_error(struct mwifiex_private *priv,
 	/* Handling errors here */
 	mwifiex_recycle_cmd_node(adapter, adapter->curr_cmd);
 
-	spin_lock_irqsave(&adapter->mwifiex_cmd_lock, flags);
+	spin_lock_bh(&adapter->mwifiex_cmd_lock);
 	adapter->curr_cmd = NULL;
-	spin_unlock_irqrestore(&adapter->mwifiex_cmd_lock, flags);
+	spin_unlock_bh(&adapter->mwifiex_cmd_lock);
 }
 
 /*
@@ -183,7 +166,7 @@ static int mwifiex_ret_802_11_snmp_mib(struct mwifiex_private *priv,
 		    "query_type = %#x, buf size = %#x\n",
 		    oid, query_type, le16_to_cpu(smib->buf_size));
 	if (query_type == HostCmd_ACT_GEN_GET) {
-		ul_temp = le16_to_cpu(*((__le16 *) (smib->value)));
+		ul_temp = get_unaligned_le16(smib->value);
 		if (data_buf)
 			*data_buf = ul_temp;
 		switch (oid) {
@@ -206,6 +189,7 @@ static int mwifiex_ret_802_11_snmp_mib(struct mwifiex_private *priv,
 			mwifiex_dbg(priv->adapter, INFO,
 				    "info: SNMP_RESP: DTIM period=%u\n",
 				    ul_temp);
+			break;
 		default:
 			break;
 		}
@@ -298,9 +282,8 @@ static int mwifiex_ret_tx_rate_cfg(struct mwifiex_private *priv,
 			priv->bitmap_rates[1] =
 				le16_to_cpu(rate_scope->ofdm_rate_bitmap);
 			for (i = 0;
-			     i <
-			     sizeof(rate_scope->ht_mcs_rate_bitmap) /
-			     sizeof(u16); i++)
+			     i < ARRAY_SIZE(rate_scope->ht_mcs_rate_bitmap);
+			     i++)
 				priv->bitmap_rates[2 + i] =
 					le16_to_cpu(rate_scope->
 						    ht_mcs_rate_bitmap[i]);
@@ -586,6 +569,11 @@ static int mwifiex_ret_802_11_key_material_v1(struct mwifiex_private *priv,
 {
 	struct host_cmd_ds_802_11_key_material *key =
 						&resp->params.key_material;
+	int len;
+
+	len = le16_to_cpu(key->key_param_set.key_len);
+	if (len > sizeof(key->key_param_set.key))
+		return -EINVAL;
 
 	if (le16_to_cpu(key->action) == HostCmd_ACT_GEN_SET) {
 		if ((le16_to_cpu(key->key_param_set.key_info) & KEY_MCAST)) {
@@ -599,9 +587,8 @@ static int mwifiex_ret_802_11_key_material_v1(struct mwifiex_private *priv,
 
 	memset(priv->aes_key.key_param_set.key, 0,
 	       sizeof(key->key_param_set.key));
-	priv->aes_key.key_param_set.key_len = key->key_param_set.key_len;
-	memcpy(priv->aes_key.key_param_set.key, key->key_param_set.key,
-	       le16_to_cpu(priv->aes_key.key_param_set.key_len));
+	priv->aes_key.key_param_set.key_len = cpu_to_le16(len);
+	memcpy(priv->aes_key.key_param_set.key, key->key_param_set.key, len);
 
 	return 0;
 }
@@ -616,9 +603,14 @@ static int mwifiex_ret_802_11_key_material_v2(struct mwifiex_private *priv,
 					      struct host_cmd_ds_command *resp)
 {
 	struct host_cmd_ds_802_11_key_material_v2 *key_v2;
-	__le16 len;
+	int len;
 
 	key_v2 = &resp->params.key_material_v2;
+
+	len = le16_to_cpu(key_v2->key_param_set.key_params.aes.key_len);
+	if (len > sizeof(key_v2->key_param_set.key_params.aes.key))
+		return -EINVAL;
+
 	if (le16_to_cpu(key_v2->action) == HostCmd_ACT_GEN_SET) {
 		if ((le16_to_cpu(key_v2->key_param_set.key_info) & KEY_MCAST)) {
 			mwifiex_dbg(priv->adapter, INFO, "info: key: GTK is set\n");
@@ -632,12 +624,11 @@ static int mwifiex_ret_802_11_key_material_v2(struct mwifiex_private *priv,
 		return 0;
 
 	memset(priv->aes_key_v2.key_param_set.key_params.aes.key, 0,
-	       WLAN_KEY_LEN_CCMP);
+	       sizeof(key_v2->key_param_set.key_params.aes.key));
 	priv->aes_key_v2.key_param_set.key_params.aes.key_len =
-				key_v2->key_param_set.key_params.aes.key_len;
-	len = priv->aes_key_v2.key_param_set.key_params.aes.key_len;
+				cpu_to_le16(len);
 	memcpy(priv->aes_key_v2.key_param_set.key_params.aes.key,
-	       key_v2->key_param_set.key_params.aes.key, le16_to_cpu(len));
+	       key_v2->key_param_set.key_params.aes.key, len);
 
 	return 0;
 }
@@ -705,11 +696,35 @@ static int mwifiex_ret_ver_ext(struct mwifiex_private *priv,
 {
 	struct host_cmd_ds_version_ext *ver_ext = &resp->params.verext;
 
+	if (test_and_clear_bit(MWIFIEX_IS_REQUESTING_FW_VEREXT, &priv->adapter->work_flags)) {
+		if (strncmp(ver_ext->version_str, "ChipRev:20, BB:9b(10.00), RF:40(21)",
+			    MWIFIEX_VERSION_STR_LENGTH) == 0) {
+			struct mwifiex_ds_auto_ds auto_ds = {
+				.auto_ds = DEEP_SLEEP_OFF,
+			};
+
+			mwifiex_dbg(priv->adapter, MSG,
+				    "Bad HW revision detected, disabling deep sleep\n");
+
+			if (mwifiex_send_cmd(priv, HostCmd_CMD_802_11_PS_MODE_ENH,
+					     DIS_AUTO_PS, BITMAP_AUTO_DS, &auto_ds, false)) {
+				mwifiex_dbg(priv->adapter, MSG,
+					    "Disabling deep sleep failed.\n");
+			}
+		}
+
+		return 0;
+	}
+
 	if (version_ext) {
 		version_ext->version_str_sel = ver_ext->version_str_sel;
 		memcpy(version_ext->version_str, ver_ext->version_str,
-		       sizeof(char) * 128);
-		memcpy(priv->version_str, ver_ext->version_str, 128);
+		       MWIFIEX_VERSION_STR_LENGTH);
+		memcpy(priv->version_str, ver_ext->version_str,
+		       MWIFIEX_VERSION_STR_LENGTH);
+
+		/* Ensure the version string from the firmware is 0-terminated */
+		priv->version_str[MWIFIEX_VERSION_STR_LENGTH - 1] = '\0';
 	}
 	return 0;
 }
@@ -741,7 +756,7 @@ mwifiex_ret_p2p_mode_cfg(struct mwifiex_private *priv,
 	struct host_cmd_ds_p2p_mode_cfg *mode_cfg = &resp->params.mode_cfg;
 
 	if (data_buf)
-		*((u16 *)data_buf) = le16_to_cpu(mode_cfg->mode);
+		put_unaligned_le16(le16_to_cpu(mode_cfg->mode), data_buf);
 
 	return 0;
 }
@@ -1030,17 +1045,14 @@ mwifiex_create_custom_regdomain(struct mwifiex_private *priv,
 	struct ieee80211_regdomain *regd;
 	struct ieee80211_reg_rule *rule;
 	bool new_rule;
-	int regd_size, idx, freq, prev_freq = 0;
+	int idx, freq, prev_freq = 0;
 	u32 bw, prev_bw = 0;
 	u8 chflags, prev_chflags = 0, valid_rules = 0;
 
 	if (WARN_ON_ONCE(num_chan > NL80211_MAX_SUPP_REG_RULES))
 		return ERR_PTR(-EINVAL);
 
-	regd_size = sizeof(struct ieee80211_regdomain) +
-		    num_chan * sizeof(struct ieee80211_reg_rule);
-
-	regd = kzalloc(regd_size, GFP_KERNEL);
+	regd = kzalloc(struct_size(regd, reg_rules, num_chan), GFP_KERNEL);
 	if (!regd)
 		return ERR_PTR(-ENOMEM);
 
@@ -1154,6 +1166,43 @@ static int mwifiex_ret_chan_region_cfg(struct mwifiex_private *priv,
 	return 0;
 }
 
+static int mwifiex_ret_pkt_aggr_ctrl(struct mwifiex_private *priv,
+				     struct host_cmd_ds_command *resp)
+{
+	struct host_cmd_ds_pkt_aggr_ctrl *pkt_aggr_ctrl =
+					&resp->params.pkt_aggr_ctrl;
+	struct mwifiex_adapter *adapter = priv->adapter;
+
+	adapter->bus_aggr.enable = le16_to_cpu(pkt_aggr_ctrl->enable);
+	if (adapter->bus_aggr.enable)
+		adapter->intf_hdr_len = INTF_HEADER_LEN;
+	adapter->bus_aggr.mode = MWIFIEX_BUS_AGGR_MODE_LEN_V2;
+	adapter->bus_aggr.tx_aggr_max_size =
+				le16_to_cpu(pkt_aggr_ctrl->tx_aggr_max_size);
+	adapter->bus_aggr.tx_aggr_max_num =
+				le16_to_cpu(pkt_aggr_ctrl->tx_aggr_max_num);
+	adapter->bus_aggr.tx_aggr_align =
+				le16_to_cpu(pkt_aggr_ctrl->tx_aggr_align);
+
+	return 0;
+}
+
+static int mwifiex_ret_get_chan_info(struct mwifiex_private *priv,
+				     struct host_cmd_ds_command *resp,
+				     struct mwifiex_channel_band *channel_band)
+{
+	struct host_cmd_ds_sta_configure *sta_cfg_cmd = &resp->params.sta_cfg;
+	struct host_cmd_tlv_channel_band *tlv_band_channel;
+
+	tlv_band_channel =
+	(struct host_cmd_tlv_channel_band *)sta_cfg_cmd->tlv_buffer;
+	memcpy(&channel_band->band_config, &tlv_band_channel->band_config,
+	       sizeof(struct mwifiex_band_config));
+	channel_band->channel = tlv_band_channel->channel;
+
+	return 0;
+}
+
 /*
  * This function handles the command responses.
  *
@@ -1201,7 +1250,7 @@ int mwifiex_process_sta_cmdresp(struct mwifiex_private *priv, u16 cmdresp_no,
 		break;
 	case HostCmd_CMD_802_11_BG_SCAN_QUERY:
 		ret = mwifiex_ret_802_11_scan(priv, resp);
-		cfg80211_sched_scan_results(priv->wdev.wiphy);
+		cfg80211_sched_scan_results(priv->wdev.wiphy, 0);
 		mwifiex_dbg(adapter, CMD,
 			    "info: CMD_RESP: BG_SCAN result is ready!\n");
 		break;
@@ -1254,6 +1303,9 @@ int mwifiex_process_sta_cmdresp(struct mwifiex_private *priv, u16 cmdresp_no,
 		ret = mwifiex_ret_remain_on_chan(priv, resp, data_buf);
 		break;
 	case HostCmd_CMD_11AC_CFG:
+		break;
+	case HostCmd_CMD_PACKET_AGGR_CTRL:
+		ret = mwifiex_ret_pkt_aggr_ctrl(priv, resp);
 		break;
 	case HostCmd_CMD_P2P_MODE_CFG:
 		ret = mwifiex_ret_p2p_mode_cfg(priv, resp, data_buf);
@@ -1354,6 +1406,7 @@ int mwifiex_process_sta_cmdresp(struct mwifiex_private *priv, u16 cmdresp_no,
 		break;
 	case HostCmd_CMD_TDLS_OPER:
 		ret = mwifiex_ret_tdls_oper(priv, resp);
+		break;
 	case HostCmd_CMD_MC_POLICY:
 		break;
 	case HostCmd_CMD_CHAN_REPORT_REQUEST:
@@ -1373,6 +1426,9 @@ int mwifiex_process_sta_cmdresp(struct mwifiex_private *priv, u16 cmdresp_no,
 		break;
 	case HostCmd_CMD_CHAN_REGION_CFG:
 		ret = mwifiex_ret_chan_region_cfg(priv, resp);
+		break;
+	case HostCmd_CMD_STA_CONFIGURE:
+		ret = mwifiex_ret_get_chan_info(priv, resp, data_buf);
 		break;
 	default:
 		mwifiex_dbg(adapter, ERROR,

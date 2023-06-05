@@ -1,3 +1,2 @@
-#define CONFIG_RADIX_TREE_MULTIORDER 1
-#define CONFIG_SHMEM 1
-#define CONFIG_SWAP 1
+#include "bit-length.h"
+#define CONFIG_XARRAY_MULTI 1

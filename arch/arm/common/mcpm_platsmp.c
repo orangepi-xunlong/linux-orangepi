@@ -1,12 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * linux/arch/arm/mach-vexpress/mcpm_platsmp.c
  *
  * Created by:  Nicolas Pitre, November 2012
  * Copyright:   (C) 2012-2013  Linaro Limited
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  *
  * Code to handle secondary CPU bringup and hotplug for the cluster power API.
  */
@@ -60,7 +57,6 @@ static int mcpm_cpu_kill(unsigned int cpu)
 {
 	unsigned int pcpu, pcluster;
 
-	pr_debug("%s: cpu %u\n", __func__, cpu);
 	cpu_to_pcpu(cpu, &pcpu, &pcluster);
 
 	return !mcpm_wait_for_cpu_powerdown(pcpu, pcluster);
@@ -68,7 +64,6 @@ static int mcpm_cpu_kill(unsigned int cpu)
 
 static bool mcpm_cpu_can_disable(unsigned int cpu)
 {
-	pr_debug("%s: cpu %u\n", __func__, cpu);
 	/* We assume all CPUs may be shut down. */
 	return true;
 }
@@ -76,7 +71,6 @@ static bool mcpm_cpu_can_disable(unsigned int cpu)
 static void mcpm_cpu_die(unsigned int cpu)
 {
 	unsigned int mpidr, pcpu, pcluster;
-	pr_debug("%s: cpu %u\n", __func__, cpu);
 	mpidr = read_cpuid_mpidr();
 	pcpu = MPIDR_AFFINITY_LEVEL(mpidr, 0);
 	pcluster = MPIDR_AFFINITY_LEVEL(mpidr, 1);

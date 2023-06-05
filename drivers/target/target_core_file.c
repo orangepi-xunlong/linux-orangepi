@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*******************************************************************************
  * Filename:  target_core_file.c
  *
@@ -6,20 +7,6 @@
  * (c) Copyright 2005-2013 Datera, Inc.
  *
  * Nicholas A. Bellinger <nab@kernel.org>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
  *
  ******************************************************************************/
 
@@ -32,6 +19,8 @@
 #include <linux/module.h>
 #include <linux/vmalloc.h>
 #include <linux/falloc.h>
+#include <linux/uio.h>
+#include <linux/scatterlist.h>
 #include <scsi/scsi_proto.h>
 #include <asm/unaligned.h>
 
@@ -97,6 +86,24 @@ static struct se_device *fd_alloc_device(struct se_hba *hba, const char *name)
 	return &fd_dev->dev;
 }
 
+static bool fd_configure_unmap(struct se_device *dev)
+{
+	struct file *file = FD_DEV(dev)->fd_file;
+	struct inode *inode = file->f_mapping->host;
+
+	if (S_ISBLK(inode->i_mode))
+		return target_configure_unmap_from_queue(&dev->dev_attrib,
+							 I_BDEV(inode));
+
+	/* Limit UNMAP emulation to 8k Number of LBAs (NoLB) */
+	dev->dev_attrib.max_unmap_lba_count = 0x2000;
+	/* Currently hardcoded to 1 in Linux/SCSI code. */
+	dev->dev_attrib.max_unmap_block_desc_count = 1;
+	dev->dev_attrib.unmap_granularity = 1;
+	dev->dev_attrib.unmap_granularity_alignment = 0;
+	return true;
+}
+
 static int fd_configure_device(struct se_device *dev)
 {
 	struct fd_dev *fd_dev = FD_DEV(dev);
@@ -145,10 +152,10 @@ static int fd_configure_device(struct se_device *dev)
 	 */
 	inode = file->f_mapping->host;
 	if (S_ISBLK(inode->i_mode)) {
-		struct request_queue *q = bdev_get_queue(inode->i_bdev);
+		struct block_device *bdev = I_BDEV(inode);
 		unsigned long long dev_size;
 
-		fd_dev->fd_block_size = bdev_logical_block_size(inode->i_bdev);
+		fd_dev->fd_block_size = bdev_logical_block_size(bdev);
 		/*
 		 * Determine the number of bytes from i_size_read() minus
 		 * one (1) logical sector from underlying struct block_device
@@ -160,17 +167,13 @@ static int fd_configure_device(struct se_device *dev)
 			" block_device blocks: %llu logical_block_size: %d\n",
 			dev_size, div_u64(dev_size, fd_dev->fd_block_size),
 			fd_dev->fd_block_size);
-
-		if (target_configure_unmap_from_queue(&dev->dev_attrib, q))
-			pr_debug("IFILE: BLOCK Discard support available,"
-				 " disabled by default\n");
 		/*
 		 * Enable write same emulation for IBLOCK and use 0xFFFF as
 		 * the smaller WRITE_SAME(10) only has a two-byte block count.
 		 */
 		dev->dev_attrib.max_write_same_len = 0xFFFF;
 
-		if (blk_queue_nonrot(q))
+		if (bdev_nonrot(bdev))
 			dev->dev_attrib.is_nonrot = 1;
 	} else {
 		if (!(fd_dev->fbd_flags & FBDF_HAS_SIZE)) {
@@ -181,16 +184,6 @@ static int fd_configure_device(struct se_device *dev)
 		}
 
 		fd_dev->fd_block_size = FD_BLOCKSIZE;
-		/*
-		 * Limit UNMAP emulation to 8k Number of LBAs (NoLB)
-		 */
-		dev->dev_attrib.max_unmap_lba_count = 0x2000;
-		/*
-		 * Currently hardcoded to 1 in Linux/SCSI code..
-		 */
-		dev->dev_attrib.max_unmap_block_desc_count = 1;
-		dev->dev_attrib.unmap_granularity = 1;
-		dev->dev_attrib.unmap_granularity_alignment = 0;
 
 		/*
 		 * Limit WRITE_SAME w/ UNMAP=0 emulation to 8k Number of LBAs (NoLB)
@@ -236,13 +229,87 @@ static void fd_dev_call_rcu(struct rcu_head *p)
 
 static void fd_free_device(struct se_device *dev)
 {
+	call_rcu(&dev->rcu_head, fd_dev_call_rcu);
+}
+
+static void fd_destroy_device(struct se_device *dev)
+{
 	struct fd_dev *fd_dev = FD_DEV(dev);
 
 	if (fd_dev->fd_file) {
 		filp_close(fd_dev->fd_file, NULL);
 		fd_dev->fd_file = NULL;
 	}
-	call_rcu(&dev->rcu_head, fd_dev_call_rcu);
+}
+
+struct target_core_file_cmd {
+	unsigned long	len;
+	struct se_cmd	*cmd;
+	struct kiocb	iocb;
+	struct bio_vec	bvecs[];
+};
+
+static void cmd_rw_aio_complete(struct kiocb *iocb, long ret)
+{
+	struct target_core_file_cmd *cmd;
+
+	cmd = container_of(iocb, struct target_core_file_cmd, iocb);
+
+	if (ret != cmd->len)
+		target_complete_cmd(cmd->cmd, SAM_STAT_CHECK_CONDITION);
+	else
+		target_complete_cmd(cmd->cmd, SAM_STAT_GOOD);
+
+	kfree(cmd);
+}
+
+static sense_reason_t
+fd_execute_rw_aio(struct se_cmd *cmd, struct scatterlist *sgl, u32 sgl_nents,
+	      enum dma_data_direction data_direction)
+{
+	int is_write = !(data_direction == DMA_FROM_DEVICE);
+	struct se_device *dev = cmd->se_dev;
+	struct fd_dev *fd_dev = FD_DEV(dev);
+	struct file *file = fd_dev->fd_file;
+	struct target_core_file_cmd *aio_cmd;
+	struct iov_iter iter;
+	struct scatterlist *sg;
+	ssize_t len = 0;
+	int ret = 0, i;
+
+	aio_cmd = kmalloc(struct_size(aio_cmd, bvecs, sgl_nents), GFP_KERNEL);
+	if (!aio_cmd)
+		return TCM_LOGICAL_UNIT_COMMUNICATION_FAILURE;
+
+	for_each_sg(sgl, sg, sgl_nents, i) {
+		aio_cmd->bvecs[i].bv_page = sg_page(sg);
+		aio_cmd->bvecs[i].bv_len = sg->length;
+		aio_cmd->bvecs[i].bv_offset = sg->offset;
+
+		len += sg->length;
+	}
+
+	iov_iter_bvec(&iter, is_write, aio_cmd->bvecs, sgl_nents, len);
+
+	aio_cmd->cmd = cmd;
+	aio_cmd->len = len;
+	aio_cmd->iocb.ki_pos = cmd->t_task_lba * dev->dev_attrib.block_size;
+	aio_cmd->iocb.ki_filp = file;
+	aio_cmd->iocb.ki_complete = cmd_rw_aio_complete;
+	aio_cmd->iocb.ki_flags = IOCB_DIRECT;
+
+	if (is_write && (cmd->se_cmd_flags & SCF_FUA))
+		aio_cmd->iocb.ki_flags |= IOCB_DSYNC;
+
+	if (is_write)
+		ret = call_write_iter(file, &aio_cmd->iocb, &iter);
+	else
+		ret = call_read_iter(file, &aio_cmd->iocb, &iter);
+
+	if (ret != -EIOCBQUEUED)
+		cmd_rw_aio_complete(&aio_cmd->iocb, ret);
+
+	return 0;
 }
 
 static int fd_do_rw(struct se_cmd *cmd, struct file *fd,
@@ -270,11 +337,11 @@ static int fd_do_rw(struct se_cmd *cmd, struct file *fd,
 		len += sg->length;
 	}
 
-	iov_iter_bvec(&iter, ITER_BVEC, bvec, sgl_nents, len);
+	iov_iter_bvec(&iter, is_write, bvec, sgl_nents, len);
 	if (is_write)
-		ret = vfs_iter_write(fd, &iter, &pos);
+		ret = vfs_iter_write(fd, &iter, &pos, 0);
 	else
-		ret = vfs_iter_read(fd, &iter, &pos);
+		ret = vfs_iter_read(fd, &iter, &pos, 0);
 
 	if (is_write) {
 		if (ret < 0 || ret != data_length) {
@@ -375,15 +442,14 @@ fd_execute_write_same(struct se_cmd *cmd)
 	unsigned int len = 0, i;
 	ssize_t ret;
 
-	if (!nolb) {
-		target_complete_cmd(cmd, SAM_STAT_GOOD);
-		return 0;
-	}
 	if (cmd->prot_op) {
 		pr_err("WRITE_SAME: Protection information with FILEIO"
 		       " backends not supported\n");
 		return TCM_LOGICAL_UNIT_COMMUNICATION_FAILURE;
 	}
+
+	if (!cmd->t_data_nents)
+		return TCM_INVALID_CDB_FIELD;
 
 	if (cmd->t_data_nents > 1 ||
 	    cmd->t_data_sg[0].length != cmd->se_dev->dev_attrib.block_size) {
@@ -407,8 +473,8 @@ fd_execute_write_same(struct se_cmd *cmd)
 		len += se_dev->dev_attrib.block_size;
 	}
 
-	iov_iter_bvec(&iter, ITER_BVEC, bvec, nolb, len);
-	ret = vfs_iter_write(fd_dev->fd_file, &iter, &pos);
+	iov_iter_bvec(&iter, ITER_SOURCE, bvec, nolb, len);
+	ret = vfs_iter_write(fd_dev->fd_file, &iter, &pos, 0);
 
 	kfree(bvec);
 	if (ret < 0 || ret != len) {
@@ -436,9 +502,10 @@ fd_do_prot_fill(struct se_device *se_dev, sector_t lba, sector_t nolb,
 
 	prot_length = nolb * se_dev->prot_length;
 
+	memset(buf, 0xff, bufsize);
 	for (prot = 0; prot < prot_length;) {
 		sector_t len = min_t(sector_t, bufsize, prot_length - prot);
-		ssize_t ret = kernel_write(prot_fd, buf, len, pos + prot);
+		ssize_t ret = kernel_write(prot_fd, buf, len, &pos);
 
 		if (ret != len) {
 			pr_err("vfs_write to prot file failed: %zd\n", ret);
@@ -461,7 +528,6 @@ fd_do_prot_unmap(struct se_cmd *cmd, sector_t lba, sector_t nolb)
 		pr_err("Unable to allocate FILEIO prot buf\n");
 		return -ENOMEM;
 	}
-	memset(buf, 0xff, PAGE_SIZE);
 
 	rc = fd_do_prot_fill(cmd->se_dev, lba, nolb, buf, PAGE_SIZE);
 
@@ -489,13 +555,13 @@ fd_execute_unmap(struct se_cmd *cmd, sector_t lba, sector_t nolb)
 
 	if (S_ISBLK(inode->i_mode)) {
 		/* The backend is block device, use discard */
-		struct block_device *bdev = inode->i_bdev;
+		struct block_device *bdev = I_BDEV(inode);
 		struct se_device *dev = cmd->se_dev;
 
 		ret = blkdev_issue_discard(bdev,
 					   target_to_linux_sector(dev, lba),
 					   target_to_linux_sector(dev,  nolb),
-					   GFP_KERNEL, 0);
+					   GFP_KERNEL);
 		if (ret < 0) {
 			pr_warn("FILEIO: blkdev_issue_discard() failed: %d\n",
 				ret);
@@ -522,7 +588,7 @@ fd_execute_unmap(struct se_cmd *cmd, sector_t lba, sector_t nolb)
 }
 
 static sense_reason_t
-fd_execute_rw(struct se_cmd *cmd, struct scatterlist *sgl, u32 sgl_nents,
+fd_execute_rw_buffered(struct se_cmd *cmd, struct scatterlist *sgl, u32 sgl_nents,
 	      enum dma_data_direction data_direction)
 {
 	struct se_device *dev = cmd->se_dev;
@@ -531,16 +597,6 @@ fd_execute_rw(struct se_cmd *cmd, struct scatterlist *sgl, u32 sgl_nents,
 	struct file *pfile = fd_dev->fd_prot_file;
 	sense_reason_t rc;
 	int ret = 0;
-	/*
-	 * We are currently limited by the number of iovecs (2048) per
-	 * single vfs_[writev,readv] call.
-	 */
-	if (cmd->data_length > FD_MAX_BYTES) {
-		pr_err("FILEIO: Not able to process I/O of %u bytes due to"
-		       "FD_MAX_BYTES: %u iovec count limitation\n",
-			cmd->data_length, FD_MAX_BYTES);
-		return TCM_LOGICAL_UNIT_COMMUNICATION_FAILURE;
-	}
 	/*
 	 * Call vectorized fileio functions to map struct scatterlist
 	 * physical memory addresses to struct iovec virtual memory.
@@ -557,7 +613,8 @@ fd_execute_rw(struct se_cmd *cmd, struct scatterlist *sgl, u32 sgl_nents,
 		ret = fd_do_rw(cmd, file, dev->dev_attrib.block_size,
 			       sgl, sgl_nents, cmd->data_length, 0);
 
-		if (ret > 0 && cmd->prot_type && dev->dev_attrib.pi_prot_type) {
+		if (ret > 0 && cmd->prot_type && dev->dev_attrib.pi_prot_type &&
+		    dev->dev_attrib.pi_prot_verify) {
 			u32 sectors = cmd->data_length >>
 					ilog2(dev->dev_attrib.block_size);
 
@@ -567,7 +624,8 @@ fd_execute_rw(struct se_cmd *cmd, struct scatterlist *sgl, u32 sgl_nents,
 				return rc;
 		}
 	} else {
-		if (cmd->prot_type && dev->dev_attrib.pi_prot_type) {
+		if (cmd->prot_type && dev->dev_attrib.pi_prot_type &&
+		    dev->dev_attrib.pi_prot_verify) {
 			u32 sectors = cmd->data_length >>
 					ilog2(dev->dev_attrib.block_size);
 
@@ -613,14 +671,39 @@ fd_execute_rw(struct se_cmd *cmd, struct scatterlist *sgl, u32 sgl_nents,
 	return 0;
 }
 
+static sense_reason_t
+fd_execute_rw(struct se_cmd *cmd, struct scatterlist *sgl, u32 sgl_nents,
+	      enum dma_data_direction data_direction)
+{
+	struct se_device *dev = cmd->se_dev;
+	struct fd_dev *fd_dev = FD_DEV(dev);
+
+	/*
+	 * We are currently limited by the number of iovecs (2048) per
+	 * single vfs_[writev,readv] call.
+	 */
+	if (cmd->data_length > FD_MAX_BYTES) {
+		pr_err("FILEIO: Not able to process I/O of %u bytes due to"
+		       "FD_MAX_BYTES: %u iovec count limitation\n",
+			cmd->data_length, FD_MAX_BYTES);
+		return TCM_LOGICAL_UNIT_COMMUNICATION_FAILURE;
+	}
+
+	if (fd_dev->fbd_flags & FDBD_HAS_ASYNC_IO)
+		return fd_execute_rw_aio(cmd, sgl, sgl_nents, data_direction);
+	return fd_execute_rw_buffered(cmd, sgl, sgl_nents, data_direction);
+}
+
 enum {
-	Opt_fd_dev_name, Opt_fd_dev_size, Opt_fd_buffered_io, Opt_err
+	Opt_fd_dev_name, Opt_fd_dev_size, Opt_fd_buffered_io,
+	Opt_fd_async_io, Opt_err
 };
 
 static match_table_t tokens = {
 	{Opt_fd_dev_name, "fd_dev_name=%s"},
 	{Opt_fd_dev_size, "fd_dev_size=%s"},
 	{Opt_fd_buffered_io, "fd_buffered_io=%d"},
+	{Opt_fd_async_io, "fd_async_io=%d"},
 	{Opt_err, NULL}
 };
 
@@ -686,6 +769,21 @@ static ssize_t fd_set_configfs_dev_params(struct se_device *dev,
 
 			fd_dev->fbd_flags |= FDBD_HAS_BUFFERED_IO_WCE;
 			break;
+		case Opt_fd_async_io:
+			ret = match_int(args, &arg);
+			if (ret)
+				goto out;
+			if (arg != 1) {
+				pr_err("bogus fd_async_io=%d value\n", arg);
+				ret = -EINVAL;
+				goto out;
+			}
+
+			pr_debug("FILEIO: Using async I/O"
+				" operations for struct fd_dev\n");
+
+			fd_dev->fbd_flags |= FDBD_HAS_ASYNC_IO;
+			break;
 		default:
 			break;
 		}
@@ -702,10 +800,11 @@ static ssize_t fd_show_configfs_dev_params(struct se_device *dev, char *b)
 	ssize_t bl = 0;
 
 	bl = sprintf(b + bl, "TCM FILEIO ID: %u", fd_dev->fd_dev_id);
-	bl += sprintf(b + bl, "        File: %s  Size: %llu  Mode: %s\n",
+	bl += sprintf(b + bl, "        File: %s  Size: %llu  Mode: %s Async: %d\n",
 		fd_dev->fd_dev_name, fd_dev->fd_dev_size,
 		(fd_dev->fbd_flags & FDBD_HAS_BUFFERED_IO_WCE) ?
-		"Buffered-WCE" : "O_DSYNC");
+		"Buffered-WCE" : "O_DSYNC",
+		!!(fd_dev->fbd_flags & FDBD_HAS_ASYNC_IO));
 	return bl;
 }
 
@@ -787,7 +886,6 @@ static int fd_format_prot(struct se_device *dev)
 		 (unsigned long long)(dev->transport->get_blocks(dev) + 1) *
 					dev->prot_length);
 
-	memset(buf, 0xff, unit_size);
 	ret = fd_do_prot_fill(dev, 0, dev->transport->get_blocks(dev) + 1,
 			      buf, unit_size);
 	vfree(buf);
@@ -827,7 +925,9 @@ static const struct target_backend_ops fileio_ops = {
 	.detach_hba		= fd_detach_hba,
 	.alloc_device		= fd_alloc_device,
 	.configure_device	= fd_configure_device,
+	.destroy_device		= fd_destroy_device,
 	.free_device		= fd_free_device,
+	.configure_unmap	= fd_configure_unmap,
 	.parse_cdb		= fd_parse_cdb,
 	.set_configfs_dev_params = fd_set_configfs_dev_params,
 	.show_configfs_dev_params = fd_show_configfs_dev_params,

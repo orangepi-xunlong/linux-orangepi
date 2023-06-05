@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _WD719X_H_
 #define _WD719X_H_
 
@@ -55,6 +56,7 @@ struct wd719x_scb {
 	u8 flags[2];	/* 62-63 SCB specific flags (local to each thread) */
 	/* everything below is for driver use (not used by card) */
 	dma_addr_t phys;	/* bus address of the SCB */
+	dma_addr_t dma_handle;
 	struct scsi_cmnd *cmd;	/* a copy of the pointer we were passed */
 	struct list_head list;
 	struct wd719x_sglist sg_list[WD719X_SG] __aligned(8); /* SG list */
@@ -73,7 +75,6 @@ struct wd719x {
 	void *hash_virt;	/* hash table CPU address */
 	dma_addr_t hash_phys;	/* hash table bus address */
 	struct list_head active_scbs;
-	struct list_head free_scbs;
 };
 
 /* timeout delays in microsecs */

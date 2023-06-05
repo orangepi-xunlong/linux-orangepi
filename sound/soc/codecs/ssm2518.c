@@ -1,20 +1,18 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * SSM2518 amplifier audio driver
  *
  * Copyright 2013 Analog Devices Inc.
  *  Author: Lars-Peter Clausen <lars@metafoo.de>
- *
- * Licensed under the GPL-2.
  */
 
+#include <linux/err.h>
 #include <linux/module.h>
 #include <linux/init.h>
 #include <linux/i2c.h>
 #include <linux/regmap.h>
 #include <linux/slab.h>
-#include <linux/gpio.h>
-#include <linux/of_gpio.h>
-#include <linux/platform_data/ssm2518.h>
+#include <linux/gpio/consumer.h>
 #include <sound/core.h>
 #include <sound/pcm.h>
 #include <sound/pcm_params.h>
@@ -115,7 +113,7 @@ struct ssm2518 {
 	unsigned int sysclk;
 	const struct snd_pcm_hw_constraint_list *constraints;
 
-	int enable_gpio;
+	struct gpio_desc *enable_gpio;
 };
 
 static const struct reg_default ssm2518_reg_defaults[] = {
@@ -336,8 +334,8 @@ static int ssm2518_lookup_mcs(struct ssm2518 *ssm2518,
 static int ssm2518_hw_params(struct snd_pcm_substream *substream,
 	struct snd_pcm_hw_params *params, struct snd_soc_dai *dai)
 {
-	struct snd_soc_codec *codec = dai->codec;
-	struct ssm2518 *ssm2518 = snd_soc_codec_get_drvdata(codec);
+	struct snd_soc_component *component = dai->component;
+	struct ssm2518 *ssm2518 = snd_soc_component_get_drvdata(component);
 	unsigned int rate = params_rate(params);
 	unsigned int ctrl1, ctrl1_mask;
 	int mcs;
@@ -389,9 +387,9 @@ static int ssm2518_hw_params(struct snd_pcm_substream *substream,
 				SSM2518_POWER1_MCS_MASK, mcs << 1);
 }
 
-static int ssm2518_mute(struct snd_soc_dai *dai, int mute)
+static int ssm2518_mute(struct snd_soc_dai *dai, int mute, int direction)
 {
-	struct ssm2518 *ssm2518 = snd_soc_codec_get_drvdata(dai->codec);
+	struct ssm2518 *ssm2518 = snd_soc_component_get_drvdata(dai->component);
 	unsigned int val;
 
 	if (mute)
@@ -405,13 +403,13 @@ static int ssm2518_mute(struct snd_soc_dai *dai, int mute)
 
 static int ssm2518_set_dai_fmt(struct snd_soc_dai *dai, unsigned int fmt)
 {
-	struct ssm2518 *ssm2518 = snd_soc_codec_get_drvdata(dai->codec);
+	struct ssm2518 *ssm2518 = snd_soc_component_get_drvdata(dai->component);
 	unsigned int ctrl1 = 0, ctrl2 = 0;
 	bool invert_fclk;
 	int ret;
 
-	switch (fmt & SND_SOC_DAIFMT_MASTER_MASK) {
-	case SND_SOC_DAIFMT_CBS_CFS:
+	switch (fmt & SND_SOC_DAIFMT_CLOCK_PROVIDER_MASK) {
+	case SND_SOC_DAIFMT_CBC_CFC:
 		break;
 	default:
 		return -EINVAL;
@@ -484,8 +482,8 @@ static int ssm2518_set_power(struct ssm2518 *ssm2518, bool enable)
 		regcache_mark_dirty(ssm2518->regmap);
 	}
 
-	if (gpio_is_valid(ssm2518->enable_gpio))
-		gpio_set_value(ssm2518->enable_gpio, enable);
+	if (ssm2518->enable_gpio)
+		gpiod_set_value_cansleep(ssm2518->enable_gpio, enable);
 
 	regcache_cache_only(ssm2518->regmap, !enable);
 
@@ -498,10 +496,10 @@ static int ssm2518_set_power(struct ssm2518 *ssm2518, bool enable)
 	return ret;
 }
 
-static int ssm2518_set_bias_level(struct snd_soc_codec *codec,
+static int ssm2518_set_bias_level(struct snd_soc_component *component,
 	enum snd_soc_bias_level level)
 {
-	struct ssm2518 *ssm2518 = snd_soc_codec_get_drvdata(codec);
+	struct ssm2518 *ssm2518 = snd_soc_component_get_drvdata(component);
 	int ret = 0;
 
 	switch (level) {
@@ -510,7 +508,7 @@ static int ssm2518_set_bias_level(struct snd_soc_codec *codec,
 	case SND_SOC_BIAS_PREPARE:
 		break;
 	case SND_SOC_BIAS_STANDBY:
-		if (snd_soc_codec_get_bias_level(codec) == SND_SOC_BIAS_OFF)
+		if (snd_soc_component_get_bias_level(component) == SND_SOC_BIAS_OFF)
 			ret = ssm2518_set_power(ssm2518, true);
 		break;
 	case SND_SOC_BIAS_OFF:
@@ -524,7 +522,7 @@ static int ssm2518_set_bias_level(struct snd_soc_codec *codec,
 static int ssm2518_set_tdm_slot(struct snd_soc_dai *dai, unsigned int tx_mask,
 	unsigned int rx_mask, int slots, int width)
 {
-	struct ssm2518 *ssm2518 = snd_soc_codec_get_drvdata(dai->codec);
+	struct ssm2518 *ssm2518 = snd_soc_component_get_drvdata(dai->component);
 	unsigned int ctrl1, ctrl2;
 	int left_slot, right_slot;
 	int ret;
@@ -609,7 +607,7 @@ static int ssm2518_set_tdm_slot(struct snd_soc_dai *dai, unsigned int tx_mask,
 static int ssm2518_startup(struct snd_pcm_substream *substream,
 	struct snd_soc_dai *dai)
 {
-	struct ssm2518 *ssm2518 = snd_soc_codec_get_drvdata(dai->codec);
+	struct ssm2518 *ssm2518 = snd_soc_component_get_drvdata(dai->component);
 
 	if (ssm2518->constraints)
 		snd_pcm_hw_constraint_list(substream->runtime, 0,
@@ -624,9 +622,10 @@ static int ssm2518_startup(struct snd_pcm_substream *substream,
 static const struct snd_soc_dai_ops ssm2518_dai_ops = {
 	.startup = ssm2518_startup,
 	.hw_params	= ssm2518_hw_params,
-	.digital_mute	= ssm2518_mute,
+	.mute_stream	= ssm2518_mute,
 	.set_fmt	= ssm2518_set_dai_fmt,
 	.set_tdm_slot	= ssm2518_set_tdm_slot,
+	.no_capture_mute = 1,
 };
 
 static struct snd_soc_dai_driver ssm2518_dai = {
@@ -641,10 +640,10 @@ static struct snd_soc_dai_driver ssm2518_dai = {
 	.ops = &ssm2518_dai_ops,
 };
 
-static int ssm2518_set_sysclk(struct snd_soc_codec *codec, int clk_id,
+static int ssm2518_set_sysclk(struct snd_soc_component *component, int clk_id,
 	int source, unsigned int freq, int dir)
 {
-	struct ssm2518 *ssm2518 = snd_soc_codec_get_drvdata(codec);
+	struct ssm2518 *ssm2518 = snd_soc_component_get_drvdata(component);
 	unsigned int val;
 
 	if (clk_id != SSM2518_SYSCLK)
@@ -710,19 +709,17 @@ static int ssm2518_set_sysclk(struct snd_soc_codec *codec, int clk_id,
 			SSM2518_POWER1_NO_BCLK, val);
 }
 
-static struct snd_soc_codec_driver ssm2518_codec_driver = {
-	.set_bias_level = ssm2518_set_bias_level,
-	.set_sysclk = ssm2518_set_sysclk,
-	.idle_bias_off = true,
-
-	.component_driver = {
-		.controls		= ssm2518_snd_controls,
-		.num_controls		= ARRAY_SIZE(ssm2518_snd_controls),
-		.dapm_widgets		= ssm2518_dapm_widgets,
-		.num_dapm_widgets	= ARRAY_SIZE(ssm2518_dapm_widgets),
-		.dapm_routes		= ssm2518_routes,
-		.num_dapm_routes	= ARRAY_SIZE(ssm2518_routes),
-	},
+static const struct snd_soc_component_driver ssm2518_component_driver = {
+	.set_bias_level		= ssm2518_set_bias_level,
+	.set_sysclk		= ssm2518_set_sysclk,
+	.controls		= ssm2518_snd_controls,
+	.num_controls		= ARRAY_SIZE(ssm2518_snd_controls),
+	.dapm_widgets		= ssm2518_dapm_widgets,
+	.num_dapm_widgets	= ARRAY_SIZE(ssm2518_dapm_widgets),
+	.dapm_routes		= ssm2518_routes,
+	.num_dapm_routes	= ARRAY_SIZE(ssm2518_routes),
+	.use_pmdown_time	= 1,
+	.endianness		= 1,
 };
 
 static const struct regmap_config ssm2518_regmap_config = {
@@ -736,10 +733,8 @@ static const struct regmap_config ssm2518_regmap_config = {
 	.num_reg_defaults = ARRAY_SIZE(ssm2518_reg_defaults),
 };
 
-static int ssm2518_i2c_probe(struct i2c_client *i2c,
-	const struct i2c_device_id *id)
+static int ssm2518_i2c_probe(struct i2c_client *i2c)
 {
-	struct ssm2518_platform_data *pdata = i2c->dev.platform_data;
 	struct ssm2518 *ssm2518;
 	int ret;
 
@@ -747,22 +742,14 @@ static int ssm2518_i2c_probe(struct i2c_client *i2c,
 	if (ssm2518 == NULL)
 		return -ENOMEM;
 
-	if (pdata) {
-		ssm2518->enable_gpio = pdata->enable_gpio;
-	} else if (i2c->dev.of_node) {
-		ssm2518->enable_gpio = of_get_gpio(i2c->dev.of_node, 0);
-		if (ssm2518->enable_gpio < 0 && ssm2518->enable_gpio != -ENOENT)
-			return ssm2518->enable_gpio;
-	} else {
-		ssm2518->enable_gpio = -1;
-	}
+	/* Start with enabling the chip */
+	ssm2518->enable_gpio = devm_gpiod_get_optional(&i2c->dev, NULL,
+						       GPIOD_OUT_HIGH);
+	ret = PTR_ERR_OR_ZERO(ssm2518->enable_gpio);
+	if (ret)
+		return ret;
 
-	if (gpio_is_valid(ssm2518->enable_gpio)) {
-		ret = devm_gpio_request_one(&i2c->dev, ssm2518->enable_gpio,
-				GPIOF_OUT_INIT_HIGH, "SSM2518 nSD");
-		if (ret)
-			return ret;
-	}
+	gpiod_set_consumer_name(ssm2518->enable_gpio, "SSM2518 nSD");
 
 	i2c_set_clientdata(i2c, ssm2518);
 
@@ -792,14 +779,9 @@ static int ssm2518_i2c_probe(struct i2c_client *i2c,
 	if (ret)
 		return ret;
 
-	return snd_soc_register_codec(&i2c->dev, &ssm2518_codec_driver,
+	return devm_snd_soc_register_component(&i2c->dev,
+			&ssm2518_component_driver,
 			&ssm2518_dai, 1);
-}
-
-static int ssm2518_i2c_remove(struct i2c_client *client)
-{
-	snd_soc_unregister_codec(&client->dev);
-	return 0;
 }
 
 #ifdef CONFIG_OF
@@ -821,8 +803,7 @@ static struct i2c_driver ssm2518_driver = {
 		.name = "ssm2518",
 		.of_match_table = of_match_ptr(ssm2518_dt_ids),
 	},
-	.probe = ssm2518_i2c_probe,
-	.remove = ssm2518_i2c_remove,
+	.probe_new = ssm2518_i2c_probe,
 	.id_table = ssm2518_i2c_ids,
 };
 module_i2c_driver(ssm2518_driver);

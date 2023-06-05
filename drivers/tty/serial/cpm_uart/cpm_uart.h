@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  *  Driver for CPM (SCC/SMC) serial ports
  *
@@ -5,11 +6,6 @@
  *
  *  2006 (c) MontaVista Software, Inc.
  *	Vitaly Bordug <vbordug@ru.mvista.com>
- *
- * This file is licensed under the terms of the GNU General Public License
- * version 2. This program is licensed "as is" without any warranty of any
- * kind, whether express or implied.
- *
  */
 #ifndef CPM_UART_H
 #define CPM_UART_H
@@ -17,10 +13,14 @@
 #include <linux/platform_device.h>
 #include <linux/fs_uart_pd.h>
 
+struct gpio_desc;
+
 #if defined(CONFIG_CPM2)
 #include "cpm_uart_cpm2.h"
 #elif defined(CONFIG_CPM1)
 #include "cpm_uart_cpm1.h"
+#elif defined(CONFIG_COMPILE_TEST)
+#include "cpm_uart_cpm2.h"
 #endif
 
 #define SERIAL_CPM_MAJOR	204
@@ -84,10 +84,9 @@ struct uart_cpm_port {
 	int			wait_closing;
 	/* value to combine with opcode to form cpm command */
 	u32			command;
-	int			gpios[NUM_GPIOS];
+	struct gpio_desc	*gpios[NUM_GPIOS];
 };
 
-extern int cpm_uart_nr;
 extern struct uart_cpm_port cpm_uart_ports[UART_NR];
 
 /* these are located in their respective files */

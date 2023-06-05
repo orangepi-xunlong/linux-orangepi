@@ -1,24 +1,12 @@
-/******************************************************************************
+/* SPDX-License-Identifier: GPL-2.0 */
+/*
  * Copyright(c) 2008 - 2010 Realtek Corporation. All rights reserved.
  *
  * Based on the r8180 driver, which is:
  * Copyright 2004-2005 Andrea Merello <andrea.merello@gmail.com>, et al.
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of version 2 of the GNU General Public License as
- * published by the Free Software Foundation.
  *
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * The full GNU General Public License is included in this distribution in the
- * file called LICENSE.
- *
- * Contact Information:
- * wlanfae <wlanfae@realtek.com>
-******************************************************************************/
-
+ * Contact Information: wlanfae <wlanfae@realtek.com>
+ */
 #ifndef _RTL_CORE_H
 #define _RTL_CORE_H
 
@@ -67,11 +55,6 @@
 #define IS_HARDWARE_TYPE_8192SE(_priv)		\
 	(((struct r8192_priv *)rtllib_priv(dev))->card_8192 == NIC_8192SE)
 
-#define RTL_PCI_DEVICE(vend, dev, cfg) \
-	.vendor = (vend), .device = (dev), \
-	.subvendor = PCI_ANY_ID, .subdevice = PCI_ANY_ID, \
-	.driver_data = (kernel_ulong_t)&(cfg)
-
 #define TOTAL_CAM_ENTRY		32
 #define CAM_CONTENT_COUNT	8
 
@@ -101,8 +84,6 @@
 #define DEFAULT_RETRY_DATA	7
 
 #define	PHY_RSSI_SLID_WIN_MAX			100
-
-#define RTL_IOCTL_WPA_SUPPLICANT		(SIOCIWFIRSTPRIV + 30)
 
 #define TxBBGainTableLength			37
 #define CCKTxBBGainTableLength			23
@@ -313,8 +294,8 @@ struct rtl819x_ops {
 	void (*tx_enable)(struct net_device *dev);
 	void (*interrupt_recognized)(struct net_device *dev,
 				     u32 *p_inta, u32 *p_intb);
-	bool (*TxCheckStuckHandler)(struct net_device *dev);
-	bool (*RxCheckStuckHandler)(struct net_device *dev);
+	bool (*tx_check_stuck_handler)(struct net_device *dev);
+	bool (*rx_check_stuck_handler)(struct net_device *dev);
 };
 
 struct r8192_priv {
@@ -406,7 +387,7 @@ struct r8192_priv {
 	u16		ShortRetryLimit;
 	u16		LongRetryLimit;
 
-	bool		bHwRadioOff;
+	bool		hw_radio_off;
 	bool		blinked_ingpio;
 	u8		polling_timer_on;
 
@@ -444,7 +425,7 @@ struct r8192_priv {
 
 	u16 basic_rate;
 	u8 short_preamble;
-	u8 dot11CurrentPreambleMode;
+	u8 dot11_current_preamble_mode;
 	u8 slot_time;
 	u16 SifsTime;
 
@@ -492,7 +473,7 @@ struct r8192_priv {
 	bool bInPowerSaveMode;
 	u8 bHwRfOffAction;
 
-	bool RFChangeInProgress;
+	bool rf_change_in_progress;
 	bool SetRFPowerStateInProgress;
 	bool bdisable_nic;
 
@@ -583,13 +564,13 @@ void rtl92e_writel(struct net_device *dev, int x, u32 y);
 
 void force_pci_posting(struct net_device *dev);
 
-void rtl92e_rx_enable(struct net_device *);
-void rtl92e_tx_enable(struct net_device *);
+void rtl92e_rx_enable(struct net_device *dev);
+void rtl92e_tx_enable(struct net_device *dev);
 
 void rtl92e_hw_sleep_wq(void *data);
 void rtl92e_commit(struct net_device *dev);
 
-void rtl92e_check_rfctrl_gpio_timer(unsigned long data);
+void rtl92e_check_rfctrl_gpio_timer(struct timer_list *t);
 
 void rtl92e_hw_wakeup_wq(void *data);
 
@@ -612,6 +593,6 @@ bool rtl92e_enable_nic(struct net_device *dev);
 bool rtl92e_disable_nic(struct net_device *dev);
 
 bool rtl92e_set_rf_state(struct net_device *dev,
-			 enum rt_rf_power_state StateToSet,
-			 RT_RF_CHANGE_SOURCE ChangeSource);
+			 enum rt_rf_power_state state_to_set,
+			 RT_RF_CHANGE_SOURCE change_source);
 #endif

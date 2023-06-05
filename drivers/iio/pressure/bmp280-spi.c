@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * SPI interface for the BMP280 driver
  *
@@ -65,6 +66,9 @@ static int bmp280_spi_probe(struct spi_device *spi)
 	case BME280_CHIP_ID:
 		regmap_config = &bmp280_regmap_config;
 		break;
+	case BMP380_CHIP_ID:
+		regmap_config = &bmp380_regmap_config;
+		break;
 	default:
 		return -EINVAL;
 	}
@@ -85,17 +89,13 @@ static int bmp280_spi_probe(struct spi_device *spi)
 				   spi->irq);
 }
 
-static int bmp280_spi_remove(struct spi_device *spi)
-{
-	return bmp280_common_remove(&spi->dev);
-}
-
 static const struct of_device_id bmp280_of_spi_match[] = {
 	{ .compatible = "bosch,bmp085", },
 	{ .compatible = "bosch,bmp180", },
 	{ .compatible = "bosch,bmp181", },
 	{ .compatible = "bosch,bmp280", },
 	{ .compatible = "bosch,bme280", },
+	{ .compatible = "bosch,bmp380", },
 	{ },
 };
 MODULE_DEVICE_TABLE(of, bmp280_of_spi_match);
@@ -105,6 +105,7 @@ static const struct spi_device_id bmp280_spi_id[] = {
 	{ "bmp181", BMP180_CHIP_ID },
 	{ "bmp280", BMP280_CHIP_ID },
 	{ "bme280", BME280_CHIP_ID },
+	{ "bmp380", BMP380_CHIP_ID },
 	{ }
 };
 MODULE_DEVICE_TABLE(spi, bmp280_spi_id);
@@ -113,13 +114,13 @@ static struct spi_driver bmp280_spi_driver = {
 	.driver = {
 		.name = "bmp280",
 		.of_match_table = bmp280_of_spi_match,
-		.pm = &bmp280_dev_pm_ops,
+		.pm = pm_ptr(&bmp280_dev_pm_ops),
 	},
 	.id_table = bmp280_spi_id,
 	.probe = bmp280_spi_probe,
-	.remove = bmp280_spi_remove,
 };
 module_spi_driver(bmp280_spi_driver);
 
 MODULE_DESCRIPTION("BMP280 SPI bus driver");
 MODULE_LICENSE("GPL");
+MODULE_IMPORT_NS(IIO_BMP280);

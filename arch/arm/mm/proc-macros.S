@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * We need constants.h for:
  *  VMA_VM_MM
@@ -25,19 +26,15 @@
 	ldr	\rd, [\rn, #VMA_VM_FLAGS]
 	.endm
 
-	.macro	tsk_mm, rd, rn
-	ldr	\rd, [\rn, #TI_TASK]
-	ldr	\rd, [\rd, #TSK_ACTIVE_MM]
-	.endm
-
 /*
  * act_mm - get current->active_mm
  */
 	.macro	act_mm, rd
-	bic	\rd, sp, #8128
-	bic	\rd, \rd, #63
-	ldr	\rd, [\rd, #TI_TASK]
-	ldr	\rd, [\rd, #TSK_ACTIVE_MM]
+	get_current \rd
+	.if (TSK_ACTIVE_MM > IMM12_MASK)
+	add	\rd, \rd, #TSK_ACTIVE_MM & ~IMM12_MASK
+	.endif
+	ldr	\rd, [\rd, #TSK_ACTIVE_MM & IMM12_MASK]
 	.endm
 
 /*
@@ -342,6 +339,7 @@ ENTRY(\name\()_cache_fns)
 
 .macro define_tlb_functions name:req, flags_up:req, flags_smp
 	.type	\name\()_tlb_fns, #object
+	.align 2
 ENTRY(\name\()_tlb_fns)
 	.long	\name\()_flush_user_tlb_range
 	.long	\name\()_flush_kern_tlb_range

@@ -1,9 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Backlight driver for Analog Devices ADP8870 Backlight Devices
  *
  * Copyright 2009-2011 Analog Devices Inc.
- *
- * Licensed under the GPL-2 or later.
  */
 
 #include <linux/module.h>
@@ -18,7 +17,7 @@
 #include <linux/workqueue.h>
 #include <linux/slab.h>
 
-#include <linux/i2c/adp8870.h>
+#include <linux/platform_data/adp8870.h>
 #define ADP8870_EXT_FEATURES
 #define ADP8870_USE_LEDS
 
@@ -246,7 +245,7 @@ static int adp8870_led_probe(struct i2c_client *client)
 	struct led_info *cur_led;
 	int ret, i;
 
-	led = devm_kzalloc(&client->dev, pdata->num_leds * sizeof(*led),
+	led = devm_kcalloc(&client->dev, pdata->num_leds, sizeof(*led),
 				GFP_KERNEL);
 	if (led == NULL)
 		return -ENOMEM;
@@ -400,15 +399,7 @@ static int adp8870_bl_set(struct backlight_device *bl, int brightness)
 
 static int adp8870_bl_update_status(struct backlight_device *bl)
 {
-	int brightness = bl->props.brightness;
-
-	if (bl->props.power != FB_BLANK_UNBLANK)
-		brightness = 0;
-
-	if (bl->props.fb_blank != FB_BLANK_UNBLANK)
-		brightness = 0;
-
-	return adp8870_bl_set(bl, brightness);
+	return adp8870_bl_set(bl, backlight_get_brightness(bl));
 }
 
 static int adp8870_bl_get_brightness(struct backlight_device *bl)
@@ -934,7 +925,7 @@ out:
 	return ret;
 }
 
-static int adp8870_remove(struct i2c_client *client)
+static void adp8870_remove(struct i2c_client *client)
 {
 	struct adp8870_bl *data = i2c_get_clientdata(client);
 
@@ -946,8 +937,6 @@ static int adp8870_remove(struct i2c_client *client)
 	if (data->pdata->en_ambl_sens)
 		sysfs_remove_group(&data->bl->dev.kobj,
 			&adp8870_bl_attr_group);
-
-	return 0;
 }
 
 #ifdef CONFIG_PM_SLEEP
@@ -992,5 +981,5 @@ static struct i2c_driver adp8870_driver = {
 module_i2c_driver(adp8870_driver);
 
 MODULE_LICENSE("GPL v2");
-MODULE_AUTHOR("Michael Hennerich <hennerich@blackfin.uclinux.org>");
+MODULE_AUTHOR("Michael Hennerich <michael.hennerich@analog.com>");
 MODULE_DESCRIPTION("ADP8870 Backlight driver");

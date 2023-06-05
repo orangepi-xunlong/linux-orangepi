@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Common defines for v7m cpus
  */
@@ -12,6 +13,7 @@
 #define V7M_SCB_ICSR_PENDSVSET			(1 << 28)
 #define V7M_SCB_ICSR_PENDSVCLR			(1 << 27)
 #define V7M_SCB_ICSR_RETTOBASE			(1 << 11)
+#define V7M_SCB_ICSR_VECTACTIVE			0x000001ff
 
 #define V7M_SCB_VTOR			0x08
 
@@ -37,7 +39,7 @@
 #define V7M_SCB_SHCSR_MEMFAULTENA		(1 << 16)
 
 #define V7M_xPSR_FRAMEPTRALIGN			0x00000200
-#define V7M_xPSR_EXCEPTIONNO			0x000001ff
+#define V7M_xPSR_EXCEPTIONNO			V7M_SCB_ICSR_VECTACTIVE
 
 /*
  * When branching to an address that has bits [31:28] == 0xf an exception return
@@ -48,7 +50,7 @@
  * (0 -> msp; 1 -> psp). Bits [1:0] are fixed to 0b01.
  */
 #define EXC_RET_STACK_MASK			0x00000004
-#define EXC_RET_THREADMODE_PROCESSSTACK		0xfffffffd
+#define EXC_RET_THREADMODE_PROCESSSTACK		(3 << 2)
 
 /* Cache related definitions */
 
@@ -56,6 +58,24 @@
 #define	V7M_SCB_CTR		0x7c	/* Cache Type register */
 #define	V7M_SCB_CCSIDR		0x80	/* Cache size ID register */
 #define	V7M_SCB_CSSELR		0x84	/* Cache size selection register */
+
+/* Memory-mapped MPU registers for M-class */
+#define MPU_TYPE		0x90
+#define MPU_CTRL		0x94
+#define MPU_CTRL_ENABLE		1
+#define MPU_CTRL_PRIVDEFENA	(1 << 2)
+
+#define PMSAv7_RNR		0x98
+#define PMSAv7_RBAR		0x9c
+#define PMSAv7_RASR		0xa0
+
+#define PMSAv8_RNR		0x98
+#define PMSAv8_RBAR		0x9c
+#define PMSAv8_RLAR		0xa0
+#define PMSAv8_RBAR_A(n)	(PMSAv8_RBAR + 8*(n))
+#define PMSAv8_RLAR_A(n)	(PMSAv8_RLAR + 8*(n))
+#define PMSAv8_MAIR0		0xc0
+#define PMSAv8_MAIR1		0xc4
 
 /* Cache opeartions */
 #define	V7M_SCB_ICIALLU		0x250	/* I-cache invalidate all to PoU */

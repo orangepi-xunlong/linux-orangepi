@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note */
 /*
  * Copyright (C) 2008 Google, Inc.
  *
@@ -37,56 +38,9 @@ enum {
 	BINDER_TYPE_PTR		= B_PACK_CHARS('p', 't', '*', B_TYPE_LARGE),
 };
 
-/**
- * enum flat_binder_object_shifts: shift values for flat_binder_object_flags
- * @FLAT_BINDER_FLAG_SCHED_POLICY_SHIFT: shift for getting scheduler policy.
- *
- */
-enum flat_binder_object_shifts {
-	FLAT_BINDER_FLAG_SCHED_POLICY_SHIFT = 9,
-};
-
-/**
- * enum flat_binder_object_flags - flags for use in flat_binder_object.flags
- */
-enum flat_binder_object_flags {
-	/**
-	 * @FLAT_BINDER_FLAG_PRIORITY_MASK: bit-mask for min scheduler priority
-	 *
-	 * These bits can be used to set the minimum scheduler priority
-	 * at which transactions into this node should run. Valid values
-	 * in these bits depend on the scheduler policy encoded in
-	 * @FLAT_BINDER_FLAG_SCHED_POLICY_MASK.
-	 *
-	 * For SCHED_NORMAL/SCHED_BATCH, the valid range is between [-20..19]
-	 * For SCHED_FIFO/SCHED_RR, the value can run between [1..99]
-	 */
+enum {
 	FLAT_BINDER_FLAG_PRIORITY_MASK = 0xff,
-	/**
-	 * @FLAT_BINDER_FLAG_ACCEPTS_FDS: whether the node accepts fds.
-	 */
 	FLAT_BINDER_FLAG_ACCEPTS_FDS = 0x100,
-	/**
-	 * @FLAT_BINDER_FLAG_SCHED_POLICY_MASK: bit-mask for scheduling policy
-	 *
-	 * These two bits can be used to set the min scheduling policy at which
-	 * transactions on this node should run. These match the UAPI
-	 * scheduler policy values, eg:
-	 * 00b: SCHED_NORMAL
-	 * 01b: SCHED_FIFO
-	 * 10b: SCHED_RR
-	 * 11b: SCHED_BATCH
-	 */
-	FLAT_BINDER_FLAG_SCHED_POLICY_MASK =
-		3U << FLAT_BINDER_FLAG_SCHED_POLICY_SHIFT,
-
-	/**
-	 * @FLAT_BINDER_FLAG_INHERIT_RT: whether the node inherits RT policy
-	 *
-	 * Only when set, calls into this node will inherit a real-time
-	 * scheduling policy from the caller (for synchronous transactions).
-	 */
-	FLAT_BINDER_FLAG_INHERIT_RT = 0x800,
 
 	/**
 	 * @FLAT_BINDER_FLAG_TXN_SECURITY_CTX: request security contexts
@@ -263,6 +217,40 @@ struct binder_node_info_for_ref {
 	__u32            reserved3;
 };
 
+struct binder_freeze_info {
+	__u32            pid;
+	__u32            enable;
+	__u32            timeout_ms;
+};
+
+struct binder_frozen_status_info {
+	__u32            pid;
+
+	/* process received sync transactions since last frozen
+	 * bit 0: received sync transaction after being frozen
+	 * bit 1: new pending sync transaction during freezing
+	 */
+	__u32            sync_recv;
+
+	/* process received async transactions since last frozen */
+	__u32            async_recv;
+};
+
+/* struct binder_extened_error - extended error information
+ * @id:		identifier for the failed operation
+ * @command:	command as defined by binder_driver_return_protocol
+ * @param:	parameter holding a negative errno value
+ *
+ * Used with BINDER_GET_EXTENDED_ERROR. This extends the error information
+ * returned by the driver upon a failed operation. Userspace can pull this
+ * data to properly handle specific error scenarios.
+ */
+struct binder_extended_error {
+	__u32	id;
+	__u32	command;
+	__s32	param;
+};
+
 #define BINDER_WRITE_READ		_IOWR('b', 1, struct binder_write_read)
 #define BINDER_SET_IDLE_TIMEOUT		_IOW('b', 3, __s64)
 #define BINDER_SET_MAX_THREADS		_IOW('b', 5, __u32)
@@ -273,6 +261,10 @@ struct binder_node_info_for_ref {
 #define BINDER_GET_NODE_DEBUG_INFO	_IOWR('b', 11, struct binder_node_debug_info)
 #define BINDER_GET_NODE_INFO_FOR_REF	_IOWR('b', 12, struct binder_node_info_for_ref)
 #define BINDER_SET_CONTEXT_MGR_EXT	_IOW('b', 13, struct flat_binder_object)
+#define BINDER_FREEZE			_IOW('b', 14, struct binder_freeze_info)
+#define BINDER_GET_FROZEN_INFO		_IOWR('b', 15, struct binder_frozen_status_info)
+#define BINDER_ENABLE_ONEWAY_SPAM_DETECTION	_IOW('b', 16, __u32)
+#define BINDER_GET_EXTENDED_ERROR	_IOWR('b', 17, struct binder_extended_error)
 
 /*
  * NOTE: Two special error codes you should check for when calling
@@ -294,6 +286,8 @@ enum transaction_flags {
 	TF_ROOT_OBJECT	= 0x04,	/* contents are the component's root object */
 	TF_STATUS_CODE	= 0x08,	/* contents are a 32-bit status code */
 	TF_ACCEPT_FDS	= 0x10,	/* allow replies with file descriptors */
+	TF_CLEAR_BUF	= 0x20,	/* clear buffer on txn complete */
+	TF_UPDATE_TXN	= 0x40,	/* update the outdated pending async txn */
 };
 
 struct binder_transaction_data {
@@ -311,8 +305,8 @@ struct binder_transaction_data {
 
 	/* General information about the transaction. */
 	__u32	        flags;
-	pid_t		sender_pid;
-	uid_t		sender_euid;
+	__kernel_pid_t	sender_pid;
+	__kernel_uid32_t	sender_euid;
 	binder_size_t	data_size;	/* number of bytes of data */
 	binder_size_t	offsets_size;	/* number of bytes of offsets */
 
@@ -450,8 +444,21 @@ enum binder_driver_return_protocol {
 
 	BR_FAILED_REPLY = _IO('r', 17),
 	/*
-	 * The the last transaction (either a bcTRANSACTION or
+	 * The last transaction (either a bcTRANSACTION or
 	 * a bcATTEMPT_ACQUIRE) failed (e.g. out of memory).  No parameters.
+	 */
+
+	BR_FROZEN_REPLY = _IO('r', 18),
+	/*
+	 * The target of the last transaction (either a bcTRANSACTION or
+	 * a bcATTEMPT_ACQUIRE) is frozen.  No parameters.
+	 */
+
+	BR_ONEWAY_SPAM_SUSPECT = _IO('r', 19),
+	/*
+	 * Current process sent too many oneway calls to target, and the last
+	 * asynchronous transaction makes the allocated async buffer size exceed
+	 * detection threshold.  No parameters.
 	 */
 };
 

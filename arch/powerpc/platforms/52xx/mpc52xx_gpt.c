@@ -1,15 +1,11 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * MPC5200 General Purpose Timer device driver
  *
  * Copyright (c) 2009 Secret Lab Technologies Ltd.
  * Copyright (c) 2008 Sascha Hauer <s.hauer@pengutronix.de>, Pengutronix
  *
- * This program is free software; you can redistribute  it and/or modify it
- * under  the terms of  the GNU General  Public License as published by the
- * Free Software Foundation;  either version 2 of the  License, or (at your
- * option) any later version.
- *
- * This file is a driver for the the General Purpose Timer (gpt) devices
+ * This file is a driver for the General Purpose Timer (gpt) devices
  * found on the MPC5200 SoC.  Each timer has an IO pin which can be used
  * for GPIO or can be used to raise interrupts.  The timer function can
  * be used independently from the IO pin, or it can be used to control
@@ -59,9 +55,12 @@
 #include <linux/list.h>
 #include <linux/mutex.h>
 #include <linux/of.h>
+#include <linux/of_address.h>
+#include <linux/of_irq.h>
 #include <linux/of_platform.h>
 #include <linux/of_gpio.h>
 #include <linux/kernel.h>
+#include <linux/property.h>
 #include <linux/slab.h>
 #include <linux/fs.h>
 #include <linux/watchdog.h>
@@ -90,7 +89,7 @@ struct mpc52xx_gpt_priv {
 	struct list_head list;		/* List of all GPT devices */
 	struct device *dev;
 	struct mpc52xx_gpt __iomem *regs;
-	spinlock_t lock;
+	raw_spinlock_t lock;
 	struct irq_domain *irqhost;
 	u32 ipb_freq;
 	u8 wdt_mode;
@@ -141,9 +140,9 @@ static void mpc52xx_gpt_irq_unmask(struct irq_data *d)
 	struct mpc52xx_gpt_priv *gpt = irq_data_get_irq_chip_data(d);
 	unsigned long flags;
 
-	spin_lock_irqsave(&gpt->lock, flags);
+	raw_spin_lock_irqsave(&gpt->lock, flags);
 	setbits32(&gpt->regs->mode, MPC52xx_GPT_MODE_IRQ_EN);
-	spin_unlock_irqrestore(&gpt->lock, flags);
+	raw_spin_unlock_irqrestore(&gpt->lock, flags);
 }
 
 static void mpc52xx_gpt_irq_mask(struct irq_data *d)
@@ -151,9 +150,9 @@ static void mpc52xx_gpt_irq_mask(struct irq_data *d)
 	struct mpc52xx_gpt_priv *gpt = irq_data_get_irq_chip_data(d);
 	unsigned long flags;
 
-	spin_lock_irqsave(&gpt->lock, flags);
+	raw_spin_lock_irqsave(&gpt->lock, flags);
 	clrbits32(&gpt->regs->mode, MPC52xx_GPT_MODE_IRQ_EN);
-	spin_unlock_irqrestore(&gpt->lock, flags);
+	raw_spin_unlock_irqrestore(&gpt->lock, flags);
 }
 
 static void mpc52xx_gpt_irq_ack(struct irq_data *d)
@@ -171,14 +170,14 @@ static int mpc52xx_gpt_irq_set_type(struct irq_data *d, unsigned int flow_type)
 
 	dev_dbg(gpt->dev, "%s: virq=%i type=%x\n", __func__, d->irq, flow_type);
 
-	spin_lock_irqsave(&gpt->lock, flags);
+	raw_spin_lock_irqsave(&gpt->lock, flags);
 	reg = in_be32(&gpt->regs->mode) & ~MPC52xx_GPT_MODE_ICT_MASK;
 	if (flow_type & IRQF_TRIGGER_RISING)
 		reg |= MPC52xx_GPT_MODE_ICT_RISING;
 	if (flow_type & IRQF_TRIGGER_FALLING)
 		reg |= MPC52xx_GPT_MODE_ICT_FALLING;
 	out_be32(&gpt->regs->mode, reg);
-	spin_unlock_irqrestore(&gpt->lock, flags);
+	raw_spin_unlock_irqrestore(&gpt->lock, flags);
 
 	return 0;
 }
@@ -194,14 +193,11 @@ static struct irq_chip mpc52xx_gpt_irq_chip = {
 static void mpc52xx_gpt_irq_cascade(struct irq_desc *desc)
 {
 	struct mpc52xx_gpt_priv *gpt = irq_desc_get_handler_data(desc);
-	int sub_virq;
 	u32 status;
 
 	status = in_be32(&gpt->regs->status) & MPC52xx_GPT_STATUS_IRQMASK;
-	if (status) {
-		sub_virq = irq_linear_revmap(gpt->irqhost, 0);
-		generic_handle_irq(sub_virq);
-	}
+	if (status)
+		generic_handle_domain_irq(gpt->irqhost, 0);
 }
 
 static int mpc52xx_gpt_irq_map(struct irq_domain *h, unsigned int virq,
@@ -226,7 +222,7 @@ static int mpc52xx_gpt_irq_xlate(struct irq_domain *h, struct device_node *ct,
 	dev_dbg(gpt->dev, "%s: flags=%i\n", __func__, intspec[0]);
 
 	if ((intsize < 1) || (intspec[0] > 3)) {
-		dev_err(gpt->dev, "bad irq specifier in %s\n", ct->full_name);
+		dev_err(gpt->dev, "bad irq specifier in %pOF\n", ct);
 		return -EINVAL;
 	}
 
@@ -264,11 +260,11 @@ mpc52xx_gpt_irq_setup(struct mpc52xx_gpt_priv *gpt, struct device_node *node)
 	/* If the GPT is currently disabled, then change it to be in Input
 	 * Capture mode.  If the mode is non-zero, then the pin could be
 	 * already in use for something. */
-	spin_lock_irqsave(&gpt->lock, flags);
+	raw_spin_lock_irqsave(&gpt->lock, flags);
 	mode = in_be32(&gpt->regs->mode);
 	if ((mode & MPC52xx_GPT_MODE_MS_MASK) == 0)
 		out_be32(&gpt->regs->mode, mode | MPC52xx_GPT_MODE_MS_IC);
-	spin_unlock_irqrestore(&gpt->lock, flags);
+	raw_spin_unlock_irqrestore(&gpt->lock, flags);
 
 	dev_dbg(gpt->dev, "%s() complete. virq=%i\n", __func__, cascade_virq);
 }
@@ -295,9 +291,9 @@ mpc52xx_gpt_gpio_set(struct gpio_chip *gc, unsigned int gpio, int v)
 	dev_dbg(gpt->dev, "%s: gpio:%d v:%d\n", __func__, gpio, v);
 	r = v ? MPC52xx_GPT_MODE_GPIO_OUT_HIGH : MPC52xx_GPT_MODE_GPIO_OUT_LOW;
 
-	spin_lock_irqsave(&gpt->lock, flags);
+	raw_spin_lock_irqsave(&gpt->lock, flags);
 	clrsetbits_be32(&gpt->regs->mode, MPC52xx_GPT_MODE_GPIO_MASK, r);
-	spin_unlock_irqrestore(&gpt->lock, flags);
+	raw_spin_unlock_irqrestore(&gpt->lock, flags);
 }
 
 static int mpc52xx_gpt_gpio_dir_in(struct gpio_chip *gc, unsigned int gpio)
@@ -307,9 +303,9 @@ static int mpc52xx_gpt_gpio_dir_in(struct gpio_chip *gc, unsigned int gpio)
 
 	dev_dbg(gpt->dev, "%s: gpio:%d\n", __func__, gpio);
 
-	spin_lock_irqsave(&gpt->lock, flags);
+	raw_spin_lock_irqsave(&gpt->lock, flags);
 	clrbits32(&gpt->regs->mode, MPC52xx_GPT_MODE_GPIO_MASK);
-	spin_unlock_irqrestore(&gpt->lock, flags);
+	raw_spin_unlock_irqrestore(&gpt->lock, flags);
 
 	return 0;
 }
@@ -321,17 +317,15 @@ mpc52xx_gpt_gpio_dir_out(struct gpio_chip *gc, unsigned int gpio, int val)
 	return 0;
 }
 
-static void
-mpc52xx_gpt_gpio_setup(struct mpc52xx_gpt_priv *gpt, struct device_node *node)
+static void mpc52xx_gpt_gpio_setup(struct mpc52xx_gpt_priv *gpt)
 {
 	int rc;
 
-	/* Only setup GPIO if the device tree claims the GPT is
-	 * a GPIO controller */
-	if (!of_find_property(node, "gpio-controller", NULL))
+	/* Only setup GPIO if the device claims the GPT is a GPIO controller */
+	if (!device_property_present(gpt->dev, "gpio-controller"))
 		return;
 
-	gpt->gc.label = kstrdup(node->full_name, GFP_KERNEL);
+	gpt->gc.label = kasprintf(GFP_KERNEL, "%pfw", dev_fwnode(gpt->dev));
 	if (!gpt->gc.label) {
 		dev_err(gpt->dev, "out of memory\n");
 		return;
@@ -343,7 +337,7 @@ mpc52xx_gpt_gpio_setup(struct mpc52xx_gpt_priv *gpt, struct device_node *node)
 	gpt->gc.get = mpc52xx_gpt_gpio_get;
 	gpt->gc.set = mpc52xx_gpt_gpio_set;
 	gpt->gc.base = -1;
-	gpt->gc.of_node = node;
+	gpt->gc.parent = gpt->dev;
 
 	/* Setup external pin in GPIO mode */
 	clrsetbits_be32(&gpt->regs->mode, MPC52xx_GPT_MODE_MS_MASK,
@@ -356,8 +350,7 @@ mpc52xx_gpt_gpio_setup(struct mpc52xx_gpt_priv *gpt, struct device_node *node)
 	dev_dbg(gpt->dev, "%s() complete.\n", __func__);
 }
 #else /* defined(CONFIG_GPIOLIB) */
-static void
-mpc52xx_gpt_gpio_setup(struct mpc52xx_gpt_priv *p, struct device_node *np) { }
+static void mpc52xx_gpt_gpio_setup(struct mpc52xx_gpt_priv *gpt) { }
 #endif /* defined(CONFIG_GPIOLIB) */
 
 /***********************************************************************
@@ -405,7 +398,7 @@ static int mpc52xx_gpt_do_start(struct mpc52xx_gpt_priv *gpt, u64 period,
 		set |= MPC52xx_GPT_MODE_CONTINUOUS;
 
 	/* Determine the number of clocks in the requested period.  64 bit
-	 * arithmatic is done here to preserve the precision until the value
+	 * arithmetic is done here to preserve the precision until the value
 	 * is scaled back down into the u32 range.  Period is in 'ns', bus
 	 * frequency is in Hz. */
 	clocks = period * (u64)gpt->ipb_freq;
@@ -436,16 +429,16 @@ static int mpc52xx_gpt_do_start(struct mpc52xx_gpt_priv *gpt, u64 period,
 	}
 
 	/* Set and enable the timer, reject an attempt to use a wdt as gpt */
-	spin_lock_irqsave(&gpt->lock, flags);
+	raw_spin_lock_irqsave(&gpt->lock, flags);
 	if (as_wdt)
 		gpt->wdt_mode |= MPC52xx_GPT_IS_WDT;
 	else if ((gpt->wdt_mode & MPC52xx_GPT_IS_WDT) != 0) {
-		spin_unlock_irqrestore(&gpt->lock, flags);
+		raw_spin_unlock_irqrestore(&gpt->lock, flags);
 		return -EBUSY;
 	}
 	out_be32(&gpt->regs->count, prescale << 16 | clocks);
 	clrsetbits_be32(&gpt->regs->mode, clear, set);
-	spin_unlock_irqrestore(&gpt->lock, flags);
+	raw_spin_unlock_irqrestore(&gpt->lock, flags);
 
 	return 0;
 }
@@ -476,14 +469,14 @@ int mpc52xx_gpt_stop_timer(struct mpc52xx_gpt_priv *gpt)
 	unsigned long flags;
 
 	/* reject the operation if the timer is used as watchdog (gpt 0 only) */
-	spin_lock_irqsave(&gpt->lock, flags);
+	raw_spin_lock_irqsave(&gpt->lock, flags);
 	if ((gpt->wdt_mode & MPC52xx_GPT_IS_WDT) != 0) {
-		spin_unlock_irqrestore(&gpt->lock, flags);
+		raw_spin_unlock_irqrestore(&gpt->lock, flags);
 		return -EBUSY;
 	}
 
 	clrbits32(&gpt->regs->mode, MPC52xx_GPT_MODE_COUNTER_ENABLE);
-	spin_unlock_irqrestore(&gpt->lock, flags);
+	raw_spin_unlock_irqrestore(&gpt->lock, flags);
 	return 0;
 }
 EXPORT_SYMBOL(mpc52xx_gpt_stop_timer);
@@ -500,16 +493,16 @@ u64 mpc52xx_gpt_timer_period(struct mpc52xx_gpt_priv *gpt)
 	u64 prescale;
 	unsigned long flags;
 
-	spin_lock_irqsave(&gpt->lock, flags);
+	raw_spin_lock_irqsave(&gpt->lock, flags);
 	period = in_be32(&gpt->regs->count);
-	spin_unlock_irqrestore(&gpt->lock, flags);
+	raw_spin_unlock_irqrestore(&gpt->lock, flags);
 
 	prescale = period >> 16;
 	period &= 0xffff;
 	if (prescale == 0)
 		prescale = 0x10000;
 	period = period * prescale * 1000000000ULL;
-	do_div(period, (u64)gpt->ipb_freq);
+	do_div(period, gpt->ipb_freq);
 	return period;
 }
 EXPORT_SYMBOL(mpc52xx_gpt_timer_period);
@@ -532,9 +525,9 @@ static inline void mpc52xx_gpt_wdt_ping(struct mpc52xx_gpt_priv *gpt_wdt)
 {
 	unsigned long flags;
 
-	spin_lock_irqsave(&gpt_wdt->lock, flags);
+	raw_spin_lock_irqsave(&gpt_wdt->lock, flags);
 	out_8((u8 *) &gpt_wdt->regs->mode, MPC52xx_GPT_MODE_WDT_PING);
-	spin_unlock_irqrestore(&gpt_wdt->lock, flags);
+	raw_spin_unlock_irqrestore(&gpt_wdt->lock, flags);
 }
 
 /* wdt misc device api */
@@ -586,6 +579,7 @@ static long mpc52xx_wdt_ioctl(struct file *file, unsigned int cmd,
 		if (ret)
 			break;
 		/* fall through and return the timeout */
+		fallthrough;
 
 	case WDIOC_GETTIMEOUT:
 		/* we need to round here as to avoid e.g. the following
@@ -628,7 +622,7 @@ static int mpc52xx_wdt_open(struct inode *inode, struct file *file)
 	}
 
 	file->private_data = mpc52xx_gpt_wdt;
-	return nonseekable_open(inode, file);
+	return stream_open(inode, file);
 }
 
 static int mpc52xx_wdt_release(struct inode *inode, struct file *file)
@@ -638,11 +632,11 @@ static int mpc52xx_wdt_release(struct inode *inode, struct file *file)
 	struct mpc52xx_gpt_priv *gpt_wdt = file->private_data;
 	unsigned long flags;
 
-	spin_lock_irqsave(&gpt_wdt->lock, flags);
+	raw_spin_lock_irqsave(&gpt_wdt->lock, flags);
 	clrbits32(&gpt_wdt->regs->mode,
 		  MPC52xx_GPT_MODE_COUNTER_ENABLE | MPC52xx_GPT_MODE_WDT_EN);
 	gpt_wdt->wdt_mode &= ~MPC52xx_GPT_IS_WDT;
-	spin_unlock_irqrestore(&gpt_wdt->lock, flags);
+	raw_spin_unlock_irqrestore(&gpt_wdt->lock, flags);
 #endif
 	clear_bit(0, &wdt_is_active);
 	return 0;
@@ -654,6 +648,7 @@ static const struct file_operations mpc52xx_wdt_fops = {
 	.llseek		= no_llseek,
 	.write		= mpc52xx_wdt_write,
 	.unlocked_ioctl = mpc52xx_wdt_ioctl,
+	.compat_ioctl	= compat_ptr_ioctl,
 	.open		= mpc52xx_wdt_open,
 	.release	= mpc52xx_wdt_release,
 };
@@ -723,16 +718,16 @@ static int mpc52xx_gpt_probe(struct platform_device *ofdev)
 	if (!gpt)
 		return -ENOMEM;
 
-	spin_lock_init(&gpt->lock);
+	raw_spin_lock_init(&gpt->lock);
 	gpt->dev = &ofdev->dev;
-	gpt->ipb_freq = mpc5xxx_get_bus_frequency(ofdev->dev.of_node);
+	gpt->ipb_freq = mpc5xxx_get_bus_frequency(&ofdev->dev);
 	gpt->regs = of_iomap(ofdev->dev.of_node, 0);
 	if (!gpt->regs)
 		return -ENOMEM;
 
 	dev_set_drvdata(&ofdev->dev, gpt);
 
-	mpc52xx_gpt_gpio_setup(gpt, ofdev->dev.of_node);
+	mpc52xx_gpt_gpio_setup(gpt);
 	mpc52xx_gpt_irq_setup(gpt, ofdev->dev.of_node);
 
 	mutex_lock(&mpc52xx_gpt_list_mutex);
@@ -758,11 +753,6 @@ static int mpc52xx_gpt_probe(struct platform_device *ofdev)
 	return 0;
 }
 
-static int mpc52xx_gpt_remove(struct platform_device *ofdev)
-{
-	return -EBUSY;
-}
-
 static const struct of_device_id mpc52xx_gpt_match[] = {
 	{ .compatible = "fsl,mpc5200-gpt", },
 
@@ -775,10 +765,10 @@ static const struct of_device_id mpc52xx_gpt_match[] = {
 static struct platform_driver mpc52xx_gpt_driver = {
 	.driver = {
 		.name = "mpc52xx-gpt",
+		.suppress_bind_attrs = true,
 		.of_match_table = mpc52xx_gpt_match,
 	},
 	.probe = mpc52xx_gpt_probe,
-	.remove = mpc52xx_gpt_remove,
 };
 
 static int __init mpc52xx_gpt_init(void)

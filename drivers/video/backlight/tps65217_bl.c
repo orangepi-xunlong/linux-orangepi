@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * tps65217_bl.c
  *
@@ -5,15 +6,6 @@
  *
  * Copyright (C) 2012 Matthias Kaehlcke
  * Author: Matthias Kaehlcke <matthias@kaehlcke.net>
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as
- * published by the Free Software Foundation version 2.
- *
- * This program is distributed "as is" WITHOUT ANY WARRANTY of any
- * kind, whether express or implied; without even the implied warranty
- * of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include <linux/kernel.h>
@@ -77,15 +69,7 @@ static int tps65217_bl_update_status(struct backlight_device *bl)
 {
 	struct tps65217_bl *tps65217_bl = bl_get_data(bl);
 	int rc;
-	int brightness = bl->props.brightness;
-
-	if (bl->props.state & BL_CORE_SUSPENDED)
-		brightness = 0;
-
-	if ((bl->props.power != FB_BLANK_UNBLANK) ||
-		(bl->props.fb_blank != FB_BLANK_UNBLANK))
-		/* framebuffer in low power mode or blanking active */
-		brightness = 0;
+	int brightness = backlight_get_brightness(bl);
 
 	if (brightness > 0) {
 		rc = tps65217_reg_write(tps65217_bl->tps,
@@ -239,8 +223,7 @@ tps65217_bl_parse_dt(struct platform_device *pdev)
 	}
 
 	if (!of_property_read_u32(node, "default-brightness", &val)) {
-		if (val < 0 ||
-			val > 100) {
+		if (val > 100) {
 			dev_err(&pdev->dev,
 				"invalid 'default-brightness' value in the device tree\n");
 			err = ERR_PTR(-EINVAL);
@@ -275,17 +258,9 @@ static int tps65217_bl_probe(struct platform_device *pdev)
 	struct tps65217_bl_pdata *pdata;
 	struct backlight_properties bl_props;
 
-	if (tps->dev->of_node) {
-		pdata = tps65217_bl_parse_dt(pdev);
-		if (IS_ERR(pdata))
-			return PTR_ERR(pdata);
-	} else {
-		pdata = dev_get_platdata(&pdev->dev);
-		if (!pdata) {
-			dev_err(&pdev->dev, "no platform data provided\n");
-			return -EINVAL;
-		}
-	}
+	pdata = tps65217_bl_parse_dt(pdev);
+	if (IS_ERR(pdata))
+		return PTR_ERR(pdata);
 
 	tps65217_bl = devm_kzalloc(&pdev->dev, sizeof(*tps65217_bl),
 				GFP_KERNEL);

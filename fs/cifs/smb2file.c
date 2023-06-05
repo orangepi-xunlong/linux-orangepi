@@ -1,23 +1,10 @@
+// SPDX-License-Identifier: LGPL-2.1
 /*
- *   fs/cifs/smb2file.c
  *
  *   Copyright (C) International Business Machines  Corp., 2002, 2011
  *   Author(s): Steve French (sfrench@us.ibm.com),
  *              Pavel Shilovsky ((pshilovsky@samba.org) 2012
  *
- *   This library is free software; you can redistribute it and/or modify
- *   it under the terms of the GNU Lesser General Public License as published
- *   by the Free Software Foundation; either version 2.1 of the License, or
- *   (at your option) any later version.
- *
- *   This library is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See
- *   the GNU Lesser General Public License for more details.
- *
- *   You should have received a copy of the GNU Lesser General Public License
- *   along with this library; if not, write to the Free Software
- *   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 #include <linux/fs.h>
 #include <linux/stat.h>
@@ -33,49 +20,134 @@
 #include "cifs_unicode.h"
 #include "fscache.h"
 #include "smb2proto.h"
+#include "smb2status.h"
 
-int
-smb2_open_file(const unsigned int xid, struct cifs_open_parms *oparms,
-	       __u32 *oplock, FILE_ALL_INFO *buf)
+static struct smb2_symlink_err_rsp *symlink_data(const struct kvec *iov)
+{
+	struct smb2_err_rsp *err = iov->iov_base;
+	struct smb2_symlink_err_rsp *sym = ERR_PTR(-EINVAL);
+	u32 len;
+
+	if (err->ErrorContextCount) {
+		struct smb2_error_context_rsp *p, *end;
+
+		len = (u32)err->ErrorContextCount * (offsetof(struct smb2_error_context_rsp,
+							      ErrorContextData) +
+						     sizeof(struct smb2_symlink_err_rsp));
+		if (le32_to_cpu(err->ByteCount) < len || iov->iov_len < len + sizeof(*err))
+			return ERR_PTR(-EINVAL);
+
+		p = (struct smb2_error_context_rsp *)err->ErrorData;
+		end = (struct smb2_error_context_rsp *)((u8 *)err + iov->iov_len);
+		do {
+			if (le32_to_cpu(p->ErrorId) == SMB2_ERROR_ID_DEFAULT) {
+				sym = (struct smb2_symlink_err_rsp *)&p->ErrorContextData;
+				break;
+			}
+			cifs_dbg(FYI, "%s: skipping unhandled error context: 0x%x\n",
+				 __func__, le32_to_cpu(p->ErrorId));
+
+			len = ALIGN(le32_to_cpu(p->ErrorDataLength), 8);
+			p = (struct smb2_error_context_rsp *)((u8 *)&p->ErrorContextData + len);
+		} while (p < end);
+	} else if (le32_to_cpu(err->ByteCount) >= sizeof(*sym) &&
+		   iov->iov_len >= SMB2_SYMLINK_STRUCT_SIZE) {
+		sym = (struct smb2_symlink_err_rsp *)err->ErrorData;
+	}
+
+	if (!IS_ERR(sym) && (le32_to_cpu(sym->SymLinkErrorTag) != SYMLINK_ERROR_TAG ||
+			     le32_to_cpu(sym->ReparseTag) != IO_REPARSE_TAG_SYMLINK))
+		sym = ERR_PTR(-EINVAL);
+
+	return sym;
+}
+
+int smb2_parse_symlink_response(struct cifs_sb_info *cifs_sb, const struct kvec *iov, char **path)
+{
+	struct smb2_symlink_err_rsp *sym;
+	unsigned int sub_offs, sub_len;
+	unsigned int print_offs, print_len;
+	char *s;
+
+	if (!cifs_sb || !iov || !iov->iov_base || !iov->iov_len || !path)
+		return -EINVAL;
+
+	sym = symlink_data(iov);
+	if (IS_ERR(sym))
+		return PTR_ERR(sym);
+
+	sub_len = le16_to_cpu(sym->SubstituteNameLength);
+	sub_offs = le16_to_cpu(sym->SubstituteNameOffset);
+	print_len = le16_to_cpu(sym->PrintNameLength);
+	print_offs = le16_to_cpu(sym->PrintNameOffset);
+
+	if (iov->iov_len < SMB2_SYMLINK_STRUCT_SIZE + sub_offs + sub_len ||
+	    iov->iov_len < SMB2_SYMLINK_STRUCT_SIZE + print_offs + print_len)
+		return -EINVAL;
+
+	s = cifs_strndup_from_utf16((char *)sym->PathBuffer + sub_offs, sub_len, true,
+				    cifs_sb->local_nls);
+	if (!s)
+		return -ENOMEM;
+	convert_delimiter(s, '/');
+	cifs_dbg(FYI, "%s: symlink target: %s\n", __func__, s);
+
+	*path = s;
+	return 0;
+}
+
+int smb2_open_file(const unsigned int xid, struct cifs_open_parms *oparms, __u32 *oplock, void *buf)
 {
 	int rc;
 	__le16 *smb2_path;
-	struct smb2_file_all_info *smb2_data = NULL;
-	__u8 smb2_oplock[17];
+	__u8 smb2_oplock;
+	struct cifs_open_info_data *data = buf;
+	struct smb2_file_all_info file_info = {};
+	struct smb2_file_all_info *smb2_data = data ? &file_info : NULL;
+	struct kvec err_iov = {};
+	int err_buftype = CIFS_NO_BUFFER;
 	struct cifs_fid *fid = oparms->fid;
 	struct network_resiliency_req nr_ioctl_req;
 
 	smb2_path = cifs_convert_path_to_utf16(oparms->path, oparms->cifs_sb);
-	if (smb2_path == NULL) {
-		rc = -ENOMEM;
-		goto out;
-	}
-
-	smb2_data = kzalloc(sizeof(struct smb2_file_all_info) + PATH_MAX * 2,
-			    GFP_KERNEL);
-	if (smb2_data == NULL) {
-		rc = -ENOMEM;
-		goto out;
-	}
+	if (smb2_path == NULL)
+		return -ENOMEM;
 
 	oparms->desired_access |= FILE_READ_ATTRIBUTES;
-	*smb2_oplock = SMB2_OPLOCK_LEVEL_BATCH;
+	smb2_oplock = SMB2_OPLOCK_LEVEL_BATCH;
 
-	if (oparms->tcon->ses->server->capabilities & SMB2_GLOBAL_CAP_LEASING)
-		memcpy(smb2_oplock + 1, fid->lease_key, SMB2_LEASE_KEY_SIZE);
+	rc = SMB2_open(xid, oparms, smb2_path, &smb2_oplock, smb2_data, NULL, &err_iov,
+		       &err_buftype);
+	if (rc && data) {
+		struct smb2_hdr *hdr = err_iov.iov_base;
 
-	rc = SMB2_open(xid, oparms, smb2_path, smb2_oplock, smb2_data, NULL);
+		if (unlikely(!err_iov.iov_base || err_buftype == CIFS_NO_BUFFER))
+			goto out;
+		if (hdr->Status == STATUS_STOPPED_ON_SYMLINK) {
+			rc = smb2_parse_symlink_response(oparms->cifs_sb, &err_iov,
+							 &data->symlink_target);
+			if (!rc) {
+				memset(smb2_data, 0, sizeof(*smb2_data));
+				oparms->create_options |= OPEN_REPARSE_POINT;
+				rc = SMB2_open(xid, oparms, smb2_path, &smb2_oplock, smb2_data,
+					       NULL, NULL, NULL);
+				oparms->create_options &= ~OPEN_REPARSE_POINT;
+			}
+		}
+	}
+
 	if (rc)
 		goto out;
 
-
-	 if (oparms->tcon->use_resilient) {
-		nr_ioctl_req.Timeout = 0; /* use server default (120 seconds) */
+	if (oparms->tcon->use_resilient) {
+		/* default timeout is 0, servers pick default (120 seconds) */
+		nr_ioctl_req.Timeout =
+			cpu_to_le32(oparms->tcon->handle_timeout);
 		nr_ioctl_req.Reserved = 0;
 		rc = SMB2_ioctl(xid, oparms->tcon, fid->persistent_fid,
-			fid->volatile_fid, FSCTL_LMR_REQUEST_RESILIENCY, true,
+			fid->volatile_fid, FSCTL_LMR_REQUEST_RESILIENCY,
 			(char *)&nr_ioctl_req, sizeof(nr_ioctl_req),
-			NULL, NULL /* no return info */);
+			CIFSMaxBufSize, NULL, NULL /* no return info */);
 		if (rc == -EOPNOTSUPP) {
 			cifs_dbg(VFS,
 			     "resiliency not supported by server, disabling\n");
@@ -86,22 +158,28 @@ smb2_open_file(const unsigned int xid, struct cifs_open_parms *oparms,
 		rc = 0;
 	}
 
-	if (buf) {
-		/* open response does not have IndexNumber field - get it */
-		rc = SMB2_get_srv_num(xid, oparms->tcon, fid->persistent_fid,
+	if (smb2_data) {
+		/* if open response does not have IndexNumber field - get it */
+		if (smb2_data->IndexNumber == 0) {
+			rc = SMB2_get_srv_num(xid, oparms->tcon,
+				      fid->persistent_fid,
 				      fid->volatile_fid,
 				      &smb2_data->IndexNumber);
-		if (rc) {
-			/* let get_inode_info disable server inode numbers */
-			smb2_data->IndexNumber = 0;
-			rc = 0;
+			if (rc) {
+				/*
+				 * let get_inode_info disable server inode
+				 * numbers
+				 */
+				smb2_data->IndexNumber = 0;
+				rc = 0;
+			}
 		}
-		move_smb2_info_to_cifs(buf, smb2_data);
+		memcpy(&data->fi, smb2_data, sizeof(data->fi));
 	}
 
-	*oplock = *smb2_oplock;
+	*oplock = smb2_oplock;
 out:
-	kfree(smb2_data);
+	free_rsp_buf(err_buftype, err_iov.iov_base);
 	kfree(smb2_path);
 	return rc;
 }
@@ -138,14 +216,19 @@ smb2_unlock_range(struct cifsFileInfo *cfile, struct file_lock *flock,
 
 	cur = buf;
 
-	down_write(&cinode->lock_sem);
+	cifs_down_write(&cinode->lock_sem);
 	list_for_each_entry_safe(li, tmp, &cfile->llist->locks, llist) {
 		if (flock->fl_start > li->offset ||
 		    (flock->fl_start + length) <
 		    (li->offset + li->length))
 			continue;
 		if (current->tgid != li->pid)
-			continue;
+			/*
+			 * flock and OFD lock are associated with an open
+			 * file description, not the process.
+			 */
+			if (!(flock->fl_flags & (FL_FLOCK | FL_OFDLCK)))
+				continue;
 		if (cinode->can_cache_brlcks) {
 			/*
 			 * We can cache brlock requests - simply remove a lock

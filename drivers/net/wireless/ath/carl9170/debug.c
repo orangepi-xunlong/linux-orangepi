@@ -45,7 +45,7 @@
 #include "cmd.h"
 
 #define ADD(buf, off, max, fmt, args...)				\
-	off += snprintf(&buf[off], max - off, fmt, ##args);
+	off += scnprintf(&buf[off], max - off, fmt, ##args)
 
 
 struct carl9170_debugfs_fops {
@@ -187,21 +187,21 @@ static const struct carl9170_debugfs_fops carl_debugfs_##name ##_ops = {\
 
 #define DEBUGFS_DECLARE_RO_FILE(name, _read_bufsize)			\
 	DEBUGFS_DECLARE_FILE(name, carl9170_debugfs_##name ##_read,	\
-			     NULL, _read_bufsize, S_IRUSR)
+			     NULL, _read_bufsize, 0400)
 
 #define DEBUGFS_DECLARE_WO_FILE(name)					\
 	DEBUGFS_DECLARE_FILE(name, NULL, carl9170_debugfs_##name ##_write,\
-			     0, S_IWUSR)
+			     0, 0200)
 
 #define DEBUGFS_DECLARE_RW_FILE(name, _read_bufsize)			\
 	DEBUGFS_DECLARE_FILE(name, carl9170_debugfs_##name ##_read,	\
 			     carl9170_debugfs_##name ##_write,		\
-			     _read_bufsize, S_IRUSR | S_IWUSR)
+			     _read_bufsize, 0600)
 
 #define __DEBUGFS_DECLARE_RW_FILE(name, _read_bufsize, _dstate)		\
 	__DEBUGFS_DECLARE_FILE(name, carl9170_debugfs_##name ##_read,	\
 			     carl9170_debugfs_##name ##_write,		\
-			     _read_bufsize, S_IRUSR | S_IWUSR, _dstate)
+			     _read_bufsize, 0600, _dstate)
 
 #define DEBUGFS_READONLY_FILE(name, _read_bufsize, fmt, value...)	\
 static char *carl9170_debugfs_ ##name ## _read(struct ar9170 *ar,	\
@@ -818,7 +818,7 @@ void carl9170_debugfs_register(struct ar9170 *ar)
 #define DEBUGFS_ADD(name)						\
 	debugfs_create_file(#name, carl_debugfs_##name ##_ops.attr,	\
 			    ar->debug_dir, ar,				\
-			    &carl_debugfs_##name ## _ops.fops);
+			    &carl_debugfs_##name ## _ops.fops)
 
 	DEBUGFS_ADD(usb_tx_anch_urbs);
 	DEBUGFS_ADD(usb_rx_pool_urbs);

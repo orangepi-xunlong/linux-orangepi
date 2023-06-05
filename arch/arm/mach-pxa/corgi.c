@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Support for Sharp SL-C7xx PDAs
  * Models: SL-C700 (Corgi), SL-C750 (Shepherd), SL-C760 (Husky)
@@ -5,11 +6,6 @@
  * Copyright (c) 2004-2005 Richard Purdie
  *
  * Based on Sharp's 2.4 kernel patches/lubbock.c
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
  */
 
 #include <linux/kernel.h>
@@ -19,13 +15,15 @@
 #include <linux/major.h>
 #include <linux/fs.h>
 #include <linux/interrupt.h>
+#include <linux/leds.h>
 #include <linux/mmc/host.h>
 #include <linux/mtd/physmap.h>
 #include <linux/pm.h>
 #include <linux/gpio.h>
+#include <linux/gpio/machine.h>
 #include <linux/backlight.h>
 #include <linux/i2c.h>
-#include <linux/i2c/pxa-i2c.h>
+#include <linux/platform_data/i2c-pxa.h>
 #include <linux/io.h>
 #include <linux/regulator/machine.h>
 #include <linux/spi/spi.h>
@@ -35,14 +33,12 @@
 #include <linux/mtd/sharpsl.h>
 #include <linux/input/matrix_keypad.h>
 #include <linux/gpio_keys.h>
-#include <linux/module.h>
 #include <linux/memblock.h>
 #include <video/w100fb.h>
 
 #include <asm/setup.h>
 #include <asm/memory.h>
 #include <asm/mach-types.h>
-#include <mach/hardware.h>
 #include <asm/irq.h>
 
 #include <asm/mach/arch.h>
@@ -53,7 +49,7 @@
 #include <linux/platform_data/irda-pxaficp.h>
 #include <linux/platform_data/mmc-pxamci.h>
 #include "udc.h"
-#include <mach/corgi.h>
+#include "corgi.h"
 #include "sharpsl_pm.h"
 
 #include <asm/mach/sharpsl_param.h>
@@ -476,6 +472,25 @@ static struct platform_device corgiled_device = {
 	},
 };
 
+static struct gpiod_lookup_table corgi_audio_gpio_table = {
+	.dev_id = "corgi-audio",
+	.table = {
+		GPIO_LOOKUP("sharp-scoop",
+			    CORGI_GPIO_MUTE_L - CORGI_SCOOP_GPIO_BASE,
+			    "mute-l", GPIO_ACTIVE_HIGH),
+		GPIO_LOOKUP("sharp-scoop",
+			    CORGI_GPIO_MUTE_R - CORGI_SCOOP_GPIO_BASE,
+			    "mute-r", GPIO_ACTIVE_HIGH),
+		GPIO_LOOKUP("sharp-scoop",
+			    CORGI_GPIO_APM_ON - CORGI_SCOOP_GPIO_BASE,
+			    "apm-on", GPIO_ACTIVE_HIGH),
+		GPIO_LOOKUP("sharp-scoop",
+			    CORGI_GPIO_MIC_BIAS - CORGI_SCOOP_GPIO_BASE,
+			    "mic-bias", GPIO_ACTIVE_HIGH),
+		{ },
+	},
+};
+
 /*
  * Corgi Audio
  */
@@ -493,11 +508,23 @@ static struct platform_device corgi_audio_device = {
 static struct pxamci_platform_data corgi_mci_platform_data = {
 	.detect_delay_ms	= 250,
 	.ocr_mask		= MMC_VDD_32_33|MMC_VDD_33_34,
-	.gpio_card_detect	= CORGI_GPIO_nSD_DETECT,
-	.gpio_card_ro		= CORGI_GPIO_nSD_WP,
-	.gpio_power		= CORGI_GPIO_SD_PWR,
 };
 
+static struct gpiod_lookup_table corgi_mci_gpio_table = {
+	.dev_id = "pxa2xx-mci.0",
+	.table = {
+		/* Card detect on GPIO 9 */
+		GPIO_LOOKUP("gpio-pxa", CORGI_GPIO_nSD_DETECT,
+			    "cd", GPIO_ACTIVE_LOW),
+		/* Write protect on GPIO 7 */
+		GPIO_LOOKUP("gpio-pxa", CORGI_GPIO_nSD_WP,
+			    "wp", GPIO_ACTIVE_LOW),
+		/* Power on GPIO 33 */
+		GPIO_LOOKUP("gpio-pxa", CORGI_GPIO_SD_PWR,
+			    "power", GPIO_ACTIVE_HIGH),
+		{ },
+	},
+};
 
 /*
  * Irda
@@ -517,8 +544,18 @@ static struct pxa2xx_udc_mach_info udc_info __initdata = {
 };
 
 #if IS_ENABLED(CONFIG_SPI_PXA2XX)
-static struct pxa2xx_spi_master corgi_spi_info = {
+static struct pxa2xx_spi_controller corgi_spi_info = {
 	.num_chipselect	= 3,
+};
+
+static struct gpiod_lookup_table corgi_spi_gpio_table = {
+	.dev_id = "spi1",
+	.table = {
+		GPIO_LOOKUP_IDX("gpio-pxa", CORGI_GPIO_ADS7846_CS, "cs", 0, GPIO_ACTIVE_LOW),
+		GPIO_LOOKUP_IDX("gpio-pxa", CORGI_GPIO_LCDCON_CS, "cs", 1, GPIO_ACTIVE_LOW),
+		GPIO_LOOKUP_IDX("gpio-pxa", CORGI_GPIO_MAX1111_CS, "cs", 2, GPIO_ACTIVE_LOW),
+		{ },
+	},
 };
 
 static void corgi_wait_for_hsync(void)
@@ -539,10 +576,6 @@ static struct ads7846_platform_data corgi_ads7846_info = {
 	.wait_for_sync		= corgi_wait_for_hsync,
 };
 
-static struct pxa2xx_spi_chip corgi_ads7846_chip = {
-	.gpio_cs	= CORGI_GPIO_ADS7846_CS,
-};
-
 static void corgi_bl_kick_battery(void)
 {
 	void (*kick_batt)(void);
@@ -554,22 +587,21 @@ static void corgi_bl_kick_battery(void)
 	}
 }
 
+static struct gpiod_lookup_table corgi_lcdcon_gpio_table = {
+	.dev_id = "spi1.1",
+	.table = {
+		GPIO_LOOKUP("gpio-pxa", CORGI_GPIO_BACKLIGHT_CONT,
+			    "BL_CONT", GPIO_ACTIVE_HIGH),
+		{ },
+	},
+};
+
 static struct corgi_lcd_platform_data corgi_lcdcon_info = {
 	.init_mode		= CORGI_LCD_MODE_VGA,
 	.max_intensity		= 0x2f,
 	.default_intensity	= 0x1f,
 	.limit_mask		= 0x0b,
-	.gpio_backlight_cont	= CORGI_GPIO_BACKLIGHT_CONT,
-	.gpio_backlight_on	= -1,
 	.kick_battery		= corgi_bl_kick_battery,
-};
-
-static struct pxa2xx_spi_chip corgi_lcdcon_chip = {
-	.gpio_cs	= CORGI_GPIO_LCDCON_CS,
-};
-
-static struct pxa2xx_spi_chip corgi_max1111_chip = {
-	.gpio_cs	= CORGI_GPIO_MAX1111_CS,
 };
 
 static struct spi_board_info corgi_spi_devices[] = {
@@ -579,7 +611,6 @@ static struct spi_board_info corgi_spi_devices[] = {
 		.bus_num	= 1,
 		.chip_select	= 0,
 		.platform_data	= &corgi_ads7846_info,
-		.controller_data= &corgi_ads7846_chip,
 		.irq		= PXA_GPIO_TO_IRQ(CORGI_GPIO_TP_INT),
 	}, {
 		.modalias	= "corgi-lcd",
@@ -587,42 +618,24 @@ static struct spi_board_info corgi_spi_devices[] = {
 		.bus_num	= 1,
 		.chip_select	= 1,
 		.platform_data	= &corgi_lcdcon_info,
-		.controller_data= &corgi_lcdcon_chip,
 	}, {
 		.modalias	= "max1111",
 		.max_speed_hz	= 450000,
 		.bus_num	= 1,
 		.chip_select	= 2,
-		.controller_data= &corgi_max1111_chip,
 	},
 };
 
 static void __init corgi_init_spi(void)
 {
+	gpiod_add_lookup_table(&corgi_spi_gpio_table);
 	pxa2xx_set_spi_info(1, &corgi_spi_info);
+	gpiod_add_lookup_table(&corgi_lcdcon_gpio_table);
 	spi_register_board_info(ARRAY_AND_SIZE(corgi_spi_devices));
 }
 #else
 static inline void corgi_init_spi(void) {}
 #endif
-
-static struct mtd_partition sharpsl_nand_partitions[] = {
-	{
-		.name = "System Area",
-		.offset = 0,
-		.size = 7 * 1024 * 1024,
-	},
-	{
-		.name = "Root Filesystem",
-		.offset = 7 * 1024 * 1024,
-		.size = 25 * 1024 * 1024,
-	},
-	{
-		.name = "Home Filesystem",
-		.offset = MTDPART_OFS_APPEND,
-		.size = MTDPART_SIZ_FULL,
-	},
-};
 
 static uint8_t scan_ff_pattern[] = { 0xff, 0xff };
 
@@ -633,10 +646,16 @@ static struct nand_bbt_descr sharpsl_bbt = {
 	.pattern = scan_ff_pattern
 };
 
+static const char * const probes[] = {
+	"cmdlinepart",
+	"ofpart",
+	"sharpslpart",
+	NULL,
+};
+
 static struct sharpsl_nand_platform_data sharpsl_nand_platform_data = {
 	.badblock_pattern	= &sharpsl_bbt,
-	.partitions		= sharpsl_nand_partitions,
-	.nr_partitions		= ARRAY_SIZE(sharpsl_nand_partitions),
+	.part_parsers		= probes,
 };
 
 static struct resource sharpsl_nand_resources[] = {
@@ -743,15 +762,14 @@ static void __init corgi_init(void)
 	corgi_init_spi();
 
  	pxa_set_udc_info(&udc_info);
+	gpiod_add_lookup_table(&corgi_mci_gpio_table);
+	gpiod_add_lookup_table(&corgi_audio_gpio_table);
 	pxa_set_mci_info(&corgi_mci_platform_data);
 	pxa_set_ficp_info(&corgi_ficp_platform_data);
 	pxa_set_i2c_info(NULL);
 	i2c_register_board_info(0, ARRAY_AND_SIZE(corgi_i2c_devices));
 
 	platform_scoop_config = &corgi_pcmcia_config;
-
-	if (machine_is_husky())
-		sharpsl_nand_partitions[1].size = 53 * 1024 * 1024;
 
 	platform_add_devices(devices, ARRAY_SIZE(devices));
 

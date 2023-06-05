@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Digital I/O driver for Technologic Systems TS-5500
  *
@@ -10,23 +11,18 @@
  * Actually, the following platforms have DIO support:
  *
  * TS-5500:
- *   Documentation: http://wiki.embeddedarm.com/wiki/TS-5500
+ *   Documentation: https://docs.embeddedts.com/TS-5500
  *   Blocks: DIO1, DIO2 and LCD port.
  *
  * TS-5600:
- *   Documentation: http://wiki.embeddedarm.com/wiki/TS-5600
+ *   Documentation: https://docs.embeddedts.com/TS-5600
  *   Blocks: LCD port (identical to TS-5500 LCD).
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/bitops.h>
-#include <linux/gpio.h>
+#include <linux/gpio/driver.h>
 #include <linux/io.h>
 #include <linux/module.h>
-#include <linux/platform_data/gpio-ts5500.h>
 #include <linux/platform_device.h>
 #include <linux/slab.h>
 
@@ -318,26 +314,22 @@ static void ts5500_disable_irq(struct ts5500_priv *priv)
 static int ts5500_dio_probe(struct platform_device *pdev)
 {
 	enum ts5500_blocks block = platform_get_device_id(pdev)->driver_data;
-	struct ts5500_dio_platform_data *pdata = dev_get_platdata(&pdev->dev);
 	struct device *dev = &pdev->dev;
 	const char *name = dev_name(dev);
 	struct ts5500_priv *priv;
-	struct resource *res;
 	unsigned long flags;
 	int ret;
 
-	res = platform_get_resource(pdev, IORESOURCE_IRQ, 0);
-	if (!res) {
-		dev_err(dev, "missing IRQ resource\n");
-		return -EINVAL;
-	}
+	ret = platform_get_irq(pdev, 0);
+	if (ret < 0)
+		return ret;
 
 	priv = devm_kzalloc(dev, sizeof(struct ts5500_priv), GFP_KERNEL);
 	if (!priv)
 		return -ENOMEM;
 
 	platform_set_drvdata(pdev, priv);
-	priv->hwirq = res->start;
+	priv->hwirq = ret;
 	spin_lock_init(&priv->lock);
 
 	priv->gpio_chip.owner = THIS_MODULE;
@@ -349,10 +341,6 @@ static int ts5500_dio_probe(struct platform_device *pdev)
 	priv->gpio_chip.set = ts5500_gpio_set;
 	priv->gpio_chip.to_irq = ts5500_gpio_to_irq;
 	priv->gpio_chip.base = -1;
-	if (pdata) {
-		priv->gpio_chip.base = pdata->base;
-		priv->strap = pdata->strap;
-	}
 
 	switch (block) {
 	case TS5500_DIO1:

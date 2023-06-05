@@ -1,22 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * tps65010 - driver for tps6501x power management chips
  *
  * Copyright (C) 2004 Texas Instruments
  * Copyright (C) 2004-2005 David Brownell
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 
 #include <linux/kernel.h>
@@ -32,7 +19,7 @@
 #include <linux/mutex.h>
 #include <linux/platform_device.h>
 
-#include <linux/i2c/tps65010.h>
+#include <linux/mfd/tps65010.h>
 
 #include <linux/gpio/driver.h>
 
@@ -417,7 +404,6 @@ static void tps65010_work(struct work_struct *work)
 	tps65010_interrupt(tps);
 
 	if (test_and_clear_bit(FLAG_VBUS_CHANGED, &tps->flags)) {
-		int	status;
 		u8	chgconfig, tmp;
 
 		chgconfig = i2c_smbus_read_byte_data(tps->client,
@@ -428,8 +414,8 @@ static void tps65010_work(struct work_struct *work)
 		else if (tps->vbus >= 100)
 			chgconfig |= TPS_VBUS_CHARGING;
 
-		status = i2c_smbus_write_byte_data(tps->client,
-				TPS_CHGCONFIG, chgconfig);
+		i2c_smbus_write_byte_data(tps->client,
+					  TPS_CHGCONFIG, chgconfig);
 
 		/* vbus update fails unless VBUS is connected! */
 		tmp = i2c_smbus_read_byte_data(tps->client, TPS_CHGCONFIG);
@@ -515,7 +501,7 @@ static int tps65010_gpio_get(struct gpio_chip *chip, unsigned offset)
 
 static struct tps65010 *the_tps;
 
-static int tps65010_remove(struct i2c_client *client)
+static void tps65010_remove(struct i2c_client *client)
 {
 	struct tps65010		*tps = i2c_get_clientdata(client);
 	struct tps65010_board	*board = dev_get_platdata(&client->dev);
@@ -531,7 +517,6 @@ static int tps65010_remove(struct i2c_client *client)
 	cancel_delayed_work_sync(&tps->work);
 	debugfs_remove(tps->file);
 	the_tps = NULL;
-	return 0;
 }
 
 static int tps65010_probe(struct i2c_client *client,

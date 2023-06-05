@@ -1,7 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0
 /dts-v1/;
 
-/include/ "bcm7362.dtsi"
-/include/ "bcm97xxx-nand-cs1-bch4.dtsi"
+#include "bcm7362.dtsi"
+#include "bcm97xxx-nand-cs1-bch4.dtsi"
 
 / {
 	compatible = "brcm,bcm97362svmb", "brcm,bcm7362";
@@ -46,6 +47,10 @@
 	status = "okay";
 };
 
+&watchdog {
+	status = "okay";
+};
+
 &enet0 {
 	status = "okay";
 };
@@ -71,5 +76,13 @@
 };
 
 &sdhci0 {
+	status = "okay";
+};
+
+&mspi {
+	status = "okay";
+};
+
+&waketimer {
 	status = "okay";
 };

@@ -1,29 +1,6 @@
-# Greybus core
-greybus-y :=	core.o		\
-		debugfs.o	\
-		hd.o		\
-		manifest.o	\
-		module.o	\
-		interface.o	\
-		bundle.o	\
-		connection.o	\
-		control.o	\
-		svc.o		\
-		svc_watchdog.o	\
-		operation.o	\
-		timesync.o	\
-		timesync_platform.o
-
-obj-$(CONFIG_GREYBUS)		+= greybus.o
-
+# SPDX-License-Identifier: GPL-2.0
 # needed for trace events
 ccflags-y += -I$(src)
-
-
-# Greybus Host controller drivers
-gb-es2-y := es2.o
-
-obj-$(CONFIG_GREYBUS_ES2)	+= gb-es2.o
 
 # Greybus class drivers
 gb-bootrom-y		:= bootrom.o
@@ -51,7 +28,7 @@ obj-$(CONFIG_GREYBUS_VIBRATOR)	+= gb-vibrator.o
 
 # Greybus Audio is a bunch of modules
 gb-audio-module-y	:= audio_module.o audio_topology.o
-gb-audio-codec-y	:= audio_codec.o
+gb-audio-codec-y	:= audio_codec.o audio_helper.o
 gb-audio-gb-y		:= audio_gb.o
 gb-audio-apbridgea-y	:= audio_apbridgea.o
 gb-audio-manager-y	:= audio_manager.o audio_manager_module.o
@@ -63,8 +40,8 @@ gb-audio-manager-y	:= audio_manager.o audio_manager_module.o
 #ccflags-y += -DGB_AUDIO_MANAGER_SYSFS
 #endif
 
-obj-$(CONFIG_GREYBUS_AUDIO_MSM8994)	+= gb-audio-codec.o
-obj-$(CONFIG_GREYBUS_AUDIO_MSM8994)	+= gb-audio-module.o
+obj-$(CONFIG_GREYBUS_AUDIO_APB_CODEC)  	+= gb-audio-codec.o
+obj-$(CONFIG_GREYBUS_AUDIO_APB_CODEC)	+= gb-audio-module.o
 obj-$(CONFIG_GREYBUS_AUDIO)		+= gb-audio-gb.o
 obj-$(CONFIG_GREYBUS_AUDIO)		+= gb-audio-apbridgea.o
 obj-$(CONFIG_GREYBUS_AUDIO)		+= gb-audio-manager.o
@@ -93,4 +70,4 @@ obj-$(CONFIG_GREYBUS_USB)		+= gb-usb.o
 # Greybus Platform driver
 gb-arche-y	:= arche-platform.o arche-apb-ctrl.o
 
-obj-$(CONFIG_USB_HSIC_USB3613)	+= gb-arche.o
+obj-$(CONFIG_GREYBUS_ARCHE)	+= gb-arche.o

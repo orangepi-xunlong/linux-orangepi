@@ -1,48 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0 or BSD-3-Clause
 /*
  * Copyright(c) 2016 - 2018 Intel Corporation.
- *
- * This file is provided under a dual BSD/GPLv2 license.  When using or
- * redistributing this file, you may do so under either license.
- *
- * GPL LICENSE SUMMARY
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of version 2 of the GNU General Public License as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- *
- * BSD LICENSE
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- *
- *  - Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- *  - Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- *  - Neither the name of Intel Corporation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *
  */
 
 #include "hfi.h"
@@ -72,22 +30,22 @@ void hfi1_put_txreq(struct verbs_txreq *tx)
 	kmem_cache_free(dev->verbs_txreq_cache, tx);
 
 	do {
-		seq = read_seqbegin(&dev->iowait_lock);
+		seq = read_seqbegin(&dev->txwait_lock);
 		if (!list_empty(&dev->txwait)) {
 			struct iowait *wait;
 
-			write_seqlock_irqsave(&dev->iowait_lock, flags);
+			write_seqlock_irqsave(&dev->txwait_lock, flags);
 			wait = list_first_entry(&dev->txwait, struct iowait,
 						list);
 			qp = iowait_to_qp(wait);
 			priv = qp->priv;
 			list_del_init(&priv->s_iowait.list);
 			/* refcount held until actual wake up */
-			write_sequnlock_irqrestore(&dev->iowait_lock, flags);
+			write_sequnlock_irqrestore(&dev->txwait_lock, flags);
 			hfi1_qp_wakeup(qp, RVT_S_WAIT_TX);
 			break;
 		}
-	} while (read_seqretry(&dev->iowait_lock, seq));
+	} while (read_seqretry(&dev->txwait_lock, seq));
 }
 
 struct verbs_txreq *__get_txreq(struct hfi1_ibdev *dev,
@@ -96,11 +54,11 @@ struct verbs_txreq *__get_txreq(struct hfi1_ibdev *dev,
 {
 	struct verbs_txreq *tx = NULL;
 
-	write_seqlock(&dev->iowait_lock);
+	write_seqlock(&dev->txwait_lock);
 	if (ib_rvt_state_ops[qp->state] & RVT_PROCESS_RECV_OK) {
 		struct hfi1_qp_priv *priv;
 
-		tx = kmem_cache_alloc(dev->verbs_txreq_cache, GFP_ATOMIC);
+		tx = kmem_cache_alloc(dev->verbs_txreq_cache, VERBS_TXREQ_GFP);
 		if (tx)
 			goto out;
 		priv = qp->priv;
@@ -108,21 +66,15 @@ struct verbs_txreq *__get_txreq(struct hfi1_ibdev *dev,
 			dev->n_txwait++;
 			qp->s_flags |= RVT_S_WAIT_TX;
 			list_add_tail(&priv->s_iowait.list, &dev->txwait);
+			priv->s_iowait.lock = &dev->txwait_lock;
 			trace_hfi1_qpsleep(qp, RVT_S_WAIT_TX);
 			rvt_get_qp(qp);
 		}
 		qp->s_flags &= ~RVT_S_BUSY;
 	}
 out:
-	write_sequnlock(&dev->iowait_lock);
+	write_sequnlock(&dev->txwait_lock);
 	return tx;
-}
-
-static void verbs_txreq_kmem_cache_ctor(void *obj)
-{
-	struct verbs_txreq *tx = (struct verbs_txreq *)obj;
-
-	memset(tx, 0, sizeof(*tx));
 }
 
 int verbs_txreq_init(struct hfi1_ibdev *dev)
@@ -134,7 +86,7 @@ int verbs_txreq_init(struct hfi1_ibdev *dev)
 	dev->verbs_txreq_cache = kmem_cache_create(buf,
 						   sizeof(struct verbs_txreq),
 						   0, SLAB_HWCACHE_ALIGN,
-						   verbs_txreq_kmem_cache_ctor);
+						   NULL);
 	if (!dev->verbs_txreq_cache)
 		return -ENOMEM;
 	return 0;

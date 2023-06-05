@@ -1,24 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Support for SATA devices on Serial Attached SCSI (SAS) controllers
  *
  * Copyright (C) 2006 IBM Corporation
  *
  * Written by: Darrick J. Wong <djwong@us.ibm.com>, IBM Corporation
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as
- * published by the Free Software Foundation; either version 2 of the
- * License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307
- * USA
  */
 
 #include <linux/scatterlist.h>
@@ -34,8 +20,8 @@
 #include <scsi/scsi.h>
 #include <scsi/scsi_transport.h>
 #include <scsi/scsi_transport_sas.h>
-#include "../scsi_sas_internal.h"
-#include "../scsi_transport_api.h"
+#include "scsi_sas_internal.h"
+#include "scsi_transport_api.h"
 #include <scsi/scsi_eh.h>
 
 static enum ata_completion_errors sas_to_ata_err(struct task_status_struct *ts)
@@ -49,46 +35,38 @@ static enum ata_completion_errors sas_to_ata_err(struct task_status_struct *ts)
 	/* ts->resp == SAS_TASK_COMPLETE */
 	/* task delivered, what happened afterwards? */
 	switch (ts->stat) {
-		case SAS_DEV_NO_RESPONSE:
-			return AC_ERR_TIMEOUT;
-
-		case SAS_INTERRUPTED:
-		case SAS_PHY_DOWN:
-		case SAS_NAK_R_ERR:
-			return AC_ERR_ATA_BUS;
-
-
-		case SAS_DATA_UNDERRUN:
-			/*
-			 * Some programs that use the taskfile interface
-			 * (smartctl in particular) can cause underrun
-			 * problems.  Ignore these errors, perhaps at our
-			 * peril.
-			 */
-			return 0;
-
-		case SAS_DATA_OVERRUN:
-		case SAS_QUEUE_FULL:
-		case SAS_DEVICE_UNKNOWN:
-		case SAS_SG_ERR:
-			return AC_ERR_INVALID;
-
-		case SAS_OPEN_TO:
-		case SAS_OPEN_REJECT:
-			SAS_DPRINTK("%s: Saw error %d.  What to do?\n",
-				    __func__, ts->stat);
-			return AC_ERR_OTHER;
-
-		case SAM_STAT_CHECK_CONDITION:
-		case SAS_ABORTED_TASK:
-			return AC_ERR_DEV;
-
-		case SAS_PROTO_RESPONSE:
-			/* This means the ending_fis has the error
-			 * value; return 0 here to collect it */
-			return 0;
-		default:
-			return 0;
+	case SAS_DEV_NO_RESPONSE:
+		return AC_ERR_TIMEOUT;
+	case SAS_INTERRUPTED:
+	case SAS_PHY_DOWN:
+	case SAS_NAK_R_ERR:
+		return AC_ERR_ATA_BUS;
+	case SAS_DATA_UNDERRUN:
+		/*
+		 * Some programs that use the taskfile interface
+		 * (smartctl in particular) can cause underrun
+		 * problems.  Ignore these errors, perhaps at our
+		 * peril.
+		 */
+		return 0;
+	case SAS_DATA_OVERRUN:
+	case SAS_QUEUE_FULL:
+	case SAS_DEVICE_UNKNOWN:
+	case SAS_OPEN_TO:
+	case SAS_OPEN_REJECT:
+		pr_warn("%s: Saw error %d.  What to do?\n",
+			__func__, ts->stat);
+		return AC_ERR_OTHER;
+	case SAM_STAT_CHECK_CONDITION:
+	case SAS_ABORTED_TASK:
+		return AC_ERR_DEV;
+	case SAS_PROTO_RESPONSE:
+		/* This means the ending_fis has the error
+		 * value; return 0 here to collect it
+		 */
+		return 0;
+	default:
+		return 0;
 	}
 }
 
@@ -136,9 +114,10 @@ static void sas_ata_task_done(struct sas_task *task)
 		}
 	}
 
-	if (stat->stat == SAS_PROTO_RESPONSE || stat->stat == SAM_STAT_GOOD ||
-	    ((stat->stat == SAM_STAT_CHECK_CONDITION &&
-	      dev->sata_dev.class == ATA_DEV_ATAPI))) {
+	if (stat->stat == SAS_PROTO_RESPONSE ||
+	    stat->stat == SAS_SAM_STAT_GOOD ||
+	    (stat->stat == SAS_SAM_STAT_CHECK_CONDITION &&
+	      dev->sata_dev.class == ATA_DEV_ATAPI)) {
 		memcpy(dev->sata_dev.fis, resp->ending_fis, ATA_RESP_FIS_SIZE);
 
 		if (!link->sactive) {
@@ -151,8 +130,7 @@ static void sas_ata_task_done(struct sas_task *task)
 	} else {
 		ac = sas_to_ata_err(stat);
 		if (ac) {
-			SAS_DPRINTK("%s: SAS error %x\n", __func__,
-				    stat->stat);
+			pr_warn("%s: SAS error 0x%x\n", __func__, stat->stat);
 			/* We saw a SAS error. Send a vague error. */
 			if (!link->sactive) {
 				qc->err_mask = ac;
@@ -175,8 +153,8 @@ qc_already_gone:
 }
 
 static unsigned int sas_ata_qc_issue(struct ata_queued_cmd *qc)
+	__must_hold(ap->lock)
 {
-	unsigned long flags;
 	struct sas_task *task;
 	struct scatterlist *sg;
 	int ret = AC_ERR_SYSTEM;
@@ -187,10 +165,7 @@ static unsigned int sas_ata_qc_issue(struct ata_queued_cmd *qc)
 	struct Scsi_Host *host = sas_ha->core.shost;
 	struct sas_internal *i = to_sas_internal(host->transportt);
 
-	/* TODO: audit callers to ensure they are ready for qc_issue to
-	 * unconditionally re-enable interrupts
-	 */
-	local_irq_save(flags);
+	/* TODO: we should try to remove that unlock */
 	spin_unlock(ap->lock);
 
 	/* If the device fell off, no sense in issuing commands */
@@ -204,14 +179,9 @@ static unsigned int sas_ata_qc_issue(struct ata_queued_cmd *qc)
 	task->task_proto = SAS_PROTOCOL_STP;
 	task->task_done = sas_ata_task_done;
 
-	if (qc->tf.command == ATA_CMD_FPDMA_WRITE ||
-	    qc->tf.command == ATA_CMD_FPDMA_READ ||
-	    qc->tf.command == ATA_CMD_FPDMA_RECV ||
-	    qc->tf.command == ATA_CMD_FPDMA_SEND ||
-	    qc->tf.command == ATA_CMD_NCQ_NON_DATA) {
-		/* Need to zero out the tag libata assigned us */
+	/* For NCQ commands, zero out the tag libata assigned us */
+	if (ata_is_ncq(qc->tf.protocol))
 		qc->tf.nsect = 0;
-	}
 
 	ata_tf_to_fis(&qc->tf, qc->dev->link->pmp, 1, (u8 *)&task->ata_task.fis);
 	task->uldd_task = qc;
@@ -219,18 +189,19 @@ static unsigned int sas_ata_qc_issue(struct ata_queued_cmd *qc)
 		memcpy(task->ata_task.atapi_packet, qc->cdb, qc->dev->cdb_len);
 		task->total_xfer_len = qc->nbytes;
 		task->num_scatter = qc->n_elem;
+		task->data_dir = qc->dma_dir;
+	} else if (!ata_is_data(qc->tf.protocol)) {
+		task->data_dir = DMA_NONE;
 	} else {
 		for_each_sg(qc->sg, sg, qc->n_elem, si)
 			xfer += sg_dma_len(sg);
 
 		task->total_xfer_len = xfer;
 		task->num_scatter = si;
+		task->data_dir = qc->dma_dir;
 	}
-
-	task->data_dir = qc->dma_dir;
 	task->scatter = qc->sg;
 	task->ata_task.retry_count = 1;
-	task->task_state_flags = SAS_TASK_STATE_PENDING;
 	qc->lldd_task = task;
 
 	task->ata_task.use_ncq = ata_is_ncq(qc->tf.protocol);
@@ -241,7 +212,7 @@ static unsigned int sas_ata_qc_issue(struct ata_queued_cmd *qc)
 
 	ret = i->dft->lldd_execute_task(task, GFP_ATOMIC);
 	if (ret) {
-		SAS_DPRINTK("lldd_execute_task returned: %d\n", ret);
+		pr_debug("lldd_execute_task returned: %d\n", ret);
 
 		if (qc->scsicmd)
 			ASSIGN_SAS_TASK(qc->scsicmd, NULL);
@@ -252,7 +223,6 @@ static unsigned int sas_ata_qc_issue(struct ata_queued_cmd *qc)
 
  out:
 	spin_lock(ap->lock);
-	local_irq_restore(flags);
 	return ret;
 }
 
@@ -287,9 +257,9 @@ int sas_get_ata_info(struct domain_device *dev, struct ex_phy *phy)
 		res = sas_get_report_phy_sata(dev->parent, phy->phy_id,
 					      &dev->sata_dev.rps_resp);
 		if (res) {
-			SAS_DPRINTK("report phy sata to %016llx:0x%x returned "
-				    "0x%x\n", SAS_ADDR(dev->parent->sas_addr),
-				    phy->phy_id, res);
+			pr_debug("report phy sata to %016llx:%02d returned 0x%x\n",
+				 SAS_ADDR(dev->parent->sas_addr),
+				 phy->phy_id, res);
 			return res;
 		}
 		memcpy(dev->frame_rcvd, &dev->sata_dev.rps_resp.rps.fis,
@@ -317,6 +287,31 @@ static int sas_ata_clear_pending(struct domain_device *dev, struct ex_phy *phy)
 		return 1;
 }
 
+int smp_ata_check_ready_type(struct ata_link *link)
+{
+	struct domain_device *dev = link->ap->private_data;
+	struct sas_phy *phy = sas_get_local_phy(dev);
+	struct domain_device *ex_dev = dev->parent;
+	enum sas_device_type type = SAS_PHY_UNUSED;
+	u8 sas_addr[SAS_ADDR_SIZE];
+	int res;
+
+	res = sas_get_phy_attached_dev(ex_dev, phy->number, sas_addr, &type);
+	sas_put_local_phy(phy);
+	if (res)
+		return res;
+
+	switch (type) {
+	case SAS_SATA_PENDING:
+		return 0;
+	case SAS_END_DEVICE:
+		return 1;
+	default:
+		return -ENODEV;
+	}
+}
+EXPORT_SYMBOL_GPL(smp_ata_check_ready_type);
+
 static int smp_ata_check_ready(struct ata_link *link)
 {
 	int res;
@@ -343,6 +338,7 @@ static int smp_ata_check_ready(struct ata_link *link)
 	case SAS_END_DEVICE:
 		if (ex_phy->attached_sata_dev)
 			return sas_ata_clear_pending(dev, ex_phy);
+		fallthrough;
 	default:
 		return -ENODEV;
 	}
@@ -379,7 +375,7 @@ static int sas_ata_printk(const char *level, const struct domain_device *ddev,
 	vaf.fmt = fmt;
 	vaf.va = &args;
 
-	r = printk("%ssas: ata%u: %s: %pV",
+	r = printk("%s" SAS_FMT "ata%u: %s: %pV",
 		   level, ap->print_id, dev_name(dev), &vaf);
 
 	va_end(args);
@@ -387,22 +383,14 @@ static int sas_ata_printk(const char *level, const struct domain_device *ddev,
 	return r;
 }
 
-static int sas_ata_hard_reset(struct ata_link *link, unsigned int *class,
-			      unsigned long deadline)
+int sas_ata_wait_after_reset(struct domain_device *dev, unsigned long deadline)
 {
-	int ret = 0, res;
-	struct sas_phy *phy;
-	struct ata_port *ap = link->ap;
+	struct sata_device *sata_dev = &dev->sata_dev;
 	int (*check_ready)(struct ata_link *link);
-	struct domain_device *dev = ap->private_data;
-	struct sas_internal *i = dev_to_sas_internal(dev);
-
-	res = i->dft->lldd_I_T_nexus_reset(dev);
-	if (res == -ENODEV)
-		return res;
-
-	if (res != TMF_RESP_FUNC_COMPLETE)
-		sas_ata_printk(KERN_DEBUG, dev, "Unable to reset ata device?\n");
+	struct ata_port *ap = sata_dev->ap;
+	struct ata_link *link = &ap->link;
+	struct sas_phy *phy;
+	int ret;
 
 	phy = sas_get_local_phy(dev);
 	if (scsi_is_sas_phy_local(phy))
@@ -414,6 +402,27 @@ static int sas_ata_hard_reset(struct ata_link *link, unsigned int *class,
 	ret = ata_wait_after_reset(link, deadline, check_ready);
 	if (ret && ret != -EAGAIN)
 		sas_ata_printk(KERN_ERR, dev, "reset failed (errno=%d)\n", ret);
+
+	return ret;
+}
+EXPORT_SYMBOL_GPL(sas_ata_wait_after_reset);
+
+static int sas_ata_hard_reset(struct ata_link *link, unsigned int *class,
+			      unsigned long deadline)
+{
+	struct ata_port *ap = link->ap;
+	struct domain_device *dev = ap->private_data;
+	struct sas_internal *i = dev_to_sas_internal(dev);
+	int ret;
+
+	ret = i->dft->lldd_I_T_nexus_reset(dev);
+	if (ret == -ENODEV)
+		return ret;
+
+	if (ret != TMF_RESP_FUNC_COMPLETE)
+		sas_ata_printk(KERN_DEBUG, dev, "Unable to reset ata device?\n");
+
+	ret = sas_ata_wait_after_reset(dev, deadline);
 
 	*class = dev->sata_dev.class;
 
@@ -435,8 +444,7 @@ static void sas_ata_internal_abort(struct sas_task *task)
 	if (task->task_state_flags & SAS_TASK_STATE_ABORTED ||
 	    task->task_state_flags & SAS_TASK_STATE_DONE) {
 		spin_unlock_irqrestore(&task->task_state_lock, flags);
-		SAS_DPRINTK("%s: Task %p already finished.\n", __func__,
-			    task);
+		pr_debug("%s: Task %p already finished.\n", __func__, task);
 		goto out;
 	}
 	task->task_state_flags |= SAS_TASK_STATE_ABORTED;
@@ -456,7 +464,7 @@ static void sas_ata_internal_abort(struct sas_task *task)
 	 * aborted ata tasks, otherwise we (likely) leak the sas task
 	 * here
 	 */
-	SAS_DPRINTK("%s: Task %p leaked.\n", __func__, task);
+	pr_warn("%s: Task %p leaked.\n", __func__, task);
 
 	if (!(task->task_state_flags & SAS_TASK_STATE_DONE))
 		task->task_state_flags &= ~SAS_TASK_STATE_ABORTED;
@@ -526,10 +534,23 @@ void sas_ata_end_eh(struct ata_port *ap)
 	spin_unlock_irqrestore(&ha->lock, flags);
 }
 
+static int sas_ata_prereset(struct ata_link *link, unsigned long deadline)
+{
+	struct ata_port *ap = link->ap;
+	struct domain_device *dev = ap->private_data;
+	struct sas_phy *local_phy = sas_get_local_phy(dev);
+	int res = 0;
+
+	if (!local_phy->enabled || test_bit(SAS_DEV_GONE, &dev->state))
+		res = -ENOENT;
+	sas_put_local_phy(local_phy);
+
+	return res;
+}
+
 static struct ata_port_operations sas_sata_ops = {
-	.prereset		= ata_std_prereset,
+	.prereset		= sas_ata_prereset,
 	.hardreset		= sas_ata_hard_reset,
-	.postreset		= ata_std_postreset,
 	.error_handler		= ata_std_error_handler,
 	.post_internal_cmd	= sas_ata_post_internal,
 	.qc_defer               = ata_std_qc_defer,
@@ -556,29 +577,46 @@ int sas_ata_init(struct domain_device *found_dev)
 {
 	struct sas_ha_struct *ha = found_dev->port->ha;
 	struct Scsi_Host *shost = ha->core.shost;
+	struct ata_host *ata_host;
 	struct ata_port *ap;
 	int rc;
 
-	ata_host_init(&found_dev->sata_dev.ata_host, ha->dev, &sas_sata_ops);
-	ap = ata_sas_port_alloc(&found_dev->sata_dev.ata_host,
-				&sata_port_info,
-				shost);
+	ata_host = kzalloc(sizeof(*ata_host), GFP_KERNEL);
+	if (!ata_host)	{
+		pr_err("ata host alloc failed.\n");
+		return -ENOMEM;
+	}
+
+	ata_host_init(ata_host, ha->dev, &sas_sata_ops);
+
+	ap = ata_sas_port_alloc(ata_host, &sata_port_info, shost);
 	if (!ap) {
-		SAS_DPRINTK("ata_sas_port_alloc failed.\n");
-		return -ENODEV;
+		pr_err("ata_sas_port_alloc failed.\n");
+		rc = -ENODEV;
+		goto free_host;
 	}
 
 	ap->private_data = found_dev;
 	ap->cbl = ATA_CBL_SATA;
 	ap->scsi_host = shost;
 	rc = ata_sas_port_init(ap);
-	if (rc) {
-		ata_sas_port_destroy(ap);
-		return rc;
-	}
+	if (rc)
+		goto destroy_port;
+
+	rc = ata_sas_tport_add(ata_host->dev, ap);
+	if (rc)
+		goto destroy_port;
+
+	found_dev->sata_dev.ata_host = ata_host;
 	found_dev->sata_dev.ap = ap;
 
 	return 0;
+
+destroy_port:
+	ata_sas_port_destroy(ap);
+free_host:
+	ata_host_put(ata_host);
+	return rc;
 }
 
 void sas_ata_task_abort(struct sas_task *task)
@@ -588,12 +626,7 @@ void sas_ata_task_abort(struct sas_task *task)
 
 	/* Bounce SCSI-initiated commands to the SCSI EH */
 	if (qc->scsicmd) {
-		struct request_queue *q = qc->scsicmd->device->request_queue;
-		unsigned long flags;
-
-		spin_lock_irqsave(q->queue_lock, flags);
-		blk_abort_request(qc->scsicmd->request);
-		spin_unlock_irqrestore(q->queue_lock, flags);
+		blk_abort_request(scsi_cmd_to_rq(qc->scsicmd));
 		return;
 	}
 
@@ -641,7 +674,7 @@ void sas_probe_sata(struct asd_sas_port *port)
 		/* if libata could not bring the link up, don't surface
 		 * the device
 		 */
-		if (ata_dev_disabled(sas_to_ata_dev(dev)))
+		if (!ata_dev_enabled(sas_to_ata_dev(dev)))
 			sas_fail_probe(dev, __func__, -ENODEV);
 	}
 
@@ -708,7 +741,7 @@ void sas_resume_sata(struct asd_sas_port *port)
 }
 
 /**
- * sas_discover_sata -- discover an STP/SATA domain device
+ * sas_discover_sata - discover an STP/SATA domain device
  * @dev: pointer to struct domain_device of interest
  *
  * Devices directly attached to a HA port, have no parents.  All other
@@ -717,20 +750,13 @@ void sas_resume_sata(struct asd_sas_port *port)
  */
 int sas_discover_sata(struct domain_device *dev)
 {
-	int res;
-
 	if (dev->dev_type == SAS_SATA_PM)
 		return -ENODEV;
 
 	dev->sata_dev.class = sas_get_ata_command_set(dev);
 	sas_fill_in_rphy(dev, dev->rphy);
 
-	res = sas_notify_lldd_dev_found(dev);
-	if (res)
-		return res;
-
-	sas_discover_event(dev->port, DISCE_PROBE);
-	return 0;
+	return sas_notify_lldd_dev_found(dev);
 }
 
 static void async_sas_ata_eh(void *data, async_cookie_t cookie)
@@ -787,8 +813,7 @@ void sas_ata_strategy_handler(struct Scsi_Host *shost)
 	sas_enable_revalidation(sas_ha);
 }
 
-void sas_ata_eh(struct Scsi_Host *shost, struct list_head *work_q,
-		struct list_head *done_q)
+void sas_ata_eh(struct Scsi_Host *shost, struct list_head *work_q)
 {
 	struct scsi_cmnd *cmd, *n;
 	struct domain_device *eh_dev;
@@ -860,3 +885,29 @@ void sas_ata_wait_eh(struct domain_device *dev)
 	ap = dev->sata_dev.ap;
 	ata_port_wait_eh(ap);
 }
+
+void sas_ata_device_link_abort(struct domain_device *device, bool force_reset)
+{
+	struct ata_port *ap = device->sata_dev.ap;
+	struct ata_link *link = &ap->link;
+	unsigned long flags;
+
+	spin_lock_irqsave(ap->lock, flags);
+	device->sata_dev.fis[2] = ATA_ERR | ATA_DRDY; /* tf status */
+	device->sata_dev.fis[3] = ATA_ABORTED; /* tf error */
+
+	link->eh_info.err_mask |= AC_ERR_DEV;
+	if (force_reset)
+		link->eh_info.action |= ATA_EH_RESET;
+	ata_link_abort(link);
+	spin_unlock_irqrestore(ap->lock, flags);
+}
+EXPORT_SYMBOL_GPL(sas_ata_device_link_abort);
+
+int sas_execute_ata_cmd(struct domain_device *device, u8 *fis, int force_phy_id)
+{
+	struct sas_tmf_task tmf_task = {};
+	return sas_execute_tmf(device, fis, sizeof(struct host_to_dev_fis),
+			       force_phy_id, &tmf_task);
+}
+EXPORT_SYMBOL_GPL(sas_execute_ata_cmd);

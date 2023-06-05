@@ -8,22 +8,29 @@ perf-kmem - Tool to trace/measure kernel memory properties
 SYNOPSIS
 --------
 [verse]
-'perf kmem' {record|stat} [<options>]
+'perf kmem' [<options>] {record|stat}
 
 DESCRIPTION
 -----------
 There are two variants of perf kmem:
 
-  'perf kmem record <command>' to record the kmem events
-  of an arbitrary workload.
+  'perf kmem [<options>] record [<perf-record-options>] <command>' to
+  record the kmem events of an arbitrary workload. Additional 'perf
+  record' options may be specified after record, such as '-o' to
+  change the output file name.
 
-  'perf kmem stat' to report kernel memory statistics.
+  'perf kmem [<options>] stat' to report kernel memory statistics.
 
 OPTIONS
 -------
 -i <file>::
 --input=<file>::
-	Select the input file (default: perf.data unless stdin is a fifo)
+	For stat, select the input file (default: perf.data unless stdin is a
+	fifo)
+
+-f::
+--force::
+	Don't do ownership validation
 
 -v::
 --verbose::
@@ -60,6 +67,13 @@ OPTIONS
 	Show live page stat.  The perf kmem shows total allocation stat by
 	default, but this option shows live (currently allocated) pages
 	instead.  (This option works with --page option only)
+
+--time=<start>,<stop>::
+	Only analyze samples within given time window: <start>,<stop>. Times
+	have the format seconds.microseconds. If start is not given (i.e., time
+	string is ',x.y') then analysis starts at the beginning of the file. If
+	stop time is not given (i.e, time string is 'x.y,') then analysis goes
+	to end of file.
 
 SEE ALSO
 --------

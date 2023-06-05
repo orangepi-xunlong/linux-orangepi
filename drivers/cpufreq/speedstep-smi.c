@@ -1,10 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Intel SpeedStep SMI driver.
  *
  * (C) 2003  Hiroshi Miura <miura@da-cha.org>
- *
- *  Licensed under the terms of the GNU GPL License version 2.
- *
  */
 
 
@@ -266,8 +264,9 @@ static int speedstep_cpu_init(struct cpufreq_policy *policy)
 			pr_debug("workaround worked.\n");
 	}
 
-	policy->cpuinfo.transition_latency = CPUFREQ_ETERNAL;
-	return cpufreq_table_validate_and_show(policy, speedstep_freqs);
+	policy->freq_table = speedstep_freqs;
+
+	return 0;
 }
 
 static unsigned int speedstep_get(unsigned int cpu)
@@ -290,6 +289,7 @@ static int speedstep_resume(struct cpufreq_policy *policy)
 
 static struct cpufreq_driver speedstep_driver = {
 	.name		= "speedstep-smi",
+	.flags		= CPUFREQ_NO_AUTO_DYNAMIC_SWITCHING,
 	.verify		= cpufreq_generic_frequency_table_verify,
 	.target_index	= speedstep_target,
 	.init		= speedstep_cpu_init,
@@ -299,15 +299,11 @@ static struct cpufreq_driver speedstep_driver = {
 };
 
 static const struct x86_cpu_id ss_smi_ids[] = {
-	{ X86_VENDOR_INTEL, 6, 0xb, },
-	{ X86_VENDOR_INTEL, 6, 0x8, },
-	{ X86_VENDOR_INTEL, 15, 2 },
+	X86_MATCH_VENDOR_FAM_MODEL(INTEL,  6, 0x8, 0),
+	X86_MATCH_VENDOR_FAM_MODEL(INTEL,  6, 0xb, 0),
+	X86_MATCH_VENDOR_FAM_MODEL(INTEL, 15, 0x2, 0),
 	{}
 };
-#if 0
-/* Not auto loaded currently */
-MODULE_DEVICE_TABLE(x86cpu, ss_smi_ids);
-#endif
 
 /**
  * speedstep_init - initializes the SpeedStep CPUFreq driver
@@ -378,7 +374,7 @@ static void __exit speedstep_exit(void)
 	cpufreq_unregister_driver(&speedstep_driver);
 }
 
-module_param(smi_port, int, 0444);
+module_param_hw(smi_port, int, ioport, 0444);
 module_param(smi_cmd,  int, 0444);
 module_param(smi_sig, uint, 0444);
 

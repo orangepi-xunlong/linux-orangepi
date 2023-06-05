@@ -1,15 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2015 MediaTek Inc.
  * Author: Hongzhou.Yang <hongzhou.yang@mediatek.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include <linux/init.h>
@@ -41,6 +33,9 @@ static const struct mtk_pinctrl_devdata mt6397_pinctrl_data = {
 	.port_shf = 3,
 	.port_mask = 0x3,
 	.port_align = 2,
+	.mode_mask = 0xf,
+	.mode_per_reg = 5,
+	.mode_shf = 4,
 };
 
 static int mt6397_pinctrl_probe(struct platform_device *pdev)
@@ -64,8 +59,4 @@ static struct platform_driver mtk_pinctrl_driver = {
 	},
 };
 
-static int __init mtk_pinctrl_init(void)
-{
-	return platform_driver_register(&mtk_pinctrl_driver);
-}
-device_initcall(mtk_pinctrl_init);
+builtin_platform_driver(mtk_pinctrl_driver);

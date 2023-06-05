@@ -1,38 +1,39 @@
+/* SPDX-License-Identifier: GPL-2.0 */
+/*
+ * Clang Control Flow Integrity (CFI) support.
+ *
+ * Copyright (C) 2022 Google LLC
+ */
 #ifndef _LINUX_CFI_H
 #define _LINUX_CFI_H
 
-#include <linux/stringify.h>
+#include <linux/bug.h>
+#include <linux/module.h>
 
 #ifdef CONFIG_CFI_CLANG
-#ifdef CONFIG_MODULES
+enum bug_trap_type report_cfi_failure(struct pt_regs *regs, unsigned long addr,
+				      unsigned long *target, u32 type);
 
-typedef void (*cfi_check_fn)(uint64_t, void *, void *);
-
-/* Compiler-generated function in each module, and the kernel */
-#define CFI_CHECK_FN		__cfi_check
-#define CFI_CHECK_FN_NAME	__stringify(CFI_CHECK_FN)
-
-extern void CFI_CHECK_FN(uint64_t, void *, void *);
-
-#ifdef CONFIG_CFI_CLANG_SHADOW
-extern void cfi_module_add(struct module *mod, unsigned long min_addr,
-	unsigned long max_addr);
-
-extern void cfi_module_remove(struct module *mod, unsigned long min_addr,
-	unsigned long max_addr);
-#else
-static inline void cfi_module_add(struct module *mod, unsigned long min_addr,
-	unsigned long max_addr)
+static inline enum bug_trap_type report_cfi_failure_noaddr(struct pt_regs *regs,
+							   unsigned long addr)
 {
+	return report_cfi_failure(regs, addr, NULL, 0);
 }
 
-static inline void cfi_module_remove(struct module *mod, unsigned long min_addr,
-	unsigned long max_addr)
-{
-}
-#endif /* CONFIG_CFI_CLANG_SHADOW */
-
-#endif /* CONFIG_MODULES */
+#ifdef CONFIG_ARCH_USES_CFI_TRAPS
+bool is_cfi_trap(unsigned long addr);
+#endif
 #endif /* CONFIG_CFI_CLANG */
+
+#ifdef CONFIG_MODULES
+#ifdef CONFIG_ARCH_USES_CFI_TRAPS
+void module_cfi_finalize(const Elf_Ehdr *hdr, const Elf_Shdr *sechdrs,
+			 struct module *mod);
+#else
+static inline void module_cfi_finalize(const Elf_Ehdr *hdr,
+				       const Elf_Shdr *sechdrs,
+				       struct module *mod) {}
+#endif /* CONFIG_ARCH_USES_CFI_TRAPS */
+#endif /* CONFIG_MODULES */
 
 #endif /* _LINUX_CFI_H */

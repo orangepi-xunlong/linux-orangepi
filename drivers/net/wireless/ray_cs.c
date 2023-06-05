@@ -1,23 +1,11 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*=============================================================================
  *
  * A  PCMCIA client driver for the Raylink wireless LAN card.
  * The starting point for this module was the skeleton.c in the
  * PCMCIA 2.9.12 package written by David Hinds, dahinds@users.sourceforge.net
  *
- *
  * Copyright (c) 1998  Corey Thomas (corey@world.std.com)
- *
- * This driver is free software; you can redistribute it and/or modify
- * it under the terms of version 2 only of the GNU General Public License as
- * published by the Free Software Foundation.
- *
- * It is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, see <http://www.gnu.org/licenses/>.
  *
  * Changes:
  * Arnaldo Carvalho de Melo <acme@conectiva.com.br> - 08/08/2000
@@ -53,7 +41,7 @@
 
 #include <asm/io.h>
 #include <asm/byteorder.h>
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 
 /* Warning : these stuff will slow down the driver... */
 #define WIRELESS_SPY		/* Enable spying addresses */
@@ -92,7 +80,7 @@ static const struct iw_handler_def ray_handler_def;
 /***** Prototypes for raylink functions **************************************/
 static void authenticate(ray_dev_t *local);
 static int build_auth_frame(ray_dev_t *local, UCHAR *dest, int auth_type);
-static void authenticate_timeout(u_long);
+static void authenticate_timeout(struct timer_list *t);
 static int get_free_ccs(ray_dev_t *local);
 static int get_free_tx_ccs(ray_dev_t *local);
 static void init_startup_params(ray_dev_t *local);
@@ -102,7 +90,7 @@ static int ray_init(struct net_device *dev);
 static int interrupt_ecf(ray_dev_t *local, int ccs);
 static void ray_reset(struct net_device *dev);
 static void ray_update_parm(struct net_device *dev, UCHAR objid, UCHAR *value, int len);
-static void verify_dl_startup(u_long);
+static void verify_dl_startup(struct timer_list *t);
 
 /* Prototypes for interrpt time functions **********************************/
 static irqreturn_t ray_interrupt(int reg, void *dev_id);
@@ -120,9 +108,8 @@ static void associate(ray_dev_t *local);
 
 /* Card command functions */
 static int dl_startup_params(struct net_device *dev);
-static void join_net(u_long local);
-static void start_net(u_long local);
-/* void start_net(ray_dev_t *local); */
+static void join_net(struct timer_list *t);
+static void start_net(struct timer_list *t);
 
 /*===========================================================================*/
 /* Parameters that can be set with 'insmod' */
@@ -275,7 +262,6 @@ static const struct net_device_ops ray_netdev_ops = {
 	.ndo_set_config		= ray_dev_config,
 	.ndo_get_stats		= ray_get_stats,
 	.ndo_set_rx_mode	= set_multicast_list,
-	.ndo_change_mtu		= eth_change_mtu,
 	.ndo_set_mac_address 	= eth_mac_addr,
 	.ndo_validate_addr	= eth_validate_addr,
 };
@@ -324,7 +310,7 @@ static int ray_probe(struct pcmcia_device *p_dev)
 	dev_dbg(&p_dev->dev, "ray_cs ray_attach calling ether_setup.)\n");
 	netif_stop_queue(dev);
 
-	init_timer(&local->timer);
+	timer_setup(&local->timer, NULL, 0);
 
 	this_device = p_dev;
 	return ray_config(p_dev);
@@ -396,6 +382,8 @@ static int ray_config(struct pcmcia_device *link)
 		goto failed;
 	local->sram = ioremap(link->resource[2]->start,
 			resource_size(link->resource[2]));
+	if (!local->sram)
+		goto failed;
 
 /*** Set up 16k window for shared memory (receive buffer) ***************/
 	link->resource[3]->flags |=
@@ -410,6 +398,8 @@ static int ray_config(struct pcmcia_device *link)
 		goto failed;
 	local->rmem = ioremap(link->resource[3]->start,
 			resource_size(link->resource[3]));
+	if (!local->rmem)
+		goto failed;
 
 /*** Set up window for attribute memory ***********************************/
 	link->resource[4]->flags |=
@@ -424,6 +414,8 @@ static int ray_config(struct pcmcia_device *link)
 		goto failed;
 	local->amem = ioremap(link->resource[4]->start,
 			resource_size(link->resource[4]));
+	if (!local->amem)
+		goto failed;
 
 	dev_dbg(&link->dev, "ray_config sram=%p\n", local->sram);
 	dev_dbg(&link->dev, "ray_config rmem=%p\n", local->rmem);
@@ -472,7 +464,6 @@ static inline struct rcs __iomem *rcs_base(ray_dev_t *dev)
 static int ray_init(struct net_device *dev)
 {
 	int i;
-	UCHAR *p;
 	struct ccs __iomem *pccs;
 	ray_dev_t *local = netdev_priv(dev);
 	struct pcmcia_device *link = local->finder;
@@ -515,12 +506,9 @@ static int ray_init(struct net_device *dev)
 	init_startup_params(local);
 
 	/* copy mac address to startup parameters */
-	if (parse_addr(phy_addr, local->sparm.b4.a_mac_addr)) {
-		p = local->sparm.b4.a_mac_addr;
-	} else {
+	if (!parse_addr(phy_addr, local->sparm.b4.a_mac_addr)) {
 		memcpy(&local->sparm.b4.a_mac_addr,
 		       &local->startup_res.station_addr, ADDRLEN);
-		p = local->sparm.b4.a_mac_addr;
 	}
 
 	clear_interrupt(local);	/* Clear any interrupt from the card */
@@ -571,7 +559,6 @@ static int dl_startup_params(struct net_device *dev)
 	local->card_status = CARD_DL_PARAM;
 	/* Start kernel timer to wait for dl startup to complete. */
 	local->timer.expires = jiffies + HZ / 2;
-	local->timer.data = (long)local;
 	local->timer.function = verify_dl_startup;
 	add_timer(&local->timer);
 	dev_dbg(&link->dev,
@@ -642,9 +629,9 @@ static void init_startup_params(ray_dev_t *local)
 } /* init_startup_params */
 
 /*===========================================================================*/
-static void verify_dl_startup(u_long data)
+static void verify_dl_startup(struct timer_list *t)
 {
-	ray_dev_t *local = (ray_dev_t *) data;
+	ray_dev_t *local = from_timer(local, t, timer);
 	struct ccs __iomem *pccs = ccs_base(local) + local->dl_param_ccs;
 	UCHAR status;
 	struct pcmcia_device *link = local->finder;
@@ -677,16 +664,16 @@ static void verify_dl_startup(u_long data)
 		return;
 	}
 	if (local->sparm.b4.a_network_type == ADHOC)
-		start_net((u_long) local);
+		start_net(&local->timer);
 	else
-		join_net((u_long) local);
+		join_net(&local->timer);
 } /* end verify_dl_startup */
 
 /*===========================================================================*/
 /* Command card to start a network */
-static void start_net(u_long data)
+static void start_net(struct timer_list *t)
 {
-	ray_dev_t *local = (ray_dev_t *) data;
+	ray_dev_t *local = from_timer(local, t, timer);
 	struct ccs __iomem *pccs;
 	int ccsindex;
 	struct pcmcia_device *link = local->finder;
@@ -711,9 +698,9 @@ static void start_net(u_long data)
 
 /*===========================================================================*/
 /* Command card to join a network */
-static void join_net(u_long data)
+static void join_net(struct timer_list *t)
 {
-	ray_dev_t *local = (ray_dev_t *) data;
+	ray_dev_t *local = from_timer(local, t, timer);
 
 	struct ccs __iomem *pccs;
 	int ccsindex;
@@ -810,7 +797,7 @@ static int ray_dev_init(struct net_device *dev)
 #endif /* RAY_IMMEDIATE_INIT */
 
 	/* copy mac and broadcast addresses to linux device */
-	memcpy(dev->dev_addr, &local->sparm.b4.a_mac_addr, ADDRLEN);
+	eth_hw_addr_set(dev, local->sparm.b4.a_mac_addr);
 	eth_broadcast_addr(dev->broadcast);
 
 	dev_dbg(&link->dev, "ray_dev_init ending\n");
@@ -896,8 +883,10 @@ static int ray_hw_xmit(unsigned char *data, int len, struct net_device *dev,
 	switch (ccsindex = get_free_tx_ccs(local)) {
 	case ECCSBUSY:
 		pr_debug("ray_hw_xmit tx_ccs table busy\n");
+		fallthrough;
 	case ECCSFULL:
 		pr_debug("ray_hw_xmit No free tx ccs\n");
+		fallthrough;
 	case ECARDGONE:
 		netif_stop_queue(dev);
 		return XMIT_NO_CCS;
@@ -964,7 +953,7 @@ static int translate_frame(ray_dev_t *local, struct tx_msg __iomem *ptx,
 		if (proto == htons(ETH_P_AARP) || proto == htons(ETH_P_IPX)) {
 			/* This is the selective translation table, only 2 entries */
 			writeb(0xf8,
-			       &((struct snaphdr_t __iomem *)ptx->var)->org[3]);
+			       &((struct snaphdr_t __iomem *)ptx->var)->org[2]);
 		}
 		/* Copy body of ethernet packet without ethernet header */
 		memcpy_toio((void __iomem *)&ptx->var +
@@ -999,7 +988,9 @@ AP to AP	1	1	dest AP		src AP		dest	source
 	if (local->net_type == ADHOC) {
 		writeb(0, &ptx->mac.frame_ctl_2);
 		memcpy_toio(ptx->mac.addr_1, ((struct ethhdr *)data)->h_dest,
-			    2 * ADDRLEN);
+			    ADDRLEN);
+		memcpy_toio(ptx->mac.addr_2, ((struct ethhdr *)data)->h_source,
+			    ADDRLEN);
 		memcpy_toio(ptx->mac.addr_3, local->bss_id, ADDRLEN);
 	} else { /* infrastructure */
 
@@ -1289,7 +1280,7 @@ static int ray_set_mode(struct net_device *dev, struct iw_request_info *info,
 	switch (wrqu->mode) {
 	case IW_MODE_ADHOC:
 		card_mode = 0;
-		/* Fall through */
+		fallthrough;
 	case IW_MODE_INFRA:
 		local->sparm.b5.a_network_type = card_mode;
 		break;
@@ -1640,50 +1631,46 @@ static int get_free_ccs(ray_dev_t *local)
 } /* get_free_ccs */
 
 /*===========================================================================*/
-static void authenticate_timeout(u_long data)
+static void authenticate_timeout(struct timer_list *t)
 {
-	ray_dev_t *local = (ray_dev_t *) data;
+	ray_dev_t *local = from_timer(local, t, timer);
 	del_timer(&local->timer);
 	printk(KERN_INFO "ray_cs Authentication with access point failed"
 	       " - timeout\n");
-	join_net((u_long) local);
+	join_net(&local->timer);
 }
 
 /*===========================================================================*/
 static int parse_addr(char *in_str, UCHAR *out)
 {
+	int i, k;
 	int len;
-	int i, j, k;
-	int status;
 
 	if (in_str == NULL)
 		return 0;
-	if ((len = strlen(in_str)) < 2)
+	len = strnlen(in_str, ADDRLEN * 2 + 1) - 1;
+	if (len < 1)
 		return 0;
 	memset(out, 0, ADDRLEN);
 
-	status = 1;
-	j = len - 1;
-	if (j > 12)
-		j = 12;
 	i = 5;
 
-	while (j > 0) {
-		if ((k = hex_to_bin(in_str[j--])) != -1)
+	while (len > 0) {
+		if ((k = hex_to_bin(in_str[len--])) != -1)
 			out[i] = k;
 		else
 			return 0;
 
-		if (j == 0)
+		if (len == 0)
 			break;
-		if ((k = hex_to_bin(in_str[j--])) != -1)
+		if ((k = hex_to_bin(in_str[len--])) != -1)
 			out[i] += k << 4;
 		else
 			return 0;
 		if (!i--)
 			break;
 	}
-	return status;
+	return 1;
 }
 
 /*===========================================================================*/
@@ -1946,7 +1933,6 @@ static irqreturn_t ray_interrupt(int irq, void *dev_id)
 
 				del_timer(&local->timer);
 				local->timer.expires = jiffies + HZ * 5;
-				local->timer.data = (long)local;
 				if (status == CCS_START_NETWORK) {
 					dev_dbg(&link->dev,
 					      "ray_cs interrupt network \"%s\" start failed\n",
@@ -1968,7 +1954,7 @@ static irqreturn_t ray_interrupt(int irq, void *dev_id)
 			} else {
 				dev_dbg(&link->dev, "ray_cs association failed,\n");
 				local->card_status = CARD_ASSOC_FAILED;
-				join_net((u_long) local);
+				join_net(&local->timer);
 			}
 			break;
 		case CCS_TX_REQUEST:
@@ -2217,7 +2203,7 @@ static void rx_data(struct net_device *dev, struct rcs __iomem *prcs,
 			untranslate(local, skb, total_len);
 		}
 	} else { /* sniffer mode, so just pass whole packet */
-	};
+	}
 
 /************************/
 	/* Now pick up the rest of the fragments if any */
@@ -2426,7 +2412,6 @@ static void authenticate(ray_dev_t *local)
 		local->timer.function = authenticate_timeout;
 	}
 	local->timer.expires = jiffies + HZ * 2;
-	local->timer.data = (long)local;
 	add_timer(&local->timer);
 	local->authentication_state = AWAITING_RESPONSE;
 } /* end authenticate */
@@ -2443,9 +2428,7 @@ static void rx_authenticate(ray_dev_t *local, struct rcs __iomem *prcs,
 	copy_from_rx_buff(local, buff, pkt_addr, rx_len & 0xff);
 	/* if we are trying to get authenticated */
 	if (local->sparm.b4.a_network_type == ADHOC) {
-		pr_debug("ray_cs rx_auth var= %02x %02x %02x %02x %02x %02x\n",
-		      msg->var[0], msg->var[1], msg->var[2], msg->var[3],
-		      msg->var[4], msg->var[5]);
+		pr_debug("ray_cs rx_auth var= %6ph\n", msg->var);
 		if (msg->var[2] == 1) {
 			pr_debug("ray_cs Sending authentication response.\n");
 			if (!build_auth_frame
@@ -2469,7 +2452,7 @@ static void rx_authenticate(ray_dev_t *local, struct rcs __iomem *prcs,
 				} else {
 					pr_debug("Authentication refused\n");
 					local->card_status = CARD_AUTH_REFUSED;
-					join_net((u_long) local);
+					join_net(&local->timer);
 					local->authentication_state =
 					    UNAUTHENTICATED;
 				}
@@ -2507,7 +2490,6 @@ static void associate(ray_dev_t *local)
 
 		del_timer(&local->timer);
 		local->timer.expires = jiffies + HZ * 2;
-		local->timer.data = (long)local;
 		local->timer.function = join_net;
 		add_timer(&local->timer);
 		local->card_status = CARD_ASSOC_FAILED;
@@ -2669,19 +2651,6 @@ static int ray_cs_proc_show(struct seq_file *m, void *v)
 	}
 	return 0;
 }
-
-static int ray_cs_proc_open(struct inode *inode, struct file *file)
-{
-	return single_open(file, ray_cs_proc_show, NULL);
-}
-
-static const struct file_operations ray_cs_proc_fops = {
-	.owner = THIS_MODULE,
-	.open = ray_cs_proc_open,
-	.read = seq_read,
-	.llseek = seq_lseek,
-	.release = single_release,
-};
 #endif
 /*===========================================================================*/
 static int build_auth_frame(ray_dev_t *local, UCHAR *dest, int auth_type)
@@ -2750,10 +2719,9 @@ static ssize_t ray_cs_essid_proc_write(struct file *file,
 	return count;
 }
 
-static const struct file_operations ray_cs_essid_proc_fops = {
-	.owner		= THIS_MODULE,
-	.write		= ray_cs_essid_proc_write,
-	.llseek		= noop_llseek,
+static const struct proc_ops ray_cs_essid_proc_ops = {
+	.proc_write	= ray_cs_essid_proc_write,
+	.proc_lseek	= noop_llseek,
 };
 
 static ssize_t int_proc_write(struct file *file, const char __user *buffer,
@@ -2780,14 +2748,13 @@ static ssize_t int_proc_write(struct file *file, const char __user *buffer,
 		nr = nr * 10 + c;
 		p++;
 	} while (--len);
-	*(int *)PDE_DATA(file_inode(file)) = nr;
+	*(int *)pde_data(file_inode(file)) = nr;
 	return count;
 }
 
-static const struct file_operations int_proc_fops = {
-	.owner		= THIS_MODULE,
-	.write		= int_proc_write,
-	.llseek		= noop_llseek,
+static const struct proc_ops int_proc_ops = {
+	.proc_write	= int_proc_write,
+	.proc_lseek	= noop_llseek,
 };
 #endif
 
@@ -2816,17 +2783,20 @@ static int __init init_ray_cs(void)
 	rc = pcmcia_register_driver(&ray_driver);
 	pr_debug("raylink init_module register_pcmcia_driver returns 0x%x\n",
 	      rc);
+	if (rc)
+		return rc;
 
 #ifdef CONFIG_PROC_FS
 	proc_mkdir("driver/ray_cs", NULL);
 
-	proc_create("driver/ray_cs/ray_cs", 0, NULL, &ray_cs_proc_fops);
-	proc_create("driver/ray_cs/essid", S_IWUSR, NULL, &ray_cs_essid_proc_fops);
-	proc_create_data("driver/ray_cs/net_type", S_IWUSR, NULL, &int_proc_fops, &net_type);
-	proc_create_data("driver/ray_cs/translate", S_IWUSR, NULL, &int_proc_fops, &translate);
+	proc_create_single("driver/ray_cs/ray_cs", 0, NULL, ray_cs_proc_show);
+	proc_create("driver/ray_cs/essid", 0200, NULL, &ray_cs_essid_proc_ops);
+	proc_create_data("driver/ray_cs/net_type", 0200, NULL, &int_proc_ops,
+			 &net_type);
+	proc_create_data("driver/ray_cs/translate", 0200, NULL, &int_proc_ops,
+			 &translate);
 #endif
-	if (translate != 0)
-		translate = 1;
+	translate = !!translate;
 	return 0;
 } /* init_ray_cs */
 
@@ -2837,11 +2807,7 @@ static void __exit exit_ray_cs(void)
 	pr_debug("ray_cs: cleanup_module\n");
 
 #ifdef CONFIG_PROC_FS
-	remove_proc_entry("driver/ray_cs/ray_cs", NULL);
-	remove_proc_entry("driver/ray_cs/essid", NULL);
-	remove_proc_entry("driver/ray_cs/net_type", NULL);
-	remove_proc_entry("driver/ray_cs/translate", NULL);
-	remove_proc_entry("driver/ray_cs", NULL);
+	remove_proc_subtree("driver/ray_cs", NULL);
 #endif
 
 	pcmcia_unregister_driver(&ray_driver);

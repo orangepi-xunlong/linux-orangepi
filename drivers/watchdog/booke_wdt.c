@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Watchdog timer for PowerPC Book-E systems
  *
@@ -5,11 +6,6 @@
  * Maintainer: Kumar Gala <galak@kernel.crashing.org>
  *
  * Copyright 2005, 2008, 2010-2011 Freescale Semiconductor Inc.
- *
- * This program is free software; you can redistribute  it and/or modify it
- * under  the terms of  the GNU General  Public License as published by the
- * Free Software Foundation;  either version 2 of the  License, or (at your
- * option) any later version.
  */
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
@@ -25,13 +21,13 @@
 /* If the kernel parameter wdt=1, the watchdog will be enabled at boot.
  * Also, the wdt_period sets the watchdog timer period timeout.
  * For E500 cpus the wdt_period sets which bit changing from 0->1 will
- * trigger a watchog timeout. This watchdog timeout will occur 3 times, the
+ * trigger a watchdog timeout. This watchdog timeout will occur 3 times, the
  * first time nothing will happen, the second time a watchdog exception will
  * occur, and the final time the board will reset.
  */
 
 
-#ifdef	CONFIG_PPC_FSL_BOOK3E
+#ifdef	CONFIG_PPC_E500
 #define WDTP(x)		((((x)&0x3)<<30)|(((x)&0x3c)<<15))
 #define WDTP_MASK	(WDTP(0x3f))
 #else
@@ -43,8 +39,13 @@ static bool booke_wdt_enabled;
 module_param(booke_wdt_enabled, bool, 0);
 static int  booke_wdt_period = CONFIG_BOOKE_WDT_DEFAULT_TIMEOUT;
 module_param(booke_wdt_period, int, 0);
+static bool nowayout = WATCHDOG_NOWAYOUT;
+module_param(nowayout, bool, 0);
+MODULE_PARM_DESC(nowayout,
+		"Watchdog cannot be stopped once started (default="
+				__MODULE_STRING(WATCHDOG_NOWAYOUT) ")");
 
-#ifdef CONFIG_PPC_FSL_BOOK3E
+#ifdef CONFIG_PPC_E500
 
 /* For the specified period, determine the number of seconds
  * corresponding to the reset time.  There will be a watchdog
@@ -73,7 +74,7 @@ static unsigned long long period_to_sec(unsigned int period)
 /*
  * This procedure will find the highest period which will give a timeout
  * greater than the one required. e.g. for a bus speed of 66666666 and
- * and a parameter of 2 secs, then this procedure will return a value of 38.
+ * a parameter of 2 secs, then this procedure will return a value of 38.
  */
 static unsigned int sec_to_period(unsigned int secs)
 {
@@ -87,7 +88,7 @@ static unsigned int sec_to_period(unsigned int secs)
 
 #define MAX_WDT_TIMEOUT		period_to_sec(1)
 
-#else /* CONFIG_PPC_FSL_BOOK3E */
+#else /* CONFIG_PPC_E500 */
 
 static unsigned long long period_to_sec(unsigned int period)
 {
@@ -101,7 +102,7 @@ static unsigned int sec_to_period(unsigned int secs)
 
 #define MAX_WDT_TIMEOUT		3	/* from Kconfig */
 
-#endif /* !CONFIG_PPC_FSL_BOOK3E */
+#endif /* !CONFIG_PPC_E500 */
 
 static void __booke_wdt_set(void *data)
 {
@@ -147,7 +148,7 @@ static void __booke_wdt_enable(void *data)
 }
 
 /**
- * booke_wdt_disable - disable the watchdog on the given CPU
+ * __booke_wdt_disable - disable the watchdog on the given CPU
  *
  * This function is called on each CPU.  It disables the watchdog on that CPU.
  *
@@ -192,12 +193,12 @@ static int booke_wdt_set_timeout(struct watchdog_device *wdt_dev,
 	return 0;
 }
 
-static struct watchdog_info booke_wdt_info = {
+static struct watchdog_info booke_wdt_info __ro_after_init = {
 	.options = WDIOF_SETTIMEOUT | WDIOF_KEEPALIVEPING,
 	.identity = "PowerPC Book-E Watchdog",
 };
 
-static struct watchdog_ops booke_wdt_ops = {
+static const struct watchdog_ops booke_wdt_ops = {
 	.owner = THIS_MODULE,
 	.start = booke_wdt_start,
 	.stop = booke_wdt_stop,
@@ -219,7 +220,6 @@ static void __exit booke_wdt_exit(void)
 static int __init booke_wdt_init(void)
 {
 	int ret = 0;
-	bool nowayout = WATCHDOG_NOWAYOUT;
 
 	pr_info("powerpc book-e watchdog driver loaded\n");
 	booke_wdt_info.firmware_version = cur_cpu_spec->pvr_value;

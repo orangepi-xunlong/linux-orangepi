@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*-*-linux-c-*-*/
 
 /*
@@ -7,20 +8,6 @@
 
   Copyright (C) 2006 Lennart Poettering <mzxreary (at) 0pointer (dot) de>
 
-  This program is free software; you can redistribute it and/or modify
-  it under the terms of the GNU General Public License as published by
-  the Free Software Foundation; either version 2 of the License, or
-  (at your option) any later version.
-
-  This program is distributed in the hope that it will be useful, but
-  WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.	See the GNU
-  General Public License for more details.
-
-  You should have received a copy of the GNU General Public License
-  along with this program; if not, write to the Free Software
-  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
-  02110-1301, USA.
  */
 
 /*
@@ -239,7 +226,7 @@ static const unsigned char pwm_lookup_table[256] = {
 /* General access */
 static u8 ec_read_u8(u8 addr)
 {
-	u8 value;
+	u8 value = 0;
 	ec_read(addr, &value);
 	return value;
 }
@@ -337,9 +324,7 @@ static int bl_update_status(struct backlight_device *b)
 	if (ret)
 		return ret;
 
-	set_backlight_state((b->props.power == FB_BLANK_UNBLANK)
-		&&    !(b->props.state & BL_CORE_SUSPENDED)
-		&&    !(b->props.state & BL_CORE_FBBLANK));
+	set_backlight_state(!backlight_is_blank(b));
 	return 0;
 }
 
@@ -679,18 +664,12 @@ static int bat_writeable_property(struct power_supply *psy,
 /* ============== */
 /* Driver Globals */
 /* ============== */
-static DEVICE_ATTR(wake_up_pme,
-		0644, wake_up_pme_show,		wake_up_pme_store);
-static DEVICE_ATTR(wake_up_modem,
-		0644, wake_up_modem_show,	wake_up_modem_store);
-static DEVICE_ATTR(wake_up_lan,
-		0644, wake_up_lan_show,	wake_up_lan_store);
-static DEVICE_ATTR(wake_up_wlan,
-		0644, wake_up_wlan_show,	wake_up_wlan_store);
-static DEVICE_ATTR(wake_up_key,
-		0644, wake_up_key_show,	wake_up_key_store);
-static DEVICE_ATTR(wake_up_mouse,
-		0644, wake_up_mouse_show,	wake_up_mouse_store);
+static DEVICE_ATTR_RW(wake_up_pme);
+static DEVICE_ATTR_RW(wake_up_modem);
+static DEVICE_ATTR_RW(wake_up_lan);
+static DEVICE_ATTR_RW(wake_up_wlan);
+static DEVICE_ATTR_RW(wake_up_key);
+static DEVICE_ATTR_RW(wake_up_mouse);
 
 static DEVICE_ATTR(fan1_input,  S_IRUGO, fan_show,          NULL);
 static DEVICE_ATTR(temp1_input, S_IRUGO, temp_cpu,          NULL);
@@ -718,7 +697,7 @@ static struct attribute *compal_platform_attrs[] = {
 	&dev_attr_wake_up_mouse.attr,
 	NULL
 };
-static struct attribute_group compal_platform_attr_group = {
+static const struct attribute_group compal_platform_attr_group = {
 	.attrs = compal_platform_attrs
 };
 
@@ -741,16 +720,6 @@ static struct attribute *compal_hwmon_attrs[] = {
 	NULL
 };
 ATTRIBUTE_GROUPS(compal_hwmon);
-
-static int compal_probe(struct platform_device *);
-static int compal_remove(struct platform_device *);
-static struct platform_driver compal_driver = {
-	.driver = {
-		.name = DRIVER_NAME,
-	},
-	.probe	= compal_probe,
-	.remove	= compal_remove,
-};
 
 static enum power_supply_property compal_bat_properties[] = {
 	POWER_SUPPLY_PROP_STATUS,
@@ -805,7 +774,7 @@ static int dmi_check_cb_extra(const struct dmi_system_id *id)
 	return 1;
 }
 
-static struct dmi_system_id __initdata compal_dmi_table[] = {
+static const struct dmi_system_id compal_dmi_table[] __initconst = {
 	{
 		.ident = "FL90/IFL90",
 		.matches = {
@@ -986,69 +955,6 @@ err_wifi:
 	return ret;
 }
 
-static int __init compal_init(void)
-{
-	int ret;
-
-	if (acpi_disabled) {
-		pr_err("ACPI needs to be enabled for this driver to work!\n");
-		return -ENODEV;
-	}
-
-	if (!force && !dmi_check_system(compal_dmi_table)) {
-		pr_err("Motherboard not recognized (You could try the module's force-parameter)\n");
-		return -ENODEV;
-	}
-
-	if (acpi_video_get_backlight_type() == acpi_backlight_vendor) {
-		struct backlight_properties props;
-		memset(&props, 0, sizeof(struct backlight_properties));
-		props.type = BACKLIGHT_PLATFORM;
-		props.max_brightness = BACKLIGHT_LEVEL_MAX;
-		compalbl_device = backlight_device_register(DRIVER_NAME,
-							    NULL, NULL,
-							    &compalbl_ops,
-							    &props);
-		if (IS_ERR(compalbl_device))
-			return PTR_ERR(compalbl_device);
-	}
-
-	ret = platform_driver_register(&compal_driver);
-	if (ret)
-		goto err_backlight;
-
-	compal_device = platform_device_alloc(DRIVER_NAME, -1);
-	if (!compal_device) {
-		ret = -ENOMEM;
-		goto err_platform_driver;
-	}
-
-	ret = platform_device_add(compal_device); /* This calls compal_probe */
-	if (ret)
-		goto err_platform_device;
-
-	ret = setup_rfkill();
-	if (ret)
-		goto err_rfkill;
-
-	pr_info("Driver " DRIVER_VERSION " successfully loaded\n");
-	return 0;
-
-err_rfkill:
-	platform_device_del(compal_device);
-
-err_platform_device:
-	platform_device_put(compal_device);
-
-err_platform_driver:
-	platform_driver_unregister(&compal_driver);
-
-err_backlight:
-	backlight_device_unregister(compalbl_device);
-
-	return ret;
-}
-
 static int compal_probe(struct platform_device *pdev)
 {
 	int err;
@@ -1097,19 +1003,6 @@ remove:
 	return err;
 }
 
-static void __exit compal_cleanup(void)
-{
-	platform_device_unregister(compal_device);
-	platform_driver_unregister(&compal_driver);
-	backlight_device_unregister(compalbl_device);
-	rfkill_unregister(wifi_rfkill);
-	rfkill_unregister(bt_rfkill);
-	rfkill_destroy(wifi_rfkill);
-	rfkill_destroy(bt_rfkill);
-
-	pr_info("Driver unloaded\n");
-}
-
 static int compal_remove(struct platform_device *pdev)
 {
 	struct compal_data *data;
@@ -1128,6 +1021,89 @@ static int compal_remove(struct platform_device *pdev)
 	return 0;
 }
 
+static struct platform_driver compal_driver = {
+	.driver = {
+		.name = DRIVER_NAME,
+	},
+	.probe	= compal_probe,
+	.remove	= compal_remove,
+};
+
+static int __init compal_init(void)
+{
+	int ret;
+
+	if (acpi_disabled) {
+		pr_err("ACPI needs to be enabled for this driver to work!\n");
+		return -ENODEV;
+	}
+
+	if (!force && !dmi_check_system(compal_dmi_table)) {
+		pr_err("Motherboard not recognized (You could try the module's force-parameter)\n");
+		return -ENODEV;
+	}
+
+	if (acpi_video_get_backlight_type() == acpi_backlight_vendor) {
+		struct backlight_properties props;
+		memset(&props, 0, sizeof(struct backlight_properties));
+		props.type = BACKLIGHT_PLATFORM;
+		props.max_brightness = BACKLIGHT_LEVEL_MAX;
+		compalbl_device = backlight_device_register(DRIVER_NAME,
+							    NULL, NULL,
+							    &compalbl_ops,
+							    &props);
+		if (IS_ERR(compalbl_device))
+			return PTR_ERR(compalbl_device);
+	}
+
+	ret = platform_driver_register(&compal_driver);
+	if (ret)
+		goto err_backlight;
+
+	compal_device = platform_device_alloc(DRIVER_NAME, PLATFORM_DEVID_NONE);
+	if (!compal_device) {
+		ret = -ENOMEM;
+		goto err_platform_driver;
+	}
+
+	ret = platform_device_add(compal_device); /* This calls compal_probe */
+	if (ret)
+		goto err_platform_device;
+
+	ret = setup_rfkill();
+	if (ret)
+		goto err_rfkill;
+
+	pr_info("Driver " DRIVER_VERSION " successfully loaded\n");
+	return 0;
+
+err_rfkill:
+	platform_device_del(compal_device);
+
+err_platform_device:
+	platform_device_put(compal_device);
+
+err_platform_driver:
+	platform_driver_unregister(&compal_driver);
+
+err_backlight:
+	backlight_device_unregister(compalbl_device);
+
+	return ret;
+}
+
+static void __exit compal_cleanup(void)
+{
+	platform_device_unregister(compal_device);
+	platform_driver_unregister(&compal_driver);
+	backlight_device_unregister(compalbl_device);
+	rfkill_unregister(wifi_rfkill);
+	rfkill_unregister(bt_rfkill);
+	rfkill_destroy(wifi_rfkill);
+	rfkill_destroy(bt_rfkill);
+
+	pr_info("Driver unloaded\n");
+}
 
 module_init(compal_init);
 module_exit(compal_cleanup);

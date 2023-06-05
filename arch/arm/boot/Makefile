@@ -10,38 +10,34 @@
 #
 # Copyright (C) 1995-2002 Russell King
 #
-
 OBJCOPYFLAGS	:=-O binary -R .comment -S
 
-ifneq ($(MACHINE),)
-include $(MACHINE)/Makefile.boot
-endif
-include $(srctree)/arch/arm/boot/dts/Makefile
-
-# Note: the following conditions must always be true:
 #   ZRELADDR == virt_to_phys(PAGE_OFFSET + TEXT_OFFSET)
-#   PARAMS_PHYS must be within 4MB of ZRELADDR
-#   INITRD_PHYS must be in RAM
-ZRELADDR    := $(zreladdr-y)
-PARAMS_PHYS := $(params_phys-y)
-INITRD_PHYS := $(initrd_phys-y)
+ifdef CONFIG_PHYS_OFFSET
+add_hex = $(shell printf 0x%x $$(( $(1) + $(2) )) )
+ZRELADDR    := $(call add_hex, $(CONFIG_PHYS_OFFSET), $(TEXT_OFFSET))
+endif
 
-export ZRELADDR INITRD_PHYS PARAMS_PHYS
+PHYS_OFFSET := $(CONFIG_PHYS_OFFSET)
+export ZRELADDR PARAMS_PHYS PHYS_OFFSET
 
 targets := Image zImage xipImage bootpImage uImage
 
-DTB_NAMES := $(subst $\",,$(CONFIG_BUILD_ARM_APPENDED_DTB_IMAGE_NAMES))
-ifneq ($(DTB_NAMES),)
-DTB_LIST := $(addsuffix .dtb,$(DTB_NAMES))
-else
-DTB_LIST := $(dtb-y)
-endif
-DTB_OBJS := $(addprefix $(obj)/dts/,$(DTB_LIST))
-
 ifeq ($(CONFIG_XIP_KERNEL),y)
 
+cmd_deflate_xip_data = $(CONFIG_SHELL) -c \
+	'$(srctree)/$(src)/deflate_xip_data.sh $< $@'
+
+ifeq ($(CONFIG_XIP_DEFLATED_DATA),y)
+quiet_cmd_mkxip = XIPZ    $@
+cmd_mkxip = $(cmd_objcopy) && $(cmd_deflate_xip_data)
+else
+quiet_cmd_mkxip = $(quiet_cmd_objcopy)
+cmd_mkxip = $(cmd_objcopy)
+endif
+
 $(obj)/xipImage: vmlinux FORCE
-	$(call if_changed,objcopy)
+	$(call if_changed,mkxip)
 	@$(kecho) '  Physical Address of xipImage: $(CONFIG_XIP_PHYS_ADDR)'
 
 $(obj)/Image $(obj)/zImage: FORCE
@@ -63,10 +59,6 @@ $(obj)/compressed/vmlinux: $(obj)/Image FORCE
 
 $(obj)/zImage:	$(obj)/compressed/vmlinux FORCE
 	$(call if_changed,objcopy)
-
-$(obj)/zImage-dtb:	$(obj)/zImage $(DTB_OBJS) FORCE
-	$(call if_changed,cat)
-	@echo '  Kernel: $@ is ready'
 
 endif
 
@@ -92,29 +84,10 @@ $(obj)/uImage:	$(obj)/zImage FORCE
 	@$(check_for_multiple_loadaddr)
 	$(call if_changed,uimage)
 
-$(obj)/bootp/bootp: $(obj)/zImage initrd FORCE
+$(obj)/bootp/bootp: $(obj)/zImage FORCE
 	$(Q)$(MAKE) $(build)=$(obj)/bootp $@
 
 $(obj)/bootpImage: $(obj)/bootp/bootp FORCE
 	$(call if_changed,objcopy)
-
-PHONY += initrd install zinstall uinstall
-initrd:
-	@test "$(INITRD_PHYS)" != "" || \
-	(echo This machine does not support INITRD; exit -1)
-	@test "$(INITRD)" != "" || \
-	(echo You must specify INITRD; exit -1)
-
-install:
-	$(CONFIG_SHELL) $(srctree)/$(src)/install.sh "$(KERNELRELEASE)" \
-	$(obj)/Image System.map "$(INSTALL_PATH)"
-
-zinstall:
-	$(CONFIG_SHELL) $(srctree)/$(src)/install.sh "$(KERNELRELEASE)" \
-	$(obj)/zImage System.map "$(INSTALL_PATH)"
-
-uinstall:
-	$(CONFIG_SHELL) $(srctree)/$(src)/install.sh "$(KERNELRELEASE)" \
-	$(obj)/uImage System.map "$(INSTALL_PATH)"
 
 subdir-	    := bootp compressed dts

@@ -1,15 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2015, Sony Mobile Communications Inc.
  * Copyright (c) 2012-2013, The Linux Foundation. All rights reserved.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 and
- * only version 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 #include <linux/device.h>
 #include <linux/list.h>
@@ -144,6 +136,7 @@ static void qcom_smem_state_release(struct kref *ref)
 	struct qcom_smem_state *state = container_of(ref, struct qcom_smem_state, refcount);
 
 	list_del(&state->list);
+	of_node_put(state->of_node);
 	kfree(state);
 }
 
@@ -158,6 +151,42 @@ void qcom_smem_state_put(struct qcom_smem_state *state)
 	mutex_unlock(&list_lock);
 }
 EXPORT_SYMBOL_GPL(qcom_smem_state_put);
+
+static void devm_qcom_smem_state_release(struct device *dev, void *res)
+{
+	qcom_smem_state_put(*(struct qcom_smem_state **)res);
+}
+
+/**
+ * devm_qcom_smem_state_get() - acquire handle to a devres managed state
+ * @dev:	client device pointer
+ * @con_id:	name of the state to lookup
+ * @bit:	flags from the state reference, indicating which bit's affected
+ *
+ * Returns handle to the state, or ERR_PTR(). qcom_smem_state_put() is called
+ * automatically when @dev is removed.
+ */
+struct qcom_smem_state *devm_qcom_smem_state_get(struct device *dev,
+						 const char *con_id,
+						 unsigned *bit)
+{
+	struct qcom_smem_state **ptr, *state;
+
+	ptr = devres_alloc(devm_qcom_smem_state_release, sizeof(*ptr), GFP_KERNEL);
+	if (!ptr)
+		return ERR_PTR(-ENOMEM);
+
+	state = qcom_smem_state_get(dev, con_id, bit);
+	if (!IS_ERR(state)) {
+		*ptr = state;
+		devres_add(dev, ptr);
+	} else {
+		devres_free(ptr);
+	}
+
+	return state;
+}
+EXPORT_SYMBOL_GPL(devm_qcom_smem_state_get);
 
 /**
  * qcom_smem_state_register() - register a new state
@@ -177,7 +206,7 @@ struct qcom_smem_state *qcom_smem_state_register(struct device_node *of_node,
 
 	kref_init(&state->refcount);
 
-	state->of_node = of_node;
+	state->of_node = of_node_get(of_node);
 	state->ops = *ops;
 	state->priv = priv;
 

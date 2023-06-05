@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Cell Internal Interrupt Controller
  *
@@ -8,20 +9,6 @@
  *
  * Author: Arnd Bergmann <arndb@de.ibm.com>
  *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2, or (at your option)
- * any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
- *
  * TODO:
  * - Fix various assumptions related to HW CPU numbers vs. linux CPU numbers
  *   vs node numbers in the setup code
@@ -31,15 +18,16 @@
 
 #include <linux/interrupt.h>
 #include <linux/irq.h>
+#include <linux/irqdomain.h>
 #include <linux/export.h>
 #include <linux/percpu.h>
 #include <linux/types.h>
 #include <linux/ioport.h>
 #include <linux/kernel_stat.h>
+#include <linux/pgtable.h>
+#include <linux/of_address.h>
 
 #include <asm/io.h>
-#include <asm/pgtable.h>
-#include <asm/prom.h>
 #include <asm/ptrace.h>
 #include <asm/machdep.h>
 #include <asm/cell-regs.h>
@@ -119,13 +107,9 @@ static void iic_ioexc_cascade(struct irq_desc *desc)
 			out_be64(&node_iic->iic_is, ack);
 		/* handle them */
 		for (cascade = 63; cascade >= 0; cascade--)
-			if (bits & (0x8000000000000000UL >> cascade)) {
-				unsigned int cirq =
-					irq_linear_revmap(iic_host,
+			if (bits & (0x8000000000000000UL >> cascade))
+				generic_handle_domain_irq(iic_host,
 							  base | cascade);
-				if (cirq)
-					generic_handle_irq(cirq);
-			}
 		/* post-ack level interrupts */
 		ack = bits & ~IIC_ISR_EDGE_MASK;
 		if (ack)
@@ -211,7 +195,7 @@ void iic_request_IPIs(void)
 	iic_request_ipi(PPC_MSG_CALL_FUNCTION);
 	iic_request_ipi(PPC_MSG_RESCHEDULE);
 	iic_request_ipi(PPC_MSG_TICK_BROADCAST);
-	iic_request_ipi(PPC_MSG_DEBUGGER_BREAK);
+	iic_request_ipi(PPC_MSG_NMI_IPI);
 }
 
 #endif /* CONFIG_SMP */
@@ -303,8 +287,8 @@ static void __init init_one_iic(unsigned int hw_cpu, unsigned long addr,
 	iic->node = of_node_get(node);
 	out_be64(&iic->regs->prio, 0);
 
-	printk(KERN_INFO "IIC for CPU %d target id 0x%x : %s\n",
-	       hw_cpu, iic->target_id, node->full_name);
+	printk(KERN_INFO "IIC for CPU %d target id 0x%x : %pOF\n",
+	       hw_cpu, iic->target_id, node);
 }
 
 static int __init setup_iic(void)
@@ -315,8 +299,7 @@ static int __init setup_iic(void)
 	struct cbe_iic_regs __iomem *node_iic;
 	const u32 *np;
 
-	for (dn = NULL;
-	     (dn = of_find_node_by_name(dn,"interrupt-controller")) != NULL;) {
+	for_each_node_by_name(dn, "interrupt-controller") {
 		if (!of_device_is_compatible(dn,
 				     "IBM,CBEA-Internal-Interrupt-Controller"))
 			continue;

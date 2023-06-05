@@ -1,20 +1,9 @@
-/**
+// SPDX-License-Identifier: GPL-2.0
+/*
  * udc.c - Core UDC Framework
  *
  * Copyright (C) 2016 Intel Corporation
  * Author: Felipe Balbi <felipe.balbi@linux.intel.com>
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2  of
- * the License as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 #undef TRACE_SYSTEM
@@ -151,7 +140,7 @@ DECLARE_EVENT_CLASS(udc_log_ep,
 	TP_PROTO(struct usb_ep *ep, int ret),
 	TP_ARGS(ep, ret),
 	TP_STRUCT__entry(
-		__dynamic_array(char, name, UDC_TRACE_STR_MAX)
+		__string(name, ep->name)
 		__field(unsigned, maxpacket)
 		__field(unsigned, maxpacket_limit)
 		__field(unsigned, max_streams)
@@ -163,7 +152,7 @@ DECLARE_EVENT_CLASS(udc_log_ep,
 		__field(int, ret)
 	),
 	TP_fast_assign(
-		snprintf(__get_str(name), UDC_TRACE_STR_MAX, "%s", ep->name);
+		__assign_str(name, ep->name);
 		__entry->maxpacket = ep->maxpacket;
 		__entry->maxpacket_limit = ep->maxpacket_limit;
 		__entry->max_streams = ep->max_streams;
@@ -225,7 +214,7 @@ DECLARE_EVENT_CLASS(udc_log_req,
 	TP_PROTO(struct usb_ep *ep, struct usb_request *req, int ret),
 	TP_ARGS(ep, req, ret),
 	TP_STRUCT__entry(
-		__dynamic_array(char, name, UDC_TRACE_STR_MAX)
+		__string(name, ep->name)
 		__field(unsigned, length)
 		__field(unsigned, actual)
 		__field(unsigned, num_sgs)
@@ -236,9 +225,10 @@ DECLARE_EVENT_CLASS(udc_log_req,
 		__field(unsigned, short_not_ok)
 		__field(int, status)
 		__field(int, ret)
+		__field(struct usb_request *, req)
 	),
 	TP_fast_assign(
-		snprintf(__get_str(name), UDC_TRACE_STR_MAX, "%s", ep->name);
+		__assign_str(name, ep->name);
 		__entry->length = req->length;
 		__entry->actual = req->actual;
 		__entry->num_sgs = req->num_sgs;
@@ -249,9 +239,10 @@ DECLARE_EVENT_CLASS(udc_log_req,
 		__entry->short_not_ok = req->short_not_ok;
 		__entry->status = req->status;
 		__entry->ret = ret;
+		__entry->req = req;
 	),
-	TP_printk("%s: length %d/%d sgs %d/%d stream %d %s%s%s status %d --> %d",
-		__get_str(name), __entry->actual, __entry->length,
+	TP_printk("%s: req %p length %d/%d sgs %d/%d stream %d %s%s%s status %d --> %d",
+		__get_str(name),__entry->req,  __entry->actual, __entry->length,
 		__entry->num_mapped_sgs, __entry->num_sgs, __entry->stream_id,
 		__entry->zero ? "Z" : "z",
 		__entry->short_not_ok ? "S" : "s",

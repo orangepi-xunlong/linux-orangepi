@@ -1,10 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Copyright (C) 2016 Linaro Ltd;  <ard.biesheuvel@linaro.org>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
  */
 
 #include <linux/efi.h>
@@ -12,132 +8,136 @@
 
 #include "efistub.h"
 
-struct efi_rng_protocol {
-	efi_status_t (*get_info)(struct efi_rng_protocol *,
-				 unsigned long *, efi_guid_t *);
-	efi_status_t (*get_rng)(struct efi_rng_protocol *,
-				efi_guid_t *, unsigned long, u8 *out);
+typedef union efi_rng_protocol efi_rng_protocol_t;
+
+union efi_rng_protocol {
+	struct {
+		efi_status_t (__efiapi *get_info)(efi_rng_protocol_t *,
+						  unsigned long *,
+						  efi_guid_t *);
+		efi_status_t (__efiapi *get_rng)(efi_rng_protocol_t *,
+						 efi_guid_t *, unsigned long,
+						 u8 *out);
+	};
+	struct {
+		u32 get_info;
+		u32 get_rng;
+	} mixed_mode;
 };
 
-efi_status_t efi_get_random_bytes(efi_system_table_t *sys_table_arg,
-				  unsigned long size, u8 *out)
+/**
+ * efi_get_random_bytes() - fill a buffer with random bytes
+ * @size:	size of the buffer
+ * @out:	caller allocated buffer to receive the random bytes
+ *
+ * The call will fail if either the firmware does not implement the
+ * EFI_RNG_PROTOCOL or there are not enough random bytes available to fill
+ * the buffer.
+ *
+ * Return:	status code
+ */
+efi_status_t efi_get_random_bytes(unsigned long size, u8 *out)
 {
 	efi_guid_t rng_proto = EFI_RNG_PROTOCOL_GUID;
 	efi_status_t status;
-	struct efi_rng_protocol *rng;
+	efi_rng_protocol_t *rng = NULL;
 
-	status = efi_call_early(locate_protocol, &rng_proto, NULL,
-				(void **)&rng);
+	status = efi_bs_call(locate_protocol, &rng_proto, NULL, (void **)&rng);
 	if (status != EFI_SUCCESS)
 		return status;
 
-	return rng->get_rng(rng, NULL, size, out);
+	return efi_call_proto(rng, get_rng, NULL, size, out);
 }
 
-/*
- * Return the number of slots covered by this entry, i.e., the number of
- * addresses it covers that are suitably aligned and supply enough room
- * for the allocation.
+/**
+ * efi_random_get_seed() - provide random seed as configuration table
+ *
+ * The EFI_RNG_PROTOCOL is used to read random bytes. These random bytes are
+ * saved as a configuration table which can be used as entropy by the kernel
+ * for the initialization of its pseudo random number generator.
+ *
+ * If the EFI_RNG_PROTOCOL is not available or there are not enough random bytes
+ * available, the configuration table will not be installed and an error code
+ * will be returned.
+ *
+ * Return:	status code
  */
-static unsigned long get_entry_num_slots(efi_memory_desc_t *md,
-					 unsigned long size,
-					 unsigned long align)
+efi_status_t efi_random_get_seed(void)
 {
-	u64 start, end;
-
-	if (md->type != EFI_CONVENTIONAL_MEMORY)
-		return 0;
-
-	start = round_up(md->phys_addr, align);
-	end = round_down(md->phys_addr + md->num_pages * EFI_PAGE_SIZE - size,
-			 align);
-
-	if (start > end)
-		return 0;
-
-	return (end - start + 1) / align;
-}
-
-/*
- * The UEFI memory descriptors have a virtual address field that is only used
- * when installing the virtual mapping using SetVirtualAddressMap(). Since it
- * is unused here, we can reuse it to keep track of each descriptor's slot
- * count.
- */
-#define MD_NUM_SLOTS(md)	((md)->virt_addr)
-
-efi_status_t efi_random_alloc(efi_system_table_t *sys_table_arg,
-			      unsigned long size,
-			      unsigned long align,
-			      unsigned long *addr,
-			      unsigned long random_seed)
-{
-	unsigned long map_size, desc_size, total_slots = 0, target_slot;
-	unsigned long buff_size;
+	efi_guid_t rng_proto = EFI_RNG_PROTOCOL_GUID;
+	efi_guid_t rng_algo_raw = EFI_RNG_ALGORITHM_RAW;
+	efi_guid_t rng_table_guid = LINUX_EFI_RANDOM_SEED_TABLE_GUID;
+	struct linux_efi_random_seed *prev_seed, *seed = NULL;
+	int prev_seed_size = 0, seed_size = EFI_RANDOM_SEED_SIZE;
+	efi_rng_protocol_t *rng = NULL;
 	efi_status_t status;
-	efi_memory_desc_t *memory_map;
-	int map_offset;
-	struct efi_boot_memmap map;
 
-	map.map =	&memory_map;
-	map.map_size =	&map_size;
-	map.desc_size =	&desc_size;
-	map.desc_ver =	NULL;
-	map.key_ptr =	NULL;
-	map.buff_size =	&buff_size;
-
-	status = efi_get_memory_map(sys_table_arg, &map);
+	status = efi_bs_call(locate_protocol, &rng_proto, NULL, (void **)&rng);
 	if (status != EFI_SUCCESS)
 		return status;
-
-	if (align < EFI_ALLOC_ALIGN)
-		align = EFI_ALLOC_ALIGN;
-
-	/* count the suitable slots in each memory map entry */
-	for (map_offset = 0; map_offset < map_size; map_offset += desc_size) {
-		efi_memory_desc_t *md = (void *)memory_map + map_offset;
-		unsigned long slots;
-
-		slots = get_entry_num_slots(md, size, align);
-		MD_NUM_SLOTS(md) = slots;
-		total_slots += slots;
-	}
-
-	/* find a random number between 0 and total_slots */
-	target_slot = (total_slots * (u16)random_seed) >> 16;
 
 	/*
-	 * target_slot is now a value in the range [0, total_slots), and so
-	 * it corresponds with exactly one of the suitable slots we recorded
-	 * when iterating over the memory map the first time around.
-	 *
-	 * So iterate over the memory map again, subtracting the number of
-	 * slots of each entry at each iteration, until we have found the entry
-	 * that covers our chosen slot. Use the residual value of target_slot
-	 * to calculate the randomly chosen address, and allocate it directly
-	 * using EFI_ALLOCATE_ADDRESS.
+	 * Check whether a seed was provided by a prior boot stage. In that
+	 * case, instead of overwriting it, let's create a new buffer that can
+	 * hold both, and concatenate the existing and the new seeds.
+	 * Note that we should read the seed size with caution, in case the
+	 * table got corrupted in memory somehow.
 	 */
-	for (map_offset = 0; map_offset < map_size; map_offset += desc_size) {
-		efi_memory_desc_t *md = (void *)memory_map + map_offset;
-		efi_physical_addr_t target;
-		unsigned long pages;
-
-		if (target_slot >= MD_NUM_SLOTS(md)) {
-			target_slot -= MD_NUM_SLOTS(md);
-			continue;
-		}
-
-		target = round_up(md->phys_addr, align) + target_slot * align;
-		pages = round_up(size, EFI_PAGE_SIZE) / EFI_PAGE_SIZE;
-
-		status = efi_call_early(allocate_pages, EFI_ALLOCATE_ADDRESS,
-					EFI_LOADER_DATA, pages, &target);
-		if (status == EFI_SUCCESS)
-			*addr = target;
-		break;
+	prev_seed = get_efi_config_table(LINUX_EFI_RANDOM_SEED_TABLE_GUID);
+	if (prev_seed && prev_seed->size <= 512U) {
+		prev_seed_size = prev_seed->size;
+		seed_size += prev_seed_size;
 	}
 
-	efi_call_early(free_pool, memory_map);
+	/*
+	 * Use EFI_ACPI_RECLAIM_MEMORY here so that it is guaranteed that the
+	 * allocation will survive a kexec reboot (although we refresh the seed
+	 * beforehand)
+	 */
+	status = efi_bs_call(allocate_pool, EFI_ACPI_RECLAIM_MEMORY,
+			     struct_size(seed, bits, seed_size),
+			     (void **)&seed);
+	if (status != EFI_SUCCESS) {
+		efi_warn("Failed to allocate memory for RNG seed.\n");
+		goto err_warn;
+	}
 
+	status = efi_call_proto(rng, get_rng, &rng_algo_raw,
+				EFI_RANDOM_SEED_SIZE, seed->bits);
+
+	if (status == EFI_UNSUPPORTED)
+		/*
+		 * Use whatever algorithm we have available if the raw algorithm
+		 * is not implemented.
+		 */
+		status = efi_call_proto(rng, get_rng, NULL,
+					EFI_RANDOM_SEED_SIZE, seed->bits);
+
+	if (status != EFI_SUCCESS)
+		goto err_freepool;
+
+	seed->size = seed_size;
+	if (prev_seed_size)
+		memcpy(seed->bits + EFI_RANDOM_SEED_SIZE, prev_seed->bits,
+		       prev_seed_size);
+
+	status = efi_bs_call(install_configuration_table, &rng_table_guid, seed);
+	if (status != EFI_SUCCESS)
+		goto err_freepool;
+
+	if (prev_seed_size) {
+		/* wipe and free the old seed if we managed to install the new one */
+		memzero_explicit(prev_seed->bits, prev_seed_size);
+		efi_bs_call(free_pool, prev_seed);
+	}
+	return EFI_SUCCESS;
+
+err_freepool:
+	memzero_explicit(seed, struct_size(seed, bits, seed_size));
+	efi_bs_call(free_pool, seed);
+	efi_warn("Failed to obtain seed from EFI_RNG_PROTOCOL\n");
+err_warn:
+	if (prev_seed)
+		efi_warn("Retaining bootloader-supplied seed only");
 	return status;
 }

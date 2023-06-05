@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /* asm/dma.h: Defines for using and allocating dma channels.
  * Written by Hennus Bergman, 1992.
  * High DMA channel support & info by Hannu Savolainen
@@ -174,11 +175,5 @@ static __inline__ void set_dma_count(unsigned int dmanr, unsigned int count)
 
 
 #define free_dma(dmanr)
-
-#ifdef CONFIG_PCI
-extern int isa_dma_bridge_buggy;
-#else
-#define isa_dma_bridge_buggy 	(0)
-#endif
 
 #endif /* _ASM_DMA_H */

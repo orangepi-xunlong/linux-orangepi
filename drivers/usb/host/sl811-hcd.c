@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * SL811HS HCD (Host Controller Driver) for USB.
  *
@@ -841,7 +842,7 @@ static int sl811h_urb_enqueue(
 		INIT_LIST_HEAD(&ep->schedule);
 		ep->udev = udev;
 		ep->epnum = epnum;
-		ep->maxpacket = usb_maxpacket(udev, urb->pipe, is_out);
+		ep->maxpacket = usb_maxpacket(udev, urb->pipe);
 		ep->defctrl = SL11H_HCTLMASK_ARM | SL11H_HCTLMASK_ENABLE;
 		usb_settoggle(udev, epnum, is_out, 0);
 
@@ -877,8 +878,8 @@ static int sl811h_urb_enqueue(
 			if (type == PIPE_ISOCHRONOUS)
 				ep->defctrl |= SL11H_HCTLMASK_ISOCH;
 			ep->load = usb_calc_bus_time(udev->speed, !is_out,
-				(type == PIPE_ISOCHRONOUS),
-				usb_maxpacket(udev, pipe, is_out))
+						     type == PIPE_ISOCHRONOUS,
+						     usb_maxpacket(udev, pipe))
 					/ 1000;
 			break;
 		}
@@ -1118,9 +1119,9 @@ sl811h_hub_descriptor (
 }
 
 static void
-sl811h_timer(unsigned long _sl811)
+sl811h_timer(struct timer_list *t)
 {
-	struct sl811 	*sl811 = (void *) _sl811;
+	struct sl811 	*sl811 = from_timer(sl811, t, timer);
 	unsigned long	flags;
 	u8		irqstat;
 	u8		signaling = sl811->ctrl1 & SL11H_CTL1MASK_FORCE;
@@ -1286,11 +1287,10 @@ sl811h_hub_control(
 			goto error;
 		put_unaligned_le32(sl811->port1, buf);
 
-#ifndef	VERBOSE
-	if (*(u16*)(buf+2))	/* only if wPortChange is interesting */
-#endif
-		dev_dbg(hcd->self.controller, "GetPortStatus %08x\n",
-			sl811->port1);
+		if (__is_defined(VERBOSE) ||
+		    *(u16*)(buf+2)) /* only if wPortChange is interesting */
+			dev_dbg(hcd->self.controller, "GetPortStatus %08x\n",
+				sl811->port1);
 		break;
 	case SetPortFeature:
 		if (wIndex != 1 || wLength != 0)
@@ -1380,7 +1380,7 @@ static void dump_irq(struct seq_file *s, char *label, u8 mask)
 		(mask & SL11H_INTMASK_DP) ? " dp" : "");
 }
 
-static int sl811h_show(struct seq_file *s, void *unused)
+static int sl811h_debug_show(struct seq_file *s, void *unused)
 {
 	struct sl811		*sl811 = s->private;
 	struct sl811h_ep	*ep;
@@ -1490,30 +1490,18 @@ static int sl811h_show(struct seq_file *s, void *unused)
 
 	return 0;
 }
-
-static int sl811h_open(struct inode *inode, struct file *file)
-{
-	return single_open(file, sl811h_show, inode->i_private);
-}
-
-static const struct file_operations debug_ops = {
-	.open		= sl811h_open,
-	.read		= seq_read,
-	.llseek		= seq_lseek,
-	.release	= single_release,
-};
+DEFINE_SHOW_ATTRIBUTE(sl811h_debug);
 
 /* expect just one sl811 per system */
 static void create_debug_file(struct sl811 *sl811)
 {
-	sl811->debug_file = debugfs_create_file("sl811h", S_IRUGO,
-						usb_debug_root, sl811,
-						&debug_ops);
+	debugfs_create_file("sl811h", S_IRUGO, usb_debug_root, sl811,
+			    &sl811h_debug_fops);
 }
 
 static void remove_debug_file(struct sl811 *sl811)
 {
-	debugfs_remove(sl811->debug_file);
+	debugfs_lookup_and_remove("sl811h", usb_debug_root);
 }
 
 /*-------------------------------------------------------------------------*/
@@ -1554,7 +1542,7 @@ sl811h_start(struct usb_hcd *hcd)
 
 /*-------------------------------------------------------------------------*/
 
-static struct hc_driver sl811h_hc_driver = {
+static const struct hc_driver sl811h_hc_driver = {
 	.description =		hcd_name,
 	.hcd_priv_size =	sizeof(struct sl811),
 
@@ -1624,10 +1612,16 @@ sl811h_probe(struct platform_device *dev)
 	void __iomem		*addr_reg;
 	void __iomem		*data_reg;
 	int			retval;
-	u8			tmp, ioaddr = 0;
+	u8			tmp, ioaddr;
 	unsigned long		irqflags;
 
 	if (usb_disabled())
+		return -ENODEV;
+
+	/* the chip may be wired for either kind of addressing */
+	addr = platform_get_mem_or_io(dev, 0);
+	data = platform_get_mem_or_io(dev, 1);
+	if (!addr || !data || resource_type(addr) != resource_type(data))
 		return -ENODEV;
 
 	/* basic sanity checks first.  board-specific init logic should
@@ -1642,22 +1636,8 @@ sl811h_probe(struct platform_device *dev)
 	irq = ires->start;
 	irqflags = ires->flags & IRQF_TRIGGER_MASK;
 
-	/* refuse to confuse usbcore */
-	if (dev->dev.dma_mask) {
-		dev_dbg(&dev->dev, "no we won't dma\n");
-		return -EINVAL;
-	}
-
-	/* the chip may be wired for either kind of addressing */
-	addr = platform_get_resource(dev, IORESOURCE_MEM, 0);
-	data = platform_get_resource(dev, IORESOURCE_MEM, 1);
-	retval = -EBUSY;
-	if (!addr || !data) {
-		addr = platform_get_resource(dev, IORESOURCE_IO, 0);
-		data = platform_get_resource(dev, IORESOURCE_IO, 1);
-		if (!addr || !data)
-			return -ENODEV;
-		ioaddr = 1;
+	ioaddr = resource_type(addr) == IORESOURCE_IO;
+	if (ioaddr) {
 		/*
 		 * NOTE: 64-bit resource->start is getting truncated
 		 * to avoid compiler warning, assuming that ->start
@@ -1691,7 +1671,7 @@ sl811h_probe(struct platform_device *dev)
 	spin_lock_init(&sl811->lock);
 	INIT_LIST_HEAD(&sl811->async);
 	sl811->board = dev_get_platdata(&dev->dev);
-	setup_timer(&sl811->timer, sl811h_timer, (unsigned long)sl811);
+	timer_setup(&sl811->timer, sl811h_timer, 0);
 	sl811->addr_reg = addr_reg;
 	sl811->data_reg = data_reg;
 
@@ -1808,7 +1788,7 @@ struct platform_driver sl811h_driver = {
 	.suspend =	sl811h_suspend,
 	.resume =	sl811h_resume,
 	.driver = {
-		.name =	(char *) hcd_name,
+		.name =	hcd_name,
 	},
 };
 EXPORT_SYMBOL(sl811h_driver);

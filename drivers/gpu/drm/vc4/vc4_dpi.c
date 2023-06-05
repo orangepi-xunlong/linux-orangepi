@@ -1,34 +1,29 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2016 Broadcom Limited
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 as published by
- * the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * You should have received a copy of the GNU General Public License along with
- * this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 /**
  * DOC: VC4 DPI module
  *
  * The VC4 DPI hardware supports MIPI DPI type 4 and Nokia ViSSI
- * signals, which are routed out to GPIO0-27 with the ALT2 function.
+ * signals.  On BCM2835, these can be routed out to GPIO0-27 with the
+ * ALT2 function.
  */
 
-#include "drm_atomic_helper.h"
-#include "drm_crtc_helper.h"
-#include "drm_edid.h"
-#include "drm_panel.h"
-#include "linux/clk.h"
-#include "linux/component.h"
-#include "linux/of_graph.h"
-#include "linux/of_platform.h"
+#include <drm/drm_atomic_helper.h>
+#include <drm/drm_bridge.h>
+#include <drm/drm_drv.h>
+#include <drm/drm_edid.h>
+#include <drm/drm_of.h>
+#include <drm/drm_panel.h>
+#include <drm/drm_probe_helper.h>
+#include <drm/drm_simple_kms_helper.h>
+#include <linux/clk.h>
+#include <linux/component.h>
+#include <linux/media-bus-format.h>
+#include <linux/of_graph.h>
+#include <linux/of_platform.h>
 #include "vc4_drv.h"
 #include "vc4_regs.h"
 
@@ -90,237 +85,136 @@
 
 /* General DPI hardware state. */
 struct vc4_dpi {
-	struct platform_device *pdev;
+	struct vc4_encoder encoder;
 
-	struct drm_encoder *encoder;
-	struct drm_connector *connector;
-	struct drm_panel *panel;
+	struct platform_device *pdev;
 
 	void __iomem *regs;
 
 	struct clk *pixel_clock;
 	struct clk *core_clock;
+
+	struct debugfs_regset32 regset;
 };
+
+static inline struct vc4_dpi *
+to_vc4_dpi(struct drm_encoder *encoder)
+{
+	return container_of(encoder, struct vc4_dpi, encoder.base);
+}
 
 #define DPI_READ(offset) readl(dpi->regs + (offset))
 #define DPI_WRITE(offset, val) writel(val, dpi->regs + (offset))
 
-/* VC4 DPI encoder KMS struct */
-struct vc4_dpi_encoder {
-	struct vc4_encoder base;
-	struct vc4_dpi *dpi;
-};
-
-static inline struct vc4_dpi_encoder *
-to_vc4_dpi_encoder(struct drm_encoder *encoder)
-{
-	return container_of(encoder, struct vc4_dpi_encoder, base.base);
-}
-
-/* VC4 DPI connector KMS struct */
-struct vc4_dpi_connector {
-	struct drm_connector base;
-	struct vc4_dpi *dpi;
-
-	/* Since the connector is attached to just the one encoder,
-	 * this is the reference to it so we can do the best_encoder()
-	 * hook.
-	 */
-	struct drm_encoder *encoder;
-};
-
-static inline struct vc4_dpi_connector *
-to_vc4_dpi_connector(struct drm_connector *connector)
-{
-	return container_of(connector, struct vc4_dpi_connector, base);
-}
-
-#define DPI_REG(reg) { reg, #reg }
-static const struct {
-	u32 reg;
-	const char *name;
-} dpi_regs[] = {
-	DPI_REG(DPI_C),
-	DPI_REG(DPI_ID),
-};
-
-static void vc4_dpi_dump_regs(struct vc4_dpi *dpi)
-{
-	int i;
-
-	for (i = 0; i < ARRAY_SIZE(dpi_regs); i++) {
-		DRM_INFO("0x%04x (%s): 0x%08x\n",
-			 dpi_regs[i].reg, dpi_regs[i].name,
-			 DPI_READ(dpi_regs[i].reg));
-	}
-}
-
-#ifdef CONFIG_DEBUG_FS
-int vc4_dpi_debugfs_regs(struct seq_file *m, void *unused)
-{
-	struct drm_info_node *node = (struct drm_info_node *)m->private;
-	struct drm_device *dev = node->minor->dev;
-	struct vc4_dev *vc4 = to_vc4_dev(dev);
-	struct vc4_dpi *dpi = vc4->dpi;
-	int i;
-
-	if (!dpi)
-		return 0;
-
-	for (i = 0; i < ARRAY_SIZE(dpi_regs); i++) {
-		seq_printf(m, "%s (0x%04x): 0x%08x\n",
-			   dpi_regs[i].name, dpi_regs[i].reg,
-			   DPI_READ(dpi_regs[i].reg));
-	}
-
-	return 0;
-}
-#endif
-
-static enum drm_connector_status
-vc4_dpi_connector_detect(struct drm_connector *connector, bool force)
-{
-	struct vc4_dpi_connector *vc4_connector =
-		to_vc4_dpi_connector(connector);
-	struct vc4_dpi *dpi = vc4_connector->dpi;
-
-	if (dpi->panel)
-		return connector_status_connected;
-	else
-		return connector_status_disconnected;
-}
-
-static void vc4_dpi_connector_destroy(struct drm_connector *connector)
-{
-	drm_connector_unregister(connector);
-	drm_connector_cleanup(connector);
-}
-
-static int vc4_dpi_connector_get_modes(struct drm_connector *connector)
-{
-	struct vc4_dpi_connector *vc4_connector =
-		to_vc4_dpi_connector(connector);
-	struct vc4_dpi *dpi = vc4_connector->dpi;
-
-	if (dpi->panel)
-		return drm_panel_get_modes(dpi->panel);
-
-	return 0;
-}
-
-static const struct drm_connector_funcs vc4_dpi_connector_funcs = {
-	.dpms = drm_atomic_helper_connector_dpms,
-	.detect = vc4_dpi_connector_detect,
-	.fill_modes = drm_helper_probe_single_connector_modes,
-	.destroy = vc4_dpi_connector_destroy,
-	.reset = drm_atomic_helper_connector_reset,
-	.atomic_duplicate_state = drm_atomic_helper_connector_duplicate_state,
-	.atomic_destroy_state = drm_atomic_helper_connector_destroy_state,
-};
-
-static const struct drm_connector_helper_funcs vc4_dpi_connector_helper_funcs = {
-	.get_modes = vc4_dpi_connector_get_modes,
-};
-
-static struct drm_connector *vc4_dpi_connector_init(struct drm_device *dev,
-						    struct vc4_dpi *dpi)
-{
-	struct drm_connector *connector = NULL;
-	struct vc4_dpi_connector *dpi_connector;
-
-	dpi_connector = devm_kzalloc(dev->dev, sizeof(*dpi_connector),
-				     GFP_KERNEL);
-	if (!dpi_connector)
-		return ERR_PTR(-ENOMEM);
-
-	connector = &dpi_connector->base;
-
-	dpi_connector->encoder = dpi->encoder;
-	dpi_connector->dpi = dpi;
-
-	drm_connector_init(dev, connector, &vc4_dpi_connector_funcs,
-			   DRM_MODE_CONNECTOR_DPI);
-	drm_connector_helper_add(connector, &vc4_dpi_connector_helper_funcs);
-
-	connector->polled = 0;
-	connector->interlace_allowed = 0;
-	connector->doublescan_allowed = 0;
-
-	drm_mode_connector_attach_encoder(connector, dpi->encoder);
-
-	return connector;
-}
-
-static const struct drm_encoder_funcs vc4_dpi_encoder_funcs = {
-	.destroy = drm_encoder_cleanup,
+static const struct debugfs_reg32 dpi_regs[] = {
+	VC4_REG32(DPI_C),
+	VC4_REG32(DPI_ID),
 };
 
 static void vc4_dpi_encoder_disable(struct drm_encoder *encoder)
 {
-	struct vc4_dpi_encoder *vc4_encoder = to_vc4_dpi_encoder(encoder);
-	struct vc4_dpi *dpi = vc4_encoder->dpi;
+	struct drm_device *dev = encoder->dev;
+	struct vc4_dpi *dpi = to_vc4_dpi(encoder);
+	int idx;
 
-	drm_panel_disable(dpi->panel);
+	if (!drm_dev_enter(dev, &idx))
+		return;
 
 	clk_disable_unprepare(dpi->pixel_clock);
 
-	drm_panel_unprepare(dpi->panel);
+	drm_dev_exit(idx);
 }
 
 static void vc4_dpi_encoder_enable(struct drm_encoder *encoder)
 {
+	struct drm_device *dev = encoder->dev;
 	struct drm_display_mode *mode = &encoder->crtc->mode;
-	struct vc4_dpi_encoder *vc4_encoder = to_vc4_dpi_encoder(encoder);
-	struct vc4_dpi *dpi = vc4_encoder->dpi;
-	u32 dpi_c = DPI_ENABLE | DPI_OUTPUT_ENABLE_MODE;
+	struct vc4_dpi *dpi = to_vc4_dpi(encoder);
+	struct drm_connector_list_iter conn_iter;
+	struct drm_connector *connector = NULL, *connector_scan;
+	u32 dpi_c = DPI_ENABLE;
+	int idx;
 	int ret;
 
-	ret = drm_panel_prepare(dpi->panel);
-	if (ret) {
-		DRM_ERROR("Panel failed to prepare\n");
-		return;
-	}
-
-	if (dpi->connector->display_info.num_bus_formats) {
-		u32 bus_format = dpi->connector->display_info.bus_formats[0];
-
-		switch (bus_format) {
-		case MEDIA_BUS_FMT_RGB888_1X24:
-			dpi_c |= VC4_SET_FIELD(DPI_FORMAT_24BIT_888_RGB,
-					       DPI_FORMAT);
-			break;
-		case MEDIA_BUS_FMT_BGR888_1X24:
-			dpi_c |= VC4_SET_FIELD(DPI_FORMAT_24BIT_888_RGB,
-					       DPI_FORMAT);
-			dpi_c |= VC4_SET_FIELD(DPI_ORDER_BGR, DPI_ORDER);
-			break;
-		case MEDIA_BUS_FMT_RGB666_1X24_CPADHI:
-			dpi_c |= VC4_SET_FIELD(DPI_FORMAT_18BIT_666_RGB_2,
-					       DPI_FORMAT);
-			break;
-		case MEDIA_BUS_FMT_RGB666_1X18:
-			dpi_c |= VC4_SET_FIELD(DPI_FORMAT_18BIT_666_RGB_1,
-					       DPI_FORMAT);
-			break;
-		case MEDIA_BUS_FMT_RGB565_1X16:
-			dpi_c |= VC4_SET_FIELD(DPI_FORMAT_16BIT_565_RGB_3,
-					       DPI_FORMAT);
-			break;
-		default:
-			DRM_ERROR("Unknown media bus format %d\n", bus_format);
+	/* Look up the connector attached to DPI so we can get the
+	 * bus_format.  Ideally the bridge would tell us the
+	 * bus_format we want, but it doesn't yet, so assume that it's
+	 * uniform throughout the bridge chain.
+	 */
+	drm_connector_list_iter_begin(dev, &conn_iter);
+	drm_for_each_connector_iter(connector_scan, &conn_iter) {
+		if (connector_scan->encoder == encoder) {
+			connector = connector_scan;
 			break;
 		}
 	}
+	drm_connector_list_iter_end(&conn_iter);
 
-	if (mode->flags & DRM_MODE_FLAG_NHSYNC)
-		dpi_c |= DPI_HSYNC_INVERT;
-	else if (!(mode->flags & DRM_MODE_FLAG_PHSYNC))
-		dpi_c |= DPI_HSYNC_DISABLE;
+	/* Default to 24bit if no connector or format found. */
+	dpi_c |= VC4_SET_FIELD(DPI_FORMAT_24BIT_888_RGB, DPI_FORMAT);
 
-	if (mode->flags & DRM_MODE_FLAG_NVSYNC)
-		dpi_c |= DPI_VSYNC_INVERT;
-	else if (!(mode->flags & DRM_MODE_FLAG_PVSYNC))
-		dpi_c |= DPI_VSYNC_DISABLE;
+	if (connector) {
+		if (connector->display_info.num_bus_formats) {
+			u32 bus_format = connector->display_info.bus_formats[0];
+
+			dpi_c &= ~DPI_FORMAT_MASK;
+
+			switch (bus_format) {
+			case MEDIA_BUS_FMT_RGB888_1X24:
+				dpi_c |= VC4_SET_FIELD(DPI_FORMAT_24BIT_888_RGB,
+						       DPI_FORMAT);
+				break;
+			case MEDIA_BUS_FMT_BGR888_1X24:
+				dpi_c |= VC4_SET_FIELD(DPI_FORMAT_24BIT_888_RGB,
+						       DPI_FORMAT);
+				dpi_c |= VC4_SET_FIELD(DPI_ORDER_BGR,
+						       DPI_ORDER);
+				break;
+			case MEDIA_BUS_FMT_RGB666_1X24_CPADHI:
+				dpi_c |= VC4_SET_FIELD(DPI_FORMAT_18BIT_666_RGB_2,
+						       DPI_FORMAT);
+				break;
+			case MEDIA_BUS_FMT_RGB666_1X18:
+				dpi_c |= VC4_SET_FIELD(DPI_FORMAT_18BIT_666_RGB_1,
+						       DPI_FORMAT);
+				break;
+			case MEDIA_BUS_FMT_RGB565_1X16:
+				dpi_c |= VC4_SET_FIELD(DPI_FORMAT_16BIT_565_RGB_1,
+						       DPI_FORMAT);
+				break;
+			default:
+				DRM_ERROR("Unknown media bus format %d\n",
+					  bus_format);
+				break;
+			}
+		}
+
+		if (connector->display_info.bus_flags & DRM_BUS_FLAG_PIXDATA_DRIVE_NEGEDGE)
+			dpi_c |= DPI_PIXEL_CLK_INVERT;
+
+		if (connector->display_info.bus_flags & DRM_BUS_FLAG_DE_LOW)
+			dpi_c |= DPI_OUTPUT_ENABLE_INVERT;
+	}
+
+	if (mode->flags & DRM_MODE_FLAG_CSYNC) {
+		if (mode->flags & DRM_MODE_FLAG_NCSYNC)
+			dpi_c |= DPI_OUTPUT_ENABLE_INVERT;
+	} else {
+		dpi_c |= DPI_OUTPUT_ENABLE_MODE;
+
+		if (mode->flags & DRM_MODE_FLAG_NHSYNC)
+			dpi_c |= DPI_HSYNC_INVERT;
+		else if (!(mode->flags & DRM_MODE_FLAG_PHSYNC))
+			dpi_c |= DPI_HSYNC_DISABLE;
+
+		if (mode->flags & DRM_MODE_FLAG_NVSYNC)
+			dpi_c |= DPI_VSYNC_INVERT;
+		else if (!(mode->flags & DRM_MODE_FLAG_PVSYNC))
+			dpi_c |= DPI_VSYNC_DISABLE;
+	}
+
+	if (!drm_dev_enter(dev, &idx))
+		return;
 
 	DPI_WRITE(DPI_C, dpi_c);
 
@@ -332,28 +226,39 @@ static void vc4_dpi_encoder_enable(struct drm_encoder *encoder)
 	if (ret)
 		DRM_ERROR("Failed to set clock rate: %d\n", ret);
 
-	ret = drm_panel_enable(dpi->panel);
-	if (ret) {
-		DRM_ERROR("Panel failed to enable\n");
-		drm_panel_unprepare(dpi->panel);
-		return;
-	}
+	drm_dev_exit(idx);
 }
 
-static bool vc4_dpi_encoder_mode_fixup(struct drm_encoder *encoder,
-				       const struct drm_display_mode *mode,
-				       struct drm_display_mode *adjusted_mode)
+static enum drm_mode_status vc4_dpi_encoder_mode_valid(struct drm_encoder *encoder,
+						       const struct drm_display_mode *mode)
 {
-	if (adjusted_mode->flags & DRM_MODE_FLAG_INTERLACE)
-		return false;
+	if (mode->flags & DRM_MODE_FLAG_INTERLACE)
+		return MODE_NO_INTERLACE;
 
-	return true;
+	return MODE_OK;
 }
 
 static const struct drm_encoder_helper_funcs vc4_dpi_encoder_helper_funcs = {
 	.disable = vc4_dpi_encoder_disable,
 	.enable = vc4_dpi_encoder_enable,
-	.mode_fixup = vc4_dpi_encoder_mode_fixup,
+	.mode_valid = vc4_dpi_encoder_mode_valid,
+};
+
+static int vc4_dpi_late_register(struct drm_encoder *encoder)
+{
+	struct drm_device *drm = encoder->dev;
+	struct vc4_dpi *dpi = to_vc4_dpi(encoder);
+	int ret;
+
+	ret = vc4_debugfs_add_regset32(drm->primary, "dpi_regs", &dpi->regset);
+	if (ret)
+		return ret;
+
+	return 0;
+}
+
+static const struct drm_encoder_funcs vc4_dpi_encoder_funcs = {
+	.late_register = vc4_dpi_late_register,
 };
 
 static const struct of_device_id vc4_dpi_dt_match[] = {
@@ -361,62 +266,55 @@ static const struct of_device_id vc4_dpi_dt_match[] = {
 	{}
 };
 
-/* Walks the OF graph to find the panel node and then asks DRM to look
- * up the panel.
+/* Sets up the next link in the display chain, whether it's a panel or
+ * a bridge.
  */
-static struct drm_panel *vc4_dpi_get_panel(struct device *dev)
+static int vc4_dpi_init_bridge(struct vc4_dpi *dpi)
 {
-	struct device_node *endpoint, *panel_node;
-	struct device_node *np = dev->of_node;
-	struct drm_panel *panel;
+	struct drm_device *drm = dpi->encoder.base.dev;
+	struct device *dev = &dpi->pdev->dev;
+	struct drm_bridge *bridge;
 
-	endpoint = of_graph_get_next_endpoint(np, NULL);
-	if (!endpoint) {
-		dev_err(dev, "no endpoint to fetch DPI panel\n");
-		return NULL;
+	bridge = drmm_of_get_bridge(drm, dev->of_node, 0, 0);
+	if (IS_ERR(bridge)) {
+		/* If nothing was connected in the DT, that's not an
+		 * error.
+		 */
+		if (PTR_ERR(bridge) == -ENODEV)
+			return 0;
+		else
+			return PTR_ERR(bridge);
 	}
 
-	/* don't proceed if we have an endpoint but no panel_node tied to it */
-	panel_node = of_graph_get_remote_port_parent(endpoint);
-	of_node_put(endpoint);
-	if (!panel_node) {
-		dev_err(dev, "no valid panel node\n");
-		return NULL;
-	}
+	return drm_bridge_attach(&dpi->encoder.base, bridge, NULL, 0);
+}
 
-	panel = of_drm_find_panel(panel_node);
-	of_node_put(panel_node);
+static void vc4_dpi_disable_clock(void *ptr)
+{
+	struct vc4_dpi *dpi = ptr;
 
-	return panel;
+	clk_disable_unprepare(dpi->core_clock);
 }
 
 static int vc4_dpi_bind(struct device *dev, struct device *master, void *data)
 {
 	struct platform_device *pdev = to_platform_device(dev);
 	struct drm_device *drm = dev_get_drvdata(master);
-	struct vc4_dev *vc4 = to_vc4_dev(drm);
 	struct vc4_dpi *dpi;
-	struct vc4_dpi_encoder *vc4_dpi_encoder;
 	int ret;
 
-	dpi = devm_kzalloc(dev, sizeof(*dpi), GFP_KERNEL);
+	dpi = drmm_kzalloc(drm, sizeof(*dpi), GFP_KERNEL);
 	if (!dpi)
 		return -ENOMEM;
 
-	vc4_dpi_encoder = devm_kzalloc(dev, sizeof(*vc4_dpi_encoder),
-				       GFP_KERNEL);
-	if (!vc4_dpi_encoder)
-		return -ENOMEM;
-	vc4_dpi_encoder->base.type = VC4_ENCODER_TYPE_DPI;
-	vc4_dpi_encoder->dpi = dpi;
-	dpi->encoder = &vc4_dpi_encoder->base.base;
-
+	dpi->encoder.type = VC4_ENCODER_TYPE_DPI;
 	dpi->pdev = pdev;
 	dpi->regs = vc4_ioremap_regs(pdev, 0);
 	if (IS_ERR(dpi->regs))
 		return PTR_ERR(dpi->regs);
-
-	vc4_dpi_dump_regs(dpi);
+	dpi->regset.base = dpi->regs;
+	dpi->regset.regs = dpi_regs;
+	dpi->regset.nregs = ARRAY_SIZE(dpi_regs);
 
 	if (DPI_READ(DPI_ID) != DPI_ID_VALUE) {
 		dev_err(dev, "Port returned 0x%08x for ID instead of 0x%08x\n",
@@ -431,6 +329,7 @@ static int vc4_dpi_bind(struct device *dev, struct device *master, void *data)
 			DRM_ERROR("Failed to get core clock: %d\n", ret);
 		return ret;
 	}
+
 	dpi->pixel_clock = devm_clk_get(dev, "pixel");
 	if (IS_ERR(dpi->pixel_clock)) {
 		ret = PTR_ERR(dpi->pixel_clock);
@@ -440,57 +339,35 @@ static int vc4_dpi_bind(struct device *dev, struct device *master, void *data)
 	}
 
 	ret = clk_prepare_enable(dpi->core_clock);
-	if (ret)
+	if (ret) {
 		DRM_ERROR("Failed to turn on core clock: %d\n", ret);
-
-	dpi->panel = vc4_dpi_get_panel(dev);
-
-	drm_encoder_init(drm, dpi->encoder, &vc4_dpi_encoder_funcs,
-			 DRM_MODE_ENCODER_DPI, NULL);
-	drm_encoder_helper_add(dpi->encoder, &vc4_dpi_encoder_helper_funcs);
-
-	dpi->connector = vc4_dpi_connector_init(drm, dpi);
-	if (IS_ERR(dpi->connector)) {
-		ret = PTR_ERR(dpi->connector);
-		goto err_destroy_encoder;
+		return ret;
 	}
 
-	if (dpi->panel)
-		drm_panel_attach(dpi->panel, dpi->connector);
+	ret = devm_add_action_or_reset(dev, vc4_dpi_disable_clock, dpi);
+	if (ret)
+		return ret;
+
+	ret = drmm_encoder_init(drm, &dpi->encoder.base,
+				&vc4_dpi_encoder_funcs,
+				DRM_MODE_ENCODER_DPI,
+				NULL);
+	if (ret)
+		return ret;
+
+	drm_encoder_helper_add(&dpi->encoder.base, &vc4_dpi_encoder_helper_funcs);
+
+	ret = vc4_dpi_init_bridge(dpi);
+	if (ret)
+		return ret;
 
 	dev_set_drvdata(dev, dpi);
 
-	vc4->dpi = dpi;
-
 	return 0;
-
-err_destroy_encoder:
-	drm_encoder_cleanup(dpi->encoder);
-	clk_disable_unprepare(dpi->core_clock);
-	return ret;
-}
-
-static void vc4_dpi_unbind(struct device *dev, struct device *master,
-			   void *data)
-{
-	struct drm_device *drm = dev_get_drvdata(master);
-	struct vc4_dev *vc4 = to_vc4_dev(drm);
-	struct vc4_dpi *dpi = dev_get_drvdata(dev);
-
-	if (dpi->panel)
-		drm_panel_detach(dpi->panel);
-
-	vc4_dpi_connector_destroy(dpi->connector);
-	drm_encoder_cleanup(dpi->encoder);
-
-	clk_disable_unprepare(dpi->core_clock);
-
-	vc4->dpi = NULL;
 }
 
 static const struct component_ops vc4_dpi_ops = {
 	.bind   = vc4_dpi_bind,
-	.unbind = vc4_dpi_unbind,
 };
 
 static int vc4_dpi_dev_probe(struct platform_device *pdev)

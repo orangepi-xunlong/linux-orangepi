@@ -1,11 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2013 Linaro Ltd.
- * Copyright (c) 2013 Hisilicon Limited.
+ * Copyright (c) 2013 HiSilicon Limited.
  * Based on arch/arm/mach-vexpress/platsmp.c, Copyright (C) 2002 ARM Ltd.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
  */
 #include <linux/smp.h>
 #include <linux/io.h>
@@ -28,7 +25,7 @@ void hi3xxx_set_cpu_jump(int cpu, void *jump_addr)
 	cpu = cpu_logical_map(cpu);
 	if (!cpu || !ctrl_base)
 		return;
-	writel_relaxed(virt_to_phys(jump_addr), ctrl_base + ((cpu - 1) << 2));
+	writel_relaxed(__pa_symbol(jump_addr), ctrl_base + ((cpu - 1) << 2));
 }
 
 int hi3xxx_get_cpu_jump(int cpu)
@@ -70,14 +67,17 @@ static void __init hi3xxx_smp_prepare_cpus(unsigned int max_cpus)
 		}
 		ctrl_base = of_iomap(np, 0);
 		if (!ctrl_base) {
+			of_node_put(np);
 			pr_err("failed to map address\n");
 			return;
 		}
 		if (of_property_read_u32(np, "smp-offset", &offset) < 0) {
+			of_node_put(np);
 			pr_err("failed to find smp-offset property\n");
 			return;
 		}
 		ctrl_base += offset;
+		of_node_put(np);
 	}
 }
 
@@ -109,7 +109,7 @@ static void hix5hd2_set_scu_boot_addr(phys_addr_t start_addr, phys_addr_t jump_a
 
 	virt = ioremap(start_addr, PAGE_SIZE);
 
-	writel_relaxed(0xe51ff004, virt);	/* ldr pc, [rc, #-4] */
+	writel_relaxed(0xe51ff004, virt);	/* ldr pc, [pc, #-4] */
 	writel_relaxed(jump_addr, virt + 4);	/* pc jump phy address */
 	iounmap(virt);
 }
@@ -118,7 +118,7 @@ static int hix5hd2_boot_secondary(unsigned int cpu, struct task_struct *idle)
 {
 	phys_addr_t jumpaddr;
 
-	jumpaddr = virt_to_phys(secondary_startup);
+	jumpaddr = __pa_symbol(secondary_startup);
 	hix5hd2_set_scu_boot_addr(HIX5HD2_BOOT_ADDRESS, jumpaddr);
 	hix5hd2_set_cpu(cpu, true);
 	arch_send_wakeup_ipi_mask(cpumask_of(cpu));
@@ -156,13 +156,14 @@ static int hip01_boot_secondary(unsigned int cpu, struct task_struct *idle)
 	struct device_node *node;
 
 
-	jumpaddr = virt_to_phys(secondary_startup);
+	jumpaddr = __pa_symbol(secondary_startup);
 	hip01_set_boot_addr(HIP01_BOOT_ADDRESS, jumpaddr);
 
 	node = of_find_compatible_node(NULL, NULL, "hisilicon,hip01-sysctrl");
 	if (WARN_ON(!node))
 		return -1;
 	ctrl_base = of_iomap(node, 0);
+	of_node_put(node);
 
 	/* set the secondary core boot from DDR */
 	remap_reg_value = readl_relaxed(ctrl_base + REG_SC_CTRL);

@@ -26,10 +26,11 @@
  */
 
 #include <linux/firmware.h>
-#include <drm/drmP.h>
+
 #include "radeon.h"
 #include "radeon_asic.h"
 #include "cikd.h"
+#include "vce.h"
 
 #define VCE_V2_0_FW_SIZE	(256 * 1024)
 #define VCE_V2_0_STACK_SIZE	(64 * 1024)
@@ -104,6 +105,10 @@ static void vce_v2_0_disable_cg(struct radeon_device *rdev)
 	WREG32(VCE_CGTT_CLK_OVERRIDE, 7);
 }
 
+/*
+ * Local variable sw_cg is used for debugging purposes, in case we
+ * ran into problems with dynamic clock gating. Don't remove it.
+ */
 void vce_v2_0_enable_mgcg(struct radeon_device *rdev, bool enable)
 {
 	bool sw_cg = false;

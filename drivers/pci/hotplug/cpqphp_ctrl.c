@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0+
 /*
  * Compaq Hot Plug Controller Driver
  *
@@ -6,21 +7,6 @@
  * Copyright (C) 2001 IBM Corp.
  *
  * All rights reserved.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or (at
- * your option) any later version.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE, GOOD TITLE or
- * NON INFRINGEMENT.  See the GNU General Public License for more
- * details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  *
  * Send feedback to <greg@kroah.com>
  *
@@ -47,7 +33,7 @@ static void interrupt_event_handler(struct controller *ctrl);
 
 
 static struct task_struct *cpqhp_event_thread;
-static unsigned long pushbutton_pending;	/* = 0 */
+static struct timer_list *pushbutton_pending;	/* = NULL */
 
 /* delay is in jiffies to wait for */
 static void long_delay(int delay)
@@ -533,7 +519,7 @@ error:
  * @head: list to search
  * @size: size of node to find, must be a power of two.
  *
- * Description: This function sorts the resource list by size and then returns
+ * Description: This function sorts the resource list by size and then
  * returns the first node of "size" length that is not in the ISA aliasing
  * window.  If it finds a node larger than "size" it will split it up.
  */
@@ -895,7 +881,6 @@ irqreturn_t cpqhp_ctrl_intr(int IRQ, void *data)
 	u8 reset;
 	u16 misc;
 	u32 Diff;
-	u32 temp_dword;
 
 
 	misc = readw(ctrl->hpc_reg + MISC);
@@ -931,7 +916,7 @@ irqreturn_t cpqhp_ctrl_intr(int IRQ, void *data)
 		writel(Diff, ctrl->hpc_reg + INT_INPUT_CLEAR);
 
 		/* Read it back to clear any posted writes */
-		temp_dword = readl(ctrl->hpc_reg + INT_INPUT_CLEAR);
+		readl(ctrl->hpc_reg + INT_INPUT_CLEAR);
 
 		if (!Diff)
 			/* Clear all interrupts */
@@ -1144,9 +1129,7 @@ static u8 set_controller_speed(struct controller *ctrl, u8 adapter_speed, u8 hp_
 	for (slot = ctrl->slot; slot; slot = slot->next) {
 		if (slot->device == (hp_slot + ctrl->slot_device_offset))
 			continue;
-		if (!slot->hotplug_slot || !slot->hotplug_slot->info)
-			continue;
-		if (slot->hotplug_slot->info->adapter_status == 0)
+		if (get_presence_status(ctrl, slot) == 0)
 			continue;
 		/* If another adapter is running on the same segment but at a
 		 * lower speed/mode, we allow the new adapter to function at
@@ -1218,7 +1201,7 @@ static u8 set_controller_speed(struct controller *ctrl, u8 adapter_speed, u8 hp_
 
 	mdelay(5);
 
-	/* Reenable interrupts */
+	/* Re-enable interrupts */
 	writel(0, ctrl->hpc_reg + INT_MASK);
 
 	pci_write_config_byte(ctrl->pci_dev, 0x41, reg);
@@ -1428,7 +1411,6 @@ static u32 board_added(struct pci_func *func, struct controller *ctrl)
 	u32 rc = 0;
 	struct pci_func *new_slot = NULL;
 	struct pci_bus *bus = ctrl->pci_bus;
-	struct slot *p_slot;
 	struct resource_lists res_lists;
 
 	hp_slot = func->device - ctrl->slot_device_offset;
@@ -1475,7 +1457,7 @@ static u32 board_added(struct pci_func *func, struct controller *ctrl)
 	if (rc)
 		return rc;
 
-	p_slot = cpqhp_find_slot(ctrl, hp_slot + ctrl->slot_device_offset);
+	cpqhp_find_slot(ctrl, hp_slot + ctrl->slot_device_offset);
 
 	/* turn on board and blink green LED */
 
@@ -1630,7 +1612,6 @@ static u32 remove_board(struct pci_func *func, u32 replace_flag, struct controll
 	u8 device;
 	u8 hp_slot;
 	u8 temp_byte;
-	u32 rc;
 	struct resource_lists res_lists;
 	struct pci_func *temp_func;
 
@@ -1645,7 +1626,7 @@ static u32 remove_board(struct pci_func *func, u32 replace_flag, struct controll
 	/* When we get here, it is safe to change base address registers.
 	 * We will attempt to save the base address register lengths */
 	if (replace_flag || !ctrl->add_support)
-		rc = cpqhp_save_base_addr_length(ctrl, func);
+		cpqhp_save_base_addr_length(ctrl, func);
 	else if (!func->bus_head && !func->mem_head &&
 		 !func->p_mem_head && !func->io_head) {
 		/* Here we check to see if we've saved any of the board's
@@ -1663,7 +1644,7 @@ static u32 remove_board(struct pci_func *func, u32 replace_flag, struct controll
 		}
 
 		if (!skip)
-			rc = cpqhp_save_used_resources(ctrl, func);
+			cpqhp_save_used_resources(ctrl, func);
 	}
 	/* Change status to shutdown */
 	if (func->is_a_board)
@@ -1732,9 +1713,10 @@ static u32 remove_board(struct pci_func *func, u32 replace_flag, struct controll
 	return 0;
 }
 
-static void pushbutton_helper_thread(unsigned long data)
+static void pushbutton_helper_thread(struct timer_list *t)
 {
-	pushbutton_pending = data;
+	pushbutton_pending = t;
+
 	wake_up_process(cpqhp_event_thread);
 }
 
@@ -1780,27 +1762,9 @@ void cpqhp_event_stop_thread(void)
 }
 
 
-static int update_slot_info(struct controller *ctrl, struct slot *slot)
-{
-	struct hotplug_slot_info *info;
-	int result;
-
-	info = kmalloc(sizeof(*info), GFP_KERNEL);
-	if (!info)
-		return -ENOMEM;
-
-	info->power_status = get_slot_enabled(ctrl, slot);
-	info->attention_status = cpq_get_attention_status(ctrl, slot);
-	info->latch_status = cpq_get_latch_status(ctrl, slot);
-	info->adapter_status = get_presence_status(ctrl, slot);
-	result = pci_hp_change_slot_info(slot->hotplug_slot, info);
-	kfree(info);
-	return result;
-}
-
 static void interrupt_event_handler(struct controller *ctrl)
 {
-	int loop = 0;
+	int loop;
 	int change = 1;
 	struct pci_func *func;
 	u8 hp_slot;
@@ -1883,13 +1847,13 @@ static void interrupt_event_handler(struct controller *ctrl)
 					wait_for_ctrl_irq(ctrl);
 
 					mutex_unlock(&ctrl->crit_sect);
-					init_timer(&p_slot->task_event);
+					timer_setup(&p_slot->task_event,
+						    pushbutton_helper_thread,
+						    0);
 					p_slot->hp_slot = hp_slot;
 					p_slot->ctrl = ctrl;
 /*					p_slot->physical_slot = physical_slot; */
 					p_slot->task_event.expires = jiffies + 5 * HZ;   /* 5 second delay */
-					p_slot->task_event.function = pushbutton_helper_thread;
-					p_slot->task_event.data = (u32) p_slot;
 
 					dbg("add_timer p_slot = %p\n", p_slot);
 					add_timer(&p_slot->task_event);
@@ -1897,9 +1861,6 @@ static void interrupt_event_handler(struct controller *ctrl)
 				/***********POWER FAULT */
 				else if (ctrl->event_queue[loop].event_type == INT_POWER_FAULT) {
 					dbg("power fault\n");
-				} else {
-					/* refresh notification */
-					update_slot_info(ctrl, p_slot);
 				}
 
 				ctrl->event_queue[loop].event_type = 0;
@@ -1908,30 +1869,25 @@ static void interrupt_event_handler(struct controller *ctrl)
 			}
 		}		/* End of FOR loop */
 	}
-
-	return;
 }
 
 
 /**
  * cpqhp_pushbutton_thread - handle pushbutton events
- * @slot: target slot (struct)
+ * @t: pointer to struct timer_list which holds all timer-related callbacks
  *
  * Scheduled procedure to handle blocking stuff for the pushbuttons.
  * Handles all pending events and exits.
  */
-void cpqhp_pushbutton_thread(unsigned long slot)
+void cpqhp_pushbutton_thread(struct timer_list *t)
 {
 	u8 hp_slot;
-	u8 device;
 	struct pci_func *func;
-	struct slot *p_slot = (struct slot *) slot;
+	struct slot *p_slot = from_timer(p_slot, t, task_event);
 	struct controller *ctrl = (struct controller *) p_slot->ctrl;
 
-	pushbutton_pending = 0;
+	pushbutton_pending = NULL;
 	hp_slot = p_slot->hp_slot;
-
-	device = p_slot->device;
 
 	if (is_slot_enabled(ctrl, hp_slot)) {
 		p_slot->state = POWEROFF_STATE;
@@ -1979,8 +1935,6 @@ void cpqhp_pushbutton_thread(unsigned long slot)
 
 		p_slot->state = STATIC_STATE;
 	}
-
-	return;
 }
 
 
@@ -1991,15 +1945,12 @@ int cpqhp_process_SI(struct controller *ctrl, struct pci_func *func)
 	u32 tempdword;
 	int rc;
 	struct slot *p_slot;
-	int physical_slot = 0;
 
 	tempdword = 0;
 
 	device = func->device;
 	hp_slot = device - ctrl->slot_device_offset;
 	p_slot = cpqhp_find_slot(ctrl, device);
-	if (p_slot)
-		physical_slot = p_slot->number;
 
 	/* Check to see if the interlock is closed */
 	tempdword = readl(ctrl->hpc_reg + INT_INPUT_CLEAR);
@@ -2070,9 +2021,6 @@ int cpqhp_process_SI(struct controller *ctrl, struct pci_func *func)
 	if (rc)
 		dbg("%s: rc = %d\n", __func__, rc);
 
-	if (p_slot)
-		update_slot_info(ctrl, p_slot);
-
 	return rc;
 }
 
@@ -2086,13 +2034,10 @@ int cpqhp_process_SS(struct controller *ctrl, struct pci_func *func)
 	unsigned int devfn;
 	struct slot *p_slot;
 	struct pci_bus *pci_bus = ctrl->pci_bus;
-	int physical_slot = 0;
 
 	device = func->device;
 	func = cpqhp_slot_find(ctrl->bus, device, index++);
 	p_slot = cpqhp_find_slot(ctrl, device);
-	if (p_slot)
-		physical_slot = p_slot->number;
 
 	/* Make sure there are no video controllers here */
 	while (func && !rc) {
@@ -2137,9 +2082,6 @@ int cpqhp_process_SS(struct controller *ctrl, struct pci_func *func)
 	} else if (!rc) {
 		rc = 1;
 	}
-
-	if (p_slot)
-		update_slot_info(ctrl, p_slot);
 
 	return rc;
 }
@@ -2319,7 +2261,7 @@ static u32 configure_new_device(struct controller  *ctrl, struct pci_func  *func
 		while ((function < max_functions) && (!stop_it)) {
 			pci_bus_read_config_dword(ctrl->pci_bus, PCI_DEVFN(func->device, function), 0x00, &ID);
 
-			if (ID == 0xFFFFFFFF) {
+			if (PCI_POSSIBLE_ERROR(ID)) {
 				function++;
 			} else {
 				/* Setup slot structure. */
@@ -2563,7 +2505,7 @@ static int configure_new_function(struct controller *ctrl, struct pci_func *func
 			pci_bus_read_config_dword(pci_bus, PCI_DEVFN(device, 0), 0x00, &ID);
 			pci_bus->number = func->bus;
 
-			if (ID != 0xFFFFFFFF) {	  /*  device present */
+			if (!PCI_POSSIBLE_ERROR(ID)) {	  /*  device present */
 				/* Setup slot structure. */
 				new_slot = cpqhp_slot_create(hold_bus_node->base);
 
@@ -2825,18 +2767,16 @@ static int configure_new_function(struct controller *ctrl, struct pci_func *func
 
 					dbg("CND:      length = 0x%x\n", base);
 					io_node = get_io_resource(&(resources->io_head), base);
+					if (!io_node)
+						return -ENOMEM;
 					dbg("Got io_node start = %8.8x, length = %8.8x next (%p)\n",
 					    io_node->base, io_node->length, io_node->next);
 					dbg("func (%p) io_head (%p)\n", func, func->io_head);
 
 					/* allocate the resource to the board */
-					if (io_node) {
-						base = io_node->base;
-
-						io_node->next = func->io_head;
-						func->io_head = io_node;
-					} else
-						return -ENOMEM;
+					base = io_node->base;
+					io_node->next = func->io_head;
+					func->io_head = io_node;
 				} else if ((temp_register & 0x0BL) == 0x08) {
 					/* Map prefetchable memory */
 					base = temp_register & 0xFFFFFFF0;

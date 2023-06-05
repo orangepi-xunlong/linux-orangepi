@@ -1,21 +1,20 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * ST Microelectronics MFD: stmpe's driver
  *
  * Copyright (C) ST-Ericsson SA 2010
  *
- * License Terms: GNU General Public License, version 2
  * Author: Rabin Vincent <rabin.vincent@stericsson.com> for ST-Ericsson
  */
 
 #include <linux/err.h>
-#include <linux/gpio.h>
+#include <linux/gpio/consumer.h>
 #include <linux/export.h>
 #include <linux/kernel.h>
 #include <linux/interrupt.h>
 #include <linux/irq.h>
 #include <linux/irqdomain.h>
 #include <linux/of.h>
-#include <linux/of_gpio.h>
 #include <linux/pm.h>
 #include <linux/slab.h>
 #include <linux/mfd/core.h>
@@ -30,17 +29,12 @@
  * @irq_trigger: IRQ trigger to use for the interrupt to the host
  * @autosleep: bool to enable/disable stmpe autosleep
  * @autosleep_timeout: inactivity timeout in milliseconds for autosleep
- * @irq_over_gpio: true if gpio is used to get irq
- * @irq_gpio: gpio number over which irq will be requested (significant only if
- *	      irq_over_gpio is true)
  */
 struct stmpe_platform_data {
 	int id;
 	unsigned int blocks;
 	unsigned int irq_trigger;
 	bool autosleep;
-	bool irq_over_gpio;
-	int irq_gpio;
 	int autosleep_timeout;
 };
 
@@ -337,6 +331,7 @@ static const struct mfd_cell stmpe_gpio_cell_noirq = {
  */
 
 static struct resource stmpe_keypad_resources[] = {
+	/* Start and end filled dynamically */
 	{
 		.name	= "KEYPAD",
 		.flags	= IORESOURCE_IRQ,
@@ -358,6 +353,7 @@ static const struct mfd_cell stmpe_keypad_cell = {
  * PWM (1601, 2401, 2403)
  */
 static struct resource stmpe_pwm_resources[] = {
+	/* Start and end filled dynamically */
 	{
 		.name	= "PWM0",
 		.flags	= IORESOURCE_IRQ,
@@ -446,6 +442,7 @@ static struct stmpe_variant_info stmpe801_noirq = {
  */
 
 static struct resource stmpe_ts_resources[] = {
+	/* Start and end filled dynamically */
 	{
 		.name	= "TOUCH_DET",
 		.flags	= IORESOURCE_IRQ,
@@ -461,6 +458,29 @@ static const struct mfd_cell stmpe_ts_cell = {
 	.of_compatible	= "st,stmpe-ts",
 	.resources	= stmpe_ts_resources,
 	.num_resources	= ARRAY_SIZE(stmpe_ts_resources),
+};
+
+/*
+ * ADC (STMPE811)
+ */
+
+static struct resource stmpe_adc_resources[] = {
+	/* Start and end filled dynamically */
+	{
+		.name	= "STMPE_TEMP_SENS",
+		.flags	= IORESOURCE_IRQ,
+	},
+	{
+		.name	= "STMPE_ADC",
+		.flags	= IORESOURCE_IRQ,
+	},
+};
+
+static const struct mfd_cell stmpe_adc_cell = {
+	.name		= "stmpe-adc",
+	.of_compatible	= "st,stmpe-adc",
+	.resources	= stmpe_adc_resources,
+	.num_resources	= ARRAY_SIZE(stmpe_adc_resources),
 };
 
 /*
@@ -497,6 +517,11 @@ static struct stmpe_variant_block stmpe811_blocks[] = {
 		.irq	= STMPE811_IRQ_TOUCH_DET,
 		.block	= STMPE_BLOCK_TOUCHSCREEN,
 	},
+	{
+		.cell	= &stmpe_adc_cell,
+		.irq	= STMPE811_IRQ_TEMP_SENS,
+		.block	= STMPE_BLOCK_ADC,
+	},
 };
 
 static int stmpe811_enable(struct stmpe *stmpe, unsigned int blocks,
@@ -516,6 +541,35 @@ static int stmpe811_enable(struct stmpe *stmpe, unsigned int blocks,
 	return __stmpe_set_bits(stmpe, stmpe->regs[STMPE_IDX_SYS_CTRL2], mask,
 				enable ? 0 : mask);
 }
+
+int stmpe811_adc_common_init(struct stmpe *stmpe)
+{
+	int ret;
+	u8 adc_ctrl1, adc_ctrl1_mask;
+
+	adc_ctrl1 = STMPE_SAMPLE_TIME(stmpe->sample_time) |
+		    STMPE_MOD_12B(stmpe->mod_12b) |
+		    STMPE_REF_SEL(stmpe->ref_sel);
+	adc_ctrl1_mask = STMPE_SAMPLE_TIME(0xff) | STMPE_MOD_12B(0xff) |
+			 STMPE_REF_SEL(0xff);
+
+	ret = stmpe_set_bits(stmpe, STMPE811_REG_ADC_CTRL1,
+			adc_ctrl1_mask, adc_ctrl1);
+	if (ret) {
+		dev_err(stmpe->dev, "Could not setup ADC\n");
+		return ret;
+	}
+
+	ret = stmpe_set_bits(stmpe, STMPE811_REG_ADC_CTRL2,
+			STMPE_ADC_FREQ(0xff), STMPE_ADC_FREQ(stmpe->adc_freq));
+	if (ret) {
+		dev_err(stmpe->dev, "Could not setup ADC\n");
+		return ret;
+	}
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(stmpe811_adc_common_init);
 
 static int stmpe811_get_altfunc(struct stmpe *stmpe, enum stmpe_block block)
 {
@@ -568,6 +622,8 @@ static const u8 stmpe1600_regs[] = {
 	[STMPE_IDX_GPMR_CSB]	= STMPE1600_REG_GPMR_MSB,
 	[STMPE_IDX_GPSR_LSB]	= STMPE1600_REG_GPSR_LSB,
 	[STMPE_IDX_GPSR_CSB]	= STMPE1600_REG_GPSR_MSB,
+	[STMPE_IDX_GPCR_LSB]	= STMPE1600_REG_GPSR_LSB,
+	[STMPE_IDX_GPCR_CSB]	= STMPE1600_REG_GPSR_MSB,
 	[STMPE_IDX_GPDR_LSB]	= STMPE1600_REG_GPDR_LSB,
 	[STMPE_IDX_GPDR_CSB]	= STMPE1600_REG_GPDR_MSB,
 	[STMPE_IDX_IEGPIOR_LSB]	= STMPE1600_REG_IEGPIOR_LSB,
@@ -1033,7 +1089,7 @@ static irqreturn_t stmpe_irq(int irq, void *data)
 
 	if (variant->id_val == STMPE801_ID ||
 	    variant->id_val == STMPE1600_ID) {
-		int base = irq_create_mapping(stmpe->domain, 0);
+		int base = irq_find_mapping(stmpe->domain, 0);
 
 		handle_nested_irq(base);
 		return IRQ_HANDLED;
@@ -1061,7 +1117,7 @@ static irqreturn_t stmpe_irq(int irq, void *data)
 		while (status) {
 			int bit = __ffs(status);
 			int line = bank * 8 + bit;
-			int nestedirq = irq_create_mapping(stmpe->domain, line);
+			int nestedirq = irq_find_mapping(stmpe->domain, line);
 
 			handle_nested_irq(nestedirq);
 			status &= ~(1 << bit);
@@ -1287,32 +1343,22 @@ static void stmpe_of_probe(struct stmpe_platform_data *pdata,
 	if (pdata->id < 0)
 		pdata->id = -1;
 
-	pdata->irq_gpio = of_get_named_gpio_flags(np, "irq-gpio", 0,
-				&pdata->irq_trigger);
-	if (gpio_is_valid(pdata->irq_gpio))
-		pdata->irq_over_gpio = 1;
-	else
-		pdata->irq_trigger = IRQF_TRIGGER_NONE;
-
 	of_property_read_u32(np, "st,autosleep-timeout",
 			&pdata->autosleep_timeout);
 
 	pdata->autosleep = (pdata->autosleep_timeout) ? true : false;
 
-	for_each_child_of_node(np, child) {
-		if (!strcmp(child->name, "stmpe_gpio")) {
+	for_each_available_child_of_node(np, child) {
+		if (of_device_is_compatible(child, stmpe_gpio_cell.of_compatible))
 			pdata->blocks |= STMPE_BLOCK_GPIO;
-		} else if (!strcmp(child->name, "stmpe_keypad")) {
+		else if (of_device_is_compatible(child, stmpe_keypad_cell.of_compatible))
 			pdata->blocks |= STMPE_BLOCK_KEYPAD;
-		} else if (!strcmp(child->name, "stmpe_touchscreen")) {
+		else if (of_device_is_compatible(child, stmpe_ts_cell.of_compatible))
 			pdata->blocks |= STMPE_BLOCK_TOUCHSCREEN;
-		} else if (!strcmp(child->name, "stmpe_adc")) {
+		else if (of_device_is_compatible(child, stmpe_adc_cell.of_compatible))
 			pdata->blocks |= STMPE_BLOCK_ADC;
-		} else if (!strcmp(child->name, "stmpe_pwm")) {
+		else if (of_device_is_compatible(child, stmpe_pwm_cell.of_compatible))
 			pdata->blocks |= STMPE_BLOCK_PWM;
-		} else if (!strcmp(child->name, "stmpe_rotator")) {
-			pdata->blocks |= STMPE_BLOCK_ROTATOR;
-		}
 	}
 }
 
@@ -1322,7 +1368,9 @@ int stmpe_probe(struct stmpe_client_info *ci, enum stmpe_partnum partnum)
 	struct stmpe_platform_data *pdata;
 	struct device_node *np = ci->dev->of_node;
 	struct stmpe *stmpe;
+	struct gpio_desc *irq_gpio;
 	int ret;
+	u32 val;
 
 	pdata = devm_kzalloc(ci->dev, sizeof(*pdata), GFP_KERNEL);
 	if (!pdata)
@@ -1339,6 +1387,15 @@ int stmpe_probe(struct stmpe_client_info *ci, enum stmpe_partnum partnum)
 
 	mutex_init(&stmpe->irq_lock);
 	mutex_init(&stmpe->lock);
+
+	if (!of_property_read_u32(np, "st,sample-time", &val))
+		stmpe->sample_time = val;
+	if (!of_property_read_u32(np, "st,mod-12b", &val))
+		stmpe->mod_12b = val;
+	if (!of_property_read_u32(np, "st,ref-sel", &val))
+		stmpe->ref_sel = val;
+	if (!of_property_read_u32(np, "st,adc-freq", &val))
+		stmpe->adc_freq = val;
 
 	stmpe->dev = ci->dev;
 	stmpe->client = ci->client;
@@ -1365,18 +1422,20 @@ int stmpe_probe(struct stmpe_client_info *ci, enum stmpe_partnum partnum)
 	if (ci->init)
 		ci->init(stmpe);
 
-	if (pdata->irq_over_gpio) {
-		ret = devm_gpio_request_one(ci->dev, pdata->irq_gpio,
-				GPIOF_DIR_IN, "stmpe");
-		if (ret) {
-			dev_err(stmpe->dev, "failed to request IRQ GPIO: %d\n",
-					ret);
-			return ret;
-		}
+	irq_gpio = devm_gpiod_get_optional(ci->dev, "irq", GPIOD_ASIS);
+	ret = PTR_ERR_OR_ZERO(irq_gpio);
+	if (ret) {
+		dev_err(stmpe->dev, "failed to request IRQ GPIO: %d\n", ret);
+		return ret;
+	}
 
-		stmpe->irq = gpio_to_irq(pdata->irq_gpio);
+	if (irq_gpio) {
+		stmpe->irq = gpiod_to_irq(irq_gpio);
+		pdata->irq_trigger = gpiod_is_active_low(irq_gpio) ?
+					IRQF_TRIGGER_LOW : IRQF_TRIGGER_HIGH;
 	} else {
 		stmpe->irq = ci->irq;
+		pdata->irq_trigger = IRQF_TRIGGER_NONE;
 	}
 
 	if (stmpe->irq < 0) {
@@ -1424,16 +1483,16 @@ int stmpe_probe(struct stmpe_client_info *ci, enum stmpe_partnum partnum)
 	return ret;
 }
 
-int stmpe_remove(struct stmpe *stmpe)
+void stmpe_remove(struct stmpe *stmpe)
 {
 	if (!IS_ERR(stmpe->vio))
 		regulator_disable(stmpe->vio);
 	if (!IS_ERR(stmpe->vcc))
 		regulator_disable(stmpe->vcc);
 
-	mfd_remove_devices(stmpe->dev);
+	__stmpe_disable(stmpe, STMPE_BLOCK_ADC);
 
-	return 0;
+	mfd_remove_devices(stmpe->dev);
 }
 
 #ifdef CONFIG_PM

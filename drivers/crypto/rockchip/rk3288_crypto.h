@@ -1,15 +1,21 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef __RK3288_CRYPTO_H__
 #define __RK3288_CRYPTO_H__
 
 #include <crypto/aes.h>
-#include <crypto/des.h>
+#include <crypto/internal/des.h>
 #include <crypto/algapi.h>
+#include <linux/dma-mapping.h>
 #include <linux/interrupt.h>
 #include <linux/delay.h>
+#include <linux/scatterlist.h>
+#include <crypto/engine.h>
 #include <crypto/internal/hash.h>
+#include <crypto/internal/skcipher.h>
 
 #include <crypto/md5.h>
-#include <crypto/sha.h>
+#include <crypto/sha1.h>
+#include <crypto/sha2.h>
 
 #define _SBF(v, f)			((v) << (f))
 
@@ -189,41 +195,15 @@ struct rk_crypto_info {
 	struct reset_control		*rst;
 	void __iomem			*reg;
 	int				irq;
-	struct crypto_queue		queue;
-	struct tasklet_struct		crypto_tasklet;
-	struct ablkcipher_request	*ablk_req;
-	struct ahash_request		*ahash_req;
-	/* device lock */
-	spinlock_t			lock;
 
-	/* the public variable */
-	struct scatterlist		*sg_src;
-	struct scatterlist		*sg_dst;
-	struct scatterlist		sg_tmp;
-	struct scatterlist		*first;
-	unsigned int			left_bytes;
-	void				*addr_vir;
-	int				aligned;
-	int				align_size;
-	size_t				nents;
-	unsigned int			total;
-	unsigned int			count;
-	u32				mode;
-	dma_addr_t			addr_in;
-	dma_addr_t			addr_out;
-	int (*start)(struct rk_crypto_info *dev);
-	int (*update)(struct rk_crypto_info *dev);
-	void (*complete)(struct rk_crypto_info *dev, int err);
-	int (*enable_clk)(struct rk_crypto_info *dev);
-	void (*disable_clk)(struct rk_crypto_info *dev);
-	int (*load_data)(struct rk_crypto_info *dev,
-			 struct scatterlist *sg_src,
-			 struct scatterlist *sg_dst);
-	void (*unload_data)(struct rk_crypto_info *dev);
+	struct crypto_engine *engine;
+	struct completion complete;
+	int status;
 };
 
 /* the private variable of hash */
 struct rk_ahash_ctx {
+	struct crypto_engine_ctx enginectx;
 	struct rk_crypto_info		*dev;
 	/* for fallback */
 	struct crypto_ahash		*fallback_tfm;
@@ -232,12 +212,24 @@ struct rk_ahash_ctx {
 /* the privete variable of hash for fallback */
 struct rk_ahash_rctx {
 	struct ahash_request		fallback_req;
+	u32				mode;
+	int nrsg;
 };
 
 /* the private variable of cipher */
 struct rk_cipher_ctx {
+	struct crypto_engine_ctx enginectx;
 	struct rk_crypto_info		*dev;
 	unsigned int			keylen;
+	u8				key[AES_MAX_KEY_SIZE];
+	u8				iv[AES_BLOCK_SIZE];
+	struct crypto_skcipher *fallback_tfm;
+};
+
+struct rk_cipher_rctx {
+	u8 backup_iv[AES_BLOCK_SIZE];
+	u32				mode;
+	struct skcipher_request fallback_req;   // keep at the end
 };
 
 enum alg_type {
@@ -248,7 +240,7 @@ enum alg_type {
 struct rk_crypto_tmp {
 	struct rk_crypto_info		*dev;
 	union {
-		struct crypto_alg	crypto;
+		struct skcipher_alg	skcipher;
 		struct ahash_alg	hash;
 	} alg;
 	enum alg_type			type;

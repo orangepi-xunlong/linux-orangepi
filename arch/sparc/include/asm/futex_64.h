@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _SPARC64_FUTEX_H
 #define _SPARC64_FUTEX_H
 
@@ -37,8 +38,6 @@ static inline int arch_futex_atomic_op_inuser(int op, int oparg, int *oval,
 	if (unlikely((((unsigned long) uaddr) & 0x3UL)))
 		return -EINVAL;
 
-	pagefault_disable();
-
 	switch (op) {
 	case FUTEX_OP_SET:
 		__futex_cas_op("mov\t%4, %1", ret, oldval, uaddr, oparg);
@@ -58,8 +57,6 @@ static inline int arch_futex_atomic_op_inuser(int op, int oparg, int *oval,
 	default:
 		ret = -ENOSYS;
 	}
-
-	pagefault_enable();
 
 	if (!ret)
 		*oval = oldval;

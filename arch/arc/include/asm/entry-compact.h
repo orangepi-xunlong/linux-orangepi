@@ -1,10 +1,7 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (C) 2014-15 Synopsys, Inc. (www.synopsys.com)
  * Copyright (C) 2004, 2007-2010, 2011-2012 Synopsys, Inc. (www.synopsys.com)
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  *
  * Vineetg: March 2009 (Supporting 2 levels of Interrupts)
  *  Stack switching code can no longer reliably rely on the fact that
@@ -24,7 +21,7 @@
  *      r25 contains the kernel current task ptr
  *  - Defined Stack Switching Macro to be reused in all intr/excp hdlrs
  *  - Shaved off 11 instructions from RESTORE_ALL_INT1 by using the
- *      address Write back load ld.ab instead of seperate ld/add instn
+ *      address Write back load ld.ab instead of separate ld/add instn
  *
  * Amit Bhor, Sameer Dhavale: Codito Technologies 2004
  */
@@ -35,10 +32,6 @@
 #include <asm/asm-offsets.h>
 #include <asm/irqflags-compact.h>
 #include <asm/thread_info.h>	/* For THREAD_SIZE */
-
-#ifdef CONFIG_ARC_PLAT_EZNPS
-#include <plat/ctop.h>
-#endif
 
 /*--------------------------------------------------------------
  * Switch to Kernel Mode stack if SP points to User Mode stack
@@ -133,19 +126,11 @@
  * to be saved again on kernel mode stack, as part of pt_regs.
  *-------------------------------------------------------------*/
 .macro PROLOG_FREEUP_REG	reg, mem
-#ifdef CONFIG_SMP
-	sr  \reg, [ARC_REG_SCRATCH_DATA0]
-#else
 	st  \reg, [\mem]
-#endif
 .endm
 
 .macro PROLOG_RESTORE_REG	reg, mem
-#ifdef CONFIG_SMP
-	lr  \reg, [ARC_REG_SCRATCH_DATA0]
-#else
 	ld  \reg, [\mem]
-#endif
 .endm
 
 /*--------------------------------------------------------------
@@ -192,8 +177,8 @@
 	PUSHAX	lp_start
 	PUSHAX	erbta
 
-	lr	r9, [ecr]
-	st      r9, [sp, PT_event]    /* EV_Trap expects r9 to have ECR */
+	lr	r10, [ecr]
+	st      r10, [sp, PT_event]    /* EV_Trap expects r10 to have ECR */
 .endm
 
 /*--------------------------------------------------------------
@@ -208,6 +193,7 @@
  * by hardware and that is not good.
  *-------------------------------------------------------------*/
 .macro EXCEPTION_EPILOGUE
+
 	POPAX	erbta
 	POPAX	lp_start
 	POPAX	lp_end
@@ -222,6 +208,9 @@
 	POP	gp
 	RESTORE_R12_TO_R0
 
+#ifdef CONFIG_ARC_CURR_IN_REG
+	ld	r25, [sp, 12]
+#endif
 	ld  sp, [sp] /* restore original sp */
 	/* orig_r0, ECR, user_r25 skipped automatically */
 .endm
@@ -265,6 +254,7 @@
 	PUSHAX	lp_end
 	PUSHAX	lp_start
 	PUSHAX	bta_l\LVL\()
+
 .endm
 
 /*--------------------------------------------------------------
@@ -277,6 +267,7 @@
  * by hardware and that is not good.
  *-------------------------------------------------------------*/
 .macro INTERRUPT_EPILOGUE  LVL
+
 	POPAX	bta_l\LVL\()
 	POPAX	lp_start
 	POPAX	lp_end
@@ -291,6 +282,9 @@
 	POP	gp
 	RESTORE_R12_TO_R0
 
+#ifdef CONFIG_ARC_CURR_IN_REG
+	ld	r25, [sp, 12]
+#endif
 	ld  sp, [sp] /* restore original sp */
 	/* orig_r0, ECR, user_r25 skipped automatically */
 .endm
@@ -300,13 +294,11 @@
 	bic \reg, sp, (THREAD_SIZE - 1)
 .endm
 
-#ifndef CONFIG_ARC_PLAT_EZNPS
 /* Get CPU-ID of this core */
 .macro  GET_CPU_ID  reg
 	lr  \reg, [identity]
 	lsr \reg, \reg, 8
 	bmsk \reg, \reg, 7
 .endm
-#endif
 
 #endif  /* __ASM_ARC_ENTRY_COMPACT_H */

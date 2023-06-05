@@ -40,7 +40,7 @@
 			d-cache-size = <32768>;
 			dcr-controller;
 			dcr-access-method = "native";
-			status = "ok";
+			status = "okay";
 		};
 		cpu@1 {
 			device_type = "cpu";
@@ -216,7 +216,7 @@
 				interrupts = <39 2>;
 			};
 
-			IIC0: i2c@00000000 {
+			IIC0: i2c@0 {
 				compatible = "ibm,iic-476gtr", "ibm,iic";
 				reg = <0x0 0x00000020>;
 				interrupt-parent = <&MPIC>;
@@ -229,7 +229,7 @@
 				};
 			};
 
-			IIC1: i2c@00000100 {
+			IIC1: i2c@100 {
 				compatible = "ibm,iic-476gtr", "ibm,iic";
 				reg = <0x100 0x00000020>;
 				interrupt-parent = <&MPIC>;
@@ -248,7 +248,7 @@
 			};
 		};
 
-		PCIE0: pciex@10100000000 {
+		PCIE0: pcie@10100000000 {
 			device_type = "pci";
 			#interrupt-cells = <1>;
 			#size-cells = <2>;
@@ -288,7 +288,7 @@
 				0x0 0x0 0x0 0x4 &MPIC 48 0x2 /* int D */>;
 		};
 
-		PCIE1: pciex@20100000000 {
+		PCIE1: pcie@20100000000 {
 			device_type = "pci";
 			#interrupt-cells = <1>;
 			#size-cells = <2>;
@@ -328,7 +328,7 @@
 				0x0 0x0 0x0 0x4 &MPIC 56 0x2 /* int D */>;
 		};
 
-		PCIE2: pciex@18100000000 {
+		PCIE2: pcie@18100000000 {
 			device_type = "pci";
 			#interrupt-cells = <1>;
 			#size-cells = <2>;
@@ -368,7 +368,7 @@
 				0x0 0x0 0x0 0x4 &MPIC 64 0x2 /* int D */>;
 		};
 
-		PCIE3: pciex@28100000000 {
+		PCIE3: pcie@28100000000 {
 			device_type = "pci";
 			#interrupt-cells = <1>;
 			#size-cells = <2>;
@@ -410,6 +410,6 @@
 	};
 
 	chosen {
-		linux,stdout-path = &UART0;
+		stdout-path = &UART0;
 	};
 };

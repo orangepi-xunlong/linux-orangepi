@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _FIREWIRE_CORE_H
 #define _FIREWIRE_CORE_H
 
@@ -12,7 +13,7 @@
 #include <linux/slab.h>
 #include <linux/types.h>
 
-#include <linux/atomic.h>
+#include <linux/refcount.h>
 
 struct device;
 struct fw_card;
@@ -157,8 +158,6 @@ void fw_node_event(struct fw_card *card, struct fw_node *node, int event);
 int fw_iso_buffer_alloc(struct fw_iso_buffer *buffer, int page_count);
 int fw_iso_buffer_map_dma(struct fw_iso_buffer *buffer, struct fw_card *card,
 			  enum dma_data_direction direction);
-int fw_iso_buffer_map_vma(struct fw_iso_buffer *buffer,
-			  struct vm_area_struct *vma);
 
 
 /* -topology */
@@ -184,7 +183,7 @@ struct fw_node {
 			 * local node to this node. */
 	u8 max_depth:4;	/* Maximum depth to any leaf node */
 	u8 max_hops:4;	/* Max hops in this sub tree */
-	atomic_t ref_count;
+	refcount_t ref_count;
 
 	/* For serializing node topology into a list. */
 	struct list_head link;
@@ -192,19 +191,19 @@ struct fw_node {
 	/* Upper layer specific data. */
 	void *data;
 
-	struct fw_node *ports[0];
+	struct fw_node *ports[];
 };
 
 static inline struct fw_node *fw_node_get(struct fw_node *node)
 {
-	atomic_inc(&node->ref_count);
+	refcount_inc(&node->ref_count);
 
 	return node;
 }
 
 static inline void fw_node_put(struct fw_node *node)
 {
-	if (atomic_dec_and_test(&node->ref_count))
+	if (refcount_dec_and_test(&node->ref_count))
 		kfree(node);
 }
 

@@ -57,7 +57,7 @@
  * QIB_VERBOSE_TRACING define as 1 if you want additional tracing in
  * fastpath code
  * QIB_TRACE_REGWRITES define as 1 if you want register writes to be
- * traced in faspath code
+ * traced in fastpath code
  * _QIB_TRACING define as 0 if you want to remove all tracing in a
  * compilation unit
  */
@@ -742,11 +742,7 @@ struct qib_tid_session_member {
 #define SIZE_OF_CRC 1
 
 #define QIB_DEFAULT_P_KEY 0xFFFF
-#define QIB_AETH_CREDIT_SHIFT 24
-#define QIB_AETH_CREDIT_MASK 0x1F
-#define QIB_AETH_CREDIT_INVAL 0x1F
 #define QIB_PSN_MASK 0xFFFFFF
-#define QIB_MSN_MASK 0xFFFFFF
 #define QIB_EAGER_TID_ID QLOGIC_IB_I_TID_MASK
 #define QIB_MULTICAST_QPN 0xFFFFFF
 
@@ -799,11 +795,4 @@ static inline __u32 qib_hdrget_use_egr_buf(const __le32 *rbuf)
 {
 	return __le32_to_cpu(rbuf[0]) & QLOGIC_IB_RHF_L_USE_EGR;
 }
-
-static inline __u32 qib_hdrget_qib_ver(__le32 hdrword)
-{
-	return (__le32_to_cpu(hdrword) >> QLOGIC_IB_I_VERS_SHIFT) &
-		QLOGIC_IB_I_VERS_MASK;
-}
-
 #endif                          /* _QIB_COMMON_H */

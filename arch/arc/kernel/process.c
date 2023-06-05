@@ -1,9 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2004, 2007-2010, 2011-2012 Synopsys, Inc. (www.synopsys.com)
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  *
  * Amit Bhor, Kanika Nema: Codito Technologies 2004
  */
@@ -11,6 +8,9 @@
 #include <linux/errno.h>
 #include <linux/module.h>
 #include <linux/sched.h>
+#include <linux/sched/task.h>
+#include <linux/sched/task_stack.h>
+
 #include <linux/mm.h>
 #include <linux/fs.h>
 #include <linux/unistd.h>
@@ -19,6 +19,8 @@
 #include <linux/syscalls.h>
 #include <linux/elf.h>
 #include <linux/tick.h>
+
+#include <asm/fpu.h>
 
 SYSCALL_DEFINE1(arc_settls, void *, user_tls_data_ptr)
 {
@@ -41,24 +43,24 @@ SYSCALL_DEFINE0(arc_gettls)
 	return task_thread_info(current)->thr_ptr;
 }
 
-SYSCALL_DEFINE3(arc_usr_cmpxchg, int *, uaddr, int, expected, int, new)
+SYSCALL_DEFINE3(arc_usr_cmpxchg, int __user *, uaddr, int, expected, int, new)
 {
 	struct pt_regs *regs = current_pt_regs();
 	u32 uval;
 	int ret;
 
 	/*
-	 * This is only for old cores lacking LLOCK/SCOND, which by defintion
+	 * This is only for old cores lacking LLOCK/SCOND, which by definition
 	 * can't possibly be SMP. Thus doesn't need to be SMP safe.
 	 * And this also helps reduce the overhead for serializing in
 	 * the UP case
 	 */
 	WARN_ON_ONCE(IS_ENABLED(CONFIG_SMP));
 
-	/* Z indicates to userspace if operation succeded */
+	/* Z indicates to userspace if operation succeeded */
 	regs->status32 &= ~STATUS_Z_MASK;
 
-	ret = access_ok(VERIFY_WRITE, uaddr, sizeof(*uaddr));
+	ret = access_ok(uaddr, sizeof(*uaddr));
 	if (!ret)
 		 goto fail;
 
@@ -88,27 +90,41 @@ fault:
 	if (unlikely(ret != -EFAULT))
 		 goto fail;
 
-	down_read(&current->mm->mmap_sem);
-	ret = fixup_user_fault(current, current->mm, (unsigned long) uaddr,
+	mmap_read_lock(current->mm);
+	ret = fixup_user_fault(current->mm, (unsigned long) uaddr,
 			       FAULT_FLAG_WRITE, NULL);
-	up_read(&current->mm->mmap_sem);
+	mmap_read_unlock(current->mm);
 
 	if (likely(!ret))
 		 goto again;
 
 fail:
-	force_sig(SIGSEGV, current);
+	force_sig(SIGSEGV);
 	return ret;
 }
 
+#ifdef CONFIG_ISA_ARCV2
+
 void arch_cpu_idle(void)
 {
-	/* sleep, but enable all interrupts before committing */
+	/* Re-enable interrupts <= default irq priority before committing SLEEP */
+	const unsigned int arg = 0x10 | ARCV2_IRQ_DEF_PRIO;
+
 	__asm__ __volatile__(
 		"sleep %0	\n"
 		:
-		:"I"(ISA_SLEEP_ARG)); /* can't be "r" has to be embedded const */
+		:"I"(arg)); /* can't be "r" has to be embedded const */
 }
+
+#else	/* ARC700 */
+
+void arch_cpu_idle(void)
+{
+	/* sleep, but enable both set E1/E2 (levels of interrupts) before committing */
+	__asm__ __volatile__("sleep 0x3	\n");
+}
+
+#endif
 
 asmlinkage void ret_from_fork(void);
 
@@ -146,10 +162,11 @@ asmlinkage void ret_from_fork(void);
  * |    user_r25    |
  * ------------------  <===== END of PAGE
  */
-int copy_thread(unsigned long clone_flags,
-		unsigned long usp, unsigned long kthread_arg,
-		struct task_struct *p)
+int copy_thread(struct task_struct *p, const struct kernel_clone_args *args)
 {
+	unsigned long clone_flags = args->flags;
+	unsigned long usp = args->stack;
+	unsigned long tls = args->tls;
 	struct pt_regs *c_regs;        /* child's pt_regs */
 	unsigned long *childksp;       /* to unwind out of __switch_to() */
 	struct callee_regs *c_callee;  /* child's callee regs */
@@ -175,11 +192,11 @@ int copy_thread(unsigned long clone_flags,
 	childksp[0] = 0;			/* fp */
 	childksp[1] = (unsigned long)ret_from_fork; /* blink */
 
-	if (unlikely(p->flags & PF_KTHREAD)) {
+	if (unlikely(args->fn)) {
 		memset(c_regs, 0, sizeof(struct pt_regs));
 
-		c_callee->r13 = kthread_arg;
-		c_callee->r14 = usp;  /* function */
+		c_callee->r13 = (unsigned long)args->fn_arg;
+		c_callee->r14 = (unsigned long)args->fn;
 
 		return 0;
 	}
@@ -206,7 +223,7 @@ int copy_thread(unsigned long clone_flags,
 		 * set task's userland tls data ptr from 4th arg
 		 * clone C-lib call is difft from clone sys-call
 		 */
-		task_thread_info(p)->thr_ptr = regs->r3;
+		task_thread_info(p)->thr_ptr = tls;
 	} else {
 		/* Normal fork case: set parent's TLS ptr in child */
 		task_thread_info(p)->thr_ptr =
@@ -239,7 +256,7 @@ int copy_thread(unsigned long clone_flags,
 /*
  * Do necessary setup to start up a new user task
  */
-void start_thread(struct pt_regs * regs, unsigned long pc, unsigned long usp)
+void start_thread(struct pt_regs *regs, unsigned long pc, unsigned long usp)
 {
 	regs->sp = usp;
 	regs->ret = pc;
@@ -251,6 +268,8 @@ void start_thread(struct pt_regs * regs, unsigned long pc, unsigned long usp)
 	 */
 	regs->status32 = STATUS_U_MASK | STATUS_L_MASK | ISA_INIT_STATUS_BITS;
 
+	fpu_init_task(regs);
+
 	/* bogus seed values for debugging */
 	regs->lp_start = 0x10;
 	regs->lp_end = 0x80;
@@ -261,11 +280,6 @@ void start_thread(struct pt_regs * regs, unsigned long pc, unsigned long usp)
  */
 void flush_thread(void)
 {
-}
-
-int dump_fpu(struct pt_regs *regs, elf_fpregset_t *fpu)
-{
-	return 0;
 }
 
 int elf_check_arch(const struct elf32_hdr *x)
@@ -281,7 +295,7 @@ int elf_check_arch(const struct elf32_hdr *x)
 	eflags = x->e_flags;
 	if ((eflags & EF_ARC_OSABI_MSK) != EF_ARC_OSABI_CURRENT) {
 		pr_err("ABI mismatch - you need newer toolchain\n");
-		force_sigsegv(SIGSEGV, current);
+		force_fatal_sig(SIGSEGV);
 		return 0;
 	}
 

@@ -51,21 +51,21 @@ struct dm_btree_value_type {
 	 */
 
 	/*
-	 * The btree is making a duplicate of the value, for instance
+	 * The btree is making a duplicate of a run of values, for instance
 	 * because previously-shared btree nodes have now diverged.
 	 * @value argument is the new copy that the copy function may modify.
 	 * (Probably it just wants to increment a reference count
 	 * somewhere.) This method is _not_ called for insertion of a new
 	 * value: It is assumed the ref count is already 1.
 	 */
-	void (*inc)(void *context, const void *value);
+	void (*inc)(void *context, const void *value, unsigned int count);
 
 	/*
-	 * This value is being deleted.  The btree takes care of freeing
+	 * These values are being deleted.  The btree takes care of freeing
 	 * the memory pointed to by @value.  Often the del function just
-	 * needs to decrement a reference count somewhere.
+	 * needs to decrement a reference counts somewhere.
 	 */
-	void (*dec)(void *context, const void *value);
+	void (*dec)(void *context, const void *value, unsigned int count);
 
 	/*
 	 * A test for equality between two values.  When a value is
@@ -84,7 +84,7 @@ struct dm_btree_info {
 	/*
 	 * Number of nested btrees. (Not the depth of a single tree.)
 	 */
-	unsigned levels;
+	unsigned int levels;
 	struct dm_btree_value_type value_type;
 };
 
@@ -149,7 +149,7 @@ int dm_btree_remove(struct dm_btree_info *info, dm_block_t root,
  */
 int dm_btree_remove_leaves(struct dm_btree_info *info, dm_block_t root,
 			   uint64_t *keys, uint64_t end_key,
-			   dm_block_t *new_root, unsigned *nr_removed);
+			   dm_block_t *new_root, unsigned int *nr_removed);
 
 /*
  * Returns < 0 on failure.  Otherwise the number of key entries that have
@@ -188,7 +188,7 @@ int dm_btree_walk(struct dm_btree_info *info, dm_block_t root,
 
 struct cursor_node {
 	struct dm_block *b;
-	unsigned index;
+	unsigned int index;
 };
 
 struct dm_btree_cursor {
@@ -196,7 +196,7 @@ struct dm_btree_cursor {
 	dm_block_t root;
 
 	bool prefetch_leaves;
-	unsigned depth;
+	unsigned int depth;
 	struct cursor_node nodes[DM_BTREE_CURSOR_MAX_DEPTH];
 };
 
@@ -209,6 +209,7 @@ int dm_btree_cursor_begin(struct dm_btree_info *info, dm_block_t root,
 			  bool prefetch_leaves, struct dm_btree_cursor *c);
 void dm_btree_cursor_end(struct dm_btree_cursor *c);
 int dm_btree_cursor_next(struct dm_btree_cursor *c);
+int dm_btree_cursor_skip(struct dm_btree_cursor *c, uint32_t count);
 int dm_btree_cursor_get_value(struct dm_btree_cursor *c, uint64_t *key, void *value_le);
 
 #endif	/* _LINUX_DM_BTREE_H */

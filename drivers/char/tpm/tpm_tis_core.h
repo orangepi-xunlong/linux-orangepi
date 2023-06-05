@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (C) 2005, 2006 IBM Corporation
  * Copyright (C) 2014, 2015 Intel Corporation
@@ -13,11 +14,6 @@
  *
  * This device driver implements the TPM interface as defined in
  * the TCG TPM Interface Spec version 1.2, revision 1.0.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as
- * published by the Free Software Foundation, version 2 of the
- * License.
  */
 
 #ifndef __TPM_TIS_CORE_H__
@@ -38,6 +34,7 @@ enum tis_status {
 	TPM_STS_GO = 0x20,
 	TPM_STS_DATA_AVAIL = 0x10,
 	TPM_STS_DATA_EXPECT = 0x08,
+	TPM_STS_READ_ZERO = 0x23, /* bits that must be zero on read */
 };
 
 enum tis_int_flags {
@@ -57,15 +54,17 @@ enum tis_defaults {
 	TIS_MEM_LEN = 0x5000,
 	TIS_SHORT_TIMEOUT = 750,	/* ms */
 	TIS_LONG_TIMEOUT = 2000,	/* 2 sec */
+	TIS_TIMEOUT_MIN_ATML = 14700,	/* usecs */
+	TIS_TIMEOUT_MAX_ATML = 15000,	/* usecs */
 };
 
 /* Some timeout values are needed before it is known whether the chip is
  * TPM 1.0 or TPM 2.0.
  */
-#define TIS_TIMEOUT_A_MAX	max(TIS_SHORT_TIMEOUT, TPM2_TIMEOUT_A)
-#define TIS_TIMEOUT_B_MAX	max(TIS_LONG_TIMEOUT, TPM2_TIMEOUT_B)
-#define TIS_TIMEOUT_C_MAX	max(TIS_SHORT_TIMEOUT, TPM2_TIMEOUT_C)
-#define TIS_TIMEOUT_D_MAX	max(TIS_SHORT_TIMEOUT, TPM2_TIMEOUT_D)
+#define TIS_TIMEOUT_A_MAX	max_t(int, TIS_SHORT_TIMEOUT, TPM2_TIMEOUT_A)
+#define TIS_TIMEOUT_B_MAX	max_t(int, TIS_LONG_TIMEOUT, TPM2_TIMEOUT_B)
+#define TIS_TIMEOUT_C_MAX	max_t(int, TIS_SHORT_TIMEOUT, TPM2_TIMEOUT_C)
+#define TIS_TIMEOUT_D_MAX	max_t(int, TIS_SHORT_TIMEOUT, TPM2_TIMEOUT_D)
 
 #define	TPM_ACCESS(l)			(0x0000 | ((l) << 12))
 #define	TPM_INT_ENABLE(l)		(0x0008 | ((l) << 12))
@@ -79,69 +78,137 @@ enum tis_defaults {
 #define	TPM_DID_VID(l)			(0x0F00 | ((l) << 12))
 #define	TPM_RID(l)			(0x0F04 | ((l) << 12))
 
+#define LPC_CNTRL_OFFSET		0x84
+#define LPC_CLKRUN_EN			(1 << 2)
+#define INTEL_LEGACY_BLK_BASE_ADDR	0xFED08000
+#define ILB_REMAP_SIZE			0x100
+
 enum tpm_tis_flags {
-	TPM_TIS_ITPM_POSSIBLE		= BIT(0),
+	TPM_TIS_ITPM_WORKAROUND		= BIT(0),
+	TPM_TIS_INVALID_STATUS		= BIT(1),
+	TPM_TIS_DEFAULT_CANCELLATION	= BIT(2),
+	TPM_TIS_IRQ_TESTED		= BIT(3),
 };
 
 struct tpm_tis_data {
 	u16 manufacturer_id;
+	struct mutex locality_count_mutex;
+	unsigned int locality_count;
 	int locality;
 	int irq;
-	bool irq_tested;
-	unsigned int flags;
+	unsigned int int_mask;
+	unsigned long flags;
+	void __iomem *ilb_base_addr;
+	u16 clkrun_enabled;
 	wait_queue_head_t int_queue;
 	wait_queue_head_t read_queue;
 	const struct tpm_tis_phy_ops *phy_ops;
+	unsigned short rng_quality;
+	unsigned int timeout_min; /* usecs */
+	unsigned int timeout_max; /* usecs */
+};
+
+/*
+ * IO modes to indicate how many bytes should be read/written at once in the
+ * tpm_tis_phy_ops read_bytes/write_bytes calls. Use TPM_TIS_PHYS_8 to
+ * receive/transmit byte-wise, TPM_TIS_PHYS_16 for two bytes etc.
+ */
+enum tpm_tis_io_mode {
+	TPM_TIS_PHYS_8,
+	TPM_TIS_PHYS_16,
+	TPM_TIS_PHYS_32,
 };
 
 struct tpm_tis_phy_ops {
+	/* data is passed in little endian */
 	int (*read_bytes)(struct tpm_tis_data *data, u32 addr, u16 len,
-			  u8 *result);
+			  u8 *result, enum tpm_tis_io_mode mode);
 	int (*write_bytes)(struct tpm_tis_data *data, u32 addr, u16 len,
-			   const u8 *value);
-	int (*read16)(struct tpm_tis_data *data, u32 addr, u16 *result);
-	int (*read32)(struct tpm_tis_data *data, u32 addr, u32 *result);
-	int (*write32)(struct tpm_tis_data *data, u32 addr, u32 src);
+			   const u8 *value, enum tpm_tis_io_mode mode);
+	int (*verify_crc)(struct tpm_tis_data *data, size_t len,
+			  const u8 *value);
 };
 
 static inline int tpm_tis_read_bytes(struct tpm_tis_data *data, u32 addr,
 				     u16 len, u8 *result)
 {
-	return data->phy_ops->read_bytes(data, addr, len, result);
+	return data->phy_ops->read_bytes(data, addr, len, result,
+					 TPM_TIS_PHYS_8);
 }
 
 static inline int tpm_tis_read8(struct tpm_tis_data *data, u32 addr, u8 *result)
 {
-	return data->phy_ops->read_bytes(data, addr, 1, result);
+	return data->phy_ops->read_bytes(data, addr, 1, result, TPM_TIS_PHYS_8);
 }
 
 static inline int tpm_tis_read16(struct tpm_tis_data *data, u32 addr,
 				 u16 *result)
 {
-	return data->phy_ops->read16(data, addr, result);
+	__le16 result_le;
+	int rc;
+
+	rc = data->phy_ops->read_bytes(data, addr, sizeof(u16),
+				       (u8 *)&result_le, TPM_TIS_PHYS_16);
+	if (!rc)
+		*result = le16_to_cpu(result_le);
+
+	return rc;
 }
 
 static inline int tpm_tis_read32(struct tpm_tis_data *data, u32 addr,
 				 u32 *result)
 {
-	return data->phy_ops->read32(data, addr, result);
+	__le32 result_le;
+	int rc;
+
+	rc = data->phy_ops->read_bytes(data, addr, sizeof(u32),
+				       (u8 *)&result_le, TPM_TIS_PHYS_32);
+	if (!rc)
+		*result = le32_to_cpu(result_le);
+
+	return rc;
 }
 
 static inline int tpm_tis_write_bytes(struct tpm_tis_data *data, u32 addr,
 				      u16 len, const u8 *value)
 {
-	return data->phy_ops->write_bytes(data, addr, len, value);
+	return data->phy_ops->write_bytes(data, addr, len, value,
+					  TPM_TIS_PHYS_8);
 }
 
 static inline int tpm_tis_write8(struct tpm_tis_data *data, u32 addr, u8 value)
 {
-	return data->phy_ops->write_bytes(data, addr, 1, &value);
+	return data->phy_ops->write_bytes(data, addr, 1, &value,
+					  TPM_TIS_PHYS_8);
 }
 
 static inline int tpm_tis_write32(struct tpm_tis_data *data, u32 addr,
 				  u32 value)
 {
-	return data->phy_ops->write32(data, addr, value);
+	__le32 value_le;
+	int rc;
+
+	value_le = cpu_to_le32(value);
+	rc =  data->phy_ops->write_bytes(data, addr, sizeof(u32),
+					 (u8 *)&value_le, TPM_TIS_PHYS_32);
+	return rc;
+}
+
+static inline int tpm_tis_verify_crc(struct tpm_tis_data *data, size_t len,
+				     const u8 *value)
+{
+	if (!data->phy_ops->verify_crc)
+		return 0;
+	return data->phy_ops->verify_crc(data, len, value);
+}
+
+static inline bool is_bsw(void)
+{
+#ifdef CONFIG_X86
+	return ((boot_cpu_data.x86_model == INTEL_FAM6_ATOM_AIRMONT) ? 1 : 0);
+#else
+	return false;
+#endif
 }
 
 void tpm_tis_remove(struct tpm_chip *chip);

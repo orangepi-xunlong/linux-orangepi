@@ -52,6 +52,21 @@
 	interrupt-controller;
 	#interrupt-cells = <1>;
 
+	ac_power_supply: ac-power {
+		compatible = "x-powers,axp221-ac-power-supply";
+		status = "disabled";
+	};
+
+	axp_adc: adc {
+		compatible = "x-powers,axp221-adc";
+		#io-channel-cells = <1>;
+	};
+
+	battery_power_supply: battery-power {
+		compatible = "x-powers,axp221-battery-power-supply";
+		status = "disabled";
+	};
+
 	regulators {
 		/* Default work frequency for buck regulators */
 		x-powers,dcdc-freq = <3000>;
@@ -148,7 +163,7 @@
 		};
 	};
 
-	usb_power_supply: usb_power_supply {
+	usb_power_supply: usb-power {
 		compatible = "x-powers,axp221-usb-power-supply";
 		status = "disabled";
 	};

@@ -97,7 +97,7 @@ int reiserfs_resize(struct super_block *s, unsigned long block_count_new)
 		 * using the copy_size var below allows this code to work for
 		 * both shrinking and expanding the FS.
 		 */
-		copy_size = bmap_nr_new < bmap_nr ? bmap_nr_new : bmap_nr;
+		copy_size = min(bmap_nr_new, bmap_nr);
 		copy_size =
 		    copy_size * sizeof(struct reiserfs_list_bitmap_node *);
 		for (i = 0; i < JOURNAL_NUM_BITMAPS; i++) {
@@ -120,7 +120,8 @@ int reiserfs_resize(struct super_block *s, unsigned long block_count_new)
 		 * array of bitmap block pointers
 		 */
 		bitmap =
-		    vzalloc(sizeof(struct reiserfs_bitmap_info) * bmap_nr_new);
+		    vzalloc(array_size(bmap_nr_new,
+				       sizeof(struct reiserfs_bitmap_info)));
 		if (!bitmap) {
 			/*
 			 * Journal bitmaps are still supersized, but the

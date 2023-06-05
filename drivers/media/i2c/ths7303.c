@@ -319,7 +319,7 @@ static const struct v4l2_subdev_core_ops ths7303_core_ops = {
 
 static const struct v4l2_subdev_ops ths7303_ops = {
 	.core	= &ths7303_core_ops,
-	.video 	= &ths7303_video_ops,
+	.video	= &ths7303_video_ops,
 };
 
 static int ths7303_probe(struct i2c_client *client,
@@ -358,13 +358,11 @@ static int ths7303_probe(struct i2c_client *client,
 	return 0;
 }
 
-static int ths7303_remove(struct i2c_client *client)
+static void ths7303_remove(struct i2c_client *client)
 {
 	struct v4l2_subdev *sd = i2c_get_clientdata(client);
 
 	v4l2_device_unregister_subdev(sd);
-
-	return 0;
 }
 
 static const struct i2c_device_id ths7303_id[] = {

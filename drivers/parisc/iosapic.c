@@ -1,13 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
 ** I/O Sapic Driver - PCI interrupt line support
 **
 **      (c) Copyright 1999 Grant Grundler
 **      (c) Copyright 1999 Hewlett-Packard Company
 **
-**      This program is free software; you can redistribute it and/or modify
-**      it under the terms of the GNU General Public License as published by
-**      the Free Software Foundation; either version 2 of the License, or
-**      (at your option) any later version.
 **
 ** The I/O sapic driver manages the Interrupt Redirection Table which is
 ** the control logic to convert PCI line based interrupts into a Message
@@ -126,21 +123,10 @@
 **   o disable IRdT - call disable_irq(vector[line]->processor_irq)
 */
 
-
-/* FIXME: determine which include files are really needed */
-#include <linux/types.h>
-#include <linux/kernel.h>
-#include <linux/spinlock.h>
 #include <linux/pci.h>
-#include <linux/init.h>
-#include <linux/slab.h>
-#include <linux/interrupt.h>
 
-#include <asm/byteorder.h>	/* get in-line asm for swab */
 #include <asm/pdc.h>
 #include <asm/pdcpat.h>
-#include <asm/page.h>
-#include <asm/io.h>		/* read/write functions */
 #ifdef CONFIG_SUPERIO
 #include <asm/superio.h>
 #endif
@@ -235,16 +221,7 @@ static size_t irt_num_entry;
 
 static struct irt_entry *iosapic_alloc_irt(int num_entries)
 {
-	unsigned long a;
-
-	/* The IRT needs to be 8-byte aligned for the PDC call. 
-	 * Normally kmalloc would guarantee larger alignment, but
-	 * if CONFIG_DEBUG_SLAB is enabled, then we can get only
-	 * 4-byte alignment on 32-bit kernels
-	 */
-	a = (unsigned long)kmalloc(sizeof(struct irt_entry) * num_entries + 8, GFP_KERNEL);
-	a = (a + 7UL) & ~7UL;
-	return (struct irt_entry *)a;
+	return kcalloc(num_entries, sizeof(struct irt_entry), GFP_KERNEL);
 }
 
 /**
@@ -691,7 +668,7 @@ static int iosapic_set_affinity_irq(struct irq_data *d,
 	if (dest_cpu < 0)
 		return -1;
 
-	cpumask_copy(irq_data_get_affinity_mask(d), cpumask_of(dest_cpu));
+	irq_data_update_affinity(d, cpumask_of(dest_cpu));
 	vi->txn_addr = txn_affinity_addr(d->irq, dest_cpu);
 
 	spin_lock_irqsave(&iosapic_lock, flags);
@@ -889,6 +866,7 @@ int iosapic_serial_irq(struct parisc_device *dev)
 
 	return vi->txn_irq;
 }
+EXPORT_SYMBOL(iosapic_serial_irq);
 #endif
 
 
@@ -941,7 +919,7 @@ void *iosapic_register(unsigned long hpa)
 		return NULL;
 	}
 
-	isi->addr = ioremap_nocache(hpa, 4096);
+	isi->addr = ioremap(hpa, 4096);
 	isi->isi_hpa = hpa;
 	isi->isi_version = iosapic_rd_version(isi);
 	isi->isi_num_vectors = IOSAPIC_IRDT_MAX_ENTRY(isi->isi_version) + 1;

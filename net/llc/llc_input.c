@@ -144,6 +144,7 @@ static inline int llc_fixup_skb(struct sk_buff *skb)
  *	@skb: received pdu
  *	@dev: device that receive pdu
  *	@pt: packet type
+ *	@orig_dev: the original receive net device
  *
  *	When the system receives a 802.2 frame this function is called. It
  *	checks SAP and connection of received pdu and passes frame to
@@ -193,7 +194,7 @@ int llc_rcv(struct sk_buff *skb, struct net_device *dev,
 	 */
 	rcv = rcu_dereference(sap->rcv_func);
 	dest = llc_pdu_type(skb);
-	sap_handler = dest ? ACCESS_ONCE(llc_type_handlers[dest - 1]) : NULL;
+	sap_handler = dest ? READ_ONCE(llc_type_handlers[dest - 1]) : NULL;
 	if (unlikely(!sap_handler)) {
 		if (rcv)
 			rcv(skb, dev, pt, orig_dev);
@@ -214,7 +215,7 @@ drop:
 	kfree_skb(skb);
 	goto out;
 handle_station:
-	sta_handler = ACCESS_ONCE(llc_station_handler);
+	sta_handler = READ_ONCE(llc_station_handler);
 	if (!sta_handler)
 		goto drop;
 	sta_handler(skb);

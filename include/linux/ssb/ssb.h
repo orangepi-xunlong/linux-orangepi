@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef LINUX_SSB_H_
 #define LINUX_SSB_H_
 
@@ -6,7 +7,7 @@
 #include <linux/types.h>
 #include <linux/spinlock.h>
 #include <linux/pci.h>
-#include <linux/gpio.h>
+#include <linux/gpio/driver.h>
 #include <linux/mod_devicetable.h>
 #include <linux/dma-mapping.h>
 #include <linux/platform_device.h>
@@ -498,11 +499,9 @@ struct ssb_bus {
 
 	/* Internal-only stuff follows. Do not touch. */
 	struct list_head list;
-#ifdef CONFIG_SSB_DEBUG
 	/* Is the bus already powered up? */
 	bool powered_up;
 	int power_warn_count;
-#endif /* DEBUG */
 };
 
 enum ssb_quirks {

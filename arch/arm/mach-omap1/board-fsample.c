@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * linux/arch/arm/mach-omap1/board-fsample.c
  *
@@ -5,10 +6,6 @@
  *
  * Original OMAP730 support by Jean Pihet <j-pihet@ti.com>
  * Updated for 2.6 by Kevin Hilman <kjh@hilman.org>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 #include <linux/gpio.h>
 #include <linux/kernel.h>
@@ -16,8 +13,7 @@
 #include <linux/platform_device.h>
 #include <linux/delay.h>
 #include <linux/mtd/mtd.h>
-#include <linux/mtd/nand.h>
-#include <linux/mtd/partitions.h>
+#include <linux/mtd/platnand.h>
 #include <linux/mtd/physmap.h>
 #include <linux/input.h>
 #include <linux/smc91x.h>
@@ -27,13 +23,13 @@
 #include <asm/mach/arch.h>
 #include <asm/mach/map.h>
 
-#include <mach/tc.h>
-#include <mach/mux.h>
-#include "flash.h"
+#include <linux/soc/ti/omap1-io.h>
 #include <linux/platform_data/keypad-omap.h>
+#include "tc.h"
 
-#include <mach/hardware.h>
-
+#include "mux.h"
+#include "flash.h"
+#include "hardware.h"
 #include "iomap.h"
 #include "common.h"
 #include "fpga.h"
@@ -186,7 +182,7 @@ static struct platform_device nor_device = {
 
 #define FSAMPLE_NAND_RB_GPIO_PIN	62
 
-static int nand_dev_ready(struct mtd_info *mtd)
+static int nand_dev_ready(struct nand_chip *chip)
 {
 	return gpio_get_value(FSAMPLE_NAND_RB_GPIO_PIN);
 }
@@ -266,7 +262,7 @@ static struct platform_device *devices[] __initdata = {
 	&kp_device,
 };
 
-static struct omap_lcd_config fsample_lcd_config = {
+static const struct omap_lcd_config fsample_lcd_config = {
 	.ctrl_name	= "internal",
 };
 

@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0 OR MIT
 /*
- * Copyright 2014 Advanced Micro Devices, Inc.
+ * Copyright 2014-2022 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
  * copy of this software and associated documentation files (the "Software"),
@@ -42,26 +43,31 @@
 
 #include <linux/slab.h>
 #include <linux/device.h>
+#include <linux/kfifo.h>
 #include "kfd_priv.h"
 
-#define KFD_INTERRUPT_RING_SIZE 1024
+#define KFD_IH_NUM_ENTRIES 8192
 
 static void interrupt_wq(struct work_struct *);
 
 int kfd_interrupt_init(struct kfd_dev *kfd)
 {
-	void *interrupt_ring = kmalloc_array(KFD_INTERRUPT_RING_SIZE,
-					kfd->device_info->ih_ring_entry_size,
-					GFP_KERNEL);
-	if (!interrupt_ring)
+	int r;
+
+	r = kfifo_alloc(&kfd->ih_fifo,
+		KFD_IH_NUM_ENTRIES * kfd->device_info.ih_ring_entry_size,
+		GFP_KERNEL);
+	if (r) {
+		dev_err(kfd->adev->dev, "Failed to allocate IH fifo\n");
+		return r;
+	}
+
+	kfd->ih_wq = alloc_workqueue("KFD IH", WQ_HIGHPRI, 1);
+	if (unlikely(!kfd->ih_wq)) {
+		kfifo_free(&kfd->ih_fifo);
+		dev_err(kfd->adev->dev, "Failed to allocate KFD IH workqueue\n");
 		return -ENOMEM;
-
-	kfd->interrupt_ring = interrupt_ring;
-	kfd->interrupt_ring_size =
-		KFD_INTERRUPT_RING_SIZE * kfd->device_info->ih_ring_entry_size;
-	atomic_set(&kfd->interrupt_ring_wptr, 0);
-	atomic_set(&kfd->interrupt_ring_rptr, 0);
-
+	}
 	spin_lock_init(&kfd->interrupt_lock);
 
 	INIT_WORK(&kfd->interrupt_work, interrupt_wq);
@@ -92,97 +98,83 @@ void kfd_interrupt_exit(struct kfd_dev *kfd)
 	spin_unlock_irqrestore(&kfd->interrupt_lock, flags);
 
 	/*
-	 * Flush_scheduled_work ensures that there are no outstanding
+	 * flush_work ensures that there are no outstanding
 	 * work-queue items that will access interrupt_ring. New work items
 	 * can't be created because we stopped interrupt handling above.
 	 */
-	flush_scheduled_work();
+	flush_workqueue(kfd->ih_wq);
 
-	kfree(kfd->interrupt_ring);
+	kfifo_free(&kfd->ih_fifo);
 }
 
 /*
- * This assumes that it can't be called concurrently with itself
- * but only with dequeue_ih_ring_entry.
+ * Assumption: single reader/writer. This function is not re-entrant
  */
 bool enqueue_ih_ring_entry(struct kfd_dev *kfd,	const void *ih_ring_entry)
 {
-	unsigned int rptr = atomic_read(&kfd->interrupt_ring_rptr);
-	unsigned int wptr = atomic_read(&kfd->interrupt_ring_wptr);
+	int count;
 
-	if ((rptr - wptr) % kfd->interrupt_ring_size ==
-					kfd->device_info->ih_ring_entry_size) {
-		/* This is very bad, the system is likely to hang. */
-		dev_err_ratelimited(kfd_chardev(),
-			"Interrupt ring overflow, dropping interrupt.\n");
+	count = kfifo_in(&kfd->ih_fifo, ih_ring_entry,
+				kfd->device_info.ih_ring_entry_size);
+	if (count != kfd->device_info.ih_ring_entry_size) {
+		dev_dbg_ratelimited(kfd->adev->dev,
+			"Interrupt ring overflow, dropping interrupt %d\n",
+			count);
 		return false;
 	}
-
-	memcpy(kfd->interrupt_ring + wptr, ih_ring_entry,
-			kfd->device_info->ih_ring_entry_size);
-
-	wptr = (wptr + kfd->device_info->ih_ring_entry_size) %
-			kfd->interrupt_ring_size;
-	smp_wmb(); /* Ensure memcpy'd data is visible before wptr update. */
-	atomic_set(&kfd->interrupt_ring_wptr, wptr);
 
 	return true;
 }
 
 /*
- * This assumes that it can't be called concurrently with itself
- * but only with enqueue_ih_ring_entry.
+ * Assumption: single reader/writer. This function is not re-entrant
  */
 static bool dequeue_ih_ring_entry(struct kfd_dev *kfd, void *ih_ring_entry)
 {
-	/*
-	 * Assume that wait queues have an implicit barrier, i.e. anything that
-	 * happened in the ISR before it queued work is visible.
-	 */
+	int count;
 
-	unsigned int wptr = atomic_read(&kfd->interrupt_ring_wptr);
-	unsigned int rptr = atomic_read(&kfd->interrupt_ring_rptr);
+	count = kfifo_out(&kfd->ih_fifo, ih_ring_entry,
+				kfd->device_info.ih_ring_entry_size);
 
-	if (rptr == wptr)
-		return false;
+	WARN_ON(count && count != kfd->device_info.ih_ring_entry_size);
 
-	memcpy(ih_ring_entry, kfd->interrupt_ring + rptr,
-			kfd->device_info->ih_ring_entry_size);
-
-	rptr = (rptr + kfd->device_info->ih_ring_entry_size) %
-			kfd->interrupt_ring_size;
-
-	/*
-	 * Ensure the rptr write update is not visible until
-	 * memcpy has finished reading.
-	 */
-	smp_mb();
-	atomic_set(&kfd->interrupt_ring_rptr, rptr);
-
-	return true;
+	return count == kfd->device_info.ih_ring_entry_size;
 }
 
 static void interrupt_wq(struct work_struct *work)
 {
 	struct kfd_dev *dev = container_of(work, struct kfd_dev,
 						interrupt_work);
+	uint32_t ih_ring_entry[KFD_MAX_RING_ENTRY_SIZE];
+	unsigned long start_jiffies = jiffies;
 
-	uint32_t ih_ring_entry[DIV_ROUND_UP(
-				dev->device_info->ih_ring_entry_size,
-				sizeof(uint32_t))];
+	if (dev->device_info.ih_ring_entry_size > sizeof(ih_ring_entry)) {
+		dev_err_once(dev->adev->dev, "Ring entry too small\n");
+		return;
+	}
 
-	while (dequeue_ih_ring_entry(dev, ih_ring_entry))
-		dev->device_info->event_interrupt_class->interrupt_wq(dev,
+	while (dequeue_ih_ring_entry(dev, ih_ring_entry)) {
+		dev->device_info.event_interrupt_class->interrupt_wq(dev,
 								ih_ring_entry);
+		if (time_is_before_jiffies(start_jiffies + HZ)) {
+			/* If we spent more than a second processing signals,
+			 * reschedule the worker to avoid soft-lockup warnings
+			 */
+			queue_work(dev->ih_wq, &dev->interrupt_work);
+			break;
+		}
+	}
 }
 
-bool interrupt_is_wanted(struct kfd_dev *dev, const uint32_t *ih_ring_entry)
+bool interrupt_is_wanted(struct kfd_dev *dev,
+			const uint32_t *ih_ring_entry,
+			uint32_t *patched_ihre, bool *flag)
 {
 	/* integer and bitwise OR so there is no boolean short-circuiting */
-	unsigned wanted = 0;
+	unsigned int wanted = 0;
 
-	wanted |= dev->device_info->event_interrupt_class->interrupt_isr(dev,
-								ih_ring_entry);
+	wanted |= dev->device_info.event_interrupt_class->interrupt_isr(dev,
+					 ih_ring_entry, patched_ihre, flag);
 
 	return wanted != 0;
 }

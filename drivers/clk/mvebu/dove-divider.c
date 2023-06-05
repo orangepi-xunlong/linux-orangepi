@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Marvell Dove PMU Core PLL divider driver
  *
@@ -169,7 +170,7 @@ static struct clk *clk_register_dove_divider(struct device *dev,
 		.num_parents = num_parents,
 	};
 
-	strlcpy(name, dc->name, sizeof(name));
+	strscpy(name, dc->name, sizeof(name));
 
 	dc->hw.init = &init;
 	dc->base = base;

@@ -8,7 +8,7 @@
 #include <linux/string.h>
 #include <linux/buffer_head.h>
 
-#include <stdarg.h>
+#include <linux/stdarg.h>
 
 static char error_buf[1024];
 static char fmt_buf[1024];
@@ -407,11 +407,11 @@ void __reiserfs_error(struct super_block *sb, const char *id,
 		printk(KERN_CRIT "REISERFS error (device %s): %s: %s\n",
 		       sb->s_id, function, error_buf);
 
-	if (sb->s_flags & MS_RDONLY)
+	if (sb_rdonly(sb))
 		return;
 
 	reiserfs_info(sb, "Remounting filesystem read-only\n");
-	sb->s_flags |= MS_RDONLY;
+	sb->s_flags |= SB_RDONLY;
 	reiserfs_abort_journal(sb, -EIO);
 }
 
@@ -430,7 +430,7 @@ void reiserfs_abort(struct super_block *sb, int errno, const char *fmt, ...)
 	printk(KERN_CRIT "REISERFS abort (device %s): %s\n", sb->s_id,
 	       error_buf);
 
-	sb->s_flags |= MS_RDONLY;
+	sb->s_flags |= SB_RDONLY;
 	reiserfs_abort_journal(sb, errno);
 }
 
@@ -456,7 +456,7 @@ static int print_internal(struct buffer_head *bh, int first, int last)
 		to = B_NR_ITEMS(bh);
 	} else {
 		from = first;
-		to = last < B_NR_ITEMS(bh) ? last : B_NR_ITEMS(bh);
+		to = min_t(int, last, B_NR_ITEMS(bh));
 	}
 
 	reiserfs_printk("INTERNAL NODE (%ld) contains %z\n", bh->b_blocknr, bh);
@@ -746,9 +746,6 @@ static void check_leaf_block_head(struct buffer_head *bh)
 
 static void check_internal_block_head(struct buffer_head *bh)
 {
-	struct block_head *blkh;
-
-	blkh = B_BLK_HEAD(bh);
 	if (!(B_LEVEL(bh) > DISK_LEAF_NODE_LEVEL && B_LEVEL(bh) <= MAX_HEIGHT))
 		reiserfs_panic(NULL, "vs-6025", "invalid level %z", bh);
 

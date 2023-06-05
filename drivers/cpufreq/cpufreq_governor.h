@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * drivers/cpufreq/cpufreq_governor.h
  *
@@ -8,10 +9,6 @@
  *		(C) 2003 Jun Nakajima <jun.nakajima@intel.com>
  *		(C) 2009 Alexander Clouter <alex@digriz.org.uk>
  *		(c) 2012 Viresh Kumar <viresh.kumar@linaro.org>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #ifndef _CPUFREQ_GOVERNOR_H
@@ -20,6 +17,7 @@
 #include <linux/atomic.h>
 #include <linux/irq_work.h>
 #include <linux/cpufreq.h>
+#include <linux/sched/cpufreq.h>
 #include <linux/kernel_stat.h>
 #include <linux/module.h>
 #include <linux/mutex.h>
@@ -39,8 +37,8 @@ enum {OD_NORMAL_SAMPLE, OD_SUB_SAMPLE};
 /* Governor demand based switching data (per-policy or global). */
 struct dbs_data {
 	struct gov_attr_set attr_set;
+	struct dbs_governor *gov;
 	void *tuners;
-	unsigned int min_sampling_rate;
 	unsigned int ignore_nice_load;
 	unsigned int sampling_rate;
 	unsigned int sampling_down_factor;
@@ -54,7 +52,7 @@ static inline struct dbs_data *to_dbs_data(struct gov_attr_set *attr_set)
 }
 
 #define gov_show_one(_gov, file_name)					\
-static ssize_t show_##file_name						\
+static ssize_t file_name##_show						\
 (struct gov_attr_set *attr_set, char *buf)				\
 {									\
 	struct dbs_data *dbs_data = to_dbs_data(attr_set);		\
@@ -63,7 +61,7 @@ static ssize_t show_##file_name						\
 }
 
 #define gov_show_one_common(file_name)					\
-static ssize_t show_##file_name						\
+static ssize_t file_name##_show						\
 (struct gov_attr_set *attr_set, char *buf)				\
 {									\
 	struct dbs_data *dbs_data = to_dbs_data(attr_set);		\
@@ -71,12 +69,10 @@ static ssize_t show_##file_name						\
 }
 
 #define gov_attr_ro(_name)						\
-static struct governor_attr _name =					\
-__ATTR(_name, 0444, show_##_name, NULL)
+static struct governor_attr _name = __ATTR_RO(_name)
 
 #define gov_attr_rw(_name)						\
-static struct governor_attr _name =					\
-__ATTR(_name, 0644, show_##_name, store_##_name)
+static struct governor_attr _name = __ATTR_RW(_name)
 
 /* Common to all CPUs of a policy */
 struct policy_dbs_info {
@@ -85,7 +81,7 @@ struct policy_dbs_info {
 	 * Per policy mutex that serializes load evaluation from limit-change
 	 * and work-handler.
 	 */
-	struct mutex timer_mutex;
+	struct mutex update_mutex;
 
 	u64 last_sample_time;
 	s64 sample_delay_ns;
@@ -97,6 +93,7 @@ struct policy_dbs_info {
 	struct list_head list;
 	/* Multiplier for increasing sample delay temporarily. */
 	unsigned int rate_mult;
+	unsigned int idle_periods;	/* For conservative */
 	/* Status indicators */
 	bool is_shared;		/* This object is used by multiple CPUs */
 	bool work_in_progress;	/* Work is being queued up or in progress */
@@ -135,7 +132,7 @@ struct dbs_governor {
 	 */
 	struct dbs_data *gdbs_data;
 
-	unsigned int (*gov_dbs_timer)(struct cpufreq_policy *policy);
+	unsigned int (*gov_dbs_update)(struct cpufreq_policy *policy);
 	struct policy_dbs_info *(*alloc)(void);
 	void (*free)(struct policy_dbs_info *policy_dbs);
 	int (*init)(struct dbs_data *dbs_data);
@@ -158,7 +155,7 @@ void cpufreq_dbs_governor_limits(struct cpufreq_policy *policy);
 #define CPUFREQ_DBS_GOVERNOR_INITIALIZER(_name_)			\
 	{								\
 		.name = _name_,						\
-		.max_transition_latency	= TRANSITION_LATENCY_LIMIT,	\
+		.flags = CPUFREQ_GOV_DYNAMIC_SWITCHING,			\
 		.owner = THIS_MODULE,					\
 		.init = cpufreq_dbs_governor_init,			\
 		.exit = cpufreq_dbs_governor_exit,			\
@@ -178,7 +175,7 @@ void od_register_powersave_bias_handler(unsigned int (*f)
 		(struct cpufreq_policy *, unsigned int, unsigned int),
 		unsigned int powersave_bias);
 void od_unregister_powersave_bias_handler(void);
-ssize_t store_sampling_rate(struct gov_attr_set *attr_set, const char *buf,
+ssize_t sampling_rate_store(struct gov_attr_set *attr_set, const char *buf,
 			    size_t count);
 void gov_update_cpu_data(struct dbs_data *dbs_data);
 #endif /* _CPUFREQ_GOVERNOR_H */

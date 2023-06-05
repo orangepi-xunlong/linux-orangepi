@@ -1,10 +1,10 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  *   Data definitions for channel report processing
  *    Copyright IBM Corp. 2000, 2009
  *    Author(s): Ingo Adlung <adlung@de.ibm.com>,
  *		 Martin Schwidefsky <schwidefsky@de.ibm.com>,
  *		 Cornelia Huck <cornelia.huck@de.ibm.com>,
- *		 Heiko Carstens <heiko.carstens@de.ibm.com>,
  */
 
 #ifndef _ASM_S390_CRW_H

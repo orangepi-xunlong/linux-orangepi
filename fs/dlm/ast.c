@@ -1,15 +1,15 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /******************************************************************************
 *******************************************************************************
 **
 **  Copyright (C) Sistina Software, Inc.  1997-2003  All rights reserved.
 **  Copyright (C) 2004-2010 Red Hat, Inc.  All rights reserved.
 **
-**  This copyrighted material is made available to anyone wishing to use,
-**  modify, copy, or redistribute it subject to the terms and conditions
-**  of the GNU General Public License v.2.
 **
 *******************************************************************************
 ******************************************************************************/
+
+#include <trace/events/dlm.h>
 
 #include "dlm_internal.h"
 #include "lock.h"
@@ -181,6 +181,8 @@ void dlm_add_cb(struct dlm_lkb *lkb, uint32_t flags, int mode, int status,
 
 	spin_lock(&dlm_cb_seq_spin);
 	new_seq = ++dlm_cb_seq;
+	if (!dlm_cb_seq)
+		new_seq = ++dlm_cb_seq;
 	spin_unlock(&dlm_cb_seq_spin);
 
 	if (lkb->lkb_flags & DLM_IFL_USER) {
@@ -198,13 +200,13 @@ void dlm_add_cb(struct dlm_lkb *lkb, uint32_t flags, int mode, int status,
 	if (!prev_seq) {
 		kref_get(&lkb->lkb_ref);
 
+		mutex_lock(&ls->ls_cb_mutex);
 		if (test_bit(LSFL_CB_DELAY, &ls->ls_flags)) {
-			mutex_lock(&ls->ls_cb_mutex);
 			list_add(&lkb->lkb_cb_list, &ls->ls_cb_delay);
-			mutex_unlock(&ls->ls_cb_mutex);
 		} else {
 			queue_work(ls->ls_callback_wq, &lkb->lkb_cb_work);
 		}
+		mutex_unlock(&ls->ls_cb_mutex);
 	}
  out:
 	mutex_unlock(&lkb->lkb_cb_mutex);
@@ -253,10 +255,12 @@ void dlm_callback_work(struct work_struct *work)
 		if (callbacks[i].flags & DLM_CB_SKIP) {
 			continue;
 		} else if (callbacks[i].flags & DLM_CB_BAST) {
+			trace_dlm_bast(ls, lkb, callbacks[i].mode);
 			bastfn(lkb->lkb_astparam, callbacks[i].mode);
 		} else if (callbacks[i].flags & DLM_CB_CAST) {
 			lkb->lkb_lksb->sb_status = callbacks[i].sb_status;
 			lkb->lkb_lksb->sb_flags = callbacks[i].sb_flags;
+			trace_dlm_ast(ls, lkb);
 			castfn(lkb->lkb_astparam);
 		}
 	}
@@ -268,7 +272,7 @@ void dlm_callback_work(struct work_struct *work)
 int dlm_callback_start(struct dlm_ls *ls)
 {
 	ls->ls_callback_wq = alloc_workqueue("dlm_callback",
-					     WQ_UNBOUND | WQ_MEM_RECLAIM, 0);
+					     WQ_HIGHPRI | WQ_MEM_RECLAIM, 0);
 	if (!ls->ls_callback_wq) {
 		log_print("can't start dlm_callback workqueue");
 		return -ENOMEM;
@@ -284,10 +288,13 @@ void dlm_callback_stop(struct dlm_ls *ls)
 
 void dlm_callback_suspend(struct dlm_ls *ls)
 {
-	set_bit(LSFL_CB_DELAY, &ls->ls_flags);
+	if (ls->ls_callback_wq) {
+		mutex_lock(&ls->ls_cb_mutex);
+		set_bit(LSFL_CB_DELAY, &ls->ls_flags);
+		mutex_unlock(&ls->ls_cb_mutex);
 
-	if (ls->ls_callback_wq)
 		flush_workqueue(ls->ls_callback_wq);
+	}
 }
 
 #define MAX_CB_QUEUE 25
@@ -295,12 +302,13 @@ void dlm_callback_suspend(struct dlm_ls *ls)
 void dlm_callback_resume(struct dlm_ls *ls)
 {
 	struct dlm_lkb *lkb, *safe;
-	int count = 0;
-
-	clear_bit(LSFL_CB_DELAY, &ls->ls_flags);
+	int count = 0, sum = 0;
+	bool empty;
 
 	if (!ls->ls_callback_wq)
 		return;
+
+	clear_bit(LSFL_CB_DELAY, &ls->ls_flags);
 
 more:
 	mutex_lock(&ls->ls_cb_mutex);
@@ -311,14 +319,17 @@ more:
 		if (count == MAX_CB_QUEUE)
 			break;
 	}
+	empty = list_empty(&ls->ls_cb_delay);
 	mutex_unlock(&ls->ls_cb_mutex);
 
-	if (count)
-		log_rinfo(ls, "dlm_callback_resume %d", count);
-	if (count == MAX_CB_QUEUE) {
+	sum += count;
+	if (!empty) {
 		count = 0;
 		cond_resched();
 		goto more;
 	}
+
+	if (sum)
+		log_rinfo(ls, "%s %d", __func__, sum);
 }
 

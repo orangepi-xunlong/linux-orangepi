@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Base driver for Dialog Semiconductor DA9030/DA9034
  *
@@ -6,10 +7,6 @@
  *
  * Copyright (C) 2006-2008 Marvell International Ltd.
  *	Eric Miao <eric.miao@marvell.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/kernel.h>
@@ -535,12 +532,11 @@ static int da903x_probe(struct i2c_client *client,
 	return da903x_add_subdevs(chip, pdata);
 }
 
-static int da903x_remove(struct i2c_client *client)
+static void da903x_remove(struct i2c_client *client)
 {
 	struct da903x_chip *chip = i2c_get_clientdata(client);
 
 	da903x_remove_subdevs(chip);
-	return 0;
 }
 
 static struct i2c_driver da903x_driver = {

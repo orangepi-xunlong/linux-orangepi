@@ -56,34 +56,35 @@
  *---------------------------------------------------------------*/
 struct dm_region_hash {
 	uint32_t region_size;
-	unsigned region_shift;
+	unsigned int region_shift;
 
 	/* holds persistent region state */
 	struct dm_dirty_log *log;
 
 	/* hash table */
 	rwlock_t hash_lock;
-	mempool_t *region_pool;
-	unsigned mask;
-	unsigned nr_buckets;
-	unsigned prime;
-	unsigned shift;
+	unsigned int mask;
+	unsigned int nr_buckets;
+	unsigned int prime;
+	unsigned int shift;
 	struct list_head *buckets;
-
-	unsigned max_recovery; /* Max # of regions to recover in parallel */
-
-	spinlock_t region_lock;
-	atomic_t recovery_in_flight;
-	struct semaphore recovery_count;
-	struct list_head clean_regions;
-	struct list_head quiesced_regions;
-	struct list_head recovered_regions;
-	struct list_head failed_recovered_regions;
 
 	/*
 	 * If there was a flush failure no regions can be marked clean.
 	 */
 	int flush_failure;
+
+	unsigned int max_recovery; /* Max # of regions to recover in parallel */
+
+	spinlock_t region_lock;
+	atomic_t recovery_in_flight;
+	struct list_head clean_regions;
+	struct list_head quiesced_regions;
+	struct list_head recovered_regions;
+	struct list_head failed_recovered_regions;
+	struct semaphore recovery_count;
+
+	mempool_t region_pool;
 
 	void *context;
 	sector_t target_begin;
@@ -162,13 +163,14 @@ struct dm_region_hash *dm_region_hash_create(
 						     struct bio_list *bios),
 		void (*wakeup_workers)(void *context),
 		void (*wakeup_all_recovery_waiters)(void *context),
-		sector_t target_begin, unsigned max_recovery,
+		sector_t target_begin, unsigned int max_recovery,
 		struct dm_dirty_log *log, uint32_t region_size,
 		region_t nr_regions)
 {
 	struct dm_region_hash *rh;
-	unsigned nr_buckets, max_buckets;
+	unsigned int nr_buckets, max_buckets;
 	size_t i;
+	int ret;
 
 	/*
 	 * Calculate a suitable number of buckets for our hash
@@ -179,7 +181,7 @@ struct dm_region_hash *dm_region_hash_create(
 		;
 	nr_buckets >>= 1;
 
-	rh = kmalloc(sizeof(*rh), GFP_KERNEL);
+	rh = kzalloc(sizeof(*rh), GFP_KERNEL);
 	if (!rh) {
 		DMERR("unable to allocate region hash memory");
 		return ERR_PTR(-ENOMEM);
@@ -201,7 +203,7 @@ struct dm_region_hash *dm_region_hash_create(
 	rh->shift = RH_HASH_SHIFT;
 	rh->prime = RH_HASH_MULT;
 
-	rh->buckets = vmalloc(nr_buckets * sizeof(*rh->buckets));
+	rh->buckets = vmalloc(array_size(nr_buckets, sizeof(*rh->buckets)));
 	if (!rh->buckets) {
 		DMERR("unable to allocate region hash bucket memory");
 		kfree(rh);
@@ -220,9 +222,9 @@ struct dm_region_hash *dm_region_hash_create(
 	INIT_LIST_HEAD(&rh->failed_recovered_regions);
 	rh->flush_failure = 0;
 
-	rh->region_pool = mempool_create_kmalloc_pool(MIN_REGIONS,
-						      sizeof(struct dm_region));
-	if (!rh->region_pool) {
+	ret = mempool_init_kmalloc_pool(&rh->region_pool, MIN_REGIONS,
+					sizeof(struct dm_region));
+	if (ret) {
 		vfree(rh->buckets);
 		kfree(rh);
 		rh = ERR_PTR(-ENOMEM);
@@ -234,7 +236,7 @@ EXPORT_SYMBOL_GPL(dm_region_hash_create);
 
 void dm_region_hash_destroy(struct dm_region_hash *rh)
 {
-	unsigned h;
+	unsigned int h;
 	struct dm_region *reg, *nreg;
 
 	BUG_ON(!list_empty(&rh->quiesced_regions));
@@ -242,14 +244,14 @@ void dm_region_hash_destroy(struct dm_region_hash *rh)
 		list_for_each_entry_safe(reg, nreg, rh->buckets + h,
 					 hash_list) {
 			BUG_ON(atomic_read(&reg->pending));
-			mempool_free(reg, rh->region_pool);
+			mempool_free(reg, &rh->region_pool);
 		}
 	}
 
 	if (rh->log)
 		dm_dirty_log_destroy(rh->log);
 
-	mempool_destroy(rh->region_pool);
+	mempool_exit(&rh->region_pool);
 	vfree(rh->buckets);
 	kfree(rh);
 }
@@ -261,9 +263,9 @@ struct dm_dirty_log *dm_rh_dirty_log(struct dm_region_hash *rh)
 }
 EXPORT_SYMBOL_GPL(dm_rh_dirty_log);
 
-static unsigned rh_hash(struct dm_region_hash *rh, region_t region)
+static unsigned int rh_hash(struct dm_region_hash *rh, region_t region)
 {
-	return (unsigned) ((region * rh->prime) >> rh->shift) & rh->mask;
+	return (unsigned int) ((region * rh->prime) >> rh->shift) & rh->mask;
 }
 
 static struct dm_region *__rh_lookup(struct dm_region_hash *rh, region_t region)
@@ -287,7 +289,7 @@ static struct dm_region *__rh_alloc(struct dm_region_hash *rh, region_t region)
 {
 	struct dm_region *reg, *nreg;
 
-	nreg = mempool_alloc(rh->region_pool, GFP_ATOMIC);
+	nreg = mempool_alloc(&rh->region_pool, GFP_ATOMIC);
 	if (unlikely(!nreg))
 		nreg = kmalloc(sizeof(*nreg), GFP_NOIO | __GFP_NOFAIL);
 
@@ -303,7 +305,7 @@ static struct dm_region *__rh_alloc(struct dm_region_hash *rh, region_t region)
 	reg = __rh_lookup(rh, region);
 	if (reg)
 		/* We lost the race. */
-		mempool_free(nreg, rh->region_pool);
+		mempool_free(nreg, &rh->region_pool);
 	else {
 		__rh_insert(rh, nreg);
 		if (nreg->state == DM_RH_CLEAN) {
@@ -481,17 +483,17 @@ void dm_rh_update_states(struct dm_region_hash *rh, int errors_handled)
 	list_for_each_entry_safe(reg, next, &recovered, list) {
 		rh->log->type->clear_region(rh->log, reg->key);
 		complete_resync_work(reg, 1);
-		mempool_free(reg, rh->region_pool);
+		mempool_free(reg, &rh->region_pool);
 	}
 
 	list_for_each_entry_safe(reg, next, &failed_recovered, list) {
 		complete_resync_work(reg, errors_handled ? 0 : 1);
-		mempool_free(reg, rh->region_pool);
+		mempool_free(reg, &rh->region_pool);
 	}
 
 	list_for_each_entry_safe(reg, next, &clean, list) {
 		rh->log->type->clear_region(rh->log, reg->key);
-		mempool_free(reg, rh->region_pool);
+		mempool_free(reg, &rh->region_pool);
 	}
 
 	rh->log->type->flush(rh->log);

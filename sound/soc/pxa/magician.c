@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * SoC audio for HTC Magician
  *
@@ -6,12 +7,6 @@
  * based on spitz.c,
  * Authors: Liam Girdwood <lrg@slimlogic.co.uk>
  *          Richard Purdie <richard@openedhand.com>
- *
- *  This program is free software; you can redistribute  it and/or modify it
- *  under  the terms of  the GNU General  Public License as published by the
- *  Free Software Foundation;  either version 2 of the  License, or (at your
- *  option) any later version.
- *
  */
 
 #include <linux/module.h>
@@ -19,16 +14,14 @@
 #include <linux/interrupt.h>
 #include <linux/platform_device.h>
 #include <linux/delay.h>
-#include <linux/gpio.h>
+#include <linux/gpio/consumer.h>
 #include <linux/i2c.h>
 
 #include <sound/core.h>
 #include <sound/pcm.h>
 #include <sound/pcm_params.h>
 #include <sound/soc.h>
-#include <sound/uda1380.h>
 
-#include <mach/magician.h>
 #include <asm/mach-types.h>
 #include "../codecs/uda1380.h"
 #include "pxa2xx-i2s.h"
@@ -40,6 +33,9 @@
 static int magician_hp_switch;
 static int magician_spk_switch = 1;
 static int magician_in_sel = MAGICIAN_MIC;
+
+static struct gpio_desc *gpiod_spk_power, *gpiod_ep_power, *gpiod_mic_power;
+static struct gpio_desc *gpiod_in_sel0, *gpiod_in_sel1;
 
 static void magician_ext_control(struct snd_soc_dapm_context *dapm)
 {
@@ -73,7 +69,7 @@ static void magician_ext_control(struct snd_soc_dapm_context *dapm)
 
 static int magician_startup(struct snd_pcm_substream *substream)
 {
-	struct snd_soc_pcm_runtime *rtd = substream->private_data;
+	struct snd_soc_pcm_runtime *rtd = asoc_substream_to_rtd(substream);
 
 	/* check the jack status at stream startup */
 	magician_ext_control(&rtd->card->dapm);
@@ -87,110 +83,25 @@ static int magician_startup(struct snd_pcm_substream *substream)
 static int magician_playback_hw_params(struct snd_pcm_substream *substream,
 				       struct snd_pcm_hw_params *params)
 {
-	struct snd_soc_pcm_runtime *rtd = substream->private_data;
-	struct snd_soc_dai *codec_dai = rtd->codec_dai;
-	struct snd_soc_dai *cpu_dai = rtd->cpu_dai;
-	unsigned int acps, acds, width;
-	unsigned int div4 = PXA_SSP_CLK_SCDB_4;
+	struct snd_soc_pcm_runtime *rtd = asoc_substream_to_rtd(substream);
+	struct snd_soc_dai *codec_dai = asoc_rtd_to_codec(rtd, 0);
+	struct snd_soc_dai *cpu_dai = asoc_rtd_to_cpu(rtd, 0);
+	unsigned int width;
 	int ret = 0;
-
-	width = snd_pcm_format_physical_width(params_format(params));
-
-	/*
-	 * rate = SSPSCLK / (2 * width(16 or 32))
-	 * SSPSCLK = (ACPS / ACDS) / SSPSCLKDIV(div4 or div1)
-	 */
-	switch (params_rate(params)) {
-	case 8000:
-		/* off by a factor of 2: bug in the PXA27x audio clock? */
-		acps = 32842000;
-		switch (width) {
-		case 16:
-			/* 513156 Hz ~= _2_ * 8000 Hz * 32 (+0.23%) */
-			acds = PXA_SSP_CLK_AUDIO_DIV_16;
-			break;
-		default: /* 32 */
-			/* 1026312 Hz ~= _2_ * 8000 Hz * 64 (+0.23%) */
-			acds = PXA_SSP_CLK_AUDIO_DIV_8;
-		}
-		break;
-	case 11025:
-		acps = 5622000;
-		switch (width) {
-		case 16:
-			/* 351375 Hz ~= 11025 Hz * 32 (-0.41%) */
-			acds = PXA_SSP_CLK_AUDIO_DIV_4;
-			break;
-		default: /* 32 */
-			/* 702750 Hz ~= 11025 Hz * 64 (-0.41%) */
-			acds = PXA_SSP_CLK_AUDIO_DIV_2;
-		}
-		break;
-	case 22050:
-		acps = 5622000;
-		switch (width) {
-		case 16:
-			/* 702750 Hz ~= 22050 Hz * 32 (-0.41%) */
-			acds = PXA_SSP_CLK_AUDIO_DIV_2;
-			break;
-		default: /* 32 */
-			/* 1405500 Hz ~= 22050 Hz * 64 (-0.41%) */
-			acds = PXA_SSP_CLK_AUDIO_DIV_1;
-		}
-		break;
-	case 44100:
-		acps = 5622000;
-		switch (width) {
-		case 16:
-			/* 1405500 Hz ~= 44100 Hz * 32 (-0.41%) */
-			acds = PXA_SSP_CLK_AUDIO_DIV_2;
-			break;
-		default: /* 32 */
-			/* 2811000 Hz ~= 44100 Hz * 64 (-0.41%) */
-			acds = PXA_SSP_CLK_AUDIO_DIV_1;
-		}
-		break;
-	case 48000:
-		acps = 12235000;
-		switch (width) {
-		case 16:
-			/* 1529375 Hz ~= 48000 Hz * 32 (-0.44%) */
-			acds = PXA_SSP_CLK_AUDIO_DIV_2;
-			break;
-		default: /* 32 */
-			/* 3058750 Hz ~= 48000 Hz * 64 (-0.44%) */
-			acds = PXA_SSP_CLK_AUDIO_DIV_1;
-		}
-		break;
-	case 96000:
-	default:
-		acps = 12235000;
-		switch (width) {
-		case 16:
-			/* 3058750 Hz ~= 96000 Hz * 32 (-0.44%) */
-			acds = PXA_SSP_CLK_AUDIO_DIV_1;
-			break;
-		default: /* 32 */
-			/* 6117500 Hz ~= 96000 Hz * 64 (-0.44%) */
-			acds = PXA_SSP_CLK_AUDIO_DIV_2;
-			div4 = PXA_SSP_CLK_SCDB_1;
-			break;
-		}
-		break;
-	}
 
 	/* set codec DAI configuration */
 	ret = snd_soc_dai_set_fmt(codec_dai, SND_SOC_DAIFMT_MSB |
-			SND_SOC_DAIFMT_NB_NF | SND_SOC_DAIFMT_CBS_CFS);
+			SND_SOC_DAIFMT_NB_NF | SND_SOC_DAIFMT_BC_FC);
 	if (ret < 0)
 		return ret;
 
 	/* set cpu DAI configuration */
 	ret = snd_soc_dai_set_fmt(cpu_dai, SND_SOC_DAIFMT_DSP_A |
-			SND_SOC_DAIFMT_NB_IF | SND_SOC_DAIFMT_CBS_CFS);
+			SND_SOC_DAIFMT_NB_IF | SND_SOC_DAIFMT_BP_FP);
 	if (ret < 0)
 		return ret;
 
+	width = snd_pcm_format_physical_width(params_format(params));
 	ret = snd_soc_dai_set_tdm_slot(cpu_dai, 1, 0, 1, width);
 	if (ret < 0)
 		return ret;
@@ -198,23 +109,6 @@ static int magician_playback_hw_params(struct snd_pcm_substream *substream,
 	/* set audio clock as clock source */
 	ret = snd_soc_dai_set_sysclk(cpu_dai, PXA_SSP_CLK_AUDIO, 0,
 			SND_SOC_CLOCK_OUT);
-	if (ret < 0)
-		return ret;
-
-	/* set the SSP audio system clock ACDS divider */
-	ret = snd_soc_dai_set_clkdiv(cpu_dai,
-			PXA_SSP_AUDIO_DIV_ACDS, acds);
-	if (ret < 0)
-		return ret;
-
-	/* set the SSP audio system clock SCDB divider4 */
-	ret = snd_soc_dai_set_clkdiv(cpu_dai,
-			PXA_SSP_AUDIO_DIV_SCDB, div4);
-	if (ret < 0)
-		return ret;
-
-	/* set SSP audio pll clock */
-	ret = snd_soc_dai_set_pll(cpu_dai, 0, 0, 0, acps);
 	if (ret < 0)
 		return ret;
 
@@ -227,22 +121,22 @@ static int magician_playback_hw_params(struct snd_pcm_substream *substream,
 static int magician_capture_hw_params(struct snd_pcm_substream *substream,
 				      struct snd_pcm_hw_params *params)
 {
-	struct snd_soc_pcm_runtime *rtd = substream->private_data;
-	struct snd_soc_dai *codec_dai = rtd->codec_dai;
-	struct snd_soc_dai *cpu_dai = rtd->cpu_dai;
+	struct snd_soc_pcm_runtime *rtd = asoc_substream_to_rtd(substream);
+	struct snd_soc_dai *codec_dai = asoc_rtd_to_codec(rtd, 0);
+	struct snd_soc_dai *cpu_dai = asoc_rtd_to_cpu(rtd, 0);
 	int ret = 0;
 
 	/* set codec DAI configuration */
 	ret = snd_soc_dai_set_fmt(codec_dai,
 			SND_SOC_DAIFMT_MSB | SND_SOC_DAIFMT_NB_NF |
-			SND_SOC_DAIFMT_CBS_CFS);
+			SND_SOC_DAIFMT_BC_FC);
 	if (ret < 0)
 		return ret;
 
 	/* set cpu DAI configuration */
 	ret = snd_soc_dai_set_fmt(cpu_dai,
 			SND_SOC_DAIFMT_MSB | SND_SOC_DAIFMT_NB_NF |
-			SND_SOC_DAIFMT_CBS_CFS);
+			SND_SOC_DAIFMT_BP_FP);
 	if (ret < 0)
 		return ret;
 
@@ -255,12 +149,12 @@ static int magician_capture_hw_params(struct snd_pcm_substream *substream,
 	return 0;
 }
 
-static struct snd_soc_ops magician_capture_ops = {
+static const struct snd_soc_ops magician_capture_ops = {
 	.startup = magician_startup,
 	.hw_params = magician_capture_hw_params,
 };
 
-static struct snd_soc_ops magician_playback_ops = {
+static const struct snd_soc_ops magician_playback_ops = {
 	.startup = magician_startup,
 	.hw_params = magician_playback_hw_params,
 };
@@ -322,10 +216,10 @@ static int magician_set_input(struct snd_kcontrol *kcontrol,
 
 	switch (magician_in_sel) {
 	case MAGICIAN_MIC:
-		gpio_set_value(EGPIO_MAGICIAN_IN_SEL1, 1);
+		gpiod_set_value(gpiod_in_sel1, 1);
 		break;
 	case MAGICIAN_MIC_EXT:
-		gpio_set_value(EGPIO_MAGICIAN_IN_SEL1, 0);
+		gpiod_set_value(gpiod_in_sel1, 0);
 	}
 
 	return 1;
@@ -334,21 +228,21 @@ static int magician_set_input(struct snd_kcontrol *kcontrol,
 static int magician_spk_power(struct snd_soc_dapm_widget *w,
 				struct snd_kcontrol *k, int event)
 {
-	gpio_set_value(EGPIO_MAGICIAN_SPK_POWER, SND_SOC_DAPM_EVENT_ON(event));
+	gpiod_set_value(gpiod_spk_power, SND_SOC_DAPM_EVENT_ON(event));
 	return 0;
 }
 
 static int magician_hp_power(struct snd_soc_dapm_widget *w,
 				struct snd_kcontrol *k, int event)
 {
-	gpio_set_value(EGPIO_MAGICIAN_EP_POWER, SND_SOC_DAPM_EVENT_ON(event));
+	gpiod_set_value(gpiod_ep_power, SND_SOC_DAPM_EVENT_ON(event));
 	return 0;
 }
 
 static int magician_mic_bias(struct snd_soc_dapm_widget *w,
 				struct snd_kcontrol *k, int event)
 {
-	gpio_set_value(EGPIO_MAGICIAN_MIC_POWER, SND_SOC_DAPM_EVENT_ON(event));
+	gpiod_set_value(gpiod_mic_power, SND_SOC_DAPM_EVENT_ON(event));
 	return 0;
 }
 
@@ -376,7 +270,7 @@ static const struct snd_soc_dapm_route audio_map[] = {
 	{"VINM", NULL, "Call Mic"},
 };
 
-static const char *input_select[] = {"Call Mic", "Headset Mic"};
+static const char * const input_select[] = {"Call Mic", "Headset Mic"};
 static const struct soc_enum magician_in_sel_enum =
 	SOC_ENUM_SINGLE_EXT(2, input_select);
 
@@ -392,24 +286,30 @@ static const struct snd_kcontrol_new uda1380_magician_controls[] = {
 };
 
 /* magician digital audio interface glue - connects codec <--> CPU */
+SND_SOC_DAILINK_DEFS(playback,
+	DAILINK_COMP_ARRAY(COMP_CPU("pxa-ssp-dai.0")),
+	DAILINK_COMP_ARRAY(COMP_CODEC("uda1380-codec.0-0018",
+				      "uda1380-hifi-playback")),
+	DAILINK_COMP_ARRAY(COMP_PLATFORM("pxa-pcm-audio")));
+
+SND_SOC_DAILINK_DEFS(capture,
+	DAILINK_COMP_ARRAY(COMP_CPU("pxa2xx-i2s")),
+	DAILINK_COMP_ARRAY(COMP_CODEC("uda1380-codec.0-0018",
+				      "uda1380-hifi-capture")),
+	DAILINK_COMP_ARRAY(COMP_PLATFORM("pxa-pcm-audio")));
+
 static struct snd_soc_dai_link magician_dai[] = {
 {
 	.name = "uda1380",
 	.stream_name = "UDA1380 Playback",
-	.cpu_dai_name = "pxa-ssp-dai.0",
-	.codec_dai_name = "uda1380-hifi-playback",
-	.platform_name = "pxa-pcm-audio",
-	.codec_name = "uda1380-codec.0-0018",
 	.ops = &magician_playback_ops,
+	SND_SOC_DAILINK_REG(playback),
 },
 {
 	.name = "uda1380",
 	.stream_name = "UDA1380 Capture",
-	.cpu_dai_name = "pxa2xx-i2s",
-	.codec_dai_name = "uda1380-hifi-capture",
-	.platform_name = "pxa-pcm-audio",
-	.codec_name = "uda1380-codec.0-0018",
 	.ops = &magician_capture_ops,
+	SND_SOC_DAILINK_REG(capture),
 }
 };
 
@@ -429,106 +329,38 @@ static struct snd_soc_card snd_soc_card_magician = {
 	.fully_routed = true,
 };
 
-static struct platform_device *magician_snd_device;
-
-/*
- * FIXME: move into magician board file once merged into the pxa tree
- */
-static struct uda1380_platform_data uda1380_info = {
-	.gpio_power = EGPIO_MAGICIAN_CODEC_POWER,
-	.gpio_reset = EGPIO_MAGICIAN_CODEC_RESET,
-	.dac_clk    = UDA1380_DAC_CLK_WSPLL,
-};
-
-static struct i2c_board_info i2c_board_info[] = {
-	{
-		I2C_BOARD_INFO("uda1380", 0x18),
-		.platform_data = &uda1380_info,
-	},
-};
-
-static int __init magician_init(void)
+static int magician_audio_probe(struct platform_device *pdev)
 {
-	int ret;
-	struct i2c_adapter *adapter;
-	struct i2c_client *client;
+	struct device *dev = &pdev->dev;
 
-	if (!machine_is_magician())
-		return -ENODEV;
+	gpiod_spk_power = devm_gpiod_get(dev, "SPK_POWER", GPIOD_OUT_LOW);
+	if (IS_ERR(gpiod_spk_power))
+		return PTR_ERR(gpiod_spk_power);
+	gpiod_ep_power = devm_gpiod_get(dev, "EP_POWER", GPIOD_OUT_LOW);
+	if (IS_ERR(gpiod_ep_power))
+		return PTR_ERR(gpiod_ep_power);
+	gpiod_mic_power = devm_gpiod_get(dev, "MIC_POWER", GPIOD_OUT_LOW);
+	if (IS_ERR(gpiod_mic_power))
+		return PTR_ERR(gpiod_mic_power);
+	gpiod_in_sel0 = devm_gpiod_get(dev, "IN_SEL0", GPIOD_OUT_HIGH);
+	if (IS_ERR(gpiod_in_sel0))
+		return PTR_ERR(gpiod_in_sel0);
+	gpiod_in_sel1 = devm_gpiod_get(dev, "IN_SEL1", GPIOD_OUT_LOW);
+	if (IS_ERR(gpiod_in_sel1))
+		return PTR_ERR(gpiod_in_sel1);
 
-	adapter = i2c_get_adapter(0);
-	if (!adapter)
-		return -ENODEV;
-	client = i2c_new_device(adapter, i2c_board_info);
-	i2c_put_adapter(adapter);
-	if (!client)
-		return -ENODEV;
-
-	ret = gpio_request(EGPIO_MAGICIAN_SPK_POWER, "SPK_POWER");
-	if (ret)
-		goto err_request_spk;
-	ret = gpio_request(EGPIO_MAGICIAN_EP_POWER, "EP_POWER");
-	if (ret)
-		goto err_request_ep;
-	ret = gpio_request(EGPIO_MAGICIAN_MIC_POWER, "MIC_POWER");
-	if (ret)
-		goto err_request_mic;
-	ret = gpio_request(EGPIO_MAGICIAN_IN_SEL0, "IN_SEL0");
-	if (ret)
-		goto err_request_in_sel0;
-	ret = gpio_request(EGPIO_MAGICIAN_IN_SEL1, "IN_SEL1");
-	if (ret)
-		goto err_request_in_sel1;
-
-	gpio_set_value(EGPIO_MAGICIAN_IN_SEL0, 0);
-
-	magician_snd_device = platform_device_alloc("soc-audio", -1);
-	if (!magician_snd_device) {
-		ret = -ENOMEM;
-		goto err_pdev;
-	}
-
-	platform_set_drvdata(magician_snd_device, &snd_soc_card_magician);
-	ret = platform_device_add(magician_snd_device);
-	if (ret) {
-		platform_device_put(magician_snd_device);
-		goto err_pdev;
-	}
-
-	return 0;
-
-err_pdev:
-	gpio_free(EGPIO_MAGICIAN_IN_SEL1);
-err_request_in_sel1:
-	gpio_free(EGPIO_MAGICIAN_IN_SEL0);
-err_request_in_sel0:
-	gpio_free(EGPIO_MAGICIAN_MIC_POWER);
-err_request_mic:
-	gpio_free(EGPIO_MAGICIAN_EP_POWER);
-err_request_ep:
-	gpio_free(EGPIO_MAGICIAN_SPK_POWER);
-err_request_spk:
-	return ret;
+	snd_soc_card_magician.dev = &pdev->dev;
+	return devm_snd_soc_register_card(&pdev->dev, &snd_soc_card_magician);
 }
 
-static void __exit magician_exit(void)
-{
-	platform_device_unregister(magician_snd_device);
-
-	gpio_set_value(EGPIO_MAGICIAN_SPK_POWER, 0);
-	gpio_set_value(EGPIO_MAGICIAN_EP_POWER, 0);
-	gpio_set_value(EGPIO_MAGICIAN_MIC_POWER, 0);
-
-	gpio_free(EGPIO_MAGICIAN_IN_SEL1);
-	gpio_free(EGPIO_MAGICIAN_IN_SEL0);
-	gpio_free(EGPIO_MAGICIAN_MIC_POWER);
-	gpio_free(EGPIO_MAGICIAN_EP_POWER);
-	gpio_free(EGPIO_MAGICIAN_SPK_POWER);
-}
-
-module_init(magician_init);
-module_exit(magician_exit);
+static struct platform_driver magician_audio_driver = {
+	.driver.name = "magician-audio",
+	.driver.pm = &snd_soc_pm_ops,
+	.probe = magician_audio_probe,
+};
+module_platform_driver(magician_audio_driver);
 
 MODULE_AUTHOR("Philipp Zabel");
 MODULE_DESCRIPTION("ALSA SoC Magician");
 MODULE_LICENSE("GPL");
+MODULE_ALIAS("platform:magician-audio");

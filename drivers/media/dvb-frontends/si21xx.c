@@ -1,12 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* DVB compliant Linux driver for the DVB-S si2109/2110 demodulator
 *
 * Copyright (C) 2008 Igor M. Liplianin (liplianin@me.by)
-*
-*	This program is free software; you can redistribute it and/or modify
-*	it under the terms of the GNU General Public License as published by
-*	the Free Software Foundation; either version 2 of the License, or
-*	(at your option) any later version.
-*
 */
 #include <linux/init.h>
 #include <linux/kernel.h>
@@ -16,7 +11,7 @@
 #include <linux/jiffies.h>
 #include <asm/div64.h>
 
-#include "dvb_frontend.h"
+#include <media/dvb_frontend.h>
 #include "si21xx.h"
 
 #define	REVISION_REG			0x00
@@ -245,8 +240,8 @@ static int si21_writeregs(struct si21xx_state *state, u8 reg1,
 	ret = i2c_transfer(state->i2c, &msg, 1);
 
 	if (ret != 1)
-		dprintk("%s: writereg error (reg1 == 0x%02x, data == 0x%02x, "
-			"ret == %i)\n", __func__, reg1, data[0], ret);
+		dprintk("%s: writereg error (reg1 == 0x%02x, data == 0x%02x, ret == %i)\n",
+			__func__, reg1, data[0], ret);
 
 	return (ret != 1) ? -EREMOTEIO : 0;
 }
@@ -265,8 +260,8 @@ static int si21_writereg(struct si21xx_state *state, u8 reg, u8 data)
 	ret = i2c_transfer(state->i2c, &msg, 1);
 
 	if (ret != 1)
-		dprintk("%s: writereg error (reg == 0x%02x, data == 0x%02x, "
-			"ret == %i)\n", __func__, reg, data, ret);
+		dprintk("%s: writereg error (reg == 0x%02x, data == 0x%02x, ret == %i)\n",
+			__func__, reg, data, ret);
 
 	return (ret != 1) ? -EREMOTEIO : 0;
 }
@@ -341,7 +336,7 @@ static int si21xx_wait_diseqc_idle(struct si21xx_state *state, int timeout)
 	dprintk("%s\n", __func__);
 
 	while ((si21_readreg(state, LNB_CTRL_REG_1) & 0x8) == 8) {
-		if (jiffies - start > timeout) {
+		if (time_is_before_jiffies(start + timeout)) {
 			dprintk("%s: timeout!!\n", __func__);
 			return -ETIMEDOUT;
 		}
@@ -469,10 +464,8 @@ static int si21xx_set_voltage(struct dvb_frontend *fe, enum fe_sec_voltage volt)
 	switch (volt) {
 	case SEC_VOLTAGE_18:
 		return si21_writereg(state, LNB_CTRL_REG_1, val | 0x40);
-		break;
 	case SEC_VOLTAGE_13:
 		return si21_writereg(state, LNB_CTRL_REG_1, (val & ~0x40));
-		break;
 	default:
 		return -EINVAL;
 	}
@@ -718,7 +711,7 @@ static int si21xx_set_frontend(struct dvb_frontend *fe)
 	int i;
 	bool inband_interferer_div2[ALLOWABLE_FS_COUNT];
 	bool inband_interferer_div4[ALLOWABLE_FS_COUNT];
-	int status;
+	int status = 0;
 
 	/* allowable sample rates for ADC in MHz */
 	int afs[ALLOWABLE_FS_COUNT] = { 200, 192, 193, 194, 195,
@@ -753,8 +746,6 @@ static int si21xx_set_frontend(struct dvb_frontend *fe)
 
 	rf_freq = 10 * c->frequency ;
 	data_rate = c->symbol_rate / 100;
-
-	status = PASS;
 
 	band_low = (rf_freq - lnb_lo) - ((lnb_uncertanity * 200)
 					+ (data_rate * 135)) / 200;
@@ -839,6 +830,9 @@ static int si21xx_set_frontend(struct dvb_frontend *fe)
 	state->fs = sample_rate;/*ADC MHz*/
 	si21xx_setacquire(fe, c->symbol_rate, c->fec_inner);
 
+	if (status)
+		return -EREMOTEIO;
+
 	return 0;
 }
 
@@ -866,14 +860,13 @@ static void si21xx_release(struct dvb_frontend *fe)
 	kfree(state);
 }
 
-static struct dvb_frontend_ops si21xx_ops = {
+static const struct dvb_frontend_ops si21xx_ops = {
 	.delsys = { SYS_DVBS },
 	.info = {
 		.name			= "SL SI21XX DVB-S",
-		.frequency_min		= 950000,
-		.frequency_max		= 2150000,
-		.frequency_stepsize	= 125,	 /* kHz for QPSK frontends */
-		.frequency_tolerance	= 0,
+		.frequency_min_hz	=  950 * MHz,
+		.frequency_max_hz	= 2150 * MHz,
+		.frequency_stepsize_hz	=  125 * kHz,
 		.symbol_rate_min	= 1000000,
 		.symbol_rate_max	= 45000000,
 		.symbol_rate_tolerance	= 500,	/* ppm */

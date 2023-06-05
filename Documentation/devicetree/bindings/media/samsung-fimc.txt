@@ -1,4 +1,4 @@
-Samsung S5P/EXYNOS SoC Camera Subsystem (FIMC)
+Samsung S5P/Exynos SoC Camera Subsystem (FIMC)
 ----------------------------------------------
 
 The S5P/Exynos SoC Camera subsystem comprises of multiple sub-devices
@@ -95,7 +95,7 @@ Optional properties:
 
 This node should contain child 'port' nodes specifying active parallel video
 input ports. It includes camera A and camera B inputs. 'reg' property in the
-port nodes specifies data input - 0, 1 indicates input A, B respectively.
+port nodes specifies data input - 1, 2 indicates input A, B respectively.
 
 Optional properties
 
@@ -138,7 +138,7 @@ Example:
 		};
 
 		/* MIPI CSI-2 bus IF sensor */
-		s5c73m3: sensor@0x1a {
+		s5c73m3: sensor@1a {
 			compatible = "samsung,s5c73m3";
 			reg = <0x1a>;
 			vddio-supply = <...>;
@@ -166,15 +166,14 @@ Example:
 		clock-output-names = "cam_a_clkout", "cam_b_clkout";
 		pinctrl-names = "default";
 		pinctrl-0 = <&cam_port_a_clk_active>;
-		status = "okay";
 		#address-cells = <1>;
 		#size-cells = <1>;
 
 		/* parallel camera ports */
 		parallel-ports {
 			/* camera A input */
-			port@0 {
-				reg = <0>;
+			port@1 {
+				reg = <1>;
 				fimc0_ep: endpoint {
 					remote-endpoint = <&s5k6aa_ep>;
 					bus-width = <8>;
@@ -189,7 +188,6 @@ Example:
 			compatible = "samsung,exynos4210-fimc";
 			reg = <0x11800000 0x1000>;
 			interrupts = <0 85 0>;
-			status = "okay";
 		};
 
 		csis_0: csis@11880000 {

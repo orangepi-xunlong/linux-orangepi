@@ -1,25 +1,12 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
 	Mantis PCI bridge driver
 
 	Copyright (C) Manu Abraham (abraham.manu@gmail.com)
 
-	This program is free software; you can redistribute it and/or modify
-	it under the terms of the GNU General Public License as published by
-	the Free Software Foundation; either version 2 of the License, or
-	(at your option) any later version.
-
-	This program is distributed in the hope that it will be useful,
-	but WITHOUT ANY WARRANTY; without even the implied warranty of
-	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-	GNU General Public License for more details.
-
-	You should have received a copy of the GNU General Public License
-	along with this program; if not, write to the Free Software
-	Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
 */
 
 #include <linux/module.h>
-#include <linux/moduleparam.h>
 #include <linux/kernel.h>
 #include <linux/pci.h>
 #include <linux/slab.h>
@@ -27,11 +14,11 @@
 #include <linux/interrupt.h>
 #include <media/rc-map.h>
 
-#include "dmxdev.h"
-#include "dvbdev.h"
-#include "dvb_demux.h"
-#include "dvb_frontend.h"
-#include "dvb_net.h"
+#include <media/dmxdev.h>
+#include <media/dvbdev.h>
+#include <media/dvb_demux.h>
+#include <media/dvb_frontend.h>
+#include <media/dvb_net.h>
 
 #include "mantis_common.h"
 
@@ -82,10 +69,8 @@ static irqreturn_t mantis_irq_handler(int irq, void *dev_id)
 	struct mantis_ca *ca;
 
 	mantis = (struct mantis_pci *) dev_id;
-	if (unlikely(mantis == NULL)) {
-		dprintk(MANTIS_ERROR, 1, "Mantis == NULL");
+	if (unlikely(!mantis))
 		return IRQ_NONE;
-	}
 	ca = mantis->mantis_ca;
 
 	stat = mmread(MANTIS_INT_STAT);
@@ -171,13 +156,11 @@ static int mantis_pci_probe(struct pci_dev *pdev,
 	struct mantis_pci_drvdata *drvdata;
 	struct mantis_pci *mantis;
 	struct mantis_hwconfig *config;
-	int err = 0;
+	int err;
 
-	mantis = kzalloc(sizeof(struct mantis_pci), GFP_KERNEL);
-	if (mantis == NULL) {
-		printk(KERN_ERR "%s ERROR: Out of memory\n", __func__);
+	mantis = kzalloc(sizeof(*mantis), GFP_KERNEL);
+	if (!mantis)
 		return -ENOMEM;
-	}
 
 	drvdata			= (void *)pci_id->driver_data;
 	mantis->num		= devs;
@@ -281,7 +264,7 @@ static void mantis_pci_remove(struct pci_dev *pdev)
 	return;
 }
 
-static struct pci_device_id mantis_pci_table[] = {
+static const struct pci_device_id mantis_pci_table[] = {
 	MAKE_ENTRY(TECHNISAT, CABLESTAR_HD2, &vp2040_config,
 		   RC_MAP_TECHNISAT_TS35),
 	MAKE_ENTRY(TECHNISAT, SKYSTAR_HD2_10, &vp1041_config,

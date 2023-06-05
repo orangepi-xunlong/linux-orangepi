@@ -1,13 +1,10 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * consumer.h -- SoC Regulator consumer support.
  *
  * Copyright (C) 2007, 2008 Wolfson Microelectronics PLC.
  *
  * Author: Liam Girdwood <lrg@slimlogic.co.uk>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  *
  * Regulator Consumer Interface.
  *
@@ -29,17 +26,18 @@
  *   but this drops rapidly to 60% when below 100mA. Regulator r has > 90%
  *   efficiency in IDLE mode at loads < 10mA. Thus regulator r will operate
  *   in normal mode for loads > 10mA and in IDLE mode for load <= 10mA.
- *
  */
 
 #ifndef __LINUX_REGULATOR_CONSUMER_H_
 #define __LINUX_REGULATOR_CONSUMER_H_
 
 #include <linux/err.h>
+#include <linux/suspend.h>
 
 struct device;
 struct notifier_block;
 struct regmap;
+struct regulator_dev;
 
 /*
  * Regulator operating modes.
@@ -80,6 +78,7 @@ struct regmap;
  * These modes can be OR'ed together to make up a mask of valid register modes.
  */
 
+#define REGULATOR_MODE_INVALID			0x0
 #define REGULATOR_MODE_FAST			0x1
 #define REGULATOR_MODE_NORMAL			0x2
 #define REGULATOR_MODE_IDLE			0x4
@@ -119,6 +118,40 @@ struct regmap;
 #define REGULATOR_EVENT_ABORT_VOLTAGE_CHANGE	0x200
 #define REGULATOR_EVENT_PRE_DISABLE		0x400
 #define REGULATOR_EVENT_ABORT_DISABLE		0x800
+#define REGULATOR_EVENT_ENABLE			0x1000
+/*
+ * Following notifications should be emitted only if detected condition
+ * is such that the HW is likely to still be working but consumers should
+ * take a recovery action to prevent problems esacalating into errors.
+ */
+#define REGULATOR_EVENT_UNDER_VOLTAGE_WARN	0x2000
+#define REGULATOR_EVENT_OVER_CURRENT_WARN	0x4000
+#define REGULATOR_EVENT_OVER_VOLTAGE_WARN	0x8000
+#define REGULATOR_EVENT_OVER_TEMP_WARN		0x10000
+#define REGULATOR_EVENT_WARN_MASK		0x1E000
+
+/*
+ * Regulator errors that can be queried using regulator_get_error_flags
+ *
+ * UNDER_VOLTAGE  Regulator output is under voltage.
+ * OVER_CURRENT   Regulator output current is too high.
+ * REGULATION_OUT Regulator output is out of regulation.
+ * FAIL           Regulator output has failed.
+ * OVER_TEMP      Regulator over temp.
+ *
+ * NOTE: These errors can be OR'ed together.
+ */
+
+#define REGULATOR_ERROR_UNDER_VOLTAGE		BIT(1)
+#define REGULATOR_ERROR_OVER_CURRENT		BIT(2)
+#define REGULATOR_ERROR_REGULATION_OUT		BIT(3)
+#define REGULATOR_ERROR_FAIL			BIT(4)
+#define REGULATOR_ERROR_OVER_TEMP		BIT(5)
+
+#define REGULATOR_ERROR_UNDER_VOLTAGE_WARN	BIT(6)
+#define REGULATOR_ERROR_OVER_CURRENT_WARN	BIT(7)
+#define REGULATOR_ERROR_OVER_VOLTAGE_WARN	BIT(8)
+#define REGULATOR_ERROR_OVER_TEMP_WARN		BIT(9)
 
 /**
  * struct pre_voltage_change_data - Data sent with PRE_VOLTAGE_CHANGE event
@@ -138,10 +171,13 @@ struct regulator;
 /**
  * struct regulator_bulk_data - Data used for bulk regulator operations.
  *
- * @supply:   The name of the supply.  Initialised by the user before
- *            using the bulk regulator APIs.
- * @consumer: The regulator consumer for the supply.  This will be managed
- *            by the bulk API.
+ * @supply:       The name of the supply.  Initialised by the user before
+ *                using the bulk regulator APIs.
+ * @init_load_uA: After getting the regulator, regulator_set_load() will be
+ *                called with this load.  Initialised by the user before
+ *                using the bulk regulator APIs.
+ * @consumer:     The regulator consumer for the supply.  This will be managed
+ *                by the bulk API.
  *
  * The regulator APIs provide a series of regulator_bulk_() API calls as
  * a convenience to consumers which require multiple supplies.  This
@@ -149,6 +185,7 @@ struct regulator;
  */
 struct regulator_bulk_data {
 	const char *supply;
+	int init_load_uA;
 	struct regulator *consumer;
 
 	/* private: Internal use */
@@ -170,6 +207,8 @@ struct regulator *__must_check regulator_get_optional(struct device *dev,
 						      const char *id);
 struct regulator *__must_check devm_regulator_get_optional(struct device *dev,
 							   const char *id);
+int devm_regulator_get_enable(struct device *dev, const char *id);
+int devm_regulator_get_enable_optional(struct device *dev, const char *id);
 void regulator_put(struct regulator *regulator);
 void devm_regulator_put(struct regulator *regulator);
 
@@ -189,17 +228,12 @@ void regulator_bulk_unregister_supply_alias(struct device *dev,
 int devm_regulator_register_supply_alias(struct device *dev, const char *id,
 					 struct device *alias_dev,
 					 const char *alias_id);
-void devm_regulator_unregister_supply_alias(struct device *dev,
-					    const char *id);
 
 int devm_regulator_bulk_register_supply_alias(struct device *dev,
 					      const char *const *id,
 					      struct device *alias_dev,
 					      const char *const *alias_id,
 					      int num_id);
-void devm_regulator_bulk_unregister_supply_alias(struct device *dev,
-						 const char *const *id,
-						 int num_id);
 
 /* regulator output control and status */
 int __must_check regulator_enable(struct regulator *regulator);
@@ -212,8 +246,15 @@ int __must_check regulator_bulk_get(struct device *dev, int num_consumers,
 				    struct regulator_bulk_data *consumers);
 int __must_check devm_regulator_bulk_get(struct device *dev, int num_consumers,
 					 struct regulator_bulk_data *consumers);
+void devm_regulator_bulk_put(struct regulator_bulk_data *consumers);
+int __must_check devm_regulator_bulk_get_const(
+	struct device *dev, int num_consumers,
+	const struct regulator_bulk_data *in_consumers,
+	struct regulator_bulk_data **out_consumers);
 int __must_check regulator_bulk_enable(int num_consumers,
 				       struct regulator_bulk_data *consumers);
+int devm_regulator_bulk_get_enable(struct device *dev, int num_consumers,
+				   const char * const *id);
 int regulator_bulk_disable(int num_consumers,
 			   struct regulator_bulk_data *consumers);
 int regulator_bulk_force_disable(int num_consumers,
@@ -237,6 +278,8 @@ int regulator_get_current_limit(struct regulator *regulator);
 
 int regulator_set_mode(struct regulator *regulator, unsigned int mode);
 unsigned int regulator_get_mode(struct regulator *regulator);
+int regulator_get_error_flags(struct regulator *regulator,
+				unsigned int *flags);
 int regulator_set_load(struct regulator *regulator, int load_uA);
 
 int regulator_allow_bypass(struct regulator *regulator, bool allow);
@@ -258,22 +301,25 @@ int regulator_unregister_notifier(struct regulator *regulator,
 void devm_regulator_unregister_notifier(struct regulator *regulator,
 					struct notifier_block *nb);
 
+/* regulator suspend */
+int regulator_suspend_enable(struct regulator_dev *rdev,
+			     suspend_state_t state);
+int regulator_suspend_disable(struct regulator_dev *rdev,
+			      suspend_state_t state);
+int regulator_set_suspend_voltage(struct regulator *regulator, int min_uV,
+				  int max_uV, suspend_state_t state);
+
 /* driver data - core doesn't touch */
 void *regulator_get_drvdata(struct regulator *regulator);
 void regulator_set_drvdata(struct regulator *regulator, void *data);
 
-#if defined(CONFIG_AW_AXP)
-extern int axp_get_ldo_name(const char *supply_name, char *ldo_name);
-extern int axp_get_enable_id_count(const char *ldo_name);
-extern int axp_get_enable_id(const char *ldo_name, u32 count, char *enable_id);
-extern int axp_check_enable_id(const char *ldo_name, const char *enalbe_id);
-extern int axp_check_ldo_alwayson(const char *ldo_name);
-extern int axp_set_ldo_alwayson(const char *ldo_name, u32 value);
-extern int axp_regulator_dump(void);
-extern unsigned int axp_regulator_debug;
-extern int axp_mem_save(void);
-extern void axp_mem_restore(void);
-#endif
+/* misc helpers */
+
+void regulator_bulk_set_supply_names(struct regulator_bulk_data *consumers,
+				     const char *const *supply_names,
+				     unsigned int num_supplies);
+
+bool regulator_is_equal(struct regulator *reg1, struct regulator *reg2);
 
 #else
 
@@ -308,6 +354,23 @@ regulator_get_exclusive(struct device *dev, const char *id)
 }
 
 static inline struct regulator *__must_check
+devm_regulator_get_exclusive(struct device *dev, const char *id)
+{
+	return ERR_PTR(-ENODEV);
+}
+
+static inline int devm_regulator_get_enable(struct device *dev, const char *id)
+{
+	return -ENODEV;
+}
+
+static inline int devm_regulator_get_enable_optional(struct device *dev,
+						     const char *id)
+{
+	return -ENODEV;
+}
+
+static inline struct regulator *__must_check
 regulator_get_optional(struct device *dev, const char *id)
 {
 	return ERR_PTR(-ENODEV);
@@ -325,6 +388,10 @@ static inline void regulator_put(struct regulator *regulator)
 }
 
 static inline void devm_regulator_put(struct regulator *regulator)
+{
+}
+
+static inline void devm_regulator_bulk_put(struct regulator_bulk_data *consumers)
 {
 }
 
@@ -364,11 +431,6 @@ static inline int devm_regulator_register_supply_alias(struct device *dev,
 	return 0;
 }
 
-static inline void devm_regulator_unregister_supply_alias(struct device *dev,
-							  const char *id)
-{
-}
-
 static inline int devm_regulator_bulk_register_supply_alias(struct device *dev,
 						const char *const *id,
 						struct device *alias_dev,
@@ -376,11 +438,6 @@ static inline int devm_regulator_bulk_register_supply_alias(struct device *dev,
 						int num_id)
 {
 	return 0;
-}
-
-static inline void devm_regulator_bulk_unregister_supply_alias(
-	struct device *dev, const char *const *id, int num_id)
-{
 }
 
 static inline int regulator_enable(struct regulator *regulator)
@@ -428,6 +485,13 @@ static inline int regulator_bulk_enable(int num_consumers,
 	return 0;
 }
 
+static inline int devm_regulator_bulk_get_enable(struct device *dev,
+						 int num_consumers,
+						 const char * const *id)
+{
+	return 0;
+}
+
 static inline int regulator_bulk_disable(int num_consumers,
 					 struct regulator_bulk_data *consumers)
 {
@@ -462,8 +526,18 @@ static inline int regulator_get_voltage(struct regulator *regulator)
 	return -EINVAL;
 }
 
+static inline int regulator_sync_voltage(struct regulator *regulator)
+{
+	return -EINVAL;
+}
+
 static inline int regulator_is_supported_voltage(struct regulator *regulator,
 				   int min_uV, int max_uV)
+{
+	return 0;
+}
+
+static inline unsigned int regulator_get_linear_step(struct regulator *regulator)
 {
 	return 0;
 }
@@ -490,9 +564,15 @@ static inline unsigned int regulator_get_mode(struct regulator *regulator)
 	return REGULATOR_MODE_NORMAL;
 }
 
+static inline int regulator_get_error_flags(struct regulator *regulator,
+					    unsigned int *flags)
+{
+	return -EINVAL;
+}
+
 static inline int regulator_set_load(struct regulator *regulator, int load_uA)
 {
-	return REGULATOR_MODE_NORMAL;
+	return 0;
 }
 
 static inline int regulator_allow_bypass(struct regulator *regulator,
@@ -543,6 +623,25 @@ static inline int devm_regulator_unregister_notifier(struct regulator *regulator
 	return 0;
 }
 
+static inline int regulator_suspend_enable(struct regulator_dev *rdev,
+					   suspend_state_t state)
+{
+	return -EINVAL;
+}
+
+static inline int regulator_suspend_disable(struct regulator_dev *rdev,
+					    suspend_state_t state)
+{
+	return -EINVAL;
+}
+
+static inline int regulator_set_suspend_voltage(struct regulator *regulator,
+						int min_uV, int max_uV,
+						suspend_state_t state)
+{
+	return -EINVAL;
+}
+
 static inline void *regulator_get_drvdata(struct regulator *regulator)
 {
 	return NULL;
@@ -563,6 +662,18 @@ static inline int regulator_list_voltage(struct regulator *regulator, unsigned s
 	return -EINVAL;
 }
 
+static inline void
+regulator_bulk_set_supply_names(struct regulator_bulk_data *consumers,
+				const char *const *supply_names,
+				unsigned int num_supplies)
+{
+}
+
+static inline bool
+regulator_is_equal(struct regulator *reg1, struct regulator *reg2)
+{
+	return false;
+}
 #endif
 
 static inline int regulator_set_voltage_triplet(struct regulator *regulator,

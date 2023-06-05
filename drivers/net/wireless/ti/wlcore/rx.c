@@ -1,24 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * This file is part of wl1271
  *
  * Copyright (C) 2009 Nokia Corporation
  *
  * Contact: Luciano Coelho <luciano.coelho@nokia.com>
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * version 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA
- * 02110-1301 USA
- *
  */
 
 #include <linux/gfp.h>
@@ -72,7 +58,7 @@ static void wl1271_rx_status(struct wl1271 *wl,
 
 	/* 11n support */
 	if (desc->rate <= wl->hw_min_ht_rate)
-		status->flag |= RX_FLAG_HT;
+		status->encoding = RX_ENC_HT;
 
 	/*
 	* Read the signal level and antenna diversity indication.
@@ -107,7 +93,7 @@ static void wl1271_rx_status(struct wl1271 *wl,
 	}
 
 	if (beacon || probe_rsp)
-		status->boottime_ns = ktime_get_boot_ns();
+		status->boottime_ns = ktime_get_boottime_ns();
 
 	if (beacon)
 		wlcore_set_pending_regdomain_ch(wl, (u16)desc->channel,
@@ -120,7 +106,6 @@ static int wl1271_rx_handle_data(struct wl1271 *wl, u8 *data, u32 length,
 	struct wl1271_rx_descriptor *desc;
 	struct sk_buff *skb;
 	struct ieee80211_hdr *hdr;
-	u8 *buf;
 	u8 beacon = 0;
 	u8 is_data = 0;
 	u8 reserved = 0, offset_to_data = 0;
@@ -177,15 +162,13 @@ static int wl1271_rx_handle_data(struct wl1271 *wl, u8 *data, u32 length,
 	/* reserve the unaligned payload(if any) */
 	skb_reserve(skb, reserved);
 
-	buf = skb_put(skb, pkt_data_len);
-
 	/*
 	 * Copy packets from aggregation buffer to the skbs without rx
 	 * descriptor and with packet payload aligned care. In case of unaligned
 	 * packets copy the packets in offset of 2 bytes guarantee IP header
 	 * payload aligned to 4 bytes.
 	 */
-	memcpy(buf, data + sizeof(*desc), pkt_data_len);
+	skb_put_data(skb, data + sizeof(*desc), pkt_data_len);
 	if (rx_align == WLCORE_RX_BUF_PADDED)
 		skb_pull(skb, RX_BUF_ALIGN);
 

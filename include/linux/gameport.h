@@ -1,9 +1,6 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  *  Copyright (c) 1999-2002 Vojtech Pavlik
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 as published by
- * the Free Software Foundation.
  */
 #ifndef _GAMEPORT_H
 #define _GAMEPORT_H
@@ -113,7 +110,7 @@ static inline void gameport_free_port(struct gameport *gameport)
 
 static inline void gameport_set_name(struct gameport *gameport, const char *name)
 {
-	strlcpy(gameport->name, name, sizeof(gameport->name));
+	strscpy(gameport->name, name, sizeof(gameport->name));
 }
 
 /*

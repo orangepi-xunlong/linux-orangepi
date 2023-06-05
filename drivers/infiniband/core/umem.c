@@ -2,6 +2,7 @@
  * Copyright (c) 2005 Topspin Communications.  All rights reserved.
  * Copyright (c) 2005 Cisco Systems.  All rights reserved.
  * Copyright (c) 2005 Mellanox Technologies. All rights reserved.
+ * Copyright (c) 2020 Intel Corporation. All rights reserved.
  *
  * This software is available to you under a choice of one of two
  * licenses.  You may choose to be licensed under the terms of the GNU
@@ -34,73 +35,128 @@
 
 #include <linux/mm.h>
 #include <linux/dma-mapping.h>
-#include <linux/sched.h>
+#include <linux/sched/signal.h>
+#include <linux/sched/mm.h>
 #include <linux/export.h>
-#include <linux/hugetlb.h>
 #include <linux/slab.h>
+#include <linux/pagemap.h>
+#include <linux/count_zeros.h>
 #include <rdma/ib_umem_odp.h>
 
 #include "uverbs.h"
 
-
 static void __ib_umem_release(struct ib_device *dev, struct ib_umem *umem, int dirty)
 {
+	bool make_dirty = umem->writable && dirty;
 	struct scatterlist *sg;
-	struct page *page;
+	unsigned int i;
+
+	if (dirty)
+		ib_dma_unmap_sgtable_attrs(dev, &umem->sgt_append.sgt,
+					   DMA_BIDIRECTIONAL, 0);
+
+	for_each_sgtable_sg(&umem->sgt_append.sgt, sg, i)
+		unpin_user_page_range_dirty_lock(sg_page(sg),
+			DIV_ROUND_UP(sg->length, PAGE_SIZE), make_dirty);
+
+	sg_free_append_table(&umem->sgt_append);
+}
+
+/**
+ * ib_umem_find_best_pgsz - Find best HW page size to use for this MR
+ *
+ * @umem: umem struct
+ * @pgsz_bitmap: bitmap of HW supported page sizes
+ * @virt: IOVA
+ *
+ * This helper is intended for HW that support multiple page
+ * sizes but can do only a single page size in an MR.
+ *
+ * Returns 0 if the umem requires page sizes not supported by
+ * the driver to be mapped. Drivers always supporting PAGE_SIZE
+ * or smaller will never see a 0 result.
+ */
+unsigned long ib_umem_find_best_pgsz(struct ib_umem *umem,
+				     unsigned long pgsz_bitmap,
+				     unsigned long virt)
+{
+	struct scatterlist *sg;
+	unsigned long va, pgoff;
+	dma_addr_t mask;
 	int i;
 
-	if (umem->nmap > 0)
-		ib_dma_unmap_sg(dev, umem->sg_head.sgl,
-				umem->nmap,
-				DMA_BIDIRECTIONAL);
+	if (umem->is_odp) {
+		unsigned int page_size = BIT(to_ib_umem_odp(umem)->page_shift);
 
-	for_each_sg(umem->sg_head.sgl, sg, umem->npages, i) {
-
-		page = sg_page(sg);
-		if (umem->writable && dirty)
-			set_page_dirty_lock(page);
-		put_page(page);
+		/* ODP must always be self consistent. */
+		if (!(pgsz_bitmap & page_size))
+			return 0;
+		return page_size;
 	}
 
-	sg_free_table(&umem->sg_head);
-	return;
+	/* rdma_for_each_block() has a bug if the page size is smaller than the
+	 * page size used to build the umem. For now prevent smaller page sizes
+	 * from being returned.
+	 */
+	pgsz_bitmap &= GENMASK(BITS_PER_LONG - 1, PAGE_SHIFT);
 
+	umem->iova = va = virt;
+	/* The best result is the smallest page size that results in the minimum
+	 * number of required pages. Compute the largest page size that could
+	 * work based on VA address bits that don't change.
+	 */
+	mask = pgsz_bitmap &
+	       GENMASK(BITS_PER_LONG - 1,
+		       bits_per((umem->length - 1 + virt) ^ virt));
+	/* offset into first SGL */
+	pgoff = umem->address & ~PAGE_MASK;
+
+	for_each_sgtable_dma_sg(&umem->sgt_append.sgt, sg, i) {
+		/* Walk SGL and reduce max page size if VA/PA bits differ
+		 * for any address.
+		 */
+		mask |= (sg_dma_address(sg) + pgoff) ^ va;
+		va += sg_dma_len(sg) - pgoff;
+		/* Except for the last entry, the ending iova alignment sets
+		 * the maximum possible page size as the low bits of the iova
+		 * must be zero when starting the next chunk.
+		 */
+		if (i != (umem->sgt_append.sgt.nents - 1))
+			mask |= va;
+		pgoff = 0;
+	}
+
+	/* The mask accumulates 1's in each position where the VA and physical
+	 * address differ, thus the length of trailing 0 is the largest page
+	 * size that can pass the VA through to the physical.
+	 */
+	if (mask)
+		pgsz_bitmap &= GENMASK(count_trailing_zeros(mask), 0);
+	return pgsz_bitmap ? rounddown_pow_of_two(pgsz_bitmap) : 0;
 }
+EXPORT_SYMBOL(ib_umem_find_best_pgsz);
 
 /**
  * ib_umem_get - Pin and DMA map userspace memory.
  *
- * If access flags indicate ODP memory, avoid pinning. Instead, stores
- * the mm for future page fault handling in conjunction with MMU notifiers.
- *
- * @context: userspace context to pin memory for
+ * @device: IB device to connect UMEM
  * @addr: userspace virtual address to start at
  * @size: length of region to pin
  * @access: IB_ACCESS_xxx flags for memory being pinned
- * @dmasync: flush in-flight DMA when the memory region is written
  */
-struct ib_umem *ib_umem_get(struct ib_ucontext *context, unsigned long addr,
-			    size_t size, int access, int dmasync)
+struct ib_umem *ib_umem_get(struct ib_device *device, unsigned long addr,
+			    size_t size, int access)
 {
 	struct ib_umem *umem;
 	struct page **page_list;
-	struct vm_area_struct **vma_list;
-	unsigned long locked;
 	unsigned long lock_limit;
+	unsigned long new_pinned;
 	unsigned long cur_base;
+	unsigned long dma_attr = 0;
+	struct mm_struct *mm;
 	unsigned long npages;
-	int ret;
-	int i;
-	unsigned long dma_attrs = 0;
-	struct scatterlist *sg, *sg_list_start;
-	int need_release = 0;
+	int pinned, ret;
 	unsigned int gup_flags = FOLL_WRITE;
-
-	if (dmasync)
-		dma_attrs |= DMA_ATTR_WRITE_BARRIER;
-
-	if (!size)
-		return ERR_PTR(-EINVAL);
 
 	/*
 	 * If the combination of the addr and size requested for this memory
@@ -113,141 +169,96 @@ struct ib_umem *ib_umem_get(struct ib_ucontext *context, unsigned long addr,
 	if (!can_do_mlock())
 		return ERR_PTR(-EPERM);
 
-	umem = kzalloc(sizeof *umem, GFP_KERNEL);
+	if (access & IB_ACCESS_ON_DEMAND)
+		return ERR_PTR(-EOPNOTSUPP);
+
+	umem = kzalloc(sizeof(*umem), GFP_KERNEL);
 	if (!umem)
 		return ERR_PTR(-ENOMEM);
-
-	umem->context   = context;
-	umem->length    = size;
-	umem->address   = addr;
-	umem->page_size = PAGE_SIZE;
-	umem->pid       = get_task_pid(current, PIDTYPE_PID);
+	umem->ibdev      = device;
+	umem->length     = size;
+	umem->address    = addr;
+	/*
+	 * Drivers should call ib_umem_find_best_pgsz() to set the iova
+	 * correctly.
+	 */
+	umem->iova = addr;
 	umem->writable   = ib_access_writable(access);
-
-	if (access & IB_ACCESS_ON_DEMAND) {
-		put_pid(umem->pid);
-		ret = ib_umem_odp_get(context, umem);
-		if (ret) {
-			kfree(umem);
-			return ERR_PTR(ret);
-		}
-		return umem;
-	}
-
-	umem->odp_data = NULL;
-
-	/* We assume the memory is from hugetlb until proved otherwise */
-	umem->hugetlb   = 1;
+	umem->owning_mm = mm = current->mm;
+	mmgrab(mm);
 
 	page_list = (struct page **) __get_free_page(GFP_KERNEL);
 	if (!page_list) {
-		put_pid(umem->pid);
-		kfree(umem);
-		return ERR_PTR(-ENOMEM);
+		ret = -ENOMEM;
+		goto umem_kfree;
 	}
 
-	/*
-	 * if we can't alloc the vma_list, it's not so bad;
-	 * just assume the memory is not hugetlb memory
-	 */
-	vma_list = (struct vm_area_struct **) __get_free_page(GFP_KERNEL);
-	if (!vma_list)
-		umem->hugetlb = 0;
-
 	npages = ib_umem_num_pages(umem);
+	if (npages == 0 || npages > UINT_MAX) {
+		ret = -EINVAL;
+		goto out;
+	}
 
-	down_write(&current->mm->mmap_sem);
-
-	locked     = npages + current->mm->pinned_vm;
 	lock_limit = rlimit(RLIMIT_MEMLOCK) >> PAGE_SHIFT;
 
-	if ((locked > lock_limit) && !capable(CAP_IPC_LOCK)) {
+	new_pinned = atomic64_add_return(npages, &mm->pinned_vm);
+	if (new_pinned > lock_limit && !capable(CAP_IPC_LOCK)) {
+		atomic64_sub(npages, &mm->pinned_vm);
 		ret = -ENOMEM;
 		goto out;
 	}
 
 	cur_base = addr & PAGE_MASK;
 
-	if (npages == 0 || npages > UINT_MAX) {
-		ret = -EINVAL;
-		goto out;
-	}
-
-	ret = sg_alloc_table(&umem->sg_head, npages, GFP_KERNEL);
-	if (ret)
-		goto out;
-
 	if (!umem->writable)
 		gup_flags |= FOLL_FORCE;
 
-	need_release = 1;
-	sg_list_start = umem->sg_head.sgl;
-
 	while (npages) {
-		ret = get_user_pages_longterm(cur_base,
-				     min_t(unsigned long, npages,
-					   PAGE_SIZE / sizeof (struct page *)),
-				     gup_flags, page_list, vma_list);
-
-		if (ret < 0)
-			goto out;
-
-		umem->npages += ret;
-		cur_base += ret * PAGE_SIZE;
-		npages   -= ret;
-
-		for_each_sg(sg_list_start, sg, ret, i) {
-			if (vma_list && !is_vm_hugetlb_page(vma_list[i]))
-				umem->hugetlb = 0;
-
-			sg_set_page(sg, page_list[i], PAGE_SIZE, 0);
+		cond_resched();
+		pinned = pin_user_pages_fast(cur_base,
+					  min_t(unsigned long, npages,
+						PAGE_SIZE /
+						sizeof(struct page *)),
+					  gup_flags | FOLL_LONGTERM, page_list);
+		if (pinned < 0) {
+			ret = pinned;
+			goto umem_release;
 		}
 
-		/* preparing for next loop */
-		sg_list_start = sg;
+		cur_base += pinned * PAGE_SIZE;
+		npages -= pinned;
+		ret = sg_alloc_append_table_from_pages(
+			&umem->sgt_append, page_list, pinned, 0,
+			pinned << PAGE_SHIFT, ib_dma_max_seg_size(device),
+			npages, GFP_KERNEL);
+		if (ret) {
+			unpin_user_pages_dirty_lock(page_list, pinned, 0);
+			goto umem_release;
+		}
 	}
 
-	umem->nmap = ib_dma_map_sg_attrs(context->device,
-				  umem->sg_head.sgl,
-				  umem->npages,
-				  DMA_BIDIRECTIONAL,
-				  dma_attrs);
+	if (access & IB_ACCESS_RELAXED_ORDERING)
+		dma_attr |= DMA_ATTR_WEAK_ORDERING;
 
-	if (umem->nmap <= 0) {
-		ret = -ENOMEM;
-		goto out;
-	}
+	ret = ib_dma_map_sgtable_attrs(device, &umem->sgt_append.sgt,
+				       DMA_BIDIRECTIONAL, dma_attr);
+	if (ret)
+		goto umem_release;
+	goto out;
 
-	ret = 0;
-
+umem_release:
+	__ib_umem_release(device, umem, 0);
+	atomic64_sub(ib_umem_num_pages(umem), &mm->pinned_vm);
 out:
-	if (ret < 0) {
-		if (need_release)
-			__ib_umem_release(context->device, umem, 0);
-		put_pid(umem->pid);
-		kfree(umem);
-	} else
-		current->mm->pinned_vm = locked;
-
-	up_write(&current->mm->mmap_sem);
-	if (vma_list)
-		free_page((unsigned long) vma_list);
 	free_page((unsigned long) page_list);
-
-	return ret < 0 ? ERR_PTR(ret) : umem;
+umem_kfree:
+	if (ret) {
+		mmdrop(umem->owning_mm);
+		kfree(umem);
+	}
+	return ret ? ERR_PTR(ret) : umem;
 }
 EXPORT_SYMBOL(ib_umem_get);
-
-static void ib_umem_account(struct work_struct *work)
-{
-	struct ib_umem *umem = container_of(work, struct ib_umem, work);
-
-	down_write(&umem->mm->mmap_sem);
-	umem->mm->pinned_vm -= umem->diff;
-	up_write(&umem->mm->mmap_sem);
-	mmput(umem->mm);
-	kfree(umem);
-}
 
 /**
  * ib_umem_release - release memory pinned with ib_umem_get
@@ -255,76 +266,20 @@ static void ib_umem_account(struct work_struct *work)
  */
 void ib_umem_release(struct ib_umem *umem)
 {
-	struct ib_ucontext *context = umem->context;
-	struct mm_struct *mm;
-	struct task_struct *task;
-	unsigned long diff;
-
-	if (umem->odp_data) {
-		ib_umem_odp_release(umem);
+	if (!umem)
 		return;
-	}
+	if (umem->is_dmabuf)
+		return ib_umem_dmabuf_release(to_ib_umem_dmabuf(umem));
+	if (umem->is_odp)
+		return ib_umem_odp_release(to_ib_umem_odp(umem));
 
-	__ib_umem_release(umem->context->device, umem, 1);
+	__ib_umem_release(umem->ibdev, umem, 1);
 
-	task = get_pid_task(umem->pid, PIDTYPE_PID);
-	put_pid(umem->pid);
-	if (!task)
-		goto out;
-	mm = get_task_mm(task);
-	put_task_struct(task);
-	if (!mm)
-		goto out;
-
-	diff = ib_umem_num_pages(umem);
-
-	/*
-	 * We may be called with the mm's mmap_sem already held.  This
-	 * can happen when a userspace munmap() is the call that drops
-	 * the last reference to our file and calls our release
-	 * method.  If there are memory regions to destroy, we'll end
-	 * up here and not be able to take the mmap_sem.  In that case
-	 * we defer the vm_locked accounting to the system workqueue.
-	 */
-	if (context->closing) {
-		if (!down_write_trylock(&mm->mmap_sem)) {
-			INIT_WORK(&umem->work, ib_umem_account);
-			umem->mm   = mm;
-			umem->diff = diff;
-
-			queue_work(ib_wq, &umem->work);
-			return;
-		}
-	} else
-		down_write(&mm->mmap_sem);
-
-	mm->pinned_vm -= diff;
-	up_write(&mm->mmap_sem);
-	mmput(mm);
-out:
+	atomic64_sub(ib_umem_num_pages(umem), &umem->owning_mm->pinned_vm);
+	mmdrop(umem->owning_mm);
 	kfree(umem);
 }
 EXPORT_SYMBOL(ib_umem_release);
-
-int ib_umem_page_count(struct ib_umem *umem)
-{
-	int shift;
-	int i;
-	int n;
-	struct scatterlist *sg;
-
-	if (umem->odp_data)
-		return ib_umem_num_pages(umem);
-
-	shift = ilog2(umem->page_size);
-
-	n = 0;
-	for_each_sg(umem->sg_head.sgl, sg, umem->nmap, i)
-		n += sg_dma_len(sg) >> shift;
-
-	return n;
-}
-EXPORT_SYMBOL(ib_umem_page_count);
 
 /*
  * Copy from the given ib_umem's pages to the given buffer.
@@ -343,12 +298,13 @@ int ib_umem_copy_from(void *dst, struct ib_umem *umem, size_t offset,
 	int ret;
 
 	if (offset > umem->length || length > umem->length - offset) {
-		pr_err("ib_umem_copy_from not in range. offset: %zd umem length: %zd end: %zd\n",
-		       offset, umem->length, end);
+		pr_err("%s not in range. offset: %zd umem length: %zd end: %zd\n",
+		       __func__, offset, umem->length, end);
 		return -EINVAL;
 	}
 
-	ret = sg_pcopy_to_buffer(umem->sg_head.sgl, umem->npages, dst, length,
+	ret = sg_pcopy_to_buffer(umem->sgt_append.sgt.sgl,
+				 umem->sgt_append.sgt.orig_nents, dst, length,
 				 offset + ib_umem_offset(umem));
 
 	if (ret < 0)
