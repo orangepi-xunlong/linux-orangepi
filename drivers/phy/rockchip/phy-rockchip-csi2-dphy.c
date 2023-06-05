@@ -477,11 +477,6 @@ static int rockchip_csi2_dphy_fwnode_parse(struct device *dev,
 			container_of(asd, struct sensor_async_subdev, asd);
 	struct v4l2_mbus_config *config = &s_asd->mbus;
 
-	if (vep->base.port != 0) {
-		dev_err(dev, "The PHY has only port 0\n");
-		return -EINVAL;
-	}
-
 	if (vep->bus_type == V4L2_MBUS_CSI2_DPHY ||
 	    vep->bus_type == V4L2_MBUS_CSI2_CPHY) {
 		config->type = V4L2_MBUS_CSI2_DPHY;
