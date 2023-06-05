@@ -18,6 +18,8 @@
  * http://www.gnu.org/licenses/gpl-2.0.html.
  *
  */
+#ifndef _KBASE_MEM_MIGRATE_H
+#define _KBASE_MEM_MIGRATE_H
 
 /**
  * DOC: Base kernel page migration implementation.
@@ -29,7 +31,7 @@
 
 #define PAGE_ISOLATE_SHIFT (7)
 #define PAGE_ISOLATE_MASK ((u8)1 << PAGE_ISOLATE_SHIFT)
-#define PAGE_ISOLATE_SET(status, value)                                                            \
+#define PAGE_ISOLATE_SET(status, value) \
 	((status & ~PAGE_ISOLATE_MASK) | (value << PAGE_ISOLATE_SHIFT))
 #define IS_PAGE_ISOLATED(status) ((bool)(status & PAGE_ISOLATE_MASK))
 
@@ -43,7 +45,11 @@
 /* Global integer used to determine if module parameter value has been
  * provided and if page migration feature is enabled.
  */
+#if !IS_ENABLED(CONFIG_PAGE_MIGRATION_SUPPORT)
+extern const int kbase_page_migration_enabled;
+#else
 extern int kbase_page_migration_enabled;
+#endif
 
 /**
  * kbase_alloc_page_metadata - Allocate and initialize page metadata
@@ -62,6 +68,8 @@ extern int kbase_page_migration_enabled;
  */
 bool kbase_alloc_page_metadata(struct kbase_device *kbdev, struct page *p, dma_addr_t dma_addr,
 			       u8 group_id);
+
+bool kbase_is_page_migration_enabled(void);
 
 /**
  * kbase_free_page_later - Defer freeing of given page.
@@ -94,6 +102,7 @@ void kbase_mem_migrate_set_address_space_ops(struct kbase_device *kbdev, struct 
  *
  * Enables page migration by default based on GPU and setup work queue to
  * defer freeing pages during page migration callbacks.
+ * This function must be called only when a kbase device is initialized.
  */
 void kbase_mem_migrate_init(struct kbase_device *kbdev);
 
@@ -106,3 +115,5 @@ void kbase_mem_migrate_init(struct kbase_device *kbdev);
  * and destroy workqueue associated.
  */
 void kbase_mem_migrate_term(struct kbase_device *kbdev);
+
+#endif /* _KBASE_migrate_H */

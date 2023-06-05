@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note
 #
-# (C) COPYRIGHT 2021-2022 ARM Limited. All rights reserved.
+# (C) COPYRIGHT 2021-2023 ARM Limited. All rights reserved.
 #
 # This program is free software and is provided to you under the terms of the
 # GNU General Public License version 2 as published by the Free Software
@@ -23,48 +23,52 @@
 #
 KERNEL_SRC ?= /lib/modules/$(shell uname -r)/build
 KDIR ?= $(KERNEL_SRC)
+M ?= $(shell pwd)
 
 ifeq ($(KDIR),)
     $(error Must specify KDIR to point to the kernel to target))
 endif
 
-vars :=
-#
-# Default configuration values
-#
-CONFIG_MALI_BASE_MODULES ?= n
+CONFIGS :=
 
-ifeq ($(CONFIG_MALI_BASE_MODULES),y)
-    CONFIG_MALI_CSF_SUPPORT ?= n
+ifeq ($(MALI_KCONFIG_EXT_PREFIX),)
+    #
+    # Default configuration values
+    #
+    CONFIG_MALI_BASE_MODULES ?= n
 
-    ifneq ($(CONFIG_DMA_SHARED_BUFFER),n)
-        CONFIG_DMA_SHARED_BUFFER_TEST_EXPORTER ?= y
+    ifeq ($(CONFIG_MALI_BASE_MODULES),y)
+        CONFIG_MALI_CSF_SUPPORT ?= n
+
+        ifneq ($(CONFIG_DMA_SHARED_BUFFER),n)
+            CONFIG_DMA_SHARED_BUFFER_TEST_EXPORTER ?= y
+        else
+            # Prevent misuse when CONFIG_DMA_SHARED_BUFFER=n
+            CONFIG_DMA_SHARED_BUFFER_TEST_EXPORTER = n
+        endif
+
+        CONFIG_MALI_MEMORY_GROUP_MANAGER ?= y
+
+        ifneq ($(CONFIG_MALI_CSF_SUPPORT), n)
+            CONFIG_MALI_PROTECTED_MEMORY_ALLOCATOR ?= y
+        endif
+
     else
-        # Prevent misuse when CONFIG_DMA_SHARED_BUFFER=n
+        # Prevent misuse when CONFIG_MALI_BASE_MODULES=n
         CONFIG_DMA_SHARED_BUFFER_TEST_EXPORTER = n
+        CONFIG_MALI_MEMORY_GROUP_MANAGER = n
+        CONFIG_MALI_PROTECTED_MEMORY_ALLOCATOR = n
+
     endif
 
-    CONFIG_MALI_MEMORY_GROUP_MANAGER ?= y
-
-    ifneq ($(CONFIG_MALI_CSF_SUPPORT), n)
-        CONFIG_MALI_PROTECTED_MEMORY_ALLOCATOR ?= y
-    endif
-
-else
-    # Prevent misuse when CONFIG_MALI_BASE_MODULES=n
-    CONFIG_DMA_SHARED_BUFFER_TEST_EXPORTER = n
-    CONFIG_MALI_MEMORY_GROUP_MANAGER = n
-    CONFIG_MALI_PROTECTED_MEMORY_ALLOCATOR = n
+    CONFIGS += \
+        CONFIG_MALI_BASE_MODULES \
+        CONFIG_MALI_CSF_SUPPORT \
+        CONFIG_DMA_SHARED_BUFFER_TEST_EXPORTER \
+        CONFIG_MALI_MEMORY_GROUP_MANAGER \
+        CONFIG_MALI_PROTECTED_MEMORY_ALLOCATOR \
 
 endif
-
-CONFIGS := \
-    CONFIG_MALI_BASE_MODULES \
-    CONFIG_MALI_CSF_SUPPORT \
-    CONFIG_DMA_SHARED_BUFFER_TEST_EXPORTER \
-    CONFIG_MALI_MEMORY_GROUP_MANAGER \
-    CONFIG_MALI_PROTECTED_MEMORY_ALLOCATOR \
-
 
 #
 # MAKE_ARGS to pass the custom CONFIGs on out-of-tree build
@@ -88,65 +92,65 @@ EXTRA_CFLAGS := $(foreach config,$(CONFIGS), \
                     $(if $(filter y m,$(value $(value config))), \
                         -D$(value config)=1))
 
-KBUILD_CFLAGS += -Wall -Werror
+CFLAGS_MODULE += -Wall -Werror
 
 ifeq ($(CONFIG_GCOV_KERNEL), y)
-    KBUILD_CFLAGS += $(call cc-option, -ftest-coverage)
-    KBUILD_CFLAGS += $(call cc-option, -fprofile-arcs)
+    CFLAGS_MODULE += $(call cc-option, -ftest-coverage)
+    CFLAGS_MODULE += $(call cc-option, -fprofile-arcs)
     EXTRA_CFLAGS += -DGCOV_PROFILE=1
 endif
 
 ifeq ($(CONFIG_MALI_KCOV),y)
-    KBUILD_CFLAGS += $(call cc-option, -fsanitize-coverage=trace-cmp)
+    CFLAGS_MODULE += $(call cc-option, -fsanitize-coverage=trace-cmp)
     EXTRA_CFLAGS += -DKCOV=1
     EXTRA_CFLAGS += -DKCOV_ENABLE_COMPARISONS=1
 endif
 
 # The following were added to align with W=1 in scripts/Makefile.extrawarn
 # from the Linux source tree (v5.18.14)
-KBUILD_CFLAGS += -Wextra -Wunused -Wno-unused-parameter
-KBUILD_CFLAGS += -Wmissing-declarations
-KBUILD_CFLAGS += -Wmissing-format-attribute
-KBUILD_CFLAGS += -Wmissing-prototypes
-KBUILD_CFLAGS += -Wold-style-definition
+CFLAGS_MODULE += -Wextra -Wunused -Wno-unused-parameter
+CFLAGS_MODULE += -Wmissing-declarations
+CFLAGS_MODULE += -Wmissing-format-attribute
+CFLAGS_MODULE += -Wmissing-prototypes
+CFLAGS_MODULE += -Wold-style-definition
 # The -Wmissing-include-dirs cannot be enabled as the path to some of the
 # included directories change depending on whether it is an in-tree or
 # out-of-tree build.
-KBUILD_CFLAGS += $(call cc-option, -Wunused-but-set-variable)
-KBUILD_CFLAGS += $(call cc-option, -Wunused-const-variable)
-KBUILD_CFLAGS += $(call cc-option, -Wpacked-not-aligned)
-KBUILD_CFLAGS += $(call cc-option, -Wstringop-truncation)
+CFLAGS_MODULE += $(call cc-option, -Wunused-but-set-variable)
+CFLAGS_MODULE += $(call cc-option, -Wunused-const-variable)
+CFLAGS_MODULE += $(call cc-option, -Wpacked-not-aligned)
+CFLAGS_MODULE += $(call cc-option, -Wstringop-truncation)
 # The following turn off the warnings enabled by -Wextra
-KBUILD_CFLAGS += -Wno-sign-compare
-KBUILD_CFLAGS += -Wno-shift-negative-value
+CFLAGS_MODULE += -Wno-sign-compare
+CFLAGS_MODULE += -Wno-shift-negative-value
 # This flag is needed to avoid build errors on older kernels
-KBUILD_CFLAGS += $(call cc-option, -Wno-cast-function-type)
+CFLAGS_MODULE += $(call cc-option, -Wno-cast-function-type)
 
 KBUILD_CPPFLAGS += -DKBUILD_EXTRA_WARN1
 
 # The following were added to align with W=2 in scripts/Makefile.extrawarn
 # from the Linux source tree (v5.18.14)
-KBUILD_CFLAGS += -Wdisabled-optimization
+CFLAGS_MODULE += -Wdisabled-optimization
 # The -Wshadow flag cannot be enabled unless upstream kernels are
 # patched to fix redefinitions of certain built-in functions and
 # global variables.
-KBUILD_CFLAGS += $(call cc-option, -Wlogical-op)
-KBUILD_CFLAGS += -Wmissing-field-initializers
+CFLAGS_MODULE += $(call cc-option, -Wlogical-op)
+CFLAGS_MODULE += -Wmissing-field-initializers
 # -Wtype-limits must be disabled due to build failures on kernel 5.x
-KBUILD_CFLAGS += -Wno-type-limit
-KBUILD_CFLAGS += $(call cc-option, -Wmaybe-uninitialized)
-KBUILD_CFLAGS += $(call cc-option, -Wunused-macros)
+CFLAGS_MODULE += -Wno-type-limits
+CFLAGS_MODULE += $(call cc-option, -Wmaybe-uninitialized)
+CFLAGS_MODULE += $(call cc-option, -Wunused-macros)
 
 KBUILD_CPPFLAGS += -DKBUILD_EXTRA_WARN2
 
 # This warning is disabled to avoid build failures in some kernel versions
-KBUILD_CFLAGS += -Wno-ignored-qualifiers
+CFLAGS_MODULE += -Wno-ignored-qualifiers
 
 all:
-	$(MAKE) -C $(KDIR) M=$(CURDIR) $(MAKE_ARGS) EXTRA_CFLAGS="$(EXTRA_CFLAGS)" KBUILD_EXTRA_SYMBOLS="$(EXTRA_SYMBOLS)" modules
+	$(MAKE) -C $(KDIR) M=$(M) $(MAKE_ARGS) EXTRA_CFLAGS="$(EXTRA_CFLAGS)" KBUILD_EXTRA_SYMBOLS="$(EXTRA_SYMBOLS)" modules
 
 modules_install:
-	$(MAKE) -C $(KDIR) M=$(CURDIR) $(MAKE_ARGS) modules_install
+	$(MAKE) -C $(KDIR) M=$(M) $(MAKE_ARGS) modules_install
 
 clean:
-	$(MAKE) -C $(KDIR) M=$(CURDIR) $(MAKE_ARGS) clean
+	$(MAKE) -C $(KDIR) M=$(M) $(MAKE_ARGS) clean

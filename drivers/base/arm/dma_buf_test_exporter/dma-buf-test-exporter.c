@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note
 /*
  *
- * (C) COPYRIGHT 2012-2022 ARM Limited. All rights reserved.
+ * (C) COPYRIGHT 2012-2023 ARM Limited. All rights reserved.
  *
  * This program is free software and is provided to you under the terms of the
  * GNU General Public License version 2 as published by the Free Software
@@ -31,6 +31,10 @@
 #include <linux/mm.h>
 #include <linux/highmem.h>
 #include <linux/dma-mapping.h>
+#if KERNEL_VERSION(5, 5, 0) <= LINUX_VERSION_CODE
+#include <linux/dma-resv.h>
+#endif
+#include <linux/version_compat_defs.h>
 
 #define DMA_BUF_TE_VER_MAJOR 1
 #define DMA_BUF_TE_VER_MINOR 0
@@ -45,6 +49,10 @@
 #endif
 #elif defined(CONFIG_ARCH_NO_SG_CHAIN)
 #define NO_SG_CHAIN
+#endif
+
+#ifndef CSTD_UNUSED
+#define CSTD_UNUSED(x) ((void)(x))
 #endif
 
 struct dma_buf_te_alloc {
@@ -65,6 +73,9 @@ struct dma_buf_te_alloc {
 	bool contiguous;
 	dma_addr_t contig_dma_addr;
 	void *contig_cpu_addr;
+
+	/* @lock: Used internally to serialize list manipulation, attach/detach etc. */
+	struct mutex lock;
 };
 
 struct dma_buf_te_attachment {
@@ -75,12 +86,13 @@ struct dma_buf_te_attachment {
 static struct miscdevice te_device;
 
 #if (KERNEL_VERSION(4, 19, 0) > LINUX_VERSION_CODE)
-static int dma_buf_te_attach(struct dma_buf *buf, struct device *dev, struct dma_buf_attachment *attachment)
+static int dma_buf_te_attach(struct dma_buf *buf, struct device *dev,
+			     struct dma_buf_attachment *attachment)
 #else
 static int dma_buf_te_attach(struct dma_buf *buf, struct dma_buf_attachment *attachment)
 #endif
 {
-	struct dma_buf_te_alloc	*alloc;
+	struct dma_buf_te_alloc *alloc;
 
 	alloc = buf->priv;
 
@@ -91,8 +103,9 @@ static int dma_buf_te_attach(struct dma_buf *buf, struct dma_buf_attachment *att
 	if (!attachment->priv)
 		return -ENOMEM;
 
-	/* dma_buf is externally locked during call */
+	mutex_lock(&alloc->lock);
 	alloc->nr_attached_devices++;
+	mutex_unlock(&alloc->lock);
 	return 0;
 }
 
@@ -107,20 +120,23 @@ static void dma_buf_te_detach(struct dma_buf *buf, struct dma_buf_attachment *at
 	struct dma_buf_te_alloc *alloc = buf->priv;
 	struct dma_buf_te_attachment *pa = attachment->priv;
 
-	/* dma_buf is externally locked during call */
+	mutex_lock(&alloc->lock);
 
-	WARN(pa->attachment_mapped, "WARNING: dma-buf-test-exporter detected detach with open device mappings");
+	WARN(pa->attachment_mapped,
+	     "WARNING: dma-buf-test-exporter detected detach with open device mappings");
 
 	alloc->nr_attached_devices--;
+	mutex_unlock(&alloc->lock);
 
 	kfree(pa);
 }
 
-static struct sg_table *dma_buf_te_map(struct dma_buf_attachment *attachment, enum dma_data_direction direction)
+static struct sg_table *dma_buf_te_map(struct dma_buf_attachment *attachment,
+				       enum dma_data_direction direction)
 {
 	struct sg_table *sg;
 	struct scatterlist *iter;
-	struct dma_buf_te_alloc	*alloc;
+	struct dma_buf_te_alloc *alloc;
 	struct dma_buf_te_attachment *pa = attachment->priv;
 	size_t i;
 	int ret;
@@ -130,8 +146,7 @@ static struct sg_table *dma_buf_te_map(struct dma_buf_attachment *attachment, en
 	if (alloc->fail_map)
 		return ERR_PTR(-ENOMEM);
 
-	if (WARN(pa->attachment_mapped,
-	    "WARNING: Attempted to map already mapped attachment."))
+	if (WARN(pa->attachment_mapped, "WARNING: Attempted to map already mapped attachment."))
 		return ERR_PTR(-EBUSY);
 
 #ifdef NO_SG_CHAIN
@@ -145,21 +160,22 @@ static struct sg_table *dma_buf_te_map(struct dma_buf_attachment *attachment, en
 		return ERR_PTR(-ENOMEM);
 
 	/* from here we access the allocation object, so lock the dmabuf pointing to it */
-	mutex_lock(&attachment->dmabuf->lock);
+	mutex_lock(&alloc->lock);
 
 	if (alloc->contiguous)
 		ret = sg_alloc_table(sg, 1, GFP_KERNEL);
 	else
 		ret = sg_alloc_table(sg, alloc->nr_pages, GFP_KERNEL);
 	if (ret) {
-		mutex_unlock(&attachment->dmabuf->lock);
+		mutex_unlock(&alloc->lock);
 		kfree(sg);
 		return ERR_PTR(ret);
 	}
 
 	if (alloc->contiguous) {
 		sg_dma_len(sg->sgl) = alloc->nr_pages * PAGE_SIZE;
-		sg_set_page(sg->sgl, pfn_to_page(PFN_DOWN(alloc->contig_dma_addr)), alloc->nr_pages * PAGE_SIZE, 0);
+		sg_set_page(sg->sgl, pfn_to_page(PFN_DOWN(alloc->contig_dma_addr)),
+			    alloc->nr_pages * PAGE_SIZE, 0);
 		sg_dma_address(sg->sgl) = alloc->contig_dma_addr;
 	} else {
 		for_each_sg(sg->sgl, iter, alloc->nr_pages, i)
@@ -167,7 +183,7 @@ static struct sg_table *dma_buf_te_map(struct dma_buf_attachment *attachment, en
 	}
 
 	if (!dma_map_sg(attachment->dev, sg->sgl, sg->nents, direction)) {
-		mutex_unlock(&attachment->dmabuf->lock);
+		mutex_unlock(&alloc->lock);
 		sg_free_table(sg);
 		kfree(sg);
 		return ERR_PTR(-ENOMEM);
@@ -176,26 +192,26 @@ static struct sg_table *dma_buf_te_map(struct dma_buf_attachment *attachment, en
 	alloc->nr_device_mappings++;
 	pa->attachment_mapped = true;
 	pa->sg = sg;
-	mutex_unlock(&attachment->dmabuf->lock);
+	mutex_unlock(&alloc->lock);
 	return sg;
 }
 
-static void dma_buf_te_unmap(struct dma_buf_attachment *attachment,
-							 struct sg_table *sg, enum dma_data_direction direction)
+static void dma_buf_te_unmap(struct dma_buf_attachment *attachment, struct sg_table *sg,
+			     enum dma_data_direction direction)
 {
 	struct dma_buf_te_alloc *alloc;
 	struct dma_buf_te_attachment *pa = attachment->priv;
 
 	alloc = attachment->dmabuf->priv;
 
-	mutex_lock(&attachment->dmabuf->lock);
+	mutex_lock(&alloc->lock);
 
 	WARN(!pa->attachment_mapped, "WARNING: Unmatched unmap of attachment.");
 
 	alloc->nr_device_mappings--;
 	pa->attachment_mapped = false;
 	pa->sg = NULL;
-	mutex_unlock(&attachment->dmabuf->lock);
+	mutex_unlock(&alloc->lock);
 
 	dma_unmap_sg(attachment->dev, sg->sgl, sg->nents, direction);
 	sg_free_table(sg);
@@ -209,13 +225,12 @@ static void dma_buf_te_release(struct dma_buf *buf)
 
 	alloc = buf->priv;
 	/* no need for locking */
+	mutex_destroy(&alloc->lock);
 
 	if (alloc->contiguous) {
-		dma_free_attrs(te_device.this_device,
-						alloc->nr_pages * PAGE_SIZE,
-						alloc->contig_cpu_addr,
-						alloc->contig_dma_addr,
-						DMA_ATTR_WRITE_COMBINE);
+		dma_free_attrs(te_device.this_device, alloc->nr_pages * PAGE_SIZE,
+			       alloc->contig_cpu_addr, alloc->contig_dma_addr,
+			       DMA_ATTR_WRITE_COMBINE);
 	} else {
 		for (i = 0; i < alloc->nr_pages; i++)
 			__free_page(alloc->pages[i]);
@@ -228,46 +243,62 @@ static void dma_buf_te_release(struct dma_buf *buf)
 	kfree(alloc);
 }
 
-static int dma_buf_te_sync(struct dma_buf *dmabuf,
-			enum dma_data_direction direction,
-			bool start_cpu_access)
+static int dma_buf_te_sync(struct dma_buf *dmabuf, enum dma_data_direction direction,
+			   bool start_cpu_access)
 {
 	struct dma_buf_attachment *attachment;
+	struct dma_buf_te_alloc *alloc = dmabuf->priv;
 
+	/* Use the kernel lock to prevent the concurrent update of dmabuf->attachments */
+#if KERNEL_VERSION(5, 5, 0) <= LINUX_VERSION_CODE
+	dma_resv_lock(dmabuf->resv, NULL);
+#else
 	mutex_lock(&dmabuf->lock);
+#endif
+
+	/* Use the internal lock to block the concurrent attach/detach calls */
+	mutex_lock(&alloc->lock);
 
 	list_for_each_entry(attachment, &dmabuf->attachments, node) {
 		struct dma_buf_te_attachment *pa = attachment->priv;
 		struct sg_table *sg = pa->sg;
 
 		if (!sg) {
-			dev_dbg(te_device.this_device, "no mapping for device %s\n", dev_name(attachment->dev));
+			dev_dbg(te_device.this_device, "no mapping for device %s\n",
+				dev_name(attachment->dev));
 			continue;
 		}
 
 		if (start_cpu_access) {
-			dev_dbg(te_device.this_device, "sync cpu with device %s\n", dev_name(attachment->dev));
+			dev_dbg(te_device.this_device, "sync cpu with device %s\n",
+				dev_name(attachment->dev));
 
 			dma_sync_sg_for_cpu(attachment->dev, sg->sgl, sg->nents, direction);
 		} else {
-			dev_dbg(te_device.this_device, "sync device %s with cpu\n", dev_name(attachment->dev));
+			dev_dbg(te_device.this_device, "sync device %s with cpu\n",
+				dev_name(attachment->dev));
 
 			dma_sync_sg_for_device(attachment->dev, sg->sgl, sg->nents, direction);
 		}
 	}
 
+	mutex_unlock(&alloc->lock);
+
+#if KERNEL_VERSION(5, 5, 0) <= LINUX_VERSION_CODE
+	dma_resv_unlock(dmabuf->resv);
+#else
 	mutex_unlock(&dmabuf->lock);
+#endif
+
 	return 0;
 }
 
-static int dma_buf_te_begin_cpu_access(struct dma_buf *dmabuf,
-					enum dma_data_direction direction)
+static int dma_buf_te_begin_cpu_access(struct dma_buf *dmabuf, enum dma_data_direction direction)
 {
 	return dma_buf_te_sync(dmabuf, direction, true);
 }
 
-static int dma_buf_te_end_cpu_access(struct dma_buf *dmabuf,
-				enum dma_data_direction direction)
+static int dma_buf_te_end_cpu_access(struct dma_buf *dmabuf, enum dma_data_direction direction)
 {
 	return dma_buf_te_sync(dmabuf, direction, false);
 }
@@ -280,9 +311,9 @@ static void dma_buf_te_mmap_open(struct vm_area_struct *vma)
 	dma_buf = vma->vm_private_data;
 	alloc = dma_buf->priv;
 
-	mutex_lock(&dma_buf->lock);
+	mutex_lock(&alloc->lock);
 	alloc->nr_cpu_mappings++;
-	mutex_unlock(&dma_buf->lock);
+	mutex_unlock(&alloc->lock);
 }
 
 static void dma_buf_te_mmap_close(struct vm_area_struct *vma)
@@ -293,10 +324,10 @@ static void dma_buf_te_mmap_close(struct vm_area_struct *vma)
 	dma_buf = vma->vm_private_data;
 	alloc = dma_buf->priv;
 
+	mutex_lock(&alloc->lock);
 	BUG_ON(alloc->nr_cpu_mappings <= 0);
-	mutex_lock(&dma_buf->lock);
 	alloc->nr_cpu_mappings--;
-	mutex_unlock(&dma_buf->lock);
+	mutex_unlock(&alloc->lock);
 }
 
 #if KERNEL_VERSION(4, 11, 0) > LINUX_VERSION_CODE
@@ -331,11 +362,9 @@ static vm_fault_t dma_buf_te_mmap_fault(struct vm_fault *vmf)
 	return 0;
 }
 
-static const struct vm_operations_struct dma_buf_te_vm_ops = {
-	.open = dma_buf_te_mmap_open,
-	.close = dma_buf_te_mmap_close,
-	.fault = dma_buf_te_mmap_fault
-};
+static const struct vm_operations_struct dma_buf_te_vm_ops = { .open = dma_buf_te_mmap_open,
+							       .close = dma_buf_te_mmap_close,
+							       .fault = dma_buf_te_mmap_fault };
 
 static int dma_buf_te_mmap(struct dma_buf *dmabuf, struct vm_area_struct *vma)
 {
@@ -346,7 +375,7 @@ static int dma_buf_te_mmap(struct dma_buf *dmabuf, struct vm_area_struct *vma)
 	if (alloc->fail_mmap)
 		return -ENOMEM;
 
-	vma->vm_flags |= VM_IO | VM_DONTEXPAND | VM_DONTDUMP;
+	vm_flags_set(vma, VM_IO | VM_DONTEXPAND | VM_DONTDUMP);
 	vma->vm_ops = &dma_buf_te_vm_ops;
 	vma->vm_private_data = dmabuf;
 
@@ -374,10 +403,9 @@ static void *dma_buf_te_kmap(struct dma_buf *buf, unsigned long page_num)
 	if (page_num >= alloc->nr_pages)
 		return NULL;
 
-	return kmap(alloc->pages[page_num]);
+	return kbase_kmap(alloc->pages[page_num]);
 }
-static void dma_buf_te_kunmap(struct dma_buf *buf,
-		unsigned long page_num, void *addr)
+static void dma_buf_te_kunmap(struct dma_buf *buf, unsigned long page_num, void *addr)
 {
 	struct dma_buf_te_alloc *alloc;
 
@@ -385,7 +413,7 @@ static void dma_buf_te_kunmap(struct dma_buf *buf,
 	if (page_num >= alloc->nr_pages)
 		return;
 
-	kunmap(alloc->pages[page_num]);
+	kbase_kunmap(alloc->pages[page_num], addr);
 }
 
 static struct dma_buf_ops dma_buf_te_ops = {
@@ -467,8 +495,9 @@ static int do_dma_buf_te_ioctl_alloc(struct dma_buf_te_ioctl_alloc __user *buf, 
 #endif /* NO_SG_CHAIN */
 
 	if (alloc_req.size > max_nr_pages) {
-		dev_err(te_device.this_device, "%s: buffer size of %llu pages exceeded the mapping limit of %zu pages",
-				__func__, alloc_req.size, max_nr_pages);
+		dev_err(te_device.this_device,
+			"%s: buffer size of %llu pages exceeded the mapping limit of %zu pages",
+			__func__, alloc_req.size, max_nr_pages);
 		goto invalid_size;
 	}
 
@@ -488,23 +517,21 @@ static int do_dma_buf_te_ioctl_alloc(struct dma_buf_te_ioctl_alloc __user *buf, 
 #endif
 
 	if (!alloc->pages) {
-		dev_err(te_device.this_device,
-				"%s: couldn't alloc %zu page structures",
-				__func__, alloc->nr_pages);
+		dev_err(te_device.this_device, "%s: couldn't alloc %zu page structures", __func__,
+			alloc->nr_pages);
 		goto free_alloc_object;
 	}
 
 	if (contiguous) {
 		dma_addr_t dma_aux;
 
-		alloc->contig_cpu_addr = dma_alloc_attrs(te_device.this_device,
-				alloc->nr_pages * PAGE_SIZE,
-				&alloc->contig_dma_addr,
-				GFP_KERNEL | __GFP_ZERO,
-				DMA_ATTR_WRITE_COMBINE);
+		alloc->contig_cpu_addr = dma_alloc_attrs(
+			te_device.this_device, alloc->nr_pages * PAGE_SIZE, &alloc->contig_dma_addr,
+			GFP_KERNEL | __GFP_ZERO, DMA_ATTR_WRITE_COMBINE);
 		if (!alloc->contig_cpu_addr) {
-			dev_err(te_device.this_device, "%s: couldn't alloc contiguous buffer %zu pages",
-				__func__, alloc->nr_pages);
+			dev_err(te_device.this_device,
+				"%s: couldn't alloc contiguous buffer %zu pages", __func__,
+				alloc->nr_pages);
 			goto free_page_struct;
 		}
 		dma_aux = alloc->contig_dma_addr;
@@ -521,6 +548,8 @@ static int do_dma_buf_te_ioctl_alloc(struct dma_buf_te_ioctl_alloc __user *buf, 
 			}
 		}
 	}
+
+	mutex_init(&alloc->lock);
 
 	/* alloc ready, let's export it */
 	{
@@ -555,13 +584,12 @@ no_fd:
 	dma_buf_put(dma_buf);
 no_export:
 	/* i still valid */
+	mutex_destroy(&alloc->lock);
 no_page:
 	if (contiguous) {
-		dma_free_attrs(te_device.this_device,
-						alloc->nr_pages * PAGE_SIZE,
-						alloc->contig_cpu_addr,
-						alloc->contig_dma_addr,
-						DMA_ATTR_WRITE_COMBINE);
+		dma_free_attrs(te_device.this_device, alloc->nr_pages * PAGE_SIZE,
+			       alloc->contig_cpu_addr, alloc->contig_dma_addr,
+			       DMA_ATTR_WRITE_COMBINE);
 	} else {
 		while (i-- > 0)
 			__free_page(alloc->pages[i]);
@@ -602,11 +630,11 @@ static int do_dma_buf_te_ioctl_status(struct dma_buf_te_ioctl_status __user *arg
 	alloc = dmabuf->priv;
 
 	/* lock while reading status to take a snapshot */
-	mutex_lock(&dmabuf->lock);
+	mutex_lock(&alloc->lock);
 	status.attached_devices = alloc->nr_attached_devices;
 	status.device_mappings = alloc->nr_device_mappings;
 	status.cpu_mappings = alloc->nr_cpu_mappings;
-	mutex_unlock(&dmabuf->lock);
+	mutex_unlock(&alloc->lock);
 
 	if (copy_to_user(arg, &status, sizeof(status)))
 		goto err_have_dmabuf;
@@ -640,11 +668,11 @@ static int do_dma_buf_te_ioctl_set_failing(struct dma_buf_te_ioctl_set_failing _
 	/* ours, set the fail modes */
 	alloc = dmabuf->priv;
 	/* lock to set the fail modes atomically */
-	mutex_lock(&dmabuf->lock);
+	mutex_lock(&alloc->lock);
 	alloc->fail_attach = f.fail_attach;
-	alloc->fail_map    = f.fail_map;
-	alloc->fail_mmap   = f.fail_mmap;
-	mutex_unlock(&dmabuf->lock);
+	alloc->fail_map = f.fail_map;
+	alloc->fail_mmap = f.fail_mmap;
+	mutex_unlock(&alloc->lock);
 
 	/* success */
 	res = 0;
@@ -709,7 +737,6 @@ no_import:
 
 static int do_dma_buf_te_ioctl_fill(struct dma_buf_te_ioctl_fill __user *arg)
 {
-
 	struct dma_buf *dmabuf;
 	struct dma_buf_te_ioctl_fill f;
 	int ret;
@@ -729,17 +756,21 @@ static int do_dma_buf_te_ioctl_fill(struct dma_buf_te_ioctl_fill __user *arg)
 
 static long dma_buf_te_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 {
+	CSTD_UNUSED(file);
+
 	switch (cmd) {
 	case DMA_BUF_TE_VERSION:
 		return do_dma_buf_te_ioctl_version((struct dma_buf_te_ioctl_version __user *)arg);
 	case DMA_BUF_TE_ALLOC:
-		return do_dma_buf_te_ioctl_alloc((struct dma_buf_te_ioctl_alloc __user *)arg, false);
+		return do_dma_buf_te_ioctl_alloc((struct dma_buf_te_ioctl_alloc __user *)arg,
+						 false);
 	case DMA_BUF_TE_ALLOC_CONT:
 		return do_dma_buf_te_ioctl_alloc((struct dma_buf_te_ioctl_alloc __user *)arg, true);
 	case DMA_BUF_TE_QUERY:
 		return do_dma_buf_te_ioctl_status((struct dma_buf_te_ioctl_status __user *)arg);
 	case DMA_BUF_TE_SET_FAILING:
-		return do_dma_buf_te_ioctl_set_failing((struct dma_buf_te_ioctl_set_failing __user *)arg);
+		return do_dma_buf_te_ioctl_set_failing(
+			(struct dma_buf_te_ioctl_set_failing __user *)arg);
 	case DMA_BUF_TE_FILL:
 		return do_dma_buf_te_ioctl_fill((struct dma_buf_te_ioctl_fill __user *)arg);
 	default:
@@ -770,7 +801,6 @@ static int __init dma_buf_te_init(void)
 
 	dev_info(te_device.this_device, "dma_buf_te ready\n");
 	return 0;
-
 }
 
 static void __exit dma_buf_te_exit(void)
