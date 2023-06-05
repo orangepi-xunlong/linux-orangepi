@@ -103,6 +103,10 @@ config SUN8I_DE2_CCU
 	tristate "Support for the Allwinner SoCs DE2 CCU"
 	default MACH_SUN8I || (ARM64 && ARCH_SUNXI)
 
+config SUN8I_DE33_CCU
+	tristate "Support for the Allwinner SoCs DE3.3 CCU"
+	default MACH_SUN8I || (ARM64 && ARCH_SUNXI)
+
 config SUN8I_R40_CCU
 	tristate "Support for the Allwinner R40 CCU"
 	default MACH_SUN8I

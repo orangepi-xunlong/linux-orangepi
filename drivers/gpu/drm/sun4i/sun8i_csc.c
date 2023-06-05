@@ -107,6 +107,14 @@ static const u32 yuv2rgb_de3[2][3][12] = {
 	},
 };
 
+static u32 sun8i_csc_base(struct sun8i_mixer *mixer, int layer)
+{
+	if (mixer->cfg->is_de33)
+		return sun8i_channel_base(mixer, layer) - 0x200;
+	else
+		return ccsc_base[mixer->cfg->ccsc][layer];
+}
+
 static void sun8i_csc_set_coefficients(struct regmap *map, u32 base,
 				       enum sun8i_csc_mode mode,
 				       enum drm_color_encoding encoding,
@@ -178,6 +186,41 @@ static void sun8i_de3_ccsc_set_coefficients(struct regmap *map, int layer,
 	}
 }
 
+static void sun8i_de33_ccsc_set_coefficients(struct sun8i_mixer *mixer,
+					     int layer,
+					     enum sun8i_csc_mode mode,
+					     enum drm_color_encoding encoding,
+					     enum drm_color_range range)
+{
+	const u32 *table;
+	u32 base, addr;
+	int i;
+
+	base = sun8i_csc_base(mixer, layer);
+	table = yuv2rgb_de3[range][encoding];
+
+	regmap_write(mixer->engine.regs, base + 4, table[3] >> 16);
+	regmap_write(mixer->engine.regs, base + 8, table[7] >> 16);
+	regmap_write(mixer->engine.regs, base + 12, table[11] >> 16);
+
+	for (i = 0; i < 12; i++) {
+		u32 val = table[i];
+
+		addr = SUN8I_CSC_COEFF(base, i);
+		if (mode == SUN8I_CSC_MODE_YVU2RGB) {
+			if ((i & 3) == 1)
+				addr = SUN8I_CSC_COEFF(base, i + 1);
+			else if ((i & 3) == 2)
+				addr = SUN8I_CSC_COEFF(base, i - 1);
+		}
+
+		if (i == 3 || i == 7 || i == 11)
+			val &= 0xffff;
+
+		regmap_write(mixer->engine.regs, addr, val);
+	}
+}
+
 static void sun8i_csc_enable(struct regmap *map, u32 base, bool enable)
 {
 	u32 val;
@@ -218,6 +261,12 @@ void sun8i_csc_set_ccsc_coefficients(struct sun8i_mixer *mixer, int layer,
 		return;
 	}
 
+	if (mixer->cfg->is_de33) {
+		sun8i_de33_ccsc_set_coefficients(mixer, layer, mode,
+						 encoding, range);
+		return;
+	}
+
 	base = ccsc_base[mixer->cfg->ccsc][layer];
 
 	sun8i_csc_set_coefficients(mixer->engine.regs, base,
@@ -233,7 +282,7 @@ void sun8i_csc_enable_ccsc(struct sun8i_mixer *mixer, int layer, bool enable)
 		return;
 	}
 
-	base = ccsc_base[mixer->cfg->ccsc][layer];
+	base = sun8i_csc_base(mixer, layer);
 
 	sun8i_csc_enable(mixer->engine.regs, base, enable);
 }
