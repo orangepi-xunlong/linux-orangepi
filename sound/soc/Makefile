@@ -62,6 +62,7 @@ obj-$(CONFIG_SND_SOC)	+= sprd/
 obj-$(CONFIG_SND_SOC)	+= sti/
 obj-$(CONFIG_SND_SOC)	+= stm/
 obj-$(CONFIG_SND_SOC)	+= sunxi/
+obj-$(CONFIG_SND_SOC)	+= sunxi_v2/
 obj-$(CONFIG_SND_SOC)	+= tegra/
 obj-$(CONFIG_SND_SOC)	+= ti/
 obj-$(CONFIG_SND_SOC)	+= uniphier/

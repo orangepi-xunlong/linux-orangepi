@@ -1,0 +1,48 @@
+# common
+config SND_SOC_SUNXI_MACH
+	tristate
+
+# ahub dam
+config SND_SOC_SUNXI_AHUB_DAM
+	tristate
+
+config SND_SOC_SUNXI_INTERNALCODEC
+	tristate
+
+config SND_SOC_SUNXI_SUN50IW9_CODEC
+	tristate
+
+# menu select
+menu "Allwinner SoC Audio support V2"
+	depends on ARCH_SUNXI
+
+# aaudio
+config SND_SOC_SUNXI_AAUDIO
+	tristate "Allwinner AAUDIO support"
+	select REGMAP_MMIO
+	select SND_SOC_GENERIC_DMAENGINE_PCM
+	select SND_SOC_SUNXI_MACH
+	select SND_SOC_SUNXI_INTERNALCODEC
+	select SND_SOC_SUNXI_SUN50IW9_CODEC
+	depends on ARCH_SUNXI
+	help
+	    Select Y or M to support analog-audio Module in the Allwinner SoCs.
+
+# ahub
+config SND_SOC_SUNXI_AHUB
+	tristate "Allwinner AHUB Support"
+	select REGMAP_MMIO
+	select SND_SOC_GENERIC_DMAENGINE_PCM
+	select SND_SOC_SUNXI_MACH
+	select SND_SOC_SUNXI_AHUB_DAM
+	depends on ARCH_SUNXI
+	help
+	    Select Y or M to support audio-hub Module in Allwinner SoCs.
+
+config SND_SOC_SUNXI_DEBUG
+	tristate "Components Debug"
+	depends on SND_SOC_SUNXI_COMPONENTS
+	help
+	    Select Y or M to support debug components.
+
+endmenu
