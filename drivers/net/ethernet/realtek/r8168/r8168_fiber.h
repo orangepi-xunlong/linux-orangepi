@@ -5,7 +5,7 @@
 # r8168 is the Linux device driver released for Realtek Gigabit Ethernet
 # controllers with PCI-Express interface.
 #
-# Copyright(c) 2021 Realtek Semiconductor Corp. All rights reserved.
+# Copyright(c) 2022 Realtek Semiconductor Corp. All rights reserved.
 #
 # This program is free software; you can redistribute it and/or modify it
 # under the terms of the GNU General Public License as published by the Free
@@ -44,24 +44,32 @@ enum {
 
 enum {
         FIBER_STAT_NOT_CHECKED = 0,
-        FIBER_STAT_CONNECT,
+        FIBER_STAT_CONNECT_EEPROM,
         FIBER_STAT_DISCONNECT,
+        FIBER_STAT_CONNECT_GPO,
         FIBER_STAT_MAX
 };
 
+enum {
+        FIBER_LED_MODE_DEFAULT = 0,
+        FIBER_LED_MODE_1,
+        FIBER_LED_MODE_MAX
+};
+
 #define HW_FIBER_MODE_ENABLED(_M)        ((_M)->HwFiberModeVer > 0)
+#define HW_FIBER_STATUS_CONNECTED(_M)        (((_M)->HwFiberStat == FIBER_STAT_CONNECT_EEPROM) || ((_M)->HwFiberStat == FIBER_STAT_CONNECT_GPO))
+#define HW_FIBER_STATUS_DISCONNECTED(_M)        ((_M)->HwFiberStat == FIBER_STAT_DISCONNECT)
 
+struct rtl8168_private;
 
-
-void rtl8168_hw_init_fiber_nic(struct net_device *dev);
-void rtl8168_hw_fiber_nic_d3_para(struct net_device *dev);
-void rtl8168_hw_fiber_phy_config(struct net_device *dev);
-void rtl8168_hw_switch_mdi_to_fiber(struct net_device *dev);
-void rtl8168_hw_switch_mdi_to_nic(struct net_device *dev);
-unsigned int rtl8168_hw_fiber_link_ok(struct net_device *dev);
-void rtl8168_check_fiber_link_status(struct net_device *dev);
-void rtl8168_check_hw_fiber_mode_support(struct net_device *dev);
-void rtl8168_set_fiber_mode_software_variable(struct net_device *dev);
-
+void rtl8168_hw_init_fiber_nic(struct rtl8168_private *tp);
+void rtl8168_hw_fiber_nic_d3_para(struct rtl8168_private *tp);
+void rtl8168_hw_fiber_phy_config(struct rtl8168_private *tp);
+void rtl8168_hw_switch_mdi_to_fiber(struct rtl8168_private *tp);
+void rtl8168_hw_switch_mdi_to_nic(struct rtl8168_private *tp);
+unsigned int rtl8168_hw_fiber_link_ok(struct rtl8168_private *tp);
+void rtl8168_check_fiber_link_status(struct rtl8168_private *tp);
+void rtl8168_check_hw_fiber_mode_support(struct rtl8168_private *tp);
+void rtl8168_set_fiber_mode_software_variable(struct rtl8168_private *tp);
 
 #endif /* _LINUX_R8168_FIBER_H */

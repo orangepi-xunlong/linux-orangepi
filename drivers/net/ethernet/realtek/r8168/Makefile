@@ -4,7 +4,7 @@
 # r8168 is the Linux device driver released for Realtek Gigabit Ethernet
 # controllers with PCI-Express interface.
 #
-# Copyright(c) 2021 Realtek Semiconductor Corp. All rights reserved.
+# Copyright(c) 2022 Realtek Semiconductor Corp. All rights reserved.
 #
 # This program is free software; you can redistribute it and/or modify it
 # under the terms of the GNU General Public License as published by the Free
@@ -43,6 +43,7 @@ ENABLE_EEE = n
 ENABLE_S0_MAGIC_PACKET = n
 CONFIG_DYNAMIC_ASPM = y
 ENABLE_USE_FIRMWARE_FILE = n
+CONFIG_CTAP_SHORT_OFF = n
 
 ifneq ($(KERNELRELEASE),)
 	obj-$(CONFIG_R8168) := r8168.o
@@ -92,6 +93,9 @@ ifneq ($(KERNELRELEASE),)
 	ifeq ($(ENABLE_USE_FIRMWARE_FILE), y)
 		r8168-objs += r8168_firmware.o
 		EXTRA_CFLAGS += -DENABLE_USE_FIRMWARE_FILE
+	endif
+	ifeq ($(CONFIG_CTAP_SHORT_OFF), y)
+		EXTRA_CFLAGS += -DCONFIG_CTAP_SHORT_OFF
 	endif
 else
 	BASEDIR := /lib/modules/$(shell uname -r)

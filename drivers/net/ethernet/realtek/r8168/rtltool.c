@@ -5,7 +5,7 @@
 # r8168 is the Linux device driver released for Realtek Gigabit Ethernet
 # controllers with PCI-Express interface.
 #
-# Copyright(c) 2021 Realtek Semiconductor Corp. All rights reserved.
+# Copyright(c) 2022 Realtek Semiconductor Corp. All rights reserved.
 #
 # This program is free software; you can redistribute it and/or modify it
 # under the terms of the GNU General Public License as published by the Free
@@ -56,9 +56,6 @@ int rtl8168_tool_ioctl(struct rtl8168_private *tp, struct ifreq *ifr)
         ret = 0;
         switch (my_cmd.cmd) {
         case RTLTOOL_READ_MAC:
-                if (!capable(CAP_NET_ADMIN))
-                        return -EPERM;
-
                 if (my_cmd.len==1)
                         my_cmd.data = readb(tp->mmio_addr+my_cmd.offset);
                 else if (my_cmd.len==2)
@@ -77,9 +74,6 @@ int rtl8168_tool_ioctl(struct rtl8168_private *tp, struct ifreq *ifr)
                 break;
 
         case RTLTOOL_WRITE_MAC:
-                if (!capable(CAP_NET_ADMIN))
-                        return -EPERM;
-
                 if (my_cmd.len==1)
                         writeb(my_cmd.data, tp->mmio_addr+my_cmd.offset);
                 else if (my_cmd.len==2)
@@ -94,9 +88,6 @@ int rtl8168_tool_ioctl(struct rtl8168_private *tp, struct ifreq *ifr)
                 break;
 
         case RTLTOOL_READ_PHY:
-                if (!capable(CAP_NET_ADMIN))
-                        return -EPERM;
-
                 spin_lock_irqsave(&tp->lock, flags);
                 my_cmd.data = rtl8168_mdio_prot_read(tp, my_cmd.offset);
                 spin_unlock_irqrestore(&tp->lock, flags);
@@ -109,18 +100,12 @@ int rtl8168_tool_ioctl(struct rtl8168_private *tp, struct ifreq *ifr)
                 break;
 
         case RTLTOOL_WRITE_PHY:
-                if (!capable(CAP_NET_ADMIN))
-                        return -EPERM;
-
                 spin_lock_irqsave(&tp->lock, flags);
                 rtl8168_mdio_prot_write(tp, my_cmd.offset, my_cmd.data);
                 spin_unlock_irqrestore(&tp->lock, flags);
                 break;
 
         case RTLTOOL_READ_EPHY:
-                if (!capable(CAP_NET_ADMIN))
-                        return -EPERM;
-
                 spin_lock_irqsave(&tp->lock, flags);
                 my_cmd.data = rtl8168_ephy_read(tp, my_cmd.offset);
                 spin_unlock_irqrestore(&tp->lock, flags);
@@ -133,9 +118,6 @@ int rtl8168_tool_ioctl(struct rtl8168_private *tp, struct ifreq *ifr)
                 break;
 
         case RTLTOOL_WRITE_EPHY:
-                if (!capable(CAP_NET_ADMIN))
-                        return -EPERM;
-
                 spin_lock_irqsave(&tp->lock, flags);
                 rtl8168_ephy_write(tp, my_cmd.offset, my_cmd.data);
                 spin_unlock_irqrestore(&tp->lock, flags);
@@ -160,12 +142,6 @@ int rtl8168_tool_ioctl(struct rtl8168_private *tp, struct ifreq *ifr)
                 break;
 
         case RTLTOOL_WRITE_ERI:
-                if (!capable(CAP_NET_ADMIN))
-                        return -EPERM;
-
-                if (!capable(CAP_NET_ADMIN))
-                        return -EPERM;
-
                 if (my_cmd.len==1 || my_cmd.len==2 || my_cmd.len==4) {
                         spin_lock_irqsave(&tp->lock, flags);
                         rtl8168_eri_write(tp, my_cmd.offset, my_cmd.len, my_cmd.data, ERIAR_ExGMAC);
@@ -177,9 +153,6 @@ int rtl8168_tool_ioctl(struct rtl8168_private *tp, struct ifreq *ifr)
                 break;
 
         case RTLTOOL_READ_PCI:
-                if (!capable(CAP_NET_ADMIN))
-                        return -EPERM;
-
                 my_cmd.data = 0;
                 if (my_cmd.len==1)
                         pci_read_config_byte(tp->pci_dev, my_cmd.offset,
@@ -202,9 +175,6 @@ int rtl8168_tool_ioctl(struct rtl8168_private *tp, struct ifreq *ifr)
                 break;
 
         case RTLTOOL_WRITE_PCI:
-                if (!capable(CAP_NET_ADMIN))
-                        return -EPERM;
-
                 if (my_cmd.len==1)
                         pci_write_config_byte(tp->pci_dev, my_cmd.offset,
                                               my_cmd.data);
@@ -222,9 +192,6 @@ int rtl8168_tool_ioctl(struct rtl8168_private *tp, struct ifreq *ifr)
                 break;
 
         case RTLTOOL_READ_EEPROM:
-                if (!capable(CAP_NET_ADMIN))
-                        return -EPERM;
-
                 spin_lock_irqsave(&tp->lock, flags);
                 my_cmd.data = rtl8168_eeprom_read_sc(tp, my_cmd.offset);
                 spin_unlock_irqrestore(&tp->lock, flags);
@@ -237,18 +204,12 @@ int rtl8168_tool_ioctl(struct rtl8168_private *tp, struct ifreq *ifr)
                 break;
 
         case RTLTOOL_WRITE_EEPROM:
-                if (!capable(CAP_NET_ADMIN))
-                        return -EPERM;
-
                 spin_lock_irqsave(&tp->lock, flags);
                 rtl8168_eeprom_write_sc(tp, my_cmd.offset, my_cmd.data);
                 spin_unlock_irqrestore(&tp->lock, flags);
                 break;
 
         case RTL_READ_OOB_MAC:
-                if (!capable(CAP_NET_ADMIN))
-                        return -EPERM;
-
                 spin_lock_irqsave(&tp->lock, flags);
                 rtl8168_oob_mutex_lock(tp);
                 my_cmd.data = rtl8168_ocp_read(tp, my_cmd.offset, 4);
@@ -262,9 +223,6 @@ int rtl8168_tool_ioctl(struct rtl8168_private *tp, struct ifreq *ifr)
                 break;
 
         case RTL_WRITE_OOB_MAC:
-                if (!capable(CAP_NET_ADMIN))
-                        return -EPERM;
-
                 if (my_cmd.len == 0 || my_cmd.len > 4)
                         return -EOPNOTSUPP;
 
@@ -276,9 +234,6 @@ int rtl8168_tool_ioctl(struct rtl8168_private *tp, struct ifreq *ifr)
                 break;
 
         case RTL_ENABLE_PCI_DIAG:
-                if (!capable(CAP_NET_ADMIN))
-                        return -EPERM;
-
                 spin_lock_irqsave(&tp->lock, flags);
                 tp->rtk_enable_diag = 1;
                 spin_unlock_irqrestore(&tp->lock, flags);
@@ -287,9 +242,6 @@ int rtl8168_tool_ioctl(struct rtl8168_private *tp, struct ifreq *ifr)
                 break;
 
         case RTL_DISABLE_PCI_DIAG:
-                if (!capable(CAP_NET_ADMIN))
-                        return -EPERM;
-
                 spin_lock_irqsave(&tp->lock, flags);
                 tp->rtk_enable_diag = 0;
                 spin_unlock_irqrestore(&tp->lock, flags);
@@ -298,9 +250,6 @@ int rtl8168_tool_ioctl(struct rtl8168_private *tp, struct ifreq *ifr)
                 break;
 
         case RTL_READ_MAC_OCP:
-                if (!capable(CAP_NET_ADMIN))
-                        return -EPERM;
-
                 if (my_cmd.offset % 2)
                         return -EOPNOTSUPP;
 
@@ -315,9 +264,6 @@ int rtl8168_tool_ioctl(struct rtl8168_private *tp, struct ifreq *ifr)
                 break;
 
         case RTL_WRITE_MAC_OCP:
-                if (!capable(CAP_NET_ADMIN))
-                        return -EPERM;
-
                 if ((my_cmd.offset % 2) || (my_cmd.len != 2))
                         return -EOPNOTSUPP;
 
@@ -327,9 +273,6 @@ int rtl8168_tool_ioctl(struct rtl8168_private *tp, struct ifreq *ifr)
                 break;
 
         case RTL_DIRECT_READ_PHY_OCP:
-                if (!capable(CAP_NET_ADMIN))
-                        return -EPERM;
-
                 spin_lock_irqsave(&tp->lock, flags);
                 my_cmd.data = rtl8168_mdio_prot_direct_read_phy_ocp(tp, my_cmd.offset);
                 spin_unlock_irqrestore(&tp->lock, flags);
@@ -342,9 +285,6 @@ int rtl8168_tool_ioctl(struct rtl8168_private *tp, struct ifreq *ifr)
                 break;
 
         case RTL_DIRECT_WRITE_PHY_OCP:
-                if (!capable(CAP_NET_ADMIN))
-                        return -EPERM;
-
                 spin_lock_irqsave(&tp->lock, flags);
                 rtl8168_mdio_prot_direct_write_phy_ocp(tp, my_cmd.offset, my_cmd.data);
                 spin_unlock_irqrestore(&tp->lock, flags);
