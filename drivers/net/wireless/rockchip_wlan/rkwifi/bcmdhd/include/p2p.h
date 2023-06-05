@@ -1,7 +1,7 @@
 /*
  * Fundamental types and constants relating to WFA P2P (aka WiFi Direct)
  *
- * Copyright (C) 2020, Broadcom.
+ * Copyright (C) 2022, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -40,11 +40,11 @@
 
 /* WiFi P2P IE */
 BWL_PRE_PACKED_STRUCT struct wifi_p2p_ie {
-	uint8	id;		/* IE ID: 0xDD */
-	uint8	len;		/* IE length */
-	uint8	OUI[3];		/* WiFi P2P specific OUI: P2P_OUI */
-	uint8	oui_type;	/* Identifies P2P version: P2P_VER */
-	uint8	subelts[1];	/* variable length subelements */
+	uint8	id;				/* IE ID: 0xDD */
+	uint8	len;				/* IE length */
+	uint8	OUI[3];				/* WiFi P2P specific OUI: P2P_OUI */
+	uint8	oui_type;			/* Identifies P2P version: P2P_VER */
+	uint8	subelts[BCM_FLEX_ARRAY];	/* variable length subelements */
 } BWL_POST_PACKED_STRUCT;
 typedef struct wifi_p2p_ie wifi_p2p_ie_t;
 
@@ -157,20 +157,20 @@ typedef struct wifi_p2p_grp_bssid_se_s wifi_p2p_grp_bssid_se_t;
 
 /* WiFi P2P IE subelement: P2P Group ID */
 BWL_PRE_PACKED_STRUCT struct wifi_p2p_grp_id_se_s {
-	uint8	eltId;		/* SE ID: P2P_SEID_GROUP_ID */
-	uint8	len[2];		/* SE length not including eltId, len fields */
-	uint8	mac[6];		/* P2P device address */
-	uint8	ssid[1];	/* ssid. device id. variable length */
+	uint8	eltId;			/* SE ID: P2P_SEID_GROUP_ID */
+	uint8	len[2];			/* SE length not including eltId, len fields */
+	uint8	mac[6];			/* P2P device address */
+	uint8	ssid[BCM_FLEX_ARRAY];	/* ssid. device id. variable length */
 } BWL_POST_PACKED_STRUCT;
 typedef struct wifi_p2p_grp_id_se_s wifi_p2p_grp_id_se_t;
 
 /* WiFi P2P IE subelement: P2P Interface */
 BWL_PRE_PACKED_STRUCT struct wifi_p2p_intf_se_s {
-	uint8	eltId;		/* SE ID: P2P_SEID_P2P_IF */
-	uint8	len[2];		/* SE length not including eltId, len fields */
-	uint8	mac[6];		/* P2P device address */
-	uint8	ifaddrs;	/* P2P Interface Address count */
-	uint8	ifaddr[1][6];	/* P2P Interface Address list */
+	uint8	eltId;				/* SE ID: P2P_SEID_P2P_IF */
+	uint8	len[2];				/* SE length not including eltId, len fields */
+	uint8	mac[6];				/* P2P device address */
+	uint8	ifaddrs;			/* P2P Interface Address count */
+	uint8	ifaddr[BCM_FLEX_ARRAY][6];	/* P2P Interface Address list */
 } BWL_POST_PACKED_STRUCT;
 typedef struct wifi_p2p_intf_se_s wifi_p2p_intf_se_t;
 
@@ -369,7 +369,7 @@ BWL_PRE_PACKED_STRUCT struct wifi_p2p_serv_hash_se_s {
 	uint8	len[2];			/* SE length not including eltId, len fields
 					 * in multiple of 6 Bytes
 					*/
-	uint8	hash[1];		/* Variable length - SHA256 hash of
+	uint8	hash[BCM_FLEX_ARRAY];	/* Variable length - SHA256 hash of
 					 * service names (can be more than one hashes)
 					*/
 } BWL_POST_PACKED_STRUCT;
@@ -377,11 +377,11 @@ typedef struct wifi_p2p_serv_hash_se_s wifi_p2p_serv_hash_se_t;
 
 /* WiFi P2P IE subelement: Service Instance Data */
 BWL_PRE_PACKED_STRUCT struct wifi_p2p_serv_inst_data_se_s {
-	uint8	eltId;			/* SE ID: P2P_SEID_SESSION */
-	uint8	len[2];			/* SE length not including eltId, len */
-	uint8	ssn_info[1];		/* Variable length - Session information as specified by
-					 * the service layer, type matches serv. name
-					*/
+	uint8	eltId;				/* SE ID: P2P_SEID_SESSION */
+	uint8	len[2];				/* SE length not including eltId, len */
+	uint8	ssn_info[BCM_FLEX_ARRAY];	/* Session information as specified by
+						 * the service layer, type matches serv. name
+						*/
 } BWL_POST_PACKED_STRUCT;
 typedef struct wifi_p2p_serv_inst_data_se_s wifi_p2p_serv_inst_data_se_t;
 
@@ -408,10 +408,10 @@ typedef struct wifi_p2p_advt_id_se_s wifi_p2p_advt_id_se_t;
 
 /* WiFi P2P IE subelement: Advertise Service Hash */
 BWL_PRE_PACKED_STRUCT struct wifi_p2p_adv_serv_info_s {
-	uint8	advt_id[4];		/* SE Advertise ID for the service */
-	uint16	nw_cfg_method;	/* SE Network Config method for the service */
-	uint8	serv_name_len;	/* SE length of the service name */
-	uint8	serv_name[1];	/* Variable length service name field */
+	uint8	advt_id[4];			/* SE Advertise ID for the service */
+	uint16	nw_cfg_method;			/* SE Network Config method for the service */
+	uint8	serv_name_len;			/* SE length of the service name */
+	uint8	serv_name[1];			/* service name field */
 } BWL_POST_PACKED_STRUCT;
 typedef struct wifi_p2p_adv_serv_info_s wifi_p2p_adv_serv_info_t;
 
@@ -421,7 +421,8 @@ BWL_PRE_PACKED_STRUCT struct wifi_p2p_advt_serv_se_s {
 	uint8	len[2];			/* SE length not including eltId, len fields mutiple len of
 					 * wifi_p2p_adv_serv_info_t entries
 					*/
-	wifi_p2p_adv_serv_info_t	p_advt_serv_info[1]; /* Variable length
+	wifi_p2p_adv_serv_info_t	p_advt_serv_info[BCM_FLEX_ARRAY];
+								/* Variable length
 								of multiple instances
 								of the advertise service info
 								*/
@@ -446,14 +447,14 @@ typedef struct wifi_p2p_ssn_id_se_s wifi_p2p_ssn_id_se_t;
 
 /* WiFi P2P Action Frame */
 BWL_PRE_PACKED_STRUCT struct wifi_p2p_action_frame {
-	uint8	category;	/* P2P_AF_CATEGORY */
-	uint8	OUI[3];		/* OUI - P2P_OUI */
-	uint8	type;		/* OUI Type - P2P_VER */
-	uint8	subtype;	/* OUI Subtype - P2P_AF_* */
-	uint8	dialog_token;	/* nonzero, identifies req/resp tranaction */
-	uint8	elts[1];	/* Variable length information elements.  Max size =
-				 * ACTION_FRAME_SIZE - sizeof(this structure) - 1
-				 */
+	uint8	category;		/* P2P_AF_CATEGORY */
+	uint8	OUI[3];			/* OUI - P2P_OUI */
+	uint8	type;			/* OUI Type - P2P_VER */
+	uint8	subtype;		/* OUI Subtype - P2P_AF_* */
+	uint8	dialog_token;		/* nonzero, identifies req/resp tranaction */
+	uint8	elts[BCM_FLEX_ARRAY];	/* information elements.  Max size =
+					 * ACTION_FRAME_SIZE - sizeof(this structure) - 1
+					 */
 } BWL_POST_PACKED_STRUCT;
 typedef struct wifi_p2p_action_frame wifi_p2p_action_frame_t;
 #define P2P_AF_CATEGORY		0x7f
@@ -468,15 +469,15 @@ typedef struct wifi_p2p_action_frame wifi_p2p_action_frame_t;
 
 /* WiFi P2P Public Action Frame */
 BWL_PRE_PACKED_STRUCT struct wifi_p2p_pub_act_frame {
-	uint8	category;	/* P2P_PUB_AF_CATEGORY */
-	uint8	action;		/* P2P_PUB_AF_ACTION */
-	uint8	oui[3];		/* P2P_OUI */
-	uint8	oui_type;	/* OUI type - P2P_VER */
-	uint8	subtype;	/* OUI subtype - P2P_TYPE_* */
-	uint8	dialog_token;	/* nonzero, identifies req/rsp transaction */
-	uint8	elts[1];	/* Variable length information elements.  Max size =
-				 * ACTION_FRAME_SIZE - sizeof(this structure) - 1
-				 */
+	uint8	category;		/* P2P_PUB_AF_CATEGORY */
+	uint8	action;			/* P2P_PUB_AF_ACTION */
+	uint8	oui[3];			/* P2P_OUI */
+	uint8	oui_type;		/* OUI type - P2P_VER */
+	uint8	subtype;		/* OUI subtype - P2P_TYPE_* */
+	uint8	dialog_token;		/* nonzero, identifies req/rsp transaction */
+	uint8	elts[BCM_FLEX_ARRAY];	/* information elements.  Max size =
+					 * ACTION_FRAME_SIZE - sizeof(this structure) - 1
+					 */
 } BWL_POST_PACKED_STRUCT;
 typedef struct wifi_p2p_pub_act_frame wifi_p2p_pub_act_frame_t;
 #define P2P_PUB_AF_FIXED_LEN	8
@@ -510,11 +511,11 @@ BWL_PRE_PACKED_STRUCT struct wifi_p2p_noa_desc {
 typedef struct wifi_p2p_noa_desc wifi_p2p_noa_desc_t;
 
 BWL_PRE_PACKED_STRUCT struct wifi_p2p_noa_se {
-	uint8	eltId;		/* Subelement ID */
-	uint8	len[2];		/* Length */
-	uint8	index;		/* Index */
-	uint8	ops_ctw_parms;	/* CTWindow and OppPS Parameters */
-	wifi_p2p_noa_desc_t	desc[1];	/* Notice of Absence Descriptor(s) */
+	uint8	eltId;					/* Subelement ID */
+	uint8	len[2];					/* Length */
+	uint8	index;					/* Index */
+	uint8	ops_ctw_parms;				/* CTWindow and OppPS Parameters */
+	wifi_p2p_noa_desc_t	desc[BCM_FLEX_ARRAY];	/* Notice of Absence Descriptor(s) */
 } BWL_POST_PACKED_STRUCT;
 typedef struct wifi_p2p_noa_se wifi_p2p_noa_se_t;
 
@@ -602,38 +603,38 @@ typedef struct wifi_p2psd_adp_ie wifi_p2psd_adp_ie_t;
 
 /* NQP Vendor-specific Content */
 BWL_PRE_PACKED_STRUCT struct wifi_p2psd_nqp_query_vsc {
-	uint8	oui_subtype;	/* OUI Subtype: 0x09 */
-	uint16	svc_updi;		/* Service Update Indicator */
-	uint8	svc_tlvs[1];	/* wifi_p2psd_qreq_tlv_t type for service request,
-				* wifi_p2psd_qresp_tlv_t type for service response
-				*/
+	uint8	oui_subtype;			/* OUI Subtype: 0x09 */
+	uint16	svc_updi;			/* Service Update Indicator */
+	uint8	svc_tlvs[BCM_FLEX_ARRAY];	/* wifi_p2psd_qreq_tlv_t type for service request,
+						* wifi_p2psd_qresp_tlv_t type for service response
+						*/
 } BWL_POST_PACKED_STRUCT;
 typedef struct wifi_p2psd_nqp_query_vsc wifi_p2psd_nqp_query_vsc_t;
 
 /* Service Request TLV */
 BWL_PRE_PACKED_STRUCT struct wifi_p2psd_qreq_tlv {
-	uint16	len;			/* Length: 5 plus size of Query Data */
-	uint8	svc_prot;		/* Service Protocol Type */
-	uint8	svc_tscid;		/* Service Transaction ID */
-	uint8	query_data[1];	/* Query Data, passed in from above Layer 2 */
+	uint16	len;				/* Length: 5 plus size of Query Data */
+	uint8	svc_prot;			/* Service Protocol Type */
+	uint8	svc_tscid;			/* Service Transaction ID */
+	uint8	query_data[BCM_FLEX_ARRAY];	/* Query Data, passed in from above Layer 2 */
 } BWL_POST_PACKED_STRUCT;
 typedef struct wifi_p2psd_qreq_tlv wifi_p2psd_qreq_tlv_t;
 
 /* Query Request Frame, defined in generic format, instead of NQP specific */
 BWL_PRE_PACKED_STRUCT struct wifi_p2psd_qreq_frame {
-	uint16	info_id;	/* Info ID: 0xDDDD */
-	uint16	len;		/* Length of service request TLV, 5 plus the size of request data */
-	uint8	oui[3];		/* WFA OUI: 0x0050F2 */
-	uint8	qreq_vsc[1]; /* Vendor-specific Content: wifi_p2psd_nqp_query_vsc_t type for NQP */
+	uint16	info_id;		/* Info ID: 0xDDDD */
+	uint16	len;			/* service request len, 5 plus the size of request data */
+	uint8	oui[3];			/* WFA OUI: 0x0050F2 */
+	uint8	qreq_vsc[BCM_FLEX_ARRAY]; /* Vendor-specific : for NQP */
 
 } BWL_POST_PACKED_STRUCT;
 typedef struct wifi_p2psd_qreq_frame wifi_p2psd_qreq_frame_t;
 
 /* GAS Initial Request AF body, "elts" in wifi_p2p_pub_act_frame */
 BWL_PRE_PACKED_STRUCT struct wifi_p2psd_gas_ireq_frame {
-	wifi_p2psd_adp_ie_t		adp_ie;		/* Advertisement Protocol IE */
-	uint16					qreq_len;	/* Query Request Length */
-	uint8	qreq_frm[1];	/* Query Request Frame wifi_p2psd_qreq_frame_t */
+	wifi_p2psd_adp_ie_t	adp_ie;		/* Advertisement Protocol IE */
+	uint16			qreq_len;	/* Query Request Length */
+	uint8	qreq_frm[BCM_FLEX_ARRAY];	/* Query Request Frame wifi_p2psd_qreq_frame_t */
 } BWL_POST_PACKED_STRUCT;
 typedef struct wifi_p2psd_gas_ireq_frame wifi_p2psd_gas_ireq_frame_t;
 
@@ -643,7 +644,7 @@ BWL_PRE_PACKED_STRUCT struct wifi_p2psd_qresp_tlv {
 	uint8	svc_prot;			/* Service Protocol Type */
 	uint8	svc_tscid;			/* Service Transaction ID */
 	uint8	status;				/* Value defined in Table 57 of P2P spec. */
-	uint8	query_data[1];		/* Response Data, passed in from above Layer 2 */
+	uint8	query_data[BCM_FLEX_ARRAY];	/* Response Data, passed in from above Layer 2 */
 } BWL_POST_PACKED_STRUCT;
 typedef struct wifi_p2psd_qresp_tlv wifi_p2psd_qresp_tlv_t;
 
@@ -652,40 +653,40 @@ BWL_PRE_PACKED_STRUCT struct wifi_p2psd_qresp_frame {
 	uint16	info_id;	/* Info ID: 0xDDDD */
 	uint16	len;		/* Lenth of service response TLV, 6 plus the size of resp data */
 	uint8	oui[3];		/* WFA OUI: 0x0050F2 */
-	uint8	qresp_vsc[1]; /* Vendor-specific Content: wifi_p2psd_qresp_tlv_t type for NQP */
+	uint8	qresp_vsc[BCM_FLEX_ARRAY]; /* Vendor-specific : for NQP */
 
 } BWL_POST_PACKED_STRUCT;
 typedef struct wifi_p2psd_qresp_frame wifi_p2psd_qresp_frame_t;
 
 /* GAS Initial Response AF body, "elts" in wifi_p2p_pub_act_frame */
 BWL_PRE_PACKED_STRUCT struct wifi_p2psd_gas_iresp_frame {
-	uint16	status;			/* Value defined in Table 7-23 of IEEE P802.11u */
-	uint16	cb_delay;		/* GAS Comeback Delay */
+	uint16	status;				/* Value defined in Table 7-23 of IEEE P802.11u */
+	uint16	cb_delay;			/* GAS Comeback Delay */
 	wifi_p2psd_adp_ie_t	adp_ie;		/* Advertisement Protocol IE */
-	uint16		qresp_len;	/* Query Response Length */
-	uint8	qresp_frm[1];	/* Query Response Frame wifi_p2psd_qresp_frame_t */
+	uint16		qresp_len;		/* Query Response Length */
+	uint8	qresp_frm[BCM_FLEX_ARRAY];	/* Query Response Frame wifi_p2psd_qresp_frame_t */
 } BWL_POST_PACKED_STRUCT;
 typedef struct wifi_p2psd_gas_iresp_frame wifi_p2psd_gas_iresp_frame_t;
 
 /* GAS Comeback Response AF body, "elts" in wifi_p2p_pub_act_frame */
 BWL_PRE_PACKED_STRUCT struct wifi_p2psd_gas_cresp_frame {
-	uint16	status;			/* Value defined in Table 7-23 of IEEE P802.11u */
-	uint8	fragment_id;	/* Fragmentation ID */
-	uint16	cb_delay;		/* GAS Comeback Delay */
+	uint16	status;				/* Value defined in Table 7-23 of IEEE P802.11u */
+	uint8	fragment_id;			/* Fragmentation ID */
+	uint16	cb_delay;			/* GAS Comeback Delay */
 	wifi_p2psd_adp_ie_t	adp_ie;		/* Advertisement Protocol IE */
-	uint16	qresp_len;		/* Query Response Length */
-	uint8	qresp_frm[1];	/* Query Response Frame wifi_p2psd_qresp_frame_t */
+	uint16	qresp_len;			/* Query Response Length */
+	uint8	qresp_frm[BCM_FLEX_ARRAY];	/* Query Response Frame wifi_p2psd_qresp_frame_t */
 } BWL_POST_PACKED_STRUCT;
 typedef struct wifi_p2psd_gas_cresp_frame wifi_p2psd_gas_cresp_frame_t;
 
 /* Wi-Fi GAS Public Action Frame */
 BWL_PRE_PACKED_STRUCT struct wifi_p2psd_gas_pub_act_frame {
-	uint8	category;		/* 0x04 Public Action Frame */
-	uint8	action;			/* 0x6c Advertisement Protocol */
-	uint8	dialog_token;	/* nonzero, identifies req/rsp transaction */
-	uint8	query_data[1];	/* Query Data. wifi_p2psd_gas_ireq_frame_t
-					 * or wifi_p2psd_gas_iresp_frame_t format
-					 */
+	uint8	category;			/* 0x04 Public Action Frame */
+	uint8	action;				/* 0x6c Advertisement Protocol */
+	uint8	dialog_token;			/* nonzero, identifies req/rsp transaction */
+	uint8	query_data[BCM_FLEX_ARRAY];	/* Query Data. wifi_p2psd_gas_ireq_frame_t
+						 * or wifi_p2psd_gas_iresp_frame_t format
+						 */
 } BWL_POST_PACKED_STRUCT;
 typedef struct wifi_p2psd_gas_pub_act_frame wifi_p2psd_gas_pub_act_frame_t;
 

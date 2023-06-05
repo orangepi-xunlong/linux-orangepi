@@ -2,7 +2,7 @@
  * Basic types and constants relating to 802.11ax/HE STA
  * This is a portion of 802.11ax definition. The rest are in 802.11.h.
  *
- * Copyright (C) 2020, Broadcom.
+ * Copyright (C) 2022, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -312,6 +312,8 @@ typedef uint8 he_phy_cap_t[HE_PHY_CAP_INFO_SIZE];
 #define HE_PHY_RX_FULL_BW_MU_COMP_SIGB_FSZ	1
 #define HE_PHY_RX_FULL_BW_MU_NON_COMP_SIGB_IDX	77	/* Rx Full BW MU PPDU Non-Comp SIGB */
 #define HE_PHY_RX_FULL_BW_MU_NON_COMP_SIGB_FSZ	1
+#define HE_PHY_NOMINAL_PACKET_PADDING_IDX	78	/* Nominal Packet Padding */
+#define HE_PHY_NOMINAL_PACKET_PADDING_FSZ	2
 
 /* HE Mac Capabilities values */
 /* b3-b4: Fragmentation Support field (table 9-262z) */
@@ -407,6 +409,12 @@ typedef uint8 he_phy_cap_t[HE_PHY_CAP_INFO_SIZE];
 #define HE_PHY_DCM_MAX_BW_80		2
 #define HE_PHY_DCM_MAX_BW_160		3
 
+/* b78-b79 */
+#define HE_PHY_NOMINAL_PKT_PADDING_0_US		0
+#define HE_PHY_NOMINAL_PKT_PADDING_8_US		1
+#define HE_PHY_NOMINAL_PKT_PADDING_16_US	2
+#define HE_PHY_NOMINAL_PKT_PADDING_RESERVED	3
+
 /* HE Duration based RTS Threshold Figure 9-589cr */
 #define HE_RTS_THRES_DISABLED		1023
 #define HE_RTS_THRES_ALL_FRAMES		0
@@ -432,6 +440,12 @@ typedef uint8 he_phy_cap_t[HE_PHY_CAP_INFO_SIZE];
 #define HE_MCS_CODE_NONE	3u
 #define HE_MCS_CODE_SIZE	2u	/* num bits */
 #define HE_MCS_CODE_MASK	0x3u	/* mask for 1-stream */
+
+/* Whenever SSID is not known and short ssid is included in the
+* 6g probe request SSID element contains one octet value
+* 128 in the SSID element
+*/
+#define WLC_SSID_VAL_IN_SHORT_SSID	128u
 
 /* Defines for The Max HE MCS For n SS subfield (where n = 1, ..., 8) */
 #define HE_MCS_MAP_NSS_MAX	8u	/* Max number of streams possible */
@@ -463,7 +477,7 @@ typedef uint8 he_phy_cap_t[HE_PHY_CAP_INFO_SIZE];
 #define HE_MCS_NSS_SUP_FLD_MAX_LEN	(HE_MCS_NSS_SUP_FLD_TXRX_MAP_LEN * 3u)
 
 /* HE Capabilities element */
-BWL_PRE_PACKED_STRUCT struct he_cap_ie {
+typedef BWL_PRE_PACKED_STRUCT struct he_cap_ie {
 	uint8 id;
 	uint8 len;
 	uint8 id_ext;
@@ -471,55 +485,50 @@ BWL_PRE_PACKED_STRUCT struct he_cap_ie {
 	he_phy_cap_t phy_cap;		/* PHY Capabilities Information */
 	/* he_tx_rx_mcs_nss_sup_t txx_rx_mcs_nss_sup; */ /* Tx Rx HE MCS NSS Support (variable) */
 	/* he_ppe_ths_t ppe_ths; */	/* PPE Thresholds (optional) */
-} BWL_POST_PACKED_STRUCT;
-
-typedef struct he_cap_ie he_cap_ie_t;
+} BWL_POST_PACKED_STRUCT he_cap_ie_t;
 
 /* Multiple BSSID element */
-BWL_PRE_PACKED_STRUCT struct nontrans_BSSID_cap {
+typedef BWL_PRE_PACKED_STRUCT struct nontrans_bssid_cap {
 	uint8 id; /* 83 */
 	uint8 len;
 	uint16 capability;
-} BWL_POST_PACKED_STRUCT;
+} BWL_POST_PACKED_STRUCT nontrans_bssid_cap_t;
+typedef nontrans_bssid_cap_t nontrans_BSSID_cap_t;
 
-typedef struct nontrans_BSSID_cap nontrans_BSSID_cap_t;
-
-BWL_PRE_PACKED_STRUCT struct multi_BSSID_index {
+typedef BWL_PRE_PACKED_STRUCT struct multi_bssid_index {
 	uint8 id; /* 85 */
 	uint8 len; /* 3 in beacon, 1 in probe response */
 	uint8 bssid_index; /* between 1 and 2^n - 1 */
 	uint8 dtim_period; /* only valid in beacon */
 	uint8 dtim_count; /* only valid in beacon */
-} BWL_POST_PACKED_STRUCT;
+} BWL_POST_PACKED_STRUCT multi_bssid_index_t;
+typedef multi_bssid_index_t multi_BSSID_index_t;
 
-typedef struct multi_BSSID_index multi_BSSID_index_t;
-
-BWL_PRE_PACKED_STRUCT struct fms_descriptor {
+typedef BWL_PRE_PACKED_STRUCT struct fms_descriptor {
 	uint8 id; /* 86 */
 	uint8 len;
 	uint8 num_FMS_counters;
 	uint8 *FMS_counters;
 	uint8 *FMSID;
-} BWL_POST_PACKED_STRUCT;
+} BWL_POST_PACKED_STRUCT fms_descriptor_t;
 
-typedef struct fms_descriptor fms_descriptor_t;
-
-BWL_PRE_PACKED_STRUCT struct nontrans_BSSID_profile_subie {
+typedef BWL_PRE_PACKED_STRUCT struct nontrans_bssid_profile_subie {
 	uint8 subie_id; /* 0 */
 	uint8 subie_len;
-	uint8 moreie[1];
-} BWL_POST_PACKED_STRUCT;
+	uint8 moreie[BCM_FLEX_ARRAY];
+} BWL_POST_PACKED_STRUCT nontrans_bssid_profile_subie_t;
+typedef nontrans_bssid_profile_subie_t nontrans_BSSID_profile_subie_t;
 
-typedef struct nontrans_BSSID_profile_subie nontrans_BSSID_profile_subie_t;
+#define maxBSSID_indicator maxbssid_indicator
 
-BWL_PRE_PACKED_STRUCT struct multi_BSSID_ie {
+typedef BWL_PRE_PACKED_STRUCT struct multi_bssid_ie {
 	uint8 id;
 	uint8 len;
-	uint8 maxBSSID_indicator;
-	nontrans_BSSID_profile_subie_t profile[1];
-} BWL_POST_PACKED_STRUCT;
+	uint8 maxbssid_indicator;
+	nontrans_bssid_profile_subie_t profile[BCM_FLEX_ARRAY];
+} BWL_POST_PACKED_STRUCT multi_bssid_ie_t;
+typedef multi_bssid_ie_t multi_BSSID_ie_t;
 
-typedef struct multi_BSSID_ie multi_BSSID_ie_t;
 #define DOT11_MULTIPLE_BSSID_PROFILE_SUBID 0
 
 /* Table 9-262ab, Highest MCS Supported subfield encoding */
@@ -619,16 +628,14 @@ typedef uint8 he_basic_mcs_nss_set_t[HE_BASIC_MCS_NSS_SIZE];
 #define HE_OP_MAX_BSSID_IND_LEN		1u
 #define HE_OP_6G_OPER_INFO_LEN		5u
 /* HE Operation element */
-BWL_PRE_PACKED_STRUCT struct he_op_ie {
+typedef BWL_PRE_PACKED_STRUCT struct he_op_ie {
 	uint8 id;
 	uint8 len;
 	uint8 id_ext;
 	he_op_parms_t parms;
 	uint8 bsscolor_info;
 	he_basic_mcs_nss_set_t mcs_nss_op;	/* Basic HE MCS & NSS Set */
-} BWL_POST_PACKED_STRUCT;
-
-typedef struct he_op_ie he_op_ie_t;
+} BWL_POST_PACKED_STRUCT he_op_ie_t;
 
 #define HE_OP_IE_MIN_LEN	(sizeof(he_op_ie_t) - TLV_HDR_LEN)
 #define HE_OP_IE_MAX_LEN (sizeof(he_op_ie_t) - TLV_HDR_LEN + VHT_OP_INFO_LEN +\
@@ -652,26 +659,34 @@ typedef struct he_op_ie he_op_ie_t;
 #define HE_6G_OP_CTL_REG_INFO(ctl) \
 	((ctl & HE_6G_CTL_REG_INFO_MASK) >> HE_6G_CTL_REG_INFO_SHIFT)
 
+#define HE_6G_OP_REG_INFO_LOW_PWR	0u	/* INDOOR Low Power */
+#define HE_6G_OP_REG_INFO_STD_PWR	1u	/* Standard Power */
+#define HE_6G_OP_REG_INFO_VLP_PWR	2u	/* Very low Power */
+#define HE_6G_OP_REG_INFO_INDR_ENAB	3u	/* Indoor Enabled */
+#define HE_6G_OP_REG_INFO_INDR_STD_PWR	4u	/* Indoor Standard Power */
+#define HE_6G_OP_REG_INFO_CAT_MAX	5u	/* Category reserved */
+
+#define HE_6G_CTL_DUP_BCN_SHIFT     0x02u
+#define HE_6G_OP_CTL_DUP_BCN(ctl) \
+	((ctl & HE_6G_CTL_DUP_BCN_MASK) >> HE_6G_CTL_DUP_BCN_SHIFT)
+
 /* HE 6G Operation info */
-BWL_PRE_PACKED_STRUCT struct he_6g_op_info {
+typedef BWL_PRE_PACKED_STRUCT struct he_6g_op_info {
 	uint8 pri_chan;
 	uint8 control;
 	uint8 seg0;
 	uint8 seg1;
 	uint8 min_rate;
-} BWL_POST_PACKED_STRUCT;
-
-typedef struct he_6g_op_info he_6g_op_info_t;
+} BWL_POST_PACKED_STRUCT he_6g_op_info_t;
 
 /* HE Extended Capabilities element */
-BWL_PRE_PACKED_STRUCT struct he_6g_cap_ie {
+typedef BWL_PRE_PACKED_STRUCT struct he_6g_cap_ie {
 	uint8 id;
 	uint8 len;
 	uint8 id_ext;
 	uint16 cap_info;    /* Capabilities Information */
-} BWL_POST_PACKED_STRUCT;
+} BWL_POST_PACKED_STRUCT he_6g_cap_ie_t;
 
-typedef struct he_6g_cap_ie he_6g_cap_ie_t;
 #define HE_6G_CAP_IE_LEN  sizeof(he_6g_cap_ie_t)
 
 /* HE Capabilities Information bit position and fieldwidth.
@@ -706,14 +721,12 @@ typedef struct he_6g_cap_ie he_6g_cap_ie_t;
 /**
  * UORA parameter set element (sec 9.4.2.244)
  */
-BWL_PRE_PACKED_STRUCT struct he_uora_ie {
+typedef BWL_PRE_PACKED_STRUCT struct he_uora_ie {
 	uint8 id;
 	uint8 len;
 	uint8 id_ext;
 	uint8 ocw_range;
-} BWL_POST_PACKED_STRUCT;
-
-typedef struct he_uora_ie he_uora_ie_t;
+} BWL_POST_PACKED_STRUCT he_uora_ie_t;
 
 /* Bit field Masks */
 #define HE_UORA_EOCW_MIN_IDX		0u
@@ -725,23 +738,19 @@ typedef struct he_uora_ie he_uora_ie_t;
 /**
  * MU EDCA parameter set element (sec 9.4.2.245)
  */
-BWL_PRE_PACKED_STRUCT struct he_mu_ac_param_record {
+typedef BWL_PRE_PACKED_STRUCT struct he_mu_ac_param_record {
 	uint8 aci_aifsn;
 	uint8 ecw_min_max;
 	uint8 muedca_timer;
-} BWL_POST_PACKED_STRUCT;
+} BWL_POST_PACKED_STRUCT he_mu_ac_param_record_t;
 
-typedef struct he_mu_ac_param_record he_mu_ac_param_record_t;
-
-BWL_PRE_PACKED_STRUCT struct he_muedca_ie {
+typedef BWL_PRE_PACKED_STRUCT struct he_muedca_ie {
 	uint8 id;
 	uint8 len;
 	uint8 id_ext;
 	uint8 mu_qos_info;
 	he_mu_ac_param_record_t param_ac[AC_COUNT];
-} BWL_POST_PACKED_STRUCT;
-
-typedef struct he_muedca_ie he_muedca_ie_t;
+} BWL_POST_PACKED_STRUCT he_muedca_ie_t;
 
 #define HE_MU_EDCA_PARAM_UPD_CNT_IDX	0u	/* EDCA Parameter Set Update Count */
 #define HE_MU_EDCA_PARAM_UPD_CNT_LEN	4u
@@ -767,14 +776,12 @@ typedef struct he_muedca_ie he_muedca_ie_t;
 /* Reserved b5-b7 */
 
 /* Spatial reuse element element */
-BWL_PRE_PACKED_STRUCT struct he_srp_ie {
+typedef BWL_PRE_PACKED_STRUCT struct he_srp_ie {
 	uint8 id;
 	uint8 len;
 	uint8 id_ext;
 	uint8 sr_control;
-} BWL_POST_PACKED_STRUCT;
-
-typedef struct he_srp_ie he_srp_ie_t;
+} BWL_POST_PACKED_STRUCT he_srp_ie_t;
 
 #define HE_SRP_NON_SRG_OBSS_PD_MAX_OFFSET_LEN	1u
 #define HE_SRP_SRG_OBSS_PD_MIN_OFFSET_LEN	1u
@@ -815,15 +822,13 @@ typedef struct he_srp_ie he_srp_ie_t;
 #define HE_BSSCOLOR_CHANGE_NEWCOLOR_FSZ		6u
 
 /* HE Bsscolor change element */
-BWL_PRE_PACKED_STRUCT struct he_bsscolor_change_ie {
+typedef BWL_PRE_PACKED_STRUCT struct he_bsscolor_change_ie {
 	uint8 id;
 	uint8 len;
 	uint8 id_ext;
 	uint8 color_switch_cntdwn;
 	uint8 new_bsscolor_info;
-} BWL_POST_PACKED_STRUCT;
-
-typedef struct he_bsscolor_change_ie he_bsscolor_change_ie_t;
+} BWL_POST_PACKED_STRUCT he_bsscolor_change_ie_t;
 
 /* HE SU bit position and field width */
 #define HE_SU_PPDU_FORMAT_IDX			0u
@@ -1176,5 +1181,21 @@ typedef uint8 he_trig_usrinfo_set_t[HE_TRIG_USRINFO_SZ];
 #define HE_N_TAIL			6	/* tail field bits for BCC */
 #define HE_N_SERVICE			16	/* bits in service field */
 #define HE_T_MAX_PE			16	/* max Packet extension duration */
+
+/* BSS Parameters subfield (Draft D8.0 Figure 9-632a) */
+#define HE_BSS_PARMS_OCT_REC_POS	0u	/* OCT Recommended */
+#define HE_BSS_PARMS_OCT_REC_SZ		1u
+#define HE_BSS_PARMS_SAME_SSID_POS	1u	/* Same SSID */
+#define HE_BSS_PARMS_SAME_SSID_SZ	1u
+#define HE_BSS_PARMS_MULTI_BSSID_POS	2u	/* Multiple BSSID */
+#define HE_BSS_PARMS_MULTI_BSSID_SZ	1u
+#define HE_BSS_PARMS_TR_BSSID_POS	3u	/* Transmitted BSSID */
+#define HE_BSS_PARMS_TR_BSSID_SZ	1u
+#define HE_BSS_PARMS_MEM_CO_AP_POS	4u	/* Member Of ESS With 2.4/5 GHz Co-Located AP */
+#define HE_BSS_PARMS_MEM_CO_AP_SZ	1u
+#define HE_BSS_PARMS_UNSOL_PRB_RSP_POS	5u	/* Unsolicited Probe Responses Active */
+#define HE_BSS_PARMS_UNSOL_PRB_RSP_SZ	1u
+#define HE_BSS_PARMS_CO_AP_POS		6u	/* Co-Located AP */
+#define HE_BSS_PARMS_CO_AP_SZ		1u
 
 #endif /* _802_11ax_h_ */

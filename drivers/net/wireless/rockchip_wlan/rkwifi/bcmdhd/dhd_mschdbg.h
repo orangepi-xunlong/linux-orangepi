@@ -1,7 +1,7 @@
 /*
  * DHD debugability header file
  *
- * Copyright (C) 2020, Broadcom.
+ * Copyright (C) 2022, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -20,7 +20,7 @@
  *
  * <<Broadcom-WL-IPTag/Open:>>
  *
- * $Id: dhd_mschdbg.h 571265 2015-07-14 20:50:18Z eccopark $
+ * $Id: dhd_mschdbg.h 571265 2015-07-14 20:50:18Z $
  */
 
 #ifndef _dhd_mschdbg_h_

@@ -1,7 +1,7 @@
 /*
  * HND SiliconBackplane PMU support.
  *
- * Copyright (C) 2020, Broadcom.
+ * Copyright (C) 2022, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -55,13 +55,13 @@ extern void si_set_lv_sleep_mode_lhl_config_4389(si_t *sih);
 
 #define HIB_EXT_WAKEUP_CAP(sih)  (PMUREV(sih->pmurev) >= 33)
 
-#ifdef WL_FWSIGN
+#ifdef BCM_BOOTLOADER
 #define LHL_IS_PSMODE_0(sih)  (1)
 #define LHL_IS_PSMODE_1(sih)  (0)
 #else
 #define LHL_IS_PSMODE_0(sih)  (si_lhl_ps_mode(sih) == LHL_PS_MODE_0)
 #define LHL_IS_PSMODE_1(sih)  (si_lhl_ps_mode(sih) == LHL_PS_MODE_1)
-#endif /* WL_FWSIGN */
+#endif /* BCM_BOOTLOADER */
 
 /* LHL revid in capabilities register */
 #define	LHL_CAP_REV_MASK	0x000000ff

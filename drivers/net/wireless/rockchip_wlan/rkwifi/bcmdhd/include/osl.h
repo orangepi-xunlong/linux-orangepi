@@ -1,7 +1,7 @@
 /*
  * OS Abstraction Layer
  *
- * Copyright (C) 2020, Broadcom.
+ * Copyright (C) 2022, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -32,9 +32,7 @@ enum {
 	TAIL_BYTES_TYPE_MIC = 3
 };
 
-#ifdef DHD_EFI
-#define OSL_PKTTAG_SZ	40 /* Size of PktTag */
-#elif defined(MACOSX)
+#if defined(MACOSX)
 #define OSL_PKTTAG_SZ	56
 #elif defined(__linux__)
 #define OSL_PKTTAG_SZ   48 /* standard linux pkttag size is 48 bytes */
@@ -42,7 +40,7 @@ enum {
 #ifndef OSL_PKTTAG_SZ
 #define OSL_PKTTAG_SZ	32 /* Size of PktTag */
 #endif /* !OSL_PKTTAG_SZ */
-#endif /* DHD_EFI */
+#endif
 
 /* Drivers use PKTFREESETCB to register a callback function when a packet is freed by OSL */
 typedef void (*pktfree_cb_fn_t)(void *ctx, void *pkt, unsigned int status);
@@ -63,6 +61,8 @@ typedef void  (*osl_wreg_fn_t)(void *ctx, volatile void *reg, unsigned int val, 
 #elif defined(_RTE_)
 #include <rte_osl.h>
 #include <hnd_pkt.h>
+#elif defined(COEX_OSL)
+#include <coex_osl.h>
 #elif defined(MACOSX)
 #include <macosx_osl.h>
 #else
@@ -90,6 +90,25 @@ typedef void  (*osl_wreg_fn_t)(void *ctx, volatile void *reg, unsigned int val, 
 #ifndef OR_REG
 #define OR_REG(osh, r, v)		W_REG(osh, (r), R_REG(osh, r) | (v))
 #endif   /* !OR_REG */
+
+/**
+ * @brief API to either read or read, modify, write, read a 32bit register.
+ * Modify the value in a register. If the mask or val are not zero, this will bitwise-or val into
+ * the register at the address after masking the value read from the register with the provided
+ * mask. This process is sometimes referred to as Read-Modify-Write (RMW). This replaces the
+ * functionality provided by si_corereg for the dongle. When mask and val are zero, this macro
+ * behaves the same as R_REG.
+ * @param  addr    Backplane address to perform an operation on as a uint32.
+ * @param  mask    Bitmask for the value that will be written.
+ * @param  val     Value to and into the register at the address.
+ * @return         The value in the register at the provided address after the optional write.
+ */
+#define RMWR_REG(addr, mask, val) ({ \
+	if ((mask != 0) || (val != 0)) { \
+		SET_REG(NULL, (uint32 *)(addr), (mask), (val)); \
+	} \
+	R_REG(NULL, (uint32 *)(addr)); \
+})
 
 #if !defined(OSL_SYSUPTIME)
 #define OSL_SYSUPTIME() (0)
@@ -128,6 +147,14 @@ typedef void  (*osl_wreg_fn_t)(void *ctx, volatile void *reg, unsigned int val, 
 #define OSL_CPU_COUNTS_PER_US_NOT_DEFINED 1
 #endif /* !defined(OSL_CPU_COUNTS_PER_US) */
 
+#if !defined(OSL_GET_PMU_ACCU_TICK_US)
+#define OSL_GET_PMU_ACCU_TICK_US(val) (0)
+#endif /* !OSL_GET_PMU_ACCU_TICK_US */
+
+#if !defined(OSL_GET_PMU_ACCU_TICK64_US)
+#define OSL_GET_PMU_ACCU_TICK64_US(val) (0)
+#endif /* !OSL_GET_PMU_ACCU_TICK64_US */
+
 #ifndef OSL_SYS_HALT
 #ifdef __COVERITY__
 /*
@@ -151,28 +178,8 @@ typedef void  (*osl_wreg_fn_t)(void *ctx, volatile void *reg, unsigned int val, 
 #endif
 
 #ifndef OSL_OBFUSCATE_BUF
-#if defined (_RTE_)
-#define OSL_OBFUSCATE_BUF(x) osl_obfuscate_ptr(x)
-#else
 #define OSL_OBFUSCATE_BUF(x) (x)
-#endif	/* _RTE_ */
 #endif	/* OSL_OBFUSCATE_BUF */
-
-#ifndef OSL_GET_HCAPISTIMESYNC
-#if defined (_RTE_)
-#define OSL_GET_HCAPISTIMESYNC() osl_get_hcapistimesync()
-#else
-#define OSL_GET_HCAPISTIMESYNC()
-#endif	/* _RTE_ */
-#endif	/*  OSL_GET_HCAPISTIMESYNC */
-
-#ifndef OSL_GET_HCAPISPKTTXS
-#if defined (_RTE_)
-#define OSL_GET_HCAPISPKTTXS() osl_get_hcapispkttxs()
-#else
-#define OSL_GET_HCAPISPKTTXS()
-#endif	/* _RTE_ */
-#endif	/*  OSL_GET_HCAPISPKTTXS */
 
 #if !defined(PKTC_DONGLE)
 #define	PKTCGETATTR(skb)	(0)
@@ -226,7 +233,6 @@ do { \
 #define PKTSETPROFILEIDX(p, idx)	BCM_REFERENCE(idx)
 #endif
 
-#ifndef _RTE_
 /* Lbuf with fraglist */
 #ifndef PKTFRAGPKTID
 #define PKTFRAGPKTID(osh, lb)		(0)
@@ -401,9 +407,8 @@ do { \
 #ifndef PKTSETUDR
 #define PKTRESETUDR(osh, lb)			BCM_REFERENCE(osh)
 #endif
-#endif	/* _RTE_ */
 
-#if !(defined(__linux__))
+#if !defined(__linux__)
 #define PKTLIST_INIT(x)			BCM_REFERENCE(x)
 #define PKTLIST_ENQ(x, y)		BCM_REFERENCE(x)
 #define PKTLIST_DEQ(x)			BCM_REFERENCE(x)
@@ -426,14 +431,6 @@ do { \
 #ifndef MALLOC_RA
 	#define MALLOC_RA(osh, size, callsite) MALLOCZ(osh, size)
 #endif /* !MALLOC_RA */
-
-#ifndef MALLOC_PERSIST_ATTACH
-	#define MALLOC_PERSIST_ATTACH MALLOC
-#endif /* !MALLOC_PERSIST_ATTACH */
-
-#ifndef MALLOCZ_PERSIST_ATTACH
-	#define MALLOCZ_PERSIST_ATTACH MALLOCZ
-#endif /* !MALLOCZ_PERSIST_ATTACH */
 
 #ifndef MALLOCZ_NOPERSIST
 	#define MALLOCZ_NOPERSIST MALLOCZ
@@ -478,5 +475,56 @@ do { \
 #if !defined(OSL_PHYS_TO_VIRT_ADDR)
 	#define OSL_PHYS_TO_VIRT_ADDR(pa)	((void*)(uintptr)(pa))
 #endif
+
+#ifndef DBG_PKTLEAK
+#define PKTSETQCALLER(lb, queue, caller_addr)
+#define PKTSETQCALLER_LIST(head, npkts, queue, caller_addr)
+#endif /* DBG_PKTLEAK */
+
+/* Memory breakup capturing macros */
+#ifdef BCMDBG_MEM_BREAKUP
+#define MB_START(var) \
+		uint mb_memuse_before_##var = MALLOCED(NULL)
+
+#define MB_END(var, fmt, ...) \
+		do { \
+			uint mb_memuse_##var = MALLOCED(NULL) - mb_memuse_before_##var; \
+			if (mb_memuse_##var) { \
+				printf("[MB] " fmt, ##__VA_ARGS__); \
+				printf(" %d\n", mb_memuse_##var); \
+			} \
+		} while (0)
+#else
+#define MB_START(var)
+#define MB_END(var, fmt, ...)
+#endif /* BCMDBG_MEM_BREAKUP */
+
+/* ASSERT NULL check should not be enabled for ROM build */
+#if defined(BCMROMBUILD) && defined(ENABLE_ASSERT_NULL)
+#error "Do not enable ENABLE_ASSERT_NULL for ROM builds..."
+#endif
+
+#ifdef ENABLE_ASSERT_NULL
+#define ASSERT_NULL(expr) ASSERT(expr)
+#else
+#define ASSERT_NULL(expr) // do nothing
+#endif /* ENABLE_ASSERT_NULL */
+
+#if defined(DONGLEBUILD) && !defined(BCM_MEM_PERSIST_ENABLE)
+#ifdef MALLOC_PERSIST
+#undef MALLOC_PERSIST
+#endif /* MALLOC_PERSIST */
+#define MALLOC_PERSIST MALLOC
+
+#ifdef MALLOCZ_PERSIST
+#undef MALLOCZ_PERSIST
+#endif /* MALLOCZ_PERSIST */
+#define MALLOCZ_PERSIST MALLOCZ
+
+#ifdef MFREE_PERSIST
+#undef MFREE_PERSIST
+#endif /* MFREE_PERSIST */
+#define MFREE_PERSIST MFREE
+#endif /* DONGLEBUILD && !BCM_MEM_PERSIST_ENABLE */
 
 #endif	/* _osl_h_ */

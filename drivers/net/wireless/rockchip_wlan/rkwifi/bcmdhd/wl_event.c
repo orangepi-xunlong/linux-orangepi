@@ -2,6 +2,7 @@
 #include <wl_android.h>
 #ifdef WL_EVENT
 #include <bcmendian.h>
+#include <dhd_config.h>
 
 #define EVENT_ERROR(name, arg1, args...) \
 	do { \
@@ -311,7 +312,8 @@ wl_ext_event_create_handler(struct wl_event_params *event_params)
 #else
 	/* Allocate workqueue for event */
 	if (!event_params->event_workq) {
-		event_params->event_workq = alloc_workqueue("ext_eventd", WQ_MEM_RECLAIM | WQ_HIGHPRI, 0);
+		event_params->event_workq = alloc_workqueue("ext_eventd",
+			WQ_MEM_RECLAIM | WQ_HIGHPRI | WQ_UNBOUND, 0);
 	}
 
 	if (!event_params->event_workq) {
@@ -385,6 +387,7 @@ wl_ext_event_register(struct net_device *dev, dhd_pub_t *dhd, uint32 event,
 			mutex_unlock(&event_params->event_sync);
 			return -ENOMEM;
 		}
+		memset(leaf, 0, sizeof(event_handler_list_t));
 		leaf->next = NULL;
 		leaf->dev = dev;
 		leaf->etype = event;

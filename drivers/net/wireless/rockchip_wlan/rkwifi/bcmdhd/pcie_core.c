@@ -3,7 +3,7 @@
  * Contains PCIe related functions that are shared between different driver models (e.g. firmware
  * builds, DHD builds, BMAC builds), in order to avoid code duplication.
  *
- * Copyright (C) 2020, Broadcom.
+ * Copyright (C) 2022, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -44,7 +44,8 @@
 
 /* function definitions */
 
-#ifdef BCMDRIVER /* this workaround can only be run on the host side since it resets the chip */
+#ifdef BCMDRIVER /* this workaround can only be run on the host side since it resets \
+	the chip */
 #if !defined(DONGLEBUILD) || defined(BCMSTANDALONE_TEST)
 
 /* To avoid build error for dongle standalone test, define CAN_SLEEP if not defined */

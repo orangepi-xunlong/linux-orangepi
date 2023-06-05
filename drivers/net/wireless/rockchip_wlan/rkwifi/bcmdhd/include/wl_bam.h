@@ -1,7 +1,7 @@
 /*
  * Bad AP Manager for ADPS
  *
- * Copyright (C) 2020, Broadcom.
+ * Copyright (C) 2022, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -37,20 +37,11 @@ typedef struct wl_bad_ap_mngr {
 
 	uint32 num;
 	spinlock_t lock;
-#if !defined(DHD_ADPS_BAM_EXPORT)
-	struct mutex fs_lock;		/* lock for bad ap file list */
-#endif  /* !DHD_ADPS_BAM_EXPORT */
 	struct list_head list;
 } wl_bad_ap_mngr_t;
 
 typedef struct wl_bad_ap_info {
 	struct	ether_addr bssid;
-#if !defined(DHD_ADPS_BAM_EXPORT)
-	struct	tm tm;
-	uint32	status;
-	uint32	reason;
-	uint32	connect_count;
-#endif	/* !DHD_ADPS_BAM_EXPORT */
 } wl_bad_ap_info_t;
 
 typedef struct wl_bad_ap_info_entry {

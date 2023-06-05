@@ -1,7 +1,7 @@
 /*
  * SDIO access interface for drivers - linux specific (pci only)
  *
- * Copyright (C) 2020, Broadcom.
+ * Copyright (C) 2022, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -95,23 +95,6 @@ bool
 bcmsdh_chipmatch(uint16 vendor, uint16 device)
 {
 	/* Add other vendors and devices as required */
-#ifdef BCMINTERNAL
-#ifdef BCMSDIOH_BCM
-	if (device == SDIOH_FPGA_ID && vendor == VENDOR_BROADCOM) {
-		return (TRUE);
-	}
-	if (device == BCM_SDIOH_ID && vendor == VENDOR_BROADCOM) {
-		return (TRUE);
-	}
-	if (device == BCM4710_DEVICE_ID && vendor == VENDOR_BROADCOM) {
-		return (TRUE);
-	}
-	/* For now still accept the old devid */
-	if (device == 0x4380 && vendor == VENDOR_BROADCOM) {
-		return (TRUE);
-	}
-#endif /* BCMSDIOH_BCM */
-#endif /* BCMINTERNAL */
 
 #ifdef BCMSDIOH_STD
 	/* Check for Arasan host controller */
@@ -142,12 +125,6 @@ bcmsdh_chipmatch(uint16 vendor, uint16 device)
 		return (TRUE);
 	}
 
-#ifdef BCMINTERNAL
-	/* Check for Jinvani (C-Guys) host controller */
-	if (device == JINVANI_SDIOH_ID && vendor == VENDOR_JINVANI) {
-		return (TRUE);
-	}
-#endif /* BCMINTERNAL */
 #endif /* BCMSDIOH_STD */
 #ifdef BCMSDIOH_SPI
 	/* This is the PciSpiHost. */
@@ -156,28 +133,8 @@ bcmsdh_chipmatch(uint16 vendor, uint16 device)
 		return (TRUE);
 	}
 
-#ifdef BCMINTERNAL
-	/* This is the SPI Host for QT. */
-	if (device == BCM_SPIH_ID && vendor == VENDOR_BROADCOM) {
-		printf("Found SPI Host Controller\n");
-		return (TRUE);
-	}
-#endif /* BCMINTERNAL */
 #endif /* BCMSDIOH_SPI */
 
-#ifdef BCMINTERNAL
-	/*
-	 * XXX - This is a hack to get the GPL SdioLinux driver to load on Arasan/x86
-	 * This is accomplished by installing a PciSpiHost into the system alongside the
-	 * Arasan controller.  The PciSpiHost is just used to get BCMSDH loaded.
-	 */
-#ifdef BCMSDH_FD
-	if (device == SPIH_FPGA_ID && vendor == VENDOR_BROADCOM) {
-		printf("Found SdioLinux Host Controller\n");
-		return (TRUE);
-	}
-#endif /* BCMSDH_FD */
-#endif /* BCMINTERNAL */
 	return (FALSE);
 }
 
@@ -271,15 +228,37 @@ int bcmsdh_set_get_wake(bcmsdh_info_t *bcmsdh, int flag)
 	bcmsdh_os_info_t *bcmsdh_osinfo = bcmsdh->os_cxt;
 	unsigned long flags;
 #endif
-	int ret = 0;
+	int ret;
 
 #if defined(OOB_INTR_ONLY)
 	spin_lock_irqsave(&bcmsdh_osinfo->oob_irq_spinlock, flags);
+#endif
 
 	ret = bcmsdh->pkt_wake;
 	bcmsdh->total_wake_count += flag;
 	bcmsdh->pkt_wake = flag;
 
+#if defined(OOB_INTR_ONLY)
+	spin_unlock_irqrestore(&bcmsdh_osinfo->oob_irq_spinlock, flags);
+#endif
+	return ret;
+}
+
+int bcmsdh_get_wake(bcmsdh_info_t *bcmsdh)
+{
+#if defined(OOB_INTR_ONLY)
+	bcmsdh_os_info_t *bcmsdh_osinfo = bcmsdh->os_cxt;
+	unsigned long flags;
+#endif
+	int ret;
+
+#if defined(OOB_INTR_ONLY)
+	spin_lock_irqsave(&bcmsdh_osinfo->oob_irq_spinlock, flags);
+#endif
+
+	ret = bcmsdh->pkt_wake;
+
+#if defined(OOB_INTR_ONLY)
 	spin_unlock_irqrestore(&bcmsdh_osinfo->oob_irq_spinlock, flags);
 #endif
 	return ret;
@@ -566,7 +545,7 @@ EXPORT_SYMBOL(bcmsdh_intr_dereg);
 EXPORT_SYMBOL(bcmsdh_intr_pending);
 #endif
 
-#if defined (BT_OVER_SDIO)
+#if defined(BT_OVER_SDIO)
 EXPORT_SYMBOL(bcmsdh_btsdio_interface_init);
 #endif /* defined (BT_OVER_SDIO) */
 

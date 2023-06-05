@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020, Broadcom.
+ * Copyright (C) 2022, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -23,7 +23,7 @@
 #define _TYPEDEFS_H_
 
 #if (!defined(EDK_RELEASE_VERSION) || (EDK_RELEASE_VERSION < 0x00020000)) || \
-		!defined(BWL_NO_INTERNAL_STDLIB_SUPPORT)
+	!defined(BWL_NO_INTERNAL_STDLIB_SUPPORT)
 
 #ifdef SITE_TYPEDEFS
 
@@ -88,7 +88,7 @@ typedef unsigned long long int uintptr;
 #endif
 #endif /* TYPEDEF_UINTPTR */
 
-#if defined(_RTE_)
+#if defined(_RTE_) || defined(COEX_CPU_BUILD)
 #define _NEED_SIZE_T_
 #endif
 
@@ -96,9 +96,9 @@ typedef unsigned long long int uintptr;
 ** math.h header file. Don't re-typedef them here.
 */
 
-#if defined(MACOSX)
+#if defined(MACOSX) || defined(__linux__)
 #define TYPEDEF_FLOAT_T
-#endif /* MACOSX */
+#endif /* MACOSX || Linux */
 
 #if defined(_NEED_SIZE_T_)
 typedef long unsigned int size_t;
@@ -143,15 +143,14 @@ typedef unsigned __int64 uint64;
 #endif	/* __KERNEL__ */
 #endif	/* linux && !EFI */
 
-#if !defined(__linux__) && !defined(_WIN32) && \
-	!defined(_RTE_) && !defined(__DJGPP__) && \
-	!defined(__BOB__) && !defined(EFI)
+#if !defined(__linux__) && !defined(_WIN32) && !defined(_RTE_) && !defined(__DJGPP__) \
+	&& !defined(__BOB__) && !defined(EFI) && !defined(COEX_CPU_BUILD)
 #define TYPEDEF_UINT
 #define TYPEDEF_USHORT
 #endif
 
 /* Do not support the (u)int64 types with strict ansi for GNU C */
-#if defined(__GNUC__) && defined(__STRICT_ANSI__)
+#if defined(__GNUC__) && defined(__STRICT_ANSI__) && (__STDC_VERSION__ < 199901L)
 #define TYPEDEF_INT64
 #define TYPEDEF_UINT64
 #endif /* defined(__GNUC__) && defined(__STRICT_ANSI__) */
@@ -163,13 +162,13 @@ typedef unsigned __int64 uint64;
 
 #define TYPEDEF_INT64
 
-#if defined(__STDC__)
+#if defined(__STDC__) && (__STDC_VERSION__ < 199901L)
 #define TYPEDEF_UINT64
 #endif
 
 #endif /* __ICL */
 
-#if !defined(_WIN32) && !defined(_RTE_) && \
+#if !defined(_WIN32) && !defined(_RTE_) && !defined(COEX_CPU_BUILD) && \
 	!defined(__DJGPP__) && !defined(__BOB__) && !defined(EFI)
 
 /* pick up ushort & uint from standard types.h */
@@ -202,9 +201,12 @@ typedef unsigned __int64 uint64;
 #ifdef USE_TYPEDEF_DEFAULTS
 #undef USE_TYPEDEF_DEFAULTS
 
+#ifndef BCMWIFI_DISSECTOR_BUILD
+/* BWD build throws errors for two or more data types in declaration */
 #ifndef TYPEDEF_BOOL
 typedef	/* @abstract@ */ unsigned char	bool;
 #endif /* endif TYPEDEF_BOOL */
+#endif /* !BCMWIFI_DISSECTOR_BUILD */
 
 /* define uchar, ushort, uint, ulong */
 
@@ -341,6 +343,13 @@ typedef float64 float_t;
 #endif /* _MSC_VER */
 #endif /* INLINE */
 
+/* Force inlining. */
+#if defined(BWL_COMPILER_GNU)
+#define INLINE_ALWAYS	inline  __attribute__ ((always_inline))
+#else
+#define INLINE_ALWAYS	INLINE
+#endif
+
 #undef TYPEDEF_BOOL
 #undef TYPEDEF_UCHAR
 #undef TYPEDEF_USHORT
@@ -394,11 +403,18 @@ typedef UINTN         uintptr;
 #define UNUSED_PARAMETER(x) (void)(x)
 #define DISCARD_QUAL(ptr, type) ((type *)(uintptr)(ptr))
 #define INLINE
+#define INLINE_ALWAYS	INLINE
 #define	AUTO	(-1) /* Auto = -1 */
 #define	ON	1  /* ON = 1 */
 #define	OFF	0
 
 #endif /* !EDK_RELEASE_VERSION || (EDK_RELEASE_VERSION < 0x00020000) */
+
+#ifndef SIZE_CONST_STRING
+/* use two level Macro mapping to make some CONSTANT value into number string */
+#define _SIZE_CONST_STRING(x)	#x
+#define SIZE_CONST_STRING(x)	_SIZE_CONST_STRING(x)
+#endif /* SIZE_CONST_STRING */
 
 /*
  * Including the bcmdefs.h here, to make sure everyone including typedefs.h

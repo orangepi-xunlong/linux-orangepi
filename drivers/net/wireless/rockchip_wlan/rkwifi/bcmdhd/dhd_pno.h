@@ -2,7 +2,7 @@
  * Header file of Broadcom Dongle Host Driver (DHD)
  * Prefered Network Offload code and Wi-Fi Location Service(WLS) code.
  *
- * Copyright (C) 2020, Broadcom.
+ * Copyright (C) 2022, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -25,7 +25,7 @@
 #ifndef __DHD_PNO_H__
 #define __DHD_PNO_H__
 
-#if defined(OEM_ANDROID) && defined(PNO_SUPPORT)
+#if defined(PNO_SUPPORT)
 #define PNO_TLV_PREFIX			'S'
 #define PNO_TLV_VERSION			'1'
 #define PNO_TLV_SUBTYPE_LEGACY_PNO '2'
@@ -458,12 +458,7 @@ typedef struct dhd_pno_status_info {
 #ifdef GSCAN_SUPPORT
 	wait_queue_head_t batch_get_wait;
 #endif /* GSCAN_SUPPORT */
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 7, 0))
-	wait_queue_head_t get_batch_done;
-	bool batch_recvd;
-#else
 	struct completion get_batch_done;
-#endif
 	bool wls_supported; /* wifi location service supported or not */
 	enum dhd_pno_status pno_status;
 	enum dhd_pno_mode pno_mode;
@@ -496,7 +491,7 @@ extern int
 dhd_dev_pno_set_for_hotlist(struct net_device *dev, wl_pfn_bssid_t *p_pfn_bssid,
 	struct dhd_pno_hotlist_params *hotlist_params);
 extern bool dhd_dev_is_legacy_pno_enabled(struct net_device *dev);
-#if defined (GSCAN_SUPPORT) || defined(DHD_GET_VALID_CHANNELS)
+#if defined(GSCAN_SUPPORT) || defined(DHD_GET_VALID_CHANNELS)
 extern void *
 dhd_dev_pno_get_gscan(struct net_device *dev, dhd_pno_gscan_cmd_cfg_t type, void *info,
         uint32 *len);
@@ -544,7 +539,7 @@ extern int dhd_pno_init(dhd_pub_t *dhd);
 extern int dhd_pno_deinit(dhd_pub_t *dhd);
 extern bool dhd_is_pno_supported(dhd_pub_t *dhd);
 extern bool dhd_is_legacy_pno_enabled(dhd_pub_t *dhd);
-#if defined (GSCAN_SUPPORT) || defined(DHD_GET_VALID_CHANNELS)
+#if defined(GSCAN_SUPPORT) || defined(DHD_GET_VALID_CHANNELS)
 extern void * dhd_pno_get_gscan(dhd_pub_t *dhd, dhd_pno_gscan_cmd_cfg_t type, void *info,
                        uint32 *len);
 #endif /* GSCAN_SUPPORT || DHD_GET_VALID_CHANNELS */
@@ -571,7 +566,7 @@ extern int dhd_pno_set_epno(dhd_pub_t *dhd);
 extern int dhd_pno_flush_fw_epno(dhd_pub_t *dhd);
 extern void dhd_pno_set_epno_auth_flag(uint32 *wpa_auth);
 #endif /* GSCAN_SUPPORT */
-#endif /* #if defined(OEM_ANDROID) && defined(PNO_SUPPORT) */
+#endif /* #if defined(PNO_SUPPORT) */
 
 #if defined(NDIS)
 #if defined(PNO_SUPPORT)

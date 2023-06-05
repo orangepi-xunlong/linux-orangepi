@@ -24,6 +24,7 @@ rk_dhd_bus_l1ss_enable_rc_ep(dhd_bus_t *bus, bool enable)
 	}
 
 	/* Disable ASPM of RC and EP */
+	printf("%s: %s L1ss\n", __FUNCTION__, enable?"enable":"disable");
 	pcie_aspm_ext_l1ss_enable(bus->dev, bus->rc_dev, enable);
 }
 

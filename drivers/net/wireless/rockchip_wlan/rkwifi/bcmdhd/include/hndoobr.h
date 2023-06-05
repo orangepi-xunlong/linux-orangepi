@@ -1,7 +1,7 @@
 /*
  * HND OOBR interface header
  *
- * Copyright (C) 2020, Broadcom.
+ * Copyright (C) 2022, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -86,7 +86,10 @@ typedef volatile struct hndoobr_reg {
 	uint32 capability;                      /* 0x00 */
 	uint32 reserved[3];
 	uint32 intstatus[4];                    /* 0x10 - 0x1c */
-	uint32 reserved1[56];                   /* 0x20 - 0xfc */
+	uint32 reserved1[4];                    /* 0x20 - 0x2c */
+	uint32 topintdestsel[4];                /* 0x30 - 0x3c */
+	uint32 topextrsrcmap[4];                /* 0x40 - 0x4c */
+	uint32 reserved2[44];                   /* 0x50 - 0xfc */
 	hndoobr_percore_reg_t percore_reg[1];   /* 0x100 */
 } hndoobr_reg_t;
 

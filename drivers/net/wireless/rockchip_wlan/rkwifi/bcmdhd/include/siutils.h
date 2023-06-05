@@ -2,7 +2,7 @@
  * Misc utility routines for accessing the SOC Interconnects
  * of Broadcom HNBU chips.
  *
- * Copyright (C) 2020, Broadcom.
+ * Copyright (C) 2022, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -349,14 +349,6 @@ extern void *si_osh(si_t *sih);
 extern void si_setosh(si_t *sih, osl_t *osh);
 extern int si_backplane_access(si_t *sih, uint addr, uint size, uint *val, bool read);
 
-/* precommit failed when this is removed */
-/* BLAZAR_BRANCH_101_10_DHD_002/build/dhd/linux-fc30/brix-brcm */
-/* TBD: Revisit later */
-#ifdef BCMINTERNAL
-extern int si_backplane_access_64(si_t *sih, uint addr, uint size,
-    uint64 *val, bool read);
-#endif /* BCMINTERNAL */
-
 extern uint si_corereg(si_t *sih, uint coreidx, uint regoff, uint mask, uint val);
 extern uint si_corereg_writeonly(si_t *sih, uint coreidx, uint regoff, uint mask, uint val);
 extern uint si_pmu_corereg(si_t *sih, uint32 idx, uint regoff, uint mask, uint val);
@@ -546,8 +538,8 @@ extern int si_cis_source(const si_t *sih);
 /* bp_ind_access default timeout */
 #define BP_ACCESS_TO (500u * 1000u)
 
-extern uint16 BCMATTACHFN(si_fabid)(si_t *sih);
-extern uint16 BCMINITFN(si_chipid)(const si_t *sih);
+extern uint16 si_fabid(si_t *sih);
+extern uint16 si_chipid(const si_t *sih);
 
 /*
  * Build device path. Path size must be >= SI_DEVPATH_BUFSZ.
@@ -697,6 +689,7 @@ extern uint32 si_gci_get_functionsel(si_t *sih, uint32 pin);
 extern void si_gci_clear_functionsel(si_t *sih, uint8 fnsel);
 extern uint8 si_gci_get_chipctrlreg_idx(uint32 pin, uint32 *regidx, uint32 *pos);
 extern uint32 si_gci_chipcontrol(si_t *sih, uint reg, uint32 mask, uint32 val);
+extern void sflash_gpio_config(si_t *sih);
 extern uint32 si_gci_chipstatus(si_t *sih, uint reg);
 extern uint8 si_enable_device_wake(si_t *sih, uint8 *wake_status, uint8 *cur_status);
 extern uint8 si_get_device_wake_opt(si_t *sih);
@@ -967,7 +960,9 @@ bool si_srpwr_cap(si_t *sih);
  *      ARM, TCM, Main, Aux
  *      Host needs to power up
  */
-#define MULTIBP_CAP(sih)	(BCM4378_CHIP(sih->chip) || \
+#define MULTIBP_CAP(sih)	(BCM4378_CHIP(sih->chip) || BCM4381_CHIP(sih->chip) || \
+				BCM4383_CHIP(sih->chip) || \
+				BCM43852_CHIP(sih->chip) || BCM4382_CHIP(sih->chip) || \
 				BCM4387_CHIP(sih->chip) || BCM4388_CHIP(sih->chip) || \
 				BCM4389_CHIP(sih->chip) || BCM4385_CHIP(sih->chip) || \
 				BCM4376_CHIP(sih->chip) || BCM4397_CHIP(sih->chip))

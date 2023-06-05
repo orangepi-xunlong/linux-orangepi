@@ -4,7 +4,7 @@
  * To be used in firmware and host apps or dhd - reducing code size,
  * duplication, and maintenance overhead.
  *
- * Copyright (C) 2020, Broadcom.
+ * Copyright (C) 2022, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -97,7 +97,7 @@ typedef int (*bcm_iov_cmd_set_t)(const bcm_iov_cmd_digest_t *dig,
 #define BCM_IOV_STATUS_LEN sizeof(uint32)
 
 /* batch version is indicated by setting high bit. */
-#define BCM_IOV_BATCH_MASK	0x8000
+#define BCM_IOV_BATCH_MASK	0x8000u
 
 /*
  * Batched commands will have the following memory layout
@@ -106,41 +106,113 @@ typedef int (*bcm_iov_cmd_set_t)(const bcm_iov_cmd_digest_t *dig,
  * +--------+---------+--------+-------+
  * version >= 0x8000
  * count = number of sub-commands encoded in the iov buf
+ * is_set = not used. All batch sub-commands are of the same type, get or set,
+ * as determined by the action id passed in to the IOVAR handler bcm_iov_doiovar().
  * sub-cmd one or more sub-commands for processing
  * Where sub-cmd is padded byte buffer with memory layout as follows
  * +--------+---------+-----------------------+-------------+------
  * |cmd-id  |length   |IN(options) OUT(status)|command data |......
  * +--------+---------+-----------------------+-------------+------
  * cmd-id =sub-command ID
- * length = length of this sub-command
+ * length = length of this sub-command, starting with options/status
  * IN(options) = On input processing options/flags for this command
  * OUT(status) on output processing status for this command
  * command data = encapsulated IOVAR data as a single structure or packed TLVs for each
  * individual sub-command.
+ *
+ * Note that if there is no data in the IN direction, the data field
+ * is empty, even if there is return data in the OUT direction. That is, the buffer does
+ * not need to include 'space' for the return parameter.
+ *
+ * For example, a batch command with one sub-command for a GET of a uint32 might look
+ * like this when sent to the device (IN direction).
+ * Note that the multi-byte values below are in litte-endian order in the IO buffers, so
+ * for example, the version '0x8000' is in the IO buffer as the byte sequence '0x00', '0x80'.
+ * +--------+------+--------+
+ * |version |count | is_set |
+ * +--------+------+--------+
+ * | 0x8000 | 0x01 |  0x00  |
+ * +--------+------+--------+
+ * +--------+--------+-------------+----------------+
+ * | cmd-id | length | IN(options) | (command data) |
+ * +--------+--------+------------------------------+
+ * | 0x0111 | 0x0004 | 0x00000000  | (not present)
+ * +--------+--------+--------------
+ *
+ * The 'length' field = 4 bytes to cover the options field.
+ *
+ * The reply might look like this (OUT direction):
+ * +--------+------+--------+
+ * |version |count | is_set |
+ * +--------+------+--------+
+ * | 0x8000 | 0x01 |  0x00  |
+ * +--------+------+--------+
+ * +--------+--------+-------------+--------------+
+ * | cmd-id | length | OUT(status) | command data |
+ * +--------+--------+-------------+--------------+
+ * | 0x0111 | 0x0008 | 0x00000000  |  0x1234abcd  |
+ * +--------+--------+-------------+--------------+
+ *
+ * The 'length' field = 8 bytes to cover the status and data fields.
+ *
  */
 struct bcm_iov_batch_subcmd {
 	uint16 id;
-	uint16 len;
+	uint16 len;     /* length of subcmd, including options */
 	union {
 		uint32 options;
 		uint32 status;
 	} u;
-	uint8 data[1];
+	uint8 data[BCM_FLEX_ARRAY];
 };
 
 struct bcm_iov_batch_buf {
 	uint16 version;
 	uint8 count;
-	uint8 is_set; /* to differentiate set or get */
+	uint8 is_set;   /* obsolete */
 	struct bcm_iov_batch_subcmd cmds[0];
 };
 
-/* non-batched command version = major|minor w/ major <= 127 */
+/* Non-Batched commands will have the following memory layout
+ * +---------+--------+--------+-------------+
+ * | version | length | cmd-id |command data |
+ * +---------+--------+--------+-------------+
+ * version = major|minor w/ major <= 127
+ * length = length of this command, not including version, length, and cmd-id
+ * cmd-id = command ID
+ * command data = encapsulated IOVAR data as a single structure or packed TLVs
+ *
+ * Note that if there is no data in the IN direction, the data field
+ * is empty, even if there is return data in the OUT direction. That is, the buffer does
+ * not need to include 'space' for the return parameter.
+ *
+ * For example, a command for a GET of a uint32 might look
+ * like this when sent to the device (IN direction).
+ * Note that the multi-byte values below are in litte-endian order in the IO buffers, so
+ * for example, the version '0x0001' is in the IO buffer as the byte sequence '0x01', '0x00'.
+ * +---------+--------+--------+----------------+
+ * | version | length | cmd-id | (command data) |
+ * +---------+--------+--------+----------------+
+ * | 0x0001  | 0x0000 | 0x0111 | (not present)
+ * +---------+--------+--------+
+ *
+ * The 'length' field = 0 bytes since there is no data field.
+ *
+ * The reply might look like this (OUT direction):
+ * +---------+--------+--------+--------------+
+ * | version | length | cmd-id | command data |
+ * +---------+--------+--------+--------------+
+ * | 0x0001  | 0x0004 | 0x0111 |  0x1234abcd  |
+ * +---------+--------+--------+--------------+
+ *
+ * The 'length' field = 4 bytes to cover the 4 byte data field.
+ *
+ */
 struct bcm_iov_buf {
 	uint16 version;
-	uint16 len;
+	uint16 len;                  /* length of data, after id */
 	bcm_iov_cmd_id_t id;
-	uint16 data[1]; /* 32 bit alignment may be repurposed by the command */
+	uint16 data[BCM_FLEX_ARRAY]; /* 32 bit alignment may be repurposed by the command */
 	/* command specific data follows */
 };
 
@@ -253,8 +325,20 @@ struct bcm_iov_cmd_tlv_info {
 
 /* Command parsing options with respect to validation */
 /* Possible values for parse context options */
-/* Bit 0 - Validate only */
-#define BCM_IOV_PARSE_OPT_BATCH_VALIDATE 0x00000001
+
+/* Validate all the commands in batch first */
+#define BCM_IOV_PARSE_OPT_BATCH_VALIDATE	0x00000001u
+
+/* implement version command within bcmiov. ver_cmd and api_ver in
+ * parse config (see below) need to specified along with this option.
+ */
+#define BCM_IOV_PARSE_OPT_AUTO_VER	0x00000002u
+
+/* option for non-batched commands to not copy when input and outputs
+ * overlap. this means that the api user/iov handers are able to handle
+ * overlapping input/output, copying as necessary.
+ */
+#define BCM_IOV_PARSE_OPT_NBOVLPOK	0x00000004u
 
 typedef uint32 bcm_iov_parse_opts_t;
 
@@ -266,8 +350,10 @@ typedef struct bcm_iov_parse_config {
 	bcm_iov_malloc_t alloc_fn;
 	bcm_iov_free_t free_fn;
 	bcm_iov_get_digest_t dig_fn;
-	int max_regs;
+	uint max_regs;
 	void *alloc_ctx;
+	uint16 ver_cmd;	/* version command */
+	uint16 api_ver; /* version of the API/iovar */
 } bcm_iov_parse_config_t;
 
 /* API */

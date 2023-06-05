@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+
 #ifndef _wl_escan_
 #define _wl_escan_
 #include <linuxver.h>
@@ -35,7 +35,7 @@ typedef struct wl_escan_info {
 	int escan_state;
 	int ioctl_ver;
 	u8 escan_buf[ESCAN_BUF_SIZE];
-	wl_scan_results_t *bss_list;
+	wl_scan_results_v109_t *bss_list;
 	u8 *escan_ioctl_buf;
 	struct mutex usr_sync; /* maily for up/down synchronization */
 	int autochannel;

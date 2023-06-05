@@ -2,7 +2,7 @@
  * Misc utility routines for accessing chip-specific features
  * of the SiliconBackplane-based Broadcom chips.
  *
- * Copyright (C) 2020, Broadcom.
+ * Copyright (C) 2022, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -52,7 +52,7 @@ static bool ai_get_apb_bridge(const si_t *sih, uint32 coreidx, uint32 *apb_id,
 	uint32 *apb_coreunit);
 #endif /* AXI_TIMEOUTS_NIC */
 
-#if defined (AXI_TIMEOUTS) || defined (AXI_TIMEOUTS_NIC)
+#if defined(AXI_TIMEOUTS) || defined(AXI_TIMEOUTS_NIC)
 static void ai_reset_axi_to(const si_info_t *sii, aidmp_t *ai);
 #endif	/* defined (AXI_TIMEOUTS) || defined (AXI_TIMEOUTS_NIC) */
 
@@ -169,7 +169,7 @@ get_asd(const si_t *sih, uint32 **eromptr, uint sp, uint ad, uint st, uint32 *ad
 
 /* Parse the enumeration rom to identify all cores */
 void
-BCMATTACHFN(ai_scan)(si_t *sih, void *regs, uint devid)
+ai_scan(si_t *sih, void *regs, uint devid)
 {
 	si_info_t *sii = SI_INFO(sih);
 	si_cores_info_t *cores_info = (si_cores_info_t *)sii->cores_info;
@@ -177,6 +177,7 @@ BCMATTACHFN(ai_scan)(si_t *sih, void *regs, uint devid)
 	uint32 erombase, *eromptr, *eromlim;
 	axi_wrapper_t * axi_wrapper = sii->axi_wrapper;
 
+	SI_MSG_DBG_REG(("%s: Enter\n", __FUNCTION__));
 	BCM_REFERENCE(devid);
 
 	erombase = R_REG(sii->osh, &cc->eromptr);
@@ -225,6 +226,7 @@ BCMATTACHFN(ai_scan)(si_t *sih, void *regs, uint devid)
 		cia = get_erom_ent(sih, &eromptr, ER_TAG, ER_CI);
 		if (cia == (ER_END | ER_VALID)) {
 			SI_VMSG(("Found END of erom after %d cores\n", sii->numcores));
+			SI_MSG_DBG_REG(("%s: Exit\n", __FUNCTION__));
 			return;
 		}
 
@@ -423,6 +425,11 @@ BCMATTACHFN(ai_scan)(si_t *sih, void *regs, uint devid)
 			/* cache APB bridge wrapper address for set/clear timeout */
 			if ((mfg == MFGID_ARM) && (cid == APB_BRIDGE_ID)) {
 				ASSERT(sii->num_br < SI_MAXBR);
+				if (sii->num_br >= SI_MAXBR) {
+					SI_ERROR(("bridge number %d is overflowed\n", sii->num_br));
+					goto error;
+				}
+
 				sii->br_wrapba[sii->num_br++] = addrl;
 			}
 
@@ -474,6 +481,7 @@ BCMATTACHFN(ai_scan)(si_t *sih, void *regs, uint devid)
 
 error:
 	sii->numcores = 0;
+	SI_MSG_DBG_REG(("%s: Exit\n", __FUNCTION__));
 	return;
 }
 
@@ -612,8 +620,10 @@ BCMPOSTTRAPFN(_ai_setcoreidx)(si_t *sih, uint coreidx, uint use_wrapn)
 			sii->curwrap = (void *)((uintptr)regs + SI_CORE_SIZE);
 
 			/* point bar0 window */
-			ai_corereg(sih, sih->buscoreidx, PCIE_TER_BAR0_WIN, ~0, addr);
-			ai_corereg(sih, sih->buscoreidx, PCIE_TER_BAR0_WRAPPER, ~0, wrap);
+			ai_corereg(sih, sih->buscoreidx,
+			            PCIE_TER_BAR0_WIN_REG(sih->buscorerev), ~0, addr);
+			ai_corereg(sih, sih->buscoreidx,
+			            PCIE_TER_BAR0_WRAPPER_REG(sih->buscorerev), ~0, wrap);
 			break;
 
 		default: /* other slices */
@@ -642,6 +652,10 @@ BCMPOSTTRAPFN(_ai_setcoreidx)(si_t *sih, uint coreidx, uint use_wrapn)
 	}
 
 	sii->curidx = coreidx;
+
+	if (regs) {
+		SI_MSG_DBG_REG(("%s: %d\n", __FUNCTION__, coreidx));
+	}
 
 	return regs;
 }
@@ -1755,7 +1769,7 @@ ai_update_backplane_timeouts(const si_t *sih, bool enable, uint32 timeout_exp, u
 #endif /* AXI_TIMEOUTS || AXI_TIMEOUTS_NIC */
 }
 
-#if defined (AXI_TIMEOUTS) || defined (AXI_TIMEOUTS_NIC)
+#if defined(AXI_TIMEOUTS) || defined(AXI_TIMEOUTS_NIC)
 
 /* slave error is ignored, so account for those cases */
 static uint32 si_ignore_errlog_cnt = 0;
@@ -1824,12 +1838,6 @@ BCMPOSTTRAPFN(ai_ignore_errlog)(const si_info_t *sii, const aidmp_t *ai,
 			extd_axi_id_mask = TRUE;
 			ignore_errsts_2 = AIELS_DECODE;
 			break;
-#ifdef USE_HOSTMEM
-		case BCM43602_CHIP_ID:
-			axi_id = BCM43602_BT_AXI_ID;
-			address_check = FALSE;
-			break;
-#endif /* USE_HOSTMEM */
 		default:
 			return FALSE;
 	}
@@ -1946,7 +1954,7 @@ ai_clear_backplane_to_fast(si_t *sih, void *addr)
 }
 #endif /* AXI_TIMEOUTS_NIC */
 
-#if defined (AXI_TIMEOUTS) || defined (AXI_TIMEOUTS_NIC)
+#if defined(AXI_TIMEOUTS) || defined(AXI_TIMEOUTS_NIC)
 static bool g_disable_backplane_logs = FALSE;
 
 static uint32 last_axi_error = AXI_WRAP_STS_NONE;
@@ -2086,11 +2094,6 @@ BCMPOSTTRAPFN(ai_clear_backplane_to_per_core)(si_t *sih, uint coreid, uint coreu
 
 			case AIELS_DECODE:
 				SI_PRINT(("AXI decode error\n"));
-#ifdef USE_HOSTMEM
-				/* Ignore known cases of CR4 prefetch abort bugs */
-				if ((errlog_id & (BCM_AXI_ID_MASK | BCM_AXI_ACCESS_TYPE_MASK)) !=
-					(BCM43xx_AXI_ACCESS_TYPE_PREFETCH | BCM43xx_CR4_AXI_ID))
-#endif
 				{
 					ret |= AXI_WRAP_STS_DECODE_ERR;
 				}
@@ -2236,7 +2239,7 @@ uint32
 BCMPOSTTRAPFN(ai_clear_backplane_to)(si_t *sih)
 {
 	uint32 ret = 0;
-#if defined (AXI_TIMEOUTS) || defined (AXI_TIMEOUTS_NIC)
+#if defined(AXI_TIMEOUTS) || defined(AXI_TIMEOUTS_NIC)
 	const si_info_t *sii = SI_INFO(sih);
 	aidmp_t *ai;
 	uint32 i;
@@ -2490,7 +2493,7 @@ BCMPOSTTRAPRAMFN(ai_get_wrapper_base_addr)(uint32 **offset)
 }
 
 uint32
-BCMATTACHFN(ai_wrapper_dump_buf_size)(const si_t *sih)
+ai_wrapper_dump_buf_size(const si_t *sih)
 {
 	uint32 buf_size = 0;
 	uint32 wrapper_count = 0;
@@ -2539,7 +2542,7 @@ uint32
 BCMPOSTTRAPFN(ai_wrapper_dump_last_timeout)(const si_t *sih, uint32 *error, uint32 *core,
 	uint32 *ba, uchar *p)
 {
-#if defined (AXI_TIMEOUTS) || defined (AXI_TIMEOUTS_NIC)
+#if defined(AXI_TIMEOUTS) || defined(AXI_TIMEOUTS_NIC)
 	uint32 *p32;
 	uint32 wrap_ba = last_axi_error_wrap;
 	uint i;
@@ -2590,7 +2593,7 @@ BCMPOSTTRAPFN(ai_wrapper_dump_binary)(const si_t *sih, uchar *p)
 bool
 BCMPOSTTRAPFN(ai_check_enable_backplane_log)(const si_t *sih)
 {
-#if defined (AXI_TIMEOUTS) || defined (AXI_TIMEOUTS_NIC)
+#if defined(AXI_TIMEOUTS) || defined(AXI_TIMEOUTS_NIC)
 	if (g_disable_backplane_logs) {
 		return FALSE;
 	}

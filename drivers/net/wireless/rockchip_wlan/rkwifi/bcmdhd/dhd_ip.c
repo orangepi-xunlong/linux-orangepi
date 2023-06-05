@@ -1,7 +1,7 @@
 /*
  * IP Packet Parser Module.
  *
- * Copyright (C) 2020, Broadcom.
+ * Copyright (C) 2022, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -31,6 +31,7 @@
 #include <bcmip.h>
 #include <bcmendian.h>
 
+#include <dhd.h>
 #include <dhd_dbg.h>
 
 #include <dhd_ip.h>
@@ -976,6 +977,11 @@ dhd_tcpdata_info_get(dhd_pub_t *dhdp, void *pkt)
 	cur_framelen -= ETHER_HDR_LEN;
 
 	ASSERT(cur_framelen >= IPV4_MIN_HEADER_LEN);
+	if (cur_framelen < IPV4_MIN_HEADER_LEN) {
+		DHD_TRACE(("%s %d: cur_framelen(%d) < IPV4_MIN_HEADER_LEN\n", __FUNCTION__,
+			__LINE__, cur_framelen));
+		goto exit;
+	}
 
 	ip_hdr_len = IPV4_HLEN(ip_hdr);
 	if (IP_VER(ip_hdr) != IP_VER_4 || IPV4_PROT(ip_hdr) != IP_PROT_TCP) {
@@ -988,6 +994,11 @@ dhd_tcpdata_info_get(dhd_pub_t *dhdp, void *pkt)
 	cur_framelen -= ip_hdr_len;
 
 	ASSERT(cur_framelen >= TCP_MIN_HEADER_LEN);
+	if (cur_framelen < TCP_MIN_HEADER_LEN) {
+		DHD_TRACE(("%s %d: cur_framelen is less than TCP_MIN_HEADER_LEN\n",
+			__FUNCTION__, __LINE__));
+		goto exit;
+	}
 
 	DHD_TRACE(("%s %d: TCP pkt!\n", __FUNCTION__, __LINE__));
 

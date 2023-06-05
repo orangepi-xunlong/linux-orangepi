@@ -1,7 +1,7 @@
 /*
  * Wifi dongle status Filter and Report
  *
- * Copyright (C) 2020, Broadcom.
+ * Copyright (C) 2022, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -63,11 +63,7 @@
 #endif /* IL_BIGENDINAN */
 
 #define DHD_FILTER_ERR_INTERNAL(fmt, ...) DHD_ERROR(("EWPF-" fmt, ##__VA_ARGS__))
-#ifdef DHD_REPLACE_LOG_INFO_TO_TRACE
-#define DHD_FILTER_TRACE_INTERNAL(fmt, ...) DHD_TRACE(("EWPF-" fmt, ##__VA_ARGS__))
-#else
 #define DHD_FILTER_TRACE_INTERNAL(fmt, ...) DHD_INFO(("EWPF-" fmt, ##__VA_ARGS__))
-#endif /* DHD_REPLACE_LOG_INFO_TO_TRACE */
 
 #define DHD_FILTER_ERR(x) DHD_FILTER_ERR_INTERNAL x
 #define DHD_FILTER_TRACE(x) DHD_FILTER_TRACE_INTERNAL x
@@ -92,7 +88,7 @@
 #define EWPF_SLICE_MAIN			0	/* SLICE ID for 5GHZ */
 #define EWPF_SLICE_AUX			1	/* SLICE ID for 2GHZ */
 
-#define EWPF_MAX_IFACE			2	/* MAX IFACE supported, 0: STA */
+#define EWPF_MAX_IFACE			3	/* MAX IFACE supported */
 #define EWPF_MAX_EVENT			1	/* MAX EVENT counter supported */
 #define EWPF_MAX_KEY_INFO			1	/* MAX KEY INFO counter supported */
 
@@ -131,6 +127,7 @@ typedef struct {
 		wl_periodic_compact_cntrs_v1_t compact_cntr_v1;
 		wl_periodic_compact_cntrs_v2_t compact_cntr_v2;
 		wl_periodic_compact_cntrs_v3_t compact_cntr_v3;
+		wl_periodic_compact_cntrs_v4_t compact_cntr_v4;
 	};
 	evt_hist_compact_toss_stats_v1_t hist_tx_toss_stat;
 	evt_hist_compact_toss_stats_v1_t hist_rx_toss_stat;
@@ -230,7 +227,7 @@ static EWPF_tbl_t EWPF_periodic[] =
 	{
 		WL_STATE_COMPACT_COUNTERS,
 		evt_xtlv_copy_cb,
-		SLICE_INFO(compact_cntr_v3),
+		SLICE_INFO(compact_cntr_v4),
 		NULL
 	},
 	{
@@ -835,7 +832,7 @@ static int
 evt_get_last_toss_hist(uint8 *ptr, const uint8 *data, uint16 len)
 {
 	bcm_xtlv_t *bcm_xtlv_desc = (bcm_xtlv_t *)data;
-	wl_hist_compact_toss_stats_v2_t *ewp_stats;
+	wl_hist_compact_toss_stats_v3_t *ewp_stats;
 	evt_hist_compact_toss_stats_v1_t bidata_stats;
 	int16 max_rcidx = EWPF_INVALID, secnd_rcidx = EWPF_INVALID;
 	uint16 cur_rnidx = 0, prev_rnidx = 0;
@@ -846,21 +843,21 @@ evt_get_last_toss_hist(uint8 *ptr, const uint8 *data, uint16 len)
 		return BCME_ERROR;
 	}
 
-	if (bcm_xtlv_desc->len != sizeof(wl_hist_compact_toss_stats_v2_t)) {
+	if (bcm_xtlv_desc->len != sizeof(wl_hist_compact_toss_stats_v3_t)) {
 		DHD_FILTER_ERR(("%s : size is not matched  %d\n", __FUNCTION__,
 			bcm_xtlv_desc->len));
 		return BCME_ERROR;
 	}
 
-	ewp_stats = (wl_hist_compact_toss_stats_v2_t *)(&bcm_xtlv_desc->data[0]);
+	ewp_stats = (wl_hist_compact_toss_stats_v3_t *)(&bcm_xtlv_desc->data[0]);
 	if (ewp_stats->htr_type == WL_STATE_HIST_TX_TOSS_REASONS) {
-		if (ewp_stats->version != WL_HIST_COMPACT_TOSS_STATS_TX_VER_2) {
+		if (ewp_stats->version != WL_HIST_COMPACT_TOSS_STATS_TX_VER_3) {
 			DHD_FILTER_ERR(("%s : unsupported version %d (type: %d)\n",
 				__FUNCTION__, ewp_stats->version, ewp_stats->htr_type));
 			return BCME_ERROR;
 		}
 	} else if (ewp_stats->htr_type == WL_STATE_HIST_RX_TOSS_REASONS) {
-		if (ewp_stats->version != WL_HIST_COMPACT_TOSS_STATS_RX_VER_2) {
+		if (ewp_stats->version != WL_HIST_COMPACT_TOSS_STATS_RX_VER_3) {
 			DHD_FILTER_ERR(("%s : unsupported version %d (type: %d)\n",
 				__FUNCTION__, ewp_stats->version, ewp_stats->htr_type));
 			return BCME_ERROR;
@@ -888,10 +885,9 @@ evt_get_last_toss_hist(uint8 *ptr, const uint8 *data, uint16 len)
 	 * Need to get largest count of toss reasons
 	 */
 	for (idx = 0; idx < WLC_HIST_TOSS_LEN; idx ++) {
-		cur_rccnt = (uint16)((ewp_stats->htr_rc[idx] &
-			HIST_TOSS_RC_COUNT_MASK)>>HIST_TOSS_RC_COUNT_POS);
+		cur_rccnt = (uint16)(ewp_stats->htr_rc[idx].toss_cnt);
 		DHD_FILTER_TRACE(("%s: idx %d htr_rc %04x cur_rccnt %d\n",
-			__FUNCTION__, idx, ewp_stats->htr_rc[idx], cur_rccnt));
+			__FUNCTION__, idx, ewp_stats->htr_rc[idx].toss_reason, cur_rccnt));
 		if (ewp_stats->htr_rc_ts[idx] && max_rccnt < cur_rccnt) {
 			max_rccnt = cur_rccnt;
 			secnd_rcidx = max_rcidx;
@@ -906,16 +902,16 @@ evt_get_last_toss_hist(uint8 *ptr, const uint8 *data, uint16 len)
 	bidata_stats.version = ewp_stats->version;
 	bidata_stats.htr_type = ewp_stats->htr_type;
 	bidata_stats.htr_num = ewp_stats->htr_num;
-	bidata_stats.htr_rn_last = ewp_stats->htr_running[cur_rnidx];
+	bidata_stats.htr_rn_last = *(uint32*)(&ewp_stats->htr_running[cur_rnidx]);
 	bidata_stats.htr_rn_ts_last = ewp_stats->htr_rn_ts[cur_rnidx];
-	bidata_stats.htr_rn_prev = ewp_stats->htr_running[prev_rnidx];
+	bidata_stats.htr_rn_prev = *(uint32*)(&ewp_stats->htr_running[prev_rnidx]);
 	bidata_stats.htr_rn_ts_prev = ewp_stats->htr_rn_ts[prev_rnidx];
 	if (max_rcidx != EWPF_INVALID) {
-		bidata_stats.htr_rc_max = ewp_stats->htr_rc[max_rcidx];
+		bidata_stats.htr_rc_max = *(uint32*)(&ewp_stats->htr_rc[max_rcidx]);
 		bidata_stats.htr_rc_ts_max = ewp_stats->htr_rc_ts[max_rcidx];
 	}
 	if (secnd_rcidx != EWPF_INVALID) {
-		bidata_stats.htr_rc_secnd = ewp_stats->htr_rc[secnd_rcidx];
+		bidata_stats.htr_rc_secnd = *(uint32*)(&ewp_stats->htr_rc[secnd_rcidx]);
 		bidata_stats.htr_rc_ts_secnd = ewp_stats->htr_rc_ts[secnd_rcidx];
 	}
 	DHD_FILTER_TRACE(("%s: ver %d type %d num %d "
@@ -1279,7 +1275,7 @@ dhd_event_log_filter_event_handler(dhd_pub_t *dhdp, prcd_event_log_hdr_t *plog_h
 #define EWP_REPORT_NAME_MAX		64
 
 #ifdef DHD_EWPR_VER2
-#define EWP_REPORT_VERSION	0x20190514
+#define EWP_REPORT_VERSION	0x20200722
 #define EWP_REPORT_SET_DEFAULT	0x01
 #define EWPR_CSDCLIENT_DIFF	10
 #define EWPR_INTERVAL	3
@@ -1349,7 +1345,7 @@ typedef struct {
 	uint32 *delta_list;		/* IN delta values to find */
 } ewpr_lock_param_t;
 
-#define MAX_MULTI_VER	3
+#define MAX_MULTI_VER	4
 typedef struct {
 	uint32	version;		/* VERSION for multiple version struct */
 	uint32	offset;			/* offset of the member at the version */
@@ -1386,7 +1382,7 @@ typedef struct {
 
 /* offset defines */
 #define EWPR_CNT_VERSION_OFFSET \
-	OFFSETOF(EWPF_slc_elem_t, compact_cntr_v3)
+	OFFSETOF(EWPF_slc_elem_t, compact_cntr_v4)
 
 #define EWPR_CNT_V1_OFFSET(a) \
 	WL_PERIODIC_COMPACT_CNTRS_VER_1, \
@@ -1397,6 +1393,9 @@ typedef struct {
 #define EWPR_CNT_V3_OFFSET(a) \
 	WL_PERIODIC_COMPACT_CNTRS_VER_3, \
 	(OFFSETOF(EWPF_slc_elem_t, compact_cntr_v3) + OFFSETOF(wl_periodic_compact_cntrs_v3_t, a))
+#define EWPR_CNT_V4_OFFSET(a) \
+	WL_PERIODIC_COMPACT_CNTRS_VER_4, \
+	(OFFSETOF(EWPF_slc_elem_t, compact_cntr_v4) + OFFSETOF(wl_periodic_compact_cntrs_v4_t, a))
 #define EWPR_STAT_OFFSET(a) \
 	(OFFSETOF(EWPF_ifc_elem_t, if_stat) + OFFSETOF(wl_if_stats_t, a))
 #define EWPR_INFRA_OFFSET(a) \
@@ -1434,14 +1433,16 @@ typedef struct {
 	.v_info = { EWPR_CNT_VERSION_OFFSET, \
 		{{EWPR_CNT_V1_OFFSET(a)}, \
 		{EWPR_CNT_V2_OFFSET(a)}, \
-		{EWPR_CNT_V3_OFFSET(a)}}}, \
+		{EWPR_CNT_V3_OFFSET(a)}, \
+		{EWPR_CNT_V4_OFFSET(a)}}}, \
 	EWP_UINT32, EWP_HEX, EWP_UINT32}
 #define EWPR_SERIAL_CNT_16(a) {\
 	#a, EWPF_IDX_TYPE_SLICE, TRUE, \
 	.v_info = { EWPR_CNT_VERSION_OFFSET, \
 		{{EWPR_CNT_V1_OFFSET(a)}, \
 		{EWPR_CNT_V2_OFFSET(a)}, \
-		{EWPR_CNT_V3_OFFSET(a)}}}, \
+		{EWPR_CNT_V3_OFFSET(a)}, \
+		{EWPR_CNT_V4_OFFSET(a)}}}, \
 	EWP_UINT32, EWP_HEX, EWP_UINT16}
 #define EWPR_SERIAL_STAT(a) {\
 	#a, EWPF_IDX_TYPE_IFACE, FALSE, .offset = EWPR_STAT_OFFSET(a), \
@@ -1528,10 +1529,10 @@ typedef struct {
 #define EWPR_SINGLE_USEC_TO_SEC EWPR_DISPLAY_METHOD_SINGLE, EWPF_USEC_TO_SEC
 
 /* serail info type define */
-#define EWPR_SERIAL_CNT_V3_BIT(a, b, c, d) {\
+#define EWPR_SERIAL_CNT_V4_BIT(a, b, c, d) {\
 	#a, EWPF_IDX_TYPE_SLICE, TRUE, \
 	.v_info = { EWPR_CNT_VERSION_OFFSET, \
-		{{EWPR_CNT_V3_OFFSET(a)}}}, \
+		{{EWPR_CNT_V4_OFFSET(a)}}}, \
 	EWP_UINT32, EWP_BIN, EWP_BIT, EWPF_INFO_ECNT, b, c, d}
 #define EWPR_SERIAL_STAT_BIT(a, b, c, d) {\
 	#a, EWPF_IDX_TYPE_IFACE, FALSE, .offset = EWPR_STAT_OFFSET(a), \
@@ -1717,21 +1718,28 @@ ewpr_serial_bit_unwanted_network_default_tbl[] = {
 	EWPR_SERIAL_MGMT_BIT(rxdeauth, 4, 6, EWPR_DIFF_DEFAULT),
 	EWPR_SERIAL_MGMT_BIT(txaction, 7, 6, EWPR_DIFF_DEFAULT),
 	EWPR_SERIAL_MGMT_BIT(rxaction, 7, 6, EWPR_DIFF_DEFAULT),
-	EWPR_SERIAL_CNT_V3_BIT(txallfrm, 17, 6, EWPR_DIFF_DEFAULT),
-	EWPR_SERIAL_CNT_V3_BIT(rxrsptmout, 17, 6, EWPR_DIFF_DEFAULT),
-	EWPR_SERIAL_CNT_V3_BIT(rxbadplcp, 17, 6, EWPR_DIFF_DEFAULT),
-	EWPR_SERIAL_CNT_V3_BIT(rxcrsglitch, 17, 6, EWPR_DIFF_DEFAULT),
-	EWPR_SERIAL_CNT_V3_BIT(rxbadfcs, 17, 6, EWPR_DIFF_DEFAULT),
-	EWPR_SERIAL_CNT_V3_BIT(rxbeaconmbss, 5, 6, EWPR_DIFF_DEFAULT),
-	EWPR_SERIAL_CNT_V3_BIT(rxbeaconobss, 12, 6, EWPR_DIFF_DEFAULT),
-	EWPR_SERIAL_CNT_V3_BIT(lqcm_report, 19, 6, EWPR_SINGLE_DEFAULT),
-	EWPR_SERIAL_CNT_V3_BIT(tx_toss_cnt, 18, 6, EWPR_DIFF_DEFAULT),
-	EWPR_SERIAL_CNT_V3_BIT(rx_toss_cnt, 18, 6, EWPR_DIFF_DEFAULT),
-	EWPR_SERIAL_CNT_V3_BIT(rxretry, 17, 6, EWPR_DIFF_DEFAULT),
-	EWPR_SERIAL_CNT_V3_BIT(rxdup, 15, 6, EWPR_DIFF_DEFAULT),
-	EWPR_SERIAL_CNT_V3_BIT(chswitch_cnt, 8, 6, EWPR_DIFF_DEFAULT),
-	EWPR_SERIAL_CNT_V3_BIT(pm_dur, 12, 6, EWPR_DIFF_DEFAULT),
-	EWPR_SERIAL_CNT_V3_BIT(rxholes, 15, 6, EWPR_DIFF_DEFAULT),
+	EWPR_SERIAL_CNT_V4_BIT(txallfrm, 17, 6, EWPR_DIFF_DEFAULT),
+	EWPR_SERIAL_CNT_V4_BIT(rxrsptmout, 17, 6, EWPR_DIFF_DEFAULT),
+	EWPR_SERIAL_CNT_V4_BIT(rxbadplcp, 17, 6, EWPR_DIFF_DEFAULT),
+	EWPR_SERIAL_CNT_V4_BIT(rxcrsglitch, 17, 6, EWPR_DIFF_DEFAULT),
+	EWPR_SERIAL_CNT_V4_BIT(rxbadfcs, 17, 6, EWPR_DIFF_DEFAULT),
+	EWPR_SERIAL_CNT_V4_BIT(rxbeaconmbss, 5, 6, EWPR_DIFF_DEFAULT),
+	EWPR_SERIAL_CNT_V4_BIT(rxbeaconobss, 12, 6, EWPR_DIFF_DEFAULT),
+	EWPR_SERIAL_CNT_V4_BIT(lqcm_report, 19, 6, EWPR_SINGLE_DEFAULT),
+	EWPR_SERIAL_CNT_V4_BIT(tx_toss_cnt, 18, 6, EWPR_DIFF_DEFAULT),
+	EWPR_SERIAL_CNT_V4_BIT(rx_toss_cnt, 18, 6, EWPR_DIFF_DEFAULT),
+	EWPR_SERIAL_CNT_V4_BIT(rxretry, 17, 6, EWPR_DIFF_DEFAULT),
+	EWPR_SERIAL_CNT_V4_BIT(rxdup, 15, 6, EWPR_DIFF_DEFAULT),
+	EWPR_SERIAL_CNT_V4_BIT(chswitch_cnt, 8, 6, EWPR_DIFF_DEFAULT),
+	EWPR_SERIAL_CNT_V4_BIT(pm_dur, 12, 6, EWPR_DIFF_DEFAULT),
+	EWPR_SERIAL_CNT_V4_BIT(rxholes, 15, 6, EWPR_DIFF_DEFAULT),
+	EWPR_SERIAL_CNT_V4_BIT(rxundec, 16, 6, EWPR_DIFF_DEFAULT),
+	EWPR_SERIAL_CNT_V4_BIT(rxundec_mcst, 16, 6, EWPR_DIFF_DEFAULT),
+	EWPR_SERIAL_CNT_V4_BIT(replay, 12, 6, EWPR_DIFF_DEFAULT),
+	EWPR_SERIAL_CNT_V4_BIT(replay_mcst, 12, 6, EWPR_DIFF_DEFAULT),
+	EWPR_SERIAL_CNT_V4_BIT(pktfilter_discard, 16, 6, EWPR_DIFF_DEFAULT),
+	EWPR_SERIAL_CNT_V4_BIT(pktfilter_forward, 16, 6, EWPR_DIFF_DEFAULT),
+	EWPR_SERIAL_CNT_V4_BIT(mac_rxfilter, 16, 6, EWPR_DIFF_DEFAULT),
 	EWPR_SERIAL_BTC_STAT_16_BIT(bt_dcsn_map, 16, 3, EWPR_SINGLE_DEFAULT),
 	EWPR_SERIAL_BTC_STAT_16_BIT(bt_dcsn_cnt, 12, 3, EWPR_SINGLE_DEFAULT),
 	EWPR_SERIAL_BTC_STAT_16_BIT(bt_a2dp_hiwat_cnt, 12, 3, EWPR_SINGLE_DEFAULT),
@@ -1783,7 +1791,7 @@ ewpr_serial_bit_unwanted_network_default_tbl[] = {
 	EWPR_SERIAL_RX_TOSS_HIST_BIT(htr_rc_max, 32, 1, EWPR_SINGLE_DEFAULT),
 	EWPR_SERIAL_RX_TOSS_HIST_BIT(htr_rc_ts_secnd, 32, 1, EWPR_SINGLE_DEFAULT),
 	EWPR_SERIAL_RX_TOSS_HIST_BIT(htr_rc_secnd, 32, 1, EWPR_SINGLE_DEFAULT),
-	EWPR_SERIAL_CPLOG_BIT(packtlog, 22, 70),
+	EWPR_SERIAL_CPLOG_BIT(packtlog, 22, 50),
 	EWPR_SERIAL_NONE
 };
 
@@ -1817,21 +1825,28 @@ ewpr_serial_bit_assoc_fail_default_tbl[] = {
 	EWPR_SERIAL_MGMT_BIT(rxdeauth, 4, 6, EWPR_DIFF_DEFAULT),
 	EWPR_SERIAL_MGMT_BIT(txaction, 7, 6, EWPR_DIFF_DEFAULT),
 	EWPR_SERIAL_MGMT_BIT(rxaction, 7, 6, EWPR_DIFF_DEFAULT),
-	EWPR_SERIAL_CNT_V3_BIT(txallfrm, 17, 6, EWPR_DIFF_DEFAULT),
-	EWPR_SERIAL_CNT_V3_BIT(rxrsptmout, 17, 6, EWPR_DIFF_DEFAULT),
-	EWPR_SERIAL_CNT_V3_BIT(rxbadplcp, 17, 6, EWPR_DIFF_DEFAULT),
-	EWPR_SERIAL_CNT_V3_BIT(rxcrsglitch, 17, 6, EWPR_DIFF_DEFAULT),
-	EWPR_SERIAL_CNT_V3_BIT(rxbadfcs, 17, 6, EWPR_DIFF_DEFAULT),
-	EWPR_SERIAL_CNT_V3_BIT(rxbeaconmbss, 5, 6, EWPR_DIFF_DEFAULT),
-	EWPR_SERIAL_CNT_V3_BIT(rxbeaconobss, 12, 6, EWPR_DIFF_DEFAULT),
-	EWPR_SERIAL_CNT_V3_BIT(lqcm_report, 19, 6, EWPR_SINGLE_DEFAULT),
-	EWPR_SERIAL_CNT_V3_BIT(tx_toss_cnt, 18, 6, EWPR_DIFF_DEFAULT),
-	EWPR_SERIAL_CNT_V3_BIT(rx_toss_cnt, 18, 6, EWPR_DIFF_DEFAULT),
-	EWPR_SERIAL_CNT_V3_BIT(rxretry, 17, 6, EWPR_DIFF_DEFAULT),
-	EWPR_SERIAL_CNT_V3_BIT(rxdup, 15, 6, EWPR_DIFF_DEFAULT),
-	EWPR_SERIAL_CNT_V3_BIT(chswitch_cnt, 8, 6, EWPR_DIFF_DEFAULT),
-	EWPR_SERIAL_CNT_V3_BIT(pm_dur, 12, 6, EWPR_DIFF_DEFAULT),
-	EWPR_SERIAL_CNT_V3_BIT(rxholes, 15, 6, EWPR_DIFF_DEFAULT),
+	EWPR_SERIAL_CNT_V4_BIT(txallfrm, 17, 6, EWPR_DIFF_DEFAULT),
+	EWPR_SERIAL_CNT_V4_BIT(rxrsptmout, 17, 6, EWPR_DIFF_DEFAULT),
+	EWPR_SERIAL_CNT_V4_BIT(rxbadplcp, 17, 6, EWPR_DIFF_DEFAULT),
+	EWPR_SERIAL_CNT_V4_BIT(rxcrsglitch, 17, 6, EWPR_DIFF_DEFAULT),
+	EWPR_SERIAL_CNT_V4_BIT(rxbadfcs, 17, 6, EWPR_DIFF_DEFAULT),
+	EWPR_SERIAL_CNT_V4_BIT(rxbeaconmbss, 5, 6, EWPR_DIFF_DEFAULT),
+	EWPR_SERIAL_CNT_V4_BIT(rxbeaconobss, 12, 6, EWPR_DIFF_DEFAULT),
+	EWPR_SERIAL_CNT_V4_BIT(lqcm_report, 19, 6, EWPR_SINGLE_DEFAULT),
+	EWPR_SERIAL_CNT_V4_BIT(tx_toss_cnt, 18, 6, EWPR_DIFF_DEFAULT),
+	EWPR_SERIAL_CNT_V4_BIT(rx_toss_cnt, 18, 6, EWPR_DIFF_DEFAULT),
+	EWPR_SERIAL_CNT_V4_BIT(rxretry, 17, 6, EWPR_DIFF_DEFAULT),
+	EWPR_SERIAL_CNT_V4_BIT(rxdup, 15, 6, EWPR_DIFF_DEFAULT),
+	EWPR_SERIAL_CNT_V4_BIT(chswitch_cnt, 8, 6, EWPR_DIFF_DEFAULT),
+	EWPR_SERIAL_CNT_V4_BIT(pm_dur, 12, 6, EWPR_DIFF_DEFAULT),
+	EWPR_SERIAL_CNT_V4_BIT(rxholes, 15, 6, EWPR_DIFF_DEFAULT),
+	EWPR_SERIAL_CNT_V4_BIT(rxundec, 16, 6, EWPR_DIFF_DEFAULT),
+	EWPR_SERIAL_CNT_V4_BIT(rxundec_mcst, 16, 6, EWPR_DIFF_DEFAULT),
+	EWPR_SERIAL_CNT_V4_BIT(replay, 12, 6, EWPR_DIFF_DEFAULT),
+	EWPR_SERIAL_CNT_V4_BIT(replay_mcst, 12, 6, EWPR_DIFF_DEFAULT),
+	EWPR_SERIAL_CNT_V4_BIT(pktfilter_discard, 16, 6, EWPR_DIFF_DEFAULT),
+	EWPR_SERIAL_CNT_V4_BIT(pktfilter_forward, 16, 6, EWPR_DIFF_DEFAULT),
+	EWPR_SERIAL_CNT_V4_BIT(mac_rxfilter, 16, 6, EWPR_DIFF_DEFAULT),
 	EWPR_SERIAL_BTC_STAT_16_BIT(bt_dcsn_map, 16, 3, EWPR_SINGLE_DEFAULT),
 	EWPR_SERIAL_BTC_STAT_16_BIT(bt_dcsn_cnt, 12, 3, EWPR_SINGLE_DEFAULT),
 	EWPR_SERIAL_BTC_STAT_16_BIT(bt_a2dp_hiwat_cnt, 12, 3, EWPR_SINGLE_DEFAULT),
@@ -1869,7 +1884,7 @@ ewpr_serial_bit_assoc_fail_default_tbl[] = {
 	EWPR_SERIAL_RX_TOSS_HIST_BIT(htr_rc_max, 32, 1, EWPR_SINGLE_DEFAULT),
 	EWPR_SERIAL_RX_TOSS_HIST_BIT(htr_rc_ts_secnd, 32, 1, EWPR_SINGLE_DEFAULT),
 	EWPR_SERIAL_RX_TOSS_HIST_BIT(htr_rc_secnd, 32, 1, EWPR_SINGLE_DEFAULT),
-	EWPR_SERIAL_CPLOG_BIT(packtlog, 22, 70),
+	EWPR_SERIAL_CPLOG_BIT(packtlog, 22, 50),
 	EWPR_SERIAL_NONE
 };
 
@@ -1903,21 +1918,28 @@ ewpr_serial_bit_abnormal_disconnect_default_tbl[] = {
 	EWPR_SERIAL_MGMT_BIT(rxdeauth, 4, 6, EWPR_DIFF_DEFAULT),
 	EWPR_SERIAL_MGMT_BIT(txaction, 7, 6, EWPR_DIFF_DEFAULT),
 	EWPR_SERIAL_MGMT_BIT(rxaction, 7, 6, EWPR_DIFF_DEFAULT),
-	EWPR_SERIAL_CNT_V3_BIT(txallfrm, 17, 6, EWPR_DIFF_DEFAULT),
-	EWPR_SERIAL_CNT_V3_BIT(rxrsptmout, 17, 6, EWPR_DIFF_DEFAULT),
-	EWPR_SERIAL_CNT_V3_BIT(rxbadplcp, 17, 6, EWPR_DIFF_DEFAULT),
-	EWPR_SERIAL_CNT_V3_BIT(rxcrsglitch, 17, 6, EWPR_DIFF_DEFAULT),
-	EWPR_SERIAL_CNT_V3_BIT(rxbadfcs, 17, 6, EWPR_DIFF_DEFAULT),
-	EWPR_SERIAL_CNT_V3_BIT(rxbeaconmbss, 5, 6, EWPR_DIFF_DEFAULT),
-	EWPR_SERIAL_CNT_V3_BIT(rxbeaconobss, 12, 6, EWPR_DIFF_DEFAULT),
-	EWPR_SERIAL_CNT_V3_BIT(lqcm_report, 19, 6, EWPR_SINGLE_DEFAULT),
-	EWPR_SERIAL_CNT_V3_BIT(tx_toss_cnt, 18, 6, EWPR_DIFF_DEFAULT),
-	EWPR_SERIAL_CNT_V3_BIT(rx_toss_cnt, 18, 6, EWPR_DIFF_DEFAULT),
-	EWPR_SERIAL_CNT_V3_BIT(rxretry, 17, 6, EWPR_DIFF_DEFAULT),
-	EWPR_SERIAL_CNT_V3_BIT(rxdup, 15, 6, EWPR_DIFF_DEFAULT),
-	EWPR_SERIAL_CNT_V3_BIT(chswitch_cnt, 8, 6, EWPR_DIFF_DEFAULT),
-	EWPR_SERIAL_CNT_V3_BIT(pm_dur, 12, 6, EWPR_DIFF_DEFAULT),
-	EWPR_SERIAL_CNT_V3_BIT(rxholes, 15, 6, EWPR_DIFF_DEFAULT),
+	EWPR_SERIAL_CNT_V4_BIT(txallfrm, 17, 6, EWPR_DIFF_DEFAULT),
+	EWPR_SERIAL_CNT_V4_BIT(rxrsptmout, 17, 6, EWPR_DIFF_DEFAULT),
+	EWPR_SERIAL_CNT_V4_BIT(rxbadplcp, 17, 6, EWPR_DIFF_DEFAULT),
+	EWPR_SERIAL_CNT_V4_BIT(rxcrsglitch, 17, 6, EWPR_DIFF_DEFAULT),
+	EWPR_SERIAL_CNT_V4_BIT(rxbadfcs, 17, 6, EWPR_DIFF_DEFAULT),
+	EWPR_SERIAL_CNT_V4_BIT(rxbeaconmbss, 5, 6, EWPR_DIFF_DEFAULT),
+	EWPR_SERIAL_CNT_V4_BIT(rxbeaconobss, 12, 6, EWPR_DIFF_DEFAULT),
+	EWPR_SERIAL_CNT_V4_BIT(lqcm_report, 19, 6, EWPR_SINGLE_DEFAULT),
+	EWPR_SERIAL_CNT_V4_BIT(tx_toss_cnt, 18, 6, EWPR_DIFF_DEFAULT),
+	EWPR_SERIAL_CNT_V4_BIT(rx_toss_cnt, 18, 6, EWPR_DIFF_DEFAULT),
+	EWPR_SERIAL_CNT_V4_BIT(rxretry, 17, 6, EWPR_DIFF_DEFAULT),
+	EWPR_SERIAL_CNT_V4_BIT(rxdup, 15, 6, EWPR_DIFF_DEFAULT),
+	EWPR_SERIAL_CNT_V4_BIT(chswitch_cnt, 8, 6, EWPR_DIFF_DEFAULT),
+	EWPR_SERIAL_CNT_V4_BIT(pm_dur, 12, 6, EWPR_DIFF_DEFAULT),
+	EWPR_SERIAL_CNT_V4_BIT(rxholes, 15, 6, EWPR_DIFF_DEFAULT),
+	EWPR_SERIAL_CNT_V4_BIT(rxundec, 16, 6, EWPR_DIFF_DEFAULT),
+	EWPR_SERIAL_CNT_V4_BIT(rxundec_mcst, 16, 6, EWPR_DIFF_DEFAULT),
+	EWPR_SERIAL_CNT_V4_BIT(replay, 12, 6, EWPR_DIFF_DEFAULT),
+	EWPR_SERIAL_CNT_V4_BIT(replay_mcst, 12, 6, EWPR_DIFF_DEFAULT),
+	EWPR_SERIAL_CNT_V4_BIT(pktfilter_discard, 16, 6, EWPR_DIFF_DEFAULT),
+	EWPR_SERIAL_CNT_V4_BIT(pktfilter_forward, 16, 6, EWPR_DIFF_DEFAULT),
+	EWPR_SERIAL_CNT_V4_BIT(mac_rxfilter, 16, 6, EWPR_DIFF_DEFAULT),
 	EWPR_SERIAL_BTC_STAT_16_BIT(bt_dcsn_map, 16, 3, EWPR_SINGLE_DEFAULT),
 	EWPR_SERIAL_BTC_STAT_16_BIT(bt_dcsn_cnt, 12, 3, EWPR_SINGLE_DEFAULT),
 	EWPR_SERIAL_BTC_STAT_16_BIT(bt_a2dp_hiwat_cnt, 12, 3, EWPR_SINGLE_DEFAULT),
@@ -1969,7 +1991,7 @@ ewpr_serial_bit_abnormal_disconnect_default_tbl[] = {
 	EWPR_SERIAL_RX_TOSS_HIST_BIT(htr_rc_max, 32, 1, EWPR_SINGLE_DEFAULT),
 	EWPR_SERIAL_RX_TOSS_HIST_BIT(htr_rc_ts_secnd, 32, 1, EWPR_SINGLE_DEFAULT),
 	EWPR_SERIAL_RX_TOSS_HIST_BIT(htr_rc_secnd, 32, 1, EWPR_SINGLE_DEFAULT),
-	EWPR_SERIAL_CPLOG_BIT(packtlog, 22, 70),
+	EWPR_SERIAL_CPLOG_BIT(packtlog, 22, 50),
 	EWPR_SERIAL_NONE
 };
 

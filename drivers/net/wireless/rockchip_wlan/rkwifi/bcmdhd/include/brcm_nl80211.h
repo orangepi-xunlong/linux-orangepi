@@ -1,7 +1,7 @@
 /*
  * Definitions for nl80211 vendor command/event access to host driver
  *
- * Copyright (C) 2020, Broadcom.
+ * Copyright (C) 2022, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -39,7 +39,9 @@ enum wl_vendor_subcmd {
 	BRCM_VENDOR_SCMD_SET_MAC		= 6,
 	BRCM_VENDOR_SCMD_SET_CONNECT_PARAMS	= 7,
 	BRCM_VENDOR_SCMD_SET_START_AP_PARAMS	= 8,
-	BRCM_VENDOR_SCMD_MAX			= 9
+	BRCM_VENDOR_SCMD_ACS			= 9,
+	BRCM_VENDOR_SCMD_SET_TD_POLICY		= 10,
+	BRCM_VENDOR_SCMD_MAX			= 11
 };
 
 struct bcm_nlmsg_hdr {

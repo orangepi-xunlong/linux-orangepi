@@ -1,7 +1,7 @@
 /*
  * Linux Packet (skb) interface
  *
- * Copyright (C) 2020, Broadcom.
+ * Copyright (C) 2022, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -141,6 +141,14 @@ extern void osl_pkt_orphan_partial(struct sk_buff *skb, int tsq);
 #define PKTORPHAN(skb, tsq)          ({BCM_REFERENCE(skb); 0;})
 #endif /* Linux Version >= 3.6 */
 
+#ifdef RX_PKT_POOL
+#ifdef DHD_USE_ATOMIC_PKTGET
+#error "Don't enable both DHD_USE_ATOMIC_PKTGET and RX_PKT_POOL, "
+		"as RX_PKT_POOL runs in non atomic context"
+#endif /* DHD_USE_ATOMIC_PKTGET */
+#define	PKTGET_RX_POOL(osh, dhd, len, send) dhd_rxpool_pktget((osh), (dhd), (len))
+#endif /* RX_PKT_POOL */
+
 #ifdef BCMDBG_CTRACE
 #define	DEL_CTRACE(zosh, zskb) { \
 	unsigned long zflags; \
@@ -180,26 +188,40 @@ extern void osl_pkt_orphan_partial(struct sk_buff *skb, int tsq);
 #define PKTCALLER(zskb)	UPDATE_CTRACE((struct sk_buff *)zskb, (char *)__FUNCTION__, __LINE__)
 #endif /* BCMDBG_CTRACE */
 
-#define	PKTSETFAST(osh, skb)	({BCM_REFERENCE(osh); BCM_REFERENCE(skb);})
-#define	PKTCLRFAST(osh, skb)	({BCM_REFERENCE(osh); BCM_REFERENCE(skb);})
-#define	PKTISFAST(osh, skb)	({BCM_REFERENCE(osh); BCM_REFERENCE(skb); FALSE;})
-#define PKTLITIDX(skb)		({BCM_REFERENCE(skb); 0;})
-#define PKTSETLITIDX(skb, idx)	({BCM_REFERENCE(skb); BCM_REFERENCE(idx);})
-#define PKTRESETLITIDX(skb)	({BCM_REFERENCE(skb);})
-#define PKTRITIDX(skb)		({BCM_REFERENCE(skb); 0;})
-#define PKTSETRITIDX(skb, idx)	({BCM_REFERENCE(skb); BCM_REFERENCE(idx);})
-#define PKTRESETRITIDX(skb)	({BCM_REFERENCE(skb);})
+#define	PKTSETFAST(osh, skb)		({BCM_REFERENCE(osh); BCM_REFERENCE(skb);})
+#define	PKTCLRFAST(osh, skb)		({BCM_REFERENCE(osh); BCM_REFERENCE(skb);})
+#define	PKTISFAST(osh, skb)		({BCM_REFERENCE(osh); BCM_REFERENCE(skb); FALSE;})
 
-#define	PKTSETSKIPCT(osh, skb)	({BCM_REFERENCE(osh); BCM_REFERENCE(skb);})
-#define	PKTCLRSKIPCT(osh, skb)	({BCM_REFERENCE(osh); BCM_REFERENCE(skb);})
-#define	PKTSKIPCT(osh, skb)	({BCM_REFERENCE(osh); BCM_REFERENCE(skb);})
+#define PKTLITIDX(skb)			({BCM_REFERENCE(skb); 0;})
+#define PKTSETLITIDX(skb, idx)		({BCM_REFERENCE(skb); BCM_REFERENCE(idx);})
+#define PKTRESETLITIDX(skb)		({BCM_REFERENCE(skb);})
+#define PKTLITIDX_1(skb)		({BCM_REFERENCE(skb); 0;})
+#define PKTSETLITIDX_1(skb, idx)	({BCM_REFERENCE(skb); BCM_REFERENCE(idx);})
+#define PKTRESETLITIDX_1(skb)		({BCM_REFERENCE(skb);})
+#define PKTLITIDX_2(skb)		({BCM_REFERENCE(skb); 0;})
+#define PKTSETLITIDX_2(skb, idx)	({BCM_REFERENCE(skb); BCM_REFERENCE(idx);})
+#define PKTRESETLITIDX_2(skb)		({BCM_REFERENCE(skb);})
 
-#define PKTFRAGLEN(osh, lb, ix)			(0)
-#define PKTSETFRAGLEN(osh, lb, ix, len)		BCM_REFERENCE(osh)
+#define PKTRITIDX(skb)			({BCM_REFERENCE(skb); 0;})
+#define PKTSETRITIDX(skb, idx)		({BCM_REFERENCE(skb); BCM_REFERENCE(idx);})
+#define PKTRESETRITIDX(skb)		({BCM_REFERENCE(skb);})
+#define PKTRITIDX_1(skb)		({BCM_REFERENCE(skb); 0;})
+#define PKTSETRITIDX_1(skb, idx)	({BCM_REFERENCE(skb); BCM_REFERENCE(idx);})
+#define PKTRESETRITIDX_1(skb)		({BCM_REFERENCE(skb);})
+#define PKTRITIDX_2(skb)		({BCM_REFERENCE(skb); 0;})
+#define PKTSETRITIDX_2(skb, idx)	({BCM_REFERENCE(skb); BCM_REFERENCE(idx);})
+#define PKTRESETRITIDX_2(skb)		({BCM_REFERENCE(skb);})
 
-#define	PKTSETTOBR(osh, skb)	({BCM_REFERENCE(osh); BCM_REFERENCE(skb);})
-#define	PKTCLRTOBR(osh, skb)	({BCM_REFERENCE(osh); BCM_REFERENCE(skb);})
-#define	PKTISTOBR(skb)	({BCM_REFERENCE(skb); FALSE;})
+#define	PKTSETSKIPCT(osh, skb)		({BCM_REFERENCE(osh); BCM_REFERENCE(skb);})
+#define	PKTCLRSKIPCT(osh, skb)		({BCM_REFERENCE(osh); BCM_REFERENCE(skb);})
+#define	PKTSKIPCT(osh, skb)		({BCM_REFERENCE(osh); BCM_REFERENCE(skb);})
+
+#define PKTFRAGLEN(osh, lb, ix)		(0)
+#define PKTSETFRAGLEN(osh, lb, ix, len)	BCM_REFERENCE(osh)
+
+#define	PKTSETTOBR(osh, skb)		({BCM_REFERENCE(osh); BCM_REFERENCE(skb);})
+#define	PKTCLRTOBR(osh, skb)		({BCM_REFERENCE(osh); BCM_REFERENCE(skb);})
+#define	PKTISTOBR(skb)			({BCM_REFERENCE(skb); FALSE;})
 
 #ifdef BCMFA
 #ifdef BCMFA_HW_HASH

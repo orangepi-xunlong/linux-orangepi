@@ -1,7 +1,7 @@
 /*
  *  'Standard' SDIO HOST CONTROLLER driver
  *
- * Copyright (C) 2020, Broadcom.
+ * Copyright (C) 2022, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -20,7 +20,7 @@
  *
  * <<Broadcom-WL-IPTag/Open:>>
  *
- * $Id: bcmsdstd.h 833030 2019-08-02 17:22:42Z jl904071 $
+ * $Id: bcmsdstd.h 833030 2019-08-02 17:22:42Z $
  */
 #ifndef	_BCM_SD_STD_H
 #define	_BCM_SD_STD_H
@@ -80,9 +80,6 @@ extern void sdstd_osfree(sdioh_info_t *sd);
 
 #define SDIOH_TYPE_ARASAN_HDK	1
 #define SDIOH_TYPE_BCM27XX	2
-#ifdef BCMINTERNAL
-#define SDIOH_TYPE_JINVANI_GOLD	3
-#endif
 #define SDIOH_TYPE_TI_PCIXX21	4	/* TI PCIxx21 Standard Host Controller */
 #define SDIOH_TYPE_RICOH_R5C822	5	/* Ricoh Co Ltd R5C822 SD/SDIO/MMC/MS/MSPro Host Adapter */
 #define SDIOH_TYPE_JMICRON	6	/* JMicron Standard SDIO Host Controller */

@@ -1,7 +1,7 @@
 /*
  * Console support for RTE - for host use only.
  *
- * Copyright (C) 2020, Broadcom.
+ * Copyright (C) 2022, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -37,7 +37,7 @@
 #endif /* RWL_DONGLE || UART_REFLECTOR */
 
 #ifndef LOG_BUF_LEN
-#if defined(BCMDBG) || defined (BCM_BIG_LOG)
+#if defined(BCMDBG) || defined(BCM_BIG_LOG)
 #define LOG_BUF_LEN	(16 * 1024)
 #elif defined(ATE_BUILD)
 #define LOG_BUF_LEN	(2 * 1024)

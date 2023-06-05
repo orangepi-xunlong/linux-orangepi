@@ -83,7 +83,6 @@ typedef struct wl_iw_extra_params {
 #define	WL_IW_RSSI_INVALID	 0	/* invalid RSSI value */
 #define MAX_WX_STRING 80
 #define SSID_FMT_BUF_LEN	((4 * 32) + 1)
-#define isprint(c) bcm_isprint(c)
 #define WL_IW_SET_ACTIVE_SCAN	(SIOCIWFIRSTPRIV+1)
 #define WL_IW_GET_RSSI			(SIOCIWFIRSTPRIV+3)
 #define WL_IW_SET_PASSIVE_SCAN	(SIOCIWFIRSTPRIV+5)

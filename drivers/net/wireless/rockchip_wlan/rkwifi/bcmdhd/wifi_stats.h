@@ -2,7 +2,7 @@
  * Common stats definitions for clients of dongle
  * ports
  *
- * Copyright (C) 2020, Broadcom.
+ * Copyright (C) 2022, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -30,6 +30,10 @@
 
 #include <ethernet.h>
 #include <802.11.h>
+
+#ifdef CONFIG_COMPAT
+#include <linux/compat.h>
+#endif /* CONFIG_COMPAT */
 
 typedef int32 wifi_radio;
 typedef int32 wifi_channel;
@@ -68,8 +72,25 @@ typedef enum {
 	WIFI_INTERFACE_P2P_CLIENT = 3,
 	WIFI_INTERFACE_P2P_GO = 4,
 	WIFI_INTERFACE_NAN = 5,
-	WIFI_INTERFACE_MESH = 6
+	WIFI_INTERFACE_MESH = 6,
+	WIFI_INTERFACE_TDLS = 7
 } wifi_interface_mode;
+
+typedef enum {
+	/* Filter channels that are unsafe due to cellular coexistence */
+	WIFI_USABLE_CHANNEL_FILTER_CELLULAR_COEXISTENCE  = 1 << 0,
+	/* Filter channels due to concurrency state */
+	WIFI_USABLE_CHANNEL_FILTER_CONCURRENCY  = 1 << 1,
+	/* Filter the channels out for non nan and non instant mode usable */
+	/* This Filter queries Wifi channels and bands that are supported for
+	 * NAN3.1 Instant communication mode. This filter should only be applied to NAN interface.
+	 * If 5G is supported default discovery channel 149/44 is considered,
+	 * If 5G is not supported then channel 6 has to be considered.
+	 * Based on regulatory domain if channel 149 and 44 are restricted, channel 6 should
+	 * be considered for instant communication channel
+	 */
+	WIFI_USABLE_CHANNEL_FILTER_NAN_INSTANT_MODE = 1 << 2
+} wifi_usable_channel_filter;
 
 #define WIFI_CAPABILITY_QOS          0x00000001     /* set for QOS association */
 #define WIFI_CAPABILITY_PROTECTED    0x00000002     /* set for protected association (802.11
@@ -83,6 +104,9 @@ typedef enum {
 						     * element UTF-8 SSID bit is set
 						     */
 #define WIFI_CAPABILITY_COUNTRY      0x00000020     /* set is 802.11 Country Element is present */
+#define WIFI_RSDB_TIMESLICE_DUTY_CYCLE	100
+#define WIFI_VSDB_TIMESLICE_DUTY_CYCLE	50
+
 #if defined(__linux__)
 #define PACK_ATTRIBUTE __attribute__ ((packed))
 #else
@@ -103,7 +127,27 @@ typedef struct {
 	uint8 PAD[2];
 } wifi_interface_info;
 
+typedef struct {
+	wifi_interface_mode mode;     /* interface mode */
+	uint8 mac_addr[6];               /* interface mac address (self) */
+	uint8 PAD[2];
+	wifi_connection_state state;  /* connection state (valid for STA, CLI only) */
+	wifi_roam_state roaming;      /* roaming state */
+	uint32 capabilities;             /* WIFI_CAPABILITY_XXX (self) */
+	uint8 ssid[DOT11_MAX_SSID_LEN+1]; /* null terminated SSID */
+	uint8 bssid[ETHER_ADDR_LEN];     /* bssid */
+	uint8 ap_country_str[3];         /* country string advertised by AP */
+	uint8 country_str[3];            /* country string for this association */
+	uint8 time_slicing_duty_cycle_percent;	/* if this iface is being served using time slicing
+						* on a radio with one or more ifaces (i.e MCC),
+						* then the duty cycle assigned to this iface in %.
+						* If not using time slicing (i.e SCC or DBS),
+						* set to 100.
+						*/
+} wifi_interface_info_v1;
+
 typedef wifi_interface_info *wifi_interface_handle;
+typedef wifi_interface_info_v1 *wifi_interface_handle_v1;
 
 /* channel information */
 typedef struct {
@@ -149,44 +193,6 @@ typedef struct {
 					*/
 } wifi_channel_stat;
 
-/* radio statistics */
-typedef struct {
-	struct {
-		uint16 version;
-		uint16 length;
-	};
-	wifi_radio radio;               /* wifi radio (if multiple radio supported) */
-	uint32 on_time;                    /* msecs the radio is awake (32 bits number
-					    * accruing over time)
-					    */
-	uint32 tx_time;                    /* msecs the radio is transmitting (32 bits
-					    * number accruing over time)
-					    */
-	uint32 rx_time;                    /* msecs the radio is in active receive (32 bits
-					    * number accruing over time)
-					    */
-	uint32 on_time_scan;               /* msecs the radio is awake due to all scan (32 bits
-					    * number accruing over time)
-					    */
-	uint32 on_time_nbd;                /* msecs the radio is awake due to NAN (32 bits
-					    * number accruing over time)
-					    */
-	uint32 on_time_gscan;              /* msecs the radio is awake due to G?scan (32 bits
-					    * number accruing over time)
-					    */
-	uint32 on_time_roam_scan;          /* msecs the radio is awake due to roam?scan (32 bits
-					    * number accruing over time)
-					    */
-	uint32 on_time_pno_scan;           /* msecs the radio is awake due to PNO scan (32 bits
-					    * number accruing over time)
-					    */
-	uint32 on_time_hs20;               /* msecs the radio is awake due to HS2.0 scans and
-					    * GAS exchange (32 bits number accruing over time)
-					    */
-	uint32 num_channels;               /* number of channels */
-	wifi_channel_stat channels[1];   /* channel statistics */
-} wifi_radio_stat;
-
 typedef struct {
 	wifi_radio radio;
 	uint32 on_time;
@@ -200,6 +206,28 @@ typedef struct {
 	uint32 on_time_hs20;
 	uint32 num_channels;
 } wifi_radio_stat_h;
+
+typedef struct {
+	wifi_radio radio;
+	uint32 on_time;
+	uint32 tx_time;
+	uint32 num_tx_levels;
+	uint32 *tx_time_per_levels;
+	uint32 rx_time;
+	uint32 on_time_scan;
+	uint32 on_time_nbd;
+	uint32 on_time_gscan;
+	uint32 on_time_roam_scan;
+	uint32 on_time_pno_scan;
+	uint32 on_time_hs20;
+	uint32 num_channels;
+} wifi_radio_stat_h_v2;
+
+/* radio statistics */
+typedef struct {
+	wifi_radio_stat_h_v2 radio_stats;
+	wifi_channel_stat channels[];  // channel statistics
+} wifi_radio_stat;
 
 /* per rate statistics */
 typedef struct {
@@ -246,6 +274,21 @@ typedef enum
 } wifi_peer_type;
 
 /* per peer statistics */
+typedef struct bssload_info {
+	uint16 sta_count;	/* station count */
+	uint16 chan_util;	/* channel utilization */
+	uint8 PAD[4];
+} bssload_info_t;
+
+typedef struct {
+	wifi_peer_type type;			/* peer type (AP, TDLS, GO etc.) */
+	uint8 peer_mac_address[6];		/* mac address */
+	uint32 capabilities;			/* peer WIFI_CAPABILITY_XXX */
+	bssload_info_t bssload;			/* STA count and CU */
+	uint32 num_rate;				/* number of rates */
+	wifi_rate_stat rate_stats[1];	/* per rate statistics, number of entries  = num_rate */
+} wifi_peer_info_v1;
+
 typedef struct {
 	wifi_peer_type type;           /* peer type (AP, TDLS, GO etc.) */
 	uint8 peer_mac_address[6];        /* mac address */
@@ -282,8 +325,13 @@ typedef struct {
 
 /* interface statistics */
 typedef struct {
+#ifdef LINKSTAT_EXT_SUPPORT
+	wifi_interface_handle_v1 iface;          /* wifi interface */
+	wifi_interface_info_v1 info;             /* current state of the interface */
+#else
 	wifi_interface_handle iface;          /* wifi interface */
 	wifi_interface_info info;             /* current state of the interface */
+#endif /* LINKSTAT_EXT_SUPPORT */
 	uint32 beacon_rx;                     /* access point beacon received count from
 					       * connected AP
 					       */
@@ -322,14 +370,22 @@ typedef struct {
 					       */
 	wifi_wmm_ac_stat ac[WIFI_AC_MAX];     /* per ac data packet statistics */
 	uint32 num_peers;                        /* number of peers */
+#if defined(LINKSTAT_EXT_SUPPORT) || (ANDROID_VERSION >= 12)
+	wifi_peer_info_v1 peer_info[1];        /* per peer statistics */
+#else
 	wifi_peer_info peer_info[1];           /* per peer statistics */
+#endif /* LINKSTAT_EXT_SUPPORT */
 } wifi_iface_stat;
 
 #ifdef CONFIG_COMPAT
 /* interface statistics */
 typedef struct {
 	compat_uptr_t iface;          /* wifi interface */
+#ifdef LINKSTAT_EXT_SUPPORT
+	wifi_interface_info_v1 info;             /* current state of the interface */
+#else
 	wifi_interface_info info;             /* current state of the interface */
+#endif /* LINKSTAT_EXT_SUPPORT */
 	uint32 beacon_rx;                     /* access point beacon received count from
 					       * connected AP
 					       */
@@ -368,7 +424,11 @@ typedef struct {
 					       */
 	wifi_wmm_ac_stat ac[WIFI_AC_MAX];     /* per ac data packet statistics */
 	uint32 num_peers;                        /* number of peers */
+#if defined(LINKSTAT_EXT_SUPPORT) || (ANDROID_VERSION >= 12)
+	wifi_peer_info_v1 peer_info[1];        /* per peer statistics */
+#else
 	wifi_peer_info peer_info[1];           /* per peer statistics */
+#endif /* LINKSTAT_EXT_SUPPORT */
 } compat_wifi_iface_stat;
 #endif /* CONFIG_COMPAT */
 

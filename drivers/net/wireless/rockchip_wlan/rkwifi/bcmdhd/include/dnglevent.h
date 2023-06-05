@@ -3,7 +3,7 @@
  *
  * Dependencies: bcmeth.h
  *
- * Copyright (C) 2020, Broadcom.
+ * Copyright (C) 2022, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -50,6 +50,7 @@
 #define DNGL_E_RSRVD_2				0x1
 #define DNGL_E_SOCRAM_IND			0x2
 #define DNGL_E_PROFILE_DATA_IND			0x3
+#define DNGL_E_SPMI_RESET_IND			0x4
 typedef BWL_PRE_PACKED_STRUCT struct
 {
 	uint16  version; /* Current version is 1 */
@@ -68,7 +69,7 @@ typedef BWL_PRE_PACKED_STRUCT struct bcm_dngl_event {
 typedef BWL_PRE_PACKED_STRUCT struct bcm_dngl_socramind {
 	uint16			tag;	/* data tag */
 	uint16			length; /* data length */
-	uint8			value[1]; /* data value with variable length specified by length */
+	uint8			value[BCM_FLEX_ARRAY]; /* variable length specified by length */
 } BWL_POST_PACKED_STRUCT bcm_dngl_socramind_t;
 
 typedef BWL_PRE_PACKED_STRUCT struct bcm_dngl_profile_data_ind_t {
@@ -76,6 +77,16 @@ typedef BWL_PRE_PACKED_STRUCT struct bcm_dngl_profile_data_ind_t {
 	uint16 length;
 	uint8 value[];
 } BWL_POST_PACKED_STRUCT bcm_dngl_profile_data_ind_t;
+
+#define DNGL_E_SPMI_RESET_IND_VERSION_1 1u
+#define DNGL_E_SPMI_RESET_IND_VERSION DNGL_E_SPMI_RESET_IND_VERSION_1
+
+typedef BWL_PRE_PACKED_STRUCT struct bcm_dngl_spmi_reset_ind_v1_t {
+	uint16		version;	/* Current version is 1 */
+	uint16		num_resets;	/* number of resets seen since last message */
+	uint8		slave_idx;	/* Slave idx of the SPMI core that was reset */
+	uint8		PAD[3];
+} BWL_POST_PACKED_STRUCT bcm_dngl_spmi_reset_ind_v1_t;
 
 typedef BWL_PRE_PACKED_STRUCT struct bcm_dngl_arm_event {
 	uint32 type;
@@ -112,7 +123,7 @@ typedef enum socram_ind_tag {
 typedef BWL_PRE_PACKED_STRUCT struct bcm_dngl_healthcheck {
 	uint16			top_module_tag;	/* top level module tag */
 	uint16			top_module_len; /* Type of PCIE issue indication */
-	uint8			value[1]; /* data value with variable length specified by length */
+	uint8			value[BCM_FLEX_ARRAY]; /* variable length specified by length */
 } BWL_POST_PACKED_STRUCT bcm_dngl_healthcheck_t;
 
 /* Health check top level module tags */
@@ -142,6 +153,9 @@ typedef BWL_PRE_PACKED_STRUCT struct bcm_dngl_healthcheck {
 #define HEALTH_CHECK_PCIEDEV_FLOWRING_IND	0x9
 #define HEALTH_CHECK_PCIEDEV_HW_ASSERT_LONG_IND 0xA
 #define HEALTH_CHECK_PCIEDEV_RXPOST_LONG_IND	0xB
+#define HEALTH_CHECK_PCIEDEV_PTM_DRIFT_IND	0xC
+#define HEALTH_CHECK_PCIEDEV_PTM_FAIL_IND	0xD
+#define HEALTH_CHECK_PCIEDEV_PTM_TIMEOUT_IND	0xE
 
 #define HC_PCIEDEV_CONFIG_REGLIST_MAX	25
 typedef BWL_PRE_PACKED_STRUCT struct bcm_dngl_pcie_hc {

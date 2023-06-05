@@ -3,7 +3,7 @@
  *
  * Provides type definitions and function prototypes used to parse ip packet.
  *
- * Copyright (C) 2020, Broadcom.
+ * Copyright (C) 2022, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -62,10 +62,10 @@ extern tcp_hdr_flag_t dhd_tcpdata_get_flag(dhd_pub_t *dhdp, void *pkt);
 
 /* Max number of TCP streams that have own src/dst IP addrs and TCP ports */
 #ifndef TCPACK_INFO_MAXNUM
-#define TCPACK_INFO_MAXNUM 4
+#define TCPACK_INFO_MAXNUM 40
 #endif
 #ifndef TCPDATA_INFO_MAXNUM
-#define TCPDATA_INFO_MAXNUM 4
+#define TCPDATA_INFO_MAXNUM 40
 #endif
 #define TCPDATA_PSH_INFO_MAXNUM (8 * TCPDATA_INFO_MAXNUM)
 

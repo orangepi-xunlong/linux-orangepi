@@ -1,7 +1,7 @@
 /*
  * Fundamental types and constants relating to WPA
  *
- * Copyright (C) 2020, Broadcom.
+ * Copyright (C) 2022, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -96,7 +96,7 @@ typedef BWL_PRE_PACKED_STRUCT struct
 		uint8 low;
 		uint8 high;
 	} BWL_POST_PACKED_STRUCT count;
-	wpa_suite_t list[1];
+	wpa_suite_t list[BCM_FLEX_ARRAY];
 } BWL_POST_PACKED_STRUCT wpa_suite_ucast_t, wpa_suite_auth_key_mgmt_t;
 #define WPA_IE_SUITE_COUNT_LEN	2
 typedef BWL_PRE_PACKED_STRUCT struct
@@ -105,7 +105,7 @@ typedef BWL_PRE_PACKED_STRUCT struct
 		uint8 low;
 		uint8 high;
 	} BWL_POST_PACKED_STRUCT count;
-	wpa_pmkid_t list[1];
+	wpa_pmkid_t list[BCM_FLEX_ARRAY];
 } BWL_POST_PACKED_STRUCT wpa_pmkid_list_t;
 
 /* WPA cipher suites */
@@ -134,13 +134,6 @@ typedef BWL_PRE_PACKED_STRUCT struct
 #define WPA_CIPHER_BIP_GMAC_256 12	/* BIP_GMAC_256 */
 #define WPA_CIPHER_BIP_CMAC_256 13	/* BIP_CMAC_256 */
 
-#ifdef BCMWAPI_WAI
-#define WAPI_CIPHER_NONE	WPA_CIPHER_NONE
-#define WAPI_CIPHER_SMS4	11
-
-#define WAPI_CSE_WPI_SMS4	1
-#endif /* BCMWAPI_WAI */
-
 #define IS_WPA_CIPHER(cipher)	((cipher) == WPA_CIPHER_NONE || \
 				 (cipher) == WPA_CIPHER_WEP_40 || \
 				 (cipher) == WPA_CIPHER_WEP_104 || \
@@ -156,18 +149,6 @@ typedef BWL_PRE_PACKED_STRUCT struct
 				    (cipher) == WPA_CIPHER_BIP_GMAC_128 || \
 				    (cipher) == WPA_CIPHER_BIP_GMAC_256 || \
 				    (cipher) == WPA_CIPHER_BIP_CMAC_256)
-
-#ifdef BCMWAPI_WAI
-#define IS_WAPI_CIPHER(cipher)	((cipher) == WAPI_CIPHER_NONE || \
-				 (cipher) == WAPI_CSE_WPI_SMS4)
-
-/* convert WAPI_CSE_WPI_XXX to WAPI_CIPHER_XXX */
-#define WAPI_CSE_WPI_2_CIPHER(cse) ((cse) == WAPI_CSE_WPI_SMS4 ? \
-				WAPI_CIPHER_SMS4 : WAPI_CIPHER_NONE)
-
-#define WAPI_CIPHER_2_CSE_WPI(cipher) ((cipher) == WAPI_CIPHER_SMS4 ? \
-				WAPI_CSE_WPI_SMS4 : WAPI_CIPHER_NONE)
-#endif /* BCMWAPI_WAI */
 
 #define IS_VALID_AKM(akm) ((akm) == RSN_AKM_NONE || \
 			(akm) == RSN_AKM_UNSPECIFIED || \
@@ -185,12 +166,14 @@ typedef BWL_PRE_PACKED_STRUCT struct
 			(akm) == RSN_AKM_FILS_SHA384 || \
 			(akm) == RSN_AKM_OWE || \
 			(akm) == RSN_AKM_SUITEB_SHA256_1X || \
-			(akm) == RSN_AKM_SUITEB_SHA384_1X)
+			(akm) == RSN_AKM_SUITEB_SHA384_1X || \
+			(akm) == RSN_AKM_PASN)
 
 #define IS_VALID_BIP_CIPHER(cipher) ((cipher) == WPA_CIPHER_BIP || \
 					(cipher) == WPA_CIPHER_BIP_GMAC_128 || \
 					(cipher) == WPA_CIPHER_BIP_GMAC_256 || \
-					(cipher) == WPA_CIPHER_BIP_CMAC_256)
+					(cipher) == WPA_CIPHER_BIP_CMAC_256 || \
+					(cipher) == WPA_CIPHER_TPK)
 
 #define WPA_IS_FT_AKM(akm)	((akm) == RSN_AKM_FBT_SHA256 || \
 			(akm) == RSN_AKM_FBT_SHA384)
@@ -283,22 +266,13 @@ typedef struct rsn_ie_info {
 	uint8 ptk_len;				/* EAPOL PTK */
 	uint8 kck2_len;				/* EAPOL KCK2 */
 	uint8 kek2_len;				/* EAPOL KEK2 */
+	uint8 rsnxe_len;			/* RSNXE IE from assoc request */
+	uint8 *rsnxe;				/* RSNXE IE length */
+	uint8 kdk_len;				/* EAPOL KDK */
+	uint8 pad[3];
+	uint32 rsnxe_cap;			/* RSNXE IE cap flag, refer to 802.11.h */
 } rsn_ie_info_t;
 #endif /* RSN_IE_INFO_STRUCT_RELOCATED */
-
-#ifdef BCMWAPI_WAI
-#define WAPI_CAP_PREAUTH		RSN_CAP_PREAUTH
-
-/* Other WAI definition */
-#define WAPI_WAI_REQUEST		0x00F1
-#define WAPI_UNICAST_REKEY		0x00F2
-#define WAPI_STA_AGING			0x00F3
-#define WAPI_MUTIL_REKEY		0x00F4
-#define WAPI_STA_STATS			0x00F5
-
-#define WAPI_USK_REKEY_COUNT		0x4000000 /* 0xA00000 */
-#define WAPI_MSK_REKEY_COUNT		0x4000000 /* 0xA00000 */
-#endif /* BCMWAPI_WAI */
 
 /* This marks the end of a packed structure section. */
 #include <packed_section_end.h>

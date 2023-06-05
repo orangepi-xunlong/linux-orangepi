@@ -2,7 +2,7 @@
  *  BCMSDH interface glue
  *  implement bcmsdh API for SDIOH driver
  *
- * Copyright (C) 2020, Broadcom.
+ * Copyright (C) 2022, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -46,7 +46,7 @@
 #include <sbsdio.h>	/* SDIO device core hardware definitions. */
 #include <sdio.h>	/* SDIO Device and Protocol Specs */
 
-#if defined (BT_OVER_SDIO)
+#if defined(BT_OVER_SDIO)
 #include <dhd_bt_interface.h>
 #endif /* defined (BT_OVER_SDIO) */
 
@@ -56,7 +56,7 @@ const uint bcmsdh_msglevel = BCMSDH_ERROR_VAL;
 /* local copy of bcm sd handler */
 bcmsdh_info_t * l_bcmsdh = NULL;
 
-#if defined (BT_OVER_SDIO)
+#if defined(BT_OVER_SDIO)
 struct sdio_func *func_f3 = NULL;
 static f3intr_handler processf3intr = NULL;
 static dhd_hang_notification process_dhd_hang_notification = NULL;
@@ -78,7 +78,7 @@ bcmsdh_enable_hw_oob_intr(bcmsdh_info_t *sdh, bool enable)
 }
 #endif
 
-#if defined (BT_OVER_SDIO)
+#if defined(BT_OVER_SDIO)
 void bcmsdh_btsdio_process_hang_state(dhd_hang_state_t new_state)
 {
 	bool state_change = false;
@@ -358,9 +358,6 @@ bcmsdh_cfg_read(void *sdh, uint fnc_num, uint32 addr, int *err)
 
 	return data;
 }
-#ifdef BCMSDH_MODULE
-EXPORT_SYMBOL(bcmsdh_cfg_read);
-#endif
 
 void
 bcmsdh_cfg_write(void *sdh, uint fnc_num, uint32 addr, uint8 data, int *err)
@@ -391,9 +388,6 @@ bcmsdh_cfg_write(void *sdh, uint fnc_num, uint32 addr, uint8 data, int *err)
 	BCMSDH_INFO(("%s:fun = %d, addr = 0x%x, uint8data = 0x%x\n", __FUNCTION__,
 	            fnc_num, addr, data));
 }
-#ifdef BCMSDH_MODULE
-EXPORT_SYMBOL(bcmsdh_cfg_write);
-#endif
 
 uint32
 bcmsdh_cfg_read_word(void *sdh, uint fnc_num, uint32 addr, int *err)
@@ -497,7 +491,6 @@ bcmsdh_cisaddr_read(void *sdh, uint func, uint8 *cisd, uint32 offset)
 
 	return (SDIOH_API_SUCCESS(status) ? 0 : BCME_ERROR);
 }
-
 
 int
 bcmsdhsdio_set_sbaddr_window(void *sdh, uint32 address, bool force_set)
