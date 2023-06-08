@@ -40,6 +40,7 @@ struct rockchip_bus {
 	struct notifier_block clk_nb;
 	struct notifier_block cpufreq_nb;
 	struct busfreq_table *freq_table;
+	struct rockchip_opp_info opp_info;
 
 	unsigned int max_state;
 
@@ -208,7 +209,7 @@ static int rockchip_bus_power_control_init(struct rockchip_bus *bus)
 		return PTR_ERR(bus->regulator);
 	}
 
-	ret = rockchip_init_opp_table(dev, NULL, "leakage", "pvtm");
+	ret = rockchip_init_opp_table(dev, &bus->opp_info, NULL, "pvtm");
 	if (ret < 0) {
 		dev_err(dev, "failed to get OPP table\n");
 		return ret;
