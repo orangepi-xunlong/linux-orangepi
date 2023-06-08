@@ -71,18 +71,25 @@ static void shm_release(struct dma_buf *dma_buf)
 	kfree(data);
 }
 
-static void *shm_vmap(struct dma_buf *dma_buf)
+static int shm_vmap(struct dma_buf *dma_buf, struct iosys_map *map)
 {
 	struct shm_data *data = dma_buf->priv;
+	void *vaddr;
 
-	return vm_map_ram(data->pages, data->npages, 0);
+	vaddr = vm_map_ram(data->pages, data->npages, 0);
+	if (!vaddr)
+		return -ENOMEM;
+	iosys_map_set_vaddr(map, vaddr);
+
+	return 0;
 }
 
-static void shm_vunmap(struct dma_buf *dma_buf, void *vaddr)
+static void shm_vunmap(struct dma_buf *dma_buf, struct iosys_map *map)
 {
 	struct shm_data *data = dma_buf->priv;
 
-	vm_unmap_ram(vaddr, data->npages);
+	vm_unmap_ram(map->vaddr, data->npages);
+	iosys_map_clear(map);
 }
 
 static int shm_mmap(struct dma_buf *dma_buf, struct vm_area_struct *vma)
