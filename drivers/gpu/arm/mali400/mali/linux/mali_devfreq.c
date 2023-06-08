@@ -244,6 +244,7 @@ int mali_devfreq_init(struct mali_device *mdev)
 	struct devfreq_dev_profile *dp;
 	struct dev_pm_opp *opp;
 	unsigned long opp_rate;
+	unsigned int dyn_power_coeff = 0;
 	int err;
 
 	MALI_DEBUG_PRINT(2, ("Init Mali devfreq\n"));
@@ -269,6 +270,10 @@ int mali_devfreq_init(struct mali_device *mdev)
 			     &ondemand_data.upthreshold);
 	of_property_read_u32(np, "downdifferential",
 			     &ondemand_data.downdifferential);
+	of_property_read_u32(np, "dynamic-power-coefficient",
+			     &dyn_power_coeff);
+	if (dyn_power_coeff)
+		dp->is_cooling_device = true;
 
 	mdev->devfreq = devfreq_add_device(mdev->dev, dp,
 					   "simple_ondemand", &ondemand_data);
@@ -290,6 +295,7 @@ int mali_devfreq_init(struct mali_device *mdev)
 	mdev->devfreq->last_status.current_frequency = opp_rate;
 
 	mali_mdevp.data = mdev->devfreq;
+	mali_mdevp.opp_info = &mdev->opp_info;
 	mdev->mdev_info = rockchip_system_monitor_register(mdev->dev,
 							   &mali_mdevp);
 	if (IS_ERR(mdev->mdev_info)) {
@@ -310,9 +316,8 @@ int mali_devfreq_init(struct mali_device *mdev)
 		}
 	}
 
-	if (callbacks) {
-		mdev->devfreq_cooling = of_devfreq_cooling_register_power(
-						mdev->dev->of_node,
+	if (callbacks && !dp->is_cooling_device) {
+		mdev->devfreq_cooling = devfreq_cooling_em_register(
 						mdev->devfreq,
 						callbacks);
 		if (IS_ERR_OR_NULL(mdev->devfreq_cooling)) {
@@ -349,7 +354,8 @@ void mali_devfreq_term(struct mali_device *mdev)
 
 	rockchip_system_monitor_unregister(mdev->mdev_info);
 #ifdef CONFIG_DEVFREQ_THERMAL
-	devfreq_cooling_unregister(mdev->devfreq_cooling);
+	if (!IS_ERR_OR_NULL(mdev->devfreq_cooling))
+		devfreq_cooling_unregister(mdev->devfreq_cooling);
 #endif
 
 	devfreq_unregister_opp_notifier(mdev->dev, mdev->devfreq);

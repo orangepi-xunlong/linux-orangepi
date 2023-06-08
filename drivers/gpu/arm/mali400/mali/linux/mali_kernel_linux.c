@@ -202,7 +202,8 @@ extern int mali_platform_device_unregister(void);
 #endif
 #endif
 
-extern int rk_platform_init_opp_table(struct device *dev);
+extern int rk_platform_init_opp_table(struct mali_device *mdev);
+extern void rk_platform_uninit_opp_table(struct mali_device *mdev);
 
 /* Linux power management operations provided by the Mali device driver */
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(2, 6, 29))
@@ -514,7 +515,6 @@ static int mali_probe(struct platform_device *pdev)
 	int err;
 #ifdef CONFIG_MALI_DEVFREQ
 	struct mali_device *mdev;
-	const char *name = "mali";
 #endif
 
 	MALI_DEBUG_PRINT(2, ("mali_probe(): Called for platform device %s\n", pdev->name));
@@ -569,13 +569,6 @@ static int mali_probe(struct platform_device *pdev)
 		mdev->regulator = NULL;
 		/* Allow probe to continue without regulator */
 	}
-	if (mdev->regulator) {
-		mdev->opp_table = dev_pm_opp_set_regulators(mdev->dev, &name, 1);
-		if (IS_ERR(mdev->opp_table)) {
-			mdev->opp_table = NULL;
-			MALI_DEBUG_PRINT(2, ("Continuing without opp regulator\n"));
-		}
-	}
 #endif /* LINUX_VERSION_CODE >= 3, 12, 0 */
 
 	mdev->num_clks = devm_clk_bulk_get_all(mdev->dev, &mdev->clks);
@@ -598,7 +591,7 @@ static int mali_probe(struct platform_device *pdev)
 		goto clock_prepare_failed;
 	}
 
-	err = rk_platform_init_opp_table(mdev->dev);
+	err = rk_platform_init_opp_table(mdev);
 	if (err)
 		MALI_DEBUG_PRINT(3, ("Failed to init_opp_table\n"));
 
@@ -654,13 +647,12 @@ clock_prepare_failed:
 	clk_put(mdev->clock);
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 19, 0)) && defined(CONFIG_OF) \
                         && defined(CONFIG_PM_OPP)
-	dev_pm_opp_of_remove_table(mdev->dev);
+	rk_platform_uninit_opp_table(mdev);
 #endif
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 12, 0)) && defined(CONFIG_OF) \
                         && defined(CONFIG_REGULATOR)
 	regulator_put(mdev->regulator);
-	dev_pm_opp_put_regulators(mdev->opp_table);
 #endif /* LINUX_VERSION_CODE >= 3, 12, 0 */
 	mali_device_free(mdev);
 #endif
@@ -698,13 +690,12 @@ static int mali_remove(struct platform_device *pdev)
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 19, 0)) && defined(CONFIG_OF) \
                         && defined(CONFIG_PM_OPP)
-	dev_pm_opp_of_remove_table(mdev->dev);
+	rk_platform_uninit_opp_table(mdev);
 #endif
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 12, 0)) && defined(CONFIG_OF) \
                         && defined(CONFIG_REGULATOR)
 	regulator_put(mdev->regulator);
-	dev_pm_opp_put_regulators(mdev->opp_table);
 #endif /* LINUX_VERSION_CODE >= 3, 12, 0 */
 	mali_device_free(mdev);
 #endif

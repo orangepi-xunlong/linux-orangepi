@@ -227,6 +227,8 @@ static void rk_context_deinit(struct platform_device *pdev)
 
 #if defined(CONFIG_MALI_DEVFREQ) && defined(CONFIG_DEVFREQ_THERMAL)
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 1, 0)
+
 #define FALLBACK_STATIC_TEMPERATURE 55000
 
 static u32 dynamic_coefficient;
@@ -398,6 +400,8 @@ static int power_model_simple_init(struct platform_device *pdev)
 
 #endif
 
+#endif
+
 /*---------------------------------------------------------------------------*/
 
 #ifdef CONFIG_PM
@@ -501,9 +505,15 @@ static void rk_platform_power_off_gpu(struct device *dev)
 	}
 }
 
-int rk_platform_init_opp_table(struct device *dev)
+int rk_platform_init_opp_table(struct mali_device *mdev)
 {
-	return rockchip_init_opp_table(dev, NULL, "gpu_leakage", "mali");
+	return rockchip_init_opp_table(mdev->dev, &mdev->opp_info,
+				       "clk_mali", "mali");
+}
+
+void rk_platform_uninit_opp_table(struct mali_device *mdev)
+{
+	rockchip_uninit_opp_table(mdev->dev, &mdev->opp_info);
 }
 
 static int mali_runtime_suspend(struct device *device)
@@ -654,7 +664,9 @@ static const struct mali_gpu_device_data mali_gpu_data = {
 	.shared_mem_size = 1024 * 1024 * 1024, /* 1GB */
 	.max_job_runtime = 60000, /* 60 seconds */
 #if defined(CONFIG_MALI_DEVFREQ) && defined(CONFIG_DEVFREQ_THERMAL)
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 1, 0)
 	.gpu_cooling_ops = &rk_cooling_ops,
+#endif
 #endif
 };
 
@@ -682,35 +694,28 @@ int mali_platform_device_init(struct platform_device *pdev)
 				       sizeof(mali_gpu_data));
 	if (err) {
 		E("fail to add platform_specific_data. err : %d.", err);
-		goto add_data_failed;
+		return err;
 	}
 
 	err = rk_context_init(pdev);
 	if (err) {
 		E("fail to init rk_context. err : %d.", err);
-		goto init_rk_context_failed;
+		return err;
 	}
 
 #if defined(CONFIG_MALI_DEVFREQ) && defined(CONFIG_DEVFREQ_THERMAL)
 	if (of_machine_is_compatible("rockchip,rk3036"))
 		return 0;
-
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 1, 0)
 	err = power_model_simple_init(pdev);
 	if (err) {
 		E("fail to init simple_power_model, err : %d.", err);
-		goto init_power_model_failed;
+		rk_context_deinit(pdev);
+		return err;
 	}
 #endif
-
-	return 0;
-
-#if defined(CONFIG_MALI_DEVFREQ) && defined(CONFIG_DEVFREQ_THERMAL)
-init_power_model_failed:
-	rk_context_deinit(pdev);
 #endif
-init_rk_context_failed:
-add_data_failed:
-	return err;
+	return 0;
 }
 
 void mali_platform_device_deinit(struct platform_device *pdev)
