@@ -458,6 +458,9 @@ static int rk3528_combphy_cfg(struct rockchip_combphy_priv *priv)
 		/* Enable adaptive CTLE for USB3.0 Rx */
 		rockchip_combphy_updatel(priv, GENMASK(17, 17), BIT(17), 0x200);
 
+		/* Set Rx squelch input filler bandwidth */
+		rockchip_combphy_updatel(priv, GENMASK(2, 0), 0x06, 0x20c);
+
 		rockchip_combphy_param_write(priv->phy_grf, &cfg->pipe_txcomp_sel, false);
 		rockchip_combphy_param_write(priv->phy_grf, &cfg->pipe_txelec_sel, false);
 		rockchip_combphy_param_write(priv->phy_grf, &cfg->usb_mode_set, true);
@@ -485,8 +488,8 @@ static int rk3528_combphy_cfg(struct rockchip_combphy_priv *priv)
 			/* PLL KVCO tuning fine */
 			rockchip_combphy_updatel(priv, GENMASK(12, 10), 0x2 << 10, 0x18);
 
-			/* su_trim[6:4]=111, [10:7]=1001, [2:0]=000 */
-			rockchip_combphy_updatel(priv, 0x7f7, 0x4f0, 0x108);
+			/* su_trim[6:4]=111, [10:7]=1001, [2:0]=000, swing 650mv */
+			writel(0x570804f0, priv->mmio + 0x108);
 		}
 		break;
 	default:
@@ -584,6 +587,9 @@ static int rk3562_combphy_cfg(struct rockchip_combphy_priv *priv)
 		/* Set PLL KVCO to min and set PLL charge pump current to max */
 		writel(0xf0, priv->mmio + (0xa << 2));
 
+		/* Set Rx squelch input filler bandwidth */
+		writel(0x0e, priv->mmio + (0x14 << 2));
+
 		rockchip_combphy_param_write(priv->phy_grf, &cfg->pipe_sel_usb, true);
 		rockchip_combphy_param_write(priv->phy_grf, &cfg->pipe_txcomp_sel, false);
 		rockchip_combphy_param_write(priv->phy_grf, &cfg->pipe_txelec_sel, false);
@@ -620,6 +626,9 @@ static int rk3562_combphy_cfg(struct rockchip_combphy_priv *priv)
 
 			writel(0x32, priv->mmio + (0x11 << 2));
 			writel(0xf0, priv->mmio + (0xa << 2));
+
+			/* CKDRV output swing adjust to 650mv */
+			rockchip_combphy_updatel(priv, GENMASK(4, 1), 0xb, 0xd << 2);
 		}
 		break;
 	default:
@@ -734,6 +743,9 @@ static int rk3568_combphy_cfg(struct rockchip_combphy_priv *priv)
 
 		/* Set PLL KVCO to min and set PLL charge pump current to max */
 		writel(0xf0, priv->mmio + (0xa << 2));
+
+		/* Set Rx squelch input filler bandwidth */
+		writel(0x0e, priv->mmio + (0x14 << 2));
 
 		rockchip_combphy_param_write(priv->phy_grf, &cfg->pipe_sel_usb, true);
 		rockchip_combphy_param_write(priv->phy_grf, &cfg->pipe_txcomp_sel, false);

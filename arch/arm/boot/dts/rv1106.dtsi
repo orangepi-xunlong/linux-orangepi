@@ -1265,7 +1265,7 @@
 		snps,tso;
 
 		tx-dma-size = <256>;
-		rx-dma-size = <16>;
+		rx-dma-size = <128>;
 
 		snps,axi-config = <&stmmac_axi_setup>;
 		snps,mtl-rx-config = <&mtl_rx_setup>;
@@ -1274,6 +1274,9 @@
 		phy-mode = "rmii";
 		clock_in_out = "input";
 		phy-handle = <&rmii_phy>;
+
+		/* FLOW_OFF: 0, FLOW_RX: 1, FLOW_TX: 2, FLOW_AUTO: 3 */
+		snps,flow-ctrl = <0>;
 
 		nvmem-cells = <&macphy_bgs>;
 		nvmem-cell-names = "bgs";
@@ -1291,6 +1294,7 @@
 				phy-is-integrated;
 				nvmem-cells = <&macphy_txlevel>;
 				nvmem-cell-names = "txlevel";
+				bgs,increment = <2>;
 			};
 		};
 

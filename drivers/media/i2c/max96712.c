@@ -11,6 +11,8 @@
  *         support modes enable select.
  *         auto initial deskew enable configure.
  *         frame sync period enable configure.
+ * V1.3.00 t_lpx timing adjust from 53.4ns to 106.7ns.
+ *         mipi dpll predef rate set api.
  *
  */
 
@@ -38,13 +40,13 @@
 #include <media/v4l2-fwnode.h>
 #include <media/v4l2-subdev.h>
 
-#define DRIVER_VERSION			KERNEL_VERSION(1, 0x02, 0x00)
+#define DRIVER_VERSION			KERNEL_VERSION(1, 0x03, 0x00)
 
 #ifndef V4L2_CID_DIGITAL_GAIN
 #define V4L2_CID_DIGITAL_GAIN		V4L2_CID_GAIN
 #endif
 
-#define MAX96712_LINK_FREQ_1000MHZ	1000000000UL
+#define MAX96712_LINK_FREQ_MHZ(x)	((x) * 1000000UL)
 #define MAX96712_XVCLK_FREQ		25000000
 
 #define MAX96712_CHIP_ID		0xA0
@@ -127,6 +129,7 @@ struct max96712 {
 	struct gpio_desc *power_gpio;
 	struct gpio_desc *reset_gpio;
 	struct gpio_desc *pwdn_gpio;
+	struct gpio_desc *pocen_gpio;
 	struct gpio_desc *lock_gpio;
 	struct regulator_bulk_data supplies[MAX96712_NUM_SUPPLIES];
 
@@ -171,6 +174,17 @@ static const struct regmap_config max96712_regmap_config = {
 	.reg_bits = 16,
 	.val_bits = 8,
 	.max_register = 0x1F17,
+};
+
+static struct rkmodule_csi_dphy_param rk3588_dcphy_param = {
+	.vendor = PHY_VENDOR_SAMSUNG,
+	.lp_vol_ref = 3,
+	.lp_hys_sw = {3, 0, 0, 0},
+	.lp_escclk_pol_sel = {1, 0, 0, 0},
+	.skew_data_cal_clk = {0, 0, 0, 0},
+	.clk_hs_term_sel = 2,
+	.data_hs_term_sel = {2, 2, 2, 2},
+	.reserved = {0},
 };
 
 static const struct regval max96712_mipi_4lane_1920x1440_30fps[] = {
@@ -242,16 +256,7 @@ static const struct regval max96712_mipi_4lane_1920x1440_30fps[] = {
 	{ 0x29, 0x090A, 0xc0, 0x00 }, // MIPI PHY 0: 4 lanes, DPHY, 2bit VC
 	{ 0x29, 0x094A, 0xc0, 0x00 }, // MIPI PHY 1: 4 lanes, DPHY, 2bit VC
 	// Turn on MIPI PHYs
-	{ 0x29, 0x08A2, 0x30, 0x00 }, // Enable MIPI PHY 0/1
-	// Hold DPLL in reset (config_soft_rst_n = 0) before changing the rate
-	{ 0x29, 0x1C00, 0xf4, 0x00 },
-	{ 0x29, 0x1D00, 0xf4, 0x00 },
-	// Set Data rate to be 2000Mbps/lane for port A and enable software override
-	{ 0x29, 0x0415, 0x34, 0x00 }, // Enable freq fine tuning, 2000Mbps
-	{ 0x29, 0x0418, 0x34, 0x00 }, // Enable freq fine tuning, 2000Mbps
-	// Release reset to DPLL (config_soft_rst_n = 1)
-	{ 0x29, 0x1C00, 0xf5, 0x00 },
-	{ 0x29, 0x1D00, 0xf5, 0x00 },
+	{ 0x29, 0x08A2, 0x34, 0x00 }, // Enable MIPI PHY 0/1, t_lpx = 106.7ns
 	// YUV422 8bit software override for all pipes since connected GMSL1 is under parallel mode
 	{ 0x29, 0x040B, 0x80, 0x00 }, // pipe 0 bpp=0x10: Datatypes = 0x22, 0x1E, 0x2E
 	{ 0x29, 0x040E, 0x5e, 0x00 }, // pipe 0 DT=0x1E: YUV422 8-bit
@@ -278,7 +283,7 @@ static const struct max96712_mode supported_modes_4lane[] = {
 			.denominator = 300000,
 		},
 		.reg_list = max96712_mipi_4lane_1920x1440_30fps,
-		.link_freq_idx = 0,
+		.link_freq_idx = 20,
 		.bus_fmt = MEDIA_BUS_FMT_UYVY8_2X8,
 		.bpp = 16,
 		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_0,
@@ -288,8 +293,34 @@ static const struct max96712_mode supported_modes_4lane[] = {
 	},
 };
 
+/* link freq = index * MAX96712_LINK_FREQ_MHZ(50) */
 static const s64 link_freq_items[] = {
-	MAX96712_LINK_FREQ_1000MHZ,
+	MAX96712_LINK_FREQ_MHZ(0),
+	MAX96712_LINK_FREQ_MHZ(50),
+	MAX96712_LINK_FREQ_MHZ(100),
+	MAX96712_LINK_FREQ_MHZ(150),
+	MAX96712_LINK_FREQ_MHZ(200),
+	MAX96712_LINK_FREQ_MHZ(250),
+	MAX96712_LINK_FREQ_MHZ(300),
+	MAX96712_LINK_FREQ_MHZ(350),
+	MAX96712_LINK_FREQ_MHZ(400),
+	MAX96712_LINK_FREQ_MHZ(450),
+	MAX96712_LINK_FREQ_MHZ(500),
+	MAX96712_LINK_FREQ_MHZ(550),
+	MAX96712_LINK_FREQ_MHZ(600),
+	MAX96712_LINK_FREQ_MHZ(650),
+	MAX96712_LINK_FREQ_MHZ(700),
+	MAX96712_LINK_FREQ_MHZ(750),
+	MAX96712_LINK_FREQ_MHZ(800),
+	MAX96712_LINK_FREQ_MHZ(850),
+	MAX96712_LINK_FREQ_MHZ(900),
+	MAX96712_LINK_FREQ_MHZ(950),
+	MAX96712_LINK_FREQ_MHZ(1000),
+	MAX96712_LINK_FREQ_MHZ(1050),
+	MAX96712_LINK_FREQ_MHZ(1100),
+	MAX96712_LINK_FREQ_MHZ(1150),
+	MAX96712_LINK_FREQ_MHZ(1200),
+	MAX96712_LINK_FREQ_MHZ(1250),
 };
 
 /* Write registers up to 4 at a time */
@@ -587,6 +618,108 @@ static irqreturn_t max96712_hot_plug_detect_irq_handler(int irq, void *dev_id)
 	}
 
 	return IRQ_HANDLED;
+}
+
+static int __maybe_unused max96712_dphy_dpll_predef_set(struct i2c_client *client,
+				u32 link_freq_mhz)
+{
+	int ret = 0;
+	u8 dpll_val = 0, dpll_lock = 0;
+	u8 mipi_tx_phy_enable = 0;
+
+	ret = max96712_read_reg(client, MAX96712_I2C_ADDR,
+			0x08A2, MAX96712_REG_VALUE_08BIT, &mipi_tx_phy_enable);
+	if (ret)
+		return ret;
+	mipi_tx_phy_enable = (mipi_tx_phy_enable & 0xF0) >> 4;
+
+	dev_info(&client->dev, "DPLL predef set: mipi_tx_phy_enable = 0x%02x, link_freq_mhz = %d\n",
+			mipi_tx_phy_enable, link_freq_mhz);
+
+	// dphy max data rate is 2500MHz
+	if (link_freq_mhz > (2500 >> 1))
+		link_freq_mhz = (2500 >> 1);
+
+	dpll_val = DIV_ROUND_UP(link_freq_mhz * 2, 100) & 0x1F;
+	// Disable software override for frequency fine tuning
+	dpll_val |= BIT(5);
+
+	// MIPI PHY0
+	if (mipi_tx_phy_enable & BIT(0)) {
+		// Hold DPLL in reset (config_soft_rst_n = 0) before changing the rate
+		ret |= max96712_write_reg(client, MAX96712_I2C_ADDR,
+			0x1C00,
+			MAX96712_REG_VALUE_08BIT,
+			0xf4);
+		// Set data rate and enable software override
+		ret |= max96712_update_reg_bits(client, MAX96712_I2C_ADDR,
+			0x0415, 0x3F, dpll_val);
+		// Release reset to DPLL (config_soft_rst_n = 1)
+		ret |= max96712_write_reg(client, MAX96712_I2C_ADDR,
+			0x1C00,
+			MAX96712_REG_VALUE_08BIT,
+			0xf5);
+	}
+
+	// MIPI PHY1
+	if (mipi_tx_phy_enable & BIT(1)) {
+		// Hold DPLL in reset (config_soft_rst_n = 0) before changing the rate
+		ret |= max96712_write_reg(client, MAX96712_I2C_ADDR,
+			0x1D00,
+			MAX96712_REG_VALUE_08BIT,
+			0xf4);
+		// Set data rate and enable software override
+		ret |= max96712_update_reg_bits(client, MAX96712_I2C_ADDR,
+			0x0418, 0x3F, dpll_val);
+		// Release reset to DPLL (config_soft_rst_n = 1)
+		ret |= max96712_write_reg(client, MAX96712_I2C_ADDR,
+			0x1D00,
+			MAX96712_REG_VALUE_08BIT,
+			0xf5);
+	}
+
+	// MIPI PHY2
+	if (mipi_tx_phy_enable & BIT(2)) {
+		// Hold DPLL in reset (config_soft_rst_n = 0) before changing the rate
+		ret |= max96712_write_reg(client, MAX96712_I2C_ADDR,
+			0x1E00,
+			MAX96712_REG_VALUE_08BIT,
+			0xf4);
+		// Set data rate and enable software override
+		ret |= max96712_update_reg_bits(client, MAX96712_I2C_ADDR,
+			0x041B, 0x3F, dpll_val);
+		// Release reset to DPLL (config_soft_rst_n = 1)
+		ret |= max96712_write_reg(client, MAX96712_I2C_ADDR,
+			0x1E00,
+			MAX96712_REG_VALUE_08BIT,
+			0xf5);
+	}
+
+	// MIPI PHY3
+	if (mipi_tx_phy_enable & BIT(3)) {
+		// Hold DPLL in reset (config_soft_rst_n = 0) before changing the rate
+		ret |= max96712_write_reg(client, MAX96712_I2C_ADDR,
+			0x1F00,
+			MAX96712_REG_VALUE_08BIT,
+			0xf4);
+		// Set data rate and enable software override
+		ret |= max96712_update_reg_bits(client, MAX96712_I2C_ADDR,
+			0x041E, 0x3F, dpll_val);
+		// Release reset to DPLL (config_soft_rst_n = 1)
+		ret |= max96712_write_reg(client, MAX96712_I2C_ADDR,
+			0x1F00,
+			MAX96712_REG_VALUE_08BIT,
+			0xf5);
+	}
+
+	ret |= max96712_read_reg(client, MAX96712_I2C_ADDR,
+			0x0400, MAX96712_REG_VALUE_08BIT, &dpll_lock);
+	if (ret)
+		return ret;
+
+	dev_info(&client->dev, "DPLL predef set: dpll_lock = 0x%02x\n", dpll_lock);
+
+	return ret;
 }
 
 static int max96712_auto_init_deskew(struct i2c_client *client, u32 deskew_mask)
@@ -931,6 +1064,7 @@ max96712_set_vicap_rst_inf(struct max96712 *max96712,
 static long max96712_ioctl(struct v4l2_subdev *sd, unsigned int cmd, void *arg)
 {
 	struct max96712 *max96712 = v4l2_get_subdevdata(sd);
+	struct rkmodule_csi_dphy_param *dphy_param;
 	long ret = 0;
 	u32 stream = 0;
 
@@ -956,6 +1090,18 @@ static long max96712_ioctl(struct v4l2_subdev *sd, unsigned int cmd, void *arg)
 		break;
 	case RKMODULE_GET_START_STREAM_SEQ:
 		break;
+	case RKMODULE_SET_CSI_DPHY_PARAM:
+		dphy_param = (struct rkmodule_csi_dphy_param *)arg;
+		if (dphy_param->vendor == rk3588_dcphy_param.vendor)
+			rk3588_dcphy_param = *dphy_param;
+		dev_dbg(&max96712->client->dev, "sensor set dphy param\n");
+		break;
+	case RKMODULE_GET_CSI_DPHY_PARAM:
+		dphy_param = (struct rkmodule_csi_dphy_param *)arg;
+		if (dphy_param->vendor == rk3588_dcphy_param.vendor)
+			*dphy_param = rk3588_dcphy_param;
+		dev_dbg(&max96712->client->dev, "sensor get dphy param\n");
+		break;
 	default:
 		ret = -ENOIOCTLCMD;
 		break;
@@ -972,6 +1118,7 @@ static long max96712_compat_ioctl32(struct v4l2_subdev *sd, unsigned int cmd,
 	struct rkmodule_inf *inf;
 	struct rkmodule_awb_cfg *cfg;
 	struct rkmodule_vicap_reset_info *vicap_rst_inf;
+	struct rkmodule_csi_dphy_param *dphy_param;
 	long ret = 0;
 	int *seq;
 	u32 stream = 0;
@@ -1058,6 +1205,35 @@ static long max96712_compat_ioctl32(struct v4l2_subdev *sd, unsigned int cmd,
 		else
 			ret = -EFAULT;
 		break;
+	case RKMODULE_SET_CSI_DPHY_PARAM:
+		dphy_param = kzalloc(sizeof(*dphy_param), GFP_KERNEL);
+		if (!dphy_param) {
+			ret = -ENOMEM;
+			return ret;
+		}
+
+		ret = copy_from_user(dphy_param, up, sizeof(*dphy_param));
+		if (!ret)
+			ret = max96712_ioctl(sd, cmd, dphy_param);
+		else
+			ret = -EFAULT;
+		kfree(dphy_param);
+		break;
+	case RKMODULE_GET_CSI_DPHY_PARAM:
+		dphy_param = kzalloc(sizeof(*dphy_param), GFP_KERNEL);
+		if (!dphy_param) {
+			ret = -ENOMEM;
+			return ret;
+		}
+
+		ret = max96712_ioctl(sd, cmd, dphy_param);
+		if (!ret) {
+			ret = copy_to_user(up, dphy_param, sizeof(*dphy_param));
+			if (ret)
+				ret = -EFAULT;
+		}
+		kfree(dphy_param);
+		break;
 	default:
 		ret = -ENOIOCTLCMD;
 		break;
@@ -1070,6 +1246,7 @@ static long max96712_compat_ioctl32(struct v4l2_subdev *sd, unsigned int cmd,
 static int __max96712_start_stream(struct max96712 *max96712)
 {
 	int ret;
+	u32 link_freq_mhz, link_freq_idx;
 
 	ret = max96712_check_link_lock_state(max96712);
 	if (ret)
@@ -1089,6 +1266,12 @@ static int __max96712_start_stream(struct max96712 *max96712)
 		if (ret)
 			return ret;
 	}
+
+	link_freq_idx = max96712->cur_mode->link_freq_idx;
+	link_freq_mhz = (u32)div_s64(link_freq_items[link_freq_idx], 1000000L);
+	ret = max96712_dphy_dpll_predef_set(max96712->client, link_freq_mhz);
+	if (ret)
+		return ret;
 
 	if (max96712->frame_sync_period != 0) {
 		ret = max96712_frame_sync_period(max96712->client,
@@ -1201,10 +1384,15 @@ static int __max96712_power_on(struct max96712 *max96712)
 	u32 delay_us;
 	struct device *dev = &max96712->client->dev;
 
-	if (!IS_ERR(max96712->power_gpio))
+	if (!IS_ERR(max96712->power_gpio)) {
 		gpiod_set_value_cansleep(max96712->power_gpio, 1);
+		usleep_range(5000, 10000);
+	}
 
-	usleep_range(1000, 2000);
+	if (!IS_ERR(max96712->pocen_gpio)) {
+		gpiod_set_value_cansleep(max96712->pocen_gpio, 1);
+		usleep_range(5000, 10000);
+	}
 
 	if (!IS_ERR_OR_NULL(max96712->pins_default)) {
 		ret = pinctrl_select_state(max96712->pinctrl,
@@ -1221,10 +1409,11 @@ static int __max96712_power_on(struct max96712 *max96712)
 		dev_err(dev, "Failed to enable regulators\n");
 		goto disable_clk;
 	}
-	if (!IS_ERR(max96712->reset_gpio))
+	if (!IS_ERR(max96712->reset_gpio)) {
 		gpiod_set_value_cansleep(max96712->reset_gpio, 1);
+		usleep_range(500, 1000);
+	}
 
-	usleep_range(500, 1000);
 	if (!IS_ERR(max96712->pwdn_gpio))
 		gpiod_set_value_cansleep(max96712->pwdn_gpio, 1);
 
@@ -1258,10 +1447,14 @@ static void __max96712_power_off(struct max96712 *max96712)
 		if (ret < 0)
 			dev_dbg(dev, "could not set pins\n");
 	}
-	if (!IS_ERR(max96712->power_gpio))
-		gpiod_set_value_cansleep(max96712->power_gpio, 0);
 
 	regulator_bulk_disable(MAX96712_NUM_SUPPLIES, max96712->supplies);
+
+	if (!IS_ERR(max96712->pocen_gpio))
+		gpiod_set_value_cansleep(max96712->pocen_gpio, 0);
+
+	if (!IS_ERR(max96712->power_gpio))
+		gpiod_set_value_cansleep(max96712->power_gpio, 0);
 }
 
 static int max96712_runtime_resume(struct device *dev)
@@ -1332,7 +1525,7 @@ static int max96712_g_mbus_config(struct v4l2_subdev *sd, unsigned int pad,
 	u8 data_lanes = max96712->bus_cfg.bus.mipi_csi2.num_data_lanes;
 
 	val |= V4L2_MBUS_CSI2_CONTINUOUS_CLOCK;
-	val |= 1 << (data_lanes - 1);
+	val |= (1 << (data_lanes - 1));
 	switch (data_lanes) {
 	case 4:
 		val |= V4L2_MBUS_CSI2_CHANNEL_3;
@@ -1593,6 +1786,10 @@ static int max96712_probe(struct i2c_client *client,
 	max96712->pwdn_gpio = devm_gpiod_get(dev, "pwdn", GPIOD_OUT_LOW);
 	if (IS_ERR(max96712->pwdn_gpio))
 		dev_warn(dev, "Failed to get pwdn-gpios\n");
+
+	max96712->pocen_gpio = devm_gpiod_get(dev, "pocen", GPIOD_OUT_LOW);
+	if (IS_ERR(max96712->pocen_gpio))
+		dev_warn(dev, "Failed to get pocen-gpios\n");
 
 	max96712->lock_gpio = devm_gpiod_get(dev, "lock", GPIOD_IN);
 	if (IS_ERR(max96712->lock_gpio))
