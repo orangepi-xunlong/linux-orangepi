@@ -458,6 +458,7 @@ static u32 get_static_power_locked(struct kbase_device *kbdev,
 	return power;
 }
 
+__maybe_unused
 #ifdef CONFIG_MALI_PWRSOFT_765
 static unsigned long kbase_get_static_power(struct devfreq *df,
 					    unsigned long voltage)
@@ -487,6 +488,7 @@ static unsigned long kbase_get_static_power(unsigned long voltage)
 	return power;
 }
 
+__maybe_unused
 #ifdef CONFIG_MALI_PWRSOFT_765
 static unsigned long kbase_get_dynamic_power(struct devfreq *df,
 					     unsigned long freq,
@@ -579,7 +581,9 @@ struct devfreq_cooling_ops kbase_ipa_power_model_ops = {
 #else
 struct devfreq_cooling_power kbase_ipa_power_model_ops = {
 #endif
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 1, 0)
 	.get_static_power = &kbase_get_static_power,
 	.get_dynamic_power = &kbase_get_dynamic_power,
+#endif
 };
 KBASE_EXPORT_TEST_API(kbase_ipa_power_model_ops);

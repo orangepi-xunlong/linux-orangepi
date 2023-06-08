@@ -4140,7 +4140,7 @@ static int kbase_device_debugfs_init(struct kbase_device *kbdev)
 
 #ifdef CONFIG_MALI_DEVFREQ
 #ifdef CONFIG_DEVFREQ_THERMAL
-	if (kbdev->inited_subsys & inited_devfreq)
+	if ((kbdev->inited_subsys & inited_devfreq) && kbdev->devfreq_cooling)
 		kbase_ipa_debugfs_init(kbdev);
 #endif /* CONFIG_DEVFREQ_THERMAL */
 #endif /* CONFIG_MALI_DEVFREQ */

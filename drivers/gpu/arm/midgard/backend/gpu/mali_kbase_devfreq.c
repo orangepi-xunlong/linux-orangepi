@@ -341,6 +341,7 @@ int kbase_devfreq_init(struct kbase_device *kbdev)
 	struct devfreq_dev_profile *dp;
 	struct dev_pm_opp *opp;
 	unsigned long opp_rate;
+	unsigned int dyn_power_coeff = 0;
 	int err;
 
 	if (!kbdev->clock) {
@@ -372,6 +373,10 @@ int kbase_devfreq_init(struct kbase_device *kbdev)
 			     &ondemand_data.upthreshold);
 	of_property_read_u32(np, "downdifferential",
 			     &ondemand_data.downdifferential);
+	of_property_read_u32(kbdev->dev->of_node, "dynamic-power-coefficient",
+			     &dyn_power_coeff);
+	if (dyn_power_coeff)
+		dp->is_cooling_device = true;
 
 	kbdev->devfreq = devfreq_add_device(kbdev->dev, dp,
 				"simple_ondemand", &ondemand_data);
@@ -407,14 +412,16 @@ int kbase_devfreq_init(struct kbase_device *kbdev)
 		kbdev->mdev_info = NULL;
 	}
 #ifdef CONFIG_DEVFREQ_THERMAL
+	if (dp->is_cooling_device)
+		return 0;
+
 	err = kbase_ipa_init(kbdev);
 	if (err) {
 		dev_err(kbdev->dev, "IPA initialization failed\n");
 		goto cooling_failed;
 	}
 
-	kbdev->devfreq_cooling = of_devfreq_cooling_register_power(
-			kbdev->dev->of_node,
+	kbdev->devfreq_cooling = devfreq_cooling_em_register(
 			kbdev->devfreq,
 			&kbase_ipa_power_model_ops);
 	if (IS_ERR_OR_NULL(kbdev->devfreq_cooling)) {
