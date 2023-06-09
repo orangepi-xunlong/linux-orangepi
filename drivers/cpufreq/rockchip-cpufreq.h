@@ -6,10 +6,10 @@
 #define __ROCKCHIP_CPUFREQ_H
 
 #if IS_ENABLED(CONFIG_ARM_ROCKCHIP_CPUFREQ)
-int rockchip_cpufreq_adjust_power_scale(struct device *dev);
+int rockchip_cpufreq_adjust_table(struct device *dev);
 int rockchip_cpufreq_opp_set_rate(struct device *dev, unsigned long target_freq);
 #else
-static inline int rockchip_cpufreq_adjust_power_scale(struct device *dev)
+static inline int rockchip_cpufreq_adjust_table(struct device *dev)
 {
 	return -EOPNOTSUPP;
 }
