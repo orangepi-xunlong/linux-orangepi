@@ -288,7 +288,7 @@ static int dt_cpufreq_early_init(struct device *dev, int cpu)
 	}
 
 #ifdef CONFIG_ARCH_ROCKCHIP
-	rockchip_cpufreq_adjust_power_scale(cpu_dev);
+	rockchip_cpufreq_adjust_table(cpu_dev);
 #endif
 
 	ret = dev_pm_opp_init_cpufreq_table(cpu_dev, &priv->freq_table);
