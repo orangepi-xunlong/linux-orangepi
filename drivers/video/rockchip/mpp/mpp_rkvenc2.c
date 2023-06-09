@@ -1713,7 +1713,7 @@ static const struct of_device_id rockchip_rkvenc_of_match[] = {
 
 static struct monitor_dev_profile venc_mdevp = {
 	.type = MONITOR_TYPE_DEV,
-	.update_volt = rockchip_monitor_check_rate_volt,
+	.check_rate_volt = rockchip_monitor_check_rate_volt,
 };
 
 static int rkvenc_devfreq_init(struct mpp_dev *mpp)
@@ -1721,37 +1721,19 @@ static int rkvenc_devfreq_init(struct mpp_dev *mpp)
 	struct rkvenc_dev *enc = to_rkvenc_dev(mpp);
 	struct clk *clk_core = enc->core_clk_info.clk;
 	struct device *dev = mpp->dev;
+	struct rockchip_opp_info *opp_info = &enc->opp_info;
 	int ret = 0;
 
 	if (!clk_core)
 		return 0;
 
-	if (of_find_property(dev->of_node, "venc-supply", NULL) &&
-	    of_find_property(dev->of_node, "mem-supply", NULL)) {
-		const char *const reg_names[] = { "venc", "mem", NULL };
-
-		ret = dev_pm_opp_set_regulators(dev, reg_names);
-		if (ret)
-			return ret;
-	} else {
-		const char *const reg_names[] = { "venc", NULL };
-
-		ret = dev_pm_opp_set_regulators(dev, reg_names);
-		if (ret)
-			return ret;
-	}
-
-	ret = dev_pm_opp_set_clkname(dev, "clk_core");
-	if (ret)
-		return ret;
-
-	rockchip_get_opp_data(rockchip_rkvenc_of_match, &enc->opp_info);
-	ret = rockchip_init_opp_table(dev, &enc->opp_info, "leakage", "venc");
+	rockchip_get_opp_data(rockchip_rkvenc_of_match, opp_info);
+	ret = rockchip_init_opp_table(dev, opp_info, "clk_core", "venc");
 	if (ret) {
 		dev_err(dev, "failed to init_opp_table\n");
 		return ret;
 	}
-
+	venc_mdevp.opp_info = opp_info;
 	enc->mdev_info = rockchip_system_monitor_register(dev, &venc_mdevp);
 	if (IS_ERR(enc->mdev_info)) {
 		dev_dbg(dev, "without system monitor\n");
