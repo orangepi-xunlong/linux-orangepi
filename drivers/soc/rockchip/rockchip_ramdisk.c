@@ -1,24 +1,22 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Copyright (C) 2020 Rockchip Electronics Co., Ltd
+ * Copyright (C) 2023 Rockchip Electronics Co., Ltd
  *
  * Parts derived from drivers/block/brd.c, copyright
  * of their respective owners.
  */
 
 #include <linux/backing-dev.h>
+#include <linux/blkdev.h>
 #include <linux/dax.h>
 #include <linux/module.h>
 #include <linux/of_address.h>
+#include <linux/pagemap.h>
 #include <linux/pfn_t.h>
 #include <linux/platform_device.h>
 #include <linux/uio.h>
 
-#define PAGE_SECTORS_SHIFT	(PAGE_SHIFT - SECTOR_SHIFT)
-#define PAGE_SECTORS		(1 << PAGE_SECTORS_SHIFT)
-
 struct rd_device {
-	struct request_queue	*rd_queue;
 	struct gendisk		*rd_disk;
 
 	struct device		*dev;
@@ -118,13 +116,13 @@ static void copy_from_rd(void *dst, struct rd_device *rd,
  * Process a single bvec of a bio.
  */
 static int rd_do_bvec(struct rd_device *rd, struct page *page,
-		      unsigned int len, unsigned int off, unsigned int op,
+		      unsigned int len, unsigned int off, blk_opf_t opf,
 		      sector_t sector)
 {
 	void *mem;
 
 	mem = kmap_atomic(page);
-	if (!op_is_write(op)) {
+	if (!op_is_write(opf)) {
 		copy_from_rd(mem + off, rd, sector, len);
 		flush_dcache_page(page);
 	} else {
@@ -136,16 +134,12 @@ static int rd_do_bvec(struct rd_device *rd, struct page *page,
 	return 0;
 }
 
-static blk_qc_t rd_submit_bio(struct bio *bio)
+static void rd_submit_bio(struct bio *bio)
 {
-	struct rd_device *rd = bio->bi_disk->private_data;
+	struct rd_device *rd = bio->bi_bdev->bd_disk->private_data;
+	sector_t sector = bio->bi_iter.bi_sector;
 	struct bio_vec bvec;
-	sector_t sector;
 	struct bvec_iter iter;
-
-	sector = bio->bi_iter.bi_sector;
-	if (bio_end_sector(bio) > get_capacity(bio->bi_disk))
-		goto io_error;
 
 	bio_for_each_segment(bvec, bio, iter) {
 		unsigned int len = bvec.bv_len;
@@ -156,21 +150,23 @@ static blk_qc_t rd_submit_bio(struct bio *bio)
 				(len & (SECTOR_SIZE - 1)));
 
 		err = rd_do_bvec(rd, bvec.bv_page, len, bvec.bv_offset,
-				 bio_op(bio), sector);
-		if (err)
-			goto io_error;
+				 bio->bi_opf, sector);
+		if (err) {
+			if (err == -ENOMEM && bio->bi_opf & REQ_NOWAIT) {
+				bio_wouldblock_error(bio);
+				return;
+			}
+			bio_io_error(bio);
+			return;
+		}
 		sector += len >> SECTOR_SHIFT;
 	}
 
 	bio_endio(bio);
-	return BLK_QC_T_NONE;
-io_error:
-	bio_io_error(bio);
-	return BLK_QC_T_NONE;
 }
 
 static int rd_rw_page(struct block_device *bdev, sector_t sector,
-		      struct page *page, unsigned int op)
+		      struct page *page, enum req_op op)
 {
 	struct rd_device *rd = bdev->bd_disk->private_data;
 	int err;
@@ -189,7 +185,8 @@ static const struct block_device_operations rd_fops = {
 };
 
 static long rd_dax_direct_access(struct dax_device *dax_dev, pgoff_t pgoff,
-				 long nr_pages, void **kaddr, pfn_t *pfn)
+				 long nr_pages, enum dax_access_mode mode,
+				 void **kaddr, pfn_t *pfn)
 {
 	struct rd_device *rd = dax_get_private(dax_dev);
 
@@ -211,24 +208,12 @@ static bool rd_dax_supported(struct dax_device *dax_dev,
 	return true;
 }
 
-static size_t rd_dax_copy_from_iter(struct dax_device *dax_dev, pgoff_t pgoff,
-				    void *addr, size_t bytes, struct iov_iter *i)
-{
-	return copy_from_iter(addr, bytes, i);
-}
-
-static size_t rd_dax_copy_to_iter(struct dax_device *dax_dev, pgoff_t pgoff,
-				  void *addr, size_t bytes, struct iov_iter *i)
-{
-	return copy_to_iter(addr, bytes, i);
-}
-
 static int rd_dax_zero_page_range(struct dax_device *dax_dev, pgoff_t pgoff, size_t nr_pages)
 {
 	long rc;
 	void *kaddr;
 
-	rc = dax_direct_access(dax_dev, pgoff, nr_pages, &kaddr, NULL);
+	rc = dax_direct_access(dax_dev, pgoff, nr_pages, DAX_ACCESS, &kaddr, NULL);
 	if (rc < 0)
 		return rc;
 	memset(kaddr, 0, nr_pages << PAGE_SHIFT);
@@ -239,65 +224,69 @@ static int rd_dax_zero_page_range(struct dax_device *dax_dev, pgoff_t pgoff, siz
 static const struct dax_operations rd_dax_ops = {
 	.direct_access = rd_dax_direct_access,
 	.dax_supported = rd_dax_supported,
-	.copy_from_iter = rd_dax_copy_from_iter,
-	.copy_to_iter = rd_dax_copy_to_iter,
 	.zero_page_range = rd_dax_zero_page_range,
 };
 
 static int rd_init(struct rd_device *rd, int major, int minor)
 {
-	int ret;
 	struct gendisk *disk;
+	int err;
 
-	rd->rd_queue = blk_alloc_queue(NUMA_NO_NODE);
-	if (!rd->rd_queue)
+	disk = blk_alloc_disk(NUMA_NO_NODE);
+	if (!disk)
 		return -ENOMEM;
 
-	/* This is so fdisk will align partitions on 4k, because of
-	 * direct_access API needing 4k alignment, returning a PFN
-	 * (This is only a problem on very small devices <= 4M,
-	 *  otherwise fdisk will align on 1M. Regardless this call
-	 *  is harmless)
-	 */
-	blk_queue_physical_block_size(rd->rd_queue, PAGE_SIZE);
-	disk = alloc_disk(1);
-	if (!disk) {
-		ret = -ENOMEM;
-		goto out_free_queue;
-	}
 	disk->major		= major;
 	disk->first_minor	= 0;
+	disk->minors		= 1;
 	disk->fops		= &rd_fops;
 	disk->private_data	= rd;
-	disk->flags		= GENHD_FL_EXT_DEVT;
 	sprintf(disk->disk_name, "rd%d", minor);
 	set_capacity(disk, rd->mem_size >> SECTOR_SHIFT);
 	rd->rd_disk = disk;
 
 	rd->mem_kaddr = phys_to_virt(rd->mem_addr);
 	rd->mem_pages = PHYS_PFN(rd->mem_size);
-	rd->dax_dev = alloc_dax(rd, disk->disk_name, &rd_dax_ops, DAXDEV_F_SYNC);
+	rd->dax_dev = alloc_dax(rd, &rd_dax_ops);
 	if (IS_ERR(rd->dax_dev)) {
-		ret = PTR_ERR(rd->dax_dev);
-		dev_err(rd->dev, "alloc_dax failed %d\n", ret);
+		err = PTR_ERR(rd->dax_dev);
+		dev_err(rd->dev, "alloc_dax failed %d\n", err);
 		rd->dax_dev = NULL;
-		goto out_free_queue;
+		goto out_cleanup_disk;
 	}
+	set_dax_synchronous(rd->dax_dev);
+	err = dax_add_host(rd->dax_dev, disk);
+	if (err)
+		goto out_cleanup_dax;
+
+	/*
+	 * This is so fdisk will align partitions on 4k, because of
+	 * direct_access API needing 4k alignment, returning a PFN
+	 * (This is only a problem on very small devices <= 4M,
+	 *  otherwise fdisk will align on 1M. Regardless this call
+	 *  is harmless)
+	 */
+	blk_queue_physical_block_size(disk->queue, PAGE_SIZE);
 
 	/* Tell the block layer that this is not a rotational device */
-	blk_queue_flag_set(QUEUE_FLAG_NONROT, rd->rd_queue);
-	blk_queue_flag_clear(QUEUE_FLAG_ADD_RANDOM, rd->rd_queue);
+	blk_queue_flag_set(QUEUE_FLAG_NONROT, disk->queue);
+	blk_queue_flag_clear(QUEUE_FLAG_ADD_RANDOM, disk->queue);
+	blk_queue_flag_set(QUEUE_FLAG_NOWAIT, disk->queue);
 	if (rd->dax_dev)
-		blk_queue_flag_set(QUEUE_FLAG_DAX, rd->rd_queue);
-
-	rd->rd_disk->queue = rd->rd_queue;
-	add_disk(rd->rd_disk);
+		blk_queue_flag_set(QUEUE_FLAG_DAX, disk->queue);
+	err = add_disk(disk);
+	if (err)
+		goto out_remove_dax_host;
 
 	return 0;
 
-out_free_queue:
-	blk_cleanup_queue(rd->rd_queue);
-	return ret;
+out_remove_dax_host:
+	dax_remove_host(disk);
+out_cleanup_dax:
+	put_dax(rd->dax_dev);
+out_cleanup_disk:
+	put_disk(disk);
+	return err;
 }
 
 static int rd_probe(struct platform_device *pdev)
