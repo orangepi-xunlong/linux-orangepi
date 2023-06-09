@@ -822,6 +822,7 @@ static int rkvdec2_devfreq_init(struct mpp_dev *mpp)
 {
 	struct rkvdec2_dev *dec = to_rkvdec2_dev(mpp);
 	struct clk *clk_core = dec->core_clk_info.clk;
+	struct rockchip_opp_info *opp_info = &dec->opp_info;
 	int ret = 0;
 
 	if (!clk_core)
@@ -839,7 +840,7 @@ static int rkvdec2_devfreq_init(struct mpp_dev *mpp)
 		return 0;
 	}
 
-	ret = rockchip_init_opp_table(mpp->dev, NULL, "leakage", "vdec");
+	ret = rockchip_init_opp_table(mpp->dev, opp_info, NULL, "vdec");
 	if (ret) {
 		dev_err(mpp->dev, "failed to init_opp_table\n");
 		return ret;
@@ -867,6 +868,7 @@ static int rkvdec2_devfreq_init(struct mpp_dev *mpp)
 	devfreq_register_opp_notifier(mpp->dev, dec->devfreq);
 
 	vdec2_mdevp.data = dec->devfreq;
+	vdec2_mdevp.opp_info = opp_info;
 	dec->mdev_info = rockchip_system_monitor_register(mpp->dev, &vdec2_mdevp);
 	if (IS_ERR(dec->mdev_info)) {
 		dev_dbg(mpp->dev, "without system monitor\n");
@@ -889,11 +891,10 @@ static int rkvdec2_devfreq_remove(struct mpp_dev *mpp)
 
 	if (dec->mdev_info)
 		rockchip_system_monitor_unregister(dec->mdev_info);
-	if (dec->devfreq) {
+	if (dec->devfreq)
 		devfreq_unregister_opp_notifier(mpp->dev, dec->devfreq);
-		dev_pm_opp_of_remove_table(mpp->dev);
-		devfreq_remove_governor(&devfreq_vdec2_ondemand);
-	}
+	devfreq_remove_governor(&devfreq_vdec2_ondemand);
+	rockchip_uninit_opp_table(mpp->dev, &dec->opp_info);
 
 	return 0;
 }
