@@ -168,13 +168,6 @@ static const struct mali_kbase_capability_def kbase_caps_table[MALI_KBASE_NUM_CA
 static struct mutex kbase_probe_mutex;
 #endif
 
-#ifndef CONFIG_MALI_BIFROST_DEVFREQ
-static inline int kbase_devfreq_opp_helper(struct dev_pm_set_opp_data *data)
-{
-	return -EOPNOTSUPP;
-}
-#endif
-
 /**
  * mali_kbase_supports_cap - Query whether a kbase capability is supported
  *
@@ -4597,39 +4590,6 @@ int power_control_init(struct kbase_device *kbdev)
 	 * from completing its initialization.
 	 */
 #if defined(CONFIG_PM_OPP)
-#if defined(CONFIG_REGULATOR)
-#if (KERNEL_VERSION(6, 0, 0) <= LINUX_VERSION_CODE)
-	if (kbdev->nr_regulators > 0) {
-		kbdev->token = dev_pm_opp_set_regulators(kbdev->dev, regulator_names);
-
-		if (kbdev->token < 0) {
-			err = kbdev->token;
-			goto regulators_probe_defer;
-		}
-
-	}
-#elif (KERNEL_VERSION(4, 10, 0) <= LINUX_VERSION_CODE)
-	if (kbdev->nr_regulators > 0) {
-		kbdev->opp_table =
-			dev_pm_opp_set_regulators(kbdev->dev, regulator_names,
-						  kbdev->nr_regulators);
-		if (IS_ERR(kbdev->opp_table)) {
-			dev_err(kbdev->dev, "Failed to set regulators\n");
-			return 0;
-		}
-		kbdev->opp_table =
-			dev_pm_opp_register_set_opp_helper(kbdev->dev,
-							   kbase_devfreq_opp_helper);
-		if (IS_ERR(kbdev->opp_table)) {
-			dev_pm_opp_put_regulators(kbdev->opp_table);
-			kbdev->opp_table = NULL;
-			dev_err(kbdev->dev, "Failed to set opp helper\n");
-			return 0;
-		}
-	}
-#endif /* (KERNEL_VERSION(6, 0, 0) <= LINUX_VERSION_CODE) */
-#endif /* CONFIG_REGULATOR */
-
 #ifdef CONFIG_ARCH_ROCKCHIP
        err = kbase_platform_rk_init_opp_table(kbdev);
        if (err)
@@ -4668,18 +4628,11 @@ void power_control_term(struct kbase_device *kbdev)
 	unsigned int i;
 
 #if defined(CONFIG_PM_OPP)
+#ifdef CONFIG_ARCH_ROCKCHIP
+	kbase_platform_rk_uninit_opp_table(kbdev);
+#else
 	dev_pm_opp_of_remove_table(kbdev->dev);
-#if defined(CONFIG_REGULATOR)
-#if (KERNEL_VERSION(6, 0, 0) <= LINUX_VERSION_CODE)
-	if (kbdev->token > -EPERM) {
-		dev_pm_opp_unregister_set_opp_helper(kbdev->opp_table);
-		dev_pm_opp_put_regulators(kbdev->token);
-	}
-#elif (KERNEL_VERSION(4, 10, 0) <= LINUX_VERSION_CODE)
-	if (!IS_ERR_OR_NULL(kbdev->opp_table))
-		dev_pm_opp_put_regulators(kbdev->opp_table);
-#endif /* (KERNEL_VERSION(6, 0, 0) <= LINUX_VERSION_CODE) */
-#endif /* CONFIG_REGULATOR */
+#endif
 #endif /* CONFIG_PM_OPP */
 
 	for (i = 0; i < BASE_MAX_NR_CLOCKS_REGULATORS; i++) {
@@ -4991,8 +4944,7 @@ static struct dentry *init_debugfs(struct kbase_device *kbdev)
 
 #ifdef CONFIG_MALI_BIFROST_DEVFREQ
 #if IS_ENABLED(CONFIG_DEVFREQ_THERMAL)
-	if (kbdev->devfreq && !kbdev->model_data &&
-	    !kbdev->dfc_power.dyn_power_coeff)
+	if (kbdev->devfreq && kbdev->devfreq_cooling)
 		kbase_ipa_debugfs_init(kbdev);
 #endif /* CONFIG_DEVFREQ_THERMAL */
 #endif /* CONFIG_MALI_BIFROST_DEVFREQ */
@@ -5542,10 +5494,6 @@ static int kbase_platform_device_probe(struct platform_device *pdev)
 	}
 
 	kbdev->dev = &pdev->dev;
-
-#if (KERNEL_VERSION(6, 0, 0) <= LINUX_VERSION_CODE)
-	kbdev->token = -EPERM;
-#endif /* (KERNEL_VERSION(6, 0, 0) <= LINUX_VERSION_CODE) */
 
 	dev_set_drvdata(kbdev->dev, kbdev);
 #if (KERNEL_VERSION(5, 3, 0) <= LINUX_VERSION_CODE)

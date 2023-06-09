@@ -49,7 +49,7 @@ static struct monitor_dev_profile mali_mdevp = {
 	.type = MONITOR_TYPE_DEV,
 	.low_temp_adjust = rockchip_monitor_dev_low_temp_adjust,
 	.high_temp_adjust = rockchip_monitor_dev_high_temp_adjust,
-	.update_volt = rockchip_monitor_check_rate_volt,
+	.check_rate_volt = rockchip_monitor_check_rate_volt,
 };
 
 /**
@@ -127,132 +127,15 @@ void kbase_devfreq_opp_translate(struct kbase_device *kbdev, unsigned long freq,
 	}
 }
 
-int kbase_devfreq_opp_helper(struct dev_pm_set_opp_data *data)
-{
-	struct device *dev = data->dev;
-	struct dev_pm_opp_supply *old_supply_vdd = &data->old_opp.supplies[0];
-	struct dev_pm_opp_supply *new_supply_vdd = &data->new_opp.supplies[0];
-	struct regulator *vdd_reg = data->regulators[0];
-	struct dev_pm_opp_supply *old_supply_mem;
-	struct dev_pm_opp_supply *new_supply_mem;
-	struct regulator *mem_reg;
-	struct clk *clk = data->clk;
-	struct kbase_device *kbdev = dev_get_drvdata(dev);
-	struct rockchip_opp_info *opp_info = &kbdev->opp_info;
-	unsigned long old_freq = data->old_opp.rate;
-	unsigned long new_freq = data->new_opp.rate;
-	unsigned int reg_count = data->regulator_count;
-	bool is_set_rm = true;
-	bool is_set_clk = true;
-	u32 target_rm = UINT_MAX;
-	int ret = 0;
-
-	if (reg_count > 1) {
-		old_supply_mem = &data->old_opp.supplies[1];
-		new_supply_mem = &data->new_opp.supplies[1];
-		mem_reg = data->regulators[1];
-	}
-
-	if (!pm_runtime_active(dev)) {
-		is_set_rm = false;
-		if (opp_info->scmi_clk)
-			is_set_clk = false;
-	}
-
-	ret = clk_bulk_prepare_enable(opp_info->num_clks,  opp_info->clks);
-	if (ret) {
-		dev_err(dev, "failed to enable opp clks\n");
-		return ret;
-	}
-	rockchip_get_read_margin(dev, opp_info, new_supply_vdd->u_volt,
-				 &target_rm);
-
-	/* Change frequency */
-	dev_dbg(dev, "switching OPP: %lu Hz --> %lu Hz\n", old_freq, new_freq);
-	/* Scaling up? Scale voltage before frequency */
-	if (new_freq >= old_freq) {
-		rockchip_set_intermediate_rate(dev, opp_info, clk, old_freq,
-					       new_freq, true, is_set_clk);
-		if (reg_count > 1) {
-			ret = regulator_set_voltage(mem_reg,
-						    new_supply_mem->u_volt,
-						    INT_MAX);
-			if (ret) {
-				dev_err(dev, "failed to set volt %lu uV for mem reg\n",
-					new_supply_mem->u_volt);
-				goto restore_voltage;
-			}
-		}
-		ret = regulator_set_voltage(vdd_reg, new_supply_vdd->u_volt,
-					    INT_MAX);
-		if (ret) {
-			dev_err(dev, "failed to set volt %lu uV for vdd reg\n",
-				new_supply_vdd->u_volt);
-			goto restore_voltage;
-		}
-		rockchip_set_read_margin(dev, opp_info, target_rm, is_set_rm);
-		if (is_set_clk && clk_set_rate(clk, new_freq)) {
-			ret = -EINVAL;
-			dev_err(dev, "failed to set clk rate\n");
-			goto restore_rm;
-		}
-	/* Scaling down? Scale voltage after frequency */
-	} else {
-		rockchip_set_intermediate_rate(dev, opp_info, clk, old_freq,
-					       new_freq, false, is_set_clk);
-		rockchip_set_read_margin(dev, opp_info, target_rm, is_set_rm);
-		if (is_set_clk && clk_set_rate(clk, new_freq)) {
-			ret = -EINVAL;
-			dev_err(dev, "failed to set clk rate\n");
-			goto restore_rm;
-		}
-		ret = regulator_set_voltage(vdd_reg, new_supply_vdd->u_volt,
-					    INT_MAX);
-		if (ret) {
-			dev_err(dev, "failed to set volt %lu uV for vdd reg\n",
-				new_supply_vdd->u_volt);
-			goto restore_freq;
-		}
-		if (reg_count > 1) {
-			ret = regulator_set_voltage(mem_reg,
-						    new_supply_mem->u_volt,
-						    INT_MAX);
-			if (ret) {
-				dev_err(dev, "failed to set volt %lu uV for mem reg\n",
-					new_supply_mem->u_volt);
-				goto restore_voltage;
-			}
-		}
-	}
-
-	clk_bulk_disable_unprepare(opp_info->num_clks, opp_info->clks);
-
-	return 0;
-
-restore_freq:
-	if (is_set_clk && clk_set_rate(clk, old_freq))
-		dev_err(dev, "failed to restore old-freq %lu Hz\n", old_freq);
-restore_rm:
-	rockchip_get_read_margin(dev, opp_info, old_supply_vdd->u_volt,
-				 &target_rm);
-	rockchip_set_read_margin(dev, opp_info, opp_info->target_rm, is_set_rm);
-restore_voltage:
-	if (reg_count > 1 && old_supply_mem->u_volt)
-		regulator_set_voltage(mem_reg, old_supply_mem->u_volt, INT_MAX);
-	regulator_set_voltage(vdd_reg, old_supply_vdd->u_volt, INT_MAX);
-	clk_bulk_disable_unprepare(opp_info->num_clks, opp_info->clks);
-
-	return ret;
-}
-
 static int
 kbase_devfreq_target(struct device *dev, unsigned long *freq, u32 flags)
 {
 	struct kbase_device *kbdev = dev_get_drvdata(dev);
+	struct rockchip_opp_info *opp_info = &kbdev->opp_info;
 	struct dev_pm_opp *opp;
 	int ret = 0;
 
-	if (!mali_mdevp.is_checked)
+	if (!opp_info->is_rate_volt_checked)
 		return -EINVAL;
 
 	opp = devfreq_recommended_opp(dev, freq, flags);
@@ -262,13 +145,18 @@ kbase_devfreq_target(struct device *dev, unsigned long *freq, u32 flags)
 
 	if (*freq == kbdev->current_nominal_freq)
 		return 0;
-	rockchip_monitor_volt_adjust_lock(kbdev->mdev_info);
+
+	rockchip_opp_dvfs_lock(opp_info);
+	if (pm_runtime_active(dev))
+		opp_info->is_runtime_active = true;
+	else
+		opp_info->is_runtime_active = false;
 	ret = dev_pm_opp_set_rate(dev, *freq);
 	if (!ret) {
 		kbdev->current_nominal_freq = *freq;
 		KBASE_TLSTREAM_AUX_DEVFREQ_TARGET(kbdev, (u64)*freq);
 	}
-	rockchip_monitor_volt_adjust_unlock(kbdev->mdev_info);
+	rockchip_opp_dvfs_unlock(opp_info);
 
 	return ret;
 }
@@ -671,23 +559,13 @@ static void kbase_devfreq_work_term(struct kbase_device *kbdev)
 	destroy_workqueue(workq);
 }
 
-static unsigned long kbase_devfreq_get_static_power(struct devfreq *devfreq,
-		unsigned long voltage)
-{
-	struct device *dev = devfreq->dev.parent;
-	struct kbase_device *kbdev = dev_get_drvdata(dev);
-
-	return rockchip_ipa_get_static_power(kbdev->model_data, voltage);
-}
-
 int kbase_devfreq_init(struct kbase_device *kbdev)
 {
-	struct devfreq_cooling_power *kbase_dcp = &kbdev->dfc_power;
 	struct device_node *np = kbdev->dev->of_node;
-	struct device_node *model_node;
 	struct devfreq_dev_profile *dp;
 	int err;
 	struct dev_pm_opp *opp;
+	unsigned int dyn_power_coeff = 0;
 	unsigned int i;
 	bool free_devfreq_freq_table = true;
 
@@ -703,8 +581,6 @@ int kbase_devfreq_init(struct kbase_device *kbdev)
 		else
 			kbdev->current_freqs[i] = 0;
 	}
-	if (strstr(__clk_get_name(kbdev->clocks[0]), "scmi"))
-		kbdev->opp_info.scmi_clk = kbdev->clocks[0];
 	kbdev->current_nominal_freq = kbdev->current_freqs[0];
 
 	opp = devfreq_recommended_opp(kbdev->dev, &kbdev->current_nominal_freq, 0);
@@ -729,6 +605,12 @@ int kbase_devfreq_init(struct kbase_device *kbdev)
 		kbdev->gpu_props.props.core_props.gpu_freq_khz_max =
 			dp->freq_table[0] / 1000;
 	};
+#if IS_ENABLED(CONFIG_DEVFREQ_THERMAL)
+	of_property_read_u32(kbdev->dev->of_node, "dynamic-power-coefficient",
+			     &dyn_power_coeff);
+	if (dyn_power_coeff)
+		dp->is_cooling_device = true;
+#endif
 	err = kbase_devfreq_init_core_mask_table(kbdev);
 	if (err)
 		goto init_core_mask_table_failed;
@@ -770,59 +652,21 @@ int kbase_devfreq_init(struct kbase_device *kbdev)
 
 	mali_mdevp.data = kbdev->devfreq;
 	mali_mdevp.opp_info = &kbdev->opp_info;
-	kbdev->mdev_info = rockchip_system_monitor_register(kbdev->dev,
-			&mali_mdevp);
+	kbdev->mdev_info = rockchip_system_monitor_register(kbdev->dev, &mali_mdevp);
 	if (IS_ERR(kbdev->mdev_info)) {
 		dev_dbg(kbdev->dev, "without system monitor\n");
                kbdev->mdev_info = NULL;
-	       mali_mdevp.is_checked = true;
 	}
+	kbdev->opp_info.is_rate_volt_checked = true;
 #if IS_ENABLED(CONFIG_DEVFREQ_THERMAL)
-	of_property_read_u32(kbdev->dev->of_node, "dynamic-power-coefficient",
-			     (u32 *)&kbase_dcp->dyn_power_coeff);
-	model_node = of_get_compatible_child(kbdev->dev->of_node,
-					     "simple-power-model");
-	if (model_node) {
-		of_node_put(model_node);
-		kbdev->model_data =
-			rockchip_ipa_power_model_init(kbdev->dev,
-						      "gpu_leakage");
-		if (IS_ERR_OR_NULL(kbdev->model_data)) {
-			kbdev->model_data = NULL;
-			if (kbase_dcp->dyn_power_coeff)
-				dev_info(kbdev->dev,
-					 "only calculate dynamic power\n");
-			else
-				dev_err(kbdev->dev,
-					"failed to initialize power model\n");
-		} else {
-			kbase_dcp->get_static_power =
-				kbase_devfreq_get_static_power;
-			if (kbdev->model_data->dynamic_coefficient)
-				kbase_dcp->dyn_power_coeff =
-					kbdev->model_data->dynamic_coefficient;
-		}
-	}
-
-	if (kbase_dcp->dyn_power_coeff) {
-		kbdev->devfreq_cooling =
-			of_devfreq_cooling_register_power(kbdev->dev->of_node,
-					kbdev->devfreq,
-					kbase_dcp);
-		if (IS_ERR(kbdev->devfreq_cooling)) {
-			err = PTR_ERR(kbdev->devfreq_cooling);
-			dev_err(kbdev->dev, "failed to register cooling device\n");
-			goto ipa_init_failed;
-		}
-	} else {
+	if (!dp->is_cooling_device) {
 		err = kbase_ipa_init(kbdev);
 		if (err) {
 			dev_err(kbdev->dev, "IPA initialization failed\n");
 			goto ipa_init_failed;
 		}
 
-		kbdev->devfreq_cooling = of_devfreq_cooling_register_power(
-				kbdev->dev->of_node,
+		kbdev->devfreq_cooling = devfreq_cooling_em_register(
 				kbdev->devfreq,
 				&kbase_ipa_power_model_ops);
 		if (IS_ERR(kbdev->devfreq_cooling)) {

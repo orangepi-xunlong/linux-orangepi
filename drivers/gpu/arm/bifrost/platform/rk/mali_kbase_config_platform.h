@@ -90,4 +90,5 @@ extern struct kbase_platform_funcs_conf platform_funcs;
 extern struct kbase_clk_rate_trace_op_conf clk_rate_trace_ops;
 
 int kbase_platform_rk_init_opp_table(struct kbase_device *kbdev);
+void kbase_platform_rk_uninit_opp_table(struct kbase_device *kbdev);
 int kbase_platform_rk_enable_regulator(struct kbase_device *kbdev);
