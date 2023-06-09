@@ -345,8 +345,35 @@ static const struct cif_output_fmt out_fmts[] = {
 		.raw_bpp = 10,
 		.csi_fmt_val = CSI_WRDDR_TYPE_RAW10,
 		.fmt_type = CIF_FMT_TYPE_RAW,
+	}, {
+		.fourcc = V4L2_PIX_FMT_SRGGB16,
+		.cplanes = 1,
+		.mplanes = 1,
+		.bpp = { 16 },
+		.raw_bpp = 16,
+		.fmt_type = CIF_FMT_TYPE_RAW,
+	}, {
+		.fourcc = V4L2_PIX_FMT_SGRBG16,
+		.cplanes = 1,
+		.mplanes = 1,
+		.bpp = { 16 },
+		.raw_bpp = 16,
+		.fmt_type = CIF_FMT_TYPE_RAW,
+	}, {
+		.fourcc = V4L2_PIX_FMT_SGBRG16,
+		.cplanes = 1,
+		.mplanes = 1,
+		.bpp = { 16 },
+		.raw_bpp = 16,
+		.fmt_type = CIF_FMT_TYPE_RAW,
+	}, {
+		.fourcc = V4L2_PIX_FMT_SBGGR16,
+		.cplanes = 1,
+		.mplanes = 1,
+		.bpp = { 16 },
+		.raw_bpp = 16,
+		.fmt_type = CIF_FMT_TYPE_RAW,
 	}
-
 	/* TODO: We can support NV12M/NV21M/NV16M/NV61M too */
 };
 
@@ -523,6 +550,136 @@ static const struct cif_input_fmt in_fmts[] = {
 		.field		= V4L2_FIELD_NONE,
 	}
 };
+
+static int rkcif_output_fmt_check(struct rkcif_stream *stream,
+				  const struct cif_output_fmt *output_fmt)
+{
+	const struct cif_input_fmt *input_fmt = stream->cif_fmt_in;
+	struct csi_channel_info *channel = &stream->cifdev->channels[stream->id];
+	int ret = -EINVAL;
+
+	switch (input_fmt->mbus_code) {
+	case MEDIA_BUS_FMT_YUYV8_2X8:
+	case MEDIA_BUS_FMT_YVYU8_2X8:
+	case MEDIA_BUS_FMT_UYVY8_2X8:
+	case MEDIA_BUS_FMT_VYUY8_2X8:
+		if (output_fmt->fourcc == V4L2_PIX_FMT_NV16 ||
+		    output_fmt->fourcc == V4L2_PIX_FMT_NV61 ||
+		    output_fmt->fourcc == V4L2_PIX_FMT_NV12 ||
+		    output_fmt->fourcc == V4L2_PIX_FMT_NV21 ||
+		    output_fmt->fourcc == V4L2_PIX_FMT_YUYV ||
+		    output_fmt->fourcc == V4L2_PIX_FMT_YVYU ||
+		    output_fmt->fourcc == V4L2_PIX_FMT_UYVY ||
+		    output_fmt->fourcc == V4L2_PIX_FMT_VYUY)
+			ret = 0;
+		break;
+	case MEDIA_BUS_FMT_SBGGR8_1X8:
+	case MEDIA_BUS_FMT_SGBRG8_1X8:
+	case MEDIA_BUS_FMT_SGRBG8_1X8:
+	case MEDIA_BUS_FMT_SRGGB8_1X8:
+	case MEDIA_BUS_FMT_Y8_1X8:
+		if (output_fmt->fourcc == V4L2_PIX_FMT_SRGGB8 ||
+		    output_fmt->fourcc == V4L2_PIX_FMT_SGRBG8 ||
+		    output_fmt->fourcc == V4L2_PIX_FMT_SGBRG8 ||
+		    output_fmt->fourcc == V4L2_PIX_FMT_SBGGR8 ||
+		    output_fmt->fourcc == V4L2_PIX_FMT_GREY)
+			ret = 0;
+		break;
+	case MEDIA_BUS_FMT_SBGGR10_1X10:
+	case MEDIA_BUS_FMT_SGBRG10_1X10:
+	case MEDIA_BUS_FMT_SGRBG10_1X10:
+	case MEDIA_BUS_FMT_SRGGB10_1X10:
+	case MEDIA_BUS_FMT_Y10_1X10:
+		if (output_fmt->fourcc == V4L2_PIX_FMT_SRGGB10 ||
+		    output_fmt->fourcc == V4L2_PIX_FMT_SGRBG10 ||
+		    output_fmt->fourcc == V4L2_PIX_FMT_SGBRG10 ||
+		    output_fmt->fourcc == V4L2_PIX_FMT_SBGGR10 ||
+		    output_fmt->fourcc == V4L2_PIX_FMT_Y10)
+			ret = 0;
+		break;
+	case MEDIA_BUS_FMT_SBGGR12_1X12:
+	case MEDIA_BUS_FMT_SGBRG12_1X12:
+	case MEDIA_BUS_FMT_SGRBG12_1X12:
+	case MEDIA_BUS_FMT_SRGGB12_1X12:
+	case MEDIA_BUS_FMT_Y12_1X12:
+		if (output_fmt->fourcc == V4L2_PIX_FMT_SRGGB12 ||
+		    output_fmt->fourcc == V4L2_PIX_FMT_SGRBG12 ||
+		    output_fmt->fourcc == V4L2_PIX_FMT_SGBRG12 ||
+		    output_fmt->fourcc == V4L2_PIX_FMT_SBGGR12 ||
+		    output_fmt->fourcc == V4L2_PIX_FMT_Y12)
+			ret = 0;
+		break;
+	case MEDIA_BUS_FMT_RGB888_1X24:
+	case MEDIA_BUS_FMT_BGR888_1X24:
+		if (output_fmt->fourcc == V4L2_PIX_FMT_RGB24 ||
+		    output_fmt->fourcc == V4L2_PIX_FMT_BGR24)
+			ret = 0;
+		break;
+	case MEDIA_BUS_FMT_RGB565_1X16:
+		if (output_fmt->fourcc == V4L2_PIX_FMT_RGB565)
+			ret = 0;
+		break;
+	case MEDIA_BUS_FMT_EBD_1X8:
+		if (output_fmt->fourcc == V4l2_PIX_FMT_EBD8 ||
+		    (channel->data_bit == 8 &&
+		     (output_fmt->fourcc == V4L2_PIX_FMT_SRGGB8 ||
+		      output_fmt->fourcc == V4L2_PIX_FMT_SGRBG8 ||
+		      output_fmt->fourcc == V4L2_PIX_FMT_SGBRG8 ||
+		      output_fmt->fourcc == V4L2_PIX_FMT_SBGGR8)) ||
+		    (channel->data_bit == 10 &&
+		     (output_fmt->fourcc == V4L2_PIX_FMT_SRGGB10 ||
+		      output_fmt->fourcc == V4L2_PIX_FMT_SGRBG10 ||
+		      output_fmt->fourcc == V4L2_PIX_FMT_SGBRG10 ||
+		      output_fmt->fourcc == V4L2_PIX_FMT_SBGGR10)) ||
+		    (channel->data_bit == 12 &&
+		     (output_fmt->fourcc == V4L2_PIX_FMT_SRGGB12 ||
+		      output_fmt->fourcc == V4L2_PIX_FMT_SGRBG12 ||
+		      output_fmt->fourcc == V4L2_PIX_FMT_SGBRG12 ||
+		      output_fmt->fourcc == V4L2_PIX_FMT_SBGGR12)) ||
+		    (channel->data_bit == 16 &&
+		     (output_fmt->fourcc == V4L2_PIX_FMT_SRGGB16 ||
+		      output_fmt->fourcc == V4L2_PIX_FMT_SGRBG16 ||
+		      output_fmt->fourcc == V4L2_PIX_FMT_SGBRG16 ||
+		      output_fmt->fourcc == V4L2_PIX_FMT_SBGGR16)))
+			ret = 0;
+		break;
+	case MEDIA_BUS_FMT_SPD_2X8:
+		if (output_fmt->fourcc == V4l2_PIX_FMT_SPD16 ||
+		    (channel->data_bit == 8 &&
+		     (output_fmt->fourcc == V4L2_PIX_FMT_SRGGB8 ||
+		      output_fmt->fourcc == V4L2_PIX_FMT_SGRBG8 ||
+		      output_fmt->fourcc == V4L2_PIX_FMT_SGBRG8 ||
+		      output_fmt->fourcc == V4L2_PIX_FMT_SBGGR8)) ||
+		    (channel->data_bit == 10 &&
+		     (output_fmt->fourcc == V4L2_PIX_FMT_SRGGB10 ||
+		      output_fmt->fourcc == V4L2_PIX_FMT_SGRBG10 ||
+		      output_fmt->fourcc == V4L2_PIX_FMT_SGBRG10 ||
+		      output_fmt->fourcc == V4L2_PIX_FMT_SBGGR10)) ||
+		    (channel->data_bit == 12 &&
+		     (output_fmt->fourcc == V4L2_PIX_FMT_SRGGB12 ||
+		      output_fmt->fourcc == V4L2_PIX_FMT_SGRBG12 ||
+		      output_fmt->fourcc == V4L2_PIX_FMT_SGBRG12 ||
+		      output_fmt->fourcc == V4L2_PIX_FMT_SBGGR12)) ||
+		    (channel->data_bit == 16 &&
+		     (output_fmt->fourcc == V4L2_PIX_FMT_SRGGB16 ||
+		      output_fmt->fourcc == V4L2_PIX_FMT_SGRBG16 ||
+		      output_fmt->fourcc == V4L2_PIX_FMT_SGBRG16 ||
+		      output_fmt->fourcc == V4L2_PIX_FMT_SBGGR16)))
+			ret = 0;
+		break;
+	default:
+		break;
+	}
+	if (ret)
+		v4l2_err(&stream->cifdev->v4l2_dev,
+			 "input mbus_code 0x%x, can't transform to %c%c%c%c\n",
+			 input_fmt->mbus_code,
+			 output_fmt->fourcc & 0xff,
+			 (output_fmt->fourcc >> 8) & 0xff,
+			 (output_fmt->fourcc >> 16) & 0xff,
+			 (output_fmt->fourcc >> 24) & 0xff);
+	return ret;
+}
 
 static int rkcif_stop_dma_capture(struct rkcif_stream *stream);
 
@@ -5742,6 +5899,10 @@ int rkcif_set_fmt(struct rkcif_stream *stream,
 		return -EINVAL;
 	}
 
+	ret = rkcif_output_fmt_check(stream, fmt);
+	if (ret)
+		return -EINVAL;
+
 	if (dev->terminal_sensor.sd) {
 		ret = v4l2_subdev_call(dev->terminal_sensor.sd,
 				       core, ioctl,
@@ -6164,12 +6325,42 @@ static int rkcif_enum_fmt_vid_cap_mplane(struct file *file, void *priv,
 					 struct v4l2_fmtdesc *f)
 {
 	const struct cif_output_fmt *fmt = NULL;
+	struct rkcif_stream *stream = video_drvdata(file);
+	struct rkcif_device *dev = stream->cifdev;
+	const struct cif_input_fmt *cif_fmt_in = NULL;
+	struct v4l2_rect input_rect;
+	int i = 0;
+	int ret = 0;
+	int fource_idx = 0;
 
 	if (f->index >= ARRAY_SIZE(out_fmts))
 		return -EINVAL;
 
-	fmt = &out_fmts[f->index];
-	f->pixelformat = fmt->fourcc;
+	if (dev->terminal_sensor.sd) {
+		cif_fmt_in = get_input_fmt(dev->terminal_sensor.sd,
+					   &input_rect, stream->id,
+					   &dev->channels[stream->id]);
+		stream->cif_fmt_in = cif_fmt_in;
+	} else {
+		v4l2_err(&stream->cifdev->v4l2_dev,
+			 "terminal subdev does not exist\n");
+		return -EINVAL;
+	}
+
+	if (f->index != 0)
+		fource_idx = stream->new_fource_idx;
+
+	for (i = fource_idx; i < ARRAY_SIZE(out_fmts); i++) {
+		fmt = &out_fmts[i];
+		ret = rkcif_output_fmt_check(stream, fmt);
+		if (!ret) {
+			f->pixelformat = fmt->fourcc;
+			stream->new_fource_idx = i + 1;
+			break;
+		}
+	}
+	if (i == ARRAY_SIZE(out_fmts))
+		return -EINVAL;
 
 	switch (f->pixelformat) {
 	case V4l2_PIX_FMT_EBD8:
@@ -6263,6 +6454,9 @@ static int rkcif_s_selection(struct file *file, void *fh,
 	struct rkcif_device *dev = stream->cifdev;
 	struct v4l2_subdev *sensor_sd;
 	struct v4l2_subdev_selection sd_sel;
+	const struct v4l2_rect *rect = &s->r;
+	struct v4l2_rect sensor_crop;
+	struct v4l2_rect *raw_rect = &dev->terminal_sensor.raw_rect;
 	u16 pad = 0;
 	int ret = 0;
 
@@ -6271,18 +6465,69 @@ static int rkcif_s_selection(struct file *file, void *fh,
 		goto err;
 	}
 
-	sensor_sd = get_remote_sensor(stream, &pad);
+	if (s->target == V4L2_SEL_TGT_CROP_BOUNDS) {
+		sensor_sd = get_remote_sensor(stream, &pad);
 
-	sd_sel.r = s->r;
-	sd_sel.pad = pad;
-	sd_sel.target = s->target;
-	sd_sel.which = V4L2_SUBDEV_FORMAT_ACTIVE;
+		sd_sel.r = s->r;
+		sd_sel.pad = pad;
+		sd_sel.target = s->target;
+		sd_sel.which = V4L2_SUBDEV_FORMAT_ACTIVE;
 
-	ret = v4l2_subdev_call(sensor_sd, pad, set_selection, NULL, &sd_sel);
-	if (!ret) {
-		s->r = sd_sel.r;
-		v4l2_dbg(1, rkcif_debug, &dev->v4l2_dev, "%s: pad:%d, which:%d, target:%d\n",
-			 __func__, pad, sd_sel.which, sd_sel.target);
+		ret = v4l2_subdev_call(sensor_sd, pad, set_selection, NULL, &sd_sel);
+		if (!ret) {
+			s->r = sd_sel.r;
+			v4l2_dbg(1, rkcif_debug, &dev->v4l2_dev, "%s: pad:%d, which:%d, target:%d\n",
+				 __func__, pad, sd_sel.which, sd_sel.target);
+		}
+	} else if (s->target == V4L2_SEL_TGT_CROP) {
+		ret = rkcif_sanity_check_fmt(stream, rect);
+		if (ret) {
+			v4l2_err(&dev->v4l2_dev, "set crop failed\n");
+			return ret;
+		}
+
+		if (stream->crop_mask & CROP_SRC_SENSOR) {
+			sensor_crop = stream->crop[CROP_SRC_SENSOR];
+			if (rect->left + rect->width > sensor_crop.width ||
+			    rect->top + rect->height > sensor_crop.height) {
+				v4l2_err(&dev->v4l2_dev,
+					 "crop size is bigger than sensor input:left:%d, top:%d, width:%d, height:%d\n",
+					 sensor_crop.left, sensor_crop.top,
+					 sensor_crop.width, sensor_crop.height);
+				return -EINVAL;
+			}
+		} else {
+			if (rect->left + rect->width > raw_rect->width ||
+			    rect->top + rect->height > raw_rect->height) {
+				v4l2_err(&dev->v4l2_dev,
+					 "crop size is bigger than sensor raw input:left:%d, top:%d, width:%d, height:%d\n",
+					 raw_rect->left, raw_rect->top,
+					 raw_rect->width, raw_rect->height);
+				return -EINVAL;
+			}
+		}
+
+		stream->crop[CROP_SRC_USR] = *rect;
+		stream->crop_enable = true;
+		stream->crop_mask |= CROP_SRC_USR_MASK;
+		stream->crop[CROP_SRC_ACT] = stream->crop[CROP_SRC_USR];
+		if (stream->crop_mask & CROP_SRC_SENSOR) {
+			sensor_crop = stream->crop[CROP_SRC_SENSOR];
+			stream->crop[CROP_SRC_ACT].left = sensor_crop.left + stream->crop[CROP_SRC_USR].left;
+			stream->crop[CROP_SRC_ACT].top = sensor_crop.top + stream->crop[CROP_SRC_USR].top;
+		}
+
+		if (stream->state == RKCIF_STATE_STREAMING) {
+			stream->crop_dyn_en = true;
+
+			v4l2_info(&dev->v4l2_dev, "enable dynamic crop, S_SELECTION(%ux%u@%u:%u) target: %d\n",
+				  rect->width, rect->height, rect->left, rect->top, s->target);
+		} else {
+			v4l2_info(&dev->v4l2_dev, "static crop, S_SELECTION(%ux%u@%u:%u) target: %d\n",
+				  rect->width, rect->height, rect->left, rect->top, s->target);
+		}
+	} else {
+		goto err;
 	}
 
 	return ret;
