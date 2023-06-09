@@ -198,6 +198,7 @@ struct rkvenc_dev {
 	unsigned long core_rate_hz;
 	unsigned long core_last_rate_hz;
 	struct monitor_dev_info *mdev_info;
+	struct rockchip_opp_info opp_info;
 #endif
 	/* for iommu pagefault handle */
 	struct work_struct iommu_work;
@@ -1002,7 +1003,7 @@ static int rkvenc_devfreq_init(struct mpp_dev *mpp)
 {
 	struct rkvenc_dev *enc = to_rkvenc_dev(mpp);
 	struct clk *clk_core = enc->core_clk_info.clk;
-	struct rockchip_opp_info opp_info = {0};
+	struct rockchip_opp_info *opp_info = &enc->opp_info;
 	int ret = 0;
 
 	if (!clk_core)
@@ -1020,8 +1021,8 @@ static int rkvenc_devfreq_init(struct mpp_dev *mpp)
 		return 0;
 	}
 
-	rockchip_get_opp_data(rockchip_rkvenc_of_match, &opp_info);
-	ret = rockchip_init_opp_table(mpp->dev, &opp_info, "leakage", "venc");
+	rockchip_get_opp_data(rockchip_rkvenc_of_match, opp_info);
+	ret = rockchip_init_opp_table(mpp->dev, opp_info, NULL, "venc");
 	if (ret) {
 		dev_err(mpp->dev, "failed to init_opp_table\n");
 		return ret;
@@ -1049,6 +1050,7 @@ static int rkvenc_devfreq_init(struct mpp_dev *mpp)
 	devfreq_register_opp_notifier(mpp->dev, enc->devfreq);
 
 	enc_mdevp.data = enc->devfreq;
+	enc_mdevp.opp_info = opp_info;
 	enc->mdev_info = rockchip_system_monitor_register(mpp->dev, &enc_mdevp);
 	if (IS_ERR(enc->mdev_info)) {
 		dev_dbg(mpp->dev, "without system monitor\n");
@@ -1071,11 +1073,10 @@ static int rkvenc_devfreq_remove(struct mpp_dev *mpp)
 
 	if (enc->mdev_info)
 		rockchip_system_monitor_unregister(enc->mdev_info);
-	if (enc->devfreq) {
+	if (enc->devfreq)
 		devfreq_unregister_opp_notifier(mpp->dev, enc->devfreq);
-		dev_pm_opp_of_remove_table(mpp->dev);
-		devfreq_remove_governor(&devfreq_venc_ondemand);
-	}
+	devfreq_remove_governor(&devfreq_venc_ondemand);
+	rockchip_uninit_opp_table(mpp->dev, &enc->opp_info);
 
 	return 0;
 }
