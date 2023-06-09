@@ -181,9 +181,7 @@ struct rkvdec_dev {
 	struct devfreq *devfreq;
 	struct devfreq *parent_devfreq;
 	struct notifier_block devfreq_nb;
-	struct thermal_zone_device *thermal_zone;
-	u32 static_power_coeff;
-	s32 ts[4];
+	struct rockchip_opp_info opp_info;
 	/* set clk lock */
 	struct mutex set_clk_lock;
 	unsigned int thermal_div;
@@ -1228,7 +1226,7 @@ static int rkvdec_devfreq_remove(struct mpp_dev *mpp)
 	struct rkvdec_dev *dec = to_rkvdec_dev(mpp);
 
 	devfreq_unregister_opp_notifier(mpp->dev, dec->devfreq);
-	dev_pm_opp_of_remove_table(mpp->dev);
+	rockchip_uninit_opp_table(mpp->dev, &dec->opp_info);
 
 	return 0;
 }
@@ -1267,8 +1265,7 @@ static int rkvdec_devfreq_init(struct mpp_dev *mpp)
 		return 0;
 	}
 
-	ret = rockchip_init_opp_table(mpp->dev, NULL,
-				      "rkvdec_leakage", "vcodec");
+	ret = rockchip_init_opp_table(mpp->dev, &dec->opp_info, NULL, "vcodec");
 	if (ret) {
 		dev_err(mpp->dev, "Failed to init_opp_table\n");
 		return ret;
