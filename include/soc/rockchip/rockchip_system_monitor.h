@@ -65,7 +65,6 @@ struct temp_opp_table {
  * @node:		Node in monitor_dev_list
  * @high_limit_table:	Limit maximum frequency at different temperature,
  *			but the frequency is also changed by thermal framework.
- * @volt_adjust_mutex:	A mutex to protect changing voltage.
  * @max_temp_freq_req:	CPU maximum frequency constraint changed according
  *			to temperature.
  * @min_sta_freq_req:   CPU minimum frequency constraint changed according
@@ -74,18 +73,18 @@ struct temp_opp_table {
  *			to system status.
  * @dev_max_freq_req:	Devices maximum frequency constraint changed according
  *			to temperature.
+ * @early_reg:		Supply regulator during kernel startup.
  * @low_limit:		Limit maximum frequency when low temperature, in Hz
  * @high_limit:		Limit maximum frequency when high temperature, in Hz
  * @max_volt:		Maximum voltage in microvolt
  * @low_temp_min_volt:	Minimum voltage of OPPs when low temperature, in
  *			microvolt
  * @high_temp_max_volt:	Maximum voltage when high temperature, in microvolt
- * @wide_temp_limit:	Target maximum frequency when low or high temperature,
- *			in Hz
  * @video_4k_freq:	Maximum frequency when paly 4k video, in KHz
  * @reboot_freq:	Limit maximum and minimum frequency when reboot, in KHz
  * @status_min_limit:	Minimum frequency of some status frequency, in KHz
  * @status_max_limit:	Minimum frequency of all status frequency, in KHz
+ * @early_min_volt:	Minimum voltage during kernel startup.
  * @low_temp:		Low temperature trip point, in millicelsius
  * @high_temp:		High temperature trip point, in millicelsius
  * @temp_hysteresis:	A low hysteresis value on low_temp, in millicelsius
@@ -93,7 +92,6 @@ struct temp_opp_table {
  * @is_high_temp:	True if current temperature greater than high_temp
  * @is_low_temp_enabled:	True if device node contains low temperature
  *				configuration
- * @is_status_freq_fixed:	True if enter into some status
  */
 struct monitor_dev_info {
 	struct device *dev;
@@ -102,15 +100,11 @@ struct monitor_dev_info {
 	struct monitor_dev_profile *devp;
 	struct list_head node;
 	struct temp_freq_table *high_limit_table;
-	struct mutex volt_adjust_mutex;
 	struct freq_qos_request max_temp_freq_req;
 	struct freq_qos_request min_sta_freq_req;
 	struct freq_qos_request max_sta_freq_req;
 	struct dev_pm_qos_request dev_max_freq_req;
 	struct regulator *early_reg;
-	struct regulator **regulators;
-	struct dev_pm_set_opp_data *set_opp_data;
-	struct clk *clk;
 	unsigned long low_limit;
 	unsigned long high_limit;
 	unsigned long max_volt;
@@ -118,11 +112,9 @@ struct monitor_dev_info {
 	unsigned long high_temp_max_volt;
 	unsigned int video_4k_freq;
 	unsigned int reboot_freq;
-	unsigned int init_freq;
 	unsigned int status_min_limit;
 	unsigned int status_max_limit;
 	unsigned int early_min_volt;
-	unsigned int regulator_count;
 	int low_temp;
 	int high_temp;
 	int temp_hysteresis;
@@ -134,11 +126,9 @@ struct monitor_dev_info {
 struct monitor_dev_profile {
 	enum monitor_dev_type type;
 	void *data;
-	bool is_checked;
 	int (*low_temp_adjust)(struct monitor_dev_info *info, bool is_low);
 	int (*high_temp_adjust)(struct monitor_dev_info *info, bool is_low);
-	int (*update_volt)(struct monitor_dev_info *info);
-	int (*set_opp)(struct dev_pm_set_opp_data *data);
+	int (*check_rate_volt)(struct monitor_dev_info *info);
 	struct cpumask allowed_cpus;
 	struct rockchip_opp_info *opp_info;
 };
@@ -152,8 +142,6 @@ int rockchip_monitor_cpu_low_temp_adjust(struct monitor_dev_info *info,
 					 bool is_low);
 int rockchip_monitor_cpu_high_temp_adjust(struct monitor_dev_info *info,
 					  bool is_high);
-void rockchip_monitor_volt_adjust_lock(struct monitor_dev_info *info);
-void rockchip_monitor_volt_adjust_unlock(struct monitor_dev_info *info);
 int rockchip_monitor_check_rate_volt(struct monitor_dev_info *info);
 int rockchip_monitor_dev_low_temp_adjust(struct monitor_dev_info *info,
 					 bool is_low);
@@ -187,16 +175,6 @@ rockchip_monitor_cpu_high_temp_adjust(struct monitor_dev_info *info,
 {
 	return 0;
 };
-
-static inline void
-rockchip_monitor_volt_adjust_lock(struct monitor_dev_info *info)
-{
-}
-
-static inline void
-rockchip_monitor_volt_adjust_unlock(struct monitor_dev_info *info)
-{
-}
 
 static inline int
 rockchip_monitor_check_rate_volt(struct monitor_dev_info *info)
