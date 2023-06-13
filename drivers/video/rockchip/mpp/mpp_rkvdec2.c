@@ -813,7 +813,7 @@ static struct devfreq_governor devfreq_vdec2_ondemand = {
 };
 
 static struct monitor_dev_profile vdec2_mdevp = {
-	.type = MONITOR_TPYE_DEV,
+	.type = MONITOR_TYPE_DEV,
 	.low_temp_adjust = rockchip_monitor_dev_low_temp_adjust,
 	.high_temp_adjust = rockchip_monitor_dev_high_temp_adjust,
 };
