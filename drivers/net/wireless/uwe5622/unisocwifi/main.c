@@ -1445,6 +1445,7 @@ static struct sprdwl_vif *sprdwl_register_netdev(struct sprdwl_priv *priv,
 	SET_NETDEV_DEV(ndev, wiphy_dev(priv->wiphy));
 
 	sprdwl_set_mac_addr(vif, addr, ndev->dev_addr);
+	ether_addr_copy(ndev->dev_addr_shadow, ndev->dev_addr);
 
 #ifdef CONFIG_P2P_INTF
 	if (type == NL80211_IFTYPE_P2P_DEVICE)
