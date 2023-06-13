@@ -15,6 +15,7 @@
 #include <linux/of_gpio.h>
 #include <linux/platform_device.h>
 #include <linux/pm.h>
+#include <linux/reboot.h>
 #include <linux/regulator/driver.h>
 #include <linux/regulator/machine.h>
 #include <linux/rockchip/rockchip_sip.h>
@@ -70,7 +71,7 @@ static const struct of_device_id pm_match_table[] = {
 };
 
 #ifndef MODULE
-static void rockchip_pm_virt_pwroff_prepare(void)
+static int rockchip_pm_virt_pwroff_prepare(struct sys_off_data *data)
 {
 	int error;
 
@@ -79,11 +80,13 @@ static void rockchip_pm_virt_pwroff_prepare(void)
 	error = suspend_disable_secondary_cpus();
 	if (error) {
 		pr_err("Disable nonboot cpus failed!\n");
-		return;
+		return NOTIFY_DONE;
 	}
 
 	sip_smc_set_suspend_mode(VIRTUAL_POWEROFF, 0, 1);
 	sip_smc_virtual_poweroff();
+
+	return NOTIFY_DONE;
 }
 
 static int parse_sleep_config(struct device_node *node, enum rk_pm_state state)
@@ -274,8 +277,15 @@ static int pm_config_probe(struct platform_device *pdev)
 	if (!of_property_read_u32_array(node,
 					"rockchip,virtual-poweroff",
 					&virtual_poweroff_en, 1) &&
-	    virtual_poweroff_en)
-		pm_power_off_prepare = rockchip_pm_virt_pwroff_prepare;
+	    virtual_poweroff_en) {
+		ret = devm_register_sys_off_handler(&pdev->dev,
+						    SYS_OFF_MODE_POWER_OFF_PREPARE,
+						    SYS_OFF_PRIO_DEFAULT,
+						    rockchip_pm_virt_pwroff_prepare,
+						    NULL);
+		if (ret)
+			dev_err(&pdev->dev, "failed to register sys-off handler: %d\n", ret);
+	}
 
 	for (i = RK_PM_MEM; i < RK_PM_STATE_MAX; i++) {
 		parse_sleep_config(node, i);
