@@ -169,9 +169,10 @@ int reboot_mode_register(struct reboot_mode_driver *reboot)
 	boot_mode_parse(reboot);
 	reboot->reboot_notifier.notifier_call = reboot_mode_notify;
 	reboot->pre_restart_notifier.notifier_call = reboot_mode_pre_restart_notify;
+	reboot->pre_restart_notifier.priority = 254;
 	reboot->panic_notifier.notifier_call = reboot_mode_panic_notify;
 	register_reboot_notifier(&reboot->reboot_notifier);
-	register_pre_restart_handler(&reboot->pre_restart_notifier);
+	register_restart_handler(&reboot->pre_restart_notifier);
 	atomic_notifier_chain_register(&panic_notifier_list,
 				       &reboot->panic_notifier);
 	ret = sysfs_create_file(kernel_kobj, &kobj_boot_mode.attr);
