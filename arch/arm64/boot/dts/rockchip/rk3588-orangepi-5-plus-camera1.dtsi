@@ -29,6 +29,12 @@
 				remote-endpoint = <&ov13855_out2>;
 				data-lanes = <1 2>;
 			};
+
+			mipi_in_ucam2: endpoint@2 {
+				reg = <2>;
+				remote-endpoint = <&gc5035_out>;
+				data-lanes = <1 2>;
+			};
 		};
 		port@1 {
 		        reg = <1>;
@@ -107,6 +113,31 @@
 		port {
 			ov13855_out2: endpoint {
 				remote-endpoint = <&mipi_in_ucam1>;
+				data-lanes = <1 2>;
+			};
+		};
+	};
+
+	gc5035: gc5035@37 {
+		compatible = "galaxycore,gc5035";
+		status = "okay";
+		reg = <0x37>;
+		clocks = <&cru CLK_MIPI_CAMARAOUT_M3>;
+		clock-names = "xvclk";
+		pinctrl-names = "default";
+		pinctrl-0 = <&mipim1_camera3_clk>;
+
+		//reset pin control by hardware,used this pin switch to mipi input
+		//0->FRONT camera, 1->REAR camera
+		reset-gpios = <&gpio1 RK_PC4 GPIO_ACTIVE_HIGH>;
+		pwdn-gpios = <&gpio1 RK_PD5 GPIO_ACTIVE_HIGH>;
+		rockchip,camera-module-index = <0>;
+		rockchip,camera-module-facing = "front";
+		rockchip,camera-module-name = "XHG-RKX11F-V5";
+		rockchip,camera-module-lens-name = "HR232H65";
+		port {
+			gc5035_out: endpoint {
+				remote-endpoint = <&mipi_in_ucam2>;
 				data-lanes = <1 2>;
 			};
 		};
