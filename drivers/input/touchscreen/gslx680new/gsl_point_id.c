@@ -1242,7 +1242,7 @@ static int MedianSpeedOver(int id, int deep)
 	if (deep < 0 || deep > 3)
 		return TRUE;
 	dis = median_dis[deep] * median_dis[deep];
-	for (i = 0; i <= deep && i < POINT_DEEP; i++) {
+	for (i = 0; i <= deep && i < PS_DEEP; i++) {
 		if (PointDistance(&ps[i][id], &ps[i+1][id]) > dis)
 			speed_over++;
 	}
@@ -2127,13 +2127,11 @@ void gsl_ReportPressure(unsigned int *p)
 			p[i] = 0;
 	}
 }
-EXPORT_SYMBOL(gsl_ReportPressure);
 
 int  gsl_TouchNear(void)
 {
 		return 0;
 }
-EXPORT_SYMBOL(gsl_TouchNear);
 
 static void DoubleClick(void)
 {
@@ -2365,10 +2363,10 @@ void gsl_DataInit(unsigned int *conf_in)
 			multi_y_array[i] = conf[251+i];
 		diagonal = conf[255];
 		for (i = 0; i < 256; i++)
-			*(multi_group[0]+i) = conf[256+i];
+			*(&multi_group[0][0]+i) = conf[256+i];
 		for (i = 0; i < 32; i++) {
-			*(ps_coe[0] + i) = conf[256 + 64 * 3 + i];
-			*(pr_coe[0] + i) = conf[256 + 64 * 3 + i + 32];
+			*(&ps_coe[0][0]+i) = conf[256 + 64 * 3 + i];
+			*(&pr_coe[0][0]+i) = conf[256 + 64 * 3 + i + 32];
 		}
 		near_set[0] = 0;
 		near_set[1] = 0;
@@ -2441,7 +2439,7 @@ void gsl_DataInit(unsigned int *conf_in)
 		}
 		for (i = 0; i < 256; i++) {
 			/*multi_group[0][i] = (conf[0x109+64/4*2+i/4] >> (i%4*8)) & 0xff;*/
-			*(multi_group[0]+i) = (conf[0x109+64/4*2+i/4] >> (i%4*8)) & 0xff;
+			*(&multi_group[0][0]+i) = (conf[0x109+64/4*2+i/4] >> (i%4*8)) & 0xff;
 		}
 
 		filter_able = conf[0x180];
@@ -2450,8 +2448,8 @@ void gsl_DataInit(unsigned int *conf_in)
 		for (i = 0; i < 4; i++)
 			median_dis[i] = conf[0x185 + i];
 		for (i = 0; i < 32; i++) {
-			*(ps_coe[0]+i) = conf[0x189 + i];
-			*(pr_coe[0]+i) = conf[0x189 + i + 32];
+			*(&ps_coe[0][0]+i) = conf[0x189 + i];
+			*(&pr_coe[0][0]+i) = conf[0x189 + i + 32];
 		}
 #ifdef GESTURE_LICH
 		GestureSet(&conf[0x189 + 64]);
@@ -2478,20 +2476,16 @@ void gsl_DataInit(unsigned int *conf_in)
 	for (i = 0; i < CONFIG_LENGTH; i++)
 		config_static[i] = 0;
 }
-EXPORT_SYMBOL(gsl_DataInit);
 
 unsigned int gsl_version_id(void)
 {
 	return GSL_VERSION;
 }
-EXPORT_SYMBOL(gsl_version_id);
 
 unsigned int gsl_mask_tiaoping(void)
 {
 	return reset_mask_send;
 }
-EXPORT_SYMBOL(gsl_mask_tiaoping);
-
 
 static void GetFlag(void)
 {
@@ -2538,7 +2532,6 @@ void gsl_FunIICRead(unsigned int (*fun) (unsigned int *, unsigned int, unsigned 
 {
 	ReadIICInt = fun;
 }
-EXPORT_SYMBOL(gsl_FunIICRead);
 
 static int GestureJoint(void)
 {
@@ -2648,7 +2641,6 @@ void gsl_alg_id_main(struct gsl_touch_info *cinfo)
 	PointPressure();
 	PointReport(cinfo);
 }
-EXPORT_SYMBOL(gsl_alg_id_main);
 
 #ifdef GESTURE_LICH
 
@@ -2656,7 +2648,6 @@ int gsl_obtain_gesture(void)
 {
 	return GestureDeal();
 }
-EXPORT_SYMBOL(gsl_obtain_gesture);
 
 static int GestureMain(unsigned int data_coor[], unsigned int num)
 {
@@ -3011,7 +3002,6 @@ void gsl_GestureExtern(const GESTURE_MODEL_TYPE *model, int len)
 	model_extern = model;
 	model_extern_len = len;
 }
-EXPORT_SYMBOL(gsl_GestureExtern);
 
 static int GestureLRUD(void)
 {
@@ -3185,6 +3175,4 @@ unsigned int gsl_GestureBuffer(unsigned int **buf)
 
 	return gesture_num_last;
 }
-EXPORT_SYMBOL(gsl_GestureBuffer);
-
 #endif

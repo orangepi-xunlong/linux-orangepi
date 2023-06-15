@@ -71,7 +71,7 @@ s32 de_snr_set_para(u32 disp, u32 chn,
 
 	for (i = 0; i < layer_num; ++i) {
 		if (pdata[i]->config.channel == chn &&
-		    pdata[i]->config.info.snr.en) {
+		  pdata[i]->config.info.snr.en) {
 			lay_info = &(pdata[i]->config.info);
 			break;
 		}
@@ -139,6 +139,7 @@ DIRTY:
 	ret = 0;
 OUT:
 	return ret;
+
 }
 
 s32 de_snr_init(u32 disp, u8 __iomem *de_reg_base)

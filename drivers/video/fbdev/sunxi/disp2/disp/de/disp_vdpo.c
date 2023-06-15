@@ -149,7 +149,7 @@ static s32 disp_vdpo_check_if_enabled(struct disp_device *p_vdpo)
 	}
 
 #if !defined(CONFIG_COMMON_CLK_ENABLE_SYNCBOOT)
-	if (p_vdpop->clk && (__clk_get_enable_count(p_vdpop->clk) == 0))
+	if (p_vdpop->clk && (__clk_is_enabled(p_vdpop->clk) == 0))
 		ret = 0;
 #endif
 
@@ -274,10 +274,8 @@ static s32 vdpo_clk_config(struct disp_device *p_vdpo)
 		return DIS_FAIL;
 	}
 
-	if (p_vdpop->clk_parent && p_vdpop->clk) {
-		clk_set_parent(p_vdpop->clk, p_vdpop->clk_parent);
+	if (p_vdpop->clk_parent)
 		clk_set_rate(p_vdpop->clk_parent, 297000000);
-	}
 
 	rate = p_vdpo->timings.pixel_clk * 4; /*tcon_dvi==4*/
 	if (p_vdpop->clk)
@@ -690,6 +688,45 @@ s32 disp_vdpo_sw_enable(struct disp_device *p_vdpo)
 	return 0;
 }
 
+static s32 disp_vdpo_get_status(struct disp_device *p_vdpo)
+{
+	if (!p_vdpo) {
+		DE_WRN("NULL hdl!\n");
+		return 0;
+	}
+
+	return disp_al_device_get_status(p_vdpo->hwdev_index);
+}
+
+static s32 disp_vdpo_set_static_config(struct disp_device *p_vdpo,
+			       struct disp_device_config *config)
+{
+	return disp_vdpo_set_mode(p_vdpo, config->mode);
+}
+
+static s32 disp_vdpo_get_static_config(struct disp_device *p_vdpo,
+				       struct disp_device_config *config)
+{
+	int ret = 0;
+	struct disp_vdpo_private_data *p_vdpop = disp_vdpo_get_priv(p_vdpo);
+
+	if (!p_vdpo || !p_vdpop) {
+		DE_WRN("NULL hdl!\n");
+		ret = -1;
+		goto exit;
+	}
+
+	config->type = p_vdpo->type;
+	config->mode = p_vdpop->mode;
+	if (p_vdpop->vdpo_func.tv_get_input_csc == NULL)
+		return DIS_FAIL;
+	config->format =
+	    p_vdpop->vdpo_func.tv_get_input_csc(p_vdpop->vdpo_index);
+
+exit:
+	return ret;
+}
+
 /**
  * @name       :disp_init_vdpo
  * @brief      :register vdpo device
@@ -807,6 +844,9 @@ s32 disp_init_vdpo(struct disp_bsp_init_para *para)
 		p_vdpo->get_fps            = disp_vdpo_get_fps;
 		p_vdpo->set_mode           = disp_vdpo_set_mode;
 		p_vdpo->get_mode           = disp_vdpo_get_mode;
+		p_vdpo->set_static_config = disp_vdpo_set_static_config;
+		p_vdpo->get_static_config = disp_vdpo_get_static_config;
+		p_vdpo->get_status = disp_vdpo_get_status;
 		p_vdpo->init(p_vdpo);
 
 		disp_device_register(p_vdpo);

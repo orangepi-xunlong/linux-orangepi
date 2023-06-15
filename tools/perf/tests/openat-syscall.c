@@ -1,16 +1,24 @@
+// SPDX-License-Identifier: GPL-2.0
+#include <errno.h>
+#include <inttypes.h>
 #include <api/fs/tracing_path.h>
 #include <linux/err.h>
+#include <linux/string.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
 #include "thread_map.h"
 #include "evsel.h"
 #include "debug.h"
 #include "tests.h"
+#include "util/counts.h"
 
-int test__openat_syscall_event(int subtest __maybe_unused)
+int test__openat_syscall_event(struct test *test __maybe_unused, int subtest __maybe_unused)
 {
 	int err = -1, fd;
-	struct perf_evsel *evsel;
+	struct evsel *evsel;
 	unsigned int nr_openat_calls = 111, i;
-	struct thread_map *threads = thread_map__new(-1, getpid(), UINT_MAX);
+	struct perf_thread_map *threads = thread_map__new(-1, getpid(), UINT_MAX);
 	char sbuf[STRERR_BUFSIZE];
 	char errbuf[BUFSIZ];
 
@@ -51,10 +59,10 @@ int test__openat_syscall_event(int subtest __maybe_unused)
 
 	err = 0;
 out_close_fd:
-	perf_evsel__close_fd(evsel, 1, threads->nr);
+	perf_evsel__close_fd(&evsel->core);
 out_evsel_delete:
-	perf_evsel__delete(evsel);
+	evsel__delete(evsel);
 out_thread_map_delete:
-	thread_map__put(threads);
+	perf_thread_map__put(threads);
 	return err;
 }

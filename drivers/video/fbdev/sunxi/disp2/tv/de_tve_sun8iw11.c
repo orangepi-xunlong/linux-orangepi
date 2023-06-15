@@ -78,15 +78,6 @@ s32 tve_low_init(u32 sel, u32 *dac_no, u32 *cali, s32 *offset, u32 *dac_type,
 
 	for (i = 0; i < TVE_DAC_NUM; i++)
 		dac_type_set |= dac_type_info[sel][i]<<(4+3*i);
-
-	if (num == 1) { /*cvbs*/
-		if (dac_no[0] == 1) {
-			dac_type_set &= 0xffffff80;
-		} else if (dac_no[0] == 2) {
-			dac_type_set &= 0xffff1ff0;
-		}
-	}
-
 	TVE_WUINT32(sel, TVE_008, dac_type_set);
 
 	return 0;
@@ -536,7 +527,7 @@ s32 tve_low_dac_autocheck_enable(u32 sel)
 	TVE_WUINT32(sel, TVE_0F8, 0x00000200);
 	TVE_WUINT32(sel, TVE_0FC, 0x0A3C00FF);	/* 20ms x 10 */
 	TVE_WUINT32(sel, TVE_03C, 0x00009999);
-#if defined(CONFIG_ARCH_SUN50IW9)
+#if defined(CONFIG_ARCH_SUN50IW9) || defined(CONFIG_ARCH_SUN8IW20)
 	TVE_SET_BIT(sel, TVE_030, 0x80000000);/* new detect mode */
 #endif
 	for (i = 0; i < TVE_DAC_NUM; i++) {
@@ -560,21 +551,10 @@ s32 tve_low_dac_autocheck_disable(u32 sel)
 
 u32 tve_low_get_sid(u32 index)
 {
-#if defined(CONFIG_ARCH_SUN50IW9)
-	u32 efuse = 0;
-
-	efuse = (readl(ioremap(0x0300622c, 4)) >> 16) +
-		(readl(ioremap(0x03006230, 4)) << 16);
-
-	if (efuse > 5)
-		efuse -= 5;
-
-	return efuse;
-#else
 	u32 efuse[TVE_DAC_NUM] = {0};
 	char tv_name[20] = {0};
 
-#if defined(CONFIG_ARCH_SUN8IW12)
+#if defined(CONFIG_ARCH_SUN8IW12) || defined(CONFIG_ARCH_SUN8IW16)
 	snprintf(tv_name, sizeof(tv_name), EFUSE_TVE_NAME);
 #else
 	snprintf(tv_name, sizeof(tv_name), "tvout");
@@ -584,7 +564,7 @@ u32 tve_low_get_sid(u32 index)
 		pr_err("get TV%d efuse fail!\n", index);
 	else
 		return efuse[index];
-#endif
+
 	return 0;
 }
 

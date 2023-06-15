@@ -16,6 +16,7 @@
 #ifndef _INCLUDE_LINUX_SUNXI_DUMP_H
 #define _INCLUDE_LINUX_SUNXI_DUMP_H
 
-extern int sunxi_dump_group_dump(void);
+int sunxi_dump_group_dump(void);
+int sunxi_set_crashdump_mode(void);
 
 #endif

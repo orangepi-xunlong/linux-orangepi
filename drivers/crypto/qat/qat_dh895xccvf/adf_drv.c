@@ -171,17 +171,12 @@ static int adf_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	accel_pci_dev->sku = hw_data->get_sku(hw_data);
 
 	/* Create dev top level debugfs entry */
-	snprintf(name, sizeof(name), "%s%s_%02x:%02d.%02d",
+	snprintf(name, sizeof(name), "%s%s_%02x:%02d.%d",
 		 ADF_DEVICE_NAME_PREFIX, hw_data->dev_class->name,
 		 pdev->bus->number, PCI_SLOT(pdev->devfn),
 		 PCI_FUNC(pdev->devfn));
 
 	accel_dev->debugfs_dir = debugfs_create_dir(name, NULL);
-	if (!accel_dev->debugfs_dir) {
-		dev_err(&pdev->dev, "Could not create debugfs dir %s\n", name);
-		ret = -EINVAL;
-		goto out_err;
-	}
 
 	/* Create device configuration table */
 	ret = adf_cfg_dev_add(accel_dev);
@@ -238,11 +233,11 @@ static int adf_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	if (ret)
 		goto out_err_free_reg;
 
-	set_bit(ADF_STATUS_PF_RUNNING, &accel_dev->status);
-
 	ret = adf_dev_init(accel_dev);
 	if (ret)
 		goto out_err_dev_shutdown;
+
+	set_bit(ADF_STATUS_PF_RUNNING, &accel_dev->status);
 
 	ret = adf_dev_start(accel_dev);
 	if (ret)

@@ -655,9 +655,9 @@ int de_rtmx_set_lay_laddr(unsigned int sel, unsigned int chno, unsigned int layn
 		if (trdinmode == DE_3D_SRC_MODE_LI) {
 			addr_off[1] = addr[1] + de_rtmx_get_li_addr_offset(size[1], align[1], x1, y1, ucnt);
 			addr_off[2] = addr[2] + de_rtmx_get_li_addr_offset(size[2], align[2], x1, y1, ucnt);
-		} else{
-			addr_off[1] = addr[1]+pitch[1]*y1+x1*ucnt;/* UV/U */
-			addr_off[2] = addr[2]+pitch[2]*y1+x1*ucnt;/* V */
+		} else {
+			addr_off[1] = addr[1] + pitch[1] * y1 + x1 * ucnt;/* UV/U */
+			addr_off[2] = addr[2] + pitch[2] * y1 + x1 * ucnt;/* V */
 		}
 
 		haddr[1] = (addr_off[1]>>32)&0xff;
@@ -685,30 +685,34 @@ int de_rtmx_get_3d_in_single_size(de_3d_in_mode inmode, de_rect64 *size)
 
 	switch (inmode) {
 	case DE_3D_SRC_MODE_TB:
-			size->w = size->w;
+			/* size->w = size->w; */
 			size->h = size->h>>1;
-			size->x = size->x;
-			size->y = size->y;
+			/* size->x = size->x; */
+			/* size->y = size->y; */
 			break;
 	case DE_3D_SRC_MODE_SSF:
 	case DE_3D_SRC_MODE_SSH:
 			size->w = size->w>>1;
-			size->h = size->h;
-			size->x = size->x;
-			size->y = size->y;
+			/* size->h = size->h; */
+			/* size->x = size->x; */
+			/* size->y = size->y; */
 			break;
 	case DE_3D_SRC_MODE_LI:
-			size->w = size->w;
+			/* size->w = size->w; */
 			size->h = size->h>>1;
-			size->x = size->x;
+			/* size->x = size->x; */
 			size->y = size->y>>1;
 			break;
+
+#if 0
 	case DE_3D_SRC_MODE_FP:
 			size->w = size->w;
 			size->h = size->h;
 			size->x = size->x;
 			size->y = size->y;
 			break;
+#endif
+
 	default:
 			/* undefine input mode */
 			break;

@@ -1,5 +1,5 @@
 /*
- * linux-4.9/drivers/media/platform/sunxi-vin/vin-mipi/bsp_mipi_csi.c
+ * linux-5.4/drivers/media/platform/sunxi-vin/vin-mipi/bsp_mipi_csi.c
  *
  * Copyright (c) 2007-2017 Allwinnertech Co., Ltd.
  *
@@ -128,6 +128,52 @@ static void mipi_s_pkt(unsigned int sel, unsigned char ch, unsigned char vc,
 	}
 }
 
+void bsp_mipi_csi_dol_enable(unsigned int sel)
+{
+	vin_reg_writel(addr + 0x108,
+			       vin_reg_readl(addr + 0x108) | 0x00200000);
+}
+
+void bsp_mipi_csi_dol_mode(unsigned int sel, unsigned int mode)
+{
+	if (mode)
+		vin_reg_writel(addr + 0x108,
+			       vin_reg_readl(addr + 0x108) | 0x00100000);
+	else
+		vin_reg_writel(addr + 0x108,
+			       vin_reg_readl(addr + 0x108) & 0xFFEFFFFF);
+}
+
+void bsp_mipi_csi_set_dol_ch(unsigned int sel, unsigned int ch)
+{
+	switch (ch) {
+	case 2:
+		vin_reg_writel(addr + 0x108,
+			       vin_reg_readl(addr + 0x108) | 0x00030000);
+		vin_reg_writel(addr + 0x108,
+			       vin_reg_readl(addr + 0x108) | 0x00000010);
+		break;
+	case 3:
+		vin_reg_writel(addr + 0x108,
+			       vin_reg_readl(addr + 0x108) | 0x00070000);
+		vin_reg_writel(addr + 0x108,
+			       vin_reg_readl(addr + 0x108) | 0x00000210);
+		break;
+	case 4:
+		vin_reg_writel(addr + 0x108,
+			       vin_reg_readl(addr + 0x108) | 0x000F0000);
+		vin_reg_writel(addr + 0x108,
+			       vin_reg_readl(addr + 0x108) | 0x00003210);
+		break;
+	default:
+		vin_reg_writel(addr + 0x108,
+			       vin_reg_readl(addr + 0x108) | 0x00030000);
+		vin_reg_writel(addr + 0x108,
+			       vin_reg_readl(addr + 0x108) | 0x00000010);
+		break;
+	}
+}
+
 void bsp_mipi_csi_set_version(unsigned int sel, unsigned int ver)
 {
 	glb_mipicsi2_version[sel] = ver;
@@ -230,4 +276,11 @@ void bsp_mipi_csi_set_fmt(unsigned int sel, unsigned int total_rx_ch,
 	for (i = 0; i < total_rx_ch; i++)
 		bsp_mipi_csi_set_pkt_header(sel, i, fmt->vc[i],
 					    fmt->packet_fmt[i]);
+}
+
+void bsp_mipi_csi_set_dol(unsigned int sel, unsigned int mode, unsigned int ch)
+{
+	bsp_mipi_csi_dol_enable(sel);
+	bsp_mipi_csi_dol_mode(sel, mode);
+	bsp_mipi_csi_set_dol_ch(sel, ch);
 }

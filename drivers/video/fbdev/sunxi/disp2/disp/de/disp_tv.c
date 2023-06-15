@@ -38,9 +38,9 @@ static struct disp_device_private_data *disp_tv_get_priv(struct disp_device
 extern void sync_event_proc(u32 disp, bool timeout);
 
 #if defined(__LINUX_PLAT__)
-static s32 disp_tv_event_proc(int irq, void *parg)
+static irqreturn_t disp_tv_event_proc(int irq, void *parg)
 #else
-static s32 disp_tv_event_proc(void *parg)
+static irqreturn_t disp_tv_event_proc(void *parg)
 #endif
 {
 	struct disp_device *ptv = (struct disp_device *)parg;
@@ -70,6 +70,7 @@ static s32 disp_tv_event_proc(void *parg)
 	return DISP_IRQ_RETURN;
 }
 
+#if defined(CONFIG_ARCH_SUN8IW6)
 static s32 tv_clk_init(struct disp_device *ptv)
 {
 	struct disp_device_private_data *ptvp = disp_tv_get_priv(ptv);
@@ -79,12 +80,15 @@ static s32 tv_clk_init(struct disp_device *ptv)
 		return DIS_FAIL;
 	}
 
+	if (!ptvp->clk) {
+		DE_WRN("clk is NULL\n");
+		return DIS_FAIL;
+	}
+
 	ptvp->clk_parent = clk_get_parent(ptvp->clk);
 
 	return 0;
 }
-
-#if defined(CONFIG_ARCH_SUN8IW6)
 
 static s32 tv_clk_exit(struct disp_device *ptv)
 {
@@ -107,6 +111,11 @@ static s32 tv_clk_config(struct disp_device *ptv)
 		return DIS_FAIL;
 	}
 
+	if (!ptvp->clk) {
+		DE_WRN("clk is NULL\n");
+		return DIS_FAIL;
+	}
+
 	return clk_set_rate(ptvp->clk, ptv->timings.pixel_clk);
 }
 
@@ -115,14 +124,36 @@ static s32 tv_clk_config(struct disp_device *ptv)
 static s32 tv_clk_enable(struct disp_device *ptv)
 {
 	struct disp_device_private_data *ptvp = disp_tv_get_priv(ptv);
+	int ret = 0;
 
 	if (!ptv || !ptvp) {
 		DE_WRN("tv init null hdl!\n");
 		return DIS_FAIL;
 	}
-	if (ptvp->clk_parent && ptvp->clk)
-		clk_set_parent(ptvp->clk, ptvp->clk_parent);
 
+	if (!ptvp->rst_bus_clk) {
+		DE_WRN("rst_bus_clk is NULL\n");
+		return DIS_FAIL;
+	}
+
+	ret = reset_control_deassert(ptvp->rst_bus_clk);
+	if (ret) {
+		pr_err("[%s] deassert reset tcon tv failed!\n", __func__);
+		return DIS_FAIL;
+	}
+
+	if (!ptvp->bus_clk) {
+		DE_WRN("bus_clk is NULL\n");
+		return DIS_FAIL;
+	}
+	ret = clk_prepare_enable(ptvp->bus_clk);
+	if (ret != 0)
+		DE_WRN("fail enable hdmi's bus clock!\n");
+
+	if (!ptvp->clk) {
+		DE_WRN("clk is NULL\n");
+		return DIS_FAIL;
+	}
 	return clk_prepare_enable(ptvp->clk);
 
 }
@@ -136,7 +167,26 @@ static s32 tv_clk_disable(struct disp_device *ptv)
 		return DIS_FAIL;
 	}
 
-	clk_disable(ptvp->clk);
+	if (!ptvp->clk) {
+		DE_WRN("clk is NULL\n");
+		return DIS_FAIL;
+	}
+	clk_disable_unprepare(ptvp->clk);
+
+	if (!ptvp->bus_clk) {
+		DE_WRN("bus_clk is NULL\n");
+		return DIS_FAIL;
+	}
+	clk_disable_unprepare(ptvp->bus_clk);
+
+	if (!ptvp->rst_bus_clk) {
+		DE_WRN("rst_bus_clk is NULL\n");
+		return DIS_FAIL;
+	}
+	if (reset_control_assert(ptvp->rst_bus_clk) != 0) {
+		pr_err("[%s] assert bus clk failed!\n", __func__);
+		return DIS_FAIL;
+	}
 
 	return 0;
 }
@@ -204,7 +254,8 @@ static s32 cal_real_frame_period(struct disp_device *ptv)
 	}
 
 	if (!ptvp->clk || !ptvp->video_info) {
-		DE_WRN(" clk | video_info is null\n");
+		DE_WRN(" clk:%p | video_info:%p is null\n",
+			ptvp->clk, ptvp->video_info);
 		goto OUT;
 	}
 
@@ -468,7 +519,7 @@ static s32 disp_tv_check_if_enabled(struct disp_device *ptv)
 
 #if !defined(CONFIG_COMMON_CLK_ENABLE_SYNCBOOT)
 	if (ptvp->clk &&
-	   (__clk_get_enable_count(ptvp->clk) == 0))
+	   (__clk_is_enabled(ptvp->clk) == 0))
 		ret = 0;
 #endif
 
@@ -483,7 +534,9 @@ static s32 disp_tv_init(struct disp_device *ptv)
 		DE_WRN("tv init null hdl!\n");
 		return DIS_FAIL;
 	}
+#if defined(CONFIG_ARCH_SUN8IW6)
 	tv_clk_init(ptv);
+#endif
 	return 0;
 }
 
@@ -540,7 +593,7 @@ s32 disp_tv_resume(struct disp_device *ptv)
 	return 0;
 }
 
-s32 disp_tv_set_mode(struct disp_device *ptv, enum disp_tv_mode tv_mode)
+s32 disp_tv_set_mode(struct disp_device *ptv, u32 tv_mode)
 {
 	s32 ret = 0;
 	struct disp_device_private_data *ptvp = disp_tv_get_priv(ptv);
@@ -640,7 +693,7 @@ s32 disp_tv_check_support_mode(struct disp_device *ptv, enum disp_output_type tv
 	if (!ptvp->tv_func.tv_mode_support)
 		return 0;
 
-	return ptvp->tv_func.tv_mode_support(ptv->disp, tv_mode);
+	return ptvp->tv_func.tv_mode_support(ptv->disp, (enum disp_tv_mode)tv_mode);
 }
 
 
@@ -855,7 +908,10 @@ s32 disp_init_tv(void)
 		p_tv->type = DISP_OUTPUT_TYPE_TV;
 		p_tvp->tv_mode = DISP_TV_MOD_PAL;
 		p_tvp->irq_no = g_init_para.irq_no[DISP_MOD_LCD0 + hwdev_index];
-		p_tvp->clk = g_init_para.mclk[DISP_MOD_LCD0 + hwdev_index];
+		p_tvp->clk = g_init_para.clk_tcon[hwdev_index];
+		p_tvp->bus_clk = g_init_para.clk_bus_tcon[hwdev_index];
+		p_tvp->rst_bus_clk = g_init_para.rst_bus_tcon[hwdev_index];
+		/*fix me*/
 
 		p_tv->set_manager = disp_device_set_manager;
 		p_tv->unset_manager = disp_device_unset_manager;

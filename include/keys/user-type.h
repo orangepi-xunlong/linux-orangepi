@@ -1,12 +1,8 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /* user-type.h: User-defined key type
  *
  * Copyright (C) 2005 Red Hat, Inc. All Rights Reserved.
  * Written by David Howells (dhowells@redhat.com)
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version
- * 2 of the License, or (at your option) any later version.
  */
 
 #ifndef _KEYS_USER_TYPE_H
@@ -45,8 +41,7 @@ extern int user_update(struct key *key, struct key_preparsed_payload *prep);
 extern void user_revoke(struct key *key);
 extern void user_destroy(struct key *key);
 extern void user_describe(const struct key *user, struct seq_file *m);
-extern long user_read(const struct key *key,
-		      char __user *buffer, size_t buflen);
+extern long user_read(const struct key *key, char *buffer, size_t buflen);
 
 static inline const struct user_key_payload *user_key_payload_rcu(const struct key *key)
 {

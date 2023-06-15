@@ -2,9 +2,8 @@
 #  Touchscreen driver configuration
 #
 config  TOUCHSCREEN_GT9XXNEW_TS
-       tristate  "gt9xxnew touchscreen driver"      
+       tristate  "gt9xxnew touchscreen driver"
        depends on INPUT && I2C
        default n
        help
-         gt9xxnew touchscreen driver    
-         
+         gt9xxnew touchscreen driver

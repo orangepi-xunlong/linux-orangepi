@@ -116,6 +116,102 @@ static const struct de_feat sun8iw17_de_features = {
 	.scale_line_buffer = sun8iw17_de_scale_line_buffer,
 };
 #endif
+#if defined(CONFIG_ARCH_SUN8IW20)  || defined(CONFIG_ARCH_SUN20IW1)
+static const int sun8iw20_de_num_chns[] = {
+	/* DISP0 */
+	2,
+	/* DISP1 */
+	1,
+};
+
+static const int sun8iw20_de_num_vi_chns[] = {
+	/* DISP0 */
+	1,
+	/* DISP1 */
+	1,
+};
+
+static const int sun8iw20_de_num_layers[] = {
+	/* DISP0 CH0 */
+	4,
+	/* DISP0 CH1 */
+	4,
+	/* DISP0 CH2 */
+	4,
+};
+
+static const int sun8iw20_de_is_support_vep[] = {
+	/* DISP0 CH0 */
+	1,
+	/* DISP0 CH1 */
+	0,
+	/* DISP0 CH2 */
+	0,
+};
+
+static const int sun8iw20_de_is_support_smbl[] = {
+	/* CH0 */
+	0,
+	/* CH1 */
+	0,
+};
+
+static const int sun8iw20_de_supported_output_types[] = {
+	/* DISP0 */
+	DE_OUTPUT_TYPE_LCD,
+	/* DISP1 */
+	DE_OUTPUT_TYPE_TV | DE_OUTPUT_TYPE_HDMI,
+};
+
+static const int sun8iw20_de_is_support_wb[] = {
+	/* DISP0 */
+	1,
+	/* DISP1 */
+	1,
+};
+
+static const int sun8iw20_de_is_support_scale[] = {
+	/* DISP0 CH0 */
+	1,
+	/* DISP0 CH1 */
+	1,
+	/* DISP1 CH0 */
+	1,
+};
+
+static const int sun8iw20_de_scale_line_buffer[] = {
+	/* DISP0 */
+	2048,
+	/* DISP1 */
+	1024,
+};
+
+static const int sun8iw20_de_is_support_lbc[] = {
+	/* DISP0 CH0 */
+	1,
+	/* DISP0 CH1 */
+	0,
+	/* DISP0 CH0 */
+	1,
+};
+
+static const struct de_feat sun8iw20_de_features = {
+	.num_screens = DE_NUM,
+	.num_devices = DEVICE_NUM,
+	.num_chns = sun8iw20_de_num_chns,
+	.num_vi_chns = sun8iw20_de_num_vi_chns,
+	.num_layers = sun8iw20_de_num_layers,
+	.is_support_vep = sun8iw20_de_is_support_vep,
+	.is_support_smbl = sun8iw20_de_is_support_smbl,
+	.is_support_wb = sun8iw20_de_is_support_wb,
+	.supported_output_types = sun8iw20_de_supported_output_types,
+	.is_support_scale = sun8iw20_de_is_support_scale,
+	.scale_line_buffer = sun8iw20_de_scale_line_buffer,
+	.is_support_lbc = sun8iw20_de_is_support_lbc,
+	.num_vdpo = DEVICE_VDPO_NUM,
+};
+
+#endif /*endif CONFIG_ARCH_SUN8iW20 */
 
 #if defined(CONFIG_ARCH_SUN8IW7)
 static const int sun8iw7_de_num_chns[] = {
@@ -800,6 +896,8 @@ static const struct de_feat sun50iw10_de_features = {
 	.scale_line_buffer = sun50iw10_de_scale_line_buffer,
 };
 #endif /*~ CONFIG_ARCH_SUN50I10*/
+
+
 static const int sun8iw12_de_num_chns[] = {
 	/* DISP0 */
 	4,
@@ -863,7 +961,11 @@ static const int sun8iw12_de_is_support_scale[] = {
 
 static const int sun8iw12_de_scale_line_buffer[] = {
 	/* DISP0 */
-	4096,
+#if defined(CONFIG_ARCH_SUN8IW19)
+    2048,
+#else
+    4096,
+#endif
 };
 
 static const struct de_feat sun8iw12_de_features = {
@@ -1194,7 +1296,24 @@ int de_feat_is_support_wb(unsigned int disp)
 {
 	return de_cur_features->is_support_wb[disp];
 }
+#if defined(SUPPORT_LBC)
+int de_feat_is_support_lbc_by_chn(unsigned int disp, unsigned int chn)
+{
+	unsigned int i, index = 0;
 
+	if (disp >= de_feat_get_num_screens())
+		return 0;
+	if (chn >= de_feat_get_num_chns(disp))
+		return 0;
+
+	for (i = 0; i < disp; i++)
+		index += de_feat_get_num_chns(i);
+	index += chn;
+
+	return de_cur_features->is_support_lbc[index];
+}
+
+#endif
 int de_feat_is_support_scale(unsigned int disp)
 {
 	unsigned int i, index = 0, num_channels = 0;
@@ -1289,7 +1408,8 @@ int de_feat_init(void)
 	de_cur_features = &sun50iw8_de_features;
 #elif defined(CONFIG_ARCH_SUN8IW11)
 	de_cur_features = &sun8iw11_de_features;
-#elif defined(CONFIG_ARCH_SUN8IW12)
+#elif defined(CONFIG_ARCH_SUN8IW12) || defined(CONFIG_ARCH_SUN8IW16)\
+    || defined(CONFIG_ARCH_SUN8IW19)
 	de_cur_features = &sun8iw12_de_features;
 #elif defined(CONFIG_ARCH_SUN50IW10)
 	de_cur_features = &sun50iw10_de_features;
@@ -1301,6 +1421,8 @@ int de_feat_init(void)
 	de_cur_features = &sun8iw7_de_features;
 #elif defined(CONFIG_ARCH_SUN8IW17)
 	de_cur_features = &sun8iw17_de_features;
+#elif defined(CONFIG_ARCH_SUN8IW20) || defined(CONFIG_ARCH_SUN20IW1)
+	de_cur_features = &sun8iw20_de_features;
 #else
 #error "undefined platform!!!"
 #endif

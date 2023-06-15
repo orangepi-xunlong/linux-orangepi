@@ -259,8 +259,9 @@ static int mtty_rx_cb(int chn, struct mbuf_t *head, struct mbuf_t *tail, int num
 {
 	int ret = 0, block_size;
 	struct rx_data *rx;
-
-	//bt_wakeup_host();
+#ifndef WOBLE_FUN
+	bt_wakeup_host();
+#endif
 	block_size = ((head->buf[2] & 0x7F) << 9) + (head->buf[1] << 1) + (head->buf[0] >> 7);
 
 	if (log_level == MTTY_LOG_LEVEL_VER) {
@@ -276,7 +277,7 @@ static int mtty_rx_cb(int chn, struct mbuf_t *head, struct mbuf_t *tail, int num
 	woble_data_recv((unsigned char *)head->buf + BT_SDIO_HEAD_LEN, block_size);
 
 	if (atomic_read(&mtty_dev->state) == MTTY_STATE_CLOSE) {
-		pr_err("%s mtty bt is closed abnormally\n", __func__);
+		//pr_err("%s mtty bt is closed abnormally\n", __func__);
 		sprdwcn_bus_push_list(chn, head, tail, num);
 		return -1;
 	}
@@ -590,6 +591,7 @@ static inline void mtty_destroy_pdata(struct mtty_init_data **init)
 #endif
 }
 
+#ifdef WOBLE_FUN
 static int bt_tx_powerchange(int channel, int is_resume)
 {
 	unsigned long power_state = marlin_get_power_state();
@@ -606,6 +608,7 @@ static int bt_tx_powerchange(int channel, int is_resume)
 
 	return 0;
 }
+#endif
 
 struct mchn_ops_t bt_rx_ops = {
 	.channel = BT_RX_CHANNEL,
@@ -621,7 +624,44 @@ struct mchn_ops_t bt_tx_ops = {
 	.inout = BT_TX_INOUT,
 	.pool_size = BT_TX_POOL_SIZE,
 	.pop_link = mtty_tx_cb,
+#ifdef WOBLE_FUN
 	.power_notify = bt_tx_powerchange,
+#endif
+};
+
+static int bluetooth_reset(struct notifier_block *this, unsigned long ev, void *ptr)
+{
+#define RESET_BUFSIZE 5
+	int ret = 0;
+	int block_size = RESET_BUFSIZE;
+	unsigned char reset_buf[RESET_BUFSIZE] = {0x04, 0xff, 0x02, 0x57, 0xa5};
+
+	if (!ev) {
+		pr_info("%s:reset callback coming\n", __func__);
+		if (mtty_dev != NULL) {
+			if (!work_pending(&mtty_dev->bt_rx_work)) {
+				pr_info("%s tty_insert_flip_string", __func__);
+				while (ret < block_size) {
+					pr_info("%s before tty_insert_flip_string ret: %d, len: %d\n",
+							__func__, ret, RESET_BUFSIZE);
+					ret = tty_insert_flip_string(mtty_dev->port,
+							(unsigned char *)reset_buf,
+							RESET_BUFSIZE);   // -BT_SDIO_HEAD_LEN
+					pr_info("%s ret: %d, len: %d\n", __func__, ret, RESET_BUFSIZE);
+					if (ret)
+						tty_flip_buffer_push(mtty_dev->port);
+					block_size = block_size - ret;
+					ret = 0;
+				}
+			}
+		}
+		ret = NOTIFY_DONE;
+	}
+	return ret;
+}
+
+static struct notifier_block bluetooth_reset_block = {
+    .notifier_call = bluetooth_reset,
 };
 
 static int  mtty_probe(struct platform_device *pdev)
@@ -692,6 +732,9 @@ static int  mtty_probe(struct platform_device *pdev)
 	rfkill_bluetooth_init(pdev);
 	bluesleep_init();
 	woble_init();
+
+	marlin_reset_callback_register(MARLIN_BLUETOOTH, &bluetooth_reset_block);
+
 	sprdwcn_bus_chn_init(&bt_rx_ops);
 	sprdwcn_bus_chn_init(&bt_tx_ops);
 	sema_init(&sem_id, BT_TX_POOL_SIZE - 1);
@@ -757,6 +800,7 @@ int marlin_sdio_write(const unsigned char *buf, int count)
 	return count;
 }
 
+#ifdef WOBLE_FUN
 static void  mtty_shutdown(struct platform_device *pdev)
 {
 	unsigned long int power_state = marlin_get_power_state();
@@ -768,6 +812,7 @@ static void  mtty_shutdown(struct platform_device *pdev)
 	}
 	return;
 }
+#endif
 
 static int  mtty_remove(struct platform_device *pdev)
 {
@@ -804,7 +849,9 @@ static struct platform_driver mtty_driver = {
 	},
 	.probe = mtty_probe,
 	.remove = mtty_remove,
+#ifdef WOBLE_FUN
 	.shutdown = mtty_shutdown,
+#endif
 };
 
 #ifdef OTT_UWE

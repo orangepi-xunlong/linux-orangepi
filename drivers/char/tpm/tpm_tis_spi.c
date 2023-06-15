@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2015 Infineon Technologies AG
  * Copyright (C) 2016 STMicroelectronics SAS
@@ -17,11 +18,6 @@
  *
  * It is based on the original tpm_tis device driver from Leendert van
  * Dorn and Kyleen Hall and Jarko Sakkinnen.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as
- * published by the Free Software Foundation, version 2 of the
- * License.
  */
 
 #include <linux/init.h>
@@ -33,7 +29,6 @@
 #include <linux/acpi.h>
 #include <linux/freezer.h>
 
-#include <linux/module.h>
 #include <linux/spi/spi.h>
 #include <linux/gpio.h>
 #include <linux/of_irq.h>
@@ -153,29 +148,40 @@ static int tpm_tis_spi_write_bytes(struct tpm_tis_data *data, u32 addr,
 
 static int tpm_tis_spi_read16(struct tpm_tis_data *data, u32 addr, u16 *result)
 {
+	__le16 result_le;
 	int rc;
 
-	rc = data->phy_ops->read_bytes(data, addr, sizeof(u16), (u8 *)result);
+	rc = data->phy_ops->read_bytes(data, addr, sizeof(u16),
+				       (u8 *)&result_le);
 	if (!rc)
-		*result = le16_to_cpu(*result);
+		*result = le16_to_cpu(result_le);
+
 	return rc;
 }
 
 static int tpm_tis_spi_read32(struct tpm_tis_data *data, u32 addr, u32 *result)
 {
+	__le32 result_le;
 	int rc;
 
-	rc = data->phy_ops->read_bytes(data, addr, sizeof(u32), (u8 *)result);
+	rc = data->phy_ops->read_bytes(data, addr, sizeof(u32),
+				       (u8 *)&result_le);
 	if (!rc)
-		*result = le32_to_cpu(*result);
+		*result = le32_to_cpu(result_le);
+
 	return rc;
 }
 
 static int tpm_tis_spi_write32(struct tpm_tis_data *data, u32 addr, u32 value)
 {
-	value = cpu_to_le32(value);
-	return data->phy_ops->write_bytes(data, addr, sizeof(u32),
-					   (u8 *)&value);
+	__le32 value_le;
+	int rc;
+
+	value_le = cpu_to_le32(value);
+	rc = data->phy_ops->write_bytes(data, addr, sizeof(u32),
+					(u8 *)&value_le);
+
+	return rc;
 }
 
 static const struct tpm_tis_phy_ops tpm_spi_phy_ops = {

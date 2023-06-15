@@ -1,5 +1,5 @@
 /*
- * linux-4.9/drivers/media/platform/sunxi-vin/vin-tdm/tdm_reg.h
+ * linux-5.4/drivers/media/platform/sunxi-vin/vin-tdm/tdm_reg.h
  *
  * Copyright (c) 2007-2019Allwinnertech Co., Ltd.
  *
@@ -96,5 +96,7 @@ void csic_tdm_rx_set_min_ddr_size(unsigned int sel, unsigned int ch, enum min_dd
 void csic_tdm_rx_input_bit(unsigned int sel, unsigned int ch, enum input_image_type_sel input_tpye);
 void csic_tdm_rx_input_size(unsigned int sel, unsigned int ch, unsigned int width, unsigned int height);
 void csic_tdm_rx_set_address(unsigned int sel, unsigned int ch, unsigned long address);
+void csic_tdm_rx_get_size(unsigned int sel, unsigned int ch, unsigned int *width, unsigned int *heigth);
+void csic_tdm_rx_get_hblank(unsigned int sel, unsigned int ch, unsigned int *hb_min, unsigned int *hb_max);
 
 #endif /* __CSIC__TDM__REG__H__ */

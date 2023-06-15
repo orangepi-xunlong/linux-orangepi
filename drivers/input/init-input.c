@@ -8,7 +8,9 @@
 #include <linux/input.h>
 #include <linux/i2c.h>
 #include <linux/delay.h>
+#include <linux/irq.h>
 #include <linux/interrupt.h>
+#include <linux/irqdesc.h>
 #include <linux/errno.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
@@ -20,12 +22,12 @@
 #include <linux/pinctrl/consumer.h>
 #include <linux/of.h>
 #include <linux/of_gpio.h>
+#include <linux/of_platform.h>
 #include <linux/platform_device.h>
+#include <linux/slab.h>
 #include "init-input.h"
 
-
 bool sensor_has_inited_flag;
-
 /***************************CTP************************************/
 
 /**
@@ -41,11 +43,22 @@ static int sunxi_ctp_startup(enum input_sensor_type *ctp_type)
 	struct ctp_config_info *data = container_of(ctp_type,
 					struct ctp_config_info, input_type);
 	struct device_node *np = NULL;
+	struct i2c_client *client = NULL;
+	struct platform_device *pdev = NULL;
+	const char *idx;
+	char ctp_name[12];
 
-	np = of_find_node_by_name(NULL, "ctp");
+	np = data->node;
+
 	if (!np) {
-		pr_err("ERROR! get ctp_para failed, func:%s, line:%d\n",
-							__func__, __LINE__);
+		if (data->np_name != NULL) {
+			np = of_find_node_by_name(NULL, data->np_name);
+		} else {
+			np = of_find_node_by_name(NULL, "ctp");
+		}
+	}
+	if (!np) {
+		pr_err("ERROR! get ctp_para failed, func:%s, line:%d\n", __func__, __LINE__);
 		goto devicetree_get_item_err;
 	}
 
@@ -55,13 +68,34 @@ static int sunxi_ctp_startup(enum input_sensor_type *ctp_type)
 	} else
 		data->ctp_used = 1;
 
+	client = of_find_i2c_device_by_node(np);
+	if (client) {
+		data->dev = &client->dev;
+		data->isI2CClient = 1;
+	} else {
+		pdev = of_find_device_by_node(np);
+		if (pdev)
+			data->dev = &pdev->dev;
+	}
+	if (!data->dev) {
+		pr_err("get device_node fail\n");
+		return -1;
+	}
+
 	ret = of_property_read_u32(np, "ctp_twi_id", &data->twi_id);
 	if (ret) {
 		pr_err("get twi_id is fail, %d\n", ret);
 		goto devicetree_get_item_err;
 	}
 
-	ret = of_property_read_string(np,  "ctp_name", &data->name);
+	ret = of_property_read_string(np,  "ctp_fw_idx", &idx);
+	if (ret)
+		idx = 0;
+
+	snprintf(ctp_name, 12, "ctp_name%s", idx);
+	ret = of_property_read_string(np,  ctp_name, &data->name);
+	if (ret)
+		ret = of_property_read_string(np,  "ctp_name", &data->name);
 	if (ret)
 		pr_err("get ctp_name is fail, %d\n", ret);
 
@@ -118,7 +152,6 @@ static int sunxi_ctp_startup(enum input_sensor_type *ctp_type)
 	if (ret) {
 		 pr_err("get ctp_gesture_wakeup fail, no gesture wakeup\n");
 	}
-
 #ifdef TOUCH_KEY_LIGHT_SUPPORT
 
 	data->key_light_gpio.gpio = of_get_named_gpio(np, "ctp_light", 0);
@@ -146,12 +179,12 @@ static void sunxi_ctp_free(enum input_sensor_type *ctp_type)
 #ifdef TOUCH_KEY_LIGHT_SUPPORT
 	gpio_free(data->key_light_gpio.gpio);
 #endif
-	if (data->ctp_power_ldo) {
+	if (!IS_ERR_OR_NULL(data->ctp_power_ldo)) {
+		regulator_disable(data->ctp_power_ldo);
 		regulator_put(data->ctp_power_ldo);
 		data->ctp_power_ldo = NULL;
 	} else if (gpio_is_valid(data->ctp_power_io.gpio))
 		gpio_free(data->ctp_power_io.gpio);
-
 }
 
 /**
@@ -168,9 +201,8 @@ static int sunxi_ctp_init(enum input_sensor_type *ctp_type)
 					struct ctp_config_info, input_type);
 
 	data->ctp_power_ldo = NULL;
-#ifdef CONFIG_SUNXI_REGULATOR_DT
 	data->ctp_power_ldo = regulator_get(data->dev, "ctp");
-	if (!IS_ERR(data->ctp_power_ldo)) {
+	if (!IS_ERR_OR_NULL(data->ctp_power_ldo)) {
 		regulator_set_voltage(data->ctp_power_ldo,
 				(int)(data->ctp_power_vol)*1000,
 				(int)(data->ctp_power_vol)*1000);
@@ -180,24 +212,6 @@ static int sunxi_ctp_init(enum input_sensor_type *ctp_type)
 		else
 			gpio_direction_output(data->ctp_power_io.gpio, 1);
 	}
-#else
-	if (data->ctp_power) {
-		data->ctp_power_ldo = regulator_get(NULL, data->ctp_power);
-		if (IS_ERR(data->ctp_power_ldo)) {
-			pr_err("%s: could not get ctp ldo '%s' , check",
-						__func__, data->ctp_power);
-			pr_err("if ctp independent power supply by ldo,ignore firstly\n");
-		} else
-			regulator_set_voltage(data->ctp_power_ldo,
-					(int)(data->ctp_power_vol)*1000,
-					(int)(data->ctp_power_vol)*1000);
-	} else if (gpio_is_valid(data->ctp_power_io.gpio)) {
-		if (gpio_request(data->ctp_power_io.gpio, NULL) != 0)
-			pr_err("ctp_power_io gpio_request is failed, check if ctp independent power supply by gpio, ignore firstly\n");
-		else
-			gpio_direction_output(data->ctp_power_io.gpio, 1);
-	}
-#endif
 	if (gpio_request(data->wakeup_gpio.gpio, NULL) != 0) {
 		pr_err("wakeup gpio_request is failed\n");
 		return ret;
@@ -234,10 +248,11 @@ static void sunxi_gsensor_free(enum input_sensor_type *gsensor_type)
 	struct sensor_config_info *data = container_of(gsensor_type,
 					struct sensor_config_info, input_type);
 
-	if (data->sensor_power_ldo) {
+	if (!IS_ERR_OR_NULL(data->sensor_power_ldo)) {
+		regulator_disable(data->sensor_power_ldo);
 		regulator_put(data->sensor_power_ldo);
 		data->sensor_power_ldo = NULL;
-	  }
+	}
 }
 
 /**
@@ -251,21 +266,12 @@ static int sunxi_gsensor_init(enum input_sensor_type *gsensor_type)
 {
 	struct sensor_config_info *data = container_of(gsensor_type,
 					struct sensor_config_info, input_type);
-
-	if (data->sensor_power) {
-		data->sensor_power_ldo = regulator_get(NULL,
-							data->sensor_power);
-		if (IS_ERR(data->sensor_power_ldo)) {
-			pr_err("%s: could not get ctp ldo '%s' ,check"
-					, __func__, data->sensor_power);
-			pr_err("if ctp independent power supply by ldo,ignore firstly\n");
-		} else
-			regulator_set_voltage(data->sensor_power_ldo,
-					(int)(data->sensor_power_vol)*1000,
-					(int)(data->sensor_power_vol)*1000);
-
+	data->sensor_power_ldo = regulator_get(data->dev, "gsensor");
+	if (!IS_ERR_OR_NULL(data->sensor_power_ldo)) {
+		regulator_set_voltage(data->sensor_power_ldo,
+				(int)(data->sensor_power_vol)*1000,
+				(int)(data->sensor_power_vol)*1000);
 	}
-
 	return 0;
 }
 
@@ -282,8 +288,19 @@ static int sunxi_gsensor_startup(enum input_sensor_type *gsensor_type)
 	struct sensor_config_info *data = container_of(gsensor_type,
 					struct sensor_config_info, input_type);
 	struct device_node *np = NULL;
+	struct i2c_client *client = NULL;
+	struct platform_device *pdev = NULL;
 
-	np = of_find_node_by_name(NULL, "gsensor");
+	np = data->node;
+
+	if (!np) {
+		if (data->np_name != NULL) {
+			np = of_find_node_by_name(NULL, data->np_name);
+		} else {
+			np = of_find_node_by_name(NULL, "gsensor");
+		}
+	}
+
 	if (!np) {
 		pr_err("ERROR! get gsensor_para failed, func:%s, line:%d\n",
 							__func__, __LINE__);
@@ -296,6 +313,21 @@ static int sunxi_gsensor_startup(enum input_sensor_type *gsensor_type)
 	} else
 		data->sensor_used = 1;
 
+	client = of_find_i2c_device_by_node(np);
+	if (client) {
+		data->dev = &client->dev;
+		data->isI2CClient = 1;
+	} else {
+		pdev = of_find_device_by_node(np);
+		if (pdev)
+			data->dev = &pdev->dev;
+	}
+
+	if (!data->dev) {
+		pr_err("get device_node fail\n");
+		return -1;
+	}
+
 	if (data->sensor_used == 1) {
 		ret = of_property_read_u32(np, "gsensor_twi_id", &data->twi_id);
 		if (ret) {
@@ -304,14 +336,6 @@ static int sunxi_gsensor_startup(enum input_sensor_type *gsensor_type)
 		}
 	} else
 		pr_err("%s gsensor_unused\n", __func__);
-
-	ret = of_property_read_string(np, "gsensor_vcc_io",
-						&data->sensor_power);
-	if (ret) {
-		pr_err("get gsensor_vcc_io is fail, %d\n", ret);
-		goto devicetree_get_item_err;
-	}
-
 	ret = of_property_read_u32(np, "gsensor_vcc_io_val",
 						&data->sensor_power_vol);
 	if (ret) {
@@ -478,20 +502,13 @@ devicetree_get_item_err:
  */
 static void sunxi_ls_free(enum input_sensor_type *ls_type)
 {
-	struct regulator *ldo = NULL;
 	struct sensor_config_info *data = container_of(ls_type,
 					struct sensor_config_info, input_type);
 	/* disable ldo if it exist */
 
-	if (data->ldo) {
-		ldo = regulator_get(NULL, data->ldo);
-		if (!ldo)
-			pr_err("%s:could not get ldo '%s' in remove, something error,ignore it here !\n",
-							__func__, data->ldo);
-		else {
-			regulator_disable(ldo);
-			regulator_put(ldo);
-		}
+	if (!IS_ERR_OR_NULL(data->sensor_power_ldo)) {
+		regulator_disable(data->sensor_power_ldo);
+		regulator_put(data->sensor_power_ldo);
 	}
 }
 
@@ -506,20 +523,13 @@ static int sunxi_ls_init(enum input_sensor_type *ls_type)
 {
 	struct sensor_config_info *data = container_of(ls_type,
 					struct sensor_config_info, input_type);
-
-	/* enalbe ldo if it exist */
-	if (data->sensor_power) {
-		data->sensor_power_ldo = regulator_get(NULL, data->sensor_power);
-		if (IS_ERR(data->sensor_power_ldo)) {
-			pr_err("%s: could not get sensor power ldo '%s' in probe,",
-							__func__, data->sensor_power);
-			pr_err("maybe config error, ignore firstly !!!!!!!\n");
-			return -1;
-		}
+	data->sensor_power_ldo = regulator_get(data->dev, "lightsensor");
+	if (!IS_ERR_OR_NULL(data->sensor_power_ldo)) {
 		/*regulator_set_voltage(ldo, 3000000, 3000000);*/
 		if (0 != regulator_enable(data->sensor_power_ldo))
 			pr_err("%s: regulator_enable error!\n", __func__);
 		usleep_range(10000, 15000);
+
 	}
 	return 0;
 }
@@ -538,8 +548,18 @@ static int sunxi_ls_startup(enum input_sensor_type *ls_type)
 	struct sensor_config_info *data = container_of(ls_type,
 					struct sensor_config_info, input_type);
 	struct device_node *np = NULL;
+	struct i2c_client *client = NULL;
+	struct platform_device *pdev = NULL;
 
-	np = of_find_node_by_name(NULL, "lightsensor");
+	np = data->node;
+	if (!np) {
+		if (data->np_name != NULL) {
+			np = of_find_node_by_name(NULL, data->np_name);
+		} else {
+			np = of_find_node_by_name(NULL, "lightsensor");
+		}
+	}
+
 	if (!np) {
 		pr_err("ERROR! get ls_para failed, func:%s, line:%d\n",
 							__func__, __LINE__);
@@ -551,6 +571,20 @@ static int sunxi_ls_startup(enum input_sensor_type *ls_type)
 		goto devicetree_get_item_err;
 	} else
 		data->sensor_used = 1;
+
+	client = of_find_i2c_device_by_node(np);
+	if (client) {
+		data->dev = &client->dev;
+		data->isI2CClient = 1;
+	} else {
+		pdev = of_find_device_by_node(np);
+		if (pdev)
+			data->dev = &pdev->dev;
+	}
+	if (!data->dev) {
+		pr_err("get device_node fail\n");
+		return -1;
+	}
 
 	if (data->sensor_used == 1) {
 		ret = of_property_read_u32(np, "ls_twi_id", &data->twi_id);
@@ -564,15 +598,12 @@ static int sunxi_ls_startup(enum input_sensor_type *ls_type)
 			pr_err("%s: irq_gpio is invalid.\n", __func__);
 		else
 			data->int_number = data->irq_gpio.gpio;
-
-		ret = of_property_read_string(np, "ls_vcc", &data->sensor_power);
-		if (ret) {
-		    pr_err("get light sensor vcc is fail, %d\n", ret);
-		}
-
+#if !IS_ENABLED(CONFIG_SUNXI_REGULATOR_DT)
+		of_property_read_string(np, "ls_vcc", &data->sensor_power);
+#endif
 	} else {
 		pr_err("%s light sensor unused \n", __func__);
-		}
+	}
 
 	return ret;
 
@@ -597,6 +628,12 @@ static void sunxi_motor_free(enum input_sensor_type *motor_type)
 
 	if (data->motor_gpio.gpio != 0)
 		gpio_free(data->motor_gpio.gpio);
+	if (data->dev != NULL) {
+		if (data->dev->init_name)
+			kfree(data->dev->init_name);
+		kfree(data->dev);
+		data->dev = NULL;
+	}
 }
 
 /**
@@ -611,6 +648,14 @@ static int sunxi_motor_init(enum input_sensor_type *motor_type)
 	struct motor_config_info *data = container_of(motor_type,
 					struct motor_config_info, input_type);
 
+#ifdef CONFIG_SUNXI_REGULATOR_DT
+	data->motor_power_ldo = regulator_get(data->dev, "motor");
+	if (!IS_ERR(data->motor_power_ldo)) {
+		regulator_set_voltage(data->motor_power_ldo,
+				(int)(data->ldo_voltage)*1000,
+				(int)(data->ldo_voltage)*1000);
+	}
+#endif
 	if (gpio_is_valid(data->motor_gpio.gpio)) {
 		if (gpio_request(data->motor_gpio.gpio, "vibe") != 0) {
 			pr_err("ERROR: vibe Gpio_request is failed\n");
@@ -635,6 +680,10 @@ static int sunxi_motor_startup(enum input_sensor_type *motor_type)
 					struct motor_config_info, input_type);
 	struct device_node *np = NULL;
 	int ret = -1;
+	struct platform_device *pdev = NULL;
+#ifdef CONFIG_SUNXI_REGULATOR_DT
+	struct device *dev = NULL;
+#endif
 
 	np = of_find_node_by_name(NULL, "motor_para");
 	if (!np) {
@@ -649,6 +698,16 @@ static int sunxi_motor_startup(enum input_sensor_type *motor_type)
 		pr_err("%s: motor_para is not used\n", __func__);
 		return -1;
 	}
+#ifdef CONFIG_SUNXI_REGULATOR_DT
+	dev = kzalloc(sizeof(*dev), GFP_KERNEL);
+	if (dev) {
+		char *dev_name = kzalloc(10, GFP_KERNEL);
+		strcpy(dev_name, "motor");
+		dev->init_name = dev_name;
+		dev->of_node = np;
+		data->dev = dev;
+	}
+#endif
 
 	data->motor_gpio.gpio = of_get_named_gpio_flags(np, "motor_shake", 0,
 				(enum of_gpio_flags *)(&(data->motor_gpio)));
@@ -658,6 +717,22 @@ static int sunxi_motor_startup(enum input_sensor_type *motor_type)
 	ret = of_property_read_string(np, "motor_ldo", &data->ldo);
 	if (ret)
 		pr_err("get motor_ldo is fail, %d\n", ret);
+
+	pdev = of_find_device_by_node(np);
+	if (pdev)
+		data->dev = &pdev->dev;
+
+	if (!data->dev) {
+		pr_err("get device_node fail\n");
+		return -1;
+	}
+
+	data->motor_power_ldo = regulator_get(data->dev, "motor");
+	if (!IS_ERR(data->motor_power_ldo)) {
+		regulator_set_voltage(data->motor_power_ldo,
+				(int)(data->ldo_voltage)*1000,
+				(int)(data->ldo_voltage)*1000);
+	}
 
 	ret = of_property_read_u32(np, "motor_ldo_voltage", &data->ldo_voltage);
 	if (ret)
@@ -717,19 +792,22 @@ int input_set_power_enable(enum input_sensor_type *input_type, u32 enable)
 		break;
 	case LS_TYPE:
 		break;
+	case MOTOR_TYPE:
+		data = container_of(input_type, struct motor_config_info,
+								input_type);
+		ldo = ((struct motor_config_info *)data)->motor_power_ldo;
 	default:
 		break;
 	}
 	if ((enable != 0) && (enable != 1))
 		return ret;
 
-	if (!IS_ERR(ldo)) {
+	if (!IS_ERR_OR_NULL(ldo)) {
 		if (enable) {
 			if (regulator_enable(ldo) != 0)
 				pr_err("%s: enable ldo error!\n", __func__);
 		} else {
-			if (regulator_is_enabled(ldo))
-				regulator_disable(ldo);
+			regulator_disable(ldo);
 		}
 	} else if (gpio_is_valid(power_io)) {
 		if (enable)
@@ -778,10 +856,51 @@ int input_set_int_enable(enum input_sensor_type *input_type, u32 enable)
 		enable_irq(irq_number);
 	else
 		disable_irq_nosync(irq_number);
-
+/*
+	if (*input_type == CTP_TYPE && enable == 0)
+		dump_stack();
+*/
 	return 0;
 }
 EXPORT_SYMBOL(input_set_int_enable);
+
+int input_set_int_enable_force(enum input_sensor_type *input_type, u32 enable)
+{
+	int ret = -1;
+	u32 irq_number = 0;
+	void *data = NULL;
+	struct irq_desc *desc = NULL;
+
+	switch (*input_type) {
+	case CTP_TYPE:
+		data = container_of(input_type,
+					struct ctp_config_info, input_type);
+		irq_number = gpio_to_irq(((struct ctp_config_info *)data)->int_number);
+		break;
+	case GSENSOR_TYPE:
+		break;
+	case LS_TYPE:
+		data = container_of(input_type,
+					struct sensor_config_info, input_type);
+		irq_number = gpio_to_irq(((struct sensor_config_info *)data)->int_number);
+		break;
+	default:
+		break;
+	}
+
+	if ((enable != 0) && (enable != 1))
+		return ret;
+
+	desc = irq_to_desc(irq_number);
+	if (enable == 1) {
+		while (desc->depth >= 1)
+			enable_irq(irq_number);
+	} else {
+		disable_irq_nosync(irq_number);
+	}
+	return 0;
+}
+EXPORT_SYMBOL(input_set_int_enable_force);
 
 /**
  * input_free_int - input free irq
@@ -911,3 +1030,8 @@ int input_sensor_startup(enum input_sensor_type *input_type)
 	return ret;
 }
 EXPORT_SYMBOL(input_sensor_startup);
+
+MODULE_LICENSE("GPL");
+MODULE_DESCRIPTION("Provide function for allwinner sensor an touchscreen devices");
+MODULE_AUTHOR("Allwinner");
+MODULE_VERSION("1.0.2");

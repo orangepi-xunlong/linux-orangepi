@@ -25,7 +25,7 @@
 #include <linux/kernel.h>
 #include <asm/fpu/api.h>
 
-#include "i915_drv.h"
+#include "i915_memcpy.h"
 
 static DEFINE_STATIC_KEY_FALSE(has_movntdqa);
 
@@ -96,6 +96,11 @@ bool i915_memcpy_from_wc(void *dst, const void *src, unsigned long len)
 
 void i915_memcpy_init_early(struct drm_i915_private *dev_priv)
 {
-	if (static_cpu_has(X86_FEATURE_XMM4_1))
+	/*
+	 * Some hypervisors (e.g. KVM) don't support VEX-prefix instructions
+	 * emulation. So don't enable movntdqa in hypervisor guest.
+	 */
+	if (static_cpu_has(X86_FEATURE_XMM4_1) &&
+	    !boot_cpu_has(X86_FEATURE_HYPERVISOR))
 		static_branch_enable(&has_movntdqa);
 }

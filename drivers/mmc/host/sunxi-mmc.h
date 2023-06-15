@@ -16,7 +16,7 @@
 
 
 #include <linux/clk.h>
-#include <linux/clk/sunxi.h>
+#include <linux/reset.h>
 
 #include <linux/gpio.h>
 #include <linux/platform_device.h>
@@ -38,11 +38,13 @@
 #include <linux/mmc/card.h>
 #include <linux/mmc/slot-gpio.h>
 
+#include "../core/core.h"
+
 #ifndef __SUNXI_MMC_H__
 #define __SUNXI_MMC_H__
 
 #define DRIVER_NAME "sunxi-mmc"
-#define DRIVER_RIVISION "v3.35 2019-12-11 14:29"
+#define DRIVER_RIVISION "v4.20 2021-12-17 11:02"
 #define DRIVER_VERSION "SD/MMC/SDIO Host Controller Driver(" DRIVER_RIVISION ")"
 
 #if defined CONFIG_FPGA_V4_PLATFORM || defined CONFIG_FPGA_V7_PLATFORM
@@ -160,11 +162,15 @@
 	(SDXC_RESP_ERROR | SDXC_RESP_CRC_ERROR | SDXC_DATA_CRC_ERROR | \
 	 SDXC_RESP_TIMEOUT | SDXC_DATA_TIMEOUT | SDXC_FIFO_RUN_ERROR | \
 	 SDXC_HARD_WARE_LOCKED | SDXC_START_BIT_ERROR | SDXC_END_BIT_ERROR)
+#define SDXC_INTERRUPT_CMD_ERROR_BIT \
+	(SDXC_RESP_ERROR | SDXC_RESP_CRC_ERROR | SDXC_RESP_TIMEOUT)
 #define SDXC_INTERRUPT_DONE_BIT \
 	(SDXC_AUTO_COMMAND_DONE | SDXC_DATA_OVER | \
 	 SDXC_COMMAND_DONE | SDXC_VOLTAGE_CHANGE_DONE)
 #define SDXC_INTERRUPT_DDONE_BIT \
 	(SDXC_AUTO_COMMAND_DONE | SDXC_DATA_OVER)
+#define SDXC_SWITCH_DDONE_BIT \
+	(SDXC_VOLTAGE_CHANGE_DONE | SDXC_COMMAND_DONE)
 
 
 /* status */
@@ -212,9 +218,6 @@
 #define SDXC_IDMAC_WRITE			(7 << 13)
 #define SDXC_IDMAC_DESC_CLOSE			(8 << 13)
 
-/*When one dma des transfer 4k,PAGE_SIZE*4 can transfer max 4M data */
-#define SUNXI_REQ_PAGE_SIZE			(PAGE_SIZE*4)
-
 /*
 * If the idma-des-size-bits of property is ie 13, bufsize bits are:
 *  Bits  0-12: buf1 size
@@ -229,6 +232,47 @@
 #define SDXC_IDMAC_DES0_ER	BIT(5)	/* end of ring */
 #define SDXC_IDMAC_DES0_CES	BIT(30)	/* card error summary */
 #define SDXC_IDMAC_DES0_OWN	BIT(31)	/* 1-idma owns it, 0-host owns it */
+
+void sunxi_dump_reg(struct mmc_host *mmc);
+
+#if 0
+#define sunxi_r_op(host, op) (\
+{\
+	int __ret_val = 0;\
+	struct mmc_host	*mmc = host->mmc;\
+	clk_disable_unprepare(host->clk_mmc);\
+	dev_dbg(mmc_dev(mmc), "%s, %d\n", __FUNCTION__, __LINE__);\
+	sunxi_dump_reg(mmc);\
+	op;\
+	__ret_val = clk_prepare_enable(host->clk_mmc);\
+	if (__ret_val) {\
+		dev_err(mmc_dev(mmc), "Enable mmc clk err %d\n", __ret_val);\
+	} \
+	__ret_val;\
+} \
+)
+#else
+#define sunxi_r_op(__h, __op) (\
+{\
+	int __ret_val = 0;\
+	struct mmc_host	*mmc = (__h)->mmc;\
+	clk_disable_unprepare((__h)->clk_mmc);\
+	dev_dbg(mmc_dev(mmc), "%s, %d\n", __FUNCTION__, __LINE__);\
+	__op;\
+	__ret_val  = clk_prepare_enable((__h)->clk_mmc);\
+	if (__ret_val) {\
+		dev_err(mmc_dev(mmc), "Enable mmc clk err %d\n", __ret_val);\
+	} \
+	__ret_val;\
+} \
+)
+#endif
+
+enum sunxi_cookie {
+	COOKIE_UNMAPPED,
+	COOKIE_PRE_MAPPED,	/* mapped by sunxi_mmc_pre_req() */
+	COOKIE_MAPPED,		/* mapped by sunxi_mmc_request() or retry*/
+};
 
 struct sunxi_idma_des {
 	u32 config;
@@ -262,6 +306,16 @@ struct sunxi_mmc_host_perf{
 	ktime_t wtimetran;
 };
 
+struct sunxi_mmc_supply {
+	struct regulator *vmmc;		/* Card power supply */
+	struct regulator *vqmmc;	/* Optional Vccq supply */
+	struct regulator *vdmmc;	/*Optional card detect pin supply*/
+	struct regulator *vdmmc33sw;	/* SD card PMU control*/
+	struct regulator *vdmmc18sw;
+	struct regulator *vqmmc33sw;	/* SD card PMU control*/
+	struct regulator *vqmmc18sw;
+};
+
 struct sunxi_mmc_host {
 	struct mmc_host *mmc;
 	struct reset_control *reset;
@@ -272,7 +326,7 @@ struct sunxi_mmc_host {
 	/* clock management */
 	struct clk *clk_ahb;
 	struct clk *clk_mmc;
-	struct clk *clk_rst;
+	struct reset_control *clk_rst;
 
 	int (*sunxi_mmc_clk_set_rate)(struct sunxi_mmc_host *host,
 				struct mmc_ios *ios);
@@ -285,6 +339,7 @@ struct sunxi_mmc_host {
 	u32 sdio_imask;
 
 	/* dma */
+	u32 req_page_count;
 	u32 idma_des_size_bits;
 	dma_addr_t sg_dma;
 	void *sg_cpu;
@@ -303,16 +358,22 @@ struct sunxi_mmc_host {
 	int ferror;
 
 	u32 power_on;
+	u32 time_pwroff_ms;
 
 	/* pinctrl handles */
 	struct pinctrl *pinctrl;
 	struct pinctrl_state *pins_default;
+	struct pinctrl_state *pins_bias_1v8;
 	struct pinctrl_state *pins_sleep;
+	struct pinctrl_state *pins_uart_jtag;
 
 	/*sys node */
 	struct device_attribute maual_insert;
 	struct device_attribute *dump_register;
 	struct device_attribute dump_clk_dly;
+	struct device_attribute host_sample_dly;
+	struct device_attribute host_ds_dly;
+	struct device_attribute host_send_status;
 	void (*sunxi_mmc_dump_dly_table)(struct sunxi_mmc_host *host);
 
 	/* backup register structrue */
@@ -328,6 +389,7 @@ struct sunxi_mmc_host {
 			u32 en_crypt, u32 ac_mode, u32 en_emce, int data_len,
 			int bypass, int task_load);
 	bool (*sunxi_mmc_hw_busy)(struct sunxi_mmc_host *host);
+	int (*sunxi_mmc_dat0_busy)(struct sunxi_mmc_host *host);
 
 	/*really controller id,no logic id */
 	int phy_index;
@@ -357,9 +419,17 @@ struct sunxi_mmc_host {
 #define SUNXI_DIS_KER_NAT_CD			0x40
 
 /*#define SUNXI_NO_ERASE				0x80*/
+#define SUNXI_SC_EN_RETRY_CMD			0x100
+#define SUNXI_SC_EN_TIMEOUT_DETECT		0x200
+#define SUNXI_CMD11_TIMEOUT_DETECT		0x400
 /*control specal function control,for customer need*/
 	u32 ctl_spec_cap;
 
+#define MMC_SUNXI_CAP3_DAT3_DET	(1 << 0)
+#define MMC_SUNXI_CAP3_CD_USED_24M	(1 << 1)
+	u32 sunxi_caps3;
+
+	struct sunxi_mmc_supply supply;
 	int card_pwr_gpio;
 
 	u32 retry_cnt;
@@ -367,10 +437,14 @@ struct sunxi_mmc_host {
 	int (*sunxi_mmc_judge_retry)(struct sunxi_mmc_host *host,
 				      struct mmc_command *cmd, u32 rcnt,
 				      u32 errno, void *other);
-	int sunxi_retry_samp_dl;
-	int sunxi_retry_ds_dl;
+	int sunxi_samp_dl;
+	int sunxi_ds_dl;
+
+	u32 sunxi_ds_dl_cnt;
+	u32 sunxi_samp_dl_cnt;
 	/*only use for MMC_CAP_NEEDS_POLL and SUNXI_DIS_KER_NAT_CD is on*/
 	u32 present;
+	u32 voltage_switching;
 
 	bool perf_enable;
 	struct device_attribute host_perf;
@@ -379,6 +453,7 @@ struct sunxi_mmc_host {
 	struct device_attribute filter_speed_perf;
 	unsigned int filter_sector;
 	unsigned int filter_speed;
+	unsigned int debounce_value;
 	struct device_attribute host_mwr;
 
 	void *version_priv_dat;
@@ -392,6 +467,8 @@ struct sunxi_mmc_host {
 	/*des phy address shift,use for over 4G phy ddrest*/
 	size_t des_addr_shift;
 	char name[32];
+	struct delayed_work sunxi_cmd11_timerout;
+	struct delayed_work sunxi_timerout_work;
 };
 
 /*the struct as the the kernel version changes,which copy form core/slot-gpio.c*/
@@ -410,14 +487,22 @@ struct mmc_gpio {
 	(((it) == MMC_TIMING_UHS_DDR50) || ((it) == MMC_TIMING_MMC_DDR52))
 
 
+/*Transfer core definition here*/
+/*core.h*/
+#define MMC_DATA_STREAM			BIT(10)
+/*host.h cap2*/
+#define MMC_CAP2_CACHE_CTRL	(1 << 1)	/* Allow cache control */
+#define MMC_CAP2_PACKED_RD	(1 << 12)	/* Allow packed read */
+#define MMC_CAP2_PACKED_WR	(1 << 13)	/* Allow packed write */
+#define MMC_CAP2_PACKED_CMD	(MMC_CAP2_PACKED_RD | \
+						 MMC_CAP2_PACKED_WR)
+#define MMC_CAP2_HC_ERASE_SZ	(1 << 9)	/* High-capacity erase size */
+
 void sunxi_mmc_set_a12a(struct sunxi_mmc_host *host);
 void sunxi_mmc_do_shutdown_com(struct platform_device *pdev);
-extern int mmc_go_idle(struct mmc_host *host);
-extern int mmc_send_op_cond(struct mmc_host *host, u32 ocr, u32 *rocr);
 extern int mmc_send_status(struct mmc_card *card, u32 *status);
-extern void mmc_set_clock(struct mmc_host *host, unsigned int hz);
-extern void mmc_set_timing(struct mmc_host *host, unsigned int timing);
 extern void mmc_set_bus_width(struct mmc_host *host, unsigned int width);
+extern int mmc_flush_cache(struct mmc_card *);
 extern int sunxi_sel_pio_mode(struct pinctrl *pinctrl, u32 pm_sel);
 
 #endif

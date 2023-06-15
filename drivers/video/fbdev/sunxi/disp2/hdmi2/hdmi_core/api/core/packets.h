@@ -20,6 +20,7 @@
 #include "../log.h"
 #include "../edid.h"
 #include "../general_ops.h"
+#include "hdr10p.h"
 
 #define ACP_TX	0
 #define ISRC1_TX	1
@@ -116,6 +117,8 @@ void fc_vsd_vendor_OUI(hdmi_tx_dev_t *dev, u32 id);
 u8 fc_vsd_vendor_payload(hdmi_tx_dev_t *dev,
 			const u8 *data, unsigned short length);
 void fc_vsif_enable(hdmi_tx_dev_t *dev, u8 enable);
+int fc_vsif_config(hdmi_tx_dev_t *dev, u8 enable);
+
 
 /**
  * Configure Source Product Description, Vendor Specific and Auxiliary
@@ -240,5 +243,5 @@ u8 fc_VideoCode_get(hdmi_tx_dev_t *dev);
 void fc_VideoCode_set(hdmi_tx_dev_t *dev, u8 data);
 void fc_vsif_get(hdmi_tx_dev_t *dev, u8 *data);
 void fc_vsif_set(hdmi_tx_dev_t *dev, u8 *data);
-
+void fc_get_vsd_vendor_payload(hdmi_tx_dev_t *dev, u8 *video_format, u32 *code);
 #endif	/* PACKETS_H_ */

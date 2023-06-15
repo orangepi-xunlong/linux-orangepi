@@ -42,10 +42,12 @@
 #define VIN_MAX_CSI			2
 #define VIN_MAX_TDM			1
 #define VIN_MAX_CCI			2
-#define VIN_MAX_MIPI			1
+#define VIN_MAX_MIPI			2
 #define VIN_MAX_ISP			2
 #define VIN_MAX_SCALER			4
 
 #define MAX_CH_NUM			4
+
+
 
 #endif /*_SUN50IW10P1_VIN_CFG_H_*/

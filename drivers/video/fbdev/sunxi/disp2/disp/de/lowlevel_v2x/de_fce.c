@@ -17,6 +17,7 @@
  *                 2014/04/25      vito cheng  v0.11 Add block updated function
  ******************************************************************************/
 
+#ifdef CONFIG_DISP2_SUNXI_SUPPORT_ENAHNCE
 #include "de_fce_type.h"
 #include "de_rtmx.h"
 #include "de_enhance.h"
@@ -87,7 +88,7 @@ int de_fce_init(unsigned int sel, unsigned int chno, uintptr_t reg_base)
 	void *memory;
 
 	base = reg_base + (sel + 1) * 0x00100000 + FCE_OFST;
-#if defined(CONFIG_ARCH_SUN50IW10)
+#if defined(CONFIG_INDEPENDENT_DE)
 	if (sel)
 		base = base - 0x00100000;
 #endif
@@ -1048,3 +1049,4 @@ int de_ce_tasklet(unsigned int screen_id, unsigned int chno,
 
 	return 0;
 }
+#endif

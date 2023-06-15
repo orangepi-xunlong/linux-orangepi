@@ -3,7 +3,8 @@
 #define _SECURE_STORAGE_C_
 /*****************************************************************************/
 #include "nand_secure_storage.h"
-#include "nand_boot.h"
+/*#include "nand_boot.h"*/
+#include "nand-partition3/sunxi_nand_boot.h"
 #include "../nfd/nand_osal_for_linux.h"
 #include "nand_physic_interface.h"
 #include "rawnand/rawnand_cfg.h"

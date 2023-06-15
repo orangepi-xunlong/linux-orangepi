@@ -706,7 +706,7 @@ static void send_addba_rsp(struct sprdwl_rx_ba_entry *ba_entry,
 			   unsigned char tid, unsigned char sta_lut_index,
 			   int status)
 {
-	struct sprdwl_cmd_ba addba_rsp;
+	struct sprdwl_ba_event_data ba_data;
 	struct sprdwl_intf *intf = NULL;
 	struct sprdwl_peer_entry *peer_entry = NULL;
 	struct sprdwl_rx_if *rx_if = container_of(ba_entry,
@@ -721,12 +721,14 @@ static void send_addba_rsp(struct sprdwl_rx_ba_entry *ba_entry,
 		return;
 	}
 
-	addba_rsp.type = SPRDWL_ADDBA_RSP_CMD;
-	addba_rsp.tid = tid;
-	ether_addr_copy(addba_rsp.da, peer_entry->tx.da);
-	addba_rsp.success = (status) ? 0 : 1;
+	ba_data.addba_rsp.type = SPRDWL_ADDBA_RSP_CMD;
+	ba_data.addba_rsp.tid = tid;
+	ether_addr_copy(ba_data.addba_rsp.da, peer_entry->tx.da);
+	ba_data.addba_rsp.success = (status) ? 0 : 1;
+	ba_data.ba_entry = ba_entry;
+	ba_data.sta_lut_index = sta_lut_index;
 
-	sprdwl_rx_send_cmd(intf, (void *)(&addba_rsp), sizeof(addba_rsp),
+	sprdwl_rx_send_cmd(intf, (void *)(&ba_data), sizeof(ba_data),
 			   SPRDWL_WORK_BA_MGMT, peer_entry->ctx_id);
 }
 
@@ -781,12 +783,17 @@ static int wlan_addba_event(struct sprdwl_rx_ba_entry *ba_entry,
 	}
 
 	spin_lock_bh(&ba_node->ba_node_lock);
+#ifdef CP2_RESET_SUPPORT
+	ba_node->active = 0;
+#endif
 	if (likely(!ba_node->active)) {
 		set_ba_node_desc(ba_node->rx_ba, win_start, win_size,
 				 INDEX_SIZE_MASK(index_size));
+#if 0
 		ba_node->active = 1;
 		wl_debug("%s:(active:%d, tid:%d)\n",
 			 __func__, ba_node->active, ba_node->tid);
+#endif
 	} else {
 		/* Should never happen */
 		wl_err("%s: BA SESSION IS ACTIVE sta_lut_index: %d, tid: %d\n",
@@ -993,4 +1000,21 @@ void peer_entry_delba(void *hw_intf, unsigned char lut_index)
 			ba_entry->current_ba_node = NULL;
 		}
 	}
+}
+
+void sprdwl_active_ba_node(struct sprdwl_rx_ba_entry *ba_entry,
+				  u8 sta_lut_index, u8 tid)
+{
+	struct rx_ba_node *ba_node = NULL;
+
+	ba_node = find_ba_node(ba_entry, sta_lut_index, tid);
+	if (ba_node == NULL) {
+	    wl_err("BA node not found, tid = %d\n", tid);
+	    return;
+	}
+
+	spin_lock_bh(&ba_node->ba_node_lock);
+	ba_node->active = 1;
+	spin_unlock_bh(&ba_node->ba_node_lock);
+	wl_info("%s BA active tid = %d\n", __func__, tid);
 }

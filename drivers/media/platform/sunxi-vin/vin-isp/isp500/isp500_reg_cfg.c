@@ -427,3 +427,19 @@ void bsp_isp_set_d3d_addr1(unsigned long id, dma_addr_t addr)
 	writel(addr >> ISP_ADDR_BIT_R_SHIFT, isp_regs[id].isp_d3d_rec_addr1);
 }
 
+void bsp_isp_set_fifo_mode(unsigned long id, unsigned int mode)
+{
+ }
+
+void bsp_isp_min_ddr_size(unsigned long id, unsigned int size)
+{
+}
+
+void bsp_isp_fifo_raw_write(unsigned long id, unsigned int depth)
+{
+}
+
+void bsp_isp_k_min_ddr_size(unsigned long id, unsigned int size)
+{
+}
+

@@ -41,6 +41,9 @@
 #define RX_SINGLE_DESC0		0x80000000
 #define RX_SINGLE_DESC1		0x83000000
 
+#define AC300_ID		0xc0000000
+#define EPHY_ID			0x00441400
+
 typedef union {
 	struct {
 		/* TDES0 */
@@ -243,13 +246,13 @@ int desc_rx_frame_len(struct dma_desc *desc);
 int sunxi_mac_reset(void *iobase, void (*mdelay)(int), int n);
 int sunxi_geth_register(void *iobase, int version, unsigned int div);
 
-#if defined(CONFIG_SUNXI_EPHY)
+#if IS_ENABLED(CONFIG_SUNXI_EPHY)
 extern int ephy_is_enable(void);
 #endif
 
-#if defined(CONFIG_ARCH_SUN8IW3) \
-	|| defined(CONFIG_ARCH_SUN9IW1) \
-	|| defined(CONFIG_ARCH_SUN7I)
+#if IS_ENABLED(CONFIG_ARCH_SUN8IW3) \
+	|| IS_ENABLED(CONFIG_ARCH_SUN9IW1) \
+	|| IS_ENABLED(CONFIG_ARCH_SUN7I)
 #define HW_VERSION	0
 #else
 #define HW_VERSION	1

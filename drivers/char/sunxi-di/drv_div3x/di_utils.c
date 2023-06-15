@@ -161,61 +161,19 @@ static struct di_dma_item *di_dma_item_create(
 	enum dma_data_direction dir)
 {
 	struct di_dma_item *item;
-	struct sg_table *sgt_bak;
-	struct scatterlist *sgl, *sgl_bak;
-	s32 sg_count = 0;
-	int i;
-
-	/*DEFINE_DMA_ATTRS(attrs);
-	dma_set_attr(DMA_ATTR_SKIP_CPU_SYNC, &attrs);*/
 
 	item = kzalloc(sizeof(*item), GFP_KERNEL);
 	if (item == NULL) {
 		DI_ERR(TAG"alloc mem for dma_item fail\n");
 		return NULL;
 	}
-
-	sgt_bak = kzalloc(sizeof(*sgt_bak), GFP_KERNEL);
-	if (sgt_bak == NULL) {
-		DI_ERR(TAG"alloc mem for sgt_bak fail\n");
-		goto err_item_kfree;
-	}
-	if (sg_alloc_table(sgt_bak, sgt->nents, GFP_KERNEL)) {
-		DI_ERR(TAG"alloc sgt fail\n");
-		goto err_sgt_kfree;
-	}
-
-	sgl_bak = sgt_bak->sgl;
-	for_each_sg(sgt->sgl, sgl, sgt->nents, i)  {
-		sg_set_page(sgl_bak, sg_page(sgl), sgl->length, sgl->offset);
-		sgl_bak = sg_next(sgl_bak);
-	}
-	sg_count = dma_map_sg_attrs(dma_dev,
-		sgt_bak->sgl, sgt_bak->nents, dir, DMA_ATTR_SKIP_CPU_SYNC);
-	if (sg_count != 1) {
-		DI_ERR(TAG"dma_map_sg_attrs failed:%d\n", sg_count);
-		goto err_free_sgt;
-	}
-
 	item->buf = dmabuf;
 	item->attach = attach;
-	item->sgt_org = sgt;
-	item->sgt_bak = sgt_bak;
+	item->sgt = sgt;
 	item->dir = dir;
-	item->dma_addr = sg_dma_address(sgt_bak->sgl);
+	item->dma_addr = sg_dma_address(sgt->sgl);
 
 	return item;
-
-err_free_sgt:
-	sg_free_table(sgt_bak);
-
-err_sgt_kfree:
-	kfree(sgt_bak);
-
-err_item_kfree:
-	kfree(item);
-
-	return NULL;
 }
 
 struct di_dma_item *di_dma_buf_self_map(
@@ -263,15 +221,8 @@ out_buf_put:
 
 void di_dma_buf_self_unmap(struct di_dma_item *item)
 {
-	/*DEFINE_DMA_ATTRS(attrs);
-	dma_set_attr(DMA_ATTR_SKIP_CPU_SYNC, &attrs);*/
-
-	dma_unmap_sg_attrs(dma_dev, item->sgt_bak->sgl,
-		item->sgt_bak->nents, item->dir, DMA_ATTR_SKIP_CPU_SYNC);
 	dma_buf_unmap_attachment(item->attach,
-		item->sgt_bak, item->dir);
-	sg_free_table(item->sgt_bak);
-	kfree(item->sgt_bak);
+		item->sgt, item->dir);
 	dma_buf_detach(item->buf, item->attach);
 	dma_buf_put(item->buf);
 

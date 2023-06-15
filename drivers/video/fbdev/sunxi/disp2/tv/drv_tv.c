@@ -7,11 +7,16 @@
  *
  */
 
+#include <linux/regulator/consumer.h>
+#include <linux/extcon-provider.h>
+#include <linux/reset.h>
+#include <linux/nvmem-consumer.h>
+#include "../../../../../extcon/extcon.h"
+
 #include "drv_tv.h"
 #if defined(CONFIG_EXTCON)
 #include <linux/extcon.h>
 #endif
-#include "../disp/disp_sys_intf.h"
 
 static int suspend;
 struct tv_info_t g_tv_info;
@@ -462,13 +467,40 @@ static struct disp_video_timings video_timing[] = {
 		} \
 	} while (0)
 
-/* #define TVDEBUG */
+/*#define TVDEBUG*/
 #if defined(TVDEBUG)
 #define TV_DBG(fmt, arg...)   pr_warn("%s()%d - "fmt, __func__, __LINE__, ##arg)
 #else
 #define TV_DBG(fmt, arg...)
 #endif
 #define TV_ERR(fmt, arg...)   pr_err("%s()%d - "fmt, __func__, __LINE__, ##arg)
+
+static int tv_regulator_enable(struct regulator *regulator)
+{
+	int ret = 0;
+
+	if (!regulator)
+		return 0;
+
+	ret = regulator_enable(regulator);
+	WARN(ret, "regulator_enable failed, ret=%d\n", ret);
+
+	return ret;
+}
+
+static int tv_regulator_disable(struct regulator *regulator)
+{
+	int ret = 0;
+
+	if (!regulator)
+		return 0;
+
+	ret = regulator_disable(regulator);
+	WARN(ret, "regulator_disable failed, ret=%d\n", ret);
+
+	return ret;
+}
+
 
 #if defined(CONFIG_EXTCON)
 static struct task_struct *tve_task;
@@ -480,7 +512,6 @@ static const unsigned int tv_cable[] = {
 	EXTCON_DISP_CVBS,
 	EXTCON_NONE,
 };
-
 
 /* this extcon is used for the purpose of compatible platform */
 static struct extcon_dev *extcon_cvbs;
@@ -524,34 +555,22 @@ void tv_report_hpd_work(u32 sel, u32 hpd)
 
 	switch (hpd) {
 	case STATUE_CLOSE:
-		if (extcon_dev[sel] == 0)
-			return;
 		extcon_set_state_sync(extcon_dev[sel], EXTCON_DISP_CVBS,
 				      STATUE_CLOSE);
-		if (is_compatible_cvbs) {
-			if (extcon_cvbs == 0)
-				return;
+		if (is_compatible_cvbs)
 			extcon_set_state_sync(extcon_cvbs, EXTCON_DISP_CVBS,
 					      STATUE_CLOSE);
-		}
 		break;
 
 	case STATUE_OPEN:
-		if (extcon_dev[sel] == 0)
-			return;
 		extcon_set_state_sync(extcon_dev[sel], EXTCON_DISP_CVBS,
 				      STATUE_OPEN);
-		if (is_compatible_cvbs) {
-			if (extcon_cvbs == 0)
-				return;
+		if (is_compatible_cvbs)
 			extcon_set_state_sync(extcon_cvbs, EXTCON_DISP_CVBS,
 					      STATUE_OPEN);
-		}
 		break;
 
 	default:
-		if (extcon_dev[sel] == 0)
-			return;
 		extcon_set_state_sync(extcon_dev[sel], EXTCON_DISP_CVBS,
 				      STATUE_CLOSE);
 		break;
@@ -733,11 +752,12 @@ s32 tv_set_enhance_mode(u32 sel, u32 mode)
 
 static void tve_clk_init(u32 sel)
 {
-	if (g_tv_info.clk)
-		g_tv_info.clk_parent = clk_get_parent(g_tv_info.clk);
-	if (g_tv_info.screen[sel].clk)
-		g_tv_info.screen[sel].clk_parent =
-		    clk_get_parent(g_tv_info.screen[sel].clk);
+	if (!g_tv_info.screen[sel].clk) {
+		TV_ERR("clk is NULL, sel:%d\n", sel);
+		return;
+	}
+
+	g_tv_info.screen[sel].clk_parent = clk_get_parent(g_tv_info.screen[sel].clk);
 }
 
 #if defined(TVE_TOP_SUPPORT)
@@ -745,7 +765,15 @@ static int tve_top_clk_enable(void)
 {
 	int ret;
 
-	ret = clk_prepare_enable(g_tv_info.clk);
+	if (!IS_ERR_OR_NULL(g_tv_info.rst_bus))
+		reset_control_deassert(g_tv_info.rst_bus);
+
+	if (!g_tv_info.bus_clk) {
+		TV_ERR("top bus clk is NULL\n");
+		return -1;
+	}
+
+	ret = clk_prepare_enable(g_tv_info.bus_clk);
 	if (ret != 0) {
 		TV_ERR("fail to enable tve's top clk!\n");
 		return ret;
@@ -756,7 +784,16 @@ static int tve_top_clk_enable(void)
 
 static int tve_top_clk_disable(void)
 {
-	clk_disable(g_tv_info.clk);
+	if (!IS_ERR_OR_NULL(g_tv_info.rst_bus))
+		reset_control_assert(g_tv_info.rst_bus);
+
+	if (!g_tv_info.bus_clk) {
+		TV_ERR("top bus clk is NULL\n");
+		return -1;
+	}
+
+	clk_disable(g_tv_info.bus_clk);
+
 	return 0;
 }
 #else
@@ -768,18 +805,50 @@ static int tve_clk_enable(u32 sel)
 {
 	int ret;
 
+	if (!g_tv_info.screen[sel].clk) {
+		TV_ERR("screen[%d] clk is NULL\n", sel);
+		return -1;
+	}
+
 	ret = clk_prepare_enable(g_tv_info.screen[sel].clk);
 	if (ret != 0) {
 		TV_ERR("fail to enable tve%d's clk!\n", sel);
 		return ret;
 	}
 
+	if (!g_tv_info.screen[sel].bus_clk) {
+		TV_ERR("screen[%d] bus clk is NULL\n", sel);
+		return -1;
+	}
+
+	ret = clk_prepare_enable(g_tv_info.screen[sel].bus_clk);
+	if (ret != 0) {
+		TV_ERR("fail to enable tve%d's bus clk!\n", sel);
+		return ret;
+	}
+
+	if (!IS_ERR_OR_NULL(g_tv_info.screen[sel].rst_bus))
+		reset_control_deassert(g_tv_info.screen[sel].rst_bus);
+
 	return 0;
 }
 
 static int tve_clk_disable(u32 sel)
 {
+	if (!g_tv_info.screen[sel].clk) {
+		TV_ERR("screen[%d] clk is NULL\n", sel);
+		return -1;
+	}
 	clk_disable(g_tv_info.screen[sel].clk);
+
+	if (!g_tv_info.screen[sel].bus_clk) {
+		TV_ERR("screen[%d] bus clk is NULL\n", sel);
+		return -1;
+	}
+	clk_disable(g_tv_info.screen[sel].bus_clk);
+	if (!IS_ERR_OR_NULL(g_tv_info.screen[sel].rst_bus))
+		reset_control_assert(g_tv_info.screen[sel].rst_bus);
+
 	return 0;
 }
 
@@ -821,13 +890,19 @@ static void tve_clk_config(u32 sel, u32 tv_mode)
 	ret = tve_get_pixclk(&rate, &tv_mode);
 	if (ret)
 		TV_ERR("%s:tve_get_pixclk fail!\n", __func__);
-	if (g_tv_info.clk_parent)
-		clk_set_parent(g_tv_info.clk, g_tv_info.clk_parent);
-	if (g_tv_info.screen[sel].clk_parent)
-		clk_set_parent(g_tv_info.screen[sel].clk,
-			       g_tv_info.screen[sel].clk_parent);
 
+	if (!g_tv_info.screen[sel].clk_parent) {
+		TV_ERR("screen[%d] clk_parent is NULL\n", sel);
+		return;
+	}
+	clk_set_rate(g_tv_info.screen[sel].clk_parent, 2 * rate);
+
+	if (!g_tv_info.screen[sel].clk) {
+		TV_ERR("screen[%d] clk is NULL\n", sel);
+		return;
+	}
 	round = clk_round_rate(g_tv_info.screen[sel].clk, rate);
+
 	rate_diff = (long)(round - rate);
 	if ((rate_diff > accuracy) || (rate_diff < -accuracy)) {
 		for (accuracy = 1000000; accuracy <= 5000000;
@@ -835,11 +910,11 @@ static void tve_clk_config(u32 sel, u32 tv_mode)
 			for (div = 1; (rate * div) <= 984000000; div++) {
 				prate = rate * div;
 				parent_round_rate =
-				    clk_round_rate(g_tv_info.clk_parent, prate);
+				    clk_round_rate(g_tv_info.screen[sel].clk_parent, prate);
 				prate_diff = (long)(parent_round_rate - prate);
 				if ((prate_diff < accuracy) &&
 				    (prate_diff > -accuracy)) {
-					ret = clk_set_rate(g_tv_info.clk_parent,
+					ret = clk_set_rate(g_tv_info.screen[sel].clk_parent,
 							   prate);
 					ret += clk_set_rate(
 					    g_tv_info.screen[sel].clk, rate);
@@ -859,15 +934,15 @@ static void tve_clk_config(u32 sel, u32 tv_mode)
 			break;
 		}
 	} else {
-		prate = clk_get_rate(g_tv_info.clk_parent);
+		prate = clk_get_rate(g_tv_info.screen[sel].clk_parent);
 		ret = clk_set_rate(g_tv_info.screen[sel].clk, rate);
 		if (ret)
 			TV_ERR("fail to set rate(%ld) fo tve%d's clock!\n",
 				rate, sel);
 	}
 
-	TV_ERR("parent prate=%lu(%lu), rate=%lu(%lu), tv_mode=%d\n",
-		clk_get_rate(g_tv_info.clk_parent), prate,
+	TV_DBG("parent prate=%lu(%lu), rate=%lu(%lu), tv_mode=%d\n",
+		clk_get_rate(g_tv_info.screen[sel].clk_parent), prate,
 		clk_get_rate(g_tv_info.screen[sel].clk), rate, tv_mode);
 }
 
@@ -880,7 +955,16 @@ static int tv_power_enable(char *name)
 		goto exit;
 	}
 
-	ret = disp_sys_power_enable(name);
+	if (!g_tv_info.regulator)
+		g_tv_info.regulator = regulator_get(
+				g_tv_info.dev, name);
+
+	if (!g_tv_info.regulator) {
+		TV_ERR("regulator_get:%s failed!\n", name);
+		return -1;
+	}
+
+	ret = tv_regulator_enable(g_tv_info.regulator);
 
 	tv_power_enable_mask = 1;
 
@@ -896,7 +980,14 @@ static int tv_power_disable(char *name)
 		ret = 0;
 		goto exit;
 	}
-	ret = disp_sys_power_disable(name);
+
+
+	if (!g_tv_info.regulator) {
+		TV_ERR("regulator_get:%s failed!\n", name);
+		return -1;
+	}
+
+	ret = tv_regulator_disable(g_tv_info.regulator);
 
 	tv_power_enable_mask = 0;
 exit:
@@ -928,22 +1019,62 @@ static s32 __get_offset(struct device_node *node, int i)
 	return 0;
 }
 
+static int __get_tv_cali_value(u32 index, u32 *out_value)
+{
+	struct nvmem_cell *calcell = NULL;
+	struct device *dev = g_tv_info.dev;
+	u32 *caldata;
+	size_t callen;
+	int ret = 0;
+
+	if (!out_value) {
+		TV_ERR("NULL pointer!!!\n");
+		ret = -1;
+		goto OUT;
+	}
+	*out_value = 0;
+
+	calcell = nvmem_cell_get(dev, "tvout");
+	if (IS_ERR_OR_NULL(calcell)) {
+		TV_ERR("Get tvout fail!\n");
+		ret = PTR_ERR(caldata);
+		goto OUT;
+	}
+
+	caldata = nvmem_cell_read(calcell, &callen);
+	if (IS_ERR_OR_NULL(caldata)) {
+		ret = PTR_ERR(caldata);
+		goto OUT_PUT;
+	}
+
+	if (index >= (callen / 4)) {
+		TV_ERR("index:%u Out of range, len:%lu\n", index, callen);
+		ret = -1;
+		goto OUT_PUT;
+	}
+
+	/*other ic might be need to adjust offset*/
+	*out_value = caldata[index] >> 16;
+	/*TV_ERR("outval:%lu len:%lu\n", *out_value, callen);*/
+	kfree(caldata);
+
+OUT_PUT:
+	nvmem_cell_put(calcell);
+OUT:
+	return ret;
+}
+
 s32 tv_init(struct platform_device *pdev)
 {
 	s32 i = 0, ret = 0;
 	u32 cali_value = 0, sel = pdev->id;
 	char sub_key[20] = {0};
 	unsigned int value, output_type, output_mode;
-	unsigned int interface = 0, fake_detect = 0;
+	unsigned int interface = 0;
 	unsigned long rate = 0;
 #if defined(CONFIG_ARCH_SUN8IW7)
 	s32 sid_turn = 0;
 #endif
-
-	ret = of_property_read_u32(pdev->dev.of_node, "fake_detect",
-					&fake_detect);
-	if (ret >= 0)
-		tv_fake_detect = fake_detect;
 
 	ret = of_property_read_u32(pdev->dev.of_node, "interface",
 					&interface);
@@ -1000,19 +1131,20 @@ s32 tv_init(struct platform_device *pdev)
 			ret = of_property_read_u32(pdev->dev.of_node, sub_key,
 						   &value);
 			if (ret < 0) {
-				TV_DBG("tve%d have no dac %d\n", sel, i);
+				TV_DBG("tve%d have no dac %d, sub_key:%s\n",
+					sel, i, sub_key);
 			} else {
 				dac_no = value;
 				g_tv_info.screen[sel].dac_no[i] = value;
 				g_tv_info.screen[sel].dac_num++;
-				cali_value = tve_low_get_sid(dac_no);
+				ret = __get_tv_cali_value(dac_no, &cali_value);
 
 				pr_debug("cali_temp = %u\n", cali_value);
 				/* VGA mode: 16~31 bits
 				 * CVBS & YPBPR mode: 0~15 bits
 				 * zero is not allow
 				 */
-				if (cali_value) {
+				if (!ret && cali_value) {
 					if (interface == DISP_VGA)
 						cali[dac_no] =
 						    (cali_value >> 16) & 0xffff;
@@ -1051,7 +1183,8 @@ s32 tv_init(struct platform_device *pdev)
 			ret = of_property_read_u32(pdev->dev.of_node, sub_key,
 						   &value);
 			if (ret < 0) {
-				TV_DBG("tve%d have no type%d\n", sel, i);
+				TV_DBG("tve%d have no type%d sub_key:%s\n",
+					sel, i, sub_key);
 				/* if do'not config type, set disabled status */
 				g_tv_info.screen[sel].dac_type[i] = 7;
 			} else {
@@ -1097,9 +1230,6 @@ s32 tv_init(struct platform_device *pdev)
 				TV_ERR(
 				    "fail to set rate(%ld) fo tve%d's clock!\n",
 				    rate, sel);
-#if defined(CONFIG_TVE_EMI_ISSUE)
-			clk_set_rate(g_tv_info.screen[sel].clk, 54000000);
-#endif
 		}
 
 		tve_low_set_reg_base(sel, g_tv_info.screen[sel].base_addr);
@@ -1134,6 +1264,10 @@ s32 tv_exit(void)
 		tv_disable(i);
 
 	tv_power_disable(tv_power);
+	if (g_tv_info.regulator) {
+		regulator_put(g_tv_info.regulator);
+		g_tv_info.regulator = NULL;
+	}
 	return 0;
 }
 
@@ -1275,9 +1409,6 @@ s32 tv_disable(u32 sel)
 		tve_low_close(sel);
 		tve_low_dac_autocheck_enable(sel);
 		g_tv_info.screen[sel].enable = 0;
-#if defined(CONFIG_TVE_EMI_ISSUE)
-		clk_set_rate(g_tv_info.screen[sel].clk, 54000000);
-#endif
 	}
 	mutex_unlock(&g_tv_info.screen[sel].mlock);
 	if (is_vga_mode(g_tv_info.screen[sel].tv_mode))
@@ -1386,7 +1517,7 @@ static const struct of_device_id sunxi_tv_match[] = {
 #if defined(TVE_TOP_SUPPORT)
 static int tv_top_init(struct platform_device *pdev)
 {
-	int ret;
+	int ret = 0;
 
 	if (g_tv_info.tv_number)
 		return 0;
@@ -1404,9 +1535,15 @@ static int tv_top_init(struct platform_device *pdev)
 		goto err_iomap;
 	}
 
-	g_tv_info.clk = of_clk_get(pdev->dev.of_node, 0);
-	if (IS_ERR(g_tv_info.clk)) {
+	g_tv_info.bus_clk = of_clk_get(pdev->dev.of_node, 0);
+	if (IS_ERR(g_tv_info.bus_clk)) {
 		dev_err(&pdev->dev, "fail to get clk for tve common module!\n");
+		goto err_iomap;
+	}
+
+	g_tv_info.rst_bus = devm_reset_control_get(&pdev->dev, "rst_bus_tve_top");
+	if (IS_ERR(g_tv_info.rst_bus)) {
+		dev_err(&pdev->dev, "get tv top bus reset control  failed!\n");
 		goto err_iomap;
 	}
 
@@ -1431,6 +1568,8 @@ static int tv_probe(struct platform_device *pdev)
 	if (!g_tv_info.tv_number)
 		memset(&g_tv_info, 0, sizeof(struct tv_info_t));
 	tv_power_enable_mask = 0;
+
+	g_tv_info.dev = &pdev->dev;
 	if (of_property_read_string(pdev->dev.of_node, "tv_power", &str)) {
 		TV_ERR("of_property_read_string tv_power failed!\n");
 	} else {
@@ -1462,11 +1601,28 @@ static int tv_probe(struct platform_device *pdev)
 		goto err_iomap;
 	}
 
+	index++;
+	g_tv_info.screen[pdev->id].bus_clk = of_clk_get(pdev->dev.of_node, index);
+	if (IS_ERR_OR_NULL(g_tv_info.screen[pdev->id].bus_clk)) {
+		dev_err(&pdev->dev, "fail to get clk for tve%d's!\n", pdev->id);
+		goto err_iomap;
+	}
+
+	g_tv_info.screen[pdev->id].rst_bus =
+		devm_reset_control_get(&pdev->dev, "rst_bus_tve");
+	 if (IS_ERR(g_tv_info.screen[pdev->id].rst_bus)) {
+		dev_err(&pdev->dev, "get tve bus reset control  failed!\n");
+		goto err_iomap;
+	}
+
+
 	ret = tv_init(pdev);
 	if (ret)
 		goto err_iomap;
 
 	g_tv_info.tv_number++;
+
+	printk("tv probe finished!\n");
 
 	return 0;
 err_iomap:

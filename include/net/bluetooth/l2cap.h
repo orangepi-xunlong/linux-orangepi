@@ -29,6 +29,7 @@
 
 #include <asm/unaligned.h>
 #include <linux/atomic.h>
+#include <linux/android_kabi.h>
 
 /* L2CAP defaults */
 #define L2CAP_DEFAULT_MTU		672
@@ -277,12 +278,19 @@ struct l2cap_conn_rsp {
 #define L2CAP_CR_SEC_BLOCK	0x0003
 #define L2CAP_CR_NO_MEM		0x0004
 #define L2CAP_CR_BAD_AMP	0x0005
-#define L2CAP_CR_AUTHENTICATION	0x0005
-#define L2CAP_CR_AUTHORIZATION	0x0006
-#define L2CAP_CR_BAD_KEY_SIZE	0x0007
-#define L2CAP_CR_ENCRYPTION	0x0008
-#define L2CAP_CR_INVALID_SCID	0x0009
-#define L2CAP_CR_SCID_IN_USE	0x0010
+#define L2CAP_CR_INVALID_SCID	0x0006
+#define L2CAP_CR_SCID_IN_USE	0x0007
+
+/* credit based connect results */
+#define L2CAP_CR_LE_SUCCESS		0x0000
+#define L2CAP_CR_LE_BAD_PSM		0x0002
+#define L2CAP_CR_LE_NO_MEM		0x0004
+#define L2CAP_CR_LE_AUTHENTICATION	0x0005
+#define L2CAP_CR_LE_AUTHORIZATION	0x0006
+#define L2CAP_CR_LE_BAD_KEY_SIZE	0x0007
+#define L2CAP_CR_LE_ENCRYPTION		0x0008
+#define L2CAP_CR_LE_INVALID_SCID	0x0009
+#define L2CAP_CR_LE_SCID_IN_USE		0X000A
 
 /* connect/create channel status */
 #define L2CAP_CS_NO_INFO	0x0000
@@ -455,9 +463,6 @@ struct l2cap_conn_param_update_rsp {
 #define L2CAP_CONN_PARAM_ACCEPTED	0x0000
 #define L2CAP_CONN_PARAM_REJECTED	0x0001
 
-#define L2CAP_LE_MAX_CREDITS		10
-#define L2CAP_LE_DEFAULT_MPS		230
-
 struct l2cap_le_conn_req {
 	__le16     psm;
 	__le16     scid;
@@ -598,6 +603,9 @@ struct l2cap_chan {
 	void			*data;
 	const struct l2cap_ops	*ops;
 	struct mutex		lock;
+
+	ANDROID_KABI_RESERVE(1);
+	ANDROID_KABI_RESERVE(2);
 };
 
 struct l2cap_ops {
@@ -619,6 +627,11 @@ struct l2cap_ops {
 	struct sk_buff		*(*alloc_skb) (struct l2cap_chan *chan,
 					       unsigned long hdr_len,
 					       unsigned long len, int nb);
+	int			(*filter) (struct l2cap_chan * chan,
+					   struct sk_buff *skb);
+
+	ANDROID_KABI_RESERVE(1);
+	ANDROID_KABI_RESERVE(2);
 };
 
 struct l2cap_conn {
@@ -654,6 +667,9 @@ struct l2cap_conn {
 	struct mutex		chan_lock;
 	struct kref		ref;
 	struct list_head	users;
+
+	ANDROID_KABI_RESERVE(1);
+	ANDROID_KABI_RESERVE(2);
 };
 
 struct l2cap_user {

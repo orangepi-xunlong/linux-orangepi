@@ -71,6 +71,20 @@ config D3D_LTF_EN
 	depends on D3D
 	default n
 
+config D3D_COMPRESS_EN
+	bool "ISP 3D denoise reduces buf size by compression"
+	depends on D3D
+	default	n
+
 config WDR
 	bool "ISP WDR module"
 	default y
+
+config WDR_COMPRESS_EN
+	bool "ISP WDR reduces buf size by compression"
+	depends on WDR
+	default	n
+
+config SAME_I2C
+	bool "sensor same i2c addr"
+	default n

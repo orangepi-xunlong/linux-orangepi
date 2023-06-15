@@ -13,7 +13,7 @@
  */
 
 /*boot0 size refer to brom, need consistent with brom configuration*/
-#if defined(CONFIG_ARCH_SUN8IW18) || defined(CONFIG_ARCH_SUN50IW11)
+#if IS_ENABLED(CONFIG_ARCH_SUN8IW18) || IS_ENABLED(CONFIG_ARCH_SUN50IW11)
 #define NAND_BOOT0_PAGE_CNT_PER_COPY	NAND_BOOT0_PAGE_CNT_PER_COPY_4
 #else
 #define NAND_BOOT0_PAGE_CNT_PER_COPY	NAND_BOOT0_PAGE_CNT_PER_COPY_2
@@ -38,7 +38,7 @@ extern struct nand_cfg *g_phy_cfg;
 
 #define PHY_WAIT_RB_BEFORE 1
 #define PHY_WAIT_RB_INTERRUPT 1
-#if defined(CONFIG_ARCH_SUN8IW18)
+#if IS_ENABLED(CONFIG_ARCH_SUN8IW18)
 #define PHY_WAIT_DMA_INTERRUPT 0 //((wait_dma_int == 1) ? 1 : 0)
 #else
 #define PHY_WAIT_DMA_INTERRUPT 1 //((wait_dma_int == 1) ? 1 : 0)

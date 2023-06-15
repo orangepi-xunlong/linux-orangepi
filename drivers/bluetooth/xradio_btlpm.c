@@ -25,10 +25,9 @@
 #include <linux/param.h>
 #include <linux/bitops.h>
 #include <linux/termios.h>
-#include <linux/wakelock.h>
 #include <linux/gpio.h>
-#include <linux/sunxi-gpio.h>
 #include <linux/of_gpio.h>
+#include <linux/of_platform.h>
 #include <linux/pm_wakeirq.h>
 #include <linux/serial_core.h>
 #include <net/bluetooth/bluetooth.h>
@@ -44,7 +43,7 @@
 #endif
 
 #define BT_SLEEP_INF(fmt, arg...) printk(KERN_INFO "[XR_BT_LPM] %s: " fmt "\n", __func__, ## arg)
-#define VERSION					"01.00.06"
+#define VERSION					"1.0.10"
 #define PROC_SLEEP_DIR			"bluetooth/sleep"
 #define PROC_POWER_DIR			"bluetooth/power"
 #define BT_BLUEDROID_SUPPORT 	1
@@ -57,10 +56,11 @@ struct xr_btsleep_info {
 	unsigned int host_wake;
 	unsigned int ext_wake;
 	unsigned int host_wake_irq;
-	struct wake_lock wake_lock;
+	struct wakeup_source *ws;
 	struct uart_port *uport;
 	unsigned int host_wake_polarity:1;
 	unsigned int bt_wake_polarity:1;
+	struct platform_device *pdev;
 };
 
 /* work function */
@@ -206,6 +206,11 @@ int bluesleep_sleep_wakeup(void)
  */
 static void bluesleep_sleep_work(struct work_struct *work)
 {
+	if (!has_lpm_enabled) {
+		BT_SLEEP_DBG("lpm disabled already");
+		return;
+	}
+
 	if (bluesleep_can_sleep()) {
 		/* already asleep, this is an error case */
 		if (test_bit(BT_ASLEEP, &flags)) {
@@ -219,7 +224,7 @@ static void bluesleep_sleep_work(struct work_struct *work)
 			clear_bit(BT_TXDATA, &flags);
 			/*Deactivating UART */
 			hsuart_power(0);
-			wake_unlock(&bsi->wake_lock);
+			__pm_relax(bsi->ws);
 		}
 	} else {
 		bluesleep_sleep_wakeup();
@@ -276,7 +281,7 @@ static struct uart_port *bluesleep_get_uart_port(void)
 }
 
 #ifdef AW1732_BT
-static void bluesleep_tx_timer_expire(unsigned long data)
+static void bluesleep_tx_timer_expire(struct timer_list *t)
 {
 	unsigned long irq_flags;
 	spin_lock_irqsave(&rw_lock, irq_flags);
@@ -299,7 +304,7 @@ static irqreturn_t bluesleep_hostwake_isr(int irq, void *dev_id)
 {
 	/* schedule a tasklet to handle the change in the host wake line */
 	tasklet_schedule(&hostwake_task);
-	wake_lock(&bsi->wake_lock);
+	__pm_stay_awake(bsi->ws);
 	return IRQ_HANDLED;
 }
 
@@ -322,24 +327,17 @@ static int bluesleep_start(void)
 	}
 	/*wake up bt device ,initial irq service*/
 	gpio_set_value(bsi->ext_wake, bsi->bt_wake_polarity);
-	if (bsi->host_wake_polarity)
-		retval = request_irq(bsi->host_wake_irq, bluesleep_hostwake_isr, IRQF_NO_SUSPEND | IRQF_TRIGGER_RISING, "bluetooth hostwake", NULL);
-	else
-		retval = request_irq(bsi->host_wake_irq, bluesleep_hostwake_isr, IRQF_NO_SUSPEND | IRQF_TRIGGER_FALLING, "bluetooth hostwake", NULL);
+	retval = request_irq(bsi->host_wake_irq, bluesleep_hostwake_isr,
+				bsi->host_wake_polarity ? IRQF_TRIGGER_RISING : IRQF_TRIGGER_FALLING,
+				"bluetooth hostwake", &bsi->pdev->dev);
 
 	if (retval  < 0) {
 		BT_ERR("Couldn't acquire BT_HOST_WAKE IRQ");
 		goto fail;
 	}
 
-	retval = enable_irq_wake(bsi->host_wake_irq);
-	if (retval < 0) {
-		BT_ERR("Couldn't enable BT_HOST_WAKE as wakeup interrupt");
-		free_irq(bsi->host_wake_irq, NULL);
-		goto fail;
-	}
 	set_bit(BT_PROTO, &flags);
-	wake_lock(&bsi->wake_lock);
+	__pm_stay_awake(bsi->ws);
 
 	return 0;
 
@@ -374,10 +372,8 @@ static void bluesleep_stop(void)
 
 	atomic_inc(&open_count);
 	spin_unlock_irqrestore(&rw_lock, irq_flags);
-	if (disable_irq_wake(bsi->host_wake_irq))
-		BT_ERR("Couldn't disable hostwake IRQ wakeup mode\n");
-	free_irq(bsi->host_wake_irq, NULL);
-	wake_lock_timeout(&bsi->wake_lock, HZ * 5);
+	free_irq(bsi->host_wake_irq, &bsi->pdev->dev);
+	__pm_wakeup_event(bsi->ws, jiffies_to_msecs(HZ * 5));
 }
 #endif
 
@@ -446,9 +442,9 @@ static ssize_t bluedroid_write_proc_lpm(struct file *file, const char __user *bu
 
 #ifdef AW1732_BT
 	if (b == '0') {
+		has_lpm_enabled = false;
 		BT_SLEEP_DBG("disable lpm mode");
 		bluesleep_stop();
-		has_lpm_enabled = false;
 		bsi->uport = NULL;
 	} else {
 		BT_SLEEP_DBG("enable lpm mode");
@@ -587,17 +583,24 @@ static const struct file_operations btwake_fops = {
 	.write		= bluedroid_write_proc_btwake,
 };
 
-extern struct platform_device *sw_uart_get_pdev(int uart_id);
-
 static int assert_level = -1;
 module_param(assert_level, int, S_IRUGO);
 MODULE_PARM_DESC(assert_level, "BT_LPM hostwake/btwake assert level");
+
+static struct platform_device *sw_uart_get_pdev(int id)
+{
+	struct device_node *np;
+	char match[20];
+	sprintf(match, "uart%d", id);
+	np = of_find_node_by_type(NULL, match);
+	return of_find_device_by_node(np);
+}
 
 static int bluesleep_probe(struct platform_device *pdev)
 {
 	struct device_node *np = pdev->dev.of_node;
 	struct device *dev = &pdev->dev;
-	struct gpio_config config;
+	enum of_gpio_flags config;
 	int ret;
 	u32 val;
 
@@ -606,16 +609,16 @@ static int bluesleep_probe(struct platform_device *pdev)
 		return -ENOMEM;
 
 	//get bt_wake & bt_host_wake from sys_config.fex
-	bsi->ext_wake = of_get_named_gpio_flags(np, "bt_wake", 0, (enum of_gpio_flags *)&config);
+	bsi->ext_wake = of_get_named_gpio_flags(np, "bt_wake", 0, &config);
 	if (!gpio_is_valid(bsi->ext_wake)) {
 		BT_ERR("get gpio bt_wake failed");
 		return -EINVAL;
 	}
 
-	bsi->bt_wake_polarity = config.data;
+	bsi->bt_wake_polarity = (config == OF_GPIO_ACTIVE_LOW) ? 0 : 1;
 	if (assert_level != -1) {
 		bsi->bt_wake_polarity = (assert_level & 0x01) > 0;
-		BT_SLEEP_DBG("override bt_wake polarity with to module_para assert_level");
+		BT_SLEEP_DBG("override bt_wake polarity to %d", bsi->bt_wake_polarity);
 	}
 
 	BT_SLEEP_DBG("bt_wake polarity: %d", bsi->bt_wake_polarity);
@@ -624,25 +627,25 @@ static int bluesleep_probe(struct platform_device *pdev)
 	if (ret < 0) {
 		BT_ERR("can't request bt_wake gpio %d",
 			bsi->ext_wake);
-		goto free_bsi;
+		goto exit;
 	}
 	ret = gpio_direction_output(bsi->ext_wake, bsi->bt_wake_polarity);
 	if (ret < 0) {
 		BT_ERR("can't request output direction bt_wake gpio %d",
 			bsi->ext_wake);
-		goto free_bsi;
+		goto exit;
 	}
 
-	bsi->host_wake = of_get_named_gpio_flags(np, "bt_hostwake", 0, (enum of_gpio_flags *)&config);
+	bsi->host_wake = of_get_named_gpio_flags(np, "bt_hostwake", 0, &config);
 	if (!gpio_is_valid(bsi->host_wake)) {
 		BT_ERR("get gpio bt_hostwake failed");
 		return -EINVAL;
 	}
 
-	bsi->host_wake_polarity = config.data;
+	bsi->host_wake_polarity = (config == OF_GPIO_ACTIVE_LOW) ? 0 : 1;
 	if (assert_level != -1) {
 		bsi->host_wake_polarity = (assert_level & 0x02) > 0;
-		BT_SLEEP_DBG("override host_wake polarity with to module_para assert_level");
+		BT_SLEEP_DBG("override host_wake polarity to %d", bsi->host_wake_polarity);
 	}
 
 	BT_SLEEP_DBG("host_wake polarity: %d", bsi->host_wake_polarity);
@@ -651,16 +654,15 @@ static int bluesleep_probe(struct platform_device *pdev)
 	if (ret < 0) {
 		BT_ERR("can't request bt_hostwake gpio %d",
 			bsi->host_wake);
-		goto free_bsi;
+		goto exit;
 	}
 	ret = gpio_direction_input(bsi->host_wake);
 	if (ret < 0) {
 		BT_ERR("can't request input direction bt_wake gpio %d",
 			bsi->host_wake);
-		goto free_bsi;
+		goto exit;
 	}
-	if (!of_property_read_u32(np, "wakeup_source", &bsi->wakeup_enable) &&
-		(bsi->wakeup_enable == 0)) {
+	if (!of_property_read_bool(np, "wakeup-source")) {
 		BT_SLEEP_DBG("wakeup source is disabled!\n");
 	} else {
 		ret = device_init_wakeup(dev, true);
@@ -681,7 +683,7 @@ static int bluesleep_probe(struct platform_device *pdev)
 		bluesleep_uart_dev = sw_uart_get_pdev(val);
 	}
 
-	wake_lock_init(&bsi->wake_lock, WAKE_LOCK_SUSPEND, "bluesleep");
+	bsi->ws = wakeup_source_register(dev, "bluesleep");
 
 	//1.set bt_wake as output and the level is 0
 	gpio_set_value(bsi->ext_wake, 0);
@@ -695,6 +697,7 @@ static int bluesleep_probe(struct platform_device *pdev)
 		goto free_bt_ext_wake;
 	}
 #endif
+	bsi->pdev = pdev;
 
 	return 0;
 
@@ -703,8 +706,8 @@ free_bt_ext_wake:
 	gpio_free(bsi->ext_wake);
 	gpio_free(bsi->host_wake);
 #endif
-free_bsi:
-	kfree(bsi);
+
+exit:
 	return ret;
 }
 
@@ -715,7 +718,7 @@ static int bluesleep_remove(struct platform_device *pdev)
 	gpio_set_value(bsi->ext_wake, bsi->bt_wake_polarity);
 	if (test_bit(BT_PROTO, &flags)) {
 #ifdef AW1732_BT
-		free_irq(bsi->host_wake_irq, NULL);
+		free_irq(bsi->host_wake_irq, &bsi->pdev->dev);
 #endif
 		del_timer(&tx_timer);
 		if (test_bit(BT_ASLEEP, &flags))
@@ -723,7 +726,7 @@ static int bluesleep_remove(struct platform_device *pdev)
 	}
 	gpio_free(bsi->host_wake);
 	gpio_free(bsi->ext_wake);
-	wake_lock_destroy(&bsi->wake_lock);
+	wakeup_source_unregister(bsi->ws);
 	if (bsi->wakeup_enable) {
 		BT_SLEEP_DBG("Deinit wakeup source");
 		device_init_wakeup(&pdev->dev, false);
@@ -844,9 +847,7 @@ static int __init btsleep_init(void)
 	spin_lock_init(&rw_lock);
 	spin_lock_init(&irq_lock);
 	/* Initialize timer */
-	init_timer(&tx_timer);
-	tx_timer.function = bluesleep_tx_timer_expire;
-	tx_timer.data = 0;
+	timer_setup(&tx_timer, bluesleep_tx_timer_expire, 0);
 	/* initialize host wake tasklet */
 	tasklet_init(&hostwake_task, bluesleep_hostwake_task, 0);
 #endif
@@ -892,5 +893,3 @@ module_exit(btsleep_exit);
 MODULE_AUTHOR("XRadioTech");
 MODULE_DESCRIPTION("Bluetooth Sleep Mode Driver ver. %s" VERSION);
 MODULE_LICENSE("GPL");
-
-

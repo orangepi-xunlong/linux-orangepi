@@ -21,7 +21,7 @@
  * nand common1 version rule vx.ab data time
  * x >= 1; 00 <= ab <= 99
  */
-#define NAND_COMMON1_PHY_DRV_VERSION "v1.01 2020-05-21 14:41"
+#define NAND_COMMON1_PHY_DRV_VERSION "v2.04 2021-11-29 14:45"
 
 #define GPIO_BASE_ADDR 0x0300B000
 
@@ -84,10 +84,73 @@ int nand_print_dbg(const char *fmt, ...)
 
 	return rtn;
 }
+/*
+extern int sunxi_mmc_res_start_addr(const char * const res_str,
+		resource_size_t *res_addr);
+
+void sunxi_nand_dump_reg(void)
+{
+	int i = 0;
+	int ret = 0;
+	void __iomem *gpio_ptr =  NULL;
+	void __iomem *ccmu_ptr =  NULL;
+	resource_size_t res_saddr_ccmu;
+	resource_size_t res_saddr_gpio;
+
+	ret = sunxi_mmc_res_start_addr("clocks", &res_saddr_ccmu);
+	if (ret < 0)
+		return;
+
+	ccmu_ptr = ioremap(res_saddr_ccmu, 0x900);
+	if (ccmu_ptr == NULL) {
+		pr_err("Can not map ccmu resource\n");
+		return;
+	}
+
+	ret = sunxi_mmc_res_start_addr("pio", &res_saddr_gpio);
+	if (ret < 0)
+		return;
+
+	gpio_ptr = ioremap(res_saddr_gpio, 0x900);
+	if (gpio_ptr == NULL) {
+		pr_err("Can not map gpio resource\n");
+		return;
+	}
+
+
+	pr_cont("Dump gpio regs:\n");
+	for (i = 0; i < 0x120; i += 4) {
+		if (!(i&0xf))
+			pr_cont("\n0x%px : ", (gpio_ptr + i));
+		pr_cont("%08x ", readl(gpio_ptr + i));
+	}
+	pr_cont("\n");
+
+	 {
+		pr_cont("Dump ccmu regs:pll,gating,reset,module clk\n");
+
+		for (i = 0x20; i < 0x900; i += 4) {
+			if (!(i&0xf))
+				pr_cont("\n0x%px : ", (ccmu_ptr + i));
+			pr_cont("%08x ", readl(ccmu_ptr + i));
+		}
+		pr_cont("\n");
+
+	}
+
+	iounmap(gpio_ptr);
+	iounmap(ccmu_ptr);
+
+}
+*/
+
+
+
 
 int nand_clk_request(struct sunxi_ndfc *ndfc, __u32 nand_index)
 {
 	long rate;
+	int ret = 0;
 
 	if (ndfc == NULL) {
 		nand_print("%s err: ndfc is null\n", __func__);
@@ -96,17 +159,52 @@ int nand_clk_request(struct sunxi_ndfc *ndfc, __u32 nand_index)
 
 	nand_print_dbg("nand_clk_request\n");
 
-	ndfc->pclk = of_clk_get(ndfc->dev->of_node, 0);
-	if ((ndfc->pclk == NULL) || IS_ERR(ndfc->pclk)) {
+	if ((ndfc->pclk == NULL) || IS_ERR(ndfc->pclk) \
+			|| IS_ERR(ndfc->rst) || IS_ERR(ndfc->busclk)\
+			|| IS_ERR(ndfc->mbusclk)) {
+		nand_print("%s: get clk resource\n", __func__);
+
+		ndfc->rst = devm_reset_control_get(ndfc->dev, "rst");
+		ndfc->busclk = devm_clk_get(ndfc->dev, "bus");
+		ndfc->mbusclk = devm_clk_get(ndfc->dev, "mbus");
+		//ndfc->pclk = of_clk_get(ndfc->dev->of_node, 0);
+		ndfc->pclk = devm_clk_get(ndfc->dev, "pll_periph");
+	}
+
+	if ((ndfc->pclk == NULL) || IS_ERR(ndfc->pclk) \
+			|| IS_ERR(ndfc->rst) || IS_ERR(ndfc->busclk)\
+			|| IS_ERR(ndfc->mbusclk)) {
 		nand_print("%s: pll clock handle invalid!\n", __func__);
 		return -1;
 	}
+
+	ret = reset_control_deassert(ndfc->rst);
+	if (ret) {
+		nand_print("%s: rst enable failed\n", __func__);
+		return -1;
+	}
+
+	ret = clk_prepare_enable(ndfc->mbusclk);
+	if (ret) {
+		nand_print("%s: mbus enable failed\n", __func__);
+		return -1;
+	}
+
+	ret = clk_prepare_enable(ndfc->busclk);
+	if (ret) {
+		nand_print("%s: bus enable failed\n", __func__);
+		return -1;
+	}
+
 
 	rate = clk_get_rate(ndfc->pclk);
 	nand_print_dbg("%s: get pll rate %dHZ\n", __func__, (__u32)rate);
 
 	if (nand_index == 0) {
-		ndfc->mdclk = of_clk_get(ndfc->dev->of_node, 1);
+//		ndfc->mdclk = of_clk_get(ndfc->dev->of_node, 1);
+		if ((ndfc->mdclk == NULL) || IS_ERR(ndfc->mdclk))
+			ndfc->mdclk = devm_clk_get(ndfc->dev, "mclk");
+
 
 		if ((ndfc->mdclk == NULL) || IS_ERR(ndfc->mdclk)) {
 			nand_print("%s: nand0 clock handle invalid!\n",
@@ -128,7 +226,9 @@ int nand_clk_request(struct sunxi_ndfc *ndfc, __u32 nand_index)
 				   __func__);
 
 		if (get_storage_type() == NAND_STORAGE_TYPE_RAWNAND) {
-			ndfc->mcclk = of_clk_get(ndfc->dev->of_node, 2);
+			//ndfc->mcclk = of_clk_get(ndfc->dev->of_node, 2);
+			if ((ndfc->mcclk == NULL) || IS_ERR(ndfc->mcclk))
+				ndfc->mcclk = devm_clk_get(ndfc->dev, "ecc");
 
 			if ((ndfc->mcclk == NULL) || IS_ERR(ndfc->mcclk)) {
 				nand_print("%s: nand0 cclock handle invalid!\n", __func__);
@@ -152,6 +252,8 @@ int nand_clk_request(struct sunxi_ndfc *ndfc, __u32 nand_index)
 		return -1;
 	}
 
+
+	//sunxi_nand_dump_reg();
 	return 0;
 }
 
@@ -161,25 +263,30 @@ void nand_clk_release(struct sunxi_ndfc *ndfc, __u32 nand_index)
 		if (ndfc->mdclk && !IS_ERR(ndfc->mdclk)) {
 			clk_disable_unprepare(ndfc->mdclk);
 
-			clk_put(ndfc->mdclk);
-			ndfc->mdclk = NULL;
+			//clk_put(ndfc->mdclk);
+			//ndfc->mdclk = NULL;
 		}
 
 		if (get_storage_type() == NAND_STORAGE_TYPE_RAWNAND) {
 			if (ndfc->mcclk && !IS_ERR(ndfc->mcclk)) {
 				clk_disable_unprepare(ndfc->mcclk);
 
-				clk_put(ndfc->mcclk);
-				ndfc->mcclk = NULL;
+				//clk_put(ndfc->mcclk);
+			//	ndfc->mcclk = NULL;
 			}
 		}
+
+		clk_disable_unprepare(ndfc->busclk);
+		clk_disable_unprepare(ndfc->mbusclk);
+		reset_control_assert(ndfc->rst);
 	} else
 		nand_print("nand_clk_request, nand_index error: 0x%x\n", nand_index);
-
+/*
 	if (ndfc->pclk && !IS_ERR(ndfc->pclk)) {
 		clk_put(ndfc->pclk);
 		ndfc->pclk = NULL;
 	}
+*/
 }
 
 int nand_set_clk(struct sunxi_ndfc *ndfc, __u32 nand_index, __u32 nand_clk0,
@@ -969,16 +1076,8 @@ int nand_get_voltage(struct sunxi_ndfc *ndfc)
 {
 
 	int ret = 0;
-	const char *sti_vcc_nand = NULL;
-	const char *sti_vcc_io = NULL;
 
-	ret = of_property_read_string(ndfc->dev->of_node, "nand0_regulator1",
-				      &sti_vcc_nand);
-	nand_print_dbg("nand0_regulator1 %s\n", sti_vcc_nand);
-	if (ret)
-		nand_print_dbg("Failed to get vcc_nand\n");
-
-	ndfc->regu1 = regulator_get(NULL, sti_vcc_nand);
+	ndfc->regu1 = regulator_get(ndfc->dev, "nand0_regulator1");
 	if (IS_ERR(ndfc->regu1))
 		nand_print_dbg("nand:fail to get regulator vcc-nand!\n");
 	else {
@@ -992,13 +1091,7 @@ int nand_get_voltage(struct sunxi_ndfc *ndfc)
 	}
 
 	if (get_storage_type() == NAND_STORAGE_TYPE_RAWNAND) {
-		ret = of_property_read_string(ndfc->dev->of_node,
-					      "nand0_regulator2", &sti_vcc_io);
-		nand_print_dbg("nand0_regulator2 %s\n", sti_vcc_io);
-		if (ret)
-			nand_print_dbg("Failed to get vcc_io\n");
-
-		ndfc->regu2 = regulator_get(NULL, sti_vcc_io);
+		ndfc->regu2 = regulator_get(ndfc->dev, "nand0_regulator2");
 		if (IS_ERR(ndfc->regu2))
 			nand_print_dbg("nand:fail to get regulator vcc-io!\n");
 		else {
@@ -1016,6 +1109,47 @@ int nand_get_voltage(struct sunxi_ndfc *ndfc)
 
 	return ret;
 }
+
+int nand_enable_voltage(struct sunxi_ndfc *ndfc)
+{
+
+	int ret = 0;
+
+	if (IS_ERR(ndfc->regu1))
+		nand_print_dbg("nand:fail to get regulator vcc-nand!\n");
+	else {
+		/*enable regulator */
+		ret = regulator_enable(ndfc->regu1);
+		if (IS_ERR(ndfc->regu1)) {
+			nand_print_dbg("nand:fail to enable regulator vcc-nand!\n");
+			return -1;
+		}
+		nand_print_dbg("nand:enable voltage vcc-nand ok:%p\n", ndfc->regu1);
+	}
+
+	if (get_storage_type() == NAND_STORAGE_TYPE_RAWNAND) {
+		if (IS_ERR(ndfc->regu2))
+			nand_print_dbg("nand:fail to get regulator vcc-io!\n");
+		else {
+			/*enable regulator */
+			ret = regulator_enable(ndfc->regu2);
+			if (IS_ERR(ndfc->regu2)) {
+				nand_print("fail to enable regulator vcc-io!\n");
+				return -1;
+			}
+			nand_print_dbg("nand:enable voltage vcc-io ok:%p\n", ndfc->regu2);
+		}
+	}
+
+	nand_print_dbg("nand:has already enable voltage\n");
+
+	return ret;
+}
+
+
+
+
+
 
 int nand_release_voltage(struct sunxi_ndfc *ndfc)
 {
@@ -1056,14 +1190,46 @@ int nand_release_voltage(struct sunxi_ndfc *ndfc)
 	return ret;
 }
 
+int nand_disable_voltage(struct sunxi_ndfc *ndfc)
+{
+	int ret = 0;
+
+	if (!IS_ERR(ndfc->regu1)) {
+		nand_print_dbg("nand disable voltage vcc-nand\n");
+		ret = regulator_disable(ndfc->regu1);
+		if (ret)
+			nand_print_dbg("nand: regu1 disable fail, ret 0x%x\n", ret);
+		if (IS_ERR(ndfc->regu1))
+			nand_print_dbg("nand: fail to disable regulator vcc-nand!");
+	}
+
+	if (get_storage_type() == NAND_STORAGE_TYPE_RAWNAND) {
+		if (!IS_ERR(ndfc->regu2)) {
+			nand_print_dbg("nand disable voltage vcc-io\n");
+			ret = regulator_disable(ndfc->regu2);
+			if (ret)
+				nand_print_dbg("nand: regu2 disable fail,ret 0x%x\n", ret);
+			if (IS_ERR(ndfc->regu2))
+				nand_print_dbg("nand: fail to disable regulator vcc-io!\n");
+		}
+	}
+
+	nand_print_dbg("nand had already disable voltage\n");
+
+	return ret;
+}
+
+
+
+
 int nand_is_secure_sys(void)
 {
 	if (sunxi_soc_is_secure()) {
 		nand_print_dbg("secure system\n");
 		return 1;
 	}
-	nand_print_dbg("non secure\n");
 
+	nand_print_dbg("non secure\n");
 	return 0;
 }
 
@@ -1379,11 +1545,15 @@ pid_t nand_get_cur_task_pid(void)
 
 int nand_vccq_3p3v_enable(void)
 {
-	return sunxi_sel_pio_mode(aw_ndfc.p, NAND_SIGNAL_VOLTAGE_330);
+	nand_print("%s: uboot set it\n", __func__);
+	return 0;
+	//return sunxi_sel_pio_mode(aw_ndfc.p, NAND_SIGNAL_VOLTAGE_330);
 }
 int nand_vccq_1p8v_enable(void)
 {
-	return sunxi_sel_pio_mode(aw_ndfc.p, NAND_SIGNAL_VOLTAGE_180);
+	nand_print("%s,uboot set it\n", __func__);
+	return 0;
+	//return sunxi_sel_pio_mode(aw_ndfc.p, NAND_SIGNAL_VOLTAGE_180);
 }
 
 void nand_common1_show_version(void)

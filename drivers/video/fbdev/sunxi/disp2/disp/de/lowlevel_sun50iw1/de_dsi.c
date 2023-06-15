@@ -98,7 +98,7 @@ s32 dsi_irq_disable(u32	sel, enum  __dsi_irq_id_t id)
 }
 
 u32 dsi_irq_query(u32 sel, enum __dsi_irq_id_t id)
-  {
+{
 	u32 en, fl;
 
 	en = dsi_dev[sel]->dsi_gint0.bits.dsi_irq_en;
@@ -1042,6 +1042,22 @@ u16 dsi_crc_pro_pd_repeat(u8 pd, u32 pd_bytes)
 		}
 	}
 	return crc;
+}
+
+/**
+ * @name       :dsi_read_mode_en
+ * @brief      :Enable dsi read mode in the case of reading in display
+ * interrupt.
+ *  user must enable read mode before read and disable it after read
+ * @param[IN]  :sel:dsi module index
+ * @param[IN]  :en: enable read mode
+ * @return     :none
+ */
+void dsi_read_mode_en(u32 sel, u32 en)
+{
+	dsi_dev[sel]->dsi_inst_jump_cfg[0].bits.jump_cfg_en = en;
+	if (!en)
+		dsi_start(sel, DSI_START_HSTX);
 }
 
 #ifdef __LINUX_PLAT__

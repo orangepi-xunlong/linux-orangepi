@@ -163,7 +163,7 @@
 #define BIS_FIFO_OF_PD	(1 << 12)
 #define CNR_FIFO_OF_PD	(1 << 13)
 #define FRAME_LOST_PD	(1 << 14)
-#define HB_SHROT_PD	(1 << 16)
+#define HB_SHORT_PD	(1 << 16)
 #define D3D_HB_PD	(1 << 24)
 #define PLTM_FIFO_OF_PD	(1 << 25)
 #define D3D_WRITE_FIFO_OF_PD	(1 << 26)
@@ -289,5 +289,9 @@ void bsp_isp_set_wdr_addr0(unsigned long id, dma_addr_t addr);
 void bsp_isp_set_wdr_addr1(unsigned long id, dma_addr_t addr);
 void bsp_isp_set_d3d_addr0(unsigned long id, dma_addr_t addr);
 void bsp_isp_set_d3d_addr1(unsigned long id, dma_addr_t addr);
+void bsp_isp_set_fifo_mode(unsigned long id, unsigned int mode);
+void bsp_isp_min_ddr_size(unsigned long id, unsigned int size);
+void bsp_isp_fifo_raw_write(unsigned long id, unsigned int depth);
+void bsp_isp_k_min_ddr_size(unsigned long id, unsigned int size);
 
 #endif /*_ISP500_REG_CFG_H_*/

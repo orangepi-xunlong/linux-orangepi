@@ -11,34 +11,20 @@
 #include "include/eink_sys_source.h"
 #include "include/fmt_convert.h"
 
-#ifdef TIME_COUNTER_DEBUG
-struct timeval buf_stime, buf_etime;
-#endif
+extern u32 force_fresh_mode;
 
-static unsigned int continue_gu16_cnt;
+/*static unsigned int continue_gu16_cnt;*/
 
 bool is_upd_list_empty(struct buf_manager *buffer_mgr)
 {
 	bool ret = false;
-	struct img_node *cur_img_node = NULL, *tmp_img_node = NULL;
-	unsigned int count = 0;
 
 	mutex_lock(&buffer_mgr->mlock);
 
 	if (list_empty(&buffer_mgr->img_used_list)) {
 		ret = true;
 	} else {
-		list_for_each_entry_safe(cur_img_node, tmp_img_node, &buffer_mgr->img_used_list, node) {
-			if (cur_img_node->img->state == USED) {
-				EINK_DEFAULT_MSG("img is used state!\n");
-				continue;/* last img may use calc upd_win or auto mode select */
-			}
-			count++;
-		}
-		if (count != 0)
-			ret = false;
-		else
-			ret = true;
+		ret = false;
 	}
 
 	mutex_unlock(&buffer_mgr->mlock);
@@ -49,25 +35,13 @@ bool is_upd_list_empty(struct buf_manager *buffer_mgr)
 bool is_coll_list_empty(struct buf_manager *buffer_mgr)
 {
 	bool ret = false;
-	struct img_node *cur_img_node = NULL, *tmp_img_node = NULL;
-	unsigned int count = 0;
 
 	mutex_lock(&buffer_mgr->mlock);
 
 	if (list_empty(&buffer_mgr->img_collision_list)) {
 		ret = true;
 	} else {
-		list_for_each_entry_safe(cur_img_node, tmp_img_node, &buffer_mgr->img_collision_list, node) {
-			if (cur_img_node->img->state == USED) {
-				EINK_DEFAULT_MSG("img is used state!\n");
-				continue;/* last img may use calc upd_win or auto mode select */
-			}
-			count++;
-		}
-		if (count != 0)
-			ret = false;
-		else
-			ret = true;
+		ret = false;
 	}
 
 	mutex_unlock(&buffer_mgr->mlock);
@@ -75,16 +49,183 @@ bool is_coll_list_empty(struct buf_manager *buffer_mgr)
 	return ret;
 }
 
+struct img_node *request_new_node(struct buf_manager *buf_mgr)
+{
+	struct img_node *img_node = NULL;
+
+	img_node = (struct img_node *)kmalloc(sizeof(struct img_node), GFP_KERNEL | __GFP_ZERO);
+	if (img_node == NULL) {
+		pr_err("[%s]:img node strcut malloc failed!\n", __func__);
+		return NULL;
+	}
+
+	img_node->upd_order = 0;
+	img_node->coll_flag = 0;
+	img_node->update_master = -1;
+	img_node->img = (struct eink_img *)kmalloc(sizeof(struct eink_img), GFP_KERNEL | __GFP_ZERO);
+	if (img_node->img == NULL) {
+		pr_err("%s:img strcut malloc failed!\n", __func__);
+		kfree(img_node);
+		return NULL;
+	}
+	memset(img_node->img, 0, sizeof(struct eink_img));
+
+	img_node->img->size.width = buf_mgr->width;
+	img_node->img->size.height = buf_mgr->height;
+	img_node->img->size.align = 4;
+	img_node->img->pitch = EINKALIGN(img_node->img->size.width,
+			img_node->img->size.align);
+	img_node->img->upd_mode = EINK_INIT_MODE;
+	img_node->img->out_fmt = EINK_Y8;
+	img_node->img->upd_all_en = false;
+
+	return img_node;
+}
+
+
+void free_unused_node(struct img_node *img_node)
+{
+	EINK_INFO_MSG("[%s] order %d\n", __func__, img_node->upd_order);
+
+	if (img_node->item) {
+		eink_dma_unmap(img_node->item);
+	}
+	if (img_node->img) {
+		kfree(img_node->img);
+		img_node->img = NULL;
+	}
+	if (img_node) {
+		kfree(img_node);
+	}
+	return;
+}
+
+int __reset_all(struct buf_manager *buf_mgr)
+{
+	struct img_node *cur_img_node = NULL, *tmp_img_node = NULL;
+
+	mutex_lock(&buf_mgr->mlock);
+
+	list_for_each_entry_safe(cur_img_node, tmp_img_node, &buf_mgr->img_collision_list, node) {
+		list_move_tail(&cur_img_node->node, &buf_mgr->img_free_list);
+	}
+	list_for_each_entry_safe(cur_img_node, tmp_img_node, &buf_mgr->img_used_list, node) {
+		list_move_tail(&cur_img_node->node, &buf_mgr->img_free_list);
+	}
+	list_for_each_entry_safe(cur_img_node, tmp_img_node, &buf_mgr->img_free_list, node) {
+		list_del(&cur_img_node->node);
+		free_unused_node(cur_img_node);
+	}
+	mutex_unlock(&buf_mgr->mlock);
+	return 0;
+}
+
+bool get_buf_msg(struct buf_manager *buffer_mgr)
+{
+	bool ret = false;
+
+	mutex_lock(&buffer_mgr->mlock);
+	if (!list_empty(&buffer_mgr->img_free_list)) {
+		ret = true;
+	} else {
+		ret = false;
+	}
+	mutex_unlock(&buffer_mgr->mlock);
+	return ret;
+}
+
+int get_free_buffer_slot(struct buf_manager *buf_mgr, struct buf_slot *slot)
+{
+	u32 count = 0;
+	struct img_node *cur_img_node = NULL, *tmp_img_node = NULL, *free_node = NULL;
+
+	mutex_lock(&buf_mgr->mlock);
+
+	if (list_empty(&buf_mgr->img_free_list)) {
+		/*pr_err("[%s]Free list is empty!, Dont need free", __func__);*/
+		slot->count = 0;
+		return 0;
+	}
+
+	list_for_each_entry_safe(cur_img_node, tmp_img_node, &buf_mgr->img_free_list, node) {
+		if (cur_img_node && count < 32) {
+			slot->upd_order[count] = cur_img_node->upd_order;
+			count++;
+			free_node = cur_img_node;
+			list_del(&free_node->node);
+			free_unused_node(free_node);
+			free_node = NULL;
+		} else if (count > 32) {
+			pr_err("count is exceed max err! May user forget free buffer\n");
+			count = 32;
+			break;
+		}
+	}
+	slot->count = count;
+	EINK_INFO_MSG("Free buf count is %d\n", count);
+
+	mutex_unlock(&buf_mgr->mlock);
+	return 0;
+}
+
+int wait_for_newest_img_node(struct buf_manager *buf_mgr)
+{
+	struct img_node *cur_img_node = NULL, *tmp_img_node = NULL;
+	struct img_node *newest_node = NULL, *free_node = NULL;
+
+	mutex_lock(&buf_mgr->mlock);
+	/* free all coll buf node */
+	if (!list_empty(&buf_mgr->img_collision_list)) {
+		list_for_each_entry_safe(cur_img_node, tmp_img_node, &buf_mgr->img_collision_list, node) {
+			free_node = cur_img_node;
+			if (free_node->img != NULL) {
+				free_node->img->upd_mode = EINK_INIT_MODE;
+				free_node->img->win_calc_en = true;
+				free_node->update_master = -1;
+				list_move_tail(&free_node->node, &buf_mgr->img_free_list);
+			}
+		}
+	}
+
+	if (list_empty(&buf_mgr->img_used_list)) {
+		EINK_INFO_MSG("Both empty!\n");
+		goto out;
+	}
+
+	list_for_each_entry_safe(cur_img_node, tmp_img_node, &buf_mgr->img_used_list, node) {
+		if (newest_node == NULL) {
+			newest_node = cur_img_node;
+		}
+		if (cur_img_node->upd_order < newest_node->upd_order) {
+			free_node = cur_img_node;
+			if (free_node->img != NULL) {
+				free_node->img->upd_mode = EINK_INIT_MODE;
+				free_node->img->win_calc_en = true;
+				free_node->update_master = -1;
+				list_move_tail(&free_node->node, &buf_mgr->img_free_list);
+			}
+		} else
+			newest_node = cur_img_node;
+	}
+
+	/* full screen */
+out:
+	mutex_unlock(&buf_mgr->mlock);
+	return 0;
+}
+
 bool rect_is_overlap(struct upd_win a_area, struct upd_win b_area)
 {
 	bool overlap_flag = true;
+	s32 w = 0, h = 0;
 
 	if (is_upd_win_zero(a_area) || is_upd_win_zero(b_area)) {
 		return false;
 	}
 
-	if ((max(a_area.left, b_area.left) <= min(a_area.right, b_area.right))
-		&& (max(a_area.top, b_area.top) <= min(a_area.bottom, b_area.bottom))) {
+	w = (s32)min(a_area.right, b_area.right) - (s32)max(a_area.left, b_area.left);
+	h = (s32)min(a_area.bottom, b_area.bottom) - (s32)max(a_area.top, b_area.top);
+	if (w >= 20 && h >= 20) {
 		overlap_flag = true;
 	} else {
 		overlap_flag = false;
@@ -211,7 +352,7 @@ static struct img_node *try_to_merge_image(struct img_node *anode, struct img_no
 	tmp_bnode = (tmp_anode == anode) ? bnode : anode;//old update
 
 	/* old update image is specify no merge, then return NULL*/
-	if (tmp_bnode->img->force_fresh == true) {
+	if (tmp_bnode->force_fresh == true) {
 		pr_warn("image specity no merge, mode=0x%x, order=%d\n",
 			tmp_bnode->img->upd_mode, tmp_bnode->upd_order);
 		return NULL;
@@ -241,8 +382,6 @@ static struct img_node *get_img_from_coll_list(struct buf_manager *buffer_mgr)
 	struct img_node *cur_img_node = NULL, *tmp_img_node = NULL;
 	unsigned int tmp_order = 0;
 
-	u32 buf_size = buffer_mgr->buf_size;
-
 	mutex_lock(&buffer_mgr->mlock);
 
 	if (list_empty(&buffer_mgr->img_collision_list)) {
@@ -252,17 +391,13 @@ static struct img_node *get_img_from_coll_list(struct buf_manager *buffer_mgr)
 
 	/* merge image node */
 	list_for_each_entry_safe(cur_img_node, tmp_img_node, &buffer_mgr->img_collision_list, node) {
-		if (cur_img_node->img->state == USED) {
-			EINK_DEFAULT_MSG("img is used dont merge!\n");
-			continue;/* last img may use calc upd_win or auto mode select */
-		}
 		if (img_node == NULL) {
 			img_node = cur_img_node;
 		} else {
 			//NO MERGE
 			combine_node = try_to_merge_image(img_node, cur_img_node);
 			if (combine_node == NULL) {
-				EINK_DEFAULT_MSG("merge block\n");
+				EINK_DEBUG_MSG("merge block\n");
 				break;
 			} else {
 				//merge success, free older image
@@ -273,31 +408,14 @@ static struct img_node *get_img_from_coll_list(struct buf_manager *buffer_mgr)
 					img_node = combine_node;
 				}
 
-				tmp_order = free_node->upd_order;
 				if (free_node->img != NULL) {
-					if (free_node->extra_flag == true) {
-						free_node->extra_flag = false;
-						__list_del_entry(&free_node->node);
-						eink_free(free_node->img->vaddr, free_node->img->paddr, buf_size);
-						kfree(free_node->img->eink_hist);
-						kfree(free_node->img);
-						kfree(free_node);
-					} else if (free_node->img->de_bypass_flag == true) {
-						free_node->img->de_bypass_flag = false;
-						__list_del_entry(&free_node->node);
-						kfree(free_node->img);
-						kfree(free_node);
-					} else {
-						free_node->img->state = FREE;
-						free_node->img->upd_mode = EINK_INIT_MODE;
-						free_node->img->win_calc_en = true;
-						free_node->img->win_calc_fin = false;
-						free_node->img->mode_select_fin = false;
-						free_node->update_master = -1;
-						list_move_tail(&free_node->node, &buffer_mgr->img_free_list);
-					}
+					tmp_order = free_node->upd_order;
+					free_node->img->upd_mode = EINK_INIT_MODE;
+					free_node->img->win_calc_en = true;
+					free_node->update_master = -1;
+					list_move_tail(&free_node->node, &buffer_mgr->img_free_list);
+					EINK_INFO_MSG("coll merge successfully, free image(order=%d)\n", tmp_order);
 				}
-				EINK_INFO_MSG("merge successfully, free image(order=%d)\n", tmp_order);
 			}
 		}
 	}
@@ -311,15 +429,14 @@ static struct img_node *get_img_from_coll_list(struct buf_manager *buffer_mgr)
 	}
 
 	if (img_node != NULL) {
-		if ((img_node->img == NULL) || (img_node->img->state != CAN_USED)) {
-			EINK_DEFAULT_MSG("img_node NULL or busy\n");
+		if (img_node->img == NULL) {
+			EINK_DEBUG_MSG("[%s]img_node NULL\n", __func__);
 			img_node = NULL;
 		} else {
 			EINK_INFO_MSG("get image node from collision list, order=%d\n", img_node->upd_order);
-			img_node->img->state = USED;
 		}
 	} else {
-		EINK_DEFAULT_MSG("no valid collision node, please wait\n");
+		EINK_DEBUG_MSG("no valid collision node, please wait\n");
 	}
 
 	mutex_unlock(&buffer_mgr->mlock);
@@ -329,81 +446,58 @@ static struct img_node *get_img_from_coll_list(struct buf_manager *buffer_mgr)
 struct img_node *get_img_from_upd_list(struct buf_manager *buffer_mgr)
 {
 	struct img_node *cur_img_node = NULL, *tmp_img_node = NULL;
-	struct img_node *img_node = NULL, *combine_node = NULL, *free_node = NULL;
+	struct img_node *img_node = NULL;
+	u8 overlap = 0;
+#if 0
+	struct img_node *combine_node = NULL, *free_node = NULL;
 	unsigned int tmp_order = 0;
-
-	u32 buf_size = buffer_mgr->buf_size;
+#endif
 
 	mutex_lock(&buffer_mgr->mlock);
 	if (list_empty(&buffer_mgr->img_used_list)) {
+		EINK_INFO_MSG("is empty\n");
 		mutex_unlock(&buffer_mgr->mlock);
 		return NULL;
 	}
 
 	list_for_each_entry_safe(cur_img_node, tmp_img_node, &buffer_mgr->img_used_list, node) {
-		if (cur_img_node->img->state == USED) {
-			EINK_DEFAULT_MSG("img is used dont merge!\n");
-			continue;/* last img may use calc upd_win or auto mode select */
-		}
-
 		if (img_node == NULL) {
 			img_node = cur_img_node;
-		} else {
-			combine_node = try_to_merge_image(img_node, cur_img_node);
-			if (combine_node == NULL) {
-				EINK_DEFAULT_MSG("merge block\n");
-				break;
-			} else {
-				/* merge success, free older image */
-				if (combine_node == img_node) {
-					free_node = cur_img_node;
-				} else {
-					free_node = img_node;
-					img_node = combine_node;
-				}
-
-				tmp_order = free_node->upd_order;
-				EINK_INFO_MSG("%s: free node %p, state = %d\n", __func__, free_node, free_node->img->state);
-				EINK_INFO_MSG("%s: img node %p, state = %d\n", __func__, img_node, img_node->img->state);
-				if (free_node->img != NULL) {
-					if (free_node->extra_flag == true) {
-						free_node->extra_flag = false;
-						__list_del_entry(&free_node->node);
-						eink_free(free_node->img->vaddr, free_node->img->paddr, buf_size);
-						kfree(free_node->img->eink_hist);
-						kfree(free_node->img);
-						kfree(free_node);
-					} else if (free_node->img->de_bypass_flag == true) {
-						free_node->img->de_bypass_flag = false;
-						__list_del_entry(&free_node->node);
-						kfree(free_node->img);
-						kfree(free_node);
-					} else {
-						free_node->img->state = FREE;
-						free_node->img->upd_mode = EINK_INIT_MODE;
-						free_node->img->win_calc_en = true;
-						free_node->img->win_calc_fin = false;
-						free_node->img->mode_select_fin = false;
-						free_node->update_master = -1;
-						list_move_tail(&free_node->node, &buffer_mgr->img_free_list);
-					}
-				}
-				EINK_INFO_MSG("merge successully, free image(order=%d)\n", tmp_order);
-			}
-		}
+		} else
+			break;
 	}
 
 	if (img_node != NULL) {
-		if ((img_node->img == NULL) || (img_node->img->state != CAN_USED)) {
-			EINK_DEFAULT_MSG("img_node is NULL or Busy\n");
+		if (img_node->img == NULL) {
+			EINK_INFO_MSG("img_node is NULL\n");
 			img_node = NULL;
 			goto out;
 		} else {
-			EINK_INFO_MSG("get img node sucess from upd list, order=%d\n", img_node->upd_order);
-			img_node->img->state = USED;
+			//check with collision list
+			if (list_empty(&buffer_mgr->img_collision_list)) {
+				//no collision
+				EINK_DEBUG_MSG("get img node sucess from upd list, order=%d, imgaddr=%p\n",
+						img_node->upd_order, img_node->img);
+			} else {
+				list_for_each_entry_safe(cur_img_node, tmp_img_node, &buffer_mgr->img_collision_list, node) {
+					if (rect_is_overlap(img_node->img->upd_win, cur_img_node->img->upd_win) &&
+							(img_node->upd_order > cur_img_node->upd_order)) {
+						overlap = 1;
+						break;
+					}
+				}
+
+				if (overlap) {
+					img_node = NULL;
+					EINK_DEBUG_MSG("current update overlap with collision list\n");
+				} else {
+					EINK_DEBUG_MSG("get img node sucess from upd list, order=%d, imgaddr=%p\n",
+							img_node->upd_order, img_node->img);
+				}
+			}
 		}
 	} else {
-		EINK_DEFAULT_MSG("no valid image node for update\n");
+		EINK_DEBUG_MSG("no valid image node for update\n");
 	}
 
 out:
@@ -441,10 +535,11 @@ static int add_img_to_coll_list(struct buf_manager *buf_mgr, struct img_node *im
 		return -1;
 	}
 
-#ifdef BUFFER_LIST_DEBUG
-	EINK_INFO_MSG("Before Add Coll Image\n");
-	print_coll_img_list(buf_mgr);
-#endif
+	/* for buf list debug */
+	if (eink_get_print_level() == 3) {
+		EINK_INFO_MSG("Before Add Coll Image\n");
+		print_coll_img_list(buf_mgr);
+	}
 
 	mutex_lock(&buf_mgr->mlock);
 	list_for_each_entry_safe(curnode, tmp_node, &buf_mgr->img_collision_list, node) {
@@ -463,10 +558,12 @@ static int add_img_to_coll_list(struct buf_manager *buf_mgr, struct img_node *im
 out:
 	mutex_unlock(&buf_mgr->mlock);
 
-#ifdef BUFFER_LIST_DEBUG
-	EINK_INFO_MSG("After Add Coll Image\n");
-	print_coll_img_list(buf_mgr);
-#endif
+	/* for debug */
+	if (eink_get_print_level() == 3) {
+		EINK_INFO_MSG("After Add Coll Image\n");
+		print_coll_img_list(buf_mgr);
+	}
+
 	return ret;
 }
 
@@ -480,10 +577,12 @@ static int remove_img_from_coll_list(struct buf_manager *buffer_mgr, struct img_
 		pr_err("%s:input param is null\n", __func__);
 		return -1;
 	}
-#ifdef BUFFER_LIST_DEBUG
-	EINK_INFO_MSG("Before Remove Coll Image\n");
-	print_coll_img_list(buffer_mgr);
-#endif
+
+	/* for debug */
+	if (eink_get_print_level() == 3) {
+		EINK_INFO_MSG("Before Remove Coll Image\n");
+		print_coll_img_list(buffer_mgr);
+	}
 
 	mutex_lock(&buffer_mgr->mlock);
 	if (list_empty(&buffer_mgr->img_collision_list)) {
@@ -496,15 +595,12 @@ static int remove_img_from_coll_list(struct buf_manager *buffer_mgr, struct img_
 		if (img_node == cur_img_node) {
 			tmp_order = cur_img_node->upd_order;
 			if (cur_img_node->img != NULL) {
-				cur_img_node->img->state = FREE;
 				cur_img_node->img->upd_mode = EINK_INIT_MODE;
 				cur_img_node->img->win_calc_en = true;
-				cur_img_node->img->win_calc_fin = false;
-				cur_img_node->img->mode_select_fin = false;
 				cur_img_node->update_master = -1;
 			}
-			EINK_INFO_MSG("remove image node from collision list, order=%d\n", tmp_order);
 			list_move_tail(&cur_img_node->node, &buffer_mgr->img_free_list);
+			EINK_INFO_MSG("remove image node from collision list, order=%d\n", tmp_order);
 			ret = 0;
 			break;
 		}
@@ -512,40 +608,12 @@ static int remove_img_from_coll_list(struct buf_manager *buffer_mgr, struct img_
 out:
 	mutex_unlock(&buffer_mgr->mlock);
 
-#ifdef BUFFER_LIST_DEBUG
-	EINK_INFO_MSG("After Remove Coll Image\n");
-	print_coll_img_list(buffer_mgr);
-#endif
-	return ret;
-}
-
-static int convert_32bpp_to_gray(struct buf_manager *buf_mgr,
-				struct disp_layer_config_inner *config,
-				unsigned int layer_num,
-				struct eink_img *last_img,
-				struct eink_img *dest_img)
-{
-	int ret = 0;
-#ifndef DE_WB_DEBUG
-	struct fmt_convert_manager *cvt_mgr = NULL;
-
-	cvt_mgr = get_fmt_convert_mgr(0);
-	/* used DE hardware to convert 32bpp to 8bpp */
-	if (config != NULL) {
-		ret = cvt_mgr->start_convert(0, config, layer_num, last_img, dest_img);
+	/* for debug */
+	if (eink_get_print_level() == 3) {
+		EINK_INFO_MSG("After Remove Coll Image\n");
+		print_coll_img_list(buffer_mgr);
 	}
-#else
-	ret = eink_get_gray_from_mem(dest_img->vaddr, DEFAULT_GRAY_PIC_PATH,
-				(buf_mgr->width * buf_mgr->height), 0);
 
-	dest_img->upd_win.left = 0;
-	dest_img->upd_win.top = 0;
-	dest_img->upd_win.right = buf_mgr->width - 1;
-	dest_img->upd_win.bottom = buf_mgr->height - 1;
-#endif
-
-	if (ret < 0)
-		pr_err("%s: fmt convert failed!\n", __func__);
 	return ret;
 }
 
@@ -562,7 +630,7 @@ int auto_mode_select(struct eink_img *last_img, struct eink_img *cur_img, u32 *a
 	EINK_INFO_MSG("AUTO MODE SEL\n");
 	cvt_mgr = get_fmt_convert_mgr(0);
 
-	if ((last_img->de_bypass_flag == true) || (cur_img->de_bypass_flag == true))
+	if ((last_img->upd_mode == EINK_DU_MODE) || (cur_img->upd_mode == EINK_DU_MODE))
 		*auto_mode = EINK_DU_MODE;
 	else {
 		ret = cvt_mgr->fmt_auto_mode_select(cvt_mgr, last_img, cur_img);
@@ -592,10 +660,6 @@ bool check_valid_update_mode(enum upd_mode mode)
 {
 	bool ret = false;
 
-	if (mode == EINK_AUTO_MODE) {
-		return true;
-	}
-
 	switch (mode & 0xff) {
 	case EINK_INIT_MODE:
 	case EINK_DU_MODE:
@@ -606,6 +670,9 @@ bool check_valid_update_mode(enum upd_mode mode)
 	case EINK_GLR16_MODE:
 	case EINK_GLD16_MODE:
 	case EINK_GU16_MODE:
+	case EINK_GC4L_MODE:
+	case EINK_GCC16_MODE:
+	case EINK_CLEAR_MODE:
 		ret = true;
 		break;
 	default:
@@ -631,250 +698,82 @@ bool is_local_update_mode(enum upd_mode mode)
 	return ret;
 }
 
-
-int buf_queue_image(struct buf_manager *buf_mgr,
-		struct disp_layer_config_inner *config, unsigned int layer_num,
-		struct eink_upd_cfg *upd_cfg)
+int buf_queue_image(struct buf_manager *buf_mgr, struct eink_upd_cfg *upd_cfg)
 {
 	int ret = 0;
-	struct img_node *curnode = NULL, *tmpnode = NULL, *de_bypass_node = NULL, *extra_node = NULL;
-	struct eink_img *cur_img = NULL, *last_img = NULL;
-	struct dmabuf_item *item = NULL;
-	enum upd_mode update_mode = 0;
-	u32 buf_size = 0;
+	struct img_node *curnode = NULL;
+	struct eink_img *cur_img = &upd_cfg->img;
 
-#ifdef PIPELINE_DEBUG
-	struct pipe_manager *pipe_mgr = get_pipeline_manager();
-	if (pipe_mgr == NULL) {
-		pr_err("%s: pipe mgr is NULL cannot print pipe list!\n", __func__);
+	if (buf_mgr == NULL || cur_img == NULL) {
+		pr_err("%s:buf_mgr or cur_img is null, please check\n", __func__);
 		return -EINVAL;
 	}
-#endif
 
-	if ((buf_mgr == NULL) || (config == NULL)) {
-		pr_err("%s:buf_mgr or config is null, please check\n", __func__);
-		return -EINVAL;
+	/* for calc queue image use time */
+	if (eink_get_print_level() == 8) {
+		getnstimeofday(&buf_mgr->stimer);
 	}
-#ifdef TIME_COUNTER_DEBUG
-	do_gettimeofday(&buf_stime);
-#endif
 
-	if (check_valid_update_mode(GET_UPDATE_MODE(upd_cfg->upd_mode)) == false) {
-		pr_warn("%s:unknown mode(0x%08x), set AUTO MODE\n", __func__, upd_cfg->upd_mode);
-		update_mode = GET_UPDATE_INFO(upd_cfg->upd_mode) | EINK_AUTO_MODE;
-	} else
-		update_mode = upd_cfg->upd_mode;
+	if (check_valid_update_mode(GET_UPDATE_MODE(cur_img->upd_mode)) == false) {
+		pr_warn("%s:unknown mode(0x%08x), set GU16 MODE\n", __func__, cur_img->upd_mode);
+		cur_img->upd_mode = EINK_GU16_MODE;
+	}
 
+	if (force_fresh_mode > 0)
+		cur_img->upd_mode = force_fresh_mode;
 
-	EINK_INFO_MSG("caller info: order=%d out_fmt=0x%x upd_mode=0x%x, dither_mode=0x%x, debypass = %d, area(%d,%d)~(%d,%d)\n",
-				buf_mgr->upd_order, upd_cfg->out_fmt, update_mode,
-				upd_cfg->dither_mode, upd_cfg->de_bypass,
-				upd_cfg->upd_win.left, upd_cfg->upd_win.top,
-				upd_cfg->upd_win.right, upd_cfg->upd_win.bottom);
-	EINK_INFO_MSG("caller info: upd_all_en=%d force_fresh=%d\n",
-				upd_cfg->upd_all_en, upd_cfg->force_fresh);
+	EINK_INFO_MSG("caller info: order=%d out_fmt=0x%x upd_mode=0x%x, dither_mode=0x%x, area(%d,%d)~(%d,%d)\n",
+				upd_cfg->order, cur_img->out_fmt, cur_img->upd_mode,
+				cur_img->dither_mode,
+				cur_img->upd_win.left, cur_img->upd_win.top,
+				cur_img->upd_win.right, cur_img->upd_win.bottom);
+	EINK_INFO_MSG("caller info: upd_all_en=%d force_fresh=%d, img addr=%p\n",
+				cur_img->upd_all_en, upd_cfg->force_fresh, cur_img);
 
-	buf_size = buf_mgr->width * buf_mgr->height;
+	if (is_upd_win_zero(cur_img->upd_win) == true) {
+		pr_err("[%s]:upd win is Zero not fresh!\n", __func__);
+		return 0;
+	}
 
-#ifdef BUFFER_LIST_DEBUG
-	EINK_INFO_MSG("Before Queue Image\n");
-	print_used_img_list(buf_mgr);
-	print_free_img_list(buf_mgr);
-#endif
-	mutex_lock(&buf_mgr->mlock);
+	curnode = request_new_node(buf_mgr);
+	if (curnode == NULL) {
+		pr_err("[%s]:current node is NULL!\n", __func__);
+		return -ENOMEM;
+	}
 
-	/* user not use de to process */
-	if (upd_cfg->de_bypass) {
-		item = eink_dma_map(config[0].info.fb.fd);
-		if (item == NULL) {
-			pr_err("%s:[EINK]dma map item failed!", __func__);
-			mutex_unlock(&buf_mgr->mlock);
+	if (cur_img->fd >= 0) {
+		curnode->item = eink_dma_map(cur_img->fd);
+		if (curnode->item == NULL) {
+			pr_err("%s:[EINK]dma map item failed!\n", __func__);
+			free_unused_node(curnode);
+			curnode = NULL;
 			return -EINVAL;
 		}
 
-		de_bypass_node = (struct img_node *)kmalloc(sizeof(struct img_node), GFP_KERNEL | __GFP_ZERO);
-		if (de_bypass_node == NULL) {
-			pr_err("%s:de_bypass node malloc failed!", __func__);
-			eink_dma_unmap(item);
-			mutex_unlock(&buf_mgr->mlock);
-			return -ENOMEM;
-		}
+		cur_img->paddr = curnode->item->dma_addr;
+	}
+	EINK_DEBUG_MSG("[%s]cur node dma_addr = 0x%lx\n", __func__, (unsigned long)cur_img->paddr);
 
-		de_bypass_node->buf_id = 15;
-		de_bypass_node->upd_order = 0;
-		de_bypass_node->coll_flag = 0;
-		de_bypass_node->update_master = -1;
-		de_bypass_node->img = (struct eink_img *)kmalloc(sizeof(struct eink_img), GFP_KERNEL | __GFP_ZERO);
-		if (de_bypass_node->img == NULL) {
-			pr_err("%s:de_bypass img malloc failed!", __func__);
-			eink_dma_unmap(item);
-			kfree(de_bypass_node);
-			mutex_unlock(&buf_mgr->mlock);
-			return -ENOMEM;
-		}
-		de_bypass_node->img->paddr = (void *)item->dma_addr;
-		de_bypass_node->img->de_bypass_flag = true;
-		de_bypass_node->img->state = FREE;
-		de_bypass_node->img->size.width = buf_mgr->width;
-		de_bypass_node->img->size.height = buf_mgr->height;
-		de_bypass_node->img->size.align = 4;
-		de_bypass_node->img->pitch = EINKALIGN(de_bypass_node->img->size.width,
-						de_bypass_node->img->size.align);
-		de_bypass_node->img->upd_mode = EINK_INIT_MODE;
-		de_bypass_node->img->out_fmt = EINK_Y8;
-		de_bypass_node->img->win_calc_fin = false;
-		de_bypass_node->img->mode_select_fin = false;
-		de_bypass_node->img->upd_all_en = false;
-
-		curnode = de_bypass_node;
-		goto add_img_list;
+	/* for debug */
+	if (eink_get_print_level() == 3) {
+		EINK_INFO_MSG("Before Queue Image\n");
+		print_used_img_list(buf_mgr);
+		print_free_img_list(buf_mgr);
 	}
 
-	/* buffer slot has no free buffer use an extra buffer */
-	if (list_empty(&buf_mgr->img_free_list)) {
-		extra_node = (struct img_node *)kmalloc(sizeof(struct img_node), GFP_KERNEL | __GFP_ZERO);
-		if (extra_node == NULL) {
-			pr_err("%s:empty extra node malloc failed!", __func__);
-			mutex_unlock(&buf_mgr->mlock);
-			return -ENOMEM;
-		}
+	mutex_lock(&buf_mgr->mlock);
 
-		extra_node->img = (struct eink_img *)kmalloc(sizeof(struct eink_img), GFP_KERNEL | __GFP_ZERO);
-		if (extra_node->img == NULL) {
-			pr_err("%s:extra_node img malloc failed!", __func__);
-			kfree(extra_node);
-			mutex_unlock(&buf_mgr->mlock);
-			return -ENOMEM;
-		}
+	buf_mgr->upd_order = upd_cfg->order;
+	curnode->upd_order = upd_cfg->order;
 
-		extra_node->img->eink_hist =
-			(unsigned int *)kmalloc((sizeof(unsigned int) * buf_mgr->gray_level_cnt), GFP_KERNEL | __GFP_ZERO);
-		if (extra_node->img->eink_hist == NULL) {
-			pr_err("%s:extra_node hist strcut malloc failed!\n", __func__);
-			kfree(extra_node->img);
-			kfree(extra_node);
-			mutex_unlock(&buf_mgr->mlock);
-			ret = -ENOMEM;
-		}
-
-		extra_node->img->vaddr = eink_malloc(buf_size, &extra_node->img->paddr);
-		if (extra_node->img->vaddr == NULL) {
-			pr_err("extra img buffer malloc failed!\n");
-			kfree(extra_node->img->eink_hist);
-			kfree(extra_node->img);
-			kfree(extra_node);
-			mutex_unlock(&buf_mgr->mlock);
-			return -ENOMEM;
-		}
-		extra_node->extra_flag = true;
-		extra_node->buf_id = 16;
-		extra_node->upd_order = 0;
-		extra_node->coll_flag = 0;
-		extra_node->update_master = -1;
-		extra_node->img->state = FREE;
-		extra_node->img->size.width = buf_mgr->width;
-		extra_node->img->size.height = buf_mgr->height;
-		extra_node->img->size.align = 4;
-		extra_node->img->pitch = EINKALIGN(extra_node->img->size.width,
-						extra_node->img->size.align);
-		extra_node->img->upd_mode = EINK_INIT_MODE;
-		extra_node->img->out_fmt = EINK_Y8;
-		extra_node->img->win_calc_fin = false;
-		extra_node->img->mode_select_fin = false;
-		extra_node->img->upd_all_en = false;
-
-		curnode = extra_node;
-		EINK_INFO_MSG("Extra buffer alloc success!\n");
-	} else {
-		EINK_INFO_MSG("GET CURNODE!\n");
-		list_for_each_entry_safe(curnode, tmpnode, &buf_mgr->img_free_list, node) {
-			if (curnode != NULL)
-				break;
-		}
-		__list_del_entry(&curnode->node);
+	if ((curnode->upd_order == 0) && (GET_UPDATE_MODE(cur_img->upd_mode) != EINK_INIT_MODE)) {
+		cur_img->upd_mode = GET_UPDATE_INFO(cur_img->upd_mode) | EINK_GC16_MODE;
 	}
+	curnode->force_fresh = upd_cfg->force_fresh;
 
-add_img_list:
-	curnode->upd_order = buf_mgr->upd_order++;
-
-	if ((curnode->upd_order == 0) && (GET_UPDATE_MODE(upd_cfg->upd_mode) != EINK_INIT_MODE)) {
-		update_mode = GET_UPDATE_INFO(upd_cfg->upd_mode) | EINK_GC16_MODE;
-	}
-
-	last_img = buf_mgr->last_img;
-	cur_img = curnode->img;
-	cur_img->upd_mode = update_mode;
-	cur_img->force_fresh = upd_cfg->force_fresh;
-	cur_img->upd_all_en = upd_cfg->upd_all_en;
-	cur_img->dither_mode = upd_cfg->dither_mode;
-	if (upd_cfg->out_fmt > 0)
-		cur_img->out_fmt = upd_cfg->out_fmt;
-	cur_img->state = CAN_USED; /* not used yet */
-
-	EINK_INFO_MSG("eink config upd mode is 0x%x\n", update_mode);
-	/* 回写得出的upd_win */
-	/* first de win disable */
-	if (curnode->upd_order == 0 || (upd_cfg->upd_mode == EINK_INIT_MODE)) {
-		cur_img->upd_win.left = 0;
-		cur_img->upd_win.top = 0;
-		cur_img->upd_win.right = buf_mgr->width - 1;
-		cur_img->upd_win.bottom = buf_mgr->height - 1;
-		cur_img->win_calc_en = false;
-		cur_img->upd_all_en = true;
-	} else {
-		if ((IS_RECT_UPDATE(update_mode) || (cur_img->de_bypass_flag == true))
-				&& (is_upd_win_zero(upd_cfg->upd_win) == false)) {
-			EINK_INFO_MSG("RECT MODE or Debypass %d use self upd_win\n",
-							cur_img->de_bypass_flag);
-			memcpy(&cur_img->upd_win, &upd_cfg->upd_win, sizeof(struct upd_win));
-			cur_img->win_calc_en = false;
-		} else {
-			EINK_INFO_MSG("Use DE to calc upd win\n");
-			cur_img->win_calc_en = true;
-		}
-	}
-
-	if (upd_cfg->upd_mode == EINK_INIT_MODE) {
-		EINK_INFO_MSG("EINK_INIT_MODE!\n");
-		memset(cur_img->vaddr, 0xff, buf_size);
-		ret = 0;
-	} else if (cur_img->de_bypass_flag == false) {
-		ret = convert_32bpp_to_gray(buf_mgr, config, layer_num, last_img, cur_img);
-		if (ret || ((is_upd_win_zero(cur_img->upd_win) == true) && (upd_cfg->force_fresh == false))) {
-			pr_err("%s:de wb convert failed ret = %d, or the same img abandon\n", __func__, ret);
-			cur_img->state = FREE;
-			if (curnode->extra_flag == true) {
-				curnode->extra_flag = false;
-				__list_del_entry(&curnode->node);
-				eink_free(curnode->img->vaddr, curnode->img->paddr, buf_size);
-				kfree(curnode->img->eink_hist);
-				kfree(curnode->img);
-				kfree(curnode);
-				//buf放回free还是释放
-			} else {
-				EINK_INFO_MSG("Abandon unused node\n");
-				list_add_tail(&curnode->node, &buf_mgr->img_free_list);
-			}
-			/* ret = -1; *//* the same img ret  = 0,err ret < 0*/
-			goto out;
-		}
-
-#ifdef SAVE_DE_WB_BUF
-		eink_put_gray_to_mem(curnode->upd_order, (char *)cur_img->vaddr,
-						buf_mgr->width, buf_mgr->height);
-#endif
-
-	}
-
-	if (last_img)
-		last_img->win_calc_fin = true;
-
-	if ((is_upd_win_zero(cur_img->upd_win) == true) && (upd_cfg->force_fresh == true)) {
-		EINK_INFO_MSG("maybe same pic but must be freshed\n");
-		cur_img->upd_win.left = 0;
-		cur_img->upd_win.top = 0;
-		cur_img->upd_win.right = buf_mgr->width - 1;
-		cur_img->upd_win.bottom = buf_mgr->height - 1;
+	if (cur_img->out_fmt > 0xe || (cur_img->out_fmt < 0x9 && cur_img->out_fmt != 0x0)) {
+		pr_warn("[%s]fmt set invalid use default Y8\n", __func__);
+		cur_img->out_fmt = EINK_Y8;
 	}
 
 	if (cur_img->upd_win.left >= buf_mgr->width)
@@ -889,20 +788,9 @@ add_img_list:
 	if (cur_img->upd_win.bottom >= buf_mgr->height)
 		cur_img->upd_win.bottom = buf_mgr->height - 1;
 
-	if (IS_AUTO_MODE(update_mode)) {
-		EINK_INFO_MSG("AUTO MODE IN!\n");
-		ret = auto_mode_select(last_img, cur_img, &update_mode);
-		if (ret < 0)
-			update_mode = EINK_GU16_MODE;/* auto mode select fail use default*/
-	}
-
-	EINK_INFO_MSG("After auto mode sel upd mode = 0x%x\n", update_mode);
-	cur_img->upd_mode = update_mode;
-
-	if (last_img)
-		last_img->mode_select_fin = true;
-
-
+#if 0
+	/* eink200 GC16 is like GU16, if want upd all screen must set 1 to upd_all_en */
+	/* prevent local flicker upd_win must full screen */
 	if (buf_mgr->global_clean_cnt != 0) {
 		if (cur_img->upd_mode == EINK_GU16_MODE) {
 			continue_gu16_cnt++;
@@ -917,43 +805,46 @@ add_img_list:
 	} else {
 		continue_gu16_cnt = 0;
 	}
-
-	buf_mgr->last_img = cur_img;
-	ret = 0;
-
-	EINK_INFO_MSG("add img to used list!\n");
-	list_add_tail(&curnode->node, &buf_mgr->img_used_list);
-out:
-	if ((cur_img != NULL) && (curnode != NULL)) {
-		if (cur_img->state == CAN_USED) {
-			EINK_INFO_MSG("add to update list: order=%d, mode=0x%x, (%d,%d)~(%d,%d)\n",
-					curnode->upd_order, cur_img->upd_mode,
-					cur_img->upd_win.left, cur_img->upd_win.top,
-					cur_img->upd_win.right, cur_img->upd_win.bottom);
-		}
-	}
-
-#ifdef TIME_COUNTER_DEBUG
-	do_gettimeofday(&buf_etime);
-
-	EINK_INFO_MSG("order=%d, queue image take %d ms\n", curnode->upd_order,
-			get_delt_ms_timer(buf_stime, buf_etime));
 #endif
 
-	if (item)
-		eink_dma_unmap(item);
+	//curnode->img = cur_img;//upd_cfg->img;
+	memcpy(curnode->img, cur_img, sizeof(struct eink_img));
+	ret = 0;
+
+	list_add_tail(&curnode->node, &buf_mgr->img_used_list);
+
+	if ((cur_img != NULL) && (curnode != NULL)) {
+		EINK_INFO_MSG("add to update list: order=%d, mode=0x%x, (%d,%d)~(%d,%d)\n",
+				curnode->upd_order, cur_img->upd_mode,
+				cur_img->upd_win.left, cur_img->upd_win.top,
+				cur_img->upd_win.right, cur_img->upd_win.bottom);
+	}
+
+	/* debug */
+	if (eink_get_print_level() == 8) {
+		getnstimeofday(&buf_mgr->etimer);
+
+		pr_info("order=%d, queue image take %d ms\n", curnode->upd_order,
+				get_delt_ms_timer(buf_mgr->stimer, buf_mgr->etimer));
+	}
+
+	if (eink_get_print_level() == 9) {
+		eink_save_img(cur_img->fd, 3, buf_mgr->width,
+				buf_mgr->height, curnode->upd_order, NULL, 0);
+	}
+
+	if (eink_get_print_level() == 5) {
+		eink_kmap_img(curnode);
+	}
 
 	mutex_unlock(&buf_mgr->mlock);
 
-#ifdef BUFFER_LIST_DEBUG
-	EINK_INFO_MSG("After Queue Image\n");
-	print_used_img_list(buf_mgr);
-	print_free_img_list(buf_mgr);
-#endif
-#ifdef PIPELINE_DEBUG
-	EINK_INFO_MSG("The end of queue image\n");
-	print_used_pipe_list(pipe_mgr);
-#endif
+	/* for debug */
+	if (eink_get_print_level() == 3) {
+		EINK_INFO_MSG("After Queue Image\n");
+		print_used_img_list(buf_mgr);
+		print_free_img_list(buf_mgr);
+	}
 
 	return ret;
 }
@@ -977,15 +868,13 @@ s32 buf_dequeue_image(struct buf_manager *buf_mgr, struct img_node *img_node)
 
 		order = image_node->upd_order;
 		if (image_node->img != NULL) {
-			image_node->img->state = FREE;
+			EINK_DEBUG_MSG("img = %p\n", image_node->img);
 			image_node->img->upd_mode = EINK_INIT_MODE;
 			image_node->img->win_calc_en = true;
-			image_node->img->win_calc_fin = false;
-			image_node->img->mode_select_fin = false;
 			image_node->update_master = -1;
 		}
 		list_move_tail(&image_node->node, &buf_mgr->img_free_list);
-		EINK_INFO_MSG("dequeue image buffer %d, order %d\n", img_node->buf_id, order);
+		EINK_DEBUG_MSG("dequeue image order %d\n", order);
 	}
 
 	mutex_unlock(&buf_mgr->mlock);
@@ -997,7 +886,7 @@ s32 buf_dequeue_image(struct buf_manager *buf_mgr, struct img_node *img_node)
 
 int buf_mgr_init(struct eink_manager *eink_mgr)
 {
-	int ret = 0, i = 0;
+	int ret = 0;
 	u32 gray_level_cnt = 0;
 	struct buf_manager *buf_mgr = NULL;
 
@@ -1024,56 +913,6 @@ int buf_mgr_init(struct eink_manager *eink_mgr)
 	INIT_LIST_HEAD(&buf_mgr->img_used_list);
 	INIT_LIST_HEAD(&buf_mgr->img_collision_list);
 
-	for (i = 0; i < MAX_IMG_CNT; i++) {
-		buf_mgr->img_node[i].buf_id = i;
-		buf_mgr->img_node[i].upd_order = 0;
-		buf_mgr->img_node[i].coll_flag = 0;
-		buf_mgr->img_node[i].update_master = -1;
-		buf_mgr->img_node[i].img = (struct eink_img *)kmalloc(sizeof(struct eink_img), GFP_KERNEL | __GFP_ZERO);
-		if (buf_mgr->img_node[i].img == NULL) {
-			pr_err("%s:img strcut malloc failed!\n", __func__);
-			ret = -ENOMEM;
-			goto img_node_err;
-		}
-		memset(buf_mgr->img_node[i].img, 0, sizeof(struct eink_img));
-
-		buf_mgr->img_node[i].img->state = FREE;
-		buf_mgr->img_node[i].img->size.width = buf_mgr->width;
-		buf_mgr->img_node[i].img->size.height = buf_mgr->height;
-		buf_mgr->img_node[i].img->size.align = 4;//看看哪里会用到
-		buf_mgr->img_node[i].img->pitch =
-					EINKALIGN(buf_mgr->img_node[i].img->size.width,
-					buf_mgr->img_node[i].img->size.align);
-		buf_mgr->img_node[i].img->upd_mode = EINK_INIT_MODE;
-		buf_mgr->img_node[i].img->out_fmt = EINK_Y8;
-		buf_mgr->img_node[i].img->win_calc_fin = false;
-		buf_mgr->img_node[i].img->mode_select_fin = false;
-		buf_mgr->img_node[i].img->upd_all_en = false;
-		buf_mgr->img_node[i].img->eink_hist =
-			(unsigned int *)kmalloc((sizeof(unsigned int) * gray_level_cnt), GFP_KERNEL | __GFP_ZERO);
-		if (buf_mgr->img_node[i].img->eink_hist == NULL) {
-			pr_err("%s:eink hist strcut malloc failed!\n", __func__);
-			ret = -ENOMEM;
-			goto hist_node_err;
-		}
-
-		buf_mgr->img_node[i].img->vaddr = eink_malloc(buf_mgr->buf_size, &buf_mgr->img_node[i].img->paddr);
-		if (buf_mgr->img_node[i].img->vaddr == NULL) {
-			pr_err("img buffer malloc failed!\n");
-			ret = -ENOMEM;
-			goto img_buffer_err;
-		}
-		EINK_INFO_MSG("image %d, paddr=0x%p, vaddr=0x%p\n",
-				i, buf_mgr->img_node[i].img->paddr, buf_mgr->img_node[i].img->vaddr);
-
-		/* init mode need buf data 0xff */
-		memset((void *)buf_mgr->img_node[i].img->vaddr, 0xff, buf_mgr->buf_size);
-		list_add_tail(&buf_mgr->img_node[i].node, &buf_mgr->img_free_list);
-	}
-
-
-	//	is_full//有点问题
-
 	buf_mgr->coll_img_workqueue = alloc_workqueue("EINK_COLL_WORK",
 			WQ_HIGHPRI | WQ_MEM_RECLAIM | WQ_UNBOUND, 1);
 	INIT_WORK(&buf_mgr->coll_handle_work, upd_coll_win_irq_handler);
@@ -1088,30 +927,15 @@ int buf_mgr_init(struct eink_manager *eink_mgr)
 	buf_mgr->queue_image = buf_queue_image;
 	buf_mgr->dequeue_image = buf_dequeue_image;
 	buf_mgr->set_global_clean_counter = set_global_clean_counter;
+	buf_mgr->wait_for_newest_img_node = wait_for_newest_img_node;
+	buf_mgr->get_buf_msg = get_buf_msg;
+	buf_mgr->reset_all = __reset_all;
+	buf_mgr->get_free_buffer_slot = get_free_buffer_slot;
 
 	eink_mgr->buf_mgr = buf_mgr;
 
 	return ret;
 
-img_buffer_err:
-	for (i = 0; i < MAX_IMG_CNT; i++) {
-		if (buf_mgr->img_node[i].img->vaddr) {
-			eink_free(buf_mgr->img_node[i].img->vaddr,
-					(void *)buf_mgr->img_node[i].img->paddr,
-					buf_mgr->buf_size);
-			buf_mgr->img_node[i].img->vaddr = NULL;
-		}
-	}
-
-hist_node_err:
-	for (i = 0; i < MAX_IMG_CNT; i++) {
-		kfree(buf_mgr->img_node[i].img->eink_hist);
-	}
-
-img_node_err:
-	for (i = 0; i < MAX_IMG_CNT; i++) {
-		kfree(buf_mgr->img_node[i].img);
-	}
 mgr_err_out:
 	kfree(buf_mgr);
 	return ret;

@@ -3,7 +3,8 @@
 #include "../aw_nand_type.h"
 #include <linux/types.h>
 #include "nand-partition/phy.h"
-#include "nand_boot.h"
+/*#include "nand_boot.h"*/
+#include "nand-partition3/sunxi_nand_boot.h"
 
 unsigned int __attribute__((weak)) spinand_nftl_get_super_page_size(int type)
 {

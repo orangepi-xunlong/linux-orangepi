@@ -241,7 +241,9 @@ struct __LogicArchitecture_t {
 #endif
 
 //define the size of the sector
+#ifndef SECTOR_SIZE 
 #define SECTOR_SIZE 512 //the size of a sector, based on byte
+#endif
 
 #define BAD_BLK_FLAG_MARK 0x03
 /* the bad block flag is only in the first page */

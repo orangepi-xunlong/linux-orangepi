@@ -17,6 +17,8 @@
 #include <linux/of_address.h>
 #include <linux/err.h>
 #include <linux/slab.h>
+#include <linux/sunxi-dump.h>
+#include <soc/allwinner/sunxi_sip.h>
 
 #define SUNXI_DUMP_COMPATIBLE "sunxi-dump"
 static LIST_HEAD(dump_group_list);
@@ -97,7 +99,12 @@ static int __init sunxi_dump_init(void)
 	}
 
 	return 0;
-
 }
 
+int sunxi_set_crashdump_mode(void)
+{
+	invoke_scp_fn_smc(ARM_SVC_SUNXI_CRASHDUMP_START, 0, 0, 0);
+	while (1)
+		cpu_relax();
+}
 late_initcall(sunxi_dump_init);

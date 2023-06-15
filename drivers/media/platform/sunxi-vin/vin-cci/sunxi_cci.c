@@ -1,5 +1,5 @@
 /*
- * linux-4.9/drivers/media/platform/sunxi-vin/vin-cci/sunxi_cci.c
+ * linux-5.4/drivers/media/platform/sunxi-vin/vin-cci/sunxi_cci.c
  *
  * Copyright (c) 2007-2017 Allwinnertech Co., Ltd.
  *
@@ -68,8 +68,7 @@ static int __cci_clk_enable(struct cci_dev *dev, int enable)
 				return -1;
 			}
 		} else {
-			if (__clk_get_enable_count(dev->clock))
-				clk_disable_unprepare(dev->clock);
+			clk_disable_unprepare(dev->clock);
 		}
 	}
 #endif

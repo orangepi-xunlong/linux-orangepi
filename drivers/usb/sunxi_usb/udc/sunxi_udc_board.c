@@ -27,6 +27,7 @@
 #include <linux/interrupt.h>
 #include <linux/platform_device.h>
 #include <linux/clk.h>
+#include <linux/reset.h>
 #include <linux/io.h>
 #include  "sunxi_udc_config.h"
 #include  "sunxi_udc_board.h"
@@ -35,40 +36,71 @@
 
 u32  open_usb_clock(sunxi_udc_io_t *sunxi_udc_io)
 {
+	int ret;
+
 	DMSG_INFO_UDC("open_usb_clock\n");
 
 	/* To fix hardware design issue. */
 #if defined(CONFIG_ARCH_SUN8IW12) || defined(CONFIG_ARCH_SUN50IW3) \
-	|| defined(CONFIG_ARCH_SUN50IW6) || defined(CONFIG_ARCH_SUN8IW15)
+	|| defined(CONFIG_ARCH_SUN50IW6) || defined(CONFIG_ARCH_SUN8IW15) \
+	|| defined(CONFIG_ARCH_SUN8IW18)
 	usb_otg_phy_txtune(sunxi_udc_io->usb_vbase);
 #endif
 
-	if (sunxi_udc_io->ahb_otg
-			&& sunxi_udc_io->mod_usbphy
-			&& !sunxi_udc_io->clk_is_open) {
-		if (clk_prepare_enable(sunxi_udc_io->ahb_otg))
-			DMSG_PANIC("ERR:try to prepare_enable sunxi_udc_io->mod_usbphy failed!\n");
+	if (!sunxi_udc_io->clk_is_open) {
+		if (sunxi_udc_io->reset_phy) {
+			ret = reset_control_deassert(sunxi_udc_io->reset_phy);
+			if (ret) {
+				DMSG_PANIC("[udc]: reset phy err, return %d\n", ret);
+				return ret;
+			}
+		}
 
-		udelay(10);
+		if (sunxi_udc_io->reset_otg) {
+			ret = reset_control_deassert(sunxi_udc_io->reset_otg);
+			if (ret) {
+				DMSG_PANIC("[udc]: reset otg err, return %d\n", ret);
+				return ret;
+			}
+		}
 
-		if (clk_prepare_enable(sunxi_udc_io->mod_usbphy))
-			DMSG_PANIC("ERR:try to prepare_enable sunxi_udc_io->mod_usbphy failed!\n");
+		if (sunxi_udc_io->clk_bus_otg) {
+			ret = clk_prepare_enable(sunxi_udc_io->clk_bus_otg);
+			if (ret) {
+				DMSG_PANIC("[udc]: enable clk_bus_otg err, return %d\n", ret);
+				return ret;
+			}
+		}
+
+			udelay(10);
+
+		if (sunxi_udc_io->clk_phy) {
+			ret = clk_prepare_enable(sunxi_udc_io->clk_phy);
+			if (ret) {
+				DMSG_PANIC("[udc]: enable clk_phy err, return %d\n", ret);
+				return ret;
+			}
+		}
 
 		udelay(10);
 
 		sunxi_udc_io->clk_is_open = 1;
-	} else {
-		DMSG_PANIC("ERR: clock handle is null, ahb_otg(0x%p), mod_usbotg(0x%p), mod_usbphy(0x%p), open(%d)\n",
-			sunxi_udc_io->ahb_otg,
-			sunxi_udc_io->mod_usbotg,
-			sunxi_udc_io->mod_usbphy,
-			sunxi_udc_io->clk_is_open);
 	}
+
+#if defined(CONFIG_ARCH_SUN50IW10) || defined(CONFIG_ARCH_SUN50IW11)\
+	|| defined(CONFIG_ARCH_SUN8IW20) || defined(CONFIG_ARCH_SUN20IW1)\
+	|| defined(CONFIG_ARCH_SUN5OIW12)
+	USBC_PHY_Clear_Ctl(sunxi_udc_io->usb_vbase, USBC_PHY_CTL_LOOPBACKENB);
+#endif
 
 #if defined(CONFIG_ARCH_SUN8IW12) || defined(CONFIG_ARCH_SUN50IW3) \
 	|| defined(CONFIG_ARCH_SUN8IW6) || defined(CONFIG_ARCH_SUN50IW6) \
 	|| defined(CONFIG_ARCH_SUN8IW15) || defined(CONFIG_ARCH_SUN50IW8) \
-	|| defined(CONFIG_ARCH_SUN50IW9)
+	|| defined(CONFIG_ARCH_SUN8IW18) || defined(CONFIG_ARCH_SUN8IW16) \
+	|| defined(CONFIG_ARCH_SUN50IW9) || defined(CONFIG_ARCH_SUN50IW10) \
+	|| defined(CONFIG_ARCH_SUN8IW19) || defined(CONFIG_ARCH_SUN50IW11) \
+	|| defined(CONFIG_ARCH_SUN8IW20) || defined(CONFIG_ARCH_SUN20IW1) \
+	|| defined(CONFIG_ARCH_SUN50IW12)
 	USBC_PHY_Set_Ctl(sunxi_udc_io->usb_vbase, USBC_PHY_CTL_VBUSVLDEXT);
 	USBC_PHY_Clear_Ctl(sunxi_udc_io->usb_vbase, USBC_PHY_CTL_SIDDQ);
 #else
@@ -78,7 +110,10 @@ u32  open_usb_clock(sunxi_udc_io_t *sunxi_udc_io)
 #if defined(CONFIG_ARCH_SUN50I) || defined(CONFIG_ARCH_SUN8IW10) \
 	|| defined(CONFIG_ARCH_SUN8IW11) || defined(CONFIG_ARCH_SUN8IW12) \
 	|| defined(CONFIG_ARCH_SUN8IW15) || defined(CONFIG_ARCH_SUN8IW7) \
-	|| defined(CONFIG_ARCH_SUN8IW17)
+	|| defined(CONFIG_ARCH_SUN8IW17) || defined(CONFIG_ARCH_SUN8IW18) \
+	|| defined(CONFIG_ARCH_SUN8IW16) || defined(CONFIG_ARCH_SUN8IW19) \
+	|| defined(CONFIG_ARCH_SUN8IW8) || defined(CONFIG_ARCH_SUN8IW20)\
+	|| defined(CONFIG_ARCH_SUN20IW1) || defined(CONFIG_ARCH_SUN50IW12)
 	/* otg and hci0 Controller Shared phy in SUN50I and SUN8IW10 */
 	USBC_SelectPhyToDevice(sunxi_udc_io->usb_vbase);
 #endif
@@ -88,30 +123,54 @@ u32  open_usb_clock(sunxi_udc_io_t *sunxi_udc_io)
 
 u32 close_usb_clock(sunxi_udc_io_t *sunxi_udc_io)
 {
+	int ret;
+
 	DMSG_INFO_UDC("close_usb_clock\n");
 
-	if (sunxi_udc_io->ahb_otg
-			&& sunxi_udc_io->mod_usbphy
-			&& sunxi_udc_io->clk_is_open) {
+	if (sunxi_udc_io->clk_is_open) {
 		sunxi_udc_io->clk_is_open = 0;
 
-		clk_disable_unprepare(sunxi_udc_io->mod_usbphy);
+		if (sunxi_udc_io->clk_phy) {
+			ret = clk_prepare_enable(sunxi_udc_io->clk_phy);
+			if (ret) {
+				DMSG_PANIC("[udc]: enable clk_phy err, return %d\n", ret);
+				return ret;
+			}
+		}
 
-		clk_disable_unprepare(sunxi_udc_io->ahb_otg);
+		if (sunxi_udc_io->clk_bus_otg) {
+			ret = clk_prepare_enable(sunxi_udc_io->clk_bus_otg);
+			if (ret) {
+				DMSG_PANIC("[udc]: enable clk_bus_otg err, return %d\n", ret);
+				return ret;
+			}
+		}
+
+		if (sunxi_udc_io->reset_otg) {
+			ret = reset_control_deassert(sunxi_udc_io->reset_otg);
+			if (ret) {
+				DMSG_PANIC("[udc]: reset otg err, return %d\n", ret);
+				return ret;
+			}
+		}
+
+		if (sunxi_udc_io->reset_phy) {
+			ret = reset_control_deassert(sunxi_udc_io->reset_phy);
+			if (ret) {
+				DMSG_PANIC("[udc]: reset phy err, return %d\n", ret);
+				return ret;
+			}
+		}
+
 		udelay(10);
-
-	} else {
-		DMSG_PANIC("ERR: clock handle is null, ahb_otg(0x%p), mod_usbotg(0x%p), mod_usbphy(0x%p), open(%d)\n",
-			sunxi_udc_io->ahb_otg,
-			sunxi_udc_io->mod_usbotg,
-			sunxi_udc_io->mod_usbphy,
-			sunxi_udc_io->clk_is_open);
 	}
-
 #if defined(CONFIG_ARCH_SUN8IW12) || defined(CONFIG_ARCH_SUN50IW3) \
 	|| defined(CONFIG_ARCH_SUN8IW6) || defined(CONFIG_ARCH_SUN50IW6) \
 	|| defined(CONFIG_ARCH_SUN8IW15) || defined(CONFIG_ARCH_SUN50IW8) \
-	|| defined(CONFIG_ARCH_SUN50IW9)
+	|| defined(CONFIG_ARCH_SUN8IW18) || defined(CONFIG_ARCH_SUN8IW16) \
+	|| defined(CONFIG_ARCH_SUN50IW9) || defined(CONFIG_ARCH_SUN50IW10) \
+	|| defined(CONFIG_ARCH_SUN8IW19) || defined(CONFIG_ARCH_SUN50IW11)\
+	|| defined(CONFIG_ARCH_SUN8IW20) || defined(CONFIG_ARCH_SUN20IW1)
 	USBC_PHY_Set_Ctl(sunxi_udc_io->usb_vbase, USBC_PHY_CTL_SIDDQ);
 #else
 	UsbPhyInit(0);

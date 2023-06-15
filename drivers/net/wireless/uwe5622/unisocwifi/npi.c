@@ -33,7 +33,6 @@ static struct genl_family sprdwl_nl_genl_family;
 static int sprdwl_get_flag(void)
 {
 	struct file *fp = NULL;
-	mm_segment_t fs;
 	loff_t *pos;
 	int flag = 0;
 	char file_data[2];
@@ -44,14 +43,11 @@ static int sprdwl_get_flag(void)
 		wl_err("open file:%s failed\n", SPRDWL_PSM_PATH);
 		return PTR_ERR(fp);
 	}
-	fs = get_fs();
-	set_fs(KERNEL_DS);
 
 	pos = &fp->f_pos;
-	vfs_read(fp, file_data, 1, pos);
+	kernel_read(fp, file_data, 1, pos);
 
 	filp_close(fp, NULL);
-	set_fs(fs);
 
 	file_data[1] = 0;
 	if (kstrtoull(file_data, 10, &tmp)) {
@@ -262,6 +258,7 @@ static int sprdwl_nl_get_info_handler(struct sk_buff *skb_2,
 }
 
 static struct nla_policy sprdwl_genl_policy[SPRDWL_NL_ATTR_MAX + 1] = {
+	[SPRDWL_NL_ATTR_IFINDEX] = { .type = NLA_U32, },
 	[SPRDWL_NL_ATTR_AP2CP] = {.type = NLA_BINARY, .len = 1024},
 	[SPRDWL_NL_ATTR_CP2AP] = {.type = NLA_BINARY, .len = 1024}
 };
@@ -269,12 +266,10 @@ static struct nla_policy sprdwl_genl_policy[SPRDWL_NL_ATTR_MAX + 1] = {
 static struct genl_ops sprdwl_nl_ops[] = {
 	{
 		.cmd = SPRDWL_NL_CMD_NPI,
-		.policy = sprdwl_genl_policy,
 		.doit = sprdwl_nl_npi_handler,
 	},
 	{
 		.cmd = SPRDWL_NL_CMD_GET_INFO,
-		.policy = sprdwl_genl_policy,
 		.doit = sprdwl_nl_get_info_handler,
 	}
 };
@@ -285,6 +280,7 @@ static struct genl_family sprdwl_nl_genl_family = {
 	.name = "SPRDWL_NL",
 	.version = 1,
 	.maxattr = SPRDWL_NL_ATTR_MAX,
+	.policy  = sprdwl_genl_policy,
 	.pre_doit = sprdwl_npi_pre_doit,
 	.post_doit = sprdwl_npi_post_doit,
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 14, 0)

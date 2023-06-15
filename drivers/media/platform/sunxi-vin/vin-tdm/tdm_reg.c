@@ -1,5 +1,5 @@
 /*
- * linux-4.9/drivers/media/platform/sunxi-vin/vin-tdm/tdm_reg.c
+ * linux-5.4/drivers/media/platform/sunxi-vin/vin-tdm/tdm_reg.c
  *
  * Copyright (c) 2007-2019 Allwinnertech Co., Ltd.
  *
@@ -220,5 +220,23 @@ void csic_tdm_rx_set_address(unsigned int sel, unsigned int ch, unsigned long ad
 {
 	vin_reg_writel(csic_tdm_base[sel] + TMD_RX0_OFFSET + ch*AMONG_RX_OFFSET + TDM_RX_CFG2_REG_OFF,
 					address >> TDM_ADDR_BIT_R_SHIFT);
+}
+
+void csic_tdm_rx_get_size(unsigned int sel, unsigned int ch, unsigned int *width, unsigned int *heigth)
+{
+	unsigned int regval;
+
+	regval = vin_reg_readl(csic_tdm_base[sel] + TMD_RX0_OFFSET + ch*AMONG_RX_OFFSET + TDM_RX_FRAME_ERR_REG_OFF);
+	*width = regval & 0x3fff;
+	*heigth = (regval >> 16) & 0x3fff;
+}
+
+void csic_tdm_rx_get_hblank(unsigned int sel, unsigned int ch, unsigned int *hb_min, unsigned int *hb_max)
+{
+	unsigned int regval;
+
+	regval = vin_reg_readl(csic_tdm_base[sel] + TMD_RX0_OFFSET + ch*AMONG_RX_OFFSET + TDM_RX_HB_SHORT_REG_OFF);
+	*hb_max = regval & 0xffff;
+	*hb_min = (regval >> 16) & 0xffff;
 }
 

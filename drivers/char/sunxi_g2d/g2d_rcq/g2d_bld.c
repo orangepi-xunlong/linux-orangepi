@@ -22,6 +22,14 @@ __s32 rgb2Ycbcr_709[12] = {
 __s32 Ycbcr2rgb_709[12] = {
 	0x04a8, 0x0, 0x072c, 0xFFFC1F7D, 0x04a8, 0xFFFFFF26, 0xFFFFFDDD,
 	0x133F8, 0x04a8, 0x0876, 0, 0xFFFB7AA0, };
+__s32 rgb2Ycbcr_601[12] = {
+	0x0107, 0x0204, 0x064, 0x4200,
+	0xFFFFFF68, 0xFFFFFED6, 0x01c2, 0x20200,
+	0x01c2, 0xFFFFFE87, 0xFFFFFFB7, 0x20200,};
+__s32 Ycbcr2rgb_601[12] = {
+	0x04a8, 0x0, 0x0662, 0xFFFC865A,
+	0x04a8, 0xFFFFFE70, 0xFFFFFCBF, 0x21FF4,
+	0x04a8, 0x0812, 0x0, 0xFFFBAE4A,};
 
 /*
  * sel: 0-->pipe0 1-->pipe1 other:error
@@ -38,6 +46,8 @@ __s32 bld_in_set(struct blender_submodule *p_bld, __u32 sel, g2d_rect rect,
 
 	if (sel == 0) {
 		p_reg->bld_en_ctrl.bits.p0_en = 1;
+		/* we best use p0 as bottom layer */
+		p_reg->bld_en_ctrl.bits.p0_fcen = 1;
 		if (premul)
 			p_reg->premulti_ctrl.bits.p0_alpha_mode = 1;
 	} else if (sel == 1) {
@@ -146,6 +156,7 @@ __s32 bld_set_rop_ctrl(struct blender_submodule *p_bld, __u32 value)
 		goto OUT;
 
 	p_reg->rop_ctrl.dwval = value;
+	p_reg->ch3_index0.dwval = 0x41000;
 	ret = 0;
 	p_bld->set_block_dirty(p_bld, 0, 1);
 OUT:
@@ -222,7 +233,11 @@ __s32 bld_csc_reg_set(struct blender_submodule *p_bld, __u32 csc_no, g2d_csc_sel
 		memcpy(csc_base_addr, Ycbcr2rgb_709, 12 * sizeof(unsigned int));
 		break;
 	case G2D_RGB2YUV_601:
+		memcpy(csc_base_addr, rgb2Ycbcr_601, 12 * sizeof(unsigned int));
+		break;
 	case G2D_YUV2RGB_601:
+		memcpy(csc_base_addr, Ycbcr2rgb_601, 12 * sizeof(unsigned int));
+		break;
 	default:
 		G2D_ERR_MSG("No implement standard:%d!\n", csc_sel);
 		goto OUT;

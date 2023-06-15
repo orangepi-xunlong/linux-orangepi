@@ -201,14 +201,12 @@ err:
 static void gab_work(struct work_struct *work)
 {
 	struct gab *adc_bat;
-	struct gab_platform_data *pdata;
 	struct delayed_work *delayed_work;
 	bool is_plugged;
 	int status;
 
 	delayed_work = to_delayed_work(work);
 	adc_bat = container_of(delayed_work, struct gab, bat_work);
-	pdata = adc_bat->pdata;
 	status = adc_bat->status;
 
 	is_plugged = power_supply_am_i_supplied(adc_bat->psy);
@@ -384,12 +382,11 @@ static int gab_remove(struct platform_device *pdev)
 	}
 
 	kfree(adc_bat->psy_desc.properties);
-	cancel_delayed_work(&adc_bat->bat_work);
+	cancel_delayed_work_sync(&adc_bat->bat_work);
 	return 0;
 }
 
-#ifdef CONFIG_PM
-static int gab_suspend(struct device *dev)
+static int __maybe_unused gab_suspend(struct device *dev)
 {
 	struct gab *adc_bat = dev_get_drvdata(dev);
 
@@ -398,7 +395,7 @@ static int gab_suspend(struct device *dev)
 	return 0;
 }
 
-static int gab_resume(struct device *dev)
+static int __maybe_unused gab_resume(struct device *dev)
 {
 	struct gab *adc_bat = dev_get_drvdata(dev);
 	struct gab_platform_data *pdata = adc_bat->pdata;
@@ -412,20 +409,12 @@ static int gab_resume(struct device *dev)
 	return 0;
 }
 
-static const struct dev_pm_ops gab_pm_ops = {
-	.suspend        = gab_suspend,
-	.resume         = gab_resume,
-};
-
-#define GAB_PM_OPS       (&gab_pm_ops)
-#else
-#define GAB_PM_OPS       (NULL)
-#endif
+static SIMPLE_DEV_PM_OPS(gab_pm_ops, gab_suspend, gab_resume);
 
 static struct platform_driver gab_driver = {
 	.driver		= {
 		.name	= "generic-adc-battery",
-		.pm	= GAB_PM_OPS
+		.pm	= &gab_pm_ops,
 	},
 	.probe		= gab_probe,
 	.remove		= gab_remove,

@@ -85,6 +85,24 @@ OUT:
 	return ret;
 }
 
+__s32 g2d_uilayer_overlay_set(struct ovl_u_submodule *p_ovl_u, __u32 sel,
+					g2d_coor *coor,  __u32 w, __u32 h)
+{
+	__s32 ret = -1;
+	struct g2d_mixer_ovl_u_reg *p_reg = p_ovl_u->get_reg(p_ovl_u, sel);
+
+	if (!p_reg)
+		goto OUT;
+
+	p_reg->ovl_winsize.bits.width = (w - 1) & 0x1fff;
+	p_reg->ovl_winsize.bits.height = (h - 1) & 0x1fff;
+
+	p_reg->ovl_mem_coor.bits.lay_xcoor = coor->x;
+	p_reg->ovl_mem_coor.bits.lay_ycoor = coor->y;
+	ret = 0;
+OUT:
+	return ret;
+}
 static int ovl_u_rcq_setup(struct ovl_u_submodule *p_ovl_u, u8 __iomem *base,
 			   struct g2d_rcq_mem_info *p_rcq_info)
 {

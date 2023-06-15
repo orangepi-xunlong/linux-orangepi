@@ -21,6 +21,7 @@
 #include "de_rtmx.h"
 #include "de_enhance.h"
 #include "de_feat.h"
+#ifdef CONFIG_DISP2_SUNXI_SUPPORT_ENAHNCE
 #include "de_vep_table.h"
 
 #define ONE_SCREEN_ONE_PARA
@@ -754,3 +755,55 @@ void de_set_bits(unsigned int *reg_addr, unsigned int bits_val,
 	reg_val = SET_BITS(shift, width, reg_val, bits_val);
 	de_writel(reg_val, reg_addr);
 }
+#else
+int de_enhance_layer_apply(unsigned int screen_id,
+			   struct disp_enhance_chn_info *info)
+{
+	return 0;
+}
+
+int de_enhance_apply(unsigned int screen_id,
+			   struct disp_enhance_config *config)
+{
+	return 0;
+}
+
+int de_enhance_sync(unsigned int screen_id)
+{
+	/* de_enhance_update_regs(id); */
+	return 0;
+}
+int de_enhance_tasklet(unsigned int screen_id)
+{
+	return 0;
+}
+
+int de_enhance_update_regs(unsigned int screen_id)
+{
+	return 0;
+}
+
+int de_enhance_init(struct disp_bsp_init_para *para)
+{
+	return 0;
+}
+int de_enhance_exit(void)
+{
+	return 0;
+}
+
+int de_enhance_double_init(struct disp_bsp_init_para *para)
+{
+	return 0;
+}
+
+int de_enhance_double_exit(void)
+{
+	return 0;
+}
+
+void de_set_bits(unsigned int *reg_addr, unsigned int bits_val,
+			unsigned int shift, unsigned int width)
+{
+}
+#endif

@@ -57,6 +57,8 @@ mmc_host_clk_release(struct mmc_host *host)
 #include <drivers/mmc/core/host.h>
 #else
 #include <linux/mmc/host.h>
+#include <drivers/mmc/core/host.h>
+#include <drivers/mmc/core/core.h>
 #endif /* (LINUX_VERSION_CODE <= KERNEL_VERSION(3, 0, 0)) */
 #include <linux/mmc/card.h>
 #include <linux/mmc/sdio_func.h>
@@ -82,12 +84,22 @@ static void IRQHandler(struct sdio_func *func);
 static void IRQHandlerF2(struct sdio_func *func);
 #endif /* !defined(OOB_INTR_ONLY) */
 static int sdioh_sdmmc_get_cisaddr(sdioh_info_t *sd, uint32 regaddr);
-#if defined(ENABLE_INSMOD_NO_FW_LOAD) && !defined(BUS_POWER_RESTORE)
+#if defined(ENABLE_INSMOD_NO_FW_LOAD) && !defined(BUS_POWER_RESTORE) && LINUX_VERSION_CODE <= KERNEL_VERSION(4, 9, 0)
 extern int sdio_reset_comm(struct mmc_card *card);
 #else
 int sdio_reset_comm(struct mmc_card *card)
 {
-	return 0;
+	int ret;
+	struct mmc_host *host = card->host;
+	__mmc_claim_host(host, NULL, NULL);
+	mmc_retune_unpause(host);
+	host->can_retune = 0;
+	mmc_retune_timer_stop(host);
+	host->retune_now = 0;
+	host->need_retune = 0;
+	ret = mmc_sw_reset(host);
+	mmc_release_host(host);
+	return ret;
 }
 #endif
 #ifdef GLOBAL_SDMMC_INSTANCE

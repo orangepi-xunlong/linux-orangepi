@@ -1,5 +1,5 @@
 /*
- * linux-4.9/drivers/media/platform/sunxi-vin/platform/sun50iw6p1_vin_cfg.h
+ * linux-5.4/drivers/media/platform/sunxi-vin/platform/sun50iw6p1_vin_cfg.h
  *
  * Copyright (c) 2007-2017 Allwinnertech Co., Ltd.
  *

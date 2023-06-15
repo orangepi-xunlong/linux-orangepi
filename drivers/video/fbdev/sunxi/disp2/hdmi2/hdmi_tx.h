@@ -30,7 +30,6 @@
 #include <asm/io.h>
 #include <linux/types.h>
 #include <video/drv_hdmi.h>
-#include <linux/sunxi-gpio.h>
 #include <linux/clk.h>
 #include <linux/clk-provider.h>
 #include <linux/clk/clk-conf.h>
@@ -57,6 +56,11 @@ enum hdmi_ioctl_cmd {
 	CMD_NUM,
 };
 
+struct hdmi_power {
+	char name[POWER_NAME];
+	struct regulator *regu;
+};
+
 /**
  * @short Main structures to instantiate the driver
  */
@@ -81,7 +85,7 @@ struct hdmi_tx_drv {
 * in order to enhance the ability of reading edid
 */
 	unsigned int			ddc_ctrl_en;
-	struct gpio_config              ddc_ctrl;
+	unsigned int                    ddc_ctrl_gpio;
 
 	u32				cec_super_standby;
 	u32				cec_support;
@@ -90,13 +94,21 @@ struct hdmi_tx_drv {
 
 	u8				support_hdcp;
 
-	char		power[POWER_CNT][POWER_NAME];
-	u32		power_count;
+	struct hdmi_power		power[POWER_CNT];
+	u32				power_count;
 
 	struct clk			*hdmi_clk;
+	struct clk			*tcon_tv_clk;
+	struct clk			*hdmi_bus_clk;
 	struct clk			*hdmi_ddc_clk;
 	struct clk			*hdmi_hdcp_clk;
+	struct clk                      *hdmi_hdcp_bus_clk;
 	struct clk			*hdmi_cec_clk;
+	struct clk                      *cec_clk_parent;
+	struct reset_control		*rst_bus_sub;
+	struct reset_control		*rst_bus_main;
+	struct reset_control		*rst_bus_hdcp;
+
 
 	struct task_struct		*hdmi_task;
 	struct task_struct		*cec_task;

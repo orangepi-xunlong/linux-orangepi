@@ -92,6 +92,13 @@ int di_client_reset(struct di_client *c, void *data)
 	c->para_checked = false;
 	c->unreset = false;
 	c->proc_fb_seqno = 0;
+	c->di_detect_result = 0;
+	c->interlace_detected_counts = 0;
+	c->lastest_interlace_detected_frame = 0;
+	c->interlace_detected_counts_exceed_first_p_frame = 0;
+	c->progressive_detected_counts = 0;
+	c->progressive_detected_first_frame = 0;
+	c->lastest_progressive_detected_frame = 0;
 	c->apply_fixed_para = true;
 	atomic_set(&c->wait_con, DI_PROC_STATE_IDLE);
 
@@ -132,6 +139,13 @@ int di_client_check_para(struct di_client *c, void *data)
 	}
 
 	c->proc_fb_seqno = 0;
+	c->di_detect_result = 0;
+	c->interlace_detected_counts = 0;
+	c->lastest_interlace_detected_frame = 0;
+	c->interlace_detected_counts_exceed_first_p_frame = 0;
+	c->progressive_detected_counts = 0;
+	c->progressive_detected_first_frame = 0;
+	c->lastest_progressive_detected_frame = 0;
 	c->apply_fixed_para = true;
 
 	if ((c->video_size.height == 0)
@@ -245,6 +259,21 @@ static bool di_client_check_fb_arg(struct di_client *c,
 		fb_arg->is_pulldown ? "Y" : "N",
 		fb_arg->top_field_first ? "Y" : "N",
 		fb_arg->base_field ? "TOP" : "BOTTOM");
+	DI_DEBUG("out fb0 info:format:%u dma_buf_fd:%d "
+	"buf:(y_addr:0x%llx)(cb_addr:0x%llx)(cr_addr:0x%llx)(ystride:%d)(cstride:%d) "
+	"size:(%dx%d)\n",
+	fb_arg->out_dit_fb0.format, fb_arg->out_dit_fb0.dma_buf_fd,
+	fb_arg->out_dit_fb0.buf.y_addr, fb_arg->out_dit_fb0.buf.cb_addr, fb_arg->out_dit_fb0.buf.cr_addr,
+	fb_arg->out_dit_fb0.buf.ystride, fb_arg->out_dit_fb0.buf.cstride,
+	fb_arg->out_dit_fb0.size.width, fb_arg->out_dit_fb0.size.height);
+
+	DI_DEBUG("out fb1 info:format:%u dma_buf_fd:%d "
+	"buf:(y_addr:0x%llx)(cb_addr:0x%llx)(cr_addr:0x%llx)(ystride:%d)(cstride:%d)"
+	"size:(%dx%d)\n",
+	fb_arg->out_dit_fb1.format, fb_arg->out_dit_fb1.dma_buf_fd,
+	fb_arg->out_dit_fb1.buf.y_addr, fb_arg->out_dit_fb1.buf.cb_addr, fb_arg->out_dit_fb1.buf.cr_addr,
+	fb_arg->out_dit_fb1.buf.ystride, fb_arg->out_dit_fb1.buf.cstride,
+	fb_arg->out_dit_fb1.size.width, fb_arg->out_dit_fb1.size.height);
 
 	/* TODO: add more check ? */
 	return true;
@@ -371,8 +400,9 @@ static int di_client_put_fbs(struct di_client *c)
 }
 
 int di_client_process_fb(struct di_client *c,
-	struct di_process_fb_arg *fb_arg)
+	void *fb_arg_)
 {
+	struct di_process_fb_arg *fb_arg = fb_arg_;
 	int ret = 0;
 	ktime_t time;
 	unsigned long long t0 = 0, t1 = 0, t2 = 0, t3 = 0;
@@ -389,6 +419,7 @@ int di_client_process_fb(struct di_client *c,
 		return -EINVAL;
 	}
 	memcpy((void *)&c->fb_arg, fb_arg, sizeof(c->fb_arg));
+
 	ret = di_client_get_fbs(c);
 
 	time = ktime_get();
@@ -396,6 +427,36 @@ int di_client_process_fb(struct di_client *c,
 
 	if (!ret)
 		ret = di_drv_process_fb(c);
+
+	if ((c->mode == DI_MODE_60HZ
+		|| c->mode == DI_MODE_30HZ
+		|| c->mode == DI_MODE_WEAVE)
+		&& c->di_detect_result == DI_DETECT_PROGRESSIVE) {
+		DI_INFO("di detect result:progressive, di_mode:%s\n",
+			c->mode == DI_MODE_60HZ ? "60HZ" :
+			c->mode == DI_MODE_30HZ ? "30HZ" : "weave");
+		if (!c->progressive_detected_counts)
+			c->progressive_detected_first_frame = c->proc_fb_seqno;
+		if (c->progressive_detected_counts == 0xffffffffffffffff)
+			c->interlace_detected_counts = 0;
+		c->progressive_detected_counts++;
+		c->lastest_progressive_detected_frame = c->proc_fb_seqno;
+		ret = FB_PROCESS_ERROR_INTERLACE_TYPE;
+	} else {
+		DI_INFO("di detect result:interlace, di_mode:%s\n",
+			c->mode == DI_MODE_60HZ ? "60HZ" :
+			c->mode == DI_MODE_30HZ ? "30HZ" :
+			c->mode == DI_MODE_BOB ? "bob" :
+			c->mode == DI_MODE_TNR ? "tnr only" :
+			"weave");
+		c->interlace_detected_counts++;
+		c->lastest_interlace_detected_frame = c->proc_fb_seqno;
+		if (c->progressive_detected_counts
+			&& (c->interlace_detected_counts
+				> c->progressive_detected_counts))
+			c->interlace_detected_counts_exceed_first_p_frame++;
+	}
+
 	time = ktime_get();
 	t2 = ktime_to_us(time);
 
@@ -412,8 +473,9 @@ int di_client_process_fb(struct di_client *c,
 	return ret;
 }
 
-int di_client_set_video_size(struct di_client *c, struct di_size *size)
+int di_client_set_video_size(struct di_client *c, void *size_)
 {
+	struct di_size *size = size_;
 	DI_DEBUG("%s: video_size[%d x %d]\n", c->name,
 		size->width, size->height);
 
@@ -422,8 +484,9 @@ int di_client_set_video_size(struct di_client *c, struct di_size *size)
 	return 0;
 }
 
-int di_client_set_video_crop(struct di_client *c, struct di_rect *rect)
+int di_client_set_video_crop(struct di_client *c, void *rect_)
 {
+	struct di_rect *rect = rect_;
 	DI_DEBUG("%s: video_crop:(%u, %u)  (%u, %u)\n", c->name,
 		rect->left, rect->top, rect->right, rect->bottom);
 
@@ -447,8 +510,9 @@ int di_client_set_video_crop(struct di_client *c, struct di_rect *rect)
 }
 
 int di_client_set_demo_crop(struct di_client *c,
-			struct di_demo_crop_arg *demo_arg)
+			void *demo_arg_)
 {
+	struct di_demo_crop_arg *demo_arg = demo_arg_;
 	DI_DEBUG("%s: demo crop: dit:(%u, %u)  (%u, %u) "
 		"tnr: (%u, %u)  (%u, %u)\n", c->name,
 		demo_arg->dit_demo.left, demo_arg->dit_demo.top,
@@ -482,8 +546,9 @@ int di_client_set_demo_crop(struct di_client *c,
 	return 0;
 }
 
-int di_client_set_dit_mode(struct di_client *c, struct di_dit_mode *mode)
+int di_client_set_dit_mode(struct di_client *c, void *mode_)
 {
+	struct di_dit_mode *mode = mode_;
 	DI_DEBUG("%s: dit_mode: intp_mode=%d, out_frame_mode=%d\n",
 		c->name, mode->intp_mode, mode->out_frame_mode);
 
@@ -492,8 +557,9 @@ int di_client_set_dit_mode(struct di_client *c, struct di_dit_mode *mode)
 	return 0;
 }
 
-int di_client_set_tnr_mode(struct di_client *c, struct di_tnr_mode *mode)
+int di_client_set_tnr_mode(struct di_client *c, void *mode_)
 {
+	struct di_tnr_mode *mode = mode_;
 	DI_DEBUG("%s: tnr_mode: mode=%d, level=%d\n",
 		c->name, mode->mode, mode->level);
 
@@ -502,8 +568,9 @@ int di_client_set_tnr_mode(struct di_client *c, struct di_tnr_mode *mode)
 	return 0;
 }
 
-int di_client_set_fmd_enable(struct di_client *c, struct di_fmd_enable *en)
+int di_client_set_fmd_enable(struct di_client *c, void *en_)
 {
+	struct di_fmd_enable *en = en_;
 	DI_DEBUG("%s: fmd_en: en=%d\n", c->name, en->en);
 
 	c->fmd_en.en = en->en;
@@ -511,14 +578,16 @@ int di_client_set_fmd_enable(struct di_client *c, struct di_fmd_enable *en)
 }
 
 int di_client_get_version(struct di_client *c,
-	struct di_version *version)
+	void *version_)
 {
+	struct di_version *version = version_;
 	return di_drv_get_version(version);
 }
 
 int di_client_set_timeout(struct di_client *c,
-	struct di_timeout_ns *timeout)
+	void *timeout_)
 {
+	struct di_timeout_ns *timeout = timeout_;
 	DI_DEBUG("%s:wait4start=%llu,wait4finish=%llu\n",
 		c->name, timeout->wait4start, timeout->wait4finish);
 	if (timeout->wait4start > 0)

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _ASM_GENERIC_PERCPU_H_
 #define _ASM_GENERIC_PERCPU_H_
 
@@ -59,10 +60,6 @@ extern void setup_per_cpu_areas(void);
 
 #ifndef PER_CPU_ATTRIBUTES
 #define PER_CPU_ATTRIBUTES
-#endif
-
-#ifndef PER_CPU_DEF_ATTRIBUTES
-#define PER_CPU_DEF_ATTRIBUTES
 #endif
 
 #define raw_cpu_generic_read(pcp)					\

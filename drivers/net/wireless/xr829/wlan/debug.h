@@ -12,6 +12,7 @@
 #define XRADIO_DEBUG_H_INCLUDED
 
 #include "itp.h"
+#include "xradio.h"
 
 /* Message always need to be present even in release version. */
 #define XRADIO_DBG_ALWY   0x01
@@ -130,11 +131,11 @@ extern struct perf_info mac_tx;
 #if TEST_GETTIME
 extern struct perf_info get_time;
 #define  PERF_INFO_GETTIME(t) do { \
-	do_gettimeofday(t); \
+	xr_do_gettimeofday(t); \
 	perf_info_stamp(t, &get_time, 0, NULL); \
 } while (0)
 #else
-#define  PERF_INFO_GETTIME(t) do_gettimeofday(t)
+#define  PERF_INFO_GETTIME(t) xr_do_gettimeofday(t)
 #endif
 #define  PERF_INFO_STAMP(t, p, s) perf_info_stamp(t, p, s, NULL)
 #define  PERF_INFO_STAMP_GET(t, p, s, g) perf_info_stamp(t, p, s, g)
@@ -147,7 +148,7 @@ static inline void perf_info_stamp(struct timeval *oldtime,
 {
 	u32 time_int;
 	struct timeval newtime;
-	do_gettimeofday(&newtime);
+	xr_do_gettimeofday(&newtime);
 	time_int = (newtime.tv_sec - oldtime->tv_sec) * 1000000 + \
 			   (long)(newtime.tv_usec - oldtime->tv_usec);
 	if (time_int <= info->min_time)
@@ -185,8 +186,10 @@ extern u32 RxedRateIdx_Map[24];
 
 #endif
 
+#ifdef CONFIG_XRADIO_DEBUGFS
 #if (SUPPORT_EPTA)
 extern u32 epta_stat_dbg_ctrl;
+#endif
 #endif
 
 #define WSM_DUMP_MAX_SIZE 20
@@ -685,7 +688,7 @@ static inline int xradio_print_fw_version(struct xradio_vif *priv,
 
 static inline void xradio_hang_driver_for_debug(struct xradio_common *hw_priv, int error)
 {
-	return 0;
+
 }
 
 static inline int   xradio_host_dbg_init(void)

@@ -1,12 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  *  debugfs.h - a tiny little debug file system
  *
  *  Copyright (C) 2004 Greg Kroah-Hartman <greg@kroah.com>
  *  Copyright (C) 2004 IBM Inc.
- *
- *	This program is free software; you can redistribute it and/or
- *	modify it under the terms of the GNU General Public License version
- *	2 as published by the Free Software Foundation.
  *
  *  debugfs is for people to use instead of /proc or /sys.
  *  See Documentation/filesystems/ for more details.
@@ -57,7 +54,11 @@ static const struct file_operations __fops = {				\
 	.llseek  = no_llseek,						\
 }
 
+typedef struct vfsmount *(*debugfs_automount_t)(struct dentry *, void *);
+
 #if defined(CONFIG_DEBUG_FS)
+
+struct dentry *debugfs_lookup(const char *name, struct dentry *parent);
 
 struct dentry *debugfs_create_file(const char *name, umode_t mode,
 				   struct dentry *parent, void *data,
@@ -76,7 +77,6 @@ struct dentry *debugfs_create_dir(const char *name, struct dentry *parent);
 struct dentry *debugfs_create_symlink(const char *name, struct dentry *parent,
 				      const char *dest);
 
-typedef struct vfsmount *(*debugfs_automount_t)(struct dentry *, void *);
 struct dentry *debugfs_create_automount(const char *name,
 					struct dentry *parent,
 					debugfs_automount_t f,
@@ -85,8 +85,7 @@ struct dentry *debugfs_create_automount(const char *name,
 void debugfs_remove(struct dentry *dentry);
 void debugfs_remove_recursive(struct dentry *dentry);
 
-const struct file_operations *debugfs_real_fops(const struct file *filp)
-	__must_hold(&debugfs_srcu);
+const struct file_operations *debugfs_real_fops(const struct file *filp);
 
 int debugfs_file_get(struct dentry *dentry);
 void debugfs_file_put(struct dentry *dentry);
@@ -135,9 +134,8 @@ struct dentry *debugfs_create_regset32(const char *name, umode_t mode,
 void debugfs_print_regs32(struct seq_file *s, const struct debugfs_reg32 *regs,
 			  int nregs, void __iomem *base, char *prefix);
 
-struct dentry *debugfs_create_u32_array(const char *name, umode_t mode,
-					struct dentry *parent,
-					u32 *array, u32 elements);
+void debugfs_create_u32_array(const char *name, umode_t mode,
+			      struct dentry *parent, u32 *array, u32 elements);
 
 struct dentry *debugfs_create_devm_seqfile(struct device *dev, const char *name,
 					   struct dentry *parent,
@@ -161,6 +159,12 @@ ssize_t debugfs_write_file_bool(struct file *file, const char __user *user_buf,
  * so users have a chance to detect if there was a real error or not.  We don't
  * want to duplicate the design decision mistakes of procfs and devfs again.
  */
+
+static inline struct dentry *debugfs_lookup(const char *name,
+					    struct dentry *parent)
+{
+	return ERR_PTR(-ENODEV);
+}
 
 static inline struct dentry *debugfs_create_file(const char *name, umode_t mode,
 					struct dentry *parent, void *data,
@@ -200,7 +204,7 @@ static inline struct dentry *debugfs_create_symlink(const char *name,
 
 static inline struct dentry *debugfs_create_automount(const char *name,
 					struct dentry *parent,
-					struct vfsmount *(*f)(void *),
+					debugfs_automount_t f,
 					void *data)
 {
 	return ERR_PTR(-ENODEV);
@@ -211,6 +215,8 @@ static inline void debugfs_remove(struct dentry *dentry)
 
 static inline void debugfs_remove_recursive(struct dentry *dentry)
 { }
+
+const struct file_operations *debugfs_real_fops(const struct file *filp);
 
 static inline int debugfs_file_get(struct dentry *dentry)
 {
@@ -347,11 +353,10 @@ static inline bool debugfs_initialized(void)
 	return false;
 }
 
-static inline struct dentry *debugfs_create_u32_array(const char *name, umode_t mode,
-					struct dentry *parent,
-					u32 *array, u32 elements)
+static inline void debugfs_create_u32_array(const char *name, umode_t mode,
+					    struct dentry *parent, u32 *array,
+					    u32 elements)
 {
-	return ERR_PTR(-ENODEV);
 }
 
 static inline struct dentry *debugfs_create_devm_seqfile(struct device *dev,

@@ -1,7 +1,32 @@
-
-config SUNXI_DI
-	tristate "allwinnertech DE-Interlace driver"
+menuconfig SUNXI_DI
+	tristate "Allwinnertech DE-Interlace Driver"
 	default n
 	help
 	  This is an option for de-interlace.
 
+config SUNXI_DI_V1XX
+  bool "Support DI V110/120"
+  depends on (SUNXI_DI)
+  default n
+  ---help---
+  Say Y here if you want to use DI110/120.
+  Say N here if you do NOT want to use DI110/120.
+  If unsure, say N.
+
+config SUNXI_DI_V2X
+  bool "Support DI V200"
+  depends on (SUNXI_DI)
+  default n
+  ---help---
+  Say Y here if you want to use DI200.
+  Say N here if you do NOT want to use DI200.
+  If unsure, say N.
+
+config SUNXI_DI_V3X
+  bool "Support DI V300"
+  depends on (SUNXI_DI)
+  default n
+  ---help---
+  Say Y here if you want to use DI300.
+  Say N here if you do NOT want to use DI300.
+  If unsure, say N.

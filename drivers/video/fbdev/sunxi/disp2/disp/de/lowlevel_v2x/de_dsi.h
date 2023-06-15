@@ -206,5 +206,19 @@ u8 dsi_ecc_pro(u32 dsi_ph);
 u16 dsi_crc_pro_pd_repeat(u8 pd, u32 pd_bytes);
 u16 dsi_crc_pro(u8 *pd_p, u32 pd_bytes);
 s32 dsi_mode_switch(__u32 sel, __u32 cmd_en, __u32 lp_en);
+/**
+ * @name       :dsi_read_mode_en
+ * @brief      :Enable dsi read mode in the case of reading in display
+ * interrupt.
+ *  user must enable read mode before read and disable it after read
+ * @param[IN]  :sel:dsi module index
+ * @param[IN]  :en: enable read mode
+ * @return     :none
+ */
+void dsi_read_mode_en(u32 sel, u32 en);
 s32 dsi_turn_on_peripheral_command(__u32 sel);
+/* 0: normal; -1:under flow; */
+s32 dsi_get_status(u32 sel);
+s32 lvds_combphy_open(__u32 sel, struct disp_panel_para *panel);
+__s32 lvds_combphy_close(__u32 sel);
 #endif

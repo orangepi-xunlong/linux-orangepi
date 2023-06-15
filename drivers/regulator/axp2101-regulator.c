@@ -38,6 +38,10 @@
 
 #define AXP22X_MISC_N_VBUSEN_FUNC	BIT(4)
 
+#define AXP803_MISC_N_VBUSEN_FUNC	BIT(4)
+
+#define AXP2202_MISC_N_RBFETEN_FUNC	BIT(0)
+
 #define AXP_DESC_IO(_family, _id, _match, _supply, _min, _max, _step, _vreg,	\
 		    _vmask, _ereg, _emask, _enable_val, _disable_val)		\
 	[_family##_##_id] = {							\
@@ -128,10 +132,110 @@
 		.ops		= &axp20x_ops_range,				\
 	}
 
+#define AXP_DESC_RANGES_VOL_DELAY(_family, _id, _match, _supply, _ranges, _n_voltages,	\
+			_vreg, _vmask, _ereg, _emask)				\
+	[_family##_##_id] = {							\
+		.name		= (_match),					\
+		.supply_name	= (_supply),					\
+		.of_match	= of_match_ptr(_match),				\
+		.regulators_node = of_match_ptr("regulators"),			\
+		.type		= REGULATOR_VOLTAGE,				\
+		.id		= _family##_##_id,				\
+		.n_voltages	= (_n_voltages),				\
+		.owner		= THIS_MODULE,					\
+		.vsel_reg	= (_vreg),					\
+		.vsel_mask	= (_vmask),					\
+		.enable_reg	= (_ereg),					\
+		.enable_mask	= (_emask),					\
+		.linear_ranges	= (_ranges),					\
+		.n_linear_ranges = ARRAY_SIZE(_ranges),				\
+		.ops		= &axp20x_ops_range_vol_delay,			\
+	}
+
 struct regulator_delay {
 	u32 step;
 	u32 final;
 };
+
+/* use for axp2202 which need to control boost_en */
+/* add a extra reg_write to set/reset reg19[4]*/
+int regulator_is_enabled_regmap_axp2202(struct regulator_dev *rdev)
+{
+	unsigned int val[2];
+	int ret;
+
+	ret = regmap_read(rdev->regmap, rdev->desc->enable_reg, &val[0]);
+	if (ret != 0)
+		return ret;
+
+	ret = regmap_read(rdev->regmap, rdev->desc->vsel_reg, &val[1]);
+	if (ret != 0)
+		return ret;
+
+	val[0] &= rdev->desc->enable_mask;
+	val[1] &= rdev->desc->vsel_mask;
+
+	if (rdev->desc->enable_is_inverted) {
+		if (rdev->desc->enable_val)
+			return (val[0] != rdev->desc->enable_val) && (val[1] != rdev->desc->vsel_mask);
+		return (val[0] == 0) && (val[1] == 0);
+	} else {
+		if (rdev->desc->enable_val)
+			return (val[0] == rdev->desc->enable_val) && (val[1] == rdev->desc->vsel_mask);
+		return (val[0] != 0) && (val[1] != 0);
+	}
+}
+EXPORT_SYMBOL_GPL(regulator_is_enabled_regmap_axp2202);
+
+int regulator_enable_regmap_axp2202(struct regulator_dev *rdev)
+{
+	unsigned int val;
+	int ret;
+
+	printk("%s %s %d \n", __FILE__, __FUNCTION__, __LINE__);
+	val = rdev->desc->enable_mask;
+
+	ret = regmap_update_bits(rdev->regmap, rdev->desc->enable_reg,
+				rdev->desc->enable_mask, val);
+	if (ret != 0)
+		return ret;
+
+	val = rdev->desc->vsel_mask;
+	ret = regmap_update_bits(rdev->regmap, rdev->desc->vsel_reg,
+				rdev->desc->vsel_mask, val);
+	if (ret != 0)
+		return ret;
+	printk("%s %s %d \n", __FILE__, __FUNCTION__, __LINE__);
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(regulator_enable_regmap_axp2202);
+
+int regulator_disable_regmap_axp2202(struct regulator_dev *rdev)
+{
+	unsigned int val;
+	int ret;
+
+	printk("%s %s %d \n", __FILE__, __FUNCTION__, __LINE__);
+	val = 0;
+
+	ret = regmap_update_bits(rdev->regmap, rdev->desc->enable_reg,
+				  rdev->desc->enable_mask, val);
+	if (ret != 0)
+		return ret;
+
+	val = 0;
+	ret = regmap_update_bits(rdev->regmap, rdev->desc->vsel_reg,
+				  rdev->desc->vsel_mask, val);
+	if (ret != 0)
+		return ret;
+	printk("%s %s %d \n", __FILE__, __FUNCTION__, __LINE__);
+
+	return 0;
+
+}
+EXPORT_SYMBOL_GPL(regulator_disable_regmap_axp2202);
+
 
 static int axp2101_set_voltage_time_sel(struct regulator_dev *rdev,
 		unsigned int old_selector, unsigned int new_selector)
@@ -155,6 +259,15 @@ static struct regulator_ops axp20x_ops_range = {
 	.set_voltage_time_sel = axp2101_set_voltage_time_sel,
 };
 
+static struct regulator_ops axp20x_ops_range_vol_delay = {
+	.set_voltage_sel	= regulator_set_voltage_sel_regmap,
+	.get_voltage_sel	= regulator_get_voltage_sel_regmap,
+	.list_voltage		= regulator_list_voltage_linear_range,
+	.enable			= regulator_enable_regmap,
+	.disable		= regulator_disable_regmap,
+	.is_enabled		= regulator_is_enabled_regmap,
+};
+
 static struct regulator_ops axp20x_ops = {
 	.set_voltage_sel	= regulator_set_voltage_sel_regmap,
 	.get_voltage_sel	= regulator_get_voltage_sel_regmap,
@@ -169,6 +282,12 @@ static struct regulator_ops axp20x_ops_sw = {
 	.enable			= regulator_enable_regmap,
 	.disable		= regulator_disable_regmap,
 	.is_enabled		= regulator_is_enabled_regmap,
+};
+
+static struct regulator_ops axp2202_ops_sw = {
+	.enable			= regulator_enable_regmap_axp2202,
+	.disable		= regulator_disable_regmap_axp2202,
+	.is_enabled		= regulator_is_enabled_regmap_axp2202,
 };
 
 static const struct regulator_linear_range axp152_dcdc1_ranges[] = {
@@ -213,12 +332,12 @@ static const struct regulator_desc axp152_regulators[] = {
 			0x10, AXP152_ALDO12_V_OUT, 0xf, AXP152_LDO3456_DC1234_CTRL, BIT(2)),
 	AXP_DESC(AXP152, DLDO1, "dldo1", "dldoin", 700, 3500, 100,
 			AXP152_DLDO1_V_OUT, 0x1f, AXP152_LDO3456_DC1234_CTRL, BIT(1)),
-	AXP_DESC(AXP152, DLDO2, "dldo2", "dldoin", 700, 1400, 50,
+	AXP_DESC(AXP152, DLDO2, "dldo2", "dldoin", 700, 3500, 100,
 			AXP152_DLDO2_V_OUT, 0x1f, AXP152_LDO3456_DC1234_CTRL, BIT(0)),
 	AXP_DESC_RANGES(AXP152, LDO0, "ldo0", "ldoin", axp152_ldo0_ranges,
 			0x4, AXP152_LDO0_CTRL, 0x30, AXP152_LDO0_CTRL, BIT(7)),
 	AXP_DESC_IO(AXP152, GPIO2_LDO, "gpio2_ldo", "gpio_ldo", 1800, 3300, 100,
-		 AXP15_GPIO0_VOL, 0xf, AXP15_GPIO2_CTL, 0x7, 0x2, 0x7),
+			AXP152_LDOGPIO2_V_OUT, 0xf, AXP152_GPIO2_CTRL, 0x7, 0x2, 0x7),
 	AXP_DESC_FIXED(AXP152, RTC13, "rtcldo13", "rtcldo13in", 1300),
 	AXP_DESC_FIXED(AXP152, RTC18, "rtcldo18", "rtcldo18in", 1800),
 };
@@ -301,7 +420,7 @@ static const struct regulator_desc axp22x_regulators[] = {
 
 static const struct regulator_desc axp22x_drivevbus_regulator = {
 	.name		= "drivevbus",
-	.supply_name	= "drivevbus",
+	.supply_name	= "drivevbusin",
 	.of_match	= of_match_ptr("drivevbus"),
 	.regulators_node = of_match_ptr("regulators"),
 	.type		= REGULATOR_VOLTAGE,
@@ -625,7 +744,11 @@ static const struct regulator_desc axp858_regulators[] = {
 		 AXP858_CLDO4_CTL, 0x3f, AXP858_OUTPUT_CONTROL3, BIT(5)),
 	AXP_DESC(AXP858, CPUSLDO, "cpusldo", "cpusldoin", 700, 1400, 50,
 		 AXP858_CPUSLDO_CTL, 0x1f, AXP858_OUTPUT_CONTROL3, BIT(6)),
-	AXP_DESC_SW(AXP858, SW, "sw", "swin", AXP858_OUTPUT_CONTROL3, BIT(7)),
+	AXP_DESC_SW(AXP858, DC1SW, "dc1sw", "swin", AXP858_OUTPUT_CONTROL3, BIT(7)),
+};
+
+static const struct regulator_linear_range axp803_dcdc1_ranges[] = {
+	REGULATOR_LINEAR_RANGE(1600000, 0x0, 0x12, 100000),
 };
 
 static const struct regulator_linear_range axp803_dcdc2_ranges[] = {
@@ -658,37 +781,49 @@ static const struct regulator_linear_range axp803_dcdc7_ranges[] = {
 	REGULATOR_LINEAR_RANGE(1120000, 0x33, 0x47, 20000),
 };
 
+static const struct regulator_linear_range axp803_aldo3_ranges[] = {
+	REGULATOR_LINEAR_RANGE(700000, 0x0, 0x1a, 100000),
+	REGULATOR_LINEAR_RANGE(3300000, 0x1b, 0x1f, 0),
+};
+
 static const struct regulator_linear_range axp803_dldo2_ranges[] = {
-	REGULATOR_LINEAR_RANGE(700000, 0x0, 0x1b, 10000),
-	REGULATOR_LINEAR_RANGE(3600000, 0x1c, 0x1f, 20000),
+	REGULATOR_LINEAR_RANGE(700000, 0x0, 0x1b, 100000),
+	REGULATOR_LINEAR_RANGE(3600000, 0x1c, 0x1f, 200000),
 };
 
 static const struct regulator_desc axp803_regulators[] = {
-	AXP_DESC(AXP803, DCDC1, "dcdc1", "vin1", 1600, 3400, 100,
-		 AXP803_DC1OUT_VOL, 0x1f, AXP803_LDO_DC_EN1, BIT(0)),
-	AXP_DESC_RANGES(AXP803, DCDC2, "dcdc2", "vin2", axp803_dcdc2_ranges,
-			0x4c, AXP803_DC2OUT_VOL, 0x7f, AXP803_LDO_DC_EN1, BIT(1)),
-	AXP_DESC_RANGES(AXP803, DCDC3, "dcdc3", "vin3", axp803_dcdc3_ranges,
-			0x4c, AXP803_DC3OUT_VOL, 0x7f, AXP803_LDO_DC_EN1, BIT(2)),
-	AXP_DESC_RANGES(AXP803, DCDC4, "dcdc4", "vin4", axp803_dcdc4_ranges,
-			0x4c, AXP803_DC4OUT_VOL, 0x7f, AXP803_LDO_DC_EN1, BIT(3)),
-	AXP_DESC_RANGES(AXP803, DCDC5, "dcdc5", "vin5", axp803_dcdc5_ranges,
-			0x45, AXP803_DC5OUT_VOL, 0x7f, AXP803_LDO_DC_EN1, BIT(4)),
-	AXP_DESC_RANGES(AXP803, DCDC6, "dcdc6", "vin6", axp803_dcdc6_ranges,
-			0x48, AXP803_DC6OUT_VOL, 0x7f, AXP803_LDO_DC_EN1, BIT(5)),
-	AXP_DESC_RANGES(AXP803, DCDC7, "dcdc7", "vin7", axp803_dcdc5_ranges,
-			0x48, AXP803_DC7OUT_VOL, 0x7f, AXP803_LDO_DC_EN1, BIT(6)),
+	AXP_DESC_RANGES_VOL_DELAY
+		(AXP803, DCDC1, "dcdc1", "vin1", axp803_dcdc1_ranges,
+		 0x13, AXP803_DC1OUT_VOL, 0x1f, AXP803_LDO_DC_EN1, BIT(0)),
+	AXP_DESC_RANGES_VOL_DELAY
+		(AXP803, DCDC2, "dcdc2", "vin2", axp803_dcdc2_ranges,
+		 0x4c, AXP803_DC2OUT_VOL, 0x7f, AXP803_LDO_DC_EN1, BIT(1)),
+	AXP_DESC_RANGES_VOL_DELAY
+		(AXP803, DCDC3, "dcdc3", "vin3", axp803_dcdc3_ranges,
+		0x4c, AXP803_DC3OUT_VOL, 0x7f, AXP803_LDO_DC_EN1, BIT(2)),
+	AXP_DESC_RANGES_VOL_DELAY
+		(AXP803, DCDC4, "dcdc4", "vin4", axp803_dcdc4_ranges,
+		 0x4c, AXP803_DC4OUT_VOL, 0x7f, AXP803_LDO_DC_EN1, BIT(3)),
+	AXP_DESC_RANGES_VOL_DELAY
+		(AXP803, DCDC5, "dcdc5", "vin5", axp803_dcdc5_ranges,
+		0x45, AXP803_DC5OUT_VOL, 0x7f, AXP803_LDO_DC_EN1, BIT(4)),
+	AXP_DESC_RANGES_VOL_DELAY
+		(AXP803, DCDC6, "dcdc6", "vin6", axp803_dcdc6_ranges,
+		0x48, AXP803_DC6OUT_VOL, 0x7f, AXP803_LDO_DC_EN1, BIT(5)),
+	AXP_DESC_RANGES_VOL_DELAY
+		(AXP803, DCDC7, "dcdc7", "vin7", axp803_dcdc5_ranges,
+		0x48, AXP803_DC7OUT_VOL, 0x7f, AXP803_LDO_DC_EN1, BIT(6)),
 	AXP_DESC_FIXED(AXP803, RTCLDO, "rtcldo", "rtcldoin", 1800),
 	AXP_DESC(AXP803, ALDO1, "aldo1", "aldoin", 700, 3300, 100,
 		AXP803_ALDO1OUT_VOL, 0x1f, AXP803_LDO_DC_EN3, BIT(5)),
 	AXP_DESC(AXP803, ALDO2, "aldo2", "aldoin", 700, 3300, 100,
 		AXP803_ALDO2OUT_VOL, 0x1f, AXP803_LDO_DC_EN3, BIT(6)),
-	AXP_DESC(AXP803, ALDO3, "aldo3", "aldoin", 700, 3300, 100,
-		AXP803_ALDO3OUT_VOL, 0x1f, AXP803_LDO_DC_EN3, BIT(7)),
+	AXP_DESC_RANGES(AXP803, ALDO3, "aldo3", "aldoin", axp803_aldo3_ranges,
+			0x20, AXP803_ALDO3OUT_VOL, 0x1f, AXP803_LDO_DC_EN3, BIT(7)),
 	AXP_DESC(AXP803, DLDO1, "dldo1", "dldoin", 700, 3300, 100,
 		AXP803_DLDO1OUT_VOL, 0x1f, AXP803_LDO_DC_EN2, BIT(3)),
 	AXP_DESC_RANGES(AXP803, DLDO2, "dldo2", "dldoin", axp803_dldo2_ranges,
-			0x20, AXP803_DLDO2OUT_VOL, 0x7f, AXP803_LDO_DC_EN2, BIT(4)),
+			0x20, AXP803_DLDO2OUT_VOL, 0x1f, AXP803_LDO_DC_EN2, BIT(4)),
 	AXP_DESC(AXP803, DLDO3, "dldo3", "dldoin", 700, 3300, 100,
 		AXP803_DLDO3OUT_VOL, 0x1f, AXP803_LDO_DC_EN2, BIT(5)),
 	AXP_DESC(AXP803, DLDO4, "dldo4", "dldoin", 700, 3300, 100,
@@ -710,6 +845,118 @@ static const struct regulator_desc axp803_regulators[] = {
 		    AXP803_GPIO1LDOOUT_VOL, 0x1f, AXP803_GPIO1_CTL, 0x07,
 		    0x3, 0x4),
 	AXP_DESC_SW(AXP803, DC1SW, "dc1sw", "swin", AXP803_LDO_DC_EN2, BIT(7)),
+};
+
+static struct regulator_linear_range axp2202_dcdc1_ranges[] = {
+	REGULATOR_LINEAR_RANGE(500000, 0x0, 0x46, 10000),
+	REGULATOR_LINEAR_RANGE(1220000, 0x47, 0x57, 20000),
+};
+
+static struct regulator_linear_range axp2202_dcdc2_ranges[] = {
+	REGULATOR_LINEAR_RANGE(500000, 0, 0x46, 10000),
+	REGULATOR_LINEAR_RANGE(1220000, 0x47, 0x57, 20000),
+	REGULATOR_LINEAR_RANGE(1600000, 0x58, 0x6b, 100000),
+};
+
+static struct regulator_linear_range axp2202_dcdc3_ranges[] = {
+	REGULATOR_LINEAR_RANGE(500000, 0, 0x46, 10000),
+	REGULATOR_LINEAR_RANGE(1220000, 0x47, 0x66, 20000),
+};
+
+static const struct regulator_desc axp2202_regulators[] = {
+	AXP_DESC_RANGES_VOL_DELAY
+			(AXP2202, DCDC1, "dcdc1", "vin-ps", axp2202_dcdc1_ranges,
+			0x58, AXP2202_DCDC1_CFG, GENMASK(6, 0),
+			AXP2202_DCDC_CFG0, BIT(0)),
+	AXP_DESC_RANGES_VOL_DELAY
+			(AXP2202, DCDC2, "dcdc2", "vin-ps", axp2202_dcdc2_ranges,
+			0x6c, AXP2202_DCDC2_CFG, GENMASK(6, 0),
+			AXP2202_DCDC_CFG0, BIT(1)),
+	AXP_DESC_RANGES_VOL_DELAY
+			(AXP2202, DCDC3, "dcdc3", "vin-ps", axp2202_dcdc3_ranges,
+			0x67, AXP2202_DCDC3_CFG, GENMASK(6, 0),
+			AXP2202_DCDC_CFG0, BIT(2)),
+	AXP_DESC(AXP2202, DCDC4, "dcdc4", "vin-ps", 1000, 3700, 100,
+			AXP2202_DCDC4_CFG, GENMASK(4, 0), AXP2202_DCDC_CFG0,
+			BIT(3)),
+	AXP_DESC(AXP2202, ALDO1, "aldo1", "aldo", 500, 3500, 100,
+		 AXP2202_ALDO1_CFG, GENMASK(4, 0), AXP2202_LDO_EN_CFG0,
+		 BIT(0)),
+	AXP_DESC(AXP2202, ALDO2, "aldo2", "aldo", 500, 3500, 100,
+		 AXP2202_ALDO2_CFG, GENMASK(4, 0), AXP2202_LDO_EN_CFG0,
+		 BIT(1)),
+	AXP_DESC(AXP2202, ALDO3, "aldo3", "aldo", 500, 3500, 100,
+		 AXP2202_ALDO3_CFG, GENMASK(4, 0), AXP2202_LDO_EN_CFG0,
+		 BIT(2)),
+	AXP_DESC(AXP2202, ALDO4, "aldo4", "aldo", 500, 3500, 100,
+		 AXP2202_ALDO4_CFG, GENMASK(4, 0), AXP2202_LDO_EN_CFG0,
+		 BIT(3)),
+	AXP_DESC(AXP2202, BLDO1, "bldo1", "bldo", 500, 3500, 100,
+		 AXP2202_BLDO1_CFG, GENMASK(4, 0), AXP2202_LDO_EN_CFG0,
+		 BIT(4)),
+	AXP_DESC(AXP2202, BLDO2, "bldo2", "bldo", 500, 3500, 100,
+		 AXP2202_BLDO2_CFG, GENMASK(4, 0), AXP2202_LDO_EN_CFG0,
+		 BIT(5)),
+	AXP_DESC(AXP2202, BLDO3, "bldo3", "bldo", 500, 3500, 100,
+		 AXP2202_BLDO3_CFG, GENMASK(4, 0), AXP2202_LDO_EN_CFG0,
+		 BIT(6)),
+	AXP_DESC(AXP2202, BLDO4, "bldo4", "bldo", 500, 3500, 100,
+		 AXP2202_BLDO4_CFG, GENMASK(4, 0), AXP2202_LDO_EN_CFG0,
+		 BIT(7)),
+	AXP_DESC(AXP2202, CLDO1, "cldo1", "cldo", 500, 3500, 100,
+		 AXP2202_CLDO1_CFG, GENMASK(4, 0), AXP2202_LDO_EN_CFG1,
+		 BIT(0)),
+	AXP_DESC(AXP2202, CLDO2, "cldo2", "cldo", 500, 3500, 100,
+		 AXP2202_CLDO2_CFG, GENMASK(4, 0), AXP2202_LDO_EN_CFG1,
+		 BIT(1)),
+	AXP_DESC(AXP2202, CLDO3, "cldo3", "cldo", 500, 3500, 100,
+		 AXP2202_CLDO3_CFG, GENMASK(4, 0), AXP2202_LDO_EN_CFG1,
+		 BIT(2)),
+	AXP_DESC(AXP2202, CLDO4, "cldo4", "cldo", 500, 3500, 100,
+		 AXP2202_CLDO4_CFG, GENMASK(4, 0), AXP2202_LDO_EN_CFG1,
+		 BIT(3)),
+	AXP_DESC_FIXED(AXP2202, RTCLDO, "rtcldo", "vin-ps", 1800),
+	AXP_DESC(AXP2202, CPUSLDO, "cpusldo", "vin-ps", 500, 1400, 50,
+		AXP2202_CPUSLDO_CFG, GENMASK(4, 0), AXP2202_LDO_EN_CFG1,
+		BIT(4)),
+};
+
+static const struct regulator_desc axp803_drivevbus_regulator = {
+	.name		= "drivevbus",
+	.supply_name	= "drivevbusin",
+	.of_match	= of_match_ptr("drivevbus"),
+	.regulators_node = of_match_ptr("regulators"),
+	.type		= REGULATOR_VOLTAGE,
+	.owner		= THIS_MODULE,
+	.enable_reg	= AXP803_IPS_SET,
+	.enable_mask	= BIT(2),
+	.ops		= &axp20x_ops_sw,
+};
+
+static const struct regulator_desc axp2202_drivevbus_regulator = {
+	.name		= "drivevbus",
+	.supply_name	= "drivevbusin",
+	.of_match	= of_match_ptr("drivevbus"),
+	.regulators_node = of_match_ptr("regulators"),
+	.type		= REGULATOR_VOLTAGE,
+	.owner		= THIS_MODULE,
+	.enable_reg	= AXP2202_RBFET_CTRL,
+	.enable_mask	= BIT(0),
+	.ops		= &axp20x_ops_sw,
+};
+
+static const struct regulator_desc axp2202_A_drivevbus_regulator = {
+	.name		= "drivevbus",
+	.supply_name	= "drivevbusin",
+	.of_match	= of_match_ptr("drivevbus"),
+	.regulators_node = of_match_ptr("regulators"),
+	.type		= REGULATOR_VOLTAGE,
+	.owner		= THIS_MODULE,
+	.enable_reg	= AXP2202_RBFET_CTRL,
+	.enable_mask	= BIT(0),
+	.vsel_reg	= AXP2202_MODULE_EN,
+	.vsel_mask	= BIT(4),
+	.ops		= &axp2202_ops_sw,
 };
 
 static int axp20x_set_dcdc_freq(struct platform_device *pdev, u32 dcdcfreq)
@@ -782,8 +1029,7 @@ static int axp20x_regulator_parse_dt(struct platform_device *pdev)
 	regulators = of_get_child_by_name(np, "regulators");
 	if (!regulators) {
 		dev_warn(&pdev->dev, "regulators node not found\n");
-	} else {
-		of_property_read_u32(regulators, "x-powers,dcdc-freq", &dcdcfreq);
+	} else if (of_property_read_u32(regulators, "x-powers,dcdc-freq", &dcdcfreq) >= 0) {
 		ret = axp20x_set_dcdc_freq(pdev, dcdcfreq);
 		if (ret < 0) {
 			dev_err(&pdev->dev, "Error setting dcdc frequency: %d\n", ret);
@@ -884,7 +1130,7 @@ static int axp2101_regulator_probe(struct platform_device *pdev)
 	const char *dcdc5_name = axp22x_regulators[AXP22X_DCDC5].name;
 	bool drivevbus = false;
 	u32 dval;
-	struct regulator_delay rdev_delay;
+	struct regulator_delay *rdev_delay;
 
 	switch (axp20x->variant) {
 	case AXP152_ID:
@@ -930,7 +1176,15 @@ static int axp2101_regulator_probe(struct platform_device *pdev)
 	case AXP803_ID:
 		regulators = axp803_regulators;
 		nregulators = AXP803_REG_ID_MAX;
+		drivevbus = of_property_read_bool(pdev->dev.parent->of_node,
+						  "x-powers,drive-vbus-en");
 		break;
+	case AXP2202_ID:
+		regulators = axp2202_regulators;
+		nregulators = AXP2202_REG_ID_MAX;
+		drivevbus = of_property_read_bool(pdev->dev.parent->of_node,
+						  "x-powers,drive-vbus-en");
+	break;
 	default:
 		dev_err(&pdev->dev, "Unsupported AXP variant: %ld\n",
 			axp20x->variant);
@@ -987,19 +1241,20 @@ static int axp2101_regulator_probe(struct platform_device *pdev)
 			return PTR_ERR(rdev);
 		}
 
+		rdev_delay = devm_kzalloc(&pdev->dev, sizeof(*rdev_delay), GFP_KERNEL);
 		if (!of_property_read_u32(rdev->dev.of_node,
 				"regulator-step-delay-us", &dval))
-			rdev_delay.step = dval;
+			rdev_delay->step = dval;
 		else
-			rdev_delay.step = 0;
+			rdev_delay->step = 0;
 
 		if (!of_property_read_u32(rdev->dev.of_node,
 				"regulator-final-delay-us", &dval))
-			rdev_delay.final = dval;
+			rdev_delay->final = dval;
 		else
-			rdev_delay.final = 0;
+			rdev_delay->final = 0;
 
-		rdev->reg_data = kmemdup(&rdev_delay, sizeof(rdev_delay), GFP_KERNEL);
+		rdev->reg_data = rdev_delay;
 
 		ret = of_property_read_u32(rdev->dev.of_node,
 					   "x-powers,dcdc-workmode",
@@ -1027,12 +1282,43 @@ static int axp2101_regulator_probe(struct platform_device *pdev)
 	}
 
 	if (drivevbus) {
-		/* Change N_VBUSEN sense pin to DRIVEVBUS output pin */
-		regmap_update_bits(axp20x->regmap, AXP20X_OVER_TMP,
-				   AXP22X_MISC_N_VBUSEN_FUNC, 0);
-		rdev = devm_regulator_register(&pdev->dev,
-					       &axp22x_drivevbus_regulator,
-					       &config);
+		switch (axp20x->variant) {
+		case AXP221_ID:
+		case AXP223_ID:
+			/* Change N_VBUSEN sense pin to DRIVEVBUS output pin */
+			regmap_update_bits(axp20x->regmap, AXP20X_OVER_TMP,
+					   AXP22X_MISC_N_VBUSEN_FUNC, 0);
+			rdev = devm_regulator_register(&pdev->dev,
+						       &axp22x_drivevbus_regulator,
+						       &config);
+			break;
+		case AXP803_ID:
+			/* Change N_VBUSEN sense pin to DRIVEVBUS output pin */
+			regmap_update_bits(axp20x->regmap, AXP803_HOTOVER_CTL,
+					   AXP803_MISC_N_VBUSEN_FUNC, 0);
+			rdev = devm_regulator_register(&pdev->dev,
+						       &axp803_drivevbus_regulator,
+						       &config);
+			break;
+		case AXP2202_ID:
+			regmap_read(axp20x->regmap, AXP2202_VBUS_TYPE, &ret);
+			/* control two regs in a133b6 , compatible later */
+			if (!ret) {
+				rdev = devm_regulator_register(&pdev->dev,
+						       &axp2202_A_drivevbus_regulator,
+						       &config);
+			} else {
+				rdev = devm_regulator_register(&pdev->dev,
+						       &axp2202_drivevbus_regulator,
+						       &config);
+			}
+			break;
+		default:
+			dev_err(&pdev->dev, "AXP variant: %ld unsupported drivevbus\n",
+				axp20x->variant);
+			return -EINVAL;
+		}
+
 		if (IS_ERR(rdev)) {
 			dev_err(&pdev->dev, "Failed to register drivevbus\n");
 			return PTR_ERR(rdev);
@@ -1042,11 +1328,52 @@ static int axp2101_regulator_probe(struct platform_device *pdev)
 	return 0;
 }
 
+static int axp2101_regulator_suspend(struct platform_device *pdev, pm_message_t state)
+{
+	struct axp20x_dev *axp20x = dev_get_drvdata(pdev->dev.parent);
+
+	switch (axp20x->variant) {
+	case AXP2202_ID:
+		regmap_update_bits(axp20x->regmap, AXP2202_MODULE_EN, BIT(4), 0);
+		break;
+	default:
+		break;
+	}
+	return 0;
+}
+static int axp2101_regulator_resume(struct platform_device *pdev)
+{
+	struct axp20x_dev *axp20x = dev_get_drvdata(pdev->dev.parent);
+
+	switch (axp20x->variant) {
+	case AXP2202_ID:
+		regmap_update_bits(axp20x->regmap, AXP2202_MODULE_EN, BIT(4), BIT(4));
+		break;
+	default:
+		break;
+	}
+	return 0;
+}
+
+static int axp2101_regulator_remove(struct platform_device *pdev)
+{
+	return 0;
+}
+
+static struct of_device_id axp_regulator_id_tab[] = {
+	{ .compatible = "x-powers,axp2202-regulator" },
+	{ /* sentinel */ },
+};
+
 static struct platform_driver axp2101_regulator_driver = {
 	.probe	= axp2101_regulator_probe,
+	.remove	= axp2101_regulator_remove,
 	.driver	= {
+		.of_match_table = axp_regulator_id_tab,
 		.name		= "axp2101-regulator",
 	},
+	.suspend = axp2101_regulator_suspend,
+	.resume = axp2101_regulator_resume,
 };
 
 static int __init axp2101_regulator_init(void)

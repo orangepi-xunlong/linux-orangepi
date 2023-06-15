@@ -52,17 +52,38 @@ struct modules_config *sd_to_modules(struct v4l2_subdev *sd)
 }
 EXPORT_SYMBOL_GPL(sd_to_modules);
 
-#ifdef CONFIG_SUNXI_REGULATOR_DT
 static int find_power_pmic(struct v4l2_subdev *sd, struct vin_power *power, enum pmic_channel pmic_ch)
 {
-	int i;
+	int i, j;
+	struct modules_config *module = sd_to_modules(sd);
 
-	for (i = 0; i < VIN_MAX_CSI; i++) {
-		if (glb_sensor_helper[i] && (!strcmp(glb_sensor_helper[i]->name, sd->name))) {
-			if (glb_sensor_helper[i]->pmic[pmic_ch] == NULL)
-				return -1;
-			power[pmic_ch].pmic = glb_sensor_helper[i]->pmic[pmic_ch];
-			return 0;
+	if (!module) {
+		vin_err("%s get module fail\n", __func__);
+		return -1;
+	}
+
+	if (module->sensors.use_sensor_list == 1) {
+		for (i = 0; i < MAX_DETECT_NUM; i++) {
+			for (j = 0; j < VIN_MAX_CSI; j++) {
+				if (!glb_sensor_helper[j])
+					continue;
+				if (!strcmp(glb_sensor_helper[j]->name, module->sensors.inst[i].cam_name)) {
+					if (!glb_sensor_helper[j]->pmic[pmic_ch])
+						return -1;
+					power[pmic_ch].pmic = glb_sensor_helper[j]->pmic[pmic_ch];
+					return 0;
+				}
+			}
+		}
+		vin_err("sensor defined in dts need be defined sensor list init file\n");
+	} else {
+		for (i = 0; i < VIN_MAX_CSI; i++) {
+			if (glb_sensor_helper[i] && (!strcmp(glb_sensor_helper[i]->name, sd->name))) {
+				if (!glb_sensor_helper[i]->pmic[pmic_ch])
+					return -1;
+				power[pmic_ch].pmic = glb_sensor_helper[i]->pmic[pmic_ch];
+				return 0;
+			}
 		}
 	}
 
@@ -70,7 +91,7 @@ static int find_power_pmic(struct v4l2_subdev *sd, struct vin_power *power, enum
 	vin_err("%s cannot find the match sensor_helper\n", sd->name);
 	return -1;
 }
-#endif
+
 /*
  *enable/disable pmic channel
  */
@@ -78,6 +99,7 @@ int vin_set_pmu_channel(struct v4l2_subdev *sd, enum pmic_channel pmic_ch,
 			enum on_off on_off)
 {
 	int ret = 0;
+
 #ifndef FPGA_VER
 	struct modules_config *modules = sd_to_modules(sd);
 	static int def_vol[MAX_POW_NUM] = {3300000, 3300000, 1800000,
@@ -92,30 +114,15 @@ int vin_set_pmu_channel(struct v4l2_subdev *sd, enum pmic_channel pmic_ch,
 		if (power[pmic_ch].pmic == NULL)
 			return 0;
 		ret = regulator_disable(power[pmic_ch].pmic);
-#ifndef CONFIG_SUNXI_REGULATOR_DT
-		regulator_put(power[pmic_ch].pmic);
-#endif
+		ret = regulator_set_voltage(power[pmic_ch].pmic,
+					  0, def_vol[pmic_ch]);
 		power[pmic_ch].pmic = NULL;
 		vin_log(VIN_LOG_POWER, "regulator_is already disabled\n");
 	} else {
-#ifndef CONFIG_SUNXI_REGULATOR_DT
-		if (strcmp(power[pmic_ch].power_str, "")) {
-			power[pmic_ch].pmic = regulator_get(NULL,
-						  power[pmic_ch].power_str);
-			if (IS_ERR_OR_NULL(power[pmic_ch].pmic)) {
-				vin_err("get regulator %s error!\n", power[pmic_ch].power_str);
-				power[pmic_ch].pmic = NULL;
-				return -1;
-			}
-		} else {
-			power[pmic_ch].pmic = NULL;
-			return 0;
-		}
-#else
 		ret = find_power_pmic(sd, power, pmic_ch);
 		if (ret)
 			return ret;
-#endif
+
 		ret = regulator_set_voltage(power[pmic_ch].pmic,
 					  power[pmic_ch].power_vol,
 					  def_vol[pmic_ch]);
@@ -136,6 +143,8 @@ int vin_set_mclk(struct v4l2_subdev *sd, enum on_off on_off)
 	struct vin_md *vind = dev_get_drvdata(sd->v4l2_dev->dev);
 	struct modules_config *modules = sd_to_modules(sd);
 	struct vin_mclk_info *mclk = NULL;
+	struct vin_power *power = NULL;
+	unsigned int mclk_mode;
 	char pin_name[20] = "";
 	int mclk_id = 0;
 
@@ -202,6 +211,15 @@ int vin_set_mclk(struct v4l2_subdev *sd, enum on_off on_off)
 	if (IS_ERR_OR_NULL(mclk->pin)) {
 		vin_err("mclk%d request pin handle failed!\n", mclk_id);
 		return -EINVAL;
+	}
+
+	if (on_off) {
+		power = &modules->sensors.power[0];
+		if (power[IOVDD].power_vol && (power[IOVDD].power_vol <= 1800000))
+			mclk_mode = MCLK_POWER_VOLTAGE_1800;
+		else
+			mclk_mode = MCLK_POWER_VOLTAGE_3300;
+		vin_log(VIN_LOG_POWER, "IOVDD power vol is %d, mclk mode is %d\n", power[IOVDD].power_vol, mclk_mode);
 	}
 #endif
 	return 0;
@@ -354,21 +372,16 @@ int vin_gpio_write(struct v4l2_subdev *sd, enum gpio_type gpio_id,
 #ifndef FPGA_VER
 	int force_value_flag = 1;
 	struct modules_config *modules = sd_to_modules(sd);
-	struct gpio_config *gc = NULL;
+	int gpio;
 
 	if (modules == NULL)
 		return -1;
 
-	gc = &modules->sensors.gpio[gpio_id];
+	gpio = modules->sensors.gpio[gpio_id];
 
-/*
-#ifndef CONFIG_ARCH_SUN8IW17P1
-	if ((gpio_id == PWDN) || (gpio_id == RESET))
-		force_value_flag = 0;
-#endif
-*/
-
-	return os_gpio_write(gc->gpio, out_value, force_value_flag);
+	if (gpio < 0)
+		return -1;
+	return os_gpio_write(gpio, out_value, force_value_flag);
 #endif
 	return 0;
 }
@@ -382,29 +395,22 @@ int vin_gpio_set_status(struct v4l2_subdev *sd, enum gpio_type gpio_id,
 {
 #ifndef FPGA_VER
 	struct modules_config *modules = sd_to_modules(sd);
-	struct gpio_config gc_def;
-	struct gpio_config *gc = NULL;
+	int gc;
 
 	if (modules == NULL)
 		return -1;
 
-	gc = &modules->sensors.gpio[gpio_id];
+	gc = modules->sensors.gpio[gpio_id];
 
-	memcpy(&gc_def, gc, sizeof(struct gpio_config));
-
-	if (status == 0)
-		gc_def.mul_sel = GPIO_DISABLE;
-	if (status == 3)
-		gc_def.mul_sel = 3;
-	if (os_gpio_set(&gc_def) < 0)
-		return -1;
-	if (status == 3)
+	if (gc < 0)
 		return 0;
 
+	vin_log(VIN_LOG_POWER, "[%s] pin%d, set status %d\n", __func__, gc, status);
+
 	if (status == 1)
-		gpio_direction_output(gc->gpio, 0);
+		gpio_direction_output(gc, 0);
 	else
-		gpio_direction_input(gc->gpio);
+		gpio_direction_input(gc);
 
 #endif
 	return 0;

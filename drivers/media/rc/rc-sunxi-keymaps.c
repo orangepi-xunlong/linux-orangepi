@@ -41,7 +41,7 @@ static struct rc_map_list sunxi_map = {
 	#ifdef CONFIG_SUNXI_KEYMAPPING_SUPPORT
 		.mapping = (void *)sunxi_key_mapping,
 	#endif
-		.rc_type = RC_TYPE_NEC,	/* Legacy IR type */
+		.rc_proto = RC_PROTO_NEC,	/* Legacy IR type */
 		.name    = RC_MAP_SUNXI,
 	}
 };

@@ -44,7 +44,7 @@ void core_init_hdcp(struct hdmi_mode *cfg, hdcpParams_t *hdcp)
 	pHdcp->mSwEncKey = NULL;
 
 	pHdcp->use_hdcp = hdcp->use_hdcp;
-#ifdef CONFIG_HDMI2_HDCP_SUNXI
+#ifdef CONFIG_HDMI2_HDCP22_SUNXI
 	pHdcp->use_hdcp22 = hdcp->use_hdcp22;
 	pHdcp->esm_hpi_base = hdcp->esm_hpi_base;
 	pHdcp->esm_firm_phy_addr = hdcp->esm_firm_phy_addr;

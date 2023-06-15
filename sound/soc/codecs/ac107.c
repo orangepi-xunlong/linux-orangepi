@@ -32,7 +32,6 @@
 #include <linux/regulator/consumer.h>
 #include <linux/io.h>
 #include <linux/of_gpio.h>
-#include <linux/sunxi-gpio.h>
 #include <linux/gpio.h>
 #include "ac107.h"
 
@@ -44,33 +43,29 @@
 #define AC107_DEBUG(...)
 #endif
 
-/* 0:ADC normal,  1:0x5A5A5A,  2:0x123456,  3:0x000000,  4~7:I2S_RX_DATA,  other:reserved */
-#define AC107_ADC_PATTERN_SEL	ADC_PTN_0x5A5A5A
+#define AC107_ADC_PATTERN_SEL	ADC_PTN_NORMAL	/* 0:ADC normal,  1:0x5A5A5A,  2:0x123456,  3:0x000000,  4~7:I2S_RX_DATA,  other:reserved */
 
 /* AC107 config */
 #define AC107_CHIP_NUMS			1	/* range[1, 8] */
 #define AC107_CHIP_NUMS_MAX		8	/* range[1, 8] */
 #define AC107_SLOT_WIDTH		32	/* 8/12/16/20/24/28/32bit Slot Width */
 #define AC107_ENCODING_EN		0	/* TX Encoding mode enable */
-#define AC107_ENCODING_CH_NUMS		2	/* TX Encoding channel numbers, must be dual, range[1, 16] */
+#define AC107_ENCODING_CH_NUMS	2	/* TX Encoding channel numbers, must be dual, range[1, 16] */
 #define AC107_ENCODING_FMT		0	/* TX Encoding format:	0:first channel number 0,  other:first channel number 1 */
-
 /*range[1, 1024], default PCM mode, I2S/LJ/RJ mode shall divide by 2 */
 //#define AC107_LRCK_PERIOD		(AC107_SLOT_WIDTH*(AC107_ENCODING_EN ? 2 : AC107_CHIP_NUMS*2))
 #define AC107_LRCK_PERIOD		(AC107_SLOT_WIDTH*(AC107_ENCODING_EN ? 2 : AC107_CHIP_NUMS))
-
 #define AC107_MATCH_DTS_EN		1	/* AC107 match method select: 0: i2c_detect, 1:devices tree */
 
 #define AC107_KCONTROL_EN		1
 #define AC107_DAPM_EN			0
-#define AC107_CODEC_RW_USER_EN		1
-#define AC107_PGA_GAIN			ADC_PGA_GAIN_28dB	/* -6dB and 0dB, 3~30dB, 1dB step */
-#define AC107_DMIC_EN			0			/* 0:ADC  1:DMIC */
-#define AC107_PDM_EN			0			/* 0:I2S  1:PDM */
+#define AC107_CODEC_RW_USER_EN	1
+#define AC107_PGA_GAIN			ADC_PGA_GAIN_28dB	//-6dB and 0dB, 3~30dB, 1dB step
+#define AC107_DMIC_EN			0	//0:ADC  1:DMIC
+#define AC107_PDM_EN			0	//0:I2S  1:PDM
 
 #define AC107_DVCC_NAME			"ac107_dvcc_1v8"
-#define AC107_AVCC_VCCIO_NAME		"ac107_avcc_vccio_3v3"
-
+#define AC107_AVCC_VCCIO_NAME	"ac107_avcc_vccio_3v3"
 #define AC107_RATES			(SNDRV_PCM_RATE_8000_48000 | SNDRV_PCM_RATE_KNOT)
 #define AC107_FORMATS			(SNDRV_PCM_FMTBIT_S16_LE | SNDRV_PCM_FMTBIT_S20_3LE | SNDRV_PCM_FMTBIT_S24_LE | SNDRV_PCM_FMTBIT_S32_LE)
 
@@ -84,14 +79,14 @@ struct ac107_voltage_supply {
 
 struct ac107_priv {
 	struct i2c_client *i2c;
-	struct snd_soc_codec *codec;
+	struct snd_soc_component *component;
 	struct ac107_voltage_supply vol_supply;
 	int reset_gpio;
 };
 
 static const struct regmap_config ac107_regmap_config = {
-	.reg_bits = 8,		/* Number of bits in a register address */
-	.val_bits = 8,		/* Number of bits in a register value */
+	.reg_bits = 8,		//Number of bits in a register address
+	.val_bits = 8,		//Number of bits in a register value
 };
 
 struct real_val_to_reg_val {
@@ -145,19 +140,19 @@ static const struct real_val_to_reg_val ac107_bclk_div[] = {
 	{192, 15},
 };
 
-/* FOUT =(FIN * N) / [(M1+1) * (M2+1)*(K1+1)*(K2+1)] ;	M1[0,31],  M2[0,1],  N[0,1023],  K1[0,31],  K2[0,1] */
+//FOUT =(FIN * N) / [(M1+1) * (M2+1)*(K1+1)*(K2+1)] ;	M1[0,31],  M2[0,1],  N[0,1023],  K1[0,31],  K2[0,1]
 static const struct pll_div ac107_pll_div[] = {
-	{400000, 12288000, 0, 0, 983, 15, 1},		//<out: 12.2875M>
-	{512000, 12288000, 0, 0, 960, 19, 1},		//24576000/48
-	{768000, 12288000, 0, 0, 640, 19, 1},		//24576000/32
+	{400000, 12288000, 0, 0, 983, 15, 1},	//<out: 12.2875M>
+	{512000, 12288000, 0, 0, 960, 19, 1},	//24576000/48
+	{768000, 12288000, 0, 0, 640, 19, 1},	//24576000/32
 	{800000, 12288000, 0, 0, 768, 24, 1},
-	{1024000, 12288000, 0, 0, 480, 19, 1},		//24576000/24
+	{1024000, 12288000, 0, 0, 480, 19, 1},	//24576000/24
 	{1600000, 12288000, 0, 0, 384, 24, 1},
-	{2048000, 12288000, 0, 0, 240, 19, 1},		//24576000/12
-	{3072000, 12288000, 0, 0, 160, 19, 1},		//24576000/8
-	{4096000, 12288000, 0, 0, 120, 19, 1},		//24576000/6
+	{2048000, 12288000, 0, 0, 240, 19, 1},	//24576000/12
+	{3072000, 12288000, 0, 0, 160, 19, 1},	//24576000/8
+	{4096000, 12288000, 0, 0, 120, 19, 1},	//24576000/6
 	{6000000, 12288000, 4, 0, 512, 24, 1},
-	{6144000, 12288000, 1, 0, 160, 19, 1},		//24576000/4
+	{6144000, 12288000, 1, 0, 160, 19, 1},	//24576000/4
 	{12000000, 12288000, 9, 0, 512, 24, 1},
 	{13000000, 12288000, 12, 0, 639, 25, 1},	//<out: 12.2885M>
 	{15360000, 12288000, 9, 0, 320, 19, 1},
@@ -166,18 +161,18 @@ static const struct pll_div ac107_pll_div[] = {
 	{19680000, 12288000, 15, 1, 999, 24, 1},	//<out: 12.2877M>
 	{24000000, 12288000, 9, 0, 256, 24, 1},
 
-	{400000, 11289600, 0, 0, 1016, 17, 1},		//<out: 11.2889M>
+	{400000, 11289600, 0, 0, 1016, 17, 1},	//<out: 11.2889M>
 	{512000, 11289600, 0, 0, 882, 19, 1},
 	{768000, 11289600, 0, 0, 588, 19, 1},
-	{800000, 11289600, 0, 0, 508, 17, 1},		//<out: 11.2889M>
+	{800000, 11289600, 0, 0, 508, 17, 1},	//<out: 11.2889M>
 	{1024000, 11289600, 0, 0, 441, 19, 1},
-	{1600000, 11289600, 0, 0, 254, 17, 1},		//<out: 11.2889M>
+	{1600000, 11289600, 0, 0, 254, 17, 1},	//<out: 11.2889M>
 	{2048000, 11289600, 1, 0, 441, 19, 1},
 	{3072000, 11289600, 0, 0, 147, 19, 1},
 	{4096000, 11289600, 3, 0, 441, 19, 1},
-	{6000000, 11289600, 1, 0, 143, 18, 1},		//<out: 11.2895M>
+	{6000000, 11289600, 1, 0, 143, 18, 1},	//<out: 11.2895M>
 	{6144000, 11289600, 1, 0, 147, 19, 1},
-	{12000000, 11289600, 3, 0, 143, 18, 1},		//<out: 11.2895M>
+	{12000000, 11289600, 3, 0, 143, 18, 1},	//<out: 11.2895M>
 	{13000000, 11289600, 12, 0, 429, 18, 1},	//<out: 11.2895M>
 	{15360000, 11289600, 14, 0, 441, 19, 1},
 	{16000000, 11289600, 24, 0, 882, 24, 1},
@@ -185,8 +180,8 @@ static const struct pll_div ac107_pll_div[] = {
 	{19680000, 11289600, 13, 1, 771, 23, 1},	//<out: 11.28964M>
 	{24000000, 11289600, 24, 0, 588, 24, 1},
 
-	{12288000, 12288000, 9, 0, 400, 19, 1},		//24576000/2
-	{11289600, 11289600, 9, 0, 400, 19, 1},		//22579200/2
+	{12288000, 12288000, 9, 0, 400, 19, 1},	//24576000/2
+	{11289600, 11289600, 9, 0, 400, 19, 1},	//22579200/2
 
 	{24576000 / 1, 12288000, 9, 0, 200, 19, 1},	//24576000
 	{24576000 / 16, 12288000, 0, 0, 320, 19, 1},	//1536000
@@ -373,9 +368,9 @@ static const DECLARE_TLV_DB_SCALE(digital_vol_tlv, -11925, 75, 0);
 static const DECLARE_TLV_DB_SCALE(digital_mix_vol_tlv, -600, 600, 0);
 
 /*************************************** General(volume) controls *******************************************/
-/* ac107 volume controls */
+//ac107 volume controls
 static const struct snd_kcontrol_new ac107_volume_controls[] = {
-	/* Channels PGA Gain */
+	//Channels PGA Gain
 	SOC_SINGLE_EXT_TLV("Channel 1 PGA Gain", ANA_ADC1_CTRL3,
 			   RX1_PGA_GAIN_CTRL, 0x1f, 0, ac107_codec0_get,
 			   ac107_codec0_put, adc_pga_gain_tlv),
@@ -425,7 +420,7 @@ static const struct snd_kcontrol_new ac107_volume_controls[] = {
 			   RX2_PGA_GAIN_CTRL, 0x1f, 0, ac107_codec7_get,
 			   ac107_codec7_put, adc_pga_gain_tlv),
 
-	/* Channels Digital Volume */
+	//Channels Digital Volume
 	SOC_SINGLE_EXT_TLV("Channel 1 Digital Volume", ADC1_DVOL_CTRL, 0, 0xff,
 			   0, ac107_codec0_get, ac107_codec0_put,
 			   digital_vol_tlv),
@@ -476,7 +471,7 @@ static const struct snd_kcontrol_new ac107_volume_controls[] = {
 			   digital_vol_tlv),
 };
 
-/* ac107 common controls */
+//ac107 common controls
 static const struct snd_kcontrol_new ac107_controls[] = {
 #if 0
 	SOC_SINGLE_TLV("ADC1 PGA Gain", ANA_ADC1_CTRL3, RX1_PGA_GAIN_CTRL, 0x1f,
@@ -500,13 +495,13 @@ static const struct snd_kcontrol_new ac107_controls[] = {
 		       1, 0, digital_mix_vol_tlv),
 #endif
 	//debug control
-	//SOC_SINGLE("ADC Pattern Sel", ADC_DIG_DEBUG, ADC_PTN_SEL, 0x7, 0),
+	SOC_SINGLE("ADC Pattern Sel", ADC_DIG_DEBUG, ADC_PTN_SEL, 0x7, 0),
 	//SOC_SINGLE("MCLK Drive Sel", I2S_PADDRV_CTRL, MCLK_DRV, 0x3, 0),
 	//SOC_SINGLE("SYSCLK Hold Time Sel", PLL_LOCK_CTRL, SYSCLK_HOLD_TIME, 0x7, 0),
 };
 
 /*************************************** DAPM controls *******************************************/
-/* ADC DMIC Source Select MUX */
+//ADC DMIC Source Select MUX
 static const char *adc_dmic_src_mux_text[] = {
 	"ADC switch", "DMIC switch"
 };
@@ -516,7 +511,7 @@ SOC_ENUM_SINGLE(DMIC_EN, DIG_MIC_EN, 2, adc_dmic_src_mux_text);
 static const struct snd_kcontrol_new adc_dmic_src_mux =
 SOC_DAPM_ENUM("ADC DMIC MUX", adc_dmic_src_mux_enum);
 
-/* ADC1 Digital Source Control Mixer */
+//ADC1 Digital Source Control Mixer
 static const struct snd_kcontrol_new adc1_digital_src_mixer[] = {
 	SOC_DAPM_SINGLE("ADC1 DAT switch", ADC1_DMIX_SRC, ADC1_ADC1_DMXL_SRC, 1,
 			0),
@@ -524,7 +519,7 @@ static const struct snd_kcontrol_new adc1_digital_src_mixer[] = {
 			0),
 };
 
-/* ADC2 Digital Source Control Mixer */
+//ADC2 Digital Source Control Mixer
 static const struct snd_kcontrol_new adc2_digital_src_mixer[] = {
 	SOC_DAPM_SINGLE("ADC1 DAT switch", ADC2_DMIX_SRC, ADC2_ADC1_DMXL_SRC, 1,
 			0),
@@ -532,7 +527,7 @@ static const struct snd_kcontrol_new adc2_digital_src_mixer[] = {
 			0),
 };
 
-/* I2S TX Ch1 Mapping Mux */
+//I2S TX Ch1 Mapping Mux
 static const char *i2s_tx_ch1_map_mux_text[] = {
 	"ADC1 Sample switch", "ADC2 Sample switch"
 };
@@ -542,7 +537,7 @@ SOC_ENUM_SINGLE(I2S_TX_CHMP_CTRL1, TX_CH1_MAP, 2, i2s_tx_ch1_map_mux_text);
 static const struct snd_kcontrol_new i2s_tx_ch1_map_mux =
 SOC_DAPM_ENUM("I2S TX CH1 MUX", i2s_tx_ch1_map_mux_enum);
 
-/* I2S TX Ch2 Mapping Mux */
+//I2S TX Ch2 Mapping Mux
 static const char *i2s_tx_ch2_map_mux_text[] = {
 	"ADC1 Sample switch", "ADC2 Sample switch"
 };
@@ -552,7 +547,7 @@ SOC_ENUM_SINGLE(I2S_TX_CHMP_CTRL1, TX_CH2_MAP, 2, i2s_tx_ch2_map_mux_text);
 static const struct snd_kcontrol_new i2s_tx_ch2_map_mux =
 SOC_DAPM_ENUM("I2S TX CH2 MUX", i2s_tx_ch2_map_mux_enum);
 
-/* I2S TX Ch3 Mapping Mux */
+//I2S TX Ch3 Mapping Mux
 static const char *i2s_tx_ch3_map_mux_text[] = {
 	"ADC1 Sample switch", "ADC2 Sample switch"
 };
@@ -562,7 +557,7 @@ SOC_ENUM_SINGLE(I2S_TX_CHMP_CTRL1, TX_CH3_MAP, 2, i2s_tx_ch3_map_mux_text);
 static const struct snd_kcontrol_new i2s_tx_ch3_map_mux =
 SOC_DAPM_ENUM("I2S TX CH3 MUX", i2s_tx_ch3_map_mux_enum);
 
-/* I2S TX Ch4 Mapping Mux */
+//I2S TX Ch4 Mapping Mux
 static const char *i2s_tx_ch4_map_mux_text[] = {
 	"ADC1 Sample switch", "ADC2 Sample switch"
 };
@@ -572,7 +567,7 @@ SOC_ENUM_SINGLE(I2S_TX_CHMP_CTRL1, TX_CH4_MAP, 2, i2s_tx_ch4_map_mux_text);
 static const struct snd_kcontrol_new i2s_tx_ch4_map_mux =
 SOC_DAPM_ENUM("I2S TX CH4 MUX", i2s_tx_ch4_map_mux_enum);
 
-/* I2S TX Ch5 Mapping Mux */
+//I2S TX Ch5 Mapping Mux
 static const char *i2s_tx_ch5_map_mux_text[] = {
 	"ADC1 Sample switch", "ADC2 Sample switch"
 };
@@ -582,7 +577,7 @@ SOC_ENUM_SINGLE(I2S_TX_CHMP_CTRL1, TX_CH5_MAP, 2, i2s_tx_ch5_map_mux_text);
 static const struct snd_kcontrol_new i2s_tx_ch5_map_mux =
 SOC_DAPM_ENUM("I2S TX CH5 MUX", i2s_tx_ch5_map_mux_enum);
 
-/* I2S TX Ch6 Mapping Mux */
+//I2S TX Ch6 Mapping Mux
 static const char *i2s_tx_ch6_map_mux_text[] = {
 	"ADC1 Sample switch", "ADC2 Sample switch"
 };
@@ -592,7 +587,7 @@ SOC_ENUM_SINGLE(I2S_TX_CHMP_CTRL1, TX_CH6_MAP, 2, i2s_tx_ch6_map_mux_text);
 static const struct snd_kcontrol_new i2s_tx_ch6_map_mux =
 SOC_DAPM_ENUM("I2S TX CH6 MUX", i2s_tx_ch6_map_mux_enum);
 
-/* I2S TX Ch7 Mapping Mux */
+//I2S TX Ch7 Mapping Mux
 static const char *i2s_tx_ch7_map_mux_text[] = {
 	"ADC1 Sample switch", "ADC2 Sample switch"
 };
@@ -602,7 +597,7 @@ SOC_ENUM_SINGLE(I2S_TX_CHMP_CTRL1, TX_CH7_MAP, 2, i2s_tx_ch7_map_mux_text);
 static const struct snd_kcontrol_new i2s_tx_ch7_map_mux =
 SOC_DAPM_ENUM("I2S TX CH7 MUX", i2s_tx_ch7_map_mux_enum);
 
-/* I2S TX Ch8 Mapping Mux */
+//I2S TX Ch8 Mapping Mux
 static const char *i2s_tx_ch8_map_mux_text[] = {
 	"ADC1 Sample switch", "ADC2 Sample switch"
 };
@@ -612,7 +607,7 @@ SOC_ENUM_SINGLE(I2S_TX_CHMP_CTRL1, TX_CH8_MAP, 2, i2s_tx_ch8_map_mux_text);
 static const struct snd_kcontrol_new i2s_tx_ch8_map_mux =
 SOC_DAPM_ENUM("I2S TX CH8 MUX", i2s_tx_ch8_map_mux_enum);
 
-/* I2S TX Ch9 Mapping Mux */
+//I2S TX Ch9 Mapping Mux
 static const char *i2s_tx_ch9_map_mux_text[] = {
 	"ADC1 Sample switch", "ADC2 Sample switch"
 };
@@ -622,7 +617,7 @@ SOC_ENUM_SINGLE(I2S_TX_CHMP_CTRL2, TX_CH9_MAP, 2, i2s_tx_ch9_map_mux_text);
 static const struct snd_kcontrol_new i2s_tx_ch9_map_mux =
 SOC_DAPM_ENUM("I2S TX CH9 MUX", i2s_tx_ch9_map_mux_enum);
 
-/* I2S TX Ch10 Mapping Mux */
+//I2S TX Ch10 Mapping Mux
 static const char *i2s_tx_ch10_map_mux_text[] = {
 	"ADC1 Sample switch", "ADC2 Sample switch"
 };
@@ -632,7 +627,7 @@ SOC_ENUM_SINGLE(I2S_TX_CHMP_CTRL2, TX_CH10_MAP, 2, i2s_tx_ch10_map_mux_text);
 static const struct snd_kcontrol_new i2s_tx_ch10_map_mux =
 SOC_DAPM_ENUM("I2S TX CH10 MUX", i2s_tx_ch10_map_mux_enum);
 
-/* I2S TX Ch11 Mapping Mux */
+//I2S TX Ch11 Mapping Mux
 static const char *i2s_tx_ch11_map_mux_text[] = {
 	"ADC1 Sample switch", "ADC2 Sample switch"
 };
@@ -642,7 +637,7 @@ SOC_ENUM_SINGLE(I2S_TX_CHMP_CTRL2, TX_CH11_MAP, 2, i2s_tx_ch11_map_mux_text);
 static const struct snd_kcontrol_new i2s_tx_ch11_map_mux =
 SOC_DAPM_ENUM("I2S TX CH11 MUX", i2s_tx_ch11_map_mux_enum);
 
-/* I2S TX Ch12 Mapping Mux */
+//I2S TX Ch12 Mapping Mux
 static const char *i2s_tx_ch12_map_mux_text[] = {
 	"ADC1 Sample switch", "ADC2 Sample switch"
 };
@@ -652,7 +647,7 @@ SOC_ENUM_SINGLE(I2S_TX_CHMP_CTRL2, TX_CH12_MAP, 2, i2s_tx_ch12_map_mux_text);
 static const struct snd_kcontrol_new i2s_tx_ch12_map_mux =
 SOC_DAPM_ENUM("I2S TX CH12 MUX", i2s_tx_ch12_map_mux_enum);
 
-/* I2S TX Ch13 Mapping Mux */
+//I2S TX Ch13 Mapping Mux
 static const char *i2s_tx_ch13_map_mux_text[] = {
 	"ADC1 Sample switch", "ADC2 Sample switch"
 };
@@ -662,7 +657,7 @@ SOC_ENUM_SINGLE(I2S_TX_CHMP_CTRL2, TX_CH13_MAP, 2, i2s_tx_ch13_map_mux_text);
 static const struct snd_kcontrol_new i2s_tx_ch13_map_mux =
 SOC_DAPM_ENUM("I2S TX CH13 MUX", i2s_tx_ch13_map_mux_enum);
 
-/* I2S TX Ch14 Mapping Mux */
+//I2S TX Ch14 Mapping Mux
 static const char *i2s_tx_ch14_map_mux_text[] = {
 	"ADC1 Sample switch", "ADC2 Sample switch"
 };
@@ -672,7 +667,7 @@ SOC_ENUM_SINGLE(I2S_TX_CHMP_CTRL2, TX_CH14_MAP, 2, i2s_tx_ch14_map_mux_text);
 static const struct snd_kcontrol_new i2s_tx_ch14_map_mux =
 SOC_DAPM_ENUM("I2S TX CH14 MUX", i2s_tx_ch14_map_mux_enum);
 
-/* I2S TX Ch15 Mapping Mux */
+//I2S TX Ch15 Mapping Mux
 static const char *i2s_tx_ch15_map_mux_text[] = {
 	"ADC1 Sample switch", "ADC2 Sample switch"
 };
@@ -682,7 +677,7 @@ SOC_ENUM_SINGLE(I2S_TX_CHMP_CTRL2, TX_CH15_MAP, 2, i2s_tx_ch15_map_mux_text);
 static const struct snd_kcontrol_new i2s_tx_ch15_map_mux =
 SOC_DAPM_ENUM("I2S TX CH15 MUX", i2s_tx_ch15_map_mux_enum);
 
-/* I2S TX Ch16 Mapping Mux */
+//I2S TX Ch16 Mapping Mux
 static const char *i2s_tx_ch16_map_mux_text[] = {
 	"ADC1 Sample switch", "ADC2 Sample switch"
 };
@@ -693,7 +688,7 @@ static const struct snd_kcontrol_new i2s_tx_ch16_map_mux =
 SOC_DAPM_ENUM("I2S TX CH16 MUX", i2s_tx_ch16_map_mux_enum);
 
 /*************************************** DAPM widgets *******************************************/
-/* ac107 dapm widgets */
+//ac107 dapm widgets
 static const struct snd_soc_dapm_widget ac107_dapm_widgets[] = {
 	//input widgets
 	SND_SOC_DAPM_INPUT("MIC1P"),
@@ -801,7 +796,7 @@ static const struct snd_soc_dapm_widget ac107_dapm_widgets[] = {
 };
 
 /*************************************** DAPM routes *******************************************/
-/* ac107 dapm routes */
+//ac107 dapm routes
 static const struct snd_soc_dapm_route ac107_dapm_routes[] = {
 	//MIC1 PGA
 	{"MIC1 PGA", NULL, "MIC1P"},
@@ -1074,7 +1069,7 @@ static void ac107_hw_init(struct i2c_client *i2c)
 			  (AC107_ADC_PATTERN_SEL & 0x7) << ADC_PTN_SEL, i2c);
 #endif
 
-	/* ADC Digital Volume Config */
+	//ADC Digital Volume Config
 	ac107_update_bits(ADC1_DVOL_CTRL, !AC107_KCONTROL_EN * 0xff, 0xA0, i2c);
 	ac107_update_bits(ADC2_DVOL_CTRL, !AC107_KCONTROL_EN * 0xff, 0xA0, i2c);
 
@@ -1092,7 +1087,7 @@ static void ac107_hw_init(struct i2c_client *i2c)
 	ac107_update_bits(ANA_ADC2_CTRL5, !AC107_DAPM_EN * 0x1 << RX2_GLOBAL_EN,
 			  0x1 << RX2_GLOBAL_EN, i2c);
 
-	/* VREF Fast Start-up Disable */
+	//VREF Fast Start-up Disable
 	ac107_update_bits(PWR_CTRL1, 0x1 << VREF_FSU_DISABLE,
 			  0x1 << VREF_FSU_DISABLE, i2c);
 }
@@ -1120,7 +1115,7 @@ static int ac107_set_sysclk(struct snd_soc_dai *dai, int clk_id,
 		return -EINVAL;
 	}
 
-	/* SYSCLK Enable */
+	//SYSCLK Enable
 	ac107_multi_chips_update_bits(SYSCLK_CTRL, 0x1 << SYSCLK_EN,
 				      0x1 << SYSCLK_EN);
 	return 0;
@@ -1544,14 +1539,7 @@ static struct snd_soc_dai_driver ac107_dai0 = {
 		    .channels_max = AC107_CHIP_NUMS * 2,
 		    .rates = AC107_RATES,
 		    .formats = AC107_FORMATS,
-	},
-	.playback = {
-		    .stream_name = "Playback",
-		    .channels_min = 1,
-		    .channels_max = AC107_CHIP_NUMS * 2,
-		    .rates = AC107_RATES,
-		    .formats = AC107_FORMATS,
-	},
+		    },
 	.ops = &ac107_dai_ops,
 };
 
@@ -1650,27 +1638,25 @@ static struct snd_soc_dai_driver *ac107_dai[] = {
 	&ac107_dai7,
 };
 
-static int ac107_probe(struct snd_soc_codec *codec)
+static int ac107_probe(struct snd_soc_component *component)
 {
-	struct ac107_priv *ac107 = dev_get_drvdata(codec->dev);
+	struct ac107_priv *ac107 = dev_get_drvdata(component->dev);
 	int ret = 0;
 
-	codec->control_data =
+	component->regmap =
 	    devm_regmap_init_i2c(ac107->i2c, &ac107_regmap_config);
-	ret = PTR_RET(codec->control_data);
+	ret = PTR_RET(component->regmap);
 	if (ret) {
-		dev_err(codec->dev, "AC107 regmap init I2C Failed: %d\n", ret);
+		dev_err(component->dev, "AC107 regmap init I2C Failed: %d\n", ret);
 		return ret;
 	}
-	ac107->codec = codec;
+	ac107->component = component;
 
 #if AC107_KCONTROL_EN
 	ac107_multi_chips_update_bits(ANA_ADC1_CTRL3, 0x1f << RX1_PGA_GAIN_CTRL, AC107_PGA_GAIN << RX1_PGA_GAIN_CTRL);	//ADC1 PGA Gain default
 	ac107_multi_chips_update_bits(ANA_ADC2_CTRL3, 0x1f << RX2_PGA_GAIN_CTRL, AC107_PGA_GAIN << RX2_PGA_GAIN_CTRL);	//ADC2 PGA Gain default
-	snd_soc_add_codec_controls(codec, ac107_volume_controls, AC107_CHIP_NUMS * 2);	//PGA Gain Control
-	snd_soc_add_codec_controls(codec, ac107_volume_controls + 16, AC107_CHIP_NUMS * 2);	//Digital Volume Control
-
-	snd_soc_add_codec_controls(codec, ac107_controls, AC107_CHIP_NUMS * 2);
+	snd_soc_add_component_controls(component, ac107_volume_controls, AC107_CHIP_NUMS * 2);	//PGA Gain Control
+	snd_soc_add_component_controls(component, ac107_volume_controls + 16, AC107_CHIP_NUMS * 2);	//Digital Volume Control
 #endif
 
 #if AC107_DAPM_EN
@@ -1681,27 +1667,16 @@ static int ac107_probe(struct snd_soc_codec *codec)
 	return 0;
 }
 
-static int ac107_remove(struct snd_soc_codec *codec)
+static void ac107_remove(struct snd_soc_component *component)
 {
-	return 0;
+	return;
 }
 
-static int ac107_suspend(struct snd_soc_codec *codec)
+static int ac107_suspend(struct snd_soc_component *component)
 {
-	struct ac107_priv *ac107 = dev_get_drvdata(codec->dev);
+	struct ac107_priv *ac107 = dev_get_drvdata(component->dev);
 
 #if AC107_MATCH_DTS_EN
-#if defined(CONFIG_ARCH_SUN50IW9)
-	if (ac107->vol_supply.dvcc_1v8)
-		regulator_disable(ac107->vol_supply.dvcc_1v8);
-	if (ac107->vol_supply.avcc_vccio_3v3)
-		regulator_disable(ac107->vol_supply.avcc_vccio_3v3);
-
-	if (gpio_is_valid(ac107->reset_gpio)) {
-		gpio_set_value(ac107->reset_gpio, 0);
-		gpio_free(ac107->reset_gpio);
-	}
-#else
 	if ((ac107_regulator_en & 0x1) && !IS_ERR(ac107->vol_supply.dvcc_1v8)) {
 		regulator_disable(ac107->vol_supply.dvcc_1v8);
 		ac107_regulator_en &= ~0x1;
@@ -1717,39 +1692,17 @@ static int ac107_suspend(struct snd_soc_codec *codec)
 		gpio_free(ac107->reset_gpio);
 	}
 #endif
-#endif
+
 	return 0;
 }
 
-static int ac107_resume(struct snd_soc_codec *codec)
+static int ac107_resume(struct snd_soc_component *component)
 {
-	struct ac107_priv *ac107 = dev_get_drvdata(codec->dev);
+	struct ac107_priv *ac107 = dev_get_drvdata(component->dev);
 	int ret;
 
 #if AC107_MATCH_DTS_EN
-#if defined(CONFIG_ARCH_SUN50IW9)
-	if (ac107->vol_supply.dvcc_1v8) {
-		ret = regulator_enable(ac107->vol_supply.dvcc_1v8);
-		if (ret != 0)
-			pr_err("ac107 dvcc_1.8v enable failed!\n");
-	}
-
-	if (ac107->vol_supply.avcc_vccio_3v3) {
-		ret = regulator_enable(ac107->vol_supply.avcc_vccio_3v3);
-		if (ret != 0)
-			pr_err("ac107 avcc_vccdio_3.3v enable failed!\n");
-	}
-
-	if (gpio_is_valid(ac107->reset_gpio)) {
-		ret = gpio_request(ac107->reset_gpio, "reset gpio");
-		if (!ret) {
-			gpio_direction_output(ac107->reset_gpio, 1);
-			gpio_set_value(ac107->reset_gpio, 1);
-			msleep(20);
-		}
-	}
-#else
-	if (!(ac107_regulator_en & 0x1) && !IS_ERR(ac107->vol_supply.dvcc_1v8)) {
+	if ((ac107_regulator_en & 0x1) && !IS_ERR(ac107->vol_supply.dvcc_1v8)) {
 		ret = regulator_enable(ac107->vol_supply.dvcc_1v8);
 		if (ret != 0)
 			pr_err
@@ -1758,7 +1711,7 @@ static int ac107_resume(struct snd_soc_codec *codec)
 		ac107_regulator_en |= 0x1;
 	}
 
-	if (!(ac107_regulator_en & 0x2)
+	if ((ac107_regulator_en & 0x2)
 	    && !IS_ERR(ac107->vol_supply.avcc_vccio_3v3)) {
 		ret = regulator_enable(ac107->vol_supply.avcc_vccio_3v3);
 		if (ret != 0)
@@ -1776,22 +1729,22 @@ static int ac107_resume(struct snd_soc_codec *codec)
 		}
 	}
 #endif
-#endif
+
 	return 0;
 }
 
-static unsigned int ac107_codec_read(struct snd_soc_codec *codec,
+static unsigned int ac107_component_read(struct snd_soc_component *component,
 				     unsigned int reg)
 {
 	//AC107_DEBUG("\n--->%s\n",__FUNCTION__);
 	u8 val_r;
-	struct ac107_priv *ac107 = dev_get_drvdata(codec->dev);
+	struct ac107_priv *ac107 = dev_get_drvdata(component->dev);
 
 	ac107_read(reg, &val_r, ac107->i2c);
 	return val_r;
 }
 
-static int ac107_codec_write(struct snd_soc_codec *codec, unsigned int reg,
+static int ac107_component_write(struct snd_soc_component *component, unsigned int reg,
 			     unsigned int value)
 {
 	//AC107_DEBUG("\n--->%s\n",__FUNCTION__);
@@ -1799,30 +1752,28 @@ static int ac107_codec_write(struct snd_soc_codec *codec, unsigned int reg,
 	return 0;
 }
 
-struct snd_soc_component_driver ac107_codec_component_driver = {
-#if AC107_KCONTROL_EN
-	.controls = ac107_controls,
-	.num_controls = ARRAY_SIZE(ac107_controls),
-#endif
-
-#if AC107_DAPM_EN
-	.dapm_widgets = ac107_dapm_widgets,
-	.num_dapm_widgets = ARRAY_SIZE(ac107_dapm_widgets),
-	.dapm_routes = ac107_dapm_routes,
-	.num_dapm_routes = ARRAY_SIZE(ac107_dapm_routes),
-#endif
-};
-
 /*** define  ac107  codec_driver struct ***/
-static const struct snd_soc_codec_driver ac107_soc_codec_driver = {
+static const struct snd_soc_component_driver ac107_soc_component_driver = {
 	.probe = ac107_probe,
 	.remove = ac107_remove,
 	.suspend = ac107_suspend,
 	.resume = ac107_resume,
 
 #if AC107_CODEC_RW_USER_EN
-	.read = ac107_codec_read,
-	.write = ac107_codec_write,
+	.read = ac107_component_read,
+	.write = ac107_component_write,
+#endif
+/*
+#if AC107_KCONTROL_EN
+	.controls = ac107_controls,
+	.num_controls = ARRAY_SIZE(ac107_controls),
+#endif
+*/
+#if AC107_DAPM_EN
+	.dapm_widgets = ac107_dapm_widgets,
+	.num_dapm_widgets = ARRAY_SIZE(ac107_dapm_widgets),
+	.dapm_routes = ac107_dapm_routes,
+	.num_dapm_routes = ARRAY_SIZE(ac107_dapm_routes),
 #endif
 };
 
@@ -1896,7 +1847,6 @@ static int ac107_i2c_probe(struct i2c_client *i2c,
 	struct device_node *np = i2c->dev.of_node;
 	const char *regulator_name = NULL;
 	int ret = 0;
-	struct gpio_config config;
 
 	ac107 = devm_kzalloc(&i2c->dev, sizeof(struct ac107_priv), GFP_KERNEL);
 	if (ac107 == NULL) {
@@ -1908,68 +1858,6 @@ static int ac107_i2c_probe(struct i2c_client *i2c,
 	dev_set_drvdata(&i2c->dev, ac107);
 
 #if AC107_MATCH_DTS_EN
-#if defined(CONFIG_ARCH_SUN50IW9)
-	/* regulator about */
-	if (!ac107_regulator_en)
-		regulator_name = NULL;
-
-	ac107->vol_supply.dvcc_1v8 = regulator_get(&i2c->dev, AC107_DVCC_NAME);
-	if (IS_ERR(ac107->vol_supply.dvcc_1v8)) {
-		pr_err("[%s]: get ac107 dvcc failed\n", __func__);
-		return -EFAULT;
-	} else {
-		ret = regulator_set_voltage(ac107->vol_supply.dvcc_1v8,
-							1800000, 1800000);
-		if (ret) {
-			pr_err("[%s]: ac107 dvcc set vol failed\n", __func__);
-			return -EFAULT;
-		}
-
-		ret = regulator_enable(ac107->vol_supply.dvcc_1v8);
-		if (ret != 0) {
-			pr_err("[%s]: ac107 dvcc enable failed!\n", __func__);
-			regulator_disable(ac107->vol_supply.dvcc_1v8);
-			regulator_put(ac107->vol_supply.dvcc_1v8);
-		}
-	}
-
-	ac107->vol_supply.avcc_vccio_3v3 = regulator_get(&i2c->dev,
-							AC107_AVCC_VCCIO_NAME);
-	if (IS_ERR(ac107->vol_supply.avcc_vccio_3v3)) {
-		pr_err("[%s]: get ac107 avcc failed\n", __func__);
-		return -EFAULT;
-	} else {
-		ret = regulator_set_voltage(ac107->vol_supply.avcc_vccio_3v3,
-							3300000, 3300000);
-		if (ret) {
-			pr_err("[%s]: ac107 avcc set vol failed\n", __func__);
-			return -EFAULT;
-		}
-
-		ret = regulator_enable(ac107->vol_supply.avcc_vccio_3v3);
-		if (ret != 0) {
-			pr_err("[%s]: ac107 avcc enable failed!\n", __func__);
-			regulator_disable(ac107->vol_supply.avcc_vccio_3v3);
-			regulator_put(ac107->vol_supply.avcc_vccio_3v3);
-		}
-	}
-
-	/*gpio reset enable */
-	ac107->reset_gpio = of_get_named_gpio_flags(np, "gpio-reset", 0,
-							    (enum of_gpio_flags
-							     *)&config);
-	if (gpio_is_valid(ac107->reset_gpio)) {
-		ret = gpio_request(ac107->reset_gpio, "reset gpio");
-		if (!ret) {
-			gpio_direction_output(ac107->reset_gpio, 1);
-			gpio_set_value(ac107->reset_gpio, 1);
-			msleep(20);
-		} else {
-			pr_err("%s, line:%d, failed request reset gpio: %d!\n",
-			     __func__, __LINE__, ac107->reset_gpio);
-		}
-	}
-#else
 	if (!ac107_regulator_en) {
 		ret = of_property_read_string(np, AC107_DVCC_NAME, &regulator_name);	//(const char**)
 		if (ret) {
@@ -2016,10 +1904,7 @@ static int ac107_i2c_probe(struct i2c_client *i2c,
 		}
 
 		/*gpio reset enable */
-		ac107->reset_gpio = of_get_named_gpio_flags(np,
-							    "gpio-reset", 0,
-							    (enum of_gpio_flags
-							     *)&config);
+		ac107->reset_gpio = of_get_named_gpio(np, "gpio-reset", 0);
 		if (gpio_is_valid(ac107->reset_gpio)) {
 			ret = gpio_request(ac107->reset_gpio, "reset gpio");
 			if (!ret) {
@@ -2034,10 +1919,10 @@ static int ac107_i2c_probe(struct i2c_client *i2c,
 		}
 	}
 #endif
-#endif
+
 	if (i2c_id->driver_data < AC107_CHIP_NUMS) {
 		i2c_ctrl[i2c_id->driver_data] = i2c;
-		ret = snd_soc_register_codec(&i2c->dev, &ac107_soc_codec_driver,
+		ret = snd_soc_register_component(&i2c->dev, &ac107_soc_component_driver,
 					ac107_dai[i2c_id->driver_data], 1);
 		if (ret < 0) {
 			dev_err(&i2c->dev,
@@ -2058,7 +1943,7 @@ static int ac107_i2c_probe(struct i2c_client *i2c,
 
 static int ac107_i2c_remove(struct i2c_client *i2c)
 {
-	snd_soc_unregister_codec(&i2c->dev);
+	snd_soc_unregister_component(&i2c->dev);
 	return 0;
 }
 

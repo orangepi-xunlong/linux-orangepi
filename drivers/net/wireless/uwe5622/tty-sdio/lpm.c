@@ -10,11 +10,6 @@
 #include <linux/gpio.h>
 #include <linux/seq_file.h>
 #include <linux/version.h>
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 9, 0)
-#include "wakelock.h"
-#else
-#include <linux/wakelock.h>
-#endif
 #include <linux/export.h>
 #include <marlin_platform.h>
 
@@ -29,23 +24,20 @@
 #endif
 
 struct proc_dir_entry *bluetooth_dir, *sleep_dir;
-static struct wake_lock tx_wakelock;
-static struct wake_lock rx_wakelock;
-
+struct wakeup_source *tx_ws;
+struct wakeup_source *rx_ws;
 
 void host_wakeup_bt(void)
 {
-	wake_lock(&tx_wakelock);
+	__pm_stay_awake(tx_ws);
 	marlin_set_sleep(MARLIN_BLUETOOTH, FALSE);
 	marlin_set_wakeup(MARLIN_BLUETOOTH);
 }
 
 void bt_wakeup_host(void)
 {
-	wake_unlock(&tx_wakelock);
-	wake_lock_timeout(&rx_wakelock, HZ*5);
-
-
+	__pm_relax(tx_ws);
+	__pm_wakeup_event(rx_ws, jiffies_to_msecs(HZ * 5));
 }
 
 static ssize_t bluesleep_write_proc_btwrite(struct file *file,
@@ -62,7 +54,7 @@ static ssize_t bluesleep_write_proc_btwrite(struct file *file,
 		host_wakeup_bt();
 	else if (b == '2') {
 		marlin_set_sleep(MARLIN_BLUETOOTH, TRUE);
-		wake_unlock(&tx_wakelock);
+		__pm_relax(tx_ws);
 	} else
 		pr_err("bludroid pass a unsupport parameter");
 	return count;
@@ -117,16 +109,20 @@ int  bluesleep_init(void)
 		retval = -ENOMEM;
 		goto fail;
 	}
-	wake_lock_init(&tx_wakelock, WAKE_LOCK_SUSPEND, "BT_TX_wakelock");
-	wake_lock_init(&rx_wakelock, WAKE_LOCK_SUSPEND, "BT_RX_wakelock");
+	tx_ws = wakeup_source_create("BT_TX_wakelock");
+	rx_ws = wakeup_source_create("BT_RX_wakelock");
+	wakeup_source_add(tx_ws);
+	wakeup_source_add(rx_ws);
 	return 0;
 
 fail:
 	remove_proc_entry("btwrite", sleep_dir);
 	remove_proc_entry("sleep", bluetooth_dir);
 	remove_proc_entry("bluetooth", 0);
-	wake_lock_destroy(&tx_wakelock);
-	wake_lock_destroy(&rx_wakelock);
+	wakeup_source_remove(tx_ws);
+	wakeup_source_remove(rx_ws);
+	wakeup_source_destroy(tx_ws);
+	wakeup_source_destroy(rx_ws);
 	return retval;
 }
 
@@ -136,14 +132,13 @@ void  bluesleep_exit(void)
 	remove_proc_entry("btwrite", sleep_dir);
 	remove_proc_entry("sleep", bluetooth_dir);
 	remove_proc_entry("bluetooth", 0);
-	wake_lock_destroy(&tx_wakelock);
-	wake_lock_destroy(&rx_wakelock);
-
+	wakeup_source_remove(tx_ws);
+	wakeup_source_remove(rx_ws);
+	wakeup_source_destroy(tx_ws);
+	wakeup_source_destroy(rx_ws);
 }
 
 /*module_init(bluesleep_init);*/
 /*module_exit(bluesleep_exit);*/
 MODULE_DESCRIPTION("Bluetooth Sleep Mode Driver ver %s " VERSION);
 MODULE_LICENSE("GPL");
-
-

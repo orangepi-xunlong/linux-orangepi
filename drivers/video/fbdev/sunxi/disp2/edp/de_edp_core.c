@@ -249,13 +249,14 @@ int dp_sink_init(u32 sel)
  * @return     :0:successful; -1:fps or vt error; -2:symbol per line error;
  *		-3:tu ratio error
  */
-int dp_video_set(u32 sel, struct disp_video_timings *tmg, u32 fps,
+int dp_video_set(u32 sel, struct disp_video_timings *tmg, struct edp_para *edp_para,
 		 enum edp_video_src_t src)
 {
 	struct video_para para;
 	unsigned int dly, total_symbol_per_line;
 	/*unsigned int video_ht_symbol_per_lane, ht_ratio, ht_per_lane;*/
 	int ret_val;
+	u32 fps = edp_para->edp_fps;
 
 	/*total_symbol_per_line = ((tmg->ht- tmg->ht/8) * 4 */
 	/*glb_lane_cnt);*/
@@ -302,10 +303,15 @@ int dp_video_set(u32 sel, struct disp_video_timings *tmg, u32 fps,
 	else
 		edp_dbg("Link and main video stream clock are sync!\n");
 
-	if (eDP_capable)
-		edp_hal_dp_scramble_seed(sel, 0xfffe);
-	else
+	if (edp_para->edp_sramble_seed == 0) {
+		if (eDP_capable)
+			edp_hal_dp_scramble_seed(sel, 0xfffe);
+		else
+			edp_hal_dp_scramble_seed(sel, 0xffff);
+	} else if (edp_para->edp_sramble_seed == 1) {
 		edp_hal_dp_scramble_seed(sel, 0xffff);
+	} else if (edp_para->edp_sramble_seed == 2)
+		edp_hal_dp_scramble_seed(sel, 0xfffe);
 
 	if (dp_enhanced_frame_cap)
 		edp_hal_dp_framing_mode(sel, 1);
@@ -339,6 +345,1592 @@ int para_convert(int lanes, int color_bits, int ht_per_lane, int ht,
 	result->nvid = Nvid;
 
 	return RET_OK;
+}
+
+u32 lane_cr_sw[4];
+u32 lane_cr_pre[4];
+int new2_dp_tps1_test(u32 sel)
+{
+	unsigned int to_cnt;
+	int ret;
+	u8 i;
+
+	u32 lane0_sw, lane0_pre;
+	u32 lane1_sw, lane1_pre;
+	u32 lane2_sw, lane2_pre;
+	u32 lane3_sw, lane3_pre;
+	u32 lane0_is_pre_max, lane1_is_pre_max, lane2_is_pre_max,
+	    lane3_is_pre_max;
+	u32 lane0_is_swing_max, lane1_is_swing_max, lane2_is_swing_max,
+	    lane3_is_swing_max;
+
+	u32 lane0_sw_old, lane0_pre_old;
+	u32 lane1_sw_old, lane1_pre_old;
+	u32 lane2_sw_old, lane2_pre_old;
+	u32 lane3_sw_old, lane3_pre_old;
+
+	lane0_sw = 0;
+	lane0_pre = 0;
+	lane1_sw = 0;
+	lane1_pre = 0;
+	lane2_sw = 0;
+	lane2_pre = 0;
+	lane3_sw = 0;
+	lane3_pre = 0;
+
+	lane0_sw_old = 0;
+	lane0_pre_old = 0;
+	lane1_sw_old = 0;
+	lane1_pre_old = 0;
+	lane2_sw_old = 0;
+	lane2_pre_old = 0;
+	lane3_sw_old = 0;
+	lane3_pre_old = 0;
+
+	lane0_is_pre_max = 0;
+	lane1_is_pre_max = 0;
+	lane2_is_pre_max = 0;
+	lane3_is_pre_max = 0;
+	lane0_is_swing_max = 0;
+	lane1_is_swing_max = 0;
+	lane2_is_swing_max = 0;
+	lane3_is_swing_max = 0;
+
+	for (i = 0; i < 4; i++) {
+		lane_cr_sw[i] = 0;
+		lane_cr_pre[i] = 0;
+	}
+
+	to_cnt = TRAIN_CNT;
+
+	while (1) {
+		fp_tx_buf[0] = 0x21; // set pattern 1 with scramble disable
+		// set pattern 1 with max swing and emphasis 0x13
+		fp_tx_buf[1] =
+		    ((lane0_is_pre_max & 0x1) << 5) | ((lane0_pre & 0x3) << 3) |
+		    ((lane0_is_swing_max & 0x1) << 2) | (lane0_sw & 0x3);
+		fp_tx_buf[2] =
+		    ((lane1_is_pre_max & 0x1) << 5) | ((lane1_pre & 0x3) << 3) |
+		    ((lane1_is_swing_max & 0x1) << 2) | (lane1_sw & 0x3);
+		fp_tx_buf[3] =
+		    ((lane2_is_pre_max & 0x1) << 5) | ((lane2_pre & 0x3) << 3) |
+		    ((lane2_is_swing_max & 0x1) << 2) | (lane2_sw & 0x3);
+		fp_tx_buf[4] =
+		    ((lane3_is_pre_max & 0x1) << 5) | ((lane3_pre & 0x3) << 3) |
+		    ((lane3_is_swing_max & 0x1) << 2) | (lane3_sw & 0x3);
+
+		edp_hal_link_training_ctrl(sel, 1, 0, 1);
+		new_phy_cfg(sel, lane0_sw, lane0_pre, lane1_sw, lane1_pre,
+			    lane2_sw, lane2_pre, lane3_sw, lane3_pre);
+		mdelay(20);
+
+		ret = aux_wr(sel, 0x00102, glb_lane_cnt + 1, fp_tx_buf);
+
+		if (ret != RET_OK)
+			return RET_FAIL;
+
+		udelay(training_aux_rd_interval_CR); // wait for the training
+						     // finish
+
+		if (glb_lane_cnt < 4)
+			ret = aux_rd(sel, 0x0202, 1, fp_rx_buf);
+		else
+			ret = aux_rd(sel, 0x0202, 2, fp_rx_buf);
+		if (ret == -1)
+			return RET_FAIL;
+
+		if (glb_lane_cnt < 4) {
+			edp_dbg("CR training reg[202h]:0x%x\n", fp_rx_buf[0]);
+		} else {
+			edp_dbg("CR training reg[202h]:0x%x\n", fp_rx_buf[0]);
+			edp_dbg("CR training reg[203h]:0x%x\n", fp_rx_buf[1]);
+		}
+
+		if (glb_lane_cnt == 1) {
+			if ((fp_rx_buf[0] & 0x01) == 0x01) {
+				lane_cr_sw[0] = lane0_sw;
+				lane_cr_pre[0] = lane0_pre;
+				return RET_OK;
+			}
+		} else if (glb_lane_cnt == 2) {
+			if ((fp_rx_buf[0] & 0x11) == 0x11) {
+				lane_cr_sw[0] = lane0_sw;
+				lane_cr_pre[0] = lane0_pre;
+				lane_cr_sw[1] = lane1_sw;
+				lane_cr_pre[1] = lane1_pre;
+				return RET_OK;
+			}
+		} else if (glb_lane_cnt == 4) {
+			if (((fp_rx_buf[0] & 0x11) == 0x11) &&
+			    ((fp_rx_buf[1] & 0x11) == 0x11)) {
+				lane_cr_sw[0] = lane0_sw;
+				lane_cr_pre[0] = lane0_pre;
+				lane_cr_sw[1] = lane1_sw;
+				lane_cr_pre[1] = lane1_pre;
+				lane_cr_sw[2] = lane2_sw;
+				lane_cr_pre[2] = lane2_pre;
+				lane_cr_sw[3] = lane3_sw;
+				lane_cr_pre[3] = lane3_pre;
+				return RET_OK;
+			}
+		}
+
+		to_cnt--;
+
+		if (to_cnt == 0) {
+			return RET_FAIL;
+		}
+
+		if (glb_lane_cnt < 4)
+			ret = aux_rd(sel, 0x0206, 1, fp_rx_buf);
+		else
+			ret = aux_rd(sel, 0x0206, 2, fp_rx_buf);
+		if (ret == -1)
+			return RET_FAIL;
+		if (glb_lane_cnt < 4) {
+			edp_dbg("CR training reg[206h]:%xh\n", fp_rx_buf[0]);
+		} else {
+			edp_dbg("CR training reg[206h]:%xh\n", fp_rx_buf[0]);
+			edp_dbg("CR training reg[207h]:%xh\n", fp_rx_buf[1]);
+		}
+
+		if (glb_lane_cnt == 1) {
+			lane0_sw = fp_rx_buf[0] & 0x3;
+			lane0_pre = (fp_rx_buf[0] >> 2) & 0x3;
+
+			if ((lane0_sw != lane0_sw_old)) {
+				lane0_sw_old = lane0_sw;
+				to_cnt = TRAIN_CNT;
+			}
+
+			if ((lane0_pre != lane0_pre_old)) {
+				lane0_pre_old = lane0_pre;
+				to_cnt = TRAIN_CNT;
+			}
+
+			if (lane0_sw == VOL_SWING_LEVEL_NUM - 1)
+				lane0_is_swing_max = 1;
+			else
+				lane0_is_swing_max = 0;
+
+			if (lane0_pre == PRE_EMPHASIS_LEVEL_NUM - 1)
+				lane0_is_pre_max = 1;
+			else
+				lane0_is_pre_max = 0;
+		} else if (glb_lane_cnt == 2) {
+			lane0_sw = fp_rx_buf[0] & 0x3;
+			lane0_pre = (fp_rx_buf[0] >> 2) & 0x3;
+			lane1_sw = (fp_rx_buf[0] >> 4) & 0x3;
+			lane1_pre = (fp_rx_buf[0] >> 6) & 0x3;
+
+			if ((lane0_sw != lane0_sw_old) ||
+			    (lane1_sw != lane1_sw_old)) {
+
+				lane0_sw_old = lane0_sw;
+				lane1_sw_old = lane1_sw;
+				to_cnt = TRAIN_CNT;
+			}
+
+			if ((lane0_pre != lane0_pre_old) ||
+			    (lane1_pre != lane1_pre_old)) {
+				lane0_pre_old = lane0_pre;
+				lane1_pre_old = lane1_pre;
+				to_cnt = TRAIN_CNT;
+			}
+
+			if (lane0_sw == VOL_SWING_LEVEL_NUM - 1)
+				lane0_is_swing_max = 1;
+			else
+				lane0_is_swing_max = 0;
+
+			if (lane1_sw == VOL_SWING_LEVEL_NUM - 1)
+				lane1_is_swing_max = 1;
+			else
+				lane1_is_swing_max = 0;
+
+			if (lane0_pre == PRE_EMPHASIS_LEVEL_NUM - 1)
+				lane0_is_pre_max = 1;
+			else
+				lane0_is_pre_max = 0;
+
+			if (lane1_pre == PRE_EMPHASIS_LEVEL_NUM - 1)
+				lane1_is_pre_max = 1;
+			else
+				lane1_is_pre_max = 0;
+		} else if (glb_lane_cnt == 4) {
+			lane0_sw = fp_rx_buf[0] & 0x3;
+			lane0_pre = (fp_rx_buf[0] >> 2) & 0x3;
+			lane1_sw = (fp_rx_buf[0] >> 4) & 0x3;
+			lane1_pre = (fp_rx_buf[0] >> 6) & 0x3;
+
+			lane2_sw = fp_rx_buf[1] & 0x3;
+			lane2_pre = (fp_rx_buf[1] >> 2) & 0x3;
+			lane3_sw = (fp_rx_buf[1] >> 4) & 0x3;
+			lane3_pre = (fp_rx_buf[1] >> 6) & 0x3;
+
+			if ((lane0_sw != lane0_sw_old) ||
+			    (lane1_sw != lane1_sw_old) ||
+			    (lane2_sw != lane2_sw_old) ||
+			    (lane3_sw != lane3_sw_old)) {
+				lane0_sw_old = lane0_sw;
+				lane1_sw_old = lane1_sw;
+				lane2_sw_old = lane2_sw;
+				lane3_sw_old = lane3_sw;
+				to_cnt = TRAIN_CNT;
+			}
+
+			if ((lane0_pre != lane0_pre_old) ||
+			    (lane1_pre != lane1_pre_old) ||
+			    (lane2_pre != lane2_pre_old) ||
+			    (lane3_pre != lane3_pre_old)) {
+				lane0_pre_old = lane0_pre;
+				lane1_pre_old = lane1_pre;
+				lane2_pre_old = lane2_pre;
+				lane3_pre_old = lane3_pre;
+				to_cnt = TRAIN_CNT;
+			}
+
+			if (lane0_sw == VOL_SWING_LEVEL_NUM - 1)
+				lane0_is_swing_max = 1;
+			else
+				lane0_is_swing_max = 0;
+
+			if (lane1_sw == VOL_SWING_LEVEL_NUM - 1)
+				lane1_is_swing_max = 1;
+			else
+				lane1_is_swing_max = 0;
+
+			if (lane2_sw == VOL_SWING_LEVEL_NUM - 1)
+				lane2_is_swing_max = 1;
+			else
+				lane2_is_swing_max = 0;
+
+			if (lane3_sw == VOL_SWING_LEVEL_NUM - 1)
+				lane3_is_swing_max = 1;
+			else
+				lane3_is_swing_max = 0;
+
+			if (lane0_pre == PRE_EMPHASIS_LEVEL_NUM - 1)
+				lane0_is_pre_max = 1;
+			else
+				lane0_is_pre_max = 0;
+
+			if (lane1_pre == PRE_EMPHASIS_LEVEL_NUM - 1)
+				lane1_is_pre_max = 1;
+			else
+				lane1_is_pre_max = 0;
+
+			if (lane2_pre == PRE_EMPHASIS_LEVEL_NUM - 1)
+				lane2_is_pre_max = 1;
+			else
+				lane2_is_pre_max = 0;
+
+			if (lane3_pre == PRE_EMPHASIS_LEVEL_NUM - 1)
+				lane3_is_pre_max = 1;
+			else
+				lane3_is_pre_max = 0;
+		}
+	}
+}
+
+int new2_dp_tps2_test(u32 sel)
+{
+	unsigned int to_cnt;
+	int ret;
+	int eq_end = 0;
+
+	u32 lane0_sw, lane0_pre;
+	u32 lane1_sw, lane1_pre;
+	u32 lane2_sw, lane2_pre;
+	u32 lane3_sw, lane3_pre;
+	u32 lane0_is_pre_max, lane1_is_pre_max, lane2_is_pre_max,
+	    lane3_is_pre_max;
+	u32 lane0_is_swing_max, lane1_is_swing_max, lane2_is_swing_max,
+	    lane3_is_swing_max;
+
+	u32 lane0_sw_old, lane0_pre_old;
+	u32 lane1_sw_old, lane1_pre_old;
+	u32 lane2_sw_old, lane2_pre_old;
+	u32 lane3_sw_old, lane3_pre_old;
+
+	lane0_sw = lane_cr_sw[0];
+	lane0_pre = lane_cr_pre[0];
+	lane1_sw = lane_cr_sw[1];
+	lane1_pre = lane_cr_pre[1];
+	lane2_sw = lane_cr_sw[2];
+	lane2_pre = lane_cr_pre[2];
+	lane3_sw = lane_cr_sw[3];
+	lane3_pre = lane_cr_pre[3];
+
+	lane0_sw_old = lane_cr_sw[0];
+	lane0_pre_old = lane_cr_pre[0];
+	lane1_sw_old = lane_cr_sw[1];
+	lane1_pre_old = lane_cr_pre[1];
+	lane2_sw_old = lane_cr_sw[2];
+	lane2_pre_old = lane_cr_pre[2];
+	lane3_sw_old = lane_cr_sw[3];
+	lane3_pre_old = lane_cr_pre[3];
+
+	lane0_is_pre_max = 0;
+	lane1_is_pre_max = 0;
+	lane2_is_pre_max = 0;
+	lane3_is_pre_max = 0;
+	lane0_is_swing_max = 0;
+	lane1_is_swing_max = 0;
+	lane2_is_swing_max = 0;
+	lane3_is_swing_max = 0;
+
+	to_cnt = TRAIN_CNT + 1;
+
+	while (1) {
+		fp_tx_buf[0] = 0x22; // set pattern 2 with scramble disable
+		// set pattern 1 with max swing and emphasis 0x13
+		fp_tx_buf[1] =
+		    ((lane0_is_pre_max & 0x1) << 5) | ((lane0_pre & 0x3) << 3) |
+		    ((lane0_is_swing_max & 0x1) << 2) | (lane0_sw & 0x3);
+		fp_tx_buf[2] =
+		    ((lane1_is_pre_max & 0x1) << 5) | ((lane1_pre & 0x3) << 3) |
+		    ((lane1_is_swing_max & 0x1) << 2) | (lane1_sw & 0x3);
+		fp_tx_buf[3] =
+		    ((lane2_is_pre_max & 0x1) << 5) | ((lane2_pre & 0x3) << 3) |
+		    ((lane2_is_swing_max & 0x1) << 2) | (lane2_sw & 0x3);
+		fp_tx_buf[4] =
+		    ((lane3_is_pre_max & 0x1) << 5) | ((lane3_pre & 0x3) << 3) |
+		    ((lane3_is_swing_max & 0x1) << 2) | (lane3_sw & 0x3);
+
+		edp_hal_link_training_ctrl(sel, 1, 0, 2);
+		new_phy_cfg(sel, lane0_sw, lane0_pre, lane1_sw, lane1_pre, lane2_sw,
+			    lane2_pre, lane3_sw, lane3_pre);
+
+		mdelay(20);
+
+		ret = aux_wr(sel, 0x0102, glb_lane_cnt + 1, fp_tx_buf);
+		if (ret != RET_OK)
+			return RET_FAIL;
+
+		if (training_aux_rd_interval_EQ > 1) {
+			udelay(training_aux_rd_interval_EQ); // wait for the
+							     // training finish
+		} else {
+			udelay(400);
+		}
+		//		mdelay(500);
+		ret = aux_rd(sel, 0x0202, 3, fp_rx_buf);
+		if (ret == -1)
+			return RET_FAIL;
+
+		if (glb_lane_cnt < 4) {
+			edp_dbg("EQ training reg[202h]:0x%x\n", fp_rx_buf[0]);
+			edp_dbg("EQ training reg[204h]:0x%x\n", fp_rx_buf[2]);
+		} else {
+			edp_dbg("EQ training reg[202h]:0x%x\n", fp_rx_buf[0]);
+			edp_dbg("EQ training reg[203h]:0x%x\n", fp_rx_buf[1]);
+			edp_dbg("EQ training reg[204h]:0x%x\n", fp_rx_buf[2]);
+		}
+
+		if (glb_lane_cnt == 1) {
+			if ((fp_rx_buf[0] & 0x01) != 0x01) {
+				return RET_FAIL;
+			}
+		} else if (glb_lane_cnt == 2) {
+			if (((fp_rx_buf[0] & 0x11) != 0x11)) {
+				return RET_FAIL;
+			}
+		} else if (glb_lane_cnt == 4) {
+			if (((fp_rx_buf[0] & 0x11) != 0x11) &&
+			    ((fp_rx_buf[1] & 0x11) != 0x11)) {
+				return RET_FAIL;
+			}
+		}
+
+		if (fp_rx_buf[2] & 0x01) {
+			if (glb_lane_cnt == 1) {
+				if ((fp_rx_buf[0] & 0x07) == 0x07) {
+					eq_end = 1;
+				}
+			} else if (glb_lane_cnt == 2) {
+				if (((fp_rx_buf[0] & 0x77) == 0x77)) {
+					eq_end = 1;
+				}
+			} else if (glb_lane_cnt == 4) {
+				if (((fp_rx_buf[0] & 0x77) == 0x77) &&
+				    ((fp_rx_buf[1] & 0x77) == 0x77)) {
+					eq_end = 1;
+				}
+			}
+
+			if (eq_end == 1) {
+				fp_tx_buf[0] = 0x00; // 102 --- indicate the end
+						     // of training
+				fp_tx_buf[1] =
+				    ((lane0_is_pre_max & 0x1) << 5) |
+				    ((lane0_sw & 0x3) << 3) |
+				    ((lane0_is_swing_max & 0x1) << 2) |
+				    (lane0_pre & 0x3);
+				fp_tx_buf[2] =
+				    ((lane1_is_pre_max & 0x1) << 5) |
+				    ((lane1_sw & 0x3) << 3) |
+				    ((lane1_is_swing_max & 0x1) << 2) |
+				    (lane1_pre & 0x3);
+				fp_tx_buf[3] =
+				    ((lane2_is_pre_max & 0x1) << 5) |
+				    ((lane2_sw & 0x3) << 3) |
+				    ((lane2_is_swing_max & 0x1) << 2) |
+				    (lane2_pre & 0x3);
+				fp_tx_buf[4] =
+				    ((lane3_is_pre_max & 0x1) << 5) |
+				    ((lane3_sw & 0x3) << 3) |
+				    ((lane3_is_swing_max & 0x1) << 2) |
+				    (lane3_pre & 0x3);
+
+				fp_tx_buf[5] = 0x00; // 107
+				fp_tx_buf[6] = 0x01; // 108
+				fp_tx_buf[7] = 0x00; // 109
+				if (eDP_capable)
+					fp_tx_buf[8] = 0x01; // 10a
+				else
+					fp_tx_buf[8] = 0x00; // 10a
+				fp_tx_buf[9] = 0x00;	 // 10b
+				fp_tx_buf[10] = 0x00;	// 10c
+				fp_tx_buf[11] = 0x00;	// 10d
+				fp_tx_buf[12] = 0x00;	// 10e
+				ret = aux_wr(sel, 0x0102, 13, fp_tx_buf);
+				if (ret != RET_OK)
+					return RET_FAIL;
+
+				return RET_OK;
+			}
+		}
+
+		if (glb_lane_cnt < 4)
+			ret = aux_rd(sel, 0x0206, 1, fp_rx_buf);
+		else
+			ret = aux_rd(sel, 0x0206, 2, fp_rx_buf);
+		if (ret == -1)
+			return RET_FAIL;
+		if (glb_lane_cnt < 4)
+			edp_dbg("EQ training reg[206h]:%xh\n", fp_rx_buf[0]);
+		else {
+			edp_dbg("EQ training reg[206h]:%xh\n", fp_rx_buf[0]);
+			edp_dbg("EQ training reg[207h]:%xh\n", fp_rx_buf[1]);
+		}
+
+		if (glb_lane_cnt == 1) {
+			lane0_sw = fp_rx_buf[0] & 0x3;
+			lane0_pre = (fp_rx_buf[0] >> 2) & 0x3;
+
+			if ((lane0_sw != lane0_sw_old)) {
+				lane0_sw_old = lane0_sw;
+				to_cnt = TRAIN_CNT;
+			}
+
+			if ((lane0_pre != lane0_pre_old)) {
+				lane0_pre_old = lane0_pre;
+				to_cnt = TRAIN_CNT;
+			}
+
+			if (lane0_sw == VOL_SWING_LEVEL_NUM - 1)
+				lane0_is_swing_max = 1;
+			else
+				lane0_is_swing_max = 0;
+
+			if (lane0_pre == PRE_EMPHASIS_LEVEL_NUM - 1)
+				lane0_is_pre_max = 1;
+			else
+				lane0_is_pre_max = 0;
+		} else if (glb_lane_cnt == 2) {
+			lane0_sw = fp_rx_buf[0] & 0x3;
+			lane0_pre = (fp_rx_buf[0] >> 2) & 0x3;
+			lane1_sw = (fp_rx_buf[0] >> 4) & 0x3;
+			lane1_pre = (fp_rx_buf[0] >> 6) & 0x3;
+
+			if ((lane0_sw != lane0_sw_old) ||
+			    (lane1_sw != lane1_sw_old)) {
+
+				lane0_sw_old = lane0_sw;
+				lane1_sw_old = lane1_sw;
+				to_cnt = TRAIN_CNT;
+			}
+
+			if ((lane0_pre != lane0_pre_old) ||
+			    (lane1_pre != lane1_pre_old)) {
+				lane0_pre_old = lane0_pre;
+				lane1_pre_old = lane1_pre;
+				to_cnt = TRAIN_CNT;
+			}
+
+			if (lane0_sw == VOL_SWING_LEVEL_NUM - 1)
+				lane0_is_swing_max = 1;
+			else
+				lane0_is_swing_max = 0;
+
+			if (lane1_sw == VOL_SWING_LEVEL_NUM - 1)
+				lane1_is_swing_max = 1;
+			else
+				lane1_is_swing_max = 0;
+
+			if (lane0_pre == PRE_EMPHASIS_LEVEL_NUM - 1)
+				lane0_is_pre_max = 1;
+			else
+				lane0_is_pre_max = 0;
+
+			if (lane1_pre == PRE_EMPHASIS_LEVEL_NUM - 1)
+				lane1_is_pre_max = 1;
+			else
+				lane1_is_pre_max = 0;
+		} else if (glb_lane_cnt == 4) {
+			lane0_sw = fp_rx_buf[0] & 0x3;
+			lane0_pre = (fp_rx_buf[0] >> 2) & 0x3;
+			lane1_sw = (fp_rx_buf[0] >> 4) & 0x3;
+			lane1_pre = (fp_rx_buf[0] >> 6) & 0x3;
+
+			lane2_sw = fp_rx_buf[1] & 0x3;
+			lane2_pre = (fp_rx_buf[1] >> 2) & 0x3;
+			lane3_sw = (fp_rx_buf[1] >> 4) & 0x3;
+			lane3_pre = (fp_rx_buf[1] >> 6) & 0x3;
+
+			if ((lane0_sw != lane0_sw_old) ||
+			    (lane1_sw != lane1_sw_old) ||
+			    (lane2_sw != lane2_sw_old) ||
+			    (lane3_sw != lane3_sw_old)) {
+				lane0_sw_old = lane0_sw;
+				lane1_sw_old = lane1_sw;
+				lane2_sw_old = lane2_sw;
+				lane3_sw_old = lane3_sw;
+				to_cnt = TRAIN_CNT;
+			}
+
+			if ((lane0_pre != lane0_pre_old) ||
+			    (lane1_pre != lane1_pre_old) ||
+			    (lane2_pre != lane2_pre_old) ||
+			    (lane3_pre != lane3_pre_old)) {
+				lane0_pre_old = lane0_pre;
+				lane1_pre_old = lane1_pre;
+				lane2_pre_old = lane2_pre;
+				lane3_pre_old = lane3_pre;
+				to_cnt = TRAIN_CNT;
+			}
+
+			if (lane0_sw == VOL_SWING_LEVEL_NUM - 1)
+				lane0_is_swing_max = 1;
+			else
+				lane0_is_swing_max = 0;
+
+			if (lane1_sw == VOL_SWING_LEVEL_NUM - 1)
+				lane1_is_swing_max = 1;
+			else
+				lane1_is_swing_max = 0;
+
+			if (lane2_sw == VOL_SWING_LEVEL_NUM - 1)
+				lane2_is_swing_max = 1;
+			else
+				lane2_is_swing_max = 0;
+
+			if (lane3_sw == VOL_SWING_LEVEL_NUM - 1)
+				lane3_is_swing_max = 1;
+			else
+				lane3_is_swing_max = 0;
+
+			if (lane0_pre == PRE_EMPHASIS_LEVEL_NUM - 1)
+				lane0_is_pre_max = 1;
+			else
+				lane0_is_pre_max = 0;
+
+			if (lane1_pre == PRE_EMPHASIS_LEVEL_NUM - 1)
+				lane1_is_pre_max = 1;
+			else
+				lane1_is_pre_max = 0;
+
+			if (lane2_pre == PRE_EMPHASIS_LEVEL_NUM - 1)
+				lane2_is_pre_max = 1;
+			else
+				lane2_is_pre_max = 0;
+
+			if (lane3_pre == PRE_EMPHASIS_LEVEL_NUM - 1)
+				lane3_is_pre_max = 1;
+			else
+				lane3_is_pre_max = 0;
+		}
+
+		to_cnt--;
+
+		if (to_cnt == 0) {
+			return RET_FAIL;
+		}
+	}
+}
+
+int new_dp_tps1_test(u32 sel)
+{
+	unsigned int to_cnt;
+	int ret;
+
+	u32 lane0_sw, lane0_pre;
+	u32 lane1_sw, lane1_pre;
+	u32 lane2_sw, lane2_pre;
+	u32 lane3_sw, lane3_pre;
+	u32 lane0_is_pre_max, lane1_is_pre_max, lane2_is_pre_max,
+	    lane3_is_pre_max;
+	u32 lane0_is_swing_max, lane1_is_swing_max, lane2_is_swing_max,
+	    lane3_is_swing_max;
+
+	u32 lane0_sw_old, lane0_pre_old;
+	u32 lane1_sw_old, lane1_pre_old;
+	u32 lane2_sw_old, lane2_pre_old;
+	u32 lane3_sw_old, lane3_pre_old;
+
+	lane0_sw = 0;
+	lane0_pre = 0;
+	lane1_sw = 0;
+	lane1_pre = 0;
+	lane2_sw = 0;
+	lane2_pre = 0;
+	lane3_sw = 0;
+	lane3_pre = 0;
+
+	lane0_sw_old = 0;
+	lane0_pre_old = 0;
+	lane1_sw_old = 0;
+	lane1_pre_old = 0;
+	lane2_sw_old = 0;
+	lane2_pre_old = 0;
+	lane3_sw_old = 0;
+	lane3_pre_old = 0;
+
+	lane0_is_pre_max = 0;
+	lane1_is_pre_max = 0;
+	lane2_is_pre_max = 0;
+	lane3_is_pre_max = 0;
+	lane0_is_swing_max = 0;
+	lane1_is_swing_max = 0;
+	lane2_is_swing_max = 0;
+	lane3_is_swing_max = 0;
+
+	to_cnt = TRAIN_CNT;
+
+	while (1) {
+		udelay(training_aux_rd_interval_CR); // wait for the training
+						     // finish
+
+		if (glb_lane_cnt < 4)
+			ret = aux_rd(sel, 0x0202, 1, fp_rx_buf);
+		else
+			ret = aux_rd(sel, 0x0202, 2, fp_rx_buf);
+		if (ret == -1)
+			return RET_FAIL;
+
+		if (glb_lane_cnt < 4) {
+			edp_dbg("CR training reg[202h]:0x%x\n", fp_rx_buf[0]);
+		} else {
+			edp_dbg("CR training reg[202h]:0x%x\n", fp_rx_buf[0]);
+			edp_dbg("CR training reg[203h]:0x%x\n", fp_rx_buf[1]);
+		}
+
+		if (glb_lane_cnt == 1) {
+			if ((fp_rx_buf[0] & 0x01) == 0x01)
+				return RET_OK;
+		} else if (glb_lane_cnt == 2) {
+			if ((fp_rx_buf[0] & 0x11) == 0x11)
+				return RET_OK;
+		} else if (glb_lane_cnt == 4) {
+			if (((fp_rx_buf[0] & 0x11) == 0x11) &&
+			    ((fp_rx_buf[1] & 0x11) == 0x11))
+				return RET_OK;
+		}
+
+		if (glb_lane_cnt < 4)
+			ret = aux_rd(sel, 0x0206, 1, fp_rx_buf);
+		else
+			ret = aux_rd(sel, 0x0206, 2, fp_rx_buf);
+		if (ret == -1)
+			return RET_FAIL;
+		if (glb_lane_cnt < 4)
+			edp_dbg("CR training reg[206h]:%xh\n", fp_rx_buf[0]);
+		else {
+			edp_dbg("CR training reg[206h]:%xh\n", fp_rx_buf[0]);
+			edp_dbg("CR training reg[207h]:%xh\n", fp_rx_buf[1]);
+		}
+
+		if (glb_lane_cnt == 1) {
+			lane0_sw = fp_rx_buf[0] & 0x3;
+			lane0_pre = (fp_rx_buf[0] >> 2) & 0x3;
+
+			if ((lane0_sw != lane0_sw_old)) {
+				lane0_sw_old = lane0_sw;
+				to_cnt = TRAIN_CNT;
+			}
+
+			if ((lane0_pre != lane0_pre_old)) {
+				lane0_pre_old = lane0_pre;
+				to_cnt = TRAIN_CNT;
+			}
+
+			if (lane0_sw == VOL_SWING_LEVEL_NUM - 1)
+				lane0_is_swing_max = 1;
+			else
+				lane0_is_swing_max = 0;
+
+			if (lane0_pre == PRE_EMPHASIS_LEVEL_NUM - 1)
+				lane0_is_pre_max = 1;
+			else
+				lane0_is_pre_max = 0;
+		} else if (glb_lane_cnt == 2) {
+			lane0_sw = fp_rx_buf[0] & 0x3;
+			lane0_pre = (fp_rx_buf[0] >> 2) & 0x3;
+			lane1_sw = (fp_rx_buf[0] >> 4) & 0x3;
+			lane1_pre = (fp_rx_buf[0] >> 6) & 0x3;
+
+			if ((lane0_sw != lane0_sw_old) ||
+			    (lane1_sw != lane1_sw_old)) {
+
+				lane0_sw_old = lane0_sw;
+				lane1_sw_old = lane1_sw;
+				to_cnt = TRAIN_CNT;
+			}
+
+			if ((lane0_pre != lane0_pre_old) ||
+			    (lane1_pre != lane1_pre_old)) {
+				lane0_pre_old = lane0_pre;
+				lane1_pre_old = lane1_pre;
+				to_cnt = TRAIN_CNT;
+			}
+
+			if (lane0_sw == VOL_SWING_LEVEL_NUM - 1)
+				lane0_is_swing_max = 1;
+			else
+				lane0_is_swing_max = 0;
+
+			if (lane1_sw == VOL_SWING_LEVEL_NUM - 1)
+				lane1_is_swing_max = 1;
+			else
+				lane1_is_swing_max = 0;
+
+			if (lane0_pre == PRE_EMPHASIS_LEVEL_NUM - 1)
+				lane0_is_pre_max = 1;
+			else
+				lane0_is_pre_max = 0;
+
+			if (lane1_pre == PRE_EMPHASIS_LEVEL_NUM - 1)
+				lane1_is_pre_max = 1;
+			else
+				lane1_is_pre_max = 0;
+		} else if (glb_lane_cnt == 4) {
+			lane0_sw = fp_rx_buf[0] & 0x3;
+			lane0_pre = (fp_rx_buf[0] >> 2) & 0x3;
+			lane1_sw = (fp_rx_buf[0] >> 4) & 0x3;
+			lane1_pre = (fp_rx_buf[0] >> 6) & 0x3;
+
+			lane2_sw = fp_rx_buf[1] & 0x3;
+			lane2_pre = (fp_rx_buf[1] >> 2) & 0x3;
+			lane3_sw = (fp_rx_buf[1] >> 4) & 0x3;
+			lane3_pre = (fp_rx_buf[1] >> 6) & 0x3;
+
+			if ((lane0_sw != lane0_sw_old) ||
+			    (lane1_sw != lane1_sw_old) ||
+			    (lane2_sw != lane2_sw_old) ||
+			    (lane3_sw != lane3_sw_old)) {
+				lane0_sw_old = lane0_sw;
+				lane1_sw_old = lane1_sw;
+				lane2_sw_old = lane2_sw;
+				lane3_sw_old = lane3_sw;
+				to_cnt = TRAIN_CNT;
+			}
+
+			if ((lane0_pre != lane0_pre_old) ||
+			    (lane1_pre != lane1_pre_old) ||
+			    (lane2_pre != lane2_pre_old) ||
+			    (lane3_pre != lane3_pre_old)) {
+				lane0_pre_old = lane0_pre;
+				lane1_pre_old = lane1_pre;
+				lane2_pre_old = lane2_pre;
+				lane3_pre_old = lane3_pre;
+				to_cnt = TRAIN_CNT;
+			}
+
+			if (lane0_sw == VOL_SWING_LEVEL_NUM - 1)
+				lane0_is_swing_max = 1;
+			else
+				lane0_is_swing_max = 0;
+
+			if (lane1_sw == VOL_SWING_LEVEL_NUM - 1)
+				lane1_is_swing_max = 1;
+			else
+				lane1_is_swing_max = 0;
+
+			if (lane2_sw == VOL_SWING_LEVEL_NUM - 1)
+				lane2_is_swing_max = 1;
+			else
+				lane2_is_swing_max = 0;
+
+			if (lane3_sw == VOL_SWING_LEVEL_NUM - 1)
+				lane3_is_swing_max = 1;
+			else
+				lane3_is_swing_max = 0;
+
+			if (lane0_pre == PRE_EMPHASIS_LEVEL_NUM - 1)
+				lane0_is_pre_max = 1;
+			else
+				lane0_is_pre_max = 0;
+
+			if (lane1_pre == PRE_EMPHASIS_LEVEL_NUM - 1)
+				lane1_is_pre_max = 1;
+			else
+				lane1_is_pre_max = 0;
+
+			if (lane2_pre == PRE_EMPHASIS_LEVEL_NUM - 1)
+				lane2_is_pre_max = 1;
+			else
+				lane2_is_pre_max = 0;
+
+			if (lane3_pre == PRE_EMPHASIS_LEVEL_NUM - 1)
+				lane3_is_pre_max = 1;
+			else
+				lane3_is_pre_max = 0;
+		}
+
+		to_cnt--;
+
+		if (to_cnt == 0) {
+			return RET_FAIL;
+		}
+
+		fp_tx_buf[0] = 0x21; // set pattern 1 with scramble disable
+		// set pattern 1 with max swing and emphasis 0x13
+		fp_tx_buf[1] =
+		    ((lane0_is_pre_max & 0x1) << 5) | ((lane0_pre & 0x3) << 3) |
+		    ((lane0_is_swing_max & 0x1) << 2) | (lane0_sw & 0x3);
+		fp_tx_buf[2] =
+		    ((lane1_is_pre_max & 0x1) << 5) | ((lane1_pre & 0x3) << 3) |
+		    ((lane1_is_swing_max & 0x1) << 2) | (lane1_sw & 0x3);
+		fp_tx_buf[3] =
+		    ((lane2_is_pre_max & 0x1) << 5) | ((lane2_pre & 0x3) << 3) |
+		    ((lane2_is_swing_max & 0x1) << 2) | (lane2_sw & 0x3);
+		fp_tx_buf[4] =
+		    ((lane3_is_pre_max & 0x1) << 5) | ((lane3_pre & 0x3) << 3) |
+		    ((lane3_is_swing_max & 0x1) << 2) | (lane3_sw & 0x3);
+
+		edp_hal_link_training_ctrl(sel, 1, 0, 1);
+		new_phy_cfg(sel, lane0_sw, lane0_pre, lane1_sw, lane1_pre,
+			    lane2_sw, lane2_pre, lane3_sw, lane3_pre);
+		mdelay(20);
+
+		ret = aux_wr(sel, 0x00102, glb_lane_cnt + 1, fp_tx_buf);
+
+		if (ret != RET_OK)
+			return RET_FAIL;
+	}
+}
+
+int new_dp_tps2_test(u32 sel)
+{
+	unsigned int to_cnt;
+	int ret;
+	int eq_end = 0;
+
+	u32 lane0_sw, lane0_pre;
+	u32 lane1_sw, lane1_pre;
+	u32 lane2_sw, lane2_pre;
+	u32 lane3_sw, lane3_pre;
+	u32 lane0_is_pre_max, lane1_is_pre_max, lane2_is_pre_max,
+	    lane3_is_pre_max;
+	u32 lane0_is_swing_max, lane1_is_swing_max, lane2_is_swing_max,
+	    lane3_is_swing_max;
+
+	u32 lane0_sw_old, lane0_pre_old;
+	u32 lane1_sw_old, lane1_pre_old;
+	u32 lane2_sw_old, lane2_pre_old;
+	u32 lane3_sw_old, lane3_pre_old;
+
+	lane0_sw = 0;
+	lane0_pre = 0;
+	lane1_sw = 0;
+	lane1_pre = 0;
+	lane2_sw = 0;
+	lane2_pre = 0;
+	lane3_sw = 0;
+	lane3_pre = 0;
+
+	lane0_sw_old = 0;
+	lane0_pre_old = 0;
+	lane1_sw_old = 0;
+	lane1_pre_old = 0;
+	lane2_sw_old = 0;
+	lane2_pre_old = 0;
+	lane3_sw_old = 0;
+	lane3_pre_old = 0;
+
+	lane0_is_pre_max = 0;
+	lane1_is_pre_max = 0;
+	lane2_is_pre_max = 0;
+	lane3_is_pre_max = 0;
+	lane0_is_swing_max = 0;
+	lane1_is_swing_max = 0;
+	lane2_is_swing_max = 0;
+	lane3_is_swing_max = 0;
+
+	to_cnt = TRAIN_CNT + 1;
+
+	while (1) {
+		if (training_aux_rd_interval_EQ > 1) {
+			/*wait for the training finish*/
+			udelay(training_aux_rd_interval_EQ);
+		} else {
+			udelay(400);
+		}
+		ret = aux_rd(sel, 0x0202, 3, fp_rx_buf);
+		if (ret == -1)
+			return RET_FAIL;
+
+		if (glb_lane_cnt < 4) {
+			edp_dbg("EQ training reg[202h]:0x%x\n", fp_rx_buf[0]);
+			edp_dbg("EQ training reg[204h]:0x%x\n", fp_rx_buf[2]);
+		} else {
+			edp_dbg("EQ training reg[202h]:0x%x\n", fp_rx_buf[0]);
+			edp_dbg("EQ training reg[203h]:0x%x\n", fp_rx_buf[1]);
+			edp_dbg("EQ training reg[204h]:0x%x\n", fp_rx_buf[2]);
+		}
+
+		if (glb_lane_cnt == 1) {
+			if ((fp_rx_buf[0] & 0x01) != 0x01) {
+				return RET_FAIL;
+			}
+		} else if (glb_lane_cnt == 2) {
+			if (((fp_rx_buf[0] & 0x11) != 0x11)) {
+				return RET_FAIL;
+			}
+		} else if (glb_lane_cnt == 4) {
+			if (((fp_rx_buf[0] & 0x11) != 0x11) &&
+			    ((fp_rx_buf[1] & 0x11) != 0x11)) {
+				return RET_FAIL;
+			}
+		}
+
+		if (fp_rx_buf[2] & 0x01) {
+			if (glb_lane_cnt == 1) {
+				if ((fp_rx_buf[0] & 0x07) == 0x07) {
+					eq_end = 1;
+				}
+			} else if (glb_lane_cnt == 2) {
+				if (((fp_rx_buf[0] & 0x77) == 0x77)) {
+					eq_end = 1;
+				}
+			} else if (glb_lane_cnt == 4) {
+				if (((fp_rx_buf[0] & 0x77) == 0x77) &&
+				    ((fp_rx_buf[1] & 0x77) == 0x77)) {
+					eq_end = 1;
+				}
+			}
+
+			if (eq_end == 1) {
+				fp_tx_buf[0] = 0x00; // 102 --- indicate the end
+						     // of training
+				fp_tx_buf[1] =
+				    ((lane0_is_pre_max & 0x1) << 5) |
+				    ((lane0_sw & 0x3) << 3) |
+				    ((lane0_is_swing_max & 0x1) << 2) |
+				    (lane0_pre & 0x3);
+				fp_tx_buf[2] =
+				    ((lane1_is_pre_max & 0x1) << 5) |
+				    ((lane1_sw & 0x3) << 3) |
+				    ((lane1_is_swing_max & 0x1) << 2) |
+				    (lane1_pre & 0x3);
+				fp_tx_buf[3] =
+				    ((lane2_is_pre_max & 0x1) << 5) |
+				    ((lane2_sw & 0x3) << 3) |
+				    ((lane2_is_swing_max & 0x1) << 2) |
+				    (lane2_pre & 0x3);
+				fp_tx_buf[4] =
+				    ((lane3_is_pre_max & 0x1) << 5) |
+				    ((lane3_sw & 0x3) << 3) |
+				    ((lane3_is_swing_max & 0x1) << 2) |
+				    (lane3_pre & 0x3);
+
+				fp_tx_buf[5] = 0x00; /* 107 */
+				fp_tx_buf[6] = 0x01; /* 108 */
+				fp_tx_buf[7] = 0x00; /* 109 */
+				if (eDP_capable)
+					fp_tx_buf[8] = 0x01; /* 10a */
+				else
+					fp_tx_buf[8] = 0x00; /* 10a */
+				fp_tx_buf[9] = 0x00;	 /* 10b */
+				fp_tx_buf[10] = 0x00;	/* 10c */
+				fp_tx_buf[11] = 0x00;	/* 10d */
+				fp_tx_buf[12] = 0x00;	/* 10e */
+				ret = aux_wr(sel, 0x0102, 13, fp_tx_buf);
+				if (ret != RET_OK)
+					return RET_FAIL;
+
+				return RET_OK;
+			}
+		}
+
+		if (glb_lane_cnt < 4)
+			ret = aux_rd(sel, 0x0206, 1, fp_rx_buf);
+		else
+			ret = aux_rd(sel, 0x0206, 2, fp_rx_buf);
+		if (ret == -1)
+			return RET_FAIL;
+		if (glb_lane_cnt < 4)
+			edp_dbg("EQ training reg[206h]:%xh\n", fp_rx_buf[0]);
+		else {
+			edp_dbg("EQ training reg[206h]:%xh\n", fp_rx_buf[0]);
+			edp_dbg("EQ training reg[207h]:%xh\n", fp_rx_buf[1]);
+		}
+
+		if (glb_lane_cnt == 1) {
+			lane0_sw = fp_rx_buf[0] & 0x3;
+			lane0_pre = (fp_rx_buf[0] >> 2) & 0x3;
+
+			if ((lane0_sw != lane0_sw_old)) {
+				lane0_sw_old = lane0_sw;
+				to_cnt = TRAIN_CNT;
+			}
+
+			if ((lane0_pre != lane0_pre_old)) {
+				lane0_pre_old = lane0_pre;
+				to_cnt = TRAIN_CNT;
+			}
+
+			if (lane0_sw == VOL_SWING_LEVEL_NUM - 1)
+				lane0_is_swing_max = 1;
+			else
+				lane0_is_swing_max = 0;
+
+			if (lane0_pre == PRE_EMPHASIS_LEVEL_NUM - 1)
+				lane0_is_pre_max = 1;
+			else
+				lane0_is_pre_max = 0;
+		} else if (glb_lane_cnt == 2) {
+			lane0_sw = fp_rx_buf[0] & 0x3;
+			lane0_pre = (fp_rx_buf[0] >> 2) & 0x3;
+			lane1_sw = (fp_rx_buf[0] >> 4) & 0x3;
+			lane1_pre = (fp_rx_buf[0] >> 6) & 0x3;
+
+			if ((lane0_sw != lane0_sw_old) ||
+			    (lane1_sw != lane1_sw_old)) {
+
+				lane0_sw_old = lane0_sw;
+				lane1_sw_old = lane1_sw;
+				to_cnt = TRAIN_CNT;
+			}
+
+			if ((lane0_pre != lane0_pre_old) ||
+			    (lane1_pre != lane1_pre_old)) {
+				lane0_pre_old = lane0_pre;
+				lane1_pre_old = lane1_pre;
+				to_cnt = TRAIN_CNT;
+			}
+
+			if (lane0_sw == VOL_SWING_LEVEL_NUM - 1)
+				lane0_is_swing_max = 1;
+			else
+				lane0_is_swing_max = 0;
+
+			if (lane1_sw == VOL_SWING_LEVEL_NUM - 1)
+				lane1_is_swing_max = 1;
+			else
+				lane1_is_swing_max = 0;
+
+			if (lane0_pre == PRE_EMPHASIS_LEVEL_NUM - 1)
+				lane0_is_pre_max = 1;
+			else
+				lane0_is_pre_max = 0;
+
+			if (lane1_pre == PRE_EMPHASIS_LEVEL_NUM - 1)
+				lane1_is_pre_max = 1;
+			else
+				lane1_is_pre_max = 0;
+		} else if (glb_lane_cnt == 4) {
+			lane0_sw = fp_rx_buf[0] & 0x3;
+			lane0_pre = (fp_rx_buf[0] >> 2) & 0x3;
+			lane1_sw = (fp_rx_buf[0] >> 4) & 0x3;
+			lane1_pre = (fp_rx_buf[0] >> 6) & 0x3;
+
+			lane2_sw = fp_rx_buf[1] & 0x3;
+			lane2_pre = (fp_rx_buf[1] >> 2) & 0x3;
+			lane3_sw = (fp_rx_buf[1] >> 4) & 0x3;
+			lane3_pre = (fp_rx_buf[1] >> 6) & 0x3;
+
+			if ((lane0_sw != lane0_sw_old) ||
+			    (lane1_sw != lane1_sw_old) ||
+			    (lane2_sw != lane2_sw_old) ||
+			    (lane3_sw != lane3_sw_old)) {
+				lane0_sw_old = lane0_sw;
+				lane1_sw_old = lane1_sw;
+				lane2_sw_old = lane2_sw;
+				lane3_sw_old = lane3_sw;
+				to_cnt = TRAIN_CNT;
+			}
+
+			if ((lane0_pre != lane0_pre_old) ||
+			    (lane1_pre != lane1_pre_old) ||
+			    (lane2_pre != lane2_pre_old) ||
+			    (lane3_pre != lane3_pre_old)) {
+				lane0_pre_old = lane0_pre;
+				lane1_pre_old = lane1_pre;
+				lane2_pre_old = lane2_pre;
+				lane3_pre_old = lane3_pre;
+				to_cnt = TRAIN_CNT;
+			}
+
+			if (lane0_sw == VOL_SWING_LEVEL_NUM - 1)
+				lane0_is_swing_max = 1;
+			else
+				lane0_is_swing_max = 0;
+
+			if (lane1_sw == VOL_SWING_LEVEL_NUM - 1)
+				lane1_is_swing_max = 1;
+			else
+				lane1_is_swing_max = 0;
+
+			if (lane2_sw == VOL_SWING_LEVEL_NUM - 1)
+				lane2_is_swing_max = 1;
+			else
+				lane2_is_swing_max = 0;
+
+			if (lane3_sw == VOL_SWING_LEVEL_NUM - 1)
+				lane3_is_swing_max = 1;
+			else
+				lane3_is_swing_max = 0;
+
+			if (lane0_pre == PRE_EMPHASIS_LEVEL_NUM - 1)
+				lane0_is_pre_max = 1;
+			else
+				lane0_is_pre_max = 0;
+
+			if (lane1_pre == PRE_EMPHASIS_LEVEL_NUM - 1)
+				lane1_is_pre_max = 1;
+			else
+				lane1_is_pre_max = 0;
+
+			if (lane2_pre == PRE_EMPHASIS_LEVEL_NUM - 1)
+				lane2_is_pre_max = 1;
+			else
+				lane2_is_pre_max = 0;
+
+			if (lane3_pre == PRE_EMPHASIS_LEVEL_NUM - 1)
+				lane3_is_pre_max = 1;
+			else
+				lane3_is_pre_max = 0;
+		}
+
+		to_cnt--;
+
+		if (to_cnt == 0) {
+			return RET_FAIL;
+		}
+
+		fp_tx_buf[0] = 0x22; /* set pattern 2 with scramble disable */
+		/* set pattern 1 with max swing and emphasis 0x13 */
+		fp_tx_buf[1] =
+		    ((lane0_is_pre_max & 0x1) << 5) | ((lane0_pre & 0x3) << 3) |
+		    ((lane0_is_swing_max & 0x1) << 2) | (lane0_sw & 0x3);
+		fp_tx_buf[2] =
+		    ((lane1_is_pre_max & 0x1) << 5) | ((lane1_pre & 0x3) << 3) |
+		    ((lane1_is_swing_max & 0x1) << 2) | (lane1_sw & 0x3);
+		fp_tx_buf[3] =
+		    ((lane2_is_pre_max & 0x1) << 5) | ((lane2_pre & 0x3) << 3) |
+		    ((lane2_is_swing_max & 0x1) << 2) | (lane2_sw & 0x3);
+		fp_tx_buf[4] =
+		    ((lane3_is_pre_max & 0x1) << 5) | ((lane3_pre & 0x3) << 3) |
+		    ((lane3_is_swing_max & 0x1) << 2) | (lane3_sw & 0x3);
+
+		edp_hal_link_training_ctrl(sel, 1, 0, 2);
+		new_phy_cfg(sel, lane0_sw, lane0_pre, lane1_sw, lane1_pre,
+			    lane2_sw, lane2_pre, lane3_sw, lane3_pre);
+
+		mdelay(20);
+
+		ret = aux_wr(sel, 0x0102, glb_lane_cnt + 1, fp_tx_buf);
+		if (ret != RET_OK)
+			return RET_FAIL;
+	}
+}
+
+int new1_dp_tps1_test(u32 sel)
+{
+	unsigned int to_cnt;
+	int ret;
+
+	u32 line_status = 0, i = 0;
+	u32 lane0_sw, lane0_pre;
+	u32 lane1_sw, lane1_pre;
+	u32 lane2_sw, lane2_pre;
+	u32 lane3_sw, lane3_pre;
+	u32 lane0_is_pre_max, lane1_is_pre_max, lane2_is_pre_max,
+	    lane3_is_pre_max;
+	u32 lane0_is_swing_max, lane1_is_swing_max, lane2_is_swing_max,
+	    lane3_is_swing_max;
+	char fp_temp_buf[16] = {0};
+
+	lane0_sw = 0;
+	lane0_pre = 0;
+	lane1_sw = 0;
+	lane1_pre = 0;
+	lane2_sw = 0;
+	lane2_pre = 0;
+	lane3_sw = 0;
+	lane3_pre = 0;
+
+	lane0_is_pre_max = 0;
+	lane1_is_pre_max = 0;
+	lane2_is_pre_max = 0;
+	lane3_is_pre_max = 0;
+	lane0_is_swing_max = 0;
+	lane1_is_swing_max = 0;
+	lane2_is_swing_max = 0;
+	lane3_is_swing_max = 0;
+
+	edp_hal_link_training_ctrl(sel, 1, 0, 1);
+	to_cnt = TRAIN_CNT + 1;
+
+	while (1) {
+		/* wait for the training finish */
+		udelay(training_aux_rd_interval_CR);
+		/* read 0x0202 */
+		ret = aux_rd(sel, 0x0202, (glb_lane_cnt + 1) / 2, fp_rx_buf);
+		if (ret == -1) {
+			edp_wrn("failed to read lane status!");
+			return RET_FAIL;
+		}
+		ret = aux_rd(sel, 0x0206, (glb_lane_cnt + 1) / 2, fp_temp_buf);
+		if (ret == -1) {
+			edp_wrn("failed to read adjust request!");
+			return RET_FAIL;
+		}
+		fp_rx_buf[3] = fp_temp_buf[0];
+		if (glb_lane_cnt > 2)
+			fp_rx_buf[4] = fp_temp_buf[1];
+
+		lane0_sw = fp_rx_buf[3] & 0x3; /* lane:1 */
+		lane0_pre = (fp_rx_buf[3] & 0xc) >> 2;
+
+		if (lane0_sw == VOL_SWING_LEVEL_NUM - 1)
+			lane0_is_swing_max = 1;
+		else
+			lane0_is_swing_max = 0;
+
+		if (lane0_pre == PRE_EMPHASIS_LEVEL_NUM - 1)
+			lane0_is_pre_max = 1;
+		else
+			lane0_is_pre_max = 0;
+
+		edp_dbg("CR training reg[202h]:%xh\n", fp_rx_buf[0]);
+		edp_dbg("CR training reg[206h]:%xh\n", fp_rx_buf[3]);
+		/* lane:2 */
+		if (glb_lane_cnt > 1) {
+			lane1_sw = (fp_rx_buf[3] & 0x30) >> 4;
+			lane1_pre = (fp_rx_buf[3] & 0xc0) >> 6;
+
+			if (lane1_sw == VOL_SWING_LEVEL_NUM - 1)
+				lane1_is_swing_max = 1;
+			else
+				lane1_is_swing_max = 0;
+
+			if (lane1_pre == PRE_EMPHASIS_LEVEL_NUM - 1)
+				lane1_is_pre_max = 1;
+			else
+				lane1_is_pre_max = 0;
+		}
+		if (glb_lane_cnt > 3) {
+			lane2_sw = fp_rx_buf[4] & 0x3;
+			lane2_pre = (fp_rx_buf[4] & 0xc) >> 2;
+			lane3_sw = (fp_rx_buf[4] & 0x30) >> 4;
+			lane3_pre = (fp_rx_buf[4] & 0xc0) >> 6;
+
+			if (lane2_sw == VOL_SWING_LEVEL_NUM - 1)
+				lane2_is_swing_max = 1;
+			else
+				lane2_is_swing_max = 0;
+
+			if (lane2_pre == PRE_EMPHASIS_LEVEL_NUM - 1)
+				lane2_is_pre_max = 1;
+			else
+				lane2_is_pre_max = 0;
+
+			if (lane3_sw == VOL_SWING_LEVEL_NUM - 1)
+				lane3_is_swing_max = 1;
+			else
+				lane3_is_swing_max = 0;
+
+			if (lane3_pre == PRE_EMPHASIS_LEVEL_NUM - 1)
+				lane3_is_pre_max = 1;
+			else
+				lane3_is_pre_max = 0;
+			edp_dbg("CR training reg[203h]:%xh\n", fp_rx_buf[1]);
+			edp_dbg("CR training reg[207h]:%xh\n", fp_rx_buf[4]);
+		}
+
+		for (i = 1; i < glb_lane_cnt + 1; i++) {
+			switch (i) {
+			case 1:
+				line_status = fp_rx_buf[0] & 0x1;
+				break;
+			case 2:
+				line_status = (fp_rx_buf[0] >> 4) & 0x1;
+				break;
+			case 3:
+				line_status = (fp_rx_buf[1]) & 0x1;
+				break;
+			case 4:
+				line_status = (fp_rx_buf[1] >> 4) & 0x1;
+				break;
+			}
+			if (line_status != 0x1)
+				goto again;
+		}
+
+		return RET_OK;
+
+	again:
+		to_cnt--;
+		if (to_cnt < 1)
+			return RET_FAIL;
+		/* set pattern 1 with scramble disable */
+		fp_tx_buf[0] = 0x21;
+		fp_tx_buf[1] =
+		    ((lane0_is_pre_max & 0x1) << 5) | ((lane0_pre & 0x3) << 3) |
+		    ((lane0_is_swing_max & 0x1) << 2) | (lane0_sw & 0x3);
+		if (glb_lane_cnt > 1)
+			fp_tx_buf[2] = ((lane1_is_pre_max & 0x1) << 5) |
+				       ((lane1_pre & 0x3) << 3) |
+				       ((lane1_is_swing_max & 0x1) << 2) |
+				       (lane1_sw & 0x3);
+		if (glb_lane_cnt > 2) {
+			fp_tx_buf[3] = ((lane2_is_pre_max & 0x1) << 5) |
+				       ((lane2_pre & 0x3) << 3) |
+				       ((lane2_is_swing_max & 0x1) << 2) |
+				       (lane2_sw & 0x3);
+			fp_tx_buf[4] = ((lane3_is_pre_max & 0x1) << 5) |
+				       ((lane3_pre & 0x3) << 3) |
+				       ((lane3_is_swing_max & 0x1) << 2) |
+				       (lane3_sw & 0x3);
+		}
+		/* set pattern 1 with max swing and emphasis 0x13 */
+		new_phy_cfg(sel, lane0_sw, lane0_pre, lane1_sw, lane1_pre,
+			    lane2_sw, lane2_pre, lane3_sw, lane3_pre);
+		mdelay(5);
+		ret = aux_wr(sel, 0x00102, glb_lane_cnt + 1, fp_tx_buf);
+		if (ret != RET_OK)
+			return RET_FAIL;
+	}
+}
+
+int new1_dp_tps2_test(u32 sel)
+{
+	unsigned int to_cnt;
+	int ret;
+
+	u32 line_status = 0, i = 0;
+	u32 lane0_sw, lane0_pre;
+	u32 lane1_sw, lane1_pre;
+	u32 lane2_sw, lane2_pre;
+	u32 lane3_sw, lane3_pre;
+	u32 lane0_is_pre_max, lane1_is_pre_max, lane2_is_pre_max,
+	    lane3_is_pre_max;
+	u32 lane0_is_swing_max, lane1_is_swing_max, lane2_is_swing_max,
+	    lane3_is_swing_max;
+	char fp_temp_buf[16] = {0};
+
+	lane0_sw = 0;
+	lane1_sw = 0;
+	lane2_sw = 0;
+	lane3_sw = 0;
+
+	lane0_pre = 0;
+	lane1_pre = 0;
+	lane2_pre = 0;
+	lane3_pre = 0;
+
+	lane0_is_pre_max = 0;
+	lane1_is_pre_max = 0;
+	lane2_is_pre_max = 0;
+	lane3_is_pre_max = 0;
+
+	lane0_is_swing_max = 0;
+	lane1_is_swing_max = 0;
+	lane2_is_swing_max = 0;
+	lane3_is_swing_max = 0;
+
+	edp_hal_link_training_ctrl(sel, 1, 0, 2);
+	to_cnt = TRAIN_CNT + 1;
+
+	while (1) {
+		udelay(training_aux_rd_interval_EQ);
+		/* read 0x0202 */
+		ret = aux_rd(sel, 0x0202, (glb_lane_cnt + 1) / 2, fp_rx_buf);
+		if (ret == -1) {
+			edp_wrn("failed to read lane status!");
+			return RET_FAIL;
+		}
+
+		for (i = 1; i < glb_lane_cnt + 1; i++) {
+			switch (i) {
+			case 1:
+				line_status = fp_rx_buf[0] & 0x1;
+				break;
+			case 2:
+				line_status = (fp_rx_buf[0] >> 4) & 0x1;
+				break;
+			case 3:
+				line_status = (fp_rx_buf[1]) & 0x1;
+				break;
+			case 4:
+				line_status = (fp_rx_buf[1] >> 4) & 0x1;
+				break;
+			}
+			if (line_status != 0x1)
+				goto again;
+		}
+		/* read 0x0204 */
+		ret = aux_rd(sel, 0x0204, 1, fp_temp_buf);
+		if (ret == -1) {
+			edp_wrn("failed to read aligned status!");
+			return RET_FAIL;
+		}
+		fp_rx_buf[2] = fp_temp_buf[0];
+
+		ret = aux_rd(sel, 0x0206, (glb_lane_cnt + 1) / 2, fp_temp_buf);
+		if (ret == -1) {
+			edp_wrn("failed to read adjust request!");
+			return RET_FAIL;
+		}
+		fp_rx_buf[3] = fp_temp_buf[0];
+		if (glb_lane_cnt > 2)
+			fp_rx_buf[4] = fp_temp_buf[1];
+		/* lane:1 */
+		lane0_sw = fp_rx_buf[3] & 0x3;
+		lane0_pre = (fp_rx_buf[3] & 0xc) >> 2;
+
+		if (lane0_sw == VOL_SWING_LEVEL_NUM - 1)
+			lane0_is_swing_max = 1;
+		else
+			lane0_is_swing_max = 0;
+
+		if (lane0_pre == PRE_EMPHASIS_LEVEL_NUM - 1)
+			lane0_is_pre_max = 1;
+		else
+			lane0_is_pre_max = 0;
+
+		edp_dbg("EQ training reg[202h]:%xh\n", fp_rx_buf[0]);
+		edp_dbg("EQ training reg[206h]:%xh\n", fp_rx_buf[3]);
+		/* lane:2 */
+		if (glb_lane_cnt > 1) {
+			lane1_sw = (fp_rx_buf[3] & 0x30) >> 4;
+			lane1_pre = (fp_rx_buf[3] & 0xc0) >> 6;
+
+			if (lane1_sw == VOL_SWING_LEVEL_NUM - 1)
+				lane1_is_swing_max = 1;
+			else
+				lane1_is_swing_max = 0;
+
+			if (lane1_pre == PRE_EMPHASIS_LEVEL_NUM - 1)
+				lane1_is_pre_max = 1;
+			else
+				lane1_is_pre_max = 0;
+		}
+		if (glb_lane_cnt > 3) {
+			lane2_sw = fp_rx_buf[4] & 0x3;
+			lane2_pre = (fp_rx_buf[4] & 0xc) >> 2;
+			lane3_sw = (fp_rx_buf[4] & 0x30) >> 4;
+			lane3_pre = (fp_rx_buf[4] & 0xc0) >> 6;
+
+			if (lane2_sw == VOL_SWING_LEVEL_NUM - 1)
+				lane2_is_swing_max = 1;
+			else
+				lane2_is_swing_max = 0;
+
+			if (lane2_pre == PRE_EMPHASIS_LEVEL_NUM - 1)
+				lane2_is_pre_max = 1;
+			else
+				lane2_is_pre_max = 0;
+
+			if (lane3_sw == VOL_SWING_LEVEL_NUM - 1)
+				lane3_is_swing_max = 1;
+			else
+				lane3_is_swing_max = 0;
+
+			if (lane3_pre == PRE_EMPHASIS_LEVEL_NUM - 1)
+				lane3_is_pre_max = 1;
+			else
+				lane3_is_pre_max = 0;
+			edp_dbg("EQ training reg[203h]:%xh\n", fp_rx_buf[1]);
+			edp_dbg("EQ training reg[207h]:%xh\n", fp_rx_buf[4]);
+		}
+		/* interlane_align_down */
+		if ((fp_rx_buf[2] & 0x1) == 0)
+			goto again;
+
+		for (i = 1; i < glb_lane_cnt + 1; i++) {
+			switch (i) {
+			case 1:
+				line_status = fp_rx_buf[0] & 0x7;
+				break;
+			case 2:
+				line_status = (fp_rx_buf[0] >> 4) & 0x7;
+				break;
+			case 3:
+				line_status = (fp_rx_buf[1]) & 0x7;
+				break;
+			case 4:
+				line_status = (fp_rx_buf[1] >> 4) & 0x7;
+				break;
+			}
+			if (line_status != 0x7)
+				goto again;
+		}
+
+		edp_dbg("Link Training success!\n");
+		fp_tx_buf[0] = 0x00; /* 102 --- indicate the end of training */
+		fp_tx_buf[5] = 0x00; /* 107 */
+		fp_tx_buf[6] = 0x01; /* 108 */
+		fp_tx_buf[7] = 0x00; /* 109 */
+		if (eDP_capable)
+			fp_tx_buf[8] = 0x01; /* 10a */
+		else
+			fp_tx_buf[8] = 0x00; /* 10a */
+		fp_tx_buf[9] = 0x00;	 /* 10b */
+		fp_tx_buf[10] = 0x00;	/* 10c */
+		fp_tx_buf[11] = 0x00;	/* 10d */
+		fp_tx_buf[12] = 0x00;	/* 10e */
+		ret = aux_wr(sel, 0x0102, 13, fp_tx_buf);
+		if (ret != RET_OK)
+			return RET_FAIL;
+
+		return RET_OK;
+
+	again:
+		to_cnt--;
+		if (to_cnt < 1)
+			return RET_FAIL;
+		/* set pattern 2 with scramble disable */
+		fp_tx_buf[0] = 0x22;
+		fp_tx_buf[1] =
+		    ((lane0_is_pre_max & 0x1) << 5) | ((lane0_pre & 0x3) << 3) |
+		    ((lane0_is_swing_max & 0x1) << 2) | (lane0_sw & 0x3);
+		if (glb_lane_cnt > 1)
+			fp_tx_buf[2] = ((lane1_is_pre_max & 0x1) << 5) |
+				       ((lane1_pre & 0x3) << 3) |
+				       ((lane1_is_swing_max & 0x1) << 2) |
+				       (lane1_sw & 0x3);
+		if (glb_lane_cnt > 2) {
+			fp_tx_buf[3] = ((lane2_is_pre_max & 0x1) << 5) |
+				       ((lane2_pre & 0x3) << 3) |
+				       ((lane2_is_swing_max & 0x1) << 2) |
+				       (lane2_sw & 0x3);
+			fp_tx_buf[4] = ((lane3_is_pre_max & 0x1) << 5) |
+				       ((lane3_pre & 0x3) << 3) |
+				       ((lane3_is_swing_max & 0x1) << 2) |
+				       (lane3_sw & 0x3);
+		}
+		/* set pattern 2 with max swing and emphasis 0x13 */
+		new_phy_cfg(sel, lane0_sw, lane0_pre, lane1_sw, lane1_pre,
+			    lane2_sw, lane2_pre, lane3_sw, lane3_pre);
+		mdelay(5);
+		ret = aux_wr(sel, 0x00102, glb_lane_cnt + 1, fp_tx_buf);
+		if (ret != RET_OK)
+			return RET_FAIL;
+	}
 }
 
 /*for clock recovery*/

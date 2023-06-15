@@ -102,10 +102,6 @@ static s32 vdpo_clk_config(u32 sel, u32 output_mode)
 	s32 ret = 0;
 	struct disp_video_timings *info = NULL;
 
-	if (g_vdpo_info[sel].clk_parent && g_vdpo_info[sel].clk)
-		clk_set_parent(g_vdpo_info[sel].clk,
-			       g_vdpo_info[sel].clk_parent);
-
 	vdpo_get_timing_info(output_mode, &info);
 	if (info == NULL) {
 		vdpo_wrn("get timing info fail!\n");

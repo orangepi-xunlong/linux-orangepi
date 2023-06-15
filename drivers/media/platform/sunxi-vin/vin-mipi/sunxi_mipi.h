@@ -16,6 +16,7 @@
 
 #include "../platform/platform_cfg.h"
 #include "combo_rx/combo_rx_reg.h"
+#include "combo_csi/combo_csi_reg.h"
 
 enum mipi_pad {
 	MIPI_PAD_SINK,
@@ -33,6 +34,7 @@ struct combo_config {
 struct combo_format {
 	u32 code;
 	enum lvds_bit_width bit_width;
+	enum cmb_mipi_yuv_seq yuv_seq;
 };
 
 struct mipi_dev {
@@ -47,8 +49,10 @@ struct mipi_dev {
 	struct combo_sync_code sync_code;
 	struct combo_lane_map lvds_map;
 	struct combo_wdr_cfg wdr_cfg;
+	struct combo_csi_cfg cmb_csi_cfg;
 	struct v4l2_mbus_framefmt format;
 	void __iomem *base;
+	void __iomem *port_base;
 	char if_name[20];
 	unsigned char id;
 	unsigned char if_type;
@@ -57,6 +61,7 @@ struct mipi_dev {
 	unsigned char time_hs;
 	unsigned char terminal_resistance;
 	unsigned char sensor_flags; /*0 means choose phy0,1 means choose phy1*/
+	unsigned int settle_time;
 };
 
 void sunxi_combo_set_sync_code(struct v4l2_subdev *sd,

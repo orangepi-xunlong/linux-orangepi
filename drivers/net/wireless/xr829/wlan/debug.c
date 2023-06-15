@@ -26,9 +26,9 @@
 #include "fw_dbg_inf.h"
 #endif
 
-
 /*for host debuglevel*/
 #define XRADIO_DBG_DEFAULT (XRADIO_DBG_ALWY|XRADIO_DBG_ERROR|XRADIO_DBG_WARN)
+
 u8 dbg_common  = XRADIO_DBG_DEFAULT;
 u8 dbg_sbus    = XRADIO_DBG_DEFAULT;
 u8 dbg_bh      = XRADIO_DBG_DEFAULT;
@@ -1640,7 +1640,7 @@ static ssize_t xradio_rts_threshold_set(struct file *file,
 	const char __user *user_buf, size_t count, loff_t *ppos)
 {
 	struct xradio_common *hw_priv = file->private_data;
-	char buf[10] = { 0 };
+	char buf[12] = { 0 };
 	char *endptr = NULL;
 	u8 if_id = 0;
 
@@ -2645,10 +2645,10 @@ static inline u32 xradio_show_intv(struct timeval *showtime)
 {
 	u32 time_int;
 	struct timeval time_now;
-	do_gettimeofday(&time_now);
+	xr_do_gettimeofday(&time_now);
 	time_int = (time_now.tv_sec - showtime->tv_sec) * 100000 + \
 			    (time_now.tv_usec - showtime->tv_usec) / 10;
-	do_gettimeofday(showtime);
+	xr_do_gettimeofday(showtime);
 	return time_int; /*10us*/
 }
 /*mac(26) + IV(8) + LLC(8) + IP(20) + TCP(20) or UDP(8)*/
@@ -3075,7 +3075,7 @@ static ssize_t xradio_hwt_hif_rx(struct file *file,
 		};
 		hwt_testing = 1;
 		wsm_hwt_cmd(hw_priv, (void *)&hwt_hdr.TestID, sizeof(hwt_hdr)-4);
-		do_gettimeofday(&hwt_start_time);
+		xr_do_gettimeofday(&hwt_start_time);
 	}
 
 	return count;
@@ -3586,7 +3586,8 @@ static int xradio_status_show_priv(struct seq_file *seq, void *v)
 
 #endif
 
-static int xradio_status_open_priv(struct inode *inode, struct file *file)
+static int xradio_status_open_priv(struct inode *inode,
+			struct file *file)
 {
 	return single_open(file, &xradio_status_show_priv, inode->i_private);
 }
@@ -3745,7 +3746,8 @@ void xradio_debug_release_priv(struct xradio_vif *priv)
 	}
 }
 
-int xradio_print_fw_version(struct xradio_common *hw_priv, u8 *buf, size_t len)
+int xradio_print_fw_version(struct xradio_common *hw_priv,
+				u8 *buf, size_t len)
 {
 	return snprintf(buf, len, "%s %d.%d",
 			xradio_debug_fw_types[hw_priv->wsm_caps.firmwareType],
@@ -4161,8 +4163,8 @@ int xradio_debug_init_common(struct xradio_common *hw_priv)
 #if (DGB_XRADIO_QC)
 	/*for QC apk read.*/
 	if (debugfs_host && !debugfs_hwinfo) {
-		debugfs_hwinfo = debugfs_create_file("hwinfo", 0666, debugfs_host,
-						     hw_priv, &fops_hwinfo);
+		debugfs_hwinfo = debugfs_create_file("hwinfo", S_IRUSR | S_IWUSR,
+				debugfs_host, hw_priv, &fops_hwinfo);
 		if (!debugfs_hwinfo)
 			ERR_LINE;
 	}
@@ -4222,7 +4224,6 @@ void xradio_debug_release_common(struct xradio_common *hw_priv)
 		kfree(d);
 	}
 }
-#endif /* CONFIG_XRADIO_DEBUGFS */
 
 #define FRAME_TYPE(xx) ieee80211_is_ ## xx(fctl)
 #define FT_MSG_PUT(f, ...) do { \
@@ -4401,12 +4402,19 @@ void xradio_parse_frame(u8 *mac_data, u8 iv_len, u16 flags, u8 if_id)
 		FRAME_PARSE(PF_MGMT, deauth);
 		FRAME_PARSE(PF_MGMT, assoc_req);
 		FRAME_PARSE(PF_MGMT, assoc_resp);
+		FRAME_PARSE(PF_MGMT, reassoc_req);
+		FRAME_PARSE(PF_MGMT, reassoc_resp);
 		FRAME_PARSE(PF_MGMT, disassoc);
 		FRAME_PARSE(PF_MGMT, atim);
 
 		/*for more information about action frames.*/
 		if (FRAME_TYPE(action)) {
+			u8 *encrypt_frame = NULL;
 			struct ieee80211_mgmt *mgmt = (struct ieee80211_mgmt *)frame;
+			if (frame->frame_control & __cpu_to_le32(IEEE80211_FCTL_PROTECTED) && (flags & PF_RX)) {
+				encrypt_frame = (u8 *)frame + IEEE80211_CCMP_256_HDR_LEN;
+				mgmt = (struct ieee80211_mgmt *)encrypt_frame;
+			}
 			FT_MSG_PUT(PF_MGMT, "%s", "action");
 
 			if (mgmt->u.action.category == WLAN_CATEGORY_PUBLIC) {
@@ -4425,6 +4433,14 @@ void xradio_parse_frame(u8 *mac_data, u8 iv_len, u16 flags, u8 if_id)
 				WLAN_ACTION_ADDBA_RESP) {
 				FT_MSG_PUT(PF_MGMT, "(ADDBA_RESP-%d)",
 					   mgmt->u.action.u.addba_resp.status);
+			} else if (mgmt->u.action.category == WLAN_CATEGORY_SA_QUERY &&
+				mgmt->u.action.u.sa_query.action ==
+				WLAN_ACTION_SA_QUERY_REQUEST) {
+				FT_MSG_PUT(PF_MGMT, "(SA_Query_Req)");
+			} else if (mgmt->u.action.category == WLAN_CATEGORY_SA_QUERY &&
+				mgmt->u.action.u.sa_query.action ==
+				WLAN_ACTION_SA_QUERY_RESPONSE) {
+				FT_MSG_PUT(PF_MGMT, "(SA_Query_Resp)");
 			} else {
 				FT_MSG_PUT(PF_MGMT, "(%d)", mgmt->u.action.category);
 			}
@@ -4547,11 +4563,12 @@ int xradio_logfile(char *buffer, int buf_len, u8 b_time)
 		} else {
 			fp_log->f_pos = 0;
 		}
+		set_fs(old_fs);
 		if (b_time) {
 			struct timeval time_now = { 0 };
 			struct rtc_time tm;
 			char time_label[T_LABEL_LEN] = { 0 };
-			do_gettimeofday(&time_now);
+			xr_do_gettimeofday(&time_now);
 			time_now.tv_sec -= sys_tz.tz_minuteswest * 60;
 			rtc_time_to_tm(time_now.tv_sec, &tm);
 			sprintf(time_label, "\n%d-%02d-%02d_%02d-%02d-%02d\n",
@@ -4559,12 +4576,11 @@ int xradio_logfile(char *buffer, int buf_len, u8 b_time)
 				tm.tm_hour, tm.tm_min, tm.tm_sec);
 			if (memcmp(last_time_label, time_label, T_LABEL_LEN)) {
 				memcpy(last_time_label, time_label, T_LABEL_LEN);
-				ret = vfs_write(fp_log, time_label, strlen(time_label),
+				ret = kernel_write(fp_log, time_label, strlen(time_label),
 						&fp_log->f_pos);
 			}
 		}
-		ret = vfs_write(fp_log, buffer, size, &fp_log->f_pos);
-		set_fs(old_fs);
+		ret = kernel_write(fp_log, buffer, size, &fp_log->f_pos);
 	}
 
 exit:
@@ -4629,7 +4645,7 @@ int get_hwt_hif_tx(struct xradio_common *hw_priv, u8 **data,
 
 	/*first packet.*/
 	if (sent_num == 1) {
-		do_gettimeofday(&hwt_start_time);
+		xr_do_gettimeofday(&hwt_start_time);
 	}
 	/*set confirm*/
 	hwt_tx_hdr->Params = 0;
@@ -4644,3 +4660,5 @@ int get_hwt_hif_tx(struct xradio_common *hw_priv, u8 **data,
 	return 1;
 }
 #endif
+
+#endif /* CONFIG_XRADIO_DEBUGFS */

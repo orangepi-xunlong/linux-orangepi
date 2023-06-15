@@ -21,7 +21,8 @@
 #define TVE_DEVICE_NUM 1
 #define TVE_TOP_DEVIVE_NUM 1
 #define TVE_DAC_NUM 1
-#elif defined(CONFIG_ARCH_SUN8IW12) || defined(CONFIG_ARCH_SUN50IW9)
+#elif defined(CONFIG_ARCH_SUN8IW12) || defined(CONFIG_ARCH_SUN8IW16) \
+	|| defined(CONFIG_ARCH_SUN50IW9) ||  defined(CONFIG_ARCH_SUN8IW20)
 #define TVE_TOP_SUPPORT
 #define TVE_DEVICE_NUM 1
 #define TVE_TOP_DEVIVE_NUM 1
@@ -37,10 +38,6 @@
 #define TVE_DEVICE_NUM 1
 #define TVE_TOP_DEVIVE_NUM 1
 #define TVE_DAC_NUM 1
-#endif
-
-#ifdef CONFIG_ARCH_SUN50IW9
-#define CONFIG_TVE_EMI_ISSUE
 #endif
 
 /* tv encoder registers offset */
@@ -97,7 +94,8 @@
 
 #define TVE_GET_REG_BASE(sel)			(tve_reg_base[sel])
 #define TVE_WUINT32(sel, offset, value) \
-	(*((u32 *)(TVE_GET_REG_BASE(sel) + (offset))) = (value))
+	writel((value), (TVE_GET_REG_BASE(sel) + (offset)));
+
 #define TVE_RUINT32(sel, offset) \
 	(*((u32 *)(TVE_GET_REG_BASE(sel) + (offset))))
 #define TVE_SET_BIT(sel, offset, bit) \
@@ -110,7 +108,7 @@
 
 #define TVE_TOP_GET_REG_BASE()		(tve_top_reg_base[0])
 #define TVE_TOP_WUINT32(offset, value) \
-	(*((u32 *)(TVE_TOP_GET_REG_BASE() + (offset))) = (value))
+	writel((value), (TVE_TOP_GET_REG_BASE() + (offset)));
 #define TVE_TOP_RUINT32(offset) \
 	(*((u32 *)(TVE_TOP_GET_REG_BASE() + (offset))))
 #define TVE_TOP_SET_BIT(offset, bit) \

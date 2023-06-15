@@ -74,7 +74,7 @@ int bh_proc_flush_txqueue(struct xradio_common *hw_priv, int if_id);
 
 int xradio_register_bh(struct xradio_common *hw_priv);
 void xradio_unregister_bh(struct xradio_common *hw_priv);
-void xradio_irq_handler(struct xradio_common *hw_priv);
+void xradio_irq_handler(void *priv);
 void xradio_bh_wakeup(struct xradio_common *hw_priv);
 int xradio_bh_suspend(struct xradio_common *hw_priv);
 int xradio_bh_resume(struct xradio_common *hw_priv);

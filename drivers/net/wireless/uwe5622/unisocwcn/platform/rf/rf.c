@@ -22,15 +22,15 @@
 #include "rf.h"
 #include "wcn_integrate.h"
 
-#define SYSTEM_WIFI_CONFIG_FILE "/lib/firmware/connectivity_configure.ini"
-#define SYSTEM_WIFI_CALI_FILE "/lib/firmware/connectivity_calibration.ini"
-#define VENDOR_WIFI_CONFIG_FILE "/lib/firmware/connectivity_configure.ini"
-#define VENDOR_WIFI_CALI_FILE "/lib/firmware/connectivity_calibration.ini"
-#define VENDOR_WIFI_CONFIG_AD_FILE "/lib/firmware/connectivity_configure.ini"
-#define SYSTEM_WIFI_CONFIG_AD_FILE "/lib/firmware/connectivity_configure.ini"
-#define VENDOR_WIFI_CALI_AD_FILE "/lib/firmware/connectivity_calibration.ini"
-#define SYSTEM_WIFI_CALI_AD_FILE "/lib/firmware/connectivity_calibration.ini"
-#define WIFI_CALI_DUMP_FILE "/lib/firmware/connectivity_calibration_bak.ini"
+#define SYSTEM_WIFI_CONFIG_FILE "/system/etc/connectivity_configure.ini"
+#define SYSTEM_WIFI_CALI_FILE "/system/etc/connectivity_calibration.ini"
+#define VENDOR_WIFI_CONFIG_FILE "/vendor/etc/connectivity_configure.ini"
+#define VENDOR_WIFI_CALI_FILE "/vendor/etc/connectivity_calibration.ini"
+#define VENDOR_WIFI_CONFIG_AD_FILE "/vendor/etc/wcn/connectivity_configure.ini"
+#define SYSTEM_WIFI_CONFIG_AD_FILE "/system/etc/wcn/connectivity_configure.ini"
+#define VENDOR_WIFI_CALI_AD_FILE "/vendor/etc/wcn/connectivity_calibration.ini"
+#define SYSTEM_WIFI_CALI_AD_FILE "/system/etc/wcn/connectivity_calibration.ini"
+#define WIFI_CALI_DUMP_FILE "/mnt/vendor/wcn/connectivity_calibration_bak.ini"
 
 #define CONF_TYPE 1
 #define CALI_TYPE 2
@@ -50,6 +50,8 @@
 	((int8_t *)&p->txpower_cali.txpower_subcarries_channel[0])
 #define TXPW_CARCH_ED \
 	((int8_t *)&p->txpower_cali.txpower_subcarries_channel[14])
+
+MODULE_IMPORT_NS(VFS_internal_I_am_really_a_filesystem_and_am_NOT_a_driver);
 
 static struct nvm_name_table g_config_table[] = {
 	/*
@@ -725,7 +727,6 @@ static void cali_save_file(char *path, struct wifi_cali_t *p)
 	struct file *fp;
 	int i, j;
 
-	set_fs(KERNEL_DS);
 
 	fp = filp_open(path, O_RDWR | O_CREAT | O_TRUNC, 0771);
 	if (IS_ERR_OR_NULL(fp)) {
@@ -979,7 +980,6 @@ static void cali_save_file(char *path, struct wifi_cali_t *p)
 
 
 	filp_close(fp, NULL);
-	set_fs(USER_DS);
 
 }
 

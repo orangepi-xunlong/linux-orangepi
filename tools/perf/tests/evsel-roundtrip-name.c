@@ -1,15 +1,18 @@
+// SPDX-License-Identifier: GPL-2.0
 #include "evlist.h"
 #include "evsel.h"
 #include "parse-events.h"
 #include "tests.h"
 #include "debug.h"
+#include <errno.h>
+#include <linux/kernel.h>
 
 static int perf_evsel__roundtrip_cache_name_test(void)
 {
 	char name[128];
 	int type, op, err = 0, ret = 0, i, idx;
-	struct perf_evsel *evsel;
-	struct perf_evlist *evlist = perf_evlist__new();
+	struct evsel *evsel;
+	struct evlist *evlist = evlist__new();
 
         if (evlist == NULL)
                 return -ENOMEM;
@@ -31,7 +34,7 @@ static int perf_evsel__roundtrip_cache_name_test(void)
 	}
 
 	idx = 0;
-	evsel = perf_evlist__first(evlist);
+	evsel = evlist__first(evlist);
 
 	for (type = 0; type < PERF_COUNT_HW_CACHE_MAX; type++) {
 		for (op = 0; op < PERF_COUNT_HW_CACHE_OP_MAX; op++) {
@@ -57,15 +60,15 @@ static int perf_evsel__roundtrip_cache_name_test(void)
 		}
 	}
 
-	perf_evlist__delete(evlist);
+	evlist__delete(evlist);
 	return ret;
 }
 
 static int __perf_evsel__name_array_test(const char *names[], int nr_names)
 {
 	int i, err;
-	struct perf_evsel *evsel;
-	struct perf_evlist *evlist = perf_evlist__new();
+	struct evsel *evsel;
+	struct evlist *evlist = evlist__new();
 
         if (evlist == NULL)
                 return -ENOMEM;
@@ -88,14 +91,14 @@ static int __perf_evsel__name_array_test(const char *names[], int nr_names)
 	}
 
 out_delete_evlist:
-	perf_evlist__delete(evlist);
+	evlist__delete(evlist);
 	return err;
 }
 
 #define perf_evsel__name_array_test(names) \
 	__perf_evsel__name_array_test(names, ARRAY_SIZE(names))
 
-int test__perf_evsel__roundtrip_name_test(int subtest __maybe_unused)
+int test__perf_evsel__roundtrip_name_test(struct test *test __maybe_unused, int subtest __maybe_unused)
 {
 	int err = 0, ret = 0;
 

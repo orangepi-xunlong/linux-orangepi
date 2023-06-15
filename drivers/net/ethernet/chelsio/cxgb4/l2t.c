@@ -146,7 +146,7 @@ static int write_l2e(struct adapter *adap, struct l2t_entry *e, int sync)
 	if (!skb)
 		return -ENOMEM;
 
-	req = (struct cpl_l2t_write_req *)__skb_put(skb, sizeof(*req));
+	req = __skb_put(skb, sizeof(*req));
 	INIT_TP_WR(req, 0);
 
 	OPCODE_TID(req) = htonl(MK_OPCODE_TID(CPL_L2T_WRITE_REQ,
@@ -231,6 +231,7 @@ again:
 		if (e->state == L2T_STATE_STALE)
 			e->state = L2T_STATE_VALID;
 		spin_unlock_bh(&e->lock);
+		/* fall through */
 	case L2T_STATE_VALID:     /* fast-path, send the packet on */
 		return t4_ofld_send(adap, skb);
 	case L2T_STATE_RESOLVING:
@@ -422,7 +423,7 @@ struct l2t_entry *cxgb4_l2t_get(struct l2t_data *d, struct neighbour *neigh,
 	u8 lport;
 	u16 vlan;
 	struct l2t_entry *e;
-	int addr_len = neigh->tbl->key_len;
+	unsigned int addr_len = neigh->tbl->key_len;
 	u32 *addr = (u32 *)neigh->primary_key;
 	int ifidx = neigh->dev->ifindex;
 	int hash = addr_hash(d, addr, addr_len, ifidx);
@@ -432,10 +433,12 @@ struct l2t_entry *cxgb4_l2t_get(struct l2t_data *d, struct neighbour *neigh,
 	else
 		lport = netdev2pinfo(physdev)->lport;
 
-	if (neigh->dev->priv_flags & IFF_802_1Q_VLAN)
+	if (is_vlan_dev(neigh->dev)) {
 		vlan = vlan_dev_vlan_id(neigh->dev);
-	else
+		vlan |= vlan_dev_get_egress_qos_mask(neigh->dev, priority);
+	} else {
 		vlan = VLAN_NONE;
+	}
 
 	write_lock_bh(&d->lock);
 	for (e = d->l2tab[hash].first; e; e = e->next)
@@ -491,15 +494,12 @@ u64 cxgb4_select_ntuple(struct net_device *dev,
 	if (tp->protocol_shift >= 0)
 		ntuple |= (u64)IPPROTO_TCP << tp->protocol_shift;
 
-	if (tp->vnic_shift >= 0) {
-		u32 viid = cxgb4_port_viid(dev);
-		u32 vf = FW_VIID_VIN_G(viid);
-		u32 pf = FW_VIID_PFN_G(viid);
-		u32 vld = FW_VIID_VIVLD_G(viid);
+	if (tp->vnic_shift >= 0 && (tp->ingress_config & VNIC_F)) {
+		struct port_info *pi = (struct port_info *)netdev_priv(dev);
 
-		ntuple |= (u64)(FT_VNID_ID_VF_V(vf) |
-				FT_VNID_ID_PF_V(pf) |
-				FT_VNID_ID_VLD_V(vld)) << tp->vnic_shift;
+		ntuple |= (u64)(FT_VNID_ID_VF_V(pi->vin) |
+				FT_VNID_ID_PF_V(adap->pf) |
+				FT_VNID_ID_VLD_V(pi->vivld)) << tp->vnic_shift;
 	}
 
 	return ntuple;
@@ -507,40 +507,19 @@ u64 cxgb4_select_ntuple(struct net_device *dev,
 EXPORT_SYMBOL(cxgb4_select_ntuple);
 
 /*
- * Called when address resolution fails for an L2T entry to handle packets
- * on the arpq head.  If a packet specifies a failure handler it is invoked,
- * otherwise the packet is sent to the device.
- */
-static void handle_failed_resolution(struct adapter *adap, struct l2t_entry *e)
-{
-	struct sk_buff *skb;
-
-	while ((skb = __skb_dequeue(&e->arpq)) != NULL) {
-		const struct l2t_skb_cb *cb = L2T_SKB_CB(skb);
-
-		spin_unlock(&e->lock);
-		if (cb->arp_err_handler)
-			cb->arp_err_handler(cb->handle, skb);
-		else
-			t4_ofld_send(adap, skb);
-		spin_lock(&e->lock);
-	}
-}
-
-/*
  * Called when the host's neighbor layer makes a change to some entry that is
  * loaded into the HW L2 table.
  */
 void t4_l2t_update(struct adapter *adap, struct neighbour *neigh)
 {
-	struct l2t_entry *e;
+	unsigned int addr_len = neigh->tbl->key_len;
+	u32 *addr = (u32 *) neigh->primary_key;
+	int hash, ifidx = neigh->dev->ifindex;
 	struct sk_buff_head *arpq = NULL;
 	struct l2t_data *d = adap->l2t;
-	int addr_len = neigh->tbl->key_len;
-	u32 *addr = (u32 *) neigh->primary_key;
-	int ifidx = neigh->dev->ifindex;
-	int hash = addr_hash(d, addr, addr_len, ifidx);
+	struct l2t_entry *e;
 
+	hash = addr_hash(d, addr, addr_len, ifidx);
 	read_lock_bh(&d->lock);
 	for (e = d->l2tab[hash].first; e; e = e->next)
 		if (!addreq(e, addr) && e->ifindex == ifidx) {
@@ -573,8 +552,25 @@ void t4_l2t_update(struct adapter *adap, struct neighbour *neigh)
 			write_l2e(adap, e, 0);
 	}
 
-	if (arpq)
-		handle_failed_resolution(adap, e);
+	if (arpq) {
+		struct sk_buff *skb;
+
+		/* Called when address resolution fails for an L2T
+		 * entry to handle packets on the arpq head. If a
+		 * packet specifies a failure handler it is invoked,
+		 * otherwise the packet is sent to the device.
+		 */
+		while ((skb = __skb_dequeue(&e->arpq)) != NULL) {
+			const struct l2t_skb_cb *cb = L2T_SKB_CB(skb);
+
+			spin_unlock(&e->lock);
+			if (cb->arp_err_handler)
+				cb->arp_err_handler(cb->handle, skb);
+			else
+				t4_ofld_send(adap, skb);
+			spin_lock(&e->lock);
+		}
+	}
 	spin_unlock_bh(&e->lock);
 }
 
@@ -646,7 +642,7 @@ struct l2t_data *t4_init_l2t(unsigned int l2t_start, unsigned int l2t_end)
 	if (l2t_size < L2T_MIN_HASH_BUCKETS)
 		return NULL;
 
-	d = t4_alloc_mem(sizeof(*d) + l2t_size * sizeof(struct l2t_entry));
+	d = kvzalloc(struct_size(d, l2tab, l2t_size), GFP_KERNEL);
 	if (!d)
 		return NULL;
 
@@ -682,8 +678,7 @@ static void *l2t_seq_start(struct seq_file *seq, loff_t *pos)
 static void *l2t_seq_next(struct seq_file *seq, void *v, loff_t *pos)
 {
 	v = l2t_get_idx(seq, *pos);
-	if (v)
-		++*pos;
+	++(*pos);
 	return v;
 }
 

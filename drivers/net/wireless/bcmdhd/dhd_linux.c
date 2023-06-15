@@ -53,6 +53,8 @@
 #include <linux/reboot.h>
 #include <linux/notifier.h>
 #include <net/addrconf.h>
+#include <uapi/linux/sched/types.h>
+#include <linux/netdevice.h>
 #ifdef ENABLE_ADAPTIVE_SCHED
 #include <linux/cpufreq.h>
 #endif /* ENABLE_ADAPTIVE_SCHED */
@@ -5022,7 +5024,11 @@ dhd_lb_sendpkt(dhd_info_t *dhd, struct net_device *net,
 }
 #endif /* DHD_LB_TXP */
 
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(2, 6, 20))
+netdev_tx_t BCMFASTPATH
+#else
 int BCMFASTPATH
+#endif
 dhd_start_xmit(struct sk_buff *skb, struct net_device *net)
 {
 	int ret;
@@ -5045,7 +5051,11 @@ dhd_start_xmit(struct sk_buff *skb, struct net_device *net)
 	DHD_TRACE(("%s: Enter\n", __FUNCTION__));
 
 	if (dhd_query_bus_erros(&dhd->pub)) {
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(2, 6, 20))
 		return -ENODEV;
+#else
+		return NETDEV_TX_BUSY;
+#endif
 	}
 
 	/* terence 2017029: Reject in early suspend */
@@ -16248,11 +16258,14 @@ write_dump_to_file(dhd_pub_t *dhd, uint8 *buf, int size, char *fname)
 	char memdump_type[32];
 	struct timeval curtime;
 	uint32 file_mode;
+	struct timespec now;
 
 	/* Init file name */
 	memset(memdump_path, 0, sizeof(memdump_path));
 	memset(memdump_type, 0, sizeof(memdump_type));
-	do_gettimeofday(&curtime);
+	getnstimeofday(&now);
+	curtime.tv_sec = now.tv_sec;
+	curtime.tv_usec = now.tv_nsec/1000;
 	dhd_convert_memdump_type_to_str(dhd->memdump_type, memdump_type);
 #ifdef CUSTOMER_HW4_DEBUG
 	snprintf(memdump_path, sizeof(memdump_path), "%s%s_%s_%ld.%ld",
@@ -17995,6 +18008,8 @@ do_dhd_log_dump(dhd_pub_t *dhdp)
 	const char *post_strs =
 		"-------------------- Specific log --------------------------\n";
 
+	struct timespec ts;
+
 	if (!dhdp) {
 		return -1;
 	}
@@ -18008,7 +18023,10 @@ do_dhd_log_dump(dhd_pub_t *dhdp)
 
 	/* Init file name */
 	memset(dump_path, 0, sizeof(dump_path));
-	do_gettimeofday(&curtime);
+	getnstimeofday(&ts);
+	curtime->tv_sec = ts.tv_sec;
+	curtime->tv_usec = ts.tv_nsec/1000;
+
 	snprintf(dump_path, sizeof(dump_path), "%s_%ld.%ld",
 		DHD_COMMON_DUMP_PATH "debug_dump",
 		(unsigned long)curtime.tv_sec, (unsigned long)curtime.tv_usec);
@@ -19758,3 +19776,5 @@ bool dhd_os_wd_timer_enabled(void *bus)
 	}
 	return dhd->wd_timer_valid;
 }
+
+MODULE_IMPORT_NS(VFS_internal_I_am_really_a_filesystem_and_am_NOT_a_driver);

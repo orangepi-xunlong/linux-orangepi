@@ -11,6 +11,7 @@ extern dma_addr_t panic_dma_handle;
 extern void *panic_buf_handle;
 extern void *panic_map_buff;
 
+extern __u32 get_storage_type(void);
 void panic_mark_enable(void);
 int is_panic_enable(void);
 int is_on_panic(void);

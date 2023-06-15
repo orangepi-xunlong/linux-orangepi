@@ -862,8 +862,15 @@ static int wsm_join_confirm(struct xradio_common *hw_priv,
 			    struct wsm_join *arg,
 			    struct wsm_buf *buf)
 {
-	if (WSM_GET32(buf) != WSM_STATUS_SUCCESS)
+	u32 status = WSM_GET32(buf);
+
+	wsm_printk(XRADIO_DBG_TRC, "%s", __func__);
+	if (status != WSM_STATUS_SUCCESS) {
+		wsm_printk(XRADIO_DBG_ERROR, "wsm_join_confirm err : %d\n", status);
+		wsm_printk(XRADIO_DBG_ERROR, "wsm_join_confirm minPowerLevel : %d\n", WSM_GET32(buf));
+		wsm_printk(XRADIO_DBG_ERROR, "wsm_join_confirm maxPowerLevel : %d\n", WSM_GET32(buf));
 		return -EINVAL;
+	}
 	arg->minPowerLevel = WSM_GET32(buf);
 	arg->maxPowerLevel = WSM_GET32(buf);
 
@@ -880,6 +887,7 @@ int wsm_join(struct xradio_common *hw_priv, struct wsm_join *arg,
 {
 	int ret;
 	struct wsm_buf *buf = &hw_priv->wsm_cmd_buf;
+	wsm_printk(XRADIO_DBG_TRC, "%s", __func__);
 
 	wsm_oper_lock(hw_priv);
 	wsm_cmd_lock(hw_priv);
@@ -1393,7 +1401,7 @@ static int wsm_request_buffer_confirm(struct xradio_vif *priv,
 						   "WRBC - could not find sta %pM\n",
 						   priv->link_id_db[i].mac);
 				} else {
-					ret = mac80211_sta_ps_transition_ni(sta,
+					ret = ieee80211_sta_ps_transition_ni(sta,
 						 (sta_asleep_mask & mask) ? true : false);
 					wsm_printk(XRADIO_DBG_MSG, "PS State NOTIFIED %d\n", ret);
 					SYS_WARN(ret);
@@ -1582,6 +1590,7 @@ void wsm_send_deauth_to_self(struct xradio_common *hw_priv,
 		deauth->seq_ctrl = 0;
 		deauth->u.deauth.reason_code = WLAN_REASON_DEAUTH_LEAVING;
 		mac80211_rx_irqsafe(priv->hw, skb);
+		priv->setbssparams_done = false;
 	}
 }
 
@@ -1639,6 +1648,7 @@ void wsm_send_disassoc_to_self(struct xradio_common *hw_priv,
 		disassoc->u.disassoc.reason_code =
 		     WLAN_REASON_DISASSOC_DUE_TO_INACTIVITY;
 		mac80211_rx_irqsafe(priv->hw, skb);
+		priv->setbssparams_done = false;
 	}
 }
 
@@ -1750,14 +1760,17 @@ static int wsm_receive_indication(struct xradio_common *hw_priv,
 			rx.rcpiRssi = 0;
 
 		if (!rx.status && unlikely(ieee80211_is_deauth(hdr->frame_control))) {
-			if (priv->join_status == XRADIO_JOIN_STATUS_STA) {
-				/* Shedule unjoin work */
-				wsm_printk(XRADIO_DBG_WARN, \
-					"Issue unjoin command (RX).\n");
-				wsm_lock_tx_async(hw_priv);
-				if (queue_work(hw_priv->workqueue,
-						&priv->unjoin_work) <= 0)
-					wsm_unlock_tx(hw_priv);
+			if (ieee80211_has_protected(hdr->frame_control) || !priv->is_mfp_connect) {
+				if (priv->join_status == XRADIO_JOIN_STATUS_STA) {
+					/* Shedule unjoin work */
+					wsm_printk(XRADIO_DBG_WARN, \
+						"Issue unjoin command (RX).\n");
+
+					cancel_delayed_work(&priv->unjoin_delayed_work);
+					wsm_lock_tx_async(hw_priv);
+					if (queue_work(hw_priv->workqueue, &priv->unjoin_work) <= 0)
+						wsm_unlock_tx(hw_priv);
+				}
 			}
 		}
 		hw_priv->wsm_cbc.rx(priv, &rx, skb_p);
@@ -2565,7 +2578,7 @@ int wsm_hwt_tx_confirm(struct xradio_common *hw_priv, struct wsm_buf *buf)
 	if (*(buf->data+7) & 0x01) { /*last packet*/
 		u32 time_int = 0;
 		u32 total    = hwt_tx_num*hwt_tx_len*8;
-		do_gettimeofday(&hwt_end_time);
+		xr_do_gettimeofday(&hwt_end_time);
 		time_int = (hwt_end_time.tv_sec-hwt_start_time.tv_sec)*1000000 + \
 				       (hwt_end_time.tv_usec-hwt_start_time.tv_usec);
 		wsm_printk(XRADIO_DBG_ALWY,
@@ -2594,7 +2607,7 @@ int wsm_hwt_rx_frames(struct xradio_common *hw_priv, struct wsm_buf *buf)
 	if (recv_num >= hwt_rx_num) {  /*last packet*/
 		u32 time_int = 0;
 		u32 total    = recv_num*hwt_rx_len*8;
-		do_gettimeofday(&hwt_end_time);
+		xr_do_gettimeofday(&hwt_end_time);
 		time_int = (hwt_end_time.tv_sec-hwt_start_time.tv_sec)*1000000 + \
 				       (hwt_end_time.tv_usec-hwt_start_time.tv_usec);
 //		wsm_printk(XRADIO_DBG_ALWY,

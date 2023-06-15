@@ -51,6 +51,7 @@
 #define ALIGN_16B(x) (((x) + (15)) & ~(15))
 
 #define display_frame 0
+#define video_s_ctrl 0
 
 struct size {
 	int width;
@@ -124,7 +125,7 @@ static unsigned int n_buffers;
 
 struct size input_size;
 
-unsigned int req_frame_num = 8;
+unsigned int req_frame_num = 5;
 unsigned int read_num = 20;
 unsigned int count;
 unsigned int nplanes;
@@ -163,7 +164,7 @@ static void uv_r90(char *dst, char *src, int width, int height)
 static int disp_set_addr(int width, int height, struct v4l2_buffer *buf)
 
 {
-	unsigned int arg[6];
+	unsigned long arg[6];
 	int ret;
 
 	if (dev.layer_info.pixformat == TVD_PL_YUV420) {
@@ -229,8 +230,9 @@ static int disp_set_addr(int width, int height, struct v4l2_buffer *buf)
 	dev.layer_info.layer_config.enable = 1;
 
 	arg[0] = dev.layer_info.screen_id;
-	arg[1] = (int)&dev.layer_info.layer_config;
+	arg[1] = (unsigned long)&dev.layer_info.layer_config;
 	arg[2] = 1;
+	arg[3] = 0;
 	ret = ioctl(dev.layer_info.dispfh, DISP_LAYER_SET_CONFIG, (void *)arg);
 	if (ret != 0)
 		printf("disp_set_addr fail to set layer info\n");
@@ -271,14 +273,10 @@ static int read_frame(int mode)
 
 			switch (nplanes) {
 			case 1:
-#if display_frame
-				disp_set_addr(input_size.width, input_size.height, &buf);
-#else
 				sprintf(fdstr, "%s/fb%d_y%d_%d_%d_%u.bin", path_name, dev_id, mode, input_size.width, input_size.height, count);
 				file_fd = fopen(fdstr, "w");
 				fwrite(buffers[buf.index].start[0], buffers[buf.index].length[0], 1, file_fd);
 				fclose(file_fd);
-#endif
 				break;
 			case 2:
 #if ROT_90
@@ -357,9 +355,6 @@ static int read_frame(int mode)
 	} else if (save_flag == 1) {
 		//if ((count > 0) && (count % 4 == 0)) {
 		if ((count > 0)) {
-#if display_frame
-			disp_set_addr(input_size.width, input_size.height, &buf);
-#else
 			switch (nplanes) {
 			case 1:
 				sprintf(fdstr, "%s/fb%d_yuv%d_%d_%d.bin", path_name, dev_id, mode, input_size.width, input_size.height);
@@ -391,9 +386,9 @@ static int read_frame(int mode)
 			default:
 				break;
 			}
-#endif
 		}
 	} else if (save_flag == 2) {
+		if (count <= 1)
 		count = read_num;
 #if display_frame
 		disp_set_addr(input_size.width, input_size.height, &buf);
@@ -438,8 +433,15 @@ static int disp_disable(void)
 {
 #if display_frame
 	int ret;
-	unsigned int arg[6];
+	unsigned long arg[6];
 	struct disp_layer_config disp;
+
+	/* release memory && clear layer */
+	arg[0] = 0;
+	arg[1] = 0;
+	arg[2] = 0;
+	arg[3] = 0;
+	ioctl(dev.layer_info.dispfh, DISP_LAYER_DISABLE, (void *)arg);
 
 	/*close channel 0*/
 	memset(&disp, 0, sizeof(disp_layer_config));
@@ -449,9 +451,10 @@ static int disp_disable(void)
 	arg[0] = dev.layer_info.screen_id;
 	arg[1] = (unsigned long)&disp;
 	arg[2] = 1;
+	arg[3] = 0;
 	ret = ioctl(dev.layer_info.dispfh, DISP_LAYER_SET_CONFIG, (void *)arg);
 	if (ret != 0)
-		printf("disp_set_addr fail to set layer info\n");
+		printf("disp_disable:disp_set_addr fail to set layer info\n");
 
 	/*close channel 2*/
 	memset(&disp, 0, sizeof(disp_layer_config));
@@ -461,9 +464,10 @@ static int disp_disable(void)
 	arg[0] = dev.layer_info.screen_id;
 	arg[1] = (unsigned long)&disp;
 	arg[2] = 1;
+	arg[3] = 0;
 	ret = ioctl(dev.layer_info.dispfh, DISP_LAYER_SET_CONFIG, (void *)arg);
 	if (ret != 0)
-		printf("disp_set_addr fail to set layer info\n");
+		printf("disp_disable:disp_set_addr fail to set layer info\n");
 
 	return ret;
 #else
@@ -473,6 +477,7 @@ static int disp_disable(void)
 
 static int disp_init(int width, int height, unsigned int pixformat)
 {
+#if display_frame
 	/* display_handle* disp = (display_handle*)display; */
 	unsigned int arg[6] = {0};
 	int layer_id = 0;
@@ -488,6 +493,13 @@ static int disp_init(int width, int height, unsigned int pixformat)
 		printf("open display device fail!\n");
 		return -1;
 	}
+
+	/* open disp */
+	arg[0] = dev.layer_info.screen_id;
+	arg[1] = 1;
+	arg[2] = 4;
+	ioctl(
+	    dev.layer_info.dispfh, DISP_DEVICE_SWITCH, (void *)arg);
 
 	/* get current output type */
 	arg[0] = dev.layer_info.screen_id;
@@ -544,6 +556,7 @@ static int disp_init(int width, int height, unsigned int pixformat)
 		    dev.layer_info.height;
 		/* printf("x: %d, y: %d, w: %d, h: %d\n",screen.x,screen.y,screen.w,screen.h); */
 	}
+#endif
 	return 0;
 }
 
@@ -718,6 +731,7 @@ static int camera_init(int sel, int mode)
 {
 	struct v4l2_input inp;
 	struct v4l2_streamparm parms;
+	struct sensor_isp_cfg sensor_isp_cfg;
 
 	fd = open(dev_name, O_RDWR /* required */  | O_NONBLOCK, 0);
 
@@ -754,6 +768,11 @@ static int camera_init(int sel, int mode)
 		printf("VIDIOC_S_PARM error\n");
 		return -1;
 	}
+	CLEAR(sensor_isp_cfg);
+	sensor_isp_cfg.isp_wdr_mode = wdr_mode;/*2:command, 1: wdr, 0: normal*/
+	if (-1 == ioctl(fd, VIDIOC_SET_SENSOR_ISP_CFG, &sensor_isp_cfg)) {
+		printf("VIDIOC_SET_SENSOR_ISP_CFG error\n");
+	}
 
 	return 0;
 }
@@ -777,16 +796,19 @@ static int camera_fmt_set(int mode)
 		fmt.fmt.pix_mp.pixelformat = V4L2_PIX_FMT_YUV420;
 		break;
 	case 3:
-		fmt.fmt.pix_mp.pixelformat = V4L2_PIX_FMT_NV12;
+		fmt.fmt.pix_mp.pixelformat = V4L2_PIX_FMT_NV12M;
 		break;
 	case 4:
-		fmt.fmt.pix_mp.pixelformat = V4L2_PIX_FMT_SBGGR10;
+		fmt.fmt.pix_mp.pixelformat = V4L2_PIX_FMT_NV12;
 		break;
 	case 5:
-		fmt.fmt.pix_mp.pixelformat = V4L2_PIX_FMT_SBGGR12;
+		fmt.fmt.pix_mp.pixelformat = V4L2_PIX_FMT_SBGGR10;
 		break;
 	case 6:
-		fmt.fmt.pix_mp.pixelformat = V4L2_PIX_FMT_FBC;
+		fmt.fmt.pix_mp.pixelformat = V4L2_PIX_FMT_SBGGR12;
+		break;
+	case 7:
+		fmt.fmt.pix_mp.pixelformat = V4L2_PIX_FMT_LBC_2_5X;
 		break;
 	default:
 		fmt.fmt.pix_mp.pixelformat = V4L2_PIX_FMT_YUV420M;
@@ -812,6 +834,31 @@ static int camera_fmt_set(int mode)
 	return 0;
 }
 
+static int video_set_control(int cmd, int value)
+{
+	struct v4l2_control control;
+
+	control.id = cmd;
+	control.value = value;
+	if (-1 == ioctl(fd, VIDIOC_S_CTRL, &control)) {
+		printf("VIDIOC_S_CTRL failed\n");
+		return -1;
+	}
+	return 0;
+}
+
+static int video_get_control(int cmd)
+{
+	struct v4l2_control control;
+
+	control.id = cmd;
+	if (-1 == ioctl(fd, VIDIOC_G_CTRL, &control)) {
+		printf("VIDIOC_G_CTRL failed\n");
+		return -1;
+	}
+	return control.value;
+}
+
 static int main_test(int sel, int mode)
 {
 	enum v4l2_buf_type type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
@@ -820,7 +867,7 @@ static int main_test(int sel, int mode)
 	struct v4l2_control control;
 	unsigned int pixformat;
 	int ret;
-	int i;
+	int i, j = 0;
 
 	if (-1 == camera_init(sel, mode))
 		return -1;
@@ -829,12 +876,8 @@ static int main_test(int sel, int mode)
 	if (-1 == req_frame_buffers())
 		return -1;
 
-#if display_frame
 	pixformat = TVD_PL_YUV420;
 	ret = disp_init(input_size.width, input_size.height, pixformat);
-	if (ret)
-		return 2;
-#endif
 
 	if (-1 == ioctl(fd, VIDIOC_STREAMON, &type)) {
 		printf("VIDIOC_STREAMON failed\n");
@@ -854,6 +897,21 @@ static int main_test(int sel, int mode)
 
 			tv.tv_sec = 2; /* Timeout. */
 			tv.tv_usec = 0;
+#if video_s_ctrl
+			if (count%3 == 0) {
+				if (j == 0) {
+					video_set_control(V4L2_CID_VFLIP, 0);
+					video_set_control(V4L2_CID_HFLIP, 0);
+					j = 1;
+					printf("V4L2_CID_VFLIP done, j = %d, count = %d\n", j, count);
+				} else {
+					video_set_control(V4L2_CID_VFLIP, 1);
+					video_set_control(V4L2_CID_HFLIP, 1);
+					j = 0;
+					printf("V4L2_CID_VFLIP no done, j = %d, count = %d\n", j, count);
+				}
+			}
+#endif
 #ifdef SUBDEV_TEST
 			for (i = 0; i < 4; i++) {
 				ctrls[i].id = V4L2_CID_R_GAIN + i;

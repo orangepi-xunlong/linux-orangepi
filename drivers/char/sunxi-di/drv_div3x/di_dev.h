@@ -14,7 +14,7 @@
 #ifndef _DI_DEV_H_
 #define _DI_DEV_H_
 
-#ifdef CONFIG_ARCH_SUN50IW9P1
+#ifdef CONFIG_ARCH_SUN50IW9
 #define USE_DI300
 #endif
 

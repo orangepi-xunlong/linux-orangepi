@@ -55,6 +55,8 @@ u32 dp_get_cur_line(u32 sel);
 void dp_set_reg_base(u32 sel, uintptr_t base);
 
 void phy_cfg(u32 sel, u8 swing_lv, u8 preemp_lv, u8 postcur2_lv);
+void new_phy_cfg(u32 sel, u8 sw0, u8 pre0, u8 sw1, u8 pre1, u8 sw2, u8 pre2,
+		 u8 sw3, u8 pre3);
 
 void dp_int_enable(u32 sel, enum edp_int interrupt, bool en);
 

@@ -1,0 +1,6 @@
+config SUNXI_ADDR_MGT
+  tristate "Allwinner Network MAC Addess Manager"
+  depends on SUNXI_RFKILL || BT || ETHERNET
+  help
+    allwinner network mac address management
+

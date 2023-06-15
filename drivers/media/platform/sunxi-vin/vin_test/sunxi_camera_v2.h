@@ -218,6 +218,11 @@ struct parser_fps_ds {
 	__u32 ch3_fps_ds;
 };
 
+struct sensor_isp_cfg {
+	__u8 isp_wdr_mode;
+	__u8 large_image;
+};
+
 #define VIDIOC_ISP_AE_STAT_REQ \
 	_IOWR('V', BASE_VIDIOC_PRIVATE + 1, struct isp_stat_buf)
 #define VIDIOC_ISP_HIST_STAT_REQ \
@@ -244,7 +249,8 @@ struct parser_fps_ds {
 	_IOWR('V', BASE_VIDIOC_PRIVATE + 12, struct vin_reset_time)
 #define VIDIOC_SET_PARSER_FPS \
 	_IOWR('V', BASE_VIDIOC_PRIVATE + 13, struct parser_fps_ds)
-
+#define VIDIOC_SET_SENSOR_ISP_CFG \
+	_IOWR('V', BASE_VIDIOC_PRIVATE + 14, struct sensor_isp_cfg)
 
 /*
  * Events

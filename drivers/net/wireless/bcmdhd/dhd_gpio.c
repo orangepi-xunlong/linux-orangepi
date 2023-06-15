@@ -19,8 +19,7 @@
 extern void sunxi_mmc_rescan_card(unsigned ids);
 extern void sunxi_wlan_set_power(int on);
 extern int sunxi_wlan_get_bus_index(void);
-extern int sunxi_wlan_get_oob_irq(void);
-extern int sunxi_wlan_get_oob_irq_flags(void);
+extern int sunxi_wlan_get_oob_irq(int *, int *);
 #endif
 
 #ifdef CONFIG_DHD_USE_STATIC_BUF
@@ -262,6 +261,7 @@ int dhd_wlan_init_gpio(void)
 #ifdef CUSTOMER_OOB
 	int host_oob_irq = -1;
 	uint host_oob_irq_flags = 0;
+	int wakeup_enable = 0;
 #endif
 
 	/* Please check your schematic and fill right GPIO number which connected to
@@ -305,7 +305,7 @@ int dhd_wlan_init_gpio(void)
 		}
 	}
 #ifdef CUSTOMER_HW_ALLWINNER
-	host_oob_irq = sunxi_wlan_get_oob_irq();
+	host_oob_irq = sunxi_wlan_get_oob_irq(&host_oob_irq_flags, &wakeup_enable);
 #endif
 
 #ifdef HW_OOB
@@ -316,10 +316,6 @@ int dhd_wlan_init_gpio(void)
 #endif
 #else
 	host_oob_irq_flags = IORESOURCE_IRQ | IORESOURCE_IRQ_HIGHEDGE | IORESOURCE_IRQ_SHAREABLE;
-#endif
-
-#ifdef CUSTOMER_HW_ALLWINNER
-	host_oob_irq_flags = sunxi_wlan_get_oob_irq_flags();
 #endif
 
 	dhd_wlan_resources[0].start = dhd_wlan_resources[0].end = host_oob_irq;

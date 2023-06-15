@@ -758,7 +758,7 @@ int nvp6158_init_hardware(int video_mode)
 #else /*BT656--NVP6158_OUTMODE_1MUX_HD / NVP6158_OUTMODE_2MUX_HD / NVP6158_OUTMODE_4MUX_HD*/
 				nvp6158_set_portmode(chip, 0, NVP6158_OUTMODE_1MUX_HD, 0)
 #endif
-			} else if (video_mode == AHD20_1080P_25P) {
+			} else if (video_mode == AHD20_1080P_25P || video_mode == AHD20_1080P_30P) {
 				nvp6158_set_portmode(chip, 0, NVP6158_OUTMODE_4MUX_MIX, 0);
 				nvp6158_set_portmode(chip, 1, NVP6158_OUTMODE_4MUX_MIX, 1);
 				nvp6158_set_portmode(chip, 2, NVP6158_OUTMODE_4MUX_MIX, 2);

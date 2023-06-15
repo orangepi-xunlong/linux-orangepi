@@ -9,7 +9,7 @@
  */
 
 #include "asm/cacheflush.h"
-#include <linux/sunxi-gpio.h>
+#include <linux/ion.h>
 #include "include/eink_sys_source.h"
 #include "include/eink_driver.h"
 
@@ -17,14 +17,42 @@
 
 extern struct eink_driver_info g_eink_drvdata;
 
-s32 get_delt_ms_timer(struct timeval start_timer, struct timeval end_timer)
+
+s32 eink_set_print_level(u32 level)
 {
-	return ((end_timer.tv_sec - start_timer.tv_sec) * 1000 + (end_timer.tv_usec - start_timer.tv_usec)/1000);
+	EINK_INFO_MSG("print level = 0x%x\n", level);
+	g_eink_drvdata.eink_dbg_info = level;
+
+	return 0;
 }
 
-s32 get_delt_us_timer(struct timeval start_timer, struct timeval end_timer)
+/* 0 -- no log
+ * 9 -- capture the pic send to eink
+ * 8 -- print timer info
+ * 7 -- capture DE WB BUF
+ * 6 -- capture wavfile
+ * 5 -- decode or rmi/index debug
+ * 4 -- dump register
+ * 3 -- print pipe and buf list
+ * 2 -- reserve
+ * 1 -- base debug info
+ */
+
+s32 eink_get_print_level(void)
 {
-	return ((end_timer.tv_sec - start_timer.tv_sec) * 1000000 + (end_timer.tv_usec - start_timer.tv_usec));
+	return g_eink_drvdata.eink_dbg_info;
+}
+
+s32 get_delt_ms_timer(struct timespec start_timer, struct timespec end_timer)
+{
+	return ((end_timer.tv_sec - start_timer.tv_sec) * 1000 +
+		(end_timer.tv_nsec - start_timer.tv_nsec) / 1000 / 1000);
+}
+
+s32 get_delt_us_timer(struct timespec start_timer, struct timespec end_timer)
+{
+	return ((end_timer.tv_sec - start_timer.tv_sec) * 1000000 +
+		(end_timer.tv_nsec - start_timer.tv_nsec) / 1000);
 }
 
 bool is_upd_win_zero(struct upd_win update_area)
@@ -33,6 +61,46 @@ bool is_upd_win_zero(struct upd_win update_area)
 		return true;
 	else
 		return false;
+}
+
+int atoi_float(char *buf)
+{
+	int num = 0;
+	int i = 0;
+	int point_pos = -1;
+	int pow = 0;
+
+	while (buf[i] != '\0') {
+		if (buf[i] >= '0' && buf[i] <= '9')	{
+			if ((point_pos < 0) || ((point_pos >= 0) && ((point_pos + 4) > i))) {
+				num = num * 10 + (buf[i] - '0');
+			} else {
+				//drop the left char
+				break;
+			}
+		}
+
+		if (buf[i] == '.') {
+			point_pos = i;
+		}
+		i++;
+	}
+
+	//auto *1000
+	if ((point_pos >= 0) && ((point_pos + 4) > i)) {
+		pow = (point_pos + 4 - i);
+		while (pow > 0) {
+			num = num * 10;
+			pow--;
+		}
+	}
+
+	if (buf[0] == '-')
+		num = num * (-1);
+
+	EINK_DEBUG_MSG("input str=%s, num=%d\n", buf, num);
+
+	return num;
 }
 
 int eink_sys_pin_set_state(char *dev_name, char *name)
@@ -85,65 +153,38 @@ int eink_sys_pin_set_state(char *dev_name, char *name)
 exit:
 	return ret;
 }
-EXPORT_SYMBOL(eink_sys_pin_set_state);
 
-int eink_sys_power_enable(char *name)
+int eink_sys_power_enable(struct regulator *regu)
 {
 	int ret = 0;
-#ifdef CONFIG_AW_AXP
-	struct regulator *regu = NULL;
 
-	regu = regulator_get(NULL, name);
-	if (IS_ERR(regu)) {
-		pr_err("some error happen, fail to get regulator %s\n", name);
-		goto exit;
+	if (!regu) {
+		pr_err("[%s]regulator is NULL\n", __func__);
+		return -1;
 	}
 	/* enalbe regulator */
 	ret = regulator_enable(regu);
-	if (ret != 0) {
-		pr_err("some err happen, fail to enable regulator %s!\n", name);
-		goto exit1;
-	} else {
-		pr_info("suceess to enable regulator %s!\n", name);
-	}
+	if (ret != 0)
+		pr_err("some err happen, fail to enable regulator!\n");
 
-exit1:
-	/* put regulater, when module exit */
-	regulator_put(regu);
-exit:
-#endif
 	return ret;
 }
-EXPORT_SYMBOL(eink_sys_power_enable);
 
-int eink_sys_power_disable(char *name)
+int eink_sys_power_disable(struct regulator *regu)
 {
 	int ret = 0;
-#ifdef CONFIG_AW_AXP
-	struct regulator *regu = NULL;
 
-	regu = regulator_get(NULL, name);
-	if (IS_ERR(regu)) {
-		pr_err("some error happen, fail to get regulator %s\n", name);
-		goto exit;
+	if (!regu) {
+		pr_err("[%s]regulator is NULL\n", __func__);
+		return -1;
 	}
 	/* disalbe regulator */
 	ret = regulator_disable(regu);
-	if (ret != 0) {
-		pr_err("some err happen, fail to disable regulator %s!\n", name);
-		goto exit1;
-	} else {
-		pr_info("suceess to disable regulator %s!\n", name);
-	}
+	if (ret != 0)
+		pr_err("some err happen, fail to disable regulator!\n");
 
-exit1:
-	/* put regulater, when module exit */
-	regulator_put(regu);
-exit:
-#endif
 	return ret;
 }
-EXPORT_SYMBOL(eink_sys_power_disable);
 
 s32 eink_panel_pin_cfg(u32 en)
 {
@@ -154,13 +195,13 @@ s32 eink_panel_pin_cfg(u32 en)
 		DE_WRN("NULL hdl!\n");
 		return -1;
 	}
-	EINK_INFO_MSG("eink pin config, state %s, %d\n", (en) ? "on" : "off", en);
+	EINK_DEBUG_MSG("eink pin config, state %s, %d\n", (en) ? "on" : "off", en);
 
 	/* io-pad */
 	if (en == 1) {
 		if (!((!strcmp(eink_mgr->eink_pin_power, "")) ||
 			(!strcmp(eink_mgr->eink_pin_power, "none"))))
-			eink_sys_power_enable(eink_mgr->eink_pin_power);
+			eink_sys_power_enable(eink_mgr->pin_regulator);
 	}
 
 	sprintf(dev_name, "eink");
@@ -170,112 +211,78 @@ s32 eink_panel_pin_cfg(u32 en)
 	if (en == 0) {
 		if (!((!strcmp(eink_mgr->eink_pin_power, "")) ||
 			(!strcmp(eink_mgr->eink_pin_power, "none"))))
-			eink_sys_power_disable(eink_mgr->eink_pin_power);
+			eink_sys_power_disable(eink_mgr->pin_regulator);
 	}
 
 	return 0;
 }
 
-int eink_sys_gpio_request(struct eink_gpio_cfg *gpio_list,
-			  u32 group_count_max)
+
+int eink_sys_gpio_request(struct eink_gpio_info *gpio_info)
 {
 	int ret = 0;
-	struct gpio_config pin_cfg;
-	char pin_name[32];
-	u32 config;
-	char pintype[50] = SUNXI_PINCTRL;
 
-	if (gpio_list == NULL) {
-		pr_err("%s: gpio list is null\n", __func__);
+	if (!gpio_info) {
+		pr_err("%s: gpio_info is null\n", __func__);
+		return -1;
+	}
+
+	/* As some GPIOs are not essential, here return 0 to avoid error */
+	if (!strlen(gpio_info->name))
 		return 0;
+
+	if (!gpio_is_valid(gpio_info->gpio)) {
+		pr_err("%s: gpio (%d) is invalid\n", __func__, gpio_info->gpio);
+		return -1;
 	}
 
-	pin_cfg.gpio = gpio_list->gpio;
-	pin_cfg.mul_sel = gpio_list->mul_sel;
-	pin_cfg.pull = gpio_list->pull;
-	pin_cfg.drv_level = gpio_list->drv_level;
-	pin_cfg.data = gpio_list->data;
-	ret = gpio_request(pin_cfg.gpio, NULL);
-	if (ret != 0) {
-		pr_err("%s failed, gpio_name=%s, gpio=%d, ret=%d\n", __func__,
-		      gpio_list->gpio_name, gpio_list->gpio, ret);
-		return 0;
+	ret = gpio_direction_output(gpio_info->gpio, gpio_info->value);
+	if (ret) {
+		pr_err("%s failed, gpio_name=%s, gpio=%d, value=%d, ret=%d\n", __func__,
+		      gpio_info->name, gpio_info->gpio, gpio_info->value, ret);
+		return -1;
 	}
 
-	EINK_DEFAULT_MSG("gpio_name=%s, gpio=%3d, <%d,%d,%d,%d> ret=%d\n",
-				 gpio_list->gpio_name, gpio_list->gpio,
-				 gpio_list->mul_sel, gpio_list->pull,
-				 gpio_list->drv_level, gpio_list->data, ret);
+	pr_info("%s, gpio_name=%s, gpio=%d, value=%d, ret=%d\n", __func__,
+		gpio_info->name, gpio_info->gpio, gpio_info->value, ret);
 
-	ret = pin_cfg.gpio;
-
-	if (!IS_AXP_PIN(pin_cfg.gpio)) {
-		/*
-		 * valid pin of sunxi-pinctrl,
-		 * config pin attributes individually.
-		 */
-		sunxi_gpio_to_name(pin_cfg.gpio, pin_name);
-		config =
-		    SUNXI_PINCFG_PACK(SUNXI_PINCFG_TYPE_FUNC, pin_cfg.mul_sel);
-		ret = pin_config_set(pintype, pin_name, config);
-		if (ret == -EINVAL) {
-			/*try r_pio*/
-			snprintf(pintype, 50, SUNXI_R_PINCTRL);
-			ret = pin_config_set(pintype, pin_name, config);
-		}
-		if (pin_cfg.pull != GPIO_PULL_DEFAULT) {
-			config =
-			    SUNXI_PINCFG_PACK(SUNXI_PINCFG_TYPE_PUD,
-					      pin_cfg.pull);
-			pin_config_set(pintype, pin_name, config);
-		}
-		if (pin_cfg.drv_level != GPIO_DRVLVL_DEFAULT) {
-			config =
-			    SUNXI_PINCFG_PACK(SUNXI_PINCFG_TYPE_DRV,
-					      pin_cfg.drv_level);
-			pin_config_set(pintype, pin_name, config);
-		}
-		if (pin_cfg.data != GPIO_DATA_DEFAULT) {
-			config =
-			    SUNXI_PINCFG_PACK(SUNXI_PINCFG_TYPE_DAT,
-					      pin_cfg.data);
-			pin_config_set(pintype, pin_name, config);
-		}
-	} else if (IS_AXP_PIN(pin_cfg.gpio)) {
-		/* valid pin of axp-pinctrl,
-		* config pin attributes individually.
-		*/
-		sunxi_gpio_to_name(pin_cfg.gpio, pin_name);
-		if (pin_cfg.data != GPIO_DATA_DEFAULT) {
-			config = SUNXI_PINCFG_PACK(SUNXI_PINCFG_TYPE_DAT,
-			    pin_cfg.data);
-			pin_config_set(AXP_PINCTRL, pin_name, config);
-		}
-	} else {
-		pr_warn("invalid pin [%d] from sys-config\n", pin_cfg.gpio);
-	}
-
-	return pin_cfg.gpio;
+	return ret;
 }
-EXPORT_SYMBOL(eink_sys_gpio_request);
 
-int eink_sys_gpio_release(int p_handler)
+
+void eink_sys_gpio_release(struct eink_gpio_info *gpio_info)
 {
-	if (p_handler)
-		gpio_free(p_handler);
-	else
-		pr_warn("%s: hdl is NULL\n", __func__);
+	if (!gpio_info) {
+		__wrn("%s: gpio_info is null\n", __func__);
+		return;
+	}
 
-	return 0;
+	if (!strlen(gpio_info->name))
+		return;
+
+	if (!gpio_is_valid(gpio_info->gpio)) {
+		__wrn("%s: gpio(%d) is invalid\n", __func__, gpio_info->gpio);
+		return;
+	}
+
+	gpio_free(gpio_info->gpio);
 }
-EXPORT_SYMBOL(eink_sys_gpio_release);
 
-int eink_sys_gpio_set_value(u32 p_handler, u32 value_to_gpio,
-			    const char *gpio_name)
+int eink_sys_gpio_get_value(struct eink_gpio_info *gpio_info)
 {
-	if (p_handler)
-		__gpio_set_value(p_handler, value_to_gpio);
-	else
+	if (gpio_info && gpio_is_valid(gpio_info->gpio))
+		return __gpio_get_value(gpio_info->gpio);
+
+	pr_warn("eink_sys_gpio_get_value fail, hdl is NULL\n");
+
+	return -1;
+}
+
+int eink_sys_gpio_set_value(struct eink_gpio_info *gpio_info, u32 value_to_gpio)
+{
+	if (gpio_info && gpio_is_valid(gpio_info->gpio)) {
+		__gpio_set_value(gpio_info->gpio, value_to_gpio);
+	} else
 		pr_warn("EINK_SET_GPIO, hdl is NULL\n");
 
 	return 0;
@@ -289,21 +296,22 @@ int eink_sys_script_get_item(char *main_name, char *sub_name, int value[],
 	u32 len = 0;
 	struct device_node *node;
 	int ret = 0;
-	struct gpio_config config;
+	enum of_gpio_flags flags;
 
 	len = sprintf(compat, "allwinner,sunxi-%s", main_name);
 	if (len > 32)
-		pr_err("size of mian_name is out of range\n");
+		__wrn("size of mian_name is out of range\n");
 
 	node = of_find_compatible_node(NULL, NULL, compat);
 	if (!node) {
-		pr_err("of_find_compatible_node %s fail\n", compat);
+		__wrn("of_find_compatible_node %s fail\n", compat);
 		return ret;
 	}
 
+
 	if (type == 1) {
 		if (of_property_read_u32_array(node, sub_name, value, 1))
-			pr_info("of_property_read_u32_array %s.%s fail\n",
+			__inf("of_property_read_u32_array %s.%s fail\n",
 			      main_name, sub_name);
 		else
 			ret = type;
@@ -311,38 +319,34 @@ int eink_sys_script_get_item(char *main_name, char *sub_name, int value[],
 		const char *str;
 
 		if (of_property_read_string(node, sub_name, &str))
-			pr_info("of_property_read_string %s.%s fail\n", main_name,
+			__inf("of_property_read_string %s.%s fail\n", main_name,
 			      sub_name);
 		else {
 			ret = type;
 			memcpy((void *)value, str, strlen(str) + 1);
 		}
 	} else if (type == 3) {
-		struct eink_gpio_cfg *gpio_info =
-		    (struct eink_gpio_cfg *)value;
 		int gpio;
+		struct disp_gpio_info *gpio_info = (struct disp_gpio_info *)value;
 
-		gpio =
-		    of_get_named_gpio_flags(node, sub_name, 0,
-					    (enum of_gpio_flags *)&config);
+		/* gpio is invalid by default */
+		gpio_info->gpio = -1;
+		gpio_info->name[0] = '\0';
+
+		gpio = of_get_named_gpio_flags(node, sub_name, 0, &flags);
 		if (!gpio_is_valid(gpio))
-			goto exit;
+			return -EINVAL;
 
-		gpio_info->gpio = config.gpio;
-		gpio_info->mul_sel = config.mul_sel;
-		gpio_info->pull = config.pull;
-		gpio_info->drv_level = config.drv_level;
-		gpio_info->data = config.data;
-		memcpy(gpio_info->gpio_name, sub_name, strlen(sub_name) + 1);
-		__inf("%s.%s gpio=%d,mul_sel=%d,data:%d\n", main_name, sub_name,
-		      gpio_info->gpio, gpio_info->mul_sel, gpio_info->data);
+		gpio_info->gpio = gpio;
+		memcpy(gpio_info->name, sub_name, strlen(sub_name) + 1);
+		gpio_info->value = (flags == OF_GPIO_ACTIVE_LOW) ? 0 : 1;
+		__inf("%s.%s gpio=%d, value:%d\n", main_name, sub_name,
+		      gpio_info->gpio, gpio_info->value);
 		ret = type;
 	}
 
-exit:
 	return ret;
 }
-EXPORT_SYMBOL(eink_sys_script_get_item);
 
 #if defined(CONFIG_ION_SUNXI) && defined(EINK_CACHE_MEM)
 static int __eink_ion_alloc_coherent(struct ion_client *client, struct eink_ion_mem *mem)
@@ -356,8 +360,14 @@ static int __eink_ion_alloc_coherent(struct ion_client *client, struct eink_ion_
 		return -1;
 	}
 
+#if defined(CONFIG_SUNXI_IOMMU)
+	mem->handle = ion_alloc(client, mem->size, 0,
+				(1 << ION_HEAP_TYPE_SYSTEM), flags);
+#else
 	mem->handle = ion_alloc(client, mem->size, PAGE_SIZE,
-		(1<<ION_HEAP_TYPE_CARVEOUT), flags);
+				((1<<ION_HEAP_TYPE_CARVEOUT) |
+				(1 << ION_HEAP_TYPE_DMA)), flags);
+#endif
 	if (IS_ERR_OR_NULL(mem->handle)) {
 		pr_err("ion_alloc failed, size=%lu!\n", (unsigned long)mem->size);
 		return -2;
@@ -369,23 +379,23 @@ static int __eink_ion_alloc_coherent(struct ion_client *client, struct eink_ion_
 		goto err_map_kernel;
 	}
 
-	#ifndef CONFIG_IOMMU_SUPPORT
+#ifndef CONFIG_IOMMU_SUPPORT
 	if (ion_phys(client, mem->handle, (ion_phys_addr_t *)&mem->paddr, &mem->size)) {
 		pr_err("ion_phys failed!!\n");
 		goto err_phys;
 	}
-	#else
+#else
 	sgl = mem->handle->buffer->sg_table->sgl;
-	ret = dma_map_sg(g_eink_drvdata.dmabuf_dev, sgl, 1, DMA_BIDIRECTIONAL);
+	ret = dma_map_sg(g_eink_drvdata.device, sgl, 1, DMA_BIDIRECTIONAL);
 	if (ret != 1) {
 		pr_err("dma map sg fail, ret=%d\n", ret);
 		goto err_phys;
 	}
 	mem->paddr = sg_dma_address(sgl);
-	#endif
+#endif
 
-	EINK_INFO_MSG("ion malloc size=0x%x, vaddr=0x%08x, paddr=0x%08x\n",
-			(unsigned int)mem->size, *((unsigned int *)mem->vaddr), *((unsigned int *)mem->paddr));
+	EINK_INFO_MSG("ion malloc size=0x%x, vaddr=%p, paddr=0x%08x\n",
+			(unsigned int)mem->size, mem->vaddr, (unsigned int)mem->paddr);
 
 	return 0;
 
@@ -454,7 +464,8 @@ static void *eink_ion_malloc(u32 num_bytes, void *phys_addr)
 
 	ion_node = kmalloc(sizeof(*ion_node), GFP_KERNEL);
 	if (ion_node == NULL) {
-		pr_err("fail to alloc ion node, size=%u\n", (unsigned int)sizeof(*ion_node));
+		pr_err("fail to alloc ion node, size=%u\n",
+				(unsigned int)sizeof(*ion_node));
 		return NULL;
 	}
 
@@ -522,21 +533,74 @@ static void eink_ion_free(void *virt_addr, void *phys_addr, u32 num_bytes)
 
 	return;
 }
+
+int init_eink_ion_mgr(struct eink_ion_mgr *ion_mgr)
+{
+	if (ion_mgr == NULL) {
+		pr_err("[%s]:input param is null\n", __func__);
+		return -EINVAL;
+	}
+
+	mutex_init(&(ion_mgr->mlock));
+
+	mutex_lock(&(ion_mgr->mlock));
+	INIT_LIST_HEAD(&(ion_mgr->ion_list));
+	ion_mgr->client = sunxi_ion_client_create("ion_eink");
+	if (IS_ERR_OR_NULL(ion_mgr->client)) {
+		mutex_unlock(&(ion_mgr->mlock));
+		pr_err("[%s]:eink_ion client create failed!!", __func__);
+		return -ENOMEM;
+	} else {
+		EINK_INFO_MSG("Init ion manager for EINK ok\n");
+	}
+	mutex_unlock(&(ion_mgr->mlock));
+
+	return 0;
+
+}
+
+void deinit_eink_ion_mgr(struct eink_ion_mgr *ion_mgr)
+{
+	struct eink_ion_list_node *ion_node = NULL, *tmp_ion_node = NULL;
+	struct eink_ion_mem *mem = NULL;
+	struct ion_client *client = NULL;
+
+	if (ion_mgr == NULL) {
+		pr_err("[%s]:input param is null\n", __func__);
+		return;
+	}
+
+	client = ion_mgr->client;
+	mutex_lock(&(ion_mgr->mlock));
+	list_for_each_entry_safe(ion_node, tmp_ion_node,
+						&ion_mgr->ion_list, node) {
+		if (ion_node != NULL) {
+			// free all ion node
+			mem = &ion_node->mem;
+			__eink_ion_free_coherent(client, mem);
+			__list_del_entry(&(ion_node->node));
+			kfree(ion_node);
+		}
+	}
+	ion_client_destroy(client);
+	mutex_unlock(&(ion_mgr->mlock));
+}
+
 #else
 void *eink_mem_malloc(u32 num_bytes, void *phys_addr)
 {
 	u32 actual_bytes;
 	void *address = NULL;
 
-	EINK_DEFAULT_MSG("input!\n");
+	EINK_DEBUG_MSG("input!\n");
 	if (num_bytes != 0) {
 		actual_bytes = ALIGN(num_bytes, PAGE_SIZE);
 
 		address =
-		    dma_alloc_coherent(g_eink_drvdata.dmabuf_dev, actual_bytes,
+		    dma_alloc_coherent(g_eink_drvdata.device, actual_bytes,
 				       (dma_addr_t *) phys_addr, GFP_KERNEL);
 		if (address) {
-			EINK_INFO_MSG
+			EINK_DEBUG_MSG
 			    ("dma_alloc_coherent ok, address=0x%p, size=0x%x\n",
 			     (void *)(*(unsigned long *)phys_addr), num_bytes);
 			return address;
@@ -557,7 +621,7 @@ void eink_mem_free(void *virt_addr, void *phys_addr, u32 num_bytes)
 
 	actual_bytes = BYTE_ALIGN(num_bytes);
 	if (phys_addr && virt_addr)
-		dma_free_coherent(g_eink_drvdata.dmabuf_dev, actual_bytes, virt_addr,
+		dma_free_coherent(g_eink_drvdata.device, actual_bytes, virt_addr,
 				  (dma_addr_t)phys_addr);
 }
 #endif
@@ -570,7 +634,6 @@ void *eink_malloc(u32 num_bytes, void *phys_addr)
 	return eink_mem_malloc(num_bytes, phys_addr); /* skip cache */
 #endif
 }
-EXPORT_SYMBOL(eink_malloc);
 
 void eink_free(void *virt_addr, void *phys_addr, u32 num_bytes)
 {
@@ -580,7 +643,6 @@ void eink_free(void *virt_addr, void *phys_addr, u32 num_bytes)
 	return eink_mem_free(virt_addr, phys_addr, num_bytes);
 #endif
 }
-EXPORT_SYMBOL(eink_free);
 
 void eink_cache_sync(void *startAddr, int size)
 {
@@ -600,29 +662,25 @@ void eink_cache_sync(void *startAddr, int size)
 	return;
 #endif
 }
-EXPORT_SYMBOL(eink_cache_sync);
 
 int eink_dma_map_core(int fd, struct dmabuf_item *item)
 {
 	struct dma_buf *dmabuf;
 	struct dma_buf_attachment *attachment;
-	struct sg_table *sgt, *sgt_bak;
-	struct scatterlist *sgl, *sgl_bak;
-	s32 sg_count = 0;
+	struct sg_table *sgt;
 	int ret = -1;
-	int i;
 
-	if (fd < 0) {
+	if (fd <= 0) {
 		pr_err("[EINK]dma_buf_id(%d) is invalid\n", fd);
 		goto exit;
 	}
 	dmabuf = dma_buf_get(fd);
 	if (IS_ERR(dmabuf)) {
-		pr_err("[EINK]dma_buf_get failed, fd=%d\n", fd);
+		pr_err("[EINK]dma_buf_get failed, fd=%d %ld\n", fd, (long)dmabuf);
 		goto exit;
 	}
 
-	attachment = dma_buf_attach(dmabuf, g_eink_drvdata.dmabuf_dev);
+	attachment = dma_buf_attach(dmabuf, g_eink_drvdata.device);
 	if (IS_ERR(attachment)) {
 		pr_err("[EINK]dma_buf_attach failed\n");
 		goto err_buf_put;
@@ -633,47 +691,15 @@ int eink_dma_map_core(int fd, struct dmabuf_item *item)
 		goto err_buf_detach;
 	}
 
-	/* create a private sgtable base on the given dmabuf */
-	sgt_bak = kmalloc(sizeof(struct sg_table), GFP_KERNEL | __GFP_ZERO);
-	if (sgt_bak == NULL) {
-		pr_err("[EINK]alloc sgt fail\n");
-		goto err_buf_unmap;
-	}
-	ret = sg_alloc_table(sgt_bak, sgt->nents, GFP_KERNEL);
-	if (ret != 0) {
-		pr_err("[EINK]alloc sgt fail\n");
-		goto err_kfree;
-	}
-	sgl_bak = sgt_bak->sgl;
-	for_each_sg(sgt->sgl, sgl, sgt->nents, i)  {
-		sg_set_page(sgl_bak, sg_page(sgl), sgl->length, sgl->offset);
-		sgl_bak = sg_next(sgl_bak);
-	}
 
-	sg_count = dma_map_sg_attrs(g_eink_drvdata.dmabuf_dev, sgt_bak->sgl,
-			      sgt_bak->nents, DMA_FROM_DEVICE,
-			      DMA_ATTR_SKIP_CPU_SYNC);
-
-	if (sg_count != 1) {
-		pr_err("[EINK]dma_map_sg failed:%d\n", sg_count);
-		goto err_sgt_free;
-	}
-
-	item->fd = fd;
 	item->buf = dmabuf;
-	item->sgt = sgt_bak;
+	item->sgt = sgt;
 	item->attachment = attachment;
-	item->dma_addr = sg_dma_address(sgt_bak->sgl);
+	item->dma_addr = sg_dma_address(sgt->sgl);
 	ret = 0;
 
 	goto exit;
 
-err_sgt_free:
-	sg_free_table(sgt_bak);
-err_kfree:
-	kfree(sgt_bak);
-err_buf_unmap:
-	/* unmap attachment sgt, not sgt_bak, because it's not alloc yet! */
 	dma_buf_unmap_attachment(attachment, sgt, DMA_FROM_DEVICE);
 err_buf_detach:
 	dma_buf_detach(dmabuf, attachment);
@@ -685,13 +711,7 @@ exit:
 
 void eink_dma_unmap_core(struct dmabuf_item *item)
 {
-
-	dma_unmap_sg_attrs(g_eink_drvdata.dmabuf_dev, item->sgt->sgl,
-			      item->sgt->nents, DMA_FROM_DEVICE,
-			      DMA_ATTR_SKIP_CPU_SYNC);
 	dma_buf_unmap_attachment(item->attachment, item->sgt, DMA_FROM_DEVICE);
-	sg_free_table(item->sgt);
-	kfree(item->sgt);
 	dma_buf_detach(item->buf, item->attachment);
 	dma_buf_put(item->buf);
 }
@@ -700,7 +720,6 @@ struct dmabuf_item *eink_dma_map(int fd)
 {
 	struct dmabuf_item *item = NULL;
 
-	EINK_INFO_MSG("Func intput!\n");
 	item = kmalloc(sizeof(struct dmabuf_item),
 			      GFP_KERNEL | __GFP_ZERO);
 
@@ -720,8 +739,10 @@ exit:
 
 void eink_dma_unmap(struct dmabuf_item *item)
 {
-	eink_dma_unmap_core(item);
-	kfree(item);
+	if (item) {
+		eink_dma_unmap_core(item);
+		kfree(item);
+	}
 }
 
 void eink_print_register(unsigned long start_addr, unsigned long end_addr)
@@ -732,18 +753,20 @@ void eink_print_register(unsigned long start_addr, unsigned long end_addr)
 	unsigned char tmp_buf[50] = {0};
 	unsigned char buf[256] = {0};
 
-	pr_info("print reg: 0x%08x ~ 0x%08x", (unsigned int)start_addr_align, (unsigned int)end_addr_align);
+	pr_info("\n");
+	pr_info("print reg: [0x%08x ~ 0x%08x]\n", (unsigned int)start_addr_align, (unsigned int)end_addr_align);
 	for (addr = start_addr_align; addr <= end_addr_align; addr += 4) {
 		if (0 == (addr & 0xf)) {
 			memset(tmp_buf, 0, sizeof(tmp_buf));
 			memset(buf, 0, sizeof(buf));
 			snprintf(tmp_buf, sizeof(tmp_buf), "0x%08x: ", (unsigned int)addr);
-			strncat(buf, tmp_buf, sizeof(tmp_buf));
+			strncat(buf, tmp_buf, 50);
 		}
 
 		memset(tmp_buf, 0, sizeof(tmp_buf));
-		snprintf(tmp_buf, sizeof(tmp_buf), "0x%08x ", readl((void __iomem *)(addr | 0xf0000000)));
-		strncat(buf, tmp_buf, sizeof(tmp_buf));
+		//snprintf(tmp_buf, sizeof(tmp_buf), "0x%08x ", readl((void __iomem *)(addr | 0xf0000000)));
+		snprintf(tmp_buf, sizeof(tmp_buf), "0x%08x ", readl((void __iomem *)addr));
+		strncat(buf, tmp_buf, 50);
 		if (0 == ((addr + 4) & 0xf)) {
 			pr_info("%s\n", buf);
 			msleep(5);
@@ -751,11 +774,11 @@ void eink_print_register(unsigned long start_addr, unsigned long end_addr)
 	}
 }
 
-#ifdef PIPELINE_DEBUG
 void print_free_pipe_list(struct pipe_manager *mgr)
 {
 	struct pipe_info_node *pipe, *tpipe;
 	unsigned long flags = 0;
+	unsigned int count = 0;
 
 	spin_lock_irqsave(&mgr->list_lock, flags);
 	if (list_empty(&mgr->pipe_free_list)) {
@@ -765,10 +788,14 @@ void print_free_pipe_list(struct pipe_manager *mgr)
 	}
 
 	list_for_each_entry_safe(pipe, tpipe, &mgr->pipe_free_list, node) {
-		if (pipe->pipe_id < 10) {
-			EINK_INFO_MSG("FREE_LIST: pipe %02d is free\n", pipe->pipe_id);
-		}
+#ifdef PIPELINE_DEBUG
+		EINK_INFO_MSG("FREE_LIST: pipe %02d is free\n", pipe->pipe_id);
+#endif
+		count++;
 	}
+
+	EINK_INFO_MSG("[+++] %d Pipes are Free!\n", count);
+
 	spin_unlock_irqrestore(&mgr->list_lock, flags);
 }
 
@@ -776,6 +803,7 @@ void print_used_pipe_list(struct pipe_manager *mgr)
 {
 	struct pipe_info_node *pipe, *tpipe;
 	unsigned long flags = 0;
+	unsigned int count = 0;
 
 	spin_lock_irqsave(&mgr->list_lock, flags);
 	if (list_empty(&mgr->pipe_used_list)) {
@@ -785,15 +813,17 @@ void print_used_pipe_list(struct pipe_manager *mgr)
 	}
 
 	list_for_each_entry_safe(pipe, tpipe, &mgr->pipe_used_list, node) {
-		if (pipe->pipe_id < 10) {
-			EINK_INFO_MSG("USED_LIST: pipe %02d is used\n", pipe->pipe_id);
-		}
+#ifdef PIPELINE_DEBUG
+		EINK_INFO_MSG("USED_LIST: pipe %02d is used\n", pipe->pipe_id);
+#endif
+		count++;
 	}
+
+	EINK_INFO_MSG("[+++] %d Pipes are Used!\n", count);
+
 	spin_unlock_irqrestore(&mgr->list_lock, flags);
 }
-#endif
 
-#ifdef BUFFER_LIST_DEBUG
 void print_coll_img_list(struct buf_manager *mgr)
 {
 	struct img_node *curnode = NULL, *tmpnode = NULL;
@@ -806,8 +836,7 @@ void print_coll_img_list(struct buf_manager *mgr)
 	}
 
 	list_for_each_entry_safe(curnode, tmpnode, &mgr->img_collision_list, node) {
-		EINK_INFO_MSG("COLL_LIST: img [buf_id, order, state] [%d, %d, %d] is collision\n",
-						curnode->buf_id, curnode->upd_order, curnode->img->state);
+		EINK_INFO_MSG("COLL_LIST: [img %d] is collision\n", curnode->upd_order);
 	}
 	mutex_unlock(&mgr->mlock);
 }
@@ -824,8 +853,7 @@ void print_used_img_list(struct buf_manager *mgr)
 	}
 
 	list_for_each_entry_safe(curnode, tmpnode, &mgr->img_used_list, node) {
-		EINK_INFO_MSG("IMG_USED_LIST: img [buf_id, order, state] [%d, %d, %d] is used\n",
-					curnode->buf_id, curnode->upd_order, curnode->img->state);
+		EINK_INFO_MSG("IMG_USED_LIST: [img %d] is used\n", curnode->upd_order);
 	}
 
 	mutex_unlock(&mgr->mlock);
@@ -843,13 +871,11 @@ void print_free_img_list(struct buf_manager *mgr)
 	}
 
 	list_for_each_entry_safe(curnode, tmpnode, &mgr->img_free_list, node) {
-		EINK_INFO_MSG("FREE_LIST: img [buf_id, order, state] [%d, %d, %d] is free\n",
-						curnode->buf_id, curnode->upd_order, curnode->img->state);
+		EINK_INFO_MSG("FREE_LIST: [img %d] is free\n", curnode->upd_order);
 	}
 
 	mutex_unlock(&mgr->mlock);
 }
-#endif
 
 int save_as_bin_file(__u8 *buf, char *file_name, __u32 length, loff_t pos)
 {
@@ -872,8 +898,8 @@ int save_as_bin_file(__u8 *buf, char *file_name, __u32 length, loff_t pos)
 	old_fs = get_fs();
 	set_fs(KERNEL_DS);
 
-	ret = vfs_write(fp, buf, length, &pos);
-	EINK_INFO_MSG("%s: save %s done, len=%u, pos=%lld, ret=%d\n",
+	ret = kernel_write(fp, buf, length, &pos);
+	pr_info("%s: save %s done, len=%u, pos=%lld, ret=%d\n",
 					__func__, file_name, length, pos, (unsigned int)ret);
 
 	set_fs(old_fs);
@@ -883,7 +909,6 @@ int save_as_bin_file(__u8 *buf, char *file_name, __u32 length, loff_t pos)
 
 }
 
-//#ifdef SAVE_DE_WB_BUF
 s32 save_gray_image_as_bmp(u8 *buf, char *file_name, u32 scn_w, u32 scn_h)
 {
 	int ret = -1;
@@ -950,17 +975,17 @@ s32 save_gray_image_as_bmp(u8 *buf, char *file_name, u32 scn_w, u32 scn_h)
 	old_fs = get_fs();
 	set_fs(KERNEL_DS);
 
-	ret = vfs_write(fd, (u8 *)(&st_file_header), BMP_FILE_HEADER_SIZE, &pos);
-	EINK_INFO_MSG("save file header, len=%u, pos=%d, ret=%d\n", (unsigned int)BMP_FILE_HEADER_SIZE, (int)pos, ret);
+	ret = kernel_write(fd, (u8 *)(&st_file_header), BMP_FILE_HEADER_SIZE, &pos);
+	//EINK_INFO_MSG("save file header, len=%u, pos=%d, ret=%d\n", (unsigned int)BMP_FILE_HEADER_SIZE, (int)pos, ret);
 
-	ret = vfs_write(fd, (u8 *)(&st_info_header), BMP_INFO_HEADER_SIZE, &pos);
-	EINK_INFO_MSG("save file header, len=%u, pos=%d, ret=%d\n", (unsigned int)BMP_INFO_HEADER_SIZE, (int)pos, ret);
+	ret = kernel_write(fd, (u8 *)(&st_info_header), BMP_INFO_HEADER_SIZE, &pos);
+	//EINK_INFO_MSG("save file header, len=%u, pos=%d, ret=%d\n", (unsigned int)BMP_INFO_HEADER_SIZE, (int)pos, ret);
 
-	ret = vfs_write(fd, (u8 *)(color_table), BMP_COLOR_SIZE, &pos);
-	EINK_INFO_MSG("save file header, len=%u, pos=%d, ret=%d\n", (unsigned int)BMP_COLOR_SIZE, (int)pos, ret);
+	ret = kernel_write(fd, (u8 *)(color_table), BMP_COLOR_SIZE, &pos);
+	//EINK_INFO_MSG("save file header, len=%u, pos=%d, ret=%d\n", (unsigned int)BMP_COLOR_SIZE, (int)pos, ret);
 
-	ret = vfs_write(fd, (u8 *)(dest_buf), dest_info.image_size, &pos);
-	EINK_INFO_MSG("save file header, len=%u, pos=%d, ret=%d\n", dest_info.image_size, (int)pos, ret);
+	ret = kernel_write(fd, (u8 *)(dest_buf), dest_info.image_size, &pos);
+	//EINK_INFO_MSG("save file header, len=%u, pos=%d, ret=%d\n", dest_info.image_size, (int)pos, ret);
 
 	set_fs(old_fs);
 
@@ -973,7 +998,74 @@ s32 save_gray_image_as_bmp(u8 *buf, char *file_name, u32 scn_w, u32 scn_h)
 	return ret;
 }
 
-void save_upd_rmi_buffer(u32 order, u8 *buf, u32 len)
+void save_index_buffer(u32 order, u16 *buf, u32 len, u32 bit_num, u32 width, u32 height, bool is_before)
+{
+	int i = 0, size = 0;
+	u8 *preidx = NULL, *curidx = NULL;
+	char file_name[256] = {0};
+
+	if (buf == NULL) {
+		pr_err("%s:input param is null\n", __func__);
+		return;
+	}
+	size = len / 2;
+	preidx = kmalloc(size, GFP_KERNEL | __GFP_ZERO);
+	if (preidx == NULL) {
+		pr_err("malloc preidx buf failed\n");
+		return;
+	}
+	curidx = kmalloc(size, GFP_KERNEL | __GFP_ZERO);
+	if (curidx == NULL) {
+		pr_err("malloc curidx buf failed\n");
+		kfree(preidx);
+		return;
+	}
+
+	if (bit_num == 5) {
+		for (i = 0; i < (len / 2); i++) {
+			*(preidx + i) = ((*(buf + i) & 0x3e0) >> 5) << 3;
+			*(curidx + i) = (*(buf + i) & 0x1f) << 3;
+		}
+	} else {
+		for (i = 0; i < (len / 2); i++) {
+			*(preidx + i) = ((*(buf + i) & 0xf0) >> 4) << 4;
+			*(curidx + i) = (*(buf + i) & 0xf) << 4;
+		}
+	}
+
+	memset(file_name, 0, sizeof(file_name));
+	if (is_before)
+		snprintf(file_name, sizeof(file_name), "/data/preidx_before%d.bmp", order);
+	else
+		snprintf(file_name, sizeof(file_name), "/data/preidx%d.bmp", order);
+	save_gray_image_as_bmp((u8 *)preidx, file_name, width, height);
+#if 0
+	if (is_before)
+		snprintf(file_name, sizeof(file_name), "/data/preidx_before%d.bin", order);
+	else
+		snprintf(file_name, sizeof(file_name), "/data/preidx%d.bin", order);
+	save_as_bin_file((u8 *)preidx, file_name, width * height, 0);
+#endif
+
+	memset(file_name, 0, sizeof(file_name));
+	if (is_before)
+		snprintf(file_name, sizeof(file_name), "/data/curidx_before%d.bmp", order);
+	else
+		snprintf(file_name, sizeof(file_name), "/data/curidx%d.bmp", order);
+
+	save_gray_image_as_bmp((u8 *)curidx, file_name, width, height);
+#if 0
+	if (is_before)
+		snprintf(file_name, sizeof(file_name), "/data/curidx_before%d.bin", order);
+	else
+		snprintf(file_name, sizeof(file_name), "/data/curidx%d.bin", order);
+	save_as_bin_file((u8 *)curidx, file_name, width * height, 0);
+#endif
+	kfree(preidx);
+	kfree(curidx);
+}
+
+void save_upd_rmi_buffer(u32 order, u8 *buf, u32 len, bool is_before)
 {
 	char file_name[256] = {0};
 
@@ -983,27 +1075,153 @@ void save_upd_rmi_buffer(u32 order, u8 *buf, u32 len)
 	}
 
 	memset(file_name, 0, sizeof(file_name));
-	snprintf(file_name, sizeof(file_name), "/tmp/rmi_buf%d.bin", order);
+	if (is_before)
+		snprintf(file_name, sizeof(file_name), "/data/rmi_buf_before%d.bin", order);
+	else
+		snprintf(file_name, sizeof(file_name), "/data/rmi_buf%d.bin", order);
 	save_as_bin_file(buf, file_name, len, 0);
 }
 
-void eink_put_gray_to_mem(u32 order, char *buf, u32 width, u32 height)
+void eink_kmap_img(struct img_node *curnode)
 {
-	char file_name[256] = {0};
+	struct dma_buf *dmabuf = NULL;
+	char *buf = NULL;
+	int ret = 0;
 
-	if (buf == NULL) {
-		pr_err("input param is null\n");
+	pr_info("[%s]: ", __func__);
+
+	dmabuf = curnode->item->buf;
+	if (IS_ERR(dmabuf)) {
+		pr_err("[%s]fail to get eink buffer dmabuf\n", __func__);
 		return;
 	}
 
-	memset(file_name, 0, sizeof(file_name));
-	snprintf(file_name, sizeof(file_name), "/tmp/eink_image%d.bmp", order);
-	save_gray_image_as_bmp((u8 *)buf, file_name, width, height);
-}
-//#endif
+	ret = dma_buf_begin_cpu_access(dmabuf, DMA_FROM_DEVICE);
+	if (ret) {
+		dma_buf_put(dmabuf);
+		dmabuf = NULL;
+		pr_err("[%s]:[%d] dma_buf_begin_cpu_access fail\n",
+				__func__, __LINE__);
+		return;
+	}
 
-#if (defined DE_WB_DEBUG) || (defined WAVEDATA_DEBUG)
-int eink_get_gray_from_mem(__u8 *buf, char *file_name, __u32 length, loff_t pos)
+	buf = dma_buf_kmap(dmabuf, 0);
+	if (buf == NULL) {
+		dma_buf_end_cpu_access(dmabuf, DMA_FROM_DEVICE);
+		dma_buf_put(dmabuf);
+		dmabuf = NULL;
+		pr_err("[%s]fail to map eink buffer fd\n", __func__);
+		return;
+	}
+	curnode->kaddr = buf;
+#if 0
+	dma_buf_kunmap(dmabuf, 0, buf);
+	dma_buf_end_cpu_access(dmabuf, DMA_FROM_DEVICE);
+#endif
+	return;
+}
+
+void eink_kunmap_img(struct img_node *curnode)
+{
+	struct dma_buf *dmabuf = curnode->item->buf;
+	if (IS_ERR(dmabuf)) {
+		pr_err("[%s]fail to get eink buffer dmabuf\n", __func__);
+		return;
+	}
+
+	dma_buf_kunmap(dmabuf, 0, curnode->kaddr);
+	dma_buf_end_cpu_access(dmabuf, DMA_FROM_DEVICE);
+	return;
+}
+
+/* flag = 0 wb last img,
+ * flag = 1 wb cur img,
+ * flag = 2 coll img,
+ * falg = 3 upd img,
+ * flag = 4 is layer order is layer num
+ */
+void eink_save_img(int fd, int flag, u32 width, u32 height, int order, char *kaddr, bool is_before)
+{
+	char file_name[256] = {0};
+	static int cur_order, last_order, layer_order;
+
+	struct dma_buf *dmabuf = NULL;
+	char *buf = NULL;
+	int ret = 0, len = 0;
+
+	pr_info("[%s]: ", __func__);
+
+	if (kaddr == NULL) {
+		dmabuf = dma_buf_get(fd);
+		if (IS_ERR(dmabuf)) {
+			pr_err("[%s]fail to get eink buffer fd = %d\n", __func__, fd);
+			return;
+		}
+
+		ret = dma_buf_begin_cpu_access(dmabuf, DMA_FROM_DEVICE);
+		if (ret) {
+			dma_buf_put(dmabuf);
+			dmabuf = NULL;
+			pr_err("[%s]:[%d] dma_buf_begin_cpu_access fail\n",
+					__func__, __LINE__);
+			return;
+		}
+
+		buf = dma_buf_kmap(dmabuf, 0);
+		if (buf == NULL) {
+			dma_buf_end_cpu_access(dmabuf, DMA_FROM_DEVICE);
+			dma_buf_put(dmabuf);
+			dmabuf = NULL;
+			pr_err("[%s]fail to map eink buffer fd\n", __func__);
+			return;
+		}
+	} else
+		buf = kaddr;
+
+	memset(file_name, 0, sizeof(file_name));
+	if (flag == 1) {
+		snprintf(file_name, sizeof(file_name), "/data/cur_img%d.bmp", cur_order);
+		cur_order++;
+	} else if (flag == 0) {
+		snprintf(file_name, sizeof(file_name), "/data/last_img%d.bmp", last_order);
+		last_order++;
+	} else if (flag == 2) {
+		snprintf(file_name, sizeof(file_name), "/data/coll_img%d.bmp", order);
+	} else if (flag == 5) {
+		if (is_before)
+			snprintf(file_name, sizeof(file_name), "/data/upd_img_before_%dx%d_%d.bmp", width, height, order);
+		else
+			snprintf(file_name, sizeof(file_name), "/data/upd_img_%dx%d_%d.bmp", width, height, order);
+
+	} else if (flag == 3) {
+		snprintf(file_name, sizeof(file_name), "/data/user_upd_img%d.bmp", order);
+	} else if (flag == 4) {
+		snprintf(file_name, sizeof(file_name), "/data/layer%d_%d.bin", order, layer_order);
+		layer_order++;
+	}
+
+	if (flag == 4) {
+		len = width * height * 4;
+		save_as_bin_file((u8 *)buf, file_name, len, 0);
+	} else {
+		save_gray_image_as_bmp((u8 *)buf, file_name, width, height);
+#if 0
+		len = width * height;
+		if (is_before)
+			snprintf(file_name, sizeof(file_name), "/data/upd_img_before_%dx%d_%d.bin", width, height, order);
+		else
+			snprintf(file_name, sizeof(file_name), "/data/upd_img_%dx%d_%d.bin", width, height, order);
+		save_as_bin_file((u8 *)buf, file_name, len, 0);
+#endif
+	}
+
+	if (kaddr == NULL) {
+		dma_buf_kunmap(dmabuf, 0, buf);
+		dma_buf_end_cpu_access(dmabuf, DMA_FROM_DEVICE);
+	}
+}
+
+int eink_get_default_file_from_mem(__u8 *buf, char *file_name, __u32 length, loff_t pos)
 {
 	struct file *fp = NULL;
 	mm_segment_t fs;
@@ -1025,7 +1243,7 @@ int eink_get_gray_from_mem(__u8 *buf, char *file_name, __u32 length, loff_t pos)
 	fs = get_fs();
 	set_fs(KERNEL_DS);
 
-	read_len = vfs_read(fp, buf, length, &pos);
+	read_len = kernel_read(fp, buf, length, &pos);
 	if (read_len != length) {
 		pr_err("maybe miss some data(read=%d byte, file=%d byte)\n",
 				read_len, length);
@@ -1036,9 +1254,7 @@ int eink_get_gray_from_mem(__u8 *buf, char *file_name, __u32 length, loff_t pos)
 
 	return ret;
 }
-#endif
 
-#ifdef WAVEDATA_DEBUG
 void save_waveform_to_mem(u32 order, u8 *buf, u32 frames, u32 bit_num)
 {
 	char file_name[256] = {0};
@@ -1049,13 +1265,15 @@ void save_waveform_to_mem(u32 order, u8 *buf, u32 frames, u32 bit_num)
 		return;
 	}
 	if (bit_num == 5)
-		per_size = 1024;
-	else
 		per_size = 256;
+	else
+		per_size = 64;
 
 	len = frames * per_size;
+
+	pr_info("[%s] size = (%d x %d) = %d\n", __func__, frames, bit_num, len);
 	memset(file_name, 0, sizeof(file_name));
-	snprintf(file_name, sizeof(file_name), "/tmp/waveform%d.bin", order);
+	snprintf(file_name, sizeof(file_name), "/data/waveform%d.bin", order);
 	save_as_bin_file(buf, file_name, len, 0);
 }
 
@@ -1070,10 +1288,9 @@ void save_rearray_waveform_to_mem(u8 *buf, u32 len)
 	pr_info("%s:len is %d\n", __func__, len);
 
 	memset(file_name, 0, sizeof(file_name));
-	snprintf(file_name, sizeof(file_name), "/tmp/waveform_rearray.bin");
+	snprintf(file_name, sizeof(file_name), "/data/waveform_rearray.bin");
 	save_as_bin_file(buf, file_name, len, 0);
 }
-#endif
 
 #ifdef OFFLINE_SINGLE_MODE
 void save_one_wavedata_buffer(u8 *buf, bool is_edma)
@@ -1104,11 +1321,11 @@ void save_one_wavedata_buffer(u8 *buf, bool is_edma)
 	queue = &pipe_mgr->wavedata_ring_buffer;
 	memset(file_name, 0, sizeof(file_name));
 	if (is_edma) {
-		snprintf(file_name, sizeof(file_name), "/tmp/edma_wf_data%d.bin", edma_id);
+		snprintf(file_name, sizeof(file_name), "/data/edma_wf_data%d.bin", edma_id);
 		/* buf = (void*)queue->wavedata_vaddr[0]; */
 		edma_id++;
 	} else {
-		snprintf(file_name, sizeof(file_name), "/tmp/dc_wf_data%d.bin", dec_id);
+		snprintf(file_name, sizeof(file_name), "/data/dc_wf_data%d.bin", dec_id);
 		/* buf = (void*)queue->wavedata_vaddr[0]; */
 		dec_id++;
 	}
@@ -1176,7 +1393,7 @@ void save_all_wavedata_buffer(struct eink_manager *mgr, u32 all_total_frames)
 	queue = &pipe_mgr->wavedata_ring_buffer;
 	for (id = 0; id < all_total_frames; id++) {
 		memset(file_name, 0, sizeof(file_name));
-		snprintf(file_name, sizeof(file_name), "/tmp/wvdata_%d.bin", id);
+		snprintf(file_name, sizeof(file_name), "/data/wvdata_%d.bin", id);
 		buf = (void *)queue->wavedata_vaddr[id];
 		save_as_bin_file(buf, file_name, data_len, 0);
 	}

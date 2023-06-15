@@ -15,7 +15,7 @@
 
 s32 disp_init_mgr(struct disp_bsp_init_para *para);
 
-#if defined(CONFIG_SUNXI_IOMMU)
+#if IS_ENABLED(CONFIG_SUNXI_IOMMU)
 #define DE_MASTOR_ID 0
 extern void sunxi_enable_device_iommu(unsigned int mastor_id, bool flag);
 #endif

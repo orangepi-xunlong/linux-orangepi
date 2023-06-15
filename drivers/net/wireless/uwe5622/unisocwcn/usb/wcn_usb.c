@@ -24,6 +24,9 @@ struct virtual_buf {
 };
 #define virtual_to_head(x) ((char *)x - sizeof(unsigned char))
 
+MODULE_LICENSE("GPL");
+MODULE_IMPORT_NS(VFS_internal_I_am_really_a_filesystem_and_am_NOT_a_driver);
+
 static int mdbg_virtual_pop(int channel, struct mbuf_t *head,
 		     struct mbuf_t *tail, int num)
 {
@@ -363,12 +366,7 @@ static void wcn_usb_register_rescan_cb(void *data)
 char ehci_dbg_buf[PAGE_SIZE];
 static int wcn_mount_debugfs(void)
 {
-	char cmd_path[] = "/system/bin/mount";
-	char *argv[] = {cmd_path, "-t", "debugfs", "none", "/sys/kernel/debug",
-			NULL};
-	char *envp[] = {"HOME=/", "PATH=/system/bin", NULL};
-
-	return call_usermodehelper(cmd_path, argv, envp, UMH_WAIT_PROC);
+	return 0;
 }
 
 static int wcn_print_async(void)

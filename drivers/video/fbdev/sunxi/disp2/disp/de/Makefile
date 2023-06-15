@@ -1,5 +1,9 @@
 MIPI_DSI_IP_VERSION ?= 40
 
+ifeq ($(CONFIG_ARCH_SUN8IW8),y)
+sub_dir = lowlevel_sun8iw8
+endif
+
 ifeq ($(CONFIG_ARCH_SUN8IW11),y)
 sub_dir = lowlevel_v2x
 endif
@@ -15,16 +19,17 @@ sub_dir = lowlevel_v2x
 endif
 
 ifeq ($(CONFIG_ARCH_SUN50IW10),y)
-MIPI_DSI_IP_VERSION := 28
+MIPI_DSI_IP_VERSION := 40
 sub_dir = lowlevel_v2x
 endif
+
 ifeq ($(CONFIG_ARCH_SUN8IW6),y)
 sub_dir = lowlevel_v2x
 MIPI_DSI_IP_VERSION := 28
 endif
 
 ifeq ($(CONFIG_ARCH_SUN8IW7),y)
-sub_dir = lowlevel_sun8iw7
+sub_dir = lowlevel_v2x
 endif
 
 ifeq ($(CONFIG_ARCH_SUN50IW1),y)
@@ -50,6 +55,15 @@ ifeq ($(CONFIG_ARCH_SUN8IW17),y)
 sub_dir = lowlevel_v2x
 endif
 
+ifeq ($(CONFIG_ARCH_SUN8IW16),y)
+sub_dir = lowlevel_v2x
+MIPI_DSI_IP_VERSION := 28
+endif
+
+ifeq ($(CONFIG_ARCH_SUN8IW19),y)
+sub_dir = lowlevel_v2x
+MIPI_DSI_IP_VERSION := 28
+endif
 
 ifeq ($(CONFIG_ARCH_SUN50IW5T),y)
 sub_dir = lowlevel_v33x
@@ -59,6 +73,24 @@ endif
 ifeq ($(CONFIG_ARCH_SUN50IW9),y)
 sub_dir = lowlevel_v33x
 MIPI_DSI_IP_VERSION := 28
+endif
+
+ifeq ($(CONFIG_ARCH_SUN50IW5T),y)
+sub_dir = lowlevel_v33x
+MIPI_DSI_IP_VERSION := 28
+endif
+
+ifeq ($(CONFIG_ARCH_SUN50IW9),y)
+sub_dir = lowlevel_v33x
+MIPI_DSI_IP_VERSION := 28
+endif
+
+ifeq ($(CONFIG_ARCH_SUN8IW20),y)
+sub_dir = lowlevel_v2x
+endif
+
+ifeq ($(CONFIG_ARCH_SUN20IW1),y)
+sub_dir = lowlevel_v2x
 endif
 
 ifneq ($(sub_dir),)

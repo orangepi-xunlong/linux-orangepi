@@ -25,7 +25,7 @@
  */
 #define _UBOOTT_RAWNAND_C_
 
-#include "../nand_boot.h"
+/*#include "../nand_boot.h"*/
 #include "../nand_errno.h"
 #include "../nand_physic_interface.h"
 #include "../nand_secure_storage.h"
@@ -40,6 +40,7 @@
 #include <linux/sunxi-boot.h>
 #include <linux/string.h>
 #include <linux/kernel.h>
+#include "../nand-partition3/sunxi_nand_boot.h"
 
 /*****************************************************************************
  *Name         :
@@ -1198,7 +1199,7 @@ int rawnand_physic_info_get_one_copy(unsigned int start_block, unsigned int page
 		lnpo.mdata = NULL;
 
 		ret = nci->nand_physic_read_page(&lnpo);
-		if ((sdata[0] == 0x0)) {
+		if (sdata[0] == 0x0) {
 			badblk_num++;
 			RAWNAND_DBG("bad block:chip %d block %d\n", lnpo.chip, lnpo.block);
 			continue;

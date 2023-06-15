@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Idle functions for s390.
  *
@@ -12,7 +13,7 @@
 #include <linux/notifier.h>
 #include <linux/init.h>
 #include <linux/cpu.h>
-#include <asm/cputime.h>
+#include <linux/sched/cputime.h>
 #include <asm/nmi.h>
 #include <asm/smp.h>
 #include "entry.h"
@@ -43,7 +44,7 @@ void enabled_wait(void)
 	idle->clock_idle_enter = idle->clock_idle_exit = 0ULL;
 	idle->idle_time += idle_time;
 	idle->idle_count++;
-	account_idle_time(idle_time);
+	account_idle_time(cputime_to_nsecs(idle_time));
 	write_seqcount_end(&idle->seqcount);
 }
 NOKPROBE_SYMBOL(enabled_wait);
@@ -57,8 +58,8 @@ static ssize_t show_idle_count(struct device *dev,
 
 	do {
 		seq = read_seqcount_begin(&idle->seqcount);
-		idle_count = ACCESS_ONCE(idle->idle_count);
-		if (ACCESS_ONCE(idle->clock_idle_enter))
+		idle_count = READ_ONCE(idle->idle_count);
+		if (READ_ONCE(idle->clock_idle_enter))
 			idle_count++;
 	} while (read_seqcount_retry(&idle->seqcount, seq));
 	return sprintf(buf, "%llu\n", idle_count);
@@ -68,35 +69,51 @@ DEVICE_ATTR(idle_count, 0444, show_idle_count, NULL);
 static ssize_t show_idle_time(struct device *dev,
 				struct device_attribute *attr, char *buf)
 {
+	unsigned long long now, idle_time, idle_enter, idle_exit, in_idle;
 	struct s390_idle_data *idle = &per_cpu(s390_idle, dev->id);
-	unsigned long long now, idle_time, idle_enter, idle_exit;
 	unsigned int seq;
 
 	do {
-		now = get_tod_clock();
 		seq = read_seqcount_begin(&idle->seqcount);
-		idle_time = ACCESS_ONCE(idle->idle_time);
-		idle_enter = ACCESS_ONCE(idle->clock_idle_enter);
-		idle_exit = ACCESS_ONCE(idle->clock_idle_exit);
+		idle_time = READ_ONCE(idle->idle_time);
+		idle_enter = READ_ONCE(idle->clock_idle_enter);
+		idle_exit = READ_ONCE(idle->clock_idle_exit);
 	} while (read_seqcount_retry(&idle->seqcount, seq));
-	idle_time += idle_enter ? ((idle_exit ? : now) - idle_enter) : 0;
+	in_idle = 0;
+	now = get_tod_clock();
+	if (idle_enter) {
+		if (idle_exit) {
+			in_idle = idle_exit - idle_enter;
+		} else if (now > idle_enter) {
+			in_idle = now - idle_enter;
+		}
+	}
+	idle_time += in_idle;
 	return sprintf(buf, "%llu\n", idle_time >> 12);
 }
 DEVICE_ATTR(idle_time_us, 0444, show_idle_time, NULL);
 
-cputime64_t arch_cpu_idle_time(int cpu)
+u64 arch_cpu_idle_time(int cpu)
 {
 	struct s390_idle_data *idle = &per_cpu(s390_idle, cpu);
-	unsigned long long now, idle_enter, idle_exit;
+	unsigned long long now, idle_enter, idle_exit, in_idle;
 	unsigned int seq;
 
 	do {
-		now = get_tod_clock();
 		seq = read_seqcount_begin(&idle->seqcount);
-		idle_enter = ACCESS_ONCE(idle->clock_idle_enter);
-		idle_exit = ACCESS_ONCE(idle->clock_idle_exit);
+		idle_enter = READ_ONCE(idle->clock_idle_enter);
+		idle_exit = READ_ONCE(idle->clock_idle_exit);
 	} while (read_seqcount_retry(&idle->seqcount, seq));
-	return idle_enter ? ((idle_exit ?: now) - idle_enter) : 0;
+	in_idle = 0;
+	now = get_tod_clock();
+	if (idle_enter) {
+		if (idle_exit) {
+			in_idle = idle_exit - idle_enter;
+		} else if (now > idle_enter) {
+			in_idle = now - idle_enter;
+		}
+	}
+	return cputime_to_nsecs(in_idle);
 }
 
 void arch_cpu_idle_enter(void)

@@ -12,8 +12,7 @@
 //#define GSL_NOID_VERSION
 
 
-unsigned int gsl_config_data_id_1680_7inch_863[] =
-{
+unsigned int gsl_config_data_id_1680_7inch_863[] = {
 	0x9fcb5f,
 	0x200,
 	0, 0,

@@ -1,7 +1,9 @@
 #
+/config_data
 # Generated files
 #
-config_data.h
-config_data.gz
+config_data
+kheaders.md5
 timeconst.h
 hz.bc
+kheaders_data.tar.xz.tmp

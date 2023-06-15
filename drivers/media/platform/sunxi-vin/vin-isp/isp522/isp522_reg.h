@@ -60,12 +60,8 @@ typedef union {
 		unsigned int isp_ch1_en:1;
 		unsigned int isp_ch2_en:1;
 		unsigned int isp_ch3_en:1;
-		unsigned int wdr_ch_seq:1;
-		unsigned int wdr_exp_seq:1;
-		unsigned int wdr_mode:2;
-		unsigned int res1:8;
-		unsigned int wdr_cmp_mode:1;
-		unsigned int res2:7;
+		unsigned int res1:4;
+		unsigned int res2:16;
 	} bits;
 } ISP_GLOBAL_CFG0_REG_t;
 
@@ -73,18 +69,12 @@ typedef union {
 	unsigned int dwval;
 	struct {
 		unsigned int line_int_num:14;
-		unsigned int wdr_en:1;
-		unsigned int res0:1;
+		unsigned int res0:2;
 		unsigned int speed_mode:3;
 		unsigned int res1:1;
 		unsigned int last_blank_cycle:3;
 		unsigned int res2:1;
-		unsigned int burst_length:3;
-		unsigned int wdr_fifo_exit:1;
-		unsigned int d3d_ltf_fifo_exit:1;
-		unsigned int d3d_fifo_exit:1;
-		unsigned int bandwidth_reg_en:1;
-		unsigned int fifo_max_layer_en:1;
+		unsigned int res4:8;
 	} bits;
 } ISP_GLOBAL_CFG1_REG_t;
 

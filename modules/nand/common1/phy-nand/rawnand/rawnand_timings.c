@@ -281,6 +281,25 @@ int set_nand_toggle_vendor_specific_setting_default(struct nand_chip_info *nci)
 			return ERR_NO_64;
 		}
 #endif
+	} else if (nci->id[0] == NAND_MFR_HYNIX) {
+		u8 pr[1] = {0};
+		addr = 0x01;
+		p[0] = 0x0;
+		if ((nci->interface_type == TOG_DDR) || (nci->interface_type == TOG_DDR2))
+			p[0] = (0x2 & 0x3)<<4; //enable toggle mode
+		else
+			p[0] = (0x0 & 0x3)<<4; //disable toggle mode
+		p[1] = 0x0;
+		p[2] = 0x0;
+		p[3] = 0x0;
+		nand_set_feature(nci, &addr, p);
+		nand_get_feature(nci, &addr, pr);
+		if (pr[0] != p[0]) {
+			RAWNAND_ERR("set feature(addr 0x01) %x,%x!\n", p[0], pr[0]);
+			return ERR_NO_64;
+		}
+		RAWNAND_DBG("set feature(addr 0x01) %x,%x!\n", p[0], pr[0]);
+
 	}
 
 	return 0;
@@ -728,6 +747,12 @@ struct itf_ops_t hynix_itf_ops = {
 		.driver_strength = set_nand_onfi_driver_strength_default,
 		.rb_strength = set_nand_onfi_rb_strength_default,
 		.timing_mode = set_nand_onfi_timing_mode_default,
+	},
+
+	.toggle = {
+		.specific_setting = set_nand_toggle_specific_setting_default,
+		.driver_strength = set_nand_toggle_driver_strength_default,
+		.vendor_specific_setting = set_nand_toggle_vendor_specific_setting_default,
 	}
 };
 

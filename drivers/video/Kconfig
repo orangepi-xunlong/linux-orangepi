@@ -1,19 +1,16 @@
+# SPDX-License-Identifier: GPL-2.0-only
 #
 # Video configuration
 #
 
 menu "Graphics support"
-	depends on HAS_IOMEM
+
+if HAS_IOMEM
 
 config HAVE_FB_ATMEL
 	bool
 
-config SH_LCD_MIPI_DSI
-	bool
-
 source "drivers/char/agp/Kconfig"
-
-source "modules/gpu/Kconfig"
 
 source "drivers/gpu/vga/Kconfig"
 
@@ -38,6 +35,8 @@ config VIDEOMODE_HELPERS
 config HDMI
 	bool
 
+endif # HAS_IOMEM
+
 if VT
 	source "drivers/video/console/Kconfig"
 endif
@@ -47,5 +46,5 @@ if FB || SGI_NEWPORT_CONSOLE
 
 endif
 
-
+source "modules/gpu/Kconfig"
 endmenu

@@ -82,6 +82,7 @@ typedef union {
 	} bits;
 } A13_WAVEDATA;
 
+#if 0
 typedef union {
 	__u8 dwval;
 	struct {
@@ -91,6 +92,20 @@ typedef union {
 		__u8 sth		:  1;
 		__u8 ckv		:  1;
 		__u8 stv		:  1;
+		__u8 res0	        :  2;
+
+	} bits;
+} TIMING_INFO;
+#endif
+typedef union {
+	__u8 dwval;
+	struct {
+		__u8 gdoe               :  1;
+		__u8 sdoe		:  1;
+		__u8 sdle		:  1;
+		__u8 sdsp		:  1;
+		__u8 gdck		:  1;
+		__u8 gdsp		:  1;
 		__u8 res0	        :  2;
 
 	} bits;

@@ -44,8 +44,6 @@ struct disp_dev_t {
 extern struct disp_dev_t gdisp;
 s32 disp_init_connections(struct disp_bsp_init_para *para);
 s32 bsp_disp_shadow_protect(u32 disp, bool protect);
-s32 bsp_disp_set_print_level(u32 print_level);
-s32 bsp_disp_get_print_level(void);
 void sync_event_proc(u32 disp, bool timeout);
 s32 disp_device_attached(int disp_mgr, int disp_dev,
 			struct disp_device_config *config);

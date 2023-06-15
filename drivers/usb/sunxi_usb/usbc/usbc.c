@@ -559,7 +559,7 @@ void USBC_SelectBus(__hdle hUSB, __u32 io_type, __u32 ep_type, __u32 ep_index)
 			reg_val |= 0x1<<USBC_BP_VEND0_BUS_SEL;
 		}
 	} else {
-#if !defined(CONFIG_ARCH_SUN8IW6)
+#if !defined(CONFIG_ARCH_SUN8IW6) && !defined(CONFIG_ARCH_SUN8IW8)
 		reg_val &= 0x00; /* clear drq_sel, select pio */
 #endif
 	}

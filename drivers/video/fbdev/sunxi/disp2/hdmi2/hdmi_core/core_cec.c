@@ -13,7 +13,7 @@
  */
 #include "hdmi_core.h"
 #include "api/api.h"
-#include "api/cec.h"
+#include "cec/cec.h"
 
 #include <linux/clk.h>
 #include <linux/mutex.h>
@@ -25,7 +25,6 @@
 #include <linux/cdev.h>
 #include <linux/list.h>
 #include <linux/spinlock.h>
-#include <linux/arisc/arisc.h>
 
 #define WAKEUP_TV_MSG			(1 << 0)
 #define STANDBY_TV_MSG			(1 << 1)
@@ -46,6 +45,9 @@ DEFINE_MUTEX(cecrx_list_lock);
 static int cec_active;
 static bool cec_local_standby;
 static struct task_struct *cec_task;
+#ifdef CONFIG_HDMI2_CEC_USER
+static struct cec_init_para init_cec;
+#endif
 
 #ifndef CONFIG_HDMI2_CEC_USER
 static char cec_msg_rx[16];
@@ -138,6 +140,21 @@ static int get_cec_opcode_name(char opcode, char *buf)
 }
 #endif
 
+/*static void cec_enable_clk(void)
+{
+	if (clk_prepare_enable(init_cec.hdmi_clk) != 0)
+		pr_err("[CEC]hdmi clk enable failed!\n");
+
+	if (clk_prepare_enable(init_cec.cec_clk) != 0)
+		pr_err("[CEC]cec clk enable failed!\n");
+}
+
+static void cec_disable_clk(void)
+{
+	clk_disable_unprepare(init_cec.cec_clk);
+	clk_disable_unprepare(init_cec.hdmi_clk);
+}*/
+
 void cec_set_local_standby(bool enable)
 {
 	cec_local_standby = enable;
@@ -150,9 +167,7 @@ bool cec_get_local_standby(void)
 
 static s32 hdmi_cec_get_simple_msg(unsigned char *msg, unsigned int size)
 {
-	struct hdmi_tx_core *core = get_platform();
-
-	return cec_ctrlReceiveFrame(&core->hdmi_tx, msg, size);
+	return cec_ctrlReceiveFrame(msg, size);
 }
 
 u16 cec_core_get_phyaddr(void)
@@ -173,21 +188,18 @@ static void cec_msleep(unsigned int ms)
 #ifdef CONFIG_HDMI2_CEC_USER
 void cec_core_set_logaddr(unsigned char logaddr)
 {
-	struct hdmi_tx_core *core = get_platform();
-
 	mutex_lock(&logaddr_lock);
 	src_logic = logaddr;
-	cec_CfgLogicAddr(&core->hdmi_tx, logaddr, 1);
+	cec_CfgLogicAddr(logaddr, 1);
 	mutex_unlock(&logaddr_lock);
 }
 
 unsigned char cec_core_get_logaddr(void)
 {
 	unsigned char logical;
-	struct hdmi_tx_core *core = get_platform();
 
 	mutex_lock(&logaddr_lock);
-	logical = (unsigned char)cec_get_log_addr(&core->hdmi_tx);
+	logical = (unsigned char)cec_get_log_addr();
 	mutex_unlock(&logaddr_lock);
 
 	return logical;
@@ -196,9 +208,8 @@ unsigned char cec_core_get_logaddr(void)
 int cec_core_msg_transmit(struct cec_msg *msg)
 {
 	int ret;
-	struct hdmi_tx_core *core = get_platform();
 
-	if ((!core) || (!msg))
+	if (!msg)
 		pr_err("Error: has NULL point\n");
 
 	if (!cec_active) {
@@ -215,10 +226,10 @@ int cec_core_msg_transmit(struct cec_msg *msg)
 #endif
 
 	mutex_lock(&ddc_analog_lock);
-	ret = cec_ctrlSendFrame(&core->hdmi_tx, &msg->msg[1],
-						msg->len - 1,
-						(msg->msg[0] >> 4) & 0x0f,
-						msg->msg[0] & 0x0f);
+	ret = cec_ctrlSendFrame(&msg->msg[1],
+				msg->len - 1,
+				(msg->msg[0] >> 4) & 0x0f,
+				msg->msg[0] & 0x0f);
 	mutex_unlock(&ddc_analog_lock);
 
 	if (ret == 0) {
@@ -349,7 +360,6 @@ static s32 hdmi_cec_send_with_allocated_srclogic(char *buf, unsigned int size,
 {
 	unsigned int src = src_logic;
 	int retval;
-	struct hdmi_tx_core *core = get_platform();
 
 	if (!cec_active) {
 		pr_err("cec NOT enable now!\n");
@@ -358,7 +368,7 @@ static s32 hdmi_cec_send_with_allocated_srclogic(char *buf, unsigned int size,
 	}
 
 	mutex_lock(&send_lock);
-	retval = cec_ctrlSendFrame(&core->hdmi_tx, buf, size, src, dst);
+	retval = cec_ctrlSendFrame(buf, size, src, dst);
 	if (retval >= 0) {
 		msg_count_tx = size + 1;
 		memset(cec_msg_tx, 0, sizeof(cec_msg_tx));
@@ -575,7 +585,6 @@ static int hdmi_cec_send_poll(void)
 {
 	int i, poll_ret;
 	unsigned char src = 0, buf;
-	struct hdmi_tx_core *core = get_platform();
 
 	for (i = 0; i < 3; i++) {
 		if (i == 0) {
@@ -599,11 +608,11 @@ static int hdmi_cec_send_poll(void)
 		buf = (src << 4) | src;
 		hdmi_printf_cec_info(&buf, 1, 1);
 		mutex_lock(&send_lock);
-		poll_ret = cec_send_poll(&core->hdmi_tx, src);
+		poll_ret = cec_send_poll(src);
 		mutex_unlock(&send_lock);
 		if (!poll_ret) {
 			CEC_INF("Get cec src logical address:%s\n", logic_addr[src]);
-			cec_CfgLogicAddr(&core->hdmi_tx, src, 1);
+			cec_CfgLogicAddr(src, 1);
 			src_logic = src;
 			return 0;
 		}
@@ -676,10 +685,8 @@ void hdmi_cec_wakup_request(void)
 
 s32 hdmi_cec_standby_request(void)
 {
-	struct hdmi_tx_core *core = get_platform();
-
 	mutex_lock(&thread_lock);
-	if ((!cec_get_local_standby()) && core->is_cts) {
+	if (!cec_get_local_standby()) {
 		hdmi_cec_standby();
 		CEC_INF("cec standby boardcast send\n");
 	}
@@ -867,7 +874,7 @@ static int cec_thread(void *param)
 			break;
 		}
 
-		if (!hdmi_enable_mask) {
+		if (!cec_active) {
 			cec_msleep(10);
 			continue;
 		}
@@ -1055,9 +1062,8 @@ static long cec_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 #ifdef TCON_PAN_SEL
 		CEC_INF("T:HDMI PAD:%d\n", hdmi_get_ddc_analog());
 #endif
-		if (!cec_active || !hdmi_enable_mask) {
-			CEC_INF("cec_active:%d hdmi_enable:%d\n",
-				cec_active, hdmi_enable_mask);
+		if (!cec_active) {
+			CEC_INF("cec_active:%d\n", cec_active);
 			break;
 		}
 
@@ -1084,7 +1090,7 @@ static long cec_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 						tx_msg->msg.tx_status,
 						tx_msg->msg.rx_status);
 		for (i = 0; i < tx_msg->msg.len; i++)
-			CEC_INF("msg[%d]:0x%x ", i, tx_msg->msg.msg[i]);
+			CEC_INF("msg[%d]:0x%02x ", i, tx_msg->msg.msg[i]);
 
 		CEC_INF("\n");
 
@@ -1183,7 +1189,7 @@ static long cec_compat_ioctl(struct file *file, unsigned int cmd,
 	}
 
 	ubuffer = compat_alloc_user_space(3 * sizeof(unsigned long));
-	if (!access_ok(VERIFY_WRITE, ubuffer, 3 * sizeof(unsigned long)))
+	if (!access_ok(/*VERIFY_WRITE, */ubuffer, 3 * sizeof(unsigned long)))
 		return -EFAULT;
 
 	if (put_user(karg[0], &ubuffer[0]) ||
@@ -1208,11 +1214,15 @@ static const struct file_operations cec_fops = {
 #endif
 };
 
-void hdmi_cec_init(void)
+void hdmi_cec_init(struct cec_init_para *init)
 {
 	int err;
 
 	pr_info("%s\n", __func__);
+
+	memcpy(&init_cec, init, sizeof(*init));
+	cec_set_base_addr(init->hdmi_base);
+
 	/*Create and add a character device*/
 	alloc_chrdev_region(&cec_devid, 0, 1, "cec");/*corely for device number*/
 	cec_cdev = cdev_alloc();
@@ -1241,8 +1251,8 @@ void hdmi_cec_exit(void)
 	cdev_del(cec_cdev);
 }
 #else
-void hdmi_cec_init(void){; }
-void hdmi_cec_exit(void){; }
+void hdmi_cec_init(struct cec_init_para *init) {; }
+void hdmi_cec_exit(void) {; }
 #endif
 
 /*Just for CEC Super Standby
@@ -1256,8 +1266,6 @@ void hdmi_cec_soft_disable(void)
 
 s32 hdmi_cec_enable(int enable)
 {
-	struct hdmi_tx_core *core = get_platform();
-
 	LOG_TRACE1(enable);
 
 	mutex_lock(&thread_lock);
@@ -1267,15 +1275,16 @@ s32 hdmi_cec_enable(int enable)
 			return 0;
 		}
 
+		cec_active = 1;
+		cec_set_active(1);
+
+		//cec_enable_clk();
+
 		/*
 		 * Enable cec module and set logic address to playback device 1.
 		 * TODO: ping other devices and allocate a idle logic address.
 		 */
-		core->hdmi_tx.snps_hdmi_ctrl.cec_on = true;
-		mc_cec_clock_enable(&core->hdmi_tx, 0);
-		udelay(200);
-		cec_Init(&core->hdmi_tx);
-		cec_active = 1;
+		cec_Init();
 
 #ifndef CONFIG_HDMI2_CEC_USER
 		hdmi_cec_send_poll();
@@ -1284,7 +1293,7 @@ s32 hdmi_cec_enable(int enable)
 #else
 		mutex_lock(&logaddr_lock);
 		if (src_logic)
-			cec_CfgLogicAddr(&core->hdmi_tx, src_logic, 1);
+			cec_CfgLogicAddr(src_logic, 1);
 		mutex_unlock(&logaddr_lock);
 #endif
 	} else {
@@ -1293,9 +1302,9 @@ s32 hdmi_cec_enable(int enable)
 			return 0;
 		}
 		cec_active = 0;
-		cec_Disable(&core->hdmi_tx, 0);
-		mc_cec_clock_enable(&core->hdmi_tx, 1);
-		core->hdmi_tx.snps_hdmi_ctrl.cec_on = false;
+		cec_Disable(0);
+		//cec_disable_clk();
+		cec_set_active(0);
 	}
 	mutex_unlock(&thread_lock);
 	return 0;
@@ -1304,10 +1313,6 @@ s32 hdmi_cec_enable(int enable)
 ssize_t cec_dump_core(char *buf)
 {
 	ssize_t n = 0;
-
-#ifdef CONFIG_HDMI2_CEC_USER
-	struct hdmi_tx_core *core = get_platform();
-#endif
 
 	n += sprintf(buf + n, "\n");
 
@@ -1339,7 +1344,7 @@ ssize_t cec_dump_core(char *buf)
 #else
 	mutex_lock(&logaddr_lock);
 	n += sprintf(buf + n, "Tx Current logical address:%s\n",
-							logic_addr[cec_get_log_addr(&core->hdmi_tx)]);
+			logic_addr[cec_get_log_addr()]);
 	mutex_unlock(&logaddr_lock);
 #endif
 	n += sprintf(buf + n, "\n\n");
@@ -1349,10 +1354,11 @@ ssize_t cec_dump_core(char *buf)
 
 int cec_tansmit_msg_test(enum cec_test_cmd cmd)
 {
-	struct cec_msg_rx *rx_msg = NULL;
+#ifdef CONFIG_HDMI2_CEC_USER
+    struct cec_msg_rx *rx_msg = NULL;
 	unsigned char msg[16];
 
-	rx_msg = vmalloc(sizeof(*rx_msg));
+	rx_msg = (struct cec_msg_rx *)vmalloc(sizeof(*rx_msg));
 	if (!rx_msg)
 		return -1;
 	memset(rx_msg, 0, sizeof(struct cec_msg_rx));
@@ -1384,6 +1390,6 @@ int cec_tansmit_msg_test(enum cec_test_cmd cmd)
 	list_add_tail(&rx_msg->list, &cec_rx_list);
 	rx_list_count++;
 	mutex_unlock(&cecrx_list_lock);
-
+#endif
 	return 0;
 }

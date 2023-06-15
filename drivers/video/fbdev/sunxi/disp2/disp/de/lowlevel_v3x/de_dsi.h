@@ -207,4 +207,5 @@ u16 dsi_crc_pro_pd_repeat(u8 pd, u32 pd_bytes);
 u16 dsi_crc_pro(u8 *pd_p, u32 pd_bytes);
 s32 dsi_mode_switch(__u32 sel, __u32 cmd_en, __u32 lp_en);
 s32 dsi_turn_on_peripheral_command(__u32 sel);
+s32 dsi_get_status(u32 sel);
 #endif

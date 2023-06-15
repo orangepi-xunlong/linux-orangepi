@@ -42,8 +42,12 @@ MODULE_LICENSE("GPL");
  * The GC0310 i2c address
  */
 #define I2C_ADDR 0x6e
+#define SENSOR_NUM	0x2
+#define SENSOR_NAME	"gc2385_mipi"
+#define SENSOR_NAME_2	"gc2385_mipi_2"
 
-#define SENSOR_NAME "gc2385_mipi"
+struct sensor_exp_gain grobal_exp_gain = {16000, 512};
+
 
 /*
  * The default register settings
@@ -74,7 +78,7 @@ static struct regval_list sensor_1600x1200p30_regs[] = {
 	{0x05, 0x02},
 	{0x06, 0x86},
 	{0x07, 0x00},
-	{0x08, 0x10},
+	{0x08, 0x24},
 	{0x09, 0x00},
 	{0x0a, 0x04},
 	{0x0b, 0x00},
@@ -327,6 +331,8 @@ static int sensor_s_exp_gain(struct v4l2_subdev *sd,
 
 	exp_val = exp_gain->exp_val;
 	gain_val = exp_gain->gain_val;
+	grobal_exp_gain.exp_val = exp_gain->exp_val;
+	grobal_exp_gain.gain_val = exp_gain->gain_val;
 
 	if (gain_val < 16)
 		gain_val = 16;
@@ -381,10 +387,11 @@ static int sensor_power(struct v4l2_subdev *sd, int on)
 		cci_unlock(sd);
 		break;
 	case PWR_ON:
-		sensor_print("PWR_ON!\n");
+		sensor_print(" sd %s,PWR_ON!\n", sd->name);
 		cci_lock(sd);
 		vin_gpio_set_status(sd, PWDN, 1);
-		//vin_gpio_set_status(sd, RESET, 1);
+		vin_gpio_set_status(sd, RESET, 1);
+		vin_gpio_write(sd, PWDN, CSI_GPIO_HIGH);
 		usleep_range(100, 120);
 		vin_gpio_write(sd, PWDN, CSI_GPIO_LOW);
 		vin_set_pmu_channel(sd, IOVDD, ON);
@@ -395,6 +402,7 @@ static int sensor_power(struct v4l2_subdev *sd, int on)
 		usleep_range(200, 220);
 		vin_set_mclk_freq(sd, MCLK);
 		vin_set_mclk(sd, ON);
+		usleep_range(200, 220);
 		vin_gpio_write(sd, PWDN, CSI_GPIO_HIGH);
 		cci_unlock(sd);
 		break;
@@ -465,8 +473,6 @@ static int sensor_init(struct v4l2_subdev *sd, u32 val)
 	int ret;
 	struct sensor_info *info = to_state(sd);
 
-	sensor_print("sensor_init\n");
-
 	/*Make sure it is a target sensor */
 	ret = sensor_detect(sd);
 	if (ret) {
@@ -513,6 +519,9 @@ static long sensor_ioctl(struct v4l2_subdev *sd, unsigned int cmd, void *arg)
 	case VIDIOC_VIN_SENSOR_CFG_REQ:
 		sensor_cfg_req(sd, (struct sensor_config *)arg);
 		break;
+	case VIDIOC_VIN_FLASH_EN:
+		ret = flash_en(sd, (struct flash_para *)arg);
+		break;
 	default:
 		return -EINVAL;
 	}
@@ -552,7 +561,7 @@ static struct sensor_win_size sensor_win_sizes[] = {
 	.bin_factor = 1,
 	.intg_min   = 1<<4,
 	.intg_max   = 1248<<4,
-	.gain_min   = 16<<4,
+	.gain_min   = 1<<4,
 	.gain_max   = 128<<4,
 	.regs       = sensor_1600x1200p30_regs,
 	.regs_size  = ARRAY_SIZE(sensor_1600x1200p30_regs),
@@ -565,7 +574,7 @@ static struct sensor_win_size sensor_win_sizes[] = {
 static int sensor_g_mbus_config(struct v4l2_subdev *sd,
 				struct v4l2_mbus_config *cfg)
 {
-	cfg->type = V4L2_MBUS_CSI2;
+	cfg->type = V4L2_MBUS_CSI2_DPHY;
 	cfg->flags = 0 | V4L2_MBUS_CSI2_1_LANE | V4L2_MBUS_CSI2_CHANNEL_0;
 
 	return 0;
@@ -629,8 +638,8 @@ static int sensor_reg_init(struct sensor_info *info)
 	info->width = wsize->width;
 	info->height = wsize->height;
 
-	exp_gain.exp_val = 16000;
-	exp_gain.gain_val = 512;
+	exp_gain.exp_val = grobal_exp_gain.exp_val;
+	exp_gain.gain_val = grobal_exp_gain.gain_val;
 	sensor_s_exp_gain(sd, &exp_gain);
 
 	sensor_print("s_fmt set width = %d, height = %d\n", wsize->width,
@@ -671,8 +680,6 @@ static const struct v4l2_subdev_core_ops sensor_core_ops = {
 };
 
 static const struct v4l2_subdev_video_ops sensor_video_ops = {
-	.s_parm = sensor_s_parm,
-	.g_parm = sensor_g_parm,
 	.s_stream = sensor_s_stream,
 	.g_mbus_config = sensor_g_mbus_config,
 };
@@ -691,10 +698,16 @@ static const struct v4l2_subdev_ops sensor_ops = {
 };
 
 /* ----------------------------------------------------------------------- */
-static struct cci_driver cci_drv = {
+static struct cci_driver cci_drv[] = {
+	{
 		.name = SENSOR_NAME,
 		.addr_width = CCI_BITS_8,
 		.data_width = CCI_BITS_8,
+	}, {
+		.name = SENSOR_NAME_2,
+		.addr_width = CCI_BITS_8,
+		.data_width = CCI_BITS_8,
+	}
 };
 
 static int sensor_init_controls(struct v4l2_subdev *sd, const struct v4l2_ctrl_ops *ops)
@@ -723,22 +736,34 @@ static int sensor_init_controls(struct v4l2_subdev *sd, const struct v4l2_ctrl_o
 	return ret;
 }
 
+static int sensor_dev_id;
 static int sensor_probe(struct i2c_client *client,
 			const struct i2c_device_id *id)
 {
 	struct v4l2_subdev *sd;
 	struct sensor_info *info;
+	int i;
 
 	info = kzalloc(sizeof(struct sensor_info), GFP_KERNEL);
 	if (info == NULL)
 		return -ENOMEM;
 	sd = &info->sd;
 
-	cci_dev_probe_helper(sd, client, &sensor_ops, &cci_drv);
+	if (client) {
+		for (i = 0; i < SENSOR_NUM; i++) {
+			if (!strcmp(cci_drv[i].name, client->name))
+				break;
+		}
+		cci_dev_probe_helper(sd, client, &sensor_ops, &cci_drv[i]);
+	} else {
+		cci_dev_probe_helper(sd, client, &sensor_ops, &cci_drv[sensor_dev_id++]);
+	}
 	sensor_init_controls(sd, &sensor_ctrl_ops);
 
 	mutex_init(&info->lock);
-
+#ifdef CONFIG_SAME_I2C
+	info->sensor_i2c_addr = I2C_ADDR >> 1;
+#endif
 	info->fmt = &sensor_formats[0];
 	info->fmt_pt = &sensor_formats[0];
 	info->win_pt = &sensor_win_sizes[0];
@@ -746,6 +771,7 @@ static int sensor_probe(struct i2c_client *client,
 	info->win_size_num = N_WIN_SIZES;
 	info->sensor_field = V4L2_FIELD_NONE;
 	info->stream_seq = MIPI_BEFORE_SENSOR;
+	info->time_hs = 0x30;
 	info->af_first_flag = 1;
 	info->exp = 0;
 	info->gain = 0;
@@ -756,8 +782,17 @@ static int sensor_probe(struct i2c_client *client,
 static int sensor_remove(struct i2c_client *client)
 {
 	struct v4l2_subdev *sd;
+	int i;
 
-	sd = cci_dev_remove_helper(client, &cci_drv);
+	if (client) {
+		for (i = 0; i < SENSOR_NUM; i++) {
+			if (!strcmp(cci_drv[i].name, client->name))
+				break;
+		}
+		sd = cci_dev_remove_helper(client, &cci_drv[i]);
+	} else {
+		sd = cci_dev_remove_helper(client, &cci_drv[sensor_dev_id++]);
+	}
 
 	kfree(to_state(sd));
 	return 0;
@@ -768,29 +803,53 @@ static const struct i2c_device_id sensor_id[] = {
 	{}
 };
 
-MODULE_DEVICE_TABLE(i2c, sensor_id);
+static const struct i2c_device_id sensor_id_2[] = {
+	{SENSOR_NAME_2, 0},
+	{}
+};
 
-static struct i2c_driver sensor_driver = {
+MODULE_DEVICE_TABLE(i2c, sensor_id);
+MODULE_DEVICE_TABLE(i2c, sensor_id_2);
+
+static struct i2c_driver sensor_driver[] = {
+	{
 		.driver = {
-				.owner = THIS_MODULE,
-				.name = SENSOR_NAME,
-				},
+			   .owner = THIS_MODULE,
+			   .name = SENSOR_NAME,
+			   },
 		.probe = sensor_probe,
 		.remove = sensor_remove,
 		.id_table = sensor_id,
+	}, {
+		.driver = {
+			   .owner = THIS_MODULE,
+			   .name = SENSOR_NAME_2,
+			   },
+		.probe = sensor_probe,
+		.remove = sensor_remove,
+		.id_table = sensor_id_2,
+	},
 };
 static __init int init_sensor(void)
 {
-	int ret = 0;
+	int i, ret = 0;
 
-	ret = cci_dev_init_helper(&sensor_driver);
+	sensor_dev_id = 0;
+
+	for (i = 0; i < SENSOR_NUM; i++)
+		ret = cci_dev_init_helper(&sensor_driver[i]);
 
 	return ret;
 }
 
 static __exit void exit_sensor(void)
 {
-	cci_dev_exit_helper(&sensor_driver);
+	int i;
+
+	sensor_dev_id = 0;
+
+	for (i = 0; i < SENSOR_NUM; i++)
+		cci_dev_exit_helper(&sensor_driver[i]);
 }
 
 module_init(init_sensor);

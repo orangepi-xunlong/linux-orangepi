@@ -42,7 +42,9 @@
 /* the number of TCON_LCD */
 #define DEVICE_LCD_NUM 2
 
+#ifdef CONFIG_DISP2_SUNXI_SUPPORT_SMBL
 #define SUPPORT_SMBL
+#endif
 #define SUPPORT_ATW
 #define SUPPORT_YUV_BLEND
 
@@ -83,6 +85,9 @@
 #define DEVICE_LCD_NUM 1
 
 /* #define SUPPORT_DSI */
+#ifdef CONFIG_DISP2_SUNXI_SUPPORT_SMBL
+#define SUPPORT_SMBL
+#endif
 #define SUPPORT_DE_NOISE
 #define SUPPORT_YUV_BLEND
 /* CDC: color space & dynamic range convert */
@@ -114,8 +119,9 @@
 #define DEVICE_LCD_NUM 2
 
 #define SUPPORT_DSI
+#ifdef CONFIG_DISP2_SUNXI_SUPPORT_SMBL
 #define SUPPORT_SMBL
-#define SUPPORT_SMBL
+#endif
 #define SUPPORT_DE_NOISE
 #define SUPPORT_YUV_BLEND
 /* CDC: color space & dynamic range convert */
@@ -141,6 +147,15 @@
 #ifndef DEVICE_DSI_NUM
 #define DEVICE_DSI_NUM 1
 #endif /*endif DEVICE_DSI_NUM */
+
+#ifndef DEVICE_LVDS_NUM
+#define DEVICE_LVDS_NUM 1
+#endif
+
+#ifndef IOMMU_DE0_MASTOR_ID
+#define IOMMU_DE0_MASTOR_ID 0
+#define IOMMU_DE1_MASTOR_ID 0
+#endif
 
 /* total number of DSI clk */
 #define CLK_DSI_NUM  (CLK_NUM_PER_DSI * DEVICE_DSI_NUM)

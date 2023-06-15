@@ -13,7 +13,13 @@
 
 #include "../access.h"
 #include "../log.h"
+
+#ifdef CONFIG_AW_PHY
+#include "../aw_phy.h"
+#else
 #include "../phy.h"
+#endif
+
 #include "../hdmitx_dev.h"
 
 #define ALL_IRQ_MASK 0xff

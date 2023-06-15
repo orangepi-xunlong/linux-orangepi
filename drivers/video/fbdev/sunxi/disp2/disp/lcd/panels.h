@@ -86,11 +86,69 @@ extern struct __lcd_panel S6D7AA0X01_panel;
 extern struct __lcd_panel gg1p4062utsw_panel;
 extern struct __lcd_panel ls029b3sx02_panel;
 extern struct __lcd_panel he0801a068_panel;
+#ifdef CONFIG_LCD_SUPPORT_INET_DSI_PANEL
 extern struct __lcd_panel inet_dsi_panel;
+#endif
+#ifdef CONFIG_LCD_SUPPORT_LQ101R1SX03
 extern struct __lcd_panel lq101r1sx03_panel;
+#endif
+#ifdef CONFIG_LCD_SUPPORT_WILLIAMLCD
 extern struct __lcd_panel WilliamLcd_panel;
-extern struct __lcd_panel fx070_panel;
-extern struct __lcd_panel FX070_DHM18BOEL2_1024X600_mipi_panel;
+#endif
+#ifdef CONFIG_LCD_SUPPORT_ILI9881C
+extern struct __lcd_panel ili9881c_dsi_panel;
+#endif
+#ifdef CONFIG_LCD_SUPPORT_TM_DSI_PANEL
+extern struct __lcd_panel tm_dsi_panel;
+#endif
+#ifdef CONFIG_LCD_SUPPORT_FD055HD003S
+extern struct __lcd_panel fd055hd003s_panel;
+#endif
+#ifdef CONFIG_LCD_SUPPORT_FRD450H40014
+extern struct __lcd_panel frd450h40014_panel;
+#endif
+#ifdef CONFIG_LCD_SUPPORT_H245QBN02
+extern struct __lcd_panel h245qbn02_panel;
+#endif
+#ifdef CONFIG_LCD_SUPPORT_ILI9341
+extern struct __lcd_panel ili9341_panel;
+#endif
+#ifdef CONFIG_LCD_SUPPORT_LH219WQ1
+extern struct __lcd_panel lh219wq1_panel;
+#endif
+#ifdef CONFIG_LCD_SUPPORT_ST7789V
+extern struct __lcd_panel st7789v_panel;
+#endif
+#ifdef CONFIG_LCD_SUPPORT_ST7796S
+extern struct __lcd_panel st7796s_panel;
+#endif
+#ifdef CONFIG_LCD_SUPPORT_ST7701S
+extern struct __lcd_panel st7701s_panel;
+#endif
+#ifdef CONFIG_LCD_SUPPORT_T30P106
+extern struct __lcd_panel t30p106_panel;
+#endif
+#ifdef CONFIG_LCD_SUPPORT_TO20T20000
+extern struct __lcd_panel to20t20000_panel;
+#endif
+#ifdef CONFIG_LCD_SUPPORT_S2003T46G
+extern struct __lcd_panel s2003t46g_panel;
+#endif
+#ifdef CONFIG_LCD_SUPPORT_WTL096601G03
+extern struct __lcd_panel wtl096601g03_panel;
+#endif
+#ifdef CONFIG_LCD_SUPPORT_RT13QV005D
+extern struct __lcd_panel rt13qv005d_panel;
+#endif
+#ifdef CONFIG_LCD_SUPPORT_ST7789V_CPU
+extern struct __lcd_panel st7789v_cpu_panel;
+#endif
+#ifdef CONFIG_LCD_SUPPORT_CC08021801_310_800X1280
+extern struct __lcd_panel CC08021801_310_800X1280_mipi_panel;
+#endif
 extern struct __lcd_panel bp101wx1_panel;
-
+extern struct __lcd_panel k101im2qa04_panel;
+extern struct __lcd_panel fx070_panel;
+extern struct __lcd_panel K101_IM2BYL02_L_800X1280_mipi_panel;
+extern struct __lcd_panel K080_IM2HYL802R_800X1280_mipi_panel;
 #endif

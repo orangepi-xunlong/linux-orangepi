@@ -1,5 +1,5 @@
 /*
- * linux-4.9/drivers/media/platform/sunxi-vin/vin-vipp/vipp_reg_i.h
+ * linux-5.4/drivers/media/platform/sunxi-vin/vin-vipp/vipp_reg_i.h
  *
  * Copyright (c) 2007-2017 Allwinnertech Co., Ltd.
  *

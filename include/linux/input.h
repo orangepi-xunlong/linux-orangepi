@@ -1,15 +1,13 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (c) 1999-2002 Vojtech Pavlik
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 as published by
- * the Free Software Foundation.
  */
 #ifndef _INPUT_H
 #define _INPUT_H
 
 #include <linux/time.h>
 #include <linux/list.h>
+#include <linux/android_kabi.h>
 #include <uapi/linux/input.h>
 /* Implementation details, userspace should not care about these */
 #define ABS_MT_FIRST		ABS_MT_TOUCH_MAJOR
@@ -24,6 +22,8 @@
 #include <linux/timer.h>
 #include <linux/mod_devicetable.h>
 
+struct input_dev_poller;
+
 /**
  * struct input_value - input value representation
  * @type: type of value (EV_KEY, EV_ABS, etc)
@@ -34,6 +34,13 @@ struct input_value {
 	__u16 type;
 	__u16 code;
 	__s32 value;
+};
+
+enum input_clock_type {
+	INPUT_CLK_REAL = 0,
+	INPUT_CLK_MONO,
+	INPUT_CLK_BOOT,
+	INPUT_CLK_MAX
 };
 
 /**
@@ -67,6 +74,8 @@ struct input_value {
  *	not sleep
  * @ff: force feedback structure associated with the device if device
  *	supports force feedback effects
+ * @poller: poller structure associated with the device if device is
+ *	set up to use polling mode
  * @repeat_key: stores key code of the last key pressed; used to implement
  *	software autorepeat
  * @timer: timer for software autorepeat
@@ -117,6 +126,8 @@ struct input_value {
  * @vals: array of values queued in the current frame
  * @devres_managed: indicates that devices is managed with devres framework
  *	and needs not be explicitly unregistered or freed.
+ * @timestamp: storage for a timestamp set by input_set_timestamp called
+ *  by a driver
  */
 struct input_dev {
 	const char *name;
@@ -149,6 +160,8 @@ struct input_dev {
 			  struct input_keymap_entry *ke);
 
 	struct ff_device *ff;
+
+	struct input_dev_poller *poller;
 
 	unsigned int repeat_key;
 	struct timer_list timer;
@@ -187,6 +200,13 @@ struct input_dev {
 	struct input_value *vals;
 
 	bool devres_managed;
+
+	ktime_t timestamp[INPUT_CLK_MAX];
+
+	ANDROID_KABI_RESERVE(1);
+	ANDROID_KABI_RESERVE(2);
+	ANDROID_KABI_RESERVE(3);
+	ANDROID_KABI_RESERVE(4);
 };
 #define to_input_dev(d) container_of(d, struct input_dev, dev)
 
@@ -232,6 +252,10 @@ struct input_dev {
 
 #if SW_MAX != INPUT_DEVICE_ID_SW_MAX
 #error "SW_MAX and INPUT_DEVICE_ID_SW_MAX do not match"
+#endif
+
+#if INPUT_PROP_MAX != INPUT_DEVICE_ID_PROP_MAX
+#error "INPUT_PROP_MAX and INPUT_DEVICE_ID_PROP_MAX do not match"
 #endif
 
 #define INPUT_DEVICE_ID_MATCH_DEVICE \
@@ -302,6 +326,8 @@ struct input_handler {
 
 	struct list_head	h_list;
 	struct list_head	node;
+
+	ANDROID_KABI_RESERVE(1);
 };
 
 /**
@@ -328,6 +354,8 @@ struct input_handle {
 
 	struct list_head	d_node;
 	struct list_head	h_node;
+
+	ANDROID_KABI_RESERVE(1);
 };
 
 struct input_dev __must_check *input_allocate_device(void);
@@ -360,6 +388,12 @@ void input_unregister_device(struct input_dev *);
 
 void input_reset_device(struct input_dev *);
 
+int input_setup_polling(struct input_dev *dev,
+			void (*poll_fn)(struct input_dev *dev));
+void input_set_poll_interval(struct input_dev *dev, unsigned int interval);
+void input_set_min_poll_interval(struct input_dev *dev, unsigned int interval);
+void input_set_max_poll_interval(struct input_dev *dev, unsigned int interval);
+
 int __must_check input_register_handler(struct input_handler *);
 void input_unregister_handler(struct input_handler *);
 
@@ -380,6 +414,9 @@ int input_open_device(struct input_handle *);
 void input_close_device(struct input_handle *);
 
 int input_flush_device(struct input_handle *handle, struct file *file);
+
+void input_set_timestamp(struct input_dev *dev, ktime_t timestamp);
+ktime_t *input_get_timestamp(struct input_dev *dev);
 
 void input_event(struct input_dev *dev, unsigned int type, unsigned int code, int value);
 void input_inject_event(struct input_handle *handle, unsigned int type, unsigned int code, int value);
@@ -469,6 +506,9 @@ int input_get_keycode(struct input_dev *dev, struct input_keymap_entry *ke);
 int input_set_keycode(struct input_dev *dev,
 		      const struct input_keymap_entry *ke);
 
+bool input_match_device_id(const struct input_dev *dev,
+			   const struct input_device_id *id);
+
 void input_enable_softrepeat(struct input_dev *dev, int delay, int period);
 
 extern struct class input_class;
@@ -519,6 +559,9 @@ struct ff_device {
 
 	int max_effects;
 	struct ff_effect *effects;
+
+	ANDROID_KABI_RESERVE(1);
+
 	struct file *effect_owners[];
 };
 
@@ -529,6 +572,7 @@ int input_ff_event(struct input_dev *dev, unsigned int type, unsigned int code, 
 
 int input_ff_upload(struct input_dev *dev, struct ff_effect *effect, struct file *file);
 int input_ff_erase(struct input_dev *dev, int effect_id, struct file *file);
+int input_ff_flush(struct input_dev *dev, struct file *file);
 
 int input_ff_create_memless(struct input_dev *dev, void *data,
 		int (*play_effect)(struct input_dev *, void *, struct ff_effect *));

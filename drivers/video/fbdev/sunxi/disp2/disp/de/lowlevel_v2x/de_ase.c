@@ -16,6 +16,7 @@
  * 2014/04/25  vito cheng  v0.11 Add block updated function
  ******************************************************************************/
 
+#ifdef CONFIG_DISP2_SUNXI_SUPPORT_ENAHNCE
 #include "de_ase_type.h"
 #include "de_rtmx.h"
 #include "de_enhance.h"
@@ -59,7 +60,7 @@ int de_ase_init(unsigned int sel, unsigned int chno, uintptr_t reg_base)
 	void *memory;
 
 	base = reg_base + (sel + 1) * 0x00100000 + ASE_OFST;
-#if defined(CONFIG_ARCH_SUN50IW10)
+#if defined(CONFIG_INDEPENDENT_DE)
 	if (sel)
 		base = base - 0x00100000;
 #endif
@@ -200,3 +201,4 @@ int de_ase_info2para(unsigned int auto_color, struct de_rect window,
 
 	return 0;
 }
+#endif

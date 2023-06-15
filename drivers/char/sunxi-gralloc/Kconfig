@@ -1,0 +1,6 @@
+config SUNXI_GRALLOC
+	depends on (ARCH_SUNXI)
+	tristate "SUNXI GRALLOC Driver"
+	default n
+	help
+	  Record gralloc buffer operations

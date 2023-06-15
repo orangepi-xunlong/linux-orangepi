@@ -12,15 +12,11 @@
 #define FWIO_H_INCLUDED
 
 #define XR829_HW_REV0       (8290)
-#ifdef USE_VFS_FIRMWARE
-#define XR829_BOOTLOADER    ("/system/vendor/etc/firmware/boot_xr829.bin")
-#define XR829_FIRMWARE      ("/system/vendor/etc/firmware/fw_xr829.bin")
-#define XR829_SDD_FILE      ("/system/vendor/etc/firmware/sdd_xr829.bin")
-#else
-#define XR829_BOOTLOADER    ("boot_xr829.bin")
-#define XR829_FIRMWARE      ("fw_xr829.bin")
-#define XR829_SDD_FILE      ("sdd_xr829.bin")
-#endif
+#define FIRMWARE_BASE_PATH  ""
+
+#define XR829_BOOTLOADER    (FIRMWARE_BASE_PATH "boot_xr829.bin")
+#define XR829_FIRMWARE      (FIRMWARE_BASE_PATH "fw_xr829.bin")
+#define XR829_SDD_FILE      (FIRMWARE_BASE_PATH "sdd_xr829.bin")
 
 #define SDD_PTA_CFG_ELT_ID              0xEB
 #define SDD_REFERENCE_FREQUENCY_ELT_ID  0xC5

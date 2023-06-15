@@ -226,6 +226,17 @@ static struct sensor_win_size sensor_win_sizes[] = {
 	.regs_size = ARRAY_SIZE(sensor_regs),
 	.set_size = NULL,
 	},
+	{
+	.width = 1920,
+	.height = 1080,
+	.hoffset = 0,
+	.voffset = 0,
+	.fps_fixed = 30,
+	.regs = sensor_regs,
+	.regs_size = ARRAY_SIZE(sensor_regs),
+	.set_size = NULL,
+	},
+
 };
 
 #define N_WIN_SIZES (ARRAY_SIZE(sensor_win_sizes))
@@ -264,8 +275,10 @@ static int sensor_reg_init(struct sensor_info *info)
 	info->width = wsize->width;
 	info->height = wsize->height;
 
-	if (info->width == 1920 && info->height == 1080)
+	if (info->width == 1920 && info->height == 1080 && wsize->fps_fixed == 25)
 		nvp6158_init_hardware(AHD20_1080P_25P);
+	else if (info->width == 1920 && info->height == 1080)
+		nvp6158_init_hardware(AHD20_1080P_30P);
 	else
 		nvp6158_init_hardware(AHD20_720P_25P);
 
@@ -295,8 +308,6 @@ static const struct v4l2_subdev_core_ops sensor_core_ops = {
 };
 
 static const struct v4l2_subdev_video_ops sensor_video_ops = {
-	.s_parm = sensor_s_parm,
-	.g_parm = sensor_g_parm,
 	.s_stream = sensor_s_stream,
 	.g_mbus_config = sensor_g_mbus_config,
 };
@@ -333,7 +344,9 @@ static int sensor_probe(struct i2c_client *client,
 	gl_sd = &info->sd;
 	cci_dev_probe_helper(gl_sd, client, &sensor_ops, &cci_drv);
 	mutex_init(&info->lock);
-
+#ifdef CONFIG_SAME_I2C
+	info->sensor_i2c_addr = I2C_ADDR >> 1;
+#endif
 	info->fmt = &sensor_formats[0];
 	info->fmt_pt = &sensor_formats[0];
 	info->win_pt = &sensor_win_sizes[0];

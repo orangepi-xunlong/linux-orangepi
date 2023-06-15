@@ -1,5 +1,5 @@
 /*
- * linux-4.9/drivers/media/platform/sunxi-vin/utility/vin_os.h
+ * linux-5.4/drivers/media/platform/sunxi-vin/utility/vin_os.h
  *
  * Copyright (c) 2007-2017 Allwinnertech Co., Ltd.
  *
@@ -19,18 +19,18 @@
 
 #include <linux/device.h>
 #include <linux/clk.h>
-#include <linux/clk/sunxi.h>
 #include <linux/interrupt.h>
 #include "../platform/platform_cfg.h"
 
 #ifdef SUNXI_MEM
 #include <linux/ion.h>      /*for all "ion api"*/
-#include <../drivers/staging/android/ion/ion_priv.h>
-#include <linux/ion_sunxi.h>    /*for import "sunxi_ion_client_create"*/
 #include <linux/dma-mapping.h>  /*just include "PAGE_SIZE" macro*/
 #else
 #include <linux/dma-mapping.h>
 #endif
+
+#define ION_HEAP_SYSTEM_MASK		(1 << 0)
+#define ION_HEAP_TYPE_DMA_MASK		(1 << 1)
 
 #define IS_FLAG(x, y) (((x)&(y)) == y)
 
@@ -110,11 +110,12 @@ struct vin_mm {
 	void *phy_addr;
 	void *vir_addr;
 	void *dma_addr;
-	struct ion_client *client;
-	struct ion_handle *handle;
+	struct dma_buf *buf;
+	struct dma_buf_attachment *attachment;
+	struct sg_table *sgt;
+	struct ion_heap *heap;
 };
 
-extern int os_gpio_set(struct gpio_config *gpio_list);
 extern int os_gpio_write(u32 gpio, __u32 out_value, int force_value_flag);
 extern int os_mem_alloc(struct device *dev, struct vin_mm *mem_man);
 extern void os_mem_free(struct device *dev, struct vin_mm *mem_man);

@@ -1,5 +1,5 @@
 /*
- * linux-4.9/drivers/media/platform/sunxi-vin/vin-cci/cci_helper.c
+ * linux-5.4/drivers/media/platform/sunxi-vin/vin-cci/cci_helper.c
  *
  * Copyright (c) 2007-2017 Allwinnertech Co., Ltd.
  *
@@ -158,11 +158,15 @@ static int sensor_registered(struct v4l2_subdev *sd)
 
 	mutex_lock(&info->lock);
 
+#if !defined SENSOR_POER_BEFORE_VIN
 	v4l2_subdev_call(sd, core, s_power, PWR_ON);
+#endif
 	sd->entity.use_count++;
 	ret = v4l2_subdev_call(sd, core, init, 0);
 	sd->entity.use_count--;
+#if !defined SENSOR_POER_BEFORE_VIN
 	v4l2_subdev_call(sd, core, s_power, PWR_OFF);
+#endif
 
 	mutex_unlock(&info->lock);
 
@@ -269,7 +273,7 @@ void cci_lock(struct v4l2_subdev *sd)
 #else
 	struct i2c_client *client = v4l2_get_subdevdata(sd);
 
-	i2c_lock_adapter(client->adapter);
+	i2c_mark_adapter_suspended(client->adapter);
 #endif
 }
 EXPORT_SYMBOL_GPL(cci_lock);
@@ -281,7 +285,7 @@ void cci_unlock(struct v4l2_subdev *sd)
 #else
 	struct i2c_client *client = v4l2_get_subdevdata(sd);
 
-	i2c_unlock_adapter(client->adapter);
+	i2c_mark_adapter_resumed(client->adapter);
 #endif
 }
 EXPORT_SYMBOL_GPL(cci_unlock);
@@ -390,6 +394,8 @@ int cci_read_a8_d8(struct v4l2_subdev *sd, unsigned char addr,
 
 	return cci_rd_8_8(cci_drv->cci_id, addr, value, cci_drv->cci_saddr);
 #else
+
+	__maybe_unused struct sensor_info *info = to_state(sd);
 	unsigned char data[2];
 	struct i2c_msg msg[2];
 	int ret;
@@ -400,14 +406,30 @@ int cci_read_a8_d8(struct v4l2_subdev *sd, unsigned char addr,
 	/*
 	 * Send out the register address...
 	 */
+#ifdef CONFIG_SAME_I2C
+	if (sd->ops->video)
+		msg[0].addr = info->sensor_i2c_addr;
+	else
+		msg[0].addr = client->addr;
+#else
 	msg[0].addr = client->addr;
+#endif
+
 	msg[0].flags = 0;
 	msg[0].len = 1;
 	msg[0].buf = &data[0];
 	/*
 	 * ...then read back the result.
 	 */
+#ifdef CONFIG_SAME_I2C
+	if (sd->ops->video)
+		msg[1].addr = info->sensor_i2c_addr;
+	else
+		msg[1].addr = client->addr;
+#else
 	msg[1].addr = client->addr;
+#endif
+
 	msg[1].flags = I2C_M_RD;
 	msg[1].len = 1;
 	msg[1].buf = &data[1];
@@ -430,6 +452,8 @@ int cci_write_a8_d8(struct v4l2_subdev *sd, unsigned char addr,
 
 	return cci_wr_8_8(cci_drv->cci_id, addr, value, cci_drv->cci_saddr);
 #else
+
+	__maybe_unused struct sensor_info *info = to_state(sd);
 	struct i2c_msg msg;
 	unsigned char data[2];
 	int ret;
@@ -438,7 +462,15 @@ int cci_write_a8_d8(struct v4l2_subdev *sd, unsigned char addr,
 	data[0] = addr;
 	data[1] = value;
 
+#ifdef CONFIG_SAME_I2C
+	if (sd->ops->video)
+		msg.addr = info->sensor_i2c_addr;
+	else
+		msg.addr = client->addr;
+#else
 	msg.addr = client->addr;
+#endif
+
 	msg.flags = 0;
 	msg.len = 2;
 	msg.buf = data;
@@ -460,6 +492,7 @@ int cci_read_a8_d16(struct v4l2_subdev *sd, unsigned char addr,
 	return cci_rd_8_16(cci_drv->cci_id, addr, value, cci_drv->cci_saddr);
 #else
 
+	__maybe_unused struct sensor_info *info = to_state(sd);
 	unsigned char data[3];
 	struct i2c_msg msg[2];
 	int ret;
@@ -471,14 +504,30 @@ int cci_read_a8_d16(struct v4l2_subdev *sd, unsigned char addr,
 	/*
 	 * Send out the register address...
 	 */
+#ifdef CONFIG_SAME_I2C
+	if (sd->ops->video)
+		msg[0].addr = info->sensor_i2c_addr;
+	else
+		msg[0].addr = client->addr;
+#else
 	msg[0].addr = client->addr;
+#endif
+
 	msg[0].flags = 0;
 	msg[0].len = 1;
 	msg[0].buf = &data[0];
 	/*
 	 * ...then read back the result.
 	 */
+#ifdef CONFIG_SAME_I2C
+	if (sd->ops->video)
+		msg[1].addr = info->sensor_i2c_addr;
+	else
+		msg[1].addr = client->addr;
+#else
 	msg[1].addr = client->addr;
+#endif
+
 	msg[1].flags = I2C_M_RD;
 	msg[1].len = 2;
 	msg[1].buf = &data[1];
@@ -502,6 +551,7 @@ int cci_write_a8_d16(struct v4l2_subdev *sd, unsigned char addr,
 	return cci_wr_8_16(cci_drv->cci_id, addr, value, cci_drv->cci_saddr);
 #else
 
+	__maybe_unused struct sensor_info *info = to_state(sd);
 	struct i2c_msg msg;
 	unsigned char data[3];
 	int ret;
@@ -511,7 +561,15 @@ int cci_write_a8_d16(struct v4l2_subdev *sd, unsigned char addr,
 	data[1] = (value & 0xff00) >> 8;
 	data[2] = (value & 0x00ff);
 
+#ifdef CONFIG_SAME_I2C
+	if (sd->ops->video)
+		msg.addr = info->sensor_i2c_addr;
+	else
+		msg.addr = client->addr;
+#else
 	msg.addr = client->addr;
+#endif
+
 	msg.flags = 0;
 	msg.len = 3;
 	msg.buf = data;
@@ -532,6 +590,8 @@ int cci_read_a16_d8(struct v4l2_subdev *sd, unsigned short addr,
 
 	return cci_rd_16_8(cci_drv->cci_id, addr, value, cci_drv->cci_saddr);
 #else
+
+	__maybe_unused struct sensor_info *info = to_state(sd);
 	int ret;
 	unsigned char data[3];
 	struct i2c_msg msg[2];
@@ -543,14 +603,30 @@ int cci_read_a16_d8(struct v4l2_subdev *sd, unsigned short addr,
 	/*
 	 * Send out the register address...
 	 */
+#ifdef CONFIG_SAME_I2C
+	if (sd->ops->video)
+		msg[0].addr = info->sensor_i2c_addr;
+	else
+		msg[0].addr = client->addr;
+#else
 	msg[0].addr = client->addr;
+#endif
+
 	msg[0].flags = 0;
 	msg[0].len = 2;
 	msg[0].buf = &data[0];
 	/*
 	 * ...then read back the result.
 	 */
+#ifdef CONFIG_SAME_I2C
+	if (sd->ops->video)
+		msg[1].addr = info->sensor_i2c_addr;
+	else
+		msg[1].addr = client->addr;
+#else
 	msg[1].addr = client->addr;
+#endif
+
 	msg[1].flags = I2C_M_RD;
 	msg[1].len = 1;
 	msg[1].buf = &data[2];
@@ -573,6 +649,8 @@ int cci_write_a16_d8(struct v4l2_subdev *sd, unsigned short addr,
 
 	return cci_wr_16_8(cci_drv->cci_id, addr, value, cci_drv->cci_saddr);
 #else
+
+	__maybe_unused struct sensor_info *info = to_state(sd);
 	int ret = 0;
 	struct i2c_msg msg;
 	unsigned char data[3];
@@ -582,7 +660,15 @@ int cci_write_a16_d8(struct v4l2_subdev *sd, unsigned short addr,
 	data[1] = (addr & 0x00ff);
 	data[2] = value;
 
+#ifdef CONFIG_SAME_I2C
+	if (sd->ops->video)
+		msg.addr = info->sensor_i2c_addr;
+	else
+		msg.addr = client->addr;
+#else
 	msg.addr = client->addr;
+#endif
+
 	msg.flags = 0;
 	msg.len = 3;
 	msg.buf = data;
@@ -604,6 +690,7 @@ int cci_read_a16_d16(struct v4l2_subdev *sd, unsigned short addr,
 	return cci_rd_16_16(cci_drv->cci_id, addr, value, cci_drv->cci_saddr);
 #else
 
+	__maybe_unused struct sensor_info *info = to_state(sd);
 	unsigned char data[4];
 	struct i2c_msg msg[2];
 	int ret;
@@ -616,14 +703,30 @@ int cci_read_a16_d16(struct v4l2_subdev *sd, unsigned short addr,
 	/*
 	 * Send out the register address...
 	 */
+#ifdef CONFIG_SAME_I2C
+	if (sd->ops->video)
+		msg[0].addr = info->sensor_i2c_addr;
+	else
+		msg[0].addr = client->addr;
+#else
 	msg[0].addr = client->addr;
+#endif
+
 	msg[0].flags = 0;
 	msg[0].len = 2;
 	msg[0].buf = &data[0];
 	/*
 	 * ...then read back the result.
 	 */
+#ifdef CONFIG_SAME_I2C
+	if (sd->ops->video)
+		msg[1].addr = info->sensor_i2c_addr;
+	else
+		msg[1].addr = client->addr;
+#else
 	msg[1].addr = client->addr;
+#endif
+
 	msg[1].flags = I2C_M_RD;
 	msg[1].len = 2;
 	msg[1].buf = &data[2];
@@ -647,6 +750,7 @@ int cci_write_a16_d16(struct v4l2_subdev *sd, unsigned short addr,
 	return cci_wr_16_16(cci_drv->cci_id, addr, value, cci_drv->cci_saddr);
 #else
 
+	__maybe_unused struct sensor_info *info = to_state(sd);
 	struct i2c_msg msg;
 	unsigned char data[4];
 	int ret;
@@ -657,7 +761,15 @@ int cci_write_a16_d16(struct v4l2_subdev *sd, unsigned short addr,
 	data[2] = (value & 0xff00) >> 8;
 	data[3] = (value & 0x00ff);
 
+#ifdef CONFIG_SAME_I2C
+	if (sd->ops->video)
+		msg.addr = info->sensor_i2c_addr;
+	else
+		msg.addr = client->addr;
+#else
 	msg.addr = client->addr;
+#endif
+
 	msg.flags = 0;
 	msg.len = 4;
 	msg.buf = data;
@@ -678,6 +790,7 @@ int cci_read_a0_d16(struct v4l2_subdev *sd, unsigned short *value)
 	return cci_rd_0_16(cci_drv->cci_id, value, cci_drv->cci_saddr);
 #else
 
+	__maybe_unused struct sensor_info *info = to_state(sd);
 	struct i2c_msg msg;
 	unsigned char data[2];
 	int ret;
@@ -686,7 +799,15 @@ int cci_read_a0_d16(struct v4l2_subdev *sd, unsigned short *value)
 	data[0] = 0xee;
 	data[1] = 0xee;
 
+#ifdef CONFIG_SAME_I2C
+	if (sd->ops->video)
+		msg.addr = info->sensor_i2c_addr;
+	else
+		msg.addr = client->addr;
+#else
 	msg.addr = client->addr;
+#endif
+
 	msg.flags = 1;
 	msg.len = 2;
 	msg.buf = &data[0];
@@ -709,6 +830,7 @@ int cci_write_a0_d16(struct v4l2_subdev *sd, unsigned short value)
 	return cci_wr_0_16(cci_drv->cci_id, value, cci_drv->cci_saddr);
 #else
 
+	__maybe_unused struct sensor_info *info = to_state(sd);
 	struct i2c_msg msg;
 	unsigned char data[2];
 	int ret;
@@ -717,7 +839,15 @@ int cci_write_a0_d16(struct v4l2_subdev *sd, unsigned short value)
 	data[0] = (value & 0xff00) >> 8;
 	data[1] = (value & 0x00ff);
 
+#ifdef CONFIG_SAME_I2C
+	if (sd->ops->video)
+		msg.addr = info->sensor_i2c_addr;
+	else
+		msg.addr = client->addr;
+#else
 	msg.addr = client->addr;
+#endif
+
 	msg.flags = 0;
 	msg.len = 2;
 	msg.buf = data;
@@ -739,6 +869,7 @@ int cci_write_a16_d8_continuous_helper(struct v4l2_subdev *sd,
 
 	return cci_wr_a16_d8_continuous(cci_drv->cci_id, addr, vals, cci_drv->cci_saddr, size);
 #else
+	__maybe_unused struct sensor_info *info = to_state(sd);
 	struct i2c_client *client = v4l2_get_subdevdata(sd);
 	struct i2c_msg msg;
 	unsigned char data[2 + 32];
@@ -753,7 +884,15 @@ int cci_write_a16_d8_continuous_helper(struct v4l2_subdev *sd,
 		for (i = 2; i < 2 + len; i++)
 			data[i] = *p++;
 
+#ifdef CONFIG_SAME_I2C
+		if (sd->ops->video)
+			msg.addr = info->sensor_i2c_addr;
+		else
+			msg.addr = client->addr;
+#else
 		msg.addr = client->addr;
+#endif
+
 		msg.flags = 0;
 		msg.len = 2 + len;
 		msg.buf = data;
@@ -986,3 +1125,34 @@ int sensor_write_array(struct v4l2_subdev *sd, struct regval_list *regs, int arr
 	return 0;
 }
 EXPORT_SYMBOL_GPL(sensor_write_array);
+
+/*
+ * Read a list of register settings, only using for debug;
+ */
+int sensor_read_array(struct v4l2_subdev *sd, struct regval_list *regs, int array_size)
+{
+	int ret = 0, i = 0, len = 1;
+	data_type data;
+
+	if (!regs)
+		return -EINVAL;
+
+	while (i < array_size) {
+		len = 1;
+		if (regs->addr == REG_DLY) {
+			continue;
+		} else {
+			ret = sensor_read(sd, regs->addr, &data);
+			if (ret < 0) {
+				cci_err("%s sensor write array error, array_size %d!\n", sd->name, array_size);
+				return -1;
+			} else {
+				cci_print("read from %s addr is 0x%x, data is 0x%x\n", sd->name, regs->addr, data);
+			}
+		}
+		i += len;
+		regs += len;
+	}
+	return 0;
+}
+EXPORT_SYMBOL_GPL(sensor_read_array);

@@ -862,6 +862,11 @@ static int sprdwl_handle_to_send_list(struct sprdwl_intf *intf,
 	struct sprdwl_msg_list *list = &tx_msg->tx_list_qos_pool;
 	u8 coex_bt_on = intf->coex_bt_on;
 
+#ifdef CP2_RESET_SUPPORT
+	if (intf->cp_asserted == 1)
+		return 0;
+#endif
+
 	if (!list_empty(&tx_msg->xmit_msg_list.to_send_list)) {
 		to_send_list = &tx_msg->xmit_msg_list.to_send_list;
 		t_lock = &tx_msg->xmit_msg_list.send_lock;
@@ -1053,7 +1058,7 @@ static int sprdwl_tx_eachmode_data(struct sprdwl_intf *intf,
 	return ret;
 }
 
-static void sprdwl_flush_all_txlist(struct sprdwl_tx_msg *sprdwl_tx_dev)
+void sprdwl_flush_all_txlist(struct sprdwl_tx_msg *sprdwl_tx_dev)
 {
 	sprdwl_sdio_flush_txlist(&sprdwl_tx_dev->tx_list_cmd);
 	sprdwl_flush_data_txlist(sprdwl_tx_dev);
@@ -1272,6 +1277,7 @@ int sprdwl_tx_msg_func(void *pdev, struct sprdwl_msg_buf *msg)
 		}
 		dscr->buffer_info.msdu_tid = tid;
 		peer_entry = &intf->peer_entry[dscr->sta_lut_index];
+		prepare_addba(intf, dscr->sta_lut_index, (struct sk_buff *)msg->skb, peer_entry, tid);
 /*TODO. temp for MARLIN2 test*/
 #if 0
 		qos_index = qos_match_q(&tx_msg->tx_list_data,
@@ -1298,9 +1304,6 @@ int sprdwl_tx_msg_func(void *pdev, struct sprdwl_msg_buf *msg)
 
 	if (msg->msg_type != SPRDWL_TYPE_DATA)
 		sprdwl_queue_msg_buf(msg, msg->msglist);
-
-	prepare_addba(intf, dscr->sta_lut_index, (struct sk_buff *)msg->skb,
-			 peer_entry, tid);
 
 	if (msg->msg_type == SPRDWL_TYPE_CMD)
 		tx_up(tx_msg);

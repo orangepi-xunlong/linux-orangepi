@@ -81,7 +81,7 @@ enum {
 
 #define dprintk(level_mask, fmt, arg...)\
 	do {\
-		if (unlikely(debug_mask & level_mask)) \
+		if (unlikely(di_debug_mask & level_mask)) \
 		printk(fmt, ## arg);\
 	} while (0)
 #endif

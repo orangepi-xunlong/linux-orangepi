@@ -1,13 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Intel Merrifield watchdog platform device library file
  *
  * (C) Copyright 2014 Intel Corporation
  * Author: David Cohen <david.a.cohen@linux.intel.com>
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2
- * of the License.
  */
 
 #include <linux/init.h>
@@ -18,6 +14,7 @@
 #include <asm/intel-mid.h>
 #include <asm/intel_scu_ipc.h>
 #include <asm/io_apic.h>
+#include <asm/hw_irq.h>
 
 #define TANGIER_EXT_TIMER0_MSI 12
 
@@ -28,27 +25,27 @@ static struct platform_device wdt_dev = {
 
 static int tangier_probe(struct platform_device *pdev)
 {
-	int gsi;
 	struct irq_alloc_info info;
 	struct intel_mid_wdt_pdata *pdata = pdev->dev.platform_data;
+	int gsi = TANGIER_EXT_TIMER0_MSI;
+	int irq;
 
 	if (!pdata)
 		return -EINVAL;
 
 	/* IOAPIC builds identity mapping between GSI and IRQ on MID */
-	gsi = pdata->irq;
 	ioapic_set_alloc_attr(&info, cpu_to_node(0), 1, 0);
-	if (mp_map_gsi_to_irq(gsi, IOAPIC_MAP_ALLOC, &info) <= 0) {
-		dev_warn(&pdev->dev, "cannot find interrupt %d in ioapic\n",
-			 gsi);
-		return -EINVAL;
+	irq = mp_map_gsi_to_irq(gsi, IOAPIC_MAP_ALLOC, &info);
+	if (irq < 0) {
+		dev_warn(&pdev->dev, "cannot find interrupt %d in ioapic\n", gsi);
+		return irq;
 	}
 
+	pdata->irq = irq;
 	return 0;
 }
 
 static struct intel_mid_wdt_pdata tangier_pdata = {
-	.irq = TANGIER_EXT_TIMER0_MSI,
 	.probe = tangier_probe,
 };
 
@@ -82,4 +79,4 @@ static int __init register_mid_wdt(void)
 
 	return 0;
 }
-rootfs_initcall(register_mid_wdt);
+arch_initcall(register_mid_wdt);

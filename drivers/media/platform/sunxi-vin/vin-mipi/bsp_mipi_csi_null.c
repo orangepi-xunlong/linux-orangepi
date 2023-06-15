@@ -1,5 +1,5 @@
 /*
- * linux-4.9/drivers/media/platform/sunxi-vin/vin-mipi/bsp_mipi_csi_null.c
+ * linux-5.4/drivers/media/platform/sunxi-vin/vin-mipi/bsp_mipi_csi_null.c
  *
  * Copyright (c) 2007-2017 Allwinnertech Co., Ltd.
  *
@@ -78,6 +78,10 @@ void bsp_mipi_csi_set_para(unsigned int sel, struct mipi_para *para)
 
 void bsp_mipi_csi_set_fmt(unsigned int sel, unsigned int total_rx_ch,
 			  struct mipi_fmt_cfg *fmt)
+{
+
+}
+void bsp_mipi_csi_set_dol(unsigned int sel, unsigned int mode, unsigned int ch)
 {
 
 }

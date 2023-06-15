@@ -1,5 +1,5 @@
 /*
- * linux-4.9/drivers/media/platform/sunxi-vin/vin-mipi/bsp_mipi_csi_v1.c
+ * linux-5.4/drivers/media/platform/sunxi-vin/vin-mipi/bsp_mipi_csi_v1.c
  *
  * Copyright (c) 2007-2017 Allwinnertech Co., Ltd.
  *
@@ -189,4 +189,8 @@ void bsp_mipi_csi_set_fmt(unsigned int sel, unsigned int total_rx_ch,
 	}
 
 	bsp_data_formats_enable(sel, fmt->fmt_type);
+}
+void bsp_mipi_csi_set_dol(unsigned int sel, unsigned int mode, unsigned int ch)
+{
+
 }

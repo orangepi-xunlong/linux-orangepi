@@ -154,7 +154,7 @@ static int xradio_sched_scan_start(struct xradio_vif *priv,
 
 int xradio_hw_scan(struct ieee80211_hw *hw,
 		   struct ieee80211_vif *vif,
-		   struct cfg80211_scan_request *req)
+		   struct ieee80211_scan_request *reqs)
 {
 	struct xradio_common *hw_priv = hw->priv;
 	struct xradio_vif *priv = xrwl_get_vif_from_ieee80211(vif);
@@ -167,6 +167,8 @@ int xradio_hw_scan(struct ieee80211_hw *hw,
 	u16 advance_scan_req_channel;
 #endif
 	int suspend_lock_state;
+	struct cfg80211_scan_request *req = (struct cfg80211_scan_request *)(&(reqs->req));
+
 	scan_printk(XRADIO_DBG_TRC, "%s\n", __func__);
 
 	/* Scan when P2P_GO corrupt firmware MiniAP mode */
@@ -238,7 +240,7 @@ int xradio_hw_scan(struct ieee80211_hw *hw,
 		return -EBUSY;
 	}
 
-	frame.skb = mac80211_probereq_get(hw, vif, NULL, 0, req->ie, req->ie_len);
+	frame.skb = mac80211_probereq_data_get(hw, vif, NULL, 0, req->ie, req->ie_len);
 	if (!frame.skb) {
 		scan_printk(XRADIO_DBG_ERROR, "%s: mac80211_probereq_get failed!\n",
 			__func__);
@@ -436,7 +438,7 @@ int xradio_hw_sched_scan_start(struct ieee80211_hw *hw,
 		return -EINVAL;
 	}
 
-	frame.skb = mac80211_probereq_get(hw, priv->vif, NULL, 0,
+	frame.skb = mac80211_probereq_data_get(hw, priv->vif, NULL, 0,
 			ies->ie[0], ies->len[0]);
 	if (!frame.skb) {
 		scan_printk(XRADIO_DBG_ERROR, "%s: mac80211_probereq_get failed!\n",
@@ -717,9 +719,11 @@ void xradio_scan_work(struct work_struct *work)
 		     ++it, ++i) {
 			if ((*it)->band != first->band)
 				break;
-			if (((*it)->flags ^ first->flags) & IEEE80211_CHAN_PASSIVE_SCAN)
+			if (((*it)->flags ^ first->flags) & (IEEE80211_CHAN_NO_IR |
+						IEEE80211_CHAN_RADAR))
 				break;
-			if (!(first->flags & IEEE80211_CHAN_PASSIVE_SCAN) &&
+			if (!(first->flags & (IEEE80211_CHAN_NO_IR |
+						IEEE80211_CHAN_RADAR)) &&
 			    (*it)->max_power != first->max_power)
 				break;
 		}
@@ -758,7 +762,8 @@ void xradio_scan_work(struct work_struct *work)
 #endif
 			/* TODO: Is it optimal? */
 			scan.numOfProbeRequests =
-			    (first->flags & IEEE80211_CHAN_PASSIVE_SCAN) ? 0 : 4;
+			    (first->flags & (IEEE80211_CHAN_NO_IR |
+						IEEE80211_CHAN_RADAR)) ? 0 : 4;
 #ifdef CONFIG_XRADIO_TESTMODE
 		}
 #endif /* CONFIG_XRADIO_TESTMODE */
@@ -787,7 +792,8 @@ void xradio_scan_work(struct work_struct *work)
 
 #endif
 		}
-		scan.ch = xr_kzalloc(sizeof(struct wsm_scan_ch[it - hw_priv->scan.curr]), false);
+		scan.ch = (struct wsm_scan_ch *)xr_kzalloc(
+				sizeof(struct wsm_scan_ch) * (it - hw_priv->scan.curr), false);
 		if (!scan.ch) {
 			hw_priv->scan.status = -ENOMEM;
 			scan_printk(XRADIO_DBG_ERROR, "xr_kzalloc wsm_scan_ch failed.\n");
@@ -806,7 +812,8 @@ void xradio_scan_work(struct work_struct *work)
 			} else {
 #endif
 				if (hw_priv->scan.curr[i]->flags &
-					IEEE80211_CHAN_PASSIVE_SCAN) {
+					(IEEE80211_CHAN_NO_IR |
+						IEEE80211_CHAN_RADAR)) {
 					scan.ch[i].minChannelTime = 50;
 					scan.ch[i].maxChannelTime = 110;
 				} else {
@@ -822,7 +829,8 @@ void xradio_scan_work(struct work_struct *work)
 #ifdef CONFIG_XRADIO_TESTMODE
 		if (!hw_priv->enable_advance_scan) {
 #endif
-			if (!(first->flags & IEEE80211_CHAN_PASSIVE_SCAN) &&
+			if (!(first->flags & (IEEE80211_CHAN_NO_IR |
+						IEEE80211_CHAN_RADAR)) &&
 			    hw_priv->scan.output_power != first->max_power) {
 			    hw_priv->scan.output_power = first->max_power;
 				/* TODO:COMBO: Change after mac80211 implementation

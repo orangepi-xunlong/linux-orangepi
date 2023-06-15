@@ -129,9 +129,6 @@ static int boot_type = 0;
 static si_info_t ksii;
 static si_cores_info_t ksii_cores_info;
 
-static const char rstr_rmin[] = "rmin";
-static const char rstr_rmax[] = "rmax";
-
 /**
  * Allocate an si handle. This function may be called multiple times.
  *

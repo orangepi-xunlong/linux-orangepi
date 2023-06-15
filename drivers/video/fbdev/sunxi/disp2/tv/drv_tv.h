@@ -79,19 +79,23 @@ struct tv_screen_t {
 	u32			dac_num;
 	enum disp_tv_dac_source dac_source;
 	struct clk *clk;
+	struct clk *clk_parent;
+	struct clk *bus_clk;
+	struct reset_control *rst_bus;
 	bool			suspend;
 	bool			used;
 	struct mutex mlock;
-	struct clk *clk_parent;
 };
 
 struct tv_info_t {
 	struct device *dev;
 	struct tv_screen_t screen[SCREEN_COUNT];
 	struct work_struct hpd_work;
-	struct clk *clk;
-	struct clk *clk_parent;
+	struct clk *bus_clk;
+	struct reset_control *rst_bus;
+
 	void __iomem *base_addr;
+	struct regulator *regulator;
 	u32 tv_number;
 };
 

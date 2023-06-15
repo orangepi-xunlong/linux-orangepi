@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * IEEE754 floating point arithmetic
  * single precision: MADDF.f (Fused Multiply Add)
@@ -6,10 +7,6 @@
  * MIPS floating point support
  * Copyright (C) 2015 Imagination Technologies, Ltd.
  * Author: Markos Chandras <markos.chandras@imgtec.com>
- *
- *  This program is free software; you can distribute it and/or modify it
- *  under the terms of the GNU General Public License as published by the
- *  Free Software Foundation; version 2 of the License.
  */
 
 #include "ieee754sp.h"
@@ -20,9 +17,9 @@ static union ieee754sp _sp_maddf(union ieee754sp z, union ieee754sp x,
 {
 	int re;
 	int rs;
-	unsigned rm;
-	uint64_t rm64;
-	uint64_t zm64;
+	unsigned int rm;
+	u64 rm64;
+	u64 zm64;
 	int s;
 
 	COMPXSP;
@@ -126,6 +123,7 @@ static union ieee754sp _sp_maddf(union ieee754sp z, union ieee754sp x,
 
 	case CLPAIR(IEEE754_CLASS_DNORM, IEEE754_CLASS_DNORM):
 		SPDNORMX;
+		/* fall through */
 
 	case CLPAIR(IEEE754_CLASS_NORM, IEEE754_CLASS_DNORM):
 		if (zc == IEEE754_CLASS_INF)
@@ -142,7 +140,7 @@ static union ieee754sp _sp_maddf(union ieee754sp z, union ieee754sp x,
 	case CLPAIR(IEEE754_CLASS_NORM, IEEE754_CLASS_NORM):
 		if (zc == IEEE754_CLASS_INF)
 			return ieee754sp_inf(zs);
-		/* fall through to real computations */
+		/* continue to real computations */
 	}
 
 	/* Finally get to do some computation */

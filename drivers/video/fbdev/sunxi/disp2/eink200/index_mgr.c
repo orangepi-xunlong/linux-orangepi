@@ -25,12 +25,39 @@ int set_rmi_addr(struct index_manager *mgr)
 	inaddr = (unsigned long)mgr->rmi_paddr;
 	outaddr = (unsigned long)mgr->rmi_paddr;/* in and out use same buf*/
 
-	EINK_INFO_MSG("rmi paddr = 0x%p, vaddr = 0x%p\n",
+	EINK_DEBUG_MSG("rmi paddr = 0x%p, vaddr = 0x%p\n",
 			mgr->rmi_paddr, mgr->rmi_vaddr);
 
 	eink_set_rmi_inaddr(inaddr);
 	eink_set_rmi_outaddr(outaddr);
 	return 0;
+}
+
+void reset_rmi_buffer(struct index_manager *mgr, u32 bit_num)
+{
+	u32 len = 0, i = 0;
+	u16 *addr = NULL;
+
+	if (mgr == NULL) {
+		pr_err("[%s] mgr is NULL!\n", __func__);
+		return;
+	}
+
+	EINK_INFO_MSG("======================\n");
+	len = mgr->rmi_size / 2;
+	addr = (u16 *)mgr->rmi_vaddr;
+
+	if (bit_num == 5) {
+		for (i = 0; i < len; i++) {
+			*(addr + i) = *(addr + i) | 0xFC00;
+		}
+	} else {
+		for (i = 0; i < len; i++) {
+			*(addr + i) = *(addr + i) | 0xFF00;
+		}
+	}
+
+	return;
 }
 
 int index_mgr_init(struct eink_manager *eink_mgr)
@@ -56,8 +83,11 @@ int index_mgr_init(struct eink_manager *eink_mgr)
 		goto err_out;
 	}
 
+	EINK_INFO_MSG("rmi buffer w=%d, h=%d, size=%d\n", width, height, mgr->rmi_size);
 	memset(mgr->rmi_vaddr, 0xff, mgr->rmi_size);
+
 	mgr->set_rmi_addr = set_rmi_addr;
+	mgr->reset_rmi = reset_rmi_buffer;
 	eink_mgr->index_mgr = mgr;
 
 	return ret;

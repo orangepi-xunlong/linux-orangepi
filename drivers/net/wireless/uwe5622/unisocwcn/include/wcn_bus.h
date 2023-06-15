@@ -1,19 +1,23 @@
 #ifndef __WCN_BUS_H__
 #define __WCN_BUS_H__
 
-#define HW_TYPE_SDIO 0
-#define HW_TYPE_PCIE 1
-#define HW_TYPE_SIPC 2
-#define HW_TYPE_USB 3
 #define CHN_MAX_NUM 32
 
-#ifdef CONFIG_SDIOHAL
+#ifdef CONFIG_WCN_SDIO
 #define PUB_HEAD_RSV 4
 #else
 #define PUB_HEAD_RSV 0
 #endif
 
-enum WCN_VENDOR_ID {
+enum wcn_hw_type {
+	HW_TYPE_SDIO = 0,
+	HW_TYPE_PCIE,
+	HW_TYPE_SIPC,
+	HW_TYPE_USB,
+	HW_TYPE_UNKNOWN
+};
+
+enum wcn_vendor_id {
 	/* NOT pull chipen, NOT reset sdio after resume. */
 	WCN_VENDOR_DEFAULT = 0,
 	/* PULL chipen after resume. */

@@ -23,7 +23,7 @@ hdmi20-y += hdmi_core/api/api.o
 hdmi20-y += hdmi_core/api/access.o
 
 ifeq ($(CONFIG_HDMI2_CEC_SUNXI),y)
-hdmi20-y += hdmi_core/api/cec.o
+hdmi20-y += hdmi_core/cec/cec.o
 endif
 
 hdmi20-y += hdmi_core/api/core/audio.o
@@ -33,6 +33,7 @@ hdmi20-y += hdmi_core/api/core/irq.o
 hdmi20-y += hdmi_core/api/core/main_controller.o
 hdmi20-y += hdmi_core/api/core/packets.o
 hdmi20-y += hdmi_core/api/core/video.o
+hdmi20-y += hdmi_core/api/core/hdr10p.o
 
 hdmi20-y += hdmi_core/api/edid.o
 
@@ -41,7 +42,13 @@ hdmi20-y += hdmi_core/api/hdcp.o
 endif
 
 hdmi20-y += hdmi_core/api/identification.o
+
+ifeq ($(CONFIG_AW_PHY),y)
+hdmi20-y += hdmi_core/api/aw_phy.o
+else
 hdmi20-y += hdmi_core/api/phy.o
+endif
+
 hdmi20-y += hdmi_core/api/scdc.o
 hdmi20-y += hdmi_core/api/general_ops.o
 

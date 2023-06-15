@@ -7,12 +7,12 @@
 #include <linux/slab.h>
 #include <linux/version.h>
 #if KERNEL_VERSION(4, 14, 0) <= LINUX_VERSION_CODE
-#include <linux/wakelock.h>
 #include <uapi/linux/sched/types.h>
 #else
 #include <linux/sched.h>
 #endif
 #include <wcn_bus.h>
+#include <linux/mmc/host.h>
 #ifdef CONFIG_WCN_SLP
 #include "../sleep/sdio_int.h"
 #include "../sleep/slp_mgr.h"
@@ -54,7 +54,7 @@ extern long int sdiohal_log_level;
 	} while (0)
 #define sdiohal_pr_perf(fmt, args...) \
 	do { if (sdiohal_log_level & SDIOHAL_PERF_LEVEL) \
-		trace_printk(fmt, ## args); \
+		pr_info(fmt, ## args); \
 	} while (0)
 #else
 #define sdiohal_normal(fmt, args...)
@@ -293,13 +293,8 @@ struct sdiohal_data_t {
 	struct task_struct *rx_thread;
 	struct completion tx_completed;
 	struct completion rx_completed;
-#if KERNEL_VERSION(4, 14, 0) <= LINUX_VERSION_CODE
-	struct wake_lock tx_wl;
-	struct wake_lock rx_wl;
-#else
-	struct wakeup_source tx_ws;
-	struct wakeup_source rx_ws;
-#endif
+	struct wakeup_source *tx_ws;
+	struct wakeup_source *rx_ws;
 	atomic_t tx_wake_flag;
 	atomic_t rx_wake_flag;
 #ifdef CONFIG_WCN_SLP
@@ -366,11 +361,7 @@ struct sdiohal_data_t {
 	struct timespec tm_begin_irq;
 	struct timespec tm_end_irq;
 
-#if KERNEL_VERSION(4, 14, 0) <= LINUX_VERSION_CODE
-	struct wake_lock scan_wl;
-#else
-	struct wakeup_source scan_ws;
-#endif
+	struct wakeup_source *scan_ws;
 	struct completion scan_done;
 	struct completion remove_done;
 	unsigned int sdio_int_reg;

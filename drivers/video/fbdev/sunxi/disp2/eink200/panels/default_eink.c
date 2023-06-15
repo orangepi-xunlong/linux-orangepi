@@ -91,26 +91,78 @@ eink_pinstv         = port:PD22<7><0><default><default>
 
 #include "default_eink.h"
 
+#if IS_ENABLED(CONFIG_TPS65185_VCOM)
+#include <linux/ebc.h>
+static struct ebc_pwr_ops g_tps65185_ops;
+extern int register_ebc_pwr_ops(struct ebc_pwr_ops *ops);
+#endif
+
 static void EINK_power_on(void);
 static void EINK_power_off(void);
 
-s32 EINK_open_flow(void)
+#if IS_ENABLED(CONFIG_TPS65185_VCOM)
+static void Eink_int_panel(void)
+{
+	//printk("%s: register tps65185 ops\n", __func__);
+	register_ebc_pwr_ops(&g_tps65185_ops);
+}
+
+static void Eink_uninit_panel(void)
+{
+	//printk("%s: unregister tps65185 ops\n", __func__);
+	g_tps65185_ops.power_down = NULL;
+	g_tps65185_ops.power_on = NULL;
+}
+
+static void panel_power_on(void)
+{
+	//sunxi_lcd_power_enable(sel, 0);
+	//config lcd_power pin to open lcd power0
+	panel_pin_cfg(1);
+}
+
+static void panel_power_off(void)
+{
+	panel_pin_cfg(0);
+	//sunxi_lcd_power_disable(sel, 0);
+	//config lcd_power pin to close lcd power0
+}
+#endif
+
+static s32 EINK_open_flow(void)
 {
 	EINK_INFO_MSG("\n");
+
+#if IS_ENABLED(CONFIG_TPS65185_VCOM)
+	EINK_OPEN_FUNC(Eink_int_panel, 0);
+#endif
 	EINK_OPEN_FUNC(EINK_power_on, 2);
 	return 0;
 }
 
-s32 EINK_close_flow(void)
+static s32 EINK_close_flow(void)
 {
 	EINK_INFO_MSG("\n");
 	EINK_CLOSE_FUNC(EINK_power_off, 2);
+#if IS_ENABLED(CONFIG_TPS65185_VCOM)
+	EINK_OPEN_FUNC(Eink_uninit_panel, 0);
+#endif
 	return 0;
 }
 
 static void EINK_power_on(void)
 {
-	EINK_INFO_MSG("EINK_power_on!\n");
+	EINK_DEBUG_MSG("EINK_power_on!\n");
+
+#if IS_ENABLED(CONFIG_TPS65185_VCOM)
+	//tps65185_power_wakeup_with_lock(1);
+	if (g_tps65185_ops.power_on) {
+		g_tps65185_ops.power_on();
+	} else {
+		pr_warn("[%s]: tps65185 power on func has not been registed yet\n", __func__);
+	}
+	panel_power_on();
+#else
 	/* pwr3 pb2 */
 	panel_gpio_set_value(0, 1);
 	mdelay(1);
@@ -131,17 +183,26 @@ static void EINK_power_on(void)
 	mdelay(2);
 
 	panel_pin_cfg(1);
+#endif
 }
 
 static void EINK_power_off(void)
 {
 	EINK_INFO_MSG("EINK_power_off!\n");
+#if IS_ENABLED(CONFIG_TPS65185_VCOM)
+	//tps65185_power_wakeup_with_lock(0);
+	if (g_tps65185_ops.power_down) {
+		g_tps65185_ops.power_down();
+	} else {
+		pr_warn("[%s]: tps65185 power down func has not been registed yet\n", __func__);
+	}
+	panel_power_off();
+#else
 	panel_pin_cfg(0);
 
-#if 1
 	panel_gpio_set_value(5, 0);
 	mdelay(1);
-#endif
+
 	panel_gpio_set_value(4, 0);
 	mdelay(1);
 
@@ -156,6 +217,7 @@ static void EINK_power_off(void)
 
 	panel_gpio_set_value(0, 0);
 	mdelay(2);
+#endif
 }
 
 struct __eink_panel default_eink = {

@@ -11,7 +11,7 @@
 #include "de_clock.h"
 
 static void __iomem *de_base;
-#if defined(CONFIG_ARCH_SUN50IW10)
+#if defined(CONFIG_INDEPENDENT_DE)
 static void __iomem *de1_base;
 #endif
 
@@ -35,17 +35,31 @@ static struct de_clk_para de_clk_tbl[] = {
 		.clk_no			= DE_CLK_CORE1,
 		.div			= 1,
 		.ahb_gate_adr		= 0x04,
+
+#if defined(CONFIG_INDEPENDENT_DE)
+		.ahb_gate_shift		= 0,
+#else
 		.ahb_gate_shift		= 1,
+#endif
 		.ahb_reset_adr		= 0x08,
+
+#if defined(CONFIG_INDEPENDENT_DE)
+		.ahb_reset_shift	= 0,
+#else
 #if defined(DE_WB_RESET_SHARE)
 		.ahb_reset_shift	= 2,
 #else
 		.ahb_reset_shift	= 1,
 #endif
+#endif
 		.dram_gate_adr		= 0x00,
 		.dram_gate_shift	= 32,
 		.mod_adr		= 0x00,
+#if defined(CONFIG_INDEPENDENT_DE)
+		.mod_enable_shift	= 0,
+#else
 		.mod_enable_shift	= 1,
+#endif
 		.mod_div_adr		= 0x0c,
 		.mod_div_shift		= 4,
 		.mod_div_width		= 4,
@@ -73,7 +87,7 @@ static s32 de_clk_set_div(u32 clk_no, u32 div)
 	u32 reg_val;
 	u32 len = sizeof(de_clk_tbl) / sizeof(struct de_clk_para);
 
-#if defined(CONFIG_ARCH_SUN50IW10)
+#if defined(CONFIG_INDEPENDENT_DE)
 	for (i = 0; i < len; i++) {
 		if (de_clk_tbl[i].clk_no == clk_no) {
 			reg_val = readl(de_clk_tbl[i].mod_div_adr + de1_base);
@@ -82,6 +96,7 @@ static s32 de_clk_set_div(u32 clk_no, u32 div)
 				     de_clk_tbl[i].mod_div_width, reg_val,
 				     (div - 1));
 			writel(reg_val, de_clk_tbl[i].mod_div_adr + de1_base);
+
 			break;
 		}
 	}
@@ -229,25 +244,41 @@ static s32 __de_clk_disable(u32 clk_no)
 
 s32 de_clk_enable(u32 clk_no)
 {
-#if defined(CONFIG_ARCH_SUN50IW10)
+#if defined(CONFIG_INDEPENDENT_DE)
 	void __iomem *tmp = de_base;
-	de_base = de1_base;
-	__de_clk_enable(clk_no);
-	de_base = tmp;
-#endif
+	s32 ret = 0;
+	if (clk_no == DE_CLK_CORE1) {
+		de_base = de1_base;
+		ret = __de_clk_enable(DE_CLK_CORE0);
+		ret = __de_clk_enable(DE_CLK_WB);
+		de_base = tmp;
+	} else {
+		ret = __de_clk_enable(clk_no);
+	}
+	return ret;
+#else
 	return __de_clk_enable(clk_no);
+#endif
 }
 EXPORT_SYMBOL(de_clk_enable);
 
 s32 de_clk_disable(u32 clk_no)
 {
-#if defined(CONFIG_ARCH_SUN50IW10)
+#if defined(CONFIG_INDEPENDENT_DE)
 	void __iomem *tmp = de_base;
-	de_base = de1_base;
-	__de_clk_disable(clk_no);
-	de_base = tmp;
-#endif
+	s32 ret = 0;
+	if (clk_no == DE_CLK_CORE1) {
+		de_base = de1_base;
+		ret = __de_clk_disable(DE_CLK_CORE0);
+		ret = __de_clk_disable(DE_CLK_WB);
+		de_base = tmp;
+	} else {
+		ret = __de_clk_disable(clk_no);
+	}
+	return ret;
+#else
 	return __de_clk_disable(clk_no);
+#endif
 }
 EXPORT_SYMBOL(de_clk_disable);
 
@@ -257,10 +288,12 @@ s32 de_clk_set_reg_base(uintptr_t reg_base)
 
 	return 0;
 }
-#if defined(CONFIG_ARCH_SUN50IW10)
+
+#if defined(CONFIG_INDEPENDENT_DE)
 s32 de1_clk_set_reg_base(uintptr_t reg_base)
 {
 	de1_base = (void __iomem *)reg_base;
+
 	return 0;
 }
 #endif

@@ -12,9 +12,9 @@
 #ifndef __BSP_NAND_H__
 #define __BSP_NAND_H__
 
-#include "../phy-nand/nand-partition/mbr.h"
-#include "../phy-nand/nand-partition/phy.h"
-#include "../phy-nand/spinand/spinand_type.h"
+#include "../phy-nand/nand-partition3/sunxi_nand_partitions.h"
+//#include "../phy-nand/nand-partition/phy.h"
+//#include "../phy-nand/spinand/spinand_type.h"
 #include "nand_type.h"
 
 struct _nftl_blk {

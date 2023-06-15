@@ -1,15 +1,14 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License, version 2, as
- * published by the Free Software Foundation.
  *
  * Copyright (C) 2015 Naveen N. Rao, IBM Corporation
  */
 
-#include "debug.h"
+#include "dso.h"
 #include "symbol.h"
 #include "map.h"
 #include "probe-event.h"
+#include "probe-file.h"
 
 #ifdef HAVE_LIBELF_SUPPORT
 bool elf__needs_adjust_symbols(GElf_Ehdr ehdr)
@@ -53,6 +52,26 @@ int arch__compare_symbol_names(const char *namea, const char *nameb)
 
 	return strcmp(namea, nameb);
 }
+
+int arch__compare_symbol_names_n(const char *namea, const char *nameb,
+				 unsigned int n)
+{
+	/* Skip over initial dot */
+	if (*namea == '.')
+		namea++;
+	if (*nameb == '.')
+		nameb++;
+
+	return strncmp(namea, nameb, n);
+}
+
+const char *arch__normalize_symbol_name(const char *name)
+{
+	/* Skip over initial dot */
+	if (name && *name == '.')
+		name++;
+	return name;
+}
 #endif
 
 #if defined(_CALL_ELF) && _CALL_ELF == 2
@@ -81,12 +100,17 @@ void arch__fix_tev_from_maps(struct perf_probe_event *pev,
 	 * However, if the user specifies an offset, we fall back to using the
 	 * GEP since all userspace applications (objdump/readelf) show function
 	 * disassembly with offsets from the GEP.
-	 *
-	 * In addition, we shouldn't specify an offset for kretprobes.
 	 */
-	if (pev->point.offset || (!pev->uprobes && pev->point.retprobe) ||
-	    !map || !sym)
+	if (pev->point.offset || !map || !sym)
 		return;
+
+	/* For kretprobes, add an offset only if the kernel supports it */
+	if (!pev->uprobes && pev->point.retprobe) {
+#ifdef HAVE_LIBELF_SUPPORT
+		if (!kretprobe_offset_is_supported())
+#endif
+			return;
+	}
 
 	lep_offset = PPC64_LOCAL_ENTRY_OFFSET(sym->arch_sym);
 
@@ -110,7 +134,7 @@ void arch__post_process_probe_trace_events(struct perf_probe_event *pev,
 	struct rb_node *tmp;
 	int i = 0;
 
-	map = get_target_map(pev->target, pev->uprobes);
+	map = get_target_map(pev->target, pev->nsi, pev->uprobes);
 	if (!map || map__load(map) < 0)
 		return;
 

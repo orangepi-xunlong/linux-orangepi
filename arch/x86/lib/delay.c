@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  *	Precise Delay Loops for i386
  *
@@ -106,14 +107,14 @@ static void delay_mwaitx(unsigned long __loops)
 		delay = min_t(u64, MWAITX_MAX_LOOPS, loops);
 
 		/*
-		 * Use cpu_tss as a cacheline-aligned, seldomly
+		 * Use cpu_tss_rw as a cacheline-aligned, seldomly
 		 * accessed per-cpu variable as the monitor target.
 		 */
-		__monitorx(raw_cpu_ptr(&cpu_tss), 0, 0);
+		__monitorx(raw_cpu_ptr(&cpu_tss_rw), 0, 0);
 
 		/*
-		 * AMD, like Intel, supports the EAX hint and EAX=0xf
-		 * means, do not enter any deep C-state and we use it
+		 * AMD, like Intel's MWAIT version, supports the EAX hint and
+		 * EAX=0xf0 means, do not enter any deep C-state and we use it
 		 * here in delay() to minimize wakeup latency.
 		 */
 		__mwaitx(MWAITX_DISABLE_CSTATES, delay, MWAITX_ECX_TIMER_ENABLE);
@@ -161,15 +162,15 @@ void __delay(unsigned long loops)
 }
 EXPORT_SYMBOL(__delay);
 
-inline void __const_udelay(unsigned long xloops)
+noinline void __const_udelay(unsigned long xloops)
 {
+	unsigned long lpj = this_cpu_read(cpu_info.loops_per_jiffy) ? : loops_per_jiffy;
 	int d0;
 
 	xloops *= 4;
 	asm("mull %%edx"
 		:"=d" (xloops), "=&a" (d0)
-		:"1" (xloops), "0"
-		(this_cpu_read(cpu_info.loops_per_jiffy) * (HZ/4)));
+		:"1" (xloops), "0" (lpj * (HZ / 4)));
 
 	__delay(++xloops);
 }

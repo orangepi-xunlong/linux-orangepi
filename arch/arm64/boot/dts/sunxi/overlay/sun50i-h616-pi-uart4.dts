@@ -1,0 +1,14 @@
+/dts-v1/;
+/plugin/;
+
+/ {
+	fragment@0 {
+		target = <&uart4>;
+		__overlay__ {
+			status = "okay";
+			pinctrl-names = "default", "sleep";
+			pinctrl-0 = <&uart4_pi_pins_a>;
+			pinctrl-1 = <&uart4_pi_pins_b>;
+		};
+	};
+};

@@ -9,14 +9,28 @@
  */
 
 #include "dev_disp.h"
+#include <linux/ion.h>
+#include <uapi/linux/ion.h>
 #include <linux/pm_runtime.h>
 #if defined(CONFIG_DEVFREQ_DRAM_FREQ_WITH_SOFT_NOTIFY)
 #include <linux/sunxi_dramfreq.h>
 #endif
-#include <linux/ion_sunxi.h>
+#include <linux/version.h>
+#include <linux/dma-mapping.h>
+#include <linux/reset.h>
+#ifndef dma_mmap_writecombine
+#define dma_mmap_writecombine dma_mmap_wc
+#endif
 
 #ifdef CONFIG_PM
 #define CONFIG_PM_RUNTIME
+#endif
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0)
+struct dma_buf *ion_alloc(size_t len, unsigned int heap_id_mask, unsigned int flags);
+int ion_free(struct ion_buffer *buffer);
+void *ion_heap_map_kernel(struct ion_heap *heap, struct ion_buffer *buffer);
+void ion_heap_unmap_kernel(struct ion_heap *heap, struct ion_buffer *buffer);
 #endif
 
 #define DISP_MEM_NUM 10
@@ -58,6 +72,8 @@ struct disp_layer_config2 lyr_cfg2_1[16];
 static spinlock_t sync_finish_lock;
 unsigned int bright_csc = 50, contrast_csc = 50, satuation_csc = 50;
 
+static atomic_t g_driver_ref_count;
+static u8 palette_data[256*4];
 #ifndef CONFIG_OF
 static struct sunxi_disp_mod disp_mod[] = {
 	{DISP_MOD_DE, "de"},
@@ -80,6 +96,11 @@ static struct resource disp_resource[] = {
 int composer_init(struct disp_drv_info *p_disp_drv);
 int hwc_dump(char *buf);
 #endif
+
+void disp_set_suspend_output_type(u8 disp, u8 output_type)
+{
+	suspend_output_type[disp] = output_type;
+}
 
 static void disp_shutdown(struct platform_device *pdev);
 static ssize_t disp_sys_show(struct device *dev,
@@ -265,8 +286,7 @@ static ssize_t disp_enhance_mode_store(struct device *dev,
 {
 	int err;
 	unsigned long val;
-	/*3:demo vivid is larger than size of _csc_enhance_setting*/
-	unsigned long real_mode = g_enhance_mode;
+
 	err = kstrtoul(buf, 10, &val);
 	if (err) {
 		pr_warn("Invalid size\n");
@@ -276,42 +296,41 @@ static ssize_t disp_enhance_mode_store(struct device *dev,
 	/*
 	 * mode: 0: standard; 1: vivid; 2: soft; 3: demo vivid
 	 */
-	if (val > 3 || val < 0)
+	if (val > 3)
 		pr_warn("Invalid value, 0~3 is expected!\n");
 	else {
 		int num_screens = 2;
 		struct disp_manager *mgr = NULL;
 		struct disp_enhance *enhance = NULL;
 
-		if (g_enhance_mode != val) {
-			g_enhance_mode = val;
+		g_enhance_mode = val;
 
-			num_screens = bsp_disp_feat_get_num_screens();
+		num_screens = bsp_disp_feat_get_num_screens();
 
-			if (g_disp < num_screens)
-				mgr = g_disp_drv.mgr[g_disp];
+		if (g_disp < num_screens)
+			mgr = g_disp_drv.mgr[g_disp];
 
-			if (mgr) {
-				enhance = mgr->enhance;
-				if (enhance && enhance->set_mode)
+		if (mgr) {
+			enhance = mgr->enhance;
+			if (enhance && enhance->set_mode)
 #if defined(CONFIG_ARCH_SUN8IW15) || defined(CONFIG_ARCH_SUN50IW1)
-					real_mode = (g_enhance_mode >= 2) ? 1 : g_enhance_mode;
-					enhance->set_mode(enhance, real_mode);
-					if (g_enhance_mode == 2)
-						g_enhance_mode = 3;
+				enhance->set_mode(enhance,
+						  (g_enhance_mode == 2) ?
+						  1 : g_enhance_mode);
+			if (g_enhance_mode == 2)
+				g_enhance_mode = 3;
 #else
-					real_mode = (g_enhance_mode >= 3) ? 1 : g_enhance_mode;
-					enhance->set_mode(enhance, real_mode);
+			enhance->set_mode(enhance,
+					  (g_enhance_mode == 3) ?
+					  1 : g_enhance_mode);
 #endif
 
-				if (enhance && enhance->demo_enable
-				    && enhance->demo_disable) {
-					if (g_enhance_mode == 3)
-						enhance->demo_enable(enhance);
-					else
-						enhance->demo_disable(enhance);
-				}
-				g_enhance_mode = real_mode;
+			if (enhance && enhance->demo_enable
+			    && enhance->demo_disable) {
+				if (g_enhance_mode == 3)
+					enhance->demo_enable(enhance);
+				else
+					enhance->demo_disable(enhance);
 			}
 		}
 	}
@@ -321,8 +340,7 @@ static ssize_t disp_enhance_mode_store(struct device *dev,
 
 static DEVICE_ATTR(enhance_mode, 0660,
 		   disp_enhance_mode_show, disp_enhance_mode_store);
-int __attribute__ ((weak))
-_csc_enhance_setting[3][4] = {
+int _csc_enhance_setting[3][4] = {
 	{50, 50, 50, 50},
 	{50, 50, 50, 50},
 	{50, 40, 50, 50},
@@ -335,6 +353,7 @@ static ssize_t disp_enhance_bright_show(struct device *dev,
 	struct disp_manager *mgr = NULL;
 	struct disp_enhance *enhance = NULL;
 	int value = 0;
+	int real_mode = (g_enhance_mode == 3) ? 1 : g_enhance_mode;
 
 	num_screens = bsp_disp_feat_get_num_screens();
 	if (g_disp < num_screens)
@@ -346,7 +365,7 @@ static ssize_t disp_enhance_bright_show(struct device *dev,
 			value = enhance->get_bright(enhance);
 	}
 
-	return sprintf(buf, "%d %d\n", _csc_enhance_setting[g_enhance_mode][0], value);
+	return sprintf(buf, "%d %d\n", _csc_enhance_setting[real_mode][0], value);
 }
 
 static ssize_t disp_enhance_bright_store(struct device *dev,
@@ -358,6 +377,7 @@ static ssize_t disp_enhance_bright_store(struct device *dev,
 	int num_screens = 2;
 	struct disp_manager *mgr = NULL;
 	struct disp_enhance *enhance = NULL;
+	int real_mode = (g_enhance_mode == 3) ? 1 : g_enhance_mode;
 
 	err = kstrtoul(buf, 10, &value);
 	if (err) {
@@ -372,12 +392,12 @@ static ssize_t disp_enhance_bright_store(struct device *dev,
 	if (mgr) {
 		enhance = mgr->enhance;
 		if (enhance && enhance->set_bright) {
-			_csc_enhance_setting[g_enhance_mode][0] = value;
+			_csc_enhance_setting[real_mode][0] = value;
 			enhance->set_bright(enhance, value);
 		}
 		if (enhance && enhance->set_mode) {
-			enhance->set_mode(enhance, g_enhance_mode ? 0 : 1);
-			enhance->set_mode(enhance, g_enhance_mode);
+			enhance->set_mode(enhance, real_mode ? 0 : 1);
+			enhance->set_mode(enhance, real_mode);
 		}
 	}
 
@@ -393,6 +413,7 @@ static ssize_t disp_enhance_saturation_show(struct device *dev,
 	struct disp_manager *mgr = NULL;
 	struct disp_enhance *enhance = NULL;
 	int value = 0;
+	int real_mode = (g_enhance_mode == 3) ? 1 : g_enhance_mode;
 
 	num_screens = bsp_disp_feat_get_num_screens();
 	if (g_disp < num_screens)
@@ -404,7 +425,7 @@ static ssize_t disp_enhance_saturation_show(struct device *dev,
 			value = enhance->get_saturation(enhance);
 	}
 
-	return sprintf(buf, "%d %d\n", value, _csc_enhance_setting[g_enhance_mode][2]);
+	return sprintf(buf, "%d %d\n", value, _csc_enhance_setting[real_mode][2]);
 }
 
 static ssize_t disp_enhance_saturation_store(struct device *dev,
@@ -416,6 +437,7 @@ static ssize_t disp_enhance_saturation_store(struct device *dev,
 	int num_screens = 2;
 	struct disp_manager *mgr = NULL;
 	struct disp_enhance *enhance = NULL;
+	int real_mode = (g_enhance_mode == 3) ? 1 : g_enhance_mode;
 
 	err = kstrtoul(buf, 10, &value);
 	if (err) {
@@ -430,12 +452,12 @@ static ssize_t disp_enhance_saturation_store(struct device *dev,
 	if (mgr) {
 		enhance = mgr->enhance;
 		if (enhance && enhance->set_saturation) {
-			_csc_enhance_setting[g_enhance_mode][2] = value;
+			_csc_enhance_setting[real_mode][2] = value;
 			enhance->set_saturation(enhance, value);
 		}
 		if (enhance && enhance->set_mode) {
-			enhance->set_mode(enhance, g_enhance_mode ? 0 : 1);
-			enhance->set_mode(enhance, g_enhance_mode);
+			enhance->set_mode(enhance, real_mode ? 0 : 1);
+			enhance->set_mode(enhance, real_mode);
 		}
 	}
 
@@ -451,6 +473,7 @@ static ssize_t disp_enhance_contrast_show(struct device *dev,
 	struct disp_manager *mgr = NULL;
 	struct disp_enhance *enhance = NULL;
 	int value = 0;
+	int real_mode = (g_enhance_mode == 3) ? 1 : g_enhance_mode;
 
 	num_screens = bsp_disp_feat_get_num_screens();
 	if (g_disp < num_screens)
@@ -462,7 +485,7 @@ static ssize_t disp_enhance_contrast_show(struct device *dev,
 			value = enhance->get_contrast(enhance);
 	}
 
-	return sprintf(buf, "%d %d\n", value, _csc_enhance_setting[g_enhance_mode][1]);
+	return sprintf(buf, "%d %d\n", value, _csc_enhance_setting[real_mode][1]);
 }
 
 static ssize_t disp_enhance_contrast_store(struct device *dev,
@@ -474,6 +497,7 @@ static ssize_t disp_enhance_contrast_store(struct device *dev,
 	int num_screens = 2;
 	struct disp_manager *mgr = NULL;
 	struct disp_enhance *enhance = NULL;
+	int real_mode = (g_enhance_mode == 3) ? 1 : g_enhance_mode;
 
 	err = kstrtoul(buf, 10, &value);
 	if (err) {
@@ -488,12 +512,12 @@ static ssize_t disp_enhance_contrast_store(struct device *dev,
 	if (mgr) {
 		enhance = mgr->enhance;
 		if (enhance && enhance->set_contrast) {
-			_csc_enhance_setting[g_enhance_mode][1] = value;
+			_csc_enhance_setting[real_mode][1] = value;
 			enhance->set_contrast(enhance, value);
 		}
 		if (enhance && enhance->set_mode) {
-			enhance->set_mode(enhance, g_enhance_mode ? 0 : 1);
-			enhance->set_mode(enhance, g_enhance_mode);
+			enhance->set_mode(enhance, real_mode ? 0 : 1);
+			enhance->set_mode(enhance, real_mode);
 		}
 	}
 
@@ -851,7 +875,7 @@ static ssize_t disp_yres_show(struct device *dev,
  * @param[IN]  :disp:screen index
  * @return     :0 if success
  */
-int disp_draw_colorbar(u32 disp)
+int disp_draw_colorbar(u32 disp, u8 zorder)
 {
 	struct disp_manager *mgr = NULL;
 	struct disp_layer_config config[4];
@@ -872,10 +896,10 @@ int disp_draw_colorbar(u32 disp)
 
 	memset(config, 0, 4 * sizeof(struct disp_layer_config));
 	for (i = 0; i < 4; ++i) {
-		config[i].channel = 1;
+		config[i].channel = 0;
 		config[i].layer_id = i;
 		config[i].enable = 1;
-		config[i].info.zorder = 16;
+		config[i].info.zorder = zorder;
 		config[i].info.mode = LAYER_MODE_COLOR;
 		config[i].info.fb.format = DISP_FORMAT_ARGB_8888;
 		config[i].info.screen_win.width = width / 4;
@@ -937,7 +961,7 @@ static ssize_t disp_colorbar_store(struct device *dev,
 	/*1:colorbar*/
 	/*2:mosaic*/
 	if (val == 8) {
-		disp_draw_colorbar(g_disp);
+		disp_draw_colorbar(g_disp, 16);
 		if (mgr && mgr->device && mgr->device->show_builtin_patten)
 			mgr->device->show_builtin_patten(mgr->device, 0);
 	} else {
@@ -952,9 +976,11 @@ static ssize_t disp_capture_dump_store(struct device *dev,
 				       struct device_attribute *attr,
 				       const char *buf, size_t count)
 {
+#ifndef MODULE
 	struct file *pfile;
 	mm_segment_t old_fs;
 	ssize_t bw;
+	loff_t pos = 0;
 	dma_addr_t phy_addr = 0;
 	void *buf_addr_vir = NULL;
 	struct disp_capture_info cptr_info;
@@ -962,7 +988,6 @@ static ssize_t disp_capture_dump_store(struct device *dev,
 	struct disp_manager *mgr = NULL;
 	char *image_name = NULL;
 	int ret = -1, cs = DISP_CSC_TYPE_RGB;
-	loff_t pos = 0;
 	struct bmp_header bmp_header;
 
 	num_screens = bsp_disp_feat_get_num_screens();
@@ -984,7 +1009,7 @@ static ssize_t disp_capture_dump_store(struct device *dev,
 	image_name[count - 1] = '\0';
 
 	old_fs = get_fs();
-	set_fs(get_ds());
+	set_fs(KERNEL_DS);
 	pfile = filp_open(image_name, O_RDWR | O_CREAT | O_EXCL, 0755);
 	set_fs(old_fs);
 	if (IS_ERR(pfile)) {
@@ -1076,22 +1101,16 @@ static ssize_t disp_capture_dump_store(struct device *dev,
 		bmp_header.planes = 1;
 		bmp_header.bit_count = 32;
 		bmp_header.image_size = size;
-		old_fs = get_fs();
-		set_fs(get_ds());
-		bw = vfs_write(pfile, (const char *)&bmp_header,
+		bw = kernel_write(pfile, (const char *)&bmp_header,
 			       sizeof(struct bmp_header), &pos);
-		set_fs(old_fs);
 		pos = sizeof(struct bmp_header);
 	}
 
-	old_fs = get_fs();
-	set_fs(get_ds());
-	bw = vfs_write(pfile, (char *)buf_addr_vir, size, &pos);
+	bw = kernel_write(pfile, (char *)buf_addr_vir, size, &pos);
 	if (unlikely(bw != size))
 		__wrn("%s, write %s err at byte offset %llu\n", __func__,
 		      image_name, pfile->f_pos);
 
-	set_fs(old_fs);
 FREE_DMA:
 	disp_free((void *)buf_addr_vir, (void *)phy_addr, size);
 FILE_CLOSE:
@@ -1100,6 +1119,7 @@ FREE:
 	kfree(image_name);
 	image_name = NULL;
 OUT:
+#endif
 	return count;
 }
 
@@ -1138,6 +1158,11 @@ static struct attribute_group disp_attribute_group = {
 unsigned int disp_boot_para_parse(const char *name)
 {
 	unsigned int value = 0;
+
+	if (!g_disp_drv.dev->of_node) {
+	    pr_err("disp_boot_para_parse failed, of node is NULL!\n");
+	    return 0;
+	}
 
 	if (of_property_read_u32(g_disp_drv.dev->of_node, name, &value) < 0)
 		__inf("of_property_read disp.%s fail\n", name);
@@ -1483,10 +1508,10 @@ void disp_free(void *virt_addr, void *phys_addr, u32 num_bytes)
 				  (dma_addr_t)phys_addr);
 }
 
-#if defined(CONFIG_ION_SUNXI)
+#if defined(CONFIG_ION)
 static int init_disp_ion_mgr(struct disp_ion_mgr *ion_mgr)
 {
-	if (NULL == ion_mgr) {
+	if (ion_mgr == NULL) {
 		__wrn("input param is null\n");
 		return -EINVAL;
 	}
@@ -1495,141 +1520,96 @@ static int init_disp_ion_mgr(struct disp_ion_mgr *ion_mgr)
 
 	mutex_lock(&(ion_mgr->mlock));
 	INIT_LIST_HEAD(&(ion_mgr->ion_list));
-	ion_mgr->client = sunxi_ion_client_create("ion_disp2");
-	if (IS_ERR_OR_NULL(ion_mgr->client)) {
-		mutex_unlock(&(ion_mgr->mlock));
-		__wrn("disp_ion client create failed!!");
-		return -ENOMEM;
-	} else {
-		__debug("init ion manager for disp ok\n");
-	}
 	mutex_unlock(&(ion_mgr->mlock));
 
 	return 0;
 }
 
-static int __disp_ion_alloc_coherent(struct ion_client *client,
-				     struct disp_ion_mem *mem)
+static int __disp_ion_alloc_coherent(struct disp_ion_mem *mem)
 {
-	unsigned int flags = ION_FLAG_CACHED | ION_FLAG_CACHED_NEEDS_SYNC;
+	unsigned int flags = 0;
+	unsigned int heap_id_mask;
+	int fd = -1;
+	struct dma_buf *dmabuf;
 
-	if (IS_ERR_OR_NULL(client) || (NULL == mem)) {
-		__wrn("input param is null\n");
-		return -1;
-	}
-
-#if defined(CONFIG_SUNXI_IOMMU)
-	mem->handle = ion_alloc(client, mem->size, 0,
-				(1 << ION_HEAP_TYPE_SYSTEM), flags);
+#if IS_ENABLED(CONFIG_SUNXI_IOMMU)
+	heap_id_mask = 1 << ION_HEAP_TYPE_SYSTEM;
 #else
-	mem->handle = ion_alloc(client, mem->size, PAGE_SIZE,
-				 ((1 << ION_HEAP_TYPE_CARVEOUT) |
-				 (1 << ION_HEAP_TYPE_DMA)),
-				flags);
+	heap_id_mask = 2;/*1 << ION_HEAP_TYPE_DMA;*/
 #endif
-	if (IS_ERR_OR_NULL(mem->handle)) {
-		__wrn("ion_alloc failed, size=%u 0x%p!\n", (unsigned int)mem->size, mem->handle);
+
+	dmabuf = ion_alloc(mem->size, heap_id_mask, flags);
+	if (IS_ERR_OR_NULL(dmabuf)) {
+		__wrn("%s: ion_alloc failed, size=%u dmabuf=0x%p\n", __func__, (unsigned int)mem->size, dmabuf);
 		return -2;
 	}
-	mem->vaddr = ion_map_kernel(client, mem->handle);
+
+	mem->vaddr = ion_heap_map_kernel(NULL, dmabuf->priv);
 	if (IS_ERR_OR_NULL(mem->vaddr)) {
 		__wrn("ion_map_kernel failed!!\n");
 		goto err_map_kernel;
 	}
 
 	__debug("ion map kernel, vaddr=0x%p\n", mem->vaddr);
-#ifndef CONFIG_SUNXI_IOMMU
 	mem->p_item = kmalloc(sizeof(struct dmabuf_item), GFP_KERNEL);
-	if (ion_phys(client, mem->handle, (ion_phys_addr_t *)&mem->p_item->dma_addr,
-		     &mem->size)) {
-		__wrn("ion_phys failed!!\n");
-		goto err_phys;
-	}
-#endif
-#ifdef CONFIG_SUNXI_IOMMU
-	mem->p_item = disp_dma_map(ion_share_dma_buf_fd2(client, mem->handle));
+
+	fd = dma_buf_fd(dmabuf, O_CLOEXEC);
+	mem->p_item = disp_dma_map(fd);
 	if (!mem->p_item)
 		goto err_phys;
-#else
-	mem->p_item->fd = ion_share_dma_buf_fd2(client, mem->handle);
-	mem->p_item->buf = dma_buf_get(mem->p_item->fd);
-	if (IS_ERR(mem->p_item->buf)) {
-		DE_WRN("Get dmabuf of fd %d fail!\n", mem->p_item->fd);
-		goto err_phys;
-	}
-#endif
+
+
+	/*
+	 * put_unused_fd should be called immediatelly after dma_buf_fd, or else
+	 * those processes forked by init will hold different fds whose file struct
+	 * data is copied from init, and finally makes abort issue for android
+	 * system server as system server treats the file type as an unknown one.
+	 */
+	put_unused_fd(fd);
+
 	return 0;
 
 err_phys:
-	ion_unmap_kernel(client, mem->handle);
+	ion_heap_unmap_kernel(NULL, mem->p_item->dmabuf->priv);
 err_map_kernel:
-	ion_free(client, mem->handle);
+	ion_free(mem->p_item->dmabuf->priv);
 	return -ENOMEM;
 }
 
-static void __disp_ion_free_coherent(struct ion_client *client,
-				     struct disp_ion_mem *mem)
+static void __disp_ion_free_coherent(struct disp_ion_mem *mem)
 {
-	if (IS_ERR_OR_NULL(client) || IS_ERR_OR_NULL(mem->handle) ||
-	    IS_ERR_OR_NULL(mem->vaddr)) {
-		__wrn("input param is null\n");
-		return;
-	}
-
-	mem->p_item->buf->ops->release(mem->p_item->buf);
-	ion_unmap_kernel(client, mem->handle);
-	ion_free(client, mem->handle);
-
-#ifdef CONFIG_SUNXI_IOMMU
+	struct dmabuf_item item;
+	memcpy(&item, mem->p_item, sizeof(struct dmabuf_item));
 	disp_dma_unmap(mem->p_item);
-#else
-	dma_buf_put(mem->p_item->buf);
-	kfree(mem->p_item);
-#endif
+	ion_heap_unmap_kernel(NULL, item.dmabuf->priv);
+	ion_free(item.dmabuf->priv);
 	return;
-}
-
-void disp_ion_flush_cache(void *startAddr, int size)
-{
-	struct sunxi_cache_range range;
-
-	range.start = (unsigned long)startAddr;
-	range.end = (unsigned long)startAddr + size;
-
-#ifdef CONFIG_ARM64
-	__dma_flush_range((void *)range.start, range.end - range.start);
-#else
-	dmac_flush_range((void *)range.start, (void *)range.end);
-#endif
 }
 
 struct disp_ion_mem *disp_ion_malloc(u32 num_bytes, void *phys_addr)
 {
 	struct disp_ion_mgr *ion_mgr = &(g_disp_drv.ion_mgr);
-	struct ion_client *client = NULL;
 	struct disp_ion_list_node *ion_node = NULL;
 	struct disp_ion_mem *mem = NULL;
 	u32 *paddr = NULL;
 	int ret = -1;
 
-	if (NULL == ion_mgr) {
+	if (ion_mgr == NULL) {
 		__wrn("disp ion manager has not initial yet\n");
 		return NULL;
 	}
 
 	ion_node = kmalloc(sizeof(struct disp_ion_list_node), GFP_KERNEL);
-	if (NULL == ion_node) {
+	if (ion_node == NULL) {
 		__wrn("fail to alloc ion node, size=%u\n",
 		      (unsigned int)sizeof(struct disp_ion_list_node));
 		return NULL;
 	}
-
 	mutex_lock(&(ion_mgr->mlock));
-	client = ion_mgr->client;
 	mem = &ion_node->mem;
 	mem->size = MY_BYTE_ALIGN(num_bytes);
-	ret = __disp_ion_alloc_coherent(client, mem);
-	if (0 != ret) {
+	ret = __disp_ion_alloc_coherent(mem);
+	if (ret != 0) {
 		__wrn("fail to alloc ion, ret=%d\n", ret);
 		goto err_hdl;
 	}
@@ -1639,42 +1619,48 @@ struct disp_ion_mem *disp_ion_malloc(u32 num_bytes, void *phys_addr)
 	list_add_tail(&(ion_node->node), &(ion_mgr->ion_list));
 
 	mutex_unlock(&(ion_mgr->mlock));
-
 	return mem;
 
 err_hdl:
-	if (ion_node)
-		kfree(ion_node);
+	kfree(ion_node);
 	mutex_unlock(&(ion_mgr->mlock));
 
 	return NULL;
 }
 
+int disp_get_ion_fd(struct disp_ion_mem *mem)
+{
+	return dma_buf_fd(mem->p_item->dmabuf, O_CLOEXEC);
+}
+
+void *disp_get_phy_addr(struct disp_ion_mem *mem)
+{
+	return (void *)mem->p_item->dma_addr;
+}
+
 void disp_ion_free(void *virt_addr, void *phys_addr, u32 num_bytes)
 {
 	struct disp_ion_mgr *ion_mgr = &(g_disp_drv.ion_mgr);
-	struct ion_client *client = NULL;
 	struct disp_ion_list_node *ion_node = NULL, *tmp_ion_node = NULL;
 	struct disp_ion_mem *mem = NULL;
 	bool found = false;
 
-	if (NULL == ion_mgr) {
+	if (ion_mgr == NULL) {
 		__wrn("disp ion manager has not initial yet\n");
 		return;
 	}
 
-	client = ion_mgr->client;
 
 	mutex_lock(&(ion_mgr->mlock));
 	list_for_each_entry_safe(ion_node, tmp_ion_node, &ion_mgr->ion_list,
 				 node) {
-		if (NULL != ion_node) {
+		if (ion_node != NULL) {
 			mem = &ion_node->mem;
 			if ((((unsigned long)mem->p_item->dma_addr) ==
 			     ((unsigned long)phys_addr)) &&
 			    (((unsigned long)mem->vaddr) ==
 			     ((unsigned long)virt_addr))) {
-				__disp_ion_free_coherent(client, mem);
+				__disp_ion_free_coherent(mem);
 				__list_del_entry(&(ion_node->node));
 				found = true;
 				break;
@@ -1693,26 +1679,23 @@ static void deinit_disp_ion_mgr(struct disp_ion_mgr *ion_mgr)
 {
 	struct disp_ion_list_node *ion_node = NULL, *tmp_ion_node = NULL;
 	struct disp_ion_mem *mem = NULL;
-	struct ion_client *client = NULL;
 
-	if (NULL == ion_mgr) {
+	if (ion_mgr == NULL) {
 		__wrn("input param is null\n");
 		return;
 	}
 
-	client = ion_mgr->client;
 	mutex_lock(&(ion_mgr->mlock));
 	list_for_each_entry_safe(ion_node, tmp_ion_node, &ion_mgr->ion_list,
 				 node) {
-		if (NULL != ion_node) {
+		if (ion_node != NULL) {
 			// free all ion node
 			mem = &ion_node->mem;
-			__disp_ion_free_coherent(client, mem);
+			__disp_ion_free_coherent(mem);
 			__list_del_entry(&(ion_node->node));
 			kfree(ion_node);
 		}
 	}
-	ion_client_destroy(client);
 	mutex_unlock(&(ion_mgr->mlock));
 }
 #endif
@@ -1747,7 +1730,7 @@ s32 disp_tv_register(struct disp_tv_func *func)
 }
 EXPORT_SYMBOL(disp_tv_register);
 
-static void resume_proc(unsigned disp, struct disp_manager *mgr)
+static void resume_proc(unsigned int disp, struct disp_manager *mgr)
 {
 	if (!mgr || !mgr->device)
 		return;
@@ -1789,10 +1772,8 @@ int disp_device_set_config(struct disp_init_para *init,
 	config.range = init->output_range[screen_id];
 	config.scan = init->output_scan[screen_id];
 	config.aspect_ratio = init->output_aspect_ratio[screen_id];
-	if (!init->using_device_config)
-		return bsp_disp_device_switch(screen_id,
-					      config.type,
-					      config.mode);
+	if (!init->using_device_config[screen_id])
+		return bsp_disp_device_switch(screen_id, config.type, (enum disp_output_type)config.mode);
 	else
 		return bsp_disp_device_set_config(screen_id, &config);
 }
@@ -1814,7 +1795,7 @@ static void start_work(struct work_struct *work)
 		for (screen_id = 0; screen_id < num_screens; screen_id++) {
 			int disp_mode = g_disp_drv.disp_init.disp_mode;
 			int output_type =
-			    g_disp_drv.disp_init.output_type[screen_id];
+			    g_disp_drv.disp_init.output_type[screen_id%DE_NUM];
 			int lcd_registered =
 			    bsp_disp_get_lcd_registered(screen_id);
 			int hdmi_registered = bsp_disp_get_hdmi_registered();
@@ -1871,7 +1852,7 @@ static void start_work(struct work_struct *work)
 static s32 start_process(void)
 {
 	flush_work(&g_disp_drv.start_work);
-#if !defined(CONFIG_EINK_PANEL_USED) && !defined(CONFIG_EINK200_SUNXI)
+#if !IS_ENABLED(CONFIG_EINK_PANEL_USED) && !IS_ENABLED(CONFIG_EINK200_SUNXI)
 	schedule_work(&g_disp_drv.start_work);
 #endif
 	return 0;
@@ -2128,6 +2109,239 @@ static s32 disp_resume_cb(void)
 
 	return -1;
 }
+/**
+ * drv_disp_vsync_event - wakeup vsync thread
+ * @sel: the index of display manager
+ *
+ * Get the current time, push it into the cirular queue,
+ * and then wakeup the vsync thread.
+ */
+
+s32 drv_disp_vsync_event(u32 sel)
+{
+	unsigned long flags;
+	ktime_t now;
+	unsigned int head, tail, next;
+	bool full = false;
+	int cur_line = -1;
+	struct disp_device *dispdev = NULL;
+	struct disp_manager *mgr = g_disp_drv.mgr[sel];
+
+	if (mgr)
+		dispdev = mgr->device;
+	if (dispdev) {
+		if (dispdev->type == DISP_OUTPUT_TYPE_LCD) {
+			struct disp_panel_para panel;
+
+			if (dispdev->get_panel_info) {
+				dispdev->get_panel_info(dispdev, &panel);
+				cur_line = disp_al_lcd_get_cur_line(
+				    dispdev->hwdev_index, &panel);
+			}
+		}
+#if defined(SUPPORT_EDP)
+		else if (dispdev->type == DISP_OUTPUT_TYPE_EDP) {
+			cur_line = -1;
+			cur_line = disp_edp_get_cur_line(dispdev);
+		}
+#endif
+		else {
+			cur_line =
+			    disp_al_device_get_cur_line(dispdev->hwdev_index);
+		}
+	}
+
+	now = ktime_get();
+	spin_lock_irqsave(&g_disp_drv.disp_vsync.slock[sel], flags);
+	head = g_disp_drv.disp_vsync.vsync_timestamp_head[sel];
+	tail = g_disp_drv.disp_vsync.vsync_timestamp_tail[sel];
+	next = tail + 1;
+	next = (next >= VSYNC_NUM) ? 0 : next;
+	if (next == head)
+		full = true;
+
+	if (!full) {
+		g_disp_drv.disp_vsync.vsync_timestamp[sel][tail] = now;
+		g_disp_drv.disp_vsync.vsync_cur_line[sel][tail] = cur_line;
+		g_disp_drv.disp_vsync.vsync_timestamp_tail[sel] = next;
+	}
+	g_disp_drv.disp_vsync.vsync_read[sel] = true;
+	spin_unlock_irqrestore(&g_disp_drv.disp_vsync.slock[sel], flags);
+
+	if (g_disp_drv.disp_vsync.vsync_task[sel])
+		wake_up_process(g_disp_drv.disp_vsync.vsync_task[sel]);
+	else
+		wake_up_interruptible(&g_disp_drv.disp_vsync.vsync_waitq);
+
+	if (full)
+		return -1;
+	return 0;
+}
+
+/**
+ * vsync_proc - sends vsync message
+ * @disp: the index of display manager
+ *
+ * Get the timestamp from the circular queue,
+ * And send it widthin vsync message to the userland.
+ */
+
+static int vsync_proc(u32 disp)
+{
+	char buf[64];
+	char *envp[2];
+	unsigned long flags;
+	unsigned int head, tail, next;
+	ktime_t time;
+	s64 ts;
+	int cur_line = -1, start_delay = -1;
+	struct disp_device *dispdev = NULL;
+	struct disp_manager *mgr = g_disp_drv.mgr[disp];
+	u32 total_lines = 0;
+	u64 period = 0;
+
+	if (mgr)
+		dispdev = mgr->device;
+	if (dispdev) {
+		start_delay = dispdev->timings.start_delay;
+		total_lines = dispdev->timings.ver_total_time;
+		period = dispdev->timings.frame_period;
+	}
+
+	spin_lock_irqsave(&g_disp_drv.disp_vsync.slock[disp], flags);
+	head = g_disp_drv.disp_vsync.vsync_timestamp_head[disp];
+	tail = g_disp_drv.disp_vsync.vsync_timestamp_tail[disp];
+	while (head != tail) {
+		time = g_disp_drv.disp_vsync.vsync_timestamp[disp][head];
+		cur_line = g_disp_drv.disp_vsync.vsync_cur_line[disp][head];
+		next = head + 1;
+		next = (next >= VSYNC_NUM) ? 0 : next;
+		g_disp_drv.disp_vsync.vsync_timestamp_head[disp] = next;
+		spin_unlock_irqrestore(&g_disp_drv.disp_vsync.slock[disp], flags);
+
+		ts = ktime_to_ns(time);
+		if ((cur_line >= 0)
+			&& (period > 0)
+			&& (start_delay >= 0)
+			&& (total_lines > 0)
+			&& (cur_line != start_delay)) {
+			u64 tmp;
+
+			if (cur_line < start_delay) {
+				tmp = (start_delay - cur_line) * period;
+				do_div(tmp, total_lines);
+				ts += tmp;
+			} else {
+				tmp = (cur_line - start_delay) * period;
+				do_div(tmp, total_lines);
+				ts -= tmp;
+			}
+		}
+		snprintf(buf, sizeof(buf), "VSYNC%d=%llu", disp, ts);
+		envp[0] = buf;
+		envp[1] = NULL;
+		kobject_uevent_env(&g_disp_drv.dev->kobj, KOBJ_CHANGE, envp);
+
+		spin_lock_irqsave(&g_disp_drv.disp_vsync.slock[disp], flags);
+		head = g_disp_drv.disp_vsync.vsync_timestamp_head[disp];
+		tail = g_disp_drv.disp_vsync.vsync_timestamp_tail[disp];
+	}
+
+	spin_unlock_irqrestore(&g_disp_drv.disp_vsync.slock[disp], flags);
+
+	return 0;
+}
+unsigned int vsync_poll(struct file *file, poll_table *wait)
+{
+	unsigned long flags;
+	int ret = 0;
+	int disp;
+	for (disp = 0; disp < DISP_SCREEN_NUM; disp++) {
+		spin_lock_irqsave(&g_disp_drv.disp_vsync.slock[disp], flags);
+		ret |= g_disp_drv.disp_vsync.vsync_read[disp] == true ? POLLIN : 0;
+		spin_unlock_irqrestore(&g_disp_drv.disp_vsync.slock[disp], flags);
+	}
+	if (ret == 0)
+		poll_wait(file, &g_disp_drv.disp_vsync.vsync_waitq, wait);
+	return ret;
+}
+int bsp_disp_get_vsync_timestamp(int disp, int64_t *timestamp)
+{
+	unsigned long flags;
+	unsigned int head, tail, next;
+	ktime_t time;
+	s64 ts;
+	int cur_line = -1, start_delay = -1;
+	struct disp_device *dispdev = NULL;
+	struct disp_manager *mgr = g_disp_drv.mgr[disp];
+	u32 total_lines = 0;
+	u64 period = 0;
+	u64 tmp;
+
+	if (mgr)
+		dispdev = mgr->device;
+	if (dispdev) {
+		start_delay = dispdev->timings.start_delay;
+		total_lines = dispdev->timings.ver_total_time;
+		period = dispdev->timings.frame_period;
+	}
+
+	spin_lock_irqsave(&g_disp_drv.disp_vsync.slock[disp], flags);
+	head = g_disp_drv.disp_vsync.vsync_timestamp_head[disp];
+	tail = g_disp_drv.disp_vsync.vsync_timestamp_tail[disp];
+	if (head == tail) {
+		spin_unlock_irqrestore(&g_disp_drv.disp_vsync.slock[disp], flags);
+		return -1;
+	}
+	time = g_disp_drv.disp_vsync.vsync_timestamp[disp][head];
+	cur_line = g_disp_drv.disp_vsync.vsync_cur_line[disp][head];
+	next = head + 1;
+	next = (next >= VSYNC_NUM) ? 0 : next;
+	g_disp_drv.disp_vsync.vsync_timestamp_head[disp] = next;
+	head = g_disp_drv.disp_vsync.vsync_timestamp_head[disp];
+	tail = g_disp_drv.disp_vsync.vsync_timestamp_tail[disp];
+	if (head == tail)
+		g_disp_drv.disp_vsync.vsync_read[disp] = false;
+	spin_unlock_irqrestore(&g_disp_drv.disp_vsync.slock[disp], flags);
+
+	ts = ktime_to_ns(time);
+	if ((cur_line >= 0)
+		&& (period > 0)
+		&& (start_delay >= 0)
+		&& (total_lines > 0)
+		&& (cur_line != start_delay)) {
+
+		if (cur_line < start_delay) {
+			tmp = (start_delay - cur_line) * period;
+			do_div(tmp, total_lines);
+			ts += tmp;
+		} else {
+			tmp = (cur_line - start_delay) * period;
+			do_div(tmp, total_lines);
+			ts -= tmp;
+		}
+	}
+		*timestamp = ts;
+
+	return 0;
+}
+
+int vsync_thread(void *parg)
+{
+	unsigned long disp = (unsigned long)parg;
+
+	while (1) {
+
+		vsync_proc(disp);
+		set_current_state(TASK_INTERRUPTIBLE);
+		schedule();
+		if (kthread_should_stop())
+			break;
+		set_current_state(TASK_RUNNING);
+	}
+
+	return 0;
+}
 
 static s32 disp_init(struct platform_device *pdev)
 {
@@ -2158,10 +2372,41 @@ static s32 disp_init(struct platform_device *pdev)
 	for (i = 0; i < DISP_MOD_NUM; i++) {
 		para->reg_base[i] = g_disp_drv.reg_base[i];
 		para->irq_no[i] = g_disp_drv.irq_no[i];
-		para->mclk[i] = g_disp_drv.mclk[i];
-		__inf("mod %d, base=0x%lx, irq=%d, mclk=0x%p\n", i,
-		      para->reg_base[i], para->irq_no[i], para->mclk[i]);
+		__inf("mod %d, base=0x%lx, irq=%d\n", i, para->reg_base[i], para->irq_no[i]);
 	}
+
+	for (i = 0; i < DE_NUM; i++) {
+		para->clk_de[i] = g_disp_drv.clk_de[i];
+		para->clk_bus_de[i] = g_disp_drv.clk_bus_de[i];
+		para->rst_bus_de[i] = g_disp_drv.rst_bus_de[i];
+	}
+
+#if defined(HAVE_DEVICE_COMMON_MODULE)
+	para->clk_bus_extra = g_disp_drv.clk_bus_extra;
+	para->rst_bus_extra = g_disp_drv.rst_bus_extra;
+#endif
+	for (i = 0; i < DISP_DEVICE_NUM; i++) {
+		para->clk_bus_dpss_top[i] = g_disp_drv.clk_bus_dpss_top[i];
+		para->clk_tcon[i] = g_disp_drv.clk_tcon[i];
+		para->clk_bus_tcon[i] = g_disp_drv.clk_bus_tcon[i];
+		para->rst_bus_dpss_top[i] = g_disp_drv.rst_bus_dpss_top[i];
+		para->rst_bus_tcon[i] = g_disp_drv.rst_bus_tcon[i];
+	}
+
+#if defined(SUPPORT_DSI)
+	for (i = 0; i < CLK_DSI_NUM; i++) {
+		para->clk_mipi_dsi[i] = g_disp_drv.clk_mipi_dsi[i];
+		para->clk_bus_mipi_dsi[i] = g_disp_drv.clk_bus_mipi_dsi[i];
+	}
+
+	for (i = 0; i < DEVICE_DSI_NUM; i++)
+		para->rst_bus_mipi_dsi[i] = g_disp_drv.rst_bus_mipi_dsi[i];
+#endif
+
+#if defined(SUPPORT_LVDS)
+	for (i = 0; i < DEVICE_LVDS_NUM; i++)
+		para->rst_bus_lvds[i] = g_disp_drv.rst_bus_lvds[i];
+#endif
 
 	para->disp_int_process = disp_sync_finish_process;
 	para->vsync_event = drv_disp_vsync_event;
@@ -2227,29 +2472,52 @@ static s32 disp_init(struct platform_device *pdev)
 								output_cs;
 		g_disp_drv.disp_init.output_eotf[para->boot_info.disp] =
 								output_eotf;
-	} else {
-#if defined(CONFIG_SUNXI_IOMMU)
-		sunxi_enable_device_iommu(DE_MASTOR_ID, true);
-#endif
 	}
 
 	para->feat_init.chn_cfg_mode = g_disp_drv.disp_init.chn_cfg_mode;
 
 	bsp_disp_init(para);
 
+#if defined(CONFIG_SUNXI_DISP2_PQ)
+	pq_init(para);
+#endif
+
 	/*if (bsp_disp_check_device_enabled(para) == 0)
 		para->boot_info.sync = 0;
 	*/
 	num_screens = bsp_disp_feat_get_num_screens();
-	for (disp = 0; disp < num_screens; disp++)
+	for (disp = 0; disp < num_screens; disp++) {
 		g_disp_drv.mgr[disp] = disp_get_layer_manager(disp);
+		spin_lock_init(&g_disp_drv.disp_vsync.slock[disp]);
+#ifdef VSYNC_USE_UEVENT
+		char task_name[25];
+		sprintf(task_name, "vsync proc %d", disp);
+		g_disp_drv.disp_vsync.vsync_task[disp] =
+		    kthread_create(vsync_thread, (void *)(unsigned long)disp, task_name);
+		if (IS_ERR(g_disp_drv.disp_vsync.vsync_task[disp])) {
+			s32 err = 0;
+
+			__wrn("Unable to start kernel thread %s.\n",
+			      "hdmi proc");
+			err = PTR_ERR(g_disp_drv.disp_vsync.vsync_task[disp]);
+			g_disp_drv.disp_vsync.vsync_task[disp] = NULL;
+		} else {
+			wake_up_process(g_disp_drv.disp_vsync.vsync_task[disp]);
+		}
+#endif
+	}
+	init_waitqueue_head(&g_disp_drv.disp_vsync.vsync_waitq);
+
 #if defined(SUPPORT_EINK)
 	g_disp_drv.eink_manager[0] = disp_get_eink_manager(0);
 #endif
 	lcd_init();
 	bsp_disp_open();
 
+
+#if !IS_ENABLED(CONFIG_EINK200_SUNXI)
 	fb_init(pdev);
+#endif
 #if defined(CONFIG_DISP2_SUNXI_COMPOSER)
 	composer_init(&g_disp_drv);
 #endif
@@ -2262,6 +2530,17 @@ static s32 disp_init(struct platform_device *pdev)
 
 static s32 disp_exit(void)
 {
+	unsigned int i;
+	unsigned int num_screens;
+
+	num_screens = bsp_disp_feat_get_num_screens();
+	for (i = 0; i < num_screens; i++) {
+		if (g_disp_drv.disp_vsync.vsync_task[i] && !IS_ERR(g_disp_drv.disp_vsync.vsync_task[i])) {
+			kthread_stop(g_disp_drv.disp_vsync.vsync_task[i]);
+			g_disp_drv.disp_vsync.vsync_task[i] = NULL;
+		}
+	}
+
 	fb_exit();
 	bsp_disp_close();
 	bsp_disp_exit(g_disp_drv.exit_mode);
@@ -2271,7 +2550,7 @@ static s32 disp_exit(void)
 static int disp_mem_request(int sel, u32 size)
 {
 
-#if defined(CONFIG_SUNXI_IOMMU) && defined(CONFIG_ION_SUNXI)
+#if IS_ENABLED(CONFIG_ION)
 	if (sel >= DISP_MEM_NUM || !size) {
 		__wrn("invalid param\n");
 		return -EINVAL;
@@ -2288,7 +2567,7 @@ static int disp_mem_request(int sel, u32 size)
 #else
 
 #ifndef FB_RESERVED_MEM
-	unsigned map_size = 0;
+	unsigned int map_size = 0;
 	struct page *page;
 
 	if ((sel >= DISP_MEM_NUM) ||
@@ -2351,7 +2630,7 @@ static int disp_mem_request(int sel, u32 size)
 
 static int disp_mem_release(int sel)
 {
-#if defined (CONFIG_SUNXI_IOMMU) && defined(CONFIG_ION_SUNXI)
+#if IS_ENABLED(CONFIG_ION)
 	if (!g_disp_mm[sel].info_base) {
 		__wrn("invalid param\n");
 		return -EINVAL;
@@ -2361,8 +2640,8 @@ static int disp_mem_release(int sel)
 #else
 
 #ifndef FB_RESERVED_MEM
-	unsigned map_size;
-	unsigned page_size;
+	unsigned int map_size;
+	unsigned int page_size;
 
 	if (g_disp_mm[sel].info_base == NULL) {
 		__wrn("invalid param\n");
@@ -2431,6 +2710,7 @@ int disp_mmap(struct file *file, struct vm_area_struct *vma)
 	unsigned int off = vma->vm_pgoff << PAGE_SHIFT;
 
 	int mem_id = g_disp_mem_id;
+
 	if (mem_id >= DISP_MEM_NUM || mem_id < 0 ||
 	    !g_disp_mm[mem_id].info_base) {
 		__wrn("invalid param\n");
@@ -2438,21 +2718,17 @@ int disp_mmap(struct file *file, struct vm_area_struct *vma)
 	}
 
 	if (off < g_disp_mm[mem_id].mem_len) {
-/*#if defined(CONFIG_SUNXI_IOMMU)
-		if (g_disp_mm[mem_id].p_ion_mem) {
-			ion_set_dmabuf_flag(
-			    g_disp_mm[mem_id].p_ion_mem->p_item->buf, 0);
-
-			return g_disp_mm[mem_id]
-			    .p_ion_mem->p_item->buf->ops->mmap(
-				g_disp_mm[mem_id].p_ion_mem->p_item->buf, vma);
-		} else
+#if IS_ENABLED(CONFIG_SUNXI_IOMMU)
+		if (g_disp_mm[mem_id].p_ion_mem)
+			return g_disp_mm[mem_id].p_ion_mem->p_item->dmabuf->ops->mmap(g_disp_mm[mem_id].p_ion_mem->p_item->dmabuf, vma);
+		else
 			return -EINVAL;
-
-#endif */
+#else /* CONFIG_SUNXI_IOMMU */
 		return dma_mmap_writecombine(
 		    g_disp_drv.dev, vma, g_disp_mm[mem_id].info_base,
 		    g_disp_mm[mem_id].mem_start, g_disp_mm[mem_id].mem_len);
+
+#endif /* CONFIG_SUNXI_IOMMU */
 	}
 
 	return -EINVAL;
@@ -2460,11 +2736,49 @@ int disp_mmap(struct file *file, struct vm_area_struct *vma)
 
 int disp_open(struct inode *inode, struct file *file)
 {
+	atomic_inc(&g_driver_ref_count);
 	return 0;
+}
+
+void disp_device_off(void)
+{
+	int num_screens = 0, i = 0, j = 0;
+	struct disp_manager *mgr = NULL;
+
+	memset(lyr_cfg, 0, 16*sizeof(struct disp_layer_config));
+
+	for (i = 0; i < 4; ++i) {
+		for (j = 0; j < 4; ++j) {
+			lyr_cfg[i + j].enable = false;
+			lyr_cfg[i + j].channel = i;
+			lyr_cfg[i + j].layer_id = j;
+		}
+	}
+	num_screens = bsp_disp_feat_get_num_screens();
+	for (i = 0; i < num_screens; ++i) {
+		mgr = g_disp_drv.mgr[i];
+		if (mgr && mgr->device) {
+			if (mgr->device->disable && mgr->device->is_enabled) {
+				if (mgr->device->is_enabled(mgr->device)) {
+					mgr->set_layer_config(mgr, lyr_cfg, 16);
+					disp_delay_ms(20);
+					mgr->device->disable(mgr->device);
+				}
+			}
+		}
+	}
 }
 
 int disp_release(struct inode *inode, struct file *file)
 {
+	if (!atomic_dec_and_test(&g_driver_ref_count)) {
+		/* There is any other user, just return. */
+		return 0;
+	}
+
+#ifdef CONFIG_DISP2_SUNXI_DEVICE_OFF_ON_RELEASE
+	disp_device_off();
+#endif
 	return 0;
 }
 
@@ -2480,6 +2794,221 @@ ssize_t disp_write(struct file *file, const char __user *buf, size_t count,
 	return 0;
 }
 
+static int disp_clk_get_wrap(struct disp_drv_info *disp_drv)
+{
+	int i;
+	char id[32];
+	struct device *dev = disp_drv->dev;
+
+	/* get clocks for de */
+	for (i = 0; i < DE_NUM; i++) {
+		sprintf(id, "clk_de%d", i);
+		disp_drv->clk_de[i] = devm_clk_get(dev, id);
+		if (IS_ERR(disp_drv->clk_de[i])) {
+			disp_drv->clk_de[i] = NULL;
+			dev_err(dev, "failed to get clk for %s\n", id);
+			return -EINVAL;
+		}
+
+		sprintf(id, "clk_bus_de%d", i);
+		disp_drv->clk_bus_de[i] = devm_clk_get(dev, id);
+		if (IS_ERR(disp_drv->clk_bus_de[i])) {
+			disp_drv->clk_bus_de[i] = NULL;
+			dev_err(dev, "failed to get clk for %s\n", id);
+			return -EINVAL;
+		}
+	}
+
+	for (i = 0; i < DISP_DEVICE_NUM; i++) {
+#if defined(HAVE_DEVICE_COMMON_MODULE)
+		/* get clocks for dpss */
+		sprintf(id, "clk_bus_dpss_top%d", i);
+		disp_drv->clk_bus_dpss_top[i] = devm_clk_get(dev, id);
+		if (IS_ERR(disp_drv->clk_bus_dpss_top[i])) {
+			disp_drv->clk_bus_dpss_top[i] = NULL;
+			dev_err(dev, "failed to get clk for %s\n", id);
+		}
+
+#endif
+		/* get clocks for tcon */
+		sprintf(id, "clk_tcon%d", i);
+		disp_drv->clk_tcon[i] = devm_clk_get(dev, id);
+		if (IS_ERR(disp_drv->clk_tcon[i])) {
+			disp_drv->clk_tcon[i] = NULL;
+			dev_err(dev, "failed to get clk for %s\n", id);
+		}
+
+		sprintf(id, "clk_bus_tcon%d", i);
+		disp_drv->clk_bus_tcon[i] = devm_clk_get(dev, id);
+		if (IS_ERR(disp_drv->clk_bus_tcon[i])) {
+			disp_drv->clk_bus_tcon[i] = NULL;
+			dev_err(dev, "failed to get clk for %s\n", id);
+		}
+	}
+
+#if defined(SUPPORT_DSI)
+	for (i = 0; i < CLK_DSI_NUM; i++) {
+		sprintf(id, "clk_mipi_dsi%d", i);
+		disp_drv->clk_mipi_dsi[i] = devm_clk_get(dev, id);
+		if (IS_ERR(disp_drv->clk_mipi_dsi[i])) {
+			disp_drv->clk_mipi_dsi[i] = NULL;
+			dev_err(dev, "failed to get clk for %s\n", id);
+			return -EINVAL;
+		}
+
+		sprintf(id, "clk_bus_mipi_dsi%d", i);
+		disp_drv->clk_bus_mipi_dsi[i] = devm_clk_get(dev, id);
+		if (IS_ERR(disp_drv->clk_bus_mipi_dsi[i])) {
+			disp_drv->clk_bus_mipi_dsi[i] = NULL;
+			dev_err(dev, "failed to get clk for %s\n", id);
+			return -EINVAL;
+		}
+	}
+#endif
+
+#if defined(CONFIG_ARCH_SUN50IW10)
+		disp_drv->clk_bus_extra = devm_clk_get(dev, "clk_pll_com");
+		if (IS_ERR(disp_drv->clk_bus_extra)) {
+			disp_drv->clk_bus_extra = NULL;
+			dev_err(dev, "failed to get clk for display top!\n");
+			return -EINVAL;
+		}
+#endif
+	return 0;
+}
+
+static void disp_clk_put_wrap(struct disp_drv_info *disp_drv)
+{
+	int i;
+	struct device *dev = disp_drv->dev;
+
+	/* put clocks for de */
+	for (i = 0; i < DE_NUM; i++) {
+		devm_clk_put(dev, disp_drv->clk_de[i]);
+		devm_clk_put(dev, disp_drv->clk_bus_de[i]);
+	}
+
+#if defined(HAVE_DEVICE_COMMON_MODULE)
+	devm_clk_put(dev, disp_drv->clk_bus_extra);
+#endif
+
+	for (i = 0; i < DISP_DEVICE_NUM; i++) {
+		/* put clocks for dpss */
+		devm_clk_put(dev, disp_drv->clk_bus_dpss_top[i]);
+
+		/* put clocks for tcon */
+		devm_clk_put(dev, disp_drv->clk_tcon[i]);
+		devm_clk_put(dev, disp_drv->clk_bus_tcon[i]);
+	}
+
+#if defined(SUPPORT_DSI)
+	/* put clocks for dsi */
+	for (i = 0; i < CLK_DSI_NUM; i++) {
+		devm_clk_put(dev, disp_drv->clk_mipi_dsi[i]);
+		devm_clk_put(dev, disp_drv->clk_bus_mipi_dsi[i]);
+	}
+#endif
+}
+
+static int disp_reset_control_get_wrap(struct disp_drv_info *disp_drv)
+{
+	int i;
+	char id[32];
+	struct device *dev = disp_drv->dev;
+	for (i = 0; i < DE_NUM; i++) {
+		/* get resets for de */
+		sprintf(id, "rst_bus_de%d", i);
+		disp_drv->rst_bus_de[i] = devm_reset_control_get_shared(dev, id);
+		if (IS_ERR(disp_drv->rst_bus_de[i])) {
+			disp_drv->rst_bus_de[i] = NULL;
+			dev_err(dev, "failed to get reset for %s\n", id);
+			return -EINVAL;
+		}
+
+	}
+
+#if 0
+	disp_drv->rst_bus_extra = devm_reset_control_get(dev, "rst_display_top");
+	if (IS_ERR(disp_drv->rst_bus_extra)) {
+		disp_drv->rst_bus_extra = NULL;
+		__wrn("failed to get reset for display top\n");
+	}
+#endif
+	for (i = 0; i < DISP_DEVICE_NUM; i++) {
+		/* get resets for dpss */
+#if defined(HAVE_DEVICE_COMMON_MODULE)
+		sprintf(id, "rst_bus_dpss_top%d", i);
+		disp_drv->rst_bus_dpss_top[i] = devm_reset_control_get_shared(dev, id);
+		if (IS_ERR(disp_drv->rst_bus_dpss_top[i])) {
+			disp_drv->rst_bus_dpss_top[i] = NULL;
+			dev_err(dev, "failed to get reset for %s\n", id);
+			return -EINVAL;
+		}
+#endif
+
+		/* get resets for tcon */
+		sprintf(id, "rst_bus_tcon%d", i);
+		disp_drv->rst_bus_tcon[i] = devm_reset_control_get_shared(dev, id);
+		if (IS_ERR(disp_drv->rst_bus_tcon[i])) {
+			disp_drv->rst_bus_tcon[i] = NULL;
+			dev_err(dev, "failed to get reset for %s\n", id);
+			return -EINVAL;
+		}
+	}
+#if defined(SUPPORT_DSI)
+	for (i = 0; i < DEVICE_DSI_NUM; i++) {
+		sprintf(id, "rst_bus_mipi_dsi%d", i);
+		disp_drv->rst_bus_mipi_dsi[i] = devm_reset_control_get(dev, id);
+		if (IS_ERR(disp_drv->rst_bus_mipi_dsi[i])) {
+			disp_drv->rst_bus_mipi_dsi[i] = NULL;
+			dev_err(dev, "failed to get reset for %s\n", id);
+			return -EINVAL;
+		}
+	}
+#endif
+
+#if defined(SUPPORT_LVDS)
+	/* get resets for lvds */
+	for (i = 0; i < DEVICE_LVDS_NUM; i++) {
+		sprintf(id, "rst_bus_lvds%d", i);
+		disp_drv->rst_bus_lvds[i] =
+			devm_reset_control_get_shared(dev, id);
+		if (IS_ERR(disp_drv->rst_bus_lvds[i])) {
+			disp_drv->rst_bus_lvds[i] = NULL;
+			dev_err(dev, "failed to get reset for %s\n", id);
+			return -EINVAL;
+		}
+	}
+#endif
+	return 0;
+}
+
+static void disp_reset_control_put_wrap(struct disp_drv_info *disp_drv)
+{
+	int i;
+
+	/* put resets for de */
+	for (i = 0; i < DE_NUM; i++)
+		reset_control_put(disp_drv->rst_bus_de[i]);
+
+	for (i = 0; i < DISP_DEVICE_NUM; i++) {
+#if defined(HAVE_DEVICE_COMMON_MODULE)
+		/* put resets for dpss */
+		reset_control_put(disp_drv->rst_bus_dpss_top[i]);
+#endif
+
+		/* put resets for tcon */
+		reset_control_put(disp_drv->rst_bus_tcon[i]);
+	}
+
+#if defined(SUPPORT_LVDS)
+	for (i = 0; i < DEVICE_LVDS_NUM; i++) {
+		/* put resets for lvds */
+		reset_control_put(disp_drv->rst_bus_lvds[i]);
+	}
+#endif
+}
+
 static u64 disp_dmamask = DMA_BIT_MASK(32);
 static int disp_probe(struct platform_device *pdev)
 {
@@ -2487,8 +3016,19 @@ static int disp_probe(struct platform_device *pdev)
 	int ret;
 	int counter = 0;
 
+	if (g_disp_drv.inited) {
+		pr_warn("disp has probed!\n");
+		return 0;
+	}
 	__inf("[DISP]disp_probe\n");
 	memset(&g_disp_drv, 0, sizeof(struct disp_drv_info));
+
+#if defined(CONFIG_ARCH_SUN8IW12P1) || defined(CONFIG_ARCH_SUN8IW16P1)\
+    || defined(CONFIG_ARCH_SUN8IW19P1)
+	/*set ve to normal mode*/
+	writel((readl(ioremap(0x03000004, 4)) & 0xfeffffff),
+	       ioremap(0x03000004, 4));
+#endif
 
 	g_disp_drv.dev = &pdev->dev;
 	pdev->dev.dma_mask = &disp_dmamask;
@@ -2505,7 +3045,7 @@ static int disp_probe(struct platform_device *pdev)
 	}
 	counter++;
 
-#if defined(CONFIG_ARCH_SUN50IW10)
+#if defined(CONFIG_INDEPENDENT_DE)
 	g_disp_drv.reg_base[DISP_MOD_DE1] =
 	    (uintptr_t __force) of_iomap(pdev->dev.of_node, counter);
 	if (!g_disp_drv.reg_base[DISP_MOD_DE1]) {
@@ -2515,6 +3055,7 @@ static int disp_probe(struct platform_device *pdev)
 	}
 	counter++;
 #endif
+
 #if defined(HAVE_DEVICE_COMMON_MODULE)
 	g_disp_drv.reg_base[DISP_MOD_DEVICE] =
 	    (uintptr_t __force) of_iomap(pdev->dev.of_node, counter);
@@ -2525,7 +3066,7 @@ static int disp_probe(struct platform_device *pdev)
 		goto err_iomap;
 	}
 	counter++;
-#if defined(CONFIG_ARCH_SUN50IW10)
+#if defined(CONFIG_INDEPENDENT_DE)
 	g_disp_drv.reg_base[DISP_MOD_DEVICE1] =
 	    (uintptr_t __force) of_iomap(pdev->dev.of_node, counter);
 	if (!g_disp_drv.reg_base[DISP_MOD_DEVICE1]) {
@@ -2629,79 +3170,15 @@ static int disp_probe(struct platform_device *pdev)
 	counter++;
 #endif
 
-	/* get clk */
-	/* de - [device(tcon-top)] - lcd0/1/2.. - lvds - dsi */
-	counter = 0;
-	g_disp_drv.mclk[DISP_MOD_DE] = of_clk_get(pdev->dev.of_node, counter);
-	if (IS_ERR(g_disp_drv.mclk[DISP_MOD_DE]))
-		dev_err(&pdev->dev, "fail to get clk for de\n");
-	counter++;
+	ret = disp_clk_get_wrap(&g_disp_drv);
+	if (ret)
+		goto out_dispose_mapping;
 
-#if defined(CONFIG_ARCH_SUN50IW10)
-	g_disp_drv.mclk[DISP_MOD_DE1] = of_clk_get(pdev->dev.of_node, counter);
-	if (IS_ERR(g_disp_drv.mclk[DISP_MOD_DE1]))
-		dev_err(&pdev->dev, "fail to get clk for de1\n");
-	counter++;
-#endif
-#if defined(HAVE_DEVICE_COMMON_MODULE)
-	g_disp_drv.mclk[DISP_MOD_DEVICE] =
-	    of_clk_get(pdev->dev.of_node, counter);
-	if (IS_ERR(g_disp_drv.mclk[DISP_MOD_DEVICE]))
-		dev_err(&pdev->dev,
-			"fail to get clk for device common module\n");
-	counter++;
-#endif
-#if defined(CONFIG_ARCH_SUN50IW10)
-	for (i = 0; i < DISP_DEVICE_NUM; i++) {
-		g_disp_drv.mclk[DISP_MOD_DPSS0 + i] =
-			of_clk_get(pdev->dev.of_node, counter);
-		if (IS_ERR(g_disp_drv.mclk[DISP_MOD_DPSS0 + i]))
-			dev_err(&pdev->dev,
-					"fail to get clk for DPSS%d\n", i);
-		counter++;
-	}
-#endif
+	ret = disp_reset_control_get_wrap(&g_disp_drv);
+	if (ret)
+		goto out_dispose_mapping;
 
-	for (i = 0; i < DISP_DEVICE_NUM; i++) {
-		g_disp_drv.mclk[DISP_MOD_LCD0 + i] =
-		    of_clk_get(pdev->dev.of_node, counter);
-		if (IS_ERR(g_disp_drv.mclk[DISP_MOD_LCD0 + i]))
-			dev_err(&pdev->dev,
-				"fail to get clk for timing controller%d\n", i);
-		counter++;
-	}
-
-#if defined(SUPPORT_LVDS)
-	g_disp_drv.mclk[DISP_MOD_LVDS] = of_clk_get(pdev->dev.of_node, counter);
-	if (IS_ERR(g_disp_drv.mclk[DISP_MOD_LVDS]))
-		dev_err(&pdev->dev, "fail to get clk for lvds\n");
-	counter++;
-#endif
-
-#if defined(SUPPORT_DSI)
-	for (i = 0; i < CLK_DSI_NUM; ++i) {
-		g_disp_drv.mclk[DISP_MOD_DSI0 + i] = of_clk_get(
-				       pdev->dev.of_node, counter);
-		if (IS_ERR(g_disp_drv.mclk[DISP_MOD_DSI0 + i]))
-			dev_err(&pdev->dev, "fail to get clk %d for dsi\n", i);
-		counter++;
-	}
-
-#endif
-
-#if defined(SUPPORT_EINK)
-	g_disp_drv.mclk[DISP_MOD_EINK] = of_clk_get(pdev->dev.of_node, counter);
-	if (IS_ERR(g_disp_drv.mclk[DISP_MOD_EINK]))
-		dev_err(&pdev->dev, "fail to get clk for eink\n");
-	counter++;
-
-	g_disp_drv.mclk[DISP_MOD_EDMA] = of_clk_get(pdev->dev.of_node, counter);
-	if (IS_ERR(g_disp_drv.mclk[DISP_MOD_EDMA]))
-		dev_err(&pdev->dev, "fail to get clk for edma\n");
-	counter++;
-#endif
-
-#if defined(CONFIG_ION_SUNXI)
+#if defined(CONFIG_ION)
 	init_disp_ion_mgr(&g_disp_drv.ion_mgr);
 #endif
 
@@ -2720,10 +3197,15 @@ static int disp_probe(struct platform_device *pdev)
 #endif
 	device_enable_async_suspend(&pdev->dev);
 
+	atomic_set(&g_driver_ref_count, 0);
+
 	__inf("[DISP]disp_probe finish\n");
 
 	return ret;
 
+out_dispose_mapping:
+	for (i = 0; i < DISP_DEVICE_NUM; i++)
+		irq_dispose_mapping(g_disp_drv.irq_no[i]);
 err_iomap:
 	for (i = 0; i < DISP_DEVICE_NUM; i++) {
 		if (g_disp_drv.reg_base[i])
@@ -2746,18 +3228,23 @@ static int disp_remove(struct platform_device *pdev)
 	pm_runtime_disable(&pdev->dev);
 #endif
 	disp_exit();
-#if defined(CONFIG_ION_SUNXI)
+
+#if defined(CONFIG_ION)
 	deinit_disp_ion_mgr(&g_disp_drv.ion_mgr);
 #endif
+
 	sysfs_remove_group(&display_dev->kobj, &disp_attribute_group);
+
+	disp_clk_put_wrap(&g_disp_drv);
+
+	disp_reset_control_put_wrap(&g_disp_drv);
+
 	for (i = 0; i < DISP_MOD_NUM; i++) {
-		if (g_disp_drv.mclk[i] && !IS_ERR(g_disp_drv.mclk[i]))
-			clk_put(g_disp_drv.mclk[i]);
-	}
-	for (i = 0; i < DISP_MOD_NUM; i++) {
+		irq_dispose_mapping(g_disp_drv.irq_no[i]);
 		if (g_disp_drv.reg_base[i])
 			iounmap((char __iomem *)g_disp_drv.reg_base[i]);
 	}
+
 	platform_set_drvdata(pdev, NULL);
 
 	return 0;
@@ -2976,7 +3463,6 @@ int disp_suspend(struct device *dev)
 				mgr = g_disp_drv.mgr[screen_id];
 				if (!mgr || !mgr->device)
 					continue;
-
 				dispdev = mgr->device;
 				if (suspend_output_type[screen_id] ==
 				    DISP_OUTPUT_TYPE_LCD)
@@ -2994,7 +3480,6 @@ int disp_suspend(struct device *dev)
 				mgr = g_disp_drv.mgr[screen_id];
 				if (!mgr || !mgr->device)
 					continue;
-
 				dispdev = mgr->device;
 				if (suspend_output_type[screen_id] !=
 				    DISP_OUTPUT_TYPE_NONE) {
@@ -3145,6 +3630,27 @@ static const struct dev_pm_ops disp_runtime_pm_ops = {
 	.resume = disp_resume,
 };
 
+bool disp_is_enable(void)
+
+{
+	bool ret = false;
+	u32 screen_id = 0;
+	int num_screens;
+
+	num_screens = bsp_disp_feat_get_num_screens();
+
+	for (screen_id = 0; screen_id < num_screens; screen_id++) {
+		struct disp_manager *mgr = g_disp_drv.mgr[screen_id];
+
+		if (mgr && mgr->device && mgr->device->is_enabled &&
+		    mgr->device->disable)
+			if (mgr->device->is_enabled(mgr->device))
+				ret = true;
+	}
+	return ret;
+}
+EXPORT_SYMBOL(disp_is_enable);
+
 static void disp_shutdown(struct platform_device *pdev)
 {
 	u32 screen_id = 0;
@@ -3156,13 +3662,12 @@ static void disp_shutdown(struct platform_device *pdev)
 		struct disp_manager *mgr = g_disp_drv.mgr[screen_id];
 
 		if (mgr && mgr->device && mgr->device->is_enabled
-		    && mgr->device->disable)
+		    && mgr->device->disable) {
 			if (mgr->device->is_enabled(mgr->device))
 				mgr->device->disable(mgr->device);
+			mgr->enable_iommu(mgr, false);
+		}
 	}
-#if defined(CONFIG_SUNXI_IOMMU)
-	sunxi_enable_device_iommu(DE_MASTOR_ID, false);
-#endif
 }
 
 #ifdef EINK_FLUSH_TIME_TEST
@@ -3200,7 +3705,7 @@ long disp_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 	ubuffer[2] = (*(unsigned long *)(karg + 2));
 	ubuffer[3] = (*(unsigned long *)(karg + 3));
 
-	if (ubuffer[0] < num_screens)
+	if (ubuffer[0] < num_screens && cmd != DISP_GET_VSYNC_TIMESTAMP)
 		mgr = g_disp_drv.mgr[ubuffer[0]];
 	if (mgr) {
 		dispdev = mgr->device;
@@ -3216,7 +3721,7 @@ long disp_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 
 #endif
 
-	if (cmd < DISP_FB_REQUEST) {
+	if (cmd < DISP_FB_REQUEST && cmd != DISP_GET_VSYNC_TIMESTAMP) {
 		if (ubuffer[0] >= num_screens) {
 			__wrn
 			    ("para err, cmd = 0x%x,screen id = %d\n",
@@ -3250,10 +3755,14 @@ long disp_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 
 	case DISP_GET_OUTPUT_TYPE:
 		{
+#if IS_ENABLED(CONFIG_EINK200_SUNXI)
+			ret = DISP_OUTPUT_TYPE_LCD;
+#else
 			if (suspend_status != DISPLAY_NORMAL)
 				ret = suspend_output_type[ubuffer[0]];
 			else
 				ret = bsp_disp_get_output_type(ubuffer[0]);
+#endif
 
 			break;
 		}
@@ -3284,6 +3793,23 @@ long disp_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		{
 			ret =
 			    bsp_disp_vsync_event_enable(ubuffer[0], ubuffer[1]);
+			break;
+		}
+
+	case DISP_GET_VSYNC_TIMESTAMP:
+		{
+			struct disp_vsync_timestame ts;
+			for (ts.disp = 0; ts.disp < DISP_SCREEN_NUM; ts.disp++) {
+				ret = bsp_disp_get_vsync_timestamp(ts.disp, &ts.timestamp);
+				if (ret == 0) {
+					if (copy_to_user((void __user *)ubuffer[0], &ts,
+						  sizeof(struct disp_vsync_timestame))) {
+						__wrn("copy_to_user fail\n");
+						ret = -EFAULT;
+					}
+					break;
+				}
+			}
 			break;
 		}
 
@@ -3530,8 +4056,11 @@ long disp_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		unsigned int i = 0;
 		const unsigned int lyr_cfg_size = ARRAY_SIZE(lyr_cfg);
 
+		mutex_lock(&g_disp_drv.mlock);
+
 		if (ubuffer[2] > lyr_cfg_size) {
 			__wrn("Total layer number is %d\n", lyr_cfg_size);
+			mutex_unlock(&g_disp_drv.mlock);
 			return -EFAULT;
 		}
 
@@ -3539,6 +4068,7 @@ long disp_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 			(void __user *)ubuffer[1],
 			sizeof(struct disp_layer_config) * ubuffer[2]))	{
 			__wrn("copy_from_user fail\n");
+			mutex_unlock(&g_disp_drv.mlock);
 
 			return  -EFAULT;
 		}
@@ -3554,6 +4084,7 @@ long disp_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		if (mgr && mgr->set_layer_config)
 			ret = mgr->set_layer_config(mgr, lyr_cfg, ubuffer[2]);
 #endif
+		mutex_unlock(&g_disp_drv.mlock);
 		break;
 	}
 
@@ -3678,6 +4209,33 @@ long disp_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		}
 		break;
 	}
+
+	/* ----channels---- */
+	case DISP_CHN_SET_PALETTE:
+	{
+		struct disp_palette_config palette;
+		if (copy_from_user(&palette,
+		    (void __user *)ubuffer[1],
+		    sizeof(struct disp_palette_config))) {
+			 __wrn("copy_from_user fail\n");
+			return  -EFAULT;
+		}
+		if (palette.num <= 0 || palette.num > 256) {
+			__wrn("palette param err with num:%d\n", palette.num);
+			return -EFAULT;
+		}
+		if (copy_from_user(palette_data, (void __user *)palette.data, palette.num * 4)) {
+			__wrn("copy palette data from user fail\n");
+			return -EFAULT;
+		}
+		palette.data = palette_data;
+		if (mgr && mgr->set_palette)
+			ret = mgr->set_palette(mgr, &palette);
+
+		break;
+	}
+
+
 		/* ---- lcd --- */
 	case DISP_LCD_SET_BRIGHTNESS:
 		{
@@ -3694,7 +4252,7 @@ long disp_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		}
 	case DISP_TV_SET_GAMMA_TABLE:
 	{
-		if (dispdev && (DISP_OUTPUT_TYPE_TV == dispdev->type)) {
+		if (dispdev && (dispdev->type == DISP_OUTPUT_TYPE_TV)) {
 			u32 *gamma_tbl = kmalloc(LCD_GAMMA_TABLE_SIZE,
 						 GFP_KERNEL | __GFP_ZERO);
 			u32 size = ubuffer[2];
@@ -3767,9 +4325,37 @@ long disp_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		}
 		break;
 	}
+	case DISP_LCD_GET_GAMMA_TABLE:
+	{
+		if (dispdev && (dispdev->type == DISP_OUTPUT_TYPE_LCD)) {
+			u32 *gamma_tbl = kmalloc(LCD_GAMMA_TABLE_SIZE,
+						 GFP_KERNEL | __GFP_ZERO);
+			u32 size = ubuffer[2];
 
+			if (gamma_tbl == NULL) {
+				__wrn("kmalloc fail\n");
+				ret = -EFAULT;
+				break;
+			}
 
-		/* ---- hdmi --- */
+			size = (size > LCD_GAMMA_TABLE_SIZE) ?
+			    LCD_GAMMA_TABLE_SIZE : size;
+
+			if(dispdev->get_gamma_tbl) {
+				ret = dispdev->get_gamma_tbl(dispdev, gamma_tbl, size);
+				if (copy_to_user((void __user *)ubuffer[1], gamma_tbl, 
+									  size)) {
+					__wrn("copy_from_user fail\n");
+					kfree(gamma_tbl);
+					ret = -EFAULT;
+					break;
+				}
+			}
+			kfree(gamma_tbl);
+		}
+	}
+	break;
+	/* ---- hdmi --- */
 	case DISP_HDMI_SUPPORT_MODE:
 		{
 			ret =
@@ -3933,6 +4519,59 @@ long disp_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		}
 #endif /*endif SUPPORT_VDPO*/
 
+#if defined(CONFIG_SUNXI_DISP2_FB_ROTATION_SUPPORT)
+	case DISP_ROTATION_SW_SET_ROT:
+		{
+			int num_screens = bsp_disp_feat_get_num_screens();
+			u32 degree, chn, lyr_id;
+
+			mutex_lock(&g_disp_drv.mlock);
+			if (mgr == NULL) {
+				printk("mgr is null\n");
+			}
+			if (mgr->rot_sw == NULL) {
+				printk("mgr->rot_sw is null\n");
+			}
+			if (!mgr || !mgr->rot_sw || num_screens <= ubuffer[0]) {
+				ret = -1;
+				mutex_unlock(&g_disp_drv.mlock);
+				break;
+			}
+			degree = ubuffer[3];
+			switch (degree) {
+			case ROTATION_SW_0:
+			case ROTATION_SW_90:
+			case ROTATION_SW_180:
+			case ROTATION_SW_270:
+				chn = ubuffer[1];
+				lyr_id = ubuffer[2];
+				ret = mgr->rot_sw->set_layer_degree(mgr->rot_sw, chn, lyr_id, degree);
+				break;
+			default:
+				ret = -1;
+			}
+			mutex_unlock(&g_disp_drv.mlock);
+			break;
+		}
+
+	case DISP_ROTATION_SW_GET_ROT:
+		{
+			int num_screens = bsp_disp_feat_get_num_screens();
+			u32 chn, lyr_id;
+
+			mutex_lock(&g_disp_drv.mlock);
+			if (mgr && mgr->rot_sw && num_screens > ubuffer[0]) {
+				chn = ubuffer[1];
+				lyr_id = ubuffer[2];
+				ret = mgr->rot_sw->get_layer_degree(mgr->rot_sw, chn, lyr_id);
+			} else {
+				ret = -1;
+			}
+			mutex_unlock(&g_disp_drv.mlock);
+			break;
+		}
+#endif
+
 	case DISP_LCD_CHECK_OPEN_FINISH:
 		{
 			if (mgr && mgr->device) {
@@ -3967,7 +4606,7 @@ long disp_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 				return 0;
 			}
 			return -1;
-			break;
+		break;
 		}
 	case DISP_SET_KSC_PARA:
 		{
@@ -3985,6 +4624,11 @@ long disp_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 			break;
 		}
 
+	case DISP_PQ_PROC:
+		{
+			ret = disp_ioctl_extend(cmd, (unsigned long)ubuffer);
+			break;
+		}
 
 	default:
 		ret = disp_ioctl_extend(cmd, (unsigned long)ubuffer);
@@ -4008,7 +4652,11 @@ static long disp_compat_ioctl(struct file *file, unsigned int cmd,
 	}
 
 	ubuffer = compat_alloc_user_space(4 * sizeof(unsigned long));
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 0, 0)
 	if (!access_ok(VERIFY_WRITE, ubuffer, 4 * sizeof(unsigned long)))
+#else
+	if (!access_ok(ubuffer, 4 * sizeof(unsigned long)))
+#endif
 		return -EFAULT;
 
 	if (put_user(karg[0], &ubuffer[0]) ||
@@ -4027,6 +4675,11 @@ static long disp_compat_ioctl(struct file *file, unsigned int cmd,
 }
 #endif
 
+static unsigned int disp_vsync_poll(struct file *file, poll_table *wait)
+{
+	return vsync_poll(file, wait);
+}
+
 static const struct file_operations disp_fops = {
 	.owner          = THIS_MODULE,
 	.open           = disp_open,
@@ -4038,6 +4691,7 @@ static const struct file_operations disp_fops = {
 	.compat_ioctl   = disp_compat_ioctl,
 #endif
 	.mmap           = disp_mmap,
+	.poll		= disp_vsync_poll,
 };
 
 #ifndef CONFIG_OF
@@ -4049,7 +4703,7 @@ static struct platform_device disp_device = {
 	.dev = {
 		.power = {
 			  .async_suspend = 1,
-			  }
+			}
 		}
 };
 #else
@@ -4150,11 +4804,7 @@ static void __exit disp_module_exit(void)
 	cdev_del(my_cdev);
 }
 
-#ifdef CONFIG_ARCH_SUN50IW9P1
-subsys_initcall_sync(disp_module_init);
-#else
 module_init(disp_module_init);
-#endif
 module_exit(disp_module_exit);
 
 MODULE_AUTHOR("tan");

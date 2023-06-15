@@ -13,7 +13,8 @@
 
 #include "rawnand_base.h"
 #include "../../nfd/nand_osal_for_linux.h"
-#include "../nand_boot.h"
+/*#include "../nand_boot.h"*/
+#include "../nand-partition3/sunxi_nand_boot.h"
 #include "../nand_errno.h"
 #include "../nand_physic_interface.h"
 #include "../nand_secure_storage.h"
@@ -29,6 +30,9 @@
 #include <linux/time.h>
 
 extern void nand_common1_show_version(void);
+extern int nand_enable_voltage(struct sunxi_ndfc *ndfc);
+extern int nand_disable_voltage(struct sunxi_ndfc *ndfc);
+
 
 void *g_nreg_base;
 struct _nand_temp_buf ntf = {0};
@@ -276,6 +280,7 @@ __u32 rawnand_get_phy_block_size(void)
 	nci = g_nctri->nci;
 	return nci->page_cnt_per_blk * (nci->sector_cnt_per_page << 9);
 }
+
 
 __u32 rawnand_used_lsb_pages(void)
 {
@@ -1571,7 +1576,7 @@ int rawnand_hw_super_standby(void)
 		nctri = nctri->next;
 	}
 
-	nand_release_voltage(&aw_ndfc);
+	nand_disable_voltage(&aw_ndfc);
 
 	return 0;
 }
@@ -1588,7 +1593,7 @@ int rawnand_hw_super_resume(void)
 	struct nand_chip_info *nci;
 
 	RAWNAND_DBG("RawNandHwSuperResume start\n");
-	nand_get_voltage(&aw_ndfc);
+	nand_enable_voltage(&aw_ndfc);
 	nctri = g_nctri;
 	while (nctri != NULL) {
 		nand_pio_request(&aw_ndfc, nctri->channel_id);

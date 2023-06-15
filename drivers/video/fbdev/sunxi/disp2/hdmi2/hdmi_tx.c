@@ -16,14 +16,15 @@
 #include <linux/vmalloc.h>
 #include <linux/mm.h>
 #include <linux/dma-mapping.h>
-//#include <linux/power/scenelock.h>
+#include <linux/reset.h>
 #if defined(CONFIG_EXTCON)
 #include <linux/extcon.h>
+#include <linux/extcon-provider.h>
+#include "../../../../../extcon/extcon.h"
 #endif
 
 #include "hdmi_tx.h"
 #include "hdmi_core/core_hdcp.h"
-/*#include "hdmi_test.h"*/
 
 #define DDC_PIN_ACTIVE "ddc_active"
 #define DDC_PIN_SLEEP "ddc_sleep"
@@ -55,6 +56,7 @@ static u32 re_read_edid_delay_count;
 u32 hdmi_clk_enable_mask;
 static u32 hdmi_pin_config_mask;
 u32 hdmi_enable_mask;
+u32 disp_suspend_mask;
 u32 hdmi_suspend_mask;
 /*static struct scene_lock hdmi_standby_lock;*/
 
@@ -103,6 +105,18 @@ unsigned char hdmi_get_ddc_analog(void)
 #endif
 }
 
+#ifdef CCMU_PLL_VIDEO2_BIAS
+static void ccmu_set_pll_video2_bias(unsigned int val)
+{
+	void __iomem *ccmu_base;
+
+	ccmu_base = ioremap(CCMU_PLL_VIDEO2_BIAS_ADDR, 4);
+	writel(val << 16, ccmu_base);
+
+	iounmap(ccmu_base);
+}
+#endif
+
 struct hdmi_tx_drv *get_hdmi_drv(void)
 {
 	return hdmi_drv;
@@ -118,12 +132,6 @@ u32 get_drv_hpd_state(void)
 #endif
 }
 
-/**
- * @short List of the devices
- * Linked list that contains the installed devices
- */
-static LIST_HEAD(devlist_global);
-
 static void hdmi_msleep(unsigned int ms)
 {
 	set_current_state(TASK_INTERRUPTIBLE);
@@ -131,96 +139,147 @@ static void hdmi_msleep(unsigned int ms)
 }
 
 #if defined(CONFIG_AW_AXP) || defined(CONFIG_REGULATOR)
-int hdmi_power_enable(char *name)
+int hdmi_power_enable(struct hdmi_power *power)
 {
 	struct regulator *regu = NULL;
 	int ret = -1;
 
+	regu = power->regu;
+	if (!regu) {
 #ifdef CONFIG_SUNXI_REGULATOR_DT
-	regu = regulator_get(&hdmi_drv->pdev->dev, name);
+		regu = regulator_get(&hdmi_drv->pdev->dev, power->name);
 #else
-	regu = regulator_get(NULL, name);
+		regu = regulator_get(NULL, power->name);
 #endif
-	if (IS_ERR(regu)) {
-		pr_err("%s: some error happen, fail to get regulator %s\n", __func__, name);
-		goto exit;
+		if (IS_ERR(regu)) {
+			pr_err("%s: some error happen, fail to get regulator %s\n",
+					__func__, power->name);
+			goto exit;
+		}
+
+		power->regu = regu;
 	}
 
 	/* enalbe regulator */
 	ret = regulator_enable(regu);
 	if (ret != 0) {
-		pr_err("%s: some error happen, fail to enable regulator %s!\n", __func__, name);
-		goto exit1;
+		pr_err("%s: some error happen, fail to enable regulator %s!\n",
+							__func__, power->name);
 	} else {
-		VIDEO_INF("suceess to enable regulator %s!\n", name);
+		VIDEO_INF("suceess to enable regulator %s!\n", power->name);
 	}
 
-exit1:
-	/* put regulater, when module exit */
-	regulator_put(regu);
 exit:
 	return ret;
 }
 
-int hdmi_power_disable(char *name)
+int hdmi_power_disable(struct hdmi_power *power)
 {
 	struct regulator *regu = NULL;
 	int ret = 0;
 
+	regu = power->regu;
+	if (!regu) {
 #ifdef CONFIG_SUNXI_REGULATOR_DT
-	regu = regulator_get(&hdmi_drv->pdev->dev, name);
+		regu = regulator_get(&hdmi_drv->pdev->dev, power->name);
 #else
-	regu = regulator_get(NULL, name);
+		regu = regulator_get(NULL, power->name);
 #endif
-	if (IS_ERR(regu)) {
-		pr_err("%s: some error happen, fail to get regulator %s\n", __func__, name);
-		goto exit;
+		if (IS_ERR(regu)) {
+			pr_err("%s: some error happen, fail to get regulator %s\n",
+							__func__, power->name);
+			goto exit;
+		}
+
+		power->regu = regu;
 	}
+
+	if (!regu)
+		return 0;
 
 	/*disalbe regulator*/
 	ret = regulator_disable(regu);
 	if (ret != 0) {
-		pr_err("%s: some error happen, fail to disable regulator %s!\n", __func__, name);
+		pr_err("%s: some error happen, fail to disable regulator %s!\n",
+						__func__, power->name);
 		goto exit1;
 	} else {
-		VIDEO_INF("suceess to disable regulator %s!\n", name);
+		VIDEO_INF("suceess to disable regulator %s!\n", power->name);
 	}
 
 exit1:
 	/*put regulater, when module exit*/
 	regulator_put(regu);
+	power->regu = NULL;
 exit:
 	return ret;
 }
 #else
-int hdmi_power_enable(char *name) {return 0; }
-int hdmi_power_disable(char *name) {return 0; }
+int hdmi_power_enable(struct hdmi_power *power) {return 0; }
+int hdmi_power_disable(struct hdmi_power *power) {return 0; }
 #endif
 
 static void hdmi_clk_enable(void)
 {
-	struct clk *clk_parent = NULL;
+	int ret = 0;
 
 	if (hdmi_clk_enable_mask)
 		return;
 
+	if (hdmi_drv->rst_bus_sub) {
+		ret = reset_control_deassert(hdmi_drv->rst_bus_sub);
+		if (ret) {
+			pr_err("[%s] deassert bus sub failed!\n", __func__);
+			return;
+		}
+	}
+
+	if (hdmi_drv->rst_bus_main) {
+		ret = reset_control_deassert(hdmi_drv->rst_bus_main);
+		if (ret) {
+			pr_err("[%s] deassert bus main failed!\n", __func__);
+			return;
+		}
+	}
+
+#if IS_ENABLED(CONFIG_HDMI2_HDCP22_SUNXI)
+	if (hdmi_drv->rst_bus_hdcp) {
+		ret = reset_control_deassert(hdmi_drv->rst_bus_hdcp);
+		if (ret) {
+			pr_err("[%s] deassert bus hdcp failed!\n", __func__);
+			return;
+		}
+	}
+#endif
+	if (hdmi_drv->hdmi_bus_clk) {
+		if (clk_prepare_enable(hdmi_drv->hdmi_bus_clk) != 0)
+			pr_info("hdmi bus clk enable failed!\n");
+	}
+
 	if (hdmi_drv->hdmi_clk != NULL) {
-		clk_parent = clk_get(NULL, "tcon_tv");
-		if (clk_parent == NULL || IS_ERR(clk_parent))
+		if (hdmi_drv->tcon_tv_clk == NULL)
 			pr_err("tcon_tv clk get failed\n");
 		else
 			clk_set_rate(hdmi_drv->hdmi_clk,
-				clk_get_rate(clk_parent));
+					clk_get_rate(hdmi_drv->tcon_tv_clk));
 
 		if (clk_prepare_enable(hdmi_drv->hdmi_clk) != 0)
 			pr_info("hdmi clk enable failed!\n");
 	}
 
-	if (hdmi_drv->hdmi_ddc_clk != NULL)
+
+	if (hdmi_drv->hdmi_ddc_clk != NULL) {
 		if (clk_prepare_enable(hdmi_drv->hdmi_ddc_clk) != 0)
 			pr_info("hdmi ddc clk enable failed!\n");
+	} else
+		printk("ddc clk is NULL!!!!!!!!!!!!!!!!!!!!\n");
 
-#ifdef CONFIG_HDMI2_HDCP_SUNXI
+#if IS_ENABLED(CONFIG_HDMI2_HDCP22_SUNXI)
+	if (hdmi_drv->hdmi_hdcp_bus_clk) {
+		if (clk_prepare_enable(hdmi_drv->hdmi_hdcp_bus_clk) != 0)
+			pr_info("hdmi hdcp bus clk enable failed!\n");
+	}
+
 	if (hdmi_drv->hdmi_hdcp_clk)
 		clk_set_rate(hdmi_drv->hdmi_hdcp_clk, 300000000);
 
@@ -231,6 +290,9 @@ static void hdmi_clk_enable(void)
 
 #ifdef CONFIG_HDMI2_CEC_SUNXI
 	if (hdmi_drv->hdmi_cec_clk != NULL) {
+		if (hdmi_drv->cec_clk_parent) {
+			clk_set_parent(hdmi_drv->hdmi_cec_clk, hdmi_drv->cec_clk_parent);
+		}
 		if (clk_prepare_enable(hdmi_drv->hdmi_cec_clk) != 0)
 			pr_info("hdmi cec clk enable failed!\n");
 	}
@@ -241,18 +303,54 @@ static void hdmi_clk_enable(void)
 
 static void hdmi_resume_clk_enable(void)
 {
-	struct clk *clk_parent = NULL;
+	int ret = 0;
 
 	if (hdmi_clk_enable_mask)
 		return;
 
+	if (hdmi_drv->rst_bus_sub) {
+		ret = reset_control_assert(hdmi_drv->rst_bus_sub);
+		if (ret) {
+			pr_err("[%s] assert bus sub failed!\n", __func__);
+			return;
+		}
+	}
+
+	if (hdmi_drv->rst_bus_main) {
+		ret = reset_control_assert(hdmi_drv->rst_bus_main);
+		if (ret) {
+			pr_err("[%s] assert bus main failed!\n", __func__);
+			return;
+		}
+	}
+
+	if (hdmi_drv->rst_bus_sub) {
+		ret = reset_control_deassert(hdmi_drv->rst_bus_sub);
+		if (ret) {
+			pr_err("[%s] deassert bus sub failed!\n", __func__);
+			return;
+		}
+	}
+
+	if (hdmi_drv->rst_bus_main) {
+		ret = reset_control_deassert(hdmi_drv->rst_bus_main);
+		if (ret) {
+			pr_err("[%s] deassert bus main failed!\n", __func__);
+			return;
+		}
+	}
+
+	if (hdmi_drv->hdmi_bus_clk) {
+		if (clk_prepare_enable(hdmi_drv->hdmi_bus_clk) != 0)
+			pr_info("hdmi bus clk enable failed!\n");
+	}
+
 	if (hdmi_drv->hdmi_clk != NULL) {
-		clk_parent = clk_get(NULL, "tcon_tv");
-		if (clk_parent == NULL || IS_ERR(clk_parent))
+		if (hdmi_drv->tcon_tv_clk == NULL)
 			pr_err("tcon_tv clk get failed\n");
 		else
 			clk_set_rate(hdmi_drv->hdmi_clk,
-				clk_get_rate(clk_parent));
+					clk_get_rate(hdmi_drv->tcon_tv_clk));
 
 		if (clk_prepare_enable(hdmi_drv->hdmi_clk) != 0)
 			pr_info("hdmi clk enable failed!\n");
@@ -262,7 +360,7 @@ static void hdmi_resume_clk_enable(void)
 		if (clk_prepare_enable(hdmi_drv->hdmi_ddc_clk) != 0)
 			pr_info("hdmi ddc clk enable failed!\n");
 
-#ifdef CONFIG_HDMI2_HDCP_SUNXI
+#if IS_ENABLED(CONFIG_HDMI2_HDCP22_SUNXI)
 	if (hdmi_drv->hdmi_hdcp_clk)
 		clk_set_rate(hdmi_drv->hdmi_hdcp_clk, 300000000);
 
@@ -273,7 +371,10 @@ static void hdmi_resume_clk_enable(void)
 
 #ifdef CONFIG_HDMI2_CEC_SUNXI
 	if ((hdmi_drv->hdmi_cec_clk != NULL) &&
-				(!hdmi_drv->cec_super_standby)) {
+			(!hdmi_drv->cec_super_standby)) {
+		if (hdmi_drv->cec_clk_parent) {
+			clk_set_parent(hdmi_drv->hdmi_cec_clk, hdmi_drv->cec_clk_parent);
+		}
 		if (clk_prepare_enable(hdmi_drv->hdmi_cec_clk) != 0)
 			pr_info("hdmi cec clk enable failed!\n");
 	}
@@ -282,9 +383,40 @@ static void hdmi_resume_clk_enable(void)
 	hdmi_clk_enable_mask = 1;
 }
 
+static void hdmi_suspend_clk_disable(void)
+{
+
+	if (!hdmi_clk_enable_mask)
+		return;
+
+	hdmi_clk_enable_mask = 0;
+
+#ifdef CONFIG_HDMI2_CEC_SUNXI
+	if ((hdmi_drv->hdmi_cec_clk != NULL)
+			&& (!hdmi_drv->cec_super_standby))
+		clk_disable_unprepare(hdmi_drv->hdmi_cec_clk);
+#endif
+
+#if IS_ENABLED(CONFIG_HDMI2_HDCP22_SUNXI)
+	if (hdmi_drv->hdmi_hdcp_clk != NULL)
+		clk_disable_unprepare(hdmi_drv->hdmi_hdcp_clk);
+#endif
+
+	if ((hdmi_drv->hdmi_ddc_clk != NULL)
+			&& (!hdmi_drv->cec_super_standby))
+		clk_disable_unprepare(hdmi_drv->hdmi_ddc_clk);
+	if (hdmi_drv->hdmi_clk != NULL)
+		clk_disable_unprepare(hdmi_drv->hdmi_clk);
+
+	if (hdmi_drv->hdmi_bus_clk != NULL)
+		clk_disable_unprepare(hdmi_drv->hdmi_bus_clk);
+
+}
 
 static void hdmi_clk_disable(void)
 {
+	int ret = 0;
+
 	if (!hdmi_clk_enable_mask)
 		return;
 
@@ -295,9 +427,11 @@ static void hdmi_clk_disable(void)
 		clk_disable_unprepare(hdmi_drv->hdmi_cec_clk);
 #endif
 
-#ifdef CONFIG_HDMI2_HDCP_SUNXI
-		if (hdmi_drv->hdmi_hdcp_clk != NULL)
-			clk_disable_unprepare(hdmi_drv->hdmi_hdcp_clk);
+#if IS_ENABLED(CONFIG_HDMI2_HDCP22_SUNXI)
+	if (hdmi_drv->hdmi_hdcp_clk != NULL)
+		clk_disable_unprepare(hdmi_drv->hdmi_hdcp_clk);
+	if (hdmi_drv->hdmi_hdcp_bus_clk != NULL)
+		clk_disable_unprepare(hdmi_drv->hdmi_hdcp_bus_clk);
 #endif
 
 	if (hdmi_drv->hdmi_ddc_clk != NULL)
@@ -306,31 +440,33 @@ static void hdmi_clk_disable(void)
 	if (hdmi_drv->hdmi_clk != NULL)
 		clk_disable_unprepare(hdmi_drv->hdmi_clk);
 
-}
+	if (hdmi_drv->hdmi_bus_clk != NULL)
+		clk_disable_unprepare(hdmi_drv->hdmi_bus_clk);
 
-static void hdmi_suspend_clk_disable(void)
-{
-	if (!hdmi_clk_enable_mask)
-		return;
-
-	hdmi_clk_enable_mask = 0;
-
-#ifdef CONFIG_HDMI2_CEC_SUNXI
-	if ((hdmi_drv->hdmi_cec_clk != NULL)
-		&& (!hdmi_drv->cec_super_standby))
-		clk_disable_unprepare(hdmi_drv->hdmi_cec_clk);
+#if IS_ENABLED(CONFIG_HDMI2_HDCP22_SUNXI)
+	if (hdmi_drv->rst_bus_hdcp) {
+		ret = reset_control_assert(hdmi_drv->rst_bus_hdcp);
+		if (ret) {
+			pr_err("[%s] assert bus hdcp failed!\n", __func__);
+			return;
+		}
+	}
 #endif
+	if (hdmi_drv->rst_bus_sub) {
+		ret = reset_control_assert(hdmi_drv->rst_bus_sub);
+		if (ret) {
+			pr_err("[%s] assert bus sub failed!\n", __func__);
+			return;
+		}
+	}
 
-#ifdef CONFIG_HDMI2_HDCP_SUNXI
-	if (hdmi_drv->hdmi_hdcp_clk != NULL)
-		clk_disable_unprepare(hdmi_drv->hdmi_hdcp_clk);
-#endif
-
-	if ((hdmi_drv->hdmi_ddc_clk != NULL)
-		&& (!hdmi_drv->cec_super_standby))
-		clk_disable_unprepare(hdmi_drv->hdmi_ddc_clk);
-	if (hdmi_drv->hdmi_clk != NULL)
-		clk_disable_unprepare(hdmi_drv->hdmi_clk);
+	if (hdmi_drv->rst_bus_main) {
+		ret = reset_control_assert(hdmi_drv->rst_bus_main);
+		if (ret) {
+			pr_err("[%s] assert bus main failed!\n", __func__);
+			return;
+		}
+	}
 }
 
 static void hdmi_pin_configure(void)
@@ -422,7 +558,7 @@ static void hdmi_resume_pin_configure(void)
 }
 
 
-static void hdmi_pin_release(void)
+void hdmi_pin_release(void)
 {
 	s32 ret = 0;
 	struct pinctrl_state *state;
@@ -520,13 +656,6 @@ static void hdmi_resume_sys_source_configure(void)
 	hdmi_resume_pin_configure();
 }
 
-static void hdmi_sys_source_release(void)
-{
-	LOG_TRACE();
-	hdmi_clk_disable();
-	hdmi_pin_release();
-}
-
 static void hdmi_suspend_sys_source_release(void)
 {
 	LOG_TRACE();
@@ -545,13 +674,6 @@ static void hdmi_clk_reset(void)
 	hdmi_clk_enable();
 }
 
-/*static void hdmi_sys_source_reset(void)
-{
-	hdmi_sys_source_release();
-	mdelay(10);
-	hdmi_sys_source_configure();
-}*/
-
 #ifdef CONFIG_HDMI2_HDCP_SUNXI
 static void set_hdcp_status(u8 status)
 {
@@ -566,7 +688,6 @@ extern u32 hdmi_set_spread_spectrum(u32 pixel_clk);
 static s32 hdmi_enable(void)
 {
 	s32 ret = 0;
-	struct clk *clk_parent = NULL;
 #ifdef CONFIG_HDMI2_FREQ_SPREAD_SPECTRUM
 	struct disp_video_timings *video_info;
 	u32 clk_rate = 0;
@@ -584,13 +705,7 @@ static s32 hdmi_enable(void)
 
 	if (hpd_state && (!video_on)) {
 		if (hdmi_drv->hdmi_clk != NULL) {
-			clk_parent = clk_get(NULL, "tcon_tv");
-			if (clk_parent == NULL || IS_ERR(clk_parent))
-				pr_err("tcon_tv clk get failed\n");
-			else
-				clk_set_rate(hdmi_drv->hdmi_clk,
-					clk_get_rate(clk_parent));
-#ifdef CONFIG_HDMI2_FREQ_SPREAD_SPECTRUM
+#if defined(CONFIG_HDMI2_FREQ_SPREAD_SPECTRUM)
 			hdmi_get_video_timming_info(&video_info);
 			clk_rate = video_info->pixel_clk
 				* (video_info->pixel_repeat + 1);
@@ -598,6 +713,8 @@ static s32 hdmi_enable(void)
 			if (pVideo->mEncodingOut == YCC420)
 				clk_rate /= 2;
 			hdmi_set_spread_spectrum(clk_rate);
+#elif defined(CCMU_PLL_VIDEO2_BIAS)
+			ccmu_set_pll_video2_bias(0x3);
 #endif
 		}
 
@@ -643,8 +760,6 @@ static s32 hdmi_disable(void)
 
 	ret = hdmi_disable_core();
 
-	hdmi_set_ddc_analog(0);
-
 	video_on = false;
 	hdmi_enable_mask = 0;
 
@@ -652,30 +767,54 @@ static s32 hdmi_disable(void)
 	return ret;
 }
 
-#if defined(CONFIG_SND_SUNXI_SOC_SUNXI_HDMIAUDIO)
-s32 hdmi_audio_enable(u8 enable, u8 channel)
+
+/******************** SND_HDMI for sunxi_v2 begain ***************************/
+int snd_hdmi_get_func(__audio_hdmi_func *hdmi_func)
 {
-	s32 ret = 0;
+	if (!hdmi_func) {
+		pr_err("HDMI Audio func is NULL\n");
+		return -1;
+	}
 
-	ret = hdmi_core_audio_enable(enable, channel);
+	hdmi_func->hdmi_audio_enable = hdmi_core_audio_enable;
+	hdmi_func->hdmi_set_audio_para =  hdmi_set_audio_para;
 
-	return ret;
+	return 0;
 }
-#endif
+EXPORT_SYMBOL_GPL(snd_hdmi_get_func);
+/******************** SND_HDMI for sunxi_v2 end ******************************/
 
 static s32 hdmi_suspend(void)
 {
-	int i = 0;
-
 	LOG_TRACE();
-
-	if (hdmi_suspend_mask)
+	if (disp_suspend_mask)
 		return 0;
+	if (hdmi_drv->cec_support)
+		hdmi_set_ddc_analog(1);
 
 	if (hdmi_drv->hdmi_task) {
 		kthread_stop(hdmi_drv->hdmi_task);
 		hdmi_drv->hdmi_task = NULL;
 	}
+
+#ifdef CONFIG_HDMI2_HDCP_SUNXI
+	if (hdmi_drv->hdmi_core->mode.pHdcp.hdcp_on)
+		set_hdcp_status(HDCP_ING);
+	if (hdmi_drv->hdmi_core->mode.pHdcp.use_hdcp)
+		hdmi_drv->hdmi_core->dev_func.hdcp_close();
+#endif
+
+	disp_suspend_mask = 1;
+	return 0;
+}
+
+static int hdmi_local_suspend(struct device *dev)
+{
+	int i = 0;
+
+	LOG_TRACE();
+	if (hdmi_suspend_mask)
+		return 0;
 
 #ifdef CONFIG_HDMI2_CEC_SUNXI
 	if (hdmi_drv->cec_support) {
@@ -689,72 +828,54 @@ static s32 hdmi_suspend(void)
 		else
 			hdmi_cec_soft_disable();
 	}
-#endif
 
-#ifdef CONFIG_HDMI2_HDCP_SUNXI
-	if (hdmi_drv->hdmi_core->mode.pHdcp.hdcp_on)
-		set_hdcp_status(HDCP_ING);
-	if (hdmi_drv->hdmi_core->mode.pHdcp.use_hdcp)
-		hdmi_drv->hdmi_core->dev_func.hdcp_close();
-#endif
-
-	hdmi_suspend_sys_source_release();
 	if (hdmi_drv->cec_support
 		&& hdmi_drv->cec_super_standby) {
 		/*enable_wakeup_src(CPUS_HDMICEC_SRC, 0);
 		scene_lock(&hdmi_standby_lock);*/
 	}
 
-	for (i = 0; i < hdmi_drv->power_count; i++)
-		hdmi_power_disable(hdmi_drv->power[i]);
+#endif
+	hdmi_suspend_sys_source_release();
 
-	hdmi_set_ddc_analog(0);
+	for (i = 0; i < hdmi_drv->power_count; i++)
+		hdmi_power_disable(&hdmi_drv->power[i]);
 
 	mutex_lock(&hdmi_drv->ctrl_mutex);
 	hdmi_suspend_mask = 1;
 	cec_wakeup = 0;
 	mutex_unlock(&hdmi_drv->ctrl_mutex);
+
 	return 0;
 }
 
 /*extern int sunxi_smc_refresh_hdcp(void);*/
 static s32 hdmi_resume(void)
 {
-	s32 ret = 0, i = 0;
+	s32 ret = 0;
 
 	LOG_TRACE();
+
+	if (disp_suspend_mask == 0)
+		return 0;
+
 #ifdef CONFIG_SUNXI_SMC
 	if (sunxi_smc_refresh_hdcp())
 		pr_err("refresh hdcp key failed!!!\n");
 #endif
 	mutex_lock(&hdmi_drv->ctrl_mutex);
-	if (hdmi_suspend_mask == 0) {
-		mutex_unlock(&hdmi_drv->ctrl_mutex);
-		return 0;
-	}
-
-#ifdef CONFIG_HDMI2_CEC_SUNXI
-	if (hdmi_drv->cec_support
-		&& hdmi_drv->cec_super_standby) {
-		/*scene_unlock(&hdmi_standby_lock);
-		disable_wakeup_src(CPUS_HDMICEC_SRC, 0);*/
-	}
-#endif
-
 	hdmi_set_ddc_analog(1);
 
-	for (i = 0; i < hdmi_drv->power_count; i++)
-		hdmi_power_enable(hdmi_drv->power[i]);
-	hdmi_resume_sys_source_configure();
-	hdmi_clk_reset();
-
+#ifdef CONFIG_AW_PHY
+	hdmi_drv->hdmi_core->dev_func.phy_config_resume();
+#endif
 	/*enable hpd sense*/
 	hpd_sense_enbale_core(hdmi_drv->hdmi_core);
 
 	hpd_state = 0;
 #if defined(CONFIG_EXTCON)
 	if (!(hdmi_hpd_mask & 0x100))
-		extcon_set_cable_state_(hdmi_extcon_dev,
+		extcon_set_state_sync(hdmi_extcon_dev,
 				EXTCON_DISP_HDMI,
 				hpd_state ? STATUE_OPEN : STATUE_CLOSE);
 #endif
@@ -766,7 +887,33 @@ static s32 hdmi_resume(void)
 	}
 	wake_up_process(hdmi_drv->hdmi_task);
 
+	disp_suspend_mask = 0;
+	mutex_unlock(&hdmi_drv->ctrl_mutex);
+
+	return ret;
+}
+
+static int hdmi_local_resume(struct device *dev)
+{
+	int i = 0;
+
+	LOG_TRACE();
+	if (hdmi_suspend_mask == 0)
+		return 0;
+
+	for (i = 0; i < hdmi_drv->power_count; i++)
+		hdmi_power_enable(&hdmi_drv->power[i]);
+	hdmi_resume_sys_source_configure();
+	hdmi_clk_reset();
+
+
 #ifdef CONFIG_HDMI2_CEC_SUNXI
+	if (hdmi_drv->cec_support
+		&& hdmi_drv->cec_super_standby) {
+		/*scene_unlock(&hdmi_standby_lock);
+		disable_wakeup_src(CPUS_HDMICEC_SRC, 0);*/
+	}
+
 	if (hdmi_drv->cec_support) {
 		cec_thread_init(hdmi_drv->parent_dev);
 		hdmi_cec_enable(1);
@@ -780,9 +927,7 @@ static s32 hdmi_resume(void)
 #endif
 
 	hdmi_suspend_mask = 0;
-	mutex_unlock(&hdmi_drv->ctrl_mutex);
-
-	return ret;
+	return 0;
 }
 
 static void edid_check(void)
@@ -794,7 +939,7 @@ static void edid_check(void)
 		mutex_unlock(&hdmi_drv->hdcp_mutex);
 #if defined(CONFIG_EXTCON)
 		if (!(hdmi_hpd_mask & 0x100))
-			extcon_set_cable_state_(hdmi_extcon_dev,
+			extcon_set_state_sync(hdmi_extcon_dev,
 						EXTCON_DISP_HDMI,
 						STATUE_OPEN);
 #endif
@@ -820,7 +965,7 @@ static void hdmi_hpd_sys_config_set(void)
 {
 	/*To enhance the ddc ability*/
 	if (hdmi_drv->ddc_ctrl_en == 1) {
-		if (gpio_direction_output(hdmi_drv->ddc_ctrl.gpio, 1) != 0) {
+		if (gpio_direction_output(hdmi_drv->ddc_ctrl_gpio, 1) != 0) {
 			pr_info("ddc ctrl gpio set 1 error!\n");
 			return;
 		}
@@ -832,7 +977,7 @@ static void hdmi_hpd_sys_config_release(void)
 {
 	pr_info("%s\n", __func__);
 	if (hdmi_drv->ddc_ctrl_en == 1) {
-		if (gpio_direction_output(hdmi_drv->ddc_ctrl.gpio, 0) != 0) {
+		if (gpio_direction_output(hdmi_drv->ddc_ctrl_gpio, 0) != 0) {
 			pr_info("ddc ctrl gpio set 0 error!\n");
 			return;
 		}
@@ -874,7 +1019,7 @@ static void hdmi_plugin_proc(void)
 	mutex_unlock(&hdmi_drv->ctrl_mutex);
 #if defined(CONFIG_EXTCON)
 	if ((!(hdmi_hpd_mask & 0x100)) && hdmi_drv->hdmi_core->mode.edid_done)
-		extcon_set_cable_state_(hdmi_extcon_dev,
+		extcon_set_state_sync(hdmi_extcon_dev,
 					EXTCON_DISP_HDMI,
 					STATUE_OPEN);
 #endif
@@ -914,11 +1059,10 @@ static void hdmi_plugout_proc(void)
 	hpd_sense_enbale_core(hdmi_drv->hdmi_core);
 
 	hdmi_edid_release();
-	hdmi_set_ddc_analog(0);
 
 #if defined(CONFIG_EXTCON)
 	if (!(hdmi_hpd_mask & 0x100))
-		extcon_set_cable_state_(hdmi_extcon_dev, EXTCON_DISP_HDMI, STATUE_CLOSE);
+		extcon_set_state_sync(hdmi_extcon_dev, EXTCON_DISP_HDMI, STATUE_CLOSE);
 #endif
 }
 
@@ -1193,6 +1337,7 @@ static int hdmi_tx_hdcp_init(struct platform_device *pdev,
 					HDCP22_FIRMWARE_SIZE,
 					&hdcp->esm_firm_phy_addr,
 					GFP_KERNEL | __GFP_ZERO);
+
 	hdcp->esm_firm_size = HDCP22_FIRMWARE_SIZE;
 
 	esm_firm_vir_addr = (char *)hdcp->esm_firm_vir_addr;
@@ -1206,11 +1351,26 @@ static int hdmi_tx_hdcp_init(struct platform_device *pdev,
 
 	hdcp->esm_hpi_base = hdmi_drv->reg_base + ESM_REG_BASE_OFFSET;
 
-	hdcp->esm_firm_phy_addr -= 0x40000000;
-	hdcp->esm_data_phy_addr -= 0x40000000;
+	hdcp->esm_firm_phy_addr -= (dma_addr_t)0x40000000;
+	hdcp->esm_data_phy_addr -= (dma_addr_t)0x40000000;
+
 #endif
 	return 0;
 }
+
+static void hdmi_tx_hdcp_exit(struct device *dev,
+					hdcpParams_t *hdcp)
+{
+#ifdef CONFIG_HDMI2_HDCP22_SUNXI
+	hdcp->esm_data_phy_addr += (dma_addr_t)0x40000000;
+	hdcp->esm_firm_phy_addr += (dma_addr_t)0x40000000;
+	dma_free_coherent(dev, HDCP22_DATA_SIZE,
+		(void *)hdcp->esm_data_vir_addr, hdcp->esm_data_phy_addr);
+	dma_free_coherent(dev, HDCP22_FIRMWARE_SIZE,
+		(void *)hdcp->esm_firm_vir_addr, hdcp->esm_firm_phy_addr);
+#endif
+}
+
 #endif
 
 static void hdmi_dts_parse_pin_config(struct platform_device *pdev)
@@ -1228,12 +1388,12 @@ static void hdmi_dts_parse_pin_config(struct platform_device *pdev)
 		pr_info("ERROR: can not get ddc_en_io_ctrl\n");
 
 	if (hdmi_drv->ddc_ctrl_en) {
-		hdmi_drv->ddc_ctrl.gpio =
+		enum of_gpio_flags flags;
+		hdmi_drv->ddc_ctrl_gpio =
 			of_get_named_gpio_flags(pdev->dev.of_node,
-				"ddc_io_ctrl", 0,
-				(enum of_gpio_flags *)(&(hdmi_drv->ddc_ctrl)));
+				"ddc_io_ctrl", 0, &flags);
 
-		if (gpio_request(hdmi_drv->ddc_ctrl.gpio, NULL) != 0) {
+		if (gpio_request(hdmi_drv->ddc_ctrl_gpio, NULL) != 0) {
 			pr_info("ddc ctrl gpio_request is failed\n");
 			return;
 		}
@@ -1242,42 +1402,86 @@ static void hdmi_dts_parse_pin_config(struct platform_device *pdev)
 
 static int hdmi_dts_parse_clk(struct platform_device *pdev)
 {
-	int index = 0;
-
-	hdmi_drv->hdmi_clk = of_clk_get(pdev->dev.of_node, index);
+	hdmi_drv->tcon_tv_clk = devm_clk_get(&pdev->dev, "clk_tcon_tv");
+	if (IS_ERR(hdmi_drv->tcon_tv_clk)) {
+		dev_err(&pdev->dev, "fail to get clk for tcon tv\n");
+		hdmi_drv->tcon_tv_clk = NULL;
+	}
+#if (IS_ENABLED(CONFIG_ARCH_SUN8IW20) || IS_ENABLED(CONFIG_ARCH_SUN20IW1))
+	hdmi_drv->hdmi_clk = NULL;
+#else
+	hdmi_drv->hdmi_clk = devm_clk_get(&pdev->dev, "clk_hdmi");
 	if (IS_ERR(hdmi_drv->hdmi_clk)) {
 		dev_err(&pdev->dev, "fail to get clk for hdmi\n");
 		return -1;
 	}
+#endif
+	hdmi_drv->hdmi_bus_clk = devm_clk_get(&pdev->dev, "clk_bus_hdmi");
+	if (IS_ERR(hdmi_drv->hdmi_bus_clk)) {
+		dev_err(&pdev->dev, "fail to get BUS clk for hdmi\n");
+		return -1;
+	}
 
-	index++;
-	hdmi_drv->hdmi_ddc_clk = of_clk_get(pdev->dev.of_node, index);
+	hdmi_drv->hdmi_ddc_clk = devm_clk_get(&pdev->dev, "clk_ddc");
 	if (IS_ERR(hdmi_drv->hdmi_ddc_clk)) {
 		dev_err(&pdev->dev, "fail to get clk for hdmi ddc\n");
 		return -1;
 	}
 
-#ifdef CONFIG_HDMI2_HDCP_SUNXI
+#if IS_ENABLED(CONFIG_HDMI2_HDCP22_SUNXI)
 	if (hdmi_drv->support_hdcp) {
-		index++;
-		hdmi_drv->hdmi_hdcp_clk = of_clk_get(pdev->dev.of_node, index);
+		hdmi_drv->hdmi_hdcp_clk = devm_clk_get(&pdev->dev, "clk_hdcp");
 		if (IS_ERR(hdmi_drv->hdmi_hdcp_clk)) {
 			dev_err(&pdev->dev, "fail to get clk for hdmi hdcp\n");
+			/*return -1;*/
+		}
+
+		hdmi_drv->hdmi_hdcp_bus_clk = devm_clk_get(&pdev->dev, "clk_bus_hdcp");
+		if (IS_ERR(hdmi_drv->hdmi_hdcp_bus_clk)) {
+			dev_err(&pdev->dev, "fail to get clk for hdmi hdcp bus\n");
+			/*return -1;*/
+		}
+	}
+#else
+	hdmi_drv->hdmi_hdcp_clk = NULL;
+	hdmi_drv->hdmi_hdcp_bus_clk = NULL;
+#endif
+
+#ifdef CONFIG_HDMI2_CEC_SUNXI
+	if (hdmi_drv->cec_support) {
+		hdmi_drv->hdmi_cec_clk = devm_clk_get(&pdev->dev, "clk_cec");
+		if (IS_ERR(hdmi_drv->hdmi_cec_clk)) {
+			dev_err(&pdev->dev, "fail to get clk for hdmi cec\n");
+			/*return -1;*/
+		}
+		hdmi_drv->cec_clk_parent = clk_get_parent(hdmi_drv->hdmi_cec_clk);
+		if (IS_ERR(hdmi_drv->cec_clk_parent)) {
+			dev_err(&pdev->dev, "fail to get clk parent for hdmi cec\n");
 			/*return -1;*/
 		}
 	}
 #endif
 
-#ifdef CONFIG_HDMI2_CEC_SUNXI
-	if (hdmi_drv->cec_support) {
-		index++;
-		hdmi_drv->hdmi_cec_clk = of_clk_get(pdev->dev.of_node, index);
-		if (IS_ERR(hdmi_drv->hdmi_cec_clk)) {
-			dev_err(&pdev->dev, "fail to get clk for hdmi cec\n");
-			/*return -1;*/
-		}
+#if IS_ENABLED(CONFIG_HDMI2_HDCP22_SUNXI)
+	hdmi_drv->rst_bus_hdcp = devm_reset_control_get(&pdev->dev, "rst_bus_hdcp");
+	if (IS_ERR(hdmi_drv->rst_bus_hdcp)) {
+		dev_err(&pdev->dev, "fail to get clk for hdmi rst_bus_hdcp\n");
+		return -1;
 	}
+#else
+	hdmi_drv->rst_bus_hdcp = NULL;
 #endif
+	hdmi_drv->rst_bus_sub = devm_reset_control_get(&pdev->dev, "rst_bus_sub");
+	if (IS_ERR(hdmi_drv->rst_bus_sub)) {
+		dev_err(&pdev->dev, "fail to get clk for hdmi rst_bus_sub\n");
+		return -1;
+	}
+
+	hdmi_drv->rst_bus_main = devm_reset_control_get(&pdev->dev, "rst_bus_main");
+	if (IS_ERR(hdmi_drv->rst_bus_main)) {
+		dev_err(&pdev->dev, "fail to get clk for hdmi rst_bus_main\n");
+		return -1;
+	}
 
 	return 0;
 }
@@ -1303,9 +1507,9 @@ static int hdmi_dts_parse_power(struct platform_device *pdev)
 			ret = -1;
 		} else {
 			pr_info("Get hdmi_power%d:%s\n", i, hdmi_power);
-			memcpy((void *)hdmi_drv->power[i], hdmi_power,
+			memcpy((void *)hdmi_drv->power[i].name, hdmi_power,
 					strlen(hdmi_power) + 1);
-			hdmi_power_enable(hdmi_drv->power[i]);
+			hdmi_power_enable(&hdmi_drv->power[i]);
 		}
 	}
 
@@ -1336,6 +1540,9 @@ static int hdmi_tx_init(struct platform_device *pdev)
 	int phy_model = 301;
 	struct disp_device_func disp_func;
 	hdcpParams_t hdcp;
+#ifdef CONFIG_HDMI2_CEC_SUNXI
+	struct cec_init_para cec_init;
+#endif
 
 #if defined(CONFIG_SND_SUNXI_SOC_SUNXI_HDMIAUDIO)
 	__audio_hdmi_func audio_func;
@@ -1435,15 +1642,12 @@ static int hdmi_tx_init(struct platform_device *pdev)
 
 #if defined(CONFIG_EXTCON)
 	if (!(hdmi_hpd_mask & 0x100))
-		extcon_set_cable_state_(hdmi_extcon_dev,
+		extcon_set_state_sync(hdmi_extcon_dev,
 						EXTCON_DISP_HDMI, hpd_state ?
 						STATUE_OPEN : STATUE_CLOSE);
 #endif
 
 	hdmi_set_ddc_analog(1);
-
-	/*Now that everything is fine, let's add it to device list*/
-	list_add_tail(&hdmi_drv->devlist, &devlist_global);
 
 	mutex_init(&hdmi_drv->ctrl_mutex);
 	mutex_init(&hdmi_drv->hdcp_mutex);
@@ -1451,7 +1655,10 @@ static int hdmi_tx_init(struct platform_device *pdev)
 	/*if (hdmi_drv->cec_super_standby)
 		scene_lock_init(&hdmi_standby_lock, SCENE_HDMI_CEC_STANDBY, "hdmi_cec_standby");*/
 #ifdef CONFIG_HDMI2_CEC_SUNXI
-	hdmi_cec_init();
+	cec_init.hdmi_clk = hdmi_drv->hdmi_clk;
+	cec_init.cec_clk = hdmi_drv->hdmi_cec_clk;
+	cec_init.hdmi_base = hdmi_drv->reg_base;
+	hdmi_cec_init(&cec_init);
 #endif
 
 	/*Create hdmi thread to poll hpd and hdcp status and handle hdcp and hpd event*/
@@ -1482,6 +1689,7 @@ static int hdmi_tx_init(struct platform_device *pdev)
 	disp_func.get_static_config = get_static_config;
 	disp_func.set_dynamic_config = set_dynamic_config;
 	disp_func.get_dynamic_config = get_dynamic_config;
+	disp_func.set_vsif_config = set_vsif_config;
 
 #ifdef CONFIG_HDMI2_CEC_SUNXI
 #ifndef CONFIG_HDMI2_CEC_USER
@@ -1493,13 +1701,13 @@ static int hdmi_tx_init(struct platform_device *pdev)
 	disp_set_hdmi_func(&disp_func);
 
 #if defined(CONFIG_SND_SUNXI_SOC_SUNXI_HDMIAUDIO)
-	audio_func.hdmi_audio_enable = hdmi_audio_enable;
+	audio_func.hdmi_audio_enable = hdmi_core_audio_enable;
 	audio_func.hdmi_set_audio_para = hdmi_set_audio_para;
 	audio_set_hdmi_func(&audio_func);
 	AUDIO_INF("audio_set_hdmi_func\n");
 
 #if defined(CONFIG_SND_SUNXI_SOC_AUDIOHUB_INTERFACE)
-	audio_func_muti.hdmi_audio_enable = hdmi_audio_enable;
+	audio_func_muti.hdmi_audio_enable = hdmi_core_audio_enable;
 	audio_func_muti.hdmi_set_audio_para = hdmi_set_audio_para;
 	audio_set_muti_hdmi_func(&audio_func_muti);
 #endif
@@ -1517,38 +1725,44 @@ free_mem:
 
 static int hdmi_tx_exit(struct platform_device *pdev)
 {
-	struct hdmi_tx_drv *dev;
-	struct list_head *list;
-	int i = 0;
-
 #ifdef CONFIG_HDMI2_CEC_SUNXI
 	cec_thread_exit();
+	msleep(20); ////wait thread complete stopping
 #endif
-
-	while (!list_empty(&devlist_global)) {
-		list = devlist_global.next;
-		list_del(list);
-		dev = list_entry(list, struct hdmi_tx_drv, devlist);
-
-		if (dev == NULL)
-			continue;
-	}
-
-	hdmi_set_ddc_analog(0);
-
 	if (hdmi_drv->hdmi_task) {
 		kthread_stop(hdmi_drv->hdmi_task);
 		hdmi_drv->hdmi_task = NULL;
 	}
 
-	/*scene_lock_destroy(&hdmi_standby_lock);*/
-	hdmi_sys_source_release();
+	msleep(200); //wait thread complete stopping
 
-	for (i = 0; i < hdmi_drv->power_count; i++)
-		hdmi_power_enable(hdmi_drv->power[i]);
+#ifdef CONFIG_HDMI2_CEC_SUNXI
+	hdmi_cec_exit();
+#endif
+
+#ifdef CONFIG_HDMI2_HDCP_SUNXI
+       hdmi_tx_hdcp_exit(&pdev->dev, &hdmi_drv->hdmi_core->mode.pHdcp);
+#endif
+
+	hdmi_core_exit(hdmi_drv->hdmi_core);
+#if defined(CONFIG_EXTCON)
+	devm_extcon_dev_unregister(&pdev->dev, hdmi_extcon_dev);
+#endif
+
+	kfree(hdmi_drv->hdmi_core);
+	hdmi_drv->hdmi_core = NULL;
+
+	kfree(hdmi_drv);
+	hdmi_drv = NULL;
 
 	return 0;
 }
+
+/*NOTE:hdmi local pm, which is dependent of display pm*/
+static const struct dev_pm_ops hdmi_pm_ops = {
+	.suspend = hdmi_local_suspend,
+	.resume = hdmi_local_resume,
+};
 
 /**
  * @short of_device_id structure
@@ -1568,6 +1782,7 @@ static struct platform_driver __refdata dwc_hdmi_tx_pdrv = {
 	.driver = {
 		.name = "allwinner,sunxi-hdmi",
 		.owner = THIS_MODULE,
+		.pm = &hdmi_pm_ops,
 		.of_match_table = dw_hdmi_tx,
 	},
 };
@@ -1685,8 +1900,8 @@ static long hdmi_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 		hdcp_info.hdcp_type = get_hdcp_type_core(hdmi_drv->hdmi_core);
 		hdcp_info.hdcp_status = (unsigned int)hdcp_encrypt_status;
 
-		if (copy_to_user((void __user *)p_arg[0], (void *)&hdcp_info,
-			sizeof(struct hdmi_hdcp_info))) {
+		if (copy_to_user((void __user *)((unsigned long)p_arg[0]), &hdcp_info,
+			sizeof(hdcp_info))) {
 			pr_err("copy hdcp info to user failed\n");
 			return -EINVAL;
 		}
@@ -1719,7 +1934,7 @@ static long hdmi_compat_ioctl(struct file *filp, unsigned int cmd,
 	}
 
 	ubuffer = compat_alloc_user_space(3 * sizeof(unsigned long));
-	if (!access_ok(VERIFY_WRITE, ubuffer, 3 * sizeof(unsigned long)))
+	if (!access_ok(/*VERIFY_WRITE, */ubuffer, 3 * sizeof(unsigned long)))
 		return -EFAULT;
 
 	if (put_user(karg[0], &ubuffer[0]) ||
@@ -1824,6 +2039,8 @@ static ssize_t hdmi_edid_show(struct device *dev, struct device_attribute *attr,
 							char *buf)
 {
 	u8 *edid = NULL, *edid_ext = NULL;
+	sink_edid_t *sink_cap = NULL;
+	u32 edid_ext_total_cnt = 0;
 
 	/*EDID_block0*/
 	edid = (u8 *)hdmi_drv->hdmi_core->mode.edid;
@@ -1832,14 +2049,20 @@ static ssize_t hdmi_edid_show(struct device *dev, struct device_attribute *attr,
 
 	/*EDID extension block*/
 	edid_ext =  hdmi_drv->hdmi_core->mode.edid_ext;
-	if (edid_ext != NULL)
-		memcpy(buf + 0x80, edid_ext,
-				0x80 * ((struct edid *)edid)->extensions);
+	sink_cap =  hdmi_drv->hdmi_core->mode.sink_cap;
+	if (edid_ext != NULL && sink_cap != NULL) {
+		if (sink_cap->hf_eeodb_block_count)
+			edid_ext_total_cnt = sink_cap->hf_eeodb_block_count;
+		else
+			edid_ext_total_cnt = ((struct edid *)edid)->extensions;
+
+		memcpy(buf + 0x80, edid_ext, 0x80 * edid_ext_total_cnt);
+	}
 
 	if (edid && (!edid_ext))
 		return 0x80;
 	if (edid && edid_ext)
-		return 0x80 * (1 + ((struct edid *)edid)->extensions);
+		return 0x80 * (1 + edid_ext_total_cnt);
 	else
 		return 0;
 }
@@ -1848,12 +2071,243 @@ static ssize_t hdmi_edid_store(struct device *dev,
 				struct device_attribute *attr,
 				const char *buf, size_t count)
 {
+	edid_set_test_data(buf, count);
 	return count;
 }
 
 static DEVICE_ATTR(edid, 0664,
 			hdmi_edid_show,
 			hdmi_edid_store);
+
+
+static ssize_t hdmi_edid_test_show(struct device *dev,
+				struct device_attribute *attr,
+					char *buf)
+{
+	return sprintf(buf, "edid test mode:%u\n",
+		edid_get_test_mode());
+}
+
+
+static ssize_t hdmi_edid_test_store(struct device *dev,
+				struct device_attribute *attr,
+				const char *buf, size_t count)
+{
+	if (strncmp(buf, "0", 1) == 0)
+		edid_test_mode_enable(false);
+	else
+		edid_test_mode_enable(true);
+	return count;
+}
+
+static DEVICE_ATTR(edid_test, 0664,
+			hdmi_edid_test_show,
+			hdmi_edid_test_store);
+
+
+static u8 reg_region;
+static ssize_t hdmi_test_reg_dump_show(struct device *dev,
+				struct device_attribute *attr,
+				char *buf)
+{
+	ssize_t n = 0;
+	int i = 0;
+
+	if (!reg_region) {
+		n += sprintf(buf + n, "echo [region_number] > /sys/class/hdmi/hdmi/attr/reg_dump\n");
+		n += sprintf(buf + n, "cat /sys/class/hdmi/hdmi/attr/reg_dump\n");
+		n += sprintf(buf + n, "region_number:\n");
+		n += sprintf(buf + n, "1: Identification Register\n");
+		n += sprintf(buf + n, "2: Interrupt Register\n");
+		n += sprintf(buf + n, "3: Video Sampler Register\n");
+		n += sprintf(buf + n, "4: Video Packetiser Register\n");
+		n += sprintf(buf + n, "5: Frame Composer Register\n");
+		n += sprintf(buf + n, "6: Audio Sampler Register\n");
+		n += sprintf(buf + n, "7: Audio Packertiser Register\n");
+		n += sprintf(buf + n, "8: Audio Sample GP Register\n");
+		n += sprintf(buf + n, "9: Main Controller Register\n");
+		n += sprintf(buf + n, "10: Color Space Conventer Register\n");
+		n += sprintf(buf + n, "11: HDCP Register\n");
+		n += sprintf(buf + n, "12: HDCP2.2 Register\n");
+		n += sprintf(buf + n, "13: CEC Register\n");
+		n += sprintf(buf + n, "14: EDID Register\n");
+	}
+
+	if (reg_region == 1) {
+		n += sprintf(buf + n, "Identification Register:\n");
+		n += sprintf(buf + n, "0x0000-0x0006:");
+		for (i = 0; i < 7; i++) {
+			n += sprintf(buf + n, " 0x%02x", hdmitx_read((0x0 + i) * 4));
+		}
+		n += sprintf(buf + n, "\n");
+	}
+
+	if (reg_region == 2) {
+		n += sprintf(buf + n, "Interrupt Register:\n");
+		n += sprintf(buf + n, "0x0100-0x100f:");
+		for (i = 0; i < 0x100; i++) {
+			if ((i % 16) == 0 && i != 0) {
+				n += sprintf(buf + n, "\n0x%04x-0x%04x:",
+						0x100 + i, 0x100 + i + 0x0f);
+			}
+
+			n += sprintf(buf + n, " 0x%02x", hdmitx_read((0x100 + i) * 4));
+		}
+		n += sprintf(buf + n, "\n");
+	}
+
+	if (reg_region == 3) {
+		n += sprintf(buf + n, "Video Sampler Register:\n");
+		n += sprintf(buf + n, "0x0200-0x0208:");
+		for (i = 0; i < 8; i++) {
+			n += sprintf(buf + n, " 0x%02x", hdmitx_read((0x200 + i) * 4));
+		}
+		n += sprintf(buf + n, "\n");
+	}
+
+	if (reg_region == 4) {
+		n += sprintf(buf + n, "Video Packetiser Register:\n");
+		n += sprintf(buf + n, "0x0800-0x0807:");
+		for (i = 0; i < 8; i++) {
+			n += sprintf(buf + n, " 0x%02x", hdmitx_read((0x800 + i) * 4));
+		}
+		n += sprintf(buf + n, "\n");
+	}
+
+	if (reg_region == 5) {
+		n += sprintf(buf + n, "Frame Composer Register:\n");
+		n += sprintf(buf + n, "0x1000-0x100f:");
+		for (i = 0; i < 0x21c; i++) {
+			if ((i % 16) == 0 && i != 0) {
+				n += sprintf(buf + n, "\n0x%04x-0x%04x:",
+					0x1000 + i, 0x1000 + i + 0x0f);
+			}
+
+			n += sprintf(buf + n, " 0x%02x", hdmitx_read((0x1000 + i) * 4));
+		}
+		n += sprintf(buf + n, "\n");
+	}
+
+	if (reg_region == 6) {
+		n += sprintf(buf + n, "Audio Sampler Register:\n");
+		n += sprintf(buf + n, "0x3100-0x3104:");
+		for (i = 0; i < 5; i++) {
+			n += sprintf(buf + n, " 0x%02x", hdmitx_read((0x3100 + i) * 4));
+		}
+		n += sprintf(buf + n, "\n");
+	}
+
+	if (reg_region == 7) {
+
+		n += sprintf(buf + n, "Audio Packetiser Register:\n");
+		n += sprintf(buf + n, "0x3200-0x3207:");
+		for (i = 0; i < 8; i++) {
+			n += sprintf(buf + n, " 0x%02x", hdmitx_read((0x3200 + i) * 4));
+		}
+		n += sprintf(buf + n, "\n");
+	}
+
+	if (reg_region == 8) {
+		n += sprintf(buf + n, "Audio Sample GP Register:\n");
+		n += sprintf(buf + n, "0x3500-0x3507:");
+		for (i = 0; i < 8; i++) {
+			n += sprintf(buf + n, " 0x%02x", hdmitx_read((0x3500 + i) * 4));
+		}
+		n += sprintf(buf + n, "\n");
+	}
+
+	if (reg_region == 9) {
+		n += sprintf(buf + n, "Main Controller Register:\n");
+		n += sprintf(buf + n, "0x4001-0x400b:");
+		for (i = 0; i < 0xb; i++) {
+			n += sprintf(buf + n, " 0x%02x", hdmitx_read((0x4001 + i) * 4));
+		}
+		n += sprintf(buf + n, "\n");
+	}
+
+	if (reg_region == 10) {
+		n += sprintf(buf + n, "Color Space Conventer Register:\n");
+		n += sprintf(buf + n, "0x4100-0x410f:");
+		for (i = 0; i < 0x1e; i++) {
+			if ((i % 16) == 0 && i != 0) {
+				n += sprintf(buf + n, "\n0x%04x-0x%04x:",
+					0x4100 + i, 0x4100 + i + 0x0f);
+			}
+
+			n += sprintf(buf + n, " 0x%02x", hdmitx_read((0x4100 + i) * 4));
+		}
+		n += sprintf(buf + n, "\n");
+	}
+
+	if (reg_region == 11) {
+		n += sprintf(buf + n, "HDCP Register:\n");
+		n += sprintf(buf + n, "0x5000-0x500f:");
+		for (i = 0; i < 0x20; i++) {
+			if ((i % 16) == 0 && i != 0) {
+				n += sprintf(buf + n, "\n0x%04x-0x%04x:",
+					0x5000 + i, 0x5000 + i + 0x0f);
+			}
+
+			n += sprintf(buf + n, " 0x%02x", hdmitx_read((0x5000 + i) * 4));
+		}
+		n += sprintf(buf + n, "\n");
+	}
+
+	if (reg_region == 12) {
+		n += sprintf(buf + n, "	HDCP2.2 Register:\n");
+		n += sprintf(buf + n, "0x7900-0x790e:");
+		for (i = 0; i < 0x0f; i++) {
+			n += sprintf(buf + n, " 0x%02x", hdmitx_read((0x7900 + i) * 4));
+		}
+		n += sprintf(buf + n, "\n");
+	}
+
+	if (reg_region == 13) {
+		n += sprintf(buf + n, "CEC Register:\n");
+		n += sprintf(buf + n, "0x7d00-0x7d0f:");
+		for (i = 0; i < 0x14; i++) {
+			if ((i % 16) == 0 && i != 0) {
+				n += sprintf(buf + n, "\n0x%04x-0x%04x:",
+					0x7d00 + i, 0x7d00 + i + 0x0f);
+			}
+
+			n += sprintf(buf + n, " 0x%02x", hdmitx_read((0x7d00 + i) * 4));
+		}
+		n += sprintf(buf + n, "\n");
+	}
+
+	if (reg_region == 14) {
+		n += sprintf(buf + n, "EDID Register:\n");
+		n += sprintf(buf + n, "0x7e00-0x7e0f:");
+		for (i = 0; i < 0x32; i++) {
+			if ((i % 16) == 0 && i != 0) {
+				n += sprintf(buf + n, "\n0x%04x-0x%04x:",
+					0x7e00 + i, 0x7e00 + i + 0x0f);
+			}
+
+			n += sprintf(buf + n, " 0x%02x", hdmitx_read((0x7e00 + i) * 4));
+		}
+		n += sprintf(buf + n, "\n");
+	}
+
+	reg_region = 0;
+	return n;
+}
+
+ssize_t hdmi_test_reg_dump_store(struct device *dev,
+				struct device_attribute *attr,
+				const char *buf, size_t count)
+{
+	char *end;
+
+	reg_region = (u8)simple_strtoull(buf, &end, 0);
+
+	return count;
+}
+
+static DEVICE_ATTR(reg_dump, 0664,
+					hdmi_test_reg_dump_show,
+					hdmi_test_reg_dump_store);
 
 static ssize_t hdmi_test_reg_read_show(struct device *dev,
 				struct device_attribute *attr,
@@ -2031,7 +2485,7 @@ ssize_t phy_read_store(struct device *dev,
 				const char *buf, size_t count)
 {
 	u8 start_reg = 0;
-	u16 value = 0;
+	u32 value = 0;
 	unsigned long read_count = 0;
 	u32 i;
 	struct hdmi_tx_core *core = get_platform();
@@ -2361,6 +2815,7 @@ static ssize_t hdmi_hdcp_type_store(struct device *dev,
 				struct device_attribute *attr,
 				const char *buf, size_t count)
 {
+	edid_set_test_data(buf, count);
 	return count;
 }
 
@@ -2664,10 +3119,10 @@ static struct hdmi_debug_video_mode debug_video_mode[] = {
 
 
 static char *hdmi_vic_name[] = {
-	"2160P30",
-	"2160P25",
-	"2160P24",
-	"4096x2160P24",
+	"hdmi14_4k_2160P30",
+	"hdmi14_4k_2160P25",
+	"hdmi14_4k_2160P24",
+	"hdmi14_4k_4096x2160P24",
 };
 
 
@@ -2732,7 +3187,7 @@ static ssize_t hdmi_sink_show(struct device *dev,
 
 	for (i = 0; i < sink_cap->edid_mHdmivsdb.mHdmiVicCount; i++) {
 		if (sink_cap->edid_mHdmivsdb.mHdmiVic[i] <= 0x4) {
-			n += sprintf(buf+n, "%s",
+			n += sprintf(buf+n, " %s",
 			hdmi_vic_name[
 			sink_cap->edid_mHdmivsdb.mHdmiVic[i]-1]);
 		}
@@ -2885,6 +3340,7 @@ static ssize_t hdmi_source_show(struct device *dev,
 					char *buf)
 {
 	ssize_t n = 0;
+	unsigned int hdmi14_4k_vic;
 
 	n += sprintf(buf+n, "\n%s%d\n",
 		"HPD:  ",
@@ -2918,12 +3374,19 @@ static ssize_t hdmi_source_show(struct device *dev,
 	n += sprintf(buf+n, "\n%s%s\n",
 		"PixelFormat:  ",
 		pixel_format_name[hdmi_core_get_pixel_format()]);
+
 	n += sprintf(buf+n, "\n%s%s\n",
 		"Colorimetry:  ",
 		 colorimetry_name[hdmi_core_get_colorimetry()]);
 	n += sprintf(buf+n, "\n%s%s\n",
 		"VideoFormat:  ",
 		 debug_get_video_name((int)hdmi_core_get_video_code()));
+
+	hdmi14_4k_vic = hdmi_core_get_hdmi14_4k_format();
+	if (hdmi14_4k_vic)
+		n += sprintf(buf+n, "\n%s%s\n", "hdmi14_4k_format: ",
+			hdmi_vic_name[hdmi14_4k_vic - 1]);
+
 	n += sprintf(buf+n, "\n%s%d\n",
 		"AudioLayout:  ",
 		 hdmi_core_get_audio_layout());
@@ -3039,6 +3502,7 @@ static DEVICE_ATTR(dvi_mode, 0664,
 				dvi_mode_store);
 
 static struct attribute *hdmi_attributes[] = {
+	&dev_attr_reg_dump.attr,
 	&dev_attr_read.attr,
 	&dev_attr_write.attr,
 	&dev_attr_phy_write.attr,
@@ -3051,6 +3515,7 @@ static struct attribute *hdmi_attributes[] = {
 	&dev_attr_debug.attr,
 	&dev_attr_hpd_mask.attr,
 	&dev_attr_edid.attr,
+	&dev_attr_edid_test.attr,
 
 	&dev_attr_hdmi_sink.attr,
 	&dev_attr_hdmi_source.attr,
@@ -3135,22 +3600,6 @@ static int __init hdmi_module_init(void)
 static void __exit hdmi_module_exit(void)
 {
 	pr_info("hdmi_module_exit\n");
-
-	hdmi_tx_exit(hdmi_drv->pdev);
-
-#ifdef CONFIG_HDMI2_HDCP22_SUNXI
-	dma_free_coherent(hdmi_drv->parent_dev,
-				HDCP22_DATA_SIZE,
-				&hdmi_drv->hdmi_core->mode.pHdcp.esm_data_phy_addr,
-				GFP_KERNEL | __GFP_ZERO);
-	dma_free_coherent(hdmi_drv->parent_dev,
-					HDCP22_FIRMWARE_SIZE,
-					&hdmi_drv->hdmi_core->mode.pHdcp.esm_firm_phy_addr,
-					GFP_KERNEL | __GFP_ZERO);
-#endif
-	hdmi_core_exit(hdmi_drv->hdmi_core);
-
-	kfree(hdmi_drv);
 
 	platform_driver_unregister(&dwc_hdmi_tx_pdrv);
 

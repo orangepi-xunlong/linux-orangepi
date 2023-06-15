@@ -56,6 +56,26 @@ TRACE_EVENT(display_trace_counter,
 		__get_str(counter_name), __entry->value)
 );
 
+TRACE_EVENT(display_trace_counter2,
+	TP_PROTO(int pid, char *name, int id, int value),
+	TP_ARGS(pid, name, id, value),
+	TP_STRUCT__entry(
+		__field(int, pid)
+		__string(counter_name, name)
+		__field(int, id)
+		__field(int, value)
+		),
+	TP_fast_assign(
+		__entry->pid = pid;
+		__assign_str(counter_name, name);
+		__entry->id = id;
+		__entry->value = value;
+		),
+	TP_printk("C|%d|%s-%d|%d",
+		__entry->pid,
+		__get_str(counter_name), __entry->id, __entry->value)
+);
+
 #define DISP_TRACE_END(name)   trace_tracing_mark_write(current->tgid, name, 0)
 #define DISP_TRACE_BEGIN(name) trace_tracing_mark_write(current->tgid, name, 1)
 #define DISP_TRACE_FUNC()      DISP_TRACE_BEGIN(__func__)
@@ -70,6 +90,9 @@ TRACE_EVENT(display_trace_counter,
 #define __fake_pid__ (0x0624)
 #define DISP_TRACE_INT_F(name, value) \
 	trace_display_trace_counter(__fake_pid__, name, value)
+
+#define DISP_TRACE_INT2(name, id, value) \
+	trace_display_trace_counter2(__fake_pid__, name, id, value)
 
 #endif /* _DISP_TRACE_H_ */
 

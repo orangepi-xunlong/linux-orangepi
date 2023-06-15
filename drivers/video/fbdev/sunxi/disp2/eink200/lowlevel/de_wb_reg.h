@@ -426,7 +426,7 @@ extern int wb_eink_set_gray_level(unsigned int sel, unsigned int val);
 extern u8 __bits_num_config_to_reg(u32 bit_num);
 extern int wb_eink_get_hist_val(unsigned int sel, unsigned int gray_level_cnt, unsigned int *eink_hist);
 extern int wb_eink_get_upd_win(unsigned int sel, struct upd_win *upd_win);
-extern int wb_eink_enable(unsigned int sel);
+extern int wb_eink_enable(unsigned int sel, int fmt);
 extern int wb_eink_disable(unsigned int sel);
 extern int wb_eink_interrupt_enable(unsigned int sel);
 extern int wb_eink_interrupt_disable(unsigned int sel);

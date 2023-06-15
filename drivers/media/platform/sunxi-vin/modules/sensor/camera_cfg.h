@@ -75,6 +75,8 @@ struct sensor_win_size {
 	unsigned int vipp_voff;	/*vipp crop voffset */
 	unsigned int vipp_w;	/*vipp crop width */
 	unsigned int vipp_h;	/*vipp crop height */
+	unsigned int vipp_wshrink;/*vipp shrink width */
+	unsigned int vipp_hshrink;/*vipp shrink height */
 	unsigned long top_clk;
 	unsigned long isp_clk;
 

@@ -22,9 +22,14 @@
 #include <linux/string.h>
 #include "woble.h"
 #include "tty.h"
+#include "alignment/sitm.h"
+#include <marlin_platform.h>
 
+#define CMD_TIMEOUT 5000
 #define MAX_WAKE_DEVICE_MAX_NUM 36
 #define CONFIG_FILE_PATH "/data/misc/bluedroid/bt_config.conf"
+
+MODULE_IMPORT_NS(VFS_internal_I_am_really_a_filesystem_and_am_NOT_a_driver);
 
 static struct hci_cmd_t hci_cmd;
 uint8_t device_count_db;
@@ -143,7 +148,7 @@ int mtty_bt_read_conf(void)
 	}
 
 	do {
-		read_len = kernel_read(bt_conf_fp, file_offset, p_buf, file_size);
+		read_len = kernel_read(bt_conf_fp, p_buf, file_size, &file_offset);
 		if (read_len > 0) {
 			buffer_len += read_len;
 			file_size -= read_len;
@@ -221,7 +226,7 @@ int woble_data_recv(const unsigned char *buf, int count)
 int hci_cmd_send_sync(unsigned short opcode, struct HC_BT_HDR *py,
 		struct HC_BT_HDR *rsp)
 {
-	unsigned char msg_req[HCI_CMD_MAX_LEN], *p;
+	unsigned char msg_req[HCI_CMD_MAX_LEN + BYTE_ALIGNMENT] = {0}, *p;
 	int ret = 0;
 
 	p = msg_req;
@@ -236,13 +241,17 @@ int hci_cmd_send_sync(unsigned short opcode, struct HC_BT_HDR *py,
 	}
 
 	hci_cmd.opcode = opcode;
-	ret = marlin_sdio_write(msg_req, p - msg_req);
+	ret = marlin_sdio_write(msg_req, (p - msg_req) + (BYTE_ALIGNMENT - ((p - msg_req) % BYTE_ALIGNMENT)));
 	if (!ret) {
 		hci_cmd.opcode = 0;
 		pr_err("%s marlin_sdio_write fail", __func__);
 		return 0;
 	}
-	down(&hci_cmd.wait);
+
+	if (down_timeout(&hci_cmd.wait, msecs_to_jiffies(CMD_TIMEOUT))) {
+		pr_err("%s CMD_TIMEOUT for CMD: 0x%04X", __func__, opcode);
+		mdbg_assert_interface("hci cmd timeout");
+	}
 	hci_cmd.opcode = 0;
 
 	return 0;

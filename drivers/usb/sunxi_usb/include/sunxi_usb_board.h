@@ -16,11 +16,14 @@
 #ifndef __SUNXI_USB_BOARD_H__
 #define __SUNXI_USB_BOARD_H__
 
-#include <linux/sunxi-gpio.h>
 #include <linux/of_gpio.h>
 
 #if defined(CONFIG_DUAL_ROLE_USB_INTF)
 #include <linux/usb/class-dual-role.h>
+#endif
+
+#if defined(CONFIG_TYPEC)
+#include <linux/usb/typec.h>
 #endif
 
 #define  SET_USB_PARA				"usb_para"
@@ -37,13 +40,14 @@
 #define  KEY_USB_ID_GPIO			"usb_id_gpio"
 #define  KEY_USB_DETVBUS_GPIO			"usb_det_vbus_gpio"
 
-#define  KEY_USB_DRVVBUS_GPIO			"usb_drv_vbus_gpio"
 #define  KEY_USB_REGULATOR_IO			"usb_regulator_io"
 #define  KEY_USB_REGULATOR_IO_VOL		"usb_regulator_vol"
 #define  KEY_USB_REGULATOR_ID_VBUS		"usb_regulator_id_vbus"
 #define  KEY_USB_REGULATOR_ID_VBUS_VOL		"usb_regulator_id_vbus_vol"
 
 #define  KEY_USB_WAKEUP_SUSPEND		        "usb_wakeup_suspend"
+
+#define  KEY_USB_DET_TYPE			"usb_detect_type"
 
 /* USB config info */
 enum usb_gpio_group_type {
@@ -58,10 +62,11 @@ enum usb_port_type {
 	USB_PORT_TYPE_OTG,
 };
 
-/* 0: dp/dm detect, 1: vbus/id detect */
+/* 0: dp/dm detect, 1: vbus/id detect 2: vbus/pmu detect*/
 enum usb_detect_type {
 	USB_DETECT_TYPE_DP_DM = 0,
 	USB_DETECT_TYPE_VBUS_ID,
+	USB_DETECT_TYPE_VBUS_PMU,
 };
 
 /* 0: thread scan mode; 1: gpio interrupt mode */
@@ -82,11 +87,12 @@ enum usb_id_type {
 	USB_ID_TYPE_AXP,
 };
 
+
 /* pio info */
 typedef struct usb_gpio {
 	/* pio valid, 1 - valid, 0 - invalid */
 	__u32 valid;
-	struct gpio_config gpio_set;
+	__u32 gpio;
 } usb_gpio_t;
 
 typedef struct usb_port_info {
@@ -102,8 +108,8 @@ typedef struct usb_port_info {
 	const char *id_name;
 	usb_gpio_t id;				/* usb id pin info */
 	usb_gpio_t det_vbus;			/* usb vbus pin info */
-	usb_gpio_t drv_vbus;			/* usb drv_vbus pin info */
-	usb_gpio_t restrict_gpio_set;		/* usb drv_vbus pin info */
+	// usb_gpio_t drv_vbus;			/* usb drv_vbus pin info */
+	// usb_gpio_t restrict_gpio_set;		/* usb drv_vbus pin info */
 	__u32 usb_restrict_flag;		/* usb port number(?) */
 	__u32 voltage;				/* usb port number(?) */
 	__u32 capacity;				/* usb port number(?) */
@@ -114,11 +120,22 @@ typedef struct usb_port_info {
 	struct dual_role_phy_instance *dual_role;
 	struct dual_role_phy_desc dr_desc;
 #endif
+#if defined(CONFIG_TYPEC)
+	struct typec_port *typec_port;
+	struct typec_partner *partner;
+	struct typec_capability typec_caps;
+	bool connected;
+#endif
+#if defined(CONFIG_POWER_SUPPLY)
+	struct power_supply *pmu_psy;            /* pmu type*/
+	union  power_supply_propval *pmu;
+#endif
 } usb_port_info_t;
 
 typedef struct usb_cfg {
 	u32 usb_global_enable;
 	u32 usbc_num;
+	struct platform_device *pdev;
 
 	struct usb_port_info port;
 } usb_cfg_t;

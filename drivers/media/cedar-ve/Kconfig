@@ -1,6 +1,7 @@
 config VIDEO_ENCODER_DECODER_SUNXI
 	tristate "sunxi video encoder and decoder support"
-    select DMA_SHARED_BUFFER
+	depends on ARCH_SUNXI
+	depends on DMA_SHARED_BUFFER
 	default y
 	---help---
 	  This is the driver for sunxi video decoder, including h264/

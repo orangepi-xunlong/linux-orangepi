@@ -696,6 +696,19 @@ LCD_IRQ_TCON0_VBLK:LCD_IRQ_TCON1_VBLK;
 	return ret;
 }
 
+int disp_al_tv_irq_enable(u32 screen_id)
+{
+	tcon_irq_enable(screen_id, LCD_IRQ_TCON1_VBLK);
+
+	return 0;
+}
+
+int disp_al_tv_irq_disable(u32 screen_id)
+{
+	tcon_irq_disable(screen_id, LCD_IRQ_TCON1_VBLK);
+
+	return 0;
+}
 
 
 int disp_al_device_enable_irq(u32 screen_id)
@@ -722,6 +735,11 @@ LCD_IRQ_TCON0_VBLK:LCD_IRQ_TCON1_VBLK;
 	return ret;
 }
 
+int disp_al_lcd_get_status(u32 screen_id, struct disp_panel_para *panel)
+{
+
+	return 0;
+}
 
 
 int disp_al_device_get_status(u32 screen_id)

@@ -70,6 +70,7 @@ static const struct of_device_id axp20x_i2c_of_match[] = {
 	{ .compatible = "x-powers,axp1530", .data = (void *)AXP1530_ID },
 	{ .compatible = "x-powers,axp858", .data = (void *)AXP858_ID },
 	{ .compatible = "x-powers,axp803", .data = (void *)AXP803_ID },
+	{ .compatible = "x-powers,axp2202", .data = (void *)AXP2202_ID },
 	{ .compatible = "x-powers,axp806", .data = (void *)AXP806_ID },
 	{ },
 };
@@ -121,7 +122,6 @@ static void __exit axp2101_i2c_exit(void)
 {
 	i2c_del_driver(&axp2101_i2c_driver);
 }
-
 module_exit(axp2101_i2c_exit);
 
 MODULE_DESCRIPTION("PMIC MFD I2C driver for AXP20X");

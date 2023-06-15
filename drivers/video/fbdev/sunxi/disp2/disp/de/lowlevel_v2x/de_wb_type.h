@@ -19,7 +19,7 @@
  *
  */
 #ifndef __DE_WB_TYPE_H__
-#define __DE_WB_TPYE_H__
+#define __DE_WB_TYPE_H__
 
 #define ____SEPARATOR_DEFEINE____
 #define WB_END_IE	0x1

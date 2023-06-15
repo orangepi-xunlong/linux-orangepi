@@ -31,7 +31,8 @@ struct disp_device_private_data {
 	struct disp_clk_info lcd_clk;
 
 	struct clk *clk;
-
+	struct clk *bus_clk;
+	struct reset_control *rst_bus_clk;
 	struct clk *clk_parent;
 
 	u32 irq_no;

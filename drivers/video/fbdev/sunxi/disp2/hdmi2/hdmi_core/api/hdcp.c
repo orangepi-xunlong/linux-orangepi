@@ -907,7 +907,7 @@ static u8 _read_ksv_list(hdmi_tx_dev_t *dev, int *param)
 	if (hdcp_verify_ksv(dev, hdcp_ksv_list_buffer, size) == TRUE) {
 		valid = HDCP_KSV_LIST_READY;
 		HDCP_INF("HDCP_KSV_LIST_READY");
-	} else{
+	} else {
 		valid = HDCP_ERR_KSV_LIST_NOT_VALID;
 		HDCP_INF("HDCP_ERR_KSV_LIST_NOT_VALID");
 	}

@@ -1,10 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Michael MIC implementation - optimized for TKIP MIC operations
  * Copyright 2002-2003, Instant802 Networks, Inc.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 #include <linux/types.h>
 #include <linux/bitops.h>
@@ -13,7 +10,7 @@
 
 #include "michael.h"
 
-static void michael_block(struct xrmac_michael_mic_ctx *mctx, u32 val)
+static void michael_block(struct michael_mic_ctx *mctx, u32 val)
 {
 	mctx->l ^= val;
 	mctx->r ^= rol32(mctx->l, 17);
@@ -27,7 +24,7 @@ static void michael_block(struct xrmac_michael_mic_ctx *mctx, u32 val)
 	mctx->l += mctx->r;
 }
 
-static void xrmac_michael_mic_hdr(struct xrmac_michael_mic_ctx *mctx, const u8 *key,
+static void michael_mic_hdr(struct michael_mic_ctx *mctx, const u8 *key,
 			    struct ieee80211_hdr *hdr)
 {
 	u8 *da, *sa, tid;
@@ -35,7 +32,7 @@ static void xrmac_michael_mic_hdr(struct xrmac_michael_mic_ctx *mctx, const u8 *
 	da = ieee80211_get_DA(hdr);
 	sa = ieee80211_get_SA(hdr);
 	if (ieee80211_is_data_qos(hdr->frame_control))
-		tid = *ieee80211_get_qos_ctl(hdr) & IEEE80211_QOS_CTL_TID_MASK;
+		tid = ieee80211_get_tid(hdr);
 	else
 		tid = 0;
 
@@ -53,14 +50,14 @@ static void xrmac_michael_mic_hdr(struct xrmac_michael_mic_ctx *mctx, const u8 *
 	michael_block(mctx, tid);
 }
 
-void xrmac_michael_mic(const u8 *key, struct ieee80211_hdr *hdr,
+void michael_mic(const u8 *key, struct ieee80211_hdr *hdr,
 		 const u8 *data, size_t data_len, u8 *mic)
 {
 	u32 val;
 	size_t block, blocks, left;
-	struct xrmac_michael_mic_ctx mctx;
+	struct michael_mic_ctx mctx;
 
-	xrmac_michael_mic_hdr(&mctx, key, hdr);
+	michael_mic_hdr(&mctx, key, hdr);
 
 	/* Real data */
 	blocks = data_len / 4;

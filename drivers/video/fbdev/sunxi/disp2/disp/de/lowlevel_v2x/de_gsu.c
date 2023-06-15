@@ -46,12 +46,16 @@ int de_gsu_init(unsigned int sel, uintptr_t reg_base)
 	for (j = 0; j < chno; j++) {
 		gsu_base = reg_base + (sel + 1) * 0x00100000 + gsu_offset
 		+ j * 0x10000;
-#if defined(CONFIG_ARCH_SUN50IW10)
+#if defined(CONFIG_INDEPENDENT_DE)
 		if (sel)
 			gsu_base = gsu_base - 0x00100000;
 #endif
 #if defined(CONFIG_ARCH_SUN8IW15)
 		if (j > 0)
+			gsu_base += 0x10000;
+#endif
+#if defined(CONFIG_ARCH_SUN50IW10)
+		if (sel && j > 0)
 			gsu_base += 0x10000;
 #endif
 

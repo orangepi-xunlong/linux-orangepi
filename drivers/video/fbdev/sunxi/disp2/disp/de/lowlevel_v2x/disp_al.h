@@ -31,6 +31,8 @@
 #include "disp_eink_data.h"
 #endif
 
+#include "../../pq/drv_pq.h"
+
 enum {
 	DISP_AL_IRQ_FLAG_FRAME_END  = DE_IRQ_FLAG_FRAME_END,
 	DISP_AL_IRQ_FLAG_RCQ_FINISH = DE_IRQ_FLAG_RCQ_FINISH,
@@ -136,6 +138,7 @@ int disp_al_hdmi_disable(u32 screen_id);
 int disp_al_hdmi_cfg(u32 screen_id, struct disp_video_timings *video_info);
 int disp_al_hdmi_irq_enable(u32 screen_id);
 int disp_al_hdmi_irq_disable(u32 screen_id);
+int disp_al_hdmi_pad_sel(u32 screen_id, u32 pad);
 
 int disp_al_tv_enable(u32 screen_id);
 int disp_al_tv_disable(u32 screen_id);
@@ -232,6 +235,9 @@ int disp_al_init_eink_ctrl_data_16(unsigned int disp, unsigned int wavedata_buf,
 		struct eink_timing_param *eink_timing_info);
 #endif
 void disp_al_show_builtin_patten(u32 hwdev_index, u32 patten);
+void disp_al_update_de_clk_rate(u32 rate);
+
+int disp_al_lcd_get_status(u32 screen_id, struct disp_panel_para *panel);
 
 static inline s32 disp_al_capture_set_rcq_update(u32 disp, u32 en) { return 0; }
 
@@ -255,4 +261,6 @@ static inline int disp_al_device_set_de_use_rcq(u32 screen_id, u32 use_rcq) { re
 
 static inline int disp_al_device_set_output_type(u32 screen_id, u32 output_type) { return 0; }
 
+unsigned long disp_al_get_reg_base(u32 sel, u32 *off, int need_update);
+unsigned long de_get_reg_base(u32 sel, u32 *off, int need_update);
 #endif

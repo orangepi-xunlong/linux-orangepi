@@ -1995,9 +1995,11 @@ int kbase_pm_init_hw(struct kbase_device *kbdev, unsigned int flags)
 	spin_unlock_irqrestore(&kbdev->hwaccess_lock, irq_flags);
 
 	/* Soft reset the GPU */
-	if (kbdev->protected_mode_support)
-		kbdev->protected_ops->protected_mode_disable(
+	if (kbdev->protected_mode_support) {
+		err = kbdev->protected_ops->protected_mode_disable(
 				kbdev->protected_dev);
+	}
+
 	err = kbase_pm_do_reset(kbdev);
 
 	spin_lock_irqsave(&kbdev->hwaccess_lock, irq_flags);

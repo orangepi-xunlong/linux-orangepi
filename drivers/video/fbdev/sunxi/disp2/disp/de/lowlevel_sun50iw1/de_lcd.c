@@ -1271,3 +1271,12 @@ void tcon_show_builtin_patten(u32 sel, u32 patten)
 {
 	lcd_dev[sel]->tcon0_ctl.bits.src_sel = patten;
 }
+
+void tcon_reset(u32 sel)
+{
+	lcd_dev[sel]->tcon0_ctl.bits.src_sel = 1;
+	lcd_dev[sel]->tcon_gctl.bits.tcon_en = 0;
+	disp_delay_us(20);
+	lcd_dev[sel]->tcon0_ctl.bits.src_sel = 0;
+	lcd_dev[sel]->tcon_gctl.bits.tcon_en = 1;
+}

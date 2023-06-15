@@ -10,3 +10,10 @@ config SPRDWL_NG
 	  This is a driver for the Spreadtrum IEEE802.11 WLAN devices.
 
 	  When compiled as a module, this driver will be called sprdwl_ng.
+
+config UNISOC_WIFI_PS
+	bool "Unisoc Wi-Fi Power Save Support"
+	depends on WLAN_UWE5622
+        ---help---
+          Spard UWE5622 Wi-Fi Driver Power Save.
+

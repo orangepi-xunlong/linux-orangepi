@@ -19,6 +19,8 @@
 #include <linux/atomic.h>
 #include <net/mac80211.h>
 #include <asm/bitops.h>
+#include <linux/version.h>
+
 
 /*Macroses for Driver parameters.*/
 #define XRWL_MAX_QUEUE_SZ    (128)
@@ -72,6 +74,16 @@
 #define BH_PROC_RX       0
 #define BH_PROC_DPA      0
 #endif
+
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0))
+#include <uapi/linux/time.h>
+#include <linux/timekeeping.h>
+#include <linux/timekeeping32.h>
+
+void xr_do_gettimeofday(struct timeval *tv);
+void xr_get_monotonic_boottime(struct timespec *ts);
+
+#endif /* (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0)) */
 
 #include "common.h"
 #include "queue.h"
@@ -289,11 +301,7 @@ struct xradio_common {
 	/* calibration, output power limit and rssi<->dBm conversation data */
 
 	/* BBP/MAC state */
-#ifdef USE_VFS_FIRMWARE
-	const struct xr_file		*sdd;
-#else
 	const struct firmware		*sdd;
-#endif
 	struct ieee80211_rate		*rates;
 	struct ieee80211_rate		*mcs_rates;
 	u8 mac_addr[ETH_ALEN];
@@ -368,7 +376,7 @@ struct xradio_common {
 	bool                exit_sync;
 	int			hw_restart_work_running;
 	bool                hw_restart;
-	bool				hw_cant_wakeup;
+	bool		    hw_cant_wakeup;
 	struct work_struct  hw_restart_work;
 #endif
 
@@ -431,7 +439,7 @@ struct xradio_common {
 
 	struct ieee80211_iface_limit		if_limits1[2];
 	struct ieee80211_iface_limit		if_limits2[2];
-	struct ieee80211_iface_limit		if_limits3[2];
+	struct ieee80211_iface_limit		if_limits3[3];
 	struct ieee80211_iface_combination	if_combs[3];
 
 	struct semaphore		wsm_oper_lock;
@@ -554,7 +562,7 @@ struct xradio_vif {
 	s8			wep_default_key_id;
 	struct work_struct	wep_key_work;
 	unsigned long           rx_timestamp;
-	u32                     cipherType;
+	u32                     unicast_cipher_type;
 
 
 	/* AP powersave */
@@ -619,6 +627,7 @@ struct xradio_vif {
 #ifdef AP_ARP_COMPAT_FIX
 	u16    arp_compat_cnt;
 #endif
+	bool	is_mfp_connect;
 };
 struct xradio_sta_priv {
 	int link_id;
@@ -674,6 +683,7 @@ struct xradio_common *xrwl_vifpriv_to_hwpriv(struct xradio_vif *priv)
 {
 	return priv->hw_priv;
 }
+
 static inline
 struct xradio_vif *xrwl_get_vif_from_ieee80211(struct ieee80211_vif *vif)
 {

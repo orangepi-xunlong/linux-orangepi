@@ -34,7 +34,10 @@ struct disp_device_private_data {
 	u32 irq_no;
 
 	struct clk *clk;
+	struct clk *bus_clk;
 	struct clk *parent_clk;
+
+	struct reset_control *rst_bus_clk;
 };
 
 static u32 hdmi_used;
@@ -138,8 +141,6 @@ static s32 hdmi_clk_config(struct disp_device *hdmi)
 	    DE_WRN("hdmi clk init null hdl!\n");
 	    return DIS_FAIL;
 	}
-	if (hdmip->parent_clk)
-		clk_set_parent(hdmip->clk, hdmip->parent_clk);
 
 	parent_clk =  clk_get_parent(hdmip->clk);
 	if (!parent_clk) {
@@ -186,8 +187,22 @@ static s32 hdmi_clk_enable(struct disp_device *hdmi)
 		return DIS_FAIL;
 	}
 
+	if (hdmip->rst_bus_clk) {
+		ret = reset_control_deassert(hdmip->rst_bus_clk);
+		if (ret) {
+			pr_err("[%s] deassert reset tcon tv failed!\n", __func__);
+			return DIS_FAIL;
+		}
+	}
+
+	if (hdmip->bus_clk) {
+		ret = clk_prepare_enable(hdmip->bus_clk);
+		if (ret != 0)
+			DE_WRN("fail enable hdmi's bus clock!\n");
+	}
+
 	hdmi_clk_config(hdmi);
-	if (hdmip->clk && (!__clk_get_enable_count(hdmip->clk))) {
+	if (hdmip->clk) {
 		ret = clk_prepare_enable(hdmip->clk);
 		if (ret != 0)
 			DE_WRN("fail enable hdmi's clock!\n");
@@ -205,8 +220,17 @@ static s32 hdmi_clk_disable(struct disp_device *hdmi)
 		return DIS_FAIL;
 	}
 
-	if (hdmip->clk && (__clk_get_enable_count(hdmip->clk)))
+	if (hdmip->clk && (__clk_is_enabled(hdmip->clk)))
 		clk_disable_unprepare(hdmip->clk);
+
+	if (hdmip->bus_clk && (__clk_is_enabled(hdmip->bus_clk)))
+		clk_disable_unprepare(hdmip->bus_clk);
+
+	if (hdmip->rst_bus_clk) {
+		if (reset_control_assert(hdmip->rst_bus_clk) != 0)
+			pr_err("[%s] assert bus clk failed!\n", __func__);
+			return DIS_FAIL;
+	}
 
 	return 0;
 }
@@ -216,12 +240,17 @@ void disp_hdmi_pad_sel(unsigned int pad_sel)
 #ifdef USE_CEC_DDC_PAD
 	struct disp_device_private_data *hdmip
 				= disp_hdmi_get_priv(hdmis);
-	if (!hdmis)
+	if (!hdmis) {
+		pr_err("can NOT get hdmis!\n");
 		return;
-	if (!hdmip->clk)
-		return;
-	if (!__clk_get_enable_count(hdmip->clk))
-		clk_prepare_enable(hdmip->clk);
+	}
+
+	if (hdmip->clk) {
+		if (!__clk_is_enabled(hdmip->clk))
+			clk_prepare_enable(hdmip->clk);
+	} else {
+		pr_err("hdmip has null clk\n");
+	}
 	disp_al_hdmi_pad_sel(hdmis->hwdev_index, pad_sel);
 #endif
 }
@@ -231,7 +260,7 @@ void disp_hdmi_pad_release(void)
 {
 #ifdef USE_CEC_DDC_PAD
 	/*struct disp_device_private_data *hdmip
-				= disp_hdmi_get_priv(hdmis);*/
+		= disp_hdmi_get_priv(hdmis);*/
 	if (!hdmis)
 		return;
 
@@ -240,9 +269,10 @@ void disp_hdmi_pad_release(void)
 	/*if (!hdmip->clk)
 		return;
 
-	if (__clk_get_enable_count(hdmip->clk))
+	if (__clk_is_enabled(hdmip->clk))
 		clk_disable_unprepare(hdmip->clk);*/
 #endif
+
 }
 EXPORT_SYMBOL(disp_hdmi_pad_release);
 
@@ -251,7 +281,9 @@ u32 disp_hdmi_pad_get(void)
 	u32 ret = 0;
 
 #ifdef USE_CEC_DDC_PAD
+#if defined(CONFIG_ARCH_SUN50IW9) || defined(CONFIG_ARCH_SUN8IW20)
 	ret = tcon_pad_get(hdmis->hwdev_index);
+#endif
 #endif
 	return ret;
 }
@@ -314,9 +346,9 @@ static s32 disp_hdmi_set_func(struct disp_device *hdmi,
 }
 
 #if defined(__LINUX_PLAT__)
-static s32 disp_hdmi_event_proc(int irq, void *parg)
+static irqreturn_t disp_hdmi_event_proc(int irq, void *parg)
 #else
-static s32 disp_hdmi_event_proc(void *parg)
+static irqreturn_t disp_hdmi_event_proc(void *parg)
 #endif
 {
 	struct disp_device *hdmi = (struct disp_device *)parg;
@@ -539,7 +571,7 @@ static s32 disp_hdmi_sw_enable(struct disp_device *hdmi)
 
 #if !defined(CONFIG_COMMON_CLK_ENABLE_SYNCBOOT)
 #ifdef CONFIG_HDMI2_FREQ_SPREAD_SPECTRUM
-	/*if (!__clk_get_enable_count(hdmip->clk)) {
+	/*if (!__clk_is_enabled(hdmip->clk)) {
 		if (hdmi_clk_enable(hdmi) != 0)
 			return -1;
 	}*/
@@ -990,6 +1022,24 @@ exit:
 		return ret;
 }
 
+static s32 disp_hdmi_set_vsif_config(struct disp_device *hdmi, void *config,
+									 struct disp_device_dynamic_config *scfg)
+{
+	int ret = -1;
+	struct disp_device_private_data *hdmip = disp_hdmi_get_priv(hdmi);
+
+	if ((hdmi == NULL) || (hdmip == NULL)) {
+		DE_WRN("NULL hdl!\n");
+		ret = false;
+		goto exit;
+	}
+	if (hdmip->hdmi_func.set_vsif_config != NULL)
+		return hdmip->hdmi_func.set_vsif_config(config, scfg);
+
+exit:
+	return ret;
+}
+
 s32 disp_init_hdmi(struct disp_bsp_init_para *para)
 {
 	u32 num_devices;
@@ -1074,8 +1124,9 @@ s32 disp_init_hdmi(struct disp_bsp_init_para *para)
 		hdmip->config.aspect_ratio = 8;
 		hdmip->irq_no =
 		    para->irq_no[DISP_MOD_LCD0 + hwdev_index];
-		hdmip->clk = para->mclk[DISP_MOD_LCD0 + hwdev_index];
-
+		hdmip->clk = para->clk_tcon[hwdev_index];
+		hdmip->bus_clk = para->clk_bus_tcon[hwdev_index];
+		hdmip->rst_bus_clk = para->rst_bus_tcon[hwdev_index];
 		hdmi->set_manager = disp_device_set_manager;
 		hdmi->unset_manager = disp_device_unset_manager;
 		hdmi->get_resolution = disp_device_get_resolution;
@@ -1097,6 +1148,7 @@ s32 disp_init_hdmi(struct disp_bsp_init_para *para)
 		hdmi->set_static_config = disp_hdmi_set_static_config;
 		hdmi->get_static_config = disp_hdmi_get_static_config;
 		hdmi->set_dynamic_config = disp_hdmi_set_dynamic_config;
+		hdmi->set_vsif_config = disp_hdmi_set_vsif_config;
 		hdmi->check_config_dirty = disp_hdmi_check_config_dirty;
 		hdmi->get_input_csc = disp_hdmi_get_input_csc;
 		hdmi->get_input_color_range =

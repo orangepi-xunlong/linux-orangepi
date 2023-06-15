@@ -1,5 +1,5 @@
 /*
- * linux-4.9/drivers/media/platform/sunxi-vin/vin-csi/sunxi_csi.h
+ * linux-5.4/drivers/media/platform/sunxi-vin/vin-csi/sunxi_csi.h
  *
  * Copyright (c) 2007-2017 Allwinnertech Co., Ltd.
  *
@@ -55,6 +55,8 @@ struct csi_dev {
 	unsigned int reset_time;
 };
 
+int sunxi_csi_subdev_s_parm(struct v4l2_subdev *sd,
+				   struct v4l2_streamparm *param);
 struct v4l2_subdev *sunxi_csi_get_subdev(int id);
 int sunxi_csi_platform_register(void);
 void sunxi_csi_platform_unregister(void);

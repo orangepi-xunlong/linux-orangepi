@@ -21,8 +21,9 @@
 #include "de_rtmx.h"
 #include "de_enhance.h"
 #include "de_feat.h"
-#include "de_vep_table.h"
 
+#ifdef CONFIG_DISP2_SUNXI_SUPPORT_ENAHNCE
+#include "de_vep_table.h"
 #define ONE_SCREEN_ONE_PARA	/* only ONE parameters for one screen, and all VEPs in this screen use SAME parameters */
 /* DEBUG */
 #define ASE_EXIST
@@ -360,3 +361,60 @@ int de_enhance_set_mode(unsigned int format, struct disp_enhance_config *config)
 
 	return 0;
 }
+#else
+int de_enhance_info2data(struct disp_enhance_config *config,
+			 vep_config_data *data, unsigned int bypass)
+{
+	return 0;
+}
+
+int de_enhance_set_format(unsigned int screen_id, unsigned int format)
+{
+	return 0;
+}
+
+int de_enhance_apply(unsigned int screen_id,
+			   struct disp_enhance_config *config)
+{
+	return 0;
+}
+int de_enhance_set_size(unsigned int screen_id, struct disp_rect *size)
+{
+	return 0;
+}
+int de_enhance_demo_enable(unsigned int screen_id, unsigned int enable)
+{
+	return 0;
+}
+
+int de_enhance_sync(unsigned int screen_id)
+{
+	/* de_enhance_update_regs(id); */
+	return 0;
+}
+int de_enhance_tasklet(unsigned int screen_id)
+{
+	return 0;
+}
+
+int de_enhance_update_regs(unsigned int screen_id)
+{
+	return 0;
+}
+
+int de_enhance_init(struct disp_bsp_init_para *para)
+{
+	return 0;
+}
+int de_enhance_exit(void)
+{
+	return 0;
+}
+
+int de_enhance_set_mode(unsigned int format, struct disp_enhance_config *config)
+{
+	return 0;
+}
+
+
+#endif

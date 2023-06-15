@@ -10,6 +10,8 @@ obj-$(CONFIG_HDMI_DISP2_SUNXI) += disp2/hdmi/
 
 obj-$(CONFIG_HDMI2_DISP2_SUNXI) += disp2/hdmi2/
 
+obj-$(CONFIG_HDMI_EP952_DISP2_SUNXI) += disp2/hdmi_ep952/
+
 obj-$(CONFIG_TV_DISP2_SUNXI) += disp2/tv/
 
 obj-$(CONFIG_DISP2_TV_AC200) += disp2/tv/
@@ -20,3 +22,4 @@ obj-$(CONFIG_EDP_DISP2_SUNXI) += disp2/edp/
 
 obj-$(CONFIG_EINK200_SUNXI) += disp2/eink200/
 
+obj-$(CONFIG_LCD_FB) += lcd_fb/

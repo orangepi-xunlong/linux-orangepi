@@ -1015,6 +1015,19 @@ int disp_al_device_disable_irq(u32 screen_id)
 	return ret;
 }
 
+int disp_al_lcd_get_status(u32 screen_id, struct disp_panel_para *panel)
+{
+	int ret = 0;
+#if defined(DSI_VERSION_40)
+	if (panel->lcd_if == LCD_IF_DSI)
+		ret = dsi_get_status(screen_id);
+	else
+#endif
+		ret = tcon_get_status(screen_id, al_priv.tcon_type[screen_id]);
+
+	return ret;
+}
+
 int disp_al_device_get_status(u32 screen_id)
 {
 	int ret = 0;

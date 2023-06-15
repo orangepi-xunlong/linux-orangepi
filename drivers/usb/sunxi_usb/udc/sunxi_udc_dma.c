@@ -196,7 +196,7 @@ void sunxi_udc_dma_set_config(struct sunxi_udc_ep *ep,
 		return;
 	}
 
-	ep->dev->dma_hdle = dma_hdl;
+	ep->dma_hdle = dma_hdl;
 	pchan = (dma_channel_t *)dma_hdl;
 	if (is_tx)
 		pchan->ep_num = ep_fifo_in[ep->num];
@@ -252,11 +252,8 @@ __s32 sunxi_udc_dma_remove(struct sunxi_udc *dev)
 
 #else
 
-#ifdef CONFIG_DMA_ENGINE
 #include <linux/dmaengine.h>
 #include <linux/dma-mapping.h>
-#include <linux/dma/sunxi-dma.h>
-#endif
 static sunxi_udc_dma_parg_t sunxi_udc_dma_para;
 
 static void sunxi_udc_dma_callback1(void *parg)
@@ -446,22 +443,23 @@ void sunxi_udc_dma_set_config(struct sunxi_udc_ep *ep,
 	is_tx = is_tx_ep(ep);
 
 	fifo_addr = USBC_REG_EPFIFOx(ep->dev->sunxi_udc_io->usb_vbase, ep->num);
+	printk("%s Please fix me\n", __func__);
 	switch (ep->num) {
 	case 1:
-		usbc_no = DRQSRC_OTG_EP1;
+		//usbc_no = DRQSRC_OTG_EP1;
 		break;
 	case 2:
-		usbc_no = DRQSRC_OTG_EP2;
+		//usbc_no = DRQSRC_OTG_EP2;
 		break;
 	case 3:
-		usbc_no = DRQSRC_OTG_EP3;
+		//usbc_no = DRQSRC_OTG_EP3;
 		break;
 	case 4:
-		usbc_no = DRQSRC_OTG_EP4;
+		//usbc_no = DRQSRC_OTG_EP4;
 		break;
 #if defined(CONFIG_ARCH_SUN50I) || defined(CONFIG_ARCH_SUN8IW6)
 	case 5:
-		usbc_no = DRQSRC_OTG_EP5;
+		//usbc_no = DRQSRC_OTG_EP5;
 		break;
 #endif
 	default:
@@ -471,24 +469,26 @@ void sunxi_udc_dma_set_config(struct sunxi_udc_ep *ep,
 	sunxi_udc_dma_para.ep[ep->num] = ep;
 	if (!is_tx) { /* ep in, rx */
 		slave_config.direction = DMA_DEV_TO_MEM;
-		slave_config.src_addr = fifo_addr;
+		slave_config.src_addr = (phys_addr_t)fifo_addr;
 		slave_config.dst_addr = buff_addr;
 		slave_config.src_addr_width = DMA_SLAVE_BUSWIDTH_4_BYTES;
 		slave_config.dst_addr_width = DMA_SLAVE_BUSWIDTH_4_BYTES;
 		slave_config.src_maxburst = 1;
 		slave_config.dst_maxburst = 1;
-		slave_config.slave_id = sunxi_slave_id(DRQDST_SDRAM, usbc_no);
+		printk("%s Please fix me\n", __func__);
+		//slave_config.slave_id = sunxi_slave_id(DRQDST_SDRAM, usbc_no);
 		dmaengine_slave_config(ep->dev->sunxi_udc_dma[ep->num].chan,
 					&slave_config);
 	} else { /* ep out, tx */
 		slave_config.direction = DMA_MEM_TO_DEV;
 		slave_config.src_addr = buff_addr;
-		slave_config.dst_addr = fifo_addr;
+		slave_config.dst_addr = (phys_addr_t)fifo_addr;
 		slave_config.src_addr_width = DMA_SLAVE_BUSWIDTH_4_BYTES;
 		slave_config.dst_addr_width = DMA_SLAVE_BUSWIDTH_4_BYTES;
 		slave_config.src_maxburst = 1;
 		slave_config.dst_maxburst = 1;
-		slave_config.slave_id = sunxi_slave_id(usbc_no, DRQSRC_SDRAM);
+		printk("%s Please fix me\n", __func__);
+		//slave_config.slave_id = sunxi_slave_id(usbc_no, //DRQSRC_SDRAM);
 		dmaengine_slave_config(ep->dev->sunxi_udc_dma[ep->num].chan,
 					&slave_config);
 	}

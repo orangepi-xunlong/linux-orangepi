@@ -1958,8 +1958,11 @@ osl_sysuptime_us(void)
 {
 	struct timeval tv;
 	uint64 usec;
+	struct timespec ts;
+	getnstimeofday(&ts);
+	tv.tv_sec = ts.tv_sec;
+	tv.tv_usec = ts.tv_nsec/1000;
 
-	do_gettimeofday(&tv);
 	/* tv_usec content is fraction of a second */
 	usec = (uint64)tv.tv_sec * 1000000ul + tv.tv_usec;
 	return usec;
@@ -2782,3 +2785,5 @@ osl_timer_del(osl_t *osh, osl_timer_t *t)
 	return (TRUE);
 }
 #endif
+
+MODULE_IMPORT_NS(VFS_internal_I_am_really_a_filesystem_and_am_NOT_a_driver);

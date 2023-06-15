@@ -1,0 +1,17 @@
+config DISP2_SUNXI_SUPPORT_SMBL
+	bool "Support smart backlight"
+	default y
+	---help---
+		If you want to support smart backlight, select it.
+
+config DISP2_SUNXI_SUPPORT_ENAHNCE
+	bool "Support Video Enhance Process"
+	default y
+	---help---
+		If you want to support video enhance process, select it.
+
+config DISP2_SUNXI_DEVICE_OFF_ON_RELEASE
+	bool "Clear all layers and turn off display device on /dev/disp release"
+	default y
+	help
+		Select it to enable this feature.

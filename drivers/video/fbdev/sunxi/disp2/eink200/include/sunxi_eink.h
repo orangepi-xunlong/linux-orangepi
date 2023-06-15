@@ -22,9 +22,12 @@
 
 enum EINK_CMD {
 	EINK_UPDATE_IMG,
+	EINK_WRITE_BACK_IMG,
 	EINK_SET_TEMP,
 	EINK_GET_TEMP,
 	EINK_SET_GC_CNT,
+	EINK_SELF_STANDBY,
+	EINK_GET_FREE_BUF,
 };
 
 enum upd_mode {
@@ -69,13 +72,34 @@ enum upd_pixel_fmt {
 	EINK_Y3 = 0x0e,
 };
 
-struct eink_upd_cfg {
-	struct upd_win		upd_win;
-	enum upd_mode		upd_mode;
-	enum dither_mode	dither_mode;
-	enum upd_pixel_fmt	out_fmt;
-	bool			force_fresh;
+struct upd_pic_size {
+	u32 width;
+	u32 height;
+	u32 align;
+};
+
+struct buf_slot {
+	int count;
+	int upd_order[32];
+};
+
+struct eink_img {
+	int			fd;
+	void			*paddr;
+	u32			pitch;
+	bool			win_calc_en;
 	bool			upd_all_en;
-	bool			de_bypass;
+	enum upd_mode           upd_mode;
+	struct upd_win		upd_win;
+	struct upd_pic_size	size;
+	enum upd_pixel_fmt      out_fmt;
+	enum dither_mode        dither_mode;
+	unsigned int		*eink_hist;
+};
+
+struct eink_upd_cfg {
+	u32			order;
+	struct eink_img		img;
+	bool			force_fresh;
 };
 #endif

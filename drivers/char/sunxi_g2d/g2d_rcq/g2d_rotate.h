@@ -20,6 +20,7 @@
 #include <linux/g2d_driver.h>
 
 __s32 g2d_rotate_set_para(g2d_image_enh *src, g2d_image_enh *dst, __u32 flag);
+__s32 g2d_lbc_rot_set_para(g2d_lbc_rot *para);
 void g2d_rot_set_base(unsigned long base);
 __s32 g2d_rot_irq_query(void);
 

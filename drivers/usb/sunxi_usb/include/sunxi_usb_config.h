@@ -30,7 +30,6 @@
 
 #include  "sunxi_usb_board.h"
 #include  "sunxi_udc.h"
-#include  <linux/sunxi-gpio.h>
 #include  <linux/gpio.h>
 
 #if defined(CONFIG_USB_SUNXI_HCD0)

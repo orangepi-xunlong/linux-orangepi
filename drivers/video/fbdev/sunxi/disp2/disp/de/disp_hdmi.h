@@ -12,6 +12,7 @@
 #define __DISP_HDMI_H__
 
 #include "disp_private.h"
+#include <linux/reset.h>
 
 #define HDMI1440_480I 6
 #define HDMI1440_576I 21

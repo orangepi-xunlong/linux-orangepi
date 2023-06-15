@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /* linux/arch/sparc/lib/memset.S: Sparc optimized memset, bzero and clear_user code
  * Copyright (C) 1991,1996 Free Software Foundation
  * Copyright (C) 1996,1997 Jakub Jelinek (jj@sunsite.mff.cuni.cz)
@@ -63,6 +64,7 @@
 __bzero_begin:
 
 	.globl	__bzero
+	.type	__bzero,#function
 	.globl	memset
 	EXPORT_SYMBOL(__bzero)
 	EXPORT_SYMBOL(memset)
@@ -140,6 +142,7 @@ __bzero:
 	ZERO_LAST_BLOCKS(%o0, 0x48, %g2)
 	ZERO_LAST_BLOCKS(%o0, 0x08, %g2)
 13:
+	EXT(12b, 13b, 21f)
 	be	8f
 	 andcc	%o1, 4, %g0
 

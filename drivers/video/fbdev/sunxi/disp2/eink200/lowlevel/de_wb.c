@@ -48,7 +48,7 @@ int rgb2yuv709[3][4] = {
 	{0xff8b, 0xfe76, 0x0200, 0x20200},
 	{0x0200, 0xfe30, 0xffd1, 0x20200} };/* rgb2yuv */
 int r2gray[3][4] = {
-	{0x0155, 0x0155, 0x0156, 0x0200},
+	{0x0155, 0x0155, 0x0156, 0x0200}, /* eink must use full(0x0200) otherwise DU and A2 cant show black (16 / 0)*/
 	{0x0000, 0x0000, 0x0000, 0x0000},
 	{0x0000, 0x0000, 0x0000, 0x0000} };/* rgb2gray */
 
@@ -64,7 +64,6 @@ int r2gray[3][4] = {
 /* ************************************************************************* */
 int wb_eink_set_reg_base(unsigned int sel, void __iomem *base)
 {
-	EINK_INFO_MSG("sel=%d, base=0x%p\n", sel, (base + WB_OFFSET));
 	wb_dev[sel] = (struct __wb_reg_t *)(base + WB_OFFSET);
 
 	return 0;
@@ -83,7 +82,7 @@ unsigned long wb_eink_get_reg_base(unsigned int sel)
 {
 	unsigned long ret = 0;
 
-	ret = *((unsigned long *)wb_dev[sel]);
+	ret = (unsigned long)wb_dev[sel];
 
 	return ret;
 }
@@ -103,12 +102,13 @@ int wb_eink_disable(unsigned int sel)
 /* return         : */
 /* success */
 /* ************************************************************************* */
-int wb_eink_enable(unsigned int sel)
+int wb_eink_enable(unsigned int sel, int fmt)
 {
 	wb_dev[sel]->gctrl.dwval |= 1;
-	wb_dev[sel]->eink_ctl.dwval |= 1;
+	if (fmt != EINK_RGB888)
+		wb_dev[sel]->eink_ctl.dwval |= 1;
 
-	EINK_INFO_MSG("gctrl val=0x%x, eink_ctrl val=0x%x\n",
+	EINK_DEBUG_MSG("gctrl val=0x%x, eink_ctrl val=0x%x\n",
 			wb_dev[sel]->gctrl.dwval, wb_dev[sel]->eink_ctl.dwval);
 	return 0;
 }
@@ -138,7 +138,7 @@ int wb_eink_set_a2_mode(unsigned int sel)
 
 int wb_eink_set_gray_level(unsigned int sel, unsigned int val)
 {
-	EINK_INFO_MSG("set gray level val = %d\n", val);
+	EINK_DEBUG_MSG("set gray level val = %d\n", val);
 	wb_dev[sel]->eink_ctl.bits.a16_gray = val;
 
 	return 0;
@@ -146,7 +146,7 @@ int wb_eink_set_gray_level(unsigned int sel, unsigned int val)
 
 int wb_eink_set_dither_mode(unsigned int sel, enum dither_mode dither_mode)
 {
-	EINK_INFO_MSG("dither mode is 0x%x\n", dither_mode);
+	EINK_DEBUG_MSG("dither mode is 0x%x\n", dither_mode);
 	wb_dev[sel]->eink_ctl.bits.dither_mode = dither_mode;
 
 	return 0;
@@ -203,6 +203,7 @@ int wb_eink_set_para(unsigned int sel, __eink_wb_config_t *cfg)
 	unsigned int upd_in_pitch = 0;
 	enum dither_mode dither_mode;
 	bool win_en = false;
+	u32 bypass_val = 0;
 
 	/* get para */
 	in_w         = cfg->frame.size.width;
@@ -220,6 +221,8 @@ int wb_eink_set_para(unsigned int sel, __eink_wb_config_t *cfg)
 	out_window_w = in_w;
 	out_window_h = in_h;
 	upd_in_pitch = in_w;
+	if (out_fmt == EINK_RGB888)
+		upd_in_pitch = upd_in_pitch * 3;
 
 	csc_std	     = cfg->csc_std;
 	win_en	     = cfg->win_en;
@@ -229,9 +232,6 @@ int wb_eink_set_para(unsigned int sel, __eink_wb_config_t *cfg)
 
 	wb_eink_set_win_en(sel, win_en);
 	wb_eink_set_dither_mode(sel, dither_mode);
-
-	/* (0x30000000|(sel << 16)|(self_sync == 1)?0x20:0x0); */
-	wb_dev[sel]->gctrl.dwval |= 0x20000020;
 
 	wb_dev[sel]->size.dwval = (in_w-1)|((in_h-1)<<16);
 	/* input crop window */
@@ -243,14 +243,18 @@ int wb_eink_set_para(unsigned int sel, __eink_wb_config_t *cfg)
 	wb_dev[sel]->wb_addr_a0.dwval = out_addr;
 	wb_dev[sel]->wb_addr_a1.dwval = 0;
 	wb_dev[sel]->wb_addr_a2.dwval = 0;
-	wb_dev[sel]->wb_pitch0.dwval = out_buf_w;
+	if (out_fmt == EINK_RGB888)
+		wb_dev[sel]->wb_pitch0.dwval = out_buf_w * 3;
+	else
+		wb_dev[sel]->wb_pitch0.dwval = out_buf_w;
 	wb_dev[sel]->wb_pitch1.dwval = 0;
 
 	/* upd win in pitch*/
 	wb_dev[sel]->eink_in_pitch.dwval = upd_in_pitch;
 
 	/* CSC */
-	wb_dev[sel]->bypass.dwval |= 0x00000001;
+	bypass_val |= 0x1;
+//	wb_dev[sel]->bypass.dwval |= 0x1;
 	if (csc_std == 0 || csc_std > 2) {
 		wb_dev[sel]->c00.bits.coff = rgb2yuv601[0][0];
 		wb_dev[sel]->c01.bits.coff = rgb2yuv601[0][1];
@@ -298,13 +302,21 @@ int wb_eink_set_para(unsigned int sel, __eink_wb_config_t *cfg)
 		wb_dev[sel]->c23.bits.cont = r2gray[2][3];
 	}
 	/*fine scal*/
-	wb_dev[sel]->bypass.dwval &= 0xfffffffb;
+
+	bypass_val &= 0xfffffffb;
+//	wb_dev[sel]->bypass.dwval &= 0xfffffffb;
+	/* because of A100 read reg bug,val is 0, so we cant & */
+	wb_dev[sel]->bypass.dwval = bypass_val;
+
 	wb_dev[sel]->fs_hstep.dwval = 1 << 20;
 	wb_dev[sel]->fs_vstep.dwval = 1 << 20;
 	wb_dev[sel]->fs_insize.dwval =
 		(out_window_w - 1) | ((out_window_h - 1) << 16);
 	wb_dev[sel]->fs_outsize.dwval =
 		(out_window_w - 1) | ((out_window_h - 1) << 16);
+
+	/* (0x30000000|(sel << 16)|(self_sync == 1)?0x20:0x0); */
+	wb_dev[sel]->gctrl.dwval |= 0x30000020;
 	return 0;
 }
 
@@ -312,7 +324,7 @@ int wb_eink_set_last_img(unsigned int sel, unsigned int last_img_addr)
 {
 	unsigned int addr;
 
-	EINK_INFO_MSG("input !\n");
+	EINK_DEBUG_MSG("input !\n");
 	addr = last_img_addr;
 	wb_dev[sel]->eink_in_laddr.dwval = addr;
 	return 0;
@@ -336,6 +348,7 @@ int wb_eink_get_status(unsigned int sel)
 
 	status = wb_dev[sel]->status.dwval & 0x71;
 
+	EINK_DEBUG_MSG("status = 0x%x\n", status);
 	if (status == 0x11)
 		return EWB_OK;
 	else if (status & 0x20)
@@ -393,7 +406,7 @@ int wb_eink_get_hist_val(unsigned int sel, unsigned int gray_level_cnt, unsigned
 {
 	int i = 0;
 
-	EINK_INFO_MSG("\n");
+	EINK_DEBUG_MSG("\n");
 	for (i = 0; i < gray_level_cnt; i++) {
 		eink_hist[i] = wb_dev[sel]->eink_hist[i].dwval;
 	}
@@ -407,7 +420,7 @@ int wb_eink_interrupt_enable(unsigned int sel)
 	/* register irq routine */
 	/* os_request_irq(); */
 
-	EINK_INFO_MSG("WB IRQ ENABLE\n");
+	EINK_DEBUG_MSG("WB IRQ ENABLE\n");
 	wb_dev[sel]->intr.dwval |= 0x00000001;
 	return 0;
 }

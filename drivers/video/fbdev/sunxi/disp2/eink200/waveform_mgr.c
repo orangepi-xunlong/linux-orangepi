@@ -9,6 +9,7 @@
  */
 #include "include/eink_sys_source.h"
 #include "include/eink_driver.h"
+#include "libeink.h"
 
 
 #define    C_HEADER_INFO_OFFSET		0
@@ -27,19 +28,20 @@
 #define    C_DU_MODE_ADDR_OFFSET		(C_MODE_ADDR_TBL_OFFSET+12)
 #define    C_A2_MODE_ADDR_OFFSET		(C_MODE_ADDR_TBL_OFFSET+16)
 #define    C_GC16_LOCAL_MODE_ADDR_OFFSET	(C_MODE_ADDR_TBL_OFFSET+20)
-#define    C_GC4_LOCAL_MODE_ADDR_OFFSET	(C_MODE_ADDR_TBL_OFFSET+24)
+#define    C_GC4_LOCAL_MODE_ADDR_OFFSET		(C_MODE_ADDR_TBL_OFFSET+24)
 #define    C_A2_IN_MODE_ADDR_OFFSET		(C_MODE_ADDR_TBL_OFFSET+28)
 #define    C_A2_OUT_MODE_ADDR_OFFSET		(C_MODE_ADDR_TBL_OFFSET+32)
 #define    C_GL16_MODE_ADDR_OFFSET		(C_MODE_ADDR_TBL_OFFSET+36)
 #define    C_GLR16_MODE_ADDR_OFFSET             (C_MODE_ADDR_TBL_OFFSET+40)
 #define    C_GLD16_MODE_ADDR_OFFSET             (C_MODE_ADDR_TBL_OFFSET+44)
+#define    C_GCC16_MODE_ADDR_OFFSET		(C_MODE_ADDR_TBL_OFFSET+48) /*0xD0*/
 
 #define    C_INIT_MODE_OFFSET			(C_MODE_ADDR_TBL_OFFSET+C_MODE_ADDR_TBL_SIZE)
 
 #define    C_REAL_TEMP_AREA_NUM		15              //max temperature range number
-#define    WF_MAX_COL				256		// GC16, 16*16 = 256
+#define    WF_MAX_COL			256		// GC16, 16*16 = 256
 
-#define MAX_MODE_CNT	6
+#define MAX_MODE_CNT	12
 #define MAX_TEMP_CNT	32
 
 __s32 file_len;
@@ -74,6 +76,7 @@ typedef struct {
 	unsigned long p_gl16_wf;		//GL16 mode address (include temperature table address)
 	unsigned long p_glr16_wf;		//GLR16 mode address (include temperature table address)
 	unsigned long p_gld16_wf;		//GLD16 mode address (include temperature table address)
+	unsigned long p_gcc16_wf;		//GLD16 mode address (include temperature table address)
 } AWF_WAVEFILE;
 
 static AWF_WAVEFILE g_waveform_file;
@@ -148,6 +151,15 @@ int get_index_from_upd_mode(enum upd_mode upd_mode)
 	case EINK_GL16_MODE:
 		index = 8;
 		break;
+	case EINK_CLEAR_MODE:
+		index = 9;
+		break;
+	case EINK_GC4L_MODE:
+		index = 10;
+		break;
+	case EINK_GCC16_MODE:
+		index = 11;
+		break;
 	default:
 		index = -1;
 		break;
@@ -157,7 +169,7 @@ int get_index_from_upd_mode(enum upd_mode upd_mode)
 
 int get_upd_mode_from_index(u32 mode)
 {
-	enum upd_mode upd_mode;
+	enum upd_mode upd_mode = 0;
 
 	switch (mode) {
 	case 0:
@@ -187,6 +199,15 @@ int get_upd_mode_from_index(u32 mode)
 	case 8:
 		upd_mode = EINK_GL16_MODE;
 		break;
+	case 9:
+		upd_mode = EINK_CLEAR_MODE;
+		break;
+	case 10:
+		upd_mode = EINK_GC4L_MODE;
+		break;
+	case 11:
+		upd_mode = EINK_GCC16_MODE;
+		break;
 	default:
 		pr_err("%s:mode is err\n", __func__);
 		break;
@@ -209,37 +230,59 @@ static u8 *get_mode_virt_address(enum upd_mode mode)
 	case EINK_INIT_MODE:
 		{
 			offset = g_waveform_file.p_init_wf - g_waveform_file.p_wf_paddr;
-			EINK_DEFAULT_MSG("offset = 0x%x\n", offset);
-			p_wf_file = (u8 *)g_waveform_file.p_wf_vaddr + offset;
+			if (offset != 0)
+				p_wf_file = (u8 *)g_waveform_file.p_wf_vaddr + offset;
+			else
+				p_wf_file = NULL;
 			break;
 		}
 
 	case EINK_DU_MODE:
 		{
 			offset = g_waveform_file.p_du_wf - g_waveform_file.p_wf_paddr;
-			EINK_DEFAULT_MSG("offset = 0x%x\n", offset);
-			p_wf_file = (u8 *)g_waveform_file.p_wf_vaddr + offset;
+			if (offset != 0)
+				p_wf_file = (u8 *)g_waveform_file.p_wf_vaddr + offset;
+			else
+				p_wf_file = NULL;
 			break;
 		}
 
 	case EINK_GC16_MODE:
 		{
 			offset = g_waveform_file.p_gc16_wf - g_waveform_file.p_wf_paddr;
-			p_wf_file = (u8 *)g_waveform_file.p_wf_vaddr + offset;
+			if (offset != 0)
+				p_wf_file = (u8 *)g_waveform_file.p_wf_vaddr + offset;
+			else
+				p_wf_file = NULL;
 			break;
 		}
 
 	case EINK_GC4_MODE:
 		{
 			offset = g_waveform_file.p_gc4_wf - g_waveform_file.p_wf_paddr;
-			p_wf_file = (u8 *)g_waveform_file.p_wf_vaddr + offset;
+			if (offset != 0)
+				p_wf_file = (u8 *)g_waveform_file.p_wf_vaddr + offset;
+			else
+				p_wf_file = NULL;
 			break;
 		}
 
+	case EINK_GC4L_MODE:
+		{
+			offset = g_waveform_file.p_gc4_local_wf - g_waveform_file.p_wf_paddr;
+			if (offset != 0)
+				p_wf_file = (u8 *)g_waveform_file.p_wf_vaddr + offset;
+			else
+				p_wf_file = NULL;
+			break;
+		}
 	case EINK_A2_MODE:
 		{
 			offset = g_waveform_file.p_A2_wf - g_waveform_file.p_wf_paddr;
-			p_wf_file = (u8 *)g_waveform_file.p_wf_vaddr + offset;
+			if (offset != 0)
+				p_wf_file = (u8 *)g_waveform_file.p_wf_vaddr + offset;
+			else
+				p_wf_file = NULL;
 			break;
 		}
 
@@ -247,32 +290,61 @@ static u8 *get_mode_virt_address(enum upd_mode mode)
 	case EINK_GU16_MODE:
 		{
 			offset = g_waveform_file.p_gc16_local_wf - g_waveform_file.p_wf_paddr;
-			p_wf_file = (u8 *)g_waveform_file.p_wf_vaddr + offset;
+			if (offset != 0)
+				p_wf_file = (u8 *)g_waveform_file.p_wf_vaddr + offset;
+			else
+				p_wf_file = NULL;
 			break;
 		}
-/*
+
+	case EINK_CLEAR_MODE:
+		{
+			offset = g_waveform_file.p_gc16_local_wf - g_waveform_file.p_wf_paddr;
+			if (offset != 0)
+				p_wf_file = (u8 *)g_waveform_file.p_wf_vaddr + offset;
+			else
+				p_wf_file = NULL;
+			break;
+		}
 	case EINK_GL16_MODE:
 		{
-			offset = (u32)g_waveform_file.p_gl16_wf - g_waveform_file.p_wf_paddr;
-			p_wf_file = (u8 *)g_waveform_file.p_wf_vaddr + offset;
+			offset = g_waveform_file.p_gl16_wf - g_waveform_file.p_wf_paddr;
+			if (offset != 0)
+				p_wf_file = (u8 *)g_waveform_file.p_wf_vaddr + offset;
+			else
+				p_wf_file = NULL;
 			break;
 		}
 
 	case EINK_GLR16_MODE:
 		{
-			offset = (u32)g_waveform_file.p_glr16_wf - g_waveform_file.p_wf_paddr;
-			pr_info("glr16 offset = 0x%x\n", offset);
-			p_wf_file = (u8 *)g_waveform_file.p_wf_vaddr + offset;
+			offset = g_waveform_file.p_glr16_wf - g_waveform_file.p_wf_paddr;
+			if (offset != 0)
+				p_wf_file = (u8 *)g_waveform_file.p_wf_vaddr + offset;
+			else
+				p_wf_file = NULL;
 			break;
 		}
 
 	case EINK_GLD16_MODE:
 		{
-			offset = (u32)g_waveform_file.p_gld16_wf - g_waveform_file.p_wf_paddr;
-			p_wf_file = (u8 *)g_waveform_file.p_wf_vaddr + offset;
+			offset = g_waveform_file.p_gld16_wf - g_waveform_file.p_wf_paddr;
+			if (offset != 0)
+				p_wf_file = (u8 *)g_waveform_file.p_wf_vaddr + offset;
+			else
+				p_wf_file = NULL;
 			break;
 		}
-*/
+
+	case EINK_GCC16_MODE:
+		{
+			offset = g_waveform_file.p_gld16_wf - g_waveform_file.p_wf_paddr;
+			if (offset != 0)
+				p_wf_file = (u8 *)g_waveform_file.p_wf_vaddr + offset;
+			else
+				p_wf_file = NULL;
+			break;
+		}
 	default:
 		{
 			pr_err("unkown mode(0x%x)\n", mode);
@@ -280,6 +352,9 @@ static u8 *get_mode_virt_address(enum upd_mode mode)
 			break;
 		}
 	}
+
+	if (p_wf_file == NULL)
+		pr_err("waveform not support mode 0x%x\n", mode);
 
 	return p_wf_file;
 }
@@ -319,6 +394,12 @@ static unsigned long get_mode_phy_address(enum upd_mode mode)
 			break;
 		}
 
+	case EINK_GC4L_MODE:
+		{
+			phy_addr = g_waveform_file.p_gc4_local_wf;
+			break;
+		}
+
 	case EINK_A2_MODE:
 		{
 			phy_addr = g_waveform_file.p_A2_wf;
@@ -330,7 +411,12 @@ static unsigned long get_mode_phy_address(enum upd_mode mode)
 			phy_addr = g_waveform_file.p_gc16_local_wf;
 			break;
 		}
-/*
+
+	case EINK_CLEAR_MODE:
+		{
+			phy_addr = g_waveform_file.p_gc16_local_wf;
+			break;
+		}
 	case EINK_GL16_MODE:
 		{
 			phy_addr = g_waveform_file.p_gl16_wf;
@@ -348,7 +434,13 @@ static unsigned long get_mode_phy_address(enum upd_mode mode)
 			phy_addr = g_waveform_file.p_gld16_wf;
 			break;
 		}
-*/
+
+	case EINK_GCC16_MODE:
+		{
+			phy_addr = g_waveform_file.p_gcc16_wf;
+			break;
+		}
+
 	default:
 		{
 			pr_err("unkown mode(0x%x)\n", mode);
@@ -403,12 +495,12 @@ int get_waveform_data(enum upd_mode mode, u32 temp, u32 *total_frames, unsigned 
 	p_mode_temp_addr = (u8 *)p_mode_virt_addr + mode_temp_offset;
 
 	*total_frames = *((u16 *)p_mode_temp_addr);
-	mode_temp_offset = mode_temp_offset + 4;		//skip total frame(2 Byte) and dividor(2 Byte)
+	mode_temp_offset = mode_temp_offset + 16; //total frame(2 Byte) and dividor(2 Byte) and wav paddr must 16byte align
 
 	*wf_paddr = p_mode_phy_addr + mode_temp_offset;
 	*wf_vaddr = (unsigned long)(p_mode_virt_addr + mode_temp_offset);
 
-	EINK_DEFAULT_MSG("mode=0x%x, temp=%d, temp_id=%d, temp_offset=0x%x, total=%d, mode_offset=0x%x\n",\
+	EINK_DEBUG_MSG("mode=0x%x, temp=%d, temp_id=%d, temp_offset=0x%x, total=%d, mode_offset=0x%x\n",\
 		mode, temp, temp_range_id, (mode_temp_offset - 4), *total_frames, (unsigned int)(*wf_paddr - g_waveform_file.p_wf_paddr));
 
 	return 0;
@@ -444,10 +536,14 @@ int eink_set_rearray_wavedata(u32 bit_num)
 			wf_paddr_array[mode][index] = (unsigned long)paddr;
 
 			temp = g_waveform_file.wf_temp_area_tbl[index];
-			EINK_DEFAULT_MSG("temp = %d, index = %d\n", temp, index);
+			EINK_DEBUG_MSG("temp = %d, index = %d\n", temp, index);
 
 			upd_mode = get_upd_mode_from_index(mode);
-			get_waveform_data(upd_mode, temp, &total_frames, &wf_paddr, &wf_vaddr);
+			ret = get_waveform_data(upd_mode, temp, &total_frames, &wf_paddr, &wf_vaddr);
+			if (ret < 0) {
+				index = C_TEMP_TBL_SIZE;
+				continue;
+			}
 			/* rearray */
 			frame_size = total_frames * per_size;/* 4bit panel 256 5bit panel 1024 */
 			for (i = 0; i < frame_size / 4; i++) {
@@ -467,7 +563,7 @@ int eink_set_rearray_wavedata(u32 bit_num)
 			   }
 			   */
 
-			EINK_DEFAULT_MSG("rearray ([%d, %d]) vaddr = 0x%lx, paddr = 0x%lx\n",
+			EINK_DEBUG_MSG("rearray ([%d, %d]) vaddr = 0x%lx, paddr = 0x%lx\n",
 					mode, index,
 					wf_vaddr_array[mode][index],
 					wf_paddr_array[mode][index]);
@@ -476,10 +572,13 @@ int eink_set_rearray_wavedata(u32 bit_num)
 			paddr += (frame_size / 4);
 		}
 	}
-#ifdef WAVEDATA_DEBUG
-	EINK_INFO_MSG("rearray_vaddr = 0x%p, paddr = 0x%lx\n", g_waveform_file.rearray_vaddr, g_waveform_file.rearray_paddr);
-	save_rearray_waveform_to_mem(g_waveform_file.rearray_vaddr, file_len);
-#endif
+
+	/* for debug if rearray wavfile is right or not  */
+	if (eink_get_print_level() == 6) {
+		EINK_INFO_MSG("rearray_vaddr = 0x%p, paddr = 0x%lx\n", g_waveform_file.rearray_vaddr, g_waveform_file.rearray_paddr);
+		save_rearray_waveform_to_mem(g_waveform_file.rearray_vaddr, file_len);
+	}
+
 	return ret;
 }
 
@@ -490,18 +589,18 @@ unsigned int memory_addr_to_wavefile_addr(unsigned int paddr)
 
 static void print_wavefile_mode_mapping(AWF_WAVEFILE wf)
 {
-	EINK_DEFAULT_MSG("INIT mode wavefile offset = 0x%08x\n", (unsigned int)(wf.p_init_wf - wf.p_wf_paddr));
-	EINK_DEFAULT_MSG("GC16 mode wavefile offset = 0x%08x\n", (unsigned int)(wf.p_gc16_wf - wf.p_wf_paddr));
-	EINK_DEFAULT_MSG("GC4 mode wavefile offset = 0x%08x\n", (unsigned int)(wf.p_gc4_wf - wf.p_wf_paddr));
-	EINK_DEFAULT_MSG("DU mode wavefile offset = 0x%08x\n", (unsigned int)(wf.p_du_wf - wf.p_wf_paddr));
-	EINK_DEFAULT_MSG("A2 mode wavefile offset = 0x%08x\n", (unsigned int)(wf.p_A2_wf - wf.p_wf_paddr));
-	EINK_DEFAULT_MSG("GC16_LOCAL mode wavefile offset = 0x%08x\n", (unsigned int)(wf.p_gc16_local_wf - wf.p_wf_paddr));
-	EINK_DEFAULT_MSG("GC4_LOCAL mode wavefile offset = 0x%08x\n", (unsigned int)(wf.p_gc4_local_wf - wf.p_wf_paddr));
-	EINK_DEFAULT_MSG("A2_IN mode wavefile offset = 0x%08x\n", (unsigned int)(wf.p_A2_in_wf - wf.p_wf_paddr));
-	EINK_DEFAULT_MSG("A2_OUT mode wavefile offset = 0x%08x\n", (unsigned int)(wf.p_A2_out_wf - wf.p_wf_paddr));
-	EINK_DEFAULT_MSG("GL16 mode wavefile offset = 0x%08x\n", (unsigned int)(wf.p_gl16_wf - wf.p_wf_paddr));
-	EINK_DEFAULT_MSG("GLR16 mode wavefile offset = 0x%08x\n", (unsigned int)(wf.p_glr16_wf - wf.p_wf_paddr));
-	EINK_DEFAULT_MSG("GLD16 mode wavefile offset = 0x%08x\n", (unsigned int)(wf.p_gld16_wf - wf.p_wf_paddr));
+	EINK_DEBUG_MSG("INIT mode wavefile offset = 0x%08x\n", (unsigned int)(wf.p_init_wf - wf.p_wf_paddr));
+	EINK_DEBUG_MSG("GC16 mode wavefile offset = 0x%08x\n", (unsigned int)(wf.p_gc16_wf - wf.p_wf_paddr));
+	EINK_DEBUG_MSG("GC4 mode wavefile offset = 0x%08x\n", (unsigned int)(wf.p_gc4_wf - wf.p_wf_paddr));
+	EINK_DEBUG_MSG("DU mode wavefile offset = 0x%08x\n", (unsigned int)(wf.p_du_wf - wf.p_wf_paddr));
+	EINK_DEBUG_MSG("A2 mode wavefile offset = 0x%08x\n", (unsigned int)(wf.p_A2_wf - wf.p_wf_paddr));
+	EINK_DEBUG_MSG("GC16_LOCAL mode wavefile offset = 0x%08x\n", (unsigned int)(wf.p_gc16_local_wf - wf.p_wf_paddr));
+	EINK_DEBUG_MSG("GC4_LOCAL mode wavefile offset = 0x%08x\n", (unsigned int)(wf.p_gc4_local_wf - wf.p_wf_paddr));
+	EINK_DEBUG_MSG("A2_IN mode wavefile offset = 0x%08x\n", (unsigned int)(wf.p_A2_in_wf - wf.p_wf_paddr));
+	EINK_DEBUG_MSG("A2_OUT mode wavefile offset = 0x%08x\n", (unsigned int)(wf.p_A2_out_wf - wf.p_wf_paddr));
+	EINK_DEBUG_MSG("GL16 mode wavefile offset = 0x%08x\n", (unsigned int)(wf.p_gl16_wf - wf.p_wf_paddr));
+	EINK_DEBUG_MSG("GLR16 mode wavefile offset = 0x%08x\n", (unsigned int)(wf.p_glr16_wf - wf.p_wf_paddr));
+	EINK_DEBUG_MSG("GLD16 mode wavefile offset = 0x%08x\n", (unsigned int)(wf.p_gld16_wf - wf.p_wf_paddr));
 }
 
 int init_waveform(const char *path, u32 bit_num)
@@ -512,16 +611,17 @@ int init_waveform(const char *path, u32 bit_num)
 	loff_t pos;
 	u32 *pAddr = NULL;
 	__s32 ret = -EINVAL;
+	struct kstat stat;
 
 	if (path == NULL) {
 		pr_err("%s:path is null\n", __func__);
 		return -EINVAL;
 	}
 
-	EINK_INFO_MSG("starting to load awf waveform file(%s)\n", path);
+	EINK_DEBUG_MSG("starting to load awf waveform file(%s)\n", path);
 
 	fp = filp_open(path, O_RDONLY, 0);
-	if (IS_ERR(fp))	{
+	if (IS_ERR_OR_NULL(fp))	{
 		pr_err("fail to open waveform file(%s)\n", path);
 		return -EBADF;
 	}
@@ -530,7 +630,11 @@ int init_waveform(const char *path, u32 bit_num)
 	fs = get_fs();
 	set_fs(KERNEL_DS);
 	pos = 0;
-	file_len = fp->f_path.dentry->d_inode->i_size;
+	ret = vfs_stat(path, &stat);
+	if (ret)
+		pr_err("fail to get %s'stat:%d\n", path, ret);
+
+	file_len = stat.size;
 
 	g_waveform_file.p_wf_vaddr = (char *)eink_malloc(file_len, (void *)(&g_waveform_file.p_wf_paddr));
 	if (g_waveform_file.p_wf_vaddr == NULL) {
@@ -539,6 +643,7 @@ int init_waveform(const char *path, u32 bit_num)
 		goto error;
 	}
 
+#ifdef DRIVER_REMAP_WAVEFILE
 	g_waveform_file.rearray_vaddr = (char *)eink_malloc(file_len, (void *)(&g_waveform_file.rearray_paddr));
 	EINK_INFO_MSG("rearray_vaddr = 0x%p\n", g_waveform_file.rearray_vaddr);
 	if (g_waveform_file.rearray_vaddr == NULL) {
@@ -547,20 +652,27 @@ int init_waveform(const char *path, u32 bit_num)
 		goto error;
 	}
 	memset(g_waveform_file.rearray_vaddr, 0, file_len);
-
-	read_len = vfs_read(fp, (char *)g_waveform_file.p_wf_vaddr, file_len, &pos);
+#endif
+	read_len = kernel_read(fp, (char *)g_waveform_file.p_wf_vaddr, file_len, &pos);
 	if (read_len != file_len) {
 		pr_err("maybe miss some data(read=%d byte, file=%d byte) when reading waveform file\n", read_len, file_len);
 		ret = -EAGAIN;
 		goto error;
 	}
 
+#ifdef CONFIG_EINK_REGAL_PROCESS
+	ret = EInk_Init((char *)g_waveform_file.p_wf_vaddr);
+	if (ret) {
+		pr_err("regal eink init fail!\n");
+	}
+#endif
+
 	g_waveform_file.eink_panel_type = *((u8 *)g_waveform_file.p_wf_vaddr);
-	EINK_INFO_MSG("eink type=0x%x\n", g_waveform_file.eink_panel_type);
+	EINK_DEBUG_MSG("eink type=0x%x\n", g_waveform_file.eink_panel_type);
 
 	memset(g_waveform_file.wavefile_name, 0, sizeof(g_waveform_file.wavefile_name));
 	memcpy(g_waveform_file.wavefile_name, (g_waveform_file.p_wf_vaddr + 1), (sizeof(g_waveform_file.wavefile_name) - 1));
-	EINK_INFO_MSG("wavefile info: %s\n", g_waveform_file.wavefile_name);
+	EINK_DEBUG_MSG("wavefile info: %s\n", g_waveform_file.wavefile_name);
 
 	/* starting to load data */
 	memcpy(g_waveform_file.wf_temp_area_tbl, (g_waveform_file.p_wf_vaddr+C_TEMP_TBL_OFFSET), C_TEMP_TBL_SIZE);
@@ -603,7 +715,9 @@ int init_waveform(const char *path, u32 bit_num)
 
 	print_wavefile_mode_mapping(g_waveform_file);
 
+#ifdef DRIVER_REMAP_WAVEFILE
 	eink_set_rearray_wavedata(bit_num);
+#endif
 
 	if (fp) {
 		filp_close(fp, NULL);
@@ -612,16 +726,18 @@ int init_waveform(const char *path, u32 bit_num)
 
 	g_waveform_file.load_flag = 1;
 
-	pr_info("load waveform file(%s) successfully\n", path);
+	pr_info("[EINK]:load waveform file(%s) successfully\n", path);
 	return 0;
 
 error:
 	g_waveform_file.load_flag = 0;
 
+#ifdef DRIVER_REMAP_WAVEFILE
 	if (g_waveform_file.rearray_vaddr != NULL)   {
 		eink_free((void *)g_waveform_file.rearray_vaddr, (void *)g_waveform_file.rearray_paddr, file_len);
 		g_waveform_file.rearray_vaddr = NULL;
 	}
+#endif
 
 	if (g_waveform_file.p_wf_vaddr != NULL)   {
 		eink_free((void *)g_waveform_file.p_wf_vaddr, (void *)g_waveform_file.p_wf_paddr, file_len);
@@ -858,9 +974,11 @@ s32 queue_wavedata_buffer(struct wavedata_queue *queue)
 	tail = queue->tail;
 	tmp_head = queue->tmp_head;
 
-#ifdef DECODE_DEBUG
-	save_one_wavedata_buffer(queue->wavedata_vaddr[tmp_head], false);
-#endif
+	/* for decode and edma debug */
+	if (eink_get_print_level() == 5) {
+		save_one_wavedata_buffer(queue->wavedata_vaddr[tmp_head], false);
+	}
+
 	if (queue->buffer_state[head] == WV_DECODE_STATE) {
 		queue->buffer_state[head] = WV_READY_STATE;
 		queue->head = (head + 1) % WAVE_DATA_BUF_NUM;
@@ -887,9 +1005,11 @@ s32 clean_used_wavedata_buffer(struct wavedata_queue *queue)
 	tmp_tail = queue->tmp_tail;
 	state = queue->buffer_state[tail];
 
-#ifdef DECODE_DEBUG
-	save_one_wavedata_buffer(queue->wavedata_vaddr[tmp_tail], true);
-#endif
+	/* for decode debug */
+	if (eink_get_print_level() == 5) {
+		save_one_wavedata_buffer(queue->wavedata_vaddr[tmp_tail], true);
+	}
+
 	if (state == WV_DISPLAY_STATE) {
 		queue->buffer_state[tail] = WV_INIT_STATE;
 		queue->tail = (tail + 1) % WAVE_DATA_BUF_NUM;

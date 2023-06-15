@@ -13,7 +13,7 @@
 #include "dev_disp_debugfs.h"
 
 static struct dentry *my_dispdbg_root;
-
+extern struct disp_dev_t gdisp;
 
 struct dispdbg_data {
 	char command[32];
@@ -191,6 +191,7 @@ static void dispdbg_process(void)
 			pr_info("disp:%d type:%d mode:%d format:%d bits:%d eotf:%d cs:%d ouputmode:%d range:%d scan:%d aspect_ratio:%d\n",
 				disp, config.type, config.mode, config.format, config.bits, config.eotf, config.cs, config.dvi_hdmi,
 				config.range, config.scan, config.aspect_ratio);
+			disp_set_suspend_output_type(disp, config.type);
 			bsp_disp_device_set_config(disp, &config);
 
 		} else if (!strncmp(dispdbg_priv.command, "switch", 6)) {
@@ -837,13 +838,13 @@ static ssize_t dispdbg_debug_level_write(struct file *file, const char __user *b
 	printk("set debug level = %s\n", tmp_buf);
 
 	if (tmp_buf[0] >= '0' && tmp_buf[0] <= '9') {
-		bsp_disp_set_print_level((tmp_buf[0] - '0'));
+		gdisp.print_level = (tmp_buf[0] - '0');
 	} else {
 		printk("please set debug level in 0~9 range\n");
 		return 0;
 	}
 
-	printk(KERN_WARNING "get debug level = %d\n", bsp_disp_get_print_level());
+	printk(KERN_WARNING "get debug level = %d\n", gdisp.print_level);
 	return count;
 }
 
@@ -854,7 +855,7 @@ static ssize_t dispdbg_debug_level_read(struct file *file, char __user *buf,
 	unsigned int debug_level = 0;
 	int len = 0;
 
-	debug_level = bsp_disp_get_print_level();
+	debug_level = gdisp.print_level;
 	snprintf(tmp_buf, 20, "%d", debug_level);
 	len = strlen(tmp_buf);
 
@@ -917,7 +918,7 @@ static const struct file_operations dbglvl_ops = {
 };
 
 #if defined(CONFIG_SUNXI_MPP)
-ssize_t disp_mpp_read(struct file *file, char __user *buf,
+ssize_t disp_mpp_read(struct file *file, char __user *user_buf,
 				 size_t count, loff_t *ppos)
 {
 	struct disp_manager *mgr = NULL;
@@ -926,7 +927,13 @@ ssize_t disp_mpp_read(struct file *file, char __user *buf,
 	int num_layers, layer_id;
 	int num_chans, chan_id;
 	size_t buf_cnt = 0;
+	char *buf = NULL;
 
+	buf = kmalloc(4096, GFP_KERNEL | __GFP_ZERO);
+	if (!buf) {
+		pr_warn("Malloc buf fail!\n");
+		return count;
+	}
 	num_screens = bsp_disp_feat_get_num_screens();
 	for (screen_id = 0; screen_id < num_screens; screen_id++) {
 		int width = 0, height = 0;
@@ -1011,16 +1018,11 @@ ssize_t disp_mpp_read(struct file *file, char __user *buf,
 #if defined(CONFIG_DISP2_SUNXI_COMPOSER)
 	buf_cnt += composer_dump(buf + buf_cnt);
 #endif
-	if (*ppos >= buf_cnt)
-		return 0;
-	if (count >= buf_cnt)
-		count = buf_cnt;
-	if (count > (buf_cnt - *ppos))
-		count = (buf_cnt - *ppos);
 
-	*ppos += count;
-
-	return count;
+	 buf_cnt = simple_read_from_buffer(user_buf, count, ppos, buf,
+				       buf_cnt);
+	 kfree(buf);
+	 return buf_cnt;
 }
 
 static const struct file_operations vo_ops = {

@@ -989,7 +989,7 @@ static int sensor_s_stream(struct v4l2_subdev *sd, int enable)
 static int sensor_g_mbus_config(struct v4l2_subdev *sd,
 				struct v4l2_mbus_config *cfg)
 {
-	cfg->type = V4L2_MBUS_CSI2;
+	cfg->type = V4L2_MBUS_CSI2_DPHY;
 	cfg->flags = 0 | V4L2_MBUS_CSI2_4_LANE | V4L2_MBUS_CSI2_CHANNEL_0;
 
 	return 0;
@@ -1043,8 +1043,6 @@ static const struct v4l2_subdev_core_ops sensor_core_ops = {
 };
 
 static const struct v4l2_subdev_video_ops sensor_video_ops = {
-	.s_parm = sensor_s_parm,
-	.g_parm = sensor_g_parm,
 	.s_stream = sensor_s_stream,
 	.g_mbus_config = sensor_g_mbus_config,
 };
@@ -1125,6 +1123,9 @@ static int sensor_probe(struct i2c_client *client,
 	sensor_init_controls(sd, &sensor_ctrl_ops);
 	mutex_init(&info->lock);
 
+#ifdef CONFIG_SAME_I2C
+	info->sensor_i2c_addr = I2C_ADDR >> 1;
+#endif
 	info->fmt = &sensor_formats[0];
 	info->fmt_pt = &sensor_formats[0];
 	info->win_pt = &sensor_win_sizes[0];

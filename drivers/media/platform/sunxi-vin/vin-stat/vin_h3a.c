@@ -1,5 +1,5 @@
 /*
- * linux-4.9/drivers/media/platform/sunxi-vin/vin-stat/vin_h3a.c
+ * linux-5.4/drivers/media/platform/sunxi-vin/vin-stat/vin_h3a.c
  *
  * Copyright (c) 2007-2017 Allwinnertech Co., Ltd.
  *
@@ -16,6 +16,7 @@
 
 #include <linux/slab.h>
 #include <linux/uaccess.h>
+#include <linux/compat.h>
 
 #include "vin_h3a.h"
 
@@ -126,9 +127,7 @@ static struct ispstat_buffer *isp_stat_buf_get(struct isp_stat *stat, struct vin
 			isp_stat_buf_release(stat);
 			return ERR_PTR(-EINVAL);
 		}
-
 		rval = copy_to_user(data->buf, buf->virt_addr, buf->buf_size);
-
 		if (rval) {
 			vin_warn("%s: failed copying %d bytes of stat data\n", stat->sd.name, rval);
 			buf = ERR_PTR(-EFAULT);
@@ -388,13 +387,17 @@ struct vin_isp_stat_data32 {
 	__u32 frame_number;
 	__u32 config_counter;
 };
+struct vin_isp_h3a_config32 {
+	__u32 buf_size;
+	__u32 config_counter;
+};
 
 static int get_isp_statistics_buf32(struct vin_isp_stat_data *kp,
 			      struct vin_isp_stat_data32 __user *up)
 {
 	u32 tmp;
 
-	if (!access_ok(VERIFY_READ, up, sizeof(struct vin_isp_stat_data32)) ||
+	if (!access_ok(up, sizeof(struct vin_isp_stat_data32)) ||
 	    get_user(kp->buf_size, &up->buf_size) ||
 	    get_user(kp->frame_number, &up->frame_number) ||
 	    get_user(kp->config_counter, &up->config_counter) ||
@@ -409,7 +412,7 @@ static int put_isp_statistics_buf32(struct vin_isp_stat_data *kp,
 {
 	u32 tmp = (u32) ((unsigned long)kp->buf);
 
-	if (!access_ok(VERIFY_READ, up, sizeof(struct vin_isp_stat_data32)) ||
+	if (!access_ok(up, sizeof(struct vin_isp_stat_data32)) ||
 	    put_user(kp->buf_size, &up->buf_size) ||
 	    put_user(kp->frame_number, &up->frame_number) ||
 	    put_user(kp->config_counter, &up->config_counter) ||
@@ -418,14 +421,55 @@ static int put_isp_statistics_buf32(struct vin_isp_stat_data *kp,
 	return 0;
 }
 
+static int get_isp_statistics_config32(struct vin_isp_h3a_config *kp,
+			      struct vin_isp_h3a_config32 __user *up)
+{
+	if (!access_ok(up, sizeof(struct vin_isp_h3a_config32)) ||
+	    get_user(kp->buf_size, &up->buf_size) ||
+	    get_user(kp->config_counter, &up->config_counter))
+		return -EFAULT;
+	return 0;
+}
+
+static int put_isp_statistics_config32(struct vin_isp_h3a_config *kp,
+			      struct vin_isp_h3a_config32 __user *up)
+{
+	if (!access_ok(up, sizeof(struct vin_isp_h3a_config32)) ||
+	    put_user(kp->buf_size, &up->buf_size) ||
+	    put_user(kp->config_counter, &up->config_counter))
+		return -EFAULT;
+	return 0;
+}
+
+static int get_isp_statistics_enable32(unsigned int *kp,
+			      unsigned int __user *up)
+{
+	if (!access_ok(up, sizeof(struct vin_isp_h3a_config32)) ||
+	    get_user(*kp, up))
+		return -EFAULT;
+	return 0;
+}
+
+static int put_isp_statistics_enable32(unsigned int *kp,
+			      unsigned int __user *up)
+{
+	if (!access_ok(up, sizeof(struct vin_isp_h3a_config32)) ||
+	    put_user(*kp, up))
+		return -EFAULT;
+	return 0;
+}
+
+#define VIDIOC_VIN_ISP_H3A_CFG32 _IOWR('V', BASE_VIDIOC_PRIVATE + 31, struct vin_isp_h3a_config32)
 #define VIDIOC_VIN_ISP_STAT_REQ32 _IOWR('V', BASE_VIDIOC_PRIVATE + 32, struct vin_isp_stat_data32)
+#define VIDIOC_VIN_ISP_STAT_EN32 _IOWR('V', BASE_VIDIOC_PRIVATE + 33, unsigned int)
 
 static long h3a_compat_ioctl32(struct v4l2_subdev *sd,
 		unsigned int cmd, unsigned long arg)
 {
 	union {
-		struct isp_stat_buf isb;
+		struct vin_isp_h3a_config isb;
 		struct vin_isp_stat_data isd;
+		unsigned int isu;
 	} karg;
 	void __user *up = compat_ptr(arg);
 	int compatible_arg = 1;
@@ -437,11 +481,25 @@ static long h3a_compat_ioctl32(struct v4l2_subdev *sd,
 	case VIDIOC_VIN_ISP_STAT_REQ32:
 		cmd = VIDIOC_VIN_ISP_STAT_REQ;
 		break;
+	case VIDIOC_VIN_ISP_H3A_CFG32:
+		cmd = VIDIOC_VIN_ISP_H3A_CFG;
+		break;
+	case VIDIOC_VIN_ISP_STAT_EN32:
+		cmd = VIDIOC_VIN_ISP_STAT_EN;
+		break;
 	}
 
 	switch (cmd) {
 	case VIDIOC_VIN_ISP_STAT_REQ:
 		err = get_isp_statistics_buf32(&karg.isd, up);
+		compatible_arg = 0;
+		break;
+	case VIDIOC_VIN_ISP_H3A_CFG:
+		err = get_isp_statistics_config32(&karg.isb, up);
+		compatible_arg = 0;
+		break;
+	case VIDIOC_VIN_ISP_STAT_EN:
+		err = get_isp_statistics_enable32(&karg.isu, up);
 		compatible_arg = 0;
 		break;
 	}
@@ -452,16 +510,19 @@ static long h3a_compat_ioctl32(struct v4l2_subdev *sd,
 	if (compatible_arg)
 		err = h3a_ioctl(sd, cmd, up);
 	else {
-		mm_segment_t old_fs = get_fs();
-
-		set_fs(KERNEL_DS);
 		err = h3a_ioctl(sd, cmd, &karg);
-		set_fs(old_fs);
 	}
 
 	switch (cmd) {
 	case VIDIOC_VIN_ISP_STAT_REQ:
 		err = put_isp_statistics_buf32(&karg.isd, up);
+		break;
+	case VIDIOC_VIN_ISP_H3A_CFG:
+		err = put_isp_statistics_config32(&karg.isb, up);
+		break;
+	case VIDIOC_VIN_ISP_STAT_EN:
+		err = put_isp_statistics_enable32(&karg.isu, up);
+		compatible_arg = 0;
 		break;
 	}
 

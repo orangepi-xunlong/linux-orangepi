@@ -25,7 +25,8 @@ DHDCFLAGS = -Wall -Wstrict-prototypes -Dlinux -DBCMDRIVER                 \
 	-DMULTIPLE_SUPPLICANT -DTSQ_MULTIPLIER -DMFP                          \
 	-DWL_EXT_IAPSTA                                                       \
 	-DENABLE_INSMOD_NO_FW_LOAD                                            \
-	-Idrivers/net/wireless/bcmdhd -Idrivers/net/wireless/bcmdhd/include
+	-I$(srctree)/$(src) -I$(srctree)/$(src)/include                       \
+	-I$(srctree)
 
 DHDOFILES = aiutils.o siutils.o sbutils.o bcmutils.o bcmwifi_channels.o   \
 	dhd_linux.o dhd_linux_platdev.o dhd_linux_sched.o dhd_pno.o           \
@@ -125,7 +126,7 @@ else
 	DHDCFLAGS += -DCUSTOMER_HW -DDHD_OF_SUPPORT
 endif
 	DHDCFLAGS += -DCUSTOMER_HW_ALLWINNER -DCONFIG_CUSTOM_MAC_ADDRESS
-	DHDCFLAGS += -Iarch/arm/mach-sunxi/include
+	DHDCFLAGS += -I$(srctree)/arch/arm/mach-sunxi/include
 #	DHDCFLAGS += -DBCMWAPI_WPI -DBCMWAPI_WAI
 endif
 

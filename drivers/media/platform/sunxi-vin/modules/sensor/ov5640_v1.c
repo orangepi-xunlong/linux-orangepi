@@ -1019,7 +1019,9 @@ static int sensor_probe(struct i2c_client *client,
 	cci_dev_probe_helper(sd, client, &sensor_ops, &cci_drv);
 
 	mutex_init(&info->lock);
-
+#ifdef CONFIG_SAME_I2C
+	info->sensor_i2c_addr = I2C_ADDR >> 1;
+#endif
 	info->fmt = &sensor_formats[0];
 	info->fmt_pt = &sensor_formats[0];
 	info->win_pt = &sensor_win_sizes[0];

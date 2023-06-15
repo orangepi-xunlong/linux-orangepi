@@ -175,7 +175,7 @@ static struct device_attribute chose_attrs[] = {
 static ssize_t show_otg_hw_scan_debug(struct device *dev,
 		struct device_attribute *attr, char *buf)
 {
-	return sprintf(buf, "%u\n", usb_hw_scan_debug);
+	return sprintf(buf, "%d\n", usb_hw_scan_debug);
 }
 
 static ssize_t otg_hw_scan_debug(struct device *dev,

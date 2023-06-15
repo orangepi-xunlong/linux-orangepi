@@ -16,9 +16,16 @@
 
 #include <linux/interrupt.h>
 #include <linux/regulator/consumer.h>
-#include <linux/sunxi-gpio.h>
 
 typedef u32 (*gpio_int_handle)(void *para);
+
+struct gpio_config {
+	u32	data;
+	u32	gpio;
+	u32	mul_sel;
+	u32	pull;
+	u32	drv_level;
+};
 
 enum input_sensor_type {
 	CTP_TYPE,
@@ -32,7 +39,9 @@ enum input_sensor_type {
 struct sensor_config_info {
 	enum input_sensor_type input_type;
 	int sensor_used;
+	int isI2CClient;
 	__u32 twi_id;
+	const char *np_name;
 	u32 int_number;
 	struct gpio_config irq_gpio;
 	char *ldo;
@@ -40,14 +49,17 @@ struct sensor_config_info {
 	struct pinctrl *pinctrl;
 	const char *sensor_power;
 	u32 sensor_power_vol;
+	struct device_node *node;
 	struct regulator *sensor_power_ldo;
 };
 
 struct ctp_config_info {
 	enum input_sensor_type input_type;
 	int ctp_used;
+	int isI2CClient;
 	__u32 twi_id;
 	const char *name;
+	const char *np_name;
 	int screen_max_x;
 	int screen_max_y;
 	int revert_x_flag;
@@ -66,7 +78,9 @@ struct ctp_config_info {
 	struct gpio_config key_light_gpio;
 #endif
 	struct device *dev;
+	struct device_node *node;
 	struct pinctrl *pinctrl;
+	int probed;
 };
 
 struct motor_config_info {
@@ -75,6 +89,8 @@ struct motor_config_info {
 	int vibe_off;
 	u32 ldo_voltage;
 	const char *ldo;
+	struct regulator *motor_power_ldo;
+	struct device *dev;
 	struct gpio_config motor_gpio;
 };
 
@@ -85,6 +101,7 @@ int input_request_int(enum input_sensor_type *input_type, irq_handler_t handle,
 			unsigned long trig_type, void *para);
 int input_free_int(enum input_sensor_type *input_type, void *para);
 int input_set_int_enable(enum input_sensor_type *input_type, u32 enable);
+int input_set_int_enable_force(enum input_sensor_type *input_type, u32 enable);
 int input_set_power_enable(enum input_sensor_type *input_type, u32 enable);
 int input_sensor_startup(enum input_sensor_type *input_type);
 int input_sensor_init(enum input_sensor_type *input_type);

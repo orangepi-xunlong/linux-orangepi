@@ -26,14 +26,40 @@
 #define WL_DEV_WIFI            0  /* bit0 */
 #define WL_DEV_BLUETOOTH       1  /* bit1 */
 
-struct sunxi_bt_platdata {
-	struct regulator *bt_power;
-	struct regulator *io_regulator;
-	struct clk *lpo;
+#define CLK_MAX                5
+#define PWR_MAX                5
+
+struct sunxi_rfkill_platdata {
 	struct pinctrl *pctrl;
+	int gpio_power_en;
+	bool gpio_power_en_assert;
+	int gpio_chip_en;
+	bool gpio_chip_en_assert;
+};
+
+struct sunxi_modem_platdata {
+	struct regulator *power[PWR_MAX];
+	char  *power_name[PWR_MAX];
+	u32    power_vol[PWR_MAX];
+
+	int gpio_modem_rst;
+	bool gpio_modem_rst_assert;
+
+	bool power_state;
+	struct rfkill *rfkill;
+	struct platform_device *pdev;
+};
+
+struct sunxi_bt_platdata {
+	struct regulator *power[PWR_MAX];
+	char  *power_name[PWR_MAX];
+	u32    power_vol[PWR_MAX];
+
+	struct clk *clk[CLK_MAX];
+	char  *clk_name[CLK_MAX];
+
 	int gpio_bt_rst;
-	char *bt_power_name;
-	char *io_regulator_name;
+	bool gpio_bt_rst_assert;
 
 	int power_state;
 	struct rfkill *rfkill;
@@ -43,30 +69,27 @@ struct sunxi_bt_platdata {
 struct sunxi_wlan_platdata {
 	unsigned int wakeup_enable;
 	int bus_index;
-	struct regulator *wlan_power;
-	struct regulator *io_regulator;
-	struct clk *lpo;
-	struct pinctrl *pctrl;
-	int gpio_wlan_regon;
-	int gpio_wlan_hostwake;
-	int gpio_power_en;
-	int gpio_chip_en;
 
-	char *wlan_power_name;
-	char *io_regulator_name;
+	struct regulator *power[PWR_MAX];
+	char  *power_name[PWR_MAX];
+	u32    power_vol[PWR_MAX];
+
+	struct clk *clk[CLK_MAX];
+	char  *clk_name[CLK_MAX];
+
+	int gpio_wlan_regon;
+	bool gpio_wlan_regon_assert;
+	int gpio_wlan_hostwake;
+	bool gpio_wlan_hostwake_assert;
 
 	int power_state;
 	struct platform_device *pdev;
 };
 
-extern void sunxi_wl_chipen_set(int dev, int on_off);
-extern void sunxi_wl_poweren_set(int dev, int on_off);
-extern void sunxi_wlan_set_power(bool on_off);
-extern int  sunxi_wlan_get_bus_index(void);
-extern int  sunxi_wlan_get_oob_irq(void);
-extern int  sunxi_wlan_get_oob_irq_flags(void);
-extern int  enable_gpio_wakeup_src(int para);
-extern void sunxi_mmc_rescan_card(unsigned ids);
-extern int  sunxi_get_soc_chipid(uint8_t *chipid);
+void sunxi_wlan_set_power(bool on_off);
+int  sunxi_wlan_get_bus_index(void);
+int  sunxi_wlan_get_oob_irq(int *irq_flags, int *wakeup_enable);
+void sunxi_bluetooth_set_power(bool on_off);
+void sunxi_modem_set_power(bool on_off);
 
 #endif /* SUNXI_RFKILL_H */

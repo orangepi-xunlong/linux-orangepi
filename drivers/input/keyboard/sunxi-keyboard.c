@@ -32,7 +32,12 @@
 #include <linux/of_irq.h>
 #include <linux/of_address.h>
 
-#if defined(CONFIG_PM)
+#include <linux/iio/iio.h>
+#include <linux/iio/machine.h>
+#include <linux/iio/driver.h>
+#include <linux/reset.h>
+
+#if IS_ENABLED(CONFIG_PM)
 #include <linux/pm.h>
 #endif
 #include "sunxi-keyboard.h"
@@ -47,20 +52,33 @@ static unsigned char keypad_mapindex[64] = {
 	6, 6, 6, 6, 6, 6, 6, 6, 6,		/* key 7, 40-49 */
 	7, 7, 7, 7, 7, 7, 7			/* key 8, 50-63 */
 };
+
+#define INITIAL_VALUE (0xff)
 #define VOL_NUM KEY_MAX_CNT
+
+/*
+ * MAX_KEYPRESS: The driver can recognize how many keys are pressed at the same time
+ * MAX_KEYPRESS can be 1, 2, 4;
+ */
+#define MAX_KEYPRESS 2
 
 struct sunxi_key_data {
 	struct platform_device	*pdev;
 	struct clk *mclk;
 	struct clk *pclk;
+	struct reset_control	*rst_clk;
 	struct input_dev *input_dev;
+	struct sunxi_adc_disc *disc;
+	spinlock_t		lock; /* syn */
 	void __iomem *reg_base;
 	u32 scankeycodes[KEY_MAX_CNT];
 	int irq_num;
 	u32 key_val;
+	u32 before_code;
 	unsigned char compare_later;
 	unsigned char compare_before;
 	u8 key_code;
+	u8 last_key_code;
 	char key_name[16];
 	u8 key_cnt;
 	int wakeup;
@@ -70,16 +88,18 @@ static struct sunxi_adc_disc disc_1350 = {
 	.measure = 1350,
 	.resol = 21,
 };
+
 static struct sunxi_adc_disc disc_1200 = {
 	.measure = 1200,
 	.resol = 19,
 };
+
 static struct sunxi_adc_disc disc_2000 = {
 	.measure = 2000,
 	.resol = 31,
 };
 
-#ifdef CONFIG_OF
+#if IS_ENABLED(CONFIG_OF)
 /*
  * Translate OpenFirmware node properties into platform_data
  */
@@ -97,7 +117,7 @@ MODULE_DEVICE_TABLE(of, sunxi_keyboard_of_match);
 #endif
 
 static void sunxi_keyboard_ctrl_set(void __iomem *reg_base,
-				enum key_mode key_mode, u32 para)
+					enum key_mode key_mode, u32 para)
 {
 	u32 ctrl_reg = 0;
 
@@ -113,7 +133,7 @@ static void sunxi_keyboard_ctrl_set(void __iomem *reg_base,
 		ctrl_reg |= (LRADC_HOLD_EN & para);
 	if (LEVELB_VOL_SET & key_mode) {
 		ctrl_reg |= (LEVELB_VOL & para);
-#if defined(CONFIG_ARCH_SUN8IW18)
+#if IS_ENABLED(CONFIG_ARCH_SUN8IW18)
 		ctrl_reg &= ~(u32)(3 << 4);
 #endif
 	}
@@ -166,7 +186,7 @@ static u32 sunxi_keyboard_read_data(void __iomem *reg_base)
 	return reg_val;
 }
 
-#ifdef CONFIG_PM
+#if IS_ENABLED(CONFIG_PM)
 static int sunxi_keyboard_suspend(struct device *dev)
 {
 	struct platform_device *pdev = to_platform_device(dev);
@@ -184,7 +204,7 @@ static int sunxi_keyboard_suspend(struct device *dev)
 
 		if (IS_ERR_OR_NULL(key_data->mclk))
 			pr_warn("%s apb1_keyadc mclk handle is invalid!\n",
-					__func__);
+				__func__);
 		else
 			clk_disable_unprepare(key_data->mclk);
 	}
@@ -206,7 +226,7 @@ static int sunxi_keyboard_resume(struct device *dev)
 	} else {
 		if (IS_ERR_OR_NULL(key_data->mclk))
 			pr_warn("%s apb1_keyadc mclk handle is invalid!\n",
-					__func__);
+				__func__);
 		else
 			clk_prepare_enable(key_data->mclk);
 
@@ -229,28 +249,94 @@ static int sunxi_keyboard_resume(struct device *dev)
 }
 #endif
 
+#define KEY_NOCHANGED         0
+#define KEY_CHANGED_DOWN      1
+#define KEY_CHANGED_UP        2
+/* before:last keycode.
+ * now: now changed keycode.
+ * key:now change key index.
+ * report: which key report.
+ * return: 0: no changed, 1, key down, 2, key up.
+ */
+static int isKeyChange(u32 before, u32 now, u32 key, u32 *report)
+{
+	int i, ret;
+	int keycode = (now >> (8 * key)) & 0xFF;
+
+	if (keycode == 0) {
+		for (i = 0; i < MAX_KEYPRESS; i++) {
+			keycode = (before >> (8 * i)) & 0xFF;
+			if (keycode == 0)
+				continue;
+			ret = isKeyChange(now, before, i, report);
+			if (ret == KEY_CHANGED_DOWN) {
+				*report = keycode;
+				return KEY_CHANGED_UP;
+			}
+		}
+		return KEY_NOCHANGED;
+	}
+
+	for (i = 0; i < MAX_KEYPRESS; i++) {
+		int key_b = (before >> (8 * i)) & 0xFF;
+		if (key_b == keycode)
+			return KEY_NOCHANGED;
+	}
+	*report = keycode;
+	return KEY_CHANGED_DOWN;
+}
+
+static void sunxi_report_key_down_event(struct sunxi_key_data *key_data)
+{
+	u32 scancode = 0;
+	int i = 0;
+
+	key_data->compare_later = key_data->compare_before;
+	scancode = key_data->scankeycodes[key_data->key_code];
+	if (key_data->before_code != scancode) {
+		int key;
+		int changed;
+
+		for (i = 0; i < MAX_KEYPRESS; i++) {
+			key = 0;
+			changed = isKeyChange(key_data->before_code, scancode, i, &key);
+			if (changed == KEY_CHANGED_DOWN) {
+				pr_debug("before : %d, scancode : %d, key : %d, down : 1\n", key_data->before_code, scancode, key);
+				input_report_key(key_data->input_dev, key, 1);
+				input_sync(key_data->input_dev);
+			} else if (changed == KEY_CHANGED_UP) {
+				pr_debug("before : %d, scancode : %d, key : %d, down : 0\n", key_data->before_code, scancode, key);
+				input_report_key(key_data->input_dev, key, 0);
+				input_sync(key_data->input_dev);
+			}
+		}
+	}
+	key_data->before_code = scancode;
+	key_data->key_cnt = 0;
+}
+
 static irqreturn_t sunxi_isr_key(int irq, void *dummy)
 {
 	struct sunxi_key_data *key_data = (struct sunxi_key_data *)dummy;
+	unsigned long flags = 0;
 	u32 reg_val = 0;
 	u32 key_val = 0;
 
 	pr_debug("Key Interrupt\n");
+	spin_lock_irqsave(&key_data->lock, flags);
 	reg_val = sunxi_keyboard_read_ints(key_data->reg_base);
+	sunxi_keyboard_clr_ints(key_data->reg_base, reg_val);
+
 	if (reg_val & LRADC_ADC0_DOWNPEND)
 		pr_debug("key down\n");
 
 	if (reg_val & LRADC_ADC0_DATAPEND) {
 		key_data->key_cnt++;
 		key_val = sunxi_keyboard_read_data(key_data->reg_base);
-		key_data->compare_before = key_val&0x3f;
+		key_data->compare_before = key_val & 0x3f;
 		if (key_data->compare_before == key_data->compare_later) {
-			key_data->compare_later = key_data->compare_before;
-			key_data->key_code = keypad_mapindex[key_val&0x3f];
-			input_report_key(key_data->input_dev,
-				key_data->scankeycodes[key_data->key_code], 1);
-			input_sync(key_data->input_dev);
-			key_data->key_cnt = 0;
+			key_data->key_code = keypad_mapindex[key_val & 0x3f];
+			sunxi_report_key_down_event(key_data);
 		}
 		if (key_data->key_cnt == 2) {
 			key_data->compare_later = key_data->compare_before;
@@ -259,20 +345,26 @@ static irqreturn_t sunxi_isr_key(int irq, void *dummy)
 	}
 
 	if (reg_val & LRADC_ADC0_UPPEND) {
+		int i;
+
 		if (key_data->wakeup)
 			pm_wakeup_event(key_data->input_dev->dev.parent, 0);
-		pr_debug("report data:%8d key_val:%8d\n",
-				key_data->scankeycodes[key_data->key_code],
-				key_val);
-		input_report_key(key_data->input_dev,
-				key_data->scankeycodes[key_data->key_code], 0);
-		input_sync(key_data->input_dev);
+		for (i = 0; i < MAX_KEYPRESS; i++) {
+			int key = (key_data->before_code >> (8 * i)) & 0xFF;
+			if (key > 0) {
+				pr_debug("report : %d, key : %d\n", key_data->before_code, key);
+				input_report_key(key_data->input_dev, key, 0);
+				input_sync(key_data->input_dev);
+			}
+		}
 		pr_debug("key up\n");
 		key_data->key_cnt = 0;
+		key_data->compare_later = 0;
+		key_data->before_code = 0;
+		key_data->last_key_code = INITIAL_VALUE;
 	}
 
-	sunxi_keyboard_clr_ints(key_data->reg_base, reg_val);
-
+	spin_unlock_irqrestore(&key_data->lock, flags);
 	return IRQ_HANDLED;
 }
 
@@ -304,16 +396,27 @@ static int sunxi_keyboard_startup(struct sunxi_key_data *key_data,
 	/* some IC will use clock gating while others HW use 24MHZ, So just try
 	 * to get the clock, if it doesn't exist, give warning instead of error
 	 */
+	key_data->rst_clk = devm_reset_control_get(&pdev->dev, NULL);
+	if (IS_ERR_OR_NULL(key_data->rst_clk)) {
+		pr_debug("%s: keyboard has no reset clk.\n", __func__);
+	} else {
+		if (reset_control_deassert(key_data->rst_clk)) {
+			pr_err("%s enable apb1_keyadc clock failed!\n",
+							__func__);
+			return -EINVAL;
+		}
+	}
 	key_data->mclk = of_clk_get(np, 0);
 	if (IS_ERR_OR_NULL(key_data->mclk)) {
-		pr_err("%s: keyboard has no clk.\n", __func__);
-	} else{
+		pr_debug("%s: keyboard has no clk.\n", __func__);
+	} else {
 		if (clk_prepare_enable(key_data->mclk)) {
 			pr_err("%s enable apb1_keyadc clock failed!\n",
 							__func__);
 			return -EINVAL;
 		}
 	}
+
 	return ret;
 }
 
@@ -331,6 +434,7 @@ static int sunxikbd_key_init(struct sunxi_key_data *key_data,
 	np = pdev->dev.of_node;
 	match = of_match_node(sunxi_keyboard_of_match, np);
 	disc = (struct sunxi_adc_disc *)match->data;
+	key_data->disc = disc;
 	if (of_property_read_u32(np, "key_cnt", &key_num)) {
 		pr_err("%s: get key count failed", __func__);
 		return -EBUSY;
@@ -365,14 +469,137 @@ static int sunxikbd_key_init(struct sunxi_key_data *key_data,
 	key_data->wakeup = of_property_read_bool(np, "wakeup-source");
 	device_init_wakeup(&pdev->dev, key_data->wakeup);
 
+	key_data->last_key_code = INITIAL_VALUE;
+
 	return 0;
 }
+
+#if IS_ENABLED(CONFIG_IIO)
+struct sunxi_lradc_iio {
+	struct sunxi_key_data *key_data;
+};
+
+static const struct iio_chan_spec sunxi_lradc_channels[] = {
+	{
+		.indexed = 1,
+		.type = IIO_VOLTAGE,
+		.channel = 0,
+		.datasheet_name = "LRADC",
+		.info_mask_separate = BIT(IIO_CHAN_INFO_RAW),
+	},
+};
+
+/* default maps used by iio consumer (axp charger driver) */
+static struct iio_map sunxi_lradc_default_iio_maps[] = {
+	{
+		.consumer_dev_name = "axp-charger",
+		.consumer_channel = "axp-battery-lradc",
+		.adc_channel_label = "LRADC",
+	},
+	{ }
+};
+
+static int sunxi_lradc_read_raw(struct iio_dev *indio_dev,
+			struct iio_chan_spec const *chan,
+			int *val, int *val2, long mask)
+{
+	int ret = 0;
+	int key_val, id_vol;
+	struct sunxi_lradc_iio *info = iio_priv(indio_dev);
+	struct sunxi_key_data *key_data = info->key_data;
+	struct sunxi_adc_disc *disc = key_data->disc;
+
+	mutex_lock(&indio_dev->mlock);
+	switch (mask) {
+	case IIO_CHAN_INFO_RAW:
+		key_val = sunxi_keyboard_read_data(key_data->reg_base) & 0x3f;
+		id_vol = key_val * disc->resol;
+		*val = id_vol;
+		break;
+	default:
+		ret = -EINVAL;
+	}
+	mutex_unlock(&indio_dev->mlock);
+
+	return ret;
+}
+
+static const struct iio_info sunxi_lradc_iio_info = {
+	.read_raw = &sunxi_lradc_read_raw,
+};
+
+static void sunxi_lradc_remove_iio(void *_data)
+{
+	struct iio_dev *indio_dev = _data;
+
+	if (IS_ERR_OR_NULL(indio_dev)) {
+		pr_err("indio_dev is null\n");
+	} else {
+		iio_device_unregister(indio_dev);
+		iio_map_array_unregister(indio_dev);
+	}
+}
+
+static int sunxi_keyboard_iio_init(struct platform_device *pdev)
+{
+	int ret;
+	struct iio_dev *indio_dev;
+	struct sunxi_lradc_iio *info;
+	struct sunxi_key_data *key_data = platform_get_drvdata(pdev);
+
+	indio_dev = devm_iio_device_alloc(&pdev->dev, sizeof(*info));
+	if (!indio_dev)
+		return -ENOMEM;
+
+	info = iio_priv(indio_dev);
+	info->key_data = key_data;
+
+	indio_dev->dev.parent = &pdev->dev;
+	indio_dev->name = pdev->name;
+	indio_dev->channels = sunxi_lradc_channels;
+	indio_dev->num_channels = ARRAY_SIZE(sunxi_lradc_channels);
+	indio_dev->info = &sunxi_lradc_iio_info;
+	indio_dev->modes = INDIO_DIRECT_MODE;
+	ret = iio_map_array_register(indio_dev, sunxi_lradc_default_iio_maps);
+	if (ret < 0)
+		return ret;
+
+	ret = iio_device_register(indio_dev);
+	if (ret < 0) {
+		dev_err(&pdev->dev, "unable to register iio device\n");
+		goto err_array_unregister;
+	}
+
+	ret = devm_add_action(&pdev->dev,
+				sunxi_lradc_remove_iio, indio_dev);
+	if (ret) {
+		dev_err(&pdev->dev, "unable to add iio cleanup action\n");
+		goto err_iio_unregister;
+	}
+
+	return 0;
+
+err_iio_unregister:
+	iio_device_unregister(indio_dev);
+
+err_array_unregister:
+	iio_map_array_unregister(indio_dev);
+
+	return ret;
+}
+#else
+static inline int sunxi_keyboard_iio_init(struct platform_device *pdev)
+{
+	return -ENODEV;
+}
+#endif
 
 static int sunxi_keyboard_probe(struct platform_device *pdev)
 {
 	static struct input_dev *sunxikbd_dev;
 	struct sunxi_key_data *key_data;
 	unsigned long mode, para;
+	u32 reg_val = 0;
 	int i;
 	int err = 0;
 
@@ -421,7 +648,7 @@ static int sunxi_keyboard_probe(struct platform_device *pdev)
 #endif
 
 	for (i = 0; i < KEY_MAX_CNT; i++) {
-		if (key_data->scankeycodes[i] <  KEY_MAX)
+		if (key_data->scankeycodes[i] < KEY_MAX)
 			set_bit(key_data->scankeycodes[i], sunxikbd_dev->keybit);
 	}
 	key_data->input_dev = sunxikbd_dev;
@@ -445,9 +672,15 @@ static int sunxi_keyboard_probe(struct platform_device *pdev)
 		pr_err("request irq failure.\n");
 		goto fail2;
 	}
+
 	err = input_register_device(key_data->input_dev);
 	if (err)
 		goto fail3;
+
+	reg_val = sunxi_keyboard_read_ints(key_data->reg_base);
+	sunxi_keyboard_clr_ints(key_data->reg_base, reg_val);
+
+	sunxi_keyboard_iio_init(pdev);
 
 	pr_debug("sunxikbd_init end\n");
 	return 0;
@@ -470,11 +703,13 @@ static int sunxi_keyboard_remove(struct platform_device *pdev)
 	free_irq(key_data->irq_num, key_data);
 	input_unregister_device(key_data->input_dev);
 	device_init_wakeup(&pdev->dev, 0);
+	clk_disable_unprepare(key_data->mclk);
+	reset_control_assert(key_data->rst_clk);
 	kfree(key_data);
 	return 0;
 }
 
-#ifdef CONFIG_PM
+#if IS_ENABLED(CONFIG_PM)
 static const struct dev_pm_ops sunxi_keyboard_pm_ops = {
 	.suspend = sunxi_keyboard_suspend,
 	.resume = sunxi_keyboard_resume,
@@ -489,13 +724,29 @@ static struct platform_driver sunxi_keyboard_driver = {
 	.driver = {
 		.name   = "sunxi-keyboard",
 		.owner  = THIS_MODULE,
-#ifdef CONFIG_PM
+#if IS_ENABLED(CONFIG_PM)
 		.pm	= SUNXI_KEYBOARD_PM_OPS,
 #endif
 		.of_match_table = of_match_ptr(sunxi_keyboard_of_match),
 	},
 };
-module_platform_driver(sunxi_keyboard_driver);
+
+static int __init sunxi_keyboard_init(void)
+{
+	int ret;
+
+	ret = platform_driver_register(&sunxi_keyboard_driver);
+
+	return ret;
+}
+
+static void __exit sunxi_keyboard_exit(void)
+{
+	platform_driver_unregister(&sunxi_keyboard_driver);
+}
+
+subsys_initcall_sync(sunxi_keyboard_init);
+module_exit(sunxi_keyboard_exit);
 
 MODULE_AUTHOR(" Qin");
 MODULE_DESCRIPTION("sunxi-keyboard driver");

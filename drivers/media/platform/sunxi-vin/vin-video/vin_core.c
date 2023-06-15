@@ -24,7 +24,7 @@
 #include <linux/string.h>
 #include <linux/freezer.h>
 #include <linux/debugfs.h>
-#include <linux/mpp.h>
+//#include <linux/mpp.h>
 
 #include <linux/io.h>
 #include <linux/platform_device.h>
@@ -458,6 +458,42 @@ static struct vin_fmt vin_formats[] = {
 		.colplanes	= 1,
 		.mbus_code	= MEDIA_BUS_FMT_YVYU8_1X16,
 		.flags		= VIN_FMT_YUV,
+	}, {
+		.name           = "YUV 4:2:2 packed, CbYCrY",
+		.fourcc         = V4L2_PIX_FMT_UYVY,
+		.depth          = { 20 },
+		.color          = V4L2_COLORSPACE_JPEG,
+		.memplanes      = 1,
+		.colplanes      = 1,
+		.mbus_code      = MEDIA_BUS_FMT_UYVY10_2X10,
+		.flags          = VIN_FMT_YUV,
+	}, {
+		.name           = "YUV 4:2:2 packed, CbYCrY",
+		.fourcc         = V4L2_PIX_FMT_VYUY,
+		.depth          = { 20 },
+		.color          = V4L2_COLORSPACE_JPEG,
+		.memplanes      = 1,
+		.colplanes      = 1,
+		.mbus_code      = MEDIA_BUS_FMT_VYUY10_2X10,
+		.flags          = VIN_FMT_YUV,
+	}, {
+		.name           = "YUV 4:2:2 packed, CbYCrY",
+		.fourcc         = V4L2_PIX_FMT_YVYU,
+		.depth          = { 20 },
+		.color          = V4L2_COLORSPACE_JPEG,
+		.memplanes      = 1,
+		.colplanes      = 1,
+		.mbus_code      = MEDIA_BUS_FMT_YVYU10_2X10,
+		.flags          = VIN_FMT_YUV,
+	}, {
+		.name           = "YUV 4:2:2 packed, CbYCrY",
+		.fourcc         = V4L2_PIX_FMT_YUYV,
+		.depth          = { 20 },
+		.color          = V4L2_COLORSPACE_JPEG,
+		.memplanes      = 1,
+		.colplanes      = 1,
+		.mbus_code      = MEDIA_BUS_FMT_YUYV10_2X10,
+		.flags          = VIN_FMT_YUV,
 	},
 };
 
@@ -612,7 +648,7 @@ static size_t vin_status_dump(struct vin_core *vinc, char *buf, size_t size)
 	case V4L2_MBUS_BT656:
 		sprintf(in_bus, "%s", "BT656");
 		break;
-	case V4L2_MBUS_CSI2:
+	case V4L2_MBUS_CSI2_DPHY:
 		sprintf(in_bus, "%s", "MIPI");
 		break;
 	case V4L2_MBUS_SUBLVDS:
@@ -649,7 +685,7 @@ static size_t vin_status_dump(struct vin_core *vinc, char *buf, size_t size)
 		count += scnprintf(buf + count, size - count, "VIN hardware feature list:\n"
 				"mcsi %d, ncsi %d, parser %d, isp %d, vipp %d, dma %d\n"
 				"CSI_VERSION: CSI%x_%x, ISP_VERSION: ISP%x_%x\n"
-				"CSI_CLK: %ld, ISP_CLK: %ld\n",
+				"CSI_TOP: %ld, CSI_ISP: %ld\n",
 				vind->csic_fl.mcsi_num,	vind->csic_fl.ncsi_num,
 				vind->csic_fl.parser_num, vind->csic_fl.isp_num,
 				vind->csic_fl.vipp_num,	vind->csic_fl.dma_num,
@@ -744,18 +780,42 @@ static int vin_debugfs_open(struct inode *inode, struct file *file)
 		return -ENOMEM;
 
 	vi_status_size_sum = 0;
-	while (vin_core_gbl[i] != NULL) {
-		vi_status_size[i] = vin_status_dump(vin_core_gbl[i],
-					buf->data + vi_status_size_sum,
-					sizeof(buf->data) - vi_status_size_sum);
-		vi_status_size_sum += vi_status_size[i];
-		if (++i >= VIN_MAX_DEV)
-			break;
+	for (i = 0; i < VIN_MAX_DEV; i++) {
+		if (vin_core_gbl[i] != NULL)
+			vi_status_size[i] = vin_status_dump(vin_core_gbl[i],
+						buf->data + vi_status_size_sum,
+						sizeof(buf->data) - vi_status_size_sum);
+						vi_status_size_sum += vi_status_size[i];
 	}
 	buf->count = vi_status_size_sum;
 	file->private_data = buf;
 	return 0;
 }
+
+#if !(IS_ENABLED(CONFIG_DEBUG_FS))
+static ssize_t vi_node_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	struct vin_debugfs_buffer *vd_buf;
+	int i = 0;
+
+	vd_buf = kmalloc(sizeof(*vd_buf), GFP_KERNEL);
+	if (vd_buf == NULL)
+		return -ENOMEM;
+
+	vi_status_size_sum = 0;
+	for (i = 0; i < VIN_MAX_DEV; i++) {
+		if (vin_core_gbl[i] != NULL)
+			vi_status_size[i] = vin_status_dump(vin_core_gbl[i],
+						vd_buf->data + vi_status_size_sum,
+						sizeof(vd_buf->data) - vi_status_size_sum);
+						vi_status_size_sum += vi_status_size[i];
+	}
+	return strlcpy(buf, vd_buf->data, vi_status_size_sum);
+}
+
+static DEVICE_ATTR(vi, S_IRUGO, vi_node_show, NULL);
+#endif
 
 static ssize_t vin_debugfs_read(struct file *file, char __user *user_buf,
 				      size_t nbytes, loff_t *ppos)
@@ -781,12 +841,20 @@ static const struct file_operations vin_debugfs_fops = {
 	.read = vin_debugfs_read,
 	.release = vin_debugfs_release,
 };
+void vin_get_timestamp(struct timeval *tv)
+{
+	struct timespec ts;
+
+	ktime_get_ts(&ts);
+	tv->tv_sec = ts.tv_sec;
+	tv->tv_usec = ts.tv_nsec / NSEC_PER_USEC;
+}
 
 static void __vin_get_frame_internal(struct vin_core *vinc)
 {
 	struct timeval ts;
 
-	v4l2_get_timestamp(&ts);
+	vin_get_timestamp(&ts);
 	if (vinc->vin_status.frame_cnt > 2) {
 		vinc->vin_status.frame_internal = (ts.tv_sec * 1000000 + ts.tv_usec - vinc->vid_cap.ts.tv_sec * 1000000 - vinc->vid_cap.ts.tv_usec);
 		if (vinc->vin_status.frame_internal > vinc->vin_status.max_internal)
@@ -922,13 +990,14 @@ static irqreturn_t vin_isr(int irq, void *priv)
 		if ((status.buf_0_overflow) || (status.buf_1_overflow) || (status.buf_2_overflow)) {
 			csic_dma_int_clear_status(vinc->vipp_sel, DMA_INT_BUF_0_OVERFLOW | DMA_INT_BUF_1_OVERFLOW | DMA_INT_BUF_2_OVERFLOW);
 			vinc->vin_status.err_cnt++;
-			vin_err("video%d fifo overflow\n", vinc->id);
+			vin_err("video%d fifo overflow, CSI frame count is %d\n", vinc->id, vinc->vin_status.frame_cnt);
 		}
 		if (status.hblank_overflow) {
 			csic_dma_int_clear_status(vinc->vipp_sel, DMA_INT_HBLANK_OVERFLOW);
 			vinc->vin_status.err_cnt++;
-			vin_err("video%d hblank overflow\n", vinc->id);
+			vin_err("video%d hblank overflow, CSI frame count is %d\n", vinc->id, vinc->vin_status.frame_cnt);
 		}
+		sunxi_isp_reset(v4l2_get_subdevdata(cap->pipe.sd[VIN_IND_ISP]));
 	}
 
 	if (status.fbc_ovhd_wrddr_full) {
@@ -943,6 +1012,10 @@ static irqreturn_t vin_isr(int irq, void *priv)
 		vin_err("video%d fbc data write ddr full\n", vinc->id);
 	}
 
+	if (status.lbc_hb) {
+		csic_dma_int_clear_status(vinc->vipp_sel, DMA_INT_LBC_HB);
+		vin_err("video%d lbc hblanking less than 48 bk_clk cycles\n", vinc->id);
+	}
 #ifndef BUF_AUTO_UPDATE
 	if (status.vsync_trig) {
 		csic_dma_int_clear_status(vinc->vipp_sel, DMA_INT_VSYNC_TRIG);
@@ -968,14 +1041,22 @@ static irqreturn_t vin_isr(int irq, void *priv)
 				buf = list_entry(cap->vidq_active.next, struct vin_buffer, list);
 				buf->vb.sequence = csic_dma_get_frame_cnt(vinc->vipp_sel);
 				buf->vb.vb2_buf.timestamp = ktime_get_ns();
-				buf->vb.framecnt = vinc->vin_status.frame_cnt;
-				buf->vb.exp_time = sensor_get_exp(vinc->vid_cap.pipe.sd[VIN_IND_SENSOR]);
+				buf->vb.sequence = vinc->vin_status.frame_cnt;
 				list_del(&buf->list);
-				if (cap->special_active == 1) {
-					list_add_tail(&buf->list, &cap->vidq_done);
-					need_callback = 1;
-				} else
-					vb2_buffer_done(&buf->vb.vb2_buf, VB2_BUF_STATE_DONE);
+
+				if (cap->frame_delay_cnt > 0) {
+					if (cap->frame_delay_cnt >= 5)
+						cap->frame_delay_cnt = 5;
+					list_add_tail(&buf->list, &cap->vidq_active);
+					cap->frame_delay_cnt--;
+					vinc->vin_status.lost_cnt++;
+				} else {
+					if (cap->special_active == 1) {
+						list_add_tail(&buf->list, &cap->vidq_done);
+						need_callback = 1;
+					} else
+						vb2_buffer_done(&buf->vb.vb2_buf, VB2_BUF_STATE_DONE);
+				}
 			}
 			if (list_empty(&cap->vidq_active) || cap->vidq_active.next->next == &cap->vidq_active) {
 				vin_log(VIN_LOG_VIDEO, "No active queue to serve\n");
@@ -1050,7 +1131,7 @@ static irqreturn_t vin_isr(int irq, void *priv)
 			/* video buffer handle */
 			if ((&cap->vidq_active) == cap->vidq_active.next->next->next) {
 				vin_log(VIN_LOG_VIDEO, "Only two buffer left for video%d\n", vinc->id);
-				v4l2_get_timestamp(&cap->ts);
+				vin_get_timestamp(&cap->ts);
 				goto unlock;
 			}
 			buf = list_entry(cap->vidq_active.next, struct vin_buffer, list);
@@ -1122,8 +1203,7 @@ static irqreturn_t vin_isr(int irq, void *priv)
 			buf->vb.sequence = csic_dma_get_frame_cnt(vinc->vipp_sel) - (cap->threshold.stored_frm_threshold - 1) + i;
 			buf->vb.vb2_buf.timestamp = timestamp_ns - ((cap->threshold.stored_frm_threshold - 1 - i) *
 							vinc->vin_status.frame_internal * 1000);
-			buf->vb.framecnt = vinc->vin_status.frame_cnt - (cap->threshold.stored_frm_threshold - 1) + i;
-			buf->vb.exp_time = sensor_get_exp(vinc->vid_cap.pipe.sd[VIN_IND_SENSOR]);
+			buf->vb.sequence = vinc->vin_status.frame_cnt - (cap->threshold.stored_frm_threshold - 1) + i;
 
 			buf_next = buf_next->next;
 			list_del(&buf->list);
@@ -1437,7 +1517,7 @@ static int vin_core_probe(struct platform_device *pdev)
 
 	vin_core_gbl[vinc->id] = vinc;
 
-	vin_log(VIN_LOG_VIDEO, "pdev->id = %d\n", pdev->id);
+	vin_log(VIN_LOG_VIDEO, "vinc->id = %d\n", vinc->id);
 	vin_log(VIN_LOG_VIDEO, "rear_sensor_sel = %d\n", vinc->rear_sensor);
 	vin_log(VIN_LOG_VIDEO, "front_sensor_sel = %d\n", vinc->front_sensor);
 	vin_log(VIN_LOG_VIDEO, "csi_sel = %d\n", vinc->csi_sel);
@@ -1497,10 +1577,10 @@ static int vin_core_remove(struct platform_device *pdev)
 	return 0;
 }
 
-#if defined(CONFIG_DEBUG_FS)
+#if IS_ENABLED(CONFIG_DEBUG_FS)
 int sunxi_vin_debug_register_driver(void)
 {
-#if defined (CONFIG_SUNXI_MPP)
+#if IS_ENABLED(CONFIG_SUNXI_MPP)
 	vi_debugfs_root = debugfs_mpp_root;
 #else
 	vi_debugfs_root = debugfs_create_dir("mpp", NULL);
@@ -1521,16 +1601,31 @@ int sunxi_vin_debug_register_driver(void)
 #else
 int sunxi_vin_debug_register_driver(void)
 {
+	struct vin_core *vinc;
+	int ret, i;
+
+	for (i = 0; i < VIN_MAX_DEV; i++) {
+		vinc = sunxi_vin_core_get_dev(i);
+		if (vinc)
+			break;
+	}
+	if (!vinc && vinc->v4l2_dev && vinc->v4l2_dev->dev)
+		return -1;
+	ret = device_create_file(vinc->v4l2_dev->dev, &dev_attr_vi);
+	if (ret) {
+		vin_err("vin debug node register fail\n");
+		return ret;
+	}
 	return 0;
 }
 #endif
 
-#if defined(CONFIG_DEBUG_FS)
+#if IS_ENABLED(CONFIG_DEBUG_FS)
 void sunxi_vin_debug_unregister_driver(void)
 {
 	if (vi_debugfs_root == NULL)
 		return;
-#if defined (CONFIG_SUNXI_MPP)
+#if IS_ENABLED(CONFIG_SUNXI_MPP)
 	debugfs_remove_recursive(vi_node);
 #else
 	debugfs_remove_recursive(vi_debugfs_root);
@@ -1538,7 +1633,20 @@ void sunxi_vin_debug_unregister_driver(void)
 #endif
 }
 #else
-void sunxi_vin_debug_unregister_driver(void) {}
+void sunxi_vin_debug_unregister_driver(void)
+{
+	struct vin_core *vinc;
+	int i;
+
+	for (i = 0; i < VIN_MAX_DEV; i++) {
+		vinc = sunxi_vin_core_get_dev(i);
+		if (vinc)
+			break;
+	}
+	if (!vinc && vinc->v4l2_dev && vinc->v4l2_dev->dev)
+		return;
+	device_remove_file(vinc->v4l2_dev->dev, &dev_attr_vi);
+}
 #endif
 
 static const struct of_device_id sunxi_vin_core_match[] = {

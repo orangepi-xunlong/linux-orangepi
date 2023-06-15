@@ -35,16 +35,25 @@
 #include <linux/of_gpio.h>
 #include <linux/io.h>
 #include <linux/sunxi-sid.h>
-#include <linux/sunxi-gpio.h>
+#include <linux/reset.h>
 #include "sunxi-gmac.h"
-#include <linux/phy.h>
+#ifdef CONFIG_RTL8363_NB
+#include <smi.h>
+#include <rtk8363.h>
+#include <rtk_types.h>
+#include <port.h>
+#include <stat.h>
+#include <rtk_switch.h>
+#include <rtk_error.h>
+#include <rtl8367c_asicdrv_port.h>
+#endif
+
+#define SUNXI_GMAC_VERSION "1.0.0"
 
 #define DMA_DESC_RX	256
 #define DMA_DESC_TX	256
 #define BUDGET		(dma_desc_rx / 4)
 #define TX_THRESH	(dma_desc_tx / 4)
-
-#define RTL_8211F_PHY_ID  0x001cc916
 
 #define HASH_TABLE_SIZE	64
 #define MAX_BUF_SZ	(SZ_2K - 1)
@@ -61,6 +70,8 @@
 #define circ_space(head, tail, size) circ_cnt((tail), ((head) + 1), (size))
 
 #define circ_inc(n, s) (((n) + 1) % (s))
+
+#define YT8531_PHY_ID 0x4f51e91b
 
 #define GETH_MAC_ADDRESS "00:00:00:00:00:00"
 static char *mac_str = GETH_MAC_ADDRESS;
@@ -101,18 +112,6 @@ static int flow_ctrl;
 module_param(flow_ctrl, int, S_IRUGO | S_IWUSR);
 MODULE_PARM_DESC(flow_ctrl, "Flow control [0: off, 1: rx, 2: tx, 3: both]");
 
-static unsigned long tx_delay;
-module_param(tx_delay, ulong, S_IRUGO | S_IWUSR);
-MODULE_PARM_DESC(tx_delay, "Adjust transmit clock delay, value: 0~7");
-
-static unsigned long rx_delay;
-module_param(rx_delay, ulong, S_IRUGO | S_IWUSR);
-MODULE_PARM_DESC(rx_delay, "Adjust receive clock delay, value: 0~31");
-
-/* whether using ephy_clk */
-static int g_use_ephy_clk;
-static int g_phy_addr;
-
 struct geth_priv {
 	struct dma_desc *dma_tx;
 	struct sk_buff **tx_sk;
@@ -147,6 +146,7 @@ struct geth_priv {
 	void __iomem *base_phy;
 	struct clk *geth_clk;
 	struct clk *ephy_clk;
+	struct reset_control *reset;
 	struct pinctrl *pinctrl;
 
 	struct regulator *gmac_power[POWER_CHAN_NUM];
@@ -157,10 +157,27 @@ struct geth_priv {
 	spinlock_t lock;
 	spinlock_t tx_lock;
 
+	/* whether using ephy_clk */
+	int use_ephy_clk;
+	int phy_addr;
+	const char *type;
+
+	/* adjust transmit clock delay, value: 0~7 */
+	/* adjust receive clock delay, value: 0~31 */
+	unsigned int tx_delay;
+	unsigned int rx_delay;
+
 	/* resume work */
 	struct work_struct eth_work;
 };
 
+#ifdef CONFIG_RTL8363_NB
+rtk_port_mac_ability_t mac_cfg;
+rtk_stat_counter_t cntr;
+rtk_mode_ext_t mode;
+struct net_device *ndev = NULL;
+struct geth_priv *priv;
+#endif
 static u64 geth_dma_mask = DMA_BIT_MASK(32);
 
 void sunxi_udelay(int n)
@@ -186,7 +203,7 @@ static ssize_t adjust_bgs_show(struct device *dev, struct device_attribute *attr
 		if (sunxi_efuse_read(EFUSE_OEM_NAME, &efuse_value) != 0)
 			pr_err("get PHY efuse fail!\n");
 		else
-#if defined(CONFIG_ARCH_SUN50IW2)
+#if IS_ENABLED(CONFIG_ARCH_SUN50IW2)
 			value = value - ((efuse_value >> 24) & 0x0F);
 #else
 			pr_warn("miss config come from efuse!\n");
@@ -212,7 +229,7 @@ static ssize_t adjust_bgs_write(struct device *dev, struct device_attribute *att
 		if (sunxi_efuse_read(EFUSE_OEM_NAME, &efuse_value) != 0)
 			pr_err("get PHY efuse fail!\n");
 		else
-#if defined(CONFIG_ARCH_SUN50IW2)
+#if IS_ENABLED(CONFIG_ARCH_SUN50IW2)
 			clk_value |= (((efuse_value >> 24) & 0x0F) + out) << 28;
 #else
 			pr_warn("miss config come from efuse!\n");
@@ -265,6 +282,72 @@ static void desc_print(struct dma_desc *desc, int size)
 }
 #endif
 
+static ssize_t extra_tx_stats_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	struct net_device *ndev = dev_get_drvdata(dev);
+	struct geth_priv *priv = netdev_priv(ndev);
+
+	if (!dev) {
+		pr_err("Argment is invalid\n");
+		return 0;
+	}
+
+	if (!ndev) {
+		pr_err("Net device is null\n");
+		return 0;
+	}
+
+	return sprintf(buf, "tx_underflow: %lu\ntx_carrier: %lu\n"
+			"tx_losscarrier: %lu\nvlan_tag: %lu\n"
+			"tx_deferred: %lu\ntx_vlan: %lu\n"
+			"tx_jabber: %lu\ntx_frame_flushed: %lu\n"
+			"tx_payload_error: %lu\ntx_ip_header_error: %lu\n\n",
+			priv->xstats.tx_underflow, priv->xstats.tx_carrier,
+			priv->xstats.tx_losscarrier, priv->xstats.vlan_tag,
+			priv->xstats.tx_deferred, priv->xstats.tx_vlan,
+			priv->xstats.tx_jabber, priv->xstats.tx_frame_flushed,
+			priv->xstats.tx_payload_error, priv->xstats.tx_ip_header_error);
+}
+static DEVICE_ATTR(extra_tx_stats, 0444, extra_tx_stats_show, NULL);
+
+static ssize_t extra_rx_stats_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	struct net_device *ndev = dev_get_drvdata(dev);
+	struct geth_priv *priv = netdev_priv(ndev);
+
+	if (!dev) {
+		pr_err("Argment is invalid\n");
+		return 0;
+	}
+
+	if (!ndev) {
+		pr_err("Net device is null\n");
+		return 0;
+	}
+
+	return sprintf(buf, "rx_desc: %lu\nsa_filter_fail: %lu\n"
+			"overflow_error: %lu\nipc_csum_error: %lu\n"
+			"rx_collision: %lu\nrx_crc: %lu\n"
+			"dribbling_bit: %lu\nrx_length: %lu\n"
+			"rx_mii: %lu\nrx_multicast: %lu\n"
+			"rx_gmac_overflow: %lu\nrx_watchdog: %lu\n"
+			"da_rx_filter_fail: %lu\nsa_rx_filter_fail: %lu\n"
+			"rx_missed_cntr: %lu\nrx_overflow_cntr: %lu\n"
+			"rx_vlan: %lu\n\n",
+			priv->xstats.rx_desc, priv->xstats.sa_filter_fail,
+			priv->xstats.overflow_error, priv->xstats.ipc_csum_error,
+			priv->xstats.rx_collision, priv->xstats.rx_crc,
+			priv->xstats.dribbling_bit, priv->xstats.rx_length,
+			priv->xstats.rx_mii, priv->xstats.rx_multicast,
+			priv->xstats.rx_gmac_overflow, priv->xstats.rx_length,
+			priv->xstats.da_rx_filter_fail, priv->xstats.sa_rx_filter_fail,
+			priv->xstats.rx_missed_cntr, priv->xstats.rx_overflow_cntr,
+			priv->xstats.rx_vlan);
+}
+static DEVICE_ATTR(extra_rx_stats, 0444, extra_rx_stats_show, NULL);
+
 static ssize_t gphy_test_show(struct device *dev,
 		struct device_attribute *attr, char *buf)
 {
@@ -307,7 +390,7 @@ static ssize_t gphy_test_store(struct device *dev,
 		return count;
 	}
 
-	data = sunxi_mdio_read(priv->base, g_phy_addr, MII_CTRL1000);
+	data = sunxi_mdio_read(priv->base, priv->phy_addr, MII_CTRL1000);
 
 	ret = kstrtou16(buf, 0, &value);
 	if (ret)
@@ -316,7 +399,7 @@ static ssize_t gphy_test_store(struct device *dev,
 	if (value >= 0 && value <= 4) {
 		data &= ~(0x7 << 13);
 		data |= value << 13;
-		sunxi_mdio_write(priv->base, g_phy_addr, MII_CTRL1000, data);
+		sunxi_mdio_write(priv->base, priv->phy_addr, MII_CTRL1000, data);
 		pr_info("Set MII_CTRL1000(0x09) Reg: 0x%x\n", data);
 	} else {
 		pr_info("unknown value (%d)\n", value);
@@ -326,6 +409,120 @@ static ssize_t gphy_test_store(struct device *dev,
 }
 
 static DEVICE_ATTR(gphy_test, 0664, gphy_test_show, gphy_test_store);
+
+static ssize_t mii_reg_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	struct net_device *ndev = NULL;
+	struct geth_priv *priv = NULL;
+
+	if (dev == NULL) {
+		pr_err("Argment is invalid\n");
+		return 0;
+	}
+
+	ndev = dev_get_drvdata(dev);
+	if (ndev == NULL) {
+		pr_err("Net device is null\n");
+		return 0;
+	}
+
+	priv = netdev_priv(ndev);
+	if (priv == NULL) {
+		pr_err("geth_priv is null\n");
+		return 0;
+	}
+
+	if (!netif_running(ndev)) {
+		pr_warn("eth is down!\n");
+		return 0;
+	}
+
+	return sprintf(buf,
+		"Current MII Registers:\n"
+		"BMCR[0x%02x] = 0x%04x,\t\tBMSR[0x%02x] = 0x%04x,\t\tPHYSID1[0x%02x] = 0x%04x\n"
+		"PHYSID2[0x%02x] = 0x%04x,\t\tADVERTISE[0x%02x] = 0x%04x,\tLPA[0x%02x] = 0x%04x\n"
+		"EXPANSION[0x%02x] = 0x%04x,\tCTRL1000[0x%02x] = 0x%04x,\tSTAT1000[0x%02x] = 0x%04x\n",
+		MII_BMCR, sunxi_mdio_read(priv->base, priv->phy_addr, MII_BMCR),
+		MII_BMSR, sunxi_mdio_read(priv->base, priv->phy_addr, MII_BMSR),
+		MII_PHYSID1, sunxi_mdio_read(priv->base, priv->phy_addr, MII_PHYSID1),
+		MII_PHYSID2, sunxi_mdio_read(priv->base, priv->phy_addr, MII_PHYSID2),
+		MII_ADVERTISE, sunxi_mdio_read(priv->base, priv->phy_addr, MII_ADVERTISE),
+		MII_LPA, sunxi_mdio_read(priv->base, priv->phy_addr, MII_LPA),
+		MII_EXPANSION, sunxi_mdio_read(priv->base, priv->phy_addr, MII_EXPANSION),
+		MII_CTRL1000, sunxi_mdio_read(priv->base, priv->phy_addr, MII_CTRL1000),
+		MII_STAT1000, sunxi_mdio_read(priv->base, priv->phy_addr, MII_STAT1000));
+}
+static DEVICE_ATTR(mii_reg, 0444, mii_reg_show, NULL);
+
+static ssize_t loopback_test_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	return sprintf(buf, "Usage:\necho [0/1/2] > loopback_test\n"
+			"0 - Normal Mode\n"
+			"1 - Mac loopback test mode\n"
+			"2 - Phy loopback test mode\n");
+}
+
+static ssize_t loopback_test_store(struct device *dev,
+		struct device_attribute *attr, const char *buf, size_t count)
+{
+	struct net_device *ndev = NULL;
+	struct geth_priv *priv = NULL;
+	u16 value = 0;
+	int ret = 0;
+	u16 data = 0;
+
+	if (dev == NULL) {
+		pr_err("Argment is invalid\n");
+		return count;
+	}
+
+	ndev = dev_get_drvdata(dev);
+	if (ndev == NULL) {
+		pr_err("Net device is null\n");
+		return count;
+	}
+
+	priv = netdev_priv(ndev);
+	if (priv == NULL) {
+		pr_err("geth_priv is null\n");
+		return count;
+	}
+
+	if (!netif_running(ndev)) {
+		pr_warn("eth is down!\n");
+		return count;
+	}
+
+	ret = kstrtou16(buf, 0, &value);
+	if (ret)
+		return ret;
+
+	if (value == 0) { /* normal mode */
+		/* clear mac loopback */
+		sunxi_mac_loopback(priv->base, 0);
+
+		/* clear phy loopback */
+		data = sunxi_mdio_read(priv->base, priv->phy_addr, MII_BMCR);
+		sunxi_mdio_write(priv->base, priv->phy_addr, MII_BMCR, data & ~BMCR_LOOPBACK);
+	} else if (value == 1) { /* mac loopback test mode */
+		data = sunxi_mdio_read(priv->base, priv->phy_addr, MII_BMCR);
+		sunxi_mdio_write(priv->base, priv->phy_addr, MII_BMCR, data & ~BMCR_LOOPBACK);
+
+		sunxi_mac_loopback(priv->base, 1);
+	} else if (value == 2) { /* phy loopback test mode */
+		sunxi_mac_loopback(priv->base, 0);
+
+		data = sunxi_mdio_read(priv->base, priv->phy_addr, MII_BMCR);
+		sunxi_mdio_write(priv->base, priv->phy_addr, MII_BMCR, data | BMCR_LOOPBACK);
+	} else {
+		pr_err("Undefined value (%d)\n", value);
+	}
+
+	return count;
+}
+static DEVICE_ATTR(loopback_test, 0664, loopback_test_show, loopback_test_store);
 
 static int geth_power_on(struct geth_priv *priv)
 {
@@ -373,6 +570,73 @@ static void geth_power_off(struct geth_priv *priv)
 	}
 }
 
+#ifdef CONFIG_RTL8363_NB
+/* rtl8363nb_vb switch init. */
+static int rtl8363nb_vb_init(void)
+{
+	pr_info("%s->%d rtk8363 init=====\n", __func__, __LINE__);
+
+	if (rtk_switch_init() != RT_ERR_OK) {
+		pr_info("rtk switch init failed!\n");
+		return -1;
+	}
+	mode = MODE_EXT_RGMII;
+	mac_cfg.forcemode = MAC_FORCE;
+	mac_cfg.speed = SPD_1000M;
+	mac_cfg.duplex = FULL_DUPLEX;
+	mac_cfg.link = PORT_LINKUP;
+	mac_cfg.nway = DISABLED;
+	mac_cfg.txpause = ENABLED;
+	mac_cfg.rxpause = ENABLED;
+
+	if (rtk_port_macForceLinkExt_set(EXT_PORT0, mode, &mac_cfg) != RT_ERR_OK) {
+		pr_info("macForceLinkExt set failed!\n");
+		return -1;
+	}
+
+	rtk_port_rgmiiDelayExt_set(EXT_PORT0, 1, 0);
+	rtk_port_phyEnableAll_set(ENABLED);
+}
+
+/* rtl8363 switch mdc/mdio interface operations */
+int rtk_mdio_read(u32 len, u8 phy_adr, u8 reg, u32 *value)
+{
+
+	struct geth_priv *priv = netdev_priv(ndev);
+	*value = sunxi_mdio_read(priv->base, 0, reg);
+
+	return 0;
+}
+
+int rtk_mdio_write(u32 len, u8 phy_adr, u8 reg, u32 data)
+{
+
+	struct geth_priv *priv = netdev_priv(ndev);
+	sunxi_mdio_write(priv->base, 0, reg, data);
+
+	return 0;
+}
+/* rtl8363 switch PHY interface operations */
+static int rtk_phy_read(struct mii_bus *bus, int phyaddr, int phyreg)
+{
+	struct net_device *ndev = bus->priv;
+	struct geth_priv *priv = netdev_priv(ndev);
+
+	return (int)smi_read(phyreg, NULL);
+}
+
+static int rtk_phy_write(struct mii_bus *bus, int phyaddr,
+			   int phyreg, u16 data)
+{
+	struct net_device *ndev = bus->priv;
+	struct geth_priv *priv = netdev_priv(ndev);
+
+	smi_write(phyreg, data);
+
+	return 0;
+}
+#endif
+
 /* PHY interface operations */
 static int geth_mdio_read(struct mii_bus *bus, int phyaddr, int phyreg)
 {
@@ -407,11 +671,16 @@ static void geth_adjust_link(struct net_device *ndev)
 	struct phy_device *phydev = ndev->phydev;
 	unsigned long flags;
 	int new_state = 0;
-
 	if (!phydev)
 		return;
 
 	spin_lock_irqsave(&priv->lock, flags);
+#ifdef CONFIG_RTL8363_NB
+	priv->speed = 1000;
+	priv->duplex = 1;
+	sunxi_set_link_mode(priv->base, 1, 1000);
+	phy_print_status(phydev);
+#else
 	if (phydev->link) {
 		/* Now we make sure that we can be in full duplex mode.
 		 * If not, we operate in half-duplex mode.
@@ -451,6 +720,7 @@ static void geth_adjust_link(struct net_device *ndev)
 
 	if (new_state)
 		phy_print_status(phydev);
+#endif
 
 	spin_unlock_irqrestore(&priv->lock, flags);
 }
@@ -461,9 +731,6 @@ static int geth_phy_init(struct net_device *ndev)
 	struct mii_bus *new_bus;
 	struct geth_priv *priv = netdev_priv(ndev);
 	struct phy_device *phydev = ndev->phydev;
-
-	if (priv->is_suspend && phydev)
-		goto resume;
 
 	/* Fixup the phy interface type */
 	if (priv->phy_ext == INT_PHY) {
@@ -480,6 +747,9 @@ static int geth_phy_init(struct net_device *ndev)
 		}
 	}
 
+	if (priv->is_suspend && phydev)
+		goto resume;
+
 	new_bus = mdiobus_alloc();
 	if (!new_bus) {
 		netdev_err(ndev, "Failed to alloc new mdio bus\n");
@@ -487,9 +757,24 @@ static int geth_phy_init(struct net_device *ndev)
 	}
 
 	new_bus->name = dev_name(priv->dev);
+#ifdef CONFIG_RTL8363_NB
+	/*rtl8363 switch can not use kernel's phy interface, neeed to redefine hook function.*/
+	new_bus->read = &rtk_phy_read;
+	new_bus->write = &rtk_phy_write;
+#if 0
+	//read reg 0x1b00
+	sunxi_mdio_write(priv->base, priv->phy_addr, 31, 0x000E);
+	sunxi_mdio_write(priv->base, priv->phy_addr, 23, 0x1b00);
+	sunxi_mdio_write(priv->base, priv->phy_addr, 21, 0x1);
+	sunxi_mdio_read(priv->base, priv->phy_addr, 25);
+	pr_info("%s->%d =====> reg 0x1b00 = %x!\n", __func__, __LINE__, \
+			sunxi_mdio_read(priv->base, priv->phy_addr, 25));
+#endif
+#else
 	new_bus->read = &geth_mdio_read;
 	new_bus->write = &geth_mdio_write;
 	new_bus->reset = &geth_mdio_reset;
+#endif
 	snprintf(new_bus->id, MII_BUS_ID_SIZE, "%s-%x", new_bus->name, 0);
 
 	new_bus->parent = priv->dev;
@@ -504,15 +789,31 @@ static int geth_phy_init(struct net_device *ndev)
 
 	{
 		int addr;
-
 		for (addr = 0; addr < PHY_MAX_ADDR; addr++) {
 			struct phy_device *phydev_tmp = mdiobus_get_phy(new_bus, addr);
 
-			if (phydev_tmp && (phydev_tmp->phy_id != 0x00)) {
+#if defined(CONFIG_ARCH_SUN50IW9)
+			if (IS_ERR_OR_NULL(phydev_tmp) || phydev_tmp->phy_id == 0xffff) {
+				if (!IS_ERR_OR_NULL(phydev_tmp))
+					phy_device_remove(phydev_tmp);
+				phydev_tmp = mdiobus_scan(new_bus, addr);
+			}
+
+			if (!phydev_tmp)
+				continue;
+
+			if (phydev_tmp->phy_id == EPHY_ID || phydev_tmp->phy_id == YT8531_PHY_ID) {
 				phydev = phydev_tmp;
-				g_phy_addr = addr;
+				priv->phy_addr = addr;
 				break;
 			}
+#else
+			if (phydev_tmp && (phydev_tmp->phy_id != 0x00)) {
+				phydev = phydev_tmp;
+				priv->phy_addr = addr;
+				break;
+			}
+#endif
 		}
 	}
 
@@ -520,13 +821,6 @@ static int geth_phy_init(struct net_device *ndev)
 		netdev_err(ndev, "No PHY found!\n");
 		goto err;
 	}
-
-	phy_write(phydev, MII_BMCR, BMCR_RESET);
-	while (BMCR_RESET & phy_read(phydev, MII_BMCR))
-		msleep(30);
-
-	value = phy_read(phydev, MII_BMCR);
-	phy_write(phydev, MII_BMCR, (value & ~BMCR_PDOWN));
 
 	phydev->irq = PHY_POLL;
 
@@ -540,10 +834,18 @@ static int geth_phy_init(struct net_device *ndev)
 			    phydev->mdio.addr, "poll", dev_name(&phydev->mdio.dev));
 	}
 
-	phydev->supported &= PHY_GBIT_FEATURES;
-	phydev->advertising = phydev->supported;
+	//phydev->supported &= PHY_GBIT_FEATURES;
+	phydev->is_gigabit_capable = 1;
+	//phydev->advertising = phydev->supported;
 
 resume:
+	phy_write(phydev, MII_BMCR, BMCR_RESET);
+	while (BMCR_RESET & phy_read(phydev, MII_BMCR))
+		msleep(30);
+
+	value = phy_read(phydev, MII_BMCR);
+	phy_write(phydev, MII_BMCR, (value & ~BMCR_PDOWN));
+
 	if (priv->phy_ext == INT_PHY) {
 		/* EPHY Initial */
 		phy_write(phydev, 0x1f, 0x0100); /* switch to page 1 */
@@ -582,19 +884,22 @@ static int geth_phy_release(struct net_device *ndev)
 	int value = 0;
 
 	/* Stop and disconnect the PHY */
-	if (phydev)
+	if (phydev && phy_is_started(phydev))
 		phy_stop(phydev);
 
 	priv->link = PHY_DOWN;
 	priv->speed = 0;
 	priv->duplex = -1;
 
+	if (phydev) {
+		value = phy_read(phydev, MII_BMCR);
+		phy_write(phydev, MII_BMCR, (value | BMCR_PDOWN));
+	}
+
 	if (priv->is_suspend)
 		return 0;
 
 	if (phydev) {
-		value = phy_read(phydev, MII_BMCR);
-		phy_write(phydev, MII_BMCR, (value | BMCR_PDOWN));
 		phy_disconnect(phydev);
 		ndev->phydev = NULL;
 	}
@@ -741,7 +1046,7 @@ static void geth_free_dma_desc(struct geth_priv *priv)
 	kfree(priv->tx_sk);
 }
 
-#ifdef CONFIG_PM
+#if IS_ENABLED(CONFIG_PM)
 static int geth_select_gpio_state(struct pinctrl *pctrl, char *name)
 {
 	int ret = 0;
@@ -802,7 +1107,7 @@ static void geth_resume_work(struct work_struct *work)
 	netif_device_attach(ndev);
 	spin_unlock(&priv->lock);
 
-#if defined(CONFIG_SUNXI_EPHY)
+#if IS_ENABLED(CONFIG_SUNXI_EPHY)
 	if (!ephy_is_enable()) {
 		pr_info("[geth_resume] ephy is not enable, waiting...\n");
 		msleep(2000);
@@ -885,8 +1190,8 @@ static void geth_chip_hwaddr(u8 *addr)
 		goto out;
 	}
 
-	sg_init_one(&sg, chipid, sizeof(chipid) - 1);
-	ahash_request_set_crypt(req, &sg, result, sizeof(chipid) - 1);
+	sg_init_one(&sg, chipid, sizeof(chipid));
+	ahash_request_set_crypt(req, &sg, result, sizeof(chipid));
 	ret = crypto_ahash_update(req);
 	if (ret) {
 		pr_err("crypto_ahash_update() failed for id\n");
@@ -913,15 +1218,21 @@ out:
 
 static void geth_check_addr(struct net_device *ndev, unsigned char *mac)
 {
-	int i;
+	int i, j;
 	char *p = mac;
+	struct geth_priv *priv = netdev_priv(ndev);
 
 	if (!is_valid_ether_addr(ndev->dev_addr)) {
 		for (i = 0; i < ETH_ALEN; i++, p++)
 			ndev->dev_addr[i] = simple_strtoul(p, &p, 16);
 
 		if (!is_valid_ether_addr(ndev->dev_addr))
+		{
 			geth_chip_hwaddr(ndev->dev_addr);
+
+			if (strcmp(priv->type, "gmac1"))
+				ndev->dev_addr[5] += 1;
+		}
 
 		if (!is_valid_ether_addr(ndev->dev_addr)) {
 			random_ether_addr(ndev->dev_addr);
@@ -930,19 +1241,32 @@ static void geth_check_addr(struct net_device *ndev, unsigned char *mac)
 	}
 }
 
-static void geth_clk_enable(struct geth_priv *priv)
+static int geth_clk_enable(struct geth_priv *priv)
 {
+	int ret;
 	int phy_interface = 0;
 	u32 clk_value;
-	u32 efuse_value;
+	/*u32 efuse_value;*/
 
-	if (clk_prepare_enable(priv->geth_clk))
+	ret = reset_control_deassert(priv->reset);
+	if (ret) {
+		pr_err("deassert gmac rst failed!\n");
+		return ret;
+	}
+
+	ret = clk_prepare_enable(priv->geth_clk);
+	if (ret) {
 		pr_err("try to enable geth_clk failed!\n");
+		goto assert_reset;
+	}
 
-	if (((priv->phy_ext == INT_PHY) || g_use_ephy_clk)
+	if (((priv->phy_ext == INT_PHY) || priv->use_ephy_clk)
 			&& !IS_ERR_OR_NULL(priv->ephy_clk)) {
-		if (clk_prepare_enable(priv->ephy_clk))
+		ret = clk_prepare_enable(priv->ephy_clk);
+		if (ret) {
 			pr_err("try to enable ephy_clk failed!\n");
+			goto ephy_clk_disable;
+		}
 	}
 
 	phy_interface = priv->phy_interface;
@@ -960,33 +1284,43 @@ static void geth_clk_enable(struct geth_priv *priv)
 	else if (phy_interface == PHY_INTERFACE_MODE_RMII)
 		clk_value |= 0x00002001;
 
-	if (priv->phy_ext == INT_PHY) {
+	/*if (priv->phy_ext == INT_PHY) {
 		if (0 != sunxi_efuse_read(EFUSE_OEM_NAME, &efuse_value))
 			pr_err("get PHY efuse fail!\n");
 		else
-#if defined(CONFIG_ARCH_SUN50IW2)
+#if IS_ENABLED(CONFIG_ARCH_SUN50IW2)
 			clk_value |= (((efuse_value >> 24) & 0x0F) + 3) << 28;
 #else
 			pr_warn("miss config come from efuse!\n");
 #endif
-	}
+	}*/
 
 	/* Adjust Tx/Rx clock delay */
 	clk_value &= ~(0x07 << 10);
-	clk_value |= ((tx_delay & 0x07) << 10);
+	clk_value |= ((priv->tx_delay & 0x07) << 10);
 	clk_value &= ~(0x1F << 5);
-	clk_value |= ((rx_delay & 0x1F) << 5);
+	clk_value |= ((priv->rx_delay & 0x1F) << 5);
 
 	writel(clk_value, priv->base_phy);
+
+    return 0;
+
+ephy_clk_disable:
+    clk_disable_unprepare(priv->ephy_clk);
+assert_reset:
+    reset_control_assert(priv->reset);
+
+    return ret;
 }
 
 static void geth_clk_disable(struct geth_priv *priv)
 {
-	if (((priv->phy_ext == INT_PHY) || g_use_ephy_clk)
+	if (((priv->phy_ext == INT_PHY) || priv->use_ephy_clk)
 			&& !IS_ERR_OR_NULL(priv->ephy_clk))
 		clk_disable_unprepare(priv->ephy_clk);
 
 	clk_disable_unprepare(priv->geth_clk);
+    reset_control_assert(priv->reset);
 }
 
 static void geth_tx_err(struct geth_priv *priv)
@@ -1050,13 +1384,24 @@ static int geth_open(struct net_device *ndev)
 		ret = -EINVAL;
 	}
 
-	geth_clk_enable(priv);
+	ret = geth_clk_enable(priv);
+	if (ret) {
+		pr_err("%s: clk enable is failed\n", __func__);
+		ret = -EINVAL;
+	}
 
 	netif_carrier_off(ndev);
 
 	ret = geth_phy_init(ndev);
-	if (ret)
-		goto err;
+	if (ret) {
+		netdev_dbg(ndev, "phy init again...\n");
+		ret = geth_phy_init(ndev);
+		if (ret) {
+			netdev_err(ndev,"phy init failed\n");
+			ret = -EINVAL;
+			goto err;
+		}
+	}
 
 	ret = sunxi_mac_reset((void *)priv->base, &sunxi_udelay, 10000);
 	if (ret) {
@@ -1220,6 +1565,10 @@ static netdev_tx_t geth_xmit(struct sk_buff *skb, struct net_device *ndev)
 
 		return NETDEV_TX_BUSY;
 	}
+#ifdef CONFIG_RTL8363_NB
+//	rtk_stat_port_get(EXT_PORT0, STAT_IfInOctets, &cntr);
+//	pr_info("%s->%d ======DATA:%llu ============\n", __func__, __LINE__, cntr);
+#endif
 
 	csum_insert = (skb->ip_summed == CHECKSUM_PARTIAL);
 	entry = priv->tx_dirty;
@@ -1230,7 +1579,7 @@ static netdev_tx_t geth_xmit(struct sk_buff *skb, struct net_device *ndev)
 	priv->tx_sk[entry] = skb;
 
 #ifdef PKT_DEBUG
-	printk("======TX PKT DATA: ============\n");
+	pr_info("======TX PKT DATA: ============\n");
 	/* dump the packet */
 	print_hex_dump(KERN_DEBUG, "skb->data: ", DUMP_PREFIX_NONE,
 		       16, 1, skb->data, 64, true);
@@ -1290,8 +1639,8 @@ static netdev_tx_t geth_xmit(struct sk_buff *skb, struct net_device *ndev)
 	}
 
 #ifdef DEBUG
-	printk("=======TX Descriptor DMA: 0x%08llx\n", priv->dma_tx_phy);
-	printk("Tx pointor: dirty: %d, clean: %d\n", priv->tx_dirty, priv->tx_clean);
+	pr_info("=======TX Descriptor DMA: 0x%08llx\n", priv->dma_tx_phy);
+	pr_info("Tx pointor: dirty: %d, clean: %d\n", priv->tx_dirty, priv->tx_clean);
 	desc_print(priv->dma_tx, dma_desc_tx);
 #endif
 	sunxi_tx_poll(priv->base);
@@ -1334,7 +1683,7 @@ static int geth_rx(struct geth_priv *priv, int limit)
 		}
 
 #ifdef PKT_DEBUG
-		printk("======RX PKT DATA: ============\n");
+		pr_info("======RX PKT DATA: ============\n");
 		/* dump the packet */
 		print_hex_dump(KERN_DEBUG, "skb->data: ", DUMP_PREFIX_NONE,
 				16, 1, skb->data, 64, true);
@@ -1366,8 +1715,8 @@ static int geth_rx(struct geth_priv *priv, int limit)
 
 #ifdef DEBUG
 	if (rxcount > 0) {
-		printk("======RX Descriptor DMA: 0x%08llx=\n", priv->dma_rx_phy);
-		printk("RX pointor: dirty: %d, clean: %d\n", priv->rx_dirty, priv->rx_clean);
+		pr_info("======RX Descriptor DMA: 0x%08llx=\n", priv->dma_rx_phy);
+		pr_info("RX pointor: dirty: %d, clean: %d\n", priv->rx_dirty, priv->rx_clean);
 		desc_print(priv->dma_rx, dma_desc_rx);
 	}
 #endif
@@ -1544,7 +1893,7 @@ int geth_set_features(struct net_device *ndev, netdev_features_t features)
 	return 0;
 }
 
-#ifdef CONFIG_NET_POLL_CONTROLLER
+#if IS_ENABLED(CONFIG_NET_POLL_CONTROLLER)
 /* Polling receive - used by NETCONSOLE and other diagnostic tools
  * to allow network I/O with interrupts disabled.
  */
@@ -1567,7 +1916,7 @@ static const struct net_device_ops geth_netdev_ops = {
 	.ndo_tx_timeout = geth_tx_timeout,
 	.ndo_do_ioctl = geth_ioctl,
 	.ndo_set_config = geth_config,
-#ifdef CONFIG_NET_POLL_CONTROLLER
+#if IS_ENABLED(CONFIG_NET_POLL_CONTROLLER)
 	.ndo_poll_controller = geth_poll_controller,
 #endif
 	.ndo_set_mac_address = geth_set_mac_address,
@@ -1594,7 +1943,7 @@ static int geth_get_sset_count(struct net_device *netdev, int sset)
 	}
 }
 
-static int geth_ethtool_getsettings(struct net_device *ndev,
+/*static int geth_ethtool_getsettings(struct net_device *ndev,
 				    struct ethtool_cmd *cmd)
 {
 	struct geth_priv *priv = netdev_priv(ndev);
@@ -1615,7 +1964,7 @@ static int geth_ethtool_getsettings(struct net_device *ndev,
 
 	cmd->transceiver = XCVR_INTERNAL;
 	spin_lock_irq(&priv->lock);
-	rc = phy_ethtool_gset(phy, cmd);
+	//rc = phy_ethtool_gset(phy, cmd);
 	spin_unlock_irq(&priv->lock);
 
 	return rc;
@@ -1633,7 +1982,7 @@ static int geth_ethtool_setsettings(struct net_device *ndev,
 	spin_unlock(&priv->lock);
 
 	return rc;
-}
+}*/
 
 static void geth_ethtool_getdrvinfo(struct net_device *ndev,
 				    struct ethtool_drvinfo *info)
@@ -1648,8 +1997,8 @@ static void geth_ethtool_getdrvinfo(struct net_device *ndev,
 
 static const struct ethtool_ops geth_ethtool_ops = {
 	.begin = geth_check_if_running,
-	.get_settings = geth_ethtool_getsettings,
-	.set_settings = geth_ethtool_setsettings,
+	//.get_settings = geth_ethtool_getsettings,
+	//.set_settings = geth_ethtool_setsettings,
 	.get_link = ethtool_op_get_link,
 	.get_pauseparam = NULL,
 	.set_pauseparam = NULL,
@@ -1670,7 +2019,7 @@ static int geth_hw_init(struct platform_device *pdev)
 	int ret = 0;
 	struct resource *res;
 	u32 value;
-	struct gpio_config cfg;
+	enum of_gpio_flags flag;
 	const char *gmac_power;
 	char power[20];
 	int i;
@@ -1722,6 +2071,13 @@ static int geth_hw_init(struct platform_device *pdev)
 		goto irq_err;
 	}
 
+	/* get gmac rst handle */
+	priv->reset = devm_reset_control_get(&pdev->dev, NULL);
+	if (IS_ERR(priv->reset)) {
+		pr_err("%s: Get gmac reset control failed!\n", __func__);
+		return PTR_ERR(priv->reset);
+	}
+
 	/* config clock */
 	priv->geth_clk = of_clk_get_by_name(np, "gmac");
 	if (unlikely(!priv->geth_clk || IS_ERR(priv->geth_clk))) {
@@ -1730,6 +2086,8 @@ static int geth_hw_init(struct platform_device *pdev)
 		goto clk_err;
 	}
 
+	of_property_read_string(np, "device_type", &(priv->type));
+
 	if (INT_PHY == priv->phy_ext) {
 		priv->ephy_clk = of_clk_get_by_name(np, "ephy");
 		if (unlikely(IS_ERR_OR_NULL(priv->ephy_clk))) {
@@ -1737,11 +2095,9 @@ static int geth_hw_init(struct platform_device *pdev)
 			ret = -EINVAL;
 			goto clk_err;
 		}
-	}
-#if defined(CONFIG_ARCH_SUN8IW12) || defined(CONFIG_ARCH_SUN50IW9)
-	else {
-		if (!of_property_read_u32(np, "use_ephy25m", &g_use_ephy_clk)
-				&& g_use_ephy_clk) {
+	} else {
+		if (!of_property_read_u32(np, "use_ephy25m", &(priv->use_ephy_clk))
+				&& priv->use_ephy_clk) {
 			priv->ephy_clk = of_clk_get_by_name(np, "ephy");
 			if (unlikely(IS_ERR_OR_NULL(priv->ephy_clk))) {
 				pr_err("Get ephy clk failed!\n");
@@ -1750,7 +2106,6 @@ static int geth_hw_init(struct platform_device *pdev)
 			}
 		}
 	}
-#endif
 
 	/* config power regulator */
 	if (EXT_PHY == priv->phy_ext) {
@@ -1780,15 +2135,15 @@ static int geth_hw_init(struct platform_device *pdev)
 	}
 
 	if (!of_property_read_u32(np, "tx-delay", &value))
-		tx_delay = value;
+		priv->tx_delay = value;
 
 	if (!of_property_read_u32(np, "rx-delay", &value))
-		rx_delay = value;
+		priv->rx_delay = value;
 
 	/* config pinctrl */
 	if (EXT_PHY == priv->phy_ext) {
-		priv->phyrst = of_get_named_gpio_flags(np, "phy-rst", 0, (enum of_gpio_flags *)&cfg);
-		priv->rst_active_low = (cfg.data == OF_GPIO_ACTIVE_LOW) ? 1 : 0;
+		priv->phyrst = of_get_named_gpio_flags(np, "phy-rst", 0, &flag);
+		priv->rst_active_low = (flag == OF_GPIO_ACTIVE_LOW) ? 1 : 0;
 
 		if (gpio_is_valid(priv->phyrst)) {
 			if (gpio_request(priv->phyrst, "phy-rst") < 0) {
@@ -1857,19 +2212,6 @@ static void geth_hw_release(struct platform_device *pdev)
 		clk_put(priv->ephy_clk);
 }
 
-static int phy_rtl8211f_led_fixup(struct phy_device *phydev)
-{
-
-	printk("%s in\n", __func__);
-
-	phy_write(phydev, 31, 0x0d04);
-	phy_write(phydev, 16, 0x2f60);
-	phy_write(phydev, 17, 0x0000);
-	phy_write(phydev,31,0x0000);
-
-	return 0;
-}
-
 /**
  * geth_probe
  * @pdev: platform device pointer
@@ -1878,10 +2220,15 @@ static int phy_rtl8211f_led_fixup(struct phy_device *phydev)
 static int geth_probe(struct platform_device *pdev)
 {
 	int ret = 0;
+#ifdef CONFIG_RTL8363_NB
+	//use net_device and geth_priv as global variable.
+#else
 	struct net_device *ndev = NULL;
 	struct geth_priv *priv;
+#endif
+	pr_info("sunxi gmac driver's version: %s\n", SUNXI_GMAC_VERSION);
 
-#ifdef CONFIG_OF
+#if IS_ENABLED(CONFIG_OF)
 	pdev->dev.dma_mask = &geth_dma_mask;
 	pdev->dev.coherent_dma_mask = DMA_BIT_MASK(32);
 #endif
@@ -1902,6 +2249,9 @@ static int geth_probe(struct platform_device *pdev)
 		pr_err("geth_hw_init fail!\n");
 		goto hw_err;
 	}
+#ifdef CONFIG_RTL8363_NB
+	rtl8363nb_vb_init();
+#endif
 
 	/* setup the netdevice, fill the field of netdevice */
 	ether_setup(ndev);
@@ -1944,18 +2294,18 @@ static int geth_probe(struct platform_device *pdev)
 	geth_create_attrs(ndev);
 #endif
 	device_create_file(&pdev->dev, &dev_attr_gphy_test);
+	device_create_file(&pdev->dev, &dev_attr_mii_reg);
+	device_create_file(&pdev->dev, &dev_attr_loopback_test);
+	device_create_file(&pdev->dev, &dev_attr_extra_tx_stats);
+	device_create_file(&pdev->dev, &dev_attr_extra_rx_stats);
 
 	device_enable_async_suspend(&pdev->dev);
 
-#ifdef CONFIG_PM
+#if IS_ENABLED(CONFIG_PM)
 	INIT_WORK(&priv->eth_work, geth_resume_work);
 #endif
-	/* register the PHY board fixup */
-	ret = phy_register_fixup_for_uid(RTL_8211F_PHY_ID, 0xffffffff, phy_rtl8211f_led_fixup);
-        if (ret)
-                dev_warn(&pdev->dev, "Cannot register PHY board fixup.\n");
 
-
+	netdev_dbg(ndev, "[gmac] probe success\n");
 	return 0;
 
 reg_err:
@@ -1973,6 +2323,10 @@ static int geth_remove(struct platform_device *pdev)
 	struct geth_priv *priv = netdev_priv(ndev);
 
 	device_remove_file(&pdev->dev, &dev_attr_gphy_test);
+	device_remove_file(&pdev->dev, &dev_attr_mii_reg);
+	device_remove_file(&pdev->dev, &dev_attr_loopback_test);
+	device_remove_file(&pdev->dev, &dev_attr_extra_tx_stats);
+	device_remove_file(&pdev->dev, &dev_attr_extra_rx_stats);
 
 	netif_napi_del(&priv->napi);
 	unregister_netdev(ndev);
@@ -1981,6 +2335,20 @@ static int geth_remove(struct platform_device *pdev)
 	free_netdev(ndev);
 
 	return 0;
+}
+
+static void geth_shutdown(struct platform_device *pdev)
+{
+	struct net_device *ndev = platform_get_drvdata(pdev);
+	struct geth_priv *priv = netdev_priv(ndev);
+
+	device_remove_file(&pdev->dev, &dev_attr_gphy_test);
+
+	netif_napi_del(&priv->napi);
+	unregister_netdev(ndev);
+	geth_hw_release(pdev);
+	platform_set_drvdata(pdev, NULL);
+	free_netdev(ndev);
 }
 
 static const struct of_device_id geth_of_match[] = {
@@ -1992,6 +2360,7 @@ MODULE_DEVICE_TABLE(of, geth_of_match);
 static struct platform_driver geth_driver = {
 	.probe	= geth_probe,
 	.remove = geth_remove,
+	.shutdown = geth_shutdown,
 	.driver = {
 		   .name = "sunxi-gmac",
 		   .owner = THIS_MODULE,

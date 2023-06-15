@@ -19,6 +19,7 @@
 /*  */
 /* ********************************************************************************************************************* */
 
+#ifdef CONFIG_DISP2_SUNXI_SUPPORT_ENAHNCE
 #include "de_peak_type.h"
 #include "de_rtmx.h"
 #include "de_enhance.h"
@@ -212,3 +213,4 @@ int de_peak_info2para(unsigned int sharp, de_rect window, __peak_config_data *pa
 	return 0;
 }
 
+#endif

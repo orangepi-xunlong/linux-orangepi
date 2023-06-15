@@ -17,6 +17,7 @@
  *
  ******************************************************************************/
 
+#ifdef CONFIG_DISP2_SUNXI_SUPPORT_ENAHNCE
 #include "de_peak2d_type.h"
 #include "de_rtmx.h"
 #include "de_enhance.h"
@@ -169,3 +170,4 @@ int de_peak2d_enable(unsigned int sel, unsigned int chno, unsigned int en)
 	return 0;
 }
 
+#endif

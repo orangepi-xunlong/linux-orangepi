@@ -14,6 +14,9 @@
 #ifndef __VIN__SUBDEV__H__
 #define __VIN__SUBDEV__H__
 
+#define MCLK_POWER_VOLTAGE_3300 0
+#define MCLK_POWER_VOLTAGE_1800 1
+
 enum pmic_channel {
 	IOVDD = 0,
 	AVDD,
@@ -65,5 +68,6 @@ extern int vin_gpio_write(struct v4l2_subdev *sd,
 			enum gpio_type gpio_id, unsigned int status);
 extern int vin_gpio_set_status(struct v4l2_subdev *sd,
 			enum gpio_type gpio_id, unsigned int out_value);
+extern int sunxi_sel_pio_mode(struct pinctrl *pinctrl, u32 pm_sel);
 
 #endif	/*__VIN__SUBDEV__H__*/

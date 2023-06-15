@@ -53,8 +53,7 @@
 #include <xen/xenbus.h>
 #include <xen/features.h>
 
-#include "xenbus_comms.h"
-#include "xenbus_probe.h"
+#include "xenbus.h"
 
 /* backend/<type>/<fe-uuid>/<id> => <type>-<fe-domid>-<id> */
 static int backend_bus_id(char bus_id[XEN_BUS_ID_SIZE], const char *nodename)
@@ -181,10 +180,16 @@ static int xenbus_probe_backend(struct xen_bus_type *bus, const char *type,
 	return err;
 }
 
-static void frontend_changed(struct xenbus_watch *watch,
-			    const char **vec, unsigned int len)
+static bool frontend_will_handle(struct xenbus_watch *watch,
+				 const char *path, const char *token)
 {
-	xenbus_otherend_changed(watch, vec, len, 0);
+	return watch->nr_pending == 0;
+}
+
+static void frontend_changed(struct xenbus_watch *watch,
+			     const char *path, const char *token)
+{
+	xenbus_otherend_changed(watch, path, token, 0);
 }
 
 static struct xen_bus_type xenbus_backend = {
@@ -192,6 +197,7 @@ static struct xen_bus_type xenbus_backend = {
 	.levels = 3,		/* backend/type/<frontend>/<id> */
 	.get_bus_id = backend_bus_id,
 	.probe = xenbus_probe_backend,
+	.otherend_will_handle = frontend_will_handle,
 	.otherend_changed = frontend_changed,
 	.bus = {
 		.name		= "xen-backend",
@@ -205,11 +211,11 @@ static struct xen_bus_type xenbus_backend = {
 };
 
 static void backend_changed(struct xenbus_watch *watch,
-			    const char **vec, unsigned int len)
+			    const char *path, const char *token)
 {
 	DPRINTK("");
 
-	xenbus_dev_changed(vec[XS_WATCH_PATH], &xenbus_backend);
+	xenbus_dev_changed(path, &xenbus_backend);
 }
 
 static struct xenbus_watch be_watch = {
@@ -224,13 +230,7 @@ static int read_frontend_details(struct xenbus_device *xendev)
 
 int xenbus_dev_is_online(struct xenbus_device *dev)
 {
-	int rc, val;
-
-	rc = xenbus_scanf(XBT_NIL, dev->nodename, "online", "%d", &val);
-	if (rc != 1)
-		val = 0; /* no online node present */
-
-	return val;
+	return !!xenbus_read_unsigned(dev->nodename, "online", 0);
 }
 EXPORT_SYMBOL_GPL(xenbus_dev_is_online);
 

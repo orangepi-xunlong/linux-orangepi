@@ -9,6 +9,7 @@
  */
 
 #include "de_hal.h"
+void pq_get_enhance(struct disp_csc_config *conig);
 
 #define EINK_DEBUG 0
 static unsigned int g_device_fps[DE_NUM] = { 60 };
@@ -346,12 +347,13 @@ int de_al_lyr_apply(unsigned int screen_id, struct disp_layer_config_data *data,
 	bool chn_is_yuv[CHN_NUM] = { false };
 	enum de_color_space cs[CHN_NUM];
 	unsigned char layer_zorder[CHN_NUM] = { 0 }, chn_index;
-	unsigned char pipe_used[CHN_NUM] = { 0 };
+	unsigned char pipe_used[4] = { 0 };
 	unsigned int pipe_sel[CHN_NUM] = { 0 };
 	struct de_rect pipe_rect[CHN_NUM] = { {0} };
 	struct disp_rect dispsize[CHN_NUM] = { {0} };
 	struct disp_layer_config_data *data1;
 	unsigned int color = 0xff000000;
+	struct de_rect input_layer;
  #if EINK_DEBUG
 	u32 count = 0;
 	u32 kcon = 0;
@@ -537,6 +539,9 @@ int de_al_lyr_apply(unsigned int screen_id, struct disp_layer_config_data *data,
 			csc_cfg.contrast = 50;
 			csc_cfg.saturation = 50;
 			csc_cfg.hue = 50;
+#if defined(CONFIG_SUNXI_DISP2_PQ)
+			pq_get_enhance(&csc_cfg);
+#endif
 			de_ccsc_apply(screen_id, j, &csc_cfg);
 			de_rtmx_set_blend_color(screen_id, j, color);
 		}
@@ -551,25 +556,42 @@ int de_al_lyr_apply(unsigned int screen_id, struct disp_layer_config_data *data,
 			lay_cfg[k].fcolor_en = data[k].config.info.mode;
 			lay_cfg[k].fmt = data[k].config.info.fb.format;
 			lay_cfg[k].premul_ctl = premul[j][i];
+			lay_cfg[k].lbc_en = data[k].config.info.fb.lbc_en;
+			lay_cfg[k].lbc_info = data[k].config.info.fb.lbc_info;
 
-			lay_cfg[k].pitch[0] =
-			    data[k].config.info.fb.size[0].width;
-			lay_cfg[k].pitch[1] =
-			    data[k].config.info.fb.size[1].width;
-			lay_cfg[k].pitch[2] =
-			    data[k].config.info.fb.size[2].width;
-			lay_cfg[k].layer = layer[j][i];
-			lay_cfg[k].laddr_t[0] =
-			    (data[k].config.info.fb.addr[0] & 0xFFFFFFFF);
-			lay_cfg[k].laddr_t[1] =
-			    (data[k].config.info.fb.addr[1] & 0xFFFFFFFF);
-			lay_cfg[k].laddr_t[2] =
-			    (data[k].config.info.fb.addr[2] & 0xFFFFFFFF);
+			if (!lay_cfg[k].lbc_en) {
+				lay_cfg[k].pitch[0] =
+				    data[k].config.info.fb.size[0].width;
+				lay_cfg[k].pitch[1] =
+				    data[k].config.info.fb.size[1].width;
+				lay_cfg[k].pitch[2] =
+				    data[k].config.info.fb.size[2].width;
+				lay_cfg[k].layer = layer[j][i];
+				lay_cfg[k].laddr_t[0] =
+				    (data[k].config.info.fb.addr[0] & 0xFFFFFFFF);
+				lay_cfg[k].laddr_t[1] =
+				    (data[k].config.info.fb.addr[1] & 0xFFFFFFFF);
+				lay_cfg[k].laddr_t[2] =
+				    (data[k].config.info.fb.addr[2] & 0xFFFFFFFF);
 
-			lay_cfg[k].top_bot_en = 0x0;
-			lay_cfg[k].laddr_b[0] = 0x0;
-			lay_cfg[k].laddr_b[1] = 0x0;
-			lay_cfg[k].laddr_b[2] = 0x0;
+				lay_cfg[k].top_bot_en = 0x0;
+				lay_cfg[k].laddr_b[0] = 0x0;
+				lay_cfg[k].laddr_b[1] = 0x0;
+				lay_cfg[k].laddr_b[2] = 0x0;
+
+			} else {
+				input_layer.x = data[k].config.info.screen_win.x;
+				input_layer.y = data[k].config.info.screen_win.y;
+				input_layer.w = data[k].config.info.fb.size[0].width;
+				input_layer.h = data[k].config.info.fb.size[0].height;
+				lay_cfg[k].layer = input_layer;
+				lay_cfg[k].lbc_haddr = ((data[k].config.info.fb.addr[0] >> 32) & 0xFF);
+				lay_cfg[k].lbc_laddr = (data[k].config.info.fb.addr[0] & 0xFFFFFFFF);
+				lay_cfg[k].lbc_crop.x = data[k].config.info.fb.crop.x >> 32;
+				lay_cfg[k].lbc_crop.y = data[k].config.info.fb.crop.y >> 32;
+				lay_cfg[k].lbc_crop.w = data[k].config.info.fb.crop.width >> 32;
+				lay_cfg[k].lbc_crop.h = data[k].config.info.fb.crop.height >> 32;
+			}
 
 			/* 3d mode */
 			if (data[k].config.info.fb.flags) {
@@ -621,12 +643,11 @@ int de_al_lyr_apply(unsigned int screen_id, struct disp_layer_config_data *data,
 			}
 		}
 	}
-
 	for (j = 0, k = 0; j < chn; j++) {
 		for (i = 0; i < layno; i++) {
 			if (LAYER_SIZE_DIRTY & data[k + i].flag) {
 				de_rtmx_set_overlay_size(screen_id, j, ovlw[j],
-							 ovlh[j]);
+							 ovlh[j], data[k + i].config.info.fb.lbc_en);
 				break;
 			}
 		}
@@ -643,14 +664,15 @@ int de_al_lyr_apply(unsigned int screen_id, struct disp_layer_config_data *data,
 						      align,
 			(enum de_3d_in_mode)data[k].config.info.fb.flags,
 						      lay_cfg[k].laddr_t,
-						      haddr[i]);
+						      haddr[i],
+						      lay_cfg[k].lbc_en);
 			}
 			if (LAYER_VI_FC_DIRTY & data[k].flag) {
 				de_rtmx_set_lay_fcolor(screen_id, j, i,
 						       data[k].config.info.mode,
 						       format[j],
-						       data[k].config.info.
-						       color);
+						       data[k].config.info.color,
+						       data[k].config.info.fb.lbc_en);
 			}
 			if (LAYER_HADDR_DIRTY & data[k].flag) {
 				lay_cfg[k].haddr_t[0] =
@@ -669,7 +691,8 @@ int de_al_lyr_apply(unsigned int screen_id, struct disp_layer_config_data *data,
 				de_rtmx_set_lay_haddr(screen_id, j, i,
 						      lay_cfg[k].top_bot_en,
 						      lay_cfg[k].haddr_t,
-						      lay_cfg[k].haddr_b);
+						      lay_cfg[k].haddr_b,
+						      lay_cfg[k].lbc_en);
 			}
 			k++;
 		}
@@ -769,6 +792,13 @@ int de_al_mgr_apply(unsigned int screen_id, struct disp_manager_data *data)
 		de_rtmx_set_outitl(screen_id, data->config.interlace);
 	}
 
+	if (data->flag & MANAGER_PALETTE_DIRTY) {
+		de_rtmx_set_palette(screen_id, data->config.palette.channel,
+					data->config.palette.data,
+					data->config.palette.num);
+	}
+
+
 	return 0;
 }
 
@@ -807,7 +837,7 @@ int de_al_init(struct disp_bsp_init_para *para)
 	int i;
 	int num_screens = de_feat_get_num_screens();
 
-#if defined(CONFIG_ARCH_SUN50IW10)
+#if defined(CONFIG_INDEPENDENT_DE)
 	for (i = 0; i < num_screens; i++) {
 		de_rtmx_init(i, para->reg_base[DISP_MOD_DE + i]);
 		de_vsu_init(i, para->reg_base[DISP_MOD_DE + i]);

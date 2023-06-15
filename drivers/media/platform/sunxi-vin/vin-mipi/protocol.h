@@ -1,5 +1,5 @@
 /*
- * linux-4.9/drivers/media/platform/sunxi-vin/vin-mipi/protocol.h
+ * linux-5.4/drivers/media/platform/sunxi-vin/vin-mipi/protocol.h
  *
  * Copyright (c) 2007-2017 Allwinnertech Co., Ltd.
  *

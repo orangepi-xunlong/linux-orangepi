@@ -1,22 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Squashfs - a compressed read only filesystem for Linux
  *
  * Copyright (c) 2002, 2003, 2004, 2005, 2006, 2007, 2008, 2009
  * Phillip Lougher <phillip@squashfs.org.uk>
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2,
- * or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  *
  * zlib_wrapper.c
  */
@@ -66,7 +53,6 @@ static int zlib_uncompress(struct squashfs_sb_info *msblk, void *strm,
 	struct buffer_head **bh, int b, int offset, int length,
 	struct squashfs_page_actor *output)
 {
-	void *buf = NULL;
 	int zlib_err, zlib_init = 0, k = 0;
 	z_stream *stream = strm;
 
@@ -85,17 +71,8 @@ static int zlib_uncompress(struct squashfs_sb_info *msblk, void *strm,
 
 		if (stream->avail_out == 0) {
 			stream->next_out = squashfs_next_page(output);
-			if (!IS_ERR(stream->next_out))
+			if (stream->next_out != NULL)
 				stream->avail_out = PAGE_SIZE;
-		}
-
-		if (!stream->next_out) {
-			if (!buf) {
-				buf = kmalloc(PAGE_SIZE, GFP_ATOMIC);
-				if (!buf)
-					goto out;
-			}
-			stream->next_out = buf;
 		}
 
 		if (!zlib_init) {
@@ -125,13 +102,11 @@ static int zlib_uncompress(struct squashfs_sb_info *msblk, void *strm,
 	if (k < b)
 		goto out;
 
-	kfree(buf);
 	return stream->total_out;
 
 out:
 	for (; k < b; k++)
 		put_bh(bh[k]);
-	kfree(buf);
 
 	return -EIO;
 }

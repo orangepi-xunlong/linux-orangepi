@@ -1168,7 +1168,7 @@ wl_escan_set_scan(
 exit:
 	if (unlikely(err)) {
 		/* Don't print Error incase of Scan suppress */
-		if ((err == BCME_EPERM))
+		if (err == BCME_EPERM)
 			ESCAN_TRACE(("Escan failed: Scan Suppressed \n"));
 		else {
 			cnt++;

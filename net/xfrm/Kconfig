@@ -1,24 +1,43 @@
+# SPDX-License-Identifier: GPL-2.0-only
 #
 # XFRM configuration
 #
 config XFRM
        bool
-       depends on NET
+       depends on INET
+       select GRO_CELLS
+       select SKB_EXTENSIONS
+
+config XFRM_OFFLOAD
+       bool
 
 config XFRM_ALGO
 	tristate
 	select XFRM
 	select CRYPTO
+	select CRYPTO_HASH
+	select CRYPTO_BLKCIPHER
 
+if INET
 config XFRM_USER
 	tristate "Transformation user configuration interface"
-	depends on INET
 	select XFRM_ALGO
 	---help---
 	  Support for Transformation(XFRM) user configuration interface
 	  like IPsec used by native Linux tools.
 
 	  If unsure, say Y.
+
+config XFRM_USER_COMPAT
+	tristate "Compatible ABI support"
+	depends on XFRM_USER && COMPAT_FOR_U64_ALIGNMENT && \
+		HAVE_EFFICIENT_UNALIGNED_ACCESS
+	select WANT_COMPAT_NETLINK_MESSAGES
+	help
+	  Transformation(XFRM) user configuration interface like IPsec
+	  used by compatible Linux applications.
+
+	  If unsure, say N.
 
 config XFRM_INTERFACE
 	tristate "Transformation virtual interface"
@@ -51,7 +70,7 @@ config XFRM_MIGRATE
 
 config XFRM_STATISTICS
 	bool "Transformation statistics"
-	depends on INET && XFRM && PROC_FS
+	depends on XFRM && PROC_FS
 	---help---
 	  This statistics is not a SNMP/MIB specification but shows
 	  statistics about transformation error (or almost error) factor
@@ -91,3 +110,4 @@ config NET_KEY_MIGRATE
 
 	  If unsure, say N.
 
+endif # INET

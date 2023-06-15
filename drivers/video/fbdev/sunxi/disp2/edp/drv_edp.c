@@ -73,9 +73,6 @@ static s32 edp_clk_enable(u32 sel, bool en)
 
 	if (g_edp_info[sel].clk) {
 		ret = 0;
-		if (g_edp_info[sel].clk_parent)
-			clk_set_parent(g_edp_info[sel].clk,
-				       g_edp_info[sel].clk_parent);
 		if (en)
 			ret = clk_prepare_enable(g_edp_info[sel].clk);
 		else
@@ -377,6 +374,16 @@ s32 edp_get_sys_config(u32 disp, struct disp_video_timings *p_info)
 	if (ret == 1)
 		g_edp_info[disp].para.edp_lane = value;
 
+	ret = disp_sys_script_get_item(primary_key, "edp_training_func", &value,
+				       1);
+	if (ret == 1)
+		g_edp_info[disp].para.edp_training_func = value;
+
+	ret = disp_sys_script_get_item(primary_key, "edp_sramble_seed", &value,
+				       1);
+	if (ret == 1)
+		g_edp_info[disp].para.edp_sramble_seed = value;
+
 	ret =
 	    disp_sys_script_get_item(primary_key, "edp_colordepth", &value, 1);
 	if (ret == 1)
@@ -625,8 +632,6 @@ static s32 edp_probe(struct platform_device *pdev)
 		dev_err(&pdev->dev, "fail to get clk for edp%d!\n", pdev->id);
 		goto ERR_IOMAP;
 	}
-	g_edp_info[pdev->id].clk_parent =
-	    clk_get_parent(g_edp_info[pdev->id].clk);
 
 	ret = edp_clk_enable(pdev->id, true);
 	if (ret) {

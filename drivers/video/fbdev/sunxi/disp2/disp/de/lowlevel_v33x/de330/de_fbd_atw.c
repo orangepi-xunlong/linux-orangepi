@@ -228,7 +228,6 @@ static s32 de_fbd_v_apply_lay(u32 disp, u32 chn,
 		DE_WRN("[%s]:afbc_header is NULL!\n", __func__);
 		return -1;
 	}
-	memset(&fbd_info, 0, sizeof(struct de_fbd_info));
 	de_fbd_get_info(lay_info->fb.p_afbc_header, &fbd_info);
 
 	dwval = 1 | (1 << 4);

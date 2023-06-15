@@ -95,7 +95,6 @@ int io_set_flash_ctrl(struct v4l2_subdev *sd, enum sunxi_flash_ctrl ctrl)
 			vin_log(VIN_LOG_FLASH, "FLASH_EN_INDEPEND SW_CTRL_FLASH_ON\n");
 			vin_gpio_set_status(sd, FLASH_EN, 1);
 			vin_gpio_set_status(sd, FLASH_MODE, 1);
-
 			ret |= vin_gpio_write(sd, FLASH_MODE, 1);
 			ret |= vin_gpio_write(sd, FLASH_EN, 0);
 			break;
@@ -105,6 +104,32 @@ int io_set_flash_ctrl(struct v4l2_subdev *sd, enum sunxi_flash_ctrl ctrl)
 			vin_gpio_set_status(sd, FLASH_MODE, 1);
 			ret |= vin_gpio_write(sd, FLASH_MODE, 0);
 			ret |= vin_gpio_write(sd, FLASH_EN, 1);
+			break;
+		default:
+			return -EINVAL;
+		}
+	} else if (fls_info->flash_driver_ic == FLASH_VIRTUAL) {
+		switch (ctrl) {
+		case SW_CTRL_FLASH_OFF:
+			vin_log(VIN_LOG_FLASH, "FLASH_VIRTUAL SW_CTRL_FLASH_OFF\n");
+			vin_gpio_set_status(sd, FLASH_EN, 1);
+			//vin_gpio_set_status(sd, FLASH_MODE, 1);
+			ret |= vin_gpio_write(sd, FLASH_EN, 0);
+			//ret |= vin_gpio_write(sd, FLASH_MODE, 0);
+			break;
+		case SW_CTRL_FLASH_ON:
+			vin_log(VIN_LOG_FLASH, "FLASH_VIRTUAL SW_CTRL_FLASH_ON\n");
+			vin_gpio_set_status(sd, FLASH_EN, 1);
+			//vin_gpio_set_status(sd, FLASH_MODE, 1);
+			ret |= vin_gpio_write(sd, FLASH_EN, 1);
+			//ret |= vin_gpio_write(sd, FLASH_MODE, 0);
+			break;
+		case SW_CTRL_TORCH_ON:
+			vin_log(VIN_LOG_FLASH, "FLASH_VIRTUAL SW_CTRL_TORCH_ON\n");
+			vin_gpio_set_status(sd, FLASH_EN, 1);
+			//vin_gpio_set_status(sd, FLASH_MODE, 1);
+			ret |= vin_gpio_write(sd, FLASH_EN, 1);
+			//ret |= vin_gpio_write(sd, FLASH_MODE, 0);
 			break;
 		default:
 			return -EINVAL;
@@ -150,7 +175,7 @@ int sunxi_flash_check_to_start(struct v4l2_subdev *sd,
 	struct modules_config *modules = sd ? sd_to_modules(sd) : NULL;
 	struct flash_dev *flash = sd ? v4l2_get_subdevdata(sd) : NULL;
 	struct v4l2_subdev *sensor = NULL;
-	unsigned int flag, to_flash;
+	unsigned int flag = 0, to_flash;
 
 	if (!flash)
 		return 0;
@@ -241,6 +266,8 @@ static int sunxi_flash_s_ctrl(struct v4l2_ctrl *ctrl)
 	switch (ctrl->id) {
 	case V4L2_CID_FLASH_LED_MODE:
 		return config_flash_mode(sd, ctrl->val, &flash->fl_info);
+	case V4L2_CID_FLASH_LED_MODE_V1:
+		return 0;
 	default:
 		break;
 	}
@@ -250,17 +277,35 @@ static const struct v4l2_ctrl_ops sunxi_flash_ctrl_ops = {
 	.g_volatile_ctrl = sunxi_flash_g_ctrl,
 	.s_ctrl = sunxi_flash_s_ctrl,
 };
+static const struct v4l2_ctrl_config custom_ctrls[] = {
+	{
+		.ops = &sunxi_flash_ctrl_ops,
+		.id = V4L2_CID_FLASH_LED_MODE_V1,
+		.name = "VIN Flash ctrl1",
+		.type = V4L2_CTRL_TYPE_MENU,
+		.min = 0,
+		.max = 2,
+		.def = 0,
+		.menu_skip_mask = 0x0,
+		.qmenu = flash_led_mode_v1,
+		.step = 0,
+		.flags = 0,
+	},
+};
 
 static int sunxi_flash_controls_init(struct v4l2_subdev *sd)
 {
 	struct flash_dev *flash = container_of(sd, struct flash_dev, subdev);
 	struct v4l2_ctrl_handler *handler = &flash->handler;
-	int ret = 0;
+	int i, ret = 0;
 
-	v4l2_ctrl_handler_init(handler, 1);
+	v4l2_ctrl_handler_init(handler, 1 + ARRAY_SIZE(custom_ctrls));
 	v4l2_ctrl_new_std_menu(handler, &sunxi_flash_ctrl_ops,
 					V4L2_CID_FLASH_LED_MODE, V4L2_FLASH_LED_MODE_RED_EYE,
 					0, V4L2_FLASH_LED_MODE_NONE);
+
+	for (i = 0; i < ARRAY_SIZE(custom_ctrls); i++)
+		v4l2_ctrl_new_custom(handler, &custom_ctrls[i], NULL);
 
 	if (handler->error) {
 		ret =  handler->error;

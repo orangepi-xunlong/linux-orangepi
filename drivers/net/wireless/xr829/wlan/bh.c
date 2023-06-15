@@ -11,6 +11,7 @@
 
 #include <net/mac80211.h>
 #include <linux/kthread.h>
+#include <uapi/linux/sched/types.h>
 
 #include "xradio.h"
 #include "bh.h"
@@ -59,7 +60,7 @@ static inline u32 bh_time_interval(struct timeval *oldtime)
 {
 	u32 time_int;
 	struct timeval newtime;
-	do_gettimeofday(&newtime);
+	xr_do_gettimeofday(&newtime);
 	time_int = (newtime.tv_sec - oldtime->tv_sec) * 1000000 + \
 			   (long)(newtime.tv_usec - oldtime->tv_usec);
 	return time_int;
@@ -765,9 +766,9 @@ void xradio_unregister_bh(struct xradio_common *hw_priv)
 	bh_printk(XRADIO_DBG_NIY, "Unregister success.\n");
 }
 
-void xradio_irq_handler(struct xradio_common *hw_priv)
+void xradio_irq_handler(void *priv)
 {
-
+	struct xradio_common *hw_priv = (struct xradio_common *)priv;
 	bh_printk(XRADIO_DBG_TRC, "%s\n", __func__);
 	DBG_INT_ADD(irq_count);
 	if (/* SYS_WARN */(hw_priv->bh_error))
@@ -1122,7 +1123,8 @@ static void xradio_put_skb(struct xradio_common *hw_priv, struct sk_buff *skb)
 static int xradio_bh_read_ctrl_reg(struct xradio_common *hw_priv,
 				   u16 *ctrl_reg)
 {
-	int ret;
+	int ret = 0;
+
 	ret = xradio_reg_read_16(hw_priv, HIF_CONTROL_REG_ID, ctrl_reg);
 	if (ret) {
 		*ctrl_reg = 0;
@@ -1968,21 +1970,8 @@ tx:
 				tx = 1;
 				goto data_proc;
 			}
-		} else {
-			PERF_INFO_GETTIME(&sdio_reg_time);
-			atomic_xchg(&hw_priv->bh_rx, 0);
-			xradio_bh_read_ctrl_reg(hw_priv, &ctrl_reg);
-			++reg_read;
-			++sdio_reg_cnt1;
-			PERF_INFO_STAMP(&sdio_reg_time, &sdio_reg, 4);
-			if (ctrl_reg & HIF_CTRL_NEXT_LEN_MASK) {
-				DBG_INT_ADD(fix_miss_cnt);
-				rx = 1;
-				goto data_proc;
-			} else {
-				++sdio_reg_cnt5;
-			}
 		}
+
 
 #if 0
 		/*One more to check rx if reg has not be read. */

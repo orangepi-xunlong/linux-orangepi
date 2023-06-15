@@ -1,5 +1,5 @@
-/*
- * drivers/input/sensor/sunxi_gpadc.c
+/* SPDX-License-Identifier: GPL-2.0-only
+ * Based on drivers/input/sensor/sunxi_gpadc.c
  *
  * Copyright (C) 2016 Allwinner.
  * fuzhaoke <fuzhaoke@allwinnertech.com>
@@ -28,14 +28,18 @@
 #include <linux/of_irq.h>
 #include <linux/of_address.h>
 #include <linux/pm.h>
+#include <linux/workqueue.h>
 #include "sunxi_gpadc.h"
 #include <linux/sched.h>
+#include <linux/clkdev.h>
+#include <linux/clk-provider.h>
+#include <linux/reset.h>
 
 static u32 debug_mask = 1;
 #define dprintk(level_mask, fmt, ...)				\
 do {								\
 	if (unlikely(debug_mask & level_mask))			\
-		printk(fmt, ##__VA_ARGS__);	\
+		pr_info(fmt, ##__VA_ARGS__);	\
 } while (0)
 
 static struct sunxi_gpadc *sunxi_gpadc;
@@ -43,8 +47,11 @@ static struct status_reg  status_para;
 static struct vol_reg     vol_para;
 static struct sr_reg      sr_para;
 static struct filter_reg  filter_para;
+static struct channel_reg  channel_para;
 u32 key_vol[VOL_NUM];
 u8 filter_cnt = 5;
+u8 channel;
+void __iomem *vaddr;
 
 static unsigned char keypad_mapindex[128] = {
 	0, 0, 0, 0, 0, 0, 0, 0, 0,		/* key 1, 0-8 */
@@ -57,6 +64,24 @@ static unsigned char keypad_mapindex[128] = {
 	7, 7, 7, 7, 7, 7, 7			/* key 8, 50-63 */
 };
 
+#ifdef CONFIG_ARCH_SUN8IW18
+static u32 sunxi_gpadc_check_vin(void)
+{
+	u32 reg_val = 0, ldoa;
+
+	reg_val = readl(vaddr);
+
+	if (reg_val > 0) {
+		if ((reg_val & 0x80) == 0x80)
+			ldoa = (reg_val & 0x7f) + 1800;
+		else
+			ldoa = (reg_val & 0x7f) + 1700;
+	} else
+		return 0;
+	return ldoa;
+}
+#endif
+
 u32 sunxi_gpadc_sample_rate_read(void __iomem *reg_base, u32 clk_in)
 {
 	u32 div, round_clk;
@@ -64,6 +89,7 @@ u32 sunxi_gpadc_sample_rate_read(void __iomem *reg_base, u32 clk_in)
 	div = readl(reg_base + GP_SR_REG);
 	div = div >> 16;
 	round_clk = clk_in / (div + 1);
+//	round_clk = (div + 1) / clk_in;
 
 	return round_clk;
 }
@@ -74,9 +100,10 @@ void sunxi_gpadc_sample_rate_set(void __iomem *reg_base, u32 clk_in,
 		u32 round_clk)
 {
 	u32 div, reg_val;
+
 	if (round_clk > clk_in)
 		pr_err("%s, invalid round clk!\n", __func__);
-	div = clk_in / round_clk - 1 ;
+	div = clk_in / round_clk - 1;
 	reg_val = readl(reg_base + GP_SR_REG);
 	reg_val &= ~GP_SR_CON;
 	reg_val |= (div << 16);
@@ -110,6 +137,18 @@ static u32 sunxi_gpadc_ch_select(void __iomem *reg_base, enum gp_channel_id id)
 	case GP_CH_3:
 		reg_val |= GP_CH3_SELECT;
 		break;
+	case GP_CH_4:
+		reg_val |= GP_CH4_SELECT;
+		break;
+	case GP_CH_5:
+		reg_val |= GP_CH5_SELECT;
+		break;
+	case GP_CH_6:
+		reg_val |= GP_CH6_SELECT;
+		break;
+	case GP_CH_7:
+		reg_val |= GP_CH7_SELECT;
+		break;
 	default:
 		pr_err("%s, invalid channel id!", __func__);
 		return -EINVAL;
@@ -119,7 +158,8 @@ static u32 sunxi_gpadc_ch_select(void __iomem *reg_base, enum gp_channel_id id)
 	return 0;
 }
 
-static u32 sunxi_gpadc_ch_deselect(void __iomem *reg_base, enum gp_channel_id id)
+static u32 sunxi_gpadc_ch_deselect(void __iomem *reg_base,
+		enum gp_channel_id id)
 {
 	u32 reg_val;
 
@@ -136,6 +176,18 @@ static u32 sunxi_gpadc_ch_deselect(void __iomem *reg_base, enum gp_channel_id id
 		break;
 	case GP_CH_3:
 		reg_val &= ~GP_CH3_SELECT;
+		break;
+	case GP_CH_4:
+		reg_val &= ~GP_CH4_SELECT;
+		break;
+	case GP_CH_5:
+		reg_val &= ~GP_CH5_SELECT;
+		break;
+	case GP_CH_6:
+		reg_val &= ~GP_CH6_SELECT;
+		break;
+	case GP_CH_7:
+		reg_val &= ~GP_CH7_SELECT;
 		break;
 	default:
 		pr_err("%s, invalid channel id!", __func__);
@@ -154,34 +206,59 @@ static u32 sunxi_gpadc_ch_cmp_low(void __iomem *reg_base, enum gp_channel_id id,
 	/* analog voltage range 0~1.8v, 12bits sample rate, unit=1.8v/(2^12) */
 	unit = VOL_RANGE / 4096; /* 12bits sample rate */
 	low = low_uv / unit;
-	if (low > 0xfff)
-		low = 0xfff;
+	if (low > VOL_VALUE_MASK)
+		low = VOL_VALUE_MASK;
 
 	switch (id) {
 	case GP_CH_0:
 		reg_val = readl(reg_base + GP_CH0_CMP_DATA_REG);
-		reg_val &= ~0xfff;
-		reg_val |= (low & 0xfff);
+		reg_val &= ~VOL_VALUE_MASK;
+		reg_val |= (low & VOL_VALUE_MASK);
 		writel(reg_val, reg_base + GP_CH0_CMP_DATA_REG);
 		break;
 	case GP_CH_1:
 		reg_val = readl(reg_base + GP_CH1_CMP_DATA_REG);
-		reg_val &= ~0xfff;
-		reg_val |= (low & 0xfff);
+		reg_val &= ~VOL_VALUE_MASK;
+		reg_val |= (low & VOL_VALUE_MASK);
 		writel(reg_val, reg_base + GP_CH1_CMP_DATA_REG);
 		break;
 	case GP_CH_2:
 		reg_val = readl(reg_base + GP_CH2_CMP_DATA_REG);
-		reg_val &= ~0xfff;
-		reg_val |= (low & 0xfff);
+		reg_val &= ~VOL_VALUE_MASK;
+		reg_val |= (low & VOL_VALUE_MASK);
 		writel(reg_val, reg_base + GP_CH2_CMP_DATA_REG);
 		break;
 	case GP_CH_3:
 		reg_val = readl(reg_base + GP_CH3_CMP_DATA_REG);
-		reg_val &= ~0xfff;
-		reg_val |= (low & 0xfff);
+		reg_val &= ~VOL_VALUE_MASK;
+		reg_val |= (low & VOL_VALUE_MASK);
 		writel(reg_val, reg_base + GP_CH3_CMP_DATA_REG);
 		break;
+	case GP_CH_4:
+		reg_val = readl(reg_base + GP_CH4_CMP_DATA_REG);
+		reg_val &= ~VOL_VALUE_MASK;
+		reg_val |= (low & VOL_VALUE_MASK);
+		writel(reg_val, reg_base + GP_CH4_CMP_DATA_REG);
+		break;
+	case GP_CH_5:
+		reg_val = readl(reg_base + GP_CH5_CMP_DATA_REG);
+		reg_val &= ~VOL_VALUE_MASK;
+		reg_val |= (low & VOL_VALUE_MASK);
+		writel(reg_val, reg_base + GP_CH5_CMP_DATA_REG);
+		break;
+	case GP_CH_6:
+		reg_val = readl(reg_base + GP_CH6_CMP_DATA_REG);
+		reg_val &= ~VOL_VALUE_MASK;
+		reg_val |= (low & VOL_VALUE_MASK);
+		writel(reg_val, reg_base + GP_CH6_CMP_DATA_REG);
+		break;
+	case GP_CH_7:
+		reg_val = readl(reg_base + GP_CH7_CMP_DATA_REG);
+		reg_val &= ~VOL_VALUE_MASK;
+		reg_val |= (low & VOL_VALUE_MASK);
+		writel(reg_val, reg_base + GP_CH7_CMP_DATA_REG);
+		break;
+
 	default:
 		pr_err("%s, invalid channel id!", __func__);
 		return -EINVAL;
@@ -197,34 +274,59 @@ static u32 sunxi_gpadc_ch_cmp_hig(void __iomem *reg_base, enum gp_channel_id id,
 	/* anolog voltage range 0~1.8v, 12bits sample rate, unit=1.8v/(2^12) */
 	unit = VOL_RANGE / 4096; /* 12bits sample rate */
 	hig = hig_uv / unit;
-	if (hig > 0xfff)
-		hig = 0xfff;
+	if (hig > VOL_VALUE_MASK)
+		hig = VOL_VALUE_MASK;
 
 	switch (id) {
 	case GP_CH_0:
 		reg_val = readl(reg_base + GP_CH0_CMP_DATA_REG);
-		reg_val &= ~(0xfff << 16);
-		reg_val |= (hig & 0xfff) << 16;
+		reg_val &= ~(VOL_VALUE_MASK << 16);
+		reg_val |= (hig & VOL_VALUE_MASK) << 16;
 		writel(reg_val, reg_base + GP_CH0_CMP_DATA_REG);
 		break;
 	case GP_CH_1:
 		reg_val = readl(reg_base + GP_CH1_CMP_DATA_REG);
-		reg_val &= ~(0xfff << 16);
-		reg_val |= (hig & 0xfff) << 16;
+		reg_val &= ~(VOL_VALUE_MASK << 16);
+		reg_val |= (hig & VOL_VALUE_MASK) << 16;
 		writel(reg_val, reg_base + GP_CH1_CMP_DATA_REG);
 		break;
 	case GP_CH_2:
 		reg_val = readl(reg_base + GP_CH2_CMP_DATA_REG);
-		reg_val &= ~(0xfff << 16);
-		reg_val |= (hig & 0xfff) << 16;
+		reg_val &= ~(VOL_VALUE_MASK << 16);
+		reg_val |= (hig & VOL_VALUE_MASK) << 16;
 		writel(reg_val, reg_base + GP_CH2_CMP_DATA_REG);
 		break;
 	case GP_CH_3:
 		reg_val = readl(reg_base + GP_CH3_CMP_DATA_REG);
-		reg_val &= ~(0xfff << 16);
-		reg_val |= (hig & 0xfff) << 16;
+		reg_val &= ~(VOL_VALUE_MASK << 16);
+		reg_val |= (hig & VOL_VALUE_MASK) << 16;
 		writel(reg_val, reg_base + GP_CH3_CMP_DATA_REG);
 		break;
+	case GP_CH_4:
+		reg_val = readl(reg_base + GP_CH4_CMP_DATA_REG);
+		reg_val &= ~(VOL_VALUE_MASK << 16);
+		reg_val |= (hig & VOL_VALUE_MASK) << 16;
+		writel(reg_val, reg_base + GP_CH4_CMP_DATA_REG);
+		break;
+	case GP_CH_5:
+		reg_val = readl(reg_base + GP_CH5_CMP_DATA_REG);
+		reg_val &= ~(VOL_VALUE_MASK << 16);
+		reg_val |= (hig & VOL_VALUE_MASK) << 16;
+		writel(reg_val, reg_base + GP_CH5_CMP_DATA_REG);
+		break;
+	case GP_CH_6:
+		reg_val = readl(reg_base + GP_CH6_CMP_DATA_REG);
+		reg_val &= ~(VOL_VALUE_MASK << 16);
+		reg_val |= (hig & VOL_VALUE_MASK) << 16;
+		writel(reg_val, reg_base + GP_CH6_CMP_DATA_REG);
+		break;
+	case GP_CH_7:
+		reg_val = readl(reg_base + GP_CH7_CMP_DATA_REG);
+		reg_val &= ~(VOL_VALUE_MASK << 16);
+		reg_val |= (hig & VOL_VALUE_MASK) << 16;
+		writel(reg_val, reg_base + GP_CH7_CMP_DATA_REG);
+		break;
+
 	default:
 		pr_err("%s, invalid channel id!", __func__);
 		return -EINVAL;
@@ -251,6 +353,18 @@ static u32 sunxi_gpadc_cmp_select(void __iomem *reg_base, enum gp_channel_id id)
 	case GP_CH_3:
 		reg_val |= GP_CH3_CMP_EN;
 		break;
+	case GP_CH_4:
+		reg_val |= GP_CH4_CMP_EN;
+		break;
+	case GP_CH_5:
+		reg_val |= GP_CH5_CMP_EN;
+		break;
+	case GP_CH_6:
+		reg_val |= GP_CH6_CMP_EN;
+		break;
+	case GP_CH_7:
+		reg_val |= GP_CH7_CMP_EN;
+		break;
 	default:
 		pr_err("%s, invalid value!", __func__);
 		return -EINVAL;
@@ -260,11 +374,12 @@ static u32 sunxi_gpadc_cmp_select(void __iomem *reg_base, enum gp_channel_id id)
 	return 0;
 }
 
-static u32 sunxi_gpadc_cmp_deselect(void __iomem *reg_base, enum gp_channel_id id)
+static u32 sunxi_gpadc_cmp_deselect(void __iomem *reg_base,
+		enum gp_channel_id id)
 {
 	u32 reg_val;
 
-	reg_val = readl(reg_base + GP_CTRL_REG);
+	reg_val = readl(reg_base + GP_CS_EN_REG);
 	switch (id) {
 	case GP_CH_0:
 		reg_val &= ~GP_CH0_CMP_EN;
@@ -278,16 +393,30 @@ static u32 sunxi_gpadc_cmp_deselect(void __iomem *reg_base, enum gp_channel_id i
 	case GP_CH_3:
 		reg_val &= ~GP_CH3_CMP_EN;
 		break;
+	case GP_CH_4:
+		reg_val &= ~GP_CH4_CMP_EN;
+		break;
+	case GP_CH_5:
+		reg_val &= ~GP_CH5_CMP_EN;
+		break;
+	case GP_CH_6:
+		reg_val &= ~GP_CH6_CMP_EN;
+		break;
+	case GP_CH_7:
+		reg_val &= ~GP_CH7_CMP_EN;
+		break;
+
 	default:
 		pr_err("%s, invalid value!", __func__);
 		return -EINVAL;
 	}
-	writel(reg_val, reg_base + GP_CTRL_REG);
+	writel(reg_val, reg_base + GP_CS_EN_REG);
 
 	return 0;
 }
 
-static u32 sunxi_gpadc_mode_select(void __iomem *reg_base, enum gp_select_mode mode)
+static u32 sunxi_gpadc_mode_select(void __iomem *reg_base,
+		enum gp_select_mode mode)
 {
 	u32 reg_val;
 
@@ -322,7 +451,8 @@ static void sunxi_gpadc_calibration_enable(void __iomem *reg_base)
 
 }
 
-static u32 sunxi_enable_lowirq_ch_select(void __iomem *reg_base, enum gp_channel_id id)
+static u32 sunxi_enable_lowirq_ch_select(void __iomem *reg_base,
+		enum gp_channel_id id)
 {
 	u32 reg_val;
 
@@ -340,6 +470,18 @@ static u32 sunxi_enable_lowirq_ch_select(void __iomem *reg_base, enum gp_channel
 	case GP_CH_3:
 		reg_val |= GP_CH3_SELECT;
 		break;
+	case GP_CH_4:
+		reg_val |= GP_CH4_SELECT;
+		break;
+	case GP_CH_5:
+		reg_val |= GP_CH5_SELECT;
+		break;
+	case GP_CH_6:
+		reg_val |= GP_CH6_SELECT;
+		break;
+	case GP_CH_7:
+		reg_val |= GP_CH7_SELECT;
+		break;
 	default:
 		pr_err("%s, invalid channel id!", __func__);
 		return -EINVAL;
@@ -349,7 +491,8 @@ static u32 sunxi_enable_lowirq_ch_select(void __iomem *reg_base, enum gp_channel
 	return 0;
 }
 
-static u32 sunxi_disable_lowirq_ch_select(void __iomem *reg_base, enum gp_channel_id id)
+static u32 sunxi_disable_lowirq_ch_select(void __iomem *reg_base,
+		enum gp_channel_id id)
 {
 	u32 reg_val;
 
@@ -367,6 +510,18 @@ static u32 sunxi_disable_lowirq_ch_select(void __iomem *reg_base, enum gp_channe
 	case GP_CH_3:
 		reg_val &= ~GP_CH3_SELECT;
 		break;
+	case GP_CH_4:
+		reg_val &= ~GP_CH4_SELECT;
+		break;
+	case GP_CH_5:
+		reg_val &= ~GP_CH5_SELECT;
+		break;
+	case GP_CH_6:
+		reg_val &= ~GP_CH6_SELECT;
+		break;
+	case GP_CH_7:
+		reg_val &= ~GP_CH7_SELECT;
+		break;
 	default:
 		pr_err("%s, invalid channel id!", __func__);
 		return -EINVAL;
@@ -376,7 +531,8 @@ static u32 sunxi_disable_lowirq_ch_select(void __iomem *reg_base, enum gp_channe
 	return 0;
 }
 
-static u32 sunxi_enable_higirq_ch_select(void __iomem *reg_base, enum gp_channel_id id)
+static u32 sunxi_enable_higirq_ch_select(void __iomem *reg_base,
+		enum gp_channel_id id)
 {
 	u32 reg_val = 0;
 
@@ -394,6 +550,18 @@ static u32 sunxi_enable_higirq_ch_select(void __iomem *reg_base, enum gp_channel
 		break;
 	case GP_CH_3:
 		reg_val |= GP_CH3_SELECT;
+		break;
+	case GP_CH_4:
+		reg_val |= GP_CH4_SELECT;
+		break;
+	case GP_CH_5:
+		reg_val |= GP_CH5_SELECT;
+		break;
+	case GP_CH_6:
+		reg_val |= GP_CH6_SELECT;
+		break;
+	case GP_CH_7:
+		reg_val |= GP_CH7_SELECT;
 		break;
 	default:
 		pr_err("%s, invalid channel id!", __func__);
@@ -404,7 +572,8 @@ static u32 sunxi_enable_higirq_ch_select(void __iomem *reg_base, enum gp_channel
 	return 0;
 }
 
-static u32 sunxi_disable_higirq_ch_select(void __iomem *reg_base, enum gp_channel_id id)
+static u32 sunxi_disable_higirq_ch_select(void __iomem *reg_base,
+		enum gp_channel_id id)
 {
 	u32 reg_val = 0;
 
@@ -421,6 +590,18 @@ static u32 sunxi_disable_higirq_ch_select(void __iomem *reg_base, enum gp_channe
 		break;
 	case GP_CH_3:
 		reg_val &= ~GP_CH3_SELECT;
+		break;
+	case GP_CH_4:
+		reg_val &= ~GP_CH4_SELECT;
+		break;
+	case GP_CH_5:
+		reg_val &= ~GP_CH5_SELECT;
+		break;
+	case GP_CH_6:
+		reg_val &= ~GP_CH6_SELECT;
+		break;
+	case GP_CH_7:
+		reg_val &= ~GP_CH7_SELECT;
 		break;
 	default:
 		pr_err("%s, invalid channel id!", __func__);
@@ -448,6 +629,18 @@ static u32 sunxi_gpadc_channel_id(enum gp_channel_id id)
 	case GP_CH_3:
 		channel_id = CHANNEL_3_SELECT;
 		break;
+	case GP_CH_4:
+		channel_id = CHANNEL_4_SELECT;
+		break;
+	case GP_CH_5:
+		channel_id = CHANNEL_5_SELECT;
+		break;
+	case GP_CH_6:
+		channel_id = CHANNEL_6_SELECT;
+		break;
+	case GP_CH_7:
+		channel_id = CHANNEL_7_SELECT;
+		break;
 	default:
 		pr_err("%s,channel id select fail", __func__);
 		return -EINVAL;
@@ -456,7 +649,17 @@ static u32 sunxi_gpadc_channel_id(enum gp_channel_id id)
 	return channel_id;
 }
 
-static u32 sunxi_enable_irq_ch_select(void __iomem *reg_base, enum gp_channel_id id)
+static void sunxi_gpadc_enable_irq(void __iomem *reg_base)
+{
+	u32 reg_val;
+
+	reg_val = readl(reg_base + GP_FIFO_INTC_REG);
+	reg_val |= FIFO_DATA_IRQ_EN;
+	writel(reg_val, reg_base + GP_FIFO_INTC_REG);
+}
+#if 0
+static u32 sunxi_enable_irq_ch_select(void __iomem *reg_base,
+		enum gp_channel_id id)
 {
 	u32 reg_val;
 
@@ -474,6 +677,18 @@ static u32 sunxi_enable_irq_ch_select(void __iomem *reg_base, enum gp_channel_id
 	case GP_CH_3:
 		reg_val |= GP_CH3_SELECT;
 		break;
+	case GP_CH_4:
+		reg_val |= GP_CH4_SELECT;
+		break;
+	case GP_CH_5:
+		reg_val |= GP_CH5_SELECT;
+		break;
+	case GP_CH_6:
+		reg_val |= GP_CH6_SELECT;
+		break;
+	case GP_CH_7:
+		reg_val |= GP_CH7_SELECT;
+		break;
 	default:
 		pr_err("%s, invalid channel id!", __func__);
 		return -EINVAL;
@@ -483,7 +698,8 @@ static u32 sunxi_enable_irq_ch_select(void __iomem *reg_base, enum gp_channel_id
 	return 0;
 }
 
-static u32 sunxi_disable_irq_ch_select(void __iomem *reg_base, enum gp_channel_id id)
+static u32 sunxi_disable_irq_ch_select(void __iomem *reg_base,
+		enum gp_channel_id id)
 {
 	u32 reg_val;
 
@@ -501,6 +717,18 @@ static u32 sunxi_disable_irq_ch_select(void __iomem *reg_base, enum gp_channel_i
 	case GP_CH_3:
 		reg_val &= ~GP_CH3_SELECT;
 		break;
+	case GP_CH_4:
+		reg_val &= ~GP_CH4_SELECT;
+		break;
+	case GP_CH_5:
+		reg_val &= ~GP_CH5_SELECT;
+		break;
+	case GP_CH_6:
+		reg_val &= ~GP_CH6_SELECT;
+		break;
+	case GP_CH_7:
+		reg_val &= ~GP_CH7_SELECT;
+		break;
 	default:
 		pr_err("%s, invalid channel id!", __func__);
 		return -EINVAL;
@@ -509,6 +737,7 @@ static u32 sunxi_disable_irq_ch_select(void __iomem *reg_base, enum gp_channel_i
 
 	return 0;
 }
+#endif
 
 static u32 sunxi_ch_lowirq_status(void __iomem *reg_base)
 {
@@ -552,7 +781,15 @@ static u32 sunxi_gpadc_read_ch_higirq_enable(void __iomem *reg_base)
 
 static u32 sunxi_gpadc_read_ch_irq_enable(void __iomem *reg_base)
 {
+	u32 reg_val;
+
+	reg_val = readl(reg_base + GP_DATA_INTC_REG);
+	reg_val |= GP_CH0_SELECT;
+	reg_val |= GP_CH1_SELECT;
+	writel(reg_val, reg_base + GP_DATA_INTC_REG);
+
 	return readl(reg_base + GP_DATA_INTC_REG);
+
 }
 
 static u32 sunxi_gpadc_read_data(void __iomem *reg_base, enum gp_channel_id id)
@@ -566,18 +803,28 @@ static u32 sunxi_gpadc_read_data(void __iomem *reg_base, enum gp_channel_id id)
 		return readl(reg_base + GP_CH2_DATA_REG) & GP_CH2_DATA_MASK;
 	case GP_CH_3:
 		return readl(reg_base + GP_CH3_DATA_REG) & GP_CH3_DATA_MASK;
+	case GP_CH_4:
+		return readl(reg_base + GP_CH4_DATA_REG) & GP_CH4_DATA_MASK;
+	case GP_CH_5:
+		return readl(reg_base + GP_CH5_DATA_REG) & GP_CH5_DATA_MASK;
+	case GP_CH_6:
+		return readl(reg_base + GP_CH6_DATA_REG) & GP_CH6_DATA_MASK;
+	case GP_CH_7:
+		return readl(reg_base + GP_CH7_DATA_REG) & GP_CH7_DATA_MASK;
 	default:
 		pr_err("%s, invalid channel id!", __func__);
 		return -EINVAL;
 	}
 }
 
-static int sunxi_gpadc_input_event_set(struct input_dev *input_dev, enum gp_channel_id id)
+static int sunxi_gpadc_input_event_set(struct input_dev *input_dev,
+		enum gp_channel_id id)
 {
 	int i;
 
 	if (!input_dev) {
-		pr_err("%s:input_dev: not enough memory for input device\n", __func__);
+		pr_err("%s:input_dev: not enough memory for input device\n",
+				__func__);
 		return -ENOMEM;
 	}
 
@@ -590,22 +837,19 @@ static int sunxi_gpadc_input_event_set(struct input_dev *input_dev, enum gp_chan
 		input_dev->evbit[0] = BIT_MASK(EV_KEY)|BIT_MASK(EV_REP);
 #endif
 		for (i = 0; i < KEY_MAX_CNT; i++)
-			set_bit(sunxi_gpadc->scankeycodes[i], input_dev->keybit);
+			set_bit(sunxi_gpadc->scankeycodes[i],
+					input_dev->keybit);
 		break;
 
 	case GP_CH_1:
-		input_dev->evbit[0] = BIT_MASK(EV_MSC);
-		set_bit(EV_MSC, input_dev->evbit);
-		set_bit(MSC_SCAN, input_dev->mscbit);
-		break;
 	case GP_CH_2:
-		input_dev->evbit[0] = BIT_MASK(EV_MSC);
-		set_bit(EV_MSC, input_dev->evbit);
-		set_bit(MSC_SCAN, input_dev->mscbit);
-		break;
 #ifndef CONFIG_ARCH_SUN8IW18
 	case GP_CH_3:
 #endif
+	case GP_CH_4:
+	case GP_CH_5:
+	case GP_CH_6:
+	case GP_CH_7:
 		input_dev->evbit[0] = BIT_MASK(EV_MSC);
 		set_bit(EV_MSC, input_dev->evbit);
 		set_bit(MSC_SCAN, input_dev->mscbit);
@@ -646,6 +890,22 @@ static int sunxi_gpadc_input_register(struct sunxi_gpadc *sunxi_gpadc, int id)
 		input_dev->name = "sunxi-gpadc3";
 		input_dev->phys = "sunxigpadc3/input0";
 		break;
+	case GP_CH_4:
+		input_dev->name = "sunxi-gpadc4";
+		input_dev->phys = "sunxigpadc4/input0";
+		break;
+	case GP_CH_5:
+		input_dev->name = "sunxi-gpadc5";
+		input_dev->phys = "sunxigpadc5/input0";
+		break;
+	case GP_CH_6:
+		input_dev->name = "sunxi-gpadc6";
+		input_dev->phys = "sunxigpadc6/input0";
+		break;
+	case GP_CH_7:
+		input_dev->name = "sunxi-gpadc7";
+		input_dev->phys = "sunxigpadc7/input0";
+		break;
 	default:
 		pr_err("%s, invalid channel id!", __func__);
 		goto fail;
@@ -673,7 +933,8 @@ fail:
 	return ret;
 }
 
-static int sunxi_key_init(struct sunxi_gpadc *sunxi_gpadc, struct platform_device *pdev)
+static int sunxi_key_init(struct sunxi_gpadc *sunxi_gpadc,
+		struct platform_device *pdev)
 {
 	struct device_node *np = NULL;
 	unsigned char i, j = 0;
@@ -711,9 +972,9 @@ static int sunxi_key_init(struct sunxi_gpadc *sunxi_gpadc, struct platform_devic
 	}
 	key_vol[sunxi_gpadc->key_num] = MAXIMUM_INPUT_VOLTAGE;
 
-	for (i = 0; i < sunxi_gpadc->key_num; i++) {
+	for (i = 0; i < sunxi_gpadc->key_num; i++)
 		set_vol[i] = key_vol[i] + (key_vol[i+1] - key_vol[i])/2;
-	}
+
 	for (i = 0; i < 128; i++) {
 		if (i * SCALE_UNIT > set_vol[j])
 			j++;
@@ -761,29 +1022,44 @@ static int sunxi_gpadc_setup(struct platform_device *pdev,
 		pr_err("%s: get channel num failed\n", __func__);
 		return -EBUSY;
 	}
-	if (of_property_read_u32(np, "channel_select", &val)) {
+
+	if (of_property_read_u32(np, "channel_select",
+				&gpadc_config->channel_select)) {
 		pr_err("%s: get channel set select failed\n", __func__);
 		gpadc_config->channel_select = 0;
 	}
-	gpadc_config->channel_select = val;
-	if (of_property_read_u32(np, "channel_data_select", &gpadc_config->channel_data_select)) {
+
+	if (of_property_read_u32(np, "channel_data_select",
+				&gpadc_config->channel_data_select)) {
 		pr_err("%s: get channel data setlect failed\n", __func__);
 		gpadc_config->channel_data_select = 0;
 	}
 
-	if (of_property_read_u32(np, "channel_compare_select", &gpadc_config->channel_compare_select)) {
+	if (of_property_read_u32(np, "channel_compare_select",
+				&gpadc_config->channel_compare_select)) {
 		pr_err("%s: get channel compare select failed\n", __func__);
 		gpadc_config->channel_compare_select = 0;
 	}
 
-	if (of_property_read_u32(np, "channel_cld_select", &gpadc_config->channel_cld_select)) {
-		pr_err("%s: get channel compare low data select failed\n", __func__);
-		gpadc_config->channel_select = 0;
+	if (of_property_read_u32(np, "channel_cld_select",
+				&gpadc_config->channel_cld_select)) {
+		pr_err("%s: get channel compare low data select failed\n",
+				__func__);
+		gpadc_config->channel_cld_select = 0;
 	}
 
-	if (of_property_read_u32(np, "channel_chd_select", &gpadc_config->channel_chd_select)) {
-		pr_err("%s: get channel compare hig data select failed\n", __func__);
+	if (of_property_read_u32(np, "channel_chd_select",
+				&gpadc_config->channel_chd_select)) {
+		pr_err("%s: get channel compare hig data select failed\n",
+				__func__);
 		gpadc_config->channel_chd_select = 0;
+	}
+
+	if (of_property_read_u32(np, "channel_scan_data",
+				&gpadc_config->channel_scan_data)) {
+		pr_err("%s: get channel scan data failed\n",
+				__func__);
+		gpadc_config->channel_scan_data = 0;
 	}
 
 	for (i = 0; i < sunxi_gpadc->channel_num; i++) {
@@ -805,36 +1081,87 @@ static int sunxi_gpadc_setup(struct platform_device *pdev,
 	return 0;
 }
 
+static int sunxi_gpadc_request_clk(struct sunxi_gpadc *sunxi_gpadc)
+{
+	sunxi_gpadc->bus_clk = devm_clk_get(sunxi_gpadc->dev, "bus");
+	if (IS_ERR_OR_NULL(sunxi_gpadc->bus_clk)) {
+		pr_err("[gpadc%d] request GPADC clock failed\n", sunxi_gpadc->bus_num);
+		return -1;
+	}
+
+	sunxi_gpadc->reset = devm_reset_control_get(sunxi_gpadc->dev, NULL);
+	if (IS_ERR_OR_NULL(sunxi_gpadc->reset)) {
+		pr_err("[gpadc%d] request GPADC reset failed\n", sunxi_gpadc->bus_num);
+		return -1;
+	}
+
+	return 0;
+}
+
+static int sunxi_gpadc_clk_init(struct sunxi_gpadc *sunxi_gpadc)
+{
+	if (reset_control_deassert(sunxi_gpadc->reset)) {
+		pr_err("[gpadc%d] reset control deassert failed!\n", sunxi_gpadc->bus_num);
+		return -1;
+	}
+
+	if (clk_prepare_enable(sunxi_gpadc->bus_clk)) {
+		pr_err("[gpadc%d] enable clock failed!\n", sunxi_gpadc->bus_num);
+		return -1;
+	}
+
+	return 0;
+}
+
+static void sunxi_gpadc_clk_exit(struct sunxi_gpadc *sunxi_gpadc)
+{
+	if (!IS_ERR_OR_NULL(sunxi_gpadc->bus_clk) && __clk_is_enabled(sunxi_gpadc->bus_clk))
+		clk_disable_unprepare(sunxi_gpadc->bus_clk);
+}
+
 static int sunxi_gpadc_hw_init(struct sunxi_gpadc *sunxi_gpadc)
 {
 	struct sunxi_config *gpadc_config = &sunxi_gpadc->gpadc_config;
 	int i;
+
+	if (sunxi_gpadc_request_clk(sunxi_gpadc)) {
+		pr_err("[gpadc%d] request gpadc clk failed\n", sunxi_gpadc->bus_num);
+		return -EPROBE_DEFER;
+	}
+
+	if (sunxi_gpadc_clk_init(sunxi_gpadc)) {
+		pr_err("[gpadc%d] init gpadc clk failed\n", sunxi_gpadc->bus_num);
+		return -EPROBE_DEFER;
+	}
 
 	sunxi_gpadc_sample_rate_set(sunxi_gpadc->reg_base, OSC_24MHZ,
 			sunxi_gpadc->gpadc_sample_rate);
 	for (i = 0; i < sunxi_gpadc->channel_num; i++) {
 		if (gpadc_config->channel_select & sunxi_gpadc_channel_id(i)) {
 			sunxi_gpadc_ch_select(sunxi_gpadc->reg_base, i);
-			if (gpadc_config->channel_data_select & sunxi_gpadc_channel_id(i))
-				sunxi_enable_irq_ch_select(sunxi_gpadc->reg_base, i);
-			if (gpadc_config->channel_compare_select & sunxi_gpadc_channel_id(i)) {
-				sunxi_gpadc_cmp_select(sunxi_gpadc->reg_base, i);
+//			if (gpadc_config->channel_data_select & sunxi_gpadc_channel_id(i))
+//				sunxi_enable_irq_ch_select(sunxi_gpadc->reg_base, i);
+//			if (gpadc_config->channel_compare_select & sunxi_gpadc_channel_id(i)) {
+//				sunxi_gpadc_cmp_select(sunxi_gpadc->reg_base, i);
 				if (gpadc_config->channel_cld_select & sunxi_gpadc_channel_id(i)) {
+					sunxi_gpadc_cmp_select(sunxi_gpadc->reg_base, i);
 					sunxi_enable_lowirq_ch_select(sunxi_gpadc->reg_base, i);
 					sunxi_gpadc_ch_cmp_low(sunxi_gpadc->reg_base, i,
 							gpadc_config->channel_compare_lowdata[i]);
 				}
 				if (gpadc_config->channel_chd_select & sunxi_gpadc_channel_id(i)) {
+					sunxi_gpadc_cmp_select(sunxi_gpadc->reg_base, i);
 					sunxi_enable_higirq_ch_select(sunxi_gpadc->reg_base, i);
 					sunxi_gpadc_ch_cmp_hig(sunxi_gpadc->reg_base, i,
 							gpadc_config->channel_compare_higdata[i]);
 				}
-			}
+//			}
 		}
 	}
 	sunxi_gpadc_calibration_enable(sunxi_gpadc->reg_base);
 	sunxi_gpadc_mode_select(sunxi_gpadc->reg_base, GP_CONTINUOUS_MODE);
 	sunxi_gpadc_enable(sunxi_gpadc->reg_base, true);
+	sunxi_gpadc_enable_irq(sunxi_gpadc->reg_base);
 
 	return 0;
 }
@@ -847,31 +1174,46 @@ static int sunxi_gpadc_hw_exit(struct sunxi_gpadc *sunxi_gpadc)
 	for (i = 0; i < sunxi_gpadc->channel_num; i++) {
 		if (gpadc_config->channel_select & sunxi_gpadc_channel_id(i)) {
 			sunxi_gpadc_ch_deselect(sunxi_gpadc->reg_base, i);
-			if (gpadc_config->channel_data_select & sunxi_gpadc_channel_id(i))
-				sunxi_disable_irq_ch_select(sunxi_gpadc->reg_base, i);
-			if (gpadc_config->channel_compare_select & sunxi_gpadc_channel_id(i)) {
-				sunxi_gpadc_cmp_deselect(sunxi_gpadc->reg_base, i);
+//			if (gpadc_config->channel_data_select & sunxi_gpadc_channel_id(i))
+//				sunxi_disable_irq_ch_select(sunxi_gpadc->reg_base, i);
+//			if (gpadc_config->channel_compare_select & sunxi_gpadc_channel_id(i)) {
+//				sunxi_gpadc_cmp_deselect(sunxi_gpadc->reg_base, i);
 				if (gpadc_config->channel_cld_select & sunxi_gpadc_channel_id(i))
 					sunxi_disable_lowirq_ch_select(sunxi_gpadc->reg_base, i);
 				if (gpadc_config->channel_chd_select & sunxi_gpadc_channel_id(i))
 					sunxi_disable_higirq_ch_select(sunxi_gpadc->reg_base, i);
-			}
+				if ((gpadc_config->channel_chd_select |
+				gpadc_config->channel_cld_select) & sunxi_gpadc_channel_id(i))
+					sunxi_gpadc_cmp_deselect(sunxi_gpadc->reg_base, i);
+//					sunxi_disable_irq_ch_select(sunxi_gpadc->reg_base, i);
+//			}
 		}
 	}
 	sunxi_gpadc_enable(sunxi_gpadc->reg_base, false);
+	sunxi_gpadc_clk_exit(sunxi_gpadc);
 
 	return 0;
 }
 
-static u32 sunxi_gpadc_key_xfer(struct sunxi_gpadc *sunxi_gpadc, u32 data, u32 reg_low)
+static u32 sunxi_gpadc_key_xfer(struct sunxi_gpadc *sunxi_gpadc, u32 data, u32 irq_low_set)
 {
 	u32 vol_data;
 	u8 ch_num;
 
-	dprintk(DEBUG_RUN, "data=%4d cnt=%1d ", data, sunxi_gpadc->key_cnt);
+#ifdef CONFIG_ARCH_SUN8IW18
+	u32 vin;
+
+	vin = sunxi_gpadc_check_vin();
+	if (vin == 0)
+		return 0;
+
+	data = ((vin - 6)*data) / 4096;
+	vol_data = data;
+	data = data * 1000;
+#else
 	data = ((VOL_RANGE / 4096)*data);	/* 12bits sample rate */
 	vol_data = data / 1000;
-
+#endif
 	if (vol_data < SUNXIKEY_DOWN) {
 		/* MAX compare_before = 128 */
 		sunxi_gpadc->compare_before = ((data / SCALE_UNIT) / 1000)&0xff;
@@ -889,7 +1231,7 @@ static u32 sunxi_gpadc_key_xfer(struct sunxi_gpadc *sunxi_gpadc, u32 data, u32 r
 			sunxi_gpadc->compare_later = sunxi_gpadc->compare_before;
 			sunxi_gpadc->key_code = keypad_mapindex[sunxi_gpadc->compare_before];
 
-			switch (reg_low) {
+			switch (irq_low_set) {
 			case GP_CH0_LOW:
 				ch_num = GP_CH_0;
 				break;
@@ -907,7 +1249,8 @@ static u32 sunxi_gpadc_key_xfer(struct sunxi_gpadc *sunxi_gpadc, u32 data, u32 r
 				return -EINVAL;
 			}
 			if (sunxi_gpadc->key_code != sunxi_gpadc->key_num) {
-				input_report_key(sunxi_gpadc->input_gpadc[ch_num], sunxi_gpadc->scankeycodes[sunxi_gpadc->key_code], 1);
+				input_report_key(sunxi_gpadc->input_gpadc[ch_num],
+					sunxi_gpadc->scankeycodes[sunxi_gpadc->key_code], 1);
 				input_sync(sunxi_gpadc->input_gpadc[ch_num]);
 			}
 			sunxi_gpadc->compare_later = 0;
@@ -919,48 +1262,39 @@ static u32 sunxi_gpadc_key_xfer(struct sunxi_gpadc *sunxi_gpadc, u32 data, u32 r
 	return 0;
 }
 
-#if defined(CONFIG_SUNXI_IR_CUT)
-extern int ir_cut_condition, ir_cut_data, ir_cut_volt_data;
-extern  wait_queue_head_t ir_cut_queue;
-#endif
-
 static irqreturn_t sunxi_gpadc_interrupt(int irqno, void *dev_id)
 {
 	struct sunxi_gpadc *sunxi_gpadc = (struct sunxi_gpadc *)dev_id;
-	u32  reg_val, reg_low, reg_hig;
-	u32  reg_enable_val, reg_enable_low, reg_enable_hig;
-	u32 data, i;
+	u32  irq_data_set, irq_low_set, irq_hig_set;
+	u32  irq_data_val, irq_low_en, irq_hig_en;
+	u32 data;
+#ifndef CONFIG_ARCH_SUN8IW18
+	u32 i;
+#endif
+	irq_data_val = sunxi_gpadc_read_ch_irq_enable(sunxi_gpadc->reg_base);
 
-	reg_enable_val = sunxi_gpadc_read_ch_irq_enable(sunxi_gpadc->reg_base);
-	reg_enable_low = sunxi_gpadc_read_ch_lowirq_enable(
+	irq_low_en = sunxi_gpadc_read_ch_lowirq_enable(
 			sunxi_gpadc->reg_base);
-	reg_enable_hig = sunxi_gpadc_read_ch_higirq_enable(
+	irq_hig_en = sunxi_gpadc_read_ch_higirq_enable(
 			sunxi_gpadc->reg_base);
 
-	reg_val = sunxi_ch_irq_status(sunxi_gpadc->reg_base);
-	sunxi_ch_irq_clear_flags(sunxi_gpadc->reg_base, reg_val);
-	reg_low = sunxi_ch_lowirq_status(sunxi_gpadc->reg_base);
-	sunxi_ch_lowirq_clear_flags(sunxi_gpadc->reg_base, reg_low);
-	reg_hig = sunxi_ch_higirq_status(sunxi_gpadc->reg_base);
-	sunxi_ch_higirq_clear_flags(sunxi_gpadc->reg_base, reg_hig);
+	irq_data_set = sunxi_ch_irq_status(sunxi_gpadc->reg_base);
+	sunxi_ch_irq_clear_flags(sunxi_gpadc->reg_base, irq_data_set);
+	irq_low_set = sunxi_ch_lowirq_status(sunxi_gpadc->reg_base);
+	sunxi_ch_lowirq_clear_flags(sunxi_gpadc->reg_base, irq_low_set);
+	irq_hig_set = sunxi_ch_higirq_status(sunxi_gpadc->reg_base);
+	sunxi_ch_higirq_clear_flags(sunxi_gpadc->reg_base, irq_hig_set);
 
-	if (reg_val & GP_CH0_DATA) {
+	if (irq_data_set & GP_CH0_DATA)
 		data = sunxi_gpadc_read_data(sunxi_gpadc->reg_base, GP_CH_0);
-	}
 
-	if (reg_val & GP_CH1_DATA) {
-		data = sunxi_gpadc_read_data(sunxi_gpadc->reg_base, GP_CH_1);
-		input_event(sunxi_gpadc->input_gpadc[GP_CH_1], EV_MSC, MSC_SCAN, data);
-		input_sync(sunxi_gpadc->input_gpadc[GP_CH_1]);
-	}
-
-	if (reg_low & GP_CH0_LOW & reg_enable_low) {
+	if (irq_low_set & GP_CH0_LOW & irq_low_en) {
 		data = sunxi_gpadc_read_data(sunxi_gpadc->reg_base, GP_CH_0);
-		sunxi_gpadc_key_xfer(sunxi_gpadc, data, reg_low);
+		sunxi_gpadc_key_xfer(sunxi_gpadc, data, irq_low_set);
 		sunxi_enable_higirq_ch_select(sunxi_gpadc->reg_base, GP_CH_0);
 	}
 
-	if (reg_hig & GP_CH0_HIG & reg_enable_hig) {
+	if (irq_hig_set & GP_CH0_HIG & irq_hig_en) {
 		input_report_key(sunxi_gpadc->input_gpadc[GP_CH_0],
 			sunxi_gpadc->scankeycodes[sunxi_gpadc->key_code], 0);
 		input_sync(sunxi_gpadc->input_gpadc[GP_CH_0]);
@@ -970,13 +1304,13 @@ static irqreturn_t sunxi_gpadc_interrupt(int irqno, void *dev_id)
 	}
 
 #ifdef CONFIG_ARCH_SUN8IW18
-	if (reg_low & GP_CH3_LOW & reg_enable_low) {
+	if (irq_low_set & GP_CH3_LOW & irq_low_en) {
 		data = sunxi_gpadc_read_data(sunxi_gpadc->reg_base, GP_CH_3);
-		sunxi_gpadc_key_xfer(sunxi_gpadc, data, reg_low);
+		sunxi_gpadc_key_xfer(sunxi_gpadc, data, irq_low_set);
 		sunxi_enable_higirq_ch_select(sunxi_gpadc->reg_base, GP_CH_3);
 	}
 
-	if (reg_hig & GP_CH3_HIG & reg_enable_hig) {
+	if (irq_hig_set & GP_CH3_HIG & irq_hig_en) {
 		input_report_key(sunxi_gpadc->input_gpadc[GP_CH_3],
 			sunxi_gpadc->scankeycodes[sunxi_gpadc->key_code], 0);
 		input_sync(sunxi_gpadc->input_gpadc[GP_CH_3]);
@@ -984,35 +1318,18 @@ static irqreturn_t sunxi_gpadc_interrupt(int irqno, void *dev_id)
 		sunxi_gpadc->key_cnt = 0;
 		sunxi_disable_higirq_ch_select(sunxi_gpadc->reg_base, GP_CH_3);
 	}
-#endif
-
-	if (reg_low & GP_CH1_LOW)
-		pr_debug("channel 1 low pend\n");
-
-	if (reg_low & GP_CH2_LOW)
-		pr_debug("channel 2 low pend\n");
-
-	if (reg_low & GP_CH3_LOW)
-		pr_debug("channel 3 low pend\n");
-
-	if (reg_hig & GP_CH0_HIG)
-		pr_debug("channel 0 hight pend\n");
-
-	if (reg_hig & GP_CH1_HIG) {
-		pr_debug("channel 1 hight pend\n");
-	}
-
-#ifndef CONFIG_ARCH_SUN8IW18
+#else
 	for (i = 1; i < sunxi_gpadc->channel_num; i++) {
-		if (reg_val & reg_enable_val & (1 << i)) {
+		if (irq_data_set & irq_data_val & (1 << i)) {
 			data = sunxi_gpadc_read_data(sunxi_gpadc->reg_base, i);
 			input_event(sunxi_gpadc->input_gpadc[i],
 					EV_MSC, MSC_SCAN, data);
 			input_sync(sunxi_gpadc->input_gpadc[i]);
 			pr_debug("channel %d data pend\n", i);
 		}
-		if (reg_enable_low & reg_enable_hig & (1 << i)) {
-			if (reg_low & reg_hig & (1 << i)) {
+
+		if (irq_low_en & irq_hig_en & (1 << i)) {
+			if (irq_low_set & irq_hig_set & (1 << i)) {
 				data = sunxi_gpadc_read_data(
 						sunxi_gpadc->reg_base, i);
 				input_event(sunxi_gpadc->input_gpadc[i],
@@ -1022,7 +1339,7 @@ static irqreturn_t sunxi_gpadc_interrupt(int irqno, void *dev_id)
 			} else
 				pr_debug("invalid range\n");
 		} else {
-			if (reg_low & reg_enable_low & ~reg_enable_hig
+			if (irq_low_set & irq_low_en & ~irq_hig_en
 					& (1 << i)) {
 				data = sunxi_gpadc_read_data(
 						sunxi_gpadc->reg_base, i);
@@ -1031,7 +1348,7 @@ static irqreturn_t sunxi_gpadc_interrupt(int irqno, void *dev_id)
 				input_sync(sunxi_gpadc->input_gpadc[i]);
 				pr_debug("channel %d low pend\n", i);
 			} else {
-				if (reg_hig & reg_enable_hig & ~reg_enable_low
+				if (irq_hig_set & irq_hig_en & ~irq_low_en
 					& (1 << i)) {
 					data = sunxi_gpadc_read_data(
 							sunxi_gpadc->reg_base,
@@ -1046,10 +1363,26 @@ static irqreturn_t sunxi_gpadc_interrupt(int irqno, void *dev_id)
 		}
 	}
 #endif
-
 	return IRQ_HANDLED;
 }
 
+#ifdef USE_DATA_SCAN
+static void push_event_status(struct work_struct *work)
+{
+	unsigned int data, i;
+	unsigned int scan_channel = sunxi_gpadc->gpadc_config.channel_scan_data;
+
+	for (i = 1; i < sunxi_gpadc->channel_num; i++) {
+		if (scan_channel & (1 << i)) {
+			data = sunxi_gpadc_read_data(sunxi_gpadc->reg_base, i);
+			input_event(sunxi_gpadc->input_gpadc[i],
+					EV_MSC, MSC_SCAN, data);
+			input_sync(sunxi_gpadc->input_gpadc[i]);
+		}
+	}
+	schedule_delayed_work(&sunxi_gpadc->gpadc_work, sunxi_gpadc->interval);
+}
+#endif
 
 void __status_regs_ex(void __iomem *reg_base)
 {
@@ -1238,6 +1571,28 @@ err:
 	return reg_tmp;
 }
 
+static struct channel_reg __parse_channel_str(const char *buf, size_t size)
+{
+	int ret = 0;
+	struct channel_reg reg_tmp;
+
+	if (!buf)
+		reg_tmp.pst = NULL;
+
+	reg_tmp.pst = (char *)buf;
+	reg_tmp.pst = strim(reg_tmp.pst);
+
+	ret = kstrtoul(reg_tmp.pst, 10, &reg_tmp.val);
+	if (ret)
+		goto err;
+
+	return reg_tmp;
+
+err:
+	reg_tmp.pst = NULL;
+	return reg_tmp;
+}
+
 static ssize_t
 status_show(struct class *class, struct class_attribute *attr, char *buf)
 {
@@ -1321,6 +1676,26 @@ err:
 	return -EINVAL;
 }
 
+u32 sunxi_gpadc_read_channel_data(u8 channel)
+{
+	u32 data, vol_data;
+
+	data = readl(sunxi_gpadc->reg_base + GP_CS_EN_REG);
+
+	if ((data & (0x01 << channel)) == 0)
+		return VOL_RANGE + 1;
+
+	data = sunxi_gpadc_read_data(sunxi_gpadc->reg_base, channel);
+
+	data = ((VOL_RANGE / 4096)*data);	/* 12bits sample rate */
+	vol_data = data / 1000;			//data to val_data
+
+	printk("vol_data: %d\n", vol_data);
+
+	return vol_data;
+}
+EXPORT_SYMBOL_GPL(sunxi_gpadc_read_channel_data);
+
 static ssize_t
 sr_show(struct class *class, struct class_attribute *attr, char *buf)
 {
@@ -1375,19 +1750,44 @@ err:
 	return -EINVAL;
 }
 
+static ssize_t
+data_store(struct class *class, struct class_attribute *attr,
+		const char *buf, size_t count)
+{
+	channel_para = __parse_channel_str(buf, count);
+	if (!channel_para.pst)
+		goto err;
+
+	channel = channel_para.val;
+
+	return count;
+
+err:
+	pr_err("%s,%d err, invalid para!\n", __func__, __LINE__);
+	return -EINVAL;
+}
+
+static ssize_t
+data_show(struct class *class, struct class_attribute *attr, char *buf)
+{
+	unsigned int data;
+
+	data = sunxi_gpadc_read_channel_data(channel);
+
+	return sprintf(buf, "%d\n", data);
+}
 
 static struct class_attribute gpadc_class_attrs[] = {
 	__ATTR(status, 0644, status_show, status_store),
 	__ATTR(vol,    0644, vol_show,    vol_store),
 	__ATTR(sr,     0644, sr_show,     sr_store),
 	__ATTR(filter, 0644, filter_show, filter_store),
-	__ATTR_NULL,
+	__ATTR(data,   0644, data_show,   data_store),
 };
 
 static struct class gpadc_class = {
 	.name		= "gpadc",
 	.owner		= THIS_MODULE,
-	.class_attrs	= gpadc_class_attrs,
 };
 
 int sunxi_gpadc_probe(struct platform_device *pdev)
@@ -1408,6 +1808,13 @@ int sunxi_gpadc_probe(struct platform_device *pdev)
 
 	sunxi_gpadc->reg_base = of_iomap(np, 0);
 	if (NULL == sunxi_gpadc->reg_base) {
+		pr_err("sunxi_gpadc of_iomap fail\n");
+		ret = -EBUSY;
+		goto fail1;
+	}
+
+	vaddr = ioremap(LDOA_EFUSE_REG, 1);
+	if (!vaddr) {
 		pr_err("sunxi_gpadc iomap fail\n");
 		ret = -EBUSY;
 		goto fail1;
@@ -1419,24 +1826,31 @@ int sunxi_gpadc_probe(struct platform_device *pdev)
 		ret = -EBUSY;
 		goto fail2;
 	}
-
+#if 0
 	sunxi_gpadc->mclk = of_clk_get(np, 0);
 	if (IS_ERR_OR_NULL(sunxi_gpadc->mclk)) {
 		pr_err("sunxi_gpadc has no clk\n");
 		ret = -EINVAL;
 		goto fail3;
-	} else{
+	} else {
 		if (clk_prepare_enable(sunxi_gpadc->mclk)) {
 			pr_err("enable sunxi_gpadc clock failed!\n");
 			ret = -EINVAL;
 			goto fail3;
 		}
 	}
-
+#endif
+	sunxi_gpadc->dev = &pdev->dev;
 	sunxi_key_init(sunxi_gpadc, pdev);
 	sunxi_gpadc_setup(pdev, sunxi_gpadc);
 	sunxi_gpadc_hw_init(sunxi_gpadc);
 	sunxi_gpadc_input_register_setup(sunxi_gpadc);
+
+#ifdef USE_DATA_SCAN
+	sunxi_gpadc->interval = msecs_to_jiffies(1 * 1000);
+	INIT_DELAYED_WORK(&sunxi_gpadc->gpadc_work, push_event_status);
+	schedule_delayed_work(&sunxi_gpadc->gpadc_work, sunxi_gpadc->interval);
+#endif
 
 	platform_set_drvdata(pdev, sunxi_gpadc);
 
@@ -1447,10 +1861,12 @@ int sunxi_gpadc_probe(struct platform_device *pdev)
 	}
 
 	return 0;
-
+#if 0
 fail3:
 	free_irq(sunxi_gpadc->irq_num, sunxi_gpadc);
+#endif
 fail2:
+	iounmap(vaddr);
 	iounmap(sunxi_gpadc->reg_base);
 fail1:
 	kfree(sunxi_gpadc);
@@ -1463,9 +1879,10 @@ int sunxi_gpadc_remove(struct platform_device *pdev)
 {
 	struct sunxi_gpadc *sunxi_gpadc = platform_get_drvdata(pdev);
 
+	cancel_delayed_work_sync(&sunxi_gpadc->gpadc_work);
+
 	sunxi_gpadc_hw_exit(sunxi_gpadc);
 	free_irq(sunxi_gpadc->irq_num, sunxi_gpadc);
-	clk_disable_unprepare(sunxi_gpadc->mclk);
 	iounmap(sunxi_gpadc->reg_base);
 	kfree(sunxi_gpadc);
 
@@ -1478,9 +1895,16 @@ static int sunxi_gpadc_suspend(struct device *dev)
 	struct platform_device *pdev = to_platform_device(dev);
 	struct sunxi_gpadc *sunxi_gpadc = platform_get_drvdata(pdev);
 
+#ifdef USE_DATA_SCAN
+	schedule_delayed_work(&sunxi_gpadc->gpadc_work, 0);
+	flush_delayed_work(&sunxi_gpadc->gpadc_work);
+	cancel_delayed_work_sync(&sunxi_gpadc->gpadc_work);
+#endif
+	sunxi_gpadc_enable(sunxi_gpadc->reg_base, false);
+
 	disable_irq_nosync(sunxi_gpadc->irq_num);
-	sunxi_gpadc_hw_exit(sunxi_gpadc);
-	clk_disable_unprepare(sunxi_gpadc->mclk);
+
+	clk_disable_unprepare(sunxi_gpadc->bus_clk);
 
 	return 0;
 }
@@ -1490,9 +1914,14 @@ static int sunxi_gpadc_resume(struct device *dev)
 	struct platform_device *pdev = to_platform_device(dev);
 	struct sunxi_gpadc *sunxi_gpadc = platform_get_drvdata(pdev);
 
+#ifdef USE_DATA_SCAN
+	schedule_delayed_work(&sunxi_gpadc->gpadc_work, sunxi_gpadc->interval);
+#endif
+	clk_prepare_enable(sunxi_gpadc->bus_clk);
+
 	enable_irq(sunxi_gpadc->irq_num);
-	clk_prepare_enable(sunxi_gpadc->mclk);
-	sunxi_gpadc_hw_init(sunxi_gpadc);
+
+	sunxi_gpadc_enable(sunxi_gpadc->reg_base, true);
 
 	return 0;
 }
@@ -1507,7 +1936,7 @@ static const struct dev_pm_ops sunxi_gpadc_dev_pm_ops = {
 #define SUNXI_GPADC_DEV_PM_OPS NULL
 #endif
 
-static struct of_device_id sunxi_gpadc_of_match[] = {
+static const struct of_device_id sunxi_gpadc_of_match[] = {
 	{ .compatible = "allwinner,sunxi-gpadc"},
 	{},
 };
@@ -1528,12 +1957,25 @@ module_param_named(debug_mask, debug_mask, int, 0644);
 static int __init sunxi_gpadc_init(void)
 {
 	int ret;
+	int i;
+	int err;
 
 	ret = class_register(&gpadc_class);
 	if (ret < 0)
 		pr_err("%s,%d err, ret:%d\n", __func__, __LINE__, ret);
 	else
 		pr_info("%s,%d, success\n", __func__, __LINE__);
+
+	for (i = 0; i < ARRAY_SIZE(gpadc_class_attrs); i++) {
+		err = class_create_file(&gpadc_class, &gpadc_class_attrs[i]);
+		if (err) {
+			pr_err("%s(): class_create_file() failed. err=%d\n", __func__, err);
+			while (i--)
+				class_remove_file(&gpadc_class, &gpadc_class_attrs[i]);
+			class_unregister(&gpadc_class);
+			return err;
+		}
+	}
 
 	ret = platform_driver_register(&sunxi_gpadc_driver);
 	if (ret != 0)

@@ -1,11 +1,7 @@
+// SPDX-License-Identifier: (GPL-2.0+ or MIT)
 /*
- * Allwinner sun50iw10p1 SoCs R_PIO pinctrl driver.
- *
  * Copyright(c) 2012-2016 Allwinnertech Co., Ltd.
  * Author: huangshuosheng <huangshuosheng@allwinnertech.com>
- *
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/module.h>
@@ -13,6 +9,7 @@
 #include <linux/of.h>
 #include <linux/of_device.h>
 #include <linux/pinctrl/pinctrl.h>
+
 #include "pinctrl-sunxi.h"
 
 static const struct sunxi_desc_pin sun50iw10p1_r_pins[] = {
@@ -92,20 +89,19 @@ static const struct sunxi_desc_pin sun50iw10p1_r_pins[] = {
 		SUNXI_FUNCTION(0x7, "io_disabled")),
 };
 
-static const unsigned sun50iw10p1_r_irq_bank_base[] = {
-	SUNXI_R_PIO_BANK_BASE(PL_BASE, 0),
- };
-
 static const struct sunxi_pinctrl_desc sun50iw10p1_r_pinctrl_data = {
 	.pins = sun50iw10p1_r_pins,
 	.npins = ARRAY_SIZE(sun50iw10p1_r_pins),
-	.pin_base = PL_BASE,
+	.pin_base = SUNXI_PIN_BASE('L'),
 	.irq_banks = 1,
-	.irq_bank_base = sun50iw10p1_r_irq_bank_base,
+	.hw_type = SUNXI_PCTL_HW_TYPE_0,
 };
 
 static int sun50iw10p1_r_pinctrl_probe(struct platform_device *pdev)
 {
+#if IS_ENABLED(CONFIG_PINCTRL_SUNXI_DEBUGFS)
+	dev_set_name(&pdev->dev, "r_pio");
+#endif
 	return sunxi_pinctrl_init(pdev, &sun50iw10p1_r_pinctrl_data);
 }
 
@@ -119,20 +115,13 @@ static struct platform_driver sun50iw10p1_r_pinctrl_driver = {
 	.probe	= sun50iw10p1_r_pinctrl_probe,
 	.driver	= {
 		.name		= "sun50iw10p1-r-pinctrl",
-		.owner		= THIS_MODULE,
 		.of_match_table	= sun50iw10p1_r_pinctrl_match,
 	},
 };
 
 static int __init sun50iw10p1_r_pio_init(void)
 {
-	int ret;
-	ret = platform_driver_register(&sun50iw10p1_r_pinctrl_driver);
-	if (ret) {
-		pr_debug("register sun50i r-pio controller failed\n");
-		return -EINVAL;
-	}
-	return 0;
+	return platform_driver_register(&sun50iw10p1_r_pinctrl_driver);
 }
 postcore_initcall(sun50iw10p1_r_pio_init);
 

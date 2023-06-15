@@ -63,6 +63,14 @@
 #define DEVICE_DSI_NUM 1
 #endif /*endif DEVICE_DSI_NUM */
 
+#ifndef DEVICE_LVDS_NUM
+#if defined(CONFIG_ARCH_SUN50IW9)
+#define DEVICE_LVDS_NUM 2
+#else
+#define DEVICE_LVDS_NUM 1
+#endif
+#endif
+
 #if defined(TV_UGLY_CLK_RATE)
 #define TV_COMPOSITE_CLK_RATE 27000000
 #endif

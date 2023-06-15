@@ -612,6 +612,9 @@ struct nand_controller_info {
 	u32 random_cmd2_send_flag; //special nand cmd for some nand in batch cmd
 	u32 random_cmd2;	   //special nand cmd for some nand in batch cmd
 	u32 random_addr_num;       //random col addr num in batch cmd
+#define SMALL_CAPACITY_NAND (1 << 16)
+#define RANDOM_VALID_BITS (0xFFFF)
+	int random_factor; /*use in write boot0*/
 
 	void *nreg_base;
 	struct _nand_controller_reg nreg;

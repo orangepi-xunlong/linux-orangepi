@@ -56,7 +56,7 @@ struct xradio_scan {
 };
 
 int xradio_hw_scan(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
-		   struct cfg80211_scan_request *req);
+		   struct ieee80211_scan_request *req);
 #ifdef ROAM_OFFLOAD
 int xradio_hw_sched_scan_start(struct ieee80211_hw *hw,
 			       struct ieee80211_vif *vif,

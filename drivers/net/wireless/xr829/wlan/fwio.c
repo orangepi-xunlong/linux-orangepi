@@ -108,21 +108,12 @@ static int xradio_parse_sdd(struct xradio_common *hw_priv, u32 *dpll)
 		return ret;
 	}
 
-#ifdef USE_VFS_FIRMWARE
-	hw_priv->sdd = xr_request_file(sdd_path);
-	if (unlikely(!hw_priv->sdd)) {
-		xradio_dbg(XRADIO_DBG_ERROR, "%s: can't load sdd file %s.\n",
-			   __func__, sdd_path);
-		return -ENOENT;
-	}
-#else
 	ret = request_firmware(&hw_priv->sdd, sdd_path, hw_priv->pdev);
 	if (unlikely(ret)) {
 		xradio_dbg(XRADIO_DBG_ERROR, "%s: can't load sdd file %s.\n",
 			   __func__, sdd_path);
 		return ret;
 	}
-#endif
 
 	/*parse SDD config.*/
 	hw_priv->is_BT_Present = false;
@@ -273,11 +264,7 @@ static int xradio_firmware(struct xradio_common *hw_priv)
 	u32 put = 0, get = 0;
 	u8 *buf = NULL;
 	const char *fw_path;
-#ifdef USE_VFS_FIRMWARE
-	const struct xr_file  *firmware = NULL;
-#else
 	const struct firmware *firmware = NULL;
-#endif
 	xradio_dbg(XRADIO_DBG_TRC, "%s\n", __func__);
 
 	switch (hw_priv->hw_revision) {
@@ -309,15 +296,6 @@ static int xradio_firmware(struct xradio_common *hw_priv)
 						0, HIF_CONFIG_CPU_CLK_DIS_BIT);
 
 	/* Load a firmware file */
-#ifdef USE_VFS_FIRMWARE
-	firmware = xr_fileopen(fw_path, O_RDONLY, 0);
-	if (!firmware) {
-		xradio_dbg(XRADIO_DBG_ERROR, "%s: can't load firmware file %s.\n",
-			   __func__, fw_path);
-		ret = -1;
-		goto error;
-	}
-#else
 	ret = request_firmware(&firmware, fw_path, hw_priv->pdev);
 	if (ret) {
 		xradio_dbg(XRADIO_DBG_ERROR, "%s: can't load firmware file %s.\n",
@@ -325,7 +303,6 @@ static int xradio_firmware(struct xradio_common *hw_priv)
 		goto error;
 	}
 	SYS_BUG(!firmware->data);
-#endif
 
 	buf = xr_kmalloc(DOWNLOAD_BLOCK_SIZE, true);
 	if (!buf) {
@@ -396,16 +373,7 @@ static int xradio_firmware(struct xradio_common *hw_priv)
 		/* calculate the block size */
 		tx_size = block_size = min((size_t)(firmware->size - put),
 					   (size_t)DOWNLOAD_BLOCK_SIZE);
-#ifdef USE_VFS_FIRMWARE
-		ret = xr_fileread(firmware, buf, block_size);
-		if (ret < block_size) {
-			xradio_dbg(XRADIO_DBG_ERROR, "%s: xr_fileread error %d.\n",
-				   __func__, ret);
-			goto error;
-		}
-#else
 		memcpy(buf, &firmware->data[put], block_size);
-#endif
 		if (block_size < DOWNLOAD_BLOCK_SIZE) {
 			memset(&buf[block_size], 0, DOWNLOAD_BLOCK_SIZE - block_size);
 			tx_size = DOWNLOAD_BLOCK_SIZE;
@@ -464,11 +432,7 @@ error:
 	if (buf)
 		kfree(buf);
 	if (firmware) {
-#ifdef USE_VFS_FIRMWARE
-		xr_fileclose(firmware);
-#else
 		release_firmware(firmware);
-#endif
 	}
 	return ret;
 }
@@ -480,22 +444,9 @@ static int xradio_bootloader(struct xradio_common *hw_priv)
 	const char *bl_path = XR829_BOOTLOADER;
 	u32 addr = AHB_MEMORY_ADDRESS;
 	u32 *data = NULL;
-#ifdef USE_VFS_FIRMWARE
-	const struct xr_file *bootloader = NULL;
-#else
 	const struct firmware *bootloader = NULL;
-#endif
 	xradio_dbg(XRADIO_DBG_TRC, "%s\n", __func__);
 
-#ifdef USE_VFS_FIRMWARE
-	bootloader = xr_request_file(bl_path);
-	if (!bootloader) {
-		xradio_dbg(XRADIO_DBG_ERROR,
-			   "%s: can't load bootloader file %s.\n",
-			   __func__, bl_path);
-		goto error;
-	}
-#else
 	/* Load a bootloader file */
 	ret = request_firmware(&bootloader, bl_path, hw_priv->pdev);
 	if (ret) {
@@ -504,7 +455,6 @@ static int xradio_bootloader(struct xradio_common *hw_priv)
 			   __func__, bl_path);
 		goto error;
 	}
-#endif
 
 	xradio_dbg(XRADIO_DBG_NIY, "%s: bootloader size = %zu, loopcount = %zu\n",
 		   __func__, bootloader->size, (bootloader->size) / 4);
@@ -525,11 +475,7 @@ static int xradio_bootloader(struct xradio_common *hw_priv)
 
 error:
 	if (bootloader) {
-#ifdef USE_VFS_FIRMWARE
-		xr_fileclose(bootloader);
-#else
 		release_firmware(bootloader);
-#endif
 	}
 	return ret;
 }
@@ -545,7 +491,7 @@ int HIF_R_W_TEST(struct xradio_common *hw_priv)
 {
 	int time;
 	int i;
-	struct timeval start;
+	struct timeval start;   //linux5.4 commit 33e26418193f58d1895f2f968e1953b1caf8deb7
 	struct timeval end;
 	unsigned int addr;
 	char *write_buf;
@@ -559,7 +505,7 @@ int HIF_R_W_TEST(struct xradio_common *hw_priv)
 		return 0xff;
 	}
 
-	do_gettimeofday(&start);
+	xr_do_gettimeofday(&start);
 	printk(KERN_ERR"[HIF test] --- <write> --- begin~~\n");
 	addr = PAS_RAM_START_ADDR;
 	memset(write_buf, hif_test_data_mode, hif_test_data_len * 4);
@@ -594,7 +540,7 @@ int HIF_R_W_TEST(struct xradio_common *hw_priv)
 	}
 
 	printk(KERN_ERR"[HIF test] --- <read> --- end~~\n");
-	do_gettimeofday(&end);
+	xr_do_gettimeofday(&end);
 	time = 1000 * (end.tv_sec - start.tv_sec) + (end.tv_usec - start.tv_usec) / 1000;
 	kfree(write_buf);
 	kfree(read_buf);
@@ -611,15 +557,15 @@ int xradio_load_firmware(struct xradio_common *hw_priv)
 {
 	int ret;
 	int i;
-	u32 val32;
-	u16 val16;
+	u32 val32 = 0;
+	u16 val16 = 0;
 	u32 dpll = 0;
 	int major_revision;
+
 	xradio_dbg(XRADIO_DBG_TRC, "%s\n", __func__);
-
 	SYS_BUG(!hw_priv);
-
 	/* Read CONFIG Register Value - We will read 32 bits */
+
 	ret = xradio_reg_read_32(hw_priv, HIF_CONFIG_REG_ID, &val32);
 	if (ret < 0) {
 		xradio_dbg(XRADIO_DBG_ERROR,
@@ -627,6 +573,7 @@ int xradio_load_firmware(struct xradio_common *hw_priv)
 			   __func__, ret);
 		return ret;
 	}
+
 	/*check hardware type and revision.*/
 	hw_priv->hw_type = xradio_get_hw_type(val32, &major_revision);
 	switch (hw_priv->hw_type) {
@@ -815,11 +762,7 @@ unsubscribe:
 	hw_priv->sbus_ops->irq_unsubscribe(hw_priv->sbus_priv);
 out:
 	if (hw_priv->sdd) {
-#ifdef USE_VFS_FIRMWARE
-		xr_fileclose(hw_priv->sdd);
-#else
 		release_firmware(hw_priv->sdd);
-#endif
 		hw_priv->sdd = NULL;
 	}
 	return ret;
@@ -829,11 +772,7 @@ int xradio_dev_deinit(struct xradio_common *hw_priv)
 {
 	hw_priv->sbus_ops->irq_unsubscribe(hw_priv->sbus_priv);
 	if (hw_priv->sdd) {
-#ifdef USE_VFS_FIRMWARE
-		xr_fileclose(hw_priv->sdd);
-#else
 		release_firmware(hw_priv->sdd);
-#endif
 		hw_priv->sdd = NULL;
 	}
 	return 0;

@@ -38,6 +38,7 @@ struct fmt_cvt_node {
 */
 
 struct fmt_convert_manager {
+	bool			enable_flag;
 	unsigned int		sel;
 	unsigned int		irq_num;
 	unsigned int		wb_finish;
@@ -45,6 +46,10 @@ struct fmt_convert_manager {
 	unsigned int		gray_level_cnt;
 	wait_queue_head_t	write_back_queue;
 	struct clk		*clk;
+	struct clk		*bus_clk;
+	struct reset_control	*rst_clk;
+	struct timespec		stimer;
+	struct timespec		etimer;
 	int (*enable)(unsigned int id);
 	int (*disable)(unsigned int id);
 	enum upd_mode (*fmt_auto_mode_select)(struct fmt_convert_manager *mgr,

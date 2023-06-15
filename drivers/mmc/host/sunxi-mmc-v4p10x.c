@@ -15,7 +15,7 @@
 */
 
 #include <linux/clk.h>
-#include <linux/clk/sunxi.h>
+#include <linux/reset.h>
 
 #include <linux/gpio.h>
 #include <linux/platform_device.h>
@@ -469,12 +469,44 @@ static int sunxi_mmc_judge_retry_v4p10x(
 
 static bool sunxi_mmc_hw_busy_v4p10x(struct sunxi_mmc_host *host)
 {
-	/**only use for sdc1,because sdc1 used for wifi(*/
-	if (host->phy_index == 1)
+	/**if use v4p10x sdmc, all use dat0-gpio check card busy status*/
+	if (host->sunxi_mmc_dat0_busy)
 		return true;
-	else
-		return false;
 
+	return false;
+}
+
+static int sunxi_mmc_dat0_busy_v4p10x(struct sunxi_mmc_host *host)
+{
+	struct device_node *np;
+	struct mmc_host *mmc = host->mmc;
+	unsigned long config_set;
+	unsigned long config_get = 0;
+	struct gpio_config gpio_flags;
+	int gpio;
+
+	if (!mmc->parent || !mmc->parent->of_node)
+		return 0;
+
+	np = mmc->parent->of_node;
+	gpio = of_get_named_gpio_flags(np, "dat0-gpios", 0,
+					(enum of_gpio_flags *)&gpio_flags);
+	if (!gpio_is_valid(gpio))
+		pr_err("mmc:failed to get dat0-gpios\n");
+	else {
+		/***********change gpio func to input*************/
+		config_set = pinconf_to_config_packed((enum pin_config_param)SUNXI_PINCFG_TYPE_FUNC, 0);
+		pinctrl_gpio_set_config(gpio, config_set);
+
+		/***********get sdcx_dat0 value*************/
+		config_get = gpio_get_value(gpio);
+
+		/***********change gpio func to sdcx_dat0*************/
+		config_set = pinconf_to_config_packed((enum pin_config_param)SUNXI_PINCFG_TYPE_FUNC, 3);
+		pinctrl_gpio_set_config(gpio, config_set);
+	}
+
+	return (!config_get);
 }
 
 void sunxi_mmc_init_priv_v4p10x(struct sunxi_mmc_host *host,
@@ -540,6 +572,7 @@ void sunxi_mmc_init_priv_v4p10x(struct sunxi_mmc_host *host,
 	host->sunxi_mmc_judge_retry = sunxi_mmc_judge_retry_v4p10x;
 	host->sunxi_mmc_updata_pha = sunxi_mmc_updata_pha_v4p10x;
 	host->sunxi_mmc_hw_busy = sunxi_mmc_hw_busy_v4p10x;
+	host->sunxi_mmc_dat0_busy = sunxi_mmc_dat0_busy_v4p10x;
 	/*sunxi_of_parse_clk_dly(host);*/
 }
 EXPORT_SYMBOL_GPL(sunxi_mmc_init_priv_v4p10x);

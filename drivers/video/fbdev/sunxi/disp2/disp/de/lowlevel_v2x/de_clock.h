@@ -41,7 +41,7 @@ struct de_clk_para {
 extern s32 de_clk_enable(u32 clk_no);
 extern s32 de_clk_disable(u32 clk_no);
 extern s32 de_clk_set_reg_base(uintptr_t reg_base);
-#if defined(CONFIG_ARCH_SUN50IW10)
+#if defined(CONFIG_INDEPENDENT_DE)
 extern s32 de1_clk_set_reg_base(uintptr_t reg_base);
 #endif
 #endif

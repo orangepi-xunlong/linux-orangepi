@@ -1,22 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Squashfs - a compressed read only filesystem for Linux
  *
  * Copyright (c) 2002, 2003, 2004, 2005, 2006, 2007, 2008, 2009
  * Phillip Lougher <phillip@squashfs.org.uk>
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2,
- * or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  *
  * decompressor.c
  */
@@ -24,8 +11,7 @@
 #include <linux/types.h>
 #include <linux/mutex.h>
 #include <linux/slab.h>
-#include <linux/highmem.h>
-#include <linux/fs.h>
+#include <linux/buffer_head.h>
 
 #include "squashfs_fs.h"
 #include "squashfs_fs_sb.h"
@@ -66,6 +52,12 @@ static const struct squashfs_decompressor squashfs_zlib_comp_ops = {
 };
 #endif
 
+#ifndef CONFIG_SQUASHFS_ZSTD
+static const struct squashfs_decompressor squashfs_zstd_comp_ops = {
+	NULL, NULL, NULL, NULL, ZSTD_COMPRESSION, "zstd", 0
+};
+#endif
+
 static const struct squashfs_decompressor squashfs_unknown_comp_ops = {
 	NULL, NULL, NULL, NULL, 0, "unknown", 0
 };
@@ -76,6 +68,7 @@ static const struct squashfs_decompressor *decompressor[] = {
 	&squashfs_lzo_comp_ops,
 	&squashfs_xz_comp_ops,
 	&squashfs_lzma_unsupported_comp_ops,
+	&squashfs_zstd_comp_ops,
 	&squashfs_unknown_comp_ops
 };
 
@@ -95,44 +88,40 @@ const struct squashfs_decompressor *squashfs_lookup_decompressor(int id)
 static void *get_comp_opts(struct super_block *sb, unsigned short flags)
 {
 	struct squashfs_sb_info *msblk = sb->s_fs_info;
-	void *comp_opts, *buffer = NULL;
-	struct page *page;
+	void *buffer = NULL, *comp_opts;
 	struct squashfs_page_actor *actor = NULL;
 	int length = 0;
-
-	if (!SQUASHFS_COMP_OPTS(flags))
-		return squashfs_comp_opts(msblk, buffer, length);
 
 	/*
 	 * Read decompressor specific options from file system if present
 	 */
+	if (SQUASHFS_COMP_OPTS(flags)) {
+		buffer = kmalloc(PAGE_SIZE, GFP_KERNEL);
+		if (buffer == NULL) {
+			comp_opts = ERR_PTR(-ENOMEM);
+			goto out;
+		}
 
-	page = alloc_page(GFP_KERNEL);
-	if (!page)
-		return ERR_PTR(-ENOMEM);
+		actor = squashfs_page_actor_init(&buffer, 1, 0);
+		if (actor == NULL) {
+			comp_opts = ERR_PTR(-ENOMEM);
+			goto out;
+		}
 
-	actor = squashfs_page_actor_init(&page, 1, 0, NULL);
-	if (actor == NULL) {
-		comp_opts = ERR_PTR(-ENOMEM);
-		goto actor_error;
+		length = squashfs_read_data(sb,
+			sizeof(struct squashfs_super_block), 0, NULL, actor);
+
+		if (length < 0) {
+			comp_opts = ERR_PTR(length);
+			goto out;
+		}
 	}
 
-	length = squashfs_read_data(sb,
-		sizeof(struct squashfs_super_block), 0, NULL, actor);
-
-	if (length < 0) {
-		comp_opts = ERR_PTR(length);
-		goto read_error;
-	}
-
-	buffer = kmap_atomic(page);
 	comp_opts = squashfs_comp_opts(msblk, buffer, length);
-	kunmap_atomic(buffer);
 
-read_error:
-	squashfs_page_actor_free(actor, 0);
-actor_error:
-	__free_page(page);
+out:
+	kfree(actor);
+	kfree(buffer);
 	return comp_opts;
 }
 

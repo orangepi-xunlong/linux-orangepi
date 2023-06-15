@@ -21,6 +21,17 @@
 #include <linux/dma-mapping.h>
 
 
+#if 1
+typedef struct sunxi_udc_dma {
+	char name[32];
+	int is_start;
+#ifdef SW_UDC_DMA_INNER
+	int *dma_hdle; /* dma channel handle */
+#else
+	struct dma_chan *chan;
+#endif
+} sunxi_udc_dma_t;
+
 typedef struct sunxi_udc_ep {
 	struct list_head	queue;
 	unsigned long		last_io; /* jiffies timestamp */
@@ -38,6 +49,11 @@ typedef struct sunxi_udc_ep {
 	unsigned		already_seen : 1;
 	unsigned		setup_stage : 1;
 
+#ifdef SW_UDC_DMA_INNER
+	int				*dma_hdle;
+#else
+	sunxi_udc_dma_t			sunxi_udc_dma[6];
+#endif
 	__u32			dma_working; /* flag. is dma busy? */
 	__u32			dma_transfer_len; /* dma want transfer length */
 } sunxi_udc_ep_t;
@@ -85,7 +101,9 @@ struct sw_udc_fifo {
 };
 
 #if defined(CONFIG_ARCH_SUN50IW1) || defined(CONFIG_ARCH_SUN50IW3) \
-	|| defined(CONFIG_ARCH_SUN8IW6) || defined(CONFIG_ARCH_SUN8IW15)
+	|| defined(CONFIG_ARCH_SUN8IW6) || defined(CONFIG_ARCH_SUN8IW15) \
+	|| defined(CONFIG_ARCH_SUN50IW10) || defined(CONFIG_ARCH_SUN50IW9) \
+	|| defined(CONFIG_ARCH_SUN8IW20) || defined(CONFIG_ARCH_SUN20IW1)
 /**
  * fifo 8k
  *
@@ -177,17 +195,6 @@ enum ep0_state {
 	EP0_STALL,
 };
 
-#if 1
-typedef struct sunxi_udc_dma {
-	char name[32];
-	int is_start;
-#ifdef SW_UDC_DMA_INNER
-	int *dma_hdle; /* dma channel handle */
-#else
-	struct dma_chan *chan;
-#endif
-} sunxi_udc_dma_t;
-
 typedef struct sunxi_udc_dma_parg {
 	struct sunxi_udc *dev;
 	struct sunxi_udc_ep *ep[6];
@@ -212,9 +219,19 @@ typedef struct sunxi_udc_io {
 	__hdle usb_bsp_hdle;			/* usb bsp handle */
 
 	__u32 clk_is_open;			/* is usb clock open? */
-	struct clk	*ahb_otg;		/* ahb clock handle */
-	struct clk	*mod_usbotg;		/* mod_usb otg clock handle */
-	struct clk	*mod_usbphy;		/* PHY0 clock handle */
+	struct clk	*clk_bus_otg;
+	struct clk	*clk_phy;
+
+	struct reset_control	*reset_otg;
+	struct reset_control	*reset_phy;
+
+#if defined(CONFIG_ARCH_SUN50IW10)
+/* for keep common circuit configuration */
+	void __iomem	*usb_common_phy_config;
+
+#define SUNXI_HCI_PHY_CTRL		0x810
+#define SUNXI_HCI_PHY_CTRL_SIDDQ	3
+#endif
 } sunxi_udc_io_t;
 
 typedef struct sunxi_udc {
@@ -244,15 +261,14 @@ typedef struct sunxi_udc {
 	sunxi_udc_io_t			*sunxi_udc_io;
 	char				driver_name[32];
 	__u32				usbc_no; /* controller port index */
-#ifdef SW_UDC_DMA_INNER
-	int				*dma_hdle;
-#else
-	sunxi_udc_dma_t			sunxi_udc_dma[6];
-#endif
+
 	u32				stopped; /* controller stop work */
 	u32				irq_no;	/* usb irq no */
 
 	struct work_struct		vbus_det_work;
+	struct work_struct		set_cur_vol_work;
+
+	struct wakeup_source		*ws;
 } sunxi_udc_t;
 
 enum sunxi_udc_cmd_e {

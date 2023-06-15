@@ -59,6 +59,7 @@ static void sprdwl_do_work(struct work_struct *work)
 	struct sprdwl_tdls_work *tdls;
 	struct sprdwl_assert_info *assert_info;
 	struct sprdwl_vif *vif;
+	struct sprdwl_ba_event_data *ba_data;
 	struct sprdwl_priv *priv = container_of(work, struct sprdwl_priv, work);
 
 	while (1) {
@@ -67,8 +68,9 @@ static void sprdwl_do_work(struct work_struct *work)
 			return;
 
 		vif = sprdwl_work->vif;
-		wl_ndev_log(L_DBG, vif->ndev, "process delayed work: %d\n",
-			   sprdwl_work->id);
+		if (vif)
+			wl_ndev_log(L_DBG, vif->ndev, "process delayed work: %d\n",
+				sprdwl_work->id);
 
 		switch (sprdwl_work->id) {
 		case SPRDWL_WORK_REG_MGMT:
@@ -95,9 +97,12 @@ static void sprdwl_do_work(struct work_struct *work)
 					 sprdwl_work->data);
 			break;
 		case SPRDWL_WORK_BA_MGMT:
+			ba_data = (struct sprdwl_ba_event_data *)sprdwl_work->data;
 			sprdwl_send_ba_mgmt(priv, vif->ctx_id,
-					    sprdwl_work->data,
-					    sprdwl_work->len);
+					    &ba_data->addba_rsp,
+					    sizeof(ba_data->addba_rsp));
+			sprdwl_active_ba_node(ba_data->ba_entry, ba_data->sta_lut_index,
+					      ba_data->addba_rsp.tid);
 			break;
 		case SPRDWL_WORK_ADDBA:
 			sprdwl_tx_send_addba(vif, sprdwl_work->data,

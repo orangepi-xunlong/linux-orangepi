@@ -26,6 +26,8 @@
 #include <linux/sunxi-sid.h>
 
 #define SUNXI_CHIP_NAME	"ACX00-CHIP"
+#define SUNXI_AC300_KEY	(0x1 << 8)
+
 static unsigned int twi_id;
 atomic_t acx00_en;
 
@@ -358,6 +360,14 @@ static int acx00_i2c_remove(struct i2c_client *i2c)
 
 	return 0;
 }
+
+static void acx00_i2c_shutdown(struct i2c_client *i2c)
+{
+	struct acx00 *acx00 = i2c_get_clientdata(i2c);
+
+	acx00_reg_write(acx00, 0x0002, 0x00);
+}
+
 static int acx00_i2c_suspend(struct device *dev)
 {
 	struct acx00 *acx00 = dev_get_drvdata(dev);
@@ -452,6 +462,7 @@ static struct i2c_driver acx00_i2c_driver = {
 	.id_table = acx00_id,
 	.probe = acx00_i2c_probe,
 	.remove = acx00_i2c_remove,
+	.shutdown = acx00_i2c_shutdown,
 	.driver = {
 		.owner = THIS_MODULE,
 		.name = "ACX00-CHIP",
@@ -512,6 +523,14 @@ static int __init acx00_i2c_init(void)
 	int ret = 0;
 	int value;
 	int ac200_used = 0;
+	u32 emac_ephy = 0;
+
+#if defined(CONFIG_ARCH_SUN50IW9)
+
+	ret = sunxi_efuse_readn(EFUSE_OEM_NAME, (void *)&emac_ephy, sizeof(emac_ephy));
+	if (ret)
+		pr_warn("can not read emac ephy!\n");
+#endif
 
 	ret = sys_script_get_item(key_name, "tv_used", &value, 1);
 	if (ret == 1)
@@ -522,7 +541,11 @@ static int __init acx00_i2c_init(void)
 				&value, 1);
 		if (ret == 1)
 			tv_twi_used = value;
-		if (tv_twi_used == 1) {
+
+		/* to be verified */
+		if (emac_ephy & SUNXI_AC300_KEY) {
+			pr_warn("it's ac300, skip the ac200 init!\n");
+		} else if (tv_twi_used == 1) {
 			ret = sys_script_get_item(key_name, "tv_twi_id",
 					&value, 1);
 			twi_id = (ret == 1) ? value : twi_id;
@@ -536,6 +559,7 @@ static int __init acx00_i2c_init(void)
 				    "Failed to register acx00 I2C driver: %d\n",
 				    ret);
 		}
+
 		ret = sys_script_get_item(key_name, "tv_regulator_name",
 					  (int *)&ave_regulator_name, 2);
 		if (ret == 2) {
@@ -575,7 +599,7 @@ static int __init acx00_i2c_init(void)
 
 	return ret;
 }
-subsys_initcall_sync(acx00_i2c_init);
+late_initcall_sync(acx00_i2c_init);
 
 static void __exit acx00_i2c_exit(void)
 {
@@ -585,4 +609,5 @@ module_exit(acx00_i2c_exit);
 
 MODULE_DESCRIPTION("Core support for the ACX00X00 audio CODEC");
 MODULE_LICENSE("GPL");
+MODULE_VERSION("1.0.0");
 MODULE_AUTHOR("huangxin<huangxin@allwinnertech.com>");

@@ -1,15 +1,6 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (c) 2015, Linaro Limited
- *
- * This software is licensed under the terms of the GNU General Public
- * License version 2, as published by the Free Software Foundation, and
- * may be copied, distributed, and modified under those terms.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
  */
 #ifndef __LINUX_ARM_SMCCC_H
 #define __LINUX_ARM_SMCCC_H
@@ -84,6 +75,8 @@
 	ARM_SMCCC_CALL_VAL(ARM_SMCCC_FAST_CALL,				\
 			   ARM_SMCCC_SMC_32,				\
 			   0, 0x7fff)
+
+#define SMCCC_ARCH_WORKAROUND_RET_UNAFFECTED	1
 
 #ifndef __ASSEMBLY__
 
@@ -160,7 +153,6 @@ asmlinkage void __arm_smccc_hvc(unsigned long a0, unsigned long a1,
 
 #define SMCCC_SMC_INST	"smc	#0"
 #define SMCCC_HVC_INST	"hvc	#0"
-#define SMCCC_REG(n)	asm("x" # n)
 
 #elif defined(CONFIG_ARM)
 #include <asm/opcodes-sec.h>
@@ -168,7 +160,6 @@ asmlinkage void __arm_smccc_hvc(unsigned long a0, unsigned long a1,
 
 #define SMCCC_SMC_INST	__SMC(0)
 #define SMCCC_HVC_INST	__HVC(0)
-#define SMCCC_REG(n)	asm("r" # n)
 
 #endif
 
@@ -201,57 +192,57 @@ asmlinkage void __arm_smccc_hvc(unsigned long a0, unsigned long a1,
 
 #define __declare_arg_0(a0, res)					\
 	struct arm_smccc_res   *___res = res;				\
-	register unsigned long r0 SMCCC_REG(0) = (u32)a0;		\
-	register unsigned long r1 SMCCC_REG(1);				\
-	register unsigned long r2 SMCCC_REG(2);				\
-	register unsigned long r3 SMCCC_REG(3)
+	register unsigned long r0 asm("r0") = (u32)a0;			\
+	register unsigned long r1 asm("r1");				\
+	register unsigned long r2 asm("r2");				\
+	register unsigned long r3 asm("r3")
 
 #define __declare_arg_1(a0, a1, res)					\
 	typeof(a1) __a1 = a1;						\
 	struct arm_smccc_res   *___res = res;				\
-	register unsigned long r0 SMCCC_REG(0) = (u32)a0;		\
-	register unsigned long r1 SMCCC_REG(1) = __a1;			\
-	register unsigned long r2 SMCCC_REG(2);				\
-	register unsigned long r3 SMCCC_REG(3)
+	register unsigned long r0 asm("r0") = (u32)a0;			\
+	register unsigned long r1 asm("r1") = __a1;			\
+	register unsigned long r2 asm("r2");				\
+	register unsigned long r3 asm("r3")
 
 #define __declare_arg_2(a0, a1, a2, res)				\
 	typeof(a1) __a1 = a1;						\
 	typeof(a2) __a2 = a2;						\
 	struct arm_smccc_res   *___res = res;				\
-	register unsigned long r0 SMCCC_REG(0) = (u32)a0;		\
-	register unsigned long r1 SMCCC_REG(1) = __a1;			\
-	register unsigned long r2 SMCCC_REG(2) = __a2;			\
-	register unsigned long r3 SMCCC_REG(3)
+	register unsigned long r0 asm("r0") = (u32)a0;			\
+	register unsigned long r1 asm("r1") = __a1;			\
+	register unsigned long r2 asm("r2") = __a2;			\
+	register unsigned long r3 asm("r3")
 
 #define __declare_arg_3(a0, a1, a2, a3, res)				\
 	typeof(a1) __a1 = a1;						\
 	typeof(a2) __a2 = a2;						\
 	typeof(a3) __a3 = a3;						\
 	struct arm_smccc_res   *___res = res;				\
-	register unsigned long r0 SMCCC_REG(0) = (u32)a0;		\
-	register unsigned long r1 SMCCC_REG(1) = __a1;			\
-	register unsigned long r2 SMCCC_REG(2) = __a2;			\
-	register unsigned long r3 SMCCC_REG(3) = __a3
+	register unsigned long r0 asm("r0") = (u32)a0;			\
+	register unsigned long r1 asm("r1") = __a1;			\
+	register unsigned long r2 asm("r2") = __a2;			\
+	register unsigned long r3 asm("r3") = __a3
 
 #define __declare_arg_4(a0, a1, a2, a3, a4, res)			\
 	typeof(a4) __a4 = a4;						\
 	__declare_arg_3(a0, a1, a2, a3, res);				\
-	register unsigned long r4 SMCCC_REG(4) = __a4
+	register unsigned long r4 asm("r4") = __a4
 
 #define __declare_arg_5(a0, a1, a2, a3, a4, a5, res)			\
 	typeof(a5) __a5 = a5;						\
 	__declare_arg_4(a0, a1, a2, a3, a4, res);			\
-	register unsigned long r5 SMCCC_REG(5) = __a5
+	register unsigned long r5 asm("r5") = __a5
 
 #define __declare_arg_6(a0, a1, a2, a3, a4, a5, a6, res)		\
 	typeof(a6) __a6 = a6;						\
 	__declare_arg_5(a0, a1, a2, a3, a4, a5, res);			\
-	register unsigned long r6 SMCCC_REG(6) = __a6
+	register unsigned long r6 asm("r6") = __a6
 
 #define __declare_arg_7(a0, a1, a2, a3, a4, a5, a6, a7, res)		\
 	typeof(a7) __a7 = a7;						\
 	__declare_arg_6(a0, a1, a2, a3, a4, a5, a6, res);		\
-	register unsigned long r7 SMCCC_REG(7) = __a7
+	register unsigned long r7 asm("r7") = __a7
 
 #define ___declare_args(count, ...) __declare_arg_ ## count(__VA_ARGS__)
 #define __declare_args(count, ...)  ___declare_args(count, __VA_ARGS__)

@@ -1,5 +1,4 @@
-/*
- * Allwinner SoCs display driver.
+/* Allwinner SoCs display driver.
  *
  * Copyright (C) 2016 Allwinner.
  *
@@ -11,13 +10,25 @@
 #include "dev_disp.h"
 #include <linux/module.h>
 #include <linux/kernel.h>
+#include <linux/version.h>
 #include <linux/fb.h>
 #include <linux/memblock.h>
 #if defined(SUPPORT_EDP)
 #include "de/disp_edp.h"
 #endif /*endif defined(SUPPORT_EDP) */
-#include <linux/ion_sunxi.h>
+#include "fb_g2d_rot.h"
+#include <linux/decompress/unlzma.h>
 #include <linux/dma-buf.h>
+#include <linux/dma-mapping.h>
+
+#ifndef dma_mmap_writecombine
+#define dma_mmap_writecombine dma_mmap_wc
+#endif
+
+#if defined(CONFIG_SUNXI_DISP2_FB_ROTATION_SUPPORT) ||                         \
+    defined(CONFIG_SUNXI_DISP2_FB_HW_ROTATION_SUPPORT)
+#define SUPPORT_ROTATE
+#endif
 
 #define VSYNC_NUM 4
 #define SUNXI_FB_MAX 1
@@ -32,12 +43,7 @@ struct fb_info_t {
 	u32 pseudo_palette[SUNXI_FB_MAX][16];
 	wait_queue_head_t wait[3];
 	unsigned long wait_count[3];
-	struct task_struct *vsync_task[3];
-	spinlock_t slock[DISP_SCREEN_NUM];
-	int vsync_cur_line[DISP_SCREEN_NUM][VSYNC_NUM];
-	ktime_t vsync_timestamp[DISP_SCREEN_NUM][VSYNC_NUM];
-	u32 vsync_timestamp_head[DISP_SCREEN_NUM];
-	u32 vsync_timestamp_tail[DISP_SCREEN_NUM];
+	struct fb_g2d_rot_t *fb_rot[FB_MAX];
 	int mem_cache_flag[SUNXI_FB_MAX];
 
 	int blank[3];
@@ -67,73 +73,6 @@ s32 sunxi_get_fb_addr_para(struct __fb_addr_para *fb_addr_para)
 EXPORT_SYMBOL(sunxi_get_fb_addr_para);
 
 #define sys_put_wvalue(addr, data) writel(data, (void __iomem *)addr)
-s32 fb_draw_colorbar(char *base, u32 width, u32 height,
-		     struct fb_var_screeninfo *var)
-{
-	u32 i = 0, j = 0;
-	u32 color, a, r, g, b;
-
-	if (!base)
-		return -1;
-
-	/*do not draw colorbar when boot sync*/
-	if (g_disp_drv.para.boot_info.sync == 1)
-		return 0;
-
-	a = ((1 << var->transp.length) - 1)
-	    << var->transp.offset;
-	r = ((1 << var->red.length) - 1)
-	    << var->red.offset;
-	g = ((1 << var->green.length) - 1)
-	    << var->green.offset;
-	b = ((1 << var->blue.length) - 1)
-	    << var->blue.offset;
-
-	for (i = 0; i < height; i++) {
-		for (j = 0; j < width / 4; j++) {
-			u32 offset = 0;
-
-			if (var->bits_per_pixel == 32) {
-				offset = width * i + j;
-				color = a | r;
-				sys_put_wvalue(base + offset * 4, color);
-
-				offset = width * i + j + width / 4;
-				color = a | g;
-				sys_put_wvalue(base + offset * 4, color);
-
-				offset = width * i + j + width / 4 * 2;
-				color = a | b;
-				sys_put_wvalue(base + offset * 4, color);
-
-				offset = width * i + j + width / 4 * 3;
-				color = a | r | g;
-				sys_put_wvalue(base + offset * 4, color);
-			}
-#if 0
-			else if (var->bits_per_pixel == 16) {
-				offset = width * i + j;
-				color = a | r;
-				sys_put_hvalue(base + offset * 2, color);
-
-				offset = width * i + j + width / 4;
-				color = a | g;
-				sys_put_hvalue(base + offset * 2, color);
-
-				offset = width * i + j + width / 4 * 2;
-				color = a | b;
-				sys_put_hvalue(base + offset * 2, color);
-
-				offset = width * i + j + width / 4 * 3;
-				color = a | r | g;
-				sys_put_hvalue(base + offset * 2, color);
-			}
-#endif
-		}
-	}
-
-	return 0;
-}
 
 s32 fb_draw_gray_pictures(char *base, u32 width, u32 height,
 			  struct fb_var_screeninfo *var)
@@ -159,7 +98,7 @@ s32 fb_draw_gray_pictures(char *base, u32 width, u32 height,
 
 static int fb_map_video_memory(struct fb_info *info)
 {
-#if defined(CONFIG_ION_SUNXI)
+#if defined(CONFIG_ION)
 	g_fbi.mem[info->node] =
 	    disp_ion_malloc(info->fix.smem_len, (u32 *)(&info->fix.smem_start));
 	if (g_fbi.mem[info->node])
@@ -169,7 +108,6 @@ static int fb_map_video_memory(struct fb_info *info)
 	    (char __iomem *)disp_malloc(info->fix.smem_len,
 					(u32 *) (&info->fix.smem_start));
 #endif
-
 	if (info->screen_base) {
 		__inf("%s(reserve),va=0x%p, pa=0x%p size:0x%x\n", __func__,
 		      (void *)info->screen_base,
@@ -199,8 +137,7 @@ static inline void fb_unmap_video_memory(struct fb_info *info)
 	__inf("%s: screen_base=0x%p, smem=0x%p, len=0x%x\n", __func__,
 	      (void *)info->screen_base,
 	      (void *)info->fix.smem_start, info->fix.smem_len);
-
-#if defined(CONFIG_ION_SUNXI)
+#if defined(CONFIG_ION)
 	disp_ion_free((void *__force)info->screen_base,
 		  (void *)info->fix.smem_start, info->fix.smem_len);
 #else
@@ -635,6 +572,27 @@ static s32 var_to_disp_fb(struct disp_fb_info *fb,
 
 static int sunxi_fb_open(struct fb_info *info, int user)
 {
+	u32 num_screens;
+	u32 sel = 0;
+
+	num_screens = bsp_disp_feat_get_num_screens();
+	for (sel = 0; sel < num_screens; sel++) {
+		if (sel == g_fbi.fb_mode[info->node]) {
+			struct disp_manager *mgr = g_disp_drv.mgr[sel];
+
+			if (mgr && mgr->device) {
+				if (mgr->device->is_enabled) {
+					if (!mgr->device->is_enabled(mgr->device)) {
+						if (mgr->device->enable)
+							mgr->device->enable(mgr->device);
+						mgr->set_layer_config(mgr, &g_fbi.config[sel],
+								      1);
+						disp_delay_ms(20);
+					}
+				}
+			}
+		}
+	}
 	return 0;
 }
 static int sunxi_fb_release(struct fb_info *info, int user)
@@ -685,17 +643,24 @@ static int sunxi_fb_pan_display(struct fb_var_screeninfo *var,
 {
 	u32 sel = 0;
 	u32 num_screens;
+#if defined(CONFIG_SUNXI_DISP2_FB_ROTATION_SUPPORT)
+	s32 type_switch_flag = 0;
+	u32 y_offset = var->yoffset;
+#endif
+	int need_wait_vsync = 1;
 
 	num_screens = bsp_disp_feat_get_num_screens();
 
 	for (sel = 0; sel < num_screens; sel++) {
 		if (sel == g_fbi.fb_mode[info->node]) {
 			u32 buffer_num = 1;
-			u32 y_offset = 0;
 			s32 chan = g_fbi.layer_hdl[info->node][0];
 			s32 layer_id = g_fbi.layer_hdl[info->node][1];
 			struct disp_layer_config config;
 			struct disp_manager *mgr = g_disp_drv.mgr[sel];
+#if defined(CONFIG_SUNXI_DISP2_FB_ROTATION_SUPPORT)
+			struct disp_rect dirty_rect;
+#endif
 
 			memset(&config, 0, sizeof(struct disp_layer_config));
 			if (mgr && mgr->get_layer_config
@@ -709,28 +674,86 @@ static int sunxi_fb_pan_display(struct fb_var_screeninfo *var,
 					     info->node, sel, chan, layer_id);
 					return -1;
 				}
+
+#if defined(CONFIG_SUNXI_DISP2_FB_ROTATION_SUPPORT)
+				if (mgr->rot_sw) {
+					if (0 != var->reserved[2] &&
+					    0 != var->reserved[3]) {
+						dirty_rect.x = var->reserved[0];
+						dirty_rect.y = var->reserved[1];
+						dirty_rect.width =
+						    var->reserved[2];
+						dirty_rect.height =
+						    var->reserved[3];
+					} else {
+						dirty_rect.x = 0;
+						dirty_rect.y = 0;
+						dirty_rect.width = 0;
+						dirty_rect.height = 0;
+						return 0;
+					}
+
+					if (mgr->rot_sw->checkout) {
+						type_switch_flag =
+						    mgr->rot_sw->checkout(
+							mgr->rot_sw, &config);
+						if (type_switch_flag == 1) {
+							dirty_rect.x = 0;
+							dirty_rect.y = 0;
+							dirty_rect.width =
+							    config.info.fb
+								.size[0]
+								.width;
+							dirty_rect.height =
+							    config.info.fb
+								.size[0]
+								.height;
+						}
+					}
+				}
+#endif
 				config.info.fb.crop.x =
 				    ((long long)var->xoffset) << 32;
 				config.info.fb.crop.y =
-				    ((unsigned long long)(var->yoffset +
-							  y_offset)) << 32;
+				    ((unsigned long long)(var->yoffset)) << 32;
 				config.info.fb.crop.width =
 				    ((long long)var->xres) << 32;
 				config.info.fb.crop.height =
 				    ((long long)(var->yres / buffer_num)) << 32;
 
+#if defined(CONFIG_SUNXI_DISP2_FB_ROTATION_SUPPORT)
+				if (mgr->rot_sw && mgr->rot_sw->apply) {
+					if (0 !=
+					    mgr->rot_sw->apply(mgr->rot_sw,
+							       &config,
+							       dirty_rect)) {
+						__wrn("not need to rot sw\n");
+						return 0;
+					}
+					config.info.fb.crop.x =
+						((unsigned long long)(y_offset)) << 32;
+					need_wait_vsync = 0;
+				}
+#endif
+#if defined(CONFIG_SUNXI_DISP2_FB_HW_ROTATION_SUPPORT)
+				if (g_fbi.fb_rot[sel])
+					g_fbi.fb_rot[sel]->apply(g_fbi.fb_rot[sel], &config);
+#endif
 				if (mgr->set_layer_config(mgr, &config, 1)
 				    != 0) {
 					__wrn
 					    ("fb%d,set_lyr_cfg(%d,%d,%d)fail\n",
 					     info->node, sel, chan, layer_id);
 					return -1;
+				} else {
+					memcpy(&g_fbi.config[sel], &config, sizeof(struct disp_layer_config));
 				}
 			}
 		}
 	}
 
-	fb_wait_for_vsync(info);
+	if (need_wait_vsync == 1)
+		fb_wait_for_vsync(info);
 
 	return 0;
 }
@@ -787,22 +810,18 @@ static int sunxi_fb_blank(int blank_mode, struct fb_info *info)
 			struct disp_layer_config config;
 			struct disp_manager *mgr = g_disp_drv.mgr[sel];
 
+			memcpy(&config, &g_fbi.config[sel], sizeof(struct disp_layer_config));
 			if (blank_mode == FB_BLANK_POWERDOWN) {
-				if (mgr && mgr->get_layer_config
-				    && mgr->set_layer_config) {
-					config.channel = chan;
-					config.layer_id = layer_id;
-					mgr->get_layer_config(mgr, &config, 1);
-					memcpy(
-					    &g_fbi.config[sel], &config,
-					    sizeof(struct disp_layer_config));
+				if (mgr && mgr->set_layer_config) {
 					config.enable = 0;
 					mgr->set_layer_config(mgr, &config, 1);
 				}
 			} else {
-				if (mgr && mgr->get_layer_config
-				    && mgr->set_layer_config) {
-					mgr->set_layer_config(mgr, &g_fbi.config[sel], 1);
+				if (mgr && mgr->set_layer_config) {
+					config.channel = chan;
+					config.layer_id = layer_id;
+					config.enable = 1;
+					mgr->set_layer_config(mgr, &config, 1);
 				}
 			}
 		}
@@ -810,194 +829,32 @@ static int sunxi_fb_blank(int blank_mode, struct fb_info *info)
 	return 0;
 }
 
-static int sunxi_fb_cursor(struct fb_info *info, struct fb_cursor *cursor)
+/*static int sunxi_fb_cursor(struct fb_info *info, struct fb_cursor *cursor)
 {
 	__inf("sunxi_fb_cursor\n");
 
 	return 0;
-}
+}*/
 
 static int sunxi_fb_mmap(struct fb_info *info, struct vm_area_struct *vma)
 {
 	unsigned int off = vma->vm_pgoff << PAGE_SHIFT;
 
 	if (off < info->fix.smem_len) {
-#if defined(CONFIG_ION_SUNXI)
-		if (g_fbi.mem_cache_flag[info->node])
-			ion_set_dmabuf_flag(g_fbi.mem[info->node]->p_item->buf,
-					    ION_FLAG_CACHED |
-						ION_FLAG_CACHED_NEEDS_SYNC);
-		else
-			ion_set_dmabuf_flag(g_fbi.mem[info->node]->p_item->buf,
-					    0);
+#if defined(CONFIG_ION)
+		return g_fbi.mem[info->node]->p_item->dmabuf->ops->mmap(
+		    g_fbi.mem[info->node]->p_item->dmabuf, vma);
 
-		return g_fbi.mem[info->node]->p_item->buf->ops->mmap(
-		    g_fbi.mem[info->node]->p_item->buf, vma);
-
-#endif
+#else /* CONFIG_ION */
 		return dma_mmap_writecombine(g_fbi.dev, vma, info->screen_base,
-				  info->fix.smem_start,
-				  info->fix.smem_len);
+				info->fix.smem_start,
+				info->fix.smem_len);
+#endif /* CONFIG_ION */
 	}
 
 	return -EINVAL;
-
 }
 
-/**
- * drv_disp_vsync_event - wakeup vsync thread
- * @sel: the index of display manager
- *
- * Get the current time, push it into the cirular queue,
- * and then wakeup the vsync thread.
- */
-s32 drv_disp_vsync_event(u32 sel)
-{
-	unsigned long flags;
-	ktime_t now;
-	unsigned int head, tail, next;
-	bool full = false;
-	int cur_line = -1;
-	struct disp_device *dispdev = NULL;
-	struct disp_manager *mgr = g_disp_drv.mgr[sel];
-
-	if (mgr)
-		dispdev = mgr->device;
-	if (dispdev) {
-		if (dispdev->type == DISP_OUTPUT_TYPE_LCD) {
-			struct disp_panel_para panel;
-
-			if (dispdev->get_panel_info) {
-				dispdev->get_panel_info(dispdev, &panel);
-				cur_line = disp_al_lcd_get_cur_line(
-				    dispdev->hwdev_index, &panel);
-			}
-		}
-#if defined(SUPPORT_EDP)
-		else if (dispdev->type == DISP_OUTPUT_TYPE_EDP) {
-			cur_line = -1; /*avoid warning*/
-			cur_line = disp_edp_get_cur_line(dispdev);
-		}
-#endif
-		else {
-			cur_line =
-			    disp_al_device_get_cur_line(dispdev->hwdev_index);
-		}
-	}
-
-	now = ktime_get();
-	spin_lock_irqsave(&g_fbi.slock[sel], flags);
-	head = g_fbi.vsync_timestamp_head[sel];
-	tail = g_fbi.vsync_timestamp_tail[sel];
-	next = tail + 1;
-	next = (next >= VSYNC_NUM) ? 0 : next;
-	if (next == head)
-		full = true;
-
-	if (!full) {
-		g_fbi.vsync_timestamp[sel][tail] = now;
-		g_fbi.vsync_cur_line[sel][tail] = cur_line;
-		g_fbi.vsync_timestamp_tail[sel] = next;
-	}
-	spin_unlock_irqrestore(&g_fbi.slock[sel], flags);
-
-	if (g_fbi.vsync_task[sel])
-		wake_up_process(g_fbi.vsync_task[sel]);
-
-	if (full)
-		return -1;
-	return 0;
-}
-
-/**
- * vsync_proc - sends vsync message
- * @disp: the index of display manager
- *
- * Get the timestamp from the circular queue,
- * And send it widthin vsync message to the userland.
- */
-static int vsync_proc(u32 disp)
-{
-	char buf[64];
-	char *envp[2];
-	unsigned long flags;
-	unsigned int head, tail, next;
-	ktime_t time;
-	s64 ts;
-	int cur_line = -1, start_delay = -1;
-	struct disp_device *dispdev = NULL;
-	struct disp_manager *mgr = g_disp_drv.mgr[disp];
-	u32 total_lines = 0;
-	u64 period = 0;
-
-	if (mgr)
-		dispdev = mgr->device;
-	if (dispdev) {
-		start_delay = dispdev->timings.start_delay;
-		total_lines = dispdev->timings.ver_total_time;
-		period = dispdev->timings.frame_period;
-	}
-
-	spin_lock_irqsave(&g_fbi.slock[disp], flags);
-	head = g_fbi.vsync_timestamp_head[disp];
-	tail = g_fbi.vsync_timestamp_tail[disp];
-	while (head != tail) {
-		time = g_fbi.vsync_timestamp[disp][head];
-		cur_line = g_fbi.vsync_cur_line[disp][head];
-		next = head + 1;
-		next = (next >= VSYNC_NUM) ? 0 : next;
-		g_fbi.vsync_timestamp_head[disp] = next;
-		spin_unlock_irqrestore(&g_fbi.slock[disp], flags);
-
-		ts = ktime_to_ns(time);
-		if ((cur_line >= 0)
-			&& (period > 0)
-			&& (start_delay >= 0)
-			&& (total_lines > 0)
-			&& (cur_line != start_delay)) {
-			u64 tmp;
-
-			if (cur_line < start_delay) {
-				tmp = (start_delay - cur_line) * period;
-				do_div(tmp, total_lines);
-				ts += tmp;
-			} else {
-				tmp = (cur_line - start_delay) * period;
-				do_div(tmp, total_lines);
-				ts -= tmp;
-			}
-		}
-		snprintf(buf, sizeof(buf), "VSYNC%d=%llu", disp, ts);
-		envp[0] = buf;
-		envp[1] = NULL;
-		kobject_uevent_env(&g_fbi.dev->kobj, KOBJ_CHANGE, envp);
-
-		spin_lock_irqsave(&g_fbi.slock[disp], flags);
-		head = g_fbi.vsync_timestamp_head[disp];
-		tail = g_fbi.vsync_timestamp_tail[disp];
-	}
-
-	spin_unlock_irqrestore(&g_fbi.slock[disp], flags);
-
-	return 0;
-}
-
-static int vsync_thread(void *parg)
-{
-	unsigned long disp = (unsigned long)parg;
-
-	while (1) {
-
-		vsync_proc(disp);
-		set_current_state(TASK_INTERRUPTIBLE);
-		schedule();
-		if (kthread_should_stop())
-			break;
-		set_current_state(TASK_RUNNING);
-	}
-
-	return 0;
-}
 
 void DRV_disp_int_process(u32 sel)
 {
@@ -1012,8 +869,8 @@ static inline u32 convert_bitfield(int val, struct fb_bitfield *bf)
 	return (val << bf->offset) & mask;
 }
 
-static int sunxi_fb_setcolreg(unsigned regno, unsigned red, unsigned green,
-			      unsigned blue, unsigned transp,
+static int sunxi_fb_setcolreg(unsigned int regno, unsigned int red, unsigned int green,
+			      unsigned int blue, unsigned int transp,
 			      struct fb_info *info)
 {
 	u32 val;
@@ -1085,9 +942,11 @@ struct fb_dmabuf_export {
 /*custom ioctl command here*/
 #define FBIO_CACHE_SYNC         0x4630
 #define FBIO_ENABLE_CACHE       0x4631
+#define FBIO_GET_IONFD          0x4632
+#define FBIO_GET_PHY_ADDR       0x4633
 #define FBIOGET_DMABUF         _IOR('F', 0x21, struct fb_dmabuf_export)
 
-#if !defined(CONFIG_ION_SUNXI)
+#if !defined(CONFIG_ION)
 
 struct sunxi_dmabuf_info {
 	struct sg_table *s_sg_table;
@@ -1106,8 +965,7 @@ void sunxi_info_free(struct kref *kref)
 	s_info = container_of(kref, struct sunxi_dmabuf_info, ref);
 	f_info = s_info->info;
 
-	if (!lock_fb_info(f_info))
-		return ;
+	lock_fb_info(f_info);
 
 	sg_free_table(s_info->s_sg_table);
 	Fb_unmap_kernel(s_info->ker_addr);
@@ -1122,6 +980,7 @@ static struct sg_table *sunxi_map_dma_buf(struct dma_buf_attachment *attachment,
 					enum dma_data_direction direction)
 {
 	struct sunxi_dmabuf_info *s_info;
+
 	s_info = (struct sunxi_dmabuf_info *)attachment->dmabuf->priv;
 
 	kref_get(&s_info->ref);
@@ -1134,6 +993,7 @@ static void sunxi_unmap_dma_buf(struct dma_buf_attachment *attachment,
 						enum dma_data_direction direction)
 {
 	struct sunxi_dmabuf_info *s_info;
+
 	s_info = (struct sunxi_dmabuf_info *)attachment->dmabuf->priv;
 
 	kref_put(&s_info->ref, sunxi_info_free);
@@ -1179,15 +1039,20 @@ static int sunxi_user_mmap(struct dma_buf *buff, struct vm_area_struct *vma)
 static void sunxi_dma_buf_release(struct dma_buf *buff)
 {
 	struct sunxi_dmabuf_info *s_info;
+
 	s_info = (struct sunxi_dmabuf_info *)buff->priv;
 
 	kref_put(&s_info->ref, sunxi_info_free);
 }
 
-static int sunxi_dma_buf_attach(struct dma_buf *buff, struct device *dev,
+static int sunxi_dma_buf_attach(struct dma_buf *buff,
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 19, 0)
+			struct device *dev,
+#endif
 			struct dma_buf_attachment *attachment)
 {
 	struct sunxi_dmabuf_info *s_info;
+
 	s_info = (struct sunxi_dmabuf_info *)buff->priv;
 	attachment->priv = (void *)s_info;
 
@@ -1198,6 +1063,7 @@ static int sunxi_dma_buf_attach(struct dma_buf *buff, struct device *dev,
 static void sunxi_dma_buf_detach(struct dma_buf *buff, struct dma_buf_attachment *attachment)
 {
 	struct sunxi_dmabuf_info *s_info;
+
 	s_info = (struct sunxi_dmabuf_info *)buff->priv;
 
 	attachment->priv = NULL;
@@ -1205,9 +1071,11 @@ static void sunxi_dma_buf_detach(struct dma_buf *buff, struct dma_buf_attachment
 	kref_put(&s_info->ref, sunxi_info_free);
 }
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 12, 0)
 static void *sunxi_dma_buf_kmap(struct dma_buf *buff, unsigned long page_num)
 {
 	struct sunxi_dmabuf_info *s_info;
+
 	s_info = (struct sunxi_dmabuf_info *)buff->priv;
 
 	return s_info->ker_addr + page_num * PAGE_SIZE;
@@ -1218,6 +1086,7 @@ static void sunxi_dma_buf_kunmap(struct dma_buf *buff, unsigned long page_num,
 {
 
 }
+#endif
 
 static struct dma_buf_ops sunxi_dma_buf_ops = {
 	.attach = sunxi_dma_buf_attach,
@@ -1226,17 +1095,20 @@ static struct dma_buf_ops sunxi_dma_buf_ops = {
 	.unmap_dma_buf = sunxi_unmap_dma_buf,
 	.mmap = sunxi_user_mmap,
 	.release = sunxi_dma_buf_release,
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 12, 0)
 	.kmap_atomic = sunxi_dma_buf_kmap,
 	.kunmap_atomic = sunxi_dma_buf_kunmap,
 	.kmap = sunxi_dma_buf_kmap,
 	.kunmap = sunxi_dma_buf_kunmap,
+#endif
 };
 #endif
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 12, 0)
 static struct dma_buf *sunxi_share_dma_buf(struct fb_info *info)
 {
 	struct dma_buf *dmabuf = NULL;
-#if !defined(CONFIG_ION_SUNXI)
+#if !defined(CONFIG_ION)
 	DEFINE_DMA_BUF_EXPORT_INFO(exp_info);
 	struct sunxi_dmabuf_info *s_info;
 #else
@@ -1245,10 +1117,10 @@ static struct dma_buf *sunxi_share_dma_buf(struct fb_info *info)
 	if (info->fix.smem_start == 0 || info->fix.smem_len == 0)
 		return NULL;
 
-#if defined(CONFIG_ION_SUNXI)
+#if defined(CONFIG_ION)
 	handle = g_fbi.mem[info->node%SUNXI_FB_MAX]->handle;
 	dmabuf = ion_share_dma_buf(g_disp_drv.ion_mgr.client, handle);
-#else
+#else /* CONFIG_ION */
 	s_info = sunxi_info[info->node%SUNXI_FB_MAX];
 	if (s_info == NULL) {
 		s_info = kzalloc(sizeof(struct sunxi_dmabuf_info), GFP_KERNEL);
@@ -1268,8 +1140,8 @@ static struct dma_buf *sunxi_share_dma_buf(struct fb_info *info)
 				info->fix.smem_len, info->fix.smem_start&PAGE_MASK);
 		s_info->info = info;
 		kref_init(&s_info->ref);
-		s_info->ker_addr = (void *)((unsigned long)Fb_map_kernel(info->fix.smem_start, info->fix.smem_len)
-						+ (info->fix.smem_start&PAGE_MASK));
+		s_info->ker_addr = (void *)((char *)Fb_map_kernel(info->fix.smem_start
+						+ (info->fix.smem_start&PAGE_MASK), info->fix.smem_len));
 		sunxi_info[info->node%SUNXI_FB_MAX] = s_info;
 	} else {
 		kref_get(&s_info->ref);
@@ -1284,15 +1156,16 @@ static struct dma_buf *sunxi_share_dma_buf(struct fb_info *info)
 		kref_put(&s_info->ref, sunxi_info_free);
 		return dmabuf;
 	}
-#endif
+#endif /* CONFIG_ION */
 	return dmabuf;
-#if !defined(CONFIG_ION_SUNXI)
+#if !defined(CONFIG_ION)
 ret_err:
 	__wrn("%s, alloc mem err...\n", __func__);
 
-	return -ENOMEM;
+	return NULL;
 #endif
 }
+#endif /* LINUX_VERSION_CODE < KERNEL_VERSION(4, 12, 0) */
 
 static int sunxi_fb_ioctl(struct fb_info *info, unsigned int cmd,
 			  unsigned long arg)
@@ -1300,7 +1173,9 @@ static int sunxi_fb_ioctl(struct fb_info *info, unsigned int cmd,
 	long ret = 0;
 	void __user *argp = (void __user *)arg;
 	unsigned long karg[4];
-
+#if defined(CONFIG_ION)
+	void *get_phy_addr = NULL;
+#endif
 	switch (cmd) {
 #if 0
 	case FBIOGET_VBLANK:
@@ -1335,6 +1210,7 @@ static int sunxi_fb_ioctl(struct fb_info *info, unsigned int cmd,
 			break;
 		}
 #endif
+
 	case FBIO_ENABLE_CACHE:
 		{
 			if (copy_from_user((void *)karg, argp,
@@ -1365,6 +1241,10 @@ static int sunxi_fb_ioctl(struct fb_info *info, unsigned int cmd,
 			__inf("### FBIO_FREE ###\n");
 
 			fb_unmap_video_memory(fbinfo);
+#if defined(CONFIG_SUNXI_DISP2_FB_HW_ROTATION_SUPPORT)
+			if (g_fbi.fb_rot[fb_id])
+				g_fbi.fb_rot[fb_id]->free(g_fbi.fb_rot[fb_id]);
+#endif
 
 			/* unbound fb0 from layer(1,0)  */
 			g_fbi.layer_hdl[fb_id][0] = 0;
@@ -1396,15 +1276,44 @@ static int sunxi_fb_ioctl(struct fb_info *info, unsigned int cmd,
 
 			g_fbi.fb_mode[fb_id] = g_fbi.fb_para[fb_id].fb_mode;
 			g_fbi.fb_enable[fb_id] = 1;
+#if defined(CONFIG_SUNXI_DISP2_FB_HW_ROTATION_SUPPORT)
+			g_fbi.fb_rot[fb_id] = fb_g2d_rot_create(
+								info, fb_id, &g_fbi.config[fb_id]);
+#endif
 			break;
 		}
 
-	case FBIO_CACHE_SYNC:
-		{
-#if defined(CONFIG_ION_SUNXI)
-			disp_ion_flush_cache(
-			    (void *)g_fbi.mem[info->node]->vaddr,
-			    g_fbi.mem[info->node]->size);
+	case FBIO_GET_IONFD:{
+	if (argp) {
+		if (copy_from_user((struct disp_ion_mem *)karg, argp,
+				2 * sizeof(unsigned long)))
+			return -EFAULT;
+		}
+#if defined(CONFIG_ION)
+	if (argp == NULL) {
+		ret = disp_get_ion_fd((struct disp_ion_mem *)g_fbi.mem[info->node]);
+	} else {
+		ret = disp_get_ion_fd((struct disp_ion_mem *)karg[0]);
+	}
+#endif
+		break;
+	}
+	case FBIO_GET_PHY_ADDR:{
+	if (argp) {
+		if (copy_from_user((struct disp_ion_mem *)karg, argp,
+				sizeof(dma_addr_t)))
+			return -EFAULT;
+		}
+#if defined(CONFIG_ION)
+	if (argp == NULL) {
+		get_phy_addr = disp_get_phy_addr((struct disp_ion_mem *)g_fbi.mem[info->node]);
+		return get_phy_addr == NULL ? -1 : 0;
+	} else {
+		get_phy_addr = disp_get_phy_addr((struct disp_ion_mem *)g_fbi.mem[info->node]);
+		ret = get_phy_addr == NULL ? -1 : 0;
+		get_phy_addr = get_phy_addr + karg[0];
+		return ret;
+	}
 #endif
 		break;
 	}
@@ -1414,8 +1323,11 @@ static int sunxi_fb_ioctl(struct fb_info *info, unsigned int cmd,
 		struct fb_dmabuf_export k_ret = {-1, 0};
 
 		ret = -1;
-
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 12, 0)
 		dmabuf = sunxi_share_dma_buf(info);
+#else
+		dmabuf = g_fbi.mem[info->node%SUNXI_FB_MAX]->p_item->dmabuf;
+#endif
 		if (IS_ERR_OR_NULL(dmabuf))
 			return PTR_ERR(dmabuf);
 
@@ -1448,7 +1360,7 @@ static struct fb_ops dispfb_ops = {
 	.fb_ioctl = sunxi_fb_ioctl,
 	.fb_check_var = sunxi_fb_check_var,
 	.fb_blank = sunxi_fb_blank,
-	.fb_cursor = sunxi_fb_cursor,
+	/*.fb_cursor = sunxi_fb_cursor,*/
 	.fb_mmap = sunxi_fb_mmap,
 #if defined(CONFIG_FB_CONSOLE_SUNXI)
 	.fb_fillrect = cfb_fillrect,
@@ -1658,8 +1570,259 @@ static int Fb_copy_boot_fb(u32 sel, struct fb_info *info)
 	disp_reserve_mem(false);
 #endif
 
+	//memblock_free((unsigned long)src_phy_addr, src_stride * src_height + 1024);
 	return 0;
 }
+
+#if defined(SUPPORT_ROTATE)
+static int rgb24_to_rgb32(const void *psrc, struct bmp_header *bmp_header,
+			  struct fb_info *info, void *pdst, int zero_num)
+{
+	int srclinesize, dstlinesize, w, h;
+	const unsigned char *psrcline = NULL, *psrcdot = NULL;
+	unsigned char *pdstline = NULL, *pdstdot = NULL;
+	int i = 0, j = 0;
+
+	if (!psrc || !pdst || !bmp_header || !info) {
+		__wrn("Invalid parameter\n");
+		return -1;
+	}
+
+	w = (info->var.xres < bmp_header->width) ? info->var.xres
+						 : bmp_header->width;
+	h = (bmp_header->height & 0x80000000) ? (-bmp_header->
+						 height) : (bmp_header->height);
+	h = (info->var.yres < h) ? info->var.yres : h;
+
+	srclinesize = w * 3 + zero_num;
+	dstlinesize = info->var.xres * 4;
+	psrcline = (const unsigned char *)psrc;
+	pdstline = (unsigned char *)pdst;
+
+	if (bmp_header->height & 0x80000000) {
+		for (i = 0; i < h; ++i) {
+			psrcdot = psrcline;
+			pdstdot = pdstline;
+			for (j = 0; j < w; ++j) {
+				*pdstdot++ = psrcdot[j*3];
+				*pdstdot++ = psrcdot[j*3+1];
+				*pdstdot++ = psrcdot[j*3+2];
+				*pdstdot++ = 0xff;
+			}
+			psrcline += srclinesize;
+			pdstline += dstlinesize;
+		}
+	} else {
+		for (i = h - 1; i >= 0; --i) {
+			psrcdot = psrcline;
+			pdstdot = pdstline;
+			for (j = 0; j < w; ++j) {
+				*pdstdot++ = psrcdot[j*3];
+				*pdstdot++ = psrcdot[j*3+1];
+				*pdstdot++ = psrcdot[j*3+2];
+				*pdstdot++ = 0xff;
+			}
+			psrcline -= srclinesize;
+			pdstline += dstlinesize;
+		}
+	}
+	info->var.bits_per_pixel = 32;
+
+	return 0;
+}
+#endif
+
+#if defined(CONFIG_DECOMPRESS_LZMA)
+int lzma_decode(uintptr_t paddr, struct fb_info *info)
+{
+	void *vaddr = NULL;
+	long pos = 0;
+	unsigned char *out = NULL;
+	int ret = -1, i = 0;
+	struct lzma_header lzma_head;
+	struct bmp_header bmp_header;
+	unsigned int x, y, bmp_bpix, fb_width, fb_height;
+	unsigned int effective_width, effective_height;
+	int zero_num = 0;
+	struct sunxi_bmp_store bmp_info;
+	void *screen_offset = NULL, *image_offset = NULL;
+	char *tmp_buffer = NULL;
+	char *bmp_data = NULL;
+
+	if (!paddr || !info) {
+		__wrn("Null pointer!\n");
+		goto OUT;
+	}
+
+	vaddr = (void *)Fb_map_kernel(paddr, sizeof(struct lzma_header));
+	if (vaddr == NULL) {
+		__wrn("fb_map_kernel failed, paddr=0x%p,size=0x%x\n",
+		      (void *)paddr, (unsigned int)sizeof(struct lzma_header));
+		goto OUT;
+	}
+
+	memcpy(&lzma_head.signature[0], vaddr, sizeof(struct lzma_header));
+
+	if ((lzma_head.signature[0] != 'L') ||
+	    (lzma_head.signature[1] != 'Z') ||
+	    (lzma_head.signature[2] != 'M') ||
+	    (lzma_head.signature[3] != 'A')) {
+		__wrn("this is not a LZMA file.\n");
+		Fb_unmap_kernel(vaddr);
+		goto OUT;
+	}
+
+	Fb_unmap_kernel(vaddr);
+
+	out = kmalloc(lzma_head.original_file_size, GFP_KERNEL | __GFP_ZERO);
+	if (!out) {
+		__wrn("kmalloc outbuffer fail!\n");
+		goto OUT;
+	}
+
+	vaddr = (void *)Fb_map_kernel(paddr, lzma_head.file_size +
+						 sizeof(struct lzma_header));
+	if (vaddr == NULL) {
+		__wrn("fb_map_kernel failed, paddr=0x%p,size=0x%x\n",
+		      (void *)paddr,
+		      (unsigned int)(lzma_head.file_size +
+				     sizeof(struct lzma_header)));
+		goto FREE_OUT;
+	}
+
+	ret = unlzma((unsigned char *)(vaddr + sizeof(struct lzma_header)),
+		     lzma_head.file_size, NULL, NULL, out, &pos, NULL);
+	if (ret) {
+		__wrn("unlzma fail:%d\n", ret);
+		goto UMAPKERNEL;
+	}
+
+	memcpy(&bmp_header, out, sizeof(struct bmp_header));
+
+	if ((bmp_header.signature[0] != 'B') ||
+	    (bmp_header.signature[1] != 'M')) {
+		__wrn("%s:this is not a bmp picture.\n", __func__);
+		goto UMAPKERNEL;
+	}
+
+	bmp_bpix = bmp_header.bit_count / 8;
+
+	if ((bmp_bpix != 3) && (bmp_bpix != 4)) {
+		__wrn("%s:not support bmp format:%d.\n", __func__, bmp_bpix);
+		goto UMAPKERNEL;
+	}
+
+	x = bmp_header.width;
+	y = (bmp_header.height & 0x80000000) ? (-bmp_header.height)
+					     : (bmp_header.height);
+	if (bmp_bpix == 3)
+		zero_num = (4 - ((3 * x) % 4)) & 3;
+	fb_width = info->var.xres;
+	fb_height = info->var.yres;
+	bmp_info.x = x;
+	bmp_info.y = y;
+	bmp_info.bit = bmp_header.bit_count;
+	bmp_info.buffer = (void *__force)(info->screen_base);
+
+	if (bmp_bpix == 3)
+		info->var.bits_per_pixel = 24;
+	else if (bmp_bpix == 4)
+		info->var.bits_per_pixel = 32;
+	else
+		info->var.bits_per_pixel = 32;
+
+	tmp_buffer = (char *)bmp_info.buffer;
+	screen_offset = (void *)bmp_info.buffer;
+	bmp_data =
+	    (char *)(out + bmp_header.data_offset + sizeof(struct lzma_header));
+	image_offset = (void *)bmp_data;
+	effective_width = (fb_width < x) ? fb_width : x;
+	effective_height = (fb_height < y) ? fb_height : y;
+
+	if (bmp_header.height & 0x80000000) {
+#if defined(SUPPORT_ROTATE)
+		if (info->var.bits_per_pixel == 24) {
+			screen_offset =
+			    (void *)((void *__force)info->screen_base +
+				     (fb_width * (abs(fb_height - y) / 2) +
+				      abs(fb_width - x) / 2) *
+					 4);
+			rgb24_to_rgb32(image_offset, &bmp_header, info,
+				       screen_offset, zero_num);
+		} else
+#endif
+		{
+			screen_offset =
+			    (void *)((void *__force)info->screen_base +
+				     (fb_width * (abs(fb_height - y) / 2) +
+				      abs(fb_width - x) / 2) *
+					 (info->var.bits_per_pixel >> 3));
+			for (i = 0; i < effective_height; i++) {
+				memcpy((void *)screen_offset, image_offset,
+				       effective_width *
+					   (info->var.bits_per_pixel >> 3));
+				screen_offset =
+				    (void *)(screen_offset +
+					     fb_width *
+						 (info->var.bits_per_pixel >>
+						  3));
+				image_offset =
+				    (void *)image_offset +
+				    x * (info->var.bits_per_pixel >> 3);
+			}
+		}
+
+	} else {
+
+#if defined(SUPPORT_ROTATE)
+		if (info->var.bits_per_pixel == 24) {
+			screen_offset =
+			    (void *)((void *__force)info->screen_base +
+				     (fb_width * (abs(fb_height - y) / 2) +
+				      abs(fb_width - x) / 2) *
+					 4);
+
+			image_offset =
+			    (void *)bmp_data +
+			    (effective_height - 1) * (x * 3 + zero_num);
+			rgb24_to_rgb32(image_offset, &bmp_header, info,
+				       screen_offset, zero_num);
+		} else
+#endif
+		{
+			screen_offset =
+			    (void *)((void *__force)info->screen_base +
+				     (fb_width * (abs(fb_height - y) / 2) +
+				      abs(fb_width - x) / 2) *
+					 (info->var.bits_per_pixel >> 3));
+
+			image_offset = (void *)bmp_data +
+				       (effective_height - 1) * x *
+					   (info->var.bits_per_pixel >> 3);
+			for (i = effective_height - 1; i >= 0; i--) {
+				memcpy((void *)screen_offset, image_offset,
+				       effective_width *
+					   (info->var.bits_per_pixel >> 3));
+				screen_offset =
+				    (void *)(screen_offset +
+					     fb_width *
+						 (info->var.bits_per_pixel >>
+						  3));
+				image_offset =
+				    (void *)bmp_data +
+				    i * x * (info->var.bits_per_pixel >> 3);
+			}
+		}
+	}
+
+UMAPKERNEL:
+	Fb_unmap_kernel(vaddr);
+FREE_OUT:
+	kfree(out);
+OUT:
+	return ret;
+}
+#endif
 
 static int Fb_map_kernel_logo(u32 sel, struct fb_info *info)
 {
@@ -1677,6 +1840,9 @@ static int Fb_map_kernel_logo(u32 sel, struct fb_info *info)
 	unsigned int effective_width, effective_height;
 	uintptr_t offset;
 	int i = 0;
+	struct disp_manager *mgr;
+
+	mgr = g_disp_drv.mgr[sel];
 
 	paddr = bootlogo_addr;
 	if (paddr == 0) {
@@ -1698,8 +1864,14 @@ static int Fb_map_kernel_logo(u32 sel, struct fb_info *info)
 	bmp_header = (struct bmp_header *) &bmp_pad_header.signature[0];
 	if ((bmp_header->signature[0] != 'B')
 	    || (bmp_header->signature[1] != 'M')) {
+		Fb_unmap_kernel(vaddr);
+#if defined(CONFIG_DECOMPRESS_LZMA)
+		return lzma_decode(paddr, info);
+#else
 		__wrn("this is not a bmp picture.\n");
 		return -1;
+
+#endif
 	}
 
 	bmp_bpix = bmp_header->bit_count / 8;
@@ -1707,12 +1879,17 @@ static int Fb_map_kernel_logo(u32 sel, struct fb_info *info)
 	if ((bmp_bpix != 3) && (bmp_bpix != 4))
 		return -1;
 
-	if (bmp_bpix == 3)
-		zero_num = (4 - ((3 * bmp_header->width) % 4)) & 3;
-
 	x = bmp_header->width;
 	y = (bmp_header->height & 0x80000000) ? (-bmp_header->
 						 height) : (bmp_header->height);
+
+	if (bmp_bpix == 3) {
+		zero_num = (4 - ((3 * x) % 4)) & 3;
+#ifndef SUPPORT_ROTATE
+		/*uboot have removed zero for us*/
+		zero_num = 0;
+#endif
+	}
 	fb_width = info->var.xres;
 	fb_height = info->var.yres;
 	if ((paddr <= 0) || x <= 1 || y <= 1) {
@@ -1737,7 +1914,7 @@ static int Fb_map_kernel_logo(u32 sel, struct fb_info *info)
 	/* map the total bmp buffer */
 	vaddr =
 	    (void *)Fb_map_kernel(paddr,
-				  x * y * bmp_bpix + sizeof(struct bmp_header));
+				  (x * bmp_bpix + zero_num) * y + sizeof(struct bmp_header));
 	if (vaddr == NULL) {
 		__wrn("fb_map_kernel failed, paddr=0x%p,size=0x%x\n",
 		      (void *)paddr,
@@ -1754,51 +1931,76 @@ static int Fb_map_kernel_logo(u32 sel, struct fb_info *info)
 	effective_height = (fb_height < y) ? fb_height : y;
 
 	if (bmp_header->height & 0x80000000) {
-
-		screen_offset =
-		    (void *)((void *__force)info->screen_base +
-			     (fb_width * (abs(fb_height - y) / 2)
-			      + abs(fb_width - x) / 2)
-			      * (info->var.bits_per_pixel >> 3));
-
-		for (i = 0; i < effective_height; i++) {
-			memcpy((void *)screen_offset, image_offset,
-			       effective_width *
-			       (info->var.bits_per_pixel >> 3));
+#if defined(SUPPORT_ROTATE)
+		if (info->var.bits_per_pixel == 24) {
 			screen_offset =
-			    (void *)(screen_offset + fb_width *
-				     (info->var.bits_per_pixel >> 3));
-			image_offset =
-			    (void *)image_offset +
-			    x * (info->var.bits_per_pixel >> 3);
+				(void *)((void *__force)info->screen_base +
+					 (fb_width * (abs(fb_height - y) / 2)
+					  + abs(fb_width - x) / 2)
+					 * 4);
+			rgb24_to_rgb32(image_offset, bmp_header, info,
+				       screen_offset, zero_num);
+		} else
+#endif
+		{
+		screen_offset =
+			(void *)((void *__force)info->screen_base +
+				 (fb_width * (abs(fb_height - y) / 2)
+				  + abs(fb_width - x) / 2)
+				 * (info->var.bits_per_pixel >> 3));
+			for (i = 0; i < effective_height; i++) {
+				memcpy((void *)screen_offset, image_offset,
+				       effective_width *
+				       (info->var.bits_per_pixel >> 3));
+				screen_offset =
+					(void *)(screen_offset + fb_width *
+						 (info->var.bits_per_pixel >> 3));
+				image_offset =
+					(void *)image_offset +
+					x * (info->var.bits_per_pixel >> 3);
+			}
 		}
+
 	} else {
 
-		screen_offset =
-		    (void *)((void *__force)info->screen_base +
-			     (fb_width * (abs(fb_height - y) / 2)
-			      + abs(fb_width - x) / 2)
-			      * (info->var.bits_per_pixel >> 3));
-		image_offset =
-		    (void *)(image_offset + (x * (abs(y - fb_height) / 2)
-					     + abs(x - fb_width) / 2) *
-			     (info->var.bits_per_pixel >> 3));
-
-		image_offset =
-		    (void *)bmp_data + (effective_height -
-					1) * x *
-		    (info->var.bits_per_pixel >> 3);
-		for (i = effective_height - 1; i >= 0; i--) {
-			memcpy((void *)screen_offset, image_offset,
-			       effective_width *
-			       (info->var.bits_per_pixel >> 3));
+#if defined(SUPPORT_ROTATE)
+		if (info->var.bits_per_pixel == 24) {
 			screen_offset =
-			    (void *)(screen_offset +
-				     fb_width *
-				     (info->var.bits_per_pixel >> 3));
+				(void *)((void *__force)info->screen_base +
+					 (fb_width * (abs(fb_height - y) / 2)
+					  + abs(fb_width - x) / 2)
+					 * 4);
+
 			image_offset =
 			    (void *)bmp_data +
-			    i * x * (info->var.bits_per_pixel >> 3);
+			    (effective_height - 1) * (x * 3 + zero_num);
+			rgb24_to_rgb32(image_offset, bmp_header, info,
+				       screen_offset, zero_num);
+		} else
+#endif
+		{
+			screen_offset =
+				(void *)((void *__force)info->screen_base +
+					 (fb_width * (abs(fb_height - y) / 2)
+					  + abs(fb_width - x) / 2)
+					 * (info->var.bits_per_pixel >> 3));
+
+			image_offset =
+				(void *)bmp_data + (effective_height -
+						    1) * x *
+				(info->var.bits_per_pixel >> 3);
+			for (i = effective_height - 1; i >= 0; i--) {
+				memcpy((void *)screen_offset, image_offset,
+				       effective_width *
+				       (info->var.bits_per_pixel >> 3));
+				screen_offset =
+					(void *)(screen_offset +
+						 fb_width *
+						 (info->var.bits_per_pixel >> 3));
+				image_offset =
+					(void *)bmp_data +
+					i * x * (info->var.bits_per_pixel >> 3);
+			}
 		}
 	}
 
@@ -1815,7 +2017,8 @@ static s32 display_fb_request(u32 fb_id, struct disp_fb_create_info *fb_para)
 	u32 num_screens;
 	s32 ret = 0;
 
-#if defined(CONFIG_ARCH_SUN8IW12)
+#if defined(CONFIG_ARCH_SUN8IW12) || defined(CONFIG_ARCH_SUN8IW16)\
+    || defined(CONFIG_ARCH_SUN8IW19)
 	/* fb bound to layer(2,0)  */
 	g_fbi.layer_hdl[fb_id][0] = 2;
 	g_fbi.layer_hdl[fb_id][1] = 0;
@@ -1828,7 +2031,7 @@ static s32 display_fb_request(u32 fb_id, struct disp_fb_create_info *fb_para)
 
 	num_screens = bsp_disp_feat_get_num_screens();
 
-	__inf("%s,fb_id:%d\n", __func__, fb_id);
+	printk("%s,fb_id:%d\n", __func__, fb_id);
 
 	if (g_fbi.fb_enable[fb_id]) {
 		__wrn("%s, fb%d is already requested!\n", __func__, fb_id);
@@ -1906,19 +2109,37 @@ static s32 display_fb_request(u32 fb_id, struct disp_fb_create_info *fb_para)
 				}
 			}
 
-			config.info.screen_win.width =
-			    (0 ==
-			     fb_para->output_width) ? src_width : fb_para->
-			    output_width;
-			config.info.screen_win.height =
-			    (0 ==
-			     fb_para->output_height) ? src_height : fb_para->
-			    output_height;
+
+#if defined(CONFIG_SUNXI_DISP2_FB_ROTATION_SUPPORT)
+			if (mgr && mgr->rot_sw &&
+			    (ROTATION_SW_90 == mgr->rot_sw->degree ||
+			     ROTATION_SW_270 == mgr->rot_sw->degree)) {
+				config.info.screen_win.height =
+					(fb_para->output_width == 0)
+					? src_width
+					: fb_para->output_width;
+				config.info.screen_win.width =
+					(fb_para->output_height == 0)
+					? src_width
+					: fb_para->output_height;
+			} else
+#endif
+			{
+				config.info.screen_win.width =
+					(0 ==
+					 fb_para->output_width) ? src_width : fb_para->
+					output_width;
+				config.info.screen_win.height =
+					(0 ==
+					 fb_para->output_height) ? src_height : fb_para->
+					output_height;
+			}
 
 			config.info.mode = LAYER_MODE_BUFFER;
+			config.info.zorder = 16;
 			config.info.alpha_mode = 1;
 			config.info.alpha_value = 0xff;
-			config.info.fb.crop.x = ((long long)0) << 32;
+			config.info.fb.crop.x = (0LL) << 32;
 			config.info.fb.crop.y = ((long long)y_offset) << 32;
 			config.info.fb.crop.width =
 			    ((long long)src_width) << 32;
@@ -1942,15 +2163,32 @@ static s32 display_fb_request(u32 fb_id, struct disp_fb_create_info *fb_para)
 			config.info.fb.size[2].height = fb_para->height;
 			config.info.fb.color_space = DISP_BT601;
 
-#if defined(CONFIG_ION_SUNXI)
-			disp_ion_flush_cache(
-			    (void *)g_fbi.mem[info->node]->vaddr,
-			    g_fbi.mem[info->node]->size);
+#if defined(CONFIG_SUNXI_DISP2_FB_ROTATION_SUPPORT)
+			if (mgr && mgr->rot_sw && mgr->rot_sw->apply) {
+				struct disp_rect dirty_rect;
+
+				dirty_rect.x = config.info.fb.crop.x >> 32;
+				dirty_rect.y = config.info.fb.crop.y >> 32;
+				dirty_rect.width =
+				    config.info.fb.crop.width >> 32;
+				dirty_rect.height =
+				    config.info.fb.crop.height >> 32;
+
+				mgr->rot_sw->apply(mgr->rot_sw, &config,
+						   dirty_rect);
+			}
 #endif
-#if (!defined(CONFIG_EINK_PANEL_USED)) && (!defined(CONFIG_EINK200_SUNXI))
+#if defined(CONFIG_SUNXI_DISP2_FB_HW_ROTATION_SUPPORT)
+			g_fbi.fb_rot[fb_id] = fb_g2d_rot_create(info, fb_id, &config);
+			if (g_fbi.fb_rot[fb_id])
+				g_fbi.fb_rot[fb_id]->apply(g_fbi.fb_rot[fb_id], &config);
+#endif
+
+#if (!IS_ENABLED(CONFIG_EINK_PANEL_USED)) && (!IS_ENABLED(CONFIG_EINK200_SUNXI))
 			if (mgr && mgr->set_layer_config)
 				mgr->set_layer_config(mgr, &config, 1);
 #endif
+			memcpy(&g_fbi.config[fb_id], &config, sizeof(struct disp_layer_config));
 		}
 	}
 
@@ -1998,6 +2236,10 @@ static s32 display_fb_release(u32 fb_id)
 		fb_dealloc_cmap(&info->cmap);
 #endif
 		fb_unmap_video_memory(info);
+#if defined(CONFIG_SUNXI_DISP2_FB_HW_ROTATION_SUPPORT)
+		if (g_fbi.fb_rot[fb_id])
+			g_fbi.fb_rot[fb_id]->free(g_fbi.fb_rot[fb_id]);
+#endif
 
 		return 0;
 	}
@@ -2078,9 +2320,10 @@ s32 fb_init(struct platform_device *pdev)
 	unsigned long i;
 	u32 num_screens;
 	s32 ret = 0;
-#ifdef CONFIG_EINK200_SUNXI
+#if IS_ENABLED(CONFIG_EINK200_SUNXI)
 	s32 value = 0;
 	char primary_key[20];
+
 	sprintf(primary_key, "eink");
 #endif
 	/* struct sched_param param = { .sched_priority = MAX_RT_PRIO - 1 }; */
@@ -2091,25 +2334,6 @@ s32 fb_init(struct platform_device *pdev)
 	__inf("[DISP] %s\n", __func__);
 
 	fb_parse_bootlogo_base(&bootlogo_addr, &bootlogo_sz);
-
-	for (i = 0; i < num_screens; i++) {
-		char task_name[25];
-
-		spin_lock_init(&g_fbi.slock[i]);
-		sprintf(task_name, "vsync proc %ld", i);
-		g_fbi.vsync_task[i] =
-		    kthread_create(vsync_thread, (void *)i, task_name);
-		if (IS_ERR(g_fbi.vsync_task[i])) {
-			s32 err = 0;
-
-			__wrn("Unable to start kernel thread %s.\n",
-			      "hdmi proc");
-			err = PTR_ERR(g_fbi.vsync_task[i]);
-			g_fbi.vsync_task[i] = NULL;
-		} else {
-			wake_up_process(g_fbi.vsync_task[i]);
-		}
-	}
 	init_waitqueue_head(&g_fbi.wait[0]);
 	init_waitqueue_head(&g_fbi.wait[1]);
 	init_waitqueue_head(&g_fbi.wait[2]);
@@ -2204,14 +2428,14 @@ s32 fb_init(struct platform_device *pdev)
 #if (defined(SUPPORT_EINK) && defined(CONFIG_EINK_PANEL_USED))
 			fb_para.output_width = fb_para.width;
 			fb_para.output_height = fb_para.height;
-#elif defined(CONFIG_EINK200_SUNXI)
+#elif IS_ENABLED(CONFIG_EINK200_SUNXI)
 			ret = disp_sys_script_get_item(primary_key, "eink_width", &value, 1);
 			if (ret == 1)
 				fb_para.output_width = value;
 			ret = disp_sys_script_get_item(primary_key, "eink_height", &value, 1);
 			if (ret == 1)
 				fb_para.output_height = value;
-			pr_info("%s:fb width = %d, height = %d\n", __func__,
+			pr_err("%s:fb width = %d, height = %d\n", __func__,
 					fb_para.output_width, fb_para.output_height);
 			fb_para.width = fb_para.output_width;
 			fb_para.height = fb_para.output_height;
@@ -2221,10 +2445,7 @@ s32 fb_init(struct platform_device *pdev)
 			if (ret)
 				break;
 #if defined(CONFIG_DISP2_SUNXI_BOOT_COLORBAR)
-			fb_draw_colorbar((char *__force)g_fbi.fbinfo[i]->
-					 screen_base, fb_para.width,
-					 fb_para.height * fb_para.buffer_num,
-					 &(g_fbi.fbinfo[i]->var));
+			disp_draw_colorbar(screen_id, 0);
 #endif
 		}
 		for (i = 0; i < SUNXI_FB_MAX; i++)
@@ -2237,19 +2458,8 @@ s32 fb_init(struct platform_device *pdev)
 s32 fb_exit(void)
 {
 	unsigned int fb_id = 0;
-	unsigned int i;
-	unsigned int num_screens;
 
-	num_screens = bsp_disp_feat_get_num_screens();
-	pr_warn("%s, num_screens=%d\n", __func__, num_screens);
 	disp_unregister_sync_finish_proc(DRV_disp_int_process);
-	for (i = 0; i < num_screens; i++) {
-		if (g_fbi.vsync_task[i] && !IS_ERR(g_fbi.vsync_task[i])) {
-			kthread_stop(g_fbi.vsync_task[i]);
-			g_fbi.vsync_task[i] = NULL;
-		}
-	}
-
 	for (fb_id = 0; fb_id < SUNXI_FB_MAX; fb_id++) {
 		if (g_fbi.fbinfo[fb_id]) {
 			fb_dealloc_cmap(&g_fbi.fbinfo[fb_id]->cmap);
@@ -2262,3 +2472,4 @@ s32 fb_exit(void)
 
 	return 0;
 }
+

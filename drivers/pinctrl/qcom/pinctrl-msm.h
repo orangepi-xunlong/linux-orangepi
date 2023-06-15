@@ -1,17 +1,11 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (c) 2013, Sony Mobile Communications AB.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 and
- * only version 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 #ifndef __PINCTRL_MSM_H__
 #define __PINCTRL_MSM_H__
+
+#include <linux/gpio/driver.h>
 
 struct pinctrl_pin_desc;
 
@@ -76,6 +70,8 @@ struct msm_pingroup {
 	u32 intr_status_reg;
 	u32 intr_target_reg;
 
+	unsigned int tile:2;
+
 	unsigned mux_bit:5;
 
 	unsigned pull_bit:5;
@@ -98,14 +94,27 @@ struct msm_pingroup {
 };
 
 /**
+ * struct msm_gpio_wakeirq_map - Map of GPIOs and their wakeup pins
+ * @gpio:          The GPIOs that are wakeup capable
+ * @wakeirq:       The interrupt at the always-on interrupt controller
+ */
+struct msm_gpio_wakeirq_map {
+	unsigned int gpio;
+	unsigned int wakeirq;
+};
+
+/**
  * struct msm_pinctrl_soc_data - Qualcomm pin controller driver configuration
- * @pins:       An array describing all pins the pin controller affects.
- * @npins:      The number of entries in @pins.
- * @functions:  An array describing all mux functions the SoC supports.
- * @nfunctions: The number of entries in @functions.
- * @groups:     An array describing all pin groups the pin SoC supports.
- * @ngroups:    The numbmer of entries in @groups.
- * @ngpio:      The number of pingroups the driver should expose as GPIOs.
+ * @pins:	    An array describing all pins the pin controller affects.
+ * @npins:	    The number of entries in @pins.
+ * @functions:	    An array describing all mux functions the SoC supports.
+ * @nfunctions:	    The number of entries in @functions.
+ * @groups:	    An array describing all pin groups the pin SoC supports.
+ * @ngroups:	    The numbmer of entries in @groups.
+ * @ngpio:	    The number of pingroups the driver should expose as GPIOs.
+ * @pull_no_keeper: The SoC does not support keeper bias.
+ * @wakeirq_map:    The map of wakeup capable GPIOs and the pin at PDC/MPM
+ * @nwakeirq_map:   The number of entries in @hierarchy_map
  */
 struct msm_pinctrl_soc_data {
 	const struct pinctrl_pin_desc *pins;
@@ -115,7 +124,15 @@ struct msm_pinctrl_soc_data {
 	const struct msm_pingroup *groups;
 	unsigned ngroups;
 	unsigned ngpios;
+	bool pull_no_keeper;
+	const char *const *tiles;
+	unsigned int ntiles;
+	const int *reserved_gpios;
+	const struct msm_gpio_wakeirq_map *wakeirq_map;
+	unsigned int nwakeirq_map;
 };
+
+extern const struct dev_pm_ops msm_pinctrl_dev_pm_ops;
 
 int msm_pinctrl_probe(struct platform_device *pdev,
 		      const struct msm_pinctrl_soc_data *soc_data);

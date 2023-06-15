@@ -35,6 +35,7 @@
 #define HDMI3840_2160P_25   (0x02 + 0x100)
 #define HDMI3840_2160P_24   (0x03 + 0x100)
 #define HDMI4096_2160P_24   (0x04 + 0x100)
+#define HDMI1280_1024P_60   (0x01 + 0x200)
 #define HDMI_EDID_LEN 1024
 
 #define HDMI_State_Idle			 0x00
@@ -88,23 +89,15 @@ extern s32 hdmi_core_set_audio_enable(bool enable);
 extern bool hdmi_core_get_audio_enable(void);
 extern s32 hdmi_core_set_hdcp_enable(u32 mode);
 extern u32 hdmi_core_get_hdcp_enable(void);
+extern int hdmi_core_hdcp_err_check(void);
 extern s32 hdmi_core_set_cts_enable(u32 enable);
 extern u32 hdmi_core_get_cts_enable(void);
 extern s32 hdmi_core_enter_lp(void);
 extern s32 hdmi_core_exit_lp(void);
 extern u32 hdmi_core_get_csc_type(void);
 extern s32 hdmi_core_update_detect_time(u32 time_val);
-
 extern s32 hdmi_core_cec_enable(bool enable);
-#ifdef CONFIG_HDMI_CEC_STANDARD
-int hdmi_core_cec_send_msg(struct cec_msg *msg);
-int hdmi_core_cec_get_msg(struct cec_msg *msg);
-void hdmi_core_cec_set_logaddr(unsigned char addr);
-unsigned char hdmi_core_cec_get_logaddr(void);
-unsigned short hdmi_core_cec_get_phyaddr(void);
-#else
 extern int hdmi_core_cec_get_simple_msg(unsigned char *msg);
-#endif
 
 s32 hdmi_core_get_list_num(void);
 

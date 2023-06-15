@@ -1,18 +1,6 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * Copyright(c) 2004 - 2009 Intel Corporation. All rights reserved.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the Free
- * Software Foundation; either version 2 of the License, or (at your option)
- * any later version.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * The full GNU General Public License is included in this distribution in the
- * file called COPYING.
  */
 #ifndef IOATDMA_H
 #define IOATDMA_H
@@ -27,7 +15,7 @@
 #include "registers.h"
 #include "hw.h"
 
-#define IOAT_DMA_VERSION  "4.00"
+#define IOAT_DMA_VERSION  "5.00"
 
 #define IOAT_DMA_DCA_ANY_CPU		~0
 
@@ -111,8 +99,6 @@ struct ioatdma_chan {
 	#define IOAT_RUN 5
 	#define IOAT_CHAN_ACTIVE 6
 	struct timer_list timer;
-	#define COMPLETION_TIMEOUT msecs_to_jiffies(100)
-	#define IDLE_TIMEOUT msecs_to_jiffies(2000)
 	#define RESET_DELAY msecs_to_jiffies(100)
 	struct ioatdma_device *ioat_dma;
 	dma_addr_t completion_dma;
@@ -142,11 +128,14 @@ struct ioatdma_chan {
 	spinlock_t prep_lock;
 	struct ioat_descs descs[2];
 	int desc_chunks;
+	int intr_coalesce;
+	int prev_intr_coalesce;
 };
 
 struct ioat_sysfs_entry {
 	struct attribute attr;
 	ssize_t (*show)(struct dma_chan *, char *);
+	ssize_t (*store)(struct dma_chan *, const char *, size_t);
 };
 
 /**
@@ -403,10 +392,9 @@ enum dma_status
 ioat_tx_status(struct dma_chan *c, dma_cookie_t cookie,
 		struct dma_tx_state *txstate);
 void ioat_cleanup_event(unsigned long data);
-void ioat_timer_event(unsigned long data);
+void ioat_timer_event(struct timer_list *t);
 int ioat_check_space_lock(struct ioatdma_chan *ioat_chan, int num_descs);
 void ioat_issue_pending(struct dma_chan *chan);
-void ioat_timer_event(unsigned long data);
 
 /* IOAT Init functions */
 bool is_bwd_ioat(struct pci_dev *pdev);

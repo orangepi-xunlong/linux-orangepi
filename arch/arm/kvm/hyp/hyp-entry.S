@@ -1,19 +1,7 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (C) 2012 - Virtual Open Systems and Columbia University
  * Author: Christoffer Dall <c.dall@virtualopensystems.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License, version 2, as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
  */
 
 #include <linux/arm-smccc.h>
@@ -176,7 +164,7 @@ THUMB(	orr	lr, lr, #PSR_T_BIT	)
 	msr	spsr_cxsf, lr
 	ldr	lr, =panic
 	msr	ELR_hyp, lr
-	ldr	lr, =kvm_call_hyp
+	ldr	lr, =__kvm_call_hyp
 	clrex
 	eret
 ENDPROC(__hyp_do_panic)
@@ -211,11 +199,29 @@ hyp_hvc:
 	 */
 	pop	{r0, r1, r2}
 
-	/* Check for __hyp_get_vectors */
-	cmp	r0, #-1
-	mrceq	p15, 4, r0, c12, c0, 0	@ get HVBAR
-	beq	1f
+	/*
+	 * Check if we have a kernel function, which is guaranteed to be
+	 * bigger than the maximum hyp stub hypercall
+	 */
+	cmp	r0, #HVC_STUB_HCALL_NR
+	bhs	1f
 
+	/*
+	 * Not a kernel function, treat it as a stub hypercall.
+	 * Compute the physical address for __kvm_handle_stub_hvc
+	 * (as the code lives in the idmaped page) and branch there.
+	 * We hijack ip (r12) as a tmp register.
+	 */
+	push	{r1}
+	ldr	r1, =kimage_voffset
+	ldr	r1, [r1]
+	ldr	ip, =__kvm_handle_stub_hvc
+	sub	ip, ip, r1
+	pop	{r1}
+
+	bx	ip
+
+1:
 	/*
 	 * Pushing r2 here is just a way of keeping the stack aligned to
 	 * 8 bytes on any path that can trigger a HYP exception. Here,
@@ -234,7 +240,7 @@ THUMB(	orr	lr, #1)
 	blx	lr			@ Call the HYP function
 
 	pop	{r2, lr}
-1:	eret
+	eret
 
 guest_hvc_trap:
 	movw	r2, #:lower16:ARM_SMCCC_ARCH_WORKAROUND_1

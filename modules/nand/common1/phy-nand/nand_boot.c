@@ -25,7 +25,7 @@
 */
 #define _UBOOTT_C_
 
-#include "nand_boot.h"
+/*#include "nand_boot.h"*/
 #include "../nfd/nand_osal_for_linux.h"
 #include "nand_physic_interface.h"
 #include "rawnand/rawnand_boot.h"
@@ -33,10 +33,13 @@
 #include "rawnand/rawnand_debug.h"
 #include "spinand/spinand_boot.h"
 #include <linux/vmalloc.h>
+#include "nand-partition3/sunxi_nand.h"
+#include "nand-partition3/sunxi_nand_boot.h"
 
 struct _uboot_info uboot_info = {0};
 struct _boot_info *phyinfo_buf;
 
+extern struct kernel_status kernelsta;
 /*****************************************************************************
 *Name         :
 *Description  :
@@ -1149,6 +1152,7 @@ int nand_physic_info_read(void)
 			RAWNAND_DBG("physic info copy is ok\n");
 			ret_flag = 0;
 			flag = 1;
+			kernelsta.nand_bootinfo_state.state = BOOT_INFO_OK;
 			break;
 		} else {
 			RAWNAND_DBG("physic info copy is bad\n");
@@ -1160,6 +1164,8 @@ int nand_physic_info_read(void)
 	}
 
 	nand_free(temp_buf);
+	if (flag == 0)
+		kernelsta.nand_bootinfo_state.state = BOOT_INFO_NOEXIST;
 
 	return ret_flag;
 }

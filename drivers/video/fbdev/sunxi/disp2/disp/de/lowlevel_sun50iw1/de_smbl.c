@@ -211,7 +211,6 @@ int de_smbl_apply(unsigned int sel, struct disp_smbl_info *info)
 			g_smbl_status[sel]->Runtime = 0;
 			memset(g_smbl_status[sel]->min_adj_index_hist, 255, sizeof(u8)*IEP_LH_PWRSV_NUM);
 			de_smbl_set_para(sel, info->size.width, info->size.height);
-		} else{
 		}
 	}
 	g_smbl_status[sel]->backlight = info->backlight;

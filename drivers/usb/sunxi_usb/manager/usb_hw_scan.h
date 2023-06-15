@@ -42,11 +42,8 @@ typedef struct usb_scan_info {
 	u32			host_insmod_delay;	/* debounce time */
 } usb_scan_info_t;
 
-#if defined(CONFIG_AW_AXP)
-extern int axp_usb_det(void);
-#if defined(CONFIG_TYPE_C)
+#if IS_ENABLED(CONFIG_TYPE_C)
 extern int axp_usb_cc_status(void);
-#endif
 #endif
 
 extern int usb_hw_scan_debug;

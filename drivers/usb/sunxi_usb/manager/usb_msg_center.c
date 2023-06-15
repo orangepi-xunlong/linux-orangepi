@@ -39,9 +39,8 @@
 #include  "usbc_platform.h"
 #include  "usb_hw_scan.h"
 #include  "usb_msg_center.h"
-#if defined(CONFIG_AW_AXP)
-#include <linux/power/axp_depend.h>
-#endif
+
+#include <linux/power_supply.h>
 
 static struct usb_msg_center_info g_center_info;
 
@@ -97,10 +96,9 @@ static void modify_msg(struct usb_msg *msg)
 
 static void insmod_host_driver(struct usb_msg_center_info *center_info)
 {
-
-#if defined(CONFIG_DUAL_ROLE_USB_INTF)
+#if defined(CONFIG_TYPEC)
 	struct usb_cfg *cfg = &g_usb_cfg;
-	struct dual_role_phy_instance *dual_role = cfg->port.dual_role;
+	struct typec_port *port = cfg->port.typec_port;
 #endif
 	DMSG_INFO("\ninsmod_host_driver\n\n");
 
@@ -120,19 +118,15 @@ static void insmod_host_driver(struct usb_msg_center_info *center_info)
 	#endif
 #endif
 
-#if defined(CONFIG_DUAL_ROLE_USB_INTF)
-	dual_role_instance_changed(dual_role);
+#if defined(CONFIG_TYPEC)
+	typec_set_data_role(port, TYPEC_HOST);
+	typec_set_pwr_role(port, TYPEC_SOURCE);
+	typec_set_vconn_role(port, TYPEC_SOURCE);
 #endif
-
 }
 
 static void rmmod_host_driver(struct usb_msg_center_info *center_info)
 {
-
-#if defined(CONFIG_DUAL_ROLE_USB_INTF)
-	struct usb_cfg *cfg = &g_usb_cfg;
-	struct dual_role_phy_instance *dual_role = cfg->port.dual_role;
-#endif
 	DMSG_INFO("\nrmmod_host_driver\n\n");
 
 #if defined(CONFIG_ARCH_SUN8IW6)
@@ -152,24 +146,30 @@ static void rmmod_host_driver(struct usb_msg_center_info *center_info)
 		sunxi_usb_disable_ehci(0);
 	#endif
 
+
+
+
 	#if IS_ENABLED(CONFIG_USB_SUNXI_OHCI0)
 		sunxi_usb_disable_ohci(0);
 	#endif
 #endif
 	set_usb_role(center_info, USB_ROLE_NULL);
-
-#if defined(CONFIG_DUAL_ROLE_USB_INTF)
-	dual_role_instance_changed(dual_role);
-#endif
-
 }
 
 static void insmod_device_driver(struct usb_msg_center_info *center_info)
 {
 
-#if defined(CONFIG_DUAL_ROLE_USB_INTF)
+#if IS_ENABLED(CONFIG_DUAL_ROLE_USB_INTF)
 	struct usb_cfg *cfg = &g_usb_cfg;
 	struct dual_role_phy_instance *dual_role = cfg->port.dual_role;
+#endif
+#if defined(CONFIG_TYPEC)
+	struct usb_cfg *cfg = &g_usb_cfg;
+	struct typec_port *port = cfg->port.typec_port;
+	struct typec_partner_desc desc;
+	desc.accessory = TYPEC_ACCESSORY_NONE; /* XXX: handle accessories */
+	desc.identity = NULL;
+
 #endif
 	DMSG_INFO("\ninsmod_device_driver\n\n");
 
@@ -179,35 +179,68 @@ static void insmod_device_driver(struct usb_msg_center_info *center_info)
 	sunxi_usb_device_enable();
 #endif
 
-#if defined(CONFIG_DUAL_ROLE_USB_INTF)
+#if IS_ENABLED(CONFIG_DUAL_ROLE_USB_INTF)
 	dual_role_instance_changed(dual_role);
+#endif
+
+#if defined(CONFIG_TYPEC)
+	typec_set_data_role(port, TYPEC_DEVICE);
+	typec_set_pwr_role(port, TYPEC_SINK);
+
+	cfg->port.partner = typec_register_partner(port, &desc);
+	cfg->port.connected = true;
 #endif
 
 }
 
 static void rmmod_device_driver(struct usb_msg_center_info *center_info)
 {
+#if !defined(SUNXI_USB_FPGA)
+	struct power_supply *psy = NULL;
+	union power_supply_propval temp;
+#endif
 
-#if defined(CONFIG_DUAL_ROLE_USB_INTF)
+#if IS_ENABLED(CONFIG_DUAL_ROLE_USB_INTF)
 	struct usb_cfg *cfg = &g_usb_cfg;
 	struct dual_role_phy_instance *dual_role = cfg->port.dual_role;
+#endif
+#if defined(CONFIG_TYPEC)
+	struct usb_cfg *cfg = &g_usb_cfg;
+	struct typec_partner *partner = cfg->port.partner;
 #endif
 
 	DMSG_INFO("\nrmmod_device_driver\n\n");
 
 	set_usb_role(center_info, USB_ROLE_NULL);
 
+#if !defined(SUNXI_USB_FPGA)
+	if (of_find_property(center_info->cfg->pdev->dev.of_node, "det_vbus_supply", NULL))
+		psy = devm_power_supply_get_by_phandle(&center_info->cfg->pdev->dev,
+						     "det_vbus_supply");
+
+	if (!psy || IS_ERR(psy)) {
+		DMSG_PANIC("%s()%d WARN: get power supply failed\n",
+			  __func__, __LINE__);
+	} else {
+		temp.intval = 0;
+
+		power_supply_set_property(psy,
+					POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT, &temp);
+	}
+#endif
+
 #if IS_ENABLED(CONFIG_USB_SUNXI_UDC0)
 	sunxi_usb_device_disable();
 #endif
 
-#if defined(CONFIG_DUAL_ROLE_USB_INTF)
+#if IS_ENABLED(CONFIG_DUAL_ROLE_USB_INTF)
 	dual_role_instance_changed(dual_role);
 #endif
-
-#if defined(CONFIG_AW_AXP)
-	axp_usbcur(CHARGE_AC);
-	axp_usbvol(CHARGE_AC);
+#if defined(CONFIG_TYPEC)
+	if (cfg->port.connected) {
+		typec_unregister_partner(partner);
+		cfg->port.connected = false;
+	}
 #endif
 }
 
@@ -261,6 +294,8 @@ void usb_msg_center(struct usb_cfg *cfg)
 {
 	enum usb_role role = USB_ROLE_NULL;
 	struct usb_msg_center_info *center_info = &g_center_info;
+
+	center_info->cfg = cfg;
 
 	/* receive massage */
 	modify_msg(&center_info->msg);

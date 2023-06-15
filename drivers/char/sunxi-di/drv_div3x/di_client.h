@@ -46,6 +46,11 @@ enum {
 	DI_PROC_STATE_FINISH_ERR,
 };
 
+enum {
+	DI_DETECT_INTERLACE = 0,
+	DI_DETECT_PROGRESSIVE = 1,
+};
+
 /* buffer for md flags */
 struct di_md_buf {
 	u32 dir;
@@ -112,7 +117,15 @@ struct di_client {
 	bool para_checked;
 	bool unreset;
 
-	/* dev_cdata must be at last */
+	u8 di_detect_result;
+	u64 interlace_detected_counts;
+	u64 lastest_interlace_detected_frame;
+	u64 interlace_detected_counts_exceed_first_p_frame;
+	u64 progressive_detected_counts;
+	u64 lastest_progressive_detected_frame;
+	u64 progressive_detected_first_frame;
+
+	/* dev_cdata must be at last!!! */
 	uintptr_t dev_cdata;
 };
 
@@ -122,18 +135,17 @@ void di_client_destroy(void *c);
 int di_client_mem_request(struct di_client *c, void *data);
 int di_client_mem_release(struct di_client *c, void *data);
 
-int di_client_get_version(struct di_client *c, struct di_version *version);
+int di_client_get_version(struct di_client *c, void *version_);
 int di_client_reset(struct di_client *c, void *data);
 int di_client_check_para(struct di_client *c, void *data);
-int di_client_set_timeout(struct di_client *c, struct di_timeout_ns *timeout);
-int di_client_set_video_size(struct di_client *c, struct di_size *size);
-int di_client_set_video_crop(struct di_client *c, struct di_rect *rect);
-int di_client_set_demo_crop(struct di_client *c,
-			struct di_demo_crop_arg *demo_arg);
-int di_client_set_dit_mode(struct di_client *c, struct di_dit_mode *mode);
-int di_client_set_tnr_mode(struct di_client *c, struct di_tnr_mode *mode);
-int di_client_set_fmd_enable(struct di_client *c, struct di_fmd_enable *en);
-int di_client_process_fb(struct di_client *c, struct di_process_fb_arg *fb_arg);
+int di_client_set_timeout(struct di_client *c, void *timeout_);
+int di_client_set_video_size(struct di_client *c, void *size_);
+int di_client_set_video_crop(struct di_client *c, void *rect_);
+int di_client_set_demo_crop(struct di_client *c, void *demo_arg_);
+int di_client_set_dit_mode(struct di_client *c, void *mode_);
+int di_client_set_tnr_mode(struct di_client *c, void *mode_);
+int di_client_set_fmd_enable(struct di_client *c, void *en_);
+int di_client_process_fb(struct di_client *c, void *fb_arg_);
 
 
 #endif /* ifndef _DI_CLIENT_H_ */

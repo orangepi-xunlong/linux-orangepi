@@ -46,4 +46,18 @@ void audio_set_hdmi_func(__audio_hdmi_func *hdmi_func);
 #if defined(CONFIG_SND_SUNXI_SOC_AUDIOHUB_INTERFACE)
 void audio_set_muti_hdmi_func(__audio_hdmi_func *hdmi_func);
 #endif
+
+/******************** SND_HDMI for sunxi_v2 begain ***************************/
+#if IS_ENABLED(CONFIG_HDMI2_DISP2_SUNXI)
+extern int snd_hdmi_get_func(__audio_hdmi_func *hdmi_func);
+#else
+static inline int snd_hdmi_get_func(__audio_hdmi_func *hdmi_func)
+{
+		pr_err("HDMI Audio API is disable\n");
+
+			return -1;
+}
+#endif
+/******************** SND_HDMI for sunxi_v2 end ******************************/
+
 #endif

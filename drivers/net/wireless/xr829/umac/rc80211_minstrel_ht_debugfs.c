@@ -1,9 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2010 Felix Fietkau <nbd@openwrt.org>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 #include <linux/netdevice.h>
 #include <linux/types.h>
@@ -15,81 +12,157 @@
 #include "rc80211_minstrel.h"
 #include "rc80211_minstrel_ht.h"
 
+static ssize_t
+minstrel_stats_read(struct file *file, char __user *buf, size_t len, loff_t *ppos)
+{
+	struct minstrel_debugfs_info *ms;
+
+	ms = file->private_data;
+	return simple_read_from_buffer(buf, len, ppos, ms->buf, ms->len);
+}
+
+static int
+minstrel_stats_release(struct inode *inode, struct file *file)
+{
+	kfree(file->private_data);
+	return 0;
+}
+
+static char *
+minstrel_ht_stats_dump(struct minstrel_ht_sta *mi, int i, char *p)
+{
+	const struct mcs_group *mg;
+	unsigned int j, tp_max, tp_avg, eprob, tx_time;
+	char htmode = '2';
+	char gimode = 'L';
+	u32 gflags;
+
+	if (!mi->supported[i])
+		return p;
+
+	mg = &minstrel_mcs_groups[i];
+	gflags = mg->flags;
+
+	if (gflags & IEEE80211_TX_RC_40_MHZ_WIDTH)
+		htmode = '4';
+	else if (gflags & IEEE80211_TX_RC_80_MHZ_WIDTH)
+		htmode = '8';
+	if (gflags & IEEE80211_TX_RC_SHORT_GI)
+		gimode = 'S';
+
+	for (j = 0; j < MCS_GROUP_RATES; j++) {
+		struct minstrel_rate_stats *mrs = &mi->groups[i].rates[j];
+		static const int bitrates[4] = { 10, 20, 55, 110 };
+		int idx = i * MCS_GROUP_RATES + j;
+		unsigned int duration;
+
+		if (!(mi->supported[i] & BIT(j)))
+			continue;
+
+		if (gflags & IEEE80211_TX_RC_MCS) {
+			p += sprintf(p, "HT%c0  ", htmode);
+			p += sprintf(p, "%cGI  ", gimode);
+			p += sprintf(p, "%d  ", mg->streams);
+		} else if (gflags & IEEE80211_TX_RC_VHT_MCS) {
+			p += sprintf(p, "VHT%c0 ", htmode);
+			p += sprintf(p, "%cGI ", gimode);
+			p += sprintf(p, "%d  ", mg->streams);
+		} else {
+			p += sprintf(p, "CCK    ");
+			p += sprintf(p, "%cP  ", j < 4 ? 'L' : 'S');
+			p += sprintf(p, "1 ");
+		}
+
+		*(p++) = (idx == mi->max_tp_rate[0]) ? 'A' : ' ';
+		*(p++) = (idx == mi->max_tp_rate[1]) ? 'B' : ' ';
+		*(p++) = (idx == mi->max_tp_rate[2]) ? 'C' : ' ';
+		*(p++) = (idx == mi->max_tp_rate[3]) ? 'D' : ' ';
+		*(p++) = (idx == mi->max_prob_rate) ? 'P' : ' ';
+
+		if (gflags & IEEE80211_TX_RC_MCS) {
+			p += sprintf(p, "  MCS%-2u", (mg->streams - 1) * 8 + j);
+		} else if (gflags & IEEE80211_TX_RC_VHT_MCS) {
+			p += sprintf(p, "  MCS%-1u/%1u", j, mg->streams);
+		} else {
+			int r = bitrates[j % 4];
+
+			p += sprintf(p, "   %d.%dM", r / 10, r % 10);
+		}
+
+		p += sprintf(p, "  %d  ", idx);
+
+		/* tx_time[rate(i)] in usec */
+		duration = mg->duration[j];
+		duration <<= mg->shift;
+		tx_time = DIV_ROUND_CLOSEST(duration, 1000);
+		p += sprintf(p, "%6u  ", tx_time);
+
+		tp_max = minstrel_ht_get_tp_avg(mi, i, j, MINSTREL_FRAC(100, 100));
+		tp_avg = minstrel_ht_get_tp_avg(mi, i, j, mrs->prob_ewma);
+		eprob = MINSTREL_TRUNC(mrs->prob_ewma * 1000);
+
+		p += sprintf(p, "%4u.%1u    %4u.%1u     %3u.%1u"
+				"     %3u   %3u %-3u   "
+				"%9llu   %-9llu\n",
+				tp_max / 10, tp_max % 10,
+				tp_avg / 10, tp_avg % 10,
+				eprob / 10, eprob % 10,
+				mrs->retry_count,
+				mrs->last_success,
+				mrs->last_attempts,
+				(unsigned long long)mrs->succ_hist,
+				(unsigned long long)mrs->att_hist);
+	}
+
+	return p;
+}
+
 static int
 minstrel_ht_stats_open(struct inode *inode, struct file *file)
 {
 	struct minstrel_ht_sta_priv *msp = inode->i_private;
 	struct minstrel_ht_sta *mi = &msp->ht;
 	struct minstrel_debugfs_info *ms;
-	unsigned int i, j, tp, prob, eprob;
-	char *p;
+	unsigned int i;
 	int ret;
+	char *p;
 
 	if (!msp->is_ht) {
 		inode->i_private = &msp->legacy;
-		ret = xrmac_minstrel_stats_open(inode, file);
+		ret = minstrel_stats_open(inode, file);
 		inode->i_private = msp;
 		return ret;
 	}
 
-	ms = kmalloc(sizeof(*ms) + 8192, GFP_KERNEL);
+	ms = kmalloc(32768, GFP_KERNEL);
 	if (!ms)
 		return -ENOMEM;
 
 	file->private_data = ms;
 	p = ms->buf;
-	p += sprintf(p, "type      rate     throughput  ewma prob   this prob  "
-			"this succ/attempt   success    attempts\n");
-	for (i = 0; i < MINSTREL_MAX_STREAMS * MINSTREL_STREAM_GROUPS; i++) {
-		char htmode = '2';
-		char gimode = 'L';
 
-		if (!mi->groups[i].supported)
-			continue;
+	p += sprintf(p, "\n");
+	p += sprintf(p,
+		     "              best   ____________rate__________    ____statistics___    _____last____    ______sum-of________\n");
+	p += sprintf(p,
+		     "mode guard #  rate  [name   idx airtime  max_tp]  [avg(tp) avg(prob)]  [retry|suc|att]  [#success | #attempts]\n");
 
-		if (xrmac_minstrel_mcs_groups[i].flags & IEEE80211_TX_RC_40_MHZ_WIDTH)
-			htmode = '4';
-		if (xrmac_minstrel_mcs_groups[i].flags & IEEE80211_TX_RC_SHORT_GI)
-			gimode = 'S';
+	p = minstrel_ht_stats_dump(mi, MINSTREL_CCK_GROUP, p);
+	for (i = 0; i < MINSTREL_CCK_GROUP; i++)
+		p = minstrel_ht_stats_dump(mi, i, p);
+	for (i++; i < ARRAY_SIZE(mi->groups); i++)
+		p = minstrel_ht_stats_dump(mi, i, p);
 
-		for (j = 0; j < MCS_GROUP_RATES; j++) {
-			struct minstrel_rate_stats *mr = &mi->groups[i].rates[j];
-			int idx = i * MCS_GROUP_RATES + j;
-
-			if (!(mi->groups[i].supported & BIT(j)))
-				continue;
-
-			p += sprintf(p, "HT%c0/%cGI ", htmode, gimode);
-
-			*(p++) = (idx == mi->max_tp_rate) ? 'T' : ' ';
-			*(p++) = (idx == mi->max_tp_rate2) ? 't' : ' ';
-			*(p++) = (idx == mi->max_prob_rate) ? 'P' : ' ';
-			p += sprintf(p, "MCS%-2u", (xrmac_minstrel_mcs_groups[i].streams - 1) *
-					MCS_GROUP_RATES + j);
-
-			tp = mr->cur_tp / 10;
-			prob = MINSTREL_TRUNC(mr->cur_prob * 1000);
-			eprob = MINSTREL_TRUNC(mr->probability * 1000);
-
-			p += sprintf(p, "  %6u.%1u   %6u.%1u   %6u.%1u        "
-					"%3u(%3u)   %8llu    %8llu\n",
-					tp / 10, tp % 10,
-					eprob / 10, eprob % 10,
-					prob / 10, prob % 10,
-					mr->last_success,
-					mr->last_attempts,
-					(unsigned long long)mr->succ_hist,
-					(unsigned long long)mr->att_hist);
-		}
-	}
 	p += sprintf(p, "\nTotal packet count::    ideal %d      "
 			"lookaround %d\n",
 			max(0, (int) mi->total_packets - (int) mi->sample_packets),
 			mi->sample_packets);
-	p += sprintf(p, "Average A-MPDU length: %d.%d\n",
-		MINSTREL_TRUNC(mi->avg_ampdu_len),
-		MINSTREL_TRUNC(mi->avg_ampdu_len * 10) % 10);
+	if (mi->avg_ampdu_len)
+		p += sprintf(p, "Average # of aggregated frames per A-MPDU: %d.%d\n",
+			MINSTREL_TRUNC(mi->avg_ampdu_len),
+			MINSTREL_TRUNC(mi->avg_ampdu_len * 10) % 10);
 	ms->len = p - ms->buf;
+	WARN_ON(ms->len + sizeof(*ms) > 32768);
 
 	return nonseekable_open(inode, file);
 }
@@ -97,98 +170,156 @@ minstrel_ht_stats_open(struct inode *inode, struct file *file)
 static const struct file_operations minstrel_ht_stat_fops = {
 	.owner = THIS_MODULE,
 	.open = minstrel_ht_stats_open,
-	.read = xrmac_minstrel_stats_read,
-	.release = xrmac_minstrel_stats_release,
+	.read = minstrel_stats_read,
+	.release = minstrel_stats_release,
 	.llseek = no_llseek,
 };
 
-static int minstrel_ctrl_open(struct inode *inode, struct file *file)
+static char *
+minstrel_ht_stats_csv_dump(struct minstrel_ht_sta *mi, int i, char *p)
 {
-	file->private_data = inode->i_private;
-	return 0;
-}
-static ssize_t minstrel_get_param(struct file *file,
-	char __user *user_buf, size_t count, loff_t *ppos)
-{
-	struct minstrel_priv *mp_ctrl = file->private_data;
-	char buf[200];
-	size_t size = 0;
-	sprintf(buf, "ewma_level=%d, update_interval=%dms\n" \
-			"has_mrr=%d, lookaround=%d, lookaround_mrr=%d\n",
-			mp_ctrl->ewma_level, mp_ctrl->update_interval,
-			mp_ctrl->has_mrr, mp_ctrl->lookaround_rate, mp_ctrl->lookaround_rate_mrr);
+	const struct mcs_group *mg;
+	unsigned int j, tp_max, tp_avg, eprob, tx_time;
+	char htmode = '2';
+	char gimode = 'L';
+	u32 gflags;
 
-	size = strlen(buf);
+	if (!mi->supported[i])
+		return p;
 
-	return simple_read_from_buffer(user_buf, count, ppos,
-					buf, size);
-}
+	mg = &minstrel_mcs_groups[i];
+	gflags = mg->flags;
 
-static ssize_t minstrel_set_param(struct file *file,
-	const char __user *user_buf, size_t count, loff_t *ppos)
-{
-	struct minstrel_priv *mp_ctrl = file->private_data;
-	char buf[50] = {0};
-	char *start  = &buf[0];
-	char *endptr = NULL;
-	unsigned int set_param = 0;
+	if (gflags & IEEE80211_TX_RC_40_MHZ_WIDTH)
+		htmode = '4';
+	else if (gflags & IEEE80211_TX_RC_80_MHZ_WIDTH)
+		htmode = '8';
+	if (gflags & IEEE80211_TX_RC_SHORT_GI)
+		gimode = 'S';
 
-	if (!count)
-		return -EINVAL;
-	if (copy_from_user(buf, user_buf, count > 49 ? 49 : count))
-		return -EFAULT;
+	for (j = 0; j < MCS_GROUP_RATES; j++) {
+		struct minstrel_rate_stats *mrs = &mi->groups[i].rates[j];
+		static const int bitrates[4] = { 10, 20, 55, 110 };
+		int idx = i * MCS_GROUP_RATES + j;
+		unsigned int duration;
 
+		if (!(mi->supported[i] & BIT(j)))
+			continue;
 
-	set_param = simple_strtoul(start, &endptr, 10);
-	if (set_param <= 100)
-		mp_ctrl->ewma_level = set_param;
+		if (gflags & IEEE80211_TX_RC_MCS) {
+			p += sprintf(p, "HT%c0,", htmode);
+			p += sprintf(p, "%cGI,", gimode);
+			p += sprintf(p, "%d,", mg->streams);
+		} else if (gflags & IEEE80211_TX_RC_VHT_MCS) {
+			p += sprintf(p, "VHT%c0,", htmode);
+			p += sprintf(p, "%cGI,", gimode);
+			p += sprintf(p, "%d,", mg->streams);
+		} else {
+			p += sprintf(p, "CCK,");
+			p += sprintf(p, "%cP,", j < 4 ? 'L' : 'S');
+			p += sprintf(p, "1,");
+		}
 
-	start = endptr+1;
-	if (start < buf+49) {
-		set_param = simple_strtoul(start, &endptr, 10);
-		mp_ctrl->update_interval = set_param;
+		p += sprintf(p, "%s", ((idx == mi->max_tp_rate[0]) ? "A" : ""));
+		p += sprintf(p, "%s", ((idx == mi->max_tp_rate[1]) ? "B" : ""));
+		p += sprintf(p, "%s", ((idx == mi->max_tp_rate[2]) ? "C" : ""));
+		p += sprintf(p, "%s", ((idx == mi->max_tp_rate[3]) ? "D" : ""));
+		p += sprintf(p, "%s", ((idx == mi->max_prob_rate) ? "P" : ""));
+
+		if (gflags & IEEE80211_TX_RC_MCS) {
+			p += sprintf(p, ",MCS%-2u,", (mg->streams - 1) * 8 + j);
+		} else if (gflags & IEEE80211_TX_RC_VHT_MCS) {
+			p += sprintf(p, ",MCS%-1u/%1u,", j, mg->streams);
+		} else {
+			int r = bitrates[j % 4];
+			p += sprintf(p, ",%d.%dM,", r / 10, r % 10);
+		}
+
+		p += sprintf(p, "%d,", idx);
+
+		duration = mg->duration[j];
+		duration <<= mg->shift;
+		tx_time = DIV_ROUND_CLOSEST(duration, 1000);
+		p += sprintf(p, "%u,", tx_time);
+
+		tp_max = minstrel_ht_get_tp_avg(mi, i, j, MINSTREL_FRAC(100, 100));
+		tp_avg = minstrel_ht_get_tp_avg(mi, i, j, mrs->prob_ewma);
+		eprob = MINSTREL_TRUNC(mrs->prob_ewma * 1000);
+
+		p += sprintf(p, "%u.%u,%u.%u,%u.%u,%u,%u,"
+				"%u,%llu,%llu,",
+				tp_max / 10, tp_max % 10,
+				tp_avg / 10, tp_avg % 10,
+				eprob / 10, eprob % 10,
+				mrs->retry_count,
+				mrs->last_success,
+				mrs->last_attempts,
+				(unsigned long long)mrs->succ_hist,
+				(unsigned long long)mrs->att_hist);
+		p += sprintf(p, "%d,%d,%d.%d\n",
+				max(0, (int) mi->total_packets -
+				(int) mi->sample_packets),
+				mi->sample_packets,
+				MINSTREL_TRUNC(mi->avg_ampdu_len),
+				MINSTREL_TRUNC(mi->avg_ampdu_len * 10) % 10);
 	}
 
-	start = endptr+1;
-	if (start < buf+49) {
-		set_param = simple_strtoul(start, &endptr, 10);
-		if (set_param <= 100)
-			mp_ctrl->lookaround_rate = set_param;
-	}
-
-	start = endptr+1;
-	if (start < buf+49) {
-		set_param = simple_strtoul(start, &endptr, 10);
-		if (set_param <= 100)
-			mp_ctrl->lookaround_rate_mrr = set_param;
-	}
-	return count;
+	return p;
 }
 
-static const struct file_operations fops_param_ctrl = {
-	.open   = minstrel_ctrl_open,
-	.write  = minstrel_set_param,
-	.read   = minstrel_get_param,
-	.llseek = default_llseek,
+static int
+minstrel_ht_stats_csv_open(struct inode *inode, struct file *file)
+{
+	struct minstrel_ht_sta_priv *msp = inode->i_private;
+	struct minstrel_ht_sta *mi = &msp->ht;
+	struct minstrel_debugfs_info *ms;
+	unsigned int i;
+	int ret;
+	char *p;
+
+	if (!msp->is_ht) {
+		inode->i_private = &msp->legacy;
+		ret = minstrel_stats_csv_open(inode, file);
+		inode->i_private = msp;
+		return ret;
+	}
+
+	ms = kmalloc(32768, GFP_KERNEL);
+
+	if (!ms)
+		return -ENOMEM;
+
+	file->private_data = ms;
+
+	p = ms->buf;
+
+	p = minstrel_ht_stats_csv_dump(mi, MINSTREL_CCK_GROUP, p);
+	for (i = 0; i < MINSTREL_CCK_GROUP; i++)
+		p = minstrel_ht_stats_csv_dump(mi, i, p);
+	for (i++; i < ARRAY_SIZE(mi->groups); i++)
+		p = minstrel_ht_stats_csv_dump(mi, i, p);
+
+	ms->len = p - ms->buf;
+	WARN_ON(ms->len + sizeof(*ms) > 32768);
+
+	return nonseekable_open(inode, file);
+}
+
+static const struct file_operations minstrel_ht_stat_csv_fops = {
+	.owner = THIS_MODULE,
+	.open = minstrel_ht_stats_csv_open,
+	.read = minstrel_stats_read,
+	.release = minstrel_stats_release,
+	.llseek = no_llseek,
 };
 
 void
-xrmac_minstrel_ht_add_sta_debugfs(void *priv, void *priv_sta, struct dentry *dir)
+minstrel_ht_add_sta_debugfs(void *priv, void *priv_sta, struct dentry *dir)
 {
 	struct minstrel_ht_sta_priv *msp = priv_sta;
 
-	msp->dbg_stats = debugfs_create_file("rc_stats", S_IRUGO, dir, msp,
-			&minstrel_ht_stat_fops);
-
-	if (priv)
-		msp->dbg_stats = debugfs_create_file("param_ctrl", S_IRUSR|S_IWUSR, dir,
-											priv, &fops_param_ctrl);
-}
-
-void
-xrmac_minstrel_ht_remove_sta_debugfs(void *priv, void *priv_sta)
-{
-	struct minstrel_ht_sta_priv *msp = priv_sta;
-
-	debugfs_remove(msp->dbg_stats);
+	debugfs_create_file("rc_stats", 0444, dir, msp,
+			    &minstrel_ht_stat_fops);
+	debugfs_create_file("rc_stats_csv", 0444, dir, msp,
+			    &minstrel_ht_stat_csv_fops);
 }

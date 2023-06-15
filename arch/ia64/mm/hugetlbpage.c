@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * IA-64 Huge TLB Page Support for Kernel.
  *
@@ -25,7 +26,8 @@ unsigned int hpage_shift = HPAGE_SHIFT_DEFAULT;
 EXPORT_SYMBOL(hpage_shift);
 
 pte_t *
-huge_pte_alloc(struct mm_struct *mm, unsigned long addr, unsigned long sz)
+huge_pte_alloc(struct mm_struct *mm, struct vm_area_struct *vma,
+	       unsigned long addr, unsigned long sz)
 {
 	unsigned long taddr = htlbpage_to_page(addr);
 	pgd_t *pgd;
@@ -44,7 +46,7 @@ huge_pte_alloc(struct mm_struct *mm, unsigned long addr, unsigned long sz)
 }
 
 pte_t *
-huge_pte_offset (struct mm_struct *mm, unsigned long addr)
+huge_pte_offset (struct mm_struct *mm, unsigned long addr, unsigned long sz)
 {
 	unsigned long taddr = htlbpage_to_page(addr);
 	pgd_t *pgd;
@@ -92,7 +94,7 @@ struct page *follow_huge_addr(struct mm_struct *mm, unsigned long addr, int writ
 	if (REGION_NUMBER(addr) != RGN_HPAGE)
 		return ERR_PTR(-EINVAL);
 
-	ptep = huge_pte_offset(mm, addr);
+	ptep = huge_pte_offset(mm, addr, HPAGE_SIZE);
 	if (!ptep || pte_none(*ptep))
 		return NULL;
 	page = pte_page(*ptep);

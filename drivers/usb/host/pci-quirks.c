@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * This file contains code to reset and initialize USB host controllers.
  * Some of it includes work-arounds for PCI hardware and BIOS quirks.
@@ -65,6 +66,23 @@
 #define	AX_INDXC		0x30
 #define	AX_DATAC		0x34
 
+#define PT_ADDR_INDX		0xE8
+#define PT_READ_INDX		0xE4
+#define PT_SIG_1_ADDR		0xA520
+#define PT_SIG_2_ADDR		0xA521
+#define PT_SIG_3_ADDR		0xA522
+#define PT_SIG_4_ADDR		0xA523
+#define PT_SIG_1_DATA		0x78
+#define PT_SIG_2_DATA		0x56
+#define PT_SIG_3_DATA		0x34
+#define PT_SIG_4_DATA		0x12
+#define PT4_P1_REG		0xB521
+#define PT4_P2_REG		0xB522
+#define PT2_P1_REG		0xD520
+#define PT2_P2_REG		0xD521
+#define PT1_P1_REG		0xD522
+#define PT1_P2_REG		0xD523
+
 #define	NB_PCIE_INDX_ADDR	0xe0
 #define	NB_PCIE_INDX_DATA	0xe4
 #define	PCIE_P_CNTL		0x10040
@@ -114,7 +132,7 @@ static struct amd_chipset_info {
 	struct amd_chipset_type sb_type;
 	int isoc_reqs;
 	int probe_count;
-	int probe_result;
+	bool need_pll_quirk;
 } amd_chipset;
 
 static DEFINE_SPINLOCK(amd_lock);
@@ -183,11 +201,11 @@ void sb800_prefetch(struct device *dev, int on)
 }
 EXPORT_SYMBOL_GPL(sb800_prefetch);
 
-int usb_amd_find_chipset_info(void)
+static void usb_amd_find_chipset_info(void)
 {
 	unsigned long flags;
 	struct amd_chipset_info info;
-	int ret;
+	info.need_pll_quirk = 0;
 
 	spin_lock_irqsave(&amd_lock, flags);
 
@@ -195,27 +213,34 @@ int usb_amd_find_chipset_info(void)
 	if (amd_chipset.probe_count > 0) {
 		amd_chipset.probe_count++;
 		spin_unlock_irqrestore(&amd_lock, flags);
-		return amd_chipset.probe_result;
+		return;
 	}
 	memset(&info, 0, sizeof(info));
 	spin_unlock_irqrestore(&amd_lock, flags);
 
 	if (!amd_chipset_sb_type_init(&info)) {
-		ret = 0;
 		goto commit;
 	}
 
-	/* Below chipset generations needn't enable AMD PLL quirk */
-	if (info.sb_type.gen == AMD_CHIPSET_UNKNOWN ||
-			info.sb_type.gen == AMD_CHIPSET_SB600 ||
-			info.sb_type.gen == AMD_CHIPSET_YANGTZE ||
-			(info.sb_type.gen == AMD_CHIPSET_SB700 &&
-			info.sb_type.rev > 0x3b)) {
+	switch (info.sb_type.gen) {
+	case AMD_CHIPSET_SB700:
+		info.need_pll_quirk = info.sb_type.rev <= 0x3B;
+		break;
+	case AMD_CHIPSET_SB800:
+	case AMD_CHIPSET_HUDSON2:
+	case AMD_CHIPSET_BOLTON:
+		info.need_pll_quirk = 1;
+		break;
+	default:
+		info.need_pll_quirk = 0;
+		break;
+	}
+
+	if (!info.need_pll_quirk) {
 		if (info.smbus_dev) {
 			pci_dev_put(info.smbus_dev);
 			info.smbus_dev = NULL;
 		}
-		ret = 0;
 		goto commit;
 	}
 
@@ -234,7 +259,6 @@ int usb_amd_find_chipset_info(void)
 		}
 	}
 
-	ret = info.probe_result = 1;
 	printk(KERN_DEBUG "QUIRK: Enable AMD PLL fix\n");
 
 commit:
@@ -245,7 +269,6 @@ commit:
 
 		/* Mark that we where here */
 		amd_chipset.probe_count++;
-		ret = amd_chipset.probe_result;
 
 		spin_unlock_irqrestore(&amd_lock, flags);
 
@@ -258,10 +281,7 @@ commit:
 		amd_chipset = info;
 		spin_unlock_irqrestore(&amd_lock, flags);
 	}
-
-	return ret;
 }
-EXPORT_SYMBOL_GPL(usb_amd_find_chipset_info);
 
 int usb_hcd_amd_remote_wakeup_quirk(struct pci_dev *pdev)
 {
@@ -296,6 +316,13 @@ bool usb_amd_prefetch_quirk(void)
 	return amd_chipset.sb_type.gen == AMD_CHIPSET_SB800;
 }
 EXPORT_SYMBOL_GPL(usb_amd_prefetch_quirk);
+
+bool usb_amd_quirk_pll_check(void)
+{
+	usb_amd_find_chipset_info();
+	return amd_chipset.need_pll_quirk;
+}
+EXPORT_SYMBOL_GPL(usb_amd_quirk_pll_check);
 
 /*
  * The hardware normally enables the A-link power management feature, which
@@ -502,7 +529,7 @@ void usb_amd_dev_put(void)
 	amd_chipset.nb_type = 0;
 	memset(&amd_chipset.sb_type, 0, sizeof(amd_chipset.sb_type));
 	amd_chipset.isoc_reqs = 0;
-	amd_chipset.probe_result = 0;
+	amd_chipset.need_pll_quirk = 0;
 
 	spin_unlock_irqrestore(&amd_lock, flags);
 
@@ -510,6 +537,98 @@ void usb_amd_dev_put(void)
 	pci_dev_put(smbus);
 }
 EXPORT_SYMBOL_GPL(usb_amd_dev_put);
+
+/*
+ * Check if port is disabled in BIOS on AMD Promontory host.
+ * BIOS Disabled ports may wake on connect/disconnect and need
+ * driver workaround to keep them disabled.
+ * Returns true if port is marked disabled.
+ */
+bool usb_amd_pt_check_port(struct device *device, int port)
+{
+	unsigned char value, port_shift;
+	struct pci_dev *pdev;
+	u16 reg;
+
+	pdev = to_pci_dev(device);
+	pci_write_config_word(pdev, PT_ADDR_INDX, PT_SIG_1_ADDR);
+
+	pci_read_config_byte(pdev, PT_READ_INDX, &value);
+	if (value != PT_SIG_1_DATA)
+		return false;
+
+	pci_write_config_word(pdev, PT_ADDR_INDX, PT_SIG_2_ADDR);
+
+	pci_read_config_byte(pdev, PT_READ_INDX, &value);
+	if (value != PT_SIG_2_DATA)
+		return false;
+
+	pci_write_config_word(pdev, PT_ADDR_INDX, PT_SIG_3_ADDR);
+
+	pci_read_config_byte(pdev, PT_READ_INDX, &value);
+	if (value != PT_SIG_3_DATA)
+		return false;
+
+	pci_write_config_word(pdev, PT_ADDR_INDX, PT_SIG_4_ADDR);
+
+	pci_read_config_byte(pdev, PT_READ_INDX, &value);
+	if (value != PT_SIG_4_DATA)
+		return false;
+
+	/* Check disabled port setting, if bit is set port is enabled */
+	switch (pdev->device) {
+	case 0x43b9:
+	case 0x43ba:
+	/*
+	 * device is AMD_PROMONTORYA_4(0x43b9) or PROMONTORYA_3(0x43ba)
+	 * PT4_P1_REG bits[7..1] represents USB2.0 ports 6 to 0
+	 * PT4_P2_REG bits[6..0] represents ports 13 to 7
+	 */
+		if (port > 6) {
+			reg = PT4_P2_REG;
+			port_shift = port - 7;
+		} else {
+			reg = PT4_P1_REG;
+			port_shift = port + 1;
+		}
+		break;
+	case 0x43bb:
+	/*
+	 * device is AMD_PROMONTORYA_2(0x43bb)
+	 * PT2_P1_REG bits[7..5] represents USB2.0 ports 2 to 0
+	 * PT2_P2_REG bits[5..0] represents ports 9 to 3
+	 */
+		if (port > 2) {
+			reg = PT2_P2_REG;
+			port_shift = port - 3;
+		} else {
+			reg = PT2_P1_REG;
+			port_shift = port + 5;
+		}
+		break;
+	case 0x43bc:
+	/*
+	 * device is AMD_PROMONTORYA_1(0x43bc)
+	 * PT1_P1_REG[7..4] represents USB2.0 ports 3 to 0
+	 * PT1_P2_REG[5..0] represents ports 9 to 4
+	 */
+		if (port > 3) {
+			reg = PT1_P2_REG;
+			port_shift = port - 4;
+		} else {
+			reg = PT1_P1_REG;
+			port_shift = port + 4;
+		}
+		break;
+	default:
+		return false;
+	}
+	pci_write_config_word(pdev, PT_ADDR_INDX, reg);
+	pci_read_config_byte(pdev, PT_READ_INDX, &value);
+
+	return !(value & BIT(port_shift));
+}
+EXPORT_SYMBOL_GPL(usb_amd_pt_check_port);
 
 /*
  * Make sure the controller is completely inactive, unable to
@@ -673,15 +792,9 @@ static void quirk_usb_handoff_ohci(struct pci_dev *pdev)
 	/* disable interrupts */
 	writel((u32) ~0, base + OHCI_INTRDISABLE);
 
-	/* Reset the USB bus, if the controller isn't already in RESET */
-	if (control & OHCI_HCFS) {
-		/* Go into RESET, preserving RWC (and possibly IR) */
-		writel(control & OHCI_CTRL_MASK, base + OHCI_CONTROL);
-		readl(base + OHCI_CONTROL);
-
-		/* drive bus reset for at least 50 ms (7.1.7.5) */
-		msleep(50);
-	}
+	/* Go into the USB_RESET state, preserving RWC (and possibly IR) */
+	writel(control & OHCI_CTRL_MASK, base + OHCI_CONTROL);
+	readl(base + OHCI_CONTROL);
 
 	/* software reset of the controller, preserving HcFmInterval */
 	if (!no_fminterval)
@@ -841,7 +954,7 @@ static void quirk_usb_disable_ehci(struct pci_dev *pdev)
 			ehci_bios_handoff(pdev, op_reg_base, cap, offset);
 			break;
 		case 0: /* Illegal reserved cap, set cap=0 so we exit */
-			cap = 0; /* then fallthrough... */
+			cap = 0; /* fall through */
 		default:
 			dev_warn(&pdev->dev,
 				 "EHCI: unrecognized capability %02x\n",

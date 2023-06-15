@@ -19,6 +19,7 @@
  *
  ******************************************************************************/
 
+#ifdef CONFIG_DISP2_SUNXI_SUPPORT_ENAHNCE
 #include "de_lti_type.h"
 #include "de_enhance.h"
 
@@ -43,6 +44,14 @@ int de_lti_set_reg_base(unsigned int sel, unsigned int chno, void *base)
 	return 0;
 }
 
+unsigned long de_lti_get_reg_base(unsigned int sel, unsigned int chno, int updata)
+{
+	if (updata) {
+		lti_block[sel][chno].dirty = 0x1;
+	}
+	return (unsigned long)lti_dev[sel][chno];
+}
+
 int de_lti_update_regs(unsigned int sel, unsigned int chno)
 {
 	if (lti_block[sel][chno].dirty == 0x1) {
@@ -61,7 +70,7 @@ int de_lti_init(unsigned int sel, unsigned int chno, uintptr_t reg_base)
 
 	/* FIXME  display path offset should be defined */
 	base = reg_base + (sel + 1) * 0x00100000 + LTI_OFST;
-#if defined(CONFIG_ARCH_SUN50IW10)
+#if defined(CONFIG_INDEPENDENT_DE)
 	if (sel)
 		base = base - 0x00100000;
 #endif
@@ -224,3 +233,4 @@ int de_lti_info2para(unsigned int sharp, struct de_rect window,
 
 	return 0;
 }
+#endif

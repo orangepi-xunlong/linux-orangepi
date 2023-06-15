@@ -33,6 +33,7 @@ extern void log_boot(char *str);
 #endif
 
 #include <linux/platform_device.h>
+#include <linux/sched/clock.h>
 void bootevent_initcall(initcall_t fn, unsigned long long ts);
 void bootevent_probe(unsigned long long ts, struct device *dev,
 		    struct device_driver *drv, unsigned long probe);

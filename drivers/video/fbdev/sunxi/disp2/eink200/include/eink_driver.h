@@ -19,24 +19,35 @@
 
 #include <linux/platform_device.h>
 #include "../../disp/de/include.h"
-#include "sunxi_eink.h"
+#include <video/sunxi_eink.h>
+#include <linux/backlight.h>
+#include <linux/pwm.h>
+
+#if IS_ENABLED(CONFIG_TPS65185_VCOM)
+#include <linux/ebc.h>
+#endif
 
 /* #define EINK_CACHE_MEM */
+/* #define DEC_WAV_DEBUG */
 
 #define EINK_MODULE_NAME "sunxi-eink"
-#define DEFAULT_WAVEFORM_PATH "/system/default.bin"
+#define DEFAULT_WAVEFORM_PATH "/vendor/default.awf"
+#define DEFAULT_VCOM_PATH "/vendor/vcom.bin"
 #define MAX_PATH_LEN 32
 #define MAX_EINK_ENGINE 1
 #define REQUST_PIPE_FAIL_MAX_CNT 200
 
 #define POWER_STR_LEN 32
 #define WAV_PATH_LEN 32
+#define VCOM_PATH_LEN 64
 #define EINK_GPIO_NUM 6
 /* #define EINK_GPIO_POWER_NUM 3 */
 #define WAVE_DATA_BUF_NUM 10
 #define DEFAULT_GC_COUNTER 6
 
 #define PRE_DECODE_NUM 5
+
+#define DEFAULT_VCOM_VOLTAGE (-1550)
 
 /* #define TIMING_FROM_MEM */
 
@@ -45,9 +56,56 @@
 #define IS_RECT_UPDATE(mode)    ((mode) & EINK_RECT_MODE)
 #define IS_AUTO_MODE(mode)      ((mode) & EINK_AUTO_MODE)
 
+
 /* default not define*/
 /* #define OFFLINE_MULTI_MODE */
 /* #define OFFLINE_SINGLE_MODE */
+extern struct eink_driver_info g_eink_drvdata;
+
+/* #define DRIVER_REMAP_WAVEFILE*/
+struct eink_gpio_info {
+	unsigned gpio;
+	char name[32];
+	int value;
+};
+
+/**
+ * eink pwm info
+ */
+struct eink_pwm_info {
+	//pwm device pointer
+	struct pwm_device *dev;
+
+	//pwm configs
+	u32 channel;
+	u32 polarity;
+	u32 period_ns;
+	u32 duty_ns;
+
+	//true if pwm is enable
+	bool enabled;
+	//true if pwm is used
+	bool used;
+};
+
+/**
+ * eink backlight infomation
+ */
+struct eink_backlight_info {
+	struct eink_pwm_info pwm_info;
+	// lcd_bl_en is a pin which is used to switch backlight
+	bool lcd_bl_en_used;
+	struct eink_gpio_info lcd_bl_en;
+	int lcd_bl_gpio_hdl;
+
+	//linux backlight device pointer
+	struct backlight_device *p_bl_dev;
+
+	//backlight value 0 ~ 255;
+	u32 backlight_bright;
+
+	struct mutex backligt_lock;
+};
 
 struct eink_panel_info {
 	u32	width;
@@ -74,18 +132,9 @@ struct timing_info {
 	u32	 fbl;
 	u32	 fdl;
 	u32	 fel;
+	struct eink_backlight_info backlight;
 };
 
-struct eink_gpio_cfg {
-	char gpio_name[32];
-	int port;
-	int port_num;
-	int mul_sel;
-	int pull;
-	int drv_level;
-	int data;
-	int gpio;
-};
 
 struct init_para {
 	void __iomem		*de_reg_base;
@@ -93,15 +142,20 @@ struct init_para {
 	u32			de_irq_no;
 	u32			ee_irq_no;
 	struct clk		*de_clk;
+	struct clk		*de_bus_clk;
+	struct reset_control	*de_rst_clk;
 	struct clk		*ee_clk;
+	struct clk		*ee_bus_clk;
+	struct reset_control	*ee_rst_clk;
 	struct clk		*panel_clk;
 	char			wav_path[32];
+	char			vcom_path[64];
 	char			eink_power[POWER_STR_LEN];
 	char			eink_pin_power[POWER_STR_LEN];
 	u32			power_used;
 	struct eink_panel_info	panel_info;
 	struct timing_info	timing_info;
-	struct eink_gpio_cfg	eink_gpio[EINK_GPIO_NUM];
+	struct eink_gpio_info	eink_gpio[EINK_GPIO_NUM];
 	u32			eink_gpio_used[EINK_GPIO_NUM];
 
 };
@@ -129,16 +183,12 @@ struct eink_driver_info {
 	struct cdev		*pcdev;
 	struct class		*pclass;
 	struct device		*eink_dev;
-	struct device		*dmabuf_dev;
+	struct device		*device;
 	struct init_para	init_para;
 	struct eink_manager	*eink_mgr;
 	struct eink_ion_mgr	ion_mgr;
-};
-
-struct upd_pic_size {
-	u32 width;
-	u32 height;
-	u32 align;
+	u32			eink_dbg_info;
+	struct mutex            lock;
 };
 
 struct upd_pic_cfg {
@@ -183,11 +233,18 @@ struct eink_panel_flow {
 };
 
 struct timing_ctrl_manager {
+	u32			enabled;
 	void			*vaddr;
 	void			*paddr;
 	struct timing_info	info;
 	u32                     eink_gpio_used[EINK_GPIO_NUM];
-	struct eink_gpio_cfg    eink_gpio[EINK_GPIO_NUM];
+	spinlock_t              tlock;
+#ifdef TIMING_FROM_MEM
+	void			*timing_vaddr;
+	unsigned long		timing_paddr;
+	u32			timing_size;
+#endif
+	struct eink_gpio_info    eink_gpio[EINK_GPIO_NUM];
 	int			gpio_hdl[EINK_GPIO_NUM];
 	struct eink_panel_flow  open_flow;
 	struct eink_panel_flow  close_flow;
@@ -205,37 +262,18 @@ enum buf_state {
 	USED = 0x2,
 };
 
-struct eink_img {
-	void			*vaddr;
-	void			*paddr;
-	u32			pitch;
-	bool                    force_fresh;
-	bool			win_calc_en;
-	bool			de_bypass_flag;
-	bool			win_calc_fin;
-	bool			mode_select_fin;
-	bool			upd_all_en;
-	enum upd_mode           upd_mode;
-	struct upd_win		upd_win;
-	struct upd_pic_size	size;
-	enum upd_pixel_fmt      out_fmt;
-	enum dither_mode        dither_mode;
-	enum buf_state		state;
-	unsigned int		*eink_hist;
-};
-
 struct img_node {
-	u32		   buf_id;
 	u32		   upd_order;
+	char               *kaddr;
 	int		   update_master;
 	unsigned long long coll_flag;
 	bool		   upd_pic_fin;
 	bool		   extra_flag;
+	bool               force_fresh;
 	struct eink_img	   *img;
+	struct dmabuf_item *item;
 	struct list_head   node;
 };
-
-#define MAX_IMG_CNT 4
 
 struct buf_manager {
 	u32		  upd_order;
@@ -244,15 +282,16 @@ struct buf_manager {
 	u32		  height;
 	u32		  buf_size;
 	u32		  gray_level_cnt;
-	struct img_node	  img_node[MAX_IMG_CNT];
 	struct img_node	  *processing_img_node;
 	struct eink_img	  *last_img;
-	struct mutex	  mlock;
-	struct list_head  img_free_list;
-	struct list_head  img_used_list;
-	struct list_head  img_collision_list;
-	struct workqueue_struct *coll_img_workqueue;
+	struct mutex		mlock;
+	struct list_head	img_free_list;
+	struct list_head	img_used_list;
+	struct list_head	img_collision_list;
+	struct workqueue_struct	*coll_img_workqueue;
 	struct work_struct	coll_handle_work;
+	struct timespec		stimer;
+	struct timespec		etimer;
 
 	bool (*is_upd_list_empty)(struct buf_manager *buf_mgr);
 	bool (*is_coll_list_empty)(struct buf_manager *buf_mgr);
@@ -261,10 +300,13 @@ struct buf_manager {
 	bool (*check_upd_coll_state)(struct buf_manager *buf_mgr, u64 state);
 	struct img_node *(*get_img_from_coll_list)(struct buf_manager *buf_mgr);
 	struct img_node *(*get_img_from_upd_list)(struct buf_manager *buf_mgr);
-	int (*queue_image)(struct buf_manager *buf_mgr, struct disp_layer_config_inner *config,
-				unsigned int layer_num, struct eink_upd_cfg *upd_cfg);
+	int (*queue_image)(struct buf_manager *buf_mgr, struct eink_upd_cfg *upd_cfg);
 	int (*dequeue_image)(struct buf_manager *buf_mgr, struct img_node *img_node);
 	int (*set_global_clean_counter)(struct buf_manager *buf_mgr, unsigned int cnt);
+	int (*wait_for_newest_img_node)(struct buf_manager *buf_mgr);
+	bool (*get_buf_msg)(struct buf_manager *buf_mgr);
+	int (*reset_all)(struct buf_manager *buf_mgr);
+	int (*get_free_buffer_slot)(struct buf_manager *buf_mgr, struct buf_slot *slot);
 };
 
 struct pipe_info_node {
@@ -322,6 +364,15 @@ struct pipe_manager {
 #endif
 	struct list_head	pipe_free_list;
 	struct list_head	pipe_used_list;
+#ifdef DEC_WAV_DEBUG
+	struct workqueue_struct *wav_dbg_workqueue;
+	struct work_struct	wav_dbg_work;
+	void *wav_wb_paddr;
+	void *wav_wb_vaddr;
+	u32 wav_len;
+	int (*pipe_mgr_config_wb)(struct pipe_manager *mgr, struct pipe_info_node *info);
+	int (*pipe_mgr_dump_wav_data)(struct pipe_manager *mgr);
+#endif
 
 	int (*pipe_mgr_enable)(struct pipe_manager *mgr);
 	int (*pipe_mgr_disable)(void);
@@ -330,6 +381,7 @@ struct pipe_manager {
 	int (*config_pipe)(struct pipe_manager *mgr, struct pipe_info_node info);
 	int (*active_pipe)(struct pipe_manager *mgr, u32 pipe_id);
 	void (*release_pipe)(struct pipe_manager *mgr, struct pipe_info_node *pipe);
+	void (*reset_all_pipe)(struct pipe_manager *mgr);
 };
 
 struct index_manager {
@@ -338,11 +390,16 @@ struct index_manager {
 	u32	rmi_size;
 
 	int (*set_rmi_addr)(struct index_manager *mgr);
+	void (*reset_rmi)(struct index_manager *mgr, u32 bit_num);
 };
 
 struct eink_manager {
 	u32				irq_num;
 	u32				panel_temperature;
+	u32				vcom_voltage;
+	u32				vcom_init_flag;
+	u32				clk_en_flag;
+	char				vcom_path[64];
 
 	volatile u32			upd_pic_accept_flag;
 	wait_queue_head_t		upd_pic_accept_queue;
@@ -353,6 +410,8 @@ struct eink_manager {
 	bool				enable_flag;
 	struct mutex			enable_lock;
 	struct clk			*ee_clk;
+	struct clk			*ee_bus_clk;
+	struct reset_control		*ee_rst_clk;
 	struct clk			*panel_clk;
 	struct eink_panel_info		panel_info;
 	struct timing_info		timing_info;
@@ -362,17 +421,27 @@ struct eink_manager {
 	struct index_manager		*index_mgr;
 	struct timing_ctrl_manager	*timing_ctrl_mgr;
 	struct task_struct		*detect_fresh_task;
+	struct task_struct		*get_temperature_task;
 	char				wav_path[32];
 	char				eink_pin_power[POWER_STR_LEN];
+	struct regulator		*pin_regulator;
 	bool				waveform_init_flag;
+	struct timespec	stimer;
+	struct timespec	etimer;
+	struct timespec	acept_timer;
+	struct timespec	upd_pic_timer;
+	struct timespec	pipe_timer;
 
-	unsigned int			suspend_state;
-	struct mutex			standby_lock;
+	unsigned int	shutdown_state;
+	unsigned int	suspend_state;
+	struct mutex	standby_lock;
 
 	int (*eink_update)(struct eink_manager *mgr,
-				struct disp_layer_config_inner *config,
-				u32 layer_num,
 				struct eink_upd_cfg *upd_config);
+	int (*eink_fmt_cvt_img)(struct disp_layer_config_inner *config,
+				unsigned int layer_num,
+				struct eink_img *last_img,
+				struct eink_img *cur_img);
 	int (*set_temperature)(struct eink_manager *mgr, u32 temp);
 	u32 (*get_temperature)(struct eink_manager *mgr);
 	s32 (*eink_set_global_clean_cnt)(struct eink_manager *mgr, u32 cnt);
@@ -404,12 +473,16 @@ extern int index_mgr_init(struct eink_manager *eink_mgr);
 extern int pipe_mgr_init(struct eink_manager *eink_mgr);
 extern int timing_ctrl_mgr_init(struct init_para *para);
 extern int waveform_mgr_init(const char *path, u32 bit_num);
+extern int detect_fresh_thread(void *parg);
+extern int regal_eink_process(struct eink_img *cur_img, struct eink_img *last_img);
 
 extern struct pipe_manager *get_pipeline_manager(void);
 extern struct eink_manager *get_eink_manager(void);
 extern struct fmt_convert_manager *get_fmt_convert_mgr(unsigned int id);
 extern struct timing_ctrl_manager *get_timing_ctrl_mgr(void);
 extern int eink_get_wf_data(enum upd_mode mode, u32 temp, u32 *total_frames,
+						unsigned long *wf_paddr, unsigned long *wf_vaddr);
+extern int get_waveform_data(enum upd_mode mode, u32 temp, u32 *total_frames,
 						unsigned long *wf_paddr, unsigned long *wf_vaddr);
 extern int init_dec_wav_buffer(struct wavedata_queue *queue,
 				struct eink_panel_info *info,
@@ -418,4 +491,13 @@ extern int eink_offline_enable(unsigned int en);
 extern void upd_coll_win_irq_handler(struct work_struct *work);
 extern int eink_clk_enable(struct eink_manager *mgr);
 extern void eink_clk_disable(struct eink_manager *mgr);
+extern int eink_get_temperature_thread(void *parg);
+#if IS_ENABLED(CONFIG_TPS65185_VCOM)
+extern int tps65185_vcom_set(int vcom_mv);
+#endif
+extern int eink_resume(struct device *dev);
+extern int eink_suspend(struct device *dev);
+#if IS_ENABLED(CONFIG_TPS65185_VCOM)
+extern int tps65185_vcom_set(int vcom_mv);
+#endif
 #endif

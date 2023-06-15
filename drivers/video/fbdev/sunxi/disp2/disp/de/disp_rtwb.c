@@ -30,6 +30,8 @@ struct disp_device_private_data {
 	wait_queue_head_t wait_wb_finish_queue;
 	atomic_t wati_wb_finish_flag;
 	struct clk *clk;
+	struct clk *clk_bus;
+	struct reset_control *rst;
 
 };
 
@@ -363,6 +365,7 @@ static s32 rtwb_get_video_timing_info(struct disp_device *p_rtwb, struct disp_vi
 
 s32 disp_rtwb_enable(struct disp_device *p_rtwb)
 {
+	int ret;
 	struct disp_manager *mgr = NULL;
 	unsigned long flags;
 	struct disp_device_private_data *p_rtwbp = disp_rtwb_get_priv(p_rtwb);
@@ -389,8 +392,23 @@ s32 disp_rtwb_enable(struct disp_device *p_rtwb)
 
 	rtwb_get_video_timing_info(p_rtwb, &p_rtwb->timings);
 
-	if (p_rtwbp->clk)
-		clk_prepare_enable(p_rtwbp->clk);
+	ret = reset_control_deassert(p_rtwbp->rst);
+	if (ret) {
+		DE_WRN("%s(%d): reset_control_deassert for rst failed\n", __func__, __LINE__);
+		return ret;
+	}
+
+	ret = clk_prepare_enable(p_rtwbp->clk);
+	if (ret) {
+		DE_WRN("%s(%d): clk_prepare_enable for clk failed\n", __func__, __LINE__);
+		return ret;
+	}
+
+	ret = clk_prepare_enable(p_rtwbp->clk_bus);
+	if (ret) {
+		DE_WRN("%s(%d): clk_prepare_enable for clk_bus failed\n", __func__, __LINE__);
+		return ret;
+	}
 
 	disp_al_capture_init(p_rtwb->disp);
 	disp_al_capture_set_irq_enable(p_rtwb->disp,
@@ -418,6 +436,7 @@ s32 disp_rtwb_enable(struct disp_device *p_rtwb)
 
 s32 disp_rtwb_disable(struct disp_device *p_rtwb)
 {
+	int ret;
 	struct disp_device_private_data *p_rtwbp = disp_rtwb_get_priv(p_rtwb);
 	unsigned long flags;
 	struct disp_manager *mgr = NULL;
@@ -449,8 +468,14 @@ s32 disp_rtwb_disable(struct disp_device *p_rtwb)
 				       DISP_AL_CAPTURE_IRQ_FLAG_FRAME_END, 0);
 	disp_al_capture_set_mode(p_rtwb->disp, TIMING_FROM_TCON);
 	disp_al_capture_exit(p_rtwb->disp);
-	if (p_rtwbp->clk)
-		clk_disable(p_rtwbp->clk);
+
+	clk_disable_unprepare(p_rtwbp->clk);
+	clk_disable_unprepare(p_rtwbp->clk_bus);
+	ret = reset_control_assert(p_rtwbp->rst);
+	if (ret) {
+		DE_WRN("%s(%d): reset_control_assert for rst failed\n", __func__, __LINE__);
+		return ret;
+	}
 
 	disp_unregister_irq(p_rtwb->disp + DISP_SCREEN_NUM + DISP_WB_NUM,
 			    &p_rtwbp->irq_info);
@@ -687,7 +712,10 @@ s32 disp_init_rtwb(struct disp_bsp_init_para *para)
 		p_rtwb->type = DISP_OUTPUT_TYPE_RTWB;
 		p_rtwbp->tv_mode = DISP_TV_MOD_1080P_60HZ;
 
-		p_rtwbp->clk = para->mclk[DISP_MOD_DE];
+		p_rtwbp->clk = para->clk_de[hwdev_index];
+		p_rtwbp->clk_bus = para->clk_bus_de[hwdev_index];
+		p_rtwbp->rst = para->rst_bus_de[hwdev_index];
+
 		p_rtwbp->irq_info.sel = disp;
 		p_rtwbp->irq_info.irq_flag =
 		    DISP_AL_CAPTURE_IRQ_FLAG_FRAME_END;

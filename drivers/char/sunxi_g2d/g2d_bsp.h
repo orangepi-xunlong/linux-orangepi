@@ -55,6 +55,7 @@
 #include <linux/string.h>
 #include <linux/g2d_driver.h>
 #include <linux/dma-buf.h>
+#include <linux/reset.h>
 
 #define G2D_FINISH_IRQ		(1<<8)
 #define G2D_ERROR_IRQ			(1<<9)
@@ -140,6 +141,8 @@ __u32	mixer_clear_init0(void);
 __s32	mixer_cmdq(__u32 addr);
 __u32	mixer_premultiply_set(__u32 flag);
 __u32	mixer_micro_block_set(g2d_blt *para);
+
+__u32 g2d_ip_version(void);
 
 #endif	/* __G2D_BSP_H */
 

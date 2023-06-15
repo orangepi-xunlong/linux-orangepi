@@ -59,12 +59,26 @@ enum IOCTL_CMD {
 	IOCTL_GET_IOMMU_ADDR,
 	IOCTL_FREE_IOMMU_ADDR,
 
+	/* map/unmap dma buffer to get/free phyaddr by dma fd */
+	/* get/free iommu addr will not use since kernel 5.4  */
+	IOCTL_MAP_DMA_BUF,
+	IOCTL_UNMAP_DMA_BUF,
+
+	/*for fush cache range since kernel 5.4*/
+	IOCTL_FLUSH_CACHE_RANGE,
+
 	/*for debug*/
 	IOCTL_SET_PROC_INFO,
 	IOCTL_STOP_PROC_INFO,
 	IOCTL_COPY_PROC_INFO,
 
 	IOCTL_SET_DRAM_HIGH_CHANNAL = 0x600,
+
+	/* debug for decoder and encoder*/
+	IOCTL_PROC_INFO_COPY = 0x610,
+	IOCTL_PROC_INFO_STOP,
+	IOCTL_POWER_SETUP = 0x700,
+	IOCTL_POWER_SHUTDOWN,
 };
 
 #define VE_LOCK_VDEC        0x01
@@ -74,10 +88,22 @@ enum IOCTL_CMD {
 #define VE_LOCK_04_REG      0x10
 #define VE_LOCK_ERR         0x80
 
+#define VE_LOCK_PROC_INFO   0x1000
+
 struct cedarv_env_infomation {
 	unsigned int phymem_start;
 	int  phymem_total_size;
 	unsigned long  address_macc;
+};
+
+struct dma_buf_param {
+	int				fd;       //[in]
+	unsigned int	phy_addr; //[out]
+};
+
+struct cache_range {
+	u64	start;
+	u64	end;
 };
 
 #endif

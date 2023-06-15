@@ -1,26 +1,16 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /* Copyright (c) 2010-2011, Code Aurora Forum. All rights reserved.
  *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 and
- * only version 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
- * 02110-1301, USA.
+ * Author: Stepan Moskovchenko <stepanm@codeaurora.org>
  */
 
 #define pr_fmt(fmt)	KBUILD_MODNAME ": " fmt
 #include <linux/kernel.h>
-#include <linux/module.h>
+#include <linux/init.h>
 #include <linux/platform_device.h>
 #include <linux/errno.h>
 #include <linux/io.h>
+#include <linux/io-pgtable.h>
 #include <linux/interrupt.h>
 #include <linux/list.h>
 #include <linux/spinlock.h>
@@ -31,11 +21,10 @@
 #include <linux/of_iommu.h>
 
 #include <asm/cacheflush.h>
-#include <asm/sizes.h>
+#include <linux/sizes.h>
 
 #include "msm_iommu_hw-8xxx.h"
 #include "msm_iommu.h"
-#include "io-pgtable.h"
 
 #define MRC(reg, processor, op1, crn, crm, op2)				\
 __asm__ __volatile__ (							\
@@ -179,20 +168,29 @@ fail:
 	return;
 }
 
-static void __flush_iotlb_sync(void *cookie)
+static void __flush_iotlb_walk(unsigned long iova, size_t size,
+			       size_t granule, void *cookie)
 {
-	/*
-	 * Nothing is needed here, the barrier to guarantee
-	 * completion of the tlb sync operation is implicitly
-	 * taken care when the iommu client does a writel before
-	 * kick starting the other master.
-	 */
+	__flush_iotlb_range(iova, size, granule, false, cookie);
 }
 
-static const struct iommu_gather_ops msm_iommu_gather_ops = {
+static void __flush_iotlb_leaf(unsigned long iova, size_t size,
+			       size_t granule, void *cookie)
+{
+	__flush_iotlb_range(iova, size, granule, true, cookie);
+}
+
+static void __flush_iotlb_page(struct iommu_iotlb_gather *gather,
+			       unsigned long iova, size_t granule, void *cookie)
+{
+	__flush_iotlb_range(iova, granule, granule, true, cookie);
+}
+
+static const struct iommu_flush_ops msm_iommu_flush_ops = {
 	.tlb_flush_all = __flush_iotlb,
-	.tlb_add_flush = __flush_iotlb_range,
-	.tlb_sync = __flush_iotlb_sync,
+	.tlb_flush_walk = __flush_iotlb_walk,
+	.tlb_flush_leaf = __flush_iotlb_leaf,
+	.tlb_add_page = __flush_iotlb_page,
 };
 
 static int msm_iommu_alloc_ctx(unsigned long *map, int start, int end)
@@ -356,7 +354,7 @@ static int msm_iommu_domain_config(struct msm_priv *priv)
 		.pgsize_bitmap = msm_iommu_ops.pgsize_bitmap,
 		.ias = 32,
 		.oas = 32,
-		.tlb = &msm_iommu_gather_ops,
+		.tlb = &msm_iommu_flush_ops,
 		.iommu_dev = priv->dev,
 	};
 
@@ -369,6 +367,64 @@ static int msm_iommu_domain_config(struct msm_priv *priv)
 	msm_iommu_ops.pgsize_bitmap = priv->cfg.pgsize_bitmap;
 
 	return 0;
+}
+
+/* Must be called under msm_iommu_lock */
+static struct msm_iommu_dev *find_iommu_for_dev(struct device *dev)
+{
+	struct msm_iommu_dev *iommu, *ret = NULL;
+	struct msm_iommu_ctx_dev *master;
+
+	list_for_each_entry(iommu, &qcom_iommu_devices, dev_node) {
+		master = list_first_entry(&iommu->ctx_list,
+					  struct msm_iommu_ctx_dev,
+					  list);
+		if (master->of_node == dev->of_node) {
+			ret = iommu;
+			break;
+		}
+	}
+
+	return ret;
+}
+
+static int msm_iommu_add_device(struct device *dev)
+{
+	struct msm_iommu_dev *iommu;
+	struct iommu_group *group;
+	unsigned long flags;
+
+	spin_lock_irqsave(&msm_iommu_lock, flags);
+	iommu = find_iommu_for_dev(dev);
+	spin_unlock_irqrestore(&msm_iommu_lock, flags);
+
+	if (iommu)
+		iommu_device_link(&iommu->iommu, dev);
+	else
+		return -ENODEV;
+
+	group = iommu_group_get_for_dev(dev);
+	if (IS_ERR(group))
+		return PTR_ERR(group);
+
+	iommu_group_put(group);
+
+	return 0;
+}
+
+static void msm_iommu_remove_device(struct device *dev)
+{
+	struct msm_iommu_dev *iommu;
+	unsigned long flags;
+
+	spin_lock_irqsave(&msm_iommu_lock, flags);
+	iommu = find_iommu_for_dev(dev);
+	spin_unlock_irqrestore(&msm_iommu_lock, flags);
+
+	if (iommu)
+		iommu_device_unlink(&iommu->iommu, dev);
+
+	iommu_group_remove_device(dev);
 }
 
 static int msm_iommu_attach_dev(struct iommu_domain *domain, struct device *dev)
@@ -401,10 +457,10 @@ static int msm_iommu_attach_dev(struct iommu_domain *domain, struct device *dev)
 				master->num =
 					msm_iommu_alloc_ctx(iommu->context_map,
 							    0, iommu->ncb);
-					if (IS_ERR_VALUE(master->num)) {
-						ret = -ENODEV;
-						goto fail;
-					}
+				if (IS_ERR_VALUE(master->num)) {
+					ret = -ENODEV;
+					goto fail;
+				}
 				config_mids(iommu, master);
 				__program_context(iommu->base, master->num,
 						  priv);
@@ -448,7 +504,7 @@ fail:
 }
 
 static int msm_iommu_map(struct iommu_domain *domain, unsigned long iova,
-			 phys_addr_t pa, size_t len, int prot)
+			 phys_addr_t pa, size_t len, int prot, gfp_t gfp)
 {
 	struct msm_priv *priv = to_msm_priv(domain);
 	unsigned long flags;
@@ -462,13 +518,13 @@ static int msm_iommu_map(struct iommu_domain *domain, unsigned long iova,
 }
 
 static size_t msm_iommu_unmap(struct iommu_domain *domain, unsigned long iova,
-			      size_t len)
+			      size_t len, struct iommu_iotlb_gather *gather)
 {
 	struct msm_priv *priv = to_msm_priv(domain);
 	unsigned long flags;
 
 	spin_lock_irqsave(&priv->pgtlock, flags);
-	len = priv->iop->unmap(priv->iop, iova, len);
+	len = priv->iop->unmap(priv->iop, iova, len, gather);
 	spin_unlock_irqrestore(&priv->pgtlock, flags);
 
 	return len;
@@ -644,8 +700,17 @@ static struct iommu_ops msm_iommu_ops = {
 	.detach_dev = msm_iommu_detach_dev,
 	.map = msm_iommu_map,
 	.unmap = msm_iommu_unmap,
-	.map_sg = default_iommu_map_sg,
+	/*
+	 * Nothing is needed here, the barrier to guarantee
+	 * completion of the tlb sync operation is implicitly
+	 * taken care when the iommu client does a writel before
+	 * kick starting the other master.
+	 */
+	.iotlb_sync = NULL,
 	.iova_to_phys = msm_iommu_iova_to_phys,
+	.add_device = msm_iommu_add_device,
+	.remove_device = msm_iommu_remove_device,
+	.device_group = generic_device_group,
 	.pgsize_bitmap = MSM_IOMMU_PGSIZES,
 	.of_xlate = qcom_iommu_of_xlate,
 };
@@ -653,6 +718,7 @@ static struct iommu_ops msm_iommu_ops = {
 static int msm_iommu_probe(struct platform_device *pdev)
 {
 	struct resource *r;
+	resource_size_t ioaddr;
 	struct msm_iommu_dev *iommu;
 	int ret, par, val;
 
@@ -696,10 +762,10 @@ static int msm_iommu_probe(struct platform_device *pdev)
 		ret = PTR_ERR(iommu->base);
 		goto fail;
 	}
+	ioaddr = r->start;
 
 	iommu->irq = platform_get_irq(pdev, 0);
 	if (iommu->irq < 0) {
-		dev_err(iommu->dev, "could not get iommu irq\n");
 		ret = -ENODEV;
 		goto fail;
 	}
@@ -737,7 +803,24 @@ static int msm_iommu_probe(struct platform_device *pdev)
 	}
 
 	list_add(&iommu->dev_node, &qcom_iommu_devices);
-	of_iommu_set_ops(pdev->dev.of_node, &msm_iommu_ops);
+
+	ret = iommu_device_sysfs_add(&iommu->iommu, iommu->dev, NULL,
+				     "msm-smmu.%pa", &ioaddr);
+	if (ret) {
+		pr_err("Could not add msm-smmu at %pa to sysfs\n", &ioaddr);
+		goto fail;
+	}
+
+	iommu_device_set_ops(&iommu->iommu, &msm_iommu_ops);
+	iommu_device_set_fwnode(&iommu->iommu, &pdev->dev.of_node->fwnode);
+
+	ret = iommu_device_register(&iommu->iommu);
+	if (ret) {
+		pr_err("Could not register msm-smmu at %pa\n", &ioaddr);
+		goto fail;
+	}
+
+	bus_set_iommu(&platform_bus_type, &msm_iommu_ops);
 
 	pr_info("device mapped at %p, irq %d with %d ctx banks\n",
 		iommu->base, iommu->irq, iommu->ncb);
@@ -782,28 +865,5 @@ static int __init msm_iommu_driver_init(void)
 
 	return ret;
 }
-
-static void __exit msm_iommu_driver_exit(void)
-{
-	platform_driver_unregister(&msm_iommu_driver);
-}
-
 subsys_initcall(msm_iommu_driver_init);
-module_exit(msm_iommu_driver_exit);
 
-static int __init msm_iommu_init(void)
-{
-	bus_set_iommu(&platform_bus_type, &msm_iommu_ops);
-	return 0;
-}
-
-static int __init msm_iommu_of_setup(struct device_node *np)
-{
-	msm_iommu_init();
-	return 0;
-}
-
-IOMMU_OF_DECLARE(msm_iommu_of, "qcom,apq8064-iommu", msm_iommu_of_setup);
-
-MODULE_LICENSE("GPL v2");
-MODULE_AUTHOR("Stepan Moskovchenko <stepanm@codeaurora.org>");

@@ -50,6 +50,8 @@ struct sbus_priv {
 	void                 *irq_priv;
 	wait_queue_head_t     init_wq;
 	int                   load_state;
+	u32                  *val32_r;
+	u32                  *val32_w;
 };
 
 struct sbus_ops {

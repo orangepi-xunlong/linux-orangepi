@@ -384,7 +384,6 @@ int sprdwl_pkt_log_save(struct sprdwl_intf *intf, void *data)
 {
 	int i, j, temp, data_len, pkt_line_num,
 		temp_pkt_line_num, pkt_len, m = 0;
-	mm_segment_t fs;
 	/*for pkt log space key and enter key*/
 	char temp_space, temp_enter;
 	/*for pkt log txt line number and write pkt log into file*/
@@ -397,12 +396,10 @@ int sprdwl_pkt_log_save(struct sprdwl_intf *intf, void *data)
 		wl_err("file create/open fail %s, %d\n", __func__, __LINE__);
 		return 1;
 	}
-	fs = get_fs();
-	set_fs(KERNEL_DS);
 	pkt_len = ((struct sprdwl_pktlog_hdr *)(data))->plen;
 	data += sizeof(struct sprdwl_pktlog_hdr);
 	while (m < pkt_len) {
-		data_len = *((unsigned char *)(data+2)) + 4;
+		data_len = *((unsigned char *)(data + 2)) + 4;
 		m += data_len;
 		temp_space = ' ';
 		temp_enter = '\n';
@@ -411,18 +408,18 @@ int sprdwl_pkt_log_save(struct sprdwl_intf *intf, void *data)
 		for (j = 0; j < 6; j++) {
 		     temphdr[j] = '0';
 		}
-		vfs_write(intf->pfile, temphdr, 6, &intf->lp);
-		vfs_write(intf->pfile, &temp_space, 1, &intf->lp);
+		kernel_write(intf->pfile, temphdr, 6, &intf->lp);
+		kernel_write(intf->pfile, &temp_space, 1, &intf->lp);
 		memset(tempdata, 0x00, 2);
 		for (i = 0; i < data_len; i++) {
 				sprintf(tempdata, "%02x",
 						*(unsigned char *)data);
-				vfs_write(intf->pfile, tempdata,
+				kernel_write(intf->pfile, tempdata,
 						  2, &intf->lp);
 				memset(tempdata, 0x00, 2);
 				if ((i != 0) && ((i+1)%16 == 0)) {
 					if (i < (data_len - 1)) {
-						vfs_write(intf->pfile, &temp_enter,
+						kernel_write(intf->pfile, &temp_enter,
 								  sizeof(temp_enter), &intf->lp);
 						pkt_line_num += 16;
 						temp_pkt_line_num = pkt_line_num;
@@ -430,22 +427,21 @@ int sprdwl_pkt_log_save(struct sprdwl_intf *intf, void *data)
 							temp = (temp_pkt_line_num >> (j*4)) & 0xf;
 							temphdr[5-j] = (temp < 10) ? (temp+'0') : (temp-10+'a');
 						}
-						vfs_write(intf->pfile, temphdr,
+						kernel_write(intf->pfile, temphdr,
 								  6, &intf->lp);
-						vfs_write(intf->pfile, &temp_space,
+						kernel_write(intf->pfile, &temp_space,
 								  1, &intf->lp);
 					}
 				} else {
-					vfs_write(intf->pfile, &temp_space,
+					kernel_write(intf->pfile, &temp_space,
 							  sizeof(temp_space), &intf->lp);
 				}
 				data++;
 		}
-		vfs_write(intf->pfile, &temp_enter, sizeof(temp_enter), &intf->lp);
+		kernel_write(intf->pfile, &temp_enter, sizeof(temp_enter), &intf->lp);
 		memset(temphdr, 0x00, 6);
 	}
 	filp_close(intf->pfile, NULL);
-	set_fs(fs);
 	return 0;
 }
 

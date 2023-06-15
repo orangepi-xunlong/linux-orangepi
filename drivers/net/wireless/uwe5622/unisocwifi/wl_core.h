@@ -182,7 +182,9 @@ struct sprdwl_intf {
 
 	int fw_power_down;
 	int fw_awake;
-
+#ifdef UNISOC_WIFI_PS
+	struct completion suspend_completed;
+#endif
 	/*for pkt log function*/
 	loff_t lp;
 	struct file *pfile;
@@ -196,6 +198,9 @@ struct sprdwl_intf {
 	u8 boost;
 	unsigned int txnum_level;
 	unsigned int rxnum_level;
+#ifdef STA_SOFTAP_SCC_MODE
+	int sta_home_channel;
+#endif
 };
 
 /* HashTable */

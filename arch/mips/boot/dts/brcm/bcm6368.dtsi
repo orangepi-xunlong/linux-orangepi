@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 / {
 	#address-cells = <1>;
 	#size-cells = <1>;
@@ -50,16 +51,22 @@
 		compatible = "simple-bus";
 		ranges;
 
-		periph_cntl: syscon@10000000 {
+		clkctl: clock-controller@10000004 {
+			compatible = "brcm,bcm6368-clocks";
+			reg = <0x10000004 0x4>;
+			#clock-cells = <1>;
+		};
+
+		periph_cntl: syscon@100000008 {
 			compatible = "syscon";
-			reg = <0x10000000 0x14>;
+			reg = <0x10000008 0x4>;
 			native-endian;
 		};
 
 		reboot: syscon-reboot@10000008 {
 			compatible = "syscon-reboot";
 			regmap = <&periph_cntl>;
-			offset = <0x8>;
+			offset = <0x0>;
 			mask = <0x1>;
 		};
 
@@ -89,6 +96,7 @@
 			interrupt-parent = <&periph_intc>;
 			interrupts = <2>;
 			clocks = <&periph_clk>;
+			clock-names = "refclk";
 			status = "disabled";
 		};
 
@@ -98,6 +106,7 @@
 			interrupt-parent = <&periph_intc>;
 			interrupts = <3>;
 			clocks = <&periph_clk>;
+			clock-names = "refclk";
 			status = "disabled";
 		};
 

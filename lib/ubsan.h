@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _LIB_UBSAN_H
 #define _LIB_UBSAN_H
 
@@ -54,16 +55,6 @@ struct nonnull_arg_data {
 	struct source_location location;
 	struct source_location attr_location;
 	int arg_index;
-};
-
-struct nonnull_return_data {
-	struct source_location location;
-	struct source_location attr_location;
-};
-
-struct vla_bound_data {
-	struct source_location location;
-	struct type_descriptor *type;
 };
 
 struct out_of_bounds_data {

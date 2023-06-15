@@ -1,0 +1,133 @@
+# common
+config SND_SOC_SUNXI_PCM
+	tristate
+
+config SND_SOC_SUNXI_MACH
+	tristate
+
+# ahub dam
+config SND_SOC_SUNXI_AHUB_DAM
+	tristate
+
+# codec
+config SND_SOC_SUNXI_SUNXI_DUMMYCODEC
+	tristate
+
+config SND_SOC_SUNXI_INTERNALCODEC
+	tristate
+
+config SND_SOC_SUNXI_SUN50IW9_CODEC
+	tristate
+
+# menu select
+menu "Allwinner SoC Audio support V2"
+	depends on ARCH_SUNXI
+
+# aaudio
+config SND_SOC_SUNXI_AAUDIO
+	tristate "Allwinner AAUDIO support"
+	select REGMAP_MMIO
+	select SND_SOC_GENERIC_DMAENGINE_PCM
+	select SND_SOC_SUNXI_PCM
+	select SND_SOC_SUNXI_MACH
+	select SND_SOC_SUNXI_INTERNALCODEC
+	select SND_SOC_SUNXI_SUN50IW9_CODEC if ARCH_SUN50IW9
+	depends on ARCH_SUN50IW9
+	help
+	    Select Y or M to support analog-audio Module in the Allwinner SoCs.
+
+# spdif
+config SND_SOC_SUNXI_SPDIF
+	tristate "Allwinner SPDIF Support"
+	select REGMAP_MMIO
+	select SND_SOC_GENERIC_DMAENGINE_PCM
+	select SND_SOC_SUNXI_PCM
+	select SND_SOC_SUNXI_MACH
+	depends on ARCH_SUN50IW9 \
+		|| (ARCH_SUN8IW20 || ARCH_SUN20IW1)
+	help
+	    Select Y or M to support SPDIF Module in Allwinner SoCs.
+
+# spdif for RX IEC61937
+config SND_SOC_SUNXI_SPDIF_RXIEC61937
+	tristate "Allwinner SPDIF RX IEC61937 Support"
+	default y
+	depends on SND_SOC_SUNXI_SPDIF
+	depends on (ARCH_SUN8IW20 || ARCH_SUN20IW1)
+	help
+	    Select Y or M to support SPDIF RX IEC61937 in Allwinner SoCs.
+
+# dmic
+config SND_SOC_SUNXI_DMIC
+	tristate "Allwinner DMIC support"
+	select REGMAP_MMIO
+	select SND_SOC_GENERIC_DMAENGINE_PCM
+	select SND_SOC_SUNXI_PCM
+	select SND_SOC_SUNXI_MACH
+	depends on ARCH_SUN50IW9 \
+		|| (ARCH_SUN8IW20 || ARCH_SUN20IW1)
+	help
+	    Select Y or M to support DMIC Module in Allwinner SoCs.
+
+# daudio
+config SND_SOC_SUNXI_DAUDIO
+	tristate "Allwinner DAUDIO Support"
+	select REGMAP_MMIO
+	select SND_SOC_GENERIC_DMAENGINE_PCM
+	select SND_SOC_SUNXI_PCM
+	select SND_SOC_SUNXI_MACH
+	depends on (ARCH_SUN8IW20 || ARCH_SUN20IW1)
+	help
+	    Select Y or M to support I2S/PCM/TDM Module in Allwinner SoCs.
+
+# HDMIAUDIO
+if SND_SOC_SUNXI_DAUDIO
+config SND_SOC_SUNXI_HDMIAUDIO
+	tristate "Allwinner HDMIAUDIO Support"
+	depends on (ARCH_SUN8IW20 || ARCH_SUN20IW1)
+	help
+	    Select Y or M to support hdmi audio in Allwinner SoCs.
+endif
+
+# ahub
+config SND_SOC_SUNXI_AHUB
+	tristate "Allwinner AHUB Support"
+	select REGMAP_MMIO
+	select SND_SOC_GENERIC_DMAENGINE_PCM
+	select SND_SOC_SUNXI_PCM
+	select SND_SOC_SUNXI_MACH
+	select SND_SOC_SUNXI_AHUB_DAM
+	depends on ARCH_SUN50IW9
+	help
+	    Select Y or M to support audio-hub Module in Allwinner SoCs.
+
+# HDMIAUDIO
+if SND_SOC_SUNXI_AHUB
+config SND_SOC_SUNXI_HDMIAUDIO
+	tristate "Allwinner HDMIAUDIO Support"
+	depends on ARCH_SUN50IW9
+	help
+	    Select Y or M to support hdmi audio in Allwinner SoCs.
+endif
+
+# Components
+config SND_SOC_SUNXI_COMPONENTS
+	tristate "Allwinner Function Components"
+	depends on (ARCH_SUN8IW20 || ARCH_SUN20IW1)
+	help
+	    Select Y or M to support function components.
+
+config SND_SOC_SUNXI_RXSYNC
+	tristate "Components Rx Sync"
+	depends on SND_SOC_SUNXI_COMPONENTS
+	depends on (ARCH_SUN8IW20 || ARCH_SUN20IW1)
+	help
+	    Select Y or M to support rx sync components.
+
+config SND_SOC_SUNXI_DEBUG
+	tristate "Components Debug"
+	depends on SND_SOC_SUNXI_COMPONENTS
+	help
+	    Select Y or M to support debug components.
+
+endmenu

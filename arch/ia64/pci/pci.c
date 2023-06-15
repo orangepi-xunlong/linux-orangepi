@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * pci.c - Low-Level PCI Access in IA-64
  *
@@ -20,10 +21,9 @@
 #include <linux/ioport.h>
 #include <linux/slab.h>
 #include <linux/spinlock.h>
-#include <linux/bootmem.h>
+#include <linux/memblock.h>
 #include <linux/export.h>
 
-#include <asm/machvec.h>
 #include <asm/page.h>
 #include <asm/io.h>
 #include <asm/sal.h>
@@ -371,7 +371,6 @@ void pcibios_fixup_bus(struct pci_bus *b)
 	}
 	list_for_each_entry(dev, &b->devices, bus_list)
 		pcibios_fixup_device_resources(dev);
-	platform_pci_fixup_bus(b);
 }
 
 void pcibios_add_bus(struct pci_bus *bus)
@@ -398,7 +397,7 @@ pcibios_enable_device (struct pci_dev *dev, int mask)
 	if (ret < 0)
 		return ret;
 
-	if (!dev->msi_enabled)
+	if (!pci_dev_msi_enabled(dev))
 		return acpi_pci_irq_enable(dev);
 	return 0;
 }
@@ -407,65 +406,12 @@ void
 pcibios_disable_device (struct pci_dev *dev)
 {
 	BUG_ON(atomic_read(&dev->enable_cnt));
-	if (!dev->msi_enabled)
+	if (!pci_dev_msi_enabled(dev))
 		acpi_pci_irq_disable(dev);
 }
 
-resource_size_t
-pcibios_align_resource (void *data, const struct resource *res,
-		        resource_size_t size, resource_size_t align)
-{
-	return res->start;
-}
-
-int
-pci_mmap_page_range (struct pci_dev *dev, struct vm_area_struct *vma,
-		     enum pci_mmap_state mmap_state, int write_combine)
-{
-	unsigned long size = vma->vm_end - vma->vm_start;
-	pgprot_t prot;
-
-	/*
-	 * I/O space cannot be accessed via normal processor loads and
-	 * stores on this platform.
-	 */
-	if (mmap_state == pci_mmap_io)
-		/*
-		 * XXX we could relax this for I/O spaces for which ACPI
-		 * indicates that the space is 1-to-1 mapped.  But at the
-		 * moment, we don't support multiple PCI address spaces and
-		 * the legacy I/O space is not 1-to-1 mapped, so this is moot.
-		 */
-		return -EINVAL;
-
-	if (!valid_mmap_phys_addr_range(vma->vm_pgoff, size))
-		return -EINVAL;
-
-	prot = phys_mem_access_prot(NULL, vma->vm_pgoff, size,
-				    vma->vm_page_prot);
-
-	/*
-	 * If the user requested WC, the kernel uses UC or WC for this region,
-	 * and the chipset supports WC, we can use WC. Otherwise, we have to
-	 * use the same attribute the kernel uses.
-	 */
-	if (write_combine &&
-	    ((pgprot_val(prot) & _PAGE_MA_MASK) == _PAGE_MA_UC ||
-	     (pgprot_val(prot) & _PAGE_MA_MASK) == _PAGE_MA_WC) &&
-	    efi_range_is_wc(vma->vm_start, vma->vm_end - vma->vm_start))
-		vma->vm_page_prot = pgprot_writecombine(vma->vm_page_prot);
-	else
-		vma->vm_page_prot = prot;
-
-	if (remap_pfn_range(vma, vma->vm_start, vma->vm_pgoff,
-			     vma->vm_end - vma->vm_start, vma->vm_page_prot))
-		return -EAGAIN;
-
-	return 0;
-}
-
 /**
- * ia64_pci_get_legacy_mem - generic legacy mem routine
+ * pci_get_legacy_mem - generic legacy mem routine
  * @bus: bus to get legacy memory base address for
  *
  * Find the base of legacy memory for @bus.  This is typically the first
@@ -476,7 +422,7 @@ pci_mmap_page_range (struct pci_dev *dev, struct vm_area_struct *vma,
  * This is the ia64 generic version of this routine.  Other platforms
  * are free to override it with a machine vector.
  */
-char *ia64_pci_get_legacy_mem(struct pci_bus *bus)
+char *pci_get_legacy_mem(struct pci_bus *bus)
 {
 	return (char *)__IA64_UNCACHED_OFFSET;
 }
@@ -502,7 +448,7 @@ pci_mmap_legacy_page_range(struct pci_bus *bus, struct vm_area_struct *vma,
 		return -ENOSYS;
 
 	/*
-	 * Avoid attribute aliasing.  See Documentation/ia64/aliasing.txt
+	 * Avoid attribute aliasing.  See Documentation/ia64/aliasing.rst
 	 * for more details.
 	 */
 	if (!valid_mmap_phys_addr_range(vma->vm_pgoff, size))
@@ -525,7 +471,7 @@ pci_mmap_legacy_page_range(struct pci_bus *bus, struct vm_area_struct *vma,
 }
 
 /**
- * ia64_pci_legacy_read - read from legacy I/O space
+ * pci_legacy_read - read from legacy I/O space
  * @bus: bus to read
  * @port: legacy port value
  * @val: caller allocated storage for returned value
@@ -537,7 +483,7 @@ pci_mmap_legacy_page_range(struct pci_bus *bus, struct vm_area_struct *vma,
  * overridden by the platform.  This is necessary on platforms that don't
  * support legacy I/O routing or that hard fail on legacy I/O timeouts.
  */
-int ia64_pci_legacy_read(struct pci_bus *bus, u16 port, u32 *val, u8 size)
+int pci_legacy_read(struct pci_bus *bus, u16 port, u32 *val, u8 size)
 {
 	int ret = size;
 
@@ -560,7 +506,7 @@ int ia64_pci_legacy_read(struct pci_bus *bus, u16 port, u32 *val, u8 size)
 }
 
 /**
- * ia64_pci_legacy_write - perform a legacy I/O write
+ * pci_legacy_write - perform a legacy I/O write
  * @bus: bus pointer
  * @port: port to write
  * @val: value to write
@@ -568,7 +514,7 @@ int ia64_pci_legacy_read(struct pci_bus *bus, u16 port, u32 *val, u8 size)
  *
  * Simply writes @size bytes of @val to @port.
  */
-int ia64_pci_legacy_write(struct pci_bus *bus, u16 port, u32 val, u8 size)
+int pci_legacy_write(struct pci_bus *bus, u16 port, u32 val, u8 size)
 {
 	int ret = size;
 
@@ -620,32 +566,6 @@ static void __init set_pci_dfl_cacheline_size(void)
 	}
 	pci_dfl_cache_line_size = (1 << cci.pcci_line_size) / 4;
 }
-
-u64 ia64_dma_get_required_mask(struct device *dev)
-{
-	u32 low_totalram = ((max_pfn - 1) << PAGE_SHIFT);
-	u32 high_totalram = ((max_pfn - 1) >> (32 - PAGE_SHIFT));
-	u64 mask;
-
-	if (!high_totalram) {
-		/* convert to mask just covering totalram */
-		low_totalram = (1 << (fls(low_totalram) - 1));
-		low_totalram += low_totalram - 1;
-		mask = low_totalram;
-	} else {
-		high_totalram = (1 << (fls(high_totalram) - 1));
-		high_totalram += high_totalram - 1;
-		mask = (((u64)high_totalram) << 32) + 0xffffffff;
-	}
-	return mask;
-}
-EXPORT_SYMBOL_GPL(ia64_dma_get_required_mask);
-
-u64 dma_get_required_mask(struct device *dev)
-{
-	return platform_dma_get_required_mask(dev);
-}
-EXPORT_SYMBOL_GPL(dma_get_required_mask);
 
 static int __init pcibios_init(void)
 {

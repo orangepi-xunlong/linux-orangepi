@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * kvm asynchronous fault support
  *
@@ -5,25 +6,13 @@
  *
  * Author:
  *      Gleb Natapov <gleb@redhat.com>
- *
- * This file is free software; you can redistribute it and/or modify
- * it under the terms of version 2 of the GNU General Public License
- * as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA.
  */
 
 #include <linux/kvm_host.h>
 #include <linux/slab.h>
 #include <linux/module.h>
 #include <linux/mmu_context.h>
+#include <linux/sched/mm.h>
 
 #include "async_pf.h"
 #include <trace/events/kvm.h>
@@ -75,17 +64,21 @@ static void async_pf_execute(struct work_struct *work)
 	struct mm_struct *mm = apf->mm;
 	struct kvm_vcpu *vcpu = apf->vcpu;
 	unsigned long addr = apf->addr;
-	gva_t gva = apf->gva;
+	gpa_t cr2_or_gpa = apf->cr2_or_gpa;
+	int locked = 1;
 
 	might_sleep();
 
 	/*
-	 * This work is run asynchromously to the task which owns
+	 * This work is run asynchronously to the task which owns
 	 * mm and might be done in another context, so we must
-	 * use FOLL_REMOTE.
+	 * access remotely.
 	 */
-	__get_user_pages_unlocked(NULL, mm, addr, 1, NULL,
-			FOLL_WRITE | FOLL_REMOTE);
+	down_read(&mm->mmap_sem);
+	get_user_pages_remote(NULL, mm, addr, 1, FOLL_WRITE, NULL, NULL,
+			&locked);
+	if (locked)
+		up_read(&mm->mmap_sem);
 
 	kvm_async_page_present_sync(vcpu, apf);
 
@@ -99,14 +92,10 @@ static void async_pf_execute(struct work_struct *work)
 	 * this point
 	 */
 
-	trace_kvm_async_pf_completed(addr, gva);
+	trace_kvm_async_pf_completed(addr, cr2_or_gpa);
 
-	/*
-	 * This memory barrier pairs with prepare_to_wait's set_current_state()
-	 */
-	smp_mb();
-	if (swait_active(&vcpu->wq))
-		swake_up(&vcpu->wq);
+	if (swq_has_sleeper(&vcpu->wq))
+		swake_up_one(&vcpu->wq);
 
 	mmput(mm);
 	kvm_put_kvm(vcpu->kvm);
@@ -176,8 +165,8 @@ void kvm_check_async_pf_completion(struct kvm_vcpu *vcpu)
 	}
 }
 
-int kvm_setup_async_pf(struct kvm_vcpu *vcpu, gva_t gva, unsigned long hva,
-		       struct kvm_arch_async_pf *arch)
+int kvm_setup_async_pf(struct kvm_vcpu *vcpu, gpa_t cr2_or_gpa,
+		       unsigned long hva, struct kvm_arch_async_pf *arch)
 {
 	struct kvm_async_pf *work;
 
@@ -196,11 +185,11 @@ int kvm_setup_async_pf(struct kvm_vcpu *vcpu, gva_t gva, unsigned long hva,
 
 	work->wakeup_all = false;
 	work->vcpu = vcpu;
-	work->gva = gva;
+	work->cr2_or_gpa = cr2_or_gpa;
 	work->addr = hva;
 	work->arch = *arch;
 	work->mm = current->mm;
-	atomic_inc(&work->mm->mm_users);
+	mmget(work->mm);
 	kvm_get_kvm(work->vcpu->kvm);
 
 	/* this can't really happen otherwise gfn_to_pfn_async

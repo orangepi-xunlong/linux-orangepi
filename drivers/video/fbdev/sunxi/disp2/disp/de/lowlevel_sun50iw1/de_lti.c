@@ -19,6 +19,7 @@
 /*  */
 /* ********************************************************************************************************************* */
 
+#ifdef CONFIG_DISP2_SUNXI_SUPPORT_ENAHNCE
 #include "de_lti_type.h"
 #include "de_enhance.h"
 
@@ -200,3 +201,4 @@ int de_lti_info2para(unsigned int sharp, de_rect window, __lti_config_data *para
 	return 0;
 }
 
+#endif

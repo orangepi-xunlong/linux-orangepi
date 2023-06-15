@@ -19,6 +19,7 @@
 /* 2014/04/25	vito cheng  v0.11 Add block updated function */
 /* ********************************************************************************************************************* */
 
+#ifdef CONFIG_DISP2_SUNXI_SUPPORT_ENAHNCE
 #include "de_bws_type.h"
 #include "de_rtmx.h"
 #include "de_fce_type.h"
@@ -508,3 +509,4 @@ int de_bws_tasklet(unsigned int screen_id, unsigned int chno, unsigned int frame
 
 }
 
+#endif

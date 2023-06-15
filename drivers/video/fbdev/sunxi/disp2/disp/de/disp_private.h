@@ -24,7 +24,9 @@
 #include "./lowlevel_sun8iw10/disp_al.h"
 #elif defined(CONFIG_ARCH_SUN8IW11)
 #include "./lowlevel_v2x/disp_al.h"
-#elif defined(CONFIG_ARCH_SUN8IW12)
+#elif defined(CONFIG_ARCH_SUN8IW12) || defined(CONFIG_ARCH_SUN8IW16)\
+    || defined(CONFIG_ARCH_SUN8IW19) || defined(CONFIG_ARCH_SUN8IW20)\
+    || defined(CONFIG_ARCH_SUN20IW1)
 #include "./lowlevel_v2x/disp_al.h"
 #elif defined(CONFIG_ARCH_SUN8IW15)
 #include "./lowlevel_v2x/disp_al.h"
@@ -32,10 +34,10 @@
 #include "./lowlevel_v2x/disp_al.h"
 #elif defined(CONFIG_ARCH_SUN8IW6)
 #include "./lowlevel_v2x/disp_al.h"
-#elif defined(CONFIG_ARCH_SUN8IW7)
-#include "./lowlevel_sun8iw7/disp_al.h"
-#elif defined(CONFIG_ARCH_SUN8IW17)
+#elif defined(CONFIG_ARCH_SUN8IW7) || defined(CONFIG_ARCH_SUN8IW17)
 #include "./lowlevel_v2x/disp_al.h"
+#elif defined(CONFIG_ARCH_SUN8IW8)
+#include "./lowlevel_sun8iw8/disp_al.h"
 #elif defined(CONFIG_ARCH_SUN50IW3) || defined(CONFIG_ARCH_SUN50IW6)
 #include "./lowlevel_v3x/disp_al.h"
 #else
@@ -61,8 +63,7 @@ struct disp_layer_address {
 
 struct dmabuf_item {
 	struct list_head list;
-	int fd;
-	struct dma_buf *buf;
+	struct dma_buf *dmabuf;
 	struct dma_buf_attachment *attachment;
 	struct sg_table *sgt;
 	dma_addr_t dma_addr;

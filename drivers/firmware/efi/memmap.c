@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Common EFI memory map functions.
  */
@@ -14,7 +15,7 @@
 
 static phys_addr_t __init __efi_memmap_alloc_early(unsigned long size)
 {
-	return memblock_alloc(size, 0);
+	return memblock_phys_alloc(size, SMP_CACHE_BYTES);
 }
 
 static phys_addr_t __init __efi_memmap_alloc_late(unsigned long size)

@@ -277,7 +277,8 @@ struct nand_chip_info {
 	unsigned int random_cmd2_send_flag;
 	unsigned int random_addr_num;
 	unsigned int nand_real_page_size;
-
+	unsigned int sharedpage_pairedwrite;
+	unsigned int sharedpage_offset;
 	itf_cfg_t itf_cfg;
 	struct nand_super_chip_info *nsci;
 	struct nand_controller_info *nctri;
@@ -505,6 +506,7 @@ struct sunxi_nand_flash_device {
 	unsigned int random_cmd2_send_flag;
 	unsigned int random_addr_num;
 	unsigned int nand_real_page_size;
+	unsigned int sharedpage_offset;
 };
 
 /**

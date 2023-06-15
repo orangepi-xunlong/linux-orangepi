@@ -29,8 +29,7 @@ struct info_mem {
 struct di_dma_item {
 	struct dma_buf *buf;
 	struct dma_buf_attachment *attach;
-	struct sg_table *sgt_org;
-	struct sg_table *sgt_bak;
+	struct sg_table *sgt;
 	enum dma_data_direction dir;
 	dma_addr_t dma_addr;
 };

@@ -27,17 +27,18 @@
 #define NAND_MFR_FUJITSU 0x04
 #define NAND_MFR_HYNIX 0xad
 #define NAND_MFR_INTEL 0x89
+#define NAND_MFR_GIGA 0xc8
+#define NAND_MFR_MXIC 0xc2
 #define NAND_MFR_MACRONIX 0xc2
 #define NAND_MFR_MICRON 0x2c
 #define NAND_MFR_NATIONAL 0x8f
 #define NAND_MFR_RENESAS 0x07
 #define NAND_MFR_SAMSUNG 0xec
 #define NAND_MFR_SANDISK 0x45
-#define NAND_MFR_GIGA	0xc8
 #define NAND_MFR_STMICRO 0x20
-#define NAND_MFR_MXIC 0xc2
 #define NAND_MFR_TOSHIBA 0x98
 #define NAND_MFR_WINBOND 0xef
+#define NAND_MFR_FORESEE 0xec
 
 /*
  * NAND Flash Manufacture name
@@ -49,8 +50,8 @@
 #define FUJITSU_NAME "fujitsu"
 #define HYNIX_NAME "hynix"
 #define INTEL_NAME "intel"
-#define GIGA_NAME "giga"
 #define MACRONIX_NAME "macronix"
+#define GIGA_NAME "giga"
 #define MXIC_NAME "mxic"
 #define MICRON_NAME "micron"
 #define NATIONAL_NAME "national"
@@ -60,6 +61,7 @@
 #define STMICRO_NAME "stmicro"
 #define TOSHIBA_NAME "toshiba"
 #define WINBOND_NAME "winbond"
+#define FORESEE_NAME "foresee"
 
 /**
  *  write boot0 special requirement
@@ -117,6 +119,12 @@
  * micron: different flash have the same id
  */
 #define NAND_FIND_ID_TAB_BY_NAME (1 << 22)
+
+/*it use in the case: name(read from flash) is not the unique,
+ * but id table 1 is conifure to NAND_FIND_ID_TAB_BY_NAME. in this case,
+ * you can use NAND_FIND_IN_TAB_BY_NAME_CANCEL to cancel name matching in id table 2.
+ * id table 2 is the same with id table1 except the optional*/
+#define NAND_FIND_ID_TAB_BY_NAME_CANCEL (1 << 23)
 /* nand flash support onfi's sync reset*/
 #define NAND_ONFI_SYNC_RESET_OP (1 << 28)
 /* nand flash support toggle interface only, and do not support switch between legacy and toggle*/

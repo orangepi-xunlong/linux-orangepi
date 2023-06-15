@@ -508,6 +508,9 @@ void xradio_bss_info_changed(struct ieee80211_hw *dev,
 {
 	struct xradio_common *hw_priv = dev->priv;
 	struct xradio_vif *priv = xrwl_get_vif_from_ieee80211(vif);
+
+	enum nl80211_channel_type chan_type = cfg80211_get_chandef_type(&info->chandef);
+
 	int suspend_lock_state;
 
 	ap_printk(XRADIO_DBG_TRC, "%s\n", __func__);
@@ -535,7 +538,7 @@ void xradio_bss_info_changed(struct ieee80211_hw *dev,
 	atomic_set(&hw_priv->suspend_lock_state, XRADIO_SUSPEND_LOCK_IDEL);
 
 	/*We do somethings first which is not of priv.*/
-	if (changed & BSS_CHANGED_RETRY_LIMITS) {
+	if (changed & IEEE80211_CONF_CHANGE_RETRY_LIMITS) {
 		spin_lock_bh(&hw_priv->tx_policy_cache.lock);
 		/*TODO:COMBO: for now it's still handled per hw and kept
 		 * in xradio_common */
@@ -550,9 +553,9 @@ void xradio_bss_info_changed(struct ieee80211_hw *dev,
 
 		hw_priv->hw->max_rate_tries = hw_priv->short_frame_max_tx_count;
 		spin_unlock_bh(&hw_priv->tx_policy_cache.lock);
-		ap_printk(XRADIO_DBG_NIY, "Retry limits: long=%d(%d), short=%d(%d).\n",
-			  hw_priv->short_frame_max_tx_count, info->retry_long,
-			  hw_priv->long_frame_max_tx_count, info->retry_short);
+		ap_printk(XRADIO_DBG_NIY, "Retry limits: long=%d(), short=%d().\n",
+			  hw_priv->short_frame_max_tx_count,
+			  hw_priv->long_frame_max_tx_count);
 		/* TBD: I think we don't need tx_policy_force_upload().
 		 * Outdated policies will leave cache in a normal way. */
 		/* SYS_WARN(tx_policy_force_upload(priv)); */
@@ -560,7 +563,7 @@ void xradio_bss_info_changed(struct ieee80211_hw *dev,
 
 	/*We check priv before operation of priv.*/
 	if (!atomic_read(&priv->enabled)) {
-		if (changed & ~BSS_CHANGED_RETRY_LIMITS)
+		if (changed & ~IEEE80211_CONF_CHANGE_RETRY_LIMITS)
 			ap_printk(XRADIO_DBG_WARN, "%s vif(type=%d) is not enable!" \
 					"changed=0x%x\n", __func__, vif->type, changed);
 		up(&hw_priv->conf_lock);
@@ -590,10 +593,11 @@ void xradio_bss_info_changed(struct ieee80211_hw *dev,
 		struct wsm_arp_ipv4_filter filter = { 0 };
 		int i;
 		ap_printk(XRADIO_DBG_MSG,
-			  "[STA] BSS_CHANGED_ARP_FILTER enabled: %d, cnt: %d\n",
-			  info->arp_filter_enabled, info->arp_addr_cnt);
+			  "[STA] BSS_CHANGED_ARP_FILTER enabled: , cnt: %d\n",
+			  info->arp_addr_cnt);
 
-		if (info->arp_filter_enabled) {
+		//if (info->arp_filter_enabled) {
+		if (info->arp_addr_cnt) {
 			if (vif->type == NL80211_IFTYPE_STATION ||
 				vif->type == NL80211_IFTYPE_P2P_DEVICE)
 				filter.enable =
@@ -632,12 +636,6 @@ void xradio_bss_info_changed(struct ieee80211_hw *dev,
 			/* Firmware requires that value for this 1-byte field must
 			 * be specified in units of 500us. Values above the 128ms
 			 * threshold are not supported. */
-			if (info->dynamic_ps_timeout >= 0x80)
-				priv->powersave_mode.fastPsmIdlePeriod = 0xFF;
-			else
-				priv->powersave_mode.fastPsmIdlePeriod =
-				    info->dynamic_ps_timeout << 1;
-
 			ap_printk(XRADIO_DBG_NIY,
 				  "[STA]fastPsmIdle=%d, apPsmChange=%d\n",
 				  priv->powersave_mode.fastPsmIdlePeriod,
@@ -667,7 +665,7 @@ void xradio_bss_info_changed(struct ieee80211_hw *dev,
 		}
 	}
 
-#ifdef IPV6_FILTERING
+#if IPV6_FILTERING
 	if (changed & BSS_CHANGED_NDP_FILTER) {
 		int i;
 		struct wsm_ndp_ipv6_filter filter = { 0 };
@@ -682,7 +680,7 @@ void xradio_bss_info_changed(struct ieee80211_hw *dev,
 				vif->type == NL80211_IFTYPE_P2P_DEVICE)
 				filter.enable =
 				    (u32) XRADIO_ENABLE_NDP_FILTER_OFFLOAD;
-			else if ((vif->type == NL80211_IFTYPE_AP))
+			else if (vif->type == NL80211_IFTYPE_AP)
 				filter.enable = (u32) (1 << 1);
 			else
 				filter.enable = 0;
@@ -848,7 +846,7 @@ void xradio_bss_info_changed(struct ieee80211_hw *dev,
 				priv->bss_params.operationalRateSet =
 				  __cpu_to_le32(xradio_rate_mask_to_wsm(hw_priv,
 						sta->supp_rates[hw_priv->channel->band]));
-				hw_priv->ht_info.channel_type   = info->channel_type;
+				hw_priv->ht_info.channel_type   = chan_type;
 				hw_priv->ht_info.operation_mode = info->ht_operation_mode;
 				priv->oper_rates = sta->supp_rates[hw_priv->channel->band];
 			} else {
@@ -936,10 +934,10 @@ void xradio_bss_info_changed(struct ieee80211_hw *dev,
 			else
 				PhyModeCfg.ModemFlags = (MODEM_F_B_DSSS|MODEM_F_A_OFDM|MODEM_F_N_OFDM);
 
-			if (info->channel_type == NL80211_CHAN_HT40MINUS) {
+			if (chan_type == NL80211_CHAN_HT40MINUS) {
 				PhyModeCfg.ChWidthCfg = CHAN_WIDTH_40MHz;
 				PhyModeCfg.PriChCfg   = PRIMARY_CH_1ST;
-			} else if (info->channel_type == NL80211_CHAN_HT40PLUS) {
+			} else if (chan_type == NL80211_CHAN_HT40PLUS) {
 				PhyModeCfg.ChWidthCfg = CHAN_WIDTH_40MHz;
 				PhyModeCfg.PriChCfg   = PRIMARY_CH_2ND;
 			} else {
@@ -947,7 +945,7 @@ void xradio_bss_info_changed(struct ieee80211_hw *dev,
 				PhyModeCfg.PriChCfg   = PRIMARY_CH_1ST;
 			}
 
-			if (info->channel_type == NL80211_CHAN_NO_HT) {
+			if (chan_type == NL80211_CHAN_NO_HT) {
 				PhyModeCfg.ModemFlags &= ~(MODEM_F_N_OFDM);
 				PhyModeCfg.SGI_Enable = false;
 				PhyModeCfg.GF_Enable = false;
@@ -992,9 +990,8 @@ void xradio_bss_info_changed(struct ieee80211_hw *dev,
 			    xradio_ht_ampdu_density(&hw_priv->ht_info);
 
 #if defined(CONFIG_XRADIO_USE_EXTENSIONS)
-			priv->cqm_beacon_loss_count =
-			    info->cqm_beacon_miss_thold;
-			priv->cqm_tx_failure_thold = info->cqm_tx_fail_thold;
+			priv->cqm_beacon_loss_count = 0; //info->cqm_beacon_miss_thold;
+			priv->cqm_tx_failure_thold = 0; //info->cqm_tx_fail_thold;
 			priv->cqm_tx_failure_count = 0;
 			cancel_delayed_work_sync(&priv->bss_loss_work);
 			cancel_delayed_work_sync(&priv->connection_loss_work);
@@ -1183,10 +1180,10 @@ void xradio_bss_info_changed(struct ieee80211_hw *dev,
 			  info->cqm_rssi_thold, info->cqm_rssi_hyst);
 
 #if defined(CONFIG_XRADIO_USE_EXTENSIONS)
-		ap_printk(XRADIO_DBG_NIY, "[CQM] Beacon loss subscribe: %d\n",
-			  info->cqm_beacon_miss_thold);
-		ap_printk(XRADIO_DBG_NIY, "[CQM] TX failure subscribe: %d\n",
-			  info->cqm_tx_fail_thold);
+		//ap_printk(XRADIO_DBG_NIY, "[CQM] Beacon loss subscribe: %d\n",
+			  //info->cqm_beacon_miss_thold);
+		//ap_printk(XRADIO_DBG_NIY, "[CQM] TX failure subscribe: %d\n",
+			  //info->cqm_tx_fail_thold);
 		priv->cqm_rssi_thold = info->cqm_rssi_thold;
 		priv->cqm_rssi_hyst  = info->cqm_rssi_hyst;
 #endif /* CONFIG_XRADIO_USE_EXTENSIONS */
@@ -1218,9 +1215,9 @@ void xradio_bss_info_changed(struct ieee80211_hw *dev,
 		SYS_WARN(wsm_set_rcpi_rssi_threshold(hw_priv, &threshold, priv->if_id));
 
 #if defined(CONFIG_XRADIO_USE_EXTENSIONS)
-		priv->cqm_tx_failure_thold = info->cqm_tx_fail_thold;
+#if 0
+		//priv->cqm_tx_failure_thold = info->cqm_tx_fail_thold;
 		priv->cqm_tx_failure_count = 0;
-
 		if (priv->cqm_beacon_loss_count != info->cqm_beacon_miss_thold) {
 			priv->cqm_beacon_loss_count = info->cqm_beacon_miss_thold;
 			priv->bss_params.beaconLostCount = (priv->cqm_beacon_loss_count ?
@@ -1233,13 +1230,17 @@ void xradio_bss_info_changed(struct ieee80211_hw *dev,
 				priv->setbssparams_done = true;
 			}
 		}
+#endif
 #endif /* CONFIG_XRADIO_USE_EXTENSIONS */
 	}
 
 	if (changed & BSS_CHANGED_PS) {
-		if (info->ps_enabled == false)
+		//if (info->ps_enabled == false)
+		//if ((dev->conf.flags & IEEE80211_CONF_PS) == 0)
+		if (vif->bss_conf.ps == false)
 			priv->powersave_mode.pmMode = WSM_PSM_ACTIVE;
-		else if (info->dynamic_ps_timeout <= 0)
+		//else if (info->dynamic_ps_timeout <= 0)
+		else if (dev->conf.dynamic_ps_timeout <= 0)
 			priv->powersave_mode.pmMode = WSM_PSM_PS;
 		else
 			priv->powersave_mode.pmMode = WSM_PSM_FAST_PS;
@@ -1255,11 +1256,11 @@ void xradio_bss_info_changed(struct ieee80211_hw *dev,
 		/* Firmware requires that value for this 1-byte field must
 		 * be specified in units of 500us. Values above the 128ms
 		 * threshold are not supported. */
-		if (info->dynamic_ps_timeout >= 0x80)
+		if (dev->conf.dynamic_ps_timeout >= 0x80)
 			priv->powersave_mode.fastPsmIdlePeriod = 0xFF;
 		else
 			priv->powersave_mode.fastPsmIdlePeriod =
-					     info->dynamic_ps_timeout << 1;
+					     dev->conf.dynamic_ps_timeout << 1;
 		ap_printk(XRADIO_DBG_NIY,
 			  "[STA]CHANGED_PS fastPsmIdle=%d, apPsmChange=%d\n",
 			  priv->powersave_mode.fastPsmIdlePeriod,
@@ -1278,6 +1279,7 @@ void xradio_bss_info_changed(struct ieee80211_hw *dev,
 		struct wsm_p2p_ps_modeinfo *modeinfo;
 		modeinfo = &priv->p2p_ps_modeinfo;
 		ap_printk(XRADIO_DBG_NIY, "[AP] BSS_CHANGED_P2P_PS\n");
+#if 0
 		ap_printk(XRADIO_DBG_NIY,
 			  "[AP] Legacy PS: %d for AID %d in %d mode.\n",
 			  info->p2p_ps.legacy_ps, priv->bss_params.aid,
@@ -1341,6 +1343,7 @@ void xradio_bss_info_changed(struct ieee80211_hw *dev,
 			modeinfo->duration  = 0;
 			modeinfo->interval  = 0;
 		}
+#endif
 
 #if defined(CONFIG_XRADIO_DEBUG)
 		print_hex_dump_bytes("p2p_set_ps_modeinfo: ", DUMP_PREFIX_NONE,
@@ -1395,9 +1398,9 @@ void xradio_multicast_stop_work(struct work_struct *work)
 	}
 }
 
-void xradio_mcast_timeout(unsigned long arg)
+void xradio_mcast_timeout(struct timer_list *t)
 {
-	struct xradio_vif *priv = (struct xradio_vif *)arg;
+	struct xradio_vif *priv = from_timer(priv, t, mcast_timeout);
 	ap_printk(XRADIO_DBG_TRC, "%s\n", __func__);
 
 	ap_printk(XRADIO_DBG_WARN, "Multicast delivery timeout.\n");
@@ -1409,9 +1412,7 @@ void xradio_mcast_timeout(unsigned long arg)
 }
 
 int xradio_ampdu_action(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
-			enum ieee80211_ampdu_mlme_action action,
-			struct ieee80211_sta *sta,
-			u16 tid, u16 *ssn, u8 buf_size)
+			struct ieee80211_ampdu_params *params)
 {
 	/* Aggregation is implemented fully in firmware,
 	 * including block ack negotiation.
@@ -1423,7 +1424,7 @@ int xradio_ampdu_action(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
 	int ret;
 	ap_printk(XRADIO_DBG_TRC, "%s\n", __func__);
 
-	switch (action) {
+	switch (params->action) {
 	case IEEE80211_AMPDU_RX_START:
 	case IEEE80211_AMPDU_RX_STOP:
 		/* Just return OK to mac80211 */
@@ -1459,9 +1460,11 @@ void xradio_suspend_resume(struct xradio_vif *priv,
 			 * to suspend, following wakeup will consume much more
 			 * power than it could be saved. */
 #ifdef CONFIG_PM
+#ifndef CONFIG_XRADIO_SUSPEND_POWER_OFF
 			xradio_pm_stay_awake(&hw_priv->pm_state,
 					     (priv->join_dtim_period * \
 					     (priv->beacon_int + 20) * HZ / 1024));
+#endif
 #endif
 			priv->tx_multicast = priv->aid0_bit_set &&
 					     priv->buffered_multicasts;
@@ -1628,6 +1631,13 @@ static int xradio_upload_proberesp(struct xradio_vif *priv)
 #endif
 
 	frame.skb = mac80211_proberesp_get(priv->hw, priv->vif);
+	if (frame.skb == NULL) {
+		frame.skb = mac80211_proberesp_ext_get(priv->hw, priv->vif);
+		if (frame.skb == NULL) {
+			ap_printk(XRADIO_DBG_ERROR, "mac80211_proberesp_ext_get frame.skb is null");
+			return -ENOMEM;
+		}
+	}
 	if (SYS_WARN(!frame.skb))
 		return -ENOMEM;
 
@@ -1731,7 +1741,8 @@ static int xradio_upload_null(struct xradio_vif *priv)
 	};
 	ap_printk(XRADIO_DBG_TRC, "%s\n", __func__);
 
-	frame.skb = mac80211_nullfunc_get(priv->hw, priv->vif);
+	frame.skb = mac80211_nullfunc_get(priv->hw, priv->vif, false);
+
 	if (SYS_WARN(!frame.skb))
 		return -ENOMEM;
 
@@ -1785,6 +1796,7 @@ static int xradio_start_ap(struct xradio_vif *priv)
 	struct ieee80211_bss_conf *conf = &priv->vif->bss_conf;
 	struct xradio_common *hw_priv = xrwl_vifpriv_to_hwpriv(priv);
 
+	enum nl80211_channel_type chan_type = cfg80211_get_chandef_type(&conf->chandef);
 #ifdef SUPPORT_HT40
 
 	struct ieee80211_supported_band *sband;
@@ -1867,10 +1879,10 @@ static int xradio_start_ap(struct xradio_vif *priv)
 					MODEM_F_A_OFDM |
 					MODEM_F_N_OFDM);
 
-	if (conf->channel_type == NL80211_CHAN_HT40MINUS) {
+	if (chan_type == NL80211_CHAN_HT40MINUS) {
 		PhyModeCfg.ChWidthCfg = CHAN_WIDTH_40MHz;
 		PhyModeCfg.PriChCfg   = PRIMARY_CH_1ST;
-	} else if (conf->channel_type == NL80211_CHAN_HT40PLUS) {
+	} else if (chan_type == NL80211_CHAN_HT40PLUS) {
 		PhyModeCfg.ChWidthCfg = CHAN_WIDTH_40MHz;
 		PhyModeCfg.PriChCfg   = PRIMARY_CH_2ND;
 	} else {
@@ -1878,7 +1890,7 @@ static int xradio_start_ap(struct xradio_vif *priv)
 		PhyModeCfg.PriChCfg   = PRIMARY_CH_1ST;
 	}
 
-	if (conf->channel_type == NL80211_CHAN_NO_HT) {
+	if (chan_type == NL80211_CHAN_NO_HT) {
 		PhyModeCfg.ModemFlags &= ~(MODEM_F_N_OFDM);
 		PhyModeCfg.SGI_Enable = false;
 		PhyModeCfg.GF_Enable = false;
@@ -2193,6 +2205,7 @@ void xradio_link_id_gc_work(struct work_struct *work)
 #if defined(CONFIG_XRADIO_USE_EXTENSIONS)
 void xradio_notify_noa(struct xradio_vif *priv, int delay)
 {
+#if 0
 	struct xradio_common *hw_priv = xrwl_vifpriv_to_hwpriv(priv);
 	struct cfg80211_p2p_ps p2p_ps = { 0 };
 	struct wsm_p2p_ps_modeinfo *modeinfo;
@@ -2221,6 +2234,7 @@ void xradio_notify_noa(struct xradio_vif *priv, int delay)
 
 		/* ieee80211_p2p_noa_notify(priv->vif, &p2p_ps, GFP_KERNEL); */
 	}
+#endif
 }
 #endif
 

@@ -570,8 +570,8 @@ __s32 dsi_gen_short_rd(__u32 sel, __u8 *para_p, __u8 para_num, __u8 *result)
 	return ret;
 }
 
- __s32 dsi_dcs_rd_memory(__u32 sel, __u32 *p_data, __u32 length)
- {
+__s32 dsi_dcs_rd_memory(__u32 sel, __u32 *p_data, __u32 length)
+{
 	 return 0;
 }
 

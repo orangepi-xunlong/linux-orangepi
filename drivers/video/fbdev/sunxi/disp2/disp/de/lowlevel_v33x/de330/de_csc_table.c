@@ -1054,7 +1054,7 @@ u32 y2rf2l[7][16] = {
 	}
 };
 
-u32 y2rl2f[7][16] = {
+u32 y2rl2f[8][16] = {
 	/* input : Limit YCbCr 601 */
 	/* output : Full RGB 601 */
 	{
@@ -1116,7 +1116,16 @@ u32 y2rl2f[7][16] = {
 		0x0002542a, 0x00000000, 0x00000000, 0x00000000,
 		0x00000000, 0x0002542a, 0x00000000, 0x00000000,
 		0xffffffc0, 0xffffffc0, 0xffffffc0, 0x00000000,
-	}
+	},
+
+	/* input : Limit YCbCr 2020 */
+	/* output : Full RGB 2020 */
+	{
+		0x0002542a, 0x00000000, 0x00035b7b, 0x00000000,
+		0x0002542a, 0xffffa017, 0xfffeb2fc, 0x00000000,
+		0x0002542a, 0x00044896, 0x00000000, 0x00000000,
+		0xfffffc40, 0xfffffe00, 0xfffffe00, 0x00000000,
+	},
 };
 
 u32 y2rf2f[7][16] = {
@@ -1256,9 +1265,11 @@ s32 de_csc_coeff_calc(struct de_csc_info *in_info,
 				else
 					*csc_coeff = &y2rf2l[inidx][0];
 			} else {
-				if (out_info->color_range == DE_COLOR_RANGE_0_255)
+				if (out_info->color_range == DE_COLOR_RANGE_0_255) {
+					if (inidx == 2 && outidx == 2)
+						inidx = 7;
 					*csc_coeff = &y2rl2f[inidx][0];
-				else
+				} else
 					*csc_coeff = &y2rl2l[inidx][0];
 			}
 		}

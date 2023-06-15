@@ -45,11 +45,10 @@ int sprdwl_vendor_nan_cmds(struct wiphy *wiphy,
 	ret = sprdwl_cmd_send_recv(vif->priv, msg,
 				    CMD_WAIT_TIMEOUT, rsp, &rsp_len);
 
-	if (!ret && rsp_len) {
+	if (!ret && rsp_len)
 		sprdwl_event_nan(vif, rsp, rsp_len);
-	} else {
+	else
 		wl_err("%s: ret=%d, rsp_len=%d\n", __func__, ret, rsp_len);
-	}
 
 	return ret;
 }

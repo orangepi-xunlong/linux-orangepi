@@ -42,6 +42,7 @@ struct isp521_reg {
 	ISP_INT_STATUS0_REG_t *isp_int_status0;
 	ISP_INTER_STATUS0_REG_t	*isp_inter_status0;
 	ISP_INTER_STATUS1_REG_t	*isp_inter_status1;
+	ISP_LBC_INTER_STATUS_REG_t *isp_lbc_inter_status;
 	ISP_VER_CFG_REG_t *isp_ver_cfg;
 	ISP_MAX_SIZE_REG_t *isp_max_width;
 
@@ -94,6 +95,7 @@ void bsp_isp_map_reg_addr(unsigned long id, unsigned long base)
 	isp_regs[id].isp_int_status0 = (ISP_INT_STATUS0_REG_t *) (base + ISP_INT_STATUS0_REG);
 	isp_regs[id].isp_inter_status0 = (ISP_INTER_STATUS0_REG_t *) (base + ISP_INTER_STATUS0_REG);
 	isp_regs[id].isp_inter_status1 = (ISP_INTER_STATUS1_REG_t *) (base + ISP_INTER_STATUS1_REG);
+	isp_regs[id].isp_lbc_inter_status = (ISP_LBC_INTER_STATUS_REG_t *) (base + ISP_LBC_INTER_STATUS_REG);
 	isp_regs[id].isp_ver_cfg = (ISP_VER_CFG_REG_t *) (base + ISP_VER_CFG_REG);
 	isp_regs[id].isp_max_width = (ISP_MAX_SIZE_REG_t *) (base + ISP_MAX_WIDTH_REG);
 
@@ -308,6 +310,16 @@ void bsp_isp_clr_internal_status0(unsigned long id, unsigned int flag)
 	isp_regs[id].isp_inter_status0->dwval = flag;
 }
 
+unsigned int bsp_isp_get_lbc_internal_status(unsigned long id, unsigned int flag)
+{
+	return isp_regs[id].isp_lbc_inter_status->dwval & flag;
+}
+
+void bsp_isp_clr_lbc_internal_status(unsigned long id, unsigned int flag)
+{
+	isp_regs[id].isp_lbc_inter_status->dwval = flag;
+}
+
 unsigned int bsp_isp_get_internal_status1(unsigned long id)
 {
 	return isp_regs[id].isp_inter_status1->dwval;
@@ -402,33 +414,6 @@ void bsp_isp_set_d3d_ltf_raw_addr(unsigned long id, dma_addr_t addr)
 	writel(addr >> ISP_ADDR_BIT_R_SHIFT, isp_regs[id].isp_d3d_ltf_raw_addr);
 }
 
-void bsp_isp_set_wdr_raw_lbc_ctrl(unsigned long id, struct isp_lbc_cfg *lbc)
-{
-	isp_regs[id].isp_wdr_raw_lbc_ctrl->bits.line_tar_bits = lbc->line_tar_bits;
-	isp_regs[id].isp_wdr_raw_lbc_ctrl->bits.lmtqp_min = 0;
-	isp_regs[id].isp_wdr_raw_lbc_ctrl->bits.mb_min_bit = lbc->mb_min_bit;
-	isp_regs[id].isp_wdr_raw_lbc_ctrl->bits.lmtqp_en = 0;
-	isp_regs[id].isp_wdr_raw_lbc_ctrl->bits.is_lossy = 1;
-}
-
-void bsp_isp_set_d3d_k_lbc_ctrl(unsigned long id, struct isp_lbc_cfg *lbc)
-{
-	isp_regs[id].isp_d3d_k_lbc_ctrl->bits.line_tar_bits = lbc->line_tar_bits;
-	isp_regs[id].isp_d3d_k_lbc_ctrl->bits.lmtqp_min = 0;
-	isp_regs[id].isp_d3d_k_lbc_ctrl->bits.mb_min_bit = lbc->mb_min_bit;
-	isp_regs[id].isp_d3d_k_lbc_ctrl->bits.lmtqp_en = 0;
-	isp_regs[id].isp_d3d_k_lbc_ctrl->bits.is_lossy = 1;
-}
-
-void bsp_isp_set_d3d_raw_lbc_ctrl(unsigned long id, struct isp_lbc_cfg *lbc)
-{
-	isp_regs[id].isp_d3d_raw_lbc_ctrl->bits.line_tar_bits = lbc->line_tar_bits;
-	isp_regs[id].isp_d3d_raw_lbc_ctrl->bits.lmtqp_min = 0;
-	isp_regs[id].isp_d3d_raw_lbc_ctrl->bits.mb_min_bit = lbc->mb_min_bit;
-	isp_regs[id].isp_d3d_raw_lbc_ctrl->bits.lmtqp_en = 0;
-	isp_regs[id].isp_d3d_raw_lbc_ctrl->bits.is_lossy = 1;
-}
-
 void bsp_isp_wdr_fifo_en(unsigned long id, unsigned int en)
 {
 	isp_regs[id].isp_global_cfg1->bits.wdr_fifo_exit = en;
@@ -444,6 +429,27 @@ void bsp_isp_top_control(unsigned long id, int isp_num, int isp0_max_w)
 {
 	isp_regs[id].isp_top_ctrl->bits.isp0_max_width = isp0_max_w;
 	isp_regs[id].isp_top_ctrl->bits.isp_mode = isp_num - 1;
+}
+
+void bsp_isp_set_fifo_mode(unsigned long id, unsigned int mode)
+{
+	isp_regs[id].isp_global_cfg1->bits.wdr_fifo_exit = mode;
+	isp_regs[id].isp_global_cfg1->bits.d3d_ltf_fifo_exit = mode;
+}
+
+void bsp_isp_min_ddr_size(unsigned long id, unsigned int size)
+{
+	isp_regs[id].isp_global_cfg3->bits.raw_min_ddr_size = size;
+}
+
+void bsp_isp_fifo_raw_write(unsigned long id, unsigned int depth)
+{
+	isp_regs[id].isp_global_cfg3->bits.fifo_dep_raw_wr = depth;
+}
+
+void bsp_isp_k_min_ddr_size(unsigned long id, unsigned int size)
+{
+	isp_regs[id].isp_global_cfg3->bits.k_min_ddr_size = size;
 }
 
 /*******isp load register which we should write to ddr first*********/
@@ -465,5 +471,32 @@ void bsp_isp_module_disable(unsigned long id, unsigned int module_flag)
 unsigned int bsp_isp_load_update_flag(unsigned long id)
 {
 	return isp_regs[id].isp_update_flag->dwval;
+}
+
+void bsp_isp_set_wdr_raw_lbc_ctrl(unsigned long id, struct isp_lbc_cfg *lbc, unsigned int mode)
+{
+	isp_regs[id].isp_wdr_raw_lbc_ctrl->bits.line_tar_bits = lbc->line_tar_bits;
+	isp_regs[id].isp_wdr_raw_lbc_ctrl->bits.lmtqp_min = 0;
+	isp_regs[id].isp_wdr_raw_lbc_ctrl->bits.mb_min_bit = lbc->mb_min_bit;
+	isp_regs[id].isp_wdr_raw_lbc_ctrl->bits.lmtqp_en = 0;
+	isp_regs[id].isp_wdr_raw_lbc_ctrl->bits.is_lossy = mode;
+}
+
+void bsp_isp_set_d3d_k_lbc_ctrl(unsigned long id, struct isp_lbc_cfg *lbc, unsigned int mode)
+{
+	isp_regs[id].isp_d3d_k_lbc_ctrl->bits.line_tar_bits = lbc->line_tar_bits;
+	isp_regs[id].isp_d3d_k_lbc_ctrl->bits.lmtqp_min = 0;
+	isp_regs[id].isp_d3d_k_lbc_ctrl->bits.mb_min_bit = lbc->mb_min_bit;
+	isp_regs[id].isp_d3d_k_lbc_ctrl->bits.lmtqp_en = 1;
+	isp_regs[id].isp_d3d_k_lbc_ctrl->bits.is_lossy = mode;
+}
+
+void bsp_isp_set_d3d_raw_lbc_ctrl(unsigned long id, struct isp_lbc_cfg *lbc, unsigned int mode)
+{
+	isp_regs[id].isp_d3d_raw_lbc_ctrl->bits.line_tar_bits = lbc->line_tar_bits;
+	isp_regs[id].isp_d3d_raw_lbc_ctrl->bits.lmtqp_min = 0;
+	isp_regs[id].isp_d3d_raw_lbc_ctrl->bits.mb_min_bit = lbc->mb_min_bit;
+	isp_regs[id].isp_d3d_raw_lbc_ctrl->bits.lmtqp_en = 1;
+	isp_regs[id].isp_d3d_raw_lbc_ctrl->bits.is_lossy = mode;
 }
 

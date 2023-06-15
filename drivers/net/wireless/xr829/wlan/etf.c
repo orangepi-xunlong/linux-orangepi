@@ -19,6 +19,8 @@
 #include <linux/kthread.h>
 #include <linux/wait.h>
 #include <linux/firmware.h>
+#include <uapi/linux/sched/types.h>
+
 
 #include "etf.h"
 #include "xradio.h"
@@ -596,7 +598,7 @@ int HWT_Tx_handle(HWT_PARAMETERS *cmd)
 			   hwt_rx_len, hwt_rx_num);
 
 		wsm_hwt_cmd((struct xradio_common *)etf_priv.core_priv, (void *)&cmd->TestID, sizeof(HWT_PARAMETERS));
-		do_gettimeofday(&hwt_start_time);
+		xr_do_gettimeofday(&hwt_start_time);
 
 	} else if (cmd->TestID == 0x3) {
 		xradio_dbg(XRADIO_DBG_ALWY, "pkt_num=%d, pkt_len=%d, enc_data=0x%04X\n",
@@ -753,18 +755,10 @@ static int xradio_etf_proc(void *data, int len)
 		break;
 	case ETF_GET_SDD_POWER_DEFT:  /* get default tx power */
 		{
-#ifdef USE_VFS_FIRMWARE
-			const struct xr_file  *sdd = NULL;
-#else
 			const struct firmware *sdd = NULL;
-#endif
 			etf_printk(XRADIO_DBG_NIY, "%s ETF_GET_SDD_POWER_DEFT!\n", __func__);
 
-#ifdef USE_VFS_FIRMWARE
-			sdd = xr_request_file(etf_get_sddpath());
-#else
 			ret = request_firmware(&sdd, etf_get_sddpath(), NULL);
-#endif
 			/* get sdd data */
 			if (likely(sdd) && likely(sdd->data)) {
 				int i;
@@ -780,11 +774,7 @@ static int xradio_etf_proc(void *data, int len)
 				}
 				hdr_rev->len = sizeof(*hdr_rev) + ie_len;
 				xradio_adapter_send(hdr_rev, hdr_rev->len);
-#ifdef USE_VFS_FIRMWARE
-				xr_fileclose(sdd);
-#else
 				release_firmware(sdd);
-#endif
 			} else {
 				etf_printk(XRADIO_DBG_ERROR, "%s: can't load sdd file %s.\n",
 							__func__, etf_get_sddpath());
@@ -801,22 +791,14 @@ static int xradio_etf_proc(void *data, int len)
 			struct get_sdd_result *sddret = (struct get_sdd_result *)sddreq;
 			void *ie_data = NULL;
 			int ie_len = 0;
-#ifdef USE_VFS_FIRMWARE
-			const struct xr_file  *sdd = NULL;
-#else
 			const struct firmware *sdd = NULL;
-#endif
 			etf_printk(XRADIO_DBG_NIY, "%s ETF_GET_SDD_PARAM_ID!\n", __func__);
 
 			if (hw_priv && hw_priv->sdd) {
 				etf_printk(XRADIO_DBG_NIY, "%s use xradio_common sdd!\n", __func__);
 				sdd = hw_priv->sdd;
 			} else {
-#ifdef USE_VFS_FIRMWARE
-				sdd = xr_request_file(etf_get_sddpath());
-#else
 				ret = request_firmware(&sdd, etf_get_sddpath(), NULL);
-#endif
 			}
 
 			hdr_rev->id  = hdr_rev->id + ETF_CNF_BASE;
@@ -845,11 +827,7 @@ static int xradio_etf_proc(void *data, int len)
 				if (hw_priv && hw_priv->sdd) {
 					sdd = NULL;
 				} else {
-#ifdef USE_VFS_FIRMWARE
-					xr_fileclose(sdd);
-#else
 					release_firmware(sdd);
-#endif
 				}
 			} else {
 				etf_printk(XRADIO_DBG_ERROR, "%s: can't load sdd file %s.\n",
@@ -867,7 +845,7 @@ static int xradio_etf_proc(void *data, int len)
 
 			etf_printk(XRADIO_DBG_MSG, "%s ETF_GET_CLI_PAR_DEFT!\n", __func__);
 			hdr_rev->id  = hdr_rev->id + ETF_CNF_BASE;
-			if(hdr_data)
+			if (hdr_data)
 				ret = xradio_set_etfcli_data(hdr_data->value, hdr_data->index);
 			hdr_data->result = ret;
 			xradio_adapter_send(hdr_data, sizeof(*hdr_data));
@@ -880,7 +858,7 @@ static int xradio_etf_proc(void *data, int len)
 
 			param_req = (struct get_cli_data_req *)hdr_rev;
 			param_ret = (struct get_cli_data_result *)param_req;
-			etf_printk(XRADIO_DBG_MSG,"%s ETF_GET_CLI_PAR_DEFT!\n", __func__);
+			etf_printk(XRADIO_DBG_MSG, "%s ETF_GET_CLI_PAR_DEFT!\n", __func__);
 
 			hdr_rev->id  = hdr_rev->id + ETF_CNF_BASE;
 			param_ret->result	= 0;

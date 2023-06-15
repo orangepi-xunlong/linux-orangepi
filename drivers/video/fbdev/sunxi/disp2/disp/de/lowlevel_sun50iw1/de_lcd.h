@@ -157,6 +157,7 @@ s32 tcon1_yuv_range(u32 sel, u32 onoff);
 void tcon_show_builtin_patten(u32 sel, u32 patten);
 void tcon0_cpu_wr_16b_multi(u32 sel, u8 cmd, u8 *para, u32 para_num);
 void tcon0_cpu_wr_24b_multi(u32 sel, u8 cmd, u8 *para, u32 para_num);
+void tcon_reset(u32 sel);
 
 #endif
 

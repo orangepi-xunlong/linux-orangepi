@@ -35,6 +35,10 @@
 #include "wcn_misc.h"
 #include "wcn_procfs.h"
 #include "wcn_txrx.h"
+#include "marlin_platform.h"
+
+
+#define CONFIG_CP2_ASSERT       (0)
 
 u32 wcn_print_level = WCN_DEBUG_OFF;
 
@@ -95,6 +99,7 @@ void mdbg_assert_interface(char *str)
 	WCN_INFO("mdbg_assert_interface:%s\n",
 		(char *)(mdbg_proc->assert.buf));
 
+#if (CONFIG_CP2_ASSERT)
 	sprdwcn_bus_set_carddump_status(true);
 #ifndef CONFIG_WCND
 	/* wcn_hold_cpu(); */
@@ -105,10 +110,18 @@ void mdbg_assert_interface(char *str)
 	mdbg_proc->fail_count++;
 	complete(&mdbg_proc->assert.completed);
 	wake_up_interruptible(&mdbg_proc->assert.rxwait);
+#else
+	WCN_ERR("%s,%s reset & notify...\n", __func__, str);
+	marlin_reset_notify_call(MARLIN_CP2_STS_ASSERTED);
+	marlin_cp2_reset();
+	msleep(1000);
+	// marlin_reset_notify_call(MARLIN_CP2_STS_READY);
+#endif
+
 }
 EXPORT_SYMBOL_GPL(mdbg_assert_interface);
 
-#ifdef CONFIG_SDIOHAL
+#ifdef CONFIG_WCN_SDIO
 /* this function get data length from buf head */
 static unsigned int mdbg_mbuf_get_datalength(struct mbuf_t *mbuf)
 {
@@ -125,11 +138,10 @@ static unsigned int mdbg_mbuf_get_datalength(struct mbuf_t *mbuf)
 }
 #endif
 
-static int mdbg_assert_read(int channel, struct mbuf_t *head,
+int mdbg_assert_read(int channel, struct mbuf_t *head,
 		     struct mbuf_t *tail, int num)
 {
 	unsigned int data_length;
-
 	data_length = mdbg_mbuf_get_datalength(head);
 	if (data_length > MDBG_ASSERT_SIZE) {
 		WCN_ERR("assert data len:%d,beyond max read:%d",
@@ -142,6 +154,7 @@ static int mdbg_assert_read(int channel, struct mbuf_t *head,
 	mdbg_proc->assert.rcv_len = data_length;
 	WCN_INFO("mdbg_assert_read:%s,data length %d\n",
 		(char *)(mdbg_proc->assert.buf), data_length);
+#if (CONFIG_CP2_ASSERT)
 #ifndef CONFIG_WCND
 	sprdwcn_bus_set_carddump_status(true);
 	/* wcn_hold_cpu(); */
@@ -153,11 +166,22 @@ static int mdbg_assert_read(int channel, struct mbuf_t *head,
 	wake_up_interruptible(&mdbg_proc->assert.rxwait);
 	sprdwcn_bus_push_list(channel, head, tail, num);
 
+#else
+		sprdwcn_bus_push_list(channel, head, tail, num);
+#ifdef CONFIG_WCN_LOOPCHECK
+		stop_loopcheck();
+#endif
+		WCN_ERR("chip reset & notify every subsystem...\n");
+		marlin_reset_notify_call(MARLIN_CP2_STS_ASSERTED);
+		marlin_cp2_reset();
+		msleep(1000);
+		// marlin_reset_notify_call(MARLIN_CP2_STS_READY);
+#endif
 	return 0;
 }
 EXPORT_SYMBOL_GPL(mdbg_assert_read);
 
-static int mdbg_loopcheck_read(int channel, struct mbuf_t *head,
+int mdbg_loopcheck_read(int channel, struct mbuf_t *head,
 			struct mbuf_t *tail, int num)
 {
 	unsigned int data_length;
@@ -187,7 +211,7 @@ static int mdbg_loopcheck_read(int channel, struct mbuf_t *head,
 }
 EXPORT_SYMBOL_GPL(mdbg_loopcheck_read);
 
-static int mdbg_at_cmd_read(int channel, struct mbuf_t *head,
+int mdbg_at_cmd_read(int channel, struct mbuf_t *head,
 		     struct mbuf_t *tail, int num)
 {
 	unsigned int data_length;
@@ -680,14 +704,16 @@ static ssize_t mdbg_proc_write(struct file *filp,
 		slp_mgr_drv_sleep(DBG_TOOL, TRUE);
 	if (x == 'U')
 		sprdwcn_bus_aon_writeb(0X1B0, 0X10);
-	if (x == 'T')
+	if (x == 'T') {
 #ifdef CONFIG_MEM_PD
 		mem_pd_mgr(MARLIN_WIFI, 0X1);
 #endif
-	if (x == 'Q')
+	}
+	if (x == 'Q') {
 #ifdef CONFIG_MEM_PD
 		mem_pd_save_bin();
 #endif
+	}
 	if (x == 'N')
 		start_marlin(MARLIN_WIFI);
 	if (x == 'R')
@@ -720,6 +746,12 @@ static ssize_t mdbg_proc_write(struct file *filp,
 		}
 		return count;
 	}
+
+	if (strncmp(mdbg_proc->write_buf, "massert", 7) == 0) {
+		mdbg_assert_interface("massert");
+		return count;
+	}
+
 
 	/* unit of loglimitsize is MByte. */
 	if (strncmp(mdbg_proc->write_buf, "loglimitsize=",

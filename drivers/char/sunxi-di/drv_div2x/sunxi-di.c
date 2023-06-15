@@ -84,7 +84,7 @@ struct dmabuf_item {
 	unsigned long long id;
 };
 
-static u32 debug_mask;
+static u32 di_debug_mask;
 
 static ssize_t di_timeout_store(struct device *dev,
 		struct device_attribute *attr,
@@ -1637,7 +1637,7 @@ subsys_initcall(sunxi_di_init);
 module_init(sunxi_di_init);
 #endif
 module_exit(sunxi_di_exit);
-module_param_named(debug_mask, debug_mask, int, 0644);
+module_param_named(di_debug_mask, di_debug_mask, int, 0644);
 MODULE_DESCRIPTION("DE-Interlace driver");
 MODULE_AUTHOR("Ming Li<liming@allwinnertech.com>");
 MODULE_LICENSE("GPL");

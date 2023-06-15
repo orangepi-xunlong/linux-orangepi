@@ -123,7 +123,7 @@ int de_dcsc_update_regs(unsigned int sel)
 			reg_val &= 0xfffffffd;
 			reg_val |= (*((unsigned int *)dcsc_enable_block[sel].val));
 			writel(reg_val, (void __iomem *)dcsc_enable_block[sel].off);
-		} else{
+		} else {
 			memcpy((void *)dcsc_enable_block[sel].off, dcsc_enable_block[sel].val, dcsc_enable_block[sel].size);
 		}
 		dcsc_enable_block[sel].dirty = 0x0;

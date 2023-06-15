@@ -1,33 +1,35 @@
+# SPDX-License-Identifier: GPL-2.0-only
 #
 # Allwinner sunXi SoC drivers
 #
-menuconfig SOC_SUNXI
-	bool "SUNXI SoC drivers support"
-
-if SOC_SUNXI
-
 config SUNXI_SRAM
 	bool
 	default ARCH_SUNXI
+	select REGMAP_MMIO
 	help
 	  Say y here to enable the SRAM controller support. This
 	  device is responsible on mapping the SRAM in the sunXi SoCs
 	  whether to the CPU/DMA, or to the devices.
 
-config SUNXI_SUSPEND
-	tristate "Sunxi suspend support"
-	default ARCH_SUNXI
-	depends on PM_SLEEP
+config GPU_PM_DOMAINS
+	tristate "Allwinner gpu power domain"
+	depends on PM
+	depends on ARCH_SUN50IW10
+	select PM_GENERIC_DOMAINS
+	select PM_GENERIC_DOMAINS_OF
 	help
-	  Say y here to enable the sunxi standby support.
+	 Say y here to enable power domain support.
+	 In order to meet high performance and low power requirements, a power
+	 management unit is designed or saving power when gpu in low power
+	 mode. The PPU is dedicated for managing the power of the GPU.
 
-config SUNXI_SUSPEND_NONARISC
-	tristate "Sunxi suspend support without arisc"
-	depends on SUNXI_SUSPEND && !SUNXI_ARISC
-	default !SUNXI_ARISC
+	 If unsure, say N.
+
+config SUNXI_SID
+	tristate "Allwinner sunxi sid support"
+	default n
 	help
-	  Say y here to enter standby without arisc.
+	 Say y here to enable the sunxi sid support.
 
-
-source "drivers/soc/sunxi/arisc/Kconfig"
-endif # SOC_SUNXI
+config SUNXI_DUMP
+	bool "sunxi dump help to dump all dram area for crash tool"

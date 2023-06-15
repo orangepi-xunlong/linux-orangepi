@@ -23,45 +23,40 @@
 #include "de_clock.h"
 #include "de_rtmx.h"
 
-enum de_irq_flag {
-	DE_IRQ_FLAG_FRAME_END  = 0x1 << 4,
-	DE_IRQ_FLAG_ERROR      = 0,
-	DE_IRQ_FLAG_RCQ_FINISH = 0x1 << 6,
-	DE_IRQ_FLAG_RCQ_ACCEPT = 0x1 << 7,
-	DE_IRQ_FLAG_MASK =
-		DE_IRQ_FLAG_FRAME_END
-		| DE_IRQ_FLAG_ERROR
-		| DE_IRQ_FLAG_RCQ_FINISH
-		| DE_IRQ_FLAG_RCQ_ACCEPT,
+enum {
+	DISP_AL_IRQ_FLAG_FRAME_END  = DE_IRQ_FLAG_FRAME_END,
+	DISP_AL_IRQ_FLAG_RCQ_FINISH = DE_IRQ_FLAG_RCQ_FINISH,
+	DISP_AL_IRQ_FLAG_RCQ_ACCEPT = DE_IRQ_FLAG_RCQ_ACCEPT,
+	DISP_AL_IRQ_FLAG_MASK       = DE_IRQ_FLAG_MASK,
 };
 
-enum de_irq_state {
-	DE_IRQ_STATE_FRAME_END  = 0x1 << 0,
-	DE_IRQ_STATE_ERROR      = 0,
-	DE_IRQ_STATE_RCQ_FINISH = 0x1 << 2,
-	DE_IRQ_STATE_RCQ_ACCEPT = 0x1 << 3,
-	DE_IRQ_STATE_MASK =
-		DE_IRQ_STATE_FRAME_END
-		| DE_IRQ_STATE_ERROR
-		| DE_IRQ_STATE_RCQ_FINISH
-		| DE_IRQ_STATE_RCQ_ACCEPT,
+enum  {
+	DISP_AL_IRQ_STATE_FRAME_END  = DE_IRQ_STATE_FRAME_END,
+	DISP_AL_IRQ_STATE_RCQ_FINISH = DE_IRQ_STATE_RCQ_FINISH,
+	DISP_AL_IRQ_STATE_RCQ_ACCEPT = DE_IRQ_STATE_RCQ_ACCEPT,
+	DISP_AL_IRQ_STATE_MASK = DE_IRQ_STATE_MASK,
 };
 
-enum de_wb_irq_flag {
-	DE_WB_IRQ_FLAG_RCQ_FINISH = 0x1 << 6,
-	DE_WB_IRQ_FLAG_RCQ_ACCEPT = 0x1 << 7,
-	DE_WB_IRQ_FLAG_MASK =
-		DE_WB_IRQ_FLAG_RCQ_FINISH
-		| DE_WB_IRQ_FLAG_RCQ_ACCEPT,
+enum {
+	DISP_AL_CAPTURE_IRQ_FLAG_FRAME_END = WB_IRQ_FLAG_INTR,
+	DISP_AL_CAPTURE_IRQ_FLAG_RCQ_ACCEPT = DE_WB_IRQ_FLAG_RCQ_ACCEPT,
+	DISP_AL_CAPTURE_IRQ_FLAG_RCQ_FINISH = DE_WB_IRQ_FLAG_RCQ_FINISH,
+	DISP_AL_CAPTURE_IRQ_FLAG_MASK =
+		DISP_AL_CAPTURE_IRQ_FLAG_FRAME_END
+		| DISP_AL_CAPTURE_IRQ_FLAG_RCQ_ACCEPT
+		| DISP_AL_CAPTURE_IRQ_FLAG_RCQ_FINISH,
 };
 
-enum de_wb_irq_state {
-	DE_WB_IRQ_STATE_RCQ_FINISH = 0x1 << 2,
-	DE_WB_IRQ_STATE_RCQ_ACCEPT = 0x1 << 3,
-	DE_WB_IRQ_STATE_MASK =
-		DE_WB_IRQ_STATE_RCQ_FINISH
-		| DE_WB_IRQ_STATE_RCQ_ACCEPT,
+enum {
+	DISP_AL_CAPTURE_IRQ_STATE_FRAME_END = WB_IRQ_STATE_PROC_END,
+	DISP_AL_CAPTURE_IRQ_STATE_RCQ_ACCEPT = DE_WB_IRQ_STATE_RCQ_ACCEPT,
+	DISP_AL_CAPTURE_IRQ_STATE_RCQ_FINISH = DE_WB_IRQ_STATE_RCQ_FINISH,
+	DISP_AL_CAPTURE_IRQ_STATE_MASK =
+		DISP_AL_CAPTURE_IRQ_STATE_FRAME_END
+		| DISP_AL_CAPTURE_IRQ_STATE_RCQ_ACCEPT
+		| DISP_AL_CAPTURE_IRQ_STATE_RCQ_FINISH,
 };
+
 
 struct lcd_clk_info {
 	enum disp_lcd_if lcd_if;
@@ -121,6 +116,8 @@ int disp_al_hdmi_enable(u32 screen_id);
 int disp_al_hdmi_disable(u32 screen_id);
 int disp_al_hdmi_cfg(u32 screen_id, struct disp_video_timings *video_info);
 
+int disp_al_tv_irq_enable(u32 screen_id);
+int disp_al_tv_irq_disable(u32 screen_id);
 int disp_al_tv_enable(u32 screen_id);
 int disp_al_tv_disable(u32 screen_id);
 int disp_al_tv_cfg(u32 screen_id, struct disp_video_timings *video_info);
@@ -140,7 +137,7 @@ int disp_al_device_get_status(u32 screen_id);
 int disp_al_get_fb_info(unsigned int sel, struct disp_layer_info *info);
 int disp_al_get_display_size(unsigned int screen_id, unsigned int *width, unsigned int *height);
 void disp_al_show_builtin_patten(u32 hwdev_index, u32 patten);
-
+int disp_al_lcd_get_status(u32 screen_id, struct disp_panel_para *panel);
 static inline s32 disp_al_capture_set_rcq_update(u32 disp, u32 en) { return 0; }
 
 static inline u32 disp_al_capture_query_irq_state(u32 disp, u32 irq_state) { return 0; }

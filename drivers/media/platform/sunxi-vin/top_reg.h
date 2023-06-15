@@ -1,5 +1,5 @@
 /*
- * linux-4.9/drivers/media/platform/sunxi-vin/top_reg.h
+ * linux-5.4/drivers/media/platform/sunxi-vin/top_reg.h
  *
  * Copyright (c) 2007-2017 Allwinnertech Co., Ltd.
  *
@@ -80,7 +80,7 @@ void csic_dma_input_select(unsigned int sel, unsigned int dma,
 				unsigned int parser, unsigned int ch);
 void csic_feature_list_get(unsigned int sel, struct csic_feature_list *fl);
 void csic_version_get(unsigned int sel, struct csic_version *v);
-void csic_mbus_req_mex_set(unsigned int sel);
+void csic_mbus_req_mex_set(unsigned int sel, unsigned int data);
 void csic_mulp_mode_en(unsigned int sel, unsigned int en);
 void csic_mulp_dma_cs(unsigned int sel, enum csic_mulp_cs cs);
 void csic_mulp_int_enable(unsigned int sel, enum csis_mulp_int interrupt);

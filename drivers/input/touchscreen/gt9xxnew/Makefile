@@ -1,7 +1,6 @@
 #
 # Makefile for the touchscreen drivers.
 #
-
 # Each configuration option enables a list of files.
 
 obj-$(CONFIG_TOUCHSCREEN_GT9XXNEW_TS)          += gt9xxnew_ts.o

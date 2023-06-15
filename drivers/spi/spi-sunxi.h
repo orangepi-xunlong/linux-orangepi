@@ -50,19 +50,26 @@
 #define SPI_DMA_CTL_REG		(0x88)	/* DMA control register, only for 1639 */
 #define SPI_TXDATA_REG		(0x200)	/* tx data register */
 #define SPI_RXDATA_REG		(0x300)	/* rx data register */
-
+#define SPI_DBI_CR_REG		(0x100)	/* DBI control register */
+#define SPI_DBI_CR_REG1		(0x104)	/* DBI control register */
+#define SPI_DBI_CR_REG2		(0x108)	/* DBI control register */
+#define SPI_DBI_TIMER_REG       (0x10C)	/* DBI timer register */
+#define SPI_DBI_VIDEO_SIZE	(0x110)	/* DBI VIDEO SIZE register */
+#define SPI_DBI_INT_REG		(0x120)	/* DBI interrupter status register */
 
 /* SPI Global Control Register Bit Fields & Masks,default value:0x0000_0080 */
-#define SPI_GC_EN		(0x1 <<  0) /* SPI module enable control 1:enable; 0:disable; default:0 */
-#define SPI_GC_MODE		(0x1 <<  1) /* SPI function mode select 1:master; 0:slave; default:0 */
+#define SPI_GC_EN			(0x1 <<  0) /* SPI module enable control 1:enable; 0:disable; default:0 */
+#define SPI_GC_MODE			(0x1 <<  1) /* SPI function mode select 1:master; 0:slave; default:0 */
 #define SPI_GC_TP_EN		(0x1 <<  7) /* SPI transmit stop enable 1:stop transmit data when RXFIFO is full; 0:ignore RXFIFO status; default:1 */
-#define SPI_GC_SRST		(0x1 << 31) /* soft reset, write 1 will clear SPI control, auto clear to 0 */
+#define SPI_GC_SRST			(0x1 << 31) /* soft reset, write 1 will clear SPI control, auto clear to 0 */
+#define SPI_GC_DBI_MODE_SEL	(0x1 <<  3) /* SPI interface mode select 1:dbi; 0:spi; default:0 */
+#define SPI_GC_DBI_EN		(0x1 <<  4) /* SPI DBI  mode enable 1:enable; 0:disable; default:0 */
 
 /* SPI Transfer Control Register Bit Fields & Masks,default value:0x0000_0087 */
 #define SPI_TC_PHA		(0x1 <<  0) /* SPI Clock/Data phase control,0: phase0,1: phase1;default:1 */
 #define SPI_TC_POL		(0x1 <<  1) /* SPI Clock polarity control,0:low level idle,1:high level idle;default:1 */
 #define SPI_TC_SPOL		(0x1 <<  2) /* SPI Chip select signal polarity control,default: 1,low effective like this:~~|_____~~ */
-#define SPI_TC_SSCTL		(0x1 <<  3) /* SPI chip select control,default 0:SPI_SSx remains asserted between SPI bursts,1:negate SPI_SSx between SPI bursts */
+#define SPI_TC_SSCTL	(0x1 <<  3) /* SPI chip select control,default 0:SPI_SSx remains asserted between SPI bursts,1:negate SPI_SSx between SPI bursts */
 #define SPI_TC_SS_MASK		(0x3 <<  4) /* SPI chip select:00-SPI_SS0;01-SPI_SS1;10-SPI_SS2;11-SPI_SS3*/
 #define SPI_TC_SS_OWNER		(0x1 <<  6) /* SS output mode select default is 0:automatic output SS;1:manual output SS */
 #define SPI_TC_SS_LEVEL		(0x1 <<  7) /* defautl is 1:set SS to high;0:set SS to low */
@@ -151,6 +158,28 @@
 #define SPI_BCC_DUAL_MODE	(0x1	  << 28) /* master dual mode RX enable */
 #define SPI_BCC_QUAD_MODE	(0x1	  << 29) /* master quad mode RX enable */
 
+#define DBI_CR_READ		(0x1	  << 31)
+#define DBI_CR_LSB_FIRST	(0x1	  << 19)
+#define DBI_CR_TRANSMIT_MODE	(0x1	  << 15)
+#define DBI_CR_FORMAT		(12)
+#define DBI_CR_FORMAT_MASK	(0x7	  << DBI_CR_FORMAT)
+#define DBI_CR_INTERFACE	(8)
+#define DBI_CR_INTERFACE_MASK	(0x7	  << DBI_CR_INTERFACE)
+#define DBI_CR1_DCX_DATA	(0x1	  << 22)
+#define DBI_CR1_CLK_AUTO	(0x1	  << 24)
+#define DBI_CR2_SDI_PIN	(0x1	  << 6)
+#define DBI_CR2_DCX_PIN	(0x1	  << 5)
+#define DBI_CR2_TE_ENABLE	(0x1	  << 0)
+#define DBI_CR2_DMA_ENABLE	(0x1	  << 15)
+#define DBI_INT_STA_MASK	(0x7f|(0x7f<<8))
+#define DBI_INT_TE_INT          (0x1 << 10) /* te enable*/
+#define DBI_INT_TIMER_INT          (0x1 << 12) /* timer enable*/
+#define DBI_INT_STA_FRAME	(0x1 << 9) /* fram Transfer Completed */
+#define DBI_INT_FIFO_EMPTY	(0x1 << 14)
+#define DBI_FRAM_DONE_INT_EN	(0x1 << 1) /* fram Transfer Completed En*/
+#define DBI_FIFO_EMPTY_INT_EN	(0x1 << 6) /* fram Transfer Completed En*/
+#define DBI_TE_INT_EN	(0x1 << 2) /* TE interrupt*/
+#define DBI_TIMER_INT_EN	(0x1 << 4) /* timer interrupt*/
 
 #define SPI_PHA_ACTIVE_		(0x01)
 #define SPI_POL_ACTIVE_		(0x02)
@@ -164,11 +193,13 @@
 #define SPI_DUMMY_ONE_ACTIVE_	(0x10)
 #define SPI_RECEIVE_ALL_ACTIVE_	(0x20)
 
+#define SPI_DBI_COMMAND_READ_	(0x10)
+#define SPI_DBI_LSB_FIRST_	(0x20)
+#define SPI_DBI_TRANSMIT_VIDEO_	(0x40)
+#define SPI_DBI_DCX_DATA_	(0x80)
+
 /* About SUNXI */
 #define SUNXI_SPI_DEV_NAME	"spi"
-
-#define SUNXI_SPI_DRQ_RX(ch)	(DRQSRC_SPI0_RX + ch)
-#define SUNXI_SPI_DRQ_TX(ch)	(DRQDST_SPI0_TX + ch)
 
 /* About DMA */
 #ifdef CONFIG_ARCH_SUN9IW1P1
@@ -182,6 +213,7 @@
 struct sunxi_spi_platform_data {
 	int cs_bitmap; /* cs0-0x1,cs1-0x2,cs0&cs1-0x3 */
 	int cs_num;    /* number of cs */
+	int sclk_freq_def;	/* clk frequence*/
 	char regulator_id[16];
 	struct regulator *regulator;
 };
@@ -210,5 +242,88 @@ enum {
 	DEBUG_INFO3   = 1U << 6,
 	DEBUG_INFO4   = 1U << 7,
 };
+
+enum dbi_out_seq {
+	DBI_OUT_RGB = 0,
+	DBI_OUT_RBG = 1,
+	DBI_OUT_GRB = 2,
+	DBI_OUT_GBR = 3,
+	DBI_OUT_BRG = 4,
+	DBI_OUT_BGR = 5,
+};
+
+enum dbi_src_seq {
+	DBI_SRC_RGB = 0,
+	DBI_SRC_RBG = 1,
+	DBI_SRC_GRB = 2,
+	DBI_SRC_GBR = 3,
+	DBI_SRC_BRG = 4,
+	DBI_SRC_BGR = 5,
+	/* following definition only for rgb565
+	 * to change the RGB order in two byte(16 bit).
+	 * format:R(5bit)--G_1(3bit)--G_0(3bit)--B(5bit)
+	 * G_0 mean the low 3 bit of G component
+	 * G_1 mean the high 3 bit of G component
+	 *  */
+	DBI_SRC_GRBG_0 = 6,
+	DBI_SRC_GRBG_1 = 7,
+	DBI_SRC_GBRG_0 = 8,
+	DBI_SRC_GBRG_1 = 9,
+};
+
+enum dbi_te_en {
+	DBI_TE_DISABLE = 0,
+	DBI_TE_RISING_EDGE = 1,
+	DBI_TE_FALLING_EDGE = 2,
+};
+
+struct spi_dbi_config {
+	enum dbi_src_seq	dbi_src_sequence;
+	enum dbi_out_seq	dbi_out_sequence;
+	char dbi_rgb_bit_order;
+	char dbi_rgb32_alpha_pos;
+	char dbi_rgb16_pixel_endian;
+	char dbi_format; /*DBI OUT format*/
+	char dbi_interface;
+	u16	 dbi_mode;
+	char dbi_clk_out_mode;
+	u16			dbi_video_v;
+	u16			dbi_video_h;
+	enum dbi_te_en          dbi_te_en;
+	unsigned char		dbi_fps;
+	void			(*dbi_vsync_handle)(unsigned long data);
+	char			dbi_read_bytes;
+};
+
+extern void __spi_get_dbi_config(struct spi_device *spi, struct spi_dbi_config *dbi_config);
+
+#define DBI_RGB111		(0x0)
+#define DBI_RGB444		(0x1)
+#define DBI_RGB565		(0x2)
+#define DBI_RGB666		(0x3)
+#define DBI_RGB888		(0x4)
+
+#define L3I1		(0x0)
+#define L3I2		(0x1)
+#define L4I1		(0x2)
+#define L4I2		(0x3)
+#define D2LI		(0x4)
+
+#define SPI_DBI_READ		(0x10)
+#define SPI_DBI_LSB_FIRST	(0x20)
+#define SPI_DBI_TRANSMIT_VIDEO	(0x40)
+#define SPI_DBI_DCX_DATA	(0x80)
+
+#define SPI_DBI_CLK_AUTO_GATING	 (0x0) /*default*/
+#define SPI_DBI_CLK_ALWAYS_ON	(0x1)
+
+#define DBI_READ(dbi_config)			(dbi_config.dbi_mode |= (SPI_DBI_READ))
+#define DBI_WRITE(dbi_config)			(dbi_config.dbi_mode &= ~(SPI_DBI_READ))
+#define DBI_LSB_FIRST(dbi_config)		(dbi_config.dbi_mode |= SPI_DBI_LSB_FIRST)
+#define DBI_MSB_FIRST(dbi_config)		(dbi_config.dbi_mode &= ~SPI_DBI_LSB_FIRST)
+#define	DBI_TR_VIDEO(dbi_config)		(dbi_config.dbi_mode |= SPI_DBI_TRANSMIT_VIDEO)
+#define	DBI_TR_COMMAND(dbi_config)		(dbi_config.dbi_mode &= ~(SPI_DBI_TRANSMIT_VIDEO))
+#define DBI_DCX_DATA(dbi_config)		(dbi_config.dbi_mode |= SPI_DBI_DCX_DATA)
+#define DBI_DCX_COMMAND(dbi_config)		(dbi_config.dbi_mode &= ~(SPI_DBI_DCX_DATA))
 
 #endif

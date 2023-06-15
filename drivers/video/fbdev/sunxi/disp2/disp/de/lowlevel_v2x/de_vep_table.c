@@ -20,6 +20,28 @@
  *
  ******************************************************************************/
 #include "de_vep_table.h"
+#include <asm/types.h>
+#include <linux/string.h>
+#include<linux/kernel.h>
+
+struct matrix4x4 {
+	__s64 x00;
+	__s64 x01;
+	__s64 x02;
+	__s64 x03;
+	__s64 x10;
+	__s64 x11;
+	__s64 x12;
+	__s64 x13;
+	__s64 x20;
+	__s64 x21;
+	__s64 x22;
+	__s64 x23;
+	__s64 x30;
+	__s64 x31;
+	__s64 x32;
+	__s64 x33;
+};
 
 int y2r[192] = {
 	/* bt601 */
@@ -236,3 +258,22 @@ unsigned char ce_constant_lut[256] = {
 	248, 248, 249, 249, 250, 250, 251, 251, 252, 252, 253, 253, 254, 254,
 	    255, 255,
 };
+
+void pq_set_matrix(struct matrix4x4 *conig, int choice, int out, int write)
+{
+	if (choice > 3)
+		return;
+	if (out) {
+		if (write) {
+			memcpy((y2r + 0x20*choice), conig, sizeof(struct matrix4x4));
+		} else {
+			memcpy(conig,(y2r + 0x20*choice), sizeof(struct matrix4x4));
+		}
+	} else {
+		if (write) {
+			memcpy((r2y + 0x20*choice), conig, sizeof(struct matrix4x4));
+		} else {
+			memcpy(conig,(r2y + 0x20*choice), sizeof(struct matrix4x4));
+		}
+	}
+}

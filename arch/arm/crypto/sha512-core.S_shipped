@@ -1,11 +1,18 @@
+@ SPDX-License-Identifier: GPL-2.0
+
+@ This code is taken from the OpenSSL project but the author (Andy Polyakov)
+@ has relicensed it under the GPLv2. Therefore this program is free software;
+@ you can redistribute it and/or modify it under the terms of the GNU General
+@ Public License version 2 as published by the Free Software Foundation.
+@
+@ The original headers, including the original license headers, are
+@ included below for completeness.
 
 @ ====================================================================
 @ Written by Andy Polyakov <appro@openssl.org> for the OpenSSL
 @ project. The module is, however, dual licensed under OpenSSL and
 @ CRYPTOGAMS licenses depending on where you obtain it. For further
 @ details see http://www.openssl.org/~appro/cryptogams/.
-@
-@ Permission to use under GPL terms is granted.
 @ ====================================================================
 
 @ SHA512 block procedure for ARMv4. September 2007.
@@ -72,7 +79,6 @@
 #else
 .syntax unified
 # ifdef __thumb2__
-#  define adrl adr
 .thumb
 # else
 .code   32
@@ -536,7 +542,8 @@ sha512_block_data_order_neon:
 	dmb				@ errata #451034 on early Cortex A8
 	add	r2,r1,r2,lsl#7	@ len to point at the end of inp
 	VFP_ABI_PUSH
-	adrl	r3,K512
+	adr	r3,.Lsha512_block_data_order
+	sub	r3,r3,.Lsha512_block_data_order-K512
 	vldmia	r0,{d16-d23}		@ load context
 .Loop_neon:
 	vshr.u64	d24,d20,#14	@ 0

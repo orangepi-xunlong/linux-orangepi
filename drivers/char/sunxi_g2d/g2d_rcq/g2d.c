@@ -94,7 +94,7 @@ void *g2d_malloc(__u32 bytes_num, __u32 *phy_addr)
 {
 	void *address = NULL;
 
-#if defined(CONFIG_ION_SUNXI)
+#if defined(CONFIG_ION)
 	u32 actual_bytes;
 
 	if (bytes_num != 0) {
@@ -111,7 +111,7 @@ void *g2d_malloc(__u32 bytes_num, __u32 *phy_addr)
 	}
 	G2D_ERR_MSG("size is zero\n");
 #else
-	unsigned map_size = 0;
+	unsigned int map_size = 0;
 	struct page *page;
 
 	if (bytes_num != 0) {
@@ -139,7 +139,7 @@ void *g2d_malloc(__u32 bytes_num, __u32 *phy_addr)
 
 void g2d_free(void *virt_addr, void *phy_addr, unsigned int size)
 {
-#if defined(CONFIG_ION_SUNXI)
+#if defined(CONFIG_ION)
 	u32 actual_bytes;
 
 	actual_bytes = PAGE_ALIGN(size);
@@ -147,8 +147,8 @@ void g2d_free(void *virt_addr, void *phy_addr, unsigned int size)
 		dma_free_coherent(para.dev, actual_bytes, virt_addr,
 				  (dma_addr_t) phy_addr);
 #else
-	unsigned map_size = PAGE_ALIGN(size);
-	unsigned page_size = map_size;
+	unsigned int map_size = PAGE_ALIGN(size);
+	unsigned int page_size = map_size;
 
 	if (virt_addr == NULL)
 		return;
@@ -161,75 +161,38 @@ int g2d_dma_map(int fd, struct dmabuf_item *item)
 {
 	struct dma_buf *dmabuf;
 	struct dma_buf_attachment *attachment;
-	struct sg_table *sgt, *sgt_bak;
-	struct scatterlist *sgl, *sgl_bak;
-	s32 sg_count = 0;
+	struct sg_table *sgt;
 	int ret = -1;
-	int i;
 
 	if (fd < 0) {
-		G2D_ERR_MSG("dma_buf_id(%d) is invalid\n", fd);
+		pr_err("[G2D]dma_buf_id(%d) is invalid\n", fd);
 		goto exit;
 	}
 	dmabuf = dma_buf_get(fd);
 	if (IS_ERR(dmabuf)) {
-		G2D_ERR_MSG("dma_buf_get failed, fd=%d\n", fd);
+		pr_err("[G2D]dma_buf_get failed, fd=%d\n", fd);
 		goto exit;
 	}
 
 	attachment = dma_buf_attach(dmabuf, dmabuf_dev);
 	if (IS_ERR(attachment)) {
-		G2D_ERR_MSG("dma_buf_attach failed\n");
+		pr_err("[G2D]dma_buf_attach failed\n");
 		goto err_buf_put;
 	}
-	sgt = dma_buf_map_attachment(attachment, DMA_FROM_DEVICE);
+	sgt = dma_buf_map_attachment(attachment, DMA_TO_DEVICE);
 	if (IS_ERR_OR_NULL(sgt)) {
-		G2D_ERR_MSG("dma_buf_map_attachment failed\n");
+		pr_err("[G2D]dma_buf_map_attachment failed\n");
 		goto err_buf_detach;
-	}
-
-	/* create a private sgtable base on the given dmabuf */
-	sgt_bak = kmalloc(sizeof(struct sg_table), GFP_KERNEL | __GFP_ZERO);
-	if (sgt_bak == NULL) {
-		G2D_ERR_MSG("alloc sgt fail\n");
-		goto err_buf_unmap;
-	}
-	ret = sg_alloc_table(sgt_bak, sgt->nents, GFP_KERNEL);
-	if (ret != 0) {
-		G2D_ERR_MSG("alloc sgt fail\n");
-		goto err_kfree;
-	}
-	sgl_bak = sgt_bak->sgl;
-	for_each_sg(sgt->sgl, sgl, sgt->nents, i)  {
-		sg_set_page(sgl_bak, sg_page(sgl), sgl->length, sgl->offset);
-		sgl_bak = sg_next(sgl_bak);
-	}
-
-	sg_count = dma_map_sg_attrs(dmabuf_dev, sgt_bak->sgl,
-			      sgt_bak->nents, DMA_FROM_DEVICE,
-			      DMA_ATTR_SKIP_CPU_SYNC);
-
-	if (sg_count != 1) {
-		G2D_ERR_MSG("dma_map_sg failed:%d\n", sg_count);
-		goto err_sgt_free;
 	}
 
 	item->fd = fd;
 	item->buf = dmabuf;
-	item->sgt = sgt_bak;
+	item->sgt = sgt;
 	item->attachment = attachment;
-	item->dma_addr = sg_dma_address(sgt_bak->sgl);
+	item->dma_addr = sg_dma_address(sgt->sgl);
 	ret = 0;
-
 	goto exit;
 
-err_sgt_free:
-	sg_free_table(sgt_bak);
-err_kfree:
-	kfree(sgt_bak);
-err_buf_unmap:
-	/* unmap attachment sgt, not sgt_bak, because it's not alloc yet! */
-	dma_buf_unmap_attachment(attachment, sgt, DMA_FROM_DEVICE);
 err_buf_detach:
 	dma_buf_detach(dmabuf, attachment);
 err_buf_put:
@@ -240,13 +203,7 @@ exit:
 
 void g2d_dma_unmap(struct dmabuf_item *item)
 {
-
-	dma_unmap_sg_attrs(dmabuf_dev, item->sgt->sgl,
-			      item->sgt->nents, DMA_FROM_DEVICE,
-			      DMA_ATTR_SKIP_CPU_SYNC);
-	dma_buf_unmap_attachment(item->attachment, item->sgt, DMA_FROM_DEVICE);
-	sg_free_table(item->sgt);
-	kfree(item->sgt);
+	dma_buf_unmap_attachment(item->attachment, item->sgt, DMA_TO_DEVICE);
 	dma_buf_detach(item->buf, item->attachment);
 	dma_buf_put(item->buf);
 }
@@ -377,7 +334,7 @@ __u32 cal_align(__u32 width, __u32 align)
 	case 0:
 		return width;
 	case 4:
-		return (width + 3) >> 1 << 1;
+		return (width + 3) >> 2 << 2;
 	case 8:
 		return (width + 7) >> 3 << 3;
 	case 16:
@@ -453,19 +410,56 @@ OUT:
 
 }
 
+static int g2d_clock_enable(const __g2d_info_t *info)
+{
+	int ret = 0;
 
+	if (info->reset) {
+		ret = reset_control_deassert(info->reset);
+		if (ret != 0) {
+			pr_err("[G2D] deassert error\n");
+			return ret;
+		}
+	}
 
+	if (info->bus_clk) {
+		ret |=  clk_prepare_enable(info->bus_clk);
+	}
+
+	if (info->clk) {
+		if (info->clk_parent) {
+			clk_set_parent(info->clk, info->clk_parent);
+		}
+		ret |= clk_prepare_enable(info->clk);
+	}
+	if (info->mbus_clk) {
+		ret |= clk_prepare_enable(info->mbus_clk);
+	}
+	if (ret != 0)
+		pr_err("[G2D] clock enable error\n");
+
+	return ret;
+}
+
+static int g2d_clock_disable(const __g2d_info_t *info)
+{
+	if (info->clk)
+		clk_disable(info->clk);
+	if (info->bus_clk)
+		clk_disable(info->bus_clk);
+	if (info->mbus_clk)
+		clk_disable(info->mbus_clk);
+	if (info->reset)
+		reset_control_assert(info->reset);
+	return 0;
+}
 
 int g2d_open(struct inode *inode, struct file *file)
 {
 	mutex_lock(&para.mutex);
 	para.user_cnt++;
 	if (para.user_cnt == 1) {
-		if (para.clk) {
-			if (para.clk_parent)
-				clk_set_parent(para.clk, para.clk_parent);
-			clk_prepare_enable(para.clk);
-		}
+		g2d_clock_enable(&para);
 		para.opened = true;
 		g2d_bsp_open();
 	}
@@ -480,8 +474,7 @@ int g2d_release(struct inode *inode, struct file *file)
 	mutex_lock(&para.mutex);
 	para.user_cnt--;
 	if (para.user_cnt == 0) {
-		if (para.clk)
-			clk_disable(para.clk);
+		g2d_clock_disable(&para);
 		para.opened = false;
 		g2d_bsp_close();
 	}
@@ -582,11 +575,11 @@ EXPORT_SYMBOL_GPL(g2d_ioctl_mutex_unlock);
 long g2d_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 {
 	int ret = -1;
-	struct timeval test_start, test_end;
+	struct timespec64 test_start, test_end;
 
 
 	if (g_time_info == 1)
-		do_gettimeofday(&test_start);
+		ktime_get_real_ts64(&test_start);
 
 	if (!mutex_trylock(&para.mutex))
 		mutex_lock(&para.mutex);
@@ -599,6 +592,7 @@ long g2d_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		struct mixer_para *p_mixer_para = NULL;
 		unsigned long karg[2];
 		unsigned long ubuffer[2] = { 0 };
+
 		if (copy_from_user((void *)karg, (void __user *)arg,
 				   sizeof(unsigned long) * 2)) {
 			ret = -EFAULT;
@@ -770,6 +764,20 @@ long g2d_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 #endif
 		break;
 		}
+	case G2D_CMD_LBC_ROT:
+		{
+			g2d_lbc_rot lbc_para;
+
+			if (copy_from_user(&lbc_para, (g2d_lbc_rot *)arg,
+						sizeof(g2d_lbc_rot))) {
+				ret = -EFAULT;
+				goto err_noput;
+			}
+
+			ret = g2d_lbc_rot_set_para(&lbc_para);
+			break;
+		}
+
 	case G2D_CMD_BLD_H:{
 #if defined(CONFIG_SUNXI_G2D_MIXER)
 			g2d_bld bld_para;
@@ -782,9 +790,12 @@ long g2d_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 			}
 			memset(&mixer_bld_para, 0, sizeof(struct mixer_para));
 			memcpy(&mixer_bld_para.dst_image_h,
-			       &bld_para.dst_image_h, sizeof(g2d_image_enh));
+			       &bld_para.dst_image, sizeof(g2d_image_enh));
 			memcpy(&mixer_bld_para.src_image_h,
-			       &bld_para.src_image_h, sizeof(g2d_image_enh));
+			       &bld_para.src_image[0], sizeof(g2d_image_enh));
+			/* ptn use as src  */
+			memcpy(&mixer_bld_para.ptn_image_h,
+			       &bld_para.src_image[1], sizeof(g2d_image_enh));
 			memcpy(&mixer_bld_para.ck_para, &bld_para.ck_para,
 			       sizeof(g2d_ck));
 			mixer_bld_para.bld_cmd = bld_para.bld_cmd;
@@ -862,9 +873,9 @@ long g2d_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 err_noput:
 	mutex_unlock(&para.mutex);
 	if (g_time_info == 1) {
-		do_gettimeofday(&test_end);
+		ktime_get_real_ts64(&test_end);
 		g_func_runtime += (test_end.tv_sec - test_start.tv_sec) * 1000000 +
-			(test_end.tv_usec - test_start.tv_usec);
+			(test_end.tv_nsec - test_start.tv_nsec) / NSEC_PER_USEC;
 	}
 	return ret;
 }
@@ -975,11 +986,15 @@ static int g2d_probe(struct platform_device *pdev)
 		goto release_regs;
 	}
 	/* clk init */
-	info->clk = of_clk_get(pdev->dev.of_node, 0);
-	if (IS_ERR(info->clk))
+	info->clk = devm_clk_get(&pdev->dev, "g2d");
+	if (IS_ERR(info->clk)) {
 		G2D_ERR_MSG("fail to get clk\n");
-	else
+	} else {
 		info->clk_parent = clk_get_parent(info->clk);
+		info->bus_clk = devm_clk_get(&pdev->dev, "bus");
+		info->mbus_clk = devm_clk_get(&pdev->dev, "mbus_g2d");
+		info->reset = devm_reset_control_get(&pdev->dev, NULL);
+	}
 
 	drv_g2d_init();
 	mutex_init(&info->mutex);
@@ -1026,8 +1041,7 @@ static int g2d_suspend(struct platform_device *pdev, pm_message_t state)
 	INFO("%s.\n", __func__);
 	mutex_lock(&para.mutex);
 	if (para.opened) {
-		if (para.clk)
-			clk_disable(para.clk);
+		g2d_clock_disable(&para);
 		g2d_bsp_close();
 	}
 	mutex_unlock(&para.mutex);
@@ -1041,11 +1055,7 @@ static int g2d_resume(struct platform_device *pdev)
 	INFO("%s.\n", __func__);
 	mutex_lock(&para.mutex);
 	if (para.opened) {
-		if (para.clk) {
-			if (para.clk_parent)
-				clk_set_parent(para.clk, para.clk_parent);
-			clk_prepare_enable(para.clk);
-		}
+		g2d_clock_enable(&para);
 		g2d_bsp_open();
 	}
 	mutex_unlock(&para.mutex);

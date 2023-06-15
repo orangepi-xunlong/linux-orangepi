@@ -71,7 +71,7 @@ static struct regval_list sensor_480p30_regs[] = {
 	{0x05, 0x03},
 	{0x06, 0x7b},
 	{0x07, 0x00},
-	{0x08, 0x06},
+	{0x08, 0x09},
 	{0x0a, 0x00},
 	{0x0c, 0x08},
 	{0x0d, 0x01},
@@ -272,7 +272,7 @@ static int sensor_s_gain(struct v4l2_subdev *sd, unsigned int gain_val)
 		Digital_gain = 64*All_gain/ANALOG_GAIN_4;
 		sensor_write(sd, 0xb1, Digital_gain >> 6);
 		sensor_write(sd, 0xb2, (Digital_gain << 2)&0xfc);
-	} else{
+	} else {
 		sensor_write(sd, 0xb6, 0x04);
 		Digital_gain = 64*All_gain/ANALOG_GAIN_5;
 		sensor_write(sd, 0xb1, Digital_gain >> 6);
@@ -445,8 +445,6 @@ static int sensor_init(struct v4l2_subdev *sd, u32 val)
 	int ret;
 	struct sensor_info *info = to_state(sd);
 
-	sensor_print("sensor_init\n");
-
 	/*Make sure it is a target sensor */
 	ret = sensor_detect(sd);
 	if (ret) {
@@ -532,7 +530,7 @@ static struct sensor_win_size sensor_win_sizes[] = {
 	.bin_factor = 1,
 	.intg_min   = 1<<4,
 	.intg_max   = 506<<4,
-	.gain_min   = 16<<4,
+	.gain_min   = 1<<4,
 	.gain_max   = 64<<4,
 	.regs       = sensor_480p30_regs,
 	.regs_size  = ARRAY_SIZE(sensor_480p30_regs),
@@ -545,7 +543,7 @@ static struct sensor_win_size sensor_win_sizes[] = {
 static int sensor_g_mbus_config(struct v4l2_subdev *sd,
 				struct v4l2_mbus_config *cfg)
 {
-	cfg->type = V4L2_MBUS_CSI2;
+	cfg->type = V4L2_MBUS_CSI2_DPHY;
 	cfg->flags = 0 | V4L2_MBUS_CSI2_1_LANE | V4L2_MBUS_CSI2_CHANNEL_0;
 
 	return 0;
@@ -651,8 +649,6 @@ static const struct v4l2_subdev_core_ops sensor_core_ops = {
 };
 
 static const struct v4l2_subdev_video_ops sensor_video_ops = {
-	.s_parm = sensor_s_parm,
-	.g_parm = sensor_g_parm,
 	.s_stream = sensor_s_stream,
 	.g_mbus_config = sensor_g_mbus_config,
 };
@@ -718,7 +714,9 @@ static int sensor_probe(struct i2c_client *client,
 	sensor_init_controls(sd, &sensor_ctrl_ops);
 
 	mutex_init(&info->lock);
-
+#ifdef CONFIG_SAME_I2C
+	info->sensor_i2c_addr = I2C_ADDR >> 1;
+#endif
 	info->fmt = &sensor_formats[0];
 	info->fmt_pt = &sensor_formats[0];
 	info->win_pt = &sensor_win_sizes[0];
@@ -726,6 +724,7 @@ static int sensor_probe(struct i2c_client *client,
 	info->win_size_num = N_WIN_SIZES;
 	info->sensor_field = V4L2_FIELD_NONE;
 	info->stream_seq = MIPI_BEFORE_SENSOR;
+	info->time_hs = 0x30;
 	info->af_first_flag = 1;
 	info->exp = 0;
 	info->gain = 0;

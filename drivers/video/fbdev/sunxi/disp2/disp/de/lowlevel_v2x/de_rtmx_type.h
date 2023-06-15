@@ -77,7 +77,7 @@ union __vi_lay_attr_reg_t {
 	struct {
 		unsigned int lay_en:1;
 		unsigned int alpmode:2;
-		unsigned int r0:1;
+		unsigned int access_sw:1;
 		unsigned int lay_fcolor_en:1;
 		unsigned int r1:3;
 		unsigned int lay_fmt:5;
@@ -227,7 +227,7 @@ union __ui_lay_attr_reg_t {
 	struct {
 		unsigned int lay_en:1;
 		unsigned int lay_alpmod:2;
-		unsigned int r0:1;
+		unsigned int access_sw:1;
 		unsigned int lay_fcolor_en:1;
 		unsigned int r1:3;
 		unsigned int lay_fmt:5;
@@ -551,11 +551,156 @@ struct __bld_reg_t {
 	union __bld_out_color_ctl_reg_t bld_out_ctl;
 };
 
+union __lbc_ctl_reg_t {
+	unsigned int dwval;
+	struct {
+		unsigned int lbc_en:1;
+		unsigned int lbc_fcen:1;
+		unsigned int alpmode:2;
+		unsigned int clk_gate:1;
+		unsigned int is_lossy:1;
+		unsigned int r0:2;
+		unsigned int rc_en:1;
+		unsigned int r1:15;
+		unsigned int alpha:8;
+	} bits;
+};
+
+union __lbc_size_reg_t {
+	unsigned int dwval;
+	struct {
+		unsigned int lay_width:12;
+		unsigned int r0:4;
+		unsigned int lay_hight:12;
+		unsigned int r1:4;
+	} bits;
+};
+
+union __lbc_crop_coor_reg_t {
+	unsigned int dwval;
+	struct {
+		unsigned int left_crop:16;
+		unsigned int top_crop:16;
+	} bits;
+};
+
+union __lbc_crop_size_reg_t {
+	unsigned int dwval;
+	struct {
+		unsigned int width_crop:12;
+		unsigned int r0:4;
+		unsigned int hight_crop:12;
+		unsigned int r1:4;
+	} bits;
+};
+
+union __lbc_laddr_reg_t {
+	unsigned int dwval;
+	struct {
+		unsigned int laddr;
+	} bits;
+};
+
+union __lbc_haddr_reg_t {
+	unsigned int dwval;
+	struct {
+		unsigned int haddr:8;
+		unsigned int r0:24;
+	} bits;
+};
+
+union __lbc_seg_reg_t {
+	unsigned int dwval;
+	struct {
+		unsigned int pitch:16;
+		unsigned int seg_bit:16;
+	} bits;
+};
+
+union __lbc_ovl_size_reg_t {
+	unsigned int dwval;
+	struct {
+		unsigned int width_ovl:12;
+		unsigned int r0:4;
+		unsigned int height_ovl:12;
+		unsigned int r1:4;
+	} bits;
+};
+
+union __lbc_ovl_coor_reg_t {
+	unsigned int dwval;
+	struct {
+		unsigned int ovl_coorx:16;
+		unsigned int ovl_coory:16;
+	} bits;
+};
+
+union __lbc_fcolor_reg_t {
+	unsigned int dwval;
+	struct {
+		unsigned int lbc_fc;
+	} bits;
+};
+
+union __ovl_palette {
+	unsigned int dwval;
+	struct {
+		unsigned int blue:8;
+		unsigned int green:8;
+		unsigned int red:8;
+		unsigned int alpha:8;
+	} bits;
+};
+struct  __ovl_palette_reg_t {
+	union __ovl_palette val[PALETTE_SIZE];
+};
+
+struct __lbc_ovl_reg_t {
+	union __lbc_ctl_reg_t lbc_ctl;
+	union __lbc_size_reg_t lbc_v_size;
+	union __lbc_crop_coor_reg_t lbc_crop_coor;
+	union __lbc_crop_size_reg_t lbc_crop_size;
+	union __lbc_laddr_reg_t lbc_laddr;
+	union __lbc_haddr_reg_t lbc_haddr;
+	union __lbc_seg_reg_t lbc_seg;
+	union __lbc_ovl_size_reg_t lbc_ovl_size;
+	union __lbc_ovl_coor_reg_t lbc_lay_coor;
+	union __lbc_fcolor_reg_t lbc_fcolor;
+};
+union __glb_dither_ctl_reg_t {
+	unsigned int dwval;
+	struct {
+		unsigned int en:1;
+		unsigned int fmt:3;
+		unsigned int mode:4;
+		unsigned int fifo_3d:1;
+	} bits;
+
+};
+
+union __glb_autoclk_reg_t {
+	unsigned int dwval;
+	struct {
+		unsigned int en:1;
+		unsigned int r0:31;
+	} bits;
+
+};
+
+struct __glb_dither_reg_t {
+	union __glb_autoclk_reg_t auto_clk;
+	union __glb_dither_ctl_reg_t dither;
+};
+
 struct __rtmx_reg_t {
 	struct __glb_reg_t *glb_ctl;
+	struct __glb_dither_reg_t *dither_ctl;
 	struct __bld_reg_t *bld_ctl;
 	struct __vi_ovl_reg_t *vi_ovl[VI_CHN_NUM];
 	struct __ui_ovl_reg_t *ui_ovl[UI_CHN_NUM];
+	struct __lbc_ovl_reg_t *lbc_ovl[VI_CHN_NUM];
+	struct __ovl_palette_reg_t *ui_palette[UI_CHN_NUM];
+	struct __ovl_palette_reg_t *vi_palette[VI_CHN_NUM];
 };
 
 #endif

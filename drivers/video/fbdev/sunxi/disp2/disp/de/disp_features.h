@@ -18,7 +18,7 @@
 #elif defined(CONFIG_ARCH_SUN8IW6)
 #include "lowlevel_v2x/de_feat.h"
 #elif defined(CONFIG_ARCH_SUN8IW7)
-#include "./lowlevel_sun8iw7/de_feat.h"
+#include "lowlevel_v2x/de_feat.h"
 #elif defined(CONFIG_ARCH_SUN8IW8)
 #include "lowlevel_sun8iw8/de_feat.h"
 #elif defined(CONFIG_ARCH_SUN8IW9)
@@ -33,7 +33,9 @@
 #include "./lowlevel_v2x/de_feat.h"
 #elif defined(CONFIG_ARCH_SUN50IW8)
 #include "./lowlevel_v2x/de_feat.h"
-#elif defined(CONFIG_ARCH_SUN8IW12)
+#elif defined(CONFIG_ARCH_SUN8IW12) || defined(CONFIG_ARCH_SUN8IW16)\
+    || defined(CONFIG_ARCH_SUN8IW19) || defined(CONFIG_ARCH_SUN8IW20)\
+    || defined(CONFIG_ARCH_SUN20IW1)
 #include "./lowlevel_v2x/de_feat.h"
 #elif defined(CONFIG_ARCH_SUN8IW15) || defined(CONFIG_ARCH_SUN8IW17)
 #include "./lowlevel_v2x/de_feat.h"

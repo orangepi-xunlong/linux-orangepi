@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-2.0-only
 #
 # Allwinner device configuration
 #
@@ -20,38 +21,38 @@ config NET_VENDOR_ALLWINNER
 if NET_VENDOR_ALLWINNER
 
 config SUN4I_EMAC
-        tristate "Allwinner A10 EMAC support"
+	tristate "Allwinner A10 EMAC support"
 	depends on ARCH_SUNXI
 	depends on OF
 	select CRC32
 	select MII
 	select PHYLIB
 	select MDIO_SUN4I
-        ---help---
-          Support for Allwinner A10 EMAC ethernet driver.
+	---help---
+	  Support for Allwinner A10 EMAC ethernet driver.
 
-          To compile this driver as a module, choose M here.  The module
-          will be called sun4i-emac.
+	  To compile this driver as a module, choose M here.  The module
+	  will be called sun4i-emac.
 
 config SUNXI_GMAC
-        tristate "Allwinner GMAC support"
+	tristate "Allwinner GMAC support"
 	depends on ARCH_SUNXI
 	depends on OF
 	select CRC32
 	select MII
 	select PHYLIB
 	select MDIO_SUNXI
-        ---help---
-          Support for Allwinner Gigabit ethernet driver.
+	help
+	  Support for Allwinner Gigabit ethernet driver.
 
-          To compile this driver as a module, choose M here.  The module
-          will be called sunxi-gmac.
+	  To compile this driver as a module, choose M here.  The module
+	  will be called sunxi-gmac.
 
 config SUNXI_EXT_PHY
 	bool "Use extern phy"
 	depends on SUNXI_GMAC
 	default y
-	---help---
+	help
 	  Allwinnertech SOC support both internal & extern PHY, Say "Y" to
 	  choose use extern phy, Say "N" to use internal phy
 

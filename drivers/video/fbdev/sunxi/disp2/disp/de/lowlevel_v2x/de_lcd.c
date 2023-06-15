@@ -223,7 +223,6 @@ s32 tcon0_dsi_clk_enable(u32 sel, u32 en)
 s32 tcon_de_attach(u32 tcon_index, u32 de_index)
 {
 	unsigned int tcon_real_index = 0;
-
 	if ((de_index >= DE_NUM) || (tcon_index >= DEVICE_NUM))
 		return -1;
 	tcon_real_index = de_feat_get_tcon_index(tcon_index);
@@ -238,16 +237,31 @@ s32 tcon_de_attach(u32 tcon_index, u32 de_index)
 		if (tcon_real_index > 2)
 			tcon_real_index += 2;
 	}
+
 #if defined(CONFIG_ARCH_SUN50IW10)
-	if (de_index == 0)
+	if (de_index == 0) {
+		if (lcd_top[1]->tcon_de_perh.bits.de_port1_perh == tcon_real_index)
+			lcd_top[1]->tcon_de_perh.bits.de_port1_perh =
+			    lcd_top[0]->tcon_de_perh.bits.de_port0_perh;
 		lcd_top[0]->tcon_de_perh.bits.de_port0_perh = tcon_real_index;
-	else if (de_index == 1)
+	} else if (de_index == 1) {
+		if (lcd_top[0]->tcon_de_perh.bits.de_port0_perh == tcon_real_index)
+			lcd_top[0]->tcon_de_perh.bits.de_port0_perh =
+			    lcd_top[1]->tcon_de_perh.bits.de_port1_perh;
 		lcd_top[1]->tcon_de_perh.bits.de_port1_perh = tcon_real_index;
+	}
 #else
-	if (de_index == 0)
+	if (de_index == 0) {
+		if (lcd_top[0]->tcon_de_perh.bits.de_port1_perh == tcon_real_index)
+			lcd_top[0]->tcon_de_perh.bits.de_port1_perh =
+			    lcd_top[0]->tcon_de_perh.bits.de_port0_perh;
 		lcd_top[0]->tcon_de_perh.bits.de_port0_perh = tcon_real_index;
-	else if (de_index == 1)
+	} else if (de_index == 1) {
+		if (lcd_top[0]->tcon_de_perh.bits.de_port0_perh == tcon_real_index)
+			lcd_top[0]->tcon_de_perh.bits.de_port0_perh =
+			    lcd_top[0]->tcon_de_perh.bits.de_port1_perh;
 		lcd_top[0]->tcon_de_perh.bits.de_port1_perh = tcon_real_index;
+	}
 #endif
 
 	return 0;
@@ -518,6 +532,7 @@ uintptr_t tcon_get_reg_base(u32 sel)
 s32 tcon_init(u32 sel)
 {
 	lcd_dev[sel]->tcon_gctl.bits.io_map_sel = 0;
+	lcd_dev[sel]->tcon_gctl.bits.pad_sel = 1;
 	lcd_dev[sel]->tcon0_ctl.bits.tcon0_en = 0;
 	lcd_dev[sel]->tcon1_ctl.bits.tcon1_en = 0;
 	lcd_dev[sel]->tcon_gctl.bits.tcon_en = 0;
@@ -528,11 +543,19 @@ s32 tcon_init(u32 sel)
 	return 0;
 }
 
+s32 tcon_pan_sel(u32 sel, u32 pad)
+{
+	lcd_dev[sel]->tcon_gctl.bits.pad_sel = pad;
+
+	return 0;
+}
+
 s32 tcon_exit(u32 sel)
 {
 	lcd_dev[sel]->tcon_gctl.bits.tcon_en = 0;
 	lcd_dev[sel]->tcon0_dclk.bits.tcon0_dclk_en = 0;
 
+	lcd_dev[sel]->tcon_gctl.bits.pad_sel = 0;
 	lcd_dev[sel]->tcon_gctl.bits.io_map_sel = 1;
 	return 0;
 }
@@ -626,7 +649,8 @@ s32 tcon0_open(u32 sel, struct disp_panel_para *panel)
 {
 	tcon0_out_to_gpio(sel);
 
-	lcd_dev[sel]->tcon_gint0.bits.tcon_irq_flag = 0;
+	/*clear tcon_irq_flag except FSYNC_INT_INV*/
+	lcd_dev[sel]->tcon_gint0.bits.tcon_irq_flag &= 0x00000004;
 	if ((panel->lcd_if == LCD_IF_HV) || (panel->lcd_if == LCD_IF_LVDS) ||
 	    (panel->lcd_if == LCD_IF_EXT_DSI) ||
 	    (panel->lcd_if == LCD_IF_VDPO)) {
@@ -638,8 +662,10 @@ s32 tcon0_open(u32 sel, struct disp_panel_para *panel)
 		if ((panel->lcd_cpu_mode == 0)
 		    && (panel->lcd_if == LCD_IF_CPU))
 			tcon_irq_enable(sel, LCD_IRQ_TCON0_VBLK);
-		else
+		else {
+			lcd_dev[sel]->tcon0_cpu_ctl.bits.da = 1;
 			tcon_irq_enable(sel, LCD_IRQ_TCON0_CNTR);
+		}
 	} else if (panel->lcd_if == LCD_IF_DSI) {
 		lcd_dev[sel]->tcon0_dclk.bits.tcon0_dclk_en = 0xf;
 		lcd_dev[sel]->tcon0_ctl.bits.tcon0_en = 1;
@@ -779,6 +805,7 @@ static s32 tcon0_cfg_mode_tri(u32 sel, struct disp_panel_para *panel)
 	/* lcd_dev[sel]->tcon0_cpu_ctl.bits.flush = 1; */
 	lcd_dev[sel]->tcon0_ctl.bits.tcon0_en = 1;
 	lcd_dev[sel]->tcon_gctl.bits.tcon_en = 1;
+	lcd_dev[sel]->tcon_gctl.bits.pad_sel = 1;
 
 	if ((panel->lcd_if == LCD_IF_CPU)
 	    || (panel->lcd_if == LCD_IF_DSI
@@ -795,6 +822,11 @@ static s32 tcon0_cfg_mode_tri(u32 sel, struct disp_panel_para *panel)
 		lcd_dev[sel]->tcon0_cpu_tri0.bits.block_space =
 		    panel->lcd_ht * dsi_pixel_bits[panel->lcd_dsi_format] /
 		    (tcon_div * panel->lcd_dsi_lane) - panel->lcd_x - 40;
+#if defined(SUNXI_DSI_PASSIVE_BUG)
+		lcd_dev[sel]->tcon0_cpu_tri0.bits.block_space =
+		    panel->lcd_ht * dsi_pixel_bits[panel->lcd_dsi_format] /
+		    (tcon_div * 4) - panel->lcd_x - 40;
+#endif
 		lcd_dev[sel]->tcon0_cpu_tri2.bits.trans_start_set = 10;
 #endif
 	}
@@ -942,7 +974,11 @@ s32 tcon0_cfg(u32 sel, struct disp_panel_para *panel)
 			panel->lcd_fresh_mode = 0;
 			lcd_dev[sel]->tcon0_hv_ctl.bits.res0 = 0;
 			lcd_dev[sel]->tcon0_hv_ctl.bits.ccir_csc_dis = 1;
+#if defined(SUNXI_DSI_PASSIVE_BUG) /*defined in de_feat.h*/
+			tcon0_cfg_mode_tri(sel, panel);
+#else
 			tcon0_cfg_mode_auto(sel, panel);
+#endif
 #if defined(HAVE_DEVICE_COMMON_MODULE)
 			if (panel->lcd_tcon_mode == DISP_TCON_DUAL_DSI) {
 				dsi_src_sel(0, 0); /*same source*/
@@ -991,12 +1027,34 @@ s32 tcon0_cfg(u32 sel, struct disp_panel_para *panel)
 
 	tcon0_frm(sel, panel->lcd_frm);
 
+	/*fsync config*/
+	lcd_dev[sel]->fsync_gen_ctrl.bits.fsync_gen_en = panel->lcd_fsync_en;
+	tcon_set_fsync_pol(sel, panel->lcd_fsync_pol);
+
+	/*follow vsync's pol*/
+	lcd_dev[sel]->fsync_gen_ctrl.bits.sel_vsync_en =
+	    lcd_dev[sel]->tcon1_io_pol.bits.io0_inv;
+
+	if (panel->lcd_fsync_act_time) {
+		tcon_set_fsync_active_time(sel, panel->lcd_fsync_act_time);
+	} else {
+		lcd_dev[sel]->fsync_gen_dly.bits.sensor_act0_time =
+		    panel->lcd_ht / 4;
+		lcd_dev[sel]->fsync_gen_dly.bits.sensor_act1_time =
+		    panel->lcd_ht / 4;
+	}
+
+	lcd_dev[sel]->fsync_gen_ctrl.bits.sensor_dis_time =
+	    (panel->lcd_fsync_dis_time) ? panel->lcd_fsync_dis_time : 1;
+
 	lcd_dev[sel]->tcon0_ctl.bits.rb_swap = panel->lcd_rb_swap;
 	lcd_dev[sel]->tcon0_io_tri.bits.rgb_endian = panel->lcd_rgb_endian;
 	lcd_dev[sel]->tcon_volume_ctl.bits.safe_period_mode = 3;
 	lcd_dev[sel]->tcon_volume_ctl.bits.safe_period_fifo_num =
 	    panel->lcd_dclk_freq * 15;
 	lcd_dev[sel]->tcon0_io_pol.bits.sync_inv = panel->lcd_hv_sync_polarity;
+	lcd_dev[sel]->fsync_gen_ctrl.bits.hsync_pol_sel =
+	    !panel->lcd_hv_sync_polarity;
 	switch (panel->lcd_hv_clk_phase) {
 	case 0:
 		lcd_dev[sel]->tcon0_io_pol.bits.clk_inv = 0;
@@ -1019,6 +1077,8 @@ s32 tcon0_cfg(u32 sel, struct disp_panel_para *panel)
 		lcd_dev[sel]->tcon0_io_pol.bits.dclk_sel = 0;
 		break;
 	}
+	if (panel->lcd_hv_data_polarity)
+		lcd_dev[sel]->tcon0_io_pol.bits.data_inv = 0xffffff;
 
 	if (panel->lcd_fresh_mode == 1) {
 		u32 lcd_te;
@@ -1125,9 +1185,55 @@ u32 tcon0_cpu_busy(u32 sel)
 		return 0;
 }
 
+#if defined(CONFIG_ARCH_SUN8IW19P1)
 s32 tcon0_cpu_wr_24b_index(u32 sel, u32 index)
 {
 	u32 count = 0;
+
+	if (lcd_dev[sel]->tcon0_io_pol.bits.data_inv == 0xffffff)
+		index = ~index;
+
+	while ((tcon0_cpu_busy(sel)) && (count < 50)) {
+		count++;
+		disp_delay_us(100);
+	}
+	lcd_dev[sel]->tcon0_cpu_ctl.bits.da = 0;
+	/*
+	 * 0: write index
+	 * 1: write param
+	 */
+	lcd_dev[sel]->tcon0_cpu_ctl.bits.ca = 0;
+	lcd_dev[sel]->tcon0_cpu_wr.bits.data_wr = index;
+	return 0;
+}
+
+s32 tcon0_cpu_wr_24b_data(u32 sel, u32 data)
+{
+	u32 count = 0;
+
+	if (lcd_dev[sel]->tcon0_io_pol.bits.data_inv == 0xffffff)
+		data = ~data;
+
+	while ((tcon0_cpu_busy(sel)) && (count < 50)) {
+		count++;
+		disp_delay_us(100);
+	}
+	/*
+	 * 0: write index
+	 * 1: write param
+	 */
+	lcd_dev[sel]->tcon0_cpu_ctl.bits.da = 0;
+	lcd_dev[sel]->tcon0_cpu_ctl.bits.ca = 1;
+	lcd_dev[sel]->tcon0_cpu_wr.bits.data_wr = data;
+	return 0;
+}
+#else
+s32 tcon0_cpu_wr_24b_index(u32 sel, u32 index)
+{
+	u32 count = 0;
+
+	if (lcd_dev[sel]->tcon0_io_pol.bits.data_inv == 0xffffff)
+		index = ~index;
 
 	while ((tcon0_cpu_busy(sel)) && (count < 50)) {
 		count++;
@@ -1148,6 +1254,9 @@ s32 tcon0_cpu_wr_24b_data(u32 sel, u32 data)
 {
 	u32 count = 0;
 
+	if (lcd_dev[sel]->tcon0_io_pol.bits.data_inv == 0xffffff)
+		data = ~data;
+
 	while ((tcon0_cpu_busy(sel)) && (count < 50)) {
 		count++;
 		disp_delay_us(100);
@@ -1162,6 +1271,7 @@ s32 tcon0_cpu_wr_24b_data(u32 sel, u32 data)
 	lcd_dev[sel]->tcon0_cpu_ctl.bits.da = 1;
 	return 0;
 }
+#endif
 
 s32 tcon0_cpu_wr_24b(u32 sel, u32 index, u32 data)
 {
@@ -1309,6 +1419,20 @@ s32 tcon_set_sync_pol(u32 sel, u32 ver_pol, u32 hor_pol)
 #endif
 	return 0;
 }
+
+#ifdef TCON_POL_CORRECT
+u32 tcon1_cfg_correct(u32 sel, struct disp_video_timings *timing)
+{
+	if (timing->pixel_clk > 27000000)
+		lcd_dev[sel]->tcon0_io_pol.bits.sync_inv
+				= (timing->hor_sync_polarity ? 0 : 1)
+				| ((timing->ver_sync_polarity ? 0 : 1) << 1);
+	else
+		lcd_dev[sel]->tcon0_io_pol.bits.sync_inv = 0;
+
+	return 0;
+}
+#endif
 
 s32 tcon1_cfg(u32 sel, struct disp_video_timings *timing)
 {
@@ -1881,4 +2005,75 @@ s32 tcon_cmap(u32 sel, u32 mode, unsigned int lcd_cmap_tbl[2][3][4])
 void tcon_show_builtin_patten(u32 sel, u32 patten)
 {
 	lcd_dev[sel]->tcon0_ctl.bits.src_sel = patten;
+}
+
+
+/**
+ * @name       :tcon_set_fsync_pol
+ * @brief      :set fsync's polarity
+ * @param[IN]  :sel:tcon index
+ * @param[IN]  :pol:polarity. 1:positive;0:negative
+ *	positive:
+ *           +---------+
+ *  ---------+         +-----------
+ *
+ *	negative:
+ *  ---------+         +------------
+ *	     +---------+
+ *
+ * @return     :always 0
+ */
+s32 tcon_set_fsync_pol(u32 sel, u32 pol)
+{
+	if (pol) {
+		lcd_dev[sel]->tcon_gint0.bits.tcon_irq_flag |= 0x00000004;
+		lcd_dev[sel]->fsync_gen_ctrl.bits.sensor_dis_value = 0;
+		lcd_dev[sel]->fsync_gen_ctrl.bits.sensor_act0_value = 1;
+		lcd_dev[sel]->fsync_gen_ctrl.bits.sensor_act1_value = 1;
+	} else {
+		lcd_dev[sel]->tcon_gint0.bits.tcon_irq_flag &= 0xfffffffb;
+		lcd_dev[sel]->fsync_gen_ctrl.bits.sensor_dis_value = 1;
+		lcd_dev[sel]->fsync_gen_ctrl.bits.sensor_act0_value = 0;
+		lcd_dev[sel]->fsync_gen_ctrl.bits.sensor_act1_value = 0;
+	}
+	return 0;
+}
+
+/**
+ * @name       :tcon_set_fsync_active_time
+ * @brief      :set tcon fsync's active time
+ * @param[IN]  :sel:tcon index
+ * @param[IN]  :pixel_num:number of pixel time(Tpixel) to set
+ *
+ * Tpixel = 1/fps*1e9/vt/ht, unit:ns
+ *
+ * @return     :0 if success
+ */
+s32 tcon_set_fsync_active_time(u32 sel, u32 pixel_num)
+{
+	/*4095*2*/
+	if (pixel_num > 8190 || pixel_num <= 0)
+		return -1;
+
+	if (pixel_num > 4095) {
+		lcd_dev[sel]->fsync_gen_dly.bits.sensor_act0_time = 4095;
+		lcd_dev[sel]->fsync_gen_dly.bits.sensor_act1_time =
+		    pixel_num - 4095;
+	} else {
+		lcd_dev[sel]->fsync_gen_dly.bits.sensor_act0_time =
+		    pixel_num / 2;
+		lcd_dev[sel]->fsync_gen_dly.bits.sensor_act1_time =
+		    pixel_num - pixel_num / 2;
+	}
+
+	return 0;
+}
+
+void tcon_reset(u32 sel)
+{
+	lcd_dev[sel]->tcon0_ctl.bits.src_sel = 1;
+	lcd_dev[sel]->tcon_gctl.bits.tcon_en = 0;
+	disp_delay_us(20);
+	lcd_dev[sel]->tcon0_ctl.bits.src_sel = 0;
+	lcd_dev[sel]->tcon_gctl.bits.tcon_en = 1;
 }

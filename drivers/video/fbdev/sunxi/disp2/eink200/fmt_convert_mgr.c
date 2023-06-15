@@ -8,20 +8,16 @@
  */
 
 #include "include/fmt_convert.h"
+#include "libeink.h"
 
 #define FORMAT_MANAGER_NUM 1
-
-#ifdef TIME_COUNTER_DEBUG
-struct timeval fmt_stimer, fmt_etimer;
-#endif
 
 #ifdef VIRTUAL_REGISTER
 static void *wb_preg_base;
 static void *wb_vreg_base;
 #endif
-#ifdef REGISTER_PRINT
-unsigned long de_test_vaddr;
-#endif
+
+unsigned long de_dbg_reg_base;
 
 static struct fmt_convert_manager fmt_mgr[FORMAT_MANAGER_NUM];
 
@@ -32,19 +28,23 @@ struct fmt_convert_manager *get_fmt_convert_mgr(unsigned int id)
 
 s32 fmt_convert_finish_proc(int irq, void *parg)
 {
+	int ret = 0;
 	struct fmt_convert_manager *mgr = (struct fmt_convert_manager *)parg;
-	EINK_INFO_MSG("FMT INTERRUPT!\n");
+
+	EINK_DEBUG_MSG("FMT INTERRUPT!\n");
 
 	if (mgr == NULL) {
 		pr_err("%s:fmt mgr is NULL!\n", __func__);
 		return DISP_IRQ_RETURN;
 	}
 
-	if (wb_eink_get_status(mgr->sel) == 0) {
+	ret = wb_eink_get_status(mgr->sel);
+	if (ret == 0) {
 		mgr->wb_finish = 1;
+		EINK_DEBUG_MSG("WB SUCCESS!\n");
 		wake_up_interruptible(&(mgr->write_back_queue));
 	} else
-		pr_err("convert err!\n");
+		pr_err("convert err! status = 0x%x\n", ret);
 	wb_eink_interrupt_clear(mgr->sel);
 
 	return DISP_IRQ_RETURN;
@@ -60,23 +60,44 @@ static int fmt_convert_enable(unsigned int id)
 		return -1;
 	}
 
+	if (mgr->enable_flag == true) {
+		EINK_DEBUG_MSG("already enable!\n");
+		return 0;
+	}
 	ret = request_irq(mgr->irq_num, (irq_handler_t)fmt_convert_finish_proc, 0, "de_writeback", (void *)mgr);
 	if (ret != 0) {
 		pr_err("fail to format convert irq\n");
 		return ret;
 	}
 
-	ret = clk_prepare_enable(mgr->clk);
-
+	ret = reset_control_deassert(mgr->rst_clk);
 	if (ret) {
-		pr_err("fail enable mgr's clock!\n");
+		pr_err("fail deassert de mgr's clock!\n");
 		return ret;
+	}
+
+	if (mgr->bus_clk) {
+		ret = clk_prepare_enable(mgr->bus_clk);
+		if (ret) {
+			pr_err("fail deassert de mgr's bus_clk!\n");
+			return ret;
+		}
+	}
+
+	if (mgr->clk) {
+		ret = clk_prepare_enable(mgr->clk);
+		if (ret) {
+			pr_err("fail deassert de mgr's clk!\n");
+			return ret;
+		}
 	}
 
 	/* enable de clk, enable write back clk */
 	de_clk_enable(DE_CLK_CORE0);
 	de_clk_enable(DE_CLK_WB);
 
+	mgr->enable_flag = true;
+	EINK_DEBUG_MSG("+++finish!");
 	return 0;
 }
 
@@ -89,6 +110,10 @@ static s32 fmt_convert_disable(unsigned int id)
 		return -1;
 	}
 
+	if (mgr->enable_flag == false) {
+		EINK_DEBUG_MSG("already disable!\n");
+		return 0;
+	}
 	/* disable write back clk, disable de clk */
 	de_clk_disable(DE_CLK_WB);
 	de_clk_disable(DE_CLK_CORE0);
@@ -96,6 +121,8 @@ static s32 fmt_convert_disable(unsigned int id)
 
 	free_irq(mgr->irq_num, (void *)mgr);
 
+	mgr->enable_flag = false;
+	EINK_DEBUG_MSG("+++finish");
 	return 0;
 }
 
@@ -118,12 +145,11 @@ static s32 fmt_convert_start(unsigned int id, struct disp_layer_config_inner *co
 	struct fmt_convert_manager *mgr = &fmt_mgr[id];
 	__eink_wb_config_t wbcfg;
 	struct dmabuf_item *item[16] = {NULL};
+	struct dmabuf_item *last_item = NULL, *cur_item = NULL;
 	struct fb_address_transfer fb;
 	long timerout = 0;
 	s32 ret = -1, k = 0;
-#ifdef REGISTER_PRINT
-	unsigned long reg_base = 0, end_reg = 0;
-#endif
+	unsigned long wdbg_reg_base = 0, wdbg_end_reg = 0;
 
 	EINK_INFO_MSG("DE WB START!\n");
 	timerout = (100 * HZ) / 1000;	/*100ms */
@@ -136,15 +162,40 @@ static s32 fmt_convert_start(unsigned int id, struct disp_layer_config_inner *co
 	if (dest_img->out_fmt != EINK_Y3 &&
 			dest_img->out_fmt != EINK_Y4 &&
 			dest_img->out_fmt != EINK_Y5 &&
-			dest_img->out_fmt != EINK_Y8) {
+			dest_img->out_fmt != EINK_Y8 &&
+			dest_img->out_fmt != EINK_RGB888) {
 		pr_err("%s:format %d not support!", __func__, dest_img->out_fmt);
 		return -1;
 	}
-	EINK_INFO_MSG("dest_addr = 0x%p\n", (void *)dest_img->paddr);
-	EINK_DEFAULT_MSG("calc_win_en = %d\n", dest_img->win_calc_en);
-#ifdef TIME_COUNTER_DEBUG
-	do_gettimeofday(&fmt_stimer);
-#endif
+
+	/* time calc debug */
+	if (eink_get_print_level() == 8) {
+		getnstimeofday(&mgr->stimer);
+	}
+
+	if (last_img->fd >= 0) {
+		last_item = eink_dma_map(last_img->fd);
+		if (last_item == NULL) {
+			pr_err("[%s]wb map last img fd %d fail!\n", __func__, last_img->fd);
+			return -1;
+		}
+		last_img->paddr = last_item->dma_addr;
+	}
+
+	if (dest_img->fd >= 0) {
+		cur_item = eink_dma_map(dest_img->fd);
+		if (cur_item == NULL) {
+			pr_err("[%s]wb map cur img fd %d fail!\n", __func__, dest_img->fd);
+			if (last_item)
+				eink_dma_unmap(last_item);
+			return -1;
+		}
+		dest_img->paddr = cur_item->dma_addr;
+	}
+
+	EINK_DEBUG_MSG("calc_win_en = %d, fmt = 0x%x\n",
+			dest_img->win_calc_en, dest_img->out_fmt);
+
 	memset((void *)&mdata, 0, sizeof(struct disp_manager_data));
 	memset((void *)ldata, 0, 16 * sizeof(ldata[0]));
 
@@ -156,6 +207,11 @@ static s32 fmt_convert_start(unsigned int id, struct disp_layer_config_inner *co
 	mdata.config.size.y = 0;
 	mdata.config.size.width = dest_img->size.width;
 	mdata.config.size.height = dest_img->size.height;
+	mdata.config.de_freq = clk_get_rate(mgr->clk);
+	if (!mdata.config.de_freq) {
+		pr_err("DE frequency is zero!\n");
+		mdata.config.de_freq = 300000000;
+	}
 
 	for (k = 0; k < layer_num; k++) {
 		ldata[k].flag = LAYER_ALL_DIRTY;
@@ -164,14 +220,24 @@ static s32 fmt_convert_start(unsigned int id, struct disp_layer_config_inner *co
 				sizeof(*config));
 
 		item[k] = NULL;
-		if (ldata[k].config.info.fb.fd && (true == config[k].enable)) {
+		if (ldata[k].config.info.fb.fd >= 0 && (true == config[k].enable) &&
+		    (ldata[k].config.info.mode == LAYER_MODE_BUFFER)) {
+
+			/* 后面要在img上面加order来debug */
+#if 0
+			if (eink_get_print_level() == 9) {
+				eink_save_img(ldata[k].config.info.fb.fd, 4,
+						ldata[k].config.info.fb.size[0].width,
+						ldata[k].config.info.fb.size[0].height, k, NULL, 0);
+			}
+#endif
 			item[k] = eink_dma_map(ldata[k].config.info.fb.fd);
 			if (item[k] == NULL) {
 				pr_err("eink wb map fd %d fail!\n", ldata[k].config.info.fb.fd);
 				return -1;
 			}
 
-			EINK_INFO_MSG("layer%d map ok, fd=%d, addr=0x%08x\n", k,
+			EINK_DEBUG_MSG("layer%d map ok, fd=%d, addr=0x%08x\n", k,
 					ldata[k].config.info.fb.fd,
 					(unsigned int)item[k]->dma_addr);
 
@@ -190,7 +256,7 @@ static s32 fmt_convert_start(unsigned int id, struct disp_layer_config_inner *co
 	}
 
 	if (dest_img->dither_mode) {
-		if (dest_img->out_fmt == EINK_Y8)
+		if (dest_img->out_fmt == EINK_Y8 || dest_img->out_fmt == EINK_RGB888)
 			dest_img->dither_mode = 0; /* Y8 bypass dither */
 
 	}
@@ -226,7 +292,7 @@ static s32 fmt_convert_start(unsigned int id, struct disp_layer_config_inner *co
 
 	wbcfg.frame.size.width  = dest_img->size.width;
 	wbcfg.frame.size.height = dest_img->size.height;
-	wbcfg.frame.addr        = (unsigned long)dest_img->paddr;
+	wbcfg.frame.addr        = dest_img->paddr;
 	wbcfg.win_en		= dest_img->win_calc_en;
 
 	if ((wbcfg.win_en == true) && (last_img != NULL)) {/* first time last img is NULL */
@@ -238,11 +304,18 @@ static s32 fmt_convert_start(unsigned int id, struct disp_layer_config_inner *co
 			dest_img->upd_win.left = 0;
 			dest_img->upd_win.right = dest_img->size.width - 1;
 			dest_img->upd_win.bottom = dest_img->size.height - 1;
-		} else
-			wb_eink_set_last_img(mgr->sel, (unsigned long)last_img->paddr);//-----------------------
+		} else {
+
+			if (eink_get_print_level() == 7) {
+				eink_save_img(last_img->fd, 0,
+						last_img->size.width,
+						last_img->size.height, 0, NULL, 0);
+			}
+			wb_eink_set_last_img(mgr->sel, last_img->paddr);//-----------------------
+		}
 	}
 
-	wbcfg.out_fmt		= dest_img->out_fmt;
+	wbcfg.out_fmt		= (enum wb_output_fmt)dest_img->out_fmt;
 	wbcfg.csc_std		= 2;
 	wbcfg.dither_mode	= dest_img->dither_mode;
 
@@ -251,26 +324,43 @@ static s32 fmt_convert_start(unsigned int id, struct disp_layer_config_inner *co
 
 	/* enable inttrrupt */
 	wb_eink_interrupt_enable(mgr->sel);
-	wb_eink_enable(mgr->sel);
+	wb_eink_enable(mgr->sel, dest_img->out_fmt);
 
-#ifdef REGISTER_PRINT
-	reg_base = wb_eink_get_reg_base(mgr->sel);
-	EINK_INFO_MSG("reg_base = 0x%x\n", (unsigned int)reg_base);
-	end_reg = reg_base + 0x3ff;
-	eink_print_register(reg_base, end_reg);
+	/* for debug reg info */
+	if (eink_get_print_level() == 4) {
+		pr_info("[EINK PRINT WB REG]:-----\n");
+		wdbg_reg_base = wb_eink_get_reg_base(mgr->sel);
+		EINK_INFO_MSG("reg_base = 0x%x\n", (unsigned int)wdbg_reg_base);
+		wdbg_end_reg = wdbg_reg_base + 0x3ff;
+		eink_print_register(wdbg_reg_base, wdbg_end_reg);
 
-	EINK_INFO_MSG("de reg_base = 0x%x\n", (unsigned int)de_test_vaddr);
-	reg_base = de_test_vaddr + 0x100000;
-	end_reg = reg_base + 0x20;
-	eink_print_register(reg_base, end_reg);
-	reg_base = de_test_vaddr + 0x101000;
-	end_reg = reg_base + 0x3ff;
-	eink_print_register(reg_base, end_reg);
-	reg_base = de_test_vaddr + 0x102000;
-	end_reg = reg_base + 0x3ff;
-	eink_print_register(reg_base, end_reg);
-#endif
+		pr_info("de reg_base = 0x%x\n", (unsigned int)de_dbg_reg_base);
 
+		pr_info("[DE RTMX REG]:\n");
+		wdbg_reg_base = de_dbg_reg_base + 0x0fffff;
+		wdbg_end_reg = wdbg_reg_base + 0x20;
+		eink_print_register(wdbg_reg_base, wdbg_end_reg);
+
+		EINK_INFO_MSG("[DE RTMX APB REG]:\n");
+		wdbg_reg_base = de_dbg_reg_base + 0x101000;
+		wdbg_end_reg = wdbg_reg_base + 0xff;
+		eink_print_register(wdbg_reg_base, wdbg_end_reg);
+
+		EINK_INFO_MSG("[DE RTMX OVL0 REG]:\n");
+		wdbg_reg_base = de_dbg_reg_base + 0x102000;
+		wdbg_end_reg = wdbg_reg_base + 0xff;
+		eink_print_register(wdbg_reg_base, wdbg_end_reg);
+
+		EINK_INFO_MSG("[DE RTMX UI0 REG]:\n");
+		wdbg_reg_base = de_dbg_reg_base + 0x103000;
+		wdbg_end_reg = wdbg_reg_base + 0xff;
+		eink_print_register(wdbg_reg_base, wdbg_end_reg);
+
+		EINK_INFO_MSG("[DE RTMX UI1 REG]:\n");
+		wdbg_reg_base = de_dbg_reg_base + 0x104000;
+		wdbg_end_reg = wdbg_reg_base + 0xff;
+		eink_print_register(wdbg_reg_base, wdbg_end_reg);
+	}
 
 	timerout =
 		wait_event_interruptible_timeout(mgr->write_back_queue,
@@ -304,6 +394,7 @@ static s32 fmt_convert_start(unsigned int id, struct disp_layer_config_inner *co
 
 	wb_eink_interrupt_disable(mgr->sel);
 	wb_eink_disable(mgr->sel);
+
 	ret = 0;
 
 EXIT:
@@ -311,10 +402,14 @@ EXIT:
 		if (item[k] != NULL)
 			eink_dma_unmap(item[k]);
 	}
-#ifdef TIME_COUNTER_DEBUG
-	do_gettimeofday(&fmt_etimer);
-	EINK_INFO_MSG("take %d ms\n", get_delt_ms_timer(fmt_stimer, fmt_etimer));
-#endif
+	if (last_item)
+		eink_dma_unmap(last_item);
+	if (cur_item)
+		eink_dma_unmap(cur_item);
+	if (eink_get_print_level() == 8) {
+		getnstimeofday(&mgr->etimer);
+		pr_info("take %d ms\n", get_delt_ms_timer(mgr->stimer, mgr->etimer));
+	}
 	return ret;
 }
 
@@ -341,15 +436,18 @@ s32 fmt_convert_mgr_init(struct init_para *para)
 		mgr->fmt_auto_mode_select = fmt_auto_mode_select;
 		mgr->start_convert = fmt_convert_start;
 		mgr->clk = para->de_clk;
-#ifdef REGISTER_PRINT
-		de_test_vaddr = (unsigned long)para->de_reg_base;
-#endif
+		mgr->bus_clk = para->de_bus_clk;
+		mgr->rst_clk = para->de_rst_clk;
+
 #ifdef VIRTUAL_REGISTER
 		wb_vreg_base = eink_malloc(0x03ffff, &wb_preg_base);
 		wb_eink_set_reg_base(mgr->sel, wb_vreg_base);
 #else
 		wb_eink_set_reg_base(mgr->sel, para->de_reg_base);
 #endif
+
+		de_dbg_reg_base = (unsigned long)para->de_reg_base;
+
 		wb_eink_set_panel_bit(mgr->sel, mgr->panel_bit);
 	}
 

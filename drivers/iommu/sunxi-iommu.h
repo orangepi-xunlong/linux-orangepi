@@ -31,8 +31,11 @@
 #define IOMMU_TLB_IVLD_ADDR_REG			0x0090
 #define IOMMU_TLB_IVLD_ADDR_MASK_REG	0x0094
 #define IOMMU_TLB_IVLD_ENABLE_REG		0x0098
+#define IOMMU_PC_IVLD_MODE_SEL_REG		0x009C
 #define IOMMU_PC_IVLD_ADDR_REG			0x00A0
+#define IOMMU_PC_IVLD_START_ADDR_REG	0x00A4
 #define IOMMU_PC_IVLD_ENABLE_REG		0x00A8
+#define IOMMU_PC_IVLD_END_ADDR_REG		0x00Ac
 #define IOMMU_DM_AUT_CTRL_REG0			0x00B0
 #define IOMMU_DM_AUT_CTRL_REG1			0x00B4
 #define IOMMU_DM_AUT_CTRL_REG2			0x00B8
@@ -55,7 +58,9 @@
 #define IOMMU_INT_ERR_ADDR_REG5			0x0124
 
 #if defined(CONFIG_ARCH_SUN8IW15) || defined(CONFIG_ARCH_SUN50IW9) \
-	|| defined(CONFIG_ARCH_SUN8IW19) || defined(CONFIG_ARCH_SUN50IW10)
+	|| defined(CONFIG_ARCH_SUN8IW19) || defined(CONFIG_ARCH_SUN50IW10) \
+	|| defined(CONFIG_ARCH_SUN8IW20) || defined(CONFIG_ARCH_SUN50IW12) \
+	|| defined(CONFIG_ARCH_SUN20IW1)
 #define IOMMU_INT_ERR_ADDR_REG6			0x0128
 #define IOMMU_INT_ERR_ADDR_REG7			0x0130
 #define IOMMU_INT_ERR_ADDR_REG8			0x0134
@@ -72,7 +77,9 @@
 #define IOMMU_INT_ERR_DATA_REG5			0x0164
 
 #if defined(CONFIG_ARCH_SUN8IW15) || defined(CONFIG_ARCH_SUN50IW9) \
-	|| defined(CONFIG_ARCH_SUN8IW19) || defined(CONFIG_ARCH_SUN50IW10)
+	|| defined(CONFIG_ARCH_SUN8IW19) || defined(CONFIG_ARCH_SUN50IW10) \
+	|| defined(CONFIG_ARCH_SUN8IW20) || defined(CONFIG_ARCH_SUN50IW12) \
+	|| defined(CONFIG_ARCH_SUN20IW1)
 #define IOMMU_INT_ERR_DATA_REG6			0x0168
 #define IOMMU_INT_ERR_DATA_REG7			0x0170
 #define IOMMU_INT_ERR_DATA_REG8			0x0174
@@ -114,7 +121,9 @@
 #define IOMMU_PMU_HIT_HIGH_REG5			0x028C
 
 #if defined(CONFIG_ARCH_SUN8IW15) || defined(CONFIG_ARCH_SUN50IW9) \
-	|| defined(CONFIG_ARCH_SUN8IW19) || defined(CONFIG_ARCH_SUN50IW10)
+	|| defined(CONFIG_ARCH_SUN8IW19) || defined(CONFIG_ARCH_SUN50IW10) \
+	|| defined(CONFIG_ARCH_SUN8IW20) || defined(CONFIG_ARCH_SUN50IW12) \
+	|| defined(CONFIG_ARCH_SUN20IW1)
 #define IOMMU_PMU_ACCESS_LOW_REG6		0x0290
 #define IOMMU_PMU_ACCESS_HIGH_REG6		0x0294
 #define IOMMU_PMU_HIT_LOW_REG6			0x0298
@@ -142,7 +151,9 @@
 #define IOMMU_PMU_TL_LOW_REG0			0x0300
 #define IOMMU_PMU_TL_HIGH_REG0			0x0304
 #if defined(CONFIG_ARCH_SUN8IW15) || defined(CONFIG_ARCH_SUN50IW9) \
-	|| defined(CONFIG_ARCH_SUN8IW19) || defined(CONFIG_ARCH_SUN50IW10)
+	|| defined(CONFIG_ARCH_SUN8IW19) || defined(CONFIG_ARCH_SUN50IW10) \
+	|| defined(CONFIG_ARCH_SUN8IW20) || defined(CONFIG_ARCH_SUN50IW12) \
+	|| defined(CONFIG_ARCH_SUN20IW1)
 #define IOMMU_PMU_ML_REG0				0x0308
 #endif
 
@@ -150,42 +161,54 @@
 #define IOMMU_PMU_TL_LOW_REG1			0x0310
 #define IOMMU_PMU_TL_HIGH_REG1			0x0314
 #if defined(CONFIG_ARCH_SUN8IW15) || defined(CONFIG_ARCH_SUN50IW9) \
-	|| defined(CONFIG_ARCH_SUN8IW19) || defined(CONFIG_ARCH_SUN50IW10)
+	|| defined(CONFIG_ARCH_SUN8IW19) || defined(CONFIG_ARCH_SUN50IW10) \
+	|| defined(CONFIG_ARCH_SUN8IW20) || defined(CONFIG_ARCH_SUN50IW12) \
+	|| defined(CONFIG_ARCH_SUN20IW1)
 #define IOMMU_PMU_ML_REG1				0x0318
 #endif
 
 #define IOMMU_PMU_TL_LOW_REG2			0x0320
 #define IOMMU_PMU_TL_HIGH_REG2			0x0324
 #if defined(CONFIG_ARCH_SUN8IW15) || defined(CONFIG_ARCH_SUN50IW9) \
-	|| defined(CONFIG_ARCH_SUN8IW19) || defined(CONFIG_ARCH_SUN50IW10)
+	|| defined(CONFIG_ARCH_SUN8IW19) || defined(CONFIG_ARCH_SUN50IW10) \
+	|| defined(CONFIG_ARCH_SUN8IW20) || defined(CONFIG_ARCH_SUN50IW12) \
+	|| defined(CONFIG_ARCH_SUN20IW1)
 #define IOMMU_PMU_ML_REG2				0x0328
 #endif
 
 #define IOMMU_PMU_TL_LOW_REG3			0x0330
 #define IOMMU_PMU_TL_HIGH_REG3			0x0334
 #if defined(CONFIG_ARCH_SUN8IW15) || defined(CONFIG_ARCH_SUN50IW9) \
-	|| defined(CONFIG_ARCH_SUN8IW19) || defined(CONFIG_ARCH_SUN50IW10)
+	|| defined(CONFIG_ARCH_SUN8IW19) || defined(CONFIG_ARCH_SUN50IW10) \
+	|| defined(CONFIG_ARCH_SUN8IW20) || defined(CONFIG_ARCH_SUN50IW12) \
+	|| defined(CONFIG_ARCH_SUN20IW1)
 #define IOMMU_PMU_ML_REG3				0x0338
 #endif
 
 #define IOMMU_PMU_TL_LOW_REG4			0x0340
 #define IOMMU_PMU_TL_HIGH_REG4			0x0344
 #if defined(CONFIG_ARCH_SUN8IW15) || defined(CONFIG_ARCH_SUN50IW9) \
-	|| defined(CONFIG_ARCH_SUN8IW19) || defined(CONFIG_ARCH_SUN50IW10)
+	|| defined(CONFIG_ARCH_SUN8IW19) || defined(CONFIG_ARCH_SUN50IW10) \
+	|| defined(CONFIG_ARCH_SUN8IW20) || defined(CONFIG_ARCH_SUN50IW12) \
+	|| defined(CONFIG_ARCH_SUN20IW1)
 #define IOMMU_PMU_ML_REG4				0x0348
 #endif
 
 #define IOMMU_PMU_TL_LOW_REG5			0x0350
 #define IOMMU_PMU_TL_HIGH_REG5			0x0354
 #if defined(CONFIG_ARCH_SUN8IW15) || defined(CONFIG_ARCH_SUN50IW9) \
-	|| defined(CONFIG_ARCH_SUN8IW19) || defined(CONFIG_ARCH_SUN50IW10)
+	|| defined(CONFIG_ARCH_SUN8IW19) || defined(CONFIG_ARCH_SUN50IW10) \
+	|| defined(CONFIG_ARCH_SUN8IW20) || defined(CONFIG_ARCH_SUN50IW12) \
+	|| defined(CONFIG_ARCH_SUN20IW1)
 #define IOMMU_PMU_ML_REG5				0x0358
 #endif
 
 #define IOMMU_PMU_TL_LOW_REG6			0x0360
 #define IOMMU_PMU_TL_HIGH_REG6			0x0364
 #if defined(CONFIG_ARCH_SUN8IW15) || defined(CONFIG_ARCH_SUN50IW9) \
-	|| defined(CONFIG_ARCH_SUN8IW19) || defined(CONFIG_ARCH_SUN50IW10)
+	|| defined(CONFIG_ARCH_SUN8IW19) || defined(CONFIG_ARCH_SUN50IW10) \
+	|| defined(CONFIG_ARCH_SUN8IW20) || defined(CONFIG_ARCH_SUN50IW12) \
+	|| defined(CONFIG_ARCH_SUN20IW1)
 #define IOMMU_PMU_ML_REG6				0x0368
 #endif
 
@@ -357,7 +380,9 @@ static const u32 master_id_bitmap[] = {0x1, 0x0, 0x4, 0xa, 0x10, 0x20};
  *	G2D:>--->-------masterID 6
  */
 #if defined(CONFIG_ARCH_SUN8IW15) || defined(CONFIG_ARCH_SUN50IW9) \
-	|| defined(CONFIG_ARCH_SUN8IW19) || defined(CONFIG_ARCH_SUN50IW10)
+	|| defined(CONFIG_ARCH_SUN8IW19) || defined(CONFIG_ARCH_SUN50IW10) \
+	|| defined(CONFIG_ARCH_SUN8IW20) || defined(CONFIG_ARCH_SUN50IW12) \
+	|| defined(CONFIG_ARCH_SUN20IW1)
 #define DEFAULT_BYPASS_VALUE     0x7f
 static const u32 master_id_bitmap[] = {0x1, 0x2, 0x4, 0x8, 0x10, 0x20, 0x40};
 #endif
@@ -402,7 +427,8 @@ static const u32 master_id_bitmap[] = {0x1, 0x2, 0x4, 0x8, 0x10, 0x20, 0x40};
  * Every id represent a micro TLB, also represent a master device.
  *
  */
-struct sunxi_iommu {
+struct sunxi_iommu_dev {
+	struct iommu_device iommu;
 	struct device *dev;
 	void __iomem *base;
 	struct clk *clk;
@@ -436,7 +462,7 @@ struct sunxi_mdev {
 struct sunxi_iommu_owner {
 	unsigned int tlbid;
 	bool flag;
-	struct sunxi_iommu *data;
+	struct sunxi_iommu_dev *data;
 	struct device *dev;
 	struct dma_iommu_mapping *mapping;
 };

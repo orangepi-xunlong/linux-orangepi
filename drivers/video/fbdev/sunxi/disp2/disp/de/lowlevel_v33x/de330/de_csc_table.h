@@ -21,7 +21,7 @@ extern u32 y2yf2l[21][16];
 extern u32 y2yf2f[21][16];
 extern u32 y2yl2f[21][16];
 extern u32 y2rl2l[7][16];
-extern u32 y2rl2f[7][16];
+extern u32 y2rl2f[8][16];
 extern u32 y2rf2l[7][16];
 extern u32 y2rf2f[7][16];
 
@@ -30,6 +30,8 @@ struct de_csc_info {
 	enum de_color_space color_space;
 	enum de_color_range color_range;
 	enum de_eotf eotf;
+	enum disp_hdr_type hdr_type;
+	struct sunxi_metadata *pMeta;
 };
 
 s32 de_csc_coeff_calc(struct de_csc_info *in_info,

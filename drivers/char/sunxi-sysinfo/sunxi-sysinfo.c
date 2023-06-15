@@ -25,6 +25,7 @@
 #include <linux/uaccess.h>
 #include <linux/fs.h>
 #include <linux/miscdevice.h>
+#include <linux/compat.h>
 
 #include "sunxi-sysinfo-user.h"
 
@@ -160,7 +161,7 @@ static ssize_t sys_info_show(struct class *class,
 
 	/* socbatch number */
 	size += sprintf(buf + size, "sunxi_batchno     : %#x\n",
-			sunxi_get_soc_ver()&0x0ffff);
+			sunxi_get_soc_ver());
 
 	return size;
 }
@@ -206,22 +207,26 @@ static ssize_t key_info_store(struct class *class, struct class_attribute *attr,
 static struct class_attribute info_class_attrs[] = {
 	__ATTR(sys_info, 0644, sys_info_show, NULL),
 	__ATTR(key_info, 0644, key_info_show, key_info_store),
-	__ATTR_NULL,
 };
 
 static struct class info_class = {
 	.name           = "sunxi_info",
 	.owner          = THIS_MODULE,
-	.class_attrs    = info_class_attrs,
 };
 
 static int __init sunxi_sys_info_init(void)
 {
-	s32 ret = 0;
+	s32 ret = 0, i;
 
 	ret = class_register(&info_class);
 	if (ret != 0)
 		return ret;
+	/* need some class specific sysfs attributes */
+	for (i = 0; i < ARRAY_SIZE(info_class_attrs); i++) {
+		ret = class_create_file(&info_class, &info_class_attrs[i]);
+		if (ret)
+			goto out_class_create_file_failed;
+	}
 
 	ret = misc_register(&soc_info_device);
 	if (ret != 0) {
@@ -230,6 +235,9 @@ static int __init sunxi_sys_info_init(void)
 		return ret;
 	}
 	return ret;
+out_class_create_file_failed:
+	class_unregister(&info_class);
+		return ret;
 }
 
 static void __exit sunxi_sys_info_exit(void)

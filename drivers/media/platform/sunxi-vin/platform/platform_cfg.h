@@ -1,5 +1,5 @@
 /*
- * linux-4.9/drivers/media/platform/sunxi-vin/platform/platform_cfg.h
+ * linux-5.4/drivers/media/platform/sunxi-vin/platform/platform_cfg.h
  *
  * Copyright (c) 2007-2017 Allwinnertech Co., Ltd.
  *
@@ -25,11 +25,18 @@
 
 #if defined (CONFIG_ARCH_SUN8IW15P1) || defined (CONFIG_ARCH_SUN8IW17P1) || defined (CONFIG_ARCH_SUN50IW3P1) || defined (CONFIG_ARCH_SUN50IW6P1)
 #define NO_SUPPROT_CCU_PLATDORM
+#define NO_SUPPROT_ISP_BRIDGE_PLATDORM
 #define NO_SUPPROT_HARDWARE_CALCULATE
 #else
+
+#if defined CONFIG_ARCH_SUN8IW16P1 || defined CONFIG_ARCH_SUN8IW19P1
+#define ISP0_BRIDGE_VALID
+#endif
+
 #if defined(CONFIG_BUF_AUTO_UPDATE)
 #define BUF_AUTO_UPDATE
 #endif
+
 #endif
 
 #if defined (CONFIG_ARCH_SUN50IW10P1)
@@ -38,9 +45,12 @@
 #endif
 #endif
 
+#if defined CONFIG_SENSOR_POWER  || defined CONFIG_SENSOR_POWER_MODULE
+#define SENSOR_POER_BEFORE_VIN
+#endif
+
 #ifndef FPGA_VER
 #include <linux/clk.h>
-#include <linux/clk/sunxi.h>
 #include <linux/clk-provider.h>
 #include <linux/pinctrl/consumer.h>
 #include <linux/pinctrl/pinconf.h>
@@ -48,7 +58,6 @@
 #endif
 
 #include <linux/gpio.h>
-#include <linux/sunxi-gpio.h>
 #include <linux/of.h>
 #include <linux/of_gpio.h>
 #include <linux/of_irq.h>
@@ -93,6 +102,10 @@ enum isp_platform {
 #include "sun8iw12p1_vin_cfg.h"
 #elif defined CONFIG_ARCH_SUN8IW19P1
 #include "sun8iw19p1_vin_cfg.h"
+#elif defined CONFIG_ARCH_SUN8IW20
+#include "sun8iw20_vin_cfg.h"
+#elif defined CONFIG_ARCH_SUN20IW1
+#include "sun8iw20_vin_cfg.h"
 #endif
 
 #define MOV_ROUND_UP(x, n)	(((x) + (1 << (n)) - 1) >> (n))

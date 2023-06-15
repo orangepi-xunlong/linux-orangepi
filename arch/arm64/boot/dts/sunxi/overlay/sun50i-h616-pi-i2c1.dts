@@ -1,0 +1,14 @@
+/dts-v1/;
+/plugin/;
+
+/ {
+	fragment@0 {
+		target = <&twi1>;
+		__overlay__ {
+			status = "okay";
+			pinctrl-0 = <&twi1_pi_pins_a>;
+			pinctrl-1 = <&twi1_pi_pins_b>;
+			pinctrl-names = "default", "sleep";
+		};
+	};
+};

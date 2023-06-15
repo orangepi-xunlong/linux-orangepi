@@ -19,11 +19,12 @@
 #include <linux/interrupt.h>
 #include <linux/i2c.h>
 #include <linux/delay.h>
+#include <linux/fs.h>
 #include <linux/jiffies.h>
 #include <linux/cdev.h>
 #include <linux/uaccess.h>
 #include <linux/pm_runtime.h>
-
+#include <linux/firmware.h>
 
 #include <linux/pm_runtime.h>
 
@@ -53,30 +54,6 @@
 #include "../../init-input.h"
 
 #include "gslX680.h"
-#include "gslX680_inetd71.h"
-#include "gsl1680e_p2.h"
-#include "gsl1680e_p1_1024x600.h"
-#include "gslX680_m86hd.h"
-#include "gslX680_m102.h"
-#include "gslX680_m102gg.h"
-#include "main_1680E_m320.h"
-#include "gslX680_m100.h"
-#include "gslX680_mq88.h"
-#include "gslX680_m71.h"
-#include "gslX680_m7300.h"
-#include "gslX680_jinghong.h"
-#include "gsl1680e_t1.h"
-#include "gsl1680e_t1_v2.h"
-#include "gsl1680e_a86.h"
-#include "GSL_A63_PERF_8001280.h"
-#include "GSL3692_F1P0B_WJ_PG.h"
-#include "gslX680_708.h"
-#include "gsl1680_7inch.h"
-#include "GSL3692_F1P0D_DZ_OGS.h"
-#include "gsl1680e_86OGS.h"
-#include "gsl1680e_86pgpcd.h"
-#include "gslX680_3676.h"
-#include "gsl1680_7inch_863.h"
 
 /* open for debug */
 /*
@@ -85,63 +62,15 @@
 #define pr_debug pr_info
 #endif
 */
+
 struct gslX680_fw_array {
-	const char *name;
+	char name[64];
 	unsigned int size;
 	const struct fw_data *fw;
-} gslx680_fw_grp[] = {
-	{"gslX680_inetd71", ARRAY_SIZE(GSLX680_FW_INETD71), GSLX680_FW_INETD71},
-	{"gslX680_708"  ,  ARRAY_SIZE(GSLX680_FW_708),GSLX680_FW_708},
-	{"gsl1680_7inch"  ,  ARRAY_SIZE(GSL1680_7INCH_FW),GSL1680_7INCH_FW},
-	{"gsl1680e_p2", ARRAY_SIZE(GSL1680E_FW_P2), GSL1680E_FW_P2},
-	{"gsl1680e_p1_1024x600", ARRAY_SIZE(GSL1680E_FW_P1_1024X600), GSL1680E_FW_P1_1024X600},
-	{"gsl1680e_86OGS", ARRAY_SIZE(GSL1680E_86OGS_FW), GSL1680E_86OGS_FW},
-	{"gsl_m86_hd", ARRAY_SIZE(GSLX680_FW_M86HD), GSLX680_FW_M86HD},
-	{"gsl_m102", ARRAY_SIZE(GSLX680_FW_M102), GSLX680_FW_M102},
-	{"gsl_m102gg", ARRAY_SIZE(GSLX680_FW_M102GG), GSLX680_FW_M102GG},
-	{"gsl_m320", ARRAY_SIZE(GSLX680_FW_M320), GSLX680_FW_M320},
-	{"gsl_m100", ARRAY_SIZE(GSLX680_FW_M100), GSLX680_FW_M100},
-	{"gsl_mq88", ARRAY_SIZE(GSLX680_FW_MQ88), GSLX680_FW_MQ88},
-	{"gsl_m71", ARRAY_SIZE(GSLX680_FW_M71), GSLX680_FW_M71},
-	{"gsl_m7300", ARRAY_SIZE(GSLX680_FW_M7300), GSLX680_FW_M7300},
-	{"gsl_jinghong", ARRAY_SIZE(GSLX680_FW_JINGHONG), GSLX680_FW_JINGHONG},
-	{"gsl_t1", ARRAY_SIZE(GSL1680E_FW_T1), GSL1680E_FW_T1},
-	{"gsl_t1_v2", ARRAY_SIZE(GSL1680E_FW_T1_V2), GSL1680E_FW_T1_V2},
-	{"gsl_a86", ARRAY_SIZE(GSL1680E_FW_A86), GSL1680E_FW_A86},
-	{"gslX680_a63_perf_8001280", ARRAY_SIZE(FW_GSL_A63_PERF_8001280), FW_GSL_A63_PERF_8001280},
-	{"gslX680_a63_perf_25601600", ARRAY_SIZE(GSL3692_FW_F1P0B_WJ_PG), GSL3692_FW_F1P0B_WJ_PG},
-	{"gslX680_a63_t1_25601600", ARRAY_SIZE(GSL3692_FW_F1P0B_ONDA_OGS), GSL3692_FW_F1P0B_ONDA_OGS},
-	{"gsl1680e_86pgpcd", ARRAY_SIZE(GSL1680E_86PGPCD_FW), GSL1680E_86PGPCD_FW},
-	{"gslX680_3676", ARRAY_SIZE(GSLX680_FW), GSLX680_FW},
-	{"gsl1680_7inch_863", ARRAY_SIZE(GSL1680_7INCH_FW_863), GSL1680_7INCH_FW_863},
-};
+} gslx680_fw_grp;
 
-unsigned int *gslX680_config_data[] = {
-	gsl_config_data_id_K71_OGS_1024600,
-	gsl_config_data_id_708,
-	gsl_config_data_id_1680_7inch,
-	gsl_config_data_id_P2,
-	gsl_config_data_id_P1_1024X600,
-	gsl_config_data_id_86OGS,
-	gsl_config_data_id_m86_1024600,
-	gsl_config_data_id_m102,
-	gsl_config_data_id_m102gg,
-	gsl_config_data_id_m320,
-	gsl_config_data_id_m100,
-	gsl_config_data_id_mq88,
-	gsl_config_data_id_m71,
-	gsl_config_data_id_m7300,
-	gsl_config_data_id_jinghong,
-	gsl_config_data_id_t1,
-	gsl_config_data_id_t1_v2,
-	gsl_config_data_id_a86,
-	gsl_config_data_id_GSL_A63_PERF_8001280,
-	gsl_config_data_id_F1P0B_WJ_PG,
-	gsl_config_data_id_F1P0B_ONDA_OGS,
-	gsl_config_data_id_86PGPCD,
-	gsl_config_data_id_3676,
-	gsl_config_data_id_1680_7inch_863,
-};
+unsigned int *gslX680_config_data;
+static int ldo_state;
 
 
 #ifdef TPD_PROC_DEBUG
@@ -155,8 +84,6 @@ static u8 gsl_data_proc[8] = {0};
 static u8 gsl_proc_flag;
 static unsigned int gsl_config_data_id[256];
 #endif
-
-
 
 #define GSL_DATA_REG		0x80
 #define GSL_STATUS_REG		0xe0
@@ -175,7 +102,6 @@ static unsigned int gsl_config_data_id[256];
 #define GPIOF_PUD		0x7f0080a8
 
 #define GSL_NOID_VERSION
-
 #ifdef GSL_MONITOR
 static struct delayed_work gsl_monitor_work;
 static struct workqueue_struct *gsl_monitor_workqueue;
@@ -183,6 +109,7 @@ static char int_1st[4] = {0};
 static char int_2nd[4] = {0};
 #endif
 
+static struct input_dev *gDevice;
 
 #ifdef HAVE_TOUCH_KEY
 static u16 key;
@@ -263,8 +190,6 @@ struct gsl_ts {
 
 };
 
-
-
 static u32 id_sign[MAX_CONTACTS+1] = {0};
 static u8 id_state_flag[MAX_CONTACTS+1] = {0};
 static u8 id_state_old_flag[MAX_CONTACTS+1] = {0};
@@ -284,10 +209,22 @@ static u16 y_new;
 #define SCREEN_MAX_Y			(screen_max_y)
 
 static const char *fwname;
-static int fw_index = -1;
 
 
 #define GSLX680_I2C_ADDR	0x40
+
+#define GSL_MONITOR_TIMER_ENABLE 		1
+#ifdef GSL_TIMER
+#undef GSL_MONITOR_TIMER_ENABLE
+#define GSL_MONITOR_TIMER_ENABLE 		0
+#endif
+
+#if GSL_MONITOR_TIMER_ENABLE
+static int gTestMonitor;
+struct timer_list monitor_timer;
+static void glsX680_monitor_events(struct work_struct *work);
+static DECLARE_WORK(glsX680_monitor_work, glsX680_monitor_events);
+#endif
 
 static int screen_max_x;
 static int screen_max_y;
@@ -304,13 +241,15 @@ struct ctp_config_info config_info = {
 static __u32 twi_id;
 
 static const unsigned short normal_i2c[2] = {GSLX680_I2C_ADDR, I2C_CLIENT_END};
-
+static int ctp_get_system_config(void);
 static void glsX680_init_events(struct work_struct *work);
 static void glsX680_resume_events(struct work_struct *work);
+static void glsX680_idle_events(struct work_struct *work);
 struct workqueue_struct *gslX680_wq;
 struct workqueue_struct *gslX680_resume_wq;
 static DECLARE_WORK(glsX680_init_work, glsX680_init_events);
 static DECLARE_WORK(glsX680_resume_work, glsX680_resume_events);
+static DECLARE_WORK(glsX680_idle_work, glsX680_idle_events);
 struct i2c_client *glsX680_i2c;
 struct gsl_ts *ts_init;
 
@@ -365,7 +304,6 @@ static int ctp_detect(struct i2c_client *client, struct i2c_board_info *info)
 	}
 	return ret;
 }
-
 /**
  * ctp_print_info - sysconfig print function
  * return value:
@@ -493,7 +431,7 @@ static int gsl_ts_write(struct i2c_client *client, u8 addr,
 	unsigned int bytelen = 0;
 
 	if (datalen > 125) {
-		pr_debug("%s too big datalen = %d!\n", __func__, datalen);
+		pr_err("%s too big datalen = %d!\n", __func__, datalen);
 		return -1;
 	}
 
@@ -516,13 +454,13 @@ static int gsl_ts_read(struct i2c_client *client, u8 addr, u8 *pdata,
 	int ret = 0;
 
 	if (datalen > 126) {
-		pr_debug("%s too big datalen = %d!\n", __func__, datalen);
+		pr_err("%s too big datalen = %d!\n", __func__, datalen);
 		return -1;
 	}
 
 	ret = gsl_ts_write(client, addr, NULL, 0);
 	if (ret < 0) {
-		pr_debug("%s set data address fail!\n", __func__);
+		pr_err("%s set data address fail!\n", __func__);
 		return ret;
 	}
 
@@ -568,17 +506,71 @@ static inline void fw2buf(u8 *buf, const u32 *fw)
 	*u32_buf = *fw;
 }
 
-static int gsl_find_fw_idx(const char *name)
+static int gsl_getfw_from_file(void)
 {
-	int i = 0;
+	u32 size = 0;
+	u32 len;
+	int err;
+	int idx = 0;
+	const u8 *data;
+	const struct firmware *fw = NULL;
+	char fw_name[128];
 
-	if (name != NULL) {
-		for (i = 0; i < ARRAY_SIZE(gslx680_fw_grp); i++) {
-			if (!strcmp(name, gslx680_fw_grp[i].name))
-				return i;
-		}
+	pr_debug("==================getfw from file==================\n");
+
+	snprintf(fw_name, 128, "gsl_firmware/%s.bin", config_info.name);
+
+	err = request_firmware_direct(&fw, fw_name, config_info.dev);
+	if (err) {
+		pr_err("can not get fw from file %s\n", fw_name);
+		return -1;
 	}
-	return -1;
+	len = fw->size;
+	data = fw->data;
+
+	// read gslx680_fw_grp.fw size
+	memcpy(&size, &data[idx], sizeof(size));
+	gslx680_fw_grp.size = size;
+	gslx680_fw_grp.fw = kmalloc(size * sizeof (struct fw_data), GFP_KERNEL);
+	if (!gslx680_fw_grp.fw) {
+		pr_err("gslx680_fw_grp.fw malloc failed\n");
+		return -1;
+	}
+	idx += sizeof(size);
+	// read gslx680_fw_grp.fw
+	memcpy((void *)gslx680_fw_grp.fw, &data[idx], size * sizeof (struct fw_data));
+	idx += (size * sizeof(struct fw_data));
+	size = 0;
+	// read gslX680_config_data size
+	memcpy(&size, &data[idx], sizeof(size));
+	idx += sizeof(size);
+	gslX680_config_data = kmalloc(size * sizeof(unsigned int), GFP_KERNEL);
+	if (!gslX680_config_data) {
+		pr_err("gslX680_config_data malloc failed\n");
+		return -1;
+	}
+	memcpy(gslX680_config_data, &data[idx], size * sizeof(unsigned int));
+	idx += (size * sizeof(unsigned int));
+
+	// read gslx680_fw_grp.name size
+	memcpy(&size, &data[idx], sizeof(size));
+	idx += sizeof(size);
+	// read gslx680_fw_grp.name
+	memcpy(gslx680_fw_grp.name, &data[idx], size);
+	idx += size;
+	size = 0;
+	if (idx != len) {
+		err = -1;
+		pr_err("data size is not match fw size: data size = %d, fw size = %u\n", idx, len);
+	}
+	if (strcmp(gslx680_fw_grp.name, config_info.name)) {
+		err = -1;
+		pr_err("firmware name not match, fw name = %s, config name = %s\n", gslx680_fw_grp.name, config_info.name);
+	}
+
+	release_firmware(fw);
+
+	return err;
 }
 
 
@@ -593,8 +585,8 @@ static void gsl_load_fw(struct i2c_client *client)
 
 	pr_debug("=============gsl_load_fw start==============\n");
 
-	ptr_fw = gslx680_fw_grp[fw_index].fw;
-	source_len = gslx680_fw_grp[fw_index].size;
+	ptr_fw = gslx680_fw_grp.fw;
+	source_len = gslx680_fw_grp.size;
 
 	for (source_line = 0; source_line < source_len; source_line++) {
 		/* init page trans, set the page val */
@@ -626,7 +618,7 @@ static void startup_chip(struct i2c_client *client)
 	u8 tmp = 0x00;
 
 #ifdef GSL_NOID_VERSION
-	gsl_DataInit(gslX680_config_data[fw_index]);
+	gsl_DataInit(gslX680_config_data);
 #endif
 	gsl_ts_write(client, 0xe0, &tmp, 1);
 	usleep_range(10000, 11000);
@@ -683,20 +675,48 @@ static void init_chip(struct i2c_client *client)
 	startup_chip(client);
 }
 
-static void check_mem_data(struct i2c_client *client)
+static bool _check_chip_state(struct i2c_client *client)
 {
 	u8 read_buf[4]  = {0};
-
-	/*if(gsl_chipType_new == 1) */
-	if (ts_init->is_suspended != false ||
-			ts_init->is_runtime_suspend != false)
-		msleep(30);
 	gsl_ts_read(client, 0xb0, read_buf, sizeof(read_buf));
+
 	pr_debug("#########check mem read 0xb0 = %x %x %x %x #########\n",
 			read_buf[3], read_buf[2], read_buf[1], read_buf[0]);
 
 	if (read_buf[3] != 0x5a || read_buf[2] != 0x5a || read_buf[1] != 0x5a ||
-							read_buf[0] != 0x5a)
+							read_buf[0] != 0x5a) {
+		return false;
+	}
+	return true;
+}
+
+static bool check_chip_state(struct i2c_client *client)
+{
+	static int retry;
+	bool ret;
+
+	if (retry > 3) {
+		printk("check_chip_state failed more times, not retry it!!");
+		retry = 0;
+		return true;
+	}
+	ret = _check_chip_state(client);
+	if (ret) {
+		retry = 0;
+	} else {
+		retry++;
+	}
+	return ret;
+}
+
+static void check_mem_data(struct i2c_client *client)
+{
+	/*if(gsl_chipType_new == 1) */
+	if (ts_init->is_suspended != false ||
+			ts_init->is_runtime_suspend != false)
+		msleep(30);
+
+	if (!_check_chip_state(client))
 		init_chip(client);
 }
 #ifdef STRETCH_FRAME
@@ -914,7 +934,7 @@ static int gsl_config_read_proc(struct seq_file *m, void *v)
 			/* ptr +=sprintf(ptr,"gsl_config_data_id[%u] = ",tmp); */
 			seq_printf(m, "gsl_config_data_id[%u] = ", tmp);
 			if (tmp >= 0 && tmp < 512)
-				/*gslX680_config_data[fw_index]*/
+				/*gslX680_config_data*/
 				/*ptr +=sprintf(ptr,"%d\n",gsl_config_data_id[tmp]); */
 				seq_printf(m, "%d\n", gsl_config_data_id[tmp]);
 #endif
@@ -947,13 +967,13 @@ static int gsl_config_write_proc(struct file *file, const char *buffer,
 
 
 	if (count > CONFIG_LEN) {
-		pr_debug("size not match [%d:%ld]\n", CONFIG_LEN, count);
+		pr_err("size not match [%d:%ld]\n", CONFIG_LEN, count);
 		return -EFAULT;
 	}
 
 	if (copy_from_user(gsl_read, buffer,
 				(count < CONFIG_LEN?count:CONFIG_LEN))) {
-		pr_debug("copy from user fail\n");
+		pr_err("copy from user fail\n");
 		return -EFAULT;
 	}
 	pr_debug("[tp-gsl][%s][%s]\n", __func__, gsl_read);
@@ -979,7 +999,7 @@ static int gsl_config_write_proc(struct file *file, const char *buffer,
 		startup_chip(glsX680_i2c);
 
 #ifdef GSL_NOID_VERSION
-		gsl_DataInit(gslX680_config_data[fw_index]);
+		gsl_DataInit(gslX680_config_data);
 #endif
 		gsl_proc_flag = 0;
 	} else if ('r' == gsl_read[0] && 'e' == gsl_read[1])
@@ -992,7 +1012,7 @@ static int gsl_config_write_proc(struct file *file, const char *buffer,
 		tmp1 = (buf[7]<<24) | (buf[6]<<16) | (buf[5]<<8) | buf[4];
 		tmp = (buf[3]<<24) | (buf[2]<<16) | (buf[1]<<8) | buf[0];
 		if (tmp1 >= 0 && tmp1 < 512)
-			gslX680_config_data[fw_index][tmp1] = tmp;
+			gslX680_config_data[tmp1] = tmp;
 	}
 #endif
 	return count;
@@ -1212,15 +1232,16 @@ static void gsl_ts_xy_worker(struct work_struct *work)
 							read_buf[0] == 0){
 		process_gslX680_data(ts);
 	} else {
-		reset_chip(ts->client);
-		startup_chip(ts->client);
+		if (!_check_chip_state(glsX680_i2c)) {
+			printk("gslX680 gsl_ts_xy_worker fail and check state fialed!!!\n");
+		}
 	}
 
 schedule:
 #ifndef GSL_TIMER
 	ret = input_set_int_enable(&(config_info.input_type), 1);
 	if (ret < 0)
-		pr_debug("%s irq enable failed\n", __func__);
+		printk("%s irq enable failed\n", __func__);
 #endif
 }
 
@@ -1266,6 +1287,27 @@ irqreturn_t gsl_ts_irq(int irq, void *dev_id)
 	return IRQ_HANDLED;
 }
 
+#if GSL_MONITOR_TIMER_ENABLE
+static void glsX680_monitor_events(struct work_struct *work)
+{
+	if (!_check_chip_state(glsX680_i2c) || gTestMonitor == 1) {
+		printk("gsl_monitor_timer_handle check failed, reinit chip!!\n");
+		input_set_int_enable(&(config_info.input_type), 0);
+		cancel_work_sync(&ts_init->work);
+		queue_work(gslX680_resume_wq, &glsX680_resume_work);
+		gTestMonitor = 0;
+	} else {
+		pr_debug("gsl_monitor_timer_handle check success!!!\n");
+		del_timer(&monitor_timer);
+		monitor_timer.expires = jiffies + msecs_to_jiffies(3000);
+		add_timer(&monitor_timer);
+	}
+}
+static void gsl_monitor_timer_handle(struct timer_list *timer)
+{
+	queue_work(ts_init->wq, &glsX680_monitor_work);
+}
+#endif
 
 #ifdef GSL_TIMER
 static void gsl_timer_handle(unsigned long data)
@@ -1378,19 +1420,47 @@ static void glsX680_resume_events(struct work_struct *work)
 #ifndef GSL_TIMER
 	int ret;
 #endif
-	gslX680_shutdown_high();
-	usleep_range(10000, 11000);
-	reset_chip(glsX680_i2c);
-	startup_chip(glsX680_i2c);
-	check_mem_data(glsX680_i2c);
-#ifndef GSL_TIMER
-	ret = input_set_int_enable(&(config_info.input_type), 1);
-	if (ret < 0)
-		pr_debug("%s irq disable failed\n", __func__);
+#if GSL_MONITOR_TIMER_ENABLE
+	del_timer(&monitor_timer);
 #endif
+	while (true) {
+		gslX680_shutdown_low();
+		if (ldo_state) {
+			input_set_power_enable(&(config_info.input_type), 0);
+			ldo_state--;
+			msleep(200);
+		} else {
+			msleep(10);
+		}
+		input_set_power_enable(&(config_info.input_type), 1);
+		ldo_state++;
+		gslX680_shutdown_high();
+		usleep_range(10000, 11000);
+		reset_chip(glsX680_i2c);
+		startup_chip(glsX680_i2c);
+		check_mem_data(glsX680_i2c);
+#ifndef GSL_TIMER
+		if (check_chip_state(glsX680_i2c)) {
+			ret = input_set_int_enable(&(config_info.input_type), 1);
+			if (ret < 0)
+				pr_debug("%s irq disable failed\n", __func__);
+			printk("gslX680_resume_events success!!!\n");
+#if GSL_MONITOR_TIMER_ENABLE
+			del_timer(&monitor_timer);
+			monitor_timer.expires = jiffies + msecs_to_jiffies(3000);
+			add_timer(&monitor_timer);
+#endif
+			return;
+		} else {
+			printk("glsX680_resume_events failed, retry!!!!\n");
+		}
+#endif
+	}
 }
 
-#ifdef CONFIG_PM
+static unsigned long idle_data;
+static unsigned long idle_next_data;
+#if IS_ENABLED(CONFIG_PM)
 static int gsl_ts_suspend(struct device *dev)
 {
 #ifndef GSL_TIMER
@@ -1399,8 +1469,17 @@ static int gsl_ts_suspend(struct device *dev)
 	struct gsl_ts *ts = dev_get_drvdata(dev);
 
 	pr_debug("%s,start\n", __func__);
+#if GSL_MONITOR_TIMER_ENABLE
+	del_timer(&monitor_timer);
+	cancel_work_sync(&glsX680_monitor_work);
+#endif
 	cancel_work_sync(&glsX680_resume_work);
+	cancel_work_sync(&glsX680_idle_work);
 	flush_workqueue(gslX680_resume_wq);
+#if GSL_MONITOR_TIMER_ENABLE
+	del_timer(&monitor_timer);
+	cancel_work_sync(&glsX680_monitor_work);
+#endif
 	/*if already do runtime suspend,and try to do suspend,then return*/
 	if (pm_runtime_suspended(dev)) {
 		pr_debug("do suspend\n");
@@ -1416,7 +1495,7 @@ static int gsl_ts_suspend(struct device *dev)
 #ifndef GSL_TIMER
 	ret = input_set_int_enable(&(config_info.input_type), 0);
 	if (ret < 0)
-		pr_debug("%s irq disable failed\n", __func__);
+		printk("%s irq disable failed\n", __func__);
 #endif
 	flush_workqueue(gslX680_resume_wq);
 	cancel_work_sync(&ts->work);
@@ -1431,7 +1510,8 @@ static int gsl_ts_suspend(struct device *dev)
 		ts->is_suspended = true;
 	}
 	input_set_power_enable(&(config_info.input_type), 0);
-
+	ldo_state--;
+	pr_info("gslX680 suspend finished");
 	return 0;
 }
 
@@ -1444,11 +1524,11 @@ static int gsl_ts_resume(struct device *dev)
 		ts->is_suspended = false;
 		return 0;
 	}
-
-	input_set_power_enable(&(config_info.input_type), 1);
-
 	pr_debug("I'am in gsl_ts_resume() start\n");
 	cancel_work_sync(&ts->work);
+#if GSL_MONITOR_TIMER_ENABLE
+	cancel_work_sync(&glsX680_monitor_work);
+#endif
 	flush_workqueue(ts->wq);
 	queue_work(gslX680_resume_wq, &glsX680_resume_work);
 
@@ -1470,6 +1550,7 @@ static int gsl_ts_resume(struct device *dev)
 	ts->gsl_timer.data = (unsigned long)ts;
 	add_timer(&ts->gsl_timer);
 #endif
+	pr_info("gslX680 resume finished");
 	return 0;
 }
 #endif
@@ -1488,7 +1569,7 @@ static void glsX680_init_events(struct work_struct *work)
 	ret = input_request_int(&(config_info.input_type), gsl_ts_irq,
 				CTP_IRQ_MODE, ts_init);
 	if (ret)
-		pr_debug("glsX680_init_events: request irq failed\n");
+		printk("glsX680_init_events: request irq failed\n");
 #else
 	pr_debug("add gsl_timer\n");
 	init_timer(&ts_init->gsl_timer);
@@ -1496,6 +1577,10 @@ static void glsX680_init_events(struct work_struct *work)
 	ts_init->gsl_timer.function = &gsl_ts_irq;
 	ts_init->gsl_timer.data = (unsigned long)ts_init;
 	add_timer(&ts_init->gsl_timer);
+#endif
+#if GSL_MONITOR_TIMER_ENABLE
+	monitor_timer.expires = jiffies + msecs_to_jiffies(3000);;
+	add_timer(&monitor_timer);
 #endif
 }
 
@@ -1507,43 +1592,324 @@ static ssize_t gsl_enable_show(struct device *dev,
 	return sprintf(buf, "%d\n", (int)data_save);
 }
 
-static ssize_t gsl_enable_store(struct device *dev,
-	       struct device_attribute *attr,
-	       const char *buf, size_t count)
+static ssize_t runtime_suspend_show(struct class *cls,
+	       struct class_attribute *attr, char *buf)
+{
+	return sprintf(buf, "%d\n", (int)data_save);
+}
+static ssize_t gsl_enable_store_l(const char *buf)
 {
 	int error;
-	struct input_dev *input = to_input_dev(dev);
-	struct i2c_client *client = input_get_drvdata(input);
+	//struct input_dev *input = to_input_dev(dev);
+	struct i2c_client *client = input_get_drvdata(gDevice);
 
 	error = kstrtoul(buf, 10, &data_save);
 	if (error)
 		return error;
 	if (data_save == 0 && !ts_init->is_runtime_suspend) {
-		/*pr_debug("[fish] go to runtime_suspend\n");*/
+		pr_info("gslX680 go to runtime_suspend\n");
 		ts_init->try_to_runtime_suspend = true;
 		pm_runtime_put(&client->dev);
 	} else if (data_save == 1 && ts_init->is_runtime_suspend) {
-		/*pr_debug("[fish] go to runtime_resume\n");*/
+		pr_info("gslX680 go to runtime_resume\n");
 		pm_runtime_get_sync(&client->dev);
 	}
+	return 0;
+}
 
+static ssize_t gsl_enable_store(struct device *dev,
+	       struct device_attribute *attr,
+	       const char *buf, size_t count)
+{
+	int error = gsl_enable_store_l(buf);
+
+	if (error)
+		return error;
 	return count;
 }
 
-static DEVICE_ATTR(runtime_suspend, S_IRUGO | S_IWUSR,
+static ssize_t runtime_suspend_store(struct class *cls,
+	       struct class_attribute *attr,
+	       const char *buf, size_t count)
+{
+	int error = gsl_enable_store_l(buf);
+
+	if (error)
+		return error;
+	return count;
+}
+
+static ssize_t gsl_idle_enable_show(struct device *dev,
+			struct device_attribute *attr, char *buf)
+{
+	return sprintf(buf, "%d\n", (int)idle_data);
+}
+
+static ssize_t tp_idle_show(struct class *cls,
+			struct class_attribute *attr, char *buf)
+{
+	return sprintf(buf, "%d\n", (int)idle_data);
+}
+
+static ssize_t tp_state_show(struct class *cls,
+			struct class_attribute *attr, char *buf)
+{
+	return sprintf(buf, "%d\n", _check_chip_state(glsX680_i2c));
+}
+
+static void glsX680_idle_events(struct work_struct *work)
+{
+	if (idle_next_data == 1 && idle_data == 0) {
+		input_set_int_enable(&(config_info.input_type), 0);
+		idle_data = 1;
+#if GSL_MONITOR_TIMER_ENABLE
+		del_timer(&monitor_timer);
+		cancel_work_sync(&glsX680_monitor_work);
+#endif
+		cancel_work_sync(&glsX680_resume_work);
+		msleep(10);
+		pr_info("gslX680 go to idle\n");
+		gslX680_shutdown_low();
+	} else if (idle_next_data == 0 && idle_data == 1) {
+#if GSL_MONITOR_TIMER_ENABLE
+		del_timer(&monitor_timer);
+		cancel_work_sync(&glsX680_monitor_work);
+#endif
+		pr_info("gslX680 go to active\n");
+		reset_chip(glsX680_i2c);
+		startup_chip(glsX680_i2c);
+		msleep(10);
+		input_set_int_enable_force(&(config_info.input_type), 1);
+		idle_data = 0;
+#if GSL_MONITOR_TIMER_ENABLE
+		monitor_timer.expires = jiffies + msecs_to_jiffies(3000);
+		del_timer(&monitor_timer);
+		add_timer(&monitor_timer);
+#endif
+	}
+}
+
+static ssize_t gsl_idle_enable_store_l(const char *buf)
+{
+	int error;
+
+	error = kstrtoul(buf, 10, &idle_next_data);
+	if (error)
+		return error;
+	if (idle_next_data != idle_data) {
+		queue_work(gslX680_resume_wq, &glsX680_idle_work);
+	}
+	return 0;
+}
+
+static ssize_t gsl_idle_enable_store(struct device *dev,
+	       struct device_attribute *attr,
+	       const char *buf, size_t count)
+{
+	int error = gsl_idle_enable_store_l(buf);
+
+	if (error)
+		return error;
+	return count;
+}
+
+static ssize_t tp_idle_store(struct class *cls,
+	       struct class_attribute *attr,
+	       const char *buf, size_t count)
+{
+	int error = gsl_idle_enable_store_l(buf);
+
+	if (error)
+		return error;
+	return count;
+}
+
+static ssize_t screen_width_show(struct class *cls,
+			struct class_attribute *attr, char *buf)
+{
+	return sprintf(buf, "%d\n", (int)screen_max_x);
+}
+
+static ssize_t screen_width_store(struct class *cls,
+	       struct class_attribute *attr,
+	       const char *buf, size_t count)
+{
+	int error;
+	int val;
+	error = kstrtoint(buf, 10, &val);
+	if (error)
+		return error;
+	screen_max_x = val;
+	return count;
+}
+
+static ssize_t screen_height_show(struct class *cls,
+			struct class_attribute *attr, char *buf)
+{
+	return sprintf(buf, "%d\n", (int)screen_max_y);
+}
+
+static ssize_t screen_height_store(struct class *cls,
+	       struct class_attribute *attr,
+	       const char *buf, size_t count)
+{
+	int error;
+	int val;
+	error = kstrtoint(buf, 10, &val);
+	if (error)
+		return error;
+	screen_max_y = val;
+	return count;
+}
+
+static ssize_t screen_revert_x_show(struct class *cls,
+			struct class_attribute *attr, char *buf)
+{
+	return sprintf(buf, "%d\n", (int)revert_x_flag);
+}
+
+static ssize_t screen_revert_x_store(struct class *cls,
+	       struct class_attribute *attr,
+	       const char *buf, size_t count)
+{
+	int error;
+	int val;
+	error = kstrtoint(buf, 10, &val);
+	if (error || (val != 0 && val != 1))
+		return error;
+	revert_x_flag = val;
+	return count;
+}
+
+static ssize_t screen_revert_y_show(struct class *cls,
+			struct class_attribute *attr, char *buf)
+{
+	return sprintf(buf, "%d\n", (int)revert_y_flag);
+}
+
+static ssize_t screen_revert_y_store(struct class *cls,
+	       struct class_attribute *attr,
+	       const char *buf, size_t count)
+{
+	int error;
+	int val;
+	error = kstrtoint(buf, 10, &val);
+	if (error || (val != 0 && val != 1))
+		return error;
+	revert_y_flag = val;
+	return count;
+}
+
+static ssize_t screen_exchange_xy_show(struct class *cls,
+			struct class_attribute *attr, char *buf)
+{
+	return sprintf(buf, "%d\n", (int)exchange_x_y_flag);
+}
+
+static ssize_t screen_exchange_xy_store(struct class *cls,
+	       struct class_attribute *attr,
+	       const char *buf, size_t count)
+{
+	int error;
+	int val;
+	error = kstrtoint(buf, 10, &val);
+	if (error || (val != 0 && val != 1))
+		return error;
+	exchange_x_y_flag = val;
+	return count;
+}
+
+#if GSL_MONITOR_TIMER_ENABLE
+static ssize_t tp_monitor_store(struct class *cls,
+	       struct class_attribute *attr,
+	       const char *buf, size_t count)
+{
+	gTestMonitor = 1;
+	queue_work(gslX680_resume_wq, &glsX680_monitor_work);
+
+	return count;
+}
+#endif
+static DEVICE_ATTR(runtime_suspend, S_IRUGO | S_IWUSR | S_IWGRP,
 		gsl_enable_show, gsl_enable_store);
 
+static DEVICE_ATTR(tp_idle, S_IRUGO | S_IWUSR | S_IWGRP,
+		gsl_idle_enable_show, gsl_idle_enable_store);
 
 static struct attribute *gsl_attributes[] = {
 	&dev_attr_runtime_suspend.attr,
+	&dev_attr_tp_idle.attr,
 	NULL
 };
+
+
+static CLASS_ATTR_RW(runtime_suspend);
+static CLASS_ATTR_RW(tp_idle);
+static CLASS_ATTR_RO(tp_state);
+#if GSL_MONITOR_TIMER_ENABLE
+static CLASS_ATTR_WO(tp_monitor);
+#endif
+static CLASS_ATTR_RW(screen_width);
+static CLASS_ATTR_RW(screen_height);
+static CLASS_ATTR_RW(screen_revert_x);
+static CLASS_ATTR_RW(screen_revert_y);
+static CLASS_ATTR_RW(screen_exchange_xy);
 
 static struct attribute_group gsl_attr_group = {
 	.attrs = gsl_attributes,
 };
 
+static struct attribute *ctp_class_attrs[] = {
+	&class_attr_runtime_suspend.attr,
+	&class_attr_tp_idle.attr,
+	&class_attr_tp_state.attr,
+#if GSL_MONITOR_TIMER_ENABLE
+	&class_attr_tp_monitor.attr,
+#endif
+	&class_attr_screen_width.attr,
+	&class_attr_screen_height.attr,
+	&class_attr_screen_revert_x.attr,
+	&class_attr_screen_revert_y.attr,
+	&class_attr_screen_exchange_xy.attr,
+	NULL
+};
 
+ATTRIBUTE_GROUPS(ctp_class);
+
+static struct class ctp_class = {
+	.name = "ctp",
+	.owner = THIS_MODULE,
+	.class_groups = ctp_class_groups,
+};
+
+static int startup(void)
+{
+	int ret = 0;
+	pr_debug("*******************************************\n");
+	if (input_sensor_startup(&(config_info.input_type))) {
+		pr_err("%s: ctp_startup err.\n", __func__);
+		return 0;
+	} else {
+		ret = input_sensor_init(&(config_info.input_type));
+		if (ret != 0)
+			pr_debug("%s:ctp_ops.init err.\n", __func__);
+	}
+	if (config_info.ctp_used == 0) {
+		pr_debug("*** ctp_used set to 0 !\n");
+		pr_debug("if use ctp,please put the sys_config.fex ctp_used set to 1.\n");
+		return 0;
+	}
+	if (!ctp_get_system_config()) {
+		pr_err("%s:read config fail!\n", __func__);
+		return 0;
+	}
+
+	input_set_power_enable(&(config_info.input_type), 1);
+	ldo_state++;
+	msleep(20);
+	ctp_wakeup(1, 0);
+	return 1;
+}
 
 static int  gsl_ts_probe(struct i2c_client *client,
 			const struct i2c_device_id *id)
@@ -1553,22 +1919,24 @@ static int  gsl_ts_probe(struct i2c_client *client,
 	int ret = 0;
 
 	pr_debug("GSLX680 Enter %s\n", __func__);
+	if (config_info.dev == NULL)
+		config_info.dev = &client->dev;
 	if (!i2c_check_functionality(client->adapter, I2C_FUNC_I2C)) {
 		dev_err(&client->dev, "I2C functionality not supported\n");
 		return -ENODEV;
 	}
 
-	ts = kzalloc(sizeof(*ts), GFP_KERNEL);
-
-	gslX680_wq = create_singlethread_workqueue("gslX680_init");
-	if (gslX680_wq == NULL) {
-		pr_debug("create gslX680_wq fail!\n");
-		return -ENOMEM;
+	pr_debug("%s:fwname:%s\n", __func__, fwname);
+	ret = gsl_getfw_from_file();
+	if (ret != 0) {
+		return -1;
 	}
+
+	ts = kzalloc(sizeof(*ts), GFP_KERNEL);
 
 	gslX680_resume_wq = create_singlethread_workqueue("gslX680_resume");
 	if (gslX680_resume_wq == NULL) {
-		pr_debug("create gslX680_resume_wq fail!\n");
+		pr_err("create gslX680_resume_wq fail!\n");
 		return -ENOMEM;
 	}
 
@@ -1588,12 +1956,26 @@ static int  gsl_ts_probe(struct i2c_client *client,
 		goto error_mutex_destroy;
 	}
 	ts_init = ts;
+	gslX680_wq = create_singlethread_workqueue("gslX680_init");
+	if (gslX680_wq == NULL) {
+		pr_err("create gslX680_wq fail!\n");
+		return -ENOMEM;
+	}
+
+#if GSL_MONITOR_TIMER_ENABLE
+	timer_setup(&monitor_timer, NULL, 0);
+	monitor_timer.expires = jiffies + msecs_to_jiffies(3000);;
+	monitor_timer.function = &gsl_monitor_timer_handle;
+#endif
+
 	queue_work(gslX680_wq, &glsX680_init_work);
 
 	device_create_file(&ts->input->dev, &dev_attr_debug_reg);
 	device_enable_async_suspend(&client->dev);
 
 	input_set_drvdata(ts->input, client);
+	gDevice = ts->input;
+
 	ret = sysfs_create_group(&ts->input->dev.kobj, &gsl_attr_group);
 	if (ret < 0) {
 		dev_err(&client->dev, "gsl: sysfs_create_group err\n");
@@ -1626,7 +2008,7 @@ static int  gsl_ts_probe(struct i2c_client *client,
 	gsl_monitor_workqueue = create_singlethread_workqueue("gsl_monitor_workqueue");
 	queue_delayed_work(gsl_monitor_workqueue, &gsl_monitor_work, 1000);
 #endif
-
+	class_register(&ctp_class);
 	return 0;
 
 error_mutex_destroy:
@@ -1642,6 +2024,7 @@ static int  gsl_ts_remove(struct i2c_client *client)
 
 	pr_debug("==gsl_ts_remove=\n");
 
+	class_unregister(&ctp_class);
 	pm_runtime_disable(&client->dev);
 	pm_runtime_set_suspended(&client->dev);
 	sysfs_remove_group(&ts->input->dev.kobj, &gsl_attr_group);
@@ -1656,11 +2039,15 @@ static int  gsl_ts_remove(struct i2c_client *client)
 	cancel_work_sync(&ts->work);
 	cancel_work_sync(&glsX680_init_work);
 	cancel_work_sync(&glsX680_resume_work);
+	cancel_work_sync(&glsX680_idle_work);
 
 #ifndef GSL_TIMER
 	input_free_int(&(config_info.input_type), ts);
 #else
 	del_timer(&ts->gsl_timer);
+#endif
+#if GSL_MONITOR_TIMER_ENABLE
+	del_timer(&monitor_timer);
 #endif
 	destroy_workqueue(ts->wq);
 	destroy_workqueue(gslX680_wq);
@@ -1672,7 +2059,10 @@ static int  gsl_ts_remove(struct i2c_client *client)
 
 	return 0;
 }
-
+static const struct of_device_id gsl_of_match[] = {
+	{.compatible = "allwinner,gslX680"},
+	{},
+};
 static const struct i2c_device_id gsl_ts_id[] = {
 	{GSLX680_I2C_NAME, 0},
 	{}
@@ -1684,10 +2074,10 @@ static UNIVERSAL_DEV_PM_OPS(gsl_pm_ops, gsl_ts_suspend,
 
 #define GSL_PM_OPS (&gsl_pm_ops)
 
-
 static struct i2c_driver gsl_ts_driver = {
 	.class = I2C_CLASS_HWMON,
 	.driver = {
+		.of_match_table = gsl_of_match,
 		.name = GSLX680_I2C_NAME,
 		.owner = THIS_MODULE,
 		.pm = GSL_PM_OPS,
@@ -1696,21 +2086,12 @@ static struct i2c_driver gsl_ts_driver = {
 	.remove		= gsl_ts_remove,
 	.id_table		= gsl_ts_id,
 	.address_list	= normal_i2c,
-	.detect   = ctp_detect,
-
 };
 static int ctp_get_system_config(void)
 {
 	ctp_print_info(config_info);
 	fwname = config_info.name;
-	pr_debug("%s:fwname:%s\n", __func__, fwname);
-	fw_index = gsl_find_fw_idx(fwname);
-	if (fw_index == -1) {
-		pr_debug("gslx680: no matched TP firmware(%s)!\n", fwname);
-		return 0;
-	}
 
-	pr_debug("fw_index = %d\n", fw_index);
 	twi_id = config_info.twi_id;
 	screen_max_x = config_info.screen_max_x;
 	screen_max_y = config_info.screen_max_y;
@@ -1718,7 +2099,7 @@ static int ctp_get_system_config(void)
 	revert_y_flag = config_info.revert_y_flag;
 	exchange_x_y_flag = config_info.exchange_x_y_flag;
 	if ((screen_max_x == 0) || (screen_max_y == 0)) {
-		pr_debug("%s:read config error!\n", __func__);
+		pr_err("%s:read config error!\n", __func__);
 		return 0;
 	}
 
@@ -1728,31 +2109,14 @@ static int __init gsl_ts_init(void)
 {
 	int ret = -1;
 
-	pr_debug("*******************************************\n");
-	if (input_sensor_startup(&(config_info.input_type))) {
-		pr_debug("%s: ctp_startup err.\n", __func__);
-		return 0;
-	} else {
-		ret = input_sensor_init(&(config_info.input_type));
-		if (ret != 0)
-			pr_debug("%s:ctp_ops.init err.\n", __func__);
-
-	}
-	if (config_info.ctp_used == 0) {
-		pr_debug("*** ctp_used set to 0 !\n");
-		pr_debug("if use ctp,please put the sys_config.fex ctp_used set to 1.\n");
-		return 0;
-	}
-	if (!ctp_get_system_config()) {
-		pr_debug("%s:read config fail!\n", __func__);
-		return ret;
-	}
-	input_set_power_enable(&(config_info.input_type), 1);
-	msleep(20);
-	ctp_wakeup(1, 0);
-
+	if (startup() != 1)
+		return -1;
+	if (!config_info.isI2CClient)
+		gsl_ts_driver.detect = ctp_detect;
 	ret = i2c_add_driver(&gsl_ts_driver);
-	pr_debug("***************************************************\n");
+	if (ret < 0) {
+		printk("add gslX680 i2c driver failed\n");
+	}
 	return ret;
 }
 
@@ -1767,5 +2131,6 @@ module_init(gsl_ts_init);
 module_exit(gsl_ts_exit);
 MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION("GSLX680 touchscreen controller driver");
-MODULE_AUTHOR("Guan Yuwei, guanyuwei@basewin.com");
+MODULE_AUTHOR("allwinner");
+MODULE_VERSION("1.0.5");
 MODULE_ALIAS("platform:gsl_ts");

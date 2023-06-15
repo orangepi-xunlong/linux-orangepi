@@ -21,6 +21,7 @@
 #include "de_rtmx.h"
 #include "de_enhance.h"
 #include "de_feat.h"
+#ifdef CONFIG_DISP2_SUNXI_SUPPORT_ENAHNCE
 #include "de_vep_table.h"
 
 #define ONE_SCREEN_ONE_PARA
@@ -73,7 +74,7 @@ enhance_mode_to_para[ENHANCE_MODE_NUM][MODE_NUM][FORMAT_NUM][PARA_NUM] = {
 	{
 		{
 			/* rgb */
-			{0x22, 0x10001, 0x21, 1, 1, 1},
+			{0x21, 0x10001, 0x21, 1, 1, 1},
 			/* yuv */
 			{0x11, 0x10010, 0x21, 1, 2, 1},
 		},
@@ -390,7 +391,7 @@ int de_enhance_init(struct disp_bsp_init_para *para)
 
 	for (screen_id = 0; screen_id < device_num; screen_id++)
 		for (ch_id = 0; ch_id < vep_num[screen_id]; ch_id++) {
-#if defined(CONFIG_ARCH_SUN50IW10)
+#if defined(CONFIG_INDEPENDENT_DE)
 			de_fce_init(screen_id, ch_id,
 				    para->reg_base[DISP_MOD_DE + screen_id]);
 #ifdef LTI_EXIST
@@ -407,7 +408,7 @@ int de_enhance_init(struct disp_bsp_init_para *para)
 			de_fcc_init(screen_id, ch_id,
 				    para->reg_base[DISP_MOD_DE + screen_id]);
 #endif
-#else/*for CONFIG_ARCH_SUN50IW10*/
+#else/*for CONFIG_INDEPENDENT_DE*/
 			de_fce_init(screen_id, ch_id,
 				    para->reg_base[DISP_MOD_DE]);
 #ifdef LTI_EXIST
@@ -424,7 +425,7 @@ int de_enhance_init(struct disp_bsp_init_para *para)
 			de_fcc_init(screen_id, ch_id,
 				    para->reg_base[DISP_MOD_DE]);
 #endif
-#endif
+#endif/*~CONFIG_ARCH_SUN50IW10*/
 		}
 
 	/* initial */
@@ -490,3 +491,59 @@ int de_enhance_set_mode(unsigned int format, struct disp_enhance_config *config)
 
 	return 0;
 }
+#else
+int de_enhance_info2data(struct disp_enhance_config *config,
+			 struct vep_config_data *data, unsigned int bypass)
+{
+	return 0;
+}
+
+int de_enhance_set_format(unsigned int screen_id, unsigned int format)
+{
+	return 0;
+}
+
+int de_enhance_apply(unsigned int screen_id,
+			   struct disp_enhance_config *config)
+{
+	return 0;
+}
+int de_enhance_set_size(unsigned int screen_id, struct disp_rect *size)
+{
+	return 0;
+}
+int de_enhance_demo_enable(unsigned int screen_id, unsigned int enable)
+{
+	return 0;
+}
+
+int de_enhance_sync(unsigned int screen_id)
+{
+	/* de_enhance_update_regs(id); */
+	return 0;
+}
+int de_enhance_tasklet(unsigned int screen_id)
+{
+	return 0;
+}
+
+int de_enhance_update_regs(unsigned int screen_id)
+{
+	return 0;
+}
+
+int de_enhance_init(struct disp_bsp_init_para *para)
+{
+	return 0;
+}
+int de_enhance_exit(void)
+{
+	return 0;
+}
+
+int de_enhance_set_mode(unsigned int format, struct disp_enhance_config *config)
+{
+	return 0;
+}
+
+#endif

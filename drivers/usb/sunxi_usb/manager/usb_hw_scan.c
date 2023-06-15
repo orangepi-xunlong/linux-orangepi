@@ -40,7 +40,11 @@
 #include  "usb_hw_scan.h"
 #include  "usb_msg_center.h"
 
+#include <linux/power_supply.h>
+
 static struct usb_scan_info g_usb_scan_info;
+
+struct power_supply *psy;// = NULL;
 
 int device_insmod_delay;
 static void (*__usb_hw_scan)(struct usb_scan_info *);
@@ -48,10 +52,10 @@ static void (*__usb_hw_scan)(struct usb_scan_info *);
 #ifndef SUNXI_USB_FPGA
 static __u32 get_pin_data(struct usb_gpio *usb_gpio)
 {
-	return __gpio_get_value(usb_gpio->gpio_set.gpio);
+	return __gpio_get_value(usb_gpio->gpio);
 }
 
-#if defined(CONFIG_USB_G_ANDROID) || defined(CONFIG_USB_MASS_STORAGE)
+#if IS_ENABLED(CONFIG_USB_G_ANDROID) || IS_ENABLED(CONFIG_USB_MASS_STORAGE)
 static int get_usb_gadget_functions(void)
 {
 	struct file *filep;
@@ -122,6 +126,66 @@ static __u32 PIODataIn_debounce(struct usb_gpio *usb_gpio, __u32 *value)
 	return change;
 }
 
+static __u32 PMUDataIn_debounce(struct power_supply *pmu_psy, union power_supply_propval *value)
+{
+	__u32 retry  = 0;
+	__u32 time   = 10;
+	union power_supply_propval temp;
+	__u32 cnt    = 0;
+	__u32 change = 0;	/* if have shake */
+
+	/**
+	 * try 10 times, if value is the same,
+	 * then current read is valid; otherwise invalid.
+	 */
+	if (pmu_psy) {
+		retry = time;
+		while (retry--) {
+			power_supply_get_property(pmu_psy,
+						POWER_SUPPLY_PROP_SCOPE, &temp);
+
+			temp.intval -= 1;
+
+			if (temp.intval)
+				cnt++;
+		}
+
+		/* 10 times, the value is all 0 or 1 */
+		if ((cnt == time) || (cnt == 0))
+			change = 0;
+		else
+			change = 1;
+	}
+
+	if (!change)
+		*value = temp;
+
+	DMSG_DBG_MANAGER("usb_gpio->valid = %x, cnt = %x, change= %d, temp1 = %x\n",
+		usb_gpio->valid, cnt, change, temp1);
+
+	return change;
+}
+
+
+static __u32 get_pmu_state(struct usb_scan_info *info)
+{
+	enum usb_id_state id_state = USB_DEVICE_MODE;
+	union power_supply_propval pin_data;
+
+	if (!PMUDataIn_debounce(info->cfg->port.pmu_psy, &pin_data)) {
+		if (pin_data.intval)
+			id_state = USB_DEVICE_MODE;
+		else
+			id_state = USB_HOST_MODE;
+
+		info->id_old_state = id_state;
+	} else {
+		id_state = info->id_old_state;
+	}
+
+	return id_state;
+}
+
 static u32 get_id_state(struct usb_scan_info *info)
 {
 	enum usb_id_state id_state = USB_DEVICE_MODE;
@@ -141,7 +205,7 @@ static u32 get_id_state(struct usb_scan_info *info)
 			}
 		}
 	} else if (info->cfg->port.id_type == USB_ID_TYPE_AXP) {
-#if defined(CONFIG_AW_AXP) && defined(CONFIG_TYPE_C)
+#if IS_ENABLED(CONFIG_TYPE_C)
 		if (axp_usb_cc_status())
 			id_state = USB_DEVICE_MODE;
 		else
@@ -157,7 +221,8 @@ static u32 get_id_state(struct usb_scan_info *info)
 static u32 get_detect_vbus_state(struct usb_scan_info *info)
 {
 	enum usb_det_vbus_state det_vbus_state = USB_DET_VBUS_INVALID;
-	__u32 pin_data = 0;
+	 __u32 pin_data = 0;
+	union power_supply_propval temp;
 
 	if (info->cfg->port.detect_mode == USB_DETECT_MODE_THREAD) {
 		if (info->cfg->port.det_vbus_type == USB_DET_VBUS_TYPE_GPIO) {
@@ -167,7 +232,6 @@ static u32 get_detect_vbus_state(struct usb_scan_info *info)
 						det_vbus_state = USB_DET_VBUS_VALID;
 					else
 						det_vbus_state = USB_DET_VBUS_INVALID;
-
 					info->det_vbus_old_state = det_vbus_state;
 				} else {
 					det_vbus_state = info->det_vbus_old_state;
@@ -175,13 +239,32 @@ static u32 get_detect_vbus_state(struct usb_scan_info *info)
 			}
 		} else if (info->cfg->port.det_vbus_type
 					== USB_DET_VBUS_TYPE_AXP) {
-#if defined(CONFIG_AW_AXP)
-			if (axp_usb_det())
-				det_vbus_state = USB_DET_VBUS_VALID;
-			else
-				det_vbus_state = USB_DET_VBUS_INVALID;
+				/*det_vbus is axp, get data only once*/
+				if (!psy) {
+					if (of_find_property(info->cfg->pdev->dev.of_node,
+								"det_vbus_supply", NULL))
+						psy = devm_power_supply_get_by_phandle(&info->cfg->pdev->dev,
+								"det_vbus_supply");
 
-#endif
+					if (!psy || IS_ERR(psy)) {
+						DMSG_INFO("%s()%d WARN: "
+								"get power supply failed\n",
+								__func__, __LINE__);
+					} else {
+						goto get_property;
+					}
+
+				} else {
+get_property:
+					power_supply_get_property(psy,
+							POWER_SUPPLY_PROP_ONLINE, &temp);
+
+					if (temp.intval)
+						det_vbus_state = USB_DET_VBUS_VALID;
+					else
+						det_vbus_state = USB_DET_VBUS_INVALID;
+				}
+
 		} else {
 			det_vbus_state = info->det_vbus_old_state;
 		}
@@ -361,7 +444,7 @@ static void do_vbus1_id1(struct usb_scan_info *info)
 				}
 
 				device_insmod_delay = 0;
-#if defined(CONFIG_USB_G_ANDROID) || defined(CONFIG_USB_MASS_STORAGE)
+#if IS_ENABLED(CONFIG_USB_G_ANDROID) || IS_ENABLED(CONFIG_USB_MASS_STORAGE)
 				if (get_usb_gadget_functions())
 #endif
 					hw_insmod_usb_device();
@@ -424,6 +507,20 @@ static __u32 get_vbus_id_state(struct usb_scan_info *info)
 
 	return state;
 }
+
+static __u32 get_vbus_pmu_state(struct usb_scan_info *info)
+{
+	u32 state = 0;
+
+	if (get_pmu_state(info) == USB_DEVICE_MODE)
+		x_set_bit(state, 0);
+
+	if (get_detect_vbus_state(info) == USB_DET_VBUS_VALID)
+		x_set_bit(state, 1);
+
+	return state;
+}
+
 #endif
 
 static void vbus_id_hw_scan(struct usb_scan_info *info)
@@ -431,6 +528,34 @@ static void vbus_id_hw_scan(struct usb_scan_info *info)
 	__u32 vbus_id_state = 0;
 
 	vbus_id_state = get_vbus_id_state(info);
+
+	if (usb_hw_scan_debug)
+		DMSG_INFO("Id=%d,role=%d\n", vbus_id_state, get_usb_role());
+	switch (vbus_id_state) {
+	case  0x00:
+		do_vbus0_id0(info);
+		break;
+	case  0x01:
+		do_vbus0_id1(info);
+		break;
+	case  0x02:
+		do_vbus1_id0(info);
+		break;
+	case  0x03:
+		do_vbus1_id1(info);
+		break;
+	default:
+		DMSG_PANIC("ERR: vbus_id_hw_scan: ");
+		DMSG_PANIC("unknown vbus_id_state(0x%x)\n",
+			vbus_id_state);
+	}
+}
+
+static void vbus_pmu_hw_scan(struct usb_scan_info *info)
+{
+	__u32 vbus_id_state = 0;
+
+	vbus_id_state = get_vbus_pmu_state(info);
 
 	if (usb_hw_scan_debug)
 		DMSG_INFO("Id=%d,role=%d\n", vbus_id_state, get_usb_role());
@@ -465,6 +590,7 @@ void usb_hw_scan(struct usb_cfg *cfg)
 	__usb_hw_scan(&g_usb_scan_info);
 }
 
+
 __s32 usb_hw_scan_init(struct usb_cfg *cfg)
 {
 	struct usb_scan_info *scan_info = &g_usb_scan_info;
@@ -493,7 +619,7 @@ __s32 usb_hw_scan_init(struct usb_cfg *cfg)
 #else
 	{
 		if (port_info->detect_mode == USB_DETECT_MODE_THREAD) {
-			__u32 need_det_vbus_req_gpio = 1;
+			 __u32 need_det_vbus_req_gpio = 1;
 
 			if (port_info->det_vbus_type == USB_DET_VBUS_TYPE_GPIO
 				&& port_info->id_type == USB_ID_TYPE_GPIO) {
@@ -506,12 +632,19 @@ __s32 usb_hw_scan_init(struct usb_cfg *cfg)
 					port_info->det_vbus.valid = 0;
 					goto failed;
 				}
+				// if (port_info->id.valid == 0) {
+				// 	DMSG_PANIC("ERR: usb detect tpye is id, but id(%d) is invalid\n",
+				// 		port_info->id.valid);
+				// 	ret = -1;
+				// 	port_info->id.valid = 0;
+				// 	goto failed;
+				// }
 
 				/**
 				 * if id and vbus use the same pin,
 				 * then need not to pull pio.
 				 */
-				if (port_info->id.gpio_set.gpio == port_info->det_vbus.gpio_set.gpio) {
+				if (port_info->id.gpio == port_info->det_vbus.gpio) {
 					/**
 					 * when id and det_vbus reuse,
 					 * the det bus need not request
@@ -524,7 +657,7 @@ __s32 usb_hw_scan_init(struct usb_cfg *cfg)
 			/* request id gpio */
 			if (port_info->id.valid) {
 				ret = gpio_request(
-						port_info->id.gpio_set.gpio,
+						port_info->id.gpio,
 						"otg_id");
 				if (ret != 0) {
 					DMSG_PANIC("ERR: id gpio_request failed\n");
@@ -536,16 +669,16 @@ __s32 usb_hw_scan_init(struct usb_cfg *cfg)
 
 				/* set config, input */
 				gpio_direction_input(
-						port_info->id.gpio_set.gpio);
+						port_info->id.gpio);
 				__gpio_set_value(
-						port_info->id.gpio_set.gpio,
+						port_info->id.gpio,
 						1);
 			}
 
 			/* request det_vbus gpio */
 			if (port_info->det_vbus.valid
 					&& need_det_vbus_req_gpio) {
-				ret = gpio_request(port_info->det_vbus.gpio_set.gpio, "otg_det");
+				ret = gpio_request(port_info->det_vbus.gpio, "otg_det");
 				if (ret != 0) {
 					DMSG_PANIC("ERR: det_vbus gpio_request failed\n");
 					ret = -1;
@@ -554,64 +687,36 @@ __s32 usb_hw_scan_init(struct usb_cfg *cfg)
 				}
 
 				/* set config, input */
-				gpio_direction_input(port_info->det_vbus.gpio_set.gpio);
+				gpio_direction_input(port_info->det_vbus.gpio);
 			}
 		} else if (port_info->detect_mode == USB_DETECT_MODE_INTR) {
 			if (port_info->id.valid) {
-				unsigned long int config_set;
-				unsigned long int config_get;
-				char pin_name[SUNXI_PIN_NAME_MAX_LEN];
-				int pull = 1;
+				// //char pin_name[SUNXI_PIN_NAME_MAX_LEN];
+				// char pin_name[8];
 
-				ret = gpio_request(
-						port_info->id.gpio_set.gpio,
-						"otg_id");
-				if (ret != 0) {
-					DMSG_PANIC("ERR: id gpio_request failed\n");
-					ret = -1;
-					port_info->id.valid = 0;
-					port_info->det_vbus.valid = 0;
-					goto failed;
-				}
+				// ret = gpio_request(
+				// 		port_info->id.gpio,
+				// 		"otg_id");
+				// if (ret != 0) {
+				// 	DMSG_PANIC("ERR: id gpio_request failed\n");
+				// 	ret = -1;
+				// 	port_info->id.valid = 0;
+				// 	port_info->det_vbus.valid = 0;
+				// 	goto failed;
+				// }
 
-				sunxi_gpio_to_name(
-						port_info->id.gpio_set.gpio,
-						pin_name);
+				// sunxi_gpio_to_name(
+				// 		port_info->id.gpio,
+				// 		pin_name);
 
 				/* set id gpio pull up */
-				config_set = SUNXI_PINCFG_PACK(
-							SUNXI_PINCFG_TYPE_PUD,
-							pull);
-				if (port_info->id.gpio_set.gpio < SUNXI_PL_BASE)
-					pin_config_set(SUNXI_PINCTRL,
-							pin_name,
-							config_set);
-				else
-					pin_config_set(SUNXI_R_PINCTRL,
-							pin_name,
-							config_set);
-
-				config_get = SUNXI_PINCFG_PACK(
-							SUNXI_PINCFG_TYPE_PUD,
-							0XFFFF);
-				if (port_info->id.gpio_set.gpio < SUNXI_PL_BASE)
-					pin_config_get(SUNXI_PINCTRL,
-							pin_name,
-							&config_get);
-				else
-					pin_config_get(SUNXI_R_PINCTRL,
-							pin_name,
-							&config_get);
-
-				if (pull != SUNXI_PINCFG_UNPACK_VALUE(config_get)) {
-					DMSG_PANIC("ERR: id gpio pull up failed\n");
-					port_info->det_vbus.valid = 0;
-					goto failed;
-				}
 			}
 		}
 
-		__usb_hw_scan = vbus_id_hw_scan;
+		if (port_info->detect_type == USB_DETECT_TYPE_VBUS_ID)
+			__usb_hw_scan = vbus_id_hw_scan;
+		else if (port_info->detect_type == USB_DETECT_TYPE_VBUS_PMU)
+			__usb_hw_scan = vbus_pmu_hw_scan;
 	}
 #endif
 		break;
@@ -626,10 +731,10 @@ __s32 usb_hw_scan_init(struct usb_cfg *cfg)
 failed:
 #ifndef SUNXI_USB_FPGA
 	if (port_info->id.valid)
-		gpio_free(port_info->id.gpio_set.gpio);
+		gpio_free(port_info->id.gpio);
 
-	if (port_info->det_vbus.valid)
-		gpio_free(port_info->det_vbus.gpio_set.gpio);
+	// if (port_info->det_vbus.valid)
+	// 	gpio_free(port_info->det_vbus.gpio);
 #endif
 	__usb_hw_scan = null_hw_scan;
 	return ret;
@@ -644,10 +749,10 @@ __s32 usb_hw_scan_exit(struct usb_cfg *cfg)
 __s32 usb_hw_scan_exit(struct usb_cfg *cfg)
 {
 	if (cfg->port.id.valid)
-		gpio_free(cfg->port.id.gpio_set.gpio);
+		gpio_free(cfg->port.id.gpio);
 
-	if (cfg->port.det_vbus.valid)
-		gpio_free(cfg->port.det_vbus.gpio_set.gpio);
+	// if (cfg->port.det_vbus.valid)
+	// 	gpio_free(cfg->port.det_vbus.gpio);
 
 	return 0;
 }

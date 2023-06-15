@@ -7,8 +7,8 @@ config DUMP_REG
 	default y
 	---help---
 	  Say y here if you want to support dump regs module.
-	  The dump regs module is used to dump regs of any devices
-	  if you want it, When in doubt, say "Y".
+	  The dump regs module is used to dump regs of any device.
+	  When in doubt, say "Y".
 
 config DUMP_REG_MISC
 	tristate "dump reg misc driver"
@@ -18,4 +18,3 @@ config DUMP_REG_MISC
 	  Add misc driver support, you can use dump regs function
 	  via ("/sys/class/...") sysfs interface.
 	  When in doubt, say "Y".
-

@@ -131,9 +131,15 @@
 		|| defined(CONFIG_ARCH_SUN8IW11) \
 		|| defined(CONFIG_ARCH_SUN8IW12) \
 		|| defined(CONFIG_ARCH_SUN8IW15) \
+		|| defined(CONFIG_ARCH_SUN8IW8) \
 		|| defined(CONFIG_ARCH_SUN8IW7) \
 		|| defined(CONFIG_ARCH_SUN8IW6) \
-		|| defined(CONFIG_ARCH_SUN8IW17)
+		|| defined(CONFIG_ARCH_SUN8IW17) \
+		|| defined(CONFIG_ARCH_SUN8IW18) \
+		|| defined(CONFIG_ARCH_SUN8IW16) \
+		|| defined(CONFIG_ARCH_SUN8IW19) \
+		|| defined(CONFIG_ARCH_SUN8IW20)\
+		|| defined(CONFIG_ARCH_SUN20IW1)
 #define  USBPHYC_REG_o_PHYCTL	0x0410
 #else
 #define  USBPHYC_REG_o_PHYCTL	0x0404
@@ -708,6 +714,7 @@
 #define  USBC_INTUSB_RESUME		(1 << USBC_BP_INTUSB_RESUME)
 #define  USBC_INTUSB_SUSPEND		(1 << USBC_BP_INTUSB_SUSPEND)
 
+#define  USBC_PHY_CTL_LOOPBACKENB		7
 #define  USBC_PHY_CTL_VBUSVLDEXT		5
 #define  USBC_PHY_CTL_SIDDQ			3
 

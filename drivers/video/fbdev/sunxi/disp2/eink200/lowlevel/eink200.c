@@ -54,8 +54,6 @@ int eink_set_reg_base(void __iomem *reg_base)
 {
 	ee_base = (struct __eink_reg_t *)reg_base;
 
-	EINK_INFO_MSG("ee base=0x%p\n", ee_base);
-
 	return 0;
 }
 
@@ -64,7 +62,7 @@ unsigned long eink_get_reg_base(void)
 
 	EINK_INFO_MSG("ee base=0x%p\n", ee_base);
 
-	return *((unsigned long *)ee_base);
+	return (unsigned long)ee_base;
 }
 
 /* reset and stop reset */
@@ -101,7 +99,7 @@ int eink_set_out_panel_mode(struct eink_panel_info  *panel_info)
 
 int eink_set_data_reverse(void)
 {
-	EINK_INFO_MSG("DATA reverse!\n");
+	EINK_DEBUG_MSG("DATA reverse!\n");
 	ee_base->top_ctrl.bits.data_reverse = 1;
 	return 0;
 }
@@ -201,6 +199,7 @@ int eink_edma_start(void)
 int eink_set_upd_bit_fmt(u32 fmt)
 {
 	u32 upd_fmt = 0;
+
 	switch (fmt) {
 	case EINK_Y8:
 		upd_fmt = 0x3;
@@ -398,9 +397,9 @@ u64 eink_get_fin_pipe_id(void)
 
 	val = ee_base->fin_pipe_id0.dwval;
 
-	EINK_INFO_MSG("Finish pipe val = 0x%llx\n", val);
+	EINK_DEBUG_MSG("Finish pipe val = 0x%llx\n", val);
 	val1 = ee_base->fin_pipe_id1.dwval;
-	EINK_INFO_MSG("Finish pipe val1 = 0x%llx\n", val1);
+	EINK_DEBUG_MSG("Finish ex-pipe val = 0x%llx\n", val1);
 	val |= val1 << 32;
 	return val;
 }
@@ -410,7 +409,7 @@ void eink_reset_fin_pipe_id(u64 reg_val)
 
 	ee_base->fin_pipe_id0.dwval = reg_val & 0xffffffff;
 	ee_base->fin_pipe_id1.dwval = (reg_val & 0xffffffff00000000) >> 32;
-	EINK_INFO_MSG("reg_val = 0x%llx, id0 = 0x%x, id1 = 0x%x\n",
+	EINK_DEBUG_MSG("reg_val = 0x%llx, id0 = 0x%x, id1 = 0x%x\n",
 			reg_val, ee_base->fin_pipe_id0.dwval,
 			ee_base->fin_pipe_id1.dwval);
 }
@@ -458,7 +457,7 @@ unsigned int eink_get_dec_cnt(u32 pipe_no)
 
 int eink_upd_pic_config(struct upd_pic_cfg *cfg)
 {
-	EINK_INFO_MSG("img addr=0x%x, size=(%d x %d), pitch=%d, (%d, %d)~(%d, %d), format=0x%x\n",
+	EINK_DEBUG_MSG("img addr=0x%x, size=(%d x %d), pitch=%d, (%d, %d)~(%d, %d), format=0x%x\n",
 			(unsigned int)cfg->addr, cfg->size.width, cfg->size.height,
 			cfg->pitch, cfg->upd_win.left, cfg->upd_win.top,
 			cfg->upd_win.right, cfg->upd_win.bottom, cfg->out_fmt);
@@ -489,6 +488,7 @@ int eink_pipe_config(struct pipe_info_node *info)
 	/* ee_base->pipe_ctrl[pipe_no].bits.pipe_frm_cnt = info->dec_frame_cnt; */
 
 #ifdef WAVEDATA_DEBUG
+	/* a defualt wav file gc16 mode frames = 51 */
 	if (info->upd_mode == EINK_GC16_MODE)
 		info->total_frames = 51;
 #endif
@@ -657,9 +657,9 @@ int eink_set_wb(unsigned char wb_en, unsigned long wb_addr)
 	return 0;
 }
 
-int eink_edma_wb_en(void)
+int eink_edma_wb_en(int en)
 {
-	ee_base->edma_wb_ctrl.bits.wb_en = 1;
+	ee_base->edma_wb_ctrl.bits.wb_en = en;
 	return 0;
 }
 

@@ -33,6 +33,10 @@
 #define MAX_CHN_NUM (6)
 #define MAX_LAYER_NUM_PER_CHN (4)
 
+#ifndef IOMMU_DE0_MASTOR_ID
+#define IOMMU_DE0_MASTOR_ID 0
+#define IOMMU_DE1_MASTOR_ID 0
+#endif
 
 enum {
 	DE_SCALER_TYPE_NONE = 0,

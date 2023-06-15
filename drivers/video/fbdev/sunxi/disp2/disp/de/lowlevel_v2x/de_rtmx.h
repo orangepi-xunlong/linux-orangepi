@@ -99,6 +99,14 @@ enum de_pixel_format {
 	DE_FORMAT_ABGR_1555 = 0x11,
 	DE_FORMAT_RGBA_5551 = 0x12,
 	DE_FORMAT_BGRA_5551 = 0x13,
+	DE_FORMAT_A2R10G10B10 = 0x14,
+	DE_FORMAT_A2B10G10R10 = 0x15,
+	DE_FORMAT_R10G10B10A2 = 0x16,
+	DE_FORMAT_B10G10R10A2 = 0x17,
+	DE_FORMAT_1bpp_palette_LE = 0x18,
+	DE_FORMAT_2bpp_palette_LE = 0x19,
+	DE_FORMAT_4bpp_palette_LE = 0x1a,
+	DE_FORMAT_8bpp_palette_LE = 0x1b,
 
 	/* SP: semi-planar, P:planar, I:interleaved
 	 * UVUV: U in the LSBs;     VUVU: V in the LSBs
@@ -292,6 +300,11 @@ struct __lay_para_t {
 	struct de_rect layer;
 	unsigned int laddr_t[3];
 	unsigned int laddr_b[3];
+	struct de_rect lbc_crop;
+	unsigned int lbc_laddr;
+	unsigned int lbc_haddr;
+	unsigned int lbc_en;
+	struct disp_lbc_info lbc_info;
 };
 
 struct __bld_ch_para_t {
@@ -347,12 +360,12 @@ int de_rtmx_set_lay_cfg(unsigned int sel, unsigned int chno, unsigned int layno,
 			struct __lay_para_t *cfg);
 int de_rtmx_set_lay_haddr(unsigned int sel, unsigned int chno,
 			  unsigned int layno, unsigned char top_bot_en,
-			  unsigned char *haddr_t, unsigned char *haddr_b);
+			  unsigned char *haddr_t, unsigned char *haddr_b, unsigned int lbc_en);
 int de_rtmx_set_lay_laddr(unsigned int sel, unsigned int chno,
 		  unsigned int layno, unsigned char fmt, struct de_rect crop,
 		  unsigned int *size, unsigned int *align,
 		  enum de_3d_in_mode trdinmode, unsigned int *addr,
-			  unsigned char *haddr);
+			  unsigned char *haddr, unsigned int lbc_en);
 int de_rtmx_get_3d_in(unsigned char fmt, struct de_rect crop,
 			struct de_fb *size,
 		  unsigned int *align, enum de_3d_in_mode trdinmode,
@@ -369,9 +382,9 @@ int de_rtmx_get_li_addr_offset(unsigned int size, unsigned int align,
 			unsigned int cnt);
 int de_rtmx_set_lay_fcolor(unsigned int sel, unsigned int chno,
 			   unsigned int layno, unsigned char en,
-			   unsigned char fmt, unsigned int color);
+			   unsigned char fmt, unsigned int color, unsigned int lbc_en);
 int de_rtmx_set_overlay_size(unsigned int sel, unsigned int chno,
-			     unsigned int w, unsigned int h);
+			     unsigned int w, unsigned int h, unsigned int lbc_en);
 int de_rtmx_set_coarse_fac(unsigned int sel, unsigned char chno,
 			   unsigned int fmt, unsigned int lcd_fps,
 			   unsigned int lcd_height, unsigned int de_freq_mhz,
@@ -427,5 +440,9 @@ int de_rtmx_get_lay_format(unsigned int sel, unsigned int chno,
 			   unsigned int layno);
 int de_rtmx_get_display_size(unsigned int sel, unsigned int *width,
 			     unsigned int *height);
+int de_rtmx_set_palette(unsigned int sel, unsigned int chno,
+			void *data, unsigned int num);
+int de_rtmx_set_dither_out(unsigned int sel, unsigned int en, unsigned int fifo_3d,
+			unsigned int mode, unsigned int fmt);
 
 #endif

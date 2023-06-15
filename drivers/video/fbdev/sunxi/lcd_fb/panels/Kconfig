@@ -1,0 +1,17 @@
+config LCD_SUPPORT_KLD35512
+	bool "LCD support kld35512 panel"
+        default n
+        ---help---
+                If you want to support kld35512 panel for display driver, select it.
+
+config LCD_SUPPORT_KLD39501
+	bool "LCD support kld39501 panel"
+	default n
+	---help---
+		If you want to support kld39501 panel for display driver, select it.
+
+config LCD_SUPPORT_KLD2844B
+	bool "LCD support kld2844B panel"
+	default y
+	---help---
+		If you want to support kld2844b panel for display driver, select it.

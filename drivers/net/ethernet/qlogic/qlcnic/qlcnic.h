@@ -37,8 +37,8 @@
 
 #define _QLCNIC_LINUX_MAJOR 5
 #define _QLCNIC_LINUX_MINOR 3
-#define _QLCNIC_LINUX_SUBVERSION 65
-#define QLCNIC_LINUX_VERSIONID  "5.3.65"
+#define _QLCNIC_LINUX_SUBVERSION 66
+#define QLCNIC_LINUX_VERSIONID  "5.3.66"
 #define QLCNIC_DRV_IDC_VER  0x01
 #define QLCNIC_DRIVER_VERSION  ((_QLCNIC_LINUX_MAJOR << 16) |\
 		 (_QLCNIC_LINUX_MINOR << 8) | (_QLCNIC_LINUX_SUBVERSION))
@@ -497,7 +497,7 @@ struct qlcnic_hardware_context {
 	u16 board_type;
 	u16 supported_type;
 
-	u16 link_speed;
+	u32 link_speed;
 	u16 link_duplex;
 	u16 link_autoneg;
 	u16 module_type;

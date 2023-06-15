@@ -1,5 +1,5 @@
 /*
- * linux-4.9/drivers/media/platform/sunxi-vin/vin-tdm/vin_tdm.h
+ * linux-5.4/drivers/media/platform/sunxi-vin/vin-tdm/vin_tdm.h
  *
  * Copyright (c) 2007-2019 Allwinnertech Co., Ltd.
  *
@@ -23,7 +23,9 @@
 #include "tdm_reg.h"
 #include "../vin-video/vin_core.h"
 
-#define TMD_BUFS_NUM 5
+#define TDM_BUFS_NUM 5
+#define TDM_TX_HBLANK 96
+#define TDM_TX_VBLANK 36
 
 struct tdm_buffer {
 	void *virt_addr;
@@ -69,8 +71,8 @@ struct tdm_rx_dev {
 	/* Buffer */
 	u32 buf_size;
 	u32 buf_cnt;
-	struct vin_mm ion_man[TMD_BUFS_NUM]; /* for ion alloc/free manage */
-	struct tdm_buffer buf[TMD_BUFS_NUM];
+	struct vin_mm ion_man[TDM_BUFS_NUM]; /* for ion alloc/free manage */
+	struct tdm_buffer buf[TDM_BUFS_NUM];
 };
 
 struct tdm_dev {

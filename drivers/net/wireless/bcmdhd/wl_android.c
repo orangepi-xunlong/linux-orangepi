@@ -2494,7 +2494,7 @@ wl_android_set_auto_channel(struct net_device *dev, const char* cmd_str,
 	uint32 band = WLC_BAND_2G;
 	uint32 buf_size;
 	char *pos = command;
-	int band_new, band_cur;
+	int band_new, band_cur = 0;
 
 	if (cmd_str) {
 		ANDROID_INFO(("Command: %s len:%d \n", cmd_str, (int)strlen(cmd_str)));
@@ -2656,7 +2656,7 @@ wl_android_set_auto_channel(struct net_device *dev, const char* cmd_str,
 done:
 	if ((retry == 0) || (ret < 0)) {
 		/* On failure, fallback to a default channel */
-		if ((band == WLC_BAND_5G)) {
+		if (band == WLC_BAND_5G) {
 			channel = APCS_DEFAULT_5G_CH;
 		} else {
 			channel = APCS_DEFAULT_2G_CH;
@@ -3641,7 +3641,7 @@ static int wl_android_get_link_status(struct net_device *dev, char *command,
 	uint encode, rate, txexp;
 	struct wl_bss_info *bi;
 	int datalen = sizeof(uint32) + sizeof(wl_bss_info_t);
-	char buf[datalen];
+	char buf[sizeof(uint32) + sizeof(wl_bss_info_t)];
 
 	/* get BSS information */
 	*(u32 *) buf = htod32(datalen);

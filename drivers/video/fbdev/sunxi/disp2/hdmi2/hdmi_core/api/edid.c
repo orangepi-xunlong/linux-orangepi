@@ -841,18 +841,18 @@ int edid_read(hdmi_tx_dev_t *dev, struct edid *edid)
 						0, 0, 128, (u8 *)edid);
 	if (error) {
 		pr_err("Error:EDID read failed\n");
-		return error;
+		return READ_ERROR;
 	}
-	error = memcmp((u8 *) edid, (u8 *) header, sizeof(header));
+	error = memcmp((u8 *)edid, (u8 *)header, sizeof(header));
 	if (error) {
 		pr_err("Error:EDID header check failed\n");
-		return error;
+		return HEADER_ERROR;
 	}
 
 	error = _edid_checksum((u8 *) edid);
 	if (error) {
 		pr_err("Error:EDID checksum failed\n");
-		return error;
+		return CHECKSUM_ERROR;
 	}
 	return 0;
 }
@@ -871,13 +871,13 @@ int edid_extension_read(hdmi_tx_dev_t *dev, int block, u8 *edid_ext)
 			start_pointer, start_address, 128, edid_ext);
 	if (error) {
 		pr_err("Error:EDID extension read failed");
-		return error;
+		return READ_ERROR;
 	}
 
 	error = _edid_checksum(edid_ext);
 	if (error) {
 		pr_err("Error:EDID extension checksum failed");
-		return error;
+		return CHECKSUM_ERROR;
 	}
 	return 0;
 }
@@ -911,9 +911,15 @@ static int _edid_struture_parser(hdmi_tx_dev_t *dev, struct edid *edid,
 {
 	int i;
 	char *monitorName;
+	const u8 header[] = {0x00, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x00};
 
-	if (edid->header[0] != 0) {
+	if (memcmp((u8 *)edid, (u8 *)header, sizeof(header)) != 0) {
 		pr_err(":Error:Invalid Header\n");
+		return -1;
+	}
+
+	if (_edid_checksum((u8 *)edid) != 0) {
+		pr_err("Error:edid checksum failed\n");
 		return -1;
 	}
 
@@ -1091,6 +1097,11 @@ concluded:;
 				edid_parser_updateYcc420(edidExt, tmpYcc420All, tmpLimitedYcc420All);
 			}
 			break;
+		case 0x78:
+			edidExt->hf_eeodb_block_count = data[2];
+			EDID_INF("sink support HF-EEODB, block count:%d\n",
+				edidExt->hf_eeodb_block_count);
+			break;
 		default:
 			EDID_INF("Error:Extended Data Block not parsed %d\n",
 					extendedTag);
@@ -1113,6 +1124,11 @@ static int _edid_cea_extension_parser(hdmi_tx_dev_t *dev, u8 *buffer,
 	int c = 0;
 	dtd_t tmpDtd;
 	u8 offset = buffer[2];
+
+	if (_edid_checksum(buffer) != 0) {
+		pr_err("Error:edid extension checksum failed\n");
+		return -1;
+	}
 
 	if (buffer[1] < 0x03) {
 		pr_err("Error:Invalid version for CEA Extension block,only rev 3 or higher is supported");

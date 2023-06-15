@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  sst_dsp.c - Intel SST Driver for audio engine
  *
@@ -7,15 +8,6 @@
  *		Dharageswari R <dharageswari.r@intel.com>
  *		KP Jeeja <jeeja.kp@intel.com>
  *  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; version 2 of the License.
- *
- *  This program is distributed in the hope that it will be useful, but
- *  WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- *  General Public License for more details.
  *
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  *
@@ -44,15 +36,15 @@ void memcpy32_toio(void __iomem *dst, const void *src, int count)
 	/* __iowrite32_copy uses 32-bit count values so divide by 4 for
 	 * right count in words
 	 */
-	__iowrite32_copy(dst, src, count/4);
+	__iowrite32_copy(dst, src, count / 4);
 }
 
 void memcpy32_fromio(void *dst, const void __iomem *src, int count)
 {
-	/* __iowrite32_copy uses 32-bit count values so divide by 4 for
+	/* __ioread32_copy uses 32-bit count values so divide by 4 for
 	 * right count in words
 	 */
-	__iowrite32_copy(dst, src, count/4);
+	__ioread32_copy(dst, src, count / 4);
 }
 
 /**
@@ -269,7 +261,7 @@ static void sst_do_memcpy(struct list_head *memcpy_list)
 	struct sst_memcpy_list *listnode;
 
 	list_for_each_entry(listnode, memcpy_list, memcpylist) {
-		if (listnode->is_io == true)
+		if (listnode->is_io)
 			memcpy32_toio((void __iomem *)listnode->dstn,
 					listnode->src, listnode->size);
 		else
@@ -415,7 +407,6 @@ int sst_load_fw(struct intel_sst_drv *sst_drv_ctx)
 			return ret_val;
 	}
 
-	BUG_ON(!sst_drv_ctx->fw_in_mem);
 	block = sst_create_block(sst_drv_ctx, 0, FW_DWNL_ID);
 	if (block == NULL)
 		return -ENOMEM;

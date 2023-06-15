@@ -1,0 +1,10 @@
+# SUNXI Ahub
+obj-$(CONFIG_SND_SOC_SUNXI_AHUB_TMP)		+= sunxi-pcm.o
+obj-$(CONFIG_SND_SOC_SUNXI_AHUB_TMP)		+= sunxi_ahub.o
+obj-$(CONFIG_SND_SOC_SUNXI_AHUB_TMP)		+= sunxi_ahub_cpudai.o
+obj-$(CONFIG_SND_SOC_SUNXI_AHUB_TMP)		+= sunxi-sndahub.o
+obj-$(CONFIG_SND_SOC_SUNXI_AHUB_TMP)		+= sunxi_ahub_daudio.o
+obj-$(CONFIG_SND_SOC_SUNXI_AHUB_TMP)		+= sunxi-snddaudio.o
+obj-$(CONFIG_SND_SOC_SUNXI_AHUB_TMP)		+= sunxi-hdmi.o
+obj-$(CONFIG_SND_SOC_SUNXI_AHUB_TMP)		+= sunxi-sndhdmi.o
+obj-$(CONFIG_SND_SOC_SUNXI_AHUB_TMP)		+= sunxi_netlink.o

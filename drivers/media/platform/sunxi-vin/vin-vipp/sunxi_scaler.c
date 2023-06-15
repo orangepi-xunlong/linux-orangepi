@@ -1,5 +1,5 @@
 /*
- * linux-4.9/drivers/media/platform/sunxi-vin/vin-vipp/sunxi_scaler.c
+ * linux-5.4/drivers/media/platform/sunxi-vin/vin-vipp/sunxi_scaler.c
  *
  * Copyright (c) 2007-2017 Allwinnertech Co., Ltd.
  *
@@ -287,6 +287,8 @@ static int sunxi_scaler_subdev_set_selection(struct v4l2_subdev *sd,
 		  format_source->width, format_source->height);
 
 	__scaler_try_crop(format_sink, format_source, &sel->r);
+
+	if (sel->reserved[0] != VIPP_ONLY_SHRINK) { /* vipp crop */
 	__scaler_calc_ratios(scaler, &sel->r, format_source, &para);
 
 	if (sel->which == V4L2_SUBDEV_FORMAT_TRY)
@@ -296,6 +298,8 @@ static int sunxi_scaler_subdev_set_selection(struct v4l2_subdev *sd,
 	scaler->crop.active = sel->r;
 	scaler->crop.request = sel->r;
 
+		if (sd->entity.stream_count)
+			vipp_set_para_ready(scaler->id, NOT_READY);
 	/* we need update register when streaming */
 	crop.hor = scaler->crop.active.left;
 	crop.ver = scaler->crop.active.top;
@@ -312,9 +316,29 @@ static int sunxi_scaler_subdev_set_selection(struct v4l2_subdev *sd,
 	scaler_cfg.sc_w_shift = __scaler_w_shift(scaler->para.xratio, scaler->para.yratio);
 	vipp_scaler_cfg(scaler->id, &scaler_cfg);
 
+		if (sd->entity.stream_count)
+			vipp_set_para_ready(scaler->id, HAS_READY);
 	vin_log(VIN_LOG_SCALER, "active crop: l = %d, t = %d, w = %d, h = %d\n",
 		scaler->crop.active.left, scaler->crop.active.top,
 		scaler->crop.active.width, scaler->crop.active.height);
+	} else { /* vipp shrink */
+		if ((sel->r.width != format_source->width) || (sel->r.height != format_source->height)) {
+			vin_err("vipp shrink size is not equal to output size");
+			return -EINVAL;
+		}
+
+		scaler->crop.active.left = sel->r.left;
+		scaler->crop.active.top = sel->r.top;
+		scaler->crop.active.width = format_sink->width;
+		scaler->crop.active.height = format_sink->height;
+		scaler->para.xratio = scaler->crop.active.width * 256 / sel->r.width;
+		scaler->para.yratio = scaler->crop.active.height * 256 / sel->r.height;
+
+		vin_log(VIN_LOG_SCALER, "active shrink: l = %d, t = %d, w = %d, h = %d, xratio = %d, yratio = %d\n",
+			scaler->crop.active.left, scaler->crop.active.top,
+			scaler->crop.active.width, scaler->crop.active.height,
+			scaler->para.xratio, scaler->para.yratio);
+	}
 	return 0;
 }
 
@@ -517,6 +541,8 @@ static void scaler_resource_free(struct scaler_dev *scaler)
 	os_mem_free(&scaler->pdev->dev, &scaler->vipp_reg);
 }
 
+static unsigned int scaler_id;
+
 static int scaler_probe(struct platform_device *pdev)
 {
 	struct device_node *np = pdev->dev.of_node;
@@ -544,16 +570,19 @@ static int scaler_probe(struct platform_device *pdev)
 	scaler->id = pdev->id;
 	scaler->pdev = pdev;
 
-	scaler->base = of_iomap(np, 0);
-	if (!scaler->base) {
+	if (scaler->id > 0xf0) {
 		scaler->is_empty = 1;
+		scaler->id = scaler_id;
+		scaler_id++;
 		scaler->base = kzalloc(0x400, GFP_KERNEL);
-		if (!scaler->base) {
-			ret = -EIO;
-			goto freedev;
-		}
+	} else {
+		scaler->base = of_iomap(np, 0);
 	}
 
+	if (!scaler->base) {
+		ret = -EIO;
+		goto freedev;
+	}
 	__scaler_init_subdev(scaler);
 
 	if (scaler_resource_alloc(scaler) < 0) {

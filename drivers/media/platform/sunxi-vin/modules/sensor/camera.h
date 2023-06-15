@@ -116,6 +116,10 @@ struct sensor_info {
 	unsigned int lane_num;
 	unsigned int bit_width;
 	struct v4l2_ctrl_handler handler;
+
+#ifdef CONFIG_SAME_I2C
+	unsigned char sensor_i2c_addr;
+#endif
 };
 
 #endif /*__CAMERA__H__*/

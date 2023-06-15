@@ -132,36 +132,95 @@ OUT:
 	return ret;
 }
 
+/* fix add */
+static bool g2d_bld_check_coor(g2d_image_enh *src,
+		g2d_image_enh *src2, g2d_image_enh *dst)
+{
+	if (dst->width < src->clip_rect.w || dst->width < src2->clip_rect.w
+			|| dst->height < src->clip_rect.h ||
+			dst->height < src2->clip_rect.h)
+		return false;
+
+	return true;
+}
+
 static __s32 g2d_bsp_bld(struct g2d_mixer_frame *p_frame, g2d_image_enh *src,
-			 g2d_image_enh *dst, __u32 flag, g2d_ck *ck_para)
+				g2d_image_enh *src2, g2d_image_enh *dst,
+				__u32 flag, g2d_ck *ck_para)
 {
 	g2d_rect rect0, rect1;
 	__s32 ret = -1;
+	__u32 midw, midh;
 
 	if (!dst || !src || !p_frame || !ck_para) {
 		G2D_ERR_MSG("Null pointer!\n");
 		goto OUT;
 	}
 
-	g2d_vlayer_set(p_frame->ovl_v, 0, dst);
-	g2d_uilayer_set(p_frame->ovl_u, 2, src);
-	if ((dst->format > G2D_FORMAT_BGRA1010102) &&
-	    (src->format <= G2D_FORMAT_BGRA1010102))
-		bld_csc_reg_set(p_frame->bld, 1, G2D_RGB2YUV_709);
+	if (g2d_bld_check_coor(src, src2, dst) == false) {
+		pr_err("[BLD] size is not suitable!");
+		goto OUT;
+	}
+
+	g2d_vlayer_set(p_frame->ovl_v, 0, src);
+	g2d_vlayer_overlay_set(p_frame->ovl_v, 0, &src->coor,
+			dst->clip_rect.w, dst->clip_rect.h);
+
+	g2d_uilayer_set(p_frame->ovl_u, 2, src2);
+	g2d_uilayer_overlay_set(p_frame->ovl_u, 2, &src2->coor,
+			dst->clip_rect.w, dst->clip_rect.h);
+
+	if (src->format > G2D_FORMAT_BGRA1010102) {
+		if (src2->format > G2D_FORMAT_BGRA1010102) {
+			pr_err("[BLD] not support two yuv layer!\n");
+			goto OUT;
+		} else {
+			/* YUV_XXX->YUV444->RGB overlay size */
+			g2d_ovl_v_calc_coarse(p_frame->ovl_v, src->format, dst->clip_rect.w,
+						dst->clip_rect.h, dst->clip_rect.w,
+						dst->clip_rect.h, &midw, &midh);
+			g2d_vsu_para_set(p_frame->scal, src->format, midw, midh,
+					dst->clip_rect.w, dst->clip_rect.h, dst->alpha);
+
+			if (src->clip_rect.w <= 1280 && src->clip_rect.h <= 720) {
+				bld_csc_reg_set(p_frame->bld, 0, G2D_YUV2RGB_601);
+			} else
+				bld_csc_reg_set(p_frame->bld, 0, G2D_YUV2RGB_709);
+
+		}
+	} else {
+		if (src2->format > G2D_FORMAT_BGRA1010102) {
+			pr_err("[BLD] please use ch0(src0) to set YUV layer!\n");
+			goto OUT;
+		}
+	}
+
+	if (dst->format > G2D_FORMAT_BGRA1010102) {
+		if (dst->clip_rect.w <= 1280 && dst->clip_rect.h <= 720) {
+			bld_csc_reg_set(p_frame->bld, 2, G2D_RGB2YUV_601);
+		} else
+			bld_csc_reg_set(p_frame->bld, 2, G2D_RGB2YUV_709);
+	}
 
 	bld_set_rop_ctrl(p_frame->bld, 0xf0);
 
 	rect0.x = 0;
 	rect0.y = 0;
-	rect0.w = dst->clip_rect.w;
+	rect0.w = dst->clip_rect.w;/* overlay size */
 	rect0.h = dst->clip_rect.h;
 
 	rect1.x = 0;
 	rect1.y = 0;
-	rect1.w = src->clip_rect.w;
-	rect1.h = src->clip_rect.h;
-	bld_in_set(p_frame->bld, 0, rect0, dst->bpremul);
-	bld_in_set(p_frame->bld, 1, rect1, src->bpremul);
+	rect1.w = dst->clip_rect.w;
+	rect1.h = dst->clip_rect.h;
+
+	bld_in_set(p_frame->bld, 0, rect0, src->bpremul);
+	bld_in_set(p_frame->bld, 1, rect1, src2->bpremul);
+
+	if (flag == 0) {
+		/* flag not set use default */
+		flag = G2D_BLD_SRCOVER;
+	}
 
 	bld_porter_duff(p_frame->bld, flag & 0xFFF);
 
@@ -549,13 +608,20 @@ static __s32 frame_mem_setup(struct g2d_mixer_frame *p_frame,
 			goto OUT;
 	}
 
+	if (p_para->op_flag & OP_BLEND) {
+		ret = g2d_set_image_addr(&p_frame->ptn_item,
+					 &p_para->ptn_image_h);
+		if (ret)
+			goto OUT;
+	}
+
 	if (p_para->op_flag & OP_MASK) {
 		ret = g2d_set_image_addr(&p_frame->ptn_item,
-					 &p_para->mask_image_h);
+					 &p_para->ptn_image_h);
 		if (ret)
 			goto OUT;
 		ret = g2d_set_image_addr(&p_frame->mask_item,
-					 &p_para->ptn_image_h);
+					 &p_para->mask_image_h);
 		if (ret)
 			goto OUT;
 	}
@@ -574,6 +640,11 @@ __s32 g2d_mixer_frame_apply(struct g2d_mixer_frame *p_frame,
 	if ((p_para->op_flag & OP_BITBLT) || (p_para->op_flag & OP_BLEND)) {
 		if (g2d_image_check(&p_para->src_image_h))
 			goto OUT;
+		if (p_para->op_flag & OP_BLEND) {
+			/* actually is use as src2 */
+			if (g2d_image_check(&p_para->ptn_image_h))
+				goto OUT;
+		}
 	} else if ((p_para->op_flag & OP_MASK)) {
 		p_para->dst_image_h.bbuff = 1;
 		p_para->dst_image_h.gamut = G2D_BT709;
@@ -591,7 +662,7 @@ __s32 g2d_mixer_frame_apply(struct g2d_mixer_frame *p_frame,
 		ret = g2d_bsp_bitblt(p_frame, &p_para->src_image_h,
 				     &p_para->dst_image_h, p_para->flag_h);
 	} else if (p_para->op_flag & OP_BLEND) {
-		ret = g2d_bsp_bld(p_frame, &p_para->src_image_h,
+		ret = g2d_bsp_bld(p_frame, &p_para->src_image_h, &p_para->ptn_image_h,
 				  &p_para->dst_image_h, p_para->bld_cmd,
 				  &p_para->ck_para);
 	} else if (p_para->op_flag & OP_FILLRECT) {
@@ -611,6 +682,7 @@ OUT:
 static __s32 g2d_mixer_frame_destory(struct g2d_mixer_frame *p_frame)
 {
 	__s32 ret = 0;
+
 	ret += p_frame->wb->destory(p_frame->wb);
 	ret += p_frame->ovl_v->destory(p_frame->ovl_v);
 	ret += p_frame->ovl_u->destory(p_frame->ovl_u);
@@ -729,28 +801,26 @@ static __s32 g2d_mixer_rcq_debug(struct g2d_mixer_task *p_task)
 		goto OUT;
 
 	old_fs = get_fs();
-	set_fs(get_ds());
+	set_fs(KERNEL_DS);
 	pfile = filp_open("/tmp/g2d_rcq_header", O_RDWR | O_CREAT | O_EXCL, 0755);
 	set_fs(old_fs);
 	if (IS_ERR(pfile)) {
 		G2D_ERR_MSG("%s, open /tmp/g2d_rcq_header err\n", __func__);
 		goto OUT;
 	}
-	old_fs = get_fs();
-	set_fs(get_ds());
+
 	size = p_task->p_rcq_info->alloc_num * sizeof(*(p_task->p_rcq_info->vir_addr));
-	bw = vfs_write(pfile, (char *)p_task->p_rcq_info->vir_addr, size, &pos);
-	set_fs(old_fs);
+	bw = kernel_write(pfile, (char *)p_task->p_rcq_info->vir_addr, size, &pos);
 
 	p_reg_blks = p_task->p_rcq_info->reg_blk;
 	for (frame_index = 0; frame_index < p_task->frame_cnt; ++frame_index) {
 		for (i = 0; i < p_task->p_rcq_info->block_num_per_frame; ++i) {
 			reg_blk = *p_reg_blks;
 			snprintf(regblk_name, 100,
-				 "/tmp/g2d_regblk_frame%d_0x%p", frame_index,
+				 "/tmp/g2d_regblk_frame%d_0x%px", frame_index,
 				 reg_blk->reg_addr);
 			old_fs = get_fs();
-			set_fs(get_ds());
+			set_fs(KERNEL_DS);
 			regblk_file = filp_open(
 			    regblk_name, O_RDWR | O_CREAT | O_EXCL, 0755);
 			set_fs(old_fs);
@@ -760,13 +830,10 @@ static __s32 g2d_mixer_rcq_debug(struct g2d_mixer_task *p_task)
 				continue;
 			}
 
-			old_fs = get_fs();
-			set_fs(get_ds());
 			size = reg_blk->size;
 			pos = 0;
-			bw = vfs_write(regblk_file, (char *)reg_blk->vir_addr,
+			bw = kernel_write(regblk_file, (char *)reg_blk->vir_addr,
 				       size, &pos);
-			set_fs(old_fs);
 			filp_close(regblk_file, NULL);
 
 			++p_reg_blks;
@@ -828,8 +895,7 @@ static __s32 g2d_mixer_task_destory(struct g2d_mixer_task *p_task)
 		kfree(p_task->p_rcq_info);
 	}
 
-	if (p_task->p_para)
-		kfree(p_task->p_para);
+	kfree(p_task->p_para);
 
 	list_del(&p_task->list);
 	ida_simple_remove(&g2d_task_ida, p_task->task_id);

@@ -1,5 +1,5 @@
 /*
- * linux-4.9/drivers/media/platform/sunxi-vin/vin-csi/parser_reg_i.h
+ * linux-5.4/drivers/media/platform/sunxi-vin/vin-csi/parser_reg_i.h
  *
  * Copyright (c) 2007-2017 Allwinnertech Co., Ltd.
  *
@@ -60,9 +60,21 @@
 #define PRS_NCSIC_IF_VREF_POL_MASK    (0X1 << PRS_NCSIC_IF_VREF_POL)
 #define PRS_NCSIC_IF_FIELD_POL         19
 #define PRS_NCSIC_IF_FIELD_POL_MASK   (0X1 << PRS_NCSIC_IF_FIELD_POL)
+#ifndef CONFIG_ARCH_SUN8IW20
 #define PRS_NCSIC_IF_RES0              20
 #define PRS_NCSIC_IF_SRC_TYPE          21
 #define PRS_NCSIC_IF_SRC_TYPE_MASK    (0X1 << PRS_NCSIC_IF_SRC_TYPE)
+#else
+#define PRS_NCSIC_IF_CH0_SRC_TYPE          20
+#define PRS_NCSIC_IF_CH0_SRC_TYPE_MASK    (0X1 << PRS_NCSIC_IF_CH0_SRC_TYPE)
+#define PRS_NCSIC_IF_CH1_SRC_TYPE          21
+#define PRS_NCSIC_IF_CH1_SRC_TYPE_MASK    (0X1 << PRS_NCSIC_IF_CH1_SRC_TYPE)
+#define PRS_NCSIC_IF_CH2_SRC_TYPE          22
+#define PRS_NCSIC_IF_CH2_SRC_TYPE_MASK    (0X1 << PRS_NCSIC_IF_CH2_SRC_TYPE)
+#define PRS_NCSIC_IF_CH3_SRC_TYPE          23
+#define PRS_NCSIC_IF_CH3_SRC_TYPE_MASK    (0X1 << PRS_NCSIC_IF_CH3_SRC_TYPE)
+#endif
+
 #define PRS_NCSIC_IF_PCLK_SHIFT        24
 #define PRS_NCSIC_IF_PCLK_SHIFT_MASK  (0XF << PRS_NCSIC_IF_PCLK_SHIFT)
 

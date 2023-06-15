@@ -20,6 +20,7 @@
 /* 2014/04/25	vito cheng  v0.11 Add block updated function */
 /* ********************************************************************************************************************* */
 
+#ifdef CONFIG_DISP2_SUNXI_SUPPORT_ENAHNCE
 #include "de_ase_type.h"
 #include "de_rtmx.h"
 #include "de_enhance.h"
@@ -178,4 +179,5 @@ int de_ase_info2para(unsigned int auto_color, de_rect window, __ase_config_data 
 
 	return 0;
 }
+#endif
 

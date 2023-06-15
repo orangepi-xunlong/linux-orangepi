@@ -85,5 +85,6 @@ int disp_al_device_set_output_type(u32 screen_id, u32 output_type);
 
 s32 disp_al_init_tcon(struct disp_bsp_init_para *para);
 void disp_al_show_builtin_patten(u32 hwdev_index, u32 patten);
+int disp_al_lcd_get_status(u32 screen_id, struct disp_panel_para *panel);
 
 #endif /* #ifndef _DISP_AL_TCON_H_ */

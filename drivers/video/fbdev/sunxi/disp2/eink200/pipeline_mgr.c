@@ -29,11 +29,13 @@ static int request_pipe(struct pipe_manager *mgr)
 	unsigned long flags = 0;
 	struct pipe_info_node *pipe = NULL, *temp = NULL;
 
-#ifdef PIPELINE_DEBUG
-	EINK_INFO_MSG("Before Request Pipe\n");
-/*	print_free_pipe_list(mgr); */
-	print_used_pipe_list(mgr);
-#endif
+	/* for pipe debug */
+	if (eink_get_print_level() == 3) {
+		EINK_INFO_MSG("Before Request Pipe\n");
+		print_free_pipe_list(mgr);
+		print_used_pipe_list(mgr);
+	}
+
 	spin_lock_irqsave(&mgr->list_lock, flags);
 
 	if (list_empty(&mgr->pipe_free_list)) {
@@ -51,12 +53,14 @@ static int request_pipe(struct pipe_manager *mgr)
 
 	spin_unlock_irqrestore(&mgr->list_lock, flags);
 
-#ifdef PIPELINE_DEBUG
-	EINK_INFO_MSG("After Request Pipe\n");
-	/*print_free_pipe_list(mgr);*/
-	print_used_pipe_list(mgr);
-#endif
-	EINK_INFO_MSG("request pipe_id = %d\n", pipe_id);
+	/* for pipe debug */
+	if (eink_get_print_level() == 3) {
+		EINK_INFO_MSG("After Request Pipe\n");
+		print_free_pipe_list(mgr);
+		print_used_pipe_list(mgr);
+	}
+
+	EINK_DEBUG_MSG("request pipe_id = %d\n", pipe_id);
 	return pipe_id;
 }
 
@@ -95,11 +99,11 @@ static int config_pipe(struct pipe_manager *mgr, struct pipe_info_node info)
 		eink_pipe_config(pipe);
 		eink_pipe_config_wavefile(pipe->wav_paddr, pipe->pipe_id);
 
-		EINK_INFO_MSG("config Pipe_id=%d, UPD:(%d,%d)~(%d,%d), wav addr = 0x%x, total frames=%d, upd_all_en = %d\n",
+		EINK_INFO_MSG("config Pipe_id=%d, UPD:(%d,%d)~(%d,%d), wav addr = 0x%lx, total frames=%d, upd_all_en = %d\n",
 				pipe->pipe_id,
 				pipe->upd_win.left, pipe->upd_win.top,
 				pipe->upd_win.right, pipe->upd_win.bottom,
-				(unsigned int)pipe->wav_paddr, pipe->total_frames,
+				pipe->wav_paddr, pipe->total_frames,
 				info.img->upd_all_en);
 		break;
 	}
@@ -136,7 +140,7 @@ static int active_pipe(struct pipe_manager *mgr, u32 pipe_no)
 			eink_pipe_enable(pipe->pipe_id);
 			pipe->active_flag = true;
 			tframes = pipe->total_frames;
-			EINK_INFO_MSG("Enable an new pipe id = %d, pipe total frames=%lu\n", pipe->pipe_id, tframes);
+			EINK_DEBUG_MSG("Enable an new pipe id = %d, pipe total frames=%lu\n", pipe->pipe_id, tframes);
 			ret = 0;
 			break;
 		}
@@ -188,14 +192,12 @@ static int active_pipe(struct pipe_manager *mgr, u32 pipe_no)
 
 static void release_pipe(struct pipe_manager *mgr, struct pipe_info_node *pipe)
 {
-
-#if 0
-#ifdef PIPELINE_DEBUG
-	EINK_DEFAULT_MSG("Before Config Pipe\n");
-	print_free_pipe_list(mgr);
-	print_used_pipe_list(mgr);
-#endif
-#endif
+	/* for pipe debug */
+	if (eink_get_print_level() == 3) {
+		EINK_INFO_MSG("Before Config Pipe\n");
+		print_free_pipe_list(mgr);
+		print_used_pipe_list(mgr);
+	}
 	/* hardware disable this pipe self */
 	/* eink_pipe_disable(pipe->pipe_id);*/
 
@@ -205,14 +207,38 @@ static void release_pipe(struct pipe_manager *mgr, struct pipe_info_node *pipe)
 	pipe->fresh_frame_cnt = 0;
 	pipe->total_frames = 0;
 
-#if 0
-#ifdef PIPELINE_DEBUG
-	EINK_DEFAULT_MSG("After Config Pipe\n");
-	print_free_pipe_list(mgr);
-	print_used_pipe_list(mgr);
-#endif
-#endif
-	EINK_INFO_MSG("release pipe id=%d\n", pipe->pipe_id);
+	if (eink_get_print_level() == 3) {
+		EINK_INFO_MSG("After Config Pipe\n");
+		print_free_pipe_list(mgr);
+		print_used_pipe_list(mgr);
+	}
+
+	EINK_DEBUG_MSG("release pipe_id=%d\n", pipe->pipe_id);
+
+	return;
+}
+
+void reset_all_pipe(struct pipe_manager *mgr)
+{
+	struct pipe_info_node *pipe_node = NULL, *tmp_node = NULL;
+	unsigned long flags = 0;
+
+	if (mgr == NULL) {
+		pr_err("%s:pipe mgr is NULL!\n", __func__);
+		return;
+	}
+
+	spin_lock_irqsave(&mgr->list_lock, flags);
+	if (!list_empty(&mgr->pipe_used_list)) {
+		list_for_each_entry_safe(pipe_node, tmp_node, &mgr->pipe_used_list, node) {
+			eink_pipe_disable(pipe_node->pipe_id);
+			release_pipe(mgr, pipe_node);
+			list_move_tail(&pipe_node->node, &mgr->pipe_free_list);
+
+		}
+	}
+	spin_unlock_irqrestore(&mgr->list_lock, flags);
+	EINK_INFO_MSG("finish!\n");
 
 	return;
 }
@@ -244,13 +270,13 @@ int pipeline_mgr_enable(struct pipe_manager *mgr)
 
 	spin_lock_irqsave(&mgr->list_lock, flags);
 	if (mgr->enable_flag == true) {
-		EINK_DEFAULT_MSG("pipe mgr already enable!\n");
+		EINK_DEBUG_MSG("pipe mgr already enable!\n");
 		spin_unlock_irqrestore(&mgr->list_lock, flags);
 		return 0;
 	}
 
 	eink_set_out_panel_mode(&mgr->panel_info);
-	eink_set_data_reverse();
+	eink_set_data_reverse();/* ------------ big small edian*/
 	eink_irq_enable();
 
 	mgr->enable_flag = true;
@@ -292,10 +318,12 @@ static int refresh_pipe_data(struct pipe_manager *mgr)
 	step = bit_num << 1; /* one frame  4bit panel 256, 5bit 1024*/
 
 	EINK_INFO_MSG("REFRESH DATA input!\n");
-#ifdef PIPELINE_DEBUG
-	EINK_INFO_MSG("Before Refresh Pipe\n");
-	print_used_pipe_list(mgr);
-#endif
+
+	/* for debug */
+	if (eink_get_print_level() == 3) {
+		EINK_INFO_MSG("Before Refresh Pipe\n");
+		print_used_pipe_list(mgr);
+	}
 
 	spin_lock_irqsave(&mgr->list_lock, flags);
 	list_for_each_entry_safe(pipe, temp, &mgr->pipe_used_list, node) {
@@ -448,6 +476,99 @@ static void edma_transfer_task(struct work_struct *work)
 }
 #endif
 
+#ifdef DEC_WAV_DEBUG
+extern int eink_edma_wb_addr(unsigned long addr);
+extern int eink_edma_wb_en(int en);
+extern int eink_edma_wb_frm_cnt(unsigned int frm_cnt);
+
+static int wav_calc_data_len(int total_cnt)
+{
+	u32 data_len = 0;
+	u32 vsync = 0, hsync = 0;
+	struct eink_manager *mgr = get_eink_manager();
+	if (mgr == NULL) {
+		pr_err("%s, eink mgr is NULL\n", __func__);
+		return -1;
+	}
+
+	hsync = mgr->timing_info.lbl + mgr->timing_info.lsl + mgr->timing_info.ldl + mgr->timing_info.lel;
+	vsync = mgr->timing_info.fbl + mgr->timing_info.fsl + mgr->timing_info.fdl + mgr->timing_info.fel;
+
+	if (mgr->panel_info.data_len == 8) {
+		data_len = hsync * vsync * (1 + 1);/* 8bit timing, 8bit wav */
+	} else {
+		data_len = hsync * vsync * (2 + 1);/* 8bit timing, 16bit wav */
+	}
+
+	data_len = data_len * total_cnt;
+	EINK_INFO_MSG("data_len = %d, total_cnt = %d hsync = %d, vsync = %d\n",
+						data_len, total_cnt, hsync, vsync);
+
+	return data_len;
+}
+
+static int __pipe_mgr_config_wb(struct pipe_manager *mgr, struct pipe_info_node *info)
+{
+	if (!mgr || !info) {
+		return -1;
+	}
+
+	if (mgr->dec_wav_vaddr) {
+		pr_err("dec_wav_vaddr is not null! try to free\n");
+		eink_free((void *)mgr->dec_wav_vaddr, (void *)mgr->wav_wb_paddr, mgr->wav_len);
+	}
+
+	mgr->wav_len = wav_calc_data_len(info->total_frames);
+	if (!mgr->wav_len) {
+		pr_err("Zero length:%u %u\n", mgr->wav_len, info->total_frames);
+		return -2;
+	}
+	mgr->wav_wb_vaddr = eink_malloc(mgr->wav_len, &mgr->wav_wb_paddr);
+	if (mgr->wav_wb_vaddr == NULL) {
+		pr_err("%s:fail to alloc mem for dec wave, len=%d\n", __func__, mgr->wav_len);
+		return -ENOMEM;
+	}
+
+	eink_edma_wb_addr((unsigned long)mgr->wav_wb_paddr);
+	eink_edma_wb_frm_cnt(0);
+	eink_edma_wb_en(1);
+	return 0;
+}
+
+static int __pipe_mgr_dump_wav_data(struct pipe_manager *mgr)
+{
+	char file_name[256] = {0};
+	static u32 id;
+
+	if (!mgr) {
+		return -1;
+	}
+
+	sprintf(file_name, "/data/dec_wav%d.bin", id);
+	pr_err("save wavedata:%s \n", file_name);
+
+	save_as_bin_file((u8 *)mgr->wav_wb_vaddr, file_name, mgr->wav_len, 0);
+	id++;
+	eink_edma_wb_en(0);
+	eink_free((void *)mgr->dec_wav_vaddr, (void *)mgr->wav_wb_paddr, mgr->wav_len);
+	mgr->dec_wav_vaddr = NULL;
+	mgr->wav_wb_paddr = NULL;
+	mgr->wav_len = 0;
+	return 0;
+}
+
+
+void wav_dbg_work_tasket(struct work_struct *work)
+{
+	struct pipe_manager *pipe_mgr =
+		container_of(work, struct pipe_manager, wav_dbg_work);
+	if (pipe_mgr) {
+		pipe_mgr->pipe_mgr_dump_wav_data(pipe_mgr);
+	}
+	return;
+}
+#endif
+
 int pipe_mgr_init(struct eink_manager *eink_mgr)
 {
 	int ret = 0, i = 0;
@@ -490,7 +611,12 @@ int pipe_mgr_init(struct eink_manager *eink_mgr)
 	INIT_LIST_HEAD(&pipe_mgr->pipe_free_list);
 	INIT_LIST_HEAD(&pipe_mgr->pipe_used_list);
 
+#ifdef DEC_WAV_DEBUG
+	pipe_mgr->wav_dbg_workqueue = alloc_workqueue("EINK_WAVE_DEBUG",
+			WQ_HIGHPRI | WQ_MEM_RECLAIM | WQ_UNBOUND, 1);
+	INIT_WORK(&pipe_mgr->wav_dbg_work, wav_dbg_work_tasket);
 
+#endif
 	pipe_node =
 		(struct pipe_info_node **)kmalloc(pipe_mgr->max_pipe_cnt * sizeof(struct pipe_info_node *), GFP_KERNEL | __GFP_ZERO);
 
@@ -529,6 +655,11 @@ int pipe_mgr_init(struct eink_manager *eink_mgr)
 	pipe_mgr->config_pipe = config_pipe;
 	pipe_mgr->active_pipe = active_pipe;
 	pipe_mgr->release_pipe = release_pipe;
+	pipe_mgr->reset_all_pipe = reset_all_pipe;
+#ifdef DEC_WAV_DEBUG
+	pipe_mgr->pipe_mgr_config_wb = __pipe_mgr_config_wb;
+	pipe_mgr->pipe_mgr_dump_wav_data = __pipe_mgr_dump_wav_data;
+#endif
 
 	eink_mgr->pipe_mgr = pipe_mgr;
 	g_pipe_mgr = pipe_mgr;

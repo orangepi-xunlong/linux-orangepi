@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 #include <net/mac80211.h>
 #include <net/rtnetlink.h>
 
@@ -6,75 +7,54 @@
 #include "driver-ops.h"
 #include "led.h"
 
-/* return value indicates whether the driver should be further notified */
-static bool ieee80211_quiesce(struct ieee80211_sub_if_data *sdata)
+static void ieee80211_sched_scan_cancel(struct ieee80211_local *local)
 {
-	switch (sdata->vif.type) {
-	case NL80211_IFTYPE_STATION:
-		mac80211_sta_quiesce(sdata);
-		return true;
-	case NL80211_IFTYPE_ADHOC:
-		mac80211_ibss_quiesce(sdata);
-		return true;
-	case NL80211_IFTYPE_MESH_POINT:
-		mac80211_mesh_quiesce(sdata);
-		return true;
-	case NL80211_IFTYPE_AP_VLAN:
-	case NL80211_IFTYPE_MONITOR:
-		/* don't tell driver about this */
-		return false;
-	default:
-		return true;
-	}
+	if (ieee80211_request_sched_scan_stop(local))
+		return;
+	cfg80211_sched_scan_stopped_rtnl(local->hw.wiphy, 0);
 }
 
-int __mac80211_suspend(struct ieee80211_hw *hw, struct cfg80211_wowlan *wowlan)
+int __ieee80211_suspend(struct ieee80211_hw *hw, struct cfg80211_wowlan *wowlan)
 {
 	struct ieee80211_local *local = hw_to_local(hw);
 	struct ieee80211_sub_if_data *sdata;
 	struct sta_info *sta;
 
-	/* PM code has a watchdog to trigger a BUG when
-	 * suspend callback is not returning in several seconds.
-	 * Some WLAN hardware has longer timeouts for non-interruptible
-	 * configuration-related operations, leading to the watchdog
-	 * timeout while mac80211_scan_cancel is waiting on the mutex.
-	 *
-	 * The code below checks if interface mutex is already held
-	 * and rejects suspend if there is a possibility of locking.
-	 *
-	 * It's a bit racy, but handles most of cases.
-	 */
-	if (mutex_trylock(&local->mtx))
-		mutex_unlock(&local->mtx);
-	else {
-		wiphy_warn(hw->wiphy, "Suspend when operation "
-			"is in progress. Suspend aborted.\n");
-		return -EBUSY;
-	}
-
-/*
 	if (!local->open_count)
 		goto suspend;
-*/
-	mac80211_scan_cancel(local);
 
-	if (hw->flags & IEEE80211_HW_AMPDU_AGGREGATION) {
+	ieee80211_scan_cancel(local);
+
+	ieee80211_dfs_cac_cancel(local);
+
+	ieee80211_roc_purge(local, NULL);
+
+	ieee80211_del_virtual_monitor(local);
+
+	if (ieee80211_hw_check(hw, AMPDU_AGGREGATION) &&
+	    !(wowlan && wowlan->any)) {
 		mutex_lock(&local->sta_mtx);
 		list_for_each_entry(sta, &local->sta_list, list) {
 			set_sta_flag(sta, WLAN_STA_BLOCK_BA);
-			mac80211_sta_tear_down_BA_sessions(sta, true);
+			ieee80211_sta_tear_down_BA_sessions(
+					sta, AGG_STOP_LOCAL_REQUEST);
 		}
 		mutex_unlock(&local->sta_mtx);
 	}
 
-	mac80211_stop_queues_by_reason(hw,
-			IEEE80211_QUEUE_STOP_REASON_SUSPEND);
+	/* keep sched_scan only in case of 'any' trigger */
+	if (!(wowlan && wowlan->any))
+		ieee80211_sched_scan_cancel(local);
+
+	ieee80211_stop_queues_by_reason(hw,
+					IEEE80211_MAX_QUEUE_MAP,
+					IEEE80211_QUEUE_STOP_REASON_SUSPEND,
+					false);
 
 	/* flush out all packets */
 	synchronize_net();
-	list_for_each_entry(sdata, &local->interfaces, list)
-		drv_flush(local, sdata, false);
+
+	ieee80211_flush_queues(local, NULL, true);
 
 	local->quiescing = true;
 	/* make quiescing visible to timers everywhere */
@@ -89,77 +69,118 @@ int __mac80211_suspend(struct ieee80211_hw *hw, struct cfg80211_wowlan *wowlan)
 	 * Note that this particular timer doesn't need to be
 	 * restarted at resume.
 	 */
-	list_for_each_entry(sdata, &local->interfaces, list) {
-		cancel_work_sync(&sdata->dynamic_ps_enable_work);
-		del_timer_sync(&sdata->dynamic_ps_timer);
-	}
+	cancel_work_sync(&local->dynamic_ps_enable_work);
+	del_timer_sync(&local->dynamic_ps_timer);
 
-	/*wowlan is useless to xradio_wow_suspend.*/
-	local->wowlan = true;
+	local->wowlan = wowlan;
 	if (local->wowlan) {
-		int err = drv_suspend(local, wowlan);
+		int err;
+
+		/* Drivers don't expect to suspend while some operations like
+		 * authenticating or associating are in progress. It doesn't
+		 * make sense anyway to accept that, since the authentication
+		 * or association would never finish since the driver can't do
+		 * that on its own.
+		 * Thus, clean up in-progress auth/assoc first.
+		 */
+		list_for_each_entry(sdata, &local->interfaces, list) {
+			if (!ieee80211_sdata_running(sdata))
+				continue;
+			if (sdata->vif.type != NL80211_IFTYPE_STATION)
+				continue;
+			ieee80211_mgd_quiesce(sdata);
+			/* If suspended during TX in progress, and wowlan
+			 * is enabled (connection will be active) there
+			 * can be a race where the driver is put out
+			 * of power-save due to TX and during suspend
+			 * dynamic_ps_timer is cancelled and TX packet
+			 * is flushed, leaving the driver in ACTIVE even
+			 * after resuming until dynamic_ps_timer puts
+			 * driver back in DOZE.
+			 */
+			if (sdata->u.mgd.associated &&
+			    sdata->u.mgd.powersave &&
+			     !(local->hw.conf.flags & IEEE80211_CONF_PS)) {
+				local->hw.conf.flags |= IEEE80211_CONF_PS;
+				ieee80211_hw_config(local,
+						    IEEE80211_CONF_CHANGE_PS);
+			}
+		}
+
+		err = drv_suspend(local, wowlan);
 		if (err < 0) {
 			local->quiescing = false;
-			mac80211_wake_queues_by_reason(hw,
-					IEEE80211_QUEUE_STOP_REASON_SUSPEND);
+			local->wowlan = false;
+			if (ieee80211_hw_check(hw, AMPDU_AGGREGATION)) {
+				mutex_lock(&local->sta_mtx);
+				list_for_each_entry(sta,
+						    &local->sta_list, list) {
+					clear_sta_flag(sta, WLAN_STA_BLOCK_BA);
+				}
+				mutex_unlock(&local->sta_mtx);
+			}
+			ieee80211_wake_queues_by_reason(hw,
+					IEEE80211_MAX_QUEUE_MAP,
+					IEEE80211_QUEUE_STOP_REASON_SUSPEND,
+					false);
 			return err;
 		} else if (err > 0) {
 			WARN_ON(err != 1);
-			local->wowlan = false;
+			/* cfg80211 will call back into mac80211 to disconnect
+			 * all interfaces, allow that to proceed properly
+			 */
+			ieee80211_wake_queues_by_reason(hw,
+					IEEE80211_MAX_QUEUE_MAP,
+					IEEE80211_QUEUE_STOP_REASON_SUSPEND,
+					false);
+			return err;
 		} else {
-			list_for_each_entry(sdata, &local->interfaces, list) {
-				cancel_work_sync(&sdata->work);
-				ieee80211_quiesce(sdata);
-			}
 			goto suspend;
 		}
-		list_for_each_entry(sdata, &local->interfaces, list) {
-			cancel_work_sync(&sdata->work);
-		}
-		goto suspend;
 	}
 
-	/* disable keys */
-	list_for_each_entry(sdata, &local->interfaces, list)
-		mac80211_disable_keys(sdata);
-
-	/* tear down aggregation sessions and remove STAs */
-	mutex_lock(&local->sta_mtx);
-	list_for_each_entry(sta, &local->sta_list, list) {
-		if (sta->uploaded) {
-			sdata = sta->sdata;
-			if (sdata->vif.type == NL80211_IFTYPE_AP_VLAN)
-				sdata = container_of(sdata->bss,
-					     struct ieee80211_sub_if_data,
-					     u.ap);
-
-			drv_sta_remove(local, sdata, &sta->sta);
-		}
-
-		xrmac_mesh_plink_quiesce(sta);
-	}
-	mutex_unlock(&local->sta_mtx);
-
-	/* remove all interfaces */
+	/* remove all interfaces that were created in the driver */
 	list_for_each_entry(sdata, &local->interfaces, list) {
-		cancel_work_sync(&sdata->work);
-
-		if (!ieee80211_quiesce(sdata))
-			continue;
-
 		if (!ieee80211_sdata_running(sdata))
 			continue;
+		switch (sdata->vif.type) {
+		case NL80211_IFTYPE_AP_VLAN:
+		case NL80211_IFTYPE_MONITOR:
+			continue;
+		case NL80211_IFTYPE_STATION:
+			ieee80211_mgd_quiesce(sdata);
+			break;
+		case NL80211_IFTYPE_WDS:
+			/* tear down aggregation sessions and remove STAs */
+			mutex_lock(&local->sta_mtx);
+			sta = sdata->u.wds.sta;
+			if (sta && sta->uploaded) {
+				enum ieee80211_sta_state state;
 
-		/* disable beaconing */
-		mac80211_bss_info_change_notify(sdata,
-			BSS_CHANGED_BEACON_ENABLED);
+				state = sta->sta_state;
+				for (; state > IEEE80211_STA_NOTEXIST; state--)
+					WARN_ON(drv_sta_state(local, sta->sdata,
+							      sta, state,
+							      state - 1));
+			}
+			mutex_unlock(&local->sta_mtx);
+			break;
+		default:
+			break;
+		}
 
-		drv_remove_interface(local, &sdata->vif);
+		flush_delayed_work(&sdata->dec_tailroom_needed_wk);
+		drv_remove_interface(local, sdata);
 	}
 
+	/*
+	 * We disconnected on all interfaces before suspend, all channel
+	 * contexts should be released.
+	 */
+	WARN_ON(!list_empty(&local->chanctx_list));
+
 	/* stop hardware - this must stop RX */
-	if (local->open_count)
-		mac80211_stop_device(local);
+	ieee80211_stop_device(local);
 
  suspend:
 	local->suspended = true;
@@ -167,15 +188,20 @@ int __mac80211_suspend(struct ieee80211_hw *hw, struct cfg80211_wowlan *wowlan)
 	barrier();
 	local->quiescing = false;
 
-#ifdef ROAM_OFFLOAD
-	local->sched_scanning = true;
-#endif /*ROAM_OFFLOAD*/
-
 	return 0;
 }
 
 /*
  * __ieee80211_resume() is a static inline which just calls
- * mac80211_reconfig(), which is also needed for hardware
+ * ieee80211_reconfig(), which is also needed for hardware
  * hang/firmware failure/etc. recovery.
  */
+
+void mac80211_report_wowlan_wakeup(struct ieee80211_vif *vif,
+				    struct cfg80211_wowlan_wakeup *wakeup,
+				    gfp_t gfp)
+{
+	struct ieee80211_sub_if_data *sdata = vif_to_sdata(vif);
+
+	cfg80211_report_wowlan_wakeup(&sdata->wdev, wakeup, gfp);
+}

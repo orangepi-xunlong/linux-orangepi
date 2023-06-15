@@ -10,7 +10,8 @@
 
 #include "rawnand_ops.h"
 #include "../../nfd/nand_osal_for_linux.h"
-#include "../nand_boot.h"
+/*#include "../nand_boot.h"*/
+#include "../nand-partition3/sunxi_nand_boot.h"
 #include "rawnand_chip.h"
 #include "controller/ndfc_ops.h"
 #include "rawnand.h"
@@ -19,6 +20,9 @@
 #include "rawnand_debug.h"
 #include "rawnand_ids.h"
 #include "rawnand_readretry.h"
+
+
+extern unsigned int get_row_addr_2(unsigned int page_offset_for_next_blk, unsigned int block, unsigned int page);
 
 struct nand_phy_write_lsb_cache nand_phy_w_cache[NAND_OPEN_BLOCK_CNT] = {
     {0},
@@ -59,7 +63,19 @@ int generic_erase_block_start(struct _nand_physic_op_par *npo)
 	cmd_seq->nctri_cmd[0].cmd_valid = 1;
 	cmd_seq->nctri_cmd[0].cmd_send = 1;
 
-	row_addr = get_row_addr(nci->page_offset_for_next_blk, npo->block, npo->page);
+
+	if (nci->id[0] == 0xec &&
+		nci->id[1] == 0xde &&
+		nci->id[2] == 0x94 &&
+		nci->id[3] == 0xc3 &&
+		nci->id[4] == 0xa4 &&
+		nci->id[5] == 0xca) {
+
+		row_addr = get_row_addr_2(nci->page_offset_for_next_blk, npo->block, npo->page);
+	} else {
+
+		row_addr = get_row_addr(nci->page_offset_for_next_blk, npo->block, npo->page);
+	}
 	if (nci->npi->operation_opt & NAND_WITH_TWO_ROW_ADR) {
 		cmd_seq->nctri_cmd[0].cmd_acnt = 2;
 		fill_cmd_addr(col_addr, 0, row_addr, 2, cmd_seq->nctri_cmd[0].cmd_addr);
@@ -152,8 +168,20 @@ int generic_read_page_start(struct _nand_physic_op_par *npo)
 	nci->nctri->random_addr_num = nci->random_addr_num;
 	nci->nctri->random_cmd2_send_flag = nci->random_cmd2_send_flag;
 
-	//address
-	row_addr = get_row_addr(nci->page_offset_for_next_blk, npo->block, npo->page);
+    //address
+	if (nci->id[0] == 0xec &&
+		nci->id[1] == 0xde &&
+		nci->id[2] == 0x94 &&
+		nci->id[3] == 0xc3 &&
+		nci->id[4] == 0xa4 &&
+		nci->id[5] == 0xca) {
+
+		row_addr = get_row_addr_2(nci->page_offset_for_next_blk, npo->block, npo->page);
+	} else {
+
+		row_addr = get_row_addr(nci->page_offset_for_next_blk, npo->block, npo->page);
+	}
+
 	if (nci->npi->operation_opt & NAND_WITH_TWO_ROW_ADR) {
 		cmd_seq->nctri_cmd[0].cmd_acnt = 4;
 		fill_cmd_addr(col_addr, 2, row_addr, 2, cmd_seq->nctri_cmd[0].cmd_addr);
@@ -407,8 +435,18 @@ int generic_write_page_start(struct _nand_physic_op_par *npo, int plane_no)
 		//set_default_batch_write_cmd_seq(cmd_seq,CMD_WRITE_PAGE_CMD1,CMD_WRITE_PAGE_CMD2);
 	}
 
-	//address
-	row_addr = get_row_addr(nci->page_offset_for_next_blk, npo->block, npo->page);
+    //address
+	if (nci->id[0] == 0xec &&
+		nci->id[1] == 0xde &&
+		nci->id[2] == 0x94 &&
+		nci->id[3] == 0xc3 &&
+		nci->id[4] == 0xa4 &&
+		nci->id[5] == 0xca) {
+
+		row_addr = get_row_addr_2(nci->page_offset_for_next_blk, npo->block, npo->page);
+	} else {
+		row_addr = get_row_addr(nci->page_offset_for_next_blk, npo->block, npo->page);
+	}
 	if (nci->npi->operation_opt & NAND_WITH_TWO_ROW_ADR) {
 		cmd_seq->nctri_cmd[0].cmd_acnt = 4;
 		fill_cmd_addr(col_addr, 2, row_addr, 2, cmd_seq->nctri_cmd[0].cmd_addr);
@@ -532,7 +570,18 @@ int generic_read_two_plane_page_start(struct _nand_physic_op_par *npo, struct _n
 	cmd_seq->nctri_cmd[0].cmd_valid = 1;
 	cmd_seq->nctri_cmd[0].cmd = nci->opt_phy_op_par->instr.multi_plane_read_instr[0]; //multi_plane_read_instr_cmd[0];
 	cmd_seq->nctri_cmd[0].cmd_send = 1;
-	row_addr = get_row_addr(nci->page_offset_for_next_blk, npo->block, npo->page);
+
+	if (nci->id[0] == 0xec &&
+		nci->id[1] == 0xde &&
+		nci->id[2] == 0x94 &&
+		nci->id[3] == 0xc3 &&
+		nci->id[4] == 0xa4 &&
+		nci->id[5] == 0xca) {
+
+		row_addr = get_row_addr_2(nci->page_offset_for_next_blk, npo->block, npo->page);
+	} else {
+		row_addr = get_row_addr(nci->page_offset_for_next_blk, npo->block, npo->page);
+	}
 	if (nci->npi->operation_opt & NAND_WITH_TWO_ROW_ADR) {
 		cmd_seq->nctri_cmd[0].cmd_acnt = 2;
 		fill_cmd_addr(col_addr, 0, row_addr, 2, cmd_seq->nctri_cmd[0].cmd_addr);
@@ -544,7 +593,18 @@ int generic_read_two_plane_page_start(struct _nand_physic_op_par *npo, struct _n
 	cmd_seq->nctri_cmd[1].cmd_valid = 1;
 	cmd_seq->nctri_cmd[1].cmd = nci->opt_phy_op_par->instr.multi_plane_read_instr[2]; //multi_plane_read_instr_cmd[0];
 	cmd_seq->nctri_cmd[1].cmd_send = 1;
-	row_addr = get_row_addr(nci->page_offset_for_next_blk, npo2->block, npo2->page);
+
+	if (nci->id[0] == 0xec &&
+		nci->id[1] == 0xde &&
+		nci->id[2] == 0x94 &&
+		nci->id[3] == 0xc3 &&
+		nci->id[4] == 0xa4 &&
+		nci->id[5] == 0xca) {
+
+		row_addr = get_row_addr_2(nci->page_offset_for_next_blk, npo->block, npo->page);
+	} else {
+		row_addr = get_row_addr(nci->page_offset_for_next_blk, npo2->block, npo2->page);
+	}
 	if (nci->npi->operation_opt & NAND_WITH_TWO_ROW_ADR) {
 		cmd_seq->nctri_cmd[1].cmd_acnt = 2;
 		fill_cmd_addr(col_addr, 0, row_addr, 2, cmd_seq->nctri_cmd[1].cmd_addr);

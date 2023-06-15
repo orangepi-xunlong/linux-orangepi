@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * linux/percpu-defs.h - basic definitions for percpu areas
  *
@@ -33,12 +34,6 @@
 #define PER_CPU_ALIGNED_SECTION "..shared_aligned"
 #define PER_CPU_FIRST_SECTION ""
 
-#endif
-
-#ifdef CONFIG_PAGE_TABLE_ISOLATION
-#define USER_MAPPED_SECTION "..user_mapped"
-#else
-#define USER_MAPPED_SECTION ""
 #endif
 
 /*
@@ -97,8 +92,7 @@
 	extern __PCPU_DUMMY_ATTRS char __pcpu_unique_##name;		\
 	__PCPU_DUMMY_ATTRS char __pcpu_unique_##name;			\
 	extern __PCPU_ATTRS(sec) __typeof__(type) name;			\
-	__PCPU_ATTRS(sec) PER_CPU_DEF_ATTRIBUTES __weak			\
-	__typeof__(type) name
+	__PCPU_ATTRS(sec) __weak __typeof__(type) name
 #else
 /*
  * Normal declaration and definition macros.
@@ -107,8 +101,7 @@
 	extern __PCPU_ATTRS(sec) __typeof__(type) name
 
 #define DEFINE_PER_CPU_SECTION(type, name, sec)				\
-	__PCPU_ATTRS(sec) PER_CPU_DEF_ATTRIBUTES			\
-	__typeof__(type) name
+	__PCPU_ATTRS(sec) __typeof__(type) name
 #endif
 
 /*
@@ -120,12 +113,6 @@
 
 #define DEFINE_PER_CPU(type, name)					\
 	DEFINE_PER_CPU_SECTION(type, name, "")
-
-#define DECLARE_PER_CPU_USER_MAPPED(type, name)				\
-	DECLARE_PER_CPU_SECTION(type, name, USER_MAPPED_SECTION)
-
-#define DEFINE_PER_CPU_USER_MAPPED(type, name)				\
-	DEFINE_PER_CPU_SECTION(type, name, USER_MAPPED_SECTION)
 
 /*
  * Declaration/definition used for per-CPU variables that must come first in
@@ -156,14 +143,6 @@
 	DEFINE_PER_CPU_SECTION(type, name, PER_CPU_SHARED_ALIGNED_SECTION) \
 	____cacheline_aligned_in_smp
 
-#define DECLARE_PER_CPU_SHARED_ALIGNED_USER_MAPPED(type, name)		\
-	DECLARE_PER_CPU_SECTION(type, name, USER_MAPPED_SECTION PER_CPU_SHARED_ALIGNED_SECTION) \
-	____cacheline_aligned_in_smp
-
-#define DEFINE_PER_CPU_SHARED_ALIGNED_USER_MAPPED(type, name)		\
-	DEFINE_PER_CPU_SECTION(type, name, USER_MAPPED_SECTION PER_CPU_SHARED_ALIGNED_SECTION) \
-	____cacheline_aligned_in_smp
-
 #define DECLARE_PER_CPU_ALIGNED(type, name)				\
 	DECLARE_PER_CPU_SECTION(type, name, PER_CPU_ALIGNED_SECTION)	\
 	____cacheline_aligned
@@ -182,25 +161,29 @@
 #define DEFINE_PER_CPU_PAGE_ALIGNED(type, name)				\
 	DEFINE_PER_CPU_SECTION(type, name, "..page_aligned")		\
 	__aligned(PAGE_SIZE)
-/*
- * Declaration/definition used for per-CPU variables that must be page aligned and need to be mapped in user mode.
- */
-#define DECLARE_PER_CPU_PAGE_ALIGNED_USER_MAPPED(type, name)		\
-	DECLARE_PER_CPU_SECTION(type, name, USER_MAPPED_SECTION"..page_aligned") \
-	__aligned(PAGE_SIZE)
-
-#define DEFINE_PER_CPU_PAGE_ALIGNED_USER_MAPPED(type, name)		\
-	DEFINE_PER_CPU_SECTION(type, name, USER_MAPPED_SECTION"..page_aligned") \
-	__aligned(PAGE_SIZE)
 
 /*
  * Declaration/definition used for per-CPU variables that must be read mostly.
  */
-#define DECLARE_PER_CPU_READ_MOSTLY(type, name)				\
+#define DECLARE_PER_CPU_READ_MOSTLY(type, name)			\
 	DECLARE_PER_CPU_SECTION(type, name, "..read_mostly")
 
 #define DEFINE_PER_CPU_READ_MOSTLY(type, name)				\
 	DEFINE_PER_CPU_SECTION(type, name, "..read_mostly")
+
+/*
+ * Declaration/definition used for per-CPU variables that should be accessed
+ * as decrypted when memory encryption is enabled in the guest.
+ */
+#ifdef CONFIG_AMD_MEM_ENCRYPT
+#define DECLARE_PER_CPU_DECRYPTED(type, name)				\
+	DECLARE_PER_CPU_SECTION(type, name, "..decrypted")
+
+#define DEFINE_PER_CPU_DECRYPTED(type, name)				\
+	DEFINE_PER_CPU_SECTION(type, name, "..decrypted")
+#else
+#define DEFINE_PER_CPU_DECRYPTED(type, name)	DEFINE_PER_CPU(type, name)
+#endif
 
 /*
  * Intermodule exports for per-CPU variables.  sparse forgets about

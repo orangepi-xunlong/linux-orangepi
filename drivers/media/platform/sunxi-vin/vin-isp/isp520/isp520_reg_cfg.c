@@ -394,6 +394,21 @@ void bsp_isp_top_control(unsigned long id, int isp_num, int isp0_max_w)
 	isp_regs[id].isp_top_ctrl->bits.isp_mode = isp_num - 1;
 }
 
+void bsp_isp_set_fifo_mode(unsigned long id, unsigned int mode)
+{
+ }
+
+void bsp_isp_min_ddr_size(unsigned long id, unsigned int size)
+{
+}
+
+void bsp_isp_fifo_raw_write(unsigned long id, unsigned int depth)
+{
+}
+
+void bsp_isp_k_min_ddr_size(unsigned long id, unsigned int size)
+{
+}
 
 /*******isp load register which we should write to ddr first*********/
 

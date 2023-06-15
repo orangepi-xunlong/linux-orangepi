@@ -8,6 +8,8 @@
 #include <linux/version.h>
 #include <uapi/linux/bpf.h>
 #include <uapi/linux/seccomp.h>
+#include <uapi/linux/unistd.h>
+#include "syscall_nrs.h"
 #include "bpf_helpers.h"
 
 #define PROG(F) SEC("kprobe/"__stringify(F)) int bpf_func_##F
@@ -16,7 +18,11 @@ struct bpf_map_def SEC("maps") progs = {
 	.type = BPF_MAP_TYPE_PROG_ARRAY,
 	.key_size = sizeof(u32),
 	.value_size = sizeof(u32),
+#ifdef __mips__
+	.max_entries = 6000, /* MIPS n64 syscalls start at 5000 */
+#else
 	.max_entries = 1024,
+#endif
 };
 
 SEC("kprobe/__seccomp_filter")
@@ -36,7 +42,7 @@ int bpf_prog1(struct pt_regs *ctx)
 }
 
 /* we jump here when syscall number == __NR_write */
-PROG(__NR_write)(struct pt_regs *ctx)
+PROG(SYS__NR_write)(struct pt_regs *ctx)
 {
 	struct seccomp_data sd;
 
@@ -49,7 +55,7 @@ PROG(__NR_write)(struct pt_regs *ctx)
 	return 0;
 }
 
-PROG(__NR_read)(struct pt_regs *ctx)
+PROG(SYS__NR_read)(struct pt_regs *ctx)
 {
 	struct seccomp_data sd;
 
@@ -62,12 +68,25 @@ PROG(__NR_read)(struct pt_regs *ctx)
 	return 0;
 }
 
-PROG(__NR_mmap)(struct pt_regs *ctx)
+#ifdef __NR_mmap2
+PROG(SYS__NR_mmap2)(struct pt_regs *ctx)
 {
-	char fmt[] = "mmap\n";
+	char fmt[] = "mmap2\n";
+
 	bpf_trace_printk(fmt, sizeof(fmt));
 	return 0;
 }
+#endif
+
+#ifdef __NR_mmap
+PROG(SYS__NR_mmap)(struct pt_regs *ctx)
+{
+	char fmt[] = "mmap\n";
+
+	bpf_trace_printk(fmt, sizeof(fmt));
+	return 0;
+}
+#endif
 
 char _license[] SEC("license") = "GPL";
 u32 _version SEC("version") = LINUX_VERSION_CODE;

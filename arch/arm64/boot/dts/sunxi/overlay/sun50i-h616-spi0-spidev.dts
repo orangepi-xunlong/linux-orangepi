@@ -1,0 +1,30 @@
+/dts-v1/;
+/plugin/;
+
+/ {
+	fragment@0 {
+		target = <&spi0>;
+		__overlay__ {
+			status = "okay";
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			spi_board0@0 {
+				device_type = "spi_board0";
+				compatible = "rohm,dh2228fv";
+				status = "okay";
+				reg = <0>;
+				spi-max-frequency = <10000000>;
+			};
+		};
+	};
+
+	fragment@1 {
+		target = <&spi0>;
+		__overlay__ {
+			flash@0 {
+				status = "disabled";
+			};
+		};
+	};
+};

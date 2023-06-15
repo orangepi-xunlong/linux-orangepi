@@ -139,11 +139,8 @@ static int disp_dma_map_core(int fd, struct dmabuf_item *item)
 #if defined(__LINUX_PLAT__)
 	struct dma_buf *dmabuf;
 	struct dma_buf_attachment *attachment;
-	struct sg_table *sgt, *sgt_bak;
-	struct scatterlist *sgl, *sgl_bak;
-	s32 sg_count = 0;
+	struct sg_table *sgt;
 	int ret = -1;
-	int i;
 
 	if (fd < 0) {
 		DE_WRN("dma_buf_id(%d) is invalid\n", fd);
@@ -165,50 +162,14 @@ static int disp_dma_map_core(int fd, struct dmabuf_item *item)
 		goto err_buf_detach;
 	}
 
-	sgt_bak = kmalloc(sizeof(struct sg_table), GFP_KERNEL | __GFP_ZERO);
-	if (sgt_bak == NULL) {
-		DE_WRN("alloc sgt fail\n");
-		goto err_buf_unmap;
-	}
-	ret = sg_alloc_table(sgt_bak, sgt->nents, GFP_KERNEL);
-	if (ret != 0) {
-		DE_WRN("alloc sgt fail\n");
-		goto err_kfree;
-	}
-	sgl_bak = sgt_bak->sgl;
-	for_each_sg(sgt->sgl, sgl, sgt->nents, i)  {
-		sg_set_page(sgl_bak, sg_page(sgl), sgl->length, sgl->offset);
-		sgl_bak = sg_next(sgl_bak);
-	}
-#if defined(SUPPORT_EINK)
-	sg_count = dma_map_sg(g_disp_drv.dev, sgt_bak->sgl,
-			      sgt_bak->nents, DMA_FROM_DEVICE);
-#else
-	sg_count =
-	    dma_map_sg_attrs(g_disp_drv.dev, sgt_bak->sgl, sgt_bak->nents,
-			     DMA_FROM_DEVICE, DMA_ATTR_SKIP_CPU_SYNC);
-#endif
-
-	if (sg_count != 1) {
-		DE_WRN("dma_map_sg failed:%d\n", sg_count);
-		ret = -1;
-		goto err_sgt_free;
-	}
-
-	item->fd = fd;
-	item->buf = dmabuf;
-	item->sgt = sgt_bak;
+	item->dmabuf = dmabuf;
+	item->sgt = sgt;
 	item->attachment = attachment;
-	item->dma_addr = sg_dma_address(sgt_bak->sgl);
+	item->dma_addr = sg_dma_address(sgt->sgl);
 	ret = 0;
 
 	goto exit;
 
-err_sgt_free:
-	sg_free_table(sgt_bak);
-err_kfree:
-	kfree(sgt_bak);
-err_buf_unmap:
 	/* unmap attachment sgt, not sgt_bak, cause it's not alloc yet! */
 	dma_buf_unmap_attachment(attachment, sgt, DMA_FROM_DEVICE);
 err_buf_detach:
@@ -224,19 +185,9 @@ exit:
 static void disp_dma_unmap_core(struct dmabuf_item *item)
 {
 #if defined(__LINUX_PLAT__)
-#if defined(SUPPORT_EINK)
-	dma_unmap_sg(g_disp_drv.dev, item->sgt->sgl,
-		item->sgt->nents, DMA_FROM_DEVICE);
-#else
-	dma_unmap_sg_attrs(g_disp_drv.dev, item->sgt->sgl,
-			      item->sgt->nents, DMA_FROM_DEVICE,
-			      DMA_ATTR_SKIP_CPU_SYNC);
-#endif
 	dma_buf_unmap_attachment(item->attachment, item->sgt, DMA_FROM_DEVICE);
-	sg_free_table(item->sgt);
-	kfree(item->sgt);
-	dma_buf_detach(item->buf, item->attachment);
-	dma_buf_put(item->buf);
+	dma_buf_detach(item->dmabuf, item->attachment);
+	dma_buf_put(item->dmabuf);
 #endif
 }
 
@@ -396,10 +347,15 @@ s32 disp_set_fb_info(struct fb_address_transfer *fb, bool left_eye)
 				fb_addr[1] = fb->dma_addr + y_size + u_size;
 				fb_addr[2] = fb->dma_addr + y_size; /* u */
 			}
-
 			ret = 0;
 			break;
 		}
+	}
+	if (fb->format >= DISP_FORMAT_1bpp_palette_LE && fb->format <= DISP_FORMAT_8bpp_palette_LE) {
+		fb_addr[0] = fb->dma_addr;
+		fb_addr[1] = fb->dma_addr;
+		fb_addr[2] = fb->dma_addr;
+		ret = 0;
 	}
 	if (ret != 0) {
 		DE_WRN("%s, format 0x%x is invalid\n", __func__,
@@ -488,7 +444,7 @@ s32 disp_init_irq_util(u32 irq_no)
 	return 0;
 }
 
-static s32 disp_irq_handler(int irq, void *parg)
+static irqreturn_t disp_irq_handler(int irq, void *parg)
 {
 	unsigned long flags;
 	const u32 total_num = sizeof(s_irq_util.irq_info)

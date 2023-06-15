@@ -23,7 +23,6 @@
 #include <linux/fs.h>
 #include <linux/dma-buf.h>
 #include <linux/dma-mapping.h>
-#include <linux/ion_sunxi.h>
 #include <linux/err.h>
 #include <linux/delay.h>
 #include <linux/errno.h>
@@ -47,19 +46,18 @@
 #include "eink_driver.h"
 #include <video/sunxi_display2.h>
 
-#define EINK_PRINT_LEVEL 0x1
-/* #define TIME_COUNTER_DEBUG */
-//#define DE_WB_DEBUG
-//#define SAVE_DE_WB_BUF
-//#define WAVEDATA_DEBUG
+
+/********************** FOR DEBUG *************************************/
+/**/
+/* #define DE_WB_DEBUG */	/* use a default pic to debug DE WB */
+/* #define WAVEDATA_DEBUG */    /* use a default wavfile to debug */
 /* #define INDEX_DEBUG */
-/* #define DECODE_DEBUG */
 /* #define ION_DEBUG_DUMP */
-//#define TIMING_BUF_DEBUG
-#define PIPELINE_DEBUG
-#define BUFFER_LIST_DEBUG
-//#define VIRTUAL_REGISTER /* for test on local */
-//#define REGISTER_PRINT
+/* #define PIPELINE_DEBUG */
+/* #define VIRTUAL_REGISTER */   /* for test on local */
+/*********************************************************************/
+
+#define EINK_PRINT_LEVEL 0x0
 
 #ifdef DE_WB_DEBUG
 #define DEFAULT_GRAY_PIC_PATH "/system/eink_image.bin"
@@ -69,26 +67,18 @@
 #define DEFAULT_INIT_WAV_PATH "/system/init_wf.bin"
 #define DEFAULT_GC16_WAV_PATH "/system/gc16_wf.bin"
 #endif
-#ifdef SAVE_DE_WB_BUF
-#define SAVE_BUF_PATH "./eink_wb_img.bin"
-#endif
-
-#ifdef TIMING_BUF_DEBUG
-#define DEFAULT_TIMING_BUF_PATH "/system/timing_buf.bin"
-#endif
 
 typedef struct file ES_FILE;
-extern u32 eink_dbg_info;
 
 #define EINK_INFO_MSG(fmt, args...) \
 	do {\
-		if (eink_dbg_info & 0x1)\
+		if (eink_get_print_level() >= 1)\
 		pr_info("[EINK-%-24s] line:%04d: " fmt, __func__, __LINE__, ##args);\
 	} while (0)
 
-#define EINK_DEFAULT_MSG(fmt, args...) \
+#define EINK_DEBUG_MSG(fmt, args...) \
 	do {\
-		if (eink_dbg_info & 0x2)\
+		if (eink_get_print_level() == 2)\
 		pr_info("[EINK-%-24s] line:%04d: " fmt, __func__, __LINE__, ##args);\
 	} while (0)
 
@@ -193,25 +183,31 @@ typedef struct {
 
 extern bool is_upd_win_zero(struct upd_win update_area);
 extern int eink_sys_script_get_item(char *main_name, char *sub_name, int value[], int type);
-extern s32 get_delt_ms_timer(struct timeval start_timer, struct timeval end_timer);
-extern void save_upd_rmi_buffer(u32 order, u8 *buf, u32 len);
+extern s32 get_delt_ms_timer(struct timespec start_timer, struct timespec end_timer);
+extern void save_upd_rmi_buffer(u32 order, u8 *buf, u32 len, bool is_before);
+extern void save_index_buffer(u32 order, u16 *buf, u32 len, u32 bit_num, u32 width, u32 height, bool is_before);
 extern void save_one_wavedata_buffer(u8 *buf, bool is_edma);
 extern void save_rearray_waveform_to_mem(u8 *buf, u32 len);
 extern void *eink_malloc(u32 num_bytes, void *phys_addr);
 extern void eink_free(void *virt_addr, void *phys_addr, u32 num_bytes);
 extern void eink_cache_sync(void *start_addr, int size);
+extern int init_eink_ion_mgr(struct eink_ion_mgr *ion_mgr);
+extern void deinit_eink_ion_mgr(struct eink_ion_mgr *ion_mgr);
 extern s32 eink_panel_pin_cfg(u32 en);
-extern int eink_sys_gpio_request(struct eink_gpio_cfg *gpio_list, u32 group_count_max);
-extern int eink_sys_gpio_release(int p_handler);
-extern int eink_sys_gpio_set_value(u32 p_handler, u32 value_to_gpio, const char *gpio_name);
+extern int eink_sys_gpio_request(struct eink_gpio_info *gpio_list);
+extern void eink_sys_gpio_release(struct eink_gpio_info *gpio_info);
+extern int eink_sys_gpio_set_value(struct eink_gpio_info *gpio_info, u32 value_to_gpio);
+extern int eink_sys_gpio_get_value(struct eink_gpio_info *gpio_info);
 
 
 extern struct dmabuf_item *eink_dma_map(int fd);
 extern void eink_dma_unmap(struct dmabuf_item *item);
 
-extern void eink_put_gray_to_mem(u32 order, char *buf, u32 width, u32 height);
+extern void eink_save_img(int fd, int flag, u32 width, u32 height, int order, char *kaddr, bool is_before);
+extern void eink_kmap_img(struct img_node *curnode);
+extern void eink_kunmap_img(struct img_node *curnode);
 extern void save_waveform_to_mem(u32 order, u8 *buf, u32 frames, u32 bit_num);
-extern int eink_get_gray_from_mem(__u8 *buf, char *file_name, __u32 length, loff_t pos);
+extern int eink_get_default_file_from_mem(__u8 *buf, char *file_name, __u32 length, loff_t pos);
 extern int save_as_bin_file(__u8 *buf, char *file_name, __u32 length, loff_t pos);
 extern void print_free_pipe_list(struct pipe_manager *mgr);
 extern void print_used_pipe_list(struct pipe_manager *mgr);
@@ -219,4 +215,7 @@ extern void print_used_img_list(struct buf_manager *mgr);
 extern void print_coll_img_list(struct buf_manager *mgr);
 extern void print_free_img_list(struct buf_manager *mgr);
 extern void eink_print_register(unsigned long start_addr, unsigned long end_addr);
+extern int atoi_float(char *buf);
+extern s32 eink_set_print_level(u32 level);
+extern s32 eink_get_print_level(void);
 #endif

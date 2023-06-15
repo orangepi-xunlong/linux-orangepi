@@ -64,6 +64,8 @@ extern unsigned int g_size_bypass[DE_NUM];
 
 /* peak function declaration */
 int de_peak_set_reg_base(unsigned int sel, unsigned int chno, void *base);
+unsigned long de_peak_get_reg_base(unsigned int sel);
+unsigned long de_lti_get_reg_base(unsigned int sel, unsigned int chno, int updata);
 int de_peak_update_regs(unsigned int sel, unsigned int chno);
 int de_peak_init(unsigned int sel, unsigned int chno, uintptr_t reg_base);
 int de_peak_exit(unsigned int sel, unsigned int chno);
@@ -76,6 +78,7 @@ int de_peak_set_para(unsigned int sel, unsigned int chno, unsigned int gain,
 		     unsigned int hp_ratio, unsigned int bp0_ratio);
 int de_peak_info2para(unsigned int sharp, struct de_rect window,
 		      struct __peak_config_data *para);
+void de_peak_set_pq_dirty(int sel);
 
 /* /LTI function declaration */
 int de_lti_set_reg_base(unsigned int sel, unsigned int chno, void *base);

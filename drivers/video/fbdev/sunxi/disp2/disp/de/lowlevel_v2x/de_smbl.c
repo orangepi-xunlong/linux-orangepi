@@ -299,7 +299,7 @@ int de_smbl_init(unsigned int sel, uintptr_t reg_base)
 	int ret;
 
 	base = reg_base + (sel + 1) * 0x00100000 + SMBL_OFST;
-#if defined(CONFIG_ARCH_SUN50IW10)
+#if defined(CONFIG_INDEPENDENT_DE)
 	if (sel)
 		base = base - 0x00100000;
 #endif

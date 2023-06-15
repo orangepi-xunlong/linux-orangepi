@@ -18,10 +18,12 @@
 #include <linux/utsname.h>
 #include <linux/module.h>
 #include <linux/moduleparam.h>
-#include <asm/uaccess.h>
 #include <linux/printk.h>
 #include <linux/platform_device.h>
 #include <linux/slab.h>
+#include <linux/sched/clock.h>
+#include <linux/uaccess.h>
+#include <linux/seq_file.h>
 
 #define BOOT_STR_SIZE 256
 #define BUF_COUNT 12
@@ -284,15 +286,6 @@ static int __init init_boot_event(void)
 {
 	struct proc_dir_entry *pe;
 
-	pe = proc_create("bootevent", 0664, NULL, &sunxi_bootevent_fops);
-	if (!pe)
-		return -ENOMEM;
-
-	return 0;
-}
-
-static int __init init_bootevent_buf(void)
-{
 	memset(bootevent, 0, sizeof(struct log_t *) * BUF_COUNT);
 	bootevent[0] = kzalloc(sizeof(struct log_t) * LOGS_PER_BUF,
 			      GFP_ATOMIC | __GFP_NORETRY | __GFP_NOWARN);
@@ -300,12 +293,17 @@ static int __init init_bootevent_buf(void)
 		goto fail;
 	sunxi_bootevent_switch(1);
 
+	pe = proc_create("bootevent", 0664, NULL, &sunxi_bootevent_fops);
+	if (!pe)
+		return -ENOMEM;
+
 fail:
 	return 0;
 }
 
-early_initcall(init_bootevent_buf);
-device_initcall(init_boot_event);
+early_initcall(init_boot_event);
 
+MODULE_AUTHOR("Allwinnertech.com");
 MODULE_DESCRIPTION("bootevent driver for debug bootting time");
+MODULE_VERSION("1.3.0");
 MODULE_LICENSE("GPL");

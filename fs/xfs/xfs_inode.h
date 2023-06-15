@@ -1,19 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Copyright (c) 2000-2003,2005 Silicon Graphics, Inc.
  * All Rights Reserved.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it would be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write the Free Software Foundation,
- * Inc.,  51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  */
 #ifndef	__XFS_INODE_H__
 #define	__XFS_INODE_H__
@@ -27,7 +15,6 @@
 struct xfs_dinode;
 struct xfs_inode;
 struct xfs_buf;
-struct xfs_defer_ops;
 struct xfs_bmbt_irec;
 struct xfs_inode_log_item;
 struct xfs_mount;
@@ -46,9 +33,9 @@ typedef struct xfs_inode {
 	struct xfs_imap		i_imap;		/* location for xfs_imap() */
 
 	/* Extent information. */
-	xfs_ifork_t		*i_afp;		/* attribute fork pointer */
-	xfs_ifork_t		*i_cowfp;	/* copy on write extents */
-	xfs_ifork_t		i_df;		/* data fork */
+	struct xfs_ifork	*i_afp;		/* attribute fork pointer */
+	struct xfs_ifork	*i_cowfp;	/* copy on write extents */
+	struct xfs_ifork	i_df;		/* data fork */
 
 	/* operations vectors */
 	const struct xfs_dir_ops *d_ops;		/* directory ops vector */
@@ -56,13 +43,20 @@ typedef struct xfs_inode {
 	/* Transaction and locking information. */
 	struct xfs_inode_log_item *i_itemp;	/* logging information */
 	mrlock_t		i_lock;		/* inode lock */
-	mrlock_t		i_iolock;	/* inode IO lock */
 	mrlock_t		i_mmaplock;	/* inode mmap IO lock */
 	atomic_t		i_pincount;	/* inode pin count */
+
+	/*
+	 * Bitsets of inode metadata that have been checked and/or are sick.
+	 * Callers must hold i_flags_lock before accessing this field.
+	 */
+	uint16_t		i_checked;
+	uint16_t		i_sick;
+
 	spinlock_t		i_flags_lock;	/* inode i_flags lock */
 	/* Miscellaneous state. */
 	unsigned long		i_flags;	/* see defined flags below */
-	unsigned int		i_delayed_blks;	/* count of delay alloc blks */
+	uint64_t		i_delayed_blks;	/* count of delay alloc blks */
 
 	struct xfs_icdinode	i_d;		/* most of ondisk inode */
 
@@ -71,6 +65,11 @@ typedef struct xfs_inode {
 
 	/* VFS inode */
 	struct inode		i_vnode;	/* embedded VFS inode */
+
+	/* pending io completions */
+	spinlock_t		i_ioend_lock;
+	struct work_struct	i_ioend_work;
+	struct list_head	i_ioend_list;
 } xfs_inode_t;
 
 /* Convert from vfs inode to xfs inode */
@@ -193,8 +192,8 @@ static inline void
 xfs_set_projid(struct xfs_inode *ip,
 		prid_t projid)
 {
-	ip->i_d.di_projid_hi = (__uint16_t) (projid >> 16);
-	ip->i_d.di_projid_lo = (__uint16_t) (projid & 0xffff);
+	ip->i_d.di_projid_hi = (uint16_t) (projid >> 16);
+	ip->i_d.di_projid_lo = (uint16_t) (projid & 0xffff);
 }
 
 static inline prid_t
@@ -209,6 +208,15 @@ xfs_get_initial_prid(struct xfs_inode *dp)
 static inline bool xfs_is_reflink_inode(struct xfs_inode *ip)
 {
 	return ip->i_d.di_flags2 & XFS_DIFLAG2_REFLINK;
+}
+
+/*
+ * Check if an inode has any data in the COW fork.  This might be often false
+ * even for inodes with the reflink flag when there is no pending COW operation.
+ */
+static inline bool xfs_inode_has_cow_data(struct xfs_inode *ip)
+{
+	return ip->i_cowfp && ip->i_cowfp->if_bytes;
 }
 
 /*
@@ -233,6 +241,7 @@ static inline bool xfs_is_reflink_inode(struct xfs_inode *ip)
  * log recovery to replay a bmap operation on the inode.
  */
 #define XFS_IRECOVERY		(1 << 11)
+#define XFS_ICOWBLOCKS		(1 << 12)/* has the cowblocks tag set */
 
 /*
  * Per-lifetime flags need to be reset when re-using a reclaimable inode during
@@ -334,7 +343,7 @@ static inline void xfs_ifunlock(struct xfs_inode *ip)
  * IOLOCK values
  *
  * 0-3		subclass value
- * 4-7		PARENT subclass values
+ * 4-7		unused
  *
  * MMAPLOCK values
  *
@@ -349,10 +358,8 @@ static inline void xfs_ifunlock(struct xfs_inode *ip)
  * 
  */
 #define XFS_IOLOCK_SHIFT		16
-#define XFS_IOLOCK_PARENT_VAL		4
-#define XFS_IOLOCK_MAX_SUBCLASS		(XFS_IOLOCK_PARENT_VAL - 1)
+#define XFS_IOLOCK_MAX_SUBCLASS		3
 #define XFS_IOLOCK_DEP_MASK		0x000f0000
-#define	XFS_IOLOCK_PARENT		(XFS_IOLOCK_PARENT_VAL << XFS_IOLOCK_SHIFT)
 
 #define XFS_MMAPLOCK_SHIFT		20
 #define XFS_MMAPLOCK_NUMORDER		0
@@ -381,6 +388,20 @@ static inline void xfs_ifunlock(struct xfs_inode *ip)
 					>> XFS_ILOCK_SHIFT)
 
 /*
+ * Layouts are broken in the BREAK_WRITE case to ensure that
+ * layout-holders do not collide with local writes. Additionally,
+ * layouts are broken in the BREAK_UNMAP case to make sure the
+ * layout-holder has a consistent view of the file's extent map. While
+ * BREAK_WRITE breaks can be satisfied by recalling FL_LAYOUT leases,
+ * BREAK_UNMAP breaks additionally require waiting for busy dax-pages to
+ * go idle.
+ */
+enum layout_break_reason {
+        BREAK_WRITE,
+        BREAK_UNMAP,
+};
+
+/*
  * For multiple groups support: if S_ISGID bit is set in the parent
  * directory, group of new file is set to that of the parent, and
  * new subdirectory gets S_ISGID bit from parent.
@@ -394,9 +415,9 @@ void		xfs_inactive(struct xfs_inode *ip);
 int		xfs_lookup(struct xfs_inode *dp, struct xfs_name *name,
 			   struct xfs_inode **ipp, struct xfs_name *ci_name);
 int		xfs_create(struct xfs_inode *dp, struct xfs_name *name,
-			   umode_t mode, xfs_dev_t rdev, struct xfs_inode **ipp);
-int		xfs_create_tmpfile(struct xfs_inode *dp, struct dentry *dentry,
-			   umode_t mode, struct xfs_inode **ipp);
+			   umode_t mode, dev_t rdev, struct xfs_inode **ipp);
+int		xfs_create_tmpfile(struct xfs_inode *dp, umode_t mode,
+			   struct xfs_inode **ipp);
 int		xfs_remove(struct xfs_inode *dp, struct xfs_name *name,
 			   struct xfs_inode *ip);
 int		xfs_link(struct xfs_inode *tdp, struct xfs_inode *sip,
@@ -415,24 +436,34 @@ uint		xfs_ilock_data_map_shared(struct xfs_inode *);
 uint		xfs_ilock_attr_map_shared(struct xfs_inode *);
 
 uint		xfs_ip2xflags(struct xfs_inode *);
-int		xfs_ifree(struct xfs_trans *, xfs_inode_t *,
-			   struct xfs_defer_ops *);
-int		xfs_itruncate_extents(struct xfs_trans **, struct xfs_inode *,
-				      int, xfs_fsize_t);
+int		xfs_ifree(struct xfs_trans *, struct xfs_inode *);
+int		xfs_itruncate_extents_flags(struct xfs_trans **,
+				struct xfs_inode *, int, xfs_fsize_t, int);
 void		xfs_iext_realloc(xfs_inode_t *, int, int);
 
 void		xfs_iunpin_wait(xfs_inode_t *);
 #define xfs_ipincount(ip)	((unsigned int) atomic_read(&ip->i_pincount))
 
 int		xfs_iflush(struct xfs_inode *, struct xfs_buf **);
-void		xfs_lock_two_inodes(xfs_inode_t *, xfs_inode_t *, uint);
+void		xfs_lock_two_inodes(struct xfs_inode *ip0, uint ip0_mode,
+				struct xfs_inode *ip1, uint ip1_mode);
 
 xfs_extlen_t	xfs_get_extsz_hint(struct xfs_inode *ip);
 xfs_extlen_t	xfs_get_cowextsz_hint(struct xfs_inode *ip);
 
 int		xfs_dir_ialloc(struct xfs_trans **, struct xfs_inode *, umode_t,
-			       xfs_nlink_t, xfs_dev_t, prid_t, int,
-			       struct xfs_inode **, int *);
+			       xfs_nlink_t, dev_t, prid_t,
+			       struct xfs_inode **);
+
+static inline int
+xfs_itruncate_extents(
+	struct xfs_trans	**tpp,
+	struct xfs_inode	*ip,
+	int			whichfork,
+	xfs_fsize_t		new_size)
+{
+	return xfs_itruncate_extents_flags(tpp, ip, whichfork, new_size, 0);
+}
 
 /* from xfs_file.c */
 enum xfs_prealloc_flags {
@@ -444,13 +475,8 @@ enum xfs_prealloc_flags {
 
 int	xfs_update_prealloc_flags(struct xfs_inode *ip,
 				  enum xfs_prealloc_flags flags);
-int	xfs_zero_eof(struct xfs_inode *ip, xfs_off_t offset,
-		     xfs_fsize_t isize, bool *did_zeroing);
-int	xfs_zero_range(struct xfs_inode *ip, xfs_off_t pos, xfs_off_t count,
-		bool *did_zero);
-loff_t	__xfs_seek_hole_data(struct inode *inode, loff_t start,
-			     loff_t eof, int whence);
-
+int	xfs_break_layouts(struct inode *inode, uint *iolock,
+		enum layout_break_reason reason);
 
 /* from xfs_iops.c */
 extern void xfs_setup_inode(struct xfs_inode *ip);
@@ -478,22 +504,18 @@ static inline void xfs_setup_existing_inode(struct xfs_inode *ip)
 	xfs_finish_inode_setup(ip);
 }
 
-#define IHOLD(ip) \
-do { \
-	ASSERT(atomic_read(&VFS_I(ip)->i_count) > 0) ; \
-	ihold(VFS_I(ip)); \
-	trace_xfs_ihold(ip, _THIS_IP_); \
-} while (0)
-
-#define IRELE(ip) \
-do { \
-	trace_xfs_irele(ip, _THIS_IP_); \
-	iput(VFS_I(ip)); \
-} while (0)
+void xfs_irele(struct xfs_inode *ip);
 
 extern struct kmem_zone	*xfs_inode_zone;
 
 /* The default CoW extent size hint. */
 #define XFS_DEFAULT_COWEXTSZ_HINT 32
+
+bool xfs_inode_verify_forks(struct xfs_inode *ip);
+
+int xfs_iunlink_init(struct xfs_perag *pag);
+void xfs_iunlink_destroy(struct xfs_perag *pag);
+
+void xfs_end_io(struct work_struct *work);
 
 #endif	/* __XFS_INODE_H__ */

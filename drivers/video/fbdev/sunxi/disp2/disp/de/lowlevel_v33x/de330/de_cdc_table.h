@@ -32,6 +32,7 @@ enum {
 	DE_TFC_HLG2WCG     = 0x00d,
 	DE_TFC_HLG2HDR10   = 0x00e,
 	DE_TFC_HLG2HLG     = 0x00f,
+	DE_TFC_HDR10P2SDR  = 0x010,
 	DE_TFC_INIT        = 0x0ff, /* for initial */
 };
 

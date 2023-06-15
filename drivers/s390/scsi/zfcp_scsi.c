@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * zfcp device driver
  *
@@ -26,9 +27,13 @@ MODULE_PARM_DESC(queue_depth, "Default queue depth for new SCSI devices");
 
 static bool enable_dif;
 module_param_named(dif, enable_dif, bool, 0400);
-MODULE_PARM_DESC(dif, "Enable DIF/DIX data integrity support");
+MODULE_PARM_DESC(dif, "Enable DIF data integrity support (default off)");
 
-static bool allow_lun_scan = 1;
+bool zfcp_experimental_dix;
+module_param_named(dix, zfcp_experimental_dix, bool, 0400);
+MODULE_PARM_DESC(dix, "Enable experimental DIX (data integrity extension) support which implies DIF support (default off)");
+
+static bool allow_lun_scan = true;
 module_param(allow_lun_scan, bool, 0600);
 MODULE_PARM_DESC(allow_lun_scan, "For NPIV, scan and attach all storage LUNs");
 
@@ -123,6 +128,15 @@ static int zfcp_scsi_slave_alloc(struct scsi_device *sdev)
 		return -ENXIO;
 
 	zfcp_sdev->erp_action.port = port;
+
+	mutex_lock(&zfcp_sysfs_port_units_mutex);
+	if (zfcp_sysfs_port_is_removing(port)) {
+		/* port is already gone */
+		mutex_unlock(&zfcp_sysfs_port_units_mutex);
+		put_device(&port->dev); /* undo zfcp_get_port_by_wwpn() */
+		return -ENXIO;
+	}
+	mutex_unlock(&zfcp_sysfs_port_units_mutex);
 
 	unit = zfcp_unit_find(port, zfcp_scsi_dev_lun(sdev));
 	if (unit)
@@ -225,7 +239,9 @@ static void zfcp_scsi_forget_cmnd(struct zfcp_fsf_req *old_req, void *data)
 		(struct zfcp_scsi_req_filter *)data;
 
 	/* already aborted - prevent side-effects - or not a SCSI command */
-	if (old_req->data == NULL || old_req->fsf_command != FSF_QTCB_FCP_CMND)
+	if (old_req->data == NULL ||
+	    zfcp_fsf_req_is_status_read_buffer(old_req) ||
+	    old_req->qtcb->header.fsf_command != FSF_QTCB_FCP_CMND)
 		return;
 
 	/* (tmf_scope == FCP_TMF_TGT_RESET || tmf_scope == FCP_TMF_LUN_RESET) */
@@ -264,45 +280,52 @@ static void zfcp_scsi_forget_cmnds(struct zfcp_scsi_dev *zsdev, u8 tm_flags)
 	write_unlock_irqrestore(&adapter->abort_lock, flags);
 }
 
-static int zfcp_task_mgmt_function(struct scsi_cmnd *scpnt, u8 tm_flags)
+/**
+ * zfcp_scsi_task_mgmt_function() - Send a task management function (sync).
+ * @sdev: Pointer to SCSI device to send the task management command to.
+ * @tm_flags: Task management flags,
+ *	      here we only handle %FCP_TMF_TGT_RESET or %FCP_TMF_LUN_RESET.
+ */
+static int zfcp_scsi_task_mgmt_function(struct scsi_device *sdev, u8 tm_flags)
 {
-	struct zfcp_scsi_dev *zfcp_sdev = sdev_to_zfcp(scpnt->device);
+	struct zfcp_scsi_dev *zfcp_sdev = sdev_to_zfcp(sdev);
 	struct zfcp_adapter *adapter = zfcp_sdev->port->adapter;
+	struct fc_rport *rport = starget_to_rport(scsi_target(sdev));
 	struct zfcp_fsf_req *fsf_req = NULL;
 	int retval = SUCCESS, ret;
 	int retry = 3;
 
 	while (retry--) {
-		fsf_req = zfcp_fsf_fcp_task_mgmt(scpnt, tm_flags);
+		fsf_req = zfcp_fsf_fcp_task_mgmt(sdev, tm_flags);
 		if (fsf_req)
 			break;
 
-		zfcp_dbf_scsi_devreset("wait", scpnt, tm_flags, NULL);
+		zfcp_dbf_scsi_devreset("wait", sdev, tm_flags, NULL);
 		zfcp_erp_wait(adapter);
-		ret = fc_block_scsi_eh(scpnt);
+		ret = fc_block_rport(rport);
 		if (ret) {
-			zfcp_dbf_scsi_devreset("fiof", scpnt, tm_flags, NULL);
+			zfcp_dbf_scsi_devreset("fiof", sdev, tm_flags, NULL);
 			return ret;
 		}
 
 		if (!(atomic_read(&adapter->status) &
 		      ZFCP_STATUS_COMMON_RUNNING)) {
-			zfcp_dbf_scsi_devreset("nres", scpnt, tm_flags, NULL);
+			zfcp_dbf_scsi_devreset("nres", sdev, tm_flags, NULL);
 			return SUCCESS;
 		}
 	}
 	if (!fsf_req) {
-		zfcp_dbf_scsi_devreset("reqf", scpnt, tm_flags, NULL);
+		zfcp_dbf_scsi_devreset("reqf", sdev, tm_flags, NULL);
 		return FAILED;
 	}
 
 	wait_for_completion(&fsf_req->completion);
 
 	if (fsf_req->status & ZFCP_STATUS_FSFREQ_TMFUNCFAILED) {
-		zfcp_dbf_scsi_devreset("fail", scpnt, tm_flags, fsf_req);
+		zfcp_dbf_scsi_devreset("fail", sdev, tm_flags, fsf_req);
 		retval = FAILED;
 	} else {
-		zfcp_dbf_scsi_devreset("okay", scpnt, tm_flags, fsf_req);
+		zfcp_dbf_scsi_devreset("okay", sdev, tm_flags, fsf_req);
 		zfcp_scsi_forget_cmnds(zfcp_sdev, tm_flags);
 	}
 
@@ -312,12 +335,40 @@ static int zfcp_task_mgmt_function(struct scsi_cmnd *scpnt, u8 tm_flags)
 
 static int zfcp_scsi_eh_device_reset_handler(struct scsi_cmnd *scpnt)
 {
-	return zfcp_task_mgmt_function(scpnt, FCP_TMF_LUN_RESET);
+	struct scsi_device *sdev = scpnt->device;
+
+	return zfcp_scsi_task_mgmt_function(sdev, FCP_TMF_LUN_RESET);
 }
 
 static int zfcp_scsi_eh_target_reset_handler(struct scsi_cmnd *scpnt)
 {
-	return zfcp_task_mgmt_function(scpnt, FCP_TMF_TGT_RESET);
+	struct scsi_target *starget = scsi_target(scpnt->device);
+	struct fc_rport *rport = starget_to_rport(starget);
+	struct Scsi_Host *shost = rport_to_shost(rport);
+	struct scsi_device *sdev = NULL, *tmp_sdev;
+	struct zfcp_adapter *adapter =
+		(struct zfcp_adapter *)shost->hostdata[0];
+	int ret;
+
+	shost_for_each_device(tmp_sdev, shost) {
+		if (tmp_sdev->id == starget->id) {
+			sdev = tmp_sdev;
+			break;
+		}
+	}
+	if (!sdev) {
+		ret = FAILED;
+		zfcp_dbf_scsi_eh("tr_nosd", adapter, starget->id, ret);
+		return ret;
+	}
+
+	ret = zfcp_scsi_task_mgmt_function(sdev, FCP_TMF_TGT_RESET);
+
+	/* release reference from above shost_for_each_device */
+	if (sdev)
+		scsi_device_put(tmp_sdev);
+
+	return ret;
 }
 
 static int zfcp_scsi_eh_host_reset_handler(struct scsi_cmnd *scpnt)
@@ -340,12 +391,38 @@ static int zfcp_scsi_eh_host_reset_handler(struct scsi_cmnd *scpnt)
 	return ret;
 }
 
+/**
+ * zfcp_scsi_sysfs_host_reset() - Support scsi_host sysfs attribute host_reset.
+ * @shost: Pointer to Scsi_Host to perform action on.
+ * @reset_type: We support %SCSI_ADAPTER_RESET but not %SCSI_FIRMWARE_RESET.
+ *
+ * Return: 0 on %SCSI_ADAPTER_RESET, -%EOPNOTSUPP otherwise.
+ *
+ * This is similar to zfcp_sysfs_adapter_failed_store().
+ */
+static int zfcp_scsi_sysfs_host_reset(struct Scsi_Host *shost, int reset_type)
+{
+	struct zfcp_adapter *adapter =
+		(struct zfcp_adapter *)shost->hostdata[0];
+	int ret = 0;
+
+	if (reset_type != SCSI_ADAPTER_RESET) {
+		ret = -EOPNOTSUPP;
+		zfcp_dbf_scsi_eh("scshr_n", adapter, ~0, ret);
+		return ret;
+	}
+
+	zfcp_erp_adapter_reset_sync(adapter, "scshr_y");
+	return ret;
+}
+
 struct scsi_transport_template *zfcp_scsi_transport_template;
 
 static struct scsi_host_template zfcp_scsi_host_template = {
 	.module			 = THIS_MODULE,
 	.name			 = "zfcp",
 	.queuecommand		 = zfcp_scsi_queuecommand,
+	.eh_timed_out		 = fc_eh_timed_out,
 	.eh_abort_handler	 = zfcp_scsi_eh_abort_handler,
 	.eh_device_reset_handler = zfcp_scsi_eh_device_reset_handler,
 	.eh_target_reset_handler = zfcp_scsi_eh_target_reset_handler,
@@ -354,6 +431,7 @@ static struct scsi_host_template zfcp_scsi_host_template = {
 	.slave_configure	 = zfcp_scsi_slave_configure,
 	.slave_destroy		 = zfcp_scsi_slave_destroy,
 	.change_queue_depth	 = scsi_change_queue_depth,
+	.host_reset		 = zfcp_scsi_sysfs_host_reset,
 	.proc_name		 = "zfcp",
 	.can_queue		 = 4096,
 	.this_id		 = -1,
@@ -363,11 +441,13 @@ static struct scsi_host_template zfcp_scsi_host_template = {
 	.max_sectors		 = (((QDIO_MAX_ELEMENTS_PER_BUFFER - 1)
 				     * ZFCP_QDIO_MAX_SBALS_PER_REQ) - 2) * 8,
 				   /* GCD, adjusted later */
+	/* report size limit per scatter-gather segment */
+	.max_segment_size	 = ZFCP_QDIO_SBALE_LEN,
 	.dma_boundary		 = ZFCP_QDIO_SBALE_LEN - 1,
-	.use_clustering		 = 1,
 	.shost_attrs		 = zfcp_sysfs_shost_attrs,
 	.sdev_attrs		 = zfcp_sysfs_sdev_attrs,
 	.track_queue_depth	 = 1,
+	.supported_mode		 = MODE_INITIATOR,
 };
 
 /**
@@ -435,7 +515,7 @@ void zfcp_scsi_adapter_unregister(struct zfcp_adapter *adapter)
 }
 
 static struct fc_host_statistics*
-zfcp_init_fc_host_stats(struct zfcp_adapter *adapter)
+zfcp_scsi_init_fc_host_stats(struct zfcp_adapter *adapter)
 {
 	struct fc_host_statistics *fc_stats;
 
@@ -449,9 +529,9 @@ zfcp_init_fc_host_stats(struct zfcp_adapter *adapter)
 	return adapter->fc_stats;
 }
 
-static void zfcp_adjust_fc_host_stats(struct fc_host_statistics *fc_stats,
-				      struct fsf_qtcb_bottom_port *data,
-				      struct fsf_qtcb_bottom_port *old)
+static void zfcp_scsi_adjust_fc_host_stats(struct fc_host_statistics *fc_stats,
+					   struct fsf_qtcb_bottom_port *data,
+					   struct fsf_qtcb_bottom_port *old)
 {
 	fc_stats->seconds_since_last_reset =
 		data->seconds_since_last_reset - old->seconds_since_last_reset;
@@ -482,8 +562,8 @@ static void zfcp_adjust_fc_host_stats(struct fc_host_statistics *fc_stats,
 	fc_stats->fcp_output_megabytes = data->output_mb - old->output_mb;
 }
 
-static void zfcp_set_fc_host_stats(struct fc_host_statistics *fc_stats,
-				   struct fsf_qtcb_bottom_port *data)
+static void zfcp_scsi_set_fc_host_stats(struct fc_host_statistics *fc_stats,
+					struct fsf_qtcb_bottom_port *data)
 {
 	fc_stats->seconds_since_last_reset = data->seconds_since_last_reset;
 	fc_stats->tx_frames = data->tx_frames;
@@ -507,7 +587,8 @@ static void zfcp_set_fc_host_stats(struct fc_host_statistics *fc_stats,
 	fc_stats->fcp_output_megabytes = data->output_mb;
 }
 
-static struct fc_host_statistics *zfcp_get_fc_host_stats(struct Scsi_Host *host)
+static struct fc_host_statistics *
+zfcp_scsi_get_fc_host_stats(struct Scsi_Host *host)
 {
 	struct zfcp_adapter *adapter;
 	struct fc_host_statistics *fc_stats;
@@ -515,7 +596,7 @@ static struct fc_host_statistics *zfcp_get_fc_host_stats(struct Scsi_Host *host)
 	int ret;
 
 	adapter = (struct zfcp_adapter *)host->hostdata[0];
-	fc_stats = zfcp_init_fc_host_stats(adapter);
+	fc_stats = zfcp_scsi_init_fc_host_stats(adapter);
 	if (!fc_stats)
 		return NULL;
 
@@ -532,16 +613,16 @@ static struct fc_host_statistics *zfcp_get_fc_host_stats(struct Scsi_Host *host)
 	if (adapter->stats_reset &&
 	    ((jiffies/HZ - adapter->stats_reset) <
 	     data->seconds_since_last_reset))
-		zfcp_adjust_fc_host_stats(fc_stats, data,
-					  adapter->stats_reset_data);
+		zfcp_scsi_adjust_fc_host_stats(fc_stats, data,
+					       adapter->stats_reset_data);
 	else
-		zfcp_set_fc_host_stats(fc_stats, data);
+		zfcp_scsi_set_fc_host_stats(fc_stats, data);
 
 	kfree(data);
 	return fc_stats;
 }
 
-static void zfcp_reset_fc_host_stats(struct Scsi_Host *shost)
+static void zfcp_scsi_reset_fc_host_stats(struct Scsi_Host *shost)
 {
 	struct zfcp_adapter *adapter;
 	struct fsf_qtcb_bottom_port *data;
@@ -563,7 +644,7 @@ static void zfcp_reset_fc_host_stats(struct Scsi_Host *shost)
 	}
 }
 
-static void zfcp_get_host_port_state(struct Scsi_Host *shost)
+static void zfcp_scsi_get_host_port_state(struct Scsi_Host *shost)
 {
 	struct zfcp_adapter *adapter =
 		(struct zfcp_adapter *)shost->hostdata[0];
@@ -580,7 +661,8 @@ static void zfcp_get_host_port_state(struct Scsi_Host *shost)
 		fc_host_port_state(shost) = FC_PORTSTATE_UNKNOWN;
 }
 
-static void zfcp_set_rport_dev_loss_tmo(struct fc_rport *rport, u32 timeout)
+static void zfcp_scsi_set_rport_dev_loss_tmo(struct fc_rport *rport,
+					     u32 timeout)
 {
 	rport->dev_loss_tmo = timeout;
 }
@@ -697,6 +779,9 @@ void zfcp_scsi_rport_work(struct work_struct *work)
 	struct zfcp_port *port = container_of(work, struct zfcp_port,
 					      rport_work);
 
+	set_worker_desc("zrp%c-%16llx",
+			(port->rport_task == RPORT_ADD) ? 'a' : 'd',
+			port->wwpn); /* < WORKER_DESC_LEN=24 */
 	while (port->rport_task) {
 		if (port->rport_task == RPORT_ADD) {
 			port->rport_task = RPORT_NONE;
@@ -723,11 +808,11 @@ void zfcp_scsi_set_prot(struct zfcp_adapter *adapter)
 	data_div = atomic_read(&adapter->status) &
 		   ZFCP_STATUS_ADAPTER_DATA_DIV_ENABLED;
 
-	if (enable_dif &&
+	if ((enable_dif || zfcp_experimental_dix) &&
 	    adapter->adapter_features & FSF_FEATURE_DIF_PROT_TYPE1)
 		mask |= SHOST_DIF_TYPE1_PROTECTION;
 
-	if (enable_dif && data_div &&
+	if (zfcp_experimental_dix && data_div &&
 	    adapter->adapter_features & FSF_FEATURE_DIX_PROT_TCPIP) {
 		mask |= SHOST_DIX_TYPE1_PROTECTION;
 		scsi_host_set_guard(shost, SHOST_DIX_GUARD_IP);
@@ -771,10 +856,10 @@ struct fc_function_template zfcp_transport_functions = {
 	.show_host_supported_speeds = 1,
 	.show_host_maxframe_size = 1,
 	.show_host_serial_number = 1,
-	.get_fc_host_stats = zfcp_get_fc_host_stats,
-	.reset_fc_host_stats = zfcp_reset_fc_host_stats,
-	.set_rport_dev_loss_tmo = zfcp_set_rport_dev_loss_tmo,
-	.get_host_port_state = zfcp_get_host_port_state,
+	.get_fc_host_stats = zfcp_scsi_get_fc_host_stats,
+	.reset_fc_host_stats = zfcp_scsi_reset_fc_host_stats,
+	.set_rport_dev_loss_tmo = zfcp_scsi_set_rport_dev_loss_tmo,
+	.get_host_port_state = zfcp_scsi_get_host_port_state,
 	.terminate_rport_io = zfcp_scsi_terminate_rport_io,
 	.show_host_port_state = 1,
 	.show_host_active_fc4s = 1,

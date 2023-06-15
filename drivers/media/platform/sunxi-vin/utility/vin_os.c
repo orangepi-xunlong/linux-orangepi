@@ -1,5 +1,5 @@
 /*
- * linux-4.9/drivers/media/platform/sunxi-vin/utility/vin_os.c
+ * linux-5.4/drivers/media/platform/sunxi-vin/utility/vin_os.c
  *
  * Copyright (c) 2007-2017 Allwinnertech Co., Ltd.
  *
@@ -14,70 +14,16 @@
  *
  */
 #include <linux/module.h>
+#include <linux/ion.h>
+
 #include "vin_os.h"
 
 unsigned int vin_log_mask;
 EXPORT_SYMBOL_GPL(vin_log_mask);
 
-int os_gpio_set(struct gpio_config *gc)
-{
-#ifndef FPGA_VER
-	char pin_name[32];
-	__u32 config;
-
-	if (gc == NULL)
-		return -1;
-	if (gc->gpio == GPIO_INDEX_INVALID)
-		return -1;
-
-	if (!IS_AXP_PIN(gc->gpio)) {
-		/* valid pin of sunxi-pinctrl,
-		 * config pin attributes individually.
-		 */
-		sunxi_gpio_to_name(gc->gpio, pin_name);
-		config =
-		    SUNXI_PINCFG_PACK(SUNXI_PINCFG_TYPE_FUNC, gc->mul_sel);
-		pin_config_set(SUNXI_PINCTRL, pin_name, config);
-		if (gc->pull != GPIO_PULL_DEFAULT) {
-			config =
-			    SUNXI_PINCFG_PACK(SUNXI_PINCFG_TYPE_PUD, gc->pull);
-			pin_config_set(SUNXI_PINCTRL, pin_name, config);
-		}
-		if (gc->drv_level != GPIO_DRVLVL_DEFAULT) {
-			config =
-			    SUNXI_PINCFG_PACK(SUNXI_PINCFG_TYPE_DRV,
-					      gc->drv_level);
-			pin_config_set(SUNXI_PINCTRL, pin_name, config);
-		}
-		if (gc->data != GPIO_DATA_DEFAULT) {
-			config =
-			    SUNXI_PINCFG_PACK(SUNXI_PINCFG_TYPE_DAT, gc->data);
-			pin_config_set(SUNXI_PINCTRL, pin_name, config);
-		}
-	} else {
-		/* valid pin of axp-pinctrl,
-		 * config pin attributes individually.
-		 */
-		sunxi_gpio_to_name(gc->gpio, pin_name);
-		config =
-		    SUNXI_PINCFG_PACK(SUNXI_PINCFG_TYPE_FUNC, gc->mul_sel);
-		pin_config_set(AXP_PINCTRL, pin_name, config);
-		if (gc->data != GPIO_DATA_DEFAULT) {
-			config =
-			    SUNXI_PINCFG_PACK(SUNXI_PINCFG_TYPE_DAT, gc->data);
-			pin_config_set(AXP_PINCTRL, pin_name, config);
-		}
-	}
-#endif
-	return 0;
-}
-EXPORT_SYMBOL_GPL(os_gpio_set);
-
 int os_gpio_write(u32 gpio, __u32 out_value, int force_value_flag)
 {
 #ifndef FPGA_VER
-	if (gpio == GPIO_INDEX_INVALID)
-		return 0;
 
 	if (force_value_flag == 1) {
 		gpio_direction_output(gpio, 0);
@@ -95,71 +41,100 @@ int os_gpio_write(u32 gpio, __u32 out_value, int force_value_flag)
 }
 EXPORT_SYMBOL_GPL(os_gpio_write);
 
+int vin_get_ion_phys(struct device *dev, struct vin_mm *mem_man)
+{
+	struct dma_buf_attachment *attachment;
+	struct sg_table *sgt;
+	int ret = -1;
+
+	if (IS_ERR(mem_man->buf)) {
+		pr_err("dma_buf is null\n");
+		return ret;
+	}
+
+	attachment = dma_buf_attach(mem_man->buf, get_device(dev));
+	if (IS_ERR(attachment)) {
+		pr_err("dma_buf_attach failed\n");
+		goto err_buf_put;
+	}
+
+	sgt = dma_buf_map_attachment(attachment, DMA_FROM_DEVICE);
+	if (IS_ERR_OR_NULL(sgt)) {
+		pr_err("dma_buf_map_attachment failed\n");
+		goto err_buf_detach;
+	}
+
+	mem_man->phy_addr = (void *)sg_dma_address(sgt->sgl);
+	mem_man->sgt = sgt;
+	mem_man->attachment = attachment;
+	ret = 0;
+	goto exit;
+
+err_buf_detach:
+	dma_buf_detach(mem_man->buf, attachment);
+err_buf_put:
+	dma_buf_put(mem_man->buf);
+exit:
+	return ret;
+
+}
+
+void vin_free_ion_phys(struct device *dev, struct vin_mm *mem_man)
+{
+	dma_buf_unmap_attachment(mem_man->attachment, mem_man->sgt, DMA_FROM_DEVICE);
+	dma_buf_detach(mem_man->buf, mem_man->attachment);
+	dma_buf_put(mem_man->buf);
+
+}
 int os_mem_alloc(struct device *dev, struct vin_mm *mem_man)
 {
-#ifdef SUNXI_MEM
 	int ret = -1;
-	char *ion_name = "ion_vin";
-	mem_man->client = sunxi_ion_client_create(ion_name);
+	__maybe_unused struct ion_buffer *ion_buf;
 
-	if (IS_ERR_OR_NULL(mem_man->client)) {
-		vin_err("sunxi_ion_client_create failed!!");
-		goto err_client;
-	}
-#if defined CONFIG_SUNXI_IOMMU && defined CONFIG_VIN_IOMMU
+	if (mem_man == NULL)
+		return -1;
+	ion_buf = (struct ion_buffer *)mem_man->buf->priv;
+
+#ifdef SUNXI_MEM
+#if IS_ENABLED(CONFIG_SUNXI_IOMMU) && IS_ENABLED(CONFIG_VIN_IOMMU)
 	/* IOMMU */
-	mem_man->handle = ion_alloc(mem_man->client, mem_man->size, PAGE_SIZE,
-					ION_HEAP_SYSTEM_MASK, 0);
-#else
-	/* CMA or CARVEOUT */
-	mem_man->handle = ion_alloc(mem_man->client, mem_man->size, PAGE_SIZE,
-				ION_HEAP_TYPE_DMA_MASK |
-				ION_HEAP_CARVEOUT_MASK, 0);
-
-#endif
-	if (IS_ERR_OR_NULL(mem_man->handle)) {
-		vin_err("ion_alloc failed!!");
+	mem_man->buf = ion_alloc(mem_man->size, ION_HEAP_SYSTEM_MASK, 0);
+	if (IS_ERR_OR_NULL(mem_man->buf)) {
+		vin_err("iommu alloc failed\n");
 		goto err_alloc;
 	}
-	mem_man->vir_addr = ion_map_kernel(mem_man->client, mem_man->handle);
+
+#else
+	/* CMA or CARVEOUT */
+	mem_man->buf = ion_alloc(mem_man->size, ION_HEAP_TYPE_DMA_MASK, 0);
+	if (IS_ERR_OR_NULL(mem_man->buf)) {
+		vin_err("cma alloc failed\n");
+		goto err_alloc;
+	}
+
+#endif
+
+	mem_man->vir_addr = ion_heap_map_kernel(NULL, mem_man->buf->priv);
 	if (IS_ERR_OR_NULL(mem_man->vir_addr)) {
 		vin_err("ion_map_kernel failed!!");
 		goto err_map_kernel;
 	}
 
-#if defined CONFIG_SUNXI_IOMMU && defined CONFIG_VIN_IOMMU
-	/* IOMMU */
-	ret = dma_map_sg_attrs(get_device(dev), mem_man->handle->buffer->sg_table->sgl,
-				mem_man->handle->buffer->sg_table->nents, DMA_BIDIRECTIONAL,
-				DMA_ATTR_SKIP_CPU_SYNC);
-	if (ret != 1) {
-		vin_err("dma map sg fail!!\n");
-		goto err_phys;
-	}
-	mem_man->dma_addr = (void *)sg_dma_address(mem_man->handle->buffer->sg_table->sgl);
-#else
-	/* CMA or CARVEOUT */
-	ret = ion_phys(mem_man->client, mem_man->handle,
-			 (ion_phys_addr_t *)&mem_man->phy_addr, &mem_man->size);
+	/*IOMMU or CMA or CARVEOUT */
+	ret = vin_get_ion_phys(dev, mem_man);
 	if (ret) {
 		vin_err("ion_phys failed!!");
 		goto err_phys;
 	}
 	mem_man->dma_addr = mem_man->phy_addr;
-#endif
-	return 0;
+	return ret;
+
 err_phys:
-#if defined CONFIG_SUNXI_IOMMU && defined CONFIG_VIN_IOMMU
-	dma_unmap_sg_attrs(get_device(dev), mem_man->handle->buffer->sg_table->sgl, mem_man->handle->buffer->sg_table->nents,
-						DMA_FROM_DEVICE, DMA_ATTR_SKIP_CPU_SYNC);
-#endif
-	ion_unmap_kernel(mem_man->client, mem_man->handle);
+	ion_heap_unmap_kernel(mem_man->heap, mem_man->buf->priv);
 err_map_kernel:
-	ion_free(mem_man->client, mem_man->handle);
+	ion_free(mem_man->buf->priv);
 err_alloc:
-	ion_client_destroy(mem_man->client);
-err_client:
-	return -1;
+	return ret;
 #else
 	mem_man->vir_addr = dma_alloc_coherent(dev, (size_t) mem_man->size,
 					(dma_addr_t *)&mem_man->phy_addr,
@@ -169,24 +144,25 @@ err_client:
 		return -ENOMEM;
 	}
 	mem_man->dma_addr = mem_man->phy_addr;
-	return 0;
+	ret = 0;
+	return ret;
 #endif
 }
 EXPORT_SYMBOL_GPL(os_mem_alloc);
 
+
 void os_mem_free(struct device *dev, struct vin_mm *mem_man)
 {
+	 __maybe_unused struct ion_buffer *ion_buf;
+
+	 if (mem_man == NULL)
+		 return;
+	 ion_buf = (struct ion_buffer *)mem_man->buf->priv;
+
 #ifdef SUNXI_MEM
-	if (IS_ERR_OR_NULL(mem_man->client) || IS_ERR_OR_NULL(mem_man->handle)
-		|| IS_ERR_OR_NULL(mem_man->vir_addr))
-		return;
-#if defined CONFIG_SUNXI_IOMMU && defined CONFIG_VIN_IOMMU
-	dma_unmap_sg_attrs(get_device(dev), mem_man->handle->buffer->sg_table->sgl, mem_man->handle->buffer->sg_table->nents,
-					DMA_FROM_DEVICE, DMA_ATTR_SKIP_CPU_SYNC);
-#endif
-	ion_unmap_kernel(mem_man->client, mem_man->handle);
-	ion_free(mem_man->client, mem_man->handle);
-	ion_client_destroy(mem_man->client);
+	vin_free_ion_phys(dev, mem_man);
+	ion_heap_unmap_kernel(mem_man->heap, mem_man->buf->priv);
+	ion_free(mem_man->buf->priv);
 #else
 	if (mem_man->vir_addr)
 		dma_free_coherent(dev, mem_man->size, mem_man->vir_addr,

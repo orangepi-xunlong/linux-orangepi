@@ -26,7 +26,7 @@ struct panic_part {
 	void *private;
 };
 
-#ifdef CONFIG_SUNXI_PANICPART
+#if IS_ENABLED(CONFIG_SUNXI_PANICPART)
 extern int sunxi_panicpart_init(struct panic_part *part);
 extern int sunxi_parse_blkdev(char *bdev, int len);
 #else

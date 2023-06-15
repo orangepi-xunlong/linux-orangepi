@@ -301,7 +301,7 @@ static void sunxi_mmc_set_clk_dly(struct sunxi_mmc_host *host, int clk,
 	 else
 		rval &= ~SDXC_DAT_DRV_PH_SEL;	/*90 phase */
 
-	mmc_writel(host, REG_DRV_DL, rval);
+	sunxi_r_op(host, mmc_writel(host, REG_DRV_DL, rval));
 
 /*
 *	rval = mmc_readl(host,REG_SAMP_DL);
@@ -571,7 +571,7 @@ void sunxi_mmc_save_spec_reg1(struct sunxi_mmc_host *host)
 
 void sunxi_mmc_restore_spec_reg1(struct sunxi_mmc_host *host)
 {
-	mmc_writel(host, REG_DRV_DL, bak_spec_regs.drv_dl);
+	sunxi_r_op(host, mmc_writel(host, REG_DRV_DL, bak_spec_regs.drv_dl));
 	mmc_writel(host, REG_SAMP_DL, bak_spec_regs.samp_dl);
 	mmc_writel(host, REG_DS_DL, bak_spec_regs.ds_dl);
 	mmc_writel(host, REG_SD_NTSR, bak_spec_regs.sd_ntsr);

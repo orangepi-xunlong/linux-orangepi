@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note */
 /*
  *  linux/include/asm/setup.h
  *
@@ -8,7 +9,7 @@
  * published by the Free Software Foundation.
  *
  *  Structure passed to kernel to tell it about the
- *  hardware it's running on.  See Documentation/arm/Setup
+ *  hardware it's running on.  See Documentation/arm/setup.rst
  *  for more info.
  */
 #ifndef _UAPI__ASMARM_SETUP_H
@@ -16,7 +17,7 @@
 
 #include <linux/types.h>
 
-#define COMMAND_LINE_SIZE 2048
+#define COMMAND_LINE_SIZE 4096
 
 /* The list ends with an ATAG_NONE node. */
 #define ATAG_NONE	0x00000000

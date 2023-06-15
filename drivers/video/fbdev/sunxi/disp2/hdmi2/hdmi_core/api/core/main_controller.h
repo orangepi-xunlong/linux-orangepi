@@ -70,7 +70,6 @@ void mc_pixel_clock_enable(hdmi_tx_dev_t *dev, u8 bit);
 void mc_pixel_repetition_clock_enable(hdmi_tx_dev_t *dev, u8 bit);
 void mc_colorspace_converter_clock_enable(hdmi_tx_dev_t *dev, u8 bit);
 void mc_audio_sampler_clock_enable(hdmi_tx_dev_t *dev, u8 bit);
-void mc_cec_clock_enable(hdmi_tx_dev_t *dev, u8 bit);
 void mc_hdcp_clock_enable(hdmi_tx_dev_t *dev, u8 bit);
 void mc_video_feed_through_off(hdmi_tx_dev_t *dev, u8 bit);
 

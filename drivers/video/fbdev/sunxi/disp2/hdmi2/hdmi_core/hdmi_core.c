@@ -19,6 +19,17 @@ static uintptr_t hdmi_reg_base;
 static struct hdmi_tx_core *p_core;
 
 struct disp_video_timings info;
+static u8 is_vsif;
+
+static struct disp_hdmi_mode hdmi_basic_mode_tbl[] = {
+	{DISP_TV_MOD_480P,                HDMI_VIC_720x480P60_16_9,   },
+	{DISP_TV_MOD_576P,                HDMI_VIC_720x576P_16_9,     },
+	{DISP_TV_MOD_720P_50HZ,           HDMI_VIC_1280x720P50,       },
+	{DISP_TV_MOD_720P_60HZ,           HDMI_VIC_1280x720P60,       },
+	{DISP_TV_MOD_1080P_50HZ,          HDMI_VIC_1920x1080P50,      },
+	{DISP_TV_MOD_1080P_60HZ,          HDMI_VIC_1920x1080P60,      },
+};
+
 static struct disp_hdmi_mode hdmi_mode_tbl[] = {
 	{DISP_TV_MOD_480I,                HDMI_VIC_720x480I_16_9,     },
 	{DISP_TV_MOD_576I,                HDMI_VIC_720x576I_16_9,     },
@@ -116,8 +127,8 @@ void hdmitx_write(uintptr_t addr, u32 data)
 		return;
 	}
 
-	asm volatile("dsb st");
-	*((volatile u8 *)(hdmi_core_get_base_addr() + (addr >> 2))) = data;
+	writeb((u8)data, (volatile void __iomem *)(
+			hdmi_core_get_base_addr() + (addr >> 2)));
 }
 
 u32 hdmitx_read(uintptr_t addr)
@@ -128,7 +139,8 @@ u32 hdmitx_read(uintptr_t addr)
 		return 0;
 	}
 
-	return *((volatile u8 *)(hdmi_core_get_base_addr() + (addr >> 2)));
+	return (u32)readb((volatile void __iomem *)(
+			hdmi_core_get_base_addr() + (addr >> 2)));
 }
 
 
@@ -439,6 +451,42 @@ void video_apply(struct hdmi_tx_core *core)
 	pr_info("HDMI Audio Enable Successfully\n");
 }
 
+s32 set_vsif_config(void *config, struct disp_device_dynamic_config *scfg)
+{
+	struct hdmi_tx_core *core = get_platform();
+
+	LOG_TRACE();
+
+	if (core == NULL) {
+		pr_err("HDMI_ERROR:Improper arguments\n");
+		return -1;
+	}
+
+	if (config == NULL) {
+		if (is_vsif < 5) {
+			/*reset vsif to default*/
+			if (core->dev_func.set_vsif_config(config, &core->mode.pVideo,
+				&core->mode.pProduct, scfg)) {
+				pr_info("Error: set vsif failed\n");
+				return -1;
+			}
+		}
+		if (is_vsif < 10)
+			is_vsif++;
+		return 0;
+	}
+
+	if (core->dev_func.set_vsif_config(config, &core->mode.pVideo, &core->mode.pProduct,
+									   scfg)) {
+		pr_info("Error: set vsif failed\n");
+		return -1;
+	}
+
+	is_vsif = 0;
+
+	return 0;
+}
+
 static u32 hdmi_check_updated(struct hdmi_tx_core *core,
 							struct disp_device_config *config)
 {
@@ -680,6 +728,9 @@ s32 get_static_config(struct disp_device_config *config)
 		break;
 	}
 
+	pr_info("config->hdr_type  = %d\n", core->config.hdr_type);
+	config->hdr_type = core->config.hdr_type;
+
 	return 0;
 }
 
@@ -864,28 +915,45 @@ s32 hdmi_mode_support(u32 mode)
 
 	LOG_TRACE();
 
+	if (!core->mode.edid_done) {
+		for (i = 0; i < sizeof(hdmi_basic_mode_tbl) / sizeof(struct disp_hdmi_mode); i++) {
+			if (hdmi_basic_mode_tbl[i].mode == (enum disp_tv_mode)mode) {
+				VIDEO_INF("support hdmi basic mode: tv_mode=%d\n", mode);
+				return 1;
+			}
+		}
+	}
+
 	if (core->blacklist_sink >= 0) {
 		for (i = 0; i < 10; i++) {
-			if (sink_blacklist[core->blacklist_sink].issue[i].tv_mode == mode)
+			if (sink_blacklist[core->blacklist_sink].issue[i].tv_mode == mode) {
+				VIDEO_INF("tv mode:%d in this sink is in the backlist\n", mode);
 				return sink_blacklist[core->blacklist_sink].issue[i].issue_type << 1;
+			}
 		}
 	}
 
 	for (i = 0; i < sizeof(hdmi_mode_tbl)/sizeof(struct disp_hdmi_mode); i++) {
 		if (hdmi_mode_tbl[i].mode == (enum disp_tv_mode)mode) {
 			hdmi_mode = hdmi_mode_tbl[i].hdmi_mode;
-			if (edid_sink_supports_vic_code(hdmi_mode) == true)
+			if (edid_sink_supports_vic_code(hdmi_mode) == true) {
+				VIDEO_INF("edid support this tv_mode:%d\n", mode);
 				return 1;
+			}
 		}
 	}
 	for (i = 0; i < sizeof(hdmi_mode_tbl_4_3)/
 		sizeof(struct disp_hdmi_mode); i++) {
 		if (hdmi_mode_tbl_4_3[i].mode == (enum disp_tv_mode)mode) {
 			hdmi_mode = hdmi_mode_tbl_4_3[i].hdmi_mode;
-			if (edid_sink_supports_vic_code(hdmi_mode) == true)
+			if (edid_sink_supports_vic_code(hdmi_mode) == true) {
+				VIDEO_INF("edid support this 4:3 tv_mode:%d\n", mode);
 				return 1;
 			}
+		}
 	}
+
+	VIDEO_INF("NOT support tv_mode:%d\n", mode);
 	return 0;
 }
 
@@ -907,7 +975,7 @@ void hdmi_reconfig_format_by_blacklist(struct disp_device_config *config)
 			((config->format == (enum disp_csc_type)YCC444) ||
 			 (config->format == (enum disp_csc_type)YCC422))) {
 		/* Sink not support yuv on this mode */
-		config->format = RGB;
+		config->format = (enum disp_csc_type)RGB;
 		VIDEO_INF("Sink is on blacklist and not support YUV on mode %d\n", config->mode);
 	}
 }
@@ -1075,7 +1143,6 @@ s32 hdmi_smooth_enable_core(void)
 			(pvideo->pb->eotf == SDR_LUMINANCE_RANGE)) {
 			clear_drm_pb();
 			core->dev_func.fc_drm_up(pvideo->pb);
-			msleep(2000);
 			core->dev_func.fc_drm_disable();
 		} else {
 			core->dev_func.fc_drm_up(pvideo->pb);
@@ -1117,10 +1184,6 @@ s32 hdmi_disable_core(void)
 	return 0;
 }
 
-/***********************************************************/
-/*************************Audio******************************/
-/**********************************************************/
-#if defined(CONFIG_SND_SUNXI_SOC_SUNXI_HDMIAUDIO)
 s32 hdmi_core_audio_enable(u8 enable, u8 channel)
 {
 	struct hdmi_tx_core *p_core = get_platform();
@@ -1140,8 +1203,6 @@ s32 hdmi_core_audio_enable(u8 enable, u8 channel)
 
 	return 0;
 }
-#endif
-#if defined(CONFIG_SND_SUNXI_SOC_SUNXI_HDMIAUDIO)
 
 s32 hdmi_set_audio_para(hdmi_audio_t *audio_para)
 {
@@ -1166,7 +1227,7 @@ s32 hdmi_set_audio_para(hdmi_audio_t *audio_para)
 
 	return 0;
 }
-#endif
+
 void register_func_to_hdmi_core(struct hdmi_dev_func func)
 {
 	struct hdmi_tx_core *core = get_platform();
@@ -1250,6 +1311,18 @@ u32 hdmi_core_get_pixel_format(void)
 
 	return core->dev_func.get_pixel_format();
 
+}
+
+u32 hdmi_core_get_hdmi14_4k_format(void)
+{
+	u8 video_format = 0;
+	u32 code = 0;
+	struct hdmi_tx_core *core = get_platform();
+
+	core->dev_func.get_vsd_payload(&video_format, &code);
+	if (video_format == VIDEO_HDMI14_4K_FORMAT)
+		return code;
+	return 0;
 }
 
 u32 hdmi_core_get_video_code(void)

@@ -232,7 +232,7 @@ static int hdmi_phy_set(struct video_para *video)
 			    hdmi_readl(0x1002c) | ((tmp & 0x1f800) >> 11));
 		hdmi_writel(0x10020, 0x01FFFF7F);
 		hdmi_writel(0x10024, 0x8063a800);
-		hdmi_writel(0x10028, 0x0F81C485);
+		hdmi_writel(0x10028, 0x0F81C405);
 		break;
 	case 4:
 		hdmi_writel(0x1002c, 0x39dc5040);
@@ -330,10 +330,26 @@ void bsp_hdmi_init(void)
 
 void bsp_hdmi_set_video_en(unsigned char enable)
 {
-	if (enable)
+	if (enable) {
 		hdmi_writel(0x10020, hdmi_readl(0x10020) | (0xf << 12));
-	else
+	} else {
+		hdmi_write(0x10010, 0x45);
+		hdmi_write(0x10011, 0x45);
+		hdmi_write(0x10012, 0x52);
+		hdmi_write(0x10013, 0x54);
+
+		hdmi_write(0x4044, 0x02);/*set avmute*/
+
+		hdmi_write(0x00C1, hdmi_read(0x00C1) | 0x02);/*_DisableEncryption(true)*/
+		hdmi_write(0x00C0, hdmi_read(0x00C0) & 0xfb);/*hdcp_rxdetect(flase)*/
+		hdmi_write(0x00C0, hdmi_read(0x00C0) | 0x08);/*set hdcp avmute*/
+
+		hdmi_write(0x10010, 0x52);
+		hdmi_write(0x10011, 0x54);
+		hdmi_write(0x10012, 0x41);
+		hdmi_write(0x10013, 0x57);
 		hdmi_writel(0x10020, hdmi_readl(0x10020) & (~(0xf << 12)));
+	}
 }
 
 int bsp_hdmi_video_get_div(unsigned int pixel_clk)
@@ -363,7 +379,8 @@ int bsp_hdcp_enable(u32 enable, struct video_para *video)
 	hdmi_write(0x10013, 0x54);
 	if (enable) {
 		hdmi_write(0x00C1, hdmi_read(0x00C1) | 0x02);/*_DisableEncryption*/
-		hdmi_write(0x0081, hdmi_read(0x0081) | 0x40);/*mc_hdcp_clock_enable*/
+		hdmi_write(0x0081, hdmi_read(0x0081) & 0xbf);/*mc_hdcp_clock_enable*/
+		hdmi_write(0xC0C0, 0x40);/*_OessWindowSize*/
 		hdmi_write(0x0040, hdmi_read(0x0040) | 0x80);/*fc_video_hdcp_keepout*/
 		hdmi_write(0x00C0, video->is_hdmi ? (hdmi_read(0x00C0) | 0x01) : (hdmi_read(0x00C0) & 0xfe));/*hdmi mode*/
 	/*	hdmi_write(0x40C1, hdmi_read(0x40C1) | 0x02);_HSyncPolarity*/
@@ -378,17 +395,17 @@ int bsp_hdcp_enable(u32 enable, struct video_para *video)
 		hdmi_write(0x00C0, hdmi_read(0x00C0) & 0xf7);/*_EnableAvmute*/
 		hdmi_write(0x40C1, hdmi_read(0x40C1) | 0x40);/*_UnencryptedVideoColor*/
 		hdmi_write(0x00C1, hdmi_read(0x00C1) | 0x04);/*_EncodingPacketHeader*/
-		hdmi_write(0xC0C0, 0x40);/*_OessWindowSize*/
 		hdmi_write(0x00C0, hdmi_read(0x00C0) & 0xdf);/*_BypassEncryption*/
 		hdmi_write(0x00C1, hdmi_read(0x00C1) & 0xfe);/*hdcp_sw_reset*/
 		hdmi_write(0x00C0, hdmi_read(0x00C0) | 0x04);/*hdcp_rxdetect*/
 		hdmi_write(0x80C2, 0xff);/*_InterruptClear*/
 		hdmi_write(0x40C0, 0x00);/*_InterruptMask*/
-		hdmi_write(0x0081, hdmi_read(0x0081) & 0xbf);/*mc_hdcp_clock_enable*/
 	} else {
 		hdmi_write(0x00C1, hdmi_read(0x00C1) | 0x02);/*_DisableEncryption(true)*/
+#if 0
 		hdmi_write(0x00C0, hdmi_read(0x00C0) & 0xfb);/*hdcp_rxdetect(flase)*/
 		hdmi_write(0x0081, hdmi_read(0x0081) | 0x40);/*mc_hdcp_clock_enable(disable)*/
+#endif
 	}
 
 	return 0;
@@ -401,8 +418,10 @@ int bsp_hdcp_disconfig(void)
 	hdmi_write(0x10012, 0x52);
 	hdmi_write(0x10013, 0x54);
 	hdmi_write(0x00C1, hdmi_read(0x00C1) | 0x02);/*_DisableEncryption(true)*/
+#if 0
 	hdmi_write(0x00C0, hdmi_read(0x00C0) & 0xfb);/*hdcp_rxdetect(flase)*/
 	hdmi_write(0x0081, hdmi_read(0x0081) | 0x40);/*mc_hdcp_clock_enable(disable)*/
+#endif
 	hdmi_write(0x10010, 0x52);
 	hdmi_write(0x10011, 0x54);
 	hdmi_write(0x10012, 0x41);
@@ -455,11 +474,9 @@ int bsp_hdmi_video(struct video_para *video)
 			video->csc = BT709;
 	}
 
-	if (hdmi_phy_set(video) != 0)
-		return -1;
-
 	bsp_hdmi_inner_init();
 
+	hdmi_write(0x4044, 0x02);
 	hdmi_write(0x0840, 0x01);
 	hdmi_write(0x4845, 0x00);
 	hdmi_write(0x0040, ptbl[id].para[3] | 0x10);
@@ -514,7 +531,7 @@ int bsp_hdmi_video(struct video_para *video)
 		hdmi_write(0x2046, 0x00);
 		hdmi_write(0x3046, 0x01);
 		hdmi_write(0x3047, 0x11);
-		hdmi_write(0x4044, 0x00);
+		//hdmi_write(0x4044, 0x00);
 		hdmi_write(0x0052, 0x00);
 		hdmi_write(0x8051, 0x11);
 		hdmi_write(0x10010, 0x45);
@@ -541,10 +558,14 @@ int bsp_hdmi_video(struct video_para *video)
 			       : (ptbl[id].para[0] & 0x7f));
 	}
 
+	if (hdmi_phy_set(video) != 0)
+		return -1;
+
 	hdmi_write(0x0082, 0x00);
 	hdmi_write(0x0081, 0x00);
 
 	hdmi_write(0x0840, 0x00);
+	hdmi_write(0x4044, 0x01);
 
 	if (video->is_hcts) {
 		bsp_hdcp_enable(1, video);
@@ -1088,7 +1109,7 @@ static u8 bsp_read_ksv_list(void)
 	if (bsp_hdcp_verify_ksv(hdcp_ksv_list_buffer, size) == TRUE) {
 		valid = HDCP_KSV_LIST_READY;
 		pr_info("HDCP_KSV_LIST_READY");
-	} else{
+	} else {
 		valid = HDCP_ERR_KSV_LIST_NOT_VALID;
 		pr_info("HDCP_ERR_KSV_LIST_NOT_VALID");
 	}
@@ -1195,299 +1216,19 @@ OUT:
 	return ret;
 }
 
-/**
- * bsp_hdmi_cec_free_time_set - Set hdmi cec free time
- * @value:
- *         0: Signal free time = 3-bit periods.
- *          Previous attempt to send frame is unsucessful.
- *         1: Signal free time = 5-bit periods.
- *          New initiator wants to send a frame.
- *         2: Signal free time = 7-bit periods.
- *          Present initiator wants to send another frame
- *          immediately after its previous frame
- */
-void bsp_hdmi_cec_free_time_set(unsigned char value)
+int bsp_hdmi_cec_get_simple_msg(unsigned char *msg)
 {
-	hdmi_write(0x06F0, (hdmi_read(0x06F0) & 0xf9) | (value << 1));
-}
-
-#ifdef CONFIG_HDMI_CEC_STANDARD
-/*Set source logical address(Tx cec logaddr)*/
-static void bsp_hdmi_cec_set_logaddr(unsigned char addr)
-{
-	if (addr < 8) {
-		hdmi_write(0x86F2, 0);
-		hdmi_write(0x06F3, 1 << addr);
-	} else if ((addr >= 8) && (addr <= 15)) {
-		hdmi_write(0x86F2, 1 << (addr - 8));
-		hdmi_write(0x06F3, 0);
-	} else {
-		pr_err("Error cec logical address\n");
-	}
-}
-
-static unsigned short bsp_hdmi_cec_get_logaddr(void)
-{
-	unsigned int reg, addr = 0, i;
-
-	reg = (hdmi_read(0x86F2) << 8) | hdmi_read(0x06F3);
-	for (i = 0; i < 16; i++) {
-		if ((reg >> i) & 0x01)
-			addr = i;
-	}
-
-	return (unsigned short)addr;
-}
-
-/**
-* get cec message base on a logical address
-*/
-int bsp_hdmi_cec_get_msg(struct cec_msg *msg, unsigned char logaddr)
-{
-	int ret = -1, i;
-
-	if (!msg) {
-		pr_err("Error: NULL hdmi cec rx msg!\n");
-		return -1;
-	}
-
-	hdmi_write(0x1003c, 0x04);
-	hdmi_write(0x10010, 0x45);
-	hdmi_write(0x10011, 0x45);
-	hdmi_write(0x10012, 0x52);
-	hdmi_write(0x10013, 0x54);
-
-	if (bsp_hdmi_cec_get_logaddr() != logaddr)
-		bsp_hdmi_cec_set_logaddr(logaddr);
-
-	/*if a msg has been received*/
-	if (hdmi_read(0x26F4) & 0x1) {
-		msg->len = hdmi_read(0x46F0);
-		for (i = 0; i < msg->len; i++) {
-			switch (i) {
-			case 0:
-				msg->msg[0] = hdmi_read(0x26F0);
-				break;
-			case 1:
-				msg->msg[1] = hdmi_read(0x26F1);
-				break;
-			case 2:
-				msg->msg[2] = hdmi_read(0xA6F0);
-				break;
-			case 3:
-				msg->msg[3] = hdmi_read(0xA6F1);
-				break;
-			case 4:
-				msg->msg[4] = hdmi_read(0x26F2);
-				break;
-			case 5:
-				msg->msg[5] = hdmi_read(0x26F3);
-				break;
-			case 6:
-				msg->msg[6] = hdmi_read(0xA6F2);
-				break;
-			case 7:
-				msg->msg[7] = hdmi_read(0xA6F3);
-				break;
-			default:
-				pr_err("ERROR: HDMI CEC GET ERROR LEN\n");
-				break;
-			}
-		}
-
-		if (msg->len <= 1)
-			msg->rx_status = CEC_RX_STATUS_FEATURE_ABORT;
-		else if (msg->len > 1)
-			msg->rx_status = CEC_RX_STATUS_OK;
-		else {
-			msg->rx_status = 0;
-			pr_err("error: cec rx len is wrong\n");
-		}
-		/*clear cec interrupt status*/
-		hdmi_write(0x8012, 0x22);
-		/*clear msg lock*/
-		hdmi_write(0x26F4, 0x00);
-		ret = 0;
-	}
-
-	hdmi_write(0x10010, 0x52);
-	hdmi_write(0x10011, 0x54);
-	hdmi_write(0x10012, 0x41);
-	hdmi_write(0x10013, 0x57);
-
-	return ret;
-}
-
-/**
- * bsp_hdmi_cec_send - Send hdmi cec message
- * @buf: pointer to message buffer
- * @bytes: bytes of message
- *
- * buf struct: address | opcode | data
- * Return: 0: success, !0 : error
- */
-int bsp_hdmi_cec_send_msg(struct cec_msg *msg, unsigned char logaddr)
-{
-	unsigned char i;
-	unsigned char bytes;
-	unsigned char *buf;
-	unsigned char timeout = 40, try_cnt = 4;
-
-	if (!msg) {
-		pr_err("Error: NULL hdmi cec tx msg!\n");
-		return -1;
-	}
-
-	buf = msg->msg;
-	bytes = msg->len;
-	if (!bytes)
-		return -1;
-	if (bytes > 16)
-		return -1;
-
-	hdmi_write(0x10010, 0x45);
-	hdmi_write(0x10011, 0x45);
-	hdmi_write(0x10012, 0x52);
-	hdmi_write(0x10013, 0x54);
-	hdmi_write(0x1003c, 0);
-
-set_and_send:
-	/*enable cec clk*/
-	hdmi_write(0x0081, hdmi_read(0x0081) & (~0x20));
-
-	hdmi_write(0x9012, 0);
-
-	/*disable cec standby mode*/
-	hdmi_write(0x06F0, hdmi_read(0x06F0) & (~0x10));
-
-	/*enable cec IRQ*/
-	hdmi_write(0x86F0, 0);
-	hdmi_write(0x86F0, 0x40);
-
-	/*clear wakeupctl*/
-	hdmi_write(0x26F5, 0);
-
-	bsp_hdmi_cec_set_logaddr(logaddr);
-
-
-	/*set sending count and msg*/
-	hdmi_write(0x86F3, bytes);
-	for (i = 0; i < bytes; i++) {
-		switch (i) {
-		case 0:
-			hdmi_write(0x06F4, buf[0]);
-			break;
-		case 1:
-			hdmi_write(0x06F5, buf[1]);
-			break;
-		case 2:
-			hdmi_write(0x86F4, buf[2]);
-			break;
-		case 3:
-			hdmi_write(0x86F5, buf[3]);
-			break;
-		case 4:
-			hdmi_write(0x06F6, buf[4]);
-			break;
-		case 5:
-			hdmi_write(0x06F7, buf[5]);
-			break;
-		case 6:
-			hdmi_write(0x86F6, buf[6]);
-			break;
-		case 7:
-			hdmi_write(0x86F7, buf[7]);
-		default:
-			pr_err("ERROR: HDMI CEC SEND ERROR LEN\n");
-			break;
-		}
-	}
-
-	/*set signal free time 5-bit periods*/
-	bsp_hdmi_cec_free_time_set((try_cnt >= 4) ? 1 : 0);
-
-	/*Start to send cec msg*/
-	hdmi_write(0x06F0, (hdmi_read(0x06F0) | 0x01));
-
-	udelay(20);
-	while ((timeout--) && (hdmi_read(0x06F0) & 0x01)) {
-		msleep(10);
-	}
-
-	msg->tx_status = hdmi_read(0x8012);
-	hdmi_write(0x8012, msg->tx_status);
-	if ((!msg->tx_status) || (msg->tx_status & CEC_DONE)
-		|| (msg->tx_status & CEC_EOM)
-		|| (msg->tx_status & CEC_NACK)) {
-		if (msg->tx_status & CEC_NACK)
-			msg->tx_status = CEC_TX_STATUS_NACK;
-		else
-			msg->tx_status = CEC_TX_STATUS_OK;
-		hdmi_read(0x00);
-		hdmi_write(0x10010, 0x52);
-		hdmi_write(0x10011, 0x54);
-		hdmi_write(0x10012, 0x41);
-		hdmi_write(0x10013, 0x57);
-		hdmi_read(0x00);
-
-		return 0;
-	} else if (try_cnt) {
-		pr_warn("cec send failed, trycount:%d tx_status:%d\n",
-				5 - try_cnt, msg->tx_status);
-		try_cnt--;
-		goto  set_and_send;
-	}
-
-	msg->tx_status = CEC_TX_STATUS_ERROR;
-	hdmi_read(0x00);
-	hdmi_write(0x10010, 0x52);
-	hdmi_write(0x10011, 0x54);
-	hdmi_write(0x10012, 0x41);
-	hdmi_write(0x10013, 0x57);
-	hdmi_read(0x00);
-
-
-	if (!try_cnt)
-		return -1;
 	return 0;
 }
 
-/**
- * bsp_hdmi_cec_sta_check - Check the result of message sending
- *
- * Return: CEC_DONE | CEC_EOM | CEC_NACK | CEC_ARB_LOST | CEC_ERROR_INITIAOT | CEC_ERROR_FOLLOW
- * | CEC_WAKEUP
- */
-int bsp_hdmi_cec_sending_status_check(void)
-{
-	unsigned char tmp;
-
-	hdmi_write(0x10010, 0x45);
-	hdmi_write(0x10011, 0x45);
-	hdmi_write(0x10012, 0x52);
-	hdmi_write(0x10013, 0x54);
-
-	tmp = hdmi_read(0x8012);
-
-	hdmi_write(0x10010, 0x52);
-	hdmi_write(0x10011, 0x54);
-	hdmi_write(0x10012, 0x41);
-	hdmi_write(0x10013, 0x57);
-
-	return tmp;
-}
-
-#else
 int bsp_hdmi_cec_send(char *buf, unsigned char bytes)
 {
-    return 0;
+	return 0;
 }
 
-int bsp_hdmi_cec_get_simple_msg(unsigned char *msg)
+void bsp_hdmi_cec_free_time_set(unsigned char value)
 {
-    return 0;
 }
-#endif
 
 int bsp_hdmi_set_func(hdmi_bsp_func *func)
 {

@@ -506,8 +506,16 @@ int disp_al_manager_apply(unsigned int disp, struct disp_manager_data *data)
 		    | (back_color->green << 8) | (back_color->blue << 0);
 	}
 
+
+	DE_INF("%s ouput_type:%d\n", __func__, al_priv.output_type[al_priv.tcon_id[disp]]);
 	if (al_priv.output_type[al_priv.tcon_id[disp]] ==
 	    (u32) DISP_OUTPUT_TYPE_HDMI) {
+
+#ifdef BYPASS_TCON_CEU
+		tcon1_hdmi_color_remap(al_priv.tcon_id[disp], 0,
+					       data->config.cs);
+
+#else
 		/*
 		 * If yuv output(cs != 0), remap yuv plane to (v y u) sequency
 		 * else disable color remap function
@@ -518,6 +526,7 @@ int disp_al_manager_apply(unsigned int disp, struct disp_manager_data *data)
 		else
 			tcon1_hdmi_color_remap(al_priv.tcon_id[disp], 0,
 					       data->config.cs);
+#endif
 	}
 	de_update_clk_rate(data->config.de_freq);
 
@@ -580,7 +589,7 @@ int disp_al_enhance_tasklet(unsigned int disp)
 	return de_enhance_tasklet(disp);
 }
 
-#ifndef CONFIG_EINK200_SUNXI
+#if !IS_ENABLED(CONFIG_EINK200_SUNXI)
 int disp_al_capture_init(unsigned int disp)
 {
 	int ret = -1;
@@ -698,7 +707,7 @@ static struct lcd_clk_info clk_tbl[] = {
 	{LCD_IF_CPU, 12, 1, 1, 0},
 	{LCD_IF_LVDS, 7, 1, 1, 0},
 #if defined(DSI_VERSION_40)
-	{LCD_IF_DSI, 4, 1, 4, 148500000},
+	{LCD_IF_DSI, 4, 1, 4, 150000000},
 #else
 	{LCD_IF_DSI, 4, 1, 4, 0},
 #endif /*endif DSI_VERSION_40*/
@@ -755,6 +764,9 @@ int disp_al_lcd_get_clk_info(u32 screen_id, struct lcd_clk_info *info,
 		}
 
 		dsi_div = bitwidth / lane;
+#if defined(SUNXI_DSI_PASSIVE_BUG)
+		dsi_div = 6;
+#endif
 		if (panel->lcd_dsi_if == LCD_DSI_IF_COMMAND_MODE) {
 			tcon_div = dsi_div;
 		}
@@ -1108,6 +1120,16 @@ int disp_al_hdmi_cfg(u32 screen_id, struct disp_video_timings *video_info)
 	tcon_set_sync_pol(screen_id, !video_info->ver_sync_polarity,
 			  !video_info->hor_sync_polarity);
 #endif /*endif DISP2_TCON_TV_SYNC_POL_ISSUE */
+
+#ifdef TCON_POL_CORRECT
+	tcon1_cfg_correct(screen_id, video_info);
+#endif
+
+	printk("%s\n", __func__);
+#ifdef BYPASS_TCON_CEU
+	tcon1_hdmi_color_remap(screen_id, 0,
+		       al_priv.output_cs[screen_id]);
+#else
 	/*
 	 * If yuv output(cs != 0), remap yuv plane to (v y u) sequency
 	 * else disable color remap function
@@ -1118,6 +1140,7 @@ int disp_al_hdmi_cfg(u32 screen_id, struct disp_video_timings *video_info)
 	else
 		tcon1_hdmi_color_remap(screen_id, 0,
 				       al_priv.output_cs[screen_id]);
+#endif
 	tcon1_src_select(screen_id, LCD_SRC_DE, al_priv.de_id[screen_id]);
 
 	return 0;
@@ -1136,7 +1159,16 @@ int disp_al_hdmi_irq_disable(u32 screen_id)
 
 	return 0;
 }
+#if (defined CONFIG_ARCH_SUN8IW16) \
+	|| (defined CONFIG_ARCH_SUN8IW20) \
+	|| (defined CONFIG_ARCH_SUN20IW1)
+int disp_al_hdmi_pad_sel(u32 screen_id, u32 pad)
+{
+	tcon_pan_sel(screen_id, pad);
 
+	return 0;
+}
+#endif
 /* tv */
 int disp_al_tv_enable(u32 screen_id)
 {
@@ -1178,7 +1210,11 @@ int disp_al_tv_cfg(u32 screen_id, struct disp_video_timings *video_info)
 
 	tcon_init(screen_id);
 	tcon1_set_timming(screen_id, video_info);
+#ifdef BYPASS_TCON_CEU
+	tcon1_yuv_range(screen_id, 0);
+#else
 	tcon1_yuv_range(screen_id, 1);
+#endif
 	tcon1_src_select(screen_id, LCD_SRC_DE, al_priv.de_id[screen_id]);
 
 	return 0;
@@ -1391,6 +1427,19 @@ int disp_al_device_disable_irq(u32 screen_id)
 	return ret;
 }
 
+int disp_al_lcd_get_status(u32 screen_id, struct disp_panel_para *panel)
+{
+	int ret = 0;
+#if defined(DSI_VERSION_40)
+	if (panel->lcd_if == LCD_IF_DSI)
+		ret = dsi_get_status(screen_id);
+	else
+#endif
+		ret = tcon_get_status(screen_id, al_priv.tcon_type[screen_id]);
+
+	return ret;
+}
+
 int disp_al_device_get_status(u32 screen_id)
 {
 	int ret = 0;
@@ -1417,21 +1466,22 @@ int disp_init_al(struct disp_bsp_init_para *para)
 	de_enhance_init(para);
 	de_ccsc_init(para);
 	de_dcsc_init(para);
-#if defined(CONFIG_EINK_PANEL_USED) || defined(CONFIG_EINK200_SUNXI)
+#if IS_ENABLED(CONFIG_EINK_PANEL_USED) || IS_ENABLED(CONFIG_EINK200_SUNXI)
 #else
 	wb_ebios_init(para);
 #endif
 	de_clk_set_reg_base(para->reg_base[DISP_MOD_DE]);
-#if defined(CONFIG_ARCH_SUN50IW10)
+#if defined(CONFIG_INDEPENDENT_DE)
 	de1_clk_set_reg_base(para->reg_base[DISP_MOD_DE1]);
 #endif
+
 
 	for (i = 0; i < DEVICE_NUM; i++)
 		tcon_set_reg_base(i, para->reg_base[DISP_MOD_LCD0 + i]);
 
 	for (i = 0; i < DE_NUM; i++) {
 		if (de_feat_is_support_smbl(i))
-#if defined(CONFIG_ARCH_SUN50IW10)
+#if defined(CONFIG_INDEPENDENT_DE)
 			de_smbl_init(i, para->reg_base[DISP_MOD_DE + i]);
 #else
 			de_smbl_init(i, para->reg_base[DISP_MOD_DE]);
@@ -1439,7 +1489,7 @@ int disp_init_al(struct disp_bsp_init_para *para)
 	}
 
 #if defined(HAVE_DEVICE_COMMON_MODULE)
-#if defined(CONFIG_ARCH_SUN50IW10)
+#if defined(CONFIG_INDEPENDENT_DE)
 	for (i = 0; i < DE_NUM; i++) {
 		tcon_top_set_reg_base(i, para->reg_base[DISP_MOD_DEVICE + i]);
 	}
@@ -1511,7 +1561,7 @@ int disp_exit_al(void)
 	de_enhance_exit();
 	de_ccsc_exit();
 	de_dcsc_exit();
-#if defined(CONFIG_EINK_PANEL_USED) || defined(CONFIG_EINK200_SUNXI)
+#if IS_ENABLED(CONFIG_EINK_PANEL_USED) || IS_ENABLED(CONFIG_EINK200_SUNXI)
 #else
 	wb_ebios_exit();
 #endif
@@ -1646,4 +1696,54 @@ int disp_al_vdpo_disable(u32 screen_id)
 void disp_al_show_builtin_patten(u32 hwdev_index, u32 patten)
 {
 	tcon_show_builtin_patten(hwdev_index, patten);
+}
+
+void disp_al_update_de_clk_rate(u32 rate)
+{
+	de_update_clk_rate(rate);
+}
+
+unsigned long de_get_reg_base(u32 sel, u32 *off, int need_update)
+{
+	u32 flag = *off & PQ_REG_MASK;
+	unsigned long reg_base = 0x0;
+
+	printk("flag = 0x%x\n", flag);
+
+	switch (flag) {
+		case PEAK_OFST:
+			reg_base = de_peak_get_reg_base(sel);
+			if (reg_base == 0) {
+				pr_err("Get PEAK reg base err!\n");
+				return 0;
+			}
+			if (need_update) {
+				de_peak_set_pq_dirty(sel);
+			}
+			*off = *off - PEAK_OFST;
+			break;
+		case LTI_OFST:
+			reg_base = de_lti_get_reg_base(sel, 0, need_update);
+			if (reg_base == 0) {
+				pr_err("Get PEAK reg base err!\n");
+				return 0;
+			}
+			*off = *off - LTI_OFST;
+			break;
+		case FCE_OFST:
+			break;
+		case ASE_OFST:
+			break;
+		case FCC_OFST:
+			break;
+		default:
+			break;
+	}
+
+	return reg_base;
+}
+
+unsigned long disp_al_get_reg_base(u32 sel, u32 *off, int updata)
+{
+	return de_get_reg_base(sel, off, updata);
 }

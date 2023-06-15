@@ -16,6 +16,7 @@
 
 #include "disp_display.h"
 #include "disp_rtwb.h"
+#include "../disp_trace.h"
 
 struct disp_dev_t gdisp;
 
@@ -35,7 +36,6 @@ s32 bsp_disp_init(struct disp_bsp_init_para *para)
 			     (unsigned long)disp);
 	}
 
-	bsp_disp_set_print_level(DEFAULT_PRINT_LEVLE);
 	disp_init_al(para);
 #if defined (DE_VERSION_V33X)
 	disp_al_init_tcon(para);
@@ -63,9 +63,17 @@ s32 bsp_disp_init(struct disp_bsp_init_para *para)
 	disp_init_vdpo(para);
 #endif
 	disp_init_mgr(para);
+#if defined(CONFIG_DISP2_SUNXI_SUPPORT_ENAHNCE)
 	disp_init_enhance(para);
+#endif
+#if defined(CONFIG_DISP2_SUNXI_SUPPORT_SMBL)
 	disp_init_smbl(para);
+#endif
 	disp_init_capture(para);
+
+#if defined(CONFIG_SUNXI_DISP2_FB_ROTATION_SUPPORT)
+	disp_init_rotation_sw(para);
+#endif
 
 #if defined(SUPPORT_WB)
 	disp_init_format_convert_manager(para);
@@ -88,8 +96,12 @@ s32 bsp_disp_exit(u32 mode)
 	disp_exit_format_convert_manager();
 #endif
 	disp_exit_capture();
+#if defined(CONFIG_DISP2_SUNXI_SUPPORT_SMBL)
 	disp_exit_smbl();
+#endif
+#if defined(CONFIG_DISP2_SUNXI_SUPPORT_ENAHNCE)
 	disp_exit_enhance();
+#endif
 	disp_exit_mgr();
 #if defined(SUPPORT_HDMI)
 	disp_exit_hdmi();
@@ -241,7 +253,7 @@ s32 disp_device_attached_and_enable(int disp_mgr, int disp_dev,
 			if (mgr->device->set_static_config)
 				ret = mgr->device->set_static_config(mgr->device,
 							config);
-				mgr->device->smooth_enable(mgr->device);
+			mgr->device->smooth_enable(mgr->device);
 			if (ret != 0)
 				goto exit;
 		}
@@ -288,9 +300,10 @@ s32 bsp_disp_device_switch(int disp, enum disp_output_type output_type,
 	int disp_dev;
 	int ret = -1;
 	struct disp_device_config config;
+	memset(&config, 0, sizeof(struct disp_device_config));
 
 	config.type = output_type;
-	config.mode = mode;
+	config.mode = (enum disp_tv_mode)mode;
 	config.format = (output_type == DISP_OUTPUT_TYPE_LCD) ?
 			DISP_CSC_TYPE_RGB : DISP_CSC_TYPE_YUV444;
 	config.bits = DISP_DATA_8BITS;
@@ -438,9 +451,16 @@ s32 disp_init_connections(struct disp_bsp_init_para *para)
 		struct disp_manager *mgr;
 		struct disp_layer *lyr;
 		struct disp_device *dispdev = NULL;
+#if defined(CONFIG_DISP2_SUNXI_SUPPORT_ENAHNCE)
 		struct disp_enhance *enhance = NULL;
+#endif
+#if defined(CONFIG_DISP2_SUNXI_SUPPORT_SMBL)
 		struct disp_smbl *smbl = NULL;
+#endif
 		struct disp_capture *cptr = NULL;
+#if defined(CONFIG_SUNXI_DISP2_FB_ROTATION_SUPPORT)
+		struct disp_rotation_sw *rot_sw = NULL;
+#endif
 
 		mgr = disp_get_layer_manager(disp);
 		if (!mgr)
@@ -478,19 +498,30 @@ s32 disp_init_connections(struct disp_bsp_init_para *para)
 			dispdev = disp_device_get(disp, DISP_OUTPUT_TYPE_LCD);
 			if ((dispdev) && (dispdev->set_manager))
 				dispdev->set_manager(dispdev, mgr);
+			mgr->enable_iommu(mgr, true);
 		}
 
+#if defined(CONFIG_DISP2_SUNXI_SUPPORT_ENAHNCE)
 		enhance = disp_get_enhance(disp);
 		if (enhance && (enhance->set_manager))
 			enhance->set_manager(enhance, mgr);
+#endif
 
+#if defined(CONFIG_DISP2_SUNXI_SUPPORT_SMBL)
 		smbl = disp_get_smbl(disp);
 		if (smbl && (smbl->set_manager))
 			smbl->set_manager(smbl, mgr);
+#endif
 
 		cptr = disp_get_capture(disp);
 		if (cptr && (cptr->set_manager))
 			cptr->set_manager(cptr, mgr);
+
+#if defined(CONFIG_SUNXI_DISP2_FB_ROTATION_SUPPORT)
+		rot_sw = disp_get_rotation_sw(disp);
+		if (rot_sw && (rot_sw->set_manager))
+			rot_sw->set_manager(rot_sw, mgr);
+#endif
 	}
 
 	return 0;
@@ -582,6 +613,7 @@ s32 bsp_disp_sync_with_hw(struct disp_bsp_init_para *para)
 		struct disp_manager *mgr = NULL;
 
 		struct disp_device_config config;
+		memset(&config, 0, sizeof(struct disp_device_config));
 
 		config.type = type;
 		config.mode = mode;
@@ -702,6 +734,8 @@ static s32 disp_sync_all(u32 disp, bool sync)
 	struct disp_manager *mgr;
 	struct disp_device *dispdev;
 
+	DISP_TRACE_INT2("frame-skip", disp, sync ? 0 : 1);
+
 	mgr = disp_get_layer_manager(disp);
 	if (!mgr) {
 		DE_WRN("get mgr%d fail\n", disp);
@@ -713,6 +747,8 @@ static s32 disp_sync_all(u32 disp, bool sync)
 			if (dispdev->get_status(dispdev) != 0)
 				gdisp.screen[disp].health_info.error_cnt++;
 		}
+		if (sync == true)
+			mgr->enable_iommu(mgr, true);
 	}
 
 	return 0;
@@ -772,6 +808,9 @@ void sync_event_proc(u32 disp, bool timeout)
 
 	gdisp.screen[disp].health_info.irq_cnt++;
 
+	DISP_TRACE_INT2("vsync-irq", disp,
+			gdisp.screen[disp].health_info.irq_cnt & 0x01);
+
 	if (!disp_feat_is_using_rcq(disp)) {
 		if (!timeout)
 			disp_sync_checkin(disp);
@@ -793,6 +832,7 @@ void sync_event_proc(u32 disp, bool timeout)
 			spin_unlock_irqrestore(&gdisp.screen[disp].flag_lock, flags);
 			disp_sync_all(disp, false);
 		}
+		DISP_TRACE_INT2("vsync-timeout", disp, timeout ? 1 : 0);
 
 		if (gdisp.screen[disp].vsync_event_en && gdisp.init_para.vsync_event) {
 			ret = gdisp.init_para.vsync_event(disp);
@@ -807,8 +847,7 @@ void sync_event_proc(u32 disp, bool timeout)
 		struct disp_manager *mgr;
 
 		mgr = disp_get_layer_manager(disp);
-		if (!timeout)
-			disp_sync_checkin(disp);
+		disp_sync_checkin(disp);
 
 
 		if (gdisp.init_para.disp_int_process)
@@ -976,17 +1015,6 @@ s32 bsp_disp_is_in_vb(void)
 }
 #endif
 
-s32 bsp_disp_set_print_level(u32 print_level)
-{
-	gdisp.print_level = print_level;
-
-	return 0;
-}
-
-s32 bsp_disp_get_print_level(void)
-{
-	return gdisp.print_level;
-}
 
 s32 bsp_disp_get_screen_physical_width(u32 disp)
 {
@@ -1297,12 +1325,16 @@ s32 bsp_disp_set_hdmi_func(struct disp_device_func *func)
 
 		hdmi = disp_device_find(disp, DISP_OUTPUT_TYPE_HDMI);
 		if (hdmi) {
-			ret = hdmi->set_func(hdmi, func);
-			if (ret == 0)
-				registered_cnt++;
+			if (hdmi->set_func) {
+				ret = hdmi->set_func(hdmi, func);
+				if (ret == 0)
+					registered_cnt++;
+			} else {
+				pr_err("disp hdmi device is NOT registered!\n");
+				return -1;
+			}
 		}
 	}
-
 	if (registered_cnt != 0) {
 		DE_INF("registered!!\n");
 		gdisp.hdmi_registered = 1;
@@ -1310,6 +1342,8 @@ s32 bsp_disp_set_hdmi_func(struct disp_device_func *func)
 			gdisp.init_para.start_process();
 
 		return 0;
+	} else {
+		pr_err("NO hdmi funcs to registered!!!\n");
 	}
 
 	return -1;
@@ -1491,7 +1525,6 @@ s32 bsp_disp_tv_set_hpd(u32 state)
 		if (ptv) {
 			ret = disp_tv_set_hpd(ptv, state);
 		} else {
-			ret &= ret;
 			/* DE_WRN("'ptv is null\n"); */
 			continue;
 		}

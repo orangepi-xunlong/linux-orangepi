@@ -1,12 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * CM3232 Ambient Light Sensor
  *
  * Copyright (C) 2014-2015 Capella Microsystems Inc.
  * Author: Kevin Tsai <ktsai@capellamicro.com>
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2, as published
- * by the Free Software Foundation.
  *
  * IIO driver for CM3232 (7-bit I2C slave address 0x10).
  */
@@ -322,7 +319,6 @@ static const struct attribute_group cm3232_attribute_group = {
 };
 
 static const struct iio_info cm3232_info = {
-	.driver_module		= THIS_MODULE,
 	.read_raw		= &cm3232_read_raw,
 	.write_raw		= &cm3232_write_raw,
 	.attrs			= &cm3232_attribute_group,

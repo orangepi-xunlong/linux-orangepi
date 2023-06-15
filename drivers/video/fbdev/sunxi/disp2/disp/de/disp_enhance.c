@@ -8,6 +8,7 @@
  * warranty of any kind, whether express or implied.
  */
 
+#if defined(CONFIG_DISP2_SUNXI_SUPPORT_ENAHNCE)
 #include "disp_enhance.h"
 
 struct disp_enhance_private_data {
@@ -809,3 +810,4 @@ s32 disp_exit_enhance(void)
 	return 0;
 }
 
+#endif

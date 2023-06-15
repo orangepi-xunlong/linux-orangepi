@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  *
  * Definitions for mount interface. This describes the in the kernel build 
@@ -15,11 +16,13 @@
 #include <linux/spinlock.h>
 #include <linux/seqlock.h>
 #include <linux/atomic.h>
+#include <linux/android_kabi.h>
 
 struct super_block;
 struct vfsmount;
 struct dentry;
 struct mnt_namespace;
+struct fs_context;
 
 #define MNT_NOSUID	0x01
 #define MNT_NODEV	0x02
@@ -67,8 +70,11 @@ struct vfsmount {
 	struct dentry *mnt_root;	/* root of the mounted tree */
 	struct super_block *mnt_sb;	/* pointer to superblock */
 	int mnt_flags;
-	void *data;
-};
+	ANDROID_KABI_RESERVE(1);
+	ANDROID_KABI_RESERVE(2);
+	ANDROID_KABI_RESERVE(3);
+	ANDROID_KABI_RESERVE(4);
+} __randomize_layout;
 
 struct file; /* forward dec */
 struct path;
@@ -80,14 +86,18 @@ extern void mnt_drop_write(struct vfsmount *mnt);
 extern void mnt_drop_write_file(struct file *file);
 extern void mntput(struct vfsmount *mnt);
 extern struct vfsmount *mntget(struct vfsmount *mnt);
-extern struct vfsmount *mnt_clone_internal(struct path *path);
-extern int __mnt_is_readonly(struct vfsmount *mnt);
+extern struct vfsmount *mnt_clone_internal(const struct path *path);
+extern bool __mnt_is_readonly(struct vfsmount *mnt);
 extern bool mnt_may_suid(struct vfsmount *mnt);
 
 struct path;
-extern struct vfsmount *clone_private_mount(struct path *path);
+extern struct vfsmount *clone_private_mount(const struct path *path);
+extern int __mnt_want_write(struct vfsmount *);
+extern void __mnt_drop_write(struct vfsmount *);
 
 struct file_system_type;
+extern struct vfsmount *fc_mount(struct fs_context *fc);
+extern struct vfsmount *vfs_create_mount(struct fs_context *fc);
 extern struct vfsmount *vfs_kern_mount(struct file_system_type *type,
 				      int flags, const char *name,
 				      void *data);
@@ -101,5 +111,7 @@ extern void mark_mounts_for_expiry(struct list_head *mounts);
 extern dev_t name_to_dev_t(const char *name);
 
 extern unsigned int sysctl_mount_max;
+
+extern bool path_is_mountpoint(const struct path *path);
 
 #endif /* _LINUX_MOUNT_H */

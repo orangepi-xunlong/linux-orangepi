@@ -4,17 +4,27 @@ config SUNXI_G2D
 	tristate "SUNXI G2D Driver"
 	default n
 	help
+	  Enable sunxi platform 2D Graphics engine
 
 config SUNXI_G2D_MIXER
 	depends on (SUNXI_G2D)
 	bool "sunxi g2d mixer module"
 	default n
 	help
-     Choose Y to enable mixer module of g2d
+	  Choose Y to enable mixer module of g2d
 
 config SUNXI_G2D_ROTATE
 	depends on (SUNXI_G2D)
 	bool "sunxi g2d rotate module"
 	default n
 	help
-     Choose Y to enable rotate module of g2d
+	  Choose Y to enable rotate module of g2d
+
+config SUNXI_SYNCFENCE
+	depends on (SUNXI_G2D)
+	select SYNC_FILE
+	default y
+	bool "sunxi sync fence implement for rotate jobs synchronous"
+	help
+	  Choose Y to enable sync fence implement for sunxi G2D
+

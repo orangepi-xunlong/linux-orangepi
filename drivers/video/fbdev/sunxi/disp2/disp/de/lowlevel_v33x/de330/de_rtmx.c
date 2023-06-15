@@ -322,18 +322,11 @@ s32 de_rtmx_update_reg_ahb(u32 disp)
 	struct de_reg_block **p_reg_blk = rcq_info->reg_blk;
 	struct de_reg_block **p_reg_blk_end =
 		p_reg_blk + rcq_info->cur_num;
-	u32 dirty = 0;
 
-#if RTMX_USE_RCQ
 	for (; p_reg_blk != p_reg_blk_end; ++p_reg_blk) {
 		struct de_reg_block *reg_blk = *p_reg_blk;
-		dirty = 1;
-#else
-	for (; p_reg_blk != p_reg_blk_end; ++p_reg_blk) {
-		struct de_reg_block *reg_blk = *p_reg_blk;
-		dirty = reg_blk->dirty;
-#endif
-		if (dirty) {
+
+		if (reg_blk->dirty) {
 			memcpy((void *)reg_blk->reg_addr,
 				(void *)reg_blk->vir_addr, reg_blk->size);
 			reg_blk->dirty = 0;
@@ -361,8 +354,8 @@ s32 de_rtmx_set_rcq_update(u32 disp, u32 en)
 	return 0;
 }
 
-enum de_color_space de_rtmx_convert_color_space(
-	enum de_color_space_u color_space_u) {
+enum de_color_space de_rtmx_convert_color_space(enum de_color_space_u color_space_u)
+{
 	switch (color_space_u) {
 	case DE_GBR:
 	case DE_GBR_F:
@@ -457,8 +450,10 @@ s32 de_rtmx_mgr_apply(u32 disp, struct disp_manager_data *data)
 		ctx->output.color_range = data->config.color_range;
 		ctx->output.color_space = de_rtmx_convert_color_space(
 			(enum de_color_space_u)data->config.color_space);
-		ctx->output.eotf = data->config.eotf;
-		ctx->output.data_bits = data->config.data_bits;
+		ctx->output.eotf = (enum de_eotf)data->config.eotf;
+		ctx->output.data_bits = (enum de_data_bits)data->config.data_bits;
+		ctx->output.hdr_type = data->config.hdr_type;
+		DE_WRN("ctx->output.hdr_type=%d\n", ctx->output.hdr_type);
 		de_fmt_set_para(disp);
 	}
 
@@ -473,8 +468,10 @@ s32 de_rtmx_mgr_apply(u32 disp, struct disp_manager_data *data)
 		ctx->output.color_range = data->config.color_range;
 		ctx->output.color_space = de_rtmx_convert_color_space(
 			(enum de_color_space_u)data->config.color_space);
-		ctx->output.eotf = data->config.eotf;
-		ctx->output.data_bits = data->config.data_bits;
+		ctx->output.eotf = (enum de_eotf)data->config.eotf;
+		ctx->output.data_bits = (enum de_data_bits)data->config.data_bits;
+		ctx->output.hdr_type = data->config.hdr_type;
+		DE_WRN("ctx->output.hdr_type=%d\n", ctx->output.hdr_type);
 
 		de_fmt_set_para(disp);
 
@@ -852,6 +849,8 @@ static s32 de_rtmx_chn_apply_csc(u32 disp, u32 chn,
 	icsc_info.color_space = chn_info->color_space;
 	icsc_info.color_range = chn_info->color_range;
 	icsc_info.eotf = chn_info->eotf;
+	icsc_info.hdr_type = chn_info->hdr_type;
+	icsc_info.pMeta = chn_info->pMeta;
 
 	/* cdc */
 	if (chn_info->cdc_hdl != NULL) {
@@ -859,6 +858,7 @@ static s32 de_rtmx_chn_apply_csc(u32 disp, u32 chn,
 		ocsc_info.color_range = icsc_info.color_range;
 		ocsc_info.color_space = ctx->output.color_space;
 		ocsc_info.eotf = ctx->output.eotf;
+		ocsc_info.hdr_type = ctx->output.hdr_type;
 		de_cdc_set_para(chn_info->cdc_hdl, &icsc_info, &ocsc_info);
 		memcpy((void *)&icsc_info, (void *)&ocsc_info,
 			sizeof(icsc_info));
@@ -1237,6 +1237,8 @@ static s32 de_rtmx_chn_layer_apply(u32 disp, u32 chn,
 	u8 fbd_en = 0;
 	u8 atw_en = 0;
 	u8 snr_en = 0;
+	enum disp_hdr_type hdr_type = HDR10;
+	struct sunxi_metadata    *pMetadata = NULL;
 
 	data_end = data + layer_num;
 	for (; data != data_end; ++data) {
@@ -1260,6 +1262,11 @@ static s32 de_rtmx_chn_layer_apply(u32 disp, u32 chn,
 				atw_en++;
 			if (data->config.info.snr.en)
 				snr_en++;
+			if (data->config.info.fb.metadata_flag
+				& SUNXI_METADATA_FLAG_HDR10P_METADATA) {
+				hdr_type = HDR10P;
+				pMetadata = data->config.info.fb.p_metadata;
+			}
 			/* 3d mode*/
 			if (data->config.info.fb.flags) {
 				memcpy(&(data + 1)->config.info.fb.crop,
@@ -1322,6 +1329,10 @@ static s32 de_rtmx_chn_layer_apply(u32 disp, u32 chn,
 	chn_info->fbd_en = fbd_en;
 	chn_info->atw_en = atw_en;
 	chn_info->snr_en = snr_en;
+	chn_info->hdr_type = hdr_type;
+	if (HDR10P == hdr_type) {
+		chn_info->pMeta = pMetadata;
+	}
 	if (!dirty_flag)
 		return 0;
 	if (!enable) {

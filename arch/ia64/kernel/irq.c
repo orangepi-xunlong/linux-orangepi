@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  *	linux/arch/ia64/kernel/irq.c
  *
@@ -17,7 +18,7 @@
  */
 
 #include <asm/delay.h>
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 #include <linux/module.h>
 #include <linux/seq_file.h>
 #include <linux/interrupt.h>
@@ -33,18 +34,6 @@ void ack_bad_irq(unsigned int irq)
 {
 	printk(KERN_ERR "Unexpected irq vector 0x%x on CPU %u!\n", irq, smp_processor_id());
 }
-
-#ifdef CONFIG_IA64_GENERIC
-ia64_vector __ia64_irq_to_vector(int irq)
-{
-	return irq_cfg[irq].vector;
-}
-
-unsigned int __ia64_local_vector_to_irq (ia64_vector vec)
-{
-	return __this_cpu_read(vector_irq[vec]);
-}
-#endif
 
 /*
  * Interrupt statistics:
@@ -72,17 +61,6 @@ void set_irq_affinity_info (unsigned int irq, int hwid, int redir)
 		irq_redir[irq] = (char) (redir & 0xff);
 	}
 }
-
-bool is_affinity_mask_valid(const struct cpumask *cpumask)
-{
-	if (ia64_platform_is("sn2")) {
-		/* Only allow one CPU to be specified in the smp_affinity mask */
-		if (cpumask_weight(cpumask) != 1)
-			return false;
-	}
-	return true;
-}
-
 #endif /* CONFIG_SMP */
 
 int __init arch_early_irq_init(void)

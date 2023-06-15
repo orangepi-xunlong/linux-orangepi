@@ -1,5 +1,5 @@
 /*
- * linux-4.9/drivers/media/platform/sunxi-vin/vin-video/dma_reg_i.h
+ * linux-5.4/drivers/media/platform/sunxi-vin/vin-video/dma_reg_i.h
  *
  * Copyright (c) 2007-2017 Allwinnertech Co., Ltd.
  *
@@ -159,6 +159,8 @@
 #define	STORED_FRM_CNT_INT_PD_MASK		(0X1 << STORED_FRM_CNT_INT_PD)
 #define	FRM_LOST_INT_PD 			15
 #define	FRM_LOST_INT_PD_MASK			(0X1 << FRM_LOST_INT_PD)
+#define	LBC_HB_INT_PD				16
+#define	LBC_HB_INT_PD_MASK			(0X1 << LBC_HB_INT_PD)
 
 #define	CSIC_DMA_LINE_CNT_REG_OFF		0X058
 #define	LINE_CNT_NUM				0

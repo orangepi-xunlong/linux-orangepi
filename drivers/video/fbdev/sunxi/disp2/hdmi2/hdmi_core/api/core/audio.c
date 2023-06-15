@@ -336,7 +336,7 @@ static void _audio_clock_cts(hdmi_tx_dev_t *dev, u32 value)
 		dev_write_mask(dev, AUD_CTS3, AUD_CTS3_AUDCTS_MASK,
 							(u8)(value >> 16));
 		dev_write_mask(dev, AUD_CTS3, AUD_CTS3_CTS_MANUAL_MASK, 1);
-	} else{
+	} else {
 		/* Set to automatic generation of CTS values */
 		dev_write_mask(dev, AUD_CTS3, AUD_CTS3_CTS_MANUAL_MASK, 0);
 	}

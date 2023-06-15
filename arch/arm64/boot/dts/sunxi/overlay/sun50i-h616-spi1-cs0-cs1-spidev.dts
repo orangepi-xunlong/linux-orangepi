@@ -1,0 +1,33 @@
+/dts-v1/;
+/plugin/;
+
+/ {
+	fragment@0 {
+		target = <&spi1>;
+		__overlay__ {
+			status = "okay";
+
+			pinctrl-names = "default", "sleep";
+			pinctrl-0 = <&spi1_pins_a &spi1_cs0_pin &spi1_cs1_pin>;
+			pinctrl-1 = <&spi1_pins_b>;
+			spi1_cs_number = <0x2>;
+			spi1_cs_bitmap = <0x3>;
+
+			spi_board0@0 {
+				device_type = "spi_board0";
+				compatible = "rohm,dh2228fv";
+				spi-max-frequency = <10000000>;
+				reg = <0x0>;
+				status = "okay";
+			};
+
+			spi_board1@1 {
+				device_type = "spi_board1";
+				compatible = "rohm,dh2228fv";
+				spi-max-frequency = <10000000>;
+				reg = <0x1>;
+				status = "okay";
+			};
+		};
+	};
+};

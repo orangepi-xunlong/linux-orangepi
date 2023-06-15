@@ -165,6 +165,11 @@
 #define S1_HB_SHORT_INT_EN	(1 << 15)
 #define SRAM_CLR_INT_EN		(1 << 16)
 #define DDR_W_FINISH_INT_EN	(1 << 17)
+#define S0_BTYPE_ERROR_INT_EN	(1 << 18)
+#define S1_BTYPE_ERROR_INT_EN	(1 << 19)
+#define ADDR_ERROR_INT_EN	(1 << 20)
+#define LBC_ERROR_INT_EN	(1 << 21)
+#define FSM_FRAME_ERROR_INT_EN	(1 << 22)
 
 #define ISP_IRQ_EN_ALL	0xffffffff
 
@@ -186,11 +191,17 @@
 #define S1_HB_SHORT_PD		(1 << 15)
 #define SRAM_CLR_PD		(1 << 16)
 #define DDR_W_FINISH_PD		(1 << 17)
+#define S0_BTYPE_ERROR_PD	(1 << 18)
+#define S1_BTYPE_ERROR_PD	(1 << 19)
+#define ADDR_ERROR_PD		(1 << 20)
+#define LBC_ERROR_PD		(1 << 21)
+#define FSM_FRAME_LOST_PD	(1 << 22)
 #define FIFO_VALID_ST		(1 << 31)
 
 #define PARA_LOAD_PD		S0_PARA_LOAD_PD
 #define FRAME_ERROR_PD		S0_FRAME_ERROR_PD
 #define FRAME_LOST_PD		S0_FRAME_LOST_PD
+#define HB_SHORT_PD		S0_HB_SHORT_PD
 
 #define ISP_IRQ_STATUS_ALL	0xffffffff
 
@@ -206,6 +217,29 @@
 #define WDR_WRITE_FIFO_OF_PD	(1 << 11)
 #define WDR_READ_FIFO_OF_PD	(1 << 13)
 #define S1_CIN_FIFO_OF_PD	(1 << 15)
+#define LCA_RGB_FIFO_R_EMP_PD	(1 << 16)
+#define LCA_RGB_FIFO_W_FULL_PD	(1 << 17)
+#define LCA_BY_FIFO_R_EMP_PD	(1 << 18)
+#define LCA_BY_FIFO_W_FULL_PD	(1 << 19)
+#define D3D_K_FIFO_W_FULL_PD	(1 << 20)
+#define D3D_RAW_FIFO_W_FULL_PD	(1 << 21)
+#define D3D_K_FIFO_R_EMP_PD	(1 << 22)
+#define D3D_REF_FIFO_R_EMP_PD	(1 << 23)
+#define D3D_LTF_FIFO_R_EMP_PD	(1 << 24)
+
+#define WDR_LBC_DEC_ERR_PD	(0x1f << 0)
+#define WDR_LBC_DEC_ERR_OFF	0
+#define D3D_K_LBC_DEC_ERR_PD	(0x1f << 8)
+#define D3D_K_LBC_DEC_ERR_OFF	8
+#define D3D_REF_LBC_DEC_ERR_PD	(0x1f << 16)
+#define D3D_REF_LBC_DEC_ERR_OFF	16
+#define D3D_LTF_LBC_DEV_ERR_PD	(0x1f << 24)
+#define D3D_LTF_LBC_DEV_ERR_OFF	24
+#define LBC_MSQ_DEC_ERR_PD	(1 << 0)
+#define LBC_DTS_DEC_ERR_PD	(1 << 1)
+#define LBC_QP_DEC_ERR_PD	(1 << 2)
+#define LBC_CODEC_BIT_LOST_PD	(1 << 3)
+#define LBC_CODEC_RED_ERR_PD	(1 << 4)
 
 struct isp_wdr_mode_cfg {
 	unsigned char wdr_ch_seq;
@@ -293,6 +327,8 @@ void bsp_isp_clr_irq_status(unsigned long id, unsigned int flag);
 unsigned int bsp_isp_get_internal_status0(unsigned long id, unsigned int flag);
 void bsp_isp_clr_internal_status0(unsigned long id, unsigned int flag);
 unsigned int bsp_isp_get_internal_status1(unsigned long id);
+unsigned int bsp_isp_get_lbc_internal_status(unsigned long id, unsigned int flag);
+void bsp_isp_clr_lbc_internal_status(unsigned long id, unsigned int flag);
 unsigned int bsp_isp_get_isp_ver(unsigned long id, unsigned int *major, unsigned int *minor);
 unsigned int bsp_isp_get_max_width(unsigned long id);
 void bsp_isp_get_s0_ch_fmerr_cnt(unsigned long id, struct isp_size *size);
@@ -307,12 +343,13 @@ void bsp_isp_set_wdr_addr0(unsigned long id, dma_addr_t addr);
 void bsp_isp_set_d3d_ref_k_addr(unsigned long id, dma_addr_t addr);
 void bsp_isp_set_d3d_ref_raw_addr(unsigned long id, dma_addr_t addr);
 void bsp_isp_set_d3d_ltf_raw_addr(unsigned long id, dma_addr_t addr);
-void bsp_isp_set_wdr_raw_lbc_ctrl(unsigned long id, struct isp_lbc_cfg *lbc);
-void bsp_isp_set_d3d_k_lbc_ctrl(unsigned long id, struct isp_lbc_cfg *lbc);
-void bsp_isp_set_d3d_raw_lbc_ctrl(unsigned long id, struct isp_lbc_cfg *lbc);
 void bsp_isp_wdr_fifo_en(unsigned long id, unsigned int en);
 void bsp_isp_d3d_fifo_en(unsigned long id, unsigned int en);
 void bsp_isp_top_control(unsigned long id, int isp_num, int isp0_max_w);
+void bsp_isp_set_fifo_mode(unsigned long id, unsigned int mode);
+void bsp_isp_min_ddr_size(unsigned long id, unsigned int size);
+void bsp_isp_fifo_raw_write(unsigned long id, unsigned int depth);
+void bsp_isp_k_min_ddr_size(unsigned long id, unsigned int size);
 
 /*******isp load register which we should write to ddr first*********/
 
@@ -320,5 +357,8 @@ void bsp_isp_module_enable(unsigned long id, unsigned int module_flag);
 void bsp_isp_module_disable(unsigned long id, unsigned int module_flag);
 void bsp_isp_set_size(unsigned long id, struct isp_size_settings *size);
 unsigned int bsp_isp_load_update_flag(unsigned long id);
+void bsp_isp_set_wdr_raw_lbc_ctrl(unsigned long id, struct isp_lbc_cfg *lbc, unsigned int mode);
+void bsp_isp_set_d3d_k_lbc_ctrl(unsigned long id, struct isp_lbc_cfg *lbc, unsigned int mode);
+void bsp_isp_set_d3d_raw_lbc_ctrl(unsigned long id, struct isp_lbc_cfg *lbc, unsigned int mode);
 
 #endif /*_ISP521_REG_CFG_H_*/

@@ -19,6 +19,7 @@
  *
  ******************************************************************************/
 
+#ifdef CONFIG_DISP2_SUNXI_SUPPORT_ENAHNCE
 #include "de_fcc_type.h"
 #include "de_rtmx.h"
 #include "de_vep_table.h"
@@ -50,7 +51,7 @@ int de_fcc_init(unsigned int sel, unsigned int chno, uintptr_t reg_base)
 	void *memory;
 
 	fcc_base = reg_base + (sel + 1) * 0x00100000 + FCC_OFST;
-#if defined(CONFIG_ARCH_SUN50IW10)
+#if defined(CONFIG_INDEPENDENT_DE)
 	if (sel)
 		fcc_base = fcc_base - 0x00100000;
 #endif
@@ -227,3 +228,4 @@ int de_fcc_info2para(unsigned int sgain0, unsigned int sgain1,
 
 	return 0;
 }
+#endif

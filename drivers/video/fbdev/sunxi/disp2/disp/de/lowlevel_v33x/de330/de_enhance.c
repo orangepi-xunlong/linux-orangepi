@@ -326,7 +326,7 @@ s32 de_enhance_layer_apply(u32 disp,
 		if (bypass != g_para[disp][chn]->bypass)
 			flags |= ENH_BYPASS_DIRTY;
 
-		g_para[disp][chn]->flags = flags;
+		g_para[disp][chn]->flags = (enum disp_manager_dirty_flags)flags;
 
 		/* UPDATE g_para->module_para */
 		if (flags & ENH_SIZE_DIRTY) {

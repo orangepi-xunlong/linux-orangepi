@@ -1,0 +1,27 @@
+# All std:: types
+# This should be possible to remove, if/when we build against
+# a statically linked libc++.
+
+# Following entries Taken from chromium's tools/cfi/blacklist.txt
+[cfi-icall]
+
+######### Function pointers cast to incorrect type signatures
+
+# libicu is currently compiled such that in libicu the 'UChar' type is a
+# defined as a char16_t internally, but for the rest of chromium it's an
+# unsigned short, causing mismatched type signatures for icalls to/from icu
+# v8/src/intl.cc
+
+# PropertyCallbackArguments::Call methods cast function pointers
+#src:*/*
+#src:*/*.S
+#src:*/nftl_v8.S
+#src:*/*
+src:*/modules/nand/*
+
+# v8 callback that casts argument template parameters
+
+# weak_callback_ is cast from original type.
+
+
+# check for type failed during indirect function call

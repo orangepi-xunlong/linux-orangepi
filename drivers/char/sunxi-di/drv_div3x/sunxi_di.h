@@ -51,6 +51,11 @@ enum {
 	DI_TNR_LEVEL_LOW,
 };
 
+enum {
+	FB_PROCESS_NO_ERROR = 0,
+	FB_PROCESS_ERROR_INTERLACE_TYPE = 1,
+};
+
 struct di_version {
 	u32 version_major;
 	u32 version_minor;

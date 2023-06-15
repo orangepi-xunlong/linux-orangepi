@@ -1,5 +1,5 @@
 /*
- * linux-4.9/drivers/media/platform/sunxi-vin/vin-video/dma_reg.h
+ * linux-5.4/drivers/media/platform/sunxi-vin/vin-video/dma_reg.h
  *
  * Copyright (c) 2007-2017 Allwinnertech Co., Ltd.
  *
@@ -127,7 +127,8 @@ enum dma_int_sel {
 	DMA_INT_BUF_ADDR_FIFO = 0x2000,
 	DMA_INT_STORED_FRM_CNT = 0x4000,
 	DMA_INT_FRM_LOST = 0x8000,
-	DMA_INT_ALL = 0XE3FF,
+	DMA_INT_LBC_HB = 0x10000,
+	DMA_INT_ALL = 0X1E3FF,
 };
 
 /*register data struct*/
@@ -182,6 +183,7 @@ struct dma_int_status {
 	bool buf_addr_fifo;
 	bool stored_frm_cnt;
 	bool frm_lost;
+	bool lbc_hb;
 };
 
 struct dma_fifo_threshold {
@@ -242,7 +244,7 @@ void csic_dma_10bit_cut2_8bit_enable(unsigned int sel);
 void csic_dma_10bit_cut2_8bit_disable(unsigned int sel);
 void csic_set_threshold_for_bufa_mode(unsigned int sel, struct dma_bufa_threshold *threshold);
 void csic_dma_output_size_cfg(unsigned int sel, struct dma_output_size *size);
-void csic_dma_buffer_address(unsigned int sel, enum fifo_buf_sel buf,
+void csic_dma_buffer_address(unsigned int sel, unsigned int buf,
 				unsigned long addr);
 void csic_dma_buffer_length(unsigned int sel, struct dma_buf_len *buf_len);
 void csic_dma_flip_size(unsigned int sel, struct dma_flip_size *flip_size);

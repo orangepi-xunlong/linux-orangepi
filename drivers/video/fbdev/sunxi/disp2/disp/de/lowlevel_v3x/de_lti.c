@@ -19,6 +19,7 @@
  *
  ******************************************************************************/
 
+#ifdef CONFIG_DISP2_SUNXI_SUPPORT_ENAHNCE
 #include "de_lti_type.h"
 #include "de_enhance.h"
 
@@ -378,3 +379,4 @@ int de_lti_info2para(unsigned int sel, unsigned int chno,
 	cti_block[sel][chno].dirty = 1;
 	return 0;
 }
+#endif

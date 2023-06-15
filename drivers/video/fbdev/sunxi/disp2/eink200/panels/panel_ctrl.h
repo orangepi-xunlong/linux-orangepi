@@ -21,8 +21,12 @@ struct __eink_panel {
 	char name[32];
 	struct eink_panel_func func;
 };
-
 extern struct __eink_panel default_eink;
+extern struct __eink_panel ed060xd4u2_tc;
+extern struct __eink_panel ed068og1;
+extern struct __eink_panel es103tc1c1;
+extern struct __eink_panel ed060xh9;
+
 extern int eink_panel_init(void);
 extern s32 panel_pin_cfg(u32 en);
 extern s32 panel_gpio_set_value(u32 io_index, u32 value);

@@ -99,8 +99,6 @@ static s32 vga_clk_config(struct disp_device *vga)
 		DE_WRN("device hdl is NULL!\n");
 		return DIS_FAIL;
 	}
-	if (vgap->clk_parent && vgap->clk)
-		clk_set_parent(vgap->clk, vgap->clk_parent);
 
 	return clk_set_rate(vgap->clk, vga->timings.pixel_clk);
 }
@@ -473,7 +471,7 @@ static s32 disp_vga_check_if_enabled(struct disp_device *vga)
 
 #if !defined(CONFIG_COMMON_CLK_ENABLE_SYNCBOOT)
 	if (vgap->clk &&
-	   (__clk_get_enable_count(vgap->clk) == 0))
+	   (__clk_is_enabled(vgap->clk) == 0))
 		ret = 0;
 #endif
 

@@ -15,7 +15,7 @@
 */
 
 #include <linux/clk.h>
-#include <linux/clk/sunxi.h>
+#include <linux/reset.h>
 
 #include <linux/gpio.h>
 #include <linux/platform_device.h>
@@ -326,6 +326,8 @@ static void sunxi_mmc_regs_save(char *host)
 static void sunxi_mmc_regs_restore(char *host)
 {
 	struct sunxi_mmc_mbak_regs *bak_regs = &gmbak_regs;
+	char *ccmu_reg = gccmu_base_reg;
+	u32 rval = 0;
 
 	/*restore public register */
 	mmc_mwritel(host, REG_GCTRL, bak_regs->gctrl);
@@ -334,7 +336,14 @@ static void sunxi_mmc_regs_restore(char *host)
 	mmc_mwritel(host, REG_WIDTH, bak_regs->buswid);
 	mmc_mwritel(host, REG_DBGC, bak_regs->debugc);
 
+	rval = readl(ccmu_reg + SUNXI_MMC_MODR);
+	rval &= ~((1<<31));
+	writel(rval, ccmu_reg + SUNXI_MMC_MODR);
 	mmc_mwritel(host, REG_DRV_DL, bak_regs->drv_dl);
+	rval = readl(ccmu_reg + SUNXI_MMC_MODR);
+	rval |= (1<<31);
+	writel(rval, ccmu_reg + SUNXI_MMC_MODR);
+
 	mmc_mwritel(host, REG_SAMP_DL, bak_regs->samp_dl);
 	mmc_mwritel(host, REG_DS_DL, bak_regs->ds_dl);
 	mmc_mwritel(host, REG_SD_NTSR, bak_regs->sd_ntsr);

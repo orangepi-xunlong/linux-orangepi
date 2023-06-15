@@ -1,6 +1,41 @@
+# SPDX-License-Identifier: GPL-2.0-only
+# The IOVA library may also be used by non-IOMMU_API users
+config IOMMU_IOVA
+	tristate
+
 # IOMMU_API always gets selected by whoever wants it.
 config IOMMU_API
 	bool
+
+if IOMMU_IOVA
+
+config IOMMU_LIMIT_IOVA_ALIGNMENT
+	bool "Limit IOVA alignment"
+	help
+	  When the IOVA framework applies IOVA alignment it aligns all
+	  IOVAs to the smallest PAGE_SIZE order which is greater than or
+	  equal to the requested IOVA size. This works fine for sizes up
+	  to several MiB, but for larger sizes it results in address
+	  space wastage and fragmentation. For example drivers with a 4
+	  GiB IOVA space might run out of IOVA space when allocating
+	  buffers great than 64 MiB.
+
+	  Enable this option to impose a limit on the alignment of IOVAs.
+
+	  If unsure, say N.
+
+config IOMMU_IOVA_ALIGNMENT
+	int "Maximum PAGE_SIZE order of alignment for IOVAs"
+	depends on IOMMU_LIMIT_IOVA_ALIGNMENT
+	range 4 9
+	default 9
+	help
+	  With this parameter you can specify the maximum PAGE_SIZE order for
+	  IOVAs. Larger IOVAs will be aligned only to this specified order.
+	  The order is expressed a power of two multiplied by the PAGE_SIZE.
+
+	  If unsure, leave the default value "9".
+endif
 
 menuconfig IOMMU_SUPPORT
 	bool "IOMMU Hardware Support"
@@ -23,7 +58,7 @@ config IOMMU_IO_PGTABLE
 config IOMMU_IO_PGTABLE_LPAE
 	bool "ARMv7/v8 Long Descriptor Format"
 	select IOMMU_IO_PGTABLE
-	depends on HAS_DMA && (ARM || ARM64 || COMPILE_TEST)
+	depends on ARM || ARM64 || (COMPILE_TEST && !GENERIC_ATOMIC64)
 	help
 	  Enable support for the ARM long descriptor pagetable format.
 	  This allocator supports 4K/2M/1G, 16K/32M and 64K/512M page
@@ -42,7 +77,7 @@ config IOMMU_IO_PGTABLE_LPAE_SELFTEST
 config IOMMU_IO_PGTABLE_ARMV7S
 	bool "ARMv7/v8 Short Descriptor Format"
 	select IOMMU_IO_PGTABLE
-	depends on HAS_DMA && (ARM || ARM64 || COMPILE_TEST)
+	depends on ARM || ARM64 || COMPILE_TEST
 	help
 	  Enable support for the ARM Short-descriptor pagetable format.
 	  This supports 32-bit virtual and physical addresses mapped using
@@ -60,8 +95,26 @@ config IOMMU_IO_PGTABLE_ARMV7S_SELFTEST
 
 endmenu
 
-config IOMMU_IOVA
-	tristate
+config IOMMU_DEBUGFS
+	bool "Export IOMMU internals in DebugFS"
+	depends on DEBUG_FS
+	help
+	  Allows exposure of IOMMU device internals. This option enables
+	  the use of debugfs by IOMMU drivers as required. Devices can,
+	  at initialization time, cause the IOMMU code to create a top-level
+	  debug/iommu directory, and then populate a subdirectory with
+	  entries as required.
+
+config IOMMU_DEFAULT_PASSTHROUGH
+	bool "IOMMU passthrough by default"
+	depends on IOMMU_API
+        help
+	  Enable passthrough by default, removing the need to pass in
+	  iommu.passthrough=on or iommu=pt through command line. If this
+	  is enabled, you can still disable with iommu.passthrough=off
+	  or iommu=nopt depending on the architecture.
+
+	  If unsure, say N here.
 
 config OF_IOMMU
        def_bool y
@@ -72,10 +125,13 @@ config IOMMU_DMA
 	bool
 	select IOMMU_API
 	select IOMMU_IOVA
+	select IRQ_MSI_IOMMU
 	select NEED_SG_DMA_LENGTH
 
 config FSL_PAMU
 	bool "Freescale IOMMU support"
+	depends on PCI
+	depends on PHYS_64BIT
 	depends on PPC_E500MC || (COMPILE_TEST && PPC)
 	select IOMMU_API
 	select GENERIC_ALLOCATOR
@@ -112,7 +168,7 @@ config AMD_IOMMU
 	select PCI_PASID
 	select IOMMU_API
 	select IOMMU_IOVA
-	depends on X86_64 && PCI && ACPI
+	depends on X86_64 && PCI && ACPI && HAVE_CMPXCHG_DOUBLE
 	---help---
 	  With this option you can enable support for AMD IOMMU hardware in
 	  your system. An IOMMU is a hardware component which provides
@@ -133,16 +189,30 @@ config AMD_IOMMU_V2
 	  hardware. Select this option if you want to use devices that support
 	  the PCI PRI and PASID interface.
 
+config AMD_IOMMU_DEBUGFS
+	bool "Enable AMD IOMMU internals in DebugFS"
+	depends on AMD_IOMMU && IOMMU_DEBUGFS
+	---help---
+	  !!!WARNING!!!  !!!WARNING!!!  !!!WARNING!!!  !!!WARNING!!!
+
+	  DO NOT ENABLE THIS OPTION UNLESS YOU REALLY, -REALLY- KNOW WHAT YOU ARE DOING!!!
+	  Exposes AMD IOMMU device internals in DebugFS.
+
+	  This option is -NOT- intended for production environments, and should
+	  not generally be enabled.
+
 # Intel IOMMU support
 config DMAR_TABLE
 	bool
 
 config INTEL_IOMMU
 	bool "Support for Intel IOMMU using DMA Remapping Devices"
-	depends on PCI_MSI && ACPI && (X86 || IA64_GENERIC)
+	depends on PCI_MSI && ACPI && (X86 || IA64)
 	select IOMMU_API
 	select IOMMU_IOVA
+	select NEED_DMA_MAP_STATE
 	select DMAR_TABLE
+	select SWIOTLB
 	help
 	  DMA remapping (DMAR) devices support enables independent address
 	  translations for Direct Memory Access (DMA) from devices.
@@ -150,9 +220,22 @@ config INTEL_IOMMU
 	  and include PCI device scope covered by these DMA
 	  remapping devices.
 
+config INTEL_IOMMU_DEBUGFS
+	bool "Export Intel IOMMU internals in Debugfs"
+	depends on INTEL_IOMMU && IOMMU_DEBUGFS
+	help
+	  !!!WARNING!!!
+
+	  DO NOT ENABLE THIS OPTION UNLESS YOU REALLY KNOW WHAT YOU ARE DOING!!!
+
+	  Expose Intel IOMMU internals in Debugfs.
+
+	  This option is -NOT- intended for production environments, and should
+	  only be enabled for debugging Intel IOMMU.
+
 config INTEL_IOMMU_SVM
 	bool "Support for Shared Virtual Memory with Intel IOMMU"
-	depends on INTEL_IOMMU && X86
+	depends on INTEL_IOMMU && X86_64
 	select PCI_PASID
 	select MMU_NOTIFIER
 	help
@@ -219,7 +302,7 @@ config OMAP_IOMMU_DEBUG
 
 config ROCKCHIP_IOMMU
 	bool "Rockchip IOMMU Support"
-	depends on ARM
+	depends on ARM || ARM64
 	depends on ARCH_ROCKCHIP || COMPILE_TEST
 	select IOMMU_API
 	select ARM_DMA_USE_IOMMU
@@ -230,22 +313,10 @@ config ROCKCHIP_IOMMU
 	  Say Y here if you are using a Rockchip SoC that includes an IOMMU
 	  device.
 
-config SUNXI_IOMMU
-	bool "Allwinner Sunxi IOMMU Support"
-	depends on ARCH_SUNXI
-	select ARM_DMA_USE_IOMMU if ARM
-	select IOMMU_API
-	help
-	  Support for the Allwinner's IOMMU(System MMU) component. This
-	  enables H/W multimedia accellerators to see non-linear physical
-	  memory chunks as a linear memory in their address spaces.
-
-	  If unsure,say N here.
-
-
 config TEGRA_IOMMU_GART
 	bool "Tegra GART IOMMU Support"
 	depends on ARCH_TEGRA_2x_SOC
+	depends on TEGRA_MC
 	select IOMMU_API
 	help
 	  Enables support for remapping discontiguous physical memory
@@ -266,6 +337,7 @@ config TEGRA_IOMMU_SMMU
 config EXYNOS_IOMMU
 	bool "Exynos IOMMU Support"
 	depends on ARCH_EXYNOS && MMU
+	depends on !CPU_BIG_ENDIAN # revisit driver if we can enable big-endian ptes
 	select IOMMU_API
 	select ARM_DMA_USE_IOMMU
 	help
@@ -287,14 +359,14 @@ config EXYNOS_IOMMU_DEBUG
 
 config IPMMU_VMSA
 	bool "Renesas VMSA-compatible IPMMU"
-	depends on ARM_LPAE
-	depends on ARCH_RENESAS || COMPILE_TEST
+	depends on ARM || IOMMU_DMA
+	depends on ARCH_RENESAS || (COMPILE_TEST && !GENERIC_ATOMIC64)
 	select IOMMU_API
 	select IOMMU_IO_PGTABLE_LPAE
 	select ARM_DMA_USE_IOMMU
 	help
-	  Support for the Renesas VMSA-compatible IPMMU Renesas found in the
-	  R-Mobile APE6 and R-Car H2/M2 SoCs.
+	  Support for the Renesas VMSA-compatible IPMMU found in the R-Mobile
+	  APE6, R-Car Gen2, and R-Car Gen3 SoCs.
 
 	  If unsure, say N.
 
@@ -308,8 +380,9 @@ config SPAPR_TCE_IOMMU
 
 # ARM IOMMU support
 config ARM_SMMU
-	bool "ARM Ltd. System MMU (SMMU) Support"
+	tristate "ARM Ltd. System MMU (SMMU) Support"
 	depends on (ARM64 || ARM) && MMU
+	depends on QCOM_SCM || !QCOM_SCM #if QCOM_SCM=m this can't be =y
 	select IOMMU_API
 	select IOMMU_IO_PGTABLE_LPAE
 	select ARM_DMA_USE_IOMMU if ARM
@@ -320,8 +393,45 @@ config ARM_SMMU
 	  Say Y here if your SoC includes an IOMMU device implementing
 	  the ARM SMMU architecture.
 
+config ARM_SMMU_LEGACY_DT_BINDINGS
+	bool "Support the legacy \"mmu-masters\" devicetree bindings"
+	depends on ARM_SMMU=y && OF
+	help
+	  Support for the badly designed and deprecated "mmu-masters"
+	  devicetree bindings. This allows some DMA masters to attach
+	  to the SMMU but does not provide any support via the DMA API.
+	  If you're lucky, you might be able to get VFIO up and running.
+
+	  If you say Y here then you'll make me very sad. Instead, say N
+	  and move your firmware to the utopian future that was 2016.
+
+config ARM_SMMU_DISABLE_BYPASS_BY_DEFAULT
+	bool "Default to disabling bypass on ARM SMMU v1 and v2"
+	depends on ARM_SMMU
+	default y
+	help
+	  Say Y here to (by default) disable bypass streams such that
+	  incoming transactions from devices that are not attached to
+	  an iommu domain will report an abort back to the device and
+	  will not be allowed to pass through the SMMU.
+
+	  Any old kernels that existed before this KConfig was
+	  introduced would default to _allowing_ bypass (AKA the
+	  equivalent of NO for this config).  However the default for
+	  this option is YES because the old behavior is insecure.
+
+	  There are few reasons to allow unmatched stream bypass, and
+	  even fewer good ones.  If saying YES here breaks your board
+	  you should work on fixing your board.  This KConfig option
+	  is expected to be removed in the future and we'll simply
+	  hardcode the bypass disable in the code.
+
+	  NOTE: the kernel command line parameter
+	  'arm-smmu.disable_bypass' will continue to override this
+	  config.
+
 config ARM_SMMU_V3
-	bool "ARM Ltd. System MMU Version 3 (SMMUv3) Support"
+	tristate "ARM Ltd. System MMU Version 3 (SMMUv3) Support"
 	depends on ARM64
 	select IOMMU_API
 	select IOMMU_IO_PGTABLE_LPAE
@@ -339,6 +449,22 @@ config S390_IOMMU
 	select IOMMU_API
 	help
 	  Support for the IOMMU API for s390 PCI devices.
+
+config S390_CCW_IOMMU
+	bool "S390 CCW IOMMU Support"
+	depends on S390 && CCW
+	select IOMMU_API
+	help
+	  Enables bits of IOMMU API required by VFIO. The iommu_ops
+	  is not implemented as it is not necessary for VFIO.
+
+config S390_AP_IOMMU
+	bool "S390 AP IOMMU Support"
+	depends on S390 && ZCRYPT
+	select IOMMU_API
+	help
+	  Enables bits of IOMMU API required by VFIO. The iommu_ops
+	  is not implemented as it is not necessary for VFIO.
 
 config MTK_IOMMU
 	bool "MTK IOMMU Support"
@@ -365,9 +491,6 @@ config MTK_IOMMU_V1
 	select IOMMU_API
 	select MEMORY
 	select MTK_SMI
-	select COMMON_CLK_MT2701_MMSYS
-	select COMMON_CLK_MT2701_IMGSYS
-	select COMMON_CLK_MT2701_VDECSYS
 	help
 	  Support for the M4U on certain Mediatek SoCs. M4U generation 1 HW is
 	  Multimedia Memory Managememt Unit. This option enables remapping of
@@ -375,26 +498,69 @@ config MTK_IOMMU_V1
 
 	  if unsure, say N here.
 
-menuconfig IOMMU_DEBUG
-	bool "IOMMU Profiling and Debugging"
+config QCOM_IOMMU
+	# Note: iommu drivers cannot (yet?) be built as modules
+	bool "Qualcomm IOMMU Support"
+	depends on ARCH_QCOM || (COMPILE_TEST && !GENERIC_ATOMIC64)
+	depends on QCOM_SCM=y
+	select IOMMU_API
+	select IOMMU_IO_PGTABLE_LPAE
+	select ARM_DMA_USE_IOMMU
+	help
+	  Support for IOMMU on certain Qualcomm SoCs.
+
+config HYPERV_IOMMU
+	bool "Hyper-V x2APIC IRQ Handling"
+	depends on HYPERV
+	select IOMMU_API
+	default HYPERV
+	help
+	  Stub IOMMU driver to handle IRQs as to allow Hyper-V Linux
+	  guests to run with x2APIC mode enabled.
+
+config VIRTIO_IOMMU
+	bool "Virtio IOMMU driver"
+	depends on VIRTIO=y
+	depends on ARM64
+	select IOMMU_API
+	select INTERVAL_TREE
+	help
+	  Para-virtualised IOMMU driver with virtio.
+
+	  Say Y here if you intend to run this kernel as a guest.
+
+config SUNXI_IOMMU
+	tristate "Allwinner Sunxi IOMMU Support"
+	depends on ARCH_SUNXI
+	select ARM_DMA_USE_IOMMU if ARM
+	select IOMMU_API
+	select IOMMU_DMA
+	help
+	  Support for the Allwinner's IOMMU(System MMU) component. This
+	  enables H/W multimedia accellerators to see non-linear physical
+	  memory chunks as a linear memory in their address spaces.
+
+	  If unsure,say N here.
+
+menuconfig SUNXI_IOMMU_DEBUG
+	tristate "Sunxi IOMMU Profiling and Debugging"
 	help
 	  Makes available some additional IOMMU profiling and debugging
 	  options.
 
 	  Say Y here if you want to debug and trace iommu driver.
 
-if IOMMU_DEBUG
+if SUNXI_IOMMU_DEBUG
 
-config IOMMU_TESTS
-	bool "Interactive IOMMU performance/functional tests"
-	depends on IOMMU_DEBUG
+config SUNXI_IOMMU_TESTS
+	tristate "Sunxi Interactive IOMMU performance/functional tests"
+	depends on SUNXI_IOMMU_DEBUG
 	select IOMMU_API
 	help
 	  Enables a suite of IOMMU unit tests.  The tests are runnable
-	  through debugfs.  Unlike the IOMMU_DEBUG_TRACKING option, the
-	  impact of enabling this option to overal system performance
-	  should be minimal.
+	  through debugfs. The impact of enabling this option to overal
+	  system performance should be minimal.
 
-endif # IOMMU_DEBUG
+endif # SUNXI_IOMMU_DEBUG
 
 endif # IOMMU_SUPPORT

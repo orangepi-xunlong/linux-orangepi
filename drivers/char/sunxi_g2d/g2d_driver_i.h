@@ -43,7 +43,7 @@
 
 #if ((defined CONFIG_ARCH_SUN8IW12P1) || (defined CONFIG_ARCH_SUN8IW15P1) || \
 					(defined CONFIG_ARCH_SUN8IW17P1) || \
-					(defined CONFIG_ARCH_SUN50IW9P1) || \
+					(defined CONFIG_ARCH_SUN50IW9) || \
 					(defined CONFIG_ARCH_SUN8IW16P1) || \
 					(defined CONFIG_ARCH_SUN50IW10P1))
 #define G2D_V2X_SUPPORT
@@ -66,6 +66,9 @@ typedef struct {
 	bool opened;
 	__u32 user_cnt;
 	struct clk *clk_parent;
+	struct clk *bus_clk;
+	struct clk *mbus_clk;
+	struct reset_control *reset;
 } __g2d_info_t;
 
 typedef struct {

@@ -21,7 +21,8 @@ union tcon_gctl_reg_t {
 	u32 dwval;
 	struct {
 		u32 io_map_sel:1;
-		u32 res0:29;
+		u32 pad_sel:1;
+		u32 res0:28;
 		u32 tcon_gamma_en:1;
 		u32 tcon_en:1;
 	} bits;
@@ -573,6 +574,32 @@ union tcon_slave_stop_reg_t {
 	} bits;
 };
 
+union tcon_fsync_gen_ctrl_reg_t {
+	u32 dwval;
+	struct {
+		u32 fsync_gen_en:1;
+		u32 sel_vsync_en:1;
+		u32 hsync_pol_sel:1;
+		u32 res0:1;
+		u32 sensor_dis_value:1;
+		u32 sensor_act0_value:1;
+		u32 sensor_act1_value:1;
+		u32 res1:1;
+		u32 sensor_dis_time:11;
+		u32 res2:13;
+	} bits;
+};
+
+union tcon_fsync_gen_dly_reg_t {
+	u32 dwval;
+	struct {
+		u32 sensor_act1_time:12;
+		u32 res0:4;
+		u32 sensor_act0_time:12;
+		u32 res1:4;
+	} bits;
+};
+
 union tcon0_lvds_ana_reg_t {
 	u32 dwval;
 	struct {
@@ -589,7 +616,9 @@ union tcon0_lvds_ana_reg_t {
 		u32 res3:1;
 		u32 en_drvd:4;
 		u32 en_drvc:1;
-		u32 res4:5;
+		u32 res4:3;
+		u32 en_24m:1;
+		u32 en_lvds:1;
 		u32 en_ldo:1;
 		u32 en_mb:1;
 	} bits;
@@ -867,7 +896,17 @@ struct __de_lcd_dev_t {
 	union tcon_sync_ctl_reg_t tcon_sync_ctl;
 	union tcon_sync_pos_reg_t tcon_sync_pos;
 	union tcon_slave_stop_reg_t tcon_slave_stop;
-	union tcon_reservd_reg_t tcon_reg23c[49];
+#if defined(CONFIG_ARCH_SUN50IW10) || defined(CONFIG_ARCH_SUN8IW20) || defined(CONFIG_ARCH_SUN20IW1)
+	union tcon0_lvds_ana_reg_t tcon0_lvds1_ana[2];
+	union tcon0_lvds_if_reg_t tcon0_lvds1_ctl;
+	union tcon_reservd_reg_t tcon_reg248[46];
+#else
+	union tcon_fsync_gen_ctrl_reg_t fsync_gen_ctrl;
+	union tcon_fsync_gen_dly_reg_t fsync_gen_dly;
+	union tcon_reservd_reg_t tcon_reg244[47];
+#endif
+
+
 	/* 0x300 - 0x30c */
 	union tcon1_fill_ctl_reg_t tcon_fill_ctl;
 	union tcon1_fill_begin_reg_t tcon_fill_start0;

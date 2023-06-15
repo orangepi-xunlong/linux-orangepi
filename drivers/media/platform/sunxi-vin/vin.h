@@ -16,6 +16,7 @@
 
 #include <media/media-device.h>
 #include <media/media-entity.h>
+#include <linux/reset.h>
 
 #include "vin-video/vin_video.h"
 #include "vin-video/vin_core.h"
@@ -45,6 +46,18 @@ enum {
 	VIN_ISP_MAX_CLK,
 };
 
+enum {
+	VIN_CSI_RET = 0,
+	VIN_ISP_RET,
+	VIN_MAX_RET,
+};
+
+enum {
+	VIN_CSI_BUS_CLK = 0,
+	VIN_CSI_MBUS_CLK,
+	VIN_ISP_MBUS_CLK,
+	VIN_MAX_BUS_CLK,
+};
 
 #define VIN_CLK_RATE (432*1000*1000)
 #define ISP_CLK_RATE (300*1000*1000)
@@ -135,6 +148,7 @@ struct sensor_instance {
 	int vflip;
 	int hflip;
 	int act_addr;
+	int act_used;
 	char act_name[I2C_NAME_SIZE];
 	char isp_cfg_name[I2C_NAME_SIZE];
 };
@@ -155,7 +169,7 @@ struct sensor_list {
 	char sensor_pos[32];
 	int valid_idx;
 	struct vin_power power[ENUM_MAX_REGU];
-	struct gpio_config gpio[MAX_GPIO_NUM];
+	int gpio[MAX_GPIO_NUM];
 	struct sensor_instance inst[MAX_DETECT_NUM];
 };
 
@@ -212,6 +226,8 @@ struct vin_md {
 	struct vin_clk_info mipi_clk[VIN_MIPI_MAX_CLK];
 	struct vin_mclk_info mclk[VIN_MAX_CCI];
 	struct vin_clk_info isp_clk[VIN_ISP_MAX_CLK];
+	struct reset_control *clk_reset[VIN_MAX_RET];
+	struct clk *bus_clk[VIN_MAX_BUS_CLK];
 	struct modules_config modules[VIN_MAX_DEV];
 	struct csic_feature_list csic_fl;
 	struct csic_version csic_ver;
@@ -223,6 +239,7 @@ struct vin_md {
 	int use_count;
 	void __iomem *base;
 	void __iomem *ccu_base;
+	void __iomem *cmb_top_base;
 	struct media_device media_dev;
 	struct v4l2_device v4l2_dev;
 	struct platform_device *pdev;

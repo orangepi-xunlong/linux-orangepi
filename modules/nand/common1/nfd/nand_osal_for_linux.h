@@ -15,6 +15,7 @@
 #include <linux/blkdev.h>
 #include <linux/blkpg.h>
 #include <linux/clk.h>
+#include <linux/reset.h>
 #include <linux/delay.h>
 #include <linux/dma-mapping.h>
 #include <linux/fs.h>
@@ -42,8 +43,9 @@
 
 #include "nand_base.h"
 #include <linux/dma-mapping.h>
-#include <linux/dma/sunxi-dma.h>
+/*#include <linux/dma/sunxi-dma.h>*/
 #include <linux/dmaengine.h>
+#include <linux/sunxi-panicpart.h>
 
 #define SPI_TX_DATA_REG 0x200
 #define SPI_RX_DATA_REG 0x300

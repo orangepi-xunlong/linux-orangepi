@@ -16,7 +16,7 @@
 #ifndef __SUNXI_USB_DEBUG_H__
 #define __SUNXI_USB_DEBUG_H__
 
-#ifdef CONFIG_USB_SUNXI_USB_DEBUG
+#if IS_ENABLED(CONFIG_USB_SUNXI_USB_DEBUG)
 #define  DMSG_PRINT(stuff...)		printk(stuff)
 #define  DMSG_PR(fmt, stuff...)	pr_debug(fmt, ##stuff)
 #define  DMSG_INFO_UDC(fmt, ...)	DMSG_PR("[udc]: "fmt, ##__VA_ARGS__)

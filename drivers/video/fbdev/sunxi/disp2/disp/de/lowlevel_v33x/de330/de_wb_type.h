@@ -9,7 +9,7 @@
 */
 
 #ifndef _DE_WB_TYPE_H_
-#define _DE_WB_TPYE_H_
+#define _DE_WB_TYPE_H_
 
 #include "linux/types.h"
 

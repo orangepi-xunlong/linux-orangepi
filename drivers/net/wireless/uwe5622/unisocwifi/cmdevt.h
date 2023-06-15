@@ -794,6 +794,12 @@ struct sprdwl_cmd_ba {
 	unsigned char success;
 } __packed;
 
+struct sprdwl_ba_event_data{
+	struct sprdwl_cmd_ba addba_rsp;
+	struct sprdwl_rx_ba_entry *ba_entry;
+	u8 sta_lut_index;
+} __packed;
+
 struct win_param {
 	unsigned short win_start;
 	unsigned short win_size;

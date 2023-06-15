@@ -30,6 +30,61 @@
 
 struct mipi_dev *glb_mipi[VIN_MAX_MIPI];
 
+static void mipi_set_st_time(int id, unsigned int time)
+{
+	struct mipi_dev *mipi;
+
+	if (id >= VIN_MAX_MIPI) {
+		vin_print("mipi id error,set it less than %d\n", VIN_MAX_MIPI);
+		return;
+	}
+
+	vin_print("Set mipi%d settle time as 0x%x\n", id, time);
+	mipi = glb_mipi[id];
+	if (mipi) {
+		mipi->settle_time = time;
+		if (mipi->subdev.entity.stream_count > 0) {
+#if defined CONFIG_ARCH_SUN8IW16P1
+			cmb_rx_mipi_stl_time(mipi->id, time);
+#elif defined CONFIG_ARCH_SUN50IW10P1
+			cmb_phy0_s2p_dly(mipi->id, time);
+#else
+			mipi_dphy_cfg_1data(mipi->id, 0x75, time);
+#endif
+		}
+	}
+}
+
+static ssize_t mipi_settle_time_show(struct device *dev,
+			struct device_attribute *attr, char *buf)
+{
+	struct mipi_dev *mipi;
+	int i, cnt = 0;
+
+	for (i = 0; i < VIN_MAX_MIPI; i++) {
+		mipi = glb_mipi[i];
+		if (mipi)
+			cnt += sprintf(buf + cnt, "mipi%d settle time = 0x%x\n",
+										mipi->id, mipi->settle_time);
+	}
+	return cnt;
+}
+
+static ssize_t mipi_settle_time_store(struct device *dev,
+		struct device_attribute *attr, const char *buf, size_t count)
+{
+	unsigned long val;
+	int mipi_id;
+
+	val = simple_strtoul(buf, NULL, 16);
+	mipi_id = val >> 8;
+	mipi_set_st_time(mipi_id, val & 0xff);
+	return count;
+}
+
+static DEVICE_ATTR(settle_time, S_IRUGO | S_IWUSR | S_IWGRP,
+		   mipi_settle_time_show, mipi_settle_time_store);
+
 static struct combo_format sunxi_mipi_formats[] = {
 	{
 		.code = MEDIA_BUS_FMT_SBGGR8_1X8,
@@ -70,41 +125,108 @@ static struct combo_format sunxi_mipi_formats[] = {
 	}, {
 		.code = MEDIA_BUS_FMT_UYVY8_2X8,
 		.bit_width = YUV8,
+		.yuv_seq = UYVY,
 	}, {
 		.code = MEDIA_BUS_FMT_VYUY8_2X8,
 		.bit_width = YUV8,
+		.yuv_seq = VYUY,
 	}, {
 		.code = MEDIA_BUS_FMT_YUYV8_2X8,
 		.bit_width = YUV8,
+		.yuv_seq = YUYV,
 	}, {
 		.code = MEDIA_BUS_FMT_YVYU8_2X8,
 		.bit_width = YUV8,
+		.yuv_seq = YVYU,
 	}, {
 		.code = MEDIA_BUS_FMT_UYVY8_1X16,
 		.bit_width = YUV8,
+		.yuv_seq = UYVY,
 	}, {
 		.code = MEDIA_BUS_FMT_VYUY8_1X16,
 		.bit_width = YUV8,
+		.yuv_seq = VYUY,
 	}, {
 		.code = MEDIA_BUS_FMT_YUYV8_1X16,
 		.bit_width = YUV8,
+		.yuv_seq = YUYV,
 	}, {
 		.code = MEDIA_BUS_FMT_YVYU8_1X16,
 		.bit_width = YUV8,
+		.yuv_seq = YVYU,
 	}, {
 		.code = MEDIA_BUS_FMT_UYVY10_2X10,
 		.bit_width = YUV10,
+		.yuv_seq = UYVY,
 	}, {
 		.code = MEDIA_BUS_FMT_VYUY10_2X10,
 		.bit_width = YUV10,
+		.yuv_seq = VYUY,
 	}, {
 		.code = MEDIA_BUS_FMT_YUYV10_2X10,
 		.bit_width = YUV10,
+		.yuv_seq = YUYV,
 	}, {
 		.code = MEDIA_BUS_FMT_YVYU10_2X10,
 		.bit_width = YUV10,
+		.yuv_seq = YVYU,
 	}
 };
+
+static enum pkt_fmt get_pkt_fmt(u32 code)
+{
+	switch (code) {
+	case MEDIA_BUS_FMT_RGB565_2X8_BE:
+		return MIPI_RGB565;
+	case MEDIA_BUS_FMT_UYVY8_1X16:
+	case MEDIA_BUS_FMT_VYUY8_1X16:
+	case MEDIA_BUS_FMT_YUYV8_1X16:
+	case MEDIA_BUS_FMT_YVYU8_1X16:
+	case MEDIA_BUS_FMT_UYVY8_2X8:
+	case MEDIA_BUS_FMT_VYUY8_2X8:
+	case MEDIA_BUS_FMT_YUYV8_2X8:
+	case MEDIA_BUS_FMT_YVYU8_2X8:
+		return MIPI_YUV422;
+	case MEDIA_BUS_FMT_UYVY10_2X10:
+	case MEDIA_BUS_FMT_VYUY10_2X10:
+	case MEDIA_BUS_FMT_YUYV10_2X10:
+	case MEDIA_BUS_FMT_YVYU10_2X10:
+		return MIPI_YUV422_10;
+	case MEDIA_BUS_FMT_SBGGR8_1X8:
+	case MEDIA_BUS_FMT_SGBRG8_1X8:
+	case MEDIA_BUS_FMT_SGRBG8_1X8:
+	case MEDIA_BUS_FMT_SRGGB8_1X8:
+		return MIPI_RAW8;
+	case MEDIA_BUS_FMT_SBGGR10_1X10:
+	case MEDIA_BUS_FMT_SGBRG10_1X10:
+	case MEDIA_BUS_FMT_SGRBG10_1X10:
+	case MEDIA_BUS_FMT_SRGGB10_1X10:
+		return MIPI_RAW10;
+	case MEDIA_BUS_FMT_SBGGR12_1X12:
+	case MEDIA_BUS_FMT_SGBRG12_1X12:
+	case MEDIA_BUS_FMT_SGRBG12_1X12:
+	case MEDIA_BUS_FMT_SRGGB12_1X12:
+		return MIPI_RAW12;
+	default:
+		return MIPI_RAW8;
+	}
+}
+
+static unsigned int data_formats_type(u32 code)
+{
+	switch (code) {
+	case MIPI_RAW8:
+	case MIPI_RAW12:
+		return RAW;
+	case MIPI_YUV422:
+	case MIPI_YUV422_10:
+		return YUV;
+	case MIPI_RGB565:
+		return RGB;
+	default:
+		return RAW;
+	}
+}
 
 #if defined CONFIG_ARCH_SUN8IW16P1
 void combo_rx_mipi_init(struct v4l2_subdev *sd)
@@ -291,86 +413,77 @@ void combo_rx_init(struct v4l2_subdev *sd)
 	cmb_rx_enable(mipi->id);
 }
 #elif defined CONFIG_ARCH_SUN50IW10P1
+static void combo_csi_mipi_init(struct v4l2_subdev *sd)
+{
+	struct mipi_dev *mipi = v4l2_get_subdevdata(sd);
+	int i;
+
+	mipi->cmb_csi_cfg.phy_lane_cfg.phy_laneck_en = CK_1LANE;
+	mipi->cmb_csi_cfg.phy_lane_cfg.phy_mipi_lpck_en = LPCK_1LANE;
+	mipi->cmb_csi_cfg.phy_lane_cfg.phy_termck_en = TERMCK_CLOSE;
+	mipi->cmb_csi_cfg.phy_lane_cfg.phy_termdt_en = TERMDT_CLOSE;
+	mipi->cmb_csi_cfg.phy_lane_cfg.phy_s2p_en = S2PDT_CLOSE;
+	mipi->cmb_csi_cfg.phy_lane_cfg.phy_hsck_en = HSCK_CLOSE;
+	mipi->cmb_csi_cfg.phy_lane_cfg.phy_hsdt_en = HSDT_CLOSE;
+
+	cmb_phy_lane_num_en(mipi->id, mipi->cmb_csi_cfg.phy_lane_cfg);
+	cmb_phy0_work_mode(mipi->id, 0);
+	cmb_phy0_ofscal_cfg(mipi->id);
+	cmb_phy_deskew_en(mipi->id, mipi->cmb_csi_cfg.phy_lane_cfg);
+	cmb_term_ctl(mipi->id, mipi->cmb_csi_cfg.phy_lane_cfg);
+	cmb_hs_ctl(mipi->id, mipi->cmb_csi_cfg.phy_lane_cfg);
+	cmb_s2p_ctl(mipi->id, mipi->time_hs, mipi->cmb_csi_cfg.phy_lane_cfg);
+	cmb_mipirx_ctl(mipi->id, mipi->cmb_csi_cfg.phy_lane_cfg);
+	cmb_phy0_en(mipi->id, 1);
+
+	for (i = 0; i < mipi->cmb_csi_cfg.lane_num; i++)
+		mipi->cmb_csi_cfg.mipi_lane[i] = cmb_port_set_lane_map(mipi->id, i);
+	for (i = 0; i < mipi->cmb_csi_cfg.total_rx_ch; i++) {
+		if (mipi->cmb_csi_cfg.total_rx_ch > 3)
+			mipi->cmb_csi_cfg.total_rx_ch = 3;
+		mipi->cmb_csi_cfg.mipi_datatype[i] = get_pkt_fmt(mipi->format.code);
+		mipi->cmb_csi_cfg.vc[i] = i;
+	}
+	cmb_port_lane_num(mipi->id, mipi->cmb_csi_cfg.lane_num);
+	cmb_port_out_num(mipi->id, TWO_DATA);
+	cmb_port_out_chnum(mipi->id, 0);
+	cmb_port_lane_map(mipi->id, mipi->cmb_csi_cfg.mipi_lane);
+	cmb_port_mipi_cfg(mipi->id, mipi->cmb_fmt->yuv_seq);
+	cmb_port_set_mipi_datatype(mipi->id, &mipi->cmb_csi_cfg);
+	cmb_port_mipi_ch_trigger_en(mipi->id, 1);
+	if (mipi->cmb_mode == MIPI_DOL_WDR_MODE)
+		cmb_port_set_mipi_wdr(mipi->id, 0, 2);
+	cmb_port_enable(mipi->id);
+}
+
 void combo_csi_init(struct v4l2_subdev *sd)
 {
 	struct mipi_dev *mipi = v4l2_get_subdevdata(sd);
 
-	cmb_phy_power_enable(mipi->id);
-
-	cmb_phy0_ibias_en(mipi->id, 1);
-	cmb_phy_lane_num_enable(mipi->id);
-	cmb_phy0_term_dly(mipi->id, 0x1);
-	cmb_phy0_hs_dly(mipi->id, 0x2);
-	cmb_phy0_s2p_width(mipi->id, 0x2);
-	cmb_phy0_s2p_dly(mipi->id, 0x3);
-	cmb_phy_mipi_lpnum_enable(mipi->id);
-	cmb_phy0_mipilp_dbc_en(mipi->id, 1);
-	cmb_phy0_en(mipi->id, 1);
-
-	cmb_port_lane_num(mipi->id, 0x4);
-	cmb_port_out_num(mipi->id, 0x1);
-	cmb_port_lane_map(mipi->id);
-	cmb_port_mipi_enpack_enable(mipi->id);
-	cmb_port_mipi_yuv_seq(mipi->id, 0x2);
-	cmb_port_mipi_ch0_dt(mipi->id, 0x2b);
-	cmb_port_mipi_ch_trig_en(mipi->id, 1);
-	cmb_port_enable(mipi->id);
-
-	cmb_phy_top_enable(mipi->id);
-
+	switch (mipi->if_type) {
+	case V4L2_MBUS_PARALLEL:
+	case V4L2_MBUS_BT656:
+		break;
+	case V4L2_MBUS_CSI2_DPHY:
+		combo_csi_mipi_init(sd);
+		break;
+	case V4L2_MBUS_CSI2_CPHY:
+		break;
+	case V4L2_MBUS_CSI1:
+		break;
+	case V4L2_MBUS_CCP2:
+		break;
+	case V4L2_MBUS_SUBLVDS:
+		break;
+	case V4L2_MBUS_HISPI:
+		break;
+	case V4L2_MBUS_UNKNOWN:
+		break;
+	default:
+		break;
+	}
 }
 #endif
-static enum pkt_fmt get_pkt_fmt(u32 code)
-{
-	switch (code) {
-	case MEDIA_BUS_FMT_RGB565_2X8_BE:
-		return MIPI_RGB565;
-	case MEDIA_BUS_FMT_UYVY8_1X16:
-	case MEDIA_BUS_FMT_UYVY8_2X8:
-	case MEDIA_BUS_FMT_VYUY8_2X8:
-	case MEDIA_BUS_FMT_YUYV8_2X8:
-	case MEDIA_BUS_FMT_YVYU8_2X8:
-		return MIPI_YUV422;
-	case MEDIA_BUS_FMT_UYVY10_2X10:
-	case MEDIA_BUS_FMT_VYUY10_2X10:
-	case MEDIA_BUS_FMT_YUYV10_2X10:
-	case MEDIA_BUS_FMT_YVYU10_2X10:
-		return MIPI_YUV422_10;
-	case MEDIA_BUS_FMT_SBGGR8_1X8:
-	case MEDIA_BUS_FMT_SGBRG8_1X8:
-	case MEDIA_BUS_FMT_SGRBG8_1X8:
-	case MEDIA_BUS_FMT_SRGGB8_1X8:
-		return MIPI_RAW8;
-	case MEDIA_BUS_FMT_SBGGR10_1X10:
-	case MEDIA_BUS_FMT_SGBRG10_1X10:
-	case MEDIA_BUS_FMT_SGRBG10_1X10:
-	case MEDIA_BUS_FMT_SRGGB10_1X10:
-		return MIPI_RAW10;
-	case MEDIA_BUS_FMT_SBGGR12_1X12:
-	case MEDIA_BUS_FMT_SGBRG12_1X12:
-	case MEDIA_BUS_FMT_SGRBG12_1X12:
-	case MEDIA_BUS_FMT_SRGGB12_1X12:
-		return MIPI_RAW12;
-	default:
-		return MIPI_RAW8;
-	}
-}
-
-static unsigned int data_formats_type(u32 code)
-{
-	switch (code) {
-	case MIPI_RAW8:
-	case MIPI_RAW12:
-		return RAW;
-	case MIPI_YUV422:
-	case MIPI_YUV422_10:
-		return YUV;
-	case MIPI_RGB565:
-		return RGB;
-	default:
-		return RAW;
-	}
-}
 
 static int sunxi_mipi_subdev_s_stream(struct v4l2_subdev *sd, int enable)
 {
@@ -394,10 +507,17 @@ static int sunxi_mipi_subdev_s_stream(struct v4l2_subdev *sd, int enable)
 	mipi->cmb_mode = res->res_combo_mode & 0xf;
 	mipi->terminal_resistance = res->res_combo_mode & CMB_TERMINAL_RES;
 	mipi->pyha_offset = (res->res_combo_mode & 0x70) >> 4;
-	if (res->res_time_hs)
+	if (mipi->settle_time > 0) {
+		mipi->time_hs = mipi->settle_time;
+	} else if (res->res_time_hs)
 		mipi->time_hs = res->res_time_hs;
-	else
+	else {
+#if defined CONFIG_ARCH_SUN8IW16P1
 		mipi->time_hs = 0x30;
+#else
+		mipi->time_hs = 0x28;
+#endif
+	}
 
 	if (enable) {
 #if defined CONFIG_ARCH_SUN8IW16P1
@@ -406,11 +526,13 @@ static int sunxi_mipi_subdev_s_stream(struct v4l2_subdev *sd, int enable)
 		combo_csi_init(sd);
 #else
 		bsp_mipi_csi_dphy_init(mipi->id);
-		mipi_dphy_cfg_1data(mipi->id, 0x75, 0xa0);
+		mipi_dphy_cfg_1data(mipi->id, 0x75,
+			mipi->settle_time ? mipi->settle_time : 0xa0);
 		bsp_mipi_csi_set_para(mipi->id, &mipi->csi2_cfg);
 		bsp_mipi_csi_set_fmt(mipi->id, mipi->csi2_cfg.total_rx_ch,
 				     &mipi->csi2_fmt);
-
+		if (mipi->cmb_mode == MIPI_DOL_WDR_MODE)
+			bsp_mipi_csi_set_dol(mipi->id, 0, 2);
 		/*for dphy clock async*/
 		bsp_mipi_csi_dphy_disable(mipi->id, mipi->sensor_flags);
 		bsp_mipi_csi_dphy_enable(mipi->id, mipi->sensor_flags);
@@ -420,7 +542,8 @@ static int sunxi_mipi_subdev_s_stream(struct v4l2_subdev *sd, int enable)
 #if defined CONFIG_ARCH_SUN8IW16P1
 		cmb_rx_disable(mipi->id);
 #elif defined CONFIG_ARCH_SUN50IW10P1
-		cmb_phy_top_disable(mipi->id);
+		cmb_port_disable(mipi->id);
+		cmb_phy0_en(mipi->id, 0);
 #else
 		bsp_mipi_csi_dphy_disable(mipi->id, mipi->sensor_flags);
 		bsp_mipi_csi_protocol_disable(mipi->id);
@@ -509,26 +632,42 @@ static int sunxi_mipi_s_mbus_config(struct v4l2_subdev *sd,
 {
 	struct mipi_dev *mipi = v4l2_get_subdevdata(sd);
 
-	if (cfg->type == V4L2_MBUS_CSI2) {
-		mipi->if_type = V4L2_MBUS_CSI2;
-		memcpy(mipi->if_name, "mipi", sizeof("mipi"));
+	if (cfg->type == V4L2_MBUS_CSI2_DPHY) {
+		mipi->if_type = V4L2_MBUS_CSI2_DPHY;
+		memcpy(mipi->if_name, "mipi_dphy", sizeof("mipi_dphy"));
 		if (IS_FLAG(cfg->flags, V4L2_MBUS_CSI2_4_LANE)) {
 			mipi->csi2_cfg.lane_num = 4;
 			mipi->cmb_cfg.lane_num = 4;
 			mipi->cmb_cfg.mipi_ln = MIPI_4LANE;
+			mipi->cmb_csi_cfg.phy_lane_cfg.phy_lanedt_en = DT_4LANE;
+			mipi->cmb_csi_cfg.phy_lane_cfg.phy_mipi_lpdt_en = LPDT_4LANE;
+			mipi->cmb_csi_cfg.lane_num = 4;
 		} else if (IS_FLAG(cfg->flags, V4L2_MBUS_CSI2_3_LANE)) {
 			mipi->csi2_cfg.lane_num = 3;
 			mipi->cmb_cfg.lane_num = 3;
 			mipi->cmb_cfg.mipi_ln = MIPI_3LANE;
+			mipi->cmb_csi_cfg.phy_lane_cfg.phy_lanedt_en = DT_3LANE;
+			mipi->cmb_csi_cfg.phy_lane_cfg.phy_mipi_lpdt_en = LPDT_3LANE;
+			mipi->cmb_csi_cfg.lane_num = 3;
 		} else if (IS_FLAG(cfg->flags, V4L2_MBUS_CSI2_2_LANE)) {
 			mipi->csi2_cfg.lane_num = 2;
 			mipi->cmb_cfg.lane_num = 2;
 			mipi->cmb_cfg.mipi_ln = MIPI_2LANE;
+			mipi->cmb_csi_cfg.phy_lane_cfg.phy_lanedt_en = DT_2LANE;
+			mipi->cmb_csi_cfg.phy_lane_cfg.phy_mipi_lpdt_en = LPDT_2LANE;
+			mipi->cmb_csi_cfg.lane_num = 2;
 		} else {
 			mipi->cmb_cfg.lane_num = 1;
 			mipi->csi2_cfg.lane_num = 1;
 			mipi->cmb_cfg.mipi_ln = MIPI_1LANE;
+			mipi->cmb_csi_cfg.phy_lane_cfg.phy_lanedt_en = DT_1LANE;
+			mipi->cmb_csi_cfg.phy_lane_cfg.phy_mipi_lpdt_en = LPDT_1LANE;
+			mipi->cmb_csi_cfg.lane_num = 1;
 		}
+	}  else if (cfg->type == V4L2_MBUS_HISPI) {
+			mipi->if_type = V4L2_MBUS_CSI2_CPHY;
+			memcpy(mipi->if_name, "mipi_cphy", sizeof("mipi_cphy"));
+
 	} else if (cfg->type == V4L2_MBUS_SUBLVDS) {
 		mipi->if_type = V4L2_MBUS_SUBLVDS;
 		memcpy(mipi->if_name, "sublvds", sizeof("sublvds"));
@@ -573,20 +712,41 @@ static int sunxi_mipi_s_mbus_config(struct v4l2_subdev *sd,
 			mipi->cmb_cfg.lane_num = 4;
 			mipi->cmb_cfg.lvds_ln = LVDS_4LANE;
 		}
+	}  else if (cfg->type == V4L2_MBUS_CCP2) {
+			mipi->if_type = V4L2_MBUS_CCP2;
+			memcpy(mipi->if_name, "ccp2", sizeof("ccp2"));
+
+	} else if (cfg->type == V4L2_MBUS_CSI1) {
+			mipi->if_type = V4L2_MBUS_CSI1;
+			memcpy(mipi->if_name, "mipi_csi1", sizeof("mipi_csi1"));
+
+	} else if (cfg->type == V4L2_MBUS_PARALLEL) {
+			mipi->if_type = V4L2_MBUS_PARALLEL;
+			memcpy(mipi->if_name, "combo_parallel", sizeof("combo_parallel"));
+
 	} else {
-		memcpy(mipi->if_name, "combo_parallel", sizeof("combo_parallel"));
-		mipi->if_type = V4L2_MBUS_PARALLEL;
+			memcpy(mipi->if_name, "combo_unknown", sizeof("combo_unknown"));
+			mipi->if_type = V4L2_MBUS_UNKNOWN;
 	}
 
 	mipi->csi2_cfg.total_rx_ch = 0;
-	if (IS_FLAG(cfg->flags, V4L2_MBUS_CSI2_CHANNEL_0))
+	mipi->cmb_csi_cfg.total_rx_ch = 0;
+	if (IS_FLAG(cfg->flags, V4L2_MBUS_CSI2_CHANNEL_0)) {
 		mipi->csi2_cfg.total_rx_ch++;
-	if (IS_FLAG(cfg->flags, V4L2_MBUS_CSI2_CHANNEL_1))
+		mipi->cmb_csi_cfg.total_rx_ch++;
+	}
+	if (IS_FLAG(cfg->flags, V4L2_MBUS_CSI2_CHANNEL_1)) {
 		mipi->csi2_cfg.total_rx_ch++;
-	if (IS_FLAG(cfg->flags, V4L2_MBUS_CSI2_CHANNEL_2))
+		mipi->cmb_csi_cfg.total_rx_ch++;
+	}
+	if (IS_FLAG(cfg->flags, V4L2_MBUS_CSI2_CHANNEL_2)) {
 		mipi->csi2_cfg.total_rx_ch++;
-	if (IS_FLAG(cfg->flags, V4L2_MBUS_CSI2_CHANNEL_3))
+		mipi->cmb_csi_cfg.total_rx_ch++;
+	}
+	if (IS_FLAG(cfg->flags, V4L2_MBUS_CSI2_CHANNEL_3)) {
 		mipi->csi2_cfg.total_rx_ch++;
+		mipi->cmb_csi_cfg.total_rx_ch++;
+	}
 
 	return 0;
 }
@@ -665,7 +825,13 @@ static int mipi_probe(struct platform_device *pdev)
 #if defined CONFIG_ARCH_SUN8IW16P1
 	cmb_rx_set_base_addr(mipi->id, (unsigned long)mipi->base);
 #elif defined CONFIG_ARCH_SUN50IW10P1
-	cmb_csi_set_base_addr(mipi->id, (unsigned long)mipi->base);
+	cmb_csi_set_phy_base_addr(mipi->id, (unsigned long)mipi->base);
+	mipi->port_base = of_iomap(np, 1);
+	if (!mipi->port_base) {
+		ret = -EIO;
+		goto freedev;
+	}
+	cmb_csi_set_port_base_addr(mipi->id, (unsigned long)mipi->port_base);
 #else
 	bsp_mipi_csi_set_base_addr(mipi->id, (unsigned long)mipi->base);
 	bsp_mipi_dphy_set_base_addr(mipi->id, (unsigned long)mipi->base + 0x1000);
@@ -679,7 +845,11 @@ static int mipi_probe(struct platform_device *pdev)
 
 	platform_set_drvdata(pdev, mipi);
 	glb_mipi[mipi->id] = mipi;
-
+	ret = device_create_file(&pdev->dev, &dev_attr_settle_time);
+	if (ret) {
+		vin_err("mipi settle time node register fail\n");
+		return ret;
+	}
 	vin_log(VIN_LOG_MIPI, "mipi%d probe end!\n", mipi->id);
 	return 0;
 

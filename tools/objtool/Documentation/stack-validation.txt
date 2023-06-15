@@ -21,7 +21,7 @@ instructions).  Similarly, it knows how to follow switch statements, for
 which gcc sometimes uses jump tables.
 
 (Objtool also has an 'orc generate' subcommand which generates debuginfo
-for the ORC unwinder.  See Documentation/x86/orc-unwinder.txt in the
+for the ORC unwinder.  See Documentation/x86/orc-unwinder.rst in the
 kernel tree for more details.)
 
 
@@ -101,7 +101,7 @@ b) ORC (Oops Rewind Capability) unwind table generation
    band.  So it doesn't affect runtime performance and it can be
    reliable even when interrupts or exceptions are involved.
 
-   For more details, see Documentation/x86/orc-unwinder.txt.
+   For more details, see Documentation/x86/orc-unwinder.rst.
 
 c) Higher live patching compatibility rate
 
@@ -111,7 +111,7 @@ c) Higher live patching compatibility rate
    be detectable).  Objtool makes that possible.
 
    For more details, see the livepatch documentation in the Linux kernel
-   source tree at Documentation/livepatch/livepatch.txt.
+   source tree at Documentation/livepatch/livepatch.rst.
 
 Rules
 -----
@@ -289,6 +289,7 @@ they mean, and suggestions for how to fix them.
       might be corrupt due to a gcc bug.  For more details, see:
       https://gcc.gnu.org/bugzilla/show_bug.cgi?id=70646
 
+
 If the error doesn't seem to make sense, it could be a bug in objtool.
 Feel free to ask the objtool maintainer for help.
 
@@ -305,7 +306,7 @@ ignore it:
 
 - To skip validation of a file, add
 
-    OBJECT_FILES_NON_STANDARD_filename.o := n
+    OBJECT_FILES_NON_STANDARD_filename.o := y
 
   to the Makefile.
 

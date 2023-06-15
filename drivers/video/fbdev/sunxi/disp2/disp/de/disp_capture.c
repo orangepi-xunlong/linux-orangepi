@@ -8,6 +8,7 @@
  * warranty of any kind, whether express or implied.
  */
 
+#include <linux/reset.h>
 #include "disp_capture.h"
 
 struct disp_capture_info_list {
@@ -33,6 +34,9 @@ struct disp_capture_private_data {
 	s32 (*shadow_protect)(u32 sel, bool protect);
 
 	struct clk *clk;
+	struct clk *clk_bus;
+	struct reset_control *rst;
+
 #if defined(__LINUX_PLAT__)
 	struct mutex mlock;
 	spinlock_t data_lock;
@@ -274,6 +278,7 @@ static s32 disp_capture_clk_exit(struct disp_capture *cptr)
 
 static s32 disp_capture_clk_enable(struct disp_capture *cptr)
 {
+	int ret;
 	struct disp_capture_private_data *cptrp = disp_capture_get_priv(cptr);
 
 	if ((cptr == NULL) || (cptrp == NULL)) {
@@ -281,13 +286,30 @@ static s32 disp_capture_clk_enable(struct disp_capture *cptr)
 		return 0;
 	}
 
-	clk_prepare_enable(cptrp->clk);
+	ret = reset_control_deassert(cptrp->rst);
+	if (ret) {
+		DE_WRN("%s: reset_control_deassert for rst failed\n", __func__);
+		return ret;
+	}
+
+	ret = clk_prepare_enable(cptrp->clk);
+	if (ret) {
+		DE_WRN("%s: clk_prepare_enable for clk failed\n", __func__);
+		return ret;
+	}
+
+	ret = clk_prepare_enable(cptrp->clk_bus);
+	if (ret) {
+		DE_WRN("%s: clk_prepare_enable for clk_bus failed\n", __func__);
+		return ret;;
+	}
 
 	return 0;
 }
 
 static s32 disp_capture_clk_disable(struct disp_capture *cptr)
 {
+	int ret;
 	struct disp_capture_private_data *cptrp = disp_capture_get_priv(cptr);
 
 	if ((cptr == NULL) || (cptrp == NULL)) {
@@ -295,7 +317,14 @@ static s32 disp_capture_clk_disable(struct disp_capture *cptr)
 		return 0;
 	}
 
-	clk_disable(cptrp->clk);
+	clk_disable_unprepare(cptrp->clk_bus);
+	clk_disable_unprepare(cptrp->clk);
+
+	ret = reset_control_assert(cptrp->rst);
+	if (ret) {
+		DE_WRN("%s: reset_control_assert for rst failed\n", __func__);
+		return ret;
+	}
 
 	return 0;
 }
@@ -474,6 +503,7 @@ s32 disp_capture_commit(struct disp_capture *cptr,
 		return -1;
 	}
 #endif
+
 #ifndef WB_HAS_CSC
 	if ((DISP_CSC_TYPE_YUV444 == cs) || (DISP_CSC_TYPE_YUV422 == cs) ||
 	    (DISP_CSC_TYPE_YUV420 == cs)) {
@@ -824,7 +854,7 @@ s32 disp_capture_sync(struct disp_capture *cptr)
 	mgr = cptr->manager;
 	if ((NULL == mgr) || (0 == mgr->is_enabled(mgr))) {
 		rcq_cptr_wq.rcq_state = 0;
-		DE_INF("mgr is disable!\n");
+		/*DE_WRN("mgr is disable!\n");*/
 		return 0;
 	}
 	dispdev = mgr->device;
@@ -842,9 +872,6 @@ s32 disp_capture_sync(struct disp_capture *cptr)
 		spin_lock_irqsave(&cptrp->data_lock, flags);
 		list_for_each_entry_safe(running, temp, &cptrp->runing_list,
 					 list) {
-			if (running == cptrp->cur_info) {
-				continue;
-			}
 			list_del(&running->list);
 			cptrp->runing_cnt--;
 
@@ -862,7 +889,6 @@ s32 disp_capture_sync(struct disp_capture *cptr)
 
 			list_add_tail(&info_list->list, &cptrp->runing_list);
 			cptrp->runing_cnt++;
-			cptrp->cur_info = info_list;
 			find = true;
 			break;
 		}
@@ -1069,23 +1095,12 @@ s32 disp_init_capture(struct disp_bsp_init_para *para)
 		spin_lock_init(&(capturep->data_lock));
 		spin_lock_init(&(capturep->reg_lock));
 
-		capturep->clk = para->mclk[DISP_MOD_DE];
-		switch (disp) {
-		case 0:
-			capture->disp = 0;
-			capture->name = "capture0";
-			break;
+		capturep->clk = para->clk_de[disp];
+		capturep->clk_bus = para->clk_bus_de[disp];
+		capturep->rst = para->rst_bus_de[disp];
 
-		case 1:
-			capture->disp = 1;
-			capture->name = "capture1";
-			break;
-
-		case 2:
-			capture->disp = 2;
-			capture->name = "capture2";
-			break;
-		}
+		capture->disp = disp;
+		sprintf(capture->name, "capture%d", disp);
 
 		capturep->irq_info.sel = disp;
 		capturep->irq_info.irq_flag =

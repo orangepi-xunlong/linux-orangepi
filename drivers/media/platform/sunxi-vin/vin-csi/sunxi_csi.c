@@ -1,5 +1,5 @@
 /*
- * linux-4.9/drivers/media/platform/sunxi-vin/vin-csi/sunxi_csi.c
+ * linux-5.4/drivers/media/platform/sunxi-vin/vin-csi/sunxi_csi.c
  *
  * Copyright (c) 2007-2017 Allwinnertech Co., Ltd.
  *
@@ -77,6 +77,26 @@ static struct csi_format sunxi_csi_formats[] = {
 		.infmt = FMT_YUV422,
 		.data_width = 16,
 	}, {
+		.code = MEDIA_BUS_FMT_UYVY10_2X10,
+		.seq = SEQ_UYVY,
+		.infmt = FMT_YUV422,
+		.data_width = 10,
+	}, {
+		.code = MEDIA_BUS_FMT_VYUY10_2X10,
+		.seq = SEQ_VYUY,
+		.infmt = FMT_YUV422,
+		.data_width = 10,
+	}, {
+		.code = MEDIA_BUS_FMT_YVYU10_2X10,
+		.seq = SEQ_YVYU,
+		.infmt = FMT_YUV422,
+		.data_width = 10,
+	}, {
+		.code = MEDIA_BUS_FMT_YUYV10_2X10,
+		.seq = SEQ_YUYV,
+		.infmt = FMT_YUV422,
+		.data_width = 10,
+	}, {
 		.code = MEDIA_BUS_FMT_SBGGR8_1X8,
 		.infmt = FMT_RAW,
 		.data_width = 8,
@@ -132,7 +152,9 @@ static int __csi_pin_config(struct csi_dev *dev, int enable)
 #ifndef FPGA_VER
 	char pinctrl_names[10] = "";
 
-	if (dev->bus_info.bus_if == V4L2_MBUS_CSI2)
+	if (dev->bus_info.bus_if == V4L2_MBUS_CSI2_DPHY ||
+		dev->bus_info.bus_if == V4L2_MBUS_CSI2_CPHY ||
+		dev->bus_info.bus_if == V4L2_MBUS_CSI1)
 		return 0;
 
 	if (!IS_ERR_OR_NULL(dev->pctrl))
@@ -258,7 +280,7 @@ static int __csi_set_fmt_hw(struct csi_dev *csi)
 		csic_prs_ncsi_if_cfg(csi->id, &csi->ncsi_if);
 		csic_prs_ncsi_en(csi->id, 1);
 		break;
-	case V4L2_MBUS_CSI2:
+	case V4L2_MBUS_CSI2_DPHY:
 		csic_prs_mode(csi->id, PRS_MCSI);
 		csic_prs_mcsi_if_cfg(csi->id, &mcsi_if);
 		csic_prs_mcsi_en(csi->id, 1);
@@ -341,7 +363,7 @@ static int sunxi_csi_subdev_s_stream(struct v4l2_subdev *sd, int enable)
 		case V4L2_MBUS_BT656:
 			csic_prs_ncsi_en(csi->id, 0);
 			break;
-		case V4L2_MBUS_CSI2:
+		case V4L2_MBUS_CSI2_DPHY:
 			csic_prs_mcsi_en(csi->id, 0);
 			break;
 		default:
@@ -366,14 +388,6 @@ static int sunxi_csi_subdev_s_stream(struct v4l2_subdev *sd, int enable)
 		csi->out_size.hor_start, csi->out_size.ver_start,
 		csi->mf.code, csi->mf.field);
 
-	return 0;
-}
-static int sunxi_csi_subdev_s_parm(struct v4l2_subdev *sd,
-				   struct v4l2_streamparm *param)
-{
-	struct csi_dev *csi = v4l2_get_subdevdata(sd);
-
-	csi->capture_mode = param->parm.capture.capturemode;
 	return 0;
 }
 
@@ -459,9 +473,9 @@ static int sunxi_csi_s_mbus_config(struct v4l2_subdev *sd,
 {
 	struct csi_dev *csi = v4l2_get_subdevdata(sd);
 
-	if (cfg->type == V4L2_MBUS_CSI2 || cfg->type == V4L2_MBUS_SUBLVDS ||
+	if (cfg->type == V4L2_MBUS_CSI2_DPHY || cfg->type == V4L2_MBUS_SUBLVDS ||
 	    cfg->type == V4L2_MBUS_HISPI) {
-		csi->bus_info.bus_if = V4L2_MBUS_CSI2;
+		csi->bus_info.bus_if = V4L2_MBUS_CSI2_DPHY;
 		csi->bus_info.ch_total_num = 0;
 		if (IS_FLAG(cfg->flags, V4L2_MBUS_CSI2_CHANNEL_0))
 			csi->bus_info.ch_total_num++;
@@ -555,7 +569,6 @@ static int sunxi_csi_s_mbus_config(struct v4l2_subdev *sd,
 static const struct v4l2_subdev_video_ops sunxi_csi_subdev_video_ops = {
 	.s_stream = sunxi_csi_subdev_s_stream,
 	.s_mbus_config = sunxi_csi_s_mbus_config,
-	.s_parm = sunxi_csi_subdev_s_parm,
 };
 
 static const struct v4l2_subdev_pad_ops sunxi_csi_subdev_pad_ops = {
@@ -681,6 +694,15 @@ static struct platform_driver csi_platform_driver = {
 		   .of_match_table = sunxi_csi_match,
 		   },
 };
+
+int sunxi_csi_subdev_s_parm(struct v4l2_subdev *sd,
+				   struct v4l2_streamparm *param)
+{
+	struct csi_dev *csi = v4l2_get_subdevdata(sd);
+
+	csi->capture_mode = param->parm.capture.capturemode;
+	return 0;
+}
 
 struct v4l2_subdev *sunxi_csi_get_subdev(int id)
 {

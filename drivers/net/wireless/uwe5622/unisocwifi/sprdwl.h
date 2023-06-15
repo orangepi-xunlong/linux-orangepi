@@ -115,8 +115,8 @@ struct sprdwl_vif {
 	u8 prwise_crypto;
 	u8 grp_crypto;
 	u8 key_index[2];
-	u8 key[2][4][WLAN_MAX_KEY_LEN];
-	u8 key_len[2][4];
+	u8 key[2][8][WLAN_MAX_KEY_LEN];
+	u8 key_len[2][8];
 	unsigned long mgmt_reg;
 
 	/* P2P stuff */
@@ -142,6 +142,8 @@ struct sprdwl_vif {
 	u16 disconnect_event_code;
 	wait_queue_head_t disconnect_wq;
 #endif
+	bool has_rand_mac;
+	u8 random_mac[ETH_ALEN];
 };
 
 enum sprdwl_hw_type {
@@ -180,6 +182,17 @@ struct sprdwl_channel_list {
 	int num_channels;
 	int channels[TOTAL_2G_5G_CHANNEL_NUM];
 };
+
+#ifdef CP2_RESET_SUPPORT
+struct sprlwl_drv_cp_sync {
+	char country[2];
+	unsigned char fw_stat[SPRDWL_MODE_MAX];
+	bool scan_not_allowed;
+	bool cmd_not_allowed;
+	struct regulatory_request request;
+
+};
+#endif
 
 struct sprdwl_priv {
 	struct wiphy *wiphy;
@@ -270,6 +283,10 @@ struct sprdwl_priv {
 #define OTT_NO_SUPT	(0)
 #define OTT_SUPT	(1)
 	unsigned char ott_supt;
+
+#ifdef CP2_RESET_SUPPORT
+	struct sprlwl_drv_cp_sync sync;
+#endif
 };
 
 struct sprdwl_eap_hdr {

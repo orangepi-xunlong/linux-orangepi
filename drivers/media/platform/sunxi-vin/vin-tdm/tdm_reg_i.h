@@ -1,5 +1,5 @@
 /*
- * linux-4.9/drivers/media/platform/sunxi-vin/vin-tdm/parser_reg_i.h
+ * linux-5.4/drivers/media/platform/sunxi-vin/vin-tdm/parser_reg_i.h
  *
  * Copyright (c) 2007-2019 Allwinnertech Co., Ltd.
  *
@@ -132,5 +132,8 @@
 #define TDM_RX_CFG2_REG_OFF			0X010
 #define TDM_RX_ADDR				0
 #define TDM_RX_ADDR_MASK			(0XFFFFFFFF << TDM_RX_ADDR)
+
+#define TDM_RX_FRAME_ERR_REG_OFF		0X020
+#define TDM_RX_HB_SHORT_REG_OFF			0X024
 
 #endif /* __CSIC__TDM__REG__I__H__ */

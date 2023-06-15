@@ -1,0 +1,8 @@
+config SUNXI_SW_SYNC
+	depends on SYNC_FILE
+	tristate "Software Sync File Framework for sunxi platform"
+	default n
+	---help---
+	  A sync object driver that uses a 32bit counter to coordinate
+	  synchronization.  Useful when there is no hardware primitive backing
+	  the synchronization.

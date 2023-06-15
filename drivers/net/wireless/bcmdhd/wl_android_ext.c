@@ -4008,8 +4008,10 @@ wl_delete_dirty_rssi_cache(wl_rssi_cache_ctrl_t *rssi_cache_ctrl)
 	wl_rssi_cache_t *node, *prev, **rssi_head;
 	int i = -1, tmp = 0;
 	struct timeval now;
-
-	do_gettimeofday(&now);
+	struct timespec ts;
+	getnstimeofday(&ts);
+	now->tv_sec = ts.tv_sec;
+	now->tv_usec = ts.tv_nsec/1000;
 
 	rssi_head = &rssi_cache_ctrl->m_cache_head;
 	node = *rssi_head;
@@ -4100,6 +4102,7 @@ wl_update_connected_rssi_cache(struct net_device *net,
 	int rssi, error = 0;
 	struct ether_addr bssid;
 	struct timeval now, timeout;
+	struct timespec ts;
 	scb_val_t scbval;
 
 	if (!g_wifi_on)
@@ -4120,7 +4123,9 @@ wl_update_connected_rssi_cache(struct net_device *net,
 	}
 	rssi = scbval.val;
 
-	do_gettimeofday(&now);
+	getnstimeofday(&ts);
+	now->tv_sec = ts.tv_sec;
+	now->tv_usec = ts.tv_nsec/1000;
 	timeout.tv_sec = now.tv_sec + RSSICACHE_TIMEOUT;
 	if (timeout.tv_sec < now.tv_sec) {
 		/*
@@ -4186,11 +4191,14 @@ wl_update_rssi_cache(wl_rssi_cache_ctrl_t *rssi_cache_ctrl,
 	wl_bss_info_t *bi = NULL;
 	int i, j, k;
 	struct timeval now, timeout;
+	struct timespec ts;
 
 	if (!ss_list->count)
 		return;
 
-	do_gettimeofday(&now);
+	getnstimeofday(&ts);
+	now->tv_sec = ts.tv_sec;
+	now->tv_usec = ts.tv_nsec/1000;
 	timeout.tv_sec = now.tv_sec + RSSICACHE_TIMEOUT;
 	if (timeout.tv_sec < now.tv_sec) {
 		/*
@@ -4333,8 +4341,11 @@ wl_delete_dirty_bss_cache(wl_bss_cache_ctrl_t *bss_cache_ctrl)
 	wl_bss_cache_t *node, *prev, **bss_head;
 	int i = -1, tmp = 0;
 	struct timeval now;
+	struct timespec ts;
 
-	do_gettimeofday(&now);
+	getnstimeofday(&ts);
+	now->tv_sec = ts.tv_sec;
+	now->tv_usec = ts.tv_nsec/1000;
 
 	bss_head = &bss_cache_ctrl->m_cache_head;
 	node = *bss_head;
@@ -4455,11 +4466,15 @@ wl_update_bss_cache(wl_bss_cache_ctrl_t *bss_cache_ctrl,
 	int16 rssi, rssi_node;
 #endif
 	struct timeval now, timeout;
+	struct timespec ts;
 
 	if (!ss_list->count)
 		return;
 
-	do_gettimeofday(&now);
+	getnstimeofday(&ts);
+	now->tv_sec = ts.tv_sec;
+	now->tv_usec = ts.tv_nsec/1000;
+
 	timeout.tv_sec = now.tv_sec + BSSCACHE_TIMEOUT;
 	if (timeout.tv_sec < now.tv_sec) {
 		/*

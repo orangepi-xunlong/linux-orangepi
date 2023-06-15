@@ -35,7 +35,8 @@
 #include "rawnand/rawnand_base.h"
 #include "rawnand/rawnand_cfg.h"
 #include "nand.h"
-#include "nand_boot.h"
+/*#include "nand_boot.h"*/
+#include "nand-partition3/sunxi_nand_boot.h"
 #include "spinand/spinand.h"
 #include "nand_weak.h"
 #include <linux/mtd/aw-spinand-nftl.h>
@@ -57,6 +58,12 @@ unsigned short cur_w_pb_no;
 unsigned short cur_w_p_no;
 /* current logical erase block */
 unsigned short cur_e_lb_no;
+
+extern unsigned int rawnand_get_super_chip_page_size(struct nand_super_chip_info *schip);
+extern unsigned int rawnand_get_super_chip_spare_size(struct nand_super_chip_info *schip);
+extern unsigned int rawnand_get_super_chip_block_size(struct nand_super_chip_info *schip);
+extern unsigned int rawnand_get_super_chip_size(struct nand_super_chip_info *schip);
+extern unsigned int rawnand_get_super_chip_cnt(struct nand_super_chip_info *schip);
 
 __u32 get_storage_type_from_init(void)
 {
@@ -503,6 +510,90 @@ __u32 nand_get_twoplane_flag(void)
 		return rawnand_get_twoplane_flag();
 	else if (get_storage_type() == 2)
 		return spinand_nftl_get_multi_plane_flag();
+	return 0;
+}
+
+/**
+ * nand_get_super_chip_page_size:
+ *
+ * @return page size in sector
+ */
+unsigned int nand_get_super_chip_page_size(void)
+{
+	if (get_storage_type() == 1) {
+		return rawnand_get_super_chip_page_size(g_nssi->nsci);
+	} else if (get_storage_type() == 2)
+		return 0;
+
+	return 0;
+}
+
+/**
+ * nand_get_super_chip_spare_size:
+ *
+ * @return the super chip spare size
+ */
+unsigned int nand_get_super_chip_spare_size(void)
+{
+	if (get_storage_type() == 1) {
+		if (!g_nssi) {
+			printk("rawnand hw not init\n");
+			return 0;
+		}
+		return rawnand_get_super_chip_spare_size(g_nssi->nsci);
+	} else if (get_storage_type() == 2)
+		return 0;
+
+	return 0;
+}
+/**
+ * nand_get_super_chip_block_size:
+ *
+ * @return block size in page
+ */
+unsigned int nand_get_super_chip_block_size(void)
+{
+	if (get_storage_type() == 1) {
+		if (!g_nssi) {
+			printk("rawnand hw not init\n");
+			return 0;
+		}
+		return rawnand_get_super_chip_block_size(g_nssi->nsci);
+	} else if (get_storage_type() == 2)
+		return 0;
+
+	return 0;
+}
+
+unsigned int nand_get_super_chip_cnt(void)
+{
+	if (get_storage_type() == 1) {
+		if (!g_nssi) {
+			printk("rawnand hw not init\n");
+			return 0;
+		}
+		return rawnand_get_super_chip_cnt(g_nssi->nsci);
+	} else if (get_storage_type() == 2)
+		return 0;
+
+	return 0;
+}
+/**
+ * nand_get_super_chip_size:
+ *
+ * @return super chip size in block
+ */
+unsigned int nand_get_super_chip_size(void)
+{
+	if (get_storage_type() == 1) {
+		if (!g_nssi) {
+			printk("rawnand hw not init\n");
+			return 0;
+		}
+		return rawnand_get_super_chip_size(g_nssi->nsci);
+	} else if (get_storage_type() == 2)
+		return 0;
+
 	return 0;
 }
 

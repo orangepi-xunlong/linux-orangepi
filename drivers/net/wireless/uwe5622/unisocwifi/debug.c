@@ -160,9 +160,8 @@ void debug_record_show(struct seq_file *s, enum debug_record_index index)
 		return;
 
 	seq_printf(s, "%s:", record_index2str(index));
-	for (i = 0; i < MAX_RECORD_NUM; i++) {
+	for (i = 0; i < MAX_RECORD_NUM; i++)
 		seq_printf(s, " %d", record->record[i]);
-	}
 	seq_puts(s, "\n");
 }
 

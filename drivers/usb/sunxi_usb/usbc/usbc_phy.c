@@ -227,7 +227,11 @@ void usb_otg_phy_txtune(void __iomem *regs)
 	__u32 reg_val = 0;
 
 	reg_val = USBC_Readl(regs + USBC_REG_o_PHYTUNE);
+#if defined(CONFIG_ARCH_SUN8IW18)
+	reg_val |= (0x01 << 1);
+#else
 	reg_val |= 0x03 << 2;	/* TXRESTUNE */
+#endif
 	reg_val &= ~(0xf << 8);
 	reg_val |= 0xc << 8;	/* TXVREFTUNE */
 	USBC_Writel(reg_val, (regs + USBC_REG_o_PHYTUNE));

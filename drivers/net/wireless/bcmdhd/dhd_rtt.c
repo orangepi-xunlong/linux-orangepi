@@ -196,6 +196,7 @@ static const ftm_status_map_host_entry_t ftm_status_map_info[] = {
 };
 
 /* ftm tlv-id mapping */
+#if 0
 static const ftm_strmap_entry_t ftm_tlvid_loginfo[] = {
 	/* { WL_PROXD_TLV_ID_xxx,				"text for WL_PROXD_TLV_ID_xxx" }, */
 	{ WL_PROXD_TLV_ID_NONE,				"none" },
@@ -246,6 +247,7 @@ static const ftm_strmap_entry_t ftm_tlvid_loginfo[] = {
 	{ WL_PROXD_TLV_ID_RI_RR,			"ri_rr" },
 	{ WL_PROXD_TLV_ID_COLLECT_CHAN_DATA,		"chan est"}
 };
+#endif
 
 static const ftm_strmap_entry_t ftm_event_type_loginfo[] = {
 	/* wl_proxd_event_type_t,			text-string */
@@ -288,6 +290,7 @@ static const ftm_strmap_entry_t ftm_session_state_value_loginfo[] = {
 /*
 * ranging-state --> text string mapping
 */
+#if 0
 static const ftm_strmap_entry_t ftm_ranging_state_value_loginfo [] = {
 	/* wl_proxd_ranging_state_t,			text string */
 	{ WL_PROXD_RANGING_STATE_NONE,			"none" },
@@ -295,6 +298,7 @@ static const ftm_strmap_entry_t ftm_ranging_state_value_loginfo [] = {
 	{ WL_PROXD_RANGING_STATE_INPROGRESS,		"inprogress" },
 	{ WL_PROXD_RANGING_STATE_DONE,			"done" },
 };
+#endif
 
 /*
 * status --> text string mapping
@@ -1708,7 +1712,7 @@ dhd_rtt_convert_results_to_host(rtt_report_t *rtt_report, uint8 *p_data, uint16 
 	/* time stamp */
 	/* get the time elapsed from boot time */
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 39))
-	get_monotonic_boottime(&ts);
+	ts = ktime_to_timespec(ktime_get_boottime());
 	rtt_report->ts = (uint64)TIMESPEC_TO_US(ts);
 #endif /* LINUX_VER >= 2.6.39 */
 

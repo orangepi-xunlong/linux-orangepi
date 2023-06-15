@@ -102,7 +102,7 @@ int de_vsu_init(unsigned int sel, uintptr_t reg_base)
 	for (j = 0; j < chno; j++) {
 		vsu_base = reg_base + (sel + 1) * 0x00100000 + VSU_OFST
 				+ j * 0x20000;
-#if defined(CONFIG_ARCH_SUN50IW10)
+#if defined(CONFIG_INDEPENDENT_DE)
 		if (sel)
 			vsu_base = vsu_base - 0x00100000;
 #endif

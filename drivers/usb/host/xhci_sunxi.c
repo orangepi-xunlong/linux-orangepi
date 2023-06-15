@@ -26,10 +26,10 @@
 #include <linux/io.h>
 
 #include <linux/clk.h>
-#include "sunxi_hci.h"
+#include "sunxi-hci.h"
 #include "xhci.h"
 
-#ifdef CONFIG_PM
+#if IS_ENABLED(CONFIG_PM)
 static void sunxi_xhci_resume_work(struct work_struct *work);
 #endif
 
@@ -37,7 +37,7 @@ static void sunxi_xhci_resume_work(struct work_struct *work);
 static const char xhci_name[] = SUNXI_XHCI_NAME;
 #define SUNXI_ALIGN_MASK		(16 - 1)
 
-#ifdef CONFIG_USB_SUNXI_XHCI
+#if IS_ENABLED(CONFIG_USB_SUNXI_XHCI)
 #define  SUNXI_XHCI_OF_MATCH	"allwinner,sunxi-xhci"
 #else
 #define  SUNXI_XHCI_OF_MATCH   "NULL"
@@ -521,7 +521,7 @@ static int sunxi_xhci_hcd_probe(struct platform_device *pdev)
 
 	g_dev_data->probe = 1;
 
-#ifdef CONFIG_PM
+#if IS_ENABLED(CONFIG_PM)
 	if (!g_dev_data->wakeup_suspend)
 		INIT_WORK(&g_dev_data->resume_work, sunxi_xhci_resume_work);
 #endif
@@ -646,7 +646,7 @@ int sunxi_usb_enable_xhci(void)
 }
 EXPORT_SYMBOL(sunxi_usb_enable_xhci);
 
-#ifdef CONFIG_PM
+#if IS_ENABLED(CONFIG_PM)
 static int sunxi_xhci_hcd_suspend(struct device *dev)
 {
 	struct sunxi_hci_hcd *sunxi_xhci = NULL;
@@ -688,7 +688,6 @@ static int sunxi_xhci_hcd_suspend(struct device *dev)
 		DMSG_INFO("[%s]: not suspend\n", dev_data->hci_name);
 	} else {
 		DMSG_INFO("[%s]: sunxi_xhci_hcd_suspend\n", dev_data->hci_name);
-		atomic_add(1, &g_sunxi_usb_super_standby);
 
 		xhci_suspend(xhci, false);
 		sunxi_stop_xhci(dev_data);
@@ -709,7 +708,6 @@ static void sunxi_xhci_resume_work(struct work_struct *work)
 	msleep(5000);
 
 	sunxi_xhci_set_vbus(dev_data, 1);
-	atomic_sub(1, &g_sunxi_usb_super_standby);
 }
 
 static int sunxi_xhci_hcd_resume(struct device *dev)
@@ -785,7 +783,7 @@ static struct platform_driver sunxi_xhci_hcd_driver = {
 	.driver = {
 			.name	= xhci_name,
 			.owner	= THIS_MODULE,
-#ifdef CONFIG_PM
+#if IS_ENABLED(CONFIG_PM)
 			.pm	= &xhci_pmops,
 #endif
 			.of_match_table = sunxi_xhci_match,

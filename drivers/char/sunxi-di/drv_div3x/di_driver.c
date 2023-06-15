@@ -26,6 +26,7 @@
 #include <linux/slab.h>
 #include <linux/of.h>
 #include <linux/clk.h>
+#include <linux/reset.h>
 #include <linux/of_irq.h>
 #include <linux/of_address.h>
 
@@ -99,7 +100,7 @@ di_device_debug_show(struct device *dev,
 	n += sprintf(buf + n, "level 4: enable debug di time detect logs\n");
 	n += sprintf(buf + n, "level 5: enable film mode detect logs\n");
 
-	n += sprintf(buf + n, "\nNow the debug level is:%d\n", debug_mask);
+	n += sprintf(buf + n, "\nNow the debug level is:%d\n", di_debug_mask);
 
 	return n;
 }
@@ -116,7 +117,7 @@ di_device_debug_store(struct device *dev,
 	val = simple_strtoull(buf, &end, 0);
 
 	if (val < DEBUG_LEVEL_MAX) {
-		debug_mask = val;
+		di_debug_mask = val;
 	} else {
 		pr_err("ERROR: invalid input log level:%u\n", val);
 		retval = -EINVAL;
@@ -150,6 +151,38 @@ static DEVICE_ATTR(info, S_IWUSR | S_IRUGO,
 	di_device_info_show, NULL);
 
 static char debug_client_name[30];
+
+static ssize_t dump_client_info(struct di_client *client, char *buf)
+{
+	ssize_t n = 0;
+
+	if (!client)
+		return 0;
+	n += sprintf(buf + n, "clients:%s basic info:\n", client->name);
+	n += sprintf(buf + n, "di_mode:%s\n",
+		client->mode == DI_MODE_60HZ ? "60HZ" :
+		client->mode == DI_MODE_30HZ ? "30HZ" :
+		client->mode == DI_MODE_BOB ? "bob" :
+		client->mode == DI_MODE_WEAVE ? "weave" :
+		client->mode == DI_MODE_TNR ? "only tnr" : "Unknowed");
+	n += sprintf(buf + n, "proc_fb_seqno:%llu\n", client->proc_fb_seqno);
+
+	n += sprintf(buf + n, "di_detect_result:%s\n",
+		client->di_detect_result ? "progressive" : "interlace");
+	n += sprintf(buf + n, "interlace_detected_counts:%llu\n",
+		client->interlace_detected_counts);
+	n += sprintf(buf + n, "lastest_interlace_detected_frame:%llu\n",
+		client->lastest_interlace_detected_frame);
+	n += sprintf(buf + n, "progressive_detected_counts:%llu\n",
+		client->progressive_detected_counts);
+	n += sprintf(buf + n, "progressive_detected_first_frame:%llu\n",
+		client->progressive_detected_first_frame);
+	n += sprintf(buf + n, "lastest_progressive_detected_frame:%llu\n",
+		client->lastest_progressive_detected_frame);
+	n += sprintf(buf + n, "warning!!! detection:interlace_detected_counts_exceed_first_progressive_frame:%llu\n",
+		client->interlace_detected_counts_exceed_first_p_frame);
+	return n;
+}
 static ssize_t di_device_client_show(struct device *dev,
 		struct device_attribute *attr, char *buf)
 {
@@ -164,6 +197,7 @@ static ssize_t di_device_client_show(struct device *dev,
 	n += sprintf(buf + n, "\n\n");
 
 	list_for_each_entry(client, &drvdata->clients, node) {
+		n += dump_client_info(client, buf + n);
 		if (!strcmp(client->name, debug_client_name)) {
 			find = true;
 			break;
@@ -178,7 +212,7 @@ static ssize_t di_device_client_show(struct device *dev,
 		return n;
 	}
 
-	n += sprintf(buf + n, "debug_client_name:%s\n",
+	n += sprintf(buf + n, "%s info\n",
 			debug_client_name);
 
 	return n;
@@ -415,6 +449,12 @@ static int di_clk_enable(struct di_driver_data *drvdata)
 			DI_ERR(TAG"try to enable di clk failed!\n");
 			return ret;
 		}
+
+		if (!IS_ERR_OR_NULL(drvdata->clk_bus))
+			clk_prepare_enable(drvdata->clk_bus);
+
+		if (!IS_ERR_OR_NULL(drvdata->rst_bus_di))
+			reset_control_deassert(drvdata->rst_bus_di);
 	} else {
 		DI_INFO(TAG"di clk handle is invalid for enable\n");
 	}
@@ -423,9 +463,12 @@ static int di_clk_enable(struct di_driver_data *drvdata)
 
 static int di_clk_disable(struct di_driver_data *drvdata)
 {
-	if (!IS_ERR_OR_NULL(drvdata->iclk))
+	if (!IS_ERR_OR_NULL(drvdata->iclk)) {
 		clk_disable_unprepare(drvdata->iclk);
-	else
+		if (!IS_ERR_OR_NULL(drvdata->rst_bus_di))
+			reset_control_assert(drvdata->rst_bus_di);
+
+	} else
 		DI_INFO(TAG"di clk handle is invalid!\n");
 	return 0;
 }
@@ -779,12 +822,19 @@ static int di_parse_dt(struct platform_device *pdev,
 		goto err_out;
 	}
 
-	/*drvdata->clk_source = of_clk_get(node, 1);
-	if (IS_ERR_OR_NULL(drvdata->clk_source)) {
-		DI_ERR(TAG"get clk_source clock failed!\n");
-		ret = PTR_ERR(drvdata->clk_source);
+	drvdata->rst_bus_di = devm_reset_control_get(&pdev->dev, "rst_bus_di");
+	if (IS_ERR(drvdata->rst_bus_di)) {
+		DI_ERR(TAG"get di bus reset control  failed!\n");
+		ret = PTR_ERR(drvdata->rst_bus_di);
 		goto err_out;
-	}*/
+	}
+
+	drvdata->clk_bus = of_clk_get(node, 1);
+	if (IS_ERR_OR_NULL(drvdata->clk_bus)) {
+		DI_ERR(TAG"get clk_source clock failed!\n");
+		ret = PTR_ERR(drvdata->clk_bus);
+		goto err_out;
+	}
 	/* fixme: set iclk's parent as clk_source */
 
 	/* irq */
@@ -992,8 +1042,8 @@ static struct platform_driver di_driver = {
 
 module_platform_driver(di_driver);
 
-int debug_mask = DEBUG_LEVEL_ERR;
-module_param_named(debug_mask, debug_mask, int, 0644);
+int di_debug_mask = DEBUG_LEVEL_ERR;
+module_param_named(di_debug_mask, di_debug_mask, int, 0644);
 
 MODULE_DEVICE_TABLE(of, di_dt_match);
 MODULE_LICENSE("GPL");

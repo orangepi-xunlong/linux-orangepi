@@ -59,10 +59,6 @@ ENTRY(_start)
 
 	.align	4
 	.literal_position
-.Lstartup:
-	.word	_startup
-
-	.align	4
 _SetupOCD:
 	/*
 	 * Initialize WB, WS, and clear PS.EXCM (to allow loop instructions).
@@ -99,12 +95,12 @@ _SetupMMU:
 1:
 #endif
 #endif
-	.end	no-absolute-literals
 
-	l32r	a0, .Lstartup
+	movi	a0, _startup
 	jx	a0
 
 ENDPROC(_start)
+	.end	no-absolute-literals
 
 	__REF
 	.literal_position
@@ -184,6 +180,8 @@ ENTRY(_startup)
 
 	isync
 
+	initialize_cacheattr
+
 #ifdef CONFIG_HAVE_SMP
 	movi	a2, CCON	# MX External Register to Configure Cache
 	movi	a3, 1
@@ -195,7 +193,7 @@ ENTRY(_startup)
 	movi	a1, start_info
 	l32i	a1, a1, 0
 
-	movi	a2, (1 << PS_WOE_BIT) | LOCKLEVEL
+	movi	a2, PS_WOE_MASK | LOCKLEVEL
 					# WOE=1, INTLEVEL=LOCKLEVEL, UM=0
 	wsr	a2, ps			# (enable reg-windows; progmode stack)
 	rsync
@@ -267,11 +265,8 @@ ENTRY(_startup)
 
 	/* init_arch kick-starts the linux kernel */
 
-	movi	a4, init_arch
-	callx4	a4
-
-	movi	a4, start_kernel
-	callx4	a4
+	call4	init_arch
+	call4	start_kernel
 
 should_never_return:
 	j	should_never_return
@@ -298,8 +293,7 @@ should_never_return:
 	movi	a6, 0
 	wsr	a6, excsave1
 
-	movi	a4, secondary_start_kernel
-	callx4	a4
+	call4	secondary_start_kernel
 	j	should_never_return
 
 #endif  /* CONFIG_SMP */

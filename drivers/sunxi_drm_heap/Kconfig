@@ -1,0 +1,8 @@
+# SPDX-License-Identifier: GPL-2.0-only
+# Generic Trusted Execution Environment Configuration
+config SUNXI_DRM_HEAP
+	tristate "sunxi drm heap"
+	depends on TEE
+	help
+	  This implements a interface for sunxi drm management
+

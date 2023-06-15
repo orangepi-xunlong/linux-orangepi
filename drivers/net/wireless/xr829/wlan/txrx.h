@@ -174,7 +174,8 @@ void tx_policy_upload_work(struct work_struct *work);
 
 u32 xradio_rate_mask_to_wsm(struct xradio_common *hw_priv,
 			       u32 rates);
-void xradio_tx(struct ieee80211_hw *dev, struct sk_buff *skb);
+void xradio_tx(struct ieee80211_hw *dev, struct ieee80211_tx_control *control, struct sk_buff *skb);
+
 void xradio_skb_dtor(struct xradio_common *hw_priv,
 		     struct sk_buff *skb,
 		     const struct xradio_txpriv *txpriv);

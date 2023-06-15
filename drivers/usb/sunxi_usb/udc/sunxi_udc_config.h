@@ -25,6 +25,12 @@
 #include <linux/usb/ch9.h>
 
 #define  SW_UDC_DOUBLE_FIFO       /* double FIFO          */
+
+/**
+ * we previously deleted the "dma_flag" variable for GKI, which led to the
+ * loss of the flag that distinguishes some gadget modules to use DMA.
+ * Therefore, UDC does not provide DMA transmission.
+ */
 #define  SW_UDC_DMA
 
 /**

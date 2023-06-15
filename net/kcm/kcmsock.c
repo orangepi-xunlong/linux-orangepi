@@ -1,11 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Kernel Connection Multiplexor
  *
  * Copyright (c) 2016 Tom Herbert <tom@herbertland.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2
- * as published by the Free Software Foundation.
  */
 
 #include <linux/bpf.h>
@@ -24,6 +21,8 @@
 #include <linux/uaccess.h>
 #include <linux/workqueue.h>
 #include <linux/syscalls.h>
+#include <linux/sched/signal.h>
+
 #include <net/kcm.h>
 #include <net/netns/generic.h>
 #include <net/sock.h>
@@ -94,12 +93,12 @@ static void kcm_update_rx_mux_stats(struct kcm_mux *mux,
 				    struct kcm_psock *psock)
 {
 	STRP_STATS_ADD(mux->stats.rx_bytes,
-		       psock->strp.stats.rx_bytes -
+		       psock->strp.stats.bytes -
 		       psock->saved_rx_bytes);
 	mux->stats.rx_msgs +=
-		psock->strp.stats.rx_msgs - psock->saved_rx_msgs;
-	psock->saved_rx_msgs = psock->strp.stats.rx_msgs;
-	psock->saved_rx_bytes = psock->strp.stats.rx_bytes;
+		psock->strp.stats.msgs - psock->saved_rx_msgs;
+	psock->saved_rx_msgs = psock->strp.stats.msgs;
+	psock->saved_rx_bytes = psock->strp.stats.bytes;
 }
 
 static void kcm_update_tx_mux_stats(struct kcm_mux *mux,
@@ -379,8 +378,12 @@ static int kcm_parse_func_strparser(struct strparser *strp, struct sk_buff *skb)
 {
 	struct kcm_psock *psock = container_of(strp, struct kcm_psock, strp);
 	struct bpf_prog *prog = psock->bpf_prog;
+	int res;
 
-	return (*prog->bpf_func)(skb, prog->insnsi);
+	preempt_disable();
+	res = BPF_PROG_RUN(prog, skb);
+	preempt_enable();
+	return res;
 }
 
 static int kcm_read_sock_done(struct strparser *strp, int err)
@@ -394,8 +397,8 @@ static int kcm_read_sock_done(struct strparser *strp, int err)
 
 static void psock_state_change(struct sock *sk)
 {
-	/* TCP only does a POLLIN for a half close. Do a POLLHUP here
-	 * since application will normally not poll with POLLIN
+	/* TCP only does a EPOLLIN for a half close. Do a EPOLLHUP here
+	 * since application will normally not poll with EPOLLIN
 	 * on the TCP sockets.
 	 */
 
@@ -636,15 +639,15 @@ do_frag_list:
 			frag_offset = 0;
 do_frag:
 			frag = &skb_shinfo(skb)->frags[fragidx];
-			if (WARN_ON(!frag->size)) {
+			if (WARN_ON(!skb_frag_size(frag))) {
 				ret = -EINVAL;
 				goto out;
 			}
 
 			ret = kernel_sendpage(psock->sk->sk_socket,
-					      frag->page.p,
-					      frag->page_offset + frag_offset,
-					      frag->size - frag_offset,
+					      skb_frag_page(frag),
+					      skb_frag_off(frag) + frag_offset,
+					      skb_frag_size(frag) - frag_offset,
 					      MSG_DONTWAIT);
 			if (ret <= 0) {
 				if (ret == -EAGAIN) {
@@ -679,7 +682,7 @@ do_frag:
 			sent += ret;
 			frag_offset += ret;
 			KCM_STATS_ADD(psock->stats.tx_bytes, ret);
-			if (frag_offset < frag->size) {
+			if (frag_offset < skb_frag_size(frag)) {
 				/* Not finished with this frag */
 				goto do_frag;
 			}
@@ -1116,7 +1119,7 @@ static int kcm_recvmsg(struct socket *sock, struct msghdr *msg,
 	struct kcm_sock *kcm = kcm_sk(sk);
 	int err = 0;
 	long timeo;
-	struct strp_rx_msg *rxm;
+	struct strp_msg *stm;
 	int copied = 0;
 	struct sk_buff *skb;
 
@@ -1130,26 +1133,26 @@ static int kcm_recvmsg(struct socket *sock, struct msghdr *msg,
 
 	/* Okay, have a message on the receive queue */
 
-	rxm = strp_rx_msg(skb);
+	stm = strp_msg(skb);
 
-	if (len > rxm->full_len)
-		len = rxm->full_len;
+	if (len > stm->full_len)
+		len = stm->full_len;
 
-	err = skb_copy_datagram_msg(skb, rxm->offset, msg, len);
+	err = skb_copy_datagram_msg(skb, stm->offset, msg, len);
 	if (err < 0)
 		goto out;
 
 	copied = len;
 	if (likely(!(flags & MSG_PEEK))) {
 		KCM_STATS_ADD(kcm->stats.rx_bytes, copied);
-		if (copied < rxm->full_len) {
+		if (copied < stm->full_len) {
 			if (sock->type == SOCK_DGRAM) {
 				/* Truncated message */
 				msg->msg_flags |= MSG_TRUNC;
 				goto msg_finished;
 			}
-			rxm->offset += copied;
-			rxm->full_len -= copied;
+			stm->offset += copied;
+			stm->full_len -= copied;
 		} else {
 msg_finished:
 			/* Finished with message */
@@ -1173,7 +1176,7 @@ static ssize_t kcm_splice_read(struct socket *sock, loff_t *ppos,
 	struct sock *sk = sock->sk;
 	struct kcm_sock *kcm = kcm_sk(sk);
 	long timeo;
-	struct strp_rx_msg *rxm;
+	struct strp_msg *stm;
 	int err = 0;
 	ssize_t copied;
 	struct sk_buff *skb;
@@ -1190,12 +1193,12 @@ static ssize_t kcm_splice_read(struct socket *sock, loff_t *ppos,
 
 	/* Okay, have a message on the receive queue */
 
-	rxm = strp_rx_msg(skb);
+	stm = strp_msg(skb);
 
-	if (len > rxm->full_len)
-		len = rxm->full_len;
+	if (len > stm->full_len)
+		len = stm->full_len;
 
-	copied = skb_splice_bits(skb, sk, rxm->offset, pipe, len, flags);
+	copied = skb_splice_bits(skb, sk, stm->offset, pipe, len, flags);
 	if (copied < 0) {
 		err = copied;
 		goto err_out;
@@ -1203,8 +1206,8 @@ static ssize_t kcm_splice_read(struct socket *sock, loff_t *ppos,
 
 	KCM_STATS_ADD(kcm->stats.rx_bytes, copied);
 
-	rxm->offset += copied;
-	rxm->full_len -= copied;
+	stm->offset += copied;
+	stm->full_len -= copied;
 
 	/* We have no way to return MSG_EOR. If all the bytes have been
 	 * read we still leave the message in the receive socket buffer.
@@ -1336,7 +1339,7 @@ static void init_kcm_sock(struct kcm_sock *kcm, struct kcm_mux *mux)
 
 	/* For SOCK_SEQPACKET sock type, datagram_poll checks the sk_state, so
 	 * we set sk_state, otherwise epoll_wait always returns right away with
-	 * POLLHUP
+	 * EPOLLHUP
 	 */
 	kcm->sk.sk_state = TCP_ESTABLISHED;
 
@@ -1374,7 +1377,11 @@ static int kcm_attach(struct socket *sock, struct socket *csock,
 	struct kcm_psock *psock = NULL, *tpsock;
 	struct list_head *head;
 	int index = 0;
-	struct strp_callbacks cb;
+	static const struct strp_callbacks cb = {
+		.rcv_msg = kcm_rcv_strparser,
+		.parse_msg = kcm_parse_func_strparser,
+		.read_sock_done = kcm_read_sock_done,
+	};
 	int err = 0;
 
 	csk = csock->sk;
@@ -1405,11 +1412,6 @@ static int kcm_attach(struct socket *sock, struct socket *csock,
 	psock->mux = mux;
 	psock->sk = csk;
 	psock->bpf_prog = prog;
-
-	cb.rcv_msg = kcm_rcv_strparser;
-	cb.abort_parser = NULL;
-	cb.parse_msg = kcm_parse_func_strparser;
-	cb.read_sock_done = kcm_read_sock_done;
 
 	err = strp_init(&psock->strp, csk, &cb);
 	if (err) {
@@ -1659,7 +1661,6 @@ static struct file *kcm_clone(struct socket *osock)
 {
 	struct socket *newsock;
 	struct sock *newsk;
-	struct file *file;
 
 	newsock = sock_alloc();
 	if (!newsock)
@@ -1679,11 +1680,7 @@ static struct file *kcm_clone(struct socket *osock)
 	sock_init_data(newsock, newsk);
 	init_kcm_sock(kcm_sk(newsk), kcm_sk(osock->sk)->mux);
 
-	file = sock_alloc_file(newsock, 0, osock->sk->sk_prot_creator->name);
-	if (IS_ERR(file))
-		sock_release(newsock);
-
-	return file;
+	return sock_alloc_file(newsock, 0, osock->sk->sk_prot_creator->name);
 }
 
 static int kcm_ioctl(struct socket *sock, unsigned int cmd, unsigned long arg)
@@ -2001,7 +1998,7 @@ static int kcm_create(struct net *net, struct socket *sock,
 	return 0;
 }
 
-static struct net_proto_family kcm_family_ops = {
+static const struct net_proto_family kcm_family_ops = {
 	.family = PF_KCM,
 	.create = kcm_create,
 	.owner  = THIS_MODULE,
@@ -2040,13 +2037,13 @@ static int __init kcm_init(void)
 
 	kcm_muxp = kmem_cache_create("kcm_mux_cache",
 				     sizeof(struct kcm_mux), 0,
-				     SLAB_HWCACHE_ALIGN | SLAB_PANIC, NULL);
+				     SLAB_HWCACHE_ALIGN, NULL);
 	if (!kcm_muxp)
 		goto fail;
 
 	kcm_psockp = kmem_cache_create("kcm_psock_cache",
 				       sizeof(struct kcm_psock), 0,
-					SLAB_HWCACHE_ALIGN | SLAB_PANIC, NULL);
+					SLAB_HWCACHE_ALIGN, NULL);
 	if (!kcm_psockp)
 		goto fail;
 
@@ -2108,4 +2105,3 @@ module_exit(kcm_exit);
 
 MODULE_LICENSE("GPL");
 MODULE_ALIAS_NETPROTO(PF_KCM);
-

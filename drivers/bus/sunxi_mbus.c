@@ -3,6 +3,7 @@
  *
  * Copyright (C) 2015 AllWinnertech Ltd.
  * Author: xiafeng <xiafeng@allwinnertech.com>
+ *         Martin <wuyan@allwinnertech.com>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -22,214 +23,133 @@
 #include <linux/slab.h>
 #include <linux/hwmon.h>
 #include <linux/hwmon-sysfs.h>
-
 #include <asm/cacheflush.h>
-#include <asm/smp_plat.h>
+//#include <asm/smp_plat.h>
 
-#define DRIVER_NAME          "MBUS"
-#define DRIVER_NAME_PMU      DRIVER_NAME"_PMU"
+#define DRIVER_NAME                 "MBUS"
+#define DRIVER_NAME_PMU             DRIVER_NAME"_PMU"
 
-#define MBUS_MAST_TMR_REG(n)        (0x000c) /* Time Measurement Register */
+/* Time Measurement Register */
+#define MBUS_MAST_TMR_REG(n)        (0x000c)
 
 /* Master N Configuration Register 0 */
 /* Master N Configuration Register 1 */
-#if (defined CONFIG_ARCH_SUN50IW3) || \
-	(defined CONFIG_ARCH_SUN8IW12) || \
-	(defined CONFIG_ARCH_SUN8IW15) || \
-	(defined CONFIG_ARCH_SUN8IW16) || \
-	(defined CONFIG_ARCH_SUN50IW8) || \
-	(defined CONFIG_ARCH_SUN50IW9) || \
-	(defined CONFIG_ARCH_SUN8IW17) || \
-	(defined CONFIG_ARCH_SUN8IW18) || \
-	(defined CONFIG_ARCH_SUN8IW19)
-#define MBUS_MAST_CFG0_REG(n)       (0x0210 + (0x10 * n))
-#define MBUS_MAST_CFG1_REG(n)       (0x0214 + (0x10 * n))
-#define MBUS_MAST_ABS_BWL_REG(n)    (0x0218 + (0x10 * n))
+/* Master N BW Limit Register */
+#if IS_ENABLED(CONFIG_ARCH_SUN8IW20) || IS_ENABLED(CONFIG_ARCH_SUN50IW9) || IS_ENABLED(CONFIG_ARCH_SUN20IW1)
+#define MBUS_MAST_CFG0_REG(n)       (0x0210 + (0x10 * (n)))
+#define MBUS_MAST_CFG1_REG(n)       (0x0214 + (0x10 * (n)))
+#define MBUS_MAST_ABS_BWL_REG(n)    (0x0218 + (0x10 * (n)))
 #else
-#define MBUS_MAST_CFG0_REG(n)       (0x0010 + (0x8 * n))
-#define MBUS_MAST_CFG1_REG(n)       (0x0014 + (0x8 * n))
-#define MBUS_MAST_ABS_BWL_REG(n)    (0x0018 + (0x8 * n))
+#define MBUS_MAST_CFG0_REG(n)       (0x0010 + (0x8 * (n)))
+#define MBUS_MAST_CFG1_REG(n)       (0x0014 + (0x8 * (n)))
+#define MBUS_MAST_ABS_BWL_REG(n)    (0x0018 + (0x8 * (n)))
 #endif
 
-/* Bandwidth Window base on MCLK cycles */
-#if (defined CONFIG_ARCH_SUN50IW3) || \
-	(defined CONFIG_ARCH_SUN8IW12) || \
-	(defined CONFIG_ARCH_SUN8IW15) || \
-	(defined CONFIG_ARCH_SUN8IW16) || \
-	(defined CONFIG_ARCH_SUN50IW8) || \
-	(defined CONFIG_ARCH_SUN50IW9) || \
-	(defined CONFIG_ARCH_SUN8IW17) || \
-	(defined CONFIG_ARCH_SUN8IW18) || \
-	(defined CONFIG_ARCH_SUN8IW19)
+/* Bandwidth Window Configuration Register */
+#if IS_ENABLED(CONFIG_ARCH_SUN8IW20) || IS_ENABLED(CONFIG_ARCH_SUN50IW9) || IS_ENABLED(CONFIG_ARCH_SUN20IW1)
 #define MBUS_BW_CFG_REG             (0x0200)
 #else
 #define MBUS_BW_CFG_REG             (0x0090)
 #endif
 
-/* Master Access Enable, 0:dis, 1:en */
-#if (defined CONFIG_ARCH_SUN50IW3) || \
-	(defined CONFIG_ARCH_SUN8IW12) || \
-	(defined CONFIG_ARCH_SUN8IW15) || \
-	(defined CONFIG_ARCH_SUN8IW16) || \
-	(defined CONFIG_ARCH_SUN50IW8) || \
-	(defined CONFIG_ARCH_SUN50IW9) || \
-	(defined CONFIG_ARCH_SUN8IW17) || \
-	(defined CONFIG_ARCH_SUN8IW18) || \
-	(defined CONFIG_ARCH_SUN8IW19)
-#define MBUS_MAST_ACEN_CFG_REG(n)   (0x0020 + (0x04 * n))
+/* Master Access Enable Register 0 ~ 2 */
+/* 0:disable, 1:enable */
+#if IS_ENABLED(CONFIG_ARCH_SUN8IW20) || IS_ENABLED(CONFIG_ARCH_SUN50IW9) || IS_ENABLED(CONFIG_ARCH_SUN20IW1)
+#define MBUS_MAST_ACEN_CFG_REG(n)   (0x0020 + (0x04 * (n)))
 #else
-#define MBUS_MAST_ACEN_CFG_REG(n)   (0x0094 + (0x04 * n))
+#define MBUS_MAST_ACEN_CFG_REG(n)   (0x0094 + (0x04 * (n)))
 #endif
 
 /* Some platform implement master access priority
  * in register MBUS_MAST_CFG0_REG(n)
  * register: Master Access Priority, 0:low, 1:hg
  */
-#if (!defined CONFIG_ARCH_SUN50IW3) && \
-	(!defined CONFIG_ARCH_SUN8IW12) && \
-	(!defined CONFIG_ARCH_SUN8IW15) && \
-	(!defined CONFIG_ARCH_SUN8IW16) && \
-	(!defined CONFIG_ARCH_SUN50IW8) && \
-	(!defined CONFIG_ARCH_SUN50IW9) && \
-	(!defined CONFIG_ARCH_SUN8IW17) && \
-	(!defined CONFIG_ARCH_SUN8IW18)
+#if (!IS_ENABLED(CONFIG_ARCH_SUN8IW20)) && (!IS_ENABLED(CONFIG_ARCH_SUN50IW9)) && (!IS_ENABLED(CONFIG_ARCH_SUN20IW1))
 #define MBUS_MAST_ACPR_CFG_REG      (0x0098)
 #endif
 
-/* Counter Enable, 0x0001:enable all */
+/* Master Counter General Configuration Register */
+/* Counter Enable, 0x1:enable all */
 #define MBUS_PMU_CNTEB_CFG_REG      (0x009c)
-/* Counter n = 0 ~ 7 */
-#define MBUS_PMU_CNT_REG(n)         (0x00a0 + (0x4 * n))
 
-/* Software Clock ON, 0:open by hws */
-/* Sofrware Clock OFF, 1:dis-access */
-#if (defined CONFIG_ARCH_SUN50IW3) || \
-	(defined CONFIG_ARCH_SUN8IW12) || \
-	(defined CONFIG_ARCH_SUN8IW15) || \
-	(defined CONFIG_ARCH_SUN8IW16) || \
-	(defined CONFIG_ARCH_SUN50IW8) || \
-	(defined CONFIG_ARCH_SUN50IW9) || \
-	(defined CONFIG_ARCH_SUN8IW17) || \
-	(defined CONFIG_ARCH_SUN8IW18) || \
-	(defined CONFIG_ARCH_SUN8IW19)
+/* BW Counter Register */
+/* Counter n = 0 ~ 7 */
+#define MBUS_PMU_CNT_REG(n)         (0x00a0 + (0x4 * (n)))
+
+/* Software Clock ON  Register 0: 0=open by hws */
+/* Software Clock OFF Register 0: 1=dis-access */
+#if IS_ENABLED(CONFIG_ARCH_SUN8IW20) || IS_ENABLED(CONFIG_ARCH_SUN50IW9) || IS_ENABLED(CONFIG_ARCH_SUN20IW1)
 #define MBUS_SW_CLK_ON_REG          (0x0030)
 #define MBUS_SW_CLK_OFF_REG         (0x0040)
 #else
 #define MBUS_SW_CLK_ON_REG          (0x00c0)
 #define MBUS_SW_CLK_OFF_REG         (0x00c4)
-#define MBUS_RESOURCE_SIZE          (MBUS_SW_CLK_OFF_REG)
+//#define MBUS_RESOURCE_SIZE          (MBUS_SW_CLK_OFF_REG)
 #endif
 
-/* for register MBUS_MAST_CFG0_REG(n) */
-#define MBUS_QOS_MAX            0x03
-#define MBUS_WT_MAX             0x0f  /* wait time, based on MCLK */
-#define MBUS_ACS_MAX            0x0ff /* access commands sequence */
-#define MBUS_BWL_MAX            0x0ffff
-#define MBUS_ABS_BWL_MAX        0x0fff
-#define MBUS_BW_SATU_MAX        0x0fff
+/* For MBUS_MAST_CFG0_REG */
+#define MBUS_QOS_MAX            0x03  /* bit mask of MASTER_N_QOS_VALUE */
+#define MBUS_WT_MAX             0x0f  /* bit mask of MASTER_N_WAIT_TIME */
+#define MBUS_ACS_MAX            0x0ff /* bit mask of COMMAND_NUMBER (access commands sequence) */
+#define MBUS_BWL_MAX            0x0ffff  /* bit mask of BANDWIDTH_LIMIT_0 */
+#define MBUS_BWLEN_SHIFT        0   /* bit shift of BANDWIDTH_LIMIT_ENABLE. 0:dis */
+#define MBUS_PRI_SHIFT          1   /* bit shift of MASTER_N_ACCESS_PRIORITY. 0:low */
+#define MBUS_QOS_SHIFT          2   /* bit shift of MASTER_N_QOS_VALUE. 0:lowest, 3:highest */
+#define MBUS_WT_SHIFT           4   /* bit shift of MASTER_N_WAIT_TIME */
+#define MBUS_ACS_SHIFT          8   /* bit shift of COMMAND_NUMBER */
+#define MBUS_BWL0_SHIFT         16  /* bit shift of BANDWIDTH_LIMIT_0. 0: no limit */
 
-/* shift, Bandwidth Limit function Enable, 0:dis */
-#define MBUS_BWLEN_SHIFT        0
-/* shift, Priority, 0:low */
-#define MBUS_PRI_SHIFT          1
-/* shift, QoS value, 0:lowest, 3:highest */
-#define MBUS_QOS_SHIFT          2
-/* shift, wait time, overflow, pr will be promoted */
-#define MBUS_WT_SHIFT           4
-/* shift, command number, overflow, CN will be 0 */
-#define MBUS_ACS_SHIFT          8
-/* shift, Bandwidth Limit in MB/S, 0: no limit */
-#define MBUS_BWL0_SHIFT         16
-#define MBUS_BWL1_SHIFT         0
-#define MBUS_BWL2_SHIFT         16
+/* For MBUS_MAST_CFG1_REG */
+#define MBUS_BWL1_SHIFT         0   /* bit shift of BANDWIDTH_LIMIT_1 */
+#define MBUS_BWL2_SHIFT         16  /* bit shift of BANDWIDTH_LIMIT_2 */
 
-#define MBUS_ABS_BWLEN_SHIFT    31
-#define MBUS_ABS_BWL_SHIFT      16
+/* For MBUS_MAST_ABS_BWL_REG */
+#define MBUS_ABS_BWL_MAX        0x0fff  /* bit mask of LIMIT_BANDWIDTH */
+#define MBUS_BW_SATU_MAX        0x0fff  /* bit mask of BANDWIDTH_SATURATION */
+#define MBUS_ABS_BWL_SHIFT      16      /* bit shift of LIMIT_BANDWIDTH */
+#define MBUS_ABS_BWLEN_SHIFT    31      /* bit shift of BANDWIDTH_LIMIT_ENABLE */
 
-/* for register MBUS_BW_CFG_REG */
+/* For MBUS_BW_CFG_REG */
 #define MBUS_BWSIZE_MAX         0x0f
 #define MBUS_BWEN_SHIFT         16
 
 /* MBUS PMU ids */
+/* See SDRAM Controller Spec: DRAMC BW Counter Register (offset:0xa0) */
 enum mbus_pmu {
-	MBUS_PMU_CPU    = 0,    /* CPU bandwidth */
-
-#if (defined CONFIG_ARCH_SUN8IW10)
-	MBUS_PMU_EINK0  = 1,
-	MBUS_PMU_EDMA   = 2,
-	MBUS_PMU_MAHB   = 3,
-#elif (defined CONFIG_ARCH_SUN8IW12)
-	MBUS_PMU_ECI  = 1,
-	MBUS_PMU_VE   = 2,
-#elif (defined CONFIG_ARCH_SUN8IW16)
-	MBUS_PMU_MAHB   = 1,
-	MBUS_PMU_DMA    = 2,
-	MBUS_PMU_VE     = 3,    /* VE */
-	MBUS_PMU_CE     = 4,    /* CE */
-	MBUS_PMU_NAND   = 5,    /* NAND */
-#elif (defined CONFIG_ARCH_SUN8IW19)
-	MBUS_PMU_MAHB   = 1,
-	MBUS_PMU_DMA    = 2,
-	MBUS_PMU_VE     = 3,
-	MBUS_PMU_CE     = 4,
-	MBUS_PMU_CSI    = 5,
-#elif (defined CONFIG_ARCH_SUN50IW9)
-	MBUS_PMU_MAHB   = 1,
-	MBUS_PMU_DMA    = 2,
-	MBUS_PMU_VE     = 3,
-	MBUS_PMU_CE     = 4,
-	MBUS_PMU_DISP   = 5,
-	MBUS_PMU_CSI0   = 6,
-	MBUS_PMU_DI     = 7,
-	MBUS_PMU_CSI1   = 8,
-	MBUS_PMU_G2D    = 9,
-	MBUS_PMU_VE1    = 10,
-	MBUS_PMU_IOMMU  = 11,
-	MBUS_PMU_GPU    = 12,
-	MBUS_PMU_TOTAL  = 13,
+	MBUS_PMU_CPU        = 0,
+#if IS_ENABLED(CONFIG_ARCH_SUN8IW20) || IS_ENABLED(CONFIG_ARCH_SUN20IW1)
+	MBUS_PMU_RISCV_SYS  = 1,
+	MBUS_PMU_MAHB       = 2,
+	MBUS_PMU_DMA        = 3,
+	MBUS_PMU_VE         = 4,
+	MBUS_PMU_CE         = 5,
+	MBUS_PMU_TVD        = 6,
+	MBUS_PMU_CSI        = 7,
+	MBUS_PMU_DSP_SYS    = 8,
+	MBUS_PMU_G2D        = 9,
+	MBUS_PMU_DI         = 10,
+	MBUS_PMU_DE         = 11,
+	MBUS_PMU_IOMMU      = 12,
+	MBUS_PMU_OTH        = 14,
+	MBUS_PMU_TOTAL      = 15,
+	MBUS_PMU_MAX        = 16,
+#elif IS_ENABLED(CONFIG_ARCH_SUN50IW9)
+	MBUS_PMU_MAHB       = 1,
+	MBUS_PMU_DMA        = 2,
+	MBUS_PMU_VE         = 3,
+	MBUS_PMU_CE         = 4,
+	MBUS_PMU_DISP       = 5,
+	MBUS_PMU_CSI0       = 6,
+	MBUS_PMU_DI         = 7,
+	MBUS_PMU_CSI1       = 8,
+	MBUS_PMU_G2D        = 9,
+	MBUS_PMU_VE1        = 10,
+	MBUS_PMU_IOMMU      = 11,
+	MBUS_PMU_GPU        = 12,
+	MBUS_PMU_TOTAL      = 13,
+	MBUS_PMU_MAX        = 14,
 #else
-	MBUS_PMU_GPU    = 1,    /* GPU bandwidth */
-	MBUS_PMU_VE     = 2,    /* VE */
-	MBUS_PMU_DISP   = 3,    /* DISPLAY */
-#endif
-
-#if (!defined CONFIG_ARCH_SUN8IW16) && \
-	(!defined CONFIG_ARCH_SUN50IW9) && \
-	(!defined CONFIG_ARCH_SUN8IW19)
-	MBUS_PMU_OTH    = 4,    /* other masters */
-	MBUS_PMU_TOTAL  = 5,    /* total masters */
-#endif
-
-#if (!defined CONFIG_ARCH_SUN8IW6) && \
-	(!defined CONFIG_ARCH_SUN50IW9) && \
-	(!defined CONFIG_ARCH_SUN8IW19)
-	MBUS_PMU_CSI    = 6,    /* csi masters */
-#endif
-
-#if (defined CONFIG_ARCH_SUN8IW16)
-	MBUS_PMU_ISP    = 7,    /* ISP */
-	MBUS_PMU_G2D_MIX = 8,	/* g2d */
-	MBUS_PMU_G2D_ROT = 9,   /* g2d */
-	MBUS_PMU_DE     = 10,    /* DE */
-	MBUS_PMU_ISE    = 11,
-	MBUS_PMU_EISE   = 12,
-	MBUS_PMU_TOTAL  = 13,
-#elif (defined CONFIG_ARCH_SUN8IW19)
-	MBUS_PMU_G2D    = 7,
-	MBUS_PMU_DE     = 8,
-	MBUS_PMU_IOMMU  = 9,
-	MBUS_PMU_EISE   = 10,
-	MBUS_PMU_DSPO   = 11,
-	MBUS_PMU_NNA    = 12,
-	MBUS_PMU_TOTAL  = 13,
-#endif
-
-#if (!defined CONFIG_ARCH_SUN8IW16) && \
-	(!defined CONFIG_ARCH_SUN50IW9) && \
-	(!defined CONFIG_ARCH_SUN8IW19)
-	MBUS_PMU_MAX    = 7,    /* max masters */
-#else
-	MBUS_PMU_MAX    = 14,    /* max masters */
+	/* ... */
 #endif
 };
 
@@ -682,12 +602,8 @@ int notrace mbus_port_control_by_index(enum mbus_port port, bool enable)
 EXPORT_SYMBOL_GPL(mbus_port_control_by_index);
 
 static const struct of_device_id sunxi_mbus_matches[] = {
-#ifdef CONFIG_ARCH_SUN8I
 	{.compatible = "allwinner,sun8i-mbus", },
-#endif
-#ifdef CONFIG_ARCH_SUN50I
 	{.compatible = "allwinner,sun50i-mbus", },
-#endif
 	{},
 };
 
@@ -1053,256 +969,106 @@ static ssize_t mbus_store_value(struct device *dev,
 	return count;
 }
 
-/* CPU bandwidth of DDR channel 0 */
-static SENSOR_DEVICE_ATTR(pmu_cpuddr, 0400,
-			  mbus_show_value, NULL, MBUS_PMU_CPU);
+#define MBUS_SENSOR_DEVICE_ATTR_RO(name, index)  \
+	static SENSOR_DEVICE_ATTR(name, 0400, mbus_show_value, NULL, index)
+#define MBUS_SENSOR_DEVICE_ATTR_RW(name, index)  \
+	static SENSOR_DEVICE_ATTR(name, 0644, mbus_show_value, mbus_store_value, index)
+#define SENSOR_DEVICE_ATTR_PTR(name) &sensor_dev_attr_##name.dev_attr.attr
 
-#if (defined CONFIG_ARCH_SUN8IW10)
-static SENSOR_DEVICE_ATTR(pmu_eink0_ddr, 0400,
-			  mbus_show_value, NULL, MBUS_PMU_EINK0);
-static SENSOR_DEVICE_ATTR(pmu_edma_ddr, 0400,
-			  mbus_show_value, NULL, MBUS_PMU_EDMA);
-static SENSOR_DEVICE_ATTR(pmu_mahb_ddr, 0400,
-			  mbus_show_value, NULL, MBUS_PMU_MAHB);
-#elif (defined CONFIG_ARCH_SUN8IW12)
-/* ECI(EVE, CVE, ISE) bandwidth of DDR channel 0 */
-static SENSOR_DEVICE_ATTR(pmu_eci_ddr, 0400,
-			  mbus_show_value, NULL, MBUS_PMU_ECI);
-/* VE bandwidth of DDR channel 0 */
-static SENSOR_DEVICE_ATTR(pmu_ve_ddr, 0400,
-			  mbus_show_value, NULL, MBUS_PMU_VE);
-#elif (defined CONFIG_ARCH_SUN8IW16)
-/* ECI(EVE, CVE, ISE) bandwidth of DDR channel 0 */
-static SENSOR_DEVICE_ATTR(pmu_mahb_ddr, 0400,
-			  mbus_show_value, NULL, MBUS_PMU_MAHB);
-/* VE bandwidth of DDR channel 0 */
-static SENSOR_DEVICE_ATTR(pmu_ve_ddr, 0400,
-			  mbus_show_value, NULL, MBUS_PMU_VE);
-static SENSOR_DEVICE_ATTR(pmu_ce_ddr, 0400,
-			  mbus_show_value, NULL, MBUS_PMU_CE);
-static SENSOR_DEVICE_ATTR(pmu_nand_ddr, 0400,
-			  mbus_show_value, NULL, MBUS_PMU_NAND);
-#elif (defined CONFIG_ARCH_SUN8IW19)
-/* ECI(EVE, CVE, ISE) bandwidth of DDR channel 0 */
-static SENSOR_DEVICE_ATTR(pmu_mahb_ddr, 0400,
-			  mbus_show_value, NULL, MBUS_PMU_MAHB);
-static SENSOR_DEVICE_ATTR(pmu_dma_ddr, 0400,
-			  mbus_show_value, NULL, MBUS_PMU_DMA);
-/* VE bandwidth of DDR channel 0 */
-static SENSOR_DEVICE_ATTR(pmu_ve_ddr, 0400,
-			  mbus_show_value, NULL, MBUS_PMU_VE);
-static SENSOR_DEVICE_ATTR(pmu_ce_ddr, 0400,
-			  mbus_show_value, NULL, MBUS_PMU_CE);
-static SENSOR_DEVICE_ATTR(pmu_csi_ddr, 0400,
-			  mbus_show_value, NULL, MBUS_PMU_CSI);
-#elif (defined CONFIG_ARCH_SUN50IW9)
-static SENSOR_DEVICE_ATTR(pmu_mahb_ddr, 0400,
-			  mbus_show_value, NULL, MBUS_PMU_MAHB);
-static SENSOR_DEVICE_ATTR(pmu_dma_ddr, 0400,
-			  mbus_show_value, NULL, MBUS_PMU_DMA);
-static SENSOR_DEVICE_ATTR(pmu_ve_ddr, 0400,
-			  mbus_show_value, NULL, MBUS_PMU_VE);
-static SENSOR_DEVICE_ATTR(pmu_ce_ddr, 0400,
-			  mbus_show_value, NULL, MBUS_PMU_CE);
-static SENSOR_DEVICE_ATTR(pmu_de_ddr, 0400,
-			  mbus_show_value, NULL, MBUS_PMU_DISP);
-static SENSOR_DEVICE_ATTR(pmu_csi0_ddr, 0400,
-			  mbus_show_value, NULL, MBUS_PMU_CSI0);
-static SENSOR_DEVICE_ATTR(pmu_di_ddr, 0400,
-			  mbus_show_value, NULL, MBUS_PMU_DI);
-static SENSOR_DEVICE_ATTR(pmu_csi1_ddr, 0400,
-			  mbus_show_value, NULL, MBUS_PMU_CSI1);
-static SENSOR_DEVICE_ATTR(pmu_g2d_ddr, 0400,
-			  mbus_show_value, NULL, MBUS_PMU_G2D);
-static SENSOR_DEVICE_ATTR(pmu_ve1_ddr, 0400,
-			  mbus_show_value, NULL, MBUS_PMU_VE1);
-static SENSOR_DEVICE_ATTR(pmu_iommu_ddr, 0400,
-			  mbus_show_value, NULL, MBUS_PMU_IOMMU);
-static SENSOR_DEVICE_ATTR(pmu_gpuddr, 0400,
-			  mbus_show_value, NULL, MBUS_PMU_GPU);
-static SENSOR_DEVICE_ATTR(pmu_totddr, 0400,
-			  mbus_show_value, NULL, MBUS_PMU_TOTAL);
+#if IS_ENABLED(CONFIG_ARCH_SUN8IW20) || IS_ENABLED(CONFIG_ARCH_SUN20IW1)
+MBUS_SENSOR_DEVICE_ATTR_RO(pmu_cpuddr,     MBUS_PMU_CPU);
+MBUS_SENSOR_DEVICE_ATTR_RO(pmu_riscv_sys,  MBUS_PMU_RISCV_SYS);
+MBUS_SENSOR_DEVICE_ATTR_RO(pmu_mahb_ddr,   MBUS_PMU_MAHB);
+MBUS_SENSOR_DEVICE_ATTR_RO(pmu_dma_ddr,    MBUS_PMU_DMA);
+MBUS_SENSOR_DEVICE_ATTR_RO(pmu_ve_ddr,     MBUS_PMU_VE);
+MBUS_SENSOR_DEVICE_ATTR_RO(pmu_ce_ddr,     MBUS_PMU_CE);
+MBUS_SENSOR_DEVICE_ATTR_RO(pmu_tvd_ddr,    MBUS_PMU_TVD);
+MBUS_SENSOR_DEVICE_ATTR_RO(pmu_csi_ddr,    MBUS_PMU_CSI);
+MBUS_SENSOR_DEVICE_ATTR_RO(pmu_dsp_sys,    MBUS_PMU_DSP_SYS);
+MBUS_SENSOR_DEVICE_ATTR_RO(pmu_g2d_ddr,    MBUS_PMU_G2D);
+MBUS_SENSOR_DEVICE_ATTR_RO(pmu_di_ddr,     MBUS_PMU_DI);
+MBUS_SENSOR_DEVICE_ATTR_RO(pmu_de_ddr,     MBUS_PMU_DE);
+MBUS_SENSOR_DEVICE_ATTR_RO(pmu_iommu_ddr,  MBUS_PMU_IOMMU);
+MBUS_SENSOR_DEVICE_ATTR_RO(pmu_othddr,     MBUS_PMU_OTH);
+MBUS_SENSOR_DEVICE_ATTR_RO(pmu_totddr,     MBUS_PMU_TOTAL);
+#elif IS_ENABLED(CONFIG_ARCH_SUN50IW9)
+MBUS_SENSOR_DEVICE_ATTR_RO(pmu_cpuddr,     MBUS_PMU_CPU);
+MBUS_SENSOR_DEVICE_ATTR_RO(pmu_mahb_ddr,   MBUS_PMU_MAHB);
+MBUS_SENSOR_DEVICE_ATTR_RO(pmu_dma_ddr,    MBUS_PMU_DMA);
+MBUS_SENSOR_DEVICE_ATTR_RO(pmu_ve_ddr,     MBUS_PMU_VE);
+MBUS_SENSOR_DEVICE_ATTR_RO(pmu_ce_ddr,     MBUS_PMU_CE);
+MBUS_SENSOR_DEVICE_ATTR_RO(pmu_de_ddr,     MBUS_PMU_DISP);
+MBUS_SENSOR_DEVICE_ATTR_RO(pmu_csi0_ddr,   MBUS_PMU_CSI0);
+MBUS_SENSOR_DEVICE_ATTR_RO(pmu_di_ddr,     MBUS_PMU_DI);
+MBUS_SENSOR_DEVICE_ATTR_RO(pmu_csi1_ddr,   MBUS_PMU_CSI1);
+MBUS_SENSOR_DEVICE_ATTR_RO(pmu_g2d_ddr,    MBUS_PMU_G2D);
+MBUS_SENSOR_DEVICE_ATTR_RO(pmu_ve1_ddr,    MBUS_PMU_VE1);
+MBUS_SENSOR_DEVICE_ATTR_RO(pmu_iommu_ddr,  MBUS_PMU_IOMMU);
+MBUS_SENSOR_DEVICE_ATTR_RO(pmu_gpuddr,    MBUS_PMU_GPU);
+MBUS_SENSOR_DEVICE_ATTR_RO(pmu_totddr,     MBUS_PMU_TOTAL);
 #else
-/* GPU bandwidth of DDR channel 0 */
-static SENSOR_DEVICE_ATTR(pmu_gpuddr, 0400,
-			  mbus_show_value, NULL, MBUS_PMU_GPU);
-/* VE & CSI & FD bandwidth of DDR channel 0 */
-static SENSOR_DEVICE_ATTR(pmu_ve_ddr, 0400,
-			  mbus_show_value, NULL, MBUS_PMU_VE);
-/* DE bandwidth of DDR channel 0 */
-static SENSOR_DEVICE_ATTR(pmu_de_ddr, 0400,
-			  mbus_show_value, NULL, MBUS_PMU_DISP);
+/* ... */
 #endif
 
-#if (!defined CONFIG_ARCH_SUN8IW16) && \
-	(!defined CONFIG_ARCH_SUN50IW9) && \
-	(!defined CONFIG_ARCH_SUN8IW19)
-/* other master bandwidth of DDR channel 0 */
-static SENSOR_DEVICE_ATTR(pmu_othddr, 0400,
-			  mbus_show_value, NULL, MBUS_PMU_OTH);
-/* total bandwidth of DDR channel 0 */
-static SENSOR_DEVICE_ATTR(pmu_totddr, 0400,
-			  mbus_show_value, NULL, MBUS_PMU_TOTAL);
-#endif
-#if (!defined CONFIG_ARCH_SUN8IW6) && \
-	(!defined CONFIG_ARCH_SUN50IW9) && \
-	(!defined CONFIG_ARCH_SUN8IW19)
-/* csi bandwidth of CSI channel 0 */
-static SENSOR_DEVICE_ATTR(pmu_csiddr, 0400,
-			  mbus_show_value, NULL, MBUS_PMU_CSI);
-#endif
-
-#if (defined CONFIG_ARCH_SUN8IW16)
-/* isp bandwidth of CSI channel 0 */
-static SENSOR_DEVICE_ATTR(pmu_isp_ddr, 0400,
-			  mbus_show_value, NULL, MBUS_PMU_ISP);
-static SENSOR_DEVICE_ATTR(pmu_g2d_mix_ddr, 0400,
-			  mbus_show_value, NULL, MBUS_PMU_G2D_MIX);
-static SENSOR_DEVICE_ATTR(pmu_g2d_rot_ddr, 0400,
-			  mbus_show_value, NULL, MBUS_PMU_G2D_ROT);
-static SENSOR_DEVICE_ATTR(pmu_de_ddr, 0400,
-			  mbus_show_value, NULL, MBUS_PMU_DE);
-static SENSOR_DEVICE_ATTR(pmu_ise_ddr, 0400,
-			  mbus_show_value, NULL, MBUS_PMU_ISE);
-static SENSOR_DEVICE_ATTR(pmu_eise_ddr, 0400,
-			  mbus_show_value, NULL, MBUS_PMU_EISE);
-static SENSOR_DEVICE_ATTR(pmu_totddr, 0400,
-			  mbus_show_value, NULL, MBUS_PMU_TOTAL);
-#elif (defined CONFIG_ARCH_SUN8IW19)
-/* isp bandwidth of CSI channel 0 */
-static SENSOR_DEVICE_ATTR(pmu_g2d_ddr, 0400,
-			  mbus_show_value, NULL, MBUS_PMU_G2D);
-static SENSOR_DEVICE_ATTR(pmu_de_ddr, 0400,
-			  mbus_show_value, NULL, MBUS_PMU_DE);
-static SENSOR_DEVICE_ATTR(pmu_iommu_ddr, 0400,
-			  mbus_show_value, NULL, MBUS_PMU_IOMMU);
-static SENSOR_DEVICE_ATTR(pmu_eise_ddr, 0400,
-			  mbus_show_value, NULL, MBUS_PMU_EISE);
-static SENSOR_DEVICE_ATTR(pmu_dspo_ddr, 0400,
-			  mbus_show_value, NULL, MBUS_PMU_DSPO);
-static SENSOR_DEVICE_ATTR(pmu_nna_ddr, 0400,
-			  mbus_show_value, NULL, MBUS_PMU_NNA);
-static SENSOR_DEVICE_ATTR(pmu_totddr, 0400,
-			  mbus_show_value, NULL, MBUS_PMU_TOTAL);
-#endif
-/* get all masters' priority or set a master's priority */
-static SENSOR_DEVICE_ATTR(port_prio, 0644,
-			  mbus_show_value, mbus_store_value, MBUS_PORT_PRI);
-/* get all masterss' qos or set a master's qos */
-static SENSOR_DEVICE_ATTR(port_qos, 0644,
-			  mbus_show_value, mbus_store_value, MBUS_PORT_QOS);
-/* get all masterss' threshold or set a master's threshold */
-static SENSOR_DEVICE_ATTR(port_watt, 0644,
-			  mbus_show_value, mbus_store_value, MBUS_PORT_WT);
-/* get all masterss' threshold or set a master's threshold */
-static SENSOR_DEVICE_ATTR(port_acs, 0644,
-			  mbus_show_value, mbus_store_value, MBUS_PORT_ACS);
-/* get all masters' requeset number or set a master's number */
-static SENSOR_DEVICE_ATTR(port_bwl0, 0644,
-			  mbus_show_value, mbus_store_value, MBUS_PORT_BWL0);
-/* get all masters' requeset number or set a master's number */
-static SENSOR_DEVICE_ATTR(port_bwl1, 0644,
-			  mbus_show_value, mbus_store_value, MBUS_PORT_BWL1);
-/* get all masters' requeset number or set a master's number */
-static SENSOR_DEVICE_ATTR(port_bwl2, 0644,
-			  mbus_show_value, mbus_store_value, MBUS_PORT_BWL2);
-/* get all masters' requeset number or set a master's number */
-static SENSOR_DEVICE_ATTR(port_bwlen, 0644,
-			  mbus_show_value, mbus_store_value, MBUS_PORT_BWLEN);
-/* get all masters' requeset number or set a master's number */
-static SENSOR_DEVICE_ATTR(port_abs_bwlen, 0644,
-			mbus_show_value, mbus_store_value, MBUS_PORT_ABS_BWLEN);
-/* get all masters' requeset number or set a master's number */
-static SENSOR_DEVICE_ATTR(port_abs_bwl, 0644,
-			mbus_show_value, mbus_store_value, MBUS_PORT_ABS_BWL);
-/* get all masters' requeset number or set a master's number */
-static SENSOR_DEVICE_ATTR(port_bw_satu, 0644,
-			mbus_show_value, mbus_store_value, MBUS_PORT_BW_SATU);
+MBUS_SENSOR_DEVICE_ATTR_RW(port_prio,      MBUS_PORT_PRI);
+MBUS_SENSOR_DEVICE_ATTR_RW(port_qos,       MBUS_PORT_QOS);
+MBUS_SENSOR_DEVICE_ATTR_RW(port_watt,      MBUS_PORT_WT);
+MBUS_SENSOR_DEVICE_ATTR_RW(port_acs,       MBUS_PORT_ACS);
+MBUS_SENSOR_DEVICE_ATTR_RW(port_bwl0,      MBUS_PORT_BWL0);
+MBUS_SENSOR_DEVICE_ATTR_RW(port_bwl1,      MBUS_PORT_BWL1);
+MBUS_SENSOR_DEVICE_ATTR_RW(port_bwl2,      MBUS_PORT_BWL2);
+MBUS_SENSOR_DEVICE_ATTR_RW(port_bwlen,     MBUS_PORT_BWLEN);
+MBUS_SENSOR_DEVICE_ATTR_RW(port_abs_bwlen, MBUS_PORT_ABS_BWLEN);
+MBUS_SENSOR_DEVICE_ATTR_RW(port_abs_bwl,   MBUS_PORT_ABS_BWL);
+MBUS_SENSOR_DEVICE_ATTR_RW(port_bw_satu,   MBUS_PORT_BW_SATU);
 
 /* pointers to created device attributes */
 static struct attribute *mbus_attributes[] = {
-	&sensor_dev_attr_pmu_cpuddr.dev_attr.attr,
-
-#if (defined CONFIG_ARCH_SUN8IW10)
-	&sensor_dev_attr_pmu_eink0_ddr.dev_attr.attr,
-	&sensor_dev_attr_pmu_edma_ddr.dev_attr.attr,
-	&sensor_dev_attr_pmu_mahb_ddr.dev_attr.attr,
-#elif defined(CONFIG_ARCH_SUN8IW12)
-	&sensor_dev_attr_pmu_eci_ddr.dev_attr.attr,
-	&sensor_dev_attr_pmu_ve_ddr.dev_attr.attr,
-#elif defined(CONFIG_ARCH_SUN8IW16)
-	&sensor_dev_attr_pmu_mahb_ddr.dev_attr.attr,
-	&sensor_dev_attr_pmu_ve_ddr.dev_attr.attr,
-	&sensor_dev_attr_pmu_ce_ddr.dev_attr.attr,
-	&sensor_dev_attr_pmu_nand_ddr.dev_attr.attr,
-#elif defined(CONFIG_ARCH_SUN8IW19)
-	&sensor_dev_attr_pmu_mahb_ddr.dev_attr.attr,
-	&sensor_dev_attr_pmu_dma_ddr.dev_attr.attr,
-	&sensor_dev_attr_pmu_ve_ddr.dev_attr.attr,
-	&sensor_dev_attr_pmu_ce_ddr.dev_attr.attr,
-	&sensor_dev_attr_pmu_csi_ddr.dev_attr.attr,
-#elif defined(CONFIG_ARCH_SUN50IW9)
-	&sensor_dev_attr_pmu_mahb_ddr.dev_attr.attr,
-	&sensor_dev_attr_pmu_dma_ddr.dev_attr.attr,
-	&sensor_dev_attr_pmu_ve_ddr.dev_attr.attr,
-	&sensor_dev_attr_pmu_ce_ddr.dev_attr.attr,
-	&sensor_dev_attr_pmu_de_ddr.dev_attr.attr,
-	&sensor_dev_attr_pmu_csi0_ddr.dev_attr.attr,
-	&sensor_dev_attr_pmu_di_ddr.dev_attr.attr,
-	&sensor_dev_attr_pmu_csi1_ddr.dev_attr.attr,
-	&sensor_dev_attr_pmu_g2d_ddr.dev_attr.attr,
-	&sensor_dev_attr_pmu_ve1_ddr.dev_attr.attr,
-	&sensor_dev_attr_pmu_iommu_ddr.dev_attr.attr,
-	&sensor_dev_attr_pmu_gpuddr.dev_attr.attr,
-	&sensor_dev_attr_pmu_totddr.dev_attr.attr,
+#if IS_ENABLED(CONFIG_ARCH_SUN8IW20) || IS_ENABLED(CONFIG_ARCH_SUN20IW1)
+	SENSOR_DEVICE_ATTR_PTR(pmu_cpuddr),
+	SENSOR_DEVICE_ATTR_PTR(pmu_riscv_sys),
+	SENSOR_DEVICE_ATTR_PTR(pmu_mahb_ddr),
+	SENSOR_DEVICE_ATTR_PTR(pmu_dma_ddr),
+	SENSOR_DEVICE_ATTR_PTR(pmu_ve_ddr),
+	SENSOR_DEVICE_ATTR_PTR(pmu_ce_ddr),
+	SENSOR_DEVICE_ATTR_PTR(pmu_tvd_ddr),
+	SENSOR_DEVICE_ATTR_PTR(pmu_csi_ddr),
+	SENSOR_DEVICE_ATTR_PTR(pmu_dsp_sys),
+	SENSOR_DEVICE_ATTR_PTR(pmu_g2d_ddr),
+	SENSOR_DEVICE_ATTR_PTR(pmu_di_ddr),
+	SENSOR_DEVICE_ATTR_PTR(pmu_de_ddr),
+	SENSOR_DEVICE_ATTR_PTR(pmu_iommu_ddr),
+	SENSOR_DEVICE_ATTR_PTR(pmu_othddr),
+	SENSOR_DEVICE_ATTR_PTR(pmu_totddr),
+#elif IS_ENABLED(CONFIG_ARCH_SUN50IW9)
+	SENSOR_DEVICE_ATTR_PTR(pmu_cpuddr),
+	SENSOR_DEVICE_ATTR_PTR(pmu_mahb_ddr),
+	SENSOR_DEVICE_ATTR_PTR(pmu_dma_ddr),
+	SENSOR_DEVICE_ATTR_PTR(pmu_ve_ddr),
+	SENSOR_DEVICE_ATTR_PTR(pmu_ce_ddr),
+	SENSOR_DEVICE_ATTR_PTR(pmu_de_ddr),
+	SENSOR_DEVICE_ATTR_PTR(pmu_csi0_ddr),
+	SENSOR_DEVICE_ATTR_PTR(pmu_di_ddr),
+	SENSOR_DEVICE_ATTR_PTR(pmu_csi1_ddr),
+	SENSOR_DEVICE_ATTR_PTR(pmu_g2d_ddr),
+	SENSOR_DEVICE_ATTR_PTR(pmu_ve1_ddr),
+	SENSOR_DEVICE_ATTR_PTR(pmu_iommu_ddr),
+	SENSOR_DEVICE_ATTR_PTR(pmu_gpuddr),
+	SENSOR_DEVICE_ATTR_PTR(pmu_totddr),
 #else
-	&sensor_dev_attr_pmu_gpuddr.dev_attr.attr,
-	&sensor_dev_attr_pmu_ve_ddr.dev_attr.attr,
-	&sensor_dev_attr_pmu_de_ddr.dev_attr.attr,
+	/* ... */
 #endif
-
-#if (!defined CONFIG_ARCH_SUN8IW16) && \
-	(!defined CONFIG_ARCH_SUN50IW9) && \
-	(!defined CONFIG_ARCH_SUN8IW19)
-	&sensor_dev_attr_pmu_othddr.dev_attr.attr,
-	&sensor_dev_attr_pmu_totddr.dev_attr.attr,
-#endif
-#if (!defined CONFIG_ARCH_SUN8IW6) && \
-	(!defined CONFIG_ARCH_SUN50IW9) && \
-	(!defined CONFIG_ARCH_SUN8IW19)
-	&sensor_dev_attr_pmu_csiddr.dev_attr.attr,
-#endif
-
-#if (defined CONFIG_ARCH_SUN8IW16)
-	&sensor_dev_attr_pmu_isp_ddr.dev_attr.attr,
-	&sensor_dev_attr_pmu_g2d_mix_ddr.dev_attr.attr,
-	&sensor_dev_attr_pmu_g2d_rot_ddr.dev_attr.attr,
-	&sensor_dev_attr_pmu_de_ddr.dev_attr.attr,
-	&sensor_dev_attr_pmu_ise_ddr.dev_attr.attr,
-	&sensor_dev_attr_pmu_eise_ddr.dev_attr.attr,
-	&sensor_dev_attr_pmu_totddr.dev_attr.attr,
-#elif (defined CONFIG_ARCH_SUN8IW19)
-	&sensor_dev_attr_pmu_g2d_ddr.dev_attr.attr,
-	&sensor_dev_attr_pmu_de_ddr.dev_attr.attr,
-	&sensor_dev_attr_pmu_iommu_ddr.dev_attr.attr,
-	&sensor_dev_attr_pmu_eise_ddr.dev_attr.attr,
-	&sensor_dev_attr_pmu_dspo_ddr.dev_attr.attr,
-	&sensor_dev_attr_pmu_nna_ddr.dev_attr.attr,
-	&sensor_dev_attr_pmu_totddr.dev_attr.attr,
-
-#endif
-
-	&sensor_dev_attr_port_prio.dev_attr.attr,
-	&sensor_dev_attr_port_qos.dev_attr.attr,
-	&sensor_dev_attr_port_watt.dev_attr.attr,
-	&sensor_dev_attr_port_acs.dev_attr.attr,
-	&sensor_dev_attr_port_bwl0.dev_attr.attr,
-	&sensor_dev_attr_port_bwl1.dev_attr.attr,
-	&sensor_dev_attr_port_bwl2.dev_attr.attr,
-	&sensor_dev_attr_port_bwlen.dev_attr.attr,
-	&sensor_dev_attr_port_abs_bwlen.dev_attr.attr,
-	&sensor_dev_attr_port_abs_bwl.dev_attr.attr,
-	&sensor_dev_attr_port_bw_satu.dev_attr.attr,
+	SENSOR_DEVICE_ATTR_PTR(port_prio),
+	SENSOR_DEVICE_ATTR_PTR(port_qos),
+	SENSOR_DEVICE_ATTR_PTR(port_watt),
+	SENSOR_DEVICE_ATTR_PTR(port_acs),
+	SENSOR_DEVICE_ATTR_PTR(port_bwl0),
+	SENSOR_DEVICE_ATTR_PTR(port_bwl1),
+	SENSOR_DEVICE_ATTR_PTR(port_bwl2),
+	SENSOR_DEVICE_ATTR_PTR(port_bwlen),
+	SENSOR_DEVICE_ATTR_PTR(port_abs_bwlen),
+	SENSOR_DEVICE_ATTR_PTR(port_abs_bwl),
+	SENSOR_DEVICE_ATTR_PTR(port_bw_satu),
 	NULL,
 };
 
@@ -1319,11 +1085,8 @@ static int mbus_pmu_probe(struct platform_device *pdev)
 {
 	int ret;
 
-	hw_mbus_pmu.hwmon_dev = devm_hwmon_device_register_with_groups(&pdev->dev,
-									"mbus_pmu",
-									NULL,
-									mbus_groups);
-
+	hw_mbus_pmu.hwmon_dev = devm_hwmon_device_register_with_groups(
+				&pdev->dev, "mbus_pmu", NULL, mbus_groups);
 	if (IS_ERR(hw_mbus_pmu.hwmon_dev)) {
 		ret = PTR_ERR(hw_mbus_pmu.hwmon_dev);
 		goto out_err;

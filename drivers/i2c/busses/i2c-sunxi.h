@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * drivers/i2c/busses/i2c-sunxi.h
  *
@@ -19,7 +20,6 @@
 #define _SUNXI_I2C_H_
 
 #include <linux/regulator/consumer.h>
-#include <linux/dma/sunxi-dma.h>
 #include <asm/ioctl.h>
 
 #define TWI_MODULE_NUM    (5)
@@ -52,11 +52,6 @@
 #define TWI_DRIVER_FIFOC	(0x21C)
 #define TWI_DRIVER_SENDF	(0x300)
 #define TWI_DRIVER_RECVF	(0x304)
-
-#if defined(CONFIG_ARCH_SUN8IW16) || defined(CONFIG_ARCH_SUN8IW18)
-#define SUNXI_TWI_DRQ_RX(ch)	(DRQSRC_TWI0_RX + ch)
-#define SUNXI_TWI_DRQ_TX(ch)	(DRQDST_TWI0_TX + ch)
-#endif
 
 /* TWI address register */
 /* general call address enable for slave mode */
@@ -327,14 +322,7 @@
 
 /* The global infor of TWI channel. */
 #define SUNXI_TWI_DEV_NAME		"twi"
-
-
-struct sunxi_i2c_platform_data {
-	int		bus_num;
-	unsigned int	frequency;
-	char		regulator_id[16];
-	struct		regulator *regulator;
-};
+#define SUNXI_TWI_ID_FORMAT		SUNXI_TWI_DEV_NAME"%u"
 
 enum {
 	DEBUG_INIT    = 1U << 0,

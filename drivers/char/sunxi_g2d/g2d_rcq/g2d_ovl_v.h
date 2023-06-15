@@ -38,6 +38,9 @@ struct ovl_v_submodule {
 __s32 g2d_ovl_v_fc_set(struct ovl_v_submodule *p_ovl_v, __u32 color_value);
 __s32 g2d_vlayer_set(struct ovl_v_submodule *p_ovl_v, __u32 sel,
 		     g2d_image_enh *p_image);
+
+__s32 g2d_vlayer_overlay_set(struct ovl_v_submodule *p_ovl_v, __u32 sel,
+					g2d_coor *coor,  __u32 w, __u32 h);
 struct ovl_v_submodule *
 g2d_ovl_v_submodule_setup(struct g2d_mixer_frame *p_frame);
 __s32 g2d_ovl_v_calc_coarse(struct ovl_v_submodule *p_ovl_v, __u32 format, __u32 inw,

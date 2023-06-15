@@ -11,6 +11,7 @@
 #define CORE_API_H_
 
 #include <linux/dma-mapping.h>
+#include <video/sunxi_display2.h>
 
 
 #define	NO_UPDATED			0
@@ -146,8 +147,22 @@ typedef enum {
 	SMPTE_ST_2084,
 	HLG
 } eotf_t;
+
+enum video_format_type {
+	VIDEO_CEA_FORMAT = 0,
+	VIDEO_HDMI14_4K_FORMAT = 1,
+	VIDEO_3D_FORMAT = 2,
+};
 /***********************VIDEO************************/
 
+/******************EDID*************************/
+enum EDID_ERROR {
+	CHECKSUM_ERROR = -3,
+	HEADER_ERROR = -2,
+	READ_ERROR = -1,
+	NONE_ERROR = 0,
+};
+/******************EDID*************************/
 
 /***********HDCP************/
 enum hdmi_hdcp_type {
@@ -819,6 +834,7 @@ typedef struct {
 	colorimetryDataBlock_t edid_mColorimetryDataBlock;
 	struct hdr_static_metadata_data_block edid_hdr_static_metadata_data_block;
 	speakerAllocationDataBlock_t edid_mSpeakerAllocationDataBlock;
+	int hf_eeodb_block_count; //HF-EEODB
 
 	/*detailed discriptor*/
 	struct detailed_timing detailed_timings[2];
@@ -861,8 +877,8 @@ struct hdmi_dev_func {
 	int (*device_close)(void);
 	void (*resistor_calibration)(u32 reg, u32 data);
 
-	int (*phy_write)(u8 addr, u16 data);
-	int (*phy_read)(u8 addr, u16 *value);
+	int (*phy_write)(u8 addr, u32 data);
+	int (*phy_read)(u8 addr, u32 *value);
 #ifndef SUPPORT_ONLY_HDMI14
 	int (*scdc_read)(u8 address, u8 size, u8 *data);
 	int (*scdc_write)(u8 address, u8 size, u8 *data);
@@ -887,9 +903,17 @@ struct hdmi_dev_func {
 	u32 (*get_audio_n)(void);
 	void (*get_vsif)(u8 *data);
 	void (*set_vsif) (u8 *data);
+	void (*get_vsd_payload)(u8 *video_format, u32 *code);
 	void (*avmute_enable)(u8 enable);
 	void (*phy_power_enable)(u8 enable);
 	void (*dvimode_enable)(u8 enable);
+	int (*set_vsif_config) (void *config, videoParams_t *video,
+							productParams_t *product,
+							struct disp_device_dynamic_config *scfg);
+#ifdef CONFIG_AW_PHY
+	void (*phy_reset)(void);
+	int (*phy_config_resume)(void);
+#endif
 };
 
 #endif

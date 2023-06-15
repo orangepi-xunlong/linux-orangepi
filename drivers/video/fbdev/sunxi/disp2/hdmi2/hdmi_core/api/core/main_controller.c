@@ -16,12 +16,6 @@ void mc_hdcp_clock_enable(hdmi_tx_dev_t *dev, u8 bit)
 	dev_write_mask(dev, MC_CLKDIS, MC_CLKDIS_HDCPCLK_DISABLE_MASK, bit);
 }
 
-void mc_cec_clock_enable(hdmi_tx_dev_t *dev, u8 bit)
-{
-	LOG_TRACE1(bit);
-	dev_write_mask(dev, MC_CLKDIS, MC_CLKDIS_CECCLK_DISABLE_MASK, bit);
-}
-
 void mc_colorspace_converter_clock_enable(hdmi_tx_dev_t *dev, u8 bit)
 {
 	LOG_TRACE1(bit);
@@ -53,12 +47,6 @@ void mc_pixel_clock_enable(hdmi_tx_dev_t *dev, u8 bit)
 }
 
 #if 0
-void mc_cec_clock_reset(hdmi_tx_dev_t *dev, u8 bit)
-{
-	LOG_TRACE1(bit);
-	dev_write_mask(dev, MC_SWRSTZREQ, MC_SWRSTZREQ_CECSWRST_REQ_MASK, bit);
-}
-
 void mc_audio_gpa_reset(hdmi_tx_dev_t *dev, u8 bit)
 {
 	LOG_TRACE1(bit);
@@ -136,6 +124,7 @@ void mc_disable_all_clocks(hdmi_tx_dev_t *dev)
 	mc_pixel_repetition_clock_enable(dev, 1);
 	mc_colorspace_converter_clock_enable(dev, 1);
 	mc_audio_sampler_clock_enable(dev, 1);
+	//mc_cec_clock_enable(dev, 1);
 	mc_hdcp_clock_enable(dev, 1);
 }
 
@@ -146,6 +135,7 @@ void mc_clocks_standby(hdmi_tx_dev_t *dev)
 	mc_pixel_repetition_clock_enable(dev, 1);
 	mc_colorspace_converter_clock_enable(dev, 1);
 	mc_audio_sampler_clock_enable(dev, 1);
+	//mc_cec_clock_enable(dev, 0);
 	mc_hdcp_clock_enable(dev, 1);
 }
 
@@ -161,7 +151,6 @@ void mc_enable_all_clocks(hdmi_tx_dev_t *dev)
 	mc_colorspace_converter_clock_enable(dev, 0);
 	mc_audio_sampler_clock_enable(dev,
 				dev->snps_hdmi_ctrl.audio_on ? 0 : 1);
-	mc_cec_clock_enable(dev, dev->snps_hdmi_ctrl.cec_on ? 0 : 1);
 	mc_hdcp_clock_enable(dev, 1);/*disable it*/
 }
 
@@ -184,7 +173,6 @@ void mc_rst_all_clocks(hdmi_tx_dev_t *dev)
 {
 	LOG_TRACE();
 	mc_pixel_clock_reset(dev, 0);
-	/*mc_cec_clock_reset(dev, 0);*/
 	mc_pixel_repetition_clock_reset(dev, 0);
 	mc_tmds_clock_reset(dev, 0);
 	mc_audio_i2s_reset(dev, 0);

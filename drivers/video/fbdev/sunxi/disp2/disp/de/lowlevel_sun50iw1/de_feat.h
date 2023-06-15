@@ -20,15 +20,46 @@
 #define LAYER_NUM_PER_CHN_PER_UI_CHN	4
 #define LAYER_MAX_NUM_PER_CHN 4
 #define VEP_NUM  1
+#define DEVICE_VDPO_NUM 0
+#define DE_WB_RESET_SHARE
+#define WB_HAS_CSC
+
+/*#define SUPPORT_DSI*/
+/*#define SUPPORT_SMBL*/
+#define SUPPORT_HDMI
+#define SUPPORT_TV
+#define TV_UGLY_CLK_RATE 216000000
+#if defined(TV_UGLY_CLK_RATE)
+#define TV_COMPOSITE_CLK_RATE 27000000
+#endif
+
+/* clk */
+#define DE_LCD_CLK0 "tcon0"
+#define DE_LCD_CLK1 "lcd1"
+#define DE_LVDS_CLK "lvds"
+#define DE_DSI_CLK0 "mipi_dsi0"
+#define DE_DSI_CLK1 "mipi_dsi1"
+#define DE_LCD_CLK_SRC "pll_video"
+#define DE_HDMI_CLK_SRC "pll_video"
+
+#define DE_CLK_SRC "pll_de"
+#define DE_CORE_CLK "de"
+#define DE_CORE_CLK_RATE 432000000  /*288000000*/
 
 #define SUPPORT_DSI
+#ifdef CONFIG_DISP2_SUNXI_SUPPORT_SMBL
 #define SUPPORT_SMBL
+#endif
 #define SUPPORT_HDMI
 #define DSI_VERSION_40
 #define SUPPORT_LVDS
 /* #define SUPPORT_TV */
 /* #define LVDS_REVERT */
 /*common macro define*/
+
+#ifndef DEVICE_LVDS_NUM
+#define DEVICE_LVDS_NUM 1
+#endif
 
 #ifndef CLK_NUM_PER_DSI
 #define CLK_NUM_PER_DSI 1

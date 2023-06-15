@@ -19,9 +19,15 @@
 #include "sensor_helper.h"
 #include "../../vin-cci/sunxi_cci.h"
 
+char ccm0[I2C_NAME_SIZE] = "";
+char ccm1[I2C_NAME_SIZE] = "";
+
 #define SENSOR_MODULE_NAME "vin_sensor_helper"
 
 struct sensor_helper_dev *glb_sensor_helper[VIN_MAX_CSI];
+
+module_param_string(ccm0, ccm0, sizeof(ccm0), S_IRUGO | S_IWUSR);
+module_param_string(ccm1, ccm1, sizeof(ccm1), S_IRUGO | S_IWUSR);
 
 struct sensor_info *to_state(struct v4l2_subdev *sd)
 {
@@ -459,7 +465,6 @@ int sensor_get_fmt(struct v4l2_subdev *sd,
 	if (fmt->which == V4L2_SUBDEV_FORMAT_TRY) {
 		if (cfg == NULL) {
 			pr_err("%s cfg is NULL!\n", sd->name);
-			mutex_unlock(&info->lock);
 			return -EINVAL;
 		}
 		fmt->format = cfg->try_fmt;
@@ -640,7 +645,43 @@ int actuator_set_code(struct v4l2_subdev *sd, struct actuator_ctrl *pos)
 }
 EXPORT_SYMBOL_GPL(actuator_set_code);
 
-#ifdef CONFIG_SUNXI_REGULATOR_DT
+int flash_en(struct v4l2_subdev *sd, struct flash_para *para)
+{
+#ifdef CONFIG_FLASH_MODULE
+	struct modules_config *modules = sd_to_modules(sd);
+	struct v4l2_subdev *flash_sd = NULL;
+	int ret = 0;
+
+	if (modules == NULL)
+		return -EINVAL;
+
+	flash_sd = modules->modules.flash.sd;
+	if (flash_sd == NULL)
+		return 0;
+
+	switch (para->mode) {
+	case V4L2_FLASH_LED_MODE_NONE:
+		ret = io_set_flash_ctrl(flash_sd, SW_CTRL_FLASH_OFF);
+		break;
+	case V4L2_FLASH_LED_MODE_FLASH:
+		ret = io_set_flash_ctrl(flash_sd, SW_CTRL_FLASH_ON);
+		break;
+	case V4L2_FLASH_LED_MODE_TORCH:
+		ret = io_set_flash_ctrl(flash_sd, SW_CTRL_TORCH_ON);
+		break;
+	default:
+		ret = -1;
+		break;
+	}
+
+	return ret;
+#else
+	return 0;
+#endif
+}
+EXPORT_SYMBOL_GPL(flash_en);
+
+#if !defined SENSOR_POER_BEFORE_VIN
 static int sensor_helper_probe(struct platform_device *pdev)
 {
 	struct device_node *np = pdev->dev.of_node;
@@ -648,6 +689,7 @@ static int sensor_helper_probe(struct platform_device *pdev)
 	struct sensor_helper_dev *sensor_helper = NULL;
 	char power_supply[20] = {0};
 	char property_name[16] = {0};
+	const char *ccm_name;
 	int ret;
 
 	if (np == NULL) {
@@ -668,12 +710,21 @@ static int sensor_helper_probe(struct platform_device *pdev)
 	}
 	sensor_helper->id = pdev->id;
 
-	snprintf(property_name, sizeof(property_name), "sensor%d_mname", pdev->id);
-	ret = of_property_read_string(np, property_name, &sensor_helper->name);
-	if (ret) {
-		vin_warn("fetch %s from device_tree failed\n", property_name);
-		return -EINVAL;
-	} else
+#ifndef FPGA_VER
+	if (sensor_helper->id == 0)
+		strcpy(sensor_helper->name, ccm0);
+	else if (sensor_helper->id == 1)
+		strcpy(sensor_helper->name, ccm1);
+
+	if (!strcmp(sensor_helper->name, "")) {
+		snprintf(property_name, sizeof(property_name), "sensor%d_mname", pdev->id);
+		ret = of_property_read_string(np, property_name, &ccm_name);
+		if (ret) {
+			vin_warn("fetch %s from device_tree failed\n", property_name);
+			return -EINVAL;
+		} else
+			strcpy(sensor_helper->name, ccm_name);
+	}
 		vin_log(VIN_LOG_POWER, "sensor_helper get name is %s\n", sensor_helper->name);
 
 	snprintf(power_supply, sizeof(power_supply), "sensor%d_cameravdd", pdev->id);
@@ -703,7 +754,7 @@ static int sensor_helper_probe(struct platform_device *pdev)
 		vin_warn("%s: cannot get %s supply, setting it to NULL!\n", __func__, power_supply);
 		sensor_helper->pmic[DVDD] = NULL;
 	}
-
+#endif
 	glb_sensor_helper[pdev->id] = sensor_helper;
 
 	platform_set_drvdata(pdev, sensor_helper);
@@ -723,7 +774,7 @@ static int sensor_helper_remove(struct platform_device *pdev)
 	struct sensor_helper_dev *sensor_helper = platform_get_drvdata(pdev);
 
 	platform_set_drvdata(pdev, NULL);
-	sensor_helper->name = NULL;
+#ifndef FPGA_VER
 	regulator_put(sensor_helper->pmic[CAMERAVDD]);
 	sensor_helper->pmic[CAMERAVDD] = NULL;
 	regulator_put(sensor_helper->pmic[IOVDD]);
@@ -732,7 +783,7 @@ static int sensor_helper_remove(struct platform_device *pdev)
 	sensor_helper->pmic[AVDD] = NULL;
 	regulator_put(sensor_helper->pmic[DVDD]);
 	sensor_helper->pmic[DVDD] = NULL;
-
+#endif
 	kfree(sensor_helper);
 	return 0;
 }
@@ -752,7 +803,6 @@ static struct platform_driver sensor_helper_platform_driver = {
 		   },
 };
 #endif
-
 static int __init vin_io_init(void)
 {
 	int ret;
@@ -761,7 +811,7 @@ static int __init vin_io_init(void)
 	if (ret)
 		return ret;
 
-#ifdef CONFIG_SUNXI_REGULATOR_DT
+#if !defined SENSOR_POER_BEFORE_VIN
 	ret = platform_driver_register(&sensor_helper_platform_driver);
 	if (ret) {
 		vin_err("sensor helper platform driver register failed\n");
@@ -776,10 +826,12 @@ static int __init vin_io_init(void)
 static void __exit vin_io_exit(void)
 {
 	sunxi_cci_platform_unregister();
-#ifdef CONFIG_SUNXI_REGULATOR_DT
+
+#if !defined SENSOR_POER_BEFORE_VIN
 	platform_driver_unregister(&sensor_helper_platform_driver);
-	vin_log(VIN_LOG_POWER, "sensor_helper_exit end\n");
 #endif
+
+	vin_log(VIN_LOG_POWER, "sensor_helper_exit end\n");
 }
 
 #ifdef CONFIG_VIDEO_SUNXI_VIN_SPECIAL

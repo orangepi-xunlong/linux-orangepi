@@ -41,9 +41,9 @@ struct di_dev_cdata {
 	struct di_dev_vof_buf *vof_buf;
 };
 
-static struct di_reg *di_reg_base;
+static volatile struct di_reg *di_reg_base;
 
-static inline struct di_reg *di_dev_get_reg_base(void)
+static inline volatile struct di_reg *di_dev_get_reg_base(void)
 {
 	return di_reg_base;
 }
@@ -159,7 +159,7 @@ static void di_dev_set_in_addr(struct di_fb *fb,
 */
 static void di_dev_set_fb(struct di_client *c)
 {
-	struct di_reg *reg = di_dev_get_reg_base();
+	volatile struct di_reg *reg = di_dev_get_reg_base();
 	struct di_fb *fb;
 
 	if (c->dma_di) {
@@ -173,7 +173,7 @@ static void di_dev_set_fb(struct di_client *c)
 		reg->in_f01_pitch[0].bits.f01 = fb->buf.ystride << 1;
 		reg->in_f01_pitch[1].bits.f01 = fb->buf.cstride << 1;
 		reg->in_f01_pitch[2].bits.f01 = fb->buf.cstride << 1;
-		di_dev_set_in_addr(fb, &reg->in_f0_addr);
+		di_dev_set_in_addr(fb, (struct di_in_addr *)&reg->in_f0_addr);
 	}
 
 	if (c->dma_p) {
@@ -184,7 +184,7 @@ static void di_dev_set_fb(struct di_client *c)
 		reg->in_f01_pitch[0].bits.f23 = fb->buf.ystride << 1;
 		reg->in_f01_pitch[1].bits.f23 = fb->buf.cstride << 1;
 		reg->in_f01_pitch[2].bits.f23 = fb->buf.cstride << 1;
-		di_dev_set_in_addr(fb, &reg->in_f1_addr);
+		di_dev_set_in_addr(fb, (struct di_in_addr *)&reg->in_f1_addr);
 	}
 
 	if (c->dma_c) {
@@ -195,7 +195,7 @@ static void di_dev_set_fb(struct di_client *c)
 		reg->in_f2_pitch[0].bits.val = fb->buf.ystride << 1;
 		reg->in_f2_pitch[1].bits.val = fb->buf.cstride << 1;
 		reg->in_f2_pitch[2].bits.val = fb->buf.cstride << 1;
-		di_dev_set_in_addr(fb, &reg->in_f2_addr);
+		di_dev_set_in_addr(fb, (struct di_in_addr *)&reg->in_f2_addr);
 	}
 
 	if (c->di_w0) {
@@ -204,7 +204,7 @@ static void di_dev_set_fb(struct di_client *c)
 		reg->out_dit_pitch[0].bits.val = fb->buf.ystride;
 		reg->out_dit_pitch[1].bits.val = fb->buf.cstride;
 		reg->out_dit_pitch[2].bits.val = fb->buf.cstride;
-		di_dev_set_out_addr(fb, &reg->out_dit0_addr);
+		di_dev_set_out_addr(fb, (struct di_addr *)&reg->out_dit0_addr);
 	}
 
 	if (c->di_w1) {
@@ -213,7 +213,7 @@ static void di_dev_set_fb(struct di_client *c)
 		reg->out_dit_pitch[0].bits.val = fb->buf.ystride;
 		reg->out_dit_pitch[1].bits.val = fb->buf.cstride;
 		reg->out_dit_pitch[2].bits.val = fb->buf.cstride;
-		di_dev_set_out_addr(fb, &reg->out_dit1_addr);
+		di_dev_set_out_addr(fb, (struct di_addr *)&reg->out_dit1_addr);
 	}
 
 	if (c->tnr_w && c->tnr_en) {
@@ -222,7 +222,7 @@ static void di_dev_set_fb(struct di_client *c)
 		reg->out_tnr_pitch[0].bits.val = fb->buf.ystride;
 		reg->out_tnr_pitch[1].bits.val = fb->buf.cstride;
 		reg->out_tnr_pitch[2].bits.val = fb->buf.cstride;
-		di_dev_set_out_addr(fb, &reg->out_tnr_addr);
+		di_dev_set_out_addr(fb, (struct di_addr *)&reg->out_tnr_addr);
 	}
 
 }
@@ -231,7 +231,7 @@ static void di_dev_set_fb(struct di_client *c)
 /*Set in/out flag phy address to reg*/
 static void di_dev_set_md_buf(struct di_client *c)
 {
-	struct di_reg *reg = di_dev_get_reg_base();
+	volatile struct di_reg *reg = di_dev_get_reg_base();
 	struct di_mapped_buf *in_buf = NULL;
 	struct di_mapped_buf *out_buf = NULL;
 
@@ -261,7 +261,7 @@ static s32 di_dev_set_top_para(struct di_client *c)
 	struct __di_para_t *di_para;
 	struct __alg_para_t *alg_para;
 	u8 tff;
-	struct di_reg *reg = di_dev_get_reg_base();
+	volatile struct di_reg *reg = di_dev_get_reg_base();
 
 	if (!c) {
 		DI_ERR("%s di_client is NULL\n", __func__);
@@ -279,16 +279,13 @@ static s32 di_dev_set_top_para(struct di_client *c)
 	di_para = &proc_rst->di_para;
 	alg_para = &di_para->alg_para;
 
-	if (alg_para->alg_en & alg_para->fod_alg_para.fod_alg_en) {
-		if (alg_hist->fod_alg_hist.is_fieldorderchange) {
-			c->fb_arg.top_field_first =
-				alg_hist->fod_alg_hist.bff_fix ? 0 : 1;
-		}
-	}
-
+	c->fb_arg.top_field_first =
+			di_para->bff ? 0 : 1;
+	DI_INFO("top_field_first:%d di_para->bff:%d\n", c->fb_arg.top_field_first, di_para->bff);
 	tff = c->fb_arg.top_field_first ? 1 : 0;
 	if (c->dit_mode.intp_mode == DI_DIT_INTP_MODE_BOB)
 		tff ^= (c->fb_arg.base_field ? 1 : 0);
+	DI_INFO("set tff:%d\n", tff);
 	reg->forder.bits.bff = tff ? 0 : 1;
 
 	if (c->md_en)
@@ -305,7 +302,7 @@ static s32 di_dev_set_top_para(struct di_client *c)
 */
 static s32 di_dev_set_md_para(struct di_client *c)
 {
-	struct di_reg *reg = di_dev_get_reg_base();
+	volatile struct di_reg *reg = di_dev_get_reg_base();
 
 	/*reg->md_croph.dwval = (c->md_out_crop.left & 0xfffffffc) |
 		((((c->md_out_crop.right + 1) & 0xfffffffc) - 1)
@@ -331,7 +328,7 @@ static s32 di_dev_set_md_para(struct di_client *c)
 */
 static s32 di_dev_set_dit_para(struct di_client *c)
 {
-	struct di_reg *reg = di_dev_get_reg_base();
+	volatile struct di_reg *reg = di_dev_get_reg_base();
 	struct di_dev_cdata *cdata =
 			(struct di_dev_cdata *)c->dev_cdata;
 	struct di_dev_proc_result *proc_rst = &cdata->proc_rst;
@@ -466,7 +463,7 @@ static s32 di_dev_set_dit_para(struct di_client *c)
 */
 static s32 di_dev_set_fmd_para(struct di_client *c)
 {
-	struct di_reg *reg = di_dev_get_reg_base();
+	volatile struct di_reg *reg = di_dev_get_reg_base();
 
 	if (di_device_get_debug_mode())
 		return 0;
@@ -500,7 +497,7 @@ static s32 di_dev_set_fmd_para(struct di_client *c)
 
 static s32 di_dev_set_tnr_para(struct di_client *c)
 {
-	struct di_reg *reg = di_dev_get_reg_base();
+	volatile struct di_reg *reg = di_dev_get_reg_base();
 	struct di_dev_cdata *cdata =
 			(struct di_dev_cdata *)c->dev_cdata;
 	struct di_dev_proc_result *proc_rst = &cdata->proc_rst;
@@ -612,7 +609,7 @@ static s32 di_dev_set_tnr_para(struct di_client *c)
  */
 s32 di_dev_get_proc_result(void *client)
 {
-	struct di_reg *reg = di_dev_get_reg_base();
+	volatile struct di_reg *reg = di_dev_get_reg_base();
 	struct di_client *c = (struct di_client *)client;
 	struct di_dev_cdata *cdata = (struct di_dev_cdata *)c->dev_cdata;
 	struct di_dev_proc_result *proc_rst = &cdata->proc_rst;
@@ -629,6 +626,8 @@ s32 di_dev_get_proc_result(void *client)
 	fmd_hist->FOD_FID12 = reg->fod_fid12.bits.cnt;
 	fmd_hist->FMD_FRD02 = reg->fmd_frd02.bits.cnt;
 	fmd_hist->FMD_FRD13 = reg->fmd_frd13.bits.cnt;
+
+	DI_INFO("di_dev_get_proc_result, FOD_FID10:%d FOD_FID32:%d\n", fmd_hist->FOD_FID10, fmd_hist->FOD_FID32);
 
 	fmd_hist->FIELD_MAX_VIDEO_NUM_F3 =
 		reg->fmd_field_hist0.bits.max_video_num;
@@ -678,17 +677,21 @@ static s32 di_dev_calc_proc_result(struct di_client *c)
 	/* FOD */
 	if (alg_hist->fod_alg_hist.is_fieldorderchange) {
 		DI_DEBUG(TAG"[FOD]Field order changed.\n");
-		if (alg_hist->fod_alg_hist.bff_fix)
-			DI_DEBUG(TAG"[FOD]Current field order:BFF.\n");
-		else
-			DI_DEBUG(TAG"[FOD]Current field order:TFF.\n");
 	}
 
-	/* ITD */
-	if (alg_hist->itd_alg_hist.is_progressive_lock)
-		DI_DEBUG(TAG"[ITD]Progressive locked.\n");
+	if (alg_hist->fod_alg_hist.bff_fix)
+		DI_DEBUG(TAG"[FOD]Current field order:BFF.\n");
 	else
-		DI_DEBUG(TAG"[ITD]Iterlaced detected.\n");
+		DI_DEBUG(TAG"[FOD]Current field order:TFF.\n");
+
+	/* ITD */
+	if (alg_hist->itd_alg_hist.is_progressive_lock) {
+		c->di_detect_result = DI_DETECT_PROGRESSIVE;
+		DI_DEBUG(TAG"[ITD]Progressive locked.\n");
+	} else {
+		c->di_detect_result = DI_DETECT_INTERLACE;
+		DI_DEBUG(TAG"[ITD]Interlaced detected.\n");
+	}
 
 	/* FMD */
 	if (alg_hist->fmd_alg_hist.is_non22_lock) {
@@ -701,6 +704,8 @@ static s32 di_dev_calc_proc_result(struct di_client *c)
 			break;
 		case 3:
 			DI_FMD(TAG"[FMD]Film mode 2224 locked.\n");
+			DI_FMD(TAG"[FMD]Film mode 22 locked. is actually a progressive video\n");
+			c->di_detect_result = DI_DETECT_PROGRESSIVE;
 			break;
 		case 4:
 			DI_FMD(TAG"[FMD]Film mode 32322 locked.\n");
@@ -715,11 +720,13 @@ static s32 di_dev_calc_proc_result(struct di_client *c)
 			DI_FMD(TAG"[FMD]Film mode 87 locked.\n");
 			break;
 		default:
-			DI_FMD(TAG"[FMD]Film mode 22 locked.\n");
+			DI_FMD(TAG"[FMD]Film mode 22 locked. is actually a progressive video\n");
+			c->di_detect_result = DI_DETECT_PROGRESSIVE;
 			break;
 		}
 	} else if (alg_hist->fmd_alg_hist.is_22_lock) {
-		DI_FMD(TAG"[FMD]Film mode 22 locked.\n");
+		DI_FMD(TAG"[FMD]Film mode 22 locked. is actually a progressive video\n");
+		c->di_detect_result = DI_DETECT_PROGRESSIVE;
 	} else {
 		DI_DEBUG(TAG"[FMD]Film mode unlocked.\n");
 	}
@@ -774,7 +781,7 @@ s32 di_dev_apply_fixed_para(void *client)
 	struct di_client *c = (struct di_client *)client;
 	struct di_dev_cdata *cdata =
 		(struct di_dev_cdata *)c->dev_cdata;
-	struct di_reg *reg = di_dev_get_reg_base();
+	volatile struct di_reg *reg = di_dev_get_reg_base();
 	u32 dwval = 0;
 	u32 vof_blk_size_sel = 0;
 
@@ -935,7 +942,7 @@ s32 di_dev_apply_fixed_para(void *client)
 
 s32 di_dev_save_spot(void *client)
 {
-	struct di_reg *reg = di_dev_get_reg_base();
+	volatile struct di_reg *reg = di_dev_get_reg_base();
 	struct di_client *c = (struct di_client *)client;
 	struct di_dev_cdata *cdata =
 		(struct di_dev_cdata *)c->dev_cdata;
@@ -965,7 +972,7 @@ s32 di_dev_save_spot(void *client)
 
 s32 di_dev_restore_spot(void *client)
 {
-	struct di_reg *reg = di_dev_get_reg_base();
+	volatile struct di_reg *reg = di_dev_get_reg_base();
 	struct di_client *c = (struct di_client *)client;
 	struct di_dev_cdata *cdata =
 		(struct di_dev_cdata *)c->dev_cdata;
@@ -986,7 +993,7 @@ s32 di_dev_restore_spot(void *client)
 
 s32 di_dev_enable_irq(u32 irq_flag, u32 en)
 {
-	struct di_reg *reg = di_dev_get_reg_base();
+	volatile struct di_reg *reg = di_dev_get_reg_base();
 	u32 reg_val = readl(&reg->int_ctl);
 
 	if (en)
@@ -1001,7 +1008,7 @@ s32 di_dev_enable_irq(u32 irq_flag, u32 en)
 /*clear di finish bit*/
 u32 di_dev_query_state_with_clear(u32 irq_state)
 {
-	struct di_reg *reg = di_dev_get_reg_base();
+	volatile struct di_reg *reg = di_dev_get_reg_base();
 	u32 reg_val = readl(&reg->status);
 	u32 state = reg_val & irq_state & DI_IRQ_STATE_MASK;
 
@@ -1014,7 +1021,7 @@ u32 di_dev_query_state_with_clear(u32 irq_state)
 
 void di_dev_start(u32 start)
 {
-	struct di_reg *reg = di_dev_get_reg_base();
+	volatile struct di_reg *reg = di_dev_get_reg_base();
 
 	reg->start.dwval = start;
 }
@@ -1022,7 +1029,7 @@ void di_dev_start(u32 start)
 /* reset then stop reset */
 void di_dev_reset(void)
 {
-	struct di_reg *reg = di_dev_get_reg_base();
+	volatile struct di_reg *reg = di_dev_get_reg_base();
 	const u32 t = 1;
 
 	reg->reset.bits.reset = 1;
@@ -1049,7 +1056,7 @@ u32 di_dev_reset_cdata(void *dev_cdata)
 
 u32 di_dev_get_ip_version(void)
 {
-	struct di_reg *reg = di_dev_get_reg_base();
+	volatile struct di_reg *reg = di_dev_get_reg_base();
 
 	return reg->ip_version;
 }
@@ -1058,7 +1065,7 @@ void di_dev_dump_reg_value(void)
 {
 	unsigned int *addr;
 	unsigned long i;
-	struct di_reg *reg = di_dev_get_reg_base();
+	volatile struct di_reg *reg = di_dev_get_reg_base();
 
 	addr = (unsigned int *)reg;
 

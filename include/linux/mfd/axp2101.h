@@ -27,8 +27,20 @@ enum {
 	AXP1530_ID,
 	AXP858_ID,
 	AXP803_ID,
+	AXP2202_ID,
+	AXP2585_ID,
 	NR_AXP20X_VARIANTS,
 };
+
+enum {
+	AXP_SPLY = 1U << 0,
+	AXP_REGU = 1U << 1,
+	AXP_INT  = 1U << 2,
+	AXP_CHG  = 1U << 3,
+	AXP_MISC = 1U << 4,
+};
+
+extern int axp_debug_mask;
 
 #define AXP20X_DATACACHE(m)		(0x04 + (m))
 
@@ -120,6 +132,48 @@ enum {
 #define AXP806_CLDO2_V_CTRL		0x25
 #define AXP806_CLDO3_V_CTRL		0x26
 #define AXP806_VREF_TEMP_WARN_L		0xf3
+#define AXP806_REG_ADDR_EXT		0xFF
+
+#define AXP806_STARTUP_SOURCE      (0x00)
+#define AXP806_IC_TYPE             (0x03)
+#define AXP806_DATA_BUFFER1        (0x04)
+#define AXP806_DATA_BUFFER2        (0x05)
+#define AXP806_DATA_BUFFER3        (0x06)
+#define AXP806_DATA_BUFFER4        (0x07)
+#define AXP806_ONOFF_CTRL1         (0x10)
+#define AXP806_ONOFF_CTRL2         (0x11)
+#define AXP806_DCAOUT_VOL          (0x12)
+#define AXP806_DCBOUT_VOL          (0x13)
+#define AXP806_DCCOUT_VOL          (0x14)
+#define AXP806_DCDOUT_VOL          (0x15)
+#define AXP806_DCEOUT_VOL          (0x16)
+#define AXP806_ALDO1OUT_VOL        (0x17)
+#define AXP806_ALDO2OUT_VOL        (0x18)
+#define AXP806_ALDO3OUT_VOL        (0x19)
+#define AXP806_DCDC_DVM_CTRL       (0x1A)
+#define AXP806_DCDC_MODE_CTRL      (0x1B)
+#define AXP806_DCDC_FREQSET        (0x1C)
+#define AXP806_DCDC_MON_CTRL       (0x1D)
+#define AXP806_IFQ_PWROK_SET       (0x1F)
+#define AXP806_BLDO1OUT_VOL        (0x20)
+#define AXP806_BLDO2OUT_VOL        (0x21)
+#define AXP806_BLDO3OUT_VOL        (0x22)
+#define AXP806_BLDO4OUT_VOL        (0x23)
+#define AXP806_CLDO1OUT_VOL        (0x24)
+#define AXP806_CLDO2OUT_VOL        (0x25)
+#define AXP806_CLDO3OUT_VOL        (0x26)
+#define AXP806_VOFF_SET            (0x31)
+#define AXP806_OFF_CTL             (0x32)
+#define AXP806_WAKEUP_PIN_CTRL     (0x35)
+#define AXP806_POK_SET             (0x36)
+#define AXP806_INTERFACE_MODE      (0x3E)
+#define AXP806_SPECIAL_CTRL        (0x3F)
+
+#define AXP806_INTEN1              (0x40)
+#define AXP806_INTEN2              (0x41)
+#define AXP806_INTSTS1             (0x48)
+#define AXP806_INTSTS2             (0x49)
+#define AXP806_REG_ADDR_EXT		0xFF
 
 /* Interrupt */
 #define AXP152_IRQ1_EN			0x40
@@ -229,6 +283,10 @@ enum {
 #define AXP20X_RDC_L			0xbb
 #define AXP20X_OCV(m)			(0xc0 + (m))
 #define AXP20X_OCV_MAX			0xf
+
+/* Hot shutdoen */
+
+#define AXP20X_OVER_TMP_VAL		0xf3
 
 /* AXP22X specific registers */
 #define AXP22X_BATLOW_THRES1		0xe6
@@ -641,6 +699,7 @@ enum {
 #define AXP803_DISIBATH_REG        (0x7C)
 #define AXP803_DCDC_MODESET        (0x80)
 #define AXP803_ADC_EN              (0x82)
+#define AXP803_ADC_TS_CTL          (0x84)
 #define AXP803_ADC_SPEED_SET       (0x85)
 #define AXP803_HOTOVER_CTL         (0x8F)
 #define AXP803_GPIO0_CTL           (0x90)
@@ -662,6 +721,7 @@ enum {
 #define AXP803_RDC1                (0xBB)
 #define AXP803_OCVBATH_RES         (0xBC)
 #define AXP803_OCVBATL_RES         (0xBD)
+#define AXP803_OCVCAP              (0xC0)
 #define AXP803_BATCAP0             (0xE0)
 #define AXP803_BATCAP1             (0xE1)
 #define AXP803_COUCNT0             (0xE2)
@@ -671,8 +731,249 @@ enum {
 #define AXP803_WARNING_LEVEL       (0xE6)
 #define AXP803_ADJUST_PARA         (0xE8)
 #define AXP803_ADJUST_PARA1        (0xE9)
+#define AXP803_HOTOVER_VAL         (0xF3)
+#define AXP803_REG_ADDR_EXT        (0xFF)
 
+/*
+ * axp2202 define
+ */
+#define AXP2202_COMM_STAT0          (0x00)
+#define AXP2202_COMM_STAT1          (0x01)
+#define AXP2202_CHIP_ID             (0x03)
+#define AXP2202_CHIP_VER            (0x04)
+#define AXP2202_BC_DECT             (0x05)
+#define AXP2202_ILIM_TYPE           (0x06)
+#define AXP2202_COMM_FAULT          (0x08)
+#define AXP2202_ICO_CFG             (0x0a)
+#define AXP2202_CLK_EN              (0x0b)
+#define AXP2202_CURVE_CHECK         (0x0c)
+#define AXP2202_VBUS_TYPE           (0x0f)
+
+#define AXP2202_COMM_CFG            (0x10)
+#define AXP2202_BATFET_CTRL         (0x12)
+#define AXP2202_RBFET_CTRL          (0x13)
+#define AXP2202_DIE_TEMP_CFG        (0x14)
+#define AXP2202_VSYS_MIN            (0x15)
+#define AXP2202_VINDPM_CFG          (0x16)
+#define AXP2202_IIN_LIM             (0x17)
+#define AXP2202_RESET_CFG           (0x18)
+#define AXP2202_MODULE_EN           (0x19)
+#define AXP2202_WATCHDOG_CFG        (0x1a)
+#define AXP2202_GAUGE_THLD          (0x1b)
+#define AXP2202_GPIO_CTRL           (0x1c)
+#define AXP2202_LOW_POWER_CFG       (0x1d)
+#define AXP2202_BST_CFG0            (0x1e)
+#define AXP2202_BST_CFG1            (0x1f)
+
+#define AXP2202_PWRON_STAT          (0x20)
+#define AXP2202_PWROFF_STAT         (0x21)
+#define AXP2202_PWROFF_EN           (0x22)
+#define AXP2202_DCDC_PWROFF_EN      (0x23)
+#define AXP2202_PWR_TIME_CTRL       (0x24)
+#define AXP2202_SLEEP_CFG           (0x25)
+#define AXP2202_PONLEVEL            (0x26)
+#define AXP2202_SOFT_PWROFF         (0x27)
+#define AXP2202_AUTO_SLP_MAP0       (0x28)
+#define AXP2202_AUTOSLP_MAP1        (0x29)
+#define AXP2202_AUTOSLP_MAP2        (0x2a)
+#define AXP2202_FAST_PWRON_CFG0     (0x2b)
+#define AXP2202_FAST_PWRON_CFG1     (0x2c)
+#define AXP2202_FAST_PWRON_CFG2     (0x2d)
+#define AXP2202_FAST_PWRON_CFG3     (0x2e)
+#define AXP2202_FAST_PWRON_CFG4     (0x2f)
+#define AXP2202_I2C_CFG             (0x30)
+#define AXP2202_BUS_MODE_SEL        (0x3e)
+
+#define AXP2202_IRQ_EN0             (0x40)
+#define AXP2202_IRQ_EN1             (0x41)
+#define AXP2202_IRQ_EN2             (0x42)
+#define AXP2202_IRQ_EN3             (0x43)
+#define AXP2202_IRQ_EN4             (0x44)
+#define AXP2202_IRQ0                (0x48)
+#define AXP2202_IRQ1                (0x49)
+#define AXP2202_IRQ2                (0x4a)
+#define AXP2202_IRQ3                (0x4b)
+#define AXP2202_IRQ4                (0x4c)
+
+#define AXP2202_TS_CFG              (0x50)
+#define AXP2202_TS_HYSL2H           (0x52)
+#define AXP2202_TS_HYSH2L           (0x53)
+#define AXP2202_VLTF_CHG            (0x54)
+#define AXP2202_VHTF_CHG            (0x55)
+#define AXP2202_VLTF_WORK           (0x56)
+#define AXP2202_VHTF_WORK           (0x57)
+#define AXP2202_JEITA_CFG           (0x58)
+#define AXP2202_JEITA_CV_CFG        (0x59)
+#define AXP2202_JEITA_COOL          (0x5a)
+#define AXP2202_JEITA_WARM          (0x5b)
+#define AXP2202_TS_CFG_DATA_H       (0x5c)
+#define AXP2202_TS_CFG_DATA_L       (0x5d)
+
+#define AXP2202_RECHG_CFG           (0x60)
+#define AXP2202_IPRECHG_CFG         (0x61)
+#define AXP2202_ICC_CFG             (0x62)
+#define AXP2202_ITERM_CFG           (0x63)
+#define AXP2202_VTERM_CFG           (0x64)
+#define AXP2202_TREGU_THLD          (0x65)
+#define AXP2202_CHG_FREQ            (0x66)
+#define AXP2202_CHG_TMR_CFG         (0x67)
+#define AXP2202_BAT_DET             (0x68)
+#define AXP2202_IR_COMP             (0x69)
+#define AXP2202_BTN_CHG_CFG         (0x6a)
+#define AXP2202_SW_TEST_CFG         (0x6b)
+
+#define AXP2202_CHGLED_CFG          (0x70)
+#define AXP2202_LOW_NUM             (0x72)
+#define AXP2202_HIGH_NUM            (0x73)
+#define AXP2202_TRANS_NUM           (0x74)
+#define AXP2202_DUTY_STEP           (0x76)
+#define AXP2202_DUTY_MIN            (0x77)
+#define AXP2202_PWN_PERIOD          (0x78)
+
+#define AXP2202_DCDC_CFG0           (0x80)
+#define AXP2202_DCDC_CFG1           (0x81)
+#define AXP2202_DCDC_CFG2           (0x82)
+#define AXP2202_DCDC1_CFG           (0x83)
+#define AXP2202_DCDC2_CFG           (0x84)
+#define AXP2202_DCDC3_CFG           (0x85)
+#define AXP2202_DCDC4_CFG           (0x86)
+#define AXP2202_DVM_STAT            (0x87)
+#define AXP2202_DCDC_OC_CFG         (0x88)
+#define AXP2202_DCDC_VDSDT_ADJ      (0x89)
+
+#define AXP2202_LDO_EN_CFG0         (0x90)
+#define AXP2202_LDO_EN_CFG1         (0x91)
+#define AXP2202_ALDO1_CFG           (0x93)
+#define AXP2202_ALDO2_CFG           (0x94)
+#define AXP2202_ALDO3_CFG           (0x95)
+#define AXP2202_ALDO4_CFG           (0x96)
+#define AXP2202_BLDO1_CFG           (0x97)
+#define AXP2202_BLDO2_CFG           (0x98)
+#define AXP2202_BLDO3_CFG           (0x99)
+#define AXP2202_BLDO4_CFG           (0x9a)
+#define AXP2202_CLDO1_CFG           (0x9b)
+#define AXP2202_CLDO2_CFG           (0x9c)
+#define AXP2202_CLDO3_CFG           (0x9d)
+#define AXP2202_CLDO4_CFG           (0x9e)
+#define AXP2202_CPUSLDO_CFG         (0x9f)
+
+#define AXP2202_GAUGE_IP_VER        (0xa0)
+#define AXP2202_GAUGE_BROM          (0xa1)
+#define AXP2202_GAUGE_CONFIG        (0xa2)
+#define AXP2202_GAUGE_TEMP   (0xa3)
+#define AXP2202_GAUGE_SOC           (0xa4)
+#define AXP2202_GAUGE_TIME2EMPTY_H  (0xa6)
+#define AXP2202_GAUGE_TIME2EMPTY_L  (0xa7)
+#define AXP2202_GAUGE_TIME2FULL_H   (0xa8)
+#define AXP2202_GAUGE_TIME2FULL_L   (0xa9)
+#define AXP2202_GAUGE_FW_VERSION    (0xab)
+#define AXP2202_GAUGE_INT0_FLAG     (0xac)
+#define AXP2202_GAUGE_COUTER_PERIOD (0xad)
+#define AXP2202_GAUGE_FG_ADDR       (0xb0)
+#define AXP2202_GAUGE_FG_DATA_H     (0xb2)
+#define AXP2202_GAUGE_FG_DATA_L     (0xb3)
+#define AXP2202_GAUGE_RAM_MBIST     (0xb4)
+#define AXP2202_GAUGE_ROM_TEST      (0xb5)
+#define AXP2202_GAUGE_ROM_TEST_RT0  (0xb6)
+#define AXP2202_GAUGE_ROM_TEST_RT1  (0xb7)
+#define AXP2202_GAUGE_ROM_TEST_RT2  (0xb8)
+#define AXP2202_GAUGE_ROM_TEST_RT3  (0xb9)
+#define AXP2202_GAUGE_WD_CLR_DIS    (0xba)
+
+#define AXP2202_ADC_CH_EN0          (0xc0)
+#define AXP2202_ADC_CH_EN1          (0xc1)
+#define AXP2202_ADC_CH_EN2          (0xc2)
+#define AXP2202_ADC_CH_EN3          (0xc3)
+#define AXP2202_VBAT_H              (0xc4)
+#define AXP2202_VBAT_L              (0xc5)
+#define AXP2202_VBUS_H              (0xc6)
+#define AXP2202_VBUS_L              (0xc7)
+#define AXP2202_VSYS_H              (0xc8)
+#define AXP2202_VSYS_L              (0xc9)
+#define AXP2202_ICHG_H              (0xca)
+#define AXP2202_ICHG_L              (0xcb)
+#define AXP2202_CH_DBG_SEL          (0xcc)
+#define AXP2202_ADC_DATA_SEL        (0xcd)
+#define AXP2202_ADC_DATA_H          (0xce)
+#define AXP2202_ADC_DATA_L          (0xcf)
+
+#define AXP2202_BC_CFG0             (0xd0)
+#define AXP2202_BC_CFG1             (0xd1)
+#define AXP2202_BC_CFG2             (0xd2)
+#define AXP2202_BC_CFG3             (0xd3)
+
+#define AXP2202_CC_VERSION          (0xe0)
+#define AXP2202_CC_GLB_CTRL         (0xe1)
+#define AXP2202_CC_LP_CTRL          (0xe2)
+#define AXP2202_CC_MODE_CTRL        (0xe3)
+#define AXP2202_CC_TGL_CTRL0        (0xe4)
+#define AXP2202_CC_TGL_CTRL1        (0xe5)
+#define AXP2202_CC_ANA_CTRL         (0xe6)
+#define AXP2202_CC_STAT0            (0xe7)
+#define AXP2202_CC_STAT1            (0xe8)
+#define AXP2202_CC_STAT2            (0xe9)
+#define AXP2202_CC_STAT3            (0xea)
+#define AXP2202_CC_STAT4            (0xeb)
+#define AXP2202_CC_ANA_STAT0        (0xec)
+#define AXP2202_CC_ANA_STAT1        (0xed)
+#define AXP2202_CC_ANA_STAT2        (0xee)
+
+#define AXP2202_EFUS_OP_CFG         (0xf0)
+#define AXP2202_EFREG_CTRL          (0xf1)
 #define AXP2202_TWI_ADDR_EXT        (0xff)
+/*
+ * end of define axp2202
+ */
+
+/* For axp2585 */
+#define AXP2585_STATUS              (0x00)
+#define AXP2585_IC_TYPE             (0x03)
+#define AXP2585_ILIMIT              (0x10)
+#define AXP2585_RBFET_SET           (0x11)
+#define AXP2585_POK_SET             (0x15)
+#define AXP2585_GPIO1_CTL           (0x18)
+#define AXP2585_GPIO2_CTL           (0x19)
+#define AXP2585_GPIO1_SIGNAL        (0x1A)
+#define AXP2585_CC_EN               (0x22)
+#define AXP2585_ADC_EN              (0x24)
+#define AXP2585_OFF_CTL             (0x28)
+#define AXP2585_CC_LOW_POWER_CTRL   (0x32)
+#define AXP2585_CC_MODE_CTRL        (0x33)
+#define AXP2585_CC_STATUS0          (0x37)
+#define AXP2585_INTEN1              (0x40)
+#define AXP2585_INTEN2              (0x41)
+#define AXP2585_INTEN3              (0x42)
+#define AXP2585_INTEN4              (0x43)
+#define AXP2585_INTEN5              (0x44)
+#define AXP2585_INTEN6              (0x45)
+#define AXP2585_INTSTS1             (0x48)
+#define AXP2585_INTSTS2             (0x49)
+#define AXP2585_INTSTS3             (0x4A)
+#define AXP2585_INTSTS4             (0x4B)
+#define AXP2585_INTSTS5             (0x4C)
+#define AXP2585_INTSTS6             (0x4D)
+#define AXP2585_VBATH_REG           (0x78)
+#define AXP2585_IBATH_REG           (0x7A)
+#define AXP2585_DISIBATH_REG        (0x7c)
+#define AXP2585_ADC_CONTROL         (0x80)
+#define AXP2585_TS_PIN_CONTROL      (0x81)
+#define AXP2585_VLTF_CHARGE         (0x84)
+#define AXP2585_VHTF_CHARGE         (0x85)
+#define AXP2585_VLTF_WORK           (0x86)
+#define AXP2585_VHTF_WORK           (0x87)
+#define AXP2585_ICC_CFG             (0x8B)
+#define AXP2585_CHARGE_CONTROL2     (0x8C)
+#define AXP2585_TIMER2_SET          (0x8E)
+#define AXP2585_COULOMB_CTL         (0xB8)
+#define AXP2585_CAP                 (0xB9)
+#define AXP2585_RDC0                (0xBA)
+#define AXP2585_RDC1               (0xBB)
+#define AXP2585_BATCAP0             (0xE0)
+#define AXP2585_BATCAP1             (0xE1)
+#define AXP2585_WARNING_LEVEL       (0xE6)
+#define AXP2585_ADJUST_PARA         (0xE8)
+#define AXP2585_ADJUST_PARA1        (0xE9)
+#define AXP2585_ADDR_EXTENSION      (0xFF)
 
 /* Regulators IDs */
 enum {
@@ -836,7 +1137,7 @@ enum {
 	AXP858_CLDO3,
 	AXP858_CLDO4,
 	AXP858_CPUSLDO,
-	AXP858_SW,
+	AXP858_DC1SW,
 	AXP858_REG_ID_MAX,
 };
 
@@ -865,6 +1166,10 @@ enum {
 	AXP803_LDOIO1,
 	AXP803_DC1SW,
 	AXP803_REG_ID_MAX,
+};
+
+enum {
+	AXP2585_REG_ID_MAX = 0,
 };
 
 /* IRQs */
@@ -1166,6 +1471,122 @@ enum axp803_irqs {
 	AXP803_IRQ_TIMER,
 };
 
+enum {
+	AXP2202_DCDC1 = 0,
+	AXP2202_DCDC2,
+	AXP2202_DCDC3,
+	AXP2202_DCDC4,
+	AXP2202_ALDO1,
+	AXP2202_ALDO2,
+	AXP2202_ALDO3,
+	AXP2202_ALDO4,
+	AXP2202_BLDO1,
+	AXP2202_BLDO2,
+	AXP2202_BLDO3,
+	AXP2202_BLDO4,
+	AXP2202_CLDO1,
+	AXP2202_CLDO2,
+	AXP2202_CLDO3,
+	AXP2202_CLDO4,
+	AXP2202_RTCLDO,
+	AXP2202_CPUSLDO,
+	AXP2202_REG_ID_MAX,
+	AXP2202_VBUS,
+};
+
+enum axp2202_irqs {
+	/* irq0 */
+	AXP2202_IRQ_SOCWL2,
+	AXP2202_IRQ_SOCWL1,
+	AXP2202_IRQ_GWDT,
+	AXP2202_IRQ_NEWSOC,
+	AXP2202_IRQ_BST_OV,
+	AXP2202_IRQ_VBUS_OV,
+	AXP2202_IRQ_VBUS_FAULT,
+	/* irq1 */
+	AXP2202_IRQ_VINSERT,
+	AXP2202_IRQ_VREMOVE,
+	AXP2202_IRQ_BINSERT,
+	AXP2202_IRQ_BREMOVE,
+	AXP2202_IRQ_PONS,
+	AXP2202_IRQ_PONL,
+	AXP2202_IRQ_PONN,
+	AXP2202_IRQ_PONP,
+	/* irq2 */
+	AXP2202_IRQ_WDEXP,
+	AXP2202_IRQ_LDOOC,
+	AXP2202_IRQ_BOCP,
+	AXP2202_IRQ_CHGDN,
+	AXP2202_IRQ_CHGST,
+	AXP2202_IRQ_DOTL1,
+	AXP2202_IRQ_CHGTE,
+	AXP2202_IRQ_BOVP,
+	/* irq3 */
+	AXP2202_IRQ_BC_DONE,
+	AXP2202_IRQ_BC_CHNG,
+	AXP2202_IRQ_RID_CHNG,
+	AXP2202_IRQ_BCOTQ,
+	AXP2202_IRQ_BCOT,
+	AXP2202_IRQ_BCUT,
+	AXP2202_IRQ_BWOT,
+	AXP2202_IRQ_BWUT,
+	/* irq4 */
+	AXP2202_IRQ_CREMOVE,
+	AXP2202_IRQ_CINSERT,
+	AXP2202_IRQ_TOGGLE_DONE,
+	AXP2202_IRQ_VBUS_SAFE5V,
+	AXP2202_IRQ_VBUS_SAFE0V,
+	AXP2202_IRQ_ERR_GEN,
+	AXP2202_IRQ_PWR_CHNG,
+
+};
+
+enum axp2585_irqs {
+	AXP2585_IRQ_Q_DROP2,  //7l2
+	AXP2585_IRQ_Q_DROP1,  //6l1
+	AXP2585_IRQ_Q_CHANGE,
+	AXP2585_IRQ_Q_GOOD,
+	AXP2585_IRQ_BAT_DECT,
+	AXP2585_IRQ_BOOST_OVP,
+	AXP2585_IRQ_BOOST_OCP,
+	AXP2585_IRQ_BAT_OCP,
+	AXP2585_IRQ_BCOT,       //15
+	AXP2585_IRQ_QBCOT,      //14
+	AXP2585_IRQ_BCUT,       //13
+	AXP2585_IRQ_QBCUT,
+	AXP2585_IRQ_BWOT,       //11
+	AXP2585_IRQ_QBWOT,
+	AXP2585_IRQ_BWUT,       //9
+	AXP2585_IRQ_QBWUT,
+	AXP2585_IRQ_VBUS_INSERT,  //23ac
+	AXP2585_IRQ_VBUS_REMOVE,  //22ac
+	AXP2585_IRQ_BAT_INSERT,  //21
+	AXP2585_IRQ_BAT_REMOVE,  //20
+	AXP2585_IRQ_BAT_DB2GD,
+	AXP2585_IRQ_TJ_OTP,
+	AXP2585_IRQ_BAT_SMODE,
+	AXP2585_IRQ_VBUS_OVP,
+	AXP2585_IRQ_SIRQ,
+	AXP2585_IRQ_LIRQ,
+	AXP2585_IRQ_NIRQ,       //29
+	AXP2585_IRQ_PIRQ,       //28
+	AXP2585_IRQ_GPADC_BWOT,
+	AXP2585_IRQ_GPADC_QBWOT,
+	AXP2585_IRQ_GPADC_BWUT,
+	AXP2585_IRQ_GPADC_QBWUT,
+	AXP2585_IRQ_CHGBG,     //39
+	AXP2585_IRQ_CHGDONE,   //38
+	AXP2585_IRQ_BC_OK,
+	AXP2585_IRQ_BC_CHANGE,
+	AXP2585_IRQ_RID_CHANGE,
+	AXP2585_IRQ_BAT_OVP,
+	AXP2585_IRQ_REMOVE,  //47tc
+	AXP2585_IRQ_INSERT,  //46tc
+	AXP2585_IRQ_TOGGLE_DONE,
+	AXP2585_IRQ_VBUS_SAFE5V,
+	AXP2585_IRQ_ERROR_GEN,
+	AXP2585_IRQ_POW_CHNG,
+};
 #define AXP288_TS_ADC_H		0x58
 #define AXP288_TS_ADC_L		0x59
 #define AXP288_GP_ADC_H		0x5a
@@ -1181,6 +1602,7 @@ struct axp20x_dev {
 	struct mfd_cell                 *cells;
 	const struct regmap_config	*regmap_cfg;
 	const struct regmap_irq_chip	*regmap_irq_chip;
+	void (*dts_parse)(struct axp20x_dev *);
 };
 
 #define BATTID_LEN				64

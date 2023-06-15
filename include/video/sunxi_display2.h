@@ -66,7 +66,10 @@ enum disp_pixel_format {
 	DISP_FORMAT_A2B10G10R10                  = 0x15,
 	DISP_FORMAT_R10G10B10A2                  = 0x16,
 	DISP_FORMAT_B10G10R10A2                  = 0x17,
-
+	DISP_FORMAT_1bpp_palette_LE				 = 0x18,
+	DISP_FORMAT_2bpp_palette_LE				 = 0x19,
+	DISP_FORMAT_4bpp_palette_LE				 = 0x1a,
+	DISP_FORMAT_8bpp_palette_LE				 = 0x1b,
 	/*
 	 * SP: semi-planar
 	 * P:planar
@@ -299,6 +302,13 @@ enum disp_eotf {
 	DISP_EOTF_SMPTE428_1 = 0x011,
 	DISP_EOTF_ARIB_STD_B67 = 0x012, /* HLG */
 };
+
+/*identify hdr10+, dv, hdr10 when eotf set to 0x10*/
+enum disp_hdr_type {
+	HDR10  = 0,
+	HDR10P = 1,
+	HDRDV  = 2,
+};
 /* disp_atw_mode - mode for asynchronous time warp
  *
  * @NORMAL_MODE: dual buffer, left eye and right eye buffer is individual
@@ -335,6 +345,13 @@ struct disp_rect64 {
 	long long height;
 };
 
+struct disp_lbc_info {
+	unsigned int is_lossy;
+	unsigned int rc_en;
+	unsigned int pitch;
+	unsigned int seg_bit;
+};
+
 struct disp_fb_info {
 	/* address of frame buffer,
 	 * single addr for interleaved fomart,
@@ -352,6 +369,8 @@ struct disp_fb_info {
 	struct disp_rect64 crop;	/* crop rectangle boundaries */
 	enum disp_buffer_flags flags;
 	enum disp_scan_flags scan;
+	unsigned int             lbc_en;
+	struct disp_lbc_info     lbc_info;
 };
 
 struct disp_layer_info {
@@ -403,6 +422,7 @@ struct disp_vdpo_config {
 	unsigned int spl_type_u;
 	unsigned int spl_type_v;
 };
+
 /* disp_fb_info2 - image buffer info v2
  *
  * @fd: dma_buf  fd for frame buffer
@@ -419,6 +439,7 @@ struct disp_vdpo_config {
  * @depth: depth perception for stereo image, only valid when stereo image input
  *            unit: pixel
  * @fbd_en: indicate if enable fbd function
+ * @lbc_en: indicate if enable lbc function
  * @metadata_fd: dma_buf fd for the buffer contained metadata for fbc/hdr
  * @metadata_size: the size of metadata buffer, unit:bytes
  * @metadata_flag: the flag to indicate the type of metadata buffer
@@ -442,6 +463,8 @@ struct disp_fb_info2 {
 	enum disp_eotf           eotf;
 	int                      depth;
 	unsigned int             fbd_en;
+	unsigned int             lbc_en;
+	struct disp_lbc_info     lbc_info;
 	int                      metadata_fd;
 	unsigned int             metadata_size;
 	unsigned int             metadata_flag;
@@ -510,6 +533,24 @@ struct disp_layer_config2 {
 	bool enable;
 	unsigned int channel;
 	unsigned int layer_id;
+};
+
+
+/* disp_palette_config - palette config
+ *
+ * @num: the num of palette
+ * @data: the palette data, each palette data takes 4 bytes,show as below
+ *      bits            description
+ *      31:24           alpha value
+ *      23:16           red value
+ *      15:8            green value
+ *      7:0             blue value
+ * @channel: the channel index of the layer, 0~max-channel-number
+ */
+struct disp_palette_config {
+	unsigned int num;
+	void *data;
+	unsigned int channel;
 };
 
 /**
@@ -633,6 +674,7 @@ struct disp_device_config {
 	enum disp_dvi_hdmi	        dvi_hdmi;
 	enum disp_color_range		range;
 	enum disp_scan_info			scan;
+	enum disp_hdr_type          hdr_type;
 	unsigned int				aspect_ratio;
 	unsigned int				reserve1;
 };
@@ -797,6 +839,7 @@ struct disp_device_func {
 	int (*set_dynamic_config)(struct disp_device_dynamic_config *config);
 	int (*get_dynamic_config)(struct disp_device_dynamic_config *config);
 
+	int (*set_vsif_config)(void *config, struct disp_device_dynamic_config *scfg);
 	/*for hdmi cec*/
 	s32 (*cec_standby_request)(void);
 	s32 (*cec_send_one_touch_play)(void);
@@ -853,6 +896,7 @@ enum tag_DISP_CMD {
 	DISP_DEVICE_GET_CONFIG = 0x15,
 	DISP_SET_KSC_PARA = 0x16,
 	DISP_RTWB_COMMIT = 0x17,
+	DISP_GET_VSYNC_TIMESTAMP = 0x18,
 
 	/* ----layer---- */
 	DISP_LAYER_ENABLE = 0x40,
@@ -870,6 +914,7 @@ enum tag_DISP_CMD {
 	 */
 	DISP_LAYER_SET_CONFIG2 = 0x49,
 	DISP_LAYER_GET_CONFIG2 = 0x4a,
+	DISP_CHN_SET_PALETTE = 0x4b,
 
 	/* ----hdmi---- */
 	DISP_HDMI_SUPPORT_MODE = 0xc4,
@@ -938,6 +983,11 @@ enum tag_DISP_CMD {
 	DISP_EINK_GET_TEMP = 0x404,
 	DISP_EINK_OVERLAP_SKIP = 0x405,
 	DISP_EINK_UPDATE2 = 0x406,
+
+	/* --- pq --- */
+	DISP_PQ_PROC = 0x500,
+	DISP_LCD_GET_GAMMA_TABLE = 0x501,
+
 };
 
 enum {
@@ -967,6 +1017,11 @@ struct disp_ksc_info {
 	unsigned int first_line_width;
 	unsigned int ration;
 	unsigned int direction;
+};
+
+struct disp_vsync_timestame {
+	int disp;
+	int64_t  timestamp;
 };
 
 #define FBIOGET_LAYER_HDL_0 0x4700

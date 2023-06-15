@@ -300,6 +300,7 @@ struct de_output_info {
 	enum de_color_range color_range;
 	enum de_data_bits data_bits;
 	bool cvbs_direct_show;
+	enum disp_hdr_type hdr_type;
 };
 
 struct de_chn_info {
@@ -328,6 +329,8 @@ struct de_chn_info {
 	enum de_color_range color_range;
 	void *cdc_hdl;
 	u8 snr_en;
+	enum disp_hdr_type hdr_type;
+	struct sunxi_metadata *pMeta;
 };
 
 struct de_port_layer_info {

@@ -21,8 +21,8 @@
  * The combo interface.
  */
 
-#define V4L2_MBUS_SUBLVDS			3
-#define V4L2_MBUS_HISPI				4
+#define V4L2_MBUS_SUBLVDS			7
+#define V4L2_MBUS_HISPI				8
 
 #define V4L2_MBUS_SUBLVDS_1_LANE		(1 << 0)
 #define V4L2_MBUS_SUBLVDS_2_LANE		(1 << 1)

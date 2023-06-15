@@ -1,18 +1,18 @@
 /* drivers/input/touchscreen/goodix_tool.c
- * 
+ *
  * 2010 - 2012 Goodix Technology.
- * 
+ *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
  * the Free Software Foundation; either version 2 of the License, or
  * (at your option) any later version.
- * 
- * This program is distributed in the hope that it will be a reference 
- * to you, when you are integrating the GOODiX's CTP IC into your system, 
- * but WITHOUT ANY WARRANTY; without even the implied warranty of 
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU 
+ *
+ * This program is distributed in the hope that it will be a reference
+ * to you, when you are integrating the GOODiX's CTP IC into your system,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
  * General Public License for more details.
- * 
+ *
  * Version:2.2
  *        V1.0:2012/05/01,create file.
  *        V1.2:2012/06/08,modify some warning.
@@ -45,7 +45,7 @@ typedef struct{
     u8 flag_addr[2];  //flag address
     u8  flag_val;   //flag val
     u8  flag_relation;  //flag_val:flag 0:not equal 1:equal 2:> 3:<
-    u16 circle;     //polling cycle 
+    u16 circle;     //polling cycle
     u8  times;      //plling times
     u8  retry;      //I2C retry times
     u16 delay;      //delay befor read or after write
@@ -81,19 +81,19 @@ extern void gtp_esd_switch(struct i2c_client *, s32);
 s32 DATA_LENGTH = 0;
 s8 IC_TYPE[16] = "GT9XX";
 
-static void tool_set_proc_name(char * procname)
+static void tool_set_proc_name(char *procname, char *name)
 {
-    char *months[12] = {"Jan", "Feb", "Mar", "Apr", "May", 
+    char *months[12] = {"Jan", "Feb", "Mar", "Apr", "May",
         "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
     char date[20] = {0};
     char month[4] = {0};
     int i = 0, n_month = 1, n_day = 0, n_year = 0;
-    
-    
+
+
     //GTP_DEBUG("compile date: %s", date);
-    
+
     sscanf(date, "%3s %02d %04d", month, &n_day, &n_year);
-    
+
     for (i = 0; i < 12; ++i)
     {
         if (!memcmp(months[i], month, 3))
@@ -102,8 +102,8 @@ static void tool_set_proc_name(char * procname)
             break;
         }
     }
-    
-    sprintf(procname, "gmnode%04d%02d%02d", n_year, n_month, n_day);    
+
+    sprintf(procname, "%s%04d%02d%02d", name, n_year, n_month, n_day);
     //sprintf(procname, "goodix_tool");
     //GTP_DEBUG("procname = %s", procname);
 }
@@ -114,12 +114,12 @@ static s32 tool_i2c_read_no_extra(u8* buf, u16 len)
     s32 ret = -1;
     s32 i = 0;
     struct i2c_msg msgs[2];
-    
+
     msgs[0].flags = !I2C_M_RD;
     msgs[0].addr  = gt_client->addr;
     msgs[0].len   = cmd_head.addr_len;
     msgs[0].buf   = &buf[0];
-    
+
     msgs[1].flags = I2C_M_RD;
     msgs[1].addr  = gt_client->addr;
     msgs[1].len   = len;
@@ -186,8 +186,8 @@ static s32 tool_i2c_write_with_extra(u8* buf, u16 len)
 
 static void register_i2c_func(void)
 {
-//    if (!strncmp(IC_TYPE, "GT818", 5) || !strncmp(IC_TYPE, "GT816", 5) 
-//        || !strncmp(IC_TYPE, "GT811", 5) || !strncmp(IC_TYPE, "GT818F", 6) 
+//    if (!strncmp(IC_TYPE, "GT818", 5) || !strncmp(IC_TYPE, "GT816", 5)
+//        || !strncmp(IC_TYPE, "GT811", 5) || !strncmp(IC_TYPE, "GT818F", 6)
 //        || !strncmp(IC_TYPE, "GT827", 5) || !strncmp(IC_TYPE,"GT828", 5)
 //        || !strncmp(IC_TYPE, "GT813", 5))
     if (strncmp(IC_TYPE, "GT8110", 6) && strncmp(IC_TYPE, "GT8105", 6)
@@ -248,7 +248,7 @@ s32 init_wr_node(struct i2c_client *client)
 
     register_i2c_func();
 
-    tool_set_proc_name(procname);
+    tool_set_proc_name(procname, client->name);
     //goodix_proc_entry = create_proc_entry(procname, 0666, NULL);
     goodix_proc_entry = proc_create(procname, 0666, NULL, &tool_ops);
     if (goodix_proc_entry == NULL)
@@ -277,7 +277,7 @@ void uninit_wr_node(void)
 static u8 relation(u8 src, u8 dst, u8 rlt)
 {
     u8 ret = 0;
-    
+
     switch (rlt)
     {
     case 0:
@@ -307,13 +307,13 @@ static u8 relation(u8 src, u8 dst, u8 rlt)
 
     default:
         ret = false;
-        break;    
+        break;
     }
 
     return ret;
 }
 
-/*******************************************************    
+/*******************************************************
 Function:
     Comfirm function.
 Input:
@@ -325,11 +325,11 @@ static u8 comfirm(void)
 {
     s32 i = 0;
     u8 buf[32];
-    
+
 //    memcpy(&buf[GTP_ADDR_LENGTH - cmd_head.addr_len], &cmd_head.flag_addr, cmd_head.addr_len);
 //    memcpy(buf, &cmd_head.flag_addr, cmd_head.addr_len);//Modified by Scott, 2012-02-17
     memcpy(buf, cmd_head.flag_addr, cmd_head.addr_len);
-   
+
     for (i = 0; i < cmd_head.times; i++)
     {
         if (tool_i2c_read(buf, 1) <= 0)
@@ -356,7 +356,7 @@ static u8 comfirm(void)
     return SUCCESS;
 }
 
-/*******************************************************    
+/*******************************************************
 Function:
     Goodix tool write function.
 Input:
@@ -368,10 +368,10 @@ Output:
 ssize_t goodix_tool_write(struct file *filp, const char __user *buff, size_t len, loff_t *off)
 {
     s32 ret = 0;
-    
+
     GTP_DEBUG_FUNC();
     GTP_DEBUG_ARRAY((u8*)buff, len);
-    
+
     ret = copy_from_user(&cmd_head, buff, CMD_HEAD_LENGTH);
     if(ret)
     {
@@ -379,15 +379,15 @@ ssize_t goodix_tool_write(struct file *filp, const char __user *buff, size_t len
         return -EPERM;
     }
 
-    
+
     GTP_DEBUG("[Operation]wr: %02X", cmd_head.wr);
-    GTP_DEBUG("[Flag]flag: %02X, addr: %02X%02X, value: %02X, relation: %02X", cmd_head.flag, cmd_head.flag_addr[0], 
+    GTP_DEBUG("[Flag]flag: %02X, addr: %02X%02X, value: %02X, relation: %02X", cmd_head.flag, cmd_head.flag_addr[0],
                         cmd_head.flag_addr[1], cmd_head.flag_val, cmd_head.flag_relation);
-    GTP_DEBUG("[Retry]circle: %d, times: %d, retry: %d, delay: %d", (s32)cmd_head.circle, (s32)cmd_head.times, 
+    GTP_DEBUG("[Retry]circle: %d, times: %d, retry: %d, delay: %d", (s32)cmd_head.circle, (s32)cmd_head.times,
                         (s32)cmd_head.retry, (s32)cmd_head.delay);
-    GTP_DEBUG("[Data]data len: %d, addr len: %d, addr: %02X%02X, buffer len: %d, data[0]: %02X", (s32)cmd_head.data_len, 
+    GTP_DEBUG("[Data]data len: %d, addr len: %d, addr: %02X%02X, buffer len: %d, data[0]: %02X", (s32)cmd_head.data_len,
                         (s32)cmd_head.addr_len, cmd_head.addr[0], cmd_head.addr[1], (s32)len, buff[CMD_HEAD_LENGTH]);
-                        
+
     if (1 == cmd_head.wr)
     {
         ret = copy_from_user(&cmd_head.data[GTP_ADDR_LENGTH], &buff[CMD_HEAD_LENGTH], cmd_head.data_len);
@@ -445,7 +445,7 @@ ssize_t goodix_tool_write(struct file *filp, const char __user *buff, size_t len
     else if (7 == cmd_head.wr)//disable irq!
     {
         gtp_irq_disable(i2c_get_clientdata(gt_client));
-        
+
     #if GTP_ESD_PROTECT
         gtp_esd_switch(gt_client, SWITCH_OFF);
     #endif
@@ -508,7 +508,7 @@ ssize_t goodix_tool_write(struct file *filp, const char __user *buff, size_t len
     return len;
 }
 
-/*******************************************************    
+/*******************************************************
 Function:
     Goodix tool read function.
 Input:
@@ -520,9 +520,9 @@ Output:
 ssize_t goodix_tool_read(struct file *file, char __user *page, size_t size, loff_t *ppos)
 {
     s32 ret = 0;
-    
+
     GTP_DEBUG_FUNC();
-    
+
     if (*ppos)      // ADB call again
     {
         //GTP_DEBUG("[HEAD]wr: %d", cmd_head.wr);
@@ -530,7 +530,7 @@ ssize_t goodix_tool_read(struct file *file, char __user *page, size_t size, loff
         //GTP_DEBUG("[TOOL_READ]ADB call again, return it.");
         return 0;
     }
-    
+
     if (cmd_head.wr % 2)
     {
         return -EPERM;
@@ -540,7 +540,7 @@ ssize_t goodix_tool_read(struct file *file, char __user *page, size_t size, loff
         u16 len = 0;
         s16 data_len = 0;
         u16 loc = 0;
-        
+
         if (1 == cmd_head.flag)
         {
             if (FAIL == comfirm())
@@ -558,12 +558,12 @@ ssize_t goodix_tool_read(struct file *file, char __user *page, size_t size, loff
 
         GTP_DEBUG("[CMD HEAD DATA] ADDR:0x%02x%02x.", cmd_head.data[0], cmd_head.data[1]);
         GTP_DEBUG("[CMD HEAD ADDR] ADDR:0x%02x%02x.", cmd_head.addr[0], cmd_head.addr[1]);
-        
+
         if (cmd_head.delay)
         {
             msleep(cmd_head.delay);
         }
-        
+
         data_len = cmd_head.data_len;
 
         while(data_len > 0)
@@ -595,7 +595,7 @@ ssize_t goodix_tool_read(struct file *file, char __user *page, size_t size, loff
             GTP_DEBUG_ARRAY(&cmd_head.data[GTP_ADDR_LENGTH], len);
             GTP_DEBUG_ARRAY(page, len);
         }
-        return cmd_head.data_len; 
+        return cmd_head.data_len;
     }
     else if (2 == cmd_head.wr)
     {
@@ -609,7 +609,7 @@ ssize_t goodix_tool_read(struct file *file, char __user *page, size_t size, loff
         progress_buf[1] = show_len & 0xff;
         progress_buf[2] = total_len >> 8;
         progress_buf[3] = total_len & 0xff;
-        
+
         ret = simple_read_from_buffer(page, size, ppos, progress_buf, 4);
         return ret;
     }

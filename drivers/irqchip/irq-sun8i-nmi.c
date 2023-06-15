@@ -23,6 +23,10 @@
 #include <linux/irqchip.h>
 #include <linux/irqchip/chained_irq.h>
 #include <linux/syscore_ops.h>
+#include <linux/pinctrl/consumer.h>
+#include <linux/init.h>
+#include <linux/module.h>
+#include <linux/platform_device.h>
 
 #define SUNXI_NMI_SRC_TYPE_MASK	0x00000003
 
@@ -116,7 +120,7 @@ static int sunxi_sc_nmi_set_type(struct irq_data *data, unsigned int flow_type)
 	return IRQ_SET_MASK_OK;
 }
 
-static void __init sunxi_nmi_pad_control(struct device_node *node)
+static void sunxi_nmi_pad_control(struct device_node *node)
 {
 	u32 v;
 	u32 __iomem *pad;
@@ -131,9 +135,9 @@ static void __init sunxi_nmi_pad_control(struct device_node *node)
 }
 
 /*
- *  * on some standby, the prcm control register can lowpower down
- *   * so it must resume the register value first
- *    */
+ * on some standby, the prcm control register can lowpower down
+ * so it must resume the register value first
+ */
 static struct irq_chip_generic *sys_gc;
 static struct sunxi_sc_nmi_reg_offs *sys_reg_offs;
 static uint32_t sys_vaule;
@@ -153,8 +157,7 @@ static struct syscore_ops sunxi_nmi_syscore_ops = {
 	.resume = sunxi_nmi_resume,
 };
 
-
-static int __init sunxi_sc_nmi_irq_init(struct device_node *node,
+static int sunxi_sc_nmi_irq_init(struct device_node *node,
 					struct sunxi_sc_nmi_reg_offs *reg_offs)
 {
 	struct irq_domain *domain;
@@ -198,9 +201,9 @@ static int __init sunxi_sc_nmi_irq_init(struct device_node *node,
 	gc->chip_types[0].chip.irq_unmask	= irq_gc_mask_set_bit;
 	gc->chip_types[0].chip.irq_eoi		= irq_gc_ack_set_bit;
 	gc->chip_types[0].chip.irq_set_type	= sunxi_sc_nmi_set_type;
-	gc->chip_types[0].chip.flags		= IRQCHIP_EOI_THREADED |
-											IRQCHIP_EOI_IF_HANDLED |
-											IRQCHIP_SKIP_SET_WAKE;
+	gc->chip_types[0].chip.flags 		= IRQCHIP_EOI_THREADED |
+							IRQCHIP_EOI_IF_HANDLED |
+							IRQCHIP_SKIP_SET_WAKE;
 	gc->chip_types[0].regs.ack		= reg_offs->pend;
 	gc->chip_types[0].regs.mask		= reg_offs->enable;
 	gc->chip_types[0].regs.type		= reg_offs->ctrl;
@@ -234,9 +237,63 @@ fail_irqd_remove:
 	return ret;
 }
 
-static int __init sun8i_nmi_irq_init(struct device_node *node,
-				     struct device_node *parent)
+static int sunxi_irq_nmi_probe(struct platform_device *pdev)
 {
-	return sunxi_sc_nmi_irq_init(node, &sun8i_reg_offs);
+	struct pinctrl *pctrl;
+	struct pinctrl_state *pctrl_state = NULL;
+
+	pctrl = devm_pinctrl_get(&pdev->dev);
+	if (!IS_ERR_OR_NULL(pctrl)) {
+		pctrl_state = pinctrl_lookup_state(pctrl, "default");
+
+		pinctrl_select_state(pctrl, pctrl_state);
+	}
+
+	return sunxi_sc_nmi_irq_init(pdev->dev.of_node, &sun8i_reg_offs);
 }
-IRQCHIP_DECLARE(sun8i_nmi, "allwinner,sun8i-nmi", sun8i_nmi_irq_init);
+
+static int sunxi_irq_nmi_remove(struct platform_device *pdev)
+{
+	struct device_node *node = pdev->dev.of_node;
+	struct resource res;
+
+	unregister_syscore_ops(&sunxi_nmi_syscore_ops);
+	iounmap(sys_gc->reg_base);
+	of_address_to_resource(node, 0, &res);
+	release_mem_region(res.start, resource_size(&res));
+	irq_domain_remove(sys_gc->domain);
+
+	return 0;
+}
+
+static struct of_device_id sunxi_irq_nmi_match[] = {
+	{ .compatible = "allwinner,sun8i-nmi" },
+	{}
+};
+
+static struct platform_driver sunxi_irq_nmi_driver = {
+	.probe = sunxi_irq_nmi_probe,
+	.remove = sunxi_irq_nmi_remove,
+	.driver = {
+		.name = "sunxi_irq_nmi",
+		.owner = THIS_MODULE,
+		.of_match_table = sunxi_irq_nmi_match,
+	},
+};
+
+static int __init sun8i_nmi_irq_init(void)
+{
+	return platform_driver_register(&sunxi_irq_nmi_driver);
+}
+postcore_initcall_sync(sun8i_nmi_irq_init);
+
+static void __exit sun8i_nmi_irq_exit(void)
+{
+	platform_driver_unregister(&sunxi_irq_nmi_driver);
+}
+module_exit(sun8i_nmi_irq_exit);
+
+MODULE_AUTHOR("lihuaxing");
+MODULE_DESCRIPTION("Allwinner nmi irq");
+MODULE_LICENSE("GPL");
+MODULE_VERSION("1.0.0");

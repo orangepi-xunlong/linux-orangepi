@@ -11,7 +11,7 @@
 *****************************************************************************/
 
 #include "nand_base.h"
-#include "../phy-nand/nand-partition2/nand_info_init_v2.h"
+/*#include "../phy-nand/nand-partition2/nand_info_init_v2.h"*/
 #include "../phy-nand/nand_physic_interface.h"
 #include "../phy-nand/rawnand/controller/ndfc_base.h"
 #include "nand_osal_for_linux.h"
@@ -22,6 +22,8 @@ struct sunxi_ndfc aw_ndfc;
 struct nand_controller_info g_nctri_data[2] = {0};
 static unsigned int channel0;
 
+
+extern int nand_info_init(struct _nand_info *nand_info, int state);
 
 /*****************************************************************************
 *Name         :
@@ -138,6 +140,86 @@ static int nand_resume(struct platform_device *plat_dev)
 	return 0;
 }
 
+
+#if (defined(CONFIG_ARCH_SUN50IW12) ||  defined(CONFIG_ARCH_SUN50IW10) || defined(CONFIG_ARCH_SUN50IW9))
+int nand_init_real(void)
+{
+	int nand_cache_level = 0;
+	int nand_capacity_level = 0;
+	int nand_flush_cache_num = 8;
+	int dragonboard_flag = 0;
+	int ret;
+
+	ret = of_property_read_u32(aw_ndfc.dev->of_node, "nand0_cache_level",
+				   &nand_cache_level);
+	if (ret) {
+		nand_dbg_err("Failed to get nand0_cache_level\n");
+		nand_cache_level = 0;
+	} else {
+		if (nand_cache_level == 0x55aaaa55) {
+			nand_dbg_inf("nand0_cache_level is no used\n");
+			nand_cache_level = 0;
+		}
+	}
+
+	ret = of_property_read_u32(aw_ndfc.dev->of_node, "nand0_flush_cache_num",
+				   &nand_flush_cache_num);
+	if (ret) {
+		nand_dbg_err("Failed to get nand_flush_cache_num\n");
+		nand_flush_cache_num = 8;
+	} else {
+		if (nand_flush_cache_num == 0x55aaaa55) {
+			nand_dbg_inf("nand_flush_cache_num is no used\n");
+			nand_flush_cache_num = 8;
+		}
+	}
+
+	ret = of_property_read_u32(aw_ndfc.dev->of_node, "nand0_capacity_level",
+				   &nand_capacity_level);
+	if (ret) {
+		nand_dbg_err("Failed to get nand_capacity_level\n");
+		nand_capacity_level = 0;
+	} else {
+		if (nand_capacity_level == 0x55aaaa55) {
+			nand_dbg_inf("nand_capacity_level is no used\n");
+			nand_capacity_level = 0;
+		}
+	}
+
+	dragonboard_flag = nand_get_dragon_board_flag(&aw_ndfc);
+
+	if (dragonboard_flag == 0) {
+		nand_dbg_err("nand init start\n");
+
+		p_nand_info = nand_hw_init();
+		if (p_nand_info == NULL) {
+			return -EAGAIN;
+		}
+
+		set_cache_level(p_nand_info, nand_cache_level);
+		set_capacity_level(p_nand_info, nand_capacity_level);
+		/*ret = nand_info_init(p_nand_info, 0, 8, NULL);*/
+		ret = nand_info_init(p_nand_info, 0);
+		if (ret != 0) {
+			nand_dbg_err("nand_info_init error\n");
+			return ret;
+		}
+
+		init_blklayer();
+
+	} else {
+		nand_dbg_err("dragonboard_flag=%d,run nand test for dragonboard\n",
+			     dragonboard_flag);
+		init_blklayer_for_dragonboard();
+		return 0;
+	}
+	kthread_run(nand_thread, &mytr, "%sd", "nand_rc");
+
+	nand_panic_init(mytr.nftl_blk_head.nftl_blk_next);
+
+	return 0;
+}
+#endif
 /****************************************************************************
 *Name         :
 *Description  :
@@ -145,15 +227,20 @@ static int nand_resume(struct platform_device *plat_dev)
 *Return       :
 *Note         :
 *****************************************************************************/
-u64 nand_dma_mask = DMA_BIT_MASK(64);
+u64 nand_dma_mask;
 static int nand_probe(struct platform_device *pdev)
 {
 	__u32 irq;
 	char *dev_name = "nand_dev";
 	struct nand_controller_info *nctri0 = &g_nctri_data[0];
 	struct nand_controller_info *nctri1 = &g_nctri_data[1];
+	int err = 0;
+    nand_dbg_err("nand_probe start\n");
+
 
 	aw_ndfc.dev = &pdev->dev;
+
+	nand_dma_mask = DMA_BIT_MASK(64);
 
 	pdev->dev.dma_mask = &nand_dma_mask;
 	pdev->dev.coherent_dma_mask = DMA_BIT_MASK(64);
@@ -168,7 +255,8 @@ static int nand_probe(struct platform_device *pdev)
 			irq = irq_of_parse_and_map(aw_ndfc.dev->of_node, 0);
 			if (request_irq(irq, nand_interrupt, 0, dev_name, &channel0)) {
 				nand_dbg_err("nand: allocating IRQ %d error\n", irq);
-				return -EAGAIN;
+				err = -EAGAIN;
+				goto fail;
 			}
 		}
 
@@ -177,20 +265,27 @@ static int nand_probe(struct platform_device *pdev)
 			nand_dbg_inf("NDFC0_BASE_ADDR %p\n", nctri0->nreg_base);
 			if (!nctri0->nreg_base) {
 				nand_dbg_err("Failed to map NDFC0 IO space1\n");
-				return -EAGAIN;
+				err = -EAGAIN;
+				goto fail;
 			}
 		} else if (nand_get_max_channel_cnt() == 2) {
 			nctri0->nreg_base = (void *)of_iomap(aw_ndfc.dev->of_node, 0);
 			if (!nctri0->nreg_base) {
 				nand_dbg_err("Failed to map NDFC0 IO space2\n");
-				return -EAGAIN;
+				err =  -EAGAIN;
+				goto fail;
 			}
 			nctri1->nreg_base = (void *)of_iomap(aw_ndfc.dev->of_node, 1);
 			if (!nctri1->nreg_base) {
 				nand_dbg_err("Failed to map NDFC1 IO space3\n");
-				return -EAGAIN;
+				err =  -EAGAIN;
+				goto fail;
 			}
 		}
+
+#if (defined(CONFIG_ARCH_SUN50IW12) ||  defined(CONFIG_ARCH_SUN50IW10) || defined(CONFIG_ARCH_SUN50IW9))
+		nand_init_real();
+#endif
 	} else if (get_storage_type() == NAND_STORAGE_TYPE_SPINAND) {
 #if 0
 		nand_dbg_inf("spinand interrupt request\n");
@@ -211,9 +306,14 @@ static int nand_probe(struct platform_device *pdev)
 	}
 
 	/*exit_probe_flag = 1;*/
-
-	nand_dbg_inf("nand_probe\n");
+	nand_dbg_err("nand_probe end\n");
 	return 0;
+
+fail:
+	nand_dbg_err("nand_probe fail");
+	pinctrl_put(aw_ndfc.p);
+	aw_ndfc.dev = NULL;
+	return err;
 }
 
 /****************************************************************************
@@ -280,6 +380,7 @@ static const struct of_device_id of_nand_id[] = {
     { .compatible = "allwinner,sun50iw9-nand"},
     { .compatible = "allwinner,sun50iw10-nand"},
 	{ .compatible = "allwinner,sun50iw11-nand"},
+	{ .compatible = "allwinner,sun50iw12-nand"},
     { .compatible = "allwinner,sun8iw18-nand"},
     {/* sentinel */},
 };
@@ -324,10 +425,12 @@ static struct platform_driver spinand_driver = {
 int __init nand_init(void)
 {
 	int ret;
+#if (!defined(CONFIG_ARCH_SUN50IW12) && !defined(CONFIG_ARCH_SUN50IW10) && !defined(CONFIG_ARCH_SUN50IW9))
 	int nand_cache_level = 0;
 	int nand_capacity_level = 0;
 	int nand_flush_cache_num = 8;
 	int dragonboard_flag = 0;
+#endif
 	struct device_node *np = NULL;
 	const char *sta;
 
@@ -373,6 +476,7 @@ int __init nand_init(void)
 	else
 		nand_dbg_err("support panic nand\n");
 
+
 	if (get_storage_type() == NAND_STORAGE_TYPE_RAWNAND)
 		ret = platform_driver_register(&nand_driver);
 	else if (get_storage_type() == NAND_STORAGE_TYPE_SPINAND)
@@ -383,6 +487,8 @@ int __init nand_init(void)
 		return 0;
 	}
 
+
+#if (!defined(CONFIG_ARCH_SUN50IW12) &&  !defined(CONFIG_ARCH_SUN50IW10) && !defined(CONFIG_ARCH_SUN50IW9))
 	ret = of_property_read_u32(aw_ndfc.dev->of_node, "nand0_cache_level",
 				   &nand_cache_level);
 	if (ret) {
@@ -394,6 +500,7 @@ int __init nand_init(void)
 			nand_cache_level = 0;
 		}
 	}
+    nand_dbg_err("init no in probe %s,%d\n", __FUNCTION__, __LINE__);
 
 	ret = of_property_read_u32(aw_ndfc.dev->of_node, "nand0_flush_cache_num",
 				   &nand_flush_cache_num);
@@ -431,7 +538,8 @@ int __init nand_init(void)
 
 		set_cache_level(p_nand_info, nand_cache_level);
 		set_capacity_level(p_nand_info, nand_capacity_level);
-		ret = nand_info_init(p_nand_info, 0, 8, NULL);
+		/*ret = nand_info_init(p_nand_info, 0, 8, NULL);*/
+		ret = nand_info_init(p_nand_info, 0);
 		if (ret != 0) {
 			nand_dbg_err("nand_info_init error\n");
 			return ret;
@@ -448,7 +556,9 @@ int __init nand_init(void)
 	kthread_run(nand_thread, &mytr, "%sd", "nand_rc");
 
 	nand_panic_init(mytr.nftl_blk_head.nftl_blk_next);
+
 	nand_dbg_err("nand init end\n");
+#endif
 	return 0;
 }
 

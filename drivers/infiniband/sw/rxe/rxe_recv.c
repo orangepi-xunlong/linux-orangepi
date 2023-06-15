@@ -36,21 +36,26 @@
 #include "rxe.h"
 #include "rxe_loc.h"
 
+/* check that QP matches packet opcode type and is in a valid state */
 static int check_type_state(struct rxe_dev *rxe, struct rxe_pkt_info *pkt,
 			    struct rxe_qp *qp)
 {
+	unsigned int pkt_type;
+
 	if (unlikely(!qp->valid))
 		goto err1;
 
+	pkt_type = pkt->opcode & 0xe0;
+
 	switch (qp_type(qp)) {
 	case IB_QPT_RC:
-		if (unlikely((pkt->opcode & IB_OPCODE_RC) != 0)) {
+		if (unlikely(pkt_type != IB_OPCODE_RC)) {
 			pr_warn_ratelimited("bad qp type\n");
 			goto err1;
 		}
 		break;
 	case IB_QPT_UC:
-		if (unlikely(!(pkt->opcode & IB_OPCODE_UC))) {
+		if (unlikely(pkt_type != IB_OPCODE_UC)) {
 			pr_warn_ratelimited("bad qp type\n");
 			goto err1;
 		}
@@ -58,7 +63,7 @@ static int check_type_state(struct rxe_dev *rxe, struct rxe_pkt_info *pkt,
 	case IB_QPT_UD:
 	case IB_QPT_SMI:
 	case IB_QPT_GSI:
-		if (unlikely(!(pkt->opcode & IB_OPCODE_UD))) {
+		if (unlikely(pkt_type != IB_OPCODE_UD)) {
 			pr_warn_ratelimited("bad qp type\n");
 			goto err1;
 		}
@@ -122,7 +127,7 @@ static int check_keys(struct rxe_dev *rxe, struct rxe_pkt_info *pkt,
 			set_bad_pkey_cntr(port);
 			goto err1;
 		}
-	} else if (qpn != 0) {
+	} else {
 		if (unlikely(!pkey_match(pkey,
 					 port->pkey_tbl[qp->attr.pkey_index]
 					))) {
@@ -134,7 +139,7 @@ static int check_keys(struct rxe_dev *rxe, struct rxe_pkt_info *pkt,
 	}
 
 	if ((qp_type(qp) == IB_QPT_UD || qp_type(qp) == IB_QPT_GSI) &&
-	    qpn != 0 && pkt->mask) {
+	    pkt->mask) {
 		u32 qkey = (qpn == 1) ? GSI_QKEY : qp->attr.qkey;
 
 		if (unlikely(deth_qkey(pkt) != qkey)) {
@@ -261,30 +266,28 @@ static int hdr_check(struct rxe_pkt_info *pkt)
 	return 0;
 
 err2:
-	if (qp)
-		rxe_drop_ref(qp);
+	rxe_drop_ref(qp);
 err1:
 	return -EINVAL;
 }
 
-static inline void rxe_rcv_pkt(struct rxe_dev *rxe,
-			       struct rxe_pkt_info *pkt,
-			       struct sk_buff *skb)
+static inline void rxe_rcv_pkt(struct rxe_pkt_info *pkt, struct sk_buff *skb)
 {
 	if (pkt->mask & RXE_REQ_MASK)
-		rxe_resp_queue_pkt(rxe, pkt->qp, skb);
+		rxe_resp_queue_pkt(pkt->qp, skb);
 	else
-		rxe_comp_queue_pkt(rxe, pkt->qp, skb);
+		rxe_comp_queue_pkt(pkt->qp, skb);
 }
 
 static void rxe_rcv_mcast_pkt(struct rxe_dev *rxe, struct sk_buff *skb)
 {
 	struct rxe_pkt_info *pkt = SKB_TO_PKT(skb);
 	struct rxe_mc_grp *mcg;
-	struct sk_buff *skb_copy;
 	struct rxe_mc_elem *mce;
 	struct rxe_qp *qp;
 	union ib_gid dgid;
+	struct sk_buff *per_qp_skb;
+	struct rxe_pkt_info *per_qp_pkt;
 	int err;
 
 	if (skb->protocol == htons(ETH_P_IP))
@@ -302,7 +305,6 @@ static void rxe_rcv_mcast_pkt(struct rxe_dev *rxe, struct sk_buff *skb)
 
 	list_for_each_entry(mce, &mcg->qp_list, qp_list) {
 		qp = mce->qp;
-		pkt = SKB_TO_PKT(skb);
 
 		/* validate qp for incoming packet */
 		err = check_type_state(rxe, pkt, qp);
@@ -313,19 +315,27 @@ static void rxe_rcv_mcast_pkt(struct rxe_dev *rxe, struct sk_buff *skb)
 		if (err)
 			continue;
 
-		/* if *not* the last qp in the list
-		 * make a copy of the skb to post to the next qp
+		/* for all but the last qp create a new clone of the
+		 * skb and pass to the qp. If an error occurs in the
+		 * checks for the last qp in the list we need to
+		 * free the skb since it hasn't been passed on to
+		 * rxe_rcv_pkt() which would free it later.
 		 */
-		skb_copy = (mce->qp_list.next != &mcg->qp_list) ?
-				skb_clone(skb, GFP_ATOMIC) : NULL;
+		if (mce->qp_list.next != &mcg->qp_list) {
+			per_qp_skb = skb_clone(skb, GFP_ATOMIC);
+		} else {
+			per_qp_skb = skb;
+			/* show we have consumed the skb */
+			skb = NULL;
+		}
 
-		pkt->qp = qp;
+		if (unlikely(!per_qp_skb))
+			continue;
+
+		per_qp_pkt = SKB_TO_PKT(per_qp_skb);
+		per_qp_pkt->qp = qp;
 		rxe_add_ref(qp);
-		rxe_rcv_pkt(rxe, pkt, skb);
-
-		skb = skb_copy;
-		if (!skb)
-			break;
+		rxe_rcv_pkt(per_qp_pkt, per_qp_skb);
 	}
 
 	spin_unlock_bh(&mcg->mcg_lock);
@@ -333,15 +343,19 @@ static void rxe_rcv_mcast_pkt(struct rxe_dev *rxe, struct sk_buff *skb)
 	rxe_drop_ref(mcg);	/* drop ref from rxe_pool_get_key. */
 
 err1:
-	if (skb)
-		kfree_skb(skb);
+	/* free skb if not consumed */
+	kfree_skb(skb);
 }
 
 static int rxe_match_dgid(struct rxe_dev *rxe, struct sk_buff *skb)
 {
+	struct rxe_pkt_info *pkt = SKB_TO_PKT(skb);
+	const struct ib_gid_attr *gid_attr;
 	union ib_gid dgid;
 	union ib_gid *pdgid;
-	u16 index;
+
+	if (pkt->mask & RXE_LOOPBACK_MASK)
+		return 0;
 
 	if (skb->protocol == htons(ETH_P_IP)) {
 		ipv6_addr_set_v4mapped(ip_hdr(skb)->daddr,
@@ -351,13 +365,18 @@ static int rxe_match_dgid(struct rxe_dev *rxe, struct sk_buff *skb)
 		pdgid = (union ib_gid *)&ipv6_hdr(skb)->daddr;
 	}
 
-	return ib_find_cached_gid_by_port(&rxe->ib_dev, pdgid,
-					  IB_GID_TYPE_ROCE_UDP_ENCAP,
-					  1, rxe->ndev, &index);
+	gid_attr = rdma_find_gid_by_port(&rxe->ib_dev, pdgid,
+					 IB_GID_TYPE_ROCE_UDP_ENCAP,
+					 1, skb->dev);
+	if (IS_ERR(gid_attr))
+		return PTR_ERR(gid_attr);
+
+	rdma_put_gid_attr(gid_attr);
+	return 0;
 }
 
 /* rxe_rcv is called from the interface driver */
-int rxe_rcv(struct sk_buff *skb)
+void rxe_rcv(struct sk_buff *skb)
 {
 	int err;
 	struct rxe_pkt_info *pkt = SKB_TO_PKT(skb);
@@ -370,7 +389,7 @@ int rxe_rcv(struct sk_buff *skb)
 	if (unlikely(skb->len < pkt->offset + RXE_BTH_BYTES))
 		goto drop;
 
-	if (unlikely(rxe_match_dgid(rxe, skb) < 0)) {
+	if (rxe_match_dgid(rxe, skb) < 0) {
 		pr_warn_ratelimited("failed matching dgid\n");
 		goto drop;
 	}
@@ -392,35 +411,34 @@ int rxe_rcv(struct sk_buff *skb)
 	pack_icrc = be32_to_cpu(*icrcp);
 
 	calc_icrc = rxe_icrc_hdr(pkt, skb);
-	calc_icrc = crc32_le(calc_icrc, (u8 *)payload_addr(pkt),
-			     payload_size(pkt));
-	calc_icrc = cpu_to_be32(~calc_icrc);
+	calc_icrc = rxe_crc32(rxe, calc_icrc, (u8 *)payload_addr(pkt),
+			      payload_size(pkt) + bth_pad(pkt));
+	calc_icrc = (__force u32)cpu_to_be32(~calc_icrc);
 	if (unlikely(calc_icrc != pack_icrc)) {
-		char saddr[sizeof(struct in6_addr)];
-
 		if (skb->protocol == htons(ETH_P_IPV6))
-			sprintf(saddr, "%pI6", &ipv6_hdr(skb)->saddr);
+			pr_warn_ratelimited("bad ICRC from %pI6c\n",
+					    &ipv6_hdr(skb)->saddr);
 		else if (skb->protocol == htons(ETH_P_IP))
-			sprintf(saddr, "%pI4", &ip_hdr(skb)->saddr);
+			pr_warn_ratelimited("bad ICRC from %pI4\n",
+					    &ip_hdr(skb)->saddr);
 		else
-			sprintf(saddr, "unknown");
+			pr_warn_ratelimited("bad ICRC from unknown\n");
 
-		pr_warn_ratelimited("bad ICRC from %s\n", saddr);
 		goto drop;
 	}
+
+	rxe_counter_inc(rxe, RXE_CNT_RCVD_PKTS);
 
 	if (unlikely(bth_qpn(pkt) == IB_MULTICAST_QPN))
 		rxe_rcv_mcast_pkt(rxe, skb);
 	else
-		rxe_rcv_pkt(rxe, pkt, skb);
+		rxe_rcv_pkt(pkt, skb);
 
-	return 0;
+	return;
 
 drop:
 	if (pkt->qp)
 		rxe_drop_ref(pkt->qp);
 
 	kfree_skb(skb);
-	return 0;
 }
-EXPORT_SYMBOL(rxe_rcv);

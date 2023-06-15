@@ -1,7 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  (C) 2010,2011       Thomas Renninger <trenn@suse.de>, Novell Inc.
- *
- *  Licensed under the terms of the GNU GPL License version 2.
  *
  *  Based on SandyBridge monitor. Implements the new package C-states
  *  (PC8, PC9, PC10) coming with a specific Haswell (family 0x45) CPU.
@@ -40,7 +39,6 @@ static cstate_t hsw_ext_cstates[HSW_EXT_CSTATE_COUNT] = {
 	{
 		.name			= "PC9",
 		.desc			= N_("Processor Package C9"),
-		.desc			= N_("Processor Package C2"),
 		.id			= PC9,
 		.range			= RANGE_PACKAGE,
 		.get_count_percent	= hsw_ext_get_count_percent,
@@ -123,7 +121,7 @@ static int hsw_ext_start(void)
 			previous_count[num][cpu] = val;
 		}
 	}
-	hsw_ext_get_count(TSC, &tsc_at_measure_start, 0);
+	hsw_ext_get_count(TSC, &tsc_at_measure_start, base_cpu);
 	return 0;
 }
 
@@ -132,7 +130,7 @@ static int hsw_ext_stop(void)
 	unsigned long long val;
 	int num, cpu;
 
-	hsw_ext_get_count(TSC, &tsc_at_measure_end, 0);
+	hsw_ext_get_count(TSC, &tsc_at_measure_end, base_cpu);
 
 	for (num = 0; num < HSW_EXT_CSTATE_COUNT; num++) {
 		for (cpu = 0; cpu < cpu_count; cpu++) {

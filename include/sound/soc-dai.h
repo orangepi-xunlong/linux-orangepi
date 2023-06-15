@@ -1,11 +1,8 @@
-/*
+/* SPDX-License-Identifier: GPL-2.0
+ *
  * linux/sound/soc-dai.h -- ALSA SoC Layer
  *
  * Copyright:	2005-2008 Wolfson Microelectronics. PLC.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  *
  * Digital Audio Interface (DAI) API.
  */
@@ -15,6 +12,7 @@
 
 
 #include <linux/list.h>
+#include <sound/asoc.h>
 
 struct snd_pcm_substream;
 struct snd_soc_dapm_widget;
@@ -26,13 +24,13 @@ struct snd_compr_stream;
  * Describes the physical PCM data formating and clocking. Add new formats
  * to the end.
  */
-#define SND_SOC_DAIFMT_I2S		1 /* I2S mode */
-#define SND_SOC_DAIFMT_RIGHT_J		2 /* Right Justified mode */
-#define SND_SOC_DAIFMT_LEFT_J		3 /* Left Justified mode */
-#define SND_SOC_DAIFMT_DSP_A		4 /* L data MSB after FRM LRC */
-#define SND_SOC_DAIFMT_DSP_B		5 /* L data MSB during FRM LRC */
-#define SND_SOC_DAIFMT_AC97		6 /* AC97 */
-#define SND_SOC_DAIFMT_PDM		7 /* Pulse density modulation */
+#define SND_SOC_DAIFMT_I2S		SND_SOC_DAI_FORMAT_I2S
+#define SND_SOC_DAIFMT_RIGHT_J		SND_SOC_DAI_FORMAT_RIGHT_J
+#define SND_SOC_DAIFMT_LEFT_J		SND_SOC_DAI_FORMAT_LEFT_J
+#define SND_SOC_DAIFMT_DSP_A		SND_SOC_DAI_FORMAT_DSP_A
+#define SND_SOC_DAIFMT_DSP_B		SND_SOC_DAI_FORMAT_DSP_B
+#define SND_SOC_DAIFMT_AC97		SND_SOC_DAI_FORMAT_AC97
+#define SND_SOC_DAIFMT_PDM		SND_SOC_DAI_FORMAT_PDM
 
 /* left and right justified also known as MSB and LSB respectively */
 #define SND_SOC_DAIFMT_MSB		SND_SOC_DAIFMT_LEFT_J
@@ -68,7 +66,7 @@ struct snd_compr_stream;
  *
  * "Negative" FSYNC polarity is the one opposite of "normal" polarity.
  */
-#define SND_SOC_DAIFMT_NB_NF		(1 << 8) /* normal bit clock + frame */
+#define SND_SOC_DAIFMT_NB_NF		(0 << 8) /* normal bit clock + frame */
 #define SND_SOC_DAIFMT_NB_IF		(2 << 8) /* normal BCLK + inv FRM */
 #define SND_SOC_DAIFMT_IB_NF		(3 << 8) /* invert BCLK + nor FRM */
 #define SND_SOC_DAIFMT_IB_IF		(4 << 8) /* invert BCLK + FRM */
@@ -101,6 +99,8 @@ struct snd_compr_stream;
 			       SNDRV_PCM_FMTBIT_S16_BE |\
 			       SNDRV_PCM_FMTBIT_S20_3LE |\
 			       SNDRV_PCM_FMTBIT_S20_3BE |\
+			       SNDRV_PCM_FMTBIT_S20_LE |\
+			       SNDRV_PCM_FMTBIT_S20_BE |\
 			       SNDRV_PCM_FMTBIT_S24_3LE |\
 			       SNDRV_PCM_FMTBIT_S24_3BE |\
                                SNDRV_PCM_FMTBIT_S32_LE |\
@@ -138,7 +138,37 @@ int snd_soc_dai_set_tristate(struct snd_soc_dai *dai, int tristate);
 int snd_soc_dai_digital_mute(struct snd_soc_dai *dai, int mute,
 			     int direction);
 
+
+int snd_soc_dai_get_channel_map(struct snd_soc_dai *dai,
+		unsigned int *tx_num, unsigned int *tx_slot,
+		unsigned int *rx_num, unsigned int *rx_slot);
+
 int snd_soc_dai_is_dummy(struct snd_soc_dai *dai);
+
+int snd_soc_dai_hw_params(struct snd_soc_dai *dai,
+			  struct snd_pcm_substream *substream,
+			  struct snd_pcm_hw_params *params);
+void snd_soc_dai_hw_free(struct snd_soc_dai *dai,
+			 struct snd_pcm_substream *substream);
+int snd_soc_dai_startup(struct snd_soc_dai *dai,
+			struct snd_pcm_substream *substream);
+void snd_soc_dai_shutdown(struct snd_soc_dai *dai,
+			  struct snd_pcm_substream *substream);
+int snd_soc_dai_prepare(struct snd_soc_dai *dai,
+			struct snd_pcm_substream *substream);
+int snd_soc_dai_trigger(struct snd_soc_dai *dai,
+			struct snd_pcm_substream *substream, int cmd);
+int snd_soc_dai_bespoke_trigger(struct snd_soc_dai *dai,
+			struct snd_pcm_substream *substream, int cmd);
+snd_pcm_sframes_t snd_soc_dai_delay(struct snd_soc_dai *dai,
+				    struct snd_pcm_substream *substream);
+void snd_soc_dai_suspend(struct snd_soc_dai *dai);
+void snd_soc_dai_resume(struct snd_soc_dai *dai);
+int snd_soc_dai_probe(struct snd_soc_dai *dai);
+int snd_soc_dai_remove(struct snd_soc_dai *dai);
+int snd_soc_dai_compress_new(struct snd_soc_dai *dai,
+			     struct snd_soc_pcm_runtime *rtd, int num);
+bool snd_soc_dai_stream_valid(struct snd_soc_dai *dai, int stream);
 
 struct snd_soc_dai_ops {
 	/*
@@ -165,8 +195,13 @@ struct snd_soc_dai_ops {
 	int (*set_channel_map)(struct snd_soc_dai *dai,
 		unsigned int tx_num, unsigned int *tx_slot,
 		unsigned int rx_num, unsigned int *rx_slot);
+	int (*get_channel_map)(struct snd_soc_dai *dai,
+			unsigned int *tx_num, unsigned int *tx_slot,
+			unsigned int *rx_num, unsigned int *rx_slot);
 	int (*set_tristate)(struct snd_soc_dai *dai, int tristate);
 
+	int (*set_sdw_stream)(struct snd_soc_dai *dai,
+			void *stream, int direction);
 	/*
 	 * DAI digital mute - optional.
 	 * Called by soc-core to minimise any pops.
@@ -207,6 +242,30 @@ struct snd_soc_dai_ops {
 		struct snd_soc_dai *);
 };
 
+struct snd_soc_cdai_ops {
+	/*
+	 * for compress ops
+	 */
+	int (*startup)(struct snd_compr_stream *,
+			struct snd_soc_dai *);
+	int (*shutdown)(struct snd_compr_stream *,
+			struct snd_soc_dai *);
+	int (*set_params)(struct snd_compr_stream *,
+			struct snd_compr_params *, struct snd_soc_dai *);
+	int (*get_params)(struct snd_compr_stream *,
+			struct snd_codec *, struct snd_soc_dai *);
+	int (*set_metadata)(struct snd_compr_stream *,
+			struct snd_compr_metadata *, struct snd_soc_dai *);
+	int (*get_metadata)(struct snd_compr_stream *,
+			struct snd_compr_metadata *, struct snd_soc_dai *);
+	int (*trigger)(struct snd_compr_stream *, int,
+			struct snd_soc_dai *);
+	int (*pointer)(struct snd_compr_stream *,
+			struct snd_compr_tstamp *, struct snd_soc_dai *);
+	int (*ack)(struct snd_compr_stream *, size_t,
+			struct snd_soc_dai *);
+};
+
 /*
  * Digital Audio Interface Driver.
  *
@@ -231,11 +290,13 @@ struct snd_soc_dai_driver {
 	int (*resume)(struct snd_soc_dai *dai);
 	/* compress dai */
 	int (*compress_new)(struct snd_soc_pcm_runtime *rtd, int num);
-	/* DAI is also used for the control bus */
-	bool bus_control;
+	/* Optional Callback used at pcm creation*/
+	int (*pcm_new)(struct snd_soc_pcm_runtime *rtd,
+		       struct snd_soc_dai *dai);
 
 	/* ops */
 	const struct snd_soc_dai_ops *ops;
+	const struct snd_soc_cdai_ops *cops;
 
 	/* DAI capabilities */
 	struct snd_soc_pcm_stream capture;
@@ -243,6 +304,7 @@ struct snd_soc_dai_driver {
 	unsigned int symmetric_rates:1;
 	unsigned int symmetric_channels:1;
 	unsigned int symmetric_samplebits:1;
+	unsigned int bus_control:1; /* DAI is also used for the control bus */
 
 	/* probe ordering - for components with runtime dependencies */
 	int probe_order;
@@ -263,13 +325,11 @@ struct snd_soc_dai {
 	struct snd_soc_dai_driver *driver;
 
 	/* DAI runtime info */
-	unsigned int capture_active:1;		/* stream is in use */
-	unsigned int playback_active:1;		/* stream is in use */
-	unsigned int symmetric_rates:1;
-	unsigned int symmetric_channels:1;
-	unsigned int symmetric_samplebits:1;
+	unsigned int capture_active;		/* stream usage count */
+	unsigned int playback_active;		/* stream usage count */
+	unsigned int probed:1;
+
 	unsigned int active;
-	unsigned char probed:1;
 
 	struct snd_soc_dapm_widget *playback_widget;
 	struct snd_soc_dapm_widget *capture_widget;
@@ -284,7 +344,6 @@ struct snd_soc_dai {
 	unsigned int sample_bits;
 
 	/* parent platform/codec */
-	struct snd_soc_codec *codec;
 	struct snd_soc_component *component;
 
 	/* CODEC TDM slot masks and params (for fixup) */
@@ -327,6 +386,27 @@ static inline void snd_soc_dai_set_drvdata(struct snd_soc_dai *dai,
 static inline void *snd_soc_dai_get_drvdata(struct snd_soc_dai *dai)
 {
 	return dev_get_drvdata(dai->dev);
+}
+
+/**
+ * snd_soc_dai_set_sdw_stream() - Configures a DAI for SDW stream operation
+ * @dai: DAI
+ * @stream: STREAM
+ * @direction: Stream direction(Playback/Capture)
+ * SoundWire subsystem doesn't have a notion of direction and we reuse
+ * the ASoC stream direction to configure sink/source ports.
+ * Playback maps to source ports and Capture for sink ports.
+ *
+ * This should be invoked with NULL to clear the stream set previously.
+ * Returns 0 on success, a negative error code otherwise.
+ */
+static inline int snd_soc_dai_set_sdw_stream(struct snd_soc_dai *dai,
+				void *stream, int direction)
+{
+	if (dai->driver->ops->set_sdw_stream)
+		return dai->driver->ops->set_sdw_stream(dai, stream, direction);
+	else
+		return -ENOTSUPP;
 }
 
 #endif

@@ -16,7 +16,7 @@
 
 
 #include <linux/clk.h>
-#include <linux/clk/sunxi.h>
+#include <linux/reset.h>
 
 #include <linux/gpio.h>
 #include <linux/platform_device.h>
@@ -31,6 +31,7 @@
 #include <linux/of_platform.h>
 #include <linux/stat.h>
 
+#include <linux/mmc/core.h>
 #include <linux/mmc/host.h>
 #include "sunxi-mmc.h"
 #include "sunxi-mmc-debug.h"
@@ -81,8 +82,8 @@ void sunxi_mmc_dumphex32(struct sunxi_mmc_host *host, char *name, char *base,
 	pr_cont("dump %s registers:", name);
 	for (i = 0; i < len; i += 4) {
 		if (!(i&0xf))
-			pr_cont("\n0x%p : ", base + i);
-		pr_cont("0x%08x ", __raw_readl(host->reg_base+i));
+			pr_cont("\n0x%px : ", base + i);
+		pr_cont("0x%08x ", __raw_readl(base+i));
 	}
 	pr_cont("\n");
 }
@@ -94,7 +95,7 @@ void sunxi_mmc_dump_des(struct sunxi_mmc_host *host, char *base, int len)
 	pr_cont("dump des mem\n");
 	for (i = 0; i < len; i += 4) {
 		if (!(i&0xf))
-			pr_cont("\n0x%p : ", base + i);
+			pr_cont("\n0x%px : ", base + i);
 		pr_cont("0x%08x ", *(u32 *)(base+i));
 	}
 	pr_cont("\n");
@@ -213,6 +214,43 @@ void sunxi_dump_reg(struct mmc_host *mmc)
 	resource_size_t res_saddr_ccmu;
 	resource_size_t res_saddr_gpio;
 
+
+	pr_cont("Dump %s (p%x) regs :\n", mmc_hostname(mmc), host->phy_index);
+	for (i = 0; i < SUNXI_MMC_MAX_HOST_PRT_ADDR; i += 4) {
+		if (!(i&0xf))
+			pr_cont("\n0x%px : ", (host->reg_base + i));
+		pr_cont("%08x ", readl(host->reg_base + i));
+	}
+	pr_cont("\n");
+
+	ret = sunxi_mmc_res_start_addr("pio", &res_saddr_gpio);
+	if (ret < 0)
+		goto map_ccmu;
+	gpio_ptr = ioremap(res_saddr_gpio, SUNXI_DEG_MAX_MAP_REG);
+	if (gpio_ptr == NULL) {
+		pr_err("Can not map gpio resource\n");
+		goto map_ccmu;
+	}
+
+	pr_cont("Dump gpio regs:\n");
+	for (i = 0; i < SUNXI_MMC_MAX_GPIO_PRT_ADDR; i += 4) {
+		if (!(i&0xf))
+			pr_cont("\n0x%px : ", (gpio_ptr + i));
+		pr_cont("%08x ", readl(gpio_ptr + i));
+	}
+	pr_cont("\n");
+
+	pr_cont("Dump gpio irqc regs:\n");
+	for (i = SUNXI_GPIOIC_PRT_SADDR; i < SUNXI_GPIOIC_PRT_EADDR; i += 4) {
+		if (!(i&0xf))
+			pr_cont("\n0x%px : ", (gpio_ptr + i));
+		pr_cont("%08x ", readl(gpio_ptr + i));
+	}
+	pr_cont("\n");
+
+	iounmap(gpio_ptr);
+
+map_ccmu:
 	ret = sunxi_mmc_res_start_addr("clocks", &res_saddr_ccmu);
 	if (ret < 0)
 		return;
@@ -222,45 +260,11 @@ void sunxi_dump_reg(struct mmc_host *mmc)
 		return;
 	}
 
-	ret = sunxi_mmc_res_start_addr("pio", &res_saddr_gpio);
-	if (ret < 0)
-		return;
-	gpio_ptr = ioremap(res_saddr_gpio, SUNXI_DEG_MAX_MAP_REG);
-	if (gpio_ptr == NULL) {
-		pr_err("Can not map gpio resource\n");
-		return;
-	}
-
-	pr_cont("Dump %s (p%x) regs :\n", mmc_hostname(mmc), host->phy_index);
-	for (i = 0; i < SUNXI_MMC_MAX_HOST_PRT_ADDR; i += 4) {
-		if (!(i&0xf))
-			pr_cont("\n0x%p : ", (host->reg_base + i));
-		pr_cont("%08x ", readl(host->reg_base + i));
-	}
-	pr_cont("\n");
-
-
-	pr_cont("Dump gpio regs:\n");
-	for (i = 0; i < SUNXI_MMC_MAX_GPIO_PRT_ADDR; i += 4) {
-		if (!(i&0xf))
-			pr_cont("\n0x%p : ", (gpio_ptr + i));
-		pr_cont("%08x ", readl(gpio_ptr + i));
-	}
-	pr_cont("\n");
-
-	pr_cont("Dump gpio irqc regs:\n");
-	for (i = SUNXI_GPIOIC_PRT_SADDR; i < SUNXI_GPIOIC_PRT_EADDR; i += 4) {
-		if (!(i&0xf))
-			pr_cont("\n0x%p : ", (gpio_ptr + i));
-		pr_cont("%08x ", readl(gpio_ptr + i));
-	}
-	pr_cont("\n");
-
 	if (res_saddr_ccmu == CCMU_BASE_ADDR_BEFORE_V2P1H) {
 		pr_cont("Dump ccmu regs:gating\n");
 		for (i = SUNXI_BCLKG_SADDR; i < SUNXI_BCLKG_EADDR; i += 4) {
 			if (!(i&0xf))
-				pr_cont("\n0x%p : ", (ccmu_ptr + i));
+				pr_cont("\n0x%px : ", (ccmu_ptr + i));
 			pr_cont("%08x ", readl(ccmu_ptr + i));
 		}
 		pr_cont("\n");
@@ -268,7 +272,7 @@ void sunxi_dump_reg(struct mmc_host *mmc)
 		pr_cont("Dump ccmu regs:module clk\n");
 		for (i = SUNXI_CLK_PRT_SADDR; i < SUNXI_CLK_PRT_EADDR; i += 4) {
 			if (!(i&0xf))
-				pr_cont("\n0x%p : ", (ccmu_ptr + i));
+				pr_cont("\n0x%px : ", (ccmu_ptr + i));
 			pr_cont("%08x ", readl(ccmu_ptr + i));
 		}
 		pr_cont("\n");
@@ -276,7 +280,7 @@ void sunxi_dump_reg(struct mmc_host *mmc)
 		pr_cont("Dump ccmu regs:reset\n");
 		for (i = SUNXI_BSRES_SADDR; i < SUNXI_BSRES_EADDR; i += 4) {
 			if (!(i&0xf))
-				pr_cont("\n0x%p : ", (ccmu_ptr + i));
+				pr_cont("\n0x%px : ", (ccmu_ptr + i));
 			pr_cont("%08x ", readl(ccmu_ptr + i));
 		}
 		pr_cont("\n");
@@ -285,20 +289,19 @@ void sunxi_dump_reg(struct mmc_host *mmc)
 
 		for (i = SUNXI_PP_NCM_SADDR; i < SUNXI_PP_NCM_EADDR; i += 4) {
 			if (!(i&0xf))
-				pr_cont("\n0x%p : ", (ccmu_ptr + i));
+				pr_cont("\n0x%px : ", (ccmu_ptr + i));
 			pr_cont("%08x ", readl(ccmu_ptr + i));
 		}
 		pr_cont("\n");
 
 		for (i = SUNXI_NCCM_SADDR; i < SUNXI_NCCM_EADDR; i += 4) {
 			if (!(i&0xf))
-				pr_cont("\n0x%p : ", (ccmu_ptr + i));
+				pr_cont("\n0x%px : ", (ccmu_ptr + i));
 			pr_cont("%08x ", readl(ccmu_ptr + i));
 		}
 		pr_cont("\n");
 	}
 
-	iounmap(gpio_ptr);
 	iounmap(ccmu_ptr);
 
 }
@@ -315,7 +318,7 @@ static ssize_t dump_host_reg_show(struct device *dev,
 	p += sprintf(p, "Dump sdmmc regs:\n");
 	for (i = 0; i < SUNXI_MMC_MAX_HOST_PRT_ADDR; i += 4) {
 		if (!(i&0xf))
-			p += sprintf(p, "\n0x%p : ", (host->reg_base + i));
+			p += sprintf(p, "\n0x%lx : ", (size_t)(host->reg_base + i));
 		p += sprintf(p, "%08x ", readl(host->reg_base + i));
 	}
 	p += sprintf(p, "\n");
@@ -346,7 +349,7 @@ static ssize_t dump_gpio_reg_show(struct device *dev,
 	p += sprintf(p, "Dump gpio regs:\n");
 	for (i = 0; i < SUNXI_MMC_MAX_GPIO_PRT_ADDR; i += 4) {
 		if (!(i&0xf))
-			p += sprintf(p, "\n0x%p : ", (gpio_ptr + i));
+			p += sprintf(p, "\n0x%lx : ", (size_t)(gpio_ptr + i));
 		p += sprintf(p, "%08x ", readl(gpio_ptr + i));
 	}
 	p += sprintf(p, "\n");
@@ -354,7 +357,7 @@ static ssize_t dump_gpio_reg_show(struct device *dev,
 	p += sprintf(p, "Dump gpio irqc regs:\n");
 	for (i = SUNXI_GPIOIC_PRT_SADDR; i < SUNXI_GPIOIC_PRT_EADDR; i += 4) {
 		if (!(i&0xf))
-			p += sprintf(p, "\n0x%p : ", (gpio_ptr + i));
+			p += sprintf(p, "\n0x%lx : ", (size_t) (gpio_ptr + i));
 		p += sprintf(p, "%08x ", readl(gpio_ptr + i));
 	}
 	p += sprintf(p, "\n");
@@ -390,7 +393,7 @@ static ssize_t dump_ccmu_reg_show(struct device *dev,
 		p += sprintf(p, "Dump ccmu regs:gating\n");
 		for (i = SUNXI_BCLKG_SADDR; i < SUNXI_BCLKG_EADDR; i += 4) {
 			if (!(i&0xf))
-				p += sprintf(p, "\n0x%p : ", (ccmu_ptr + i));
+				p += sprintf(p, "\n0x%lx : ", (size_t)(ccmu_ptr + i));
 			p += sprintf(p, "%08x ", readl(ccmu_ptr + i));
 		}
 		p += sprintf(p, "\n");
@@ -398,7 +401,7 @@ static ssize_t dump_ccmu_reg_show(struct device *dev,
 		p += sprintf(p, "Dump ccmu regs:module clk\n");
 		for (i = SUNXI_CLK_PRT_SADDR; i < SUNXI_CLK_PRT_EADDR; i += 4) {
 			if (!(i&0xf))
-				p += sprintf(p, "\n0x%p : ", (ccmu_ptr + i));
+				p += sprintf(p, "\n0x%lx : ", (size_t)(ccmu_ptr + i));
 			p += sprintf(p, "%08x ", readl(ccmu_ptr + i));
 		}
 		p += sprintf(p, "\n");
@@ -406,7 +409,7 @@ static ssize_t dump_ccmu_reg_show(struct device *dev,
 		p += sprintf(p, "Dump ccmu regs:reset\n");
 		for (i = SUNXI_BSRES_SADDR; i < SUNXI_BSRES_EADDR; i += 4) {
 			if (!(i&0xf))
-				p += sprintf(p, "\n0x%p : ", (ccmu_ptr + i));
+				p += sprintf(p, "\n0x%lx : ", (size_t)(ccmu_ptr + i));
 			p += sprintf(p, "%08x ", readl(ccmu_ptr + i));
 		}
 		p += sprintf(p, "\n");
@@ -416,14 +419,14 @@ static ssize_t dump_ccmu_reg_show(struct device *dev,
 
 		for (i = SUNXI_PP_NCM_SADDR; i < SUNXI_PP_NCM_EADDR; i += 4) {
 			if (!(i&0xf))
-				p += sprintf(p, "\n0x%p : ", (ccmu_ptr + i));
+				p += sprintf(p, "\n0x%lx : ", (size_t)(ccmu_ptr + i));
 			p += sprintf(p, "%08x ", readl(ccmu_ptr + i));
 		}
 		p += sprintf(p, "\n");
 
 		for (i = SUNXI_NCCM_SADDR; i < SUNXI_NCCM_EADDR; i += 4) {
 			if (!(i&0xf))
-				p += sprintf(p, "\n0x%p : ", (ccmu_ptr + i));
+				p += sprintf(p, "\n0x%lx : ", (size_t)(ccmu_ptr + i));
 			p += sprintf(p, "%08x ", readl(ccmu_ptr + i));
 		}
 		p += sprintf(p, "\n");
@@ -549,6 +552,64 @@ sunxi_mmc_set_perf(struct device *dev, struct device_attribute *attr,
 	mmc_release_host(mmc);
 
 	return count;
+}
+
+extern void sunxi_mmc_set_ds_dl_raw(struct sunxi_mmc_host *host, int sunxi_ds_dl);
+extern void sunxi_mmc_set_samp_dl_raw(struct sunxi_mmc_host *host, int sunxi_samp_dl);
+
+int sunxi_mmc_bus_clk_en(struct sunxi_mmc_host *host, int enable);
+void sunxi_mmc_regs_save(struct sunxi_mmc_host *host);
+void sunxi_mmc_regs_restore(struct sunxi_mmc_host *host);
+
+static ssize_t
+sunxi_mmc_set_samp_dly_sys(struct device *dev, struct device_attribute *attr,
+				const char *buf, size_t count)
+{
+	struct platform_device *pdev = to_platform_device(dev);
+	struct mmc_host	*mmc = platform_get_drvdata(pdev);
+	struct sunxi_mmc_host *host = mmc_priv(mmc);
+	int64_t value;
+
+	sscanf(buf, "%lld", &value);
+	printk("set sample delay %lld\n", value);
+	mmc_claim_host(mmc);
+	sunxi_mmc_set_samp_dl_raw(host, value);
+	mmc_release_host(mmc);
+
+	return count;
+}
+
+static ssize_t
+sunxi_mmc_set_ds_dly_sys(struct device *dev, struct device_attribute *attr,
+				const char *buf, size_t count)
+{
+	struct platform_device *pdev = to_platform_device(dev);
+	struct mmc_host	*mmc = platform_get_drvdata(pdev);
+	struct sunxi_mmc_host *host = mmc_priv(mmc);
+	int64_t value;
+
+	sscanf(buf, "%lld", &value);
+	printk("set ds delay %lld\n", value);
+	mmc_claim_host(mmc);
+	sunxi_mmc_set_ds_dl_raw(host, value);
+	mmc_release_host(mmc);
+
+	return count;
+}
+
+static ssize_t
+sunxi_mmc_send_status(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct platform_device *pdev = to_platform_device(dev);
+	struct mmc_host	*mmc = platform_get_drvdata(pdev);
+	u32 status = 0;
+
+	mmc_claim_host(mmc);
+	mmc_send_status(mmc->card, &status);
+	printk("mmc status %x\n", status);
+	mmc_release_host(mmc);
+
+	return (ssize_t)buf;
 }
 
 static ssize_t
@@ -682,6 +743,33 @@ int mmc_create_sys_fs(struct sunxi_mmc_host *host, struct platform_device *pdev)
 	if (ret)
 		return ret;
 
+	host->host_sample_dly.show = NULL;
+	host->host_sample_dly.store = sunxi_mmc_set_samp_dly_sys;
+	sysfs_attr_init(&(host->host_sample_dly.attr));
+	host->host_sample_dly.attr.name = "sunxi_host_set_sample_dly";
+	host->host_sample_dly.attr.mode =  S_IWUSR;
+	ret = device_create_file(&pdev->dev, &host->host_sample_dly);
+	if (ret)
+		return ret;
+
+	host->host_ds_dly.show = NULL;
+	host->host_ds_dly.store = sunxi_mmc_set_ds_dly_sys;
+	sysfs_attr_init(&(host->host_ds_dly.attr));
+	host->host_ds_dly.attr.name = "sunxi_host_set_ds_dly";
+	host->host_ds_dly.attr.mode =  S_IWUSR;
+	ret = device_create_file(&pdev->dev, &host->host_ds_dly);
+	if (ret)
+		return ret;
+
+	host->host_send_status.show = sunxi_mmc_send_status;
+	host->host_send_status.store = NULL;
+	sysfs_attr_init(&(host->host_send_status.attr));
+	host->host_send_status.attr.name = "sunxi_mmc_send_status";
+	host->host_send_status.attr.mode =  S_IRUGO;
+	ret = device_create_file(&pdev->dev, &host->host_send_status);
+	if (ret)
+		return ret;
+
 	host->host_mwr.show = sunxi_mmc_panic_rtest;
 	host->host_mwr.store = sunxi_mmc_pancic_wrtest;
 	sysfs_attr_init(&(host->host_mwr.attr));
@@ -705,5 +793,8 @@ void mmc_remove_sys_fs(struct sunxi_mmc_host *host,
 	device_remove_file(&pdev->dev, &host->dump_clk_dly);
 	device_remove_file(&pdev->dev, &host->filter_sector_perf);
 	device_remove_file(&pdev->dev, &host->filter_speed_perf);
+	device_remove_file(&pdev->dev, &host->host_sample_dly);
+	device_remove_file(&pdev->dev, &host->host_ds_dly);
+	device_remove_file(&pdev->dev, &host->host_send_status);
 }
 EXPORT_SYMBOL_GPL(mmc_remove_sys_fs);

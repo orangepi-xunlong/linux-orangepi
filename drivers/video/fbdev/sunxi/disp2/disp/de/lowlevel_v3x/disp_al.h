@@ -161,6 +161,7 @@ int disp_al_edp_disable(u32 screen_id);
 int disp_exit_al(void);
 bool disp_al_get_direct_show_state(unsigned int disp);
 void disp_al_show_builtin_patten(u32 hwdev_index, u32 patten);
+int disp_al_lcd_get_status(u32 screen_id, struct disp_panel_para *panel);
 
 static inline s32 disp_al_capture_set_rcq_update(u32 disp, u32 en) { return 0; }
 

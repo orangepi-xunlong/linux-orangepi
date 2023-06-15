@@ -87,17 +87,15 @@ struct etf_sdd_req {
 	u32    sdd_cmd;
 };
 
-typedef enum
-{
-    ETF_CHANNEL_BANDWIDTH_20MHz,
-    ETF_CHANNEL_BANDWIDTH_10MHz,
-    ETF_CHANNEL_BANDWIDTH_40MHz
+typedef enum {
+	ETF_CHANNEL_BANDWIDTH_20MHz,
+	ETF_CHANNEL_BANDWIDTH_10MHz,
+	ETF_CHANNEL_BANDWIDTH_40MHz
 } ETF_CHANNEL_BANDWIDTH_T;
 
-typedef enum
-{
-    ETF_SUB_CHANNEL_UPPER,
-    ETF_SUB_CHANNEL_LOWER
+typedef enum {
+	ETF_SUB_CHANNEL_UPPER,
+	ETF_SUB_CHANNEL_LOWER
 } ETF_SUB_CHANNEL_T;
 
 typedef struct ETFCLI_PAR_S {
@@ -224,11 +222,7 @@ struct drv_download {
 	/* data followed, max size is HI_MEM_BLK_BYTES */
 };
 
-#ifdef USE_VFS_FIRMWARE
-#define XR829_ETF_FIRMWARE   ("/system/vendor/etc/firmware/etf_xr829.bin")
-#else
-#define XR829_ETF_FIRMWARE   ("etf_xr829.bin")
-#endif
+#define XR829_ETF_FIRMWARE  "etf_xr829.bin"
 
 /* ETF interfaces called by WLAN core */
 int xradio_etf_init(void);

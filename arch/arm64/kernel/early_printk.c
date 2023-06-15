@@ -132,6 +132,7 @@ static int __init setup_early_printk(char *buf)
 {
 	const struct earlycon_match *match = earlycon_match;
 	phys_addr_t paddr = 0;
+	char *e;
 
 	if (!buf) {
 		pr_warning("No earlyprintk arguments passed.\n");
@@ -153,9 +154,7 @@ static int __init setup_early_printk(char *buf)
 
 	/* I/O address */
 	if (!strncmp(buf, ",0x", 3)) {
-		char *e;
 		paddr = simple_strtoul(buf + 1, &e, 16);
-		buf = e;
 	}
 	/* no options parsing yet */
 

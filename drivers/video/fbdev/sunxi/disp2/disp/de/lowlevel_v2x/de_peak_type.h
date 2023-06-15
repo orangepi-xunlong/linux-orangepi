@@ -170,4 +170,17 @@ struct __peak_config_data {
 
 };
 
+struct __pq_peak_config {
+	/* peak */
+	unsigned int peak_en;
+	unsigned int gain;
+	unsigned int hp_ratio;
+	unsigned int bp0_ratio;
+	unsigned int bp1_ratio;
+	unsigned int corth;
+	unsigned int neg_gain;
+	unsigned int dif_up;
+	unsigned int beta;
+};
+
 #endif

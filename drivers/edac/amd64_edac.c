@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 #include "amd64_edac.h"
 #include <asm/amd_nb.h>
 
@@ -17,6 +18,12 @@ static struct msr __percpu *msrs;
 
 /* Per-node stuff */
 static struct ecc_settings **ecc_stngs;
+
+/* Number of Unified Memory Controllers */
+static u8 num_umcs;
+
+/* Device for the PCI component */
+static struct device *pci_ctl_dev;
 
 /*
  * Valid scrub rates for the K8 hardware memory scrubber. We map the scrubbing
@@ -164,8 +171,23 @@ static inline int amd64_read_dct_pci_cfg(struct amd64_pvt *pvt, u8 dct,
  * other archs, we might not have access to the caches directly.
  */
 
+static inline void __f17h_set_scrubval(struct amd64_pvt *pvt, u32 scrubval)
+{
+	/*
+	 * Fam17h supports scrub values between 0x5 and 0x14. Also, the values
+	 * are shifted down by 0x5, so scrubval 0x5 is written to the register
+	 * as 0x0, scrubval 0x6 as 0x1, etc.
+	 */
+	if (scrubval >= 0x5 && scrubval <= 0x14) {
+		scrubval -= 0x5;
+		pci_write_bits32(pvt->F6, F17H_SCR_LIMIT_ADDR, scrubval, 0xF);
+		pci_write_bits32(pvt->F6, F17H_SCR_BASE_ADDR, 1, 0x1);
+	} else {
+		pci_write_bits32(pvt->F6, F17H_SCR_BASE_ADDR, 0, 0x1);
+	}
+}
 /*
- * scan the scrub rate mapping table for a close or matching bandwidth value to
+ * Scan the scrub rate mapping table for a close or matching bandwidth value to
  * issue. If requested is too big, then use last maximum value found.
  */
 static int __set_scrub_rate(struct amd64_pvt *pvt, u32 new_bw, u32 min_rate)
@@ -196,7 +218,9 @@ static int __set_scrub_rate(struct amd64_pvt *pvt, u32 new_bw, u32 min_rate)
 
 	scrubval = scrubrates[i].scrubval;
 
-	if (pvt->fam == 0x15 && pvt->model == 0x60) {
+	if (pvt->fam == 0x17 || pvt->fam == 0x18) {
+		__f17h_set_scrubval(pvt, scrubval);
+	} else if (pvt->fam == 0x15 && pvt->model == 0x60) {
 		f15h_select_dct(pvt, 0);
 		pci_write_bits32(pvt->F2, F15H_M60H_SCRCTRL, scrubval, 0x001F);
 		f15h_select_dct(pvt, 1);
@@ -233,18 +257,37 @@ static int set_scrub_rate(struct mem_ctl_info *mci, u32 bw)
 static int get_scrub_rate(struct mem_ctl_info *mci)
 {
 	struct amd64_pvt *pvt = mci->pvt_info;
-	u32 scrubval = 0;
 	int i, retval = -EINVAL;
+	u32 scrubval = 0;
 
-	if (pvt->fam == 0x15) {
+	switch (pvt->fam) {
+	case 0x15:
 		/* Erratum #505 */
 		if (pvt->model < 0x10)
 			f15h_select_dct(pvt, 0);
 
 		if (pvt->model == 0x60)
 			amd64_read_pci_cfg(pvt->F2, F15H_M60H_SCRCTRL, &scrubval);
-	} else
+		else
+			amd64_read_pci_cfg(pvt->F3, SCRCTRL, &scrubval);
+		break;
+
+	case 0x17:
+	case 0x18:
+		amd64_read_pci_cfg(pvt->F6, F17H_SCR_BASE_ADDR, &scrubval);
+		if (scrubval & BIT(0)) {
+			amd64_read_pci_cfg(pvt->F6, F17H_SCR_LIMIT_ADDR, &scrubval);
+			scrubval &= 0xF;
+			scrubval += 0x5;
+		} else {
+			scrubval = 0;
+		}
+		break;
+
+	default:
 		amd64_read_pci_cfg(pvt->F3, SCRCTRL, &scrubval);
+		break;
+	}
 
 	scrubval = scrubval & 0x001F;
 
@@ -414,6 +457,9 @@ static void get_cs_base_and_mask(struct amd64_pvt *pvt, int csrow, u8 dct,
 
 #define for_each_chip_select_mask(i, dct, pvt) \
 	for (i = 0; i < pvt->csels[dct].m_cnt; i++)
+
+#define for_each_umc(i) \
+	for (i = 0; i < num_umcs; i++)
 
 /*
  * @input_addr is an InputAddr associated with the node given by mci. Return the
@@ -682,15 +728,33 @@ static int get_channel_from_ecc_syndrome(struct mem_ctl_info *, u16);
  */
 static unsigned long determine_edac_cap(struct amd64_pvt *pvt)
 {
-	u8 bit;
 	unsigned long edac_cap = EDAC_FLAG_NONE;
+	u8 bit;
 
-	bit = (pvt->fam > 0xf || pvt->ext_model >= K8_REV_F)
-		? 19
-		: 17;
+	if (pvt->umc) {
+		u8 i, umc_en_mask = 0, dimm_ecc_en_mask = 0;
 
-	if (pvt->dclr0 & BIT(bit))
-		edac_cap = EDAC_FLAG_SECDED;
+		for_each_umc(i) {
+			if (!(pvt->umc[i].sdp_ctrl & UMC_SDP_INIT))
+				continue;
+
+			umc_en_mask |= BIT(i);
+
+			/* UMC Configuration bit 12 (DimmEccEn) */
+			if (pvt->umc[i].umc_cfg & BIT(12))
+				dimm_ecc_en_mask |= BIT(i);
+		}
+
+		if (umc_en_mask == dimm_ecc_en_mask)
+			edac_cap = EDAC_FLAG_SECDED;
+	} else {
+		bit = (pvt->fam > 0xf || pvt->ext_model >= K8_REV_F)
+			? 19
+			: 17;
+
+		if (pvt->dclr0 & BIT(bit))
+			edac_cap = EDAC_FLAG_SECDED;
+	}
 
 	return edac_cap;
 }
@@ -729,8 +793,98 @@ static void debug_dump_dramcfg_low(struct amd64_pvt *pvt, u32 dclr, int chan)
 		 (dclr & BIT(15)) ?  "yes" : "no");
 }
 
+#define CS_EVEN_PRIMARY		BIT(0)
+#define CS_ODD_PRIMARY		BIT(1)
+#define CS_EVEN_SECONDARY	BIT(2)
+#define CS_ODD_SECONDARY	BIT(3)
+
+#define CS_EVEN			(CS_EVEN_PRIMARY | CS_EVEN_SECONDARY)
+#define CS_ODD			(CS_ODD_PRIMARY | CS_ODD_SECONDARY)
+
+static int f17_get_cs_mode(int dimm, u8 ctrl, struct amd64_pvt *pvt)
+{
+	int cs_mode = 0;
+
+	if (csrow_enabled(2 * dimm, ctrl, pvt))
+		cs_mode |= CS_EVEN_PRIMARY;
+
+	if (csrow_enabled(2 * dimm + 1, ctrl, pvt))
+		cs_mode |= CS_ODD_PRIMARY;
+
+	/* Asymmetric dual-rank DIMM support. */
+	if (csrow_sec_enabled(2 * dimm + 1, ctrl, pvt))
+		cs_mode |= CS_ODD_SECONDARY;
+
+	return cs_mode;
+}
+
+static void debug_display_dimm_sizes_df(struct amd64_pvt *pvt, u8 ctrl)
+{
+	int dimm, size0, size1, cs0, cs1, cs_mode;
+
+	edac_printk(KERN_DEBUG, EDAC_MC, "UMC%d chip selects:\n", ctrl);
+
+	for (dimm = 0; dimm < 2; dimm++) {
+		cs0 = dimm * 2;
+		cs1 = dimm * 2 + 1;
+
+		cs_mode = f17_get_cs_mode(dimm, ctrl, pvt);
+
+		size0 = pvt->ops->dbam_to_cs(pvt, ctrl, cs_mode, cs0);
+		size1 = pvt->ops->dbam_to_cs(pvt, ctrl, cs_mode, cs1);
+
+		amd64_info(EDAC_MC ": %d: %5dMB %d: %5dMB\n",
+				cs0,	size0,
+				cs1,	size1);
+	}
+}
+
+static void __dump_misc_regs_df(struct amd64_pvt *pvt)
+{
+	struct amd64_umc *umc;
+	u32 i, tmp, umc_base;
+
+	for_each_umc(i) {
+		umc_base = get_umc_base(i);
+		umc = &pvt->umc[i];
+
+		edac_dbg(1, "UMC%d DIMM cfg: 0x%x\n", i, umc->dimm_cfg);
+		edac_dbg(1, "UMC%d UMC cfg: 0x%x\n", i, umc->umc_cfg);
+		edac_dbg(1, "UMC%d SDP ctrl: 0x%x\n", i, umc->sdp_ctrl);
+		edac_dbg(1, "UMC%d ECC ctrl: 0x%x\n", i, umc->ecc_ctrl);
+
+		amd_smn_read(pvt->mc_node_id, umc_base + UMCCH_ECC_BAD_SYMBOL, &tmp);
+		edac_dbg(1, "UMC%d ECC bad symbol: 0x%x\n", i, tmp);
+
+		amd_smn_read(pvt->mc_node_id, umc_base + UMCCH_UMC_CAP, &tmp);
+		edac_dbg(1, "UMC%d UMC cap: 0x%x\n", i, tmp);
+		edac_dbg(1, "UMC%d UMC cap high: 0x%x\n", i, umc->umc_cap_hi);
+
+		edac_dbg(1, "UMC%d ECC capable: %s, ChipKill ECC capable: %s\n",
+				i, (umc->umc_cap_hi & BIT(30)) ? "yes" : "no",
+				    (umc->umc_cap_hi & BIT(31)) ? "yes" : "no");
+		edac_dbg(1, "UMC%d All DIMMs support ECC: %s\n",
+				i, (umc->umc_cfg & BIT(12)) ? "yes" : "no");
+		edac_dbg(1, "UMC%d x4 DIMMs present: %s\n",
+				i, (umc->dimm_cfg & BIT(6)) ? "yes" : "no");
+		edac_dbg(1, "UMC%d x16 DIMMs present: %s\n",
+				i, (umc->dimm_cfg & BIT(7)) ? "yes" : "no");
+
+		if (pvt->dram_type == MEM_LRDDR4) {
+			amd_smn_read(pvt->mc_node_id, umc_base + UMCCH_ADDR_CFG, &tmp);
+			edac_dbg(1, "UMC%d LRDIMM %dx rank multiply\n",
+					i, 1 << ((tmp >> 4) & 0x3));
+		}
+
+		debug_display_dimm_sizes_df(pvt, i);
+	}
+
+	edac_dbg(1, "F0x104 (DRAM Hole Address): 0x%08x, base: 0x%08x\n",
+		 pvt->dhar, dhar_base(pvt));
+}
+
 /* Display and decode various NB registers for debug purposes. */
-static void dump_misc_regs(struct amd64_pvt *pvt)
+static void __dump_misc_regs(struct amd64_pvt *pvt)
 {
 	edac_dbg(1, "F3xE8 (NB Cap): 0x%08x\n", pvt->nbcap);
 
@@ -750,8 +904,6 @@ static void dump_misc_regs(struct amd64_pvt *pvt)
 		 (pvt->fam == 0xf) ? k8_dhar_offset(pvt)
 				   : f10_dhar_offset(pvt));
 
-	edac_dbg(1, "  DramHoleValid: %s\n", dhar_valid(pvt) ? "yes" : "no");
-
 	debug_display_dimm_sizes(pvt, 0);
 
 	/* everything below this point is Fam10h and above */
@@ -760,11 +912,22 @@ static void dump_misc_regs(struct amd64_pvt *pvt)
 
 	debug_display_dimm_sizes(pvt, 1);
 
-	amd64_info("using %s syndromes.\n", ((pvt->ecc_sym_sz == 8) ? "x8" : "x4"));
-
 	/* Only if NOT ganged does dclr1 have valid info */
 	if (!dct_ganging_enabled(pvt))
 		debug_dump_dramcfg_low(pvt, pvt->dclr1, 1);
+}
+
+/* Display and decode various NB registers for debug purposes. */
+static void dump_misc_regs(struct amd64_pvt *pvt)
+{
+	if (pvt->umc)
+		__dump_misc_regs_df(pvt);
+	else
+		__dump_misc_regs(pvt);
+
+	edac_dbg(1, "  DramHoleValid: %s\n", dhar_valid(pvt) ? "yes" : "no");
+
+	amd64_info("using x%u syndromes.\n", pvt->ecc_sym_sz);
 }
 
 /*
@@ -778,9 +941,68 @@ static void prep_chip_selects(struct amd64_pvt *pvt)
 	} else if (pvt->fam == 0x15 && pvt->model == 0x30) {
 		pvt->csels[0].b_cnt = pvt->csels[1].b_cnt = 4;
 		pvt->csels[0].m_cnt = pvt->csels[1].m_cnt = 2;
+	} else if (pvt->fam >= 0x17) {
+		int umc;
+
+		for_each_umc(umc) {
+			pvt->csels[umc].b_cnt = 4;
+			pvt->csels[umc].m_cnt = 2;
+		}
+
 	} else {
 		pvt->csels[0].b_cnt = pvt->csels[1].b_cnt = 8;
 		pvt->csels[0].m_cnt = pvt->csels[1].m_cnt = 4;
+	}
+}
+
+static void read_umc_base_mask(struct amd64_pvt *pvt)
+{
+	u32 umc_base_reg, umc_base_reg_sec;
+	u32 umc_mask_reg, umc_mask_reg_sec;
+	u32 base_reg, base_reg_sec;
+	u32 mask_reg, mask_reg_sec;
+	u32 *base, *base_sec;
+	u32 *mask, *mask_sec;
+	int cs, umc;
+
+	for_each_umc(umc) {
+		umc_base_reg = get_umc_base(umc) + UMCCH_BASE_ADDR;
+		umc_base_reg_sec = get_umc_base(umc) + UMCCH_BASE_ADDR_SEC;
+
+		for_each_chip_select(cs, umc, pvt) {
+			base = &pvt->csels[umc].csbases[cs];
+			base_sec = &pvt->csels[umc].csbases_sec[cs];
+
+			base_reg = umc_base_reg + (cs * 4);
+			base_reg_sec = umc_base_reg_sec + (cs * 4);
+
+			if (!amd_smn_read(pvt->mc_node_id, base_reg, base))
+				edac_dbg(0, "  DCSB%d[%d]=0x%08x reg: 0x%x\n",
+					 umc, cs, *base, base_reg);
+
+			if (!amd_smn_read(pvt->mc_node_id, base_reg_sec, base_sec))
+				edac_dbg(0, "    DCSB_SEC%d[%d]=0x%08x reg: 0x%x\n",
+					 umc, cs, *base_sec, base_reg_sec);
+		}
+
+		umc_mask_reg = get_umc_base(umc) + UMCCH_ADDR_MASK;
+		umc_mask_reg_sec = get_umc_base(umc) + UMCCH_ADDR_MASK_SEC;
+
+		for_each_chip_select_mask(cs, umc, pvt) {
+			mask = &pvt->csels[umc].csmasks[cs];
+			mask_sec = &pvt->csels[umc].csmasks_sec[cs];
+
+			mask_reg = umc_mask_reg + (cs * 4);
+			mask_reg_sec = umc_mask_reg_sec + (cs * 4);
+
+			if (!amd_smn_read(pvt->mc_node_id, mask_reg, mask))
+				edac_dbg(0, "  DCSM%d[%d]=0x%08x reg: 0x%x\n",
+					 umc, cs, *mask, mask_reg);
+
+			if (!amd_smn_read(pvt->mc_node_id, mask_reg_sec, mask_sec))
+				edac_dbg(0, "    DCSM_SEC%d[%d]=0x%08x reg: 0x%x\n",
+					 umc, cs, *mask_sec, mask_reg_sec);
+		}
 	}
 }
 
@@ -792,6 +1014,9 @@ static void read_dct_base_mask(struct amd64_pvt *pvt)
 	int cs;
 
 	prep_chip_selects(pvt);
+
+	if (pvt->umc)
+		return read_umc_base_mask(pvt);
 
 	for_each_chip_select(cs, 0, pvt) {
 		int reg0   = DCSB0 + (cs * 4);
@@ -809,7 +1034,7 @@ static void read_dct_base_mask(struct amd64_pvt *pvt)
 		if (!amd64_read_dct_pci_cfg(pvt, 1, reg0, base1))
 			edac_dbg(0, "  DCSB1[%d]=0x%08x reg: F2x%x\n",
 				 cs, *base1, (pvt->fam == 0x10) ? reg1
-								: reg0);
+							: reg0);
 	}
 
 	for_each_chip_select_mask(cs, 0, pvt) {
@@ -828,7 +1053,7 @@ static void read_dct_base_mask(struct amd64_pvt *pvt)
 		if (!amd64_read_dct_pci_cfg(pvt, 1, reg0, mask1))
 			edac_dbg(0, "    DCSM1[%d]=0x%08x reg: F2x%x\n",
 				 cs, *mask1, (pvt->fam == 0x10) ? reg1
-								: reg0);
+							: reg0);
 	}
 }
 
@@ -880,6 +1105,16 @@ static void determine_memory_type(struct amd64_pvt *pvt)
 
 	case 0x16:
 		goto ddr3;
+
+	case 0x17:
+	case 0x18:
+		if ((pvt->umc[0].dimm_cfg | pvt->umc[1].dimm_cfg) & BIT(5))
+			pvt->dram_type = MEM_LRDDR4;
+		else if ((pvt->umc[0].dimm_cfg | pvt->umc[1].dimm_cfg) & BIT(4))
+			pvt->dram_type = MEM_RDDR4;
+		else
+			pvt->dram_type = MEM_DDR4;
+		return;
 
 	default:
 		WARN(1, KERN_ERR "%s: Family??? 0x%x\n", __func__, pvt->fam);
@@ -1210,6 +1445,19 @@ static int f1x_early_channel_count(struct amd64_pvt *pvt)
 	return channels;
 }
 
+static int f17_early_channel_count(struct amd64_pvt *pvt)
+{
+	int i, channels = 0;
+
+	/* SDP Control bit 31 (SdpInit) is clear for unused UMC channels */
+	for_each_umc(i)
+		channels += !!(pvt->umc[i].sdp_ctrl & UMC_SDP_INIT);
+
+	amd64_info("MCT channel count: %d\n", channels);
+
+	return channels;
+}
+
 static int ddr3_cs_size(unsigned i, bool dct_width)
 {
 	unsigned shift = 0;
@@ -1335,6 +1583,63 @@ static int f16_dbam_to_chip_select(struct amd64_pvt *pvt, u8 dct,
 		return -1;
 	else
 		return ddr3_cs_size(cs_mode, false);
+}
+
+static int f17_addr_mask_to_cs_size(struct amd64_pvt *pvt, u8 umc,
+				    unsigned int cs_mode, int csrow_nr)
+{
+	u32 addr_mask_orig, addr_mask_deinterleaved;
+	u32 msb, weight, num_zero_bits;
+	int dimm, size = 0;
+
+	/* No Chip Selects are enabled. */
+	if (!cs_mode)
+		return size;
+
+	/* Requested size of an even CS but none are enabled. */
+	if (!(cs_mode & CS_EVEN) && !(csrow_nr & 1))
+		return size;
+
+	/* Requested size of an odd CS but none are enabled. */
+	if (!(cs_mode & CS_ODD) && (csrow_nr & 1))
+		return size;
+
+	/*
+	 * There is one mask per DIMM, and two Chip Selects per DIMM.
+	 *	CS0 and CS1 -> DIMM0
+	 *	CS2 and CS3 -> DIMM1
+	 */
+	dimm = csrow_nr >> 1;
+
+	/* Asymmetric dual-rank DIMM support. */
+	if ((csrow_nr & 1) && (cs_mode & CS_ODD_SECONDARY))
+		addr_mask_orig = pvt->csels[umc].csmasks_sec[dimm];
+	else
+		addr_mask_orig = pvt->csels[umc].csmasks[dimm];
+
+	/*
+	 * The number of zero bits in the mask is equal to the number of bits
+	 * in a full mask minus the number of bits in the current mask.
+	 *
+	 * The MSB is the number of bits in the full mask because BIT[0] is
+	 * always 0.
+	 */
+	msb = fls(addr_mask_orig) - 1;
+	weight = hweight_long(addr_mask_orig);
+	num_zero_bits = msb - weight;
+
+	/* Take the number of zero bits off from the top of the mask. */
+	addr_mask_deinterleaved = GENMASK_ULL(msb - num_zero_bits, 1);
+
+	edac_dbg(1, "CS%d DIMM%d AddrMasks:\n", csrow_nr, dimm);
+	edac_dbg(1, "  Original AddrMask: 0x%x\n", addr_mask_orig);
+	edac_dbg(1, "  Deinterleaved AddrMask: 0x%x\n", addr_mask_deinterleaved);
+
+	/* Register [31:1] = Address [39:9]. Size is in kBs here. */
+	size = (addr_mask_deinterleaved >> 2) + 1;
+
+	/* Return size in MBs. */
+	return size >> 10;
 }
 
 static void read_dram_ctl_register(struct amd64_pvt *pvt)
@@ -1897,8 +2202,9 @@ static void debug_display_dimm_sizes(struct amd64_pvt *pvt, u8 ctrl)
 
 		size0 = 0;
 		if (dcsb[dimm*2] & DCSB_CS_ENABLE)
-			/* For f15m60h, need multiplier for LRDIMM cs_size
-			 * calculation. We pass 'dimm' value to the dbam_to_cs
+			/*
+			 * For F15m60h, we need multiplier for LRDIMM cs_size
+			 * calculation. We pass dimm value to the dbam_to_cs
 			 * mapper so we can find the multiplier from the
 			 * corresponding DCSM.
 			 */
@@ -1987,6 +2293,51 @@ static struct amd64_family_type family_types[] = {
 			.early_channel_count	= f1x_early_channel_count,
 			.map_sysaddr_to_csrow	= f1x_map_sysaddr_to_csrow,
 			.dbam_to_cs		= f16_dbam_to_chip_select,
+		}
+	},
+	[F17_CPUS] = {
+		.ctl_name = "F17h",
+		.f0_id = PCI_DEVICE_ID_AMD_17H_DF_F0,
+		.f6_id = PCI_DEVICE_ID_AMD_17H_DF_F6,
+		.ops = {
+			.early_channel_count	= f17_early_channel_count,
+			.dbam_to_cs		= f17_addr_mask_to_cs_size,
+		}
+	},
+	[F17_M10H_CPUS] = {
+		.ctl_name = "F17h_M10h",
+		.f0_id = PCI_DEVICE_ID_AMD_17H_M10H_DF_F0,
+		.f6_id = PCI_DEVICE_ID_AMD_17H_M10H_DF_F6,
+		.ops = {
+			.early_channel_count	= f17_early_channel_count,
+			.dbam_to_cs		= f17_addr_mask_to_cs_size,
+		}
+	},
+	[F17_M30H_CPUS] = {
+		.ctl_name = "F17h_M30h",
+		.f0_id = PCI_DEVICE_ID_AMD_17H_M30H_DF_F0,
+		.f6_id = PCI_DEVICE_ID_AMD_17H_M30H_DF_F6,
+		.ops = {
+			.early_channel_count	= f17_early_channel_count,
+			.dbam_to_cs		= f17_addr_mask_to_cs_size,
+		}
+	},
+	[F17_M60H_CPUS] = {
+		.ctl_name = "F17h_M60h",
+		.f0_id = PCI_DEVICE_ID_AMD_17H_M60H_DF_F0,
+		.f6_id = PCI_DEVICE_ID_AMD_17H_M60H_DF_F6,
+		.ops = {
+			.early_channel_count	= f17_early_channel_count,
+			.dbam_to_cs		= f17_addr_mask_to_cs_size,
+		}
+	},
+	[F17_M70H_CPUS] = {
+		.ctl_name = "F17h_M70h",
+		.f0_id = PCI_DEVICE_ID_AMD_17H_M70H_DF_F0,
+		.f6_id = PCI_DEVICE_ID_AMD_17H_M70H_DF_F6,
+		.ops = {
+			.early_channel_count	= f17_early_channel_count,
+			.dbam_to_cs		= f17_addr_mask_to_cs_size,
 		}
 	},
 };
@@ -2155,7 +2506,7 @@ static int get_channel_from_ecc_syndrome(struct mem_ctl_info *mci, u16 syndrome)
 	return map_err_sym_to_channel(err_sym, pvt->ecc_sym_sz);
 }
 
-static void __log_bus_error(struct mem_ctl_info *mci, struct err_info *err,
+static void __log_ecc_error(struct mem_ctl_info *mci, struct err_info *err,
 			    u8 ecc_type)
 {
 	enum hw_event_mc_err_type err_type;
@@ -2165,6 +2516,8 @@ static void __log_bus_error(struct mem_ctl_info *mci, struct err_info *err,
 		err_type = HW_EVENT_ERR_CORRECTED;
 	else if (ecc_type == 1)
 		err_type = HW_EVENT_ERR_UNCORRECTED;
+	else if (ecc_type == 3)
+		err_type = HW_EVENT_ERR_DEFERRED;
 	else {
 		WARN(1, "Something is rotten in the state of Denmark.\n");
 		return;
@@ -2181,7 +2534,13 @@ static void __log_bus_error(struct mem_ctl_info *mci, struct err_info *err,
 		string = "Failed to map error addr to a csrow";
 		break;
 	case ERR_CHANNEL:
-		string = "unknown syndrome - possible error reporting race";
+		string = "Unknown syndrome - possible error reporting race";
+		break;
+	case ERR_SYND:
+		string = "MCA_SYND not valid - unknown syndrome and csrow";
+		break;
+	case ERR_NORM_ADDR:
+		string = "Cannot decode normalized address";
 		break;
 	default:
 		string = "WTF error";
@@ -2227,36 +2586,125 @@ static inline void decode_bus_error(int node_id, struct mce *m)
 
 	pvt->ops->map_sysaddr_to_csrow(mci, sys_addr, &err);
 
-	__log_bus_error(mci, &err, ecc_type);
+	__log_ecc_error(mci, &err, ecc_type);
+}
+
+/*
+ * To find the UMC channel represented by this bank we need to match on its
+ * instance_id. The instance_id of a bank is held in the lower 32 bits of its
+ * IPID.
+ *
+ * Currently, we can derive the channel number by looking at the 6th nibble in
+ * the instance_id. For example, instance_id=0xYXXXXX where Y is the channel
+ * number.
+ */
+static int find_umc_channel(struct mce *m)
+{
+	return (m->ipid & GENMASK(31, 0)) >> 20;
+}
+
+static void decode_umc_error(int node_id, struct mce *m)
+{
+	u8 ecc_type = (m->status >> 45) & 0x3;
+	struct mem_ctl_info *mci;
+	struct amd64_pvt *pvt;
+	struct err_info err;
+	u64 sys_addr;
+
+	mci = edac_mc_find(node_id);
+	if (!mci)
+		return;
+
+	pvt = mci->pvt_info;
+
+	memset(&err, 0, sizeof(err));
+
+	if (m->status & MCI_STATUS_DEFERRED)
+		ecc_type = 3;
+
+	err.channel = find_umc_channel(m);
+
+	if (!(m->status & MCI_STATUS_SYNDV)) {
+		err.err_code = ERR_SYND;
+		goto log_error;
+	}
+
+	if (ecc_type == 2) {
+		u8 length = (m->synd >> 18) & 0x3f;
+
+		if (length)
+			err.syndrome = (m->synd >> 32) & GENMASK(length - 1, 0);
+		else
+			err.err_code = ERR_CHANNEL;
+	}
+
+	err.csrow = m->synd & 0x7;
+
+	if (umc_normaddr_to_sysaddr(m->addr, pvt->mc_node_id, err.channel, &sys_addr)) {
+		err.err_code = ERR_NORM_ADDR;
+		goto log_error;
+	}
+
+	error_address_to_page_and_offset(sys_addr, &err);
+
+log_error:
+	__log_ecc_error(mci, &err, ecc_type);
 }
 
 /*
  * Use pvt->F3 which contains the F3 CPU PCI device to get the related
  * F1 (AddrMap) and F2 (Dct) devices. Return negative value on error.
+ * Reserve F0 and F6 on systems with a UMC.
  */
-static int reserve_mc_sibling_devs(struct amd64_pvt *pvt, u16 f1_id, u16 f2_id)
+static int
+reserve_mc_sibling_devs(struct amd64_pvt *pvt, u16 pci_id1, u16 pci_id2)
 {
+	if (pvt->umc) {
+		pvt->F0 = pci_get_related_function(pvt->F3->vendor, pci_id1, pvt->F3);
+		if (!pvt->F0) {
+			amd64_err("F0 not found, device 0x%x (broken BIOS?)\n", pci_id1);
+			return -ENODEV;
+		}
+
+		pvt->F6 = pci_get_related_function(pvt->F3->vendor, pci_id2, pvt->F3);
+		if (!pvt->F6) {
+			pci_dev_put(pvt->F0);
+			pvt->F0 = NULL;
+
+			amd64_err("F6 not found: device 0x%x (broken BIOS?)\n", pci_id2);
+			return -ENODEV;
+		}
+
+		if (!pci_ctl_dev)
+			pci_ctl_dev = &pvt->F0->dev;
+
+		edac_dbg(1, "F0: %s\n", pci_name(pvt->F0));
+		edac_dbg(1, "F3: %s\n", pci_name(pvt->F3));
+		edac_dbg(1, "F6: %s\n", pci_name(pvt->F6));
+
+		return 0;
+	}
+
 	/* Reserve the ADDRESS MAP Device */
-	pvt->F1 = pci_get_related_function(pvt->F3->vendor, f1_id, pvt->F3);
+	pvt->F1 = pci_get_related_function(pvt->F3->vendor, pci_id1, pvt->F3);
 	if (!pvt->F1) {
-		amd64_err("error address map device not found: "
-			  "vendor %x device 0x%x (broken BIOS?)\n",
-			  PCI_VENDOR_ID_AMD, f1_id);
+		amd64_err("F1 not found: device 0x%x (broken BIOS?)\n", pci_id1);
 		return -ENODEV;
 	}
 
 	/* Reserve the DCT Device */
-	pvt->F2 = pci_get_related_function(pvt->F3->vendor, f2_id, pvt->F3);
+	pvt->F2 = pci_get_related_function(pvt->F3->vendor, pci_id2, pvt->F3);
 	if (!pvt->F2) {
 		pci_dev_put(pvt->F1);
 		pvt->F1 = NULL;
 
-		amd64_err("error F2 device not found: "
-			  "vendor %x device 0x%x (broken BIOS?)\n",
-			  PCI_VENDOR_ID_AMD, f2_id);
-
+		amd64_err("F2 not found: device 0x%x (broken BIOS?)\n", pci_id2);
 		return -ENODEV;
 	}
+
+	if (!pci_ctl_dev)
+		pci_ctl_dev = &pvt->F2->dev;
+
 	edac_dbg(1, "F1: %s\n", pci_name(pvt->F1));
 	edac_dbg(1, "F2: %s\n", pci_name(pvt->F2));
 	edac_dbg(1, "F3: %s\n", pci_name(pvt->F3));
@@ -2266,8 +2714,69 @@ static int reserve_mc_sibling_devs(struct amd64_pvt *pvt, u16 f1_id, u16 f2_id)
 
 static void free_mc_sibling_devs(struct amd64_pvt *pvt)
 {
-	pci_dev_put(pvt->F1);
-	pci_dev_put(pvt->F2);
+	if (pvt->umc) {
+		pci_dev_put(pvt->F0);
+		pci_dev_put(pvt->F6);
+	} else {
+		pci_dev_put(pvt->F1);
+		pci_dev_put(pvt->F2);
+	}
+}
+
+static void determine_ecc_sym_sz(struct amd64_pvt *pvt)
+{
+	pvt->ecc_sym_sz = 4;
+
+	if (pvt->umc) {
+		u8 i;
+
+		for_each_umc(i) {
+			/* Check enabled channels only: */
+			if (pvt->umc[i].sdp_ctrl & UMC_SDP_INIT) {
+				if (pvt->umc[i].ecc_ctrl & BIT(9)) {
+					pvt->ecc_sym_sz = 16;
+					return;
+				} else if (pvt->umc[i].ecc_ctrl & BIT(7)) {
+					pvt->ecc_sym_sz = 8;
+					return;
+				}
+			}
+		}
+	} else if (pvt->fam >= 0x10) {
+		u32 tmp;
+
+		amd64_read_pci_cfg(pvt->F3, EXT_NB_MCA_CFG, &tmp);
+		/* F16h has only DCT0, so no need to read dbam1. */
+		if (pvt->fam != 0x16)
+			amd64_read_dct_pci_cfg(pvt, 1, DBAM0, &pvt->dbam1);
+
+		/* F10h, revD and later can do x8 ECC too. */
+		if ((pvt->fam > 0x10 || pvt->model > 7) && tmp & BIT(25))
+			pvt->ecc_sym_sz = 8;
+	}
+}
+
+/*
+ * Retrieve the hardware registers of the memory controller.
+ */
+static void __read_mc_regs_df(struct amd64_pvt *pvt)
+{
+	u8 nid = pvt->mc_node_id;
+	struct amd64_umc *umc;
+	u32 i, umc_base;
+
+	/* Read registers from each UMC */
+	for_each_umc(i) {
+
+		umc_base = get_umc_base(i);
+		umc = &pvt->umc[i];
+
+		amd_smn_read(nid, umc_base + UMCCH_DIMM_CFG, &umc->dimm_cfg);
+		amd_smn_read(nid, umc_base + UMCCH_UMC_CFG, &umc->umc_cfg);
+		amd_smn_read(nid, umc_base + UMCCH_SDP_CTRL, &umc->sdp_ctrl);
+		amd_smn_read(nid, umc_base + UMCCH_ECC_CTRL, &umc->ecc_ctrl);
+		amd_smn_read(nid, umc_base + UMCCH_UMC_CAP_HI, &umc->umc_cap_hi);
+	}
 }
 
 /*
@@ -2276,24 +2785,31 @@ static void free_mc_sibling_devs(struct amd64_pvt *pvt)
  */
 static void read_mc_regs(struct amd64_pvt *pvt)
 {
-	unsigned range;
+	unsigned int range;
 	u64 msr_val;
-	u32 tmp;
 
 	/*
 	 * Retrieve TOP_MEM and TOP_MEM2; no masking off of reserved bits since
-	 * those are Read-As-Zero
+	 * those are Read-As-Zero.
 	 */
 	rdmsrl(MSR_K8_TOP_MEM1, pvt->top_mem);
 	edac_dbg(0, "  TOP_MEM:  0x%016llx\n", pvt->top_mem);
 
-	/* check first whether TOP_MEM2 is enabled */
+	/* Check first whether TOP_MEM2 is enabled: */
 	rdmsrl(MSR_K8_SYSCFG, msr_val);
-	if (msr_val & (1U << 21)) {
+	if (msr_val & BIT(21)) {
 		rdmsrl(MSR_K8_TOP_MEM2, pvt->top_mem2);
 		edac_dbg(0, "  TOP_MEM2: 0x%016llx\n", pvt->top_mem2);
-	} else
+	} else {
 		edac_dbg(0, "  TOP_MEM2 disabled\n");
+	}
+
+	if (pvt->umc) {
+		__read_mc_regs_df(pvt);
+		amd64_read_pci_cfg(pvt->F0, DF_DHAR, &pvt->dhar);
+
+		goto skip;
+	}
 
 	amd64_read_pci_cfg(pvt->F3, NBCAP, &pvt->nbcap);
 
@@ -2322,8 +2838,6 @@ static void read_mc_regs(struct amd64_pvt *pvt)
 			 dram_dst_node(pvt, range));
 	}
 
-	read_dct_base_mask(pvt);
-
 	amd64_read_pci_cfg(pvt->F1, DHAR, &pvt->dhar);
 	amd64_read_dct_pci_cfg(pvt, 0, DBAM0, &pvt->dbam0);
 
@@ -2337,20 +2851,14 @@ static void read_mc_regs(struct amd64_pvt *pvt)
 		amd64_read_dct_pci_cfg(pvt, 1, DCHR0, &pvt->dchr1);
 	}
 
-	pvt->ecc_sym_sz = 4;
+skip:
+	read_dct_base_mask(pvt);
+
 	determine_memory_type(pvt);
 	edac_dbg(1, "  DIMM type: %s\n", edac_mem_types[pvt->dram_type]);
 
-	if (pvt->fam >= 0x10) {
-		amd64_read_pci_cfg(pvt->F3, EXT_NB_MCA_CFG, &tmp);
-		/* F16h has only DCT0, so no need to read dbam1 */
-		if (pvt->fam != 0x16)
-			amd64_read_dct_pci_cfg(pvt, 1, DBAM0, &pvt->dbam1);
+	determine_ecc_sym_sz(pvt);
 
-		/* F10h, revD and later can do x8 ECC too */
-		if ((pvt->fam > 0x10 || pvt->model > 7) && tmp & BIT(25))
-			pvt->ecc_sym_sz = 8;
-	}
 	dump_misc_regs(pvt);
 }
 
@@ -2388,29 +2896,71 @@ static void read_mc_regs(struct amd64_pvt *pvt)
  *	encompasses
  *
  */
-static u32 get_csrow_nr_pages(struct amd64_pvt *pvt, u8 dct, int csrow_nr)
+static u32 get_csrow_nr_pages(struct amd64_pvt *pvt, u8 dct, int csrow_nr_orig)
 {
-	u32 cs_mode, nr_pages;
 	u32 dbam = dct ? pvt->dbam1 : pvt->dbam0;
+	int csrow_nr = csrow_nr_orig;
+	u32 cs_mode, nr_pages;
 
+	if (!pvt->umc) {
+		csrow_nr >>= 1;
+		cs_mode = DBAM_DIMM(csrow_nr, dbam);
+	} else {
+		cs_mode = f17_get_cs_mode(csrow_nr >> 1, dct, pvt);
+	}
 
-	/*
-	 * The math on this doesn't look right on the surface because x/2*4 can
-	 * be simplified to x*2 but this expression makes use of the fact that
-	 * it is integral math where 1/2=0. This intermediate value becomes the
-	 * number of bits to shift the DBAM register to extract the proper CSROW
-	 * field.
-	 */
-	cs_mode = DBAM_DIMM(csrow_nr / 2, dbam);
-
-	nr_pages = pvt->ops->dbam_to_cs(pvt, dct, cs_mode, (csrow_nr / 2))
-							   << (20 - PAGE_SHIFT);
+	nr_pages   = pvt->ops->dbam_to_cs(pvt, dct, cs_mode, csrow_nr);
+	nr_pages <<= 20 - PAGE_SHIFT;
 
 	edac_dbg(0, "csrow: %d, channel: %d, DBAM idx: %d\n",
-		    csrow_nr, dct,  cs_mode);
+		    csrow_nr_orig, dct,  cs_mode);
 	edac_dbg(0, "nr_pages/channel: %u\n", nr_pages);
 
 	return nr_pages;
+}
+
+static int init_csrows_df(struct mem_ctl_info *mci)
+{
+	struct amd64_pvt *pvt = mci->pvt_info;
+	enum edac_type edac_mode = EDAC_NONE;
+	enum dev_type dev_type = DEV_UNKNOWN;
+	struct dimm_info *dimm;
+	int empty = 1;
+	u8 umc, cs;
+
+	if (mci->edac_ctl_cap & EDAC_FLAG_S16ECD16ED) {
+		edac_mode = EDAC_S16ECD16ED;
+		dev_type = DEV_X16;
+	} else if (mci->edac_ctl_cap & EDAC_FLAG_S8ECD8ED) {
+		edac_mode = EDAC_S8ECD8ED;
+		dev_type = DEV_X8;
+	} else if (mci->edac_ctl_cap & EDAC_FLAG_S4ECD4ED) {
+		edac_mode = EDAC_S4ECD4ED;
+		dev_type = DEV_X4;
+	} else if (mci->edac_ctl_cap & EDAC_FLAG_SECDED) {
+		edac_mode = EDAC_SECDED;
+	}
+
+	for_each_umc(umc) {
+		for_each_chip_select(cs, umc, pvt) {
+			if (!csrow_enabled(cs, umc, pvt))
+				continue;
+
+			empty = 0;
+			dimm = mci->csrows[cs]->channels[umc]->dimm;
+
+			edac_dbg(1, "MC node: %d, csrow: %d\n",
+					pvt->mc_node_id, cs);
+
+			dimm->nr_pages = get_csrow_nr_pages(pvt, umc, cs);
+			dimm->mtype = pvt->dram_type;
+			dimm->edac_mode = edac_mode;
+			dimm->dtype = dev_type;
+			dimm->grain = 64;
+		}
+	}
+
+	return empty;
 }
 
 /*
@@ -2420,12 +2970,15 @@ static u32 get_csrow_nr_pages(struct amd64_pvt *pvt, u8 dct, int csrow_nr)
 static int init_csrows(struct mem_ctl_info *mci)
 {
 	struct amd64_pvt *pvt = mci->pvt_info;
+	enum edac_type edac_mode = EDAC_NONE;
 	struct csrow_info *csrow;
 	struct dimm_info *dimm;
-	enum edac_type edac_mode;
 	int i, j, empty = 1;
 	int nr_pages = 0;
 	u32 val;
+
+	if (pvt->umc)
+		return init_csrows_df(mci);
 
 	amd64_read_pci_cfg(pvt->F3, NBCFG, &val);
 
@@ -2469,19 +3022,18 @@ static int init_csrows(struct mem_ctl_info *mci)
 
 		edac_dbg(1, "Total csrow%d pages: %u\n", i, nr_pages);
 
-		/*
-		 * determine whether CHIPKILL or JUST ECC or NO ECC is operating
-		 */
-		if (pvt->nbcfg & NBCFG_ECC_ENABLE)
-			edac_mode = (pvt->nbcfg & NBCFG_CHIPKILL) ?
-				    EDAC_S4ECD4ED : EDAC_SECDED;
-		else
-			edac_mode = EDAC_NONE;
+		/* Determine DIMM ECC mode: */
+		if (pvt->nbcfg & NBCFG_ECC_ENABLE) {
+			edac_mode = (pvt->nbcfg & NBCFG_CHIPKILL)
+					? EDAC_S4ECD4ED
+					: EDAC_SECDED;
+		}
 
 		for (j = 0; j < pvt->channel_count; j++) {
 			dimm = csrow->channels[j]->dimm;
 			dimm->mtype = pvt->dram_type;
 			dimm->edac_mode = edac_mode;
+			dimm->grain = 64;
 		}
 	}
 
@@ -2539,7 +3091,7 @@ static int toggle_ecc_err_reporting(struct ecc_settings *s, u16 nid, bool on)
 
 	if (!zalloc_cpumask_var(&cmask, GFP_KERNEL)) {
 		amd64_warn("%s: error allocating mask\n", __func__);
-		return false;
+		return -ENOMEM;
 	}
 
 	get_cpus_on_this_dct_cpumask(cmask, nid);
@@ -2627,7 +3179,6 @@ static void restore_ecc_error_reporting(struct ecc_settings *s, u16 nid,
 {
 	u32 value, mask = 0x3;		/* UECC/CECC enable */
 
-
 	if (!s->nbctl_valid)
 		return;
 
@@ -2663,26 +3214,90 @@ static const char *ecc_msg =
 
 static bool ecc_enabled(struct pci_dev *F3, u16 nid)
 {
-	u32 value;
-	u8 ecc_en = 0;
 	bool nb_mce_en = false;
+	u8 ecc_en = 0, i;
+	u32 value;
 
-	amd64_read_pci_cfg(F3, NBCFG, &value);
+	if (boot_cpu_data.x86 >= 0x17) {
+		u8 umc_en_mask = 0, ecc_en_mask = 0;
 
-	ecc_en = !!(value & NBCFG_ECC_ENABLE);
-	amd64_info("DRAM ECC %s.\n", (ecc_en ? "enabled" : "disabled"));
+		for_each_umc(i) {
+			u32 base = get_umc_base(i);
 
-	nb_mce_en = nb_mce_bank_enabled_on_node(nid);
-	if (!nb_mce_en)
-		amd64_notice("NB MCE bank disabled, set MSR "
-			     "0x%08x[4] on node %d to enable.\n",
-			     MSR_IA32_MCG_CTL, nid);
+			/* Only check enabled UMCs. */
+			if (amd_smn_read(nid, base + UMCCH_SDP_CTRL, &value))
+				continue;
+
+			if (!(value & UMC_SDP_INIT))
+				continue;
+
+			umc_en_mask |= BIT(i);
+
+			if (amd_smn_read(nid, base + UMCCH_UMC_CAP_HI, &value))
+				continue;
+
+			if (value & UMC_ECC_ENABLED)
+				ecc_en_mask |= BIT(i);
+		}
+
+		/* Check whether at least one UMC is enabled: */
+		if (umc_en_mask)
+			ecc_en = umc_en_mask == ecc_en_mask;
+		else
+			edac_dbg(0, "Node %d: No enabled UMCs.\n", nid);
+
+		/* Assume UMC MCA banks are enabled. */
+		nb_mce_en = true;
+	} else {
+		amd64_read_pci_cfg(F3, NBCFG, &value);
+
+		ecc_en = !!(value & NBCFG_ECC_ENABLE);
+
+		nb_mce_en = nb_mce_bank_enabled_on_node(nid);
+		if (!nb_mce_en)
+			edac_dbg(0, "NB MCE bank disabled, set MSR 0x%08x[4] on node %d to enable.\n",
+				     MSR_IA32_MCG_CTL, nid);
+	}
+
+	amd64_info("Node %d: DRAM ECC %s.\n",
+		   nid, (ecc_en ? "enabled" : "disabled"));
 
 	if (!ecc_en || !nb_mce_en) {
-		amd64_notice("%s", ecc_msg);
+		amd64_info("%s", ecc_msg);
 		return false;
 	}
 	return true;
+}
+
+static inline void
+f17h_determine_edac_ctl_cap(struct mem_ctl_info *mci, struct amd64_pvt *pvt)
+{
+	u8 i, ecc_en = 1, cpk_en = 1, dev_x4 = 1, dev_x16 = 1;
+
+	for_each_umc(i) {
+		if (pvt->umc[i].sdp_ctrl & UMC_SDP_INIT) {
+			ecc_en &= !!(pvt->umc[i].umc_cap_hi & UMC_ECC_ENABLED);
+			cpk_en &= !!(pvt->umc[i].umc_cap_hi & UMC_ECC_CHIPKILL_CAP);
+
+			dev_x4  &= !!(pvt->umc[i].dimm_cfg & BIT(6));
+			dev_x16 &= !!(pvt->umc[i].dimm_cfg & BIT(7));
+		}
+	}
+
+	/* Set chipkill only if ECC is enabled: */
+	if (ecc_en) {
+		mci->edac_ctl_cap |= EDAC_FLAG_SECDED;
+
+		if (!cpk_en)
+			return;
+
+		if (dev_x4)
+			mci->edac_ctl_cap |= EDAC_FLAG_S4ECD4ED;
+		else if (dev_x16)
+			mci->edac_ctl_cap |= EDAC_FLAG_S16ECD16ED;
+		else
+			mci->edac_ctl_cap |= EDAC_FLAG_S8ECD8ED;
+	}
 }
 
 static void setup_mci_misc_attrs(struct mem_ctl_info *mci,
@@ -2693,17 +3308,20 @@ static void setup_mci_misc_attrs(struct mem_ctl_info *mci,
 	mci->mtype_cap		= MEM_FLAG_DDR2 | MEM_FLAG_RDDR2;
 	mci->edac_ctl_cap	= EDAC_FLAG_NONE;
 
-	if (pvt->nbcap & NBCAP_SECDED)
-		mci->edac_ctl_cap |= EDAC_FLAG_SECDED;
+	if (pvt->umc) {
+		f17h_determine_edac_ctl_cap(mci, pvt);
+	} else {
+		if (pvt->nbcap & NBCAP_SECDED)
+			mci->edac_ctl_cap |= EDAC_FLAG_SECDED;
 
-	if (pvt->nbcap & NBCAP_CHIPKILL)
-		mci->edac_ctl_cap |= EDAC_FLAG_S4ECD4ED;
+		if (pvt->nbcap & NBCAP_CHIPKILL)
+			mci->edac_ctl_cap |= EDAC_FLAG_S4ECD4ED;
+	}
 
 	mci->edac_cap		= determine_edac_cap(pvt);
 	mci->mod_name		= EDAC_MOD_STR;
-	mci->mod_ver		= EDAC_AMD64_VERSION;
 	mci->ctl_name		= fam->ctl_name;
-	mci->dev_name		= pci_name(pvt->F2);
+	mci->dev_name		= pci_name(pvt->F3);
 	mci->ctl_page_to_phys	= NULL;
 
 	/* memory scrubber interface */
@@ -2759,6 +3377,33 @@ static struct amd64_family_type *per_family_init(struct amd64_pvt *pvt)
 		pvt->ops	= &family_types[F16_CPUS].ops;
 		break;
 
+	case 0x17:
+		if (pvt->model >= 0x10 && pvt->model <= 0x2f) {
+			fam_type = &family_types[F17_M10H_CPUS];
+			pvt->ops = &family_types[F17_M10H_CPUS].ops;
+			break;
+		} else if (pvt->model >= 0x30 && pvt->model <= 0x3f) {
+			fam_type = &family_types[F17_M30H_CPUS];
+			pvt->ops = &family_types[F17_M30H_CPUS].ops;
+			break;
+		} else if (pvt->model >= 0x60 && pvt->model <= 0x6f) {
+			fam_type = &family_types[F17_M60H_CPUS];
+			pvt->ops = &family_types[F17_M60H_CPUS].ops;
+			break;
+		} else if (pvt->model >= 0x70 && pvt->model <= 0x7f) {
+			fam_type = &family_types[F17_M70H_CPUS];
+			pvt->ops = &family_types[F17_M70H_CPUS].ops;
+			break;
+		}
+		/* fall through */
+	case 0x18:
+		fam_type	= &family_types[F17_CPUS];
+		pvt->ops	= &family_types[F17_CPUS].ops;
+
+		if (pvt->fam == 0x18)
+			family_types[F17_CPUS].ctl_name = "F18h";
+		break;
+
 	default:
 		amd64_err("Unsupported family!\n");
 		return NULL;
@@ -2782,6 +3427,22 @@ static const struct attribute_group *amd64_edac_attr_groups[] = {
 	NULL
 };
 
+/* Set the number of Unified Memory Controllers in the system. */
+static void compute_num_umcs(void)
+{
+	u8 model = boot_cpu_data.x86_model;
+
+	if (boot_cpu_data.x86 < 0x17)
+		return;
+
+	if (model >= 0x30 && model <= 0x3f)
+		num_umcs = 8;
+	else
+		num_umcs = 2;
+
+	edac_dbg(1, "Number of UMCs: %x", num_umcs);
+}
+
 static int init_one_instance(unsigned int nid)
 {
 	struct pci_dev *F3 = node_to_amd_nb(nid)->misc;
@@ -2789,6 +3450,7 @@ static int init_one_instance(unsigned int nid)
 	struct mem_ctl_info *mci = NULL;
 	struct edac_mc_layer layers[2];
 	struct amd64_pvt *pvt = NULL;
+	u16 pci_id1, pci_id2;
 	int err = 0, ret;
 
 	ret = -ENOMEM;
@@ -2804,10 +3466,23 @@ static int init_one_instance(unsigned int nid)
 	if (!fam_type)
 		goto err_free;
 
-	ret = -ENODEV;
-	err = reserve_mc_sibling_devs(pvt, fam_type->f1_id, fam_type->f2_id);
+	if (pvt->fam >= 0x17) {
+		pvt->umc = kcalloc(num_umcs, sizeof(struct amd64_umc), GFP_KERNEL);
+		if (!pvt->umc) {
+			ret = -ENOMEM;
+			goto err_free;
+		}
+
+		pci_id1 = fam_type->f0_id;
+		pci_id2 = fam_type->f6_id;
+	} else {
+		pci_id1 = fam_type->f1_id;
+		pci_id2 = fam_type->f2_id;
+	}
+
+	err = reserve_mc_sibling_devs(pvt, pci_id1, pci_id2);
 	if (err)
-		goto err_free;
+		goto err_post_init;
 
 	read_mc_regs(pvt);
 
@@ -2831,8 +3506,14 @@ static int init_one_instance(unsigned int nid)
 	 * Always allocate two channels since we can have setups with DIMMs on
 	 * only one channel. Also, this simplifies handling later for the price
 	 * of a couple of KBs tops.
+	 *
+	 * On Fam17h+, the number of controllers may be greater than two. So set
+	 * the size equal to the maximum number of UMCs.
 	 */
-	layers[1].size = 2;
+	if (pvt->fam >= 0x17)
+		layers[1].size = num_umcs;
+	else
+		layers[1].size = 2;
 	layers[1].is_virt_csrow = false;
 
 	mci = edac_mc_alloc(nid, ARRAY_SIZE(layers), layers, 0);
@@ -2853,12 +3534,6 @@ static int init_one_instance(unsigned int nid)
 		goto err_add_mc;
 	}
 
-	/* register stuff with EDAC MCE */
-	if (report_gart_errors)
-		amd_report_gart_errors(true);
-
-	amd_register_ecc_decoder(decode_bus_error);
-
 	return 0;
 
 err_add_mc:
@@ -2866,6 +3541,10 @@ err_add_mc:
 
 err_siblings:
 	free_mc_sibling_devs(pvt);
+
+err_post_init:
+	if (pvt->fam >= 0x17)
+		kfree(pvt->umc);
 
 err_free:
 	kfree(pvt);
@@ -2888,12 +3567,16 @@ static int probe_one_instance(unsigned int nid)
 	ecc_stngs[nid] = s;
 
 	if (!ecc_enabled(F3, nid)) {
-		ret = -ENODEV;
+		ret = 0;
 
 		if (!ecc_enable_override)
 			goto err_enable;
 
-		amd64_warn("Forcing ECC on!\n");
+		if (boot_cpu_data.x86 >= 0x17) {
+			amd64_warn("Forcing ECC on is not recommended on newer systems. Please enable ECC in BIOS.");
+			goto err_enable;
+		} else
+			amd64_warn("Forcing ECC on!\n");
 
 		if (!enable_ecc_error_reporting(s, nid, F3))
 			goto err_enable;
@@ -2902,7 +3585,11 @@ static int probe_one_instance(unsigned int nid)
 	ret = init_one_instance(nid);
 	if (ret < 0) {
 		amd64_err("Error probing instance: %d\n", nid);
-		restore_ecc_error_reporting(s, nid, F3);
+
+		if (boot_cpu_data.x86 < 0x17)
+			restore_ecc_error_reporting(s, nid, F3);
+
+		goto err_enable;
 	}
 
 	return ret;
@@ -2936,10 +3623,6 @@ static void remove_one_instance(unsigned int nid)
 
 	free_mc_sibling_devs(pvt);
 
-	/* unregister from EDAC MCE */
-	amd_report_gart_errors(false);
-	amd_unregister_ecc_decoder(decode_bus_error);
-
 	kfree(ecc_stngs[nid]);
 	ecc_stngs[nid] = NULL;
 
@@ -2952,18 +3635,10 @@ static void remove_one_instance(unsigned int nid)
 
 static void setup_pci_device(void)
 {
-	struct mem_ctl_info *mci;
-	struct amd64_pvt *pvt;
-
 	if (pci_ctl)
 		return;
 
-	mci = edac_mc_find(0);
-	if (!mci)
-		return;
-
-	pvt = mci->pvt_info;
-	pci_ctl = edac_pci_create_generic_ctl(&pvt->F2->dev, EDAC_MOD_STR);
+	pci_ctl = edac_pci_create_generic_ctl(pci_ctl_dev, EDAC_MOD_STR);
 	if (!pci_ctl) {
 		pr_warn("%s(): Unable to create PCI control\n", __func__);
 		pr_warn("%s(): PCI error report via EDAC not set\n", __func__);
@@ -2975,14 +3650,21 @@ static const struct x86_cpu_id amd64_cpuids[] = {
 	{ X86_VENDOR_AMD, 0x10, X86_MODEL_ANY,	X86_FEATURE_ANY, 0 },
 	{ X86_VENDOR_AMD, 0x15, X86_MODEL_ANY,	X86_FEATURE_ANY, 0 },
 	{ X86_VENDOR_AMD, 0x16, X86_MODEL_ANY,	X86_FEATURE_ANY, 0 },
+	{ X86_VENDOR_AMD, 0x17, X86_MODEL_ANY,	X86_FEATURE_ANY, 0 },
+	{ X86_VENDOR_HYGON, 0x18, X86_MODEL_ANY, X86_FEATURE_ANY, 0 },
 	{ }
 };
 MODULE_DEVICE_TABLE(x86cpu, amd64_cpuids);
 
 static int __init amd64_edac_init(void)
 {
+	const char *owner;
 	int err = -ENODEV;
 	int i;
+
+	owner = edac_get_owner();
+	if (owner && strncmp(owner, EDAC_MOD_STR, sizeof(EDAC_MOD_STR)))
+		return -EBUSY;
 
 	if (!x86_match_cpu(amd64_cpuids))
 		return -ENODEV;
@@ -2993,13 +3675,15 @@ static int __init amd64_edac_init(void)
 	opstate_init();
 
 	err = -ENOMEM;
-	ecc_stngs = kzalloc(amd_nb_num() * sizeof(ecc_stngs[0]), GFP_KERNEL);
+	ecc_stngs = kcalloc(amd_nb_num(), sizeof(ecc_stngs[0]), GFP_KERNEL);
 	if (!ecc_stngs)
 		goto err_free;
 
 	msrs = msrs_alloc();
 	if (!msrs)
 		goto err_free;
+
+	compute_num_umcs();
 
 	for (i = 0; i < amd_nb_num(); i++) {
 		err = probe_one_instance(i);
@@ -3012,6 +3696,20 @@ static int __init amd64_edac_init(void)
 		}
 	}
 
+	if (!edac_has_mcs()) {
+		err = -ENODEV;
+		goto err_pci;
+	}
+
+	/* register stuff with EDAC MCE */
+	if (report_gart_errors)
+		amd_report_gart_errors(true);
+
+	if (boot_cpu_data.x86 >= 0x17)
+		amd_register_ecc_decoder(decode_umc_error);
+	else
+		amd_register_ecc_decoder(decode_bus_error);
+
 	setup_pci_device();
 
 #ifdef CONFIG_X86_32
@@ -3023,6 +3721,8 @@ static int __init amd64_edac_init(void)
 	return 0;
 
 err_pci:
+	pci_ctl_dev = NULL;
+
 	msrs_free(msrs);
 	msrs = NULL;
 
@@ -3040,11 +3740,21 @@ static void __exit amd64_edac_exit(void)
 	if (pci_ctl)
 		edac_pci_release_generic_ctl(pci_ctl);
 
+	/* unregister from EDAC MCE */
+	amd_report_gart_errors(false);
+
+	if (boot_cpu_data.x86 >= 0x17)
+		amd_unregister_ecc_decoder(decode_umc_error);
+	else
+		amd_unregister_ecc_decoder(decode_bus_error);
+
 	for (i = 0; i < amd_nb_num(); i++)
 		remove_one_instance(i);
 
 	kfree(ecc_stngs);
 	ecc_stngs = NULL;
+
+	pci_ctl_dev = NULL;
 
 	msrs_free(msrs);
 	msrs = NULL;

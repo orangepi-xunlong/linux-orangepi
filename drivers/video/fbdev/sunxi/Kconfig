@@ -18,15 +18,85 @@ config DISP2_SUNXI
 	tristate "DISP Driver Support(sunxi-disp2)"
 	depends on (ARCH_SUNXI)
 	default n
+	select DMA_SHARED_BUFFER
 	---help---
 	  Display driver for sunxi based boards.
 
-menuconfig HDMI_DISP2_SUNXI
+config SUNXI_DISP2_PQ
+	bool "Support PQ driver"
+	depends on (DISP2_SUNXI)
+	default y
+	---help---
+		If you want to support PQ driver, select it.
+choice
+    prompt "DISP2 Framebuffer rotation support"
+	default SUNXI_DISP2_FB_DISABLE_ROTATE
+
+config SUNXI_DISP2_FB_DISABLE_ROTATE
+	bool "Disable rotation"
+	depends on (DISP2_SUNXI)
+	---help---
+	  Do not use framebuffer rotation
+
+config SUNXI_DISP2_FB_ROTATION_SUPPORT
+	bool "Software rotation support"
+	depends on (DISP2_SUNXI)
+	---help---
+	  Framebuffer software rotation on the top of disp2.
+
+config SUNXI_DISP2_FB_HW_ROTATION_SUPPORT
+	bool "Hardware(G2D) rotation support"
+	depends on (DISP2_SUNXI && SUNXI_G2D)
+	---help---
+	  Framebuffer hardware(G2D) rotation on the top of disp2.
+
+endchoice
+
+config SUNXI_DISP2_FB_DECOMPRESS_LZMA
+	bool "Framebuffer show bootlogo from lzma file"
+	depends on (DISP2_SUNXI)
+	default n
+	select DECOMPRESS_LZMA
+	---help---
+	  Show bootlogo from lzma file.
+
+config HDMI_DISP2_SUNXI
 	tristate "HDMI Driver Support(sunxi-disp2)"
 	depends on (DISP2_SUNXI)
 	default n
 	---help---
 	  Hdmi driver for sunxi based boards.
+
+menuconfig HDMI2_DISP2_SUNXI
+  tristate "HDMI2.0 Driver Support(sunxi-disp2)"
+  depends on (DISP2_SUNXI)
+  default n
+  ---help---
+  Say Y here if you want to have support for HDMI2.0 controller
+  on the sunxi based boards. The HDMI2.0 controller include edid,
+  hdcp1.4,hdcp2.2,cec feature and is compatible with hdmi1.4,support
+  HDR,4k@60Hz. If unsure, say N.
+
+choice
+	prompt "HDMI2.0 PHY SELECT."
+config AW_PHY
+	bool "Allwinner PHY"
+	depends on HDMI2_DISP2_SUNXI
+	help
+	Use sunxi self phy to show
+config DEFAULT_PHY
+	bool "Synopsys PHY"
+	depends on HDMI2_DISP2_SUNXI
+	help
+	Use original phy to show
+endchoice
+
+config HDMI_EP952_DISP2_SUNXI
+	tristate "HDMI EP952 Driver Support(sunxi-disp2)"
+	depends on (DISP2_SUNXI)
+	default n
+	---help---
+	  Hdmi ep952 driver for sunxi based boards.
 
 menuconfig HDMI2_HDCP_SUNXI
   bool "HDMI2.0 HDCP"
@@ -45,7 +115,6 @@ config HDMI2_HDCP22_SUNXI
   Say Y here if you want to handle the cec message by User Space.
   Say N here if you want to handle the cec message by Kernel.
   If unsure, say N.
-
 
 menuconfig HDMI2_CEC_SUNXI
   bool "HDMI2.0 CEC"
@@ -74,16 +143,6 @@ config HDMI2_FREQ_SPREAD_SPECTRUM
   Say N here if you do NOT want to new frequency spread spectrum of sunxi.
   If unsure, say N
 
-config HDMI2_DISP2_SUNXI
-  tristate "HDMI2.0 Driver Support(sunxi-disp2)"
-  depends on (DISP2_SUNXI)
-  default n
-  ---help---
-  Say Y here if you want to have support for HDMI2.0 controller
-  on the sunxi based boards. The HDMI2.0 controller include edid,
-  hdcp1.4,hdcp2.2,cec feature and is compatible with hdmi1.4,support
-  HDR,4k@60Hz. If unsure, say N.
-
 config TV_DISP2_SUNXI
 	 tristate "TV Driver Support(sunxi-disp2)"
 	 depends on (DISP2_SUNXI)
@@ -101,6 +160,7 @@ config DISP2_TV_GM7121
  	depends on (DISP2_SUNXI && TV_DISP2_SUNXI)
 	default n
 	---help---
+	  TV GM7121 support for Allwinner platforms.
 
 config EDP_DISP2_SUNXI
 	tristate "EDP Driver Support(sunxi-disp2)"
@@ -118,18 +178,29 @@ config DISP2_TV_AC200
 	depends on (DISP2_SUNXI && MFD_ACX00)
 	default n
 	---help---
+	  TV AC200 support for Allwinner platforms.
 
 config EINK_PANEL_USED
 	bool "Eink panel used"
 	depends on (DISP2_SUNXI && (ARCH_SUN8IW10 || ARCH_SUN8IW15))
 	default n
 	---help---
+	  EINK panel support for Allwinner platforms.
 
 config EINK200_SUNXI
-	bool "Eink Driver Version 2.0 Support"
+	tristate "Eink Driver Version 2.0 Support"
 	depends on (DISP2_SUNXI && ARCH_SUN50IW10)
 	default n
+    select FB_DEFERRED_IO
+	select BACKLIGHT_CLASS_DEVICE
 	---help---
+	  EINK200 support for Allwinner platforms.
+
+config EINK_REGAL_PROCESS
+	bool "Eink regal process"
+	default n
+    ---help---
+    eink regal process
 
 config DISP2_SUNXI_BOOT_COLORBAR
 	bool "boot colorbar Support for disp driver(sunxi-disp2)"
@@ -150,6 +221,7 @@ config DISP2_SUNXI_DEBUG
 config DISP2_SUNXI_COMPOSER
 	bool "composer support for disp driver(sunxi-disp2)"
 	depends on DISP2_SUNXI
+	select SYNC_FILE
 	default n
 	---help---
 	  This enable composer support for display driver. The composer
@@ -161,4 +233,40 @@ config DISP2_LCD_ESD_DETECT
 	---help---
 	  This enable lcd  esd detect and panel reset for display driver. User must
 	  define panel_reset and esd_check function.
+
+config LCD_FB
+	tristate "Framebuffer implementaion without display hardware of AW"
+	depends on (ARCH_SUNXI)
+	select FB_CFB_FILLRECT
+	select FB_CFB_COPYAREA
+	select FB_CFB_IMAGEBLIT
+	default n
+	---help---
+	  Framebuffer implementaion for LCD panel without DE and tcon
+
+config LCD_FB_ENABLE_DEFERRED_IO
+	bool "Enable LCD_FB FB_DEFERRED_IO"
+	select FB_DEFERRED_IO
+	default n
+	---help---
+	  Enable linux framebuffer FB_DEFERRED_IO for LCD_FB
+
+menu "LCD panels select"
+	depends on DISP2_SUNXI
+
+source "drivers/video/fbdev/sunxi/disp2/disp/lcd/Kconfig"
+endmenu
+
+menu "LCD fb panels select"
+	depends on LCD_FB
+
+source "drivers/video/fbdev/sunxi/lcd_fb/panels/Kconfig"
+endmenu
+
+menu "Display engine feature select"
+	depends on DISP2_SUNXI
+
+source "drivers/video/fbdev/sunxi/disp2/disp/Kconfig"
+endmenu
+
 endmenu

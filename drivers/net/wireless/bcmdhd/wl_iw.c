@@ -285,7 +285,7 @@ dev_wlc_ioctl(
 	ifr.ifr_data = (caddr_t) &ioc;
 
 	fs = get_fs();
-	set_fs(get_ds());
+	set_fs(KERNEL_DS);
 #if defined(WL_USE_NETDEV_OPS)
 	ret = dev->netdev_ops->ndo_do_ioctl(dev, &ifr, SIOCDEVPRIVATE);
 #else
@@ -746,7 +746,7 @@ wl_iw_get_freq(
 	WL_TRACE(("%s: SIOCGIWFREQ\n", dev->name));
 
 	error = dev_wlc_intvar_get(dev, "chanspec", &chanspec);
-	if (error) {
+	if (error)
 		return error;
 	ctl_chan = wf_chspec_ctlchan(chanspec);
 

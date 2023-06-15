@@ -11517,12 +11517,17 @@ static s32 wl_inform_single_bss(struct bcm_cfg80211 *cfg, struct wl_bss_info *bi
 	if (!mgmt->u.probe_resp.timestamp) {
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 39))
 		struct timespec ts;
-		get_monotonic_boottime(&ts);
+		ts = ktime_to_timespec(ktime_get_boottime());
 		mgmt->u.probe_resp.timestamp = ((u64)ts.tv_sec*1000000)
 				+ ts.tv_nsec / 1000;
 #else
 		struct timeval tv;
-		do_gettimeofday(&tv);
+		struct timespec ts;
+
+		getnstimeofday(&ts);
+		tv->tv_sec = ts.tv_sec;
+		tv->tv_usec = ts.tv_nsec/1000;
+
 		mgmt->u.probe_resp.timestamp = ((u64)tv.tv_sec*1000000)
 				+ tv.tv_usec;
 #endif
@@ -20974,7 +20979,7 @@ wl_cfg80211_tdls_config(struct bcm_cfg80211 *cfg, enum wl_tdls_config state, boo
 	/* Protect tdls config session */
 	mutex_lock(&cfg->tdls_sync);
 
-	if ((state == TDLS_STATE_TEARDOWN)) {
+	if (state == TDLS_STATE_TEARDOWN) {
 		/* Host initiated TDLS tear down */
 		err = dhd_tdls_enable(ndev, false, auto_mode, NULL);
 		goto exit;

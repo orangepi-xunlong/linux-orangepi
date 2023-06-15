@@ -3,7 +3,8 @@
 #define _NCFB8_C_
 
 #include "../../nfd/nand_osal_for_linux.h"
-#include "../nand_boot.h"
+/*#include "../nand_boot.h"*/
+#include "../nand-partition3/sunxi_nand_boot.h"
 #include "../nand_physic_interface.h"
 #include "rawnand_chip.h"
 #include "controller/ndfc_ops.h"
@@ -17,7 +18,7 @@
 #include "rawnand_boot.h"
 /*#include <linux/sunxi-boot.h>*/
 
-int small_nand_seed; //small nand random seed flag
+/*int small_nand_seed; //small nand random seed flag*/
 static __u32 SECURE_FLAG;
 
 
@@ -470,7 +471,8 @@ int generic_write_boot0_one_1k_mode(unsigned char *buf, unsigned int len, unsign
 			lnpo.page = j;
 			lnpo.sdata = oob_buf;
 			lnpo.slen = 64;
-			small_nand_seed = count; //zzm 20180301
+			nci->nctri->random_factor = count;
+			nci->nctri->random_factor |= SMALL_CAPACITY_NAND;
 
 			lnpo.mdata = (__u8 *)(buf + 1024 * count);
 
@@ -484,7 +486,7 @@ int generic_write_boot0_one_1k_mode(unsigned char *buf, unsigned int len, unsign
 			}
 		}
 	}
-	small_nand_seed = 0;
+	nci->nctri->random_factor = 0;
 
 	ndfc_encode_default(nci->nctri);
 	ndfc_channel_select(nci->nctri, 0);
@@ -552,11 +554,13 @@ s32 generic_read_boot0_page_cfg_mode(struct nand_chip_info *nci, struct _nand_ph
 		ndfc_set_ecc_mode(nci->nctri, cfg.ecc_mode);
 		ndfc_enable_ecc(nci->nctri, 1, 1);
 
-		/*For A50 & over 64k boot0 @ R328 spinand*/
-		/*ndfc_set_rand_seed(nci->nctri, small_nand_seed); //zzm 20180301*/
-		ndfc_set_rand_seed(nci->nctri, npo->page); // czk 2019.9.24
-		/*For R100, yc 20180605*/
-		/*ndfc_set_rand_seed(nci->nctri, npo->page);*/
+		if (nci->nctri->random_factor & SMALL_CAPACITY_NAND) {
+			ndfc_set_rand_seed(nci->nctri,
+					(nci->nctri->random_factor & RANDOM_VALID_BITS));
+		} else {
+			ndfc_set_rand_seed(nci->nctri, npo->page);
+		}
+
 		ndfc_enable_randomize(nci->nctri);
 	} else {
 		/*LDPC*/
@@ -734,10 +738,14 @@ s32 generic_write_boot0_page_cfg_mode(struct nand_chip_info *nci,
 	if (nci->nctri->channel_sel == 0) {
 		/*BCH*/
 		ndfc_enable_randomize(nci->nctri);
-		/*For A50 & over 64k boot0 @ R328 spinand*/
-		ndfc_set_rand_seed(nci->nctri, npo->page); // czk 2019.9.24
-		/*For R100, yc 20180605*/
-		/*ndfc_set_rand_seed(nci->nctri, npo->page);*/
+
+		if (nci->nctri->random_factor & SMALL_CAPACITY_NAND) {
+			ndfc_set_rand_seed(nci->nctri,
+					(nci->nctri->random_factor & RANDOM_VALID_BITS));
+		} else {
+			ndfc_set_rand_seed(nci->nctri, npo->page);
+		}
+
 
 		ndfc_channel_select(nci->nctri, 0);
 		ndfc_set_ecc_mode(nci->nctri, cfg.ecc_mode);
@@ -980,7 +988,8 @@ int generic_read_boot0_one_1k_mode(unsigned char *buf, unsigned int len, unsigne
 			lnpo.sdata = oob_buf;
 			lnpo.slen = 64;
 			lnpo.mdata = ptr;
-			small_nand_seed = count; //zzm 20180301
+			nci->nctri->random_factor = count;
+			nci->nctri->random_factor |= SMALL_CAPACITY_NAND;
 
 			nand_wait_all_rb_ready();
 			if (nci->nand_read_boot0_page(nci, &lnpo) < 0) {
@@ -1004,7 +1013,7 @@ int generic_read_boot0_one_1k_mode(unsigned char *buf, unsigned int len, unsigne
 			break;
 	}
 	nand_free_temp_buf(ptr);
-	small_nand_seed = 0;
+	nci->nctri->random_factor = 0;
 	return 0;
 
 error:

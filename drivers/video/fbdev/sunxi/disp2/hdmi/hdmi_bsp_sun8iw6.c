@@ -1018,7 +1018,7 @@ static u8 bsp_read_ksv_list(void)
 	if (bsp_hdcp_verify_ksv(hdcp_ksv_list_buffer, size) == TRUE) {
 		valid = HDCP_KSV_LIST_READY;
 		pr_info("HDCP_KSV_LIST_READY");
-	} else{
+	} else {
 		valid = HDCP_ERR_KSV_LIST_NOT_VALID;
 		pr_info("HDCP_ERR_KSV_LIST_NOT_VALID");
 	}

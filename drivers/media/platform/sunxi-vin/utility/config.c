@@ -14,317 +14,8 @@
 
 #include "config.h"
 #include "../platform/platform_cfg.h"
+#include "../modules/sensor-list/sensor_list.h"
 
-#ifdef CONFIG_SENSOR_LIST_MODULE
-static void set_used(struct sensor_list *sensors,
-		void *value, int len)
-{
-	sensors->used = *(int *)value;
-	vin_log(VIN_LOG_CONFIG, "sensors->used = %d!\n", sensors->used);
-}
-static void set_csi_sel(struct sensor_list *sensors,
-		void *value, int len)
-{
-	sensors->csi_sel = *(int *)value;
-}
-static void set_device_sel(struct sensor_list *sensors,
-		void *value, int len)
-{
-	sensors->device_sel = *(int *)value;
-}
-static void set_sensor_twi_id(struct sensor_list *sensors,
-		void *value, int len)
-{
-	sensors->sensor_bus_sel = *(int *)value;
-}
-static void set_power_settings_en(struct sensor_list *sensors,
-			       void *value, int len)
-{
-	sensors->power_set = *(int *)value;
-}
-
-static void set_cameravdd(struct sensor_list *sensors,
-		void *value, int len)
-{
-	if (sensors->power_set)
-		strcpy(sensors->power[CAMERAVDD].power_str, (char *)value);
-}
-static void set_cameravdd_vol(struct sensor_list *sensors,
-		void *value, int len)
-{
-	if (!sensors->power_set)
-		sensors->power[CAMERAVDD].power_vol = *(int *)value;
-}
-
-static void set_iovdd(struct sensor_list *sensors,
-		void *value, int len)
-{
-	if (sensors->power_set)
-		strcpy(sensors->power[IOVDD].power_str, (char *)value);
-}
-static void set_iovdd_vol(struct sensor_list *sensors,
-		void *value, int len)
-{
-	if (!sensors->power_set)
-		sensors->power[IOVDD].power_vol = *(int *)value;
-}
-static void set_avdd(struct sensor_list *sensors,
-		void *value, int len)
-{
-	if (sensors->power_set)
-		strcpy(sensors->power[AVDD].power_str, (char *)value);
-}
-static void set_avdd_vol(struct sensor_list *sensors,
-		void *value, int len)
-{
-	if (sensors->power_set)
-		sensors->power[AVDD].power_vol = *(int *)value;
-}
-static void set_dvdd(struct sensor_list *sensors,
-		void *value, int len)
-{
-	if (sensors->power_set)
-		strcpy(sensors->power[DVDD].power_str, (char *)value);
-}
-static void set_dvdd_vol(struct sensor_list *sensors,
-		void *value, int len)
-{
-	if (sensors->power_set)
-		sensors->power[DVDD].power_vol = *(int *)value;
-}
-static void set_afvdd(struct sensor_list *sensors,
-		void *value, int len)
-{
-	if (sensors->power_set)
-		strcpy(sensors->power[AFVDD].power_str, (char *)value);
-}
-static void set_afvdd_vol(struct sensor_list *sensors,
-		void *value, int len)
-{
-	if (sensors->power_set)
-		sensors->power[AFVDD].power_vol = *(int *)value;
-}
-static void set_detect_sensor_num(struct sensor_list *sensors,
-		void *value, int len)
-{
-	sensors->detect_num = *(int *)value;
-}
-
-static void set_sensor_name(struct sensor_list *sensors,
-		void *value, int sel)
-{
-	strcpy(sensors->inst[sel].cam_name, (char *)value);
-	vin_log(VIN_LOG_CONFIG, "sensor index %d, name is %s\n",
-		sel, (char *)value);
-}
-static void set_sensor_twi_addr(struct sensor_list *sensors,
-		void *value, int sel)
-{
-	sensors->inst[sel].cam_addr = *(int *)value;
-	vin_log(VIN_LOG_CONFIG, "sensor index %d, addr is %d\n",
-		sel, *(int *)value);
-}
-static void set_sensor_type(struct sensor_list *sensors,
-		void *value, int sel)
-{
-	sensors->inst[sel].cam_type = *(int *)value;
-}
-static void set_sensor_hflip(struct sensor_list *sensors,
-		void *value, int sel)
-{
-	sensors->inst[sel].vflip = *(int *)value;
-}
-static void set_sensor_vflip(struct sensor_list *sensors,
-		void *value, int sel)
-{
-	sensors->inst[sel].hflip = *(int *)value;
-}
-static void set_act_name(struct sensor_list *sensors,
-		void *value, int sel)
-{
-	strcpy(sensors->inst[sel].act_name, (char *)value);
-}
-static void set_act_twi_addr(struct sensor_list *sensors,
-		void *value, int sel)
-{
-	sensors->inst[sel].act_addr = *(int *)value;
-}
-static void set_isp_cfg_name(struct sensor_list *sensors,
-		void *value, int sel)
-{
-	strcpy(sensors->inst[sel].isp_cfg_name, (char *)value);
-	vin_log(VIN_LOG_CONFIG, "isp_cfg_name: %s\n", (char *)value);
-}
-
-enum ini_item_type {
-	INTEGER,
-	STRING,
-};
-
-struct SensorParamAttribute {
-	char *sub;
-	int len;
-	enum ini_item_type type;
-	void (*set_param)(struct sensor_list *, void *, int len);
-};
-
-static struct SensorParamAttribute SensorParamCommon[] = {
-	{"used", 1, INTEGER, set_used,},
-	{"csi_sel", 1, INTEGER, set_csi_sel,},
-	{"device_sel", 1, INTEGER, set_device_sel,},
-	{"sensor_twi_id", 1, INTEGER, set_sensor_twi_id,},
-	{"power_settings_enable", 1, INTEGER, set_power_settings_en,},
-	{"cameravdd", 1, STRING, set_cameravdd,},
-	{"cameravdd_vol", 1, INTEGER, set_cameravdd_vol,},
-	{"iovdd", 1, STRING, set_iovdd,},
-	{"iovdd_vol", 1, INTEGER, set_iovdd_vol,},
-	{"avdd", 1, STRING, set_avdd,},
-	{"avdd_vol", 1, INTEGER, set_avdd_vol,},
-	{"dvdd", 1, STRING, set_dvdd,},
-	{"dvdd_vol", 1, INTEGER, set_dvdd_vol,},
-	{"afvdd", 1, STRING, set_afvdd,},
-	{"afvdd_vol", 1, INTEGER, set_afvdd_vol,},
-	{"detect_sensor_num", 1, INTEGER, set_detect_sensor_num,},
-};
-static struct SensorParamAttribute SensorParamDetect[] = {
-	{"sensor_name", 1, STRING, set_sensor_name,},
-	{"sensor_twi_addr", 1, INTEGER, set_sensor_twi_addr,},
-	{"sensor_type", 1, INTEGER, set_sensor_type,},
-	{"sensor_hflip", 1, INTEGER, set_sensor_hflip,},
-	{"sensor_vflip", 1, INTEGER, set_sensor_vflip,},
-	{"act_name", 1, STRING, set_act_name,},
-	{"act_twi_addr", 1, INTEGER, set_act_twi_addr,},
-	{"isp_cfg_name", 1, STRING, set_isp_cfg_name,},
-};
-
-static int __fetch_sensor_list(struct sensor_list *sl,
-			char *main, struct cfg_section *sct,
-			struct SensorParamAttribute *sp,
-			int detect_id, int len)
-{
-	int i;
-	struct cfg_subkey sk;
-	char sub_name[128] = { 0 };
-
-	for (i = 0; i < len; i++) {
-		if (main == NULL || sp->sub == NULL) {
-			vin_warn("sl main or sp->sub is NULL!\n");
-			continue;
-		}
-		if (-1 == detect_id)
-			sprintf(sub_name, "%s", sp->sub);
-		else
-			sprintf(sub_name, "%s%d", sp->sub, detect_id);
-
-		if (sp->type == INTEGER) {
-			if (CFG_ITEM_VALUE_TYPE_INT !=
-			    cfg_get_one_subkey(sct, main, sub_name, &sk)) {
-				vin_log(VIN_LOG_CONFIG,
-					"Warn:%s->%s, apply default value!\n",
-					main, sub_name);
-			} else {
-				if (sp->set_param) {
-					sp->set_param(sl,
-						(void *)&sk.value.val,
-						detect_id);
-					vin_log(VIN_LOG_CONFIG,
-						"sensor list: %s->%s = %d\n",
-						main, sub_name,
-						sk.value.val);
-				}
-			}
-		} else if (sp->type == STRING) {
-			if (CFG_ITEM_VALUE_TYPE_STR !=
-			    cfg_get_one_subkey(sct, main, sub_name, &sk)) {
-				vin_log(VIN_LOG_CONFIG,
-					"Warn:%s->%s, apply default value!\n",
-					main, sub_name);
-			} else {
-				if (sp->set_param) {
-					if (!strcmp(&sk.value.str[0], "\"\""))
-						strcpy(&sk.value.str[0], "");
-					sp->set_param(sl,
-						(void *)&sk.value.str[0],
-						detect_id);
-					vin_log(VIN_LOG_CONFIG,
-						"sensor list: %s->%s = %s\n",
-						main, sub_name,
-						&sk.value.str[0]);
-				}
-			}
-		}
-		sp++;
-	}
-	return 0;
-}
-static int fetch_sensor_list(struct sensor_list *sensors,
-			char *main, struct cfg_section *section)
-{
-	int j, len;
-	struct SensorParamAttribute *spc;
-	static struct SensorParamAttribute *spd;
-
-	spc = &SensorParamCommon[0];
-	len = ARRAY_SIZE(SensorParamCommon);
-	/* fetch sensor common config */
-	vin_log(VIN_LOG_CONFIG, "fetch sensor common config!\n");
-	__fetch_sensor_list(sensors, main, section, spc, -1, len);
-
-	/* fetch sensor detect config */
-	vin_log(VIN_LOG_CONFIG, "fetch sensor detect config!\n");
-	if (sensors->detect_num > MAX_DETECT_NUM) {
-		vin_warn("sensor_num = %d > MAX_DETECT_NUM = %d\n",
-			sensors->detect_num, MAX_DETECT_NUM);
-		sensors->detect_num = MAX_DETECT_NUM;
-	}
-	vin_log(VIN_LOG_CONFIG, "detect num is %d\n", sensors->detect_num);
-	for (j = 0; j < sensors->detect_num; j++) {
-		spd = &SensorParamDetect[0];
-		len = ARRAY_SIZE(SensorParamDetect);
-		__fetch_sensor_list(sensors, main, section,
-				spd, j, len);
-	}
-	vin_log(VIN_LOG_CONFIG, "fetch sensors done!\n");
-	return 0;
-}
-
-static int parse_sensor_list_info(struct sensor_list *sl, char *pos)
-{
-	int ret = 0;
-	struct cfg_section *section;
-	char sensor_list_cfg[128];
-
-	if (strcmp(pos, "rear") && strcmp(pos, "REAR") && strcmp(pos, "FRONT")
-	    && strcmp(pos, "front")) {
-		vin_err("Camera position config ERR! POS = %s\n", pos);
-		return -EINVAL;
-	}
-
-	sprintf(sensor_list_cfg, "/vendor/etc/hawkview/sensor_list_cfg.ini");
-	vin_log(VIN_LOG_CONFIG, "Fetch %s sensor list form\"%s\"\n", pos, sensor_list_cfg);
-
-	cfg_section_init(&section);
-	ret = cfg_read_ini(sensor_list_cfg, &section);
-	if (ret == -1) {
-		cfg_section_release(&section);
-		goto parse_sensor_list_info_end;
-	}
-	if (strcmp(pos, "rear") == 0 || strcmp(pos, "REAR") == 0)
-		fetch_sensor_list(sl, "rear_camera_cfg", section);
-	else
-		fetch_sensor_list(sl, "front_camera_cfg", section);
-	cfg_section_release(&section);
-
-parse_sensor_list_info_end:
-	vin_log(VIN_LOG_CONFIG, "fetch %s sensor list info end!\n", pos);
-	return ret;
-}
-#else
-static int parse_sensor_list_info(struct sensor_list *sl, char *pos)
-{
-	return 0;
-}
-#endif
 static int get_value_int(struct device_node *np, const char *name,
 			  u32 *value)
 {
@@ -357,20 +48,19 @@ static int get_value_string(struct device_node *np, const char *name,
 }
 
 static int get_gpio_info(struct device_node *np, const char *name,
-			 struct gpio_config *gc)
+			 int *gpio)
 {
 	int gnum;
+	enum of_gpio_flags gc;
 
-	gnum = of_get_named_gpio_flags(np, name, 0, (enum of_gpio_flags *)gc);
+	gnum = of_get_named_gpio_flags(np, name, 0, &gc);
 	if (!gpio_is_valid(gnum)) {
-		gc->gpio = GPIO_INDEX_INVALID;
 		vin_log(VIN_LOG_CONFIG, "fetch %s from device_tree failed\n", name);
-		return -EINVAL;
+		return -ENODEV;
 	}
-	vin_log(VIN_LOG_CONFIG,
-		"%s: pin=%d  mul-sel=%d  drive=%d  pull=%d  data=%d gnum=%d\n",
-		name, gc->gpio, gc->mul_sel, gc->drv_level, gc->pull, gc->data,
-		gnum);
+	*gpio = gnum;
+	vin_log(VIN_LOG_CONFIG, "fetch %s gpio = %d\n", name, *gpio);
+
 	return 0;
 }
 
@@ -629,7 +319,7 @@ int parse_modules_from_device_tree(struct vin_md *vind)
 	struct modules_config *module;
 	struct sensor_list *sensors;
 	struct sensor_instance *inst;
-	unsigned int sensor_uses = 2; /*1/2 mean use one/two sensor*/
+	unsigned int sensor_uses = 1; /*1/2 mean use one/two sensor*/
 	struct sensor_list sensors_def[2] = {
 		{
 		.used = 1,
@@ -737,7 +427,7 @@ int parse_modules_from_device_tree(struct vin_md *vind)
 			strcpy(inst->act_name, sensors_def[i].inst[0].act_name);
 			inst->act_addr = sensors_def[i].inst[0].act_addr;
 		}
-
+/*
 		for (j = 0; j < MAX_GPIO_NUM; j++) {
 			sensors->gpio[j].gpio = sensors_def[i].gpio[j].gpio;
 			sensors->gpio[j].mul_sel = sensors_def[i].gpio[j].mul_sel;
@@ -745,32 +435,37 @@ int parse_modules_from_device_tree(struct vin_md *vind)
 			sensors->gpio[j].drv_level = sensors_def[i].gpio[j].drv_level;
 			sensors->gpio[j].data = sensors_def[i].gpio[j].data;
 		}
-
+*/
 		sensors->detect_num = sensors_def[i].detect_num;
 		vin_log(VIN_LOG_CONFIG, "vin cci_sel is %d\n", sensors->sensor_bus_sel);
 	}
 #else
-	int i = 0, j = 0;
+	int i = 0, j = 0, idx;
 	struct device_node *parent = vind->pdev->dev.of_node;
 	struct device_node *cam = NULL, *child;
 	char property[32] = { 0 };
 	struct modules_config *module = NULL;
 	struct sensor_list *sensors = NULL;
-#ifdef CONFIG_ACTUATOR_MODULE
-	int size = 0;
-	const __be32 *list;
-#endif
+	const char *device_type;
+	int ret;
+	__maybe_unused  int size = 0;
+	__maybe_unused const __be32 *list;
 
 	for_each_available_child_of_node(parent, child) {
 		if (!strcmp(child->name, "sensor")) {
 			cam = child;
-			sscanf(cam->type, "sensor%d", &i);
-			vin_log(VIN_LOG_CONFIG, "get sensor%d config for device tree\n", i);
+
+			ret = of_property_read_string(cam, "device_type", &device_type);
+			if (ret) {
+				vin_err("%s get sensor device_type failed!\n", __func__);
+				continue;
+			}
+
+			sscanf(device_type, "sensor%d", &i);
 			module = &vind->modules[i];
 			sensors = &module->sensors;
-		} else {
+		} else
 			continue;
-		}
 
 		/*when insmod without parm*/
 		if (!strcmp(sensors->inst[0].cam_name, "")) {
@@ -781,8 +476,8 @@ int parse_modules_from_device_tree(struct vin_md *vind)
 			if (!fetch_camera[j].flag)
 				continue;
 
-			sprintf(property, "%s_%s",
-				cam->type, fetch_camera[j].sub);
+			sprintf(property, "%s%d_%s",
+				cam->name, i, fetch_camera[j].sub);
 			fetch_camera[j].fun(cam,
 				property, sensors);
 		}
@@ -809,8 +504,8 @@ int parse_modules_from_device_tree(struct vin_md *vind)
 				for (j = 0; j < ARRAY_SIZE(fetch_actuator); j++) {
 					if (!fetch_actuator[j].flag)
 						continue;
-					sprintf(property, "%s_%s", act->type,
-						fetch_actuator[j].sub);
+					sprintf(property, "%s%d_%s", act->name,
+						i, fetch_actuator[j].sub);
 					fetch_actuator[j].fun(act,
 							property, sensors);
 				}
@@ -843,8 +538,8 @@ int parse_modules_from_device_tree(struct vin_md *vind)
 					if (!fetch_flash[j].flag)
 						continue;
 
-					sprintf(property, "%s_%s", flash->type,
-						fetch_flash[j].sub);
+					sprintf(property, "%s%d_%s", flash->name,
+						i, fetch_flash[j].sub);
 					fetch_flash[j].fun(flash,
 							property, sensors);
 				}
@@ -861,41 +556,52 @@ int parse_modules_from_device_tree(struct vin_md *vind)
 	for_each_available_child_of_node(parent, child) {
 		if (strcmp(child->name, "vinc"))
 			continue;
-
-		sprintf(property, "%s_rear_sensor_sel", child->type);
+		ret = of_property_read_string(child, "device_type", &device_type);
+		if (ret) {
+			vin_err("%s get sensor device_type failed!\n", __func__);
+			continue;
+		}
+		sscanf(device_type, "vinc%d", &idx);
+		sprintf(property, "%s%d_rear_sensor_sel", child->name, idx);
 		if (get_value_int(child, property, &i))
 			i = 0;
 		module = &vind->modules[i];
 		sensors = &module->sensors;
-		sprintf(property, "%s_csi_sel", child->type);
+		sprintf(property, "%s%d_csi_sel", child->name, idx);
 		get_value_int(child, property, &sensors->csi_sel);
 
 		if (sensors->use_sensor_list == 0xff) {
-			sprintf(property, "%s_sensor_list", child->type);
+			sprintf(property, "%s%d_sensor_list", child->name, idx);
 			get_value_int(child, property, &sensors->use_sensor_list);
+#ifndef CONFIG_SENSOR_LIST_MODULE
+			sensors->use_sensor_list = 0;
+#endif
 		}
 		if (sensors->use_sensor_list == 1) {
 			if (!strcmp(sensors->sensor_pos, ""))
 				strcpy(sensors->sensor_pos, "rear");
-			parse_sensor_list_info(sensors, sensors->sensor_pos);
+			sensor_list_get_parms(sensors, sensors->sensor_pos);
 		}
 
-		sprintf(property, "%s_front_sensor_sel", child->type);
+		sprintf(property, "%s%d_front_sensor_sel", child->name, idx);
 		if (get_value_int(child, property, &i))
 			i = 1;
 		module = &vind->modules[i];
 		sensors = &module->sensors;
-		sprintf(property, "%s_csi_sel", child->type);
+		sprintf(property, "%s%d_csi_sel", child->name, idx);
 		get_value_int(child, property, &sensors->csi_sel);
 
 		if (sensors->use_sensor_list == 0xff) {
-			sprintf(property, "%s_sensor_list", child->type);
+			sprintf(property, "%s%d_sensor_list", child->name, idx);
 			get_value_int(child, property, &sensors->use_sensor_list);
+#ifndef CONFIG_SENSOR_LIST_MODULE
+			sensors->use_sensor_list = 0;
+#endif
 		}
 		if (sensors->use_sensor_list == 1) {
 			if (!strcmp(sensors->sensor_pos, ""))
 				strcpy(sensors->sensor_pos, "front");
-			parse_sensor_list_info(sensors, sensors->sensor_pos);
+			sensor_list_get_parms(sensors, sensors->sensor_pos);
 		}
 	}
 #endif

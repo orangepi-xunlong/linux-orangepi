@@ -13,6 +13,10 @@
 struct __eink_panel *eink_panel_array[] = {
 	&default_eink,
 	/* add new panel below */
+	&ed060xd4u2_tc,
+	&ed068og1,
+	&es103tc1c1,
+	&ed060xh9,
 	NULL,
 };
 
@@ -28,7 +32,6 @@ void EINK_OPEN_FUNC(EINK_PANEL_FUNC func, u32 delay)
 	if (func == NULL) {
 		pr_err("%s:func is NULL\n", __func__);
 	}
-	EINK_INFO_MSG("0x%p\n", func);
 	if (mgr->set_open_func)
 		mgr->set_open_func(mgr, func, delay);
 }
@@ -58,7 +61,7 @@ static void set_panel_funcs(void)
 
 int eink_panel_init(void)
 {
-	EINK_INFO_MSG("eink_panel_init!\n");
+	EINK_DEBUG_MSG("eink_panel_init!\n");
 	set_panel_funcs();
 
 	return 0;
@@ -83,7 +86,6 @@ s32 panel_pin_cfg(u32 en)
 s32 panel_gpio_set_value(u32 io_index, u32 value)
 {
 	int ret = 0;
-	char gpio_name[20];
 	struct timing_ctrl_manager *mgr = get_timing_ctrl_mgr();
 
 	if (mgr == NULL) {
@@ -95,9 +97,8 @@ s32 panel_gpio_set_value(u32 io_index, u32 value)
 		pr_err("%s:gpio num out of range\n", __func__);
 		return -1;
 	}
-	sprintf(gpio_name, "eink_gpio_%d", io_index);
 
-	EINK_DEFAULT_MSG("io_index = %d\n", io_index);
-	ret = eink_sys_gpio_set_value(mgr->gpio_hdl[io_index], value, gpio_name);
+	EINK_DEBUG_MSG("io_index = %d\n", io_index);
+	ret = eink_sys_gpio_set_value(&mgr->eink_gpio[io_index], value);
 	return ret;
 }

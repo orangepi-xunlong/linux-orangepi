@@ -11,11 +11,12 @@
 #include <linux/rfkill.h>
 #include <linux/regulator/consumer.h>
 #include <linux/platform_device.h>
-#include <linux/sunxi-gpio.h>
-
+#include "internal.h"
 #include "sunxi-rfkill.h"
 
 static struct sunxi_bt_platdata *bluetooth_data;
+static const struct of_device_id sunxi_bt_ids[];
+
 static int sunxi_bt_on(struct sunxi_bt_platdata *data, bool on_off);
 static DEFINE_MUTEX(sunxi_bluetooth_mutex);
 
@@ -29,13 +30,13 @@ void sunxi_bluetooth_set_power(bool on_off)
 
 	pdev = bluetooth_data->pdev;
 	mutex_lock(&sunxi_bluetooth_mutex);
-	sunxi_wl_poweren_set(WL_DEV_BLUETOOTH, on_off);
+	rfkill_poweren_set(WL_DEV_BLUETOOTH, on_off);
 	if (on_off != bluetooth_data->power_state) {
 		ret = sunxi_bt_on(bluetooth_data, on_off);
 		if (ret)
 			dev_err(&pdev->dev, "set power failed\n");
 	}
-	sunxi_wl_chipen_set(WL_DEV_BLUETOOTH, on_off);
+	rfkill_chipen_set(WL_DEV_BLUETOOTH, on_off);
 	mutex_unlock(&sunxi_bluetooth_mutex);
 }
 EXPORT_SYMBOL_GPL(sunxi_bluetooth_set_power);
@@ -44,81 +45,69 @@ static int sunxi_bt_on(struct sunxi_bt_platdata *data, bool on_off)
 {
 	struct platform_device *pdev = data->pdev;
 	struct device *dev = &pdev->dev;
-	int ret = 0;
+	int ret = 0, i;
 
-	if (!on_off && gpio_is_valid(data->gpio_bt_rst))
-		gpio_set_value(data->gpio_bt_rst, 0);
+	if (on_off) {
+		for (i = 0; i < CLK_MAX; i++) {
+			if (!IS_ERR_OR_NULL(data->clk[i]))
+				clk_prepare_enable(data->clk[i]);
+		}
 
-	if (data->bt_power_name) {
-		data->bt_power = regulator_get(dev, data->bt_power_name);
-		if (!IS_ERR(data->bt_power)) {
-			if (on_off) {
-				ret = regulator_enable(data->bt_power);
-				if (ret < 0) {
-					dev_err(dev, "regulator bt_power enable failed\n");
-					regulator_put(data->bt_power);
-					return ret;
+		for (i = 0; i < PWR_MAX; i++) {
+			if (!IS_ERR_OR_NULL(data->power[i])) {
+				if (data->power_vol[i]) {
+					ret = regulator_set_voltage(data->power[i],
+							data->power_vol[i], data->power_vol[i]);
+					if (ret < 0) {
+						dev_err(dev, "bt power[%d] (%s) set voltage failed\n",
+								i, data->power_name[i]);
+						return ret;
+					}
+
+					ret = regulator_get_voltage(data->power[i]);
+					if (ret != data->power_vol[i]) {
+						dev_err(dev, "bt power[%d] (%s) get voltage failed\n",
+								i, data->power_name[i]);
+						return ret;
+					}
 				}
 
-				ret = regulator_get_voltage(data->bt_power);
+				ret = regulator_enable(data->power[i]);
 				if (ret < 0) {
-					dev_err(dev, "regulator bt_power get voltage failed\n");
-					regulator_put(data->bt_power);
-					return ret;
-				}
-				dev_info(dev,
-					"check bluetooth bt_power voltage: %d\n",
-					ret);
-			} else {
-				ret = regulator_disable(data->bt_power);
-				if (ret < 0) {
-					dev_err(dev, "regulator bt_power disable failed\n");
-					regulator_put(data->bt_power);
+					dev_err(dev, "bt power[%d] (%s) enable failed\n",
+								i, data->power_name[i]);
 					return ret;
 				}
 			}
-			regulator_put(data->bt_power);
 		}
-	}
 
-	if (data->io_regulator_name) {
-		data->io_regulator = regulator_get(dev,
-				data->io_regulator_name);
-		if (!IS_ERR(data->io_regulator)) {
-			if (on_off) {
-				ret = regulator_enable(data->io_regulator);
-				if (ret < 0) {
-					dev_err(dev, "regulator io_regulator enable failed\n");
-					regulator_put(data->io_regulator);
-					return ret;
-				}
+		if (gpio_is_valid(data->gpio_bt_rst)) {
+			mdelay(10);
+			gpio_set_value(data->gpio_bt_rst, !data->gpio_bt_rst_assert);
+		}
+	} else {
+		if (gpio_is_valid(data->gpio_bt_rst))
+			gpio_set_value(data->gpio_bt_rst, data->gpio_bt_rst_assert);
 
-				ret = regulator_get_voltage(data->io_regulator);
+		for (i = 0; i < PWR_MAX; i++) {
+			if (!IS_ERR_OR_NULL(data->power[i])) {
+				ret = regulator_disable(data->power[i]);
 				if (ret < 0) {
-					dev_err(dev, "regulator io_regulator get voltage failed\n");
-					regulator_put(data->io_regulator);
-					return ret;
-				}
-				dev_info(dev,
-					"check bluetooth io_regulator voltage: %d\n",
-					ret);
-			} else {
-				ret = regulator_disable(data->io_regulator);
-				if (ret < 0) {
-					dev_err(dev, "regulator io_regulator disable failed\n");
-					regulator_put(data->io_regulator);
+					dev_err(dev, "bt power[%d] (%s) disable failed\n",
+								i, data->power_name[i]);
 					return ret;
 				}
 			}
-			regulator_put(data->io_regulator);
+		}
+
+		for (i = 0; i < CLK_MAX; i++) {
+			if (!IS_ERR_OR_NULL(data->clk[i]))
+				clk_disable_unprepare(data->clk[i]);
 		}
 	}
 
-	if (on_off && gpio_is_valid(data->gpio_bt_rst)) {
-		mdelay(10);
-		gpio_set_value(data->gpio_bt_rst, 1);
-	}
 	data->power_state = on_off;
+	dev_info(dev, "bt power %s success\n", on_off ? "on" : "off");
 
 	return 0;
 }
@@ -129,20 +118,23 @@ static int sunxi_bt_set_block(void *data, bool blocked)
 	struct platform_device *pdev = platdata->pdev;
 	int ret;
 
+	if (!bluetooth_data)
+		return 0;
+
 	if (blocked != platdata->power_state) {
 		dev_warn(&pdev->dev, "block state already is %d\n", blocked);
 		return 0;
 	}
 
 	dev_info(&pdev->dev, "set block: %d\n", blocked);
-	sunxi_wl_poweren_set(WL_DEV_BLUETOOTH, !blocked);
+	rfkill_poweren_set(WL_DEV_BLUETOOTH, !blocked);
 	ret = sunxi_bt_on(platdata, !blocked);
 	if (ret) {
 		dev_err(&pdev->dev, "set block failed\n");
 		return ret;
 	}
 
-	sunxi_wl_chipen_set(WL_DEV_BLUETOOTH, !blocked);
+	rfkill_chipen_set(WL_DEV_BLUETOOTH, !blocked);
 
 	return 0;
 }
@@ -151,55 +143,88 @@ static const struct rfkill_ops sunxi_bt_rfkill_ops = {
 	.set_block = sunxi_bt_set_block,
 };
 
-static int sunxi_bt_probe(struct platform_device *pdev)
+int sunxi_bt_init(struct platform_device *pdev)
 {
-	struct device_node *np = pdev->dev.of_node;
+	struct device_node *np = of_find_matching_node(pdev->dev.of_node, sunxi_bt_ids);
 	struct device *dev = &pdev->dev;
 	struct sunxi_bt_platdata *data;
-	struct gpio_config config;
-	const char *power, *io_regulator;
+	enum of_gpio_flags config;
 	int ret = 0;
-	char *pctrl_name = PINCTRL_STATE_DEFAULT;
-	struct pinctrl_state *pctrl_state = NULL;
+	int count, i;
 
-	data = devm_kzalloc(dev, sizeof(*data), GFP_KERNEL);
 	if (!dev)
 		return -ENOMEM;
 
-	data->pdev = pdev;
-	bluetooth_data = data;
+	if (!np)
+		return 0;
 
-	if (of_property_read_string(np, "bt_power", &power)) {
+	data = devm_kzalloc(dev, sizeof(*data), GFP_KERNEL);
+	data->pdev = pdev;
+
+	count = of_property_count_strings(np, "bt_power");
+	if (count <= 0) {
 		dev_warn(dev, "Missing bt_power.\n");
 	} else {
-		data->bt_power_name = devm_kzalloc(dev, 64, GFP_KERNEL);
-		if (!data->bt_power_name)
+		if (count > PWR_MAX) {
+			dev_warn(dev, "bt power count large than max(%d).\n", PWR_MAX);
+			count = PWR_MAX;
+		}
+		ret = of_property_read_string_array(np, "bt_power",
+					(const char **)data->power_name, count);
+		if (ret < 0)
 			return -ENOMEM;
-		strcpy(data->bt_power_name, power);
-	}
-	dev_info(dev, "bt_power_name (%s)\n", data->bt_power_name);
 
-	if (of_property_read_string(np, "bt_io_regulator", &io_regulator)) {
-		dev_warn(dev, "Missing bt_io_regulator.\n");
+		ret = of_property_read_u32_array(np, "bt_power_vol",
+					(u32 *)data->power_vol, count);
+		if (ret < 0)
+			dev_warn(dev, "Missing bt_power_vol config.\n");
+
+		for (i = 0; i < count; i++) {
+			data->power[i] = regulator_get(dev, data->power_name[i]);
+			if (IS_ERR_OR_NULL(data->power[i]))
+				return -ENOMEM;
+
+			dev_info(dev, "bt power[%d] (%s) voltage: %dmV\n",
+					i, data->power_name[i], data->power_vol[i] / 1000);
+		}
+	}
+
+	count = of_property_count_strings(np, "clock-names");
+	if (count <= 0) {
+		count = CLK_MAX;
+		for (i = 0; i < count; i++) {
+			data->clk[i] = of_clk_get(np, i);
+			if (IS_ERR_OR_NULL(data->clk[i]))
+				break;
+			data->clk_name[i] = devm_kzalloc(dev, 16, GFP_KERNEL);
+			sprintf(data->clk_name[i], "clk%d", i);
+			dev_info(dev, "bt clock[%d] (%s)\n", i, data->clk_name[i]);
+		}
 	} else {
-		data->io_regulator_name = devm_kzalloc(dev, 64, GFP_KERNEL);
-		if (!data->io_regulator_name)
+		if (count > CLK_MAX) {
+			dev_warn(dev, "bt clocks count large than max(%d > %d).\n",
+						count, CLK_MAX);
+			count = CLK_MAX;
+		}
+		ret = of_property_read_string_array(np, "clock-names",
+					(const char **)data->clk_name, count);
+		if (ret < 0)
 			return -ENOMEM;
-		strcpy(data->io_regulator_name, io_regulator);
-	}
-	dev_info(dev, "io_regulator_name (%s)\n", data->io_regulator_name);
 
-	data->gpio_bt_rst = of_get_named_gpio_flags(np, "bt_rst_n",
-			0, (enum of_gpio_flags *)&config);
+		for (i = 0; i < count; i++) {
+			data->clk[i] = of_clk_get(np, i);
+			if (IS_ERR_OR_NULL(data->clk[i]))
+				return -ENOMEM;
+			dev_info(dev, "bt clock[%d] (%s)\n", i, data->clk_name[i]);
+		}
+	}
+
+	data->gpio_bt_rst = of_get_named_gpio_flags(np, "bt_rst_n", 0, &config);
 	if (!gpio_is_valid(data->gpio_bt_rst)) {
 		dev_err(dev, "get gpio bt_rst failed\n");
 	} else {
-		dev_info(dev, "bt_rst gpio=%d  mul-sel=%d  pull=%d  drv_level=%d  data=%d\n",
-				config.gpio,
-				config.mul_sel,
-				config.pull,
-				config.drv_level,
-				config.data);
+		data->gpio_bt_rst_assert = (config == OF_GPIO_ACTIVE_LOW) ? 0 : 1;
+		dev_info(dev, "bt_rst gpio=%d assert=%d\n", data->gpio_bt_rst, data->gpio_bt_rst_assert);
 
 		ret = devm_gpio_request(dev, data->gpio_bt_rst, "bt_rst");
 		if (ret < 0) {
@@ -208,7 +233,7 @@ static int sunxi_bt_probe(struct platform_device *pdev)
 			return ret;
 		}
 
-		ret = gpio_direction_output(data->gpio_bt_rst, 0);
+		ret = gpio_direction_output(data->gpio_bt_rst, data->gpio_bt_rst_assert);
 		if (ret < 0) {
 			dev_err(dev, "can't request output direction bt_rst gpio %d\n",
 				data->gpio_bt_rst);
@@ -216,73 +241,50 @@ static int sunxi_bt_probe(struct platform_device *pdev)
 		}
 	}
 
-	data->lpo = devm_clk_get(dev, NULL);
-	if (IS_ERR_OR_NULL(data->lpo)) {
-		dev_warn(dev, "clk not config\n");
-	} else {
-		ret = clk_prepare_enable(data->lpo);
-		if (ret < 0)
-			dev_warn(dev, "can't enable clk\n");
-	}
-
-	data->pctrl = devm_pinctrl_get(dev);
-	if (IS_ERR(data->pctrl)) {
-		dev_warn(dev, "devm_pinctrl_get() failed!\n");
-	} else {
-		pctrl_state = pinctrl_lookup_state(data->pctrl,  pctrl_name);
-		if (IS_ERR(pctrl_state)) {
-			dev_warn(dev, "pinctrl_lookup_state(%s) failed! return %p \n",
-					pctrl_name, pctrl_state);
-		} else {
-			ret = pinctrl_select_state(data->pctrl, pctrl_state);
-			if (ret < 0) {
-				dev_warn(dev, "pinctrl_select_state(%s) failed! return %d \n",
-						pctrl_name, ret);
-			}
-		}
-	}
-
 	data->rfkill = rfkill_alloc("sunxi-bt", dev, RFKILL_TYPE_BLUETOOTH,
 				&sunxi_bt_rfkill_ops, data);
-	if (!data->rfkill) {
-		ret = -ENOMEM;
-		goto failed_alloc;
-	}
+	if (!data->rfkill)
+		return -ENOMEM;
 
 	rfkill_set_states(data->rfkill, true, false);
 
 	ret = rfkill_register(data->rfkill);
 	if (ret)
 		goto fail_rfkill;
-	platform_set_drvdata(pdev, data);
 
 	data->power_state = 0;
+	bluetooth_data = data;
 	return 0;
 
 fail_rfkill:
 	if (data->rfkill)
 		rfkill_destroy(data->rfkill);
-failed_alloc:
-	if (!IS_ERR_OR_NULL(data->lpo))
-		clk_disable_unprepare(data->lpo);
 
 	return ret;
 }
 
-static int sunxi_bt_remove(struct platform_device *pdev)
+int sunxi_bt_deinit(struct platform_device *pdev)
 {
-	struct sunxi_bt_platdata *data = platform_get_drvdata(pdev);
-	struct rfkill *rfk = data->rfkill;
+	struct sunxi_bt_platdata *data = bluetooth_data;
+	struct rfkill *rfk;
+	int i;
 
-	platform_set_drvdata(pdev, NULL);
+	if (!data)
+		return 0;
 
+	rfk = data->rfkill;
 	if (rfk) {
 		rfkill_unregister(rfk);
 		rfkill_destroy(rfk);
 	}
 
-	if (!IS_ERR_OR_NULL(data->lpo))
-		clk_disable_unprepare(data->lpo);
+	if (data->power_state)
+		sunxi_bluetooth_set_power(0);
+
+	for (i = 0; i < PWR_MAX; i++) {
+		if (!IS_ERR_OR_NULL(data->power[i]))
+			regulator_put(data->power[i]);
+	}
 
 	bluetooth_data = NULL;
 
@@ -294,17 +296,5 @@ static const struct of_device_id sunxi_bt_ids[] = {
 	{ /* Sentinel */ }
 };
 
-static struct platform_driver sunxi_bt_driver = {
-	.probe	= sunxi_bt_probe,
-	.remove	= sunxi_bt_remove,
-	.driver	= {
-		.owner	= THIS_MODULE,
-		.name	= "sunxi-bt",
-		.of_match_table	= sunxi_bt_ids,
-	},
-};
-
-module_platform_driver(sunxi_bt_driver);
-
 MODULE_DESCRIPTION("sunxi bluetooth driver");
-MODULE_LICENSE(GPL);
+MODULE_LICENSE("GPL");

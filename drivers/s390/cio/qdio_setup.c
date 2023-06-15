@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * qdio queue initialization
  *
@@ -7,6 +8,7 @@
 #include <linux/kernel.h>
 #include <linux/slab.h>
 #include <linux/export.h>
+#include <linux/io.h>
 #include <asm/qdio.h>
 
 #include "cio.h"
@@ -26,7 +28,6 @@ struct qaob *qdio_allocate_aob(void)
 {
 	return kmem_cache_zalloc(qdio_aob_cache, GFP_ATOMIC);
 }
-EXPORT_SYMBOL_GPL(qdio_allocate_aob);
 
 void qdio_release_aob(struct qaob *aob)
 {
@@ -113,7 +114,7 @@ static void set_impl_params(struct qdio_irq *irq_ptr,
 	irq_ptr->qib.pfmt = qib_param_field_format;
 	if (qib_param_field)
 		memcpy(irq_ptr->qib.parm, qib_param_field,
-		       QDIO_MAX_BUFFERS_PER_Q);
+		       sizeof(irq_ptr->qib.parm));
 
 	if (!input_slib_elements)
 		goto output;
@@ -150,6 +151,7 @@ static int __qdio_allocate_qs(struct qdio_q **irq_ptr_qs, int nr_queues)
 			return -ENOMEM;
 		}
 		irq_ptr_qs[i] = q;
+		INIT_LIST_HEAD(&q->entry);
 	}
 	return 0;
 }
@@ -178,10 +180,11 @@ static void setup_queues_misc(struct qdio_q *q, struct qdio_irq *irq_ptr,
 	q->mask = 1 << (31 - i);
 	q->nr = i;
 	q->handler = handler;
+	INIT_LIST_HEAD(&q->entry);
 }
 
 static void setup_storage_lists(struct qdio_q *q, struct qdio_irq *irq_ptr,
-				void **sbals_array, int i)
+				struct qdio_buffer **sbals_array, int i)
 {
 	struct qdio_q *prev;
 	int j;
@@ -205,15 +208,15 @@ static void setup_storage_lists(struct qdio_q *q, struct qdio_irq *irq_ptr,
 
 	/* fill in sl */
 	for (j = 0; j < QDIO_MAX_BUFFERS_PER_Q; j++)
-		q->sl->element[j].sbal = (unsigned long)q->sbal[j];
+		q->sl->element[j].sbal = virt_to_phys(q->sbal[j]);
 }
 
 static void setup_queues(struct qdio_irq *irq_ptr,
 			 struct qdio_initialize *qdio_init)
 {
 	struct qdio_q *q;
-	void **input_sbal_array = qdio_init->input_sbal_addr_array;
-	void **output_sbal_array = qdio_init->output_sbal_addr_array;
+	struct qdio_buffer **input_sbal_array = qdio_init->input_sbal_addr_array;
+	struct qdio_buffer **output_sbal_array = qdio_init->output_sbal_addr_array;
 	struct qdio_outbuf_state *output_sbal_state_array =
 				  qdio_init->output_sbal_state_array;
 	int i;
@@ -246,14 +249,12 @@ static void setup_queues(struct qdio_irq *irq_ptr,
 		output_sbal_state_array += QDIO_MAX_BUFFERS_PER_Q;
 
 		q->is_input_q = 0;
-		q->u.out.scan_threshold = qdio_init->scan_threshold;
 		setup_storage_lists(q, irq_ptr, output_sbal_array, i);
 		output_sbal_array += QDIO_MAX_BUFFERS_PER_Q;
 
 		tasklet_init(&q->tasklet, qdio_outbound_processing,
 			     (unsigned long) q);
-		setup_timer(&q->u.out.timer, (void(*)(unsigned long))
-			    &qdio_outbound_timer, (unsigned long)q);
+		timer_setup(&q->u.out.timer, qdio_outbound_timer, 0);
 	}
 }
 
@@ -473,11 +474,11 @@ int qdio_setup_irq(struct qdio_initialize *init_data)
 	irq_ptr->nr_input_qs = init_data->no_input_qs;
 	irq_ptr->nr_output_qs = init_data->no_output_qs;
 	irq_ptr->cdev = init_data->cdev;
+	irq_ptr->scan_threshold = init_data->scan_threshold;
 	ccw_device_get_schid(irq_ptr->cdev, &irq_ptr->schid);
 	setup_queues(irq_ptr, init_data);
 
 	setup_qib(irq_ptr, init_data);
-	qdio_setup_thinint(irq_ptr);
 	set_impl_params(irq_ptr, init_data->qib_param_field_format,
 			init_data->qib_param_field,
 			init_data->input_slib_elements,
@@ -504,8 +505,10 @@ int qdio_setup_irq(struct qdio_initialize *init_data)
 	irq_ptr->aqueue = *ciw;
 
 	/* set new interrupt handler */
+	spin_lock_irq(get_ccwdev_lock(irq_ptr->cdev));
 	irq_ptr->orig_handler = init_data->cdev->handler;
 	init_data->cdev->handler = qdio_int_handler;
+	spin_unlock_irq(get_ccwdev_lock(irq_ptr->cdev));
 	return 0;
 }
 
@@ -522,7 +525,7 @@ void qdio_print_subchannel_info(struct qdio_irq *irq_ptr,
 		 irq_ptr->schid.sch_no,
 		 is_thinint_irq(irq_ptr),
 		 (irq_ptr->sch_token) ? 1 : 0,
-		 (irq_ptr->qib.ac & QIB_AC_OUTBOUND_PCI_SUPPORTED) ? 1 : 0,
+		 pci_out_supported(irq_ptr) ? 1 : 0,
 		 css_general_characteristics.aif_tdd,
 		 (irq_ptr->siga_flag.input) ? "R" : " ",
 		 (irq_ptr->siga_flag.output) ? "W" : " ",
@@ -534,7 +537,7 @@ void qdio_print_subchannel_info(struct qdio_irq *irq_ptr,
 
 int qdio_enable_async_operation(struct qdio_output_q *outq)
 {
-	outq->aobs = kzalloc(sizeof(struct qaob *) * QDIO_MAX_BUFFERS_PER_Q,
+	outq->aobs = kcalloc(QDIO_MAX_BUFFERS_PER_Q, sizeof(struct qaob *),
 			     GFP_ATOMIC);
 	if (!outq->aobs) {
 		outq->use_cq = 0;

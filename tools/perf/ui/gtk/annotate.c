@@ -1,9 +1,15 @@
+// SPDX-License-Identifier: GPL-2.0
 #include "gtk.h"
+#include "util/sort.h"
 #include "util/debug.h"
 #include "util/annotate.h"
 #include "util/evsel.h"
+#include "util/map.h"
+#include "util/dso.h"
+#include "util/symbol.h"
 #include "ui/helpline.h"
-
+#include <inttypes.h>
+#include <signal.h>
 
 enum {
 	ANN_COL__PERCENT,
@@ -29,14 +35,14 @@ static int perf_gtk__get_percent(char *buf, size_t size, struct symbol *sym,
 
 	strcpy(buf, "");
 
-	if (dl->offset == (s64) -1)
+	if (dl->al.offset == (s64) -1)
 		return 0;
 
 	symhist = annotation__histogram(symbol__annotation(sym), evidx);
-	if (!symbol_conf.event_group && !symhist->addr[dl->offset])
+	if (!symbol_conf.event_group && !symhist->addr[dl->al.offset].nr_samples)
 		return 0;
 
-	percent = 100.0 * symhist->addr[dl->offset] / symhist->sum;
+	percent = 100.0 * symhist->addr[dl->al.offset].nr_samples / symhist->nr_samples;
 
 	markup = perf_gtk__get_percent_color(percent);
 	if (markup)
@@ -55,16 +61,16 @@ static int perf_gtk__get_offset(char *buf, size_t size, struct symbol *sym,
 
 	strcpy(buf, "");
 
-	if (dl->offset == (s64) -1)
+	if (dl->al.offset == (s64) -1)
 		return 0;
 
-	return scnprintf(buf, size, "%"PRIx64, start + dl->offset);
+	return scnprintf(buf, size, "%"PRIx64, start + dl->al.offset);
 }
 
 static int perf_gtk__get_line(char *buf, size_t size, struct disasm_line *dl)
 {
 	int ret = 0;
-	char *line = g_markup_escape_text(dl->line, -1);
+	char *line = g_markup_escape_text(dl->al.line, -1);
 	const char *markup = "<span fgcolor='gray'>";
 
 	strcpy(buf, "");
@@ -72,7 +78,7 @@ static int perf_gtk__get_line(char *buf, size_t size, struct disasm_line *dl)
 	if (!line)
 		return 0;
 
-	if (dl->offset != (s64) -1)
+	if (dl->al.offset != (s64) -1)
 		markup = NULL;
 
 	if (markup)
@@ -86,7 +92,7 @@ static int perf_gtk__get_line(char *buf, size_t size, struct disasm_line *dl)
 }
 
 static int perf_gtk__annotate_symbol(GtkWidget *window, struct symbol *sym,
-				struct map *map, struct perf_evsel *evsel,
+				struct map *map, struct evsel *evsel,
 				struct hist_browser_timer *hbt __maybe_unused)
 {
 	struct disasm_line *pos, *n;
@@ -117,14 +123,14 @@ static int perf_gtk__annotate_symbol(GtkWidget *window, struct symbol *sym,
 	gtk_tree_view_set_model(GTK_TREE_VIEW(view), GTK_TREE_MODEL(store));
 	g_object_unref(GTK_TREE_MODEL(store));
 
-	list_for_each_entry(pos, &notes->src->source, node) {
+	list_for_each_entry(pos, &notes->src->source, al.node) {
 		GtkTreeIter iter;
 		int ret = 0;
 
 		gtk_list_store_append(store, &iter);
 
 		if (perf_evsel__is_group_event(evsel)) {
-			for (i = 0; i < evsel->nr_members; i++) {
+			for (i = 0; i < evsel->core.nr_members; i++) {
 				ret += perf_gtk__get_percent(s + ret,
 							     sizeof(s) - ret,
 							     sym, pos,
@@ -146,8 +152,8 @@ static int perf_gtk__annotate_symbol(GtkWidget *window, struct symbol *sym,
 
 	gtk_container_add(GTK_CONTAINER(window), view);
 
-	list_for_each_entry_safe(pos, n, &notes->src->source, node) {
-		list_del(&pos->node);
+	list_for_each_entry_safe(pos, n, &notes->src->source, al.node) {
+		list_del_init(&pos->al.node);
 		disasm_line__free(pos);
 	}
 
@@ -155,7 +161,7 @@ static int perf_gtk__annotate_symbol(GtkWidget *window, struct symbol *sym,
 }
 
 static int symbol__gtk_annotate(struct symbol *sym, struct map *map,
-				struct perf_evsel *evsel,
+				struct evsel *evsel,
 				struct hist_browser_timer *hbt)
 {
 	GtkWidget *window;
@@ -167,13 +173,15 @@ static int symbol__gtk_annotate(struct symbol *sym, struct map *map,
 	if (map->dso->annotate_warned)
 		return -1;
 
-	err = symbol__disassemble(sym, map, 0);
+	err = symbol__annotate(sym, map, evsel, 0, &annotation__default_options, NULL);
 	if (err) {
 		char msg[BUFSIZ];
 		symbol__strerror_disassemble(sym, map, err, msg, sizeof(msg));
 		ui__error("Couldn't annotate %s: %s\n", sym->name, msg);
 		return -1;
 	}
+
+	symbol__calc_percent(sym, evsel);
 
 	if (perf_gtk__is_active_context(pgctx)) {
 		window = pgctx->main_window;
@@ -231,7 +239,7 @@ static int symbol__gtk_annotate(struct symbol *sym, struct map *map,
 }
 
 int hist_entry__gtk_annotate(struct hist_entry *he,
-			     struct perf_evsel *evsel,
+			     struct evsel *evsel,
 			     struct hist_browser_timer *hbt)
 {
 	return symbol__gtk_annotate(he->ms.sym, he->ms.map, evsel, hbt);

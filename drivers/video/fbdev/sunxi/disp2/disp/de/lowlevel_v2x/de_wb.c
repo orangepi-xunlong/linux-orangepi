@@ -66,6 +66,10 @@ int r2gray[3][4] = {
  */
 s32 wb_ebios_set_reg_base(u32 sel, uintptr_t base)
 {
+#if defined(CONFIG_INDEPENDENT_DE)
+	if (sel >= 0 && sel < DE_NUM)
+		wb_dev[sel] = (struct __wb_reg_t *) (base + WB_OFFSET);
+#else
 	int i = 0;
 
 	__inf("sel=%d, base=0x%p\n", sel, (void *)(base + WB_OFFSET));
@@ -73,6 +77,7 @@ s32 wb_ebios_set_reg_base(u32 sel, uintptr_t base)
 	for (i = 0; i < DE_NUM; ++i)
 		wb_dev[i] = (struct __wb_reg_t *) (base + WB_OFFSET);
 
+#endif
 	return 0;
 }
 
@@ -104,7 +109,7 @@ uintptr_t wb_ebios_get_reg_base(u32 sel)
 s32 wb_ebios_init(struct disp_bsp_init_para *para)
 {
 	wb_ebios_set_reg_base(0, para->reg_base[DISP_MOD_DE]);
-#if defined(CONFIG_ARCH_SUN50IW10)
+#if defined(CONFIG_INDEPENDENT_DE)
 	wb_ebios_set_reg_base(1, para->reg_base[DISP_MOD_DE1]);
 #endif
 	/* FIXME, need */
@@ -204,6 +209,7 @@ s32 wb_ebios_set_para(u32 sel, struct disp_capture_config *cfg)
 	u32 v_intg, v_frac, h_intg, h_frac;
 	u32 down_scale_y, down_scale_c;
 	u32 i;
+	u32 bypass_val = 0;
 	/* get para */
 	in_port = cfg->disp;
 	in_w = cfg->in_frame.size[0].width;
@@ -245,7 +251,7 @@ s32 wb_ebios_set_para(u32 sel, struct disp_capture_config *cfg)
 	    && (out_window_w > LINE_BUF_LEN))
 		return -1;
 	/* gctrl */
-	wb_dev[sel]->gctrl.dwval |= (0x10000000 | (in_port << 16));
+	wb_dev[sel]->gctrl.dwval |= (0x20000000 | (in_port << 16));
 	/* input size */
 	wb_dev[sel]->size.dwval = (in_w - 1) | ((in_h - 1) << 16);
 	/* input crop window */
@@ -314,28 +320,28 @@ s32 wb_ebios_set_para(u32 sel, struct disp_capture_config *cfg)
 	    || (out_fmt == DISP_FORMAT_RGBA_8888)
 	    || (out_fmt == DISP_FORMAT_BGRA_8888)
 	    || (out_fmt == DISP_FORMAT_RGB_888)
-	    || (out_fmt == DISP_FORMAT_BGR_888))
-		wb_dev[sel]->bypass.dwval &= 0xfffffffe;
-	else {
-		wb_dev[sel]->bypass.dwval |= 0x00000001;
+	    || (out_fmt == DISP_FORMAT_BGR_888)) {
+		bypass_val &= 0xfffffffe;
+	 } else {
+		bypass_val |= 0x00000001;
 	}
 	/* Coarse scaling */
 	if ((crop_w > (out_window_w << 1)) && (crop_h > (out_window_h << 1))) {
-		wb_dev[sel]->bypass.dwval |= 0x00000002;
+		bypass_val |= 0x00000002;
 		wb_dev[sel]->cs_horz.dwval = crop_w | (out_window_w << 17);
 		wb_dev[sel]->cs_vert.dwval = crop_h | (out_window_h << 17);
 		cs_out_w0 = out_window_w << 1;
 		cs_out_h0 = out_window_h << 1;
 	}
 	if ((crop_w > (out_window_w << 1)) && (crop_h <= (out_window_h << 1))) {
-		wb_dev[sel]->bypass.dwval |= 0x00000002;
+		bypass_val |= 0x00000002;
 		wb_dev[sel]->cs_horz.dwval = crop_w | (out_window_w << 17);
 		wb_dev[sel]->cs_vert.dwval = 0;
 		cs_out_w0 = out_window_w << 1;
 		cs_out_h0 = crop_h;
 	}
 	if ((crop_w <= (out_window_w << 1)) && (crop_h > (out_window_h << 1))) {
-		wb_dev[sel]->bypass.dwval |= 0x00000002;
+		bypass_val |= 0x00000002;
 		wb_dev[sel]->cs_horz.dwval = 0;
 		wb_dev[sel]->cs_vert.dwval = crop_h | (out_window_h << 17);
 		cs_out_w0 = crop_w;
@@ -343,7 +349,7 @@ s32 wb_ebios_set_para(u32 sel, struct disp_capture_config *cfg)
 	}
 	if ((crop_w <= (out_window_w << 1))
 		&& (crop_h <= (out_window_h << 1))) {
-		wb_dev[sel]->bypass.dwval &= 0xfffffffd;
+		bypass_val &= 0xfffffffd;
 		wb_dev[sel]->cs_horz.dwval = 0;
 		wb_dev[sel]->cs_vert.dwval = 0;
 		cs_out_w0 = crop_w;
@@ -366,13 +372,13 @@ s32 wb_ebios_set_para(u32 sel, struct disp_capture_config *cfg)
 	    (out_window_h >> 1) : out_window_h;
 	if ((cs_out_w0 == fs_out_w0) && (cs_out_h0 == fs_out_h0)
 	    && (cs_out_w1 == fs_out_w1) && (cs_out_h1 == fs_out_h1)) {
-		wb_dev[sel]->bypass.dwval &= 0xfffffffb;
+		bypass_val &= 0xfffffffb;
 		wb_dev[sel]->fs_hstep.dwval = 1 << 20;
 		wb_dev[sel]->fs_vstep.dwval = 1 << 20;
 	} else {
 		unsigned long long tmp;
 
-		wb_dev[sel]->bypass.dwval |= 0x00000004;
+		bypass_val |= 0x00000004;
 		tmp = ((long long)cs_out_w0 << LOCFRACBIT);
 		do_div(tmp, (long long)out_window_w);
 		step_h = (int)tmp;
@@ -406,6 +412,7 @@ s32 wb_ebios_set_para(u32 sel, struct disp_capture_config *cfg)
 	    (cs_out_w0 - 1) | ((cs_out_h0 - 1) << 16);
 	wb_dev[sel]->fs_outsize.dwval =
 	    (out_window_w - 1) | ((out_window_h - 1) << 16);
+	wb_dev[sel]->bypass.dwval = bypass_val;
 	return 0;
 }
 

@@ -1,8 +1,5 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
- * This file is subject to the terms and conditions of the GNU General Public
- * License.  See the file "COPYING" in the main directory of this archive
- * for more details.
- *
  * Copyright (C) 2009-2016 Cavium, Inc.
  */
 
@@ -73,8 +70,8 @@ static int thunder_mdiobus_pci_probe(struct pci_dev *pdev,
 		err = of_address_to_resource(node, 0, &r);
 		if (err) {
 			dev_err(&pdev->dev,
-				"Couldn't translate address for \"%s\"\n",
-				node->name);
+				"Couldn't translate address for \"%pOFn\"\n",
+				node);
 			break;
 		}
 
@@ -87,7 +84,7 @@ static int thunder_mdiobus_pci_probe(struct pci_dev *pdev,
 		nexus->buses[i] = bus;
 		i++;
 
-		bus->register_base = (u64)nexus->bar0 +
+		bus->register_base = nexus->bar0 +
 			r.start - pci_resource_start(pdev, 0);
 
 		smi_en.u64 = 0;
@@ -129,7 +126,6 @@ static void thunder_mdiobus_pci_remove(struct pci_dev *pdev)
 			continue;
 
 		mdiobus_unregister(bus->mii_bus);
-		mdiobus_free(bus->mii_bus);
 		oct_mdio_writeq(0, bus->register_base + SMI_EN);
 	}
 	pci_set_drvdata(pdev, NULL);
@@ -151,4 +147,4 @@ static struct pci_driver thunder_mdiobus_driver = {
 module_pci_driver(thunder_mdiobus_driver);
 
 MODULE_DESCRIPTION("Cavium ThunderX MDIO bus driver");
-MODULE_LICENSE("GPL");
+MODULE_LICENSE("GPL v2");

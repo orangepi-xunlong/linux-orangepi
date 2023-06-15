@@ -8,6 +8,7 @@
  * warranty of any kind, whether express or implied.
  */
 
+#include <linux/reset.h>
 #include "disp_vdevice.h"
 
 struct disp_vdevice_private_data {
@@ -26,7 +27,11 @@ struct disp_vdevice_private_data {
 	u32                       judge_line;
 
 	struct clk *clk;
+	struct clk *clk_bus;
 	struct clk *clk_parent;
+
+	struct reset_control *rst;
+
 	struct mutex mlock;
 };
 
@@ -100,8 +105,6 @@ static s32 vdevice_clk_config(struct disp_device *vdevice)
 
 	lcd_rate = dclk_rate * clk_info.tcon_div;
 	pll_rate = lcd_rate * clk_info.lcd_div;
-	if (vdevicep->clk_parent && vdevicep->clk)
-		clk_set_parent(vdevicep->clk, vdevicep->clk_parent);
 
 	/* set the rate of parent */
 	clk_set_rate(vdevicep->clk_parent, pll_rate);
@@ -131,6 +134,8 @@ static s32 vdevice_clk_enable(struct disp_device *vdevice)
 	}
 
 	vdevice_clk_config(vdevice);
+
+	reset_control_deassert(vdevicep->rst);
 	clk_prepare_enable(vdevicep->clk);
 
 	return 0;
@@ -146,7 +151,8 @@ static s32 vdevice_clk_disable(struct disp_device *vdevice)
 		return DIS_FAIL;
 	}
 
-	clk_disable(vdevicep->clk);
+	clk_disable_unprepare(vdevicep->clk);
+	reset_control_assert(vdevicep->rst);
 
 	return 0;
 }
@@ -439,7 +445,7 @@ static s32 disp_vdevice_check_if_enabled(struct disp_device *vdevice)
 
 #if !defined(CONFIG_COMMON_CLK_ENABLE_SYNCBOOT)
 	if (vdevicep->clk &&
-	   (__clk_get_enable_count(vdevicep->clk) == 0))
+	   (__clk_is_enabled(vdevicep->clk) == 0))
 		ret = 0;
 #endif
 
@@ -856,9 +862,11 @@ struct disp_device *disp_vdevice_register(struct disp_vdevice_init_data *data)
 	vdevice->type = data->type;
 	memcpy(&vdevicep->func, &data->func, sizeof(struct disp_device_func));
 
-	vdevicep->irq_no =
-	    gdisp.init_para.irq_no[DISP_MOD_LCD0 + vdevice->disp];
-	vdevicep->clk = gdisp.init_para.mclk[DISP_MOD_LCD0 + vdevice->disp];
+	vdevicep->irq_no = gdisp.init_para.irq_no[DISP_MOD_LCD0 + vdevice->disp];
+
+	vdevicep->clk = gdisp.init_para.clk_tcon[vdevice->disp];
+	vdevicep->clk_bus = gdisp.init_para.clk_bus_tcon[vdevice->disp];
+	vdevicep->rst = gdisp.init_para.rst_bus_tcon[vdevice->disp];
 
 	vdevice->set_manager = disp_device_set_manager;
 	vdevice->unset_manager = disp_device_unset_manager;

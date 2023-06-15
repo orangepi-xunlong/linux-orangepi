@@ -5,14 +5,13 @@
  */
 
 #include "dm.h"
-#include "dm-bufio.h"
 #include "dm-core.h"
 
 #include <linux/crc32.h>
+#include <linux/dm-bufio.h>
 #include <linux/module.h>
 
 #define DM_MSG_PREFIX "bow"
-#define SECTOR_SIZE 512
 
 struct log_entry {
 	u64 source;
@@ -176,7 +175,7 @@ static int split_range(struct bow_context *bc, struct bow_range **br,
 
 	if (bi_iter->bi_sector < (*br)->sector) {
 		WARN_ON(true);
-		return -EIO;
+		return BLK_STS_IOERR;
 	}
 
 	if (bi_iter->bi_sector > (*br)->sector) {
@@ -184,7 +183,7 @@ static int split_range(struct bow_context *bc, struct bow_range **br,
 			kzalloc(sizeof(*leading_br), GFP_KERNEL);
 
 		if (!leading_br)
-			return -ENOMEM;
+			return BLK_STS_RESOURCE;
 
 		*leading_br = **br;
 		if (leading_br->type == TRIMMED)
@@ -197,20 +196,20 @@ static int split_range(struct bow_context *bc, struct bow_range **br,
 	if (bvec_top(bi_iter) >= range_top(*br)) {
 		bi_iter->bi_size = (range_top(*br) - (*br)->sector)
 					* SECTOR_SIZE;
-		return 0;
+		return BLK_STS_OK;
 	}
 
 	/* new_br will be the beginning, existing br will be the tail */
 	new_br = kzalloc(sizeof(*new_br), GFP_KERNEL);
 	if (!new_br)
-		return -ENOMEM;
+		return BLK_STS_RESOURCE;
 
 	new_br->sector = (*br)->sector;
 	(*br)->sector = bvec_top(bi_iter);
 	add_before(&bc->ranges, new_br, *br);
 	*br = new_br;
 
-	return 0;
+	return BLK_STS_OK;
 }
 
 /*
@@ -280,7 +279,7 @@ static int copy_data(struct bow_context const *bc,
 
 	if (range_size(source) != range_size(dest)) {
 		WARN_ON(1);
-		return -EIO;
+		return BLK_STS_IOERR;
 	}
 
 	if (checksum)
@@ -318,7 +317,7 @@ static int copy_data(struct bow_context const *bc,
 	}
 
 	dm_bufio_write_dirty_buffers(bc->bufio);
-	return 0;
+	return BLK_STS_OK;
 }
 
 /****** logging functions ******/
@@ -337,18 +336,18 @@ static int backup_log_sector(struct bow_context *bc)
 
 	if (first_br->type != SECTOR0) {
 		WARN_ON(1);
-		return -EIO;
+		return BLK_STS_IOERR;
 	}
 
 	if (range_size(first_br) != bc->block_size) {
 		WARN_ON(1);
-		return -EIO;
+		return BLK_STS_IOERR;
 	}
 
 	free_br = find_free_range(bc);
 	/* No space left - return this error to userspace */
 	if (!free_br)
-		return -ENOSPC;
+		return BLK_STS_NOSPC;
 	bi_iter.bi_sector = free_br->sector;
 	bi_iter.bi_size = bc->block_size;
 	ret = split_range(bc, &free_br, &bi_iter);
@@ -356,7 +355,7 @@ static int backup_log_sector(struct bow_context *bc)
 		return ret;
 	if (bi_iter.bi_size != bc->block_size) {
 		WARN_ON(1);
-		return -EIO;
+		return BLK_STS_IOERR;
 	}
 
 	ret = copy_data(bc, first_br, free_br, &checksum);
@@ -371,7 +370,7 @@ static int backup_log_sector(struct bow_context *bc)
 		return ret;
 
 	set_type(bc, &free_br, BACKUP);
-	return 0;
+	return BLK_STS_OK;
 }
 
 static int add_log_entry(struct bow_context *bc, sector_t source, sector_t dest,
@@ -393,7 +392,7 @@ static int add_log_entry(struct bow_context *bc, sector_t source, sector_t dest,
 	if (IS_ERR(sector)) {
 		DMERR("Cannot write boot sector");
 		dm_bufio_release(sector_buffer);
-		return -ENOSPC;
+		return BLK_STS_NOSPC;
 	}
 
 	bc->log_sector->entries[bc->log_sector->count].source = source;
@@ -406,7 +405,7 @@ static int add_log_entry(struct bow_context *bc, sector_t source, sector_t dest,
 	dm_bufio_mark_buffer_dirty(sector_buffer);
 	dm_bufio_release(sector_buffer);
 	dm_bufio_write_dirty_buffers(bc->bufio);
-	return 0;
+	return BLK_STS_OK;
 }
 
 static int prepare_log(struct bow_context *bc)
@@ -420,12 +419,12 @@ static int prepare_log(struct bow_context *bc)
 	first_br = container_of(rb_first(&bc->ranges), struct bow_range, node);
 	if (first_br->type != UNCHANGED) {
 		WARN_ON(1);
-		return -EIO;
+		return BLK_STS_IOERR;
 	}
 
 	if (range_size(first_br) < bc->block_size) {
 		WARN_ON(1);
-		return -EIO;
+		return BLK_STS_IOERR;
 	}
 	bi_iter.bi_sector = 0;
 	bi_iter.bi_size = bc->block_size;
@@ -435,13 +434,13 @@ static int prepare_log(struct bow_context *bc)
 	first_br->type = SECTOR0;
 	if (range_size(first_br) != bc->block_size) {
 		WARN_ON(1);
-		return -EIO;
+		return BLK_STS_IOERR;
 	}
 
 	/* Find free sector for active sector0 reads/writes */
 	free_br = find_free_range(bc);
 	if (!free_br)
-		return -ENOSPC;
+		return BLK_STS_NOSPC;
 	bi_iter.bi_sector = free_br->sector;
 	bi_iter.bi_size = bc->block_size;
 	ret = split_range(bc, &free_br, &bi_iter);
@@ -459,7 +458,7 @@ static int prepare_log(struct bow_context *bc)
 	/* Find free sector to back up original sector zero */
 	free_br = find_free_range(bc);
 	if (!free_br)
-		return -ENOSPC;
+		return BLK_STS_NOSPC;
 	bi_iter.bi_sector = free_br->sector;
 	bi_iter.bi_size = bc->block_size;
 	ret = split_range(bc, &free_br, &bi_iter);
@@ -489,7 +488,7 @@ static int prepare_log(struct bow_context *bc)
 		return ret;
 
 	set_type(bc, &free_br, BACKUP);
-	return 0;
+	return BLK_STS_OK;
 }
 
 static struct bow_range *find_sector0_current(struct bow_context *bc)
@@ -622,6 +621,72 @@ static void dm_bow_dtr(struct dm_target *ti)
 	kfree(bc);
 }
 
+static void dm_bow_io_hints(struct dm_target *ti, struct queue_limits *limits)
+{
+	struct bow_context *bc = ti->private;
+	const unsigned int block_size = bc->block_size;
+
+	limits->logical_block_size =
+		max_t(unsigned short, limits->logical_block_size, block_size);
+	limits->physical_block_size =
+		max_t(unsigned int, limits->physical_block_size, block_size);
+	limits->io_min = max_t(unsigned int, limits->io_min, block_size);
+
+	if (limits->max_discard_sectors == 0) {
+		limits->discard_granularity = 1 << 12;
+		limits->max_hw_discard_sectors = 1 << 15;
+		limits->max_discard_sectors = 1 << 15;
+		bc->forward_trims = false;
+	} else {
+		limits->discard_granularity = 1 << 12;
+		bc->forward_trims = true;
+	}
+}
+
+static int dm_bow_ctr_optional(struct dm_target *ti, unsigned int argc,
+		char **argv)
+{
+	struct bow_context *bc = ti->private;
+	struct dm_arg_set as;
+	static const struct dm_arg _args[] = {
+		{0, 1, "Invalid number of feature args"},
+	};
+	unsigned int opt_params;
+	const char *opt_string;
+	int err;
+	char dummy;
+
+	as.argc = argc;
+	as.argv = argv;
+
+	err = dm_read_arg_group(_args, &as, &opt_params, &ti->error);
+	if (err)
+		return err;
+
+	while (opt_params--) {
+		opt_string = dm_shift_arg(&as);
+		if (!opt_string) {
+			ti->error = "Not enough feature arguments";
+			return -EINVAL;
+		}
+
+		if (sscanf(opt_string, "block_size:%u%c",
+					&bc->block_size, &dummy) == 1) {
+			if (bc->block_size < SECTOR_SIZE ||
+			    bc->block_size > 4096 ||
+			    !is_power_of_2(bc->block_size)) {
+				ti->error = "Invalid block_size";
+				return -EINVAL;
+			}
+		} else {
+			ti->error = "Invalid feature arguments";
+			return -EINVAL;
+		}
+	}
+
+	return 0;
+}
+
 static int dm_bow_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 {
 	struct bow_context *bc;
@@ -629,7 +694,7 @@ static int dm_bow_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	int ret;
 	struct mapped_device *md = dm_table_get_md(ti->table);
 
-	if (argc != 1) {
+	if (argc < 1) {
 		ti->error = "Invalid argument count";
 		return -EINVAL;
 	}
@@ -652,16 +717,13 @@ static int dm_bow_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 		goto bad;
 	}
 
-	if (bc->dev->bdev->bd_queue->limits.max_discard_sectors == 0) {
-		bc->dev->bdev->bd_queue->limits.discard_granularity = 1 << 12;
-		bc->dev->bdev->bd_queue->limits.max_hw_discard_sectors = 1 << 15;
-		bc->dev->bdev->bd_queue->limits.max_discard_sectors = 1 << 15;
-		bc->forward_trims = false;
-	} else {
-		bc->forward_trims = true;
+	bc->block_size = bc->dev->bdev->bd_queue->limits.logical_block_size;
+	if (argc > 1) {
+		ret = dm_bow_ctr_optional(ti, argc - 1, &argv[1]);
+		if (ret)
+			goto bad;
 	}
 
-	bc->block_size = bc->dev->bdev->bd_queue->limits.logical_block_size;
 	bc->block_shift = ilog2(bc->block_size);
 	bc->log_sector = kzalloc(bc->block_size, GFP_KERNEL);
 	if (!bc->log_sector) {
@@ -752,7 +814,7 @@ static int prepare_unchanged_range(struct bow_context *bc, struct bow_range *br,
 	/* Find a free range */
 	backup_br = find_free_range(bc);
 	if (!backup_br)
-		return -ENOSPC;
+		return BLK_STS_NOSPC;
 
 	/* Carve out a backup range. This may be smaller than the br given */
 	backup_bi.bi_sector = backup_br->sector;
@@ -771,7 +833,7 @@ static int prepare_unchanged_range(struct bow_context *bc, struct bow_range *br,
 		return ret;
 	if (range_size(br) != range_size(backup_br)) {
 		WARN_ON(1);
-		return -EIO;
+		return BLK_STS_IOERR;
 	}
 
 
@@ -792,6 +854,7 @@ static int prepare_unchanged_range(struct bow_context *bc, struct bow_range *br,
 	 */
 	original_type = br->type;
 	sector0 = backup_br->sector;
+	bc->trims_total -= range_size(backup_br);
 	if (backup_br->type == TRIMMED)
 		list_del(&backup_br->trimmed_list);
 	backup_br->type = br->type == SECTOR0_CURRENT ? SECTOR0_CURRENT
@@ -826,14 +889,14 @@ static int prepare_free_range(struct bow_context *bc, struct bow_range *br,
 	if (ret)
 		return ret;
 	set_type(bc, &br, CHANGED);
-	return 0;
+	return BLK_STS_OK;
 }
 
 static int prepare_changed_range(struct bow_context *bc, struct bow_range *br,
 				 struct bvec_iter *bi_iter)
 {
 	/* Nothing to do ... */
-	return 0;
+	return BLK_STS_OK;
 }
 
 static int prepare_one_range(struct bow_context *bc,
@@ -863,7 +926,7 @@ static int prepare_one_range(struct bow_context *bc,
 	case TOP:	/* Illegal - top is off the end of the device */
 	default:
 		WARN_ON(1);
-		return -EIO;
+		return BLK_STS_IOERR;
 	}
 }
 
@@ -879,7 +942,7 @@ static void bow_write(struct work_struct *work)
 	struct bow_context *bc = ww->bc;
 	struct bio *bio = ww->bio;
 	struct bvec_iter bi_iter = bio->bi_iter;
-	int ret = 0;
+	int ret = BLK_STS_OK;
 
 	kfree(ww);
 
@@ -895,11 +958,11 @@ static void bow_write(struct work_struct *work)
 	mutex_unlock(&bc->ranges_lock);
 
 	if (!ret) {
-		bio->bi_bdev = bc->dev->bdev;
+		bio_set_dev(bio, bc->dev->bdev);
 		submit_bio(bio);
 	} else {
 		DMERR("Write failure with error %d", -ret);
-		bio->bi_error = ret;
+		bio->bi_status = ret;
 		bio_endio(bio);
 	}
 }
@@ -928,17 +991,17 @@ static int handle_sector0(struct bow_context *bc, struct bio *bio)
 		struct bio * split = bio_split(bio,
 					       bc->block_size >> SECTOR_SHIFT,
 					       GFP_NOIO,
-					       fs_bio_set);
+					       &fs_bio_set);
 		if (!split) {
 			DMERR("Failed to split bio");
-			bio->bi_error = -ENOMEM;
+			bio->bi_status = BLK_STS_RESOURCE;
 			bio_endio(bio);
 			return DM_MAPIO_SUBMITTED;
 		}
 
 		bio_chain(split, bio);
 		split->bi_iter.bi_sector = bc->log_sector->sector0;
-		split->bi_bdev = bc->dev->bdev;
+		bio_set_dev(split, bc->dev->bdev);
 		submit_bio(split);
 
 		if (bio_data_dir(bio) == WRITE)
@@ -1030,11 +1093,11 @@ static int remove_trim(struct bow_context *bc, struct bio *bio)
 int remap_unless_illegal_trim(struct bow_context *bc, struct bio *bio)
 {
 	if (!bc->forward_trims && bio_op(bio) == REQ_OP_DISCARD) {
-		bio->bi_error = -EINVAL;
+		bio->bi_status = BLK_STS_NOTSUPP;
 		bio_endio(bio);
 		return DM_MAPIO_SUBMITTED;
 	} else {
-		bio->bi_bdev = bc->dev->bdev;
+		bio_set_dev(bio, bc->dev->bdev);
 		return DM_MAPIO_REMAPPED;
 	}
 }
@@ -1182,8 +1245,7 @@ static void dm_bow_status(struct dm_target *ti, status_type_t type,
 	}
 }
 
-int dm_bow_prepare_ioctl(struct dm_target *ti, struct block_device **bdev,
-			 fmode_t *mode)
+int dm_bow_prepare_ioctl(struct dm_target *ti, struct block_device **bdev)
 {
 	struct bow_context *bc = ti->private;
 	struct dm_dev *dev = bc->dev;
@@ -1203,7 +1265,8 @@ static int dm_bow_iterate_devices(struct dm_target *ti,
 
 static struct target_type bow_target = {
 	.name   = "bow",
-	.version = {1, 1, 1},
+	.version = {1, 2, 0},
+	.features = DM_TARGET_PASSES_CRYPTO,
 	.module = THIS_MODULE,
 	.ctr    = dm_bow_ctr,
 	.dtr    = dm_bow_dtr,
@@ -1211,6 +1274,7 @@ static struct target_type bow_target = {
 	.status = dm_bow_status,
 	.prepare_ioctl  = dm_bow_prepare_ioctl,
 	.iterate_devices = dm_bow_iterate_devices,
+	.io_hints = dm_bow_io_hints,
 };
 
 int __init dm_bow_init(void)

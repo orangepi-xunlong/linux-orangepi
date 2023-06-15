@@ -1,8 +1,11 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Copyright (C) 1999 Cort Dougan <cort@cs.nmt.edu>
  */
 #ifndef _ASM_POWERPC_BARRIER_H
 #define _ASM_POWERPC_BARRIER_H
+
+#include <asm/asm-const.h>
 
 /*
  * Memory barrier.
@@ -74,8 +77,6 @@ do {									\
 	__smp_lwsync();							\
 	___p1;								\
 })
-
-#define smp_mb__before_spinlock()   smp_mb()
 
 #ifdef CONFIG_PPC_BOOK3S_64
 #define NOSPEC_BARRIER_SLOT   nop

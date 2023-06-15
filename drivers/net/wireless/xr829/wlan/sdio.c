@@ -418,6 +418,7 @@ struct device *sbus_sdio_init(struct sbus_ops **sdio_ops,
 
 		/*module power up.*/
 		xradio_wlan_power(1);
+		mdelay(100);
 		/*detect sdio card.*/
 		xradio_sdio_detect(1);
 
@@ -438,6 +439,15 @@ struct device *sbus_sdio_init(struct sbus_ops **sdio_ops,
 			sbus_printk(XRADIO_DBG_ERROR, "sdio probe timeout!\n");
 			return NULL;
 		}
+	}
+
+	sdio_self.val32_r = (u32 *)kmalloc(sizeof(u32), GFP_KERNEL);
+	sdio_self.val32_w = (u32 *)kmalloc(sizeof(u32), GFP_KERNEL);
+	if (!sdio_self.val32_r || !sdio_self.val32_w) {
+		xradio_dbg(XRADIO_DBG_ERROR,
+			"%s, val32: kmalloc error!\n",
+			__func__);
+		return NULL;
 	}
 
 	/*register sbus.*/
@@ -465,6 +475,8 @@ retry:	xradio_sdio_detect(0);
 				goto retry;
 		}
 		sdio_unregister_driver(&sdio_driver);
+		kfree(sdio_self.val32_r);
+		kfree(sdio_self.val32_w);
 		memset(&sdio_self, 0, sizeof(sdio_self));
 		msleep(5);
 	} else {

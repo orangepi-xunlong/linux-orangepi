@@ -126,6 +126,7 @@ s32 tcon1_black_src(u32 sel, u32 on_off, u32 color);
 s32 edp_de_attach(u32 edp_index, u32 de_index);
 void tcon0_cpu_wr_16b_multi(u32 sel, u8 cmd, u8 *para, u32 para_num);
 void tcon0_cpu_wr_24b_multi(u32 sel, u8 cmd, u8 *para, u32 para_num);
+void tcon_reset(u32 sel);
 
 #if defined(SUPPORT_DSI)
 extern __u32 dsi_pixel_bits[4];

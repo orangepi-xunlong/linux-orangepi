@@ -20,7 +20,8 @@
 #include "linux/kernel.h"
 #include "linux/mm.h"
 #include <asm/uaccess.h>
-#include <asm/memory.h>
+/*#include <asm/memory.h>*/
+#include <linux/uaccess.h>
 #include <asm/unistd.h>
 #include "linux/semaphore.h"
 #include <linux/vmalloc.h>
@@ -53,6 +54,7 @@
 #include <linux/string.h>
 #include <linux/g2d_driver.h>
 #include <linux/dma-buf.h>
+#include <linux/reset.h>
 
 #define G2D_FINISH_IRQ		(1<<8)
 #define G2D_ERROR_IRQ			(1<<9)

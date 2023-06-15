@@ -47,7 +47,7 @@ renew_parental_timestamps(struct dentry *direntry)
 
 char *
 cifs_build_path_to_root(struct smb_vol *vol, struct cifs_sb_info *cifs_sb,
-			struct cifs_tcon *tcon)
+			struct cifs_tcon *tcon, int add_treename)
 {
 	int pplen = vol->prepath ? strlen(vol->prepath) + 1 : 0;
 	int dfsplen;
@@ -59,7 +59,7 @@ cifs_build_path_to_root(struct smb_vol *vol, struct cifs_sb_info *cifs_sb,
 		return full_path;
 	}
 
-	if (tcon->Flags & SMB_SHARE_IS_IN_DFS)
+	if (add_treename)
 		dfsplen = strnlen(tcon->treeName, MAX_TREE_SIZE + 1);
 	else
 		dfsplen = 0;
@@ -69,17 +69,27 @@ cifs_build_path_to_root(struct smb_vol *vol, struct cifs_sb_info *cifs_sb,
 		return full_path;
 
 	if (dfsplen)
-		strncpy(full_path, tcon->treeName, dfsplen);
+		memcpy(full_path, tcon->treeName, dfsplen);
 	full_path[dfsplen] = CIFS_DIR_SEP(cifs_sb);
-	strncpy(full_path + dfsplen + 1, vol->prepath, pplen);
+	memcpy(full_path + dfsplen + 1, vol->prepath, pplen);
 	convert_delimiter(full_path, CIFS_DIR_SEP(cifs_sb));
-	full_path[dfsplen + pplen] = 0; /* add trailing null */
 	return full_path;
 }
 
 /* Note: caller must free return buffer */
 char *
 build_path_from_dentry(struct dentry *direntry)
+{
+	struct cifs_sb_info *cifs_sb = CIFS_SB(direntry->d_sb);
+	struct cifs_tcon *tcon = cifs_sb_master_tcon(cifs_sb);
+	bool prefix = tcon->Flags & SMB_SHARE_IS_IN_DFS;
+
+	return build_path_from_dentry_optional_prefix(direntry,
+						      prefix);
+}
+
+char *
+build_path_from_dentry_optional_prefix(struct dentry *direntry, bool prefix)
 {
 	struct dentry *temp;
 	int namelen;
@@ -92,7 +102,7 @@ build_path_from_dentry(struct dentry *direntry)
 	unsigned seq;
 
 	dirsep = CIFS_DIR_SEP(cifs_sb);
-	if (tcon->Flags & SMB_SHARE_IS_IN_DFS)
+	if (prefix)
 		dfsplen = strnlen(tcon->treeName, MAX_TREE_SIZE + 1);
 	else
 		dfsplen = 0;
@@ -115,7 +125,7 @@ cifs_bp_rename_retry:
 	}
 	rcu_read_unlock();
 
-	full_path = kmalloc(namelen+1, GFP_KERNEL);
+	full_path = kmalloc(namelen+1, GFP_ATOMIC);
 	if (full_path == NULL)
 		return full_path;
 	full_path[namelen] = 0;	/* trailing null */
@@ -358,7 +368,7 @@ cifs_do_create(struct inode *inode, struct dentry *direntry, unsigned int xid,
 	oparms.path = full_path;
 	oparms.fid = fid;
 	oparms.reconnect = false;
-
+	oparms.mode = mode;
 	rc = server->ops->open(xid, &oparms, oplock, buf);
 	if (rc) {
 		cifs_dbg(FYI, "cifs_create returned 0x%x\n", rc);
@@ -454,8 +464,7 @@ out_err:
 
 int
 cifs_atomic_open(struct inode *inode, struct dentry *direntry,
-		 struct file *file, unsigned oflags, umode_t mode,
-		 int *opened)
+		 struct file *file, unsigned oflags, umode_t mode)
 {
 	int rc;
 	unsigned int xid;
@@ -528,9 +537,9 @@ cifs_atomic_open(struct inode *inode, struct dentry *direntry,
 	}
 
 	if ((oflags & (O_CREAT | O_EXCL)) == (O_CREAT | O_EXCL))
-		*opened |= FILE_CREATED;
+		file->f_mode |= FMODE_CREATED;
 
-	rc = finish_open(file, direntry, generic_file_open, opened);
+	rc = finish_open(file, direntry, generic_file_open);
 	if (rc) {
 		if (server->ops->close)
 			server->ops->close(xid, tcon, &fid);
@@ -551,7 +560,6 @@ cifs_atomic_open(struct inode *inode, struct dentry *direntry,
 		if (server->ops->close)
 			server->ops->close(xid, tcon, &fid);
 		cifs_del_pending_open(&open);
-		fput(file);
 		rc = -ENOMEM;
 	}
 
@@ -611,20 +619,10 @@ int cifs_mknod(struct inode *inode, struct dentry *direntry, umode_t mode,
 {
 	int rc = -EPERM;
 	unsigned int xid;
-	int create_options = CREATE_NOT_DIR | CREATE_OPTION_SPECIAL;
 	struct cifs_sb_info *cifs_sb;
 	struct tcon_link *tlink;
 	struct cifs_tcon *tcon;
-	struct cifs_io_parms io_parms;
 	char *full_path = NULL;
-	struct inode *newinode = NULL;
-	__u32 oplock = 0;
-	struct cifs_fid fid;
-	struct cifs_open_parms oparms;
-	FILE_ALL_INFO *buf = NULL;
-	unsigned int bytes_written;
-	struct win_dev *pdev;
-	struct kvec iov[2];
 
 	if (!old_valid_dev(device_number))
 		return -EINVAL;
@@ -644,103 +642,12 @@ int cifs_mknod(struct inode *inode, struct dentry *direntry, umode_t mode,
 		goto mknod_out;
 	}
 
-	if (tcon->unix_ext) {
-		struct cifs_unix_set_info_args args = {
-			.mode	= mode & ~current_umask(),
-			.ctime	= NO_CHANGE_64,
-			.atime	= NO_CHANGE_64,
-			.mtime	= NO_CHANGE_64,
-			.device	= device_number,
-		};
-		if (cifs_sb->mnt_cifs_flags & CIFS_MOUNT_SET_UID) {
-			args.uid = current_fsuid();
-			args.gid = current_fsgid();
-		} else {
-			args.uid = INVALID_UID; /* no change */
-			args.gid = INVALID_GID; /* no change */
-		}
-		rc = CIFSSMBUnixSetPathInfo(xid, tcon, full_path, &args,
-					    cifs_sb->local_nls,
-					    cifs_remap(cifs_sb));
-		if (rc)
-			goto mknod_out;
-
-		rc = cifs_get_inode_info_unix(&newinode, full_path,
-						inode->i_sb, xid);
-
-		if (rc == 0)
-			d_instantiate(direntry, newinode);
-		goto mknod_out;
-	}
-
-	if (!S_ISCHR(mode) && !S_ISBLK(mode))
-		goto mknod_out;
-
-	if (!(cifs_sb->mnt_cifs_flags & CIFS_MOUNT_UNX_EMUL))
-		goto mknod_out;
-
-
-	cifs_dbg(FYI, "sfu compat create special file\n");
-
-	buf = kmalloc(sizeof(FILE_ALL_INFO), GFP_KERNEL);
-	if (buf == NULL) {
-		rc = -ENOMEM;
-		goto mknod_out;
-	}
-
-	if (backup_cred(cifs_sb))
-		create_options |= CREATE_OPEN_BACKUP_INTENT;
-
-	oparms.tcon = tcon;
-	oparms.cifs_sb = cifs_sb;
-	oparms.desired_access = GENERIC_WRITE;
-	oparms.create_options = create_options;
-	oparms.disposition = FILE_CREATE;
-	oparms.path = full_path;
-	oparms.fid = &fid;
-	oparms.reconnect = false;
-
-	if (tcon->ses->server->oplocks)
-		oplock = REQ_OPLOCK;
-	else
-		oplock = 0;
-	rc = tcon->ses->server->ops->open(xid, &oparms, &oplock, buf);
-	if (rc)
-		goto mknod_out;
-
-	/*
-	 * BB Do not bother to decode buf since no local inode yet to put
-	 * timestamps in, but we can reuse it safely.
-	 */
-
-	pdev = (struct win_dev *)buf;
-	io_parms.pid = current->tgid;
-	io_parms.tcon = tcon;
-	io_parms.offset = 0;
-	io_parms.length = sizeof(struct win_dev);
-	iov[1].iov_base = buf;
-	iov[1].iov_len = sizeof(struct win_dev);
-	if (S_ISCHR(mode)) {
-		memcpy(pdev->type, "IntxCHR", 8);
-		pdev->major = cpu_to_le64(MAJOR(device_number));
-		pdev->minor = cpu_to_le64(MINOR(device_number));
-		rc = tcon->ses->server->ops->sync_write(xid, &fid, &io_parms,
-							&bytes_written, iov, 1);
-	} else if (S_ISBLK(mode)) {
-		memcpy(pdev->type, "IntxBLK", 8);
-		pdev->major = cpu_to_le64(MAJOR(device_number));
-		pdev->minor = cpu_to_le64(MINOR(device_number));
-		rc = tcon->ses->server->ops->sync_write(xid, &fid, &io_parms,
-							&bytes_written, iov, 1);
-	}
-	tcon->ses->server->ops->close(xid, tcon, &fid);
-	d_drop(direntry);
-
-	/* FIXME: add code here to set EAs */
+	rc = tcon->ses->server->ops->make_node(xid, inode, direntry, tcon,
+					       full_path, mode,
+					       device_number);
 
 mknod_out:
 	kfree(full_path);
-	kfree(buf);
 	free_xid(xid);
 	cifs_put_tlink(tlink);
 	return rc;
@@ -769,21 +676,25 @@ cifs_lookup(struct inode *parent_dir_inode, struct dentry *direntry,
 	tlink = cifs_sb_tlink(cifs_sb);
 	if (IS_ERR(tlink)) {
 		free_xid(xid);
-		return (struct dentry *)tlink;
+		return ERR_CAST(tlink);
 	}
 	pTcon = tlink_tcon(tlink);
 
 	rc = check_name(direntry, pTcon);
-	if (rc)
-		goto lookup_out;
+	if (unlikely(rc)) {
+		cifs_put_tlink(tlink);
+		free_xid(xid);
+		return ERR_PTR(rc);
+	}
 
 	/* can not grab the rename sem here since it would
 	deadlock in the cases (beginning of sys_rename itself)
 	in which we already have the sb rename sem */
 	full_path = build_path_from_dentry(direntry);
 	if (full_path == NULL) {
-		rc = -ENOMEM;
-		goto lookup_out;
+		cifs_put_tlink(tlink);
+		free_xid(xid);
+		return ERR_PTR(-ENOMEM);
 	}
 
 	if (d_really_is_positive(direntry)) {
@@ -802,40 +713,60 @@ cifs_lookup(struct inode *parent_dir_inode, struct dentry *direntry,
 				parent_dir_inode->i_sb, xid, NULL);
 	}
 
-	if ((rc == 0) && (newInode != NULL)) {
-		d_add(direntry, newInode);
+	if (rc == 0) {
 		/* since paths are not looked up by component - the parent
 		   directories are presumed to be good here */
 		renew_parental_timestamps(direntry);
-
 	} else if (rc == -ENOENT) {
-		rc = 0;
 		cifs_set_time(direntry, jiffies);
-		d_add(direntry, NULL);
-	/*	if it was once a directory (but how can we tell?) we could do
-		shrink_dcache_parent(direntry); */
-	} else if (rc != -EACCES) {
-		cifs_dbg(FYI, "Unexpected lookup error %d\n", rc);
-		/* We special case check for Access Denied - since that
-		is a common return code */
+		newInode = NULL;
+	} else {
+		if (rc != -EACCES) {
+			cifs_dbg(FYI, "Unexpected lookup error %d\n", rc);
+			/* We special case check for Access Denied - since that
+			is a common return code */
+		}
+		newInode = ERR_PTR(rc);
 	}
-
-lookup_out:
 	kfree(full_path);
 	cifs_put_tlink(tlink);
 	free_xid(xid);
-	return ERR_PTR(rc);
+	return d_splice_alias(newInode, direntry);
 }
 
 static int
 cifs_d_revalidate(struct dentry *direntry, unsigned int flags)
 {
+	struct inode *inode;
+	int rc;
+
 	if (flags & LOOKUP_RCU)
 		return -ECHILD;
 
 	if (d_really_is_positive(direntry)) {
-		if (cifs_revalidate_dentry(direntry))
-			return 0;
+		inode = d_inode(direntry);
+		if ((flags & LOOKUP_REVAL) && !CIFS_CACHE_READ(CIFS_I(inode)))
+			CIFS_I(inode)->time = 0; /* force reval */
+
+		rc = cifs_revalidate_dentry(direntry);
+		if (rc) {
+			cifs_dbg(FYI, "cifs_revalidate_dentry failed with rc=%d", rc);
+			switch (rc) {
+			case -ENOENT:
+			case -ESTALE:
+				/*
+				 * Those errors mean the dentry is invalid
+				 * (file was deleted or recreated)
+				 */
+				return 0;
+			default:
+				/*
+				 * Otherwise some unexpected error happened
+				 * report it as-is to VFS layer
+				 */
+				return rc;
+			}
+		}
 		else {
 			/*
 			 * If the inode wasn't known to be a dfs entry when
@@ -844,7 +775,7 @@ cifs_d_revalidate(struct dentry *direntry, unsigned int flags)
 			 * attributes will have been updated by
 			 * cifs_revalidate_dentry().
 			 */
-			if (IS_AUTOMOUNT(d_inode(direntry)) &&
+			if (IS_AUTOMOUNT(inode) &&
 			   !(direntry->d_flags & DCACHE_NEED_AUTOMOUNT)) {
 				spin_lock(&direntry->d_lock);
 				direntry->d_flags |= DCACHE_NEED_AUTOMOUNT;

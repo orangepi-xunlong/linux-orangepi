@@ -8,22 +8,20 @@
  * warranty of any kind, whether express or implied.
  */
 
+#include <linux/reset.h>
 #include "disp_manager.h"
 #include "disp_display.h"
 #include "../disp_trace.h"
 #include "disp_rtwb.h"
 
-#ifndef RTMX_USE_RCQ
-#define RTMX_USE_RCQ (0)
-#endif
-
-#define DMABUF_CACHE_MAX_EACH 10
-#define FORCE_SYNC_THRESHOLD 3
-#define DMABUF_REF_SIZE 7
+#define MAX_LAYERS 16
+#define FORCE_SYNC_THRESHOLD 4
 
 struct disp_manager_private_data {
 	bool applied;
 	bool enabled;
+	bool unmap_dmabuf;
+	bool setting;
 	bool color_range_modified;
 	struct disp_manager_data *cfg;
 
@@ -32,15 +30,17 @@ struct disp_manager_private_data {
 	u32 reg_base;
 	u32 irq_no;
 	struct clk *clk;
-#if defined(CONFIG_ARCH_SUN50IW10)
-	struct clk *clk1;
-#endif
+	struct clk *clk_bus;
 	struct clk *clk_parent;
-	struct clk *extra_clk;
-#if defined(CONFIG_ARCH_SUN50IW10)
-	struct clk *dpss0_clk;
-	struct clk *dpss1_clk;
+	struct clk *clk_extra;
+	struct clk *clk_dpss;
+
+	struct reset_control *rst;
+#if defined(HAVE_DEVICE_COMMON_MODULE)
+	struct reset_control *rst_extra;
 #endif
+	struct reset_control *rst_dpss;
+
 	unsigned int layers_using;
 	bool sync;
 	bool force_sync;
@@ -49,15 +49,16 @@ struct disp_manager_private_data {
 	bool err;
 	unsigned int err_cnt;
 	unsigned int dmabuf_unmap_skip_cnt;
+	unsigned int dmabuf_unmap_skip_cnt_max;
 	struct list_head dmabuf_list;
 	unsigned int dmabuf_cnt;
 	unsigned int dmabuf_cnt_max;
-	unsigned int dmabuf_overflow_cnt;
-	unsigned long long dmabuf_ref[DMABUF_REF_SIZE];
 
 	struct disp_irq_info irq_info;
 	wait_queue_head_t wait_rcq_finish_queue;
 	atomic_t wati_rcq_finish_flag;
+	bool iommu_en_flag;
+	unsigned int iommu_master_id;
 };
 
 static spinlock_t mgr_data_lock;
@@ -205,6 +206,10 @@ s32 __disp_config_transfer2inner(
 	config_inner->info.fb.scan = config->info.fb.scan;
 	config_inner->info.fb.eotf = DISP_EOTF_UNDEF;
 	config_inner->info.fb.fbd_en = 0;
+	config_inner->info.fb.lbc_en = config->info.fb.lbc_en;
+	memcpy(&config_inner->info.fb.lbc_info,
+	       &config->info.fb.lbc_info,
+	       sizeof(struct disp_lbc_info));
 	config_inner->info.fb.metadata_buf = 0;
 	config_inner->info.fb.fd = -911;
 	config_inner->info.fb.metadata_size = 0;
@@ -261,6 +266,10 @@ s32 __disp_config2_transfer2inner(struct disp_layer_config_inner *config_inner,
 	/* hdr related */
 	config_inner->info.fb.eotf = config2->info.fb.eotf;
 	config_inner->info.fb.fbd_en = config2->info.fb.fbd_en;
+	config_inner->info.fb.lbc_en = config2->info.fb.lbc_en;
+	memcpy(&config_inner->info.fb.lbc_info,
+	       &config2->info.fb.lbc_info,
+	       sizeof(struct disp_lbc_info));
 	config_inner->info.fb.metadata_fd = config2->info.fb.metadata_fd;
 	config_inner->info.fb.metadata_size = config2->info.fb.metadata_size;
 	config_inner->info.fb.metadata_flag =
@@ -328,6 +337,11 @@ s32 __disp_inner_transfer2config(struct disp_layer_config *config,
 	config->info.fb.flags = config_inner->info.fb.flags;
 	config->info.fb.scan = config_inner->info.fb.scan;
 
+	config->info.fb.lbc_en = config_inner->info.fb.lbc_en;
+	memcpy(&config->info.fb.lbc_info,
+	       &config_inner->info.fb.lbc_info,
+	       sizeof(struct disp_lbc_info));
+
 	if (config->info.mode == LAYER_MODE_COLOR)
 		config->info.color = config_inner->info.color;
 
@@ -373,6 +387,12 @@ s32 __disp_inner_transfer2config2(struct disp_layer_config2 *config2,
 	/* hdr related */
 	config2->info.fb.eotf = config_inner->info.fb.eotf;
 	config2->info.fb.fbd_en = config_inner->info.fb.fbd_en;
+
+	config2->info.fb.lbc_en = config_inner->info.fb.lbc_en;
+	memcpy(&config2->info.fb.lbc_info,
+	       &config_inner->info.fb.lbc_info,
+	       sizeof(struct disp_lbc_info));
+
 	config2->info.fb.metadata_fd = config_inner->info.fb.metadata_fd;
 	config2->info.fb.metadata_size = config_inner->info.fb.metadata_size;
 	config2->info.fb.metadata_flag =
@@ -704,6 +724,11 @@ static s32 disp_lyr_dump(struct disp_layer *lyr, char *buf)
 			 data.config.info.fb.size[1].height,
 			 data.config.info.fb.size[2].width,
 			 data.config.info.fb.size[2].height);
+	count += sprintf(buf + count, "align[%4u,%4u,%4u] ",
+				      data.config.info.fb.align[0],
+				      data.config.info.fb.align[1],
+				      data.config.info.fb.align[2]);
+
 	count += sprintf(buf + count, "crop[%4u,%4u,%4u,%4u] ",
 			 (unsigned int)(data.config.info.fb.crop.x >> 32),
 			 (unsigned int)(data.config.info.fb.crop.y >> 32),
@@ -913,11 +938,9 @@ static s32 disp_mgr_protect_reg_for_rcq(
 						 msecs_to_jiffies(1000/mgrp->cfg->config.device_fps + 1));
 			if (ret <= 0) {
 				atomic_set(&mgrp->wati_rcq_finish_flag, 2);
-				mgrp->sync = false;
 				disp_al_manager_set_rcq_update(mgr->disp, 0);
 				wake_up(&mgrp->wait_rcq_finish_queue);
 				gdisp.screen[mgr->disp].health_info.skip_cnt++;
-				mgr->update_regs(mgr);
 			} else
 				disp_al_manager_set_all_rcq_head_dirty(mgr->disp, 0);
 		}
@@ -955,6 +978,7 @@ static s32 disp_mgr_rcq_finish_irq_handler(
 {
 	struct disp_manager_private_data *mgrp = disp_mgr_get_priv(mgr);
 	u32 irq_state = 0;
+	unsigned long flags;
 
 	if ((mgr == NULL) || (mgrp == NULL)) {
 		__wrn("NULL hdl!\n");
@@ -970,7 +994,10 @@ static s32 disp_mgr_rcq_finish_irq_handler(
 			if (mgr->device->get_status(mgr->device) != 0)
 				gdisp.screen[mgr->disp].health_info.error_cnt++;
 		disp_al_manager_set_all_rcq_head_dirty(mgr->disp, 0);
-		mgrp->sync = true;
+		spin_lock_irqsave(&mgr_data_lock, flags);
+		/*rcq update ok, we know exactly what address is using, so just unmap dmabuf*/
+		mgrp->unmap_dmabuf = true;
+		spin_unlock_irqrestore(&mgr_data_lock, flags);
 		atomic_set(&mgrp->wati_rcq_finish_flag, 2);
 		wake_up(&mgrp->wait_rcq_finish_queue);
 	}
@@ -999,6 +1026,10 @@ static s32 disp_mgr_clk_init(struct disp_manager *mgr)
 	mgrp->clk_parent = clk_get_parent(mgrp->clk);
 	mgrp->cfg->config.de_freq = clk_get_rate(mgrp->clk);
 
+#if defined(DE_VERSION_V2X)
+	disp_al_update_de_clk_rate(mgrp->cfg->config.de_freq);
+#endif
+
 	return 0;
 }
 
@@ -1019,17 +1050,11 @@ static s32 disp_mgr_clk_enable(struct disp_manager *mgr)
 	struct disp_manager_private_data *mgrp = disp_mgr_get_priv(mgr);
 	int ret = 0;
 	unsigned long de_freq = 0;
-#if defined(CONFIG_ARCH_SUN50IW10)
-	unsigned long de1_freq = 0;
-#endif
 
 	if ((mgr == NULL) || (mgrp == NULL)) {
 		DE_WRN("NULL hdl!\n");
 		return -1;
 	}
-
-	if (mgrp->clk_parent && mgrp->clk)
-		clk_set_parent(mgrp->clk, mgrp->clk_parent);
 
 	if (mgr->get_clk_rate && mgrp->clk) {
 		DE_INF("set DE rate to %u\n", mgr->get_clk_rate(mgr));
@@ -1046,54 +1071,63 @@ static s32 disp_mgr_clk_enable(struct disp_manager *mgr)
 		}
 	}
 
+	clk_set_parent(mgrp->clk, mgrp->clk_parent);
 
 	DE_INF("mgr %d clk enable\n", mgr->disp);
-	ret = clk_prepare_enable(mgrp->clk);
-	if (ret != 0)
-		DE_WRN("fail enable mgr's clock!\n");
 
-	if (mgrp->extra_clk) {
-		ret = clk_prepare_enable(mgrp->extra_clk);
-		if (ret != 0)
-			DE_WRN("fail enable mgr's extra_clk!\n");
-	}
-#if defined(CONFIG_ARCH_SUN50IW10)
-	if (mgr->get_clk_rate && mgrp->clk1) {
-		DE_INF("set DE rate to %u\n", mgr->get_clk_rate(mgr));
-		de1_freq = mgr->get_clk_rate(mgr);
-		clk_set_rate(mgrp->clk1, de1_freq);
-		if (de1_freq != clk_get_rate(mgrp->clk1)) {
-			if (mgrp->clk_parent)
-				clk_set_rate(mgrp->clk_parent, de1_freq);
-			clk_set_rate(mgrp->clk1, de1_freq);
-			if (de1_freq != clk_get_rate(mgrp->clk1)) {
-				DE_WRN("Set DE clk fail\n");
-				return -1;
-			}
+	if (mgrp->rst_extra) {
+		ret = reset_control_deassert(mgrp->rst_extra);
+		if (ret) {
+			DE_WRN("%s(%d): reset_control_deassert for rst_display top failed, ret=%d\n", __func__, __LINE__, ret);
+			return ret;
 		}
 	}
-	clk_set_parent(mgrp->clk1, mgrp->clk_parent);
-	DE_INF("mgr %d clk enable\n", mgr->disp);
-	ret = clk_prepare_enable(mgrp->clk1);
-	if (ret != 0)
-		DE_WRN("fail enable mgr's clock!\n");
-	if (mgrp->dpss0_clk) {
-		ret = clk_prepare_enable(mgrp->dpss0_clk);
+
+	if (mgrp->clk_extra) {
+		ret = clk_prepare_enable(mgrp->clk_extra);
 		if (ret != 0)
-			DE_WRN("fail enable mgr's dpss0_clk!\n");
+			DE_WRN("fail enable mgr's clk_extra!\n");
 	}
-	if (mgrp->dpss1_clk) {
-		ret = clk_prepare_enable(mgrp->dpss1_clk);
-		if (ret != 0)
-			DE_WRN("fail enable mgr's dpss1_clk!\n");
+
+	ret = reset_control_deassert(mgrp->rst);
+	if (ret) {
+		DE_WRN("%s(%d): reset_control_deassert for rst failed\n", __func__, __LINE__);
+		return ret;
 	}
-#endif
+
+	ret = clk_prepare_enable(mgrp->clk);
+	if (ret) {
+		DE_WRN("%s(%d): clk_prepare_enable for clk failed\n", __func__, __LINE__);
+		return ret;
+	}
+
+	ret = clk_prepare_enable(mgrp->clk_bus);
+	if (ret) {
+		DE_WRN("%s(%d): clk_prepare_enable for clk_bus failed\n", __func__, __LINE__);
+		return ret;
+	}
+
+	if (mgrp->rst_dpss) {
+		ret = reset_control_deassert(mgrp->rst_dpss);
+		if (ret) {
+			DE_WRN("%s(%d): reset_control_deassert for rst_dpss failed, ret=%d\n", __func__, __LINE__, ret);
+			return ret;
+		}
+	}
+	if (mgrp->clk_dpss) {
+		ret = clk_prepare_enable(mgrp->clk_dpss);
+		if (ret) {
+			DE_WRN("%s(%d): clk_prepare_enable for clk_dpss failed, ret=%d\n", __func__, __LINE__, ret);
+			return ret;
+		}
+	}
 
 	return ret;
 }
 
 static s32 disp_mgr_clk_disable(struct disp_manager *mgr)
 {
+	int ret;
 	struct disp_manager_private_data *mgrp = disp_mgr_get_priv(mgr);
 
 	if ((mgr == NULL) || (mgrp == NULL)) {
@@ -1101,18 +1135,25 @@ static s32 disp_mgr_clk_disable(struct disp_manager *mgr)
 		return -1;
 	}
 
-	if (mgrp->extra_clk)
-		clk_disable(mgrp->extra_clk);
+	if (mgrp->clk_extra)
+		clk_disable_unprepare(mgrp->clk_extra);
+	if (mgrp->rst_extra)
+		reset_control_assert(mgrp->rst_extra);
 
-	clk_disable(mgrp->clk);
+	clk_disable_unprepare(mgrp->clk);
+	clk_disable_unprepare(mgrp->clk_bus);
 
-#if defined(CONFIG_ARCH_SUN50IW10)
-	if (mgrp->dpss0_clk)
-		clk_disable(mgrp->dpss0_clk);
-	if (mgrp->dpss1_clk)
-		clk_disable(mgrp->dpss1_clk);
-	clk_disable(mgrp->clk1);
-#endif
+	ret = reset_control_assert(mgrp->rst);
+	if (ret) {
+		DE_WRN("%s(%d): reset_control_assert for rst failed\n", __func__, __LINE__);
+		return ret;
+	}
+
+	if (mgrp->clk_dpss)
+		clk_disable(mgrp->clk_dpss);
+	if (mgrp->rst_dpss)
+		reset_control_assert(mgrp->rst_dpss);
+
 	return 0;
 }
 
@@ -1125,6 +1166,13 @@ static s32 disp_mgr_get_clk_rate(struct disp_manager *mgr)
 		DE_WRN("NULL hdl!\n");
 		return 0;
 	}
+
+#if defined(CONFIG_ARCH_SUN8IW16)
+	if (mgr->device && mgr->device->type != DISP_OUTPUT_TYPE_HDMI)
+		mgrp->cfg->config.de_freq = 216000000;
+	else
+		mgrp->cfg->config.de_freq = 432000000;
+#endif
 
 	return mgrp->cfg->config.de_freq;
 }
@@ -1155,6 +1203,31 @@ static s32 disp_mgr_exit(struct disp_manager *mgr)
 	disp_mgr_clk_exit(mgr);
 
 	return 0;
+}
+
+static s32 disp_mgr_set_palette(struct disp_manager *mgr, struct disp_palette_config *config)
+{
+	unsigned long flags;
+	unsigned int num_chns = 0;
+	struct disp_manager_private_data *mgrp = disp_mgr_get_priv(mgr);
+	if ((mgr == NULL) || (mgrp == NULL)) {
+		DE_WRN("NULL hdl!\n");
+		return -1;
+	}
+	num_chns = bsp_disp_feat_get_num_channels(mgr->disp);
+	if ((config == NULL) || (num_chns == 0) || (config->channel > num_chns)) {
+		DE_WRN("NULL hdl!\n");
+		return -1;
+	}
+	spin_lock_irqsave(&mgr_data_lock, flags);
+	memcpy(&mgrp->cfg->config.palette, config,
+	    sizeof(struct disp_palette_config));
+	mgrp->cfg->flag |= MANAGER_PALETTE_DIRTY;
+	spin_unlock_irqrestore(&mgr_data_lock, flags);
+
+	mgr->apply(mgr);
+
+	return DIS_SUCCESS;
 }
 
 static s32
@@ -1323,6 +1396,7 @@ static s32 disp_mgr_smooth_switch(struct disp_manager *mgr)
 	spin_lock_irqsave(&mgr_data_lock, flags);
 	mgrp->cfg->config.color_space = dev_config.cs;
 	mgrp->cfg->config.eotf = dev_config.eotf;
+	mgrp->cfg->config.hdr_type = dev_config.hdr_type;
 	mgrp->cfg->flag |= MANAGER_COLOR_SPACE_DIRTY;
 	spin_unlock_irqrestore(&mgr_data_lock, flags);
 
@@ -1586,48 +1660,10 @@ disp_mgr_set_layer_config(struct disp_manager *mgr,
 	return DIS_SUCCESS;
 }
 
-static void __disp_update_dmabuf_ref(struct disp_manager_private_data *mgrp)
-{
-	struct dmabuf_item *item;
-	int i;
-
-	for (i = 0; i < DMABUF_REF_SIZE; i++)
-		mgrp->dmabuf_ref[i] = 0;
-
-	list_for_each_entry(item, &mgrp->dmabuf_list, list) {
-		if (mgrp->dmabuf_ref[0] < item->id) {
-			for (i = DMABUF_REF_SIZE - 1; i > 0; i--)
-				mgrp->dmabuf_ref[i] = mgrp->dmabuf_ref[i - 1];
-
-			mgrp->dmabuf_ref[0] = item->id;
-		}
-	}
-}
-
 static void disp_mgr_dmabuf_list_add(struct dmabuf_item *item,
 			struct disp_manager_private_data *mgrp,
 			unsigned long long ref)
 {
-	struct dmabuf_item *old, *otmp, *same = NULL;
-	int shoot = 0;
-	/*prevent to add same item in list if app always set the same addr*/
-	list_for_each_entry_safe(old, otmp, &mgrp->dmabuf_list, list) {
-		if (!old || !item)
-			break;
-
-		if (old->lyr_id.disp == item->lyr_id.disp &&
-				old->lyr_id.channel == item->lyr_id.channel &&
-				old->lyr_id.layer_id == item->lyr_id.layer_id &&
-				old->dma_addr == item->dma_addr) {
-			same = old;
-			shoot++;
-		}
-	}
-	if (same && shoot > 2) {
-		list_del(&same->list);
-		disp_dma_unmap(same);
-		mgrp->dmabuf_cnt--;
-	}
 	item->id = ref;
 	list_add_tail(&item->list, &mgrp->dmabuf_list);
 	mgrp->dmabuf_cnt++;
@@ -1642,7 +1678,6 @@ s32 disp_mgr_set_layer_config2_restore(struct disp_manager *mgr,
 		struct disp_layer_config_data *lyr_cfg;
 		struct dmabuf_item *item;
 		struct disp_layer_config2 *config1 = config;
-		unsigned int layers_using = 0;
 		struct fb_address_transfer fb;
 		struct disp_device_dynamic_config dconf;
 
@@ -1670,8 +1705,6 @@ s32 disp_mgr_set_layer_config2_restore(struct disp_manager *mgr,
 				}
 			}
 
-			if (config1->enable == 1)
-				layers_using++;
 			config1++;
 		}
 
@@ -1788,20 +1821,18 @@ static s32 disp_mgr_is_address_using(u32 layer_num, struct dmabuf_item *item,
 		if (lyr_addr[i].lyr_id.disp == item->lyr_id.disp &&
 		    lyr_addr[i].lyr_id.channel == item->lyr_id.channel &&
 		    lyr_addr[i].lyr_id.layer_id == item->lyr_id.layer_id) {
-			if (lyr_addr[i].lyr_id.type == item->lyr_id.type) {
-				if (item->lyr_id.type & 0x1)
-					if (lyr_addr[i].dma_addr ==
-					    item->dma_addr)
-						return 1;
-				if (item->lyr_id.type & 0x2)
-					if (lyr_addr[i].trd_addr ==
-					    item->dma_addr)
-						return 1;
-				if (item->lyr_id.type & 0x4)
-					if (lyr_addr[i].atw_addr ==
-					    item->dma_addr)
-						return 1;
-			}
+			if (item->lyr_id.type & 0x1)
+				if (lyr_addr[i].dma_addr ==
+				    item->dma_addr)
+					return 1;
+			if (item->lyr_id.type & 0x2)
+				if (lyr_addr[i].trd_addr ==
+				    item->dma_addr)
+					return 1;
+			if (item->lyr_id.type & 0x4)
+				if (lyr_addr[i].atw_addr ==
+				    item->dma_addr)
+					return 1;
 		}
 	}
 
@@ -1833,11 +1864,57 @@ static s32 disp_unmap_afbc_header(struct disp_fb_info_inner *fb)
 	return 0;
 }
 
+static void disp_unmap_dmabuf(struct disp_manager *mgr, struct disp_manager_private_data *mgrp, unsigned int num_layers)
+{
+	struct disp_layer_config_data *lyr_cfg;
+	struct disp_layer_address *lyr_addr = NULL;
+	struct dmabuf_item *item, *tmp;
+	int i;
+	lyr_addr = kmalloc_array(num_layers, sizeof(struct disp_manager),
+			     GFP_KERNEL | __GFP_ZERO);
+
+	lyr_cfg = disp_mgr_get_layer_cfg_head(mgr);
+	for (i = 0; i < num_layers; ++i, ++lyr_cfg) {
+
+		if (lyr_cfg->config.enable == 0)
+			continue;
+		/*color mode and set_layer_config do no need to dma map*/
+		if (lyr_cfg->config.info.mode == LAYER_MODE_COLOR ||
+		    lyr_cfg->config.info.fb.fd == -911)
+			continue;
+		lyr_addr[i].lyr_id.disp = mgr->disp;
+		lyr_addr[i].lyr_id.channel = lyr_cfg->config.channel;
+		lyr_addr[i].lyr_id.layer_id = lyr_cfg->config.layer_id;
+		lyr_addr[i].dma_addr = lyr_cfg->config.info.fb.addr[0];
+		lyr_addr[i].lyr_id.type |= 0x1;
+		if (lyr_cfg->config.info.fb.flags == DISP_BF_STEREO_FP) {
+			lyr_addr[i].trd_addr =
+			    lyr_cfg->config.info.fb.trd_right_addr[0];
+			lyr_addr[i].lyr_id.type |= 0x2;
+		}
+		/* get dma_buf for atw coef buffer */
+		if (!lyr_cfg->config.info.atw.used)
+			continue;
+		lyr_addr[i].atw_addr = lyr_cfg->config.info.atw.cof_addr;
+		lyr_addr[i].lyr_id.type |= 0x4;
+	}
+
+	list_for_each_entry_safe(item, tmp, &mgrp->dmabuf_list, list) {
+		if (!disp_mgr_is_address_using(num_layers, item, lyr_addr)) {
+			list_del(&item->list);
+			disp_dma_unmap(item);
+			mgrp->dmabuf_cnt--;
+		}
+	}
+	kfree(lyr_addr);
+}
+
 static s32 disp_map_afbc_header(struct disp_fb_info_inner *fb)
 {
 	int ret;
 	if ((fb->metadata_fd < 0)
-		|| !(fb->metadata_flag & SUNXI_METADATA_FLAG_AFBC_HEADER)
+		|| !(fb->metadata_flag & SUNXI_METADATA_FLAG_AFBC_HEADER
+		|| (fb->metadata_flag & SUNXI_METADATA_FLAG_HDR10P_METADATA))
 		|| (fb->metadata_size == 0)) {
 		DE_WRN("invalid value\n");
 		return -1;
@@ -1871,26 +1948,26 @@ static s32 disp_map_afbc_header(struct disp_fb_info_inner *fb)
 	return 0;
 }
 
-static s32
-disp_mgr_set_layer_config2(struct disp_manager *mgr,
+s32 disp_mgr_set_layer_config2(struct disp_manager *mgr,
 			  struct disp_layer_config2 *config,
 			  unsigned int layer_num)
 {
 	struct disp_manager_private_data *mgrp;
 	unsigned int num_layers = 0, i = 0;
 	struct disp_layer *lyr = NULL;
-	struct disp_layer_config_data *lyr_cfg_using[layer_num];
+	struct disp_layer_config_data *lyr_cfg_using[MAX_LAYERS];
 	struct disp_layer_config_data *lyr_cfg;
-	struct dmabuf_item *item, *tmp;
+	struct dmabuf_item *item;
 	struct disp_layer_config2 *config1 = config;
 	unsigned long long ref = 0;
-	unsigned int layers_using = 0, layers_max_using;
-	struct disp_layer_address *lyr_addr = NULL;
 	struct fb_address_transfer fb;
 	bool pre_force_sync;
 	struct disp_device_dynamic_config dconf;
 	struct disp_device *dispdev = NULL;
 	unsigned int map_err_cnt = 0;
+	unsigned long flags;
+	bool unmap = false;
+	bool send_vsif = false;
 
 	if (mgr == NULL) {
 		DE_WRN("NULL hdl!\n");
@@ -1910,9 +1987,6 @@ disp_mgr_set_layer_config2(struct disp_manager *mgr,
 		DE_WRN("NULL hdl!\n");
 		goto err;
 	}
-	lyr_addr = kmalloc_array(num_layers, sizeof(struct disp_manager),
-			     GFP_KERNEL | __GFP_ZERO);
-
 
 	memset(&dconf, 0, sizeof(struct disp_device_dynamic_config));
 	mutex_lock(&mgr_mlock);
@@ -1930,6 +2004,20 @@ disp_mgr_set_layer_config2(struct disp_manager *mgr,
 		}
 		_force_layer2 = 1;
 	}
+
+	spin_lock_irqsave(&mgr_data_lock, flags);
+	if (mgrp->unmap_dmabuf) {
+		mgrp->unmap_dmabuf = false;
+		unmap = true;
+	}
+	/*if vysnc comes before finish modifying lyr_cfgs, we should not unmap after vsync, or we will get uncorrect using address*/
+	mgrp->setting = true;
+	spin_unlock_irqrestore(&mgr_data_lock, flags);
+
+	if (unmap)
+		disp_unmap_dmabuf(mgr, mgrp, num_layers);
+
+
 	for (i = 0; i < layer_num; i++) {
 		struct disp_layer *lyr = NULL;
 
@@ -1950,36 +2038,7 @@ disp_mgr_set_layer_config2(struct disp_manager *mgr,
 		}
 		lyr_cfg_using[i] = disp_mgr_get_layer_cfg(mgr, config1);
 
-		if (config1->enable == 1)
-			layers_using++;
 		config1++;
-	}
-
-
-	lyr_cfg = disp_mgr_get_layer_cfg_head(mgr);
-	for (i = 0; i < num_layers; ++i, ++lyr_cfg) {
-
-		if (lyr_cfg->config.enable == 0)
-			continue;
-		/*color mode and set_layer_config do no need to dma map*/
-		if (lyr_cfg->config.info.mode == LAYER_MODE_COLOR ||
-		    lyr_cfg->config.info.fb.fd == -911)
-			continue;
-		lyr_addr[i].lyr_id.disp = mgr->disp;
-		lyr_addr[i].lyr_id.channel = lyr_cfg->config.channel;
-		lyr_addr[i].lyr_id.layer_id = lyr_cfg->config.layer_id;
-		lyr_addr[i].dma_addr = lyr_cfg->config.info.fb.addr[0];
-		lyr_addr[i].lyr_id.type |= 0x1;
-		if (lyr_cfg->config.info.fb.flags == DISP_BF_STEREO_FP) {
-			lyr_addr[i].trd_addr =
-			    lyr_cfg->config.info.fb.trd_right_addr[0];
-			lyr_addr[i].lyr_id.type |= 0x2;
-		}
-		/* get dma_buf for atw coef buffer */
-		if (!lyr_cfg->config.info.atw.used)
-			continue;
-		lyr_addr[i].atw_addr = lyr_cfg->config.info.atw.cof_addr;
-		lyr_addr[i].lyr_id.type |= 0x4;
 	}
 
 	ref = gdisp.screen[mgr->disp].health_info.irq_cnt;
@@ -2024,18 +2083,33 @@ disp_mgr_set_layer_config2(struct disp_manager *mgr,
 				(unsigned int)fb.trd_right_addr[2];
 		disp_mgr_dmabuf_list_add(item, mgrp, ref);
 
-		if (lyr_cfg->config.info.fb.fbd_en)
+		if (lyr_cfg->config.info.fb.fbd_en
+			|| (lyr_cfg->config.info.fb.metadata_flag
+			& SUNXI_METADATA_FLAG_HDR10P_METADATA)) {
 			disp_map_afbc_header(&(lyr_cfg->config.info.fb));
+			if ((lyr_cfg->config.info.fb.metadata_flag
+				& SUNXI_METADATA_FLAG_HDR10P_METADATA)
+				&& mgr->device && mgr->device->set_vsif_config
+				&& mgrp->cfg->config.hdr_type == HDR10P) {
+				mgr->device->set_vsif_config(mgr->device,
+				(void *) lyr_cfg->config.info.fb.p_metadata,
+				&dconf);
+				send_vsif = true;
+			}
+		} else if (mgr->device && mgr->device->set_vsif_config
+			&& send_vsif == false) {
+			mgr->device->set_vsif_config(mgr->device, NULL, &dconf);
+		}
 
 		/* get dma_buf for right image buffer */
 		if (lyr_cfg->config.info.fb.flags == DISP_BF_STEREO_FP) {
 			item = disp_dma_map(lyr_cfg->config.info.atw.cof_fd);
-			memcpy(&back_dma_item[mgr->disp][1], item, sizeof(struct dmabuf_item));
 			if (item == NULL) {
 				DE_WRN("disp dma map for right buffer fail!\n");
 				lyr_cfg->config.info.fb.flags = DISP_BF_NORMAL;
 				continue;
 			}
+			memcpy(&back_dma_item[mgr->disp][1], item, sizeof(struct dmabuf_item));
 			item->lyr_id.disp = mgr->disp;
 			item->lyr_id.channel = lyr_cfg->config.channel;
 			item->lyr_id.layer_id = lyr_cfg->config.layer_id;
@@ -2094,12 +2168,12 @@ disp_mgr_set_layer_config2(struct disp_manager *mgr,
 			continue;
 
 		item = disp_dma_map(lyr_cfg->config.info.atw.cof_fd);
-		memcpy(&back_dma_item[mgr->disp][2], item, sizeof(struct dmabuf_item));
 		if (item == NULL) {
 			DE_WRN("disp dma map for atw coef fail!\n");
 			lyr_cfg->config.info.atw.used = 0;
 			continue;
 		}
+		memcpy(&back_dma_item[mgr->disp][2], item, sizeof(struct dmabuf_item));
 
 		item->lyr_id.disp = mgr->disp;
 		item->lyr_id.channel = lyr_cfg->config.channel;
@@ -2111,36 +2185,32 @@ disp_mgr_set_layer_config2(struct disp_manager *mgr,
 
 
 	}
-	if (map_err_cnt == 0)
-		__disp_update_dmabuf_ref(mgrp);
 
 	mgrp->dmabuf_cnt_max = (mgrp->dmabuf_cnt > mgrp->dmabuf_cnt_max) ?
-				mgrp->dmabuf_cnt : mgrp->dmabuf_cnt_max;
+			mgrp->dmabuf_cnt : mgrp->dmabuf_cnt_max;
 	if (!_force_layer_en) {
 		if (mgr->apply)
 			mgr->apply(mgr);
 
 		lyr_cfg = disp_mgr_get_layer_cfg_head(mgr);
 		for (i = 0; i < num_layers; i++, lyr_cfg++)
-			if (lyr_cfg->config.info.fb.fbd_en)
-				disp_unmap_afbc_header(
-				    &(lyr_cfg->config.info.fb));
+			if (lyr_cfg->config.info.fb.fbd_en
+				|| (lyr_cfg->config.info.fb.metadata_flag
+				& SUNXI_METADATA_FLAG_HDR10P_METADATA))
+				disp_unmap_afbc_header(&(lyr_cfg->config.info.fb));
 
 		list_for_each_entry(lyr, &mgr->lyr_list, list) {
 			lyr->dirty_clear(lyr);
 		}
 	}
 
-	/* we will force sync the manager when continue nosync appear */
+	/* finish modifying lyr_cfgs, vsync update register will make sw_reg == hw_reg == lyr_cfgs*/
+	spin_lock_irqsave(&mgr_data_lock, flags);
+	mgrp->setting = false;
+	spin_unlock_irqrestore(&mgr_data_lock, flags);
+
+	/* will force sync the manager when continue nosync appear */
 	mgrp->force_sync = false;
-#if RTMX_USE_RCQ
-	if (mgrp->force_sync_cnt !=
-	    gdisp.screen[mgr->disp].health_info.skip_cnt) {
-		mgrp->nosync_cnt = 0;
-		mgrp->force_sync_cnt++;
-		mgrp->force_sync = true;
-	}
-#else
 	if (!mgrp->sync) {
 		mgrp->nosync_cnt++;
 		if (mgrp->nosync_cnt >= FORCE_SYNC_THRESHOLD) {
@@ -2152,55 +2222,12 @@ disp_mgr_set_layer_config2(struct disp_manager *mgr,
 	} else {
 		mgrp->nosync_cnt = 0;
 	}
-#endif
 
-	layers_max_using = (layers_using > mgrp->layers_using) ?
-			layers_using : mgrp->layers_using;
-	mgrp->layers_using = layers_using;
-	if (mgrp->dmabuf_cnt > (DMABUF_CACHE_MAX_EACH * layers_max_using * 2))
-		goto exit_unmap;
-	/*
-	 * We skip unmap dma_buf when the manager is not sync
-	 * or there is a error.
-	 * But when the cache dma_buf number is overflow,
-	 * we will force unmap it.
-	 */
-	if ((mgrp->dmabuf_cnt < (DMABUF_CACHE_MAX_EACH * layers_max_using)) &&
-	    (!mgrp->sync || mgrp->err)) {
-		mgrp->dmabuf_unmap_skip_cnt++;
-		goto exit;
-	}
-
-	/* we will defer unmap until next 2 commit when force sync happens */
-	if (pre_force_sync || mgrp->force_sync) {
-		mgrp->dmabuf_unmap_skip_cnt++;
-		goto exit;
-	}
-
-	if (mgrp->dmabuf_cnt >= (DMABUF_CACHE_MAX_EACH * layers_max_using))
-		mgrp->dmabuf_overflow_cnt++;
-
-exit_unmap:
-	DISP_TRACE_BEGIN("unmap_dmabuf");
-	list_for_each_entry_safe(item, tmp, &mgrp->dmabuf_list, list) {
-		if (item->id < mgrp->dmabuf_ref[DMABUF_REF_SIZE - 1]) {
-			if (!disp_mgr_is_address_using(num_layers, item,
-						       lyr_addr)) {
-				list_del(&item->list);
-				disp_dma_unmap(item);
-				mgrp->dmabuf_cnt--;
-			}
-		}
-	}
-	DISP_TRACE_END("unmap_dmabuf");
-
-exit:
-	kfree(lyr_addr);
 	mutex_unlock(&mgr_mlock);
-
 	dispdev = mgr->device;
 	if ((dconf.metadata_flag & 0x3) &&
-		dispdev && dispdev->set_dynamic_config)
+		dispdev && dispdev->set_dynamic_config
+		&& send_vsif == false)
 		dispdev->set_dynamic_config(dispdev, &dconf);
 
 	return DIS_SUCCESS;
@@ -2302,8 +2329,15 @@ static s32 disp_mgr_sync(struct disp_manager *mgr, bool sync)
 	}
 
 	mgrp->sync = sync;
-	if (!mgrp->sync)
+	if (!mgrp->sync) {
+		mgrp->dmabuf_unmap_skip_cnt_max = mgrp->dmabuf_unmap_skip_cnt++ >
+							mgrp->dmabuf_unmap_skip_cnt_max ?
+							mgrp->dmabuf_unmap_skip_cnt :
+							mgrp->dmabuf_unmap_skip_cnt_max;
 		return 0;
+	}
+
+	mgrp->nosync_cnt = 0;
 
 	enhance = mgr->enhance;
 	smbl = mgr->smbl;
@@ -2329,6 +2363,16 @@ static s32 disp_mgr_sync(struct disp_manager *mgr, bool sync)
 	}
 	spin_lock_irqsave(&mgr_data_lock, flags);
 	mgrp->applied = false;
+	if (!mgrp->err && !mgrp->setting) {
+		mgrp->dmabuf_unmap_skip_cnt = 0;
+		/*update_regs ok, we know exactly what address is using, so just unmap dmabuf*/
+		mgrp->unmap_dmabuf = true;
+	} else {
+		mgrp->dmabuf_unmap_skip_cnt_max = mgrp->dmabuf_unmap_skip_cnt++ >
+							mgrp->dmabuf_unmap_skip_cnt_max ?
+							mgrp->dmabuf_unmap_skip_cnt :
+							mgrp->dmabuf_unmap_skip_cnt_max;
+	}
 	spin_unlock_irqrestore(&mgr_data_lock, flags);
 
 	/* enhance */
@@ -2503,7 +2547,7 @@ static s32 disp_mgr_enable(struct disp_manager *mgr)
 	unsigned long flags;
 	struct disp_manager_private_data *mgrp = disp_mgr_get_priv(mgr);
 	unsigned int width = 0, height = 0;
-	unsigned int cs = 0, color_range = DISP_COLOR_RANGE_0_255;
+	unsigned int color_range = DISP_COLOR_RANGE_0_255;
 	int ret;
 	struct disp_device_config dev_config;
 
@@ -2567,7 +2611,7 @@ static s32 disp_mgr_enable(struct disp_manager *mgr)
 	}
 
 	DE_INF("output res: %d x %d, cs=%d, range=%d, interlace=%d\n",
-	       width, height, cs, color_range, mgrp->cfg->config.interlace);
+	       width, height, dev_config.cs, color_range, mgrp->cfg->config.interlace);
 
 	mutex_lock(&mgr_mlock);
 	spin_lock_irqsave(&mgr_data_lock, flags);
@@ -2581,6 +2625,7 @@ static s32 disp_mgr_enable(struct disp_manager *mgr)
 	mgrp->cfg->config.color_space = dev_config.cs;
 	mgrp->cfg->config.eotf = dev_config.eotf;
 	mgrp->cfg->config.data_bits = dev_config.bits;
+	mgrp->cfg->config.hdr_type = dev_config.hdr_type;
 	if (!mgrp->color_range_modified)
 		mgrp->cfg->config.color_range = color_range;
 	mgrp->cfg->flag |= MANAGER_SIZE_DIRTY;
@@ -2596,6 +2641,9 @@ static s32 disp_mgr_enable(struct disp_manager *mgr)
 	return 0;
 }
 
+#ifndef RTMX_USE_RCQ
+#define RTMX_USE_RCQ (0)
+#endif
 
 static s32 disp_mgr_sw_enable(struct disp_manager *mgr)
 {
@@ -2604,14 +2652,15 @@ static s32 disp_mgr_sw_enable(struct disp_manager *mgr)
 	unsigned int width = 0, height = 0;
 	unsigned int cs = 0, color_range = DISP_COLOR_RANGE_0_255;
 	struct disp_device_config dev_config;
-	struct disp_device *dispdev;
-	unsigned long curtime;
-	unsigned int curline0, curline1;
 	struct disp_enhance *enhance = NULL;
 	struct disp_smbl *smbl = NULL;
 	struct disp_layer *lyr = NULL;
+#if RTMX_USE_RCQ
+	struct disp_device *dispdev;
+	unsigned long curtime;
+	unsigned int curline0, curline1;
 	unsigned long cnt = 0;
-
+#endif
 	memset(&dev_config, 0, sizeof(struct disp_device_config));
 	if ((mgr == NULL) || (mgrp == NULL)) {
 		DE_WRN("NULL hdl!\n");
@@ -2679,6 +2728,7 @@ static s32 disp_mgr_sw_enable(struct disp_manager *mgr)
 	mgrp->cfg->config.eotf = dev_config.eotf;
 	mgrp->cfg->config.data_bits = dev_config.bits;
 	mgrp->cfg->config.color_range = color_range;
+	mgrp->cfg->config.hdr_type = dev_config.hdr_type;
 	mgrp->cfg->flag |= MANAGER_ALL_DIRTY;
 	spin_unlock_irqrestore(&mgr_data_lock, flags);
 	list_for_each_entry(lyr, &mgr->lyr_list, list) {
@@ -2702,9 +2752,9 @@ static s32 disp_mgr_sw_enable(struct disp_manager *mgr)
 	if (dispdev) {
 		curline0 = disp_al_device_get_cur_line(dispdev->hwdev_index);
 		disp_mgr_sync(mgr, true);
-#if defined(CONFIG_SUNXI_IOMMU)
+#if IS_ENABLED(CONFIG_SUNXI_IOMMU)
 		DISP_TRACE_BEGIN("enable_iommu");
-		sunxi_enable_device_iommu(DE_MASTOR_ID, true);
+		mgr->enable_iommu(mgr, true);
 		DISP_TRACE_END("enable_iommu");
 #endif
 		curline1 = disp_al_device_get_cur_line(dispdev->hwdev_index);
@@ -2731,35 +2781,6 @@ static s32 disp_mgr_sw_enable(struct disp_manager *mgr)
 	DISP_TRACE_END("sw_apply");
 #else
 	disp_mgr_apply(mgr);
-	disp_mgr_update_regs(mgr);
-
-	/* wait for vertical blank period */
-	dispdev = mgr->device;
-	if (dispdev && dispdev->usec_before_vblank) {
-		curtime = jiffies;
-		while (dispdev->usec_before_vblank(dispdev) != 0) {
-			if (time_after(jiffies, curtime + msecs_to_jiffies(50)))
-				break;
-			cnt++;
-			if (cnt >= 1000 * 1000)
-				break;
-		}
-	}
-
-	if (dispdev) {
-		curline0 = disp_al_device_get_cur_line(dispdev->hwdev_index);
-		disp_mgr_sync(mgr, true);
-#if defined(CONFIG_SUNXI_IOMMU)
-		sunxi_enable_device_iommu(DE_MASTOR_ID, true);
-#endif
-		curline1 = disp_al_device_get_cur_line(dispdev->hwdev_index);
-		if (dispdev->is_in_safe_period) {
-			if (!dispdev->is_in_safe_period(dispdev)) {
-				DE_WRN("sync at non-safe period,start=%d,end=%d line\n",
-				       curline0, curline1);
-			}
-		}
-	}
 #endif
 
 	enhance = mgr->enhance;
@@ -2850,7 +2871,7 @@ static s32 disp_mgr_dump(struct disp_manager *mgr, char *buf)
 
 	count += sprintf(
 	    buf + count,
-	    "mgr%d: %dx%d fmt[%s] cs[0x%x] range[%s] eotf[0x%x] bits[%s] err[%u] force_sync[%u] %s direct_show[%s]\n",
+	    "mgr%d: %dx%d fmt[%s] cs[0x%x] range[%s] eotf[0x%x] bits[%s] err[%u] force_sync[%u] %s direct_show[%s] iommu[%d]\n",
 	    mgr->disp, mgrp->cfg->config.size.width, mgrp->cfg->config.size.height,
 	    (mgrp->cfg->config.cs < 4) ? fmt_name[mgrp->cfg->config.cs]
 				       : "undef",
@@ -2863,13 +2884,13 @@ static s32 disp_mgr_dump(struct disp_manager *mgr, char *buf)
 		mgrp->err_cnt,
 		 mgrp->force_sync_cnt,
 		 (mgrp->cfg->config.blank) ? "blank" : "unblank",
-	    (direct_show) ? "true" : "false");
+	    (direct_show) ? "true" : "false", mgrp->iommu_en_flag);
 
 	count += sprintf(
 	    buf + count,
-	    "dmabuf: cache[%d] cache max[%d] umap skip[%d] overflow[%d]\n",
+	    "dmabuf: cache[%d] cache max[%d] umap skip[%d] umap skip max[%d]\n",
 	    mgrp->dmabuf_cnt, mgrp->dmabuf_cnt_max, mgrp->dmabuf_unmap_skip_cnt,
-	    mgrp->dmabuf_overflow_cnt);
+	    mgrp->dmabuf_unmap_skip_cnt_max);
 
 	return count;
 
@@ -2911,6 +2932,20 @@ s32 disp_mgr_set_ksc_para(struct disp_manager *mgr,
 	spin_unlock_irqrestore(&mgr_data_lock, flags);
 
 	return mgr->apply(mgr);
+}
+
+extern void sunxi_enable_device_iommu(unsigned int mastor_id, bool flag);
+
+static s32 disp_mgr_enable_iommu(struct disp_manager *mgr, bool en)
+{
+#if IS_ENABLED(CONFIG_SUNXI_IOMMU)
+	struct disp_manager_private_data *mgrp = disp_mgr_get_priv(mgr);
+
+	if (mgrp->iommu_en_flag != en)
+		sunxi_enable_device_iommu(mgrp->iommu_master_id, en);
+	mgrp->iommu_en_flag = en;
+#endif
+	return 0;
 }
 
 s32 disp_init_mgr(struct disp_bsp_init_para *para)
@@ -2962,16 +2997,15 @@ s32 disp_init_mgr(struct disp_bsp_init_para *para)
 		mgrp->cfg = &mgr_cfgs[disp];
 		mgrp->irq_no = para->irq_no[DISP_MOD_DE];
 		mgrp->shadow_protect = para->shadow_protect;
-		mgrp->clk = para->mclk[DISP_MOD_DE];
-#if defined(CONFIG_ARCH_SUN50IW10)
-		mgrp->clk1 = para->mclk[DISP_MOD_DE1];
-		mgrp->dpss0_clk = para->mclk[DISP_MOD_DPSS0];
-		mgrp->dpss1_clk = para->mclk[DISP_MOD_DPSS1];
-#endif
-#if defined(HAVE_DEVICE_COMMON_MODULE)
-		mgrp->extra_clk = para->mclk[DISP_MOD_DEVICE];
-#endif
-
+		mgrp->clk = para->clk_de[disp];
+		mgrp->clk_bus = para->clk_bus_de[disp];
+		if (para->rst_bus_de[disp])
+			mgrp->rst = para->rst_bus_de[disp];
+		mgrp->clk_dpss = para->clk_bus_dpss_top[disp];
+		if (para->rst_bus_dpss_top[disp])
+			mgrp->rst_dpss = para->rst_bus_dpss_top[disp];
+		mgrp->clk_extra = para->clk_bus_extra;
+		mgrp->rst_extra = para->rst_bus_extra;
 		mgrp->irq_info.sel = disp;
 		mgrp->irq_info.irq_flag = disp_feat_is_using_rcq(disp) ?
 			DISP_AL_IRQ_FLAG_RCQ_FINISH : 0;
@@ -2981,6 +3015,10 @@ s32 disp_init_mgr(struct disp_bsp_init_para *para)
 			init_waitqueue_head(&mgrp->wait_rcq_finish_queue);
 			atomic_set(&mgrp->wati_rcq_finish_flag, 0);
 		}
+
+		mgrp->iommu_master_id =
+		    (disp == 0) ? IOMMU_DE0_MASTOR_ID : IOMMU_DE1_MASTOR_ID;
+
 
 		mgr->enable = disp_mgr_enable;
 		mgr->sw_enable = disp_mgr_sw_enable;
@@ -3004,6 +3042,7 @@ s32 disp_init_mgr(struct disp_bsp_init_para *para)
 		mgr->dump = disp_mgr_dump;
 		mgr->blank = disp_mgr_blank;
 		mgr->get_clk_rate = disp_mgr_get_clk_rate;
+		mgr->set_palette = disp_mgr_set_palette;
 
 		mgr->init = disp_mgr_init;
 		mgr->exit = disp_mgr_exit;
@@ -3013,6 +3052,7 @@ s32 disp_init_mgr(struct disp_bsp_init_para *para)
 		mgr->force_apply = disp_mgr_force_apply;
 		mgr->sync = disp_mgr_sync;
 		mgr->tasklet = disp_mgr_tasklet;
+		mgr->enable_iommu = disp_mgr_enable_iommu;
 
 		if (disp_feat_is_using_rcq(disp))
 			mgr->reg_protect = disp_mgr_protect_reg_for_rcq;
@@ -3065,16 +3105,15 @@ disp_mgr_set_rtwb_layer(struct disp_manager *mgr,
 			  struct disp_capture_info2 *p_cptr_info,
 			  unsigned int layer_num)
 {
+#define LAYER_NUM_MAX 16
 	struct disp_manager_private_data *mgrp;
 	unsigned int num_layers = 0, i = 0;
 	struct disp_layer *lyr = NULL;
-	struct disp_layer_config_data *lyr_cfg_using[layer_num];
+	struct disp_layer_config_data *lyr_cfg_using[LAYER_NUM_MAX];
 	struct disp_layer_config_data *lyr_cfg;
-	struct dmabuf_item *item, *tmp, *wb_item;
+	struct dmabuf_item *item, *wb_item;
 	struct disp_layer_config2 *config1 = config;
 	unsigned long long ref = 0;
-	unsigned int layers_using = 0;
-	struct disp_layer_address *lyr_addr = NULL;
 	struct fb_address_transfer fb;
 	bool pre_force_sync;
 	struct disp_device_dynamic_config dconf;
@@ -3100,17 +3139,16 @@ disp_mgr_set_rtwb_layer(struct disp_manager *mgr,
 	DE_INF("mgr%d, config %d layers\n", mgr->disp, layer_num);
 
 	num_layers = bsp_disp_feat_get_num_layers(mgr->disp);
-	if ((config == NULL) || (layer_num == 0) || (layer_num > num_layers)) {
+	if ((config == NULL) || (layer_num == 0) || (layer_num > num_layers) || (layer_num > LAYER_NUM_MAX)) {
 		DE_WRN("NULL hdl!\n");
 		goto err;
 	}
-	lyr_addr = kmalloc_array(num_layers, sizeof(struct disp_manager),
-			     GFP_KERNEL | __GFP_ZERO);
-
 
 	memset(&dconf, 0, sizeof(struct disp_device_dynamic_config));
 	mutex_lock(&mgr_mlock);
 
+	/*every call of set_rtwb_layer should update hw_reg/sw_reg/lyr_cfgs successfully, it is ok to unmap dmabuf*/
+	disp_unmap_dmabuf(mgr, mgrp, num_layers);
 	for (i = 0; i < layer_num; i++) {
 		struct disp_layer *lyr = NULL;
 
@@ -3131,38 +3169,11 @@ disp_mgr_set_rtwb_layer(struct disp_manager *mgr,
 		}
 		lyr_cfg_using[i] = disp_mgr_get_layer_cfg(mgr, config1);
 
-		if (config1->enable == 1)
-			layers_using++;
 		config1++;
 	}
 
 
 	lyr_cfg = disp_mgr_get_layer_cfg_head(mgr);
-	for (i = 0; i < num_layers; ++i, ++lyr_cfg) {
-
-		if (lyr_cfg->config.enable == 0)
-			continue;
-		/*color mode and set_layer_config do no need to dma map*/
-		if (lyr_cfg->config.info.mode == LAYER_MODE_COLOR ||
-		    lyr_cfg->config.info.fb.fd == -911)
-			continue;
-		lyr_addr[i].lyr_id.disp = mgr->disp;
-		lyr_addr[i].lyr_id.channel = lyr_cfg->config.channel;
-		lyr_addr[i].lyr_id.layer_id = lyr_cfg->config.layer_id;
-		lyr_addr[i].dma_addr = lyr_cfg->config.info.fb.addr[0];
-		lyr_addr[i].lyr_id.type |= 0x1;
-		if (lyr_cfg->config.info.fb.flags == DISP_BF_STEREO_FP) {
-			lyr_addr[i].trd_addr =
-			    lyr_cfg->config.info.fb.trd_right_addr[0];
-			lyr_addr[i].lyr_id.type |= 0x2;
-		}
-		/* get dma_buf for atw coef buffer */
-		if (!lyr_cfg->config.info.atw.used)
-			continue;
-		lyr_addr[i].atw_addr = lyr_cfg->config.info.atw.cof_addr;
-		lyr_addr[i].lyr_id.type |= 0x4;
-	}
-
 	ref = gdisp.screen[mgr->disp].health_info.irq_cnt;
 
 	for (i = 0, lyr_cfg = lyr_cfg_using[0]; i < layer_num; i++, lyr_cfg++) {
@@ -3205,18 +3216,21 @@ disp_mgr_set_rtwb_layer(struct disp_manager *mgr,
 				(unsigned int)fb.trd_right_addr[2];
 		disp_mgr_dmabuf_list_add(item, mgrp, ref);
 
-		if (lyr_cfg->config.info.fb.fbd_en)
+		if (lyr_cfg->config.info.fb.fbd_en
+			|| (lyr_cfg->config.info.fb.metadata_flag
+			& SUNXI_METADATA_FLAG_HDR10P_METADATA)) {
 			disp_map_afbc_header(&(lyr_cfg->config.info.fb));
+		}
 
 		/* get dma_buf for right image buffer */
 		if (lyr_cfg->config.info.fb.flags == DISP_BF_STEREO_FP) {
 			item = disp_dma_map(lyr_cfg->config.info.atw.cof_fd);
-			memcpy(&back_dma_item[mgr->disp][1], item, sizeof(struct dmabuf_item));
 			if (item == NULL) {
 				DE_WRN("disp dma map for right buffer fail!\n");
 				lyr_cfg->config.info.fb.flags = DISP_BF_NORMAL;
 				continue;
 			}
+			memcpy(&back_dma_item[mgr->disp][1], item, sizeof(struct dmabuf_item));
 			item->lyr_id.disp = mgr->disp;
 			item->lyr_id.channel = lyr_cfg->config.channel;
 			item->lyr_id.layer_id = lyr_cfg->config.layer_id;
@@ -3275,12 +3289,12 @@ disp_mgr_set_rtwb_layer(struct disp_manager *mgr,
 			continue;
 
 		item = disp_dma_map(lyr_cfg->config.info.atw.cof_fd);
-		memcpy(&back_dma_item[mgr->disp][2], item, sizeof(struct dmabuf_item));
 		if (item == NULL) {
 			DE_WRN("disp dma map for atw coef fail!\n");
 			lyr_cfg->config.info.atw.used = 0;
 			continue;
 		}
+		memcpy(&back_dma_item[mgr->disp][2], item, sizeof(struct dmabuf_item));
 
 		item->lyr_id.disp = mgr->disp;
 		item->lyr_id.channel = lyr_cfg->config.channel;
@@ -3292,8 +3306,6 @@ disp_mgr_set_rtwb_layer(struct disp_manager *mgr,
 
 
 	}
-	if (map_err_cnt == 0)
-		__disp_update_dmabuf_ref(mgrp);
 
 	mgrp->dmabuf_cnt_max = (mgrp->dmabuf_cnt > mgrp->dmabuf_cnt_max) ?
 				mgrp->dmabuf_cnt : mgrp->dmabuf_cnt_max;
@@ -3302,9 +3314,10 @@ disp_mgr_set_rtwb_layer(struct disp_manager *mgr,
 
 	lyr_cfg = disp_mgr_get_layer_cfg_head(mgr);
 	for (i = 0; i < num_layers; i++, lyr_cfg++)
-		if (lyr_cfg->config.info.fb.fbd_en)
-			disp_unmap_afbc_header(
-					       &(lyr_cfg->config.info.fb));
+		if (lyr_cfg->config.info.fb.fbd_en
+			|| (lyr_cfg->config.info.fb.metadata_flag
+			& SUNXI_METADATA_FLAG_HDR10P_METADATA))
+			disp_unmap_afbc_header(&(lyr_cfg->config.info.fb));
 
 	list_for_each_entry(lyr, &mgr->lyr_list, list) {
 		lyr->dirty_clear(lyr);
@@ -3315,24 +3328,18 @@ disp_mgr_set_rtwb_layer(struct disp_manager *mgr,
 
 	ret = disp_rtwb_wait_finish(mgr);
 
-
-	list_for_each_entry_safe(item, tmp, &mgrp->dmabuf_list, list) {
-		if (item->id < mgrp->dmabuf_ref[DMABUF_REF_SIZE - 1]) {
-			if (!disp_mgr_is_address_using(num_layers, item,
-						       lyr_addr)) {
-				list_del(&item->list);
-				disp_dma_unmap(item);
-				mgrp->dmabuf_cnt--;
-			}
-		}
-	}
 	disp_dma_unmap(wb_item);
 
-	kfree(lyr_addr);
 	mutex_unlock(&mgr_mlock);
-
 
 err:
 	return ret;
 }
 #endif
+
+void disp_pq_force_flush(int disp)
+{
+	if (mgrs != NULL && disp < bsp_disp_feat_get_num_screens()) {
+		disp_mgr_force_apply(&mgrs[disp]);
+	}
+}

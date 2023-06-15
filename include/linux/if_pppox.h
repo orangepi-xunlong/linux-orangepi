@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /***************************************************************************
  * Linux PPP over X - Generic PPP transport layer sockets
  * Linux PPP over Ethernet (PPPoE) Socket Implementation (RFC 2516) 
@@ -6,11 +7,6 @@
  * (pppox.c).  All version information wrt this file is located in pppox.c
  *
  * License:
- *		This program is free software; you can redistribute it and/or
- *		modify it under the terms of the GNU General Public License
- *		as published by the Free Software Foundation; either version
- *		2 of the License, or (at your option) any later version.
- *
  */
 #ifndef __LINUX_IF_PPPOX_H
 #define __LINUX_IF_PPPOX_H
@@ -43,25 +39,6 @@ struct pptp_opt {
 	u32 seq_sent, seq_recv;
 	int ppp_flags;
 };
-
-struct pppolac_opt {
-	__u32		local;
-	__u32		remote;
-	__u32		recv_sequence;
-	__u32		xmit_sequence;
-	atomic_t	sequencing;
-	int		(*backlog_rcv)(struct sock *sk_udp, struct sk_buff *skb);
-};
-
-struct pppopns_opt {
-	__u16		local;
-	__u16		remote;
-	__u32		recv_sequence;
-	__u32		xmit_sequence;
-	void		(*data_ready)(struct sock *sk_raw);
-	int		(*backlog_rcv)(struct sock *sk_raw, struct sk_buff *skb);
-};
-
 #include <net/sock.h>
 
 struct pppox_sock {
@@ -72,8 +49,6 @@ struct pppox_sock {
 	union {
 		struct pppoe_opt pppoe;
 		struct pptp_opt  pptp;
-		struct pppolac_opt lac;
-		struct pppopns_opt pns;
 	} proto;
 	__be16			num;
 };
@@ -105,6 +80,9 @@ extern int register_pppox_proto(int proto_num, const struct pppox_proto *pp);
 extern void unregister_pppox_proto(int proto_num);
 extern void pppox_unbind_sock(struct sock *sk);/* delete ppp-channel binding */
 extern int pppox_ioctl(struct socket *sock, unsigned int cmd, unsigned long arg);
+extern int pppox_compat_ioctl(struct socket *sock, unsigned int cmd, unsigned long arg);
+
+#define PPPOEIOCSFWD32    _IOW(0xB1 ,0, compat_size_t)
 
 /* PPPoX socket states */
 enum {

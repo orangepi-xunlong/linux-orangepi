@@ -17,6 +17,7 @@
  *
  ******************************************************************************/
 
+#ifdef CONFIG_DISP2_SUNXI_SUPPORT_ENAHNCE
 #include "de_fce_type.h"
 #include "de_rtmx.h"
 #include "de_enhance.h"
@@ -1184,3 +1185,4 @@ int de_ce_tasklet(unsigned int sel, unsigned int chno, unsigned int frame_cnt)
 
 	return 0;
 }
+#endif

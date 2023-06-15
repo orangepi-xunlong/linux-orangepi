@@ -68,13 +68,25 @@ static int __xradio_write(struct xradio_common *hw_priv, u16 addr,
 static inline int __xradio_read_reg32(struct xradio_common *hw_priv,
 				       u16 addr, u32 *val)
 {
-	return __xradio_read(hw_priv, addr, val, sizeof(val), 0);
+	int ret = 0;
+
+	*hw_priv->sbus_priv->val32_r = 0;
+	ret = __xradio_read(hw_priv, addr, hw_priv->sbus_priv->val32_r, sizeof(u32), 0);
+	*val = *hw_priv->sbus_priv->val32_r;
+
+	return ret;
 }
 
 static inline int __xradio_write_reg32(struct xradio_common *hw_priv,
 					u16 addr, u32 val)
 {
-	return __xradio_write(hw_priv, addr, &val, sizeof(val), 0);
+	int ret = 0;
+
+	*hw_priv->sbus_priv->val32_w = val;
+	ret = __xradio_write(hw_priv, addr, hw_priv->sbus_priv->val32_w, sizeof(u32), 0);
+	*hw_priv->sbus_priv->val32_w = 0;
+
+	return ret;
 }
 
 int xradio_reg_read(struct xradio_common *hw_priv, u16 addr,
@@ -83,7 +95,9 @@ int xradio_reg_read(struct xradio_common *hw_priv, u16 addr,
 	int ret;
 	SYS_BUG(!hw_priv->sbus_ops);
 	hw_priv->sbus_ops->lock(hw_priv->sbus_priv);
-	ret = __xradio_read(hw_priv, addr, buf, buf_len, 0);
+	*hw_priv->sbus_priv->val32_r = 0;
+	ret = __xradio_read(hw_priv, addr, hw_priv->sbus_priv->val32_r, buf_len, 0);
+	*(u32 *)buf = *hw_priv->sbus_priv->val32_r;
 	hw_priv->sbus_ops->unlock(hw_priv->sbus_priv);
 	return ret;
 }
@@ -94,7 +108,9 @@ int xradio_reg_write(struct xradio_common *hw_priv, u16 addr,
 	int ret;
 	SYS_BUG(!hw_priv->sbus_ops);
 	hw_priv->sbus_ops->lock(hw_priv->sbus_priv);
-	ret = __xradio_write(hw_priv, addr, buf, buf_len, 0);
+	*hw_priv->sbus_priv->val32_w = *(u32 *)buf;
+	ret = __xradio_write(hw_priv, addr, hw_priv->sbus_priv->val32_w, buf_len, 0);
+	*hw_priv->sbus_priv->val32_w = 0;
 	hw_priv->sbus_ops->unlock(hw_priv->sbus_priv);
 	return ret;
 }
@@ -239,7 +255,13 @@ int xradio_indirect_read(struct xradio_common *hw_priv, u32 addr, void *buf,
 	}
 
 	/* Read data port */
-	ret = __xradio_read(hw_priv, port_addr, buf, buf_len, 0);
+	if (buf_len == sizeof(u32)) {
+		*hw_priv->sbus_priv->val32_r = 0;
+		ret = __xradio_read(hw_priv, port_addr, hw_priv->sbus_priv->val32_r, buf_len, 0);
+		*(u32 *)buf = *hw_priv->sbus_priv->val32_r;
+	} else {
+		ret = __xradio_read(hw_priv, port_addr, buf, buf_len, 0);
+	}
 	if (ret < 0) {
 		sbus_printk(XRADIO_DBG_ERROR,
 			    "%s: Can't read data port.\n", __func__);
@@ -273,7 +295,15 @@ int xradio_apb_write(struct xradio_common *hw_priv, u32 addr, const void *buf,
 	}
 
 	/* Write data port */
-	ret = __xradio_write(hw_priv, HIF_SRAM_DPORT_REG_ID, buf, buf_len, 0);
+	if (buf_len == sizeof(u32)) {
+		memcpy(hw_priv->sbus_priv->val32_w, buf, sizeof(u32));
+		ret = __xradio_write(hw_priv, HIF_SRAM_DPORT_REG_ID,
+				hw_priv->sbus_priv->val32_w, buf_len, 0);
+		memset(hw_priv->sbus_priv->val32_w, 0, sizeof(u32));
+	} else {
+		ret = __xradio_write(hw_priv, HIF_SRAM_DPORT_REG_ID, buf, buf_len, 0);
+	}
+
 	if (ret < 0) {
 		sbus_printk(XRADIO_DBG_ERROR, "%s: Can't write data port.\n",
 			    __func__);
@@ -308,7 +338,15 @@ int xradio_ahb_write(struct xradio_common *hw_priv, u32 addr, const void *buf,
 	}
 
 	/* Write data port */
-	ret = __xradio_write(hw_priv, HIF_AHB_DPORT_REG_ID, buf, buf_len, 0);
+	if (buf_len == sizeof(u32)) {
+		memcpy(hw_priv->sbus_priv->val32_w, buf, sizeof(u32));
+		ret = __xradio_write(hw_priv, HIF_AHB_DPORT_REG_ID,
+				hw_priv->sbus_priv->val32_w, buf_len, 0);
+		memset(hw_priv->sbus_priv->val32_w, 0, sizeof(u32));
+	} else {
+		ret = __xradio_write(hw_priv, HIF_AHB_DPORT_REG_ID, buf, buf_len, 0);
+	}
+
 	if (ret < 0) {
 		sbus_printk(XRADIO_DBG_ERROR,
 			    "%s: Can't write data port.\n", __func__);

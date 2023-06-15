@@ -1,5 +1,5 @@
 /*
- * linux-4.9/drivers/media/platform/sunxi-vin/vin-isp/sunxi_isp.c
+ * linux-5.4/drivers/media/platform/sunxi-vin/vin-isp/sunxi_isp.c
  *
  * Copyright (c) 2007-2017 Allwinnertech Co., Ltd.
  *
@@ -17,6 +17,7 @@
 #include <linux/platform_device.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
+#include <linux/compat.h>
 #include <media/v4l2-device.h>
 #include <media/v4l2-mediabus.h>
 #include <media/v4l2-subdev.h>
@@ -34,6 +35,20 @@
 #define ISP_MODULE_NAME "vin_isp"
 
 struct isp_dev *glb_isp[VIN_MAX_ISP];
+
+#ifdef CONFIG_D3D_COMPRESS_EN
+#define D3D_RAW_LBC_MODE		16 /* <=10 = lossless, 12 = 1.2x, 30 = 3x(< 3x)*/
+#define D3D_K_LBC_MODE			20 /* <=10 = lossless, 12 = 1.2x, 20 = 2x(< 2x)*/
+#else
+#define D3D_RAW_LBC_MODE		10 /* <=10 = lossless, 12 = 1.2x, 30 = 3x(< 3x)*/
+#define D3D_K_LBC_MODE			10 /* <=10 = lossless, 12 = 1.2x, 20 = 2x(< 2x)*/
+#endif
+
+#ifdef CONFIG_WDR_COMPRESS_EN
+#define WDR_RAW_LBC_MODE		26 /* <=10 = lossless, 12 = 1.2x, 30 = 3x(< 3x)*/
+#else
+#define WDR_RAW_LBC_MODE		10 /* <=10 = lossless, 12 = 1.2x, 30 = 3x(< 3x)*/
+#endif
 
 #define LARGE_IMAGE_OFF			32
 
@@ -132,27 +147,46 @@ static int isp_3d_pingpong_alloc(struct isp_dev *isp)
 #if defined CONFIG_ARCH_SUN8IW19P1
 	int cmp_ratio, bitdepth, wth;
 
-	cmp_ratio = 500;
+	if (D3D_K_LBC_MODE > 10) {
+		if (D3D_K_LBC_MODE > 20)
+			cmp_ratio = 1000/2;
+		else
+			cmp_ratio = 1000*10/D3D_K_LBC_MODE;
+	} else
+		cmp_ratio = 1000;
 	bitdepth = 5;
 	wth = roundup(isp->mf.width, 16);
-	isp->d3d_k_lbc.line_tar_bits = roundup(cmp_ratio*wth*bitdepth/1000, 512);
-	isp->d3d_k_lbc.mb_min_bit = ((cmp_ratio*bitdepth + 500)/1000-1)*32+16;
+	if (D3D_K_LBC_MODE <= 10)
+		isp->d3d_k_lbc.line_tar_bits = roundup(wth*bitdepth + wth/16*2, 512);
+	else
+		isp->d3d_k_lbc.line_tar_bits = roundup(cmp_ratio*wth*bitdepth/1000, 512);
+	isp->d3d_k_lbc.mb_min_bit = clamp((cmp_ratio*bitdepth*16)/1000, 0, 127);
 
-	cmp_ratio = 400;
+	if (D3D_RAW_LBC_MODE > 10) {
+		if (D3D_RAW_LBC_MODE > 30)
+			cmp_ratio = 1000/3;
+		else
+			cmp_ratio = 1000*10/D3D_RAW_LBC_MODE;
+	} else
+		cmp_ratio = 1000;
 	bitdepth = 12;
 	wth = roundup(isp->mf.width, 32);
-	isp->d3d_raw_lbc.line_tar_bits = roundup(cmp_ratio*wth*bitdepth/1000, 512);
-	isp->d3d_raw_lbc.mb_min_bit = ((cmp_ratio*bitdepth + 500)/1000-1)*32+16;
+	if (D3D_RAW_LBC_MODE <= 10)
+		isp->d3d_raw_lbc.line_tar_bits = roundup(wth*bitdepth + wth/32*2, 512);
+	else
+		isp->d3d_raw_lbc.line_tar_bits = roundup(cmp_ratio*wth*bitdepth/1000, 512);
+	isp->d3d_raw_lbc.mb_min_bit = clamp(((cmp_ratio*bitdepth + 500)/1000-1)*32+6, 0, 511);
 
 	isp->d3d_pingpong[0].size = isp->d3d_k_lbc.line_tar_bits * isp->mf.height / 8;
 	isp->d3d_pingpong[1].size = isp->d3d_raw_lbc.line_tar_bits * isp->mf.height / 8;
+#if defined CONFIG_D3D_LTF_EN
 	isp->d3d_pingpong[2].size = isp->d3d_raw_lbc.line_tar_bits * isp->mf.height / 8;
-
 	ret = os_mem_alloc(&isp->pdev->dev, &isp->d3d_pingpong[2]);
 	if (ret < 0) {
 		vin_err("isp 3d pingpong buf2 requset failed!\n");
 		return -ENOMEM;
 	}
+#endif
 #elif defined CONFIG_ARCH_SUN8IW16P1
 #if defined CONFIG_D3D_LTF_EN
 	isp->d3d_pingpong[0].size = roundup(isp->mf.width, 64) * isp->mf.height * 29 / 8;
@@ -183,7 +217,9 @@ static void isp_3d_pingpong_free(struct isp_dev *isp)
 	os_mem_free(&isp->pdev->dev, &isp->d3d_pingpong[0]);
 	os_mem_free(&isp->pdev->dev, &isp->d3d_pingpong[1]);
 #if defined CONFIG_ARCH_SUN8IW19P1
+#if defined CONFIG_D3D_LTF_EN
 	os_mem_free(&isp->pdev->dev, &isp->d3d_pingpong[2]);
+#endif
 #endif
 }
 
@@ -196,11 +232,21 @@ static int isp_3d_pingpong_update(struct isp_dev *isp)
 	bsp_isp_set_d3d_ref_k_addr(isp->id, addr);
 	addr = (dma_addr_t)isp->d3d_pingpong[1].dma_addr;
 	bsp_isp_set_d3d_ref_raw_addr(isp->id, addr);
+#if defined CONFIG_D3D_LTF_EN
 	addr = (dma_addr_t)isp->d3d_pingpong[2].dma_addr;
 	bsp_isp_set_d3d_ltf_raw_addr(isp->id, addr);
+#endif
 
-	bsp_isp_set_d3d_k_lbc_ctrl(isp->id, &isp->d3d_k_lbc);
-	bsp_isp_set_d3d_raw_lbc_ctrl(isp->id, &isp->d3d_raw_lbc);
+	if (D3D_K_LBC_MODE <= 10)
+		bsp_isp_set_d3d_k_lbc_ctrl(isp->id, &isp->d3d_k_lbc, 0);
+	else
+		bsp_isp_set_d3d_k_lbc_ctrl(isp->id, &isp->d3d_k_lbc, 1);
+
+	if (D3D_RAW_LBC_MODE <= 10)
+		bsp_isp_set_d3d_raw_lbc_ctrl(isp->id, &isp->d3d_raw_lbc, 0);
+	else
+		bsp_isp_set_d3d_raw_lbc_ctrl(isp->id, &isp->d3d_raw_lbc, 1);
+
 	bsp_isp_set_d3d_stride(isp->id, isp->d3d_k_lbc.line_tar_bits/32, isp->d3d_raw_lbc.line_tar_bits/32);
 	bsp_isp_d3d_fifo_en(isp->id, 1);
 #else
@@ -249,11 +295,20 @@ static int isp_wdr_pingpong_alloc(struct isp_dev *isp)
 #if defined CONFIG_ARCH_SUN8IW19P1
 	int cmp_ratio, bitdepth, wth;
 
-	cmp_ratio = 400;
+	if (WDR_RAW_LBC_MODE > 10) {
+		if (WDR_RAW_LBC_MODE > 30)
+			cmp_ratio = 1000/3;
+		else
+			cmp_ratio = 1000*10/WDR_RAW_LBC_MODE;
+	} else
+		cmp_ratio = 1000;
 	bitdepth = 12;
 	wth = roundup(isp->mf.width, 32);
-	isp->wdr_raw_lbc.line_tar_bits = roundup(cmp_ratio*wth*bitdepth/1000, 512);
-	isp->wdr_raw_lbc.mb_min_bit = ((cmp_ratio*bitdepth + 500)/1000-1)*32+16;
+	if (WDR_RAW_LBC_MODE <= 10)
+		isp->wdr_raw_lbc.line_tar_bits = roundup(wth*bitdepth + wth/32*2, 512);
+	else
+		isp->wdr_raw_lbc.line_tar_bits = roundup(cmp_ratio*wth*bitdepth/1000, 512);
+	isp->wdr_raw_lbc.mb_min_bit = clamp(((cmp_ratio*bitdepth + 500)/1000-1)*32+16, 0, 511);
 
 	isp->wdr_pingpong[0].size = isp->wdr_raw_lbc.line_tar_bits * isp->mf.height / 8;
 #else
@@ -295,7 +350,10 @@ static int isp_wdr_pingpong_set(struct isp_dev *isp)
 #if defined  CONFIG_ARCH_SUN8IW19P1
 	addr = (dma_addr_t)isp->wdr_pingpong[0].dma_addr;
 	bsp_isp_set_wdr_addr0(isp->id, addr);
-	bsp_isp_set_wdr_raw_lbc_ctrl(isp->id, &isp->wdr_raw_lbc);
+	if (WDR_RAW_LBC_MODE <= 10)
+		bsp_isp_set_wdr_raw_lbc_ctrl(isp->id, &isp->wdr_raw_lbc, 0);
+	else
+		bsp_isp_set_wdr_raw_lbc_ctrl(isp->id, &isp->wdr_raw_lbc, 1);
 	bsp_isp_set_wdr_stride(isp->id, isp->wdr_raw_lbc.line_tar_bits / 32);
 	bsp_isp_wdr_fifo_en(isp->id, 1);
 #else
@@ -438,6 +496,9 @@ static int sunxi_isp_subdev_s_stream(struct v4l2_subdev *sd, int enable)
 #else
 		bsp_isp_irq_enable(isp->id, FINISH_INT_EN | S0_PARA_LOAD_INT_EN | S0_FIFO_INT_EN
 				     | S0_FRAME_ERROR_INT_EN | S0_FRAME_LOST_INT_EN);
+#if defined CONFIG_ARCH_SUN8IW19P1
+		bsp_isp_irq_enable(isp->id, S0_BTYPE_ERROR_INT_EN | ADDR_ERROR_INT_EN | LBC_ERROR_INT_EN);
+#endif
 
 		load_val = bsp_isp_load_update_flag(isp->id);
 		if (isp->wdr_mode == ISP_DOL_WDR_MODE) {
@@ -476,6 +537,10 @@ static int sunxi_isp_subdev_s_stream(struct v4l2_subdev *sd, int enable)
 		bsp_isp_set_para_ready(isp->id, PARA_READY);
 		bsp_isp_set_last_blank_cycle(isp->id, 5);
 		bsp_isp_set_speed_mode(isp->id, 3);
+#if !defined CONFIG_D3D_LTF_EN && !defined CONFIG_WDR
+		bsp_isp_set_fifo_mode(isp->id, 0);
+		bsp_isp_fifo_raw_write(isp->id, 0x200);
+#endif
 		bsp_isp_ch_enable(isp->id, ISP_CH0, 1);
 		bsp_isp_capture_start(isp->id);
 	} else {
@@ -573,7 +638,7 @@ static struct isp_pix_fmt *__isp_try_format(struct isp_dev *isp,
 	return isp_fmt;
 }
 
-static int sunxi_isp_s_parm(struct v4l2_subdev *sd, struct v4l2_streamparm *parms)
+int sunxi_isp_s_parm(struct v4l2_subdev *sd, struct v4l2_streamparm *parms)
 {
 	struct v4l2_captureparm *cp = &parms->parm.capture;
 	struct isp_dev *isp = v4l2_get_subdevdata(sd);
@@ -587,7 +652,7 @@ static int sunxi_isp_s_parm(struct v4l2_subdev *sd, struct v4l2_streamparm *parm
 	return 0;
 }
 
-static int sunxi_isp_g_parm(struct v4l2_subdev *sd, struct v4l2_streamparm *parms)
+int sunxi_isp_g_parm(struct v4l2_subdev *sd, struct v4l2_streamparm *parms)
 {
 	struct v4l2_captureparm *cp = &parms->parm.capture;
 	struct isp_dev *isp = v4l2_get_subdevdata(sd);
@@ -672,7 +737,16 @@ int sunxi_isp_subdev_init(struct v4l2_subdev *sd, u32 val)
 			memset(&isp->load_shadow[0], 0, ISP_LOAD_DRAM_SIZE);
 			isp->load_flag = 0;
 			isp->have_init = 1;
+		} else {
+#if defined CONFIG_D3D
+			if ((isp->load_shadow[0x2d4 + 0x3]) & (1<<1)) {
+				/* clear D3D rec_en */
+				isp->load_shadow[0x2d4 + 0x3] = (isp->load_shadow[0x2d4 + 0x3]) & (~(1<<1));
+				memcpy(isp->isp_load.vir_addr, &isp->load_shadow[0], ISP_LOAD_DRAM_SIZE);
+			}
+#endif
 		}
+		isp->isp_frame_number = 0;
 		isp->h3a_stat.buf[0].empty = 1;
 		isp->h3a_stat.buf[0].dma_addr = isp->isp_stat.dma_addr;
 		isp->h3a_stat.buf[0].virt_addr = isp->isp_stat.vir_addr;
@@ -784,7 +858,7 @@ static int get_isp_table_reg_map32(struct isp_table_reg_map *kp,
 {
 	u32 tmp;
 
-	if (!access_ok(VERIFY_READ, up, sizeof(struct isp_table_reg_map32)) ||
+	if (!access_ok(up, sizeof(struct isp_table_reg_map32)) ||
 	    get_user(kp->size, &up->size) || get_user(tmp, &up->addr))
 		return -EFAULT;
 	kp->addr = compat_ptr(tmp);
@@ -796,7 +870,7 @@ static int put_isp_table_reg_map32(struct isp_table_reg_map *kp,
 {
 	u32 tmp = (u32) ((unsigned long)kp->addr);
 
-	if (!access_ok(VERIFY_WRITE, up, sizeof(struct isp_table_reg_map32)) ||
+	if (!access_ok(up, sizeof(struct isp_table_reg_map32)) ||
 	    put_user(kp->size, &up->size) || put_user(tmp, &up->addr))
 		return -EFAULT;
 	return 0;
@@ -863,19 +937,33 @@ static long isp_compat_ioctl32(struct v4l2_subdev *sd,
 /*
  * must reset all the pipeline through isp.
  */
-static void __sunxi_isp_reset(struct isp_dev *isp)
+void sunxi_isp_reset(struct isp_dev *isp)
 {
+#ifndef SUPPORT_ISP_TDM
 	struct vin_md *vind = dev_get_drvdata(isp->subdev.v4l2_dev->dev);
 	struct vin_core *vinc = NULL;
 	struct prs_cap_mode mode = {.mode = VCAP};
+	bool flags = 1;
 	int i = 0;
 
-	if (!isp->subdev.entity.use_count) {
+	if (!isp->use_isp)
+		return;
+
+	if (!isp->subdev.entity.stream_count) {
 		vin_err("isp%d is not used, cannot be resetted!!!\n", isp->id);
 		return;
 	}
 
-	vin_print("isp%d reset!!!\n", isp->id);
+	vin_print("%s:isp%d reset!!!,ISP frame number is %d\n", __func__, isp->id, isp->isp_frame_number);
+
+	bsp_isp_set_para_ready(isp->id, PARA_NOT_READY);
+#if defined CONFIG_D3D
+	if ((isp->load_shadow[0x2d4 + 0x3]) & (1<<1)) {
+		/* clear D3D rec_en 0x2d4 bit25*/
+		isp->load_shadow[0x2d4 + 0x3] = (isp->load_shadow[0x2d4 + 0x3]) & (~(1<<1));
+		memcpy(isp->isp_load.vir_addr, &isp->load_shadow[0], ISP_LOAD_DRAM_SIZE);
+	}
+#endif
 
 	/*****************stop*******************/
 	for (i = 0; i < VIN_MAX_DEV; i++) {
@@ -886,34 +974,32 @@ static void __sunxi_isp_reset(struct isp_dev *isp)
 
 		if (vind->vinc[i]->isp_sel == isp->id) {
 			vinc = vind->vinc[i];
-			csic_prs_capture_stop(vinc->csi_sel);
-			csic_prs_disable(vinc->csi_sel);
-			switch (vinc->vid_cap.frame.fmt.fourcc) {
-			case V4L2_PIX_FMT_FBC:
-				csic_fbc_disable(vinc->vipp_sel);
-				break;
-			case V4L2_PIX_FMT_LBC_2_0X:
-			case V4L2_PIX_FMT_LBC_2_5X:
-			case V4L2_PIX_FMT_LBC_1_0X:
-				csic_lbc_disable(vinc->vipp_sel);
-				break;
-			default:
-				csic_dma_disable(vinc->vipp_sel);
-				break;
+			vinc->vid_cap.frame_delay_cnt = 1;
+
+			if (flags) {
+				csic_prs_capture_stop(vinc->csi_sel);
+
+#if defined CONFIG_ARCH_SUN8IW16P1
+				if (vinc->mipi_sel == 0)
+					cmb_rx_disable(vinc->mipi_sel);
+#endif
+				csic_prs_disable(vinc->csi_sel);
+				csic_isp_bridge_disable(0);
+
+				bsp_isp_clr_irq_status(isp->id, ISP_IRQ_EN_ALL);
+				bsp_isp_enable(isp->id, 0);
+				bsp_isp_capture_stop(isp->id);
+				flags = 0;
 			}
-			csic_dma_top_disable(vinc->vipp_sel);
 			vipp_disable(vinc->vipp_sel);
 			vipp_top_clk_en(vinc->vipp_sel, 0);
+			csic_dma_int_clear_status(vinc->vipp_sel, DMA_INT_ALL);
+			csic_dma_top_disable(vinc->vipp_sel);
 		}
 	}
-	csic_isp_bridge_disable(0);
-#if defined CONFIG_ARCH_SUN8IW16P1
-	cmb_rx_disable(vinc->mipi_sel);
-#endif
-	bsp_isp_enable(isp->id, 0);
-	bsp_isp_capture_stop(isp->id);
 
 	/*****************start*******************/
+	flags = 1;
 	for (i = 0; i < VIN_MAX_DEV; i++) {
 		if (vind->vinc[i] == NULL)
 			continue;
@@ -923,41 +1009,36 @@ static void __sunxi_isp_reset(struct isp_dev *isp)
 		if (vind->vinc[i]->isp_sel == isp->id) {
 			vinc = vind->vinc[i];
 
+			csic_dma_top_enable(vinc->vipp_sel);
 			vipp_top_clk_en(vinc->vipp_sel, 1);
 			vipp_enable(vinc->vipp_sel);
-			csic_dma_top_enable(vinc->vipp_sel);
-			switch (vinc->vid_cap.frame.fmt.fourcc) {
-			case V4L2_PIX_FMT_FBC:
-				csic_fbc_enable(vinc->vipp_sel);
-				break;
-			case V4L2_PIX_FMT_LBC_2_0X:
-			case V4L2_PIX_FMT_LBC_2_5X:
-			case V4L2_PIX_FMT_LBC_1_0X:
-				csic_lbc_enable(vinc->vipp_sel);
-				break;
-			default:
-				csic_dma_enable(vinc->vipp_sel);
-				break;
+			vinc->vin_status.frame_cnt = 0;
+			vinc->vin_status.lost_cnt = 0;
+
+			if (flags) {
+				bsp_isp_enable(isp->id, 1);
+				bsp_isp_set_para_ready(isp->id, PARA_READY);
+				bsp_isp_capture_start(isp->id);
+				isp->isp_frame_number = 0;
+
+				csic_isp_bridge_enable(0);
+
+				csic_prs_enable(vinc->csi_sel);
+
+#if defined CONFIG_ARCH_SUN8IW16P1
+				if (vinc->mipi_sel == 0)
+					cmb_rx_enable(vinc->mipi_sel);
+#endif
+
+				csic_prs_capture_start(vinc->csi_sel, 1, &mode);
+				flags = 0;
 			}
 		}
 	}
-	bsp_isp_enable(isp->id, 1);
-	bsp_isp_capture_start(isp->id);
-	/*//clear D3D rec_en
-	int readval = vin_reg_readl(isp->base + 0x2d4);
-	readval = readval & (~(1<<25));
-	vin_reg_writel(isp->base + 0x2d4, readval);*/
-
-#if defined CONFIG_ARCH_SUN8IW16P1
-	cmb_rx_enable(vinc->mipi_sel);
-#endif
-	csic_isp_bridge_enable(0);
-
-	csic_prs_enable(vinc->csi_sel);
-	csic_prs_capture_start(vinc->csi_sel, 1, &mode);
 
 	if (isp->sensor_lp_mode)
 		schedule_work(&isp->s_sensor_stby_task);
+#endif
 }
 
 void sunxi_isp_frame_sync_isr(struct v4l2_subdev *sd)
@@ -1018,8 +1099,6 @@ static const struct v4l2_subdev_core_ops sunxi_isp_subdev_core_ops = {
 };
 
 static const struct v4l2_subdev_video_ops sunxi_isp_subdev_video_ops = {
-	.s_parm = sunxi_isp_s_parm,
-	.g_parm = sunxi_isp_g_parm,
 	.s_stream = sunxi_isp_subdev_s_stream,
 };
 
@@ -1081,6 +1160,8 @@ static int __sunxi_isp_ctrl(struct isp_dev *isp, struct v4l2_ctrl *ctrl)
 	case V4L2_CID_FLASH_LED_MODE:
 	case V4L2_CID_AUTO_FOCUS_INIT:
 	case V4L2_CID_AUTO_FOCUS_RELEASE:
+	case V4L2_CID_FLASH_LED_MODE_V1:
+	case V4L2_CID_TAKE_PICTURE:
 		break;
 	default:
 		break;
@@ -1263,6 +1344,27 @@ static const struct v4l2_ctrl_config custom_ctrls[] = {
 		.max = 0,
 		.step = 0,
 		.def = 0,
+	}, {
+		.ops = &sunxi_isp_ctrl_ops,
+		.id = V4L2_CID_TAKE_PICTURE,
+		.name = "Take Picture",
+		.type = V4L2_CTRL_TYPE_INTEGER,
+		.min = 0,
+		.max = 16,
+		.step = 1,
+		.def = 0,
+	}, {
+		.ops = &sunxi_isp_ctrl_ops,
+		.id = V4L2_CID_FLASH_LED_MODE_V1,
+		.name = "VIN Flash ctrl",
+		.type = V4L2_CTRL_TYPE_MENU,
+		.min = 0,
+		.max = 2,
+		.def = 0,
+		.menu_skip_mask = 0x0,
+		.qmenu = flash_led_mode_v1,
+		.flags = 0,
+		.step = 0,
 	},
 };
 static const s64 iso_qmenu[] = {
@@ -1316,7 +1418,7 @@ int __isp_init_subdev(struct isp_dev *isp)
 	v4l2_ctrl_new_std(handler, &sunxi_isp_ctrl_ops, V4L2_CID_HUE_AUTO, 0, 1, 1, 1);
 	v4l2_ctrl_new_std(handler, &sunxi_isp_ctrl_ops,
 			  V4L2_CID_WHITE_BALANCE_TEMPERATURE, 2800, 10000, 1, 6500);
-	v4l2_ctrl_new_std(handler, &sunxi_isp_ctrl_ops, V4L2_CID_SHARPNESS, -32, 32, 1, 0);
+	v4l2_ctrl_new_std(handler, &sunxi_isp_ctrl_ops, V4L2_CID_SHARPNESS, 0, 1000, 1, 0);
 	v4l2_ctrl_new_std(handler, &sunxi_isp_ctrl_ops, V4L2_CID_CHROMA_AGC, 0, 1, 1, 1);
 	v4l2_ctrl_new_std_menu(handler, &sunxi_isp_ctrl_ops, V4L2_CID_COLORFX,
 			       V4L2_COLORFX_SET_CBCR, 0, V4L2_COLORFX_NONE);
@@ -1505,12 +1607,7 @@ static irqreturn_t isp_isr(int irq, void *priv)
 			bsp_isp_clr_irq_status(isp->id, D3D_HB_PD);
 		}
 		/*isp reset*/
-		__sunxi_isp_reset(isp);
-	}
-
-	if (bsp_isp_get_irq_status(isp->id, HB_SHROT_PD)) {
-		vin_err("isp%d Hblanking is short (less than 96 cycles)\n", isp->id);
-		bsp_isp_clr_irq_status(isp->id, HB_SHROT_PD);
+		sunxi_isp_reset(isp);
 	}
 #else
 	if (bsp_isp_get_irq_status(isp->id, S0_FIFO_OF_PD)) {
@@ -1554,10 +1651,52 @@ static irqreturn_t isp_isr(int irq, void *priv)
 			bsp_isp_clr_internal_status0(isp->id, WDR_READ_FIFO_OF_PD);
 		}
 #endif
+#if defined CONFIG_ARCH_SUN8IW19P1
+		if (bsp_isp_get_internal_status0(isp->id, LCA_RGB_FIFO_R_EMP_PD)) {
+			vin_err("isp%d RGB fifo of LCA read empty\n", isp->id);
+			bsp_isp_clr_internal_status0(isp->id, LCA_RGB_FIFO_R_EMP_PD);
+		}
+		if (bsp_isp_get_internal_status0(isp->id, LCA_RGB_FIFO_W_FULL_PD)) {
+			vin_err("isp%d RGB fifo of LCA write full\n", isp->id);
+			bsp_isp_clr_internal_status0(isp->id, LCA_RGB_FIFO_W_FULL_PD);
+		}
+		if (bsp_isp_get_internal_status0(isp->id, LCA_BY_FIFO_R_EMP_PD)) {
+			vin_err("isp%d bayer fifo of LCA read empty\n", isp->id);
+			bsp_isp_clr_internal_status0(isp->id, LCA_BY_FIFO_R_EMP_PD);
+		}
+		if (bsp_isp_get_internal_status0(isp->id, LCA_BY_FIFO_W_FULL_PD)) {
+			vin_err("isp%d bayer fifo of LCA write full\n", isp->id);
+			bsp_isp_clr_internal_status0(isp->id, LCA_BY_FIFO_W_FULL_PD);
+		}
+		if (bsp_isp_get_internal_status0(isp->id, D3D_K_FIFO_W_FULL_PD)) {
+			vin_err("isp%d write fifo of D3D K data full\n", isp->id);
+			bsp_isp_clr_internal_status0(isp->id, D3D_K_FIFO_W_FULL_PD);
+		}
+		if (bsp_isp_get_internal_status0(isp->id, D3D_RAW_FIFO_W_FULL_PD)) {
+			vin_err("isp%d write fifo of D3D RAW data full\n", isp->id);
+			bsp_isp_clr_internal_status0(isp->id, D3D_RAW_FIFO_W_FULL_PD);
+		}
+		if (bsp_isp_get_internal_status0(isp->id, D3D_K_FIFO_R_EMP_PD)) {
+			vin_err("isp%d read fifo of D3D K data empty\n", isp->id);
+			bsp_isp_clr_internal_status0(isp->id, D3D_K_FIFO_R_EMP_PD);
+		}
+		if (bsp_isp_get_internal_status0(isp->id, D3D_REF_FIFO_R_EMP_PD)) {
+			vin_err("isp%d read fifo of D3D REF data empty\n", isp->id);
+			bsp_isp_clr_internal_status0(isp->id, D3D_REF_FIFO_R_EMP_PD);
+		}
+		if (bsp_isp_get_internal_status0(isp->id, D3D_LTF_FIFO_R_EMP_PD)) {
+			vin_err("isp%d read fifo of D3D LTF data empty\n", isp->id);
+			bsp_isp_clr_internal_status0(isp->id, D3D_LTF_FIFO_R_EMP_PD);
+		}
+#endif
 		/*isp reset*/
-		__sunxi_isp_reset(isp);
+		sunxi_isp_reset(isp);
 	}
 #endif
+	if (bsp_isp_get_irq_status(isp->id, HB_SHORT_PD)) {
+		vin_err("isp%d Hblanking is short (less than 96 cycles)\n", isp->id);
+		bsp_isp_clr_irq_status(isp->id, HB_SHORT_PD);
+	}
 
 	if (bsp_isp_get_irq_status(isp->id, FRAME_ERROR_PD)) {
 		bsp_isp_get_s0_ch_fmerr_cnt(isp->id, &isp->err_size);
@@ -1565,14 +1704,123 @@ static irqreturn_t isp_isr(int irq, void *priv)
 		vin_err("isp%d frame error, size %d %d, hblank max %d min %d!!\n", isp->id,
 			isp->err_size.width, isp->err_size.height, isp->hb_max, isp->hb_min);
 		bsp_isp_clr_irq_status(isp->id, FRAME_ERROR_PD);
-		__sunxi_isp_reset(isp);
+		sunxi_isp_reset(isp);
 	}
 
 	if (bsp_isp_get_irq_status(isp->id, FRAME_LOST_PD)) {
 		vin_err("isp%d frame lost\n", isp->id);
 		bsp_isp_clr_irq_status(isp->id, FRAME_LOST_PD);
-		__sunxi_isp_reset(isp);
+		sunxi_isp_reset(isp);
 	}
+
+#if defined CONFIG_ARCH_SUN8IW19P1
+	if (bsp_isp_get_irq_status(isp->id, S0_BTYPE_ERROR_PD)) {
+		vin_err("isp%d input btype error\n", isp->id);
+		bsp_isp_clr_irq_status(isp->id, S0_BTYPE_ERROR_PD);
+	}
+
+	if (bsp_isp_get_irq_status(isp->id, ADDR_ERROR_PD)) {
+		vin_err("isp%d aligned addr error\n", isp->id);
+		bsp_isp_clr_irq_status(isp->id, ADDR_ERROR_PD);
+	}
+
+	if (bsp_isp_get_irq_status(isp->id, LBC_ERROR_PD)) {
+		vin_err("isp%d LBC de-compress error\n", isp->id);
+		bsp_isp_clr_irq_status(isp->id, LBC_ERROR_PD);
+		if (bsp_isp_get_lbc_internal_status(isp->id, WDR_LBC_DEC_ERR_PD)) {
+			vin_err("isp%d WDR LBC decode error\n", isp->id);
+			if (bsp_isp_get_lbc_internal_status(isp->id, LBC_MSQ_DEC_ERR_PD << WDR_LBC_DEC_ERR_OFF)) {
+				vin_err("isp%d msq decode error\n", isp->id);
+				bsp_isp_clr_lbc_internal_status(isp->id, LBC_MSQ_DEC_ERR_PD << WDR_LBC_DEC_ERR_OFF);
+			}
+			if (bsp_isp_get_lbc_internal_status(isp->id, LBC_DTS_DEC_ERR_PD << WDR_LBC_DEC_ERR_OFF)) {
+				vin_err("isp%d dts decode error\n", isp->id);
+				bsp_isp_clr_lbc_internal_status(isp->id, LBC_DTS_DEC_ERR_PD << WDR_LBC_DEC_ERR_OFF);
+			}
+			if (bsp_isp_get_lbc_internal_status(isp->id, LBC_QP_DEC_ERR_PD << WDR_LBC_DEC_ERR_OFF)) {
+				vin_err("isp%d qp decode error\n", isp->id);
+				bsp_isp_clr_lbc_internal_status(isp->id, LBC_QP_DEC_ERR_PD << WDR_LBC_DEC_ERR_OFF);
+			}
+			if (bsp_isp_get_lbc_internal_status(isp->id, LBC_CODEC_BIT_LOST_PD << WDR_LBC_DEC_ERR_OFF)) {
+				vin_err("isp%d codec bit lost error\n", isp->id);
+				bsp_isp_clr_lbc_internal_status(isp->id, LBC_CODEC_BIT_LOST_PD << WDR_LBC_DEC_ERR_OFF);
+			}
+			if (bsp_isp_get_lbc_internal_status(isp->id, LBC_CODEC_RED_ERR_PD << WDR_LBC_DEC_ERR_OFF)) {
+				vin_err("isp%d codec redundancy error\n", isp->id);
+				bsp_isp_clr_lbc_internal_status(isp->id, LBC_CODEC_RED_ERR_PD << WDR_LBC_DEC_ERR_OFF);
+			}
+		}
+		if (bsp_isp_get_lbc_internal_status(isp->id, D3D_K_LBC_DEC_ERR_PD)) {
+			vin_err("isp%d D3D K LBC decode error\n", isp->id);
+			if (bsp_isp_get_lbc_internal_status(isp->id, LBC_MSQ_DEC_ERR_PD << D3D_K_LBC_DEC_ERR_OFF)) {
+				vin_err("isp%d msq decode error\n", isp->id);
+				bsp_isp_clr_lbc_internal_status(isp->id, LBC_MSQ_DEC_ERR_PD << D3D_K_LBC_DEC_ERR_OFF);
+			}
+			if (bsp_isp_get_lbc_internal_status(isp->id, LBC_DTS_DEC_ERR_PD << D3D_K_LBC_DEC_ERR_OFF)) {
+				vin_err("isp%d dts decode error\n", isp->id);
+				bsp_isp_clr_lbc_internal_status(isp->id, LBC_DTS_DEC_ERR_PD << D3D_K_LBC_DEC_ERR_OFF);
+			}
+			if (bsp_isp_get_lbc_internal_status(isp->id, LBC_QP_DEC_ERR_PD << D3D_K_LBC_DEC_ERR_OFF)) {
+				vin_err("isp%d qp decode error\n", isp->id);
+				bsp_isp_clr_lbc_internal_status(isp->id, LBC_QP_DEC_ERR_PD << D3D_K_LBC_DEC_ERR_OFF);
+			}
+			if (bsp_isp_get_lbc_internal_status(isp->id, LBC_CODEC_BIT_LOST_PD << D3D_K_LBC_DEC_ERR_OFF)) {
+				vin_err("isp%d codec bit lost error\n", isp->id);
+				bsp_isp_clr_lbc_internal_status(isp->id, LBC_CODEC_BIT_LOST_PD << D3D_K_LBC_DEC_ERR_OFF);
+			}
+			if (bsp_isp_get_lbc_internal_status(isp->id, LBC_CODEC_RED_ERR_PD << D3D_K_LBC_DEC_ERR_OFF)) {
+				vin_err("isp%d codec redundancy error\n", isp->id);
+				bsp_isp_clr_lbc_internal_status(isp->id, LBC_CODEC_RED_ERR_PD << D3D_K_LBC_DEC_ERR_OFF);
+			}
+		}
+		if (bsp_isp_get_lbc_internal_status(isp->id, D3D_REF_LBC_DEC_ERR_PD)) {
+			vin_err("isp%d D3D reference frame LBC decode error\n", isp->id);
+			if (bsp_isp_get_lbc_internal_status(isp->id, LBC_MSQ_DEC_ERR_PD << D3D_REF_LBC_DEC_ERR_OFF)) {
+				vin_err("isp%d msq decode error\n", isp->id);
+				bsp_isp_clr_lbc_internal_status(isp->id, LBC_MSQ_DEC_ERR_PD << D3D_REF_LBC_DEC_ERR_OFF);
+			}
+			if (bsp_isp_get_lbc_internal_status(isp->id, LBC_DTS_DEC_ERR_PD << D3D_REF_LBC_DEC_ERR_OFF)) {
+				vin_err("isp%d dts decode error\n", isp->id);
+				bsp_isp_clr_lbc_internal_status(isp->id, LBC_DTS_DEC_ERR_PD << D3D_REF_LBC_DEC_ERR_OFF);
+			}
+			if (bsp_isp_get_lbc_internal_status(isp->id, LBC_QP_DEC_ERR_PD << D3D_REF_LBC_DEC_ERR_OFF)) {
+				vin_err("isp%d qp decode error\n", isp->id);
+				bsp_isp_clr_lbc_internal_status(isp->id, LBC_QP_DEC_ERR_PD << D3D_REF_LBC_DEC_ERR_OFF);
+			}
+			if (bsp_isp_get_lbc_internal_status(isp->id, LBC_CODEC_BIT_LOST_PD << D3D_REF_LBC_DEC_ERR_OFF)) {
+				vin_err("isp%d codec bit lost error\n", isp->id);
+				bsp_isp_clr_lbc_internal_status(isp->id, LBC_CODEC_BIT_LOST_PD << D3D_REF_LBC_DEC_ERR_OFF);
+			}
+			if (bsp_isp_get_lbc_internal_status(isp->id, LBC_CODEC_RED_ERR_PD << D3D_REF_LBC_DEC_ERR_OFF)) {
+				vin_err("isp%d codec redundancy error\n", isp->id);
+				bsp_isp_clr_lbc_internal_status(isp->id, LBC_CODEC_RED_ERR_PD << D3D_REF_LBC_DEC_ERR_OFF);
+			}
+		}
+		if (bsp_isp_get_lbc_internal_status(isp->id, D3D_LTF_LBC_DEV_ERR_PD)) {
+			vin_err("isp%d D3D long time reference frame LBC decode error\n", isp->id);
+			if (bsp_isp_get_lbc_internal_status(isp->id, LBC_MSQ_DEC_ERR_PD << D3D_LTF_LBC_DEV_ERR_OFF)) {
+				vin_err("isp%d msq decode error\n", isp->id);
+				bsp_isp_clr_lbc_internal_status(isp->id, LBC_MSQ_DEC_ERR_PD << D3D_LTF_LBC_DEV_ERR_OFF);
+			}
+			if (bsp_isp_get_lbc_internal_status(isp->id, LBC_DTS_DEC_ERR_PD << D3D_LTF_LBC_DEV_ERR_OFF)) {
+				vin_err("isp%d dts decode error\n", isp->id);
+				bsp_isp_clr_lbc_internal_status(isp->id, LBC_DTS_DEC_ERR_PD << D3D_LTF_LBC_DEV_ERR_OFF);
+			}
+			if (bsp_isp_get_lbc_internal_status(isp->id, LBC_QP_DEC_ERR_PD << D3D_LTF_LBC_DEV_ERR_OFF)) {
+				vin_err("isp%d qp decode error\n", isp->id);
+				bsp_isp_clr_lbc_internal_status(isp->id, LBC_QP_DEC_ERR_PD << D3D_LTF_LBC_DEV_ERR_OFF);
+			}
+			if (bsp_isp_get_lbc_internal_status(isp->id, LBC_CODEC_BIT_LOST_PD << D3D_LTF_LBC_DEV_ERR_OFF)) {
+				vin_err("isp%d codec bit lost error\n", isp->id);
+				bsp_isp_clr_lbc_internal_status(isp->id, LBC_CODEC_BIT_LOST_PD << D3D_LTF_LBC_DEV_ERR_OFF);
+			}
+			if (bsp_isp_get_lbc_internal_status(isp->id, LBC_CODEC_RED_ERR_PD << D3D_LTF_LBC_DEV_ERR_OFF)) {
+				vin_err("isp%d codec redundancy error\n", isp->id);
+				bsp_isp_clr_lbc_internal_status(isp->id, LBC_CODEC_RED_ERR_PD << D3D_LTF_LBC_DEV_ERR_OFF);
+			}
+		}
+	}
+#endif
 
 	if (bsp_isp_get_irq_status(isp->id, PARA_LOAD_PD)) {
 		bsp_isp_clr_irq_status(isp->id, PARA_LOAD_PD);
@@ -1619,6 +1867,7 @@ static irqreturn_t isp_isr(int irq, void *priv)
 	spin_unlock_irqrestore(&isp->slock, flags);
 
 	if (bsp_isp_get_irq_status(isp->id, FINISH_PD)) {
+		isp->isp_frame_number++;
 		bsp_isp_clr_irq_status(isp->id, FINISH_PD);
 #ifdef SUPPORT_PTN
 		if (isp->ptn_type) {
@@ -1650,6 +1899,8 @@ static irqreturn_t isp_isr(int irq, void *priv)
 	return IRQ_HANDLED;
 }
 
+static unsigned int isp_id;
+
 static int isp_probe(struct platform_device *pdev)
 {
 	struct device_node *np = pdev->dev.of_node;
@@ -1678,10 +1929,12 @@ static int isp_probe(struct platform_device *pdev)
 	isp->pdev = pdev;
 	isp->nosend_ispoff = 0;
 
-	isp->base = of_iomap(np, 0);
-	if (!isp->base) {
+	if (isp->id > 0xf0) {
 		isp->is_empty = 1;
+		isp->id = isp_id;
+		isp_id++;
 	} else {
+		isp->base = of_iomap(np, 0);
 		isp->is_empty = 0;
 		/*get irq resource */
 		isp->irq = irq_of_parse_and_map(np, 0);

@@ -27,7 +27,8 @@
 
 #include "rawnand_debug.h"
 #include "../../nfd/nand_osal_for_linux.h"
-#include "../nand_boot.h"
+/*#include "../nand_boot.h"*/
+#include "../nand-partition3/sunxi_nand_boot.h"
 #include "../nand_errno.h"
 #include "../nand_nftl.h"
 #include "../nand_physic_interface.h"
@@ -648,7 +649,7 @@ block_test_end:
 int nand_phy_block_erase_test(unsigned int chip, unsigned int block)
 {
 	unsigned char spare[64];
-	int i, j, ret;
+	int i, j, ret = 0;
 	int page_size;
 
 	unsigned char *mbuf;

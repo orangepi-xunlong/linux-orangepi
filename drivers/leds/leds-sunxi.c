@@ -1,9 +1,12 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * drivers/leds/leds-sunxi.c - Allwinner RGB LED Driver
  *
  * Copyright (C) 2018 Allwinner Technology Limited. All rights reserved.
- * Albert Yu <yuxyun@allwinnertech.com>
+ *      http://www.allwinnertech.com
  *
+ *Author : Albert Yu <yuxyun@allwinnertech.com>
+ *	   Lewis <liuyu@allwinnertech.com>
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
  * published by the Free Software Foundation.
@@ -23,16 +26,48 @@
 #include <linux/platform_device.h>
 #include <linux/pinctrl/consumer.h>
 #include <linux/dma-mapping.h>
-#include <linux/dma/sunxi-dma.h>
 #include <linux/debugfs.h>
 #include <linux/uaccess.h>
-
+#include <linux/delay.h>
+#include <linux/regulator/consumer.h>
+#include <linux/reset.h>
 #include "leds-sunxi.h"
 
-static struct sunxi_led *sunxi_led;
+/* For debug */
+#define LED_ERR(fmt, arg...) pr_err("%s()%d - "fmt, __func__, __LINE__, ##arg)
 
-static void sunxi_ledc_trans_data(struct sunxi_led *led);
-static void sunxi_ledc_set_trans_mode(struct sunxi_led *led, const char *mode);
+#define dprintk(level_mask, fmt, arg...)				\
+do {									\
+	if (unlikely(debug_mask & level_mask))				\
+		pr_warn("%s()%d - "fmt, __func__, __LINE__, ##arg);	\
+} while (0)
+
+static u32 debug_mask = 1;
+struct sunxi_led *sunxi_led_global;
+static struct class *led_class;
+
+#define sunxi_slave_id(d, s) (((d)<<16) | (s))
+
+/*For Driver */
+void led_dump_reg(struct sunxi_led *led, u32 offset, u32 len)
+{
+	u32 i;
+	u8 buf[64], cnt = 0;
+
+	for (i = 0; i < len; i = i + REG_INTERVAL) {
+		if (i%HEXADECIMAL == 0)
+			cnt += sprintf(buf + cnt, "0x%08x: ",
+					(u32)(led->res->start + offset + i));
+
+		cnt += sprintf(buf + cnt, "%08x ",
+				readl(led->iomem_reg_base + offset + i));
+
+		if (i%HEXADECIMAL == REG_CL) {
+			pr_warn("%s\n", buf);
+			cnt = 0;
+		}
+	}
+}
 
 static void sunxi_clk_get(struct sunxi_led *led)
 {
@@ -41,17 +76,19 @@ static void sunxi_clk_get(struct sunxi_led *led)
 
 	led->clk_ledc = of_clk_get(np, 0);
 	if (IS_ERR(led->clk_ledc))
-		dev_err(dev, "failed to get clk_ledc!\n");
+		LED_ERR("failed to get clk_ledc!\n");
 
 	led->clk_cpuapb = of_clk_get(np, 1);
 	if (IS_ERR(led->clk_cpuapb))
-		dev_err(dev, "failed to get clk_cpuapb!\n");
+		LED_ERR("failed to get clk_cpuapb!\n");
 }
 
 static void sunxi_clk_put(struct sunxi_led *led)
 {
 	clk_put(led->clk_ledc);
 	clk_put(led->clk_cpuapb);
+	led->clk_ledc = NULL;
+	led->clk_cpuapb = NULL;
 }
 
 static void sunxi_clk_enable(struct sunxi_led *led)
@@ -62,7 +99,6 @@ static void sunxi_clk_enable(struct sunxi_led *led)
 
 static void sunxi_clk_disable(struct sunxi_led *led)
 {
-	clk_disable_unprepare(led->clk_cpuapb);
 	clk_disable_unprepare(led->clk_ledc);
 }
 
@@ -80,7 +116,7 @@ static void sunxi_clk_deinit(struct sunxi_led *led)
 
 static u32 sunxi_get_reg(int offset)
 {
-	struct sunxi_led *led = sunxi_led;
+	struct sunxi_led *led = sunxi_led_global;
 	u32 value = ioread32(((u8 *)led->iomem_reg_base) + offset);
 
 	return value;
@@ -88,7 +124,7 @@ static u32 sunxi_get_reg(int offset)
 
 static void sunxi_set_reg(int offset, u32 value)
 {
-	struct sunxi_led *led = sunxi_led;
+	struct sunxi_led *led = sunxi_led_global;
 
 	iowrite32(value, ((u8 *)led->iomem_reg_base) + offset);
 }
@@ -101,10 +137,9 @@ static inline void sunxi_set_reset_ns(struct sunxi_led *led)
 	u32 max = SUNXI_RESET_TIME_MAX_NS;
 
 	if (led->reset_ns < min || led->reset_ns > max) {
-		dev_err(led->dev,
-				"invalid parameter, reset_ns should be %d-%d!\n",
+		LED_ERR("invalid parameter, reset_ns should be %u-%u!\n",
 				min, max);
-		goto out;
+		return;
 	}
 
 	n = (led->reset_ns - 42) / 42;
@@ -112,11 +147,6 @@ static inline void sunxi_set_reset_ns(struct sunxi_led *led)
 	reg_val &= ~(mask << 16);
 	reg_val |= (n << 16);
 	sunxi_set_reg(LED_RESET_TIMING_CTRL_REG_OFFSET, reg_val);
-
-out:
-	reg_val = sunxi_get_reg(LED_RESET_TIMING_CTRL_REG_OFFSET);
-	n = (reg_val >> 16) & mask;
-	led->reset_ns = 42 * (n + 1);
 }
 
 static inline void sunxi_set_t1h_ns(struct sunxi_led *led)
@@ -128,10 +158,9 @@ static inline void sunxi_set_t1h_ns(struct sunxi_led *led)
 	u32 max = SUNXI_T1H_MAX_NS;
 
 	if (led->t1h_ns < min || led->t1h_ns > max) {
-		dev_err(led->dev,
-				"invalid parameter, t1h_ns should be %d-%d!\n",
+		LED_ERR("invalid parameter, t1h_ns should be %u-%u!\n",
 				min, max);
-		goto out;
+		return;
 	}
 
 	n = (led->t1h_ns - 42) / 42;
@@ -139,11 +168,6 @@ static inline void sunxi_set_t1h_ns(struct sunxi_led *led)
 	reg_val &= ~(mask << shift);
 	reg_val |= n << shift;
 	sunxi_set_reg(LED_T01_TIMING_CTRL_REG_OFFSET, reg_val);
-
-out:
-	reg_val = sunxi_get_reg(LED_T01_TIMING_CTRL_REG_OFFSET);
-	n = (reg_val >> shift) & mask;
-	led->t1h_ns = 42 * (n + 1);
 }
 
 static inline void sunxi_set_t1l_ns(struct sunxi_led *led)
@@ -155,10 +179,9 @@ static inline void sunxi_set_t1l_ns(struct sunxi_led *led)
 	u32 max = SUNXI_T1L_MAX_NS;
 
 	if (led->t1l_ns < min || led->t1l_ns > max) {
-		dev_err(led->dev,
-				"invalid parameter, t1l_ns should be %d-%d!\n",
+		LED_ERR("invalid parameter, t1l_ns should be %u-%u!\n",
 				min, max);
-		goto out;
+		return;
 	}
 
 	n = (led->t1l_ns - 42) / 42;
@@ -166,12 +189,6 @@ static inline void sunxi_set_t1l_ns(struct sunxi_led *led)
 	reg_val &= ~(mask << shift);
 	reg_val |= n << shift;
 	sunxi_set_reg(LED_T01_TIMING_CTRL_REG_OFFSET, reg_val);
-
-out:
-	reg_val = sunxi_get_reg(LED_T01_TIMING_CTRL_REG_OFFSET);
-	n = (reg_val >> shift) & mask;
-	led->t1l_ns = 42 * (n + 1);
-
 }
 
 static inline void sunxi_set_t0h_ns(struct sunxi_led *led)
@@ -183,10 +200,9 @@ static inline void sunxi_set_t0h_ns(struct sunxi_led *led)
 	u32 max = SUNXI_T0H_MAX_NS;
 
 	if (led->t0h_ns < min || led->t0h_ns > max) {
-		dev_err(led->dev,
-			"invalid parameter, t0h_ns should be %d-%d!\n",
+		LED_ERR("invalid parameter, t0h_ns should be %u-%u!\n",
 			min, max);
-		goto out;
+		return;
 	}
 
 	n = (led->t0h_ns - 42) / 42;
@@ -194,25 +210,18 @@ static inline void sunxi_set_t0h_ns(struct sunxi_led *led)
 	reg_val &= ~(mask << shift);
 	reg_val |= n << shift;
 	sunxi_set_reg(LED_T01_TIMING_CTRL_REG_OFFSET, reg_val);
-
-out:
-	reg_val = sunxi_get_reg(LED_T01_TIMING_CTRL_REG_OFFSET);
-	n = (reg_val >> shift) & mask;
-	led->t0h_ns = 42 * (n + 1);
 }
 
 static inline void sunxi_set_t0l_ns(struct sunxi_led *led)
 {
 	u32 n, reg_val;
-	u32 mask = 0x3F;
 	u32 min = SUNXI_T0L_MIN_NS;
 	u32 max = SUNXI_T0L_MAX_NS;
 
 	if (led->t0l_ns < min || led->t0l_ns > max) {
-		dev_err(led->dev,
-				"invalid parameter, t0l_ns should be %d-%d!\n",
+		LED_ERR("invalid parameter, t0l_ns should be %u-%u!\n",
 				min, max);
-		goto out;
+		return;
 	}
 
 	n = (led->t0l_ns - 42) / 42;
@@ -220,68 +229,50 @@ static inline void sunxi_set_t0l_ns(struct sunxi_led *led)
 	reg_val &= ~0x3F;
 	reg_val |= n;
 	sunxi_set_reg(LED_T01_TIMING_CTRL_REG_OFFSET, reg_val);
-
-out:
-	reg_val = sunxi_get_reg(LED_T01_TIMING_CTRL_REG_OFFSET);
-	n = reg_val & mask;
-	led->t0l_ns = 42 * (n + 1);
 }
 
 static inline void sunxi_set_wait_time0_ns(struct sunxi_led *led)
 {
 	u32 n, reg_val;
-	u32 mask = 0xFF;
 	u32 min = SUNXI_WAIT_TIME0_MIN_NS;
 	u32 max = SUNXI_WAIT_TIME0_MAX_NS;
 
 	if (led->wait_time0_ns < min || led->wait_time0_ns > max) {
-		dev_err(led->dev,
-				"invalid parameter, wait_time0_ns should be %d-%d!\n",
+		LED_ERR("invalid parameter, wait_time0_ns should be %u-%u!\n",
 				min, max);
-		goto out;
+		return;
 	}
 
 	n = (led->wait_time0_ns - 42) / 42;
 	reg_val = (1 << 8) | n;
 	sunxi_set_reg(LEDC_WAIT_TIME0_CTRL_REG, reg_val);
-
-out:
-	reg_val = sunxi_get_reg(LEDC_WAIT_TIME0_CTRL_REG);
-	n = reg_val & mask;
-	led->wait_time0_ns = 42 * (n + 1);
 }
 
 static inline void sunxi_set_wait_time1_ns(struct sunxi_led *led)
 {
-	u32 n, reg_val;
-	u32 mask = 0x7FFFFFFF;
+	unsigned long long tmp, max = SUNXI_WAIT_TIME1_MAX_NS;
 	u32 min = SUNXI_WAIT_TIME1_MIN_NS;
-	long long max = SUNXI_WAIT_TIME1_MAX_NS;
+	u32 n, reg_val;
 
 	if (led->wait_time1_ns < min || led->wait_time1_ns > max) {
-		dev_err(led->dev,
-			"invalid parameter, wait_time1_ns should be %u-%lld!\n",
+		LED_ERR("invalid parameter, wait_time1_ns should be %u-%llu!\n",
 			min, max);
-		goto out;
+		return;
 	}
 
-	n = (led->wait_time1_ns - 42) / 42;
+	tmp = led->wait_time1_ns;
+	n = div_u64(tmp, 42);
+	n -= 1;
 	reg_val = (1 << 31) | n;
 	sunxi_set_reg(LEDC_WAIT_TIME1_CTRL_REG, reg_val);
-
-out:
-	reg_val = sunxi_get_reg(LEDC_WAIT_TIME1_CTRL_REG);
-	n = reg_val & mask;
-	led->wait_time1_ns =  42 * (n + 1);
 }
 
 static inline void sunxi_set_wait_data_time_ns(struct sunxi_led *led)
 {
-	u32 mask = 0x1FFF;
-	u32 shift = 16;
-	u32 reg_val = 0;
-	u32 n, min, max;
-
+	u32 min, max;
+#ifndef SUNXI_FPGA_LEDC
+	u32 mask = 0x1FFF, shift = 16, reg_val = 0, n;
+#endif
 	min = SUNXI_WAIT_DATA_TIME_MIN_NS;
 #ifdef SUNXI_FPGA_LEDC
 	/*
@@ -296,10 +287,9 @@ static inline void sunxi_set_wait_data_time_ns(struct sunxi_led *led)
 #endif /* SUNXI_FPGA_LEDC */
 
 	if (led->wait_data_time_ns < min || led->wait_data_time_ns > max) {
-		dev_err(led->dev,
-			"invalid parameter, wait_data_time_ns should be %d-%d!\n",
+		LED_ERR("invalid parameter, wait_data_time_ns should be %u-%u!\n",
 			min, max);
-		goto out;
+		return;
 	}
 
 #ifndef SUNXI_FPGA_LEDC
@@ -308,16 +298,6 @@ static inline void sunxi_set_wait_data_time_ns(struct sunxi_led *led)
 	reg_val |= (n << shift);
 	sunxi_set_reg(LEDC_DATA_FINISH_CNT_REG_OFFSET, reg_val);
 #endif /* SUNXI_FPGA_LEDC */
-
-out:
-#ifdef SUNXI_FPGA_LEDC
-	if (led->wait_data_time_ns <= SUNXI_WAIT_DATA_TIME_MAX_NS_IC)
-#endif /* SUNXI_FPGA_LEDC */
-	{
-		reg_val = sunxi_get_reg(LEDC_DATA_FINISH_CNT_REG_OFFSET);
-		n = (reg_val >> shift) & mask;
-		led->wait_data_time_ns =  42 * (n + 1);
-	}
 }
 
 static void sunxi_ledc_set_time(struct sunxi_led *led)
@@ -338,13 +318,13 @@ static void sunxi_ledc_set_length(struct sunxi_led *led)
 	u32 length = led->length;
 
 	if (length == 0)
-		goto err_out;
+		return;
 
 	if (length > led->led_count)
-		goto err_out;
+		return;
 
 	reg_val = sunxi_get_reg(LEDC_CTRL_REG_OFFSET);
-	reg_val &= ~(0x1FF << 16);
+	reg_val &= ~(0x1FFF << 16);
 	reg_val |=  length << 16;
 	sunxi_set_reg(LEDC_CTRL_REG_OFFSET, reg_val);
 
@@ -352,11 +332,6 @@ static void sunxi_ledc_set_length(struct sunxi_led *led)
 	reg_val &= ~0x3FF;
 	reg_val |= length - 1;
 	sunxi_set_reg(LED_RESET_TIMING_CTRL_REG_OFFSET, reg_val);
-
-	return;
-
-err_out:
-	led->length = 0;
 }
 
 static void sunxi_ledc_set_output_mode(struct sunxi_led *led, const char *str)
@@ -367,9 +342,6 @@ static void sunxi_ledc_set_output_mode(struct sunxi_led *led, const char *str)
 	u32 reg_val = sunxi_get_reg(LEDC_CTRL_REG_OFFSET);
 
 	if (str != NULL) {
-		if (!strncmp(led->output_mode.str, str, 3))
-			return;
-
 		if (!strncmp(str, "GRB", 3))
 			val = SUNXI_OUTPUT_GRB;
 		else if (!strncmp(str, "GBR", 3))
@@ -384,8 +356,6 @@ static void sunxi_ledc_set_output_mode(struct sunxi_led *led, const char *str)
 			val = SUNXI_OUTPUT_BRG;
 		else
 			return;
-
-		memcpy(led->output_mode.str, str, 3);
 	} else {
 		val = led->output_mode.val;
 	}
@@ -395,58 +365,28 @@ static void sunxi_ledc_set_output_mode(struct sunxi_led *led, const char *str)
 
 	sunxi_set_reg(LEDC_CTRL_REG_OFFSET, reg_val);
 
-	if (str)
+	if (strncmp(str, led->output_mode.str, 3))
 		memcpy(led->output_mode.str, str, 3);
 
 	if (val != led->output_mode.val)
 		led->output_mode.val = val;
 }
 
-static void sunxi_ledc_set_trans_mode(struct sunxi_led *led, const char *str)
+static void sunxi_ledc_enable_irq(u32 mask)
 {
-	u32 val, reg_val;
+	u32 reg_val = 0;
 
-	if (str != NULL) {
-		if (!strncmp(led->trans_mode.str, str, 3))
-			return;
-
-		if (!strncmp(str, "CPU", 3))
-			val = LEDC_TRANS_CPU_MODE;
-		else if (!strncmp(str, "DMA", 3))
-			val = LEDC_TRANS_DMA_MODE;
-		else
-			return;
-
-		memcpy(led->trans_mode.str, str, 3);
-	} else {
-		val = led->trans_mode.val;
-	}
-
-	reg_val = sunxi_get_reg(LEDC_DMA_CTRL_REG);
-	if (val == LEDC_TRANS_DMA_MODE)
-		reg_val |= 1 << 5;
-	else
-		reg_val &= ~(1 << 5);
-	reg_val &= ~0x1F;
-	reg_val |= SUNXI_LEDC_FIFO_TRIG_LEVEL;
-	sunxi_set_reg(LEDC_DMA_CTRL_REG, reg_val);
-
-	reg_val = sunxi_get_reg(LEDC_INT_CTRL_REG_OFFSET);
-	if (val == LEDC_TRANS_DMA_MODE)
-		reg_val &= ~(1 << 1);
-	else
-		reg_val |= 1 << 1;
+	reg_val |= mask;
 	sunxi_set_reg(LEDC_INT_CTRL_REG_OFFSET, reg_val);
-
-	if (val != led->trans_mode.val)
-		led->trans_mode.val = val;
 }
 
-static bool sunxi_ledc_is_enabled(struct sunxi_led *led)
+static void sunxi_ledc_disable_irq(u32 mask)
 {
-	u32 reg_val = sunxi_get_reg(LEDC_CTRL_REG_OFFSET);
+	u32 reg_val = 0;
 
-	return reg_val & 1;
+	reg_val = sunxi_get_reg(LEDC_INT_CTRL_REG_OFFSET);
+	reg_val &= ~mask;
+	sunxi_set_reg(LEDC_INT_CTRL_REG_OFFSET, reg_val);
 }
 
 static inline void sunxi_ledc_enable(struct sunxi_led *led)
@@ -460,11 +400,22 @@ static inline void sunxi_ledc_enable(struct sunxi_led *led)
 
 static inline void sunxi_ledc_reset(struct sunxi_led *led)
 {
+	u32 reg_val = sunxi_get_reg(LEDC_CTRL_REG_OFFSET);
+
+	sunxi_ledc_disable_irq(LEDC_TRANS_FINISH_INT_EN | LEDC_FIFO_CPUREQ_INT_EN
+			| LEDC_WAITDATA_TIMEOUT_INT_EN | LEDC_FIFO_OVERFLOW_INT_EN
+			| LEDC_GLOBAL_INT_EN);
+
+	if (debug_mask & DEBUG_INFO2) {
+		dprintk(DEBUG_INFO2, "dump reg:\n");
+		led_dump_reg(led, 0, 0x30);
+	}
+
 	if (led->dma_chan)
 		dmaengine_terminate_all(led->dma_chan);
 
-	led->transmitted_data = 0;
-	sunxi_set_reg(LEDC_CTRL_REG_OFFSET, 1 << 1);
+	reg_val |= 1 << 1;
+	sunxi_set_reg(LEDC_CTRL_REG_OFFSET, reg_val);
 }
 
 #ifdef CONFIG_DEBUG_FS
@@ -475,8 +426,7 @@ static ssize_t reset_ns_write(struct file *filp, const char __user *buf,
 	char buffer[64];
 	u32 min, max;
 	unsigned long val;
-	struct sunxi_led *led = sunxi_led;
-	struct device *dev = led->dev;
+	struct sunxi_led *led = sunxi_led_global;
 
 	min = SUNXI_RESET_TIME_MIN_NS;
 	max = SUNXI_RESET_TIME_MAX_NS;
@@ -504,8 +454,7 @@ static ssize_t reset_ns_write(struct file *filp, const char __user *buf,
 	return count;
 
 err_out:
-	dev_err(dev,
-		"invalid parameter, reset_ns should be %u-%u!\n",
+	LED_ERR("invalid parameter, reset_ns should be %u-%u!\n",
 		min, max);
 
 	return -EINVAL;
@@ -516,7 +465,7 @@ static ssize_t reset_ns_read(struct file *filp, char __user *buf,
 {
 	int r;
 	char buffer[64];
-	struct sunxi_led *led = sunxi_led;
+	struct sunxi_led *led = sunxi_led_global;
 
 	r = snprintf(buffer, 64, "%u\n", led->reset_ns);
 
@@ -536,8 +485,7 @@ static ssize_t t1h_ns_write(struct file *filp, const char __user *buf,
 	char buffer[64];
 	u32 min, max;
 	unsigned long val;
-	struct sunxi_led *led = sunxi_led;
-	struct device *dev = led->dev;
+	struct sunxi_led *led = sunxi_led_global;
 
 	min = SUNXI_T1H_MIN_NS;
 	max = SUNXI_T1H_MAX_NS;
@@ -566,8 +514,7 @@ static ssize_t t1h_ns_write(struct file *filp, const char __user *buf,
 	return count;
 
 err_out:
-	dev_err(dev,
-		"invalid parameter, t1h_ns should be %u-%u!\n",
+	LED_ERR("invalid parameter, t1h_ns should be %u-%u!\n",
 		min, max);
 
 	return -EINVAL;
@@ -578,7 +525,7 @@ static ssize_t t1h_ns_read(struct file *filp, char __user *buf,
 {
 	int r;
 	char buffer[64];
-	struct sunxi_led *led = sunxi_led;
+	struct sunxi_led *led = sunxi_led_global;
 
 	r = snprintf(buffer, 64, "%u\n", led->t1h_ns);
 
@@ -598,8 +545,7 @@ static ssize_t t1l_ns_write(struct file *filp, const char __user *buf,
 	char buffer[64];
 	u32 min, max;
 	unsigned long val;
-	struct sunxi_led *led = sunxi_led;
-	struct device *dev = led->dev;
+	struct sunxi_led *led = sunxi_led_global;
 
 	min = SUNXI_T1L_MIN_NS;
 	max = SUNXI_T1L_MAX_NS;
@@ -627,8 +573,7 @@ static ssize_t t1l_ns_write(struct file *filp, const char __user *buf,
 	return count;
 
 err_out:
-	dev_err(dev,
-		"invalid parameter, t1l_ns should be %u-%u!\n",
+	LED_ERR("invalid parameter, t1l_ns should be %u-%u!\n",
 		min, max);
 
 	return -EINVAL;
@@ -639,7 +584,7 @@ static ssize_t t1l_ns_read(struct file *filp, char __user *buf,
 {
 	int r;
 	char buffer[64];
-	struct sunxi_led *led = sunxi_led;
+	struct sunxi_led *led = sunxi_led_global;
 
 	r = snprintf(buffer, 64, "%u\n", led->t1l_ns);
 
@@ -659,8 +604,7 @@ static ssize_t t0h_ns_write(struct file *filp, const char __user *buf,
 	char buffer[64];
 	u32 min, max;
 	unsigned long val;
-	struct sunxi_led *led = sunxi_led;
-	struct device *dev = led->dev;
+	struct sunxi_led *led = sunxi_led_global;
 
 	min = SUNXI_T0H_MIN_NS;
 	max = SUNXI_T0H_MAX_NS;
@@ -688,8 +632,7 @@ static ssize_t t0h_ns_write(struct file *filp, const char __user *buf,
 	return count;
 
 err_out:
-	dev_err(dev,
-		"invalid parameter, t0h_ns should be %u-%u!\n",
+	LED_ERR("invalid parameter, t0h_ns should be %u-%u!\n",
 		min, max);
 
 	return -EINVAL;
@@ -700,7 +643,7 @@ static ssize_t t0h_ns_read(struct file *filp, char __user *buf,
 {
 	int r;
 	char buffer[64];
-	struct sunxi_led *led = sunxi_led;
+	struct sunxi_led *led = sunxi_led_global;
 
 	r = snprintf(buffer, 64, "%u\n", led->t0h_ns);
 
@@ -720,8 +663,7 @@ static ssize_t t0l_ns_write(struct file *filp, const char __user *buf,
 	char buffer[64];
 	u32 min, max;
 	unsigned long val;
-	struct sunxi_led *led = sunxi_led;
-	struct device *dev = led->dev;
+	struct sunxi_led *led = sunxi_led_global;
 
 	min = SUNXI_T0L_MIN_NS;
 	max = SUNXI_T0L_MAX_NS;
@@ -749,8 +691,7 @@ static ssize_t t0l_ns_write(struct file *filp, const char __user *buf,
 	return count;
 
 err_out:
-	dev_err(dev,
-		"invalid parameter, t0l_ns should be %u-%u!\n",
+	LED_ERR("invalid parameter, t0l_ns should be %u-%u!\n",
 		min, max);
 
 	return -EINVAL;
@@ -761,7 +702,7 @@ static ssize_t t0l_ns_read(struct file *filp, char __user *buf,
 {
 	int r;
 	char buffer[64];
-	struct sunxi_led *led = sunxi_led;
+	struct sunxi_led *led = sunxi_led_global;
 
 	r = snprintf(buffer, 64, "%u\n", led->t0l_ns);
 
@@ -781,8 +722,7 @@ static ssize_t wait_time0_ns_write(struct file *filp, const char __user *buf,
 	char buffer[64];
 	u32 min, max;
 	unsigned long val;
-	struct sunxi_led *led = sunxi_led;
-	struct device *dev = led->dev;
+	struct sunxi_led *led = sunxi_led_global;
 
 	min = SUNXI_WAIT_TIME0_MIN_NS;
 	max = SUNXI_WAIT_TIME0_MAX_NS;
@@ -810,8 +750,7 @@ static ssize_t wait_time0_ns_write(struct file *filp, const char __user *buf,
 	return count;
 
 err_out:
-	dev_err(dev,
-		"invalid parameter, wait_time0_ns should be %u-%u!\n",
+	LED_ERR("invalid parameter, wait_time0_ns should be %u-%u!\n",
 		min, max);
 
 	return -EINVAL;
@@ -822,7 +761,7 @@ static ssize_t wait_time0_ns_read(struct file *filp, char __user *buf,
 {
 	int r;
 	char buffer[64];
-	struct sunxi_led *led = sunxi_led;
+	struct sunxi_led *led = sunxi_led_global;
 
 	r = snprintf(buffer, 64, "%u\n", led->wait_time0_ns);
 
@@ -841,10 +780,9 @@ static ssize_t wait_time1_ns_write(struct file *filp, const char __user *buf,
 	int err;
 	char buffer[64];
 	u32 min;
-	long long max;
-	unsigned long val;
-	struct sunxi_led *led = sunxi_led;
-	struct device *dev = led->dev;
+	unsigned long long max;
+	unsigned long long val;
+	struct sunxi_led *led = sunxi_led_global;
 
 	min = SUNXI_WAIT_TIME1_MIN_NS;
 	max = SUNXI_WAIT_TIME1_MAX_NS;
@@ -857,7 +795,7 @@ static ssize_t wait_time1_ns_write(struct file *filp, const char __user *buf,
 
 	buffer[count] = '\0';
 
-	err = kstrtoul(buffer, 10, &val);
+	err = kstrtoull(buffer, 10, &val);
 	if (err)
 		goto err_out;
 
@@ -872,8 +810,7 @@ static ssize_t wait_time1_ns_write(struct file *filp, const char __user *buf,
 	return count;
 
 err_out:
-	dev_err(dev,
-		"invalid parameter, wait_time1_ns should be %u-%lld!\n",
+	LED_ERR("invalid parameter, wait_time1_ns should be %u-%lld!\n",
 		min, max);
 
 	return -EINVAL;
@@ -884,7 +821,7 @@ static ssize_t wait_time1_ns_read(struct file *filp, char __user *buf,
 {
 	int r;
 	char buffer[64];
-	struct sunxi_led *led = sunxi_led;
+	struct sunxi_led *led = sunxi_led_global;
 
 	r = snprintf(buffer, 64, "%lld\n", led->wait_time1_ns);
 
@@ -905,8 +842,7 @@ static ssize_t wait_data_time_ns_write(struct file *filp,
 	char buffer[64];
 	u32 min, max;
 	unsigned long val;
-	struct sunxi_led *led = sunxi_led;
-	struct device *dev = led->dev;
+	struct sunxi_led *led = sunxi_led_global;
 
 	min = SUNXI_WAIT_DATA_TIME_MIN_NS;
 #ifdef SUNXI_FPGA_LEDC
@@ -938,8 +874,7 @@ static ssize_t wait_data_time_ns_write(struct file *filp,
 	return count;
 
 err_out:
-	dev_err(dev,
-		"invalid parameter, wait_data_time_ns should be %u-%u!\n",
+	LED_ERR("invalid parameter, wait_data_time_ns should be %u-%u!\n",
 		min, max);
 
 	return -EINVAL;
@@ -950,7 +885,7 @@ static ssize_t wait_data_time_ns_read(struct file *filp, char __user *buf,
 {
 	int r;
 	char buffer[64];
-	struct sunxi_led *led = sunxi_led;
+	struct sunxi_led *led = sunxi_led_global;
 
 	r = snprintf(buffer, 64, "%u\n", led->wait_data_time_ns);
 
@@ -966,7 +901,7 @@ static const struct file_operations wait_data_time_ns_fops = {
 static int data_show(struct seq_file *s, void *data)
 {
 	int i;
-	struct sunxi_led *led = sunxi_led;
+	struct sunxi_led *led = sunxi_led_global;
 
 	for (i = 0; i < led->led_count; i++) {
 		if (!(i % 4)) {
@@ -1000,8 +935,7 @@ static ssize_t output_mode_write(struct file *filp, const char __user *buf,
 			size_t count, loff_t *offp)
 {
 	char buffer[64];
-	struct sunxi_led *led = sunxi_led;
-	struct device *dev = led->dev;
+	struct sunxi_led *led = sunxi_led_global;
 
 	if (count >= sizeof(buffer))
 		goto err_out;
@@ -1018,7 +952,7 @@ static ssize_t output_mode_write(struct file *filp, const char __user *buf,
 	return count;
 
 err_out:
-	dev_err(dev, "invalid parameter!\n");
+	LED_ERR("invalid parameter!\n");
 
 	return -EINVAL;
 }
@@ -1028,7 +962,7 @@ static ssize_t output_mode_read(struct file *filp, char __user *buf,
 {
 	int r;
 	char buffer[64];
-	struct sunxi_led *led = sunxi_led;
+	struct sunxi_led *led = sunxi_led_global;
 
 	r = snprintf(buffer, 64, "%s\n", led->output_mode.str);
 
@@ -1039,52 +973,6 @@ static const struct file_operations output_mode_fops = {
 	.owner = THIS_MODULE,
 	.write = output_mode_write,
 	.read  = output_mode_read,
-};
-
-static ssize_t trans_mode_write(struct file *filp, const char __user *buf,
-			size_t count, loff_t *offp)
-{
-	char buffer[64];
-	struct sunxi_led *led = sunxi_led;
-	struct device *dev = led->dev;
-
-	if (count >= sizeof(buffer))
-		goto err_out;
-
-	if (copy_from_user(buffer, buf, count))
-		goto err_out;
-
-	buffer[count] = '\0';
-
-	sunxi_ledc_set_trans_mode(led, buffer);
-
-	*offp += count;
-
-	return count;
-
-err_out:
-	dev_err(dev, "invalid parameter!\n");
-
-	return -EINVAL;
-}
-
-
-static ssize_t trans_mode_read(struct file *filp, char __user *buf,
-			size_t count, loff_t *offp)
-{
-	int r;
-	char buffer[64];
-	struct sunxi_led *led = sunxi_led;
-
-	r = snprintf(buffer, 64, "%s\n", led->trans_mode.str);
-
-	return simple_read_from_buffer(buf, count, offp, buffer, r);
-}
-
-static const struct file_operations trans_mode_fops = {
-	.owner = THIS_MODULE,
-	.write = trans_mode_write,
-	.read  = trans_mode_read,
 };
 
 static ssize_t hwversion_read(struct file *filp, char __user *buf,
@@ -1111,121 +999,139 @@ static const struct file_operations hwversion_fops = {
 static void sunxi_led_create_debugfs(struct sunxi_led *led)
 {
 	struct dentry *debugfs_dir, *debugfs_file;
-	struct device *dev = led->dev;
 
 	debugfs_dir = debugfs_create_dir("sunxi_leds", NULL);
 	if (IS_ERR_OR_NULL(debugfs_dir)) {
-		dev_err(dev, "debugfs_create_dir failed!\n");
+		LED_ERR("debugfs_create_dir failed!\n");
 		return;
 	}
+
+	led->debugfs_dir = debugfs_dir;
 
 	debugfs_file = debugfs_create_file("reset_ns", 0660,
 				debugfs_dir, NULL, &reset_ns_fops);
 	if (!debugfs_file)
-		dev_err(dev, "debugfs_create_file for reset_ns failed!\n");
+		LED_ERR("debugfs_create_file for reset_ns failed!\n");
 
 	debugfs_file = debugfs_create_file("t1h_ns", 0660,
 				debugfs_dir, NULL, &t1h_ns_fops);
 	if (!debugfs_file)
-		dev_err(dev, "debugfs_create_file for t1h_ns failed!\n");
+		LED_ERR("debugfs_create_file for t1h_ns failed!\n");
 
 	debugfs_file = debugfs_create_file("t1l_ns", 0660,
 				debugfs_dir, NULL, &t1l_ns_fops);
 	if (!debugfs_file)
-		dev_err(dev, "debugfs_create_file for t1l_ns failed!\n");
+		LED_ERR("debugfs_create_file for t1l_ns failed!\n");
 
 	debugfs_file = debugfs_create_file("t0h_ns", 0660,
 				debugfs_dir, NULL, &t0h_ns_fops);
 	if (!debugfs_file)
-		dev_err(dev, "debugfs_create_file for t0h_ns failed!\n");
+		LED_ERR("debugfs_create_file for t0h_ns failed!\n");
 
 	debugfs_file = debugfs_create_file("t0l_ns", 0660,
 				debugfs_dir, NULL, &t0l_ns_fops);
 	if (!debugfs_file)
-		dev_err(dev, "debugfs_create_file for t0l_ns failed!\n");
+		LED_ERR("debugfs_create_file for t0l_ns failed!\n");
 
 	debugfs_file = debugfs_create_file("wait_time0_ns", 0660,
 				debugfs_dir, NULL, &wait_time0_ns_fops);
 	if (!debugfs_file)
-		dev_err(dev, "debugfs_create_file for wait_time0_ns failed!\n");
+		LED_ERR("debugfs_create_file for wait_time0_ns failed!\n");
 
 	debugfs_file = debugfs_create_file("wait_time1_ns", 0660,
 				debugfs_dir, NULL, &wait_time1_ns_fops);
 	if (!debugfs_file)
-		dev_err(dev, "debugfs_create_file for wait_time1_ns failed!\n");
+		LED_ERR("debugfs_create_file for wait_time1_ns failed!\n");
 
 	debugfs_file = debugfs_create_file("wait_data_time_ns", 0660,
 				debugfs_dir, NULL, &wait_data_time_ns_fops);
 	if (!debugfs_file)
-		dev_err(dev, "debugfs_create_file for wait_data_time_ns failed!\n");
+		LED_ERR("debugfs_create_file for wait_data_time_ns failed!\n");
 
 	debugfs_file = debugfs_create_file("data", 0440,
 				debugfs_dir, NULL, &data_fops);
 	if (!debugfs_file)
-		dev_err(dev, "debugfs_create_file for data failed!\n");
+		LED_ERR("debugfs_create_file for data failed!\n");
 
 	debugfs_file = debugfs_create_file("output_mode", 0660,
 				debugfs_dir, NULL, &output_mode_fops);
 	if (!debugfs_file)
-		dev_err(dev, "debugfs_create_file for output_mode failed!\n");
+		LED_ERR("debugfs_create_file for output_mode failed!\n");
 
-	debugfs_file = debugfs_create_file("trans_mode", 0660,
-				debugfs_dir, NULL, &trans_mode_fops);
 	if (!debugfs_file)
-		dev_err(dev, "debugfs_create_file for trans_mode failed!\n");
+		LED_ERR("debugfs_create_file for trans_mode failed!\n");
 
 	debugfs_file = debugfs_create_file("hwversion", 0440,
 				debugfs_dir, NULL, &hwversion_fops);
 	if (!debugfs_file)
-		dev_err(dev, "debugfs_create_file for hwversion failed!\n");
+		LED_ERR("debugfs_create_file for hwversion failed!\n");
+}
+
+static void sunxi_led_remove_debugfs(struct sunxi_led *led)
+{
+	debugfs_remove_recursive(led->debugfs_dir);
 }
 #endif /* CONFIG_DEBUG_FS */
 
 static void sunxi_ledc_dma_callback(void *param)
 {
-	struct sunxi_led *led = sunxi_led;
+	dprintk(DEBUG_INFO, "finish\n");
+}
 
-	dev_dbg(led->dev, "sunxi_ledc_dma_callback finish\n");
+static void sunxi_ledc_set_cpu_mode(struct sunxi_led *led)
+{
+	u32 reg_val = 0;
+
+	reg_val &= ~(1 << 5);
+	sunxi_set_reg(LEDC_DMA_CTRL_REG, reg_val);
+
+	sunxi_ledc_enable_irq(LEDC_FIFO_CPUREQ_INT_EN);
+}
+
+static void sunxi_ledc_set_dma_mode(struct sunxi_led *led)
+{
+	u32 reg_val = 0;
+
+	reg_val |= 1 << 5;
+	sunxi_set_reg(LEDC_DMA_CTRL_REG, reg_val);
+
+	sunxi_ledc_disable_irq(LEDC_FIFO_CPUREQ_INT_EN);
 }
 
 static void sunxi_ledc_trans_data(struct sunxi_led *led)
 {
 	int i, err;
 	size_t size;
-	u32 sub_length, delta_length;
-	unsigned int slave_id;
 	unsigned long flags;
 	phys_addr_t dst_addr;
 	struct dma_slave_config slave_config;
 	struct device *dev = led->dev;
 	struct dma_async_tx_descriptor *dma_desc;
 
-	if (led->transmitted_data >= led->length)
-		return;
+	if (led->length <= SUNXI_LEDC_FIFO_DEPTH) {
+		dprintk(DEBUG_INFO, "cpu xfer\n");
+		ktime_get_coarse_real_ts64(&(led->start_time));
+		sunxi_ledc_set_time(led);
+		sunxi_ledc_set_output_mode(led, led->output_mode.str);
+		sunxi_ledc_set_cpu_mode(led);
+		sunxi_ledc_set_length(led);
 
-	delta_length = led->length - led->transmitted_data;
-	if (delta_length > SUNXI_LEDC_FIFO_TRIG_LEVEL)
-		sub_length = SUNXI_LEDC_FIFO_TRIG_LEVEL;
-	else
-		sub_length = delta_length;
+		sunxi_ledc_enable_irq(LEDC_TRANS_FINISH_INT_EN | LEDC_WAITDATA_TIMEOUT_INT_EN
+				| LEDC_FIFO_OVERFLOW_INT_EN | LEDC_GLOBAL_INT_EN);
 
-	switch (led->trans_mode.val) {
-	case LEDC_TRANS_CPU_MODE:
-		for (i = 0; i < sub_length; i++) {
-			sunxi_set_reg(LEDC_DATA_REG_OFFSET,
-				led->data[led->transmitted_data]);
-			led->transmitted_data++;
-		}
+		sunxi_ledc_enable(led);
 
-		break;
+		for (i = 0; i < led->length; i++)
+			sunxi_set_reg(LEDC_DATA_REG_OFFSET, led->data[i]);
 
-	case LEDC_TRANS_DMA_MODE:
+	} else {
+		dprintk(DEBUG_INFO, "dma xfer\n");
+
 		size = led->length * 4;
 		led->src_dma = dma_map_single(dev, led->data,
 					size, DMA_TO_DEVICE);
+		dst_addr = led->res->start + LEDC_DATA_REG_OFFSET;
 
-		dst_addr = SUNXI_LEDC_REG_BASE_ADDR + LEDC_DATA_REG_OFFSET;
-		slave_id = sunxi_slave_id(DRQDST_LEDC, DRQSRC_SDRAM);
 		flags = DMA_PREP_INTERRUPT | DMA_CTRL_ACK;
 
 		slave_config.direction = DMA_MEM_TO_DEV;
@@ -1233,12 +1139,12 @@ static void sunxi_ledc_trans_data(struct sunxi_led *led)
 		slave_config.dst_addr = dst_addr;
 		slave_config.src_addr_width = DMA_SLAVE_BUSWIDTH_4_BYTES;
 		slave_config.dst_addr_width = DMA_SLAVE_BUSWIDTH_4_BYTES;
-		slave_config.src_maxburst = 1;
-		slave_config.dst_maxburst = 1;
-		slave_config.slave_id = slave_id;
+		slave_config.src_maxburst = 4;
+		slave_config.dst_maxburst = 4;
+
 		err = dmaengine_slave_config(led->dma_chan, &slave_config);
 		if (err < 0) {
-			dev_err(dev, "dmaengine_slave_config failed!\n");
+			LED_ERR("dmaengine_slave_config failed!\n");
 			dma_unmap_single(dev, led->src_dma,
 					size, DMA_TO_DEVICE);
 			return;
@@ -1250,7 +1156,7 @@ static void sunxi_ledc_trans_data(struct sunxi_led *led)
 							DMA_MEM_TO_DEV,
 							flags);
 		if (!dma_desc) {
-			dev_err(dev, "dmaengine_prep_slave_single failed!\n");
+			LED_ERR("dmaengine_prep_slave_single failed!\n");
 			dma_unmap_single(dev, led->src_dma,
 					size, DMA_TO_DEVICE);
 			return;
@@ -1261,11 +1167,13 @@ static void sunxi_ledc_trans_data(struct sunxi_led *led)
 		dmaengine_submit(dma_desc);
 		dma_async_issue_pending(led->dma_chan);
 
-		break;
-	}
-
-	if (!sunxi_ledc_is_enabled(led)) {
+		ktime_get_coarse_real_ts64(&(led->start_time));
+		sunxi_ledc_set_time(led);
+		sunxi_ledc_set_output_mode(led, led->output_mode.str);
+		sunxi_ledc_set_dma_mode(led);
 		sunxi_ledc_set_length(led);
+		sunxi_ledc_enable_irq(LEDC_TRANS_FINISH_INT_EN | LEDC_WAITDATA_TIMEOUT_INT_EN
+				| LEDC_FIFO_OVERFLOW_INT_EN | LEDC_GLOBAL_INT_EN);
 		sunxi_ledc_enable(led);
 	}
 }
@@ -1286,12 +1194,43 @@ static inline void sunxi_ledc_clear_irq(enum sunxi_ledc_irq_status_reg irq)
 	sunxi_set_reg(LEDC_INT_STS_REG_OFFSET, reg_val);
 }
 
+static int sunxi_ledc_complete(struct sunxi_led *led)
+{
+	unsigned long flags = 0;
+	unsigned long timeout = 0;
+	u32 reg_val;
+
+	/*wait_event_timeout return 0   : timeout
+	 *wait_event_timeout return > 0 : thr left time
+	 */
+	timeout = wait_event_timeout(led->wait, led->result, 5*HZ);
+	if (timeout == 0) {
+		reg_val = sunxi_get_reg(LEDC_INT_STS_REG_OFFSET);
+		dprintk(DEBUG_INFO, "LEDC INTERRUPT STATUS REG IS %x", reg_val);
+		LED_ERR("led xfer timeout\n");
+		reg_val = sunxi_get_reg(LEDC_INT_STS_REG_OFFSET);
+		dprintk(DEBUG_INFO, "LEDC INTERRUPT STATUS REG IS %x", reg_val);
+		return -ETIME;
+	} else if (led->result == RESULT_ERR) {
+		return -ECOMM;
+	}
+
+	dprintk(DEBUG_INFO, "xfer complete\n");
+
+	spin_lock_irqsave(&led->lock, flags);
+	led->result = 0;
+	spin_unlock_irqrestore(&led->lock, flags);
+
+	return 0;
+}
+
+
 static irqreturn_t sunxi_ledc_irq_handler(int irq, void *dev_id)
 {
 	unsigned long flags;
 	long delta_time_ns;
 	u32 irq_status, max_ns;
-	struct sunxi_led *led = sunxi_led;
+	struct sunxi_led *led = sunxi_led_global;
 	struct device *dev = led->dev;
 	struct timespec64 current_time;
 
@@ -1308,11 +1247,13 @@ static irqreturn_t sunxi_ledc_irq_handler(int irq, void *dev_id)
 					DMA_TO_DEVICE);
 		sunxi_ledc_reset(led);
 		led->length = 0;
+		led->result = RESULT_COMPLETE;
+		wake_up(&led->wait);
 		goto out;
 	}
 
 	if (irq_status & LEDC_WAITDATA_TIMEOUT_INT) {
-		current_time = current_kernel_time64();
+		ktime_get_coarse_real_ts64(&current_time);
 		delta_time_ns = current_time.tv_sec - led->start_time.tv_sec;
 		delta_time_ns *= 1000 * 1000 * 1000;
 		delta_time_ns += current_time.tv_nsec - led->start_time.tv_nsec;
@@ -1332,9 +1273,9 @@ static irqreturn_t sunxi_ledc_irq_handler(int irq, void *dev_id)
 		if (delta_time_ns <= max_ns * 2) {
 			sunxi_ledc_trans_data(led);
 		} else {
-			dev_err(dev,
-				"wait time is more than %d ns, going to reset ledc and drop this operation!\n",
-				max_ns);
+			LED_ERR("wait time is more than %d ns, going to reset ledc and drop this operation!\n", max_ns);
+			led->result = RESULT_ERR;
+			wake_up(&led->wait);
 			led->length = 0;
 		}
 
@@ -1342,32 +1283,23 @@ static irqreturn_t sunxi_ledc_irq_handler(int irq, void *dev_id)
 	}
 
 	if (irq_status & LEDC_FIFO_OVERFLOW_INT) {
-		dev_err(dev,
-			"there exists fifo overflow issue, irq_status=0x%x!\n",
-			irq_status);
-
+		LED_ERR("there exists fifo overflow issue, irq_status=0x%x!\n",
+				irq_status);
 		sunxi_ledc_reset(led);
-		sunxi_ledc_trans_data(led);
-
+		led->result = RESULT_ERR;
+		wake_up(&led->wait);
+		led->length = 0;
 		goto out;
-	}
-
-	if (irq_status & LEDC_FIFO_CPUREQ_INT) {
-		if (led->trans_mode.val == LEDC_TRANS_CPU_MODE
-			&& led->transmitted_data <= led->length)
-			sunxi_ledc_trans_data(led);
 	}
 
 out:
 	spin_unlock_irqrestore(&led->lock, flags);
-
 	return IRQ_HANDLED;
 }
 
 static int sunxi_ledc_irq_init(struct sunxi_led *led)
 {
 	int err;
-	u32 reg_val = 0;
 	struct device *dev = led->dev;
 	unsigned long flags = 0;
 	const char *name = "ledcirq";
@@ -1379,43 +1311,25 @@ static int sunxi_ledc_irq_init(struct sunxi_led *led)
 
 	led->irqnum = platform_get_irq(pdev, 0);
 	if (led->irqnum < 0)
-		dev_err(dev, "failed to get ledc irq!\n");
+		LED_ERR("failed to get ledc irq!\n");
 
 	err = request_irq(led->irqnum, sunxi_ledc_irq_handler,
 				flags, name, dev);
 	if (err) {
-		dev_err(dev,
-			"failed to install IRQ handler for irqnum %d\n",
+		LED_ERR("failed to install IRQ handler for irqnum %d\n",
 			led->irqnum);
 		return -EPERM;
 	}
-
-	reg_val = sunxi_get_reg(LEDC_INT_CTRL_REG_OFFSET);
-	reg_val |= LEDC_GLOBAL_INT_EN;
-	reg_val |= LEDC_FIFO_OVERFLOW_INT_EN;
-	reg_val |= LEDC_WAITDATA_TIMEOUT_INT_EN;
-	if (led->trans_mode.val == LEDC_TRANS_CPU_MODE)
-		reg_val |= LEDC_FIFO_CPUREQ_INT_EN;
-	reg_val |= LEDC_TRANS_FINISH_INT_EN;
-
-	sunxi_set_reg(LEDC_INT_CTRL_REG_OFFSET, reg_val);
 
 	return 0;
 }
 
 static void sunxi_ledc_irq_deinit(struct sunxi_led *led)
 {
-	u32 reg_val;
-
 	free_irq(led->irqnum, led->dev);
-
-	reg_val = sunxi_get_reg(LEDC_INT_CTRL_REG_OFFSET);
-	reg_val &= ~LEDC_TRANS_FINISH_INT_EN;
-	reg_val &= ~LEDC_FIFO_CPUREQ_INT_EN;
-	reg_val &= ~LEDC_WAITDATA_TIMEOUT_INT_EN;
-	reg_val &= ~LEDC_FIFO_OVERFLOW_INT_EN;
-	reg_val &= ~LEDC_GLOBAL_INT_EN;
-	sunxi_set_reg(LEDC_INT_CTRL_REG_OFFSET, reg_val);
+	sunxi_ledc_disable_irq(LEDC_TRANS_FINISH_INT_EN | LEDC_FIFO_CPUREQ_INT_EN
+			| LEDC_WAITDATA_TIMEOUT_INT_EN | LEDC_FIFO_OVERFLOW_INT_EN
+			| LEDC_GLOBAL_INT_EN);
 }
 
 static void sunxi_ledc_pinctrl_init(struct sunxi_led *led)
@@ -1423,8 +1337,38 @@ static void sunxi_ledc_pinctrl_init(struct sunxi_led *led)
 	struct device *dev = led->dev;
 	struct pinctrl *pinctrl = devm_pinctrl_get_select_default(dev);
 
+	led->pctrl = pinctrl;
 	if (IS_ERR(pinctrl))
-		dev_warn(dev, "devm_pinctrl_get_select_default failed!\n");
+		LED_ERR("devm_pinctrl_get_select_default failed!\n");
+}
+
+static int led_regulator_request(struct sunxi_led *led)
+{
+	struct regulator *regu = NULL;
+
+	/* Consider "n*" as nocare. Support "none", "nocare", "null", "" etc. */
+	if ((led->regulator_id[0] == 'n') || (led->regulator_id[0] == 0))
+		return 0;
+
+	regu = regulator_get(NULL, led->regulator_id);
+	if (IS_ERR(regu)) {
+		LED_ERR("get regulator %s failed!\n", led->regulator_id);
+		return -1;
+	}
+	led->regulator = regu;
+
+	return 0;
+}
+
+static int led_regulator_release(struct sunxi_led *led)
+{
+	if (led->regulator == NULL)
+		return 0;
+
+	regulator_put(led->regulator);
+	led->regulator = NULL;
+
+	return 1;
 }
 
 static int sunxi_set_led_brightness(struct led_classdev *led_cdev,
@@ -1434,23 +1378,24 @@ static int sunxi_set_led_brightness(struct led_classdev *led_cdev,
 	u32 r, g, b, shift, old_data, new_data, length;
 	struct sunxi_led_info *pinfo;
 	struct sunxi_led_classdev_group *pcdev_group;
-	struct sunxi_led *led = sunxi_led;
+	struct sunxi_led *led = sunxi_led_global;
 
 	pinfo = container_of(led_cdev, struct sunxi_led_info, cdev);
 
 	switch (pinfo->type) {
-	case LED_TYPE_R:
-		pcdev_group = container_of(pinfo,
-			struct sunxi_led_classdev_group, r);
-		r = value;
-		shift = 8;
-		break;
 	case LED_TYPE_G:
 		pcdev_group = container_of(pinfo,
 			struct sunxi_led_classdev_group, g);
 		g = value;
 		shift = 16;
 		break;
+	case LED_TYPE_R:
+		pcdev_group = container_of(pinfo,
+			struct sunxi_led_classdev_group, r);
+		r = value;
+		shift = 8;
+		break;
+
 	case LED_TYPE_B:
 		pcdev_group = container_of(pinfo,
 			struct sunxi_led_classdev_group, b);
@@ -1472,20 +1417,23 @@ static int sunxi_set_led_brightness(struct led_classdev *led_cdev,
 
 	/* LEDC treats input data as GRB by default */
 	new_data = (g << 16) | (r << 8) | b;
-
 	length = pcdev_group->led_num + 1;
 
 	spin_lock_irqsave(&led->lock, flags);
-
 	led->data[pcdev_group->led_num] = new_data;
-
 	led->length = length;
-
-	led->start_time = current_kernel_time64();
+	spin_unlock_irqrestore(&led->lock, flags);
 
 	sunxi_ledc_trans_data(led);
+	if (debug_mask & DEBUG_INFO2) {
+		dprintk(DEBUG_INFO2, "dump reg:\n");
+		led_dump_reg(led, 0, 0x30);
+	}
 
-	spin_unlock_irqrestore(&led->lock, flags);
+	sunxi_ledc_complete(led);
+
+	if (debug_mask & DEBUG_INFO1)
+		pr_warn("num = %03u\n", length);
 
 	return 0;
 }
@@ -1495,59 +1443,59 @@ static int sunxi_register_led_classdev(struct sunxi_led *led)
 	int i, err;
 	size_t size;
 	struct device *dev = led->dev;
-	struct led_classdev *pcdev;
+	struct led_classdev *pcdev_RGB;
 
+	dprintk(DEBUG_INIT, "led_classdev start\n");
 	if (!led->led_count)
 		led->led_count = SUNXI_DEFAULT_LED_COUNT;
 
 	size = sizeof(struct sunxi_led_classdev_group) * led->led_count;
 	led->pcdev_group = kzalloc(size, GFP_KERNEL);
-	if (!led->pcdev_group)
+	if (!led->pcdev_group) {
+		LED_ERR("kzalloc error\n");
 		return -ENOMEM;
+	}
 
 	for (i = 0; i < led->led_count; i++) {
 		led->pcdev_group[i].r.type = LED_TYPE_R;
-		pcdev = &led->pcdev_group[i].r.cdev;
-		pcdev->name = kzalloc(16, GFP_KERNEL);
-		sprintf((char *)pcdev->name, "sunxi_led%dr", i);
-		pcdev->brightness = LED_OFF;
-		pcdev->brightness_set_blocking = sunxi_set_led_brightness;
-		pcdev->dev = dev;
-		err = led_classdev_register(dev, pcdev);
+		pcdev_RGB = &led->pcdev_group[i].r.cdev;
+		pcdev_RGB->name = kzalloc(16, GFP_KERNEL);
+		sprintf((char *)pcdev_RGB->name, "sunxi_led%dr", i);
+		pcdev_RGB->brightness = LED_OFF;
+		pcdev_RGB->brightness_set_blocking = sunxi_set_led_brightness;
+		pcdev_RGB->dev = dev;
+		err = led_classdev_register(dev, pcdev_RGB);
 		if (err < 0) {
-			dev_err(dev,
-				"led_classdev_register %s failed!\n",
-				pcdev->name);
+			LED_ERR("led_classdev_register %s failed!\n",
+				pcdev_RGB->name);
 			return err;
 		}
 
 		led->pcdev_group[i].g.type = LED_TYPE_G;
-		pcdev = &led->pcdev_group[i].g.cdev;
-		pcdev->name = kzalloc(16, GFP_KERNEL);
-		sprintf((char *)pcdev->name, "sunxi_led%dg", i);
-		pcdev->brightness = LED_OFF;
-		pcdev->brightness_set_blocking = sunxi_set_led_brightness;
-		pcdev->dev = dev;
-		err = led_classdev_register(dev, pcdev);
+		pcdev_RGB = &led->pcdev_group[i].g.cdev;
+		pcdev_RGB->name = kzalloc(16, GFP_KERNEL);
+		sprintf((char *)pcdev_RGB->name, "sunxi_led%dg", i);
+		pcdev_RGB->brightness = LED_OFF;
+		pcdev_RGB->brightness_set_blocking = sunxi_set_led_brightness;
+		pcdev_RGB->dev = dev;
+		err = led_classdev_register(dev, pcdev_RGB);
 		if (err < 0) {
-			dev_err(dev,
-			"led_classdev_register %s failed!\n",
-			pcdev->name);
+			LED_ERR("led_classdev_register %s failed!\n",
+			pcdev_RGB->name);
 			return err;
 		}
 
 		led->pcdev_group[i].b.type = LED_TYPE_B;
-		pcdev = &led->pcdev_group[i].b.cdev;
-		pcdev->name = kzalloc(16, GFP_KERNEL);
-		sprintf((char *)pcdev->name, "sunxi_led%db", i);
-		pcdev->brightness = LED_OFF;
-		pcdev->brightness_set_blocking = sunxi_set_led_brightness;
-		pcdev->dev = dev;
-		err = led_classdev_register(dev, pcdev);
+		pcdev_RGB = &led->pcdev_group[i].b.cdev;
+		pcdev_RGB->name = kzalloc(16, GFP_KERNEL);
+		sprintf((char *)pcdev_RGB->name, "sunxi_led%db", i);
+		pcdev_RGB->brightness = LED_OFF;
+		pcdev_RGB->brightness_set_blocking = sunxi_set_led_brightness;
+		pcdev_RGB->dev = dev;
+		err = led_classdev_register(dev, pcdev_RGB);
 		if (err < 0) {
-			dev_err(dev,
-				"led_classdev_register %s failed!\n",
-				pcdev->name);
+			LED_ERR("led_classdev_register %s failed!\n",
+					pcdev_RGB->name);
 			return err;
 		}
 
@@ -1567,30 +1515,34 @@ static void sunxi_unregister_led_classdev(struct sunxi_led *led)
 	int i;
 
 	for (i = 0; i < led->led_count; i++) {
-		kfree(led->pcdev_group[i].r.cdev.name);
-		kfree(led->pcdev_group[i].g.cdev.name);
 		kfree(led->pcdev_group[i].b.cdev.name);
-		led_classdev_unregister(&led->pcdev_group[i].r.cdev);
-		led_classdev_unregister(&led->pcdev_group[i].g.cdev);
+		led->pcdev_group[i].b.cdev.name = NULL;
+		kfree(led->pcdev_group[i].g.cdev.name);
+		led->pcdev_group[i].g.cdev.name = NULL;
+		kfree(led->pcdev_group[i].r.cdev.name);
+		led->pcdev_group[i].r.cdev.name = NULL;
 		led_classdev_unregister(&led->pcdev_group[i].b.cdev);
+		led_classdev_unregister(&led->pcdev_group[i].g.cdev);
+		led_classdev_unregister(&led->pcdev_group[i].r.cdev);
 	}
+	kfree(led->data);
+	led->data = NULL;
+
 
 	kfree(led->pcdev_group);
-	kfree(led->data);
+	led->pcdev_group = NULL;
 }
 
 static inline int sunxi_get_u32_of_property(const char *propname, int *val)
 {
 	int err;
-	struct sunxi_led *led = sunxi_led;
+	struct sunxi_led *led = sunxi_led_global;
 	struct device *dev = led->dev;
 	struct device_node *np = dev->of_node;
 
 	err = of_property_read_u32(np, propname, val);
 	if (err < 0)
-		dev_warn(dev,
-			"failed to get the value of propname %s!\n",
-			propname);
+		LED_ERR("failed to get the value of propname %s!\n", propname);
 
 	return err;
 }
@@ -1599,15 +1551,13 @@ static inline int sunxi_get_str_of_property(const char *propname,
 					const char **out_string)
 {
 	int err;
-	struct sunxi_led *led = sunxi_led;
+	struct sunxi_led *led = sunxi_led_global;
 	struct device *dev = led->dev;
 	struct device_node *np = dev->of_node;
 
 	err = of_property_read_string(np, propname, out_string);
 	if (err < 0)
-		dev_warn(dev,
-			"failed to get the string of propname %s!\n",
-			propname);
+		LED_ERR("failed to get the string of propname %s!\n", propname);
 
 	return err;
 }
@@ -1634,12 +1584,15 @@ static void sunxi_get_para_of_property(struct sunxi_led *led)
 			!strncmp(str, "BRG", 3))
 			memcpy(led->output_mode.str, str, 3);
 
-	memcpy(led->trans_mode.str, "DMA", 3);
-	led->trans_mode.val = LEDC_TRANS_DMA_MODE;
-	err = sunxi_get_str_of_property("trans_mode", &str);
-	if (!err)
-		if (!strncmp(str, "CPU", 3) || !strncmp(str, "DMA", 3))
-			memcpy(led->trans_mode.str, str, 3);
+	err =  sunxi_get_str_of_property("led_regulator", &str);
+	if (!err) {
+		if (strlen(str) >= sizeof(led->regulator_id))
+			LED_ERR("illegal regulator id\n");
+		else {
+			strcpy(led->regulator_id, str);
+			pr_info("led_regulator: %s\n", led->regulator_id);
+		}
+	}
 
 	err = sunxi_get_u32_of_property("reset_ns", &val);
 	if (!err)
@@ -1673,6 +1626,81 @@ static void sunxi_get_para_of_property(struct sunxi_led *led)
 	if (!err)
 		led->wait_data_time_ns = val;
 }
+void sunxi_led_set_all(struct sunxi_led *led, u8 channel,
+		enum led_brightness value)
+{
+	u32 i;
+	struct led_classdev *led_cdev;
+
+	if (channel%3 == 0) {
+		for (i = 0; i < led->led_count; i++) {
+			led_cdev = &led->pcdev_group[i].r.cdev;
+			mutex_lock(&led_cdev->led_access);
+			sunxi_set_led_brightness(led_cdev, value);
+			mutex_unlock(&led_cdev->led_access);
+		}
+	} else if (channel%3 == 1) {
+		for (i = 0; i < led->led_count; i++) {
+			led_cdev = &led->pcdev_group[i].g.cdev;
+			mutex_lock(&led_cdev->led_access);
+			sunxi_set_led_brightness(led_cdev, value);
+			mutex_unlock(&led_cdev->led_access);
+		}
+	} else {
+		for (i = 0; i < led->led_count; i++) {
+			led_cdev = &led->pcdev_group[i].b.cdev;
+			mutex_lock(&led_cdev->led_access);
+			sunxi_set_led_brightness(led_cdev, value);
+			mutex_unlock(&led_cdev->led_access);
+		}
+	}
+}
+
+static ssize_t led_show(struct class *class,
+			struct class_attribute *attr,
+			char *buf)
+{
+	struct sunxi_led *led = sunxi_led_global;
+
+	sunxi_led_set_all(led, 0, 0);
+	sunxi_led_set_all(led, 1, 0);
+	sunxi_led_set_all(led, 2, 0);
+
+	sunxi_led_set_all(led, 0, 20);
+	msleep(500);
+	sunxi_led_set_all(led, 1, 20);
+	msleep(500);
+	sunxi_led_set_all(led, 2, 20);
+	msleep(500);
+
+	sunxi_led_set_all(led, 0, 0);
+	sunxi_led_set_all(led, 1, 0);
+	sunxi_led_set_all(led, 2, 0);
+
+	return 0;
+}
+
+static struct class_attribute led_class_attrs[] = {
+	__ATTR(light, 0644, led_show, NULL),
+	//__ATTR_NULL,
+};
+
+static void led_node_init(void)
+{
+	int i;
+	int err;
+	/* sys/class/led/xxx */
+	for (i = 0; i < ARRAY_SIZE(led_class_attrs); i++) {
+		err = class_create_file(led_class, &led_class_attrs[i]);
+		if (err) {
+			LED_ERR("class_create_file() failed!\n");
+			while (i--)
+				class_remove_file(led_class, &led_class_attrs[i]);
+			class_destroy(led_class);
+			led_class = NULL;
+		}
+	}
+}
 
 static int sunxi_led_probe(struct platform_device *pdev)
 {
@@ -1680,41 +1708,90 @@ static int sunxi_led_probe(struct platform_device *pdev)
 	dma_cap_mask_t mask;
 	struct sunxi_led *led;
 	struct device *dev = &pdev->dev;
+	struct resource *mem_res = NULL;
+	int ret;
+
+	dprintk(DEBUG_INIT, "start\n");
 
 	led = kzalloc(sizeof(struct sunxi_led), GFP_KERNEL);
-	if (!led)
-		return -ENOMEM;
+	if (!led) {
+		LED_ERR("kzalloc failed\n");
+		ret = -ENOMEM;
+	}
 
-	sunxi_led = led;
+	/* global variable, edfined at the beginning */
+	sunxi_led_global = led;
 
+	platform_set_drvdata(pdev, led);
 	led->dev = dev;
 
-	led->output_mode.str = kzalloc(3, GFP_KERNEL);
-	if (!led->output_mode.str)
-		return -ENOMEM;
+	mem_res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+	if (mem_res == NULL) {
+		LED_ERR("failed to get MEM res\n");
+		ret = -ENXIO;
+		goto emem;
+	}
 
-	led->trans_mode.str = kzalloc(3, GFP_KERNEL);
-	if (!led->trans_mode.str)
-		return -ENOMEM;
+	if (!request_mem_region(mem_res->start, resource_size(mem_res),
+				mem_res->name)) {
+		LED_ERR("failed to request mem region\n");
+		ret = -EINVAL;
+		goto emem;
+	}
+
+	led->iomem_reg_base = ioremap(mem_res->start, resource_size(mem_res));
+	if (!led->iomem_reg_base) {
+		ret = -EIO;
+		goto eiomap;
+	}
+	led->res = mem_res;
+
+	led->output_mode.str = kzalloc(3, GFP_KERNEL);
+	if (!led->output_mode.str) {
+		LED_ERR("kzalloc failed\n");
+		ret = -ENOMEM;
+		goto ezalloc_str;
+	}
 
 	sunxi_get_para_of_property(led);
 
-	err = sunxi_register_led_classdev(led);
-	if (err)
-		return err;
+	err = led_regulator_request(led);
+	if (err < 0) {
+		LED_ERR("request regulator failed!\n");
+		ret = err;
+		goto eregulator;
+	}
 
-	/* Registers initialization */
-	led->iomem_reg_base = ioremap(SUNXI_LEDC_REG_BASE_ADDR,
-					LEDC_TOTAL_REG_SIZE);
+	err = sunxi_register_led_classdev(led);
+	if (err) {
+		LED_ERR("failed to register led classdev\n");
+		ret = err;
+		goto eclassdev;
+	}
+
 	sunxi_ledc_set_time(led);
-	sunxi_ledc_set_trans_mode(led, NULL);
-	sunxi_ledc_set_output_mode(led, NULL);
+
+	led->reset = devm_reset_control_get(&pdev->dev, NULL);
+	if (IS_ERR(led->reset)) {
+		LED_ERR("get reset clk error\n");
+		return -EINVAL;
+	}
+	ret = reset_control_deassert(led->reset);
+	if (ret) {
+		LED_ERR("deassert clk error, ret:%d\n", ret);
+		return ret;
+	}
 
 	sunxi_clk_init(led);
 
+	init_waitqueue_head(&led->wait);
+
 	err = sunxi_ledc_irq_init(led);
-	if (err)
-		return err;
+	if (err) {
+		LED_ERR("failed to init irq\n");
+		ret = err;
+		goto eirq;
+	}
 
 	sunxi_ledc_pinctrl_init(led);
 
@@ -1722,40 +1799,178 @@ static int sunxi_led_probe(struct platform_device *pdev)
 	dma_cap_set(DMA_SLAVE, mask);
 	led->dma_chan = dma_request_channel(mask, NULL, NULL);
 	if (!led->dma_chan) {
-		dev_err(dev, "failed to get the DMA channel!\n");
-		return 0;
+		LED_ERR("failed to get the DMA channel!\n");
+		ret = -EFAULT;
+		goto edma;
 	}
 
 #ifdef CONFIG_DEBUG_FS
-		sunxi_led_create_debugfs(led);
+	sunxi_led_create_debugfs(led);
 #endif /* CONFIG_DEBUG_FS */
 
+	led_class = class_create(THIS_MODULE, "led");
+	if (IS_ERR(led_class)) {
+		LED_ERR("class_register err\n");
+		class_destroy(led_class);
+		ret = -EFAULT;
+		goto eclass;
+	}
+	led_node_init();
+	dprintk(DEBUG_INIT, "finish\n");
 	return 0;
+
+eclass:
+	dma_release_channel(led->dma_chan);
+	led->dma_chan = NULL;
+
+#ifdef CONFIG_DEBUG_FS
+	sunxi_led_remove_debugfs(led);
+#endif /* CONFIG_DEBUG_FS */
+
+edma:
+	sunxi_ledc_irq_deinit(led);
+
+eirq:
+	sunxi_unregister_led_classdev(led);
+	sunxi_clk_deinit(led);
+
+eclassdev:
+	led_regulator_release(led);
+
+eregulator:
+	kfree(led->output_mode.str);
+
+ezalloc_str:
+	iounmap(led->iomem_reg_base);
+	led->iomem_reg_base = NULL;
+
+eiomap:
+	release_mem_region(mem_res->start, resource_size(mem_res));
+
+emem:
+	kfree(led);
+	return ret;
 }
 
 static int sunxi_led_remove(struct platform_device *pdev)
 {
-	struct device *dev = &pdev->dev;
-	struct sunxi_led *led = dev_get_drvdata(dev);
+	struct sunxi_led *led = platform_get_drvdata(pdev);
+
+	class_destroy(led_class);
+
+#ifdef CONFIG_DEBUG_FS
+	sunxi_led_remove_debugfs(led);
+#endif /* CONFIG_DEBUG_FS */
+
+	if (led->dma_chan) {
+		dma_release_channel(led->dma_chan);
+		led->dma_chan = NULL;
+	}
 
 	sunxi_ledc_irq_deinit(led);
 
 	sunxi_unregister_led_classdev(led);
+	sunxi_clk_deinit(led);
+
+	led_regulator_release(led);
+
+	kfree(led->output_mode.str);
+	led->output_mode.str = NULL;
 
 	iounmap(led->iomem_reg_base);
 	led->iomem_reg_base = NULL;
 
-	sunxi_clk_deinit(led);
+	release_mem_region(led->res->start, resource_size(led->res));
 
-	if (led->dma_chan)
-		dma_release_channel(led->dma_chan);
-
-	kfree(led->output_mode.str);
-	kfree(led->trans_mode.str);
 	kfree(led);
+	led = NULL;
+
+	dprintk(DEBUG_INIT, "finish\n");
+	return 0;
+}
+
+#ifdef CONFIG_PM
+static int led_select_gpio_state(struct pinctrl *pctrl, char *name)
+{
+	int ret = 0;
+	struct pinctrl_state *pctrl_state = NULL;
+
+	pctrl_state = pinctrl_lookup_state(pctrl, name);
+	if (IS_ERR(pctrl_state)) {
+		LED_ERR("pinctrl_lookup_state(%s) failed! return %p\n",
+				name, pctrl_state);
+		return -1;
+	}
+
+	ret = pinctrl_select_state(pctrl, pctrl_state);
+	if (ret < 0)
+		LED_ERR("pinctrl_select_state(%s) failed! return %d\n",
+				name, ret);
+
+	return ret;
+}
+
+static int led_regulator_enable(struct sunxi_led *led)
+{
+	if (led->regulator == NULL)
+		return 0;
+
+	if (regulator_enable(led->regulator) != 0) {
+		LED_ERR("enable regulator %s failed!\n", led->regulator_id);
+		return -1;
+	}
+	return 0;
+}
+
+static int led_regulator_disable(struct sunxi_led *led)
+{
+	if (led->regulator == NULL)
+		return 0;
+
+	if (regulator_disable(led->regulator) != 0) {
+		LED_ERR("enable regulator %s failed!\n", led->regulator_id);
+		return -1;
+	}
+	return 0;
+}
+
+static int sunxi_led_suspend_noirq(struct device *dev)
+{
+	struct platform_device *pdev = to_platform_device(dev);
+	struct sunxi_led *led = platform_get_drvdata(pdev);
+
+	sunxi_clk_disable(led);
+	led_select_gpio_state(led->pctrl, PINCTRL_STATE_SLEEP);
+	led_regulator_disable(led);
+
+	dprintk(DEBUG_SUSPEND, "finish\n");
 
 	return 0;
 }
+
+static int sunxi_led_resume_noirq(struct device *dev)
+{
+	struct platform_device *pdev = to_platform_device(dev);
+	struct sunxi_led *led = platform_get_drvdata(pdev);
+
+	led_regulator_enable(led);
+	led_select_gpio_state(led->pctrl, PINCTRL_STATE_DEFAULT);
+	sunxi_clk_enable(led);
+
+	dprintk(DEBUG_SUSPEND, "finish\n");
+
+	return 0;
+}
+
+static const struct dev_pm_ops sunxi_led_dev_pm_ops = {
+	.suspend_noirq	 = sunxi_led_suspend_noirq,
+	.resume_noirq	 = sunxi_led_resume_noirq,
+};
+
+#define SUNXI_LED_DEV_PM_OPS (&sunxi_led_dev_pm_ops)
+#else
+#define SUNXI_LED_DEV_PM_OPS NULL
+#endif
 
 static const struct of_device_id sunxi_led_dt_ids[] = {
 	{.compatible = "allwinner,sunxi-leds"},
@@ -1767,12 +1982,19 @@ static struct platform_driver sunxi_led_driver = {
 	.remove		= sunxi_led_remove,
 	.driver		= {
 		.name	= "sunxi-leds",
+		.owner	= THIS_MODULE,
+		.pm	= SUNXI_LED_DEV_PM_OPS,
 		.of_match_table = sunxi_led_dt_ids,
 	},
 };
 
 module_platform_driver(sunxi_led_driver);
+module_param_named(debug, debug_mask, int, 0664);
 
-MODULE_AUTHOR("Albert Yu <yuxyun@allwinnertech.com>");
-MODULE_DESCRIPTION("Allwinner LED driver");
+MODULE_ALIAS("sunxi leds dirver");
+MODULE_ALIAS("platform : leds dirver");
 MODULE_LICENSE("GPL v2");
+MODULE_VERSION("1.1.0");
+MODULE_AUTHOR("Albert Yu <yuxyun@allwinnertech.com>");
+MODULE_AUTHOR("liuyu <SWCliuyus@allwinnertech.com>");
+MODULE_DESCRIPTION("Allwinner ledc-controller driver");

@@ -18,6 +18,7 @@
  *  History     :       2016/03/22  iptang  v0.1  Initial version
  *
  ******************************************************************************/
+#ifdef CONFIG_DISP2_SUNXI_SUPPORT_ENAHNCE
 
 #include "de_fcc_type.h"
 #include "de_rtmx.h"
@@ -323,3 +324,4 @@ int de_fcc_info2para(unsigned int sel, unsigned int chno, unsigned int fmt,
 
 	return 0;
 }
+#endif

@@ -163,6 +163,7 @@ struct vin_vid_cap {
 	/*working state */
 	bool registered;
 	bool special_active;
+	bool dma_parms_alloc;
 	struct mutex lock;
 	unsigned int first_flag; /* indicate the first time triggering irq */
 	struct timeval ts;
@@ -179,6 +180,7 @@ struct vin_vid_cap {
 	struct work_struct s_stream_task;
 	struct work_struct pipeline_reset_task;
 	unsigned long state;
+	unsigned int frame_delay_cnt;
 	struct dma_lbc_cmp lbc_cmp;
 	struct dma_bufa_threshold threshold;
 	void (*vin_buffer_process)(int id);

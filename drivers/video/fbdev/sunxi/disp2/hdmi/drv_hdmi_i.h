@@ -46,8 +46,6 @@
 #include <video/sunxi_display2.h>
 #include <video/drv_hdmi.h>
 
-#include "hdmi_bsp.h"
-
 extern u32 hdmi_print;
 extern u32 rgb_only;
 extern u32 hdmi_hpd_mask;/* 0x10: force unplug; 0x11: force plug */
@@ -100,43 +98,6 @@ typedef struct {
 	u32                   base_hdmi;
 	struct work_struct      hpd_work;
 } hdmi_info_t;
-
-#ifdef CONFIG_HDMI_CEC_STANDARD
-/* cec_msg tx/rx_status field */
-#define CEC_TX_STATUS_OK            (1 << 0)
-#define CEC_TX_STATUS_NACK          (1 << 1)
-#define CEC_TX_STATUS_ERROR         (1 << 2)
-#define CEC_TX_STATUS_MAX_RETRIES   (1 << 3)
-
-#define CEC_RX_STATUS_OK            (1 << 0)
-#define CEC_RX_STATUS_TIMEOUT       (1 << 1)
-#define CEC_RX_STATUS_FEATURE_ABORT (1 << 2)
-
-
-/* CEC config ioctl */
-#define CEC_S_PHYS_ADDR             _IOW('c', 1, __u16)
-#define CEC_G_PHYS_ADDR             _IOR('c', 2, __u16)
-#define CEC_S_LOG_ADDR              _IOW('c', 3, __u8)
-#define CEC_G_LOG_ADDR              _IOR('c', 4, __u8)
-
-/* CEC transmit/receive ioctl */
-#define CEC_TRANSMIT                _IOWR('c', 5, struct cec_msg)
-#define CEC_RECEIVE                 _IOWR('c', 6, struct cec_msg)
-
-#define CEC_RXMSG_MAX		    20
-
-struct hdmi_cec_drv {
-	dev_t cec_devid;
-	struct cdev *cec_cdev;
-	struct class *cec_class;
-	struct device *cec_dev;
-};
-
-struct hdmi_cec {
-	struct cec_msg msg;
-	struct list_head list;
-};
-#endif
 
 enum hdcp_status {
 	HDCP_DISABLE,

@@ -8,7 +8,20 @@
  * warranty of any kind, whether express or implied.
  */
 
+#include <linux/version.h>
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 10, 0)
 #include <linux/fence.h>
+#else
+#include <linux/dma-fence.h>
+#define fence dma_fence
+#define fence_ops dma_fence_ops
+#define fence_init dma_fence_init
+#define fence_put dma_fence_put
+#define fence_signal_locked dma_fence_signal_locked
+#define fence_default_wait dma_fence_default_wait
+#define fence_context_alloc dma_fence_context_alloc
+#define FENCE_FLAG_ENABLE_SIGNAL_BIT DMA_FENCE_FLAG_ENABLE_SIGNAL_BIT
+#endif
 #include <linux/sync_file.h>
 #include <linux/file.h>
 #include "dev_disp.h"
@@ -98,7 +111,7 @@ static void hwc_timeline_fence_release(struct fence *fence)
 	hwc_fence = get_hwc_fence(fence);
 	if (fence->seqno - display_sync->current_count < INT_MAX
 		&& !list_empty(&hwc_fence->node)) {
-		printk(KERN_ERR "Other user put the fence:%u,check it\n", fence->seqno);
+		printk(KERN_ERR "Other user put the fence:%llu,check it\n", fence->seqno);
 		return;
 	}
 	kfree(hwc_fence);
@@ -221,10 +234,8 @@ static int get_de_clk_rate(unsigned int disp, int *usr)
 
 static int hwc_new_client(int disp, int *user)
 {
-	if (composer_priv.display_sync[disp].active_disp == true) {
-		get_de_clk_rate(disp, (int *)user);
+	if (composer_priv.display_sync[disp].active_disp == true)
 		return 0;
-	}
 	composer_priv.display_sync[disp].timeline_count = 0;
 	composer_priv.display_sync[disp].submmit_count = 0;
 	composer_priv.display_sync[disp].free_count = 0;

@@ -37,44 +37,10 @@ static int xradio_vendor_stop_mkeep_alive(struct wiphy *wiphy,
 				 struct wireless_dev *wdev,
 				 const void *data, int data_len);
 
-static const struct wiphy_vendor_command xradio_nl80211_vendor_commands[] = {
-	[NL80211_VENDOR_SUBCMD_DO_ACS_INDEX] = {
-		.info.vendor_id = XRADIO_NL80211_VENDOR_ID,
-		.info.subcmd = NL80211_VENDOR_SUBCMD_DO_ACS,
-		.flags = WIPHY_VENDOR_CMD_NEED_WDEV |
-			 WIPHY_VENDOR_CMD_NEED_RUNNING,
-		.doit = xradio_vendor_do_acs
-	},
-	[NL80211_VENDOR_SUBCMD_GET_FEATURES_INDEX] = {
-		.info.vendor_id = XRADIO_NL80211_VENDOR_ID,
-		.info.subcmd = NL80211_VENDOR_SUBCMD_GET_FEATURES,
-		.flags = WIPHY_VENDOR_CMD_NEED_WDEV |
-			 WIPHY_VENDOR_CMD_NEED_RUNNING,
-		.doit = xradio_vendor_get_features
-	},
-	[NL80211_WIFI_OFFLOAD_SUBCMD_START_MKEEP_ALIVE_INDEX] = {
-		.info.vendor_id = XRADIO_NL80211_ANDROID_ID,
-		.info.subcmd = NL80211_WIFI_OFFLOAD_SUBCMD_START_MKEEP_ALIVE,
-		.flags = WIPHY_VENDOR_CMD_NEED_WDEV |
-			 WIPHY_VENDOR_CMD_NEED_RUNNING,
-		.doit = xradio_vendor_start_mkeep_alive
-	},
-	[NL80211_WIFI_OFFLOAD_SUBCMD_STOP_MKEEP_ALIVE_INDEX] = {
-		.info.vendor_id = XRADIO_NL80211_ANDROID_ID,
-		.info.subcmd = NL80211_WIFI_OFFLOAD_SUBCMD_STOP_MKEEP_ALIVE,
-		.flags = WIPHY_VENDOR_CMD_NEED_WDEV |
-			 WIPHY_VENDOR_CMD_NEED_RUNNING,
-		.doit = xradio_vendor_stop_mkeep_alive
-	},
-};
-
-/* vendor specific events */
-static const struct nl80211_vendor_cmd_info xradio_nl80211_vendor_events[] = {
-	[NL80211_VENDOR_SUBCMD_DO_ACS_INDEX] = {
-			.vendor_id = XRADIO_NL80211_VENDOR_ID,
-			.subcmd = NL80211_VENDOR_SUBCMD_DO_ACS
-	},
-};
+static int xradio_dump_interface(struct wiphy *wiphy,
+				struct wireless_dev *wdev, struct sk_buff *skb,
+				const void *data, int data_len,
+				unsigned long *storage);
 
 static const struct nla_policy
 xradio_cfg80211_do_acs_policy[WLAN_VENDOR_ATTR_ACS_MAX+1] = {
@@ -85,6 +51,120 @@ xradio_cfg80211_do_acs_policy[WLAN_VENDOR_ATTR_ACS_MAX+1] = {
 	[WLAN_VENDOR_ATTR_ACS_CHWIDTH] = { .type = NLA_U16 },
 	[WLAN_VENDOR_ATTR_ACS_CH_LIST] = { .type = NLA_UNSPEC },
 	[WLAN_VENDOR_ATTR_ACS_FREQ_LIST] = { .type = NLA_UNSPEC },
+};
+
+static const struct nla_policy
+xradio_cfg80211_mkeep_alive_policy[MKEEP_ALIVE_ATTRIBUTE_MAX+1] = {
+	[0] = {.type = NLA_UNSPEC },
+	[MKEEP_ALIVE_ATTRIBUTE_ID]		= { .type = NLA_U8 },
+	[MKEEP_ALIVE_ATTRIBUTE_IP_PKT]		= { .type = NLA_MSECS },
+	[MKEEP_ALIVE_ATTRIBUTE_IP_PKT_LEN]	= { .type = NLA_U16 },
+	[MKEEP_ALIVE_ATTRIBUTE_SRC_MAC_ADDR]	= { .type = NLA_MSECS,
+						    .len  = ETH_ALEN },
+	[MKEEP_ALIVE_ATTRIBUTE_DST_MAC_ADDR]	= { .type = NLA_MSECS,
+						    .len  = ETH_ALEN },
+	[MKEEP_ALIVE_ATTRIBUTE_PERIOD_MSEC]	= { .type = NLA_U32 },
+};
+
+static const struct nla_policy
+xradio_vendor_subcmd_set_mac_policy[WLAN_VENDOR_ATTR_DRIVER_MAX + 1] = {
+	[0] = {.type = NLA_UNSPEC },
+	[WLAN_VENDOR_ATTR_DRIVER_MAC_ADDR] = { .type = NLA_MSECS, .len  = ETH_ALEN },
+};
+
+static int xradio_vendor_subcmd_set_mac(struct wiphy *wiphy,
+				 struct wireless_dev *wdev,
+				 const void *data, int data_len)
+{
+	int ret = 0, rem, type;
+	u8 mac[ETH_ALEN];
+	const struct nlattr *iter;
+
+	nla_for_each_attr(iter, data, data_len, rem) {
+		type = nla_type(iter);
+		switch (type) {
+		case WLAN_VENDOR_ATTR_DRIVER_MAC_ADDR:
+			memcpy(mac, nla_data(iter), ETH_ALEN);
+			pr_err("%s, %02X:%02X:%02X:%02X:%02X:%02X\n", __func__,
+					mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+			break;
+		default:
+			printk("Unknown type: %d\n", type);
+			ret = -EINVAL;
+			break;
+		}
+	}
+	if (ret < 0) {
+		printk("%s is failed ret: %d\n", __func__, ret);
+		goto exit;
+	}
+
+	/* Handle mac address set here */
+
+exit:
+	return ret;
+
+}
+
+static const struct wiphy_vendor_command xradio_nl80211_vendor_commands[] = {
+	[NL80211_VENDOR_SUBCMD_DO_ACS_INDEX] = {
+		.info.vendor_id = XRADIO_NL80211_VENDOR_ID,
+		.info.subcmd = NL80211_VENDOR_SUBCMD_DO_ACS,
+		.flags = WIPHY_VENDOR_CMD_NEED_WDEV |
+			 WIPHY_VENDOR_CMD_NEED_RUNNING,
+		.doit = xradio_vendor_do_acs,
+		.dumpit = xradio_dump_interface,
+		.policy = xradio_cfg80211_do_acs_policy
+	},
+	[NL80211_VENDOR_SUBCMD_GET_FEATURES_INDEX] = {
+		.info.vendor_id = XRADIO_NL80211_VENDOR_ID,
+		.info.subcmd = NL80211_VENDOR_SUBCMD_GET_FEATURES,
+		.flags = WIPHY_VENDOR_CMD_NEED_WDEV |
+			 WIPHY_VENDOR_CMD_NEED_RUNNING,
+		.doit = xradio_vendor_get_features,
+		.dumpit = xradio_dump_interface,
+		.policy = VENDOR_CMD_RAW_DATA
+	},
+	[NL80211_WIFI_OFFLOAD_SUBCMD_START_MKEEP_ALIVE_INDEX] = {
+		.info.vendor_id = XRADIO_NL80211_ANDROID_ID,
+		.info.subcmd = NL80211_WIFI_OFFLOAD_SUBCMD_START_MKEEP_ALIVE,
+		.flags = WIPHY_VENDOR_CMD_NEED_WDEV |
+			 WIPHY_VENDOR_CMD_NEED_RUNNING,
+		.doit = xradio_vendor_start_mkeep_alive,
+		.dumpit = xradio_dump_interface,
+		.policy = xradio_cfg80211_mkeep_alive_policy,
+		.maxattr = MKEEP_ALIVE_ATTRIBUTE_MAX
+	},
+	[NL80211_WIFI_OFFLOAD_SUBCMD_STOP_MKEEP_ALIVE_INDEX] = {
+		.info.vendor_id = XRADIO_NL80211_ANDROID_ID,
+		.info.subcmd = NL80211_WIFI_OFFLOAD_SUBCMD_STOP_MKEEP_ALIVE,
+		.flags = WIPHY_VENDOR_CMD_NEED_WDEV |
+			 WIPHY_VENDOR_CMD_NEED_RUNNING,
+		.doit = xradio_vendor_stop_mkeep_alive,
+		.dumpit = xradio_dump_interface,
+		.policy = xradio_cfg80211_mkeep_alive_policy,
+		.maxattr = MKEEP_ALIVE_ATTRIBUTE_MAX
+	},
+	{
+		{
+			.vendor_id = XRADIO_NL80211_ANDROID_ID,
+			.subcmd = NL80211_VENDOR_SUBCMD_SET_MAC,
+		},
+		.flags = WIPHY_VENDOR_CMD_NEED_WDEV |
+			 WIPHY_VENDOR_CMD_NEED_RUNNING,
+		.doit = xradio_vendor_subcmd_set_mac,
+		.dumpit = xradio_dump_interface,
+		.policy = xradio_vendor_subcmd_set_mac_policy,
+		.maxattr = WLAN_VENDOR_ATTR_DRIVER_MAX
+	},
+};
+
+/* vendor specific events */
+static const struct nl80211_vendor_cmd_info xradio_nl80211_vendor_events[] = {
+	[NL80211_VENDOR_SUBCMD_DO_ACS_INDEX] = {
+			.vendor_id = XRADIO_NL80211_VENDOR_ID,
+			.subcmd = NL80211_VENDOR_SUBCMD_DO_ACS
+	},
 };
 
 static unsigned int xradio_acs_calc_channel(struct wiphy *wiphy)
@@ -167,7 +247,7 @@ static int xradio_vendor_do_acs(struct wiphy *wiphy,
 
 
 	res = nla_parse(tb, WLAN_VENDOR_ATTR_ACS_MAX, data, data_len,
-						xradio_cfg80211_do_acs_policy);
+						xradio_cfg80211_do_acs_policy, NULL);
 	if (res) {
 		printk("Invalid ATTR");
 		goto out;
@@ -257,7 +337,13 @@ struct keepalivenode {
 };
 
 static struct list_head keepalivelist;
-static struct timer_list keepalivetimer;
+
+struct keepalive_timer {
+struct ieee80211_local *local;
+	struct timer_list kalive_timer;
+};
+
+struct keepalive_timer *keepalivetimer;
 
 static void keep_alive_send(struct ieee80211_local *local, struct net_device *dev, u8 *frame_8023,
 						u16 pkt_len)
@@ -272,7 +358,7 @@ static void keep_alive_send(struct ieee80211_local *local, struct net_device *de
 	skb_put(skb, pkt_len);
 	memcpy(skb->data, frame_8023, pkt_len);
 
-	mac80211_subif_start_xmit(skb, dev);
+	ieee80211_subif_start_xmit(skb, dev);
 
 }
 
@@ -294,10 +380,11 @@ keep_alive_cmp(void *priv,
 	return 0;
 }
 
-static void keep_alive_run(unsigned long data)
+static void keep_alive_run(struct timer_list *t)
 {
 	struct keepalivenode *node;
-	struct ieee80211_local *local = (struct ieee80211_local *)data;
+	struct keepalive_timer *k_timer = from_timer(k_timer, t, kalive_timer);
+	struct ieee80211_local *local = k_timer->local;
 
 	if (list_empty(&keepalivelist))
 		return;
@@ -312,7 +399,7 @@ static void keep_alive_run(unsigned long data)
 
 	//reset timer;
 	node = container_of(keepalivelist.next, struct keepalivenode, list);
-	mod_timer(&keepalivetimer, node->next_jiffies);
+	mod_timer(&keepalivetimer->kalive_timer, node->next_jiffies);
 }
 
 static void keep_alive_queue_clear(void)
@@ -333,7 +420,9 @@ static void keep_alive_queue_clear(void)
 	}
 
 	//delete timer
-	del_timer(&keepalivetimer);
+	del_timer(&keepalivetimer->kalive_timer);
+
+	kfree(keepalivetimer);
 }
 
 static int keep_alive_queue_put(u8 *dst_mac, u8 *src_mac, struct net_device *netdev,
@@ -393,7 +482,7 @@ static int keep_alive_queue_put(u8 *dst_mac, u8 *src_mac, struct net_device *net
 	list_add(&node->list, &keepalivelist);
 
 	//run timer;
-	mod_timer(&keepalivetimer, jiffies);
+	mod_timer(&keepalivetimer->kalive_timer, jiffies);
 
 	return ret;
 
@@ -416,7 +505,7 @@ static void keep_alive_queue_remove(u8 mkeep_alive_id)
 	}
 	if (list_empty(&keepalivelist)) {
 		//delete timer;
-		del_timer(&keepalivetimer);
+		del_timer(&keepalivetimer->kalive_timer);
 	}
 }
 
@@ -539,6 +628,14 @@ exit:
 
 }
 
+static int xradio_dump_interface(struct wiphy *wiphy,
+				struct wireless_dev *wdev, struct sk_buff *skb,
+				const void *data, int data_len,
+				unsigned long *storage)
+{
+	return 0;
+}
+
 void xradio_vendor_close_mkeep_alive(void)
 {
 	keep_alive_queue_clear();
@@ -547,6 +644,14 @@ void xradio_vendor_close_mkeep_alive(void)
 void xradio_vendor_init(struct wiphy *wiphy)
 {
 	struct ieee80211_local *local = wiphy_priv(wiphy);
+	/*int i = 0;
+	int *llocal = &i;*/
+
+	keepalivetimer = kmalloc(sizeof(struct keepalive_timer), GFP_KERNEL);
+	if (!keepalivetimer) {
+		printk(KERN_ERR "%s:init keepalivetimer error!\n", __func__);
+		return;
+	}
 
 	wiphy->n_vendor_commands = ARRAY_SIZE(xradio_nl80211_vendor_commands);
 	wiphy->vendor_commands = xradio_nl80211_vendor_commands;
@@ -554,9 +659,26 @@ void xradio_vendor_init(struct wiphy *wiphy)
 	wiphy->vendor_events = xradio_nl80211_vendor_events;
 
 	INIT_LIST_HEAD(&keepalivelist);
-	setup_timer(&keepalivetimer, keep_alive_run,
-			(unsigned long)local);
+	timer_setup(&keepalivetimer->kalive_timer, keep_alive_run, 0);
+	keepalivetimer->local = local;
 
 	return;
 }
+
+void xr_do_gettimeofday(struct timeval *tv)
+{
+	struct timespec now;
+
+	getnstimeofday(&now);
+	tv->tv_sec = now.tv_sec;
+	tv->tv_usec = now.tv_nsec/1000;
+}
+
+void xr_get_monotonic_boottime(struct timespec *ts)
+{
+	*ts = ktime_to_timespec(ktime_get_boottime());
+}
+
+
+
 

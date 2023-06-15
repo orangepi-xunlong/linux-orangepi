@@ -89,13 +89,13 @@ static int de_calc_overlay_scaler_para(unsigned int screen_id, unsigned char chn
 					de_rtmx_get_3d_in_single_size((de_3d_in_mode)data[k].config.info.fb.flags, &crop64[j][i+1]);
 					de_rtmx_get_3d_out(frame[j][i], lcd_width, lcd_height, (de_3d_out_mode)data[k].config.info.out_trd_mode, &frame[j][i+1]);
 					lay_en[j][i+1] = data[k].config.enable;
-				} else{
+				} else {
 					lay_en[j][i+1] = 0;
 				}
 				premul[j][i+1] = data[k].config.info.fb.pre_multiply;
 				k += 2;
 				i += 2;
-			} else{
+			} else {
 				i++;
 				k++;
 			}
@@ -109,7 +109,7 @@ static int de_calc_overlay_scaler_para(unsigned int screen_id, unsigned char chn
 				de_d1_p2p_recalc(yv12_d1_en[j][i], lcd_width, lcd_height, &crop64[j][i], &frame[j][i], &p2p_para[j][i]);
 				i++;
 				k++;
-			} else{
+			} else {
 				i++;
 				k++;
 			}

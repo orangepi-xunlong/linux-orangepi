@@ -1,9 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2013, 2014
  * Phillip Lougher <phillip@squashfs.org.uk>
- *
- * This work is licensed under the terms of the GNU GPL, version 2. See
- * the COPYING file in the top-level directory.
  */
 
 #include <linux/buffer_head.h>
@@ -94,19 +92,41 @@ static int lz4_uncompress(struct squashfs_sb_info *msblk, void *strm,
 	struct buffer_head **bh, int b, int offset, int length,
 	struct squashfs_page_actor *output)
 {
-	int res;
-	size_t dest_len = output->length;
 	struct squashfs_lz4 *stream = strm;
+	void *buff = stream->input, *data;
+	int avail, i, bytes = length, res;
 
-	squashfs_bh_to_buf(bh, b, stream->input, offset, length,
-		msblk->devblksize);
-	res = lz4_decompress_unknownoutputsize(stream->input, length,
-					stream->output, &dest_len);
-	if (res)
+	for (i = 0; i < b; i++) {
+		avail = min(bytes, msblk->devblksize - offset);
+		memcpy(buff, bh[i]->b_data + offset, avail);
+		buff += avail;
+		bytes -= avail;
+		offset = 0;
+		put_bh(bh[i]);
+	}
+
+	res = LZ4_decompress_safe(stream->input, stream->output,
+		length, output->length);
+
+	if (res < 0)
 		return -EIO;
-	squashfs_buf_to_actor(stream->output, output, dest_len);
 
-	return dest_len;
+	bytes = res;
+	data = squashfs_first_page(output);
+	buff = stream->output;
+	while (data) {
+		if (bytes <= PAGE_SIZE) {
+			memcpy(data, buff, bytes);
+			break;
+		}
+		memcpy(data, buff, PAGE_SIZE);
+		buff += PAGE_SIZE;
+		bytes -= PAGE_SIZE;
+		data = squashfs_next_page(output);
+	}
+	squashfs_finish_page(output);
+
+	return res;
 }
 
 const struct squashfs_decompressor squashfs_lz4_comp_ops = {

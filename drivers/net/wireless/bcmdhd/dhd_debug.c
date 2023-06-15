@@ -1475,7 +1475,7 @@ __dhd_dbg_driver_ts_usec(void)
 {
 	struct timespec ts;
 
-	get_monotonic_boottime(&ts);
+	ts = ktime_to_timespec(ktime_get_boottime());
 	return ((uint32)(__TIMESPEC_TO_US(ts)));
 }
 

@@ -30,6 +30,8 @@
 #define OFS_MARK_STRING \
 	"#-----------------------------------------------------------------\r\n"
 
+MODULE_IMPORT_NS(VFS_internal_I_am_really_a_filesystem_and_am_NOT_a_driver);
+
 static struct nvm_name_table g_config_table[] = {
 	/* [Section 1: Version]
 	 */

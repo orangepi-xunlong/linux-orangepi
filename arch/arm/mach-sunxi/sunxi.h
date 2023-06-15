@@ -1,9 +1,9 @@
 /*
  * Generic definitions for Allwinner SunXi SoCs
  *
- * Copyright (C) 2012 Maxime Ripard
+ * Copyright (C) 2021 huafenghuang
  *
- * Maxime Ripard <maxime.ripard@free-electrons.com>
+ * huafenghuang  <huafenghuang@allwinnertech.com>
  *
  * This file is licensed under the terms of the GNU General Public
  * License version 2.  This program is licensed "as is" without any
@@ -13,44 +13,13 @@
 #ifndef __MACH_SUNXI_H
 #define __MACH_SUNXI_H
 
-#if defined(CONFIG_ARCH_SUN8IW10P1)
-#define SUNXI_SRAM_A1_PBASE       (0x00000000)
-#define SUNXI_SRAM_A1_SIZE        (0x4000)
-#define SUNXI_SRAM_C_PBASE        (0x00004000)
-#define SUNXI_SRAM_C_SIZE         (0x9000)
+#if !defined(SUNXI_UART_PBASE)
+#define SUNXI_UART_PBASE		CONFIG_DEBUG_UART_PHYS
+#define SUNXI_UART_SIZE			UL(0x2000)
+#endif
 
-#elif defined(CONFIG_ARCH_SUN8IW11P1)
-#define SUNXI_SRAM_A1_PBASE       (0x00000000)
-#define SUNXI_SRAM_A1_SIZE        (0x4000)
-#define SUNXI_SRAM_A_PBASE        (0x00000000)
-#define SUNXI_SRAM_A_SIZE         (0xC000)
-
-#elif defined(CONFIG_ARCH_SUN8IW7P1)
-#define SUNXI_SRAM_A1_PBASE	  (0x00000000)
-#define SUNXI_SRAM_A1_SIZE	  (0x10000)
-#define SUNXI_SRAM_A2_PBASE	  (0x40000)
-#define SUNXI_SRAM_A2_SIZE	  (0xc000)
-
-#elif defined(CONFIG_ARCH_SUN8IW6P1)
-#define SUNXI_SRAM_A1_PBASE	  (0x00000000)
-#define SUNXI_SRAM_A1_SIZE	  (0x4000)
-#define SUNXI_SRAM_A2_PBASE	  (0x44000)
-#define SUNXI_SRAM_A2_SIZE	  (0x14000)
-#define SUNXI_SRAM_C_SIZE	  (0x9000)
-
-#elif defined(CONFIG_ARCH_SUN50IW1P1)
-#define SUNXI_SRAM_BROM_PBASE     (0x00000000)
-#define SUNXI_SRAM_BROM_SIZE      (0x00010000)
-#define SUNXI_SRAM_A1_PBASE       (0x00010000)
-#define SUNXI_SRAM_A1_SIZE        (0x00008000)
-#define SUNXI_SRAM_A2_PBASE       (0x00040000)
-#define SUNXI_SRAM_A2_SIZE        (0x00014000)
-#define SUNXI_SRAM_C_PBASE        (0x00018000)
-#define SUNXI_SRAM_C_SIZE         (0x00028000)
-#elif defined(CONFIG_ARCH_SUN8IW12P1) || defined(CONFIG_ARCH_SUN8IW15P1) \
-	|| defined(CONFIG_ARCH_SUN8IW18P1)
-#define ARISC_MESSAGE_POOL_PBASE  (0x48105000)
-#define ARISC_MESSAGE_POOL_RANGE  (0x1000)
+#if !defined(UARTIO_ADDRESS)
+#define UARTIO_ADDRESS(x)  IOMEM((x) + 0xf0000000)
 #endif
 
 #endif /* __MACH_SUNXI_H */

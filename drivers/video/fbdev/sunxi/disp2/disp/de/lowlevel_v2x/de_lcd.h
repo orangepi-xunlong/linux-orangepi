@@ -21,6 +21,8 @@ enum __lcd_irq_id_t {
 	LCD_IRQ_TCON1_LINE = 12,
 	LCD_IRQ_TCON0_TRIF = 11,
 	LCD_IRQ_TCON0_CNTR = 10,
+	LCD_IRQ_FSYNC_INT = 9,
+	LCD_IRQ_DATA_EN_INT = 8,
 };
 
 enum __dsi_irq_id_t {
@@ -109,6 +111,8 @@ s32 tcon0_cpu_wr_16b_index(u32 sel, u32 index);
 s32 tcon0_cpu_wr_16b_data(u32 sel, u32 data);
 s32 tcon0_cpu_rd_16b(u32 sel, u32 index, u32 *data);
 
+s32 tcon_pan_sel(u32 sel, u32 pad);
+u32 tcon_pad_get(u32 sel);
 s32 tcon1_open(u32 sel);
 s32 tcon1_close(u32 sel);
 s32 tcon1_src_select(u32 sel, enum __lcd_src_t src, enum __de_perh_t de_no);
@@ -116,6 +120,9 @@ s32 tcon1_src_get(u32 sel);
 s32 tcon1_cfg_ex(u32 sel, struct disp_panel_para *panel);
 s32 tcon1_set_timming(u32 sel, struct disp_video_timings *timming);
 s32 tcon1_cfg(u32 sel, struct disp_video_timings *timing);
+#ifdef TCON_POL_CORRECT
+u32 tcon1_cfg_correct(u32 sel, struct disp_video_timings *timing);
+#endif
 s32 tcon1_set_tv_mode(u32 sel, enum disp_output_type mode);
 s32 hmdi_src_sel(u32 sel);
 s32 tcon1_hdmi_color_remap(u32 sel, u32 onoff, u32 is_yuv);
@@ -128,6 +135,37 @@ s32 vdpo_src_sel(u32 sel, u32 src);
 void tcon_show_builtin_patten(u32 sel, u32 patten);
 void tcon0_cpu_wr_16b_multi(u32 sel, u8 cmd, u8 *para, u32 para_num);
 void tcon0_cpu_wr_24b_multi(u32 sel, u8 cmd, u8 *para, u32 para_num);
+
+/**
+ * @name       :tcon_fsync_set_pol
+ * @brief      :set fsync's polarity
+ * @param[IN]  :sel:tcon index
+ * @param[IN]  :pol:polarity. 1:positive;0:negetive
+ *	positive:
+ *           +---------+
+ *  ---------+         +-----------
+ *
+ *	negative:
+ *  ---------+         +------------
+ *	     +---------+
+ *
+ * @return     :always 0
+ */
+s32 tcon_set_fsync_pol(u32 sel, u32 pol);
+
+/**
+ * @name       :tcon_set_fsync_active_time
+ * @brief      :set tcon fsync's active time
+ * @param[IN]  :sel:tcon index
+ * @param[IN]  :pixel_num:number of pixel time(Tpixel) to set
+ *
+ * Tpixel = 1/fps*1e9/vt/ht, unit:ns
+ *
+ * @return     :0 if success
+ */
+s32 tcon_set_fsync_active_time(u32 sel, u32 pixel_num);
+
+void tcon_reset(u32 sel);
 
 #if defined(SUPPORT_DSI)
 extern __u32 dsi_pixel_bits[4];

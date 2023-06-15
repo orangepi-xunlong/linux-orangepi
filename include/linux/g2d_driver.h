@@ -308,6 +308,13 @@ typedef struct {
 	g2d_pixel_seq	pixel_seq;/* pixel sequence of image frame buffer */
 } g2d_image;
 
+typedef struct {
+	/* left point coordinate x of dst rect */
+	unsigned int x;
+	/* top point coordinate y of dst rect */
+	unsigned int y;
+} g2d_coor;
+
 /* image struct */
 typedef struct {
 	int		 bbuff;
@@ -320,6 +327,7 @@ typedef struct {
 	__u32		 align[3];
 
 	g2d_rect	 clip_rect;
+	g2d_coor	 coor;
 
 	__u32		 gamut;
 	int		 bpremul;
@@ -377,6 +385,13 @@ typedef struct {
 	g2d_image_enh src_image_h;
 	g2d_image_enh dst_image_h;
 } g2d_blt_h;
+
+typedef struct {
+	g2d_blt_h blt;
+	__u32	lbc_cmp_ratio;
+	bool	enc_is_lossy;
+	bool	dec_is_lossy;
+} g2d_lbc_rot;
 
 typedef struct {
 	g2d_blt_flags			 flag;
@@ -444,8 +459,8 @@ typedef struct {
 
 typedef struct {
 	g2d_bld_cmd_flag bld_cmd;
-	g2d_image_enh dst_image_h;
-	g2d_image_enh src_image_h;
+	g2d_image_enh dst_image;
+	g2d_image_enh src_image[4];/*now only ch0 and ch3*/
 	g2d_ck ck_para;
 } g2d_bld;			/* blending enhance */
 
@@ -473,6 +488,11 @@ struct mixer_para {
 	g2d_ck ck_para;
 };
 
+struct g2d_hardware_version {
+	uint32_t g2d_version;
+	uint32_t chip_version;
+};
+
 #define SUNXI_G2D_IOC_MAGIC 'G'
 #define SUNXI_G2D_IO(nr)          _IO(SUNXI_G2D_IOC_MAGIC, nr)
 #define SUNXI_G2D_IOR(nr, size)   _IOR(SUNXI_G2D_IOC_MAGIC, nr, size)
@@ -496,12 +516,15 @@ typedef enum {
 	G2D_CMD_MEM_SELIDX		=	0x5C,
 	G2D_CMD_MEM_FLUSH_CACHE		=	0x5D,
 	G2D_CMD_INVERTED_ORDER		=	0x5E,
-	G2D_CMD_MIXER_TASK = 0x5F,
+	G2D_CMD_MIXER_TASK		=	0x5F,
+	G2D_CMD_LBC_ROT			=	0x60,
 	G2D_CMD_CREATE_TASK = SUNXI_G2D_IOW(0x1, struct mixer_para),
 	G2D_CMD_TASK_APPLY = SUNXI_G2D_IOW(0x2, struct mixer_para),
 	G2D_CMD_TASK_DESTROY = SUNXI_G2D_IOW(0x3, unsigned int),
 	G2D_CMD_TASK_GET_PARA = SUNXI_G2D_IOR(0x4, struct mixer_para),
 
+	// qurey g2d hardware version and soc chip version
+	G2D_CMD_QUERY_VERSION = _IOR(SUNXI_G2D_IOC_MAGIC, 0x9F, struct g2d_hardware_version),
 } g2d_cmd;
 
 #endif	/* __G2D_DRIVER_H */

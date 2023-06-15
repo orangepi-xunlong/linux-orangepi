@@ -2,11 +2,11 @@
 
 #ifndef _PHY_H
 #define _PHY_H
-
+#if 0
 //#include "../nand_boot.h"
 #include "../rawnand/rawnand.h"
 #include "../rawnand/rawnand_cfg.h"
-#include "../spinand/spinand_type.h"
+//#include "../spinand/spinand_type.h"
 #include "mbr.h"
 
 #define PHY_RESERVED_BLOCK_RATIO 256
@@ -181,5 +181,5 @@ struct _nand_partition {
 	int (*nand_is_blk_good)(struct _nand_partition *nand, struct _physic_par *p);
 	int (*nand_mark_bad_blk)(struct _nand_partition *nand, struct _physic_par *p);
 };
-
+#endif
 #endif /*_PHY_H*/

@@ -334,7 +334,7 @@ int init_nci_from_id(struct nand_chip_info *nci, struct sunxi_nand_flash_device 
 	nci->itf_cfg.toggle_cfg.support_io_driver_strength_setting =
 		(npi->ddr_opt & NAND_TOGGLE_IO_DRIVER_STRENGTH) ? 1 : 0;
 	nci->itf_cfg.toggle_cfg.support_vendor_specific_setting =
-		(npi->operation_opt & NAND_TOGGLE_VENDOR_SPECIFIC_CFG) ? 1 : 0;
+		(npi->ddr_opt & NAND_TOGGLE_VENDOR_SPECIFIC_CFG) ? 1 : 0;
 
 	nci->ecc_sector = 1;
 	nci->sdata_bytes_per_page = (nci->sector_cnt_per_page >> nci->ecc_sector) * 4;
@@ -356,6 +356,8 @@ int init_nci_from_id(struct nand_chip_info *nci, struct sunxi_nand_flash_device 
 
 	nci->is_lsb_page = chose_lsb_func(((nci->npi->operation_opt >> LSB_PAGE_POS) & 0xff));
 
+	nci->sharedpage_pairedwrite = (nci->npi->operation_opt & NAND_PAIRED_PAGE_SYNC) ? 1 : 0;
+	nci->sharedpage_offset = nci->npi->sharedpage_offset;
 	/*according to id table, update the interface setting bind*/
 	rawnand_update_timings_ift_ops(nci->npi->mfr_id);
 
@@ -893,6 +895,81 @@ int nand_get_feature(struct nand_chip_info *nci, u8 *addr, u8 *feature)
 	return ret;
 }
 
+int nand_set_read_retry_K9GCGD8U0F(struct nand_chip_info *nci, u8 *addr, u8 *feature)
+{
+	int ret = 0;
+	struct _nctri_cmd_seq *cmd_seq = &nci->nctri->nctri_cmd_seq;
+
+	nand_enable_chip(nci);
+	ndfc_repeat_mode_enable(nci->nctri);
+	ndfc_disable_randomize(nci->nctri);
+
+	ndfc_clean_cmd_seq(cmd_seq);
+
+	cmd_seq->cmd_type = CMD_TYPE_NORMAL;
+	cmd_seq->nctri_cmd[0].cmd = 0xD5;
+	cmd_seq->nctri_cmd[0].cmd_valid = 1;
+	cmd_seq->nctri_cmd[0].cmd_send = 1;
+
+	cmd_seq->nctri_cmd[0].cmd_wait_rb = 1;
+	cmd_seq->nctri_cmd[0].cmd_acnt = 2;
+	cmd_seq->nctri_cmd[0].cmd_addr[0] = 0x00;
+	cmd_seq->nctri_cmd[0].cmd_addr[1] = 0x89;
+
+	cmd_seq->nctri_cmd[0].cmd_trans_data_nand_bus = 1;
+	cmd_seq->nctri_cmd[0].cmd_swap_data = 1;
+	cmd_seq->nctri_cmd[0].cmd_swap_data_dma = 0;
+	cmd_seq->nctri_cmd[0].cmd_direction = 1; //write
+	cmd_seq->nctri_cmd[0].cmd_mdata_len = 4;
+	cmd_seq->nctri_cmd[0].cmd_mdata_addr = feature;
+
+	ret = ndfc_execute_cmd(nci->nctri, cmd_seq);
+	if (ret) {
+		RAWNAND_ERR("nand_reset_chip, read chip id failed!\n");
+	}
+
+	ndfc_repeat_mode_disable(nci->nctri);
+	nand_disable_chip(nci);
+	return ret;
+}
+
+int nand_get_read_retry_K9GCGD8U0F(struct nand_chip_info *nci, u8 *addr, u8 *feature)
+{
+	int ret = 0;
+	struct _nctri_cmd_seq *cmd_seq = &nci->nctri->nctri_cmd_seq;
+
+	nand_enable_chip(nci);
+	ndfc_repeat_mode_enable(nci->nctri);
+	ndfc_disable_randomize(nci->nctri);
+
+	ndfc_clean_cmd_seq(cmd_seq);
+
+	cmd_seq->cmd_type = CMD_TYPE_NORMAL;
+	cmd_seq->nctri_cmd[0].cmd = 0xD4;
+	cmd_seq->nctri_cmd[0].cmd_valid = 1;
+	cmd_seq->nctri_cmd[0].cmd_send = 1;
+
+	cmd_seq->nctri_cmd[0].cmd_wait_rb = 1;
+	cmd_seq->nctri_cmd[0].cmd_acnt = 2;
+	cmd_seq->nctri_cmd[0].cmd_addr[0] = 0x00;
+	cmd_seq->nctri_cmd[0].cmd_addr[1] = 0x89;
+
+	cmd_seq->nctri_cmd[0].cmd_trans_data_nand_bus = 1;
+	cmd_seq->nctri_cmd[0].cmd_swap_data = 1;
+	cmd_seq->nctri_cmd[0].cmd_swap_data_dma = 0;
+	cmd_seq->nctri_cmd[0].cmd_direction = 0; //read
+	cmd_seq->nctri_cmd[0].cmd_mdata_len = 4;
+	cmd_seq->nctri_cmd[0].cmd_mdata_addr = feature;
+
+	ret = ndfc_execute_cmd(nci->nctri, cmd_seq);
+	if (ret) {
+		RAWNAND_ERR("nand_reset_chip, read chip id failed!\n");
+	}
+
+	ndfc_repeat_mode_disable(nci->nctri);
+	nand_disable_chip(nci);
+	return ret;
+}
 /*
  *Name         :
  *Description  :
@@ -958,14 +1035,39 @@ unsigned int get_row_addr(unsigned int page_offset_for_next_blk, unsigned int bl
 		maddr = (block << 8) + page;
 	else if (page_offset_for_next_blk == 512)
 		maddr = (block << 9) + page;
+	else if (page_offset_for_next_blk == 792)
+		maddr = ((block * 792) + page);
 	else if (page_offset_for_next_blk == 1024)
 		maddr = (block << 10) + page;
-	else {
+	else if ((page_offset_for_next_blk > 256)
+			 && (page_offset_for_next_blk < 512)) {
+		maddr = (block << 9) + page;
+		//RAWNAND_ERR("pb %d!\n", page_offset_for_next_blk);
+	} else {
 		maddr = 0xffffffff;
 		RAWNAND_ERR("error page per block %d!\n", page_offset_for_next_blk);
 	}
 	return maddr;
 }
+
+
+unsigned int get_row_addr_2(unsigned int page_offset_for_next_blk, unsigned int block, unsigned int page)
+{
+	unsigned int row = 0;
+
+	row += page;
+
+	if (block > 344) {
+		row = (row | (1 << 10));
+		row = (row | ((block - 344) << 11));
+	} else {
+		row = (row& ~(1 << 10));
+		row = (row | (block << 11));
+	}
+	return row;
+
+}
+
 
 /*
  *Name         :
@@ -2082,6 +2184,54 @@ int rawnand_get_chip_die_size(struct nand_chip_info *chip,
 		return ERR_NO_22;
 	}
 }
+
+
+unsigned int rawnand_get_super_chip_cnt(struct nand_super_chip_info *schip)
+{
+	if (!g_nssi) {
+		RAWNAND_INFO("rawnand hw not init\n");
+		return 0;
+	}
+
+	return g_nssi->super_chip_cnt;
+}
+
+unsigned int rawnand_get_super_chip_size(struct nand_super_chip_info *schip)
+{
+	if (!schip) {
+		RAWNAND_INFO("rawnand hw not init\n");
+		return 0;
+	}
+		return schip->blk_cnt_per_super_chip;
+}
+
+unsigned int rawnand_get_super_chip_block_size(struct nand_super_chip_info *schip)
+{
+	if (!schip) {
+		RAWNAND_INFO("rawnand hw not init\n");
+		return 0;
+	}
+		return schip->page_cnt_per_super_blk;
+}
+
+unsigned int rawnand_get_super_chip_page_size(struct nand_super_chip_info *schip)
+{
+	if (!schip) {
+		RAWNAND_INFO("rawnand hw not init\n");
+		return 0;
+	}
+		return schip->sector_cnt_per_super_page;
+}
+
+unsigned int rawnand_get_super_chip_spare_size(struct nand_super_chip_info *schip)
+{
+	if (!schip) {
+		RAWNAND_INFO("rawnand hw not init\n");
+		return 0;
+	}
+		return schip->spare_bytes;
+}
+
 unsigned long long rawnand_get_chip_opt(struct nand_chip_info *chip)
 {
 	struct sunxi_nand_flash_device *info = chip->npi;

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Off-channel operation helpers
  *
@@ -7,45 +8,43 @@
  * Copyright 2006-2007	Jiri Benc <jbenc@suse.cz>
  * Copyright 2007, Michael Wu <flamingice@sourmilk.net>
  * Copyright 2009	Johannes Berg <johannes@sipsolutions.net>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
+ * Copyright (C) 2019 Intel Corporation
  */
 #include <linux/export.h>
 #include <net/mac80211.h>
 #include "ieee80211_i.h"
-#include "driver-trace.h"
 #include "driver-ops.h"
 
 /*
- * inform AP that we will go to sleep so that it will buffer the frames
- * while we scan
+ * Tell our hardware to disable PS.
+ * Optionally inform AP that we will go to sleep so that it will buffer
+ * the frames while we are doing off-channel work.  This is optional
+ * because we *may* be doing work on-operating channel, and want our
+ * hardware unconditionally awake, but still let the AP send us normal frames.
  */
-#if 0
 static void ieee80211_offchannel_ps_enable(struct ieee80211_sub_if_data *sdata)
 {
 	struct ieee80211_local *local = sdata->local;
 	struct ieee80211_if_managed *ifmgd = &sdata->u.mgd;
 
-	sdata->offchannel_ps_enabled = false;
+	local->offchannel_ps_enabled = false;
 
 	/* FIXME: what to do when local->pspolling is true? */
 
-	del_timer_sync(&sdata->dynamic_ps_timer);
+	del_timer_sync(&local->dynamic_ps_timer);
 	del_timer_sync(&ifmgd->bcn_mon_timer);
 	del_timer_sync(&ifmgd->conn_mon_timer);
 
-	cancel_work_sync(&sdata->dynamic_ps_enable_work);
+	cancel_work_sync(&local->dynamic_ps_enable_work);
 
-	if (sdata->vif.bss_conf.ps_enabled) {
-		sdata->offchannel_ps_enabled = true;
-		sdata->vif.bss_conf.ps_enabled = false;
-		mac80211_bss_info_change_notify(sdata, BSS_CHANGED_PS);
+	if (local->hw.conf.flags & IEEE80211_CONF_PS) {
+		local->offchannel_ps_enabled = true;
+		local->hw.conf.flags &= ~IEEE80211_CONF_PS;
+		ieee80211_hw_config(local, IEEE80211_CONF_CHANGE_PS);
 	}
 
-	if (!(sdata->offchannel_ps_enabled) ||
-	    !(local->hw.flags & IEEE80211_HW_PS_NULLFUNC_STACK))
+	if (!local->offchannel_ps_enabled ||
+	    !ieee80211_hw_check(&local->hw, PS_NULLFUNC_STACK))
 		/*
 		 * If power save was enabled, no need to send a nullfunc
 		 * frame because AP knows that we are sleeping. But if the
@@ -56,7 +55,7 @@ static void ieee80211_offchannel_ps_enable(struct ieee80211_sub_if_data *sdata)
 		 * to send a new nullfunc frame to inform the AP that we
 		 * are again sleeping.
 		 */
-		mac80211_send_nullfunc(local, sdata, 1);
+		ieee80211_send_nullfunc(local, sdata, true);
 }
 
 /* inform AP that we are awake again, unless power save is enabled */
@@ -64,9 +63,9 @@ static void ieee80211_offchannel_ps_disable(struct ieee80211_sub_if_data *sdata)
 {
 	struct ieee80211_local *local = sdata->local;
 
-	if (!sdata->ps_allowed)
-		mac80211_send_nullfunc(local, sdata, 0);
-	else if (sdata->offchannel_ps_enabled) {
+	if (!local->ps_sdata)
+		ieee80211_send_nullfunc(local, sdata, false);
+	else if (local->offchannel_ps_enabled) {
 		/*
 		 * In !IEEE80211_HW_PS_NULLFUNC_STACK case the hardware
 		 * will send a nullfunc frame with the powersave bit set
@@ -80,162 +79,198 @@ static void ieee80211_offchannel_ps_disable(struct ieee80211_sub_if_data *sdata)
 		 * we are sleeping, let's just enable power save mode in
 		 * hardware.
 		 */
-		sdata->vif.bss_conf.ps_enabled = true;
-		mac80211_bss_info_change_notify(sdata, BSS_CHANGED_PS);
-	} else if (sdata->vif.bss_conf.dynamic_ps_timeout > 0) {
+		/* TODO:  Only set hardware if CONF_PS changed?
+		 * TODO:  Should we set offchannel_ps_enabled to false?
+		 */
+		local->hw.conf.flags |= IEEE80211_CONF_PS;
+		ieee80211_hw_config(local, IEEE80211_CONF_CHANGE_PS);
+	} else if (local->hw.conf.dynamic_ps_timeout > 0) {
 		/*
 		 * If IEEE80211_CONF_PS was not set and the dynamic_ps_timer
 		 * had been running before leaving the operating channel,
 		 * restart the timer now and send a nullfunc frame to inform
 		 * the AP that we are awake.
 		 */
-		mac80211_send_nullfunc(local, sdata, 0);
-		mod_timer(&sdata->dynamic_ps_timer, jiffies +
-			  msecs_to_jiffies(sdata->vif.bss_conf.dynamic_ps_timeout));
+		ieee80211_send_nullfunc(local, sdata, false);
+		mod_timer(&local->dynamic_ps_timer, jiffies +
+			  msecs_to_jiffies(local->hw.conf.dynamic_ps_timeout));
 	}
 
-	mac80211_sta_reset_beacon_monitor(sdata);
-	mac80211_sta_reset_conn_monitor(sdata);
+	ieee80211_sta_reset_beacon_monitor(sdata);
+	ieee80211_sta_reset_conn_monitor(sdata);
 }
-#endif
 
-void ieee80211_offchannel_stop_beaconing(struct ieee80211_local *local)
+void ieee80211_offchannel_stop_vifs(struct ieee80211_local *local)
 {
 	struct ieee80211_sub_if_data *sdata;
 
-	mutex_lock(&local->iflist_mtx);
-	list_for_each_entry(sdata, &local->interfaces, list) {
-		if (!ieee80211_sdata_running(sdata))
-			continue;
-
-		if (sdata->vif.type == NL80211_IFTYPE_P2P_DEVICE)
-			continue;
-
-		/* disable beaconing */
-		if (sdata->vif.type == NL80211_IFTYPE_AP ||
-		    sdata->vif.type == NL80211_IFTYPE_ADHOC ||
-		    sdata->vif.type == NL80211_IFTYPE_MESH_POINT)
-			mac80211_bss_info_change_notify(
-				sdata, BSS_CHANGED_BEACON_ENABLED);
-
-		/*
-		 * only handle non-STA interfaces here, STA interfaces
-		 * are handled in ieee80211_offchannel_stop_station(),
-		 * e.g., from the background scan state machine.
-		 *
-		 * In addition, do not stop monitor interface to allow it to be
-		 * used from user space controlled off-channel operations.
-		 */
-		if (sdata->vif.type != NL80211_IFTYPE_STATION &&
-		    sdata->vif.type != NL80211_IFTYPE_MONITOR) {
-			set_bit(SDATA_STATE_OFFCHANNEL, &sdata->state);
-			netif_tx_stop_all_queues(sdata->dev);
-		}
-	}
-	mutex_unlock(&local->iflist_mtx);
-}
-
-void ieee80211_offchannel_stop_station(struct ieee80211_local *local)
-{
-	struct ieee80211_sub_if_data *sdata;
+	if (WARN_ON(local->use_chanctx))
+		return;
 
 	/*
-	 * notify the AP about us leaving the channel and stop all STA interfaces
+	 * notify the AP about us leaving the channel and stop all
+	 * STA interfaces.
 	 */
+
+	/*
+	 * Stop queues and transmit all frames queued by the driver
+	 * before sending nullfunc to enable powersave at the AP.
+	 */
+	ieee80211_stop_queues_by_reason(&local->hw, IEEE80211_MAX_QUEUE_MAP,
+					IEEE80211_QUEUE_STOP_REASON_OFFCHANNEL,
+					false);
+	ieee80211_flush_queues(local, NULL, false);
+
 	mutex_lock(&local->iflist_mtx);
 	list_for_each_entry(sdata, &local->interfaces, list) {
 		if (!ieee80211_sdata_running(sdata))
 			continue;
 
-		if (sdata->vif.type == NL80211_IFTYPE_STATION) {
+		if (sdata->vif.type == NL80211_IFTYPE_P2P_DEVICE ||
+		    sdata->vif.type == NL80211_IFTYPE_NAN)
+			continue;
+
+		if (sdata->vif.type != NL80211_IFTYPE_MONITOR)
 			set_bit(SDATA_STATE_OFFCHANNEL, &sdata->state);
-			netif_tx_stop_all_queues(sdata->dev);
-#if 0
-			/* TEMPHACK - FW manages power save mode when
-			   doing ROC */
-			if (sdata->u.mgd.associated)
-				ieee80211_offchannel_ps_enable(sdata);
-#endif
+
+		/* Check to see if we should disable beaconing. */
+		if (sdata->vif.bss_conf.enable_beacon) {
+			set_bit(SDATA_STATE_OFFCHANNEL_BEACON_STOPPED,
+				&sdata->state);
+			sdata->vif.bss_conf.enable_beacon = false;
+			ieee80211_bss_info_change_notify(
+				sdata, BSS_CHANGED_BEACON_ENABLED);
 		}
+
+		if (sdata->vif.type == NL80211_IFTYPE_STATION &&
+		    sdata->u.mgd.associated)
+			ieee80211_offchannel_ps_enable(sdata);
 	}
 	mutex_unlock(&local->iflist_mtx);
 }
 
-void mac80211_offchannel_return(struct ieee80211_local *local,
-				 bool enable_beaconing)
+void ieee80211_offchannel_return(struct ieee80211_local *local)
 {
 	struct ieee80211_sub_if_data *sdata;
+
+	if (WARN_ON(local->use_chanctx))
+		return;
 
 	mutex_lock(&local->iflist_mtx);
 	list_for_each_entry(sdata, &local->interfaces, list) {
 		if (sdata->vif.type == NL80211_IFTYPE_P2P_DEVICE)
 			continue;
 
-		if (sdata->vif.type != NL80211_IFTYPE_MONITOR) {
+		if (sdata->vif.type != NL80211_IFTYPE_MONITOR)
 			clear_bit(SDATA_STATE_OFFCHANNEL, &sdata->state);
-		}
-	/* TODO: Combo mode TEMPHACK */
-#if 0
+
 		if (!ieee80211_sdata_running(sdata))
 			continue;
-#endif
+
 		/* Tell AP we're back */
-#if 0
-		/* TEMPHACK - FW handles the power save mode when
-		   doing ROC */
-		if (sdata->vif.type == NL80211_IFTYPE_STATION) {
-			if (sdata->u.mgd.associated)
-				ieee80211_offchannel_ps_disable(sdata);
-		}
-#endif
+		if (sdata->vif.type == NL80211_IFTYPE_STATION &&
+		    sdata->u.mgd.associated)
+			ieee80211_offchannel_ps_disable(sdata);
 
-		if (sdata->vif.type != NL80211_IFTYPE_MONITOR) {
-			/*
-			 * This may wake up queues even though the driver
-			 * currently has them stopped. This is not very
-			 * likely, since the driver won't have gotten any
-			 * (or hardly any) new packets while we weren't
-			 * on the right channel, and even if it happens
-			 * it will at most lead to queueing up one more
-			 * packet per queue in mac80211 rather than on
-			 * the interface qdisc.
-			 */
-#ifdef CONFIG_XRMAC_XR_ROAMING_CHANGES
-			if (!sdata->queues_locked)
-#endif
-				netif_tx_wake_all_queues(sdata->dev);
-		}
-
-		/* re-enable beaconing */
-		if (enable_beaconing &&
-		    (sdata->vif.type == NL80211_IFTYPE_AP ||
-		     sdata->vif.type == NL80211_IFTYPE_ADHOC ||
-		     sdata->vif.type == NL80211_IFTYPE_MESH_POINT))
-			mac80211_bss_info_change_notify(
+		if (test_and_clear_bit(SDATA_STATE_OFFCHANNEL_BEACON_STOPPED,
+				       &sdata->state)) {
+			sdata->vif.bss_conf.enable_beacon = true;
+			ieee80211_bss_info_change_notify(
 				sdata, BSS_CHANGED_BEACON_ENABLED);
+		}
 	}
 	mutex_unlock(&local->iflist_mtx);
+
+	ieee80211_wake_queues_by_reason(&local->hw, IEEE80211_MAX_QUEUE_MAP,
+					IEEE80211_QUEUE_STOP_REASON_OFFCHANNEL,
+					false);
 }
 
-void mac80211_handle_roc_started(struct ieee80211_roc_work *roc)
+static void ieee80211_roc_notify_destroy(struct ieee80211_roc_work *roc)
 {
-	if (roc->notified)
+	/* was never transmitted */
+	if (roc->frame) {
+		cfg80211_mgmt_tx_status(&roc->sdata->wdev, roc->mgmt_tx_cookie,
+					roc->frame->data, roc->frame->len,
+					false, GFP_KERNEL);
+		mac80211_free_txskb(&roc->sdata->local->hw, roc->frame);
+	}
+
+	if (!roc->mgmt_tx_cookie)
+		cfg80211_remain_on_channel_expired(&roc->sdata->wdev,
+						   roc->cookie, roc->chan,
+						   GFP_KERNEL);
+	else
+		cfg80211_tx_mgmt_expired(&roc->sdata->wdev,
+					 roc->mgmt_tx_cookie,
+					 roc->chan, GFP_KERNEL);
+
+	list_del(&roc->list);
+	kfree(roc);
+}
+
+static unsigned long ieee80211_end_finished_rocs(struct ieee80211_local *local,
+						 unsigned long now)
+{
+	struct ieee80211_roc_work *roc, *tmp;
+	long remaining_dur_min = LONG_MAX;
+
+	lockdep_assert_held(&local->mtx);
+
+	list_for_each_entry_safe(roc, tmp, &local->roc_list, list) {
+		long remaining;
+
+		if (!roc->started)
+			break;
+
+		remaining = roc->start_time +
+			    msecs_to_jiffies(roc->duration) -
+			    now;
+
+		/* In case of HW ROC, it is possible that the HW finished the
+		 * ROC session before the actual requested time. In such a case
+		 * end the ROC session (disregarding the remaining time).
+		 */
+		if (roc->abort || roc->hw_begun || remaining <= 0)
+			ieee80211_roc_notify_destroy(roc);
+		else
+			remaining_dur_min = min(remaining_dur_min, remaining);
+	}
+
+	return remaining_dur_min;
+}
+
+static bool ieee80211_recalc_sw_work(struct ieee80211_local *local,
+				     unsigned long now)
+{
+	long dur = ieee80211_end_finished_rocs(local, now);
+
+	if (dur == LONG_MAX)
+		return false;
+
+	mod_delayed_work(local->workqueue, &local->roc_work, dur);
+	return true;
+}
+
+static void ieee80211_handle_roc_started(struct ieee80211_roc_work *roc,
+					 unsigned long start_time)
+{
+	if (WARN_ON(roc->notified))
 		return;
+
+	roc->start_time = start_time;
+	roc->started = true;
 
 	if (roc->mgmt_tx_cookie) {
 		if (!WARN_ON(!roc->frame)) {
-			ieee80211_tx_skb(roc->sdata, roc->frame);
+			ieee80211_tx_skb_tid_band(roc->sdata, roc->frame, 7,
+						  roc->chan->band, 0);
 			roc->frame = NULL;
 		}
 	} else {
-		/*
-		cfg80211_ready_on_channel(roc->hw_roc_dev, roc->cookie,
-					  roc->chan, roc->chan_type, roc->req_duration,
-					  GFP_KERNEL);
-		*/
 		cfg80211_ready_on_channel(&roc->sdata->wdev, roc->cookie,
-				  roc->chan, roc->req_duration,
-				  GFP_KERNEL);
+					  roc->chan, roc->req_duration,
+					  GFP_KERNEL);
 	}
 
 	roc->notified = true;
@@ -245,35 +280,18 @@ static void ieee80211_hw_roc_start(struct work_struct *work)
 {
 	struct ieee80211_local *local =
 		container_of(work, struct ieee80211_local, hw_roc_start);
-	struct ieee80211_roc_work *roc, *dep, *tmp;
+	struct ieee80211_roc_work *roc;
 
 	mutex_lock(&local->mtx);
 
-	if (list_empty(&local->roc_list))
-		goto out_unlock;
+	list_for_each_entry(roc, &local->roc_list, list) {
+		if (!roc->started)
+			break;
 
-	roc = list_first_entry(&local->roc_list, struct ieee80211_roc_work,
-			       list);
-
-	if (!roc->started)
-		goto out_unlock;
-
-	roc->hw_begun = true;
-	roc->hw_start_time = local->hw_roc_start_time;
-	roc->local = local;
-
-	mac80211_handle_roc_started(roc);
-	list_for_each_entry_safe(dep, tmp, &roc->dependents, list) {
-		mac80211_handle_roc_started(dep);
-
-		if (dep->duration > roc->duration) {
-			u32 dur = dep->duration;
-			dep->duration = dur - roc->duration;
-			roc->duration = dur;
-			list_move(&dep->list, &roc->list);
-		}
+		roc->hw_begun = true;
+		ieee80211_handle_roc_started(roc, local->hw_roc_start_time);
 	}
- out_unlock:
+
 	mutex_unlock(&local->mtx);
 }
 
@@ -288,35 +306,40 @@ void mac80211_ready_on_channel(struct ieee80211_hw *hw)
 	mac80211_queue_work(hw, &local->hw_roc_start);
 }
 
-void mac80211_start_next_roc(struct ieee80211_local *local)
+static void _ieee80211_start_next_roc(struct ieee80211_local *local)
 {
-	struct ieee80211_roc_work *roc;
+	struct ieee80211_roc_work *roc, *tmp;
+	enum ieee80211_roc_type type;
+	u32 min_dur, max_dur;
 
 	lockdep_assert_held(&local->mtx);
 
-	if (list_empty(&local->roc_list)) {
-		/*ieee80211_run_deferred_scan(local);*/
+	if (WARN_ON(list_empty(&local->roc_list)))
 		return;
-	}
 
 	roc = list_first_entry(&local->roc_list, struct ieee80211_roc_work,
 			       list);
 
-	if (WARN_ON_ONCE(roc->started))
+	if (WARN_ON(roc->started))
 		return;
 
+	min_dur = roc->duration;
+	max_dur = roc->duration;
+	type = roc->type;
+
+	list_for_each_entry(tmp, &local->roc_list, list) {
+		if (tmp == roc)
+			continue;
+		if (tmp->sdata != roc->sdata || tmp->chan != roc->chan)
+			break;
+		max_dur = max(tmp->duration, max_dur);
+		min_dur = min(tmp->duration, min_dur);
+		type = max(tmp->type, type);
+	}
+
 	if (local->ops->remain_on_channel) {
-		int ret, duration = roc->duration;
-
-		/* XXX: duplicated, see ieee80211_start_roc_work() */
-		if (!duration)
-			duration = 10;
-
-		ret = drv_remain_on_channel(local, roc->sdata, roc->chan, NL80211_CHAN_NO_HT,
-					    duration,
-					    (roc->mgmt_tx_cookie ? roc->mgmt_tx_cookie : roc->cookie));
-
-		roc->started = true;
+		int ret = drv_remain_on_channel(local, roc->sdata, roc->chan,
+						max_dur, type);
 
 		if (ret) {
 			wiphy_warn(local->hw.wiphy,
@@ -325,115 +348,133 @@ void mac80211_start_next_roc(struct ieee80211_local *local)
 			 * queue the work struct again to avoid recursion
 			 * when multiple failures occur
 			 */
-			mac80211_remain_on_channel_expired(&local->hw,
-					(roc->mgmt_tx_cookie ? roc->mgmt_tx_cookie : roc->cookie));
-		} else
-			local->hw_roc_channel = roc->chan;
+			list_for_each_entry(tmp, &local->roc_list, list) {
+				if (tmp->sdata != roc->sdata ||
+				    tmp->chan != roc->chan)
+					break;
+				tmp->started = true;
+				tmp->abort = true;
+			}
+			mac80211_queue_work(&local->hw, &local->hw_roc_done);
+			return;
+		}
+
+		/* we'll notify about the start once the HW calls back */
+		list_for_each_entry(tmp, &local->roc_list, list) {
+			if (tmp->sdata != roc->sdata || tmp->chan != roc->chan)
+				break;
+			tmp->started = true;
+		}
+	} else {
+		/* If actually operating on the desired channel (with at least
+		 * 20 MHz channel width) don't stop all the operations but still
+		 * treat it as though the ROC operation started properly, so
+		 * other ROC operations won't interfere with this one.
+		 */
+		roc->on_channel = roc->chan == local->_oper_chandef.chan &&
+				  local->_oper_chandef.width != NL80211_CHAN_WIDTH_5 &&
+				  local->_oper_chandef.width != NL80211_CHAN_WIDTH_10;
+
+		/* start this ROC */
+		ieee80211_recalc_idle(local);
+
+		if (!roc->on_channel) {
+			ieee80211_offchannel_stop_vifs(local);
+
+			local->tmp_channel = roc->chan;
+			ieee80211_hw_config(local, 0);
+		}
+
+		mac80211_queue_delayed_work(&local->hw, &local->roc_work,
+					     msecs_to_jiffies(min_dur));
+
+		/* tell userspace or send frame(s) */
+		list_for_each_entry(tmp, &local->roc_list, list) {
+			if (tmp->sdata != roc->sdata || tmp->chan != roc->chan)
+				break;
+
+			tmp->on_channel = roc->on_channel;
+			ieee80211_handle_roc_started(tmp, jiffies);
+		}
+	}
+}
+
+void ieee80211_start_next_roc(struct ieee80211_local *local)
+{
+	struct ieee80211_roc_work *roc;
+
+	lockdep_assert_held(&local->mtx);
+
+	if (list_empty(&local->roc_list)) {
+		ieee80211_run_deferred_scan(local);
+		return;
+	}
+
+	/* defer roc if driver is not started (i.e. during reconfig) */
+	if (local->in_reconfig)
+		return;
+
+	roc = list_first_entry(&local->roc_list, struct ieee80211_roc_work,
+			       list);
+
+	if (WARN_ON_ONCE(roc->started))
+		return;
+
+	if (local->ops->remain_on_channel) {
+		_ieee80211_start_next_roc(local);
 	} else {
 		/* delay it a bit */
-		mac80211_queue_delayed_work(&local->hw, &roc->work,
+		mac80211_queue_delayed_work(&local->hw, &local->roc_work,
 					     round_jiffies_relative(HZ/2));
 	}
 }
 
-void mac80211_roc_notify_destroy(struct ieee80211_roc_work *roc)
+static void __ieee80211_roc_work(struct ieee80211_local *local)
 {
-	struct ieee80211_roc_work *dep, *tmp;
+	struct ieee80211_roc_work *roc;
+	bool on_channel;
 
-	/* was never transmitted */
-	if (roc->frame) {
-		cfg80211_mgmt_tx_status(&roc->sdata->wdev,
-					(unsigned long)roc->frame,
-					roc->frame->data, roc->frame->len,
-					false, GFP_KERNEL);
-		kfree_skb(roc->frame);
-	}
+	lockdep_assert_held(&local->mtx);
 
-	/*
-	if (!roc->mgmt_tx_cookie)
-	cfg80211_remain_on_channel_expired(roc->hw_roc_dev,
-						   roc->cookie, roc->chan, roc->chan_type,
-						   GFP_KERNEL);
-	*/
-	if (!roc->mgmt_tx_cookie)
-		cfg80211_remain_on_channel_expired(&roc->sdata->wdev,
-						   roc->cookie, roc->chan,
-						   GFP_KERNEL);
+	if (WARN_ON(local->ops->remain_on_channel))
+		return;
 
-
-	list_for_each_entry_safe(dep, tmp, &roc->dependents, list)
-		mac80211_roc_notify_destroy(dep);
-
-	kfree(roc);
-}
-
-void mac80211_sw_roc_work(struct work_struct *work)
-{
-	struct ieee80211_roc_work *roc =
-		container_of(work, struct ieee80211_roc_work, work.work);
-	struct ieee80211_sub_if_data *sdata = roc->sdata;
-	struct ieee80211_local *local = sdata->local;
-	bool started;
-
-	mutex_lock(&local->mtx);
-
-	if (roc->abort)
-		goto finish;
-
-	if (WARN_ON(list_empty(&local->roc_list)))
-		goto out_unlock;
-
-	if (WARN_ON(roc != list_first_entry(&local->roc_list,
-					    struct ieee80211_roc_work,
-					    list)))
-		goto out_unlock;
+	roc = list_first_entry_or_null(&local->roc_list,
+				       struct ieee80211_roc_work, list);
+	if (!roc)
+		return;
 
 	if (!roc->started) {
-		struct ieee80211_roc_work *dep;
-
-		/* start this ROC */
-
-		/* switch channel etc */
-		mac80211_recalc_idle(local);
-
-		local->tmp_channel = roc->chan;
-		mac80211_hw_config(local, 0);
-
-		/* tell userspace or send frame */
-		mac80211_handle_roc_started(roc);
-		list_for_each_entry(dep, &roc->dependents, list)
-			mac80211_handle_roc_started(dep);
-
-		/* if it was pure TX, just finish right away */
-		if (!roc->duration)
-			goto finish;
-
-		roc->started = true;
-		mac80211_queue_delayed_work(&local->hw, &roc->work,
-					     msecs_to_jiffies(roc->duration));
+		WARN_ON(local->use_chanctx);
+		_ieee80211_start_next_roc(local);
 	} else {
-		/* finish this ROC */
- finish:
-		list_del(&roc->list);
-		started = roc->started;
-		mac80211_roc_notify_destroy(roc);
+		on_channel = roc->on_channel;
+		if (ieee80211_recalc_sw_work(local, jiffies))
+			return;
 
-		if (started) {
-			drv_flush(local, sdata, false);
+		/* careful - roc pointer became invalid during recalc */
+
+		if (!on_channel) {
+			ieee80211_flush_queues(local, NULL, false);
 
 			local->tmp_channel = NULL;
-			mac80211_hw_config(local, 0);
+			ieee80211_hw_config(local, 0);
 
-			mac80211_offchannel_return(local, true);
+			ieee80211_offchannel_return(local);
 		}
 
-		mac80211_recalc_idle(local);
-
-		if (started)
-			mac80211_start_next_roc(local);
+		ieee80211_recalc_idle(local);
+		ieee80211_start_next_roc(local);
 	}
+}
 
- out_unlock:
+static void ieee80211_roc_work(struct work_struct *work)
+{
+	struct ieee80211_local *local =
+		container_of(work, struct ieee80211_local, roc_work.work);
+
+	mutex_lock(&local->mtx);
+	__ieee80211_roc_work(local);
 	mutex_unlock(&local->mtx);
 }
 
@@ -441,91 +482,525 @@ static void ieee80211_hw_roc_done(struct work_struct *work)
 {
 	struct ieee80211_local *local =
 		container_of(work, struct ieee80211_local, hw_roc_done);
-	struct ieee80211_roc_work *roc;
-	u64	cookie;
 
 	mutex_lock(&local->mtx);
 
-	if (list_empty(&local->roc_list))
-		goto out_unlock;
-
-	roc = list_first_entry(&local->roc_list, struct ieee80211_roc_work,
-			       list);
-
-	if (!roc->started)
-		goto out_unlock;
-
-	cookie = roc->mgmt_tx_cookie ? roc->mgmt_tx_cookie : roc->cookie;
-
-	if (cookie != local->roc_cookie) {
-		local->roc_cookie = 0;
-		goto out_unlock;
-	}
-	local->roc_cookie = 0;
-	list_del(&roc->list);
-
-	mac80211_roc_notify_destroy(roc);
-
-	local->hw_roc_channel = NULL;
+	ieee80211_end_finished_rocs(local, jiffies);
 
 	/* if there's another roc, start it now */
-	mac80211_start_next_roc(local);
+	ieee80211_start_next_roc(local);
 
- out_unlock:
 	mutex_unlock(&local->mtx);
 }
 
-void mac80211_remain_on_channel_expired(struct ieee80211_hw *hw, u64 cookie)
+void mac80211_remain_on_channel_expired(struct ieee80211_hw *hw)
 {
 	struct ieee80211_local *local = hw_to_local(hw);
-	/*struct ieee80211_roc_work *roc;*/
-	local->roc_cookie = cookie;
 
 	trace_api_remain_on_channel_expired(local);
 
 	mac80211_queue_work(hw, &local->hw_roc_done);
 }
 
-void mac80211_hw_roc_setup(struct ieee80211_local *local)
+static bool
+ieee80211_coalesce_hw_started_roc(struct ieee80211_local *local,
+				  struct ieee80211_roc_work *new_roc,
+				  struct ieee80211_roc_work *cur_roc)
 {
-	INIT_WORK(&local->hw_roc_start, ieee80211_hw_roc_start);
-	INIT_WORK(&local->hw_roc_done, ieee80211_hw_roc_done);
-	INIT_LIST_HEAD(&local->roc_list);
+	unsigned long now = jiffies;
+	unsigned long remaining;
+
+	if (WARN_ON(!cur_roc->started))
+		return false;
+
+	/* if it was scheduled in the hardware, but not started yet,
+	 * we can only combine if the older one had a longer duration
+	 */
+	if (!cur_roc->hw_begun && new_roc->duration > cur_roc->duration)
+		return false;
+
+	remaining = cur_roc->start_time +
+		    msecs_to_jiffies(cur_roc->duration) -
+		    now;
+
+	/* if it doesn't fit entirely, schedule a new one */
+	if (new_roc->duration > jiffies_to_msecs(remaining))
+		return false;
+
+	/* add just after the current one so we combine their finish later */
+	list_add(&new_roc->list, &cur_roc->list);
+
+	/* if the existing one has already begun then let this one also
+	 * begin, otherwise they'll both be marked properly by the work
+	 * struct that runs once the driver notifies us of the beginning
+	 */
+	if (cur_roc->hw_begun) {
+		new_roc->hw_begun = true;
+		ieee80211_handle_roc_started(new_roc, now);
+	}
+
+	return true;
 }
 
-void mac80211_roc_purge(struct ieee80211_sub_if_data *sdata)
+static int ieee80211_start_roc_work(struct ieee80211_local *local,
+				    struct ieee80211_sub_if_data *sdata,
+				    struct ieee80211_channel *channel,
+				    unsigned int duration, u64 *cookie,
+				    struct sk_buff *txskb,
+				    enum ieee80211_roc_type type)
 {
-	struct ieee80211_local *local = sdata->local;
 	struct ieee80211_roc_work *roc, *tmp;
-	LIST_HEAD(tmp_list);
+	bool queued = false, combine_started = true;
+	int ret;
+
+	lockdep_assert_held(&local->mtx);
+
+	if (local->use_chanctx && !local->ops->remain_on_channel)
+		return -EOPNOTSUPP;
+
+	roc = kzalloc(sizeof(*roc), GFP_KERNEL);
+	if (!roc)
+		return -ENOMEM;
+
+	/*
+	 * If the duration is zero, then the driver
+	 * wouldn't actually do anything. Set it to
+	 * 10 for now.
+	 *
+	 * TODO: cancel the off-channel operation
+	 *       when we get the SKB's TX status and
+	 *       the wait time was zero before.
+	 */
+	if (!duration)
+		duration = 10;
+
+	roc->chan = channel;
+	roc->duration = duration;
+	roc->req_duration = duration;
+	roc->frame = txskb;
+	roc->type = type;
+	roc->sdata = sdata;
+
+	/*
+	 * cookie is either the roc cookie (for normal roc)
+	 * or the SKB (for mgmt TX)
+	 */
+	if (!txskb) {
+		roc->cookie = ieee80211_mgmt_tx_cookie(local);
+		*cookie = roc->cookie;
+	} else {
+		roc->mgmt_tx_cookie = *cookie;
+	}
+
+	/* if there's no need to queue, handle it immediately */
+	if (list_empty(&local->roc_list) &&
+	    !local->scanning && !ieee80211_is_radar_required(local)) {
+		/* if not HW assist, just queue & schedule work */
+		if (!local->ops->remain_on_channel) {
+			list_add_tail(&roc->list, &local->roc_list);
+			mac80211_queue_delayed_work(&local->hw,
+						     &local->roc_work, 0);
+		} else {
+			/* otherwise actually kick it off here
+			 * (for error handling)
+			 */
+			ret = drv_remain_on_channel(local, sdata, channel,
+						    duration, type);
+			if (ret) {
+				kfree(roc);
+				return ret;
+			}
+			roc->started = true;
+			list_add_tail(&roc->list, &local->roc_list);
+		}
+
+		return 0;
+	}
+
+	/* otherwise handle queueing */
+
+	list_for_each_entry(tmp, &local->roc_list, list) {
+		if (tmp->chan != channel || tmp->sdata != sdata)
+			continue;
+
+		/*
+		 * Extend this ROC if possible: If it hasn't started, add
+		 * just after the new one to combine.
+		 */
+		if (!tmp->started) {
+			list_add(&roc->list, &tmp->list);
+			queued = true;
+			break;
+		}
+
+		if (!combine_started)
+			continue;
+
+		if (!local->ops->remain_on_channel) {
+			/* If there's no hardware remain-on-channel, and
+			 * doing so won't push us over the maximum r-o-c
+			 * we allow, then we can just add the new one to
+			 * the list and mark it as having started now.
+			 * If it would push over the limit, don't try to
+			 * combine with other started ones (that haven't
+			 * been running as long) but potentially sort it
+			 * with others that had the same fate.
+			 */
+			unsigned long now = jiffies;
+			u32 elapsed = jiffies_to_msecs(now - tmp->start_time);
+			struct wiphy *wiphy = local->hw.wiphy;
+			u32 max_roc = wiphy->max_remain_on_channel_duration;
+
+			if (elapsed + roc->duration > max_roc) {
+				combine_started = false;
+				continue;
+			}
+
+			list_add(&roc->list, &tmp->list);
+			queued = true;
+			roc->on_channel = tmp->on_channel;
+			ieee80211_handle_roc_started(roc, now);
+			ieee80211_recalc_sw_work(local, now);
+			break;
+		}
+
+		queued = ieee80211_coalesce_hw_started_roc(local, roc, tmp);
+		if (queued)
+			break;
+		/* if it wasn't queued, perhaps it can be combined with
+		 * another that also couldn't get combined previously,
+		 * but no need to check for already started ones, since
+		 * that can't work.
+		 */
+		combine_started = false;
+	}
+
+	if (!queued)
+		list_add_tail(&roc->list, &local->roc_list);
+
+	return 0;
+}
+
+int ieee80211_remain_on_channel(struct wiphy *wiphy, struct wireless_dev *wdev,
+				struct ieee80211_channel *chan,
+				unsigned int duration, u64 *cookie)
+{
+	struct ieee80211_sub_if_data *sdata = IEEE80211_WDEV_TO_SUB_IF(wdev);
+	struct ieee80211_local *local = sdata->local;
+	int ret;
+
+	mutex_lock(&local->mtx);
+	ret = ieee80211_start_roc_work(local, sdata, chan,
+				       duration, cookie, NULL,
+				       IEEE80211_ROC_TYPE_NORMAL);
+	mutex_unlock(&local->mtx);
+
+	return ret;
+}
+
+static int ieee80211_cancel_roc(struct ieee80211_local *local,
+				u64 cookie, bool mgmt_tx)
+{
+	struct ieee80211_roc_work *roc, *tmp, *found = NULL;
+	int ret;
+
+	if (!cookie)
+		return -ENOENT;
+
+	flush_work(&local->hw_roc_start);
 
 	mutex_lock(&local->mtx);
 	list_for_each_entry_safe(roc, tmp, &local->roc_list, list) {
-		if (roc->sdata != sdata)
+		if (!mgmt_tx && roc->cookie != cookie)
+			continue;
+		else if (mgmt_tx && roc->mgmt_tx_cookie != cookie)
 			continue;
 
-		if (roc->started && local->ops->remain_on_channel) {
-			/* can race, so ignore return value */
-			drv_cancel_remain_on_channel(local);
+		found = roc;
+		break;
+	}
+
+	if (!found) {
+		mutex_unlock(&local->mtx);
+		return -ENOENT;
+	}
+
+	if (!found->started) {
+		ieee80211_roc_notify_destroy(found);
+		goto out_unlock;
+	}
+
+	if (local->ops->remain_on_channel) {
+		ret = drv_cancel_remain_on_channel(local, roc->sdata);
+		if (WARN_ON_ONCE(ret)) {
+			mutex_unlock(&local->mtx);
+			return ret;
 		}
 
-		list_move_tail(&roc->list, &tmp_list);
-		roc->abort = true;
+		/* TODO:
+		 * if multiple items were combined here then we really shouldn't
+		 * cancel them all - we should wait for as much time as needed
+		 * for the longest remaining one, and only then cancel ...
+		 */
+		list_for_each_entry_safe(roc, tmp, &local->roc_list, list) {
+			if (!roc->started)
+				break;
+			if (roc == found)
+				found = NULL;
+			ieee80211_roc_notify_destroy(roc);
+		}
+
+		/* that really must not happen - it was started */
+		WARN_ON(found);
+
+		ieee80211_start_next_roc(local);
+	} else {
+		/* go through work struct to return to the operating channel */
+		found->abort = true;
+		mod_delayed_work(local->workqueue, &local->roc_work, 0);
 	}
-	local->hw_roc_channel = NULL;
+
+ out_unlock:
 	mutex_unlock(&local->mtx);
 
-	list_for_each_entry_safe(roc, tmp, &tmp_list, list) {
-		if (local->ops->remain_on_channel) {
-			list_del(&roc->list);
-			mac80211_roc_notify_destroy(roc);
-		} else {
-			mac80211_queue_delayed_work(&local->hw, &roc->work, 0);
+	return 0;
+}
 
-			/* work will clean up etc */
-			flush_delayed_work(&roc->work);
-		}
+int ieee80211_cancel_remain_on_channel(struct wiphy *wiphy,
+				       struct wireless_dev *wdev, u64 cookie)
+{
+	struct ieee80211_sub_if_data *sdata = IEEE80211_WDEV_TO_SUB_IF(wdev);
+	struct ieee80211_local *local = sdata->local;
+
+	return ieee80211_cancel_roc(local, cookie, false);
+}
+
+int ieee80211_mgmt_tx(struct wiphy *wiphy, struct wireless_dev *wdev,
+		      struct cfg80211_mgmt_tx_params *params, u64 *cookie)
+{
+	struct ieee80211_sub_if_data *sdata = IEEE80211_WDEV_TO_SUB_IF(wdev);
+	struct ieee80211_local *local = sdata->local;
+	struct sk_buff *skb;
+	struct sta_info *sta;
+	const struct ieee80211_mgmt *mgmt = (void *)params->buf;
+	bool need_offchan = false;
+	u32 flags;
+	int ret;
+	u8 *data;
+
+	if (params->dont_wait_for_ack)
+		flags = IEEE80211_TX_CTL_NO_ACK;
+	else
+		flags = IEEE80211_TX_INTFL_NL80211_FRAME_TX |
+			IEEE80211_TX_CTL_REQ_TX_STATUS;
+
+	if (params->no_cck)
+		flags |= IEEE80211_TX_CTL_NO_CCK_RATE;
+
+	switch (sdata->vif.type) {
+	case NL80211_IFTYPE_ADHOC:
+		if (!sdata->vif.bss_conf.ibss_joined)
+			need_offchan = true;
+#ifdef CONFIG_MAC80211_MESH
+		/* fall through */
+	case NL80211_IFTYPE_MESH_POINT:
+		if (ieee80211_vif_is_mesh(&sdata->vif) &&
+		    !sdata->u.mesh.mesh_id_len)
+			need_offchan = true;
+#endif
+		/* fall through */
+	case NL80211_IFTYPE_AP:
+	case NL80211_IFTYPE_AP_VLAN:
+	case NL80211_IFTYPE_P2P_GO:
+		if (sdata->vif.type != NL80211_IFTYPE_ADHOC &&
+		    !ieee80211_vif_is_mesh(&sdata->vif) &&
+		    !rcu_access_pointer(sdata->bss->beacon))
+			need_offchan = true;
+		if (!ieee80211_is_action(mgmt->frame_control) ||
+		    mgmt->u.action.category == WLAN_CATEGORY_PUBLIC ||
+		    mgmt->u.action.category == WLAN_CATEGORY_SELF_PROTECTED ||
+		    mgmt->u.action.category == WLAN_CATEGORY_SPECTRUM_MGMT)
+			break;
+		rcu_read_lock();
+		sta = sta_info_get_bss(sdata, mgmt->da);
+		rcu_read_unlock();
+		if (!sta)
+			return -ENOLINK;
+		break;
+	case NL80211_IFTYPE_STATION:
+	case NL80211_IFTYPE_P2P_CLIENT:
+		sdata_lock(sdata);
+		if (!sdata->u.mgd.associated ||
+		    (params->offchan && params->wait &&
+		     local->ops->remain_on_channel &&
+		     memcmp(sdata->u.mgd.associated->bssid,
+			    mgmt->bssid, ETH_ALEN)))
+			need_offchan = true;
+		sdata_unlock(sdata);
+		break;
+	case NL80211_IFTYPE_P2P_DEVICE:
+		need_offchan = true;
+		break;
+	case NL80211_IFTYPE_NAN:
+	default:
+		return -EOPNOTSUPP;
 	}
 
-	WARN_ON_ONCE(!list_empty(&tmp_list));
+	/* configurations requiring offchan cannot work if no channel has been
+	 * specified
+	 */
+	if (need_offchan && !params->chan)
+		return -EINVAL;
+
+	mutex_lock(&local->mtx);
+
+	/* Check if the operating channel is the requested channel */
+	if (!need_offchan) {
+		struct ieee80211_chanctx_conf *chanctx_conf;
+
+		rcu_read_lock();
+		chanctx_conf = rcu_dereference(sdata->vif.chanctx_conf);
+
+		if (chanctx_conf) {
+			need_offchan = params->chan &&
+				       (params->chan !=
+					chanctx_conf->def.chan);
+		} else if (!params->chan) {
+			ret = -EINVAL;
+			rcu_read_unlock();
+			goto out_unlock;
+		} else {
+			need_offchan = true;
+		}
+		rcu_read_unlock();
+	}
+
+	if (need_offchan && !params->offchan) {
+		ret = -EBUSY;
+		goto out_unlock;
+	}
+
+	skb = dev_alloc_skb(local->hw.extra_tx_headroom + params->len);
+	if (!skb) {
+		ret = -ENOMEM;
+		goto out_unlock;
+	}
+	skb_reserve(skb, local->hw.extra_tx_headroom);
+
+	data = skb_put_data(skb, params->buf, params->len);
+
+	/* Update CSA counters */
+	if (sdata->vif.csa_active &&
+	    (sdata->vif.type == NL80211_IFTYPE_AP ||
+	     sdata->vif.type == NL80211_IFTYPE_MESH_POINT ||
+	     sdata->vif.type == NL80211_IFTYPE_ADHOC) &&
+	    params->n_csa_offsets) {
+		int i;
+		struct beacon_data *beacon = NULL;
+
+		rcu_read_lock();
+
+		if (sdata->vif.type == NL80211_IFTYPE_AP)
+			beacon = rcu_dereference(sdata->u.ap.beacon);
+		else if (sdata->vif.type == NL80211_IFTYPE_ADHOC)
+			beacon = rcu_dereference(sdata->u.ibss.presp);
+		else if (ieee80211_vif_is_mesh(&sdata->vif))
+			beacon = rcu_dereference(sdata->u.mesh.beacon);
+
+		if (beacon)
+			for (i = 0; i < params->n_csa_offsets; i++)
+				data[params->csa_offsets[i]] =
+					beacon->csa_current_counter;
+
+		rcu_read_unlock();
+	}
+
+	IEEE80211_SKB_CB(skb)->flags = flags;
+
+	skb->dev = sdata->dev;
+
+	if (!params->dont_wait_for_ack) {
+		/* make a copy to preserve the frame contents
+		 * in case of encryption.
+		 */
+		ret = ieee80211_attach_ack_skb(local, skb, cookie, GFP_KERNEL);
+		if (ret) {
+			kfree_skb(skb);
+			goto out_unlock;
+		}
+	} else {
+		/* Assign a dummy non-zero cookie, it's not sent to
+		 * userspace in this case but we rely on its value
+		 * internally in the need_offchan case to distinguish
+		 * mgmt-tx from remain-on-channel.
+		 */
+		*cookie = 0xffffffff;
+	}
+
+	if (!need_offchan) {
+		ieee80211_tx_skb(sdata, skb);
+		ret = 0;
+		goto out_unlock;
+	}
+
+	IEEE80211_SKB_CB(skb)->flags |= IEEE80211_TX_CTL_TX_OFFCHAN |
+					IEEE80211_TX_INTFL_OFFCHAN_TX_OK;
+	if (ieee80211_hw_check(&local->hw, QUEUE_CONTROL))
+		IEEE80211_SKB_CB(skb)->hw_queue =
+			local->hw.offchannel_tx_hw_queue;
+
+	/* This will handle all kinds of coalescing and immediate TX */
+	ret = ieee80211_start_roc_work(local, sdata, params->chan,
+				       params->wait, cookie, skb,
+				       IEEE80211_ROC_TYPE_MGMT_TX);
+	if (ret)
+		mac80211_free_txskb(&local->hw, skb);
+ out_unlock:
+	mutex_unlock(&local->mtx);
+	return ret;
+}
+
+int ieee80211_mgmt_tx_cancel_wait(struct wiphy *wiphy,
+				  struct wireless_dev *wdev, u64 cookie)
+{
+	struct ieee80211_local *local = wiphy_priv(wiphy);
+
+	return ieee80211_cancel_roc(local, cookie, true);
+}
+
+void ieee80211_roc_setup(struct ieee80211_local *local)
+{
+	INIT_WORK(&local->hw_roc_start, ieee80211_hw_roc_start);
+	INIT_WORK(&local->hw_roc_done, ieee80211_hw_roc_done);
+	INIT_DELAYED_WORK(&local->roc_work, ieee80211_roc_work);
+	INIT_LIST_HEAD(&local->roc_list);
+}
+
+void ieee80211_roc_purge(struct ieee80211_local *local,
+			 struct ieee80211_sub_if_data *sdata)
+{
+	struct ieee80211_roc_work *roc, *tmp;
+	bool work_to_do = false;
+
+	mutex_lock(&local->mtx);
+	list_for_each_entry_safe(roc, tmp, &local->roc_list, list) {
+		if (sdata && roc->sdata != sdata)
+			continue;
+
+		if (roc->started) {
+			if (local->ops->remain_on_channel) {
+				/* can race, so ignore return value */
+				drv_cancel_remain_on_channel(local, sdata);
+				ieee80211_roc_notify_destroy(roc);
+			} else {
+				roc->abort = true;
+				work_to_do = true;
+			}
+		} else {
+			ieee80211_roc_notify_destroy(roc);
+		}
+	}
+	if (work_to_do)
+		__ieee80211_roc_work(local);
+	mutex_unlock(&local->mtx);
 }

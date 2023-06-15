@@ -134,54 +134,9 @@ enum {
 	HDMI_CEC_REPORT_CEC_VERSION            = 0x9e,
 };
 
-#ifdef CONFIG_HDMI_CEC_STANDARD
-enum {
-	CEC_DONE = 0x01,
-	CEC_EOM = 0x02,
-	CEC_NACK = 0x04,
-	CEC_ARB_LOST = 0x08,
-	CEC_ERROR_INITIAOT = 0x10,
-	CEC_ERROR_FOLLOW = 0x20,
-	CEC_WAKEUP = 0x40,
-};
-
-enum {
-	CEC_TV = 0,
-	CEC_RD1 = 1, /*RD: Recording Device*/
-	CEC_RD2 = 2,
-	CEC_TURNER1,
-	CEC_PD1, /*PD: Playback Device*/
-	CEC_AS, /*AS: Audio System*/
-	CEC_TURNER3,
-	CEC_TURNER4,
-	CEC_PD2,
-	CEC_RD3,
-	CEC_TURNER5,
-	CEC_PD3,
-	CEC_FREE_USER = 14,
-	CEC_BC = 15, /*BC: Broadcast*/
-};
-
-struct cec_msg {
-	unsigned int len;
-	unsigned char msg[16];
-	int timeout;
-
-	/*for sending cec message result*/
-	int tx_status;
-
-	/*for receiving cec message result*/
-	int rx_status;
-};
-#endif
-
 #if defined(CONFIG_ARCH_SUN8IW12) || defined(CONFIG_ARCH_SUN8IW7)
 #define HDMI_ENABLE_DUMP_WRITE
 #endif /*endif CONFIG_ARCH_SUN8IW12 */
-
-#if defined(CONFIG_ARCH_SUN8IW7)
-#define HDMI_ENABLE_DUMP_WRITE
-#endif /*endif CONFIG_ARCH_SUN8IW7 */
 
 int bsp_hdmi_set_func(hdmi_bsp_func *func);
 void bsp_hdmi_set_addr(uintptr_t base_addr);
@@ -201,22 +156,10 @@ void bsp_hdmi_hdl(void);
 /* @version: 0:A, 1:B, 2:C, 3:D */
 void bsp_hdmi_set_version(unsigned int version);
 int bsp_hdmi_hdcp_err_check(void);
-
-/******************For cec ********************/
-void bsp_hdmi_cec_free_time_set(unsigned char value);
-#ifdef CONFIG_HDMI_CEC_STANDARD
-int bsp_hdmi_cec_get_msg(struct cec_msg *msg,
-			unsigned char logaddr);
-int bsp_hdmi_cec_send_msg(struct cec_msg *msg,
-			unsigned char logaddr);
-int bsp_hdmi_cec_sending_status_check(void);
-#else
 int bsp_hdmi_cec_get_simple_msg(unsigned char *msg);
 int bsp_hdmi_cec_send(char *buf, unsigned char bytes);
+void bsp_hdmi_cec_free_time_set(unsigned char value);
 int bsp_hdmi_cec_sta_check(void);
-#endif
-/******************For cec ********************/
-
 int bsp_hdmi_set_bias_source(unsigned int src);
 
 #if defined(HDMI_ENABLE_DUMP_WRITE)

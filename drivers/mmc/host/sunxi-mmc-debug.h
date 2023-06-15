@@ -17,7 +17,7 @@
 #ifndef __SUNXI_MMC_DEBUG_H__
 #define __SUNXI_MMC_DEBUG_H__
 #include <linux/clk.h>
-#include <linux/clk/sunxi.h>
+#include <linux/reset.h>
 
 #include <linux/gpio.h>
 #include <linux/platform_device.h>

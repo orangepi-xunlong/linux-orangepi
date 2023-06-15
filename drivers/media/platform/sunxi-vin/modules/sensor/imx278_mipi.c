@@ -614,6 +614,110 @@ static struct regval_list sensor_1080p60_regs[] = {
 	{0x0100, 0x01},
 };
 
+
+
+static struct regval_list sensor_1080p30_regs[] = {
+	{0x0100, 0x00},
+	{0x0112, 0x0A},
+	{0x0113, 0x0A},
+	{0x0114, 0x03},
+
+	{0x0301, 0x05},
+	{0x0303, 0x02},
+	{0x0305, 0x0C},
+	{0x0306, 0x01},
+	{0x0307, 0xCC},
+	{0x0309, 0x0A},
+	{0x030B, 0x01},
+	{0x030D, 0x0C},
+	{0x030E, 0x01},
+	{0x030F, 0x30},
+	{0x0310, 0x01},
+	{0x3041, 0x01},
+
+	{0x0342, 0x13},
+	{0x0343, 0x70},
+	{0x0340, 0x09},
+	{0x0341, 0xA0},
+
+	{0x0344, 0x00},
+	{0x0345, 0x00},
+	{0x0346, 0x01},
+	{0x0347, 0x78},
+	{0x0348, 0x10},
+	{0x0349, 0x6F},
+	{0x034A, 0x0A},
+	{0x034B, 0xB7},
+	{0x0381, 0x01},
+	{0x0383, 0x01},
+	{0x0385, 0x01},
+	{0x0387, 0x01},
+	{0x0900, 0x01},
+	{0x0901, 0x12},
+	{0x0401, 0x01},
+	{0x0404, 0x00},
+	{0x0405, 0x20},
+	{0x0408, 0x00},
+	{0x0409, 0x00},
+	{0x040A, 0x00},
+	{0x040B, 0x00},
+	{0x040C, 0x10},
+	{0x040D, 0x70},
+	{0x040E, 0x04},
+	{0x040F, 0xA0},
+	{0x3038, 0x00},
+	{0x303A, 0x00},
+	{0x303B, 0x10},
+	{0x300D, 0x00},
+
+	{0x034C, 0x07},
+	{0x034D, 0x80},
+	{0x034E, 0x04},
+	{0x034F, 0x38},
+
+	{0x3029, 0x00},
+	{0x3A00, 0x00},
+	{0x3A01, 0x00},
+	{0x3A02, 0x05},
+	{0x3A03, 0x05},
+	{0x3A04, 0x05},
+	{0x3A05, 0xF8},
+	{0x3A06, 0x40},
+	{0x3A07, 0xFE},
+	{0x3A08, 0x10},
+	{0x3A09, 0x14},
+	{0x3A0A, 0xFE},
+	{0x3A0B, 0x44},
+
+	{0x0202, 0x04},
+	{0x0203, 0x00},
+	{0x0204, 0x00},
+	{0x0205, 0x00},
+	{0x020E, 0x01},
+	{0x020F, 0x00},
+
+	{0x0808, 0x02},
+	{0x080A, 0x00},
+	{0x080B, 0x67},
+	{0x080C, 0x00},
+	{0x080D, 0x2F},
+	{0x080E, 0x00},
+	{0x080F, 0x57},
+	{0x0810, 0x00},
+	{0x0811, 0x2F},
+	{0x0812, 0x00},
+	{0x0813, 0x27},
+	{0x0814, 0x00},
+	{0x0815, 0x2F},
+	{0x0816, 0x00},
+	{0x0817, 0xBF},
+	{0x0818, 0x00},
+	{0x0819, 0x27},
+
+	{0x0100, 0x01},
+};
+
+
 static struct regval_list sensor_720p120_regs[] = {
 	{0x0100, 0x00},
 	{0x0112, 0x0A},
@@ -834,10 +938,10 @@ static int fps_change_flag;
 static int sensor_s_fps(struct v4l2_subdev *sd,
 			struct sensor_fps *fps)
 {
-	unsigned int coarse_int_time, frame_length;
+	unsigned int coarse_int_time, frame_length = 0;
 	struct sensor_info *info = to_state(sd);
 	struct sensor_win_size *wsize = info->current_wins;
-	unsigned int times_reg, times, imx278_hts, FRM_LINES;
+	unsigned int times_reg, times, imx278_hts = 0, FRM_LINES = 0;
 
 	if (fps->fps == 0)
 		fps->fps = 30;
@@ -1013,8 +1117,8 @@ static int sensor_power(struct v4l2_subdev *sd, int on)
 		cci_unlock(sd);
 		break;
 	case PWR_OFF:
-		sensor_dbg("PWR_OFF!\n");
-		cci_lock(sd);
+		sensor_dbg("PWR_OFF! null\n");
+/*		cci_lock(sd);
 		vin_gpio_set_status(sd, PWDN, 1);
 		vin_gpio_set_status(sd, RESET, 1);
 		vin_gpio_write(sd, RESET, CSI_GPIO_LOW);
@@ -1028,7 +1132,7 @@ static int sensor_power(struct v4l2_subdev *sd, int on)
 		vin_gpio_set_status(sd, RESET, 0);
 		vin_gpio_set_status(sd, PWDN, 0);
 		vin_gpio_set_status(sd, POWER_EN, 0);
-		cci_unlock(sd);
+		cci_unlock(sd);*/
 		break;
 	default:
 		return -EINVAL;
@@ -1062,9 +1166,12 @@ static int sensor_detect(struct v4l2_subdev *sd)
 	if ((rdval&0x0f) != (V4L2_IDENT_SENSOR>>8))
 		return -ENODEV;
 
+	sensor_dbg("sensor id = 0x%x", rdval);
 	sensor_read(sd, 0x0017, &rdval);
 	if (rdval != (V4L2_IDENT_SENSOR&0xff))
 		return -ENODEV;
+	sensor_dbg("%x\n", rdval);
+
 	return 0;
 }
 
@@ -1211,6 +1318,7 @@ static struct sensor_win_size sensor_win_sizes[] = {
 	   .set_size   = NULL,
 	 },
 
+	/* info->time_hs=0x48 */
 	 {
 	   .width      = 2048,
 	   .height     = 1152,
@@ -1231,6 +1339,29 @@ static struct sensor_win_size sensor_win_sizes[] = {
 	   .set_size   = NULL,
 	 },
 
+
+	   /* info->time_hs=0x48 */
+	 {
+	   .width	  = 1920,
+	   .height	  = 1080,
+	   .hoffset	  = 0,
+	   .voffset	  = 0,
+	   .hts		  = 4976,
+	   .vts		  = 2425,
+	   .pclk 	  = 724*1000*1000,
+	   .mipi_bps   = 832*1000*1000,
+	   .fps_fixed  = 30,
+	   .bin_factor = 1,
+	   .intg_min   = 16,
+	   .intg_max   = (2466-4)<<4,
+	   .gain_min   = 16,
+	   .gain_max   = (128<<4),
+	   .regs 	  = sensor_1080p30_regs,
+	   .regs_size  = ARRAY_SIZE(sensor_1080p30_regs),
+	   .set_size   = NULL,
+	 },
+
+	/* info->time_hs=0x30 */
 	 {
 	   .width      = 1280,
 	   .height     = 720,
@@ -1257,7 +1388,7 @@ static struct sensor_win_size sensor_win_sizes[] = {
 static int sensor_g_mbus_config(struct v4l2_subdev *sd,
 				struct v4l2_mbus_config *cfg)
 {
-	cfg->type = V4L2_MBUS_CSI2;
+	cfg->type = V4L2_MBUS_CSI2_DPHY;
 
 	cfg->flags = 0 | V4L2_MBUS_CSI2_4_LANE | V4L2_MBUS_CSI2_CHANNEL_0;
 
@@ -1321,6 +1452,9 @@ static int sensor_reg_init(struct sensor_info *info)
 	imx278_sensor_vts = wsize->vts;
 	imx278_sensor_hts = wsize->hts;
 
+	sensor_s_exp(sd, 16*400);
+	sensor_s_gain(sd, 16*100);
+
 	return 0;
 }
 
@@ -1355,8 +1489,6 @@ static const struct v4l2_subdev_core_ops sensor_core_ops = {
 };
 
 static const struct v4l2_subdev_video_ops sensor_video_ops = {
-	.s_parm = sensor_s_parm,
-	.g_parm = sensor_g_parm,
 	.s_stream = sensor_s_stream,
 	.g_mbus_config = sensor_g_mbus_config,
 };
@@ -1440,6 +1572,9 @@ static int sensor_probe(struct i2c_client *client,
 	sensor_init_controls(sd, &sensor_ctrl_ops);
 
 	mutex_init(&info->lock);
+#ifdef CONFIG_SAME_I2C
+		info->sensor_i2c_addr = I2C_ADDR >> 1;
+#endif
 
 	info->fmt = &sensor_formats[0];
 	info->fmt_pt = &sensor_formats[0];
@@ -1449,6 +1584,7 @@ static int sensor_probe(struct i2c_client *client,
 	info->sensor_field = V4L2_FIELD_NONE;
 	info->stream_seq = MIPI_BEFORE_SENSOR;
 	info->combo_mode = CMB_TERMINAL_RES | CMB_PHYA_OFFSET2 | MIPI_NORMAL_MODE;
+	info->time_hs = 0x30;
 	info->af_first_flag = 1;
 	info->exp = 0;
 	info->gain = 0;

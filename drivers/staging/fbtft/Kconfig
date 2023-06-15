@@ -1,6 +1,7 @@
+# SPDX-License-Identifier: GPL-2.0
 menuconfig FB_TFT
 	tristate "Support for small TFT LCD display modules"
-	depends on FB && SPI
+	depends on FB && SPI && OF
 	depends on GPIOLIB || COMPILE_TEST
 	select FB_SYS_FILLRECT
 	select FB_SYS_COPYAREA
@@ -111,6 +112,12 @@ config FB_TFT_S6D1121
 	help
 	  Generic Framebuffer support for S6D1121
 
+config FB_TFT_SH1106
+	tristate "FB driver for the SH1106 OLED Controller"
+	depends on FB_TFT
+	help
+	  Framebuffer support for SH1106
+
 config FB_TFT_SSD1289
 	tristate "FB driver for the SSD1289 LCD Controller"
 	depends on FB_TFT
@@ -128,12 +135,6 @@ config FB_TFT_SSD1306
 	depends on FB_TFT
 	help
 	  Framebuffer support for SSD1306
-
-config FB_TFT_SSD1325
-        tristate "FB driver for the SSD1325 OLED Controller"
-        depends on FB_TFT
-        help
-          Framebuffer support for SSD1305
 
 config FB_TFT_SSD1331
 	tristate "FB driver for the SSD1331 LCD Controller"
@@ -198,13 +199,3 @@ config FB_TFT_WATTEROTT
 	depends on FB_TFT
 	help
 	  Generic Framebuffer support for WATTEROTT
-
-config FB_FLEX
-	tristate "Generic FB driver for TFT LCD displays"
-	depends on FB_TFT
-	help
-	  Generic Framebuffer support for TFT LCD displays.
-
-config FB_TFT_FBTFT_DEVICE
-	tristate "Module to for adding FBTFT devices"
-	depends on FB_TFT

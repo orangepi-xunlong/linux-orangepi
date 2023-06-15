@@ -1,11 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Input driver for Microchip CAP11xx based capacitive touch sensors
  *
  * (c) 2014 Daniel Mack <linux@zonque.org>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/kernel.h>
@@ -344,8 +341,7 @@ static int cap11xx_i2c_probe(struct i2c_client *i2c_client,
 	}
 
 	priv = devm_kzalloc(dev,
-			    sizeof(*priv) +
-				cap->num_channels * sizeof(priv->keycodes[0]),
+			    struct_size(priv, keycodes, cap->num_channels),
 			    GFP_KERNEL);
 	if (!priv)
 		return -ENOMEM;
@@ -379,7 +375,6 @@ static int cap11xx_i2c_probe(struct i2c_client *i2c_client,
 		return error;
 
 	dev_info(dev, "CAP11XX detected, revision 0x%02x\n", rev);
-	i2c_set_clientdata(i2c_client, priv);
 	node = dev->of_node;
 
 	if (!of_property_read_u32(node, "microchip,sensor-gain", &gain32)) {

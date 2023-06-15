@@ -32,10 +32,9 @@ static bool is_valid_channel(struct wiphy *wiphy, int chn)
 
 static int sprdwl_get_softap_chan(u8 *path)
 {
-	int ret;
+	int ret = 0;
 	int chn;
 	struct file *fp = NULL;
-	mm_segment_t fs;
 	char buf[64] = {0};
 
 	if (path == NULL)
@@ -47,13 +46,8 @@ static int sprdwl_get_softap_chan(u8 *path)
 		return -EINVAL;
 	}
 
-	fs = get_fs();
-	set_fs(get_ds());
-
-	ret = vfs_read(fp, buf, sizeof(buf), &fp->f_pos);
-
+	kernel_read(fp, buf, sizeof(buf), &fp->f_pos);
 	filp_close(fp, NULL);
-	set_fs(fs);
 
 	if (ret <= 0) {
 		wl_err("read file failed, ret = %d\n", ret);

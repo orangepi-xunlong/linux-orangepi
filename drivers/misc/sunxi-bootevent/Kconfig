@@ -2,7 +2,7 @@
 # sunxi bootevent debugger driver.
 #
 config SUNXI_BOOTEVENT
-  bool "Enable sunxi bootevent debugger tool"
+  tristate "Enable sunxi bootevent debugger tool"
   default n
   help
     SUNXI_BOOTEVENT is used to debug bootting time,If you are not sure

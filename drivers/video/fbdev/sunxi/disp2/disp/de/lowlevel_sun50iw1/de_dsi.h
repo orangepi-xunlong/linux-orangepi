@@ -193,6 +193,16 @@ s32 dsi_dphy_cfg_1data(u32 sel, u32 code, u32 data);
 s32 dsi_dphy_cfg_2data(u32 sel, u32 code, u32 data0, u32 data1);
 s32 dsi_gen_short_rd(__u32 sel, __u8 *para_p, __u8 para_num, __u8 *result);
 s32 dsi_mode_switch(__u32 sel, __u32 cmd_en, __u32 lp_en);
+/**
+ * @name       :dsi_read_mode_en
+ * @brief      :Enable dsi read mode in the case of reading in display
+ * interrupt.
+ *  user must enable read mode before read and disable it after read
+ * @param[IN]  :sel:dsi module index
+ * @param[IN]  :en: enable read mode
+ * @return     :none
+ */
+void dsi_read_mode_en(u32 sel, u32 en);
 
 extern u32  dsi_pixel_bits[4];
 extern u32  dsi_lane_den[4];

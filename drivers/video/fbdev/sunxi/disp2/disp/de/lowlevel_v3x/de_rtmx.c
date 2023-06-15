@@ -911,6 +911,15 @@ int de_rtmx_set_lay_cfg(unsigned int sel, unsigned int chno, unsigned int layno,
 		tmp |= (cfg->top_bot_en << 23);
 		tmp |= (cfg->alpha << 24);
 		rtmx[sel].vi_ovl[chno]->cfg[layno].attr.dwval = tmp;
+		if (layno > 0 && ui_sel == 0
+				&& (rtmx[sel].vi_ovl[chno]->cfg[0].attr.dwval & 0x1) == 0) {
+			rtmx[sel].vi_ovl[chno]->cfg[0].attr.dwval &= ~(0xf << 8);
+			rtmx[sel].vi_ovl[chno]->cfg[0].attr.dwval &= ~(0x1 << 15);
+			rtmx[sel].vi_ovl[chno]->cfg[0].attr.dwval &= ~(0xff << 24);
+			rtmx[sel].vi_ovl[chno]->cfg[0].attr.dwval |= (cfg->alpha << 24);
+			rtmx[sel].vi_ovl[chno]->cfg[0].attr.dwval |= (fmt << 8);
+			rtmx[sel].vi_ovl[chno]->cfg[0].attr.dwval |= (ui_sel << 15);
+		}
 
 		tmp = cfg->layer.w == 0 ? 0 : cfg->layer.w - 1;
 		tmp |= ((cfg->layer.h == 0 ? 0 : cfg->layer.h - 1) << 16);
@@ -926,6 +935,10 @@ int de_rtmx_set_lay_cfg(unsigned int sel, unsigned int chno, unsigned int layno,
 		}
 
 		vi_attr_block[sel][chno][layno].dirty = 1;
+		if (layno > 0 && ui_sel == 0
+				&& (rtmx[sel].vi_ovl[chno]->cfg[0].attr.dwval & 0x1) == 0) {
+			vi_attr_block[sel][chno][0].dirty = 1;
+		}
 	}
 
 	return 0;
@@ -1182,29 +1195,29 @@ int de_rtmx_get_3d_in_single_size(enum de_3d_in_mode inmode,
 
 	switch (inmode) {
 	case DE_3D_SRC_MODE_TB:
-		size->w = size->w;
+		/*size->w = size->w;*/
 		size->h = size->h >> 1;
-		size->x = size->x;
-		size->y = size->y;
+		/*size->x = size->x;
+		size->y = size->y;*/
 		break;
 	case DE_3D_SRC_MODE_SSF:
 	case DE_3D_SRC_MODE_SSH:
 		size->w = size->w >> 1;
-		size->h = size->h;
+		/*size->h = size->h;
 		size->x = size->x;
-		size->y = size->y;
+		size->y = size->y;*/
 		break;
 	case DE_3D_SRC_MODE_LI:
-		size->w = size->w;
+		/*size->w = size->w;*/
 		size->h = size->h >> 1;
-		size->x = size->x;
+		/*size->x = size->x;*/
 		size->y = size->y >> 1;
 		break;
 	case DE_3D_SRC_MODE_FP:
-		size->w = size->w;
+		/*size->w = size->w;
 		size->h = size->h;
 		size->x = size->x;
-		size->y = size->y;
+		size->y = size->y;*/
 		break;
 	default:
 		/* undefine input mode */

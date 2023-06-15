@@ -19,6 +19,7 @@
  *
  ******************************************************************************/
 
+#ifdef CONFIG_DISP2_SUNXI_SUPPORT_ENAHNCE
 #include "de_peak_type.h"
 #include "de_rtmx.h"
 #include "de_enhance.h"
@@ -290,3 +291,4 @@ exit:
 	peak_block[sel][chno].dirty = 1;
 	return 0;
 }
+#endif

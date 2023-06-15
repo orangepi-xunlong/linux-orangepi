@@ -99,6 +99,8 @@
 #define SUNXI_ADC_DRC_RPFLRT	0x228
 #define SUNXI_ADC_DRC_LRMSHAT	0x22C
 #define SUNXI_ADC_DRC_LRMSLAT	0x230
+#define SUNXI_ADC_DRC_RRMSHAT	0x234
+#define SUNXI_ADC_DRC_RRMSLAT	0x238
 #define SUNXI_ADC_DRC_HCT	0x23C
 #define SUNXI_ADC_DRC_LCT	0x240
 #define SUNXI_ADC_DRC_HKC	0x244
@@ -141,7 +143,7 @@
 #define SUNXI_DAC_REG		0x310
 #define SUNXI_MICBIAS_REG	0x318
 #define SUNXI_BIAS_REG		0x320
-#define SUNXI_HP_REG		0x324
+#define SUNXI_HEADPHONE_REG	0x324
 #define SUNXI_HMIC_CTRL		0x328
 #define SUNXI_HMIC_STS		0x32c
 
@@ -261,7 +263,7 @@
 #define ADC_DRC_SIGNAL_SEL		3
 #define ADC_DRC_DELAY_EN		2
 #define ADC_DRC_LT_EN			1
-#define ADC_DRC_ER_EN			0
+#define ADC_DRC_ET_EN			0
 
 /* SUNXI_ADCL_REG : 0x300 */
 #define ADCL_EN			31
@@ -298,7 +300,7 @@
 #define IOPDACS			16
 #define DACLEN			15
 #define DACREN			14
-#define LINEOUTL_EN		13
+#define LINEOUTLEN		13
 #define DACLMUTE		12
 #define LINEOUTLDIFFEN		6
 #define LINEOUT_VOL		0
@@ -326,7 +328,7 @@
 /* SUNXI_BIAS_REG : 0x320 */
 #define AC_BIASDATA		0
 
-/* SUNXI_HP_REG : 0x324 */
+/* SUNXI_HEADPHONE_REG : 0x324 */
 #define HPRCALIVERIFY		24
 #define HPLCALIVERIFY		16
 #define HPPA_EN			15
@@ -359,6 +361,9 @@
 #define JACK_DET_IIRQ		3
 #define MIC_DET_ST		0
 
+#define CODEC_TX_FIFO_SIZE	128
+#define CODEC_RX_FIFO_SIZE	256
+
 /*125ms * (HP_DEBOUCE_TIME+1)*/
 #define HP_DEBOUCE_TIME	0x1
 
@@ -369,7 +374,10 @@
 #define SUNXI_CODEC_DAP_ENABLE
 
 /* SUNXI_CODEC_HUB_ENABLE: Whether to use the hub mode */
-#undef SUNXI_CODEC_HUB_ENABLE
+#define SUNXI_CODEC_HUB_ENABLE
+
+/* SUNXI_CODEC_ADCSWAP_ENABLE: Whether to open the adc swap func controls */
+#define SUNXI_CODEC_ADCSWAP_ENABLE
 
 struct reg_label {
 	const char *name;
@@ -378,10 +386,10 @@ struct reg_label {
 };
 
 struct codec_hw_config {
-	u32 adcdrc_cfg:1;
-	u32 dacdrc_cfg:1;
-	u32 adchpf_cfg:1;
-	u32 dachpf_cfg:1;
+	u32 adcdrc_cfg:8;
+	u32 dacdrc_cfg:8;
+	u32 adchpf_cfg:8;
+	u32 dachpf_cfg:8;
 };
 
 struct codec_spk_config {
@@ -396,27 +404,44 @@ struct sample_rate {
 	unsigned int rate_bit;
 };
 
+struct voltage_supply {
+	struct regulator *avcc;
+	struct regulator *cpvin;
+};
+
+struct codec_dap {
+	int drc_enable;
+	int hpf_enable;
+};
+
 struct sunxi_codec_info {
 	struct device *dev;
 	struct regmap *regmap;
 	void __iomem *digital_base;
-	struct clk *pll_clk;
-	struct clk *module_clk;
+	struct clk *pllclk;
+	struct clk *pllcom;
+	struct clk *pllcomdiv5;
+	struct clk *dacclk;
+	struct clk *adcclk;
+	struct clk *codec_clk_bus;
+	struct reset_control *codec_clk_rst;
+
+	/* regulator about */
+	struct voltage_supply vol_supply;
 
 	/* for dap function */
-	u32 dac_dap_enable;
-	u32 adc_dap_enable;
+	struct codec_dap dac_dap;
+	struct codec_dap adc_dap;
+	int dac_dap_enable;
+	int adc_dap_enable;
 
 	/* self user config params */
 	u32 digital_vol;
 	u32 lineout_vol;
-	u32 headphonevol;
+	u32 dac_digital_vol;
 	u32 mic1gain;
 	u32 mic2gain;
 	u32 headphonegain;
-
-	struct sunxi_dma_params playback_dma_param;
-	struct sunxi_dma_params capture_dma_param;
 
 	struct codec_spk_config spk_config;
 	struct codec_hw_config hw_config;

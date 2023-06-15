@@ -157,7 +157,7 @@ struct timeval resume_time;
 u32 xradio_realtime_interval(struct timeval *oldtime, struct timeval *newtime)
 {
 	u32 time_int;
-	do_gettimeofday(newtime);
+	xr_do_gettimeofday(newtime);
 	time_int = (newtime->tv_sec - oldtime->tv_sec) * 1000 + \
 			    (newtime->tv_usec - oldtime->tv_usec) / 1000;
 	return time_int;
@@ -170,7 +170,7 @@ static int xradio_pm_init_common(struct xradio_pm_state *pm,
 	int ret;
 	pm_printk(XRADIO_DBG_TRC, "%s\n", __func__);
 #ifdef CONFIG_XRADIO_DEBUG
-	do_gettimeofday(&resume_time);
+	xr_do_gettimeofday(&resume_time);
 #endif
 
 	spin_lock_init(&pm->lock);
@@ -282,8 +282,11 @@ void xradio_pm_unlock_awake(struct xradio_pm_state *pm)
 
 #else /* CONFIG_WAKELOCK */
 
-static void xradio_pm_stay_awake_tmo(unsigned long arg)
+static void xradio_pm_stay_awake_tmo(struct timer_list *t)
 {
+	struct xradio_pm_state *pm = from_timer(pm, t, stay_awake);
+
+	atomic_set(&pm->status, XRADIO_PM_STATE_ALLOW_SUSPEND);
 }
 
 int xradio_pm_init(struct xradio_pm_state *pm,
@@ -294,9 +297,8 @@ int xradio_pm_init(struct xradio_pm_state *pm,
 
 	ret = xradio_pm_init_common(pm, hw_priv);
 	if (!ret) {
-		init_timer(&pm->stay_awake);
-		pm->stay_awake.data = (unsigned long)pm;
-		pm->stay_awake.function = xradio_pm_stay_awake_tmo;
+		timer_setup(&pm->stay_awake, xradio_pm_stay_awake_tmo, 0);
+		atomic_set(&pm->status, XRADIO_PM_STATE_ALLOW_SUSPEND);
 	} else
 		pm_printk(XRADIO_DBG_ERROR, "xradio_pm_init_common failed!\n");
 	return ret;
@@ -316,6 +318,7 @@ void xradio_pm_stay_awake(struct xradio_pm_state *pm,
 	pm_printk(XRADIO_DBG_MSG, "%s\n", __func__);
 
 	spin_lock_bh(&pm->lock);
+	atomic_set(&pm->status, XRADIO_PM_STATE_KEEP_WAKE);
 	cur_tmo = pm->stay_awake.expires - jiffies;
 	if (!timer_pending(&pm->stay_awake) || cur_tmo < (long)tmo)
 		mod_timer(&pm->stay_awake, jiffies + tmo);
@@ -438,6 +441,15 @@ int xradio_wow_suspend(struct ieee80211_hw *hw,
 		return -EBUSY;
 	}
 #endif
+
+#ifndef CONFIG_WAKELOCK
+	if (atomic_read(&hw_priv->pm_state.status) == XRADIO_PM_STATE_KEEP_WAKE) {
+		pm_printk(XRADIO_DBG_WARN, "Don't suspend "
+			"because of pm_state need keep awake.\n");
+		return -EBUSY;
+	}
+#endif
+
 	if (work_pending(&hw_priv->query_work)) {
 		pm_printk(XRADIO_DBG_WARN, "Don't suspend "
 				"because of query_work is working.\n");
@@ -969,4 +981,6 @@ static int xradio_poweroff_resume(struct xradio_common *hw_priv)
 	up(&hw_priv->wsm_cmd_sema);
 	return 0;
 }
+
+
 #endif

@@ -1,9 +1,9 @@
 /*
  * sound\soc\sunxi\sunxi-hdmi.c
- * (C) Copyright 2014-2019
+ * (C) Copyright 2014-2020
  * Allwinner Technology Co., Ltd. <www.allwinnertech.com>
- * huangxin <huangxin@allwinnertech.com>
  * yumingfeng <yumingfeng@allwinnertech.com>
+ * luguofang <luguofang@allwinnertech.com>
  *
  * some simple description for this code
  *
@@ -21,46 +21,32 @@
 #include <sound/soc.h>
 #include <sound/soc-dapm.h>
 #include <sound/initval.h>
+#include <sound/simple_card.h>
 #include <linux/io.h>
-#include <video/drv_hdmi.h>
 
 #include "sunxi-pcm.h"
-#ifdef CONFIG_HAS_EARLYSUSPEND
-#include <linux/earlysuspend.h>
-#endif
 
-#ifdef CONFIG_ARCH_SUN50IW9
-#define AUDIO_HDMI_BOOT_INIT_SKIP
-#endif
+#include <video/drv_hdmi.h>
 
-static bool			hdmiaudio_reset_en;
-atomic_t			pcm_count_num;
-static __audio_hdmi_func	g_hdmi_func;
-static hdmi_audio_t		hdmi_para;
+static bool	hdmiaudio_reset_en;
 
 struct sunxi_hdmi_priv {
 	hdmi_audio_t hdmi_para;
 	bool update_param;
 };
 
+atomic_t			pcm_count_num;
+static __audio_hdmi_func	g_hdmi_func;
+static hdmi_audio_t		hdmi_para;
+
 module_param_named(hdmiaudio_reset_en, hdmiaudio_reset_en,
 		bool, S_IRUGO | S_IWUSR);
-
-static int shake_msleep = 1200;
-module_param_named(shake_msleep, shake_msleep,
-		int, S_IRUGO | S_IWUSR);
-
-#ifdef AUDIO_HDMI_BOOT_INIT_SKIP
-static bool boot_start;
-module_param_named(boot_start, boot_start, bool, S_IRUGO);
-#endif
 
 void audio_set_hdmi_func(__audio_hdmi_func *hdmi_func)
 {
 	if (hdmi_func) {
 		g_hdmi_func.hdmi_audio_enable	= hdmi_func->hdmi_audio_enable;
-		g_hdmi_func.hdmi_set_audio_para	=
-			hdmi_func->hdmi_set_audio_para;
+		g_hdmi_func.hdmi_set_audio_para	= hdmi_func->hdmi_set_audio_para;
 		g_hdmi_func.hdmi_is_playback	= hdmi_func->hdmi_is_playback;
 	} else {
 		pr_err("error:%s,line:%d\n", __func__, __LINE__);
@@ -69,13 +55,13 @@ void audio_set_hdmi_func(__audio_hdmi_func *hdmi_func)
 EXPORT_SYMBOL(audio_set_hdmi_func);
 
 int sunxi_hdmi_codec_hw_params(struct snd_pcm_substream *substream,
-					struct snd_pcm_hw_params *params,
-					struct snd_soc_dai *dai)
+			       struct snd_pcm_hw_params *params,
+			       struct snd_soc_dai *dai)
 {
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
 	struct snd_soc_card *card = rtd->card;
-	struct sndhdmi_priv *sndhdmi_priv = snd_soc_card_get_drvdata(card);
-	struct sunxi_hdmi_priv *sunxi_hdmi = snd_soc_codec_get_drvdata(dai->codec);
+	struct asoc_simple_priv *sndhdmi_priv = snd_soc_card_get_drvdata(card);
+	struct sunxi_hdmi_priv *sunxi_hdmi = snd_soc_component_get_drvdata(dai->component);
 
 	hdmi_para.sample_rate = params_rate(params);
 	hdmi_para.channel_num = params_channels(params);
@@ -134,13 +120,13 @@ int sunxi_hdmi_codec_hw_params(struct snd_pcm_substream *substream,
 		hdmi_para.sample_bit = 24;
 
 	if ((sunxi_hdmi != NULL) &&
-		(sunxi_hdmi->hdmi_para.sample_bit != hdmi_para.sample_bit)) {
+	    (sunxi_hdmi->hdmi_para.sample_bit != hdmi_para.sample_bit)) {
 		sunxi_hdmi->hdmi_para.sample_bit = hdmi_para.sample_bit;
 		sunxi_hdmi->update_param = 1;
 	}
 
 	if (hdmi_para.channel_num == 8)
-		hdmi_para.ca = 0x13;
+		hdmi_para.ca = 0x12;
 	else if (hdmi_para.channel_num == 6)
 		hdmi_para.ca = 0x0b;
 	else if ((hdmi_para.channel_num >= 3))
@@ -149,7 +135,7 @@ int sunxi_hdmi_codec_hw_params(struct snd_pcm_substream *substream,
 		hdmi_para.ca = 0x0;
 
 	if ((sunxi_hdmi != NULL) &&
-		(sunxi_hdmi->hdmi_para.ca != hdmi_para.ca)) {
+	    (sunxi_hdmi->hdmi_para.ca != hdmi_para.ca)) {
 		sunxi_hdmi->hdmi_para.ca = hdmi_para.ca;
 		sunxi_hdmi->update_param = 1;
 	}
@@ -167,7 +153,7 @@ static int sunxi_hdmi_codec_set_dai_fmt(struct snd_soc_dai *codec_dai,
 int sunxi_hdmi_codec_prepare(struct snd_pcm_substream *substream,
 	struct snd_soc_dai *dai)
 {
-	struct sunxi_hdmi_priv *sunxi_hdmi = snd_soc_codec_get_drvdata(dai->codec);
+	struct sunxi_hdmi_priv *sunxi_hdmi = snd_soc_component_get_drvdata(dai->component);
 
 	if (hdmiaudio_reset_en == false) {
 		if ((sunxi_hdmi != NULL) && (sunxi_hdmi->update_param)) {
@@ -202,14 +188,9 @@ int sunxi_hdmi_codec_prepare(struct snd_pcm_substream *substream,
 		/*
 		 * When the params was be changed,
 		 * the hdmi clk should be shake hands again,
-		 * it needs some time(maybe up to 1200ms) to finished.
+		 * it needs some time to finishe.
 		 */
-#ifdef AUDIO_HDMI_BOOT_INIT_SKIP
-		if (!boot_start) {
-			boot_start = 1;
-		} else
-#endif
-			msleep(shake_msleep);
+		//msleep(1200);
 	}
 	return 0;
 }
@@ -218,7 +199,7 @@ EXPORT_SYMBOL(sunxi_hdmi_codec_prepare);
 void sunxi_hdmi_codec_shutdown(struct snd_pcm_substream *substream,
 					struct snd_soc_dai *dai)
 {
-	struct sunxi_hdmi_priv *sunxi_hdmi = snd_soc_codec_get_drvdata(dai->codec);
+	struct sunxi_hdmi_priv *sunxi_hdmi = snd_soc_component_get_drvdata(dai->component);
 
 	if (sunxi_hdmi)
 		sunxi_hdmi->update_param = 0;
@@ -234,12 +215,12 @@ static int sunxi_hdmi_codec_trigger(struct snd_pcm_substream *substream,
 	return 0;
 }
 
-static int sunxi_hdmi_codec_suspend(struct snd_soc_codec *dai)
+static int sunxi_hdmi_codec_suspend(struct snd_soc_component *dai)
 {
 	return 0;
 }
 
-static int sunxi_hdmi_codec_resume(struct snd_soc_codec *dai)
+static int sunxi_hdmi_codec_resume(struct snd_soc_component *dai)
 {
 	atomic_set(&pcm_count_num, 0);
 	return 0;
@@ -265,7 +246,6 @@ static struct snd_soc_dai_driver sunxi_hdmi_codec_dai = {
 				| SNDRV_PCM_FMTBIT_S24_LE
 				| SNDRV_PCM_FMTBIT_S32_LE,
 	},
-#ifdef CONFIG_SUNXI_AUDIO_DEBUG
 	/* HDMI capture only for i2s loop(chan <= 2ch) debug */
 	.capture	= {
 		.stream_name	= "Capture",
@@ -277,17 +257,16 @@ static struct snd_soc_dai_driver sunxi_hdmi_codec_dai = {
 				| SNDRV_PCM_FMTBIT_S24_LE
 				| SNDRV_PCM_FMTBIT_S32_LE,
 	},
-#endif
 	.ops			= &sunxi_hdmi_dai_ops,
 };
 
-static int sunxi_hdmi_codec_soc_probe(struct snd_soc_codec *codec)
+static int sunxi_hdmi_codec_probe(struct snd_soc_component *component)
 {
 	struct sunxi_hdmi_priv *sunxi_hdmi = NULL;
 
 	atomic_set(&pcm_count_num, 0);
 
-	if (!codec) {
+	if (!component) {
 		pr_err("error:%s,line:%d\n", __func__, __LINE__);
 		return -EAGAIN;
 	}
@@ -297,138 +276,84 @@ static int sunxi_hdmi_codec_soc_probe(struct snd_soc_codec *codec)
 		pr_err("[%s] cannot malloc sunxi_hdmi.\n", __func__);
 		return -ENOMEM;
 	}
-	snd_soc_codec_set_drvdata(codec, sunxi_hdmi);
+	snd_soc_component_set_drvdata(component, sunxi_hdmi);
 
 	return 0;
 }
 
-static int sunxi_hdmi_codec_soc_remove(struct snd_soc_codec *codec)
+static void sunxi_hdmi_codec_remove(struct snd_soc_component *component)
 {
 	struct sunxi_hdmi_priv *sunxi_hdmi = NULL;
 
-	if (!codec) {
-		pr_err("[%s] codec is null.\n", __func__);
-		return -EAGAIN;
+
+	if (!component) {
+		pr_err("[%s] component is null !!!\n", __func__);
 	} else {
-		sunxi_hdmi = snd_soc_codec_get_drvdata(codec);
+		sunxi_hdmi = snd_soc_component_get_drvdata(component);
 		kfree(sunxi_hdmi);
 	}
-
-	return 0;
 }
 
-static struct snd_soc_codec_driver soc_codec_dev_sunxi_hdmi = {
-	.probe		= sunxi_hdmi_codec_soc_probe,
-	.remove		= sunxi_hdmi_codec_soc_remove,
+static struct snd_soc_component_driver soc_codec_dev_sunxi_hdmi = {
+	.name		= "sunxi-hdmiaudio",
+	.probe		= sunxi_hdmi_codec_probe,
+	.remove		= sunxi_hdmi_codec_remove,
 	.suspend	= sunxi_hdmi_codec_suspend,
 	.resume		= sunxi_hdmi_codec_resume,
 };
 
-#ifdef CONFIG_HAS_EARLYSUSPEND
-static inline void hdmiaudio_early_suspend(struct early_suspend *h)
-{
-}
-
-static inline void hdmiaudio_late_resume(struct early_suspend *h)
-{
-	atomic_set(&pcm_count_num, 0);
-}
-
-static struct early_suspend hdmiaudio_early_suspend_handler = {
-	.level		= EARLY_SUSPEND_LEVEL_BLANK_SCREEN,
-	.suspend	= hdmiaudio_early_suspend,
-	.resume		= hdmiaudio_late_resume,
-};
-#endif
-
-static int sunxi_hdmi_codec_probe(struct platform_device *pdev)
+static int sunxi_hdmi_codec_dev_probe(struct platform_device *pdev)
 {
 	if (!pdev) {
 		pr_err("error:%s,line:%d\n", __func__, __LINE__);
 		return -EAGAIN;
 	}
-#ifdef AUDIO_HDMI_BOOT_INIT_SKIP
-	/* for bootanimation:maybe the hdmi audio lost previous frame. */
-	boot_start = 0;
-#endif
 
-#ifdef CONFIG_HAS_EARLYSUSPEND
-	register_early_suspend(&hdmiaudio_early_suspend_handler);
-#endif
-	return snd_soc_register_codec(&pdev->dev, &soc_codec_dev_sunxi_hdmi,
+	return snd_soc_register_component(&pdev->dev, &soc_codec_dev_sunxi_hdmi,
 				&sunxi_hdmi_codec_dai, 1);
 }
 
-static int __exit sunxi_hdmi_codec_remove(struct platform_device *pdev)
+static int __exit sunxi_hdmi_codec_dev_remove(struct platform_device *pdev)
 {
 	if (!pdev) {
 		pr_err("error:%s,line:%d\n", __func__, __LINE__);
 		return -EAGAIN;
 	}
 
-	snd_soc_unregister_codec(&pdev->dev);
-
-#ifdef CONFIG_HAS_EARLYSUSPEND
-	unregister_early_suspend(&hdmiaudio_early_suspend_handler);
-#endif
+	snd_soc_unregister_component(&pdev->dev);
 
 	return 0;
 }
 
-void sunxi_hdmiaudio_device_release(struct device *dev)
-{
-	dev_notice(dev, "[%s] device_release.\n", __func__);
-}
-
-/*data relating*/
-static struct platform_device sunxi_hdmi_codec_device = {
-	.name	= "sunxi-hdmiaudio-codec",
-	.dev	= {
-		.release = sunxi_hdmiaudio_device_release,
-	},
+static const struct of_device_id sunxi_hdmi_codec_of_match[] = {
+	{ .compatible = "allwinner,sunxi-hdmiaudio", },
+	{ },
 };
+MODULE_DEVICE_TABLE(of, sunxi_hdmi_codec_of_match);
 
 static struct platform_driver sunxi_hdmi_codec_driver = {
+	.probe = sunxi_hdmi_codec_dev_probe,
+	.remove = __exit_p(sunxi_hdmi_codec_dev_remove),
 	.driver = {
-		.name	= "sunxi-hdmiaudio-codec",
-		.owner	= THIS_MODULE,
+		.name	= "sunxi-hdmiaudio",
+		.owner = THIS_MODULE,
+		.of_match_table = sunxi_hdmi_codec_of_match,
 	},
-	.probe		= sunxi_hdmi_codec_probe,
-	.remove		= __exit_p(sunxi_hdmi_codec_remove),
 };
 
-static int __init sunxi_hdmi_codec_init(void)
+static int __init sunxi_hdmi_codec_driver_init(void)
 {
-	int err = 0;
-
-	err = platform_device_register(&sunxi_hdmi_codec_device);
-	if (err < 0) {
-		pr_err("sunxi hdmi codec register device failed\n");
-		return err;
-	}
-
-	err = platform_driver_register(&sunxi_hdmi_codec_driver);
-	if (err < 0) {
-		platform_device_unregister(&sunxi_hdmi_codec_device);
-		pr_err("sunxi hdmi codec register driver failed\n");
-		return err;
-	}
-
-	pr_warn("[%s] driver and deivce register finished.\n", __func__);
-
-	return 0;
+	return platform_driver_register(&sunxi_hdmi_codec_driver);
 }
-module_init(sunxi_hdmi_codec_init);
+module_init(sunxi_hdmi_codec_driver_init);
 
-static void __exit sunxi_hdmi_codec_exit(void)
+static void __exit sunxi_hdmi_codec_driver_exit(void)
 {
 	platform_driver_unregister(&sunxi_hdmi_codec_driver);
-	platform_device_unregister(&sunxi_hdmi_codec_device);
-
-	pr_warn("[%s] driver and deivce unregister finished.\n", __func__);
 }
-module_exit(sunxi_hdmi_codec_exit);
+module_exit(sunxi_hdmi_codec_driver_exit);
 
-MODULE_DESCRIPTION("SUNXI ALSA HDMI Codec driver");
-MODULE_AUTHOR("huangxin, <huangxin@allwinnertech.com>");
+MODULE_AUTHOR("luguofang <luguofang@allwinnertech.com>");
+MODULE_DESCRIPTION("SUNXI HDMIAUDIO ASoC DRIVER");
+MODULE_ALIAS("platform:sunxi-hdmiaudio");
 MODULE_LICENSE("GPL");

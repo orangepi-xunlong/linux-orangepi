@@ -1,18 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * livepatch.c - x86-specific Kernel Live Patching Core
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, see <http://www.gnu.org/licenses/>.
  */
 
 #include <linux/module.h>
@@ -36,12 +24,12 @@ void arch_klp_init_object_loaded(struct klp_patch *patch,
 	objname = obj->name ? obj->name : "vmlinux";
 
 	/* See livepatch core code for BUILD_BUG_ON() explanation */
-	BUILD_BUG_ON(MODULE_NAME_LEN < 56 || KSYM_NAME_LEN != 128);
+	BUILD_BUG_ON(MODULE_NAME_LEN < 56 || KSYM_NAME_LEN != 192);
 
 	for (s = info->sechdrs; s < info->sechdrs + info->hdr.e_shnum; s++) {
 		/* Apply per-object .klp.arch sections */
 		cnt = sscanf(info->secstrings + s->sh_name,
-			     ".klp.arch.%55[^.].%127s",
+			     ".klp.arch.%55[^.].%191s",
 			     sec_objname, secname);
 		if (cnt != 2)
 			continue;

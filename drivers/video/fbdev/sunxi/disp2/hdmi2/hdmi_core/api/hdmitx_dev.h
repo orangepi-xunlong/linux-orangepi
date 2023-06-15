@@ -61,7 +61,6 @@ struct hdmi_tx_ctrl {
 	u8 color_resolution;
 	u8 csc_on; /*csc_on=1,color space clock will be enabled*/
 	u8 audio_on;
-	u8 cec_on;
 	u8 use_hdcp;
 	u8 use_hdcp22;
 	u8 hdcp_on;

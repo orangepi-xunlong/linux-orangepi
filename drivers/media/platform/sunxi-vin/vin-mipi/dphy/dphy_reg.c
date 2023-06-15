@@ -1,5 +1,5 @@
 /*
- * linux-4.9/drivers/media/platform/sunxi-vin/vin-mipi/dphy/dphy_reg.c
+ * linux-5.4/drivers/media/platform/sunxi-vin/vin-mipi/dphy/dphy_reg.c
  *
  * Copyright (c) 2007-2017 Allwinnertech Co., Ltd.
  *

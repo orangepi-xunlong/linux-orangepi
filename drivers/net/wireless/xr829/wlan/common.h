@@ -15,21 +15,6 @@
 #include <linux/version.h>
 
 /*******************************************************
- interfaces for file operation.
-********************************************************/
-struct xr_file {
-	struct file *fp;
-	char *data;
-	size_t size;
-};
-struct xr_file *xr_fileopen(const char *path, int open_mode, umode_t mode);
-struct xr_file *xr_request_file(const char *path);
-int xr_fileclose(const struct xr_file *fp);
-int xr_fileread(const struct xr_file *fp, char *buffer, int size);
-int xr_filewrite(const struct xr_file *fp, char *buffer, int size);
-int access_file(char *path, char *buffer, int size, int isRead);
-
-/*******************************************************
  interfaces for parse frame protocol info.
 ********************************************************/
 #define LLC_LEN       8

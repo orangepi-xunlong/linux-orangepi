@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-2.0-only
 #
 # ARM CPU Idle drivers
 #
@@ -11,6 +12,16 @@ config ARM_CPUIDLE
           at run-time through DT nodes. The CPUidle suspend backend is
           initialized by calling the CPU operations init idle hook
           provided by architecture code.
+
+config ARM_PSCI_CPUIDLE
+	bool "PSCI CPU idle Driver"
+	depends on ARM_PSCI_FW
+	select DT_IDLE_STATES
+	select CPU_IDLE_MULTIPLE_DRIVERS
+	help
+	  Select this to enable PSCI firmware based CPUidle driver for ARM.
+	  It provides an idle driver that is capable of detecting and
+	  managing idle states through the PSCI firmware interface.
 
 config ARM_BIG_LITTLE_CPUIDLE
 	bool "Support for ARM big.LITTLE processors"
@@ -75,24 +86,3 @@ config ARM_MVEBU_V7_CPUIDLE
 	depends on ARCH_MVEBU && !ARM64
 	help
 	  Select this to enable cpuidle on Armada 370, 38x and XP processors.
-
-config SUNXI_CPU0IDLE
-	bool "Allow CPU0 Enter C1/C2 Idle"
-	default n
-	depends on ARCH_SUNXI && ARM_CPUIDLE && !ARM_SUNXI_CPUIDLE
-	help
-	  Select this to allow CPU0 to enter c1/c2.
-
-config ARM_SUNXI_CPUIDLE
-	bool "Cpu Idle Config for sunxi soc"
-	default n
-	depends on ARCH_SUNXI && ARM_CPUIDLE
-	help
-	  Select this to enable cpuidle for sunxi soc.
-
-config ARM_SUNXI_CPUIDLE_TIMESTAMP
-	bool "Echo entry-latency-us and exit-latency-us when cpuidle"
-	default n
-	depends on ARM_SUNXI_CPUIDLE
-	help
-	  Select this to echo entry-latency and exit-latency when cpuidle.

@@ -20,17 +20,24 @@
 /* ******************************************************************** */
 /* mac80211 API */
 
-#ifdef CONFIG_PM
 #define XRADIO_WAKE_LOCK   "xradio_wlan"
 
 /* extern */   struct xradio_common;
  /* private */ struct xradio_suspend_state;
+
+#ifndef CONFIG_WAKELOCK
+enum xradio_pm_keep_wake_state {
+	XRADIO_PM_STATE_ALLOW_SUSPEND,
+	XRADIO_PM_STATE_KEEP_WAKE,
+};
+#endif
 
 struct xradio_pm_state {
 #ifdef CONFIG_WAKELOCK
 	struct wake_lock wakelock;
 #else
 	struct timer_list stay_awake;
+	atomic_t status;
 #endif
 	spinlock_t lock;
 	long expires_save;
@@ -63,7 +70,5 @@ void xradio_pm_unlock_awake(struct xradio_pm_state *pm);
 int xradio_wow_suspend(struct ieee80211_hw *hw,
 			       struct cfg80211_wowlan *wowlan);
 int xradio_wow_resume(struct ieee80211_hw *hw);
-
-#endif /* CONFIG_PM */
 
 #endif

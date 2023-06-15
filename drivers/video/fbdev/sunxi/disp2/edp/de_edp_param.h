@@ -71,6 +71,8 @@ struct edp_para {
 	unsigned int edp_lane;
 	enum disp_edp_colordepth edp_colordepth;
 	unsigned int edp_fps;
+	unsigned int edp_training_func;
+	unsigned int edp_sramble_seed;
 };
 
 #endif /*End of file*/

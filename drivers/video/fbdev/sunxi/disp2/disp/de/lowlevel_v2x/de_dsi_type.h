@@ -722,10 +722,14 @@ union dphy_ana4_reg_t {
 		u32 reg_tmsd:2;
 		u32 reg_tmsc:2;
 		u32 reg_ckdv:5;
-		u32 res0:3;
+		u32 reg_vtt_set:3;
 		u32 reg_dmplvd:4;
 		u32 reg_dmplvc:1;
-		u32 res1:7;
+		u32 reg_ib:2;
+		u32 res4:1;
+		u32 reg_comtest:2;
+		u32 en_comtest:1;
+		u32 en_mipi:1;
 
 	} bits;
 };
@@ -896,9 +900,12 @@ union dphy_dbg0_reg_t {
 		u32 lptx_sta_d3:3;
 		u32 res3:1;
 		u32 lptx_sta_clk:3;
-		u32 res4:9;
+		u32 res4:5;
+		u32 rcal_flag:1;
+		u32 rcal_cmpo:1;
+		u32 res5:2;
 		u32 direction:1;
-		u32 res5:3;
+		u32 res6:3;
 	} bits;
 };
 
@@ -967,6 +974,111 @@ union dphy_reservd_reg_t {
 		u32 res0;
 	} bits;
 };
+union combo_phy_reg0_t {
+	__u32 dwval;
+	struct {
+		__u32 en_cp               :  1 ;    //default: 0;
+		__u32 en_comboldo         :  1 ;    //default: 0;
+		__u32 en_lvds             :  1 ;    //default: 0;
+		__u32 en_mipi             :  1 ;    //default: 0;
+		__u32 en_test_0p8         :  1 ;    //default: 0;
+		__u32 en_test_comboldo    :  1 ;    //default: 0;
+		__u32 res0                :  26;    //default: 0;
+	} bits;
+};
+
+union combo_phy_reg1_t {
+	__u32 dwval;
+	struct {
+		__u32 reg_vref0p8         :  3 ;    //default: 0;
+		__u32 res0                :  1 ;    //default: 0;
+		__u32 reg_vref1p6         :  3 ;    //default: 0;
+		__u32 res1                :  25;    //default: 0;
+	} bits;
+};
+
+union combo_phy_reg2_t {
+	__u32 dwval;
+	struct {
+		__u32 hs_stop_dly         :  8 ;    //default: 0;
+		__u32 res0                :  24;    //default: 0;
+	} bits;
+};
+
+union dphy_tx_skew_reg0_t {
+	__u32 dwavl;
+	struct {
+		__u32 reg_skewcal_sync     :  8 ;    // default: 0;
+		__u32 reg_skewcal          :  8 ;    // default: 0;
+		__u32 skewcal_trail_set    :  8 ;    // default: 0;
+		__u32 skewcal_zero_set     :  8 ;    // default: 0;
+	} bits;
+};
+
+union dphy_tx_skew_reg1_t {
+	__u32 dwval;
+	struct {
+		__u32 skewcal_init_set      : 16 ;    // default: 0;
+		__u32 skewcal_pedic_set     :  8 ;    // default: 0;
+		__u32 skewcal_sync_set      :  8 ;    // default: 0;
+	} bits;
+};
+
+union dphy_tx_skew_reg2_t {
+	__u32 dwval;
+	struct {
+		__u32 skewcal_prepare_lp00   :  8 ;    //default: 0;
+		__u32 skewcal_trail_inv      :  1 ;    //default: 0;
+		__u32 en_skewcal_perdic      :  1 ;    //default: 0;
+		__u32 en_skewcal_init        :  1 ;    //default: 0;
+		__u32 res0                   : 21 ;    //default: 0;
+	} bits;
+};
+
+union dphy_pll_reg0_t {
+	__u32 dwval;
+	struct {
+		__u32 m1                      :  4 ;    //default: 0x3;
+		__u32 m0                      :  2 ;    //default: 0;
+		__u32 tdiv                    :  1 ;    //default: 0;
+		__u32 ndet                    :  1 ;    //default: 0x1;
+		__u32 n                       :  8 ;    //default: 0x32;
+		__u32 p                       :  4 ;    //default: 0;
+		__u32 pll_en                  :  1 ;    //default: 0x1;
+		__u32 en_lvs                  :  1 ;    //default: 0x1;
+		__u32 ldo_en                  :  1 ;    //default: 0x1;
+		__u32 cp36_en                 :  1 ;    //default: 0x1;
+		__u32 res0                    :  8 ;    //default: 0;
+	} bits;
+};
+
+union dphy_pll_reg1_t {
+	__u32 dwval;
+	struct {
+		__u32 test_en                  :  1 ;    //default: 0x1;
+		__u32 atest_sel                :  2 ;    //default: 0;
+		__u32 icp_sel                  :  2 ;    //default: 0;
+		__u32 lpf_sw                   :  1 ;    //default: 0;
+		__u32 vsetd                    :  3 ;    //default: 0x2;
+		__u32 vseta                    :  3 ;    //default: 0x2;
+		__u32 lockdet_en               :  1 ;    //default: 0;
+		__u32 lockmdsel                :  1 ;    //default: 0;
+		__u32 unlock_mdsel             :  2 ;    //default: 0;
+		__u32 res0                     : 16 ;    //default: 0;
+	} bits;
+};
+
+union dphy_pll_reg2_t {
+	__u32 dwval;
+	struct {
+		__u32 frac                      : 12 ;    //default: 0x800;
+		__u32 ss_int                    :  8 ;    //default: 0x32;
+		__u32 ss_frac                   :  9 ;    //default: 0;
+		__u32 ss_en                     :  1 ;    //default: 0;
+		__u32 ff_en                     :  1 ;    //default: 0;
+		__u32 sdm_en                    :  1 ;    //default: 0x1;
+	} bits;
+};
 
 /* dphy register define */
 struct __de_dsi_dphy_dev_t {
@@ -1017,6 +1129,15 @@ struct __de_dsi_dphy_dev_t {
 	/* 0xf0 - 0xfc */
 	union dphy_dbg4_reg_t dphy_dbg4;
 	union dphy_dbg5_reg_t dphy_dbg5;
+	union dphy_tx_skew_reg0_t       dphy_tx_skew_reg0;  /*0xf8 */
+	union dphy_tx_skew_reg1_t       dphy_tx_skew_reg1;  /*0xfc */
+	union dphy_tx_skew_reg2_t       dphy_tx_skew_reg2;  /*0x100 */
+	union dphy_pll_reg0_t           dphy_pll_reg0;      /*0x104 */
+	union dphy_pll_reg1_t           dphy_pll_reg1;      /*0x108 */
+	union dphy_pll_reg2_t           dphy_pll_reg2;      /*0x10c */
+	union combo_phy_reg0_t          combo_phy_reg0;     /*0x110 */
+	union combo_phy_reg1_t          combo_phy_reg1;     /*0x114 */
+	union combo_phy_reg2_t          combo_phy_reg2;     /*0x118 */
 };
 
 union dsi_ph_t {

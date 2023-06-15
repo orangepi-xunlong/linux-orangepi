@@ -254,6 +254,7 @@ s32 set_static_config(struct disp_device_config *config);
 s32 get_static_config(struct disp_device_config *config);
 s32 set_dynamic_config(struct disp_device_dynamic_config *config);
 s32 get_dynamic_config(struct disp_device_dynamic_config *config);
+s32 set_vsif_config(void *config, struct disp_device_dynamic_config *scfg);
 
 s32 hdmi_set_display_mode(u32 mode);
 s32 hdmi_mode_support(u32 mode);
@@ -266,10 +267,8 @@ s32 hdmi_smooth_enable_core(void);
 s32 hdmi_disable_core(void);
 
 /*************************audio***************************/
-#if defined(CONFIG_SND_SUNXI_SOC_SUNXI_HDMIAUDIO)
 s32 hdmi_set_audio_para(hdmi_audio_t *audio_para);
 s32 hdmi_core_audio_enable(u8 mode, u8 channel);
-#endif
 
 u32 hdmi_core_get_rxsense_state(void);
 u32 hdmi_core_get_phy_pll_lock_state(void);
@@ -283,6 +282,7 @@ u32 hdmi_core_get_color_depth(void);
 u32 hdmi_core_get_pixelrepetion(void);
 u32 hdmi_core_get_colorimetry(void);
 u32 hdmi_core_get_pixel_format(void);
+u32 hdmi_core_get_hdmi14_4k_format(void);
 u32 hdmi_core_get_video_code(void);
 u32 hdmi_core_get_audio_sample_freq(void);
 u32 hdmi_core_get_audio_sample_size(void);

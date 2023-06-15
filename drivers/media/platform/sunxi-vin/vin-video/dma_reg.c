@@ -1,5 +1,5 @@
 /*
- * linux-4.9/drivers/media/platform/sunxi-vin/vin-video/dma_reg.c
+ * linux-5.4/drivers/media/platform/sunxi-vin/vin-video/dma_reg.c
  *
  * Copyright (c) 2007-2017 Allwinnertech Co., Ltd.
  *
@@ -203,7 +203,7 @@ void csic_dma_output_size_cfg(unsigned int sel, struct dma_output_size *size)
 	vin_reg_clr_set(csic_dma_base[sel] + CSIC_DMA_VSIZE_REG_OFF,
 			VER_LEN_MASK, size->ver_len << VER_LEN);
 }
-void csic_dma_buffer_address(unsigned int sel, enum fifo_buf_sel buf,
+void csic_dma_buffer_address(unsigned int sel, unsigned int buf,
 				unsigned long addr)
 {
 #ifndef BUF_AUTO_UPDATE
@@ -274,6 +274,7 @@ void csic_dma_int_get_status(unsigned int sel, struct dma_int_status *status)
 	status->buf_addr_fifo = (reg_val & BUF_ADDR_FIFO_INT_PD_MASK) >> BUF_ADDR_FIFO_INT_PD;
 	status->stored_frm_cnt = (reg_val & STORED_FRM_CNT_INT_PD_MASK) >> STORED_FRM_CNT_INT_PD;
 	status->frm_lost = (reg_val & FRM_LOST_INT_PD_MASK) >> FRM_LOST_INT_PD;
+	status->lbc_hb = (reg_val & LBC_HB_INT_PD_MASK) >> LBC_HB_INT_PD;
 }
 void csic_dma_int_clear_status(unsigned int sel, enum dma_int_sel interrupt)
 {

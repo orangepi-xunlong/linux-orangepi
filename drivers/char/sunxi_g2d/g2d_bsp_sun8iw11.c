@@ -1905,3 +1905,8 @@ __u32 mixer_micro_block_set(g2d_blt *para)
 
 	return 0;
 }
+
+__u32 g2d_ip_version(void)
+{
+	return 0x00;
+}

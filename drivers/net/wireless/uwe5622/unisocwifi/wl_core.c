@@ -72,16 +72,16 @@ extern unsigned int wmmac_ratio;
 void adjust_qos_ratio(char *buf, unsigned char offset)
 {
 	unsigned int qos_ratio =
-		(buf[offset+3] - '0')*10 + (buf[offset+4] - '0');
+		(buf[offset + 3] - '0')*10 + (buf[offset + 4] - '0');
 
 	if (buf[offset] == 'v') {
-		if (buf[offset+1] == 'o')
+		if (buf[offset + 1] == 'o')
 			vo_ratio = qos_ratio;
-		else if (buf[offset+1] == 'i')
+		else if (buf[offset + 1] == 'i')
 			vi_ratio = qos_ratio;
-	} else if (buf[offset] == 'b' && buf[offset+1] == 'e') {
+	} else if (buf[offset] == 'b' && buf[offset + 1] == 'e') {
 		be_ratio = qos_ratio;
-	} else if (buf[offset] == 'a' && buf[offset+1] == 'm') {
+	} else if (buf[offset] == 'a' && buf[offset + 1] == 'm') {
 		wmmac_ratio = qos_ratio;
 	}
 
@@ -534,12 +534,69 @@ static struct notifier_block boost_notifier = {
 	.notifier_call = sprdwl_notifier_boost,
 };
 
+#ifdef CP2_RESET_SUPPORT
+extern struct sprdwl_priv *g_sprdwl_priv;
+extern void sprdwl_cancel_scan(struct sprdwl_vif *vif);
+extern void sprdwl_cancel_sched_scan(struct sprdwl_vif *vif);
+struct completion wifi_reset_ready;
+extern void sprdwl_net_flowcontrl(struct sprdwl_priv *priv, enum sprdwl_mode mode, bool state);
+extern struct sprdwl_cmd g_sprdwl_cmd;
+
+static void sprdwl_wifi_reset(void)
+{
+	struct sprdwl_intf *intf = NULL;
+	struct sprdwl_tx_msg *tx_msg = NULL;
+	struct sprdwl_rx_if *rx_if = NULL;
+
+	intf = (struct sprdwl_intf *)g_sprdwl_priv->hw_priv;
+	tx_msg = (void *)intf->sprdwl_tx;
+	rx_if = (struct sprdwl_rx_if *)intf->sprdwl_rx;
+
+	wl_err("cp2 reset begin..........\n");
+	g_sprdwl_priv->sync.scan_not_allowed = true;
+	g_sprdwl_priv->sync.cmd_not_allowed = true;
+	intf->cp_asserted = 1;
+	intf->exit = 1;
+	if (tx_msg->tx_thread) {
+		tx_up(tx_msg);
+		kthread_stop(tx_msg->tx_thread);
+		tx_msg->tx_thread = NULL;
+	}
+
+	wl_err("cp2 reset finish..........\n");
+}
+
+static int wifi_exception_event(void)
+{
+	char *envp[2];
+	envp[0] = "CP2-EXCEPTION-EVENT";
+	envp[1] = NULL;
+	kobject_uevent_env(&sprdwl_dev->kobj, KOBJ_CHANGE, envp);
+	return 0;
+}
+
+int wifi_reset_callback(struct notifier_block *nb, unsigned long event, void *v)
+{
+	sprdwl_wifi_reset();
+	wifi_exception_event();
+	return NOTIFY_OK;
+}
+
+static struct notifier_block wifi_reset_notifier = {
+    .notifier_call = wifi_reset_callback,
+};
+#endif
+
 static int sprdwl_probe(struct platform_device *pdev)
 {
 	struct sprdwl_intf *intf;
 	struct sprdwl_priv *priv;
 	int ret;
 	u8 i;
+
+#ifdef CP2_RESET_SUPPORT
+	marlin_reset_callback_register(MARLIN_WIFI, &wifi_reset_notifier);
+#endif
 
 	if (start_marlin(MARLIN_WIFI)) {
 		wl_err("%s power on chipset failed\n", __func__);
@@ -561,6 +618,9 @@ static int sprdwl_probe(struct platform_device *pdev)
 		intf->peer_entry[i].ctx_id = 0xff;
 
 	dbg_util_init(&intf->ini_cfg);
+#ifdef STA_SOFTAP_SCC_MODE
+	intf->sta_home_channel = 0;
+#endif
 	priv = sprdwl_core_create(get_hwintf_type(),
 				  &sprdwl_core_ops);
 	if (!priv) {
@@ -648,6 +708,10 @@ static int sprdwl_remove(struct platform_device *pdev)
 {
 	struct sprdwl_intf *intf = platform_get_drvdata(pdev);
 	struct sprdwl_priv *priv = intf->priv;
+
+#ifdef CP2_RESET_SUPPORT
+	marlin_reset_callback_unregister(MARLIN_WIFI, &wifi_reset_notifier);
+#endif
 
 	cpufreq_unregister_notifier(&boost_notifier, CPUFREQ_POLICY_NOTIFIER);
 	sprdwl_debugfs_deinit();

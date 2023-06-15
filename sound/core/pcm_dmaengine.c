@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  Copyright (C) 2012, Analog Devices Inc.
  *	Author: Lars-Peter Clausen <lars@metafoo.de>
@@ -7,16 +8,6 @@
  *	mxs-pcm.c, Copyright (C) 2011 Freescale Semiconductor, Inc.
  *	ep93xx-pcm.c, Copyright (C) 2006 Lennert Buytenhek <buytenh@wantstofly.org>
  *		      Copyright (C) 2006 Applied Data Systems
- *
- *  This program is free software; you can redistribute it and/or modify it
- *  under  the terms of the GNU General  Public License as published by the
- *  Free Software Foundation;  either version 2 of the License, or (at your
- *  option) any later version.
- *
- *  You should have received a copy of the GNU General Public License along
- *  with this program; if not, write to the Free Software Foundation, Inc.,
- *  675 Mass Ave, Cambridge, MA 02139, USA.
- *
  */
 #include <linux/module.h>
 #include <linux/init.h>
@@ -25,9 +16,9 @@
 #include <sound/pcm.h>
 #include <sound/pcm_params.h>
 #include <sound/soc.h>
+#include <sound/simple_card.h>
 
 #include <sound/dmaengine_pcm.h>
-#include "../soc/sunxi/sunxi-pcm.h"
 
 struct dmaengine_pcm_runtime_data {
 	struct dma_chan *dma_chan;
@@ -64,25 +55,21 @@ int snd_hwparams_to_dma_slave_config(const struct snd_pcm_substream *substream,
 	struct dma_slave_config *slave_config)
 {
 	enum dma_slave_buswidth buswidth;
-	switch (params_format(params)) {
-	case SNDRV_PCM_FORMAT_S8:
-		buswidth = DMA_SLAVE_BUSWIDTH_1_BYTE;
-		break;
-	case SNDRV_PCM_FORMAT_S16_LE:
-		buswidth = DMA_SLAVE_BUSWIDTH_2_BYTES;
-		break;
-	case SNDRV_PCM_FORMAT_S18_3LE:
-	case SNDRV_PCM_FORMAT_S20_3LE:
-	case SNDRV_PCM_FORMAT_S24_LE:
-	case SNDRV_PCM_FORMAT_S32_LE:
-		buswidth = DMA_SLAVE_BUSWIDTH_4_BYTES;
-		break;
-	default:
+	int bits;
+
+	bits = params_physical_width(params);
+	if (bits < 8 || bits > 64)
 		return -EINVAL;
-	}
-#ifdef CONFIG_SND_SUNXI_MAD
-	buswidth = DMA_SLAVE_BUSWIDTH_4_BYTES;
-#endif
+	else if (bits == 8)
+		buswidth = DMA_SLAVE_BUSWIDTH_1_BYTE;
+	else if (bits == 16)
+		buswidth = DMA_SLAVE_BUSWIDTH_2_BYTES;
+	else if (bits == 24)
+		buswidth = DMA_SLAVE_BUSWIDTH_3_BYTES;
+	else if (bits <= 32)
+		buswidth = DMA_SLAVE_BUSWIDTH_4_BYTES;
+	else
+		buswidth = DMA_SLAVE_BUSWIDTH_8_BYTES;
 
 	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
 		slave_config->direction = DMA_MEM_TO_DEV;
@@ -146,18 +133,10 @@ static void dmaengine_pcm_dma_complete(void *arg)
 {
 	struct snd_pcm_substream *substream = arg;
 	struct dmaengine_pcm_runtime_data *prtd = substream_to_prtd(substream);
-	unsigned long flags;
-
-	snd_pcm_stream_lock_irqsave(substream, flags);
-	if (!substream->runtime) {
-		snd_pcm_stream_unlock_irqrestore(substream, flags);
-		return;
-	}
 
 	prtd->pos += snd_pcm_lib_period_bytes(substream);
 	if (prtd->pos >= snd_pcm_lib_buffer_bytes(substream))
 		prtd->pos = 0;
-	snd_pcm_stream_unlock_irqrestore(substream, flags);
 
 	snd_pcm_period_elapsed(substream);
 }
@@ -170,27 +149,40 @@ static int dmaengine_pcm_prepare_and_submit(struct snd_pcm_substream *substream)
 	enum dma_transfer_direction direction;
 	unsigned long flags = DMA_CTRL_ACK;
 
+	struct snd_card *card = substream->pcm->card;
+	struct snd_soc_pcm_runtime *rtd = NULL;
+	struct asoc_simple_priv *sndhdmi_priv = NULL;
+	unsigned int raw_flag;
+
 	direction = snd_pcm_substream_to_dma_direction(substream);
 
 	if (!substream->runtime->no_period_wakeup)
 		flags |= DMA_PREP_INTERRUPT;
 
 	prtd->pos = 0;
-#ifdef CONFIG_SND_SUNXI_SOC_AHUB
-	if (sunxi_ahub_get_rawflag() > 1) {
-#else
-	if (!strcmp(substream->pcm->card->id, "sndhdmiraw")) {
-#endif
-		desc = dmaengine_prep_dma_cyclic(chan,
-			substream->runtime->dma_addr,
-			2 * snd_pcm_lib_buffer_bytes(substream),
-			2 * snd_pcm_lib_period_bytes(substream),
-			direction, flags);
+	/* sunxi for hdmi dma transfer */
+	if (strcmp(card->shortname, "sndhdmi") == 0) {
+		rtd = substream->private_data;
+		sndhdmi_priv = snd_soc_card_get_drvdata(rtd->card);
+		raw_flag = sndhdmi_priv->hdmi_format;
+		if (raw_flag > 1)
+			desc = dmaengine_prep_dma_cyclic(chan,
+				substream->runtime->dma_addr,
+				snd_pcm_lib_buffer_bytes(substream) * 2,
+				snd_pcm_lib_period_bytes(substream) * 2,
+				direction, flags);
+		else
+			desc = dmaengine_prep_dma_cyclic(chan,
+				substream->runtime->dma_addr,
+				snd_pcm_lib_buffer_bytes(substream),
+				snd_pcm_lib_period_bytes(substream),
+				direction, flags);
 	} else {
 		desc = dmaengine_prep_dma_cyclic(chan,
 			substream->runtime->dma_addr,
 			snd_pcm_lib_buffer_bytes(substream),
-			snd_pcm_lib_period_bytes(substream), direction, flags);
+			snd_pcm_lib_period_bytes(substream),
+			direction, flags);
 	}
 
 	if (!desc)
@@ -260,7 +252,6 @@ EXPORT_SYMBOL_GPL(snd_dmaengine_pcm_trigger);
 snd_pcm_uframes_t snd_dmaengine_pcm_pointer_no_residue(struct snd_pcm_substream *substream)
 {
 	struct dmaengine_pcm_runtime_data *prtd = substream_to_prtd(substream);
-
 	return bytes_to_frames(substream->runtime, prtd->pos);
 }
 EXPORT_SYMBOL_GPL(snd_dmaengine_pcm_pointer_no_residue);

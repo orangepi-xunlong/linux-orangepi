@@ -161,6 +161,20 @@ enum v4l2_sensor_type {
 #define  V4L2_CID_AF_WIN_X2		(V4L2_CID_USER_SUNXI_CAMERA_BASE + 21)
 #define  V4L2_CID_AF_WIN_Y2		(V4L2_CID_USER_SUNXI_CAMERA_BASE + 22)
 
+static const char *const flash_led_mode_v1[] = {
+	"Off",
+	"Auto",
+	"Red Eye",
+	NULL,
+};
+
+enum v4l2_flash_led_mode_v1{
+	V4L2_FLASH_MODE_NONE = 0,
+	V4L2_FLASH_MODE_AUTO,
+	V4L2_FLASH_MODE_RED_EYE,
+};
+
+#define	V4L2_CID_FLASH_LED_MODE_V1		(V4L2_CID_USER_SUNXI_CAMERA_BASE + 23)
 /*
  *	PRIVATE IOCTRLS
  */
@@ -218,6 +232,11 @@ struct parser_fps_ds {
 	__u32 ch3_fps_ds;
 };
 
+struct sensor_isp_cfg {
+	__u8 isp_wdr_mode;
+	__u8 large_image;
+};
+
 #define VIDIOC_ISP_AE_STAT_REQ \
 	_IOWR('V', BASE_VIDIOC_PRIVATE + 1, struct isp_stat_buf)
 #define VIDIOC_ISP_HIST_STAT_REQ \
@@ -244,6 +263,8 @@ struct parser_fps_ds {
 	_IOWR('V', BASE_VIDIOC_PRIVATE + 12, struct vin_reset_time)
 #define VIDIOC_SET_PARSER_FPS \
 	_IOWR('V', BASE_VIDIOC_PRIVATE + 13, struct parser_fps_ds)
+#define VIDIOC_SET_SENSOR_ISP_CFG \
+	_IOWR('V', BASE_VIDIOC_PRIVATE + 14, struct sensor_isp_cfg)
 
 /*
  * Events
@@ -353,6 +374,10 @@ struct actuator_para {
 	unsigned short code_max;
 };
 
+struct flash_para {
+   enum v4l2_flash_led_mode mode;
+};
+
 /*
  * Camera Sensor IOCTLs
  */
@@ -371,6 +396,8 @@ struct actuator_para {
 	_IOWR('V', BASE_VIDIOC_PRIVATE + 64, struct actuator_ctrl)
 #define VIDIOC_VIN_ACT_INIT \
 	_IOWR('V', BASE_VIDIOC_PRIVATE + 65, struct actuator_para)
+#define VIDIOC_VIN_FLASH_EN \
+	_IOWR('V', BASE_VIDIOC_PRIVATE + 66, struct flash_para)
 
 #define VIDIOC_VIN_ISP_LOAD_REG \
 	_IOWR('V', BASE_VIDIOC_PRIVATE + 70, struct isp_table_reg_map)

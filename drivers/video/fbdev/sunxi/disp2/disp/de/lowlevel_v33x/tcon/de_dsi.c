@@ -205,6 +205,18 @@ __s32 dsi_gen_short_rd(__u32 sel, __u8 *para_p, __u8 para_num, __u8 *result)
 	return 0;
 }
 
+/* 0: normal; -1:under flow; */
+s32 dsi_get_status(u32 sel)
+{
+	if (dsi_dev[sel]->dsi_debug_inst.bits.trans_low_flag ||
+	    dsi_dev[sel]->dsi_debug_inst.bits.trans_fast_flag) {
+		dsi_dev[sel]->dsi_debug_inst.bits.trans_low_flag = 1;
+		dsi_dev[sel]->dsi_debug_inst.bits.trans_fast_flag = 1;
+		return -1;
+	}
+	return 0;
+}
+
 s32 dsi_tri_start(u32 sel)
 {
 	dsi_start(sel, DSI_START_HSTX);

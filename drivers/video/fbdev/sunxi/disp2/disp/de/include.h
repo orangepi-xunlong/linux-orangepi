@@ -19,7 +19,7 @@
 #include <linux/kernel.h>
 #include <linux/mm.h>
 #include <linux/uaccess.h>
-#include <asm/memory.h>
+/*#include <asm/memory.h>*/
 #include <asm/unistd.h>
 #include "linux/semaphore.h"
 #include <linux/vmalloc.h>
@@ -40,6 +40,7 @@
 #include <linux/interrupt.h>
 #include <linux/platform_device.h>
 #include <linux/clk.h>
+#include <linux/reset.h>
 #include <linux/cdev.h>
 #include <linux/types.h>
 #include <linux/timer.h>
@@ -65,43 +66,43 @@
 #include "disp_features.h"
 
 /* #include "disp_format_convert.h" */
-s32 bsp_disp_get_print_level(void);
 
-#if 1
+#define DISP2_DEBUG_LEVEL 0
+
+#if DISP2_DEBUG_LEVEL == 1
 #define __inf(msg...) do { \
-		if (bsp_disp_get_print_level()) { \
 			pr_warn("[DISP] %s,line:%d:", __func__, __LINE__); \
 			pr_warn(msg); \
-		} \
 	} while (0)
 #define __msg(msg...) do { \
-		if (bsp_disp_get_print_level()) { \
 			pr_warn("[DISP] %s,line:%d:", __func__, __LINE__); \
 			pr_warn(msg); \
-		} \
 	} while (0)
+#define __here__
+#define __debug(msg...)
+#elif DISP2_DEBUG_LEVEL == 2
+#define __inf(msg...) do { \
+			pr_warn("[DISP] %s,line:%d:", __func__, __LINE__); \
+			pr_warn(msg); \
+	} while (0)
+#define __here__ do { \
+			pr_warn("[DISP] %s,line:%d\n", __func__, __LINE__);\
+	} while (0)
+#define __debug(msg...)  do { \
+			pr_warn("[DISP] %s,line:%d:", __func__, __LINE__); \
+			pr_warn(msg); \
+	} while (0)
+#else
+#define __inf(msg...)
+#define __msg(msg...)
+#define __here__
+#define __debug(msg...)
+#endif
+
 #define __wrn(msg...) do { \
 			pr_warn("[DISP] %s,line:%d:", __func__, __LINE__); \
 			pr_warn(msg); \
 		} while (0)
-#define __here__ do { \
-		if (bsp_disp_get_print_level() == 2) { \
-			pr_warn("[DISP] %s,line:%d\n", __func__, __LINE__);\
-		} \
-	} while (0)
-#define __debug(msg...)  do { \
-		if (bsp_disp_get_print_level() == 2) { \
-			pr_warn("[DISP] %s,line:%d:", __func__, __LINE__); \
-			pr_warn(msg); \
-		} \
-	} while (0)
-#else
-#define __inf(msg...)  printk(msg)
-#define __msg(msg...)  printk(msg)
-#define __wrn(msg...)  printk(msg)
-#define __here__
-#define __debug(msg...)
-#endif
 
 #endif				/* end of define __LINUX_PLAT__ */
 
@@ -241,7 +242,8 @@ enum disp_manager_dirty_flags {
 	MANAGER_COLOR_SPACE_DIRTY = 0x00000020,
 	MANAGER_BLANK_DIRTY = 0x00000040,
 	MANAGER_KSC_DIRTY = 0x00000080,
-	MANAGER_ALL_DIRTY = 0x000000ff,
+	MANAGER_PALETTE_DIRTY = 0x00000100,
+	MANAGER_ALL_DIRTY = 0x00000fff,
 };
 
 /* disp_atw_info_inner - asynchronous time wrap infomation
@@ -300,10 +302,12 @@ struct disp_fb_info_inner {
 	enum disp_eotf           eotf;
 	int                      depth;
 	unsigned int             fbd_en;
+	unsigned int             lbc_en;
 	int                      metadata_fd;
 	unsigned long long       metadata_buf;
 	unsigned int             metadata_size;
 	unsigned int             metadata_flag;
+	struct disp_lbc_info     lbc_info;
 	struct dma_buf           *metadata_dmabuf;
 	struct sunxi_metadata    *p_metadata;
 	struct afbc_header       *p_afbc_header;
@@ -411,6 +415,8 @@ struct disp_manager_info {
 	enum disp_data_bits data_bits;
 	u32 device_fps;
 	struct disp_ksc_info ksc;
+	struct disp_palette_config palette;
+	enum disp_hdr_type hdr_type;
 };
 
 struct disp_manager_data {
@@ -492,6 +498,24 @@ struct disp_enhance_config {
 	struct disp_enhance_info info;
 	enum disp_enhance_dirty_flags flags;
 };
+
+
+struct peak_pq_cfg {
+	u32 hp_ratio;
+	u32 bp0_ratio;
+	u32 bp1_ratio;
+	u32 corth;
+	u32 neg_gain;
+	u32 dif_up;
+	u32 beta;
+	u32 gain;
+};
+
+struct g_pq_cfg {
+	struct peak_pq_cfg peak;
+};
+
+
 
 enum disp_smbl_dirty_flags {
 	SMBL_DIRTY_NONE = 0x00000000,
@@ -643,6 +667,7 @@ enum disp_lcd_te {
 enum disp_lcd_lvds_if {
 	LCD_LVDS_IF_SINGLE_LINK = 0,
 	LCD_LVDS_IF_DUAL_LINK = 1,
+	LCD_LVDS_IF_DUAL_LINK_SAME_SRC = 2,
 };
 
 enum disp_lcd_lvds_colordepth {
@@ -814,22 +839,25 @@ struct disp_panel_para {
 
 	char lcd_size[8];	/* e.g. 7.9, 9.7 */
 	char lcd_model_name[32];
+	char lcd_driver_name[32];
 
 	unsigned int tcon_index;	/* not need to config for user */
 	unsigned int lcd_fresh_mode;	/* not need to config for user */
 	unsigned int lcd_dclk_freq_original;/* not need to config for user */
 	unsigned int ccir_clk_div;/*not need to config for user*/
 	unsigned int input_csc;/*not need to config for user*/
+	unsigned int lcd_gsensor_detect;
+	unsigned int lcd_hv_data_polarity;
 
 };
 
 enum disp_mod_id {
 	DISP_MOD_DE = 0,
-#if defined(CONFIG_ARCH_SUN50IW10)
+#if defined(CONFIG_INDEPENDENT_DE)
 	DISP_MOD_DE1,
 #endif
 	DISP_MOD_DEVICE,	/* for timing controller common module */
-#if defined(CONFIG_ARCH_SUN50IW10)
+#if defined(CONFIG_INDEPENDENT_DE)
 	DISP_MOD_DEVICE1,
 #endif
 	DISP_MOD_LCD0,
@@ -842,10 +870,11 @@ enum disp_mod_id {
 	DISP_MOD_DSI3,
 	DISP_MOD_HDMI,
 	DISP_MOD_LVDS,
+	DISP_MOD_LVDS1,
 	DISP_MOD_EINK,
 	DISP_MOD_EDMA,
 	DISP_MOD_VDPO,
-#if defined(CONFIG_ARCH_SUN50IW10)
+#if defined(CONFIG_INDEPENDENT_DE)
 	DISP_MOD_DPSS0,
 	DISP_MOD_DPSS1,
 #endif
@@ -890,7 +919,26 @@ struct disp_health_info {
 struct disp_bsp_init_para {
 	uintptr_t reg_base[DISP_MOD_NUM];
 	u32 irq_no[DISP_MOD_NUM];
-	struct clk *mclk[DISP_MOD_NUM];
+
+	struct clk *clk_de[DE_NUM];
+	struct clk *clk_bus_de[DE_NUM];
+#if defined(HAVE_DEVICE_COMMON_MODULE)
+	struct clk *clk_bus_extra;
+#endif
+	struct clk *clk_bus_dpss_top[DISP_DEVICE_NUM];
+	struct clk *clk_tcon[DISP_DEVICE_NUM];
+	struct clk *clk_bus_tcon[DISP_DEVICE_NUM];
+	struct clk *clk_mipi_dsi[CLK_DSI_NUM];
+	struct clk *clk_bus_mipi_dsi[CLK_DSI_NUM];
+
+	struct reset_control *rst_bus_de[DE_NUM];
+#if defined(HAVE_DEVICE_COMMON_MODULE)
+	struct reset_control *rst_bus_extra;
+#endif
+	struct reset_control *rst_bus_dpss_top[DISP_DEVICE_NUM];
+	struct reset_control *rst_bus_mipi_dsi[DEVICE_DSI_NUM];
+	struct reset_control *rst_bus_tcon[DISP_DEVICE_NUM];
+	struct reset_control *rst_bus_lvds[DEVICE_LVDS_NUM];
 
 	s32 (*disp_int_process)(u32 sel);
 	s32 (*vsync_event)(u32 sel);
@@ -1025,6 +1073,9 @@ struct disp_device {
 	s32 (*get_dynamic_config)(struct disp_device *dispdev,
 			  struct disp_device_dynamic_config *config);
 
+	s32 (*set_vsif_config)(struct disp_device *dispdev, void *config,
+						   struct disp_device_dynamic_config *scfg);
+
 	s32 (*cec_standby_request)(struct disp_device *dispdev);
 	s32 (*cec_send_one_touch_play)(struct disp_device *dispdev);
 	/*
@@ -1057,6 +1108,8 @@ struct disp_device {
 	struct disp_lcd_flow *(*get_close_flow)(struct disp_device *dispdev);
 	s32 (*pin_cfg)(struct disp_device *dispdev, u32 bon);
 	s32 (*set_gamma_tbl)(struct disp_device *dispdev, u32 *tbl,
+			      u32 size);
+	s32 (*get_gamma_tbl)(struct disp_device *dispdev, u32 *tbl,
 			      u32 size);
 	s32 (*enable_gamma)(struct disp_device *dispdev);
 	s32 (*disable_gamma)(struct disp_device *dispdev);
@@ -1093,6 +1146,9 @@ struct disp_manager {
 	struct disp_capture *cptr;
 
 	struct list_head lyr_list;
+#if defined(CONFIG_SUNXI_DISP2_FB_ROTATION_SUPPORT)
+	struct disp_rotation_sw *rot_sw;
+#endif
 
 #ifdef SUPPORT_WB
 	wait_queue_head_t write_back_queue;
@@ -1153,6 +1209,7 @@ struct disp_manager {
 	s32 (*get_output_color_range)(struct disp_manager *mgr);
 	s32 (*update_color_space)(struct disp_manager *mgr);
 	s32 (*smooth_switch)(struct disp_manager *mgr);
+	s32 (*set_palette)(struct disp_manager *mgr, struct disp_palette_config *config);
 
 	s32 (*apply)(struct disp_manager *mgr);
 	s32 (*force_apply)(struct disp_manager *mgr);
@@ -1165,6 +1222,7 @@ struct disp_manager {
 	s32 (*reg_protect)(struct disp_manager *mgr, bool protect);
 	s32 (*set_ksc_para)(struct disp_manager *mgr,
 				      struct disp_ksc_info *pinfo);
+	s32 (*enable_iommu)(struct disp_manager *mgr, bool en);
 };
 
 struct disp_layer {
@@ -1322,7 +1380,7 @@ struct disp_enhance {
 };
 
 struct disp_capture {
-	char *name;
+	char name[16];
 	u32 disp;
 	struct disp_manager *manager;
 
@@ -1347,6 +1405,31 @@ struct disp_capture {
 	/* inner interface */
 	s32 (*apply)(struct disp_capture *cptr);
 };
+
+#if defined(CONFIG_SUNXI_DISP2_FB_ROTATION_SUPPORT)
+struct disp_rotation_sw {
+	u32 disp;
+	u32 degree;
+	struct disp_rectsz screen_size; /* virtual screen_size */
+
+	struct disp_manager *manager;
+
+	s32 (*init)(struct disp_rotation_sw *rot_sw);
+	s32 (*exit)(struct disp_rotation_sw *rot_sw);
+	s32 (*set_layer_degree)(struct disp_rotation_sw *rot_sw, u32 chn,
+				u32 lyr_id, u32 degree);
+	s32 (*get_layer_degree)(struct disp_rotation_sw *rot_sw, u32 chn,
+				u32 lyr_id);
+	s32 (*set_manager)(struct disp_rotation_sw *rot_sw,
+			   struct disp_manager *mgr);
+	s32 (*unset_manager)(struct disp_rotation_sw *rot_sw);
+	s32 (*apply)(struct disp_rotation_sw *rot_sw,
+		     struct disp_layer_config *lyr_config,
+		     struct disp_rect src_dirty_rect);
+	s32 (*checkout)(struct disp_rotation_sw *rot_sw,
+			struct disp_layer_config *lyr_config);
+};
+#endif
 
 struct ee_img {
 	unsigned long addr;
@@ -1489,7 +1572,12 @@ struct format_manager {
 	unsigned int irq_num;
 	unsigned int write_back_finish;
 	wait_queue_head_t write_back_queue;
+
 	struct clk *clk;
+	struct clk *clk_bus;
+
+	struct reset_control *rst;
+
 	int (*enable)(unsigned int id);
 	int (*disable)(unsigned int id);
 	int (*start_convert)(unsigned int id,

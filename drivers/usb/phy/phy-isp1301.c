@@ -1,13 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * NXP ISP1301 USB transceiver driver
  *
  * Copyright (C) 2012 Roland Stigge
  *
  * Author: Roland Stigge <stigge@antcom.de>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/module.h>
@@ -136,7 +133,7 @@ static int isp1301_remove(struct i2c_client *client)
 static struct i2c_driver isp1301_driver = {
 	.driver = {
 		.name = DRV_NAME,
-		.of_match_table = of_match_ptr(isp1301_of_match),
+		.of_match_table = isp1301_of_match,
 	},
 	.probe = isp1301_probe,
 	.remove = isp1301_remove,
@@ -145,9 +142,9 @@ static struct i2c_driver isp1301_driver = {
 
 module_i2c_driver(isp1301_driver);
 
-static int match(struct device *dev, void *data)
+static int match(struct device *dev, const void *data)
 {
-	struct device_node *node = (struct device_node *)data;
+	const struct device_node *node = (const struct device_node *)data;
 	return (dev->of_node == node) &&
 		(dev->driver == &isp1301_driver.driver);
 }

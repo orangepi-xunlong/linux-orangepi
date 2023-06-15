@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Serial port driver for BCM2835AUX UART
  *
@@ -5,11 +6,6 @@
  *
  * Based on 8250_lpc18xx.c:
  * Copyright (C) 2015 Joachim Eastwood <manabian@gmail.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
  */
 
 #include <linux/clk.h>
@@ -39,7 +35,7 @@ static int bcm2835aux_serial_probe(struct platform_device *pdev)
 
 	/* initialize data */
 	spin_lock_init(&data->uart.port.lock);
-	data->uart.capabilities = UART_CAP_FIFO;
+	data->uart.capabilities = UART_CAP_FIFO | UART_CAP_MINI;
 	data->uart.port.dev = &pdev->dev;
 	data->uart.port.regshift = 2;
 	data->uart.port.type = PORT_16550;
@@ -60,10 +56,8 @@ static int bcm2835aux_serial_probe(struct platform_device *pdev)
 
 	/* get the interrupt */
 	ret = platform_get_irq(pdev, 0);
-	if (ret < 0) {
-		dev_err(&pdev->dev, "irq not found - %i", ret);
+	if (ret < 0)
 		return ret;
-	}
 	data->uart.port.irq = ret;
 
 	/* map the main registers */
@@ -119,7 +113,7 @@ static int bcm2835aux_serial_remove(struct platform_device *pdev)
 {
 	struct bcm2835aux_data *data = platform_get_drvdata(pdev);
 
-	serial8250_unregister_port(data->uart.port.line);
+	serial8250_unregister_port(data->line);
 	clk_disable_unprepare(data->clk);
 
 	return 0;

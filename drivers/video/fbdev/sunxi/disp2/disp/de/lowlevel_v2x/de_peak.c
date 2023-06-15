@@ -19,6 +19,7 @@
  *
  ******************************************************************************/
 
+#ifdef CONFIG_DISP2_SUNXI_SUPPORT_ENAHNCE
 #include "de_peak_type.h"
 #include "de_rtmx.h"
 #include "de_enhance.h"
@@ -26,6 +27,8 @@
 static volatile struct __peak_reg_t *peak_dev[DE_NUM][CHN_NUM];
 static struct de_reg_blocks peak_block[DE_NUM][CHN_NUM];
 static struct de_reg_blocks peak_gain_block[DE_NUM][CHN_NUM];
+
+static unsigned char pq_dirty[DE_NUM];
 
 /*******************************************************************************
  * function       : de_peak_set_reg_base(unsigned int sel, unsigned int chno,
@@ -46,8 +49,29 @@ int de_peak_set_reg_base(unsigned int sel, unsigned int chno, void *base)
 	return 0;
 }
 
+unsigned long de_peak_get_reg_base(unsigned int sel)
+{
+	//if g_fmt = yuv yuv mem.else rgb
+	return (unsigned long)peak_dev[sel][0];
+}
+
+void de_peak_set_pq_dirty(int sel)
+{
+	pq_dirty[sel] = 1;
+}
+
+void de_peak_reset_pq_dirty(int sel)
+{
+	pq_dirty[sel] = 0;
+}
+
 int de_peak_update_regs(unsigned int sel, unsigned int chno)
 {
+	if (pq_dirty[sel] == 1) {
+		peak_block[sel][chno].dirty = 0x1;
+		peak_gain_block[sel][chno].dirty = 0x1;
+	}
+
 	if (peak_block[sel][chno].dirty == 0x1) {
 		memcpy((void *)peak_block[sel][chno].off,
 		       peak_block[sel][chno].val, peak_block[sel][chno].size);
@@ -61,6 +85,9 @@ int de_peak_update_regs(unsigned int sel, unsigned int chno)
 		peak_gain_block[sel][chno].dirty = 0x0;
 	}
 
+	if (pq_dirty[sel] == 1)
+		de_peak_reset_pq_dirty(sel);
+
 	return 0;
 }
 
@@ -71,7 +98,7 @@ int de_peak_init(unsigned int sel, unsigned int chno, uintptr_t reg_base)
 
 	/* FIXME: chno is not considered */
 	base = reg_base + (sel + 1) * 0x00100000 + PEAK_OFST;
-#if defined(CONFIG_ARCH_SUN50IW10)
+#if defined(CONFIG_INDEPENDENT_DE)
 	if (sel)
 		base = base - 0x00100000;
 #endif
@@ -240,3 +267,4 @@ int de_peak_info2para(unsigned int sharp, struct de_rect window,
 
 	return 0;
 }
+#endif

@@ -25,6 +25,8 @@
  */
 
 #include "include/timing_ctrl.h"
+#include <linux/backlight.h>
+#include <linux/pwm.h>
 
 static struct timing_ctrl_manager *g_timing_ctrl_mgr;
 
@@ -654,90 +656,7 @@ const __u32 eink_ctrl_tbl_GC16_COMMON[8][EINK_WF_WIDTH] = {
 
 };
 
-#ifdef TIMING_BUF_DEBUG
-static __s32 load_timing_buf(const char *path, char *buf)
-{
-	struct file *fp = NULL;
-	__s32 file_len = 0;
-	__s32 read_len = 0;
-	mm_segment_t fs;
-	loff_t pos;
-	__s32 ret = -EINVAL;
-
-	if ((path == NULL) || (buf == NULL)) {
-		pr_info("path is null\n");
-		return -EINVAL;
-	}
-
-	fp = filp_open(path, O_RDONLY, 0);
-	if (IS_ERR(fp))	{
-		pr_info("fail to open timing buf file(%s)", path);
-		return -EBADF;
-	}
-
-	fs = get_fs();
-	set_fs(KERNEL_DS);
-	pos = 0;
-	file_len = fp->f_path.dentry->d_inode->i_size;
-
-	EINK_INFO_MSG("Timing buf %s: len=0x%x\n", path, file_len);
-
-	read_len = vfs_read(fp, (char *)buf, file_len, &pos);
-	if (read_len != file_len) {
-		pr_err("read file(%s) error(read=%d byte, file=%d byte)\n",
-				path, read_len, file_len);
-		ret = -EAGAIN;
-		goto error;
-	}
-
-	save_as_bin_file((__u8 *)buf, "/tmp/timing_test.bin", file_len, 0);
-
-	if (fp) {
-		filp_close(fp, NULL);
-		set_fs(fs);
-	}
-
-	pr_info("load timing file(%s) successfully\n", path);
-	return 0;
-
-error:
-	if (fp) {
-		filp_close(fp, NULL);
-		set_fs(fs);
-	}
-
-	return ret;
-}
-#endif
-
-
-
-#ifdef TIMING_BUF_DEBUG
-int init_eink_ctrl_data(unsigned long timing_vaddr)
-{
-	u8 *point = NULL;
-
-	char path[128] = {0};
-	int ret = -EINVAL;
-
-	if (timing_vaddr == 0) {
-		pr_err("%s: input param is null\n", __func__);
-		return -EINVAL;
-	}
-
-	point = (u8 *)timing_vaddr;
-	memset(path, 0, sizeof(path));
-	sprintf(path, "%s", DEFAULT_TIMING_BUF_PATH);
-	ret = load_timing_buf(path, (char *)point);
-
-
-	if (ret != 0)
-		pr_err("%s: load timing buf fail, ret = %d\n", __func__, ret);
-
-	return ret;
-
-}
-#else
+#define GDOE_START_LINE 0
 /*
 Description	: wavedata buffer must call this function to init conctrl data,
 		  this interface is for 8-bits data TCON
@@ -748,30 +667,22 @@ Return		: 0 -- success, others -- fail
 int init_eink_ctrl_data(unsigned long timing_vaddr)
 {
 	int ret = 0;
-	u32 row, col = 0, row_temp = 0;
-
-	const u32 *p_ctrl_gc_tbl = NULL;
-	u32 *p_ctrl_line = NULL;
-
+	u32 w = 0, h = 0;
 	u32 wav_width = 0, wav_height = 0;
 	u32 hync_len = 0, vync_len = 0;
 	u32 h_data_len = 0, v_data_len = 0;
 
-	u32 *point = NULL;
-	A13_WAVEDATA *global_ctrl_buffer = NULL;
-
-	A13_WAVEDATA *src = NULL;
-	TIMING_INFO *dest = NULL;
-
-	struct eink_panel_info	*panel_info;
-	struct timing_info *timing;
-
+	TIMING_INFO *wave = NULL;
+	struct eink_panel_info	*panel_info = NULL;
+	struct timing_info *timing = NULL;
 	struct eink_manager *mgr = get_eink_manager();
 
 	if (mgr == NULL) {
 		pr_err("%s:Eink Mgr is NULL\n", __func__);
 		return -1;
 	}
+
+	wave = (TIMING_INFO *)timing_vaddr;;
 
 	panel_info = &mgr->panel_info;
 	timing = &mgr->timing_info;
@@ -784,92 +695,76 @@ int init_eink_ctrl_data(unsigned long timing_vaddr)
 
 	hync_len = timing->lsl + timing->lbl + timing->lel;
 	vync_len = timing->fsl + timing->fbl + timing->fel;
-	h_data_len = panel_info->width >> 2;
-	v_data_len = panel_info->height;
+	h_data_len = timing->ldl;
+	v_data_len = timing->fdl;
 	wav_width = h_data_len + hync_len;
 	wav_height = v_data_len + vync_len;
+	for (h = 0; h < wav_height; h++) {
+		for (w = 0; w < wav_width; w++) {
+			if ((h > (timing->fsl + timing->fbl)) && (h < (timing->fsl + timing->fbl + timing->fdl))) {
+				if (w < timing->lsl) {
+					wave->bits.sdle = 1;
+				} else {
+					wave->bits.sdle = 0;
+				}
+			} else {
+				wave->bits.sdle = 0;
+			}
 
-	global_ctrl_buffer = (A13_WAVEDATA *)kzalloc(wav_width * wav_height *
-					sizeof(A13_WAVEDATA), GFP_KERNEL);
-	if (global_ctrl_buffer == NULL) {
-		pr_err("%s: alloc memory for global control buffer fail, size=0x%x\n", __func__,
-				(unsigned int)(wav_width * wav_height * sizeof(A13_WAVEDATA)));
-		return -ENOMEM;
-	}
+			if ((h >= (timing->fsl + timing->fbl)) && (h < (timing->fsl + timing->fbl + timing->fdl))) {
+				if ((w >= (timing->lsl + timing->lbl)) && (w < (timing->lsl + timing->lbl + timing->ldl))) {
+					wave->bits.sdsp = 0;
+				} else {
+					wave->bits.sdsp = 1;
+				}
+			} else {
+				wave->bits.sdsp = 1;
+			}
 
-	point = (u32 *)global_ctrl_buffer;
-	p_ctrl_gc_tbl = (u32 *)eink_ctrl_tbl_GC16_COMMON[4];
-	p_ctrl_line = (u32 *)eink_ctrl_line_index_tbl;
+			if ((h < (timing->fsl + timing->fbl + timing->fdl)) &&
+					(w >= (timing->gdck_sta + timing->lsl)) &&
+					(w < (timing->gdck_sta + timing->lsl + timing->lgonl))) {
+				wave->bits.gdck = 1;
+			} else {
+				wave->bits.gdck = 0;
+			}
 
-	/* line1--line8 */
-	for (row = 0; row < (timing->fsl + timing->fbl); row++) {
-		row_temp = *p_ctrl_line++;
-		for (col = 0; col < wav_width; col++) {
-			*point = eink_ctrl_tbl_GC16_COMMON[row_temp][col];
-			point++;
+			if (((h == 0) && (w >= (timing->gdck_sta + (timing->lgonl>>1)))) ||
+					((h > 0) && (h < timing->fsl)) ||
+					((h == timing->fsl) && (w < (wav_width - timing->gdck_sta - (timing->lgonl>>1))))) {
+				wave->bits.gdsp = 0;
+			} else {
+				wave->bits.gdsp = 1;
+			}
+
+			if (((h == (GDOE_START_LINE + timing->fbl)) && (w >= timing->gdck_sta)) ||
+					((h > (GDOE_START_LINE + timing->fbl)) && (h < (GDOE_START_LINE + timing->fbl + timing->fdl))) ||
+					((h == (GDOE_START_LINE + timing->fbl + timing->fdl)) && (w < timing->gdck_sta))) {
+				wave->bits.sdoe = 1;
+			} else {
+				wave->bits.sdoe = 0;
+			}
+
+			if (((h == GDOE_START_LINE) && (w >= timing->gdck_sta)) ||
+					((h > GDOE_START_LINE) && (h < (GDOE_START_LINE + timing->fbl + timing->fdl))) ||
+					((h == (GDOE_START_LINE + timing->fbl + timing->fdl)) && (w < timing->gdck_sta))) {
+				wave->bits.gdoe = 1;
+			} else {
+				wave->bits.gdoe = 0;
+			}
+
+			wave++;
 		}
-	}
-
-/*    p_ctrl_line += 600;*/
-/*    point += 600*258;*/
-
-	for (; row < (wav_height - timing->fel); row++) {
-		row_temp = *p_ctrl_line++;
-/*		for (col = 0; col < (eink_timing_info->lsl +
- *					eink_timing_info->lbl); col++) {
-			*point = (*(p_ctrl_gc_tbl + col));
-			point++;
-		}
-
-		point += h_data_len;
-		col += h_data_len;
-*/
-		for (col = 0; col < wav_width; col++) {
-			*point = (*(p_ctrl_gc_tbl + col));
-			point++;
-		}
-	}
-
-	for (; row < wav_height; row++) {
-		row_temp = *p_ctrl_line++;
-		for (col = 0; col < wav_width; col++) {
-			*point = eink_ctrl_tbl_GC16_COMMON[row_temp][col];
-			point++;
-		}
-	}
-
-	src = global_ctrl_buffer;
-	dest = (TIMING_INFO *)timing_vaddr;
-
-	for (row = 0; row < wav_height; row++) {
-		for (col = 0; col < wav_width; col++) {
-			dest->bits.mode = src->bits.mode;
-			dest->bits.oeh = src->bits.oeh;
-			dest->bits.leh = src->bits.leh;
-			dest->bits.sth = src->bits.sth;
-			dest->bits.ckv = src->bits.ckv;
-			dest->bits.stv = src->bits.stv;
-			dest->bits.res0 = 0;//3;
-			dest++;
-			src++;
-		}
-	}
-
-	if (global_ctrl_buffer != NULL) {
-		kfree(global_ctrl_buffer);
-		global_ctrl_buffer = NULL;
 	}
 
 	return ret;
 }
-#endif
 
 static s32 timing_ctrl_set_open_func(struct timing_ctrl_manager *mgr,
 					EINK_PANEL_FUNC func, u32 delay)
 {
 	EINK_INFO_MSG("\n");
 	if (func) {
-		EINK_INFO_MSG("\n");
 		mgr->open_flow.func[mgr->open_flow.func_num].func = func;
 		mgr->open_flow.func[mgr->open_flow.func_num].delay = delay;
 		mgr->open_flow.func_num++;
@@ -891,41 +786,116 @@ static s32 timing_ctrl_set_close_func(struct timing_ctrl_manager *mgr,
 	return 0;
 }
 
+static int eink_set_bright(struct eink_backlight_info *p_info, u32 bright)
+{
+	int ret = -1;
+
+	if (!p_info) {
+		pr_warn("NULL hdl!\n");
+		return -1;
+	}
+
+	p_info->backlight_bright = (bright >= 255) ? 255 : bright;
+
+	if (p_info->pwm_info.dev) {
+		p_info->pwm_info.duty_ns =
+			(p_info->backlight_bright *
+			 p_info->pwm_info.period_ns) /
+			256;
+
+		ret = pwm_config(p_info->pwm_info.dev, p_info->pwm_info.duty_ns,
+				 p_info->pwm_info.period_ns);
+	}
+
+	return ret;
+}
+
+static int eink_backlight_enable(struct eink_backlight_info *p_info)
+{
+	int ret = -1;
+	if (!p_info) {
+		pr_warn("NULL hdl!\n");
+		goto OUT;
+	}
+	if (p_info->pwm_info.enabled) {
+		ret = 0;
+		goto OUT;
+	}
+
+	if (p_info->lcd_bl_en_used) {
+		eink_sys_gpio_set_value(&p_info->lcd_bl_en,
+					!p_info->lcd_bl_en.value);
+	}
+	eink_set_bright(p_info, p_info->backlight_bright);
+	pwm_enable(p_info->pwm_info.dev);
+	p_info->pwm_info.enabled = true;
+	ret = 0;
+OUT:
+	return ret;
+}
+
+static s32 eink_backlight_disable(struct eink_backlight_info *p_info)
+{
+	if (!p_info) {
+		pr_warn("NULL hdl!\n");
+		return -1;
+	}
+	if (!p_info->pwm_info.enabled) {
+		return 0;
+	}
+
+	if (p_info->lcd_bl_en_used) {
+		eink_sys_gpio_set_value(&p_info->lcd_bl_en,
+					p_info->lcd_bl_en.value);
+	}
+	pwm_disable(p_info->pwm_info.dev);
+	p_info->pwm_info.enabled = false;
+
+	return 0;
+}
+
 s32 timing_ctrl_mgr_enable(struct timing_ctrl_manager *mgr)
 {
 	int ret = 0, i = 0;
+	unsigned long flags = 0;
 
+	spin_lock_irqsave(&mgr->tlock, flags);
+	if (mgr->enabled) {
+		pr_warn("timing mgr already enable!\n");
+		spin_unlock_irqrestore(&mgr->tlock, flags);
+		return 0;
+	}
+
+	spin_unlock_irqrestore(&mgr->tlock, flags);
 #ifdef TIMING_FROM_MEM
-	u32 hsync = 0, vsync = 0, timing_size = 0;
-	void *timing_vaddr = NULL;
-	unsigned long timing_paddr = 0;
+	u32 hsync = 0, vsync = 0;
 	struct timing_buf_cfg cfg_buf;
 	struct timing_info *timing = &mgr->info;
 	u32 coor_x = 0, coor_y = 0;
 
 	hsync = timing->lsl + timing->lbl + timing->ldl + timing->lel;
 	vsync = timing->fsl + timing->fbl + timing->fdl + timing->fel;
-	timing_size = hsync * vsync;
+	mgr->timing_size = hsync * vsync;
 
-	timing_vaddr = eink_malloc(timing_size, &timing_paddr);
-	if (timing_vaddr == NULL) {
+	mgr->timing_vaddr = eink_malloc(mgr->timing_size, &mgr->timing_paddr);
+	if (mgr->timing_vaddr == NULL) {
 		pr_err("%s: timing buf malloc faile\n", __func__);
 		ret = -ENOMEM;
 		goto timing_buf_err;
 	}
 
-	ret = init_eink_ctrl_data((unsigned long)timing_vaddr);
+	ret = init_eink_ctrl_data((unsigned long)mgr->timing_vaddr);
 	if (ret) {
 		pr_err("%s:fail to init ctrl data\n", __func__);
 		ret = -EINVAL;
 		goto timing_buf_err;
 	}
-	eink_cache_sync(timing_vaddr, timing_size);
-	EINK_INFO_MSG("timing vaddr=0x%p, paddr=0x%p\n", timing_vaddr, (void *)timing_paddr);
+	eink_cache_sync(mgr->timing_vaddr, mgr->timing_size);
+	EINK_DEBUG_MSG("timing vaddr=0x%p, paddr=0x%p\n", mgr->timing_vaddr, (void *)mgr->timing_paddr);
 
-	save_as_bin_file((__u8 *)timing_vaddr, "/tmp/timing_test.bin", timing_size, 0);
+//	save_as_bin_file((__u8 *)mgr->timing_vaddr, "/tmp/timing_test.bin", mgr->timing_size, 0);
 
-	cfg_buf.addr   = timing_paddr;
+	cfg_buf.addr   = mgr->timing_paddr;
 	cfg_buf.width  = hsync - 1;
 	cfg_buf.pitch  = hsync;
 	cfg_buf.height = vsync - 1;
@@ -939,48 +909,72 @@ s32 timing_ctrl_mgr_enable(struct timing_ctrl_manager *mgr)
 	eink_timing_gen_enable();
 #endif
 	for (i = 0; i < EINK_GPIO_NUM; i++) {
-		mgr->gpio_hdl[i] = 0;
 
 		if (mgr->eink_gpio_used[i]) {
-			mgr->gpio_hdl[i] =
-				eink_sys_gpio_request(&mgr->eink_gpio[i], 1);
+			eink_sys_gpio_request(&mgr->eink_gpio[i]);
 		}
 	}
 
+	mgr->open_flow.func_num = 0;/* reset when standby */
 	if (mgr->panel_func.cfg_open_flow)
 		mgr->panel_func.cfg_open_flow();
-	else
+	else {
 		pr_err("%s:cfg_open_flow is NULL\n", __func__);
+		ret = -EINVAL;
+		return ret;
+	}
 
-	EINK_INFO_MSG("func num = %d\n", mgr->open_flow.func_num);
 	for (i = 0; i < mgr->open_flow.func_num; i++) {
-		EINK_INFO_MSG("0x%p\n", mgr->open_flow.func[i].func);
 		if (mgr->open_flow.func[i].func) {
 			mgr->open_flow.func[i].func();
-			EINK_INFO_MSG("open flow:step %d finish, to delay %d\n", i,
+			EINK_DEBUG_MSG("open flow:step %d finish, to delay %d\n", i,
 			       mgr->open_flow.func[i].delay);
 			if (mgr->open_flow.func[i].delay != 0)
 				mdelay(mgr->open_flow.func[i].delay);
 		}
 	}
+	if (mgr->info.backlight.p_bl_dev) {
+		mutex_lock(&mgr->info.backlight.backligt_lock);
+		eink_backlight_enable(&mgr->info.backlight);
+		mutex_unlock(&mgr->info.backlight.backligt_lock);
+	}
 
+	spin_lock_irqsave(&mgr->tlock, flags);
+	mgr->enabled = 1;
+	spin_unlock_irqrestore(&mgr->tlock, flags);
+	return ret;
 #ifdef TIMING_FROM_MEM
 timing_buf_err:
-	if (timing_vaddr)
-		eink_free(timing_vaddr, (void *)timing_paddr, timing_size);
-#endif
+	if (mgr->timing_vaddr)
+		eink_free(mgr->timing_vaddr, (void *)mgr->timing_paddr, mgr->timing_size);
 	return ret;
+#endif
 }
 
 int timing_ctrl_mgr_disable(struct timing_ctrl_manager *mgr)
 {
 	int i = 0;
+	unsigned long flags = 0;
 
+	spin_lock_irqsave(&mgr->tlock, flags);
+	if (mgr->enabled == 0) {
+		pr_warn("timing mgr already disable!\n");
+		spin_unlock_irqrestore(&mgr->tlock, flags);
+		return 0;
+	}
+	spin_unlock_irqrestore(&mgr->tlock, flags);
+
+	mgr->close_flow.func_num = 0;
 	if (mgr->panel_func.cfg_close_flow)
 		mgr->panel_func.cfg_close_flow();
 	else {
 		pr_err("%s:cfg_close_flow is NULL\n", __func__);
 		return -1;
+	}
+	if (mgr->info.backlight.p_bl_dev) {
+		mutex_lock(&mgr->info.backlight.backligt_lock);
+		eink_backlight_disable(&mgr->info.backlight);
+		mutex_unlock(&mgr->info.backlight.backligt_lock);
 	}
 
 	for (i = 0; i < mgr->close_flow.func_num; i++) {
@@ -994,17 +988,158 @@ int timing_ctrl_mgr_disable(struct timing_ctrl_manager *mgr)
 	}
 
 	for (i = 0; i < EINK_GPIO_NUM; i++) {
-		if (mgr->gpio_hdl[i]) {
-			eink_sys_gpio_release(mgr->gpio_hdl[i]);
-
-			mgr->eink_gpio[i].mul_sel = 7;
-			mgr->gpio_hdl[i] =
-				eink_sys_gpio_request(&mgr->eink_gpio[i], 1);
-
-			eink_sys_gpio_release(mgr->gpio_hdl[i]);
-			mgr->gpio_hdl[i] = 0;
-		}
+		eink_sys_gpio_release(&mgr->eink_gpio[i]);
 	}
+#ifdef TIMING_FROM_MEM
+	if (mgr->timing_vaddr)
+		eink_free(mgr->timing_vaddr, (void *)mgr->timing_paddr, mgr->timing_size);
+#endif
+	spin_lock_irqsave(&mgr->tlock, flags);
+	mgr->enabled = 0;
+	spin_unlock_irqrestore(&mgr->tlock, flags);
+	return 0;
+}
+
+
+
+static int eink_backlight_update_status(struct backlight_device *bd)
+{
+	struct eink_backlight_info *p_info =
+	    (struct eink_backlight_info *)bd->dev.driver_data;
+
+	mutex_lock(&p_info->backligt_lock);
+
+	if (bd->props.power != FB_BLANK_POWERDOWN) {
+		if (!p_info->pwm_info.enabled)
+			eink_backlight_enable(p_info);
+		eink_set_bright(p_info, bd->props.brightness);
+	} else {
+		eink_set_bright(p_info, 0);
+		if (p_info->pwm_info.enabled)
+			eink_backlight_disable(p_info);
+	}
+
+	mutex_unlock(&p_info->backligt_lock);
+
+	return 0;
+}
+
+static int eink_backlight_get_brightness(struct backlight_device *bd)
+{
+	struct eink_backlight_info *p_info =
+	    (struct eink_backlight_info *)bd->dev.driver_data;
+
+	int ret = -1;
+	if (!p_info)
+		goto OUT;
+
+	mutex_lock(&p_info->backligt_lock);
+	ret = p_info->backlight_bright;
+	mutex_unlock(&p_info->backligt_lock);
+
+OUT:
+	return ret;
+}
+
+static const struct backlight_ops sunxi_backlight_device_ops = {
+	.update_status = eink_backlight_update_status,
+	.get_brightness = eink_backlight_get_brightness,
+};
+
+static int eink_backlight_register(struct eink_backlight_info *p_info,
+				   struct device *p_dev)
+{
+	struct backlight_properties props;
+	char sunxi_bl_name[40] = {0};
+
+	if (!p_info || !p_dev) {
+		pr_warn("NULL pointer\n");
+		return -1;
+	}
+
+	memset(&props, 0, sizeof(props));
+	props.type = BACKLIGHT_RAW;
+
+	/*
+	 * Note: Everything should work even if the backlight device max
+	 * presented to the userspace is arbitrarily chosen.
+	 */
+	props.max_brightness = 255;
+	props.brightness = p_info->backlight_bright;
+
+	props.power = FB_BLANK_UNBLANK;
+	snprintf(sunxi_bl_name, 40, "eink");
+
+	p_info->p_bl_dev = backlight_device_register(
+	    sunxi_bl_name, p_dev, p_info, &sunxi_backlight_device_ops, &props);
+
+	if (!p_info->p_bl_dev) {
+		pr_warn("backligt register fail!\n");
+		return -2;
+	}
+
+	return 0;
+}
+
+static void eink_backlight_unregister(struct eink_backlight_info *p_info)
+{
+	if (p_info->p_bl_dev) {
+		backlight_device_unregister(p_info->p_bl_dev);
+		p_info->p_bl_dev = NULL;
+	} else
+		pr_warn("Can not find corresponding backlight device\n");
+}
+
+static int __backlight_init(struct eink_backlight_info *p_info, struct device *p_dev)
+{
+	int ret = -1;
+
+	if (!p_info || !p_dev)
+		goto OUT;
+
+	if (p_info->pwm_info.used) {
+		if (p_info->lcd_bl_en_used) {
+			p_info->lcd_bl_gpio_hdl =
+				eink_sys_gpio_request(&p_info->lcd_bl_en);
+			if (p_info->lcd_bl_gpio_hdl < 0) {
+				pr_warn("request eink bl en fail!\n");
+				goto OUT;
+			}
+		}
+		p_info->pwm_info.dev =
+			pwm_request(p_info->pwm_info.channel, "eink");
+		if (IS_ERR_OR_NULL(p_info->pwm_info.dev)) {
+			pr_warn("request pwm %d fail\n", p_info->pwm_info.channel);
+			goto GPIO_FREE;
+		}
+
+
+		mutex_init(&p_info->backligt_lock);
+		ret = eink_backlight_register(p_info, p_dev);
+		if (ret)
+			goto PWM_FREE;
+
+	}
+	ret = 0;
+	goto OUT;
+
+
+PWM_FREE:
+	pwm_free(p_info->pwm_info.dev);
+GPIO_FREE:
+	eink_sys_gpio_release(&p_info->lcd_bl_en);
+OUT:
+	return ret;
+}
+
+static int __backlight_deinit(struct eink_backlight_info *p_info)
+{
+	if (!IS_ERR_OR_NULL(p_info->pwm_info.dev)) {
+		pwm_free(p_info->pwm_info.dev);
+	}
+
+	eink_sys_gpio_release(&p_info->lcd_bl_en);
+	eink_backlight_unregister(p_info);
 
 	return 0;
 }
@@ -1013,8 +1148,15 @@ int timing_ctrl_mgr_init(struct init_para *para)
 {
 	int ret = 0;
 	struct timing_ctrl_manager *timing_ctrl_mgr = NULL;
-
+	struct eink_driver_info *p_info =
+	    container_of(para, struct eink_driver_info, init_para);
+	struct device *p_dev = NULL;
 	struct eink_manager *eink_mgr = get_eink_manager();
+
+	if (p_info) {
+		p_dev = p_info->device;
+	}
+
 
 	if (eink_mgr == NULL) {
 		pr_err("%s:eink_mgr is NULL!\n", __func__);
@@ -1030,21 +1172,25 @@ int timing_ctrl_mgr_init(struct init_para *para)
 
 	memcpy(&timing_ctrl_mgr->info, &para->timing_info, sizeof(struct timing_info));
 	memcpy(timing_ctrl_mgr->eink_gpio_used, para->eink_gpio_used, EINK_GPIO_NUM * sizeof(unsigned int));
-	memcpy(timing_ctrl_mgr->eink_gpio, para->eink_gpio, EINK_GPIO_NUM * sizeof(struct eink_gpio_cfg));
+	memcpy(timing_ctrl_mgr->eink_gpio, para->eink_gpio, EINK_GPIO_NUM * sizeof(struct eink_gpio_info));
 
 	timing_ctrl_mgr->enable = timing_ctrl_mgr_enable;
 	timing_ctrl_mgr->disable = timing_ctrl_mgr_disable;
 	timing_ctrl_mgr->set_open_func = timing_ctrl_set_open_func;
 	timing_ctrl_mgr->set_close_func = timing_ctrl_set_close_func;
 
+	timing_ctrl_mgr->enabled = 0;
 	eink_mgr->timing_ctrl_mgr = timing_ctrl_mgr;
 	g_timing_ctrl_mgr = timing_ctrl_mgr;
+	ret = __backlight_init(&timing_ctrl_mgr->info.backlight, p_dev);
+	if (ret) {
+		__backlight_deinit(&timing_ctrl_mgr->info.backlight);
+	}
 
 	/* init eink panel func */
 	eink_panel_init();
 
 	return 0;
-
 timing_mgr_err:
 	kfree(timing_ctrl_mgr);
 	return ret;

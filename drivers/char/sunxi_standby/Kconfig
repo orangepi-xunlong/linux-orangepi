@@ -1,0 +1,13 @@
+#
+# sunxi standby debug config.
+#
+
+config SUNXI_STANDBY_DEBUG
+	tristate "sunxi standby debug driver"
+	depends on ARCH_SUNXI && PM && (ARM || ARM64)
+	default y
+	---help---
+	  Say y here if you want to support standby debug module.
+	  The standby debug module is used to debug system suspend.
+	  When in doubt, say "Y".
+

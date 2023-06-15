@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Data gathering module for Linux-VM Monitor Stream, Stage 1.
  * Collects misc. OS related data (CPU utilization, running processes).
@@ -18,6 +19,7 @@
 #include <linux/netdevice.h>
 #include <linux/sched.h>
 #include <linux/sched/loadavg.h>
+#include <linux/sched/stat.h>
 #include <asm/appldata.h>
 #include <asm/smp.h>
 

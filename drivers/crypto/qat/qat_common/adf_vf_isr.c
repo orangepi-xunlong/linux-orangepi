@@ -148,7 +148,7 @@ static void adf_pf2vf_bh_handler(void *data)
 		INIT_WORK(&stop_data->work, adf_dev_stop_async);
 		queue_work(adf_vf_stop_wq, &stop_data->work);
 		/* To ack, clear the PF2VFINT bit */
-		msg &= ~BIT(0);
+		msg &= ~ADF_PF2VF_INT;
 		ADF_CSR_WR(pmisc_bar_addr, hw_data->get_pf2vf_offset(0), msg);
 		return;
 	}
@@ -168,7 +168,7 @@ static void adf_pf2vf_bh_handler(void *data)
 	}
 
 	/* To ack, clear the PF2VFINT bit */
-	msg &= ~BIT(0);
+	msg &= ~ADF_PF2VF_INT;
 	ADF_CSR_WR(pmisc_bar_addr, hw_data->get_pf2vf_offset(0), msg);
 
 	/* Re-enable PF2VF interrupts */
@@ -304,17 +304,26 @@ int adf_vf_isr_resource_alloc(struct adf_accel_dev *accel_dev)
 		goto err_out;
 
 	if (adf_setup_pf2vf_bh(accel_dev))
-		goto err_out;
+		goto err_disable_msi;
 
 	if (adf_setup_bh(accel_dev))
-		goto err_out;
+		goto err_cleanup_pf2vf_bh;
 
 	if (adf_request_msi_irq(accel_dev))
-		goto err_out;
+		goto err_cleanup_bh;
 
 	return 0;
+
+err_cleanup_bh:
+	adf_cleanup_bh(accel_dev);
+
+err_cleanup_pf2vf_bh:
+	adf_cleanup_pf2vf_bh(accel_dev);
+
+err_disable_msi:
+	adf_disable_msi(accel_dev);
+
 err_out:
-	adf_vf_isr_resource_free(accel_dev);
 	return -EFAULT;
 }
 EXPORT_SYMBOL_GPL(adf_vf_isr_resource_alloc);

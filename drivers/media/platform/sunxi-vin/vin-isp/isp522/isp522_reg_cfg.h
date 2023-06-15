@@ -154,6 +154,7 @@
 #define PARA_LOAD_PD		S0_PARA_LOAD_PD
 #define FRAME_ERROR_PD		S0_FRAME_ERROR_PD
 #define FRAME_LOST_PD		S0_FRAME_LOST_PD
+#define HB_SHORT_PD		S0_HB_SHORT_PD
 
 #define ISP_IRQ_STATUS_ALL	0xffffffff
 
@@ -257,6 +258,10 @@ unsigned int bsp_isp_get_isp_ver(unsigned long id, unsigned int *major, unsigned
 unsigned int bsp_isp_get_max_width(unsigned long id);
 void bsp_isp_get_s0_ch_fmerr_cnt(unsigned long id, struct isp_size *size);
 void bsp_isp_get_s0_ch_hb_cnt(unsigned long id, unsigned int *hb_max, unsigned int *hb_min);
+void bsp_isp_set_fifo_mode(unsigned long id, unsigned int mode);
+void bsp_isp_min_ddr_size(unsigned long id, unsigned int size);
+void bsp_isp_fifo_raw_write(unsigned long id, unsigned int depth);
+void bsp_isp_k_min_ddr_size(unsigned long id, unsigned int size);
 
 /*******isp load register which we should write to ddr first*********/
 

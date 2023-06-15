@@ -1,10 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0
 /******************************************************************************
  *
  * This file contains wireless extension handlers.
  *
  * This is part of rtl8180 OpenSource driver.
  * Copyright (C) Andrea Merello 2004-2005  <andrea.merello@gmail.com>
- * Released under the terms of GPL (General Public Licence)
  *
  * Parts of this driver are based on the GPL part
  * of the official realtek driver.
@@ -333,8 +333,10 @@ static int r8192_wx_set_scan(struct net_device *dev, struct iw_request_info *a,
 		struct iw_scan_req *req = (struct iw_scan_req *)b;
 
 		if (req->essid_len) {
-			ieee->current_network.ssid_len = req->essid_len;
-			memcpy(ieee->current_network.ssid, req->essid, req->essid_len);
+			int len = min_t(int, req->essid_len, IW_ESSID_MAX_SIZE);
+
+			ieee->current_network.ssid_len = len;
+			memcpy(ieee->current_network.ssid, req->essid, len);
 		}
 	}
 
@@ -562,7 +564,7 @@ static int r8192_wx_set_enc(struct net_device *dev,
 		}
 
 		if (wrqu->encoding.length == 0x5) {
-				ieee->pairwise_key_type = KEY_TYPE_WEP40;
+			ieee->pairwise_key_type = KEY_TYPE_WEP40;
 			EnableHWSecurityConfig8192(dev);
 
 			setKey(dev,
@@ -576,8 +578,8 @@ static int r8192_wx_set_enc(struct net_device *dev,
 		}
 
 		else if (wrqu->encoding.length == 0xd) {
-				ieee->pairwise_key_type = KEY_TYPE_WEP104;
-				EnableHWSecurityConfig8192(dev);
+			ieee->pairwise_key_type = KEY_TYPE_WEP104;
+			EnableHWSecurityConfig8192(dev);
 
 			setKey(dev,
 				key_idx,                /* EntryNo */
@@ -964,7 +966,7 @@ struct iw_statistics *r8192_get_wireless_stats(struct net_device *dev)
 	return wstats;
 }
 
-struct iw_handler_def  r8192_wx_handlers_def = {
+const struct iw_handler_def  r8192_wx_handlers_def = {
 	.standard = r8192_wx_handlers,
 	.num_standard = ARRAY_SIZE(r8192_wx_handlers),
 	.private = r8192_private_handler,

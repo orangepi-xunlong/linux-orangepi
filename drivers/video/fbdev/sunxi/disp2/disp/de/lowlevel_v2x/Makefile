@@ -3,7 +3,6 @@
 # Tyle <tyle at allwinnertech.com>
 #
 #
-
 mydir = de/lowlevel_v2x
 
 ifeq ($(MIPI_DSI_IP_VERSION),40)
@@ -21,10 +20,22 @@ ifneq ($(CONFIG_EINK200_SUNXI),y)
 wb_obj:=$(mydir)/de_wb.o
 endif
 
+ifeq ($(CONFIG_ARCH_SUN50IW10),y)
+de_lcd_obj:=$(mydir)/de_lcd_sun50iw10.o
+else ifeq ($(CONFIG_ARCH_SUN8IW20),y)
+de_lcd_obj:=$(mydir)/de_lcd_sun50iw10.o
+else ifeq ($(CONFIG_ARCH_SUN20IW1),y)
+de_lcd_obj:=$(mydir)/de_lcd_sun50iw10.o
+else
+de_lcd_obj:=$(mydir)/de_lcd.o
+endif
+
 obj_low = $(mydir)/de_fcc.o $(mydir)/de_gsu.o $(mydir)/de_hal.o $(mydir)/disp_al.o \
 		$(mydir)/de_peak.o $(mydir)/de_rtmx.o $(mydir)/de_scaler_table.o\
 		$(mydir)/de_vep_table.o $(mydir)/de_vsu.o $(mydir)/de_feat.o \
-		$(mydir)/de_lcd.o $(mydir)/de_lti.o $(mydir)/de_fce.o \
+		$(mydir)/de_lti.o $(mydir)/de_fce.o \
 		$(mydir)/de_ase.o $(mydir)/de_bws.o $(mydir)/de_enhance.o \
 		$(mydir)/de_smbl.o $(mydir)/de_ccsc.o $(mydir)/de_dcsc.o \
-		$(wb_obj) $(mydir)/de_clock.o $(eink_obj) $(dsi_obj)
+		$(wb_obj) $(mydir)/de_clock.o $(eink_obj) $(dsi_obj) $(de_lcd_obj)
+
+ccflags-y += -DDE_VERSION_V2X

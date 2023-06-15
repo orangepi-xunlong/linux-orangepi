@@ -285,8 +285,4 @@ int decode_is_i2c_stat0(u32 decode)
 	return (decode & IH_DECODE_IH_I2CM_STAT0_MASK) ? 1 : 0;
 }
 
-int decode_is_cec_stat0(u32 decode)
-{
-	return (decode & IH_DECODE_IH_CEC_STAT0_MASK) ? 1 : 0;
-}
 #endif

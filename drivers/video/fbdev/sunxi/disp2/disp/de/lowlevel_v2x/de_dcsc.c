@@ -46,14 +46,7 @@ static int de_dcsc_set_reg_base(unsigned int sel, void *base)
 	return 0;
 }
 
-int _csc_enhance_setting[CSC_ENHANCE_MODE_NUM][4] = {
-    {50, 50, 50, 50},
-    /* normal */
-    {50, 50, 50, 50},
-    /* vivid */
-    {50, 40, 50, 50},
-    /* soft */
-};
+extern int _csc_enhance_setting[CSC_ENHANCE_MODE_NUM][4];
 
 int de_dcsc_apply(unsigned int sel, struct disp_csc_config *config)
 {
@@ -165,7 +158,7 @@ int de_dcsc_init(struct disp_bsp_init_para *para)
 	for (screen_id = 0; screen_id < device_num; screen_id++) {
 		is_in_smbl[screen_id] = de_feat_is_support_smbl(screen_id);
 
-#if defined(CONFIG_ARCH_SUN50IW10)
+#if defined(CONFIG_INDEPENDENT_DE)
 		base = para->reg_base[DISP_MOD_DE + screen_id]
 		    + (screen_id + 1) * 0x00100000 + DCSC_OFST;
 		if (screen_id)

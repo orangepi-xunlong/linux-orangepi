@@ -29,6 +29,10 @@ struct sunxi_ndfc {
 	struct clk *pclk;/*pll clock*/
 	struct clk *mdclk; /*nand module clock*/
 	struct clk *mcclk; /*nand ecc engine clock*/
+	struct clk *busclk;
+	struct clk *mbusclk;
+	struct reset_control *rst;
+
 	struct regulator *regu1; /*vcc-nand*/
 	struct regulator *regu2; /*vcc-io*/
 

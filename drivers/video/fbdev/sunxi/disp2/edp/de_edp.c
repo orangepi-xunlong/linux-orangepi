@@ -14,7 +14,6 @@
 
 char fp_tx_buf[16];
 char fp_rx_buf[16];
-char fp_temp_buf[16];
 
 int training_aux_rd_interval_CR, training_aux_rd_interval_EQ;
 int sink_ssc_flag;
@@ -158,6 +157,142 @@ void phy_cfg(u32 sel, u8 swing_lv, u8 preemp_lv, u8 postcur2_lv)
 			      glb_lane_cnt);
 }
 
+void new_phy_cfg(u32 sel, u8 sw0, u8 pre0, u8 sw1, u8 pre1, u8 sw2, u8 pre2,
+		 u8 sw3, u8 pre3)
+{
+	u8 index0, index1, index2, index3;
+	u32 mc0, tap1_0, tap2_0, tap1_op0, tap2_op0;
+	u32 mc1, tap1_1, tap2_1, tap1_op1, tap2_op1;
+	u32 mc2, tap1_2, tap2_2, tap1_op2, tap2_op2;
+	u32 mc3, tap1_3, tap2_3, tap1_op3, tap2_op3;
+
+	u32 mc, tap1, tap2, tap1_op, tap2_op;
+
+	index0 = sw0 * 4 + pre0;
+	index1 = sw1 * 4 + pre1;
+	index2 = sw2 * 4 + pre2;
+	index3 = sw3 * 4 + pre3;
+
+	switch (glb_bit_rate) {
+	case BR_1P62G:
+		mc0 = (rbr_tbl[index0].mc) & 0xf;
+		tap1_0 = (rbr_tbl[index0].tap1) & 0xff;
+		tap2_0 = (rbr_tbl[index0].tap2) & 0xf;
+		tap1_op0 = (rbr_tbl[index0].tap1_op) & 0xff;
+		tap2_op0 = (rbr_tbl[index0].tap2_op) & 0xf;
+
+		mc1 = (rbr_tbl[index1].mc >> 4) & 0xf;
+		tap1_1 = (rbr_tbl[index1].tap1 >> 8) & 0xff;
+		tap2_1 = (rbr_tbl[index1].tap2 >> 4) & 0xf;
+		tap1_op1 = (rbr_tbl[index1].tap1_op >> 8) & 0xff;
+		tap2_op1 = (rbr_tbl[index1].tap2_op >> 4) & 0xf;
+
+		mc2 = (rbr_tbl[index2].mc >> 8) & 0xf;
+		tap1_2 = (rbr_tbl[index2].tap1 >> 16) & 0xff;
+		tap2_2 = (rbr_tbl[index2].tap2 >> 8) & 0xf;
+		tap1_op2 = (rbr_tbl[index2].tap1_op >> 16) & 0xff;
+		tap2_op2 = (rbr_tbl[index2].tap2_op >> 8) & 0xf;
+
+		mc3 = (rbr_tbl[index3].mc >> 12) & 0xf;
+		tap1_3 = (rbr_tbl[index3].tap1 >> 24) & 0xff;
+		tap2_3 = (rbr_tbl[index3].tap2 >> 12) & 0xf;
+		tap1_op3 = (rbr_tbl[index3].tap1_op >> 24) & 0xff;
+		tap2_op3 = (rbr_tbl[index3].tap2_op >> 12) & 0xf;
+		break;
+	case BR_2P7G:
+		mc0 = (hbr_tbl[index0].mc) & 0xf;
+		tap1_0 = (hbr_tbl[index0].tap1) & 0xff;
+		tap2_0 = (hbr_tbl[index0].tap2) & 0xf;
+		tap1_op0 = (hbr_tbl[index0].tap1_op) & 0xff;
+		tap2_op0 = (hbr_tbl[index0].tap2_op) & 0xf;
+
+		mc1 = (hbr_tbl[index1].mc >> 4) & 0xf;
+		tap1_1 = (hbr_tbl[index1].tap1 >> 8) & 0xff;
+		tap2_1 = (hbr_tbl[index1].tap2 >> 4) & 0xf;
+		tap1_op1 = (hbr_tbl[index1].tap1_op >> 8) & 0xff;
+		tap2_op1 = (hbr_tbl[index1].tap2_op >> 4) & 0xf;
+
+		mc2 = (hbr_tbl[index2].mc >> 8) & 0xf;
+		tap1_2 = (hbr_tbl[index2].tap1 >> 16) & 0xff;
+		tap2_2 = (hbr_tbl[index2].tap2 >> 8) & 0xf;
+		tap1_op2 = (hbr_tbl[index2].tap1_op >> 16) & 0xff;
+		tap2_op2 = (hbr_tbl[index2].tap2_op >> 8) & 0xf;
+
+		mc3 = (hbr_tbl[index3].mc >> 12) & 0xf;
+		tap1_3 = (hbr_tbl[index3].tap1 >> 24) & 0xff;
+		tap2_3 = (hbr_tbl[index3].tap2 >> 12) & 0xf;
+		tap1_op3 = (hbr_tbl[index3].tap1_op >> 24) & 0xff;
+		tap2_op3 = (hbr_tbl[index3].tap2_op >> 12) & 0xf;
+		break;
+	case BR_5P4G:
+		mc0 = (hbr2_tbl[index0].mc) & 0xf;
+		tap1_0 = (hbr2_tbl[index0].tap1) & 0xff;
+		tap2_0 = (hbr2_tbl[index0].tap2) & 0xf;
+		tap1_op0 = (hbr2_tbl[index0].tap1_op) & 0xff;
+		tap2_op0 = (hbr2_tbl[index0].tap2_op) & 0xf;
+
+		mc1 = (hbr2_tbl[index1].mc >> 4) & 0xf;
+		tap1_1 = (hbr2_tbl[index1].tap1 >> 8) & 0xff;
+		tap2_1 = (hbr2_tbl[index1].tap2 >> 4) & 0xf;
+		tap1_op1 = (hbr2_tbl[index1].tap1_op >> 8) & 0xff;
+		tap2_op1 = (hbr2_tbl[index1].tap2_op >> 4) & 0xf;
+
+		mc2 = (hbr2_tbl[index2].mc >> 8) & 0xf;
+		tap1_2 = (hbr2_tbl[index2].tap1 >> 16) & 0xff;
+		tap2_2 = (hbr2_tbl[index2].tap2 >> 8) & 0xf;
+		tap1_op2 = (hbr2_tbl[index2].tap1_op >> 16) & 0xff;
+		tap2_op2 = (hbr2_tbl[index2].tap2_op >> 8) & 0xf;
+
+		mc3 = (hbr2_tbl[index3].mc >> 12) & 0xf;
+		tap1_3 = (hbr2_tbl[index3].tap1 >> 24) & 0xff;
+		tap2_3 = (hbr2_tbl[index3].tap2 >> 12) & 0xf;
+		tap1_op3 = (hbr2_tbl[index3].tap1_op >> 24) & 0xff;
+		tap2_op3 = (hbr2_tbl[index3].tap2_op >> 12) & 0xf;
+
+		break;
+	default:
+		mc0 = (hbr_tbl[index0].mc) & 0xf;
+		tap1_0 = (hbr_tbl[index0].tap1) & 0xff;
+		tap2_0 = (hbr_tbl[index0].tap2) & 0xf;
+		tap1_op0 = (hbr_tbl[index0].tap1_op) & 0xff;
+		tap2_op0 = (hbr_tbl[index0].tap2_op) & 0xf;
+
+		mc1 = (hbr_tbl[index1].mc >> 4) & 0xf;
+		tap1_1 = (hbr_tbl[index1].tap1 >> 8) & 0xff;
+		tap2_1 = (hbr_tbl[index1].tap2 >> 4) & 0xf;
+		tap1_op1 = (hbr_tbl[index1].tap1_op >> 8) & 0xff;
+		tap2_op1 = (hbr_tbl[index1].tap2_op >> 4) & 0xf;
+
+		mc2 = (hbr_tbl[index2].mc >> 8) & 0xf;
+		tap1_2 = (hbr_tbl[index2].tap1 >> 16) & 0xff;
+		tap2_2 = (hbr_tbl[index2].tap2 >> 8) & 0xf;
+		tap1_op2 = (hbr_tbl[index2].tap1_op >> 16) & 0xff;
+		tap2_op2 = (hbr_tbl[index2].tap2_op >> 8) & 0xf;
+
+		mc3 = (hbr_tbl[index3].mc >> 12) & 0xf;
+		tap1_3 = (hbr_tbl[index3].tap1 >> 24) & 0xff;
+		tap2_3 = (hbr_tbl[index3].tap2 >> 12) & 0xf;
+		tap1_op3 = (hbr_tbl[index3].tap1_op >> 24) & 0xff;
+		tap2_op3 = (hbr_tbl[index3].tap2_op >> 12) & 0xf;
+		break;
+	}
+
+	mc = mc0 | (mc1 << 4) | (mc2 << 8) | (mc3 << 12);
+	tap1 = tap1_0 | (tap1_1 << 8) | (tap1_2 << 16) | (tap1_3 << 24);
+	tap2 = tap2_0 | (tap2_1 << 4) | (tap2_2 << 8) | (tap2_3 << 12);
+	tap1_op =
+	    tap1_op0 | (tap1_op1 << 8) | (tap1_op2 << 16) | (tap1_op3 << 24);
+	tap2_op =
+	    tap2_op0 | (tap2_op1 << 4) | (tap2_op2 << 8) | (tap2_op3 << 12);
+
+#ifdef EDP_PHY_TEST
+	swing_preempha_cal(index, mc, tap1, tap2, tap1_op, tap2_op);
+#endif
+
+	edp_hal_phy_drive_ctrl_cfg(sel, mc, tap1, tap2, tap1_op, tap2_op,
+				   glb_lane_cnt);
+}
+
 /* Description:	            dp phy init function
  * @param lane_cnt:         number of lane
  * @param bit_rate:         bitrate of lane
@@ -252,6 +387,78 @@ s32 dp_get_training_info(struct training_info *train_inf)
 	train_inf->postcur2_lv = glb_postcur2_lv;
 	ret = 0;
 OUT:
+	return ret;
+}
+
+s32 dp_training0(u32 sel)
+{
+	int ret = 0;
+
+	ret = new_dp_tps1_test(sel);
+
+	if (ret != RET_OK) {
+		edp_wrn("CR Training Fail!\n");
+		return RET_FAIL;
+	} else {
+		edp_dbg("CR Training OK!\n");
+	}
+
+	ret = new_dp_tps2_test(sel);
+
+	if (ret != RET_OK) {
+		edp_wrn("EQ Training Fail!\n");
+		return RET_FAIL;
+	} else {
+		edp_dbg("EQ Training OK!\n");
+	}
+	return ret;
+}
+
+s32 dp_training1(u32 sel)
+{
+	int ret = 0;
+
+	ret = new1_dp_tps1_test(sel);
+
+	if (ret != RET_OK) {
+		edp_wrn("CR Training Fail!\n");
+		return RET_FAIL;
+	} else {
+		edp_dbg("CR Training OK!\n");
+	}
+
+	ret = new1_dp_tps2_test(sel);
+
+	if (ret != RET_OK) {
+		edp_wrn("EQ Training Fail!\n");
+		return RET_FAIL;
+	} else {
+		edp_dbg("EQ Training OK!\n");
+	}
+	return ret;
+}
+
+s32 dp_training2(u32 sel)
+{
+	int ret = 0;
+
+	ret = new2_dp_tps1_test(sel);
+
+	if (ret != RET_OK) {
+		edp_wrn("CR Training Fail!\n");
+		return RET_FAIL;
+	} else {
+		edp_dbg("CR Training OK!\n");
+	}
+
+	ret = new2_dp_tps2_test(sel);
+
+	if (ret != RET_OK) {
+		edp_wrn("EQ Training Fail!\n");
+		return RET_FAIL;
+	} else {
+		edp_dbg("EQ Training OK!\n");
+	}
 	return ret;
 }
 
@@ -357,22 +564,43 @@ s32 dp_enable(u32 sel, struct edp_para *para, struct disp_video_timings *tmg)
 {
 	s32 ret = -1;
 	struct training_info train_inf;
+	u32 try_cnt = 10;
 
 	ret = dp_init(sel, para->edp_lane, para->edp_rate);
 	if (ret) {
 		edp_wrn("dp init fail\n");
 		goto OUT;
 	}
-	ret = dp_video_set(sel, tmg, para->edp_fps, RGB_INPUT);
+	ret = dp_video_set(sel, tmg, para, RGB_INPUT);
 	if (ret) {
 		edp_wrn("dp_video_set fail:%d\n", ret);
 		goto OUT;
 	}
 
-	ret = dp_training(sel, 0);
-	if (ret) {
-		edp_wrn("dp_training fail:%d\n", ret);
-		goto OUT;
+	while (try_cnt--) {
+		switch (para->edp_training_func) {
+		case 0:
+			ret = dp_training0(sel);
+			break;
+		case 1:
+			ret = dp_training1(sel);
+			break;
+		case 2:
+			ret = dp_training2(sel);
+			break;
+		case 3:
+			ret = dp_training(sel, 0);
+			break;
+		default:
+			ret = dp_training0(sel);
+			break;
+		}
+		if (ret) {
+			edp_wrn("dp_training%d fail:%d after %d times\n",
+				para->edp_training_func, ret, try_cnt);
+			continue;
+		} else
+			break;
 	}
 
 	dp_get_training_info(&train_inf);

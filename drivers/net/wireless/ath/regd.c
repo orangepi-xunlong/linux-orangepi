@@ -454,7 +454,7 @@ static void ath_reg_apply_world_flags(struct wiphy *wiphy,
 	}
 }
 
-static u16 ath_regd_find_country_by_name(char *alpha2)
+u16 ath_regd_find_country_by_name(char *alpha2)
 {
 	unsigned int i;
 
@@ -465,6 +465,7 @@ static u16 ath_regd_find_country_by_name(char *alpha2)
 
 	return -1;
 }
+EXPORT_SYMBOL(ath_regd_find_country_by_name);
 
 static int __ath_reg_dyn_country(struct wiphy *wiphy,
 				 struct ath_regulatory *reg,

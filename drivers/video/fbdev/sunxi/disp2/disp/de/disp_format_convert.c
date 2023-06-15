@@ -64,13 +64,33 @@ static s32 disp_format_convert_enable(unsigned int id)
 
 	disp_sys_enable_irq(mgr->irq_num);
 	if (first) {
-		clk_disable(mgr->clk);
+		clk_disable_unprepare(mgr->clk);
 		first = 0;
 	}
-	ret = clk_prepare_enable(mgr->clk);
 
-	if (ret != 0)
-		DE_WRN("fail enable mgr's clock!\n");
+	ret = reset_control_deassert(mgr->rst);
+	if (ret) {
+		DE_WRN("reset_control_deassert for rst failed, ret=%d\n", ret);
+		return ret;
+	}
+
+	ret = clk_prepare_enable(mgr->clk);
+	if (ret) {
+		DE_WRN("%s(%d): clk_prepare_enable for clk failed, ret=%d\n", __func__, __LINE__, ret);
+		return ret;
+	}
+
+	ret = clk_prepare_enable(mgr->clk_parent);
+	if (ret) {
+		DE_WRN("%s(%d): clk_prepare_enable for clk_parent failed, ret=%d\n", __func__, __LINE__, ret);
+		return ret;
+	}
+
+	ret = clk_prepare_enable(mgr->clk_bus);
+	if (ret) {
+		DE_WRN("%s(%d): clk_prepare_enable for clk_bus failed\n", __func__, __LINE__);
+		return ret;
+	}
 
 	/* enable de clk, enable write back clk */
 	disp_al_de_clk_enable(mgr->disp);
@@ -95,7 +115,12 @@ static s32 disp_format_convert_disable(unsigned int id)
 	if (ret != 0)
 		return ret;
 
-	clk_disable(mgr->clk);
+	clk_disable_unprepare(mgr->clk_bus);
+	clk_disable_unprepare(mgr->clk);
+	ret = reset_control_assert(mgr->rst);
+	if (ret)
+		DE_WRN("%s(%d): reset_control_assert for rst failed\n", __func__, __LINE__);
+
 	disp_sys_disable_irq(mgr->irq_num);
 	disp_sys_unregister_irq(mgr->irq_num, disp_format_convert_finish_proc,
 				(void *)mgr);
@@ -141,6 +166,7 @@ static s32 disp_format_convert_start(unsigned int id,
 		mdata.config.size.y = 0;
 		mdata.config.size.width = dest->width;
 		mdata.config.size.height = dest->height;
+		mdata.config.de_freq = clk_get_rate(mgr->clk);
 
 		for (k = 0; k < layer_num; k++) {
 			ldata[k].flag = LAYER_ALL_DIRTY;
@@ -242,7 +268,9 @@ s32 disp_init_format_convert_manager(struct disp_bsp_init_para *para)
 		mgr->enable = disp_format_convert_enable;
 		mgr->disable = disp_format_convert_disable;
 		mgr->start_convert = disp_format_convert_start;
-		mgr->clk = para->mclk[DISP_MOD_DE];
+		mgr->clk = para->clk_de[i];
+		mgr->clk_bus = para->clk_bus_de[i];
+		mgr->rst = para->reset_bus_de[i];
 		disp_al_set_eink_wb_base(i, para->reg_base[DISP_MOD_DE]);
 	}
 

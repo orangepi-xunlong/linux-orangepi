@@ -21,6 +21,9 @@
 #include <linux/irq.h>
 #include <linux/kdebug.h>
 #include <linux/module.h>
+#include <linux/sched/mm.h>
+#include <linux/sched/hotplug.h>
+#include <linux/sched/task_stack.h>
 #include <linux/reboot.h>
 #include <linux/seq_file.h>
 #include <linux/smp.h>
@@ -123,7 +126,7 @@ void secondary_start_kernel(void)
 
 	init_mmu();
 
-#ifdef CONFIG_DEBUG_KERNEL
+#ifdef CONFIG_DEBUG_MISC
 	if (boot_secondary_processors == 0) {
 		pr_debug("%s: boot_secondary_processors:%d; Hanging cpu:%d\n",
 			__func__, boot_secondary_processors, cpu);
@@ -140,8 +143,8 @@ void secondary_start_kernel(void)
 
 	/* All kernel threads share the same mm context. */
 
-	atomic_inc(&mm->mm_users);
-	atomic_inc(&mm->mm_count);
+	mmget(mm);
+	mmgrab(mm);
 	current->active_mm = mm;
 	cpumask_set_cpu(cpu, mm_cpumask(mm));
 	enter_lazy_tlb(mm, current);
@@ -369,8 +372,7 @@ static void send_ipi_message(const struct cpumask *callmask,
 	unsigned long mask = 0;
 
 	for_each_cpu(index, callmask)
-		if (index != smp_processor_id())
-			mask |= 1 << index;
+		mask |= 1 << index;
 
 	set_er(mask, MIPISET(msg_id));
 }
@@ -409,22 +411,31 @@ irqreturn_t ipi_interrupt(int irq, void *dev_id)
 {
 	unsigned int cpu = smp_processor_id();
 	struct ipi_data *ipi = &per_cpu(ipi_data, cpu);
-	unsigned int msg;
-	unsigned i;
 
-	msg = get_er(MIPICAUSE(cpu));
-	for (i = 0; i < IPI_MAX; i++)
-		if (msg & (1 << i)) {
-			set_er(1 << i, MIPICAUSE(cpu));
-			++ipi->ipi_count[i];
+	for (;;) {
+		unsigned int msg;
+
+		msg = get_er(MIPICAUSE(cpu));
+		set_er(msg, MIPICAUSE(cpu));
+
+		if (!msg)
+			break;
+
+		if (msg & (1 << IPI_CALL_FUNC)) {
+			++ipi->ipi_count[IPI_CALL_FUNC];
+			generic_smp_call_function_interrupt();
 		}
 
-	if (msg & (1 << IPI_RESCHEDULE))
-		scheduler_ipi();
-	if (msg & (1 << IPI_CALL_FUNC))
-		generic_smp_call_function_interrupt();
-	if (msg & (1 << IPI_CPU_STOP))
-		ipi_cpu_stop(cpu);
+		if (msg & (1 << IPI_RESCHEDULE)) {
+			++ipi->ipi_count[IPI_RESCHEDULE];
+			scheduler_ipi();
+		}
+
+		if (msg & (1 << IPI_CPU_STOP)) {
+			++ipi->ipi_count[IPI_CPU_STOP];
+			ipi_cpu_stop(cpu);
+		}
+	}
 
 	return IRQ_HANDLED;
 }

@@ -11,7 +11,7 @@
 #ifndef __NAND_BLK_H__
 #define __NAND_BLK_H__
 
-#include "../phy-nand/nand-partition/phy.h"
+#include "../phy-nand/nand-partition3/sunxi_nand_partitions.h"
 #include "nand_lib.h"
 #include "nand_type.h"
 #include <asm/cacheflush.h>
@@ -58,44 +58,45 @@
 #include <linux/uaccess.h>
 #include <linux/vmalloc.h>
 #include <linux/wait.h>
+#include <linux/blk-mq.h>
 
-#if defined CONFIG_ARCH_SUN8IW1P1
+#if IS_ENABLED(CONFIG_ARCH_SUN8IW1P1)
 #define SUN8IW1P1
-#elif defined CONFIG_ARCH_SUN8IW3P1
+#elif IS_ENABLED(CONFIG_ARCH_SUN8IW3P1)
 #define SUN8IW3P1
-#elif defined CONFIG_ARCH_SUN9IW1P1
+#elif IS_ENABLED(CONFIG_ARCH_SUN9IW1P1)
 #define SUN9IW1P1
-#elif defined CONFIG_ARCH_SUN8IW5P1
+#elif IS_ENABLED(CONFIG_ARCH_SUN8IW5P1)
 #define SUN8IW5P1
-#elif defined CONFIG_ARCH_SUN8IW6P1
+#elif IS_ENABLED(CONFIG_ARCH_SUN8IW6P1)
 #define SUN8IW6P1
-#elif defined CONFIG_ARCH_SUN8IW7P1
+#elif IS_ENABLED(CONFIG_ARCH_SUN8IW7P1)
 #define SUN8IW7P1
-#elif defined CONFIG_ARCH_SUN8IW8P1
+#elif IS_ENABLED(CONFIG_ARCH_SUN8IW8P1)
 #define SUN8IW8P1
-#elif defined CONFIG_ARCH_SUN8IW10P1
+#elif IS_ENABLED(CONFIG_ARCH_SUN8IW10P1)
 #define SUN8IW10P1
-#elif defined CONFIG_ARCH_SUN8IW11P1
+#elif IS_ENABLED(CONFIG_ARCH_SUN8IW11P1)
 #define SUN8IW11P1
-#elif defined CONFIG_ARCH_SUN8IW12P1
+#elif IS_ENABLED(CONFIG_ARCH_SUN8IW12P1)
 #define SUN8IW12P1
-#elif defined CONFIG_ARCH_SUN8IW15P1
+#elif IS_ENABLED(CONFIG_ARCH_SUN8IW15P1)
 #define SUN8IW15P1
-#elif defined CONFIG_ARCH_SUN50I
+#elif IS_ENABLED(CONFIG_ARCH_SUN50I)
 #define SUN50IW1P1
-#elif defined CONFIG_ARCH_SUN8IW10P1
+#elif IS_ENABLED(CONFIG_ARCH_SUN8IW10P1)
 #define SUN8IW10P1
-#elif defined CONFIG_ARCH_SUN8IW11P1
+#elif IS_ENABLED(CONFIG_ARCH_SUN8IW11P1)
 #define SUN8IW11P1
-#elif defined CONFIG_ARCH_SUN50IW2P1
+#elif IS_ENABLED(CONFIG_ARCH_SUN50IW2P1)
 #define SUN50IW2P1
-#elif defined CONFIG_ARCH_SUN50IW3P1
+#elif IS_ENABLED(CONFIG_ARCH_SUN50IW3P1)
 #define SUN50IW6P1
-#elif defined CONFIG_ARCH_SUN8IW18P1
+#elif IS_ENABLED(CONFIG_ARCH_SUN8IW18P1)
 #define SUN8IW18P1
-#elif defined CONFIG_ARCH_SUN50IW9P1
+#elif IS_ENABLED(CONFIG_ARCH_SUN50IW9P1)
 #define SUN50IW9P1
-#elif defined(CONFIG_ARCH_SUN8IW19)
+#elif IS_ENABLED((CONFIG_ARCH_SUN8IW19)
 #define SUN8IW19P1
 #else
 #error "please select a platform\n"
@@ -211,6 +212,7 @@ struct nand_blk_ops {
 	int rq_null;
 
 	struct module *owner;
+	struct blk_mq_tag_set	tag_set;
 };
 
 /*****************************************************************************/

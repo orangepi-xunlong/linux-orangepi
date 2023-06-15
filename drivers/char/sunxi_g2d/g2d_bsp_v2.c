@@ -1734,6 +1734,11 @@ __s32 mixer_stretchblt(g2d_stretchblt *para,
 		/* ROT or scal case */
 		switch (para->flag) {
 		case G2D_BLT_NONE:
+			if ((dst->width == src->width) &&
+					(dst->height == src->height)) {
+				result = g2d_bsp_bitblt(src, dst, G2D_ROT_0);
+				return result;
+			}
 			if (scan_order == G2D_SM_DTLR)
 				result = g2d_bsp_bitblt(src, dst,
 						G2D_BLT_NONE | G2D_SM_DTLR_1);
@@ -2368,3 +2373,9 @@ __u32 mixer_set_reg_base(unsigned long addr)
 	return 0;
 }
 
+__u32 g2d_ip_version(void)
+{
+	__u32 reg_val;
+	reg_val = read_wvalue(G2D_IP_VERSION);
+	return reg_val;
+}

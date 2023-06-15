@@ -1,5 +1,5 @@
 /*
- * include/linux/mfd/acx00/core.h -- Core interface for ACX00
+ * include/linux/mfd/acx00-mfd.h -- Core interface for ACX00
  *
  * Copyright 2009 Wolfson Microelectronics PLC.
  *
@@ -12,8 +12,8 @@
  *
  */
 
-#ifndef __MFD_ACX00_CORE_H__
-#define __MFD_ACX00_CORE_H__
+#ifndef __ACX00_MFD_H__
+#define __ACX00_MFD_H__
 
 #include <linux/mutex.h>
 #include <linux/interrupt.h>

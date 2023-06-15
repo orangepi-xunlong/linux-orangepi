@@ -21,6 +21,7 @@
 #include "../../vin-cci/cci_helper.h"
 #include "camera_cfg.h"
 #include "camera.h"
+#include "../flash/flash.h"
 #include "../../platform/platform_cfg.h"
 
 #define REG_DLY  0xffff
@@ -32,8 +33,8 @@ struct regval_list {
 
 struct sensor_helper_dev {
 	struct regulator *pmic[MAX_POW_NUM];
+	char name[I2C_NAME_SIZE];
 	unsigned int id;
-	const char *name;
 };
 
 #define DEV_DBG_EN   0
@@ -83,5 +84,6 @@ extern int sensor_try_ctrl(struct v4l2_ctrl *ctrl);
 
 extern int actuator_init(struct v4l2_subdev *sd, struct actuator_para *range);
 extern int actuator_set_code(struct v4l2_subdev *sd, struct actuator_ctrl *pos);
+extern int flash_en(struct v4l2_subdev *sd, struct flash_para *para);
 
 #endif

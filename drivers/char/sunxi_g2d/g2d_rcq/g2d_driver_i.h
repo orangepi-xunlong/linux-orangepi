@@ -61,6 +61,9 @@ typedef struct {
 	bool opened;
 	__u32 user_cnt;
 	struct clk *clk_parent;
+	struct clk *bus_clk;
+	struct clk *mbus_clk;
+	struct reset_control *reset;
 } __g2d_info_t;
 
 typedef struct {

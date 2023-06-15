@@ -12,5 +12,6 @@
 #define __DEFAULT_EINK_H__
 
 #include "panel_ctrl.h"
+extern struct __eink_panel default_eink;
 
 #endif

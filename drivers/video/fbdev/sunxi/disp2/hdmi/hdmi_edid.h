@@ -20,7 +20,7 @@
 #define Explicit_Offset_Address_E_DDC_Read  6
 #define Implicit_Offset_Address_E_DDC_Read  7
 
-extern u8	Device_Support_VIC[512];
+extern u8	Device_Support_VIC[516];
 extern s32 hdmi_edid_parse(void);
 /* extern s32 DDC_Read(char cmd,char pointer,
  * char offset,int nbyte,char * pbuf);
@@ -30,6 +30,5 @@ extern s32 hdmi_edid_parse(void);
 extern u32 hdmi_edid_is_hdmi(void);
 extern u32 hdmi_edid_is_yuv(void);
 extern uintptr_t hdmi_edid_get_data(void);
-unsigned short hdmi_edid_get_phyaddr(void);
 
 #endif /* __HDMI_EDID_H_ */

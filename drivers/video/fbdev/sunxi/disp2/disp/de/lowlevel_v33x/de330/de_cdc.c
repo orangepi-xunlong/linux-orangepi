@@ -22,6 +22,7 @@ enum {
 	DE_WCG,
 	DE_HDR10,
 	DE_HLG,
+	DE_HDR10P,
 };
 
 enum {
@@ -102,13 +103,26 @@ static void cdc_set_rcq_head_dirty(
 		DE_WRN("rcq_head is null ! blk_id=%d\n", blk_id);
 	}
 }
-static u32 cdc_get_wcg_type(struct de_csc_info *info)
+static u32 cdc_get_wcg_type(struct de_csc_info *info, bool isIn)
 {
+	/*DE_WRN("info->hdr_type =%d, eotf=%d, fmt=%d, cs=%d\n",
+		   info->hdr_type, info->eotf,
+		   info->px_fmt_space, info->color_space);*/
 	if (info->color_space == DE_COLOR_SPACE_BT2020NC
 		|| info->color_space == DE_COLOR_SPACE_BT2020C) {
-		if (info->eotf == DE_EOTF_SMPTE2084)
-			return DE_HDR10;
-		else if (info->eotf == DE_EOTF_ARIB_STD_B67)
+		if (info->eotf == DE_EOTF_SMPTE2084) {
+			if (info->hdr_type == HDR10P
+				&& info->px_fmt_space == DE_FORMAT_SPACE_YUV
+				&& ((isIn && (info->pMeta != NULL)
+					 && (info->pMeta->hdr10_plus_smetada.divLut[
+						 NUM_DIV - 1][MAX_LUT_SIZE - 1] == 0x0101
+						 || info->pMeta->hdr10_plus_smetada.divLut[
+						 NUM_DIV - 1][MAX_LUT_SIZE - 1] == 0x0102))
+					|| !isIn))
+				return DE_HDR10P;
+			else
+				return DE_HDR10;
+		} else if (info->eotf == DE_EOTF_ARIB_STD_B67)
 			return DE_HLG;
 		else
 			return DE_WCG;
@@ -130,6 +144,8 @@ static u32 cdc_get_convert_type(u32 in_type, u32 out_type)
 			convert_type = DE_TFC_SDR2HDR10;
 		else if (out_type == DE_HLG)
 			convert_type = DE_TFC_SDR2HLG;
+		else if (out_type == DE_HDR10P)
+			convert_type = DE_TFC_SDR2HDR10;
 	} else if (in_type == DE_WCG) {
 		if (out_type == DE_SDR)
 			convert_type = DE_TFC_WCG2SDR;
@@ -139,6 +155,8 @@ static u32 cdc_get_convert_type(u32 in_type, u32 out_type)
 			convert_type = DE_TFC_WCG2HDR10;
 		else if (out_type == DE_HLG)
 			convert_type = DE_TFC_WCG2HLG;
+		else if (out_type == DE_HDR10P)
+			convert_type = DE_TFC_WCG2HDR10;
 	} else if (in_type == DE_HDR10) {
 		if (out_type == DE_SDR)
 			convert_type = DE_TFC_HDR102SDR;
@@ -148,6 +166,8 @@ static u32 cdc_get_convert_type(u32 in_type, u32 out_type)
 			convert_type = DE_TFC_HDR102HDR10;
 		else if (out_type == DE_HLG)
 			convert_type = DE_TFC_HDR102HLG;
+		else if (out_type == DE_HDR10P)
+			convert_type = DE_TFC_HDR102HDR10;
 	} else if (in_type == DE_HLG) {
 		if (out_type == DE_SDR)
 			convert_type = DE_TFC_HLG2SDR;
@@ -157,6 +177,13 @@ static u32 cdc_get_convert_type(u32 in_type, u32 out_type)
 			convert_type = DE_TFC_HLG2HDR10;
 		else if (out_type == DE_HLG)
 			convert_type = DE_TFC_HLG2HLG;
+		else if (out_type == DE_HDR10P)
+			convert_type = DE_TFC_HLG2HDR10;
+	} else if (in_type == DE_HDR10P) {
+		if (out_type == DE_SDR)
+			convert_type = DE_TFC_HDR10P2SDR;
+		else
+			convert_type = DE_TFC_HDR102HDR10;
 	}
 
 	return convert_type;
@@ -194,6 +221,7 @@ static u32 cdc_check_bypass(struct de_csc_info *in_info, u32 convert_type)
 		case DE_TFC_HLG2SDR:
 		case DE_TFC_HLG2WCG:
 		case DE_TFC_HLG2HDR10:
+		case DE_TFC_HDR10P2SDR:
 			return 0;
 		default:
 			DE_WRN("conversion type no support %d", convert_type);
@@ -257,6 +285,16 @@ static void cdc_set_csc_coeff(struct cdc_reg *reg,
 
 static void cdc_set_lut(struct cdc_reg *reg, u32 **lut_ptr)
 {
+	/*DE_WRN("%s:%d, %d, %d, %d, %d, %d, %d, %d, %d\n", __func__, __LINE__,
+		   *((u32 *)lut_ptr[0] + 1),
+		   *((u32 *)lut_ptr[1] + 2),
+		   (*((u32 *)lut_ptr[2] + 3)),
+		   (*((u32 *)lut_ptr[3] + 4)),
+		   (*((u32 *)lut_ptr[3] + 5)),
+		   (*((u32 *)lut_ptr[3] + 6)),
+		   (*((u32 *)lut_ptr[3] + 7)),
+		   (*((u32 *)lut_ptr[3] + 8)));*/
+
 	memcpy((void *)reg->lut0, (void *)lut_ptr[0], sizeof(reg->lut0));
 	memcpy((void *)reg->lut1, (void *)lut_ptr[1], sizeof(reg->lut1));
 	memcpy((void *)reg->lut2, (void *)lut_ptr[2], sizeof(reg->lut2));
@@ -277,14 +315,36 @@ s32 de_cdc_set_para(void *cdc_hdl,
 	u32 convert_type;
 	u32 bypass = 0;
 
-	in_type = cdc_get_wcg_type(in_info);
-	out_type = cdc_get_wcg_type(out_info);
+	in_type = cdc_get_wcg_type(in_info, true);
+	out_type = cdc_get_wcg_type(out_info, false);
 	convert_type = cdc_get_convert_type(in_type, out_type);
 	bypass = cdc_check_bypass(in_info, convert_type);
+	/*DE_WRN("in out type %d,%d conver %d bpas %d", in_type,
+		   out_type, convert_type, bypass);*/
 
 	if (!bypass) {
 		u32 *lut_ptr[DE_CDC_LUT_NUM];
 		u32 i;
+		int hdr10p2sdr_mode = -1;
+		if (in_info->hdr_type == HDR10P
+			&& convert_type == DE_TFC_HDR10P2SDR
+			&& in_info->px_fmt_space == DE_FORMAT_SPACE_YUV
+			&& in_info->pMeta != NULL) {
+			if (in_info->pMeta->hdr10_plus_smetada.divLut[
+				NUM_DIV - 1][MAX_LUT_SIZE - 1] == 0x0101) {
+				/*same meta, change csc only*/
+				hdr10p2sdr_mode = 1;
+			} else if (in_info->pMeta->hdr10_plus_smetada.divLut[
+					   NUM_DIV - 1][MAX_LUT_SIZE - 1] == 0x0102) {
+				/*meta change, change csc and cdc*/
+				hdr10p2sdr_mode = 2;
+				priv->convert_type = DE_TFC_INIT;
+			} else {
+				/*meta eror, fall back to other mode*/
+				hdr10p2sdr_mode = 0;
+				priv->convert_type = DE_TFC_INIT;
+			}
+		}
 
 		reg->ctl.dwval = 1;
 		priv->set_blk_dirty(priv, CDC_REG_BLK_CTL, 1);
@@ -300,14 +360,24 @@ s32 de_cdc_set_para(void *cdc_hdl,
 				icsc_out.color_space = in_info->color_space;
 				icsc_out.color_range = in_info->color_range;
 			} else if (in_info->px_fmt_space == DE_FORMAT_SPACE_YUV) {
-				icsc_out.px_fmt_space = DE_FORMAT_SPACE_YUV;
-				icsc_out.color_range = DE_COLOR_RANGE_16_235;
-				if ((in_info->color_space != DE_COLOR_SPACE_BT2020NC)
-					&& (in_info->color_space != DE_COLOR_SPACE_BT2020C))
-					icsc_out.color_space = DE_COLOR_SPACE_BT709;
-				else
-					icsc_out.color_space = in_info->color_space;
-				ocsc_in.color_range = DE_COLOR_RANGE_16_235;
+				if (hdr10p2sdr_mode >= 1) {
+					icsc_out.px_fmt_space = DE_FORMAT_SPACE_RGB;
+					icsc_out.color_range = DE_COLOR_RANGE_0_255;
+					icsc_out.color_space = DE_COLOR_SPACE_BT2020NC;
+
+					ocsc_in.px_fmt_space = DE_FORMAT_SPACE_RGB;
+					ocsc_in.color_range = DE_COLOR_RANGE_0_255;
+					ocsc_in.color_space = DE_COLOR_SPACE_BT709;
+				} else {
+					icsc_out.px_fmt_space = DE_FORMAT_SPACE_YUV;
+					icsc_out.color_range = DE_COLOR_RANGE_16_235;
+					if ((in_info->color_space != DE_COLOR_SPACE_BT2020NC)
+						&& (in_info->color_space != DE_COLOR_SPACE_BT2020C))
+						icsc_out.color_space = DE_COLOR_SPACE_BT709;
+					else
+						icsc_out.color_space = in_info->color_space;
+					ocsc_in.color_range = DE_COLOR_RANGE_16_235;
+				}
 			} else {
 				DE_WRN("px_fmt_space %d no support",
 					in_info->px_fmt_space);
@@ -324,11 +394,20 @@ s32 de_cdc_set_para(void *cdc_hdl,
 		}
 
 		if ((convert_type == priv->convert_type)
-			&& (in_info->px_fmt_space == priv->in_px_fmt_space))
+			&& (in_info->px_fmt_space == priv->in_px_fmt_space)) {
+			if (priv->set_blk_dirty == cdc_set_rcq_head_dirty)
+				for (i = 0; i < DE_CDC_LUT_NUM; i++) {
+					priv->set_blk_dirty(priv, CDC_REG_BLK_LUT0 + i, 1);
+				}
 			return 0;
+		}
 
+		DE_WRN("hdr10p2sdr_mode =%d, %d, %d", hdr10p2sdr_mode,
+			   priv->convert_type, convert_type);
 		priv->convert_type = convert_type;
 		priv->in_px_fmt_space = in_info->px_fmt_space;
+		if (convert_type == DE_TFC_HDR10P2SDR)
+			convert_type = DE_TFC_HDR102SDR;
 		if (in_info->px_fmt_space == DE_FORMAT_SPACE_RGB) {
 			for (i = 0; i < DE_CDC_LUT_NUM; i++) {
 				lut_ptr[i] = cdc_lut_ptr_r[convert_type][i];
@@ -336,7 +415,11 @@ s32 de_cdc_set_para(void *cdc_hdl,
 			}
 		} else {
 			for (i = 0; i < DE_CDC_LUT_NUM; i++) {
-				lut_ptr[i] = cdc_lut_ptr_y[convert_type][i];
+				if (hdr10p2sdr_mode >= 1)
+					lut_ptr[i] = (u32 *)(in_info->pMeta->
+										hdr10_plus_smetada.divLut[i]);
+				else
+					lut_ptr[i] = cdc_lut_ptr_y[convert_type][i];
 				priv->set_blk_dirty(priv, CDC_REG_BLK_LUT0 + i, 1);
 			}
 		}

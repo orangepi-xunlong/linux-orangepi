@@ -1,14 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright(c) 2013-2015 Intel Corporation. All rights reserved.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of version 2 of the GNU General Public License as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
  */
 #include <linux/memremap.h>
 #include <linux/rculist.h>
@@ -104,15 +96,63 @@ void *__wrap_devm_memremap(struct device *dev, resource_size_t offset,
 }
 EXPORT_SYMBOL(__wrap_devm_memremap);
 
-void *__wrap_devm_memremap_pages(struct device *dev, struct resource *res,
-		struct percpu_ref *ref, struct vmem_altmap *altmap)
+static void nfit_test_kill(void *_pgmap)
 {
-	resource_size_t offset = res->start;
+	struct dev_pagemap *pgmap = _pgmap;
+
+	WARN_ON(!pgmap || !pgmap->ref);
+
+	if (pgmap->ops && pgmap->ops->kill)
+		pgmap->ops->kill(pgmap);
+	else
+		percpu_ref_kill(pgmap->ref);
+
+	if (pgmap->ops && pgmap->ops->cleanup) {
+		pgmap->ops->cleanup(pgmap);
+	} else {
+		wait_for_completion(&pgmap->done);
+		percpu_ref_exit(pgmap->ref);
+	}
+}
+
+static void dev_pagemap_percpu_release(struct percpu_ref *ref)
+{
+	struct dev_pagemap *pgmap =
+		container_of(ref, struct dev_pagemap, internal_ref);
+
+	complete(&pgmap->done);
+}
+
+void *__wrap_devm_memremap_pages(struct device *dev, struct dev_pagemap *pgmap)
+{
+	int error;
+	resource_size_t offset = pgmap->res.start;
 	struct nfit_test_resource *nfit_res = get_nfit_res(offset);
 
-	if (nfit_res)
-		return nfit_res->buf + offset - nfit_res->res.start;
-	return devm_memremap_pages(dev, res, ref, altmap);
+	if (!nfit_res)
+		return devm_memremap_pages(dev, pgmap);
+
+	if (!pgmap->ref) {
+		if (pgmap->ops && (pgmap->ops->kill || pgmap->ops->cleanup))
+			return ERR_PTR(-EINVAL);
+
+		init_completion(&pgmap->done);
+		error = percpu_ref_init(&pgmap->internal_ref,
+				dev_pagemap_percpu_release, 0, GFP_KERNEL);
+		if (error)
+			return ERR_PTR(error);
+		pgmap->ref = &pgmap->internal_ref;
+	} else {
+		if (!pgmap->ops || !pgmap->ops->kill || !pgmap->ops->cleanup) {
+			WARN(1, "Missing reference count teardown definition\n");
+			return ERR_PTR(-EINVAL);
+		}
+	}
+
+	error = devm_add_action_or_reset(dev, nfit_test_kill, pgmap);
+	if (error)
+		return ERR_PTR(error);
+	return nfit_res->buf + offset - nfit_res->res.start;
 }
 EXPORT_SYMBOL_GPL(__wrap_devm_memremap_pages);
 
@@ -370,7 +410,7 @@ acpi_status __wrap_acpi_evaluate_object(acpi_handle handle, acpi_string path,
 }
 EXPORT_SYMBOL(__wrap_acpi_evaluate_object);
 
-union acpi_object * __wrap_acpi_evaluate_dsm(acpi_handle handle, const u8 *uuid,
+union acpi_object * __wrap_acpi_evaluate_dsm(acpi_handle handle, const guid_t *guid,
 		u64 rev, u64 func, union acpi_object *argv4)
 {
 	union acpi_object *obj = ERR_PTR(-ENXIO);
@@ -379,11 +419,11 @@ union acpi_object * __wrap_acpi_evaluate_dsm(acpi_handle handle, const u8 *uuid,
 	rcu_read_lock();
 	ops = list_first_or_null_rcu(&iomap_head, typeof(*ops), list);
 	if (ops)
-		obj = ops->evaluate_dsm(handle, uuid, rev, func, argv4);
+		obj = ops->evaluate_dsm(handle, guid, rev, func, argv4);
 	rcu_read_unlock();
 
 	if (IS_ERR(obj))
-		return acpi_evaluate_dsm(handle, uuid, rev, func, argv4);
+		return acpi_evaluate_dsm(handle, guid, rev, func, argv4);
 	return obj;
 }
 EXPORT_SYMBOL(__wrap_acpi_evaluate_dsm);

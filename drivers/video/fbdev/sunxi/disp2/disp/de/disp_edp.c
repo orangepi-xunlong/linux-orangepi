@@ -24,6 +24,8 @@ struct disp_edp_private_data {
 	struct disp_video_timings *video_info;
 	struct disp_tv_func edp_func;
 	struct clk *clk;
+	struct clk *clk_bus;
+	struct reset_control *reset;
 	u32 irq_no;
 	u32 frame_per_sec;
 	u32 usec_per_line;
@@ -45,7 +47,7 @@ struct disp_edp_private_data {
 	} pwm_info;
 	u32 backlight_bright;
 	bool edp_bl_en_used;
-	struct disp_gpio_set_t edp_bl_en;
+	struct disp_gpio_info edp_bl_en;
 	int edp_bl_gpio_hdl;
 	char edp_bl_en_power[32];
 	u32 edp_power_used[EDP_POWER_NUM];
@@ -226,6 +228,7 @@ static s32 edp_calc_judge_line(struct disp_device *p_edp)
 
 static s32 disp_edp_power_enable(struct disp_device *edp, u32 power_id)
 {
+	int ret;
 	struct disp_edp_private_data *edpp = disp_edp_get_priv(edp);
 
 	if (!edp || !edpp) {
@@ -233,14 +236,16 @@ static s32 disp_edp_power_enable(struct disp_device *edp, u32 power_id)
 		return DIS_FAIL;
 	}
 
-	if (edpp->edp_power_used[power_id] == 1)
-		disp_sys_power_enable(edpp->edp_power[power_id]);
+	ret = disp_sys_power_enable(edpp->edp_regulator[power_id]);
+	if (ret)
+		return DIS_FAIL;
 
-	return 0;
+	return DIS_SUCCESS;
 }
 
 static s32 disp_edp_power_disable(struct disp_device *edp, u32 power_id)
 {
+	int ret;
 	struct disp_edp_private_data *edpp = disp_edp_get_priv(edp);
 
 	if (!edp || !edpp) {
@@ -248,10 +253,11 @@ static s32 disp_edp_power_disable(struct disp_device *edp, u32 power_id)
 		return DIS_FAIL;
 	}
 
-	if (edpp->edp_power_used[power_id] == 1)
-		disp_sys_power_disable(edpp->edp_power[power_id]);
+	ret = disp_sys_power_disable(edpp->edp_regulator[power_id]);
+	if (ret)
+		return DIS_FAIL;
 
-	return 0;
+	return DIS_SUCCESS;
 }
 
 #if defined(__LINUX_PLAT__)
@@ -345,7 +351,7 @@ s32 edp_parse_panel_para(struct disp_edp_private_data *p_edpp,
 	s32  value = 1;
 	char primary_key[20], sub_name[25];
 	u32 fps = 0, i = 0;
-	struct disp_gpio_set_t  *gpio_info;
+	struct disp_gpio_info  *gpio_info;
 
 	if (!p_info || !p_edpp)
 		goto OUT;
@@ -662,8 +668,9 @@ s32 disp_edp_enable(struct disp_device *p_edp)
 		DE_WRN("cal_real_frame_period fail\n");
 
 	for (i = 0; i < EDP_POWER_NUM; i++) {
-		if (p_edpp->edp_power_used[i] == 1)
-			disp_sys_power_enable(p_edpp->edp_power[i]);
+		ret = disp_sys_power_enable(p_edpp->edp_regulator[i]);
+		if (ret)
+			return DIS_FAIL;
 	}
 
 	disp_al_edp_cfg(p_edp->hwdev_index, p_edpp->frame_per_sec,
@@ -772,6 +779,7 @@ s32 disp_edp_sw_enable(struct disp_device *p_edp)
 	struct disp_manager *mgr = NULL;
 	unsigned long flags;
 	struct disp_edp_private_data *p_edpp = disp_edp_get_priv(p_edp);
+	struct pwm_device *pwm_dev = NULL;
 
 	if (!p_edp || !p_edpp) {
 		DE_WRN("p_edp init null hdl!\n");
@@ -813,6 +821,14 @@ s32 disp_edp_sw_enable(struct disp_device *p_edp)
 
 	if (mgr->sw_enable)
 		mgr->sw_enable(mgr);
+
+	if (p_edpp->edp_pwm_used && p_edpp->pwm_info.dev) {
+		pwm_dev = (struct pwm_device *)p_edpp->pwm_info.dev;
+		pwm_dev->state.enabled = true;
+		pwm_dev->state.period = p_edpp->pwm_info.period_ns;
+		pwm_dev->state.duty_cycle = p_edpp->pwm_info.duty_ns;
+		pwm_dev->state.polarity = p_edpp->pwm_info.polarity;
+	}
 
 	p_edpp->edp_func.tv_irq_enable(p_edpp->edp_index, 0, 0);
 	disp_sys_register_irq(p_edpp->irq_no, 0, disp_edp_event_proc,
@@ -926,7 +942,7 @@ static s32 disp_edp_set_bright_dimming(struct disp_device *edp, u32 dimming)
 
 static s32 disp_edp_backlight_enable(struct disp_device *edp)
 {
-	struct disp_gpio_set_t gpio_info[1];
+	struct disp_gpio_info gpio_info;
 	struct disp_edp_private_data *edpp = disp_edp_get_priv(edp);
 	unsigned long flags;
 	unsigned int bl;
@@ -947,14 +963,13 @@ static s32 disp_edp_backlight_enable(struct disp_device *edp)
 	spin_unlock_irqrestore(&g_edp_data_lock, flags);
 
 	if (edpp->edp_bl_en_used) {
-		if (!((!strcmp(edpp->edp_bl_en_power, "")) ||
-		      (!strcmp(edpp->edp_bl_en_power, "none"))))
-			disp_sys_power_enable(edpp->edp_bl_en_power);
+		if (edpp->edp_bl_regulator)
+			regulator_enable(edpp->edp_bl_regulator);
 
-		memcpy(gpio_info, &(edpp->edp_bl_en),
-		       sizeof(struct disp_gpio_set_t));
+		memcpy(&gpio_info, &(edpp->edp_bl_en),
+		       sizeof(struct disp_gpio_info));
 
-		edpp->edp_bl_gpio_hdl = disp_sys_gpio_request(gpio_info, 1);
+		disp_sys_gpio_request(&gpio_info);
 	}
 	bl = disp_edp_get_bright(edp);
 	disp_edp_set_bright(edp, bl);
@@ -966,6 +981,7 @@ static s32 disp_edp_backlight_disable(struct disp_device *edp)
 {
 	struct disp_edp_private_data *edpp = disp_edp_get_priv(edp);
 	unsigned long flags;
+	struct disp_gpio_info gpio_info;
 
 	if (!edp || !edpp) {
 		DE_WRN("NULL hdl!\n");
@@ -981,12 +997,13 @@ static s32 disp_edp_backlight_disable(struct disp_device *edp)
 	edpp->bl_enabled = false;
 	spin_unlock_irqrestore(&g_edp_data_lock, flags);
 
-	if (edpp->edp_bl_en_used) {
-		disp_sys_gpio_release(edpp->edp_bl_gpio_hdl, 2);
-		if (!((!strcmp(edpp->edp_bl_en_power, "")) ||
-		      (!strcmp(edpp->edp_bl_en_power, "none"))))
-			disp_sys_power_disable(edpp->edp_bl_en_power);
-	}
+	if (!edpp->edp_bl_en_used)
+		return 0;
+
+	memcpy(&gpio_info, &edpp->edp_bl_en, sizeof(struct disp_gpio_info));
+
+	disp_sys_gpio_release(&gpio_info);
+	disp_sys_power_disable(edpp->edp_bl_regulator);
 
 	return 0;
 }

@@ -193,6 +193,7 @@ void bsp_isp_set_para_ready(unsigned long id, int ready)
 
 void bsp_isp_update_table(unsigned long id, unsigned short table_update)
 {
+	isp_regs[id].isp_update_ctrl0->bits.lens_update = !!(table_update & RSC_UPDATE);
 	isp_regs[id].isp_update_ctrl0->bits.gamma_update = !!(table_update & GAMMA_UPDATE);
 	isp_regs[id].isp_update_ctrl0->bits.drc_update = !!(table_update & DRC_UPDATE);
 	isp_regs[id].isp_update_ctrl0->bits.satu_update = !!(table_update & SATU_UPDATE);
@@ -289,6 +290,21 @@ void bsp_isp_set_size(unsigned long id, struct isp_size_settings *size)
 	isp_regs[id].isp_valid_start->bits.valid_ver_start = size->ob_start.ver;
 }
 
+void bsp_isp_set_fifo_mode(unsigned long id, unsigned int mode)
+{
+ }
+
+void bsp_isp_min_ddr_size(unsigned long id, unsigned int size)
+{
+}
+
+void bsp_isp_fifo_raw_write(unsigned long id, unsigned int depth)
+{
+}
+
+void bsp_isp_k_min_ddr_size(unsigned long id, unsigned int size)
+{
+}
 /*******isp load register which we should write to ddr first*********/
 
 void bsp_isp_module_enable(unsigned long id, unsigned int module_flag)

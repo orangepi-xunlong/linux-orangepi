@@ -1,5 +1,5 @@
 /*
- * linux-4.9/drivers/media/platform/sunxi-vin/modules/flash/flash.h
+ * linux-5.4/drivers/media/platform/sunxi-vin/modules/flash/flash.h
  *
  * Copyright (c) 2007-2017 Allwinnertech Co., Ltd.
  *
@@ -45,6 +45,7 @@ typedef enum sunxi_flash_ctrl {
 typedef enum sunxi_flash_driver_ic_type {
 	FLASH_RELATING,
 	FLASH_EN_INDEPEND,
+	FLASH_VIRTUAL,
 	FLASH_POWER,
 } __flash_driver_ic_type;
 

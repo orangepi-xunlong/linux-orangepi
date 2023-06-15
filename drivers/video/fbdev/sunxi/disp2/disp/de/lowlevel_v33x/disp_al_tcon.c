@@ -527,7 +527,11 @@ int disp_al_tv_cfg(u32 screen_id, struct disp_video_timings *video_info)
 	/*rgb_src_sel(screen_id);*/
 /*#endif*/
 	tcon1_set_timming(screen_id, video_info);
+#if defined (CONFIG_ARCH_SUN50IW9)
+	tcon1_yuv_range(screen_id, 0);
+#else
 	tcon1_yuv_range(screen_id, 1);
+#endif
 	tcon1_src_select(screen_id, LCD_SRC_DE, al_priv.de_id[screen_id]);
 
 	return 0;
@@ -711,6 +715,19 @@ int disp_al_device_disable_irq(u32 screen_id)
 	irq_id = (al_priv.tcon_type[screen_id] == 0) ?
 	    LCD_IRQ_TCON0_VBLK : LCD_IRQ_TCON1_VBLK;
 	ret = tcon_irq_disable(screen_id, irq_id);
+
+	return ret;
+}
+
+int disp_al_lcd_get_status(u32 screen_id, struct disp_panel_para *panel)
+{
+	int ret = 0;
+#if defined(DSI_VERSION_40)
+	if (panel->lcd_if == LCD_IF_DSI)
+		ret = dsi_get_status(screen_id);
+	else
+#endif
+		ret = tcon_get_status(screen_id, al_priv.tcon_type[screen_id]);
 
 	return ret;
 }

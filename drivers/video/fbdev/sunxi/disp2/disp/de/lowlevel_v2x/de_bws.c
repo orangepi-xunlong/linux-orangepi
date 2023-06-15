@@ -19,6 +19,7 @@
  *                2014/04/25      vito cheng  v0.11 Add block updated function
  *****************************************************************************/
 
+#ifdef CONFIG_DISP2_SUNXI_SUPPORT_ENAHNCE
 #include "de_bws_type.h"
 #include "de_rtmx.h"
 #include "de_fce_type.h"
@@ -90,7 +91,7 @@ int de_bws_init(unsigned int sel, unsigned int chno, uintptr_t reg_base)
 	void *memory;
 
 	base = reg_base + (sel + 1) * 0x00100000 + BWS_OFST;
-#if defined(CONFIG_ARCH_SUN50IW10)
+#if defined(CONFIG_INDEPENDENT_DE)
 	if (sel)
 		base = base - 0x00100000;
 #endif
@@ -573,3 +574,4 @@ int de_bws_tasklet(unsigned int screen_id, unsigned int chno,
 	return 0;
 
 }
+#endif

@@ -1,8 +1,8 @@
 /*
  * sound\soc\sunxi\sunxi_dmic.h
- * (C) Copyright 2010-2016
+ * (C) Copyright 2019-2025
  * Allwinner Technology Co., Ltd. <www.allwinnertech.com>
- * Wolfgang huang <huangjinhui@allwinnertech.com>
+ * yumingfeng <yumingfeng@allwinnertech.com>
  *
  * some simple description for this code
  *
@@ -16,11 +16,7 @@
 #ifndef __SUNXI_DMIC_H
 #define __SUNXI_DMIC_H
 
-#if defined(CONFIG_ARCH_SUN8IW18) || defined(CONFIG_ARCH_SUN50IW9)
-#define DMIC_PLL_AUDIO_X4
-#else
-#undef DMIC_PLL_AUDIO_X4
-#endif
+#include "sunxi-pcm.h"
 
 /*------------------DMIC register definition--------------------*/
 #define SUNXI_DMIC_EN			0x00
@@ -40,11 +36,9 @@
 #define	SUNXI_DMIC_HPF_COEF		0x3C
 #define	SUNXI_DMIC_HPF_GAIN		0x40
 #define SUNXI_DMIC_REV			0x50
+#define SUNXI_DMIC_REG_MAX			SUNXI_DMIC_REV
 
 /*0x00:SUNXI_DMIC_EN*/
-#ifdef CONFIG_SND_SUNXI_MAD
-#define DMIC_MAD_DATA_EN		31
-#endif
 #define DMIC_RX_SYNC_EN			29
 #define DMIC_RX_EN_MUX			28
 #define GLOBE_EN			8
@@ -89,9 +83,6 @@
 #define FIFO_TRG_LEVEL			0
 
 /*SUNXI_DMIC_FIFO_STA:0x20*/
-#ifdef CONFIG_SND_SUNXI_MAD
-#define DMIC_MAD_DATA_ALIGN		8
-#endif
 #define DMIC_DATA_CNT			0
 
 /*SUNXI_DMIC_CH_NUM:0x24*/
@@ -121,7 +112,7 @@
 #define DATA3R_VOL			16
 #define DATA2L_VOL			8
 #define DATA2R_VOL			0
-#define	DMIC_DEFAULT_VOL		0xB0B0B0B0
+#define	DMIC_DEFAULT_VOL		0xB0
 
 /*SUNXI_DMIC_HPF_EN_CTR:0x38*/
 #define HPF_DATA3_CHR_EN		7
@@ -144,43 +135,67 @@ struct sunxi_dmic_reg_label {
 	int value;
 };
 
-#define SUNXI_DMIC_REG_LABEL(constant)				\
-{						\
-	#constant, constant			\
+#define SUNXI_DMIC_REG_LABEL(constant) \
+{ \
+	#constant, constant \
 }
 
-#define SUNXI_DMIC_REG_LABEL_END				\
-{						\
-	NULL, -1				\
+#define SUNXI_DMIC_REG_LABEL_END \
+{ \
+	NULL, -1 \
 }
 
-struct sunxi_dmic_info {
+/*to clear FIFO*/
+#define SUNXI_DMIC_FTX_TIMES	3
+#define DMIC_RX_FIFO_SIZE	128
+
+#define DMIC_CLK_PLL_AUDIO_X1	0
+#define DMIC_CLK_PLL_AUDIO_X4	1
+
+#define	SUNXI_DMIC_RATES (SNDRV_PCM_RATE_8000_48000 | SNDRV_PCM_RATE_KNOT)
+
+struct sunxi_dmic_mem_info {
+	struct resource res;
 	void __iomem *membase;
 	struct resource *memregion;
 	struct regmap   *regmap;
-	struct regulator *power_supply;
-	struct clk *pllclk;
-#ifdef DMIC_PLL_AUDIO_X4
-	struct clk *pllclkx4;
-#endif
-	struct clk *moduleclk;
-	int moduleclk_en;
-	struct device *dev;
-	struct snd_soc_dai_driver dai;
-	struct sunxi_dma_params capture_dma_param;
+};
+
+struct sunxi_dmic_clk_info {
+	struct clk *clk_pll;
+	struct clk *clk_module;
+	struct clk *clk_bus;
+	struct reset_control *clk_rst;
+
+	unsigned int clk_parent;
+};
+
+struct sunxi_dmic_pinctl_info {
 	struct pinctrl *pinctrl;
 	struct pinctrl_state  *pinstate;
 	struct pinctrl_state  *pinstate_sleep;
-	bool capture_en;
-#ifdef CONFIG_SND_SUNXI_MAD
-	struct resource res;
-	unsigned int mad_bind;
-	unsigned int mad_suspend;
-	unsigned int lpsd_chan_sel;
-	unsigned int mad_standby_chan_sel;
-	unsigned int audio_src_chan_num;
-#endif
-	u32 chanmap;
 };
 
+struct sunxi_dmic_dts_info {
+	/* value must be (2^n)Kbyte */
+	size_t playback_cma;
+	size_t capture_cma;
+
+	unsigned int dmic_rxsync_en;
+	unsigned int rx_chmap;
+	unsigned int data_vol;
+};
+
+struct sunxi_dmic_info {
+	struct device *dev;
+	struct snd_soc_dai_driver dai;
+
+	struct sunxi_dmic_dts_info dts_info;
+	struct sunxi_dmic_mem_info mem_info;
+	struct sunxi_dmic_clk_info clk_info;
+	struct sunxi_dmic_pinctl_info pin_info;
+
+	struct sunxi_dma_params capture_dma_param;
+	unsigned int chan_en;
+};
 #endif /* SUNXI_DMIC_H */

@@ -32,6 +32,10 @@
 .rx_threshold = threshold, .timeout = time, .pop_link = pop,\
 .push_link = push, .tx_complete = complete, .power_notify = suspend }
 
+#ifndef CPUFREQ_ADJUST
+#define CPUFREQ_ADJUST CPUFREQ_CREATE_POLICY
+#endif
+
 struct sprdwl_intf_ops g_intf_ops;
 
 static inline struct sprdwl_intf *get_intf(void)
@@ -403,6 +407,11 @@ int sprdwl_intf_tx_list(struct sprdwl_intf *dev,
 #endif
 	int tx_count_saved = tx_count;
 	int list_num;
+
+#ifdef CP2_RESET_SUPPORT
+	if (dev->cp_asserted == 1)
+		return 0;
+#endif
 
 	wl_debug("%s:%d tx_count is %d\n", __func__, __LINE__, tx_count);
 	list_num = get_list_num(tx_list);
@@ -1205,7 +1214,8 @@ int sprdwl_tx_free_pcie_data(struct sprdwl_intf *dev, unsigned char *data,
 	int i;
 	struct sprdwl_tx_msg *tx_msg;
 	unsigned char *data_addr_ptr;
-	unsigned long pcie_addr, timeout;
+	uint64_t pcie_addr;
+	unsigned long timeout;
 	unsigned short  data_num;
 	struct list_head *free_list;
 	struct txc_addr_buff *txc_addr;
@@ -1367,16 +1377,27 @@ int sprdwl_suspend_resume_handle(int chn, int mode)
 					vif->ctx_id,
 					SPRDWL_SUSPEND_RESUME,
 					0);
-		if (ret == 0)
+		if (ret == 0) {
 			intf->suspend_mode = SPRDWL_PS_SUSPENDED;
+#ifdef UNISOC_WIFI_PS
+			sprdwcn_bus_allow_sleep(WIFI);
+			wl_info("sprdwcn bus allow sleep\n");
+#endif
+		}
 		else
 			intf->suspend_mode = SPRDWL_PS_RESUMED;
 		sprdwl_put_vif(vif);
-		wl_info("power save ret = %d\n", ret);
 		return ret;
 	} else if (mode == 1) {
+#ifdef UNISOC_WIFI_PS
+		sprdwcn_bus_sleep_wakeup(WIFI);
+		wl_info("sprdwcn bus wake up\n");
+#endif
 		intf->suspend_mode = SPRDWL_PS_RESUMING;
 		priv->wakeup_tracer.resume_flag = 1;
+#ifdef UNISOC_WIFI_PS
+		complete(&intf->suspend_completed);
+#endif
 		getnstimeofday(&time);
 		intf->sleep_time = timespec_to_ns(&time) - intf->sleep_time;
 		ret = sprdwl_power_save(priv,
@@ -1712,11 +1733,15 @@ void sprdwl_tx_delba(struct sprdwl_intf *intf,
 
 int sprdwl_notifier_boost(struct notifier_block *nb, unsigned long event, void *data)
 {
-	struct cpufreq_policy *policy = data;
+	struct cpufreq_policy_data *policy = data;
 	unsigned long min_freq;
 	unsigned long max_freq = policy->cpuinfo.max_freq;
 	struct sprdwl_intf *intf = get_intf();
-	u8 boost = intf->boost;
+	u8 boost;
+	if (NULL == intf)
+		return NOTIFY_DONE;
+
+	boost = intf->boost;
 
 	if (event != CPUFREQ_ADJUST)
 		return NOTIFY_DONE;
@@ -1726,6 +1751,13 @@ int sprdwl_notifier_boost(struct notifier_block *nb, unsigned long event, void *
 
 	return NOTIFY_OK;
 }
+
+#if !IS_ENABLED(CONFIG_CPU_FREQ)
+void cpufreq_update_policy(unsigned int cpu)
+{
+	(void)cpu;
+}
+#endif
 
 void sprdwl_boost(void)
 {
@@ -1835,6 +1867,9 @@ int sprdwl_intf_init(struct sprdwl_priv *priv, struct sprdwl_intf *intf)
 		intf->txnum_level = BOOST_TXNUM_LEVEL;
 		intf->rxnum_level = BOOST_RXNUM_LEVEL;
 		intf->boost = 0;
+#ifdef UNISOC_WIFI_PS
+		init_completion(&intf->suspend_completed);
+#endif
 	} else {
 err:
 		wl_err("%s: unregister %d ops\n",

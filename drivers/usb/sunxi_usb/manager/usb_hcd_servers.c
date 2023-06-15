@@ -17,6 +17,7 @@
 #include  "usb_hcd_servers.h"
 
 #if defined(CONFIG_ARCH_SUN50I) \
+			|| defined(CONFIG_ARCH_SUN8IW8) \
 			|| defined(CONFIG_ARCH_SUN8IW10) \
 			|| defined(CONFIG_ARCH_SUN8IW11)
 #define HCI0_USBC_NO    0

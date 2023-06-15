@@ -43,6 +43,20 @@ static struct de_reg_blocks bld_attr_block[DE_NUM];
 static struct de_reg_blocks bld_ctl_block[DE_NUM];
 static struct de_reg_blocks bld_ck_block[DE_NUM];
 static struct de_reg_blocks bld_out_block[DE_NUM];
+#if defined(SUPPORT_LBC)
+static struct de_reg_blocks lbc_block[DE_NUM][VI_CHN_NUM];
+#endif
+
+#if defined(SUPPORT_PALETTE)
+static struct de_reg_blocks vi_palette_block[DE_NUM][VI_CHN_NUM];
+static struct de_reg_blocks ui_palette_block[DE_NUM][CHN_NUM - VI_CHN_NUM];
+#endif
+
+#if defined(SUPPORT_DITHER_OUTPUT)
+static struct de_reg_blocks dither_ctrl_block[DE_NUM];
+#endif
+
+
 /* static uintptr_t de_base = 0; */
 static uintptr_t de_base;
 
@@ -59,7 +73,14 @@ int de_rtmx_update_regs(unsigned int sel)
 		       glb_ctl_block[sel].size);
 		glb_ctl_block[sel].dirty = 0;
 	}
+#if defined(SUPPORT_DITHER_OUTPUT)
 
+	if (dither_ctrl_block[sel].dirty == 0x1) {
+		memcpy((void *)dither_ctrl_block[sel].off, dither_ctrl_block[sel].val,
+		       dither_ctrl_block[sel].size);
+		dither_ctrl_block[sel].dirty = 0;
+	}
+#endif
 	for (j = 0; j < vi_chno; j++) {
 		for (i = 0; i < layno; i++) {
 			if (vi_attr_block[sel][j][i].dirty == 0x1) {
@@ -90,6 +111,27 @@ int de_rtmx_update_regs(unsigned int sel)
 			       vi_size_block[sel][j].size);
 			vi_size_block[sel][j].dirty = 0;
 		}
+
+#if defined(SUPPORT_LBC)
+		if (lbc_block[sel][j].dirty == 0x1) {
+			memcpy((void *)lbc_block[sel][j].off,
+			       lbc_block[sel][j].val,
+			       lbc_block[sel][j].size);
+			lbc_block[sel][j].dirty = 0;
+		}
+#endif
+
+#if defined(SUPPORT_PALETTE)
+		if (vi_palette_block[sel][j].dirty == 0x1) {
+			memcpy((void *)vi_palette_block[sel][j].off,
+			       vi_palette_block[sel][j].val,
+			       vi_palette_block[sel][j].size);
+			vi_palette_block[sel][j].dirty = 0;
+			de200_rtmx[sel].vi_ovl[j]->vi_lay_cfg[0].lay_attr.bits.access_sw = 0;
+			vi_attr_block[sel][j][0].dirty = 1;
+		}
+#endif
+
 	}
 
 	for (j = 0; j < ui_chno; j++) {
@@ -115,6 +157,16 @@ int de_rtmx_update_regs(unsigned int sel)
 			       ui_size_block[sel][j].size);
 			ui_size_block[sel][j].dirty = 0;
 		}
+#if defined(SUPPORT_PALETTE)
+		if (ui_palette_block[sel][j].dirty == 0x1) {
+			memcpy((void *)ui_palette_block[sel][j].off,
+				   ui_palette_block[sel][j].val,
+				   ui_palette_block[sel][j].size);
+			ui_palette_block[sel][j].dirty = 0;
+				de200_rtmx[sel].ui_ovl[j]->ui_lay_cfg[0].lay_attr.bits.access_sw = 0;
+				ui_attr_block[sel][j][0].dirty = 1;
+		}
+#endif
 	}
 
 	if (bld_attr_block[sel].dirty == 0x1) {
@@ -201,7 +253,7 @@ int de_rtmx_init(unsigned int sel, uintptr_t reg_base)
 		apb_base = reg_base + 0x00201000;
 		ovl_base = reg_base + 0x00202000;
 	}
-#if defined(CONFIG_ARCH_SUN50IW10)
+#if defined(CONFIG_INDEPENDENT_DE)
 	if (sel) {
 		glb_base = glb_base - 0x00100000;
 		apb_base = apb_base - 0x00100000;
@@ -209,7 +261,7 @@ int de_rtmx_init(unsigned int sel, uintptr_t reg_base)
 
 	}
 #endif
-	memory = kmalloc(sizeof(struct __glb_reg_t), GFP_KERNEL | __GFP_ZERO);
+	memory = kmalloc(sizeof(struct __glb_reg_t) + sizeof(struct __glb_dither_reg_t), GFP_KERNEL | __GFP_ZERO);
 	if (memory == NULL) {
 		__wrn("malloc rtmx global memory fail! size=0x%x\n",
 		      (unsigned int)sizeof(struct __glb_reg_t));
@@ -222,6 +274,14 @@ int de_rtmx_init(unsigned int sel, uintptr_t reg_base)
 	glb_ctl_block[sel].dirty = 1;
 
 	de_rtmx_set_gld_reg_base(sel, memory);
+
+#if defined(SUPPORT_DITHER_OUTPUT)
+	dither_ctrl_block[sel].off = glb_base + 0x14;
+	dither_ctrl_block[sel].val = ((u8 *)memory) + sizeof(struct __glb_reg_t);
+	dither_ctrl_block[sel].size = sizeof(struct __glb_dither_reg_t);
+	dither_ctrl_block[sel].dirty = 1;
+	de200_rtmx[sel].dither_ctl = (struct __glb_dither_reg_t *)(dither_ctrl_block[sel].val);
+#endif
 
 	for (j = 0; j < vi_chno; j++) {
 		memory =
@@ -262,6 +322,21 @@ int de_rtmx_init(unsigned int sel, uintptr_t reg_base)
 		vi_size_block[sel][j].dirty = 1;
 		de_rtmx_set_overlay_reg_base(sel, j, memory);
 
+#if defined(SUPPORT_PALETTE)
+		memory = kmalloc(sizeof(struct __ovl_palette_reg_t),
+			    GFP_KERNEL | __GFP_ZERO);
+		if (memory == NULL) {
+			__wrn("malloc vi_palette overlay memory fail! size=0x%x\n",
+			    (unsigned int)sizeof(struct __ovl_palette_reg_t));
+			return -1;
+		}
+
+		vi_palette_block[sel][j].off = ovl_base + ch_index * 0x00001000 + 0x400;
+		vi_palette_block[sel][j].val = memory;
+		vi_palette_block[sel][j].size = PALETTE_SIZE*4;
+		vi_palette_block[sel][j].dirty = 0;
+		de200_rtmx[sel].vi_palette[j] = (struct __ovl_palette_reg_t *) memory;
+#endif
 		ch_index++;
 	}
 
@@ -297,9 +372,48 @@ int de_rtmx_init(unsigned int sel, uintptr_t reg_base)
 		ui_size_block[sel][j].dirty = 1;
 
 		de_rtmx_set_overlay_reg_base(sel, j + vi_chno, memory);
+#if defined(SUPPORT_PALETTE)
+		memory =
+			kmalloc(sizeof(struct __ovl_palette_reg_t),
+			    GFP_KERNEL | __GFP_ZERO);
+		if (memory == NULL) {
+			__wrn("malloc ui_palette overlay memory fail! size=0x%x\n",
+			    (unsigned int)sizeof(struct __ovl_palette_reg_t));
+			return -1;
+		}
 
+		ui_palette_block[sel][j].off = ovl_base + ch_index * 0x00001000 + 0x400;
+		ui_palette_block[sel][j].val = memory;
+		ui_palette_block[sel][j].size = PALETTE_SIZE*4;
+		ui_palette_block[sel][j].dirty = 0;
+		de200_rtmx[sel].ui_palette[j] = (struct __ovl_palette_reg_t *) memory;
+
+#endif
 		ch_index++;
 	}
+
+#if defined(SUPPORT_LBC)
+
+	ch_index = 0;
+	for (j = 0; j < vi_chno; j++) {
+		memory =
+			kmalloc(sizeof(struct __lbc_ovl_reg_t),
+			GFP_KERNEL | __GFP_ZERO);
+		if (memory == NULL) {
+			__wrn("malloc lbc overlay memory fail! size=0x%x\n",
+			      (unsigned int)sizeof(struct __lbc_ovl_reg_t));
+			return -1;
+		}
+
+		lbc_block[sel][j].off = ovl_base + ch_index * 0x00001000 + 0x100;
+		lbc_block[sel][j].val = memory;
+		lbc_block[sel][j].size = 0x28;
+		lbc_block[sel][j].dirty = 1;
+
+		de200_rtmx[sel].lbc_ovl[j] = (struct __lbc_ovl_reg_t *) memory;
+		ch_index++;
+	}
+#endif
 
 	memory = kmalloc(sizeof(struct __bld_reg_t), GFP_KERNEL | __GFP_ZERO);
 	if (memory == NULL) {
@@ -348,11 +462,21 @@ int de_rtmx_exit(unsigned int sel)
 
 	for (j = 0; j < vi_chno; j++) {
 		kfree(vi_attr_block[sel][j][0].val);
+#if defined(SUPPORT_LBC)
+		kfree(lbc_block[sel][j].val);
+#endif
+#if defined(SUPPORT_PALETTE)
+		kfree(vi_palette_block[sel][j].val);
+#endif
 		ch_index++;
 	}
 
 	for (j = 0; j < ui_chno; j++) {
 		kfree(ui_attr_block[sel][j][0].val);
+#if defined(SUPPORT_PALETTE)
+		kfree(ui_palette_block[sel][j].val);
+#endif
+
 		ch_index++;
 	}
 
@@ -506,6 +630,54 @@ int de_rtmx_set_lay_cfg(unsigned int sel, unsigned int chno, unsigned int layno,
 {
 	int fmt, ui_sel;
 	int vi_chno = de_feat_get_num_vi_chns(sel);
+#if defined(SUPPORT_LBC)
+	int lbc_en = cfg->lbc_en;
+	unsigned int lbc_support;
+	unsigned int tmp;
+	lbc_support = de_feat_is_support_lbc_by_chn(sel, chno);
+	if (lbc_support == 0 && lbc_en == 1) {
+		__wrn("rtmx%d chno%d lay%d does not supported LBC\n", sel, chno, layno);
+		return 0;
+	}
+	if (lbc_en == 1) {
+		/* disable overlay */
+		tmp = de200_rtmx[sel].vi_ovl[chno]->vi_lay_cfg[layno].lay_attr.dwval;
+		tmp &= 0xfffffffe;
+		de200_rtmx[sel].vi_ovl[chno]->vi_lay_cfg[layno].lay_attr.dwval = tmp;
+		vi_attr_block[sel][chno][layno].dirty = 1;
+
+		de200_rtmx[sel].lbc_ovl[chno]->lbc_ctl.bits.lbc_en = cfg->lbc_en;
+		de200_rtmx[sel].lbc_ovl[chno]->lbc_ctl.bits.lbc_fcen = cfg->fcolor_en;
+		de200_rtmx[sel].lbc_ovl[chno]->lbc_ctl.bits.alpmode = cfg->alpha_mode;
+		de200_rtmx[sel].lbc_ovl[chno]->lbc_ctl.bits.clk_gate = 1;
+		de200_rtmx[sel].lbc_ovl[chno]->lbc_ctl.bits.is_lossy = cfg->lbc_info.is_lossy ? 1 : 0;
+		de200_rtmx[sel].lbc_ovl[chno]->lbc_ctl.bits.rc_en = cfg->lbc_info.rc_en ? 1 : 0;
+		de200_rtmx[sel].lbc_ovl[chno]->lbc_ctl.bits.alpha = cfg->alpha;
+		de200_rtmx[sel].lbc_ovl[chno]->lbc_v_size.bits.lay_width = cfg->layer.w - 1;
+		de200_rtmx[sel].lbc_ovl[chno]->lbc_v_size.bits.lay_hight = cfg->layer.h - 1;
+
+		de200_rtmx[sel].lbc_ovl[chno]->lbc_crop_coor.bits.left_crop = cfg->lbc_crop.x;
+		de200_rtmx[sel].lbc_ovl[chno]->lbc_crop_coor.bits.top_crop = cfg->lbc_crop.y;
+
+		de200_rtmx[sel].lbc_ovl[chno]->lbc_crop_size.bits.width_crop = cfg->lbc_crop.w - 1;
+		de200_rtmx[sel].lbc_ovl[chno]->lbc_crop_size.bits.hight_crop = cfg->lbc_crop.h - 1;
+
+		de200_rtmx[sel].lbc_ovl[chno]->lbc_laddr.bits.laddr = cfg->lbc_laddr;
+		de200_rtmx[sel].lbc_ovl[chno]->lbc_haddr.bits.haddr = cfg->lbc_haddr & 0xFF;
+
+		de200_rtmx[sel].lbc_ovl[chno]->lbc_seg.bits.pitch = cfg->lbc_info.pitch & 0xFFFF;
+		de200_rtmx[sel].lbc_ovl[chno]->lbc_seg.bits.seg_bit = cfg->lbc_info.seg_bit & 0xFFFF;
+
+		de200_rtmx[sel].lbc_ovl[chno]->lbc_lay_coor.bits.ovl_coorx = cfg->layer.x;
+		de200_rtmx[sel].lbc_ovl[chno]->lbc_lay_coor.bits.ovl_coory = cfg->layer.y;
+
+
+		lbc_block[sel][chno].dirty = 1;
+		return 0;
+	}
+
+#endif
+
 
 	if (chno >= vi_chno) {
 		de200_rtmx[sel].ui_ovl[chno -
@@ -620,6 +792,12 @@ int de_rtmx_set_lay_cfg(unsigned int sel, unsigned int chno, unsigned int layno,
 		vi_attr_block[sel][chno][layno].dirty = 1;
 	}
 
+#if defined(SUPPORT_LBC)
+	if (lbc_support && layno == 0) {
+		de200_rtmx[sel].lbc_ovl[chno]->lbc_ctl.dwval = 0;
+		lbc_block[sel][chno].dirty = 1;
+	}
+#endif
 	return 0;
 }
 
@@ -638,7 +816,8 @@ int de_rtmx_set_lay_cfg(unsigned int sel, unsigned int chno, unsigned int layno,
  */
 int de_rtmx_set_lay_haddr(unsigned int sel, unsigned int chno,
 			  unsigned int layno, unsigned char top_bot_en,
-			  unsigned char *haddr_t, unsigned char *haddr_b)
+			  unsigned char *haddr_t, unsigned char *haddr_b,
+			  unsigned int lbc_en)
 {
 	unsigned int haddr, mask;
 	int vi_chno = de_feat_get_num_vi_chns(sel);
@@ -677,6 +856,11 @@ int de_rtmx_set_lay_haddr(unsigned int sel, unsigned int chno,
 
 		ui_haddr_block[sel][chno - vi_chno].dirty = 1;
 	} else {
+#if defined(SUPPORT_LBC)
+			if (lbc_en)
+				return 0;
+#endif
+
 		haddr =
 		    de200_rtmx[sel].vi_ovl[chno]->vi_lay_top_haddr[0].dwval
 		    & mask;
@@ -735,7 +919,8 @@ int de_rtmx_set_lay_laddr(unsigned int sel, unsigned int chno,
 			unsigned int layno, unsigned char fmt,
 			struct de_rect crop, unsigned int *size,
 			unsigned int *align, enum de_3d_in_mode trdinmode,
-			unsigned int *addr, unsigned char *haddr)
+			unsigned int *addr, unsigned char *haddr,
+			unsigned int lbc_en)
 {
 	long long addr_off[3];
 	unsigned int pitch[3];
@@ -753,6 +938,9 @@ int de_rtmx_set_lay_laddr(unsigned int sel, unsigned int chno,
 		ycnt = 3;
 	} else if (fmt <= DE_FORMAT_BGRA_5551) {
 		ycnt = 2;
+	} else if (fmt >= DE_FORMAT_1bpp_palette_LE
+		    && fmt <= DE_FORMAT_8bpp_palette_LE) {
+		ycnt = 1;
 	} else if (fmt <= DE_FORMAT_YUV422_I_VYUY) {
 		ycnt = 2;
 		ucnt = 0;
@@ -799,7 +987,6 @@ int de_rtmx_set_lay_laddr(unsigned int sel, unsigned int chno,
 	pitch[0] = DISPALIGN(size[0] * ycnt, align[0]);
 	pitch[1] = DISPALIGN(size[1] * ucnt, align[1]);
 	pitch[2] = DISPALIGN(size[2] * ucnt, align[2]);
-
 	if (trdinmode == DE_3D_SRC_MODE_LI)
 		addr_off[0] =
 		    addr[0] + de_rtmx_get_li_addr_offset(size[0], align[0], x0,
@@ -819,6 +1006,11 @@ int de_rtmx_set_lay_laddr(unsigned int sel, unsigned int chno,
 
 		ui_attr_block[sel][chno - vi_chno][layno].dirty = 1;
 	} else {
+#if defined(SUPPORT_LBC)
+	if (lbc_en)
+		return 0;
+#endif
+
 		if (trdinmode == DE_3D_SRC_MODE_LI) {
 			addr_off[1] =
 			    addr[1] + de_rtmx_get_li_addr_offset(size[1],
@@ -1191,7 +1383,7 @@ int de_rtmx_get_3d_out(struct de_rect frame0, unsigned int scn_w,
 
 int de_rtmx_set_lay_fcolor(unsigned int sel, unsigned int chno,
 			   unsigned int layno, unsigned char en,
-			   unsigned char fmt, unsigned int color)
+			   unsigned char fmt, unsigned int color, unsigned int lbc_en)
 {
 	unsigned int Y, U, V;
 	int vi_chno = de_feat_get_num_vi_chns(sel);
@@ -1217,6 +1409,14 @@ int de_rtmx_set_lay_fcolor(unsigned int sel, unsigned int chno,
 			V = (color & 0xff);
 			break;
 		}
+#if defined(SUPPORT_LBC)
+		if (lbc_en) {
+			de200_rtmx[sel].lbc_ovl[chno]->lbc_fcolor.dwval = en ?
+				((0xFF << 24) | Y | U | V) : 0;
+			lbc_block[sel][chno].dirty = 1;
+			return 0;
+		}
+#endif
 		de200_rtmx[sel].vi_ovl[chno]->vi_lay_fcolor[layno].dwval = en ?
 		    ((0xFF << 24) | Y | U | V) : 0;
 
@@ -1227,10 +1427,9 @@ int de_rtmx_set_lay_fcolor(unsigned int sel, unsigned int chno,
 }
 
 int de_rtmx_set_overlay_size(unsigned int sel, unsigned int chno,
-			     unsigned int w, unsigned int h)
+			     unsigned int w, unsigned int h, unsigned int lbc_en)
 {
 	int vi_chno = de_feat_get_num_vi_chns(sel);
-
 	if (chno >= vi_chno) {
 		de200_rtmx[sel].ui_ovl[chno -
 				       vi_chno]->ui_ovl_size.bits.ovl_width =
@@ -1241,6 +1440,16 @@ int de_rtmx_set_overlay_size(unsigned int sel, unsigned int chno,
 
 		ui_size_block[sel][chno - vi_chno].dirty = 1;
 	} else {
+#if defined(SUPPORT_LBC)
+		if (lbc_en) {
+			de200_rtmx[sel].lbc_ovl[chno]->lbc_ovl_size.bits.width_ovl =
+				w == 0 ? 0 : w - 1;
+			de200_rtmx[sel].lbc_ovl[chno]->lbc_ovl_size.bits.height_ovl =
+				h == 0 ? 0 : h - 1;
+			lbc_block[sel][chno].dirty = 1;
+		}
+#endif
+
 		de200_rtmx[sel].vi_ovl[chno]->vi_ovl_size[0].bits.ovl_width =
 		    w == 0 ? 0 : w - 1;
 		de200_rtmx[sel].vi_ovl[chno]->vi_ovl_size[0].bits.ovl_height =
@@ -1251,6 +1460,50 @@ int de_rtmx_set_overlay_size(unsigned int sel, unsigned int chno,
 
 	return 0;
 }
+int de_rtmx_set_palette(unsigned int sel, unsigned int chno,
+			void *data, unsigned int num)
+{
+#if defined(SUPPORT_PALETTE)
+	int vi_chno = de_feat_get_num_vi_chns(sel);
+	if (num == 0)
+		return 0;
+	if (chno >= vi_chno) {
+		memcpy(de200_rtmx[sel].ui_palette[chno - vi_chno], data, num * 4);
+		ui_palette_block[sel][chno - vi_chno].size = num * 4;
+		ui_palette_block[sel][chno - vi_chno].dirty = 1;
+		/*only need to set the first layer.*/
+		de200_rtmx[sel].ui_ovl[chno - vi_chno]->ui_lay_cfg[0].lay_attr.bits.access_sw = 1;
+		ui_attr_block[sel][chno - vi_chno][0].dirty = 1;
+
+	} else {
+		memcpy(de200_rtmx[sel].vi_palette[chno], data, num * 4);
+		vi_palette_block[sel][chno].size = num*4;
+		vi_palette_block[sel][chno].dirty = 1;
+		/*only need to set the first layer.*/
+		de200_rtmx[sel].vi_ovl[chno]->vi_lay_cfg[0].lay_attr.bits.access_sw = 1;
+		vi_attr_block[sel][chno][0].dirty = 1;
+
+	}
+#endif
+	return 0;
+}
+
+int de_rtmx_set_dither_out(unsigned int sel, unsigned int en, unsigned int fifo_3d,
+			unsigned int mode, unsigned int fmt)
+{
+#if defined(SUPPORT_DITHER_OUTPUT)
+
+	de200_rtmx[sel].dither_ctl->auto_clk.bits.en = en ? 1 : 0;
+	de200_rtmx[sel].dither_ctl->dither.bits.en = en ? 1 : 0;
+	de200_rtmx[sel].dither_ctl->dither.bits.fmt = fmt;
+	de200_rtmx[sel].dither_ctl->dither.bits.mode = mode;
+	de200_rtmx[sel].dither_ctl->dither.bits.fifo_3d = fifo_3d;
+	dither_ctrl_block[sel].dirty = 1;
+#endif
+	return 0;
+
+}
+
 
 static int de_rtmx_get_coarse_fac(unsigned int sel, unsigned int ovl_w,
 				  unsigned int ovl_h, unsigned int vsu_outw,

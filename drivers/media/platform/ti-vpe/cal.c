@@ -1,12 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * TI CAL camera interface driver
  *
  * Copyright (c) 2015 Texas Instruments Inc.
  * Benoit Parrot, <bparrot@ti.com>
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 as published by
- * the Free Software Foundation
  */
 
 #include <linux/interrupt.h>
@@ -21,17 +18,14 @@
 #include <linux/of_device.h>
 #include <linux/of_graph.h>
 
-#include <media/v4l2-of.h>
+#include <media/v4l2-fwnode.h>
 #include <media/v4l2-async.h>
 #include <media/v4l2-common.h>
 #include <media/v4l2-ctrls.h>
 #include <media/v4l2-device.h>
 #include <media/v4l2-event.h>
 #include <media/v4l2-ioctl.h>
-#include <media/v4l2-ctrls.h>
 #include <media/v4l2-fh.h>
-#include <media/v4l2-event.h>
-#include <media/v4l2-common.h>
 #include <media/videobuf2-core.h>
 #include <media/videobuf2-dma-contig.h>
 #include "cal_regs.h"
@@ -270,10 +264,7 @@ struct cal_ctx {
 	struct video_device	vdev;
 	struct v4l2_async_notifier notifier;
 	struct v4l2_subdev	*sensor;
-	struct v4l2_of_endpoint	endpoint;
-
-	struct v4l2_async_subdev asd;
-	struct v4l2_async_subdev *asd_list[1];
+	struct v4l2_fwnode_endpoint	endpoint;
 
 	struct v4l2_fh		fh;
 	struct cal_dev		*dev;
@@ -483,11 +474,7 @@ static void cal_get_hwinfo(struct cal_dev *dev)
 
 static inline int cal_runtime_get(struct cal_dev *dev)
 {
-	int r;
-
-	r = pm_runtime_get_sync(&dev->pdev->dev);
-
-	return r;
+	return pm_runtime_get_sync(&dev->pdev->dev);
 }
 
 static inline void cal_runtime_put(struct cal_dev *dev)
@@ -548,16 +535,16 @@ static void enable_irqs(struct cal_ctx *ctx)
 
 static void disable_irqs(struct cal_ctx *ctx)
 {
+	u32 val;
+
 	/* Disable IRQ_WDMA_END 0/1 */
-	reg_write_field(ctx->dev,
-			CAL_HL_IRQENABLE_CLR(2),
-			CAL_HL_IRQ_CLEAR,
-			CAL_HL_IRQ_MASK(ctx->csi2_port));
+	val = 0;
+	set_field(&val, CAL_HL_IRQ_CLEAR, CAL_HL_IRQ_MASK(ctx->csi2_port));
+	reg_write(ctx->dev, CAL_HL_IRQENABLE_CLR(2), val);
 	/* Disable IRQ_WDMA_START 0/1 */
-	reg_write_field(ctx->dev,
-			CAL_HL_IRQENABLE_CLR(3),
-			CAL_HL_IRQ_CLEAR,
-			CAL_HL_IRQ_MASK(ctx->csi2_port));
+	val = 0;
+	set_field(&val, CAL_HL_IRQ_CLEAR, CAL_HL_IRQ_MASK(ctx->csi2_port));
+	reg_write(ctx->dev, CAL_HL_IRQENABLE_CLR(3), val);
 	/* Todo: Add VC_IRQ and CSI2_COMPLEXIO_IRQ handling */
 	reg_write(ctx->dev, CAL_CSI2_VC_IRQENABLE(1), 0);
 }
@@ -612,7 +599,8 @@ static void csi2_lane_config(struct cal_ctx *ctx)
 	u32 val = reg_read(ctx->dev, CAL_CSI2_COMPLEXIO_CFG(ctx->csi2_port));
 	u32 lane_mask = CAL_CSI2_COMPLEXIO_CFG_CLOCK_POSITION_MASK;
 	u32 polarity_mask = CAL_CSI2_COMPLEXIO_CFG_CLOCK_POL_MASK;
-	struct v4l2_of_bus_mipi_csi2 *mipi_csi2 = &ctx->endpoint.bus.mipi_csi2;
+	struct v4l2_fwnode_bus_mipi_csi2 *mipi_csi2 =
+		&ctx->endpoint.bus.mipi_csi2;
 	int lane;
 
 	set_field(&val, mipi_csi2->clock_lane + 1, lane_mask);
@@ -690,12 +678,13 @@ static void pix_proc_config(struct cal_ctx *ctx)
 }
 
 static void cal_wr_dma_config(struct cal_ctx *ctx,
-			      unsigned int width)
+			      unsigned int width, unsigned int height)
 {
 	u32 val;
 
 	val = reg_read(ctx->dev, CAL_WR_DMA_CTRL(ctx->csi2_port));
 	set_field(&val, ctx->csi2_port, CAL_WR_DMA_CTRL_CPORT_MASK);
+	set_field(&val, height, CAL_WR_DMA_CTRL_YSIZE_MASK);
 	set_field(&val, CAL_WR_DMA_CTRL_DTAG_PIX_DAT,
 		  CAL_WR_DMA_CTRL_DTAG_MASK);
 	set_field(&val, CAL_WR_DMA_CTRL_MODE_CONST,
@@ -918,14 +907,11 @@ static int cal_querycap(struct file *file, void *priv,
 {
 	struct cal_ctx *ctx = video_drvdata(file);
 
-	strlcpy(cap->driver, CAL_MODULE_NAME, sizeof(cap->driver));
-	strlcpy(cap->card, CAL_MODULE_NAME, sizeof(cap->card));
+	strscpy(cap->driver, CAL_MODULE_NAME, sizeof(cap->driver));
+	strscpy(cap->card, CAL_MODULE_NAME, sizeof(cap->card));
 
 	snprintf(cap->bus_info, sizeof(cap->bus_info),
 		 "platform:%s", ctx->v4l2_dev.name);
-	cap->device_caps = V4L2_CAP_VIDEO_CAPTURE | V4L2_CAP_STREAMING |
-			    V4L2_CAP_READWRITE;
-	cap->capabilities = cap->device_caps | V4L2_CAP_DEVICE_CAPS;
 	return 0;
 }
 
@@ -1321,7 +1307,8 @@ static int cal_start_streaming(struct vb2_queue *vq, unsigned int count)
 	csi2_lane_config(ctx);
 	csi2_ctx_config(ctx);
 	pix_proc_config(ctx);
-	cal_wr_dma_config(ctx, ctx->v_fmt.fmt.pix.bytesperline);
+	cal_wr_dma_config(ctx, ctx->v_fmt.fmt.pix.bytesperline,
+			  ctx->v_fmt.fmt.pix.height);
 	cal_wr_dma_addr(ctx, addr);
 	csi2_ppi_enable(ctx);
 
@@ -1423,12 +1410,14 @@ static const struct v4l2_ioctl_ops cal_ioctl_ops = {
 	.vidioc_unsubscribe_event = v4l2_event_unsubscribe,
 };
 
-static struct video_device cal_videodev = {
+static const struct video_device cal_videodev = {
 	.name		= CAL_MODULE_NAME,
 	.fops		= &cal_fops,
 	.ioctl_ops	= &cal_ioctl_ops,
 	.minor		= -1,
 	.release	= video_device_release_empty,
+	.device_caps	= V4L2_CAP_VIDEO_CAPTURE | V4L2_CAP_STREAMING |
+			  V4L2_CAP_READWRITE,
 };
 
 /* -----------------------------------------------------------------
@@ -1525,6 +1514,11 @@ static int cal_async_complete(struct v4l2_async_notifier *notifier)
 	return 0;
 }
 
+static const struct v4l2_async_notifier_operations cal_async_ops = {
+	.bound = cal_async_bound,
+	.complete = cal_async_complete,
+};
+
 static int cal_complete_ctx(struct cal_ctx *ctx)
 {
 	struct video_device *vfd;
@@ -1617,7 +1611,8 @@ of_get_next_port(const struct device_node *parent,
 				return NULL;
 			}
 			prev = port;
-		} while (of_node_cmp(port->name, "port") != 0);
+		} while (!of_node_name_eq(port, "port"));
+		of_node_put(ports);
 	}
 
 	return port;
@@ -1637,7 +1632,7 @@ of_get_next_endpoint(const struct device_node *parent,
 		if (!ep)
 			return NULL;
 		prev = ep;
-	} while (of_node_cmp(ep->name, "endpoint") != 0);
+	} while (!of_node_name_eq(ep, "endpoint"));
 
 	return ep;
 }
@@ -1645,21 +1640,18 @@ of_get_next_endpoint(const struct device_node *parent,
 static int of_cal_create_instance(struct cal_ctx *ctx, int inst)
 {
 	struct platform_device *pdev = ctx->dev->pdev;
-	struct device_node *ep_node, *port, *remote_ep,
-			*sensor_node, *parent;
-	struct v4l2_of_endpoint *endpoint;
+	struct device_node *ep_node, *port, *sensor_node, *parent;
+	struct v4l2_fwnode_endpoint *endpoint;
 	struct v4l2_async_subdev *asd;
 	u32 regval = 0;
 	int ret, index, found_port = 0, lane;
 
 	parent = pdev->dev.of_node;
 
-	asd = &ctx->asd;
 	endpoint = &ctx->endpoint;
 
 	ep_node = NULL;
 	port = NULL;
-	remote_ep = NULL;
 	sensor_node = NULL;
 	ret = -EINVAL;
 
@@ -1702,19 +1694,12 @@ static int of_cal_create_instance(struct cal_ctx *ctx, int inst)
 		ctx_dbg(3, ctx, "can't get remote parent\n");
 		goto cleanup_exit;
 	}
-	asd->match_type = V4L2_ASYNC_MATCH_OF;
-	asd->match.of.node = sensor_node;
 
-	remote_ep = of_parse_phandle(ep_node, "remote-endpoint", 0);
-	if (!remote_ep) {
-		ctx_dbg(3, ctx, "can't get remote-endpoint\n");
-		goto cleanup_exit;
-	}
-	v4l2_of_parse_endpoint(remote_ep, endpoint);
+	v4l2_fwnode_endpoint_parse(of_fwnode_handle(ep_node), endpoint);
 
-	if (endpoint->bus_type != V4L2_MBUS_CSI2) {
-		ctx_err(ctx, "Port:%d sub-device %s is not a CSI2 device\n",
-			inst, sensor_node->name);
+	if (endpoint->bus_type != V4L2_MBUS_CSI2_DPHY) {
+		ctx_err(ctx, "Port:%d sub-device %pOFn is not a CSI2 device\n",
+			inst, sensor_node);
 		goto cleanup_exit;
 	}
 
@@ -1733,30 +1718,45 @@ static int of_cal_create_instance(struct cal_ctx *ctx, int inst)
 			endpoint->bus.mipi_csi2.data_lanes[lane]);
 	ctx_dbg(3, ctx, "\t>\n");
 
-	ctx_dbg(1, ctx, "Port: %d found sub-device %s\n",
-		inst, sensor_node->name);
+	ctx_dbg(1, ctx, "Port: %d found sub-device %pOFn\n",
+		inst, sensor_node);
 
-	ctx->asd_list[0] = asd;
-	ctx->notifier.subdevs = ctx->asd_list;
-	ctx->notifier.num_subdevs = 1;
-	ctx->notifier.bound = cal_async_bound;
-	ctx->notifier.complete = cal_async_complete;
+	v4l2_async_notifier_init(&ctx->notifier);
+
+	asd = kzalloc(sizeof(*asd), GFP_KERNEL);
+	if (!asd)
+		goto cleanup_exit;
+
+	asd->match_type = V4L2_ASYNC_MATCH_FWNODE;
+	asd->match.fwnode = of_fwnode_handle(sensor_node);
+
+	ret = v4l2_async_notifier_add_subdev(&ctx->notifier, asd);
+	if (ret) {
+		ctx_err(ctx, "Error adding asd\n");
+		kfree(asd);
+		goto cleanup_exit;
+	}
+
+	ctx->notifier.ops = &cal_async_ops;
 	ret = v4l2_async_notifier_register(&ctx->v4l2_dev,
 					   &ctx->notifier);
 	if (ret) {
 		ctx_err(ctx, "Error registering async notifier\n");
+		v4l2_async_notifier_cleanup(&ctx->notifier);
 		ret = -EINVAL;
 	}
 
+	/*
+	 * On success we need to keep reference on sensor_node, or
+	 * if notifier_cleanup was called above, sensor_node was
+	 * already put.
+	 */
+	sensor_node = NULL;
+
 cleanup_exit:
-	if (!remote_ep)
-		of_node_put(remote_ep);
-	if (!sensor_node)
-		of_node_put(sensor_node);
-	if (!ep_node)
-		of_node_put(ep_node);
-	if (!port)
-		of_node_put(port);
+	of_node_put(sensor_node);
+	of_node_put(ep_node);
+	of_node_put(port);
 
 	return ret;
 }
@@ -1812,15 +1812,17 @@ err_exit:
 static int cal_probe(struct platform_device *pdev)
 {
 	struct cal_dev *dev;
+	struct cal_ctx *ctx;
 	int ret;
 	int irq;
+	int i;
 
 	dev = devm_kzalloc(&pdev->dev, sizeof(*dev), GFP_KERNEL);
 	if (!dev)
 		return -ENOMEM;
 
 	/* set pseudo v4l2 device name so we can use v4l2_printk */
-	strlcpy(dev->v4l2_dev.name, CAL_MODULE_NAME,
+	strscpy(dev->v4l2_dev.name, CAL_MODULE_NAME,
 		sizeof(dev->v4l2_dev.name));
 
 	/* save pdev pointer */
@@ -1881,6 +1883,16 @@ static int cal_probe(struct platform_device *pdev)
 
 runtime_disable:
 	pm_runtime_disable(&pdev->dev);
+	for (i = 0; i < CAL_NUM_CONTEXT; i++) {
+		ctx = dev->ctx[i];
+		if (ctx) {
+			v4l2_async_notifier_unregister(&ctx->notifier);
+			v4l2_async_notifier_cleanup(&ctx->notifier);
+			v4l2_ctrl_handler_free(&ctx->ctrl_handler);
+			v4l2_device_unregister(&ctx->v4l2_dev);
+		}
+	}
+
 	return ret;
 }
 
@@ -1902,6 +1914,7 @@ static int cal_remove(struct platform_device *pdev)
 				video_device_node_name(&ctx->vdev));
 			camerarx_phy_disable(ctx);
 			v4l2_async_notifier_unregister(&ctx->notifier);
+			v4l2_async_notifier_cleanup(&ctx->notifier);
 			v4l2_ctrl_handler_free(&ctx->ctrl_handler);
 			v4l2_device_unregister(&ctx->v4l2_dev);
 			video_unregister_device(&ctx->vdev);

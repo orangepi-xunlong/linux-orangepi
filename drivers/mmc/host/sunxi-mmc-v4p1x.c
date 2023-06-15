@@ -16,7 +16,7 @@
 
 
 #include <linux/clk.h>
-#include <linux/clk/sunxi.h>
+#include <linux/reset.h>
 
 #include <linux/gpio.h>
 #include <linux/platform_device.h>
@@ -236,7 +236,7 @@ static void sunxi_mmc_set_clk_dly(struct sunxi_mmc_host *host, int clk,
 	else
 		rval &= ~SDXC_DAT_DRV_PH_SEL;	/*90 phase */
 
-	mmc_writel(host, REG_DRV_DL, rval);
+	sunxi_r_op(host, mmc_writel(host, REG_DRV_DL, rval));
 
 /*
 *      rval = mmc_readl(host,REG_SAMP_DL);
@@ -290,7 +290,7 @@ static int __sunxi_mmc_do_oclk_onoff(struct sunxi_mmc_host *host, u32 oclk_en,
 
 	if (oclk_en)
 		rval |= SDXC_CARD_CLOCK_ON;
-	if (pwr_save)
+	if (pwr_save && host->voltage_switching == 0)
 		rval |= SDXC_LOW_POWER_ON;
 	if (ignore_dat0)
 		rval |= SDXC_MASK_DATA0;
@@ -300,7 +300,11 @@ static int __sunxi_mmc_do_oclk_onoff(struct sunxi_mmc_host *host, u32 oclk_en,
 	dev_dbg(mmc_dev(host->mmc), "%s REG_CLKCR:%x\n", __func__,
 		mmc_readl(host, REG_CLKCR));
 
-	rval = SDXC_START | SDXC_UPCLK_ONLY | SDXC_WAIT_PRE_OVER;
+	if (host->voltage_switching == 1) {
+		rval = SDXC_START | SDXC_UPCLK_ONLY | SDXC_WAIT_PRE_OVER | SDXC_VOLTAGE_SWITCH;
+	} else {
+		rval = SDXC_START | SDXC_UPCLK_ONLY | SDXC_WAIT_PRE_OVER;
+	}
 	mmc_writel(host, REG_CMDR, rval);
 
 	do {
@@ -526,7 +530,7 @@ static void sunxi_mmc_restore_spec_reg_v4p1x(struct sunxi_mmc_host *host)
 	struct sunxi_mmc_spec_regs *spec_regs =
 	    &((struct sunxi_mmc_ver_priv *)(host->version_priv_dat))->
 	    bak_spec_regs;
-	mmc_writel(host, REG_DRV_DL, spec_regs->drv_dl);
+	sunxi_r_op(host, mmc_writel(host, REG_DRV_DL, spec_regs->drv_dl));
 	mmc_writel(host, REG_SAMP_DL, spec_regs->samp_dl);
 	mmc_writel(host, REG_DS_DL, spec_regs->ds_dl);
 	mmc_writel(host, REG_SD_NTSR, spec_regs->sd_ntsr);
@@ -548,7 +552,7 @@ static inline void sunxi_mmc_set_dly_raw(struct sunxi_mmc_host *host,
 	else if (opha_dat == 0)
 		rval &= ~SDXC_DAT_DRV_PH_SEL;	/*90 phase */
 
-	mmc_writel(host, REG_DRV_DL, rval);
+	sunxi_r_op(host, mmc_writel(host, REG_DRV_DL, rval));
 
 	rval = mmc_readl(host, REG_SD_NTSR);
 
@@ -714,7 +718,7 @@ void sunxi_mmc_init_priv_v4p1x(struct sunxi_mmc_host *host,
 	host->sunxi_mmc_oclk_en = sunxi_mmc_oclk_onoff;
 	host->sunxi_mmc_judge_retry = sunxi_mmc_judge_retry_v4p1x;
 	/*sunxi_of_parse_clk_dly(host); */
-#if (defined(CONFIG_ARCH_SUN50IW9P1) || defined(CONFIG_ARCH_SUN50IW10))
+#if (defined(CONFIG_ARCH_SUN50IW9) || defined(CONFIG_ARCH_SUN50IW10))
 	host->des_addr_shift = 2;
 #endif
 }

@@ -1,5 +1,5 @@
 /*
- * linux-4.9/drivers/media/platform/sunxi-vin/vin-vipp/sunxi_scaler.h
+ * linux-5.4/drivers/media/platform/sunxi-vin/vin-vipp/sunxi_scaler.h
  *
  * Copyright (c) 2007-2017 Allwinnertech Co., Ltd.
  *
@@ -20,6 +20,8 @@
 #include <media/v4l2-ctrls.h>
 #include <media/v4l2-subdev.h>
 #include "vipp_reg.h"
+
+#define VIPP_ONLY_SHRINK 1
 
 enum scaler_pad {
 	SCALER_PAD_SINK,

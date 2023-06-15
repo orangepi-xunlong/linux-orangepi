@@ -1,11 +1,11 @@
-/* driver/misc/sunxi-reg.c
+/* drivers/gpio/gpio-sunxi.c
  *
  *  Copyright (C) 2011 Reuuimlla Technology Co.Ltd
  *  Charles <yanjianbo@allwinnertech.com>
  *
  *  www.reuuimllatech.com
  *
- *  User access to the registers driver.
+ *  User access to the gpios via sysfs.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -28,17 +28,77 @@
 #include <linux/ctype.h>
 #include <linux/sysfs.h>
 #include <linux/device.h>
-#include <linux/sunxi-gpio.h>
 #include <linux/io.h>
 #include <linux/of_gpio.h>
 #include <linux/device.h>
 #include "../base/base.h"
 
-#define PINS_PER_BANK       32
+#define PINS_PER_BANK   32
+#define SUNXI_PA_BASE	0
+#define SUNXI_PB_BASE	32
+#define SUNXI_PC_BASE	64
+#define SUNXI_PD_BASE	96
+#define SUNXI_PE_BASE	128
+#define SUNXI_PF_BASE	160
+#define SUNXI_PG_BASE	192
+#define SUNXI_PH_BASE	224
+#define SUNXI_PI_BASE	256
+#define SUNXI_PJ_BASE	288
+#define SUNXI_PK_BASE	320
+#define SUNXI_PL_BASE	352
+#define SUNXI_PM_BASE	384
+#define SUNXI_PN_BASE	416
+#define SUNXI_PO_BASE	448
+#define AXP_PIN_BASE	1024
+
+#define SUNXI_PIN_NAME_MAX_LEN	8
+
+/* sunxi specific input/output/eint functions */
+#define SUNXI_PIN_INPUT_FUNC	(0)
+#define SUNXI_PIN_OUTPUT_FUNC	(1)
+#define SUNXI_PIN_EINT_FUNC	(6)
+#define SUNXI_PIN_IO_DISABLE	(7)
+
+/* axp group base number name space,
+ * axp pinctrl number space coherent to sunxi-pinctrl.
+ */
+#define AXP_PINCTRL	        "axp-pinctrl"
+#define AXP_CFG_GRP		(0xFFFF)
+#define AXP_PIN_INPUT_FUNC	(0)
+#define AXP_PIN_OUTPUT_FUNC	(1)
+#define IS_AXP_PIN(pin)		(pin >= AXP_PIN_BASE)
+
+/*
+ * PIN_CONFIG_PARAM_MAX - max available value of 'enum pin_config_param'.
+ * see include/linux/pinctrl/pinconf-generic.h
+ */
+#define PIN_CONFIG_PARAM_MAX    PIN_CONFIG_PERSIST_STATE
+enum sunxi_pin_config_param {
+	SUNXI_PINCFG_TYPE_FUNC = PIN_CONFIG_PARAM_MAX + 1,
+	SUNXI_PINCFG_TYPE_DAT,
+	SUNXI_PINCFG_TYPE_PUD,
+	SUNXI_PINCFG_TYPE_DRV,
+};
+
+/*
+ * struct gpio_config - gpio config info
+ * @gpio:      gpio global index, must be unique
+ * @mul_sel:   multi sel val: 0 - input, 1 - output.
+ * @pull:      pull val: 0 - pull up/down disable, 1 - pull up
+ * @drv_level: driver level val: 0 - level 0, 1 - level 1
+ * @data:      data val: 0 - low, 1 - high, only valid when mul_sel is input/output
+ */
+struct gpio_config {
+	u32	data;
+	u32	gpio;
+	u32	mul_sel;
+	u32	pull;
+	u32	drv_level;
+};
 DECLARE_RWSEM(gpio_sw_list_lock);
 LIST_HEAD(gpio_sw_list);
 static struct class *gpio_sw_class;
-static int network_led_data_suspend;
+/* static int network_led_data_suspend; */
 
 struct sw_gpio_pd {
 	char name[16];
@@ -69,7 +129,7 @@ struct gpio_sw_classdev {
 
 struct sw_gpio {
 	struct sw_gpio_pd *pdata;
-	spinlock_t lock;
+	struct mutex lock;
 	struct gpio_sw_classdev class;
 };
 
@@ -77,14 +137,15 @@ static struct platform_device *gpio_sw_dev[256];
 static struct sw_gpio_pd *sw_pdata[256];
 struct device_node *node;
 static unsigned int easy_light_used;
-
+static unsigned int gpio_sdcard_reused;
 /*
- * mul_cfg: 0 - inpit
- *          1 - output
-*/
+ * mul_cfg:
+ * 0 - input
+ * 1 - output
+ */
+
 static int gpio_sw_cfg_set(struct gpio_sw_classdev *gpio_sw_cdev, int mul_cfg)
 {
-	char pin_name[32];
 	unsigned long config;
 
 	if (mul_cfg == 0)
@@ -92,12 +153,8 @@ static int gpio_sw_cfg_set(struct gpio_sw_classdev *gpio_sw_cdev, int mul_cfg)
 	else if (mul_cfg == 1)
 		gpio_direction_output(gpio_sw_cdev->item->gpio, 0);
 	else if (mul_cfg > 1 && mul_cfg <= 7) {
-		sunxi_gpio_to_name(gpio_sw_cdev->item->gpio, pin_name);
-		config = SUNXI_PINCFG_PACK(SUNXI_PINCFG_TYPE_FUNC, mul_cfg);
-		if (gpio_sw_cdev->item->gpio < SUNXI_PL_BASE)
-			pin_config_set(SUNXI_PINCTRL, pin_name, config);
-		else
-			pin_config_set(SUNXI_R_PINCTRL, pin_name, config);
+		config = PIN_CONF_PACKED(SUNXI_PINCFG_TYPE_FUNC, mul_cfg);
+		pinctrl_gpio_set_config(gpio_sw_cdev->item->gpio, config);
 	}
 	gpio_sw_cdev->cfg = mul_cfg;
 	return 0;
@@ -110,16 +167,11 @@ static int gpio_sw_cfg_get(struct gpio_sw_classdev *gpio_sw_cdev)
 
 static int gpio_sw_pull_set(struct gpio_sw_classdev *gpio_sw_cdev, int pull)
 {
-	char pin_name[32];
 	unsigned long config;
 
 	if (pull >= 0 && pull <= 3) {
-		sunxi_gpio_to_name(gpio_sw_cdev->item->gpio, pin_name);
-		config = SUNXI_PINCFG_PACK(SUNXI_PINCFG_TYPE_PUD, pull);
-		if (gpio_sw_cdev->item->gpio < SUNXI_PL_BASE)
-			pin_config_set(SUNXI_PINCTRL, pin_name, config);
-		else
-			pin_config_set(SUNXI_R_PINCTRL, pin_name, config);
+		config = PIN_CONF_PACKED(SUNXI_PINCFG_TYPE_PUD, pull);
+		pinctrl_gpio_set_config(gpio_sw_cdev->item->gpio, config);
 	}
 
 	gpio_sw_cdev->pull = pull;
@@ -134,16 +186,11 @@ static int gpio_sw_pull_get(struct gpio_sw_classdev *gpio_sw_cdev)
 
 static int gpio_sw_drv_set(struct gpio_sw_classdev *gpio_sw_cdev, int drv)
 {
-	char pin_name[32];
 	unsigned long config;
 
 	if (drv >= 0 && drv <= 3) {
-		sunxi_gpio_to_name(gpio_sw_cdev->item->gpio, pin_name);
-		config = SUNXI_PINCFG_PACK(SUNXI_PINCFG_TYPE_DRV, drv);
-		if (gpio_sw_cdev->item->gpio < SUNXI_PL_BASE)
-			pin_config_set(SUNXI_PINCTRL, pin_name, config);
-		else
-			pin_config_set(SUNXI_R_PINCTRL, pin_name, config);
+		config = PIN_CONF_PACKED(SUNXI_PINCFG_TYPE_DRV, drv);
+		pinctrl_gpio_set_config(gpio_sw_cdev->item->gpio, config);
 	}
 
 	gpio_sw_cdev->drv = drv;
@@ -309,6 +356,9 @@ static ssize_t light_store(struct device *dev,
 	return size;
 }
 
+/* TODO:support pm ops */
+
+/*
 static int gpio_sw_suspend(struct device *dev, pm_message_t state)
 {
 	struct gpio_sw_classdev *gpio_sw_cdev = dev_get_drvdata(dev);
@@ -333,13 +383,12 @@ static int gpio_sw_resume(struct device *dev)
 	}
 	return 0;
 }
-
+*/
 static struct device_attribute gpio_sw_class_attrs[] = {
 	__ATTR(cfg, 0664, cfg_sel_show, cfg_sel_store),
 	__ATTR(pull, 0664, pull_show, pull_store),
 	__ATTR(drv, 0664, drv_level_show, drv_level_store),
 	__ATTR(data, 0664, data_show, data_store),
-	__ATTR_NULL,
 };
 
 static struct device_attribute easy_light_attr =
@@ -373,10 +422,25 @@ gpio_sw_classdev_register(struct device *parent,
 			  struct gpio_sw_classdev *gpio_sw_cdev)
 {
 	struct sw_gpio_pd *pdata = parent->platform_data;
+	int i, ret;
 
 	gpio_sw_cdev->dev = device_create(gpio_sw_class, parent, 0,
 					  gpio_sw_cdev, "%s",
 					  gpio_sw_cdev->name);
+
+	for (i = 0; i < ARRAY_SIZE(gpio_sw_class_attrs); i++) {
+		ret = device_create_file(gpio_sw_cdev->dev, &gpio_sw_class_attrs[i]);
+		if (ret) {
+			pr_err("%s:%u class_create_file() failed. err=%d\n", __func__, __LINE__, ret);
+			while (i--) {
+				device_remove_file(gpio_sw_cdev->dev, &gpio_sw_class_attrs[i]);
+			}
+			class_destroy(gpio_sw_class);
+			gpio_sw_class = NULL;
+			return ret;
+		}
+	}
+
 	if (IS_ERR(gpio_sw_cdev->dev))
 		return PTR_ERR(gpio_sw_cdev->dev);
 	if (easy_light_used && strlen(pdata->link)) {
@@ -485,8 +549,8 @@ static int gpio_sw_probe(struct platform_device *dev)
 {
 	struct sw_gpio *sw_gpio_entry;
 	struct sw_gpio_pd *pdata = dev->dev.platform_data;
+	enum of_gpio_flags config;
 	int ret;
-	unsigned long flags;
 	char io_area[16];
 	int gpio;
 
@@ -500,30 +564,22 @@ static int gpio_sw_probe(struct platform_device *dev)
 		kfree(sw_gpio_entry);
 		return -ENOMEM;
 	}
-	/* pr_info("gpio_name: %s\n", pdata->name); */
-	gpio = of_get_named_gpio_flags(node, pdata->name, 0,
-				       (enum of_gpio_flags *)sw_gpio_entry->
-				       class.item);
+	gpio = of_get_named_gpio_flags(node, pdata->name, 0, &config);
 	if (!gpio_is_valid(gpio)) {
 		pr_err("get config err!\n");
 		kfree(sw_gpio_entry->class.item);
 		kfree(sw_gpio_entry);
-		return -ENOMEM;
+		return gpio;
 	}
 
-	/* init the  */
-	sw_gpio_entry->class.cfg  = (sw_gpio_entry->class.item)->mul_sel;
-	sw_gpio_entry->class.pull = (sw_gpio_entry->class.item)->pull;
-	sw_gpio_entry->class.drv  = (sw_gpio_entry->class.item)->drv_level;
-
-	ret = map_gpio_to_name(io_area, sw_gpio_entry->class.item->gpio);
-	pr_info("gpio name is %s, ret = %d\n", io_area, ret);
-
+	(sw_gpio_entry->class.item)->gpio = gpio;
 	platform_set_drvdata(dev, sw_gpio_entry);
-	spin_lock_init(&sw_gpio_entry->lock);
-	spin_lock_irqsave(&sw_gpio_entry->lock, flags);
+	mutex_init(&sw_gpio_entry->lock);
+	mutex_lock(&sw_gpio_entry->lock);
 	sw_gpio_entry->pdata = pdata;
 
+	ret = map_gpio_to_name(io_area, gpio);
+	pr_info("gpio: %d, name: %s, ret = %d\n", gpio, io_area, ret);
 	if (ret == 0)
 		sw_gpio_entry->class.name = io_area;
 	else
@@ -538,21 +594,18 @@ static int gpio_sw_probe(struct platform_device *dev)
 	sw_gpio_entry->class.gpio_sw_data_set = gpio_sw_data_set;
 	sw_gpio_entry->class.gpio_sw_data_get = gpio_sw_data_get;
 
+	/* init the gpio */
+	if (!gpio_sdcard_reused)
+		gpio_direction_output(gpio, (config == OF_GPIO_ACTIVE_LOW) ? 0 : 1);
 
-	/* init the gpio form sys_config */
-	gpio_sw_cfg_set(&sw_gpio_entry->class,
-			sw_gpio_entry->class.item->mul_sel);
-	gpio_sw_data_set(&sw_gpio_entry->class,
-			 sw_gpio_entry->class.item->data);
-
-	spin_unlock_irqrestore(&sw_gpio_entry->lock, flags);
+	mutex_unlock(&sw_gpio_entry->lock);
 
 	ret = gpio_sw_classdev_register(&dev->dev, &sw_gpio_entry->class);
 	if (ret < 0) {
 		dev_err(&dev->dev, "gpio_sw_classdev_register failed\n");
 		kfree(sw_gpio_entry->class.item);
 		kfree(sw_gpio_entry);
-		return -1;
+		return ret;
 	}
 
 	/* create symbol link */
@@ -578,7 +631,7 @@ static struct platform_driver gpio_sw_driver = {
 static void __exit gpio_sw_exit(void)
 {
 	int i, cnt;
-	struct gpio_config config;
+	enum of_gpio_flags config;
 	int gpio;
 	char gpio_name[32];
 	int ret;
@@ -593,8 +646,7 @@ static void __exit gpio_sw_exit(void)
 	for (i = 0; i < cnt; i++) {
 		sprintf(gpio_name, "gpio_pin_%d", i + 1);
 		gpio =
-		    of_get_named_gpio_flags(node, gpio_name, 0,
-					    (enum of_gpio_flags *)&config);
+		    of_get_named_gpio_flags(node, gpio_name, 0, &config);
 		if (!gpio_is_valid(gpio)) {
 			pr_err("this gpio is invalid: %d\n", gpio);
 			continue;
@@ -603,7 +655,8 @@ static void __exit gpio_sw_exit(void)
 		platform_device_unregister(gpio_sw_dev[i]);
 		kfree(gpio_sw_dev[i]);
 		kfree(sw_pdata[i]);
-		gpio_free(gpio);
+		if (!gpio_sdcard_reused)
+			gpio_free(gpio);
 	}
 
 	class_destroy(gpio_sw_class);
@@ -614,71 +667,81 @@ EXIT_END:
 static int sunxi_init_gpio_probe(struct platform_device *pdev)
 {
 	int i, cnt;
-	struct gpio_config config;
+	enum of_gpio_flags config;
 	int gpio;
 	char gpio_name[32];
 	int ret;
-	const char *normal_led_pin_str = NULL;
-	const char *standby_led_pin_str = NULL;
-	const char *network_led_pin_str = NULL;
+	const char *normal_led_pin_str;
+	const char *standby_led_pin_str;
+	const char *network_led_pin_str;
 
 	node = pdev->dev.of_node;
-	if (!node)
-		goto INIT_END;
+	if (!node) {
+		ret = -EINVAL;
+		goto err0;
+	}
 
 	/* create debug dir: /sys/class/gpio_sw */
 	gpio_sw_class = class_create(THIS_MODULE, "gpio_sw");
-	if (IS_ERR(gpio_sw_class))
-		return PTR_ERR(gpio_sw_class);
+	if (IS_ERR(gpio_sw_class)) {
+		ret = PTR_ERR(gpio_sw_class);
+		goto err0;
 
-	gpio_sw_class->suspend = gpio_sw_suspend;
-	gpio_sw_class->resume = gpio_sw_resume;
-	gpio_sw_class->class_attrs = (struct class_attribute *)gpio_sw_class_attrs;
+	}
 
 	if (of_property_read_u32(node, "easy_light_used", &easy_light_used)) {
 		easy_light_used = 0;
-		pr_err("failed to get easy_light_used assign\n");
+		//pr_debug("failed to get easy_light_used assign\n");
 	}
 	if (of_property_read_string(node, "normal_led", &normal_led_pin_str))
-		pr_err("failed to get normal led pin assign\n");
+		pr_debug("failed to get normal led pin assign\n");
 
 	if (of_property_read_string(node, "standby_led", &standby_led_pin_str))
-		pr_err("failed to get standby led pin assign\n");
+		pr_debug("failed to get standby led pin assign\n");
 
 	if (of_property_read_string(node, "network_led", &network_led_pin_str))
-		pr_err("failed to get standby led pin assign\n");
+		pr_debug("failed to get network led pin assign\n");
+
+	if (of_property_read_u32(node, "gpio_sdcard_reused", &gpio_sdcard_reused))
+		pr_debug("failed to get gpio_sdcard_reused assign\n");
 
 	ret = of_property_read_u32(node, "gpio_num", &cnt);
 	if (ret || !cnt) {
-		pr_err("these is zero number for gpio\n");
-		goto INIT_END;
+		//pr_err("there is zero number for gpio\n");
+		goto err1;
 	}
 
 	for (i = 0; i < cnt; i++) {
 		sprintf(gpio_name, "gpio_pin_%d", i + 1);
-		gpio =
-		    of_get_named_gpio_flags(node, gpio_name, 0,
-					    (enum of_gpio_flags *)&config);
-		/*printk(KERN_EMERG"gpio = %d, mul = %d, drv= %d, pull= %d, data = %d\n",\
-				 config.gpio, config.mul_sel, config.drv_level, config.pull, config.data);*/
-		if (gpio_request(gpio, NULL)) {
-			pr_err("gpio_pin_%d(%d) gpio_request fail\n", i + 1,
-			       gpio);
-			continue;
-		}
-		pr_info("gpio_pin_%d(%d) gpio_is_valid\n", i + 1, config.gpio);
+		gpio = of_get_named_gpio_flags(node, gpio_name, 0, &config);
+		if (!gpio_is_valid(gpio)) {
+			pr_err("get config err!\n");
+			ret = gpio;
+			goto err1;
 
-		sw_pdata[i] = kzalloc(sizeof(struct sw_gpio_pd), GFP_KERNEL);
-		if (!sw_pdata[i]) {
+		}
+		if (!gpio_sdcard_reused) {
+			if (gpio_request(gpio, NULL)) {
+				pr_err("gpio_pin_%d(%d) gpio_request fail\n", i + 1, gpio);
+				ret = -EINVAL;
+				goto err1;
+			}
+
+		}
+		pr_info("gpio_pin_%d(%d) gpio_is_valid\n", i + 1, gpio);
+
+		sw_pdata[i] = devm_kzalloc(&pdev->dev, sizeof(struct sw_gpio_pd), GFP_KERNEL);
+		if (IS_ERR_OR_NULL(sw_pdata[i])) {
 			pr_err("kzalloc fail for sw_pdata[%d]\n", i);
-			return -1;
+			ret = -ENOMEM;
+			goto err1;
 		}
 
-		gpio_sw_dev[i] =
-		    kzalloc(sizeof(struct platform_device), GFP_KERNEL);
-		if (!gpio_sw_dev[i]) {
+		gpio_sw_dev[i] = devm_kzalloc(&pdev->dev, sizeof(struct platform_device), GFP_KERNEL);
+		if (IS_ERR_OR_NULL(gpio_sw_dev[i])) {
 			pr_err("kzalloc fail for gpio_sw_dev[%d]\n", i);
-			return -1;
+			ret = -ENOMEM;
+			goto err1;
 		}
 
 		sprintf(sw_pdata[i]->name, "gpio_pin_%d", i + 1);
@@ -705,26 +768,26 @@ static int sunxi_init_gpio_probe(struct platform_device *pdev)
 		gpio_sw_dev[i]->dev.release = gpio_sw_release;
 
 		if (platform_device_register(gpio_sw_dev[i])) {
-			pr_err("%s platform_device_register fail\n",
-			       sw_pdata[i]->name);
-			goto INIT_ERR_FREE;
+			pr_err("%s platform_device_register fail\n", sw_pdata[i]->name);
+			ret = -EINVAL;
+			goto err1;
 		}
 	}
 	if (platform_driver_register(&gpio_sw_driver)) {
 		pr_err("gpio user platform_driver_register  fail\n");
 		for (i = 0; i < cnt; i++)
 			platform_device_unregister(gpio_sw_dev[i]);
-		goto INIT_ERR_FREE;
-	}
+		ret = -EINVAL;
+		goto err1;
 
-INIT_END:
-	pr_info("gpio_init finish with uesd\n");
+	}
+	pr_info("gpio-sunxi probe success\n");
 	return 0;
-INIT_ERR_FREE:
-	pr_err("gpio_init err\n");
-	kfree(sw_pdata[i]);
-	kfree(gpio_sw_dev[i]);
-	return -1;
+
+err1:
+	class_destroy(gpio_sw_class);
+err0:
+	return ret;
 }
 
 static const struct of_device_id sunxi_gpio_of_match[] = {
@@ -754,4 +817,5 @@ module_exit(gpio_sw_exit);
 
 MODULE_AUTHOR("yanjianbo");
 MODULE_DESCRIPTION("SW GPIO USER driver");
-MODULE_LICENSE("GPL");
+MODULE_LICENSE("GPL v2");
+MODULE_VERSION("1.3.0");

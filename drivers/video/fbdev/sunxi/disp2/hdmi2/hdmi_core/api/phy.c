@@ -1296,7 +1296,7 @@ static u32 phy301_get_freq(u32 pClk)
 	else if (((pClk >= 593995) && (pClk <= 594005)) ||
 		((pClk >= 593403) && (pClk <= 593413)))
 		return 594000;
-	else{
+	else {
 		pr_err("Error:Unable to map input pixel clock frequency %d kHz\n", pClk);
 	}
 	return 1000;
@@ -1529,7 +1529,7 @@ u32 phy303_get_freq(u32 pClk)
 	else if (((pClk >= 593995) && (pClk <= 594005)) ||
 			((pClk >= 593403) && (pClk <= 593413)))
 		return 594000;
-	else{
+	else {
 		pr_err("Error:Unable to map input pixel clock frequency %dkHz\n", pClk);
 	}
 	return 1000;
@@ -1549,6 +1549,7 @@ static struct phy_config *phy301_get_configs(u32 pClk, color_depth_t color,
 		if ((pClk == phy301[i].clock) &&
 				(color == phy301[i].color) &&
 				(pixel == phy301[i].pixel)) {
+			VIDEO_INF("tmds clk:%d phy choose index:%d\n", pClk, i);
 			return &(phy301[i]);
 		}
 	}

@@ -53,6 +53,102 @@
 #include "sunxi-mmc-debug.h"
 #include "sunxi-mmc-export.h"
 
+#ifdef CONFIG_REGULATOR
+/**
+ * mmc_regulator_get_ocrmask - return mask of supported voltages
+ * @supply: regulator to use
+ *
+ * This returns either a negative errno, or a mask of voltages that
+ * can be provided to MMC/SD/SDIO devices using the specified voltage
+ * regulator.  This would normally be called before registering the
+ * MMC host adapter.
+ */
+static int mmc_regulator_get_ocrmask(struct regulator *supply)
+{
+	int			result = 0;
+	int			count;
+	int			i;
+	int			vdd_uV;
+	int			vdd_mV;
+
+	count = regulator_count_voltages(supply);
+	if (count < 0)
+		return count;
+
+	for (i = 0; i < count; i++) {
+		vdd_uV = regulator_list_voltage(supply, i);
+		if (vdd_uV <= 0)
+			continue;
+
+		vdd_mV = vdd_uV / 1000;
+		result |= mmc_vddrange_to_ocrmask(vdd_mV, vdd_mV);
+	}
+
+	if (!result) {
+		vdd_uV = regulator_get_voltage(supply);
+		if (vdd_uV <= 0)
+			return vdd_uV;
+
+		vdd_mV = vdd_uV / 1000;
+		result = mmc_vddrange_to_ocrmask(vdd_mV, vdd_mV);
+	}
+
+	return result;
+}
+
+/**
+ * mmc_regulator_set_ocr - set regulator to match host->ios voltage
+ * @mmc: the host to regulate
+ * @supply: regulator to use
+ * @vdd_bit: zero for power off, else a bit number (host->ios.vdd)
+ *
+ * Returns zero on success, else negative errno.
+ *
+ * MMC host drivers may use this to enable or disable a regulator using
+ * a particular supply voltage.  This would normally be called from the
+ * set_ios() method.
+ */
+int sunxi_mmc_regulator_set_ocr(struct mmc_host *mmc,
+			struct regulator *supply,
+			unsigned short vdd_bit)
+{
+	int			result = 0;
+	/*int			min_uV, max_uV;*/
+
+	if (vdd_bit) {
+		/*sunxi platform avoid set vcc voltage*/
+		/*mmc_ocrbitnum_to_vdd(vdd_bit, &min_uV, &max_uV);*/
+
+		/*result = regulator_set_voltage(supply, min_uV, max_uV);*/
+		if (result == 0 && !mmc->regulator_enabled) {
+			result = regulator_enable(supply);
+			if (!result)
+				mmc->regulator_enabled = true;
+		}
+	} else if (mmc->regulator_enabled) {
+		result = regulator_disable(supply);
+		if (result == 0)
+			mmc->regulator_enabled = false;
+	}
+
+	if (result)
+		dev_err(mmc_dev(mmc),
+			"could not set regulator OCR (%d)\n", result);
+	return result;
+}
+#else
+static inline int mmc_regulator_get_ocrmask(struct regulator *supply)
+{
+	return 0;
+}
+static inline int sunxi_mmc_regulator_set_ocr(struct mmc_host *mmc,
+			struct regulator *supply,
+	i		unsigned short vdd_bit)
+{
+	return 0;
+}
+#endif
+
 static int sunxi_wait_bit_clr(struct sunxi_mmc_host *smc_host, u32 reg_add,
 			      u32 bit_map, s8 *reg_add_str, s8 *bit_map_str,
 			      u32 timeout_ms)
@@ -601,7 +697,7 @@ dev_info(mmc_dev(mmc), "sdc set ios: ",
 			break;
 		if (!IS_ERR(mmc->supply.vmmc)) {
 			rval =
-			    mmc_regulator_set_ocr(mmc, mmc->supply.vmmc,
+			    sunxi_mmc_regulator_set_ocr(mmc, mmc->supply.vmmc,
 						  ios->vdd);
 			if (rval)
 				return;
@@ -678,7 +774,7 @@ dev_info(mmc_dev(mmc), "sdc set ios: ",
 		}
 
 		if (!IS_ERR(mmc->supply.vmmc)) {
-			rval = mmc_regulator_set_ocr(mmc, mmc->supply.vmmc, 0);
+			rval = sunxi_mmc_regulator_set_ocr(mmc, mmc->supply.vmmc, 0);
 			if (rval)
 				return;
 		}
@@ -1112,67 +1208,11 @@ static int sunxi_mmc_regulator_get_supply(struct mmc_host *mmc)
 {
 	struct device *dev = mmc_dev(mmc);
 	int ret = 0;
-	int i = 0;
-	struct device_node *np = NULL;
-	struct property *prop = NULL;
-	struct const char * const pwr_str[] = { "vmmc", "vqmmc", "vdmmc" };
-	const char *reg_str[ARRAY_SIZE(pwr_str)] = { NULL };
+	struct sunxi_mmc_host *host = mmc_priv(mmc);
 
-	if (!mmc->parent || !mmc->parent->of_node) {
-		dev_err(mmc_dev(mmc), "not dts found\n");
-		return -EINVAL;
-	}
-
-	np = mmc->parent->of_node;
-	for (i = 0; i < ARRAY_SIZE(pwr_str); i++) {
-		prop = of_find_property(np, pwr_str[i], NULL);
-		if (!prop) {
-			dev_info(dev, "Can't get %s regulator string\n",
-				 pwr_str[i]);
-			continue;
-		}
-		reg_str[i] = devm_kzalloc(&mmc->class_dev, prop->length,
-					  GFP_KERNEL);
-		if (!reg_str[i]) {
-			int j = 0;
-
-			dev_err(dev, "Can't get mem for %s regulator string\n",
-				pwr_str[i]);
-			for (j = 0; j < i; j++)
-				devm_kfree(&mmc->class_dev, (void *)reg_str[j]);
-			return -EINVAL;
-		}
-
-		ret = of_property_read_string(np, pwr_str[i], &reg_str[i]);
-		if (ret) {
-			dev_err(dev, "read regulator prop %s failed\n",
-				pwr_str[i]);
-			return ret;
-		}
-		dev_info(dev, "regulator prop %s,str %s\n", pwr_str[i],
-			 reg_str[i]);
-	}
-
-	/*if there is not regulator,we should make supply to ERR_PTR to
-	 *make sure that other code know there is not regulator
-	 */
-	/*Because our regulator driver does not support binding to device tree,
-	 *so we can not binding it to our dev
-	 (for example regulator_get(dev, reg_str[0])
-	 *or devm_regulator_get(dev, reg_str[0]) )
-	 */
-	/*mmc->supply.vmmc = (reg_str[0]== NULL)?(ERR_PTR(-ENODEV)):
-	 *devm_regulator_get(NULL, reg_str[0]);
-	 */
-	/*mmc->supply.vqmmc = (reg_str[1]== NULL)?(ERR_PTR(-ENODEV)):
-	 *devm_regulator_get(NULL, reg_str[1]);
-	 */
-	/*mmc->supply.vdmmc = (reg_str[2]== NULL)?(ERR_PTR(-ENODEV)):
-	 *devm_regulator_get(NULL, reg_str[2]);
-	 */
-	mmc->supply.vmmc = regulator_get(NULL, reg_str[0]);
-	mmc->supply.vqmmc = regulator_get(NULL, reg_str[1]);
-	mmc->supply.vdmmc = regulator_get(NULL, reg_str[2]);
+	mmc->supply.vmmc = regulator_get_optional(dev, "vmmc");
+	mmc->supply.vqmmc = regulator_get_optional(dev, "vqmmc");
+	host->supply.vdmmc = regulator_get_optional(dev, "vdmmc");
 
 	if (IS_ERR(mmc->supply.vmmc)) {
 		dev_info(dev, "No vmmc regulator found\n");
@@ -1187,7 +1227,7 @@ static int sunxi_mmc_regulator_get_supply(struct mmc_host *mmc)
 	if (IS_ERR(mmc->supply.vqmmc))
 		dev_info(dev, "No vqmmc regulator found\n");
 
-	if (IS_ERR(mmc->supply.vdmmc))
+	if (IS_ERR(host->supply.vdmmc))
 		dev_info(dev, "No vdmmc regulator found\n");
 
 	return 0;
@@ -1201,8 +1241,10 @@ static int sunxi_mmc_regulator_get_supply(struct mmc_host *mmc)
 /*so we must release it manully*/
 static void sunxi_mmc_regulator_release_supply(struct mmc_host *mmc)
 {
-	if (!IS_ERR(mmc->supply.vdmmc))
-		regulator_put(mmc->supply.vdmmc);
+	struct sunxi_mmc_host *host = mmc_priv(mmc);
+
+	if (!IS_ERR(host->supply.vdmmc))
+		regulator_put(host->supply.vdmmc);
 
 	if (!IS_ERR(mmc->supply.vqmmc))
 		regulator_put(mmc->supply.vqmmc);
@@ -1265,8 +1307,8 @@ static int sunxi_mmc_resource_request(struct sunxi_mmc_host *host,
 		    MMC_VDD_31_32 | MMC_VDD_32_33 | MMC_VDD_33_34;
 
 	/*enable card detect pin power*/
-	if (!IS_ERR(host->mmc->supply.vdmmc)) {
-		ret = regulator_enable(host->mmc->supply.vdmmc);
+	if (!IS_ERR(host->supply.vdmmc)) {
+		ret = regulator_enable(host->supply.vdmmc);
 		if (ret < 0)
 			dev_err(mmc_dev(host->mmc),
 				"failed to enable vdmmc regulator\n");
@@ -1392,8 +1434,8 @@ error_assert_reset:
 		clk_disable_unprepare(host->clk_rst);
 #endif
 error_disable_regulator:
-	if (!IS_ERR(host->mmc->supply.vdmmc))
-		regulator_disable(host->mmc->supply.vdmmc);
+	if (!IS_ERR(host->supply.vdmmc))
+		regulator_disable(host->supply.vdmmc);
 	sunxi_mmc_regulator_release_supply(host->mmc);
 
 	return ret;
@@ -1499,8 +1541,8 @@ static int sunxi_mmc_remove(struct platform_device *pdev)
 
 	mmc_remove_sys_fs(host, pdev);
 
-	if (!IS_ERR(mmc->supply.vdmmc))
-		regulator_disable(mmc->supply.vdmmc);
+	if (!IS_ERR(host->supply.vdmmc))
+		regulator_disable(host->supply.vdmmc);
 
 	sunxi_mmc_regulator_release_supply(mmc);
 
@@ -1568,8 +1610,8 @@ static int sunxi_mmc_suspend(struct device *dev)
 	if (mmc) {
 		ret = mmc_suspend_host(mmc);
 		if (!ret) {
-			if (!IS_ERR(mmc->supply.vdmmc)) {
-				ret = regulator_disable(mmc->supply.vdmmc);
+			if (!IS_ERR(host->supply.vdmmc)) {
+				ret = regulator_disable(host->supply.vdmmc);
 				if (ret) {
 					dev_err(mmc_dev(mmc),
 						"disable vdmmc failed in suspend\n");
@@ -1600,7 +1642,7 @@ static int sunxi_mmc_suspend(struct device *dev)
 
 				if (!IS_ERR(mmc->supply.vmmc)) {
 					ret =
-					    mmc_regulator_set_ocr(mmc,
+					    sunxi_mmc_regulator_set_ocr(mmc,
 								  mmc->supply.
 								  vmmc, 0);
 					return ret;
@@ -1630,7 +1672,7 @@ static int sunxi_mmc_resume(struct device *dev)
 		if (mmc_card_keep_power(mmc) || host->dat3_imask) {
 			if (!IS_ERR(mmc->supply.vmmc)) {
 				ret =
-				    mmc_regulator_set_ocr(mmc, mmc->supply.vmmc,
+				    sunxi_mmc_regulator_set_ocr(mmc, mmc->supply.vmmc,
 							  mmc->ios.vdd);
 				if (ret)
 					return ret;
@@ -1693,8 +1735,8 @@ static int sunxi_mmc_resume(struct device *dev)
 			/*dump_reg(host);*/
 		}
 		/*enable card detect pin power*/
-		if (!IS_ERR(mmc->supply.vdmmc)) {
-			ret = regulator_enable(mmc->supply.vdmmc);
+		if (!IS_ERR(host->supply.vdmmc)) {
+			ret = regulator_enable(host->supply.vdmmc);
 			if (ret < 0) {
 				dev_err(mmc_dev(mmc),
 					"failed to enable vdmmc regulator\n");

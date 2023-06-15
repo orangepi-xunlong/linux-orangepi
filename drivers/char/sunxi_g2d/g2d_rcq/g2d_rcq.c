@@ -25,7 +25,7 @@ __s32 g2d_top_mem_pool_alloc(struct g2d_rcq_mem_info *p_rcq_info)
 	p_rcq_info->rcq_byte_used =
 	    p_rcq_info->alloc_num * sizeof(*(p_rcq_info->vir_addr));
 	p_rcq_info->vir_addr = g2d_malloc(p_rcq_info->rcq_reg_mem_size,
-					  (dma_addr_t *)&p_rcq_info->phy_addr);
+					  (__u32 *)&p_rcq_info->phy_addr);
 	if (!p_rcq_info->vir_addr)
 		ret = -1;
 

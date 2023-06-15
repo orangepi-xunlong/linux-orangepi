@@ -1,5 +1,5 @@
 /*
- * linux-4.9/drivers/media/platform/sunxi-vin/vin-cci/bsp_cci.c
+ * linux-5.4/drivers/media/platform/sunxi-vin/vin-cci/bsp_cci.c
  *
  * Copyright (c) 2007-2017 Allwinnertech Co., Ltd.
  *

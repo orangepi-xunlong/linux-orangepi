@@ -95,10 +95,8 @@ void local_flush_tlb_range(struct vm_area_struct *vma,
 	if (mm->context.asid[cpu] == NO_CONTEXT)
 		return;
 
-#if 0
-	printk("[tlbrange<%02lx,%08lx,%08lx>]\n",
-			(unsigned long)mm->context.asid[cpu], start, end);
-#endif
+	pr_debug("[tlbrange<%02lx,%08lx,%08lx>]\n",
+		 (unsigned long)mm->context.asid[cpu], start, end);
 	local_irq_save(flags);
 
 	if (end-start + (PAGE_SIZE-1) <= _TLB_ENTRIES << PAGE_SHIFT) {
@@ -218,6 +216,8 @@ static int check_tlb_entry(unsigned w, unsigned e, bool dtlb)
 	unsigned tlbidx = w | (e << PAGE_SHIFT);
 	unsigned r0 = dtlb ?
 		read_dtlb_virtual(tlbidx) : read_itlb_virtual(tlbidx);
+	unsigned r1 = dtlb ?
+		read_dtlb_translation(tlbidx) : read_itlb_translation(tlbidx);
 	unsigned vpn = (r0 & PAGE_MASK) | (e << PAGE_SHIFT);
 	unsigned pte = get_pte_for_vaddr(vpn);
 	unsigned mm_asid = (get_rasid_register() >> 8) & ASID_MASK;
@@ -233,8 +233,6 @@ static int check_tlb_entry(unsigned w, unsigned e, bool dtlb)
 	}
 
 	if (tlb_asid == mm_asid) {
-		unsigned r1 = dtlb ? read_dtlb_translation(tlbidx) :
-			read_itlb_translation(tlbidx);
 		if ((pte ^ r1) & PAGE_MASK) {
 			pr_err("%cTLB: way: %u, entry: %u, mapping: %08x->%08x, PTE: %08x\n",
 					dtlb ? 'D' : 'I', w, e, r0, r1, pte);

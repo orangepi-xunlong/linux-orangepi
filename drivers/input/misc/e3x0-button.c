@@ -1,16 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2014, National Instruments Corp. All rights reserved.
  *
  * Driver for NI Ettus Research USRP E3x0 Button Driver
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; version 2 of the License.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- * GNU General Public License for more details.
  */
 
 #include <linux/device.h>
@@ -73,18 +65,12 @@ static int e3x0_button_probe(struct platform_device *pdev)
 	int error;
 
 	irq_press = platform_get_irq_byname(pdev, "press");
-	if (irq_press < 0) {
-		dev_err(&pdev->dev, "No IRQ for 'press', error=%d\n",
-			irq_press);
+	if (irq_press < 0)
 		return irq_press;
-	}
 
 	irq_release = platform_get_irq_byname(pdev, "release");
-	if (irq_release < 0) {
-		dev_err(&pdev->dev, "No IRQ for 'release', error=%d\n",
-			irq_release);
+	if (irq_release < 0)
 		return irq_release;
-	}
 
 	input = devm_input_allocate_device(&pdev->dev);
 	if (!input)
@@ -120,14 +106,7 @@ static int e3x0_button_probe(struct platform_device *pdev)
 		return error;
 	}
 
-	platform_set_drvdata(pdev, input);
 	device_init_wakeup(&pdev->dev, 1);
-	return 0;
-}
-
-static int e3x0_button_remove(struct platform_device *pdev)
-{
-	device_init_wakeup(&pdev->dev, 0);
 	return 0;
 }
 
@@ -146,7 +125,6 @@ static struct platform_driver e3x0_button_driver = {
 		.pm	= &e3x0_button_pm_ops,
 	},
 	.probe		= e3x0_button_probe,
-	.remove		= e3x0_button_remove,
 };
 
 module_platform_driver(e3x0_button_driver);

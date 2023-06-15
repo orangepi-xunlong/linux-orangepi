@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * include/linux/uio_driver.h
  *
@@ -7,15 +8,15 @@
  * Copyright(C) 2006, Greg Kroah-Hartman <greg@kroah.com>
  *
  * Userspace IO driver.
- *
- * Licensed under the GPLv2 only.
  */
 
 #ifndef _UIO_DRIVER_H_
 #define _UIO_DRIVER_H_
 
+#include <linux/device.h>
 #include <linux/fs.h>
 #include <linux/interrupt.h>
+#include <linux/android_kabi.h>
 
 struct module;
 struct uio_map;
@@ -23,11 +24,13 @@ struct uio_map;
 /**
  * struct uio_mem - description of a UIO memory region
  * @name:		name of the memory region for identification
- * @addr:		address of the device's memory (phys_addr is used since
- * 			addr can be logical, virtual, or physical & phys_addr_t
- * 			should always be large enough to handle any of the
- * 			address types)
- * @size:		size of IO
+ * @addr:               address of the device's memory rounded to page
+ * 			size (phys_addr is used since addr can be
+ * 			logical, virtual, or physical & phys_addr_t
+ * 			should always be large enough to handle any of
+ * 			the address types)
+ * @offs:               offset of device memory within the page
+ * @size:		size of IO (multiple of page size)
  * @memtype:		type of memory addr points to
  * @internal_addr:	ioremap-ped version of addr, for driver internal use
  * @map:		for use by the UIO core only.
@@ -35,6 +38,7 @@ struct uio_map;
 struct uio_mem {
 	const char		*name;
 	phys_addr_t		addr;
+	unsigned long		offs;
 	resource_size_t		size;
 	int			memtype;
 	void __iomem		*internal_addr;
@@ -65,14 +69,16 @@ struct uio_port {
 
 struct uio_device {
         struct module           *owner;
-        struct device           *dev;
+	struct device		dev;
         int                     minor;
         atomic_t                event;
         struct fasync_struct    *async_queue;
         wait_queue_head_t       wait;
         struct uio_info         *info;
+	struct mutex		info_lock;
         struct kobject          *map_dir;
         struct kobject          *portio_dir;
+	ANDROID_KABI_RESERVE(1);
 };
 
 /**
@@ -105,6 +111,7 @@ struct uio_info {
 	int (*open)(struct uio_info *info, struct inode *inode);
 	int (*release)(struct uio_info *info, struct inode *inode);
 	int (*irqcontrol)(struct uio_info *info, s32 irq_on);
+	ANDROID_KABI_RESERVE(1);
 };
 
 extern int __must_check
@@ -128,6 +135,7 @@ extern void uio_event_notify(struct uio_info *info);
 #define UIO_MEM_PHYS	1
 #define UIO_MEM_LOGICAL	2
 #define UIO_MEM_VIRTUAL 3
+#define UIO_MEM_IOVA	4
 
 /* defines for uio_port->porttype */
 #define UIO_PORT_NONE	0

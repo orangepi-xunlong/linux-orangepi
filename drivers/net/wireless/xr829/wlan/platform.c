@@ -22,12 +22,12 @@
 #include "xradio.h"
 #include "platform.h"
 #include "sbus.h"
-#include <linux/sunxi-gpio.h>
 #include <linux/gpio.h>
 #include <linux/types.h>
 //#include <linux/power/scenelock.h>
-#include <linux/power/aw_pm.h>
-#define WLAN_WOW_SUPPORT
+//#include <linux/power/aw_pm.h>
+#include <linux/pm_wakeirq.h>
+
 MODULE_AUTHOR("XRadioTech");
 MODULE_DESCRIPTION("XRadioTech WLAN driver");
 MODULE_LICENSE("GPL");
@@ -35,13 +35,12 @@ MODULE_ALIAS("xradio_wlan");
 
 extern void sunxi_wlan_set_power(bool on);
 extern int sunxi_wlan_get_bus_index(void);
-extern int sunxi_wlan_get_oob_irq(void);
-extern int sunxi_wlan_get_oob_irq_flags(void);
+extern int sunxi_wlan_get_oob_irq(int *, int *);
 extern void sunxi_bluetooth_set_power(bool on_off);
-
 
 static int wlan_bus_id;
 static u32 gpio_irq_handle;
+static int irq_flags, wakeup_enable;
 
 int xradio_get_syscfg(void)
 {
@@ -51,7 +50,7 @@ int xradio_get_syscfg(void)
 		return wlan_bus_index;
 	else
 		wlan_bus_id = wlan_bus_index;
-	gpio_irq_handle = sunxi_wlan_get_oob_irq();
+	gpio_irq_handle = sunxi_wlan_get_oob_irq(&irq_flags, &wakeup_enable);
 	return wlan_bus_index;
 }
 /*********************Interfaces called by xradio core. *********************/
@@ -84,7 +83,6 @@ void xradio_bt_power(int on_off)
 	mdelay(100);
 }
 
-
 void xradio_sdio_detect(int enable)
 {
 	MCI_RESCAN_CARD(wlan_bus_id);
@@ -109,26 +107,40 @@ static irqreturn_t xradio_gpio_irq_handler(int irq, void *sbus_priv)
 int xradio_request_gpio_irq(struct device *dev, void *sbus_priv)
 {
 	int ret = -1;
+
 	ret = devm_request_irq(dev, gpio_irq_handle,
 					(irq_handler_t)xradio_gpio_irq_handler,
-					IRQF_TRIGGER_RISING|IRQF_NO_SUSPEND, "xradio_irq", sbus_priv);
+					irq_flags, "xradio_irq", sbus_priv);
 	if (ret < 0) {
 			gpio_irq_handle = 0;
 			xradio_dbg(XRADIO_DBG_ERROR, "%s: request_irq FAIL!ret=%d\n",
 					__func__, ret);
+	}
+
+	if (wakeup_enable) {
+		ret = device_init_wakeup(dev, true);
+		if (ret < 0) {
+			xradio_dbg(XRADIO_DBG_ERROR, "device init wakeup failed!\n");
+			return ret;
 		}
-#ifdef WLAN_WOW_SUPPORT
-	enable_irq_wake(gpio_irq_handle);
-#endif
+
+		ret = dev_pm_set_wake_irq(dev, gpio_irq_handle);
+		if (ret < 0) {
+			xradio_dbg(XRADIO_DBG_ERROR, "can't enable wakeup src!\n");
+			return ret;
+		}
+	}
+
 	return ret;
 }
 
 void xradio_free_gpio_irq(struct device *dev, void *sbus_priv)
 {
 	struct sbus_priv *self = (struct sbus_priv *)sbus_priv;
-#ifdef WLAN_WOW_SUPPORT
-		disable_irq_wake(gpio_irq_handle);
-#endif
-		devm_free_irq(dev, gpio_irq_handle, self);
-		gpio_irq_handle = 0;
+	if (wakeup_enable) {
+		device_init_wakeup(dev, false);
+		dev_pm_clear_wake_irq(dev);
+	}
+	devm_free_irq(dev, gpio_irq_handle, self);
+	gpio_irq_handle = 0;
 }

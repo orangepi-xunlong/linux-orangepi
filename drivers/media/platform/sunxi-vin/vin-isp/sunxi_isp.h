@@ -1,5 +1,5 @@
 /*
- * linux-4.9/drivers/media/platform/sunxi-vin/vin-isp/sunxi_isp.h
+ * linux-5.4/drivers/media/platform/sunxi-vin/vin-isp/sunxi_isp.h
  *
  * Copyright (c) 2007-2017 Allwinnertech Co., Ltd.
  *
@@ -85,6 +85,7 @@ struct isp_dev {
 	unsigned int event_lost_cnt;
 	unsigned int hb_max;
 	unsigned int hb_min;
+	unsigned int isp_frame_number;
 	unsigned char id;
 	char is_empty;
 	char use_isp;
@@ -107,6 +108,9 @@ struct isp_dev {
 #endif
 };
 
+void sunxi_isp_reset(struct isp_dev *isp);
+int sunxi_isp_s_parm(struct v4l2_subdev *sd, struct v4l2_streamparm *parms);
+int sunxi_isp_g_parm(struct v4l2_subdev *sd, struct v4l2_streamparm *parms);
 void sunxi_isp_sensor_type(struct v4l2_subdev *sd, int use_isp);
 void sunxi_isp_sensor_fps(struct v4l2_subdev *sd, int fps);
 void sunxi_isp_debug(struct v4l2_subdev *sd, struct isp_debug_mode *isp_debug);

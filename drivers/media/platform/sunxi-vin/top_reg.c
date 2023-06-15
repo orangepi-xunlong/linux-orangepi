@@ -1,5 +1,5 @@
 /*
- * linux-4.9/drivers/media/platform/sunxi-vin/top_reg.c
+ * linux-5.4/drivers/media/platform/sunxi-vin/top_reg.c
  *
  * Copyright (c) 2007-2017 Allwinnertech Co., Ltd.
  *
@@ -270,17 +270,18 @@ void csic_version_get(unsigned int sel, struct csic_version *v)
 	v->ver_big = (reg_val & CSIC_VER_BIG_MASK) >> CSIC_VER_BIG;
 }
 
-/*
-void csic_mbus_req_mex_set(unsigned int sel)
+
+void csic_mbus_req_mex_set(unsigned int sel, unsigned int data)
 {
+#if !defined CONFIG_ARCH_SUN8IW15P1 && !defined CONFIG_ARCH_SUN8IW16P1 && !defined CONFIG_ARCH_SUN8IW17P1 && !defined CONFIG_ARCH_SUN50IW9P1 && !defined CONFIG_ARCH_SUN50IW3P1 && !defined CONFIG_ARCH_SUN50IW6P1
 	vin_reg_clr_set(csic_top_base[sel] + CSIC_MBUS_REQ_MAX,
-			MCSI_MEM_REQ_MAX_MASK, 0xF << MCSI_MEM_REQ_MAX);
+			MCSI_MEM_REQ_MAX_MASK, data << MCSI_MEM_REQ_MAX);
 	vin_reg_clr_set(csic_top_base[sel] + CSIC_MBUS_REQ_MAX,
-			MCSI_MEM_1_REQ_MAX_MASK, 0xF << MCSI_MEM_1_REQ_MAX);
+			MCSI_MEM_1_REQ_MAX_MASK, data << MCSI_MEM_1_REQ_MAX);
 	vin_reg_clr_set(csic_top_base[sel] + CSIC_MBUS_REQ_MAX,
-			MISP_MEM_REQ_MAX_MASK, 0xF << MISP_MEM_REQ_MAX);
+			MISP_MEM_REQ_MAX_MASK, data << MISP_MEM_REQ_MAX);
+#endif
 }
-*/
 
 void csic_mulp_mode_en(unsigned int sel, unsigned int en)
 {

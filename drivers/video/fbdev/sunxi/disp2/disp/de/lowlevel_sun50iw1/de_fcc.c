@@ -19,6 +19,7 @@
 /*  */
 /* ********************************************************************************************************************* */
 
+#ifdef CONFIG_DISP2_SUNXI_SUPPORT_ENAHNCE
 #include "de_fcc_type.h"
 #include "de_rtmx.h"
 #include "de_vep_table.h"
@@ -198,3 +199,4 @@ de_rect window, __fcc_config_data *para)
 	return 0;
 }
 
+#endif

@@ -134,9 +134,11 @@ long int wcn_ap_notify_btwf_time(void)
 	struct wcn_tm tm;
 	char aptime[64];
 	long int send_cnt = 0;
+	struct timespec64 ts64;
 
 	/* get ap kernel time and transfer to China-BeiJing Time */
-	now = current_kernel_time();
+	ktime_get_real_ts64(&ts64);
+	now = timespec64_to_timespec(ts64);
 	wcn_gmtime(&now, &tm);
 	tm.tm_hour = (tm.tm_hour + WCN_BTWF_TIME_OFFSET) % 24;
 

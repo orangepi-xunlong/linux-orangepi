@@ -935,10 +935,6 @@ s32 tcon0_cfg(u32 sel, struct disp_panel_para *panel, u32 de_use_rcq)
 		lcd_dev[sel]->tcon0_io_pol.bits.clk_inv = 1;
 		lcd_dev[sel]->tcon0_io_pol.bits.dclk_sel = 2;
 		break;
-	case 4:
-		lcd_dev[sel]->tcon0_io_pol.bits.clk_inv = 0;
-		lcd_dev[sel]->tcon0_io_pol.bits.dclk_sel = 1;
-		break;
 	default:
 		lcd_dev[sel]->tcon0_io_pol.bits.clk_inv = 0;
 		lcd_dev[sel]->tcon0_io_pol.bits.dclk_sel = 0;
@@ -1321,12 +1317,6 @@ s32 tcon1_yuv_range(u32 sel, u32 onoff)
 	lcd_dev[sel]->tcon_ceu_coef_bb.bits.value = 0x100;
 	lcd_dev[sel]->tcon_ceu_coef_bc.bits.value = 0;
 
-#if defined (CONFIG_ARCH_SUN50IW9P1)
-	lcd_dev[sel]->tcon_ceu_coef_rv.dwval = 0x001003ac;
-	lcd_dev[sel]->tcon_ceu_coef_gv.dwval = 0x001003c0;
-	lcd_dev[sel]->tcon_ceu_coef_bv.dwval = 0x001003c0;
-#else
-
 	lcd_dev[sel]->tcon_ceu_coef_rv.bits.max = 235;
 	lcd_dev[sel]->tcon_ceu_coef_rv.bits.min = 16;
 	lcd_dev[sel]->tcon_ceu_coef_gv.bits.max = 240;
@@ -1334,7 +1324,6 @@ s32 tcon1_yuv_range(u32 sel, u32 onoff)
 	lcd_dev[sel]->tcon_ceu_coef_bv.bits.max = 240;
 	lcd_dev[sel]->tcon_ceu_coef_bv.bits.min = 16;
 
-#endif
 	if (onoff)
 		lcd_dev[sel]->tcon_ceu_ctl.bits.ceu_en = 1;
 	else

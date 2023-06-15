@@ -37,7 +37,7 @@ struct fw_data {
 	u32 val;
 };
 extern void gsl_alg_id_main(struct gsl_touch_info *cinfo);
-extern void gsl_DataInit(int *ret);
+extern void gsl_DataInit(unsigned int *ret);
 extern unsigned int gsl_version_id(void);
 extern unsigned int gsl_mask_tiaoping(void);
 

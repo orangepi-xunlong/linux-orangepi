@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 #include <xen/xen.h>
 #include <xen/events.h>
 #include <xen/grant_table.h>
@@ -14,7 +15,6 @@
 #include <xen/xen-ops.h>
 #include <asm/xen/hypervisor.h>
 #include <asm/xen/hypercall.h>
-#include <asm/xen/xen-ops.h>
 #include <asm/system_misc.h>
 #include <asm/efi.h>
 #include <linux/interrupt.h>
@@ -29,6 +29,7 @@
 #include <linux/cpu.h>
 #include <linux/console.h>
 #include <linux/pvclock_gtod.h>
+#include <linux/reboot.h>
 #include <linux/time64.h>
 #include <linux/timekeeping.h>
 #include <linux/timekeeper_internal.h>
@@ -59,28 +60,8 @@ struct xen_memory_region xen_extra_mem[XEN_EXTRA_MEM_MAX_REGIONS] __initdata;
 
 static __read_mostly unsigned int xen_events_irq;
 
-int xen_remap_domain_gfn_array(struct vm_area_struct *vma,
-			       unsigned long addr,
-			       xen_pfn_t *gfn, int nr,
-			       int *err_ptr, pgprot_t prot,
-			       unsigned domid,
-			       struct page **pages)
-{
-	return xen_xlate_remap_gfn_array(vma, addr, gfn, nr, err_ptr,
-					 prot, domid, pages);
-}
-EXPORT_SYMBOL_GPL(xen_remap_domain_gfn_array);
-
-/* Not used by XENFEAT_auto_translated guests. */
-int xen_remap_domain_gfn_range(struct vm_area_struct *vma,
-                              unsigned long addr,
-                              xen_pfn_t gfn, int nr,
-                              pgprot_t prot, unsigned domid,
-                              struct page **pages)
-{
-	return -ENOSYS;
-}
-EXPORT_SYMBOL_GPL(xen_remap_domain_gfn_range);
+uint32_t xen_start_flags;
+EXPORT_SYMBOL(xen_start_flags);
 
 int xen_unmap_domain_gfn_range(struct vm_area_struct *vma,
 			       int nr, struct page **pages)
@@ -191,20 +172,31 @@ static int xen_dying_cpu(unsigned int cpu)
 	return 0;
 }
 
-static void xen_restart(enum reboot_mode reboot_mode, const char *cmd)
+void xen_reboot(int reason)
 {
-	struct sched_shutdown r = { .reason = SHUTDOWN_reboot };
+	struct sched_shutdown r = { .reason = reason };
 	int rc;
+
 	rc = HYPERVISOR_sched_op(SCHEDOP_shutdown, &r);
 	BUG_ON(rc);
 }
 
+static int xen_restart(struct notifier_block *nb, unsigned long action,
+		       void *data)
+{
+	xen_reboot(SHUTDOWN_reboot);
+
+	return NOTIFY_DONE;
+}
+
+static struct notifier_block xen_restart_nb = {
+	.notifier_call = xen_restart,
+	.priority = 192,
+};
+
 static void xen_power_off(void)
 {
-	struct sched_shutdown r = { .reason = SHUTDOWN_poweroff };
-	int rc;
-	rc = HYPERVISOR_sched_op(SCHEDOP_shutdown, &r);
-	BUG_ON(rc);
+	xen_reboot(SHUTDOWN_poweroff);
 }
 
 static irqreturn_t xen_arm_callback(int irq, void *arg)
@@ -278,9 +270,7 @@ void __init xen_early_init(void)
 	xen_setup_features();
 
 	if (xen_feature(XENFEAT_dom0))
-		xen_start_info->flags |= SIF_INITDOMAIN|SIF_PRIVILEGED;
-	else
-		xen_start_info->flags &= ~(SIF_INITDOMAIN|SIF_PRIVILEGED);
+		xen_start_flags |= SIF_INITDOMAIN|SIF_PRIVILEGED;
 
 	if (!console_set_on_cmdline && !xen_initial_domain())
 		add_preferred_console("hvc", 0, NULL);
@@ -388,8 +378,6 @@ static int __init xen_guest_init(void)
 		return -ENOMEM;
 	}
 	gnttab_init();
-	if (!xen_initial_domain())
-		xenbus_probe(NULL);
 
 	/*
 	 * Making sure board specific code will not set up ops for
@@ -412,7 +400,7 @@ static int __init xen_guest_init(void)
 		pvclock_gtod_register_notifier(&xen_pvclock_gtod_notifier);
 
 	return cpuhp_setup_state(CPUHP_AP_ARM_XEN_STARTING,
-				 "AP_ARM_XEN_STARTING", xen_starting_cpu,
+				 "arm/xen:starting", xen_starting_cpu,
 				 xen_dying_cpu);
 }
 early_initcall(xen_guest_init);
@@ -423,7 +411,7 @@ static int __init xen_pm_init(void)
 		return -ENODEV;
 
 	pm_power_off = xen_power_off;
-	arm_pm_restart = xen_restart;
+	register_restart_handler(&xen_restart_nb);
 	if (!xen_initial_domain()) {
 		struct timespec64 ts;
 		xen_read_wallclock(&ts);
@@ -454,7 +442,8 @@ EXPORT_SYMBOL_GPL(HYPERVISOR_memory_op);
 EXPORT_SYMBOL_GPL(HYPERVISOR_physdev_op);
 EXPORT_SYMBOL_GPL(HYPERVISOR_vcpu_op);
 EXPORT_SYMBOL_GPL(HYPERVISOR_tmem_op);
-EXPORT_SYMBOL_GPL(HYPERVISOR_platform_op);
+EXPORT_SYMBOL_GPL(HYPERVISOR_platform_op_raw);
 EXPORT_SYMBOL_GPL(HYPERVISOR_multicall);
 EXPORT_SYMBOL_GPL(HYPERVISOR_vm_assist);
+EXPORT_SYMBOL_GPL(HYPERVISOR_dm_op);
 EXPORT_SYMBOL_GPL(privcmd_call);

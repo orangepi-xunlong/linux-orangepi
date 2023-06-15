@@ -968,7 +968,7 @@ static int sensor_s_exp(struct v4l2_subdev *sd, unsigned int exp_val)
 
 		sensor_dbg("sensor_set_short_exp = %d line Done!\n", exp_val);
 
-	} else{
+	} else {
 			exphigh = (unsigned char) (0xf & (exp_val>>16));
 			expmid = (unsigned char) (0xff & (exp_val>>8));
 			explow = (unsigned char) (0xf0 & exp_val);
@@ -1555,7 +1555,9 @@ static int sensor_probe(struct i2c_client *client,
 	sensor_init_controls(sd, &sensor_ctrl_ops);
 
 	mutex_init(&info->lock);
-
+#ifdef CONFIG_SAME_I2C
+	info->sensor_i2c_addr = I2C_ADDR >> 1;
+#endif
 	info->fmt = &sensor_formats[0];
 	info->fmt_pt = &sensor_formats[0];
 	info->win_pt = &sensor_win_sizes[0];
