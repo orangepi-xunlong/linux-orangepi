@@ -966,9 +966,9 @@ static int sensor_g_mbus_config(struct v4l2_subdev *sd, unsigned int pad_id,
 				 struct v4l2_mbus_config *config)
 {
 	struct gc5035 *sensor = to_gc5035(sd);
-	struct device *dev = &sensor->client->dev;
+	//struct device *dev = &sensor->client->dev;
 
-	dev_info(dev, "%s(%d) enter!\n", __func__, __LINE__);
+	//dev_info(dev, "%s(%d) enter!\n", __func__, __LINE__);
 
 	if (2 == sensor->lane_num) {
 		config->type = V4L2_MBUS_CSI2_DPHY;
@@ -1105,7 +1105,7 @@ static int gc5035_set_gain_reg(struct gc5035 *gc5035, u32 a_gain)
 	int ret = 0, i = 0;
 	u32 temp_gain = 0;
 
-	dev_info(dev, "%s(%d) a_gain(0x%08x)!\n", __func__, __LINE__, a_gain);
+	//dev_info(dev, "%s(%d) a_gain(0x%08x)!\n", __func__, __LINE__, a_gain);
 	if (a_gain < 0x40)
 		a_gain = 0x40;
 	else if (a_gain > 0x400)
