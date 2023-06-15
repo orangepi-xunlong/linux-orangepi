@@ -356,31 +356,49 @@
 				drive-strength = <40>;
 			};
 
-			i2c0_pins: i2c0-pins {
-				pins = "PI6", "PI7";
+			/omit-if-no-ref/
+			i2c0_pi_pins: i2c0-pi-pins {
+				pins = "PI5", "PI6";
 				function = "i2c0";
 			};
 
+			/omit-if-no-ref/
 			i2c1_pins: i2c1-pins {
 				pins = "PH0", "PH1";
 				function = "i2c1";
 			};
 
+			/omit-if-no-ref/
+			i2c1_pi_pins: i2c1-pi-pins {
+				pins = "PI7", "PI8";
+				function = "i2c1";
+			};
+
+			/omit-if-no-ref/
 			i2c2_pins: i2c2-pins {
 				pins = "PH2", "PH3";
 				function = "i2c2";
 			};
 
+			/omit-if-no-ref/
+			i2c2_pi_pins: i2c2-pi-pins {
+				pins = "PI9", "PI10";
+				function = "i2c2";
+			};
+
+			/omit-if-no-ref/
 			i2c3_pins: i2c3-pins {
 				pins = "PH4", "PH5";
 				function = "i2c3";
 			};
 
+			/omit-if-no-ref/
 			i2c4_pins: i2c4-pins {
 				pins = "PH6", "PH7";
 				function = "i2c4";
 			};
 
+			/omit-if-no-ref/
 			i2s3_pins: i2s3-pins {
 				pins = "PH5", "PH6", "PH7", "PH8", "PH9";
 				function = "i2s3";
@@ -391,29 +409,58 @@
 				function = "ir_rx";
 			};
 
+			/omit-if-no-ref/
 			pwm1_pin: pwm1-pin {
 				pins = "PH3";
 				function = "pwm1";
 			};
 
+			/omit-if-no-ref/
 			pwm2_pin: pwm2-pin {
 				pins = "PH2";
 				function = "pwm2";
 			};
 
+			/omit-if-no-ref/
 			pwm3_pin: pwm3-pin {
 				pins = "PH0";
 				function = "pwm3";
 			};
 
+			/omit-if-no-ref/
 			pwm4_pin: pwm4-pin {
 				pins = "PH1";
 				function = "pwm4";
 			};
 
+			/omit-if-no-ref/
 			pwm5_pin: pwm5-pin {
 				pins = "PA12";
 				function = "pwm5";
+			};
+
+			/omit-if-no-ref/
+			pwm1_pi_pin: pwm1-pi-pin {
+				pins = "PI11";
+				function = "pwm1";
+			};
+
+			/omit-if-no-ref/
+			pwm2_pi_pin: pwm2-pi-pin {
+				pins = "PI12";
+				function = "pwm2";
+			};
+
+			/omit-if-no-ref/
+			pwm3_pi_pin: pwm3-pi-pin {
+				pins = "PI13";
+				function = "pwm3";
+			};
+
+			/omit-if-no-ref/
+			pwm4_pi_pin: pwm4-pi-pin {
+				pins = "PI14";
+				function = "pwm4";
 			};
 
 			mmc0_pins: mmc0-pins {
@@ -506,6 +553,24 @@
 			uart2_rts_cts_pins: uart2-rts-cts-pins {
 				pins = "PH7", "PH8";
 				function = "uart2";
+			};
+
+			/omit-if-no-ref/
+			uart2_pi_pins: uart2-pi-pins {
+				pins = "PI5", "PI6";
+				function = "uart2";
+			};
+
+			/omit-if-no-ref/
+			uart3_pi_pins: uart3-pi-pins {
+				pins = "PI9", "PI10";
+				function = "uart3";
+			};
+
+			/omit-if-no-ref/
+			uart4_pi_pins: uart4-pi-pins {
+				pins = "PI13", "PI14";
+				function = "uart4";
 			};
 
 			/omit-if-no-ref/
@@ -759,7 +824,7 @@
 			clocks = <&ccu CLK_BUS_I2C0>;
 			resets = <&ccu RST_BUS_I2C0>;
 			pinctrl-names = "default";
-			pinctrl-0 = <&i2c0_pins>;
+			pinctrl-0 = <&i2c0_pi_pins>;
 			status = "disabled";
 			#address-cells = <1>;
 			#size-cells = <0>;
