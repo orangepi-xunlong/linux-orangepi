@@ -2263,7 +2263,6 @@ static struct snd_soc_component_driver soc_codec_dev_es7243e = {
 	.idle_bias_on = 1,
 	.use_pmdown_time = 1,
 	.endianness = 1,
-	.non_legacy_dai_naming = 1,
 #if ES7243E_CODEC_RW_TEST_EN
 	.read = es7243e_codec_read,
 	.write = es7243e_codec_write,
