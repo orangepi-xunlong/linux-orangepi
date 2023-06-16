@@ -2502,11 +2502,6 @@ static void aw883xx_i2c_remove(struct i2c_client *i2c)
 			gpio_to_irq(aw883xx->irq_gpio),
 			aw883xx);
 
-	if (gpio_is_valid(aw883xx->irq_gpio))
-		devm_gpio_free(&i2c->dev, aw883xx->irq_gpio);
-	if (gpio_is_valid(aw883xx->reset_gpio))
-		devm_gpio_free(&i2c->dev, aw883xx->reset_gpio);
-
 	sysfs_remove_group(&aw883xx->dev->kobj,
 			&aw883xx_attribute_group);
 
