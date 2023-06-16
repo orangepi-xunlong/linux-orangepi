@@ -782,7 +782,6 @@ static struct snd_soc_component_driver soc_codec_dev_es7202 = {
 	.idle_bias_on = 1,
 	.use_pmdown_time = 1,
 	.endianness = 1,
-	.non_legacy_dai_naming = 1,
 };
 
 static ssize_t es7202_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
