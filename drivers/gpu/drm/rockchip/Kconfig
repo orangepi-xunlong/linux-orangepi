@@ -89,6 +89,7 @@ config ROCKCHIP_DRM_TVE
 
 config ROCKCHIP_DW_HDMI
 	bool "Rockchip specific extensions for Synopsys DW HDMI"
+	select DRM_DISPLAY_HDCP_HELPER
 	help
 	  This selects support for Rockchip SoC specific extensions
 	  for the Synopsys DesignWare HDMI driver. If you want to
