@@ -287,13 +287,13 @@
 
 &i2c3 {
 	pinctrl-names = "default";
-	pinctrl-0 = <&i2c3_pins>;
+	pinctrl-0 = <&i2c3_ph_pins>;
 	status = "disabled";
 };
 
 &i2c4 {
 	pinctrl-names = "default";
-	pinctrl-0 = <&i2c4_pins>;
+	pinctrl-0 = <&i2c4_ph_pins>;
 	status = "disabled";
 };
 

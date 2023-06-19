@@ -1,0 +1,20 @@
+/dts-v1/;
+/plugin/;
+
+/ {
+	fragment@0 {
+		target-path = "/aliases";
+		__overlay__ {
+			i2c4 = "/soc/i2c@5003000";
+		};
+	};
+
+	fragment@1 {
+		target = <&i2c4>;
+		__overlay__ {
+			pinctrl-names = "default";
+			pinctrl-0 = <&i2c4_ph_pins>;
+			status = "okay";
+		};
+	};
+};

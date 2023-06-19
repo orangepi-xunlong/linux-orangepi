@@ -5,13 +5,15 @@
 	fragment@0 {
 		target-path = "/aliases";
 		__overlay__ {
-			serial2 = "/soc/serial@5000800";
+			serial3 = "/soc/serial@5001000";
 		};
 	};
 
 	fragment@1 {
-		target = <&uart2>;
+		target = <&uart4>;
 		__overlay__ {
+			pinctrl-names = "default";
+			pinctrl-0 = <&uart4_pi_pins>;
 			status = "okay";
 		};
 	};

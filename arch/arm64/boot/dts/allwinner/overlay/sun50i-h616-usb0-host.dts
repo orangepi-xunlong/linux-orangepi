@@ -1,0 +1,33 @@
+/dts-v1/;
+/plugin/;
+
+/ {
+	fragment@0 {
+		target = <&usbotg>;
+		__overlay__ {
+			dr_mode = "host";
+			status = "okay";
+		};
+	};
+
+	fragment@1 {
+		target = <&usbphy>;
+		__overlay__ {
+			status = "okay";
+		};
+	};
+
+	fragment@2 {
+		target = <&ehci0>;
+		__overlay__ {
+			status = "okay";
+		};
+	};
+
+	fragment@3 {
+		target = <&ohci0>;
+		__overlay__ {
+			status = "okay";
+		};
+	};
+};

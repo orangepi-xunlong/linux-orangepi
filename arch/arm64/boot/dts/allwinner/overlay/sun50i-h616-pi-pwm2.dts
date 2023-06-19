@@ -1,0 +1,19 @@
+/dts-v1/;
+/plugin/;
+
+/ {
+	fragment@0 {
+		target = <&pwm>;
+		__overlay__ {
+			status = "okay";
+		};
+	};
+
+	fragment@1 {
+		target = <&pwm2>;
+		__overlay__ {
+			pinctrl-names = "default";
+			pinctrl-0 = <&pwm2_pi_pin>;
+		};
+	};
+};

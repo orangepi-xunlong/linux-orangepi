@@ -302,25 +302,25 @@
 		pwm1: pwm1@0300a000 {
 			compatible = "allwinner,sunxi-pwm1";
 			pinctrl-names = "default";
-			pinctrl-0 = <&pwm1_pin>;
+			pinctrl-0 = <&pwm1_ph_pin>;
 		};
 
 		pwm2: pwm2@0300a000 {
 			compatible = "allwinner,sunxi-pwm2";
 			pinctrl-names = "default";
-			pinctrl-0 = <&pwm2_pin>;
+			pinctrl-0 = <&pwm2_ph_pin>;
 		};
 
 		pwm3: pwm3@0300a000 {
 			compatible = "allwinner,sunxi-pwm3";
 			pinctrl-names = "default";
-			pinctrl-0 = <&pwm3_pin>;
+			pinctrl-0 = <&pwm3_ph_pin>;
 		};
 
 		pwm4: pwm4@0300a000 {
 			compatible = "allwinner,sunxi-pwm4";
 			pinctrl-names = "default";
-			pinctrl-0 = <&pwm4_pin>;
+			pinctrl-0 = <&pwm4_ph_pin>;
 		};
 
 		pwm5: pwm5@0300a000 {
@@ -363,7 +363,7 @@
 			};
 
 			/omit-if-no-ref/
-			i2c1_pins: i2c1-pins {
+			i2c1_ph_pins: i2c1-ph-pins {
 				pins = "PH0", "PH1";
 				function = "i2c1";
 			};
@@ -375,7 +375,7 @@
 			};
 
 			/omit-if-no-ref/
-			i2c2_pins: i2c2-pins {
+			i2c2_ph_pins: i2c2-ph-pins {
 				pins = "PH2", "PH3";
 				function = "i2c2";
 			};
@@ -387,13 +387,13 @@
 			};
 
 			/omit-if-no-ref/
-			i2c3_pins: i2c3-pins {
+			i2c3_ph_pins: i2c3-ph-pins {
 				pins = "PH4", "PH5";
 				function = "i2c3";
 			};
 
 			/omit-if-no-ref/
-			i2c4_pins: i2c4-pins {
+			i2c4_ph_pins: i2c4-ph-pins {
 				pins = "PH6", "PH7";
 				function = "i2c4";
 			};
@@ -410,25 +410,25 @@
 			};
 
 			/omit-if-no-ref/
-			pwm1_pin: pwm1-pin {
+			pwm1_ph_pin: pwm1-ph-pin {
 				pins = "PH3";
 				function = "pwm1";
 			};
 
 			/omit-if-no-ref/
-			pwm2_pin: pwm2-pin {
+			pwm2_ph_pin: pwm2-ph-pin {
 				pins = "PH2";
 				function = "pwm2";
 			};
 
 			/omit-if-no-ref/
-			pwm3_pin: pwm3-pin {
+			pwm3_ph_pin: pwm3-ph-pin {
 				pins = "PH0";
 				function = "pwm3";
 			};
 
 			/omit-if-no-ref/
-			pwm4_pin: pwm4-pin {
+			pwm4_ph_pin: pwm4-ph-pin {
 				pins = "PH1";
 				function = "pwm4";
 			};
@@ -517,7 +517,7 @@
 			/omit-if-no-ref/
 			spi1_cs0_pin: spi1-cs0-pin {
 				pins = "PH5";
-				function = "spi0";
+				function = "spi1";
 			};
 
 			/omit-if-no-ref/
@@ -532,13 +532,13 @@
 			};
 
 			/omit-if-no-ref/
-			uart1_pins: uart1-pins {
+			uart1_ph_pins: uart1-ph-pins {
 				pins = "PG6", "PG7";
 				function = "uart1";
 			};
 
 			/omit-if-no-ref/
-			uart1_rts_cts_pins: uart1-rts-cts-pins {
+			uart1_ph_rts_cts_pins: uart1-ph-rts-cts-pins {
 				pins = "PG8", "PG9";
 				function = "uart1";
 			};
@@ -550,7 +550,7 @@
 			};
 
 			/omit-if-no-ref/
-			uart2_rts_cts_pins: uart2-rts-cts-pins {
+			uart2_ph_rts_cts_pins: uart2-ph-rts-cts-pins {
 				pins = "PH7", "PH8";
 				function = "uart2";
 			};
@@ -839,7 +839,7 @@
 			clocks = <&ccu CLK_BUS_I2C1>;
 			resets = <&ccu RST_BUS_I2C1>;
 			pinctrl-names = "default";
-			pinctrl-0 = <&i2c1_pins>;
+			pinctrl-0 = <&i2c1_ph_pins>;
 			status = "disabled";
 			#address-cells = <1>;
 			#size-cells = <0>;
@@ -854,7 +854,7 @@
 			clocks = <&ccu CLK_BUS_I2C2>;
 			resets = <&ccu RST_BUS_I2C2>;
 			pinctrl-names = "default";
-			pinctrl-0 = <&i2c2_pins>;
+			pinctrl-0 = <&i2c2_ph_pins>;
 			status = "disabled";
 			#address-cells = <1>;
 			#size-cells = <0>;
@@ -869,7 +869,7 @@
 			clocks = <&ccu CLK_BUS_I2C3>;
 			resets = <&ccu RST_BUS_I2C3>;
 			pinctrl-names = "default";
-			pinctrl-0 = <&i2c3_pins>;
+			pinctrl-0 = <&i2c3_ph_pins>;
 			status = "disabled";
 			#address-cells = <1>;
 			#size-cells = <0>;
@@ -884,7 +884,7 @@
 			clocks = <&ccu CLK_BUS_I2C4>;
 			resets = <&ccu RST_BUS_I2C4>;
 			pinctrl-names = "default";
-			pinctrl-0 = <&i2c4_pins>;
+			pinctrl-0 = <&i2c4_ph_pins>;
 			status = "disabled";
 			#address-cells = <1>;
 			#size-cells = <0>;

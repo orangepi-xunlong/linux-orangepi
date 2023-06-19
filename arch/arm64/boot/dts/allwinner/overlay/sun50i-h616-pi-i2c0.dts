@@ -5,21 +5,25 @@
 	fragment@0 {
 		target-path = "/aliases";
 		__overlay__ {
-			i2c1 = "/soc/i2c@5002400";
+			i2c0 = "/soc/i2c@5002000";
 			serial2 = "/soc/serial@5000800";
 		};
 	};
 
 	fragment@1 {
-		target = <&i2c1>;
+		target = <&i2c0>;
 		__overlay__ {
+			pinctrl-names = "default";
+			pinctrl-0 = <&i2c0_pi_pins>;
 			status = "okay";
 		};
 	};
 
         fragment@2 {
-                target = <&uart0>;
+                target = <&uart2>;
                 __overlay__ {
+			pinctrl-names = "default";
+			pinctrl-0 = <&uart2_pi_pins>;
                         status = "disabled";
                 };
         };
