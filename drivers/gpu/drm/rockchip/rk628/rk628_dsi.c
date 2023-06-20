@@ -662,10 +662,10 @@ static int rk628_dsi_read_from_fifo(struct rk628_dsi *dsi,
 		switch (length) {
 		case 3:
 			payload[2] = (val >> 16) & 0xff;
-			/* fallthrough */
+			fallthrough;
 		case 2:
 			payload[1] = (val >> 8) & 0xff;
-			/* fallthrough */
+			fallthrough;
 		case 1:
 			payload[0] = val & 0xff;
 			return 0;
@@ -802,10 +802,10 @@ static ssize_t rk628_dsi_transfer(struct rk628_dsi *dsi,
 	switch (packet.payload_length) {
 	case 3:
 		val |= packet.payload[2] << 16;
-		/* fallthrough */
+		fallthrough;
 	case 2:
 		val |= packet.payload[1] << 8;
-		/* fallthrough */
+		fallthrough;
 	case 1:
 		val |= packet.payload[0];
 		dsi_write(dsi, DSI_GEN_PLD_DATA, val);
