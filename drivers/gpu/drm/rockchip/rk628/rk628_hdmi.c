@@ -963,7 +963,8 @@ static int rk628_hdmi_connector_get_modes(struct drm_connector *connector)
 		hdmi->hdmi_data.sink_is_hdmi = true;
 		hdmi->hdmi_data.sink_has_audio = true;
 		ret = rockchip_drm_add_modes_noedid(connector);
-		info->edid_hdmi_dc_modes = 0;
+		info->edid_hdmi_rgb444_dc_modes = 0;
+		info->edid_hdmi_ycbcr444_dc_modes = 0;
 		info->hdmi.y420_dc_modes = 0;
 		info->color_formats = 0;
 
