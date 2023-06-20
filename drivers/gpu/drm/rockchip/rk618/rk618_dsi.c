@@ -951,10 +951,10 @@ static ssize_t rk618_dsi_host_transfer(struct mipi_dsi_host *host,
 	switch (packet.payload_length) {
 	case 3:
 		value |= packet.payload[2] << 16;
-		/* Fall through */
+		fallthrough;
 	case 2:
 		value |= packet.payload[1] << 8;
-		/* Fall through */
+		fallthrough;
 	case 1:
 		value |= packet.payload[0];
 		regmap_write(dsi->regmap, DSI_GEN_PLD_DATA, value);
@@ -1013,10 +1013,10 @@ static ssize_t rk618_dsi_host_transfer(struct mipi_dsi_host *host,
 			switch (length) {
 			case 3:
 				payload[2] = (value >> 16) & 0xff;
-				/* Fall through */
+				fallthrough;
 			case 2:
 				payload[1] = (value >> 8) & 0xff;
-				/* Fall through */
+				fallthrough;
 			case 1:
 				payload[0] = value & 0xff;
 				return length;
