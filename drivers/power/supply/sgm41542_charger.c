@@ -924,54 +924,58 @@ static int sgm4154x_power_supply_init(struct sgm4154x_device *sgm,
 
 static int sgm4154x_hw_init(struct sgm4154x_device *sgm)
 {
-	struct power_supply_battery_info bat_info = { };
+	struct power_supply_battery_info *bat_info;
 	int chrg_stat, ret = 0;
 
 	ret = power_supply_get_battery_info(sgm->charger, &bat_info);
 	if (ret) {
+		/* Allocate an empty battery */
+		bat_info = devm_kzalloc(sgm->dev, sizeof(*bat_info), GFP_KERNEL);
+		if (!bat_info)
+			return -ENOMEM;
 		pr_info("sgm4154x: no battery information is supplied\n");
 		/*
 		 * If no battery information is supplied, we should set
 		 * default charge termination current to 120 mA, and default
 		 * charge termination voltage to 4.35V.
 		 */
-		bat_info.constant_charge_current_max_ua =
+		bat_info->constant_charge_current_max_ua =
 			SGM4154x_ICHRG_I_DEF_uA;
-		bat_info.constant_charge_voltage_max_uv =
+		bat_info->constant_charge_voltage_max_uv =
 			SGM4154x_VREG_V_DEF_uV;
-		bat_info.precharge_current_ua =
+		bat_info->precharge_current_ua =
 			SGM4154x_PRECHRG_I_DEF_uA;
-		bat_info.charge_term_current_ua =
+		bat_info->charge_term_current_ua =
 			SGM4154x_TERMCHRG_I_DEF_uA;
 		sgm->init_data.max_ichg =
 			SGM4154x_ICHRG_I_MAX_uA;
 		sgm->init_data.max_vreg = SGM4154x_VREG_V_DEF_uV;
 	}
-	if (!bat_info.constant_charge_current_max_ua)
-		bat_info.constant_charge_current_max_ua =
+	if (!bat_info->constant_charge_current_max_ua)
+		bat_info->constant_charge_current_max_ua =
 					SGM4154x_ICHRG_I_MAX_uA;
-	if (!bat_info.constant_charge_voltage_max_uv)
-		bat_info.constant_charge_voltage_max_uv =
+	if (!bat_info->constant_charge_voltage_max_uv)
+		bat_info->constant_charge_voltage_max_uv =
 			SGM4154x_VREG_V_DEF_uV;
-	if (!bat_info.precharge_current_ua)
-		bat_info.precharge_current_ua =
+	if (!bat_info->precharge_current_ua)
+		bat_info->precharge_current_ua =
 			SGM4154x_PRECHRG_I_DEF_uA;
-	if (!bat_info.charge_term_current_ua)
-		bat_info.charge_term_current_ua =
+	if (!bat_info->charge_term_current_ua)
+		bat_info->charge_term_current_ua =
 			SGM4154x_TERMCHRG_I_DEF_uA;
 	if (!sgm->init_data.max_ichg)
 		sgm->init_data.max_ichg =
 			SGM4154x_ICHRG_I_MAX_uA;
 
-	if (bat_info.constant_charge_voltage_max_uv)
-		sgm->init_data.max_vreg = bat_info.constant_charge_voltage_max_uv;
+	if (bat_info->constant_charge_voltage_max_uv)
+		sgm->init_data.max_vreg = bat_info->constant_charge_voltage_max_uv;
 
 	ret = sgm4154x_set_watchdog_timer(sgm, 0);
 	if (ret)
 		goto err_out;
 
 
-	ret = sgm4154x_set_prechrg_curr(sgm, bat_info.precharge_current_ua);
+	ret = sgm4154x_set_prechrg_curr(sgm, bat_info->precharge_current_ua);
 	if (ret)
 		goto err_out;
 
@@ -981,7 +985,7 @@ static int sgm4154x_hw_init(struct sgm4154x_device *sgm)
 		goto err_out;
 
 	ret = sgm4154x_set_term_curr(sgm,
-				     bat_info.charge_term_current_ua);
+				     bat_info->charge_term_current_ua);
 	if (ret)
 		goto err_out;
 
@@ -1000,7 +1004,7 @@ static int sgm4154x_hw_init(struct sgm4154x_device *sgm)
 		if (ret)
 			goto err_out;
 		ret = sgm4154x_set_ichrg_curr(sgm,
-			      bat_info.constant_charge_current_max_ua);
+			      bat_info->constant_charge_current_max_ua);
 		if (ret)
 			goto err_out;
 
@@ -1037,10 +1041,10 @@ static int sgm4154x_hw_init(struct sgm4154x_device *sgm)
 	    "chrg_vol:%d\n"
 	    "term_curr:%d\n"
 	    "input_curr_lim:%d\n",
-	    bat_info.constant_charge_current_max_ua,
-	    bat_info.precharge_current_ua,
-	    bat_info.constant_charge_voltage_max_uv,
-	    bat_info.charge_term_current_ua,
+	    bat_info->constant_charge_current_max_ua,
+	    bat_info->precharge_current_ua,
+	    bat_info->constant_charge_voltage_max_uv,
+	    bat_info->charge_term_current_ua,
 	    sgm->init_data.ilim);
 
 	return 0;
