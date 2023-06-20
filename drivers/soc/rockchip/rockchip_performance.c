@@ -5,6 +5,7 @@
 #include <linux/kernel.h>
 #include <linux/proc_fs.h>
 #include <linux/seq_file.h>
+#include <linux/sched/cputime.h>
 #include <soc/rockchip/rockchip_performance.h>
 #include <../../kernel/sched/sched.h>
 
@@ -16,7 +17,6 @@ static DEFINE_MUTEX(update_mutex);
 #ifdef CONFIG_UCLAMP_TASK
 static inline void set_uclamp_util_min_rt(unsigned int util)
 {
-	sysctl_sched_uclamp_util_min_rt_default = util;
 	static_branch_enable(&sched_uclamp_used);
 	rockchip_perf_uclamp_sync_util_min_rt_default();
 }
@@ -145,7 +145,7 @@ struct cpumask *rockchip_perf_get_cpub_mask(void)
 int rockchip_perf_select_rt_cpu(int prev_cpu, struct cpumask *lowest_mask)
 {
 	struct cpumask target_mask;
-	int cpu = nr_cpu_ids;
+	int cpu;
 
 	if (!perf_init_done)
 		return prev_cpu;
