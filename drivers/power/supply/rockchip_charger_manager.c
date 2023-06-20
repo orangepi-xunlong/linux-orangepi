@@ -255,7 +255,7 @@ struct charger_desc {
 	unsigned int polling_interval_ms;
 	unsigned int polling_force_enable;
 
-	struct power_supply_battery_info info;
+	struct power_supply_battery_info *info;
 
 	const char *psy_charger_stat;
 	const char *psy_charger_pump_stat;
@@ -1066,7 +1066,7 @@ static void cm_charge_pump_move_state(struct charger_manager *cm,
 static int cm_charge_limit_update(struct charger_manager *cm)
 {
 	struct fastcharge_config *fc_config;
-	struct power_supply_battery_info info;
+	struct power_supply_battery_info *info;
 	union power_supply_propval val;
 	int ibus_dcdc_lmt;
 	int ret = 0;
@@ -1075,13 +1075,13 @@ static int cm_charge_limit_update(struct charger_manager *cm)
 	fc_config = cm->fc_config;
 
 	if (fc_config->jeita_charge_support) {
-		fc_config->vbat_lmt = min(info.constant_charge_voltage_max_uv,
+		fc_config->vbat_lmt = min(info->constant_charge_voltage_max_uv,
 					  fc_config->jeita_charge_voltage);
-		fc_config->ibat_lmt = min(info.constant_charge_current_max_ua,
+		fc_config->ibat_lmt = min(info->constant_charge_current_max_ua,
 					  fc_config->jeita_charge_current);
 	} else {
-		fc_config->vbat_lmt = info.constant_charge_voltage_max_uv;
-		fc_config->ibat_lmt = info.constant_charge_current_max_ua;
+		fc_config->vbat_lmt = info->constant_charge_voltage_max_uv;
+		fc_config->ibat_lmt = info->constant_charge_current_max_ua;
 	}
 
 	ret = get_battery_voltage(cm, &fc_config->vbat_now);
@@ -1159,19 +1159,19 @@ static int cm_charge_limit_update(struct charger_manager *cm)
 
 	CM_DBG("battery info:\n");
 	CM_DBG("battery info:: charge-full-design-microamp-hours: %d\n",
-	       info.charge_full_design_uah);
+	       info->charge_full_design_uah);
 	CM_DBG("battery info:: factory_internal_resistance_uohm: %d\n",
-	       info.factory_internal_resistance_uohm);
+	       info->factory_internal_resistance_uohm);
 	CM_DBG("battery info:: charge_term_current_ua: %d\n",
-	       info.charge_term_current_ua);
+	       info->charge_term_current_ua);
 	CM_DBG("battery info:: constant_charge_voltage_max_uv: %d\n",
-	       info.constant_charge_voltage_max_uv);
+	       info->constant_charge_voltage_max_uv);
 	CM_DBG("battery info:: constant_charge_current_max_ua: %d\n",
-	       info.constant_charge_current_max_ua);
+	       info->constant_charge_current_max_ua);
 	CM_DBG("battery info:: precharge_current_ua: %d\n",
-	       info.precharge_current_ua);
+	       info->precharge_current_ua);
 	CM_DBG("battery info:: precharge-upper-limit-microvolt: %d\n",
-	       info.precharge_voltage_max_uv);
+	       info->precharge_voltage_max_uv);
 
 	CM_DBG("charge type: %d\n", fc_config->charge_type);
 
@@ -1436,7 +1436,7 @@ static void cm_sw_fast_charge_algo(struct charger_manager *cm)
 
 static int cm_charge_pump_sm(struct charger_manager *cm)
 {
-	struct power_supply_battery_info info;
+	struct power_supply_battery_info *info;
 	struct fastcharge_config *fc_config;
 	union power_supply_propval val;
 	static int tune_vbus_retry;
@@ -1507,7 +1507,7 @@ static int cm_charge_pump_sm(struct charger_manager *cm)
 			}
 		}
 
-		if (cm->cp.vbat_volt < info.precharge_voltage_max_uv) {
+		if (cm->cp.vbat_volt < info->precharge_voltage_max_uv) {
 			ret = power_supply_get_property(cm->desc->tcpm_psy,
 							POWER_SUPPLY_PROP_CURRENT_MAX,
 							&val);
@@ -1519,7 +1519,7 @@ static int cm_charge_pump_sm(struct charger_manager *cm)
 			if (ret)
 				return ret;
 			CM_DBG("batt_volt-%d, waiting... > %d\n",
-			       cm->cp.vbat_volt, info.precharge_voltage_max_uv);
+			       cm->cp.vbat_volt, info->precharge_voltage_max_uv);
 		} else if (cm->cp.vbat_volt > cm->fc_config->vbat_lmt - 100 * 1000) {
 			pr_info("batt_volt-%d is too high for cp, charging with switch charger(%duv)\n",
 				cm->cp.vbat_volt, cm->fc_config->vbat_lmt - 100 * 1000);
@@ -1558,9 +1558,9 @@ static int cm_charge_pump_sm(struct charger_manager *cm)
 
 		cm->cp.request_current = min(cm->cp.ibus_max + fc_config->ibus_dcdc_lmt, val.intval);
 
-		bat_voltage = fc_config->vbat_now - fc_config->ibat_now / 1000 * info.factory_internal_resistance_uohm;
+		bat_voltage = fc_config->vbat_now - fc_config->ibat_now / 1000 * info->factory_internal_resistance_uohm;
 		ibat_max = min(fc_config->ibat_lmt, 2 * cm->cp.request_current);
-		vbus_volt_init_up = ibat_max / 1000 * info.factory_internal_resistance_uohm;
+		vbus_volt_init_up = ibat_max / 1000 * info->factory_internal_resistance_uohm;
 		/* cm->cp.request_voltage = bat_voltage * 2 + 2 * vbus_volt_init_up + ibat_max / 2 * 100 / 1000; */
 		cm->cp.request_voltage = bat_voltage * 2 + 15 * vbus_volt_init_up / 10 + ibat_max / 2 * 100 / 1000;
 
@@ -1693,7 +1693,7 @@ static int cm_charge_pump_sm(struct charger_manager *cm)
 		CM_DBG("PPS_PM_STATE_FC_ENTRY_1: cm->cp.vbus_volt: %d vbus_volt_init_up: %d\n"
 		       "bat_res: %d, factory_internal_resistance_uohm: %d\n",
 		       cm->cp.vbus_volt, vbus_volt_init_up, bat_res,
-		       info.factory_internal_resistance_uohm);
+		       info->factory_internal_resistance_uohm);
 		cm_charge_pump_move_state(cm, PPS_PM_STATE_FC_ENTRY_2);
 		break;
 	case PPS_PM_STATE_FC_ENTRY_2:
@@ -2478,7 +2478,7 @@ static inline struct charger_desc *cm_get_drv_data(struct platform_device *pdev)
 static int charger_manager_probe(struct platform_device *pdev)
 {
 	struct charger_desc *desc = cm_get_drv_data(pdev);
-	struct power_supply_battery_info info;
+	struct power_supply_battery_info *info;
 	struct power_supply charger_psy;
 	struct charger_manager *cm;
 	int ret;
@@ -2519,8 +2519,8 @@ static int charger_manager_probe(struct platform_device *pdev)
 	charger_psy.of_node = cm->dev->of_node;
 	ret  = power_supply_get_battery_info(&charger_psy, &(desc->info));
 	if (ret) {
-		info = bat_default_info;
-		desc->info = bat_default_info;
+		info = &bat_default_info;
+		desc->info = &bat_default_info;
 		dev_err(&pdev->dev, "failed to get battery information\n");
 	} else
 		info = desc->info;
@@ -2537,19 +2537,19 @@ static int charger_manager_probe(struct platform_device *pdev)
 
 	CM_DBG("battery info:\n");
 	CM_DBG("INFO: charge-full-design-microamp-hours: %d\n",
-	       info.charge_full_design_uah);
+	       info->charge_full_design_uah);
 	CM_DBG("INFO:factory_internal_resistance_uohm: %d\n",
-	       info.factory_internal_resistance_uohm);
+	       info->factory_internal_resistance_uohm);
 	CM_DBG("charge_term_current_ua: %d\n",
-	       info.charge_term_current_ua);
+	       info->charge_term_current_ua);
 	CM_DBG("constant_charge_voltage_max_uv: %d\n",
-	       info.constant_charge_voltage_max_uv);
+	       info->constant_charge_voltage_max_uv);
 	CM_DBG("constant_charge_current_max_ua: %d\n",
-	       info.constant_charge_current_max_ua);
+	       info->constant_charge_current_max_ua);
 	CM_DBG("precharge_current_ua: %d\n",
-	       info.precharge_current_ua);
+	       info->precharge_current_ua);
 	CM_DBG("precharge-upper-limit-microvolt: %d\n",
-	       info.precharge_voltage_max_uv);
+	       info->precharge_voltage_max_uv);
 
 	cm->cm_wq = alloc_ordered_workqueue("%s",
 					    WQ_MEM_RECLAIM | WQ_FREEZABLE,
