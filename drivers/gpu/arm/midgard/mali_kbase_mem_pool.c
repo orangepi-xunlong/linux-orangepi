@@ -346,7 +346,7 @@ int kbase_mem_pool_init(struct kbase_mem_pool *pool,
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 1, 0)
 	pool->reclaim.batch = 0;
 #endif
-	register_shrinker(&pool->reclaim);
+	register_shrinker(&pool->reclaim, "mali-mem-pool");
 
 	pool_dbg(pool, "initialized\n");
 

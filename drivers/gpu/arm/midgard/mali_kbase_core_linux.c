@@ -2059,6 +2059,7 @@ static bool align_and_check(unsigned long *gap_end, unsigned long gap_start,
 static unsigned long kbase_unmapped_area_topdown(struct vm_unmapped_area_info
 		*info, bool is_shader_code)
 {
+#if (KERNEL_VERSION(6, 1, 0) > LINUX_VERSION_CODE)
 	struct mm_struct *mm = current->mm;
 	struct vm_area_struct *vma;
 	unsigned long length, low_limit, high_limit, gap_start, gap_end;
@@ -2149,7 +2150,37 @@ check_current:
 			}
 		}
 	}
+#else
+	unsigned long length, high_limit, gap_start, gap_end;
 
+	MA_STATE(mas, &current->mm->mm_mt, 0, 0);
+	/* Adjust search length to account for worst case alignment overhead */
+	length = info->length + info->align_mask;
+	if (length < info->length)
+		return -ENOMEM;
+
+	/*
+	 * Adjust search limits by the desired length.
+	 * See implementation comment at top of unmapped_area().
+	 */
+	gap_end = info->high_limit;
+	if (gap_end < length)
+		return -ENOMEM;
+	high_limit = gap_end - length;
+
+	if (info->low_limit > high_limit)
+		return -ENOMEM;
+
+	while (true) {
+		if (mas_empty_area_rev(&mas, info->low_limit, info->high_limit - 1, length))
+			return -ENOMEM;
+		gap_end = mas.last + 1;
+		gap_start = mas.min;
+
+		if (align_and_check(&gap_end, gap_start, info, is_shader_code))
+			return gap_end;
+	}
+#endif
 	return -ENOMEM;
 }
 
