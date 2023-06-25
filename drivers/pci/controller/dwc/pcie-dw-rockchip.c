@@ -1145,6 +1145,10 @@ static int rk_add_pcie_port(struct rk_pcie *rk_pcie, struct platform_device *pde
 		return ret;
 	}
 
+	/* Disable BAR0 BAR1 */
+	dw_pcie_writel_dbi(pci, PCIE_TYPE0_HDR_DBI2_OFFSET + 0x10 + BAR_0 * 4, 0);
+	dw_pcie_writel_dbi(pci, PCIE_TYPE0_HDR_DBI2_OFFSET + 0x10 + BAR_1 * 4, 0);
+
 	return 0;
 }
 
