@@ -1109,6 +1109,9 @@ static int rga_get_img_info(rga_img_info_t *img,
 	struct dma_buf_attachment *attach = NULL;
 	struct device *rga_dev = NULL;
 	struct sg_table *sgt = NULL;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0)
+	struct iosys_map map;
+#endif
 	struct dma_buf *dma_buf = NULL;
 	u32 vir_w, vir_h;
 	int yrgb_addr = -1;
@@ -1137,11 +1140,20 @@ static int rga_get_img_info(rga_img_info_t *img,
 		}
 #if RGA_DEBUGFS
 	if (RGA_CHECK_MODE) {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0)
+		ret = dma_buf_vmap(dma_buf, &map);
+		vaddr = ret ? NULL : map.vaddr;
+#else
 		vaddr = dma_buf_vmap(dma_buf);
+#endif
 		if (vaddr)
 			rga_memory_check(vaddr, img->vir_w, img->vir_h,
 					 img->format, img->yrgb_addr);
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0)
+		dma_buf_vunmap(dma_buf, &map);
+#else
 		dma_buf_vunmap(dma_buf, vaddr);
+#endif
 	}
 #endif
 		*pattach = attach;
