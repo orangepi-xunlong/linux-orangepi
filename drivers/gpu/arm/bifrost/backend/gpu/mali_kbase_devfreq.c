@@ -192,7 +192,8 @@ kbase_devfreq_status(struct device *dev, struct devfreq_dev_status *stat)
 	stat->private_data = NULL;
 
 #if MALI_USE_CSF && defined CONFIG_DEVFREQ_THERMAL
-	kbase_ipa_reset_data(kbdev);
+	if (!kbdev->devfreq_profile.is_cooling_device)
+		kbase_ipa_reset_data(kbdev);
 #endif
 
 	return 0;
