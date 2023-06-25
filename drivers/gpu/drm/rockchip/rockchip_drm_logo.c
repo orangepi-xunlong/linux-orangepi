@@ -204,7 +204,7 @@ void rockchip_free_loader_memory(struct drm_device *drm)
 		rockchip_drm_release_reserve_vm(drm, &logo->logo_reserved_node);
 	}
 
-	memblock_phys_free(logo->start, logo->size);
+	memblock_free(logo->kvaddr, logo->size);
 	rockchip_drm_free_reserved_area(logo->start, logo->start + logo->size,
 					-1, "drm_logo");
 	kfree(logo);
