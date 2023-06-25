@@ -278,13 +278,12 @@ static int rga_procfs_open(struct inode *inode, struct file *file)
 	return single_open(file, node->info_ent->show, node);
 }
 
-static const struct file_operations rga_procfs_fops = {
-	.owner   = THIS_MODULE,
-	.open    = rga_procfs_open,
-	.read    = seq_read,
-	.llseek  = seq_lseek,
-	.release = single_release,
-	.write   = rga_debugger_write,
+static const struct proc_ops rga_procfs_fops = {
+	.proc_open = rga_procfs_open,
+	.proc_read = seq_read,
+	.proc_lseek = seq_lseek,
+	.proc_release = single_release,
+	.proc_write = rga_debugger_write,
 };
 
 static int rga_procfs_remove_files(struct rga_debugger *debugger)
