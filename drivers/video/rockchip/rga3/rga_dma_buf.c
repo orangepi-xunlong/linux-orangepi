@@ -394,14 +394,20 @@ int rga_dma_memory_check(struct rga_dma_buffer *rga_dma_buffer, struct rga_img_i
 {
 	int ret = 0;
 	void *vaddr;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0)
 	struct iosys_map map;
+#endif
 	struct dma_buf *dma_buf;
 
 	dma_buf = rga_dma_buffer->dma_buf;
 
 	if (!IS_ERR_OR_NULL(dma_buf)) {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0)
 		ret = dma_buf_vmap(dma_buf, &map);
 		vaddr = ret ? NULL : map.vaddr;
+#else
+		vaddr = dma_buf_vmap(dma_buf);
+#endif
 		if (vaddr) {
 			ret = rga_virtual_memory_check(vaddr, img->vir_w,
 				img->vir_h, img->format, img->yrgb_addr);
@@ -409,8 +415,11 @@ int rga_dma_memory_check(struct rga_dma_buffer *rga_dma_buffer, struct rga_img_i
 			pr_err("can't vmap the dma buffer!\n");
 			return -EINVAL;
 		}
-
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0)
+		dma_buf_vunmap(dma_buf, &map);
+#else
 		dma_buf_vunmap(dma_buf, vaddr);
+#endif
 	}
 
 	return ret;
