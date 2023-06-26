@@ -1176,12 +1176,13 @@ static int rockchip_get_pvtm(struct device *dev, struct device_node *np,
 }
 
 static void rockchip_of_get_pvtm_sel(struct device *dev, struct device_node *np,
-				     const char *reg_name, int process,
+				     const char *reg_name, int bin, int process,
 				     int *volt_sel, int *scale_sel)
 {
 	struct property *prop = NULL;
 	char name[NAME_MAX];
 	int pvtm, ret;
+	u32 hw = 0;
 
 	if (of_property_read_bool(np, "rockchip,pvtm-pvtpll"))
 		pvtm = rockchip_get_pvtm_pvtpll(dev, np, reg_name);
@@ -1196,6 +1197,12 @@ static void rockchip_of_get_pvtm_sel(struct device *dev, struct device_node *np,
 		snprintf(name, sizeof(name),
 			 "rockchip,p%d-pvtm-voltage-sel", process);
 		prop = of_find_property(np, name, NULL);
+	} else if (bin >= 0) {
+		of_property_read_u32(np, "rockchip,pvtm-hw", &hw);
+		if (hw && (hw & BIT(bin))) {
+			sprintf(name, "rockchip,pvtm-voltage-sel-hw");
+			prop = of_find_property(np, name, NULL);
+		}
 	}
 	if (!prop)
 		sprintf(name, "rockchip,pvtm-voltage-sel");
@@ -1206,6 +1213,7 @@ static void rockchip_of_get_pvtm_sel(struct device *dev, struct device_node *np,
 next:
 	if (!scale_sel)
 		return;
+	prop = NULL;
 	if (process >= 0) {
 		snprintf(name, sizeof(name),
 			 "rockchip,p%d-pvtm-scaling-sel", process);
@@ -1377,7 +1385,7 @@ static void rockchip_get_scale_volt_sel(struct device *dev, char *lkg_name,
 
 	rockchip_of_get_lkg_sel(dev, np, lkg_name, info->process,
 				&lkg_volt_sel, &lkg_scale);
-	rockchip_of_get_pvtm_sel(dev, np, reg_name, info->process,
+	rockchip_of_get_pvtm_sel(dev, np, reg_name, info->bin, info->process,
 				 &pvtm_volt_sel, &pvtm_scale);
 	rockchip_of_get_bin_sel(dev, np, info->bin, &bin_scale);
 	rockchip_of_get_bin_volt_sel(dev, np, info->bin, &bin_volt_sel);
