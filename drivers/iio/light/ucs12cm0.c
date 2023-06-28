@@ -553,19 +553,12 @@ static int ucs12cm0_probe(struct i2c_client *client,
 {
 	struct ucs12cm0_data *data;
 	struct iio_dev *indio_dev;
-	struct iio_buffer *buffer;
 	u32 type;
 	int ret;
 
 	indio_dev = devm_iio_device_alloc(&client->dev, sizeof(*data));
 	if (!indio_dev)
 		return -ENOMEM;
-
-	buffer = devm_iio_kfifo_allocate(&client->dev);
-	if (!buffer)
-		return -ENOMEM;
-
-	iio_device_attach_buffer(indio_dev, buffer);
 
 	data = iio_priv(indio_dev);
 	i2c_set_clientdata(client, indio_dev);
@@ -575,8 +568,12 @@ static int ucs12cm0_probe(struct i2c_client *client,
 	indio_dev->channels = ucs12cm0_channels;
 	indio_dev->num_channels = ARRAY_SIZE(ucs12cm0_channels);
 	indio_dev->name = "ucs12cm0";
-	indio_dev->modes = (INDIO_DIRECT_MODE | INDIO_BUFFER_SOFTWARE);
-	indio_dev->setup_ops = &ucs12cm0_buffer_setup_ops;
+	indio_dev->modes = INDIO_DIRECT_MODE;
+
+	ret = devm_iio_kfifo_buffer_setup(&client->dev, indio_dev,
+					  &ucs12cm0_buffer_setup_ops);
+	if (ret)
+		return ret;
 
 	ret = ucs12cm0_init(data);
 	if (ret < 0)
