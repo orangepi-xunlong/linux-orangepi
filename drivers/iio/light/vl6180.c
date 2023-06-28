@@ -898,7 +898,6 @@ static int vl6180_probe(struct i2c_client *client,
 {
 	struct vl6180_data *data;
 	struct iio_dev *indio_dev;
-	struct iio_buffer *buffer;
 	u32 type;
 	int ret;
 
@@ -931,13 +930,10 @@ static int vl6180_probe(struct i2c_client *client,
 		return ret;
 
 	if (client->irq) {
-		buffer = devm_iio_kfifo_allocate(&client->dev);
-		if (!buffer)
-			return -ENOMEM;
-
-		iio_device_attach_buffer(indio_dev, buffer);
-		indio_dev->modes |= INDIO_BUFFER_SOFTWARE;
-		indio_dev->setup_ops = &vl6180_buffer_setup_ops;
+		ret = devm_iio_kfifo_buffer_setup(&client->dev, indio_dev,
+						  &vl6180_buffer_setup_ops);
+		if (ret)
+			return ret;
 
 		type = irqd_get_trigger_type(irq_get_irq_data(client->irq));
 		ret = devm_request_threaded_irq(&client->dev, client->irq,
