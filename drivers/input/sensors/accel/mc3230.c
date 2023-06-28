@@ -123,7 +123,6 @@ static GSENSOR_VECTOR3D gsensor_gain;
 static struct file *fd_file;
 static int load_cali_flg;
 static bool READ_FROM_BACKUP;
-static mm_segment_t oldfs;
 static unsigned char offset_buf[9];
 static signed int offset_data[3];
 static s16 G_RAW_DATA[3];
@@ -219,8 +218,6 @@ static int closeFile(struct file *fp)
 
 static void initKernelEnv(void)
 {
-	oldfs = get_fs();
-	set_fs(KERNEL_DS);
 }
 
 static struct mc3230_data g_mc3230_data = { 0 };
@@ -259,7 +256,6 @@ static int mcube_read_cali_file(struct i2c_client *client)
 		else
 			GSE_LOG("read file error %d\n", err);
 
-		set_fs(oldfs);
 		closeFile(fd_file);
 
 		sscanf(backup_buf, "%d %d %d", &cali_data[MC32X0_AXIS_X],
@@ -1043,7 +1039,6 @@ static void mcube_copy_file(const char *dstfilepath)
 	else
 		GSE_LOG("write file error %d\n", err);
 
-	set_fs(oldfs);
 	closeFile(fd_file);
 }
 
