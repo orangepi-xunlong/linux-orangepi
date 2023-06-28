@@ -60,6 +60,20 @@ config VIDEO_AR0521
 	  To compile this driver as a module, choose M here: the
 	  module will be called ar0521.
 
+config VIDEO_AR0822
+	tristate "Onsemi AR0822 sensor support"
+	depends on I2C && VIDEO_DEV
+	depends on MEDIA_CAMERA_SUPPORT
+	select MEDIA_CONTROLLER
+	select VIDEO_V4L2_SUBDEV_API
+	select V4L2_FWNODE
+	help
+	  This is a Video4Linux2 sensor driver for the Onsemi
+	  AR0822 camera.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called ar0822.
+
 config VIDEO_BF3925
 	tristate "BYD BF3925 sensor support"
 	depends on I2C && VIDEO_DEV
