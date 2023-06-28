@@ -17,6 +17,7 @@
 #include <linux/iio/triggered_buffer.h>
 #include <linux/iio/trigger.h>
 #include <linux/iio/buffer.h>
+#include <linux/of.h>
 #include "st_lsm6dsr.h"
 
 #define ST_LSM6DSR_REG_EMB_FUNC_STATUS_MAINPAGE		0x35
@@ -976,7 +977,6 @@ int st_lsm6dsr_buffers_setup(struct st_lsm6dsr_hw *hw)
 {
 	struct device_node *np = hw->dev->of_node;
 	struct st_lsm6dsr_sensor *sensor;
-	struct iio_buffer *buffer;
 	struct iio_dev *iio_dev;
 	unsigned long irq_type;
 	int i, err;
@@ -1014,13 +1014,10 @@ int st_lsm6dsr_buffers_setup(struct st_lsm6dsr_hw *hw)
 		if (!hw->iio_devs[i])
 			continue;
 
-		buffer = devm_iio_kfifo_allocate(hw->dev);
-		if (!buffer)
-			return -ENOMEM;
-
-		iio_device_attach_buffer(hw->iio_devs[i], buffer);
-		hw->iio_devs[i]->modes |= INDIO_BUFFER_SOFTWARE;
-		hw->iio_devs[i]->setup_ops = &st_lsm6dsr_fifo_ops;
+		err = devm_iio_kfifo_buffer_setup(hw->dev, hw->iio_devs[i],
+						  &st_lsm6dsr_fifo_ops);
+		if (err)
+			return err;
 	}
 
 	err = st_lsm6dsr_fifo_init(hw);
