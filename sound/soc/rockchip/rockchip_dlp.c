@@ -431,7 +431,7 @@ dmaengine_pcm_set_runtime_hwparams(struct snd_soc_component *component,
 	struct snd_dmaengine_dai_dma_data *dma_data;
 	struct snd_pcm_hardware hw;
 
-	if (rtd->num_cpus > 1) {
+	if (rtd->dai_link->num_cpus > 1) {
 		dev_err(rtd->dev,
 			"%s doesn't support Multi CPU yet\n", __func__);
 		return -EINVAL;
