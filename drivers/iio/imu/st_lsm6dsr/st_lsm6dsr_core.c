@@ -1126,6 +1126,7 @@ static int st_lsm6dsr_write_raw(struct iio_dev *iio_dev,
 					break;
 
 				err = st_lsm6dsr_update_batching(iio_dev, 1);
+				break;
 			default:
 				break;
 			}
