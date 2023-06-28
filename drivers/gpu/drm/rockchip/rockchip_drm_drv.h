@@ -73,6 +73,7 @@ enum rockchip_drm_debug_category {
 	VOP_DEBUG_OVERLAY	= BIT(1),
 	VOP_DEBUG_WB		= BIT(2),
 	VOP_DEBUG_CFG_DONE	= BIT(3),
+	VOP_DEBUG_CLK		= BIT(4),
 	VOP_DEBUG_VSYNC		= BIT(7),
 };
 
@@ -114,6 +115,12 @@ enum rockchip_drm_split_area {
 	ROCKCHIP_DRM_SPLIT_UNSET = 0,
 	ROCKCHIP_DRM_SPLIT_LEFT_SIDE = 1,
 	ROCKCHIP_DRM_SPLIT_RIGHT_SIDE = 2,
+};
+
+enum rockchip_drm_vop_aclk_mode {
+	ROCKCHIP_VOP_ACLK_NORMAL_MODE = 0,
+	ROCKCHIP_VOP_ACLK_ADVANCED_MODE = 1,
+	ROCKCHIP_VOP_ACLK_MAX_MODE = 2,
 };
 
 struct rockchip_drm_sub_dev {
@@ -461,6 +468,7 @@ struct rockchip_crtc_funcs {
 	int (*wait_vact_end)(struct drm_crtc *crtc, unsigned int mstimeout);
 	void (*crtc_standby)(struct drm_crtc *crtc, bool standby);
 	int (*crtc_set_color_bar)(struct drm_crtc *crtc, enum rockchip_color_bar_mode mode);
+	int (*set_aclk)(struct drm_crtc *crtc, enum rockchip_drm_vop_aclk_mode aclk_mode);
 };
 
 struct rockchip_dclk_pll {
@@ -527,6 +535,7 @@ struct rockchip_drm_private {
 
 	dma_addr_t cubic_lut_dma_addr;
 	void *cubic_lut_kvaddr;
+	int aclk_adjust_frame_num;
 	struct drm_mm_node *clut_reserved_node;
 	struct loader_cubic_lut cubic_lut[ROCKCHIP_MAX_CRTC];
 };

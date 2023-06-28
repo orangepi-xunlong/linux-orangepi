@@ -48,9 +48,12 @@
 #include <linux/types.h>
 #include <soc/rockchip/rockchip_csu.h>
 #include <soc/rockchip/rockchip_dmc.h>
+#include <soc/rockchip/rockchip_opp_select.h>
+#include <soc/rockchip/rockchip_system_monitor.h>
 #include <soc/rockchip/rockchip-system-status.h>
 #include <uapi/linux/videodev2.h>
 
+#include <../drivers/devfreq/governor.h>
 #include "../drm_crtc_internal.h"
 #include "../drm_internal.h"
 
@@ -837,7 +840,7 @@ struct vop2 {
 	bool loader_protect;
 
 	bool aclk_rate_reset;
-	unsigned long aclk_rate;
+	unsigned long aclk_current_freq;
 
 	const struct vop2_data *data;
 	/* Number of win that registered as plane,
@@ -897,6 +900,16 @@ struct vop2 {
 	struct workqueue_struct *workqueue;
 
 	struct vop2_layer layers[ROCKCHIP_MAX_LAYER];
+
+#ifdef CONFIG_PM_DEVFREQ
+	struct rockchip_opp_info opp_info;
+	struct devfreq *devfreq;
+	struct monitor_dev_info *mdev_info;
+	struct opp_table *opp_table;
+	unsigned long aclk_target_freq;
+	u32 aclk_mode_rate[ROCKCHIP_VOP_ACLK_MAX_MODE];
+#endif
+
 	/* must put at the end of the struct */
 	struct vop2_win win[];
 };
@@ -945,6 +958,7 @@ static const struct drm_bus_format_enum_list drm_bus_format_enum_list[] = {
 };
 
 static DRM_ENUM_NAME_FN(drm_get_bus_format_name, drm_bus_format_enum_list)
+static int vop2_devfreq_set_aclk(struct drm_crtc *crtc, enum rockchip_drm_vop_aclk_mode aclk_mode);
 
 static inline struct vop2_video_port *to_vop2_video_port(struct drm_crtc *crtc)
 {
@@ -4320,7 +4334,7 @@ static void vop2_crtc_atomic_enter_psr(struct drm_crtc *crtc, struct drm_crtc_st
 
 		adjust_aclk_rate = (pre_scan_hblank + pre_scan_hactive) * dclk_rate * 12 / 10 / htotal;
 
-		vop2->aclk_rate = clk_get_rate(vop2->aclk);
+		vop2->aclk_current_freq = clk_get_rate(vop2->aclk);
 		clk_set_rate(vop2->aclk, adjust_aclk_rate * 1000000L);
 		vop2->aclk_rate_reset = true;
 	}
@@ -4336,7 +4350,7 @@ static void vop2_crtc_atomic_exit_psr(struct drm_crtc *crtc, struct drm_crtc_sta
 
 	drm_crtc_vblank_on(crtc);
 	if (vop2->aclk_rate_reset)
-		clk_set_rate(vop2->aclk, vop2->aclk_rate);
+		clk_set_rate(vop2->aclk, vop2->aclk_current_freq);
 	vop2->aclk_rate_reset = false;
 
 	for_each_set_bit(phys_id, &enabled_win_mask, ROCKCHIP_MAX_LAYER) {
@@ -6820,6 +6834,7 @@ static const struct rockchip_crtc_funcs private_crtc_funcs = {
 	.wait_vact_end = vop2_crtc_wait_vact_end,
 	.crtc_standby = vop2_crtc_standby,
 	.crtc_set_color_bar = vop2_crtc_set_color_bar,
+	.set_aclk = vop2_devfreq_set_aclk,
 };
 
 static bool vop2_crtc_mode_fixup(struct drm_crtc *crtc,
@@ -11877,6 +11892,227 @@ static void vop2_plane_mask_assign(struct vop2 *vop2, struct device_node *vop_ou
 	}
 }
 
+#ifdef CONFIG_PM_DEVFREQ
+static struct monitor_dev_profile vop2_mdevp = {
+	.type = MONITOR_TYPE_DEV,
+	.low_temp_adjust = rockchip_monitor_dev_low_temp_adjust,
+	.high_temp_adjust = rockchip_monitor_dev_high_temp_adjust,
+	.check_rate_volt = rockchip_monitor_check_rate_volt,
+};
+
+static int devfreq_vop2_ondemand_func(struct devfreq *df, unsigned long *freq)
+{
+	struct vop2 *vop2 = df->data;
+
+	if (vop2 && vop2->aclk_target_freq)
+		*freq = vop2->aclk_target_freq;
+	else
+		*freq = df->previous_freq;
+
+	return 0;
+}
+
+static int devfreq_vop2_ondemand_handler(struct devfreq *devfreq,
+					 unsigned int event, void *data)
+{
+	return 0;
+}
+
+static struct devfreq_governor devfreq_vop2_ondemand = {
+	.name = "vop2_ondemand",
+	.get_target_freq = devfreq_vop2_ondemand_func,
+	.event_handler = devfreq_vop2_ondemand_handler,
+};
+
+static int vop2_devfreq_set_aclk(struct drm_crtc *crtc, enum rockchip_drm_vop_aclk_mode aclk_mode)
+{
+	struct vop2_video_port *vp = to_vop2_video_port(crtc);
+	struct vop2 *vop2 = vp->vop2;
+	struct drm_crtc *first_active_crtc = NULL;
+	int i = 0, ret = 0;
+
+	if (!vop2->devfreq)
+		return 0;
+
+	/* all vp/crtc share one vop aclk, so only need to set once */
+	for (i = 0; i < vop2->data->nr_vps; i++) {
+		if (vop2->vps[i].rockchip_crtc.crtc.state &&
+		    vop2->vps[i].rockchip_crtc.crtc.state->active) {
+			first_active_crtc = &vop2->vps[i].rockchip_crtc.crtc;
+			break;
+		}
+	}
+	if (first_active_crtc != crtc)
+		return 0;
+
+	vop2->aclk_target_freq = vop2->aclk_mode_rate[aclk_mode];
+	ret = update_devfreq(vop2->devfreq);
+	if (ret)
+		dev_err(vop2->dev, "failed to set rate %lu\n", vop2->aclk_target_freq);
+
+	return 0;
+}
+
+static int vop2_devfreq_target(struct device *dev, unsigned long *freq,
+			       u32 flags)
+{
+	struct vop2 *vop2 = dev_get_drvdata(dev);
+	struct rockchip_opp_info *opp_info = &vop2->opp_info;
+	struct dev_pm_opp *opp;
+	int ret = 0;
+
+	if (!opp_info->is_rate_volt_checked)
+		return -EINVAL;
+
+	opp = devfreq_recommended_opp(dev, freq, flags);
+	if (IS_ERR(opp)) {
+		dev_err(dev, "Failed to find opp for %lu Hz\n", *freq);
+		return PTR_ERR(opp);
+	}
+	dev_pm_opp_put(opp);
+
+	if (*freq == vop2->aclk_current_freq)
+		return 0;
+
+	rockchip_opp_dvfs_lock(opp_info);
+	ret = dev_pm_opp_set_rate(dev, *freq);
+	if (!ret) {
+		rockchip_drm_dbg(vop2->dev, VOP_DEBUG_CLK,
+				 "Set VOP aclk from %ld to %ld\n", vop2->aclk_current_freq, *freq);
+		vop2->aclk_current_freq = *freq;
+		vop2->devfreq->last_status.current_frequency = *freq;
+	}
+	rockchip_opp_dvfs_unlock(opp_info);
+
+	return ret;
+}
+
+static int vop2_devfreq_get_dev_status(struct device *dev,
+				       struct devfreq_dev_status *stat)
+{
+	return 0;
+}
+
+static int vop2_devfreq_get_cur_freq(struct device *dev,
+				     unsigned long *freq)
+{
+	struct vop2 *vop2 = dev_get_drvdata(dev);
+
+	*freq = vop2->aclk_current_freq;
+
+	return 0;
+}
+
+static struct devfreq_dev_profile vop2_devfreq_profile = {
+	.target	= vop2_devfreq_target,
+	.get_dev_status	= vop2_devfreq_get_dev_status,
+	.get_cur_freq = vop2_devfreq_get_cur_freq,
+};
+
+static int rockchip_vop2_devfreq_init(struct vop2 *vop2)
+{
+	struct devfreq_dev_profile *dev_profile = &vop2_devfreq_profile;
+	struct dev_pm_opp *opp;
+	int ret = 0;
+
+	ret = rockchip_init_opp_table(vop2->dev, &vop2->opp_info, NULL, "vop");
+	if (ret) {
+		dev_err(vop2->dev, "failed to init_opp_table\n");
+		return ret;
+	}
+
+	vop2->aclk_current_freq = clk_get_rate(vop2->aclk);
+	opp = devfreq_recommended_opp(vop2->dev, &vop2->aclk_current_freq, 0);
+	if (IS_ERR(opp)) {
+		ret = PTR_ERR(opp);
+		goto err_remove_table;
+	}
+	dev_pm_opp_put(opp);
+	dev_profile->initial_freq = vop2->aclk_current_freq;
+
+	ret = devfreq_add_governor(&devfreq_vop2_ondemand);
+	if (ret) {
+		dev_err(vop2->dev, "failed to add vop2_ondemand governor\n");
+		goto err_remove_table;
+	}
+
+	vop2->devfreq = devm_devfreq_add_device(vop2->dev, dev_profile, "vop2_ondemand",
+						(void *)vop2);
+	if (IS_ERR(vop2->devfreq)) {
+		dev_err(vop2->dev, "failed to add devfreq\n");
+		ret = PTR_ERR(vop2->devfreq);
+		goto err_remove_governor;
+	}
+
+	vop2_mdevp.data = vop2->devfreq;
+	vop2_mdevp.opp_info = &vop2->opp_info;
+	vop2->mdev_info = rockchip_system_monitor_register(vop2->dev, &vop2_mdevp);
+	if (IS_ERR(vop2->mdev_info)) {
+		dev_dbg(vop2->dev, "without system monitor\n");
+		vop2->mdev_info = NULL;
+	}
+	vop2->aclk_current_freq = clk_get_rate(vop2->aclk);
+	vop2->aclk_target_freq = vop2->aclk_current_freq;
+	vop2->devfreq->previous_freq = vop2->aclk_current_freq;
+	if (vop2->devfreq->suspend_freq)
+		vop2->devfreq->resume_freq = vop2->aclk_current_freq;
+	vop2->devfreq->last_status.current_frequency = vop2->aclk_current_freq;
+	vop2->devfreq->last_status.total_time = 1;
+	vop2->devfreq->last_status.busy_time = 1;
+
+	of_property_read_u32(vop2->dev->of_node, "rockchip,aclk-normal-mode-rates",
+			     &vop2->aclk_mode_rate[ROCKCHIP_VOP_ACLK_NORMAL_MODE]);
+
+	of_property_read_u32(vop2->dev->of_node, "rockchip,aclk-advanced-mode-rates",
+			     &vop2->aclk_mode_rate[ROCKCHIP_VOP_ACLK_ADVANCED_MODE]);
+
+	dev_err(vop2->dev, "Supported VOP aclk dvfs, normal mode:%d, advanced mode:%d\n",
+			   vop2->aclk_mode_rate[ROCKCHIP_VOP_ACLK_NORMAL_MODE],
+			   vop2->aclk_mode_rate[ROCKCHIP_VOP_ACLK_ADVANCED_MODE]);
+
+	return 0;
+
+err_remove_governor:
+	devfreq_remove_governor(&devfreq_vop2_ondemand);
+err_remove_table:
+	rockchip_uninit_opp_table(vop2->dev, &vop2->opp_info);
+
+	return ret;
+}
+
+static void rockchip_vop2_devfreq_uninit(struct vop2 *vop2)
+{
+	if (vop2->mdev_info) {
+		rockchip_system_monitor_unregister(vop2->mdev_info);
+		vop2->mdev_info = NULL;
+	}
+	if (vop2->devfreq) {
+		devfreq_remove_governor(&devfreq_vop2_ondemand);
+		if (vop2_devfreq_profile.freq_table) {
+			devm_kfree(vop2->dev, vop2_devfreq_profile.freq_table);
+			vop2_devfreq_profile.freq_table = NULL;
+			vop2_devfreq_profile.max_state = 0;
+		}
+		vop2->devfreq = NULL;
+	}
+	rockchip_uninit_opp_table(vop2->dev, &vop2->opp_info);
+}
+#else
+static inline int vop2_devfreq_set_aclk(struct drm_crtc *crtc, enum rockchip_drm_vop_aclk_mode aclk_mode)
+{
+	return 0;
+}
+
+static inline int rockchip_vop2_devfreq_init(struct vop2 *vop2)
+{
+	return 0;
+}
+
+static inline void rockchip_vop2_devfreq_uninit(struct vop2 *vop2)
+{
+}
+#endif
+
 static int vop2_bind(struct device *dev, struct device *master, void *data)
 {
 	struct platform_device *pdev = to_platform_device(dev);
@@ -12102,6 +12338,7 @@ static int vop2_bind(struct device *dev, struct device *master, void *data)
 	vop2_wb_connector_init(vop2, registered_num_crtcs);
 	rockchip_drm_dma_init_device(drm_dev, vop2->dev);
 	pm_runtime_enable(&pdev->dev);
+	rockchip_vop2_devfreq_init(vop2);
 
 	return 0;
 }
@@ -12115,6 +12352,7 @@ static void vop2_unbind(struct device *dev, struct device *master, void *data)
 	struct drm_crtc *crtc, *tmpc;
 	struct drm_plane *plane, *tmpp;
 
+	rockchip_vop2_devfreq_uninit(vop2);
 	pm_runtime_disable(dev);
 
 	list_for_each_entry_safe(plane, tmpp, plane_list, head)
