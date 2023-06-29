@@ -1810,8 +1810,11 @@ static int rkvenc_devfreq_remove(struct mpp_dev *mpp)
 {
 	struct rkvenc_dev *enc = to_rkvenc_dev(mpp);
 
-	if (enc->mdev_info)
+	if (enc->mdev_info) {
 		rockchip_system_monitor_unregister(enc->mdev_info);
+		enc->mdev_info = NULL;
+	}
+	rockchip_uninit_opp_table(mpp->dev, &enc->opp_info);
 
 	return 0;
 }
