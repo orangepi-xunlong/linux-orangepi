@@ -93,7 +93,6 @@ struct mpp_iommu_info {
 	spinlock_t dev_lock;
 	struct mpp_dev *dev_active;
 
-	u32 av1d_iommu;
 	int irq;
 	int got_irq;
 };

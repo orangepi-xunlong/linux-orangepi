@@ -898,11 +898,6 @@ extern struct platform_driver rockchip_jpgdec_driver;
 extern struct platform_driver rockchip_rkvdec2_driver;
 extern struct platform_driver rockchip_rkvenc2_driver;
 extern struct platform_driver rockchip_av1dec_driver;
-extern struct platform_driver rockchip_av1_iommu_driver;
-
-extern int av1dec_driver_register(struct platform_driver *drv);
-extern void av1dec_driver_unregister(struct platform_driver *drv);
-extern struct bus_type av1dec_bus;
 extern struct platform_driver rockchip_vdpp_driver;
 
 #endif

@@ -557,13 +557,7 @@ int mpp_iommu_refresh(struct mpp_iommu_info *info, struct device *dev)
 
 	if (!info)
 		return 0;
-	/* call av1 iommu ops */
-	if (IS_ENABLED(CONFIG_ROCKCHIP_MPP_AV1DEC) && info->av1d_iommu) {
-		ret = mpp_av1_iommu_disable(dev);
-		if (ret)
-			return ret;
-		return mpp_av1_iommu_enable(dev);
-	}
+
 	/* disable iommu */
 	ret = rockchip_iommu_disable(dev);
 	if (ret)

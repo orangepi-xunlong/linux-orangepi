@@ -99,10 +99,7 @@ static int mpp_add_driver(struct mpp_service *srv,
 		     &srv->grf_infos[type],
 		     grf_name);
 
-	if (IS_ENABLED(CONFIG_ROCKCHIP_MPP_AV1DEC) && type == MPP_DRIVER_AV1DEC)
-		ret = av1dec_driver_register(driver);
-	else
-		ret = platform_driver_register(driver);
+	ret = platform_driver_register(driver);
 	if (ret)
 		return ret;
 
@@ -114,12 +111,8 @@ static int mpp_add_driver(struct mpp_service *srv,
 static int mpp_remove_driver(struct mpp_service *srv, int i)
 {
 	if (srv && srv->sub_drivers[i]) {
-		if (i != MPP_DRIVER_AV1DEC) {
-			mpp_set_grf(&srv->grf_infos[i]);
-			platform_driver_unregister(srv->sub_drivers[i]);
-		} else if (IS_ENABLED(CONFIG_ROCKCHIP_MPP_AV1DEC)) {
-			av1dec_driver_unregister(srv->sub_drivers[i]);
-		}
+		mpp_set_grf(&srv->grf_infos[i]);
+		platform_driver_unregister(srv->sub_drivers[i]);
 		srv->sub_drivers[i] = NULL;
 	}
 

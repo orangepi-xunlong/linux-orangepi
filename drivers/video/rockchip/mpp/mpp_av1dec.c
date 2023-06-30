@@ -1025,180 +1025,6 @@ static const struct of_device_id mpp_av1dec_dt_match[] = {
 	{},
 };
 
-static int av1dec_device_match(struct device *dev, struct device_driver *drv)
-{
-	return 1;
-}
-
-static int av1dec_device_probe(struct device *dev)
-{
-	int ret;
-	const struct platform_driver *drv;
-	struct platform_device *pdev = to_platform_device(dev);
-
-	ret = of_clk_set_defaults(dev->of_node, false);
-	if (ret < 0)
-		return ret;
-
-	ret = dev_pm_domain_attach(dev, true);
-	if (ret)
-		return ret;
-
-	drv = to_platform_driver(dev->driver);
-	if (drv->probe) {
-		ret = drv->probe(pdev);
-		if (ret)
-			dev_pm_domain_detach(dev, true);
-	}
-
-	return ret;
-}
-
-static int av1dec_device_remove(struct device *dev)
-{
-
-	struct platform_device *pdev = to_platform_device(dev);
-	struct platform_driver *drv = to_platform_driver(dev->driver);
-
-	if (dev->driver && drv->remove)
-		drv->remove(pdev);
-
-	dev_pm_domain_detach(dev, true);
-
-	return 0;
-}
-
-static void av1dec_device_shutdown(struct device *dev)
-{
-	struct platform_device *pdev = to_platform_device(dev);
-	struct platform_driver *drv = to_platform_driver(dev->driver);
-
-	if (dev->driver && drv->shutdown)
-		drv->shutdown(pdev);
-}
-
-static int av1dec_dma_configure(struct device *dev)
-{
-	return of_dma_configure(dev, dev->of_node, true);
-}
-
-static const struct dev_pm_ops platform_dev_pm_ops = {
-	.runtime_suspend = pm_generic_runtime_suspend,
-	.runtime_resume = pm_generic_runtime_resume,
-};
-
-struct bus_type av1dec_bus = {
-	.name		= "av1dec_bus",
-	.match		= av1dec_device_match,
-	.probe		= av1dec_device_probe,
-	.remove		= av1dec_device_remove,
-	.shutdown	= av1dec_device_shutdown,
-	.dma_configure  = av1dec_dma_configure,
-	.pm		= &platform_dev_pm_ops,
-};
-
-static int av1_of_device_add(struct platform_device *ofdev)
-{
-	WARN_ON(ofdev->dev.of_node == NULL);
-
-	/* name and id have to be set so that the platform bus doesn't get
-	 * confused on matching
-	 */
-	ofdev->name = dev_name(&ofdev->dev);
-	ofdev->id = PLATFORM_DEVID_NONE;
-
-	/*
-	 * If this device has not binding numa node in devicetree, that is
-	 * of_node_to_nid returns NUMA_NO_NODE. device_add will assume that this
-	 * device is on the same node as the parent.
-	 */
-	set_dev_node(&ofdev->dev, of_node_to_nid(ofdev->dev.of_node));
-
-	return device_add(&ofdev->dev);
-}
-
-static struct platform_device *av1dec_device_create(void)
-{
-	int ret = -ENODEV;
-	struct device_node *root, *child;
-	struct platform_device *pdev;
-
-	root = of_find_node_by_path("/");
-
-	for_each_child_of_node(root, child) {
-		if (!of_match_node(mpp_av1dec_dt_match, child))
-			continue;
-
-		pr_info("Adding child %pOF\n", child);
-
-		pdev = of_device_alloc(child, "av1d-master", NULL);
-		if (!pdev)
-			return ERR_PTR(-ENOMEM);
-
-		pdev->dev.bus = &av1dec_bus;
-
-		dma_coerce_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(32));
-
-		ret = av1_of_device_add(pdev);
-		if (ret) {
-			platform_device_put(pdev);
-			return ERR_PTR(-EINVAL);
-		}
-
-		pr_info("register device %s\n", dev_name(&pdev->dev));
-
-		return  pdev;
-	}
-
-	return ERR_PTR(ret);
-}
-
-static void av1dec_device_destory(void)
-{
-	struct platform_device *pdev;
-	struct device *dev;
-
-	dev = bus_find_device_by_name(&av1dec_bus, NULL, "av1d-master");
-	pdev = dev ? to_platform_device(dev) : NULL;
-	if (!pdev) {
-		pr_err("cannot find platform device\n");
-		return;
-	}
-
-	pr_info("destroy device %s\n", dev_name(&pdev->dev));
-	platform_device_del(pdev);
-	platform_device_put(pdev);
-}
-
-void av1dec_driver_unregister(struct platform_driver *drv)
-{
-	/* 1. unregister av1 driver */
-	driver_unregister(&drv->driver);
-	/* 2. release device */
-	av1dec_device_destory();
-	/* 3. unregister iommu driver */
-	platform_driver_unregister(&rockchip_av1_iommu_driver);
-	/* 4. unregister bus */
-	bus_unregister(&av1dec_bus);
-}
-
-int av1dec_driver_register(struct platform_driver *drv)
-{
-	int ret;
-	/* 1. register bus */
-	ret = bus_register(&av1dec_bus);
-	if (ret) {
-		pr_err("failed to register av1 bus: %d\n", ret);
-		return ret;
-	}
-	/* 2. register iommu driver */
-	platform_driver_register(&rockchip_av1_iommu_driver);
-	/* 3. create device */
-	av1dec_device_create();
-	/* 4. register av1 driver */
-	return driver_register(&drv->driver);
-}
-
 static int av1dec_cache_init(struct platform_device *pdev, struct av1dec_dev *dec)
 {
 	struct resource *res;
@@ -1261,10 +1087,6 @@ static int av1dec_probe(struct platform_device *pdev)
 	ret = mpp_dev_probe(mpp, pdev);
 	if (ret)
 		return ret;
-
-	/* iommu may disabled */
-	if (mpp->iommu_info)
-		mpp->iommu_info->av1d_iommu = 1;
 
 	dec->reg_base[AV1DEC_CLASS_VCD] = mpp->reg_base;
 	ret = devm_request_threaded_irq(dev, mpp->irq,
@@ -1338,6 +1160,5 @@ struct platform_driver rockchip_av1dec_driver = {
 	.driver = {
 		.name = AV1DEC_DRIVER_NAME,
 		.of_match_table = of_match_ptr(mpp_av1dec_dt_match),
-		.bus = &av1dec_bus,
 	},
 };
