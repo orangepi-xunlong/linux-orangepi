@@ -77,4 +77,13 @@ static inline int rockchip_iommu_force_reset(struct device *dev)
 }
 #endif
 
+#if IS_ENABLED(CONFIG_ROCKCHIP_MPP_AV1DEC)
+struct third_iommu_ops_wrap *av1d_iommu_get_ops(void);
+#else
+static inline struct third_iommu_ops_wrap *av1d_iommu_get_ops(void)
+{
+	return NULL;
+}
+#endif
+
 #endif

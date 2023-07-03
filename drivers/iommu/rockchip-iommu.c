@@ -1597,7 +1597,9 @@ static int rk_iommu_probe(struct platform_device *pdev)
 		return -EINVAL;
 
 	if (device_property_match_string(dev, "compatible", "rockchip,iommu-av1d") >= 0) {
-		iommu->opt_ops = NULL;
+		iommu->opt_ops = av1d_iommu_get_ops();
+		if (iommu->opt_ops)
+			dev_info(dev, "av1d iommu enabled\n");
 		goto alloc_group;
 	}
 
@@ -1823,6 +1825,9 @@ static const struct of_device_id rk_iommu_dt_ids[] = {
 		.data = &iommu_data_ops_v2,
 	},
 	{	.compatible = "rockchip,rk3568-iommu",
+		.data = &iommu_data_ops_v2,
+	},
+	{	.compatible = "rockchip,iommu-av1d",
 		.data = &iommu_data_ops_v2,
 	},
 	{ /* sentinel */ }
