@@ -28,6 +28,9 @@
 #include <soc/rockchip/rockchip_csu.h>
 #include "stmmac_platform.h"
 #include "dwmac-rk-tool.h"
+#include <asm/system_info.h>
+
+static int dev_num = 0;
 
 #define MAX_ETH		2
 
@@ -2811,6 +2814,30 @@ int dwmac_rk_get_phy_interface(struct stmmac_priv *priv)
 }
 EXPORT_SYMBOL(dwmac_rk_get_phy_interface);
 
+/*
+ * Create an ethernet address from the system serial number.
+ */
+static int __init etherm_addr(char *addr)
+{
+	unsigned int serial;
+
+	if (system_serial_low == 0 && system_serial_high == 0)
+		return -ENODEV;
+
+	serial = system_serial_low | system_serial_high;
+
+	addr[0] = 0;
+	addr[1] = 0;
+	addr[2] = 0xa4;
+	addr[3] = 0x10 + (serial >> 24);
+	addr[4] = serial >> 16;
+	addr[5] = (serial >> 8) + dev_num;
+
+	dev_num++;
+
+	return 0;
+}
+
 static void rk_get_eth_addr(void *priv, unsigned char *addr)
 {
 	struct rk_priv_data *bsp_priv = priv;
@@ -2831,19 +2858,20 @@ static void rk_get_eth_addr(void *priv, unsigned char *addr)
 	    !is_valid_ether_addr(&ethaddr[id * ETH_ALEN])) {
 		dev_err(dev, "%s: rk_vendor_read eth mac address failed (%d)\n",
 			__func__, ret);
-		eth_random_addr(&ethaddr[id * ETH_ALEN]);
+		//eth_random_addr(&ethaddr[id * ETH_ALEN]);
+		etherm_addr(&ethaddr[id * ETH_ALEN]);
 		memcpy(addr, &ethaddr[id * ETH_ALEN], ETH_ALEN);
-		dev_err(dev, "%s: generate random eth mac address: %pM\n", __func__, addr);
+		dev_err(dev, "%s: use serial to generate eth mac address: %pM\n", __func__, addr);
 
-		ret = rk_vendor_write(LAN_MAC_ID, ethaddr, ETH_ALEN * MAX_ETH);
-		if (ret != 0)
-			dev_err(dev, "%s: rk_vendor_write eth mac address failed (%d)\n",
-				__func__, ret);
+		//ret = rk_vendor_write(LAN_MAC_ID, ethaddr, ETH_ALEN * MAX_ETH);
+		//if (ret != 0)
+		//	dev_err(dev, "%s: rk_vendor_write eth mac address failed (%d)\n",
+		//		__func__, ret);
 
-		ret = rk_vendor_read(LAN_MAC_ID, ethaddr, ETH_ALEN * MAX_ETH);
-		if (ret != ETH_ALEN * MAX_ETH)
-			dev_err(dev, "%s: id: %d rk_vendor_read eth mac address failed (%d)\n",
-				__func__, id, ret);
+		//ret = rk_vendor_read(LAN_MAC_ID, ethaddr, ETH_ALEN * MAX_ETH);
+		//if (ret != ETH_ALEN * MAX_ETH)
+		//	dev_err(dev, "%s: id: %d rk_vendor_read eth mac address failed (%d)\n",
+		//		__func__, id, ret);
 	} else {
 		memcpy(addr, &ethaddr[id * ETH_ALEN], ETH_ALEN);
 	}
