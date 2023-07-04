@@ -1413,7 +1413,7 @@ wl_mesh_update_mesh_info(struct wl_apsta_params *apsta_params,
 			WL_MSG(mesh_if->ifname, "moving channel %d -> %d\n",
 				cur_chan, peer_mesh_info.master_channel);
 			wl_ext_disable_iface(mesh_if->dev, mesh_if->ifname);
-			mesh_if->channel = peer_mesh_info.master_channel;
+			mesh_if->chan_info.chan = peer_mesh_info.master_channel;
 			wl_ext_enable_iface(mesh_if->dev, mesh_if->ifname, 500, TRUE);
 		}
 	}
@@ -1476,8 +1476,8 @@ wl_mesh_event_handler(struct wl_if_info *cur_if,
 				(event_type == WLC_E_LINK && status == WLC_E_STATUS_SUCCESS &&
 				reason == WLC_E_REASON_INITIAL_ASSOC))) {
 			if (!wl_mesh_update_master_info(apsta_params, mesh_if)) {
-				mesh_info->scan_channel = wl_ext_get_chan(&mesh_if->dev,
-					mesh_if->chan_info);
+				mesh_info->scan_channel = wl_ext_get_chan(mesh_if->dev,
+					&mesh_if->chan_info);
 				wl_timer_mod(dhd, &mesh_if->delay_scan, WL_MESH_DELAY_SCAN_TMO);
 			}
 		}
@@ -4154,13 +4154,15 @@ wl_ext_in4way_sync_sta(dhd_pub_t *dhd, struct wl_if_info *cur_if,
 			wl_timer_mod(dhd, &cur_if->reconnect_timer, 0);
 #endif /* WL_EXT_RECONNECT && WL_CFG80211 */
 #ifdef KEY_INSTALL_CHECK
-			key_installed = wl_key_installed(cur_if);
+			if (wpa_auth != WPA_AUTH_DISABLED) {
+				key_installed = wl_key_installed(cur_if);
+			}
 #endif /* KEY_INSTALL_CHECK */
 			if (key_installed)
 				conn_state = CONN_STATE_CONNECTED;
-			wl_ext_update_conn_state(dhd, cur_if->ifidx, conn_state);
 			IAPSTA_INFO(dev->name, "WPA 4-WAY complete %d => %d\n",
 				cur_conn_state, conn_state);
+			wl_ext_update_conn_state(dhd, cur_if->ifidx, conn_state);
 #ifdef EAPOL_RESEND
 			if (key_installed)
 				wl_ext_release_eapol_txpkt(dhd, cur_if->ifidx, FALSE);
@@ -5729,8 +5731,7 @@ wl_ext_parse_config(struct wl_if_info *cur_if, char *command, char **pick_next)
 				}
 			} else if (!strcmp(row->name, " chan ")) {
 				cur_if->chan_info.chan = (int)simple_strtol(pick_tmp, NULL, 10);
-				if (!cur_if->chan_info.band)
-					cur_if->chan_info.band = WL_GET_BAND(cur_if->chan_info.chan);
+				cur_if->chan_info.band = WL_GET_BAND(cur_if->chan_info.chan);
 			} else if (!strcmp(row->name, " amode ")) {
 				if (!strcmp(pick_tmp, "open"))
 					cur_if->amode = AUTH_OPEN;
@@ -6848,7 +6849,7 @@ wl_ext_iapsta_postinit(struct net_device *net, struct wl_if_info *cur_if)
 		}
 #ifdef WLMESH
 		else if (cur_if->ifmode == IMESH_MODE) {
-			pm = 0;
+			int pm = 0;
 			wl_ext_ioctl(cur_if->dev, WLC_SET_PM, &pm, sizeof(pm), 1);
 		}
 #endif /* WLMESH */

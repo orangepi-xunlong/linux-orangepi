@@ -9435,7 +9435,9 @@ static int wl_cfgvendor_nla_put_dump_data(dhd_pub_t *dhd_pub, struct sk_buff *sk
 		wl_cfgvendor_nla_put_axi_error_data(skb, ndev);
 	}
 #endif /* DNGL_AXI_ERROR_LOGGING && REPORT_AXI_ERROR */
+#if defined(DHD_FW_COREDUMP)
 	if (dhd_pub->memdump_enabled || (dhd_pub->memdump_type == DUMP_TYPE_BY_SYSDUMP)) {
+#endif /* DHD_FW_COREDUMP */
 		if (((ret = wl_cfgvendor_nla_put_debug_dump_data(skb, ndev)) < 0) ||
 			((ret = wl_cfgvendor_nla_put_memdump_data(skb, ndev, fw_len)) < 0)) {
 			goto done;
@@ -9453,7 +9455,9 @@ static int wl_cfgvendor_nla_put_dump_data(dhd_pub_t *dhd_pub, struct sk_buff *sk
 		}
 #endif /* DHD_PKT_LOGGING */
 #endif /* DHD_HAL_RING_DUMP */
+#if defined(DHD_FW_COREDUMP)
 	}
+#endif /* DHD_FW_COREDUMP */
 done:
 	return ret;
 }

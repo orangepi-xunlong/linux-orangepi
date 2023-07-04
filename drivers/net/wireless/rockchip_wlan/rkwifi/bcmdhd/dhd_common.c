@@ -8240,7 +8240,16 @@ dhd_apply_default_clm(dhd_pub_t *dhd, char *clm_path)
 	char iovbuf[WLC_IOCTL_SMLEN];
 	wl_country_t *cspec;
 
-	clm_blob_path = clm_path;
+	if (clm_path[0] != '\0') {
+		if (strlen(clm_path) > MOD_PARAM_PATHLEN) {
+			DHD_ERROR(("clm path exceeds max len\n"));
+			return BCME_ERROR;
+		}
+		clm_blob_path = clm_path;
+		DHD_TRACE(("clm path from module param:%s\n", clm_path));
+	} else {
+		clm_blob_path = VENDOR_PATH CONFIG_BCMDHD_CLM_PATH;
+	}
 
 	/* If CLM blob file is found on the filesystem, download the file.
 	* After CLM file download or If the blob file is not present,
@@ -8395,11 +8404,20 @@ dhd_apply_default_clm(dhd_pub_t *dhd, char *clm_path)
 	ota_update_info_t *ota_info = &dhd->ota_update_info;
 #endif /* SUPPORT_OTA_UPDATE */
 
+	if (clm_path && clm_path[0] != '\0') {
+		if (strlen(clm_path) > MOD_PARAM_PATHLEN) {
+			DHD_ERROR(("clm path exceeds max len\n"));
+			return BCME_ERROR;
+		}
+		clm_blob_path = clm_path;
+		DHD_TRACE(("clm path from module param:%s\n", clm_path));
+	} else {
 #ifdef DHD_LINUX_STD_FW_API
-	clm_blob_path = DHD_CLM_NAME;
+		clm_blob_path = DHD_CLM_NAME;
 #else
-	clm_blob_path = clm_path;
+		clm_blob_path = VENDOR_PATH CONFIG_BCMDHD_CLM_PATH;
 #endif /* DHD_LINUX_STD_FW_API */
+	}
 
 	/* If CLM blob file is found on the filesystem, download the file.
 	 * After CLM file download or If the blob file is not present,
@@ -8458,7 +8476,7 @@ dhd_apply_default_clm(dhd_pub_t *dhd, char *clm_path)
 		}
 
 		/* Found blob file. Download the file */
-		DHD_ERROR(("clm file download from %s \n", clm_blob_path));
+		DHD_TRACE(("clm file download from %s \n", clm_blob_path));
 		err = dhd_download_blob(dhd, (unsigned char*)memblock, len, "clmload");
 		if (err) {
 			DHD_ERROR(("%s: CLM download failed err=%d\n", __FUNCTION__, err));

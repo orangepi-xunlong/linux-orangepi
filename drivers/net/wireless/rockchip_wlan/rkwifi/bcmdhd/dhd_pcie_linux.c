@@ -715,6 +715,7 @@ static int dhdpcie_pci_suspend(struct device *dev)
 	int timeleft = 0;
 	uint bitmask = 0xFFFFFFFF;
 
+	printf("%s: Enter\n", __FUNCTION__);
 	if (pch) {
 		bus = pch->bus;
 	}
@@ -754,6 +755,7 @@ static int dhdpcie_pci_suspend(struct device *dev)
 	DHD_GENERAL_LOCK(bus->dhd, flags);
 	DHD_BUS_BUSY_CLEAR_SUSPEND_IN_PROGRESS(bus->dhd);
 	dhd_os_busbusy_wake(bus->dhd);
+	printf("%s: Exit ret=%d\n", __FUNCTION__, ret);
 	DHD_GENERAL_UNLOCK(bus->dhd, flags);
 
 	return ret;
@@ -821,6 +823,7 @@ static int dhdpcie_pci_resume(struct device *dev)
 	dhd_bus_t *bus = NULL;
 	unsigned long flags;
 
+	printf("%s: Enter\n", __FUNCTION__);
 	if (pch) {
 		bus = pch->bus;
 	}
@@ -838,6 +841,7 @@ static int dhdpcie_pci_resume(struct device *dev)
 	DHD_GENERAL_LOCK(bus->dhd, flags);
 	DHD_BUS_BUSY_CLEAR_RESUME_IN_PROGRESS(bus->dhd);
 	dhd_os_busbusy_wake(bus->dhd);
+	printf("%s: Exit ret=%d\n", __FUNCTION__, ret);
 	DHD_GENERAL_UNLOCK(bus->dhd, flags);
 #if defined(DEVICE_TX_STUCK_DETECT) && defined(ASSOC_CHECK_SR)
 	dhd_assoc_check_sr(bus->dhd, FALSE);

@@ -173,6 +173,10 @@ wifi_adapter_info_t* dhd_wifi_platform_get_adapter(uint32 bus_type, uint32 bus_n
 	return NULL;
 }
 
+#if defined(CONFIG_WIFI_CONTROL_FUNC) && defined(CONFIG_DHD_USE_STATIC_BUF)
+extern void *dhd_wlan_mem_prealloc(int section, unsigned long size);
+#endif /* CONFIG_WIFI_CONTROL_FUNC && CONFIG_DHD_USE_STATIC_BUF */
+
 void* wifi_platform_prealloc(wifi_adapter_info_t *adapter, int section, unsigned long size)
 {
 	void *alloc_ptr = NULL;
@@ -185,7 +189,11 @@ void* wifi_platform_prealloc(wifi_adapter_info_t *adapter, int section, unsigned
 #if defined(BCMDHD_MDRIVER) && !defined(DHD_STATIC_IN_DRIVER)
 		alloc_ptr = plat_data->mem_prealloc(adapter->bus_type, adapter->index, section, size);
 #else
+#if defined(CONFIG_WIFI_CONTROL_FUNC) && defined(CONFIG_DHD_USE_STATIC_BUF)
+		alloc_ptr = dhd_wlan_mem_prealloc(section, size);
+#else
 		alloc_ptr = plat_data->mem_prealloc(section, size);
+#endif
 #endif
 		if (alloc_ptr) {
 			DHD_INFO(("success alloc section %d\n", section));
@@ -272,7 +280,11 @@ int wifi_platform_set_power(wifi_adapter_info_t *adapter, bool on, unsigned long
 		}
 #endif /* ENABLE_4335BT_WAR */
 
+#ifdef CONFIG_WIFI_CONTROL_FUNC
+		err = plat_data->set_power(on);
+#else
 		err = plat_data->set_power(on, adapter);
+#endif
 	}
 
 	if (msec && !err) {
@@ -324,7 +336,11 @@ int wifi_platform_get_mac_addr(wifi_adapter_info_t *adapter, unsigned char *buf,
 		return -EINVAL;
 	plat_data = adapter->wifi_plat_data;
 	if (plat_data->get_mac_addr) {
+#ifdef CONFIG_WIFI_CONTROL_FUNC
+		return plat_data->get_mac_addr(buf);
+#else
 		return plat_data->get_mac_addr(buf, ifidx);
+#endif
 	}
 	return -EOPNOTSUPP;
 }
@@ -1121,7 +1137,7 @@ static int dhd_wifi_platform_load_usb(void)
 }
 #endif /* BCMDBUS */
 
-static int dhd_wifi_platform_load(void)
+static int dhd_wifi_platform_load()
 {
 	int err = 0;
 	printf("%s: Enter\n", __FUNCTION__);

@@ -211,7 +211,7 @@ enum wl_cfgp2p_status {
 #endif
 #endif
 
-#if (LINUX_VERSION_CODE < KERNEL_VERSION(3, 2, 0))
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(3, 0, 0))
 #ifdef WL_CFG80211_STA_EVENT
 #undef WL_CFG80211_STA_EVENT
 #endif

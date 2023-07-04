@@ -458,13 +458,13 @@ uint dhd_download_fw_on_driverload = TRUE;
 #ifdef DHD_LINUX_STD_FW_API
 char firmware_path[MOD_PARAM_PATHLEN] = DHD_FW_NAME;
 char nvram_path[MOD_PARAM_PATHLEN] = DHD_NVRAM_NAME;
-char clm_path[MOD_PARAM_PATHLEN] = DHD_CLM_NAME;
-char config_path[MOD_PARAM_PATHLEN] = DHD_CONFIG_NAME;
+char clm_path[MOD_PARAM_PATHLEN];
+char config_path[MOD_PARAM_PATHLEN];
 #else
 char firmware_path[MOD_PARAM_PATHLEN] = CONFIG_BCMDHD_FW_PATH;
 char nvram_path[MOD_PARAM_PATHLEN] = CONFIG_BCMDHD_NVRAM_PATH;
-char clm_path[MOD_PARAM_PATHLEN] = CONFIG_BCMDHD_CLM_PATH;
-char config_path[MOD_PARAM_PATHLEN] = CONFIG_BCMDHD_CONFIG_PATH;
+char clm_path[MOD_PARAM_PATHLEN];
+char config_path[MOD_PARAM_PATHLEN];
 #endif /* DHD_LINUX_STD_FW_API */
 char signature_path[MOD_PARAM_PATHLEN];
 #ifdef DHD_UCODE_DOWNLOAD
@@ -3377,7 +3377,8 @@ static void
 dhd_set_mac_addr_handler(void *handle, void *event_info, u8 event)
 {
 	dhd_info_t *dhd = handle;
-	dhd_if_t *ifp = event_info;
+	int ifidx = (int)((long int)event_info);
+	dhd_if_t *ifp = NULL;
 
 	if (event != DHD_WQ_WORK_SET_MAC) {
 		DHD_ERROR(("%s: unexpected event \n", __FUNCTION__));
@@ -3393,6 +3394,8 @@ dhd_set_mac_addr_handler(void *handle, void *event_info, u8 event)
 #endif /* DHD_NOTIFY_MAC_CHANGED */
 	dhd_net_if_lock_local(dhd);
 	DHD_OS_WAKE_LOCK(&dhd->pub);
+
+	ifp = dhd->iflist[ifidx];
 
 	// terence 20160907: fix for not able to set mac when wlan0 is down
 	if (ifp == NULL || !ifp->set_macaddress) {
@@ -3558,8 +3561,8 @@ dhd_set_mac_address(struct net_device *dev, void *addr)
 	}
 #endif /* WL_CFG80211 */
 
-	dhd_deferred_schedule_work(dhd->dhd_deferred_wq, (void *)dhdif, DHD_WQ_WORK_SET_MAC,
-		dhd_set_mac_addr_handler, DHD_WQ_WORK_PRIORITY_LOW);
+	dhd_deferred_schedule_work(dhd->dhd_deferred_wq, (void *)((long int)ifidx),
+		DHD_WQ_WORK_SET_MAC, dhd_set_mac_addr_handler, DHD_WQ_WORK_PRIORITY_LOW);
 	return ret;
 }
 
@@ -3578,7 +3581,7 @@ dhd_set_multicast_list(struct net_device *dev)
 		DHD_WQ_WORK_SET_MCAST_LIST, dhd_set_mcast_list_handler, DHD_WQ_WORK_PRIORITY_LOW);
 
 	// terence 20160907: fix for not able to set mac when wlan0 is down
-	dhd_deferred_schedule_work(dhd->dhd_deferred_wq, (void *)dhd->iflist[ifidx],
+	dhd_deferred_schedule_work(dhd->dhd_deferred_wq, (void *)((long int)ifidx),
 		DHD_WQ_WORK_SET_MAC, dhd_set_mac_addr_handler, DHD_WQ_WORK_PRIORITY_LOW);
 }
 
@@ -9563,7 +9566,6 @@ bool dhd_update_fw_nv_path(dhd_info_t *dhdinfo)
 #ifdef DHD_LINUX_STD_FW_API
 		fw = DHD_FW_NAME;
 		nv = DHD_NVRAM_NAME;
-		clm = DHD_CLM_NAME;
 #else
 #ifdef CONFIG_BCMDHD_FW_PATH
 		fw = VENDOR_PATH CONFIG_BCMDHD_FW_PATH;
@@ -9571,9 +9573,6 @@ bool dhd_update_fw_nv_path(dhd_info_t *dhdinfo)
 #ifdef CONFIG_BCMDHD_NVRAM_PATH
 		nv = VENDOR_PATH CONFIG_BCMDHD_NVRAM_PATH;
 #endif /* CONFIG_BCMDHD_NVRAM_PATH */
-#ifdef CONFIG_BCMDHD_CLM_PATH
-		clm = VENDOR_PATH CONFIG_BCMDHD_CLM_PATH;
-#endif /* CONFIG_BCMDHD_CLM_PATH */
 #endif /* DHD_LINUX_STD_FW_API */
 //	}
 
@@ -9750,7 +9749,6 @@ bool dhd_update_fw_nv_path(dhd_info_t *dhdinfo)
 		firmware_path[0] = '\0';
 		nvram_path[0] = '\0';
 		signature_path[0] = '\0';
-		clm_path[0] = '\0';
 	}
 #endif
 #ifdef DHD_UCODE_DOWNLOAD
@@ -9766,10 +9764,6 @@ bool dhd_update_fw_nv_path(dhd_info_t *dhdinfo)
 	}
 	if (dhdinfo->nv_path[0] == '\0') {
 		DHD_ERROR(("nvram path not found\n"));
-		return FALSE;
-	}
-	if (dhdinfo->clm_path[0] == '\0') {
-		DHD_ERROR(("clm path not found\n"));
 		return FALSE;
 	}
 #endif /* BCMEMBEDIMAGE */

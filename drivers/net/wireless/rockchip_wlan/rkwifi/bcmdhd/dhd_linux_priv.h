@@ -512,18 +512,9 @@ extern uint sssr_enab;
 extern uint fis_enab;
 #endif /* DHD_SSSR_DUMP */
 
-/*
- * Some android arch platforms backported wakelock APIs from kernel 5.4..0
- * Since their minor versions are changed in the Android R OS
- * Added defines for these platforms
- * 4.19.81 -> 4.19.110, 4.14.78 -> 4.14.170
- */
-#if (defined(BOARD_HIKEY) && (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 19, 96))) || \
-	(defined(CONFIG_ARCH_MSM) && (((LINUX_VERSION_CODE >= KERNEL_VERSION(4, 14, 170)) && \
-	(LINUX_VERSION_CODE < KERNEL_VERSION(4, 15, 0))) || (LINUX_VERSION_CODE >= \
-	KERNEL_VERSION(4, 19, 110))))
+#if defined(ANDROID_VERSION) && (LINUX_VERSION_CODE  >= KERNEL_VERSION(4, 14, 0))
 #define WAKELOCK_BACKPORT
-#endif /* WAKELOCK_BACKPORT */
+#endif
 
 #ifdef CONFIG_HAS_WAKELOCK
 #if ((LINUX_VERSION_CODE  >= KERNEL_VERSION(5, 4, 0)) || defined(WAKELOCK_BACKPORT))
