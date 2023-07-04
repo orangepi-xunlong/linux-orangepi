@@ -117,8 +117,11 @@ static int csi2_dphy_update_sensor_mbus(struct v4l2_subdev *sd)
 		return -ENODEV;
 
 	ret = v4l2_subdev_call(sensor_sd, pad, get_mbus_config, 0, &mbus);
-	if (ret)
+	if (ret) {
+		dev_err(dphy->dev, "%s get_mbus_config fail, pls check it\n",
+			sensor_sd->name);
 		return ret;
+	}
 
 	sensor->mbus = mbus;
 
@@ -200,7 +203,9 @@ static int csi2_dphy_s_stream_start(struct v4l2_subdev *sd)
 	if (ret < 0)
 		return ret;
 
-	csi2_dphy_update_sensor_mbus(sd);
+	ret = csi2_dphy_update_sensor_mbus(sd);
+	if (ret < 0)
+		return ret;
 
 	if (dphy->drv_data->vendor == PHY_VENDOR_SAMSUNG) {
 		if (samsung_phy && samsung_phy->stream_on)
@@ -276,16 +281,17 @@ static int csi2_dphy_g_mbus_config(struct v4l2_subdev *sd,
 	struct csi2_dphy *dphy = to_csi2_dphy(sd);
 	struct v4l2_subdev *sensor_sd = get_remote_sensor(sd);
 	struct csi2_sensor *sensor;
+	int ret = 0;
 
 	if (!sensor_sd)
 		return -ENODEV;
 	sensor = sd_to_sensor(dphy, sensor_sd);
 	if (!sensor)
 		return -ENODEV;
-	csi2_dphy_update_sensor_mbus(sd);
+	ret = csi2_dphy_update_sensor_mbus(sd);
 	*config = sensor->mbus;
 
-	return 0;
+	return ret;
 }
 
 static int csi2_dphy_s_power(struct v4l2_subdev *sd, int on)
@@ -469,28 +475,43 @@ v4l2_async_notifier_operations rockchip_csi2_dphy_async_ops = {
 	.unbind = rockchip_csi2_dphy_notifier_unbind,
 };
 
-static int rockchip_csi2_dphy_fwnode_parse(struct device *dev,
-					  struct v4l2_fwnode_endpoint *vep,
-					  struct v4l2_async_subdev *asd)
+static int rockchip_csi2_dphy_fwnode_parse(struct csi2_dphy *dphy)
 {
-	struct sensor_async_subdev *s_asd =
-			container_of(asd, struct sensor_async_subdev, asd);
-	struct v4l2_mbus_config *config = &s_asd->mbus;
+	struct device *dev = dphy->dev;
+	struct fwnode_handle *ep;
+	struct sensor_async_subdev *s_asd;
+	struct fwnode_handle *remote_ep;
+	struct v4l2_fwnode_endpoint vep = {
+		.bus_type = V4L2_MBUS_CSI2_DPHY
+	};
+	int ret;
 
-	if (vep->bus_type == V4L2_MBUS_CSI2_DPHY ||
-	    vep->bus_type == V4L2_MBUS_CSI2_CPHY) {
-		config->type = V4L2_MBUS_CSI2_DPHY;
-		config->bus.mipi_csi2.flags = vep->bus.mipi_csi2.flags;
-		s_asd->lanes = vep->bus.mipi_csi2.num_data_lanes;
-	} else if (vep->bus_type == V4L2_MBUS_CCP2) {
-		config->type = V4L2_MBUS_CCP2;
-		s_asd->lanes = vep->bus.mipi_csi1.data_lane;
-	} else {
-		dev_err(dev, "Only CSI2 type is currently supported\n");
-		return -EINVAL;
+	fwnode_graph_for_each_endpoint(dev_fwnode(dev), ep) {
+		remote_ep = fwnode_graph_get_remote_port_parent(ep);
+
+		if (!fwnode_device_is_available(remote_ep))
+			continue;
+
+		ret = v4l2_fwnode_endpoint_parse(ep, &vep);
+		if (ret)
+			goto err_parse;
+
+		s_asd = v4l2_async_nf_add_fwnode_remote(&dphy->notifier, ep,
+							struct
+							sensor_async_subdev);
+
+		if (IS_ERR(s_asd)) {
+			ret = PTR_ERR(s_asd);
+			goto err_parse;
+		}
+
+		fwnode_handle_put(ep);
 	}
-
 	return 0;
+
+err_parse:
+	fwnode_handle_put(ep);
+	return ret;
 }
 
 static int rockchip_csi2dphy_media_init(struct csi2_dphy *dphy)
@@ -509,11 +530,8 @@ static int rockchip_csi2dphy_media_init(struct csi2_dphy *dphy)
 
 	v4l2_async_nf_init(&dphy->notifier);
 
-	ret = v4l2_async_nf_parse_fwnode_endpoints(
-		dphy->dev, &dphy->notifier,
-		sizeof(struct sensor_async_subdev),
-		rockchip_csi2_dphy_fwnode_parse);
-	if (ret < 0)
+	ret = rockchip_csi2_dphy_fwnode_parse(dphy);
+	if (ret)
 		return ret;
 
 	dphy->sd.subdev_notifier = &dphy->notifier;
