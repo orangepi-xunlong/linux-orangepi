@@ -513,7 +513,8 @@ static void cpufreq_interactive_idle_end(void)
 			sampling_rate = icpu->ipolicy->tunables->sampling_rate;
 			icpu->last_sample_time = local_clock();
 			icpu->next_sample_jiffies = usecs_to_jiffies(sampling_rate) + jiffies;
-			cpufreq_interactive_update(icpu);
+			icpu->work_in_progress = true;
+			irq_work_queue_on(&icpu->irq_work, icpu->cpu);
 		}
 	}
 
