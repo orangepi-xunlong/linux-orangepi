@@ -209,21 +209,14 @@ static bool have_cpu_fpsimd_context(void)
 	return !preemptible() && __this_cpu_read(fpsimd_context_busy);
 }
 
-/*
- * Call __sve_free() directly only if you know task can't be scheduled
- * or preempted.
- */
-static void __sve_free(struct task_struct *task)
+static void *sve_free_atomic(struct task_struct *task)
 {
-	kfree(task->thread.sve_state);
-	task->thread.sve_state = NULL;
-}
+	void *sve_state = task->thread.sve_state;
 
-static void sve_free(struct task_struct *task)
-{
 	WARN_ON(test_tsk_thread_flag(task, TIF_SVE));
 
-	__sve_free(task);
+	task->thread.sve_state = NULL;
+	return sve_state;
 }
 
 /*
@@ -584,6 +577,7 @@ void sve_sync_from_fpsimd_zeropad(struct task_struct *task)
 int sve_set_vector_length(struct task_struct *task,
 			  unsigned long vl, unsigned long flags)
 {
+	void *mem = NULL;
 	if (flags & ~(unsigned long)(PR_SVE_VL_INHERIT |
 				     PR_SVE_SET_VL_ONEXEC))
 		return -EINVAL;
@@ -637,9 +631,10 @@ int sve_set_vector_length(struct task_struct *task,
 	 * Force reallocation of task SVE state to the correct size
 	 * on next use:
 	 */
-	sve_free(task);
+	mem = sve_free_atomic(task);
 
 	task->thread.sve_vl = vl;
+	kfree(mem);
 
 out:
 	update_tsk_thread_flag(task, TIF_SVE_VL_INHERIT,
@@ -917,7 +912,9 @@ void __init sve_setup(void)
  */
 void fpsimd_release_task(struct task_struct *dead_task)
 {
-	__sve_free(dead_task);
+	void *mem = NULL;
+	mem = sve_free_atomic(dead_task);
+	kfree(mem);
 }
 
 #endif /* CONFIG_ARM64_SVE */
@@ -1022,6 +1019,7 @@ void fpsimd_thread_switch(struct task_struct *next)
 void fpsimd_flush_thread(void)
 {
 	int vl, supported_vl;
+	void *mem = NULL;
 
 	if (!system_supports_fpsimd())
 		return;
@@ -1034,7 +1032,7 @@ void fpsimd_flush_thread(void)
 
 	if (system_supports_sve()) {
 		clear_thread_flag(TIF_SVE);
-		sve_free(current);
+		mem = sve_free_atomic(current);
 
 		/*
 		 * Reset the task vector length as required.
@@ -1068,6 +1066,7 @@ void fpsimd_flush_thread(void)
 	}
 
 	put_cpu_fpsimd_context();
+	kfree(mem);
 }
 
 /*

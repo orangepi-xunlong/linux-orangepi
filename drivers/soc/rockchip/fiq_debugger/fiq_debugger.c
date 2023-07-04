@@ -263,11 +263,10 @@ static void fiq_debugger_dump_kernel_log(struct fiq_debugger_state *state)
 {
 	char buf[512];
 	size_t len;
-	struct kmsg_dumper dumper = { .active = true };
+	struct kmsg_dumper_iter dumper = { .active = true };
 
-
-	kmsg_dump_rewind_nolock(&dumper);
-	while (kmsg_dump_get_line_nolock(&dumper, true, buf,
+	kmsg_dump_rewind(&dumper);
+	while (kmsg_dump_get_line(&dumper, true, buf,
 					 sizeof(buf) - 1, &len)) {
 		buf[len] = 0;
 		fiq_debugger_puts(state, buf);
