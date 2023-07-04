@@ -387,7 +387,7 @@ config NOMMU_INITIAL_TRIM_EXCESS
 
 config TRANSPARENT_HUGEPAGE
 	bool "Transparent Hugepage Support"
-	depends on HAVE_ARCH_TRANSPARENT_HUGEPAGE
+	depends on HAVE_ARCH_TRANSPARENT_HUGEPAGE && !PREEMPT_RT
 	select COMPACTION
 	select XARRAY_MULTI
 	help
@@ -913,5 +913,8 @@ config MAPPING_DIRTY_HELPERS
         bool
 
 source "mm/damon/Kconfig"
+
+config KMAP_LOCAL
+	bool
 
 endmenu
