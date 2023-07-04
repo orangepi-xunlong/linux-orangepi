@@ -3675,7 +3675,7 @@
 	};
 
 	av1d_mmu: iommu@fdca0000 {
-		compatible = "rockchip,iommu-av1";
+		compatible = "rockchip,iommu-av1d";
 		reg = <0x0 0xfdca0000 0x0 0x600>;
 		interrupts = <GIC_SPI 109 IRQ_TYPE_LEVEL_HIGH>;
 		interrupt-names = "irq_av1d_mmu";
