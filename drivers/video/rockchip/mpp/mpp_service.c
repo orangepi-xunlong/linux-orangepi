@@ -493,6 +493,7 @@ static struct platform_driver mpp_service_driver = {
 
 module_platform_driver(mpp_service_driver);
 
+MODULE_IMPORT_NS(DMA_BUF);
 MODULE_LICENSE("Dual MIT/GPL");
 MODULE_VERSION(MPP_VERSION);
 MODULE_AUTHOR("Ding Wei leo.ding@rock-chips.com");
