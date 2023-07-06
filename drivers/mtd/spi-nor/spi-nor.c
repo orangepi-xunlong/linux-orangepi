@@ -2502,6 +2502,7 @@ static const struct flash_info spi_nor_ids[] = {
 	{ "3S700AN", S3AN_INFO(0x1f2500, 512, 264) },
 	{ "3S1400AN", S3AN_INFO(0x1f2600, 512, 528) },
 
+	{ "ZB25VQ16AS", INFO(0x5e6015, 0, 64 * 1024, 32, SECT_4K) },
 	{ "ZB25VQ128A", INFO(0x5e4018, 0, 64 * 1024, 256, SECT_4K | SPI_NOR_DUAL_READ | SPI_NOR_QUAD_READ) },
 
 	/* XMC (Wuhan Xinxin Semiconductor Manufacturing Corp.) */
