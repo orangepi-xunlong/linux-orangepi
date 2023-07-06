@@ -177,10 +177,11 @@ static int i2s_tdm_prepare_enable_mclk(struct rk_i2s_tdm_dev *i2s_tdm)
 	ret = clk_prepare_enable(i2s_tdm->mclk_rx);
 	if (ret)
 		goto err_mclk_rx;
+
 	if (i2s_tdm->mclk_calibrate) {
 		ret = clk_prepare_enable(i2s_tdm->mclk_tx_src);
 		if (ret)
-			goto err_mclk_rx;
+			goto err_mclk_tx_src;
 		ret = clk_prepare_enable(i2s_tdm->mclk_rx_src);
 		if (ret)
 			goto err_mclk_rx_src;
@@ -200,6 +201,8 @@ err_mclk_root0:
 	clk_disable_unprepare(i2s_tdm->mclk_rx_src);
 err_mclk_rx_src:
 	clk_disable_unprepare(i2s_tdm->mclk_tx_src);
+err_mclk_tx_src:
+	clk_disable_unprepare(i2s_tdm->mclk_rx);
 err_mclk_rx:
 	clk_disable_unprepare(i2s_tdm->mclk_tx);
 err_mclk_tx:
