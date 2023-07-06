@@ -16,6 +16,8 @@ static const struct flash_info xmc_nor_parts[] = {
 	{ "XM25QH128A", INFO(0x207018, 0, 64 * 1024, 256)
 		NO_SFDP_FLAGS(SECT_4K | SPI_NOR_DUAL_READ |
 			      SPI_NOR_QUAD_READ) },
+	{ "ZB25VQ16AS", INFO(0x5e6015, 0, 64 * 1024,  32)
+		NO_SFDP_FLAGS(SECT_4K) },
 	{ "ZB25VQ128A", INFO(0x5e4018, 0, 64 * 1024, 256)
 		NO_SFDP_FLAGS(SECT_4K | SPI_NOR_DUAL_READ |
 			      SPI_NOR_QUAD_READ) },
