@@ -221,6 +221,7 @@ struct rockchip_spi {
 	bool slave_aborted;
 	bool cs_inactive; /* spi slave tansmition stop when cs inactive */
 	bool cs_high_supported; /* native CS supports active-high polarity */
+	struct gpio_desc *ready; /* spi slave transmission ready */
 
 	struct spi_transfer *xfer; /* Store xfer temporarily */
 	phys_addr_t base_addr_phy;
@@ -859,8 +860,17 @@ static int rockchip_spi_transfer_one(
 		ret = rockchip_spi_prepare_irq(rs, ctlr, xfer);
 	}
 
+	if (rs->ready) {
+		gpiod_set_value(rs->ready, 0);
+		udelay(1);
+		gpiod_set_value(rs->ready, 1);
+	}
+
 	if (ret > 0)
 		ret = rockchip_spi_transfer_wait(ctlr, xfer);
+
+	if (rs->ready)
+		gpiod_set_value(rs->ready, 0);
 
 	return ret;
 }
@@ -1178,6 +1188,8 @@ static int rockchip_spi_probe(struct platform_device *pdev)
 		rs->cs_inactive = false;
 		break;
 	}
+	if (device_property_read_bool(&pdev->dev, "rockchip,cs-inactive-disable"))
+		rs->cs_inactive = false;
 
 	pinctrl = devm_pinctrl_get(&pdev->dev);
 	if (!IS_ERR(pinctrl)) {
@@ -1186,6 +1198,13 @@ static int rockchip_spi_probe(struct platform_device *pdev)
 			dev_warn(&pdev->dev, "no high_speed pinctrl state\n");
 			rs->high_speed_state = NULL;
 		}
+	}
+
+	rs->ready = devm_gpiod_get_optional(&pdev->dev, "ready", GPIOD_OUT_HIGH);
+	if (IS_ERR(rs->ready)) {
+		ret = dev_err_probe(&pdev->dev, PTR_ERR(rs->ready),
+				    "invalid ready-gpios property in node\n");
+		goto err_free_dma_rx;
 	}
 
 	ret = devm_spi_register_controller(&pdev->dev, ctlr);
@@ -1210,7 +1229,8 @@ static int rockchip_spi_probe(struct platform_device *pdev)
 			dev_info(&pdev->dev, "register misc device %s\n", misc_name);
 	}
 
-	dev_info(rs->dev, "probed, poll=%d, rsd=%d\n", rs->poll, rs->rsd);
+	dev_info(rs->dev, "probed, poll=%d, rsd=%d, cs-inactive=%d, ready=%d\n",
+		 rs->poll, rs->rsd, rs->cs_inactive, rs->ready ? 1 : 0);
 
 	return 0;
 

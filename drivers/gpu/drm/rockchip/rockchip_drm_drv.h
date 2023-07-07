@@ -110,6 +110,12 @@ enum rockchip_color_bar_mode {
 	ROCKCHIP_COLOR_BAR_VERTICAL = 2,
 };
 
+enum rockchip_drm_split_area {
+	ROCKCHIP_DRM_SPLIT_UNSET = 0,
+	ROCKCHIP_DRM_SPLIT_LEFT_SIDE = 1,
+	ROCKCHIP_DRM_SPLIT_RIGHT_SIDE = 2,
+};
+
 struct rockchip_drm_sub_dev {
 	struct list_head list;
 	struct drm_connector *connector;
@@ -260,6 +266,7 @@ struct rockchip_crtc_state {
 	int afbdc_win_yoffset;
 	int dsp_layer_sel;
 	u32 output_if;
+	u32 output_if_left_panel;
 	u32 bus_format;
 	u32 bus_flags;
 	int yuv_overlay;
@@ -433,7 +440,7 @@ struct next_hdr_sink_data {
  * @wait_vact_end: wait the last active line.
  */
 struct rockchip_crtc_funcs {
-	int (*loader_protect)(struct drm_crtc *crtc, bool on);
+	int (*loader_protect)(struct drm_crtc *crtc, bool on, void *data);
 	int (*enable_vblank)(struct drm_crtc *crtc);
 	void (*disable_vblank)(struct drm_crtc *crtc);
 	size_t (*bandwidth)(struct drm_crtc *crtc,
@@ -498,6 +505,7 @@ struct rockchip_drm_private {
 
 	/* private connector prop */
 	struct drm_property *connector_id_prop;
+	struct drm_property *split_area_prop;
 
 	const struct rockchip_crtc_funcs *crtc_funcs[ROCKCHIP_MAX_CRTC];
 

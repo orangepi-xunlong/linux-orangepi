@@ -4362,8 +4362,11 @@ static void vop2_crtc_atomic_disable(struct drm_crtc *crtc,
 	if (vp->output_if & VOP_OUTPUT_IF_eDP0)
 		VOP_GRF_SET(vop2, grf, grf_edp0_en, 0);
 
-	if (vp->output_if & VOP_OUTPUT_IF_eDP1)
+	if (vp->output_if & VOP_OUTPUT_IF_eDP1) {
 		VOP_GRF_SET(vop2, grf, grf_edp1_en, 0);
+		if (dual_channel)
+			VOP_CTRL_SET(vop2, edp_dual_en, 0);
+	}
 
 	if (vp->output_if & VOP_OUTPUT_IF_HDMI0) {
 		VOP_GRF_SET(vop2, grf, grf_hdmi0_dsc_en, 0);
@@ -4373,7 +4376,15 @@ static void vop2_crtc_atomic_disable(struct drm_crtc *crtc,
 	if (vp->output_if & VOP_OUTPUT_IF_HDMI1) {
 		VOP_GRF_SET(vop2, grf, grf_hdmi1_dsc_en, 0);
 		VOP_GRF_SET(vop2, grf, grf_hdmi1_en, 0);
+		if (dual_channel)
+			VOP_CTRL_SET(vop2, hdmi_dual_en, 0);
 	}
+
+	if ((vcstate->output_if & VOP_OUTPUT_IF_DP1) && dual_channel)
+		VOP_CTRL_SET(vop2, dp_dual_en, 0);
+
+	if ((vcstate->output_if & VOP_OUTPUT_IF_MIPI1) && dual_channel)
+		VOP_CTRL_SET(vop2, mipi_dual_en, 0);
 
 	VOP_MODULE_SET(vop2, vp, dual_channel_en, 0);
 	VOP_MODULE_SET(vop2, vp, dual_channel_swap, 0);
@@ -5878,7 +5889,58 @@ static void vop2_crtc_disable_line_flag_event(struct drm_crtc *crtc)
 	spin_unlock_irqrestore(&vop2->irq_lock, flags);
 }
 
-static int vop2_crtc_loader_protect(struct drm_crtc *crtc, bool on)
+static int vop2_crtc_get_inital_acm_info(struct drm_crtc *crtc)
+{
+	struct vop2_video_port *vp = to_vop2_video_port(crtc);
+	struct vop2 *vop2 = vp->vop2;
+	struct post_acm *acm = &vp->acm_info;
+	s16 *lut_y;
+	s16 *lut_h;
+	s16 *lut_s;
+	u32 value;
+	int i;
+
+	value = readl(vop2->acm_regs + RK3528_ACM_CTRL);
+	acm->acm_enable = value & 0x1;
+	value = readl(vop2->acm_regs + RK3528_ACM_DELTA_RANGE);
+	acm->y_gain = value & 0x3ff;
+	acm->h_gain = (value >> 10) & 0x3ff;
+	acm->s_gain = (value >> 20) & 0x3ff;
+
+	lut_y = &acm->gain_lut_hy[0];
+	lut_h = &acm->gain_lut_hy[ACM_GAIN_LUT_HY_LENGTH];
+	lut_s = &acm->gain_lut_hy[ACM_GAIN_LUT_HY_LENGTH * 2];
+	for (i = 0; i < ACM_GAIN_LUT_HY_LENGTH; i++) {
+		value = readl(vop2->acm_regs + RK3528_ACM_YHS_DEL_HY_SEG0 + (i << 2));
+		lut_y[i] = value & 0xff;
+		lut_h[i] = (value >> 8) & 0xff;
+		lut_s[i] = (value >> 16) & 0xff;
+	}
+
+	lut_y = &acm->gain_lut_hs[0];
+	lut_h = &acm->gain_lut_hs[ACM_GAIN_LUT_HS_LENGTH];
+	lut_s = &acm->gain_lut_hs[ACM_GAIN_LUT_HS_LENGTH * 2];
+	for (i = 0; i < ACM_GAIN_LUT_HS_LENGTH; i++) {
+		value = readl(vop2->acm_regs + RK3528_ACM_YHS_DEL_HS_SEG0 + (i << 2));
+		lut_y[i] = value & 0xff;
+		lut_h[i] = (value >> 8) & 0xff;
+		lut_s[i] = (value >> 16) & 0xff;
+	}
+
+	lut_y = &acm->delta_lut_h[0];
+	lut_h = &acm->delta_lut_h[ACM_DELTA_LUT_H_LENGTH];
+	lut_s = &acm->delta_lut_h[ACM_DELTA_LUT_H_LENGTH * 2];
+	for (i = 0; i < ACM_DELTA_LUT_H_LENGTH; i++) {
+		value = readl(vop2->acm_regs + RK3528_ACM_YHS_DEL_HGAIN_SEG0 + (i << 2));
+		lut_y[i] = value & 0x3ff;
+		lut_h[i] = (value >> 12) & 0xff;
+		lut_s[i] = (value >> 20) & 0x3ff;
+	}
+
+	return 0;
+}
+
+static int vop2_crtc_loader_protect(struct drm_crtc *crtc, bool on, void *data)
 {
 	struct vop2_video_port *vp = to_vop2_video_port(crtc);
 	struct rockchip_crtc_state *vcstate = to_rockchip_crtc_state(crtc->state);
@@ -5942,6 +6004,12 @@ static int vop2_crtc_loader_protect(struct drm_crtc *crtc, bool on)
 				ext_pll->vp_mask |= BIT(vp->id);
 		}
 		drm_crtc_vblank_on(crtc);
+		if (is_vop3(vop2)) {
+			if (vp_data->feature & (VOP_FEATURE_POST_ACM))
+				vop2_crtc_get_inital_acm_info(crtc);
+			if (data && (vp_data->feature & VOP_FEATURE_POST_CSC))
+				memcpy(&vp->csc_info, data, sizeof(struct post_csc));
+		}
 		if (private->cubic_lut[vp->id].enable) {
 			dma_addr_t cubic_lut_mst;
 			struct loader_cubic_lut *cubic_lut = &private->cubic_lut[vp->id];
@@ -6350,9 +6418,9 @@ static size_t vop2_plane_line_bandwidth(struct drm_plane_state *pstate)
 
 	bandwidth = bandwidth * src_width / dst_width;
 	bandwidth = bandwidth * src_height / dst_height;
-	if (vskiplines == 2)
+	if (vskiplines == 2 && vpstate->afbc_en == 0)
 		bandwidth /= 2;
-	else if (vskiplines == 4)
+	else if (vskiplines == 4 && vpstate->afbc_en == 0)
 		bandwidth /= 4;
 
 	return bandwidth;
@@ -6446,9 +6514,12 @@ static size_t vop2_crtc_bandwidth(struct drm_crtc *crtc,
 
 		act_w = drm_rect_width(&pstate->src) >> 16;
 		act_h = drm_rect_height(&pstate->src) >> 16;
+		if (pstate->fb->format->is_yuv && (act_w >= 3840 || act_h >= 3840))
+			vop_bw_info->plane_num_4k++;
+
 		bpp = rockchip_drm_get_bpp(pstate->fb->format);
 
-		vop_bw_info->frame_bw_mbyte += act_w * act_h / 1000 * bpp / 8 * fps / 1000;
+		vop_bw_info->frame_bw_mbyte += act_w * act_h / 1000 * bpp / 8 * fps / 1000 / afbc_fac;
 	}
 
 	sort(pbandwidth, cnt, sizeof(pbandwidth[0]), vop2_bandwidth_cmp, NULL);
@@ -7257,6 +7328,11 @@ static void vop2_crtc_enable_dsc(struct drm_crtc *crtc, struct drm_crtc_state *o
 	dsc->enabled = true;
 }
 
+static inline bool vop2_mark_as_left_panel(struct rockchip_crtc_state *vcstate, u32 output_if)
+{
+	return vcstate->output_if_left_panel & output_if;
+}
+
 static void vop2_setup_dual_channel_if(struct drm_crtc *crtc)
 {
 	struct vop2_video_port *vp = to_vop2_video_port(crtc);
@@ -7267,13 +7343,17 @@ static void vop2_setup_dual_channel_if(struct drm_crtc *crtc)
 	if (vcstate->output_flags & ROCKCHIP_OUTPUT_DATA_SWAP)
 		VOP_MODULE_SET(vop2, vp, dual_channel_swap, 1);
 
-	if (vcstate->output_if & VOP_OUTPUT_IF_DP1)
+	if (vcstate->output_if & VOP_OUTPUT_IF_DP1 &&
+	    !vop2_mark_as_left_panel(vcstate, VOP_OUTPUT_IF_DP1))
 		VOP_CTRL_SET(vop2, dp_dual_en, 1);
-	else if (vcstate->output_if & VOP_OUTPUT_IF_eDP1)
+	else if (vcstate->output_if & VOP_OUTPUT_IF_eDP1 &&
+		 !vop2_mark_as_left_panel(vcstate, VOP_OUTPUT_IF_eDP1))
 		VOP_CTRL_SET(vop2, edp_dual_en, 1);
-	else if (vcstate->output_if & VOP_OUTPUT_IF_HDMI1)
+	else if (vcstate->output_if & VOP_OUTPUT_IF_HDMI1 &&
+		 !vop2_mark_as_left_panel(vcstate, VOP_OUTPUT_IF_HDMI1))
 		VOP_CTRL_SET(vop2, hdmi_dual_en, 1);
-	else if (vcstate->output_if & VOP_OUTPUT_IF_MIPI1)
+	else if (vcstate->output_if & VOP_OUTPUT_IF_MIPI1 &&
+		 !vop2_mark_as_left_panel(vcstate, VOP_OUTPUT_IF_MIPI1))
 		VOP_CTRL_SET(vop2, mipi_dual_en, 1);
 }
 
@@ -7489,9 +7569,9 @@ static void vop2_crtc_atomic_enable(struct drm_crtc *crtc, struct drm_atomic_sta
 	vop2_set_system_status(vop2);
 
 	vop2_lock(vop2);
-	DRM_DEV_INFO(vop2->dev, "Update mode to %dx%d%s%d, type: %d(if:%x) for vp%d dclk: %d\n",
+	DRM_DEV_INFO(vop2->dev, "Update mode to %dx%d%s%d, type: %d(if:%x, flag:0x%x) for vp%d dclk: %d\n",
 		     hdisplay, adjusted_mode->vdisplay, interlaced ? "i" : "p",
-		     vop2_get_vrefresh(vp, adjusted_mode), vcstate->output_type, vcstate->output_if,
+		     vop2_get_vrefresh(vp, adjusted_mode), vcstate->output_type, vcstate->output_if, vcstate->output_flags,
 		     vp->id, adjusted_mode->crtc_clock * 1000);
 
 	if (adjusted_mode->hdisplay > VOP2_MAX_VP_OUTPUT_WIDTH) {
@@ -7502,6 +7582,9 @@ static void vop2_crtc_atomic_enable(struct drm_crtc *crtc, struct drm_atomic_sta
 		splice_en = 1;
 		vop2->active_vp_mask |= BIT(splice_vp->id);
 	}
+
+	if (vcstate->output_flags & ROCKCHIP_OUTPUT_DUAL_CONNECTOR_SPLIT_MODE)
+		vcstate->output_flags |= ROCKCHIP_OUTPUT_DUAL_CHANNEL_LEFT_RIGHT_MODE;
 
 	if (vcstate->dsc_enable) {
 		int k = 1;
