@@ -644,6 +644,11 @@ struct vop2_video_port {
 	 */
 	uint32_t win_mask;
 	/**
+	 * @enabled_win_mask: Bitmask of enabled wins attached to the video port;
+	 */
+	uint32_t enabled_win_mask;
+
+	/**
 	 * @nr_layers: active layers attached to the video port;
 	 */
 	uint8_t nr_layers;
@@ -4267,13 +4272,24 @@ static int vop2_clk_set_parent_extend(struct vop2_video_port *vp,
 	return 0;
 }
 
-static void vop2_crtc_atomic_disable_for_psr(struct drm_crtc *crtc,
-					     struct drm_crtc_state *old_state)
+static void vop2_crtc_atomic_enter_psr(struct drm_crtc *crtc, struct drm_crtc_state *old_state)
 {
 	struct vop2_video_port *vp = to_vop2_video_port(crtc);
 	struct vop2 *vop2 = vp->vop2;
+	struct vop2_win *win;
+	unsigned long win_mask = vp->enabled_win_mask;
+	int phys_id;
 
-	vop2_disable_all_planes_for_crtc(crtc);
+	for_each_set_bit(phys_id, &win_mask, ROCKCHIP_MAX_LAYER) {
+		win = vop2_find_win_by_phys_id(vop2, phys_id);
+		VOP_WIN_SET(vop2, win, enable, 0);
+
+		if (win->feature & WIN_FEATURE_CLUSTER_MAIN)
+			VOP_CLUSTER_SET(vop2, win, enable, 0);
+	}
+
+	vop2_cfg_done(crtc);
+	vop2_wait_for_fs_by_done_bit_status(vp);
 	drm_crtc_vblank_off(crtc);
 	if (hweight8(vop2->active_vp_mask) == 1) {
 		u32 adjust_aclk_rate = 0;
@@ -4296,6 +4312,30 @@ static void vop2_crtc_atomic_disable_for_psr(struct drm_crtc *crtc,
 	}
 }
 
+static void vop2_crtc_atomic_exit_psr(struct drm_crtc *crtc, struct drm_crtc_state *old_state)
+{
+	struct vop2_video_port *vp = to_vop2_video_port(crtc);
+	struct vop2 *vop2 = vp->vop2;
+	u32 phys_id;
+	struct vop2_win *win;
+	unsigned long enabled_win_mask = vp->enabled_win_mask;
+
+	drm_crtc_vblank_on(crtc);
+	if (vop2->aclk_rate_reset)
+		clk_set_rate(vop2->aclk, vop2->aclk_rate);
+	vop2->aclk_rate_reset = false;
+
+	for_each_set_bit(phys_id, &enabled_win_mask, ROCKCHIP_MAX_LAYER) {
+		win = vop2_find_win_by_phys_id(vop2, phys_id);
+		VOP_WIN_SET(vop2, win, enable, 1);
+		if (win->feature & WIN_FEATURE_CLUSTER_MAIN)
+			VOP_CLUSTER_SET(vop2, win, enable, 1);
+	}
+
+	vop2_cfg_done(crtc);
+	vop2_wait_for_fs_by_done_bit_status(vp);
+}
+
 static void vop2_crtc_atomic_disable(struct drm_crtc *crtc,
 				     struct drm_atomic_state *state)
 {
@@ -4311,7 +4351,7 @@ static void vop2_crtc_atomic_disable(struct drm_crtc *crtc,
 	WARN_ON(vp->event);
 
 	if (crtc->state->self_refresh_active) {
-		vop2_crtc_atomic_disable_for_psr(crtc, old_cstate);
+		vop2_crtc_atomic_enter_psr(crtc, old_cstate);
 		goto out;
 	}
 
@@ -4778,6 +4818,10 @@ static void vop2_plane_atomic_disable(struct drm_plane *plane, struct drm_atomic
 	struct drm_plane_state *old_pstate = NULL;
 	struct vop2_win *win = to_vop2_win(plane);
 	struct vop2 *vop2 = win->vop2;
+	struct drm_plane_state *pstate;
+	struct drm_crtc *crtc;
+	struct vop2_video_port *vp;
+
 #if defined(CONFIG_ROCKCHIP_DRM_DEBUG)
 	struct vop2_plane_state *vpstate = to_vop2_plane_state(plane->state);
 #endif
@@ -4785,16 +4829,26 @@ static void vop2_plane_atomic_disable(struct drm_plane *plane, struct drm_atomic
 	rockchip_drm_dbg(vop2->dev, VOP_DEBUG_PLANE, "%s disable %s\n",
 			 win->name, current->comm);
 
-	 if (state)
-		 old_pstate = drm_atomic_get_old_plane_state(state, plane);
-	 if (old_pstate && !old_pstate->crtc)
-		 return;
+	if (state)
+		old_pstate = drm_atomic_get_old_plane_state(state, plane);
+	if (old_pstate && !old_pstate->crtc)
+		return;
 
 	spin_lock(&vop2->reg_lock);
+	if (old_pstate)
+		pstate = old_pstate;
+	else
+		pstate = plane->state;
+
+	crtc = pstate->crtc;
+	vp = to_vop2_video_port(crtc);
 
 	vop2_win_disable(win, false);
-	if (win->splice_win)
+	vp->enabled_win_mask &= ~BIT(win->phys_id);
+	if (win->splice_win) {
 		vop2_win_disable(win->splice_win, false);
+		vp->enabled_win_mask &= ~BIT(win->splice_win->phys_id);
+	}
 
 #if defined(CONFIG_ROCKCHIP_DRM_DEBUG)
 	kfree(vpstate->planlist);
@@ -5204,6 +5258,7 @@ static void vop2_win_atomic_update(struct vop2_win *win, struct drm_rect *src, s
 	VOP_WIN_SET(vop2, win, dither_up, dither_up);
 
 	VOP_WIN_SET(vop2, win, enable, 1);
+	vp->enabled_win_mask |= BIT(win->phys_id);
 	if (vop2_cluster_window(win)) {
 		lb_mode = vop2_get_cluster_lb_mode(win, vpstate);
 		VOP_CLUSTER_SET(vop2, win, lb_mode, lb_mode);
@@ -5972,6 +6027,7 @@ static int vop2_crtc_loader_protect(struct drm_crtc *crtc, bool on, void *data)
 					win->pd->vp_mask |= BIT(vp->id);
 				}
 
+				vp->enabled_win_mask |= BIT(win->phys_id);
 				crtc_state = drm_atomic_get_crtc_state(crtc->state->state, crtc);
 				mode = &crtc_state->adjusted_mode;
 				if (mode->hdisplay > VOP2_MAX_VP_OUTPUT_WIDTH)	{
@@ -5984,6 +6040,7 @@ static int vop2_crtc_loader_protect(struct drm_crtc *crtc, bool on, void *data)
 					splice_vp->win_mask |=  BIT(splice_win->phys_id);
 					splice_win->vp_mask = BIT(splice_vp->id);
 					vop2->active_vp_mask |= BIT(splice_vp->id);
+					vp->enabled_win_mask |= BIT(splice_win->phys_id);
 
 					if (splice_win->pd &&
 					    VOP_WIN_GET(vop2, splice_win, enable)) {
@@ -7558,10 +7615,7 @@ static void vop2_crtc_atomic_enable(struct drm_crtc *crtc, struct drm_atomic_sta
 	int ret;
 
 	if (old_cstate && old_cstate->self_refresh_active) {
-		drm_crtc_vblank_on(crtc);
-		if (vop2->aclk_rate_reset)
-			clk_set_rate(vop2->aclk, vop2->aclk_rate);
-		vop2->aclk_rate_reset = false;
+		vop2_crtc_atomic_exit_psr(crtc, old_cstate);
 
 		return;
 	}
