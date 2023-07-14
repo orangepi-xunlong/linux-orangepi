@@ -179,11 +179,6 @@
 #define RK3399_TXRX_ENABLECLK		BIT(6)
 #define RK3399_TXRX_BASEDIR		BIT(5)
 
-#define RK3562_SYS_GRF_VO_CON1		0x05d4
-#define RK3562_DSI_FORCETXSTOPMODE	(0xf << 4)
-#define RK3562_DSI_TURNDISABLE		(0x1 << 2)
-#define RK3562_DSI_FORCERXMODE		(0x1 << 0)
-
 #define RK3568_GRF_VO_CON2		0x0368
 #define RK3568_GRF_VO_CON3		0x036c
 #define RK3568_DSI_FORCETXSTOPMODE	(0xf << 4)
@@ -226,7 +221,6 @@ enum soc_type {
 	RK3128,
 	RK3288,
 	RK3399,
-	RK3562,
 	RK3568,
 	RV1126,
 };
@@ -302,7 +296,6 @@ struct dw_mipi_dsi_rockchip {
 	int devcnt;
 	struct rockchip_drm_sub_dev sub_dev;
 	struct drm_panel *panel;
-	struct drm_bridge *bridge;
 };
 
 struct dphy_pll_parameter_map {
@@ -572,20 +565,36 @@ static void dw_mipi_dsi_phy_power_off(void *priv_data)
 	dsi->phy_enabled = false;
 }
 
-static unsigned int dw_mipi_dsi_calculate_lane_mpbs(struct dw_mipi_dsi_rockchip *dsi,
-						    const struct drm_display_mode *mode,
-						    u32 lanes, int bpp)
+static int
+dw_mipi_dsi_get_lane_mbps(void *priv_data, const struct drm_display_mode *mode,
+			  unsigned long mode_flags, u32 lanes, u32 format,
+			  unsigned int *lane_mbps)
 {
+	struct dw_mipi_dsi_rockchip *dsi = priv_data;
 	struct device *dev = dsi->dev;
+	int bpp;
+	unsigned long mpclk, tmp;
 	unsigned int target_mbps = 1000;
 	unsigned int max_mbps;
+	unsigned long best_freq = 0;
+	unsigned long fvco_min, fvco_max, fin, fout;
+	unsigned int min_prediv, max_prediv;
+	unsigned int _prediv, best_prediv;
+	unsigned long _fbdiv, best_fbdiv;
+	unsigned long min_delta = ULONG_MAX;
+	unsigned long target_pclk, hs_clk_rate;
 	unsigned int value;
-	unsigned long mpclk, tmp;
-
-	if (dsi->is_slave)
-		return dsi->lane_mbps;
+	int ret;
 
 	max_mbps = dsi->cdata->max_bit_rate_per_lane / USEC_PER_SEC;
+	dsi->format = format;
+	bpp = mipi_dsi_pixel_format_to_bpp(dsi->format);
+	if (bpp < 0) {
+		DRM_DEV_ERROR(dsi->dev,
+			      "failed to get bpp for pixel format %d\n",
+			      dsi->format);
+		return bpp;
+	}
 
 	/* optional override of the desired bandwidth */
 	if (!of_property_read_u32(dev->of_node, "rockchip,lane-rate", &value)) {
@@ -604,39 +613,6 @@ static unsigned int dw_mipi_dsi_calculate_lane_mpbs(struct dw_mipi_dsi_rockchip 
 			}
 		}
 	}
-
-	if (dsi->slave)
-		dsi->slave->lane_mbps = target_mbps;
-
-	return target_mbps;
-}
-
-static int
-dw_mipi_dsi_get_lane_mbps(void *priv_data, const struct drm_display_mode *mode,
-			  unsigned long mode_flags, u32 lanes, u32 format,
-			  unsigned int *lane_mbps)
-{
-	struct dw_mipi_dsi_rockchip *dsi = priv_data;
-	unsigned long best_freq = 0;
-	unsigned long fvco_min, fvco_max, fin, fout;
-	unsigned int min_prediv, max_prediv;
-	unsigned int _prediv, best_prediv;
-	unsigned long _fbdiv, best_fbdiv;
-	unsigned long min_delta = ULONG_MAX;
-	unsigned long target_pclk, hs_clk_rate;
-	unsigned int target_mbps;
-	int bpp, ret;
-
-	dsi->format = format;
-	bpp = mipi_dsi_pixel_format_to_bpp(dsi->format);
-	if (bpp < 0) {
-		DRM_DEV_ERROR(dsi->dev,
-			      "failed to get bpp for pixel format %d\n",
-			      dsi->format);
-		return bpp;
-	}
-
-	target_mbps = dw_mipi_dsi_calculate_lane_mpbs(dsi, mode, lanes, bpp);
 
 	/* for external phy only a the mipi_dphy_config is necessary */
 	if (dsi->phy) {
@@ -794,7 +770,6 @@ dw_mipi_dsi_encoder_atomic_check(struct drm_encoder *encoder,
 	else
 		s->bus_format = MEDIA_BUS_FMT_RGB888_1X24;
 
-	s->bus_flags = info->bus_flags;
 	/* rk356x series drive mipi pixdata on posedge */
 	if (dsi->cdata->soc_type == RK3568) {
 		s->bus_flags &= ~DRM_BUS_FLAG_PIXDATA_DRIVE_NEGEDGE;
@@ -802,7 +777,6 @@ dw_mipi_dsi_encoder_atomic_check(struct drm_encoder *encoder,
 	}
 
 	s->output_type = DRM_MODE_CONNECTOR_DSI;
-	s->tv_state = &conn_state->tv;
 	s->color_space = V4L2_COLORSPACE_DEFAULT;
 	s->output_if = dsi->id ? VOP_OUTPUT_IF_MIPI1 : VOP_OUTPUT_IF_MIPI0;
 	if (dsi->slave) {
@@ -1020,13 +994,6 @@ static int dw_mipi_dsi_rockchip_bind(struct device *dev,
 	if (dsi->is_slave)
 		return 0;
 
-	ret = drm_of_find_panel_or_bridge(dsi->dev->of_node, 1, -1,
-					  &dsi->panel, &dsi->bridge);
-	if (ret) {
-		dev_err(dsi->dev, "failed to find panel or bridge: %d\n", ret);
-		return ret;
-	}
-
 	ret = clk_prepare_enable(dsi->pllref_clk);
 	if (ret) {
 		DRM_DEV_ERROR(dev, "Failed to enable pllref_clk: %d\n", ret);
@@ -1045,8 +1012,12 @@ static int dw_mipi_dsi_rockchip_bind(struct device *dev,
 		return ret;
 	}
 
-	if (dsi->panel)
-		dw_mipi_dsi_get_dsc_info_from_sink(dsi, dsi->panel, NULL);
+	ret = drm_of_find_panel_or_bridge(dsi->dev->of_node, 1, 0,
+					  &dsi->panel, NULL);
+	if (ret)
+		dev_err(dsi->dev, "failed to find panel\n");
+
+	dw_mipi_dsi_get_dsc_info_from_sink(dsi, dsi->panel, NULL);
 
 	dsi->sub_dev.connector = dw_mipi_dsi_get_connector(dsi->dmd);
 	if (dsi->sub_dev.connector) {
@@ -1080,8 +1051,11 @@ static const struct component_ops dw_mipi_dsi_rockchip_ops = {
 	.unbind	= dw_mipi_dsi_rockchip_unbind,
 };
 
-static int dw_mipi_dsi_rockchip_component_add(struct dw_mipi_dsi_rockchip *dsi)
+static int dw_mipi_dsi_rockchip_host_attach(void *priv_data,
+					    struct mipi_dsi_device *device)
 {
+	struct dw_mipi_dsi_rockchip *dsi = priv_data;
+	struct device *second;
 	int ret;
 
 	ret = component_add(dsi->dev, &dw_mipi_dsi_rockchip_ops);
@@ -1091,15 +1065,41 @@ static int dw_mipi_dsi_rockchip_component_add(struct dw_mipi_dsi_rockchip *dsi)
 		return ret;
 	}
 
+	second = dw_mipi_dsi_rockchip_find_second(dsi);
+	if (IS_ERR(second))
+		return PTR_ERR(second);
+	if (second) {
+		ret = component_add(second, &dw_mipi_dsi_rockchip_ops);
+		if (ret) {
+			DRM_DEV_ERROR(second,
+				      "Failed to register component: %d\n",
+				      ret);
+			return ret;
+		}
+	}
+
 	return 0;
 }
 
-static int dw_mipi_dsi_rockchip_component_del(struct dw_mipi_dsi_rockchip *dsi)
+static int dw_mipi_dsi_rockchip_host_detach(void *priv_data,
+					    struct mipi_dsi_device *device)
 {
+	struct dw_mipi_dsi_rockchip *dsi = priv_data;
+	struct device *second;
+
+	second = dw_mipi_dsi_rockchip_find_second(dsi);
+	if (second && !IS_ERR(second))
+		component_del(second, &dw_mipi_dsi_rockchip_ops);
+
 	component_del(dsi->dev, &dw_mipi_dsi_rockchip_ops);
 
 	return 0;
 }
+
+static const struct dw_mipi_dsi_host_ops dw_mipi_dsi_rockchip_host_ops = {
+	.attach = dw_mipi_dsi_rockchip_host_attach,
+	.detach = dw_mipi_dsi_rockchip_host_detach,
+};
 
 static int dw_mipi_dsi_rockchip_probe(struct platform_device *pdev)
 {
@@ -1208,6 +1208,7 @@ static int dw_mipi_dsi_rockchip_probe(struct platform_device *pdev)
 	dsi->pdata.base = dsi->base;
 	dsi->pdata.max_data_lanes = dsi->cdata->max_data_lanes;
 	dsi->pdata.phy_ops = &dw_mipi_dsi_rockchip_phy_ops;
+	dsi->pdata.host_ops = &dw_mipi_dsi_rockchip_host_ops;
 	dsi->pdata.priv_data = dsi;
 	platform_set_drvdata(pdev, dsi);
 
@@ -1217,12 +1218,6 @@ static int dw_mipi_dsi_rockchip_probe(struct platform_device *pdev)
 		if (ret != -EPROBE_DEFER)
 			DRM_DEV_ERROR(dev,
 				      "Failed to probe dw_mipi_dsi: %d\n", ret);
-		goto err_clkdisable;
-	}
-
-	ret = dw_mipi_dsi_rockchip_component_add(dsi);
-	if (ret < 0) {
-		dw_mipi_dsi_remove(dsi->dmd);
 		goto err_clkdisable;
 	}
 
@@ -1237,8 +1232,9 @@ static int dw_mipi_dsi_rockchip_remove(struct platform_device *pdev)
 {
 	struct dw_mipi_dsi_rockchip *dsi = platform_get_drvdata(pdev);
 
+	if (dsi->devcnt == 0)
+		component_del(dsi->dev, &dw_mipi_dsi_rockchip_ops);
 
-	dw_mipi_dsi_rockchip_component_del(dsi);
 	dw_mipi_dsi_remove(dsi->dmd);
 
 	return 0;
@@ -1382,22 +1378,6 @@ static const struct rockchip_dw_dsi_chip_data rk3399_chip_data[] = {
 	{ /* sentinel */ }
 };
 
-static const struct rockchip_dw_dsi_chip_data rk3562_chip_data[] = {
-	{
-		.reg = 0xffb10000,
-
-		.lanecfg1_grf_reg = RK3562_SYS_GRF_VO_CON1,
-		.lanecfg1 = HIWORD_UPDATE(0, RK3562_DSI_TURNDISABLE |
-					     RK3562_DSI_FORCERXMODE |
-					     RK3562_DSI_FORCETXSTOPMODE),
-
-		.max_data_lanes = 4,
-		.max_bit_rate_per_lane = 1200000000UL,
-		.soc_type = RK3562,
-	},
-	{ /* sentinel */ }
-};
-
 static const struct rockchip_dw_dsi_chip_data rk3568_chip_data[] = {
 	{
 		.reg = 0xfe060000,
@@ -1458,9 +1438,6 @@ static const struct of_device_id dw_mipi_dsi_rockchip_dt_ids[] = {
 	 .compatible = "rockchip,rk3399-mipi-dsi",
 	 .data = &rk3399_chip_data,
 	}, {
-	 .compatible = "rockchip,rk3562-mipi-dsi",
-	 .data = &rk3562_chip_data,
-	}, {
 	 .compatible = "rockchip,rk3568-mipi-dsi",
 	 .data = &rk3568_chip_data,
 	}, {
@@ -1478,11 +1455,5 @@ struct platform_driver dw_mipi_dsi_rockchip_driver = {
 		.of_match_table = dw_mipi_dsi_rockchip_dt_ids,
 		.pm = &dw_mipi_dsi_rockchip_pm_ops,
 		.name	= "dw-mipi-dsi-rockchip",
-		/*
-		 * For dual-DSI display, one DSI pokes at the other DSI's
-		 * drvdata in dw_mipi_dsi_rockchip_find_second(). This is not
-		 * safe for asynchronous probe.
-		 */
-		.probe_type = PROBE_FORCE_SYNCHRONOUS,
 	},
 };
