@@ -3201,8 +3201,8 @@ static bool vop_crtc_mode_fixup(struct drm_crtc *crtc,
 {
 	struct vop *vop = to_vop(crtc);
 	const struct vop_data *vop_data = vop->data;
-	struct rockchip_crtc_state *s =
-			to_rockchip_crtc_state(crtc->state);
+	struct drm_crtc_state *new_crtc_state = container_of(mode, struct drm_crtc_state, mode);
+	struct rockchip_crtc_state *s = to_rockchip_crtc_state(new_crtc_state);
 	unsigned long rate;
 
 	if (mode->hdisplay > vop_data->max_output.width)
@@ -3218,6 +3218,10 @@ static bool vop_crtc_mode_fixup(struct drm_crtc *crtc,
 	    (VOP_MAJOR(vop->version) == 2 && VOP_MINOR(vop->version) >= 12 &&
 	     s->output_if & VOP_OUTPUT_IF_BT656))
 		adj_mode->crtc_clock *= 2;
+
+	if (vop->mcu_timing.mcu_pix_total)
+		adj_mode->crtc_clock *= rockchip_drm_get_cycles_per_pixel(s->bus_format) *
+					(vop->mcu_timing.mcu_pix_total + 1);
 
 	/*
 	 * Clock craziness.
@@ -3245,11 +3249,11 @@ static bool vop_crtc_mode_fixup(struct drm_crtc *crtc,
 	 * 4. Store the rounded up rate so that we don't need to worry about
 	 *    this in the actual clk_set_rate().
 	 */
-	rate = clk_round_rate(vop->dclk, adj_mode->clock * 1000);
-	if (rate / 1000 != adj_mode->clock)
+	rate = clk_round_rate(vop->dclk, adj_mode->crtc_clock * 1000);
+	if (rate / 1000 != adj_mode->crtc_clock)
 		rate = clk_round_rate(vop->dclk,
-				      adj_mode->clock * 1000 + 999);
-	adj_mode->clock = DIV_ROUND_UP(rate, 1000);
+				      adj_mode->crtc_clock * 1000 + 999);
+	adj_mode->crtc_clock = DIV_ROUND_UP(rate, 1000);
 
 	return true;
 }
