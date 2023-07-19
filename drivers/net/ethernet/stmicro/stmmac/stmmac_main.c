@@ -5053,7 +5053,7 @@ static int stmmac_rx_zc(struct stmmac_priv *priv, int limit, u32 queue)
 			len = 0;
 		}
 
-		if (count >= limit)
+		if ((count >= limit - 1) && limit > 1)
 			break;
 
 read_again:
@@ -5488,7 +5488,6 @@ static int stmmac_napi_poll_tx(struct napi_struct *napi, int budget)
 	int work_done;
 
 	priv->xstats.napi_poll++;
-	budget = min(priv->plat->dma_tx_size, budget);
 
 	work_done = stmmac_tx_clean(priv, budget, chan);
 	work_done = min(work_done, budget);
@@ -5510,17 +5509,14 @@ static int stmmac_napi_poll_rxtx(struct napi_struct *napi, int budget)
 		container_of(napi, struct stmmac_channel, rxtx_napi);
 	struct stmmac_priv *priv = ch->priv_data;
 	int rx_done, tx_done, rxtx_done;
-	int rx_budget, tx_budget;
 	u32 chan = ch->index;
 
 	priv->xstats.napi_poll++;
-	rx_budget = min(priv->plat->dma_rx_size, budget);
-	tx_budget = min(priv->plat->dma_tx_size, budget);
 
-	tx_done = stmmac_tx_clean(priv, tx_budget, chan);
+	tx_done = stmmac_tx_clean(priv, budget, chan);
 	tx_done = min(tx_done, budget);
 
-	rx_done = stmmac_rx_zc(priv, rx_budget, chan);
+	rx_done = stmmac_rx_zc(priv, budget, chan);
 
 	rxtx_done = max(tx_done, rx_done);
 
@@ -6929,22 +6925,30 @@ static void stmmac_napi_add(struct net_device *dev)
 
 	for (queue = 0; queue < maxq; queue++) {
 		struct stmmac_channel *ch = &priv->channel[queue];
+		int rx_budget = ((priv->plat->dma_rx_size < NAPI_POLL_WEIGHT) &&
+				 (priv->plat->dma_rx_size > 0)) ?
+				 priv->plat->dma_rx_size : NAPI_POLL_WEIGHT;
+		int tx_budget = ((priv->plat->dma_tx_size < NAPI_POLL_WEIGHT) &&
+				 (priv->plat->dma_tx_size > 0)) ?
+				 priv->plat->dma_tx_size : NAPI_POLL_WEIGHT;
+		int budget = min(rx_budget, tx_budget);
 
 		ch->priv_data = priv;
 		ch->index = queue;
 		spin_lock_init(&ch->lock);
 
 		if (queue < priv->plat->rx_queues_to_use) {
-			netif_napi_add(dev, &ch->rx_napi, stmmac_napi_poll_rx);
+			netif_napi_add_weight(dev, &ch->rx_napi,
+					      stmmac_napi_poll_rx, rx_budget);
 		}
 		if (queue < priv->plat->tx_queues_to_use) {
-			netif_napi_add_tx(dev, &ch->tx_napi,
-					  stmmac_napi_poll_tx);
+			netif_napi_add_tx_weight(dev, &ch->tx_napi,
+						 stmmac_napi_poll_tx, tx_budget);
 		}
 		if (queue < priv->plat->rx_queues_to_use &&
 		    queue < priv->plat->tx_queues_to_use) {
-			netif_napi_add(dev, &ch->rxtx_napi,
-				       stmmac_napi_poll_rxtx);
+			netif_napi_add_weight(dev, &ch->rxtx_napi,
+					      stmmac_napi_poll_rxtx, budget);
 		}
 	}
 }
