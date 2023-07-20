@@ -40,13 +40,6 @@ config SND_SOC_ROCKCHIP_I2S_TDM_MULTI_LANES
 	  Say Y or M if you want to add support for TDM Multi Lanes
 	  based on I2S_TDM controller.
 
-config SND_SOC_ROCKCHIP_I2S_TDM_MULTI_LANES
-	bool "Rockchip TDM Multi Lanes"
-	depends on SND_SOC_ROCKCHIP_I2S_TDM
-	help
-	  Say Y or M if you want to add support for TDM Multi Lanes
-	  based on I2S_TDM controller.
-
 config SND_SOC_ROCKCHIP_MULTI_DAIS
 	tristate "Rockchip Multi-DAIS Device Driver"
 	depends on HAVE_CLK && SND_SOC_ROCKCHIP
