@@ -71,7 +71,6 @@ dtbo-$(CONFIG_ARCH_ROCKCHIP) += \
 	rk3588-disable-led.dtbo \
 	rk3588-opi5plus-disable-leds.dtbo \
 	rk356x-edp.dtbo \
-	rk356x-opi3b-edp.dtbo \
 	rk356x-i2c2-m1.dtbo \
 	rk356x-i2c3-m0.dtbo \
 	rk356x-i2c4-m0.dtbo \

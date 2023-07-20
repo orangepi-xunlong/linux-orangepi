@@ -9,16 +9,6 @@
 
 		__overlay__ {
 			status = "okay";
-
-			ports {
-				port@1 {
-					reg = <1>;
-
-					dsi0_out_panel: endpoint {
-						remote-endpoint = <&panel_in_dsi0>;
-					};
-				};
-			};
 		};
 	};
 
@@ -28,27 +18,11 @@
 		__overlay__ {
 
 			status = "okay";
-
-			raspits_panel_1: raspits-panel@45 {
-				compatible = "raspberrypi,7inch-touchscreen-panel";
-				reg = <0x45>;
-
-				port {
-					panel_in_dsi0: endpoint {
-						remote-endpoint = <&dsi0_out_panel>;
-					};
-				};
-			};
-
-			raspits_touch_ft5426_1: raspits-touch-ft5426@38 {
-				compatible = "raspits_ft5426";
-				reg = <0x38>;
-			};
 		};
 	};
 
 	fragment@2 {
-		target = <&video_phy0>;
+		target = <&raspits_panel_1>;
 
 		__overlay__ {
 			status = "okay";
@@ -56,6 +30,23 @@
 	};
 
 	fragment@3 {
+		target = <&raspits_touch_ft5426_1>;
+
+		__overlay__ {
+			status = "okay";
+
+		};
+	};
+
+	fragment@4 {
+		target = <&video_phy0>;
+
+		__overlay__ {
+			status = "okay";
+		};
+	};
+
+	fragment@5 {
 		target = <&dsi0_in_vp0>;
 
 		__overlay__ {
@@ -63,7 +54,7 @@
 		};
 	};
 
-	fragment@4 {
+	fragment@6 {
 		target = <&dsi0_in_vp1>;
 
 		__overlay__ {
@@ -71,7 +62,7 @@
 		};
 	};
 
-	fragment@5 {
+	fragment@7 {
 		target = <&route_dsi0>;
 
 		__overlay__ {
@@ -79,30 +70,10 @@
 		};
 	};
 
-	fragment@6 {
+	fragment@8 {
 		target = <&hdmi>;
 		__overlay__ {
 			status = "disabled";
 		};
 	};
-
-//	fragment@6 {
-//		target = <&vp0>;
-//		__overlay__ {
-//			rockchip,plane-mask = <(1 << ROCKCHIP_VOP2_CLUSTER1 | 1 << ROCKCHIP_VOP2_ESMART1 | 1 <<
-//			ROCKCHIP_VOP2_SMART1)>;
-//			rockchip,primary-plane = <ROCKCHIP_VOP2_SMART1>;
-//			cursor-win-id = <ROCKCHIP_VOP2_CLUSTER1>;
-//		};
-//	};
-//
-//	fragment@7 {
-//		target = <&vp1>;
-//		__overlay__ {
-//			rockchip,plane-mask = <(1 << ROCKCHIP_VOP2_CLUSTER0 | 1 << ROCKCHIP_VOP2_ESMART0 | 1 <<
-//			ROCKCHIP_VOP2_SMART0)>;
-//			rockchip,primary-plane = <ROCKCHIP_VOP2_SMART0>;
-//			cursor-win-id = <ROCKCHIP_VOP2_CLUSTER0>;
-//		};
-//	};
 };
