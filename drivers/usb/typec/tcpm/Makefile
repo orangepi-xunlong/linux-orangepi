@@ -10,3 +10,4 @@ obj-$(CONFIG_TYPEC_TCPCI_MT6370)	+= tcpci_mt6370.o
 obj-$(CONFIG_TYPEC_TCPCI_MAXIM)		+= tcpci_maxim.o
 tcpci_maxim-y				+= tcpci_maxim_core.o maxim_contaminant.o
 obj-$(CONFIG_TYPEC_QCOM_PMIC)		+= qcom/
+obj-$(CONFIG_TYPEC_HUSB311)		+= tcpci_husb311.o
