@@ -1210,6 +1210,7 @@ module_exit(iep_exit);
 MODULE_AUTHOR("ljf@rock-chips.com");
 MODULE_DESCRIPTION("Driver for iep device");
 MODULE_LICENSE("GPL");
+MODULE_IMPORT_NS(DMA_BUF);
 
 #ifdef IEP_TEST_CASE
 
