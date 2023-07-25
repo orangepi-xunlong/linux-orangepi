@@ -22,6 +22,8 @@
 #include "cipherapi.h"
 #include "rk_cryptodev.h"
 
+MODULE_IMPORT_NS(DMA_BUF);
+
 #define MAX_CRYPTO_DEV		1
 #define MAX_CRYPTO_NAME_LEN	64
 
