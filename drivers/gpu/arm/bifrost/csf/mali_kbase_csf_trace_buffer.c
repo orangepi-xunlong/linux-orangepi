@@ -88,7 +88,7 @@ struct firmware_trace_buffer {
 	} cpu_va;
 	u32 num_pages;
 	u32 trace_enable_init_mask[CSF_FIRMWARE_TRACE_ENABLE_INIT_MASK_MAX];
-	char name[1]; /* this field must be last */
+	char name[]; /* this field must be last */
 };
 
 /**
