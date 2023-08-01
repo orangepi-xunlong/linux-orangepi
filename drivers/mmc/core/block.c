@@ -1826,8 +1826,14 @@ static void mmc_blk_mq_rw_recovery(struct mmc_queue *mq, struct request *req)
 	 * bytes transferred to zero in that case.
 	 */
 	err = __mmc_send_status(card, &status, 0);
-	if (err || mmc_blk_status_error(req, status))
+	if (err || mmc_blk_status_error(req, status)) {
 		brq->data.bytes_xfered = 0;
+		if (mmc_card_sd(card) && !mmc_card_removed(card)) {
+			mmc_blk_reset_success(mq->blkdata, type);
+			if (!mmc_blk_reset(md, card->host, type))
+				return;
+		}
+	}
 
 	mmc_retune_release(card->host);
 
