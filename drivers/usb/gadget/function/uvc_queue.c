@@ -162,18 +162,18 @@ static int uvc_buffer_prepare(struct vb2_buffer *vb)
 		return -ENODEV;
 
 	buf->state = UVC_BUF_STATE_QUEUED;
-#if defined(CONFIG_ARCH_ROCKCHIP) && defined(CONFIG_NO_GKI)
-	buf->mem = uvc_buffer_mem_prepare(vb, queue);
-	if (IS_ERR(buf->mem))
-		return -ENOMEM;
-#else
 	if (queue->use_sg) {
 		buf->sgt = vb2_dma_sg_plane_desc(vb, 0);
 		buf->sg = buf->sgt->sgl;
 	} else {
+#if defined(CONFIG_ARCH_ROCKCHIP) && defined(CONFIG_NO_GKI)
+		buf->mem = uvc_buffer_mem_prepare(vb, queue);
+		if (IS_ERR(buf->mem))
+			return -ENOMEM;
+#else
 		buf->mem = vb2_plane_vaddr(vb, 0);
-	}
 #endif
+	}
 	buf->length = vb2_plane_size(vb, 0);
 	if (vb->type == V4L2_BUF_TYPE_VIDEO_CAPTURE)
 		buf->bytesused = 0;
@@ -219,6 +219,10 @@ int uvcg_queue_init(struct uvc_video_queue *queue, struct device *dev, enum v4l2
 {
 	struct uvc_video *video = container_of(queue, struct uvc_video, queue);
 	struct usb_composite_dev *cdev = video->uvc->func.config->cdev;
+#if defined(CONFIG_ARCH_ROCKCHIP) && defined(CONFIG_NO_GKI)
+	struct uvc_device *uvc = container_of(video, struct uvc_device, video);
+	struct f_uvc_opts *opts = fi_to_f_uvc_opts(uvc->func.fi);
+#endif
 	int ret;
 
 	queue->queue.type = type;
@@ -227,7 +231,11 @@ int uvcg_queue_init(struct uvc_video_queue *queue, struct device *dev, enum v4l2
 	queue->queue.buf_struct_size = sizeof(struct uvc_buffer);
 	queue->queue.ops = &uvc_queue_qops;
 	queue->queue.lock = lock;
+#if defined(CONFIG_ARCH_ROCKCHIP) && defined(CONFIG_NO_GKI)
+	if (cdev->gadget->sg_supported && !opts->uvc_zero_copy) {
+#else
 	if (cdev->gadget->sg_supported) {
+#endif
 		queue->queue.mem_ops = &vb2_dma_sg_memops;
 		queue->use_sg = 1;
 	} else {
