@@ -458,6 +458,12 @@ static int rk3528_combphy_cfg(struct rockchip_combphy_priv *priv)
 		/* Enable adaptive CTLE for USB3.0 Rx */
 		rockchip_combphy_updatel(priv, GENMASK(17, 17), BIT(17), 0x200);
 
+		/* Set slow slew rate control for PI */
+		rockchip_combphy_updatel(priv, GENMASK(2, 0), 0x07, 0x204);
+
+		/* Set CDR phase path with 2x gain */
+		rockchip_combphy_updatel(priv, GENMASK(5, 5), BIT(5), 0x204);
+
 		/* Set Rx squelch input filler bandwidth */
 		rockchip_combphy_updatel(priv, GENMASK(2, 0), 0x06, 0x20c);
 
