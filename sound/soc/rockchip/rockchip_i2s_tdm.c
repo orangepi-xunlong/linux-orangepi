@@ -2864,8 +2864,6 @@ static int rockchip_i2s_tdm_probe(struct platform_device *pdev)
 		i2s_tdm->mclk_root1_freq = i2s_tdm->mclk_root1_initial_freq;
 	}
 
-	pm_runtime_enable(&pdev->dev);
-
 	regmap_update_bits(i2s_tdm->regmap, I2S_DMACR, I2S_DMACR_TDL_MASK,
 			   I2S_DMACR_TDL(16));
 	regmap_update_bits(i2s_tdm->regmap, I2S_DMACR, I2S_DMACR_RDL_MASK,
@@ -2883,7 +2881,7 @@ static int rockchip_i2s_tdm_probe(struct platform_device *pdev)
 	if (i2s_tdm->is_tdm_multi_lanes) {
 		ret = rockchip_i2s_tdm_multi_lanes_parse(i2s_tdm);
 		if (ret)
-			goto err_suspend;
+			goto err_disable_hclk;
 	}
 #endif
 	/*
@@ -2894,8 +2892,20 @@ static int rockchip_i2s_tdm_probe(struct platform_device *pdev)
 	if (i2s_tdm->quirks & QUIRK_ALWAYS_ON) {
 		ret = rockchip_i2s_tdm_keep_clk_always_on(i2s_tdm);
 		if (ret)
-			goto err_suspend;
+			goto err_disable_hclk;
 	}
+
+	/*
+	 * MUST: after pm_runtime_enable step, any register R/W
+	 * should be wrapped with pm_runtime_get_sync/put.
+	 *
+	 * Another approach is to enable the regcache true to
+	 * avoid access HW registers.
+	 *
+	 * Alternatively, performing the registers R/W before
+	 * pm_runtime_enable is also a good option.
+	 */
+	pm_runtime_enable(&pdev->dev);
 
 	ret = devm_snd_soc_register_component(&pdev->dev,
 					      &rockchip_i2s_tdm_component,
