@@ -388,6 +388,10 @@
 };
 
 &usbdrd3 {
+	status = "okay";
+};
+
+&usbdrd_dwc3 {
 	dr_mode = "host";
 	status = "okay";
 	#address-cells = <1>;
