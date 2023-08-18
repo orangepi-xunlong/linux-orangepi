@@ -203,7 +203,7 @@
 
 		syscon: syscon@3000000 {
 			compatible = "allwinner,sun50i-h616-system-control";
-			reg = <0x03000000 0x1000>;
+			reg = <0x03000000 0x30>,<0x03000038 0x0fc8>;
 			#address-cells = <1>;
 			#size-cells = <1>;
 			ranges;
@@ -270,6 +270,10 @@
 
 			ths_calibration: thermal-sensor-calibration@14 {
 				reg = <0x14 0x8>;
+			};
+
+			ephy_calibration: ephy-calibration@2c {
+				reg = <0x2c 0x2>;
 			};
 		};
 
@@ -390,6 +394,12 @@
 			i2c3_ph_pins: i2c3-ph-pins {
 				pins = "PH4", "PH5";
 				function = "i2c3";
+			};
+
+			i2c3_pa_pins: i2c3-pa-pins {
+				pins = "PA10", "PA11";
+				function = "i2c3";
+				bias-pull-up;
 			};
 
 			/omit-if-no-ref/
@@ -945,19 +955,29 @@
 		};
 
 		emac1: ethernet@5030000 {
-			compatible = "allwinner,sun50i-h616-emac";
-			syscon = <&syscon 1>;
-			reg = <0x05030000 0x10000>;
+			compatible = "allwinner,sunxi-gmac";
+			reg = <0x05030000 0x10000>,
+			      <0x03000034 0x4>;
+			reg-names = "gmac1_reg","ephy_reg";
 			interrupts = <GIC_SPI 15 IRQ_TYPE_LEVEL_HIGH>;
-			interrupt-names = "macirq";
+			interrupt-names = "gmacirq";
 			resets = <&ccu RST_BUS_EMAC1>;
 			reset-names = "stmmaceth";
-			clocks = <&ccu CLK_BUS_EMAC1>;
-			clock-names = "stmmaceth";
+			clocks = <&ccu CLK_BUS_EMAC1>,<&ccu CLK_EMAC_25M>;
+			clock-names = "bus-emac1","emac-25m";
+			pinctrl-0 = <&rmii_pins>;
+			pinctrl-names = "default";
+			phy-mode = "rmii";
+			tx-delay = <7>;
+			rx-delay = <31>;
+			phy-rst;
+			gmac-power0;
+			gmac-power1;
+			gmac-power2;
 			status = "disabled";
 
 			mdio1: mdio {
-				compatible = "snps,dwmac-mdio";
+				compatible = "ethernet-phy-ieee802.3-c22";
 				#address-cells = <1>;
 				#size-cells = <0>;
 			};

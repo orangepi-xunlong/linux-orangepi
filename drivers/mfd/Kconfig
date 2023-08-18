@@ -179,6 +179,15 @@ config MFD_AC100
 	  This driver include only the core APIs. You have to select individual
 	  components like codecs or RTC under the corresponding menus.
 
+config MFD_AC200
+	bool "X-Powers AC200"
+	select MFD_CORE
+	depends on I2C
+	help
+	  If you say Y here you get support for the X-Powers AC200 IC.
+	  This driver include only the core APIs. You have to select individual
+	  components like Ethernet PHY or RTC under the corresponding menus.
+
 config MFD_AXP20X
 	tristate
 	select MFD_CORE
