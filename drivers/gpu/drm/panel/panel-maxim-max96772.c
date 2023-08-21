@@ -19,7 +19,7 @@
 #include <uapi/linux/media-bus-format.h>
 
 #include <drm/drm_device.h>
-#include <drm/drm_dp_helper.h>
+#include <drm/display/drm_dp_helper.h>
 #include <drm/drm_modes.h>
 #include <drm/drm_panel.h>
 
@@ -489,13 +489,11 @@ static int max96772_panel_probe(struct i2c_client *client)
 	return 0;
 }
 
-static int max96772_panel_remove(struct i2c_client *client)
+static void max96772_panel_remove(struct i2c_client *client)
 {
 	struct max96772_panel *p = i2c_get_clientdata(client);
 
 	drm_panel_remove(&p->panel);
-
-	return 0;
 }
 
 static int boe_ae146m1t_l10_prepare(struct max96772_panel *p)
