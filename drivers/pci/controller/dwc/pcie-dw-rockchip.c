@@ -2073,6 +2073,14 @@ retry_regulator:
 	if (device_property_read_bool(dev, "rockchip,skip-scan-in-resume"))
 		rk_pcie->skip_scan_in_resume = true;
 
+	rk_pcie->hot_rst_wq = create_singlethread_workqueue("rk_pcie_hot_rst_wq");
+	if (!rk_pcie->hot_rst_wq) {
+		dev_err(dev, "failed to create hot_rst workqueue\n");
+		ret = -ENOMEM;
+		goto remove_irq_domain;
+	}
+	INIT_WORK(&rk_pcie->hot_rst_work, rk_pcie_hot_rst_work);
+
 	switch (rk_pcie->mode) {
 	case RK_PCIE_RC_TYPE:
 		ret = rk_add_pcie_port(rk_pcie, pdev);
@@ -2086,12 +2094,12 @@ retry_regulator:
 		return 0;
 
 	if (ret)
-		goto remove_irq_domain;
+		goto remove_rst_wq;
 
 	ret = rk_pcie_init_dma_trx(rk_pcie);
 	if (ret) {
 		dev_err(dev, "failed to add dma extension\n");
-		goto remove_irq_domain;
+		goto remove_rst_wq;
 	}
 
 	if (rk_pcie->dma_obj) {
@@ -2103,18 +2111,10 @@ retry_regulator:
 		/* hold link reset grant after link-up */
 		ret = rk_pcie_reset_grant_ctrl(rk_pcie, false);
 		if (ret)
-			goto remove_irq_domain;
+			goto remove_rst_wq;
 	}
 
 	dw_pcie_dbi_ro_wr_dis(pci);
-
-	rk_pcie->hot_rst_wq = create_singlethread_workqueue("rk_pcie_hot_rst_wq");
-	if (!rk_pcie->hot_rst_wq) {
-		dev_err(dev, "failed to create hot_rst workqueue\n");
-		ret = -ENOMEM;
-		goto remove_irq_domain;
-	}
-	INIT_WORK(&rk_pcie->hot_rst_work, rk_pcie_hot_rst_work);
 
 	device_init_wakeup(dev, true);
 
@@ -2139,6 +2139,8 @@ retry_regulator:
 
 	return 0;
 
+remove_rst_wq:
+	destroy_workqueue(rk_pcie->hot_rst_wq);
 remove_irq_domain:
 	if (rk_pcie->irq_domain)
 		irq_domain_remove(rk_pcie->irq_domain);
