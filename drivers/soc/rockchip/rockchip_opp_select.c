@@ -2228,8 +2228,8 @@ EXPORT_SYMBOL(rockchip_init_opp_table);
 
 void rockchip_uninit_opp_table(struct device *dev, struct rockchip_opp_info *info)
 {
-	rockchip_uninit_opp_info(dev, info);
 	dev_pm_opp_of_remove_table(dev);
+	rockchip_uninit_opp_info(dev, info);
 }
 EXPORT_SYMBOL(rockchip_uninit_opp_table);
 
