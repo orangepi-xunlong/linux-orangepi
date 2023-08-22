@@ -506,6 +506,17 @@ static int rockchip_sai_hw_params(struct snd_pcm_substream *substream,
 
 		regmap_update_bits(sai->regmap, SAI_CKR, SAI_CKR_MDIV_MASK,
 				   SAI_CKR_MDIV(div_bclk));
+	}
+
+	return 0;
+}
+
+static int rockchip_sai_prepare(struct snd_pcm_substream *substream,
+				struct snd_soc_dai *dai)
+{
+	struct rk_sai_dev *sai = snd_soc_dai_get_drvdata(dai);
+
+	if (sai->is_master_mode) {
 		/*
 		 * Should wait for one BCLK ready after DIV and then ungate
 		 * output clk to achieve the clean clk.
@@ -628,6 +639,7 @@ static const struct snd_soc_dai_ops rockchip_sai_dai_ops = {
 	.hw_params = rockchip_sai_hw_params,
 	.set_sysclk = rockchip_sai_set_sysclk,
 	.set_fmt = rockchip_sai_set_fmt,
+	.prepare = rockchip_sai_prepare,
 	.trigger = rockchip_sai_trigger,
 	.set_tdm_slot = rockchip_sai_set_tdm_slot,
 };
@@ -1432,33 +1444,9 @@ static int rockchip_sai_remove(struct platform_device *pdev)
 	return 0;
 }
 
-#ifdef CONFIG_PM_SLEEP
-static int rockchip_sai_suspend(struct device *dev)
-{
-	struct rk_sai_dev *sai = dev_get_drvdata(dev);
-
-	regcache_mark_dirty(sai->regmap);
-
-	return 0;
-}
-
-static int rockchip_sai_resume(struct device *dev)
-{
-	struct rk_sai_dev *sai = dev_get_drvdata(dev);
-	int ret = pm_runtime_resume_and_get(dev);
-
-	if (ret < 0)
-		return ret;
-	ret = regcache_sync(sai->regmap);
-	pm_runtime_put(dev);
-
-	return ret;
-}
-#endif /* CONFIG_PM_SLEEP */
-
 static const struct dev_pm_ops rockchip_sai_pm_ops = {
 	SET_RUNTIME_PM_OPS(rockchip_sai_runtime_suspend, rockchip_sai_runtime_resume, NULL)
-	SET_SYSTEM_SLEEP_PM_OPS(rockchip_sai_suspend, rockchip_sai_resume)
+	SET_SYSTEM_SLEEP_PM_OPS(pm_runtime_force_suspend, pm_runtime_force_resume)
 };
 
 static struct platform_driver rockchip_sai_driver = {
