@@ -1154,6 +1154,14 @@ int rockchip_monitor_check_rate_volt(struct monitor_dev_info *info)
 }
 EXPORT_SYMBOL(rockchip_monitor_check_rate_volt);
 
+static void rockchip_system_monitor_check_rate_volt(struct monitor_dev_info *info)
+{
+	if (info->devp->check_rate_volt)
+		info->devp->check_rate_volt(info);
+	else
+		rockchip_monitor_check_rate_volt(info);
+}
+
 struct monitor_dev_info *
 rockchip_system_monitor_register(struct device *dev,
 				 struct monitor_dev_profile *devp)
@@ -1173,14 +1181,14 @@ rockchip_system_monitor_register(struct device *dev,
 	info->devp = devp;
 
 	if (monitor_device_parse_dt(dev, info)) {
-		devp->check_rate_volt(info);
+		rockchip_system_monitor_check_rate_volt(info);
 		kfree(info);
 		return ERR_PTR(-EINVAL);
 	}
 
 	rockchip_system_monitor_early_regulator_init(info);
 	rockchip_system_monitor_wide_temp_init(info);
-	devp->check_rate_volt(info);
+	rockchip_system_monitor_check_rate_volt(info);
 	rockchip_system_monitor_freq_qos_requset(info);
 
 	down_write(&mdev_list_sem);
