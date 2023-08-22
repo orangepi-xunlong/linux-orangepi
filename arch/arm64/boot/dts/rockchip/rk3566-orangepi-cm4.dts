@@ -155,25 +155,25 @@
 		status = "okay";
 	};
 
-	unisoc_uwe_bsp: uwe-bsp {
-		compatible = "unisoc,uwe_bsp";
-		wl-reg-on = <&gpio0 RK_PD3 GPIO_ACTIVE_HIGH>;
-		bt-reg-on = <&gpio2 RK_PB7 GPIO_ACTIVE_HIGH>;
-		wl-wake-host-gpio = <&gpio0 RK_PD6 GPIO_ACTIVE_HIGH>;
-		bt-wake-host-gpio = <&gpio2 RK_PC0 GPIO_ACTIVE_HIGH>;
-		//sdio-ext-int-gpio = <&gpio2 RK_PC1 GPIO_ACTIVE_HIGH>;
-		unisoc,btwf-file-name = "/vendor/etc/firmware/wcnmodem.bin";
-		//adma-tx;
-		//adma-rx;
-		data-irq;
-		blksz-512;
-		keep-power-on;
+	wireless_wlan: wireless-wlan {
+		compatible = "wlan-platdata";
+		rockchip,grf = <&grf>;
+		wifi_chip_type = "ap6256";
+		WIFI,host_wake_irq = <&gpio0 RK_PD6 GPIO_ACTIVE_HIGH>;
 		status = "okay";
 	};
 
-	sprd-mtty {
-		compatible = "sprd,mtty";
-		sprd,name = "ttyBT";
+	wireless_bluetooth: wireless-bluetooth {
+		compatible = "bluetooth-platdata";
+		clocks = <&rk809 1>;
+		clock-names = "ext_clock";
+		uart_rts_gpios = <&gpio2 RK_PB5 GPIO_ACTIVE_LOW>;
+		pinctrl-names = "default", "rts_gpio";
+		pinctrl-0 = <&uart1m0_rtsn>;
+		pinctrl-1 = <&uart1_gpios>;
+		BT,reset_gpio    = <&gpio2 RK_PB7 GPIO_ACTIVE_HIGH>;
+		BT,wake_gpio     = <&gpio2 RK_PC1 GPIO_ACTIVE_HIGH>;
+		BT,wake_host_irq = <&gpio2 RK_PC0 GPIO_ACTIVE_HIGH>;
 		status = "okay";
 	};
 
