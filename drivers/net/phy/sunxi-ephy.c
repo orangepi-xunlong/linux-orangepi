@@ -257,7 +257,8 @@ static int ephy_config_init(struct phy_device *phydev)
 			value |= (1 << 11);
 		else
 			value &= (~(1 << 11));
-		phy_write(ac300_ephy.ac300, 0x06, value);
+		//phy_write(ac300_ephy.ac300, 0x06, value);
+		phy_write(ac300_ephy.ac300, 0x06, value | (1 << 1)); /*LED_POL 1:Low active*/
 	}
 
 #if defined(CONFIG_ARCH_SUN50IW6)
@@ -313,7 +314,8 @@ static void ac300_ephy_enable(struct ephy_res *priv)
 	/* clk gating */
 	phy_write(priv->ac300, 0x00, 0x1fb7);
 
-	phy_write(priv->ac300, 0x05, 0xa81f);
+	phy_write(priv->ac300, 0x05, 0xa819);
+	//phy_write(priv->ac300, 0x05, 0xa81f);
 	phy_write(priv->ac300, 0x06, 0);
 
 	msleep(1000);  /* FIXME: fix some board compatible issues. */
