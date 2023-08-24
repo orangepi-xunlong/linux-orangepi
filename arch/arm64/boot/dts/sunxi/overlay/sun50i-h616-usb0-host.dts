@@ -1,0 +1,12 @@
+/dts-v1/;
+/plugin/;
+
+/ {
+	fragment@0 {
+		target = <&usbc0>;
+		__overlay__ {
+			status = "okay";
+			usb_port_type = <0x1>;
+		};
+	};
+};
