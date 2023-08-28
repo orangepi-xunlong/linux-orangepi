@@ -176,7 +176,7 @@ static int dw_mci_v2_execute_tuning(struct dw_mci_slot *slot, u32 opcode)
 	}
 
 	if (i == ARRAY_SIZE(degrees)) {
-		dev_warn(host->dev, "All phases bad!");
+		dev_warn(host->dev, "V2 All phases bad!");
 		return -EIO;
 	}
 
@@ -210,8 +210,7 @@ static int dw_mci_rk3288_execute_tuning(struct dw_mci_slot *slot, u32 opcode)
 	}
 
 	if (priv->use_v2_tuning) {
-		ret = dw_mci_v2_execute_tuning(slot, opcode);
-		if (!ret)
+		if (!dw_mci_v2_execute_tuning(slot, opcode))
 			return 0;
 		/* Otherwise we continue using fine tuning */
 	}
