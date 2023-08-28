@@ -1209,6 +1209,13 @@ static int spinand_init_flash(struct spinand_device *spinand)
 		if (ret)
 			break;
 
+		/* HWP_EN must be enabled first before block unlock region is set */
+		if (spinand->id.data[0] == 0x01) {
+			ret = spinand_lock_block(spinand, HWP_EN);
+			if (ret)
+				return ret;
+		}
+
 		ret = spinand_lock_block(spinand, BL_ALL_UNLOCKED);
 		if (ret)
 			break;

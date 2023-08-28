@@ -5302,6 +5302,7 @@ static void rkcif_sync_crop_info(struct rkcif_stream *stream)
 			stream->crop_mask |= CROP_SRC_SENSOR_MASK;
 			dev->terminal_sensor.selection = input_sel;
 		} else {
+			stream->crop_mask &= ~CROP_SRC_SENSOR_MASK;
 			dev->terminal_sensor.selection.r = dev->terminal_sensor.raw_rect;
 		}
 	}
@@ -5322,8 +5323,10 @@ static void rkcif_sync_crop_info(struct rkcif_stream *stream)
 			stream->crop[CROP_SRC_ACT].top = stream->crop[CROP_SRC_USR].top +
 							  stream->crop[CROP_SRC_SENSOR].top;
 		}
-	} else {
+	} else if (stream->crop_mask & CROP_SRC_SENSOR_MASK) {
 		stream->crop[CROP_SRC_ACT] = stream->crop[CROP_SRC_SENSOR];
+	} else {
+		stream->crop[CROP_SRC_ACT] = dev->terminal_sensor.raw_rect;
 	}
 }
 
