@@ -2119,12 +2119,20 @@ int rockchip_opp_config_clks(struct device *dev, struct opp_table *opp_table,
 	if (!info->is_runtime_active)
 		return 0;
 
+	ret = clk_bulk_prepare_enable(info->nclocks, info->clocks);
+	if (ret) {
+		dev_err(dev, "failed to enable opp clks\n");
+		return ret;
+	}
+
 	dev_dbg(dev, "%lu -> %lu (Hz)\n", opp_table->rate_clk_single, *target);
 	ret = clk_set_rate(opp_table->clk, *target);
 	if (ret)
 		dev_err(dev, "failed to set clock rate: %lu\n", *target);
 	else
 		opp_table->rate_clk_single = *target;
+
+	clk_bulk_disable_unprepare(info->nclocks, info->clocks);
 
 	return ret;
 }
