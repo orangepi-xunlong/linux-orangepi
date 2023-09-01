@@ -1262,6 +1262,7 @@ static const struct snd_soc_component_driver rockchip_sai_component = {
 	.name = DRV_NAME,
 	.controls = rockchip_sai_controls,
 	.num_controls = ARRAY_SIZE(rockchip_sai_controls),
+	.legacy_dai_naming = 1,
 };
 
 static irqreturn_t rockchip_sai_isr(int irq, void *devid)
