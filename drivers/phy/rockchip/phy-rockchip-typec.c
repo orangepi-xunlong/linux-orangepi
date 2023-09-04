@@ -903,7 +903,7 @@ static int rockchip_usb3_phy_power_on(struct phy *phy)
 			tcphy_cfg_usb3_to_usb2_only(tcphy, false);
 			goto unlock_ret;
 		}
-		usleep_range(10, 20);
+		usleep_range(100, 200);
 	}
 
 	if (tcphy->mode == MODE_DISCONNECT)
