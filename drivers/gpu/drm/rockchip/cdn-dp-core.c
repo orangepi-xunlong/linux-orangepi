@@ -1055,6 +1055,7 @@ static int cdn_dp_bind(struct device *dev, struct device *master, void *data)
 	dp->aux.name = "DP-AUX";
 	dp->aux.transfer = cdn_dp_aux_transfer;
 	dp->aux.dev = dev;
+	dp->aux.drm_dev = drm_dev;
 
 	ret = drm_dp_aux_register(&dp->aux);
 	if (ret)
