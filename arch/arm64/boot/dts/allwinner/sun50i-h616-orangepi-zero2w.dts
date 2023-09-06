@@ -162,6 +162,11 @@
 		reg = <0x36>;
 		wakeup-source;
 
+		interrupt-parent = <&pio>;
+		interrupts = <2 9 IRQ_TYPE_LEVEL_LOW>; /* PC9 */
+		interrupt-controller;
+		#interrupt-cells = <1>;
+
 		regulators{
 			reg_dcdc1: dcdc1 {
 				regulator-name = "axp313a-dcdc1";

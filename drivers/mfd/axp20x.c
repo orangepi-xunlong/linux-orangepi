@@ -245,6 +245,11 @@ static const struct resource axp803_pek_resources[] = {
 	DEFINE_RES_IRQ_NAMED(AXP803_IRQ_PEK_FAL_EDGE, "PEK_DBF"),
 };
 
+static struct resource axp313a_pek_resources[] = {
+	DEFINE_RES_IRQ_NAMED(AXP313A_IRQ_PEK_RIS_EDGE, "PEK_DBR"),
+	DEFINE_RES_IRQ_NAMED(AXP313A_IRQ_PEK_FAL_EDGE, "PEK_DBF"),
+};
+
 static const struct resource axp806_pek_resources[] = {
 	DEFINE_RES_IRQ_NAMED(AXP806_IRQ_POK_RISE, "PEK_DBR"),
 	DEFINE_RES_IRQ_NAMED(AXP806_IRQ_POK_FALL, "PEK_DBF"),
@@ -595,6 +600,7 @@ static const struct regmap_irq_chip axp313a_regmap_irq_chip = {
 	.status_base		= AXP313A_IRQ_STATE,
 	.ack_base		= AXP313A_IRQ_STATE,
 	.unmask_base		= AXP313A_IRQ_EN,
+	.mask_invert		= true,
 	.init_ack_masked	= true,
 	.irqs			= axp313a_regmap_irqs,
 	.num_irqs		= ARRAY_SIZE(axp313a_regmap_irqs),
@@ -733,6 +739,16 @@ static const struct mfd_cell axp152_cells[] = {
 };
 
 static struct mfd_cell axp313a_cells[] = {
+	{
+		.name           = "axp221-pek",
+		.num_resources  = ARRAY_SIZE(axp313a_pek_resources),
+		.resources      = axp313a_pek_resources,
+	}, {
+		.name = "axp20x-regulator",
+	},
+};
+
+static struct mfd_cell axp313a_cells_noirq[] = {
 	{
 		.name = "axp20x-regulator",
 	},
@@ -893,7 +909,11 @@ static void axp20x_power_off(void)
 	if (axp20x_pm_power_off->variant == AXP288_ID)
 		return;
 
-	regmap_write(axp20x_pm_power_off->regmap, AXP20X_OFF_CTRL,
+	if (axp20x_pm_power_off->variant == AXP313A_ID)
+		regmap_write(axp20x_pm_power_off->regmap, AXP313A_POWER_STATUS,
+		     AXP20X_OFF);
+	else
+		regmap_write(axp20x_pm_power_off->regmap, AXP20X_OFF_CTRL,
 		     AXP20X_OFF);
 
 	/* Give capacitors etc. time to drain to avoid kernel panic msg. */
@@ -956,8 +976,13 @@ int axp20x_match_device(struct axp20x_dev *axp20x)
 		axp20x->irq_flags = IRQF_TRIGGER_LOW;
 		break;
 	case AXP313A_ID:
-		axp20x->nr_cells = ARRAY_SIZE(axp313a_cells);
-		axp20x->cells = axp313a_cells;
+                if (axp20x->irq > 0) {
+			axp20x->nr_cells = ARRAY_SIZE(axp313a_cells);
+			axp20x->cells = axp313a_cells;
+		} else {
+			axp20x->nr_cells = ARRAY_SIZE(axp313a_cells_noirq);
+			axp20x->cells = axp313a_cells_noirq;
+		}
 		axp20x->regmap_cfg = &axp313a_regmap_config;
 		axp20x->regmap_irq_chip = &axp313a_regmap_irq_chip;
 		break;
@@ -1069,6 +1094,9 @@ int axp20x_device_probe(struct axp20x_dev *axp20x)
 		regmap_del_irq_chip(axp20x->irq, axp20x->regmap_irqc);
 		return ret;
 	}
+
+	if (axp20x->variant == AXP313A_ID)
+		pm_power_off = NULL;
 
 	if (!pm_power_off) {
 		axp20x_pm_power_off = axp20x;
