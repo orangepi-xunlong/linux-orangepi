@@ -1419,6 +1419,15 @@
 			type_addr_eth = <0x2>;
 			status = "okay";
 		};
+
+		r_lradc: lradc@5070800 {
+			compatible = "allwinner,sun50i-h616-lradc";
+			reg = <0x05070800 0x400>;
+			interrupts = <GIC_SPI 20 IRQ_TYPE_EDGE_RISING>;
+			clocks = <&ccu CLK_BUS_KEYADC>;
+			resets = <&ccu RST_BUS_KEYADC>;
+			status = "disabled";
+		};
 	};
 
 	thermal-zones {
