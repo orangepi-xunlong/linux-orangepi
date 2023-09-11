@@ -2262,6 +2262,7 @@ static int dw_hdmi_connector_get_modes(struct drm_connector *connector)
 	struct drm_display_mode *mode;
 	struct drm_display_info *info = &connector->display_info;
 	void *data = hdmi->plat_data->phy_data;
+	struct drm_property_blob *edid_blob_ptr = connector->edid_blob_ptr;
 	int i, ret = 0;
 
 	if (hdmi->plat_data->right && hdmi->plat_data->right->next_bridge) {
@@ -2283,7 +2284,17 @@ static int dw_hdmi_connector_get_modes(struct drm_connector *connector)
 		return 0;
 
 	memset(metedata, 0, sizeof(*metedata));
-	edid = drm_get_edid(connector, hdmi->ddc);
+
+	if (edid_blob_ptr && edid_blob_ptr->length) {
+		edid = kmalloc(edid_blob_ptr->length, GFP_KERNEL);
+		if (!edid)
+			return -ENOMEM;
+		memcpy(edid, edid_blob_ptr->data, edid_blob_ptr->length);
+	} else {
+		edid = drm_get_edid(connector, hdmi->ddc);
+		hdmi->hdcp_caps = dw_hdmi_qp_hdcp_capable(hdmi);
+	}
+
 	if (edid) {
 		dev_dbg(hdmi->dev, "got edid: width[%d] x height[%d]\n",
 			edid->width_cm, edid->height_cm);
@@ -2311,8 +2322,10 @@ static int dw_hdmi_connector_get_modes(struct drm_connector *connector)
 			else if (hdmi->plat_data->right)
 				secondary = hdmi->plat_data->right;
 
-			if (!secondary)
+			if (!secondary) {
+				kfree(edid);
 				return -ENOMEM;
+			}
 			secondary_data = secondary->plat_data->phy_data;
 
 			list_for_each_entry(mode, &connector->probed_modes, head)
@@ -4051,6 +4064,7 @@ void dw_hdmi_qp_suspend(struct device *dev, struct dw_hdmi_qp *hdmi)
 		disable_irq(hdmi->earc_irq);
 
 	pinctrl_pm_select_sleep_state(dev);
+	drm_connector_update_edid_property(&hdmi->connector, NULL);
 }
 EXPORT_SYMBOL_GPL(dw_hdmi_qp_suspend);
 

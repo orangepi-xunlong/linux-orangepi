@@ -239,6 +239,7 @@ config SND_SOC_ALL_CODECS
 	imply SND_SOC_TAS5720
 	imply SND_SOC_TAS6424
 	imply SND_SOC_TDA7419
+	imply SND_SOC_TDA7803
 	imply SND_SOC_TFA9879
 	imply SND_SOC_TFA989X
 	imply SND_SOC_TLV320ADC3XXX
@@ -1695,6 +1696,11 @@ config SND_SOC_TAS6424
 
 config SND_SOC_TDA7419
 	tristate "ST TDA7419 audio processor"
+	depends on I2C
+	select REGMAP_I2C
+
+config SND_SOC_TDA7803
+	tristate "ST TDA7803 audio processor"
 	depends on I2C
 	select REGMAP_I2C
 

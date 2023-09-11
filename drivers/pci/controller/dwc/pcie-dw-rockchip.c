@@ -202,6 +202,7 @@ struct rk_pcie {
 	struct workqueue_struct		*hot_rst_wq;
 	struct work_struct		hot_rst_work;
 	u32				comp_prst[2];
+	u32				intx;
 };
 
 enum dw_pcie_as_type {
@@ -2339,6 +2340,8 @@ no_l2:
 	phy_power_off(rk_pcie->phy);
 	phy_exit(rk_pcie->phy);
 
+	rk_pcie->intx = rk_pcie_readl_apb(rk_pcie, PCIE_CLIENT_INTR_MASK_LEGACY);
+
 	clk_bulk_disable_unprepare(rk_pcie->clk_cnt, rk_pcie->clks);
 
 	rk_pcie->in_suspend = true;
@@ -2402,6 +2405,9 @@ static int __maybe_unused rockchip_dw_pcie_resume(struct device *dev)
 
 	if (std_rc)
 		dw_pcie_setup_rc(&rk_pcie->pci->pp);
+
+	rk_pcie_writel_apb(rk_pcie, PCIE_CLIENT_INTR_MASK_LEGACY,
+			   rk_pcie->intx | 0xffff0000);
 
 	ret = rk_pcie_establish_link(rk_pcie->pci);
 	if (ret) {
