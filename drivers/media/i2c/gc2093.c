@@ -604,10 +604,10 @@ static const struct gc2093_mode supported_modes[] = {
 		.reg_list = gc2093_1080p_25fps_hdr_settings,
 		.reg_num = ARRAY_SIZE(gc2093_1080p_25fps_hdr_settings),
 		.hdr_mode = HDR_X2,
-		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_1,
-		.vc[PAD1] = V4L2_MBUS_CSI2_CHANNEL_0,//L->csi wr0
-		.vc[PAD2] = V4L2_MBUS_CSI2_CHANNEL_1,
-		.vc[PAD3] = V4L2_MBUS_CSI2_CHANNEL_1,//M->csi wr2
+		.vc[PAD0] = 1,
+		.vc[PAD1] = 0,//L->csi wr0
+		.vc[PAD2] = 1,
+		.vc[PAD3] = 1,//M->csi wr2
 	},
 };
 
