@@ -188,7 +188,6 @@ struct rk_pcie {
 	struct dma_trx_obj		*dma_obj;
 	bool				in_suspend;
 	bool				skip_scan_in_resume;
-	bool				is_rk1808;
 	bool				is_signal_test;
 	bool				bifurcation;
 	bool				supports_clkreq;
@@ -689,15 +688,6 @@ static inline void rk_pcie_set_mode(struct rk_pcie *rk_pcie)
 			disable_aspm_l1ss(rk_pcie);
 		}
 		rk_pcie_writel_apb(rk_pcie, 0x0, 0xf00040);
-		/*
-		 * Disable order rule for CPL can't pass halted P queue.
-		 * Need to check producer-consumer model.
-		 * Just for RK1808 platform.
-		 */
-		if (rk_pcie->is_rk1808)
-			dw_pcie_writel_dbi(rk_pcie->pci,
-					   PCIE_PL_ORDER_RULE_CTRL_OFF,
-					   0xff00);
 		break;
 	}
 }
@@ -722,15 +712,9 @@ static int rk_pcie_link_up(struct dw_pcie *pci)
 	struct rk_pcie *rk_pcie = to_rk_pcie(pci);
 	u32 val;
 
-	if (rk_pcie->is_rk1808) {
-		val = rk_pcie_readl_apb(rk_pcie, PCIE_CLIENT_GENERAL_DEBUG);
-		if ((val & (PCIE_PHY_LINKUP | PCIE_DATA_LINKUP)) == 0x3)
-			return 1;
-	} else {
-		val = rk_pcie_readl_apb(rk_pcie, PCIE_CLIENT_LTSSM_STATUS);
-		if ((val & (RDLH_LINKUP | SMLH_LINKUP)) == 0x30000)
-			return 1;
-	}
+	val = rk_pcie_readl_apb(rk_pcie, PCIE_CLIENT_LTSSM_STATUS);
+	if ((val & (RDLH_LINKUP | SMLH_LINKUP)) == 0x30000)
+		return 1;
 
 	return 0;
 }
@@ -738,8 +722,6 @@ static int rk_pcie_link_up(struct dw_pcie *pci)
 static void rk_pcie_enable_debug(struct rk_pcie *rk_pcie)
 {
 	if (!IS_ENABLED(CONFIG_DEBUG_FS))
-		return;
-	if (rk_pcie->is_rk1808 == true)
 		return;
 
 	rk_pcie_writel_apb(rk_pcie, PCIE_CLIENT_DBG_FIFO_PTN_HIT_D0,
@@ -1062,12 +1044,6 @@ static void rk_pcie_ep_setup(struct rk_pcie *rk_pcie)
 	/* Device id and class id needed for request bar address */
 	dw_pcie_writew_dbi(rk_pcie->pci, PCI_DEVICE_ID, 0x356a);
 	dw_pcie_writew_dbi(rk_pcie->pci, PCI_CLASS_DEVICE, 0x0580);
-
-	/* Set shadow BAR0 */
-	if (rk_pcie->is_rk1808) {
-		val = rk_pcie->mem_size - 1;
-		dw_pcie_writel_dbi(rk_pcie->pci, PCIE_SB_BAR0_MASK_REG, val);
-	}
 }
 
 static int rk_pcie_ep_win_parse(struct rk_pcie *rk_pcie)
@@ -1327,19 +1303,6 @@ static int rk_pcie_phy_init(struct rk_pcie *rk_pcie)
 	return 0;
 }
 
-static int rk_pcie_reset_grant_ctrl(struct rk_pcie *rk_pcie,
-						bool enable)
-{
-	int ret;
-	u32 val = (0x1 << 18); /* Write mask bit */
-
-	if (enable)
-		val |= (0x1 << 2);
-
-	ret = regmap_write(rk_pcie->usb_pcie_grf, 0x0, val);
-	return ret;
-}
-
 static void rk_pcie_start_dma_rd(struct dma_trx_obj *obj, struct dma_table *cur, int ctr_off)
 {
 	struct rk_pcie *rk_pcie = dev_get_drvdata(obj->dev);
@@ -1543,14 +1506,6 @@ static const struct rk_pcie_of_data rk3528_pcie_rc_of_data = {
 
 static const struct of_device_id rk_pcie_of_match[] = {
 	{
-		.compatible = "rockchip,rk1808-pcie",
-		.data = &rk_pcie_rc_of_data,
-	},
-	{
-		.compatible = "rockchip,rk1808-pcie-ep",
-		.data = &rk_pcie_ep_of_data,
-	},
-	{
 		.compatible = "rockchip,rk3528-pcie",
 		.data = &rk3528_pcie_rc_of_data,
 	},
@@ -1583,39 +1538,6 @@ static const struct dw_pcie_ops dw_pcie_ops = {
 	.start_link = rk_pcie_establish_link,
 	.link_up = rk_pcie_link_up,
 };
-
-static int rk1808_pcie_fixup(struct rk_pcie *rk_pcie, struct device_node *np)
-{
-	int ret;
-	struct device *dev = rk_pcie->pci->dev;
-
-	rk_pcie->usb_pcie_grf = syscon_regmap_lookup_by_phandle(np,
-						"rockchip,usbpciegrf");
-	if (IS_ERR(rk_pcie->usb_pcie_grf)) {
-		dev_err(dev, "failed to find usb_pcie_grf regmap\n");
-		return PTR_ERR(rk_pcie->usb_pcie_grf);
-	}
-
-	rk_pcie->pmu_grf = syscon_regmap_lookup_by_phandle(np,
-							 "rockchip,pmugrf");
-	if (IS_ERR(rk_pcie->pmu_grf)) {
-		dev_err(dev, "failed to find pmugrf regmap\n");
-		return PTR_ERR(rk_pcie->pmu_grf);
-	}
-
-	/* Workaround for pcie, switch to PCIe_PRSTNm0 */
-	ret = regmap_write(rk_pcie->pmu_grf, 0x100, 0x01000100);
-	if (ret)
-		return ret;
-
-	ret = regmap_write(rk_pcie->pmu_grf, 0x0, 0x0c000000);
-	if (ret)
-		return ret;
-
-	/* release link reset grant */
-	ret = rk_pcie_reset_grant_ctrl(rk_pcie, true);
-	return ret;
-}
 
 static void rk_pcie_fast_link_setup(struct rk_pcie *rk_pcie)
 {
@@ -1919,7 +1841,6 @@ static int rk_pcie_really_probe(void *p)
 	const struct of_device_id *match;
 	const struct rk_pcie_of_data *data;
 	enum rk_pcie_device_mode mode;
-	struct device_node *np = pdev->dev.of_node;
 	u32 val = 0;
 	int irq;
 
@@ -1950,12 +1871,6 @@ static int rk_pcie_really_probe(void *p)
 	rk_pcie->mode = mode;
 	rk_pcie->msi_vector_num = data->msi_vector_num;
 	rk_pcie->pci = pci;
-
-	if (of_device_is_compatible(np, "rockchip,rk1808-pcie") ||
-	    of_device_is_compatible(np, "rockchip,rk1808-pcie-ep"))
-		rk_pcie->is_rk1808 = true;
-	else
-		rk_pcie->is_rk1808 = false;
 
 	if (device_property_read_bool(dev, "rockchip,bifurcation"))
 		rk_pcie->bifurcation = true;
@@ -2029,13 +1944,7 @@ retry_regulator:
 
 	dw_pcie_dbi_ro_wr_en(pci);
 
-	if (rk_pcie->is_rk1808) {
-		ret = rk1808_pcie_fixup(rk_pcie, np);
-		if (ret)
-			goto deinit_clk;
-	} else {
-		rk_pcie_fast_link_setup(rk_pcie);
-	}
+	rk_pcie_fast_link_setup(rk_pcie);
 
 	/* Legacy interrupt is optional */
 	ret = rk_pcie_init_irq_domain(rk_pcie);
@@ -2123,13 +2032,6 @@ retry_regulator:
 		rk_pcie->dma_obj->config_dma_func = rk_pcie_config_dma_dwc;
 	}
 
-	if (rk_pcie->is_rk1808) {
-		/* hold link reset grant after link-up */
-		ret = rk_pcie_reset_grant_ctrl(rk_pcie, false);
-		if (ret)
-			goto remove_rst_wq;
-	}
-
 	dw_pcie_dbi_ro_wr_dis(pci);
 
 	device_init_wakeup(dev, true);
@@ -2163,7 +2065,6 @@ remove_irq_domain:
 disable_phy:
 	phy_power_off(rk_pcie->phy);
 	phy_exit(rk_pcie->phy);
-deinit_clk:
 	clk_bulk_disable_unprepare(rk_pcie->clk_cnt, rk_pcie->clks);
 disable_vpcie3v3:
 	rk_pcie_disable_power(rk_pcie);
@@ -2391,14 +2292,7 @@ static int __maybe_unused rockchip_dw_pcie_resume(struct device *dev)
 
 	dw_pcie_dbi_ro_wr_en(rk_pcie->pci);
 
-	if (rk_pcie->is_rk1808) {
-		/* release link reset grant */
-		ret = rk_pcie_reset_grant_ctrl(rk_pcie, true);
-		if (ret)
-			return ret;
-	} else {
-		rk_pcie_fast_link_setup(rk_pcie);
-	}
+	rk_pcie_fast_link_setup(rk_pcie);
 
 	/* Set PCIe mode */
 	rk_pcie_set_mode(rk_pcie);
@@ -2430,12 +2324,6 @@ static int __maybe_unused rockchip_dw_pcie_resume(struct device *dev)
 
 std_rc_done:
 	dw_pcie_dbi_ro_wr_dis(rk_pcie->pci);
-	/* hold link reset grant after link-up */
-	if (rk_pcie->is_rk1808) {
-		ret = rk_pcie_reset_grant_ctrl(rk_pcie, false);
-		if (ret)
-			goto err;
-	}
 
 	return 0;
 err:
