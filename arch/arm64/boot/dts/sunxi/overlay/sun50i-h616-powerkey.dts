@@ -1,0 +1,19 @@
+/dts-v1/;
+/plugin/;
+
+/ {
+	fragment@0 {
+		target = <&twi5>;
+		__overlay__ {
+                        pmu {
+                                compatible = "x-powers,axp1530";
+                                reg = <0x36>;
+
+                                interrupt-parent = <0x23>;
+                                interrupts = <2 9 8>;
+                                interrupt-controller;
+                                #interrupt-cells = <1>;
+			};
+		};
+	};
+};

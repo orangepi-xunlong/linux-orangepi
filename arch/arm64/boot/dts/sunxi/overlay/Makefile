@@ -18,6 +18,7 @@ dtbo-$(CONFIG_ARCH_SUNXI) += \
 	sun50i-h616-pi-uart3.dtbo \
 	sun50i-h616-pi-uart4.dtbo \
 	sun50i-h616-ph-uart5.dtbo \
+	sun50i-h616-powerkey.dtbo \
 	sun50i-h616-usb0-host.dtbo \
 	sun50i-h616-spi0-spidev.dtbo \
 	sun50i-h616-spi1-cs0-spidev.dtbo \
