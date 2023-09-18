@@ -960,6 +960,7 @@
 };
 
 &vop {
+	vop-supply = <&vdd_logic>;
 	status = "okay";
 };
 

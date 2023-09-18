@@ -463,6 +463,7 @@
 	status = "okay";
 	assigned-clocks = <&cru DCLK_VOP1>;
 	assigned-clock-parents = <&cru PLL_VPLL>;
+	vop-supply = <&vdd_logic>;
 };
 
 &vop_mmu {
