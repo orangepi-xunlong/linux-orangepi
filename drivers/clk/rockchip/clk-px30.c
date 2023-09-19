@@ -188,7 +188,7 @@ PNAME(mux_gpu_p)		= { "clk_gpu_div", "clk_gpu_np5" };
 
 static struct rockchip_pll_clock px30_pll_clks[] __initdata = {
 	[apll] = PLL(pll_rk3328, PLL_APLL, "apll", mux_pll_p,
-		     0, PX30_PLL_CON(0),
+		     CLK_IS_CRITICAL, PX30_PLL_CON(0),
 		     PX30_MODE_CON, 0, 0, 0, px30_pll_rates),
 	[dpll] = PLL(pll_rk3328, PLL_DPLL, "dpll", mux_pll_p,
 		     0, PX30_PLL_CON(8),
