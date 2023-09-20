@@ -220,6 +220,11 @@ struct panel_simple {
 	enum drm_panel_orientation orientation;
 };
 
+static inline void panel_simple_msleep(unsigned int msecs)
+{
+	usleep_range(msecs * 1000, msecs * 1000 + 100);
+}
+
 static inline struct panel_simple *to_panel_simple(struct drm_panel *panel)
 {
 	return container_of(panel, struct panel_simple, base);
@@ -337,7 +342,7 @@ static int panel_simple_xfer_dsi_cmd_seq(struct panel_simple *panel,
 			dev_err(dev, "failed to write dcs cmd: %d\n", err);
 
 		if (cmd->header.delay)
-			msleep(cmd->header.delay);
+			panel_simple_msleep(cmd->header.delay);
 	}
 
 	return 0;
@@ -360,7 +365,7 @@ static int panel_simple_xfer_spi_cmd_seq(struct panel_simple *panel, struct pane
 			return ret;
 
 		if (cmd->header.delay)
-			usleep_range(cmd->header.delay * 1000, (cmd->header.delay + 1) * 1000);
+			panel_simple_msleep(cmd->header.delay);
 	}
 
 	return 0;
@@ -490,7 +495,7 @@ static void panel_simple_wait(ktime_t start_ktime, unsigned int min_ms)
 	now_ktime = ktime_get_boottime();
 
 	if (ktime_before(now_ktime, min_ktime))
-		msleep(ktime_to_ms(ktime_sub(min_ktime, now_ktime)) + 1);
+		panel_simple_msleep(ktime_to_ms(ktime_sub(min_ktime, now_ktime)) + 1);
 }
 
 static int panel_simple_regulator_enable(struct panel_simple *p)
@@ -552,7 +557,7 @@ static int panel_simple_disable(struct drm_panel *panel)
 		return 0;
 
 	if (p->desc->delay.disable)
-		msleep(p->desc->delay.disable);
+		panel_simple_msleep(p->desc->delay.disable);
 
 	p->enabled = false;
 
@@ -569,7 +574,7 @@ static int panel_simple_suspend(struct device *dev)
 	panel_simple_regulator_disable(p);
 
 	if (p->desc->delay.unprepare)
-		msleep(p->desc->delay.unprepare);
+		panel_simple_msleep(p->desc->delay.unprepare);
 
 	p->unprepared_time = ktime_get_boottime();
 
@@ -625,7 +630,7 @@ static int panel_simple_resume(struct device *dev)
 	gpiod_set_value_cansleep(p->enable_gpio, 1);
 
 	if (p->desc->delay.prepare)
-		msleep(p->desc->delay.prepare);
+		panel_simple_msleep(p->desc->delay.prepare);
 
 	p->prepared_time = ktime_get_boottime();
 
@@ -650,12 +655,12 @@ static int panel_simple_prepare(struct drm_panel *panel)
 	gpiod_set_value_cansleep(p->reset_gpio, 1);
 
 	if (p->desc->delay.reset)
-		msleep(p->desc->delay.reset);
+		panel_simple_msleep(p->desc->delay.reset);
 
 	gpiod_set_value_cansleep(p->reset_gpio, 0);
 
 	if (p->desc->delay.init)
-		msleep(p->desc->delay.init);
+		panel_simple_msleep(p->desc->delay.init);
 
 	if (p->desc->init_seq) {
 		if (p->desc->cmd_type == CMD_TYPE_SPI) {
@@ -682,7 +687,7 @@ static int panel_simple_enable(struct drm_panel *panel)
 		return 0;
 
 	if (p->desc->delay.enable)
-		msleep(p->desc->delay.enable);
+		panel_simple_msleep(p->desc->delay.enable);
 
 	p->enabled = true;
 
