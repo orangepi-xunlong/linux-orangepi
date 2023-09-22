@@ -167,8 +167,6 @@
 #define VOP2_MAX_VP_OUTPUT_WIDTH	4096
 /* KHZ */
 #define VOP2_MAX_DCLK_RATE		600000
-/* KHZ */
-#define VOP2_COMMON_ACLK_RATE		500000
 
 enum vop2_data_format {
 	VOP2_FMT_ARGB8888 = 0,
@@ -6546,7 +6544,6 @@ vop2_crtc_mode_valid(struct drm_crtc *crtc, const struct drm_display_mode *mode)
 	const struct vop2_video_port_data *vp_data = &vop2_data->vp[vp->id];
 	int request_clock = mode->clock;
 	int clock;
-	unsigned long aclk_rate;
 	uint8_t active_vp_mask = vop2->active_vp_mask;
 
 	/*
@@ -6569,11 +6566,6 @@ vop2_crtc_mode_valid(struct drm_crtc *crtc, const struct drm_display_mode *mode)
 
 	if (mode->flags & DRM_MODE_FLAG_DBLCLK || vcstate->output_if & VOP_OUTPUT_IF_BT656)
 		request_clock *= 2;
-
-	aclk_rate = clk_get_rate(vop2->aclk) / 1000;
-
-	if (request_clock > VOP2_MAX_DCLK_RATE && aclk_rate <= VOP2_COMMON_ACLK_RATE)
-		return MODE_BAD;
 
 	if ((request_clock <= VOP2_MAX_DCLK_RATE) &&
 	    (vop2_extend_clk_find_by_name(vop2, "hdmi0_phy_pll") ||
