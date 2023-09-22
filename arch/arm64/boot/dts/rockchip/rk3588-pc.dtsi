@@ -343,6 +343,7 @@
 			  <&cru DCLK_VOP2_SRC>,
 			  <&cru DCLK_VOP3>;
 	assigned-clock-parents = <0>, <0>, <&cru PLL_V0PLL>, <0>;
+	vop-supply = <&vdd_log_s0>;
 	status = "okay";
 };
 

@@ -406,6 +406,7 @@
 
 &vop {
 	status = "okay";
+	vop-supply = <&vdd_log_s0>;
 };
 
 &vop_mmu {
