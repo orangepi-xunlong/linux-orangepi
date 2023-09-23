@@ -1089,7 +1089,7 @@ static int rockchip_i2s_probe(struct platform_device *pdev)
 	struct snd_soc_dai_driver *dai;
 	struct resource *res;
 	void __iomem *regs;
-	int ret, i;
+	int ret, i, val;
 
 	i2s = devm_kzalloc(&pdev->dev, sizeof(*i2s), GFP_KERNEL);
 	if (!i2s)
@@ -1124,6 +1124,10 @@ static int rockchip_i2s_probe(struct platform_device *pdev)
 	}
 
 	i2s->bclk_ratio = 64;
+	if (!device_property_read_u32(&pdev->dev, "rockchip,bclk-fs", &val)) {
+		if ((val >= 32) && (val % 2 == 0))
+			i2s->bclk_ratio = val;
+	}
 	i2s->pinctrl = devm_pinctrl_get(&pdev->dev);
 	if (!IS_ERR(i2s->pinctrl)) {
 		i2s->bclk_on = pinctrl_lookup_state(i2s->pinctrl, "bclk_on");
