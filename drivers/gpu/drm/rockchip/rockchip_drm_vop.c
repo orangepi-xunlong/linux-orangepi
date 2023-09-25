@@ -1559,6 +1559,17 @@ static int vop_crtc_atomic_gamma_set(struct drm_crtc *crtc,
 	return 0;
 }
 
+static void vop_regsbak(struct vop *vop)
+{
+	int i;
+
+	/*
+	 * No need to backup DSC/GAMMA_LUT/BPP_LUT/MMU
+	 */
+	for (i = 0; i < vop->len; i += sizeof(u32))
+		vop->regsbak[i / 4] = readl_relaxed(vop->regs + i);
+}
+
 static void vop_power_enable(struct drm_crtc *crtc)
 {
 	struct vop *vop = to_vop(crtc);
@@ -1588,7 +1599,7 @@ static void vop_power_enable(struct drm_crtc *crtc)
 		return;
 	}
 
-	memcpy(vop->regsbak, vop->regs, vop->len);
+	vop_regsbak(vop);
 
 	if (VOP_CTRL_SUPPORT(vop, version)) {
 		uint32_t version = VOP_CTRL_GET(vop, version);
