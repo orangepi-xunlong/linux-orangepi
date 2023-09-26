@@ -14,6 +14,7 @@ config VIDEO_RK628_CSI
 	select V4L2_FWNODE
 	select VIDEO_V4L2_SUBDEV_API
 	select VIDEO_RK628
+	select VIDEO_ROCKCHIP_HDMIRX_CLASS
 	help
 	  Support for the Rockchip RK628 HDMI to MIPI CSI-2 bridge.
 
