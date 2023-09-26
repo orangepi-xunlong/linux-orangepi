@@ -1813,6 +1813,9 @@
 		clocks = <&cru ACLK_VOP>, <&cru HCLK_VOP>, <&cru DCLK_VOP0>,
 			 <&cru DCLK_VOP1>, <&cru DCLK_VOP2>;
 		clock-names = "aclk_vop", "hclk_vop", "dclk_vp0", "dclk_vp1", "dclk_vp2";
+		rockchip,aclk-normal-mode-rates = <396000000>;
+		rockchip,aclk-advanced-mode-rates = <500000000>;
+		operating-points-v2 = <&vop_opp_table>;
 		iommus = <&vop_mmu>;
 		power-domains = <&power RK3568_PD_VO>;
 		rockchip,grf = <&grf>;
@@ -1894,6 +1897,35 @@
 					remote-endpoint = <&rgb_in_vp2>;
 				};
 			};
+		};
+	};
+
+	vop_opp_table: vop-opp-table {
+		compatible = "operating-points-v2";
+
+		nvmem-cells = <&log_leakage>, <&core_pvtm>;
+		nvmem-cell-names = "leakage", "pvtm";
+		rockchip,leakage-voltage-sel = <
+			1   80    0
+			81  254   1
+		>;
+		rockchip,pvtm-voltage-sel = <
+			0        84000   0
+			84001    100000  1
+		>;
+		rockchip,pvtm-ch = <0 5>;
+
+		opp-396000000 {
+			opp-hz = /bits/ 64 <396000000>;
+			opp-microvolt = <900000 900000 1000000>;
+			opp-microvolt-L0 = <900000 900000 1000000>;
+			opp-microvolt-L1 = <875000 875000 1000000>;
+		};
+		opp-500000000 {
+			opp-hz = /bits/ 64 <500000000>;
+			opp-microvolt = <925000 925000 1000000>;
+			opp-microvolt-L0 = <925000 925000 1000000>;
+			opp-microvolt-L1 = <900000 900000 1000000>;
 		};
 	};
 
