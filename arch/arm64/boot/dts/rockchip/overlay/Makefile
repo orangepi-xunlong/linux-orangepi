@@ -77,6 +77,7 @@ dtbo-$(CONFIG_ARCH_ROCKCHIP) += \
 	rk356x-raspi-7inch-touchscreen.dtbo \
 	rk356x-raspi-7inch-touchscreen-dsi0.dtbo \
 	rk356x-spi3-m0-cs0-spidev.dtbo \
+	rk356x-uart2-m0.dtbo \
 	rk356x-uart3-m0.dtbo \
 	rk356x-uart7-m2.dtbo \
 	rk356x-uart9-m2.dtbo \
