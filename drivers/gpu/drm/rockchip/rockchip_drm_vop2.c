@@ -7517,6 +7517,14 @@ static void vop2_setup_dual_channel_if(struct drm_crtc *crtc)
 	struct rockchip_crtc_state *vcstate = to_rockchip_crtc_state(crtc->state);
 	struct vop2 *vop2 = vp->vop2;
 
+	if (vcstate->output_flags & ROCKCHIP_OUTPUT_DUAL_CHANNEL_ODD_EVEN_MODE) {
+		VOP_CTRL_SET(vop2, lvds_dual_en, 1);
+		VOP_CTRL_SET(vop2, lvds_dual_mode, 0);
+		if (vcstate->output_flags & ROCKCHIP_OUTPUT_DATA_SWAP)
+			VOP_CTRL_SET(vop2, lvds_dual_channel_swap, 1);
+		return;
+	}
+
 	VOP_MODULE_SET(vop2, vp, dual_channel_en, 1);
 	if (vcstate->output_flags & ROCKCHIP_OUTPUT_DATA_SWAP)
 		VOP_MODULE_SET(vop2, vp, dual_channel_swap, 1);
@@ -7533,6 +7541,10 @@ static void vop2_setup_dual_channel_if(struct drm_crtc *crtc)
 	else if (vcstate->output_if & VOP_OUTPUT_IF_MIPI1 &&
 		 !vop2_mark_as_left_panel(vcstate, VOP_OUTPUT_IF_MIPI1))
 		VOP_CTRL_SET(vop2, mipi_dual_en, 1);
+	else if (vcstate->output_if & VOP_OUTPUT_IF_LVDS1) {
+		VOP_CTRL_SET(vop2, lvds_dual_en, 1);
+		VOP_CTRL_SET(vop2, lvds_dual_mode, 1);
+	}
 }
 
 /*
@@ -7843,15 +7855,6 @@ static void vop2_crtc_atomic_enable(struct drm_crtc *crtc, struct drm_atomic_sta
 		VOP_CTRL_SET(vop2, lvds_dclk_pol, dclk_inv);
 	}
 
-	if (vcstate->output_flags & (ROCKCHIP_OUTPUT_DUAL_CHANNEL_ODD_EVEN_MODE |
-	    ROCKCHIP_OUTPUT_DUAL_CHANNEL_LEFT_RIGHT_MODE)) {
-		VOP_CTRL_SET(vop2, lvds_dual_en, 1);
-		if (vcstate->output_flags & ROCKCHIP_OUTPUT_DUAL_CHANNEL_LEFT_RIGHT_MODE)
-			VOP_CTRL_SET(vop2, lvds_dual_mode, 1);
-		if (vcstate->output_flags & ROCKCHIP_OUTPUT_DATA_SWAP)
-			VOP_CTRL_SET(vop2, lvds_dual_channel_swap, 1);
-	}
-
 	if (vcstate->output_if & VOP_OUTPUT_IF_MIPI0) {
 		ret = vop2_calc_cru_cfg(crtc, VOP_OUTPUT_IF_MIPI0, &if_pixclk, &if_dclk);
 		if (ret < 0)
@@ -7895,7 +7898,8 @@ static void vop2_crtc_atomic_enable(struct drm_crtc *crtc, struct drm_atomic_sta
 		}
 	}
 
-	if (vcstate->output_flags & ROCKCHIP_OUTPUT_DUAL_CHANNEL_LEFT_RIGHT_MODE)
+	if (vcstate->output_flags & ROCKCHIP_OUTPUT_DUAL_CHANNEL_LEFT_RIGHT_MODE ||
+	    vcstate->output_flags & ROCKCHIP_OUTPUT_DUAL_CHANNEL_ODD_EVEN_MODE)
 		vop2_setup_dual_channel_if(crtc);
 
 	if (vcstate->output_if & VOP_OUTPUT_IF_eDP0) {
