@@ -1070,7 +1070,7 @@ static void RGA3_set_reg_overlap_info(u8 *base, struct rga3_req *msg)
 	bottom_color_ctrl.bits.alpha_cal_mode = RGA_ALPHA_SATURATION;
 
 	top_color_ctrl.bits.global_alpha = config->fg_global_alpha_value;
-	bottom_color_ctrl.bits.global_alpha = config->fg_global_alpha_value;
+	bottom_color_ctrl.bits.global_alpha = config->bg_global_alpha_value;
 
 	/* porter duff alpha enable */
 	switch (config->mode) {
@@ -1643,70 +1643,30 @@ static void rga_cmd_to_rga3_cmd(struct rga_req *req_rga, struct rga3_req *req)
 			req->alpha_config.fg_pixel_alpha_en = rga_is_alpha_format(req->win1.format);
 			req->alpha_config.bg_pixel_alpha_en = rga_is_alpha_format(req->win0.format);
 
-			req->alpha_config.fg_global_alpha_en = false;
-			req->alpha_config.bg_global_alpha_en = false;
-
-			req->alpha_config.fg_global_alpha_value = req_rga->alpha_global_value;
-			req->alpha_config.bg_global_alpha_value = req_rga->alpha_global_value;
-
-			/* porter duff alpha enable */
-			switch (req_rga->PD_mode) {
-			/* dst = 0 */
-			case 0:
-				break;
-			case 1:
-				req->alpha_config.mode = RGA_ALPHA_BLEND_SRC;
-				break;
-			case 2:
-				req->alpha_config.mode = RGA_ALPHA_BLEND_DST;
-				break;
-			case 3:
-				if ((req_rga->alpha_rop_mode & 3) == 0) {
-					/* both use globalAlpha. */
+			if (req_rga->feature.global_alpha_en) {
+				if (req_rga->fg_global_alpha < 0xff) {
 					req->alpha_config.fg_global_alpha_en = true;
-					req->alpha_config.bg_global_alpha_en = true;
-				} else if ((req_rga->alpha_rop_mode & 3) == 1) {
-					/* Do not use globalAlpha. */
-					req->alpha_config.fg_global_alpha_en = false;
-					req->alpha_config.bg_global_alpha_en = false;
-				} else {
-					/* dst use globalAlpha */
-					req->alpha_config.fg_global_alpha_en = false;
-					req->alpha_config.bg_global_alpha_en = true;
+					req->alpha_config.fg_global_alpha_value =
+						req_rga->fg_global_alpha;
+				} else if (!req->alpha_config.fg_pixel_alpha_en) {
+					req->alpha_config.fg_global_alpha_en = true;
+					req->alpha_config.fg_global_alpha_value = 0xff;
 				}
 
-				req->alpha_config.mode = RGA_ALPHA_BLEND_SRC_OVER;
-				break;
-			case 4:
-				req->alpha_config.mode = RGA_ALPHA_BLEND_DST_OVER;
-				break;
-			case 5:
-				req->alpha_config.mode = RGA_ALPHA_BLEND_SRC_IN;
-				break;
-			case 6:
-				req->alpha_config.mode = RGA_ALPHA_BLEND_DST_IN;
-				break;
-			case 7:
-				req->alpha_config.mode = RGA_ALPHA_BLEND_SRC_OUT;
-				break;
-			case 8:
-				req->alpha_config.mode = RGA_ALPHA_BLEND_DST_OUT;
-				break;
-			case 9:
-				req->alpha_config.mode = RGA_ALPHA_BLEND_SRC_ATOP;
-				break;
-			case 10:
-				req->alpha_config.mode = RGA_ALPHA_BLEND_DST_ATOP;
-				break;
-			case 11:
-				req->alpha_config.mode = RGA_ALPHA_BLEND_XOR;
-				break;
-			case 12:
-				req->alpha_config.mode = RGA_ALPHA_BLEND_CLEAR;
-				break;
-			default:
-				break;
+				if (req_rga->bg_global_alpha < 0xff) {
+					req->alpha_config.bg_global_alpha_en = true;
+					req->alpha_config.bg_global_alpha_value =
+						req_rga->bg_global_alpha;
+				} else if (!req->alpha_config.bg_pixel_alpha_en) {
+					req->alpha_config.bg_global_alpha_en = true;
+					req->alpha_config.bg_global_alpha_value = 0xff;
+				}
+			} else {
+				req->alpha_config.bg_global_alpha_value = 0xff;
+				req->alpha_config.bg_global_alpha_value = 0xff;
 			}
+
+			req->alpha_config.mode = req_rga->PD_mode;
 		}
 	}
 
