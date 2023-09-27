@@ -10,6 +10,8 @@
 
 	aliases {
 		ethernet0 = &gmac0;
+		lvds0 = &lvds;
+		lvds1 = &lvds1;
 	};
 
 	edac: edac {
@@ -329,6 +331,36 @@
 	};
 };
 
+&grf {
+	lvds1: lvds1 {
+		compatible = "rockchip,rk3568-lvds";
+		phys = <&video_phy1>;
+		phy-names = "phy";
+		status = "disabled";
+
+		ports {
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			port@0 {
+				reg = <0>;
+				#address-cells = <1>;
+				#size-cells = <0>;
+
+				lvds1_in_vp1: endpoint@0 {
+					reg = <0>;
+					remote-endpoint = <&vp1_out_lvds1>;
+				};
+
+				lvds1_in_vp2: endpoint@1 {
+					reg = <1>;
+					remote-endpoint = <&vp2_out_lvds1>;
+				};
+			};
+		};
+	};
+};
+
 &npu_opp_table {
 	/* RK3568J npu OPPs */
 	opp-j-600000000 {
@@ -368,4 +400,18 @@
 &usbdrd_dwc3 {
 	phys = <&u2phy0_otg>, <&combphy0_us PHY_TYPE_USB3>;
 	phy-names = "usb2-phy", "usb3-phy";
+};
+
+&vp1 {
+	vp1_out_lvds1: endpoint@5 {
+		reg = <5>;
+		remote-endpoint = <&lvds1_in_vp1>;
+	};
+};
+
+&vp2 {
+	vp2_out_lvds1: endpoint@2 {
+		reg = <2>;
+		remote-endpoint = <&lvds1_in_vp2>;
+	};
 };
