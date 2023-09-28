@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: (GPL-2.0+ OR MIT)
 /*
- * Copyright (c) 2018 Fuzhou Rockchip Electronics Co., Ltd
+ * Copyright (c) 2023 Rockchip Electronics Co., Ltd
  */
 
 /dts-v1/;
 
-#include "rk3308-evb-v11.dtsi"
+#include "rk3308-evb-v13.dtsi"
 
 / {
-	model = "Rockchip RK3308 evb analog mic v11 board";
-	compatible = "rockchip,rk3308-evb-amic-v11", "rockchip,rk3308";
+	model = "Rockchip RK3308 evb analog mic v13 board";
+	compatible = "rockchip,rk3308-evb-amic-v13", "rockchip,rk3308";
 
 	vad_acodec_sound: vad-acodec-sound {
 		status = "okay";
