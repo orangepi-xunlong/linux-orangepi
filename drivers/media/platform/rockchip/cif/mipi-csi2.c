@@ -642,13 +642,6 @@ static const struct v4l2_subdev_ops csi2_subdev_ops = {
 	.pad = &csi2_pad_ops,
 };
 
-static int csi2_parse_endpoint(struct device *dev,
-			       struct v4l2_fwnode_endpoint *vep,
-			       struct v4l2_async_subdev *asd)
-{
-	return 0;
-}
-
 /* The .bound() notifier callback when a match is found */
 static int
 csi2_notifier_bound(struct v4l2_async_notifier *notifier,
@@ -891,6 +884,53 @@ static irqreturn_t rk_csirx_irq2_handler(int irq, void *ctx)
 	return IRQ_HANDLED;
 }
 
+/* Parse fwnode with port0, if an empty function is used, each node will parse
+ * all ports, causing the device to repeatedly join the link and unable to
+ * complete the link
+ */
+static int csi2_fwnode_parse(struct csi2_dev *csi2)
+{
+	struct device *dev = csi2->dev;
+	struct fwnode_handle *ep = NULL;
+	struct v4l2_async_subdev *s_asd = NULL;
+	struct fwnode_handle *remote_ep = NULL;
+	struct v4l2_fwnode_endpoint vep = {
+		.bus_type = V4L2_MBUS_CSI2_DPHY
+	};
+	int ret = 0;
+
+	fwnode_graph_for_each_endpoint(dev_fwnode(dev), ep) {
+		ret = v4l2_fwnode_endpoint_parse(ep, &vep);
+		if (ret)
+			goto err_parse;
+
+		/* only add fwnode form port 0 to notifier list */
+		if (vep.base.port != 0)
+			continue;
+
+		remote_ep = fwnode_graph_get_remote_port_parent(ep);
+		/* skip device dts status is disabled */
+		if (!fwnode_device_is_available(remote_ep)) {
+			fwnode_handle_put(remote_ep);
+			continue;
+		}
+
+		s_asd = v4l2_async_nf_add_fwnode(&csi2->notifier, remote_ep,
+						 struct
+						 v4l2_async_subdev);
+		fwnode_handle_put(remote_ep);
+		if (IS_ERR(s_asd)) {
+			ret = PTR_ERR(s_asd);
+			goto err_parse;
+		}
+	}
+	return 0;
+
+err_parse:
+	fwnode_handle_put(ep);
+	return ret;
+}
+
 static int csi2_notifier(struct csi2_dev *csi2)
 {
 	struct v4l2_async_notifier *ntf = &csi2->notifier;
@@ -898,10 +938,7 @@ static int csi2_notifier(struct csi2_dev *csi2)
 
 	v4l2_async_nf_init(ntf);
 
-	ret = v4l2_async_nf_parse_fwnode_endpoints(csi2->dev,
-							 ntf,
-							 sizeof(struct v4l2_async_subdev),
-							 csi2_parse_endpoint);
+	ret = csi2_fwnode_parse(csi2);
 	if (ret < 0)
 		return ret;
 
