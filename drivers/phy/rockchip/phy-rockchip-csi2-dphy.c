@@ -791,37 +791,64 @@ v4l2_async_notifier_operations rockchip_csi2_dphy_async_ops = {
 	.unbind = rockchip_csi2_dphy_notifier_unbind,
 };
 
+/* Parse fwnode with port0, if an empty function is used, each node will parse
+ * all ports, causing the device to repeatedly join the link and unable to
+ * complete the link
+ */
 static int rockchip_csi2_dphy_fwnode_parse(struct csi2_dphy *dphy)
 {
 	struct device *dev = dphy->dev;
-	struct fwnode_handle *ep;
-	struct sensor_async_subdev *s_asd;
-	struct fwnode_handle *remote_ep;
+	struct fwnode_handle *ep = NULL;
+	struct sensor_async_subdev *s_asd = NULL;
+	struct v4l2_mbus_config *config = NULL;
+	struct fwnode_handle *remote_ep = NULL;
 	struct v4l2_fwnode_endpoint vep = {
 		.bus_type = V4L2_MBUS_CSI2_DPHY
 	};
 	int ret;
 
 	fwnode_graph_for_each_endpoint(dev_fwnode(dev), ep) {
-		remote_ep = fwnode_graph_get_remote_port_parent(ep);
-
-		if (!fwnode_device_is_available(remote_ep))
-			continue;
-
 		ret = v4l2_fwnode_endpoint_parse(ep, &vep);
 		if (ret)
 			goto err_parse;
 
+		/* only add fwnode form port 0 to notifier list */
+		if (vep.base.port != 0)
+			continue;
+
+		remote_ep = fwnode_graph_get_remote_port_parent(ep);
+
+		/* skip device dts status is disabled */
+		if (!fwnode_device_is_available(remote_ep)) {
+			fwnode_handle_put(remote_ep);
+			continue;
+		}
+
+		fwnode_handle_put(remote_ep);
+
 		s_asd = v4l2_async_nf_add_fwnode_remote(&dphy->notifier, ep,
 							struct
 							sensor_async_subdev);
-
 		if (IS_ERR(s_asd)) {
 			ret = PTR_ERR(s_asd);
 			goto err_parse;
 		}
 
-		fwnode_handle_put(ep);
+		config = &s_asd->mbus;
+		if (vep.bus_type == V4L2_MBUS_CSI2_DPHY ||
+		    vep.bus_type == V4L2_MBUS_CSI2_CPHY) {
+			config->type = vep.bus_type;
+			config->bus.mipi_csi2.flags = vep.bus.mipi_csi2.flags;
+			s_asd->lanes = vep.bus.mipi_csi2.num_data_lanes;
+		} else if (vep.bus_type == V4L2_MBUS_CCP2) {
+			/* V4L2_MBUS_CCP2 for lvds */
+			config->type = V4L2_MBUS_CCP2;
+			s_asd->lanes = vep.bus.mipi_csi1.data_lane;
+		} else {
+			dev_err(dev, "Only CSI2 and CCP2 bus type is currently supported\n");
+			ret = -EINVAL;
+			goto err_parse;
+		}
 	}
 	return 0;
 
