@@ -2104,7 +2104,7 @@ task_done_ret:
 
 		if (ret < 0)
 			return ret;
-	} while (ret > 0);
+	} while (!ret);
 
 	rkvenc2_task_timeout_process(session, task);
 

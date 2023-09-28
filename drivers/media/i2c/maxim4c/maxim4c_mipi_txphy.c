@@ -220,10 +220,21 @@ int maxim4c_mipi_csi_output(maxim4c_t *maxim4c, bool enable)
 {
 	struct i2c_client *client = maxim4c->client;
 	struct device *dev = &client->dev;
+	maxim4c_mipi_txphy_t *mipi_txphy = &maxim4c->mipi_txphy;
 	u8 reg_mask = 0, reg_value = 0;
 	int ret = 0;
 
 	dev_dbg(dev, "%s: enable = %d\n", __func__, enable);
+
+	if (mipi_txphy->force_clock_out_en != 0) {
+		reg_mask = BIT(7);
+		reg_value = enable ? BIT(7) : 0;
+
+		// Force all MIPI clocks running Config
+		ret |= maxim4c_i2c_update_byte(client,
+				0x08A0, MAXIM4C_I2C_REG_ADDR_16BITS,
+				reg_mask, reg_value);
+	}
 
 	/* Bit1 of the register 0x040B: CSI_OUT_EN
 	 *     1 = CSI output enabled
@@ -259,7 +270,8 @@ static int maxim4c_mipi_txphy_config_parse_dt(struct device *dev,
 				 txphy_cfg_name,
 				 strlen(txphy_cfg_name))) {
 			if (sub_idx >= MAXIM4C_TXPHY_ID_MAX) {
-				dev_err(dev, "Too many matching %s node\n", txphy_cfg_name);
+				dev_err(dev, "%pOF: Too many matching %s node\n",
+						parent_node, txphy_cfg_name);
 
 				of_node_put(node);
 				break;
@@ -355,8 +367,11 @@ int maxim4c_mipi_txphy_parse_dt(maxim4c_t *maxim4c, struct device_node *of_node)
 	dev_info(dev, "=== maxim4c mipi txphy parse dt ===\n");
 
 	node = of_get_child_by_name(of_node, "mipi-txphys");
-	if (IS_ERR_OR_NULL(node))
+	if (IS_ERR_OR_NULL(node)) {
+		dev_err(dev, "%pOF has no child node: mipi-txphys\n",
+				of_node);
 		return -ENODEV;
+	}
 
 	if (!of_device_is_available(node)) {
 		dev_info(dev, "%pOF is disabled\n", node);
@@ -404,6 +419,7 @@ EXPORT_SYMBOL(maxim4c_mipi_txphy_parse_dt);
 int maxim4c_mipi_txphy_hw_init(maxim4c_t *maxim4c)
 {
 	struct i2c_client *client = maxim4c->client;
+	struct device *dev = &client->dev;
 	maxim4c_mipi_txphy_t *mipi_txphy = &maxim4c->mipi_txphy;
 	struct maxim4c_txphy_cfg *phy_cfg = NULL;
 	u8 mode = 0;
@@ -479,9 +495,6 @@ int maxim4c_mipi_txphy_hw_init(maxim4c_t *maxim4c)
 			phy_cfg->clock_master = 1;
 		break;
 	}
-	// MIPI clocks running mode
-	if (mipi_txphy->force_clock_out_en != 0)
-		mode |= BIT(7);
 
 	// MIPI TXPHY Mode setting
 	ret |= maxim4c_i2c_write_byte(client,
@@ -497,7 +510,12 @@ int maxim4c_mipi_txphy_hw_init(maxim4c_t *maxim4c)
 	// mipi txphy auto init deskew
 	ret |= maxim4c_txphy_auto_init_deskew(maxim4c);
 
-	return ret;
+	if (ret) {
+		dev_err(dev, "%s: txphy hw init error\n", __func__);
+		return ret;
+	}
+
+	return 0;
 }
 EXPORT_SYMBOL(maxim4c_mipi_txphy_hw_init);
 
