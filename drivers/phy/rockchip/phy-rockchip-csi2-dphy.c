@@ -805,6 +805,7 @@ static int rockchip_csi2_dphy_fwnode_parse(struct csi2_dphy *dphy)
 	struct v4l2_fwnode_endpoint vep = {
 		.bus_type = V4L2_MBUS_CSI2_DPHY
 	};
+	struct device *remote_dev = NULL;
 	int ret;
 
 	fwnode_graph_for_each_endpoint(dev_fwnode(dev), ep) {
@@ -822,6 +823,18 @@ static int rockchip_csi2_dphy_fwnode_parse(struct csi2_dphy *dphy)
 		if (!fwnode_device_is_available(remote_ep)) {
 			fwnode_handle_put(remote_ep);
 			continue;
+		}
+
+		/* check sensor register state on i2c/spi bus for gki*/
+		if (!IS_ENABLED(CONFIG_NO_GKI)) {
+			remote_dev = bus_find_device_by_fwnode(&i2c_bus_type, remote_ep);
+			if (!remote_dev || !remote_dev->driver) {
+				remote_dev = bus_find_device_by_fwnode(&spi_bus_type, remote_ep);
+				if (!remote_dev || !remote_dev->driver) {
+					fwnode_handle_put(remote_ep);
+					continue;
+				}
+			}
 		}
 
 		fwnode_handle_put(remote_ep);
