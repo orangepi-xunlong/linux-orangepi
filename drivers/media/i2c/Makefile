@@ -190,6 +190,7 @@ obj-$(CONFIG_VIDEO_RDACM21) += rdacm21.o
 obj-$(CONFIG_VIDEO_RJ54N1) += rj54n1cb0c.o
 obj-$(CONFIG_VIDEO_RK628) += rk628/
 obj-$(CONFIG_VIDEO_RK_IRCUT) += rk_ircut.o
+obj-$(CONFIG_VIDEO_ROCKCHIP_THUNDER_BOOT_ISP)	+= cam-tb-setup.o
 obj-$(CONFIG_VIDEO_S5C73M3) += s5c73m3/
 obj-$(CONFIG_VIDEO_S5K3L6XX) += s5k3l6xx.o
 obj-$(CONFIG_VIDEO_S5K4ECGX) += s5k4ecgx.o
