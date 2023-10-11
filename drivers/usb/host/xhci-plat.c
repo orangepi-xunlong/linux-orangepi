@@ -304,7 +304,7 @@ static int xhci_plat_probe(struct platform_device *pdev)
 			xhci->quirks |= XHCI_BROKEN_PORT_PED;
 
 		if (device_property_read_bool(tmpdev, "quirk-skip-phy-init"))
-			xhci->quirks |= XHCI_SKIP_PHY_INIT;
+			hcd->skip_phy_initialization = 1;
 
 		if (device_property_read_bool(tmpdev,
 					      "xhci-u2-broken-suspend"))
