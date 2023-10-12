@@ -29,6 +29,11 @@
  * V2.03.00
  *     1. remote device add the maxim4c prefix to driver name.
  *
+ * V2.04.02
+ *     1. Add regulator supplier dependencies.
+ *     2. Add config ssc-ratio property
+ *     3. Add debugfs entry to change MIPI timing
+ *
  */
 #include <linux/clk.h>
 #include <linux/i2c.h>
@@ -58,9 +63,14 @@
 
 #include "maxim4c_api.h"
 
-#define DRIVER_VERSION			KERNEL_VERSION(2, 0x03, 0x00)
+#define DRIVER_VERSION			KERNEL_VERSION(2, 0x04, 0x02)
 
 #define MAXIM4C_XVCLK_FREQ		25000000
+
+static const char *const maxim4c_supply_names[MAXIM4C_NUM_SUPPLIES] = {
+	"vcc1v2",
+	"vcc1v8",
+};
 
 static int maxim4c_check_local_chipid(maxim4c_t *maxim4c)
 {
@@ -302,6 +312,13 @@ static inline u32 maxim4c_cal_delay(u32 cycles)
 static int maxim4c_local_device_power_on(maxim4c_t *maxim4c)
 {
 	struct device *dev = &maxim4c->client->dev;
+	int ret;
+
+	ret = regulator_bulk_enable(MAXIM4C_NUM_SUPPLIES, maxim4c->supplies);
+	if (ret < 0) {
+		dev_err(dev, "Failed to enable regulators\n");
+		return -EINVAL;
+	}
 
 	if (!IS_ERR(maxim4c->pwdn_gpio)) {
 		dev_info(dev, "local device pwdn gpio on\n");
@@ -317,24 +334,30 @@ static int maxim4c_local_device_power_on(maxim4c_t *maxim4c)
 static void maxim4c_local_device_power_off(maxim4c_t *maxim4c)
 {
 	struct device *dev = &maxim4c->client->dev;
+	int ret;
 
 	if (!IS_ERR(maxim4c->pwdn_gpio)) {
 		dev_info(dev, "local device pwdn gpio off\n");
 
 		gpiod_set_value_cansleep(maxim4c->pwdn_gpio, 0);
 	}
+
+	ret = regulator_bulk_disable(MAXIM4C_NUM_SUPPLIES, maxim4c->supplies);
+	if (ret < 0) {
+		dev_warn(dev, "Failed to disable regulators\n");
+	}
 }
 
 static int maxim4c_remote_device_power_on(maxim4c_t *maxim4c)
 {
 	struct device *dev = &maxim4c->client->dev;
+	int ret;
 
-	// remote PoC enable
-	if (!IS_ERR(maxim4c->pocen_gpio)) {
-		dev_info(dev, "remote device pocen gpio on\n");
-
-		gpiod_set_value_cansleep(maxim4c->pocen_gpio, 1);
-		usleep_range(5000, 10000);
+	dev_dbg(dev, "Turn PoC on\n");
+	ret = regulator_enable(maxim4c->poc_regulator);
+	if (ret < 0) {
+		dev_err(dev, "Unable to turn PoC on\n");
+		return ret;
 	}
 
 	return 0;
@@ -343,13 +366,12 @@ static int maxim4c_remote_device_power_on(maxim4c_t *maxim4c)
 static int maxim4c_remote_device_power_off(maxim4c_t *maxim4c)
 {
 	struct device *dev = &maxim4c->client->dev;
+	int ret;
 
-	// remote PoC enable
-	if (!IS_ERR(maxim4c->pocen_gpio)) {
-		dev_info(dev, "remote device pocen gpio off\n");
-
-		gpiod_set_value_cansleep(maxim4c->pocen_gpio, 0);
-	}
+	dev_dbg(dev, "Turn PoC off\n");
+	ret = regulator_disable(maxim4c->poc_regulator);
+	if (ret < 0)
+		dev_warn(dev, "Unable to turn PoC off\n");
 
 	return 0;
 }
@@ -581,6 +603,7 @@ static int maxim4c_probe(struct i2c_client *client,
 	maxim4c_t *maxim4c = NULL;
 	u32 chip_id;
 	int ret = 0;
+	unsigned int i;
 
 	dev_info(dev, "driver version: %02x.%02x.%02x", DRIVER_VERSION >> 16,
 		 (DRIVER_VERSION & 0xff00) >> 8, DRIVER_VERSION & 0x00ff);
@@ -621,13 +644,36 @@ static int maxim4c_probe(struct i2c_client *client,
 	if (IS_ERR(maxim4c->pwdn_gpio))
 		dev_warn(dev, "Failed to get pwdn-gpios, maybe no use\n");
 
-	maxim4c->pocen_gpio = devm_gpiod_get(dev, "pocen", GPIOD_OUT_LOW);
-	if (IS_ERR(maxim4c->pocen_gpio))
-		dev_warn(dev, "Failed to get pocen-gpios\n");
-
 	maxim4c->lock_gpio = devm_gpiod_get(dev, "lock", GPIOD_IN);
 	if (IS_ERR(maxim4c->lock_gpio))
 		dev_warn(dev, "Failed to get lock-gpios\n");
+
+	for (i = 0; i < MAXIM4C_NUM_SUPPLIES; i++)
+		maxim4c->supplies[i].supply = maxim4c_supply_names[i];
+
+	ret = devm_regulator_bulk_get(dev, MAXIM4C_NUM_SUPPLIES,
+				      maxim4c->supplies);
+	if (ret < 0) {
+		if (ret != -EPROBE_DEFER)
+			dev_err(dev, "Unable to get supply regulators\n");
+		else
+			dev_warn(dev, "Get PoC regulator deferred\n");
+		return ret;
+	}
+
+	maxim4c->poc_regulator = devm_regulator_get(dev, "poc");
+	if (IS_ERR(maxim4c->poc_regulator)) {
+		if (PTR_ERR(maxim4c->poc_regulator) != -EPROBE_DEFER)
+			dev_err(dev, "Unable to get PoC regulator (%ld)\n",
+				PTR_ERR(maxim4c->poc_regulator));
+		else
+			dev_err(dev, "Get PoC regulator deferred\n");
+
+		ret = PTR_ERR(maxim4c->poc_regulator);
+#if !MAXIM4C_TEST_PATTERN
+		return ret;
+#endif
+	}
 
 	mutex_init(&maxim4c->mutex);
 
@@ -668,15 +714,19 @@ static int maxim4c_probe(struct i2c_client *client,
 	maxim4c_module_data_init(maxim4c);
 	maxim4c_module_parse_dt(maxim4c);
 
+	ret = maxim4c_dbgfs_init(maxim4c);
+	if (ret)
+		goto err_subdev_deinit;
+
 #if (MAXIM4C_LOCAL_DES_ON_OFF_EN == 0)
 	ret = maxim4c_module_hw_init(maxim4c);
 	if (ret)
-		goto err_subdev_deinit;
+		goto err_dbgfs_deinit;
 #endif /* MAXIM4C_LOCAL_DES_ON_OFF_EN */
 
 	ret = maxim4c_remote_mfd_add_devices(maxim4c);
 	if (ret)
-		goto err_subdev_deinit;
+		goto err_dbgfs_deinit;
 
 	maxim4c_lock_irq_init(maxim4c);
 	maxim4c_lock_state_work_init(maxim4c);
@@ -687,6 +737,8 @@ static int maxim4c_probe(struct i2c_client *client,
 
 	return 0;
 
+err_dbgfs_deinit:
+	maxim4c_dbgfs_deinit(maxim4c);
 err_subdev_deinit:
 	maxim4c_v4l2_subdev_deinit(maxim4c);
 err_power_off:
@@ -702,6 +754,8 @@ static int maxim4c_remove(struct i2c_client *client)
 	maxim4c_t *maxim4c = i2c_get_clientdata(client);
 
 	maxim4c_lock_state_work_deinit(maxim4c);
+
+	maxim4c_dbgfs_deinit(maxim4c);
 
 	maxim4c_v4l2_subdev_deinit(maxim4c);
 
