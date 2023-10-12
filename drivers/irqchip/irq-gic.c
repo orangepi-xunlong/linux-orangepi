@@ -271,7 +271,8 @@ static int gic_irq_set_irqchip_state(struct irq_data *d,
 	u32 reg;
 
 #ifdef CONFIG_ROCKCHIP_AMP
-	if (rockchip_amp_check_amp_irq(gic_irq(d)))
+	if (which != IRQCHIP_STATE_PENDING &&
+	    rockchip_amp_check_amp_irq(gic_irq(d)))
 		return -EINVAL;
 #endif
 	switch (which) {
@@ -527,7 +528,7 @@ static void gic_dist_init(struct gic_chip_data *gic)
 
 		maskval = 0;
 		for (j = 0; j < 4; j++) {
-			if (rockchip_amp_check_amp_irq(i + j)) {
+			if (rockchip_amp_need_init_amp_irq(i + j)) {
 				maskval |= rockchip_amp_get_irq_cpumask(i + j) <<
 					   (j * 8);
 			} else {
@@ -1359,6 +1360,9 @@ static int gic_init_bases(struct gic_chip_data *gic,
 		goto error;
 	}
 
+#ifdef CONFIG_ROCKCHIP_AMP
+	rockchip_amp_get_gic_info(gic->gic_irqs, GIC_V2);
+#endif
 	gic_dist_init(gic);
 	ret = gic_cpu_init(gic);
 	if (ret)
@@ -1565,10 +1569,6 @@ static int gic_of_setup(struct gic_chip_data *gic, struct device_node *node)
 		gic->percpu_offset = 0;
 
 	gic_enable_of_quirks(node, gic_quirks, gic);
-
-#ifdef CONFIG_ROCKCHIP_AMP
-	rockchip_amp_get_gic_info();
-#endif
 
 	return 0;
 
