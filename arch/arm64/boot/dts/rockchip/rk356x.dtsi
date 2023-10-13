@@ -2593,7 +2593,7 @@
 		dma-names = "tx", "rx";
 		rockchip,cru = <&cru>;
 		rockchip,grf = <&grf>;
-		rockchip,clk-trcm = <1>;
+		rockchip,trcm-sync-tx-only;
 		pinctrl-names = "default";
 		pinctrl-0 = <&i2s2m0_sclktx
 			     &i2s2m0_lrcktx
@@ -2616,7 +2616,7 @@
 		reset-names = "tx-m", "rx-m";
 		rockchip,cru = <&cru>;
 		rockchip,grf = <&grf>;
-		rockchip,clk-trcm = <1>;
+		rockchip,trcm-sync-tx-only;
 		#sound-dai-cells = <0>;
 		pinctrl-names = "default";
 		pinctrl-0 = <&i2s3m0_sclk
