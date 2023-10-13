@@ -60,7 +60,7 @@
 	rockchip,tdm-multi-lanes;
 	rockchip,tdm-tx-lanes = <3>;
 	rockchip,tdm-rx-lanes = <2>;
-	rockchip,clk-trcm = <1>;
+	rockchip,trcm-sync-tx-only;
 	status = "okay";
 };
 

@@ -282,7 +282,7 @@
 &i2s3_2ch {
 	status = "okay";
 	pinctrl-names = "default";
-	rockchip,clk-trcm = <1>;
+	rockchip,trcm-sync-tx-only;
 	pinctrl-0 = <&i2s3m1_sclk
 		     &i2s3m1_lrck
 		     &i2s3m1_sdi

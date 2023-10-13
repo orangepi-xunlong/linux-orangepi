@@ -597,7 +597,7 @@
 	status = "okay";
 	assigned-clocks = <&cru SCLK_I2S0_8CH_RX>;
 	assigned-clock-parents = <&cru SCLK_I2S0_8CH_TX_MUX>;
-	rockchip,clk-trcm = <1>;
+	rockchip,trcm-sync-tx-only;
 	#sound-dai-cells = <0>;
 };
 

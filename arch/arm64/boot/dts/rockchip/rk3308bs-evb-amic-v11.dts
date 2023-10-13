@@ -36,7 +36,7 @@
 &i2s_8ch_0 {
 	status = "okay";
 	#sound-dai-cells = <0>;
-	rockchip,clk-trcm = <1>;
+	rockchip,trcm-sync-tx-only;
 	pinctrl-names = "default";
 	pinctrl-0 = <&i2s_8ch_0_sclktx
 		     &i2s_8ch_0_lrcktx
