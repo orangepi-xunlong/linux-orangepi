@@ -264,7 +264,7 @@
 
 &i2s0_8ch {
 	status = "okay";
-	rockchip,clk-trcm = <1>;
+	rockchip,trcm-sync-tx-only;
 	#sound-dai-cells = <0>;
 	pinctrl-0 = <&i2s0m0_sclk_tx
 		     &i2s0m0_lrck_tx
