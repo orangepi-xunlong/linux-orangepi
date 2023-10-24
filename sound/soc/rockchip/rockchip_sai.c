@@ -19,10 +19,11 @@
 #include <sound/tlv.h>
 
 #include "rockchip_sai.h"
+#include "rockchip_dlp_pcm.h"
 
 #define DRV_NAME		"rockchip-sai"
 
-#define CLK_SHIFT_RATE_HZ_MAX	1 /* 1 Hz */
+#define CLK_SHIFT_RATE_HZ_MAX	5
 #define FW_RATIO_MAX		8
 #define FW_RATIO_MIN		1
 #define MAXBURST_PER_FIFO	8
@@ -422,7 +423,7 @@ static int rockchip_sai_hw_params(struct snd_pcm_substream *substream,
 {
 	struct rk_sai_dev *sai = snd_soc_dai_get_drvdata(dai);
 	struct snd_dmaengine_dai_dma_data *dma_data;
-	unsigned int mclk_rate, bclk_rate, div_bclk;
+	unsigned int mclk_rate, mclk_req_rate, bclk_rate, div_bclk;
 	unsigned int ch_per_lane, lanes, slot_width;
 	unsigned int val, fscr, reg;
 
@@ -497,14 +498,15 @@ static int rockchip_sai_hw_params(struct snd_pcm_substream *substream,
 		if (sai->is_clk_auto)
 			clk_set_rate(sai->mclk, bclk_rate);
 		mclk_rate = clk_get_rate(sai->mclk);
-		if (mclk_rate < bclk_rate - CLK_SHIFT_RATE_HZ_MAX ||
-		    mclk_rate > bclk_rate + CLK_SHIFT_RATE_HZ_MAX) {
+		div_bclk = DIV_ROUND_CLOSEST(mclk_rate, bclk_rate);
+		mclk_req_rate = bclk_rate * div_bclk;
+
+		if (mclk_rate < mclk_req_rate - CLK_SHIFT_RATE_HZ_MAX ||
+		    mclk_rate > mclk_req_rate + CLK_SHIFT_RATE_HZ_MAX) {
 			dev_err(sai->dev, "Mismatch mclk: %u, expected %u (+/- %dHz)\n",
-				mclk_rate, bclk_rate, CLK_SHIFT_RATE_HZ_MAX);
+				mclk_rate, mclk_req_rate, CLK_SHIFT_RATE_HZ_MAX);
 			return -EINVAL;
 		}
-
-		div_bclk = DIV_ROUND_CLOSEST(mclk_rate, bclk_rate);
 
 		regmap_update_bits(sai->regmap, SAI_CKR, SAI_CKR_MDIV_MASK,
 				   SAI_CKR_MDIV(div_bclk));
@@ -1345,6 +1347,29 @@ static int rockchip_sai_parse_quirks(struct rk_sai_dev *sai)
 	return ret;
 }
 
+static int rockchip_sai_get_fifo_count(struct device *dev,
+				       struct snd_pcm_substream *substream)
+{
+	struct rk_sai_dev *sai = dev_get_drvdata(dev);
+	int val = 0;
+
+	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
+		regmap_read(sai->regmap, SAI_TXFIFOLR, &val);
+	else
+		regmap_read(sai->regmap, SAI_RXFIFOLR, &val);
+
+	val = ((val & SAI_FIFOLR_XFL3_MASK) >> SAI_FIFOLR_XFL3_SHIFT) +
+	      ((val & SAI_FIFOLR_XFL2_MASK) >> SAI_FIFOLR_XFL2_SHIFT) +
+	      ((val & SAI_FIFOLR_XFL1_MASK) >> SAI_FIFOLR_XFL1_SHIFT) +
+	      ((val & SAI_FIFOLR_XFL0_MASK) >> SAI_FIFOLR_XFL0_SHIFT);
+
+	return val;
+}
+
+static const struct snd_dlp_config dconfig = {
+	.get_fifo_count = rockchip_sai_get_fifo_count,
+};
+
 static int rockchip_sai_probe(struct platform_device *pdev)
 {
 	struct device_node *node = pdev->dev.of_node;
@@ -1439,7 +1464,11 @@ static int rockchip_sai_probe(struct platform_device *pdev)
 		return 0;
 	}
 
-	ret = devm_snd_dmaengine_pcm_register(&pdev->dev, NULL, 0);
+	if (device_property_read_bool(&pdev->dev, "rockchip,digital-loopback"))
+		ret = devm_snd_dmaengine_dlp_register(&pdev->dev, &dconfig);
+	else
+		ret = devm_snd_dmaengine_pcm_register(&pdev->dev, NULL, 0);
+
 	if (ret)
 		goto err_runtime_suspend;
 

@@ -22,6 +22,7 @@
 #include <sound/dmaengine_pcm.h>
 
 #include "rockchip_i2s.h"
+#include "rockchip_dlp_pcm.h"
 
 #define DRV_NAME "rockchip-i2s"
 
@@ -635,8 +636,8 @@ static int rockchip_i2s_clk_compensation_info(struct snd_kcontrol *kcontrol,
 static int rockchip_i2s_clk_compensation_get(struct snd_kcontrol *kcontrol,
 					     struct snd_ctl_elem_value *ucontrol)
 {
-	struct snd_soc_dai *dai = snd_kcontrol_chip(kcontrol);
-	struct rk_i2s_dev *i2s = snd_soc_dai_get_drvdata(dai);
+	struct snd_soc_component *compnt = snd_soc_kcontrol_component(kcontrol);
+	struct rk_i2s_dev *i2s = snd_soc_component_get_drvdata(compnt);
 
 	ucontrol->value.integer.value[0] = i2s->clk_ppm;
 
@@ -646,8 +647,8 @@ static int rockchip_i2s_clk_compensation_get(struct snd_kcontrol *kcontrol,
 static int rockchip_i2s_clk_compensation_put(struct snd_kcontrol *kcontrol,
 					     struct snd_ctl_elem_value *ucontrol)
 {
-	struct snd_soc_dai *dai = snd_kcontrol_chip(kcontrol);
-	struct rk_i2s_dev *i2s = snd_soc_dai_get_drvdata(dai);
+	struct snd_soc_component *compnt = snd_soc_kcontrol_component(kcontrol);
+	struct rk_i2s_dev *i2s = snd_soc_component_get_drvdata(compnt);
 	int ppm = ucontrol->value.integer.value[0];
 
 	if ((ucontrol->value.integer.value[0] < CLK_PPM_MIN) ||
@@ -863,7 +864,8 @@ static bool rockchip_i2s_rd_reg(struct device *dev, unsigned int reg)
 	case I2S_CLR:
 	case I2S_TXDR:
 	case I2S_RXDR:
-	case I2S_FIFOLR:
+	case I2S_TXFIFOLR:
+	case I2S_RXFIFOLR:
 	case I2S_INTSR:
 		return true;
 	default:
@@ -876,7 +878,8 @@ static bool rockchip_i2s_volatile_reg(struct device *dev, unsigned int reg)
 	switch (reg) {
 	case I2S_INTSR:
 	case I2S_CLR:
-	case I2S_FIFOLR:
+	case I2S_TXFIFOLR:
+	case I2S_RXFIFOLR:
 	case I2S_TXDR:
 	case I2S_RXDR:
 		return true;
@@ -1081,6 +1084,36 @@ static int rockchip_i2s_keep_clk_always_on(struct rk_i2s_dev *i2s)
 	return 0;
 }
 
+static int rockchip_i2s_get_fifo_count(struct device *dev,
+				       struct snd_pcm_substream *substream)
+{
+	struct rk_i2s_dev *i2s = dev_get_drvdata(dev);
+	unsigned int tx, rx;
+	int val = 0;
+
+	regmap_read(i2s->regmap, I2S_TXFIFOLR, &tx);
+	regmap_read(i2s->regmap, I2S_RXFIFOLR, &rx);
+
+	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
+		val = I2S_FIFOLR_XFL3(tx) +
+		      I2S_FIFOLR_XFL2(tx) +
+		      I2S_FIFOLR_XFL1(tx) +
+		      I2S_FIFOLR_XFL0(tx);
+	else
+		/* XFL4 is compatible for old version */
+		val = I2S_FIFOLR_XFL4(tx) +
+		      I2S_FIFOLR_XFL3(rx) +
+		      I2S_FIFOLR_XFL2(rx) +
+		      I2S_FIFOLR_XFL1(rx) +
+		      I2S_FIFOLR_XFL0(rx);
+
+	return val;
+}
+
+static const struct snd_dlp_config dconfig = {
+	.get_fifo_count = rockchip_i2s_get_fifo_count,
+};
+
 static int rockchip_i2s_probe(struct platform_device *pdev)
 {
 	struct device_node *node = pdev->dev.of_node;
@@ -1221,7 +1254,11 @@ static int rockchip_i2s_probe(struct platform_device *pdev)
 		return 0;
 	}
 
-	ret = devm_snd_dmaengine_pcm_register(&pdev->dev, NULL, 0);
+	if (device_property_read_bool(&pdev->dev, "rockchip,digital-loopback"))
+		ret = devm_snd_dmaengine_dlp_register(&pdev->dev, &dconfig);
+	else
+		ret = devm_snd_dmaengine_pcm_register(&pdev->dev, NULL, 0);
+
 	if (ret) {
 		dev_err(&pdev->dev, "Could not register PCM\n");
 		goto err_suspend;
