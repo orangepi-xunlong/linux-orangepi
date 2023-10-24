@@ -223,7 +223,8 @@
 
 &rkcif_mipi_lvds {
 	status = "okay";
-	//memory-region-thunderboot = <&rkisp_thunderboot>;
+	memory-region-thunderboot = <&rkisp_thunderboot>;
+	rtt-suspend;
 
 	pinctrl-names = "default";
 	pinctrl-0 = <&mipi_pins>;
@@ -252,6 +253,9 @@
 
 &rkisp_vir0 {
 	status = "okay";
+
+	memory-region-thunderboot = <&rkisp_thunderboot>;
+	rtt-suspend;
 
 	port@0 {
 		isp_in: endpoint {
