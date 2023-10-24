@@ -6,6 +6,7 @@
 #include <linux/clk-provider.h>
 #include <linux/device.h>
 #include <linux/err.h>
+#include <linux/math.h>
 #include <linux/slab.h>
 
 static u8 clk_composite_get_parent(struct clk_hw *hw)
@@ -119,10 +120,7 @@ static int clk_composite_determine_rate(struct clk_hw *hw,
 			if (ret)
 				continue;
 
-			if (req->rate >= tmp_req.rate)
-				rate_diff = req->rate - tmp_req.rate;
-			else
-				rate_diff = tmp_req.rate - req->rate;
+			rate_diff = abs_diff(req->rate, tmp_req.rate);
 
 			if (!rate_diff || !req->best_parent_hw
 				       || best_rate_diff > rate_diff) {
