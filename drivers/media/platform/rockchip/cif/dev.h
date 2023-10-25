@@ -193,6 +193,7 @@ struct rkcif_buffer {
 
 struct rkcif_tools_buffer {
 	struct vb2_v4l2_buffer *vb;
+	struct rkisp_rx_buf *dbufs;
 	struct list_head list;
 	u32 frame_idx;
 	u64 timestamp;
@@ -279,10 +280,12 @@ struct csi_channel_info {
 	unsigned int width;
 	unsigned int height;
 	unsigned int virtual_width;
+	unsigned int left_virtual_width;
 	unsigned int crop_st_x;
 	unsigned int crop_st_y;
 	unsigned int dsi_input;
 	struct rkmodule_lvds_cfg lvds_cfg;
+	struct rkmodule_capture_info capture_info;
 };
 
 struct rkcif_vdev_node {
@@ -526,7 +529,7 @@ struct rkcif_stream {
 	unsigned int			cur_stream_mode;
 	struct rkcif_rx_buffer		rx_buf[RKISP_VICAP_BUF_CNT_MAX];
 	struct list_head		rx_buf_head;
-	int				buf_num_toisp;
+	int				total_buf_num;
 	u64				line_int_cnt;
 	int				lack_buf_cnt;
 	unsigned int			buf_wake_up_cnt;
@@ -553,6 +556,7 @@ struct rkcif_stream {
 	bool				is_in_vblank;
 	bool				is_change_toisp;
 	bool				is_stop_capture;
+	bool				is_wait_dma_stop;
 };
 
 struct rkcif_lvds_subdev {
@@ -842,6 +846,7 @@ struct rkcif_device {
 	struct rkcif_work_struct	reset_work;
 	int				id_use_cnt;
 	unsigned int			csi_host_idx;
+	unsigned int			csi_host_idx_def;
 	unsigned int			dvp_sof_in_oneframe;
 	unsigned int			wait_line;
 	unsigned int			wait_line_bak;
@@ -884,7 +889,7 @@ void rkcif_vb_done_tasklet(struct rkcif_stream *stream, struct rkcif_buffer *buf
 int rkcif_scale_start(struct rkcif_scale_vdev *scale_vdev);
 
 const struct
-cif_input_fmt *get_input_fmt(struct v4l2_subdev *sd,
+cif_input_fmt *rkcif_get_input_fmt(struct rkcif_device *dev,
 				 struct v4l2_rect *rect,
 				 u32 pad_id, struct csi_channel_info *csi_info);
 

@@ -247,6 +247,12 @@
 		#clock-cells = <0>;
 	};
 
+	mipi_csi2: mipi-csi2 {
+		compatible = "rockchip,rk1808-mipi-csi2";
+		rockchip,hw = <&mipi_csi2_hw>;
+		status = "disabled";
+	};
+
 	psci {
 		compatible = "arm,psci-1.0";
 		method = "smc";
@@ -372,13 +378,15 @@
 			phy-names = "usb2-phy", "usb3-phy";
 			phy_type = "utmi_wide";
 			snps,dis_enblslpm_quirk;
-			snps,dis-u1u2-quirk;
+			snps,dis-u1-entry-quirk;
+			snps,dis-u2-entry-quirk;
 			snps,dis-u2-freeclk-exists-quirk;
 			snps,dis_u2_susphy_quirk;
 			snps,dis_u3_susphy_quirk;
 			snps,dis-del-phy-power-chg-quirk;
 			snps,tx-ipgap-linecheck-dis-quirk;
 			snps,xhci-trb-ent-quirk;
+			snps,parkmode-disable-hs-quirk;
 			snps,parkmode-disable-ss-quirk;
 			status = "disabled";
 		};
@@ -1525,8 +1533,8 @@
 		status = "disabled";
 	};
 
-	mipi_csi2: mipi-csi2@ffb10000 {
-		compatible = "rockchip,rk1808-mipi-csi2";
+	mipi_csi2_hw: mipi-csi2-hw@ffb10000 {
+		compatible = "rockchip,rk1808-mipi-csi2-hw";
 		reg = <0x0 0xffb10000 0x0 0x100>;
 		reg-names = "csihost_regs";
 		interrupts = <GIC_SPI 106 IRQ_TYPE_LEVEL_HIGH>,
@@ -2246,15 +2254,15 @@
 		i2s1 {
 			i2s1_2ch_lrck: i2s1-2ch-lrck {
 				rockchip,pins =
-					<3 RK_PA0 1 &pcfg_pull_none_2ma>;
+					<3 RK_PA0 1 &pcfg_pull_none_2ma_smt>;
 			};
 			i2s1_2ch_sclk: i2s1-2ch-sclk {
 				rockchip,pins =
-					<3 RK_PA1 1 &pcfg_pull_none_2ma>;
+					<3 RK_PA1 1 &pcfg_pull_none_2ma_smt>;
 			};
 			i2s1_2ch_mclk: i2s1-2ch-mclk {
 				rockchip,pins =
-					<3 RK_PA2 1 &pcfg_pull_none_2ma>;
+					<3 RK_PA2 1 &pcfg_pull_none_2ma_smt>;
 			};
 			i2s1_2ch_sdo: i2s1-2ch-sdo {
 				rockchip,pins =
@@ -2281,11 +2289,11 @@
 			};
 			i2s0_8ch_sclkrx: i2s0-8ch-sclkrx {
 				rockchip,pins =
-					<3 RK_PB0 1 &pcfg_pull_none_2ma>;
+					<3 RK_PB0 1 &pcfg_pull_none_2ma_smt>;
 			};
 			i2s0_8ch_lrckrx: i2s0-8ch-lrckrx {
 				rockchip,pins =
-					<3 RK_PB1 1 &pcfg_pull_none_2ma>;
+					<3 RK_PB1 1 &pcfg_pull_none_2ma_smt>;
 			};
 			i2s0_8ch_sdo3: i2s0-8ch-sdo3 {
 				rockchip,pins =
@@ -2301,15 +2309,15 @@
 			};
 			i2s0_8ch_mclk: i2s0-8ch-mclk {
 				rockchip,pins =
-					<3 RK_PB5 1 &pcfg_pull_none_2ma>;
+					<3 RK_PB5 1 &pcfg_pull_none_2ma_smt>;
 			};
 			i2s0_8ch_lrcktx: i2s0-8ch-lrcktx {
 				rockchip,pins =
-					<3 RK_PB6 1 &pcfg_pull_none_2ma>;
+					<3 RK_PB6 1 &pcfg_pull_none_2ma_smt>;
 			};
 			i2s0_8ch_sclktx: i2s0-8ch-sclktx {
 				rockchip,pins =
-					<3 RK_PB7 1 &pcfg_pull_none_2ma>;
+					<3 RK_PB7 1 &pcfg_pull_none_2ma_smt>;
 			};
 			i2s0_8ch_sdo0: i2s0-8ch-sdo0 {
 				rockchip,pins =

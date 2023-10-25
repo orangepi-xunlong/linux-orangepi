@@ -32,6 +32,7 @@
 
 #include "analogix_dp_core.h"
 #include "analogix_dp_reg.h"
+#include "../../rockchip/rockchip_drm_drv.h"
 
 #define to_dp(nm)	container_of(nm, struct analogix_dp_device, nm)
 
@@ -51,6 +52,9 @@ struct bridge_init {
 	struct i2c_client *client;
 	struct device_node *node;
 };
+
+static void analogix_dp_bridge_mode_set(struct drm_bridge *bridge,
+				const struct drm_display_mode *adj_mode);
 
 static bool analogix_dp_bandwidth_ok(struct analogix_dp_device *dp,
 				     const struct drm_display_mode *mode,
@@ -1442,6 +1446,32 @@ static void analogix_dp_connector_force(struct drm_connector *connector)
 		extcon_set_state_sync(dp->extcon, EXTCON_DISP_DP, false);
 }
 
+static int
+analogix_dp_atomic_connector_get_property(struct drm_connector *connector,
+					  const struct drm_connector_state *state,
+					  struct drm_property *property,
+					  uint64_t *val)
+{
+	struct rockchip_drm_private *private = connector->dev->dev_private;
+	struct analogix_dp_device *dp = to_dp(connector);
+
+	if (property == private->split_area_prop) {
+		switch (dp->split_area) {
+		case 1:
+			*val = ROCKCHIP_DRM_SPLIT_LEFT_SIDE;
+			break;
+		case 2:
+			*val = ROCKCHIP_DRM_SPLIT_RIGHT_SIDE;
+			break;
+		default:
+			*val = ROCKCHIP_DRM_SPLIT_UNSET;
+			break;
+		}
+	}
+
+	return 0;
+}
+
 static const struct drm_connector_funcs analogix_dp_connector_funcs = {
 	.fill_modes = drm_helper_probe_single_connector_modes,
 	.detect = analogix_dp_connector_detect,
@@ -1450,6 +1480,7 @@ static const struct drm_connector_funcs analogix_dp_connector_funcs = {
 	.atomic_duplicate_state = drm_atomic_helper_connector_duplicate_state,
 	.atomic_destroy_state = drm_atomic_helper_connector_destroy_state,
 	.force = analogix_dp_connector_force,
+	.atomic_get_property = analogix_dp_atomic_connector_get_property,
 };
 
 static int analogix_dp_bridge_attach(struct drm_bridge *bridge,
@@ -1480,6 +1511,7 @@ static int analogix_dp_bridge_attach(struct drm_bridge *bridge,
 
 	if (!dp->plat_data->skip_connector) {
 		int connector_type = DRM_MODE_CONNECTOR_eDP;
+		struct rockchip_drm_private *private;
 
 		if (dp->plat_data->bridge &&
 		    dp->plat_data->bridge->type != DRM_MODE_CONNECTOR_Unknown)
@@ -1498,6 +1530,13 @@ static int analogix_dp_bridge_attach(struct drm_bridge *bridge,
 			DRM_ERROR("Failed to initialize connector with drm\n");
 			return ret;
 		}
+
+		private = connector->dev->dev_private;
+
+		if (dp->split_area)
+			drm_object_attach_property(&connector->base,
+						   private->split_area_prop,
+						   dp->split_area);
 
 		drm_connector_helper_add(connector,
 					 &analogix_dp_connector_helper_funcs);
@@ -1575,13 +1614,17 @@ analogix_dp_bridge_atomic_pre_enable(struct drm_bridge *bridge,
 	struct drm_atomic_state *old_state = old_bridge_state->base.state;
 	struct analogix_dp_device *dp = bridge->driver_private;
 	struct drm_crtc *crtc;
-	struct drm_crtc_state *old_crtc_state;
+	struct drm_crtc_state *old_crtc_state, *new_crtc_state;
 
 	crtc = analogix_dp_get_new_crtc(dp, old_state);
 	if (!crtc)
 		return;
 
 	old_crtc_state = drm_atomic_get_old_crtc_state(old_state, crtc);
+
+	new_crtc_state = drm_atomic_get_new_crtc_state(old_state, crtc);
+	analogix_dp_bridge_mode_set(bridge, &new_crtc_state->adjusted_mode);
+
 	/* Don't touch the panel if we're coming back from PSR */
 	if (old_crtc_state && old_crtc_state->self_refresh_active)
 		return;
@@ -1790,7 +1833,6 @@ analogix_dp_bridge_atomic_post_disable(struct drm_bridge *bridge,
 }
 
 static void analogix_dp_bridge_mode_set(struct drm_bridge *bridge,
-				const struct drm_display_mode *orig_mode,
 				const struct drm_display_mode *adj_mode)
 {
 	struct analogix_dp_device *dp = bridge->driver_private;
@@ -1910,7 +1952,7 @@ analogix_dp_bridge_mode_valid(struct drm_bridge *bridge,
 
 	drm_mode_copy(&m, mode);
 
-	if (dp->plat_data->split_mode)
+	if (dp->plat_data->split_mode || dp->plat_data->dual_connector_split)
 		dp->plat_data->convert_to_origin_mode(&m);
 
 	max_link_rate = min_t(u32, dp->video_info.max_link_rate,
@@ -1934,7 +1976,6 @@ static const struct drm_bridge_funcs analogix_dp_bridge_funcs = {
 	.atomic_enable = analogix_dp_bridge_atomic_enable,
 	.atomic_disable = analogix_dp_bridge_atomic_disable,
 	.atomic_post_disable = analogix_dp_bridge_atomic_post_disable,
-	.mode_set = analogix_dp_bridge_mode_set,
 	.attach = analogix_dp_bridge_attach,
 	.detach = analogix_dp_bridge_detach,
 	.mode_valid = analogix_dp_bridge_mode_valid,
@@ -2072,6 +2113,9 @@ static int analogix_dp_dt_parse_pdata(struct analogix_dp_device *dp)
 		DRM_DEV_ERROR(dp->dev, "failed to read lane data\n");
 		return ret;
 	}
+
+	if (device_property_read_u32(dp->dev, "split-area", &dp->split_area))
+		dp->split_area = 0;
 
 	return 0;
 }

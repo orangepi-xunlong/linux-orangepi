@@ -1571,16 +1571,6 @@ static int subdev_notifier_complete(struct v4l2_async_notifier *notifier)
 
 	if (!completion_done(&dev->cmpl_ntf))
 		complete(&dev->cmpl_ntf);
-	if (dev->active_sensor &&
-	    (dev->active_sensor->mbus.type == V4L2_MBUS_CSI2_DPHY ||
-	     dev->active_sensor->mbus.type == V4L2_MBUS_CSI2_CPHY)) {
-		ret = v4l2_subdev_call(dev->active_sensor->sd,
-				       core, ioctl,
-				       RKCIF_CMD_SET_CSI_IDX,
-				       &dev->csi_host_idx);
-		if (ret)
-			v4l2_err(&dev->v4l2_dev, "set csi idx %d fail\n", dev->csi_host_idx);
-	}
 	v4l2_info(&dev->v4l2_dev, "Async subdev notifier completed\n");
 
 	return ret;
@@ -1950,6 +1940,7 @@ int rkcif_plat_init(struct rkcif_device *cif_dev, struct device_node *node, int 
 	cif_dev->early_line = 0;
 	cif_dev->is_thunderboot = false;
 	cif_dev->rdbk_debug = 0;
+	memset(&cif_dev->channels[0].capture_info, 0, sizeof(cif_dev->channels[0].capture_info));
 	if (cif_dev->chip_id == CHIP_RV1126_CIF_LITE)
 		cif_dev->isr_hdl = rkcif_irq_lite_handler;
 
@@ -2007,6 +1998,17 @@ int rkcif_plat_init(struct rkcif_device *cif_dev, struct device_node *node, int 
 	cif_dev->csi_host_idx = of_alias_get_id(node, "rkcif_mipi_lvds");
 	if (cif_dev->csi_host_idx < 0 || cif_dev->csi_host_idx > 5)
 		cif_dev->csi_host_idx = 0;
+	if (cif_dev->hw_dev->is_rk3588s2) {
+		if (cif_dev->csi_host_idx == 0)
+			cif_dev->csi_host_idx = 2;
+		else if (cif_dev->csi_host_idx == 2)
+			cif_dev->csi_host_idx = 4;
+		else if (cif_dev->csi_host_idx == 3)
+			cif_dev->csi_host_idx = 5;
+		v4l2_info(&cif_dev->v4l2_dev, "rk3588s2 attach to mipi%d\n",
+			  cif_dev->csi_host_idx);
+	}
+	cif_dev->csi_host_idx_def = cif_dev->csi_host_idx;
 	cif_dev->media_dev.dev = dev;
 	v4l2_dev = &cif_dev->v4l2_dev;
 	v4l2_dev->mdev = &cif_dev->media_dev;
@@ -2169,7 +2171,9 @@ static int rkcif_plat_probe(struct platform_device *pdev)
 	if (sysfs_create_group(&pdev->dev.kobj, &dev_attr_grp))
 		return -ENODEV;
 
-	rkcif_attach_hw(cif_dev);
+	ret = rkcif_attach_hw(cif_dev);
+	if (ret)
+		return ret;
 
 	rkcif_parse_dts(cif_dev);
 

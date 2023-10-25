@@ -377,30 +377,6 @@
 	status = "okay";
 };
 
-&can0 {
-	assigned-clocks = <&cru CLK_CAN0>;
-	assigned-clock-rates = <150000000>;
-	pinctrl-names = "default";
-	pinctrl-0 = <&can0m1_pins>;
-	status = "disabled";
-};
-
-&can1 {
-	assigned-clocks = <&cru CLK_CAN1>;
-	assigned-clock-rates = <150000000>;
-	pinctrl-names = "default";
-	pinctrl-0 = <&can1m1_pins>;
-	status = "disabled";
-};
-
-&can2 {
-	assigned-clocks = <&cru CLK_CAN2>;
-	assigned-clock-rates = <150000000>;
-	pinctrl-names = "default";
-	pinctrl-0 = <&can2m1_pins>;
-	status = "disabled";
-};
-
 &cpu0 {
 	cpu-supply = <&vdd_cpu>;
 };
@@ -1857,8 +1833,8 @@
 
 &vop {
 	status = "okay";
-	assigned-clocks = <&cru DCLK_VOP0>, <&cru DCLK_VOP1>;
-	assigned-clock-parents = <&pmucru PLL_HPLL>, <&cru PLL_VPLL>;
+	assigned-clocks = <&cru DCLK_VOP0>, <&cru DCLK_VOP1>, <&cru DCLK_VOP2>;
+	assigned-clock-parents = <&pmucru PLL_HPLL>, <&cru PLL_VPLL>, <&cru PLL_GPLL>;
 };
 
 &vop_mmu {

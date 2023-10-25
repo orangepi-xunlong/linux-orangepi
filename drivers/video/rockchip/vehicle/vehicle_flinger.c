@@ -46,7 +46,6 @@
 static int vehicle_dump_cif;
 static int vehicle_dump_rga;
 static int vehicle_dump_vop;
-static bool nv12_display = true;
 
 enum force_value {
 	FORCE_WIDTH = 1920,
@@ -326,8 +325,11 @@ int vehicle_flinger_init(struct device *dev, struct vehicle_cfg *v_cfg)
 	if (inited)
 		return 0;
 
+	VEHICLE_INFO("%s: v_cfg->rotate_mirror(0x%x)\n", __func__, v_cfg->rotate_mirror);
+
 	// if (FORCE_ROTATION == RGA_TRANSFORM_ROT_270 || FORCE_ROTATION == RGA_TRANSFORM_ROT_90) {
-	if (v_cfg->rotate_mirror == 0x01  || v_cfg->rotate_mirror == 0x04) {
+	if ((v_cfg->rotate_mirror & RGA_TRANSFORM_ROT_MASK) == 0x01 ||
+	    (v_cfg->rotate_mirror & RGA_TRANSFORM_ROT_MASK) == 0x04) {
 		w = FORCE_WIDTH;
 		h = ALIGN(FORCE_HEIGHT, 64);
 		s = ALIGN(FORCE_HEIGHT, 64);
@@ -387,7 +389,8 @@ int vehicle_flinger_init(struct device *dev, struct vehicle_cfg *v_cfg)
 		// f = HAL_PIXEL_FORMAT_RGBX_8888;
 		// if (FORCE_ROTATION == RGA_TRANSFORM_ROT_270 ||
 		//	FORCE_ROTATION == RGA_TRANSFORM_ROT_90)
-		if (v_cfg->rotate_mirror == 0x01  || v_cfg->rotate_mirror == 0x04)
+		if ((v_cfg->rotate_mirror & RGA_TRANSFORM_ROT_MASK) == 0x01 ||
+		    (v_cfg->rotate_mirror & RGA_TRANSFORM_ROT_MASK) == 0x04)
 			ret = rk_flinger_alloc_buffer(flg, buffer, h, w, s, f);
 		else
 			ret = rk_flinger_alloc_buffer(flg, buffer, w, h, s, f);
@@ -528,7 +531,7 @@ rk_flinger_cacultae_dst_rect_by_rotation(struct graphic_buffer *buffer)
 	src_rect = &buffer->src;
 	dst_rect = &buffer->dst;
 
-	switch (buffer->rotation) {
+	switch (buffer->rotation & RGA_TRANSFORM_ROT_MASK) {
 	case RGA_TRANSFORM_ROT_90:
 	case RGA_TRANSFORM_ROT_270:
 		dst_rect->x = src_rect->x;
@@ -662,7 +665,10 @@ static int rk_flinger_rga_scaler(struct flinger *flinger,
 	rga_request.rotate_mode = 0;
 	rga_request.sina = 0;
 	rga_request.cosa = 0;
-	rga_request.yuv2rgb_mode = 0x1 << 0; // limit range
+
+	rga_request.yuv2rgb_mode = 0x0 << 0; // yuvtoyuv config 0
+	/* yuv to rgb color space transform if need  */
+	//rga_request.yuv2rgb_mode = 0x1 << 0; // limit range
 	//rga_request.yuv2rgb_mode = 0x2 << 0; // full range
 
 	rga_request.src.act_w = src_buffer->src.w;
@@ -685,7 +691,7 @@ static int rk_flinger_rga_scaler(struct flinger *flinger,
 	rga_request.dst.yrgb_addr = dst_buffer->fd;
 	rga_request.dst.uv_addr = 0;
 	rga_request.dst.v_addr = 0;
-	rga_request.dst.format =  RGA_FORMAT_RGBX_8888;
+	rga_request.dst.format =  RGA_FORMAT_YCrCb_420_SP;
 
 	rga_request.scale_mode = 1;
 
@@ -834,7 +840,7 @@ static int rk_flinger_rga_blit(struct flinger *flinger,
 		rga_request.rotate_mode = 0;
 		rga_request.sina = 0;
 		rga_request.cosa = 0;
-		rga_request.dst.vir_w = ALIGN(ds, 64);
+		rga_request.dst.vir_w = ds;
 		rga_request.dst.vir_h = dh;
 		rga_request.dst.act_w = dw;
 		rga_request.dst.act_h = dh;
@@ -843,7 +849,7 @@ static int rk_flinger_rga_blit(struct flinger *flinger,
 		break;
 	case RGA_TRANSFORM_FLIP_H:/*x mirror*/
 		rga_request.rotate_mode = 2;
-		rga_request.dst.vir_w = ALIGN(ds, 64);
+		rga_request.dst.vir_w = ds;
 		rga_request.dst.vir_h = dh;
 		rga_request.dst.act_w = dw;
 		rga_request.dst.act_h = dh;
@@ -852,7 +858,7 @@ static int rk_flinger_rga_blit(struct flinger *flinger,
 		break;
 	case RGA_TRANSFORM_FLIP_V:/*y mirror*/
 		rga_request.rotate_mode = 3;
-		rga_request.dst.vir_w = ALIGN(ds, 64);
+		rga_request.dst.vir_w = ds;
 		rga_request.dst.vir_h = dh;
 		rga_request.dst.act_w = dw;
 		rga_request.dst.act_h = dh;
@@ -863,7 +869,7 @@ static int rk_flinger_rga_blit(struct flinger *flinger,
 		rga_request.rotate_mode = 1;
 		rga_request.sina = 65536;
 		rga_request.cosa = 0;
-		rga_request.dst.vir_w = ALIGN(ds, 64);
+		rga_request.dst.vir_w = ds;
 		rga_request.dst.vir_h = dh;
 		rga_request.dst.act_w = dh;
 		rga_request.dst.act_h = dw;
@@ -874,7 +880,7 @@ static int rk_flinger_rga_blit(struct flinger *flinger,
 		rga_request.rotate_mode = 1;
 		rga_request.sina = 0;
 		rga_request.cosa = -65536;
-		rga_request.dst.vir_w = ALIGN(ds, 64);
+		rga_request.dst.vir_w = ds;
 		rga_request.dst.vir_h = dh;
 		rga_request.dst.act_w = dw;
 		rga_request.dst.act_h = dh;
@@ -885,7 +891,7 @@ static int rk_flinger_rga_blit(struct flinger *flinger,
 		rga_request.rotate_mode = 1;
 		rga_request.sina = -65536;
 		rga_request.cosa = 0;
-		rga_request.dst.vir_w = ALIGN(ds, 64);
+		rga_request.dst.vir_w = ds;
 		rga_request.dst.vir_h = dh;
 		rga_request.dst.act_w = dh;
 		rga_request.dst.act_h = dw;
@@ -896,7 +902,7 @@ static int rk_flinger_rga_blit(struct flinger *flinger,
 		rga_request.rotate_mode = 0;
 		rga_request.sina = 0;
 		rga_request.cosa = 0;
-		rga_request.dst.vir_w = ALIGN(ds, 64);
+		rga_request.dst.vir_w = ds;
 		rga_request.dst.vir_h = dh;
 		rga_request.dst.act_w = dw;
 		rga_request.dst.act_h = dh;
@@ -952,19 +958,41 @@ static int rk_flinger_rga_blit(struct flinger *flinger,
 
 static int rk_flinger_rga_render(struct flinger *flinger,
 				 struct graphic_buffer *src_buffer,
-				 struct graphic_buffer *dst_buffer)
+				 struct graphic_buffer *dst_buffer,
+				 struct graphic_buffer *tmp_buffer)
 {
+	int rotation;
+
 	if (!flinger || !src_buffer || !dst_buffer)
 		return -EINVAL;
 
 	if (dst_buffer && dst_buffer->rel_fence)
 		dst_buffer->rel_fence = NULL;
 
-	rk_flinger_rga_blit(flinger, src_buffer, dst_buffer);
-	rk_flinger_fill_buffer_rects(dst_buffer, &src_buffer->dst,
-				     &src_buffer->dst);
-	dst_buffer->src.f = src_buffer->dst.f;
+	if ((src_buffer->rotation & RGA_TRANSFORM_ROT_MASK) &&
+		(src_buffer->rotation & RGA_TRANSFORM_FLIP_MASK)) {
 
+		rotation = flinger->v_cfg.rotate_mirror;
+		/* 1. rotate */
+		src_buffer->rotation = rotation & RGA_TRANSFORM_ROT_MASK;
+		rk_flinger_rga_blit(flinger, src_buffer, tmp_buffer);
+		rk_flinger_fill_buffer_rects(tmp_buffer, &src_buffer->dst,
+					     &src_buffer->dst);
+		tmp_buffer->src.f = src_buffer->dst.f;
+		tmp_buffer->rotation = rotation & RGA_TRANSFORM_FLIP_MASK;
+		/* 2. mirror */
+		rk_flinger_rga_blit(flinger, tmp_buffer, dst_buffer);
+		rk_flinger_fill_buffer_rects(dst_buffer, &tmp_buffer->dst,
+					     &tmp_buffer->dst);
+		dst_buffer->src.f = src_buffer->dst.f;
+
+		src_buffer->rotation = rotation;
+	} else {
+		rk_flinger_rga_blit(flinger, src_buffer, dst_buffer);
+		rk_flinger_fill_buffer_rects(dst_buffer, &src_buffer->dst,
+					     &src_buffer->dst);
+		dst_buffer->src.f = src_buffer->dst.f;
+	}
 	/* save rga out buffer */
 	if (vehicle_dump_rga) {
 		struct file *filep = NULL;
@@ -1074,6 +1102,7 @@ static void rk_drm_vehicle_commit(struct flinger *flinger, struct graphic_buffer
 	rockchip_drm_direct_show_commit(flinger->drm_dev, &commit_info);
 }
 
+static int drop_frames_number;
 static int rk_flinger_vop_show(struct flinger *flinger,
 			       struct graphic_buffer *buffer)
 {
@@ -1082,6 +1111,12 @@ static int rk_flinger_vop_show(struct flinger *flinger,
 
 	VEHICLE_DG("flinger vop show buffer wxh(%zux%zu)\n",
 					buffer->src.w, buffer->src.h);
+	if (drop_frames_number > 0) {
+		VEHICLE_INFO("%s discard the frame num(%d)!\n", __func__, drop_frames_number);
+		drop_frames_number--;
+		return 0;
+	}
+
 	if (!flinger->running)
 		return 0;
 
@@ -1160,9 +1195,11 @@ static void rk_flinger_first_done(struct work_struct *work)
 					    FORCE_XOFFSET, FORCE_YOFFSET,
 					    v_cfg->width, v_cfg->height,
 					    v_cfg->width, FORCE_FORMAT);
-			rk_flinger_set_buffer_rotation(buffer, FORCE_ROTATION);
+			rk_flinger_set_buffer_rotation(buffer, v_cfg->rotate_mirror);
 			rk_flinger_cacultae_dst_rect_by_rotation(buffer);
 			buffer->dst.f = buffer->src.f;
+			VEHICLE_INFO("buffer[%d]->rotation(%d).\n",
+				      i, buffer->rotation);
 		}
 	}
 }
@@ -1294,20 +1331,12 @@ try_again:
 			VEHICLE_DG("it is ypbpr signal\n");
 			iep_buffer = &(flg->target_buffer[NUM_TARGET_BUFFERS - 1]);
 			iep_buffer->state = ACQUIRE;
-			//scaler by rga for rgbx8888/rgb888/rgb565 display
-			if (!nv12_display) {
-				rk_flinger_rga_render(flg, src_buffer, iep_buffer);
-				src_buffer->state = FREE;
-				rk_flinger_rga_scaler(flg, iep_buffer, dst_buffer);
-				iep_buffer->state = FREE;
-				rk_flinger_vop_show(flg, dst_buffer);
-			} else {
-				rk_flinger_rga_render(flg, src_buffer, dst_buffer);
-				src_buffer->state = FREE;
-				rk_flinger_vop_show(flg, dst_buffer);
-				// rk_flinger_vop_show(flg, src_buffer);
-			}
-
+			//scaler by rga to force widthxheight display
+			rk_flinger_rga_render(flg, src_buffer, iep_buffer, dst_buffer);
+			src_buffer->state = FREE;
+			rk_flinger_rga_scaler(flg, iep_buffer, dst_buffer);
+			iep_buffer->state = FREE;
+			rk_flinger_vop_show(flg, dst_buffer);
 			for (i = 0; i < NUM_TARGET_BUFFERS; i++) {
 				buffer = &(flinger->target_buffer[i]);
 				if (buffer->state == DISPLAY)
@@ -1318,7 +1347,7 @@ try_again:
 		} else {
 			// cvbs
 			VEHICLE_DG("it is a cvbs signal\n");
-			rk_flinger_rga_render(flg, src_buffer, dst_buffer);
+			rk_flinger_rga_render(flg, src_buffer, dst_buffer, iep_buffer);
 			src_buffer->state = FREE;
 			rk_flinger_iep_deinterlace(flg, dst_buffer, iep_buffer);
 			dst_buffer->state = FREE;
@@ -1384,18 +1413,27 @@ rk_flinger_lookup_buffer_by_phy_addr(unsigned long phy_addr)
 
 static bool vehicle_rotation_param_check(struct vehicle_cfg *v_cfg)
 {
-	switch (v_cfg->rotate_mirror) {
+	switch (v_cfg->rotate_mirror & RGA_TRANSFORM_ROT_MASK) {
 	case RGA_TRANSFORM_ROT_90:
 	case RGA_TRANSFORM_ROT_270:
 	case RGA_TRANSFORM_ROT_0:
 	case RGA_TRANSFORM_ROT_180:
+		return true;
+	default:
+		VEHICLE_INFO("invalid rotate-mirror param %d\n",
+					v_cfg->rotate_mirror);
+		v_cfg->rotate_mirror = v_cfg->rotate_mirror & RGA_TRANSFORM_FLIP_MASK;
+		return false;
+	}
+
+	switch (v_cfg->rotate_mirror & RGA_TRANSFORM_FLIP_MASK) {
 	case RGA_TRANSFORM_FLIP_H:
 	case RGA_TRANSFORM_FLIP_V:
 		return true;
 	default:
 		VEHICLE_INFO("invalid rotate-mirror param %d\n",
 					v_cfg->rotate_mirror);
-		v_cfg->rotate_mirror = 0;
+		v_cfg->rotate_mirror = v_cfg->rotate_mirror & RGA_TRANSFORM_ROT_MASK;
 		return false;
 	}
 }
@@ -1450,6 +1488,7 @@ int vehicle_flinger_reverse_open(struct vehicle_cfg *v_cfg,
 	flg->cvbs_field_count = 0;
 	memcpy(&flg->v_cfg, v_cfg, sizeof(struct vehicle_cfg));
 	flg->running = true;
+	drop_frames_number = v_cfg->drop_frames;
 
 	return 0;
 }
@@ -1475,9 +1514,8 @@ unsigned long vehicle_flinger_request_cif_buffer(void)
 	int i;
 
 	src_buffer = NULL;
-	found = last_src_index + 1;
 	for (i = 1; i < NUM_SOURCE_BUFFERS; i++) {
-		found = (found + i) % NUM_SOURCE_BUFFERS;
+		found = (last_src_index + i) % NUM_SOURCE_BUFFERS;
 		VEHICLE_DG("%s,flg->source_buffer[%d].state(%d)",
 			__func__, found, flg->source_buffer[found].state);
 		if (flg->source_buffer[found].state == FREE) {

@@ -1269,9 +1269,9 @@ static const struct hsfreq_range samsung_cphy_rx_hsfreq_ranges[] = {
 	{ 500,  0x102}, { 990, 0x002}, { 2500, 0x001},
 };
 
-static void samsung_mipi_dcphy_bias_block_enable(struct samsung_mipi_dcphy *samsung)
+static void samsung_mipi_dcphy_bias_block_enable(struct samsung_mipi_dcphy *samsung,
+						 struct csi2_dphy *csi_dphy)
 {
-	struct csi2_dphy *csi_dphy = samsung->dphy_dev[0];
 	u32 bias_con2 = 0x3223;
 
 	if (csi_dphy &&
@@ -1466,9 +1466,9 @@ static void samsung_mipi_cphy_timing_init(struct samsung_mipi_dcphy *samsung)
 
 	/*
 	 * Divide-by-2 Clock from Serial Clock. Use this when data rate is under
-	 * 1500Mbps, otherwise divide-by-16 Clock from Serial Clock
+	 * 500Msps, otherwise divide-by-16 Clock from Serial Clock
 	 */
-	if (lane_hs_rate < 1500)
+	if (lane_hs_rate < 500)
 		val = HSTX_CLK_SEL;
 
 	val |= T_LPX(timing->lpx);
@@ -1701,7 +1701,7 @@ static void samsung_mipi_dphy_power_on(struct samsung_mipi_dcphy *samsung)
 {
 	reset_control_assert(samsung->m_phy_rst);
 
-	samsung_mipi_dcphy_bias_block_enable(samsung);
+	samsung_mipi_dcphy_bias_block_enable(samsung, NULL);
 	samsung_mipi_dcphy_pll_configure(samsung);
 	samsung_mipi_dphy_clk_lane_timing_init(samsung);
 	samsung_mipi_dphy_data_lane_timing_init(samsung);
@@ -1721,7 +1721,7 @@ static void samsung_mipi_cphy_power_on(struct samsung_mipi_dcphy *samsung)
 	regmap_write(samsung->grf_regmap, MIPI_DCPHY_GRF_CON0, M_CPHY_MODE);
 	reset_control_assert(samsung->m_phy_rst);
 
-	samsung_mipi_dcphy_bias_block_enable(samsung);
+	samsung_mipi_dcphy_bias_block_enable(samsung, NULL);
 	samsung_mipi_dcphy_hs_vreg_amp_configure(samsung);
 	samsung_mipi_dcphy_pll_configure(samsung);
 	samsung_mipi_cphy_timing_init(samsung);
@@ -2207,7 +2207,7 @@ static int samsung_dcphy_rx_stream_on(struct csi2_dphy *dphy,
 	if (samsung->s_phy_rst)
 		reset_control_assert(samsung->s_phy_rst);
 
-	samsung_mipi_dcphy_bias_block_enable(samsung);
+	samsung_mipi_dcphy_bias_block_enable(samsung, dphy);
 	ret = samsung_dcphy_rx_config_common(dphy, sensor);
 	if (ret)
 		goto out_streamon;

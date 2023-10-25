@@ -45,11 +45,11 @@
 #include <media/videobuf2-v4l2.h>
 #include <soc/rockchip/rockchip-system-status.h>
 #include <sound/hdmi-codec.h>
+#include <linux/rk_hdmirx_class.h>
 #include "rk_hdmirx.h"
 #include "rk_hdmirx_cec.h"
 #include "rk_hdmirx_hdcp.h"
 
-static struct class *hdmirx_class;
 static int debug;
 module_param(debug, int, 0644);
 MODULE_PARM_DESC(debug, "debug level (0-3)");
@@ -529,6 +529,16 @@ static int hdmirx_g_dv_timings(struct file *file, void *_fh,
 	struct rk_hdmirx_dev *hdmirx_dev = stream->hdmirx_dev;
 	struct v4l2_device *v4l2_dev = &hdmirx_dev->v4l2_dev;
 	u32 dma_cfg1;
+
+	if (port_no_link(hdmirx_dev)) {
+		v4l2_err(v4l2_dev, "%s port has no link!\n", __func__);
+		return -ENOLINK;
+	}
+
+	if (signal_not_lock(hdmirx_dev)) {
+		v4l2_err(v4l2_dev, "%s signal is not locked!\n", __func__);
+		return -ENOLCK;
+	}
 
 	*timings = hdmirx_dev->timings;
 	dma_cfg1 = hdmirx_readl(hdmirx_dev, DMA_CONFIG1);
@@ -1556,7 +1566,7 @@ static int hdmirx_wait_lock_and_get_timing(struct rk_hdmirx_dev *hdmirx_dev)
 	}
 
 	hdmirx_reset_dma(hdmirx_dev);
-	usleep_range(200*1000, 200*1010);
+	usleep_range(500*1000, 500*1010);
 	hdmirx_format_change(hdmirx_dev);
 
 	return 0;
@@ -2471,13 +2481,28 @@ static void mainunit_2_int_handler(struct rk_hdmirx_dev *hdmirx_dev,
 	hdmirx_writel(hdmirx_dev, MAINUNIT_2_INT_FORCE, 0x0);
 }
 
+/*
+ * In the normal preview, some scenarios will trigger the change interrupt
+ * by mistake, and the trigger source of the interrupt needs to be detected
+ * to avoid the problem.
+ */
 static void pkt_0_int_handler(struct rk_hdmirx_dev *hdmirx_dev,
 		int status, bool *handled)
 {
 	struct v4l2_device *v4l2_dev = &hdmirx_dev->v4l2_dev;
+	u32 pre_fmt_fourcc = hdmirx_dev->cur_fmt_fourcc;
+	u32 pre_color_range = hdmirx_dev->cur_color_range;
+	u32 pre_color_space = hdmirx_dev->cur_color_space;
 
 	if ((status & PKTDEC_AVIIF_CHG_IRQ)) {
-		process_signal_change(hdmirx_dev);
+		hdmirx_get_color_range(hdmirx_dev);
+		hdmirx_get_color_space(hdmirx_dev);
+		hdmirx_get_pix_fmt(hdmirx_dev);
+		if (hdmirx_dev->cur_fmt_fourcc != pre_fmt_fourcc ||
+		    hdmirx_dev->cur_color_range != pre_color_range ||
+		    hdmirx_dev->cur_color_space != pre_color_space) {
+			process_signal_change(hdmirx_dev);
+		}
 		v4l2_dbg(2, debug, v4l2_dev, "%s: ptk0_st:%#x\n",
 				__func__, status);
 		*handled = true;
@@ -3170,7 +3195,7 @@ static void hdmirx_delayed_work_audio(struct work_struct *work)
 							struct rk_hdmirx_dev,
 							delayed_work_audio);
 	struct hdmirx_audiostate *as = &hdmirx_dev->audio_state;
-	u32 fs_audio, ch_audio;
+	u32 fs_audio, ch_audio, sample_flat;
 	int cur_state, init_state, pre_state, fifo_status2;
 	unsigned long delay = 200;
 
@@ -3235,6 +3260,10 @@ static void hdmirx_delayed_work_audio(struct work_struct *work)
 		}
 	}
 	as->pre_state = cur_state;
+
+	sample_flat = hdmirx_readl(hdmirx_dev, AUDIO_PROC_STATUS1) & AUD_SAMPLE_FLAT;
+	hdmirx_update_bits(hdmirx_dev, AUDIO_PROC_CONFIG0, I2S_EN, sample_flat ? 0 : I2S_EN);
+
 exit:
 	schedule_delayed_work_on(hdmirx_dev->bound_cpu,
 			&hdmirx_dev->delayed_work_audio,
@@ -4291,7 +4320,7 @@ static int hdmirx_probe(struct platform_device *pdev)
 	if (ret)
 		goto err_unreg_video_dev;
 
-	hdmirx_dev->classdev = device_create_with_groups(hdmirx_class,
+	hdmirx_dev->classdev = device_create_with_groups(rk_hdmirx_class(),
 							 dev, MKDEV(0, 0),
 							 hdmirx_dev,
 							 hdmirx_groups,
@@ -4449,9 +4478,6 @@ static struct platform_driver hdmirx_driver = {
 
 static int __init hdmirx_init(void)
 {
-	hdmirx_class = class_create(THIS_MODULE, "hdmirx");
-	if (IS_ERR(hdmirx_class))
-		return PTR_ERR(hdmirx_class);
 	return platform_driver_register(&hdmirx_driver);
 }
 module_init(hdmirx_init);
@@ -4459,7 +4485,6 @@ module_init(hdmirx_init);
 static void __exit hdmirx_exit(void)
 {
 	platform_driver_unregister(&hdmirx_driver);
-	class_destroy(hdmirx_class);
 }
 module_exit(hdmirx_exit);
 

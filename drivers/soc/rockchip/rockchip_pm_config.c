@@ -27,6 +27,10 @@
 #define MAX_ON_OFF_REG_PROP_NAME_LEN	60
 #define MAX_CONFIG_PROP_NAME_LEN	60
 
+#define RK_ATAG_MCU_SLP_CORE		0x526b0001
+#define RK_ATAG_MCU_SLP_MAX		0x526b00ff
+#define RK_ATAG_NONE			0x00000000
+
 enum rk_pm_state {
 	RK_PM_MEM = 0,
 	RK_PM_MEM_LITE,
@@ -52,6 +56,31 @@ static struct rk_sleep_config {
 	u32 wakeup_config;
 } sleep_config[RK_PM_STATE_MAX];
 
+/* rk_tag related defines */
+#define sleep_tag_next(t)	\
+	((struct rk_sleep_tag *)((__u32 *)(t) + (t)->hdr.size))
+
+struct rk_tag_header {
+	u32 size;
+	u32 tag;
+};
+
+struct rk_sleep_tag {
+	struct rk_tag_header hdr;
+	u32 params[];
+};
+
+struct rk_mcu_sleep_core_tag {
+	struct rk_tag_header hdr;
+	u32 total_size;
+	u32 reserve[13];
+};
+
+struct rk_mcu_sleep_tags {
+	struct rk_mcu_sleep_core_tag core;
+	struct rk_sleep_tag slp_tags;
+};
+
 static const struct of_device_id pm_match_table[] = {
 	{ .compatible = "rockchip,pm-px30",},
 	{ .compatible = "rockchip,pm-rk1808",},
@@ -70,9 +99,19 @@ static const struct of_device_id pm_match_table[] = {
 };
 
 #ifndef MODULE
+enum {
+	RK_PM_VIRT_PWROFF_EN = 0,
+	RK_PM_VIRT_PWROFF_IRQ_CFG = 1,
+	RK_PM_VIRT_PWROFF_MAX,
+};
+
+static u32 *virtual_pwroff_irqs;
+
 static void rockchip_pm_virt_pwroff_prepare(void)
 {
-	int error;
+	int error, i;
+
+	pm_wakeup_clear(0);
 
 	regulator_suspend_prepare(PM_SUSPEND_MEM);
 
@@ -82,8 +121,58 @@ static void rockchip_pm_virt_pwroff_prepare(void)
 		return;
 	}
 
-	sip_smc_set_suspend_mode(VIRTUAL_POWEROFF, 0, 1);
+	sip_smc_set_suspend_mode(VIRTUAL_POWEROFF, RK_PM_VIRT_PWROFF_EN, 1);
+
+	if (virtual_pwroff_irqs) {
+		for (i = 0; virtual_pwroff_irqs[i]; i++) {
+			error = sip_smc_set_suspend_mode(VIRTUAL_POWEROFF,
+							 RK_PM_VIRT_PWROFF_IRQ_CFG,
+							 virtual_pwroff_irqs[i]);
+			if (error) {
+				pr_err("%s: config virtual_pwroff_irqs[%d] error, overflow or update trust!\n",
+				       __func__, i);
+				break;
+			}
+		}
+	}
+
 	sip_smc_virtual_poweroff();
+}
+
+static int parse_virtual_pwroff_config(struct device_node *node)
+{
+	int ret = 0, cnt;
+	u32 virtual_poweroff_en = 0;
+
+	if (!of_property_read_u32_array(node,
+					"rockchip,virtual-poweroff",
+					&virtual_poweroff_en, 1) &&
+	    virtual_poweroff_en)
+		pm_power_off_prepare = rockchip_pm_virt_pwroff_prepare;
+
+	if (!virtual_poweroff_en)
+		return 0;
+
+	cnt = of_property_count_u32_elems(node, "rockchip,virtual-poweroff-irqs");
+	if (cnt > 0) {
+		/* 0 as the last element of virtual_pwroff_irqs */
+		virtual_pwroff_irqs = kzalloc((cnt + 1) * sizeof(u32), GFP_KERNEL);
+		if (!virtual_pwroff_irqs) {
+			ret = -ENOMEM;
+			goto out;
+		}
+
+		ret = of_property_read_u32_array(node, "rockchip,virtual-poweroff-irqs",
+						 virtual_pwroff_irqs, cnt);
+		if (ret) {
+			pr_err("%s: get rockchip,virtual-poweroff-irqs error\n",
+			       __func__);
+			goto out;
+		}
+	}
+
+out:
+	return ret;
 }
 
 static int parse_sleep_config(struct device_node *node, enum rk_pm_state state)
@@ -166,6 +255,115 @@ static int parse_on_off_regulator(struct device_node *node, enum rk_pm_state sta
 }
 #endif
 
+static int parse_mcu_sleep_config(struct device_node *node)
+{
+	int ret, cnt;
+	struct arm_smccc_res res;
+	struct device_node *mcu_sleep_node;
+	struct device_node *child;
+	struct rk_mcu_sleep_tags *config;
+	struct rk_sleep_tag *slp_tag;
+	char *end;
+
+	mcu_sleep_node = of_find_node_by_name(node, "rockchip-mcu-sleep-cfg");
+	if (IS_ERR_OR_NULL(mcu_sleep_node)) {
+		ret = -ENODEV;
+		goto out;
+	}
+
+	cnt = of_get_child_count(mcu_sleep_node);
+	if (!cnt) {
+		ret = -EINVAL;
+		goto free_mcu_mode;
+	}
+
+	/*
+	 * 4kb for sleep parameters
+	 */
+	res = sip_smc_request_share_mem(1, SHARE_PAGE_TYPE_SLEEP);
+	if (res.a0 != 0) {
+		pr_err("%s: no trust memory for mcu_sleep\n", __func__);
+		ret = -ENOMEM;
+		goto free_mcu_mode;
+	}
+
+	/* Initialize core tag */
+	memset((void *)res.a1, 0, sizeof(struct rk_mcu_sleep_tags));
+	config = (struct rk_mcu_sleep_tags *)res.a1;
+	config->core.hdr.tag = RK_ATAG_MCU_SLP_CORE;
+	config->core.hdr.size = sizeof(struct rk_mcu_sleep_core_tag) / sizeof(u32);
+	config->core.total_size = sizeof(struct rk_mcu_sleep_tags) -
+				  sizeof(struct rk_sleep_tag);
+
+	slp_tag = &config->slp_tags;
+
+	/* End point of sleep data  */
+	end = (char *)config + PAGE_SIZE - sizeof(struct rk_sleep_tag);
+
+	for_each_available_child_of_node(mcu_sleep_node, child) {
+		/* Is overflow? */
+		if ((char *)slp_tag->params >= end)
+			break;
+
+		ret = of_property_read_u32_array(child, "rockchip,tag",
+						 &slp_tag->hdr.tag, 1);
+		if (ret ||
+		    slp_tag->hdr.tag <= RK_ATAG_MCU_SLP_CORE ||
+		    slp_tag->hdr.tag >= RK_ATAG_MCU_SLP_MAX) {
+			pr_info("%s: no or invalid rockchip,tag in %s\n",
+				__func__, child->name);
+
+			continue;
+		}
+
+		cnt = of_property_count_u32_elems(child, "rockchip,params");
+		if (cnt > 0) {
+			/* Is overflow? */
+			if ((char *)(slp_tag->params + cnt) >= end) {
+				pr_warn("%s: no more space for rockchip,tag in %s\n",
+					__func__, child->name);
+				break;
+			}
+
+			ret = of_property_read_u32_array(child, "rockchip,params",
+							 slp_tag->params, cnt);
+			if (ret) {
+				pr_err("%s: rockchip,params error in %s\n",
+				       __func__, child->name);
+				break;
+			}
+
+			slp_tag->hdr.size =
+				cnt + sizeof(struct rk_tag_header) / sizeof(u32);
+		} else if (cnt == 0) {
+			slp_tag->hdr.size = 0;
+		} else {
+			continue;
+		}
+
+		config->core.total_size += slp_tag->hdr.size * sizeof(u32);
+
+		slp_tag = sleep_tag_next(slp_tag);
+	}
+
+	/* Add none tag.
+	 * Compiler will combine the follow code as "str xzr, [x28]", but
+	 * "slp->hdr" may not be 8-byte alignment. So we use memset_io instead:
+	 * slp_tag->hdr.size = 0;
+	 * slp_tag->hdr.tag = RK_ATAG_NONE;
+	 */
+	memset_io(&slp_tag->hdr, 0, sizeof(slp_tag->hdr));
+
+	config->core.total_size += sizeof(struct rk_sleep_tag);
+
+	ret = 0;
+
+free_mcu_mode:
+	of_node_put(mcu_sleep_node);
+out:
+	return ret;
+}
+
 static int pm_config_probe(struct platform_device *pdev)
 {
 	const struct of_device_id *match_id;
@@ -177,9 +375,7 @@ static int pm_config_probe(struct platform_device *pdev)
 	u32 apios_suspend = 0;
 	u32 io_ret_config = 0;
 	u32 sleep_pin_config[2] = {0};
-#ifndef MODULE
-	u32 virtual_poweroff_en = 0;
-#endif
+
 	enum of_gpio_flags flags;
 	int i = 0;
 	int length;
@@ -270,12 +466,10 @@ static int pm_config_probe(struct platform_device *pdev)
 				 ret);
 	}
 
+	parse_mcu_sleep_config(node);
+
 #ifndef MODULE
-	if (!of_property_read_u32_array(node,
-					"rockchip,virtual-poweroff",
-					&virtual_poweroff_en, 1) &&
-	    virtual_poweroff_en)
-		pm_power_off_prepare = rockchip_pm_virt_pwroff_prepare;
+	parse_virtual_pwroff_config(node);
 
 	for (i = RK_PM_MEM; i < RK_PM_STATE_MAX; i++) {
 		parse_sleep_config(node, i);

@@ -644,12 +644,15 @@
 			resets = <&cru SRST_ARESETN_USB3OTG>;
 			reset-names = "usb3-otg";
 			snps,dis_enblslpm_quirk;
-			snps,dis-u1u2-quirk;
+			snps,dis-u1-entry-quirk;
+			snps,dis-u2-entry-quirk;
 			snps,dis-u2-freeclk-exists-quirk;
 			snps,dis-del-phy-power-chg-quirk;
 			snps,dis-tx-ipgap-linecheck-quirk;
 			snps,xhci-trb-ent-quirk;
 			snps,dis_rxdet_inp3_quirk;
+			snps,parkmode-disable-hs-quirk;
+			snps,parkmode-disable-ss-quirk;
 			quirk-skip-phy-init;
 			status = "disabled";
 		};
@@ -1528,9 +1531,8 @@
 		ddc-i2c-scl-low-time-ns = <10000>;
 		reg-io-width = <4>;
 		rockchip,grf = <&grf>;
-		pinctrl-names = "default", "idle";
+		pinctrl-names = "default";
 		pinctrl-0 = <&hdmi_pins>;
-		pinctrl-1 = <&hdmi_pins_idle>;
 		phys = <&hdmiphy>;
 		phy-names = "hdmi";
 		#sound-dai-cells = <0>;
@@ -1916,6 +1918,8 @@
 		rockchip,hw-tshut-temp = <120000>;
 		rockchip,hw-tshut-mode = <0>; /* tshut mode 0:CRU 1:GPIO */
 		rockchip,hw-tshut-polarity = <0>; /* tshut polarity 0:LOW 1:HIGH */
+		nvmem-cells = <&cpu_tsadc_trim_l>, <&cpu_tsadc_trim_h>;
+		nvmem-cell-names = "trim_l", "trim_h";
 		status = "disabled";
 	};
 
@@ -2315,6 +2319,12 @@
 		};
 		dmc_opp_info: dmc-opp-info@3e {
 			reg = <0x3e 0x6>;
+		};
+		cpu_tsadc_trim_l: cpu-tsadc-trim-l@44 {
+			reg = <0x44 0x1>;
+		};
+		cpu_tsadc_trim_h: cpu-tsadc-trim-h@45 {
+			reg = <0x45 0x1>;
 		};
 	};
 

@@ -223,9 +223,9 @@ struct lt6911uxe_mode {
 static struct rkmodule_csi_dphy_param rk3588_dcphy_param = {
 	.vendor = PHY_VENDOR_SAMSUNG,
 	.lp_vol_ref = 3,
-	.lp_hys_sw = {3, 0, 0, 0},
-	.lp_escclk_pol_sel = {1, 0, 0, 0},
-	.skew_data_cal_clk = {0, 3, 3, 3},
+	.lp_hys_sw = {3, 0, 3, 0},
+	.lp_escclk_pol_sel = {1, 1, 0, 0},
+	.skew_data_cal_clk = {0, 13, 0, 13},
 	.clk_hs_term_sel = 2,
 	.data_hs_term_sel = {2, 2, 2, 2},
 	.reserved = {0},
@@ -1395,15 +1395,14 @@ static long lt6911uxe_ioctl(struct v4l2_subdev *sd, unsigned int cmd, void *arg)
 		break;
 	case RKMODULE_SET_CSI_DPHY_PARAM:
 		dphy_param = (struct rkmodule_csi_dphy_param *)arg;
-		if (dphy_param->vendor == rk3588_dcphy_param.vendor)
+		if (dphy_param->vendor == PHY_VENDOR_SAMSUNG)
 			rk3588_dcphy_param = *dphy_param;
 		dev_dbg(&lt6911uxe->i2c_client->dev,
 			"sensor set dphy param\n");
 		break;
 	case RKMODULE_GET_CSI_DPHY_PARAM:
 		dphy_param = (struct rkmodule_csi_dphy_param *)arg;
-		if (dphy_param->vendor == rk3588_dcphy_param.vendor)
-			*dphy_param = rk3588_dcphy_param;
+		*dphy_param = rk3588_dcphy_param;
 		dev_dbg(&lt6911uxe->i2c_client->dev,
 			"sensor get dphy param\n");
 		break;

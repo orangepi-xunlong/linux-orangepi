@@ -136,6 +136,8 @@
 		simple-audio-card,frame-master = <&codec_master>;
 		simple-audio-card,cpu {
 			sound-dai = <&i2s0_8ch>;
+			dai-tdm-slot-num = <8>;
+			dai-tdm-slot-width = <32>;
 		};
 		codec_master: simple-audio-card,codec {
 			sound-dai = <&dummy_codec>;
@@ -163,7 +165,7 @@
 	snps,reset-active-low;
 	/* Reset time is 20ms, 100ms for rtl8211f */
 	snps,reset-delays-us = <0 20000 100000>;
-	pinctrl-names = "phydisb";
+	pinctrl-names = "default";
 	pinctrl-0 = <&gmac0_miim
 		     &gmac0_tx_bus2
 		     &gmac0_rx_bus2
@@ -196,6 +198,7 @@
 
 &i2s0_8ch {
 	status = "okay";
+	rockchip,tdm-fsync-half-frame;
 	pinctrl-names = "default";
 	pinctrl-0 = <&i2s0_lrck
 		     &i2s0_sclk

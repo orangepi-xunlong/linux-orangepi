@@ -666,11 +666,13 @@ static bool is_uv_swap(uint32_t bus_format, uint32_t output_mode)
 static bool is_rb_swap(uint32_t bus_format, uint32_t output_mode)
 {
 	/*
-	 * The default component order of serial rgb3x8 formats
+	 * The default component order of serial formats
 	 * is BGR. So it is needed to enable RB swap.
 	 */
 	if (bus_format == MEDIA_BUS_FMT_RGB888_3X8 ||
-	    bus_format == MEDIA_BUS_FMT_RGB888_DUMMY_4X8)
+	    bus_format == MEDIA_BUS_FMT_RGB888_DUMMY_4X8 ||
+	    bus_format == MEDIA_BUS_FMT_RGB666_3X6 ||
+	    bus_format == MEDIA_BUS_FMT_RGB565_2X8_LE)
 		return true;
 	else
 		return false;
@@ -1871,6 +1873,9 @@ static void vop_plane_atomic_disable(struct drm_plane *plane,
 					to_vop_plane_state(plane->state);
 #endif
 
+	rockchip_drm_dbg(vop->dev, VOP_DEBUG_PLANE, "disable win%d-area%d by %s\n",
+			 win->win_id, win->area_id, current->comm);
+
 	if (!old_state->crtc)
 		return;
 
@@ -1980,6 +1985,7 @@ static void vop_plane_atomic_update(struct drm_plane *plane,
 	uint32_t val;
 	bool rb_swap, global_alpha_en;
 	int is_yuv = fb->format->is_yuv;
+	struct drm_format_name_buf format_name;
 
 #if defined(CONFIG_ROCKCHIP_DRM_DEBUG)
 	bool AFBC_flag = false;
@@ -2144,6 +2150,13 @@ static void vop_plane_atomic_update(struct drm_plane *plane,
 	VOP_WIN_SET(vop, win, enable, 1);
 	VOP_WIN_SET(vop, win, gate, 1);
 	spin_unlock(&vop->reg_lock);
+
+	drm_get_format_name(fb->format->format, &format_name);
+	rockchip_drm_dbg(vop->dev, VOP_DEBUG_PLANE,
+			 "update win%d-area%d [%dx%d->%dx%d@(%d, %d)] zpos:%d fmt[%s%s] addr[%pad] by %s\n",
+			 win->win_id, win->area_id, actual_w, actual_h,
+			 dsp_w, dsp_h, dsp_stx, dsp_sty, vop_plane_state->zpos, format_name.str,
+			 fb->modifier ? "[AFBC]" : "", &vop_plane_state->yrgb_mst, current->comm);
 	/*
 	 * spi interface(vop_plane_state->yrgb_kvaddr, fb->pixel_format,
 	 * actual_w, actual_h)
@@ -2325,7 +2338,7 @@ static void vop_atomic_plane_reset(struct drm_plane *plane)
 		return;
 
 	__drm_atomic_helper_plane_reset(plane, &vop_plane_state->base);
-	win->state.zpos = win->zpos;
+	vop_plane_state->base.zpos = win->zpos;
 	vop_plane_state->global_alpha = 0xff;
 }
 
@@ -2514,7 +2527,7 @@ static void vop_crtc_cancel_pending_vblank(struct drm_crtc *crtc,
 	spin_unlock_irqrestore(&drm->event_lock, flags);
 }
 
-static int vop_crtc_loader_protect(struct drm_crtc *crtc, bool on)
+static int vop_crtc_loader_protect(struct drm_crtc *crtc, bool on, void *data)
 {
 	struct rockchip_drm_private *private = crtc->dev->dev_private;
 	struct vop *vop = to_vop(crtc);
@@ -3078,8 +3091,8 @@ static bool vop_crtc_mode_fixup(struct drm_crtc *crtc,
 {
 	struct vop *vop = to_vop(crtc);
 	const struct vop_data *vop_data = vop->data;
-	struct rockchip_crtc_state *s =
-			to_rockchip_crtc_state(crtc->state);
+	struct drm_crtc_state *new_crtc_state = container_of(mode, struct drm_crtc_state, mode);
+	struct rockchip_crtc_state *s = to_rockchip_crtc_state(new_crtc_state);
 
 	if (mode->hdisplay > vop_data->max_output.width)
 		return false;
@@ -3094,6 +3107,10 @@ static bool vop_crtc_mode_fixup(struct drm_crtc *crtc,
 	    (VOP_MAJOR(vop->version) == 2 && VOP_MINOR(vop->version) >= 12 &&
 	     s->output_if & VOP_OUTPUT_IF_BT656))
 		adj_mode->crtc_clock *= 2;
+
+	if (vop->mcu_timing.mcu_pix_total)
+		adj_mode->crtc_clock *= rockchip_drm_get_cycles_per_pixel(s->bus_format) *
+					(vop->mcu_timing.mcu_pix_total + 1);
 
 	adj_mode->crtc_clock =
 		DIV_ROUND_UP(clk_round_rate(vop->dclk, adj_mode->crtc_clock * 1000),
@@ -3118,12 +3135,14 @@ static void vop_dither_setup(struct drm_crtc *crtc)
 
 	switch (s->bus_format) {
 	case MEDIA_BUS_FMT_RGB565_1X16:
+	case MEDIA_BUS_FMT_RGB565_2X8_LE:
 		VOP_CTRL_SET(vop, dither_down_en, 1);
 		VOP_CTRL_SET(vop, dither_down_mode, RGB888_TO_RGB565);
 		break;
 	case MEDIA_BUS_FMT_RGB666_1X18:
 	case MEDIA_BUS_FMT_RGB666_1X24_CPADHI:
 	case MEDIA_BUS_FMT_RGB666_1X7X3_SPWG:
+	case MEDIA_BUS_FMT_RGB666_3X6:
 		VOP_CTRL_SET(vop, dither_down_en, 1);
 		VOP_CTRL_SET(vop, dither_down_mode, RGB888_TO_RGB666);
 		break;
@@ -4023,6 +4042,7 @@ static void vop_crtc_atomic_flush(struct drm_crtc *crtc,
 	spin_lock_irqsave(&vop->irq_lock, flags);
 	vop->pre_overlay = s->hdr.pre_overlay;
 	vop_cfg_done(vop);
+	rockchip_drm_dbg(vop->dev, VOP_DEBUG_CFG_DONE, "cfg_done\n\n");
 	/*
 	 * rk322x and rk332x odd-even field will mistake when in interlace mode.
 	 * we must switch to frame effect before switch screen and switch to
@@ -4388,6 +4408,7 @@ static irqreturn_t vop_isr(int irq, void *data)
 		 * frame effective, but actually it's effective immediately, so
 		 * we config this register at frame start.
 		 */
+		rockchip_drm_dbg(vop->dev, VOP_DEBUG_VSYNC, "vsync\n");
 		spin_lock_irqsave(&vop->irq_lock, flags);
 		VOP_CTRL_SET(vop, level2_overlay_en, vop->pre_overlay);
 		VOP_CTRL_SET(vop, alpha_hard_calc, vop->pre_overlay);

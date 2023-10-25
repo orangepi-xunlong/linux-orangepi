@@ -1165,12 +1165,13 @@ static int rockchip_get_pvtm(struct device *dev, struct device_node *np,
 }
 
 void rockchip_of_get_pvtm_sel(struct device *dev, struct device_node *np,
-			      char *reg_name, int process,
+			      char *reg_name, int bin, int process,
 			      int *volt_sel, int *scale_sel)
 {
 	struct property *prop = NULL;
 	char name[NAME_MAX];
 	int pvtm, ret;
+	u32 hw = 0;
 
 	if (of_property_read_bool(np, "rockchip,pvtm-pvtpll"))
 		pvtm = rockchip_get_pvtm_pvtpll(dev, np, reg_name);
@@ -1185,6 +1186,12 @@ void rockchip_of_get_pvtm_sel(struct device *dev, struct device_node *np,
 		snprintf(name, sizeof(name),
 			 "rockchip,p%d-pvtm-voltage-sel", process);
 		prop = of_find_property(np, name, NULL);
+	} else if (bin >= 0) {
+		of_property_read_u32(np, "rockchip,pvtm-hw", &hw);
+		if (hw && (hw & BIT(bin))) {
+			sprintf(name, "rockchip,pvtm-voltage-sel-hw");
+			prop = of_find_property(np, name, NULL);
+		}
 	}
 	if (!prop)
 		sprintf(name, "rockchip,pvtm-voltage-sel");
@@ -1195,6 +1202,7 @@ void rockchip_of_get_pvtm_sel(struct device *dev, struct device_node *np,
 next:
 	if (!scale_sel)
 		return;
+	prop = NULL;
 	if (process >= 0) {
 		snprintf(name, sizeof(name),
 			 "rockchip,p%d-pvtm-scaling-sel", process);
@@ -1294,6 +1302,46 @@ int rockchip_get_volt_rm_table(struct device *dev, struct device_node *np,
 }
 EXPORT_SYMBOL(rockchip_get_volt_rm_table);
 
+int rockchip_get_soc_info(struct device *dev, struct device_node *np, int *bin,
+			  int *process)
+{
+	u8 value = 0;
+	int ret = 0;
+
+	if (*bin >= 0 || *process >= 0)
+		return 0;
+
+	if (of_property_match_string(np, "nvmem-cell-names",
+				     "remark_spec_serial_number") >= 0)
+		rockchip_nvmem_cell_read_u8(np, "remark_spec_serial_number", &value);
+
+	if (!value && of_property_match_string(np, "nvmem-cell-names",
+					       "specification_serial_number") >= 0) {
+		ret = rockchip_nvmem_cell_read_u8(np,
+						  "specification_serial_number",
+						  &value);
+		if (ret) {
+			dev_err(dev,
+				"Failed to get specification_serial_number\n");
+			return ret;
+		}
+	}
+
+	/* M */
+	if (value == 0xd)
+		*bin = 1;
+	/* J */
+	else if (value == 0xa)
+		*bin = 2;
+
+	if (*bin < 0)
+		*bin = 0;
+	dev_info(dev, "bin=%d\n", *bin);
+
+	return 0;
+}
+EXPORT_SYMBOL(rockchip_get_soc_info);
+
 void rockchip_get_scale_volt_sel(struct device *dev, char *lkg_name,
 				 char *reg_name, int bin, int process,
 				 int *scale, int *volt_sel)
@@ -1311,7 +1359,7 @@ void rockchip_get_scale_volt_sel(struct device *dev, char *lkg_name,
 
 	rockchip_of_get_lkg_sel(dev, np, lkg_name, process,
 				&lkg_volt_sel, &lkg_scale);
-	rockchip_of_get_pvtm_sel(dev, np, reg_name, process,
+	rockchip_of_get_pvtm_sel(dev, np, reg_name, bin, process,
 				 &pvtm_volt_sel, &pvtm_scale);
 	rockchip_of_get_bin_sel(dev, np, bin, &bin_scale);
 	rockchip_of_get_bin_volt_sel(dev, np, bin, &bin_volt_sel);
@@ -1348,6 +1396,42 @@ struct opp_table *rockchip_set_opp_prop_name(struct device *dev, int process,
 	return dev_pm_opp_set_prop_name(dev, name);
 }
 EXPORT_SYMBOL(rockchip_set_opp_prop_name);
+
+struct opp_table *rockchip_set_opp_supported_hw(struct device *dev,
+						struct device_node *np,
+						int bin, int volt_sel)
+{
+	struct opp_table *opp_table;
+	u32 supported_hw[2];
+	u32 version = 0, speed = 0;
+
+	if (!of_property_read_bool(np, "rockchip,supported-hw"))
+		return NULL;
+
+	opp_table = dev_pm_opp_get_opp_table(dev);
+	if (!opp_table)
+		return NULL;
+	if (opp_table->supported_hw) {
+		dev_pm_opp_put_opp_table(opp_table);
+		return NULL;
+	}
+	dev_pm_opp_put_opp_table(opp_table);
+
+	if (bin >= 0)
+		version = bin;
+	if (volt_sel >= 0)
+		speed = volt_sel;
+
+	/* SoC Version */
+	supported_hw[0] = BIT(version);
+	/* Speed Grade */
+	supported_hw[1] = BIT(speed);
+
+	dev_info(dev, "soc version=%d, speed=%d\n", version, speed);
+
+	return dev_pm_opp_set_supported_hw(dev, supported_hw, 2);
+}
+EXPORT_SYMBOL(rockchip_set_opp_supported_hw);
 
 static int rockchip_adjust_opp_by_irdrop(struct device *dev,
 					 struct device_node *np,
@@ -1815,11 +1899,13 @@ int rockchip_init_opp_table(struct device *dev, struct rockchip_opp_info *info,
 		info->data->get_soc_info(dev, np, &bin, &process);
 
 next:
+	rockchip_get_soc_info(dev, np, &bin, &process);
 	rockchip_get_scale_volt_sel(dev, lkg_name, reg_name, bin, process,
 				    &scale, &volt_sel);
 	if (info && info->data && info->data->set_soc_info)
 		info->data->set_soc_info(dev, np, bin, process, volt_sel);
 	rockchip_set_opp_prop_name(dev, process, volt_sel);
+	rockchip_set_opp_supported_hw(dev, np, bin, volt_sel);
 	ret = dev_pm_opp_of_add_table(dev);
 	if (ret) {
 		dev_err(dev, "Invalid operating-points in device tree.\n");

@@ -536,12 +536,21 @@ static int rga_request_add_acquire_fence_callback(int acquire_fence_fd,
 		       __func__, acquire_fence_fd);
 		return -EINVAL;
 	}
-	/* close acquire fence fd */
+
+	if (!request->feature.user_close_fence) {
+		/* close acquire fence fd */
+#ifdef CONFIG_NO_GKI
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0)
-	close_fd(acquire_fence_fd);
+		close_fd(acquire_fence_fd);
 #else
-	ksys_close(acquire_fence_fd);
+		ksys_close(acquire_fence_fd);
 #endif
+#else
+		pr_err("Please update the driver to v1.2.28 to prevent acquire_fence_fd leaks.");
+		return -EFAULT;
+#endif
+	}
+
 
 	ret = rga_dma_fence_get_status(acquire_fence);
 	if (ret < 0) {
@@ -650,7 +659,8 @@ static int rga_request_scheduler_job_abort(struct rga_request *request)
 					scheduler->ops->soft_reset(scheduler);
 				}
 
-				pr_err("reset core[%d] by request abort", scheduler->core);
+				pr_err("reset core[%d] by request[%d] abort",
+				       scheduler->core, request->id);
 				running_abort_count++;
 			}
 		}
@@ -757,12 +767,13 @@ static int rga_request_timeout_query_state(struct rga_request *request)
 				} else if (!test_bit(RGA_JOB_STATE_DONE, &job->state) &&
 					   test_bit(RGA_JOB_STATE_FINISH, &job->state)) {
 					spin_unlock_irqrestore(&scheduler->irq_lock, flags);
-					pr_err("hardware has finished, but the software has timeout!\n");
+					pr_err("request[%d] hardware has finished, but the software has timeout!\n",
+					       request->id);
 					return -EBUSY;
 				} else if (!test_bit(RGA_JOB_STATE_DONE, &job->state) &&
 					   !test_bit(RGA_JOB_STATE_FINISH, &job->state)) {
 					spin_unlock_irqrestore(&scheduler->irq_lock, flags);
-					pr_err("hardware has timeout.\n");
+					pr_err("request[%d] hardware has timeout.\n", request->id);
 					return -EBUSY;
 				}
 			}
@@ -835,7 +846,7 @@ static void rga_request_acquire_fence_signaled_cb(struct dma_fence *fence,
 	struct rga_pending_request_manager *request_manager = rga_drvdata->pend_request_manager;
 
 	if (rga_request_commit(request))
-		pr_err("rga request commit failed!\n");
+		pr_err("rga request[%d] commit failed!\n", request->id);
 
 	mutex_lock(&request_manager->lock);
 	rga_request_put(request);
@@ -849,6 +860,7 @@ int rga_request_release_signal(struct rga_scheduler_t *scheduler, struct rga_job
 	struct rga_pending_request_manager *request_manager;
 	struct rga_request *request;
 	int finished_count, failed_count;
+	bool is_finished = false;
 	unsigned long flags;
 
 	request_manager = rga_drvdata->pend_request_manager;
@@ -897,7 +909,7 @@ int rga_request_release_signal(struct rga_scheduler_t *scheduler, struct rga_job
 
 		rga_dma_fence_signal(request->release_fence, request->ret);
 
-		wake_up(&request->finished_wq);
+		is_finished = true;
 
 		if (DEBUGGER_EN(MSG))
 			pr_info("request[%d] finished %d failed %d\n",
@@ -910,7 +922,12 @@ int rga_request_release_signal(struct rga_scheduler_t *scheduler, struct rga_job
 	}
 
 	mutex_lock(&request_manager->lock);
+
+	if (is_finished)
+		wake_up(&request->finished_wq);
+
 	rga_request_put(request);
+
 	mutex_unlock(&request_manager->lock);
 
 	return 0;
@@ -964,6 +981,7 @@ struct rga_request *rga_request_config(struct rga_user_request *user_request)
 	request->sync_mode = user_request->sync_mode;
 	request->mpi_config_flags = user_request->mpi_config_flags;
 	request->acquire_fence_fd = user_request->acquire_fence_fd;
+	request->feature = task_list[0].feature;
 
 	spin_unlock_irqrestore(&request->lock, flags);
 
@@ -1099,7 +1117,7 @@ int rga_request_submit(struct rga_request *request)
 request_commit:
 	ret = rga_request_commit(request);
 	if (ret < 0) {
-		pr_err("rga request commit failed!\n");
+		pr_err("rga request[%d] commit failed!\n", request->id);
 		goto err_put_release_fence;
 	}
 

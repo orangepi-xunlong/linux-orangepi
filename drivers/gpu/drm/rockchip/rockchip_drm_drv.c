@@ -125,6 +125,7 @@ void drm_mode_convert_to_split_mode(struct drm_display_mode *mode)
 	hbp = mode->htotal - mode->hsync_end;
 
 	mode->clock *= 2;
+	mode->crtc_clock *= 2;
 	mode->hdisplay = hactive * 2;
 	mode->hsync_start = mode->hdisplay + hfp * 2;
 	mode->hsync_end = mode->hsync_start + hsync * 2;
@@ -143,6 +144,7 @@ void drm_mode_convert_to_origin_mode(struct drm_display_mode *mode)
 	hbp = mode->htotal - mode->hsync_end;
 
 	mode->clock /= 2;
+	mode->crtc_clock /= 2;
 	mode->hdisplay = hactive / 2;
 	mode->hsync_start = mode->hdisplay + hfp / 2;
 	mode->hsync_end = mode->hsync_start + hsync / 2;
@@ -197,6 +199,30 @@ uint32_t rockchip_drm_get_bpp(const struct drm_format_info *info)
 	return 0;
 }
 EXPORT_SYMBOL(rockchip_drm_get_bpp);
+
+uint32_t rockchip_drm_get_cycles_per_pixel(uint32_t bus_format)
+{
+	switch (bus_format) {
+	case MEDIA_BUS_FMT_RGB565_1X16:
+	case MEDIA_BUS_FMT_RGB666_1X18:
+	case MEDIA_BUS_FMT_RGB888_1X24:
+	case MEDIA_BUS_FMT_RGB666_1X24_CPADHI:
+		return 1;
+	case MEDIA_BUS_FMT_RGB565_2X8_LE:
+	case MEDIA_BUS_FMT_BGR565_2X8_LE:
+		return 2;
+	case MEDIA_BUS_FMT_RGB666_3X6:
+	case MEDIA_BUS_FMT_RGB888_3X8:
+	case MEDIA_BUS_FMT_BGR888_3X8:
+		return 3;
+	case MEDIA_BUS_FMT_RGB888_DUMMY_4X8:
+	case MEDIA_BUS_FMT_BGR888_DUMMY_4X8:
+		return 4;
+	default:
+		return 1;
+	}
+}
+EXPORT_SYMBOL(rockchip_drm_get_cycles_per_pixel);
 
 /**
  * rockchip_drm_of_find_possible_crtcs - find the possible CRTCs for an active
@@ -1289,6 +1315,12 @@ static void rockchip_drm_debugfs_init(struct drm_minor *minor)
 }
 #endif
 
+static const struct drm_prop_enum_list split_area[] = {
+	{ ROCKCHIP_DRM_SPLIT_UNSET, "UNSET" },
+	{ ROCKCHIP_DRM_SPLIT_LEFT_SIDE, "LEFT" },
+	{ ROCKCHIP_DRM_SPLIT_RIGHT_SIDE, "RIGHT" },
+};
+
 static int rockchip_drm_create_properties(struct drm_device *dev)
 {
 	struct drm_property *prop;
@@ -1323,6 +1355,11 @@ static int rockchip_drm_create_properties(struct drm_device *dev)
 	if (!prop)
 		return -ENOMEM;
 	private->connector_id_prop = prop;
+
+	prop = drm_property_create_enum(dev, DRM_MODE_PROP_ENUM, "SPLIT_AREA",
+					split_area,
+					ARRAY_SIZE(split_area));
+	private->split_area_prop = prop;
 
 	prop = drm_property_create_object(dev,
 					  DRM_MODE_PROP_ATOMIC | DRM_MODE_PROP_IMMUTABLE,

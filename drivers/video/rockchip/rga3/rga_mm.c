@@ -1302,13 +1302,6 @@ static int rga_mm_sync_dma_sg_for_device(struct rga_internal_buffer *buffer,
 	struct sg_table *sgt;
 	struct rga_scheduler_t *scheduler;
 
-	sgt = rga_mm_lookup_sgt(buffer);
-	if (sgt == NULL) {
-		pr_err("%s(%d), failed to get sgt, core = 0x%x\n",
-		       __func__, __LINE__, job->core);
-		return -EINVAL;
-	}
-
 	scheduler = buffer->dma_buffer->scheduler;
 	if (scheduler == NULL) {
 		pr_err("%s(%d), failed to get scheduler, core = 0x%x\n",
@@ -1316,7 +1309,18 @@ static int rga_mm_sync_dma_sg_for_device(struct rga_internal_buffer *buffer,
 		return -EFAULT;
 	}
 
-	dma_sync_sg_for_device(scheduler->dev, sgt->sgl, sgt->orig_nents, dir);
+	if (buffer->mm_flag & RGA_MEM_PHYSICAL_CONTIGUOUS) {
+		dma_sync_single_for_device(scheduler->dev, buffer->phys_addr, buffer->size, dir);
+	} else {
+		sgt = rga_mm_lookup_sgt(buffer);
+		if (sgt == NULL) {
+			pr_err("%s(%d), failed to get sgt, core = 0x%x\n",
+			       __func__, __LINE__, job->core);
+			return -EINVAL;
+		}
+
+		dma_sync_sg_for_device(scheduler->dev, sgt->sgl, sgt->orig_nents, dir);
+	}
 
 	return 0;
 }
@@ -1328,13 +1332,6 @@ static int rga_mm_sync_dma_sg_for_cpu(struct rga_internal_buffer *buffer,
 	struct sg_table *sgt;
 	struct rga_scheduler_t *scheduler;
 
-	sgt = rga_mm_lookup_sgt(buffer);
-	if (sgt == NULL) {
-		pr_err("%s(%d), failed to get sgt, core = 0x%x\n",
-		       __func__, __LINE__, job->core);
-		return -EINVAL;
-	}
-
 	scheduler = buffer->dma_buffer->scheduler;
 	if (scheduler == NULL) {
 		pr_err("%s(%d), failed to get scheduler, core = 0x%x\n",
@@ -1342,7 +1339,18 @@ static int rga_mm_sync_dma_sg_for_cpu(struct rga_internal_buffer *buffer,
 		return -EFAULT;
 	}
 
-	dma_sync_sg_for_cpu(scheduler->dev, sgt->sgl, sgt->orig_nents, dir);
+	if (buffer->mm_flag & RGA_MEM_PHYSICAL_CONTIGUOUS) {
+		dma_sync_single_for_cpu(scheduler->dev, buffer->phys_addr, buffer->size, dir);
+	} else {
+		sgt = rga_mm_lookup_sgt(buffer);
+		if (sgt == NULL) {
+			pr_err("%s(%d), failed to get sgt, core = 0x%x\n",
+			       __func__, __LINE__, job->core);
+			return -EINVAL;
+		}
+
+		dma_sync_sg_for_cpu(scheduler->dev, sgt->sgl, sgt->orig_nents, dir);
+	}
 
 	return 0;
 }
@@ -1581,6 +1589,53 @@ static int rga_mm_get_handle_info(struct rga_job *job)
 
 	req = &job->rga_command_base;
 	mm = rga_drvdata->mm;
+
+	switch (req->render_mode) {
+	case BITBLT_MODE:
+	case COLOR_PALETTE_MODE:
+		if (unlikely(req->src.yrgb_addr <= 0)) {
+			pr_err("render_mode[0x%x] src0 channel handle[%ld] must is valid!",
+			       req->render_mode, (unsigned long)req->src.yrgb_addr);
+			return -EINVAL;
+		}
+
+		if (unlikely(req->dst.yrgb_addr <= 0)) {
+			pr_err("render_mode[0x%x] dst channel handle[%ld] must is valid!",
+			       req->render_mode, (unsigned long)req->dst.yrgb_addr);
+			return -EINVAL;
+		}
+
+		if (req->bsfilter_flag) {
+			if (unlikely(req->pat.yrgb_addr <= 0)) {
+				pr_err("render_mode[0x%x] src1/pat channel handle[%ld] must is valid!",
+				       req->render_mode, (unsigned long)req->pat.yrgb_addr);
+				return -EINVAL;
+			}
+		}
+
+		break;
+	case COLOR_FILL_MODE:
+		if (unlikely(req->dst.yrgb_addr <= 0)) {
+			pr_err("render_mode[0x%x] dst channel handle[%ld] must is valid!",
+			       req->render_mode, (unsigned long)req->dst.yrgb_addr);
+			return -EINVAL;
+		}
+
+		break;
+
+	case UPDATE_PALETTE_TABLE_MODE:
+	case UPDATE_PATTEN_BUF_MODE:
+		if (unlikely(req->pat.yrgb_addr <= 0)) {
+			pr_err("render_mode[0x%x] lut/pat channel handle[%ld] must is valid!, req->render_mode",
+			       req->render_mode, (unsigned long)req->pat.yrgb_addr);
+			return -EINVAL;
+		}
+
+		break;
+	default:
+		pr_err("%s, unknown render mode!\n", __func__);
+		break;
+	}
 
 	if (likely(req->src.yrgb_addr > 0)) {
 		ret = rga_mm_get_channel_handle_info(mm, job, &req->src,

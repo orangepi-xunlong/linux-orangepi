@@ -342,7 +342,10 @@ static long sditf_ioctl(struct v4l2_subdev *sd, unsigned int cmd, void *arg)
 		mode = (struct rkisp_vicap_mode *)arg;
 		memcpy(&priv->mode, mode, sizeof(*mode));
 		sditf_reinit_mode(priv, &priv->mode);
-		mode->input.merge_num = cif_dev->sditf_cnt;
+		if (priv->is_combine_mode)
+			mode->input.merge_num = cif_dev->sditf_cnt;
+		else
+			mode->input.merge_num = 1;
 		mode->input.index = priv->combine_index;
 		return 0;
 	case RKISP_VICAP_CMD_INIT_BUF:
@@ -430,6 +433,7 @@ static long sditf_compat_ioctl32(struct v4l2_subdev *sd,
 static int sditf_channel_enable(struct sditf_priv *priv, int user)
 {
 	struct rkcif_device *cif_dev = priv->cif_dev;
+	struct rkmodule_capture_info *capture_info = &cif_dev->channels[0].capture_info;
 	unsigned int ch0 = 0, ch1 = 0, ch2 = 0;
 	unsigned int ctrl_val = 0;
 	unsigned int int_en = 0;
@@ -437,11 +441,25 @@ static int sditf_channel_enable(struct sditf_priv *priv, int user)
 	unsigned int offset_y = 0;
 	unsigned int width = priv->cap_info.width;
 	unsigned int height = priv->cap_info.height;
+	int csi_idx = cif_dev->csi_host_idx;
+
+	if (capture_info->mode == RKMODULE_MULTI_DEV_COMBINE_ONE &&
+	    priv->toisp_inf.link_mode == TOISP_UNITE) {
+		if (capture_info->multi_dev.dev_num != 2 ||
+		    capture_info->multi_dev.pixel_offset != RKMOUDLE_UNITE_EXTEND_PIXEL) {
+			v4l2_err(&cif_dev->v4l2_dev,
+				 "param error of online mode, combine dev num %d, offset %d\n",
+				 capture_info->multi_dev.dev_num,
+				 capture_info->multi_dev.pixel_offset);
+			return -EINVAL;
+		}
+		csi_idx = capture_info->multi_dev.dev_idx[user];
+	}
 
 	if (priv->hdr_cfg.hdr_mode == NO_HDR ||
 	    priv->hdr_cfg.hdr_mode == HDR_COMPR) {
 		if (cif_dev->inf_id == RKCIF_MIPI_LVDS)
-			ch0 = cif_dev->csi_host_idx * 4;
+			ch0 = csi_idx * 4;
 		else
 			ch0 = 24;//dvp
 		ctrl_val = (ch0 << 3) | 0x1;
@@ -496,7 +514,10 @@ static int sditf_channel_enable(struct sditf_priv *priv, int user)
 		}
 	} else {
 		if (priv->toisp_inf.link_mode == TOISP_UNITE) {
-			offset_x = priv->cap_info.width / 2 - RKMOUDLE_UNITE_EXTEND_PIXEL;
+			if (capture_info->mode == RKMODULE_MULTI_DEV_COMBINE_ONE)
+				offset_x = 0;
+			else
+				offset_x = priv->cap_info.width / 2 - RKMOUDLE_UNITE_EXTEND_PIXEL;
 			width = priv->cap_info.width / 2 + RKMOUDLE_UNITE_EXTEND_PIXEL;
 		}
 		rkcif_write_register(cif_dev, CIF_REG_TOISP1_CTRL, ctrl_val);
@@ -606,36 +627,39 @@ static int sditf_start_stream(struct sditf_priv *priv)
 	struct rkcif_device *cif_dev = priv->cif_dev;
 	struct v4l2_subdev_format fmt;
 	unsigned int mode = RKCIF_STREAM_MODE_TOISP;
+	int ret = 0;
 
 	sditf_check_capture_mode(cif_dev);
 	sditf_get_set_fmt(&priv->sd, NULL, &fmt);
 	if (priv->mode.rdbk_mode == RKISP_VICAP_ONLINE) {
 		if (priv->toisp_inf.link_mode == TOISP0) {
-			sditf_channel_enable(priv, 0);
+			ret = sditf_channel_enable(priv, 0);
 		} else if (priv->toisp_inf.link_mode == TOISP1) {
-			sditf_channel_enable(priv, 1);
+			ret = sditf_channel_enable(priv, 1);
 		} else if (priv->toisp_inf.link_mode == TOISP_UNITE) {
-			sditf_channel_enable(priv, 0);
-			sditf_channel_enable(priv, 1);
+			ret = sditf_channel_enable(priv, 0);
+			ret |= sditf_channel_enable(priv, 1);
 		}
 		mode = RKCIF_STREAM_MODE_TOISP;
 	} else if (priv->mode.rdbk_mode == RKISP_VICAP_RDBK_AUTO) {
 		mode = RKCIF_STREAM_MODE_TOISP_RDBK;
 	}
+	if (ret)
+		return ret;
 
 	if (priv->hdr_cfg.hdr_mode == NO_HDR ||
 	    priv->hdr_cfg.hdr_mode == HDR_COMPR) {
-		rkcif_do_start_stream(&cif_dev->stream[0], mode);
+		ret = rkcif_do_start_stream(&cif_dev->stream[0], mode);
 	} else if (priv->hdr_cfg.hdr_mode == HDR_X2) {
-		rkcif_do_start_stream(&cif_dev->stream[0], mode);
-		rkcif_do_start_stream(&cif_dev->stream[1], mode);
+		ret = rkcif_do_start_stream(&cif_dev->stream[0], mode);
+		ret |= rkcif_do_start_stream(&cif_dev->stream[1], mode);
 	} else if (priv->hdr_cfg.hdr_mode == HDR_X3) {
-		rkcif_do_start_stream(&cif_dev->stream[0], mode);
-		rkcif_do_start_stream(&cif_dev->stream[1], mode);
-		rkcif_do_start_stream(&cif_dev->stream[2], mode);
+		ret = rkcif_do_start_stream(&cif_dev->stream[0], mode);
+		ret |= rkcif_do_start_stream(&cif_dev->stream[1], mode);
+		ret |= rkcif_do_start_stream(&cif_dev->stream[2], mode);
 	}
 	INIT_LIST_HEAD(&priv->buf_free_list);
-	return 0;
+	return ret;
 }
 
 static int sditf_stop_stream(struct sditf_priv *priv)
@@ -697,6 +721,8 @@ static int sditf_s_stream(struct v4l2_subdev *sd, int on)
 		}
 
 	}
+	if (on && ret)
+		atomic_dec(&priv->stream_cnt);
 	return ret;
 }
 
@@ -724,6 +750,7 @@ static int sditf_s_power(struct v4l2_subdev *sd, int on)
 		} else {
 			v4l2_pipeline_pm_put(&node->vdev.entity);
 			pm_runtime_put_sync(cif_dev->dev);
+			priv->mode.rdbk_mode = RKISP_VICAP_RDBK_AIQ;
 		}
 		v4l2_info(&node->vdev, "s_power %d, entity use_count %d\n",
 			  on, node->vdev.entity.use_count);
@@ -779,10 +806,11 @@ static int sditf_s_rx_buffer(struct v4l2_subdev *sd,
 		return -EINVAL;
 
 	rx_buf = to_cif_rx_buf(dbufs);
-
+	v4l2_dbg(rkcif_debug, 3, &cif_dev->v4l2_dev, "buf back to vicap 0x%x\n",
+		 (u32)rx_buf->dummy.dma_addr);
 	spin_lock_irqsave(&stream->vbq_lock, flags);
-	stream->buf_num_toisp++;
 	stream->last_rx_buf_idx = dbufs->sequence + 1;
+	atomic_inc(&stream->buf_cnt);
 
 	if (!list_empty(&stream->rx_buf_head) &&
 	    cif_dev->is_thunderboot &&
@@ -791,6 +819,8 @@ static int sditf_s_rx_buffer(struct v4l2_subdev *sd,
 		spin_lock_irqsave(&cif_dev->buffree_lock, buffree_flags);
 		list_add_tail(&rx_buf->list_free, &priv->buf_free_list);
 		spin_unlock_irqrestore(&cif_dev->buffree_lock, buffree_flags);
+		atomic_dec(&stream->buf_cnt);
+		stream->total_buf_num--;
 		schedule_work(&priv->buffree_work.work);
 		is_free = true;
 	}

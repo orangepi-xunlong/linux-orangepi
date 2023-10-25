@@ -107,6 +107,12 @@ enum rockchip_color_bar_mode {
 	ROCKCHIP_COLOR_BAR_VERTICAL = 2,
 };
 
+enum rockchip_drm_split_area {
+	ROCKCHIP_DRM_SPLIT_UNSET = 0,
+	ROCKCHIP_DRM_SPLIT_LEFT_SIDE = 1,
+	ROCKCHIP_DRM_SPLIT_RIGHT_SIDE = 2,
+};
+
 struct rockchip_drm_sub_dev {
 	struct list_head list;
 	struct drm_connector *connector;
@@ -184,6 +190,37 @@ struct rockchip_dsc_sink_cap {
 	u16 target_bits_per_pixel_x16;
 };
 
+#define ACM_GAIN_LUT_HY_LENGTH		(9*17)
+#define ACM_GAIN_LUT_HY_TOTAL_LENGTH	(ACM_GAIN_LUT_HY_LENGTH * 3)
+#define ACM_GAIN_LUT_HS_LENGTH		(13*17)
+#define ACM_GAIN_LUT_HS_TOTAL_LENGTH	(ACM_GAIN_LUT_HS_LENGTH * 3)
+#define ACM_DELTA_LUT_H_LENGTH		65
+#define ACM_DELTA_LUT_H_TOTAL_LENGTH	(ACM_DELTA_LUT_H_LENGTH * 3)
+
+struct post_acm {
+	s16 delta_lut_h[ACM_DELTA_LUT_H_TOTAL_LENGTH];
+	s16 gain_lut_hy[ACM_GAIN_LUT_HY_TOTAL_LENGTH];
+	s16 gain_lut_hs[ACM_GAIN_LUT_HS_TOTAL_LENGTH];
+	u16 y_gain;
+	u16 h_gain;
+	u16 s_gain;
+	u16 acm_enable;
+};
+
+struct post_csc {
+	u16 hue;
+	u16 saturation;
+	u16 contrast;
+	u16 brightness;
+	u16 r_gain;
+	u16 g_gain;
+	u16 b_gain;
+	u16 r_offset;
+	u16 g_offset;
+	u16 b_offset;
+	u16 csc_enable;
+};
+
 struct rockchip_crtc_state {
 	struct drm_crtc_state base;
 	int vp_id;
@@ -227,6 +264,7 @@ struct rockchip_crtc_state {
 	int afbdc_win_yoffset;
 	int dsp_layer_sel;
 	u32 output_if;
+	u32 output_if_left_panel;
 	u32 bus_format;
 	u32 bus_flags;
 	int yuv_overlay;
@@ -400,7 +438,7 @@ struct next_hdr_sink_data {
  * @wait_vact_end: wait the last active line.
  */
 struct rockchip_crtc_funcs {
-	int (*loader_protect)(struct drm_crtc *crtc, bool on);
+	int (*loader_protect)(struct drm_crtc *crtc, bool on, void *data);
 	int (*enable_vblank)(struct drm_crtc *crtc);
 	void (*disable_vblank)(struct drm_crtc *crtc);
 	size_t (*bandwidth)(struct drm_crtc *crtc,
@@ -464,6 +502,7 @@ struct rockchip_drm_private {
 
 	/* private connector prop */
 	struct drm_property *connector_id_prop;
+	struct drm_property *split_area_prop;
 
 	const struct rockchip_crtc_funcs *crtc_funcs[ROCKCHIP_MAX_CRTC];
 
@@ -528,6 +567,7 @@ int rockchip_drm_endpoint_is_subdriver(struct device_node *ep);
 uint32_t rockchip_drm_of_find_possible_crtcs(struct drm_device *dev,
 					     struct device_node *port);
 uint32_t rockchip_drm_get_bpp(const struct drm_format_info *info);
+uint32_t rockchip_drm_get_cycles_per_pixel(uint32_t bus_format);
 int rockchip_drm_get_yuv422_format(struct drm_connector *connector,
 				   struct edid *edid);
 int rockchip_drm_parse_cea_ext(struct rockchip_drm_dsc_cap *dsc_cap,

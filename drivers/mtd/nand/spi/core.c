@@ -527,7 +527,7 @@ static int spinand_read_page(struct spinand_device *spinand,
 			     const struct nand_page_io_req *req,
 			     bool ecc_enabled)
 {
-	u8 status;
+	u8 status = 0;
 	int ret;
 
 	ret = spinand_load_page_op(spinand, req);
@@ -535,6 +535,13 @@ static int spinand_read_page(struct spinand_device *spinand,
 		return ret;
 
 	ret = spinand_wait(spinand, &status);
+	/*
+	 * When there is data outside of OIP in the status, the status data is
+	 * inaccurate and needs to be reconfirmed
+	 */
+	if (spinand->id.data[0] == 0x01 && status && !ret)
+		ret = spinand_wait(spinand, &status);
+
 	if (ret < 0)
 		return ret;
 
@@ -1110,6 +1117,13 @@ static int spinand_reinit(struct mtd_info *mtd)
 		ret = spinand_select_target(spinand, i);
 		if (ret)
 			return ret;
+
+		/* HWP_EN must be enabled first before block unlock region is set */
+		if (spinand->id.data[0] == 0x01) {
+			ret = spinand_lock_block(spinand, HWP_EN);
+			if (ret)
+				return ret;
+		}
 
 		ret = spinand_lock_block(spinand, BL_ALL_UNLOCKED);
 		if (ret)
