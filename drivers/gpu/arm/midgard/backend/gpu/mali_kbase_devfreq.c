@@ -405,6 +405,7 @@ int kbase_devfreq_init(struct kbase_device *kbdev)
 	kbdev->devfreq->last_status.current_frequency = opp_rate;
 
 	mali_mdevp.data = kbdev->devfreq;
+	mali_mdevp.opp_info = &kbdev->opp_info;
 	kbdev->mdev_info = rockchip_system_monitor_register(kbdev->dev,
 							    &mali_mdevp);
 	if (IS_ERR(kbdev->mdev_info)) {
