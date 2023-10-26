@@ -477,6 +477,8 @@ static int rockchip_irq_reqres(struct irq_data *d)
 	struct irq_chip_generic *gc = irq_data_get_irq_chip_data(d);
 	struct rockchip_pin_bank *bank = gc->private;
 
+	rockchip_gpio_direction_input(&bank->gpio_chip, d->hwirq);
+
 	return gpiochip_reqres_irq(&bank->gpio_chip, d->hwirq);
 }
 
