@@ -20,6 +20,7 @@
 #include <linux/ctype.h>
 #include <linux/of.h>
 #include <linux/interrupt.h>
+#include <linux/iopoll.h>
 
 #include <uapi/linux/rk-pcie-ep.h>
 
@@ -87,6 +88,9 @@ static DEFINE_MUTEX(rkep_mutex);
 #define PCIE_CFG_ELBI_APP_OFFSET	0xe00
 #define PCIE_ELBI_REG_NUM		0x2
 
+#define RKEP_EP_VIRTUAL_ID_MAX		(8 * 4096)
+#define RKEP_EP_ELBI_TIEMOUT_US		100000
+
 struct pcie_rkep_msix_context {
 	struct pci_dev *dev;
 	u16 msg_id;
@@ -98,7 +102,6 @@ struct pcie_rkep {
 	void __iomem *bar0;
 	void __iomem *bar2;
 	void __iomem *bar4;
-	bool in_used;
 	struct miscdevice dev;
 	struct msix_entry msix_entries[RKEP_NUM_MSIX_VECTORS];
 	struct pcie_rkep_msix_context msix_ctx[RKEP_NUM_MSIX_VECTORS];
@@ -109,6 +112,14 @@ struct pcie_rkep {
 	struct pcie_ep_obj_info *obj_info;
 	struct page *user_pages; /* Allocated physical memory for user space */
 	struct fasync_struct *async;
+	struct mutex dev_lock_mutex;
+	DECLARE_BITMAP(virtual_id_bitmap, RKEP_EP_VIRTUAL_ID_MAX);
+};
+
+struct pcie_file {
+	struct mutex file_lock_mutex;
+	struct pcie_rkep *pcie_rkep;
+	DECLARE_BITMAP(child_vid_bitmap, RKEP_EP_VIRTUAL_ID_MAX); /* The virtual IDs applied for each task */
 };
 
 static int rkep_ep_dma_xfer(struct pcie_rkep *pcie_rkep, struct pcie_ep_dma_block_req *dma)
@@ -123,10 +134,89 @@ static int rkep_ep_dma_xfer(struct pcie_rkep *pcie_rkep, struct pcie_ep_dma_bloc
 	return ret;
 }
 
+static int rkep_ep_request_virtual_id(struct pcie_file *pcie_file)
+{
+	struct pcie_rkep *pcie_rkep = pcie_file->pcie_rkep;
+	int index;
+
+	mutex_lock(&pcie_rkep->dev_lock_mutex);
+	index = find_first_zero_bit(pcie_rkep->virtual_id_bitmap, RKEP_EP_VIRTUAL_ID_MAX);
+	if (index >= RKEP_EP_VIRTUAL_ID_MAX) {
+		dev_err(&pcie_rkep->pdev->dev, "request virtual id %d is invalid\n", index);
+		mutex_unlock(&pcie_rkep->dev_lock_mutex);
+		return -EINVAL;
+	}
+	__set_bit(index, pcie_rkep->virtual_id_bitmap);
+	mutex_unlock(&pcie_rkep->dev_lock_mutex);
+
+	mutex_lock(&pcie_file->file_lock_mutex);
+	__set_bit(index, pcie_file->child_vid_bitmap);
+	mutex_unlock(&pcie_file->file_lock_mutex);
+
+	dev_dbg(&pcie_rkep->pdev->dev, "request virtual id %d\n", index);
+
+	return index;
+}
+
+static int rkep_ep_release_virtual_id(struct pcie_file *pcie_file, int index)
+{
+	struct pcie_rkep *pcie_rkep = pcie_file->pcie_rkep;
+
+	if (index >= RKEP_EP_VIRTUAL_ID_MAX) {
+		dev_err(&pcie_rkep->pdev->dev, "release virtual id %d out of range\n", index);
+
+		return -EINVAL;
+	}
+
+	if (!test_bit(index, pcie_rkep->virtual_id_bitmap))
+		dev_err(&pcie_rkep->pdev->dev, "release virtual id %d is already free\n", index);
+
+	mutex_lock(&pcie_file->file_lock_mutex);
+	__clear_bit(index, pcie_file->child_vid_bitmap);
+	mutex_unlock(&pcie_file->file_lock_mutex);
+
+	mutex_lock(&pcie_rkep->dev_lock_mutex);
+	__clear_bit(index, pcie_rkep->virtual_id_bitmap);
+	mutex_unlock(&pcie_rkep->dev_lock_mutex);
+
+	dev_dbg(&pcie_rkep->pdev->dev, "release virtual id %d\n", index);
+
+	return 0;
+}
+
+static int rkep_ep_raise_elbi_irq_user(struct pcie_rkep *pcie_rkep, u32 interrupt_num)
+{
+	u32 index, off;
+	int i, gap_us = 100;
+	u32 val;
+
+	if (interrupt_num >= (PCIE_ELBI_REG_NUM * 16)) {
+		dev_err(&pcie_rkep->pdev->dev, "elbi int num out of max count\n");
+		return -EINVAL;
+	}
+
+	index = interrupt_num / 16;
+	off = interrupt_num % 16;
+
+	for (i = 0; i < RKEP_EP_ELBI_TIEMOUT_US; i += gap_us) {
+		pci_read_config_dword(pcie_rkep->pdev, PCIE_CFG_ELBI_APP_OFFSET + 4 * index, &val);
+		if (val & BIT(off))
+			usleep_range(gap_us, gap_us + 10);
+		else
+			break;
+	}
+
+	if (i >= gap_us)
+		dev_err(&pcie_rkep->pdev->dev, "elbi int is not clear, status=%x\n", val);
+
+	return pci_write_config_dword(pcie_rkep->pdev, PCIE_CFG_ELBI_APP_OFFSET + 4 * index,
+				      (1 << (off + 16)) | (1 << off));
+}
+
 static int pcie_rkep_fasync(int fd, struct file *file, int mode)
 {
-	struct miscdevice *miscdev = file->private_data;
-	struct pcie_rkep *pcie_rkep = container_of(miscdev, struct pcie_rkep, dev);
+	struct pcie_file *pcie_file = file->private_data;
+	struct pcie_rkep *pcie_rkep = pcie_file->pcie_rkep;
 
 	return fasync_helper(fd, file, mode, &pcie_rkep->async);
 }
@@ -135,29 +225,47 @@ static int pcie_rkep_open(struct inode *inode, struct file *file)
 {
 	struct miscdevice *miscdev = file->private_data;
 	struct pcie_rkep *pcie_rkep = container_of(miscdev, struct pcie_rkep, dev);
-	int ret = 0;
+	struct pcie_file *pcie_file = NULL;
 
-	mutex_lock(&rkep_mutex);
+	pcie_file = devm_kzalloc(&pcie_rkep->pdev->dev, sizeof(struct pcie_file), GFP_KERNEL);
+	if (!pcie_file)
+		return -ENOMEM;
 
-	if (pcie_rkep->in_used)
-		ret = -EINVAL;
-	else
-		pcie_rkep->in_used = true;
+	pcie_file->pcie_rkep = pcie_rkep;
 
-	mutex_unlock(&rkep_mutex);
+	mutex_init(&pcie_file->file_lock_mutex);
 
-	return ret;
+	file->private_data = pcie_file;
+
+	return 0;
 }
 
 static int pcie_rkep_release(struct inode *inode, struct file *file)
 {
-	struct miscdevice *miscdev = file->private_data;
-	struct pcie_rkep *pcie_rkep = container_of(miscdev, struct pcie_rkep, dev);
+	struct pcie_file *pcie_file = file->private_data;
+	struct pcie_rkep *pcie_rkep = pcie_file->pcie_rkep;
+	int index;
 
-	mutex_lock(&rkep_mutex);
-	pcie_rkep->in_used = false;
-	pcie_rkep_fasync(-1, file, 0);
-	mutex_unlock(&rkep_mutex);
+	pcie_rkep_fasync(-1, file, 0);//TODO
+
+	while (1) {
+		mutex_lock(&pcie_file->file_lock_mutex);
+		index = find_first_bit(pcie_file->child_vid_bitmap, RKEP_EP_VIRTUAL_ID_MAX);
+
+		if (index >= RKEP_EP_VIRTUAL_ID_MAX)
+			break;
+
+		__clear_bit(index, pcie_file->child_vid_bitmap);
+		mutex_unlock(&pcie_file->file_lock_mutex);
+
+		mutex_lock(&pcie_rkep->dev_lock_mutex);
+		__clear_bit(index, pcie_rkep->virtual_id_bitmap);
+		mutex_unlock(&pcie_rkep->dev_lock_mutex);
+
+		dev_dbg(&pcie_rkep->pdev->dev, "release virtual id %d\n", index);
+	}
+
+	devm_kfree(&pcie_rkep->pdev->dev, pcie_file);
 
 	return 0;
 }
@@ -165,8 +273,8 @@ static int pcie_rkep_release(struct inode *inode, struct file *file)
 static ssize_t pcie_rkep_write(struct file *file, const char __user *buf,
 			       size_t count, loff_t *ppos)
 {
-	struct miscdevice *miscdev = file->private_data;
-	struct pcie_rkep *pcie_rkep = container_of(miscdev, struct pcie_rkep, dev);
+	struct pcie_file *pcie_file = file->private_data;
+	struct pcie_rkep *pcie_rkep = pcie_file->pcie_rkep;
 	u32 *bar0_buf;
 	int loop, i = 0;
 	size_t raw_count = count;
@@ -199,8 +307,8 @@ exit:
 static ssize_t pcie_rkep_read(struct file *file, char __user *buf,
 			      size_t count, loff_t *ppos)
 {
-	struct miscdevice *miscdev = file->private_data;
-	struct pcie_rkep *pcie_rkep = container_of(miscdev, struct pcie_rkep, dev);
+	struct pcie_file *pcie_file = file->private_data;
+	struct pcie_rkep *pcie_rkep = pcie_file->pcie_rkep;
 	u32 *bar0_buf;
 	int loop, i = 0;
 	size_t raw_count = count;
@@ -233,8 +341,8 @@ exit:
 static int pcie_rkep_mmap(struct file *file, struct vm_area_struct *vma)
 {
 	u64 addr;
-	struct miscdevice *miscdev = file->private_data;
-	struct pcie_rkep *pcie_rkep = container_of(miscdev, struct pcie_rkep, dev);
+	struct pcie_file *pcie_file = file->private_data;
+	struct pcie_rkep *pcie_rkep = pcie_file->pcie_rkep;
 	size_t size = vma->vm_end - vma->vm_start;
 
 	if (size > RKEP_USER_MEM_SIZE) {
@@ -262,12 +370,13 @@ static int pcie_rkep_mmap(struct file *file, struct vm_area_struct *vma)
 static long pcie_rkep_ioctl(struct file *file, unsigned int cmd, unsigned long args)
 {
 	void __user *argp;
-	struct miscdevice *miscdev = file->private_data;
-	struct pcie_rkep *pcie_rkep = container_of(miscdev, struct pcie_rkep, dev);
+	struct pcie_file *pcie_file = file->private_data;
+	struct pcie_rkep *pcie_rkep = pcie_file->pcie_rkep;
 	struct pcie_ep_dma_cache_cfg cfg;
 	struct pcie_ep_dma_block_req dma;
 	void __user *uarg = (void __user *)args;
 	int ret;
+	int index;
 	u64 addr;
 
 	argp = (void __user *)args;
@@ -313,6 +422,46 @@ static long pcie_rkep_ioctl(struct file *file, unsigned int cmd, unsigned long a
 			dev_err(&pcie_rkep->pdev->dev, "failed to transfer dma, ret=%d\n", ret);
 			return -EFAULT;
 		}
+		break;
+	case PCIE_EP_REQUEST_VIRTUAL_ID:
+		index = rkep_ep_request_virtual_id(pcie_file);
+		if (index < 0) {
+			dev_err(&pcie_rkep->pdev->dev,
+				"request virtual id failed, ret=%d\n", index);
+
+			return -EFAULT;
+		}
+		if (copy_to_user(argp, &index, sizeof(index)))
+			return -EFAULT;
+		break;
+	case PCIE_EP_RELEASE_VIRTUAL_ID:
+		ret = copy_from_user(&index, uarg, sizeof(index));
+		if (ret) {
+			dev_err(&pcie_rkep->pdev->dev, "failed to get dma_data copy from userspace\n");
+			return -EFAULT;
+		}
+		ret = rkep_ep_release_virtual_id(pcie_file, index);
+		if (ret < 0) {
+			dev_err(&pcie_rkep->pdev->dev,
+				"release virtual id %d failed, ret=%d\n", index, ret);
+
+			return -EFAULT;
+		}
+		break;
+	case PCIE_EP_RAISE_ELBI:
+		ret = copy_from_user(&index, uarg, sizeof(index));
+		if (ret) {
+			dev_err(&pcie_rkep->pdev->dev, "failed to get dma_data copy from userspace\n");
+			return -EFAULT;
+		}
+		ret = rkep_ep_raise_elbi_irq_user(pcie_rkep, index);
+		if (ret < 0) {
+			dev_err(&pcie_rkep->pdev->dev,
+				"raise elbi %d failed, ret=%d\n", index, ret);
+
+			return -EFAULT;
+		}
+		break;
 	default:
 		break;
 	}
@@ -582,22 +731,6 @@ static int pcie_rkep_obj_handler(struct pcie_rkep *pcie_rkep, struct pci_dev *pd
 	return 0;
 }
 
-static int __maybe_unused rockchip_pcie_raise_elbi_irq(struct pcie_rkep *pcie_rkep,
-						       u8 interrupt_num)
-{
-	u32 index, off;
-
-	if (interrupt_num >= (PCIE_ELBI_REG_NUM * 16)) {
-		dev_err(&pcie_rkep->pdev->dev, "elbi int num out of max count\n");
-		return -EINVAL;
-	}
-
-	index = interrupt_num / 16;
-	off = interrupt_num % 16;
-	return pci_write_config_dword(pcie_rkep->pdev, PCIE_CFG_ELBI_APP_OFFSET + 4 * index,
-				      (1 << (off + 16)) | (1 << off));
-}
-
 static irqreturn_t pcie_rkep_pcie_interrupt(int irq, void *context)
 {
 	struct pcie_rkep_msix_context *ctx = context;
@@ -758,6 +891,12 @@ static int pcie_rkep_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	if (!pcie_rkep)
 		return -ENOMEM;
 
+	name = devm_kzalloc(&pdev->dev, MISC_DEV_NAME_MAX_LENGTH, GFP_KERNEL);
+	if (!name)
+		return -ENOMEM;
+
+	__set_bit(0, pcie_rkep->virtual_id_bitmap);
+
 	ret = pci_enable_device(pdev);
 	if (ret) {
 		dev_err(&pdev->dev, "pci_enable_device failed %d\n", ret);
@@ -796,16 +935,13 @@ static int pcie_rkep_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 
 	dev_dbg(&pdev->dev, "get bar4 address is %p\n", pcie_rkep->bar4);
 
-	name = devm_kzalloc(&pdev->dev, MISC_DEV_NAME_MAX_LENGTH, GFP_KERNEL);
-	if (!name) {
-		ret = -ENOMEM;
-		goto err_pci_iomap;
-	}
 	sprintf(name, "%s-%s", DRV_NAME, dev_name(&pdev->dev));
 	pcie_rkep->dev.minor = MISC_DYNAMIC_MINOR;
 	pcie_rkep->dev.name = name;
 	pcie_rkep->dev.fops = &pcie_rkep_fops;
 	pcie_rkep->dev.parent = NULL;
+
+	mutex_init(&pcie_rkep->dev_lock_mutex);
 
 	ret = misc_register(&pcie_rkep->dev);
 	if (ret) {
@@ -838,8 +974,6 @@ static int pcie_rkep_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 			pcie_rkep_writel_dbi(pcie_rkep, PCIE_DMA_OFFSET + PCIE_DMA_RD_INT_MASK, 0xffffffff);
 		}
 	}
-
-
 
 #if IS_ENABLED(CONFIG_PCIE_FUNC_RKEP_USERPAGES)
 	pcie_rkep->user_pages =
