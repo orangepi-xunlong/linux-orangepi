@@ -1414,15 +1414,21 @@ static int rockchip_opp_set_config(struct device *dev, struct rockchip_opp_info 
 
 	if (clk_name) {
 		clk = clk_get(dev, clk_name);
+		if (IS_ERR_OR_NULL(clk)) {
+			if (!of_property_read_string_index(dev->of_node,
+							   "clock-names",
+							   0, &clk_name))
+				clk = clk_get(dev, clk_name);
+		}
 		if (!IS_ERR_OR_NULL(clk)) {
 			if (strstr(__clk_get_name(clk), "scmi"))
 				info->is_scmi_clk = true;
 			clk_names[0] = clk_name;
 			config.clk_names = clk_names;
 			clk_put(clk);
+			if (info->data && info->data->config_clks)
+				config.config_clks = info->data->config_clks;
 		}
-		if (info->data && info->data->config_clks)
-			config.config_clks = info->data->config_clks;
 	}
 
 	if (info->process >= 0) {
