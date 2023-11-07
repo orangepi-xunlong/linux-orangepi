@@ -743,6 +743,35 @@ config CRYPTO_DEV_XILINX_TRNG
 	  To compile this driver as a module, choose M here: the module
 	  will be called xilinx-trng.
 
+config CRYPTO_DEV_ROCKCHIP2
+	tristate "Rockchip's cryptographic offloader V2"
+	depends on OF && ARCH_ROCKCHIP
+	depends on PM
+	select CRYPTO_ECB
+	select CRYPTO_CBC
+	select CRYPTO_AES
+	select CRYPTO_MD5
+	select CRYPTO_SHA1
+	select CRYPTO_SHA256
+	select CRYPTO_SHA512
+	select CRYPTO_SM3_GENERIC
+	select CRYPTO_HASH
+	select CRYPTO_SKCIPHER
+	select CRYPTO_ENGINE
+
+	help
+	  This driver interfaces with the hardware crypto offloader present
+	  on RK3566, RK3568 and RK3588.
+
+config CRYPTO_DEV_ROCKCHIP2_DEBUG
+	bool "Enable Rockchip V2 crypto stats"
+	depends on CRYPTO_DEV_ROCKCHIP2
+	depends on DEBUG_FS
+	help
+	  Say y to enable Rockchip crypto debug stats.
+	  This will create /sys/kernel/debug/rk3588_crypto/stats for displaying
+	  the number of requests per algorithm and other internal stats.
+
 config CRYPTO_DEV_ZYNQMP_AES
 	tristate "Support for Xilinx ZynqMP AES hw accelerator"
 	depends on ZYNQMP_FIRMWARE || COMPILE_TEST
