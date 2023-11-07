@@ -716,40 +716,40 @@
 #define SRST_P_GPIO0			627
 #define SRST_GPIO0			628
 
-#define SRST_A_SECURE_NS_BIU		629
-#define SRST_H_SECURE_NS_BIU		630
-#define SRST_A_SECURE_S_BIU		631
-#define SRST_H_SECURE_S_BIU		632
-#define SRST_P_SECURE_S_BIU		633
-#define SRST_CRYPTO_CORE		634
+#define SRST_A_SECURE_NS_BIU		10
+#define SRST_H_SECURE_NS_BIU		11
+#define SRST_A_SECURE_S_BIU		12
+#define SRST_H_SECURE_S_BIU		13
+#define SRST_P_SECURE_S_BIU		14
+#define SRST_CRYPTO_CORE		15
 
-#define SRST_CRYPTO_PKA			635
-#define SRST_CRYPTO_RNG			636
-#define SRST_A_CRYPTO			637
-#define SRST_H_CRYPTO			638
-#define SRST_KEYLADDER_CORE		639
-#define SRST_KEYLADDER_RNG		640
-#define SRST_A_KEYLADDER		641
-#define SRST_H_KEYLADDER		642
-#define SRST_P_OTPC_S			643
-#define SRST_OTPC_S			644
-#define SRST_WDT_S			645
+#define SRST_CRYPTO_PKA			16
+#define SRST_CRYPTO_RNG			17
+#define SRST_A_CRYPTO			18
+#define SRST_H_CRYPTO			19
+#define SRST_KEYLADDER_CORE		25
+#define SRST_KEYLADDER_RNG		26
+#define SRST_A_KEYLADDER		27
+#define SRST_H_KEYLADDER		28
+#define SRST_P_OTPC_S			29
+#define SRST_OTPC_S			30
+#define SRST_WDT_S			31
 
-#define SRST_T_WDT_S			646
-#define SRST_H_BOOTROM			647
-#define SRST_A_DCF			648
-#define SRST_P_DCF			649
-#define SRST_H_BOOTROM_NS		650
-#define SRST_P_KEYLADDER		651
-#define SRST_H_TRNG_S			652
+#define SRST_T_WDT_S			32
+#define SRST_H_BOOTROM			33
+#define SRST_A_DCF			34
+#define SRST_P_DCF			35
+#define SRST_H_BOOTROM_NS		37
+#define SRST_P_KEYLADDER		46
+#define SRST_H_TRNG_S			47
 
-#define SRST_H_TRNG_NS			653
-#define SRST_D_SDMMC_BUFFER		654
-#define SRST_H_SDMMC			655
-#define SRST_H_SDMMC_BUFFER		656
-#define SRST_SDMMC			657
-#define SRST_P_TRNG_CHK			658
-#define SRST_TRNG_S			659
+#define SRST_H_TRNG_NS			48
+#define SRST_D_SDMMC_BUFFER		49
+#define SRST_H_SDMMC			50
+#define SRST_H_SDMMC_BUFFER		51
+#define SRST_SDMMC			52
+#define SRST_P_TRNG_CHK			53
+#define SRST_TRNG_S			54
 
 #define SRST_A_HDMIRX_BIU		660
 
