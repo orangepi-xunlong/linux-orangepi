@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020, Broadcom.
+ * Copyright (C) 2022, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -122,6 +122,15 @@ typedef enum {
 	WLFC_CTL_TYPE_HP2P_EXT_TXSTATUS		= 32, /* Hp2p extended tx status */
 	WLFC_CTL_TYPE_HP2P_ACTIVE_STATE		= 33, /* Get status of HP2P ring active or not */
 	WLFC_CTL_TYPE_HP2P_QUERY_LIFETIME	= 34, /* Query lifetime for last unacked */
+
+	WLFC_CTL_TYPE_FLOWID_MAC		= 35, /* Get flow's MAC (used by WLMESH) */
+
+	WLFC_CTL_TYPE_LLW_OPEN			= 36, /* Open LLW interface */
+	WLFC_CTL_TYPE_LLW_CLOSE			= 37, /* Close LLW interface */
+
+	WLFC_CTL_TYPE_D2HQ_STATUS		= 38,
+	WLFC_CTL_TYPE_LLW_LATENCY		= 39, /* LLW latency TLV */
+
 	WLFC_CTL_TYPE_FILLER			= 255
 } wlfc_ctl_type_t;
 
@@ -143,6 +152,9 @@ typedef enum {
 #define WLFC_CTL_VALUE_LEN_TID			3u	/* interface index, TID */
 
 #define WLFC_CTL_EXT_TXSTATUS_PAYLOAD_LEN	8u	/* Payload legnth of extention tx status */
+
+#define WLFC_CTL_VALUE_LEN_LLW			8u	/** tid, ifindex, MAC */
+#define WLFC_CTL_VALUE_LEN_LLW_LATENCY		16u	/* Peer latency information */
 
 /* Reset the flags set for the corresponding flowring of the SCB which is de-inited */
 /* FLOW_RING_FLAG_LAST_TIM | FLOW_RING_FLAG_INFORM_PKTPEND | FLOW_RING_FLAG_PKT_REQ */
@@ -186,8 +198,8 @@ typedef enum {
 #define WLFC_PKTFLAG_PKT_FLUSHED_MASK		0x08
 #endif /* WLFC_PKTFLAG_COMPAT */
 
-#define WL_TXSTATUS_STATUS_MASK			0xff /* allow 8 bits */
-#define WL_TXSTATUS_STATUS_SHIFT		24
+#define WL_TXSTATUS_STATUS_MASK			0xffu /* allow 8 bits */
+#define WL_TXSTATUS_STATUS_SHIFT		24u
 
 #define WL_TXSTATUS_SET_STATUS(x, status)	((x)  = \
 	((x) & ~(WL_TXSTATUS_STATUS_MASK << WL_TXSTATUS_STATUS_SHIFT)) | \
@@ -201,8 +213,8 @@ typedef enum {
  * firmware accepts a packet when the generation matches; on reset (startup) both "current" and
  * "expected" are set to 0.
  */
-#define WL_TXSTATUS_GENERATION_MASK		1 /* allow 1 bit */
-#define WL_TXSTATUS_GENERATION_SHIFT		31
+#define WL_TXSTATUS_GENERATION_MASK		1u /* allow 1 bit */
+#define WL_TXSTATUS_GENERATION_SHIFT		31u
 
 #define WL_TXSTATUS_SET_GENERATION(x, gen)	((x) = \
 	((x) & ~(WL_TXSTATUS_GENERATION_MASK << WL_TXSTATUS_GENERATION_SHIFT)) | \
@@ -211,8 +223,8 @@ typedef enum {
 #define WL_TXSTATUS_GET_GENERATION(x)	(((x) >> WL_TXSTATUS_GENERATION_SHIFT) & \
 	WL_TXSTATUS_GENERATION_MASK)
 
-#define WL_TXSTATUS_FLAGS_MASK			0xf /* allow 4 bits only */
-#define WL_TXSTATUS_FLAGS_SHIFT			27
+#define WL_TXSTATUS_FLAGS_MASK			0xfu /* allow 4 bits only */
+#define WL_TXSTATUS_FLAGS_SHIFT			27u
 
 #define WL_TXSTATUS_SET_FLAGS(x, flags)	((x)  = \
 	((x) & ~(WL_TXSTATUS_FLAGS_MASK << WL_TXSTATUS_FLAGS_SHIFT)) | \
@@ -222,21 +234,21 @@ typedef enum {
 #define WL_TXSTATUS_CLEAR_FLAGS(x, flags)	((x)  = \
 	((x) & ~(((flags) & WL_TXSTATUS_FLAGS_MASK) << WL_TXSTATUS_FLAGS_SHIFT)))
 
-#define WL_TXSTATUS_FIFO_MASK			0x7 /* allow 3 bits for FIFO ID */
-#define WL_TXSTATUS_FIFO_SHIFT			24
+#define WL_TXSTATUS_FIFO_MASK			0x7u /* allow 3 bits for FIFO ID */
+#define WL_TXSTATUS_FIFO_SHIFT			24u
 
 #define WL_TXSTATUS_SET_FIFO(x, flags)	((x)  = \
 	((x) & ~(WL_TXSTATUS_FIFO_MASK << WL_TXSTATUS_FIFO_SHIFT)) | \
 	(((flags) & WL_TXSTATUS_FIFO_MASK) << WL_TXSTATUS_FIFO_SHIFT))
 #define WL_TXSTATUS_GET_FIFO(x)		(((x) >> WL_TXSTATUS_FIFO_SHIFT) & WL_TXSTATUS_FIFO_MASK)
 
-#define WL_TXSTATUS_PKTID_MASK			0xffffff /* allow 24 bits */
+#define WL_TXSTATUS_PKTID_MASK			0xffffffu /* allow 24 bits */
 #define WL_TXSTATUS_SET_PKTID(x, num)	((x) = \
 	((x) & ~WL_TXSTATUS_PKTID_MASK) | (num))
 #define WL_TXSTATUS_GET_PKTID(x)		((x) & WL_TXSTATUS_PKTID_MASK)
 
-#define WL_TXSTATUS_HSLOT_MASK			0xffff /* allow 16 bits */
-#define WL_TXSTATUS_HSLOT_SHIFT			8
+#define WL_TXSTATUS_HSLOT_MASK			0xffffu /* allow 16 bits */
+#define WL_TXSTATUS_HSLOT_SHIFT			8u
 
 #define WL_TXSTATUS_SET_HSLOT(x, hslot)	((x)  = \
 	((x) & ~(WL_TXSTATUS_HSLOT_MASK << WL_TXSTATUS_HSLOT_SHIFT)) | \
@@ -244,7 +256,7 @@ typedef enum {
 #define WL_TXSTATUS_GET_HSLOT(x)	(((x) >> WL_TXSTATUS_HSLOT_SHIFT)& \
 	WL_TXSTATUS_HSLOT_MASK)
 
-#define WL_TXSTATUS_FREERUNCTR_MASK		0xff /* allow 8 bits */
+#define WL_TXSTATUS_FREERUNCTR_MASK		0xffu /* allow 8 bits */
 
 #define WL_TXSTATUS_SET_FREERUNCTR(x, ctr)	((x)  = \
 	((x) & ~(WL_TXSTATUS_FREERUNCTR_MASK)) | \
@@ -377,6 +389,8 @@ typedef enum {
 #define WLFC_CTL_PKTFLAG_DROPPED	7
 /* Firmware free this packet  */
 #define WLFC_CTL_PKTFLAG_MKTFREE	8
+/* Firmware drop this packet due to AMPDU cleanup  */
+#define WLFC_CTL_PKTFLAG_AMPDU_CLEANUP	8
 /* Firmware dropped the frame after suppress retries reached max */
 #define WLFC_CTL_PKTFLAG_MAX_SUP_RETR   9
 
@@ -423,30 +437,30 @@ typedef enum {
 #define WLFC_MODE_AFQ		2 /* use afq (At Firmware Queue) */
 #define WLFC_IS_OLD_DEF(x) ((x & 1) || (x & 2))
 
-#define WLFC_MODE_AFQ_SHIFT		2	/* afq bit */
+#define WLFC_MODE_AFQ_SHIFT		2u	/* afq bit */
 #define WLFC_SET_AFQ(x, val)	((x) = \
-	((x) & ~(1 << WLFC_MODE_AFQ_SHIFT)) | \
-	(((val) & 1) << WLFC_MODE_AFQ_SHIFT))
+	((x) & ~(1u << WLFC_MODE_AFQ_SHIFT)) | \
+	(((val) & 1u) << WLFC_MODE_AFQ_SHIFT))
 /** returns TRUE if firmware supports 'at firmware queue' feature */
 #define WLFC_GET_AFQ(x)	(((x) >> WLFC_MODE_AFQ_SHIFT) & 1)
 
-#define WLFC_MODE_REUSESEQ_SHIFT	3	/* seq reuse bit */
+#define WLFC_MODE_REUSESEQ_SHIFT	3u	/* seq reuse bit */
 #define WLFC_SET_REUSESEQ(x, val)	((x) = \
-	((x) & ~(1 << WLFC_MODE_REUSESEQ_SHIFT)) | \
-	(((val) & 1) << WLFC_MODE_REUSESEQ_SHIFT))
+	((x) & ~(1u << WLFC_MODE_REUSESEQ_SHIFT)) | \
+	(((val) & 1u) << WLFC_MODE_REUSESEQ_SHIFT))
 
 /** returns TRUE if 'd11 sequence reuse' has been agreed upon between host and dongle */
-#if defined(BCMPCIEDEV_ENABLED) && !defined(ROM_ENAB_RUNTIME_CHECK)
+#if defined(BCMPCIEDEV_ENABLED)
 /* GET_REUSESEQ is always TRUE in pciedev */
 #define WLFC_GET_REUSESEQ(x)	(TRUE)
 #else
 #define WLFC_GET_REUSESEQ(x)	(((x) >> WLFC_MODE_REUSESEQ_SHIFT) & 1)
-#endif /* defined(BCMPCIEDEV_ENABLED) && !defined(ROM_ENAB_RUNTIME_CHECK) */
+#endif /* defined(BCMPCIEDEV_ENABLED) */
 
-#define WLFC_MODE_REORDERSUPP_SHIFT	4	/* host reorder suppress pkt bit */
+#define WLFC_MODE_REORDERSUPP_SHIFT	4u	/* host reorder suppress pkt bit */
 #define WLFC_SET_REORDERSUPP(x, val)	((x) = \
-	((x) & ~(1 << WLFC_MODE_REORDERSUPP_SHIFT)) | \
-	(((val) & 1) << WLFC_MODE_REORDERSUPP_SHIFT))
+	((x) & ~(1u << WLFC_MODE_REORDERSUPP_SHIFT)) | \
+	(((val) & 1u) << WLFC_MODE_REORDERSUPP_SHIFT))
 /** returns TRUE if 'reorder suppress' has been agreed upon between host and dongle */
 #define WLFC_GET_REORDERSUPP(x)	(((x) >> WLFC_MODE_REORDERSUPP_SHIFT) & 1)
 
@@ -467,6 +481,8 @@ typedef enum {
 #define FLOW_RING_GET_BUFFERED_TIME  15u
 #define FLOW_RING_HP2P_TXQ_STRT      16u
 #define FLOW_RING_HP2P_TXQ_STOP      17u
+#define FLOW_RING_GET_TXPARAMS       18u
+#define FLOW_RING_GET_ONCHAN_TIME    19u
 
 /* bit 7, indicating if is TID(1) or AC(0) mapped info in tid field) */
 #define PCIEDEV_IS_AC_TID_MAP_MASK	0x80
@@ -483,7 +499,9 @@ typedef enum {
 	APP_STS_FLOWRING_CLOSED		= 1u,	/* Disable APP as flowring is closed */
 	APP_STS_CRYPTO_UNSUPPORTED	= 2u,	/* Secuirity type doesn't support APP */
 	APP_STS_80211_FRAGMENTATION	= 3u,   /* 802.11 fragmentation enabled */
-	APP_STS_MAX			= 4u	/* MAX */
+	APP_STS_DISABLE_FOR_BTCX	= 4u,	/* BTCX requested APP disable */
+	APP_STS_DISABLE_FOR_QOS		= 5u,	/* Disable APP for QoS */
+	APP_STS_MAX			= 6u	/* MAX */
 } app_disable_reason_s;
 
 /* shared structure between wlc and pciedev layer to set/reset a reason code */
@@ -492,5 +510,11 @@ typedef struct app_upd_sts {
 	bool	sta;			/* set if scb/flowring  belong to sta */
 	app_disable_reason_s rsn;	/* APP disable reason codes. */
 } app_upd_sts_t;
+
+/* shared structure between wlc and pciedev layer for info exchange. */
+typedef struct d2h_queue_status {
+	bool	status;			/* pciedev layer updates its status */
+	void	*pkt;			/* wlc layer argument to be validated in PCIE layer. */
+} d2h_queue_status_t;
 
 #endif /* __wlfc_proto_definitions_h__ */

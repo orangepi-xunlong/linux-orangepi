@@ -1,7 +1,7 @@
 /*
  * Header file for the Packet dump helper functions
  *
- * Copyright (C) 2020, Broadcom.
+ * Copyright (C) 2022, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -51,10 +51,30 @@ enum pkt_type {
 	PKT_TYPE_DATA = 0,
 	PKT_TYPE_DHCP = 1,
 	PKT_TYPE_ICMP = 2,
-	PKT_TYPE_DNS = 3,
-	PKT_TYPE_ARP = 4,
-	PKT_TYPE_EAP = 5
+	PKT_TYPE_ICMPV6 = 3,
+	PKT_TYPE_DNS = 4,
+	PKT_TYPE_ARP = 5,
+	PKT_TYPE_EAP = 6,
+	PKT_TYPE_IGMP = 7
 };
+
+#ifdef WL_CFGVENDOR_CUST_ADVLOG
+#define DHD_ADVLOG_FMT_MAX      256u
+typedef struct dhd_advlog_map_entry {
+	uint32 key;
+	const char val[DHD_ADVLOG_FMT_MAX];
+} dhd_advlog_map_entry_t;
+
+extern void dhd_send_supp_dhcp(dhd_pub_t *dhdp, int ifidx, uint8 *pktdata,
+	bool tx, uint16 *pktfate);
+extern void dhd_send_supp_eap(dhd_pub_t *dhdp, int ifidx, uint8 *pktdata, uint32 pktlen,
+	bool tx, uint16 *pktfate);
+#else
+static INLINE void dhd_send_supp_dhcp(dhd_pub_t *dhdp, int ifidx, uint8 *pktdata,
+	bool tx, uint16 *pktfate) {}
+static INLINE void dhd_send_supp_eap(dhd_pub_t *dhdp, int ifidx, uint8 *pktdata,
+	uint32 pktlen, bool tx, uint16 *pktfate) {}
+#endif /* WL_CFGVENDOR_CUST_ADVLOG */
 
 extern msg_eapol_t dhd_is_4way_msg(uint8 *pktdata);
 extern void dhd_dump_pkt(dhd_pub_t *dhd, int ifidx, uint8 *pktdata,
@@ -131,5 +151,6 @@ extern bool dhd_check_ip_prot(uint8 *pktdata, uint16 ether_type);
 extern bool dhd_check_arp(uint8 *pktdata, uint16 ether_type);
 extern bool dhd_check_dhcp(uint8 *pktdata);
 extern bool dhd_check_icmp(uint8 *pktdata);
+extern bool dhd_check_icmpv6(uint8 *pktdata, uint32 plen);
 extern bool dhd_check_dns(uint8 *pktdata);
 #endif /* __DHD_LINUX_PKTDUMP_H_ */

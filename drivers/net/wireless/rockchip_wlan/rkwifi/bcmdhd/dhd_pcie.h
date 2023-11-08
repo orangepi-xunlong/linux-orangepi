@@ -1,7 +1,7 @@
 /*
  * Linux DHD Bus Module for PCIE
  *
- * Copyright (C) 2020, Broadcom.
+ * Copyright (C) 2022, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -28,28 +28,8 @@
 
 #include <bcmpcie.h>
 #include <hnd_cons.h>
+#include <fwpkg_utils.h>
 #include <dhd_linux.h>
-#ifdef SUPPORT_LINKDOWN_RECOVERY
-#ifdef CONFIG_ARCH_MSM
-#ifdef CONFIG_PCI_MSM
-#include <linux/msm_pcie.h>
-#else
-#include <mach/msm_pcie.h>
-#endif /* CONFIG_PCI_MSM */
-#endif /* CONFIG_ARCH_MSM */
-#ifdef CONFIG_ARCH_EXYNOS
-#ifndef SUPPORT_EXYNOS7420
-#include <linux/exynos-pci-noti.h>
-extern int exynos_pcie_register_event(struct exynos_pcie_register_event *reg);
-extern int exynos_pcie_deregister_event(struct exynos_pcie_register_event *reg);
-#endif /* !SUPPORT_EXYNOS7420 */
-#endif /* CONFIG_ARCH_EXYNOS */
-#endif /* SUPPORT_LINKDOWN_RECOVERY */
-
-#ifdef DHD_PCIE_RUNTIMEPM
-#include <linux/mutex.h>
-#include <linux/wait.h>
-#endif /* DHD_PCIE_RUNTIMEPM */
 
 /* defines */
 #define PCIE_SHARED_VERSION		PCIE_SHARED_VERSION_7
@@ -64,19 +44,6 @@ extern int exynos_pcie_deregister_event(struct exynos_pcie_register_event *reg);
 #endif /* DHD_DEBUG */
 #define	REMAP_ENAB(bus)			((bus)->remap)
 #define	REMAP_ISADDR(bus, a)		(((a) >= ((bus)->orig_ramsize)) && ((a) < ((bus)->ramsize)))
-
-#ifdef SUPPORT_LINKDOWN_RECOVERY
-#ifdef CONFIG_ARCH_MSM
-#define struct_pcie_notify		struct msm_pcie_notify
-#define struct_pcie_register_event	struct msm_pcie_register_event
-#endif /* CONFIG_ARCH_MSM */
-#ifdef CONFIG_ARCH_EXYNOS
-#ifndef SUPPORT_EXYNOS7420
-#define struct_pcie_notify		struct exynos_pcie_notify
-#define struct_pcie_register_event	struct exynos_pcie_register_event
-#endif /* !SUPPORT_EXYNOS7420 */
-#endif /* CONFIG_ARCH_EXYNOS */
-#endif /* SUPPORT_LINKDOWN_RECOVERY */
 
 #define MAX_DHD_TX_FLOWS	320
 
@@ -186,7 +153,7 @@ typedef struct _dhd_ds_trace_t {
 
 #define PCIE_FASTLPO_ENABLED(buscorerev) \
 	((buscorerev == 66) || (buscorerev == 67) || (buscorerev == 68) || \
-	(buscorerev == 70) || (buscorerev == 72))
+	(buscorerev == 70) || (buscorerev == 72) || (buscorerev == 76))
 
 /*
  * HW JIRA - CRWLPCIEGEN2-672
@@ -264,6 +231,16 @@ typedef struct _dhd_flow_ring_status_trace_t {
 } dhd_frs_trace_t;
 #endif /* DHD_FLOW_RING_STATUS_TRACE */
 
+typedef enum dhd_pcie_link_state {
+	DHD_PCIE_ALL_GOOD = 0,
+	DHD_PCIE_LINK_DOWN = 1,
+	DHD_PCIE_COMMON_BP_DOWN = 2,
+	DHD_PCIE_WLAN_BP_DOWN = 3
+} dhd_pcie_link_state_type_t;
+
+/* Max length of filename in IOVAR or in module parameter */
+#define DHD_MAX_PATH	2048u
+
 /** Instantiated once for each hardware (dongle) instance that this DHD manages */
 typedef struct dhd_bus {
 	dhd_pub_t	*dhd;	/**< pointer to per hardware (dongle) unique instance */
@@ -271,9 +248,6 @@ typedef struct dhd_bus {
 	struct pci_dev  *rc_dev;	/* pci RC device handle */
 	struct pci_dev  *dev;		/* pci device handle */
 #endif /* !defined(NDIS) */
-#ifdef DHD_EFI
-	void *pcie_dev;
-#endif
 	dll_t		flowring_active_list; /* constructed list of tx flowring queues */
 #ifdef IDLE_TX_FLOW_MGMT
 	uint64		active_list_last_process_ts;
@@ -349,14 +323,6 @@ typedef struct dhd_bus {
 	uint32		curr_bar1_win;	/* current PCIEBar1Window setting */
 	osl_t		*osh;
 	uint32		nvram_csm;	/* Nvram checksum */
-#ifdef BCMINTERNAL
-	bool            msi_sim;
-	uchar           *msi_sim_addr;
-	dmaaddr_t       msi_sim_phys;
-	dhd_dma_buf_t   hostfw_buf;	/* Host offload firmware buffer */
-	uint32          hostfw_base;	/* FW assumed base of host offload mem */
-	uint32          bp_base;	/* adjusted bp base of host offload mem */
-#endif /* BCMINTERNAL */
 	uint16		pollrate;
 	uint16  polltick;
 
@@ -403,25 +369,8 @@ typedef struct dhd_bus {
 	bool	irq_registered;
 	bool	d2h_intr_method;
 	bool	d2h_intr_control;
-#ifdef SUPPORT_LINKDOWN_RECOVERY
-#if defined(CONFIG_ARCH_MSM) || (defined(CONFIG_ARCH_EXYNOS) && \
-	!defined(SUPPORT_EXYNOS7420))
-#ifdef CONFIG_ARCH_MSM
-	uint8 no_cfg_restore;
-#endif /* CONFIG_ARCH_MSM */
-	struct_pcie_register_event pcie_event;
-#endif /* CONFIG_ARCH_MSM || CONFIG_ARCH_EXYNOS && !SUPPORT_EXYNOS7420  */
-	bool read_shm_fail;
-#endif /* SUPPORT_LINKDOWN_RECOVERY */
 	int32 idletime;                 /* Control for activity timeout */
 	bool rpm_enabled;
-#ifdef DHD_PCIE_RUNTIMEPM
-	int32 idlecount;                /* Activity timeout counter */
-	int32 bus_wake;                 /* For wake up the bus */
-	bool runtime_resume_done;       /* For check runtime suspend end */
-	struct mutex pm_lock;            /* Synchronize for system PM & runtime PM */
-	wait_queue_head_t rpm_queue;    /* wait-queue for bus wake up */
-#endif /* DHD_PCIE_RUNTIMEPM */
 	uint32 d3_inform_cnt;
 	uint32 d0_inform_cnt;
 	uint32 d0_inform_in_use_cnt;
@@ -455,14 +404,14 @@ typedef struct dhd_bus {
 	dhd_ds_trace_t   ds_trace[MAX_DS_TRACE_SIZE];
 	uint32	ds_trace_count;
 	uint32  hostready_count; /* Number of hostready issued */
-#if defined(PCIE_OOB) || defined (BCMPCIE_OOB_HOST_WAKE)
+#if defined(PCIE_OOB) || defined(BCMPCIE_OOB_HOST_WAKE)
 	bool	oob_presuspend;
 #endif /* PCIE_OOB || BCMPCIE_OOB_HOST_WAKE */
 	dhdpcie_config_save_t saved_config;
-	ulong resume_intr_enable_count;
-	ulong dpc_intr_enable_count;
-	ulong isr_intr_disable_count;
-	ulong suspend_intr_disable_count;
+	ulong host_irq_enable_count;
+	ulong host_irq_disable_count;
+	ulong dngl_intmask_disable_count;
+	ulong dngl_intmask_enable_count;
 	ulong dpc_return_busdown_count;
 	ulong non_ours_irq_count;
 #ifdef BCMPCIE_OOB_HOST_WAKE
@@ -475,6 +424,7 @@ typedef struct dhd_bus {
 	uint64 last_oob_irq_disable_time;
 #endif /* BCMPCIE_OOB_HOST_WAKE */
 	uint64 isr_entry_time;
+	uint64 prev_isr_entry_time;
 	uint64 isr_exit_time;
 	uint64 isr_sched_dpc_time;
 	uint64 rpm_sched_dpc_time;
@@ -482,6 +432,7 @@ typedef struct dhd_bus {
 	uint64 dpc_exit_time;
 	uint64 resched_dpc_time;
 	uint64 last_d3_inform_time;
+	uint64 last_d3_ack_time;
 	uint64 last_process_ctrlbuf_time;
 	uint64 last_process_flowring_time;
 	uint64 last_process_txcpl_time;
@@ -493,6 +444,16 @@ typedef struct dhd_bus {
 	uint64 last_resume_start_time;
 	uint64 last_resume_end_time;
 	uint64 last_non_ours_irq_time;
+	uint64 dpc_time_usec;
+	uint64  *dpc_time_histo;
+	uint64 ctrl_cpl_post_time_usec;
+	uint64  *ctrl_cpl_post_time_histo;
+	uint64 tx_post_time_usec;
+	uint64  *tx_post_time_histo;
+	uint64 tx_cpl_time_usec;
+	uint64  *tx_cpl_time_histo;
+	uint64 rx_cpl_post_time_usec;
+	uint64  *rx_cpl_post_time_histo;
 	bool  hwa_enabled;
 	bool  idma_enabled;
 	bool  ifrm_enabled;
@@ -518,9 +479,6 @@ typedef struct dhd_bus {
 #if defined(PCIE_OOB) || defined(PCIE_INB_DW)
 	bool  ds_enabled;
 #endif
-#ifdef DHD_PCIE_RUNTIMEPM
-	bool chk_pm;	/* To avoid counting of wake up from Runtime PM */
-#endif /* DHD_PCIE_RUNTIMEPM */
 #if defined(PCIE_INB_DW)
 	bool calc_ds_exit_latency;
 	bool deep_sleep; /* Indicates deep_sleep set or unset by the DHD IOVAR deep_sleep */
@@ -536,6 +494,8 @@ typedef struct dhd_bus {
 	uint32 gdb_proxy_last_id;
 	/* True if firmware was started in bootloader mode */
 	bool gdb_proxy_bootloader_mode;
+	/* Counter incremented at each generated memory dump */
+	uint32 gdb_proxy_mem_dump_count;
 #endif /* GDB_PROXY */
 	uint8  dma_chan;
 
@@ -560,7 +520,7 @@ typedef struct dhd_bus {
 	uint32 fw_memmap_download_addr;	/* Dongle address of FWS memory-info download */
 	uint32 fw_memmap_download_len;	/* Length in bytes of FWS memory-info download */
 
-	char fwsig_filename[DHD_FILENAME_MAX];		/* Name of FW signature file */
+	char fwsig_filename[DHD_MAX_PATH];		/* Name of FW signature file */
 	char bootloader_filename[DHD_FILENAME_MAX];	/* Name of bootloader image file */
 	uint32 bootloader_addr;		/* Dongle address of bootloader download */
 	bool force_bt_quiesce; /* send bt_quiesce command to BT driver. */
@@ -576,12 +536,9 @@ typedef struct dhd_bus {
 #ifdef BCMSLTGT
 	int xtalfreq;		/* Xtal frequency used for htclkratio calculation */
 	uint32 ilp_tick;	/* ILP ticks per second read from pmutimer */
-	uint32 xtal_ratio;	/* xtal ticks per 4 ILP ticks read from pmu_xtalfreq */
+	uint32 alp_to_ilp_ratio;	/* ALP ticks per ILP ticks read from pmu_xtalfreq */
+	uint32 xtal_to_alp_ratio;	/* xtal to ALP ratio which can change from chip to chip */
 #endif /* BCMSLTGT */
-#ifdef BT_OVER_PCIE
-	/* whether the chip is in BT over PCIE mode or not */
-	bool btop_mode;
-#endif /* BT_OVER_PCIE */
 	uint16 hp2p_txcpl_max_items;
 	uint16 hp2p_rxcpl_max_items;
 	/* PCIE coherent status */
@@ -591,7 +548,26 @@ typedef struct dhd_bus {
 	uint64 rd_shared_pass_time;
 	uint32 hwa_mem_base;
 	uint32 hwa_mem_size;
+	dhd_pcie_link_state_type_t link_state;
+	bool dar_err_set;
+	uint32 ptm_ctrl_reg;
+	fwpkg_info_t fwpkg;	/* combined fw package info structure */
+	bool lpm_mode;	/* lpm enabled */
+	bool lpm_keep_in_reset; /* during LPM keep in FLR, if FLR force is enabled */
+	bool lpm_mem_kill; /* kill WLAN memories in LPM */
+	bool lpm_force_flr; /* Force F0 FLR on WLAN  when in LPM */
+	uint32 lpbk_xfer_data_pattern_type; /*  data Pattern type DMA lpbk */
 } dhd_bus_t;
+
+#define LPBK_DMA_XFER_DTPTRN_DEFAULT	0
+#define LPBK_DMA_XFER_DTPTRN_0x00	1
+#define LPBK_DMA_XFER_DTPTRN_0xFF	2
+#define LPBK_DMA_XFER_DTPTRN_0x55	3
+#define LPBK_DMA_XFER_DTPTRN_0xAA	4
+
+#define LPM_MODE_LPM_ALL	0x1
+#define LPM_MODE_NO_MEMKILL	0x010
+#define LPM_MODE_NO_FLR		0x100
 
 #ifdef DHD_MSI_SUPPORT
 extern uint enable_msi;
@@ -759,6 +735,7 @@ extern int dhdpcie_disable_irq_nosync(dhd_bus_t *bus);
 extern int dhdpcie_enable_irq(dhd_bus_t *bus);
 
 extern void dhd_bus_dump_dar_registers(struct dhd_bus *bus);
+extern void dhd_bus_dump_imp_cfg_registers(struct dhd_bus *bus);
 
 #if defined(linux) || defined(LINUX)
 extern uint32 dhdpcie_rc_config_read(dhd_bus_t *bus, uint offset);
@@ -767,6 +744,7 @@ extern uint32 dhdpcie_rc_access_cap(dhd_bus_t *bus, int cap, uint offset, bool i
 extern uint32 dhdpcie_ep_access_cap(dhd_bus_t *bus, int cap, uint offset, bool is_ext,
 		bool is_write, uint32 writeval);
 extern uint32 dhd_debug_get_rc_linkcap(dhd_bus_t *bus);
+extern void dhdpcie_enable_irq_loop(dhd_bus_t *bus);
 #else
 static INLINE uint32 dhdpcie_rc_config_read(dhd_bus_t *bus, uint offset) { return 0;}
 static INLINE uint32 dhdpcie_rc_access_cap(dhd_bus_t *bus, int cap, uint offset, bool is_ext,
@@ -774,7 +752,8 @@ static INLINE uint32 dhdpcie_rc_access_cap(dhd_bus_t *bus, int cap, uint offset,
 static INLINE uint32 dhdpcie_ep_access_cap(dhd_bus_t *bus, int cap, uint offset, bool is_ext,
 		bool is_write, uint32 writeval) { return -1;}
 static INLINE uint32 dhd_debug_get_rc_linkcap(dhd_bus_t *bus) { return -1;}
-#endif
+static INLINE void dhdpcie_enable_irq_loop(dhd_bus_t *bus) { return; }
+#endif /* LINUX || linux */
 #if defined(linux) || defined(LINUX)
 extern int dhdpcie_start_host_dev(dhd_bus_t *bus);
 extern int dhdpcie_stop_host_dev(dhd_bus_t *bus);
@@ -794,9 +773,10 @@ uint32 dhdpcie_os_rtcm32(dhd_bus_t *bus, ulong offset);
 void dhdpcie_os_wtcm64(dhd_bus_t *bus, ulong offset, uint64 data);
 uint64 dhdpcie_os_rtcm64(dhd_bus_t *bus, ulong offset);
 #endif
+extern void dhd_dpc_kill(dhd_pub_t *dhdp);
 #endif /* LINUX || linux */
 
-#if defined(linux) || defined(LINUX) || defined(DHD_EFI)
+#if defined(linux) || defined(LINUX)
 extern int dhdpcie_enable_device(dhd_bus_t *bus);
 #endif
 
@@ -807,6 +787,9 @@ extern void dhdpcie_oob_intr_set(dhd_bus_t *bus, bool enable);
 extern int dhdpcie_get_oob_irq_num(struct dhd_bus *bus);
 extern int dhdpcie_get_oob_irq_status(struct dhd_bus *bus);
 extern int dhdpcie_get_oob_irq_level(void);
+#ifdef PRINT_WAKEUP_GPIO_STATUS
+extern int dhdpcie_get_oob_gpio_number(void);
+#endif /* PRINT_WAKEUP_GPIO_STATUS */
 #endif /* BCMPCIE_OOB_HOST_WAKE */
 #ifdef PCIE_OOB
 extern void dhd_oob_set_bt_reg_on(struct dhd_bus *bus, bool val);
@@ -819,92 +802,13 @@ extern void dhd_os_ib_set_device_wake(struct dhd_bus *bus, bool val);
 extern void dhd_bus_doorbell_timeout_reset(struct dhd_bus *bus);
 #endif /* defined(PCIE_OOB) || defined(PCIE_INB_DW) */
 
-#if defined(linux) || defined(LINUX)
-/* XXX: SWWLAN-82173 Making PCIe RC D3cold by force during system PM
- * exynos_pcie_pm_suspend : RC goes to suspend status & assert PERST
- * exynos_pcie_pm_resume : de-assert PERST & RC goes to resume status
- */
-#if defined(CONFIG_ARCH_EXYNOS)
-#define EXYNOS_PCIE_VENDOR_ID 0x144d
-#if defined(CONFIG_MACH_UNIVERSAL7420) || defined(CONFIG_SOC_EXYNOS7420)
-#define EXYNOS_PCIE_DEVICE_ID 0xa575
-#define EXYNOS_PCIE_CH_NUM 1
-#elif defined(CONFIG_SOC_EXYNOS8890)
-#define EXYNOS_PCIE_DEVICE_ID 0xa544
-#define EXYNOS_PCIE_CH_NUM 0
-#elif defined(CONFIG_SOC_EXYNOS8895) || defined(CONFIG_SOC_EXYNOS9810) || \
-	defined(CONFIG_SOC_EXYNOS9820) || defined(CONFIG_SOC_EXYNOS9830) || \
-	defined(CONFIG_SOC_EXYNOS2100) || defined(CONFIG_SOC_EXYNOS1000) || \
-	defined(CONFIG_SOC_GS101)
-#define EXYNOS_PCIE_DEVICE_ID 0xecec
-#define EXYNOS_PCIE_CH_NUM 0
-#else
-#error "Not supported platform"
-#endif /* CONFIG_SOC_EXYNOSXXXX & CONFIG_MACH_UNIVERSALXXXX */
-extern void exynos_pcie_pm_suspend(int ch_num);
-extern void exynos_pcie_pm_resume(int ch_num);
-#endif /* CONFIG_ARCH_EXYNOS */
-
-#if defined(CONFIG_ARCH_MSM)
-#define MSM_PCIE_VENDOR_ID 0x17cb
-#if defined(CONFIG_ARCH_APQ8084)
-#define MSM_PCIE_DEVICE_ID 0x0101
-#elif defined(CONFIG_ARCH_MSM8994)
-#define MSM_PCIE_DEVICE_ID 0x0300
-#elif defined(CONFIG_ARCH_MSM8996)
-#define MSM_PCIE_DEVICE_ID 0x0104
-#elif defined(CONFIG_ARCH_MSM8998)
-#define MSM_PCIE_DEVICE_ID 0x0105
-#elif defined(CONFIG_ARCH_SDM845) || defined(CONFIG_ARCH_SM8150) || \
-	defined(CONFIG_ARCH_KONA) || defined(CONFIG_ARCH_LAHAINA)
-#define MSM_PCIE_DEVICE_ID 0x0106
-#else
-#error "Not supported platform"
-#endif
-#endif /* CONFIG_ARCH_MSM */
-
-#if defined(CONFIG_X86)
-#define X86_PCIE_VENDOR_ID 0x8086
-#define X86_PCIE_DEVICE_ID 0x9c1a
-#endif /* CONFIG_X86 */
-
-#if defined(CONFIG_ARCH_TEGRA)
-#define TEGRA_PCIE_VENDOR_ID 0x14e4
-#define TEGRA_PCIE_DEVICE_ID 0x4347
-#endif /* CONFIG_ARCH_TEGRA */
-
-#if defined(BOARD_HIKEY)
-#define HIKEY_PCIE_VENDOR_ID 0x19e5
-#define HIKEY_PCIE_DEVICE_ID 0x3660
-#endif /* BOARD_HIKEY */
-
-#define DUMMY_PCIE_VENDOR_ID 0xffff
-#define DUMMY_PCIE_DEVICE_ID 0xffff
-
-#if defined(CONFIG_ARCH_EXYNOS)
-#define PCIE_RC_VENDOR_ID EXYNOS_PCIE_VENDOR_ID
-#define PCIE_RC_DEVICE_ID EXYNOS_PCIE_DEVICE_ID
-#elif defined(CONFIG_ARCH_MSM)
-#define PCIE_RC_VENDOR_ID MSM_PCIE_VENDOR_ID
-#define PCIE_RC_DEVICE_ID MSM_PCIE_DEVICE_ID
-#elif defined(CONFIG_X86)
-#define PCIE_RC_VENDOR_ID X86_PCIE_VENDOR_ID
-#define PCIE_RC_DEVICE_ID X86_PCIE_DEVICE_ID
-#elif defined(CONFIG_ARCH_TEGRA)
-#define PCIE_RC_VENDOR_ID TEGRA_PCIE_VENDOR_ID
-#define PCIE_RC_DEVICE_ID TEGRA_PCIE_DEVICE_ID
-#elif defined(BOARD_HIKEY)
-#define PCIE_RC_VENDOR_ID HIKEY_PCIE_VENDOR_ID
-#define PCIE_RC_DEVICE_ID HIKEY_PCIE_DEVICE_ID
-#else
-/* Use dummy vendor and device IDs */
-#define PCIE_RC_VENDOR_ID DUMMY_PCIE_VENDOR_ID
-#define PCIE_RC_DEVICE_ID DUMMY_PCIE_DEVICE_ID
-#endif /* CONFIG_ARCH_EXYNOS */
-#endif /* linux || LINUX */
-
 #define DHD_REGULAR_RING    0
 #define DHD_HP2P_RING    1
+
+#ifdef DHD_SET_PCIE_DMA_MASK_FOR_GS101
+/* This is only for GS101 platform. Others is done on RC side */
+#define DHD_PCIE_DMA_MASK_FOR_GS101 36
+#endif /* DHD_SET_PCIE_DMA_MASK_FOR_GS101 */
 
 #ifdef CONFIG_ARCH_TEGRA
 extern int tegra_pcie_pm_suspend(void);
@@ -932,6 +836,8 @@ extern int dhdpcie_send_mb_data(dhd_bus_t *bus, uint32 h2d_mb_data);
 #ifdef DHD_WAKE_STATUS
 int bcmpcie_get_total_wake(struct dhd_bus *bus);
 int bcmpcie_set_get_wake(struct dhd_bus *bus, int flag);
+int bcmpcie_get_wake(struct dhd_bus *bus);
+int bcmpcie_set_get_wake_pkt_dump(struct dhd_bus *bus, int wake_pkt_dump);
 #endif /* DHD_WAKE_STATUS */
 #ifdef DHD_MMIO_TRACE
 extern void dhd_dump_bus_mmio_trace(dhd_bus_t *bus, struct bcmstrbuf *strbuf);
@@ -950,6 +856,9 @@ extern enum dhd_bus_ds_state dhdpcie_bus_get_pcie_inband_dw_state(dhd_bus_t *bus
 extern const char * dhd_convert_inb_state_names(enum dhd_bus_ds_state inbstate);
 extern const char * dhd_convert_dsval(uint32 val, bool d2h);
 extern int dhd_bus_inb_set_device_wake(struct dhd_bus *bus, bool val);
+#ifdef PCIE_INB_DSACK_EXT_WAIT
+extern void dhd_bus_ds_ack_debug_dump(struct dhd_bus *bus);
+#endif /* PCIE_INB_DSACK_EXT_WAIT */
 extern void dhd_bus_inb_ack_pending_ds_req(dhd_bus_t *bus);
 #endif /* PCIE_INB_DW */
 extern void dhdpcie_bus_enab_pcie_dw(dhd_bus_t *bus, uint8 dw_option);
@@ -962,27 +871,11 @@ static INLINE int dhdpcie_set_master_and_d0_pwrstate(struct dhd_bus *bus)
 { return BCME_ERROR;}
 #endif /* defined(LINUX) || defined(linux) */
 
-#ifdef DHD_EFI
-extern bool dhdpcie_is_arm_halted(struct dhd_bus *bus);
-extern int dhd_os_wifi_platform_set_power(uint32 value);
-extern void dhdpcie_dongle_pwr_toggle(dhd_bus_t *bus);
-void dhdpcie_dongle_flr_or_pwr_toggle(dhd_bus_t *bus);
-int dhd_control_signal(dhd_bus_t *bus, char *arg, int len, int set);
-extern int dhd_wifi_properties(struct dhd_bus *bus, char *arg, int len);
-extern int dhd_otp_dump(dhd_bus_t *bus, char *arg, int len);
-extern int dhdpcie_deinit_phase1(dhd_bus_t *bus);
-int dhdpcie_disable_intr_poll(dhd_bus_t *bus);
-int dhdpcie_enable_intr_poll(dhd_bus_t *bus);
-#ifdef BT_OVER_PCIE
-int dhd_btop_test(dhd_bus_t *bus, char *arg, int len);
-#endif /* BT_OVER_PCIE */
-#else
 static INLINE bool dhdpcie_is_arm_halted(struct dhd_bus *bus) {return TRUE;}
 static INLINE int dhd_os_wifi_platform_set_power(uint32 value) {return BCME_OK; }
 static INLINE void
 dhdpcie_dongle_flr_or_pwr_toggle(dhd_bus_t *bus)
 { return; }
-#endif /* DHD_EFI */
 
 int dhdpcie_config_check(dhd_bus_t *bus);
 int dhdpcie_config_restore(dhd_bus_t *bus, bool restore_pmcsr);
@@ -1022,18 +915,10 @@ extern int dhdpcie_get_fwpath_otp(dhd_bus_t *bus, char *fw_path, char *nv_path,
 extern int dhd_pcie_debug_info_dump(dhd_pub_t *dhd);
 extern void dhd_pcie_intr_count_dump(dhd_pub_t *dhd);
 extern void dhdpcie_bus_clear_intstatus(dhd_bus_t *bus);
-#ifdef DHD_HP2P
-extern uint16 dhd_bus_get_hp2p_ring_max_size(dhd_bus_t *bus, bool tx);
-#endif
 
-#if defined(DHD_EFI)
-extern wifi_properties_t *dhd_get_props(dhd_bus_t *bus);
-#endif
-
-#if defined(DHD_EFI) || defined(NDIS)
+#if defined(NDIS)
 extern int dhd_get_platform(dhd_pub_t* dhd, char *progname);
 extern bool dhdpcie_is_chip_supported(uint32 chipid, int *idx);
-extern bool dhdpcie_is_sflash_chip(uint32 chipid);
 #endif
 
 extern int dhd_get_pcie_linkspeed(dhd_pub_t *dhd);
@@ -1045,4 +930,11 @@ extern void dhd_init_dongle_ds_lock(dhd_bus_t *bus);
 extern void dhd_deinit_dongle_ds_lock(dhd_bus_t *bus);
 #endif /* PCIE_INB_DW */
 
+extern bool dhd_check_htput_chip(dhd_bus_t *bus);
+
+#if defined(DEVICE_TX_STUCK_DETECT) && defined(ASSOC_CHECK_SR)
+void dhd_assoc_check_sr(dhd_pub_t *dhd, bool state);
+#endif /* DEVICE_TX_STUCK_DETECT && ASSOC_CHECK_SR */
+
+void dhd_init_bar1_switch_lock(dhd_bus_t *bus);
 #endif /* dhd_pcie_h */

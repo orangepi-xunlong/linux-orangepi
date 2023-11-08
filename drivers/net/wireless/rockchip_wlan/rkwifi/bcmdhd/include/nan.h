@@ -2,7 +2,7 @@
  * Fundamental types and constants relating to WFA NAN
  * (Neighbor Awareness Networking)
  *
- * Copyright (C) 2020, Broadcom.
+ * Copyright (C) 2022, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -36,11 +36,17 @@
 
 /* WiFi NAN OUI values */
 #define NAN_OUI			"\x50\x6F\x9A"     /* WFA OUI. WiFi-Alliance OUI */
+#define NAN_OUI_LEN		3u		/* NAN OUI length */
 /* For oui_type field identifying the type and version of the NAN IE. */
 #define NAN_OUI_TYPE		0x13        /* Type/Version */
 #define NAN_AF_OUI_TYPE		0x18        /* Type/Version */
 /* IEEE 802.11 vendor specific information element. (Same as P2P_IE_ID.) */
 #define NAN_IE_ID		0xdd
+
+#define NAN_IDENTITY_KEY_LIFETIME_SECONDS	(24u*3600u) /* 24 hours. */
+
+/* Default cipher version for pairing NIK KDE */
+#define NAN_SEC_NIK_DEFAULT_CIPHER_VER	0
 
 /* Same as P2P_PUB_AF_CATEGORY and DOT11_ACTION_CAT_PUBLIC */
 #define NAN_PUB_AF_CATEGORY	DOT11_ACTION_CAT_PUBLIC
@@ -159,39 +165,45 @@ enum {
 	NAN_ATTR_COUNTRY_CODE	= 11,
 	NAN_ATTR_RANGING	= 12,
 	NAN_ATTR_CLUSTER_DISC	= 13,
+
 	/* nan 2.0 */
-	NAN_ATTR_SVC_DESC_EXTENSION = 14,
-	NAN_ATTR_NAN_DEV_CAP = 15,
-	NAN_ATTR_NAN_NDP = 16,
-	NAN_ATTR_NAN_NMSG = 17,
-	NAN_ATTR_NAN_AVAIL = 18,
-	NAN_ATTR_NAN_NDC = 19,
-	NAN_ATTR_NAN_NDL = 20,
-	NAN_ATTR_NAN_NDL_QOS = 21,
-	NAN_ATTR_MCAST_SCHED = 22,
-	NAN_ATTR_UNALIGN_SCHED = 23,
-	NAN_ATTR_PAGING_UCAST = 24,
-	NAN_ATTR_PAGING_MCAST = 25,
-	NAN_ATTR_RANGING_INFO = 26,
-	NAN_ATTR_RANGING_SETUP = 27,
-	NAN_ATTR_FTM_RANGE_REPORT = 28,
-	NAN_ATTR_ELEMENT_CONTAINER = 29,
-	NAN_ATTR_WLAN_INFRA_EXT = 30,
-	NAN_ATTR_EXT_P2P_OPER = 31,
-	NAN_ATTR_EXT_IBSS = 32,
-	NAN_ATTR_EXT_MESH = 33,
-	NAN_ATTR_CIPHER_SUITE_INFO = 34,
-	NAN_ATTR_SEC_CTX_ID_INFO = 35,
-	NAN_ATTR_SHARED_KEY_DESC = 36,
-	NAN_ATTR_MCAST_SCHED_CHANGE = 37,
-	NAN_ATTR_MCAST_SCHED_OWNER_CHANGE = 38,
-	NAN_ATTR_PUBLIC_AVAILABILITY = 39,
-	NAN_ATTR_SUB_SVC_ID_LIST = 40,
-	NAN_ATTR_NDPE = 41,
+	NAN_ATTR_SVC_DESC_EXTENSION		= 14,
+	NAN_ATTR_NAN_DEV_CAP			= 15,
+	NAN_ATTR_NAN_NDP			= 16,
+	NAN_ATTR_NAN_NMSG			= 17,
+	NAN_ATTR_NAN_AVAIL			= 18,
+	NAN_ATTR_NAN_NDC			= 19,
+	NAN_ATTR_NAN_NDL			= 20,
+	NAN_ATTR_NAN_NDL_QOS			= 21,
+	NAN_ATTR_MCAST_SCHED			= 22,
+	NAN_ATTR_UNALIGN_SCHED			= 23,
+	NAN_ATTR_PAGING_UCAST			= 24,
+	NAN_ATTR_PAGING_MCAST			= 25,
+	NAN_ATTR_RANGING_INFO			= 26,
+	NAN_ATTR_RANGING_SETUP			= 27,
+	NAN_ATTR_FTM_RANGE_REPORT		= 28,
+	NAN_ATTR_ELEMENT_CONTAINER		= 29,
+	NAN_ATTR_WLAN_INFRA_EXT			= 30,
+	NAN_ATTR_EXT_P2P_OPER			= 31,
+	NAN_ATTR_EXT_IBSS			= 32,
+	NAN_ATTR_EXT_MESH			= 33,
+	NAN_ATTR_CIPHER_SUITE_INFO		= 34,
+	NAN_ATTR_SEC_CTX_ID_INFO		= 35,
+	NAN_ATTR_SHARED_KEY_DESC		= 36,
+	NAN_ATTR_MCAST_SCHED_CHANGE		= 37,
+	NAN_ATTR_MCAST_SCHED_OWNER_CHANGE	= 38,
+	NAN_ATTR_PUBLIC_AVAILABILITY		= 39,
+	NAN_ATTR_SUB_SVC_ID_LIST		= 40,
+	NAN_ATTR_NDPE				= 41,
+	NAN_ATTR_DEV_CAP_EXT			= 42, /* NAN R4, Device Capability Extension */
+	NAN_ATTR_NIRA				= 43, /* NAN R4, Identity Resolution Attribute */
+	NAN_ATTR_NPBA				= 44, /* NAN R4, Pairing Bootstrapping Attribute */
+	NAN_ATTR_S3				= 45, /* NAN R4, Sub Slot Schedule (S3) attribute */
+
 	/* change NAN_ATTR_MAX_ID to max ids + 1, excluding NAN_ATTR_VENDOR_SPECIFIC.
 	 * This is used in nan_parse.c
 	 */
-	NAN_ATTR_MAX_ID		= NAN_ATTR_NDPE + 1,
+	NAN_ATTR_MAX_ID		= NAN_ATTR_S3 + 1,
 
 	NAN_ATTR_VENDOR_SPECIFIC = 221
 };
@@ -252,6 +264,8 @@ typedef BWL_PRE_PACKED_STRUCT struct wifi_nan_svc_id_attr_s {
 #define NAN_SC_RANGE_LIMITED 0x20
 /* Set to 1 if binding bitamp is present in descriptors */
 #define NAN_SC_BINDING_BITMAP_PRESENT 0x40
+/* Max olength used for KDK in NAN R4 */
+#define NAN_SEC_MAX_KDK_LEN		32u
 
 /* Service descriptor */
 typedef BWL_PRE_PACKED_STRUCT struct wifi_nan_svc_descriptor_attr_s {
@@ -287,7 +301,7 @@ typedef BWL_PRE_PACKED_STRUCT struct wifi_nan_ibss_attr_s {
 	*/
 	uint8 map_ctrl;
 	/* avail. intervals bitmap, var len  */
-	uint8 avail_bmp[1];
+	uint8 avail_bmp[BCM_FLEX_ARRAY];
 } BWL_POST_PACKED_STRUCT wifi_nan_ibss_attr_t;
 
 /* Country code attribute  */
@@ -309,7 +323,7 @@ typedef BWL_PRE_PACKED_STRUCT struct wifi_nan_favail_attr_s {
 	/* MAP id: val [0..15], values[16-255] reserved */
 	uint8 map_id;
 	/*  availibility entry, var len */
-	uint8 avil_entry[1];
+	uint8 avil_entry[BCM_FLEX_ARRAY];
 } BWL_POST_PACKED_STRUCT wifi_nan_favail_attr_t;
 
 /* Further Availability MAP attr  */
@@ -325,7 +339,7 @@ typedef BWL_PRE_PACKED_STRUCT struct wifi_nan_avail_entry_s {
 	/* channel number */
 	uint8 chan;
 	/*  avail bmp, var len */
-	uint8 avail_bmp[1];
+	uint8 avail_bmp[BCM_FLEX_ARRAY];
 } BWL_POST_PACKED_STRUCT wifi_nan_avail_entry_t;
 
 /* Map control Field */
@@ -342,10 +356,10 @@ typedef BWL_PRE_PACKED_STRUCT struct wifi_nan_avail_entry_s {
 /* TODO remove */
 typedef BWL_PRE_PACKED_STRUCT struct wifi_nan_vendor_attr_s {
 	uint8	id;			/* 0xDD */
-	uint16	len;		/* IE length */
-	uint8	oui[DOT11_OUI_LEN]; /* 00-90-4C */
-	uint8	type;		/* attribute type */
-	uint8	attr[1];	/* var len attributes */
+	uint16	len;			/* IE length */
+	uint8	oui[DOT11_OUI_LEN]; 	/* 00-90-4C */
+	uint8	type;			/* attribute type */
+	uint8	attr[BCM_FLEX_ARRAY];	/* var len attributes */
 } BWL_POST_PACKED_STRUCT wifi_nan_vendor_attr_t;
 
 #define NAN_VENDOR_HDR_SIZE	(OFFSETOF(wifi_nan_vendor_attr_t, attr))
@@ -377,7 +391,7 @@ typedef BWL_PRE_PACKED_STRUCT struct wifi_nan_p2p_op_attr_s {
 	*/
 	uint8 map_ctrl;
 	/* avail. intervals bitmap */
-	uint8 avail_bmp[1];
+	uint8 avail_bmp[BCM_FLEX_ARRAY];
 } BWL_POST_PACKED_STRUCT wifi_nan_p2p_op_attr_t;
 
 /* ranging attribute */
@@ -557,7 +571,7 @@ typedef BWL_PRE_PACKED_STRUCT struct wifi_nan_container_attr_s {
 	uint8 id;	/* id - 0x20 */
 	uint16 len;	/* Total length of following IEs */
 	uint8 map_id;	/* map id */
-	uint8 data[1];	/* Data pointing to one or more IEs */
+	uint8 data[BCM_FLEX_ARRAY];	/* Data pointing to one or more IEs */
 } BWL_POST_PACKED_STRUCT wifi_nan_container_attr_t;
 
 /* NAN 2.0 NAN avail attribute */
@@ -568,7 +582,7 @@ typedef BWL_PRE_PACKED_STRUCT struct wifi_nan_avail_attr_s {
 	uint16 len;	/* total length */
 	uint8 seqid;	/* sequence id */
 	uint16 ctrl;	/* attribute control */
-	uint8 entry[1];	/* availability entry list */
+	uint8 entry[BCM_FLEX_ARRAY];	/* availability entry list */
 } BWL_POST_PACKED_STRUCT wifi_nan_avail_attr_t;
 
 /* for processing/building time bitmap info in nan_avail_entry */
@@ -669,7 +683,7 @@ typedef BWL_PRE_PACKED_STRUCT struct wifi_nan_channel_entry_s {
 
 typedef BWL_PRE_PACKED_STRUCT struct wifi_nan_channel_entry_list_s {
 	uint8 chan_info;
-	uint8 var[0];
+	uint8 var[];
 } BWL_POST_PACKED_STRUCT wifi_nan_channel_entry_list_t;
 
 /* define for chan_info */
@@ -786,6 +800,16 @@ enum
 #define NAN_CHAN_ENTRY_BW_LT_80MHZ	0
 #define NAN_CHAN_ENTRY_BW_EQ_160MHZ	1
 
+/* Channel bitmap field for when opclass >=131 */
+#define NAN_CHAN_BITMAP_EXT_START_CHANNEL_MASK	0x00FF
+#define NAN_CHAN_BITMAP_EXT_START_CHANNEL_SHIFT	0
+#define NAN_CHAN_BITMAP_EXT_NUM_CHANNEL_MASK	0xFF00
+#define NAN_CHAN_BITMAP_EXT_NUM_CHANNEL_SHIFT	8
+#define NAN_CHAN_BITMAP_EXT_NUM_CHANNEL(bmap)	(((bmap) & NAN_CHAN_BITMAP_EXT_NUM_CHANNEL_MASK) \
+		>> NAN_CHAN_BITMAP_EXT_NUM_CHANNEL_SHIFT)
+#define NAN_CHAN_BITMAP_EXT_START_CHANNEL(bmap)	(((bmap) & NAN_CHAN_BITMAP_EXT_START_CHANNEL_MASK) \
+		>> NAN_CHAN_BITMAP_EXT_START_CHANNEL_SHIFT)
+
 /*
  * NDL Attribute WFA Tech. Spec ver 1.0.r12 (section 10.7.19.2)
  */
@@ -899,6 +923,89 @@ typedef BWL_PRE_PACKED_STRUCT struct wifi_nan_dev_cap_s {
 	uint8 capabilities;	/* DFS Master, Extended key id etc */
 } BWL_POST_PACKED_STRUCT wifi_nan_dev_cap_t;
 
+/* Regulatory info - operation types in 6G band, Table 126, NAN R4 spec.
+ * Also, see Table E-12, REVme_D1.0
+ */
+typedef enum nan_mac_6g_op_type {
+	/* Indoor AP, i.e., LPI(Low Power Indoor) AP.
+	 * AFC is not required but with some regulations to be indoor opeation.
+	 */
+	NAN_MAC_6G_OP_INDOOR_AP		= 0,
+
+	/* Standard Power AP, needs AFC coordination */
+	NAN_MAC_6G_OP_SP_AP		= 1,
+
+	/* Very Low Power AP - VLP AP
+	 * AFC is not required. Resticted with very low transmit power
+	 * This is the default mode of all P2P devices.
+	 */
+	NAN_MAC_6G_OP_VLP_AP		= 2,
+
+	/* Indoor Enabled AP.
+	 * Devices capable of receiving the "enabling signal" and configures itself to use
+	 * C2C power level which is 10dB Higher than VLP AP.
+	 */
+	NAN_MAC_6G_OP_INDOOR_ENABLED_AP	= 3,
+
+	/* This is kind of hybrid mode (AFC in indoors).
+	 * Devices opering in indoors and standard power mode with AFC.
+	 */
+	NAN_MAC_6G_OP_INDOOR_SP_AP	= 4
+} nan_mac_6g_op_type_e;
+
+/* First byte of the extended capabilities is the regulatory info */
+typedef struct nan_mac_dev_cap_ext_reg_info_s {
+	uint8 reg_info_6g_present:1;	/* bit0 */
+	uint8 reg_info_6g:3;		/* bits 1-3, see nan_mac_6g_op_type_e */
+	uint8 reserved:4;		/* bits 4-7 */
+} nan_mac_dev_cap_ext_reg_info_t;
+
+/* Byte1 (bits 8..15) of the extended capabilities */
+typedef struct nan_mac_dev_cap_ext_byte1_s {
+	uint8 pairing_setup:1;		/* 1 -> NAN pairing enabled, 0 disabled */
+	uint8 npk_nik_caching:1;	/* 1 -> NPK/NIK caching enabled, 0 disabled */
+	uint8 reserved:6;		/* reserved */
+} nan_mac_dev_cap_ext_byte1_t;
+
+typedef struct nan_mac_dev_cap_ext_cap_data_s {
+	nan_mac_dev_cap_ext_reg_info_t reg_info; /* Byte0 (bits 0..7) in the data */
+	nan_mac_dev_cap_ext_byte1_t byte1;	 /* Byte1 (bits 8..15) */
+	/* add more bytes */
+} nan_mac_dev_cap_ext_cap_data_t;
+
+/* NAN R4 - Device Capability Extension Attribute */
+typedef BWL_PRE_PACKED_STRUCT struct wifi_nan_dev_cap_ext_s {
+	uint8 id;		/* 0x2A */
+	uint16 len;		/* Length */
+	/* Bit field with variable length in octets as indicated in the len field */
+	uint8 data[];
+} BWL_POST_PACKED_STRUCT wifi_nan_dev_cap_ext_t;
+
+/* Fixed string for the NIK (NAN Identity Key) generation algorithm */
+static const uint8 nan_pairing_nik_prefix[] = "NIK Generation";
+
+/* Caching NPK prefix */
+static const uint8 nan_pairing_npk_prefix[] = "NAN Opportunistic NPK Derivation";
+
+/* Tag prefix */
+static const uint8 nan_pairing_tag_prefix[] = "NIR";
+
+/* NAN Pairing (R4) reklated definitions */
+#define NAN_PAIRING_MAX_NPK_LEN		32u		/* bytes */
+#define NAN_PAIRING_NPK_PREFIXES	4u		/* Number of prefixes for NPK caching */
+#define NAN_PAIRING_NIK_PREFIXES	3u		/* max number of prefixes */
+#define NAN_PAIRING_TAG_PREFIXES	3u		/* Tag prefixes */
+#define NAN_PAIRING_RAND_BUF_LEN	32u		/* random buffer length */
+#define NAN_PAIRING_SID_MAP_FULL	0xFFFFFFFFu	/* session IDs in map are Full */
+
+/* Cipher vesion lengths */
+#define NAN_PAIRING_CIPHER_VER_0_NIK_BITS	128u	/* Number of bits */
+#define NAN_PAIRING_CIPHER_VER_0_NONCE_BITS	64u
+#define NAN_PAIRING_CIPHER_VER_0_TAG_BITS	64u
+
+#define NAN_SSID "516F9A010000"		/* NAN Network ID */
+#define NAN_SSID_len (sizeof(NAN_SSID) - 1)
+
 /* map id related */
 
 /* all maps */
@@ -937,12 +1044,15 @@ typedef BWL_PRE_PACKED_STRUCT struct wifi_nan_dev_cap_s {
 #define NAN_DEV_CAP_COMMIT_DW_5G_SHIFT	3
 #define NAN_DEV_CAP_COMMIT_DW_2G_OVERWRITE_SHIFT	6
 #define NAN_DEV_CAP_COMMIT_DW_5G_OVERWRITE_SHIFT	10
+
 /* Operation Mode */
 #define NAN_DEV_CAP_OP_PHY_MODE_HT_ONLY		0x00
 #define NAN_DEV_CAP_OP_PHY_MODE_VHT		0x01
 #define NAN_DEV_CAP_OP_PHY_MODE_VHT_8080	0x02
 #define NAN_DEV_CAP_OP_PHY_MODE_VHT_160		0x04
+#define NAN_DEV_CAP_OP_PHY_MODE_HE_160		0x04
 #define NAN_DEV_CAP_OP_PAGING_NDL		0x08
+#define NAN_DEV_CAP_OP_PHY_MODE_HE		0x10
 
 #define NAN_DEV_CAP_OP_MODE_VHT_MASK		0x01
 #define NAN_DEV_CAP_OP_MODE_VHT_SHIFT		0
@@ -952,6 +1062,8 @@ typedef BWL_PRE_PACKED_STRUCT struct wifi_nan_dev_cap_s {
 #define NAN_DEV_CAP_OP_MODE_VHT160_SHIFT	2
 #define NAN_DEV_CAP_OP_MODE_PAGING_NDL_MASK	0x08
 #define NAN_DEV_CAP_OP_MODE_PAGING_NDL_SHIFT	3
+#define NAN_DEV_CAP_OP_MODE_HE_MASK		0x10
+#define NAN_DEV_CAP_OP_MODE_HE_SHIFT		4
 
 #define NAN_DEV_CAP_RX_ANT_SHIFT		4
 #define NAN_DEV_CAP_TX_ANT_MASK			0x0F
@@ -964,15 +1076,31 @@ typedef BWL_PRE_PACKED_STRUCT struct wifi_nan_dev_cap_s {
 
 /* DFS master capability */
 #define NAN_DEV_CAP_DFS_MASTER_MASK		0x01
-#define NAN_DEV_CAP_DFS_MASTER_SHIFT	0
+#define NAN_DEV_CAP_DFS_MASTER_SHIFT		0u
 /* extended iv cap */
 #define NAN_DEV_CAP_EXT_KEYID_MASK		0x02
-#define NAN_DEV_CAP_EXT_KEYID_SHIFT		1
+#define NAN_DEV_CAP_EXT_KEYID_SHIFT		1u
+/* Simultaneous NDP data reception capability */
+#define NAN_DEV_CAP_SIMULTANEOUS_DATA_RECV_MASK		0x04
+#define NAN_DEV_CAP_SIMULTANEOUS_DATA_RECV_SHIFT	2u
 /* NDPE attribute support */
 #define	NAN_DEV_CAP_NDPE_ATTR_SUPPORT_MASK	0x08
+#define	NAN_DEV_CAP_NDPE_ATTR_SUPPORT_SHIFT	3u
 #define NAN_DEV_CAP_NDPE_ATTR_SUPPORT(_cap)	((_cap) & NAN_DEV_CAP_NDPE_ATTR_SUPPORT_MASK)
+/* S3 capability */
+#define	NAN_DEV_CAP_S3_CAPABLE_MASK	0x10
+#define	NAN_DEV_CAP_S3_CAPABLE_SHIFT	4u
+#define NAN_DEV_CAP_S3_CAPABLE(_cap)	((_cap) & NAN_DEV_CAP_S3_CAPABLE_MASK)
 
-/* Band IDs */
+#ifdef NAN_REKEY
+#define NAN_DEV_CAP_PTK_REKEY_SUPPORT_MASK	0x10
+#define NAN_DEV_CAP_PTK_REKEY_SUPPORT_SHIFT	4u
+
+#define NAN_DEV_CAP_GTK_REKEY_SUPPORT_MASK	0x20
+#define NAN_DEV_CAP_GTK_REKEY_SUPPORT_SHIFT	5u
+#endif /* NAN_REKEY */
+
+/* Band IDs: See Table 99 in NAN R4 spec */
 enum {
 	NAN_BAND_ID_TVWS		= 0,
 	NAN_BAND_ID_SIG			= 1,	/* Sub 1 GHz */
@@ -980,14 +1108,29 @@ enum {
 	NAN_BAND_ID_3G			= 3,	/* 3.6 GHz */
 	NAN_BAND_ID_5G			= 4,	/* 4.9 & 5 GHz */
 	NAN_BAND_ID_60G			= 5,	/* 60 GHz */
-	NAN_BAND_ID_6G			= 6	/* 6 GHz (proprietary) */
+	NAN_BAND_ID_45G			= 6,	/* 45 GHz */
+	NAN_BAND_ID_6G			= 7	/* 6 GHz */
 };
 typedef uint8 nan_band_id_t;
 
 /* NAN supported band in device capability */
 #define NAN_DEV_CAP_SUPPORTED_BANDS_2G	(1 << NAN_BAND_ID_2G)
 #define NAN_DEV_CAP_SUPPORTED_BANDS_5G	(1 << NAN_BAND_ID_5G)
+#define NAN_DEV_CAP_SUPPORTED_BANDS_6G	(1 << NAN_BAND_ID_6G)
 
+/* NAN Supported Band ID bitmap, Table 72 in NAN R4 spec,
+ * bitmap of supported bands in the device capability attribute.
+ */
+typedef enum nan_mac_supp_band_flags {
+	NAN_MAC_SUPP_BAND_TV_WHITE_SPACES	= (1u << 0u),	 /* bit0 */
+	NAN_MAC_SUPP_BAND_SUB_1GHZ		= (1u << 1u),
+	NAN_MAC_SUPP_BAND_2G			= (1u << 2u),
+	NAN_MAC_SUPP_BAND_3G			= (1u << 3u),
+	NAN_MAC_SUPP_BAND_5G			= (1u << 4u),
+	NAN_MAC_SUPP_BAND_60G			= (1u << 5u),
+	NAN_MAC_SUPP_BAND_45G			= (1u << 6u),
+	NAN_MAC_SUPP_BAND_6G			= (1u << 7u)	/* bit7 */
+} nan_mac_supp_band_flags_e;
 /*
  * Unaligned schedule attribute section 10.7.19.6 spec. ver r15
  */
@@ -1084,6 +1227,14 @@ typedef BWL_PRE_PACKED_STRUCT struct nan2_pub_act_frame_s {
 #define NAN_MGMT_FRM_SUBTYPE_SCHED_CONF		12
 /* Schedule Update */
 #define NAN_MGMT_FRM_SUBTYPE_SCHED_UPD		13
+#ifdef NAN_REKEY
+/* Rekey Trigger  frame */
+#define NAN_MGMT_FRM_SUBTYPE_REKEY_TRIGGER	14
+/* Group key request frame */
+#define NAN_MGMT_FRM_SUBTYPE_GRP_REKEY_REQ	15
+/* Group key response frame */
+#define NAN_MGMT_FRM_SUBTYPE_GRP_REKEY_RESP	16
+#endif /* NAN_REKEY */
 
 /* Vendor specific NAN OOB AF subtype */
 #define NAN_MGMT_FRM_SUBTYPE_NAN_OOB_AF		0xDD
@@ -1105,6 +1256,7 @@ typedef BWL_PRE_PACKED_STRUCT struct nan2_pub_act_frame_s {
 #define NAN_REASON_QOS_UNACCEPT			0x9
 #define NAN_REASON_NDP_REJECT			0xa
 #define NAN_REASON_NDL_UNACCEPTABLE		0xb
+#define NAN_REASON_RNG_SCHED_UNACCEPTALE	0xc
 
 /* nan 2.0 qos (not attribute) */
 typedef BWL_PRE_PACKED_STRUCT struct wifi_nan_ndp_qos_s {
@@ -1116,11 +1268,26 @@ typedef BWL_PRE_PACKED_STRUCT struct wifi_nan_ndp_qos_s {
 
 /* NDP control bitmap defines */
 #define NAN_NDP_CTRL_CONFIRM_REQUIRED		0x01
+#ifdef NAN_REKEY
+/* 0 = NDP setup, 1 = rekey handshake */
+#define NAN_NDP_CTRL_NDP_REKEY			0x02
+#endif /* NAN_REKEY */
 #define NAN_NDP_CTRL_SECURTIY_PRESENT		0x04
 #define NAN_NDP_CTRL_PUB_ID_PRESENT		0x08
 #define NAN_NDP_CTRL_RESP_NDI_PRESENT		0x10
 #define NAN_NDP_CTRL_SPEC_INFO_PRESENT		0x20
 #define NAN_NDP_CTRL_RESERVED			0xA0
+
+#if defined(WL_NAN_GAF_PROTECT) || defined(NAN_GTK)
+/*
+ * NDPE control bitmap defines
+ * currently NDP & NDPE share same control bitmap before b5
+ * GTK/IGTK Required b5
+ * 0: GTK/IGTK protection is not required
+ * 1: GTK/IGTK protection is required
+ */
+#define NAN_NDPE_CTRL_GTK_REQUIRED		0x20
+#endif /* WL_NAN_GAF_PROTECT || NAN_GTK */
 
 /* Used for both NDP Attribute and NDPE Attribute, since the structures are identical */
 typedef BWL_PRE_PACKED_STRUCT struct wifi_nan_ndp_attr_s {
@@ -1141,13 +1308,26 @@ typedef BWL_PRE_PACKED_STRUCT struct wifi_nan_ndp_attr_s {
 #define NAN_NDP_TYPE_CONFIRM	0x2
 #define NAN_NDP_TYPE_SECURITY	0x3
 #define NAN_NDP_TYPE_TERMINATE	0x4
+#ifdef NAN_REKEY
+#define NAN_NDP_TYPE_REKEY		0x5
+#define NAN_NDP_TYPE_GRP_REKEY_REQ	0x6
+#define NAN_NDP_TYPE_GRP_REKEY_RESP	0x7
+#endif /* NAN_REKEY */
 #define NAN_NDP_REQUEST(_ndp)	(((_ndp)->type_status & NAN_NDP_TYPE_MASK) == NAN_NDP_TYPE_REQUEST)
 #define NAN_NDP_RESPONSE(_ndp)	(((_ndp)->type_status & NAN_NDP_TYPE_MASK) == NAN_NDP_TYPE_RESPONSE)
 #define NAN_NDP_CONFIRM(_ndp)	(((_ndp)->type_status & NAN_NDP_TYPE_MASK) == NAN_NDP_TYPE_CONFIRM)
 #define NAN_NDP_SECURITY_INST(_ndp)	(((_ndp)->type_status & NAN_NDP_TYPE_MASK) == \
-									NAN_NDP_TYPE_SECURITY)
+						NAN_NDP_TYPE_SECURITY)
 #define NAN_NDP_TERMINATE(_ndp) (((_ndp)->type_status & NAN_NDP_TYPE_MASK) == \
-									NAN_NDP_TYPE_TERMINATE)
+						NAN_NDP_TYPE_TERMINATE)
+#ifdef NAN_REKEY
+#define NAN_NDP_REKEY(_ndp)		(((_ndp)->type_status & NAN_NDP_TYPE_MASK) == \
+						NAN_NDP_TYPE_REKEY)
+#define NAN_NDP_GRP_REKEY_REQ(_ndp)	(((_ndp)->type_status & NAN_NDP_TYPE_MASK) == \
+						NAN_NDP_TYPE_GRP_REKEY_REQ)
+#define NAN_NDP_GRP_REKEY_RESP(_ndp)	(((_ndp)->type_status & NAN_NDP_TYPE_MASK) == \
+						NAN_NDP_TYPE_GRP_REKEY_RESP)
+#endif /* NAN_REKEY */
 #define NAN_NDP_STATUS_SHIFT	4
 #define NAN_NDP_STATUS_MASK	0xF0
 #define NAN_NDP_STATUS_CONT	(0 << NAN_NDP_STATUS_SHIFT)
@@ -1268,6 +1448,60 @@ typedef BWL_PRE_PACKED_STRUCT struct wifi_nan_ndc_attr_s {
 		(((value) << NAN_NDC_ATTR_PROPOSED_NDC_SHIFT) & NAN_NDC_ATTR_PROPOSED_NDC_MASK)); \
 	} while (0)
 
+/* NAN Subslot attribute */
+/* Subslot S3 schedule entry */
+typedef BWL_PRE_PACKED_STRUCT struct wifi_nan_s3_entry_s {
+	uint8 entry_ctrl;	/* entry control */
+	uint16 tbmp_ctrl;	/* time bitmap control */
+	uint16 tbmp_len;	/* time bitmap len */
+	uint8 tbmp[];		/* time bitmap */
+} BWL_POST_PACKED_STRUCT wifi_nan_s3_entry_t;
+
+typedef BWL_PRE_PACKED_STRUCT struct wifi_nan_subslot_attr_s {
+	uint8 id;
+	uint16 len;
+	uint8 var[];		/* One or more wifi_nan_s3_entry_t */
+} BWL_POST_PACKED_STRUCT wifi_nan_s3_attr_t;
+
+enum
+{
+	NAN_S3_TIME_BMP_BIT_DUR_1TU_IDX = 0,
+	NAN_S3_TIME_BMP_BIT_DUR_2TU_IDX = 1,
+	NAN_S3_TIME_BMP_BIT_DUR_4TU_IDX = 2,
+	NAN_S3_TIME_BMP_BIT_DUR_8TU_IDX = 3
+};
+
+#define NAN_SUBSLOT_CTRL_MAP_ID_FULL		0x1F
+#define NAN_SUBSLOT_CTRL_MAP_ID_MASK		0x1E
+#define NAN_SUBSLOT_CTRL_MAP_ID_ALL		0x01
+
+#define NAN_SUBSLOT_CTRL_MAP_ID(_ctrl)		(((_ctrl) & NAN_SUBSLOT_CTRL_MAP_ID_MASK) >> 1)
+#define NAN_SUBSLOT_CTRL_MAP_ID_ALLMAP(_ctrl)	((_ctrl) & NAN_SUBSLOT_CTRL_MAP_ID_ALL)
+#define NAN_SUBSLOT_CTRL_IMMUTABLE(_ctrl)	((_ctrl) & 0x20)
+#define NAN_SUBSLOT_SET_CTRL_IMMUTABLE(_ctrl)	((_ctrl) |= ((_ctrl) | 0x20))
+
+#define NAN_S3_TIME_BMAP_CTRL_BITDUR_MASK 0x03
+#define NAN_S3_TIME_BMAP_CTRL_BITDUR(_flags) ((_flags) & NAN_S3_TIME_BMAP_CTRL_BITDUR_MASK)
+
+#define NAN_S3_TIME_BMAP_CTRL_PERIOD_MASK 0x3C
+#define NAN_S3_TIME_BMAP_CTRL_PERIOD_SHIFT 0x2
+#define NAN_S3_TIME_BMAP_CTRL_PERIOD(_flags) (((_flags) & NAN_S3_TIME_BMAP_CTRL_PERIOD_MASK) \
+	>> NAN_S3_TIME_BMAP_CTRL_PERIOD_SHIFT)
+
+#define NAN_S3_TIME_BMAP_CTRL_OFFSET_MASK 0x7FC0
+#define NAN_S3_TIME_BMAP_CTRL_OFFSET_SHIFT 6
+#define NAN_S3_TIME_BMAP_CTRL_OFFSET(_flags) (((_flags) & NAN_S3_TIME_BMAP_CTRL_OFFSET_MASK) \
+	>> NAN_S3_TIME_BMAP_CTRL_OFFSET_SHIFT)
+#define NAN_S3_MIN_AVAIL_ATTR_SIZE(n)	(OFFSETOF(wifi_nan_s3_attr_t, var) + \
+		((n) * OFFSETOF(wifi_nan_s3_entry_t, tbmp)))
+#define NAN_S3_ENTRY_MIN_SIZE	OFFSETOF(wifi_nan_s3_entry_t, tbmp)
+#define NAN_S3_ENTRY_SIZE(_entry)	(NAN_S3_ENTRY_MIN_SIZE + (_entry)->tbmp_len)
+
+/* mandatory fields in subslot attribute for given avail entries */
+#define NAN_AVAIL_MIN_SUBSLOT_ATTR_SIZE(n)	(OFFSETOF(wifi_nan_s3_attr_t, var) + \
+	((n) * OFFSETOF(wifi_nan_s3_entry_t, tbmp)))
+#define NAN_SUBSLOT_TIME_BITMAP_HDR_LEN		OFFSETOF(wifi_nan_s3_entry_t, bitmap)
+
 /* Service descriptor extension attribute */
 typedef BWL_PRE_PACKED_STRUCT struct wifi_nan_svc_desc_ext_attr_s {
 	/* Attribute ID - 0x11 */
@@ -1305,6 +1539,9 @@ typedef BWL_PRE_PACKED_STRUCT struct wifi_nan_svc_desc_ext_attr_s {
 #define NAN_SDE_CF_RANGING_REQUIRED	(1 << 7)
 #define NAN_SDE_CF_RANGE_PRESENT	(1 << 8)
 #define NAN_SDE_CF_SVC_UPD_IND_PRESENT	(1 << 9)
+#if defined(WL_NAN_GAF_PROTECT) || defined(NAN_GTK)
+#define NAN_SDE_CF_GTK_REQUIRED	        (1u << 10u)
+#endif /* WL_NAN_GAF_PROTECT || NAN_GTK */
 /* Using Reserved Bits as per Spec */
 #define NAN_SDE_CF_LIFE_CNT_PUB_RX      (1 << 15)
 #define NAN_SDE_FSD_REQUIRED(_sde)	((_sde)->control & NAN_SDE_CF_FSD_REQUIRED)
@@ -1324,19 +1561,78 @@ typedef BWL_PRE_PACKED_STRUCT struct wifi_nan_svc_desc_ext_attr_s {
 /*
  * Cipher suite information Attribute.
  * WFA Tech. Spec ver 1.0.r21 (section 10.7.24.2)
+ * Bit 0 is 0 for 4 PTKSA replay counters
+ * Bit 0 is 1 for 16 PTKSA replay counters
+ * Bit 1 and 2:
+ * 00: GTKSA, IGTKSA, BIGTKSA are not supported;
+ * 01: GTKSA and IGTKSA are supported, and BIGTKSA is not supported;
+ * 10: GTKSA, IGTKSA, and BIGTKSA are supported;
+ * 11: Reserved;
+ * Bit 3 is 0 for 4 GTKSA replay counters, if GTKSA is supported
+ * Bit 3 is 1 for 16 GTKSA replay counters, if GTKSA is supported
+ * Bit 4 is 0: BIP-CMAC-128 is selected for transmit, if IGTKSA or BIGTKSA is supported
+ * Bit 4 is 1: BIP-GMAC-256 is selected for transmit, if IGTKSA or BIGTKSA is supported
+ * Bit 5 is 0 if IRK is not supported
+ * Bit 5 is 1 if IRK is supported
+ * Bit 7 is reserved
  */
-#define NAN_SEC_CIPHER_SUITE_CAP_REPLAY_4     0
-#define NAN_SEC_CIPHER_SUITE_CAP_REPLAY_16    (1 << 0)
+#define NAN_SEC_CIPHER_SUITE_CAP_REPLAY_4	0u
+#define NAN_SEC_CIPHER_SUITE_CAP_REPLAY_16	(1u << 0u)
 
-/* enum security algo.
-*/
+#if defined(WL_NAN_GAF_PROTECT) || defined(NAN_GTK)
+/* Defines for GTK, IGTK and BIGTK */
+/*
+ * Bit 1 and 2:
+ * 00: GTKSA, IGTKSA, BIGTKSA are not supported;
+ * 01: GTKSA and IGTKSA are supported, and BIGTKSA is not supported;
+ * 10: GTKSA, IGTKSA, and BIGTKSA are supported;
+ * 11: Reserved;
+ */
+#define NAN_SEC_CIPHER_SUITE_CAP_DIS_GTK_IGTK_BIGTK     (0 << 1)
+#define NAN_SEC_CIPHER_SUITE_CAP_DIS_BIGTK		(1 << 1)
+#define NAN_SEC_CIPHER_SUITE_CAP_ENAB_GTK_IGTK_BIGTK	(1 << 2)
+
+/*
+ * Bit 3 is 0 for 4 GTKSA replay counters, if GTKSA is supported
+ * Bit 3 is 1 for 16 GTKSA replay counters, if GTKSA is supported
+ */
+#define NAN_SEC_CIPHER_SUITE_CAP_GTK_REPLAY_4		(0 << 4)
+#define NAN_SEC_CIPHER_SUITE_CAP_GTK_REPLAY_16		(1 << 4)
+
+/*
+ * Bit 4 is 0: BIP-CMAC-128 is selected for transmit, if IGTKSA or BIGTKSA is supported
+ * Bit 4 is 1: BIP-GMAC-256 is selected for transmit, if IGTKSA or BIGTKSA is supported
+ */
+#define NAN_SEC_CIPHER_SUITE_CAP_BIP_CMAC_128		(0)
+#define NAN_SEC_CIPHER_SUITE_CAP_BIP_GMAC_256		(1 << 5)
+
+#define NAN_SEC_BIP_ENABLED(cap)	((cap) & \
+	(NAN_SEC_CIPHER_SUITE_CAP_ENAB_GTK_IGTK_BIGTK | \
+	NAN_SEC_CIPHER_SUITE_CAP_DIS_BIGTK))
+
+#define NAN_SEC_BIP_CAP_TO_CIPER(cap)	\
+	(((cap) & NAN_SEC_CIPHER_SUITE_CAP_BIP_GMAC_256) ?\
+		 CRYPTO_ALGO_BIP_GMAC256 : CRYPTO_ALGO_BIP)
+#define NAN_SEC_IGTK_ENABLED(cap)	NAN_SEC_BIP_ENABLED(cap)
+
+#define NAN_SEC_BIGTK_ENABLED(cap)	((cap) & \
+	(NAN_SEC_CIPHER_SUITE_CAP_ENAB_GTK_IGTK_BIGTK))
+#endif /* WL_NAN_GAF_PROTECT || NAN_GTK */
+
+/* enum security algo. */
 enum nan_sec_csid {
-	NAN_SEC_ALGO_NONE = 0,
+	NAN_SEC_ALGO_NONE			= 0,	/* default, open */
 	NAN_SEC_ALGO_NCS_SK_CCM_128 = 1,     /* CCMP 128 */
 	NAN_SEC_ALGO_NCS_SK_GCM_256 = 2,     /* GCMP 256 */
-	NAN_SEC_ALGO_LAST = 3
+	NAN_SEC_ALGO_NCS_PK_CCM_128 = 3,     /* CCMP 128 */
+	NAN_SEC_ALGO_NCS_PK_GCM_256 = 4,     /* GCMP 256 */
+	NAN_SEC_ALGO_NCS_GK_CCM_128 = 5,     /* CCMP 128 */
+	NAN_SEC_ALGO_NCS_GK_GCM_256 = 6,     /* GCMP 256 */
+	NAN_SEC_ALGO_NCS_PK_PASN_CCM_128	= 7,	/* CCMP 128, NAN R4 */
+	NAN_SEC_ALGO_NCS_PK_PASN_GCM_256	= 8,	/* GCMP 256, NAN R4 */
+	NAN_SEC_ALGO_LAST
 };
-typedef int8 nan_sec_csid_e;
+typedef uint8 nan_sec_csid_e;
 
 /* nan2 cipher suite attribute field */
 typedef BWL_PRE_PACKED_STRUCT struct wifi_nan_sec_cipher_suite_field_s {
@@ -1351,6 +1647,13 @@ typedef BWL_PRE_PACKED_STRUCT struct wifi_nan_sec_cipher_suite_info_attr_s {
 	uint8 capabilities;
 	uint8 var[];	/* cipher suite list */
 } BWL_POST_PACKED_STRUCT wifi_nan_sec_cipher_suite_info_attr_t;
+
+/* Currently cipher suite list supports maximum of 2 entries */
+#define NAN_SEC_CIPHER_SUITE_LIST_MAX_ENTRIES	2u
+#define NAN_SEC_CIPHER_SUITE_FIELD_LEN		2u
+#define NAN_SEC_CIPHER_SUITE_INFO_LEN_MIN	1u /* capabilities field only */
+#define NAN_SEC_CIPHER_SUITE_INFO_LEN_MAX	(NAN_SEC_CIPHER_SUITE_INFO_LEN_MIN + \
+		(NAN_SEC_CIPHER_SUITE_FIELD_LEN * NAN_SEC_CIPHER_SUITE_LIST_MAX_ENTRIES))
 
 /*
  * Security context identifier attribute
@@ -1379,8 +1682,10 @@ typedef BWL_PRE_PACKED_STRUCT struct wifi_nan_sec_ctx_id_info_attr_s {
  * WFA Tech. Spec ver 23
  */
 
-#define NAN_SEC_NCSSK_DESC_REPLAY_CNT_LEN	8
-#define NAN_SEC_NCSSK_DESC_KEY_NONCE_LEN	32
+#define NAN_SEC_NCSSK_DESC_REPLAY_CNT_LEN	8u
+#define NAN_SEC_NCSSK_DESC_KEY_NONCE_LEN	32u
+#define NAN_SEC_NCSSK_DESC_KEY_IV_LEN		16u
+#define NAN_SEC_NCSSK_DESC_KEY_RSC_LEN		8u
 
 /* nan shared key descriptor attr field */
 typedef BWL_PRE_PACKED_STRUCT struct wifi_nan_sec_ncssk_key_desc_attr_s {
@@ -1392,7 +1697,9 @@ typedef BWL_PRE_PACKED_STRUCT struct wifi_nan_sec_ncssk_key_desc_attr_s {
 	uint16 key_len;
 	uint8 key_replay_cntr[NAN_SEC_NCSSK_DESC_REPLAY_CNT_LEN];
 	uint8 key_nonce[NAN_SEC_NCSSK_DESC_KEY_NONCE_LEN];
-	uint8 reserved[32];	/* EAPOL IV + Key RSC + Rsvd fields in EAPOL Key */
+	uint8 key_iv[NAN_SEC_NCSSK_DESC_KEY_IV_LEN];
+	uint8 key_rsc[NAN_SEC_NCSSK_DESC_KEY_RSC_LEN];
+	uint8 reserved[8];
 	uint8 mic[];  /* mic + key data len + key data */
 } BWL_POST_PACKED_STRUCT wifi_nan_sec_ncssk_key_desc_attr_t;
 
@@ -1555,6 +1862,50 @@ typedef BWL_PRE_PACKED_STRUCT struct wifi_nan_fac_chan_entry_s {
 	NAN_FRM_SVC_DISC | NAN_FRM_RNG_REQ_AF | \
 	NAN_FRM_RNG_RESP_AF | NAN_FRM_RNG_REPORT_AF | \
 	NAN_FRM_RNG_TERM_AF)
+
+/* Generic NAN attribute data strucutre */
+typedef BWL_PRE_PACKED_STRUCT struct wifi_nan_attr_s {
+	uint8 id;		/* attribute id */
+	uint16 len;		/* length following */
+	uint8 data[];		/* attribute data */
+} BWL_POST_PACKED_STRUCT wifi_nan_attr_t;
+
+/* NIRA cipher versions */
+
+/* Version 0 means 128-bit NIK, 64-bit Nonce, 64-bit Tag, HMAC-SHA-256 */
+#define NAN_MAC_CIPHER_VERSION_0	0u
+
+/* NIRA (NAN Identity Resolution Attribute) */
+typedef BWL_PRE_PACKED_STRUCT struct wifi_nan_nira_attr_s {
+	uint8 id;		/* attribute id */
+	uint16 len;		/* length following */
+	uint8 cipher_version;	/* cipher version */
+
+	/* Nonce and Tag lengths are determined based on the cipher_verison */
+	/* variable Nonce */
+	/* variable Tag */
+} BWL_POST_PACKED_STRUCT wifi_nan_nira_attr_t;
+
+#define NAN_SEC_NCS_SK_PMKID_CONST	"NAN PMK Name"
+#define NAN_SEC_NCS_SK_PTK_CONST	"NAN Pairwise key expansion"
+#define NAN_SEC_NCS_PK_KEK_CONST	"NAN Management KEK Derivation"
+#define NAN_SEC_NCS_PK_PMK_CONST	"NDP PMK Derivation"
+
+#define NAN_IDENTITY_KEY_LENGTH	16u
+/* NIK KDE */
+typedef BWL_PRE_PACKED_STRUCT struct {
+	uint8	cipher;
+	uint8	nik[];
+} BWL_POST_PACKED_STRUCT nan_identity_key_t;
+
+/* Lifetime KDE */
+typedef BWL_PRE_PACKED_STRUCT struct {
+	uint16	key_bitmap;
+	uint32	lifetime;
+} BWL_POST_PACKED_STRUCT nan_key_lifetime_t;
+
+#define NAN_KEY_DATA_SUBTYPE_NIK		36
+#define NAN_KEY_DATA_SUBTYPE_LIFETIME		37
 
 /* This marks the end of a packed structure section. */
 #include <packed_section_end.h>

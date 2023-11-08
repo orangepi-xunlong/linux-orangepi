@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+
 #ifndef _wl_escan_
 #define _wl_escan_
 #include <linuxver.h>
@@ -20,13 +20,6 @@ enum escan_state {
 	ESCAN_STATE_SCANING
 };
 
-typedef struct wl_scan_info {
-	bool bcast_ssid;
-	wlc_ssid_t ssid;
-	wl_channel_list_t channels;
-	int scan_time;
-} wl_scan_info_t;
-
 typedef struct wl_escan_info {
 	struct net_device *dev;
 	bool scan_params_v2;
@@ -35,7 +28,7 @@ typedef struct wl_escan_info {
 	int escan_state;
 	int ioctl_ver;
 	u8 escan_buf[ESCAN_BUF_SIZE];
-	wl_scan_results_t *bss_list;
+	wl_scan_results_v109_t *bss_list;
 	u8 *escan_ioctl_buf;
 	struct mutex usr_sync; /* maily for up/down synchronization */
 	int autochannel;
@@ -74,12 +67,15 @@ bool wl_escan_mesh_peer(struct net_device *dev,
 	struct wl_escan_info *escan, wlc_ssid_t *cur_ssid, uint16 cur_chan, bool sae,
 	struct wl_mesh_params *mesh_info);
 #endif /* WLMESH */
-
+int wl_escan_drv_acs_scan(struct net_device *dev, uint32 band,
+	wl_scan_info_t *scan_info);
+int wl_escan_drv_apcs(struct net_device *dev, uint32 band, wl_scan_info_t *scan_info);
 int wl_escan_set_scan(struct net_device *dev, wl_scan_info_t *scan_info);
 #if defined(WL_WIRELESS_EXT)
 int wl_escan_get_scan(struct net_device *dev,
 	struct iw_request_info *info, struct iw_point *dwrq, char *extra);
 #endif
+int wl_ext_drv_scan(struct net_device *dev, uint32 band, wl_scan_info_t *scan_info);
 int wl_escan_attach(struct net_device *dev);
 void wl_escan_detach(struct net_device *dev);
 int wl_escan_event_attach(struct net_device *dev, int ifidx);

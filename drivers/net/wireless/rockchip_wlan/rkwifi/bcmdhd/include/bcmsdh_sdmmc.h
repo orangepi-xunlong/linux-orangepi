@@ -1,7 +1,7 @@
 /*
  * BCMSDH Function Driver for the native SDIO/MMC driver in the Linux Kernel
  *
- * Copyright (C) 2020, Broadcom.
+ * Copyright (C) 2022, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -85,6 +85,9 @@ struct sdioh_info {
 	struct sdio_func	*func[SDIOD_MAX_IOFUNCS];
 	uint		sd_clk_rate;
 	uint	txglom_mode;		/* Txglom mode: 0 - copy, 1 - multi-descriptor */
+#if defined(BCMSDIOH_TXGLOM) && defined(BCMSDIOH_STATIC_COPY_BUF)
+	uint8	*copy_buf;
+#endif
 #ifdef PKT_STATICS
 	uint32	sdio_spent_time_us;
 #endif

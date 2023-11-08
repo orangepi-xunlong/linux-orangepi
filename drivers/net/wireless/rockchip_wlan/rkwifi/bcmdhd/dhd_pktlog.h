@@ -1,7 +1,7 @@
 /*
  * DHD debugability packet logging header file
  *
- * Copyright (C) 2020, Broadcom.
+ * Copyright (C) 2022, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -58,6 +58,8 @@ typedef struct dhd_dbg_pktlog_info {
 	uint32 driver_ts_usec;
 	uint32 firmware_ts;
 	uint32 pkt_hash;
+	uint32 tx_status_ts_sec;
+	uint32 tx_status_ts_usec;
 	bool direction;
 	void *pkt;
 } dhd_dbg_pktlog_info_t;
@@ -84,6 +86,9 @@ typedef struct dhd_pktlog_ring
 	spinlock_t *pktlog_ring_lock;
 	dhd_pub_t *dhdp;
 	dhd_pktlog_ring_info_t *ring_info_mem; /* ring_info mem pointer */
+#ifdef DHD_PKT_LOGGING_DBGRING
+	void *dbg_ring;
+#endif /* DHD_PKT_LOGGING_DBGRING */
 } dhd_pktlog_ring_t;
 
 typedef struct dhd_pktlog_filter_info
@@ -112,6 +117,9 @@ typedef struct dhd_pktlog
 #ifdef DHD_COMPACT_PKT_LOG
 	struct rb_root cpkt_log_tt_rbt;
 #endif  /* DHD_COMPACT_PKT_LOG */
+#ifdef DHD_PKT_LOGGING_DBGRING
+	osl_atomic_t enable; /* logging suspend/resume */
+#endif /* DHD_PKT_LOGGING_DBGRING */
 } dhd_pktlog_t;
 
 typedef struct dhd_pktlog_pcap_hdr
@@ -133,6 +141,12 @@ typedef struct dhd_pktlog_pcap_hdr
 
 extern int dhd_os_attach_pktlog(dhd_pub_t *dhdp);
 extern int dhd_os_detach_pktlog(dhd_pub_t *dhdp);
+#ifdef DHD_PKT_LOGGING_DBGRING
+extern int dhd_pktlog_is_enabled(dhd_pub_t *dhdp);
+extern void dhd_pktlog_suspend(dhd_pub_t *dhdp);
+extern void dhd_pktlog_resume(dhd_pub_t *dhdp);
+extern int dhd_pktlog_ring_reinit(dhd_pub_t *dhdp);
+#endif /* DHD_PKT_LOGGING_DBGRING */
 extern dhd_pktlog_ring_t* dhd_pktlog_ring_init(dhd_pub_t *dhdp, int size);
 extern int dhd_pktlog_ring_deinit(dhd_pub_t *dhdp, dhd_pktlog_ring_t *ring);
 extern int dhd_pktlog_ring_set_nextpos(dhd_pktlog_ring_t *ringbuf);
@@ -298,7 +312,7 @@ extern int dhd_pktlog_dump_write_file(dhd_pub_t *dhdp);
 
 extern void dhd_pktlog_get_filename(dhd_pub_t *dhdp, char *dump_path, int len);
 extern uint32 dhd_pktlog_get_item_length(dhd_pktlog_ring_info_t *report_ptr);
-extern uint32 dhd_pktlog_get_dump_length(dhd_pub_t *dhdp);
+extern int dhd_pktlog_get_dump_length(dhd_pub_t *dhdp);
 extern uint32 __dhd_dbg_pkt_hash(uintptr_t pkt, uint32 pktid);
 
 #ifdef DHD_COMPACT_PKT_LOG

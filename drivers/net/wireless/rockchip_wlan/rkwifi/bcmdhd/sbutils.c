@@ -2,7 +2,7 @@
  * Misc utility routines for accessing chip-specific features
  * of the SiliconBackplane-based Broadcom chips.
  *
- * Copyright (C) 2020, Broadcom.
+ * Copyright (C) 2022, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -127,7 +127,7 @@ sb_setint(const si_t *sih, int siflag)
 
 /* return core index of the core with address 'sba' */
 static uint
-BCMATTACHFN(_sb_coreidx)(const si_info_t *sii, uint32 sba)
+_sb_coreidx(const si_info_t *sii, uint32 sba)
 {
 	uint i;
 	const si_cores_info_t *cores_info = (const si_cores_info_t *)sii->cores_info;
@@ -140,7 +140,7 @@ BCMATTACHFN(_sb_coreidx)(const si_info_t *sii, uint32 sba)
 
 /* return core address of the current core */
 static uint32
-BCMATTACHFN(_sb_coresba)(const si_info_t *sii)
+_sb_coresba(const si_info_t *sii)
 {
 	uint32 sbaddr;
 
@@ -444,7 +444,7 @@ sb_corereg_addr(const si_t *sih, uint coreidx, uint regoff)
  */
 #define SB_MAXBUSES	2
 static uint
-BCMATTACHFN(_sb_scan)(si_info_t *sii, uint32 sba, volatile void *regs, uint bus,
+_sb_scan(si_info_t *sii, uint32 sba, volatile void *regs, uint bus,
 	uint32 sbba, uint numcores, uint devid)
 {
 	uint next;
@@ -518,7 +518,7 @@ BCMATTACHFN(_sb_scan)(si_info_t *sii, uint32 sba, volatile void *regs, uint bus,
 
 /* scan the sb enumerated space to identify all cores */
 void
-BCMATTACHFN(sb_scan)(si_t *sih, volatile void *regs, uint devid)
+sb_scan(si_t *sih, volatile void *regs, uint devid)
 {
 	uint32 origsba;
 	sbconfig_t *sb;
@@ -673,8 +673,7 @@ sb_addrspacesize(const si_t *sih, uint asidx)
 	return (sb_size(R_SBREG(sii, sb_admatch(sii, asidx))));
 }
 
-#if defined(BCMDBG_ERR) || defined(BCMASSERT_SUPPORT) || \
-	defined(BCMDBG_DUMP)
+#if defined(BCMDBG_ERR) || defined(BCMASSERT_SUPPORT) || defined(BCMDBG_DUMP)
 /* traverse all cores to find and clear source of serror */
 static void
 sb_serr_clear(si_info_t *sii)

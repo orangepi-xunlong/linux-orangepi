@@ -1,7 +1,7 @@
 /*
  *  'Standard' SDIO HOST CONTROLLER driver - linux portion
  *
- * Copyright (C) 2020, Broadcom.
+ * Copyright (C) 2022, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -515,8 +515,15 @@ static struct pci_device_id bcmsdh_pci_devid[] __devinitdata = {
 	class: 0,
 	class_mask: 0,
 	driver_data: 0,
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0))
+	override_only: 0,
+#endif /* (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0)) */
 	},
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0))
+	{ 0, 0, 0, 0, 0, 0, 0, 0}
+#else
 	{ 0, 0, 0, 0, 0, 0, 0}
+#endif /* (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0)) */
 };
 MODULE_DEVICE_TABLE(pci, bcmsdh_pci_devid);
 

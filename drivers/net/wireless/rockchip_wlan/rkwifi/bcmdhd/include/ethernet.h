@@ -1,7 +1,7 @@
 /*
  * From FreeBSD 2.2.7: Fundamental constants relating to ethernet.
  *
- * Copyright (C) 2020, Broadcom.
+ * Copyright (C) 2022, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -175,10 +175,22 @@ BWL_PRE_PACKED_STRUCT struct	ether_addr {
 				 (((const uint16 *)(a))[6] ^ ((const uint16 *)(b))[6]))
 #endif /* DONGLEBUILD && __ARM_ARCH_7A__ */
 
+#define eacmp_nogrp(a, b) \
+			(((((const uint8 *)(a))[0] & 0x0e) ^ (((const uint8 *)(b))[0] & 0x0e)) | \
+	                (((const uint8 *)(a))[1] ^ ((const uint8 *)(b))[1]) | \
+	                (((const uint8 *)(a))[2] ^ ((const uint8 *)(b))[2]) | \
+	                (((const uint8 *)(a))[3] ^ ((const uint8 *)(b))[3]) | \
+	                (((const uint8 *)(a))[4] ^ ((const uint8 *)(b))[4]) | \
+	                (((const uint8 *)(a))[5] ^ ((const uint8 *)(b))[5]))
+
 #define	ether_cmp(a, b)	eacmp(a, b)
 
+#ifdef BCMFUZZ
+/* memcpy_s to avoid alignment warnings for fuzzer */
+#define eacopy(s, d)	((void)memcpy_s((d), ETHER_ADDR_LEN, (s), ETHER_ADDR_LEN))
+#else
 /* copy an ethernet address - assumes the pointers can be referenced as shorts */
-#if defined(DONGLEBUILD) && defined(__ARM_ARCH_7A__) && !defined(BCMFUZZ)
+#if defined(DONGLEBUILD) && defined(__ARM_ARCH_7A__)
 #define eacopy(s, d) \
 do { \
 	(*(uint32 *)(d)) = (*(const uint32 *)(s)); \
@@ -192,6 +204,7 @@ do { \
 	((uint16 *)(d))[2] = ((const uint16 *)(s))[2]; \
 } while (0)
 #endif /* DONGLEBUILD && __ARM_ARCH_7A__ */
+#endif /* BCMFUZZ */
 
 #define	ether_copy(s, d) eacopy(s, d)
 
@@ -244,7 +257,7 @@ do { \
 	*(struct ether_header *)(d) = t; \
 } while (0)
 
-#define  ETHER_ISUCAST(ea) ((((uint8 *)(ea))[0] & 0x01) == 0)
+#define  ETHER_ISUCAST(ea) ((((const uint8 *)(ea))[0] & 0x01) == 0)
 
 /* This marks the end of a packed structure section. */
 #include <packed_section_end.h>

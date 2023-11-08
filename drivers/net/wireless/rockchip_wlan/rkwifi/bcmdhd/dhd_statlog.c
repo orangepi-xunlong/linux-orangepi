@@ -1,7 +1,7 @@
 /*
  * DHD debugability: Status Information Logging support
  *
- * Copyright (C) 2020, Broadcom.
+ * Copyright (C) 2022, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -693,7 +693,7 @@ dhd_statlog_convert_time(stat_elem_t *elem, uint8 *buf, uint32 buflen)
 	ts_sec = elem->ts_tz;
 	rem_usec = DIV_AND_MOD_U64_BY_U32(ts_sec, USEC_PER_SEC);
 
-	rtc_time_to_tm((unsigned long)ts_sec, &tm);
+	rtc_time_to_tm(ts_sec, &tm);
 	snprintf(buf, buflen, DHD_STATLOG_TZFMT_YYMMDDHHMMSSMS,
 		tm.tm_year - 100, tm.tm_mon + 1, tm.tm_mday,
 		tm.tm_hour, tm.tm_min, tm.tm_sec,

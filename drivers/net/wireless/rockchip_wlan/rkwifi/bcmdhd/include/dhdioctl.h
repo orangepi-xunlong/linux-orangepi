@@ -5,7 +5,7 @@
  *
  * Definitions subject to change without notice.
  *
- * Copyright (C) 2020, Broadcom.
+ * Copyright (C) 2022, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -170,10 +170,6 @@ typedef enum dhd_iftype {
 	DHD_IF_TYPE_STA		= 0,
 	DHD_IF_TYPE_AP		= 1,
 
-#ifdef DHD_AWDL
-	DHD_IF_TYPE_AWDL	= 2,
-#endif /* DHD_AWDL */
-
 	DHD_IF_TYPE_NAN_NMI	= 3,
 	DHD_IF_TYPE_NAN		= 4,
 	DHD_IF_TYPE_P2P_GO	= 5,
@@ -225,9 +221,11 @@ typedef enum dhd_iface_mgmt_policy {
 
 /*
  * For cases where 16K buf is not sufficient.
- * Ex:- DHD dump output beffer is more than 16K.
+ * Ex:- DHD dump output buffer is more than 16K.
  */
+#define	DHD_IOCTL_MAXLEN_48K	(48 * 1024)
 #define	DHD_IOCTL_MAXLEN_32K	(32768u)
+#define DHD_DUMP_IOCTL_MAXLEN DHD_IOCTL_MAXLEN_48K
 
 /* common ioctl definitions */
 #define DHD_GET_MAGIC				0
@@ -262,11 +260,7 @@ typedef enum dhd_iface_mgmt_policy {
 #define DHD_MSGTRACE_VAL	0x200000
 #define DHD_FWLOG_VAL		0x400000
 #define DHD_DBGIF_VAL		0x800000
-#ifdef DHD_PCIE_RUNTIMEPM
 #define DHD_RPM_VAL		0x1000000
-#else
-#define DHD_RPM_VAL		DHD_ERROR_VAL
-#endif /* DHD_PCIE_NATIVE_RUNTIMEPM */
 #define DHD_PKT_MON_VAL		0x2000000
 #define DHD_PKT_MON_DUMP_VAL	0x4000000
 #define DHD_ERROR_MEM_VAL	0x8000000
@@ -285,6 +279,9 @@ typedef enum dhd_iface_mgmt_policy {
 #define DUMP_ICMP_VAL	0x0008
 #define DUMP_DNS_VAL	0x0010
 #define DUMP_TRX_VAL	0x0080
+
+/* Message levels for Mesh */
+#define MESH_MSG_HDR_VAL        0x00000001u /* Header details */
 
 #ifdef SDTEST
 /* For pktgen iovar */
@@ -313,6 +310,17 @@ typedef struct dhd_pktgen {
 #define DHD_PKTGEN_RECV		4 /* Continuous rx from continuous tx dongle */
 #endif /* SDTEST */
 
+/* For membytes iovar - flags param bit definitions and accessor macros */
+#define DHD_MEMBYTES_FLAGS_MAGIC		0x5DA60900 /* indicates flags presence */
+#define DHD_MEMBYTES_FLAGS_MAGIC_MASK		0xFFFFFF00 /* magic bytes mask */
+#define DHD_MEMBYTES_FLAGS_BAR_MASK		0x00000007 /* bar region mask */
+#define DHD_MEMBYTES_FLAGS_BAR_MIN		0 /* Min valid value for BAR region */
+#define DHD_MEMBYTES_FLAGS_BAR_MAX		5 /* Max valid value for BAR region */
+#define DHD_MEMBYTES_FLAGS_INIT(x)		((x) = ((uint32)DHD_MEMBYTES_FLAGS_MAGIC))
+#define DHD_MEMBYTES_FLAGS_GET_MAGIC(x)		((x) & DHD_MEMBYTES_FLAGS_MAGIC_MASK)
+#define DHD_MEMBYTES_FLAGS_GET_BAR(x)		((x) & DHD_MEMBYTES_FLAGS_BAR_MASK)
+#define DHD_MEMBYTES_FLAGS_SET_BAR(x, b)	((x) |= ((b) & DHD_MEMBYTES_FLAGS_BAR_MASK))
+
 /* Enter idle immediately (no timeout) */
 #define DHD_IDLE_IMMEDIATE	(-1)
 
@@ -327,22 +335,22 @@ enum dhd_maclist_xtlv_type {
 };
 
 typedef struct _dhd_maclist_t {
-	uint16 version;		/* Version */
-	uint16 bytes_len;	/* Total bytes length of lists, XTLV headers and paddings */
-	uint8 plist[1];		/* Pointer to the first list */
+	uint16 version;			/* Version */
+	uint16 bytes_len;		/* Total bytes length of lists, XTLV headers and paddings */
+	uint8 plist[BCM_FLEX_ARRAY];	/* Pointer to the first list */
 } dhd_maclist_t;
 
 typedef struct _dhd_pd11regs_param {
 	uint16 start_idx;
 	uint8 verbose;
 	uint8 pad;
-	uint8 plist[1];
+	uint8 plist[BCM_FLEX_ARRAY];
 } dhd_pd11regs_param;
 
 typedef struct _dhd_pd11regs_buf {
 	uint16 idx;
 	uint8 pad[2];
-	uint8 pbuf[1];
+	uint8 pbuf[BCM_FLEX_ARRAY];
 } dhd_pd11regs_buf;
 
 /* BT logging and memory dump */
@@ -383,64 +391,6 @@ typedef struct debug_buf_dest_stat {
 	uint32 stat[DEBUG_BUF_DEST_MAX];
 } debug_buf_dest_stat_t;
 
-#ifdef DHD_PKTTS
-/* max pktts flow config supported */
-#define PKTTS_CONFIG_MAX 8
-
-#define PKTTS_OFFSET_INVALID ((uint32)(~0))
-
-/* pktts flow configuration */
-typedef struct pktts_flow {
-	uint16 ver;     /**< version of this struct */
-	uint16 len;     /**< length in bytes of this structure */
-	uint32 src_ip;  /**< source ip address */
-	uint32 dst_ip;  /**< destination ip address */
-	uint32 src_port; /**< source port */
-	uint32 dst_port; /**< destination port */
-	uint32 proto;    /**< protocol */
-	uint32 ip_prec;  /**< ip precedence */
-	uint32 pkt_offset; /**< offset from data[0] (TCP/UDP payload) */
-	uint32 chksum;   /**< 5 tuple checksum */
-} pktts_flow_t;
-
-#define BCM_TS_MAGIC	0xB055B055
-#define BCM_TS_MAGIC_V2	0xB055B056
-#define BCM_TS_TX	 1u
-#define BCM_TS_RX	 2u
-#define BCM_TS_UTX	 3u /* ucode tx timestamps */
-
-#define PKTTS_MAX_FWTX		4u
-#define PKTTS_MAX_UCTX		5u
-#define PKTTS_MAX_UCCNT		8u
-#define PKTTS_MAX_FWRX		2u
-
-/* Firmware timestamp header */
-typedef struct bcm_to_info_hdr {
-	uint magic;  /**< magic word */
-	uint type;   /**< tx/rx type */
-	uint flowid; /**< 5 tuple checksum */
-	uint prec; /**< ip precedence (IP_PREC) */
-	uint8 xbytes[16]; /**< 16bytes info from pkt offset */
-} bcm_to_info_hdr_t;
-
-/* Firmware tx timestamp payload structure */
-typedef struct bcm_to_info_tx_ts {
-	bcm_to_info_hdr_t hdr;
-	uint64 dhdt0; /**< system time - DHDT0 */
-	uint64 dhdt5; /**< system time - DHDT5 */
-	uint fwts[PKTTS_MAX_FWTX];	/**< fw timestamp - FWT0..FWT4 */
-	uint ucts[PKTTS_MAX_UCTX];	/**< uc timestamp - UCT0..UCT4 */
-	uint uccnt[PKTTS_MAX_UCCNT];	/**< uc counters */
-} bcm_to_info_tx_ts_t;
-
-/* Firmware rx timestamp payload structure */
-typedef struct bcm_to_info_rx_ts {
-	bcm_to_info_hdr_t hdr;
-	uint64 dhdr3; /**< system time - DHDR3 */
-	uint fwts[PKTTS_MAX_FWRX]; /**< fw timestamp - FWT0, FWT1 */
-} bcm_to_info_rx_ts_t;
-#endif /* DHD_PKTTS */
-
 /* devreset */
 #define DHD_DEVRESET_VERSION 1
 
@@ -475,4 +425,26 @@ typedef struct dhd_tx_profile_protocol {
 #define DHD_MAX_PROFILES	(1u)	/* ucode only supports 1 profile atm */
 
 #endif /* defined(DHD_TX_PROFILE) */
+
+typedef struct dhd_loglevel_data {
+	uint32 type;
+	uint32 component;
+	uint32 dhd_print_lv;
+	uint32 dhd_log_lv;
+	uint32 wl_print_lv;
+	uint32 wl_log_lv;
+} dhd_loglevel_data_t;
+
+typedef enum dhd_loglevel_type {
+	DHD_LOGLEVEL_TYPE_ALL		= 0,
+	DHD_LOGLEVEL_TYPE_PRINT		= 1,
+	DHD_LOGLEVEL_TYPE_LOG		= 2,
+	DHD_LOGLEVEL_TYPE_INVALID	= 3
+} dhd_loglevel_type_t;
+
+typedef enum dhd_loglevel_comp {
+	DHD_LOGLEVEL_COMP_DHD           = 0,
+	DHD_LOGLEVEL_COMP_WL            = 1,
+	DHD_LOGLEVEL_COMP_INVALID	= 2
+} dhd_loglevel_comp_t;
 #endif /* _dhdioctl_h_ */

@@ -1,7 +1,7 @@
 /*
  * Header for Linux cfg80211 scan
  *
- * Copyright (C) 2020, Broadcom.
+ * Copyright (C) 2022, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -53,6 +53,15 @@
 #define wl_escan_set_sync_id(a, b) ((a) = htod16((b)->escan_sync_id_cntr++))
 #define wl_escan_set_type(a, b)
 #endif /* DUAL_ESCAN_RESULT_BUFFER */
+
+#define SCAN_PARAMS_VER_2    2u
+#define SCAN_PARAMS_VER_3    3u
+/* SCAN_PARAMS V3 and V2 have same size. so use V3 with appriate version param */
+#define IS_SCAN_PARAMS_V3_V2(cfg) (((cfg->scan_params_ver == SCAN_PARAMS_VER_3) || \
+			(cfg->scan_params_ver == SCAN_PARAMS_VER_2)) ? TRUE : FALSE)
+#define IS_SCAN_PARAMS_V3(cfg) ((cfg->scan_params_ver == SCAN_PARAMS_VER_3) ? \
+				TRUE : FALSE)
+
 extern s32 wl_escan_handler(struct bcm_cfg80211 *cfg, bcm_struct_cfgdev *cfgdev,
 	const wl_event_msg_t *e, void *data);
 extern s32 wl_do_escan(struct bcm_cfg80211 *cfg, struct wiphy *wiphy,
@@ -89,6 +98,17 @@ extern s32 wl_notify_gscan_event(struct bcm_cfg80211 *cfg, bcm_struct_cfgdev *cf
 	const wl_event_msg_t *e, void *data);
 #endif /* GSCAN_SUPPORT */
 
+#ifdef WL_SCHED_SCAN
+extern s32 wl_cfgscan_pfn_scanresult_handler(struct bcm_cfg80211 *cfg, bcm_struct_cfgdev *cfgdev,
+	const wl_event_msg_t *e, void *data);
+extern s32 wl_cfgscan_pfn_handler(struct bcm_cfg80211 *cfg,
+	wl_pfn_scanresult_v3_1_t *pfn_scanresult);
+#endif /* WL_SCHED_SCAN */
+
+#if defined(GSCAN_SUPPORT) || defined(WL_SCHED_SCAN)
+extern s32 wl_cfgscan_notify_pfn_complete(struct bcm_cfg80211 *cfg, bcm_struct_cfgdev *cfgdev,
+	const wl_event_msg_t *e, void *data);
+#endif /* GSCAN_SUPPORT || WL_SCHED_SCAN */
 #ifdef WES_SUPPORT
 #ifdef CUSTOMER_SCAN_TIMEOUT_SETTING
 #define CUSTOMER_WL_SCAN_TIMER_INTERVAL_MS	25000 /* Scan timeout */
@@ -138,15 +158,20 @@ extern s32 wl_cfgscan_remain_on_channel(struct wiphy *wiphy, bcm_struct_cfgdev *
 extern s32 wl_cfgscan_cancel_remain_on_channel(struct wiphy *wiphy,
 	bcm_struct_cfgdev *cfgdev, u64 cookie);
 extern chanspec_t wl_freq_to_chanspec(int freq);
-extern s32 wl_inform_single_bss(struct bcm_cfg80211 *cfg, wl_bss_info_t *bi, bool update_ssid);
+extern s32 wl_inform_single_bss(struct bcm_cfg80211 *cfg, wl_bss_info_v109_t *bi, bool update_ssid);
 #ifdef WL_GET_RCC
 extern int wl_android_get_roam_scan_chanlist(struct bcm_cfg80211 *cfg);
+extern int wl_android_get_roam_scan_freqlist(struct bcm_cfg80211 *cfg);
 #endif /* WL_GET_RCC */
 extern s32 wl_get_assoc_channels(struct bcm_cfg80211 *cfg,
 	struct net_device *dev, wlcfg_assoc_info_t *info);
 extern void wl_cfgscan_cancel_scan(struct bcm_cfg80211 *cfg);
 extern void wl_cfgscan_scan_abort(struct bcm_cfg80211 *cfg);
-#ifdef DHD_GET_VALID_CHANNELS
+
+#define APCS_DEFAULT_2G_FREQ	2437u
+#define APCS_DEFAULT_5G_FREQ	5745u
+#define APCS_DEFAULT_6G_FREQ	5975u
+
 typedef enum {
 	WIFI_BAND_UNSPECIFIED,
 	/* 2.4 GHz */
@@ -172,10 +197,35 @@ typedef enum {
 } wifi_band;
 
 extern bool wl_cfgscan_is_dfs_set(wifi_band band);
-extern s32 wl_cfgscan_get_band_freq_list(struct bcm_cfg80211 *cfg, int band,
-        uint16 *list, uint32 *num_channels);
-#endif /* DHD_GET_VALID_CHANNELS */
-#if defined (WL_SCHED_SCAN) && defined (SCHED_SCAN_DELAYED_WORK)
+extern s32 wl_cfgscan_get_band_freq_list(struct bcm_cfg80211 *cfg,
+		struct wireless_dev *wdev, int band, uint32 *list, uint32 *num_channels);
+#define MAX_AP_IFACES 2
+typedef struct ap_iface_data {
+	chanspec_t chspec;
+	struct net_device *ndev;
+} wl_ap_iface_data_t;
+
+typedef struct ap_oper_data {
+	u8 count;
+	wl_ap_iface_data_t iface[MAX_AP_IFACES];
+} wl_ap_oper_data_t;
+
+extern void wl_get_ap_chanspecs(struct bcm_cfg80211 *cfg, wl_ap_oper_data_t *ap_data);
+
+extern int wl_android_get_sta_channel(struct bcm_cfg80211 *cfg);
+extern int wl_handle_acs_concurrency_cases(struct bcm_cfg80211 *cfg,
+		drv_acs_params_t *parameter, int qty, uint32 *pList);
+#ifdef WL_SCHED_SCAN
 extern void wl_cfgscan_sched_scan_stop_work(struct work_struct *work);
 #endif /* WL_SCHED_SCAN */
+#ifdef WL_SOFTAP_ACS
+extern bool wl_is_chanspec_restricted(struct bcm_cfg80211 *cfg, chanspec_t chspec);
+#endif /* WL_SOFTAP_ACS */
+#ifdef ESCAN_CHANNEL_CACHE
+void reset_roam_cache(struct bcm_cfg80211 *cfg);
+void add_roam_cache(struct bcm_cfg80211 *cfg, wl_bss_info_v109_t *bi);
+int get_roam_channel_list(struct bcm_cfg80211 *cfg, chanspec_t target_chan, chanspec_t *channels,
+	int n_channels, const wlc_ssid_t *ssid, int ioctl_ver);
+void set_roam_band(int band);
+#endif /* ESCAN_CHANNEL_CACHE */
 #endif /* _wl_cfgscan_h_ */

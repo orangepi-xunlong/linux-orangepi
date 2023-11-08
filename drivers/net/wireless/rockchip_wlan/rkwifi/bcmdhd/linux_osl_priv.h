@@ -1,7 +1,7 @@
 /*
  * Private header file for Linux OS Independent Layer
  *
- * Copyright (C) 2020, Broadcom.
+ * Copyright (C) 2022, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -145,10 +145,6 @@ struct osl_cmn_info {
 };
 typedef struct osl_cmn_info osl_cmn_t;
 
-#if defined(AXI_TIMEOUTS_NIC)
-typedef uint32 (*bpt_cb_fn)(void *ctx, void *addr);
-#endif	/* AXI_TIMEOUTS_NIC */
-
 struct osl_info {
 	osl_pubinfo_t pub;
 	uint32  flags;		/* If specific cases to be handled in the OSL */
@@ -168,10 +164,6 @@ struct osl_info {
 	struct list_head ctrace_list;
 	int ctrace_num;
 #endif /* BCMDBG_CTRACE */
-#if defined(AXI_TIMEOUTS_NIC)
-	bpt_cb_fn bpt_cb;
-	void *sih;
-#endif	/* AXI_TIMEOUTS_NIC */
 #ifdef USE_DMA_LOCK
 	spinlock_t dma_lock;
 	bool dma_lock_bh;

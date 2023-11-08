@@ -1,7 +1,7 @@
 /*
  * Fundamental types and constants relating to WFA MBO
  * (Multiband Operation)
- * Copyright (C) 2020, Broadcom.
+ * Copyright (C) 2022, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -23,6 +23,8 @@
 
 #ifndef _MBO_H_
 #define _MBO_H_
+
+#include <802.11wfa.h>
 
 /* This marks the start of a packed structure section. */
 #include <packed_section_start.h>
@@ -67,11 +69,11 @@ enum {
 };
 
 typedef BWL_PRE_PACKED_STRUCT struct wifi_mbo_ie_s {
-	uint8 id;      /* IE ID: MBO_IE_ID 0xDD */
-	uint8 len;     /* IE length */
-	uint8 oui[WFA_OUI_LEN]; /* MBO_OUI 50:6F:9A */
-	uint8 oui_type;   /* MBO_OUI_TYPE 0x16 */
-	uint8 attr[1]; /* var len attributes */
+	uint8 id;                      /* IE ID: MBO_IE_ID 0xDD */
+	uint8 len;                     /* IE length */
+	uint8 oui[WFA_OUI_LEN];        /* MBO_OUI 50:6F:9A */
+	uint8 oui_type;                /* MBO_OUI_TYPE 0x16 */
+	uint8 attr[BCM_FLEX_ARRAY];    /* var len attributes */
 } BWL_POST_PACKED_STRUCT wifi_mbo_ie_t;
 
 #define MBO_IE_HDR_SIZE (OFFSETOF(wifi_mbo_ie_t, attr))
@@ -245,7 +247,7 @@ typedef BWL_PRE_PACKED_STRUCT struct wifi_mbo_anqp_elem_s {
 	/* MBO ANQP element type */
 	uint8 sub_type;
 	/* variable len payload */
-	uint8 payload[1];
+	uint8 payload[BCM_FLEX_ARRAY];
 } BWL_POST_PACKED_STRUCT wifi_mbo_anqp_elem_t;
 
 #define MBO_ANQP_ELEM_HDR_SIZE (OFFSETOF(wifi_mbo_anqp_elem_t, payload))

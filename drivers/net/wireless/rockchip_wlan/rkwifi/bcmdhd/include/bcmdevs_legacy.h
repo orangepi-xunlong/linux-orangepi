@@ -1,7 +1,7 @@
 /*
  * Broadcom device-specific manifest constants used by DHD, but deprecated in firmware.
  *
- * Copyright (C) 2020, Broadcom.
+ * Copyright (C) 2022, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -25,12 +25,8 @@
 #define	_bcmdevs_legacy_h_
 
 /* DONGLE VID/PIDs */
-#define BCM_DNGL_BL_PID_4322	0xbd13
-#define BCM_DNGL_BL_PID_4319    0xbd16
-#define BCM_DNGL_BL_PID_43236   0xbd17
 #define BCM_DNGL_BL_PID_43143	0xbd1e
 #define BCM_DNGL_BL_PID_43242	0xbd1f
-#define BCM_DNGL_BL_PID_4350    0xbd23
 #define BCM_DNGL_BL_PID_43569   0xbd27
 
 /* PCI Device IDs */
@@ -151,16 +147,6 @@
 				(CHIPID(chipid) == BCM43570_CHIP_ID) || \
 				(CHIPID(chipid) == BCM4358_CHIP_ID)) /* 4350 variations */
 
-#define BCM43598_CHIP_ID		0xaa4c          /* 4371 chipcommon chipid */
-#define	BCM43234_CHIP_ID	43234		/* 43234 chipcommon chipid */
-#define	BCM43235_CHIP_ID	43235		/* 43235 chipcommon chipid */
-#define	BCM43236_CHIP_ID	43236		/* 43236 chipcommon chipid */
-#define	BCM43238_CHIP_ID	43238		/* 43238 chipcommon chipid */
-#define BCM43556_CHIP_ID	0xAA24          /* 43556 chipcommon chipid */
-#define BCM43558_CHIP_ID	0xAA26          /* 43558 chipcommon chipid */
-#define BCM43566_CHIP_ID	0xAA2E          /* 43566 chipcommon chipid */
-#define BCM43568_CHIP_ID	0xAA30          /* 43568 chipcommon chipid */
-
 /* Board Flags */
 
 /* Package IDs */
@@ -168,16 +154,6 @@
 /* Board IDs */
 
 /* chip RAM specifications */
-#define RDL_RAM_BASE_4319 0x60000000
-#define RDL_RAM_BASE_4329 0x60000000
-#define RDL_RAM_SIZE_4319 0x48000
-#define RDL_RAM_SIZE_4329  0x48000
-#define RDL_RAM_SIZE_43236 0x70000
-#define RDL_RAM_BASE_43236 0x60000000
-#define RDL_RAM_SIZE_4328 0x60000
-#define RDL_RAM_BASE_4328 0x80000000
-#define RDL_RAM_SIZE_4322 0x60000
-#define RDL_RAM_BASE_4322 0x60000000
 #define RDL_RAM_SIZE_43242  0x90000
 #define RDL_RAM_BASE_43242  0x60000000
 #define RDL_RAM_SIZE_43143  0x70000

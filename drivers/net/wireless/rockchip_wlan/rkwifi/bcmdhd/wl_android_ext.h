@@ -7,6 +7,19 @@ typedef struct wl_chan_info {
 	uint16 chan;
 } wl_chan_info_t;
 
+#define MAX_CTRL_CHANSPECS 256
+typedef struct wl_channel_list {
+	uint32 count;
+	uint32 chanspec[MAX_CTRL_CHANSPECS];
+} wl_channel_list_t;
+
+typedef struct wl_scan_info {
+	bool bcast_ssid;
+	wlc_ssid_t ssid;
+	wl_channel_list_t channels;
+	int scan_time;
+} wl_scan_info_t;
+
 typedef struct bcol_gtk_para {
 	int enable;
 	int ptk_len;
@@ -15,7 +28,8 @@ typedef struct bcol_gtk_para {
 } bcol_gtk_para_t;
 #define ACS_FW_BIT		(1<<0)
 #define ACS_DRV_BIT		(1<<1)
-int wl_ext_autochannel(struct net_device *dev, uint acs, uint32 band);
+int wl_ext_autochannel(struct net_device *dev, uint acs, uint32 band,
+	wl_scan_info_t *scan_info);
 chanspec_band_t wl_ext_wlcband_to_chanspec_band(int band);
 int wl_android_ext_priv_cmd(struct net_device *net, char *command, int total_len,
 	int *bytes_written);
@@ -24,11 +38,10 @@ bool wl_ext_check_scan(struct net_device *dev, dhd_pub_t *dhdp);
 int wl_ext_set_scan_time(struct net_device *dev, int scan_time,
 	uint32 scan_get, uint32 scan_set);
 void wl_ext_wait_event_complete(struct dhd_pub *dhd, int ifidx);
-int wl_ext_add_del_ie(struct net_device *dev, uint pktflag, char *ie_data, const char* add_del_cmd);
-#ifdef WL_ESCAN
-int wl_construct_ctl_chanspec_list(struct net_device *dev, wl_uint32_list_t *chan_list);
-int wl_ext_drv_scan(struct net_device *dev, uint band, bool fast_scan);
-#endif
+int wl_ext_add_del_ie(struct net_device *dev, uint pktflag, char *ie_data,
+	const char* add_del_cmd);
+int wl_construct_ctl_chanspec_list(struct net_device *dev,
+	wl_uint32_list_t *chan_list, bool nodfs);
 #ifdef WL_EXT_GENL
 int wl_ext_genl_init(struct net_device *net);
 void wl_ext_genl_deinit(struct net_device *net);
@@ -47,9 +60,10 @@ int wl_ext_iovar_setbuf(struct net_device *dev, s8 *iovar_name,
 int wl_ext_iovar_setbuf_bsscfg(struct net_device *dev, s8 *iovar_name,
 	void *param, s32 paramlen, void *buf, s32 buflen, s32 bsscfg_idx,
 	struct mutex* buf_sync);
-chanspec_t wl_ext_chspec_driver_to_host(int ioctl_ver, chanspec_t chanspec);
-chanspec_t wl_ext_chspec_host_to_driver(int ioctl_ver, chanspec_t chanspec);
+chanspec_t wl_ext_chspec_driver_to_host(struct dhd_pub *dhd, chanspec_t chanspec);
+chanspec_t wl_ext_chspec_host_to_driver(struct dhd_pub *dhd, chanspec_t chanspec);
 bool wl_ext_dfs_chan(struct wl_chan_info *chan_info);
+bool wl_ext_passive_chan(struct net_device *dev, u32 chanspec);
 uint16 wl_ext_get_default_chan(struct net_device *dev,
 	uint16 *chan_2g, uint16 *chan_5g, bool nodfs);
 int wl_ext_set_chanspec(struct net_device *dev, struct wl_chan_info *chan_info,
@@ -58,11 +72,6 @@ int wl_ext_get_ioctl_ver(struct net_device *dev, int *ioctl_ver);
 #endif
 #if defined(WL_CFG80211) || defined(WL_ESCAN)
 void wl_ext_user_sync(struct dhd_pub *dhd, int ifidx, bool lock);
-#endif
-#if defined(WL_CFG80211)
-bool wl_legacy_chip_check(struct net_device *net);
-bool wl_new_chip_check(struct net_device *net);
-bool wl_extsae_chip(struct dhd_pub *dhd);
 #endif
 #if defined(WL_EXT_IAPSTA) || defined(WL_CFG80211)
 void wl_ext_bss_iovar_war(struct net_device *dev, s32 *val);
@@ -178,18 +187,31 @@ int wl_ext_get_best_channel(struct net_device *net,
 #else
 	wl_scan_results_v109_t *bss_list,
 #endif
-	int ioctl_ver, int *best_2g_ch, int *best_5g_ch, int *best_6g_ch
+	int *best_2g_ch, int *best_5g_ch, int *best_6g_ch
 );
 
 #ifdef WL_6G_BAND
-#define CHSPEC2BANDSTR(chspec) (CHSPEC_IS2G(chspec) ? "2g" : CHSPEC_IS5G(chspec) ? \
-	"5g" : CHSPEC_IS6G(chspec) ? "6g" : "0g")
-#define WLCBAND2STR(band) ((band == WLC_BAND_2G) ? "2g" : (band == WLC_BAND_5G) ? \
-	"5g" : (band == WLC_BAND_6G) ? "6g" : "0g")
+#define CHSPEC2BANDSTR(chspec) ((chspec && CHSPEC_IS2G(chspec)) ? \
+	"2g" : CHSPEC_IS5G(chspec) ? \
+	"5g" : CHSPEC_IS6G(chspec) ? \
+	"6g" : "0g")
+#define WLCBAND2STR(band) ((band == WLC_BAND_2G) ? \
+	"2g" : (band == WLC_BAND_5G) ? \
+	"5g" : (band == WLC_BAND_6G) ? \
+	"6g" : (band == WLC_BAND_AUTO) ? \
+	"auto" : "0g")
 #else
-#define CHSPEC2BANDSTR(chspec) (CHSPEC_IS2G(chspec) ? "2g" : CHSPEC_IS5G(chspec) ? \
+#define CHSPEC2BANDSTR(chspec) ((chspec && CHSPEC_IS2G(chspec)) ? \
+	"2g" : CHSPEC_IS5G(chspec) ? \
 	"5g" : "0g")
-#define WLCBAND2STR(band) ((band == WLC_BAND_2G) ? "2g" : (band == WLC_BAND_5G) ? \
-	"5g" : "0g")
+#define WLCBAND2STR(band) ((band == WLC_BAND_2G) ? \
+	"2g" : (band == WLC_BAND_5G) ? \
+	"5g" : (band == WLC_BAND_AUTO) ? \
+	"auto" : "0g")
 #endif /* WL_6G_BAND */
+#define WLCWIDTH2STR(width) ((width == WL_CHANSPEC_BW_20) ? \
+	"20" : (width == WL_CHANSPEC_BW_40) ? \
+	"40" : (width == WL_CHANSPEC_BW_80) ? \
+	"80" : (width == WL_CHANSPEC_BW_160) ? \
+	"160" : "0")
 #endif

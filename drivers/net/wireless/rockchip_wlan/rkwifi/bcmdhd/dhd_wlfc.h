@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020, Broadcom.
+ * Copyright (C) 2022, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -112,8 +112,8 @@ typedef struct wlfc_hanger {
 #define WLFC_PSQ_LEN			(4096 * 8)
 
 #ifdef BCMDBUS
-#define WLFC_FLOWCONTROL_HIWATER	512
-#define WLFC_FLOWCONTROL_LOWATER	(WLFC_FLOWCONTROL_HIWATER / 4)
+#define WLFC_FLOWCONTROL_HIWATER	((4096 * 8) - 256)
+#define WLFC_FLOWCONTROL_LOWATER	256
 #else
 #define WLFC_FLOWCONTROL_HIWATER	((4096 * 8) - 256)
 #define WLFC_FLOWCONTROL_LOWATER	256
@@ -145,11 +145,6 @@ typedef struct wlfc_mac_descriptor {
 	struct pktq	psq;    /**< contains both 'delayed' and 'suppressed' packets */
 	/** packets at firmware queue */
 	struct pktq	afq;
-#if defined(BCMINTERNAL) && defined(OOO_DEBUG)
-	uint8 last_send_gen[AC_COUNT+1];
-	uint8 last_send_seq[AC_COUNT+1];
-	uint8 last_complete_seq[AC_COUNT+1];
-#endif /* defined(BCMINTERNAL) && defined(OOO_DEBUG) */
 	/** The AC pending bitmap that was reported to the fw at last change */
 	uint8 traffic_lastreported_bmp;
 	/** The new AC pending bitmap */
@@ -357,12 +352,6 @@ typedef struct athost_wl_status_info {
 	uint32  single_ac_timestamp;
 
 	bool	bcmc_credit_supported;
-
-#if defined(BCMINTERNAL) && defined(OOO_DEBUG)
-	uint8*	log_buf;
-	uint32	log_buf_offset;
-	bool	log_buf_full;
-#endif /* defined(BCMINTERNAL) && defined(OOO_DEBUG) */
 
 #ifdef BULK_DEQUEUE
 	uint8	max_release_count;

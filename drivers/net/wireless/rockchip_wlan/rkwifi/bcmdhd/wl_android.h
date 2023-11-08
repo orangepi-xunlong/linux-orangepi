@@ -1,7 +1,7 @@
 /*
  * Linux cfg80211 driver - Android related functions
  *
- * Copyright (C) 2020, Broadcom.
+ * Copyright (C) 2022, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -31,11 +31,11 @@
 #include <dhd.h>
 #include <wl_android_ext.h>
 #ifdef WL_EXT_IAPSTA
+#include <wl_iapsta.h>
+#endif /* WL_IAPSTA */
 #ifdef WL_ESCAN
 #include <wl_escan.h>
 #endif /* WL_ESCAN */
-#include <wl_iapsta.h>
-#endif /* WL_IAPSTA */
 #if defined(WL_EXT_IAPSTA) || defined(USE_IW) || defined(WL_ESCAN) || \
 	(defined(WL_EXT_GENL) && defined(SENDPROB))
 #ifndef WL_EVENT
@@ -43,16 +43,22 @@
 #endif
 #include <wl_event.h>
 #endif
+#include <wl_timer.h>
 
 /* If any feature uses the Generic Netlink Interface, put it here to enable WL_GENL
  * automatically
  */
-#if defined(WL_SDO) || defined(BT_WIFI_HANDOVER)
+#if defined(WL_SDO)
 #define WL_GENL
 #endif
 
 #ifdef WL_GENL
 #include <net/genetlink.h>
+#endif
+
+#if !defined(WL_MBO_IOV_VERSION)
+/* MBO IOV API version */
+#define WL_MBO_IOV_VERSION WL_MBO_IOV_VERSION_1_1
 #endif
 
 typedef struct _android_wifi_priv_cmd {
@@ -82,6 +88,9 @@ typedef struct _compat_android_wifi_priv_cmd {
 #define ANDROID_SCAN_LEVEL	(1 << 3)
 #define ANDROID_DBG_LEVEL	(1 << 4)
 #define ANDROID_TPUT_LEVEL	(1 << 8)
+#define ANDROID_AMPDU_LEVEL	(1 << 9)
+#define ANDROID_TVPM_LEVEL	(1 << 10)
+#define ANDROID_BTC_LEVEL	(1 << 11)
 #define ANDROID_MSG_LEVEL	(1 << 0)
 
 #define WL_MSG(name, arg1, args...) \
@@ -170,9 +179,6 @@ enum {
 	BCM_E_SVC_FOUND,
 	BCM_E_DEV_FOUND,
 	BCM_E_DEV_LOST,
-#ifdef BT_WIFI_HANDOVER
-	BCM_E_DEV_BT_WIFI_HO_REQ,
-#endif
 	BCM_E_MAX
 };
 
@@ -249,4 +255,16 @@ extern int wl_android_bcnrecv_event(struct net_device *ndev,
 #define WLC_ACS_BAND_INVALID	0xffffu
 #endif /* WL_SUPPORT_AUTO_CHANNEL */
 #define WL_PRIV_CMD_LEN 64
+#define CHECK_SCNPRINTF_RET_VAL(ret) \
+	{ \
+		if (ret < 0) { \
+				WL_ERR(("scnprintf failed %d\n", ret)); \
+				return BCME_ERROR; \
+		} \
+	}
+
+#if defined(CUSTOM_CONTROL_HE_6G_FEATURES)
+extern int wl_android_set_he_6g_band(struct net_device *dev, bool enable);
+#endif /* CUSTOM_CONTROL_HE_6G_FEATURES */
+extern int wl_android_rcroam_turn_on(struct net_device *dev, int rcroam_enab);
 #endif /* _wl_android_ */

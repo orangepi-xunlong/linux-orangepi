@@ -1,7 +1,7 @@
 /*
  * Broadcom device-specific manifest constants.
  *
- * Copyright (C) 2020, Broadcom.
+ * Copyright (C) 2022, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -41,13 +41,6 @@
 #define VENDOR_RICOH		0x1180		/* Ricoh */
 #define VENDOR_JMICRON		0x197b
 
-/* precommit failed when this is removed */
-/* BLAZAR_BRANCH_101_10_DHD_001/build/dhd/linux-fc19/brix-brcm */
-/* TBD: Revisit later */
-#ifdef BCMINTERNAL
-#define VENDOR_JINVANI		0x1947		/* Jinvani Systech, Inc. */
-#endif
-
 /* PCMCIA vendor IDs */
 #define	VENDOR_BROADCOM_PCMCIA	0x02d0
 
@@ -59,6 +52,7 @@
 #define BCM_DNGL_BL_PID_4328	0xbd12
 #define BCM_DNGL_BL_PID_4332	0xbd18
 #define BCM_DNGL_BL_PID_4360	0xbd1d
+#define BCM_DNGL_BL_PID_4381	0xbd2a
 
 #define BCM_DNGL_BDC_PID	0x0bdc
 #define BCM_DNGL_JTAG_PID	0x4a44
@@ -135,6 +129,10 @@
 #define BCM4378_D11AX2G_ID	0x4426		/* 4378 802.11ax 2.4G device */
 #define BCM4378_D11AX5G_ID	0x4427		/* 4378 802.11ax 5G device */
 
+#define BCM4381_D11AX_ID	0x4446		/* 4381 802.11ax dualband device */
+#define BCM4382_D11AX_ID	0x4447		/* 4382 802.11ax dualband device */
+#define BCM43852_D11AX_ID	0x4448		/* 43852 802.11ax dualband device */
+
 #define BCM4387_D11AX_ID	0x4433		/* 4387 802.11ax dualband device */
 #define BCM4388_D11AX_ID	0x4434		/* 4388 802.11ax dualband device */
 #define BCM4385_D11AX_ID	0x4442		/* 4385 802.11ax dualband device */
@@ -150,6 +148,12 @@
 #define BCM43752_D11AX_ID	0x449d		/* 43752 802.11ax dualband device */
 #define BCM43752_D11AX2G_ID	0x449e		/* 43752 802.11ax 2.4G device */
 #define BCM43752_D11AX5G_ID	0x449f		/* 43752 802.11ax 5G device */
+
+#define BCM43756_D11AX_ID	0x44a0		/* 43756 802.11ax dualband device */
+
+#define BCM43711_D11AX6E_ID	0x44b0          /* 43711 802.11ax dualband device */
+#define BCM43711_D11AC_ID	0x44b1          /* 43711 802.11ax 2.4G device */
+#define BCM43711_D11AX_ID	0x44b2          /* 43711 802.11ax 5G device */
 
 /* TBD change below values */
 #define BCM4369_D11AX_ID	0x4470		/* 4369 802.11ax dualband device */
@@ -171,7 +175,8 @@
 
 #define BCM43143_CHIP_ID	43143		/* 43143 chipcommon chipid */
 #define	BCM43242_CHIP_ID	43242		/* 43242 chipcommon chipid */
-#define	BCM43460_CHIP_ID	43460		/* 4360  chipcommon chipid (OTP, RBBU) */
+#define BCM43430_CHIP_ID	43430		/* 43430 chipcommon chipid */
+#define BCM43460_CHIP_ID	43460		/* 4360  chipcommon chipid (OTP, RBBU) */
 #define BCM4360_CHIP_ID		0x4360          /* 4360 chipcommon chipid */
 #define BCM43362_CHIP_ID	43362		/* 43362 chipcommon chipid */
 #define BCM4330_CHIP_ID		0x4330		/* 4330 chipcommon chipid */
@@ -197,22 +202,38 @@
 
 #define BCM4345_CHIP_ID		0x4345		/* 4345 chipcommon chipid */
 #define BCM43454_CHIP_ID	43454		/* 43454 chipcommon chipid */
-#define BCM43430_CHIP_ID	43430		/* 43430 chipcommon chipid */
 #define BCM4359_CHIP_ID		0x4359		/* 4359 chipcommon chipid */
 #define BCM4362_CHIP_ID		0x4362          /* 4362 chipcommon chipid */
 #define BCM43751_CHIP_ID	0xAAE7          /* 43751 chipcommon chipid */
 #define BCM43752_CHIP_ID	0xAAE8          /* 43752 chipcommon chipid */
+#define BCM43756_CHIP_ID	0xAAEC          /* 43756 chipcommon chipid */
+#define BCM43711_CHIP_ID	0xAABF          /* 43711 chipcommon chipid */
 #define BCM4369_CHIP_ID		0x4369          /* 4369 chipcommon chipid */
 #define BCM4377_CHIP_ID		0x4377          /* 4377 chipcommon chipid */
 #define BCM4378_CHIP_ID		0x4378          /* 4378 chipcommon chipid */
+#define BCM4381_CHIP_ID		0x4381          /* 4381 chipcommon chipid */
+#define BCM4382_CHIP_ID		0x4382          /* 4382 chipcommon chipid */
+#define BCM43852_CHIP_ID	0xAB4C          /* 43852 chipcommon chipid */
 #define BCM4385_CHIP_ID		0x4385          /* 4385 chipcommon chipid */
 #define BCM4387_CHIP_ID		0x4387          /* 4387 chipcommon chipid */
 #define BCM4388_CHIP_ID		0x4388          /* 4388 chipcommon chipid */
 #define BCM4389_CHIP_ID		0x4389          /* 4389 chipcommon chipid */
 #define BCM4397_CHIP_ID		0x4397          /* 4397 chipcommon chipid */
 
-#define BCM4362_CHIP(chipid)	(CHIPID(chipid) == BCM4362_CHIP_ID)
-#define BCM4362_CHIP_GRPID	BCM4362_CHIP_ID
+#define BCM4383_CHIP_ID         0x4383          /* 4383 chipcommon chipid */
+#define BCM4383_D11AX_ID        0x4449          /* 4383 802.11ax triband device */
+
+#define BCM4383_CHIP(chipid)	(CHIPID(chipid) == BCM4383_CHIP_ID)
+#define BCM4383_CHIP_GRPID	BCM4383_CHIP_ID
+
+#define BCM4362_CHIP(chipid)	((CHIPID(chipid) == BCM4362_CHIP_ID) || \
+				(CHIPID(chipid) == BCM43751_CHIP_ID) || \
+				(CHIPID(chipid) == BCM43752_CHIP_ID) || \
+				(CHIPID(chipid) == BCM43756_CHIP_ID))
+#define BCM4362_CHIP_GRPID	BCM4362_CHIP_ID: \
+				case BCM43751_CHIP_ID: \
+				case BCM43752_CHIP_ID: \
+				case BCM43756_CHIP_ID
 
 #define BCM4369_CHIP(chipid)	((CHIPID(chipid) == BCM4369_CHIP_ID) || \
 				(CHIPID(chipid) == BCM4377_CHIP_ID) || \
@@ -220,6 +241,15 @@
 #define BCM4369_CHIP_GRPID		BCM4369_CHIP_ID: \
 					case BCM4377_CHIP_ID: \
 					case BCM4375_CHIP_ID
+
+#define BCM4381_CHIP(chipid)	(CHIPID(chipid) == BCM4381_CHIP_ID)
+#define BCM4381_CHIP_GRPID	BCM4381_CHIP_ID
+
+#define BCM4382_CHIP(chipid)	(CHIPID(chipid) == BCM4382_CHIP_ID)
+#define BCM4382_CHIP_GRPID	BCM4382_CHIP_ID
+
+#define BCM43852_CHIP(chipid)	(CHIPID(chipid) == BCM43852_CHIP_ID)
+#define BCM43852_CHIP_GRPID	BCM43852_CHIP_ID
 
 #define BCM4385_CHIP(chipid)	(CHIPID(chipid) == BCM4385_CHIP_ID)
 #define BCM4385_CHIP_GRPID	BCM4385_CHIP_ID
@@ -599,6 +629,10 @@
 /* chip RAM specifications */
 #define RDL_RAM_SIZE_4360  0xA0000
 #define RDL_RAM_BASE_4360  0x60000000
+#define RDL_RAM_SIZE_4381	0x180000
+#define RDL_RAM_BASE_4381	0x740000
+#define RDL_RAM_SIZE_4382	0x200000
+#define RDL_RAM_BASE_4382	0x700000
 
 /* generic defs for nvram "muxenab" bits
 * Note: these differ for 4335a0. refer bcmchipc.h for specific mux options.

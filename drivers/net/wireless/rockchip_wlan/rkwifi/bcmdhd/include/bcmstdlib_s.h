@@ -1,7 +1,7 @@
 /*
  * Broadcom Secure Standard Library.
  *
- * Copyright (C) 2020, Broadcom.
+ * Copyright (C) 2022, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -25,8 +25,8 @@
 #define	_bcmstdlib_s_h_
 
 #ifndef BWL_NO_INTERNAL_STDLIB_S_SUPPORT
-#if !defined(__STDC_WANT_SECURE_LIB__) && \
-	!(defined(__STDC_LIB_EXT1__) && defined(__STDC_WANT_LIB_EXT1__))
+#if !defined(__STDC_WANT_SECURE_LIB__) && !(defined(__STDC_LIB_EXT1__) && \
+	defined(__STDC_WANT_LIB_EXT1__))
 extern int memmove_s(void *dest, size_t destsz, const void *src, size_t n);
 extern int memcpy_s(void *dest, size_t destsz, const void *src, size_t n);
 extern int memset_s(void *dest, size_t destsz, int c, size_t n);

@@ -3,7 +3,7 @@
  * Contents are wifi-specific, used by any kernel or app-level
  * software that might want wifi things as it grows.
  *
- * Copyright (C) 2020, Broadcom.
+ * Copyright (C) 2022, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -29,7 +29,9 @@
 #ifdef BCMDRIVER
 #include <osl.h>
 #define strtoul(nptr, endptr, base) bcm_strtoul((nptr), (endptr), (base))
+#ifndef tolower
 #define tolower(c) (bcm_isupper((c)) ? ((c) + 'a' - 'A') : (c))
+#endif
 #else
 #include <stdio.h>
 #include <stdlib.h>
@@ -47,6 +49,7 @@
 #endif
 
 #include <802.11.h>
+#include <802.11ac.h>
 
 /* Definitions for D11AC capable (80MHz+) Chanspec type */
 
@@ -182,6 +185,13 @@ static const uint8 wf_5g_160m_chans[] = {
 #define WFC_BW_EQ(bw, val)	WFC_2VALS_EQ(bw, val)
 #else
 #define WFC_BW_EQ(bw, val)	(FALSE)
+#endif
+
+/* compare bandwidth based on WFC_NON_CONT_CHAN */
+#ifdef WFC_NON_CONT_CHAN
+#define WFC_NCBW_EQ(bw, val)	WFC_2VALS_EQ(bw, val)
+#else
+#define WFC_NCBW_EQ(bw, val)	(FALSE)
 #endif
 
 static void wf_chanspec_iter_firstchan(wf_chanspec_iter_t *iter);
@@ -384,6 +394,88 @@ channel_6g_320mhz_to_id(uint ch)
 }
 
 /**
+ * This function returns the the 5GHz 80MHz center channel for the given chanspec 80MHz ID
+ *
+ * @param    chan_80MHz_id    80MHz chanspec ID
+ *
+ * @return   Return the center channel number, or 0 on error.
+ *
+ */
+static uint8
+wf_chspec_5G_id80_to_ch(uint8 chan_80MHz_id)
+{
+	if (chan_80MHz_id < WF_NUM_5G_80M_CHANS) {
+		return wf_5g_80m_chans[chan_80MHz_id];
+	}
+
+	return 0;
+}
+
+/**
+ * This function returns the the 6GHz 80MHz center channel for the given chanspec 80MHz ID
+ *
+ * @param    chan_80MHz_id    80MHz chanspec ID
+ *
+ * @return   Return the center channel number, or 0 on error.
+ *
+ */
+static uint8
+wf_chspec_6G_id80_to_ch(uint8 chan_80MHz_id)
+{
+	uint8 ch = 0;
+
+	if (chan_80MHz_id < WF_NUM_6G_80M_CHANS) {
+		/* The 6GHz center channels have a spacing of 16
+		 * starting from the first 80MHz center
+		 */
+		ch = CH_MIN_6G_80M_CHANNEL + (chan_80MHz_id * 16);
+	}
+
+	return ch;
+}
+
+/**
+ * This function returns the the 5GHz 160MHz center channel for the given chanspec 160MHz ID
+ *
+ * @param    chan_160MHz_id    160MHz chanspec ID
+ *
+ * @return   Return the center channel number, or 0 on error.
+ *
+ */
+static uint8
+wf_chspec_5G_id160_to_ch(uint8 chan_160MHz_id)
+{
+	if (chan_160MHz_id < WF_NUM_5G_160M_CHANS) {
+		return wf_5g_160m_chans[chan_160MHz_id];
+	}
+
+	return 0;
+}
+
+/**
+ * This function returns the the 6GHz 160MHz center channel for the given chanspec 160MHz ID
+ *
+ * @param    chan_160MHz_id    160MHz chanspec ID
+ *
+ * @return   Return the center channel number, or 0 on error.
+ *
+ */
+static uint8
+wf_chspec_6G_id160_to_ch(uint8 chan_160MHz_id)
+{
+	uint8 ch = 0;
+
+	if (chan_160MHz_id < WF_NUM_6G_160M_CHANS) {
+		/* The 6GHz center channels have a spacing of 32
+		 * starting from the first 160MHz center
+		 */
+		ch = CH_MIN_6G_160M_CHANNEL + (chan_160MHz_id * 32);
+	}
+
+	return ch;
+}
+
+/**
  * This function returns the the 6GHz 240MHz center channel for the given chanspec 240MHz ID
  *
  * @param    chan_240MHz_id    240MHz chanspec ID
@@ -521,6 +613,24 @@ wf_chspec_ntoa(chanspec_t chspec, char *buf)
 	/* bandwidth and primary20 sideband */
 	if (CHSPEC_IS20(chspec)) {
 		snprintf(buf, CHANSPEC_STR_LEN, "%s%d", band, pri_chan);
+	} else if (CHSPEC_IS8080(chspec)) {
+		/* 80+80 */
+		uint ch0;
+		uint ch1;
+
+		/* get the center channels for each frequency segment */
+		if (CHSPEC_IS5G(chspec)) {
+			ch0 = wf_chspec_5G_id80_to_ch(CHSPEC_CHAN0(chspec));
+			ch1 = wf_chspec_5G_id80_to_ch(CHSPEC_CHAN1(chspec));
+		} else if (CHSPEC_IS6G(chspec)) {
+			ch0 = wf_chspec_6G_id80_to_ch(CHSPEC_CHAN0(chspec));
+			ch1 = wf_chspec_6G_id80_to_ch(CHSPEC_CHAN1(chspec));
+		} else {
+			return NULL;
+		}
+
+		/* Outputs a max of CHANSPEC_STR_LEN chars including '\0'  */
+		snprintf(buf, CHANSPEC_STR_LEN, "%s%d/80+80/%d-%d", band, pri_chan, ch0, ch1);
 	} else if (CHSPEC_IS240(chspec)) {
 		/* 240 */
 		const char *bw;
@@ -535,6 +645,24 @@ wf_chspec_ntoa(chanspec_t chspec, char *buf)
 		bw = wf_chspec_to_bw_str(chspec);
 
 		snprintf(buf, CHANSPEC_STR_LEN, "%s%d/%s", band, pri_chan, bw);
+	} else if (CHSPEC_IS160160(chspec)) {
+		/* 160+160 */
+		uint ch0;
+		uint ch1;
+
+		/* get the center channels for each frequency segment */
+		if (CHSPEC_IS5G(chspec)) {
+			ch0 = wf_chspec_5G_id160_to_ch(CHSPEC_CHAN0(chspec));
+			ch1 = wf_chspec_5G_id160_to_ch(CHSPEC_CHAN1(chspec));
+		} else if (CHSPEC_IS6G(chspec)) {
+			ch0 = wf_chspec_6G_id160_to_ch(CHSPEC_CHAN0(chspec));
+			ch1 = wf_chspec_6G_id160_to_ch(CHSPEC_CHAN1(chspec));
+		} else {
+			return NULL;
+		}
+
+		/* Outputs a max of CHANSPEC_STR_LEN chars including '\0'  */
+		snprintf(buf, CHANSPEC_STR_LEN, "%s%d/160+160/%d-%d", band, pri_chan, ch0, ch1);
 	} else {
 		const char *bw;
 		const char *sb = "";
@@ -796,6 +924,40 @@ wf_chspec_malformed(chanspec_t chanspec)
 			} else {
 				return TRUE;
 			}
+		} else if (WFC_NCBW_EQ(chspec_bw, WL_CHANSPEC_BW_160160)) {
+			uint ch0_id, ch1_id;
+
+			ch0_id = CHSPEC_CHAN0(chanspec);
+			ch1_id = CHSPEC_CHAN1(chanspec);
+
+			/* channel IDs in 160+160 must be in range */
+			if (CHSPEC_IS5G(chanspec) &&
+			    (ch0_id >= WF_NUM_5G_160M_CHANS || ch1_id >= WF_NUM_5G_160M_CHANS)) {
+				/* bad 160MHz channel ID for the band */
+				return TRUE;
+			}
+			if (CHSPEC_IS6G(chanspec) &&
+			    (ch0_id >= WF_NUM_6G_160M_CHANS || ch1_id >= WF_NUM_6G_160M_CHANS)) {
+				/* bad 160MHz channel ID for the band */
+				return TRUE;
+			}
+		} else if (WFC_NCBW_EQ(chspec_bw, WL_CHANSPEC_BW_8080)) {
+			uint ch0_id, ch1_id;
+
+			ch0_id = CHSPEC_CHAN0(chanspec);
+			ch1_id = CHSPEC_CHAN1(chanspec);
+
+			/* channel IDs in 80+80 must be in range */
+			if (CHSPEC_IS5G(chanspec) &&
+			    (ch0_id >= WF_NUM_5G_80M_CHANS || ch1_id >= WF_NUM_5G_80M_CHANS)) {
+				/* bad 80MHz channel ID for the band */
+				return TRUE;
+			}
+			if (CHSPEC_IS6G(chanspec) &&
+			    (ch0_id >= WF_NUM_6G_80M_CHANS || ch1_id >= WF_NUM_6G_80M_CHANS)) {
+				/* bad 80MHz channel ID for the band */
+				return TRUE;
+			}
 		} else if (chspec_bw == WL_CHANSPEC_BW_20 || chspec_bw == WL_CHANSPEC_BW_40 ||
 		           chspec_bw == WL_CHANSPEC_BW_80 || chspec_bw == WL_CHANSPEC_BW_160) {
 
@@ -827,13 +989,15 @@ wf_chspec_malformed(chanspec_t chanspec)
 	} else if (chspec_bw == WL_CHANSPEC_BW_40) {
 		if (chspec_sb > WL_CHANSPEC_CTL_SB_LLU)
 			return TRUE;
-	} else if (chspec_bw == WL_CHANSPEC_BW_80) {
+	} else if (chspec_bw == WL_CHANSPEC_BW_80 ||
+	           WFC_NCBW_EQ(chspec_bw, WL_CHANSPEC_BW_8080)) {
 		/* both 80MHz and 80+80MHz use 80MHz side bands.
 		 * 80+80 SB info is relative to the primary 80MHz sub-band.
 		 */
 		if (chspec_sb > WL_CHANSPEC_CTL_SB_LUU)
 			return TRUE;
-	} else if (chspec_bw == WL_CHANSPEC_BW_160) {
+	} else if (chspec_bw == WL_CHANSPEC_BW_160 ||
+	           WFC_NCBW_EQ(chspec_bw, WL_CHANSPEC_BW_160160)) {
 		ASSERT(chspec_sb <= WL_CHANSPEC_CTL_SB_UUU);
 	} else if (WFC_BW_EQ(chspec_bw, WL_CHANSPEC_BW_240)) {
 		/* FIXME: define the max sideband index */
@@ -918,6 +1082,45 @@ wf_chspec_valid(chanspec_t chanspec)
 
 		return wf_valid_320MHz_center_chan(chspec_ch, chspec_band);
 
+	} else if (WFC_NCBW_EQ(chspec_bw, WL_CHANSPEC_BW_8080)) {
+		uint16 ch0 = 0;
+		uint16 ch1 = 0;
+
+		/* get the center channels for each frequency segment */
+		if (CHSPEC_IS5G(chanspec)) {
+			ch0 = wf_chspec_5G_id80_to_ch(CHSPEC_CHAN0(chanspec));
+			ch1 = wf_chspec_5G_id80_to_ch(CHSPEC_CHAN1(chanspec));
+		} else if (CHSPEC_IS6G(chanspec)) {
+			ch0 = wf_chspec_6G_id80_to_ch(CHSPEC_CHAN0(chanspec));
+			ch1 = wf_chspec_6G_id80_to_ch(CHSPEC_CHAN1(chanspec));
+		} else {
+			return FALSE;
+		}
+
+		/* the two channels must be separated by more than 80MHz by VHT req */
+		if ((ch1 > ch0 + CH_80MHZ_APART) ||
+		    (ch0 > ch1 + CH_80MHZ_APART))
+			return TRUE;
+	} else if (WFC_NCBW_EQ(chspec_bw, WL_CHANSPEC_BW_160160)) {
+		uint16 ch0 = 0;
+		uint16 ch1 = 0;
+
+		/* get the center channels for each frequency segment */
+		if (CHSPEC_IS5G(chanspec)) {
+			ch0 = wf_chspec_5G_id160_to_ch(CHSPEC_CHAN0(chanspec));
+			ch1 = wf_chspec_5G_id160_to_ch(CHSPEC_CHAN1(chanspec));
+		} else if (CHSPEC_IS6G(chanspec)) {
+			ch0 = wf_chspec_6G_id160_to_ch(CHSPEC_CHAN0(chanspec));
+			ch1 = wf_chspec_6G_id160_to_ch(CHSPEC_CHAN1(chanspec));
+		} else {
+			return FALSE;
+		}
+
+		/* the two channels must be separated by more than 160MHz by EHT req */
+		if ((ch1 > ch0 + CH_160MHZ_APART) ||
+		    (ch0 > ch1 + CH_160MHZ_APART)) {
+			return TRUE;
+		}
 	}
 
 	return FALSE;
@@ -2197,7 +2400,35 @@ wf_chspec_primary20_chan(chanspec_t chspec)
 			sb = CHSPEC_CTL_SB(chspec) >> WL_CHANSPEC_CTL_SB_SHIFT;
 		}
 
-		if (CHSPEC_IS240(chspec)) {
+		if (CHSPEC_IS8080(chspec)) {
+			/* For an 80+80 MHz channel, the sideband 'sb' field is an 80 MHz sideband
+			 * (LL, LU, UL, LU) for the 80 MHz frequency segment 0.
+			 */
+
+			/* use bw 80MHz for the primary channel lookup */
+			bw = WL_CHANSPEC_BW_80;
+
+			/* convert from channel index to channel number */
+			if (CHSPEC_IS5G(chspec)) {
+				center_chan = wf_chspec_5G_id80_to_ch(CHSPEC_CHAN0(chspec));
+			} else if (CHSPEC_IS6G(chspec)) {
+				center_chan = wf_chspec_6G_id80_to_ch(CHSPEC_CHAN0(chspec));
+			}
+		} else if (CHSPEC_IS160160(chspec)) {
+			/* For an 160+160 MHz channel, the sideband 'sb' field is an 160MHz sideband
+			 * for the 160 MHz frequency segment 0.
+			 */
+
+			/* use bw 160MHz for the primary channel lookup */
+			bw = WL_CHANSPEC_BW_160;
+
+			/* convert from channel index to channel number */
+			if (CHSPEC_IS5G(chspec)) {
+				center_chan = wf_chspec_5G_id160_to_ch(CHSPEC_CHAN0(chspec));
+			} else if (CHSPEC_IS6G(chspec)) {
+				center_chan = wf_chspec_6G_id160_to_ch(CHSPEC_CHAN0(chspec));
+			}
+		} else if (CHSPEC_IS240(chspec)) {
 			/* use bw 240MHz for the primary channel lookup */
 			bw = WL_CHANSPEC_BW_240;
 
@@ -2345,7 +2576,7 @@ wf_chspec_primary40_chspec(chanspec_t chspec)
 	ASSERT(!wf_chspec_malformed(chspec));
 
 	/* if the chanspec is > 80MHz, use the helper routine to find the primary 80 MHz channel */
-	if (CHSPEC_IS160(chspec)) {
+	if (CHSPEC_IS8080(chspec) || CHSPEC_IS160(chspec)) {
 		chspec = wf_chspec_primary80_chspec(chspec);
 	}
 
@@ -2371,6 +2602,29 @@ wf_chspec_primary40_chspec(chanspec_t chspec)
 	}
 
 	return chspec40;
+}
+
+/**
+ * Return the chanspec band for a given frequency.
+ *
+ * @param  freq		frequency in MHz of the channel center
+ *
+ * @return  Returns chanspec band of frequency (chanspec_band_t)
+ */
+chanspec_band_t
+wf_mhz2chanspec_band(uint freq)
+{
+	chanspec_band_t band = INVCHANSPEC;
+
+	if (freq >= 2400u && freq <= 2500u) {
+		band = WL_CHANSPEC_BAND_2G;
+	} else if (freq >= 5000u && freq < 5935u) {
+		band = WL_CHANSPEC_BAND_5G;
+	} else if (freq >= 5935u && freq <= 7205u) {
+		band = WL_CHANSPEC_BAND_6G;
+	}
+
+	return band;
 }
 
 /**
@@ -2674,7 +2928,23 @@ wf_chspec_primary80_chspec(chanspec_t chspec)
 
 	if (CHSPEC_IS80(chspec)) {
 		chspec80 = chspec;
-	} else if (CHSPEC_IS160(chspec)) {
+	}
+	else if (CHSPEC_IS8080(chspec)) {
+		sb = CHSPEC_CTL_SB(chspec);
+
+		/* primary sub-band is stored in seg0 */
+		if (CHSPEC_IS5G(chspec)) {
+			center_chan = wf_chspec_5G_id80_to_ch(CHSPEC_CHAN0(chspec));
+		} else if (CHSPEC_IS6G(chspec)) {
+			center_chan = wf_chspec_6G_id80_to_ch(CHSPEC_CHAN0(chspec));
+		} else {
+			center_chan = INVCHANNEL;
+		}
+
+		/* Create primary 80MHz chanspec */
+		chspec80 = (CHSPEC_BAND(chspec) | WL_CHANSPEC_BW_80 | sb | center_chan);
+	}
+	else if (CHSPEC_IS160(chspec)) {
 		center_chan = CHSPEC_CHANNEL(chspec);
 		sb = CHSPEC_CTL_SB(chspec);
 
@@ -2709,7 +2979,23 @@ wf_chspec_secondary80_chspec(chanspec_t chspec)
 
 	ASSERT(!wf_chspec_malformed(chspec));
 
-	if (CHSPEC_IS160(chspec)) {
+	if (CHSPEC_IS8080(chspec)) {
+		/* secondary sub-band is stored in seg1 */
+		if (CHSPEC_IS5G(chspec)) {
+			center_chan = wf_chspec_5G_id80_to_ch(CHSPEC_CHAN1(chspec));
+		} else if (CHSPEC_IS6G(chspec)) {
+			center_chan = wf_chspec_6G_id80_to_ch(CHSPEC_CHAN1(chspec));
+		} else {
+			center_chan = INVCHANNEL;
+		}
+
+		/* Create secondary 80MHz chanspec */
+		chspec80 = (CHSPEC_BAND(chspec) |
+		            WL_CHANSPEC_BW_80 |
+		            WL_CHANSPEC_CTL_SB_LL |
+		            center_chan);
+	}
+	else if (CHSPEC_IS160(chspec)) {
 		center_chan = CHSPEC_CHANNEL(chspec);
 
 		if (CHSPEC_CTL_SB(chspec) < WL_CHANSPEC_CTL_SB_ULL) {
@@ -2916,6 +3202,8 @@ channel_bw_to_width(chanspec_t chspec)
 		channel_width = VHT_OP_CHAN_WIDTH_80;
 	else if (CHSPEC_IS160(chspec))
 		channel_width = VHT_OP_CHAN_WIDTH_160;
+	else if (CHSPEC_IS8080(chspec))
+		channel_width = VHT_OP_CHAN_WIDTH_80_80;
 	else
 		channel_width = VHT_OP_CHAN_WIDTH_20_40;
 
@@ -2924,11 +3212,6 @@ channel_bw_to_width(chanspec_t chspec)
 
 uint wf_chspec_first_20_sb(chanspec_t chspec)
 {
-#if defined(WL_BW160MHZ)
-	if (CHSPEC_IS160(chspec)) {
-		return LLL_20_SB_160(CHSPEC_CHANNEL(chspec));
-	} else
-#endif
 	if (CHSPEC_IS80(chspec)) {
 		return LL_20_SB(CHSPEC_CHANNEL(chspec));
 	} else if (CHSPEC_IS40(chspec)) {
@@ -2946,6 +3229,56 @@ wf_create_chspec_sb(uint sb, uint center_channel, chanspec_bw_t bw, chanspec_ban
 		return INVCHANSPEC;
 	}
 	chspec = center_channel | band | bw | ((uint)sb << WL_CHANSPEC_CTL_SB_SHIFT);
+	return wf_chspec_valid(chspec) ? chspec : INVCHANSPEC;
+}
+
+chanspec_t
+wf_create_8080MHz_chspec_sb(uint sb, uint chan0, uint chan1, chanspec_band_t band)
+{
+	int chan0_id, chan1_id, seg0, seg1;
+	chanspec_t chspec;
+
+	if (sb > (WL_CHANSPEC_CTL_SB_UUU >> WL_CHANSPEC_CTL_SB_SHIFT)) {
+		return INVCHANSPEC;
+	}
+	/* From here on sb is not an index, but value for SB field */
+	sb <<= WL_CHANSPEC_CTL_SB_SHIFT;
+
+	/* frequency segments need to be non-contiguous, so the channel
+	 * separation needs to be greater than 80MHz
+	 */
+	if ((uint)ABS((int)(chan0 - chan1)) <= CH_80MHZ_APART) {
+		return INVCHANSPEC;
+	}
+
+	if (band == WL_CHANSPEC_BAND_5G) {
+		chan0_id = channel_80mhz_to_id(chan0);
+		chan1_id = channel_80mhz_to_id(chan1);
+	} else if (band == WL_CHANSPEC_BAND_6G) {
+		chan0_id = channel_6g_80mhz_to_id(chan0);
+		chan1_id = channel_6g_80mhz_to_id(chan1);
+	} else {
+		return INVCHANSPEC;
+	}
+
+	/* make sure the channel numbers were valid */
+	if ((chan0_id == -1) || (chan1_id == -1)) {
+		return INVCHANSPEC;
+	}
+	/* Optionally swapping channel IDs to make sure that control subchannel
+	 * is in chan0
+	 */
+	if (sb < WL_CHANSPEC_CTL_SB_ULL) {
+		seg0 = chan0_id;
+		seg1 = chan1_id;
+	} else {
+		seg0 = chan1_id;
+		seg1 = chan0_id;
+		sb -= WL_CHANSPEC_CTL_SB_ULL;
+	}
+	chspec = ((seg0 << WL_CHANSPEC_CHAN0_SHIFT) |
+	         (seg1 << WL_CHANSPEC_CHAN1_SHIFT) |
+	         sb | WL_CHANSPEC_BW_8080 | band);
 	return wf_chspec_valid(chspec) ? chspec : INVCHANSPEC;
 }
 

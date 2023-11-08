@@ -1,7 +1,7 @@
 /*
  * Extended Trap data component interface file.
  *
- * Copyright (C) 2020, Broadcom.
+ * Copyright (C) 2022, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -28,6 +28,7 @@
 #include <hnd_trap.h>
 #endif
 #include <bcmutils.h>
+
 /* Tags for structures being used by etd info iovar.
  * Related structures are defined in wlioctl.h.
  */
@@ -141,7 +142,7 @@ typedef struct hnd_ext_trap_axi_sr_err_v1
 	uint32 sr_dig_gci_status_0;
 } hnd_ext_trap_axi_sr_err_v1_t;
 
-#define HND_EXT_TRAP_PSMWD_INFO_VER	1
+#define HND_EXT_TRAP_PSMWD_INFO_VER_1	(1u)
 typedef struct hnd_ext_trap_psmwd_v1 {
 	uint16 xtag;
 	uint16 version; /* version of the information following this */
@@ -177,7 +178,8 @@ typedef struct hnd_ext_trap_psmwd_v1 {
 	uint16 pad;
 } hnd_ext_trap_psmwd_v1_t;
 
-typedef struct hnd_ext_trap_psmwd {
+#define HND_EXT_TRAP_PSMWD_INFO_VER_2	(2u)
+typedef struct hnd_ext_trap_psmwd_v2 {
 	uint16 xtag;
 	uint16 version; /* version of the information following this */
 	uint32 i32_maccontrol;
@@ -214,7 +216,44 @@ typedef struct hnd_ext_trap_psmwd {
 	uint16 shm_prewds_cnt;
 	uint16 shm_txtplufl_cnt;
 	uint16 shm_txphyerr_cnt;
-} hnd_ext_trap_psmwd_t;
+} hnd_ext_trap_psmwd_v2_t;
+
+#define HND_EXT_TRAP_PSMWD_INFO_VER_3	(3u)
+typedef struct hnd_ext_trap_psmwd_v3 {
+	uint16 xtag;
+	uint16 version; /* version of the information following this */
+	uint32 i32_maccontrol;
+	uint32 i32_maccommand;
+	uint32 i32_macintstatus;
+	uint32 i32_phydebug;
+	uint32 i32_clk_ctl_st;
+	uint32 i32_psmdebug[PSMDBG_REG_READ_CNT_FOR_PSMWDTRAP_V1];
+	uint32 i32_gated_clock_en; /* gated clock en */
+	uint16 rcv_fifo_ctrl;
+	uint16 rx_ctrl1;
+	uint16 rxe_status1;
+	uint16 rxe_status2;
+	uint16 rcv_wrd_count0;
+	uint16 rcv_wrd_count1;
+	uint16 rcv_lfifo_sts;
+	uint16 psm_slp_tmr;
+	uint16 psm_brc;
+	uint16 txe_ctrl;
+	uint16 txe_status;
+	uint16 txe_xmtdmabusy;
+	uint16 txe_xmt_fifo_susp_flush;
+	uint16 ifs_stat;
+	uint16 ifs_medbusy_ctr;
+	uint16 ifs_tx_dur;
+	uint16 slow_ctl;
+	uint16 txe_aqm_fifo_ready;
+	uint16 dagg_ctrl;
+	uint16 shm_prewds_cnt;
+	uint16 shm_txtplufl_cnt;
+	uint16 shm_txphyerr_cnt;
+	uint16 shm_ucode_dbgst;
+	uint16 PAD;
+} hnd_ext_trap_psmwd_v3_t;
 
 #define HEAP_HISTOGRAM_DUMP_LEN	6
 #define HEAP_MAX_SZ_BLKS_LEN	2
@@ -348,8 +387,8 @@ typedef struct hnd_ext_trap_macsusp {
 	uint16 shm_ucode_dbgst;
 } hnd_ext_trap_macsusp_t;
 
-#define HND_EXT_TRAP_MACENAB_INFO_VER	1
-typedef struct hnd_ext_trap_macenab {
+#define HND_EXT_TRAP_MACENAB_INFO_VER_1		(1u)
+typedef struct hnd_ext_trap_macenab_v1 {
 	uint16 xtag;
 	uint8 version; /* version of the information following this */
 	uint8 trap_reason;
@@ -371,7 +410,33 @@ typedef struct hnd_ext_trap_macenab {
 	uint16 i16_0x6aa; /* SLow_PER */
 	uint16 shm_ucode_dbgst;
 	uint16 PAD;
-} hnd_ext_trap_macenab_t;
+} hnd_ext_trap_macenab_v1_t;
+
+#define HND_EXT_TRAP_MACENAB_INFO_VER_2		(2u)
+typedef struct hnd_ext_trap_macenab_v2 {
+	uint16 xtag;
+	uint8 version; /* version of the information following this */
+	uint8 trap_reason;
+	uint32 i32_maccontrol;
+	uint32 i32_maccommand;
+	uint32 i32_macintstatus;
+	uint32 i32_psmdebug[8];
+	uint32 i32_clk_ctl_st;
+	uint32 i32_powerctl;
+	uint32 i32_gated_clock_en;
+	uint16 psm_slp_tmr;
+	uint16 psm_brc;
+	uint16 tsf_ctl;
+	uint16 ifs_stat;
+	uint16 ifs_medbusy_ctr;
+	uint16 slow_ctl;
+	uint16 slow_frac;
+	uint16 fast_powerup_delay;
+	uint16 slow_per;
+	uint16 shm_ucode_dbgst;
+	uint16 shm_prewds_cnt;
+	uint16 PAD;
+} hnd_ext_trap_macenab_v2_t;
 
 #define HND_EXT_TRAP_PHY_INFO_VER_1 (1)
 typedef struct hnd_ext_trap_phydbg {
@@ -450,7 +515,7 @@ typedef struct hnd_ext_trap_phydbg_v2 {
 	uint16 gpioSel;
 	uint16 pktprocdebug;
 	uint32 gpioOut[3];
-	uint32 additional_regs[1];
+	uint32 additional_regs[BCM_FLEX_ARRAY];
 } hnd_ext_trap_phydbg_v2_t;
 
 #define HND_EXT_TRAP_PHY_INFO_VER_3		(3)
@@ -487,7 +552,7 @@ typedef struct hnd_ext_trap_phydbg_v3 {
 	uint32 gpioOut[3];
 	uint16 HESigURateFlagStatus;
 	uint16 HESigUsRateFlagStatus;
-	uint32 additional_regs[1];
+	uint32 additional_regs[BCM_FLEX_ARRAY];
 } hnd_ext_trap_phydbg_v3_t;
 
 /* Phy TxErr Dump Structure */
@@ -620,15 +685,15 @@ uint etd_get_reg_dump_config_len(void);
 extern bool _etd_enab;
 
 #if defined(ROM_ENAB_RUNTIME_CHECK)
-	#define ETD_ENAB(pub)		(_etd_enab)
+	#define ETD_ENAB(pub)	(_etd_enab)
 #elif defined(ETD_DISABLED)
-	#define ETD_ENAB(pub)		(0)
+	#define ETD_ENAB(pub)	(FALSE)
 #else
-	#define ETD_ENAB(pub)		(1)
+	#define ETD_ENAB(pub)	(TRUE)
 #endif
 
 #else
-#define ETD_ENAB(pub)		(0)
+#define ETD_ENAB(pub)		(FALSE)
 #endif /* WLETD */
 
 #endif /* !LANGUAGE_ASSEMBLY */

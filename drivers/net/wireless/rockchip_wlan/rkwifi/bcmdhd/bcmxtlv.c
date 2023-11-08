@@ -1,7 +1,7 @@
 /*
  * Driver O/S-independent utility routines
  *
- * Copyright (C) 2020, Broadcom.
+ * Copyright (C) 2022, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -23,10 +23,6 @@
 
 #include <typedefs.h>
 #include <bcmdefs.h>
-
-#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 15, 0))
-#include <stdarg.h>
-#endif /* LINUX_VERSION_CODE < KERNEL_VERSION(5, 15, 0) */
 
 #ifdef BCMDRIVER
 #include <osl.h>
@@ -428,14 +424,14 @@ int
 bcm_unpack_xtlv_buf(void *ctx, const uint8 *tlv_buf, uint16 buflen, bcm_xtlv_opts_t opts,
 	bcm_xtlv_unpack_cbfn_t *cbfn)
 {
+	int res = BCME_OK;
+	const bcm_xtlv_t *ptlv;
 	uint16 len;
 	uint16 type;
-	int res = BCME_OK;
-	int size;
-	const bcm_xtlv_t *ptlv;
-	int sbuflen = buflen;
 	const uint8 *data;
-	int hdr_size;
+	uint32 sbuflen = buflen;
+	uint32 hdr_size;	/* size of tlv header */
+	uint32 size;		/* size of tlv including header + data */
 
 	ASSERT(!buflen || tlv_buf);
 	ASSERT(!buflen || cbfn);
@@ -447,12 +443,11 @@ bcm_unpack_xtlv_buf(void *ctx, const uint8 *tlv_buf, uint16 buflen, bcm_xtlv_opt
 		bcm_xtlv_unpack_xtlv(ptlv, &type, &len, &data, opts);
 		size = bcm_xtlv_size_for_data(len, opts);
 
-		sbuflen -= size;
-
 		/* check for buffer overrun */
-		if (sbuflen < 0) {
+		if (sbuflen < size) {
 			break;
 		}
+		sbuflen -= size;
 
 		if ((res = cbfn(ctx, data, type, len)) != BCME_OK) {
 			break;

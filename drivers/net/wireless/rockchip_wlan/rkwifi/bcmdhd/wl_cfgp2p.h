@@ -1,7 +1,7 @@
 /*
  * Linux cfgp2p driver
  *
- * Copyright (C) 2020, Broadcom.
+ * Copyright (C) 2022, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -27,6 +27,7 @@
 
 struct bcm_cfg80211;
 extern u32 wl_dbg_level;
+extern u32 wl_log_level;
 
 typedef struct wifi_p2p_ie wifi_wfd_ie_t;
 /* Enumeration of the usages of the BSSCFGs used by the P2P Library.  Do not
@@ -125,9 +126,6 @@ enum wl_cfgp2p_status {
 #define p2p_scan(cfg) ((cfg)->p2p->scan)
 #define p2p_is_on(cfg) ((cfg)->p2p && (cfg)->p2p->on)
 
-/* dword align allocation */
-#define WLC_IOCTL_MAXLEN 8192
-
 #if defined(CUSTOMER_DBG_PREFIX_ENABLE)
 #define USER_PREFIX_CFGP2P		"[cfgp2p][wlan] "
 #define CFGP2P_ERROR_TEXT		USER_PREFIX_CFGP2P
@@ -135,46 +133,44 @@ enum wl_cfgp2p_status {
 #define CFGP2P_ACTION_TEXT		USER_PREFIX_CFGP2P
 #define CFGP2P_DEBUG_TEXT		USER_PREFIX_CFGP2P
 #else
-/* Samsung want to print INFO2 instead of ERROR
- * because most of case, ERROR message is not a real ERROR.
- * but it can be regarded as real error case for Tester
- */
-#ifdef CUSTOMER_HW4_DEBUG
-#define CFGP2P_ERROR_TEXT		"CFGP2P-INFO2) "
-#else
 #define CFGP2P_ERROR_TEXT		"CFGP2P-ERROR) "
-#endif /* CUSTOMER_HW4_DEBUG */
 #define CFGP2P_INFO_TEXT		"CFGP2P-INFO) "
 #define CFGP2P_ACTION_TEXT		"CFGP2P-ACTION) "
 #define CFGP2P_DEBUG_TEXT		"CFGP2P-DEBUG) "
 #endif /* defined(CUSTOMER_DBG_PREFIX_ENABLE) */
 
 #ifdef DHD_LOG_DUMP
-#define	CFGP2P_ERR_MSG(x, args...)									\
-	do {										\
-		if (wl_dbg_level & WL_DBG_ERR) {				\
+#define	CFGP2P_ERR_MSG(x, args...)						\
+	do {								\
+		if (wl_dbg_level & WL_DBG_ERR) {			\
 			printf(CFGP2P_ERROR_TEXT "%s : " x, __func__, ## args);	\
-			DHD_LOG_DUMP_WRITE_TS_FN;	\
-			DHD_LOG_DUMP_WRITE(x, ## args);	\
-		}									\
+		}							\
+		if (wl_log_level & WL_DBG_ERR) {			\
+			DHD_LOG_DUMP_WRITE_TS_FN;			\
+			DHD_LOG_DUMP_WRITE(x, ## args);			\
+		}							\
 	} while (0)
 #define CFGP2P_ERR(x) CFGP2P_ERR_MSG x
-#define	CFGP2P_INFO_MSG(x, args...)									\
-	do {										\
-		if (wl_dbg_level & WL_DBG_INFO) {				\
+#define	CFGP2P_INFO_MSG(x, args...)						\
+	do {								\
+		if (wl_dbg_level & WL_DBG_INFO) {			\
 			printf(CFGP2P_INFO_TEXT "%s : " x, __func__, ## args);	\
-			DHD_LOG_DUMP_WRITE_TS_FN;	\
-			DHD_LOG_DUMP_WRITE(x, ## args);	\
-		}									\
+		}							\
+		if (wl_log_level & WL_DBG_INFO) {			\
+			DHD_LOG_DUMP_WRITE_TS_FN;			\
+			DHD_LOG_DUMP_WRITE(x, ## args);			\
+		}							\
 	} while (0)
 #define CFGP2P_INFO(x) CFGP2P_INFO_MSG x
-#define	CFGP2P_ACTION_MSG(x, args...)								\
-	do {									\
+#define	CFGP2P_ACTION_MSG(x, args...)						\
+	do {								\
 		if (wl_dbg_level & WL_DBG_P2P_ACTION) {			\
 			printf(CFGP2P_ACTION_TEXT "%s : " x, __func__, ## args);	\
-			DHD_LOG_DUMP_WRITE_TS_FN;	\
-			DHD_LOG_DUMP_WRITE(x, ## args);	\
-		}									\
+		}							\
+		if (wl_log_level & WL_DBG_P2P_ACTION) {			\
+			DHD_LOG_DUMP_WRITE_TS_FN;			\
+			DHD_LOG_DUMP_WRITE(x, ## args);			\
+		}							\
 	} while (0)
 #define CFGP2P_ACTION(x) CFGP2P_ACTION_MSG x
 #else
@@ -209,27 +205,19 @@ enum wl_cfgp2p_status {
 	} while (0)
 #define CFGP2P_DBG(x) CFGP2P_DBG_MSG x
 
-#define INIT_TIMER(timer, func, duration, extra_delay)	\
-	do {				   \
-		init_timer_compat(timer, func, cfg); \
-		timer_expires(timer) = jiffies + msecs_to_jiffies(duration + extra_delay); \
-		add_timer(timer); \
-	} while (0);
-
 #if (LINUX_VERSION_CODE <= KERNEL_VERSION(3, 0, 8))
 #ifdef WL_SUPPORT_BACKPORTED_KPATCHES
 #undef WL_SUPPORT_BACKPORTED_KPATCHES
 #endif
 #endif
 
-#if (LINUX_VERSION_CODE < KERNEL_VERSION(3, 2, 0))
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(3, 0, 0))
 #ifdef WL_CFG80211_STA_EVENT
 #undef WL_CFG80211_STA_EVENT
 #endif
 #endif
 
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 8, 0)) && \
-	 !defined(WL_CFG80211_P2P_DEV_IF)
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 8, 0)) && !defined(WL_CFG80211_P2P_DEV_IF)
 #define WL_CFG80211_P2P_DEV_IF
 
 #ifdef WL_ENABLE_P2P_IF
@@ -365,11 +353,11 @@ wl_cfgp2p_action_tx_complete(struct bcm_cfg80211 *cfg, bcm_struct_cfgdev *cfgdev
 	const wl_event_msg_t *e, void *data);
 
 extern s32
-wl_cfgp2p_tx_action_frame(struct bcm_cfg80211 *cfg, struct net_device *dev,
-	wl_af_params_t *af_params, s32 bssidx);
+wl_cfgp2p_tx_action_frame(struct bcm_cfg80211 *cfg, bcm_struct_cfgdev *cfgdev,
+	struct net_device *dev, wl_af_params_v1_t *af_params, s32 bssidx, const u8 *sa);
 
 extern void
-wl_cfgp2p_generate_bss_mac(struct bcm_cfg80211 *cfg, struct ether_addr *primary_addr);
+wl_cfgp2p_generate_bss_mac(struct bcm_cfg80211 *cfg);
 
 extern void
 wl_cfg80211_change_ifaddr(u8* buf, struct ether_addr *p2p_int_addr, u8 element_id);
@@ -402,7 +390,7 @@ extern const u8*
 wl_cfgp2p_find_attrib_in_all_p2p_Ies(const u8 *parse, u32 len, u32 attrib);
 
 extern const u8 *
-wl_cfgp2p_retreive_p2p_dev_addr(wl_bss_info_t *bi, u32 bi_length);
+wl_cfgp2p_retreive_p2p_dev_addr(wl_bss_info_v109_t *bi, u32 bi_length);
 
 extern s32
 wl_cfgp2p_register_ndev(struct bcm_cfg80211 *cfg);
@@ -446,6 +434,9 @@ wl_cfgp2p_need_wait_actfrmae(struct bcm_cfg80211 *cfg, void *frame, u32 frame_le
 extern int
 wl_cfgp2p_is_p2p_specific_scan(struct cfg80211_scan_request *request);
 
+extern s32
+wl_cfg80211_abort_action_frame(struct bcm_cfg80211 *cfg, struct net_device *dev, s32 bssidx);
+
 /* WiFi Direct */
 #define SOCIAL_CHAN_1 1
 #define SOCIAL_CHAN_2 6
@@ -485,4 +476,9 @@ wl_cfgp2p_is_p2p_specific_scan(struct cfg80211_scan_request *request);
  * instead of channel in actframe iovar.
  */
 #define FW_MAJOR_VER_ACTFRAME_CHSPEC    14
+
+#ifdef BCMDBUS
+int
+wl_cfgp2p_start_p2p_device_resume(dhd_pub_t *dhd);
+#endif /* BCMDBUS */
 #endif				/* _wl_cfgp2p_h_ */

@@ -4,7 +4,7 @@
  * Flow rings are transmit traffic (=propagating towards antenna) related entities
  *
  *
- * Copyright (C) 2020, Broadcom.
+ * Copyright (C) 2022, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -63,12 +63,6 @@ int dhd_flow_queue_overflow(flow_queue_t *queue, void *pkt);
 
 #define FLOW_QUEUE_PKT_NEXT(p)          PKTLINK(p)
 #define FLOW_QUEUE_PKT_SETNEXT(p, x)    PKTSETLINK((p), (x))
-
-#ifdef DHD_REPLACE_LOG_INFO_TO_TRACE
-#define DHD_FLOWRING_INFO DHD_TRACE
-#else
-#define DHD_FLOWRING_INFO DHD_INFO
-#endif /* DHD_REPLACE_LOG_INFO_TO_TRACE */
 
 const uint8 prio2ac[8] = { 0, 1, 1, 0, 2, 2, 3, 3 };
 const uint8 prio2tid[8] = { 0, 1, 2, 3, 4, 5, 6, 7 };
@@ -254,7 +248,6 @@ BCMFASTPATH(dhd_flow_queue_dequeue)(dhd_pub_t *dhdp, flow_queue_t *queue)
 	pkt = queue->head; /* from head */
 
 	if (pkt == NULL) {
-		ASSERT((queue->len == 0) && (queue->tail == NULL));
 		goto done;
 	}
 
@@ -361,11 +354,11 @@ dhd_get_max_multi_client_flow_rings(dhd_pub_t *dhdp)
 int
 dhd_flowid_map_init(dhd_pub_t *dhdp, uint16 max_tx_flow_rings)
 {
-#if defined(DHD_HTPUT_TUNABLES)
-	uint16 max_normal_tx_flow_rings = max_tx_flow_rings - HTPUT_TOTAL_FLOW_RINGS;
-#else
 	uint16 max_normal_tx_flow_rings = max_tx_flow_rings;
-#endif /* DHD_HTPUT_TUNABLES */
+
+	if (dhdp->htput_support) {
+		max_normal_tx_flow_rings = max_tx_flow_rings - HTPUT_TOTAL_FLOW_RINGS;
+	}
 
 	/* Construct a normal flowid allocator from FLOWID_RESERVED to
 	 * (max_normal_tx_flow_rings - 1)
@@ -377,21 +370,24 @@ dhd_flowid_map_init(dhd_pub_t *dhdp, uint16 max_tx_flow_rings)
 		return BCME_NOMEM;
 	}
 
-#if defined(DHD_HTPUT_TUNABLES)
-	if (HTPUT_TOTAL_FLOW_RINGS > 0) {
-		dhdp->htput_flow_ring_start = max_normal_tx_flow_rings + FLOWID_RESERVED;
-		/* Construct a htput flowid allocator from htput_flow_ring_start to
-		 * (htput_flow_ring_start + HTPUT_TOTAL_FLOW_RINGS - 1)
-		 */
-		dhdp->htput_flowid_allocator = id16_map_init(dhdp->osh, HTPUT_TOTAL_FLOW_RINGS,
-			dhdp->htput_flow_ring_start);
-		if (dhdp->htput_flowid_allocator == NULL) {
-			DHD_ERROR(("%s: htput flowid allocator init failure\n", __FUNCTION__));
-			return BCME_NOMEM;
+	dhdp->htput_flowid_allocator = NULL;
+
+	if (dhdp->htput_support) {
+		if (HTPUT_TOTAL_FLOW_RINGS > 0) {
+			dhdp->htput_flow_ring_start = max_normal_tx_flow_rings + FLOWID_RESERVED;
+			/* Construct a htput flowid allocator from htput_flow_ring_start to
+			 * (htput_flow_ring_start + HTPUT_TOTAL_FLOW_RINGS - 1)
+			 */
+			dhdp->htput_flowid_allocator = id16_map_init(dhdp->osh,
+				HTPUT_TOTAL_FLOW_RINGS,	dhdp->htput_flow_ring_start);
+			if (dhdp->htput_flowid_allocator == NULL) {
+				DHD_ERROR(("%s: htput flowid allocator init failure\n",
+					__FUNCTION__));
+				return BCME_NOMEM;
+			}
+			dhdp->htput_client_flow_rings = 0u;
 		}
-		dhdp->htput_client_flow_rings = 0u;
 	}
-#endif /* !DHD_HTPUT_TUNABLES */
 
 	return BCME_OK;
 }
@@ -404,14 +400,13 @@ dhd_flowid_map_deinit(dhd_pub_t *dhdp)
 	}
 	ASSERT(dhdp->flowid_allocator == NULL);
 
-#if defined(DHD_HTPUT_TUNABLES)
 	if (dhdp->htput_flowid_allocator) {
 		dhdp->htput_flowid_allocator = id16_map_fini(dhdp->osh,
 			dhdp->htput_flowid_allocator);
 		ASSERT(dhdp->htput_flowid_allocator == NULL);
 	}
 	dhdp->htput_client_flow_rings = 0u;
-#endif /* !DHD_HTPUT_TUNABLES */
+
 	return;
 }
 
@@ -508,7 +503,8 @@ dhd_flow_rings_init(dhd_pub_t *dhdp, uint32 num_h2d_rings)
 	bcopy(prio2ac, dhdp->flow_prio_map, sizeof(uint8) * NUMPRIO);
 
 	dhdp->max_multi_client_flow_rings = dhd_get_max_multi_client_flow_rings(dhdp);
-	dhdp->multi_client_flow_rings = 0U;
+
+	OSL_ATOMIC_INIT(dhdp->osh, &dhdp->multi_client_flow_rings);
 
 #ifdef DHD_LOSSLESS_ROAMING
 	dhdp->dequeue_prec_map = ALLPRIO;
@@ -608,7 +604,8 @@ void dhd_flow_rings_deinit(dhd_pub_t *dhdp)
 	bzero(dhdp->flow_prio_map, sizeof(uint8) * NUMPRIO);
 
 	dhdp->max_multi_client_flow_rings = 0U;
-	dhdp->multi_client_flow_rings = 0U;
+
+	OSL_ATOMIC_INIT(dhdp->osh, &dhdp->multi_client_flow_rings);
 
 	lock = dhdp->flowid_lock;
 	dhdp->flowid_lock = NULL;
@@ -702,7 +699,8 @@ dhd_flowid_find(dhd_pub_t *dhdp, uint8 ifindex, uint8 prio, char *sa, char *da)
 		}
 	} else {
 
-		if (ETHER_ISMULTI(da)) {
+		if (ETHER_ISMULTI(da) &&
+			TRUE) {
 			ismcast = TRUE;
 			hash = 0;
 		} else {
@@ -723,11 +721,7 @@ dhd_flowid_find(dhd_pub_t *dhdp, uint8 ifindex, uint8 prio, char *sa, char *da)
 	}
 	DHD_FLOWID_UNLOCK(dhdp->flowid_lock, flags);
 
-#ifdef DHD_EFI
-	DHD_TRACE(("%s: cannot find flowid\n", __FUNCTION__));
-#else
-	DHD_FLOWRING_INFO(("%s: cannot find flowid\n", __FUNCTION__));
-#endif
+	DHD_INFO(("%s: cannot find flowid\n", __FUNCTION__));
 	return FLOWID_INVALID;
 } /* dhd_flowid_find */
 
@@ -737,7 +731,13 @@ dhd_flowid_map_alloc(dhd_pub_t *dhdp, uint8 ifindex, uint8 prio, char *da)
 	uint16 flowid = FLOWID_INVALID;
 	ASSERT(dhdp->flowid_allocator != NULL);
 
-#if defined(DHD_HTPUT_TUNABLES)
+	/* P2P Connections are always 80Mhz */
+	if (DHD_IF_ROLE_P2PGC(dhdp, ifindex) ||
+	    DHD_IF_ROLE_P2PGO(dhdp, ifindex)) {
+		flowid = id16_map_alloc(dhdp->flowid_allocator);
+		return flowid;
+	}
+
 	if (dhdp->htput_flowid_allocator) {
 		if (prio == HTPUT_FLOW_RING_PRIO) {
 			if (DHD_IF_ROLE_GENERIC_STA(dhdp, ifindex)) {
@@ -748,7 +748,8 @@ dhd_flowid_map_alloc(dhd_pub_t *dhdp, uint8 ifindex, uint8 prio, char *da)
 				 * will take care assigning same for those HTPUT_PRIO packets.
 				 */
 				flowid = id16_map_alloc(dhdp->htput_flowid_allocator);
-			} else if (DHD_IF_ROLE_MULTI_CLIENT(dhdp, ifindex) && !ETHER_ISMULTI(da)) {
+			} else if (DHD_IF_ROLE_MULTI_CLIENT(dhdp, ifindex) && !ETHER_ISMULTI(da) &&
+				dhd_is_sta_htput(dhdp, ifindex, (uint8 *)da)) {
 				/* Use HTPUT flowrings for only HTPUT_NUM_CLIENT_FLOW_RINGS */
 				if (dhdp->htput_client_flow_rings < HTPUT_NUM_CLIENT_FLOW_RINGS) {
 					flowid = id16_map_alloc(dhdp->htput_flowid_allocator);
@@ -760,7 +761,6 @@ dhd_flowid_map_alloc(dhd_pub_t *dhdp, uint8 ifindex, uint8 prio, char *da)
 			}
 		}
 	}
-#endif /* !DHD_HTPUT_TUNABLES */
 
 	BCM_REFERENCE(flowid);
 
@@ -830,7 +830,9 @@ dhd_flowid_alloc(dhd_pub_t *dhdp, uint8 ifindex, uint8 prio, char *sa, char *da)
 	} else {
 
 		/* For bcast/mcast assign first slot in in interface */
-		hash = ETHER_ISMULTI(da) ? 0 : DHD_FLOWRING_HASHINDEX(da, prio);
+		hash = (ETHER_ISMULTI(da) &&
+			TRUE) ?  0 : DHD_FLOWRING_HASHINDEX(da, prio);
+
 		cur = if_flow_lkup[ifindex].fl_hash[hash];
 		if (cur) {
 			while (cur->next) {
@@ -842,7 +844,7 @@ dhd_flowid_alloc(dhd_pub_t *dhdp, uint8 ifindex, uint8 prio, char *sa, char *da)
 	}
 	DHD_FLOWID_UNLOCK(dhdp->flowid_lock, flags);
 
-	DHD_FLOWRING_INFO(("%s: allocated flowid %d\n", __FUNCTION__, fl_hash_node->flowid));
+	DHD_INFO(("%s: allocated flowid %d\n", __FUNCTION__, fl_hash_node->flowid));
 
 	if (fl_hash_node->flowid > dhdp->max_tx_flowid) {
 		DHD_ERROR(("%s: flowid=%d max_tx_flowid=%d ifindex=%d prio=%d role=%d\n",
@@ -881,7 +883,7 @@ dhd_flowid_lookup(dhd_pub_t *dhdp, uint8 ifindex,
 
 	id = dhd_flowid_find(dhdp, ifindex, prio, sa, da);
 
-	if (id == FLOWID_INVALID) {
+	if (id == FLOWID_INVALID || (id > dhdp->max_tx_flowid)) {
 		bool if_role_multi_client;
 		if_flow_lkup_t *if_flow_lkup;
 		if_flow_lkup = (if_flow_lkup_t *)dhdp->if_flow_lkup;
@@ -895,9 +897,11 @@ dhd_flowid_lookup(dhd_pub_t *dhdp, uint8 ifindex,
 		/* Abort Flowring creation if multi client flowrings crossed the threshold */
 #ifdef DHD_LIMIT_MULTI_CLIENT_FLOWRINGS
 		if (if_role_multi_client &&
-			(dhdp->multi_client_flow_rings >= dhdp->max_multi_client_flow_rings)) {
+			(OSL_ATOMIC_READ(dhdp->osh, &dhdp->multi_client_flow_rings) >=
+				dhdp->max_multi_client_flow_rings)) {
 			DHD_ERROR_RLMT(("%s: Max multi client flow rings reached: %d:%d\n",
-				__FUNCTION__, dhdp->multi_client_flow_rings,
+				__FUNCTION__,
+				OSL_ATOMIC_READ(dhdp->osh, &dhdp->multi_client_flow_rings),
 				dhdp->max_multi_client_flow_rings));
 			return BCME_ERROR;
 		}
@@ -923,7 +927,7 @@ dhd_flowid_lookup(dhd_pub_t *dhdp, uint8 ifindex,
 
 		/* Only after flowid alloc, increment multi_client_flow_rings */
 		if (if_role_multi_client) {
-			dhdp->multi_client_flow_rings++;
+			OSL_ATOMIC_INC(dhdp->osh, &dhdp->multi_client_flow_rings);
 		}
 
 		/* register this flowid in dhd_pub */
@@ -1095,7 +1099,7 @@ BCMFASTPATH(dhd_flowid_update)(dhd_pub_t *dhdp, uint8 ifindex, uint8 prio, void 
 		return BCME_ERROR;
 	}
 
-	DHD_FLOWRING_INFO(("%s: prio %d flowid %d\n", __FUNCTION__, prio, flowid));
+	DHD_INFO(("%s: prio %d flowid %d\n", __FUNCTION__, prio, flowid));
 
 	/* Tag the packet with flowid */
 	DHD_PKT_SET_FLOWID(pktbuf, flowid);
@@ -1105,7 +1109,6 @@ BCMFASTPATH(dhd_flowid_update)(dhd_pub_t *dhdp, uint8 ifindex, uint8 prio, void 
 static void
 dhd_flowid_map_free(dhd_pub_t *dhdp, uint8 ifindex, uint16 flowid)
 {
-#if defined(DHD_HTPUT_TUNABLES)
 	if (dhdp->htput_flowid_allocator) {
 		if (DHD_IS_FLOWID_HTPUT(dhdp, flowid)) {
 			id16_map_free(dhdp->htput_flowid_allocator, flowid);
@@ -1116,7 +1119,6 @@ dhd_flowid_map_free(dhd_pub_t *dhdp, uint8 ifindex, uint16 flowid)
 			return;
 		}
 	}
-#endif /* !DHD_HTPUT_TUNABLES */
 
 	id16_map_free(dhdp->flowid_allocator, flowid);
 
@@ -1169,15 +1171,19 @@ dhd_flowid_free(dhd_pub_t *dhdp, uint8 ifindex, uint16 flowid)
 
 				/* Decrement multi_client_flow_rings */
 				if (if_role_multi_client) {
-					dhdp->multi_client_flow_rings--;
+					if (OSL_ATOMIC_READ(dhdp->osh,
+						&dhdp->multi_client_flow_rings)) {
+						OSL_ATOMIC_DEC(dhdp->osh,
+							&dhdp->multi_client_flow_rings);
+					}
 				}
 
 				/* deregister flowid from dhd_pub. */
 				dhd_del_flowid(dhdp, ifindex, flowid);
 
 				dhd_flowid_map_free(dhdp, ifindex, flowid);
-				DHD_FLOWID_UNLOCK(dhdp->flowid_lock, flags);
 				MFREE(dhdp->osh, cur, sizeof(flow_hash_info_t));
+				DHD_FLOWID_UNLOCK(dhdp->flowid_lock, flags);
 
 				return;
 			}
@@ -1220,6 +1226,50 @@ dhd_flow_rings_delete(dhd_pub_t *dhdp, uint8 ifindex)
 }
 
 void
+dhd_update_multicilent_flow_rings(dhd_pub_t *dhdp, uint8 ifindex, bool increment)
+{
+	uint32 id;
+	flow_ring_table_t *flow_ring_table;
+
+	DHD_ERROR(("%s: ifindex %u\n", __FUNCTION__, ifindex));
+
+	ASSERT(ifindex < DHD_MAX_IFS);
+	if (ifindex >= DHD_MAX_IFS)
+		return;
+
+	if (!dhdp->flow_ring_table)
+		return;
+
+	flow_ring_table = (flow_ring_table_t *)dhdp->flow_ring_table;
+	for (id = 0; id < dhdp->num_h2d_rings; id++) {
+		if (flow_ring_table[id].active &&
+			(flow_ring_table[id].flow_info.ifindex == ifindex) &&
+			(flow_ring_table[id].status == FLOW_RING_STATUS_OPEN)) {
+			if (increment) {
+				if (OSL_ATOMIC_READ(dhdp->osh, &dhdp->multi_client_flow_rings) <
+					dhdp->max_multi_client_flow_rings) {
+					OSL_ATOMIC_INC(dhdp->osh, &dhdp->multi_client_flow_rings);
+				} else {
+					DHD_ERROR(("%s: multi_client_flow_rings:%u"
+						" reached max:%d\n", __FUNCTION__,
+						OSL_ATOMIC_READ(dhdp->osh,
+						&dhdp->multi_client_flow_rings),
+						dhdp->max_multi_client_flow_rings));
+				}
+			} else {
+				if (OSL_ATOMIC_READ(dhdp->osh, &dhdp->multi_client_flow_rings)) {
+					OSL_ATOMIC_DEC(dhdp->osh, &dhdp->multi_client_flow_rings);
+				} else {
+					DHD_ERROR(("%s: multi_client_flow_rings:%u"
+						" reached ZERO\n", __FUNCTION__,
+						OSL_ATOMIC_READ(dhdp->osh,
+						&dhdp->multi_client_flow_rings)));
+				}
+			}
+		}
+	}
+}
+void
 dhd_flow_rings_flush(dhd_pub_t *dhdp, uint8 ifindex)
 {
 	uint32 id;
@@ -1252,7 +1302,7 @@ dhd_flow_rings_delete_for_peer(dhd_pub_t *dhdp, uint8 ifindex, char *addr)
 	uint32 id;
 	flow_ring_table_t *flow_ring_table;
 
-	DHD_ERROR(("%s: ifindex %u\n", __FUNCTION__, ifindex));
+	DHD_INFO(("%s: ifindex %u\n", __FUNCTION__, ifindex));
 
 	ASSERT(ifindex < DHD_MAX_IFS);
 	if (ifindex >= DHD_MAX_IFS)
@@ -1277,7 +1327,7 @@ dhd_flow_rings_delete_for_peer(dhd_pub_t *dhdp, uint8 ifindex, char *addr)
 			(!memcmp(flow_ring_table[id].flow_info.da, addr, ETHER_ADDR_LEN)) &&
 			((flow_ring_table[id].status == FLOW_RING_STATUS_OPEN) ||
 			(flow_ring_table[id].status == FLOW_RING_STATUS_CREATE_PENDING))) {
-			DHD_ERROR(("%s: deleting flowid %d\n",
+			DHD_INFO(("%s: deleting flowid %d\n",
 				__FUNCTION__, flow_ring_table[id].flowid));
 			dhd_bus_flow_ring_delete_request(dhdp->bus,
 				(void *) &flow_ring_table[id]);
@@ -1308,8 +1358,15 @@ dhd_update_interface_flow_info(dhd_pub_t *dhdp, uint8 ifindex,
 	if_flow_lkup = (if_flow_lkup_t *)dhdp->if_flow_lkup;
 
 	if (op == WLC_E_IF_ADD || op == WLC_E_IF_CHANGE) {
-
+		DHD_ERROR(("%s: ifindex:%d previous role:%d new role:%d\n",
+			__FUNCTION__, ifindex, if_flow_lkup[ifindex].role, role));
 		if_flow_lkup[ifindex].role = role;
+#ifdef PCIE_FULL_DONGLE
+		if (op == WLC_E_IF_CHANGE) {
+			bool increment = DHD_IF_ROLE_MULTI_CLIENT(dhdp, ifindex);
+			dhd_update_multicilent_flow_rings(dhdp, ifindex, increment);
+		}
+#endif /* PCIE_FULL_DONGLE */
 
 		if (role == WLC_E_IF_ROLE_WDS) {
 			/**
@@ -1452,48 +1509,3 @@ dhd_active_tx_flowring_bkpq_len(dhd_pub_t *dhd)
 	DHD_FLOWRING_LIST_UNLOCK(bus->dhd->flowring_list_lock, list_lock_flags);
 	return active_tx_flowring_qlen;
 }
-
-#ifdef DHD_AWDL
-/**
- * Handle/Intercept awdl peer op IOVAR fired by user
- * buf = NULL means delete all peers in awdl interface
- */
-void
-dhd_awdl_peer_op(dhd_pub_t *dhdp, uint8 ifindex, void *buf, uint32 buflen)
-{
-	awdl_peer_op_t	*peer = (awdl_peer_op_t *)buf;
-	DHD_TRACE(("%s\n", __FUNCTION__));
-
-	ASSERT(ifindex < DHD_MAX_IFS);
-	if (ifindex >= DHD_MAX_IFS)
-		return;
-	if (!buf) {
-		/* Delete all peers in awdl interface */
-		if_flow_lkup_t *if_flow_lkup;
-		if_flow_lkup = (if_flow_lkup_t *)dhdp->if_flow_lkup;
-		if (if_flow_lkup[ifindex].role != WLC_E_IF_ROLE_AWDL) {
-			DHD_ERROR(("%s: Iinterface %d is not a awdl peer \n",
-				__FUNCTION__, ifindex));
-			return;
-		}
-		dhd_flow_rings_delete(dhdp, ifindex);
-		return;
-	}
-	/* Parse awdl_peer_op info now */
-	if (buflen < sizeof(awdl_peer_op_t)) {
-		DHD_ERROR(("%s: cannot handle awdl_peer_op add/del\n", __FUNCTION__));
-		return;
-	}
-	/**
-	 * Only flowring deletion is handled here
-	 * Flowring addition is taken care in dhd_flowid_lookup
-	 */
-	if (peer->opcode == AWDL_PEER_OP_DEL) {
-		dhd_del_sta(dhdp, ifindex, &peer->addr.octet[0]);
-		dhd_flow_rings_delete_for_peer(dhdp, ifindex, (char *)&peer->addr.octet[0]);
-	} else if (peer->opcode == AWDL_PEER_OP_ADD) {
-		dhd_findadd_sta(dhdp, ifindex, &peer->addr.octet[0]);
-	}
-		return;
-}
-#endif /* DHD_AWDL */

@@ -1,7 +1,7 @@
 /*
  * Common function shared by Linux WEXT, cfg80211 and p2p drivers
  *
- * Copyright (C) 2020, Broadcom.
+ * Copyright (C) 2022, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -85,6 +85,14 @@ s32 wldev_iovar_getint_bsscfg(
 
 s32 wldev_iovar_setint_bsscfg(
 	struct net_device *dev, s8 *iovar, s32 val, s32 bssidx);
+
+#if defined(BCMDONGLEHOST) && defined(WL_CFG80211)
+extern s32 wldev_iovar_no_wl(struct net_device *dev, s8 *iovar, s8 *param_buf,
+		u32 param_len, s8 *res_buf, u32 res_len, bool set);
+extern s32 wldev_ioctl_no_wl(struct net_device *dev, u32 cmd, s8 *buf, u32 len, bool set);
+extern s32 wldev_iovar_setint_no_wl(struct net_device *dev, s8 *iovar, s32 val);
+extern s32 wldev_iovar_getint_no_wl(struct net_device *dev, s8 *iovar, s32 *val);
+#endif /* BCMDONGLEHOST && WL_CFG80211 */
 
 extern int dhd_net_set_fw_path(struct net_device *dev, char *fw);
 extern int dhd_net_bus_suspend(struct net_device *dev);

@@ -1,7 +1,7 @@
 /*
  *  'Standard' SDIO HOST CONTROLLER driver
  *
- * Copyright (C) 2020, Broadcom.
+ * Copyright (C) 2022, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -134,38 +134,46 @@ uint32 sd3_autoselect_uhsi_max = 0;
 *	All has DrvStr as 'B' [val:0] and CLKGEN as 0.
 */
 static unsigned short presetval_sw_table[] = {
-	0x0520, /* initialization: 	DrvStr:'B' [0]; CLKGen:0;
+	0x0520, /* initialization:	DrvStr:'B' [0]; CLKGen:0;
 			* SDCLKFreqSel: 520 [division: 320*2 = 640: ~400 KHz]
 			*/
 	0x0008, /* default speed:DrvStr:'B' [0]; CLKGen:0;
 			* SDCLKFreqSel: 8 [division: 6*2 = 12: ~25 MHz]
 			*/
-	0x0004, /* High speed: 	DrvStr:'B' [0]; CLKGen:0;
+	0x0004, /* High speed: DrvStr:'B' [0]; CLKGen:0;
 			* SDCLKFreqSel: 4 [division: 3*2 = 6: ~50 MHz]
 			*/
-	0x0008, /* SDR12: 		DrvStr:'B' [0]; CLKGen:0;
+	0x0008, /* SDR12:		DrvStr:'B' [0]; CLKGen:0;
 			* SDCLKFreqSel: 8 [division: 6*2 = 12: ~25 MHz]
 			*/
-	0x0004, /* SDR25: 		DrvStr:'B' [0]; CLKGen:0;
+	0x0004, /* SDR25:		DrvStr:'B' [0]; CLKGen:0;
 			* SDCLKFreqSel: 4 [division: 3*2 = 6: ~50 MHz]
 			*/
-	0x0001, /* SDR50: 		DrvStr:'B' [0]; CLKGen:0;
+	0x0001, /* SDR50:		DrvStr:'B' [0]; CLKGen:0;
 			* SDCLKFreqSel: 2 [division: 1*2 = 2: ~100 MHz]
 			*/
-	0x0001, /* SDR104: 		DrvStr:'B' [0]; CLKGen:0;
+	0x0001, /* SDR104:		DrvStr:'B' [0]; CLKGen:0;
 			SDCLKFreqSel: 1 [no division: ~255/~208 MHz]
 			*/
-	0x0002  /* DDR50: 		DrvStr:'B' [0]; CLKGen:0;
+	0x0002  /* DDR50:		DrvStr:'B' [0]; CLKGen:0;
 			SDCLKFreqSel: 4 [division: 3*2 = 6: ~50 MHz]
 			*/
 };
 
+#ifdef BCMFPGA_HW
+/*
+ * Voltage switch, clock tuning and preset are not supported in
+ * FPGA which operates at 6.25Mhz.
+ */
+bool sd3_sw_override1 = TRUE;
+#else
 /* This is to have software overrides to the hardware. Info follows:
-	For override [1]: 	Preset registers: not supported
+	For override [1]:	Preset registers: not supported
 	Voltage switch:  not supported
 	Clock Tuning: not supported
 */
 bool sd3_sw_override1 = FALSE;
+#endif /* BCMFPGA_HW */
 bool sd3_sw_read_magic_bytes = FALSE;
 
 #define SD3_TUNING_REQD(sd, sd_uhsimode) ((sd_uhsimode != SD3CLKMODE_DISABLED) && \
@@ -248,14 +256,6 @@ static bool sdstd_3_get_matching_drvstrn(sdioh_info_t *sd,
 static int sdstd_3_clock_wrapper(sdioh_info_t *sd);
 static int sdstd_clock_wrapper(sdioh_info_t *sd);
 
-#ifdef BCMINTERNAL
-#ifdef NOTUSED
-static int parse_caps(uint32 caps_reg, char *buf, int len);
-static int parse_state(uint32 state_reg, char *buf, int len);
-static void cis_fetch(sdioh_info_t *sd, int func, char *data, int len);
-#endif /* NOTUSED */
-#endif /* BCMINTERNAL */
-
 #ifdef BCMDBG
 static void print_regs(sdioh_info_t *sd);
 #endif
@@ -321,25 +321,6 @@ sdstd_wreg(sdioh_info_t *sd, uint reg, uint32 data)
 	sd_ctrl(("32: W Reg 0x%02x, Data 0x%x\n", reg, data));
 
 }
-#ifdef BCMINTERNAL
-#ifdef NOTUSED
-static void
-sdstd_or_reg(sdioh_info_t *sd, uint reg, uint32 val)
-{
-	volatile uint32 data = *(volatile uint32 *)(sd->mem_space + reg);
-	data |= val;
-	*(volatile uint32 *)(sd->mem_space + reg) = (volatile uint32)data;
-}
-static void
-sdstd_mod_reg(sdioh_info_t *sd, uint reg, uint32 mask, uint32 val)
-{
-	volatile uint32 data = *(volatile uint32 *)(sd->mem_space + reg);
-	data &= ~mask;
-	data |= (val & mask);
-	*(volatile uint32 *)(sd->mem_space + reg) = (volatile uint32)data;
-}
-#endif /* NOTUSED */
-#endif /* BCMINTERNAL */
 
 /* 8 bit PCI regs */
 static inline void
@@ -545,7 +526,8 @@ enum {
 	IOV_CLOCK,
 	IOV_UHSIMOD,
 	IOV_TUNEMOD,
-	IOV_TUNEDIS
+	IOV_TUNEDIS,
+	IOV_DS
 };
 
 const bcm_iovar_t sdioh_iovars[] = {
@@ -575,6 +557,7 @@ const bcm_iovar_t sdioh_iovars[] = {
 #endif
 	{"tuning_mode", IOV_TUNEMOD,	0,	0, IOVT_UINT32,	0},
 	{"sd3_tuning_disable", IOV_TUNEDIS,	0,	0, IOVT_BOOL,	0},
+	{"sd_ds",	IOV_DS,		0,	0, IOVT_UINT32,	0},
 
 	{NULL, 0, 0, 0, 0, 0 }
 };
@@ -1023,6 +1006,58 @@ sdioh_iovar_op(sdioh_info_t *si, const char *name,
 	case IOV_SVAL(IOV_TUNEDIS):
 		si->sd3_tuning_disable = (bool)int_val;
 		break;
+
+	case IOV_GVAL(IOV_DS):
+	{
+		uint32 drvstrn;
+		int status;
+
+		status = sdstd_card_regread(si, 0, SDIOD_CCCR_DRIVER_STRENGTH, 1, &drvstrn);
+		if (status != BCME_OK) {
+			sd_err(("sd_ds error for read SDIOD_CCCR_DRIVER_STRENGTH : 0x%x\n",
+				status));
+			bcmerror = BCME_SDIO_ERROR;
+		} else {
+			sd_err(("sd_ds get cccr driver strength 0x%x\n", drvstrn));
+		}
+		int_val = (uint32)drvstrn;
+		bcopy(&int_val, arg, val_size);
+		break;
+	}
+
+	case IOV_SVAL(IOV_DS):
+	{
+		uint32 drvstrn;
+		int status;
+
+		status = sdstd_card_regread(si, 0, SDIOD_CCCR_DRIVER_STRENGTH, 1, &drvstrn);
+		if (status != BCME_OK) {
+			sd_err(("sd_ds error for read SDIOD_CCCR_DRIVER_STRENGTH : 0x%x\n",
+				status));
+			bcmerror = BCME_SDIO_ERROR;
+		} else {
+			sd_err(("sd_ds get cccr driver strength 0x%x\n", drvstrn));
+		}
+
+		if (int_val == 0) {
+			drvstrn = ((drvstrn & 0xf) | 0x0);
+		} else if (int_val == 1) {
+			drvstrn = ((drvstrn & 0xf) | 0x10);
+		} else if (int_val == 2) {
+			drvstrn = ((drvstrn & 0xf) | 0x20);
+		} else if (int_val == 3) {
+			drvstrn = ((drvstrn & 0xf) | 0x30);
+		} else {
+			bcmerror = BCME_BADARG;
+			break;
+		}
+
+		status = sdstd_card_regwrite(si, 0, SDIOD_CCCR_DRIVER_STRENGTH, 1, drvstrn);
+		if (status != BCME_OK) {
+			sd_err(("sd_ds error write SDIOD_CCCR_DRIVER_STRENGTH : 0x%x\n", status));
+		}
+		break;
+	}
 
 	default:
 		bcmerror = BCME_UNSUPPORTED;
@@ -1834,15 +1869,6 @@ sdstd_check_errs(sdioh_info_t *sdioh_info, uint32 cmd, uint32 arg)
 	return ERROR;
 }
 
-#ifdef BCMINTERNAL
-extern SDIOH_API_RC
-sdioh_test_diag(sdioh_info_t *sd)
-{
-	sd_err(("%s: Implement me\n", __FUNCTION__));
-	return (0);
-}
-#endif /* BCMINTERNAL */
-
 /*
  * Private/Static work routines
  */
@@ -1988,12 +2014,6 @@ sdstd_host_init(sdioh_info_t *sd)
 			__FUNCTION__));
 		sd->controller_type = SDIOH_TYPE_JMICRON;
 		detect_slots = TRUE;
-#ifdef BCMINTERNAL
-	} else if ((OSL_PCI_READ_CONFIG(sd->osh, PCI_CFG_VID, 4) & 0xFFFF) == VENDOR_JINVANI) {
-		sd_info(("%s: Found Jinvani Standard SDIO Host Controller\n", __FUNCTION__));
-		detect_slots = FALSE;
-		sd->controller_type = SDIOH_TYPE_JINVANI_GOLD;
-#endif /* BCMINTERNAL */
 	} else {
 		return ERROR;
 	}
@@ -2127,46 +2147,6 @@ sdstd_host_init(sdioh_info_t *sd)
 
 	sdstd_set_dma_mode(sd, sd->sd_dma_mode);
 
-#if defined(BCMINTERNAL)
-	if (OSL_PCI_READ_CONFIG(sd->osh, PCI_CFG_VID, 4) ==
-	    ((SDIOH_FPGA_ID << 16) | VENDOR_BROADCOM)) {
-			sd_err(("* * * SDIO20H FPGA Build Date: 0x%04x\n", sdstd_rreg(sd, 0x110)));
-	}
-
-	if (GFIELD(sd->caps, CAP_MAXBLOCK) == 0x3) {
-		sd_info(("SD HOST CAPS: Max block size is INVALID\n"));
-	} else {
-		sd_info(("SD HOST CAPS: Max block size is %d bytes\n",
-			512 << GFIELD(sd->caps, CAP_MAXBLOCK)));
-	}
-
-	sd_info(("SD HOST CAPS: 64-bit DMA is %ssupported.\n",
-		GFIELD(sd->caps, CAP_64BIT_HOST) ? "" : "not "));
-	sd_info(("SD HOST CAPS: Suspend/Resume is %ssupported.\n",
-		GFIELD(sd->caps, CAP_SUSPEND) ? "" : "not "));
-
-	sd_err(("SD HOST CAPS: SD Host supports "));
-	if (GFIELD(sd->caps, CAP_VOLT_3_3)) {
-		sd_err(("3.3V"));
-		if (GFIELD(sd->curr_caps, CAP_CURR_3_3)) {
-			sd_err(("@%dmA\n", 4*GFIELD(sd->curr_caps, CAP_CURR_3_3)));
-		}
-	}
-	if (GFIELD(sd->caps, CAP_VOLT_3_0)) {
-		sd_err((", 3.0V"));
-		if (GFIELD(sd->curr_caps, CAP_CURR_3_0)) {
-			sd_err(("@%dmA\n", 4*GFIELD(sd->curr_caps, CAP_CURR_3_0)));
-		}
-	}
-	if (GFIELD(sd->caps, CAP_VOLT_1_8)) {
-		sd_err((", 1.8V"));
-		if (GFIELD(sd->curr_caps, CAP_CURR_1_8)) {
-			sd_err(("@%dmA\n", 4*GFIELD(sd->curr_caps, CAP_CURR_1_8)));
-		}
-	}
-	sd_err(("\n"));
-#endif /* defined(BCMINTERNAL) */
-
 	sdstd_reset(sd, 1, 0);
 
 	/* Read SD4/SD1 mode */
@@ -2256,15 +2236,6 @@ sdstd_client_init(sdioh_info_t *sd)
 	uint8 fn_ints;
 	uint32 regdata;
 	uint16 powerstat = 0;
-
-#ifdef BCMINTERNAL
-#ifdef NOTUSED
-	/* Handy routine to dump capabilities. */
-	static char caps_buf[500];
-	parse_caps(sd->caps, caps_buf, 500);
-	sd_err((caps_buf));
-#endif /* NOTUSED */
-#endif /* BCMINTERNAL */
 
 	sd_trace(("%s: Powering up slot %d\n", __FUNCTION__, sd->adapter_slot));
 
@@ -2433,11 +2404,24 @@ sdstd_client_init(sdioh_info_t *sd)
 static int
 sdstd_clock_wrapper(sdioh_info_t *sd)
 {
+	uint ret = 0;
 	sd_trace(("%s:Enter\n", __FUNCTION__));
 	/* After configuring for High-Speed mode, set the desired clock rate. */
 	sdstd_set_highspeed_mode(sd, (bool)sd_hiok);
 
-	if (FALSE == sdstd_start_clock(sd, (uint16)sd_divisor)) {
+#ifdef BCMFPGA_HW
+	/*
+	 * To make the SDIO clock 6.25Mhz for FPGA divide the
+	 * standard clock with 8 insted of default 2. 50Mhz/8 = 6.25Mhz
+	 * sdstd_clock_wrapper() is used to start clock for default and
+	 * high speed only.
+	 */
+	sd_err(("%s set 6.25Mhz clock speed for FPGA default or high speed\n", __FUNCTION__));
+	ret = sdstd_start_clock(sd, ((uint16)sd_divisor * 4));
+#else
+	ret = sdstd_start_clock(sd, (uint16)sd_divisor);
+#endif /* BCMFPGA_HW */
+	if (ret != TRUE) {
 		sd_err(("sdstd_start_clock failed\n"));
 		return ERROR;
 	}
@@ -2693,6 +2677,7 @@ sdstd_3_set_highspeed_uhsi_mode(sdioh_info_t *sd, int sd3ClkMode)
 	uint8 hc_reg8;
 	uint16 val1 = 0, presetval = 0;
 	uint32 regdata;
+	uint32 ret = 0;
 
 	sd3_trace(("sd3: %s:enter:clkmode:%d\n", __FUNCTION__, sd3ClkMode));
 
@@ -2780,9 +2765,19 @@ sdstd_3_set_highspeed_uhsi_mode(sdioh_info_t *sd, int sd3ClkMode)
 	sdstd_wreg16(sd, SD3_HostCntrl2, val1);
 
 	sd_err(("%s:HostCtrl2 final value:0x%x\n", __FUNCTION__, val1));
-
+#ifdef BCMFPGA_HW
+	/*
+	 * To make the SDIO clock 6.25Mhz for FPGA divide the
+	 * standard clock with 0x20. 208Mhz/32 = 6.25Mhz
+	 * this function is invoked to start clock for UHSI mode only
+	 */
+	sd_err(("%s set 6.25Mhz clock speed for UHSI speed\n", __FUNCTION__));
+	ret = sdstd_start_clock(sd, 0x20);
+#else
+	ret = sdstd_start_clock(sd, GFIELD(presetval, PRESET_CLK_DIV));
+#endif /* BCMFPGA_HW */
+	if (ret != TRUE) {
 	/* start clock : clk will be enabled inside. */
-	if (FALSE == sdstd_start_clock(sd, GFIELD(presetval, PRESET_CLK_DIV))) {
 		sd_err(("sdstd_start_clock failed\n"));
 		return ERROR;
 	}
@@ -3143,16 +3138,6 @@ sdstd_set_highspeed_mode(sdioh_info_t *sd, bool HSMode)
 
 	reg8 = sdstd_rreg8(sd, SD_HostCntrl);
 
-#ifdef BCMINTERNAL
-	/* The Jinvani SD Gold Host forces the highest clock rate in high-speed mode */
-	/* Only enable high-speed mode if the SD clock divisor is 1. */
-	if (sd->controller_type == SDIOH_TYPE_JINVANI_GOLD) {
-		if (sd_divisor != 1) {
-			HSMode = FALSE;
-		}
-	}
-#endif /* BCMINTERNAL */
-
 	if (HSMode == TRUE) {
 		if (sd_hiok && (GFIELD(sd->caps, CAP_HIGHSPEED)) == 0) {
 			sd_err(("Host Controller does not support hi-speed mode.\n"));
@@ -3409,61 +3394,6 @@ print_regs(sdioh_info_t *sd)
 }
 #endif /* BCMDBG */
 
-#ifdef BCMINTERNAL
-#ifdef NOTUSED
-static int
-parse_state(uint32 state, char *buf, int len)
-{
-	char *data = buf;
-
-	sd_err(("Parsing state 0x%x\n", state));
-	if (!len) {
-		return (0);
-	}
-
-	data += sprintf(data, "cmd_inhibit      %d\n", GFIELD(state, PRES_CMD_INHIBIT));
-	data += sprintf(data, "dat_inhibit      %d\n", GFIELD(state, PRES_DAT_INHIBIT));
-	data += sprintf(data, "dat_busy	        %d\n", GFIELD(state, PRES_DAT_BUSY));
-	data += sprintf(data, "write_active     %d\n", GFIELD(state, PRES_WRITE_ACTIVE));
-	data += sprintf(data, "read_active      %d\n", GFIELD(state, PRES_READ_ACTIVE));
-	data += sprintf(data, "write_data_rdy   %d\n", GFIELD(state, PRES_WRITE_DATA_RDY));
-	data += sprintf(data, "read_data_rdy    %d\n", GFIELD(state, PRES_READ_DATA_RDY));
-	data += sprintf(data, "card_present     %d\n", GFIELD(state, PRES_CARD_PRESENT));
-	data += sprintf(data, "card_stable      %d\n", GFIELD(state, PRES_CARD_STABLE));
-	data += sprintf(data, "card_present_raw %d\n", GFIELD(state, PRES_CARD_PRESENT_RAW));
-	data += sprintf(data, "write_enabled    %d\n", GFIELD(state, PRES_WRITE_ENABLED));
-	data += sprintf(data, "cmd_signal       %d\n", GFIELD(state, PRES_CMD_SIGNAL));
-
-	return (data - buf);
-}
-
-static int
-parse_caps(uint32 cap, char *buf, int len)
-{
-	int block = 0xbeef;
-	char *data = buf;
-
-	data += sprintf(data, "TimeOut Clock Freq:\t%d\n", GFIELD(cap, CAP_TO_CLKFREQ));
-	data += sprintf(data, "TimeOut Clock Unit:\t%d\n", GFIELD(cap, CAP_TO_CLKUNIT));
-	data += sprintf(data, "Base Clock:\t\t%d\n", GFIELD(cap, CAP_BASECLK));
-	switch (GFIELD(cap, CAP_MAXBLOCK)) {
-	case 0: block = 512; break;
-	case 1: block = 1024; break;
-	case 2: block = 2048; break;
-	case 3: block = 0; break;
-	}
-	data += sprintf(data, "Max Block Size:\t\t%d\n", block);
-	data += sprintf(data, "Support High Speed:\t%d\n", GFIELD(cap, CAP_HIGHSPEED));
-	data += sprintf(data, "Support DMA:\t\t%d\n", GFIELD(cap, CAP_DMA));
-	data += sprintf(data, "Support Suspend:\t%d\n", GFIELD(cap, CAP_SUSPEND));
-	data += sprintf(data, "Support 3.3 Volts:\t%d\n", GFIELD(cap, CAP_VOLT_3_3));
-	data += sprintf(data, "Support 3.0 Volts:\t%d\n", GFIELD(cap, CAP_VOLT_3_0));
-	data += sprintf(data, "Support 1.8 Volts:\t%d\n", GFIELD(cap, CAP_VOLT_1_8));
-	return (data - buf);
-}
-#endif /* NOTUSED */
-#endif /* BCMINTERNAL */
-
 /* XXX Per SDIO Host Controller Spec section 3.2.1
 	Note: for 2.x HC, new_sd_divisor should be a power of 2, but for 3.0
 	HC, new_sd_divisor should be a multiple of 2.
@@ -3507,11 +3437,6 @@ sdstd_start_clock(sdioh_info_t *sd, uint16 new_sd_divisor)
 			new_sd_divisor = 256;
 		divisor = (new_sd_divisor >> 1) << 8;
 	}
-#ifdef BCMINTERNAL
-	if (sd->controller_type == SDIOH_TYPE_JINVANI_GOLD) {
-		divisor = (new_sd_divisor >> 2) << 8;
-	}
-#endif /* BCMINTERNAL */
 
 	sd_info(("Clock control is 0x%x\n", sdstd_rreg16(sd, SD_ClockCntrl)));
 	if (sd->host_UHSISupported) {
@@ -3848,6 +3773,7 @@ voltsel:
 				 * val1 = SFIELD(val1, HOSTCtrl2_1_8SIG_EN, 1);
 				 * sdstd_wreg16(sd, SD3_HostCntrl2, val1);
 				 */
+
 				sd_info(("%s: Not sdio3.0: host_UHSISupported: %d; HC volts=%d\n",
 					__FUNCTION__, sd->host_UHSISupported, volts));
 		}
@@ -5142,30 +5068,6 @@ sdioh_sdio_reset(sdioh_info_t *si)
 	si->card_init_done = FALSE;
 	return sdstd_client_init(si);
 }
-
-#ifdef BCMINTERNAL
-#ifdef NOTUSED
-static void
-cis_fetch(sdioh_info_t *sd, int func, char *data, int len)
-{
-	int count;
-	int offset;
-	char *end = data + len;
-	uint32 foo;
-
-	for (count = 0; count < 512 && data < end; count++) {
-		offset =  sd->func_cis_ptr[func] + count;
-		if (sdstd_card_regread (sd, func, offset, 1, &foo) < 0) {
-			sd_err(("%s: regread failed\n", __FUNCTION__));
-			return;
-		}
-		data += sprintf(data, "%.2x ", foo & 0xff);
-		if (((count+1) % 16) == 0)
-			data += sprintf(data, "\n");
-	}
-}
-#endif /* NOTUSED */
-#endif /* BCMINTERNAL */
 
 static void
 sd_map_dma(sdioh_info_t * sd)

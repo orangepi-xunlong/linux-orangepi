@@ -1,7 +1,7 @@
 /*
  * DHD Linux header file - contains private structure definition of the Linux specific layer
  *
- * Copyright (C) 2020, Broadcom.
+ * Copyright (C) 2022, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -41,7 +41,6 @@
 #ifdef CONFIG_HAS_WAKELOCK
 #include <linux/pm_wakeup.h>
 #endif /* CONFIG_HAS_WAKELOCK */
-#include <linux/wakelock.h>
 #include <dngl_stats.h>
 #include <dhd.h>
 #include <dhd_dbg.h>
@@ -54,9 +53,15 @@
 #include <dhd_flowring.h>
 #endif /* PCIE_FULL_DONGLE */
 
-#ifdef DHD_QOS_ON_SOCK_FLOW
-struct dhd_sock_qos_info;
-#endif /* DHD_QOS_ON_SOCK_FLOW */
+#ifdef RX_PKT_POOL
+#define RX_PKTPOOL_RESCHED_DELAY_MS 500u
+#define RX_PKTPOOL_FETCH_MAX_ATTEMPTS 10u
+typedef struct pkt_pool {
+	struct sk_buff_head skb_q     ____cacheline_aligned;
+	uint32 max_size;
+	uint16 rxbuf_sz;
+} pkt_pool_t;
+#endif /* RX_PKT_POOL */
 
 /*
  * Do not include this header except for the dhd_linux.c dhd_linux_sysfs.c
@@ -74,8 +79,9 @@ typedef struct dhd_info {
 	wifi_adapter_info_t *adapter;			/* adapter information, interrupt, fw path etc. */
 	char fw_path[PATH_MAX];		/* path to firmware image */
 	char nv_path[PATH_MAX];		/* path to nvram vars file */
-	char clm_path[PATH_MAX];		/* path to clm vars file */
+	char clm_path[PATH_MAX];	/* path to CLM data */
 	char conf_path[PATH_MAX];	/* path to config vars file */
+	char sig_path[PATH_MAX];	/* path to rtecdc.sig file */
 #ifdef DHD_UCODE_DOWNLOAD
 	char uc_path[PATH_MAX];	/* path to ucode image */
 #endif /* DHD_UCODE_DOWNLOAD */
@@ -96,18 +102,10 @@ typedef struct dhd_info {
 	wait_queue_head_t d3ack_wait;
 	wait_queue_head_t dhd_bus_busy_state_wait;
 	wait_queue_head_t dmaxfer_wait;
-#ifdef BT_OVER_PCIE
-	wait_queue_head_t quiesce_wait;
-#endif /* BT_OVER_PCIE */
 	uint32	default_wd_interval;
 
 	timer_list_compat_t timer;
 	bool wd_timer_valid;
-#ifdef DHD_PCIE_RUNTIMEPM
-	timer_list_compat_t rpm_timer;
-	bool rpm_timer_valid;
-	tsk_ctl_t	  thr_rpm_ctl;
-#endif /* DHD_PCIE_RUNTIMEPM */
 	struct tasklet_struct tasklet;
 	spinlock_t	sdlock;
 	spinlock_t	txqlock;
@@ -129,32 +127,35 @@ typedef struct dhd_info {
 
 	/* Wakelocks */
 #if defined(CONFIG_HAS_WAKELOCK)
-	struct wakeup_source wl_wifi;   /* Wifi wakelock */
-	struct wakeup_source wl_rxwake; /* Wifi rx wakelock */
-	struct wakeup_source wl_ctrlwake; /* Wifi ctrl wakelock */
-	struct wakeup_source wl_wdwake; /* Wifi wd wakelock */
-	struct wakeup_source wl_evtwake; /* Wifi event wakelock */
-	struct wakeup_source wl_pmwake;   /* Wifi pm handler wakelock */
-	struct wakeup_source wl_txflwake; /* Wifi tx flow wakelock */
+	struct wakeup_source *wl_wifi;   /* Wifi wakelock */
+	struct wakeup_source *wl_rxwake; /* Wifi rx wakelock */
+	struct wakeup_source *wl_ctrlwake; /* Wifi ctrl wakelock */
+	struct wakeup_source *wl_wdwake; /* Wifi wd wakelock */
+	struct wakeup_source *wl_evtwake; /* Wifi event wakelock */
+	struct wakeup_source *wl_pmwake;   /* Wifi pm handler wakelock */
+	struct wakeup_source *wl_txflwake; /* Wifi tx flow wakelock */
 #ifdef BCMPCIE_OOB_HOST_WAKE
-	struct wakeup_source wl_intrwake; /* Host wakeup wakelock */
+	struct wakeup_source *wl_intrwake; /* Host wakeup wakelock */
 #endif /* BCMPCIE_OOB_HOST_WAKE */
 #ifdef DHD_USE_SCAN_WAKELOCK
-	struct wakeup_source wl_scanwake;  /* Wifi scan wakelock */
+	struct wakeup_source *wl_scanwake;  /* Wifi scan wakelock */
 #endif /* DHD_USE_SCAN_WAKELOCK */
-	struct wakeup_source wl_nanwake; /* NAN wakelock */
+	struct wakeup_source *wl_nanwake; /* NAN wakelock */
 #endif /* CONFIG_HAS_WAKELOCK */
 
-	struct wake_lock rx_wakelock;
 #if defined(OEM_ANDROID)
 	/* net_device interface lock, prevent race conditions among net_dev interface
 	 * calls and wifi_on or wifi_off
 	 */
 	struct mutex dhd_net_if_mutex;
 	struct mutex dhd_suspend_mutex;
-#if defined(PKT_FILTER_SUPPORT) && defined(APF)
+#if defined(APF)
 	struct mutex dhd_apf_mutex;
-#endif /* PKT_FILTER_SUPPORT && APF */
+#endif /* APF */
+#else
+#if defined(APF)
+	struct mutex dhd_apf_mutex;
+#endif /* APF */
 #endif /* OEM_ANDROID */
 	spinlock_t wakelock_spinlock;
 	spinlock_t wakelock_evt_spinlock;
@@ -254,6 +255,11 @@ typedef struct dhd_info {
 	struct work_struct    tx_dispatcher_work;
 	struct work_struct    rx_compl_dispatcher_work;
 
+	/* Emergency queue to hold pkts when flow control is enabled and
+	 * same pkts will be posted back to the dongle till flow control is disabled.
+	*/
+	struct sk_buff_head   rx_emerge_queue	____cacheline_aligned;
+
 	/* Number of times DPC Tasklet ran */
 	uint32	dhd_dpc_cnt;
 	/* Number of times NAPI processing got scheduled */
@@ -352,7 +358,12 @@ typedef struct dhd_info {
 	uint32 *rxc_hist[HIST_BIN_SIZE];
 	struct kobject dhd_lb_kobj;
 	bool dhd_lb_candidacy_override;
+	enum cpuhp_state dhd_cpuhp_state;
 #endif /* DHD_LB */
+
+	/* DPC bounds sysfs */
+	struct kobject dhd_dpc_bounds_kobj;
+
 #if defined(DNGL_AXI_ERROR_LOGGING) && defined(DHD_USE_WQ_FOR_DNGL_AXI_ERROR)
 	struct work_struct	  axi_error_dispatcher_work;
 #endif /* DNGL_AXI_ERROR_LOGGING && DHD_USE_WQ_FOR_DNGL_AXI_ERROR */
@@ -364,24 +375,20 @@ typedef struct dhd_info {
 #endif /* DHD_USE_KTHREAD_FOR_LOGTRACE */
 #endif /* SHOW_LOGTRACE */
 
-#ifdef BTLOG
-	struct work_struct	  bt_log_dispatcher_work;
-#endif /* SHOW_LOGTRACE */
 #ifdef EWP_EDL
 	struct delayed_work edl_dispatcher_work;
 #endif
 #if defined(WLAN_ACCEL_BOOT)
-	int fs_check_retry;
-	struct delayed_work wl_accel_work;
 	bool wl_accel_force_reg_on;
-	bool wl_accel_boot_on_done;
 #endif
 #if defined(BCM_DNGL_EMBEDIMAGE) || defined(BCM_REQUEST_FW)
 #if defined(BCMDBUS)
 	struct task_struct *fw_download_task;
 	struct semaphore fw_download_lock;
+	bool fw_download_thread_exit;
 #endif /* BCMDBUS */
 #endif /* defined(BCM_DNGL_EMBEDIMAGE) || defined(BCM_REQUEST_FW) */
+	uint32 flag_kobj;    /* Add for duplicate kobj processing */
 	struct kobject dhd_kobj;
 	timer_list_compat_t timesync_timer;
 #if defined(BT_OVER_SDIO)
@@ -397,7 +404,7 @@ typedef struct dhd_info {
 	uint host_radiotap_conv;
 #endif /* HOST_RADIOTAP_CONV */
 #endif /* WL_MONITOR */
-#if defined (BT_OVER_SDIO)
+#if defined(BT_OVER_SDIO)
     struct mutex bus_user_lock; /* lock for sdio bus apis shared between WLAN & BT */
     int     bus_user_count; /* User counts of sdio bus shared between WLAN & BT */
 #endif /* BT_OVER_SDIO */
@@ -408,27 +415,13 @@ typedef struct dhd_info {
 	struct workqueue_struct *tx_wq;
 	struct workqueue_struct *rx_wq;
 #endif /* DHD_PCIE_NATIVE_RUNTIMEPM */
-#ifdef BTLOG
-	struct sk_buff_head   bt_log_queue     ____cacheline_aligned;
-#endif	/* BTLOG */
 #ifdef PCIE_INB_DW
 	wait_queue_head_t ds_exit_wait;
 #endif /* PCIE_INB_DW */
 #ifdef DHD_DEBUG_UART
 	bool duart_execute;
 #endif	/* DHD_DEBUG_UART */
-#ifdef BT_OVER_PCIE
-	struct mutex quiesce_flr_lock;
-	struct mutex quiesce_lock;
-	enum dhd_bus_quiesce_state dhd_quiesce_state;
-#endif /* BT_OVER_PCIE */
 	struct mutex logdump_lock;
-#if defined(GDB_PROXY) && defined(PCIE_FULL_DONGLE) && defined(BCMINTERNAL)
-	/* Root directory for GDB Proxy's (proc)fs files, used by first (default) interface */
-	struct proc_dir_entry *gdb_proxy_fs_root;
-	/* Name of procfs root directory */
-	char gdb_proxy_fs_root_name[100];
-#endif /* defined(GDB_PROXY) && defined(PCIE_FULL_DONGLE) && defined(BCMINTERNAL) */
 #if defined(DHD_MQ) && defined(DHD_MQ_STATS)
 	uint64 pktcnt_qac_histo[MQ_MAX_QUEUES][AC_COUNT];
 	uint64 pktcnt_per_ac[AC_COUNT];
@@ -436,18 +429,34 @@ typedef struct dhd_info {
 #endif /* DHD_MQ && DHD_MQ_STATS */
 	/* indicates mem_dump was scheduled as work queue or called directly */
 	bool scheduled_memdump;
-#ifdef DHD_PKTTS
-	bool latency; /* pktts enab flag */
-	pktts_flow_t config[PKTTS_CONFIG_MAX]; /* pktts user config */
-#endif /* DHD_PKTTS */
 	struct work_struct dhd_hang_process_work;
-#ifdef DHD_HP2P
-	spinlock_t	hp2p_lock;
-#endif /* DHD_HP2P */
-#ifdef DHD_QOS_ON_SOCK_FLOW
-	struct dhd_sock_qos_info *psk_qos;
+#ifdef WL_CFGVENDOR_SEND_ALERT_EVENT
+	struct work_struct dhd_alert_process_work;
+#endif /* WL_CFGVENDOR_SEND_ALERT_EVENT */
+#ifdef RX_PKT_POOL
+	pkt_pool_t rx_pkt_pool;
+	tsk_ctl_t rx_pktpool_thread;
 #endif
+#if defined(DHD_FILE_DUMP_EVENT) && defined(DHD_FW_COREDUMP)
+	osl_atomic_t dump_status;
+	struct work_struct dhd_dump_proc_work;
+#endif /* DHD_FILE_DUMP_EVENT && DHD_FW_COREDUMP */
 } dhd_info_t;
+
+/** priv_link is the link between netdev and the dhdif and dhd_info structs. */
+typedef struct dhd_dev_priv {
+	dhd_info_t * dhd; /* cached pointer to dhd_info in netdevice priv */
+	dhd_if_t   * ifp; /* cached pointer to dhd_if in netdevice priv */
+	int          ifidx; /* interface index */
+	void       * lkup;
+} dhd_dev_priv_t;
+
+#define DHD_DEV_PRIV_SIZE       (sizeof(dhd_dev_priv_t))
+#define DHD_DEV_PRIV(dev)       ((dhd_dev_priv_t *)DEV_PRIV(dev))
+#define DHD_DEV_INFO(dev)       (((dhd_dev_priv_t *)DEV_PRIV(dev))->dhd)
+#define DHD_DEV_IFP(dev)        (((dhd_dev_priv_t *)DEV_PRIV(dev))->ifp)
+#define DHD_DEV_IFIDX(dev)      (((dhd_dev_priv_t *)DEV_PRIV(dev))->ifidx)
+#define DHD_DEV_LKUP(dev)		(((dhd_dev_priv_t *)DEV_PRIV(dev))->lkup)
 
 #ifdef WL_MONITOR
 #define MONPKT_EXTRA_LEN	48u
@@ -495,21 +504,42 @@ int dhd_register_cpuhp_callback(dhd_info_t *dhd);
 int dhd_unregister_cpuhp_callback(dhd_info_t *dhd);
 #endif /* DHD_LB */
 
-#if defined(DHD_CONTROL_PCIE_CPUCORE_WIFI_TURNON)
+#ifdef RX_PKT_POOL
+void dhd_rx_pktpool_init(dhd_info_t *dhd);
+void dhd_rx_pktpool_deinit(dhd_info_t *dhd);
+#endif /* RX_PKT_POOL */
+
+#if defined(SET_PCIE_IRQ_CPU_CORE) || defined(DHD_CONTROL_PCIE_CPUCORE_WIFI_TURNON)
 void dhd_irq_set_affinity(dhd_pub_t *dhdp, const struct cpumask *cpumask);
-#endif /* DHD_CONTROL_PCIE_CPUCORE_WIFI_TURNON */
+#endif /* SET_PCIE_IRQ_CPU_CORE ||  DHD_CONTROL_PCIE_CPUCORE_WIFI_TURNON */
+
+void dhd_flush_logtrace_process(dhd_info_t *dhd);
+
 #ifdef DHD_SSSR_DUMP
 extern uint sssr_enab;
 extern uint fis_enab;
 #endif /* DHD_SSSR_DUMP */
 
+#if defined(ANDROID_VERSION) && (LINUX_VERSION_CODE  >= KERNEL_VERSION(4, 14, 0))
+#define WAKELOCK_BACKPORT
+#endif
+
 #ifdef CONFIG_HAS_WAKELOCK
-enum {
-	WAKE_LOCK_SUSPEND, /* Prevent suspend */
-	WAKE_LOCK_TYPE_COUNT
-};
-#define dhd_wake_lock_init(wakeup_source, type, name)	wakeup_source_add(wakeup_source)
-#define dhd_wake_lock_destroy(wakeup_source)		wakeup_source_remove(wakeup_source)
+#if ((LINUX_VERSION_CODE  >= KERNEL_VERSION(5, 4, 0)) || defined(WAKELOCK_BACKPORT))
+#define dhd_wake_lock_init(wakeup_source, dev, name) \
+do { \
+	wakeup_source = wakeup_source_register(dev, name); \
+} while (0);
+#else
+#define dhd_wake_lock_init(wakeup_source, dev, name) \
+do { \
+	wakeup_source = wakeup_source_register(name); \
+} while (0);
+#endif /* LINUX_VERSION >= 5.4.0 */
+#define dhd_wake_lock_destroy(wakeup_source) \
+do { \
+	wakeup_source_unregister(wakeup_source); \
+} while (0);
 #define dhd_wake_lock(wakeup_source)			__pm_stay_awake(wakeup_source)
 #define dhd_wake_unlock(wakeup_source)			__pm_relax(wakeup_source)
 #define dhd_wake_lock_active(wakeup_source)		((wakeup_source)->active)

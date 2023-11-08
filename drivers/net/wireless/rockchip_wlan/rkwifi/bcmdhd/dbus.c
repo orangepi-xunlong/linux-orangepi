@@ -1,18 +1,17 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 /** @file dbus.c
  *
  * Hides details of USB / SDIO / SPI interfaces and OS details. It is intended to shield details and
  * provide the caller with one common bus interface for all dongle devices. In practice, it is only
  * used for USB interfaces. DBUS is not a protocol, but an abstraction layer.
  *
- * Copyright (C) 1999-2016, Broadcom Corporation
- * 
+ * Copyright (C) 2022, Broadcom.
+ *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
  * under the terms of the GNU General Public License version 2 (the "GPL"),
  * available at http://www.broadcom.com/licenses/GPLv2.php, with the
  * following added to such license:
- * 
+ *
  *      As a special exception, the copyright holders of this software give you
  * permission to link this software with independent modules, and to copy and
  * distribute the resulting executable under terms of your choice, provided that
@@ -20,17 +19,10 @@
  * the license of that module.  An independent module is a module which is not
  * derived from this software.  The special exception does not apply to any
  * modifications of the software.
- * 
- *      Notwithstanding the above, under no circumstances may you combine this
- * software in any way with any other Broadcom software provided under a license
- * other than the GPL, without Broadcom's express prior written consent.
  *
  *
- * <<Broadcom-WL-IPTag/Open:>>
- *
- * $Id: dbus.c 553311 2015-04-29 10:23:08Z $
+ * <<Broadcom-WL-IPTag/Dual:>>
  */
-
 
 #include <linux/usb.h>
 #include "osl.h"
@@ -43,8 +35,22 @@
 #include <dhd_wlfc.h>
 #endif
 #include <dhd_config.h>
+#ifdef WL_CFG80211
+#include <wl_cfg80211.h>
+#include <wl_cfgp2p.h>
+#endif
 
-#if defined(BCM_REQUEST_FW)
+#include <bcmdevs_legacy.h>
+#if defined(BCM_DNGL_EMBEDIMAGE)
+#include <bcmsrom_fmt.h>
+#include <trxhdr.h>
+#include <usbrdl.h>
+#include <bcmendian.h>
+#include <zutil.h>
+#include <sbpcmcia.h>
+#include <bcmnvram.h>
+#include <bcmdevs.h>
+#elif defined(BCM_REQUEST_FW)
 #include <bcmsrom_fmt.h>
 #include <trxhdr.h>
 #include <usbrdl.h>
@@ -52,15 +58,42 @@
 #include <sbpcmcia.h>
 #include <bcmnvram.h>
 #include <bcmdevs.h>
+#endif /* #if defined(BCM_DNGL_EMBEDIMAGE) */
+#if defined(EHCI_FASTPATH_TX) || defined(EHCI_FASTPATH_RX)
+#include <linux/usb.h>
+#endif /* EHCI_FASTPATH_TX || EHCI_FASTPATH_RX */
+
+#if defined(BCM_DNGL_EMBEDIMAGE)
+/* zlib file format field ids etc from gzio.c */
+#define Z_DEFLATED     8
+#define ASCII_FLAG     0x01 /**< bit 0 set: file probably ascii text */
+#define HEAD_CRC       0x02 /**< bit 1 set: header CRC present */
+#define EXTRA_FIELD    0x04 /**< bit 2 set: extra field present */
+#define ORIG_NAME      0x08 /**< bit 3 set: original file name present */
+#define COMMENT        0x10 /**< bit 4 set: file comment present */
+#define RESERVED       0xE0 /**< bits 5..7: reserved */
+
+/* Rename define */
+#ifdef WL_FW_DECOMP
+#define UNZIP_ENAB(info)  1
+#else
+#define UNZIP_ENAB(info)  0
+
+#ifdef inflateInit2
+#undef inflateInit2
+#define inflateInit2(a, b)  Z_ERRNO
 #endif
+#define inflate(a, b)       Z_STREAM_ERROR
+#define inflateEnd(a)       do {} while (0)
+#define crc32(a, b, c)      -1
+#define free(a)             do {} while (0)
+#endif /* WL_FW_DECOMP */
 
-
-
-#if defined(BCM_REQUEST_FW)
+#elif defined(BCM_REQUEST_FW)
 #ifndef VARS_MAX
 #define VARS_MAX            8192
 #endif
-#endif
+#endif /* #if defined(BCM_DNGL_EMBEDIMAGE) */
 
 #ifdef DBUS_USB_LOOPBACK
 extern bool is_loopback_pkt(void *buf);
@@ -83,26 +116,33 @@ typedef struct dhd_bus {
 	dhd_pub_t *dhd;
 
 	void        *cbarg;
-	dbus_callbacks_t *cbs; /* callbacks to higher level, e.g. dhd_linux.c */
+	dbus_callbacks_t *cbs; /**< callbacks to higher level, eg dhd_linux.c */
 	void        *bus_info;
-	dbus_intf_t *drvintf;  /* callbacks to lower level, e.g. dbus_usb.c or dbus_usb_linux.c */
+	dbus_intf_t *drvintf;  /**< callbacks to lower level, eg dbus_usb.c or dbus_usb_linux.c */
 	uint8       *fw;
 	int         fwlen;
 	uint32      errmask;
-	int         rx_low_watermark;  /* avoid rx overflow by filling rx with free IRBs */
+	int         rx_low_watermark;  /**< avoid rx overflow by filling rx with free IRBs */
 	int         tx_low_watermark;
 	bool        txoff;
-	bool        txoverride;   /* flow control related */
+	bool        txoverride;   /**< flow control related */
 	bool        rxoff;
 	bool        tx_timer_ticking;
-
+	uint ctl_completed;
 
 	dbus_irbq_t *rx_q;
 	dbus_irbq_t *tx_q;
 
+#ifdef BCMDBG
+	int         *txpend_q_hist;
+	int         *rxpend_q_hist;
+#endif /* BCMDBG */
+#ifdef EHCI_FASTPATH_RX
+	atomic_t    rx_outstanding;
+#endif
 	uint8        *nvram;
 	int          nvram_len;
-	uint8        *image;  /* buffer for combine fw and nvram */
+	uint8        *image;  /**< buffer for combine fw and nvram */
 	int          image_len;
 	uint8        *orig_fw;
 	int          origfw_len;
@@ -115,6 +155,7 @@ typedef struct dhd_bus {
 #endif
 	char		*fw_path;		/* module_param: path to firmware image */
 	char		*nv_path;		/* module_param: path to nvram vars file */
+	uint64 last_suspend_end_time;
 } dhd_bus_t;
 
 struct exec_parms {
@@ -153,12 +194,13 @@ static void dbus_if_pktfree(void *handle, void *p, bool send);
 static struct dbus_irb *dbus_if_getirb(void *cbarg, bool send);
 static void dbus_if_rxerr_indicate(void *handle, bool on);
 
-void * dhd_dbus_probe_cb(void *arg, const char *desc, uint32 bustype,
-	uint16 bus_no, uint16 slot, uint32 hdrlen);
-void dhd_dbus_disconnect_cb(void *arg);
-void dbus_detach(dhd_bus_t *pub);
+static int dbus_suspend(void *context);
+static int dbus_resume(void *context);
+static void * dhd_dbus_probe_cb(uint16 bus_no, uint16 slot, uint32 hdrlen);
+static void dhd_dbus_disconnect_cb(void *arg);
+static void dbus_detach(dhd_bus_t *pub);
 
-/** functions in this file that are called by lower DBUS levels, e.g. dbus_usb.c */
+/** functions in this file that are called by lower DBUS levels, eg dbus_usb.c */
 static dbus_intf_callbacks_t dbus_intf_cbs = {
 	dbus_if_send_irb_timeout,
 	dbus_if_send_irb_complete,
@@ -166,9 +208,9 @@ static dbus_intf_callbacks_t dbus_intf_cbs = {
 	dbus_if_errhandler,
 	dbus_if_ctl_complete,
 	dbus_if_state_change,
-	NULL,			/* isr */
-	NULL,			/* dpc */
-	NULL,			/* watchdog */
+	NULL,			/**< isr */
+	NULL,			/**< dpc */
+	NULL,			/**< watchdog */
 	dbus_if_pktget,
 	dbus_if_pktfree,
 	dbus_if_getirb,
@@ -181,13 +223,9 @@ static dbus_intf_callbacks_t dbus_intf_cbs = {
  * can be called inside disconnect()
  */
 static dbus_intf_t     *g_busintf = NULL;
-static probe_cb_t      probe_cb = NULL;
-static disconnect_cb_t disconnect_cb = NULL;
-static void            *probe_arg = NULL;
-static void            *disc_arg = NULL;
 
 #if defined(BCM_REQUEST_FW)
-int8 *nonfwnvram = NULL; /* stand-alone multi-nvram given with driver load */
+int8 *nonfwnvram = NULL; /**< stand-alone multi-nvram given with driver load */
 int nonfwnvramlen = 0;
 #endif /* #if defined(BCM_REQUEST_FW) */
 
@@ -202,24 +240,24 @@ static int   dbus_irbq_init(dhd_bus_t *dhd_bus, dbus_irbq_t *q, int nq, int size
 static int   dbus_irbq_deinit(dhd_bus_t *dhd_bus, dbus_irbq_t *q, int size_irb);
 static int   dbus_rxirbs_fill(dhd_bus_t *dhd_bus);
 static int   dbus_send_irb(dbus_pub_t *pub, uint8 *buf, int len, void *pkt, void *info);
-static void  dbus_disconnect(void *handle);
-static void *dbus_probe(void *arg, const char *desc, uint32 bustype,
-	uint16 bus_no, uint16 slot, uint32 hdrlen);
 
+#if (defined(BCM_DNGL_EMBEDIMAGE) || defined(BCM_REQUEST_FW))
 #if defined(BCM_REQUEST_FW)
 extern char * dngl_firmware;
 extern unsigned int dngl_fwlen;
+#endif  /* #if defined(BCM_REQUEST_FW) */
 #ifndef EXTERNAL_FW_PATH
 static int dbus_get_nvram(dhd_bus_t *dhd_bus);
 static int dbus_jumbo_nvram(dhd_bus_t *dhd_bus);
-static int dbus_otp(dhd_bus_t *dhd_bus, uint16 *boardtype, uint16 *boardrev);
 static int dbus_select_nvram(dhd_bus_t *dhd_bus, int8 *jumbonvram, int jumbolen,
 uint16 boardtype, uint16 boardrev, int8 **nvram, int *nvram_len);
 #endif /* !EXTERNAL_FW_PATH */
-extern int dbus_zlib_decomp(dhd_bus_t *dhd_bus);
+#ifndef BCM_REQUEST_FW
+static int dbus_zlib_decomp(dhd_bus_t *dhd_bus);
 extern void *dbus_zlib_calloc(int num, int size);
 extern void dbus_zlib_free(void *ptr);
 #endif
+#endif /* defined(BCM_DNGL_EMBEDIMAGE) || defined(BCM_REQUEST_FW) */
 
 /* function */
 void
@@ -375,13 +413,12 @@ dbus_irbq_init(dhd_bus_t *dhd_bus, dbus_irbq_t *q, int nq, int size_irb)
 	ASSERT(dhd_bus);
 
 	for (i = 0; i < nq; i++) {
-		/* MALLOC dbus_irb_tx or dbus_irb_rx, but cast to simple dbus_irb_t linkedlist */
-		irb = (dbus_irb_t *) MALLOC(dhd_bus->pub.osh, size_irb);
+		/* MALLOCZ dbus_irb_tx or dbus_irb_rx, but cast to simple dbus_irb_t linkedlist */
+		irb = (dbus_irb_t *) MALLOCZ(dhd_bus->pub.osh, size_irb);
 		if (irb == NULL) {
 			ASSERT(irb);
 			return DBUS_ERR;
 		}
-		bzero(irb, size_irb);
 
 		/* q_enq() does not need to go through EXEC_xxLOCK() during init() */
 		q_enq(q, irb);
@@ -417,6 +454,21 @@ dbus_rxirbs_fill(dhd_bus_t *dhd_bus)
 {
 	int err = DBUS_OK;
 
+#ifdef EHCI_FASTPATH_RX
+	while (atomic_read(&dhd_bus->rx_outstanding) < 100) /* TODO: Improve constant */
+	{
+#if defined(BCM_RPC_NOCOPY) || defined(BCM_RPC_RXNOCOPY)
+		/* NOCOPY force new packet allocation */
+		optimize_submit_rx_request(&dhd_bus->pub, 1, NULL, NULL);
+#else
+		/* Copy mode - allocate own buffer to be reused */
+		void *buf = MALLOCZ(dhd_bus->pub.osh, 4000); /* usbos_info->rxbuf_len */
+		optimize_submit_rx_request(&dhd_bus->pub, 1, NULL, buf);
+		/* ME: Need to check result and set err = DBUS_ERR_RXDROP */
+#endif /* BCM_RPC_NOCOPY || BCM_RPC_RXNOCOPY */
+		atomic_inc(&dhd_bus->rx_outstanding);
+	}
+#else /* EHCI_FASTPATH_RX */
 
 	dbus_irb_rx_t *rxirb;
 	struct exec_parms args;
@@ -456,6 +508,7 @@ dbus_rxirbs_fill(dhd_bus_t *dhd_bus)
 			}
 		}
 	}
+#endif /* EHCI_FASTPATH_RX */
 	return err;
 } /* dbus_rxirbs_fill */
 
@@ -501,9 +554,11 @@ dbus_send_irb(dbus_pub_t *pub, uint8 *buf, int len, void *pkt, void *info)
 {
 	dhd_bus_t *dhd_bus = (dhd_bus_t *) pub;
 	int err = DBUS_OK;
+#ifndef EHCI_FASTPATH_TX
 	dbus_irb_tx_t *txirb = NULL;
 	int txirb_pending;
 	struct exec_parms args;
+#endif /* EHCI_FASTPATH_TX */
 
 	if (dhd_bus == NULL)
 		return DBUS_ERR;
@@ -512,6 +567,43 @@ dbus_send_irb(dbus_pub_t *pub, uint8 *buf, int len, void *pkt, void *info)
 
 	if (dhd_bus->pub.busstate == DBUS_STATE_UP ||
 		dhd_bus->pub.busstate == DBUS_STATE_SLEEP) {
+#ifdef EHCI_FASTPATH_TX
+		struct ehci_qtd *qtd;
+		int token = EHCI_QTD_SET_CERR(3);
+		int len;
+
+		ASSERT(buf == NULL); /* Not handled */
+		ASSERT(pkt != NULL);
+
+		qtd = optimize_ehci_qtd_alloc(GFP_KERNEL);
+
+		if (qtd == NULL)
+			return DBUS_ERR;
+
+		len = PKTLEN(pub->osh, pkt);
+
+		len = ROUNDUP(len, sizeof(uint32));
+
+#ifdef BCMDBG
+		/* The packet length is already padded to not to be multiple of 512 bytes
+		 * in bcm_rpc_tp_buf_send_internal(), so it should not be 512*N bytes here.
+		 */
+		if (len % EHCI_BULK_PACKET_SIZE == 0) {
+			DBUSERR(("%s: len = %d (multiple of 512 bytes)\n", __FUNCTION__, len));
+			return DBUS_ERR_TXDROP;
+		}
+#endif /* BCMDBG */
+
+		optimize_qtd_fill_with_rpc(pub, 0, qtd, pkt, token, len);
+		err = optimize_submit_async(qtd, 0);
+
+		if (err) {
+			optimize_ehci_qtd_free(qtd);
+			err = DBUS_ERR_TXDROP;
+		}
+
+		/* ME: Add timeout? */
+#else
 		args.qdeq.q = dhd_bus->tx_q;
 		if (dhd_bus->drvintf)
 			txirb = EXEC_TXLOCK(dhd_bus, q_deq_exec, &args);
@@ -549,11 +641,15 @@ dbus_send_irb(dbus_pub_t *pub, uint8 *buf, int len, void *pkt, void *info)
 			} else {
 				dbus_tx_timer_start(dhd_bus, DBUS_TX_TIMEOUT_INTERVAL);
 				txirb_pending = dhd_bus->pub.ntxq - dhd_bus->tx_q->cnt;
+#ifdef BCMDBG
+				dhd_bus->txpend_q_hist[txirb_pending]++;
+#endif /* BCMDBG */
 				if (txirb_pending > (dhd_bus->tx_low_watermark * 3)) {
 					dbus_flowctrl_tx(dhd_bus, TRUE);
 				}
 			}
 		}
+#endif /* EHCI_FASTPATH_TX */
 	} else {
 		err = DBUS_ERR_TXFAIL;
 		DBUSTRACE(("%s: bus down, send_irb failed\n", __FUNCTION__));
@@ -562,7 +658,7 @@ dbus_send_irb(dbus_pub_t *pub, uint8 *buf, int len, void *pkt, void *info)
 	return err;
 } /* dbus_send_irb */
 
-#if defined(BCM_REQUEST_FW)
+#if (defined(BCM_DNGL_EMBEDIMAGE) || defined(BCM_REQUEST_FW))
 
 /**
  * Before downloading a firmware image into the dongle, the validity of the image must be checked.
@@ -603,7 +699,7 @@ check_file(osl_t *osh, unsigned char *headers)
 
 #ifdef EXTERNAL_FW_PATH
 static int
-dbus_get_fw_nvram(dhd_bus_t *dhd_bus, char *pfw_path, char *pnv_path)
+dbus_get_fw_nvram(dhd_bus_t *dhd_bus)
 {
 	int bcmerror = -1, i;
 	uint len, total_len;
@@ -618,6 +714,8 @@ dbus_get_fw_nvram(dhd_bus_t *dhd_bus, char *pfw_path, char *pnv_path)
 	struct trx_header *hdr;
 	uint32 img_offset = 0;
 	int offset = 0;
+	char *pfw_path = dhd_bus->fw_path;
+	char *pnv_path = dhd_bus->nv_path;
 
 	/* For Get nvram */
 	file_exists = ((pnv_path != NULL) && (pnv_path[0] != '\0'));
@@ -750,11 +848,11 @@ err:
  * the dongle
  */
 static int
-dbus_do_download(dhd_bus_t *dhd_bus, char *pfw_path, char *pnv_path)
+dbus_do_download(dhd_bus_t *dhd_bus)
 {
 	int err = DBUS_OK;
 
-	err = dbus_get_fw_nvram(dhd_bus, pfw_path, pnv_path);
+	err = dbus_get_fw_nvram(dhd_bus);
 	if (err) {
 		DBUSERR(("dbus_do_download: fail to get nvram %d\n", err));
 		return err;
@@ -797,12 +895,6 @@ dbus_jumbo_nvram(dhd_bus_t *dhd_bus)
 	int ret = DBUS_OK;
 	uint16 boardrev = 0xFFFF;
 	uint16 boardtype = 0xFFFF;
-
-	/* read the otp for boardrev & boardtype
-	* if boardtype/rev are present in otp
-	* select nvram data for that boardtype/rev
-	*/
-	dbus_otp(dhd_bus, &boardtype, &boardrev);
 
 	ret = dbus_select_nvram(dhd_bus, dhd_bus->extdl.vars, dhd_bus->extdl.varslen,
 		boardtype, boardrev, &nvram, &nvram_len);
@@ -862,7 +954,17 @@ dbus_get_nvram(dhd_bus_t *dhd_bus)
 			nvram_words_pad = 4 - dhd_bus->nvram_len % 4;
 
 		len = actual_fwlen + dhd_bus->nvram_len + nvram_words_pad;
-		dhd_bus->image = MALLOC(dhd_bus->pub.osh, len);
+#ifdef USBAP
+		/* Allocate virtual memory otherwise it might fail on embedded systems */
+		dhd_bus->image = VMALLOC(dhd_bus->pub.osh, len);
+#else
+#if defined(CONFIG_DHD_USE_STATIC_BUF)
+		dhd_bus->image = (uint8*)DHD_OS_PREALLOC(dhd_bus->dhd,
+			DHD_PREALLOC_MEMDUMP_RAM, len);
+#else
+		dhd_bus->image = MALLOCZ(dhd_bus->pub.osh, len);
+#endif /* CONFIG_DHD_USE_STATIC_BUF */
+#endif /* USBAP */
 		dhd_bus->image_len = len;
 		if (dhd_bus->image == NULL) {
 			DBUSERR(("%s: malloc failed!\n", __FUNCTION__));
@@ -894,6 +996,7 @@ dbus_get_nvram(dhd_bus_t *dhd_bus)
 				hdr->offsets[TRX_OFFSETS_DSG_LEN_IDX] +
 				hdr->offsets[TRX_OFFSETS_CFG_LEN_IDX]);
 
+			/* Not needed */
 			img_offset += hdr->offsets[TRX_OFFSETS_DSG_LEN_IDX] +
 				hdr->offsets[TRX_OFFSETS_CFG_LEN_IDX];
 		}
@@ -938,13 +1041,28 @@ dbus_do_download(dhd_bus_t *dhd_bus)
 	int temp_len;
 #endif
 
-#if defined(BCM_REQUEST_FW)
+#if defined(BCM_DNGL_EMBEDIMAGE)
+	if (dhd_bus->extdl.fw && (dhd_bus->extdl.fwlen > 0)) {
+		dhd_bus->fw = (uint8 *)dhd_bus->extdl.fw;
+		dhd_bus->fwlen = dhd_bus->extdl.fwlen;
+		DBUSERR(("dbus_do_download: using override firmmware %d bytes\n",
+			dhd_bus->fwlen));
+	} else
+		dbus_bus_fw_get(dhd_bus->bus_info, &dhd_bus->fw, &dhd_bus->fwlen,
+			&decomp_override);
+
+	if (!dhd_bus->fw) {
+		DBUSERR(("dbus_do_download: devid 0x%x / %d not supported\n",
+			dhd_bus->pub.attrib.devid, dhd_bus->pub.attrib.devid));
+		return DBUS_ERR;
+	}
+#elif defined(BCM_REQUEST_FW)
 	dhd_bus->firmware = dbus_get_fw_nvfile(dhd_bus->pub.attrib.devid,
 		dhd_bus->pub.attrib.chiprev, &dhd_bus->fw, &dhd_bus->fwlen,
-		DBUS_FIRMWARE, 0, 0);
+		DBUS_FIRMWARE, 0, 0, dhd_bus->fw_path);
 	if (!dhd_bus->firmware)
 		return DBUS_ERR;
-#endif
+#endif /* defined(BCM_DNGL_EMBEDIMAGE) */
 
 	dhd_bus->image = dhd_bus->fw;
 	dhd_bus->image_len = (uint32)dhd_bus->fwlen;
@@ -960,16 +1078,14 @@ dbus_do_download(dhd_bus_t *dhd_bus)
 #endif
 
 #if defined(BCM_REQUEST_FW)
-	/* check if firmware is appended with nvram file */
-	err = dbus_otp(dhd_bus, &boardtype, &boardrev);
 	/* check if nvram is provided as separte file */
 	nonfwnvram = NULL;
 	nonfwnvramlen = 0;
 	dhd_bus->nvfile = dbus_get_fw_nvfile(dhd_bus->pub.attrib.devid,
 		dhd_bus->pub.attrib.chiprev, (void *)&temp_nvram, &temp_len,
-		DBUS_NVFILE, boardtype, boardrev);
+		DBUS_NVFILE, boardtype, boardrev, dhd_bus->nv_path);
 	if (dhd_bus->nvfile) {
-		int8 *tmp = MALLOC(dhd_bus->pub.osh, temp_len);
+		int8 *tmp = MALLOCZ(dhd_bus->pub.osh, temp_len);
 		if (tmp) {
 			bcopy(temp_nvram, tmp, temp_len);
 			nonfwnvram = tmp;
@@ -987,7 +1103,6 @@ dbus_do_download(dhd_bus_t *dhd_bus)
 		return err;
 	}
 
-
 	if (dhd_bus->drvintf->dlstart && dhd_bus->drvintf->dlrun) {
 		err = dhd_bus->drvintf->dlstart(dhd_bus->bus_info,
 			dhd_bus->image, dhd_bus->image_len);
@@ -998,7 +1113,15 @@ dbus_do_download(dhd_bus_t *dhd_bus)
 		err = DBUS_ERR;
 
 	if (dhd_bus->nvram) {
+#ifdef USBAP
+		VMFREE(dhd_bus->pub.osh, dhd_bus->image, dhd_bus->image_len);
+#else
+#if defined(CONFIG_DHD_USE_STATIC_BUF)
+		DHD_OS_PREFREE(dhd_bus->dhd, dhd_bus->image, dhd_bus->image_len);
+#else
 		MFREE(dhd_bus->pub.osh, dhd_bus->image, dhd_bus->image_len);
+#endif /* CONFIG_DHD_USE_STATIC_BUF */
+#endif /* USBAP */
 		dhd_bus->image = dhd_bus->fw;
 		dhd_bus->image_len = (uint32)dhd_bus->fwlen;
 	}
@@ -1030,17 +1153,7 @@ fail:
 	return err;
 } /* dbus_do_download */
 #endif /* EXTERNAL_FW_PATH */
-#endif
-
-/** required for DBUS deregistration */
-static void
-dbus_disconnect(void *handle)
-{
-	DBUSTRACE(("%s\n", __FUNCTION__));
-
-	if (disconnect_cb)
-		disconnect_cb(disc_arg);
-}
+#endif /* defined(BCM_DNGL_EMBEDIMAGE) || defined(BCM_REQUEST_FW) */
 
 /**
  * This function is called when the sent irb times out without a tx response status.
@@ -1057,13 +1170,17 @@ dbus_if_send_irb_timeout(void *handle, dbus_irb_tx_t *txirb)
 
 	DBUSTRACE(("%s\n", __FUNCTION__));
 
+	/* Timeout in DBUS is fatal until we have a reproducible case. If the time out really
+	 * happen, then retry needs to be fixed to maintain the order of IRPs going out
+	 * (cancel in reverse order)
+	 */
 	return;
 
 } /* dbus_if_send_irb_timeout */
 
 /**
  * When lower DBUS level signals that a send IRB completed, either successful or not, the higher
- * level (e.g. dhd_linux.c) has to be notified, and transmit flow control has to be evaluated.
+ * level (eg dhd_linux.c) has to be notified, and transmit flow control has to be evaluated.
  */
 static void
 dbus_if_send_irb_complete(void *handle, dbus_irb_tx_t *txirb, int status)
@@ -1168,6 +1285,9 @@ dbus_if_recv_irb_complete(void *handle, dbus_irb_rx_t *rxirb, int status)
 			}
 
 			rxirb_pending = dhd_bus->pub.nrxq - dhd_bus->rx_q->cnt - 1;
+#ifdef BCMDBG
+			dhd_bus->rxpend_q_hist[rxirb_pending]++;
+#endif /* BCMDBG */
 			if ((rxirb_pending <= dhd_bus->rx_low_watermark) &&
 				!dhd_bus->rxoff) {
 				DBUSTRACE(("Low watermark so submit more %d <= %d \n",
@@ -1216,7 +1336,7 @@ dbus_if_recv_irb_complete(void *handle, dbus_irb_rx_t *rxirb, int status)
 } /* dbus_if_recv_irb_complete */
 
 /**
- *  Accumulate errors signaled by lower DBUS levels and signal them to higher (e.g. dhd_linux.c)
+ *  Accumulate errors signaled by lower DBUS levels and signal them to higher (eg dhd_linux.c)
  *  level.
  */
 static void
@@ -1254,7 +1374,7 @@ dbus_if_errhandler(void *handle, int err)
 }
 
 /**
- * When lower DBUS level signals control IRB completed, higher level (e.g. dhd_linux.c) has to be
+ * When lower DBUS level signals control IRB completed, higher level (eg dhd_linux.c) has to be
  * notified.
  */
 static void
@@ -1278,7 +1398,7 @@ dbus_if_ctl_complete(void *handle, int type, int status)
 /**
  * Rx related functionality (flow control, posting of free IRBs to rx queue) is dependent upon the
  * bus state. When lower DBUS level signals a change in the interface state, take appropriate action
- * and forward the signaling to the higher (e.g. dhd_linux.c) level.
+ * and forward the signaling to the higher (eg dhd_linux.c) level.
  */
 static void
 dbus_if_state_change(void *handle, int state)
@@ -1373,25 +1493,20 @@ dbus_if_getirb(void *cbarg, bool send)
 	return irb;
 }
 
-/**
- * Called as part of DBUS bus registration. Calls back into higher level (e.g. dhd_linux.c) probe
- * function.
+/* Register/Unregister functions are called by the main DHD entry
+ * point (e.g. module insertion) to link with the bus driver, in
+ * order to look for or await the device.
  */
-static void *
-dbus_probe(void *arg, const char *desc, uint32 bustype, uint16 bus_no,
-	uint16 slot, uint32 hdrlen)
-{
-	DBUSTRACE(("%s\n", __FUNCTION__));
-	if (probe_cb) {
-		disc_arg = probe_cb(probe_arg, desc, bustype, bus_no, slot, hdrlen);
-		return disc_arg;
-	}
 
-	return (void *)DBUS_ERR;
-}
+static dbus_driver_t dhd_dbus = {
+	dhd_dbus_probe_cb,
+	dhd_dbus_disconnect_cb,
+	dbus_suspend,
+	dbus_resume
+};
 
 /**
- * As part of initialization, higher level (e.g. dhd_linux.c) requests DBUS to prepare for
+ * As part of initialization, higher level (eg dhd_linux.c) requests DBUS to prepare for
  * action.
  */
 int
@@ -1401,12 +1516,7 @@ dhd_bus_register(void)
 
 	DBUSTRACE(("%s: Enter\n", __FUNCTION__));
 
-	probe_cb = dhd_dbus_probe_cb;
-	disconnect_cb = dhd_dbus_disconnect_cb;
-	probe_arg = NULL;
-
-	err = dbus_bus_register(0xa5c, 0x48f, dbus_probe, /* call lower DBUS level register function */
-		dbus_disconnect, NULL, &g_busintf, NULL, NULL);
+	err = dbus_bus_register(&dhd_dbus, &g_busintf);
 
 	/* Device not detected */
 	if (err == DBUS_ERR_NODEVICE)
@@ -1416,11 +1526,10 @@ dhd_bus_register(void)
 }
 
 dhd_pub_t *g_pub = NULL;
+bool net_attached = FALSE;
 void
 dhd_bus_unregister(void)
 {
-	int ret;
-
 	DBUSTRACE(("%s\n", __FUNCTION__));
 
 	DHD_MUTEX_LOCK();
@@ -1430,11 +1539,8 @@ dhd_bus_unregister(void)
 			dhd_dbus_disconnect_cb(g_pub->bus);
 		}
 	}
-	probe_cb = NULL;
 	DHD_MUTEX_UNLOCK();
-	ret = dbus_bus_deregister();
-	disconnect_cb = NULL;
-	probe_arg = NULL;
+	dbus_bus_deregister();
 }
 
 /** As part of initialization, data structures have to be allocated and initialized */
@@ -1453,13 +1559,11 @@ dbus_attach(osl_t *osh, int rxsize, int nrxq, int ntxq, dhd_pub_t *pub,
 	if ((nrxq <= 0) || (ntxq <= 0))
 		return NULL;
 
-	dhd_bus = MALLOC(osh, sizeof(dhd_bus_t));
+	dhd_bus = MALLOCZ(osh, sizeof(dhd_bus_t));
 	if (dhd_bus == NULL) {
 		DBUSERR(("%s: malloc failed %zu\n", __FUNCTION__, sizeof(dhd_bus_t)));
 		return NULL;
 	}
-
-	bzero(dhd_bus, sizeof(dhd_bus_t));
 
 	/* BUS-specific driver interface (at a lower DBUS level) */
 	dhd_bus->drvintf = g_busintf;
@@ -1470,31 +1574,42 @@ dbus_attach(osl_t *osh, int rxsize, int nrxq, int ntxq, dhd_pub_t *pub,
 	dhd_bus->pub.osh = osh;
 	dhd_bus->pub.rxsize = rxsize;
 
+#ifdef EHCI_FASTPATH_RX
+	atomic_set(&dhd_bus->rx_outstanding, 0);
+#endif
+
 	dhd_bus->pub.nrxq = nrxq;
 	dhd_bus->rx_low_watermark = nrxq / 2;	/* keep enough posted rx urbs */
 	dhd_bus->pub.ntxq = ntxq;
 	dhd_bus->tx_low_watermark = ntxq / 4;	/* flow control when too many tx urbs posted */
 
-	dhd_bus->tx_q = MALLOC(osh, sizeof(dbus_irbq_t));
+	dhd_bus->tx_q = MALLOCZ(osh, sizeof(dbus_irbq_t));
 	if (dhd_bus->tx_q == NULL)
 		goto error;
 	else {
-		bzero(dhd_bus->tx_q, sizeof(dbus_irbq_t));
 		err = dbus_irbq_init(dhd_bus, dhd_bus->tx_q, ntxq, sizeof(dbus_irb_tx_t));
 		if (err != DBUS_OK)
 			goto error;
 	}
 
-	dhd_bus->rx_q = MALLOC(osh, sizeof(dbus_irbq_t));
+	dhd_bus->rx_q = MALLOCZ(osh, sizeof(dbus_irbq_t));
 	if (dhd_bus->rx_q == NULL)
 		goto error;
 	else {
-		bzero(dhd_bus->rx_q, sizeof(dbus_irbq_t));
 		err = dbus_irbq_init(dhd_bus, dhd_bus->rx_q, nrxq, sizeof(dbus_irb_rx_t));
 		if (err != DBUS_OK)
 			goto error;
 	}
 
+#ifdef BCMDBG
+	dhd_bus->txpend_q_hist = MALLOCZ(osh, dhd_bus->pub.ntxq * sizeof(int));
+	if (dhd_bus->txpend_q_hist == NULL)
+		goto error;
+
+	dhd_bus->rxpend_q_hist = MALLOCZ(osh, dhd_bus->pub.nrxq * sizeof(int));
+	if (dhd_bus->rxpend_q_hist == NULL)
+		goto error;
+#endif /* BCMDBG */
 
 	dhd_bus->bus_info = (void *)g_busintf->attach(&dhd_bus->pub,
 		dhd_bus, &dbus_intf_cbs);
@@ -1503,10 +1618,10 @@ dbus_attach(osl_t *osh, int rxsize, int nrxq, int ntxq, dhd_pub_t *pub,
 
 	dbus_tx_timer_init(dhd_bus);
 
-#if defined(BCM_REQUEST_FW)
+#if defined(BCM_DNGL_EMBEDIMAGE) || defined(BCM_REQUEST_FW)
 	/* Need to copy external image for re-download */
 	if (extdl && extdl->fw && (extdl->fwlen > 0)) {
-		dhd_bus->extdl.fw = MALLOC(osh, extdl->fwlen);
+		dhd_bus->extdl.fw = MALLOCZ(osh, extdl->fwlen);
 		if (dhd_bus->extdl.fw) {
 			bcopy(extdl->fw, dhd_bus->extdl.fw, extdl->fwlen);
 			dhd_bus->extdl.fwlen = extdl->fwlen;
@@ -1514,13 +1629,13 @@ dbus_attach(osl_t *osh, int rxsize, int nrxq, int ntxq, dhd_pub_t *pub,
 	}
 
 	if (extdl && extdl->vars && (extdl->varslen > 0)) {
-		dhd_bus->extdl.vars = MALLOC(osh, extdl->varslen);
+		dhd_bus->extdl.vars = MALLOCZ(osh, extdl->varslen);
 		if (dhd_bus->extdl.vars) {
 			bcopy(extdl->vars, dhd_bus->extdl.vars, extdl->varslen);
 			dhd_bus->extdl.varslen = extdl->varslen;
 		}
 	}
-#endif
+#endif /* defined(BCM_DNGL_EMBEDIMAGE) || defined(BCM_REQUEST_FW) */
 
 	return (dhd_bus_t *)dhd_bus;
 
@@ -1530,7 +1645,7 @@ error:
 	return NULL;
 } /* dbus_attach */
 
-void
+static void
 dbus_detach(dhd_bus_t *pub)
 {
 	dhd_bus_t *dhd_bus = (dhd_bus_t *) pub;
@@ -1560,6 +1675,12 @@ dbus_detach(dhd_bus_t *pub)
 		dhd_bus->rx_q = NULL;
 	}
 
+#ifdef BCMDBG
+	if (dhd_bus->txpend_q_hist)
+		MFREE(osh, dhd_bus->txpend_q_hist, dhd_bus->pub.ntxq * sizeof(int));
+	if (dhd_bus->rxpend_q_hist)
+		MFREE(osh, dhd_bus->rxpend_q_hist, dhd_bus->pub.nrxq * sizeof(int));
+#endif /* BCMDBG */
 
 	if (dhd_bus->extdl.fw && (dhd_bus->extdl.fwlen > 0)) {
 		MFREE(osh, dhd_bus->extdl.fw, dhd_bus->extdl.fwlen);
@@ -1599,8 +1720,8 @@ int dbus_dlneeded(dhd_bus_t *pub)
 	return dlneeded;
 }
 
-#if defined(BCM_REQUEST_FW)
-int dbus_download_firmware(dhd_bus_t *pub, char *pfw_path, char *pnv_path)
+#if (defined(BCM_DNGL_EMBEDIMAGE) || defined(BCM_REQUEST_FW))
+int dbus_download_firmware(dhd_bus_t *pub)
 {
 	dhd_bus_t *dhd_bus = (dhd_bus_t *) pub;
 	int err = DBUS_OK;
@@ -1613,11 +1734,7 @@ int dbus_download_firmware(dhd_bus_t *pub, char *pfw_path, char *pnv_path)
 	DBUSTRACE(("%s: state %d\n", __FUNCTION__, dhd_bus->pub.busstate));
 
 	dhd_bus->pub.busstate = DBUS_STATE_DL_PENDING;
-#ifdef EXTERNAL_FW_PATH
-	err = dbus_do_download(dhd_bus, pfw_path, pnv_path);
-#else
 	err = dbus_do_download(dhd_bus);
-#endif /* EXTERNAL_FW_PATH */
 	if (err == DBUS_OK) {
 		dhd_bus->pub.busstate = DBUS_STATE_DL_DONE;
 	} else {
@@ -1626,7 +1743,7 @@ int dbus_download_firmware(dhd_bus_t *pub, char *pfw_path, char *pnv_path)
 
 	return err;
 }
-#endif
+#endif /* BCM_DNGL_EMBEDIMAGE || BCM_REQUEST_FW */
 
 /**
  * higher layer requests us to 'up' the interface to the dongle. Prerequisite is that firmware (not
@@ -1718,24 +1835,19 @@ dbus_stop(struct dhd_bus *pub)
 	return DBUS_ERR;
 }
 
-int dbus_send_txdata(dbus_pub_t *dbus, void *pktbuf)
-{
-	return dbus_send_pkt(dbus, pktbuf, pktbuf /* pktinfo */);
-}
-
 int
 dbus_send_buf(dbus_pub_t *pub, uint8 *buf, int len, void *info)
 {
 	return dbus_send_irb(pub, buf, len, NULL, info);
 }
 
-int
+static int
 dbus_send_pkt(dbus_pub_t *pub, void *pkt, void *info)
 {
 	return dbus_send_irb(pub, NULL, 0, pkt, info);
 }
 
-int
+static int
 dbus_send_ctl(struct dhd_bus *pub, uint8 *buf, int len)
 {
 	dhd_bus_t *dhd_bus = (dhd_bus_t *) pub;
@@ -1756,7 +1868,7 @@ dbus_send_ctl(struct dhd_bus *pub, uint8 *buf, int len)
 	return DBUS_ERR;
 }
 
-int
+static int
 dbus_recv_ctl(struct dhd_bus *pub, uint8 *buf, int len)
 {
 	dhd_bus_t *dhd_bus = (dhd_bus_t *) pub;
@@ -1768,6 +1880,8 @@ dbus_recv_ctl(struct dhd_bus *pub, uint8 *buf, int len)
 		dhd_bus->pub.busstate == DBUS_STATE_SLEEP) {
 		if (dhd_bus->drvintf && dhd_bus->drvintf->recv_ctl)
 			return dhd_bus->drvintf->recv_ctl(dhd_bus->bus_info, buf, len);
+	} else {
+		DBUSERR(("%s: bustate=%d\n", __FUNCTION__, dhd_bus->pub.busstate));
 	}
 
 	return DBUS_ERR;
@@ -1777,6 +1891,10 @@ dbus_recv_ctl(struct dhd_bus *pub, uint8 *buf, int len)
 int
 dbus_recv_bulk(dbus_pub_t *pub, uint32 ep_idx)
 {
+#ifdef EHCI_FASTPATH_RX
+	/* 2nd bulk in not supported for EHCI_FASTPATH_RX */
+	ASSERT(0);
+#else
 	dhd_bus_t *dhd_bus = (dhd_bus_t *) pub;
 
 	dbus_irb_rx_t *rxirb;
@@ -1802,12 +1920,14 @@ dbus_recv_bulk(dbus_pub_t *pub, uint32 ep_idx)
 			}
 		}
 	}
+#endif /* EHCI_FASTPATH_RX */
 
-	return DBUS_ERR;
+	return DBUS_ERR; /* ME DVV: This does not seem right :-) */
 }
 
+#ifdef INTR_EP_ENABLE
 /** only called by dhd_cdc.c (Dec 2012) */
-int
+static int
 dbus_poll_intr(dbus_pub_t *pub)
 {
 	dhd_bus_t *dhd_bus = (dhd_bus_t *) pub;
@@ -1825,6 +1945,7 @@ dbus_poll_intr(dbus_pub_t *pub)
 	}
 	return status;
 }
+#endif /* INTR_EP_ENABLE */
 
 /** called by nobody (Dec 2012) */
 void *
@@ -1962,6 +2083,23 @@ dbus_pnp_resume(dbus_pub_t *pub, int *fw_reload)
 		return DBUS_OK;
 	}
 
+#if defined(BCM_DNGL_EMBEDIMAGE)
+	if (dhd_bus->drvintf->device_exists &&
+		dhd_bus->drvintf->device_exists(dhd_bus->bus_info)) {
+		if (dhd_bus->drvintf->dlneeded) {
+			if (dhd_bus->drvintf->dlneeded(dhd_bus->bus_info)) {
+				err = dbus_do_download(dhd_bus);
+				if (err == DBUS_OK) {
+					fwdl = TRUE;
+				}
+				if (dhd_bus->pub.busstate == DBUS_STATE_DL_DONE)
+					dbus_up(&dhd_bus->pub);
+			}
+		}
+	} else {
+		return DBUS_ERR;
+	}
+#endif /* BCM_DNGL_EMBEDIMAGE */
 
 
 	if (dhd_bus->drvintf->pnp) {
@@ -1976,6 +2114,11 @@ dbus_pnp_resume(dbus_pub_t *pub, int *fw_reload)
 		}
 	}
 
+#if defined(BCM_DNGL_EMBEDIMAGE)
+	if (fwdl == TRUE) {
+		dbus_if_state_change(dhd_bus, DBUS_STATE_PNP_FWDL);
+	}
+#endif /* BCM_DNGL_EMBEDIMAGE */
 
 	if (fw_reload)
 		*fw_reload = fwdl;
@@ -2045,6 +2188,42 @@ dhd_bus_iovar_op(dhd_pub_t *dhdp, const char *name,
 	return err;
 }
 
+#ifdef BCMDBG
+void
+dbus_hist_dump(dbus_pub_t *pub, struct bcmstrbuf *b)
+{
+	int i = 0, j = 0;
+	dbus_info_t *dbus_info = (dbus_info_t *) pub;
+
+	bcm_bprintf(b, "\nDBUS histogram\n");
+	bcm_bprintf(b, "txq\n");
+	for (i = 0; i < dbus_info->pub.ntxq; i++) {
+		if (dbus_info->txpend_q_hist[i]) {
+			bcm_bprintf(b, "%d: %d ", i, dbus_info->txpend_q_hist[i]);
+			j++;
+			if (j % 10 == 0) {
+				bcm_bprintf(b, "\n");
+			}
+		}
+	}
+
+	j = 0;
+	bcm_bprintf(b, "\nrxq\n");
+	for (i = 0; i < dbus_info->pub.nrxq; i++) {
+		if (dbus_info->rxpend_q_hist[i]) {
+			bcm_bprintf(b, "%d: %d ", i, dbus_info->rxpend_q_hist[i]);
+			j++;
+			if (j % 10 == 0) {
+				bcm_bprintf(b, "\n");
+			}
+		}
+	}
+	bcm_bprintf(b, "\n");
+
+	if (dbus_info->drvintf && dbus_info->drvintf->dump)
+		dbus_info->drvintf->dump(dbus_info->bus_info, b);
+}
+#endif /* BCMDBG */
 
 void *
 dhd_dbus_txq(const dbus_pub_t *pub)
@@ -2064,133 +2243,7 @@ dbus_get_devinfo(dbus_pub_t *pub)
 	return pub->dev_info;
 }
 
-#if defined(BCM_REQUEST_FW) && !defined(EXTERNAL_FW_PATH)
-static int
-dbus_otp(dhd_bus_t *dhd_bus, uint16 *boardtype, uint16 *boardrev)
-{
-	uint32 value = 0;
-	uint8 *cis;
-	uint16 *otpinfo;
-	uint32 i;
-	bool standard_cis = TRUE;
-	uint8 tup, tlen;
-	bool btype_present = FALSE;
-	bool brev_present = FALSE;
-	int ret;
-	int devid;
-	uint16 btype = 0;
-	uint16 brev = 0;
-	uint32 otp_size = 0, otp_addr = 0, otp_sw_rgn = 0;
-
-	if (dhd_bus == NULL || dhd_bus->drvintf == NULL ||
-		dhd_bus->drvintf->readreg == NULL)
-		return DBUS_ERR;
-
-	devid = dhd_bus->pub.attrib.devid;
-
-	if ((devid == BCM43234_CHIP_ID) || (devid == BCM43235_CHIP_ID) ||
-		(devid == BCM43236_CHIP_ID)) {
-
-		otp_size = BCM_OTP_SIZE_43236;
-		otp_sw_rgn = BCM_OTP_SW_RGN_43236;
-		otp_addr = BCM_OTP_ADDR_43236;
-
-	} else {
-		return DBUS_ERR_NVRAM;
-	}
-
-	cis = MALLOC(dhd_bus->pub.osh, otp_size * 2);
-	if (cis == NULL)
-		return DBUS_ERR;
-
-	otpinfo = (uint16 *) cis;
-
-	for (i = 0; i < otp_size; i++) {
-
-		ret = dhd_bus->drvintf->readreg(dhd_bus->bus_info,
-			otp_addr + ((otp_sw_rgn + i) << 1), 2, &value);
-
-		if (ret != DBUS_OK) {
-			MFREE(dhd_bus->pub.osh, cis, otp_size * 2);
-			return ret;
-		}
-		otpinfo[i] = (uint16) value;
-	}
-
-	for (i = 0; i < (otp_size << 1); ) {
-
-		if (standard_cis) {
-			tup = cis[i++];
-			if (tup == CISTPL_NULL || tup == CISTPL_END)
-				tlen = 0;
-			else
-				tlen = cis[i++];
-		} else {
-			if (cis[i] == CISTPL_NULL || cis[i] == CISTPL_END) {
-				tlen = 0;
-				tup = cis[i];
-			} else {
-				tlen = cis[i];
-				tup = CISTPL_BRCM_HNBU;
-			}
-			++i;
-		}
-
-		if (tup == CISTPL_END || (i + tlen) >= (otp_size << 1)) {
-			break;
-		}
-
-		switch (tup) {
-
-		case CISTPL_BRCM_HNBU:
-
-			switch (cis[i]) {
-
-			case HNBU_BOARDTYPE:
-
-				btype = (uint16) ((cis[i + 2] << 8) + cis[i + 1]);
-				btype_present = TRUE;
-				DBUSTRACE(("%s: HNBU_BOARDTYPE = 0x%2x\n", __FUNCTION__,
-					(uint32)btype));
-				break;
-
-			case HNBU_BOARDREV:
-
-				if (tlen == 2)
-					brev = (uint16) cis[i + 1];
-				else
-					brev = (uint16) ((cis[i + 2] << 8) + cis[i + 1]);
-				brev_present = TRUE;
-				DBUSTRACE(("%s: HNBU_BOARDREV =  0x%2x\n", __FUNCTION__,
-					(uint32)*boardrev));
-				break;
-
-			case HNBU_HNBUCIS:
-				DBUSTRACE(("%s: HNBU_HNBUCIS\n", __FUNCTION__));
-				tlen++;
-				standard_cis = FALSE;
-				break;
-			}
-			break;
-		}
-
-		i += tlen;
-	}
-
-	MFREE(dhd_bus->pub.osh, cis, otp_size * 2);
-
-	if (btype_present == TRUE && brev_present == TRUE) {
-		*boardtype = btype;
-		*boardrev = brev;
-		DBUSERR(("otp boardtype = 0x%2x boardrev = 0x%2x\n",
-			*boardtype, *boardrev));
-
-		return DBUS_OK;
-	}
-	else
-		return DBUS_ERR;
-} /* dbus_otp */
-
+#if (defined(BCM_DNGL_EMBEDIMAGE) || defined(BCM_REQUEST_FW)) && !defined(EXTERNAL_FW_PATH)
 static int
 dbus_select_nvram(dhd_bus_t *dhd_bus, int8 *jumbonvram, int jumbolen,
 uint16 boardtype, uint16 boardrev, int8 **nvram, int *nvram_len)
@@ -2328,6 +2381,245 @@ uint16 boardtype, uint16 boardrev, int8 **nvram, int *nvram_len)
 
 #endif
 
+#if defined(BCM_DNGL_EMBEDIMAGE)
+
+/* store the global osh handle */
+static osl_t *osl_handle = NULL;
+
+/** this function is a combination of trx.c and bcmdl.c plus dbus adaptation */
+static int
+dbus_zlib_decomp(dhd_bus_t *dhd_bus)
+{
+
+	int method, flags, len, status;
+	unsigned int uncmp_len, uncmp_crc, dec_crc, crc_init;
+	struct trx_header *trx, *newtrx;
+	unsigned char *file = NULL;
+	unsigned char gz_magic[2] = {0x1f, 0x8b}; /* gzip magic header */
+	z_stream d_stream;
+	unsigned char unused;
+	int actual_len = -1;
+	unsigned char *headers;
+	unsigned int trxhdrsize, nvramsize, decomp_memsize, i;
+
+	(void)actual_len;
+	(void)unused;
+	(void)crc_init;
+
+	osl_handle = dhd_bus->pub.osh;
+	dhd_bus->orig_fw = NULL;
+
+	headers = dhd_bus->fw;
+	/* Extract trx header */
+	trx = (struct trx_header *)headers;
+	trxhdrsize = sizeof(struct trx_header);
+
+	if (ltoh32(trx->magic) != TRX_MAGIC) {
+		DBUSERR(("%s: Error: trx bad hdr %x\n", __FUNCTION__,
+			ltoh32(trx->magic)));
+		return -1;
+	}
+
+	headers += sizeof(struct trx_header);
+
+	if (ltoh32(trx->flag_version) & TRX_UNCOMP_IMAGE) {
+		actual_len = ltoh32(trx->offsets[TRX_OFFSETS_DLFWLEN_IDX]) +
+		                     sizeof(struct trx_header);
+		DBUSERR(("%s: not a compressed image\n", __FUNCTION__));
+		return 0;
+	} else {
+		/* Extract the gzip header info */
+		if ((*headers++ != gz_magic[0]) || (*headers++ != gz_magic[1])) {
+			DBUSERR(("%s: Error: gzip bad hdr\n", __FUNCTION__));
+			return -1;
+		}
+
+		method = (int) *headers++;
+		flags = (int) *headers++;
+
+		if (method != Z_DEFLATED || (flags & RESERVED) != 0) {
+			DBUSERR(("%s: Error: gzip bad hdr not a Z_DEFLATED file\n", __FUNCTION__));
+			return -1;
+		}
+	}
+
+	/* Discard time, xflags and OS code: */
+	for (len = 0; len < 6; len++)
+		unused = *headers++;
+
+	if ((flags & EXTRA_FIELD) != 0) { /* skip the extra field */
+		len = (uint32) *headers++;
+		len += ((uint32)*headers++)<<8;
+		/* len is garbage if EOF but the loop below will quit anyway */
+		while (len-- != 0) unused = *headers++;
+	}
+
+	if ((flags & ORIG_NAME) != 0) { /* skip the original file name */
+		while (*headers++ && (*headers != 0));
+	}
+
+	if ((flags & COMMENT) != 0) {   /* skip the .gz file comment */
+		while (*headers++ && (*headers != 0));
+	}
+
+	if ((flags & HEAD_CRC) != 0) {  /* skip the header crc */
+		for (len = 0; len < 2; len++) unused = *headers++;
+	}
+
+	headers++;	/* I need this, why ? */
+
+	/* create space for the uncompressed file */
+	/* the space is for trx header, uncompressed image  and nvram file */
+	/* with typical compression of 0.6, space double of firmware should be ok */
+
+	decomp_memsize = dhd_bus->fwlen * 2;
+	dhd_bus->decomp_memsize = decomp_memsize;
+	if (!(file = MALLOCZ(osl_handle, decomp_memsize))) {
+		DBUSERR(("%s: check_file : failed malloc\n", __FUNCTION__));
+		goto err;
+	}
+
+	/* Initialise the decompression struct */
+	d_stream.next_in = NULL;
+	d_stream.avail_in = 0;
+	d_stream.next_out = NULL;
+	d_stream.avail_out = decomp_memsize - trxhdrsize;
+	d_stream.zalloc = (alloc_func)0;
+	d_stream.zfree = (free_func)0;
+	if (inflateInit2(&d_stream, -15) != Z_OK) {
+		DBUSERR(("%s: Err: inflateInit2\n", __FUNCTION__));
+		goto err;
+	}
+
+	/* Inflate the code */
+	d_stream.next_in = headers;
+	d_stream.avail_in = ltoh32(trx->len);
+	d_stream.next_out = (unsigned char*)(file + trxhdrsize);
+
+	status = inflate(&d_stream, Z_SYNC_FLUSH);
+
+	if (status != Z_STREAM_END)	{
+		DBUSERR(("%s: Error: decompression failed\n", __FUNCTION__));
+		goto err;
+	}
+
+	uncmp_crc = *d_stream.next_in++;
+	uncmp_crc |= *d_stream.next_in++<<8;
+	uncmp_crc |= *d_stream.next_in++<<16;
+	uncmp_crc |= *d_stream.next_in++<<24;
+
+	uncmp_len = *d_stream.next_in++;
+	uncmp_len |= *d_stream.next_in++<<8;
+	uncmp_len |= *d_stream.next_in++<<16;
+	uncmp_len |= *d_stream.next_in++<<24;
+
+	actual_len = (int) (d_stream.next_in - (unsigned char *)trx);
+
+	inflateEnd(&d_stream);
+
+	/* Do a CRC32 on the uncompressed data */
+	crc_init = crc32(0L, Z_NULL, 0);
+	dec_crc = crc32(crc_init, file + trxhdrsize, uncmp_len);
+
+	if (dec_crc != uncmp_crc) {
+		DBUSERR(("%s: decompression: bad crc check \n", __FUNCTION__));
+		goto err;
+	}
+	else {
+		DBUSTRACE(("%s: decompression: good crc check \n", __FUNCTION__));
+	}
+
+	/* rebuild the new trx header and calculate crc */
+	newtrx = (struct trx_header *)file;
+	newtrx->magic = trx->magic;
+	/* add the uncompressed image flag */
+	newtrx->flag_version = trx->flag_version;
+	newtrx->flag_version  |= htol32(TRX_UNCOMP_IMAGE);
+	newtrx->offsets[TRX_OFFSETS_DLFWLEN_IDX] = htol32(uncmp_len);
+	newtrx->offsets[TRX_OFFSETS_JUMPTO_IDX] = trx->offsets[TRX_OFFSETS_JUMPTO_IDX];
+	newtrx->offsets[TRX_OFFSETS_NVM_LEN_IDX] = trx->offsets[TRX_OFFSETS_NVM_LEN_IDX];
+
+	nvramsize = ltoh32(trx->offsets[TRX_OFFSETS_NVM_LEN_IDX]);
+
+	/* the original firmware has nvram file appended */
+	/* copy the nvram file to uncompressed firmware */
+
+	if (nvramsize) {
+		if (nvramsize + uncmp_len > decomp_memsize) {
+			DBUSERR(("%s: nvram cannot be accomodated\n", __FUNCTION__));
+			goto err;
+		}
+		bcopy(d_stream.next_in, &file[uncmp_len], nvramsize);
+		uncmp_len += nvramsize;
+	}
+
+	/* add trx header size to uncmp_len */
+	uncmp_len += trxhdrsize;
+	/* PR14373 WAR: Pad to multiple of 4096 bytes */
+	uncmp_len = ROUNDUP(uncmp_len, 4096);
+	newtrx->len	= htol32(uncmp_len);
+
+	/* Calculate CRC over header */
+	newtrx->crc32 = hndcrc32((uint8 *)&newtrx->flag_version,
+	sizeof(struct trx_header) - OFFSETOF(struct trx_header, flag_version),
+	CRC32_INIT_VALUE);
+
+	/* Calculate CRC over data */
+	for (i = trxhdrsize; i < (uncmp_len); ++i)
+				newtrx->crc32 = hndcrc32((uint8 *)&file[i], 1, newtrx->crc32);
+	newtrx->crc32 = htol32(newtrx->crc32);
+
+	dhd_bus->orig_fw = dhd_bus->fw;
+	dhd_bus->origfw_len = dhd_bus->fwlen;
+	dhd_bus->image = dhd_bus->fw = file;
+	dhd_bus->image_len = dhd_bus->fwlen = uncmp_len;
+
+	return 0;
+
+err:
+	if (file)
+		free(file);
+	return -1;
+} /* dbus_zlib_decomp */
+
+void *
+dbus_zlib_calloc(int num, int size)
+{
+	uint *ptr;
+	uint totalsize;
+
+	if (osl_handle == NULL)
+		return NULL;
+
+	totalsize = (num * (size + 1));
+
+	ptr  = MALLOCZ(osl_handle, totalsize);
+
+	if (ptr == NULL)
+		return NULL;
+
+	/* store the size in the first integer space */
+
+	ptr[0] = totalsize;
+
+	return ((void *) &ptr[1]);
+}
+
+void
+dbus_zlib_free(void *ptr)
+{
+	uint totalsize;
+	uchar *memptr = (uchar *)ptr;
+
+	if (ptr && osl_handle) {
+		memptr -= sizeof(uint);
+		totalsize = *(uint *) memptr;
+		MFREE(osl_handle, memptr, totalsize);
+	}
+}
+
+#endif /* #if defined(BCM_DNGL_EMBEDIMAGE) */
+
 #define DBUS_NRXQ	50
 #define DBUS_NTXQ	100
 
@@ -2461,31 +2753,49 @@ dhd_dbus_ctl_complete(void *handle, int type, int status)
 			dhd->tx_ctlerrs++;
 	}
 
-	dhd_prot_ctl_complete(dhd);
+	dhd->bus->ctl_completed = TRUE;
+	dhd_os_ioctl_resp_wake(dhd);
 }
 
 static void
 dhd_dbus_state_change(void *handle, int state)
 {
 	dhd_pub_t *dhd = (dhd_pub_t *)handle;
+	unsigned long flags;
+	wifi_adapter_info_t *adapter;
+	int wowl_dngldown = 0;
 
 	if (dhd == NULL) {
 		DBUSERR(("%s: dhd is NULL\n", __FUNCTION__));
 		return;
 	}
+	adapter = (wifi_adapter_info_t *)dhd->adapter;
+#ifdef WL_EXT_WOWL
+	wowl_dngldown = dhd_conf_wowl_dngldown(dhd);
+#endif
 
+	if ((dhd->busstate == DHD_BUS_SUSPEND && state == DBUS_STATE_DOWN) ||
+			(dhd->hostsleep && wowl_dngldown)) {
+		DBUSERR(("%s: switch state %d to %d\n", __FUNCTION__, state, DBUS_STATE_SLEEP));
+		state = DBUS_STATE_SLEEP;
+	}
 	switch (state) {
-
 		case DBUS_STATE_DL_NEEDED:
 			DBUSERR(("%s: firmware request cannot be handled\n", __FUNCTION__));
 			break;
 		case DBUS_STATE_DOWN:
+			DHD_LINUX_GENERAL_LOCK(dhd, flags);
+			dhd_txflowcontrol(dhd, ALL_INTERFACES, ON);
 			DBUSTRACE(("%s: DBUS is down\n", __FUNCTION__));
 			dhd->busstate = DHD_BUS_DOWN;
+			DHD_LINUX_GENERAL_UNLOCK(dhd, flags);
 			break;
 		case DBUS_STATE_UP:
 			DBUSTRACE(("%s: DBUS is up\n", __FUNCTION__));
+			DHD_LINUX_GENERAL_LOCK(dhd, flags);
+			dhd_txflowcontrol(dhd, ALL_INTERFACES, OFF);
 			dhd->busstate = DHD_BUS_DATA;
+			DHD_LINUX_GENERAL_UNLOCK(dhd, flags);
 			break;
 		default:
 			break;
@@ -2577,14 +2887,7 @@ dhd_bus_chiprev(struct dhd_bus *bus)
 struct device *
 dhd_bus_to_dev(struct dhd_bus *bus)
 {
-	struct usb_device *pdev;
-
-	pdev = (struct usb_device *)bus->pub.dev_info;
-
-	if (pdev)
-		return &pdev->dev;
-	else
-		return NULL;
+	return dbus_get_dev();
 }
 
 void
@@ -2606,7 +2909,95 @@ dhd_bus_txdata(struct dhd_bus *bus, void *pktbuf)
 		DBUSTRACE(("txoff\n"));
 		return BCME_EPERM;
 	}
-	return dbus_send_txdata(&bus->pub, pktbuf);
+	return dbus_send_pkt(&bus->pub, pktbuf, pktbuf);
+}
+
+int
+dhd_bus_txctl(struct dhd_bus *bus, uchar *msg, uint msglen)
+{
+	int timeleft = 0;
+	int ret = -1;
+
+	DBUSTRACE(("%s: Enter\n", __FUNCTION__));
+
+	if (bus->dhd->dongle_reset)
+		return -EIO;
+
+	bus->ctl_completed = FALSE;
+	ret = dbus_send_ctl(bus, (void *)msg, msglen);
+	if (ret) {
+		DBUSERR(("%s: dbus_send_ctl error %d\n", __FUNCTION__, ret));
+		return ret;
+	}
+
+	timeleft = dhd_os_ioctl_resp_wait(bus->dhd, &bus->ctl_completed);
+	if ((!timeleft) || (!bus->ctl_completed)) {
+		DBUSERR(("%s: Txctl timeleft %d ctl_completed %d\n",
+			__FUNCTION__, timeleft, bus->ctl_completed));
+		ret = -1;
+#ifdef OEM_ANDROID
+		bus->dhd->hang_reason = HANG_REASON_IOCTL_RESP_TIMEOUT_SCHED_ERROR;
+		dhd_os_send_hang_message(bus->dhd);
+#endif /* OEM_ANDROID */
+	}
+
+#ifdef INTR_EP_ENABLE
+	/* If the ctl write is successfully completed, wait for an acknowledgement
+	* that indicates that it is now ok to do ctl read from the dongle
+	*/
+	if (ret != -1) {
+		bus->ctl_completed = FALSE;
+		if (dbus_poll_intr(bus->pub)) {
+			DBUSERR(("%s: dbus_poll_intr not submitted\n", __FUNCTION__));
+		} else {
+			/* interrupt polling is sucessfully submitted. Wait for dongle to send
+			* interrupt
+			*/
+			timeleft = dhd_os_ioctl_resp_wait(bus->dhd, &bus->ctl_completed);
+			if (!timeleft) {
+				DBUSERR(("%s: intr poll wait timed out\n", __FUNCTION__));
+			}
+		}
+	}
+#endif /* INTR_EP_ENABLE */
+
+	return ret;
+}
+
+int
+dhd_bus_rxctl(struct dhd_bus *bus, uchar *msg, uint msglen)
+{
+	int timeleft;
+	int ret = -1;
+
+	DBUSTRACE(("%s: Enter\n", __FUNCTION__));
+
+	if (bus->dhd->dongle_reset)
+		return -EIO;
+
+	bus->ctl_completed = FALSE;
+	ret = dbus_recv_ctl(bus, (uchar*)msg, msglen);
+	if (ret) {
+		DBUSERR(("%s: dbus_recv_ctl error %d\n", __FUNCTION__, ret));
+		goto done;
+	}
+
+	timeleft = dhd_os_ioctl_resp_wait(bus->dhd, &bus->ctl_completed);
+	if ((!timeleft) || (!bus->ctl_completed)) {
+		DBUSERR(("%s: Rxctl timeleft %d ctl_completed %d\n", __FUNCTION__,
+			timeleft, bus->ctl_completed));
+		ret = -ETIMEDOUT;
+		goto done;
+	}
+
+	/* XXX FIX: Must return cdc_len, not len, because after query_ioctl()
+	 * it subtracts sizeof(cdc_ioctl_t);  The other approach is
+	 * to have dbus_recv_ctl() return actual len.
+	 */
+	ret = msglen;
+
+done:
+	return ret;
 }
 
 static void
@@ -2636,7 +3027,8 @@ dhd_dbus_advertise_bus_remove(dhd_pub_t *dhdp)
 	int timeleft;
 
 	DHD_LINUX_GENERAL_LOCK(dhdp, flags);
-	dhdp->busstate = DHD_BUS_REMOVE;
+	if (dhdp->busstate != DHD_BUS_SUSPEND)
+		dhdp->busstate = DHD_BUS_REMOVE;
 	DHD_LINUX_GENERAL_UNLOCK(dhdp, flags);
 
 	timeleft = dhd_os_busbusy_wait_negation(dhdp, &dhdp->dhd_bus_busy_state);
@@ -2729,27 +3121,160 @@ dhd_bus_update_fw_nv_path(struct dhd_bus *bus, char *pfw_path,
 
 }
 
+static int
+dhd_dbus_sync_dongle(dhd_pub_t *pub, int dlneeded)
+{
+	int ret = 0;
+
+	if (dlneeded == 0) {
+		ret = dbus_up(pub->bus);
+		if (ret) {
+			DBUSERR(("%s: dbus_up failed!!\n", __FUNCTION__));
+			goto exit;
+		}
+		ret = dhd_sync_with_dongle(pub);
+		if (ret < 0) {
+			DBUSERR(("%s: failed with code ret=%d\n", __FUNCTION__, ret));
+			goto exit;
+		}
+	}
+
+exit:
+	return ret;
+}
+
+static int
+dbus_suspend(void *context)
+{
+	int ret = 0;
+
+#if defined(LINUX)
+	dhd_bus_t *bus = (dhd_bus_t*)context;
+	unsigned long flags;
+
+	DBUSERR(("%s Enter\n", __FUNCTION__));
+	if (bus->dhd == NULL) {
+		DBUSERR(("bus not inited\n"));
+		return BCME_ERROR;
+	}
+	if (bus->dhd->prot == NULL) {
+		DBUSERR(("prot is not inited\n"));
+		return BCME_ERROR;
+	}
+
+	if (bus->dhd->up == FALSE) {
+		return BCME_OK;
+	}
+
+	DHD_LINUX_GENERAL_LOCK(bus->dhd, flags);
+	if (bus->dhd->busstate != DHD_BUS_DATA && bus->dhd->busstate != DHD_BUS_SUSPEND) {
+		DBUSERR(("not in a readystate to LPBK  is not inited\n"));
+		DHD_LINUX_GENERAL_UNLOCK(bus->dhd, flags);
+		return BCME_ERROR;
+	}
+	DHD_LINUX_GENERAL_UNLOCK(bus->dhd, flags);
+	if (bus->dhd->dongle_reset) {
+		DBUSERR(("Dongle is in reset state.\n"));
+		return -EIO;
+	}
+
+	DHD_LINUX_GENERAL_LOCK(bus->dhd, flags);
+	/* stop all interface network queue. */
+	dhd_txflowcontrol(bus->dhd, ALL_INTERFACES, ON);
+	bus->dhd->busstate = DHD_BUS_SUSPEND;
+#if defined(LINUX) || defined(linux)
+	if (DHD_BUS_BUSY_CHECK_IN_TX(bus->dhd)) {
+		DBUSERR(("Tx Request is not ended\n"));
+		bus->dhd->busstate = DHD_BUS_DATA;
+		/* resume all interface network queue. */
+		dhd_txflowcontrol(bus->dhd, ALL_INTERFACES, OFF);
+		DHD_LINUX_GENERAL_UNLOCK(bus->dhd, flags);
+		return -EBUSY;
+	}
+#endif /* LINUX || linux */
+	DHD_BUS_BUSY_SET_SUSPEND_IN_PROGRESS(bus->dhd);
+	DHD_LINUX_GENERAL_UNLOCK(bus->dhd, flags);
+
+	ret = dhd_os_check_wakelock_all(bus->dhd);
+
+	DHD_LINUX_GENERAL_LOCK(bus->dhd, flags);
+	if (ret) {
+		bus->dhd->busstate = DHD_BUS_DATA;
+		/* resume all interface network queue. */
+		dhd_txflowcontrol(bus->dhd, ALL_INTERFACES, OFF);
+	} else {
+		bus->last_suspend_end_time = OSL_LOCALTIME_NS();
+	}
+	bus->dhd->hostsleep = 2;
+	DHD_BUS_BUSY_CLEAR_SUSPEND_IN_PROGRESS(bus->dhd);
+	dhd_os_busbusy_wake(bus->dhd);
+	DHD_LINUX_GENERAL_UNLOCK(bus->dhd, flags);
+
+#endif /* LINUX */
+	DBUSERR(("%s Exit ret=%d\n", __FUNCTION__, ret));
+	return ret;
+}
+
+static int
+dbus_resume(void *context)
+{
+	dhd_bus_t *bus = (dhd_bus_t*)context;
+	ulong flags;
+	int dlneeded = 0;
+	int ret = 0;
+
+	DBUSERR(("%s Enter\n", __FUNCTION__));
+
+	if (bus->dhd->up == FALSE) {
+		return BCME_OK;
+	}
+
+	dlneeded = dbus_dlneeded(bus);
+	if (dlneeded == 0) {
+		ret = dbus_up(bus);
+		if (ret) {
+			DBUSERR(("%s: dbus_up failed!!\n", __FUNCTION__));
+		}
+	}
+
+	DHD_LINUX_GENERAL_LOCK(bus->dhd, flags);
+	DHD_BUS_BUSY_SET_RESUME_IN_PROGRESS(bus->dhd);
+	DHD_LINUX_GENERAL_UNLOCK(bus->dhd, flags);
+
+	DHD_LINUX_GENERAL_LOCK(bus->dhd, flags);
+	DHD_BUS_BUSY_CLEAR_RESUME_IN_PROGRESS(bus->dhd);
+	bus->dhd->hostsleep = 0;
+	bus->dhd->busstate = DHD_BUS_DATA;
+	dhd_os_busbusy_wake(bus->dhd);
+	/* resume all interface network queue. */
+	dhd_txflowcontrol(bus->dhd, ALL_INTERFACES, OFF);
+	DHD_LINUX_GENERAL_UNLOCK(bus->dhd, flags);
+//	dhd_conf_set_suspend_resume(bus->dhd, 0);
+
+	return 0;
+}
+
 /*
  * hdrlen is space to reserve in pkt headroom for DBUS
  */
-void *
-dhd_dbus_probe_cb(void *arg, const char *desc, uint32 bustype,
-	uint16 bus_no, uint16 slot, uint32 hdrlen)
+static void *
+dhd_dbus_probe_cb(uint16 bus_no, uint16 slot, uint32 hdrlen)
 {
 	osl_t *osh = NULL;
 	dhd_bus_t *bus = NULL;
 	dhd_pub_t *pub = NULL;
 	uint rxsz;
-	int dlneeded = 0;
+	int dlneeded = 0, ret = DBUS_OK;
 	wifi_adapter_info_t *adapter = NULL;
+	bool net_attach_now = TRUE;
 
 	DBUSTRACE(("%s: Enter\n", __FUNCTION__));
 
-	adapter = dhd_wifi_platform_get_adapter(bustype, bus_no, slot);
+	adapter = dhd_wifi_platform_get_adapter(USB_BUS, bus_no, slot);
 
 	if (!g_pub) {
 		/* Ask the OS interface part for an OSL handle */
-		if (!(osh = osl_attach(NULL, bustype, TRUE))) {
+		if (!(osh = osl_attach(NULL, USB_BUS, TRUE))) {
 			DBUSERR(("%s: OSL attach failed\n", __FUNCTION__));
 			goto fail;
 		}
@@ -2776,35 +3301,57 @@ dhd_dbus_probe_cb(void *arg, const char *desc, uint32 bustype,
 		bus->dhd = pub;
 
 		dlneeded = dbus_dlneeded(bus);
-		if (dlneeded >= 0) {
-			if (!g_pub) {
-				dhd_conf_reset(pub);
-				dhd_conf_set_chiprev(pub, bus->pub.attrib.devid, bus->pub.attrib.chiprev);
-				dhd_conf_preinit(pub);
-			}
+		if (dlneeded >= 0 && !g_pub) {
+			dhd_conf_reset(pub);
+			dhd_conf_set_chiprev(pub, bus->pub.attrib.devid, bus->pub.attrib.chiprev);
+			dhd_conf_preinit(pub);
 		}
 
-		if (g_pub || dhd_download_fw_on_driverload) {
-			if (dlneeded == 0) {
+#if defined(BCMDHD_MODULAR) && defined(INSMOD_FW_LOAD)
+		if (1)
+#else
+		if (g_pub || dhd_download_fw_on_driverload)
+#endif
+		{
+			if (dlneeded == 0)
 				wifi_set_adapter_status(adapter, WIFI_STATUS_FW_READY);
 #ifdef BCM_REQUEST_FW
-			} else if (dlneeded > 0) {
+			else if (dlneeded > 0) {
+				struct dhd_conf *conf = pub->conf;
+				unsigned long flags;
+				bool suspended;
+				wifi_clr_adapter_status(adapter, WIFI_STATUS_FW_READY);
+				suspended = conf->suspended;
 				dhd_set_path(bus->dhd);
-				if (dbus_download_firmware(bus, bus->fw_path, bus->nv_path) != DBUS_OK)
+				conf->suspended = suspended;
+				if (dbus_download_firmware(bus) != DBUS_OK)
 					goto fail;
+				DHD_LINUX_GENERAL_LOCK(pub, flags);
+				if (bus->dhd->busstate != DHD_BUS_SUSPEND)
+					bus->dhd->busstate = DHD_BUS_LOAD;
+				DHD_LINUX_GENERAL_UNLOCK(pub, flags);
+			}
 #endif
-			} else {
+			else {
 				goto fail;
 			}
 		}
-	} else {
+	}
+	else {
 		DBUSERR(("%s: dbus_attach failed\n", __FUNCTION__));
+		goto fail;
 	}
 
-	if (!g_pub) {
-		/* Ok, have the per-port tell the stack we're open for business */
-		if (dhd_attach_net(bus->dhd, TRUE) != 0)
-		{
+#if defined(BCMDHD_MODULAR) && defined(INSMOD_FW_LOAD)
+	if (dlneeded > 0)
+		net_attach_now = FALSE;
+#endif
+
+	if (!net_attached && (net_attach_now || (dlneeded == 0))) {
+		if (dhd_dbus_sync_dongle(pub, dlneeded)) {
+			goto fail;
+		}
+		if (dhd_attach_net(bus->dhd, TRUE) != 0) {
 			DBUSERR(("%s: Net attach failed!!\n", __FUNCTION__));
 			goto fail;
 		}
@@ -2812,14 +3359,32 @@ dhd_dbus_probe_cb(void *arg, const char *desc, uint32 bustype,
 #if defined(MULTIPLE_SUPPLICANT)
 		wl_android_post_init(); // terence 20120530: fix critical section in dhd_open and dhdsdio_probe
 #endif
+		net_attached = TRUE;
+	}
+	else if (net_attached && (pub->up == 1) && (dlneeded == 0)) {
+		// kernel resume case
+		pub->hostsleep = 0;
+		ret = dhd_dbus_sync_dongle(pub, dlneeded);
+#ifdef WL_CFG80211
+		__wl_cfg80211_up_resume(pub);
+		wl_cfgp2p_start_p2p_device_resume(pub);
+#endif
+		dhd_conf_set_suspend_resume(pub, 0);
+		if (ret != DBUS_OK)
+			goto fail;
+	}
+
+	if (!g_pub) {
 		g_pub = pub;
 	}
 
 	DBUSTRACE(("%s: Exit\n", __FUNCTION__));
-	wifi_clr_adapter_status(adapter, WIFI_STATUS_DETTACH);
-	wifi_set_adapter_status(adapter, WIFI_STATUS_ATTACH);
-	wake_up_interruptible(&adapter->status_event);
-	/* This is passed to dhd_dbus_disconnect_cb */
+	wifi_clr_adapter_status(adapter, WIFI_STATUS_BUS_DISCONNECTED);
+	if (net_attached) {
+		wifi_set_adapter_status(adapter, WIFI_STATUS_NET_ATTACHED);
+		wake_up_interruptible(&adapter->status_event);
+		/* This is passed to dhd_dbus_disconnect_cb */
+	}
 	return bus;
 
 fail:
@@ -2842,7 +3407,7 @@ fail:
 	return NULL;
 }
 
-void
+static void
 dhd_dbus_disconnect_cb(void *arg)
 {
 	dhd_bus_t *bus = (dhd_bus_t *)arg;
@@ -2868,8 +3433,7 @@ dhd_dbus_disconnect_cb(void *arg)
 		dhd_dbus_advertise_bus_remove(bus->dhd);
 		dbus_detach(pub->bus);
 		pub->bus = NULL;
-		wifi_clr_adapter_status(adapter, WIFI_STATUS_ATTACH);
-		wifi_set_adapter_status(adapter, WIFI_STATUS_DETTACH);
+		wifi_set_adapter_status(adapter, WIFI_STATUS_BUS_DISCONNECTED);
 		wake_up_interruptible(&adapter->status_event);
 	} else {
 		osh = pub->osh;
@@ -2880,6 +3444,8 @@ dhd_dbus_disconnect_cb(void *arg)
 		}
 		dhd_free(pub);
 		g_pub = NULL;
+		net_attached = FALSE;
+		wifi_clr_adapter_status(adapter, WIFI_STATUS_NET_ATTACHED);
 		if (MALLOCED(osh)) {
 			DBUSERR(("%s: MEMORY LEAK %d bytes\n", __FUNCTION__, MALLOCED(osh)));
 		}
@@ -2887,6 +3453,24 @@ dhd_dbus_disconnect_cb(void *arg)
 	}
 
 	DBUSTRACE(("%s: Exit\n", __FUNCTION__));
+}
+
+int
+dhd_bus_sleep(dhd_pub_t *dhdp, bool sleep, uint32 *intstatus)
+{
+	wifi_adapter_info_t *adapter = (wifi_adapter_info_t *)dhdp->adapter;
+	s32 timeout = -1;
+	int err = 0;
+
+	timeout = wait_event_interruptible_timeout(adapter->status_event,
+		wifi_get_adapter_status(adapter, WIFI_STATUS_BUS_DISCONNECTED),
+		msecs_to_jiffies(12000));
+	if (timeout <= 0) {
+		err = -1;
+		DBUSERR(("%s: bus disconnected timeout\n", __FUNCTION__));
+	}
+
+	return err;
 }
 
 #ifdef LINUX_EXTERNAL_MODULE_DBUS
@@ -2906,7 +3490,11 @@ bcm_dbus_module_exit(void)
 }
 
 EXPORT_SYMBOL(dbus_pnp_sleep);
+EXPORT_SYMBOL(dhd_bus_register);
 EXPORT_SYMBOL(dbus_get_devinfo);
+#ifdef BCMDBG
+EXPORT_SYMBOL(dbus_hist_dump);
+#endif
 EXPORT_SYMBOL(dbus_detach);
 EXPORT_SYMBOL(dbus_get_attrib);
 EXPORT_SYMBOL(dbus_down);
@@ -2918,6 +3506,7 @@ EXPORT_SYMBOL(dbus_get_device_speed);
 EXPORT_SYMBOL(dbus_send_pkt);
 EXPORT_SYMBOL(dbus_recv_ctl);
 EXPORT_SYMBOL(dbus_attach);
+EXPORT_SYMBOL(dhd_bus_unregister);
 
 MODULE_LICENSE("GPL");
 

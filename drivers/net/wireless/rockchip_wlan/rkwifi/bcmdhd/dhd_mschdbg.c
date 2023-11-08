@@ -1,7 +1,7 @@
 /*
  * DHD debugability support
  *
- * Copyright (C) 2020, Broadcom.
+ * Copyright (C) 2022, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -20,7 +20,7 @@
  *
  * <<Broadcom-WL-IPTag/Open:>>
  *
- * $Id: dhd_mschdbg.c 639872 2016-05-25 05:39:30Z sjadhav $
+ * $Id: dhd_mschdbg.c 639872 2016-05-25 05:39:30Z $
  */
 #ifdef SHOW_LOGTRACE
 #include <typedefs.h>
@@ -47,17 +47,17 @@ static const char *head_log = "";
 		} \
 	} while (0)
 
-#ifdef DHD_EFI
+#if defined(CUSTOM_PREFIX)
 #define MSCH_EVENT(args) \
 do {	\
 	if (dhd_msg_level & DHD_EVENT_VAL) {	\
-		DHD_LOG_DUMP_WRITE_FW("[%s]: ", dhd_log_dump_get_timestamp()); \
-		DHD_LOG_DUMP_WRITE_FW args; \
+		DBG_PRINT_SYSTEM_TIME;  \
+		pr_cont args;	\
 	}	\
 } while (0)
 #else
 #define MSCH_EVENT(args) do {if (dhd_msg_level & DHD_EVENT_VAL) printf args;} while (0)
-#endif /* DHD_EFI */
+#endif
 
 static uint64 solt_start_time[4], req_start_time[4], profiler_start_time[4];
 static uint32 solt_chanspec[4] = {0, }, req_start[4] = {0, };

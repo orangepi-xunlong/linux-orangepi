@@ -1,7 +1,7 @@
 /*
  * Linux cfg80211 driver - Dongle Host Driver (DHD) related
  *
- * Copyright (C) 2020, Broadcom.
+ * Copyright (C) 2022, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -57,7 +57,6 @@ static int dhd_dongle_up = FALSE;
 static s32 wl_dongle_up(struct net_device *ndev);
 static s32 wl_dongle_down(struct net_device *ndev);
 #ifndef OEM_ANDROID
-#ifndef CUSTOMER_HW6
 static s32 wl_dongle_power(struct net_device *ndev, u32 power_mode);
 #ifdef BCMSDIO /* glomming is a sdio specific feature */
 static s32 wl_dongle_glom(struct net_device *ndev, s32 glom, u32 dongle_align);
@@ -66,7 +65,6 @@ static s32 wl_dongle_scantime(struct net_device *ndev, s32 scan_assoc_time, s32 
 static s32 wl_dongle_offload(struct net_device *ndev, s32 arpoe, s32 arp_ol);
 static s32 wl_pattern_atoh(s8 *src, s8 *dst);
 static s32 wl_dongle_filter(struct net_device *ndev, u32 filter_mode);
-#endif /* !CUSTOMER_HW6 */
 #endif /* !OEM_ANDROID */
 
 /**
@@ -142,20 +140,13 @@ int wl_cfg80211_register_if(struct bcm_cfg80211 *cfg,
 int wl_cfg80211_remove_if(struct bcm_cfg80211 *cfg,
 	int ifidx, struct net_device* ndev, bool rtnl_lock_reqd)
 {
-#ifdef DHD_PCIE_RUNTIMEPM
-	dhdpcie_runtime_bus_wake(cfg->pub, CAN_SLEEP(), __builtin_return_address(0));
-#endif /* DHD_PCIE_RUNTIMEPM */
 	return dhd_remove_if(cfg->pub, ifidx, rtnl_lock_reqd);
 }
 
 void wl_cfg80211_cleanup_if(struct net_device *net)
 {
 	struct bcm_cfg80211 *cfg = wl_get_cfg(net);
-#ifdef DHD_PCIE_RUNTIMEPM
-	dhdpcie_runtime_bus_wake(cfg->pub, CAN_SLEEP(), __builtin_return_address(0));
-#else
 	BCM_REFERENCE(cfg);
-#endif /* DHD_PCIE_RUNTIMEPM */
 	dhd_cleanup_if(net);
 }
 
@@ -233,7 +224,6 @@ wl_dongle_down(struct net_device *ndev)
 }
 
 #ifndef OEM_ANDROID
-#ifndef CUSTOMER_HW6
 static s32 wl_dongle_power(struct net_device *ndev, u32 power_mode)
 {
 	s32 err = 0;
@@ -271,7 +261,6 @@ dongle_glom_out:
 }
 
 #endif /* BCMSDIO */
-#endif /* !CUSTOMER_HW6 */
 #endif /* !OEM_ANDROID */
 
 s32
@@ -293,12 +282,12 @@ wl_dongle_roam(struct net_device *ndev, u32 roamvar, u32 bcn_timeout)
 		WL_ERR(("roam_off error (%d)\n", err));
 		goto dongle_rom_out;
 	}
+	ROAMOFF_DBG_SAVE(ndev, SET_ROAM_FILS_TOGGLE, roamvar);
 dongle_rom_out:
 	return err;
 }
 
 #ifndef OEM_ANDROID
-#ifndef CUSTOMER_HW6
 static s32
 wl_dongle_scantime(struct net_device *ndev, s32 scan_assoc_time,
 	s32 scan_unassoc_time)
@@ -494,7 +483,6 @@ static s32 wl_dongle_filter(struct net_device *ndev, u32 filter_mode)
 dongle_filter_out:
 	return err;
 }
-#endif /* !CUSTOMER_HW6 */
 #endif /* !OEM_ANDROID */
 
 s32 dhd_config_dongle(struct bcm_cfg80211 *cfg)
@@ -527,7 +515,6 @@ s32 dhd_config_dongle(struct bcm_cfg80211 *cfg)
 	}
 
 #ifndef OEM_ANDROID
-#ifndef CUSTOMER_HW6
 	err = wl_dongle_power(ndev, PM_FAST);
 	if (unlikely(err)) {
 		WL_ERR(("wl_dongle_power failed\n"));
@@ -548,7 +535,6 @@ s32 dhd_config_dongle(struct bcm_cfg80211 *cfg)
 	wl_dongle_scantime(ndev, 40, 80);
 	wl_dongle_offload(ndev, 1, 0xf);
 	wl_dongle_filter(ndev, 1);
-#endif /* !CUSTOMER_HW6 */
 #endif /* OEM_ANDROID */
 
 default_conf_out:
@@ -595,3 +581,35 @@ done:
 	DHD_OS_WAKE_UNLOCK(dhd);
 	return ret;
 }
+
+int
+dhd_set_wsec_info(dhd_pub_t *dhd, uint32 data, int tag)
+{
+	struct net_device *ndev;
+	uint32  wsec_info = data;
+	int ret = BCME_OK;
+
+	ndev = dhd_linux_get_primary_netdev(dhd);
+	if (!ndev) {
+		WL_ERR(("Cannot find primary netdev\n"));
+		return -ENODEV;
+	}
+	BCM_REFERENCE(wsec_info);
+#if defined(WL_CFG80211)
+	ret = wl_cfg80211_set_wsec_info(ndev, &wsec_info, sizeof(wsec_info), tag);
+	if (unlikely(ret)) {
+		WL_ERR(("Set wsec_info tag 0x%04x failed \n", tag));
+	}
+#endif /* WL_CFG80211 */
+
+	return ret;
+}
+
+#ifdef RPM_FAST_TRIGGER
+void
+dhd_trigger_rpm_fast(struct bcm_cfg80211 *cfg)
+{
+	dhd_pub_t *dhd = (dhd_pub_t *)cfg->pub;
+	dhdpcie_trigger_rpm_fast(dhd);
+}
+#endif /* RPM_FAST_TRIGGER */

@@ -2,7 +2,7 @@
  * Broadcom Dongle Host Driver (DHD)
  * Prefered Network Offload and Wi-Fi Location Service(WLS) code.
  *
- * Copyright (C) 2020, Broadcom.
+ * Copyright (C) 2022, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -22,7 +22,7 @@
  * <<Broadcom-WL-IPTag/Dual:>>
  */
 
-#if defined (GSCAN_SUPPORT) && !defined(PNO_SUPPORT)
+#if defined(GSCAN_SUPPORT) && !defined(PNO_SUPPORT)
 #error "GSCAN needs PNO to be enabled!"
 #endif
 
@@ -35,13 +35,11 @@
 
 #include <bcmendian.h>
 
-#ifdef OEM_ANDROID
 #include <linuxver.h>
 #include <linux/init.h>
 #include <linux/kernel.h>
 #include <linux/list.h>
 #include <linux/sort.h>
-#endif
 
 #include <dngl_stats.h>
 #include <wlioctl.h>
@@ -74,15 +72,34 @@
 #define dtohchanspec(i) (i)
 #endif /* IL_BIGENDINA */
 
-#ifdef OEM_ANDROID
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 7, 0))
+#define COMPLETION_WAIT_QUEUE_ACTIVE(wait_queue) swait_active(wait_queue)
+#else
+#define COMPLETION_WAIT_QUEUE_ACTIVE(wait_queue) waitqueue_active(wait_queue)
+#endif /* LINUX_VERSION_CODE >= KERNEL_VERSION(5, 7, 0) */
+
+#ifdef CUSTOM_PREFIX
+#define PNO_PRINT_PREFIX "[%s]"CUSTOM_PREFIX, OSL_GET_RTCTIME()
+#define PNO_PRINT_SYSTEM_TIME pr_cont(PNO_PRINT_PREFIX)
+#define PNO_CONS_ONLY(args)     \
+do {    \
+	PNO_PRINT_SYSTEM_TIME;  \
+	pr_cont args;           \
+} while (0)
+#else
+#define PNO_PRINT_SYSTEM_TIME
+#define PNO_CONS_ONLY(args) do { printf args;} while (0)
+#endif /* CUSTOM_PREFIX */
+
 #define NULL_CHECK(p, s, err)  \
-			do { \
-				if (!(p)) { \
-					printf("NULL POINTER (%s) : %s\n", __FUNCTION__, (s)); \
-					err = BCME_ERROR; \
-					return err; \
-				} \
-			} while (0)
+do { \
+	if (!(p)) { \
+		PNO_CONS_ONLY(("NULL POINTER (%s) : %s\n", __FUNCTION__, (s))); \
+		err = BCME_ERROR; \
+		return err; \
+	} \
+} while (0)
+
 #define PNO_GET_PNOSTATE(dhd) ((dhd_pno_status_info_t *)dhd->pno_state)
 
 #define PNO_BESTNET_LEN		WLC_IOCTL_MEDLEN
@@ -103,8 +120,6 @@
 						- (uint32)(timestamp2/1000)))
 #define TIME_DIFF_MS(timestamp1, timestamp2) (abs((uint32)(timestamp1)  \
 						- (uint32)(timestamp2)))
-#define TIMESPEC_TO_US(ts)  (((uint64)(ts).tv_sec * USEC_PER_SEC) + \
-							(ts).tv_nsec / NSEC_PER_USEC)
 
 #define ENTRY_OVERHEAD strlen("bssid=\nssid=\nfreq=\nlevel=\nage=\ndist=\ndistSd=\n====")
 #define TIME_MIN_DIFF 5
@@ -210,7 +225,7 @@ dhd_is_legacy_pno_enabled(dhd_pub_t *dhd)
 static uint64
 convert_fw_rel_time_to_systime(struct osl_timespec *ts, uint32 fw_ts_ms)
 {
-	return ((uint64)(TIMESPEC_TO_US(*ts)) - (uint64)(fw_ts_ms * 1000));
+	return ((uint64)(TIMESPEC64_TO_US(*ts)) - (uint64)(fw_ts_ms * USEC_PER_MSEC));
 }
 
 static void
@@ -382,6 +397,7 @@ _dhd_pno_suspend(dhd_pub_t *dhd)
 exit:
 	return err;
 }
+
 static int
 _dhd_pno_enable(dhd_pub_t *dhd, int enable)
 {
@@ -401,15 +417,6 @@ _dhd_pno_enable(dhd_pub_t *dhd, int enable)
 		DHD_ERROR(("PNO is not allowed for non-STA mode"));
 		err = BCME_BADOPTION;
 		goto exit;
-	}
-	if (enable) {
-		if ((_pno_state->pno_mode & DHD_PNO_LEGACY_MODE) &&
-			dhd_is_associated(dhd, 0, NULL)) {
-			DHD_ERROR(("%s Legacy PNO mode cannot be enabled "
-				"in assoc mode , ignore it\n", __FUNCTION__));
-			err = BCME_BADOPTION;
-			goto exit;
-		}
 	}
 	/* Enable/Disable PNO */
 	err = dhd_iovar(dhd, 0, "pfn", (char *)&enable, sizeof(enable), NULL, 0, TRUE);
@@ -432,28 +439,71 @@ static int
 _dhd_pno_set(dhd_pub_t *dhd, const dhd_pno_params_t *pno_params, dhd_pno_mode_t mode)
 {
 	int err = BCME_OK;
-	wl_pfn_param_t pfn_param;
+	wl_pfn_param_v3_t pfn_param;
 	dhd_pno_params_t *_params;
 	dhd_pno_status_info_t *_pno_state;
 	bool combined_scan = FALSE;
+	uint16 size;
+	bool use_v3 = FALSE;
 	DHD_PNO(("%s enter\n", __FUNCTION__));
 
 	NULL_CHECK(dhd, "dhd is NULL", err);
 	NULL_CHECK(dhd->pno_state, "pno_state is NULL", err);
 	_pno_state = PNO_GET_PNOSTATE(dhd);
 
-	memset(&pfn_param, 0, sizeof(pfn_param));
+	/* Query pfn version */
+	bzero(&pfn_param, sizeof(pfn_param));
+	err = dhd_iovar(dhd, 0, "pfn_set", (char *)&pfn_param, sizeof(pfn_param),
+		(char *)&pfn_param, sizeof(pfn_param), FALSE);
+	if (err < 0) {
+		if (err == BCME_UNSUPPORTED) {
+			DHD_PNO(("%s : PFN versioning not supported. Use v2\n",
+				__FUNCTION__));
+			use_v3 = FALSE;
+		} else {
+			DHD_ERROR(("%s : failed to query pfn_set %d\n", __FUNCTION__, err));
+			goto exit;
+		}
+	} else {
+		if (pfn_param.version == PFN_VERSION_V3) {
+			DHD_ERROR(("%s : using pfn_param v3\n", __FUNCTION__));
+			use_v3 = TRUE;
+		} else if (pfn_param.version == PFN_VERSION_V2) {
+			DHD_ERROR(("%s : using pfn_param v2\n", __FUNCTION__));
+			use_v3 = FALSE;
+		}  else {
+			DHD_ERROR(("unsupported pfn ver:%d\n", pfn_param.version));
+			err = BCME_UNSUPPORTED;
+			goto exit;
+		}
+	}
 
 	/* set pfn parameters */
-	pfn_param.version = htod32(PFN_VERSION);
+	bzero(&pfn_param, sizeof(pfn_param));
+	if (use_v3) {
+		pfn_param.version = PFN_VERSION_V3;
+		pfn_param.version = htod32(pfn_param.version);
+		size = sizeof(wl_pfn_param_v3_t);
+		pfn_param.length = htod32(size);
+	} else {
+		wl_pfn_param_v2_t *pfn_param_v2 = (wl_pfn_param_v2_t *)&pfn_param;
+		pfn_param_v2->version = PFN_VERSION_V2;
+		pfn_param_v2->version = htod32(pfn_param_v2->version);
+		size = sizeof(wl_pfn_param_v2_t);
+	}
+
 	pfn_param.flags = ((PFN_LIST_ORDER << SORT_CRITERIA_BIT) |
 		(ENABLE << IMMEDIATE_SCAN_BIT) | (ENABLE << REPORT_SEPERATELY_BIT));
+#ifdef WL_SCHED_SCAN
+	/* bit to select the pfn partial scan result event logic */
+	pfn_param.flags |= htod16(ENABLE << PFN_FULL_SCAN_RESULT_BIT);
+#endif /* WL_SCHED_SCAN */
 	if (mode == DHD_PNO_LEGACY_MODE) {
+		pfn_param.repeat = (uchar) (pno_params->params_legacy.pno_repeat);
 		/* check and set extra pno params */
-		if ((pno_params->params_legacy.pno_repeat != 0) ||
+		if ((pno_params->params_legacy.pno_repeat != 0) &&
 			(pno_params->params_legacy.pno_freq_expo_max != 0)) {
 			pfn_param.flags |= htod16(ENABLE << ENABLE_ADAPTSCAN_BIT);
-			pfn_param.repeat = (uchar) (pno_params->params_legacy.pno_repeat);
 			pfn_param.exp = (uchar) (pno_params->params_legacy.pno_freq_expo_max);
 		}
 		/* set up pno scan fr */
@@ -590,7 +640,7 @@ _dhd_pno_set(dhd_pub_t *dhd, const dhd_pno_params_t *pno_params, dhd_pno_mode_t 
 			goto exit;
 		}
 	}
-#if (!defined(WL_USE_RANDOMIZED_SCAN))
+#if !defined(WL_USE_RANDOMIZED_SCAN)
 	err = dhd_set_rand_mac_oui(dhd);
 	/* Ignore if chip doesnt support the feature */
 	if (err < 0 && err != BCME_UNSUPPORTED) {
@@ -622,7 +672,7 @@ _dhd_pno_set(dhd_pub_t *dhd, const dhd_pno_params_t *pno_params, dhd_pno_mode_t 
 		DHD_PNO((" returned mscan : %d, set bestn : %d mscan %d\n", _tmp, pfn_param.bestn,
 		        pfn_param.mscan));
 	}
-	err = dhd_iovar(dhd, 0, "pfn_set", (char *)&pfn_param, sizeof(pfn_param), NULL, 0, TRUE);
+	err = dhd_iovar(dhd, 0, "pfn_set", (char *)&pfn_param, size, NULL, 0, TRUE);
 	if (err < 0) {
 		DHD_ERROR(("%s : failed to execute pfn_set %d\n", __FUNCTION__, err));
 		goto exit;
@@ -970,6 +1020,15 @@ _dhd_pno_cfg(dhd_pub_t *dhd, uint16 *channel_list, int nchan)
 	int err = BCME_OK;
 	int i = 0;
 	wl_pfn_cfg_t pfncfg_param;
+	bool use_chanspec = FALSE;
+
+#if defined(WL_6G_BAND) || defined(CFG80211_6G_SUPPORT)
+	/* When enable 6G, force to use chanspec list */
+	if (FW_SUPPORTED((dhd), 6g)) {
+		use_chanspec = TRUE;
+	}
+#endif /* WL_6G_BAND || CFG80211_6G_SUPPORT */
+
 	NULL_CHECK(dhd, "dhd is NULL", err);
 	if (nchan) {
 		if (nchan > WL_NUMCHANNELS) {
@@ -980,8 +1039,8 @@ _dhd_pno_cfg(dhd_pub_t *dhd, uint16 *channel_list, int nchan)
 		pfncfg_param.channel_num = htod32(0);
 
 		for (i = 0; i < nchan; i++) {
-			if (dhd->wlc_ver_major >= DHD_PNO_CHSPEC_SUPPORT_VER) {
-				pfncfg_param.channel_list[i] = CH20MHZ_CHSPEC(channel_list[i]);
+			if ((dhd->wlc_ver_major >= DHD_PNO_CHSPEC_SUPPORT_VER) || use_chanspec) {
+				pfncfg_param.channel_list[i] = wf_chspec_ctlchspec(channel_list[i]);
 			} else {
 				pfncfg_param.channel_list[i] = channel_list[i];
 			}
@@ -1564,13 +1623,13 @@ dhd_pno_set_for_batch(dhd_pub_t *dhd, struct dhd_pno_batch_params *batch_params)
 			sizeof(_params->params_batch.chan_list[0]), _dhd_pno_cmpfunc, NULL);
 	}
 #ifdef PNO_DEBUG
-{
+	{
 		DHD_PNO(("Channel list : "));
 		for (i = 0; i < _params->params_batch.nchan; i++) {
 			DHD_PNO(("%d ", _params->params_batch.chan_list[i]));
 		}
 		DHD_PNO(("\n"));
-}
+	}
 #endif
 	if (_params->params_batch.nchan) {
 		/* copy the channel list into local array */
@@ -2111,7 +2170,7 @@ dhd_pno_set_for_gscan(dhd_pub_t *dhd, struct dhd_pno_gscan_params *gscan_params)
 		goto exit;
 	}
 
-	pfn_gscan_cfg_t->version = WL_GSCAN_CFG_VERSION;
+	pfn_gscan_cfg_t->version = WL_GSCAN_CFG_VERSION_1;
 	if (gscan_params->mscan)
 		pfn_gscan_cfg_t->buffer_threshold = gscan_params->buffer_threshold;
 	else
@@ -2480,7 +2539,7 @@ dhd_pno_enable_full_scan_result(dhd_pub_t *dhd, bool real_time_flag)
 	    if (old_flag != gscan_params->send_all_results_flag) {
 			wl_pfn_gscan_cfg_t gscan_cfg;
 
-			gscan_cfg.version = WL_GSCAN_CFG_VERSION;
+			gscan_cfg.version = WL_GSCAN_CFG_VERSION_1;
 			gscan_cfg.flags = (gscan_params->send_all_results_flag &
 			                           GSCAN_SEND_ALL_RESULTS_MASK);
 			gscan_cfg.flags |= GSCAN_CFG_FLAGS_ONLY_MASK;
@@ -2904,7 +2963,7 @@ exit:
 }
 #endif /* GSCAN_SUPPORT */
 
-#if defined (GSCAN_SUPPORT) || defined(DHD_GET_VALID_CHANNELS)
+#if defined(GSCAN_SUPPORT) || defined(DHD_GET_VALID_CHANNELS)
 static void *
 dhd_get_gscan_batch_results(dhd_pub_t *dhd, uint32 *len)
 {
@@ -3098,8 +3157,6 @@ _dhd_pno_get_for_batch(dhd_pub_t *dhd, char *buf, int bufsize, int reason)
 	STATIC_ASSERT(sizeof(wl_pfn_net_info_v1_t) == sizeof(wl_pfn_net_info_v2_t));
 	STATIC_ASSERT(sizeof(wl_pfn_lnet_info_v1_t) == sizeof(wl_pfn_lnet_info_v2_t));
 	STATIC_ASSERT(sizeof(wl_pfn_subnet_info_v1_t) == sizeof(wl_pfn_subnet_info_v2_t));
-	ASSERT(OFFSETOF(wl_pfn_subnet_info_v1_t, SSID) ==
-	              OFFSETOF(wl_pfn_subnet_info_v2_t, u.SSID));
 
 	DHD_PNO(("%s enter\n", __FUNCTION__));
 	_pno_state = PNO_GET_PNOSTATE(dhd);
@@ -3466,15 +3523,8 @@ exit:
 	}
 	mutex_unlock(&_pno_state->pno_mutex);
 exit_no_unlock:
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 7, 0))
-	if (waitqueue_active(&_pno_state->get_batch_done)) {
-		_pno_state->batch_recvd = TRUE;
-		wake_up(&_pno_state->get_batch_done);
-	}
-#else
-	if (waitqueue_active(&_pno_state->get_batch_done.wait))
+	if (COMPLETION_WAIT_QUEUE_ACTIVE(&_pno_state->get_batch_done.wait))
 		complete(&_pno_state->get_batch_done);
-#endif
 	return err;
 }
 
@@ -3554,15 +3604,8 @@ dhd_pno_get_for_batch(dhd_pub_t *dhd, char *buf, int bufsize, int reason)
 		params_batch->get_batch.bufsize = bufsize;
 		params_batch->get_batch.reason = reason;
 		params_batch->get_batch.bytes_written = 0;
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 7, 0))
-		_pno_state->batch_recvd = FALSE;
-#endif
 		schedule_work(&_pno_state->work);
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 7, 0))
-		wait_event(_pno_state->get_batch_done, _pno_state->batch_recvd);
-#else
 		wait_for_completion(&_pno_state->get_batch_done);
-#endif
 	}
 
 #ifdef GSCAN_SUPPORT
@@ -3749,14 +3792,14 @@ dhd_pno_set_for_hotlist(dhd_pub_t *dhd, wl_pfn_bssid_t *p_pfn_bssid,
 			sizeof(_params->params_hotlist.chan_list[0]), _dhd_pno_cmpfunc, NULL);
 	}
 #ifdef PNO_DEBUG
-{
+	{
 		int i;
 		DHD_PNO(("Channel list : "));
 		for (i = 0; i < _params->params_batch.nchan; i++) {
 			DHD_PNO(("%d ", _params->params_batch.chan_list[i]));
 		}
 		DHD_PNO(("\n"));
-}
+	}
 #endif
 	if (_params->params_hotlist.nchan) {
 		/* copy the channel list into local array */
@@ -3975,8 +4018,8 @@ dhd_gscan_hotlist_cache_cleanup(dhd_pub_t *dhd, hotlist_type_t type)
 void *
 dhd_process_full_gscan_result(dhd_pub_t *dhd, const void *data, uint32 len, int *size)
 {
-	wl_bss_info_t *bi = NULL;
-	wl_gscan_result_t *gscan_result;
+	wl_bss_info_v109_t *bi = NULL;
+	wl_gscan_result_v2_t *gscan_result;
 	wifi_gscan_full_result_t *result = NULL;
 	u32 bi_length = 0;
 	uint8 channel;
@@ -3987,7 +4030,7 @@ dhd_process_full_gscan_result(dhd_pub_t *dhd, const void *data, uint32 len, int 
 
 	*size = 0;
 	GCC_DIAGNOSTIC_PUSH_SUPPRESS_CAST();
-	gscan_result = (wl_gscan_result_t *)data;
+	gscan_result = (wl_gscan_result_v2_t *)data;
 	GCC_DIAGNOSTIC_POP();
 	if (!gscan_result) {
 		DHD_ERROR(("Invalid gscan result (NULL pointer)\n"));
@@ -4006,7 +4049,8 @@ dhd_process_full_gscan_result(dhd_pub_t *dhd, const void *data, uint32 len, int 
 	bi = &gscan_result->bss_info[0].info;
 	bi_length = dtoh32(bi->length);
 	if (bi_length != (dtoh32(gscan_result->buflen) -
-	       WL_GSCAN_RESULTS_FIXED_SIZE - WL_GSCAN_INFO_FIXED_FIELD_SIZE)) {
+	       OFFSETOF(wl_gscan_result_v2_t, bss_info) -
+	       OFFSETOF(wl_gscan_bss_info_v2_t, info))) {
 		DHD_ERROR(("Invalid bss_info length %d: ignoring\n", bi_length));
 		goto exit;
 	}
@@ -4039,7 +4083,7 @@ dhd_process_full_gscan_result(dhd_pub_t *dhd, const void *data, uint32 len, int 
 	result->fixed.rtt = 0;
 	result->fixed.rtt_sd = 0;
 	osl_get_monotonic_boottime(&ts);
-	result->fixed.ts = (uint64) TIMESPEC_TO_US(ts);
+	result->fixed.ts = (uint64) TIMESPEC64_TO_US(ts);
 	result->fixed.beacon_period = dtoh16(bi->beacon_period);
 	result->fixed.capability = dtoh16(bi->capability);
 	result->ie_length = bi_ie_length;
@@ -4508,12 +4552,7 @@ dhd_pno_event_handler(dhd_pub_t *dhd, wl_event_msg_t *event, void *event_data)
 	{
 		struct dhd_pno_batch_params *params_batch;
 		params_batch = &_pno_state->pno_params_arr[INDEX_OF_BATCH_PARAMS].params_batch;
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 7, 0))
-		if (!waitqueue_active(&_pno_state->get_batch_done))
-#else
-		if (!waitqueue_active(&_pno_state->get_batch_done.wait))
-#endif
-		{
+		if (!COMPLETION_WAIT_QUEUE_ACTIVE(&_pno_state->get_batch_done.wait)) {
 			DHD_PNO(("%s : WLC_E_PFN_BEST_BATCHING\n", __FUNCTION__));
 			params_batch->get_batch.buf = NULL;
 			params_batch->get_batch.bufsize = 0;
@@ -4553,11 +4592,7 @@ int dhd_pno_init(dhd_pub_t *dhd)
 	_pno_state->dhd = dhd;
 	mutex_init(&_pno_state->pno_mutex);
 	INIT_WORK(&_pno_state->work, _dhd_pno_get_batch_handler);
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 7, 0))
-	init_waitqueue_head(&_pno_state->get_batch_done);
-#else
 	init_completion(&_pno_state->get_batch_done);
-#endif
 #ifdef GSCAN_SUPPORT
 	init_waitqueue_head(&_pno_state->batch_get_wait);
 #endif /* GSCAN_SUPPORT */
@@ -4617,7 +4652,6 @@ int dhd_pno_deinit(dhd_pub_t *dhd)
 	dhd->pno_state = NULL;
 	return err;
 }
-#endif /* OEM_ANDROID */
 
 #ifndef OEM_ANDROID
 #if defined(NDIS)

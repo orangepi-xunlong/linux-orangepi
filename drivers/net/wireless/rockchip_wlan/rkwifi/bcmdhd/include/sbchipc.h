@@ -5,7 +5,7 @@
  * JTAG, 0/1/2 UARTs, clock frequency control, a watchdog interrupt timer,
  * GPIO interface, extbus, and support for serial and parallel flashes.
  *
- * Copyright (C) 2020, Broadcom.
+ * Copyright (C) 2022, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -2825,6 +2825,8 @@ typedef volatile struct {
 #define PMU4369_PLL6VAL_PRE_SCALE		(1 << 17)
 #define PMU4369_PLL6VAL_POST_SCALE		(1 << 3)
 
+#define PMU_PLL_CTRL_REG6      6
+
 /* PLL usage in 4378
 * Temporay setting, update is needed.
 */
@@ -2933,6 +2935,42 @@ typedef volatile struct {
 
 /* 4360 Chip specific Regulator Control register bits */
 #define RCTRL4360_RFLDO_PWR_DOWN		(1 << 1)
+
+/*
+* 4383 PMU Resources
+*/
+#define RES4383_DUMMY			0
+#define RES4383_FAST_LPO_AVAIL		1
+#define RES4383_PMU_LP			2
+#define RES4383_MISC_LDO		3
+#define RES4383_SERDES_AFE_RET		4
+#define RES4383_XTAL_HQ			5
+#define RES4383_XTAL_PU			6
+#define RES4383_XTAL_STABLE		7
+#define RES4383_PWRSW_DIG		8
+#define RES4383_CORE_RDY_BTMAIN		9
+#define RES4383_CORE_RDY_BTSC		10
+#define RES4383_PWRSW_AUX		11
+#define RES4383_PWRSW_SCAN		12
+#define RES4383_CORE_RDY_SCAN		13
+#define RES4383_PWRSW_MAIN		14
+#define RES4383_USBLDO_PU		15
+#define RES4383_USBPHY_RDY		16
+#define RES4383_CORE_RDY_DIG		17
+#define RES4383_CORE_RDY_AUX		18
+#define RES4383_ALP_AVAIL		19
+#define RES4383_RADIO_PU_AUX		20
+#define RES4383_RADIO_PU_SCAN		21
+#define RES4383_CORE_RDY_MAIN		22
+#define RES4383_RADIO_PU_MAIN		23
+#define RES4383_MACPHY_CLK_SCAN		24
+#define RES4383_CORE_RDY_CB		25
+#define RES4383_PWRSW_CB		26
+#define RES4383_ARMCLK_AVAIL		27
+#define RES4383_HT_AVAIL		28
+#define RES4383_MACPHY_CLK_AUX		29
+#define RES4383_MACPHY_CLK_MAIN		30
+#define RES4383_RESERVED_31		31
 
 /* 4360 PMU resources and chip status bits */
 #define RES4360_REGULATOR          0
@@ -3050,6 +3088,7 @@ typedef volatile struct {
 #define CC4387_FNSEL_FUART		(3u)
 #define CC4387_FNSEL_DBG_UART		(6u)
 #define CC4387_FNSEL_SPI		(7u)
+#define CC4387_FNSEL_SFLASH		(8u)
 
 /* Indices of PMU voltage regulator registers */
 #define PMU_VREG_0	(0u)
@@ -3461,7 +3500,7 @@ typedef volatile struct {
 #define CST4378_CHIPMODE_BTOP(cs)	(((cs) & (1 << 6)) == 0)
 #define CST4378_SPROM_PRESENT		0x00000010
 
-#define CST4387_SFLASH_PRESENT		0x00000010U
+#define CST_SFLASH_PRESENT		0x00000010U
 
 #define CST4387_CHIPMODE_BTOU(cs)	(((cs) & (1 << 6)) != 0)
 #define CST4387_CHIPMODE_BTOP(cs)	(((cs) & (1 << 6)) == 0)
@@ -3698,6 +3737,46 @@ typedef volatile struct {
 #define FIS_CMN_SUBCORE_ADDR_4389	(0x1640u)
 
 #define SR_ASM_ADDR_DIG_4397		(0x18520000)
+
+/* Txfifo is 512KB for main core and 128KB for aux core
+ * We use first 12kB (0x3000) in BMC buffer for template in main core and
+ * 6.5kB (0x1A00) in aux core, followed by ASM code
+ */
+#define SR_ASM_ADDR_MAIN_4383A0		BM_ADDR_TO_SR_ADDR(0xC00)
+#define SR_ASM_ADDR_AUX_4383A0		BM_ADDR_TO_SR_ADDR(0xC00)
+
+/*
+ * LAst 32K of (B)TCM Memory is used for DIG SR ASM
+ * => 0X900000 - 0X8000 (2176KB from 0x6E0000)
+ */
+#define SR_ASM_ADDR_DIG_4383A0		(0x8F8000)
+
+/* srcontrol2 reg has to be programmed with asm download address
+ * It is 14 bit address but with RAM address range in 0x8yyyyy
+ * additionally bit 15 also gets set when address is derived as
+ * addr >> 9 in sr_asm_addr. This by default enables sr self test
+ * feature which is not yet ready for 4383. Hence masking it
+ */
+#define SR_ASM_ADDR_DIG_4381A0_SRCTRL2	(0x0b8000)
+#define SR_ASM_ADDR_DIG_4382A0_SRCTRL2	(0x0f8000)
+#define SR_ASM_ADDR_DIG_4383A0_SRCTRL2	(0x0b8000)
+
+/* TODO: Update the right value after confirmation with RTL, Ucode.
+*/
+/* SR Control0 bits for 4383 */
+#define SR0_4383_SR_ENG_EN_MASK		0x1
+#define SR0_4383_SR_ENG_EN_SHIFT	0
+#define SR0_4383_SR_ENG_CLK_EN		(1 << 1)
+#define SR0_4383_RSRC_TRIGGER		(0xC << 2)
+#define SR0_4383_WD_MEM_MIN_DIV		(0x2 << 6)
+#define SR0_4383_WD_MEM_MIN_DIV_AUX	(0x4 << 6)
+#define SR0_4383_INVERT_SR_CLK		(1 << 11)
+#define SR0_4383_MEM_STBY_ALLOW		(1 << 16)
+#define SR0_4383_ENABLE_SR_ILP		(1 << 17)
+#define SR0_4383_ENABLE_SR_ALP		(1 << 18)
+#define SR0_4383_ENABLE_SR_HT		(1 << 19)
+#define SR0_4383_ALLOW_PIC		(3 << 20)
+#define SR0_4383_ENB_PMU_MEM_DISABLE	(1 << 30)
 
 /* SR Control0 bits */
 #define SR0_SR_ENG_EN_MASK		0x1
@@ -4120,6 +4199,11 @@ typedef volatile struct {
 #define PMU_4362_MACCORE_0_RES_REQ_MASK		(0x3FCBF7FFu)
 #define PMU_4362_MACCORE_1_RES_REQ_MASK		(0x7FFB3647u)
 
+/* 4381 related */
+#define CST4381_CHIPMODE_PCIE(cs)               (((cs) & (1 << 7)) != 0)        /* PCIE */
+#define CST4381_CHIPMODE_SDIO(cs)               (((cs) & (1 << 31)) != 0)       /* SDIO */
+#define CST4381_CHIPMODE_USB(cs)               (((cs) & (1 << 20)) != 0)        /* USB */
+
 #define PMU_MACCORE_0_RES_REQ_TIMER		0x1d000000
 #define PMU_MACCORE_0_RES_REQ_MASK		0x5FF2364F
 
@@ -4154,8 +4238,12 @@ typedef volatile struct {
 #define CR4_4377_RAM_BASE                    (0x170000)
 #define CR4_43751_RAM_BASE                   (0x170000)
 #define CR4_43752_RAM_BASE                   (0x170000)
+#define CR4_43756_RAM_BASE                   (0x170000)
+#define CR4_43711_RAM_BASE                   (0x170000)
 #define CR4_4376_RAM_BASE                    (0x352000)
 #define CR4_4378_RAM_BASE                    (0x352000)
+#define CR4_4381_RAM_BASE                    (0x740000)
+#define CR4_4382_RAM_BASE                    (0x700000)
 #define CR4_4387_RAM_BASE                    (0x740000)
 #define CR4_4385_RAM_BASE                    (0x740000)
 #define CA7_4388_RAM_BASE                    (0x200000)

@@ -3,7 +3,7 @@
  *     export functions to client drivers
  *     abstract OS and BUS specific details of SDIO
  *
- * Copyright (C) 2020, Broadcom.
+ * Copyright (C) 2022, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -42,7 +42,8 @@ extern const uint bcmsdh_msglevel;
 #define BCMSDH_INFO(x)
 #endif /* BCMDBG */
 
-#if defined(BCMSDIO) && (defined(BCMSDIOH_STD) || defined(BCMSDIOH_BCM) || defined(BCMSDIOH_SPI))
+#if defined(BCMSDIO) && (defined(BCMSDIOH_STD) || defined(BCMSDIOH_BCM) || \
+	defined(BCMSDIOH_SPI))
 #define BCMSDH_ADAPTER
 #endif /* BCMSDIO && (BCMSDIOH_STD || BCMSDIOH_BCM || BCMSDIOH_SPI) */
 
@@ -288,4 +289,10 @@ extern bool bcmsdh_gpioin(void *sd, uint32 gpio);
 extern int bcmsdh_gpioouten(void *sd, uint32 gpio);
 extern int bcmsdh_gpioout(void *sd, uint32 gpio, bool enab);
 
-#endif	/* _bcmsdh_h_ */
+#ifdef DHD_WAKE_STATUS
+extern int bcmsdh_get_total_wake(bcmsdh_info_t *bcmsdh);
+extern int bcmsdh_set_get_wake(bcmsdh_info_t *bcmsdh, int flag);
+
+#endif /* DHD_WAKE_STATUS */
+
+#endif /* _bcmsdh_h_ */

@@ -1,7 +1,7 @@
 /*
  * Wifi Virtual Interface implementaion
  *
- * Copyright (C) 2020, Broadcom.
+ * Copyright (C) 2022, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -118,18 +118,21 @@ void wl_cfg80211_init_ap_rps(struct bcm_cfg80211 *cfg);
 int wl_cfg80211_iface_count(struct net_device *dev);
 struct net_device* wl_get_ap_netdev(struct bcm_cfg80211 *cfg, char *ifname);
 void wl_cfg80211_cleanup_virtual_ifaces(struct bcm_cfg80211 *cfg, bool rtnl_lock_reqd);
+extern wl_iftype_t wl_cfg80211_get_sec_iface(struct bcm_cfg80211 *cfg);
 #ifdef WL_IFACE_MGMT
 extern int wl_cfg80211_set_iface_policy(struct net_device *ndev, char *arg, int len);
 extern uint8 wl_cfg80211_get_iface_policy(struct net_device *ndev);
 extern s32 wl_cfg80211_handle_if_role_conflict(struct bcm_cfg80211 *cfg, wl_iftype_t new_wl_iftype);
-extern wl_iftype_t wl_cfg80211_get_sec_iface(struct bcm_cfg80211 *cfg);
 #endif /* WL_IFACE_MGMT */
 
 extern s32 wl_get_vif_macaddr(struct bcm_cfg80211 *cfg, u16 wl_iftype, u8 *mac_addr);
-extern s32 wl_release_vif_macaddr(struct bcm_cfg80211 *cfg, u8 *mac_addr, u16 wl_iftype);
+extern s32 wl_release_vif_macaddr(struct bcm_cfg80211 *cfg, const u8 *mac_addr, u16 wl_iftype);
 
-int wl_cfg80211_set_he_mode(struct net_device *dev, struct bcm_cfg80211 *cfg,
+int wl_cfg80211_change_he_features(struct net_device *dev, struct bcm_cfg80211 *cfg,
 		s32 bssidx, u32 interface_type, bool set);
+extern int wl_cfg80211_set_he_features(struct net_device *dev, struct bcm_cfg80211 *cfg,
+		s32 bssidx, u32 interface_type, uint features);
+
 #ifdef SUPPORT_AP_SUSPEND
 extern int wl_set_ap_suspend(struct net_device *dev, bool enable, char *ifname);
 #endif /* SUPPORT_AP_SUSPEND */
@@ -137,6 +140,10 @@ extern int wl_set_ap_suspend(struct net_device *dev, bool enable, char *ifname);
 int wl_set_softap_elna_bypass(struct net_device *dev, char *ifname, int enable);
 int wl_get_softap_elna_bypass(struct net_device *dev, char *ifname, void *param);
 #endif /* SUPPORT_SOFTAP_ELNA_BYPASS */
+#ifdef CUSTOM_SOFTAP_SET_ANT
+int wl_set_softap_antenna(struct net_device *dev, char *ifname, int set_chain);
+int wl_get_softap_antenna(struct net_device *dev, char *ifname, void *param);
+#endif /* CUSTOM_SOFTAP_SET_ANT */
 #ifdef SUPPORT_AP_BWCTRL
 extern int wl_set_ap_bw(struct net_device *dev, u32 bw, char *ifname);
 extern int wl_get_ap_bw(struct net_device *dev, char* command, char *ifname, int total_len);
@@ -144,11 +151,9 @@ extern int wl_get_ap_bw(struct net_device *dev, char* command, char *ifname, int
 extern s32 wl_get_nl80211_band(u32 wl_band);
 extern int wl_get_bandwidth_cap(struct net_device *ndev, uint32 band, uint32 *bandwidth);
 
-#if (LINUX_VERSION_CODE > KERNEL_VERSION(3, 2, 0)) || \
-	defined(WL_COMPAT_WIRELESS)
-#if (defined(CONFIG_ARCH_MSM) && defined(TDLS_MGMT_VERSION2)) || \
-	((LINUX_VERSION_CODE < KERNEL_VERSION(3, 16, 0) && \
-	LINUX_VERSION_CODE >= KERNEL_VERSION(3, 15, 0)))
+#if (LINUX_VERSION_CODE > KERNEL_VERSION(3, 2, 0)) || defined(WL_COMPAT_WIRELESS)
+#if (defined(CONFIG_ARCH_MSM) && defined(TDLS_MGMT_VERSION2)) || (LINUX_VERSION_CODE < \
+	KERNEL_VERSION(3, 16, 0) && LINUX_VERSION_CODE >= KERNEL_VERSION(3, 15, 0))
 extern s32 wl_cfg80211_tdls_mgmt(struct wiphy *wiphy, struct net_device *dev,
 	u8 *peer, u8 action_code, u8 dialog_token, u16 status_code,
 	u32 peer_capability, const u8 *buf, size_t len);
@@ -189,13 +194,22 @@ extern s32 wl_cfg80211_change_virtual_iface(struct wiphy *wiphy, struct net_devi
 s32
 wl_cfg80211_set_channel(struct wiphy *wiphy, struct net_device *dev,
 	struct ieee80211_channel *chan,
-	enum nl80211_channel_type channel_type);
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(3, 6, 0))
+	enum nl80211_channel_type channel_type
+#else
+	enum nl80211_chan_width width
+#endif
+);
 #endif /* ((LINUX_VERSION < VERSION(3, 6, 0)) || WL_COMPAT_WIRELESS */
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 4, 0)) || \
-	defined(WL_COMPAT_WIRELESS)
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 4, 0)) || defined(WL_COMPAT_WIRELESS)
 extern s32 wl_cfg80211_start_ap(struct wiphy *wiphy, struct net_device *dev,
 		struct cfg80211_ap_settings *info);
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 19, 2) || defined(CFG80211_BKPORT_MLO)
+extern s32 wl_cfg80211_stop_ap(struct wiphy *wiphy, struct net_device *dev,
+	unsigned int link_id);
+#else
 extern s32 wl_cfg80211_stop_ap(struct wiphy *wiphy, struct net_device *dev);
+#endif /* LINUX_VER >= 5.19.2 || CFG80211_BKPORT_MLO */
 extern s32 wl_cfg80211_change_beacon(struct wiphy *wiphy, struct net_device *dev,
 	struct cfg80211_beacon_data *info);
 #else
@@ -203,6 +217,10 @@ extern s32 wl_cfg80211_add_set_beacon(struct wiphy *wiphy, struct net_device *de
 	struct beacon_parameters *info);
 extern s32 wl_cfg80211_del_beacon(struct wiphy *wiphy, struct net_device *dev);
 #endif /* LINUX_VERSION_CODE >= KERNEL_VERSION(3, 4, 0)  || WL_COMPAT_WIRELESS */
+#ifdef WL_CFG80211_ACL
+extern int wl_cfg80211_set_mac_acl(struct wiphy *wiphy, struct net_device *cfgdev,
+	const struct cfg80211_acl_data *acl);
+#endif /* WL_CFG80211_ACL */
 
 extern s32 wl_ap_start_ind(struct bcm_cfg80211 *cfg, bcm_struct_cfgdev *cfgdev,
 	const wl_event_msg_t *e, void *data);
@@ -248,4 +266,28 @@ extern bool wl_cfg80211_is_tdls_tunneled_frame(void *frame, u32 frame_len);
 #ifdef SUPPORT_AP_BWCTRL
 extern void wl_restore_ap_bw(struct bcm_cfg80211 *cfg);
 #endif /* SUPPORT_AP_BWCTRL */
+extern bool wl_is_sta_connected(struct bcm_cfg80211 *cfg);
+extern void wl_cfgvif_roam_config(struct bcm_cfg80211 *cfg, struct net_device *dev,
+		wl_roam_conf_t state);
+#ifdef SUPPORT_AP_INIT_BWCONF
+extern uint32
+wl_get_configured_ap_bw(dhd_pub_t *dhdp);
+extern uint32
+wl_update_configured_bw(uint32 bw);
+#endif /* SUPPORT_AP_INIT_BWCONF */
+extern uint32 wl_cfgvif_get_iftype_count(struct bcm_cfg80211 *cfg, wl_iftype_t iftype);
+extern s32 wl_update_akm_from_assoc_ie(struct bcm_cfg80211 *cfg, struct net_device *ndev,
+	u8 *assoc_ies, u32 assoc_ie_len);
+
+#if defined(LIMIT_AP_BW)
+uint32 wl_cfg80211_get_ap_bw_limit_bit(struct bcm_cfg80211 *cfg, uint32 band);
+chanspec_t wl_cfg80211_get_ap_bw_limited_chspec(struct bcm_cfg80211 *cfg,
+	uint32 band, chanspec_t candidate);
+int wl_cfg80211_set_softap_bw(struct bcm_cfg80211 *cfg, uint32 band, uint32 limit);
+#endif /* LIMIT_AP_BW */
+
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION (3, 8, 0))
+extern int wl_chspec_chandef(chanspec_t chanspec,
+	struct cfg80211_chan_def *chandef, struct wiphy *wiphy);
+#endif /* (LINUX_VERSION_CODE >= KERNEL_VERSION (3, 8, 0))) */
 #endif /* _wl_cfgvif_h_ */

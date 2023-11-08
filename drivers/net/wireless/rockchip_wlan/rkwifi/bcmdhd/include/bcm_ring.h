@@ -6,7 +6,7 @@
  *
  * NOTE: A ring of size N, may only hold N-1 elements.
  *
- * Copyright (C) 2020, Broadcom.
+ * Copyright (C) 2022, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -429,7 +429,7 @@ bcm_ring_cons_avail(const bcm_ring_t *ring, const int ring_size)
 	} else {
 		cons_avail = ring->write - ring->read;
 	}
-	ASSERT(cons_avail < ring_size);
+	ASSERT_FP(cons_avail < ring_size);
 	return cons_avail;
 }
 

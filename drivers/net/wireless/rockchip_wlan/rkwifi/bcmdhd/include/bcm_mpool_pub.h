@@ -35,7 +35,7 @@
  *              and instrumentation on top of the heap, without modifying the heap
  *              allocation implementation.
  *
- * Copyright (C) 2020, Broadcom.
+ * Copyright (C) 2022, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -169,10 +169,10 @@ int bcm_mpm_deinit(bcm_mpm_mgr_h *mgrp);
  */
 int bcm_mpm_create_prealloc_pool(bcm_mpm_mgr_h mgr,
                                  unsigned int obj_sz,
-                                 int nobj,
+                                 uint nobj,
                                  void *memstart,
                                  unsigned int memsize,
-                                 const char poolname[BCM_MP_NAMELEN],
+                                 const char *poolname,
                                  bcm_mp_pool_h *newp);
 
 /*
@@ -210,7 +210,7 @@ int bcm_mpm_delete_prealloc_pool(bcm_mpm_mgr_h mgr, bcm_mp_pool_h *poolp);
  *
  */
 int bcm_mpm_create_heap_pool(bcm_mpm_mgr_h mgr, unsigned int obj_sz,
-                             const char poolname[BCM_MP_NAMELEN],
+                             const char *poolname,
                              bcm_mp_pool_h *newp);
 
 /*

@@ -1,7 +1,7 @@
 /*
  * Trace messages sent over HBUS
  *
- * Copyright (C) 2020, Broadcom.
+ * Copyright (C) 2022, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -33,12 +33,15 @@
 
 #define MSGTRACE_VERSION 1
 
+enum msgtrace_hdr_type {
+	MSGTRACE_HDR_TYPE_MSG = 0u,
+	MSGTRACE_HDR_TYPE_LOG = 1u
+};
+
 /* Message trace header */
 typedef BWL_PRE_PACKED_STRUCT struct msgtrace_hdr {
 	uint8	version;
 	uint8   trace_type;
-#define MSGTRACE_HDR_TYPE_MSG 0
-#define MSGTRACE_HDR_TYPE_LOG 1
 	uint16	len;	/* Len of the trace */
 	uint32	seqnum;	/* Sequence number of message. Useful if the messsage has been lost
 			 * because of DMA error or a bus reset (ex: SDIO Func2)

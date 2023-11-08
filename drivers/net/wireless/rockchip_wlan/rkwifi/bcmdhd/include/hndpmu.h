@@ -1,7 +1,7 @@
 /*
  * HND SiliconBackplane PMU support.
  *
- * Copyright (C) 2020, Broadcom.
+ * Copyright (C) 2022, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -324,7 +324,7 @@ extern void si_pmu_reg_on_war_ext_wake_perst_set(si_t *sih);
 extern void si_pmu_reg_on_war_ext_wake_perst_clear(si_t *sih);
 #endif /* BT_WLAN_REG_ON_WAR */
 
-#if defined (BCMSRTOPOFF)
+#if defined(BCMSRTOPOFF)
 	extern bool _srtopoff_enab;
 #if defined(ROM_ENAB_RUNTIME_CHECK) || !defined(DONGLEBUILD)
 	#define BCMSRTOPOFF_ENAB()	(_srtopoff_enab)
@@ -345,4 +345,5 @@ extern void si_pmu_reg_on_war_ext_wake_perst_clear(si_t *sih);
 
 extern pmuregs_t *hnd_pmur;	/* PMU core regs */
 extern void si_pmu_res_state_wait(si_t *sih, uint rsrc);
+extern void si_pmu_43711a0_pll_war(si_t *sih);
 #endif /* _hndpmu_h_ */

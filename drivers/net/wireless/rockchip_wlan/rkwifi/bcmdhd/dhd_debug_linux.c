@@ -1,7 +1,7 @@
 /*
  * DHD debugability Linux os layer
  *
- * Copyright (C) 2020, Broadcom.
+ * Copyright (C) 2022, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -34,6 +34,9 @@
 
 #include <net/cfg80211.h>
 #include <wl_cfgvendor.h>
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0)
+#include <linux/sched/clock.h>
+#endif /* LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0) */
 #include <dhd_config.h>
 
 typedef void (*dbg_ring_send_sub_t)(void *ctx, const int ring_id, const void *data,
@@ -73,6 +76,7 @@ debug_data_send(dhd_pub_t *dhdp, int ring_id, const void *data, const uint32 len
 	struct net_device *ndev;
 	dbg_ring_send_sub_t ring_sub_send;
 	ndev = dhd_linux_get_primary_netdev(dhdp);
+
 	if (!ndev)
 		return;
 	if (!VALID_RING(ring_id))
@@ -105,10 +109,20 @@ dbg_ring_poll_worker(struct work_struct *work)
 	dhd_pub_t *dhdp;
 	int ringid;
 	dhd_dbg_ring_status_t ring_status;
-	void *buf;
+	void *buf, *buf_entries;
+	dhd_dbg_ring_entry_pack_t *pack_hdr;
 	dhd_dbg_ring_entry_t *hdr;
-	uint32 buflen, rlen;
+	int32 buflen, rlen, remain_buflen;
+	int32 alloc_len;
 	unsigned long flags;
+
+	BCM_REFERENCE(hdr);
+
+	if (!CAN_SLEEP()) {
+		DHD_CONS_ONLY(("this context should be sleepable\n"));
+		sched = FALSE;
+		goto exit;
+	}
 
 	GCC_DIAGNOSTIC_PUSH_SUPPRESS_CAST();
 	ring_info = container_of(d_work, linux_dbgring_info_t, work);
@@ -120,55 +134,126 @@ dbg_ring_poll_worker(struct work_struct *work)
 	ring = &dhdp->dbg->dbg_rings[ringid];
 	DHD_DBG_RING_LOCK(ring->lock, flags);
 	dhd_dbg_get_ring_status(dhdp, ringid, &ring_status);
+	DHD_DBG_RING_UNLOCK(ring->lock, flags);
 
-	if (ring->wp > ring->rp) {
-		buflen = ring->wp - ring->rp;
-	} else if (ring->wp < ring->rp) {
-		buflen = ring->ring_size - ring->rp + ring->wp;
-	} else {
-		goto exit;
+#ifdef DHD_PKT_LOGGING_DBGRING
+	if (ringid == PACKET_LOG_RING_ID) {
+		struct net_device *ndev;
+		ndev = dhd_linux_get_primary_netdev(dhdp);
+		buflen = DBG_RING_ENTRY_SIZE;
+		buflen += dhd_os_get_pktlog_dump_size(ndev);
+		DHD_DBGIF(("%s: buflen: %d\n", __FUNCTION__, buflen));
+		alloc_len = buflen + DBG_RING_ENTRY_PACK_SIZE;
+	} else
+#endif /* DHD_PKT_LOGGING_DBGRING */
+	{
+		DHD_DBG_RING_LOCK(ring->lock, flags);
+		if (ring->wp > ring->rp) {
+			buflen = ring->wp - ring->rp;
+		} else if (ring->wp < ring->rp) {
+			buflen = ring->ring_size - ring->rp + ring->wp;
+		} else {
+			DHD_DBG_RING_UNLOCK(ring->lock, flags);
+			goto exit;
+		}
+
+		if (buflen > ring->ring_size) {
+			DHD_DBG_RING_UNLOCK(ring->lock, flags);
+			goto exit;
+		}
+		DHD_DBG_RING_UNLOCK(ring->lock, flags);
+
+		alloc_len = NLMSG_DEFAULT_SIZE;
 	}
+	buf = VMALLOCZ(dhdp->osh, alloc_len);
 
-	if (buflen > ring->ring_size) {
-		goto exit;
-	}
-
-	buf = MALLOCZ(dhdp->osh, buflen);
 	if (!buf) {
-		DHD_ERROR(("%s failed to allocate read buf\n", __FUNCTION__));
+		DHD_CONS_ONLY(("%s failed to allocate read buf\n", __FUNCTION__));
 		sched = FALSE;
 		goto exit;
 	}
 
-	DHD_DBG_RING_UNLOCK(ring->lock, flags);
-	rlen = dhd_dbg_pull_from_ring(dhdp, ringid, buf, buflen);
-	DHD_DBG_RING_LOCK(ring->lock, flags);
+	pack_hdr = (dhd_dbg_ring_entry_pack_t *)buf;
+	pack_hdr->magic = DBG_RING_PACK_MAGIC;
 
+	buf_entries = (char *)buf + sizeof(dhd_dbg_ring_entry_pack_t);
+
+#ifdef DHD_PKT_LOGGING_DBGRING
+	if (ringid == PACKET_LOG_RING_ID) {
+		pack_hdr->num_entries = 1u;
+		rlen = dhd_dbg_pull_from_pktlog(dhdp, ringid, buf_entries, buflen);
+		DHD_DBGIF(("%s: rlen: %d\n", __FUNCTION__, rlen));
+		hdr = (dhd_dbg_ring_entry_t *)buf_entries;
+		while (rlen > 0) {
+			DHD_DBG_RING_LOCK(ring->lock, flags);
+			ring_status.read_bytes += (rlen - DBG_RING_ENTRY_SIZE);
+			ring->stat.read_bytes += (rlen - DBG_RING_ENTRY_SIZE);
+			if (ring->stat.read_bytes > ring->stat.written_bytes) {
+				DHD_DBGIF(("%s READ/WRITE counter mismatched!\n", __FUNCTION__));
+				ring->stat.read_bytes = ring->stat.written_bytes;
+			}
+			DHD_DBGIF(("%s RING%d[%s]read_bytes %d, written_bytes %d, "
+				"writen_records %d\n", __FUNCTION__, ring->id, ring->name,
+				ring->stat.read_bytes, ring->stat.written_bytes,
+				ring->stat.written_records));
+			DHD_DBG_RING_UNLOCK(ring->lock, flags);
+			/* offset fw ts to host ts */
+			hdr->timestamp += ring_info->tsoffset;
+			debug_data_send(dhdp, ringid, pack_hdr,
+					ENTRY_LENGTH(hdr) + DBG_RING_ENTRY_PACK_SIZE, ring_status);
+			rlen -= ENTRY_LENGTH(hdr);
+			hdr = (dhd_dbg_ring_entry_t *)((char *)hdr + ENTRY_LENGTH(hdr));
+		}
+	} else
+#endif /* DHD_PKT_LOGGING_DBGRING */
+	{
+		remain_buflen = buflen;
+		while (remain_buflen > 0) {
+			pack_hdr->num_entries = 0;
+			memset_s(buf_entries, NLMSG_DEFAULT_SIZE - DBG_RING_ENTRY_PACK_SIZE,
+				0, NLMSG_DEFAULT_SIZE - DBG_RING_ENTRY_PACK_SIZE);
+			/* Returns as much as possible with the size of the passed buffer
+			 * rlen means the total length of multiple entries including entry hdr
+			 */
+			rlen = dhd_dbg_pull_from_ring(dhdp, ringid, buf_entries,
+				NLMSG_DEFAULT_SIZE - DBG_RING_ENTRY_PACK_SIZE,
+				&pack_hdr->num_entries);
+			if (rlen <= 0) {
+				break;
+			}
+
+			DHD_DBG_RING_LOCK(ring->lock, flags);
+			ring_status.read_bytes += rlen;
+			DHD_DBG_RING_UNLOCK(ring->lock, flags);
+
+			/* payload length includes pack_hdr size */
+			debug_data_send(dhdp, ringid, pack_hdr,
+					rlen + DBG_RING_ENTRY_PACK_SIZE, ring_status);
+			remain_buflen -= rlen;
+		}
+	}
+
+	VMFREE(dhdp->osh, buf, alloc_len);
+
+	DHD_DBG_RING_LOCK(ring->lock, flags);
 	if (!ring->sched_pull) {
 		ring->sched_pull = TRUE;
 	}
-
-	hdr = (dhd_dbg_ring_entry_t *)buf;
-	while (rlen > 0) {
-		ring_status.read_bytes += ENTRY_LENGTH(hdr);
-		/* offset fw ts to host ts */
-		hdr->timestamp += ring_info->tsoffset;
-		debug_data_send(dhdp, ringid, hdr, ENTRY_LENGTH(hdr),
-			ring_status);
-		rlen -= ENTRY_LENGTH(hdr);
-		hdr = (dhd_dbg_ring_entry_t *)((char *)hdr + ENTRY_LENGTH(hdr));
-	}
-	MFREE(dhdp->osh, buf, buflen);
-
+	DHD_DBG_RING_UNLOCK(ring->lock, flags);
 exit:
 	if (sched) {
 		/* retrigger the work at same interval */
-		if ((ring_status.written_bytes == ring_status.read_bytes) &&
-				(ring_info->interval)) {
-			schedule_delayed_work(d_work, ring_info->interval);
+		if ((ring_info->interval)) {
+			if ((ring_status.written_bytes == ring_status.read_bytes) ||
+#ifdef DHD_PKT_LOGGING_DBGRING
+				(ringid == PACKET_LOG_RING_ID)) {
+#else
+				FALSE) {
+#endif /* DHD_PKT_LOGGING_DBGRING */
+				schedule_delayed_work(d_work, ring_info->interval);
+			}
 		}
 	}
-	DHD_DBG_RING_UNLOCK(ring->lock, flags);
 
 	return;
 }
@@ -205,8 +290,9 @@ dhd_os_start_logging(dhd_pub_t *dhdp, char *ring_name, int log_level,
 	if (!VALID_RING(ring_id))
 		return BCME_UNSUPPORTED;
 
-	DHD_INFO(("%s , log_level : %d, time_intval : %d, threshod %d Bytes\n",
-		__FUNCTION__, log_level, time_intval, threshold));
+	DHD_ERROR(("%s , ring_id : %d log_level : %d, "
+			"time_intval : %d, threshod %d Bytes\n",
+			__FUNCTION__, ring_id, log_level, time_intval, threshold));
 
 	/* change the configuration */
 	ret = dhd_dbg_set_configuration(dhdp, ring_id, log_level, flags, threshold);
@@ -248,8 +334,6 @@ dhd_os_reset_logging(dhd_pub_t *dhdp)
 		DHD_INFO(("%s: Stop ring buffer %d\n", __FUNCTION__, ring_id));
 
 		ring_info = &os_priv[ring_id];
-		/* cancel any pending work */
-		cancel_delayed_work_sync(&ring_info->work);
 		/* log level zero makes stop logging on that ring */
 		ring_info->log_level = 0;
 		ring_info->interval = 0;
@@ -259,6 +343,8 @@ dhd_os_reset_logging(dhd_pub_t *dhdp)
 			DHD_ERROR(("dhd_set_configuration is failed : %d\n", ret));
 			return ret;
 		}
+		/* cancel any pending work */
+		cancel_delayed_work_sync(&ring_info->work);
 	}
 	return ret;
 }
@@ -365,7 +451,7 @@ dhd_os_push_push_ring_data(dhd_pub_t *dhdp, int ring_id, void *data, int32 data_
 	}
 #endif /* DHD_DEBUGABILITY_LOG_DUMP_RING */
 	ret = dhd_dbg_push_to_ring(dhdp, ring_id, &msg_hdr, event_data);
-	if (ret) {
+	if (ret && ret != BCME_BUSY) {
 		DHD_ERROR(("%s : failed to push data into the ring (%d) with ret(%d)\n",
 			__FUNCTION__, ring_id, ret));
 	}
@@ -388,9 +474,10 @@ dhd_os_dbg_start_pkt_monitor(dhd_pub_t *dhdp)
 }
 
 int
-dhd_os_dbg_monitor_tx_pkts(dhd_pub_t *dhdp, void *pkt, uint32 pktid)
+dhd_os_dbg_monitor_tx_pkts(dhd_pub_t *dhdp, void *pkt, uint32 pktid,
+	frame_type type, uint8 mgmt_acked)
 {
-	return dhd_dbg_monitor_tx_pkts(dhdp, pkt, pktid);
+	return dhd_dbg_monitor_tx_pkts(dhdp, pkt, pktid, type, mgmt_acked);
 }
 
 int
@@ -401,9 +488,9 @@ dhd_os_dbg_monitor_tx_status(dhd_pub_t *dhdp, void *pkt, uint32 pktid,
 }
 
 int
-dhd_os_dbg_monitor_rx_pkts(dhd_pub_t *dhdp, void *pkt)
+dhd_os_dbg_monitor_rx_pkts(dhd_pub_t *dhdp, void *pkt, frame_type type)
 {
-	return dhd_dbg_monitor_rx_pkts(dhdp, pkt);
+	return dhd_dbg_monitor_rx_pkts(dhdp, pkt, type);
 }
 
 int
@@ -465,6 +552,9 @@ dhd_os_dbg_get_feature(dhd_pub_t *dhdp, int32 *features)
 	}
 #endif /* DBG_PKT_MON */
 #endif /* DEBUGABILITY */
+#ifdef DHD_PKT_LOGGING_DBGRING
+	*features |= DBG_PACKET_LOG_SUPPORTED;
+#endif /* DHD_PKT_LOGGING_DBGRING */
 	return ret;
 }
 
@@ -478,6 +568,14 @@ dhd_os_dbg_pullreq(void *os_priv, int ring_id)
 	schedule_delayed_work(&ring_info->work, 0);
 }
 
+#ifdef DHD_PKT_LOGGING_DBGRING
+void
+dhd_os_dbg_urgent_pullreq(void *os_priv, int ring_id)
+{
+	dhd_os_dbg_pullreq(os_priv, ring_id);
+}
+#endif /* DHD_PKT_LOGGING_DBGRING */
+
 int
 dhd_os_dbg_attach(dhd_pub_t *dhdp)
 {
@@ -486,9 +584,12 @@ dhd_os_dbg_attach(dhd_pub_t *dhdp)
 	int ring_id;
 
 	/* os_dbg data */
-	os_priv = MALLOCZ(dhdp->osh, sizeof(*os_priv) * DEBUG_RING_ID_MAX);
-	if (!os_priv)
+	os_priv = VMALLOCZ(dhdp->osh, sizeof(*os_priv) * DEBUG_RING_ID_MAX);
+	if (!os_priv) {
+		DHD_ERROR(("%s:%d: VMALLOC failed for os_priv, size %d\n", __FUNCTION__,
+			__LINE__, (uint32)sizeof(*os_priv) * DEBUG_RING_ID_MAX));
 		return BCME_NOMEM;
+	}
 
 	for (ring_id = DEBUG_RING_ID_INVALID + 1; ring_id < DEBUG_RING_ID_MAX;
 	     ring_id++) {
@@ -499,8 +600,9 @@ dhd_os_dbg_attach(dhd_pub_t *dhdp)
 	}
 
 	ret = dhd_dbg_attach(dhdp, dhd_os_dbg_pullreq, dhd_os_dbg_urgent_notifier, os_priv);
-	if (ret)
-		MFREE(dhdp->osh, os_priv, sizeof(*os_priv) * DEBUG_RING_ID_MAX);
+	if (ret) {
+		VMFREE(dhdp->osh, os_priv, sizeof(*os_priv) * DEBUG_RING_ID_MAX);
+	}
 
 	return ret;
 }
@@ -522,7 +624,7 @@ dhd_os_dbg_detach(dhd_pub_t *dhdp)
 			cancel_delayed_work_sync(&ring_info->work);
 		}
 	}
-	MFREE(dhdp->osh, os_priv, sizeof(*os_priv) * DEBUG_RING_ID_MAX);
+	VMFREE(dhdp->osh, os_priv, sizeof(*os_priv) * DEBUG_RING_ID_MAX);
 
 	return dhd_dbg_detach(dhdp);
 }

@@ -1,7 +1,7 @@
 /*
  * Fundamental constants relating to DHCP Protocol
  *
- * Copyright (C) 2020, Broadcom.
+ * Copyright (C) 2022, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -82,5 +82,7 @@
 
 #define DHCP6_PORT_SERVER	547	/* DHCP6 server UDP port */
 #define DHCP6_PORT_CLIENT	546	/* DHCP6 client UDP port */
+
+#define UDP_PORT_DNS		53	/* UDP DNS port */
 
 #endif	/* #ifndef _bcmdhcp_h_ */

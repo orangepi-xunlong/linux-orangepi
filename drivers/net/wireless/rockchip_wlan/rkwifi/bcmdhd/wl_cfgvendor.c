@@ -1,7 +1,7 @@
 /*
  * Linux cfg80211 Vendor Extension Code
  *
- * Copyright (C) 2020, Broadcom.
+ * Copyright (C) 2022, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -69,6 +69,7 @@
 #include <linux/wireless.h>
 #include <linux/ieee80211.h>
 #include <linux/wait.h>
+#include <linux/list_sort.h>
 #include <net/cfg80211.h>
 #include <net/rtnetlink.h>
 
@@ -77,6 +78,7 @@
 #include <wl_cfg80211.h>
 #include <wl_cfgp2p.h>
 #include <wl_cfgscan.h>
+#include <wl_cfgvif.h>
 #ifdef WL_NAN
 #include <wl_cfgnan.h>
 #endif /* WL_NAN */
@@ -90,6 +92,73 @@
 #include <dhd_wlfc.h>
 #endif
 #include <brcm_nl80211.h>
+
+#ifdef WL_CELLULAR_CHAN_AVOID
+#include <wl_cfg_cellavoid.h>
+#endif /* WL_CELLULAR_CHAN_AVOID */
+
+#ifdef WL_CFGVENDOR_CUST_ADVLOG
+static void wl_cfgvendor_custom_advlog_scan_start(void *plog, uint32 armcycle);
+static void wl_cfgvendor_custom_advlog_scan_cmpl(void *plog, uint32 armcycle);
+static void wl_cfgvendor_custom_advlog_roam_cmpl(void *plog, uint32 armcycle);
+static void wl_cfgvendor_custom_advlog_btm_req(void *plog, uint32 armcycle);
+static void wl_cfgvendor_custom_advlog_btm_resp(void *plog, uint32 armcycle);
+static void wl_cfgvendor_custom_advlog_btm_wtc(void *plog, uint32 armcycle);
+static void wl_cfgvendor_custom_advlog_btm_query(void *plog, uint32 armcycle);
+
+typedef void (*print_advlog_func)(void *log, uint32 armcycle);
+typedef struct _pr_advlog_tbl {
+	uint8 id;
+	print_advlog_func advlog_func;
+} pr_advlog_tbl_t;
+
+typedef struct dhd_covt_roam_rsn {
+	uint roam_rsn;
+	uint cust_roam_rsn;
+} dhd_covt_roam_rsn_t;
+
+typedef enum {
+	WL_CUST_ROAM_REASON_UNKNOWN = 0,
+	WL_CUST_ROAM_REASON_LOW_RSSI,
+	WL_CUST_ROAM_REASON_LOW_RSSI_CU,
+	WL_CUST_ROAM_REASON_BCNS_LOST,
+	WL_CUST_ROAM_REASON_EMERG_ROAM,
+	WL_CUST_ROAM_REASON_BTM_REQ,
+	WL_CUST_ROAM_REASON_IDLE_ROAM,
+	WL_CUST_ROAM_REASON_WTC,
+	WL_CUST_ROAM_REASON_INACTIVITY,
+	WL_CUST_ROAM_REASON_SCAN_TIMEOUT,
+	WL_CUST_ROAM_REASON_BTCOEX,
+	WL_CUST_ROAM_REASON_MAX
+} cust_roam_reason_t;
+
+static dhd_covt_roam_rsn_t dhd_covt_roam_rsn_list[] =
+{
+	{WLC_E_REASON_INITIAL_ASSOC, WL_CUST_ROAM_REASON_UNKNOWN},
+	{WLC_E_REASON_LOW_RSSI, WL_CUST_ROAM_REASON_LOW_RSSI},
+	{WLC_E_REASON_DEAUTH, WL_CUST_ROAM_REASON_EMERG_ROAM},
+	{WLC_E_REASON_DISASSOC, WL_CUST_ROAM_REASON_EMERG_ROAM},
+	{WLC_E_REASON_BCNS_LOST, WL_CUST_ROAM_REASON_BCNS_LOST},
+	{WLC_E_REASON_BSSTRANS_REQ, WL_CUST_ROAM_REASON_BTM_REQ},
+	{WLC_E_REASON_LOW_RSSI_CU, WL_CUST_ROAM_REASON_LOW_RSSI_CU},
+	{WLC_E_REASON_SILENT_ROAM, WL_CUST_ROAM_REASON_IDLE_ROAM},
+	{WLC_E_REASON_INACTIVITY, WL_CUST_ROAM_REASON_INACTIVITY},
+	{WLC_E_REASON_ROAM_SCAN_TIMEOUT, WL_CUST_ROAM_REASON_SCAN_TIMEOUT},
+	{WLC_E_REASON_BTCX_ROAM, WL_CUST_ROAM_REASON_BTCOEX}
+};
+
+static const pr_advlog_tbl_t advlog_print_tbl[] =
+{
+	{ROAM_LOG_SCANSTART, wl_cfgvendor_custom_advlog_scan_start},
+	{ROAM_LOG_SCAN_CMPLT, wl_cfgvendor_custom_advlog_scan_cmpl},
+	{ROAM_LOG_ROAM_CMPLT, wl_cfgvendor_custom_advlog_roam_cmpl},
+	{ROAM_LOG_BTM_REP, wl_cfgvendor_custom_advlog_btm_resp},
+	{ROAM_LOG_WTC_BTM_REP, wl_cfgvendor_custom_advlog_btm_wtc},
+	{ROAM_LOG_BTM_QUERY, wl_cfgvendor_custom_advlog_btm_query},
+	{ROAM_LOG_BTM_REQ, wl_cfgvendor_custom_advlog_btm_req},
+	{PRSV_PERIODIC_ID_MAX, NULL}
+};
+#endif /* WL_CFGVENDOR_CUST_ADVLOG */
 
 char*
 wl_get_kernel_timestamp(void)
@@ -197,6 +266,55 @@ wl_cfgvendor_notify_supp_event_str(const char *evt_name, const char *fmt, ...)
 	return wl_cfgvendor_send_async_event(wiphy,
 		bcmcfg_to_prmry_ndev(cfg), BRCM_VENDOR_EVENT_PRIV_STR, buf, len);
 }
+
+#ifdef WL_CFGVENDOR_CUST_ADVLOG
+int
+wl_cfgvendor_send_supp_advlog(const char *fmt, ...)
+{
+	char buf[SUPP_LOG_LEN] = {0};
+	struct bcm_cfg80211 *cfg;
+	struct wiphy *wiphy;
+	va_list args;
+	int len;
+	int prefix_len;
+	int rem_len;
+
+	cfg = wl_cfg80211_get_bcmcfg();
+	if (!cfg || !cfg->wdev) {
+		WL_DBG(("supp evt invalid arg\n"));
+		return BCME_OK;
+	}
+
+	wiphy = cfg->wdev->wiphy;
+	prefix_len = snprintf(buf, SUPP_LOG_LEN, "[%s]",
+		wl_get_kernel_timestamp());
+	/* Remaining buffer len */
+	rem_len = SUPP_LOG_LEN - (prefix_len + 1);
+	/* Print the arg list on to the remaining part of the buffer */
+	va_start(args, fmt);
+	len = vsnprintf((buf + prefix_len), rem_len, fmt, args);
+	va_end(args);
+	if (len < 0) {
+		return -EINVAL;
+	}
+
+	if (len > rem_len) {
+		/* If return length is greater than buffer len,
+		 * then its truncated buffer case.
+		 */
+		len = rem_len;
+	}
+
+	/* Ensure the buffer is null terminated */
+	len += prefix_len;
+	buf[len] = '\0';
+	len++;
+
+	return wl_cfgvendor_send_async_event(wiphy,
+		bcmcfg_to_prmry_ndev(cfg), BRCM_VENDOR_EVENT_CONNECTIVITY_LOG,
+		buf, len);
+}
+#endif /* WL_CFGVENDOR_CUST_ADVLOG */
 #endif /* WL_SUPP_EVENT */
 
 /*
@@ -215,7 +333,7 @@ int wl_cfgvendor_send_async_event(struct wiphy *wiphy,
 
 	/* Alloc the SKB for vendor_event */
 #if (defined(CONFIG_ARCH_MSM) && defined(SUPPORT_WDEV_CFG80211_VENDOR_EVENT_ALLOC)) || \
-		LINUX_VERSION_CODE >= KERNEL_VERSION(4, 1, 0)
+	LINUX_VERSION_CODE >= KERNEL_VERSION(4, 1, 0)
 	skb = cfg80211_vendor_event_alloc(wiphy, ndev_to_wdev(dev), len, event_id, kflags);
 #else
 	skb = cfg80211_vendor_event_alloc(wiphy, len, event_id, kflags);
@@ -355,6 +473,7 @@ wl_cfgvendor_set_rand_mac_oui(struct wiphy *wiphy,
 exit:
 	return err;
 }
+
 #ifdef CUSTOM_FORCE_NODFS_FLAG
 static int
 wl_cfgvendor_set_nodfs_flag(struct wiphy *wiphy,
@@ -411,12 +530,25 @@ wl_cfgvendor_set_country(struct wiphy *wiphy,
 				return err;
 		}
 	}
+
 	/* country code is unique for dongle..hence using primary interface. */
 	err = wl_cfg80211_set_country_code(primary_ndev, country_code, true, true, 0);
 	if (err < 0) {
 		WL_ERR(("Set country failed ret:%d\n", err));
+		goto exit;
 	}
-
+#ifdef OEM_ANDROID
+#ifdef FCC_PWR_LIMIT_2G
+	err = wldev_iovar_setint(primary_ndev, "fccpwrlimit2g", FALSE);
+	if (err < 0) {
+		WL_ERR(("fccpwrlimit2g deactivation is failed\n"));
+		goto exit;
+	} else {
+		WL_ERR(("fccpwrlimit2g is deactivated\n"));
+	}
+#endif /* FCC_PWR_LIMIT_2G */
+#endif /* OEM_ANDROID */
+exit:
 	return err;
 }
 
@@ -445,7 +577,7 @@ wl_cfgvendor_send_hotlist_event(struct wiphy *wiphy,
 
 		/* Alloc the SKB for vendor_event */
 #if (defined(CONFIG_ARCH_MSM) && defined(SUPPORT_WDEV_CFG80211_VENDOR_EVENT_ALLOC)) || \
-		LINUX_VERSION_CODE >= KERNEL_VERSION(4, 1, 0)
+	LINUX_VERSION_CODE >= KERNEL_VERSION(4, 1, 0)
 		skb = cfg80211_vendor_event_alloc(wiphy, ndev_to_wdev(dev),
 		malloc_len, event, kflags);
 #else
@@ -469,7 +601,11 @@ wl_cfgvendor_send_hotlist_event(struct wiphy *wiphy,
 			iter_cnt_to_send -= cnt;
 			cache->tot_consumed += cnt;
 			/* Push the data to the skb */
+#ifdef ANDROID13_KERNEL515_BKPORT
+			nla_put_nohdr(skb, cnt * sizeof(wifi_gscan_result_t), ptr);
+#else
 			nla_append(skb, cnt * sizeof(wifi_gscan_result_t), ptr);
+#endif
 			if (cache->tot_consumed == cache->tot_count) {
 				cache = cache->next;
 			}
@@ -1203,14 +1339,14 @@ wl_cfgvendor_set_batch_scan_cfg(struct wiphy *wiphy,
 }
 
 #endif /* GSCAN_SUPPORT */
-#if defined (GSCAN_SUPPORT) || defined(DHD_GET_VALID_CHANNELS)
+#if defined(GSCAN_SUPPORT) || defined(DHD_GET_VALID_CHANNELS)
 static int
 wl_cfgvendor_gscan_get_channel_list(struct wiphy *wiphy,
 	struct wireless_dev *wdev, const void  *data, int len)
 {
 	int err = 0, type, band;
 	struct bcm_cfg80211 *cfg = wiphy_priv(wiphy);
-	uint16 *reply = NULL;
+	uint32 *reply = NULL;
 	uint32 reply_len = 0, num_channels, mem_needed;
 	struct sk_buff *skb;
 	dhd_pub_t *dhdp;
@@ -1249,7 +1385,8 @@ wl_cfgvendor_gscan_get_channel_list(struct wiphy *wiphy,
 		WL_ERR(("failed to allocate chanspec buffer\n"));
 		return -ENOMEM;
 	}
-	err = wl_cfgscan_get_band_freq_list(cfg, band, reply, &num_channels);
+
+	err = wl_cfgscan_get_band_freq_list(cfg, wdev, band, reply, &num_channels);
 	if (err != BCME_OK && err != BCME_UNSUPPORTED) {
 		WL_ERR(("%s: failed to get valid channel list\n",
 				__FUNCTION__));
@@ -1258,6 +1395,7 @@ wl_cfgvendor_gscan_get_channel_list(struct wiphy *wiphy,
 	} else if (err == BCME_OK) {
 		reply_len = (num_channels * sizeof(uint32));
 	} else if (err == BCME_UNSUPPORTED) {
+		MFREE(cfg->osh, reply, CHANINFO_LIST_BUF_SIZE);
 		reply = dhd_pno_get_gscan(dhdp,
 			DHD_PNO_GET_CHANNEL_LIST, &band, &reply_len);
 		if (!reply) {
@@ -1289,7 +1427,7 @@ exit:
 	MFREE(cfg->osh, reply, CHANINFO_LIST_BUF_SIZE);
 	return err;
 }
-#endif	/* GSCAN_SUPPORT || DHD_GET_VALID_CHANNELS */
+#endif /* GSCAN_SUPPORT || DHD_GET_VALID_CHANNELS */
 
 #ifdef RSSI_MONITOR_SUPPORT
 static int wl_cfgvendor_set_rssi_monitor(struct wiphy *wiphy,
@@ -1299,8 +1437,15 @@ static int wl_cfgvendor_set_rssi_monitor(struct wiphy *wiphy,
 	struct bcm_cfg80211 *cfg = wiphy_priv(wiphy);
 	int8 max_rssi = 0, min_rssi = 0;
 	const struct nlattr *iter;
+	struct net_device *ndev = wdev_to_ndev(wdev);
 
-	if (!wl_get_drv_status(cfg, CONNECTED, wdev_to_ndev(wdev))) {
+	/* Limit rssi monitoring only on primary interface */
+	if (!IS_INET_LINK_NDEV(cfg, ndev)) {
+		WL_ERR(("rssi monitor query requested on non primary interface\n"));
+		return BCME_UNSUPPORTED;
+	}
+
+	if (!wl_get_drv_status(cfg, CONNECTED, ndev)) {
 		WL_ERR(("Sta is not connected to an AP, rssi monitoring is not allowed\n"));
 		return -EINVAL;
 	}
@@ -1319,8 +1464,7 @@ static int wl_cfgvendor_set_rssi_monitor(struct wiphy *wiphy,
 		}
 	}
 
-	if (dhd_dev_set_rssi_monitor_cfg(bcmcfg_to_prmry_ndev(cfg),
-	       start, max_rssi, min_rssi) < 0) {
+	if (dhd_dev_set_rssi_monitor_cfg(ndev, start, max_rssi, min_rssi) < 0) {
 		WL_ERR(("Could not set rssi monitor cfg\n"));
 		err = -EINVAL;
 	}
@@ -1336,9 +1480,14 @@ wl_cfgvendor_get_wake_reason_stats(struct wiphy *wiphy,
 	struct net_device *ndev = wdev_to_ndev(wdev);
 	wake_counts_t *pwake_count_info;
 	int ret, mem_needed;
-#if defined(DHD_DEBUG) && defined(DHD_WAKE_EVENT_STATUS)
+#if defined(DHD_WAKE_EVENT_STATUS)
 	int flowid;
-#endif /* DHD_DEBUG && DHD_WAKE_EVENT_STATUS */
+#ifdef CUSTOM_WAKE_REASON_STATS
+	int tmp_rc_event[MAX_WAKE_REASON_STATS];
+	int rc_event_used_cnt = 0;
+	int front = 0;
+#endif /* CUSTOM_WAKE_REASON_STATS */
+#endif /* DHD_WAKE_EVENT_STATUS */
 	struct sk_buff *skb = NULL;
 	dhd_pub_t *dhdp = wl_cfg80211_get_dhdp(ndev);
 
@@ -1356,29 +1505,66 @@ wl_cfgvendor_get_wake_reason_stats(struct wiphy *wiphy,
 	}
 #ifdef DHD_WAKE_EVENT_STATUS
 	WL_ERR(("pwake_count_info->rcwake %d\n", pwake_count_info->rcwake));
+#ifdef CUSTOM_WAKE_REASON_STATS
+	ret = nla_put_u32(skb, WAKE_STAT_ATTRIBUTE_TOTAL_DRIVER_FW, 0);
+	if (unlikely(ret)) {
+		WL_ERR(("Failed to put total count of driver fw\n"));
+		goto exit;
+	}
+#endif /* CUSTOM_WAKE_REASON_STATS */
 	ret = nla_put_u32(skb, WAKE_STAT_ATTRIBUTE_TOTAL_CMD_EVENT, pwake_count_info->rcwake);
 	if (unlikely(ret)) {
 		WL_ERR(("Failed to put Total count of CMD event, ret=%d\n", ret));
 		goto exit;
 	}
-	ret = nla_put_u32(skb, WAKE_STAT_ATTRIBUTE_CMD_EVENT_COUNT_USED, WLC_E_LAST);
+#ifdef CUSTOM_WAKE_REASON_STATS
+	front = pwake_count_info->rc_event_idx - 1;
+	for (flowid = 0; flowid < MAX_WAKE_REASON_STATS; flowid++) {
+		/* Reorder the rc_event, the latest event in the header index */
+		if (front < 0) {
+			front = MAX_WAKE_REASON_STATS - 1;
+		}
+		if (pwake_count_info->rc_event[front] != -1) {
+			rc_event_used_cnt++;
+		}
+		tmp_rc_event[flowid] = pwake_count_info->rc_event[front];
+		front--;
+	}
+
+	ret = nla_put_u32(skb, WAKE_STAT_ATTRIBUTE_CMD_EVENT_COUNT_USED, rc_event_used_cnt);
+#endif /* CUSTOM_WAKE_REASON_STATS */
 	if (unlikely(ret)) {
 		WL_ERR(("Failed to put Max count of event used, ret=%d\n", ret));
 		goto exit;
 	}
+#ifdef CUSTOM_WAKE_REASON_STATS
+	ret = nla_put(skb, WAKE_STAT_ATTRIBUTE_CMD_EVENT_WAKE,
+		(MAX_WAKE_REASON_STATS * sizeof(int)), tmp_rc_event);
+#else
 	ret = nla_put(skb, WAKE_STAT_ATTRIBUTE_CMD_EVENT_WAKE, (WLC_E_LAST * sizeof(uint)),
 		pwake_count_info->rc_event);
+#endif /* CUSTOM_WAKE_REASON_STATS */
 	if (unlikely(ret)) {
 		WL_ERR(("Failed to put Event wake data, ret=%d\n", ret));
 		goto exit;
 	}
+
 #ifdef DHD_DEBUG
+#ifdef CUSTOM_WAKE_REASON_STATS
+	for (flowid = 0; flowid < MAX_WAKE_REASON_STATS; flowid++) {
+		if (pwake_count_info->rc_event[flowid] != -1) {
+			WL_INFORM(("Event ID %u = %s\n", pwake_count_info->rc_event[flowid],
+				bcmevent_get_name(pwake_count_info->rc_event[flowid])));
+		}
+	}
+#else
 	for (flowid = 0; flowid < WLC_E_LAST; flowid++) {
 		if (pwake_count_info->rc_event[flowid] != 0) {
 			WL_ERR((" %s = %u\n", bcmevent_get_name(flowid),
 				pwake_count_info->rc_event[flowid]));
 		}
 	}
+#endif /* CUSTOM_WAKE_REASON_STATS */
 #endif /* DHD_DEBUG */
 #endif /* DHD_WAKE_EVENT_STATUS */
 #ifdef DHD_WAKE_RX_STATUS
@@ -1403,7 +1589,7 @@ wl_cfgvendor_get_wake_reason_stats(struct wiphy *wiphy,
 		WL_ERR(("Failed to put Total wake due to RX broadcast, ret=%d\n", ret));
 		goto exit;
 	}
-	ret = nla_put_u32(skb, WAKE_STAT_ATTRIBUTE_RX_ICMP_PKT, pwake_count_info->rx_arp);
+	ret = nla_put_u32(skb, WAKE_STAT_ATTRIBUTE_RX_ICMP_PKT, pwake_count_info->rx_icmp);
 	if (unlikely(ret)) {
 		WL_ERR(("Failed to put Total wake due to ICMP pkt, ret=%d\n", ret));
 		goto exit;
@@ -1516,6 +1702,7 @@ wl_cfgvendor_notify_dump_completion(struct wiphy *wiphy,
 	/* call wmb() to synchronize with the previous memory operations */
 	OSL_SMP_WMB();
 	DHD_BUS_BUSY_CLEAR_IN_HALDUMP(dhd_pub);
+	dhd_set_dump_status(dhd_pub, DUMP_READY);
 	/* Call another wmb() to make sure wait_for_dump_completion value
 	 * gets updated before waking up waiting context.
 	 */
@@ -1561,8 +1748,10 @@ wl_cfgvendor_set_hal_started(struct wiphy *wiphy,
 	struct bcm_cfg80211 *cfg = wiphy_priv(wiphy);
 #ifdef WL_STA_ASSOC_RAND
 	struct ether_addr primary_mac;
-	dhd_pub_t *dhd = (dhd_pub_t *)(cfg->pub);
 #endif /* WL_STA_ASSOC_RAND */
+#if defined(WL_STA_ASSOC_RAND) || defined(DHD_FILE_DUMP_EVENT)
+	dhd_pub_t *dhd = (dhd_pub_t *)(cfg->pub);
+#endif /* WL_STA_ASSOC_RAND || DHD_FILE_DUMP_EVENT */
 	int ret = BCME_OK;
 #if defined(WIFI_TURNON_USE_HALINIT)
 	struct net_device *ndev = wdev_to_wlc_ndev(wdev, cfg);
@@ -1598,6 +1787,9 @@ wl_cfgvendor_set_hal_started(struct wiphy *wiphy,
 	WL_INFORM(("%s,[DUMP] HAL STARTED\n", __FUNCTION__));
 
 	cfg->hal_started = true;
+#ifdef DHD_FILE_DUMP_EVENT
+	dhd_set_dump_status(dhd, DUMP_READY);
+#endif /* DHD_FILE_DUMP_EVENT */
 #ifdef WL_STA_ASSOC_RAND
 	/* If mac randomization is enabled and primary macaddress is not
 	 * randomized, randomize it from HAL init context
@@ -1621,9 +1813,16 @@ wl_cfgvendor_stop_hal(struct wiphy *wiphy,
 		struct wireless_dev *wdev, const void  *data, int len)
 {
 	struct bcm_cfg80211 *cfg = wiphy_priv(wiphy);
+#ifdef DHD_FILE_DUMP_EVENT
+	dhd_pub_t *dhd = (dhd_pub_t *)(cfg->pub);
+#endif /* DHD_FILE_DUMP_EVENT */
+
 	WL_INFORM(("%s,[DUMP] HAL STOPPED\n", __FUNCTION__));
 
 	cfg->hal_started = false;
+#ifdef DHD_FILE_DUMP_EVENT
+	dhd_set_dump_status(dhd, DUMP_NOT_READY);
+#endif /* DHD_FILE_DUMP_EVENT */
 	return BCME_OK;
 }
 #endif /* WL_CFG80211 */
@@ -1639,9 +1838,6 @@ wl_cfgvendor_set_latency_mode(struct wiphy *wiphy,
 #ifdef SUPPORT_LATENCY_CRITICAL_DATA
 	bool enable;
 #endif /* SUPPORT_LATENCY_CRITICAL_DATA */
-#ifdef WL_AUTO_QOS
-	dhd_pub_t *dhdp = wl_cfg80211_get_dhdp(wdev->netdev);
-#endif /* WL_AUTO_QOS */
 
 	nla_for_each_attr(iter, data, len, rem) {
 		type = nla_type(iter);
@@ -1650,10 +1846,6 @@ wl_cfgvendor_set_latency_mode(struct wiphy *wiphy,
 				latency_mode = nla_get_u32(iter);
 				WL_DBG(("%s,Setting latency mode %u\n", __FUNCTION__,
 					latency_mode));
-#ifdef WL_AUTO_QOS
-				/* Enable/Disable qos monitoring */
-				dhd_wl_sock_qos_set_status(dhdp, latency_mode);
-#endif /* WL_AUTO_QOS */
 #ifdef SUPPORT_LATENCY_CRITICAL_DATA
 				enable = latency_mode ? true : false;
 				err = wldev_iovar_setint(wdev->netdev,
@@ -1677,6 +1869,43 @@ wl_cfgvendor_set_latency_mode(struct wiphy *wiphy,
 #endif /* WL_LATENCY_MODE */
 
 #ifdef RTT_SUPPORT
+bool wl_check_wdev(struct wireless_dev *wdev)
+{
+	struct bcm_cfg80211 *cfg = NULL;
+	cfg = wl_cfg80211_get_bcmcfg();
+
+	if (!wdev) {
+		WL_ERR(("wdev is null\n"));
+		return BCME_ERROR;
+	}
+
+	/* g_bcmcfg is set when the primary interface up
+	 * compare the wdev as parameter with g_bcmcfg->wdev
+	 * to detect whether the wdev is corrupted or not
+	 */
+	if (!cfg) {
+		WL_ERR(("cfg is null\n"));
+		return BCME_ERROR;
+	}
+
+	if (!cfg->wdev) {
+		WL_ERR(("cfg->wdev is null\n"));
+		return BCME_ERROR;
+	}
+
+	/* if the wdev param is valid address it will print and hexdump */
+	if (cfg->wdev->wiphy != wdev->wiphy) {
+		WL_ERR(("wiphy is not the same with wiphy "
+			"cfg->wdev:%px wdev:%px "
+			"cfg->wdev->wiphy:%px wdev->wiphy:%px\n",
+			cfg->wdev, wdev, cfg->wdev->wiphy, wdev->wiphy));
+		prhex("wdev hexdump", (const u8 *)wdev, sizeof(struct wireless_dev));
+		return BCME_ERROR;
+	}
+
+	return BCME_OK;
+}
+
 void
 wl_cfgvendor_rtt_evt(void *ctx, void *rtt_data)
 {
@@ -1693,16 +1922,27 @@ wl_cfgvendor_rtt_evt(void *ctx, void *rtt_data)
 	wiphy = wdev->wiphy;
 
 	WL_DBG(("In\n"));
+	if (wl_check_wdev(wdev)) {
+		WL_ERR(("Invalid wdev\n"));
+		return;
+	}
+
 	/* Push the data to the skb */
 	if (!rtt_data) {
 		WL_ERR(("rtt_data is NULL\n"));
 		return;
 	}
 	rtt_cache_list = (struct list_head *)rtt_data;
+
+	if (!wiphy) {
+		WL_ERR(("wiphy is NULL\n"));
+		return;
+	}
+
 	kflags = in_atomic() ? GFP_ATOMIC : GFP_KERNEL;
 	if (list_empty(rtt_cache_list)) {
 #if (defined(CONFIG_ARCH_MSM) && defined(SUPPORT_WDEV_CFG80211_VENDOR_EVENT_ALLOC)) || \
-		LINUX_VERSION_CODE >= KERNEL_VERSION(4, 1, 0)
+	LINUX_VERSION_CODE >= KERNEL_VERSION(4, 1, 0)
 		skb = cfg80211_vendor_event_alloc(wiphy, NULL, 100,
 			GOOGLE_RTT_COMPLETE_EVENT, kflags);
 #else
@@ -1726,7 +1966,7 @@ wl_cfgvendor_rtt_evt(void *ctx, void *rtt_data)
 	list_for_each_entry(rtt_header, rtt_cache_list, list) {
 		/* Alloc the SKB for vendor_event */
 #if (defined(CONFIG_ARCH_MSM) && defined(SUPPORT_WDEV_CFG80211_VENDOR_EVENT_ALLOC)) || \
-		LINUX_VERSION_CODE >= KERNEL_VERSION(4, 1, 0)
+	LINUX_VERSION_CODE >= KERNEL_VERSION(4, 1, 0)
 		skb = cfg80211_vendor_event_alloc(wiphy, NULL, rtt_header->result_tot_len + 100,
 			GOOGLE_RTT_COMPLETE_EVENT, kflags);
 #else
@@ -1764,8 +2004,62 @@ wl_cfgvendor_rtt_evt(void *ctx, void *rtt_data)
 			goto free_mem;
 		}
 		list_for_each_entry(rtt_result, &rtt_header->result_list, list) {
-			ret = nla_put(skb, RTT_ATTRIBUTE_RESULT,
-				rtt_result->report_len, &rtt_result->report);
+#ifdef WL_RTT_LCI
+			WL_DBG(("rtt_result report len=%d(%lu)\n",
+				rtt_result->report_len, RTT_REPORT_SIZE));
+			if (rtt_result->report_len > RTT_REPORT_SIZE) {
+				struct bcm_cfg80211 *cfg = wiphy_priv(wiphy);
+				int msize = rtt_result->report_len;
+				char *mbuf;
+				int plen;
+				char *pdata;
+
+				mbuf = (char *)MALLOCZ(cfg->osh, msize);
+				if (!mbuf) {
+					WL_ERR(("Failed to malloc buf for LCI/LCR, len(%d)\n",
+						msize));
+					goto free_mem;
+				}
+				pdata = mbuf;
+				plen = msize;
+				(void) memcpy_s(pdata, plen, &rtt_result->report, RTT_REPORT_SIZE);
+				pdata += RTT_REPORT_SIZE;
+				plen -= RTT_REPORT_SIZE;
+				if (rtt_result->report.LCI) {
+					bcm_tlv_t *tlv = rtt_result->report.LCI;
+					int tlv_size = BCM_TLV_SIZE(tlv);
+					if (tlv_size > plen) {
+						WL_ERR(("LCI IE size error, len %d(%d)\n",
+							tlv_size, plen));
+					} else {
+						(void) memcpy_s(pdata, plen, (char*)tlv, tlv_size);
+						pdata += tlv_size;
+						plen -= tlv_size;
+						WL_INFORM_MEM(("copy LCI, len=%d\n", tlv_size));
+					}
+				}
+				if (rtt_result->report.LCR) {
+					bcm_tlv_t *tlv = rtt_result->report.LCR;
+					int tlv_size = BCM_TLV_SIZE(tlv);
+					if (tlv_size > plen) {
+						WL_ERR(("LCR IE size error, len %d(%d)\n",
+							tlv_size, plen));
+					} else {
+						(void) memcpy_s(pdata, plen, (char*)tlv, tlv_size);
+						pdata += tlv_size;
+						plen -= tlv_size;
+						WL_INFORM_MEM(("copy LCR, len=%d\n", tlv_size));
+					}
+				}
+				ret = nla_put(skb, RTT_ATTRIBUTE_RESULT, msize - plen, mbuf);
+				MFREE(cfg->osh, mbuf, msize);
+			} else
+#endif /* WL_RTT_LCI */
+			{
+				ret = nla_put(skb, RTT_ATTRIBUTE_RESULT,
+					rtt_result->report_len, &rtt_result->report);
+			}
+
 			if (ret < 0) {
 				WL_ERR(("Failed to put RTT_ATTRIBUTE_RESULT, ret:%d\n", ret));
 				goto free_mem;
@@ -1792,6 +2086,31 @@ free_mem:
 	}
 }
 
+static void
+wl_cfgvendor_rtt_sort_targets(rtt_config_params_t *rtt_param)
+{
+	uint8 target_count = rtt_param->rtt_target_cnt;
+	rtt_target_info_t *rtt_target = rtt_param->target_info;
+	uint8 i, j;
+	uint8 min_index;
+	rtt_target_info_t rtt_tmp_target;
+
+	for (i = 0; i < (target_count - 1); i++) {
+		min_index = i;
+		for (j = i+1; j < target_count; j++) {
+			if (rtt_target[min_index].chanspec > rtt_target[j].chanspec) {
+				min_index = j;
+			}
+		}
+		if (i != min_index) {
+			/* swap */
+			rtt_tmp_target = rtt_target[i];
+			rtt_target[i] = rtt_target[min_index];
+			rtt_target[min_index] = rtt_tmp_target;
+		}
+	}
+}
+
 static int
 wl_cfgvendor_rtt_set_config(struct wiphy *wiphy, struct wireless_dev *wdev,
 	const void *data, int len) {
@@ -1808,6 +2127,11 @@ wl_cfgvendor_rtt_set_config(struct wiphy *wiphy, struct wireless_dev *wdev,
 	bzero(&rtt_param, sizeof(rtt_param));
 
 	WL_DBG(("In\n"));
+	if (wl_check_wdev(wdev)) {
+		WL_ERR(("Invalid wdev\n"));
+		goto exit;
+	}
+
 	err = dhd_dev_rtt_register_noti_callback(wdev->netdev, wdev, wl_cfgvendor_rtt_evt);
 	if (err < 0) {
 		WL_ERR(("failed to register rtt_noti_callback\n"));
@@ -1942,7 +2266,7 @@ wl_cfgvendor_rtt_set_config(struct wiphy *wiphy, struct wireless_dev *wdev,
 						rtt_target->LCI_request = nla_get_u8(iter2);
 						break;
 					case RTT_ATTRIBUTE_TARGET_LCR:
-						rtt_target->LCI_request = nla_get_u8(iter2);
+						rtt_target->LCR_request = nla_get_u8(iter2);
 						break;
 					case RTT_ATTRIBUTE_TARGET_BURST_DURATION:
 						if ((nla_get_u32(iter2) > 1 &&
@@ -1971,12 +2295,12 @@ wl_cfgvendor_rtt_set_config(struct wiphy *wiphy, struct wireless_dev *wdev,
 				/* convert to chanspec value */
 				rtt_target->chanspec =
 					dhd_rtt_convert_to_chspec(rtt_target->channel);
-				if (rtt_target->chanspec == 0) {
+				if (rtt_target->chanspec == INVCHANSPEC) {
 					WL_ERR(("Channel is not valid \n"));
 					err = -EINVAL;
 					goto exit;
 				}
-				WL_INFORM_MEM(("Target addr %s, Channel : %s for RTT \n",
+				WL_MEM(("Target addr %s, Channel : %s for RTT \n",
 					bcm_ether_ntoa((const struct ether_addr *)&rtt_target->addr,
 					eabuf),
 					wf_chspec_ntoa(rtt_target->chanspec, chanbuf)));
@@ -1986,6 +2310,8 @@ wl_cfgvendor_rtt_set_config(struct wiphy *wiphy, struct wireless_dev *wdev,
 		}
 	}
 	WL_DBG(("leave :target_cnt : %d\n", rtt_param.rtt_target_cnt));
+	/* sort targets */
+	wl_cfgvendor_rtt_sort_targets(&rtt_param);
 	if (dhd_dev_rtt_set_cfg(bcmcfg_to_prmry_ndev(cfg), &rtt_param) < 0) {
 		WL_ERR(("Could not set RTT configuration\n"));
 		err = -EINVAL;
@@ -2103,6 +2429,7 @@ wl_cfgvendor_rtt_get_capability(struct wiphy *wiphy, struct wireless_dev *wdev,
 exit:
 	return err;
 }
+
 static int
 get_responder_info(struct bcm_cfg80211 *cfg,
 	struct wifi_rtt_responder *responder_info)
@@ -2128,6 +2455,7 @@ get_responder_info(struct bcm_cfg80211 *cfg,
 	}
 	return err;
 }
+
 static int
 wl_cfgvendor_rtt_get_responder_info(struct wiphy *wiphy, struct wireless_dev *wdev,
 	const void *data, int len)
@@ -2315,7 +2643,7 @@ wl_cfgvendor_set_bssid_pref(struct wiphy *wiphy,
 		switch (type) {
 			case GSCAN_ATTRIBUTE_NUM_BSSID:
 				if (num) {
-					WL_ERR(("attempt overide bssid num.\n"));
+					WL_ERR(("attempt override bssid num.\n"));
 					err = -EINVAL;
 					goto exit;
 				}
@@ -2432,6 +2760,7 @@ exit:
 	return err;
 }
 #endif /* GSCAN_SUPPORT */
+
 #if defined(GSCAN_SUPPORT) || defined(ROAMEXP_SUPPORT)
 static int
 wl_cfgvendor_set_bssid_blacklist(struct wiphy *wiphy,
@@ -2676,10 +3005,8 @@ exit:
 
 #ifdef ROAMEXP_SUPPORT
 typedef enum {
-	FW_ROAMING_ENABLE = 1,
 	FW_ROAMING_DISABLE,
-	FW_ROAMING_PAUSE,
-	FW_ROAMING_RESUME
+	FW_ROAMING_ENABLE
 } fw_roaming_state_t;
 
 static int
@@ -2689,6 +3016,8 @@ wl_cfgvendor_set_fw_roaming_state(struct wiphy *wiphy,
 	fw_roaming_state_t requested_roaming_state;
 	int type;
 	int err = 0;
+	wl_roam_conf_t roam_req;
+	struct bcm_cfg80211 *cfg = wl_get_cfg(wdev_to_ndev(wdev));
 
 	if (!data) {
 		WL_ERR(("data is not available\n"));
@@ -2710,15 +3039,18 @@ wl_cfgvendor_set_fw_roaming_state(struct wiphy *wiphy,
 	requested_roaming_state = nla_get_u32(data);
 	WL_INFORM(("setting FW roaming state to %d\n", requested_roaming_state));
 
-	if ((requested_roaming_state == FW_ROAMING_ENABLE) ||
-		(requested_roaming_state == FW_ROAMING_RESUME)) {
-		err = wldev_iovar_setint(wdev_to_ndev(wdev), "roam_off", FALSE);
-	} else if ((requested_roaming_state == FW_ROAMING_DISABLE) ||
-		(requested_roaming_state == FW_ROAMING_PAUSE)) {
-		err = wldev_iovar_setint(wdev_to_ndev(wdev), "roam_off", TRUE);
+	if (requested_roaming_state == FW_ROAMING_ENABLE) {
+		roam_req = ROAM_CONF_ROAM_ENAB_REQ;
+	} else if (requested_roaming_state == FW_ROAMING_DISABLE) {
+		roam_req = ROAM_CONF_ROAM_DISAB_REQ;
 	} else {
-		err = -EINVAL;
+		WL_ERR(("unexpected roam_state_request:%d\n", requested_roaming_state));
+		return -EINVAL;
 	}
+
+	wl_cfgvif_roam_config(cfg, wdev->netdev, roam_req);
+
+	ROAMOFF_DBG_SAVE(wdev_to_ndev(wdev), SET_ROAM_VNDR_POLICY, !cfg->disable_fw_roam);
 
 	return err;
 }
@@ -2808,7 +3140,7 @@ wl_cfgvendor_priv_string_handler(struct wiphy *wiphy,
 
 	ret = dhd_cfgvendor_priv_string_handler(cfg, wdev, nlioc, buf);
 	if (ret) {
-		WL_ERR(("dhd_cfgvendor returned error %d", ret));
+		WL_ERR(("dhd_cfgvendor returned error %d\n", ret));
 		vfree(buf);
 		return ret;
 	}
@@ -3009,7 +3341,7 @@ wl_cfgvendor_start_ap_params_handler(struct wiphy *wiphy,
 	return ret;
 }
 
-#if defined(WL_SAE) || defined(WL_CLIENT_SAE)
+#if defined(WL_SAE)
 static int
 wl_cfgvendor_set_sae_password(struct wiphy *wiphy,
 	struct wireless_dev *wdev, const void  *data, int len)
@@ -3020,11 +3352,7 @@ wl_cfgvendor_set_sae_password(struct wiphy *wiphy,
 	wsec_pmk_t pmk;
 	s32 bssidx;
 
-/* This api not needed for wpa_supplicant based sae authentication */
-#ifdef WL_CLIENT_SAE
-	WL_INFORM_MEM(("Ignore for external sae auth\n"));
-	return BCME_OK;
-#endif /* WL_CLIENT_SAE */
+	BCM_REFERENCE(pmk);
 
 	/* clear the content of pmk structure before usage */
 	(void)memset_s(&pmk, sizeof(wsec_pmk_t), 0x0, sizeof(wsec_pmk_t));
@@ -3034,8 +3362,8 @@ wl_cfgvendor_set_sae_password(struct wiphy *wiphy,
 		return BCME_ERROR;
 	}
 
-	if ((len < WSEC_MIN_PSK_LEN) || (len >= WSEC_MAX_PASSPHRASE_LEN)) {
-		WL_ERR(("Invalid passphrase length %d..should be >= 8 and < 256\n",
+	if ((len < 1) || (len > WSEC_MAX_PASSPHRASE_LEN)) {
+		WL_ERR(("Invalid passphrase length %d..should be >= 1 and <= 256\n",
 			len));
 		err = BCME_BADLEN;
 		goto done;
@@ -3046,21 +3374,63 @@ wl_cfgvendor_set_sae_password(struct wiphy *wiphy,
 		WL_ERR(("could not set wpa_auth (0x%x)\n", err));
 		goto done;
 	}
-	pmk.key_len = htod16(len);
-	bcopy((const u8*)data, pmk.key, len);
-	pmk.flags = htod16(WSEC_PASSPHRASE);
 
-	err = wldev_ioctl_set(net, WLC_SET_WSEC_PMK, &pmk, sizeof(pmk));
+	/* Update passphrase in net_info and will be used
+	* in connect/start_ap context
+	*/
+	err = wl_cfg80211_set_netinfo_passphrase(cfg, net, data, len);
+
 	if (err) {
-		WL_ERR(("\n failed to set pmk %d\n", err));
+		WL_ERR(("\n failed to cache sae passphrase %d\n", err));
 		goto done;
 	} else {
 		WL_INFORM_MEM(("sae passphrase set successfully\n"));
 	}
+
 done:
 	return err;
 }
-#endif /* WL_SAE || WL_CLIENT_SAE */
+#endif /* WL_SAE */
+
+static int
+wl_cfgvendor_set_td_policy(struct wiphy *wiphy,
+	struct wireless_dev *wdev, const void  *data, int len)
+{
+	struct net_device *net = wdev->netdev;
+	int ret = BCME_OK;
+	int attr_type;
+	int rem = len;
+	const struct nlattr *iter;
+
+	BCM_REFERENCE(net);
+	nla_for_each_attr(iter, data, len, rem) {
+		attr_type = nla_type(iter);
+		WL_DBG(("attr type: (%u)\n", attr_type));
+
+		switch (attr_type) {
+		case BRCM_ATTR_TD_POLICY: {
+			u32 td_policy = nla_get_u32(iter);
+
+			WL_INFORM_MEM(("Setting TD policy %d\n", td_policy));
+			ret = wl_cfg80211_set_wsec_info(net, &td_policy,
+				sizeof(td_policy), WL_WSEC_INFO_BSS_TD_POLICY);
+			if (unlikely(ret)) {
+				WL_ERR(("set wsec_info for td_policy failed, error %d\n", ret));
+				/* Trigger disassoc, going ahead with connection is
+				 * violation of TD policy
+				 */
+				wl_cfg80211_disassoc(net, WLAN_REASON_UNSPECIFIED);
+			}
+			break;
+		}
+		/* Add new attributes here */
+		default:
+			WL_ERR(("%s: Unknown type, %d\n", __FUNCTION__, attr_type));
+		}
+	}
+
+	return ret;
+}
 
 #ifdef BCM_PRIV_CMD_SUPPORT
 /* strlen("ifname=") + IFNAMESIZE + strlen(" ") + '\0' */
@@ -3084,13 +3454,14 @@ wl_cfgvendor_priv_bcm_handler(struct wiphy *wiphy,
 	struct net_device *net = NULL;
 	unsigned long int cmd_out = 0;
 
-#if defined(WL_ANDROID_PRIV_CMD_OVER_NL80211) && defined(OEM_ANDROID)
+#if (defined(WL_ANDROID_PRIV_CMD_OVER_NL80211) && defined(OEM_ANDROID)) || \
+	defined(WL_PRIV_CMD_OVER_NL80211)
 	u32 cmd_buf_len = WL_DRIVER_PRIV_CMD_LEN;
 	char cmd_prefix[ANDROID_PRIV_CMD_IF_PREFIX_LEN + 1] = {0};
 	char *cmd_buf = NULL;
 	char *current_pos;
 	u32 cmd_offset;
-#endif /* WL_ANDROID_PRIV_CMD_OVER_NL80211 && OEM_ANDROID */
+#endif /* (WL_ANDROID_PRIV_CMD_OVER_NL80211 && OEM_ANDROID) || defined(WL_PRIV_CMD_OVER_NL80211) */
 
 	WL_DBG(("%s: Enter \n", __func__));
 
@@ -3109,7 +3480,8 @@ wl_cfgvendor_priv_bcm_handler(struct wiphy *wiphy,
 			goto exit;
 		}
 
-#if defined(WL_ANDROID_PRIV_CMD_OVER_NL80211) && defined(OEM_ANDROID)
+#if (defined(WL_ANDROID_PRIV_CMD_OVER_NL80211) && defined(OEM_ANDROID)) || \
+	defined(WL_PRIV_CMD_OVER_NL80211)
 		if (type == BRCM_ATTR_DRIVER_CMD) {
 			if ((cmd_len >= WL_DRIVER_PRIV_CMD_LEN) ||
 				(cmd_len < ANDROID_PRIV_CMD_IF_PREFIX_LEN)) {
@@ -3165,6 +3537,7 @@ wl_cfgvendor_priv_bcm_handler(struct wiphy *wiphy,
 			cmd_buf[WL_DRIVER_PRIV_CMD_LEN - 1] = '\0';
 
 			WL_DBG(("vendor_command: %s len: %u \n", cmd_buf, cmd_buf_len));
+#ifdef OEM_ANDROID
 			bytes_written = wl_handle_private_cmd(net, cmd_buf, cmd_buf_len);
 			WL_DBG(("bytes_written: %d \n", bytes_written));
 			if (bytes_written == 0) {
@@ -3183,6 +3556,10 @@ wl_cfgvendor_priv_bcm_handler(struct wiphy *wiphy,
 				err = bytes_written;
 				goto exit;
 			}
+#else // OEM_ANDROID
+			err = bytes_written = -ENODEV;
+			goto exit;
+#endif // OEM_ANDROID
 			if ((data_len > 0) && (data_len < (cmd_buf_len - 1)) && cmd_buf) {
 				err =  wl_cfgvendor_send_cmd_reply(wiphy, cmd_buf, data_len);
 				if (unlikely(err)) {
@@ -3197,18 +3574,18 @@ wl_cfgvendor_priv_bcm_handler(struct wiphy *wiphy,
 			}
 			break;
 		}
-#endif /* WL_ANDROID_PRIV_CMD_OVER_NL80211 && OEM_ANDROID */
+#endif /* (WL_ANDROID_PRIV_CMD_OVER_NL80211 && OEM_ANDROID) || defined(WL_PRIV_CMD_OVER_NL80211) */
 
 	}
 
 exit:
 
-#if defined(WL_ANDROID_PRIV_CMD_OVER_NL80211) && defined(OEM_ANDROID)
+#if (defined(WL_ANDROID_PRIV_CMD_OVER_NL80211) && defined(OEM_ANDROID)) || \
+	defined(WL_PRIV_CMD_OVER_NL80211)
 	if (cmd_buf) {
 		MFREE(cfg->osh, cmd_buf, cmd_buf_len);
 	}
-#endif /* WL_ANDROID_PRIV_CMD_OVER_NL80211 && OEM_ANDROID */
-
+#endif /* (WL_ANDROID_PRIV_CMD_OVER_NL80211 && OEM_ANDROID) || defined(WL_PRIV_CMD_OVER_NL80211) */
 	net_os_wake_unlock(ndev);
 	return err;
 }
@@ -3455,6 +3832,14 @@ nan_attr_to_str(u16 cmd)
 		break;
 	C2S(NAN_ATTRIBUTE_DW_EARLY_TERM);
 		break;
+	C2S(NAN_ATTRIBUTE_CHANNEL_INFO);
+		break;
+	C2S(NAN_ATTRIBUTE_NUM_CHANNELS);
+		break;
+	C2S(NAN_ATTRIBUTE_INSTANT_MODE_ENABLE);
+		break;
+	C2S(NAN_ATTRIBUTE_INSTANT_COMM_CHAN);
+		break;
 	default:
 		id2str = "NAN_ATTRIBUTE_UNKNOWN";
 	}
@@ -3548,7 +3933,8 @@ wl_cfgvendor_nan_cmd_reply(struct wiphy *wiphy, int nan_cmd,
 	nan_req_resp->value = ret;
 	err = wl_cfgvendor_send_cmd_reply(wiphy, nan_req_resp,
 		sizeof(*nan_req_resp));
-	return err;
+	/* giving more prio to ret than err */
+	return (ret == 0) ? err : ret;
 }
 
 static void
@@ -3578,6 +3964,9 @@ wl_cfgvendor_free_disc_cmd_data(struct bcm_cfg80211 *cfg,
 	if (cmd_data->key.data) {
 		MFREE(cfg->osh, cmd_data->key.data, NAN_MAX_PMK_LEN);
 	}
+	if (cmd_data->scid.data) {
+		MFREE(cfg->osh, cmd_data->scid.data, cmd_data->scid.dlen);
+	}
 	if (cmd_data->sde_svc_info.data) {
 		MFREE(cfg->osh, cmd_data->sde_svc_info.data, cmd_data->sde_svc_info.dlen);
 	}
@@ -3600,6 +3989,9 @@ wl_cfgvendor_free_dp_cmd_data(struct bcm_cfg80211 *cfg,
 	}
 	if (cmd_data->key.data) {
 		MFREE(cfg->osh, cmd_data->key.data, NAN_MAX_PMK_LEN);
+	}
+	if (cmd_data->scid.data) {
+		MFREE(cfg->osh, cmd_data->scid.data, cmd_data->scid.dlen);
 	}
 	MFREE(cfg->osh, cmd_data, sizeof(*cmd_data));
 }
@@ -3631,7 +4023,7 @@ wl_cfgvendor_nan_parse_dp_sec_info_args(struct wiphy *wiphy,
 			}
 			break;
 		case NAN_ATTRIBUTE_PUBLISH_ID:
-			cmd_data->pub_id = nla_get_u16(iter);
+			cmd_data->pub_id = nla_get_u32(iter);
 			break;
 		case NAN_ATTRIBUTE_NDP_ID:
 			cmd_data->ndp_instance_id = nla_get_u32(iter);
@@ -3647,6 +4039,65 @@ wl_cfgvendor_nan_parse_dp_sec_info_args(struct wiphy *wiphy,
 	return ret;
 }
 #endif /* WL_NAN_DISC_CACHE */
+
+static int
+wl_cfgvendor_nan_parse_scid_params(struct bcm_cfg80211 *cfg, nan_str_data_t *scid,
+	const struct nlattr *iter, int attr_type)
+{
+	int ret = BCME_OK;
+
+	switch (attr_type) {
+	case NAN_ATTRIBUTE_SCID_LEN:
+		if (nla_len(iter) != sizeof(uint32)) {
+			ret = -EINVAL;
+			goto exit;
+		}
+		if (scid->dlen) {
+			WL_ERR(("trying to overwrite:%d\n", attr_type));
+			ret = -EINVAL;
+			goto exit;
+		}
+		scid->dlen = nla_get_u32(iter);
+		if ((!scid->dlen) || scid->dlen >= NAN_MAX_SCID_BUF_LEN) {
+			ret = -EINVAL;
+			WL_ERR(("scid len %d invalid\n", scid->dlen));
+			goto exit;
+		}
+		WL_TRACE(("valid scid length = %u\n", scid->dlen));
+		break;
+	case NAN_ATTRIBUTE_SCID:
+		if (!scid->dlen || (nla_len(iter) != scid->dlen)) {
+			WL_ERR(("wrong scid len:%d,%d\n", scid->dlen, nla_len(iter)));
+			ret = -EINVAL;
+			goto exit;
+		}
+		if (scid->data) {
+			WL_ERR(("trying to overwrite:%d\n", attr_type));
+			ret = -EINVAL;
+			goto exit;
+		}
+
+		scid->data = MALLOCZ(cfg->osh, scid->dlen);
+		if (scid->data == NULL) {
+			WL_ERR(("failed to allocate scid, len=%d\n", scid->dlen));
+			ret = -ENOMEM;
+			goto exit;
+		}
+		ret = memcpy_s(scid->data, scid->dlen,
+				nla_data(iter), nla_len(iter));
+		if (ret != BCME_OK) {
+			WL_ERR(("Failed to copy scid data\n"));
+			return ret;
+		}
+		break;
+	default:
+		WL_ERR(("Unknown type, %d\n", attr_type));
+		ret = -EINVAL;
+		break;
+	}
+exit:
+	return ret;
+}
 
 int8 chanbuf[CHANSPEC_STR_LEN];
 static int
@@ -3780,13 +4231,9 @@ wl_cfgvendor_nan_parse_datapath_args(struct wiphy *wiphy,
 			}
 			/* take the default channel start_factor frequency */
 			chan = wf_mhz2channel((uint)nla_get_u32(iter), 0);
-			if (chan <= CH_MAX_2G_CHANNEL) {
-				cmd_data->avail_params.chanspec[0] =
-					wf_channel2chspec(chan, WL_CHANSPEC_BW_20);
-			} else {
-				cmd_data->avail_params.chanspec[0] =
-					wf_channel2chspec(chan, WL_CHANSPEC_BW_80);
-			}
+			/* 20MHz as BW */
+			cmd_data->avail_params.chanspec[0] =
+				wf_channel2chspec(chan, WL_CHANSPEC_BW_20);
 			if (cmd_data->avail_params.chanspec[0] == 0) {
 				WL_ERR(("Channel is not valid \n"));
 				ret = -EINVAL;
@@ -3962,7 +4409,16 @@ wl_cfgvendor_nan_parse_datapath_args(struct wiphy *wiphy,
 				goto exit;
 			}
 			break;
-
+		case NAN_ATTRIBUTE_SCID_LEN:
+		/* Fall through */
+		case NAN_ATTRIBUTE_SCID:
+			ret = wl_cfgvendor_nan_parse_scid_params(cfg, &cmd_data->scid,
+					iter, attr_type);
+			if (ret != BCME_OK) {
+				WL_ERR(("Failed to scid data\n"));
+				return ret;
+			}
+			break;
 		default:
 			WL_ERR(("Unknown type, %d\n", attr_type));
 			ret = -EINVAL;
@@ -4007,11 +4463,11 @@ wl_cfgvendor_nan_parse_discover_args(struct wiphy *wiphy,
 
 		/* Nan Publish/Subscribe request Attributes */
 		case NAN_ATTRIBUTE_PUBLISH_ID:
-			if (nla_len(iter) != sizeof(uint16)) {
+			if (nla_len(iter) != sizeof(uint32)) {
 				ret = -EINVAL;
 				goto exit;
 			}
-			cmd_data->pub_id = nla_get_u16(iter);
+			cmd_data->pub_id = nla_get_u32(iter);
 			cmd_data->local_id = cmd_data->pub_id;
 			break;
 		case NAN_ATTRIBUTE_MAC_ADDR:
@@ -4522,6 +4978,16 @@ wl_cfgvendor_nan_parse_discover_args(struct wiphy *wiphy,
 				return ret;
 			}
 			break;
+		case NAN_ATTRIBUTE_SCID_LEN:
+		/* Fall through */
+		case NAN_ATTRIBUTE_SCID:
+			ret = wl_cfgvendor_nan_parse_scid_params(cfg, &cmd_data->scid,
+					iter, attr_type);
+			if (ret != BCME_OK) {
+				WL_ERR(("Failed to scid data\n"));
+				return ret;
+			}
+			break;
 		case NAN_ATTRIBUTE_RSSI_THRESHOLD_FLAG:
 			if (nla_len(iter) != sizeof(uint8)) {
 				ret = -EINVAL;
@@ -4825,11 +5291,8 @@ wl_cfgvendor_nan_parse_args(struct wiphy *wiphy, const void *buf,
 			}
 			/* take the default channel start_factor frequency */
 			chan = wf_mhz2channel((uint)nla_get_u32(iter), 0);
-			if (chan <= CH_MAX_2G_CHANNEL) {
-				cmd_data->chanspec[0] = wf_channel2chspec(chan, WL_CHANSPEC_BW_20);
-			} else {
-				cmd_data->chanspec[0] = wf_channel2chspec(chan, WL_CHANSPEC_BW_80);
-			}
+			/* 20MHz as BW */
+			cmd_data->chanspec[0] = wf_channel2chspec(chan, WL_CHANSPEC_BW_20);
 			if (cmd_data->chanspec[0] == 0) {
 				WL_ERR(("Channel is not valid \n"));
 				ret = -EINVAL;
@@ -5051,45 +5514,10 @@ wl_cfgvendor_nan_parse_args(struct wiphy *wiphy, const void *buf,
 			WL_TRACE(("CSID = %u\n", cmd_data->csid));
 			break;
 		case NAN_ATTRIBUTE_SCID_LEN:
-			if (nla_len(iter) != sizeof(uint32)) {
-				ret = -EINVAL;
-				goto exit;
-			}
-			if (cmd_data->scid.dlen) {
-				WL_ERR(("trying to overwrite:%d\n", attr_type));
-				ret = -EINVAL;
-				goto exit;
-			}
-			cmd_data->scid.dlen = nla_get_u32(iter);
-			if (cmd_data->scid.dlen > MAX_SCID_LEN) {
-				ret = -EINVAL;
-				WL_ERR_RLMT(("Not allowed beyond %d\n", MAX_SCID_LEN));
-				goto exit;
-			}
-			WL_TRACE(("valid scid length = %u\n", cmd_data->scid.dlen));
-			break;
+		/* Fall through */
 		case NAN_ATTRIBUTE_SCID:
-			if (!cmd_data->scid.dlen || (nla_len(iter) != cmd_data->scid.dlen)) {
-				WL_ERR(("wrong scid len:%d,%d\n", cmd_data->scid.dlen,
-					nla_len(iter)));
-				ret = -EINVAL;
-				goto exit;
-			}
-			if (cmd_data->scid.data) {
-				WL_ERR(("trying to overwrite:%d\n", attr_type));
-				ret = -EINVAL;
-				goto exit;
-			}
-
-			cmd_data->scid.data = MALLOCZ(cfg->osh, cmd_data->scid.dlen);
-			if (cmd_data->scid.data == NULL) {
-				WL_ERR(("failed to allocate scid, len=%d\n",
-					cmd_data->scid.dlen));
-				ret = -ENOMEM;
-				goto exit;
-			}
-			ret = memcpy_s(cmd_data->scid.data, cmd_data->scid.dlen,
-					nla_data(iter), nla_len(iter));
+			ret = wl_cfgvendor_nan_parse_scid_params(cfg, &cmd_data->scid,
+					iter, attr_type);
 			if (ret != BCME_OK) {
 				WL_ERR(("Failed to scid data\n"));
 				return ret;
@@ -5170,6 +5598,28 @@ wl_cfgvendor_nan_parse_args(struct wiphy *wiphy, const void *buf,
 			}
 			cmd_data->use_ndpe_attr = nla_get_u32(iter);
 			break;
+		case NAN_ATTRIBUTE_INSTANT_MODE_ENABLE:
+			if (nla_len(iter) != sizeof(uint32)) {
+				ret = -EINVAL;
+				goto exit;
+			}
+			cmd_data->instant_mode_en = nla_get_u32(iter);
+			*nan_attr_mask |= NAN_ATTR_INSTANT_MODE_CONFIG;
+			break;
+		case NAN_ATTRIBUTE_INSTANT_COMM_CHAN:
+			if (nla_len(iter) != sizeof(uint32)) {
+				ret = -EINVAL;
+				goto exit;
+			}
+			cmd_data->instant_chspec = wl_freq_to_chanspec((int)nla_get_u32(iter));
+			if (cmd_data->instant_chspec <= 0) {
+				WL_ERR((" Instant mode Channel is not valid \n"));
+				ret = -EINVAL;
+				break;
+			}
+			WL_INFORM_MEM(("[NAN Instant mode] Freq %d chanspec %x \n",
+					nla_get_u32(iter), cmd_data->instant_chspec));
+			break;
 		case NAN_ATTRIBUTE_ENABLE_MERGE:
 			if (nla_len(iter) != sizeof(uint8)) {
 				ret = -EINVAL;
@@ -5199,12 +5649,7 @@ wl_cfgvendor_nan_parse_args(struct wiphy *wiphy, const void *buf,
 				ret = -EINVAL;
 				goto exit;
 			}
-			cfg->nancfg->ranging_enable = nla_get_u32(iter);
-			if (cfg->nancfg->ranging_enable == 0) {
-				WL_ERR((" ranging enable is not set \n"));
-				cmd_data->status = BCME_BADARG;
-				goto exit;
-			}
+			cfg->nancfg->ranging_enable = nla_get_u32(iter) != 0 ? TRUE : FALSE;
 			break;
 		case NAN_ATTRIBUTE_DW_EARLY_TERM:
 			if (nla_len(iter) != sizeof(uint32)) {
@@ -5212,6 +5657,13 @@ wl_cfgvendor_nan_parse_args(struct wiphy *wiphy, const void *buf,
 				goto exit;
 			}
 			cmd_data->dw_early_termination = nla_get_u32(iter);
+			break;
+		case NAN_ATTRIBUTE_CHRE_REQUEST:
+			if (nla_len(iter) != sizeof(uint8)) {
+				ret = -EINVAL;
+				goto exit;
+			}
+			cmd_data->chre_req = nla_get_u8(iter);
 			break;
 		default:
 			WL_ERR(("%s: Unknown type, %d\n", __FUNCTION__, attr_type));
@@ -5235,6 +5687,8 @@ static int
 wl_cfgvendor_nan_dp_estb_event_data_filler(struct sk_buff *msg,
 	nan_event_data_t *event_data) {
 	int ret = BCME_OK;
+	nan_ndl_sched_info_t *nan_sched_info = &event_data->ndl_sched_info;
+
 	ret = nla_put_u32(msg, NAN_ATTRIBUTE_NDP_ID, event_data->ndp_id);
 	if (unlikely(ret)) {
 		WL_ERR(("Failed to put NDP ID, ret=%d\n", ret));
@@ -5270,15 +5724,37 @@ wl_cfgvendor_nan_dp_estb_event_data_filler(struct sk_buff *msg,
 		}
 	}
 
+	if (nan_sched_info->num_channels > 0) {
+		if (nan_sched_info->num_channels > NAN_MAX_CHANNEL_INFO_SUPPORTED) {
+			WL_ERR(("Failed to put more num channels: %d than supported\n",
+					nan_sched_info->num_channels));
+			ret = BCME_BADLEN;
+			goto fail;
+		}
+		ret = nla_put_u32(msg, NAN_ATTRIBUTE_NUM_CHANNELS, nan_sched_info->num_channels);
+		if (unlikely(ret)) {
+			WL_ERR(("Failed to put num channels, ret=%d\n", ret));
+			goto fail;
+		}
+
+		ret = nla_put(msg, NAN_ATTRIBUTE_CHANNEL_INFO,
+				(nan_sched_info->num_channels * sizeof(nan_channel_info_t)),
+				&nan_sched_info->channel_info[0]);
+		if (unlikely(ret)) {
+			WL_ERR(("Failed to put nan channel info, ret=%d\n", ret));
+			goto fail;
+		}
+	}
 fail:
 	return ret;
 }
 static int
 wl_cfgvendor_nan_dp_ind_event_data_filler(struct sk_buff *msg,
-		nan_event_data_t *event_data) {
+		nan_event_data_t *event_data)
+{
 	int ret = BCME_OK;
 
-	ret = nla_put_u16(msg, NAN_ATTRIBUTE_PUBLISH_ID,
+	ret = nla_put_u32(msg, NAN_ATTRIBUTE_PUBLISH_ID,
 			event_data->pub_id);
 	if (unlikely(ret)) {
 		WL_ERR(("Failed to put pub ID, ret=%d\n", ret));
@@ -5315,6 +5791,23 @@ wl_cfgvendor_nan_dp_ind_event_data_filler(struct sk_buff *msg,
 			goto fail;
 		}
 	}
+#ifdef WL_NAN_INSTANT_MODE
+	/* PMKID(scid) info */
+	if (event_data->scid.dlen && event_data->scid.data) {
+		ret = nla_put_u32(msg, NAN_ATTRIBUTE_SCID_LEN, event_data->scid.dlen);
+		if (unlikely(ret)) {
+			WL_ERR(("Failed to put scid info len, ret=%d\n", ret));
+			goto fail;
+		}
+		ret = nla_put(msg, NAN_ATTRIBUTE_SCID,
+				event_data->scid.dlen, event_data->scid.data);
+		if (unlikely(ret)) {
+			WL_ERR(("Failed to put scid info, ret=%d\n", ret));
+			goto fail;
+		}
+		WL_TRACE(("scid info len = %d\n", event_data->scid.dlen));
+	}
+#endif /* WL_NAN_INSTANT_MODE */
 
 fail:
 	return ret;
@@ -5376,7 +5869,7 @@ wl_cfgvendor_nan_svc_terminate_event_filler(struct sk_buff *msg,
 			goto fail;
 		}
 	} else {
-		ret = nla_put_u16(msg, NAN_ATTRIBUTE_PUBLISH_ID,
+		ret = nla_put_u32(msg, NAN_ATTRIBUTE_PUBLISH_ID,
 				event_data->local_inst_id);
 		if (unlikely(ret)) {
 			WL_ERR(("Failed to put local inst id, ret=%d\n", ret));
@@ -5462,6 +5955,27 @@ fail:
 }
 
 static int
+wl_cfgvendor_nan_match_expiry_event_filler(struct sk_buff *msg,
+		nan_event_data_t *event_data) {
+	int ret = BCME_OK;
+
+	WL_DBG(("sub id (local id)=%d, pub id (remote id)=%d\n",
+		event_data->sub_id, event_data->pub_id));
+	ret = nla_put_u16(msg, NAN_ATTRIBUTE_SUBSCRIBE_ID, event_data->sub_id);
+	if (unlikely(ret)) {
+		WL_ERR(("Failed to put Sub Id, ret=%d\n", ret));
+		goto fail;
+	}
+	ret = nla_put_u32(msg, NAN_ATTRIBUTE_PUBLISH_ID, event_data->pub_id);
+	if (unlikely(ret)) {
+		WL_ERR(("Failed to put pub id, ret=%d\n", ret));
+		goto fail;
+	}
+fail:
+	return ret;
+}
+
+static int
 wl_cfgvendor_nan_tx_followup_event_filler(struct sk_buff *msg,
 		nan_event_data_t *event_data) {
 	int ret = BCME_OK;
@@ -5527,7 +6041,7 @@ wl_cfgvendor_nan_sub_match_event_filler(struct sk_buff *msg,
 		WL_ERR(("Failed to put handle, ret=%d\n", ret));
 		goto fail;
 	}
-	ret = nla_put_u16(msg, NAN_ATTRIBUTE_PUBLISH_ID, event_data->pub_id);
+	ret = nla_put_u32(msg, NAN_ATTRIBUTE_PUBLISH_ID, event_data->pub_id);
 	if (unlikely(ret)) {
 		WL_ERR(("Failed to put pub id, ret=%d\n", ret));
 		goto fail;
@@ -5543,6 +6057,13 @@ wl_cfgvendor_nan_sub_match_event_filler(struct sk_buff *msg,
 		WL_ERR(("Failed to put remote NMI, ret=%d\n", ret));
 		goto fail;
 	}
+#ifdef WL_NAN_INSTANT_MODE
+	ret = nla_put_u8(msg, NAN_ATTRIBUTE_CIPHER_SUITE_TYPE, event_data->peer_cipher_suite);
+	if (unlikely(ret)) {
+		WL_ERR(("Failed to put CSID, ret=%d\n", ret));
+		goto fail;
+	}
+#endif /* WL_NAN_INSTANT_MODE */
 	if (event_data->publish_rssi) {
 		event_data->publish_rssi = -event_data->publish_rssi;
 		ret = nla_put_u8(msg, NAN_ATTRIBUTE_RSSI_PROXIMITY,
@@ -5589,6 +6110,24 @@ wl_cfgvendor_nan_sub_match_event_filler(struct sk_buff *msg,
 		WL_TRACE(("tx matching filter (%d):\n",
 				event_data->tx_match_filter.dlen));
 	}
+
+#ifdef WL_NAN_INSTANT_MODE
+	/* PMKID(scid) info */
+	if (event_data->scid.dlen && event_data->scid.data) {
+		ret = nla_put_u32(msg, NAN_ATTRIBUTE_SCID_LEN, event_data->scid.dlen);
+		if (unlikely(ret)) {
+			WL_ERR(("Failed to put scid info len, ret=%d\n", ret));
+			goto fail;
+		}
+		ret = nla_put(msg, NAN_ATTRIBUTE_SCID,
+				event_data->scid.dlen, event_data->scid.data);
+		if (unlikely(ret)) {
+			WL_ERR(("Failed to put scid info, ret=%d\n", ret));
+			goto fail;
+		}
+		WL_TRACE(("scid info len = %d\n", event_data->scid.dlen));
+	}
+#endif /* WL_NAN_INSTANT_MODE */
 
 fail:
 	return ret;
@@ -5725,11 +6264,13 @@ wl_cfgvendor_send_nan_async_resp(struct wiphy *wiphy, struct wireless_dev *wdev,
 	int ret = BCME_OK;
 	int buf_len = NAN_EVENT_BUFFER_SIZE_LARGE;
 	gfp_t kflags = in_atomic() ? GFP_ATOMIC : GFP_KERNEL;
+	struct bcm_cfg80211 *cfg = (struct bcm_cfg80211 *)wiphy_priv(wiphy);
 
 	struct sk_buff *msg;
 
 	NAN_DBG_ENTER();
 
+	wdev = bcmcfg_to_nmi_wdev(cfg);
 	/* Allocate the skb for vendor event */
 	msg = CFG80211_VENDOR_EVENT_ALLOC(wiphy, wdev, buf_len,
 		event_id, kflags);
@@ -5753,8 +6294,8 @@ wl_cfgvendor_send_nan_async_resp(struct wiphy *wiphy, struct wireless_dev *wdev,
 
 fail:
 	dev_kfree_skb_any(msg);
-	WL_ERR(("Event not implemented or unknown -- Free skb, event_id = %d, ret = %d\n",
-		event_id, ret));
+	WL_ERR(("%s: Event not implemented or unknown -- Free skb, event_id = %d, ret = %d\n",
+		__func__, event_id, ret));
 	NAN_DBG_EXIT();
 	return ret;
 }
@@ -5790,6 +6331,7 @@ wl_cfgvendor_send_nan_event(struct wiphy *wiphy, struct net_device *dev,
 
 	NAN_DBG_ENTER();
 
+	dev = bcmcfg_to_nmi_ndev(cfg);
 	/* Allocate the skb for vendor event */
 	msg = CFG80211_VENDOR_EVENT_ALLOC(wiphy, ndev_to_wdev(dev), buf_len,
 		event_id, kflags);
@@ -5800,17 +6342,29 @@ wl_cfgvendor_send_nan_event(struct wiphy *wiphy, struct net_device *dev,
 
 	switch (event_id) {
 	case GOOGLE_NAN_EVENT_DE_EVENT: {
-		WL_INFORM_MEM(("[NAN] GOOGLE_NAN_DE_EVENT cluster id=" MACDBG "nmi= " MACDBG "\n",
-			MAC2STRDBG(event_data->clus_id.octet),
-			MAC2STRDBG(event_data->local_nmi.octet)));
-		ret = wl_cfgvendor_nan_de_event_filler(msg, event_data);
-		if (unlikely(ret)) {
-			WL_ERR(("Failed to fill de event data, ret=%d\n", ret));
-			goto fail;
+		if (event_data->nan_de_evt_type == WL_NAN_EVENT_NMI_ADDR) {
+			WL_INFORM_MEM(("[NAN] GOOGLE_NAN_DE_EVENT nmi= " MACDBG "\n",
+					MAC2STRDBG(event_data->local_nmi.octet)));
+			ret = nla_put(msg, NAN_ATTRIBUTE_MAC_ADDR, ETH_ALEN,
+					event_data->local_nmi.octet);
+			if (unlikely(ret)) {
+				WL_ERR(("Failed to put NMI, ret=%d\n", ret));
+				goto fail;
+			}
+		} else {
+			WL_DBG(("[NAN] GOOGLE_NAN_DE_EVENT cluster id=" MACDBG "nmi= " MACDBG "\n",
+					MAC2STRDBG(event_data->clus_id.octet),
+					MAC2STRDBG(event_data->local_nmi.octet)));
+			ret = wl_cfgvendor_nan_de_event_filler(msg, event_data);
+			if (unlikely(ret)) {
+				WL_ERR(("Failed to fill de event data, ret=%d\n", ret));
+				goto fail;
+			}
 		}
 		break;
 	}
 	case GOOGLE_NAN_EVENT_SUBSCRIBE_MATCH:
+	case GOOGLE_NAN_EVENT_MATCH_EXPIRY:
 	case GOOGLE_NAN_EVENT_FOLLOWUP: {
 		if (event_id == GOOGLE_NAN_EVENT_SUBSCRIBE_MATCH) {
 			WL_DBG(("GOOGLE_NAN_EVENT_SUBSCRIBE_MATCH\n"));
@@ -5823,10 +6377,18 @@ wl_cfgvendor_send_nan_event(struct wiphy *wiphy, struct net_device *dev,
 			WL_DBG(("GOOGLE_NAN_EVENT_FOLLOWUP\n"));
 			ret = wl_cfgvendor_nan_tx_followup_event_filler(msg, event_data);
 			if (unlikely(ret)) {
-				WL_ERR(("Failed to fill sub match event data, ret=%d\n", ret));
+				WL_ERR(("Failed to fill tx follow up event data, ret=%d\n", ret));
+				goto fail;
+			}
+		} else if (event_id == GOOGLE_NAN_EVENT_MATCH_EXPIRY) {
+			WL_DBG(("GOOGLE_NAN_EVENT_MATCH_EXPIRY\n"));
+			ret = wl_cfgvendor_nan_match_expiry_event_filler(msg, event_data);
+			if (unlikely(ret)) {
+				WL_ERR(("Failed to fill match expiry event data, ret=%d\n", ret));
 				goto fail;
 			}
 		}
+
 		ret = wl_cfgvendor_nan_opt_params_filler(msg, event_data);
 		if (unlikely(ret)) {
 			WL_ERR(("Failed to fill sub match event data, ret=%d\n", ret));
@@ -5925,8 +6487,8 @@ wl_cfgvendor_send_nan_event(struct wiphy *wiphy, struct net_device *dev,
 
 fail:
 	dev_kfree_skb_any(msg);
-	WL_ERR(("Event not implemented or unknown -- Free skb, event_id = %d, ret = %d\n",
-			event_id, ret));
+	WL_ERR(("%s: Event not implemented or unknown -- Free skb, event_id = %d, ret = %d\n",
+			__func__, event_id, ret));
 	NAN_DBG_EXIT();
 	return ret;
 }
@@ -5941,6 +6503,7 @@ wl_cfgvendor_nan_req_subscribe(struct wiphy *wiphy,
 	nan_hal_resp_t nan_req_resp;
 
 	NAN_DBG_ENTER();
+	wdev = bcmcfg_to_prmry_wdev(cfg);
 	/* Blocking Subscribe if NAN is not enable */
 	if (!cfg->nancfg->nan_enable) {
 		WL_ERR(("nan is not enabled, subscribe blocked\n"));
@@ -6004,6 +6567,7 @@ wl_cfgvendor_nan_req_publish(struct wiphy *wiphy,
 	nan_hal_resp_t nan_req_resp;
 	NAN_DBG_ENTER();
 
+	wdev = bcmcfg_to_prmry_wdev(cfg);
 	/* Blocking Publish if NAN is not enable */
 	if (!cfg->nancfg->nan_enable) {
 		WL_ERR(("nan is not enabled publish blocked\n"));
@@ -6066,7 +6630,9 @@ wl_cfgvendor_nan_start_handler(struct wiphy *wiphy,
 	struct bcm_cfg80211 *cfg = wiphy_priv(wiphy);
 	nan_hal_resp_t nan_req_resp;
 	uint32 nan_attr_mask = 0;
+	wl_nancfg_t *nancfg = cfg->nancfg;
 
+	wdev = bcmcfg_to_prmry_wdev(cfg);
 	cmd_data = (nan_config_cmd_data_t *)MALLOCZ(cfg->osh, sizeof(*cmd_data));
 	if (!cmd_data) {
 		WL_ERR(("%s: memory allocation failed\n", __func__));
@@ -6081,15 +6647,11 @@ wl_cfgvendor_nan_start_handler(struct wiphy *wiphy,
 		goto exit;
 	}
 
-	if (cfg->nancfg->nan_enable) {
-		WL_ERR(("nan is already enabled\n"));
-		ret = BCME_OK;
-		goto exit;
-	}
 	bzero(&nan_req_resp, sizeof(nan_req_resp));
 
 	cmd_data->sid_beacon.sid_enable = NAN_SID_ENABLE_FLAG_INVALID; /* Setting to some default */
 	cmd_data->sid_beacon.sid_count = NAN_SID_BEACON_COUNT_INVALID; /* Setting to some default */
+	cfg->nancfg->ranging_enable = TRUE; /* by default enable ranging */
 
 	ret = wl_cfgvendor_nan_parse_args(wiphy, data, len, cmd_data, &nan_attr_mask);
 	if (ret) {
@@ -6101,6 +6663,32 @@ wl_cfgvendor_nan_start_handler(struct wiphy *wiphy,
 		goto exit;
 	}
 
+	if (nancfg->nan_enable) {
+		if (cmd_data->chre_req) {
+			if (cfg->nancfg->enab_reason == ENABLE_FOR_CHRE) {
+				/* Already enabled for CHRE */
+				ret = BCME_OK;
+				goto exit;
+			} else {
+				/* enabled for APP .. return busy for CHRE req */
+				ret = BCME_BUSY;
+				goto exit;
+			}
+		} else {
+			if (cfg->nancfg->enab_reason == ENABLE_FOR_CHRE) {
+				/* TODO : Disable Nan and enable again for APP
+				 * For now return busy
+				 */
+				ret = BCME_BUSY;
+				goto exit;
+			} else {
+				/* already enabled for APP */
+				ret = BCME_OK;
+				goto exit;
+			}
+		}
+	}
+
 	ret = wl_cfgnan_start_handler(wdev->netdev, cfg, cmd_data, nan_attr_mask);
 	if (ret) {
 		WL_ERR(("failed to start nan error[%d]\n", ret));
@@ -6108,7 +6696,14 @@ wl_cfgvendor_nan_start_handler(struct wiphy *wiphy,
 	}
 	/* Initializing Instance Id List */
 	bzero(cfg->nancfg->nan_inst_ctrl, NAN_ID_CTRL_SIZE * sizeof(nan_svc_inst_t));
+
 exit:
+	if (ret == BCME_OK) {
+		nancfg->enab_reason = cmd_data->chre_req ?
+			ENABLE_FOR_CHRE : ENABLE_FOR_APP;
+		WL_INFORM_MEM(("Enabled successful for reason %d\n", nancfg->enab_reason));
+	}
+
 	ret = wl_cfgvendor_nan_cmd_reply(wiphy, NAN_WIFI_SUBCMD_ENABLE,
 		&nan_req_resp, ret, cmd_data ? cmd_data->status : BCME_OK);
 	if (cmd_data) {
@@ -6119,6 +6714,7 @@ exit:
 		MFREE(cfg->osh, cmd_data, sizeof(*cmd_data));
 	}
 	NAN_DBG_EXIT();
+
 	return ret;
 }
 
@@ -6135,6 +6731,7 @@ wl_cfgvendor_terminate_dp_rng_sessions(struct bcm_cfg80211 *cfg,
 	nan_ranging_inst_t *ranging_inst = NULL;
 #endif /* RTT_SUPPORT */
 
+	wdev = bcmcfg_to_prmry_wdev(cfg);
 	*ssn_exists = false;
 	dhdp = wl_cfg80211_get_dhdp(wdev->netdev);
 	/* Cleanup active Data Paths If any */
@@ -6159,7 +6756,7 @@ wl_cfgvendor_terminate_dp_rng_sessions(struct bcm_cfg80211 *cfg,
 				(NAN_RANGING_IS_IN_PROG(ranging_inst->range_status))) {
 			ret = wl_cfgnan_cancel_ranging(bcmcfg_to_prmry_ndev(cfg), cfg,
 					&ranging_inst->range_id,
-					NAN_RNG_TERM_FLAG_NONE, &status);
+					NAN_RNG_TERM_FLAG_IMMEDIATE, &status);
 			if (unlikely(ret) || unlikely(status)) {
 				WL_ERR(("nan range cancel failed ret = %d status = %d\n",
 					ret, status));
@@ -6181,9 +6778,30 @@ wl_cfgvendor_nan_stop_handler(struct wiphy *wiphy,
 	bool ssn_exists = false;
 	uint32 delay_ms = 0;
 	wl_nancfg_t *nancfg = cfg->nancfg;
+	nan_config_cmd_data_t *cmd_data;
+	uint32 nan_attr_mask = 0;
 
 	NAN_DBG_ENTER();
 	mutex_lock(&cfg->if_sync);
+
+	wdev = bcmcfg_to_prmry_wdev(cfg);
+
+	cmd_data = (nan_config_cmd_data_t *)MALLOCZ(cfg->osh, sizeof(*cmd_data));
+	if (!cmd_data) {
+		WL_ERR(("%s: memory allocation failed\n", __func__));
+		ret = BCME_NOMEM;
+		goto exit;
+	}
+
+	ret = wl_cfgvendor_nan_parse_args(wiphy, data, len, cmd_data, &nan_attr_mask);
+	if (ret) {
+		WL_ERR(("failed to parse nan vendor args, ret %d\n", ret));
+		goto exit;
+	}
+	if (cmd_data->status == BCME_BADARG) {
+		WL_ERR(("nan vendor args is invalid\n"));
+		goto exit;
+	}
 
 	if (nancfg->nan_init_state == false) {
 		WL_INFORM_MEM(("nan is not initialized/nmi doesnt exists\n"));
@@ -6192,6 +6810,19 @@ wl_cfgvendor_nan_stop_handler(struct wiphy *wiphy,
 	if (nancfg->nan_enable == false) {
 		WL_INFORM_MEM(("nan is in disabled state\n"));
 	} else {
+		if (cmd_data->chre_req) {
+			if (nancfg->enab_reason != ENABLE_FOR_CHRE) {
+				/* Not enabled for CHRE.. ignore disable req */
+				WL_INFORM_MEM(("nan not enabled for CHRE..ignore disab\n"));
+				goto exit;
+			}
+		} else {
+			if (nancfg->enab_reason != ENABLE_FOR_APP) {
+				/* Not enabled for APP.. ignore disable req */
+				WL_INFORM_MEM(("nan not enabled for APP..ignore disab\n"));
+				goto exit;
+			}
+		}
 		nancfg->notify_user = true;
 		wl_cfgvendor_terminate_dp_rng_sessions(cfg, wdev, &ssn_exists);
 		if (ssn_exists == true) {
@@ -6234,6 +6865,7 @@ wl_cfgvendor_nan_config_handler(struct wiphy *wiphy,
 	}
 	NAN_DBG_ENTER();
 
+	wdev = bcmcfg_to_prmry_wdev(cfg);
 	bzero(&nan_req_resp, sizeof(nan_req_resp));
 
 	cmd_data->avail_params.duration = NAN_BAND_INVALID;  /* Setting to some default */
@@ -6278,6 +6910,7 @@ wl_cfgvendor_nan_cancel_publish(struct wiphy *wiphy,
 	struct bcm_cfg80211 *cfg = wiphy_priv(wiphy);
 	nan_hal_resp_t nan_req_resp;
 
+	wdev = bcmcfg_to_prmry_wdev(cfg);
 	/* Blocking Cancel_Publish if NAN is not enable */
 	if (!cfg->nancfg->nan_enable) {
 		WL_ERR(("nan is not enabled, cancel publish blocked\n"));
@@ -6325,6 +6958,7 @@ wl_cfgvendor_nan_cancel_subscribe(struct wiphy *wiphy,
 	struct bcm_cfg80211 *cfg = wiphy_priv(wiphy);
 	nan_hal_resp_t nan_req_resp;
 
+	wdev = bcmcfg_to_prmry_wdev(cfg);
 	/* Blocking Cancel_Subscribe if NAN is not enableb */
 	if (!cfg->nancfg->nan_enable) {
 		WL_ERR(("nan is not enabled, cancel subscribe blocked\n"));
@@ -6372,6 +7006,7 @@ wl_cfgvendor_nan_transmit(struct wiphy *wiphy,
 	struct bcm_cfg80211 *cfg = wiphy_priv(wiphy);
 	nan_hal_resp_t nan_req_resp;
 
+	wdev = bcmcfg_to_prmry_wdev(cfg);
 	/* Blocking Transmit if NAN is not enable */
 	if (!cfg->nancfg->nan_enable) {
 		WL_ERR(("nan is not enabled, transmit blocked\n"));
@@ -6417,6 +7052,7 @@ wl_cfgvendor_nan_get_capablities(struct wiphy *wiphy,
 
 	NAN_DBG_ENTER();
 
+	wdev = bcmcfg_to_prmry_wdev(cfg);
 	bzero(&nan_req_resp, sizeof(nan_req_resp));
 	ret = wl_cfgnan_get_capablities_handler(wdev->netdev, cfg, &nan_req_resp.capabilities);
 	if (ret) {
@@ -6441,6 +7077,7 @@ wl_cfgvendor_nan_data_path_iface_create(struct wiphy *wiphy,
 	nan_hal_resp_t nan_req_resp;
 	dhd_pub_t *dhdp = wl_cfg80211_get_dhdp(wdev->netdev);
 
+	wdev = bcmcfg_to_prmry_wdev(cfg);
 	if (!cfg->nancfg->nan_init_state) {
 		WL_ERR(("%s: NAN is not inited or Device doesn't support NAN \n", __func__));
 		ret = -ENODEV;
@@ -6498,6 +7135,7 @@ wl_cfgvendor_nan_data_path_iface_delete(struct wiphy *wiphy,
 	}
 
 	NAN_DBG_ENTER();
+	wdev = bcmcfg_to_prmry_wdev(cfg);
 	cmd_data = (nan_datapath_cmd_data_t *)MALLOCZ(cfg->osh, sizeof(*cmd_data));
 	if (!cmd_data) {
 		WL_ERR(("%s: memory allocation failed\n", __func__));
@@ -6542,6 +7180,7 @@ wl_cfgvendor_nan_data_path_request(struct wiphy *wiphy,
 		goto exit;
 	}
 
+	wdev = bcmcfg_to_prmry_wdev(cfg);
 	NAN_DBG_ENTER();
 	cmd_data = (nan_datapath_cmd_data_t *)MALLOCZ(cfg->osh, sizeof(*cmd_data));
 	if (!cmd_data) {
@@ -6592,6 +7231,7 @@ wl_cfgvendor_nan_data_path_response(struct wiphy *wiphy,
 		goto exit;
 	}
 	NAN_DBG_ENTER();
+	wdev = bcmcfg_to_prmry_wdev(cfg);
 	cmd_data = (nan_datapath_cmd_data_t *)MALLOCZ(cfg->osh, sizeof(*cmd_data));
 	if (!cmd_data) {
 		WL_ERR(("%s: memory allocation failed\n", __func__));
@@ -6629,6 +7269,7 @@ wl_cfgvendor_nan_data_path_end(struct wiphy *wiphy,
 	int status = BCME_ERROR;
 
 	NAN_DBG_ENTER();
+	wdev = bcmcfg_to_prmry_wdev(cfg);
 	if (!cfg->nancfg->nan_enable) {
 		WL_ERR(("nan is not enabled, nan data path end blocked\n"));
 		ret = BCME_OK;
@@ -6673,6 +7314,7 @@ wl_cfgvendor_nan_data_path_sec_info(struct wiphy *wiphy,
 	dhd_pub_t *dhdp = wl_cfg80211_get_dhdp(wdev->netdev);
 
 	NAN_DBG_ENTER();
+	wdev = bcmcfg_to_prmry_wdev(cfg);
 	if (!cfg->nancfg->nan_enable) {
 		WL_ERR(("nan is not enabled\n"));
 		ret = BCME_UNSUPPORTED;
@@ -6741,6 +7383,7 @@ wl_cfgvendor_nan_enable_merge(struct wiphy *wiphy,
 		goto exit;
 	}
 
+	wdev = bcmcfg_to_prmry_wdev(cfg);
 	ret = wl_cfgvendor_nan_parse_args(wiphy, data, len, cmd_data, &nan_attr_mask);
 	if (ret) {
 		WL_ERR((" Enable merge: failed to parse nan config vendor args, ret = %d\n", ret));
@@ -6769,8 +7412,11 @@ exit:
 #endif /* WL_NAN */
 
 #ifdef LINKSTAT_SUPPORT
-
-#define NUM_RATE 32
+/* 11n/HT:   OFDM(12) + HT(16) rates = 28 (MCS0 ~ MCS15)
+ * 11ac/VHT: OFDM(12) + VHT(12) x 2 nss = 36 (MCS0 ~ MCS11)
+ * 11ax/HE:  OFDM(12) + HE(12) x 2 nss = 36 (MCS0 ~ MCS11)
+ */
+#define NUM_RATE 36
 #define NUM_PEER 1
 #define NUM_CHAN 11
 #define HEADER_SIZE sizeof(ver_len)
@@ -6778,30 +7424,51 @@ exit:
 #define NUM_PNO_SCANS 8
 #define NUM_CCA_SAMPLING_SECS 1
 
-static int wl_cfgvendor_lstats_get_bcn_mbss(char *buf, uint32 *rxbeaconmbss)
+#if ANDROID_VERSION >= 13
+static int wl_cfgvendor_send_stats_info(struct wiphy *wiphy,
+	const void *data, int len)
 {
-	wl_cnt_info_t *cbuf = (wl_cnt_info_t *)buf;
-	const void *cnt;
+	int ret = 0;
+	struct sk_buff *skb;
+	struct bcm_cfg80211 *cfg = wiphy_priv(wiphy);
+	int mem_needed;
 
-	if ((cnt = (const void *)bcm_get_data_from_xtlv_buf(cbuf->data, cbuf->datalen,
-			WL_CNT_XTLV_CNTV_LE10_UCODE, NULL, BCM_XTLV_OPTION_ALIGN32)) != NULL) {
-		*rxbeaconmbss = ((const wl_cnt_v_le10_mcst_t *)cnt)->rxbeaconmbss;
-	} else if ((cnt = (const void *)bcm_get_data_from_xtlv_buf(cbuf->data, cbuf->datalen,
-			WL_CNT_XTLV_LT40_UCODE_V1, NULL, BCM_XTLV_OPTION_ALIGN32)) != NULL) {
-		*rxbeaconmbss = ((const wl_cnt_lt40mcst_v1_t *)cnt)->rxbeaconmbss;
-	} else if ((cnt = (const void *)bcm_get_data_from_xtlv_buf(cbuf->data, cbuf->datalen,
-			WL_CNT_XTLV_GE40_UCODE_V1, NULL, BCM_XTLV_OPTION_ALIGN32)) != NULL) {
-		*rxbeaconmbss = ((const wl_cnt_ge40mcst_v1_t *)cnt)->rxbeaconmbss;
-	} else if ((cnt = (const void *)bcm_get_data_from_xtlv_buf(cbuf->data, cbuf->datalen,
-			WL_CNT_XTLV_GE80_UCODE_V1, NULL, BCM_XTLV_OPTION_ALIGN32)) != NULL) {
-		*rxbeaconmbss = ((const wl_cnt_ge80mcst_v1_t *)cnt)->rxbeaconmbss;
-	} else {
-		*rxbeaconmbss = 0;
-		return BCME_NOTFOUND;
+	mem_needed = VENDOR_REPLY_OVERHEAD + len + ATTRIBUTE_U32_LEN;
+
+	/* Alloc the SKB for vendor_event */
+	skb = cfg80211_vendor_cmd_alloc_reply_skb(wiphy, mem_needed);
+	if (unlikely(!skb)) {
+		WL_ERR(("skb alloc failed"));
+		return -ENOMEM;
 	}
 
-	return BCME_OK;
+	ret = nla_put_u32(skb, ANDR_LSTAT_ATTRIBUTE_NUM_RADIO, cfg->num_radios);
+	if (unlikely(ret)) {
+		WL_ERR(("Failed to put number of radios, ret=%d\n", ret));
+		goto fail;
+	}
+
+	ret = nla_put(skb, ANDR_LSTAT_ATTRIBUTE_STATS_INFO, len, data);
+	if (unlikely(ret)) {
+		WL_ERR(("Failed to put stats info , ret=%d\n", ret));
+		goto fail;
+	}
+
+	ret = cfg80211_vendor_cmd_reply(skb);
+	if (unlikely(ret)) {
+		WL_ERR(("Vendor Command reply failed ret:%d \n", ret));
+	}
+
+	return ret;
+fail:
+	/* Free skb memory */
+	if (skb) {
+		kfree_skb(skb);
+	}
+	return ret;
+
 }
+#endif /* ANDROID_VERSION >= 13  */
 
 static void fill_chanspec_to_channel_info(chanspec_t cur_chanspec,
 	wifi_channel_info *channel, int *cur_band)
@@ -6841,27 +7508,221 @@ static void fill_chanspec_to_channel_info(chanspec_t cur_chanspec,
 	}
 }
 
+static s32
+wl_cfgvendor_get_radio_stats(struct bcm_cfg80211 *cfg, struct net_device *ndev,
+	wifi_channel_stat *chan_stats, int num_channels, char **output, uint *total_len)
+{
+	s32 err = 0;
+	uint radio_stats_size = 0, chan_stats_size = 0, avail_radio_stat_len = 0;
+	char *radio_stat_ptr = NULL, *out_radio_stat = NULL;
+	wifi_radio_stat_h_v2 radio_h_v2[WL_RADIOSTAT_SLICE_INDEX_MAX];
+	wifi_radio_stat_h radio_h;
+	wifi_radio_stat_v1_t *radio_v1;
+	wifi_radio_stat_v2_t radio_req_v2;
+	wifi_radio_stat_v2_t *radio_v2;
+	static char iovar_buf[WLC_IOCTL_MAXLEN];
+	int i = 0;
+
+	chan_stats_size = sizeof(wifi_channel_stat) * num_channels;
+	/* Radio stat field */
+	radio_stats_size = cfg->num_radios*(offsetof(wifi_radio_stat, channels)) +
+			chan_stats_size;
+	radio_stat_ptr = (char*)MALLOCZ(cfg->osh, radio_stats_size);
+	if (radio_stat_ptr == NULL) {
+		WL_ERR(("radio_stat_ptr alloc failed\n"));
+		err = BCME_NOMEM;
+		goto exit;
+	}
+	bzero(radio_stat_ptr, radio_stats_size);
+	avail_radio_stat_len = radio_stats_size;
+
+	bzero(&radio_h, sizeof(radio_h));
+	bzero(&radio_h_v2, sizeof(radio_h_v2));
+
+	out_radio_stat = radio_stat_ptr;
+
+	for (i = 0; i < cfg->num_radios; i++) {
+		/* Try the VERSION_2 first */
+		radio_req_v2.version = WIFI_RADIO_STAT_VERSION_2;
+		radio_req_v2.length = sizeof(radio_req_v2);
+		radio_req_v2.radio = i;
+
+		err = wldev_iovar_getbuf(ndev, "radiostat", &radio_req_v2,
+			sizeof(radio_req_v2), iovar_buf, sizeof(iovar_buf), NULL);
+		if (err != BCME_OK && err != BCME_UNSUPPORTED && err != BCME_VERSION) {
+			WL_ERR(("error (%d) - size = %zu\n",
+				err, sizeof(wifi_radio_stat_v2_t)));
+			goto exit;
+		}
+
+		radio_v2 = (wifi_radio_stat_v2_t *)iovar_buf;
+		if ((err == BCME_OK) &&
+			(dtoh16(radio_v2->version) == WIFI_RADIO_STAT_VERSION_2)) {
+			if (i != radio_v2->radio) {
+				WL_ERR(("Fw version is unsupported\n"));
+				err = BCME_UNSUPPORTED;
+				goto exit;
+			}
+			radio_h_v2[i].radio = radio_v2->radio;
+			if (radio_v2->radio != WL_RADIOSTAT_SLICE_INDEX_SCAN) {
+				radio_h_v2[i].on_time = radio_v2->on_time;
+			} else {
+				radio_h_v2[i].on_time = 0;
+			}
+			radio_h_v2[i].tx_time = radio_v2->tx_time;
+			radio_h_v2[i].num_tx_levels = 0;
+			radio_h_v2[i].tx_time_per_levels = NULL;
+#ifdef LINKSTAT_EXT_SUPPORT
+			radio_h_v2[i].rx_time = radio_v2->myrx_time;
+#else
+			radio_h_v2[i].rx_time = radio_v2->rx_time;
+#endif /* LINKSTAT_EXT_SUPPORT  */
+			if (radio_v2->radio != WL_RADIOSTAT_SLICE_INDEX_SCAN) {
+				radio_h_v2[i].on_time_scan =
+					(uint32)(radio_v2->on_time_scan / 1000);
+			} else {
+				radio_h_v2[i].on_time_scan = 0;
+			}
+			radio_h_v2[i].on_time_nbd = (uint32)(radio_v2->on_time_nbd / 1000);
+			radio_h_v2[i].on_time_gscan = (uint32)(radio_v2->on_time_gscan / 1000);
+			radio_h_v2[i].on_time_roam_scan = radio_v2->on_time_roam_scan;
+			radio_h_v2[i].on_time_pno_scan =
+				(uint32)(radio_v2->on_time_pno_scan / 1000);
+			radio_h_v2[i].on_time_hs20 = radio_v2->on_time_hs20;
+			if (i == WL_RADIOSTAT_SLICE_INDEX_MAIN) {
+				radio_h_v2[i].num_channels = 0;
+			} else if (i == WL_RADIOSTAT_SLICE_INDEX_AUX) {
+				radio_h_v2[i].num_channels = 0;
+			} else {
+				radio_h_v2[i].num_channels = num_channels;
+			}
+
+			err = memcpy_s(out_radio_stat, avail_radio_stat_len,
+					&radio_h_v2[i], offsetof(wifi_radio_stat, channels));
+			if (err) {
+				WL_ERR(("failed to copy radio_stat_h : %d\n", err));
+				goto exit;
+			}
+			out_radio_stat += offsetof(wifi_radio_stat, channels);
+			avail_radio_stat_len -= offsetof(wifi_radio_stat, channels);
+		} else {
+			/* Retry the VERSION_1 */
+			err = wldev_iovar_getbuf(ndev, "radiostat", NULL, 0,
+					iovar_buf, sizeof(iovar_buf), NULL);
+
+			if (err != BCME_OK && err != BCME_UNSUPPORTED) {
+				WL_ERR(("error (%d) - size = %zu\n",
+					err, sizeof(wifi_radio_stat_v1_t)));
+				goto exit;
+			}
+			radio_v1 = (wifi_radio_stat_v1_t *)iovar_buf;
+#if ANDROID_VERSION >= 13
+			radio_h_v2[i].radio = radio_v1->radio;
+			if (radio_v1->radio != WL_RADIOSTAT_SLICE_INDEX_SCAN) {
+				radio_h_v2[i].on_time = radio_v1->on_time;
+			} else {
+				radio_h_v2[i].on_time = 0;
+			}
+			radio_h_v2[i].tx_time = radio_v1->tx_time;
+			radio_h_v2[i].num_tx_levels = 0;
+			radio_h_v2[i].tx_time_per_levels = NULL;
+			radio_h_v2[i].rx_time = radio_v1->rx_time;
+			radio_h_v2[i].on_time_scan = 0;
+			radio_h_v2[i].on_time_nbd = radio_v1->on_time_nbd;
+			radio_h_v2[i].on_time_gscan = radio_v1->on_time_gscan;
+			radio_h_v2[i].on_time_roam_scan = radio_v1->on_time_roam_scan;
+			radio_h_v2[i].on_time_pno_scan = radio_v1->on_time_pno_scan;
+			radio_h_v2[i].on_time_hs20 = radio_v1->on_time_hs20;
+			if (i == WL_RADIOSTAT_SLICE_INDEX_MAIN) {
+				radio_h_v2[i].num_channels = 0;
+			} else if (i == WL_RADIOSTAT_SLICE_INDEX_AUX) {
+				radio_h_v2[i].num_channels = 0;
+			} else {
+				radio_h_v2[i].num_channels = num_channels;
+			}
+
+			err = memcpy_s(out_radio_stat, avail_radio_stat_len,
+					&radio_h_v2[i], offsetof(wifi_radio_stat, channels));
+			if (err) {
+				WL_ERR(("failed to copy radio_stat_h : %d\n", err));
+				goto exit;
+			}
+			out_radio_stat += offsetof(wifi_radio_stat, channels);
+			avail_radio_stat_len -= offsetof(wifi_radio_stat, channels);
+#else
+			radio_h.rx_time = radio_v1->rx_time;
+			if (radio_v1->radio != WL_RADIOSTAT_SLICE_INDEX_SCAN) {
+				radio_h.on_time = radio_v1->on_time;
+			} else {
+				radio_h.on_time = 0;
+			}
+			radio_h.tx_time = radio_v1->tx_time;
+			radio_h.on_time_nbd = radio_v1->on_time_nbd;
+			radio_h.on_time_gscan = radio_v1->on_time_gscan;
+			radio_h.on_time_hs20 = radio_v1->on_time_hs20;
+			err = memcpy_s(out_radio_stat, avail_radio_stat_len,
+					&radio_h, sizeof(wifi_radio_stat_h));
+			if (err) {
+				WL_ERR(("failed to copy VERSION_1 radio_stat_h : %d\n", err));
+				goto exit;
+			}
+			out_radio_stat += sizeof(wifi_radio_stat_h);
+			avail_radio_stat_len -= sizeof(wifi_radio_stat_h);
+#endif
+		}
+	}
+	/* Update all channels */
+	err = memcpy_s(out_radio_stat, avail_radio_stat_len,
+		chan_stats, chan_stats_size);
+	if (err) {
+		WL_ERR(("failed to copy all channel_stat: %d\n", err));
+		goto exit;
+	}
+	out_radio_stat += chan_stats_size;
+	avail_radio_stat_len -= chan_stats_size;
+
+	err = memcpy_s(*output, WLC_IOCTL_MAXLEN, radio_stat_ptr, radio_stats_size);
+	if (err) {
+		WL_ERR(("Failed to copy wifi_radio_stat_h: %d\n", err));
+		goto exit;
+	}
+	*output += radio_stats_size;
+	*total_len += radio_stats_size;
+exit:
+	if (radio_stat_ptr) {
+		MFREE(cfg->osh, radio_stat_ptr, radio_stats_size);
+	}
+	return err;
+}
+
 static int wl_cfgvendor_lstats_get_info(struct wiphy *wiphy,
 	struct wireless_dev *wdev, const void  *data, int len)
 {
-	static char iovar_buf[WLC_IOCTL_MAXLEN];
+	char *iovar_buf;
 	struct bcm_cfg80211 *cfg = wiphy_priv(wiphy);
-	int err = 0, ret = 0, i;
-	wifi_radio_stat *radio;
+	struct net_device *inet_ndev = wdev_to_ndev(wdev);
+	int err = 0, i;
 	wifi_radio_stat_h radio_h;
 	wifi_channel_stat *chan_stats = NULL;
+	int num_channels = 0;
 	uint chan_stats_size = 0;
-#ifdef CHAN_STATS_SUPPORT
-	wifi_channel_stat *p_chan_stats = NULL;
+#ifdef LINKSTAT_EXT_SUPPORT
+	wifi_channel_stat *all_chan_stats = NULL;
 	cca_congest_ext_channel_req_v2_t *per_chspec_stats = NULL;
 	uint per_chspec_stats_size = 0;
 	cca_congest_ext_channel_req_v3_t *all_chan_results;
-	cca_congest_ext_channel_req_v3_t all_chan_req;
+	cca_congest_ext_channel_req_v3_t *all_chan_req = NULL;
+	uint all_chan_req_size = sizeof(cca_congest_ext_channel_req_v3_t);
+	wl_bssload_t *bssload;
 #else
 	/* cca_get_stats_ext iovar for Wifi channel statics */
-	struct cca_congest_ext_channel_req_v2 *cca_v2_results;
-	struct cca_congest_ext_channel_req_v2 cca_v2_req;
-#endif /* CHAN_STATS_SUPPORT  */
+	cca_congest_ext_channel_req_v2_t *cca_v2_results = NULL;
+	cca_congest_ext_channel_req_v3_t *cca_v3_req = NULL;
+	cca_congest_ext_channel_req_v2_t *cca_v2_req = NULL;
+	uint cca_v3_req_size = sizeof(cca_congest_ext_channel_req_v3_t);
+	uint cca_v2_req_size = sizeof(cca_congest_ext_channel_req_v2_t);
+	uint16 cca_ver;
+#endif /* LINKSTAT_EXT_SUPPORT  */
 	const wl_cnt_wlc_t *wlc_cnt;
 	scb_val_t scbval;
 	char *output = NULL;
@@ -6869,18 +7730,15 @@ static int wl_cfgvendor_lstats_get_info(struct wiphy *wiphy,
 	wifi_rate_stat_v1 *p_wifi_rate_stat_v1 = NULL;
 	wifi_rate_stat *p_wifi_rate_stat = NULL;
 	uint total_len = 0;
-	uint32 rxbeaconmbss;
+	uint32 rxbeaconmbss = 0;
 	wlc_rev_info_t revinfo;
 	wl_if_stats_t *if_stats = NULL;
+	wl_if_infra_enh_stats_v2_t *if_infra_enh_stats = NULL;
 	dhd_pub_t *dhdp = (dhd_pub_t *)(cfg->pub);
-	wl_pwrstats_query_t scan_query;
-	wl_pwrstats_t *pwrstats;
-	wl_pwr_scan_stats_t scan_stats;
-	int scan_time_len;
-	uint32 tot_pno_dur = 0;
 	wifi_channel_stat cur_channel_stat;
 	cca_congest_channel_req_t *cca_result;
-	cca_congest_channel_req_t cca_req;
+	cca_congest_channel_req_t *cca_req = NULL;
+	uint cca_req_size = sizeof(cca_congest_channel_req_t);
 	uint32 cca_busy_time = 0;
 	int cur_chansp, cur_band;
 	chanspec_t cur_chanspec;
@@ -6891,7 +7749,15 @@ static int wl_cfgvendor_lstats_get_info(struct wiphy *wiphy,
 	RETURN_EIO_IF_NOT_UP(cfg);
 
 	BCM_REFERENCE(if_stats);
+	BCM_REFERENCE(if_infra_enh_stats);
 	BCM_REFERENCE(dhdp);
+	BCM_REFERENCE(chan_stats_size);
+
+	/* Limit link stats query only on primary interface */
+	if (!IS_INET_LINK_NDEV(cfg, inet_ndev)) {
+		WL_ERR(("link stats query requested on non primary interface\n"));
+		return BCME_UNSUPPORTED;
+	}
 	/* Get the device rev info */
 	bzero(&revinfo, sizeof(revinfo));
 	err = wldev_ioctl_get(bcmcfg_to_prmry_ndev(cfg), WLC_GET_REVINFO, &revinfo,
@@ -6900,6 +7766,7 @@ static int wl_cfgvendor_lstats_get_info(struct wiphy *wiphy,
 		goto exit;
 	}
 
+	iovar_buf = cfg->ioctl_buf;
 	outdata = (void *)MALLOCZ(cfg->osh, WLC_IOCTL_MAXLEN);
 	if (outdata == NULL) {
 		WL_ERR(("outdata alloc failed\n"));
@@ -6910,90 +7777,8 @@ static int wl_cfgvendor_lstats_get_info(struct wiphy *wiphy,
 	bzero(outdata, WLC_IOCTL_MAXLEN);
 	output = outdata;
 
-	err = wldev_iovar_getbuf(bcmcfg_to_prmry_ndev(cfg), "radiostat", NULL, 0,
-		iovar_buf, WLC_IOCTL_MAXLEN, NULL);
-	if (err != BCME_OK && err != BCME_UNSUPPORTED) {
-		WL_ERR(("error (%d) - size = %zu\n", err, sizeof(wifi_radio_stat)));
-		goto exit;
-	}
-	radio = (wifi_radio_stat *)iovar_buf;
-
 	bzero(&radio_h, sizeof(wifi_radio_stat_h));
-	radio_h.on_time = radio->on_time;
-	radio_h.tx_time = radio->tx_time;
-	radio_h.rx_time = radio->rx_time;
-	radio_h.on_time_scan = radio->on_time_scan;
-	radio_h.on_time_nbd = radio->on_time_nbd;
-	radio_h.on_time_gscan = radio->on_time_gscan;
-	radio_h.on_time_roam_scan = radio->on_time_roam_scan;
-	radio_h.on_time_pno_scan = radio->on_time_pno_scan;
-	radio_h.on_time_hs20 = radio->on_time_hs20;
-	radio_h.num_channels = NUM_PEER;
-
-	scan_query.length = 1;
-	scan_query.type[0] = WL_PWRSTATS_TYPE_SCAN;
-
-	err = wldev_iovar_getbuf(bcmcfg_to_prmry_ndev(cfg), "pwrstats", &scan_query,
-		sizeof(scan_query), iovar_buf, WLC_IOCTL_MAXLEN, NULL);
-	if (err != BCME_OK && err != BCME_UNSUPPORTED) {
-		WL_ERR(("error (%d) - size = %zu\n", err, sizeof(wl_pwrstats_t)));
-		goto exit;
-	}
-
-	pwrstats = (wl_pwrstats_t *) iovar_buf;
-
-	if (dtoh16(pwrstats->version) != WL_PWRSTATS_VERSION) {
-		WL_ERR(("PWRSTATS Version mismatch\n"));
-		err = BCME_ERROR;
-		goto exit;
-	}
-
-	scan_time_len = dtoh16(((uint16 *)pwrstats->data)[1]);
-
-	if (scan_time_len < sizeof(wl_pwr_scan_stats_t)) {
-		WL_ERR(("WL_PWRSTATS_TYPE_SCAN IOVAR info short len :  %d < %d\n",
-			scan_time_len, (int)sizeof(wl_pwr_scan_stats_t)));
-		err = BCME_ERROR;
-		goto exit;
-	}
-
-	(void) memcpy_s(&scan_stats, sizeof(wl_pwr_scan_stats_t), pwrstats->data, scan_time_len);
-
-	/* wl_pwr_scan_stats structure has the array of pno_scans.
-	 * scan_data_t pno_scans[8];
-	 * The number of array is 8 : For future PNO bucketing (BSSID, SSID, etc)
-	 * FW sets the number as harcoded.
-	 * If the hardcoded number (8) is changed,
-	 * the loop condition or NUM_PNO_SCANS has to be changed
-	 */
-
-	for (i = 0; i < NUM_PNO_SCANS; i++) {
-		tot_pno_dur += dtoh32(scan_stats.pno_scans[i].dur);
-	}
-
-	/*  Android Framework defines the total scan time in ms.
-	 *  But FW sends each scan time in us except for roam scan time.
-	 *  So we need to scale the times in ms.
-	 */
-
-	radio_h.on_time_scan = (uint32)((tot_pno_dur +
-		dtoh32(scan_stats.user_scans.dur) +
-		dtoh32(scan_stats.assoc_scans.dur) +
-		dtoh32(scan_stats.other_scans.dur)) / 1000);
-
-	radio_h.on_time_scan += dtoh32(scan_stats.roam_scans.dur);
-	radio_h.on_time_roam_scan = dtoh32(scan_stats.roam_scans.dur);
-	radio_h.on_time_pno_scan = (uint32)(tot_pno_dur / 1000);
-
-	WL_TRACE(("pwr_scan_stats : %u %u %u %u %u %u\n",
-		radio_h.on_time_scan,
-		dtoh32(scan_stats.user_scans.dur),
-		dtoh32(scan_stats.assoc_scans.dur),
-		dtoh32(scan_stats.roam_scans.dur),
-		tot_pno_dur,
-		dtoh32(scan_stats.other_scans.dur)));
-
-	err = wldev_iovar_getint(bcmcfg_to_prmry_ndev(cfg), "chanspec", (int*)&cur_chansp);
+	err = wldev_iovar_getint(inet_ndev, "chanspec", (int*)&cur_chansp);
 	if (err != BCME_OK) {
 		WL_ERR(("error (%d) \n", err));
 		goto exit;
@@ -7016,15 +7801,18 @@ static int wl_cfgvendor_lstats_get_info(struct wiphy *wiphy,
 		cur_channel_stat.channel.center_freq0,
 		cur_channel_stat.channel.center_freq1));
 
-	chan_stats_size = sizeof(wifi_channel_stat);
-	chan_stats = &cur_channel_stat;
-
-#ifdef CHAN_STATS_SUPPORT
+#ifdef LINKSTAT_EXT_SUPPORT
 	/* Option to get all channel statistics */
-	all_chan_req.num_of_entries = 0;
-	all_chan_req.ver = WL_CCA_EXT_REQ_VER_V3;
-	err = wldev_iovar_getbuf(bcmcfg_to_prmry_ndev(cfg), "cca_get_stats_ext",
-		&all_chan_req, sizeof(all_chan_req), iovar_buf, WLC_IOCTL_MAXLEN, NULL);
+	all_chan_req = (void *)MALLOCZ(cfg->osh, all_chan_req_size);
+	if (all_chan_req == NULL) {
+		err = BCME_NOMEM;
+		WL_ERR(("all_chan_req alloc failed\n"));
+		goto exit;
+	}
+	all_chan_req->num_of_entries = 0;
+	all_chan_req->ver = WL_CCA_EXT_REQ_VER_V3;
+	err = wldev_iovar_getbuf(inet_ndev, "cca_get_stats_ext",
+		all_chan_req, all_chan_req_size, iovar_buf, WLC_IOCTL_MAXLEN, NULL);
 
 	if (err != BCME_OK && err != BCME_UNSUPPORTED) {
 		WL_ERR(("cca_get_stats_ext iovar err = %d\n", err));
@@ -7034,28 +7822,25 @@ static int wl_cfgvendor_lstats_get_info(struct wiphy *wiphy,
 	all_chan_results = (cca_congest_ext_channel_req_v3_t *) iovar_buf;
 	if ((err == BCME_OK) &&
 			(dtoh16(all_chan_results->ver) == WL_CCA_EXT_REQ_VER_V3)) {
-		wifi_channel_stat *all_chan_stats = NULL;
-		int i = 0, num_channels;
+		int i = 0;
 
 		num_channels = dtoh16(all_chan_results->num_of_entries);
-		radio_h.num_channels = num_channels;
-
 		chan_stats_size = sizeof(wifi_channel_stat) * num_channels;
 		chan_stats = (wifi_channel_stat*)MALLOCZ(cfg->osh, chan_stats_size);
-		p_chan_stats = chan_stats;
 		if (chan_stats == NULL) {
 			WL_ERR(("chan_stats alloc failed\n"));
+			err = BCME_NOMEM;
 			goto exit;
 		}
 		bzero(chan_stats, chan_stats_size);
 		all_chan_stats = chan_stats;
-
 		per_chspec_stats_size =
 			sizeof(cca_congest_ext_channel_req_v2_t) * num_channels;
 		per_chspec_stats = (cca_congest_ext_channel_req_v2_t *)
 			MALLOCZ(cfg->osh, per_chspec_stats_size);
 		if (per_chspec_stats == NULL) {
 			WL_ERR(("per_chspec_stats alloc failed\n"));
+			err = BCME_NOMEM;
 			goto exit;
 		}
 		(void) memcpy_s(per_chspec_stats, per_chspec_stats_size,
@@ -7083,33 +7868,76 @@ static int wl_cfgvendor_lstats_get_info(struct wiphy *wiphy,
 				per_chspec_stats[i].secs[0].radio_on_time,
 				per_chspec_stats[i].secs[0].cca_busy_time));
 		}
+		all_chan_stats = chan_stats;
 	}
 #else
-	cca_v2_req.ver = WL_CCA_EXT_REQ_VER_V2;
-	cca_v2_req.chanspec =
+	chan_stats_size = sizeof(wifi_channel_stat);
+	chan_stats = &cur_channel_stat;
+
+	cca_v3_req = (void *)MALLOCZ(cfg->osh, cca_v3_req_size);
+	if (cca_v3_req == NULL) {
+		err = BCME_NOMEM;
+		WL_ERR(("cca_v3_req alloc failed\n"));
+		goto exit;
+	}
+	cca_v3_req->num_of_entries = 1;
+	cca_v3_req->ver = WL_CCA_EXT_REQ_VER_V3;
+	cca_v3_req->per_chan_stats->chanspec =
 		wl_chspec_host_to_driver(wf_chspec_primary20_chspec(cur_chanspec));
 
-	err = wldev_iovar_getbuf(bcmcfg_to_prmry_ndev(cfg), "cca_get_stats_ext", &cca_v2_req,
-		sizeof(cca_v2_req), iovar_buf, WLC_IOCTL_MAXLEN, NULL);
+	err = wldev_iovar_getbuf(inet_ndev, "cca_get_stats_ext", cca_v3_req,
+		cca_v3_req_size, iovar_buf, WLC_IOCTL_MAXLEN, NULL);
 
 	if (err != BCME_OK && err != BCME_UNSUPPORTED) {
 		WL_ERR(("cca_get_stats_ext iovar err = %d\n", err));
 		goto exit;
 	}
 
-	cca_v2_results = (struct cca_congest_ext_channel_req_v2 *) iovar_buf;
+	cca_ver = ((cca_congest_ext_channel_req_v3_t *)iovar_buf)->ver;
 
 	/* Check the verison for cca_get_stats_ext iovar */
 	if ((err == BCME_OK) &&
-			(dtoh16(cca_v2_results->ver) == WL_CCA_EXT_REQ_VER_V2)) {
+			(dtoh16(cca_ver) == WL_CCA_EXT_REQ_VER_V3)) {
+
+		cca_v2_results =
+			((cca_congest_ext_channel_req_v3_t *)iovar_buf)->per_chan_stats;
+
 		/* the accumulated time for the current channel */
 		cur_channel_stat.on_time = dtoh32(cca_v2_results->secs[0].radio_on_time);
 		cur_channel_stat.cca_busy_time = dtoh32(cca_v2_results->secs[0].cca_busy_time);
 
-		WL_TRACE(("wifi chan statics - on_time : %u, cca_busy_time : %u\n",
+		WL_TRACE(("wifi chan statics ver.3 - on_time : %u, cca_busy_time : %u\n",
+			cur_channel_stat.on_time, cur_channel_stat.cca_busy_time));
+	} else if ((err == BCME_OK) &&
+			(dtoh16(cca_ver) == WL_CCA_EXT_REQ_VER_V2)) {
+
+		cca_v2_req = (void *)MALLOCZ(cfg->osh, cca_v2_req_size);
+		if (cca_v2_req == NULL) {
+			err = BCME_NOMEM;
+			WL_ERR(("cca_v2_req alloc failed\n"));
+			goto exit;
+		}
+		cca_v2_req->chanspec =
+			wl_chspec_host_to_driver(wf_chspec_primary20_chspec(cur_chanspec));
+
+		err = wldev_iovar_getbuf(inet_ndev, "cca_get_stats_ext",
+			cca_v2_req, cca_v2_req_size, iovar_buf, WLC_IOCTL_MAXLEN, NULL);
+
+		if (err != BCME_OK) {
+			WL_ERR(("cca_get_stats_ext iovar err = %d\n", err));
+			goto exit;
+		}
+
+		cca_v2_results = (cca_congest_ext_channel_req_v2_t *) iovar_buf;
+
+		/* the accumulated time for the current channel */
+		cur_channel_stat.on_time = dtoh32(cca_v2_results->secs[0].radio_on_time);
+		cur_channel_stat.cca_busy_time = dtoh32(cca_v2_results->secs[0].cca_busy_time);
+
+		WL_TRACE(("wifi chan statics ver.2 - on_time : %u, cca_busy_time : %u\n",
 			cur_channel_stat.on_time, cur_channel_stat.cca_busy_time));
 	}
-#endif /* CHAN_STATS_SUPPORT  */
+#endif /* LINKSTAT_EXT_SUPPORT  */
 	else {
 		/* To get fine-grained cca result,
 		* you can increase num_secs because num_secs is the time to get samples.
@@ -7119,10 +7947,16 @@ static int wl_cfgvendor_lstats_get_info(struct wiphy *wiphy,
 		*/
 		WL_TRACE(("cca_get_stats_ext unsupported or version mismatch\n"));
 
-		cca_req.num_secs = NUM_CCA_SAMPLING_SECS;
-		cca_req.chanspec = wl_chspec_host_to_driver(cur_chanspec);
+		cca_req = (void *)MALLOCZ(cfg->osh, cca_req_size);
+		if (cca_req == NULL) {
+			err = BCME_NOMEM;
+			WL_ERR(("cca_req alloc failed\n"));
+			goto exit;
+		}
+		cca_req->num_secs = NUM_CCA_SAMPLING_SECS;
+		cca_req->chanspec = wl_chspec_host_to_driver(cur_chanspec);
 
-		err = wldev_iovar_getbuf(bcmcfg_to_prmry_ndev(cfg), "cca_get_stats", &cca_req,
+		err = wldev_iovar_getbuf(inet_ndev, "cca_get_stats", cca_req,
 			sizeof(cca_req), iovar_buf, WLC_IOCTL_MAXLEN, NULL);
 
 		if (err != BCME_OK && err != BCME_UNSUPPORTED) {
@@ -7145,35 +7979,37 @@ static int wl_cfgvendor_lstats_get_info(struct wiphy *wiphy,
 				dtoh32(cca_result->secs[0].congest_obss),
 				dtoh32(cca_result->secs[0].interference)));
 		} else {
-			WL_ERR(("cca_get_stats is unsupported \n"));
+			WL_INFORM(("cca_get_stats is unsupported \n"));
 		}
 
 		/* If cca_get_stats is unsupported, cca_busy_time has zero value as initial value */
 		cur_channel_stat.cca_busy_time = cca_busy_time;
 	}
 
-	ret = memcpy_s(output, WLC_IOCTL_MAXLEN, &radio_h, sizeof(wifi_radio_stat_h));
-	if (ret) {
-		WL_ERR(("Failed to copy wifi_radio_stat_h: %d\n", ret));
+	err = wl_cfgvendor_get_radio_stats(cfg, inet_ndev, chan_stats,
+			num_channels, &output, &total_len);
+	if (unlikely(err)) {
+		WL_ERR(("Failed to get radio_stat (%d)\n", err));
 		goto exit;
 	}
-	output += sizeof(wifi_radio_stat_h);
-
-	ret = memcpy_s(output, (WLC_IOCTL_MAXLEN - sizeof(wifi_radio_stat_h)),
-		chan_stats, chan_stats_size);
-	if (ret) {
-		WL_ERR(("Failed to copy wifi_channel_stat: %d\n", ret));
-		goto exit;
-	}
-	output += chan_stats_size;
 
 	COMPAT_BZERO_IFACE(wifi_iface_stat, iface);
+#ifdef LINKSTAT_EXT_SUPPORT
+	/* Update duty cycle info based on RSDB/VSDB */
+	if (wl_cfg80211_determine_rsdb_scc_mode(cfg)) {
+		COMPAT_ASSIGN_VALUE(iface, info.time_slicing_duty_cycle_percent,
+			WIFI_RSDB_TIMESLICE_DUTY_CYCLE);
+	} else {
+		COMPAT_ASSIGN_VALUE(iface, info.time_slicing_duty_cycle_percent,
+			WIFI_VSDB_TIMESLICE_DUTY_CYCLE);
+	}
+#endif /* LINKSTAT_EXT_SUPPORT */
 	COMPAT_ASSIGN_VALUE(iface, ac[WIFI_AC_VO].ac, WIFI_AC_VO);
 	COMPAT_ASSIGN_VALUE(iface, ac[WIFI_AC_VI].ac, WIFI_AC_VI);
 	COMPAT_ASSIGN_VALUE(iface, ac[WIFI_AC_BE].ac, WIFI_AC_BE);
 	COMPAT_ASSIGN_VALUE(iface, ac[WIFI_AC_BK].ac, WIFI_AC_BK);
 
-	err = wldev_iovar_getbuf(bcmcfg_to_prmry_ndev(cfg), "counters", NULL, 0,
+	err = wldev_iovar_getbuf(inet_ndev, "counters", NULL, 0,
 		iovar_buf, WLC_IOCTL_MAXLEN, NULL);
 	if (unlikely(err)) {
 		WL_ERR(("error (%d) - size = %zu\n", err, sizeof(wl_cnt_wlc_t)));
@@ -7200,30 +8036,47 @@ static int wl_cfgvendor_lstats_get_info(struct wiphy *wiphy,
 #ifndef DISABLE_IF_COUNTERS
 	if_stats = (wl_if_stats_t *)MALLOCZ(cfg->osh, sizeof(wl_if_stats_t));
 	if (!if_stats) {
+		WL_ERR(("%s: memory allocation for if_stats failed\n", __func__));
+		err = BCME_NOMEM;
+		goto exit;
+	}
+
+	if_infra_enh_stats = (wl_if_infra_enh_stats_v2_t *)MALLOCZ(cfg->osh,
+		sizeof(wl_if_infra_enh_stats_v2_t));
+	if (!if_infra_enh_stats) {
 	    WL_ERR(("MALLOCZ failed\n"));
 	    err = BCME_NOMEM;
 	    goto exit;
 	}
 
 	if (FW_SUPPORTED(dhdp, ifst)) {
-		err = wl_cfg80211_ifstats_counters(bcmcfg_to_prmry_ndev(cfg), if_stats);
+		err = wl_cfg80211_if_infra_enh_ifstats_counters(inet_ndev,
+				if_infra_enh_stats);
+		if (!err) {
+			rxbeaconmbss =	if_infra_enh_stats->rxbeaconmbss;
+		}
+	}
+
+	if (FW_SUPPORTED(dhdp, ifst)) {
+		err = wl_cfg80211_ifstats_counters(inet_ndev, if_stats);
 	} else {
-		err = wldev_iovar_getbuf(bcmcfg_to_prmry_ndev(cfg), "if_counters",
+		err = wldev_iovar_getbuf(inet_ndev, "if_counters",
 			NULL, 0, (char *)if_stats, sizeof(*if_stats), NULL);
 	}
 
 	if (!err) {
 		/* Populate from if_stats */
-		if (dtoh16(if_stats->version) > WL_IF_STATS_T_VERSION) {
+		if (dtoh16(if_stats->version) > WL_IF_STATS_T_VERSION_1) {
 			WL_ERR(("incorrect version of wl_if_stats_t,"
-				" expected=%u got=%u\n", WL_IF_STATS_T_VERSION,
+				" expected=%u got=%u\n", WL_IF_STATS_T_VERSION_1,
 				if_stats->version));
 			goto exit;
 		}
 		COMPAT_ASSIGN_VALUE(iface, ac[WIFI_AC_BE].tx_mpdu, (uint32)if_stats->txframe);
 		COMPAT_ASSIGN_VALUE(iface, ac[WIFI_AC_BE].rx_mpdu,
 			(uint32)(if_stats->rxframe - if_stats->rxmulti));
-		COMPAT_ASSIGN_VALUE(iface, ac[WIFI_AC_BE].mpdu_lost, (uint32)if_stats->txfail);
+		COMPAT_ASSIGN_VALUE(iface, ac[WIFI_AC_BE].mpdu_lost,
+				(uint32)if_stats->txfail + wlc_cnt->tx_toss_cnt);
 		COMPAT_ASSIGN_VALUE(iface, ac[WIFI_AC_BE].retries, (uint32)if_stats->txretrans);
 	} else
 #endif /* !DISABLE_IF_COUNTERS */
@@ -7231,17 +8084,12 @@ static int wl_cfgvendor_lstats_get_info(struct wiphy *wiphy,
 		COMPAT_ASSIGN_VALUE(iface, ac[WIFI_AC_BE].tx_mpdu,
 			(wlc_cnt->txfrmsnt - wlc_cnt->txmulti));
 		COMPAT_ASSIGN_VALUE(iface, ac[WIFI_AC_BE].rx_mpdu, wlc_cnt->rxframe);
-		COMPAT_ASSIGN_VALUE(iface, ac[WIFI_AC_BE].mpdu_lost, wlc_cnt->txfail);
+		COMPAT_ASSIGN_VALUE(iface, ac[WIFI_AC_BE].mpdu_lost,
+				wlc_cnt->txfail + wlc_cnt->tx_toss_cnt);
 		COMPAT_ASSIGN_VALUE(iface, ac[WIFI_AC_BE].retries, wlc_cnt->txretrans);
 	}
 
-	err = wl_cfgvendor_lstats_get_bcn_mbss(iovar_buf, &rxbeaconmbss);
-	if (unlikely(err)) {
-		WL_ERR(("get_bcn_mbss error (%d)\n", err));
-		goto exit;
-	}
-
-	err = wldev_get_rssi(bcmcfg_to_prmry_ndev(cfg), &scbval);
+	err = wldev_get_rssi(inet_ndev, &scbval);
 	if (unlikely(err)) {
 		WL_ERR(("get_rssi error (%d)\n", err));
 		goto exit;
@@ -7252,9 +8100,26 @@ static int wl_cfgvendor_lstats_get_info(struct wiphy *wiphy,
 	COMPAT_ASSIGN_VALUE(iface, num_peers, NUM_PEER);
 	COMPAT_ASSIGN_VALUE(iface, peer_info->num_rate, NUM_RATE);
 
+#ifdef LINKSTAT_EXT_SUPPORT
+	err = wldev_iovar_getbuf(inet_ndev, "bssload_report", NULL,
+		0, iovar_buf, WLC_IOCTL_MAXLEN, NULL);
+
+	if (err == BCME_OK) {
+		bssload = (wl_bssload_t *)iovar_buf;
+		COMPAT_ASSIGN_VALUE(iface, peer_info->bssload.sta_count, bssload->sta_count);
+		COMPAT_ASSIGN_VALUE(iface, peer_info->bssload.chan_util, bssload->chan_util);
+	} else if (err == BCME_UNSUPPORTED) {
+		WL_ERR(("bssload_report is unsupported \n"));
+	} else if (err == BCME_NOTASSOCIATED) {
+		WL_ERR(("bssload_report IOVAR failed. STA is not associated.\n"));
+	} else {
+		WL_ERR(("error (%d) - size = %zu\n", err, sizeof(wl_bssload_t)));
+		goto exit;
+	}
+#endif /* LINKSTAT_EXT_SUPPORT */
 	COMPAT_MEMCOPY_IFACE(output, total_len, wifi_iface_stat, iface, wifi_rate_stat);
 
-	err = wldev_iovar_getbuf(bcmcfg_to_prmry_ndev(cfg), "ratestat", NULL, 0,
+	err = wldev_iovar_getbuf(inet_ndev, "ratestat", NULL, 0,
 		iovar_buf, WLC_IOCTL_MAXLEN, NULL);
 	if (err != BCME_OK && err != BCME_UNSUPPORTED) {
 		WL_ERR(("error (%d) - size = %zu\n", err, NUM_RATE*sizeof(wifi_rate_stat)));
@@ -7280,56 +8145,129 @@ static int wl_cfgvendor_lstats_get_info(struct wiphy *wiphy,
 		output += sizeof(p_wifi_rate_stat_v1->retries_long);
 	}
 
-	total_len = sizeof(wifi_radio_stat_h) + chan_stats_size;
-	total_len = total_len - sizeof(wifi_peer_info) +
-		NUM_PEER * (sizeof(wifi_peer_info) - sizeof(wifi_rate_stat_v1) +
-			NUM_RATE * sizeof(wifi_rate_stat_v1));
+	/* Due to flexible array member, '-' operation is required.
+	 * Remove redundant wifi_peer_info[1] size from 'wifi_iface_stat'
+	 * Remove redundant wifi_rate_stat[1] size from 'wifi_peer_info'
+	 */
+#if defined(LINKSTAT_EXT_SUPPORT) || (ANDROID_VERSION >= 12)
+	total_len = total_len -
+		sizeof(wifi_peer_info) +
+		NUM_PEER * (sizeof(wifi_peer_info_v1) -
+		sizeof(wifi_rate_stat) +
+		NUM_RATE * sizeof(wifi_rate_stat_v1));
+#else
+	total_len = total_len -
+		sizeof(wifi_peer_info) +
+		NUM_PEER * (sizeof(wifi_peer_info) -
+		sizeof(wifi_rate_stat) +
+		NUM_RATE * sizeof(wifi_rate_stat_v1));
+#endif
 
 	if (total_len > WLC_IOCTL_MAXLEN) {
 		WL_ERR(("Error! total_len:%d is unexpected value\n", total_len));
 		err = BCME_BADLEN;
 		goto exit;
 	}
-	err =  wl_cfgvendor_send_cmd_reply(wiphy, outdata, total_len);
-
-	if (unlikely(err))
+#if ANDROID_VERSION >= 13
+	err = wl_cfgvendor_send_stats_info(wiphy, outdata, total_len);
+	if (unlikely(err)) {
 		WL_ERR(("Vendor Command reply failed ret:%d \n", err));
+	}
+#else
+	err =  wl_cfgvendor_send_cmd_reply(wiphy, outdata, total_len);
+#endif /* ANDROID_VERSION >= 13  */
 
 exit:
+	if (cca_req) {
+		MFREE(cfg->osh, cca_req, cca_req_size);
+	}
+#ifdef LINKSTAT_EXT_SUPPORT
+	if (all_chan_req) {
+		MFREE(cfg->osh, all_chan_req, all_chan_req_size);
+	}
+#else
+	if (cca_v2_req) {
+		MFREE(cfg->osh, cca_v2_req, cca_v2_req_size);
+	}
+	if (cca_v3_req) {
+		MFREE(cfg->osh, cca_v3_req, cca_v3_req_size);
+	}
+#endif /* LINKSTAT_EXT_SUPPORT */
 	if (outdata) {
 		MFREE(cfg->osh, outdata, WLC_IOCTL_MAXLEN);
 	}
+#ifndef DISABLE_IF_COUNTERS
 	if (if_stats) {
 		MFREE(cfg->osh, if_stats, sizeof(wl_if_stats_t));
 	}
-#ifdef CHAN_STATS_SUPPORT
-	if (p_chan_stats) {
-		MFREE(cfg->osh, p_chan_stats, chan_stats_size);
+
+	if (if_infra_enh_stats) {
+		MFREE(cfg->osh, if_infra_enh_stats, sizeof(wl_if_infra_enh_stats_v2_t));
+	}
+#endif /* !DISABLE_IF_COUNTERS */
+
+#ifdef LINKSTAT_EXT_SUPPORT
+	if (chan_stats) {
+		MFREE(cfg->osh, chan_stats, chan_stats_size);
 	}
 	if (per_chspec_stats) {
 		MFREE(cfg->osh, per_chspec_stats, per_chspec_stats_size);
 	}
-#endif /* CHAN_STATS_SUPPORT */
+#endif /* LINKSTAT_EXT_SUPPORT */
+
+#ifdef RPM_FAST_TRIGGER
+	WL_INFORM(("Trgger RPM Fast\n"));
+	dhd_trigger_rpm_fast(cfg);
+#endif /* RPM_FAST_TRIGGER */
 	return err;
 }
 #endif /* LINKSTAT_SUPPORT */
 
 #ifdef DHD_LOG_DUMP
 static int
-wl_cfgvendor_get_buf_data(const struct nlattr *iter, struct buf_data **buf)
+wl_cfgvendor_get_buf_data(const struct nlattr *iter, struct buf_data *buf)
 {
 	int ret = BCME_OK;
+#ifdef CONFIG_COMPAT
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 6, 0))
+	if (in_compat_syscall())
+#else
+	if (is_compat_task())
+#endif /* LINUX_VER >= 4.6 */
+	{
+		struct compat_buf_data *compat_buf = (struct compat_buf_data *)nla_data(iter);
 
-	if (nla_len(iter) != sizeof(struct buf_data)) {
-		WL_ERR(("Invalid len : %d\n", nla_len(iter)));
-		ret = BCME_BADLEN;
+		if (nla_len(iter) != sizeof(struct compat_buf_data)) {
+			WL_ERR(("Invalid len : %d\n", nla_len(iter)));
+			ret = BCME_BADLEN;
+		}
+
+		buf->ver = compat_buf->ver;
+		buf->len = compat_buf->len;
+		buf->buf_threshold = compat_buf->buf_threshold;
+		buf->data_buf[0] = (const void *)compat_ptr(compat_buf->data_buf);
 	}
-	(*buf) = (struct buf_data *)nla_data(iter);
-	if (!(*buf) || (((*buf)->len) <= 0) || !((*buf)->data_buf[0])) {
+	else
+#endif /* CONFIG_COMPAT */
+	{
+		if (nla_len(iter) != sizeof(struct buf_data)) {
+			WL_ERR(("Invalid len : %d\n", nla_len(iter)));
+			ret = BCME_BADLEN;
+		}
+		ret = memcpy_s(buf, sizeof(struct buf_data), (void *)nla_data(iter), nla_len(iter));
+		if (ret) {
+			WL_ERR(("Can't get buf data\n"));
+			goto exit;
+		}
+	}
+
+	if ((buf->len <= 0) || !buf->data_buf[0]) {
 		WL_ERR(("Invalid buffer\n"));
 		ret = BCME_ERROR;
 	}
+exit:
 	return ret;
+
 }
 
 static int
@@ -7342,8 +8280,10 @@ wl_cfgvendor_dbg_file_dump(struct wiphy *wiphy,
 	struct sk_buff *skb = NULL;
 	struct bcm_cfg80211 *cfg = wiphy_priv(wiphy);
 	struct buf_data *buf;
+	struct buf_data data_from_hal;
 	int pos = 0;
 
+	RETURN_EIO_IF_NOT_UP(cfg);
 	/* Alloc the SKB for vendor_event */
 	skb = cfg80211_vendor_cmd_alloc_reply_skb(wiphy, CFG80211_VENDOR_CMD_REPLY_SKB_SZ);
 	if (!skb) {
@@ -7351,12 +8291,16 @@ wl_cfgvendor_dbg_file_dump(struct wiphy *wiphy,
 		ret = BCME_NOMEM;
 		goto exit;
 	}
-	WL_ERR(("%s\n", __FUNCTION__));
+
+	memset_s(&data_from_hal, sizeof(data_from_hal),  0, sizeof(data_from_hal));
+	buf = &data_from_hal;
 	nla_for_each_attr(iter, data, len, rem) {
 		type = nla_type(iter);
-		ret = wl_cfgvendor_get_buf_data(iter, &buf);
+		ret = wl_cfgvendor_get_buf_data(iter, buf);
 		if (ret)
 			goto exit;
+
+		WL_DBG_MEM(("%s: type %d\n", __FUNCTION__, type));
 		switch (type) {
 			case DUMP_BUF_ATTR_MEMDUMP:
 				ret = dhd_os_get_socram_dump(bcmcfg_to_prmry_ndev(cfg), &mem_buf,
@@ -7379,6 +8323,25 @@ wl_cfgvendor_dbg_file_dump(struct wiphy *wiphy,
 					buf->data_buf[0], NULL, (uint32)buf->len, &pos);
 				break;
 #endif /* EWP_ECNTRS_LOGGING */
+
+#ifdef EWP_DACS
+			case DUMP_BUF_ATTR_EWP_HW_INIT_LOG:
+				ret = dhd_print_init_dump_data(bcmcfg_to_prmry_ndev(cfg), NULL,
+					buf->data_buf[0], NULL, (uint32)buf->len, &pos,
+					LOG_DUMP_SECTION_EWP_HW_INIT_LOG);
+				break;
+			case DUMP_BUF_ATTR_EWP_HW_MOD_DUMP:
+				ret = dhd_print_init_dump_data(bcmcfg_to_prmry_ndev(cfg), NULL,
+					buf->data_buf[0], NULL, (uint32)buf->len, &pos,
+					LOG_DUMP_SECTION_EWP_HW_MOD_DUMP);
+				break;
+			case DUMP_BUF_ATTR_EWP_HW_REG_DUMP:
+				ret = dhd_print_init_dump_data(bcmcfg_to_prmry_ndev(cfg), NULL,
+					buf->data_buf[0], NULL, (uint32)buf->len, &pos,
+					LOG_DUMP_SECTION_EWP_HW_REG_DUMP);
+				break;
+#endif /* EWP_DACS */
+
 #ifdef DHD_STATUS_LOGGING
 			case DUMP_BUF_ATTR_STATUS_LOG :
 				ret = dhd_print_status_log_data(bcmcfg_to_prmry_ndev(cfg), NULL,
@@ -7434,6 +8397,24 @@ wl_cfgvendor_dbg_file_dump(struct wiphy *wiphy,
 					buf->data_buf[0], NULL, (uint32)buf->len,
 					DLD_BUF_TYPE_SPECIAL, &pos);
 				break;
+#ifdef DHD_SDTC_ETB_DUMP
+			case DUMP_BUF_ATTR_SDTC_ETB_DUMP:
+				ret = dhd_sdtc_etb_hal_file_dump(bcmcfg_to_prmry_ndev(cfg),
+					buf->data_buf[0], (uint32)buf->len);
+				break;
+#endif /* DHD_SDTC_ETB_DUMP */
+#ifdef DHD_MAP_PKTID_LOGGING
+			case DUMP_BUF_ATTR_PKTID_MAP_LOG:
+				ret = dhd_print_pktid_map_log_data(bcmcfg_to_prmry_ndev(cfg), NULL,
+					buf->data_buf[0], NULL, (uint32)buf->len, &pos, TRUE);
+				break;
+
+			case DUMP_BUF_ATTR_PKTID_UNMAP_LOG:
+				ret = dhd_print_pktid_map_log_data(bcmcfg_to_prmry_ndev(cfg), NULL,
+					buf->data_buf[0], NULL, (uint32)buf->len, &pos, FALSE);
+				break;
+#endif /* DHD_MAP_PKTID_LOGGIN */
+
 #ifdef DHD_SSSR_DUMP
 #ifdef DHD_SSSR_DUMP_BEFORE_SR
 			case DUMP_BUF_ATTR_SSSR_C0_D11_BEFORE :
@@ -7494,12 +8475,12 @@ wl_cfgvendor_dbg_file_dump(struct wiphy *wiphy,
 					buf->data_buf[0], (uint32)buf->len);
 				break;
 #endif /* DHD_PKT_LOGGING */
-#ifdef DNGL_AXI_ERROR_LOGGING
+#if defined(DNGL_AXI_ERROR_LOGGING) && defined(REPORT_AXI_ERROR)
 			case DUMP_BUF_ATTR_AXI_ERROR:
 				ret = dhd_os_get_axi_error_dump(bcmcfg_to_prmry_ndev(cfg),
 					buf->data_buf[0], (uint32)buf->len);
 				break;
-#endif /* DNGL_AXI_ERROR_LOGGING */
+#endif /* DNGL_AXI_ERROR_LOGGING && REPORT_AXI_ERROR */
 			default:
 				WL_ERR(("Unknown type: %d\n", type));
 				ret = BCME_ERROR;
@@ -7708,14 +8689,14 @@ static int
 wl_cfgvendor_dbg_trigger_mem_dump(struct wiphy *wiphy,
 	struct wireless_dev *wdev, const void  *data, int len)
 {
-	return WIFI_ERROR_NOT_SUPPORTED;
+	return -EOPNOTSUPP;
 }
 
 static int
 wl_cfgvendor_dbg_get_mem_dump(struct wiphy *wiphy,
 	struct wireless_dev *wdev, const void *data, int len)
 {
-	return WIFI_ERROR_NOT_SUPPORTED;
+	return -EOPNOTSUPP;
 }
 #endif /* !DEBUGABILITY_DISABLE_MEMDUMP */
 
@@ -7829,6 +8810,7 @@ static int wl_cfgvendor_dbg_get_ring_data(struct wiphy *wiphy,
 {
 	int ret = BCME_OK, rem, type;
 	char ring_name[DBGRING_NAME_MAX] = {0};
+	int ring_id;
 	const struct nlattr *iter;
 	struct bcm_cfg80211 *cfg = wiphy_priv(wiphy);
 	dhd_pub_t *dhd_pub = cfg->pub;
@@ -7845,6 +8827,21 @@ static int wl_cfgvendor_dbg_get_ring_data(struct wiphy *wiphy,
 		}
 	}
 
+	/* Moved the dump_start op */
+	ring_id = dhd_dbg_find_ring_id(dhd_pub, ring_name);
+	/* Using first ring get context to trigger ring dump event. */
+	if (ring_id == DEBUG_DUMP_RING1_ID) {
+		/*
+		 * The ring buffer data context timeout at framework is 100ms and
+		 * hence skipping memdump invocation in this path.
+		 */
+		dhd_pub->skip_memdump_map_read = true;
+		WL_MEM(("Doing dump_start op for ring_id %d ring:%s\n",
+			ring_id, ring_name));
+		dhd_log_dump_vendor_trigger(dhd_pub);
+	}
+
+	WL_DBG_MEM(("Received GET_RING_DATA ring:%s\n", ring_name));
 	ret = dhd_os_trigger_get_ring_data(dhd_pub, ring_name);
 	if (ret < 0) {
 		WL_ERR(("trigger_get_data failed ret:%d\n", ret));
@@ -7852,6 +8849,54 @@ static int wl_cfgvendor_dbg_get_ring_data(struct wiphy *wiphy,
 
 	return ret;
 }
+
+#ifdef DHD_HAL_RING_DUMP
+static int wl_cfgvendor_dbg_get_buf_ring_map(struct wiphy *wiphy,
+	struct wireless_dev *wdev, const void *data, int len)
+{
+	int ret = BCME_OK;
+	struct sk_buff *skb = NULL;
+	int map_cnt = ARRAYSIZE(dhd_buf_ring_map);
+	int entry_size = sizeof(dhd_buf_ring_map_entry_t);
+	int i;
+
+	WL_MEM(("map_cnt:%d\n", map_cnt));
+	/* Alloc the SKB for vendor_event */
+	skb = cfg80211_vendor_cmd_alloc_reply_skb(wiphy,
+		nla_total_size(sizeof(dhd_buf_ring_map)) + nla_total_size(sizeof(map_cnt)));
+	if (!skb) {
+		WL_ERR(("skb allocation is failed\n"));
+		ret = BCME_NOMEM;
+		goto fail;
+	}
+
+	ret = nla_put_u32(skb, DEBUG_ATTRIBUTE_BUF_RING_NUM, map_cnt);
+	if (unlikely(ret)) {
+		goto fail;
+	}
+
+	for (i = 0; i < map_cnt; i++) {
+		ret = nla_put(skb, DEBUG_ATTRIBUTE_BUF_RING_MAP, entry_size,
+				&dhd_buf_ring_map[i]);
+		if (unlikely(ret)) {
+			goto fail;
+		}
+	}
+
+	ret = cfg80211_vendor_cmd_reply(skb);
+	if (ret) {
+		/* kfree_skb is called if it is failed */
+		WL_ERR(("Vendor Command reply failed ret:%d \n", ret));
+	}
+	return ret;
+
+fail:
+	if (skb) {
+		kfree_skb(skb);
+	}
+	return ret;
+}
+#endif /* DHD_HAL_RING_DUMP */
 #endif /* DEBUGABILITY */
 
 static int wl_cfgvendor_dbg_get_feature(struct wiphy *wiphy,
@@ -7884,8 +8929,8 @@ static void wl_cfgvendor_dbg_ring_send_evt(void *ctx,
 	struct sk_buff *skb;
 	struct nlmsghdr *nlh;
 	struct bcm_cfg80211 *cfg;
-	if (!ndev) {
-		WL_ERR(("ndev is NULL\n"));
+	if (ndev == NULL || ndev->ieee80211_ptr == NULL) {
+		WL_CONS_ONLY(("no device for debug ring id:%d\n", ring_id));
 		return;
 	}
 	kflags = in_atomic() ? GFP_ATOMIC : GFP_KERNEL;
@@ -7894,12 +8939,12 @@ static void wl_cfgvendor_dbg_ring_send_evt(void *ctx,
 
 	/* If wifi hal is not start, don't send event to wifi hal */
 	if (!cfg->hal_started) {
-		WL_ERR(("Hal is not started\n"));
+		WL_CONS_ONLY(("Hal is not started id:%d\n", ring_id));
 		return;
 	}
 	/* Alloc the SKB for vendor_event */
 #if (defined(CONFIG_ARCH_MSM) && defined(SUPPORT_WDEV_CFG80211_VENDOR_EVENT_ALLOC)) || \
-		LINUX_VERSION_CODE >= KERNEL_VERSION(4, 1, 0)
+	LINUX_VERSION_CODE >= KERNEL_VERSION(4, 1, 0)
 	skb = cfg80211_vendor_event_alloc(wiphy, NULL, len + CFG80211_VENDOR_EVT_SKB_SZ,
 			GOOGLE_DEBUG_RING_EVENT, kflags);
 #else
@@ -7908,7 +8953,7 @@ static void wl_cfgvendor_dbg_ring_send_evt(void *ctx,
 #endif /* (defined(CONFIG_ARCH_MSM) && defined(SUPPORT_WDEV_CFG80211_VENDOR_EVENT_ALLOC)) || */
 		/* LINUX_VERSION_CODE >= KERNEL_VERSION(4, 1, 0) */
 	if (!skb) {
-		WL_ERR(("skb alloc failed"));
+		WL_CONS_ONLY(("skb alloc failed id:%d\n", ring_id));
 		return;
 	}
 	/* Set halpid for sending unicast event to wifi hal */
@@ -7921,6 +8966,7 @@ static void wl_cfgvendor_dbg_ring_send_evt(void *ctx,
 #endif /* DEBUGABILITY */
 
 #ifdef DHD_LOG_DUMP
+#ifndef DHD_HAL_RING_DUMP
 #ifdef DHD_SSSR_DUMP
 #define DUMP_SSSR_DUMP_MAX_COUNT	8
 static int wl_cfgvendor_nla_put_sssr_dump_data(struct sk_buff *skb,
@@ -8040,14 +9086,19 @@ static int wl_cfgvendor_nla_put_sssr_dump_data(struct sk_buff *skb,
 	return BCME_OK;
 }
 #endif /* DHD_SSSR_DUMP */
+#endif /* DHD_HAL_RING_DUMP */
 
 static int wl_cfgvendor_nla_put_debug_dump_data(struct sk_buff *skb,
 		struct net_device *ndev)
 {
 	int ret = BCME_OK;
 	uint32 len = 0;
-	char dump_path[128];
+#ifdef EWP_DACS
+	int i = 0, j = 0;
+#endif
 
+#ifndef DHD_HAL_RING_DUMP
+	char dump_path[128];
 	ret = dhd_get_debug_dump_file_name(ndev, NULL, dump_path, sizeof(dump_path));
 	if (ret < 0) {
 		WL_ERR(("%s: Failed to get debug dump filename\n", __FUNCTION__));
@@ -8060,6 +9111,7 @@ static int wl_cfgvendor_nla_put_debug_dump_data(struct sk_buff *skb,
 	}
 	WL_ERR(("debug_dump path = %s%s\n", dump_path, FILE_NAME_HAL_TAG));
 	wl_print_verinfo(wl_get_cfg(ndev));
+#endif /* DHD_HAL_RING_DUMP */
 
 	len = dhd_get_time_str_len();
 	if (len) {
@@ -8070,6 +9122,7 @@ static int wl_cfgvendor_nla_put_debug_dump_data(struct sk_buff *skb,
 		}
 	}
 
+#ifndef DHD_HAL_RING_DUMP
 	len = dhd_get_dld_len(DLD_BUF_TYPE_GENERAL);
 	if (len) {
 		ret = nla_put_u32(skb, DUMP_LEN_ATTR_GENERAL_LOG, len);
@@ -8078,6 +9131,7 @@ static int wl_cfgvendor_nla_put_debug_dump_data(struct sk_buff *skb,
 			goto exit;
 		}
 	}
+#endif /* DHD_HAL_RING_DUMP */
 #ifdef EWP_ECNTRS_LOGGING
 	len = dhd_get_ecntrs_len(ndev, NULL);
 	if (len) {
@@ -8088,6 +9142,22 @@ static int wl_cfgvendor_nla_put_debug_dump_data(struct sk_buff *skb,
 		}
 	}
 #endif /* EWP_ECNTRS_LOGGING */
+
+#ifdef EWP_DACS
+	j = DUMP_LEN_ATTR_EWP_HW_INIT_LOG;
+	for (i = LOG_DUMP_SECTION_EWP_HW_INIT_LOG; i <= LOG_DUMP_SECTION_EWP_HW_REG_DUMP; ++i) {
+		len = dhd_get_init_dump_len(ndev, NULL, i);
+		if (len) {
+			ret = nla_put_u32(skb, j, len);
+			if (unlikely(ret)) {
+				WL_ERR(("Failed to nla put init dump length, ret=%d\n", ret));
+				goto exit;
+			}
+		}
+		++j;
+	}
+#endif /* EWP_DACS */
+#ifndef DHD_HAL_RING_DUMP
 	len = dhd_get_dld_len(DLD_BUF_TYPE_SPECIAL);
 	if (len) {
 		ret = nla_put_u32(skb, DUMP_LEN_ATTR_SPECIAL_LOG, len);
@@ -8096,6 +9166,7 @@ static int wl_cfgvendor_nla_put_debug_dump_data(struct sk_buff *skb,
 			goto exit;
 		}
 	}
+#endif /* DHD_HAL_RING_DUMP */
 	len = dhd_get_dhd_dump_len(ndev, NULL);
 	if (len) {
 		ret = nla_put_u32(skb, DUMP_LEN_ATTR_DHD_DUMP, len);
@@ -8126,7 +9197,7 @@ static int wl_cfgvendor_nla_put_debug_dump_data(struct sk_buff *skb,
 		}
 	}
 #endif
-
+#ifndef DHD_HAL_RING_DUMP
 	len = dhd_get_dld_len(DLD_BUF_TYPE_PRESERVE);
 	if (len) {
 		ret = nla_put_u32(skb, DUMP_LEN_ATTR_PRESERVE_LOG, len);
@@ -8135,7 +9206,7 @@ static int wl_cfgvendor_nla_put_debug_dump_data(struct sk_buff *skb,
 			goto exit;
 		}
 	}
-
+#endif /* DHD_HAL_RING_DUMP */
 	len = dhd_get_cookie_log_len(ndev, NULL);
 	if (len) {
 		ret = nla_put_u32(skb, DUMP_LEN_ATTR_COOKIE, len);
@@ -8174,10 +9245,30 @@ static int wl_cfgvendor_nla_put_debug_dump_data(struct sk_buff *skb,
 		}
 	}
 #endif /* EWP_RTT_LOGGING */
+#ifdef  DHD_MAP_PKTID_LOGGING
+	len = dhd_get_pktid_map_logging_len(ndev, NULL, TRUE);
+	if (len) {
+	ret = nla_put_u32(skb, DUMP_LEN_ATTR_PKTID_MAP_LOG, len);
+		if (unlikely(ret)) {
+			WL_ERR(("Failed to nla put pktid log length, ret=%d", ret));
+			goto exit;
+		}
+	}
+
+	len = dhd_get_pktid_map_logging_len(ndev, NULL, FALSE);
+	if (len) {
+		ret = nla_put_u32(skb, DUMP_LEN_ATTR_PKTID_UNMAP_LOG, len);
+		if (unlikely(ret)) {
+			WL_ERR(("Failed to nla put pktid log length, ret=%d", ret));
+			goto exit;
+		}
+	}
+#endif /* DHD_MAP_PKTID_LOGGING */
 exit:
 	return ret;
 }
-#ifdef DNGL_AXI_ERROR_LOGGING
+
+#if defined(DNGL_AXI_ERROR_LOGGING) && defined(REPORT_AXI_ERROR)
 static void wl_cfgvendor_nla_put_axi_error_data(struct sk_buff *skb,
 		struct net_device *ndev)
 {
@@ -8200,7 +9291,8 @@ static void wl_cfgvendor_nla_put_axi_error_data(struct sk_buff *skb,
 		return;
 	}
 }
-#endif /* DNGL_AXI_ERROR_LOGGING */
+#endif /* DNGL_AXI_ERROR_LOGGING && REPORT_AXI_ERROR */
+
 #ifdef DHD_PKT_LOGGING
 static int wl_cfgvendor_nla_put_pktlogdump_data(struct sk_buff *skb,
 		struct net_device *ndev, bool pktlogdbg)
@@ -8209,8 +9301,13 @@ static int wl_cfgvendor_nla_put_pktlogdump_data(struct sk_buff *skb,
 	char pktlogdump_path[MEMDUMP_PATH_LEN];
 	uint32 pktlog_dumpsize = dhd_os_get_pktlog_dump_size(ndev);
 	if (pktlog_dumpsize == 0) {
+#ifdef DHD_PKT_LOGGING_DBGRING
+		/* dump size can be zero. do not fail dump process */
+		return BCME_OK;
+#else
 		WL_ERR(("Failed to calcuate pktlog len\n"));
 		return BCME_ERROR;
+#endif /* DHD_PKT_LOGGING_DBGRING */
 	}
 
 	dhd_os_get_pktlogdump_filename(ndev, pktlogdump_path, MEMDUMP_PATH_LEN);
@@ -8242,18 +9339,62 @@ static int wl_cfgvendor_nla_put_pktlogdump_data(struct sk_buff *skb,
 }
 #endif /* DHD_PKT_LOGGING */
 
-static int wl_cfgvendor_nla_put_memdump_data(struct sk_buff *skb,
-		struct net_device *ndev, const uint32 fw_len)
+#ifndef DHD_HAL_RING_DUMP
+/* There is no appropriate ringbuffer to push etbdump data in google build.
+ * Disable it until negotiated with Google and the etb data is required.
+ */
+#ifdef DHD_SDTC_ETB_DUMP
+static int wl_cfgvendor_nla_put_sdtc_etb_dump_data(struct sk_buff *skb, struct net_device *ndev)
 {
+	dhd_pub_t *dhdp = wl_cfg80211_get_dhdp(ndev);
 	char memdump_path[MEMDUMP_PATH_LEN];
 	int ret = BCME_OK;
 
+	if (!dhdp->sdtc_etb_inited) {
+		WL_ERR(("sdtc not inited, hence donot collect SDTC dump through HAL\n"));
+		goto exit;
+	}
+	if (dhdp->sdtc_etb_dump_len <= sizeof(etb_info_t)) {
+		WL_ERR(("ETB is of zero size. Hence donot collect SDTC ETB\n"));
+		goto exit;
+	}
+	dhd_get_memdump_filename(ndev, memdump_path, MEMDUMP_PATH_LEN, "sdtc_etb_dump");
+	ret = nla_put_string(skb, DUMP_FILENAME_ATTR_SDTC_ETB_DUMP, memdump_path);
+	if (unlikely(ret)) {
+		WL_ERR(("Failed to nla put stdc etb dump path, ret=%d\n", ret));
+		goto exit;
+	}
+
+	ret = nla_put_u32(skb, DUMP_LEN_ATTR_SDTC_ETB_DUMP, DHD_SDTC_ETB_MEMPOOL_SIZE);
+	if (unlikely(ret)) {
+		WL_ERR(("Failed to nla put stdc etb length, ret=%d\n", ret));
+		goto exit;
+	}
+
+exit:
+	return ret;
+}
+#else
+static int wl_cfgvendor_nla_put_sdtc_etb_dump_data(struct sk_buff *skb, struct net_device *ndev)
+{
+	return BCME_OK;
+}
+#endif /* DHD_SDTC_ETB_DUMP */
+#endif /* DHD_HAL_RING_DUMP */
+
+static int wl_cfgvendor_nla_put_memdump_data(struct sk_buff *skb,
+		struct net_device *ndev, const uint32 fw_len)
+{
+	int ret = BCME_OK;
+#ifndef DHD_HAL_RING_DUMP
+	char memdump_path[MEMDUMP_PATH_LEN];
 	dhd_get_memdump_filename(ndev, memdump_path, MEMDUMP_PATH_LEN, "mem_dump");
 	ret = nla_put_string(skb, DUMP_FILENAME_ATTR_MEM_DUMP, memdump_path);
 	if (unlikely(ret)) {
 		WL_ERR(("Failed to nla put mem dump path, ret=%d\n", ret));
 		goto exit;
 	}
+#endif /* DHD_HAL_RING_DUMP */
 	ret = nla_put_u32(skb, DUMP_LEN_ATTR_MEMDUMP, fw_len);
 	if (unlikely(ret)) {
 		WL_ERR(("Failed to nla put mem dump length, ret=%d\n", ret));
@@ -8269,15 +9410,23 @@ static int wl_cfgvendor_nla_put_dump_data(dhd_pub_t *dhd_pub, struct sk_buff *sk
 {
 	int ret = BCME_OK;
 
-#ifdef DNGL_AXI_ERROR_LOGGING
+#if defined(DNGL_AXI_ERROR_LOGGING) && defined(REPORT_AXI_ERROR)
 	if (dhd_pub->smmu_fault_occurred) {
 		wl_cfgvendor_nla_put_axi_error_data(skb, ndev);
 	}
-#endif /* DNGL_AXI_ERROR_LOGGING */
+#endif /* DNGL_AXI_ERROR_LOGGING && REPORT_AXI_ERROR */
+#if defined(DHD_FW_COREDUMP)
 	if (dhd_pub->memdump_enabled || (dhd_pub->memdump_type == DUMP_TYPE_BY_SYSDUMP)) {
+#endif /* DHD_FW_COREDUMP */
 		if (((ret = wl_cfgvendor_nla_put_debug_dump_data(skb, ndev)) < 0) ||
-			((ret = wl_cfgvendor_nla_put_memdump_data(skb, ndev, fw_len)) < 0) ||
-			((ret = wl_cfgvendor_nla_put_sssr_dump_data(skb, ndev)) < 0)) {
+			((ret = wl_cfgvendor_nla_put_memdump_data(skb, ndev, fw_len)) < 0)) {
+			goto done;
+		}
+#ifndef DHD_HAL_RING_DUMP
+		if ((ret = wl_cfgvendor_nla_put_sssr_dump_data(skb, ndev)) < 0) {
+			goto done;
+		}
+		if ((ret = wl_cfgvendor_nla_put_sdtc_etb_dump_data(skb, ndev)) < 0) {
 			goto done;
 		}
 #ifdef DHD_PKT_LOGGING
@@ -8285,7 +9434,10 @@ static int wl_cfgvendor_nla_put_dump_data(dhd_pub_t *dhd_pub, struct sk_buff *sk
 			goto done;
 		}
 #endif /* DHD_PKT_LOGGING */
+#endif /* DHD_HAL_RING_DUMP */
+#if defined(DHD_FW_COREDUMP)
 	}
+#endif /* DHD_FW_COREDUMP */
 done:
 	return ret;
 }
@@ -8310,7 +9462,7 @@ static void wl_cfgvendor_dbg_send_file_dump_evt(void *ctx, const void *data,
 	wiphy = ndev->ieee80211_ptr->wiphy;
 	/* Alloc the SKB for vendor_event */
 #if (defined(CONFIG_ARCH_MSM) && defined(SUPPORT_WDEV_CFG80211_VENDOR_EVENT_ALLOC)) || \
-		LINUX_VERSION_CODE >= KERNEL_VERSION(4, 1, 0)
+	LINUX_VERSION_CODE >= KERNEL_VERSION(4, 1, 0)
 	skb = cfg80211_vendor_event_alloc(wiphy, NULL, len + CFG80211_VENDOR_EVT_SKB_SZ,
 			GOOGLE_FILE_DUMP_EVENT, kflags);
 #else
@@ -8443,15 +9595,15 @@ static int __wl_cfgvendor_dbg_get_pkt_fates(struct wiphy *wiphy,
 				user_buf = (void __user *)(unsigned long) nla_get_u64(iter);
 				break;
 			default:
-				WL_ERR(("%s: no such attribute %d\n", __FUNCTION__, type));
+				WL_ERR(("no such attribute %d\n", type));
 				ret = -EINVAL;
 				goto exit;
 		}
 	}
 
 	if (!req_count || !user_buf) {
-		WL_ERR(("%s: invalid request, user_buf=%p, req_count=%u\n",
-			__FUNCTION__, user_buf, req_count));
+		WL_ERR(("invalid request, user_buf=%p, req_count=%u\n",
+			user_buf, req_count));
 		ret = -EINVAL;
 		goto exit;
 	}
@@ -8536,6 +9688,13 @@ static int wl_cfgvendor_start_mkeep_alive(struct wiphy *wiphy, struct wireless_d
 	uint32 period_msec = 0;
 	const struct nlattr *iter;
 	struct bcm_cfg80211 *cfg = wiphy_priv(wiphy);
+	struct net_device *ndev = wdev_to_ndev(wdev);
+
+	/* Limit keep alive only on primary interface */
+	if (!IS_INET_LINK_NDEV(cfg, ndev)) {
+		WL_ERR(("keep alive query requested on non primary interface\n"));
+		return BCME_UNSUPPORTED;
+	}
 
 	nla_for_each_attr(iter, data, len, rem) {
 		type = nla_type(iter);
@@ -8600,11 +9759,16 @@ static int wl_cfgvendor_start_mkeep_alive(struct wiphy *wiphy, struct wireless_d
 		goto exit;
 	}
 
-	ret = wl_cfg80211_start_mkeep_alive(cfg, mkeep_alive_id,
+	ret = wl_cfg80211_start_mkeep_alive(ndev, cfg, mkeep_alive_id,
 		ether_type, ip_pkt, ip_pkt_len, src_mac, dst_mac, period_msec);
 	if (ret < 0) {
 		WL_ERR(("start_mkeep_alive is failed ret: %d\n", ret));
 	}
+#ifdef DHD_CLEANUP_KEEP_ALIVE
+	else if (ret == BCME_OK) {
+		setbit(&cfg->mkeep_alive_avail, mkeep_alive_id);
+	}
+#endif /* DHD_CLEANUP_KEEP_ALIVE */
 
 exit:
 	if (ip_pkt) {
@@ -8621,6 +9785,13 @@ static int wl_cfgvendor_stop_mkeep_alive(struct wiphy *wiphy, struct wireless_de
 	uint8 mkeep_alive_id = 0;
 	const struct nlattr *iter;
 	struct bcm_cfg80211 *cfg = wiphy_priv(wiphy);
+	struct net_device *ndev = wdev_to_ndev(wdev);
+
+	/* Limit keep alive only on primary interface */
+	if (!IS_INET_LINK_NDEV(cfg, ndev)) {
+		WL_ERR(("keep alive query requested on non primary interface\n"));
+		return BCME_UNSUPPORTED;
+	}
 
 	nla_for_each_attr(iter, data, len, rem) {
 		type = nla_type(iter);
@@ -8635,16 +9806,21 @@ static int wl_cfgvendor_stop_mkeep_alive(struct wiphy *wiphy, struct wireless_de
 		}
 	}
 
-	ret = wl_cfg80211_stop_mkeep_alive(cfg, mkeep_alive_id);
+	ret = wl_cfg80211_stop_mkeep_alive(ndev, cfg, mkeep_alive_id);
 	if (ret < 0) {
 		WL_ERR(("stop_mkeep_alive is failed ret: %d\n", ret));
 	}
+#ifdef DHD_CLEANUP_KEEP_ALIVE
+	else if (ret == BCME_OK) {
+		clrbit(&cfg->mkeep_alive_avail, mkeep_alive_id);
+	}
+#endif /* DHD_CLEANUP_KEEP_ALIVE */
 
 	return ret;
 }
 #endif /* KEEP_ALIVE */
 
-#if defined(PKT_FILTER_SUPPORT) && defined(APF)
+#if defined(APF)
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 3, 0))
 const struct nla_policy apf_atrribute_policy[APF_ATTRIBUTE_MAX] = {
 	[APF_ATTRIBUTE_VERSION] = { .type = NLA_U32 },
@@ -8667,7 +9843,7 @@ wl_cfgvendor_apf_get_capabilities(struct wiphy *wiphy,
 	ret = dhd_dev_apf_get_version(ndev, &ver);
 	if (unlikely(ret)) {
 		WL_ERR(("APF get version failed, ret=%d\n", ret));
-		return ret;
+		goto fail;
 	}
 
 	/* APF memory size limit */
@@ -8675,7 +9851,7 @@ wl_cfgvendor_apf_get_capabilities(struct wiphy *wiphy,
 	ret = dhd_dev_apf_get_max_len(ndev, &max_len);
 	if (unlikely(ret)) {
 		WL_ERR(("APF get maximum length failed, ret=%d\n", ret));
-		return ret;
+		goto fail;
 	}
 
 	mem_needed = VENDOR_REPLY_OVERHEAD + (ATTRIBUTE_U32_LEN * 2);
@@ -8683,28 +9859,34 @@ wl_cfgvendor_apf_get_capabilities(struct wiphy *wiphy,
 	skb = cfg80211_vendor_cmd_alloc_reply_skb(wiphy, mem_needed);
 	if (unlikely(!skb)) {
 		WL_ERR(("%s: can't allocate %d bytes\n", __FUNCTION__, mem_needed));
-		return -ENOMEM;
+		ret = -ENOMEM;
+		goto fail;
 	}
 
 	ret = nla_put_u32(skb, APF_ATTRIBUTE_VERSION, ver);
 	if (ret < 0) {
 		WL_ERR(("Failed to put APF_ATTRIBUTE_VERSION, ret:%d\n", ret));
-		goto exit;
+		goto fail;
 	}
 	ret = nla_put_u32(skb, APF_ATTRIBUTE_MAX_LEN, max_len);
 	if (ret < 0) {
 		WL_ERR(("Failed to put APF_ATTRIBUTE_MAX_LEN, ret:%d\n", ret));
-		goto exit;
+		goto fail;
 	}
 
 	ret = cfg80211_vendor_cmd_reply(skb);
 	if (unlikely(ret)) {
 		WL_ERR(("vendor command reply failed, ret=%d\n", ret));
 	}
+
 	return ret;
-exit:
-	/* Free skb memory */
-	kfree_skb(skb);
+
+fail:
+	if (skb) {
+		/* Free skb memory */
+		kfree_skb(skb);
+	}
+
 	return ret;
 }
 
@@ -8716,7 +9898,7 @@ wl_cfgvendor_apf_set_filter(struct wiphy *wiphy,
 	const struct nlattr *iter;
 	u8 *program = NULL;
 	u32 program_len = 0;
-	int ret, tmp, type;
+	int ret, tmp, type, max_len;
 	struct bcm_cfg80211 *cfg = wiphy_priv(wiphy);
 
 	if (len <= 0) {
@@ -8724,6 +9906,15 @@ wl_cfgvendor_apf_set_filter(struct wiphy *wiphy,
 		ret = -EINVAL;
 		goto exit;
 	}
+
+	/* APF memory size limit */
+	max_len = 0;
+	ret = dhd_dev_apf_get_max_len(ndev, &max_len);
+	if (unlikely(ret)) {
+		WL_ERR(("APF get maximum length failed, ret=%d\n", ret));
+		return ret;
+	}
+
 	nla_for_each_attr(iter, data, len, tmp) {
 		type = nla_type(iter);
 		switch (type) {
@@ -8738,7 +9929,7 @@ wl_cfgvendor_apf_set_filter(struct wiphy *wiphy,
 					goto exit;
 				}
 
-				if (program_len > WL_APF_PROGRAM_MAX_SIZE) {
+				if (program_len > max_len) {
 					WL_ERR(("program len is more than expected len\n"));
 					ret = -EINVAL;
 					goto exit;
@@ -8790,7 +9981,89 @@ exit:
 	}
 	return ret;
 }
-#endif /* PKT_FILTER_SUPPORT && APF */
+
+static int
+wl_cfgvendor_apf_read_filter_data(struct wiphy *wiphy,
+	struct wireless_dev *wdev, const void *data, int len)
+{
+	struct net_device *ndev = wdev_to_ndev(wdev);
+	struct bcm_cfg80211 *cfg = wiphy_priv(wiphy);
+	struct sk_buff *skb = NULL;
+	uint8 *buf = NULL;
+	int ret, buf_len, max_len, mem_needed;
+
+	/* Get APF memory size limit */
+	max_len = 0;
+	ret = dhd_dev_apf_get_max_len(ndev, &max_len);
+	if (unlikely(ret)) {
+		WL_ERR(("APF get maximum length failed, ret=%d\n", ret));
+		goto fail;
+	}
+
+	/* As the IOVar returns the data in 'wl_apf_program_t' structure format, account for this
+	 * also along with the queried APF buffer size for the IOvar buffer.
+	 */
+	buf_len = WL_APF_PROGRAM_FIXED_LEN + max_len;
+
+	/* Get APF filter data */
+	buf = MALLOCZ(cfg->osh, buf_len);
+	if (unlikely(!buf)) {
+		WL_ERR(("%s: can't allocate %d bytes\n", __FUNCTION__, buf_len));
+		ret = -ENOMEM;
+		goto fail;
+	}
+	ret = dhd_dev_apf_read_filter_data(ndev, buf, buf_len);
+	if (unlikely(ret)) {
+		WL_ERR(("APF get filter data failed, ret=%d\n", ret));
+		goto fail;
+	}
+
+	mem_needed = VENDOR_REPLY_OVERHEAD + ATTRIBUTE_U32_LEN + max_len;
+
+	skb = cfg80211_vendor_cmd_alloc_reply_skb(wiphy, mem_needed);
+	if (unlikely(!skb)) {
+		WL_ERR(("%s: can't allocate %d bytes\n", __FUNCTION__, mem_needed));
+		ret = -ENOMEM;
+		goto fail;
+	}
+
+	ret = nla_put_u32(skb, APF_ATTRIBUTE_PROGRAM_LEN, max_len);
+	if (ret < 0) {
+		WL_ERR(("Failed to put APF_ATTRIBUTE_MAX_LEN, ret=%d\n", ret));
+		goto fail;
+	}
+
+	/* Skip the initial fixed portion of 'wl_apf_program_t' and copy only the data portion */
+	ret = nla_put(skb, APF_ATTRIBUTE_PROGRAM, max_len, (buf + WL_APF_PROGRAM_FIXED_LEN));
+	if (ret < 0) {
+		WL_ERR(("Failed to put APF_ATTRIBUTE_MAX_LEN, ret=%d\n", ret));
+		goto fail;
+	}
+
+	ret = cfg80211_vendor_cmd_reply(skb);
+	if (unlikely(ret)) {
+		WL_ERR(("vendor command reply failed, ret=%d\n", ret));
+	}
+
+	if (buf) {
+		MFREE(cfg->osh, buf, buf_len);
+	}
+
+	return ret;
+
+fail:
+	if (buf) {
+		MFREE(cfg->osh, buf, buf_len);
+	}
+
+	if (skb) {
+		/* Free skb memory */
+		kfree_skb(skb);
+	}
+
+	return ret;
+}
+#endif /* APF */
 
 #ifdef NDO_CONFIG_SUPPORT
 static int wl_cfgvendor_configure_nd_offload(struct wiphy *wiphy,
@@ -8834,7 +10107,6 @@ static int wl_cfgvendor_set_pmk(struct wiphy *wiphy,
 	int rem, type;
 	struct net_device *ndev = wdev_to_ndev(wdev);
 	struct bcm_cfg80211 *cfg = wiphy_priv(wiphy);
-	struct wl_security *sec;
 
 	bzero(&pmk, sizeof(pmk));
 	nla_for_each_attr(iter, data, len, rem) {
@@ -8857,17 +10129,7 @@ static int wl_cfgvendor_set_pmk(struct wiphy *wiphy,
 				goto exit;
 		}
 	}
-
-	sec = wl_read_prof(cfg, ndev, WL_PROF_SEC);
-	if ((sec->wpa_auth == WLAN_AKM_SUITE_8021X) ||
-		(sec->wpa_auth == WL_AKM_SUITE_SHA256_1X)) {
-		ret = wldev_iovar_setbuf(ndev, "okc_info_pmk", pmk.key, pmk.key_len, cfg->ioctl_buf,
-			WLC_IOCTL_SMLEN,  &cfg->ioctl_buf_sync);
-		if (ret) {
-			/* could fail in case that 'okc' is not supported */
-			WL_INFORM_MEM(("okc_info_pmk failed, err=%d (ignore)\n", ret));
-		}
-	}
+	wl_cfg80211_set_okc_pmkinfo(cfg, ndev, pmk, TRUE);
 
 	ret = wldev_ioctl_set(ndev, WLC_SET_WSEC_PMK, &pmk, sizeof(pmk));
 	WL_INFORM_MEM(("IOVAR set_pmk ret:%d", ret));
@@ -8972,75 +10234,1894 @@ exit:
 }
 #endif /* WL_P2P_RAND */
 
-#ifdef WL_SAR_TX_POWER
+#ifdef WL_THERMAL_MITIGATION
 static int
-wl_cfgvendor_tx_power_scenario(struct wiphy *wiphy,
+wl_cfgvendor_thermal_mitigation(struct wiphy *wiphy,
 	struct wireless_dev *wdev, const void  *data, int len)
 {
 	int err = BCME_ERROR, rem, type;
+	wifi_thermal_mode set_thermal_mode = WIFI_MITIGATION_NONE;
 	struct bcm_cfg80211 *cfg = wl_get_cfg(wdev_to_ndev(wdev));
 	const struct nlattr *iter;
-	wifi_power_scenario sar_tx_power_val = WIFI_POWER_SCENARIO_INVALID;
-	wl_sar_modes_t wifi_tx_power_mode = 0;
+	u32 duty_cycle = 100;
+	/* delay_win
+	 * Deadline (in milliseconds) to complete this request, value 0 implies apply
+	 * immediately. Deadline is basically a relaxed limit and allows
+	 * vendors to apply the mitigation within the window (if it cannot
+	 * apply immediately)
+	 * current chip can apply immediately, so will not use this value currently
+	 */
+	u32 delay_win = 0;
 
 	nla_for_each_attr(iter, data, len, rem) {
 		type = nla_type(iter);
-		if (type == ANDR_WIFI_ATTRIBUTE_TX_POWER_SCENARIO) {
-			sar_tx_power_val = nla_get_s8(iter);
+		if (type == ANDR_WIFI_ATTRIBUTE_THERMAL_MITIGATION) {
+			set_thermal_mode = nla_get_u32(iter);
+			WL_INFORM_MEM(("got thermal mode = %d\n", set_thermal_mode));
+		} else if (type == ANDR_WIFI_ATTRIBUTE_THERMAL_COMPLETION_WINDOW) {
+			delay_win = nla_get_u32(iter);
+			WL_INFORM_MEM(("got delay_win = %d\n", delay_win));
 		} else {
 			WL_ERR(("Unknown attr type: %d\n", type));
 			err = -EINVAL;
 			goto exit;
 		}
 	}
-	/* If sar tx power is already configured, no need to set it again */
-	if (cfg->wifi_tx_power_mode == sar_tx_power_val) {
-		WL_INFORM_MEM(("%s, tx_power_mode %d is already set\n",
-			__FUNCTION__, sar_tx_power_val));
+	/* If thermal mode is already configured, no need to set it again */
+	if (cfg->thermal_mode == set_thermal_mode) {
+		WL_INFORM_MEM(("%s, thermal_mode %d is already set\n",
+			__FUNCTION__, set_thermal_mode));
 		err = BCME_OK;
 		goto exit;
 	}
 
-	/* Map Android TX power modes to Brcm power mode */
-	switch (sar_tx_power_val) {
-		case WIFI_POWER_SCENARIO_VOICE_CALL:
-		case WIFI_POWER_SCENARIO_DEFAULT:
-			wifi_tx_power_mode = HEAD_SAR_BACKOFF_ENABLE;
+	/* Map Android TX power modes to internal power mode */
+	switch (set_thermal_mode) {
+		case WIFI_MITIGATION_LIGHT:
+			duty_cycle = DUTY_CYCLE_LIGHT;
 			break;
-		case WIFI_POWER_SCENARIO_ON_HEAD_CELL_OFF:
-			wifi_tx_power_mode = GRIP_SAR_BACKOFF_DISABLE;
+		case WIFI_MITIGATION_MODERATE:
+			duty_cycle = DUTY_CYCLE_MODERATE;
 			break;
-		case WIFI_POWER_SCENARIO_ON_BODY_CELL_OFF:
-			wifi_tx_power_mode = GRIP_SAR_BACKOFF_ENABLE;
+		case WIFI_MITIGATION_SEVERE:
+			duty_cycle = DUTY_CYCLE_SEVERE;
 			break;
-		case WIFI_POWER_SCENARIO_ON_BODY_BT:
-			wifi_tx_power_mode = NR_mmWave_SAR_BACKOFF_ENABLE;
+		case WIFI_MITIGATION_CRITICAL:
+			duty_cycle = DUTY_CYCLE_CRITICAL;
 			break;
-		case WIFI_POWER_SCENARIO_ON_HEAD_CELL_ON:
-			wifi_tx_power_mode = NR_Sub6_SAR_BACKOFF_DISABLE;
+		case WIFI_MITIGATION_EMERGENCY:
+			duty_cycle = DUTY_CYCLE_EMERGENCY;
 			break;
-		case WIFI_POWER_SCENARIO_ON_BODY_CELL_ON:
-			wifi_tx_power_mode = NR_Sub6_SAR_BACKOFF_ENABLE;
-			break;
+		case WIFI_MITIGATION_NONE:
+		/* intentional fall-through */
 		default:
-			WL_ERR(("invalid wifi tx power scenario = %d\n",
-				sar_tx_power_val));
+			duty_cycle = DUTY_CYCLE_NONE;
+			break;
+	}
+	WL_DBG(("%s, duty_cycle %d thermal_mode %d\n", __FUNCTION__,
+			duty_cycle, set_thermal_mode));
+	err = wldev_iovar_setint(wdev_to_ndev(wdev), "dutycycle_thermal", duty_cycle);
+	if (unlikely(err)) {
+		WL_ERR(("%s: Failed to set dutycycle - error (%d)\n", __FUNCTION__, err));
+		goto exit;
+	}
+	/* Cache the thermal mode sent by the hal */
+	cfg->thermal_mode = set_thermal_mode;
+exit:
+	return err;
+}
+#endif /* WL_THERMAL_MITIGATION */
+
+#ifdef WL_SAR_TX_POWER
+static int
+wl_cfgvendor_tx_power_scenario(struct wiphy *wiphy,
+	struct wireless_dev *wdev, const void  *data, int len)
+{
+	int err = BCME_ERROR, rem, type;
+	int8 wifi_tx_power_mode = WIFI_POWER_SCENARIO_INVALID;
+	struct bcm_cfg80211 *cfg = wl_get_cfg(wdev_to_ndev(wdev));
+	const struct nlattr *iter;
+	sar_advance_modes sar_tx_power_val = SAR_DISABLE;
+	int airplane_mode = 0;
+#if defined(WL_SAR_TX_POWER_CONFIG)
+	int i = 0;
+	bool found = FALSE;
+#endif /* WL_SAR_TX_POWER_CONFIG */
+
+	nla_for_each_attr(iter, data, len, rem) {
+		type = nla_type(iter);
+		if (type == ANDR_WIFI_ATTRIBUTE_TX_POWER_SCENARIO) {
+			wifi_tx_power_mode = nla_get_s8(iter);
+		} else {
+			WL_ERR(("SAR: Unknown attr type: %d\n", type));
 			err = -EINVAL;
 			goto exit;
+		}
+	}
+	/* If sar tx power is already configured, no need to set it again */
+	if (cfg->wifi_tx_power_mode == wifi_tx_power_mode) {
+		WL_INFORM_MEM(("SAR: tx_power_mode %d is already set\n",
+			wifi_tx_power_mode));
+		err = BCME_OK;
+		goto exit;
 	}
 
-	WL_DBG(("%s, tx_power_mode %d\n", __FUNCTION__, wifi_tx_power_mode));
-	err = wldev_iovar_setint(wdev_to_ndev(wdev), "sar_enable", wifi_tx_power_mode);
+#if defined(WL_SAR_TX_POWER_CONFIG)
+	for (i = 0; i < cfg->sar_config_info_cnt; i++) {
+		if ((wifi_tx_power_mode != WIFI_POWER_SCENARIO_INVALID) &&
+				(cfg->sar_config_info[i].scenario == wifi_tx_power_mode)) {
+			found = TRUE;
+			sar_tx_power_val = cfg->sar_config_info[i].sar_tx_power_val;
+			airplane_mode = cfg->sar_config_info[i].airplane_mode;
+			WL_DBG(("found scenario with new config\n"));
+			break;
+		}
+	}
+
+	if (!found)
+#endif /* WL_SAR_TX_POWER_CONFIG */
+	{
+		/* Map Android TX power modes to Brcm power mode */
+		switch (wifi_tx_power_mode) {
+			case WIFI_POWER_SCENARIO_VOICE_CALL:
+			case WIFI_POWER_SCENARIO_DEFAULT:
+				/* SAR disabled */
+				sar_tx_power_val = SAR_DISABLE;
+				airplane_mode = 0;
+				break;
+			case WIFI_POWER_SCENARIO_ON_HEAD_CELL_OFF:
+				/* HEAD mode, Airplane */
+				sar_tx_power_val = SAR_HEAD;
+				airplane_mode = 1;
+				break;
+			case WIFI_POWER_SCENARIO_ON_BODY_CELL_OFF:
+				/* GRIP mode, Airplane */
+				sar_tx_power_val = SAR_GRIP;
+				airplane_mode = 1;
+				break;
+			case WIFI_POWER_SCENARIO_ON_BODY_BT:
+				/* BT mode, Airplane */
+				sar_tx_power_val = SAR_BT;
+				airplane_mode = 1;
+				break;
+			case WIFI_POWER_SCENARIO_ON_HEAD_CELL_ON:
+				/* HEAD mode, Normal */
+				sar_tx_power_val = SAR_HEAD;
+				airplane_mode = 0;
+				break;
+			case WIFI_POWER_SCENARIO_ON_BODY_CELL_ON:
+				/* GRIP mode, Normal */
+				sar_tx_power_val = SAR_GRIP;
+				airplane_mode = 0;
+				break;
+			default:
+				WL_ERR(("SAR: invalid wifi tx power scenario = %d\n",
+					sar_tx_power_val));
+				err = -EINVAL;
+				goto exit;
+		}
+	}
+	WL_DBG_MEM(("SAR: sar_mode %d airplane_mode %d\n", sar_tx_power_val, airplane_mode));
+#ifdef SYNA_SAR_CUSTOMER_PARAMETER
+	if (sar_tx_power_val) {
+		struct bcm_cfg80211 *cfg = wiphy_priv(wiphy);
+		dhd_pub_t *dhd = (dhd_pub_t *)(cfg->pub);
+		err = dhd_sar_set_parameter(dhd, sar_tx_power_val);
+		if (unlikely(err)) {
+			WL_ERR(("SAR: Failed to set sar_params - error (%d)\n", err));
+			goto exit;
+		}
+		/* as already set sar_params for sar_enable 1 */
+		sar_tx_power_val = 1;
+	}
+#endif /* SYNA_SAR_CUSTOMER_PARAMETER */
+	err = wldev_iovar_setint(wdev_to_ndev(wdev), "fccpwrlimit2g", airplane_mode);
 	if (unlikely(err)) {
-		WL_ERR(("%s: Failed to set sar_enable - error (%d)\n", __FUNCTION__, err));
+		WL_ERR(("SAR: Failed to set airplane_mode - error (%d)\n", err));
+		goto exit;
+	}
+	err = wldev_iovar_setint(wdev_to_ndev(wdev), "sar_enable", sar_tx_power_val);
+	if (unlikely(err)) {
+		WL_ERR(("SAR: Failed to set sar_enable - error (%d)\n", err));
 		goto exit;
 	}
 	/* Cache the tx power mode sent by the hal */
-	cfg->wifi_tx_power_mode = sar_tx_power_val;
+	cfg->wifi_tx_power_mode = wifi_tx_power_mode;
+	WL_INFORM_MEM(("SAR: tx_power_mode %d SUCCESS\n", wifi_tx_power_mode));
 exit:
 	return err;
 }
 #endif /* WL_SAR_TX_POWER */
+
+#ifdef WL_CUSTOM_MAPPING_OF_DSCP
+#define UNUSED_PRIO	0xffu
+enum andr_user_ac {
+	BEST_EFFORT = 0,
+	BACKGROUND = 1,
+	VIDEO = 2,
+	VOICE = 3
+};
+const uint8 default_dscp_mapping_table[UP_TABLE_MAX] =
+{
+	PRIO_8021D_BE, UNUSED_PRIO, UNUSED_PRIO,   UNUSED_PRIO,		/* 00 ~ 03 */
+	UNUSED_PRIO,   UNUSED_PRIO, UNUSED_PRIO,   UNUSED_PRIO,		/* 04 ~ 07 */
+	PRIO_8021D_BK, UNUSED_PRIO, PRIO_8021D_BE, UNUSED_PRIO,		/* 08 ~ 11 */
+	PRIO_8021D_BE, UNUSED_PRIO, PRIO_8021D_BE, UNUSED_PRIO,		/* 12 ~ 15 */
+	PRIO_8021D_BE, UNUSED_PRIO, PRIO_8021D_EE, UNUSED_PRIO,		/* 16 ~ 19 */
+	PRIO_8021D_EE, UNUSED_PRIO, PRIO_8021D_EE, UNUSED_PRIO,		/* 20 ~ 23 */
+	PRIO_8021D_CL, UNUSED_PRIO, PRIO_8021D_CL, UNUSED_PRIO,		/* 24 ~ 27 */
+	PRIO_8021D_CL, UNUSED_PRIO, PRIO_8021D_CL, UNUSED_PRIO,		/* 28 ~ 31 */
+	PRIO_8021D_CL, UNUSED_PRIO, PRIO_8021D_CL, UNUSED_PRIO,		/* 32 ~ 35 */
+	PRIO_8021D_CL, UNUSED_PRIO, PRIO_8021D_CL, UNUSED_PRIO,		/* 36 ~ 39 */
+	PRIO_8021D_VI, UNUSED_PRIO, UNUSED_PRIO,   UNUSED_PRIO,		/* 40 ~ 43 */
+	PRIO_8021D_VO, UNUSED_PRIO, PRIO_8021D_VO, UNUSED_PRIO,		/* 44 ~ 47 */
+	PRIO_8021D_NC, UNUSED_PRIO, UNUSED_PRIO,   UNUSED_PRIO,		/* 48 ~ 51 */
+	UNUSED_PRIO,   UNUSED_PRIO, UNUSED_PRIO,   UNUSED_PRIO,		/* 52 ~ 55 */
+	PRIO_8021D_NC, UNUSED_PRIO, UNUSED_PRIO,   UNUSED_PRIO,		/* 56 ~ 59 */
+	UNUSED_PRIO,   UNUSED_PRIO, UNUSED_PRIO,   UNUSED_PRIO		/* 60 ~ 63 */
+};
+
+static int
+wl_set_dscp_default_priority(uint8* table)
+{
+	int err = BCME_ERROR;
+
+	err = memcpy_s(table, UP_TABLE_MAX, default_dscp_mapping_table,
+			sizeof(default_dscp_mapping_table));
+	if (unlikely(err)) {
+		WL_ERR(("Fail to set the defalut dscp.\n"));
+	}
+	return err;
+}
+
+static int
+wl_cfgvendor_custom_mapping_of_dscp(struct wiphy *wiphy,
+	struct wireless_dev *wdev, const void  *data, int len)
+{
+	int err = BCME_OK, rem, type;
+	const struct nlattr *iter;
+	uint32 dscp_start = 0;
+	uint32 dscp_end = 0;
+	uint32 access_category = 0;
+	uint32 priority = 0;
+	uint32 dscp;
+	int32 def_dscp_pri;
+	struct bcm_cfg80211 *cfg = wiphy_priv(wiphy);
+	struct net_device *ndev = wdev_to_ndev(wdev);
+	u8 *up_table;
+
+	if (ndev == NULL) {
+		WL_ERR(("Invalid net device, NULL\n"));
+		err = BCME_ERROR;
+		goto exit;
+	}
+
+	up_table = wl_get_up_table_netinfo(cfg, ndev);
+	if (!up_table) {
+		up_table = (uint8 *)MALLOCZ(cfg->osh, UP_TABLE_MAX);
+		if (up_table == NULL) {
+			WL_ERR(("malloc failure for up_table\n"));
+			err = BCME_NOMEM;
+			goto exit;
+		}
+		wl_set_dscp_default_priority(up_table);
+		wl_store_up_table_netinfo(cfg, ndev, up_table);
+		WL_INFORM(("allocate dscp up_table\n"));
+	}
+
+	nla_for_each_attr(iter, data, len, rem) {
+		type = nla_type(iter);
+		if (type == CUSTOM_SETTING_ATTRIBUTE_DSCP_START) {
+			dscp_start = nla_get_u32(iter);
+			WL_INFORM(("got to dscp_stat value [%d]\n", dscp_start));
+			if (dscp_start >= UP_TABLE_MAX) {
+				err = -EINVAL;
+				goto exit;
+			}
+		} else if (type == CUSTOM_SETTING_ATTRIBUTE_DSCP_END) {
+			dscp_end = nla_get_u32(iter);
+			WL_INFORM(("got to dscp_end value [%d]\n", dscp_end));
+			if (dscp_end >= UP_TABLE_MAX) {
+				err = -EINVAL;
+				goto exit;
+			}
+		} else if (type == CUSTOM_SETTING_ATTRIBUTE_ACCESS_CATEGORY) {
+			access_category = nla_get_u32(iter);
+			WL_INFORM(("got to access_category value [%d]\n", access_category));
+			switch (access_category) {
+				case BEST_EFFORT:
+					priority = PRIO_8021D_BE;
+					break;
+				case BACKGROUND:
+					priority = PRIO_8021D_BK;
+					break;
+				case VIDEO:
+					priority = PRIO_8021D_VI;
+					break;
+				case VOICE:
+					priority = PRIO_8021D_VO;
+					break;
+				default:
+					err = -EINVAL;
+					goto exit;
+					break;
+			}
+		} else {
+			WL_ERR(("Unknown attr type: %d\n", type));
+			err = -EINVAL;
+			goto exit;
+		}
+	}
+
+	if (dscp_end < dscp_start) {
+		WL_ERR(("dscp_end is lower than dscp_start.\n"));
+		return -EINVAL;
+	}
+
+	/* Verify to set DSCP of user priority. */
+	for (dscp = dscp_start; dscp <= dscp_end; dscp++) {
+		def_dscp_pri = default_dscp_mapping_table[dscp];
+		if ((def_dscp_pri != 0xff) && (def_dscp_pri != priority)) {
+			err = -EINVAL;
+			WL_ERR(("Request priority is %d from %d to %d.\n",
+				priority, dscp_start, dscp_end));
+			WL_ERR(("But conflict with defalut priority of DSCP %d and priority %d.\n",
+				dscp, def_dscp_pri));
+			goto exit;
+		}
+	}
+
+	/* Set the custom DSCP of user priority. */
+	err = memset_s(up_table + dscp_start, UP_TABLE_MAX - dscp_start, priority,
+			dscp_end - dscp_start + 1);
+
+	if (unlikely(err)) {
+		WL_ERR(("Fail to set table. free table\n"));
+		MFREE(cfg->osh, up_table, UP_TABLE_MAX);
+		wl_store_up_table_netinfo(cfg, ndev, NULL);
+	}
+
+exit:
+	return err;
+
+}
+
+static int
+wl_cfgvendor_custom_mapping_of_dscp_reset(struct wiphy *wiphy,
+	struct wireless_dev *wdev, const void  *data, int len)
+{
+	struct bcm_cfg80211 *cfg = wiphy_priv(wiphy);
+	struct net_device *ndev = wdev_to_ndev(wdev);
+	u8 *up_table;
+
+	if (ndev == NULL) {
+		WL_ERR(("Invalid net device, NULL\n"));
+		return BCME_ERROR;
+	}
+
+	up_table = wl_get_up_table_netinfo(cfg, ndev);
+	if (!up_table) {
+		WL_ERR(("up_table is not ready\n"));
+		return BCME_ERROR;
+	}
+
+	wl_set_dscp_default_priority(up_table);
+
+	return BCME_OK;
+}
+#endif /* WL_CUSTOM_MAPPING_OF_DSCP */
+
+int
+wl_cfgvendor_multista_set_primary_connection(struct wiphy *wiphy,
+	struct wireless_dev *wdev, const void  *data, int len)
+{
+	int err = BCME_OK;
+	struct bcm_cfg80211 *cfg = NULL;
+	struct net_device *dev = NULL;
+
+	if (wdev == NULL) {
+		WL_ERR(("Invalid wireless device, NULL\n"));
+		return -EINVAL;
+	}
+
+	dev = wdev_to_ndev(wdev);
+	if (dev == NULL) {
+		WL_ERR(("Invalid net device, NULL\n"));
+		return -EINVAL;
+	}
+
+	cfg = wl_get_cfg(dev);
+	if (cfg == NULL) {
+		WL_ERR(("Invalid cfg, NULL\n"));
+		return -EINVAL;
+	}
+
+	if (dev != cfg->inet_ndev) {
+		WL_INFORM_MEM(("primary iface changed from (%s) to %s\n",
+			cfg->inet_ndev->name, dev->name));
+		cfg->inet_ndev = dev;
+		wl_cfg80211_handle_primary_ifchange(cfg, cfg->inet_ndev);
+	} else {
+		WL_INFORM_MEM(("primary iface:%s\n", cfg->inet_ndev->name));
+	}
+
+	return err;
+}
+
+static int
+wl_cfgvendor_multista_set_use_case(struct wiphy *wiphy,
+	struct wireless_dev *wdev, const void  *data, int len)
+{
+	int err = BCME_OK;
+	int rem, type;
+	const struct nlattr *iter;
+	wifi_multi_sta_use_case sta_use_case;
+
+	nla_for_each_attr(iter, data, len, rem) {
+		type = nla_type(iter);
+		if (type == MULTISTA_ATTRIBUTE_USE_CASE) {
+			sta_use_case = nla_get_u32(iter);
+			WL_INFORM_MEM(("Multista requested usecase = %d\n", sta_use_case));
+		} else {
+			WL_ERR(("Unknown attr type: %d\n", type));
+			err = -EINVAL;
+			return err;
+		}
+	}
+
+	return err;
+}
+
+#if !defined(WL_TWT) && defined(WL_TWT_HAL_IF)
+static int
+wl_cfgvendor_twt_setup(struct wiphy *wiphy,
+	struct wireless_dev *wdev, const void  *data, int len)
+{
+	wl_twt_config_t val;
+	s32 bw;
+	s32 type, rem_attr;
+	u8 mybuf[WLC_IOCTL_SMLEN] = {0};
+	u8 resp_buf[WLC_IOCTL_SMLEN] = {0};
+	const struct nlattr *iter;
+	uint8 *rem = mybuf;
+	uint16 rem_len = sizeof(mybuf);
+
+	bzero(&val, sizeof(val));
+	val.version = WL_TWT_SETUP_VER;
+	val.length = sizeof(val.version) + sizeof(val.length);
+
+	/* Default values, Override Below */
+	val.desc.flow_flags = 0;
+	val.desc.wake_time_h = 0xFFFFFFFF;
+	val.desc.wake_time_l = 0xFFFFFFFF;
+	val.desc.wake_int_min = 0xFFFFFFFF;
+	val.desc.wake_int_max = 0xFFFFFFFF;
+	val.desc.wake_dur_min = 0xFFFFFFFF;
+	val.desc.wake_dur_max = 0xFFFFFFFF;
+	val.desc.avg_pkt_num  = 0xFFFFFFFF;
+	val.desc.avg_pkt_size = 0xFFFFFFFF;
+
+	nla_for_each_attr(iter, data, len, rem_attr) {
+		type = nla_type(iter);
+		switch (type) {
+			case ANDR_TWT_ATTR_CONFIG_ID:
+				/* Config ID */
+				val.desc.configID = nla_get_u8(iter);
+				break;
+			case ANDR_TWT_ATTR_NEGOTIATION_TYPE:
+				/* negotiation_type */
+				val.desc.negotiation_type  = nla_get_u8(iter);
+				break;
+			case ANDR_TWT_ATTR_TRIGGER_TYPE:
+				/* Trigger Type */
+				if (nla_get_u8(iter) == 1) {
+					val.desc.flow_flags |= WL_TWT_FLOW_FLAG_TRIGGER;
+				}
+				break;
+			case ANDR_TWT_ATTR_WAKE_DURATION:
+				/* Wake Duration */
+				val.desc.wake_dur = nla_get_u32(iter);
+				break;
+			case ANDR_TWT_ATTR_WAKE_INTERVAL:
+				/* Wake interval */
+				val.desc.wake_int = nla_get_u32(iter);
+				break;
+			case ANDR_TWT_ATTR_WAKETIME_OFFSET:
+				/* Wake Time parameter */
+				val.desc.wake_time_h = 0;
+				val.desc.wake_time_l = nla_get_u32(iter);
+				break;
+			case ANDR_TWT_ATTR_WAKE_INTERVAL_MIN:
+				/* Minimum allowed Wake interval */
+				val.desc.wake_int_min = nla_get_u32(iter);
+				break;
+			case ANDR_TWT_ATTR_WAKE_INTERVAL_MAX:
+				/* Max Allowed Wake interval */
+				val.desc.wake_int_max = nla_get_u32(iter);
+				break;
+			case ANDR_TWT_ATTR_WAKE_DURATION_MIN:
+				/* Minimum allowed Wake duration */
+				val.desc.wake_dur_min = nla_get_u32(iter);
+				break;
+			case ANDR_TWT_ATTR_WAKE_DURATION_MAX:
+				/* Maximum allowed Wake duration */
+				val.desc.wake_dur_max = nla_get_u32(iter);
+				break;
+			case ANDR_TWT_ATTR_AVG_PKT_NUM:
+				/* Average number of packets */
+				val.desc.avg_pkt_num  = nla_get_u32(iter);
+				break;
+			case ANDR_TWT_ATTR_AVG_PKT_SIZE:
+				/* Average packets size */
+				val.desc.avg_pkt_size = nla_get_u32(iter);
+				break;
+			default:
+				WL_ERR(("Invalid setup attribute type %d\n", type));
+				break;
+		}
+	}
+
+	bw = bcm_pack_xtlv_entry(&rem, &rem_len, WL_TWT_CMD_CONFIG,
+			sizeof(val), (uint8 *)&val, BCM_XTLV_OPTION_ALIGN32);
+	if (bw != BCME_OK) {
+		goto exit;
+	}
+
+	bw = wldev_iovar_setbuf(wdev_to_ndev(wdev), "twt",
+		mybuf, sizeof(mybuf) - rem_len, resp_buf, WLC_IOCTL_SMLEN, NULL);
+	if (bw < 0) {
+		WL_ERR(("twt config set failed. ret:%d\n", bw));
+	} else {
+		WL_INFORM(("twt config setup succeeded, config ID %d "
+			"Negotiation type %d flow flags %d\n", val.desc.configID,
+			val.desc.negotiation_type, val.desc.flow_flags));
+	}
+
+exit:
+	return bw;
+}
+
+static int
+wl_cfgvendor_twt_teardown(struct wiphy *wiphy,
+	struct wireless_dev *wdev, const void  *data, int len)
+{
+	wl_twt_teardown_t val;
+	s32 bw;
+	s32 type, rem_attr;
+	u8 mybuf[WLC_IOCTL_SMLEN] = {0};
+	u8 res_buf[WLC_IOCTL_SMLEN] = {0};
+	const struct nlattr *iter;
+	uint8 *rem = mybuf;
+	uint16 rem_len = sizeof(mybuf);
+
+	bzero(&val, sizeof(val));
+	val.version = WL_TWT_TEARDOWN_VER;
+	val.length = sizeof(val.version) + sizeof(val.length);
+
+	/* Default values, Override Below */
+	val.teardesc.flow_id = 0xFF;
+	val.teardesc.bid = 0xFF;
+
+	nla_for_each_attr(iter, data, len, rem_attr) {
+		type = nla_type(iter);
+		switch (type) {
+			case ANDR_TWT_ATTR_CONFIG_ID:
+				/* Config ID */
+				val.configID = nla_get_u8(iter);
+				break;
+			case ANDR_TWT_ATTR_NEGOTIATION_TYPE:
+				/* negotiation_type */
+				val.teardesc.negotiation_type  = nla_get_u8(iter);
+				break;
+			case ANDR_TWT_ATTR_ALL_TWT:
+				/* all twt */
+				val.teardesc.alltwt = nla_get_u8(iter);
+				break;
+			default:
+				WL_ERR(("Invalid teardown attribute type %d\n", type));
+			break;
+		}
+	}
+
+	bw = bcm_pack_xtlv_entry(&rem, &rem_len, WL_TWT_CMD_TEARDOWN,
+		sizeof(val), (uint8 *)&val, BCM_XTLV_OPTION_ALIGN32);
+	if (bw != BCME_OK) {
+		goto exit;
+	}
+
+	bw = wldev_iovar_setbuf(wdev_to_ndev(wdev), "twt",
+		mybuf, sizeof(mybuf) - rem_len, res_buf, WLC_IOCTL_SMLEN, NULL);
+	if (bw < 0) {
+		WL_ERR(("twt teardown failed. ret:%d\n", bw));
+	} else {
+		WL_INFORM(("twt teardown succeeded, config ID %d "
+			"Negotiation type %d alltwt %d\n", val.configID,
+			val.teardesc.negotiation_type, val.teardesc.alltwt));
+	}
+
+exit:
+	return bw;
+}
+
+static int
+wl_cfgvendor_twt_info_frame(struct wiphy *wiphy,
+	struct wireless_dev *wdev, const void  *data, int len)
+{
+	wl_twt_info_t val;
+	int bw;
+	s32 type, rem_attr;
+	const struct nlattr *iter;
+	u8 mybuf[WLC_IOCTL_SMLEN] = {0};
+	u8 res_buf[WLC_IOCTL_SMLEN] = {0};
+	uint8 *rem = mybuf;
+	uint16 rem_len = sizeof(mybuf);
+	uint32 val32 = 0;
+
+	bzero(&val, sizeof(val));
+	val.version = WL_TWT_INFO_VER;
+	val.length = sizeof(val.version) + sizeof(val.length);
+
+	/* Default values, Override Below */
+	val.infodesc.flow_id = 0xFF;
+	val.desc.next_twt_h = 0xFFFFFFFF;
+	val.desc.next_twt_l = 0xFFFFFFFF;
+
+	nla_for_each_attr(iter, data, len, rem_attr) {
+		type = nla_type(iter);
+		if (type == ANDR_TWT_ATTR_CONFIG_ID) {
+			/* Config ID */
+			val.configID = nla_get_u8(iter);
+		} else if (type == ANDR_TWT_ATTR_RESUME_TIME) {
+			/* Resume offset */
+			val32 = nla_get_u32(iter);
+			if (!((val32 == 0) || (val32 == -1))) {
+				val.infodesc.next_twt_h = 0;
+				val.infodesc.next_twt_l = val32;
+				val.infodesc.flow_flags |= WL_TWT_INFO_FLAG_RESUME;
+			}
+		} else if (type == ANDR_TWT_ATTR_ALL_TWT) {
+			/* all twt */
+			val32 = (uint32)nla_get_u8(iter);
+			if (val32) {
+				val.infodesc.flow_flags |= WL_TWT_INFO_FLAG_ALL_TWT;
+			}
+		} else {
+			WL_ERR(("Invalid info frame attribute type %d\n", type));
+		}
+	}
+
+	bw = bcm_pack_xtlv_entry(&rem, &rem_len, WL_TWT_CMD_INFO,
+		sizeof(val), (uint8 *)&val, BCM_XTLV_OPTION_ALIGN32);
+	if (bw != BCME_OK) {
+		goto exit;
+	}
+
+	bw = wldev_iovar_setbuf(wdev_to_ndev(wdev), "twt",
+		mybuf, sizeof(mybuf) - rem_len, res_buf, WLC_IOCTL_SMLEN, NULL);
+	if (bw < 0) {
+		WL_ERR(("twt info frame failed. ret:%d\n", bw));
+	} else {
+		WL_INFORM(("twt info frame succeeded, config ID %d\n", val.configID));
+	}
+
+exit:
+	return bw;
+}
+
+static int
+wl_cfgvendor_twt_stats_update_v2(struct wiphy *wiphy, wl_twt_stats_v2_t *stats)
+{
+	u32 i;
+	wl_twt_peer_stats_v2_t *peer_stats;
+	struct sk_buff *skb;
+	int32 mem_needed;
+	int ret = BCME_OK;
+
+	mem_needed = BRCM_TWT_HAL_VENDOR_EVENT_BUF_LEN;
+
+	skb = cfg80211_vendor_cmd_alloc_reply_skb(wiphy, mem_needed);
+	if (unlikely(!skb)) {
+		WL_ERR(("%s: can't allocate %d bytes\n", __FUNCTION__, mem_needed));
+		ret = -ENOMEM;
+		goto fail;
+	}
+
+	ret = nla_put_u32(skb, ANDR_TWT_ATTR_NUM_PEER_STATS, stats->num_stats);
+	if (ret < 0) {
+		WL_ERR(("Failed to put ANDR_TWT_ATTR_DEVICE_CAP, ret:%d\n", ret));
+		goto fail;
+	}
+
+	for (i = 0; i < stats->num_stats; i++) {
+		peer_stats = &stats->peer_stats_list[i];
+
+		WL_INFORM_MEM(("%u %u %u %u %u",
+			peer_stats->eosp_dur_avg, peer_stats->tx_pkts_avg, peer_stats->rx_pkts_avg,
+			peer_stats->tx_pkt_sz_avg, peer_stats->rx_pkt_sz_avg));
+		ret = nla_put_u8(skb, ANDR_TWT_ATTR_CONFIG_ID, peer_stats->configID);
+		if (ret < 0) {
+			WL_ERR(("Failed to put ANDR_TWT_ATTR_CONFIG_ID, ret:%d\n", ret));
+			goto fail;
+		}
+		ret = nla_put_u32(skb, ANDR_TWT_ATTR_AVG_PKT_NUM_TX, peer_stats->tx_pkts_avg);
+		if (ret < 0) {
+			WL_ERR(("Failed to put ANDR_TWT_ATTR_AVG_PKT_NUM_TX, ret:%d\n", ret));
+			goto fail;
+		}
+		ret = nla_put_u32(skb, ANDR_TWT_ATTR_AVG_PKT_SIZE_TX, peer_stats->tx_pkt_sz_avg);
+		if (ret < 0) {
+			WL_ERR(("Failed to put ANDR_TWT_ATTR_AVG_PKT_SIZE_TX, ret:%d\n", ret));
+			goto fail;
+		}
+		ret = nla_put_u32(skb, ANDR_TWT_ATTR_AVG_PKT_NUM_RX, peer_stats->rx_pkts_avg);
+		if (ret < 0) {
+			WL_ERR(("Failed to put ANDR_TWT_ATTR_AVG_PKT_NUM_RX, ret:%d\n", ret));
+			goto fail;
+		}
+		ret = nla_put_u32(skb, ANDR_TWT_ATTR_AVG_PKT_SIZE_RX, peer_stats->rx_pkt_sz_avg);
+		if (ret < 0) {
+			WL_ERR(("Failed to put ANDR_TWT_ATTR_AVG_PKT_SIZE_RX, ret:%d\n", ret));
+			goto fail;
+		}
+		ret = nla_put_u32(skb, ANDR_TWT_ATTR_AVG_EOSP_DUR, peer_stats->eosp_dur_avg);
+		if (ret < 0) {
+			WL_ERR(("Failed to put ANDR_TWT_ATTR_AVG_EOSP_DUR, ret:%d\n", ret));
+			goto fail;
+		}
+		ret = nla_put_u32(skb, ANDR_TWT_ATTR_EOSP_CNT, peer_stats->eosp_count);
+		if (ret < 0) {
+			WL_ERR(("Failed to put ANDR_TWT_ATTR_EOSP_CNT, ret:%d\n", ret));
+			goto fail;
+		}
+		ret = nla_put_u32(skb, ANDR_TWT_ATTR_NUM_SP, peer_stats->sp_seq);
+		if (ret < 0) {
+			WL_ERR(("Failed to put ANDR_TWT_ATTR_NUM_SP, ret:%d\n", ret));
+			goto fail;
+		}
+	}
+
+	ret = cfg80211_vendor_cmd_reply(skb);
+	if (unlikely(ret)) {
+		WL_ERR(("vendor command reply failed, ret=%d\n", ret));
+	}
+	return ret;
+
+fail:
+	/* Free skb for failure cases */
+	if (skb) {
+		kfree_skb(skb);
+	}
+	return ret;
+}
+
+static int
+wl_cfgvendor_send_twt_status_map_v1(struct wiphy *wiphy, uint8 config_id,
+	wl_twt_status_v1_t *status)
+{
+	uint i;
+	int ret = BCME_OK;
+	wl_twt_sdesc_v0_t *sdesc = NULL;
+	struct sk_buff *skb;
+	int32 mem_needed;
+
+	mem_needed = BRCM_TWT_HAL_VENDOR_EVENT_BUF_LEN;
+
+	skb = cfg80211_vendor_cmd_alloc_reply_skb(wiphy, mem_needed);
+	if (unlikely(!skb)) {
+		WL_ERR(("%s: can't allocate %d bytes\n", __FUNCTION__, mem_needed));
+		ret = -ENOMEM;
+		goto fail;
+	}
+
+	for (i = 0; i < WL_TWT_MAX_ITWT; i ++) {
+		if ((status->itwt_status[i].configID != WL_TWT_INV_CONFIG_ID) &&
+			(status->itwt_status[i].configID == config_id)) {
+			sdesc = &status->itwt_status[i].desc;
+			if (!sdesc) {
+				WL_ERR(("Failed to fetch the descriptions for the config id %d\n",
+					config_id));
+				goto fail;
+			}
+			WL_DBG_MEM(("response o/p for config_id %u: setup_cmd: %d, flow_flags: %u,"
+				" flow_id: %u, channel: %u, wake_dur: %u,"
+				" wake_int: %u, neg_type: %d",
+				status->itwt_status[i].configID,
+				(int)sdesc->setup_cmd, sdesc->flow_flags, (int)sdesc->flow_id,
+				(int)sdesc->channel, sdesc->wake_dur, sdesc->wake_int,
+				sdesc->negotiation_type));
+
+			ret = nla_put_u8(skb, ANDR_TWT_ATTRIBUTE_SETUP_CMD, (int)sdesc->setup_cmd);
+			if (ret < 0) {
+				WL_ERR(("Failed to put ANDR_TWT_ATTRIBUTE_SETUP_CMD, ret:%d\n",
+					ret));
+				goto fail;
+			}
+			ret = nla_put_u8(skb, ANDR_TWT_ATTRIBUTE_FLOW_FLAGS,
+				(int)sdesc->flow_flags);
+			if (ret < 0) {
+				WL_ERR(("Failed to put ANDR_TWT_ATTRIBUTE_FLOW_FLAGS, ret:%d\n",
+					ret));
+				goto fail;
+			}
+			ret = nla_put_u8(skb, ANDR_TWT_ATTRIBUTE_FLOW_ID, (int)sdesc->flow_id);
+			if (ret < 0) {
+				WL_ERR(("Failed to put ANDR_TWT_ATTRIBUTE_FLOW_ID, ret:%d\n",
+					ret));
+				goto fail;
+			}
+			ret = nla_put_u32(skb, ANDR_TWT_ATTRIBUTE_CHANNEL, (int)sdesc->channel);
+			if (ret < 0) {
+				WL_ERR(("Failed to put ANDR_TWT_ATTRIBUTE_CHANNEL, ret:%d\n",
+					ret));
+				goto fail;
+			}
+			ret = nla_put_u8(skb, ANDR_TWT_ATTR_NEGOTIATION_TYPE,
+				(int)sdesc->negotiation_type);
+			if (ret < 0) {
+				WL_ERR(("Failed to put ANDR_TWT_ATTR_NEGOTIATION_TYPE, ret:%d\n",
+					ret));
+				goto fail;
+			}
+
+			/* Convert to us from ms, as fw expects it in us */
+			ret = nla_put_u32(skb, ANDR_TWT_ATTR_WAKE_DURATION,
+				(1000u*sdesc->wake_dur));
+			if (ret < 0) {
+				WL_ERR(("Failed to put ANDR_TWT_ATTR_WAKE_DURATION, ret:%d\n",
+					ret));
+				goto fail;
+			}
+
+			/* Convert to us from ms, as fw expects it in us */
+			ret = nla_put_u32(skb, ANDR_TWT_ATTR_WAKE_INTERVAL,
+				(1000u*sdesc->wake_int));
+			if (ret < 0) {
+				WL_ERR(("Failed to put ANDR_TWT_ATTR_WAKE_INTERVAL, ret:%d\n",
+					ret));
+				goto fail;
+			}
+		}
+	}
+
+	ret = cfg80211_vendor_cmd_reply(skb);
+	if (unlikely(ret)) {
+		WL_ERR(("vendor command reply failed, ret=%d\n", ret));
+	}
+	return ret;
+fail:
+	/* Free skb for failure cases */
+	if (skb) {
+		kfree_skb(skb);
+	}
+
+	return ret;
+}
+
+static int
+wl_cfgvendor_twt_stats(struct wiphy *wiphy,
+	struct wireless_dev *wdev, const void  *data, int len, bool clear_stats)
+{
+	wl_twt_stats_cmd_v1_t query;
+	wl_twt_stats_v2_t stats_v2;
+	s32 type, rem_attr;
+	const struct nlattr *iter;
+	int ret = BCME_OK;
+	char iovbuf[WLC_IOCTL_SMLEN] = {0, };
+	uint8 *pxtlv = NULL;
+	uint8 *iovresp = NULL;
+	uint16 buflen = 0, bufstart = 0;
+	struct bcm_cfg80211 *cfg = wl_get_cfg(wdev_to_ndev(wdev));
+
+	bzero(&query, sizeof(query));
+	query.version = WL_TWT_STATS_CMD_VERSION_1;
+	query.length = sizeof(query) - OFFSETOF(wl_twt_stats_cmd_v1_t, peer);
+
+	/* Default values, Override Below */
+	query.num_bid = 0xFF;
+	query.num_fid = 0xFF;
+
+	if (clear_stats) {
+		query.flags |= WL_TWT_STATS_CMD_FLAGS_RESET;
+	}
+	nla_for_each_attr(iter, data, len, rem_attr) {
+		type = nla_type(iter);
+		if (type == ANDR_TWT_ATTR_CONFIG_ID) {
+			/* Config ID */
+			query.configID = nla_get_u8(iter);
+		} else {
+			WL_ERR(("Invalid TWT stats attribute type %d\n", type));
+		}
+	}
+
+	iovresp = (uint8 *)MALLOCZ(cfg->osh, WLC_IOCTL_MEDLEN);
+	if (iovresp == NULL) {
+		WL_ERR(("%s: iov resp memory alloc exited\n", __FUNCTION__));
+		goto exit;
+	}
+
+	buflen = bufstart = WLC_IOCTL_SMLEN;
+	pxtlv = (uint8 *)iovbuf;
+	ret = bcm_pack_xtlv_entry(&pxtlv, &buflen, WL_TWT_CMD_STATS,
+			sizeof(query), (uint8 *)&query, BCM_XTLV_OPTION_ALIGN32);
+	if (ret != BCME_OK) {
+		WL_ERR(("%s : Error return during pack xtlv :%d\n", __FUNCTION__, ret));
+		goto exit;
+	}
+
+	if ((ret = wldev_iovar_getbuf(wdev_to_ndev(wdev), "twt", iovbuf, bufstart-buflen,
+		iovresp, WLC_IOCTL_MEDLEN, NULL))) {
+		WL_ERR(("twt status failed with err=%d \n", ret));
+		goto exit;
+	}
+
+	if (sizeof(stats_v2) > sizeof(iovresp)) {
+		WL_ERR(("Invalid len : %ld\n", sizeof(stats_v2)));
+		ret = BCME_BADLEN;
+		goto exit;
+	}
+
+	ret = memcpy_s(&stats_v2, sizeof(stats_v2), iovresp, sizeof(stats_v2));
+	if (ret) {
+		WL_ERR(("Failed to copy result: %d\n", ret));
+		goto exit;
+	}
+
+	if (dtoh16(stats_v2.version) == WL_TWT_STATS_VERSION_2) {
+		if (!clear_stats) {
+			WL_ERR(("stats query ver %d, \n", dtoh16(stats_v2.version)));
+			ret = wl_cfgvendor_twt_stats_update_v2(wiphy, (wl_twt_stats_v2_t*)iovresp);
+		}
+	} else {
+		ret = BCME_UNSUPPORTED;
+		WL_ERR(("Version 1 unsupported. ver %d, \n", dtoh16(stats_v2.version)));
+		goto exit;
+	}
+
+exit:
+	if (iovresp) {
+		MFREE(cfg->osh, iovresp, WLC_IOCTL_MEDLEN);
+	}
+
+	return ret;
+}
+
+static int
+wl_cfgvendor_twt_get_response(struct wiphy *wiphy,
+	struct wireless_dev *wdev, const void  *data, int len)
+{
+	int ret = BCME_OK;
+	char iovbuf[WLC_IOCTL_SMLEN] = {0, };
+	uint8 *pxtlv = NULL;
+	uint8 *iovresp = NULL;
+	wl_twt_status_cmd_v1_t status_cmd;
+	wl_twt_status_v1_t result;
+	uint16 buflen = 0, bufstart = 0;
+	s32 type, rem_attr;
+	const struct nlattr *iter;
+	struct bcm_cfg80211 *cfg = wl_get_cfg(wdev_to_ndev(wdev));
+
+	bzero(&status_cmd, sizeof(status_cmd));
+	bzero(&result, sizeof(result));
+
+	status_cmd.version = WL_TWT_CMD_STATUS_VERSION_1;
+	status_cmd.length = sizeof(status_cmd) - OFFSETOF(wl_twt_status_cmd_v1_t, peer);
+
+	nla_for_each_attr(iter, data, len, rem_attr) {
+		type = nla_type(iter);
+		if (type == ANDR_TWT_ATTR_CONFIG_ID) {
+			/* Config ID */
+			status_cmd.configID = nla_get_u8(iter);
+		} else {
+			WL_ERR(("Invalid TWT get status attribute type %d\n", type));
+			goto exit;
+		}
+	}
+
+	iovresp = (uint8 *)MALLOCZ(cfg->osh, WLC_IOCTL_MEDLEN);
+	if (iovresp == NULL) {
+		WL_ERR(("%s: iov resp memory alloc exited\n", __FUNCTION__));
+		goto exit;
+	}
+
+	buflen = bufstart = WLC_IOCTL_SMLEN;
+	pxtlv = (uint8 *)iovbuf;
+	ret = bcm_pack_xtlv_entry(&pxtlv, &buflen, WL_TWT_CMD_STATUS,
+			sizeof(status_cmd), (uint8 *)&status_cmd, BCM_XTLV_OPTION_ALIGN32);
+	if (ret != BCME_OK) {
+		WL_ERR(("%s : Error return during pack xtlv :%d\n", __FUNCTION__, ret));
+		goto exit;
+	}
+
+	if ((ret = wldev_iovar_getbuf(wdev_to_ndev(wdev), "twt", iovbuf, bufstart-buflen,
+		iovresp, WLC_IOCTL_MEDLEN, NULL))) {
+		WL_ERR(("Getting twt status failed with err=%d \n", ret));
+		goto exit;
+	}
+
+	if (sizeof(result) > sizeof(iovresp)) {
+		WL_ERR(("Invalid len : %ld\n", sizeof(result)));
+		ret = BCME_BADLEN;
+		goto exit;
+	}
+
+	ret = memcpy_s(&result, sizeof(result), iovresp, sizeof(result));
+	if (ret) {
+		WL_ERR(("Failed to copy result: %d\n", ret));
+		goto exit;
+	}
+
+	if (dtoh16(result.version) == WL_TWT_CMD_STATUS_VERSION_1) {
+		ret = wl_cfgvendor_send_twt_status_map_v1(wiphy, status_cmd.configID, &result);
+		if (ret != BCME_OK) {
+			WL_ERR(("Failed to send twt response for config_id %d\n",
+				status_cmd.configID));
+			goto exit;
+		}
+	} else {
+		ret = BCME_UNSUPPORTED;
+		WL_ERR(("Version 1 unsupported. ver %d, \n", dtoh16(result.version)));
+	}
+
+exit:
+	if (iovresp) {
+		MFREE(cfg->osh, iovresp, WLC_IOCTL_MEDLEN);
+	}
+	return ret;
+}
+
+static int
+wl_cfgvendor_twt_get_stats(struct wiphy *wiphy,
+	struct wireless_dev *wdev, const void  *data, int len)
+{
+	return wl_cfgvendor_twt_stats(wiphy, wdev, data, len, false);
+}
+
+static int
+wl_cfgvendor_twt_clear_stats(struct wiphy *wiphy,
+	struct wireless_dev *wdev, const void  *data, int len)
+{
+	return wl_cfgvendor_twt_stats(wiphy, wdev, data, len, true);
+}
+
+static int
+wl_cfgvendor_twt_update_cap(struct wiphy *wiphy, wl_twt_cap_t *result)
+{
+	struct sk_buff *skb;
+	int32 mem_needed;
+	int ret = BCME_OK;
+
+	WL_INFORM_MEM(("TWT Capabilites Device,Peer 0x%04x 0x%04x\n",
+		result->device_cap, result->peer_cap));
+
+	mem_needed = VENDOR_REPLY_OVERHEAD + (ATTRIBUTE_U32_LEN * 2);
+
+	skb = cfg80211_vendor_cmd_alloc_reply_skb(wiphy, mem_needed);
+	if (unlikely(!skb)) {
+		WL_ERR(("%s: can't allocate %d bytes\n", __FUNCTION__, mem_needed));
+		ret = -ENOMEM;
+		goto fail;
+	}
+
+	ret = nla_put_u32(skb, ANDR_TWT_ATTR_DEVICE_CAP, result->device_cap);
+	if (ret < 0) {
+		WL_ERR(("Failed to put ANDR_TWT_ATTR_DEVICE_CAP, ret:%d\n", ret));
+		goto fail;
+	}
+	ret = nla_put_u32(skb, ANDR_TWT_ATTR_PEER_CAP, result->peer_cap);
+	if (ret < 0) {
+		WL_ERR(("Failed to put ANDR_TWT_ATTR_PEER_CAP, ret:%d\n", ret));
+		goto fail;
+	}
+
+	ret = cfg80211_vendor_cmd_reply(skb);
+	if (unlikely(ret)) {
+		WL_ERR(("vendor command reply failed, ret=%d\n", ret));
+	}
+	return ret;
+
+fail:
+	/* Free skb for failure cases */
+	if (skb) {
+		kfree_skb(skb);
+	}
+	return ret;
+}
+
+static int
+wl_cfgvendor_twt_cap(struct wiphy *wiphy,
+	struct wireless_dev *wdev, const void  *data, int len)
+{
+	int ret = BCME_OK;
+	char iovbuf[WLC_IOCTL_SMLEN] = {0, };
+	uint8 *pxtlv = NULL;
+	uint8 *iovresp = NULL;
+	wl_twt_cap_cmd_t cmd_cap;
+	wl_twt_cap_t result;
+
+	uint16 buflen = 0, bufstart = 0;
+	struct bcm_cfg80211 *cfg = wl_get_cfg(wdev_to_ndev(wdev));
+
+	bzero(&cmd_cap, sizeof(cmd_cap));
+
+	cmd_cap.version = WL_TWT_CAP_CMD_VERSION_1;
+	cmd_cap.length = sizeof(cmd_cap) - OFFSETOF(wl_twt_cap_cmd_t, peer);
+
+	iovresp = (uint8 *)MALLOCZ(cfg->osh, WLC_IOCTL_MEDLEN);
+	if (iovresp == NULL) {
+		WL_ERR(("%s: iov resp memory alloc exited\n", __FUNCTION__));
+		goto exit;
+	}
+
+	buflen = bufstart = WLC_IOCTL_SMLEN;
+	pxtlv = (uint8 *)iovbuf;
+
+	ret = bcm_pack_xtlv_entry(&pxtlv, &buflen, WL_TWT_CMD_CAP,
+			sizeof(cmd_cap), (uint8 *)&cmd_cap, BCM_XTLV_OPTION_ALIGN32);
+	if (ret != BCME_OK) {
+		WL_ERR(("%s : Error return during pack xtlv :%d\n", __FUNCTION__, ret));
+		goto exit;
+	}
+
+	if ((ret = wldev_iovar_getbuf(wdev_to_ndev(wdev), "twt", iovbuf, bufstart-buflen,
+		iovresp, WLC_IOCTL_MEDLEN, NULL))) {
+		WL_ERR(("Getting twt status failed with err=%d \n", ret));
+		goto exit;
+	}
+
+	if (sizeof(result) > sizeof(iovresp)) {
+		WL_ERR(("Invalid len : %ld\n", sizeof(result)));
+		ret = BCME_BADLEN;
+		goto exit;
+	}
+
+	ret = memcpy_s(&result, sizeof(result), iovresp, sizeof(result));
+	if (ret) {
+		WL_ERR(("Failed to copy result: %d\n", ret));
+		goto exit;
+	}
+
+	if (dtoh16(result.version) == WL_TWT_CAP_CMD_VERSION_1) {
+		WL_ERR(("capability ver %d, \n", dtoh16(result.version)));
+		ret = wl_cfgvendor_twt_update_cap(wiphy, &result);
+		return ret;
+	} else {
+		ret = BCME_UNSUPPORTED;
+		WL_ERR(("Version 1 unsupported. ver %d, \n", dtoh16(result.version)));
+		goto exit;
+	}
+
+exit:
+	if (iovresp) {
+		MFREE(cfg->osh, iovresp, WLC_IOCTL_MEDLEN);
+	}
+
+	return ret;
+}
+
+static int
+wl_cfgvendor_twt_update_setup_response(struct sk_buff *skb, void *event_data)
+{
+	s32 err = BCME_OK;
+	const wl_twt_setup_cplt_t *setup_cplt = (wl_twt_setup_cplt_t *)event_data;
+	const wl_twt_sdesc_v0_t *sdesc = (const wl_twt_sdesc_v0_t *)&setup_cplt[1];
+
+	WL_DBG(("TWT_SETUP: status %d, reason %d, configID %d, setup_cmd %d, flow_flags 0x%x,"
+		" flow_id %d, channel %d, negotiation_type %d, wake_time_h %u, wake_time_l %u,"
+		" wake_dur %u, wake_int %u\n",
+		(int)setup_cplt->status, (int)setup_cplt->reason_code, (int)setup_cplt->configID,
+		(int)sdesc->setup_cmd, sdesc->flow_flags, (int)sdesc->flow_id, (int)sdesc->channel,
+		(int)sdesc->negotiation_type, sdesc->wake_time_h, sdesc->wake_time_l,
+		sdesc->wake_dur, sdesc->wake_int));
+
+	err = nla_put_u8(skb, ANDR_TWT_ATTR_SUB_EVENT, ANDR_TWT_EVENT_SETUP);
+	if (unlikely(err)) {
+		WL_ERR(("nla_put_u8 WIFI_TWT_ATTR_SUB_EVENT failed\n"));
+		goto fail;
+	}
+	err = nla_put_u8(skb, ANDR_TWT_ATTR_CONFIG_ID, setup_cplt->configID);
+	if (unlikely(err)) {
+		WL_ERR(("nla_put_u8 WIFI_TWT_ATTR_CONFIG_ID failed\n"));
+		goto fail;
+	}
+	err = nla_put_u8(skb, ANDR_TWT_ATTR_REASON_CODE, setup_cplt->reason_code);
+	if (unlikely(err)) {
+		WL_ERR(("nla_put_u8 WIFI_TWT_ATTR_REASON_CODE failed\n"));
+		goto fail;
+	}
+	err = nla_put_u8(skb, ANDR_TWT_ATTR_STATUS, !!(setup_cplt->status));
+	if (unlikely(err)) {
+		WL_ERR(("nla_put_u8 WIFI_TWT_ATTR_STATUS failed\n"));
+		goto fail;
+	}
+	err = nla_put_u8(skb, ANDR_TWT_ATTR_NEGOTIATION_TYPE, sdesc->negotiation_type);
+	if (unlikely(err)) {
+		WL_ERR(("nla_put_u8 WIFI_TWT_ATTR_NEGOTIATION_TYPE failed\n"));
+		goto fail;
+	}
+	err = nla_put_u32(skb, ANDR_TWT_ATTR_WAKE_DURATION, sdesc->wake_dur);
+	if (unlikely(err)) {
+		WL_ERR(("nla_put_u32 WIFI_TWT_ATTR_WAKE_DURATION failed\n"));
+		goto fail;
+	}
+	err = nla_put_u32(skb, ANDR_TWT_ATTR_WAKE_INTERVAL, sdesc->wake_int);
+	if (unlikely(err)) {
+		WL_ERR(("nla_put_u32 WIFI_TWT_ATTR_WAKE_INTERVAL failed\n"));
+		goto fail;
+	}
+	err = nla_put_u8(skb, ANDR_TWT_ATTR_TRIGGER_TYPE,
+		!!(sdesc->flow_flags & WL_TWT_FLOW_FLAG_TRIGGER));
+	if (unlikely(err)) {
+		WL_ERR(("nla_put_u8 WIFI_TWT_ATTR_TRIGGER_TYPE failed\n"));
+		goto fail;
+	}
+
+fail:
+	return err;
+}
+
+static int
+wl_cfgvendor_twt_update_teardown_response(struct sk_buff *skb, void *event_data)
+{
+	s32 err = BCME_OK;
+	const wl_twt_teardown_cplt_t *td_cplt = (wl_twt_teardown_cplt_t *)event_data;
+	const wl_twt_teardesc_t *teardesc = (const wl_twt_teardesc_t *)&td_cplt[1];
+
+	WL_DBG(("TWT_TEARDOWN: status %d, reason %d, configID %d, flow_id %d, negotiation_type %d,"
+		" bid %d, alltwt %d\n", (int)td_cplt->status, (int)td_cplt->reason_code,
+		(int)td_cplt->configID, (int)teardesc->flow_id, (int)teardesc->negotiation_type,
+		(int)teardesc->bid, (int)teardesc->alltwt));
+
+	err = nla_put_u8(skb, ANDR_TWT_ATTR_SUB_EVENT, ANDR_TWT_EVENT_TEARDOWN);
+	if (unlikely(err)) {
+		WL_ERR(("nla_put_u8 WIFI_TWT_ATTR_SUB_EVENT failed\n"));
+		goto fail;
+	}
+	err = nla_put_u8(skb, ANDR_TWT_ATTR_REASON_CODE, td_cplt->reason_code);
+	if (unlikely(err)) {
+		WL_ERR(("nla_put_u8 ANDR_TWT_ATTR_REASON_CODE failed\n"));
+		goto fail;
+	}
+	err = nla_put_u8(skb, ANDR_TWT_ATTR_STATUS, !!(td_cplt->status));
+	if (unlikely(err)) {
+		WL_ERR(("nla_put_u8 ANDR_TWT_ATTR_STATUS failed\n"));
+		goto fail;
+	}
+	err = nla_put_u8(skb, ANDR_TWT_ATTR_CONFIG_ID, td_cplt->configID);
+	if (unlikely(err)) {
+		WL_ERR(("nla_put_u8 ANDR_TWT_ATTR_CONFIG_ID failed\n"));
+		goto fail;
+	}
+	err = nla_put_u8(skb, ANDR_TWT_ATTR_ALL_TWT, teardesc->alltwt);
+	if (unlikely(err)) {
+		WL_ERR(("nla_put_u8 ANDR_TWT_ATTR_ALL_TWT failed\n"));
+		goto fail;
+	}
+
+fail:
+	return err;
+}
+
+static int
+wl_cfgvendor_twt_update_infoframe_response(struct sk_buff *skb, void *event_data)
+{
+	s32 err = BCME_OK;
+	const wl_twt_info_cplt_t *info_cplt = (wl_twt_info_cplt_t *)event_data;
+	const wl_twt_infodesc_t *infodesc = (const wl_twt_infodesc_t *)&info_cplt[1];
+
+	WL_DBG(("TWT_INFOFRM: status %d, reason %d, configID %d, flow_flags 0x%x, flow_id %d,"
+		" next_twt_h %u, next_twt_l %u\n", (int)info_cplt->status,
+		(int)info_cplt->reason_code, (int)info_cplt->configID, infodesc->flow_flags,
+		(int)infodesc->flow_id, infodesc->next_twt_h, infodesc->next_twt_l));
+
+	err = nla_put_u8(skb, ANDR_TWT_ATTR_SUB_EVENT, ANDR_TWT_EVENT_INFO_FRM);
+	if (unlikely(err)) {
+		WL_ERR(("nla_put_u8 WIFI_TWT_ATTR_SUB_EVENT failed\n"));
+		goto fail;
+	}
+	err = nla_put_u8(skb, ANDR_TWT_ATTR_REASON_CODE, info_cplt->reason_code);
+	if (unlikely(err)) {
+		WL_ERR(("nla_put_u8 WIFI_TWT_ATTR_REASON_CODE failed\n"));
+		goto fail;
+	}
+	err = nla_put_u8(skb, ANDR_TWT_ATTR_STATUS, !!(info_cplt->status));
+	if (unlikely(err)) {
+		WL_ERR(("nla_put_u8 WIFI_TWT_ATTR_STATUS failed\n"));
+		goto fail;
+	}
+	err = nla_put_u8(skb, ANDR_TWT_ATTR_CONFIG_ID, info_cplt->configID);
+	if (unlikely(err)) {
+		WL_ERR(("nla_put_u8 WIFI_TWT_ATTR_CONFIG_ID failed\n"));
+		goto fail;
+	}
+	err = nla_put_u8(skb, ANDR_TWT_ATTR_ALL_TWT,
+			!!(infodesc->flow_flags & WL_TWT_INFO_FLAG_ALL_TWT));
+	if (unlikely(err)) {
+		WL_ERR(("nla_put_u8 ANDR_TWT_ATTR_TWT_RESUMED failed\n"));
+		goto fail;
+	}
+	err = nla_put_u8(skb, ANDR_TWT_ATTR_TWT_RESUMED,
+			!!(infodesc->flow_flags & WL_TWT_INFO_FLAG_RESUME));
+	if (unlikely(err)) {
+		WL_ERR(("nla_put_u8 ANDR_TWT_ATTR_TWT_RESUMED failed\n"));
+		goto fail;
+	}
+
+fail:
+	return err;
+}
+
+static int
+wl_cfgvendor_twt_update_notify_response(struct sk_buff *skb, void *event_data)
+{
+	s32 err = BCME_OK;
+	const wl_twt_notify_t *notif_cplt = (wl_twt_notify_t *)event_data;
+
+	WL_DBG(("TWT_NOTIFY: notification %d\n", (int)notif_cplt->notification));
+
+	err = nla_put_u8(skb, ANDR_TWT_ATTR_SUB_EVENT, ANDR_TWT_EVENT_NOTIFY);
+	if (unlikely(err)) {
+		WL_ERR(("nla_put_u8 WIFI_TWT_ATTR_SUB_EVENT failed\n"));
+		goto fail;
+	}
+
+	err = nla_put_u8(skb, ANDR_TWT_ATTR_TWT_NOTIFICATION, notif_cplt->notification);
+	if (unlikely(err)) {
+		WL_ERR(("nla_put_u8 WIFI_TWT_ATTR_NOTIFICATION failed\n"));
+		goto fail;
+	}
+
+fail:
+	return err;
+}
+
+s32
+wl_cfgvendor_notify_twt_event(struct bcm_cfg80211 *cfg,
+		bcm_struct_cfgdev *cfgdev, const wl_event_msg_t *e, void *data)
+{
+	struct sk_buff *skb = NULL;
+	gfp_t kflags;
+	struct wiphy *wiphy = bcmcfg_to_wiphy(cfg);
+	int err = BCME_OK;
+	struct net_device *ndev = bcmcfg_to_prmry_ndev(cfg);
+	const wl_twt_event_t *twt_event = (wl_twt_event_t *)data;
+
+	kflags = in_atomic() ? GFP_ATOMIC : GFP_KERNEL;
+	skb = CFG80211_VENDOR_EVENT_ALLOC(wiphy, ndev_to_wdev(ndev),
+		BRCM_TWT_HAL_VENDOR_EVENT_BUF_LEN, BRCM_VENDOR_EVENT_TWT, kflags);
+	if (!skb) {
+		WL_ERR(("skb alloc failed"));
+		err = BCME_NOMEM;
+		goto fail;
+	}
+
+	switch (twt_event->event_type) {
+		case WL_TWT_EVENT_SETUP:
+			err = wl_cfgvendor_twt_update_setup_response(skb,
+					(void*)twt_event->event_info);
+			break;
+		case WL_TWT_EVENT_TEARDOWN:
+			err = wl_cfgvendor_twt_update_teardown_response(skb,
+					(void*)twt_event->event_info);
+			break;
+		case WL_TWT_EVENT_INFOFRM:
+			err = wl_cfgvendor_twt_update_infoframe_response(skb,
+					(void*)twt_event->event_info);
+			break;
+		case WL_TWT_EVENT_NOTIFY:
+			err = wl_cfgvendor_twt_update_notify_response(skb,
+					(void*)twt_event->event_info);
+			break;
+		default:
+			WL_ERR(("Invalid TWT sub event type %d", twt_event->event_type));
+			err = BCME_UNSUPPORTED;
+			break;
+	}
+
+	if (err) {
+		goto fail;
+	}
+
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 14, 0))
+	cfg80211_vendor_event(skb, kflags);
+#endif /* LINUX_VERSION_CODE >= KERNEL_VERSION(3, 14, 0) */
+	WL_INFORM(("Successfully sent TWT vendor event type %d\n", twt_event->event_type));
+	return BCME_OK;
+
+fail:
+	/* Free skb for failure cases */
+	if (skb) {
+		kfree_skb(skb);
+	}
+
+	return err;
+}
+#endif /* !WL_TWT && WL_TWT_HAL_IF */
+
+#ifdef SUPPORT_OTA_UPDATE
+static void
+wl_set_ota_nvram_ext(dhd_pub_t *dhd)
+{
+#if defined(USE_CID_CHECK)
+	naming_info_t *info = NULL;
+	bool is_murata_fem = FALSE;
+	ota_update_info_t *ota_info = &dhd->ota_update_info;
+
+	info = dhd_find_naming_info_by_chip_rev(dhd, &is_murata_fem);
+	if (info) {
+		WL_INFORM(("Nvram extension prefix is [%s].\n", info->nvram_ext));
+		strlcpy(ota_info->nvram_ext, info->nvram_ext, MAX_EXT_INFO_LEN);
+	}
+	else {
+		WL_ERR(("info is null\n"));
+	}
+#endif /* USE_CID_CHECK */
+	return;
+}
+
+static int
+wl_cfgvendor_get_ota_current_info(struct wiphy *wiphy,
+	struct wireless_dev *wdev, const void  *data, int len)
+{
+	int ret, mem_needed;
+	struct sk_buff *skb = NULL;
+	struct bcm_cfg80211 *cfg = wiphy_priv(wiphy);
+	dhd_pub_t *dhd_pub = cfg->pub;
+	ota_update_info_t *ota_info = &dhd_pub->ota_update_info;
+
+	WL_DBG(("Recv get ota current info cmd.\n"));
+
+	mem_needed =  VENDOR_REPLY_OVERHEAD + MAX_EXT_INFO_LEN;
+
+	skb = cfg80211_vendor_cmd_alloc_reply_skb(wiphy, mem_needed);
+	if (unlikely(!skb)) {
+		WL_ERR(("%s: can't allocate %d bytes\n", __FUNCTION__, mem_needed));
+		ret = -ENOMEM;
+		goto exit;
+	}
+
+	ret = nla_put_string(skb, OTA_CUR_NVRAM_EXT_ATTR, ota_info->nvram_ext);
+	if (unlikely(ret)) {
+		WL_ERR(("Failed to put ota_nvram_ext string, ret=%d\n", ret));
+		goto exit;
+	}
+
+	ret = cfg80211_vendor_cmd_reply(skb);
+	if (unlikely(ret)) {
+		WL_ERR(("Vendor cmd reply for -get wake status failed:%d \n", ret));
+	}
+	/* On cfg80211_vendor_cmd_reply() skb is consumed and freed in case of success or failure */
+	return ret;
+
+exit:
+	/* Free skb memory */
+	if (skb) {
+		kfree_skb(skb);
+	}
+	return ret;
+
+}
+
+static int
+wl_cfgvendor_ota_download(struct wiphy *wiphy,
+	struct wireless_dev *wdev, const void  *data, int len)
+{
+	int err = BCME_OK;
+	int rem, type;
+	const struct nlattr *iter;
+	char* buf[1];
+	struct bcm_cfg80211 *cfg = wiphy_priv(wiphy);
+	dhd_pub_t *dhdp = cfg->pub;
+#if defined(WLAN_ACCEL_BOOT)
+	struct net_device *net = wdev->netdev;
+#endif /* WLAN_ACCEL_BOOT */
+	ota_update_info_t *ota_info = &dhdp->ota_update_info;
+
+	nla_for_each_attr(iter, data, len, rem) {
+		type = nla_type(iter);
+		switch (type) {
+			case OTA_DOWNLOAD_CLM_LENGTH_ATTR:
+				ota_info->clm_len = nla_get_u32(iter);
+				WL_INFORM_MEM(("Set to OTA clm length to [%d].\n",
+					ota_info->clm_len));
+				break;
+			case OTA_DOWNLOAD_CLM_ATTR:
+				if (!ota_info->clm_len) {
+					err = -EINVAL;
+					WL_ERR(("clm length is invalid\n"));
+					goto exit;
+				}
+				memcpy_s(buf, sizeof(*buf),
+						(void *)nla_data(iter), nla_len(iter));
+				ota_info->clm_buf = MALLOCZ(cfg->osh, ota_info->clm_len);
+				if (ota_info->clm_buf == NULL) {
+					err = -ENOMEM;
+					WL_ERR(("Allocte fail size [%d]\n", ota_info->clm_len));
+					goto exit;
+				}
+				err = copy_from_user(ota_info->clm_buf, buf[0],
+						ota_info->clm_len);
+				if (err) {
+					WL_ERR(("Failed copy_from_user for ota_clm_buf.\n"));
+					goto exit;
+				}
+				break;
+			case OTA_DOWNLOAD_NVRAM_LENGTH_ATTR:
+				ota_info->nvram_len = nla_get_u32(iter);
+				WL_INFORM_MEM(("Set the OTA nvram length to [%d]\n",
+					ota_info->nvram_len));
+				break;
+			case OTA_DOWNLOAD_NVRAM_ATTR:
+				if (!ota_info->nvram_len) {
+					err = -EINVAL;
+					WL_ERR(("clm length is invalid\n"));
+					goto exit;
+				}
+				memcpy_s(buf, sizeof(*buf),
+						(void *)nla_data(iter), nla_len(iter));
+				ota_info->nvram_buf = MALLOCZ(cfg->osh, ota_info->nvram_len);
+				if (ota_info->nvram_buf  == NULL) {
+					err = -ENOMEM;
+					WL_ERR(("Allocte fail size [%d]\n", ota_info->nvram_len));
+					goto exit;
+				}
+				err = copy_from_user(ota_info->nvram_buf, buf[0],
+						ota_info->nvram_len);
+				if (err) {
+					WL_ERR(("Failed copy_from_user for ota_nvram_buf.\n"));
+					goto exit;
+				}
+				break;
+			case OTA_SET_FORCE_REG_ON:
+				{
+#if defined(WLAN_ACCEL_BOOT)
+					uint force_reg_on = nla_get_u32(iter);
+					if (force_reg_on == TRUE) {
+						dhd_dev_set_accel_force_reg_on(net);
+					}
+#endif /* WLAN_ACCEL_BOOT */
+				}
+				break;
+			default:
+				WL_ERR(("Unknown attr type: %d\n", type));
+				err = -EINVAL;
+				goto exit;
+				break;
+		}
+	}
+	return err;
+exit:
+	if (ota_info->clm_buf) {
+		MFREE(cfg->osh, ota_info->clm_buf, ota_info->clm_len);
+	}
+	if (ota_info->nvram_buf) {
+		MFREE(cfg->osh, ota_info->nvram_buf, ota_info->nvram_len);
+	}
+	ota_info->clm_len = 0;
+	ota_info->nvram_len = 0;
+	return err;
+}
+#endif /* SUPPORT_OTA_UPDATE */
+
+#ifdef OEM_ANDROID
+static int
+wl_cfgvendor_set_dtim_config(struct wiphy *wiphy,
+	struct wireless_dev *wdev, const void  *data, int len)
+{
+	int err = BCME_OK, rem, type;
+	const struct nlattr *iter;
+	uint32 dtim_multiplier;
+	int set = 0;
+	struct bcm_cfg80211 *cfg = wiphy_priv(wiphy);
+	struct net_device *net = wdev->netdev;
+
+	nla_for_each_attr(iter, data, len, rem) {
+		type = nla_type(iter);
+		switch (type) {
+			case ANDR_WIFI_ATTRIBUTE_DTIM_MULTIPLIER:
+				dtim_multiplier = nla_get_u32(iter);
+				WL_INFORM_MEM(("dtim multiplier %d\n", dtim_multiplier));
+				set = (dtim_multiplier > 0) ? FALSE : TRUE;
+				cfg->suspend_bcn_li_dtim = dtim_multiplier;
+				cfg->max_dtim_enable = set ? TRUE : FALSE;
+				if (cfg->soft_suspend) {
+					wl_cfg80211_set_suspend_bcn_li_dtim(cfg, net, TRUE);
+				}
+				break;
+			default:
+				WL_ERR(("Unknown type: %d\n", type));
+				return err;
+		}
+	}
+
+	return err;
+
+}
+#endif /* OEM_ANDROID */
+
+#ifdef WL_USABLE_CHAN
+static int wl_cfgvendor_get_usable_channels(struct wiphy *wiphy,
+	struct wireless_dev *wdev, const void *data, int len)
+{
+	struct bcm_cfg80211 *cfg = wiphy_priv(wiphy);
+	usable_channel_info_t u_info;
+	usable_channel_t u_chan;
+	struct sk_buff *skb;
+	int ret = BCME_OK;
+	s32 type, rem_attr;
+	const struct nlattr *iter;
+	int i = 0;
+	uint32 uchan_item_size = 0, uchan_data_len = 0;
+	int off = 0;
+	char *uchan_data = NULL;
+
+	nla_for_each_attr(iter, data, len, rem_attr) {
+		type = nla_type(iter);
+		switch (type) {
+			case USABLECHAN_ATTRIBUTE_BAND:
+				u_info.band_mask = nla_get_u32(iter);
+				break;
+			case USABLECHAN_ATTRIBUTE_IFACE:
+				u_info.iface_mode_mask = nla_get_u32(iter);
+				break;
+			case USABLECHAN_ATTRIBUTE_FILTER:
+				u_info.filter_mask = nla_get_u32(iter);
+				break;
+			case USABLECHAN_ATTRIBUTE_MAX_SIZE:
+				u_info.max_size = nla_get_u32(iter);
+				break;
+			default:
+				WL_ERR(("Invalid usable_chan attribute type %d\n", type));
+				break;
+		}
+	}
+	WL_INFORM_MEM(("usable channel param band:%u iface:%u filter:%u max_size:%u\n",
+		u_info.band_mask, u_info.iface_mode_mask, u_info.filter_mask, u_info.max_size));
+
+	if (u_info.max_size == 0 || u_info.band_mask == 0 || u_info.iface_mode_mask == 0) {
+		WL_ERR(("Invalid param band:%u iface:%u filter:%u max_size:%u\n",
+			u_info.band_mask, u_info.iface_mode_mask,
+			u_info.filter_mask, u_info.max_size));
+		return -EINVAL;
+	}
+
+	if (u_info.max_size > USABLE_CHAN_MAX_SIZE) {
+		WL_ERR(("Too big max_size band:%u iface:%u filter:%u max_size:%u limit:%u\n",
+			u_info.band_mask, u_info.iface_mode_mask,
+			u_info.filter_mask, u_info.max_size, USABLE_CHAN_MAX_SIZE));
+		return -EINVAL;
+	}
+
+	u_info.channels = MALLOCZ(cfg->osh, sizeof(*u_info.channels) * u_info.max_size);
+	if (!u_info.channels) {
+		WL_ERR(("failed to allocate channels buffer\n"));
+		return -ENOMEM;
+	}
+
+	ret = wl_get_usable_channels(cfg, &u_info);
+	if (ret) {
+		WL_ERR(("can not get channel list from FW err:%d\n", ret));
+		goto exit;
+	}
+
+	uchan_item_size = sizeof(u_chan.freq) + sizeof(u_chan.width) +
+		sizeof(u_chan.iface_mode_mask);
+	uchan_data_len = uchan_item_size * u_info.size;
+	/* Only freq, width and iface_mode_mask in usable_channel_t send to HAL */
+	uchan_data = MALLOC(cfg->osh, uchan_data_len);
+	if (!uchan_data) {
+		WL_ERR(("failed to allocate sending buffer\n"));
+		ret = -ENOMEM;
+		goto exit;
+	}
+
+	for (i = 0; i < u_info.size; i++) {
+		memcpy_s(uchan_data + off, uchan_data_len, &u_info.channels[i], uchan_item_size);
+		off += uchan_item_size;
+	}
+
+	/* Alloc the SKB for vendor_event */
+	skb = cfg80211_vendor_cmd_alloc_reply_skb(wiphy,
+		nla_total_size(uchan_data_len) +
+		nla_total_size(sizeof(u_info.size)));
+	if (!skb) {
+		WL_ERR(("skb allocation is failed\n"));
+		ret = -ENOMEM;
+		goto exit;
+	}
+
+	(void)nla_put_u32(skb, USABLECHAN_ATTRIBUTE_SIZE, u_info.size);
+	(void)nla_put(skb, USABLECHAN_ATTRIBUTE_CHANNELS, uchan_data_len, uchan_data);
+
+	ret = cfg80211_vendor_cmd_reply(skb);
+
+	if (ret) {
+		WL_ERR(("Vendor Command reply failed ret:%d \n", ret));
+	}
+exit:
+	if (uchan_data) {
+		MFREE(cfg->osh, uchan_data, uchan_data_len);
+	}
+
+	if (u_info.channels) {
+		MFREE(cfg->osh, u_info.channels, sizeof(*u_info.channels) * u_info.max_size);
+	}
+
+	return ret;
+}
+#endif /* WL_USABLE_CHAN */
+
+#if defined(WLAN_ACCEL_BOOT)
+static int
+wl_cfgvendor_trigger_ssr(struct wiphy *wiphy,
+	struct wireless_dev *wdev, const void  *data, int len)
+{
+	WL_INFORM_MEM(("trigger subsystem recovery\n"));
+	dhd_dev_set_accel_force_reg_on(wdev->netdev);
+
+	return BCME_OK;
+}
+#endif /* WLAN_ACCEL_BOOT */
+
+const struct nla_policy wifi_tx_power_limits_attr_policy[TX_POWER_ATTRIBUTE_MAX] = {
+	[TX_POWER_CAP_ENABLE_ATTRIBUTE] = { .type = NLA_U8 },
+};
+
+int
+wl_cfgvendor_set_tx_power_policy_handler(struct wiphy *wiphy,
+	struct wireless_dev *wdev, const void  *data, int len)
+{
+	int ret = BCME_OK;
+	int attr_type;
+	int rem = len;
+	const struct nlattr *iter;
+	bool pwr_lmt_enab = false;
+
+	nla_for_each_attr(iter, data, len, rem) {
+		attr_type = nla_type(iter);
+
+		switch (attr_type) {
+		case TX_POWER_CAP_ENABLE_ATTRIBUTE: {
+			if (nla_len(iter) != sizeof(uint8)) {
+				WL_ERR(("Invalid value of tx_power cap\n"));
+				ret = -EINVAL;
+				break;
+			}
+			pwr_lmt_enab = nla_get_u8(iter);
+			break;
+		}
+		/* Add new attributes here */
+		default:
+		    WL_ERR(("Unknown type %d\n", attr_type));
+		    ret = -EINVAL;
+		    goto exit;
+		}
+	}
+
+	WL_DBG_MEM(("wl phy_peak_curr_txpwrcap (%d)\n", pwr_lmt_enab));
+	ret = wldev_iovar_setint(wdev_to_ndev(wdev), "phy_peak_curr_txpwrcap", pwr_lmt_enab);
+	if (unlikely(ret)) {
+		WL_ERR(("txpwrcap set failed with error %d\n", ret));
+		goto exit;
+	}
+exit:
+	return ret;
+}
+
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 3, 0))
+const struct nla_policy wifi_radio_combo_attr_policy[ANDR_WIFI_ATTRIBUTE_RADIO_COMBO_MAX] = {
+	[ANDR_WIFI_ATTRIBUTE_RADIO_COMBO_MATRIX] = { .type = NLA_BINARY },
+};
+#endif /* LINUX_VERSION >= 5.3 */
+
+wifi_radio_configuration radio6_2x2[] = {{WLAN_MAC_6_0_BAND, WIFI_ANTENNA_2X2}};
+wifi_radio_configuration radio5_2x2[] = {{WLAN_MAC_5_0_BAND, WIFI_ANTENNA_2X2}};
+wifi_radio_configuration radio2_2x2[] = {{WLAN_MAC_2_4_BAND, WIFI_ANTENNA_2X2}};
+wifi_radio_configuration radio25_2x2[] = {{WLAN_MAC_2_4_BAND, WIFI_ANTENNA_2X2},
+	{WLAN_MAC_5_0_BAND, WIFI_ANTENNA_2X2}};
+wifi_radio_configuration radio26_2x2[] = {{WLAN_MAC_2_4_BAND, WIFI_ANTENNA_2X2},
+	{WLAN_MAC_6_0_BAND, WIFI_ANTENNA_2X2}};
+
+static int
+wl_cfgvendor_get_radio_combo_matrix(struct wiphy *wiphy,
+	struct wireless_dev *wdev, const void *data, int len)
+{
+	struct net_device *ndev = wdev_to_ndev(wdev);
+	struct sk_buff *skb = NULL;
+	int err, mem_needed;
+	struct bcm_cfg80211 *cfg = wl_get_cfg(ndev);
+	dhd_pub_t *dhdp = (dhd_pub_t *)(cfg->pub);
+	u8 buf[WLC_IOCTL_SMLEN] = {0};
+	u32 total_len = 0, size = 0;
+	wifi_radio_combination *radio_combinations = NULL;
+	wifi_radio_combination_matrix *rc = NULL;
+
+	if (sizeof(buf) < MAX_RADIO_MATRIX_SIZE) {
+		WL_ERR(("Buff too short: %zd, exp max_radio matrix size: %zd\n",
+			sizeof(buf), MAX_RADIO_MATRIX_SIZE));
+		err = BCME_BUFTOOSHORT;
+		goto fail;
+	}
+
+	rc = (wifi_radio_combination_matrix *)buf;
+	(void)memset_s(&buf, sizeof(buf), 0x0, sizeof(buf));
+	radio_combinations = rc->radio_combinations;
+	total_len = sizeof(u32);
+
+	/* Fill up stand alone cases first and conditionally include rsdb & 6G */
+	radio_combinations->num_radio_combinations = 1;
+	(void)(memcpy_s(radio_combinations->radio_configurations,
+		sizeof(radio2_2x2), (void *)radio2_2x2, sizeof(radio2_2x2)));
+	total_len += size = sizeof(u32) + sizeof(radio2_2x2);
+	rc->num_combinations++;
+
+	radio_combinations = (wifi_radio_combination *)((u8 *)radio_combinations + size);
+	radio_combinations->num_radio_combinations = 1;
+	(void)(memcpy_s(radio_combinations->radio_configurations,
+		sizeof(radio5_2x2), (void *)radio5_2x2, sizeof(radio5_2x2)));
+	total_len += size = sizeof(u32) + sizeof(radio5_2x2);
+	rc->num_combinations++;
+
+#ifdef WL_6G_BAND
+	if (cfg->band_6g_supported) {
+		radio_combinations = (wifi_radio_combination *)((u8 *)radio_combinations + size);
+		radio_combinations->num_radio_combinations = 1;
+		(void)(memcpy_s(radio_combinations->radio_configurations,
+			sizeof(radio6_2x2), radio6_2x2, sizeof(radio6_2x2)));
+		total_len += size = sizeof(u32) + sizeof(radio6_2x2);
+		rc->num_combinations++;
+	}
+#endif /* WL_6G_BAND */
+
+	if (FW_SUPPORTED(dhdp, rsdb)) {
+		radio_combinations = (wifi_radio_combination *)((u8 *)radio_combinations + size);
+		radio_combinations->num_radio_combinations = 2;
+		(void)memcpy_s(radio_combinations->radio_configurations,
+			sizeof(radio25_2x2), radio25_2x2, sizeof(radio25_2x2));
+		total_len += size = sizeof(u32) + sizeof(radio25_2x2);
+		rc->num_combinations++;
+
+#ifdef WL_6G_BAND
+		if (cfg->band_6g_supported) {
+			radio_combinations =
+				(wifi_radio_combination *)((u8 *)radio_combinations + size);
+			radio_combinations->num_radio_combinations = 2;
+			(void)memcpy_s(radio_combinations->radio_configurations,
+				sizeof(radio26_2x2), radio26_2x2, sizeof(radio26_2x2));
+			total_len += size = sizeof(u32) + sizeof(radio26_2x2);
+			rc->num_combinations++;
+		}
+#endif /* WL_6G_BAND */
+	}
+
+	mem_needed = VENDOR_REPLY_OVERHEAD + total_len;
+	/* Alloc the SKB for vendor_event */
+	skb = cfg80211_vendor_cmd_alloc_reply_skb(wiphy, mem_needed);
+	if (unlikely(!skb)) {
+		WL_ERR(("skb alloc failed"));
+		err = -ENOMEM;
+		goto fail;
+	}
+
+	err = nla_put(skb, ANDR_WIFI_ATTRIBUTE_RADIO_COMBO_MATRIX, total_len, rc);
+	if (unlikely(err)) {
+		WL_ERR(("nla_put ANDR_WIFI_ATTRIBUTE_RADIO_COMBO_MATRIX failed\n"));
+		goto fail;
+	}
+
+	err = cfg80211_vendor_cmd_reply(skb);
+	if (unlikely(err)) {
+		WL_ERR(("Vendor Command reply failed err:%d \n", err));
+	}
+	return err;
+
+fail:
+	if (skb) {
+		/* Free skb memory */
+		kfree_skb(skb);
+	}
+
+	return err;
+}
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 3, 0))
 const struct nla_policy andr_wifi_attr_policy[ANDR_WIFI_ATTRIBUTE_MAX] = {
@@ -9052,6 +12133,7 @@ const struct nla_policy andr_wifi_attr_policy[ANDR_WIFI_ATTRIBUTE_MAX] = {
 	[ANDR_WIFI_ATTRIBUTE_ND_OFFLOAD_VALUE] = { .type = NLA_U8 },
 	[ANDR_WIFI_ATTRIBUTE_TCPACK_SUP_VALUE] = { .type = NLA_U32 },
 	[ANDR_WIFI_ATTRIBUTE_LATENCY_MODE] = { .type = NLA_U32, .len = sizeof(uint32) },
+	/* Dont see ANDR_WIFI_ATTRIBUTE_RANDOM_MAC being used currently */
 	[ANDR_WIFI_ATTRIBUTE_RANDOM_MAC] = { .type = NLA_U32 },
 	[ANDR_WIFI_ATTRIBUTE_TX_POWER_SCENARIO] = { .type = NLA_S8 },
 	[ANDR_WIFI_ATTRIBUTE_THERMAL_MITIGATION] = { .type = NLA_S8 },
@@ -9088,6 +12170,33 @@ const struct nla_policy dump_buf_policy[DUMP_BUF_ATTR_MAX] = {
 	[DUMP_BUF_ATTR_SDTC_ETB_DUMP] = { .type = NLA_BINARY },
 	[DUMP_BUF_ATTR_PKTID_MAP_LOG] = { .type = NLA_BINARY },
 	[DUMP_BUF_ATTR_PKTID_UNMAP_LOG] = { .type = NLA_BINARY },
+	[DUMP_BUF_ATTR_EWP_HW_INIT_LOG] = { .type = NLA_BINARY },
+	[DUMP_BUF_ATTR_EWP_HW_MOD_DUMP] = { .type = NLA_BINARY },
+	[DUMP_BUF_ATTR_EWP_HW_REG_DUMP] = { .type = NLA_BINARY },
+};
+
+const struct nla_policy andr_dbg_policy[DEBUG_ATTRIBUTE_MAX] = {
+	[DEBUG_ATTRIBUTE_GET_DRIVER] = { .type = NLA_BINARY },
+	[DEBUG_ATTRIBUTE_GET_FW] = { .type = NLA_BINARY },
+	[DEBUG_ATTRIBUTE_RING_ID] = { .type = NLA_U32 },
+	[DEBUG_ATTRIBUTE_RING_NAME] = { .type = NLA_NUL_STRING },
+	[DEBUG_ATTRIBUTE_RING_FLAGS] = { .type = NLA_U32 },
+	[DEBUG_ATTRIBUTE_LOG_LEVEL] = { .type = NLA_U32 },
+	[DEBUG_ATTRIBUTE_LOG_TIME_INTVAL] = { .type = NLA_U32 },
+	[DEBUG_ATTRIBUTE_LOG_MIN_DATA_SIZE] = { .type = NLA_U32 },
+	[DEBUG_ATTRIBUTE_FW_DUMP_LEN] = { .type = NLA_U32 },
+	[DEBUG_ATTRIBUTE_FW_DUMP_DATA] = { .type = NLA_U64 },
+#if (ANDROID_VERSION >= 11)
+	[DEBUG_ATTRIBUTE_FW_ERR_CODE] = { .type = NLA_U32 },
+#endif
+	[DEBUG_ATTRIBUTE_RING_DATA] = { .type = NLA_BINARY },
+	[DEBUG_ATTRIBUTE_RING_STATUS] = { .type = NLA_BINARY },
+	[DEBUG_ATTRIBUTE_RING_NUM] = { .type = NLA_U32 },
+	[DEBUG_ATTRIBUTE_DRIVER_DUMP_LEN] = { .type = NLA_U32 },
+	[DEBUG_ATTRIBUTE_DRIVER_DUMP_DATA] = { .type = NLA_BINARY },
+	[DEBUG_ATTRIBUTE_PKT_FATE_NUM] = { .type = NLA_U32 },
+	[DEBUG_ATTRIBUTE_PKT_FATE_DATA] = { .type = NLA_U64 },
+	[DEBUG_ATTRIBUTE_HANG_REASON] = { .type = NLA_BINARY },
 };
 
 const struct nla_policy brcm_drv_attr_policy[BRCM_ATTR_DRIVER_MAX] = {
@@ -9097,6 +12206,7 @@ const struct nla_policy brcm_drv_attr_policy[BRCM_ATTR_DRIVER_MAX] = {
 	((BRCM_WLAN_VENDOR_FEATURES_MAX / 8) + 1) },
 	[BRCM_ATTR_DRIVER_RAND_MAC] = { .type = NLA_BINARY, .len = ETHER_ADDR_LEN },
 	[BRCM_ATTR_SAE_PWE] = { .type = NLA_U32 },
+	[BRCM_ATTR_TD_POLICY] = { .type = NLA_U32 },
 };
 
 #ifdef RTT_SUPPORT
@@ -9125,6 +12235,14 @@ const struct nla_policy rtt_attr_policy[RTT_ATTRIBUTE_MAX] = {
 	.len = sizeof(struct rtt_result_detail) },
 };
 #endif /* RTT_SUPPORT */
+
+#ifdef RSSI_MONITOR_SUPPORT
+const struct nla_policy rssi_monitor_attr_policy[RSSI_MONITOR_ATTRIBUTE_MAX] = {
+	[RSSI_MONITOR_ATTRIBUTE_MAX_RSSI] = { .type = NLA_U32 },
+	[RSSI_MONITOR_ATTRIBUTE_MIN_RSSI] = { .type = NLA_U32 },
+	[RSSI_MONITOR_ATTRIBUTE_START] = { .type = NLA_U32 }
+};
+#endif /* RSSI_MONITOR_SUPPORT */
 
 #ifdef KEEP_ALIVE
 const struct nla_policy mkeep_alive_attr_policy[MKEEP_ALIVE_ATTRIBUTE_MAX] = {
@@ -9173,7 +12291,7 @@ const struct nla_policy nan_attr_policy[NAN_ATTRIBUTE_MAX] = {
 	[NAN_ATTRIBUTE_RSSI_WINDOW_SIZE] = { .type = NLA_U8, .len = sizeof(uint8) },
 	[NAN_ATTRIBUTE_CIPHER_SUITE_TYPE] = { .type = NLA_U8, .len = sizeof(uint8) },
 	[NAN_ATTRIBUTE_SCID_LEN] = { .type = NLA_U32, .len = sizeof(uint32) },
-	[NAN_ATTRIBUTE_SCID] = { .type = NLA_BINARY, .len = MAX_SCID_LEN },
+	[NAN_ATTRIBUTE_SCID] = { .type = NLA_BINARY, .len = NAN_MAX_SCID_BUF_LEN },
 	[NAN_ATTRIBUTE_2G_AWAKE_DW] = { .type = NLA_U32, .len = sizeof(uint32) },
 	[NAN_ATTRIBUTE_5G_AWAKE_DW] = { .type = NLA_U32, .len = sizeof(uint32) },
 	[NAN_ATTRIBUTE_DISC_IND_CFG] = { .type = NLA_U8, .len = sizeof(uint8) },
@@ -9248,6 +12366,7 @@ const struct nla_policy nan_attr_policy[NAN_ATTRIBUTE_MAX] = {
 	[NAN_ATTRIBUTE_NUM_CHANNELS] = { .type = NLA_U32, .len = sizeof(uint32) },
 	[NAN_ATTRIBUTE_INSTANT_MODE_ENABLE] = { .type = NLA_U32, .len = sizeof(uint32) },
 	[NAN_ATTRIBUTE_INSTANT_COMM_CHAN] = { .type = NLA_U32, .len = sizeof(uint32) },
+	[NAN_ATTRIBUTE_CHRE_REQUEST] = { .type = NLA_U8, .len = sizeof(uint8) },
 };
 #endif /* WL_NAN */
 
@@ -9303,14 +12422,22 @@ const struct nla_policy wake_stat_attr_policy[WAKE_STAT_ATTRIBUTE_MAX] = {
 };
 #endif /* DHD_WAKE_STATUS */
 
-#ifdef RSSI_MONITOR_SUPPORT
-const struct nla_policy rssi_monitor_attr_policy[RSSI_MONITOR_ATTRIBUTE_MAX] = {
-	[RSSI_MONITOR_ATTRIBUTE_MAX_RSSI] = { .type = NLA_U32 },
-	[RSSI_MONITOR_ATTRIBUTE_MIN_RSSI] = { .type = NLA_U32 },
-	[RSSI_MONITOR_ATTRIBUTE_START] = { .type = NLA_U32 }
+#ifdef WL_SOFTAP_ACS
+const struct nla_policy acs_attr_policy[BRCM_VENDOR_ATTR_ACS_LAST] = {
+	[BRCM_VENDOR_ATTR_ACS_CHANNEL_INVALID] = { .type = NLA_U8 },
+	[BRCM_VENDOR_ATTR_ACS_PRIMARY_FREQ] = { .type = NLA_U32 },
+	[BRCM_VENDOR_ATTR_ACS_SECONDARY_FREQ] = { .type = NLA_U32 },
+	[BRCM_VENDOR_ATTR_ACS_VHT_SEG0_CENTER_CHANNEL] = { .type = NLA_U8 },
+	[BRCM_VENDOR_ATTR_ACS_VHT_SEG1_CENTER_CHANNEL] = { .type = NLA_U8 },
+	[BRCM_VENDOR_ATTR_ACS_HW_MODE] = { .type = NLA_U8 },
+	[BRCM_VENDOR_ATTR_ACS_HT_ENABLED] = { .type = NLA_U8 },
+	[BRCM_VENDOR_ATTR_ACS_HT40_ENABLED] = { .type = NLA_U8 },
+	[BRCM_VENDOR_ATTR_ACS_VHT_ENABLED] = { .type = NLA_U8 },
+	[BRCM_VENDOR_ATTR_ACS_CHWIDTH] = { .type = NLA_U16 },
+	[BRCM_VENDOR_ATTR_ACS_CH_LIST] = { .type = NLA_BINARY },
+	[BRCM_VENDOR_ATTR_ACS_FREQ_LIST] = { .type = NLA_BINARY },
 };
-#endif /* RSSI_MONITOR_SUPPORT */
-
+#endif /* WL_SOFTAP_ACS */
 
 const struct nla_policy hal_start_attr_policy[SET_HAL_START_ATTRIBUTE_MAX] = {
 	[0] = { .strict_start_type = 0 },
@@ -9319,27 +12446,96 @@ const struct nla_policy hal_start_attr_policy[SET_HAL_START_ATTRIBUTE_MAX] = {
 	[SET_HAL_START_ATTRIBUTE_EVENT_SOCK_PID] = { .type = NLA_U32 },
 };
 
-const struct nla_policy andr_dbg_policy[DEBUG_ATTRIBUTE_MAX] = {
-	[DEBUG_ATTRIBUTE_GET_DRIVER] = { .type = NLA_BINARY },
-	[DEBUG_ATTRIBUTE_GET_FW] = { .type = NLA_BINARY },
-	[DEBUG_ATTRIBUTE_RING_ID] = { .type = NLA_U32 },
-	[DEBUG_ATTRIBUTE_RING_NAME] = { .type = NLA_NUL_STRING },
-	[DEBUG_ATTRIBUTE_RING_FLAGS] = { .type = NLA_U32 },
-	[DEBUG_ATTRIBUTE_LOG_LEVEL] = { .type = NLA_U32 },
-	[DEBUG_ATTRIBUTE_LOG_TIME_INTVAL] = { .type = NLA_U32 },
-	[DEBUG_ATTRIBUTE_LOG_MIN_DATA_SIZE] = { .type = NLA_U32 },
-	[DEBUG_ATTRIBUTE_FW_DUMP_LEN] = { .type = NLA_U32 },
-	[DEBUG_ATTRIBUTE_FW_DUMP_DATA] = { .type = NLA_U64 },
-	[DEBUG_ATTRIBUTE_FW_ERR_CODE] = { .type = NLA_U32 },
-	[DEBUG_ATTRIBUTE_RING_DATA] = { .type = NLA_BINARY },
-	[DEBUG_ATTRIBUTE_RING_STATUS] = { .type = NLA_BINARY },
-	[DEBUG_ATTRIBUTE_RING_NUM] = { .type = NLA_U32 },
-	[DEBUG_ATTRIBUTE_DRIVER_DUMP_LEN] = { .type = NLA_U32 },
-	[DEBUG_ATTRIBUTE_DRIVER_DUMP_DATA] = { .type = NLA_BINARY },
-	[DEBUG_ATTRIBUTE_PKT_FATE_NUM] = { .type = NLA_U32 },
-	[DEBUG_ATTRIBUTE_PKT_FATE_DATA] = { .type = NLA_U64 },
-	[DEBUG_ATTRIBUTE_HANG_REASON] = { .type = NLA_BINARY },
+#ifdef WL_CUSTOM_MAPPING_OF_DSCP
+const struct nla_policy custom_setting_attr_policy[CUSTOM_SETTING_ATTRIBUTE_MAX] = {
+	[CUSTOM_SETTING_ATTRIBUTE_DSCP_START] = { .type = NLA_U32 },
+	[CUSTOM_SETTING_ATTRIBUTE_DSCP_END] = { .type = NLA_U32 },
+	[CUSTOM_SETTING_ATTRIBUTE_ACCESS_CATEGORY] = { .type = NLA_U32 },
 };
+#endif /* WL_CUSTOM_MAPPING_OF_DSCP */
+
+#ifdef WL_CELLULAR_CHAN_AVOID
+const struct nla_policy cellavoid_attr_policy[CELLAVOID_ATTRIBUTE_MAX] = {
+	[CELLAVOID_ATTRIBUTE_CNT] = { .type = NLA_U32 },
+	[CELLAVOID_ATTRIBUTE_CONFIG] = { .type = NLA_NESTED },
+	[CELLAVOID_ATTRIBUTE_BAND] = { .type = NLA_U32 },
+	[CELLAVOID_ATTRIBUTE_CHANNEL] = { .type = NLA_U32 },
+	[CELLAVOID_ATTRIBUTE_PWRCAP] = { .type = NLA_U32 },
+	[CELLAVOID_ATTRIBUTE_MANDATORY] = { .type = NLA_U32 },
+};
+#endif /* WL_CELLULAR_CHAN_AVOID */
+
+#ifdef WL_USABLE_CHAN
+const struct nla_policy usable_chan_attr_policy[USABLECHAN_ATTRIBUTE_MAX] = {
+	[USABLECHAN_ATTRIBUTE_BAND] = { .type = NLA_U32 },
+	[USABLECHAN_ATTRIBUTE_IFACE] = { .type = NLA_U32 },
+	[USABLECHAN_ATTRIBUTE_FILTER] = { .type = NLA_U32 },
+	[USABLECHAN_ATTRIBUTE_MAX_SIZE] = { .type = NLA_U32 },
+	[USABLECHAN_ATTRIBUTE_SIZE] = { .type = NLA_U32 },
+	[USABLECHAN_ATTRIBUTE_CHANNELS] = { .type = NLA_BINARY },
+};
+#endif /* WL_USABLE_CHAN */
+
+#ifdef TPUT_DEBUG_DUMP
+const struct nla_policy tput_debug_dump_attr_policy[TPUT_DEBUG_ATTRIBUTE_MAX] = {
+	[0] = { .strict_start_type = 0 },
+	[TPUT_DEBUG_ATTRIBUTE_CMD_STR ] = { .type = NLA_NUL_STRING },
+	[TPUT_DEBUG_ATTRIBUTE_SUB_CMD_STR_AMPDU] = { .type = NLA_NUL_STRING },
+	[TPUT_DEBUG_ATTRIBUTE_SUB_CMD_STR_CLEAR] = { .type = NLA_NUL_STRING },
+};
+#endif /* TPUT_DEBUG_DUMP */
+
+#ifdef SUPPORT_OTA_UPDATE
+const struct nla_policy ota_update_attr_policy[OTA_UPDATE_ATTRIBUTE_MAX] = {
+	[OTA_DOWNLOAD_CLM_LENGTH_ATTR ] = { .type = NLA_U32 },
+	[OTA_DOWNLOAD_CLM_ATTR ] = { .type = NLA_BINARY },
+	[OTA_DOWNLOAD_NVRAM_LENGTH_ATTR ] = { .type = NLA_U32 },
+	[OTA_DOWNLOAD_NVRAM_ATTR ] = { .type = NLA_BINARY },
+	[OTA_SET_FORCE_REG_ON ] = { .type = NLA_U32 },
+	[OTA_CUR_NVRAM_EXT_ATTR] = { .type = NLA_NUL_STRING },
+};
+#endif /* SUPPORT_OTA_UPDATE */
+
+const struct nla_policy multista_attr_policy[MULTISTA_ATTRIBUTE_MAX] = {
+	[MULTISTA_ATTRIBUTE_PRIM_CONN_IFACE] = { .type = NLA_NUL_STRING },
+	[MULTISTA_ATTRIBUTE_USE_CASE] = { .type = NLA_U32 },
+};
+
+#if !defined(WL_TWT) && defined(WL_TWT_HAL_IF)
+const struct nla_policy andr_twt_attr_policy[ANDR_TWT_ATTR_MAX] = {
+	[ANDR_TWT_ATTR_NONE] = { .strict_start_type = 0 },
+	[ANDR_TWT_ATTR_CONFIG_ID] = { .type = NLA_U8 },
+	[ANDR_TWT_ATTR_NEGOTIATION_TYPE] = { .type = NLA_U8 },
+	[ANDR_TWT_ATTR_TRIGGER_TYPE] = { .type = NLA_U8 },
+	[ANDR_TWT_ATTR_WAKE_DURATION] = { .type = NLA_U32 },
+	[ANDR_TWT_ATTR_WAKE_INTERVAL] = { .type = NLA_U32 },
+	[ANDR_TWT_ATTR_WAKE_INTERVAL_MIN] = { .type = NLA_U32 },
+	[ANDR_TWT_ATTR_WAKE_INTERVAL_MAX] = { .type = NLA_U32 },
+	[ANDR_TWT_ATTR_WAKE_DURATION_MIN] = { .type = NLA_U32 },
+	[ANDR_TWT_ATTR_WAKE_DURATION_MAX] = { .type = NLA_U32 },
+	[ANDR_TWT_ATTR_AVG_PKT_SIZE] = { .type = NLA_U32 },
+	[ANDR_TWT_ATTR_AVG_PKT_NUM] = { .type = NLA_U32 },
+	[ANDR_TWT_ATTR_WAKETIME_OFFSET] = { .type = NLA_U32 },
+	[ANDR_TWT_ATTR_ALL_TWT] = { .type = NLA_U8 },
+	[ANDR_TWT_ATTR_RESUME_TIME] = { .type = NLA_U32 },
+	[ANDR_TWT_ATTR_AVG_EOSP_DUR] = { .type = NLA_U32 },
+	[ANDR_TWT_ATTR_EOSP_CNT] = { .type = NLA_U32 },
+	[ANDR_TWT_ATTR_NUM_SP] = { .type = NLA_U32 },
+	[ANDR_TWT_ATTR_DEVICE_CAP] = { .type = NLA_U32 },
+	[ANDR_TWT_ATTR_PEER_CAP] = { .type = NLA_U32 },
+	[ANDR_TWT_ATTR_STATUS] = { .type = NLA_U8 },
+	[ANDR_TWT_ATTR_REASON_CODE] = { .type = NLA_U8 },
+	[ANDR_TWT_ATTR_TWT_RESUMED] = { .type = NLA_U8 },
+	[ANDR_TWT_ATTR_TWT_NOTIFICATION] = { .type = NLA_U8 },
+	[ANDR_TWT_ATTR_SUB_EVENT] = { .type = NLA_U8 },
+	[ANDR_TWT_ATTR_NUM_PEER_STATS] = { .type = NLA_U8 },
+	[ANDR_TWT_ATTR_AVG_PKT_NUM_TX] = { .type = NLA_U32 },
+	[ANDR_TWT_ATTR_AVG_PKT_SIZE_TX] = { .type = NLA_U32 },
+	[ANDR_TWT_ATTR_AVG_PKT_NUM_RX] = { .type = NLA_U32 },
+	[ANDR_TWT_ATTR_AVG_PKT_SIZE_RX] = { .type = NLA_U32 },
+};
+#endif /* !WL_TWT && WL_TWT_HAL_IF */
+
 #endif /* LINUX_VERSION >= 5.3 */
 
 static struct wiphy_vendor_command wl_vendor_cmds [] = {
@@ -9369,7 +12565,7 @@ static struct wiphy_vendor_command wl_vendor_cmds [] = {
 #endif /* LINUX_VERSION >= 5.3 */
 	},
 #endif /* BCM_PRIV_CMD_SUPPORT */
-#if defined(WL_SAE) || defined(WL_CLIENT_SAE)
+#if defined(WL_SAE)
 	{
 		{
 			.vendor_id = OUI_BRCM,
@@ -9378,7 +12574,7 @@ static struct wiphy_vendor_command wl_vendor_cmds [] = {
 		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
 		.doit = wl_cfgvendor_set_sae_password
 	},
-#endif /* WL_SAE || WL_CLIENT_SAE */
+#endif /* WL_SAE */
 	{
 		{
 			.vendor_id = OUI_BRCM,
@@ -9398,6 +12594,18 @@ static struct wiphy_vendor_command wl_vendor_cmds [] = {
 		},
 		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
 		.doit = wl_cfgvendor_start_ap_params_handler,
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 3, 0))
+		.policy = brcm_drv_attr_policy,
+		.maxattr = BRCM_ATTR_DRIVER_MAX
+#endif /* LINUX_VERSION >= 5.3 */
+	},
+	{
+		{
+			.vendor_id = OUI_BRCM,
+			.subcmd = BRCM_VENDOR_SCMD_SET_TD_POLICY
+		},
+		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
+		.doit = wl_cfgvendor_set_td_policy,
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 3, 0))
 		.policy = brcm_drv_attr_policy,
 		.maxattr = BRCM_ATTR_DRIVER_MAX
@@ -9597,6 +12805,7 @@ static struct wiphy_vendor_command wl_vendor_cmds [] = {
 		.policy = andr_wifi_attr_policy,
 		.maxattr = ANDR_WIFI_ATTRIBUTE_MAX
 #endif /* LINUX_VERSION >= 5.3 */
+
 	},
 #endif /* CUSTOM_FORCE_NODFS_FLAG */
 	{
@@ -9800,7 +13009,22 @@ static struct wiphy_vendor_command wl_vendor_cmds [] = {
 		.policy = andr_dbg_policy,
 		.maxattr = DEBUG_ATTRIBUTE_MAX
 #endif /* LINUX_VERSION >= 5.3 */
+
 	},
+#ifdef DHD_HAL_RING_DUMP
+	{
+		{
+			.vendor_id = OUI_GOOGLE,
+			.subcmd = DEBUG_GET_BUF_RING_MAP
+		},
+		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
+		.doit = wl_cfgvendor_dbg_get_buf_ring_map,
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 3, 0))
+		.policy = andr_dbg_policy,
+		.maxattr = DEBUG_ATTRIBUTE_MAX
+#endif /* LINUX_VERSION >= 5.3 */
+	},
+#endif /* DHD_HAL_RING_DUMP */
 #endif /* DEBUGABILITY */
 	{
 		{
@@ -10071,7 +13295,7 @@ static struct wiphy_vendor_command wl_vendor_cmds [] = {
 #endif /* LINUX_VERSION >= 5.3 */
 	},
 #endif /* WL_NAN */
-#if defined(PKT_FILTER_SUPPORT) && defined(APF)
+#if defined(APF)
 	{
 		{
 			.vendor_id = OUI_GOOGLE,
@@ -10084,7 +13308,6 @@ static struct wiphy_vendor_command wl_vendor_cmds [] = {
 		.maxattr = APF_ATTRIBUTE_MAX
 #endif /* LINUX_VERSION >= 5.3 */
 	},
-
 	{
 		{
 			.vendor_id = OUI_GOOGLE,
@@ -10097,7 +13320,19 @@ static struct wiphy_vendor_command wl_vendor_cmds [] = {
 		.maxattr = APF_ATTRIBUTE_MAX
 #endif /* LINUX_VERSION >= 5.3 */
 	},
-#endif /* PKT_FILTER_SUPPORT && APF */
+	{
+		{
+			.vendor_id = OUI_GOOGLE,
+			.subcmd = APF_SUBCMD_READ_FILTER_DATA
+		},
+		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
+		.doit = wl_cfgvendor_apf_read_filter_data,
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 3, 0))
+		.policy = apf_atrribute_policy,
+		.maxattr = APF_ATTRIBUTE_MAX
+#endif /* LINUX_VERSION >= 5.3 */
+	},
+#endif /* APF */
 #ifdef NDO_CONFIG_SUPPORT
 	{
 		{
@@ -10166,6 +13401,7 @@ static struct wiphy_vendor_command wl_vendor_cmds [] = {
 		.policy = brcm_drv_attr_policy,
 		.maxattr = BRCM_ATTR_DRIVER_MAX
 #endif /* LINUX_VERSION >= 5.3 */
+
 	},
 #endif /* !BCMSUP_4WAY_HANDSHAKE || LINUX_VERSION_CODE < KERNEL_VERSION(4, 13, 0) */
 	{
@@ -10179,6 +13415,7 @@ static struct wiphy_vendor_command wl_vendor_cmds [] = {
 		.policy = brcm_drv_attr_policy,
 		.maxattr = BRCM_ATTR_DRIVER_MAX
 #endif /* LINUX_VERSION >= 5.3 */
+
 	},
 #if defined(WL_CFG80211) && defined(DHD_FILE_DUMP_EVENT)
 	{
@@ -10238,6 +13475,7 @@ static struct wiphy_vendor_command wl_vendor_cmds [] = {
 #endif /* LINUX_VERSION >= 5.3 */
 	},
 #endif /* WL_LATENCY_MODE */
+
 #ifdef WL_P2P_RAND
 	{
 		{
@@ -10252,6 +13490,20 @@ static struct wiphy_vendor_command wl_vendor_cmds [] = {
 #endif /* LINUX_VERSION >= 5.3 */
 	},
 #endif /* WL_P2P_RAND */
+#ifdef WL_THERMAL_MITIGATION
+	{
+		{
+			.vendor_id = OUI_GOOGLE,
+			.subcmd = WIFI_SUBCMD_THERMAL_MITIGATION
+		},
+		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
+		.doit = wl_cfgvendor_thermal_mitigation,
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 3, 0))
+		.policy = andr_wifi_attr_policy,
+		.maxattr = ANDR_WIFI_ATTRIBUTE_MAX
+#endif /* LINUX_VERSION >= 5.3 */
+	},
+#endif /* WL_THERMAL_MITIGATION */
 #ifdef WL_SAR_TX_POWER
 	{
 		{
@@ -10264,8 +13516,274 @@ static struct wiphy_vendor_command wl_vendor_cmds [] = {
 		.policy = andr_wifi_attr_policy,
 		.maxattr = ANDR_WIFI_ATTRIBUTE_MAX
 #endif /* LINUX_VERSION >= 5.3 */
-	}
+	},
 #endif /* WL_SAR_TX_POWER */
+#ifdef WL_SOFTAP_ACS
+	{
+		{
+			.vendor_id = OUI_BRCM,
+			.subcmd = BRCM_VENDOR_SCMD_ACS
+		},
+		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
+		.doit = wl_cfgscan_acs,
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 3, 0))
+		.policy = acs_attr_policy,
+		.maxattr = BRCM_VENDOR_ATTR_ACS_LAST
+#endif /* LINUX_VERSION >= 5.3 */
+	},
+#endif /* WL_SOFTAP_ACS */
+#ifdef WL_CUSTOM_MAPPING_OF_DSCP
+	{
+		{
+			.vendor_id = OUI_GOOGLE,
+			.subcmd = WIFI_SUBCMD_CUSTOM_MAPPING_OF_DSCP
+		},
+		.flags = WIPHY_VENDOR_CMD_NEED_WDEV,
+		.doit = wl_cfgvendor_custom_mapping_of_dscp,
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 3, 0))
+		.policy = custom_setting_attr_policy,
+		.maxattr = CUSTOM_SETTING_ATTRIBUTE_MAX
+#endif /* LINUX_VERSION >= 5.3 */
+	},
+	{
+		{
+			.vendor_id = OUI_GOOGLE,
+			.subcmd = WIFI_SUBCMD_CUSTOM_MAPPING_OF_DSCP_RESET
+		},
+		.flags = WIPHY_VENDOR_CMD_NEED_WDEV,
+		.doit = wl_cfgvendor_custom_mapping_of_dscp_reset,
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 3, 0))
+		.policy = custom_setting_attr_policy,
+		.maxattr = CUSTOM_SETTING_ATTRIBUTE_MAX
+#endif /* LINUX_VERSION >= 5.3 */
+	},
+#endif /* WL_CUSTOM_MAPPING_OF_DSCP */
+#ifdef WL_CELLULAR_CHAN_AVOID
+	{
+		{
+			.vendor_id = OUI_GOOGLE,
+			.subcmd = WIFI_SUBCMD_CELL_AVOID_SUBCMD_SET_CONFIG
+		},
+		.flags = WIPHY_VENDOR_CMD_NEED_WDEV,
+		.doit = wl_cfgvendor_cellavoid_set_cell_channels,
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 3, 0))
+		.policy = cellavoid_attr_policy,
+		.maxattr = CELLAVOID_ATTRIBUTE_MAX
+#endif /* LINUX_VERSION >= 5.3 */
+	},
+#endif /* WL_CELLULAR_CHAN_AVOID */
+#ifdef TPUT_DEBUG_DUMP
+	{
+		{
+			.vendor_id = OUI_GOOGLE,
+			.subcmd = DEBUG_SET_TPUT_DEBUG_DUMP_CMD
+		},
+		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
+		.doit = wl_cfgdbg_tput_debug_get_cmd,
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 3, 0))
+		.policy = tput_debug_dump_attr_policy,
+		.maxattr = TPUT_DEBUG_ATTRIBUTE_MAX
+#endif /* LINUX_VERSION >= 5.3 */
+	},
+#endif /* TPUT_DEBUG_DUMP */
+	{
+		{
+			.vendor_id = OUI_GOOGLE,
+			.subcmd = WIFI_SUBCMD_SET_MULTISTA_PRIMARY_CONNECTION
+		},
+		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
+		.doit = wl_cfgvendor_multista_set_primary_connection,
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 3, 0))
+		.policy = multista_attr_policy,
+		.maxattr = MULTISTA_ATTRIBUTE_MAX
+#endif /* LINUX_VERSION >= 5.3 */
+	},
+	{
+		{
+			.vendor_id = OUI_GOOGLE,
+			.subcmd = WIFI_SUBCMD_SET_MULTISTA_USE_CASE
+		},
+		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
+		.doit = wl_cfgvendor_multista_set_use_case,
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 3, 0))
+		.policy = multista_attr_policy,
+		.maxattr = MULTISTA_ATTRIBUTE_MAX
+#endif /* LINUX_VERSION >= 5.3 */
+	},
+#if !defined(WL_TWT) && defined(WL_TWT_HAL_IF)
+	{
+		{
+			.vendor_id = OUI_GOOGLE,
+			.subcmd = ANDR_TWT_SUBCMD_SETUP
+		},
+		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
+		.doit = wl_cfgvendor_twt_setup,
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 3, 0))
+		.policy = andr_twt_attr_policy,
+		.maxattr = ANDR_TWT_ATTR_MAX
+#endif /* LINUX_VERSION >= 5.3 */
+	},
+	{
+		{
+			.vendor_id = OUI_GOOGLE,
+			.subcmd = ANDR_TWT_SUBCMD_TEARDOWN
+		},
+		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
+		.doit = wl_cfgvendor_twt_teardown,
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 3, 0))
+		.policy = andr_twt_attr_policy,
+		.maxattr = ANDR_TWT_ATTR_MAX
+#endif /* LINUX_VERSION >= 5.3 */
+	},
+	{
+		{
+			.vendor_id = OUI_GOOGLE,
+			.subcmd = ANDR_TWT_SUBCMD_INFO_FRAME
+		},
+		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
+		.doit = wl_cfgvendor_twt_info_frame,
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 3, 0))
+		.policy = andr_twt_attr_policy,
+		.maxattr = ANDR_TWT_ATTR_MAX
+#endif /* LINUX_VERSION >= 5.3 */
+	},
+	{
+		{
+			.vendor_id = OUI_GOOGLE,
+			.subcmd = ANDR_TWT_SUBCMD_GET_CAP
+		},
+		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
+		.doit = wl_cfgvendor_twt_cap,
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 3, 0))
+		.policy = andr_twt_attr_policy,
+		.maxattr = ANDR_TWT_ATTR_MAX
+#endif /* LINUX_VERSION >= 5.3 */
+	},
+	{
+		{
+			.vendor_id = OUI_GOOGLE,
+			.subcmd = ANDR_TWT_SUBCMD_GET_STATS
+		},
+		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
+		.doit = wl_cfgvendor_twt_get_stats,
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 3, 0))
+		.policy = andr_twt_attr_policy,
+		.maxattr = ANDR_TWT_ATTR_MAX
+#endif /* LINUX_VERSION >= 5.3 */
+	},
+	{
+		{
+			.vendor_id = OUI_GOOGLE,
+			.subcmd = ANDR_TWT_SUBCMD_CLR_STATS
+		},
+		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
+		.doit = wl_cfgvendor_twt_clear_stats,
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 3, 0))
+		.policy = andr_twt_attr_policy,
+		.maxattr = ANDR_TWT_ATTR_MAX
+#endif /* LINUX_VERSION >= 5.3 */
+	},
+	{
+		{
+			.vendor_id = OUI_GOOGLE,
+			.subcmd = ANDR_TWT_SUBCMD_GET_RESPONSE
+		},
+		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
+		.doit = wl_cfgvendor_twt_get_response,
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 3, 0))
+		.policy = andr_twt_attr_policy,
+		.maxattr = ANDR_TWT_ATTR_MAX
+#endif /* LINUX_VERSION >= 5.3 */
+	},
+#endif /* !WL_TWT && WL_TWT_HAL_IF */
+#ifdef SUPPORT_OTA_UPDATE
+	{
+		{
+			.vendor_id = OUI_GOOGLE,
+			.subcmd = WIFI_SUBCMD_GET_OTA_CURRUNT_INFO
+		},
+		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
+		.doit = wl_cfgvendor_get_ota_current_info,
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 3, 0))
+		.policy = ota_update_attr_policy,
+		.maxattr = OTA_UPDATE_ATTRIBUTE_MAX
+#endif /* LINUX_VERSION >= 5.3 */
+	},
+	{
+		{
+			.vendor_id = OUI_GOOGLE,
+			.subcmd = WIFI_SUBCMD_OTA_UPDATE
+		},
+		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
+		.doit = wl_cfgvendor_ota_download,
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 3, 0))
+		.policy = ota_update_attr_policy,
+		.maxattr = OTA_UPDATE_ATTRIBUTE_MAX
+#endif /* LINUX_VERSION >= 5.3 */
+	},
+#endif /* SUPPORT_OTA_UPDATE */
+#ifdef OEM_ANDROID
+	{
+		{
+			.vendor_id = OUI_GOOGLE,
+			.subcmd = WIFI_SUBCMD_SET_DTIM_CONFIG
+		},
+		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
+		.doit = wl_cfgvendor_set_dtim_config,
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 3, 0))
+		.policy = andr_wifi_attr_policy,
+		.maxattr = ANDR_WIFI_ATTRIBUTE_MAX
+#endif /* LINUX_VERSION >= 5.3 */
+	},
+#endif /* OEM_ANDROID */
+#ifdef WL_USABLE_CHAN
+	{
+		{
+			.vendor_id = OUI_GOOGLE,
+			.subcmd = WIFI_SUBCMD_USABLE_CHAN
+		},
+		.flags = WIPHY_VENDOR_CMD_NEED_WDEV,
+		.doit = wl_cfgvendor_get_usable_channels,
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 3, 0))
+		.policy = usable_chan_attr_policy,
+		.maxattr = USABLECHAN_ATTRIBUTE_MAX
+#endif /* LINUX_VERSION >= 5.3 */
+	},
+#endif /* WL_USABLE_CHAN */
+#ifdef WLAN_ACCEL_BOOT
+	{
+		{
+			.vendor_id = OUI_GOOGLE,
+			.subcmd = WIFI_SUBCMD_TRIGGER_SSR
+		},
+		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
+		.doit = wl_cfgvendor_trigger_ssr
+	},
+#endif /* WLAN_ACCEL_BOOT */
+	{
+		{
+			.vendor_id = OUI_GOOGLE,
+			.subcmd = WIFI_SUBCMD_GET_RADIO_COMBO_MATRIX
+		},
+		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
+		.doit = wl_cfgvendor_get_radio_combo_matrix,
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 3, 0))
+		.policy = wifi_radio_combo_attr_policy,
+		.maxattr = ANDR_WIFI_ATTRIBUTE_RADIO_COMBO_MAX
+#endif /* LINUX_VERSION >= 5.3 */
+	},
+	{
+		{
+			.vendor_id = OUI_GOOGLE,
+			.subcmd = WIFI_SUBCMD_SET_TX_POWER_LIMITS
+		},
+		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
+		.doit = wl_cfgvendor_set_tx_power_policy_handler,
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 3, 0))
+		.policy = wifi_tx_power_limits_attr_policy,
+		.maxattr = TX_POWER_ATTRIBUTE_MAX
+#endif /* LINUX_VERSION >= 5.3 */
+	},
 
 };
 
@@ -10311,7 +13829,13 @@ static const struct  nl80211_vendor_cmd_info wl_vendor_events [] = {
 		{ OUI_BRCM, BRCM_VENDOR_EVENT_CU},
 		{ OUI_BRCM, BRCM_VENDOR_EVENT_WIPS},
 		{ OUI_GOOGLE, NAN_ASYNC_RESPONSE_DISABLED},
-		{ OUI_BRCM, BRCM_VENDOR_EVENT_RCC_INFO}
+		{ OUI_BRCM, BRCM_VENDOR_EVENT_RCC_INFO},
+		{ OUI_BRCM, BRCM_VENDOR_EVENT_ACS},
+		{ OUI_BRCM, BRCM_VENDOR_EVENT_TWT},
+		{ OUI_GOOGLE, BRCM_VENDOR_EVENT_TPUT_DUMP},
+		{ OUI_GOOGLE, GOOGLE_NAN_EVENT_MATCH_EXPIRY},
+		{ OUI_BRCM, BRCM_VENDOR_EVENT_RCC_FREQ_INFO},
+		{ OUI_BRCM, BRCM_VENDOR_EVENT_CONNECTIVITY_LOG},
 };
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 3, 0))
@@ -10348,16 +13872,27 @@ int wl_cfgvendor_attach(struct wiphy *wiphy, dhd_pub_t *dhd)
 
 #ifdef DEBUGABILITY
 	dhd_os_dbg_register_callback(FW_VERBOSE_RING_ID, wl_cfgvendor_dbg_ring_send_evt);
+#ifdef DHD_DEBUGABILITY_EVENT_RING
 	dhd_os_dbg_register_callback(DHD_EVENT_RING_ID, wl_cfgvendor_dbg_ring_send_evt);
+#endif /* DHD_DEBUGABILITY_EVENT_RING */
 #ifdef DHD_DEBUGABILITY_LOG_DUMP_RING
 	dhd_os_dbg_register_callback(DRIVER_LOG_RING_ID, wl_cfgvendor_dbg_ring_send_evt);
 	dhd_os_dbg_register_callback(ROAM_STATS_RING_ID, wl_cfgvendor_dbg_ring_send_evt);
+#ifdef DHD_DEBUGABILITY_DEBUG_DUMP
+	dhd_os_dbg_register_callback(DEBUG_DUMP_RING1_ID, wl_cfgvendor_dbg_ring_send_evt);
+	dhd_os_dbg_register_callback(DEBUG_DUMP_RING2_ID, wl_cfgvendor_dbg_ring_send_evt);
+#endif /* DHD_DEBUGABILITY_DEBUG_DUMP */
 #endif /* DHD_DEBUGABILITY_LOG_DUMP_RING */
+#ifdef DHD_PKT_LOGGING_DBGRING
+	dhd_os_dbg_register_callback(PACKET_LOG_RING_ID, wl_cfgvendor_dbg_ring_send_evt);
+#endif /* DHD_PKT_LOGGING_DBGRING */
 #endif /* DEBUGABILITY */
 #ifdef DHD_LOG_DUMP
 	dhd_os_dbg_register_urgent_notifier(dhd, wl_cfgvendor_dbg_send_file_dump_evt);
 #endif /* DHD_LOG_DUMP */
-
+#ifdef SUPPORT_OTA_UPDATE
+	(void)wl_set_ota_nvram_ext(dhd);
+#endif /* SUPPORT_OTA_UPDATE */
 	return 0;
 }
 
@@ -10524,7 +14059,7 @@ wl_cfgvendor_simple_hang_event(struct net_device *dev, u16 reason)
 	nla_put(msg, DEBUG_ATTRIBUTE_HANG_REASON, DHD_MEMDUMP_LONGSTR_LEN, dhd->memdump_str);
 #endif
 
-	cfg80211_vendor_event(msg, kflags);
+	CFG80211_VENDOR_EVENT(msg, kflags);
 	return;
 }
 
@@ -10540,7 +14075,7 @@ wl_copy_hang_info_if_falure(struct net_device *dev, u16 reason, s32 ret)
 	int remain_len = 0;
 
 	if (!dev) {
-		WL_ERR(("dev is null"));
+		WL_ERR(("dev is null\n"));
 		return;
 
 	}
@@ -10598,3 +14133,258 @@ wl_copy_hang_info_if_falure(struct net_device *dev, u16 reason, s32 ret)
 	return;
 }
 #endif /* WL_CFGVENDOR_SEND_HANG_EVENT */
+
+#ifdef WL_CFGVENDOR_SEND_ALERT_EVENT
+void
+wl_cfgvendor_send_alert_event(struct net_device *dev, uint32 reason)
+{
+#if (ANDROID_VERSION >= 11)
+	struct bcm_cfg80211 *cfg;
+	struct wiphy *wiphy;
+	struct sk_buff *msg;
+	gfp_t kflags = in_atomic() ? GFP_ATOMIC : GFP_KERNEL;
+
+	WL_DBG(("wl_cfgvendor_send_fw_dump_event %d\n", reason));
+
+	cfg = wl_cfg80211_get_bcmcfg();
+	if (!cfg || !cfg->wdev) {
+		WL_ERR(("fw dump evt invalid arg\n"));
+		return;
+	}
+
+	wiphy = bcmcfg_to_wiphy(cfg);
+	if (!wiphy) {
+		WL_ERR(("wiphy is NULL\n"));
+		return;
+	}
+
+	/* Allocate the skb for vendor event */
+	msg = CFG80211_VENDOR_EVENT_ALLOC(wiphy, ndev_to_wdev(dev), sizeof(uint32),
+		GOOGLE_FW_DUMP_EVENT, kflags);
+	if (!msg) {
+		WL_ERR(("%s: fail to allocate skb for vendor event\n", __FUNCTION__));
+		return;
+	}
+
+	nla_put_u32(msg, DEBUG_ATTRIBUTE_FW_ERR_CODE, reason);
+
+	cfg80211_vendor_event(msg, kflags);
+#endif
+	return;
+}
+#endif /* WL_CFGVENDOR_SEND_ALERT_EVENT */
+
+#ifdef WL_CFGVENDOR_CUST_ADVLOG
+void
+wl_cfgvendor_custom_advlog_roam_log(void *plog, uint32 armcycle)
+{
+	prsv_periodic_log_hdr_t *hdr = (prsv_periodic_log_hdr_t *)plog;
+	const pr_advlog_tbl_t *cur_advlog_elem = &advlog_print_tbl[0];
+
+	if (hdr->version < ROAM_LOG_VER_3) {
+		WL_ERR(("%s: Version mis-match(%d)\n", __FUNCTION__, hdr->version));
+		return;
+	}
+
+	while (cur_advlog_elem && cur_advlog_elem->advlog_func) {
+		if (hdr->id == cur_advlog_elem->id) {
+			cur_advlog_elem->advlog_func(plog, armcycle);
+			break;
+		}
+		cur_advlog_elem++;
+	}
+}
+
+static void
+wl_cfgvendor_custom_advlog_scan_start(void *plog, uint32 armcycle)
+{
+	roam_log_trig_v2_t *log = (roam_log_trig_v2_t *)plog;
+	uint cust_roam_rsn = WLC_E_REASON_INITIAL_ASSOC;
+	int i;
+	bool rssi_thresh = FALSE;
+
+	if (log->result != BCME_OK) {
+		/* Not required logging if ROAM scan is failed. */
+		return;
+	}
+
+	for (i = 0; i < WL_CUST_ROAM_REASON_MAX; i++) {
+		if (dhd_covt_roam_rsn_list[i].roam_rsn == log->reason) {
+			cust_roam_rsn = dhd_covt_roam_rsn_list[i].cust_roam_rsn;
+			break;
+		}
+	}
+
+	if ((log->reason == WLC_E_REASON_LOW_RSSI) ||
+		(log->reason == WLC_E_REASON_LOW_RSSI_CU) ||
+		(log->reason == WLC_E_REASON_INACTIVITY) ||
+		(log->reason == WLC_E_REASON_ROAM_SCAN_TIMEOUT)) {
+		rssi_thresh = TRUE;
+	}
+	SUPP_ADVLOG(("[ROAM] SCAN_START reason=%d rssi=%d cu=%d full_scan=%d "
+		"rssi_thresh=%d [%d]\n",
+		cust_roam_rsn, log->rssi, log->current_cu, log->full_scan,
+		(rssi_thresh ? log->low_rssi.rssi_threshold : (0)), armcycle));
+}
+
+static int
+wl_cfgvendor_custom_advlog_get_rcc(chanspec_t *chanspecs)
+{
+	struct bcm_cfg80211 *cfg;
+	struct net_device *ndev;
+	int rcc_chan_cnt = 0;
+	wlc_ssid_t *ssid = NULL;
+
+	cfg = wl_cfg80211_get_bcmcfg();
+	ndev = bcmcfg_to_prmry_ndev(cfg);
+
+	/* Get Current SSID */
+	ssid = (struct wlc_ssid *)wl_read_prof(cfg, ndev, WL_PROF_SSID);
+	if (!ssid) {
+		WL_ERR(("No SSID found in the saved profile\n"));
+		goto exit;
+	}
+
+	rcc_chan_cnt = get_roam_channel_list(cfg, 0, chanspecs, MAX_ROAM_CHANNEL,
+		ssid, ioctl_version);
+
+exit:
+	return rcc_chan_cnt;
+}
+
+#define CH_LIST_LEN	(SUPP_LOG_LEN / 2)
+static void
+wl_cfgvendor_custom_advlog_scan_cmpl(void *plog, uint32 armcycle)
+{
+	int i;
+	roam_log_scan_cmplt_v2_t *log = (roam_log_scan_cmplt_v2_t *)plog;
+	int freq;
+#ifdef ESCAN_CHANNEL_CACHE
+	chanspec_t chanspecs[MAX_ROAM_CHANNEL] = {0};
+	uint ch_cnt = 0;
+	char ch_list[CH_LIST_LEN] = {'\0'};
+	uint buf_pos = 0;
+
+	ch_cnt = wl_cfgvendor_custom_advlog_get_rcc(chanspecs);
+
+	bzero(ch_list, CH_LIST_LEN);
+	for (i = 0; i < ch_cnt; i++) {
+		freq = wl_channel_to_frequency(wf_chspec_ctlchan(chanspecs[i]),
+			CHSPEC_BAND(chanspecs[i]));
+		if (CH_LIST_LEN < buf_pos) {
+			break;
+		}
+		buf_pos += snprintf(&ch_list[buf_pos], CH_LIST_LEN - buf_pos,
+			"%d ", freq);
+	}
+
+	SUPP_ADVLOG(("[ROAM] SCAN_DONE ap_count=%d freq[%d]=%s [%d]\n",
+		log->scan_count, ch_cnt, ch_list, armcycle));
+#else
+	SUPP_ADVLOG(("[ROAM] SCAN_DONE ap_count=%d freq[%d] [%d]\n",
+		log->scan_count, log->chan_num, armcycle));
+#endif /* ESCAN_CHANNEL_CACHE */
+
+	freq = wl_channel_to_frequency(wf_chspec_ctlchan(log->cur_info.chanspec),
+		CHSPEC_BAND(log->cur_info.chanspec));
+	/* do not print to the kernel, only for framework (MACDBG_FULL) */
+	SUPP_ADVLOG(("[ROAM] SCORE_CUR_AP bssid=" MACDBG_FULL " freq=%d rssi=%d cu=%d "
+		"score=%d.%02d\n",
+		MAC2STRDBG_FULL((uint8 *)&log->cur_info.addr),
+		freq, log->cur_info.rssi,
+		log->cur_info.cu_avail ?
+		(log->cur_info.cu * 100 / WL_MAX_CHANNEL_USAGE) : WL_CU_NOT_AVAIL,
+		log->cur_info.score / 100, log->cur_info.score % 100));
+
+	for (i = 0; i < log->scan_list_size; i++) {
+		freq = wl_channel_to_frequency(wf_chspec_ctlchan(log->scan_list[i].chanspec),
+			CHSPEC_BAND(log->scan_list[i].chanspec));
+		/* do not print to the kernel, only for framework (MACDBG_FULL) */
+		SUPP_ADVLOG(("[ROAM] SCORE_CANDI[%d], bssid=" MACDBG_FULL " freq=%d "
+			"rssi=%d cu=%d score=%d.%02d tp=%dkbps\n",
+			i, MAC2STRDBG_FULL((uint8 *)&log->scan_list[i].addr), freq,
+			log->scan_list[i].rssi,
+			log->scan_list[i].cu_avail ?
+			(log->scan_list[i].cu * 100 / WL_MAX_CHANNEL_USAGE) : WL_CU_NOT_AVAIL,
+			log->scan_list[i].score / 100, log->scan_list[i].score % 100,
+			log->scan_list[i].estm_tput != ROAM_LOG_INVALID_TPUT?
+			log->scan_list[i].estm_tput:0));
+	}
+}
+
+static void
+wl_cfgvendor_custom_advlog_roam_cmpl(void *plog, uint32 armcycle)
+{
+	roam_log_cmplt_v1_t *log = (roam_log_cmplt_v1_t *)plog;
+
+	if (log->status == WLC_E_STATUS_ABORT) {
+		/* Roaming Abort(Cancel) */
+		SUPP_ADVLOG(("[ROAM] CANCELLED [%d]\n", armcycle));
+	} else if (log->status == WLC_E_STATUS_NO_NETWORKS || log->status == WLC_E_STATUS_TIMEOUT) {
+		/* Roaming No Networks */
+		/* do not print to the kernel, only for framework (MACDBG_FULL) */
+		SUPP_ADVLOG(("[ROAM] RESULT NO_ROAM bssid=" MACDBG_FULL " [%d]\n",
+			MAC2STRDBG_FULL((uint8 *)&log->addr), armcycle));
+	} else {
+		/* do not print to the kernel, only for framework (MACDBG_FULL) */
+		SUPP_ADVLOG(("[ROAM] RESULT ROAM bssid=" MACDBG_FULL " [%d status=%d]\n",
+			MAC2STRDBG_FULL((uint8 *)&log->addr), armcycle, log->status));
+	}
+}
+
+static void
+wl_cfgvendor_custom_advlog_btm_req(void *plog, uint32 armcycle)
+{
+	roam_log_btm_req_v4_t *log = (roam_log_btm_req_v4_t *)plog;
+	int i;
+
+	SUPP_ADVLOG(("[BTM] REQ token=%d mode=%d disassoc=%d validity=%d "
+		"candidate_list_cnt=%d [%d]\n",
+		log->token, log->req_mode, log->disassoc_dur, log->validity_dur,
+		log->nbrlist_size, armcycle));
+	if (log->nbrlist_size) {
+		int max_idx = MIN(log->nbrlist_size, ROAM_NBR_RPT_LIST_SIZE);
+		for (i = 0; i < max_idx; i++) {
+			/* do not print to the kernel, only for framework (MACDBG_FULL) */
+			SUPP_ADVLOG(("[BTM] REQ_CANDI[%d] bssid=" MACDBG_FULL " preference=%d\n",
+				i, MAC2STRDBG_FULL((uint8 *)&log->nbr_list[i].bssid),
+				log->nbr_list[i].preference));
+		}
+	}
+}
+
+static void
+wl_cfgvendor_custom_advlog_btm_resp(void *plog, uint32 armcycle)
+{
+	roam_log_btm_resp_v4_t *log = (roam_log_btm_resp_v4_t *)plog;
+
+	/* do not print to the kernel, only for framework (MACDBG_FULL) */
+	SUPP_ADVLOG(("[BTM] RESP token=%d status=%d delay=%d target=" MACDBG_FULL " [%d]\n",
+		log->token, log->status, log->term_delay,
+		MAC2STRDBG_FULL((uint8 *)&log->target_addr), armcycle));
+}
+
+static void
+wl_cfgvendor_custom_advlog_btm_wtc(void *plog, uint32 armcycle)
+{
+	roam_log_wtc_btmrep_v3_t *log = (roam_log_wtc_btmrep_v3_t *)plog;
+
+	if (log->wtc_type == WTC_BTMREQ) {
+		SUPP_ADVLOG(("[BTM] WTC reason=%d sub_code=%d duration=%d [%d]\n",
+			log->wtcreq.rsn_code, log->wtcreq.subcode, log->wtcreq.duration,
+			armcycle));
+	} else if (log->wtc_type == WTC_BTMRESP) {
+		SUPP_ADVLOG(("[BTM] WTC reason_code=%d [%d]\n",
+			log->wtcresp.rsn_code, armcycle));
+	}
+}
+
+static void
+wl_cfgvendor_custom_advlog_btm_query(void *plog, uint32 armcycle)
+{
+	roam_log_btm_query_v3_t *log = (roam_log_btm_query_v3_t *)plog;
+
+	SUPP_ADVLOG(("[BTM] QUERY token=%d reason=%d [%d]\n",
+		log->token, log->reason, armcycle));
+}
+#endif /* WL_CFGVENDOR_CUST_ADVLOG */

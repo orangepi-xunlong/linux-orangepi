@@ -1,7 +1,7 @@
 /*
  * Customer code to add GPIO control during WLAN start/stop
  *
- * Copyright (C) 2020, Broadcom.
+ * Copyright (C) 2022, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -32,6 +32,8 @@
 #include <dhd_linux.h>
 
 #include <wlioctl.h>
+
+#include <dhd_dbg.h>
 
 #ifndef BCMDONGLEHOST
 #include <wlc_pub.h>
@@ -68,7 +70,7 @@ int dhd_customer_oob_irq_map(void *adapter, unsigned long *irq_flags_ptr)
 {
 	int  host_oob_irq = 0;
 
-#if defined(CUSTOMER_HW2) || defined(CUSTOMER_HW4) || defined(BOARD_HIKEY)
+#if defined(BOARD_HIKEY)
 	host_oob_irq = wifi_platform_get_irq_number(adapter, irq_flags_ptr);
 
 #else
@@ -87,7 +89,7 @@ int dhd_customer_oob_irq_map(void *adapter, unsigned long *irq_flags_ptr)
 	WL_ERROR(("%s: customer specific Host GPIO number is (%d)\n",
 	         __FUNCTION__, dhd_oob_gpio_num));
 
-#endif /* CUSTOMER_HW2 || CUSTOMER_HW4 || BOARD_HIKEY */
+#endif /* BOARD_HIKER */
 
 	return (host_oob_irq);
 }
@@ -114,8 +116,7 @@ dhd_custom_get_mac_address(void *adapter, unsigned char *buf)
 		return -EINVAL;
 
 	/* Customer access to MAC address stored outside of DHD driver */
-#if (defined(CUSTOMER_HW2) || defined(CUSTOMER_HW10) || defined(BOARD_HIKEY)) && \
-	(LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 35))
+#if defined(BOARD_HIKEY) && (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 35))
 	ret = wifi_platform_get_mac_addr(adapter, buf);
 #endif
 
@@ -131,7 +132,195 @@ dhd_custom_get_mac_address(void *adapter, unsigned char *buf)
 }
 #endif /* GET_CUSTOM_MAC_ENABLE */
 
-#ifndef CUSTOMER_HW4
+#ifdef SYNA_SAR_CUSTOMER_PARAMETER
+struct customer_cntry_list {
+	eCountry_flag_type  type;
+	char                ccode[WLC_CNTRY_BUF_SZ];   /* Country code */
+};
+
+/* maximum: (A~Z+0~9) * (A~Z+0~9) = (26+10)*(26+10) = 1296 */
+#define MAX_COUNTRY_LIST        500
+struct customer_cntry_list syna_cntry_flag[MAX_COUNTRY_LIST] = {
+	/* FCC TYPE */
+	{SYNA_COUNTRY_TYPE_FCC, "AG"},
+	{SYNA_COUNTRY_TYPE_FCC, "AI"},
+	{SYNA_COUNTRY_TYPE_FCC, "AR"},
+	{SYNA_COUNTRY_TYPE_FCC, "AW"},
+	{SYNA_COUNTRY_TYPE_FCC, "BB"},
+	{SYNA_COUNTRY_TYPE_FCC, "BL"},
+	{SYNA_COUNTRY_TYPE_FCC, "BM"},
+	{SYNA_COUNTRY_TYPE_FCC, "BO"},
+	{SYNA_COUNTRY_TYPE_FCC, "BS"},
+	{SYNA_COUNTRY_TYPE_FCC, "BZ"},
+	{SYNA_COUNTRY_TYPE_FCC, "CA"},
+	{SYNA_COUNTRY_TYPE_FCC, "CL"},
+	{SYNA_COUNTRY_TYPE_FCC, "CO"},
+	{SYNA_COUNTRY_TYPE_FCC, "CR"},
+	{SYNA_COUNTRY_TYPE_FCC, "CW"},
+	{SYNA_COUNTRY_TYPE_FCC, "DO"},
+	{SYNA_COUNTRY_TYPE_FCC, "EC"},
+	{SYNA_COUNTRY_TYPE_FCC, "FM"},
+	{SYNA_COUNTRY_TYPE_FCC, "GT"},
+	{SYNA_COUNTRY_TYPE_FCC, "GU"},
+	{SYNA_COUNTRY_TYPE_FCC, "GY"},
+	{SYNA_COUNTRY_TYPE_FCC, "HN"},
+	{SYNA_COUNTRY_TYPE_FCC, "HT"},
+	{SYNA_COUNTRY_TYPE_FCC, "IN"},
+	{SYNA_COUNTRY_TYPE_FCC, "IR"},
+	{SYNA_COUNTRY_TYPE_FCC, "JM"},
+	{SYNA_COUNTRY_TYPE_FCC, "KH"},
+	{SYNA_COUNTRY_TYPE_FCC, "KN"},
+	{SYNA_COUNTRY_TYPE_FCC, "KR"},
+	{SYNA_COUNTRY_TYPE_FCC, "KY"},
+	{SYNA_COUNTRY_TYPE_FCC, "LC"},
+	{SYNA_COUNTRY_TYPE_FCC, "MF"},
+	{SYNA_COUNTRY_TYPE_FCC, "MP"},
+	{SYNA_COUNTRY_TYPE_FCC, "NI"},
+	{SYNA_COUNTRY_TYPE_FCC, "PA"},
+	{SYNA_COUNTRY_TYPE_FCC, "PE"},
+	{SYNA_COUNTRY_TYPE_FCC, "PG"},
+	{SYNA_COUNTRY_TYPE_FCC, "PM"},
+	{SYNA_COUNTRY_TYPE_FCC, "PW"},
+	{SYNA_COUNTRY_TYPE_FCC, "PR"},
+	{SYNA_COUNTRY_TYPE_FCC, "PY"},
+	{SYNA_COUNTRY_TYPE_FCC, "SR"},
+	{SYNA_COUNTRY_TYPE_FCC, "SV"},
+	{SYNA_COUNTRY_TYPE_FCC, "SX"},
+	{SYNA_COUNTRY_TYPE_FCC, "TC"},
+	{SYNA_COUNTRY_TYPE_FCC, "TT"},
+	{SYNA_COUNTRY_TYPE_FCC, "US"},
+	{SYNA_COUNTRY_TYPE_FCC, "UY"},
+	{SYNA_COUNTRY_TYPE_FCC, "VC"},
+	{SYNA_COUNTRY_TYPE_FCC, "VE"},
+	{SYNA_COUNTRY_TYPE_FCC, "VG"},
+	{SYNA_COUNTRY_TYPE_FCC, "VI"},
+	{SYNA_COUNTRY_TYPE_FCC, "VU"},
+	{SYNA_COUNTRY_TYPE_FCC, "WF"},
+	{SYNA_COUNTRY_TYPE_FCC, "WS"},
+	{SYNA_COUNTRY_TYPE_INVALID, ""}
+};
+
+static int gSyna_country_flag_qty = 55;
+
+static int syna_country_flag_find(char *cntry)
+{
+	char country[WLC_CNTRY_BUF_SZ];
+	int  ret = BCME_NOTFOUND;
+	int  n;
+
+	if (!cntry) {
+		DHD_ERROR(("%s: invalid cntry!\n", __FUNCTION__));
+		return BCME_BADARG;
+	} else {
+		n = strcspn(cntry, " ,");
+		if ((n != 2) && (n != 3)) {
+			DHD_ERROR(("%s: invalid n=%d!\n", __FUNCTION__, n));
+			return BCME_BUFTOOLONG;
+		} else {
+			strlcpy(country, cntry, WLC_CNTRY_BUF_SZ);
+			country[n] = '\0';
+			DHD_TRACE(("%s: here n=%d, country='%s'!\n",
+			           __FUNCTION__, n, country));
+		}
+	}
+
+	n = 0;
+	while ((MAX_COUNTRY_LIST > n) &&
+	       (SYNA_COUNTRY_TYPE_INVALID != syna_cntry_flag[n].type) &&
+	       (0 < strlen(syna_cntry_flag[n].ccode))) {
+		if (!strncmp(country, syna_cntry_flag[n].ccode, WLC_CNTRY_BUF_SZ)) {
+			ret = n;
+			break;
+		} else {
+			n++;
+		}
+	}
+
+	/* sync up the quantity for appending new item */
+	if ((MAX_COUNTRY_LIST > n) &&
+	    (SYNA_COUNTRY_TYPE_INVALID == syna_cntry_flag[n].type)) {
+		gSyna_country_flag_qty = n;
+		DHD_TRACE(("%s: update qty=%d!\n", __FUNCTION__, n));
+	}
+
+	return ret;
+}
+
+eCountry_flag_type syna_country_check_type(char *cntry)
+{
+	int ret = SYNA_COUNTRY_TYPE_INVALID;
+	int i;
+
+	i = syna_country_flag_find(cntry);
+	if (0 <= i) {
+		ret = syna_cntry_flag[i].type;
+	}
+
+	return ret;
+}
+
+int syna_country_update_type_list(eCountry_flag_type type, char *list_str)
+{
+	char   *next = NULL;
+	int     n = 0;
+	size_t  len;
+
+	if (SYNA_COUNTRY_TYPE_QTY <= type) {
+		return BCME_BADARG;
+	} else if ((next = list_str) == NULL) {
+		return BCME_BADARG;
+	}
+
+	while ((len = strcspn(next, " ,")) > 0) {
+		if (len >= WLC_CNTRY_BUF_SZ) {
+			DHD_ERROR(("%s: string '%s' before ',' or ' ' is too long\n",
+			           __FUNCTION__, next));
+			return BCME_ERROR;
+		}
+
+		n = syna_country_flag_find(next);
+		if (0 > n) {
+			if (BCME_NOTFOUND == n) {
+				if (MAX_COUNTRY_LIST <= (1 + gSyna_country_flag_qty)) {
+					DHD_ERROR(("%s: too many ccode(max=%d) list: '%s'\n",
+					           __FUNCTION__, MAX_COUNTRY_LIST, list_str));
+					break;
+				} else {
+					/* adopt this new item */
+					n = gSyna_country_flag_qty;
+					gSyna_country_flag_qty++;
+				}
+			} else {
+				DHD_ERROR(("%s: skip this invalid item '%s', err=%d\n",
+				           __FUNCTION__, next, n));
+			}
+		}
+
+		if (0 <= n) {
+			/* update or add a new item */
+			syna_cntry_flag[n].type = type;
+			strlcpy(syna_cntry_flag[n].ccode, next, WLC_CNTRY_BUF_SZ);
+			syna_cntry_flag[n].ccode[len] = '\0';
+			DHD_TRACE(("%s: cntry list [%d] type=%d ccode=%s\n",
+			           __FUNCTION__, n,
+			           syna_cntry_flag[n].type, syna_cntry_flag[n].ccode));
+
+			/* fill with a new blank item as terminate */
+			if ((gSyna_country_flag_qty == (n + 1)) &&
+				(MAX_COUNTRY_LIST > gSyna_country_flag_qty)) {
+				syna_cntry_flag[n+1].type = SYNA_COUNTRY_TYPE_INVALID;
+				syna_cntry_flag[n+1].ccode[0] = '\0';
+			}
+		}
+
+		next += len;
+		next += strspn(next, " ,");
+	}
+
+	return BCME_OK;
+}
+#endif /* SYNA_SAR_CUSTOMER_PARAMETER */
+
 /* Customized Locale table : OPTIONAL feature */
 const struct cntry_locales_custom translate_custom_table[] = {
 /* Table should be filled out based on custom platform regulatory requirement */
@@ -179,7 +368,7 @@ const struct cntry_locales_custom translate_custom_table[] = {
 	{"TR", "TR", 0},
 	{"NO", "NO", 0},
 #endif /* EXMAPLE_TABLE */
-#if (defined(CUSTOMER_HW2) || defined(BOARD_HIKEY)) && !defined(CUSTOMER_HW5)
+#if defined(BOARD_HIKEY)
 #if defined(BCM4335_CHIP)
 	{"",   "XZ", 11},  /* Universal if Country code is unknown or empty */
 #endif
@@ -236,142 +425,7 @@ const struct cntry_locales_custom translate_custom_table[] = {
 	{"PS", "XZ", 11},	/* Universal if Country code is PALESTINIAN TERRITORY, OCCUPIED */
 	{"TL", "XZ", 11},	/* Universal if Country code is TIMOR-LESTE (EAST TIMOR) */
 	{"MH", "XZ", 11},	/* Universal if Country code is MARSHALL ISLANDS */
-#elif defined(CUSTOMER_HW5)
-	{"",   "XZ", 11},
-	{"AE", "AE", 212},
-	{"AG", "AG", 2},
-	{"AI", "AI", 2},
-	{"AL", "AL", 2},
-	{"AN", "AN", 3},
-	{"AR", "AR", 212},
-	{"AS", "AS", 15},
-	{"AT", "AT", 4},
-	{"AU", "AU", 212},
-	{"AW", "AW", 2},
-	{"AZ", "AZ", 2},
-	{"BA", "BA", 2},
-	{"BD", "BD", 2},
-	{"BE", "BE", 4},
-	{"BG", "BG", 4},
-	{"BH", "BH", 4},
-	{"BM", "BM", 15},
-	{"BN", "BN", 4},
-	{"BR", "BR", 212},
-	{"BS", "BS", 2},
-	{"BY", "BY", 3},
-	{"BW", "BW", 1},
-	{"CA", "CA", 212},
-	{"CH", "CH", 212},
-	{"CL", "CL", 212},
-	{"CN", "CN", 212},
-	{"CO", "CO", 212},
-	{"CR", "CR", 21},
-	{"CY", "CY", 212},
-	{"CZ", "CZ", 212},
-	{"DE", "DE", 212},
-	{"DK", "DK", 4},
-	{"DZ", "DZ", 1},
-	{"EC", "EC", 23},
-	{"EE", "EE", 4},
-	{"EG", "EG", 212},
-	{"ES", "ES", 212},
-	{"ET", "ET", 2},
-	{"FI", "FI", 4},
-	{"FR", "FR", 212},
-	{"GB", "GB", 212},
-	{"GD", "GD", 2},
-	{"GF", "GF", 2},
-	{"GP", "GP", 2},
-	{"GR", "GR", 212},
-	{"GT", "GT", 0},
-	{"GU", "GU", 17},
-	{"HK", "HK", 212},
-	{"HR", "HR", 4},
-	{"HU", "HU", 4},
-	{"IN", "IN", 212},
-	{"ID", "ID", 212},
-	{"IE", "IE", 5},
-	{"IL", "IL", 7},
-	{"IN", "IN", 212},
-	{"IS", "IS", 4},
-	{"IT", "IT", 212},
-	{"JO", "JO", 3},
-	{"JP", "JP", 212},
-	{"KH", "KH", 4},
-	{"KI", "KI", 1},
-	{"KR", "KR", 212},
-	{"KW", "KW", 5},
-	{"KY", "KY", 4},
-	{"KZ", "KZ", 212},
-	{"LA", "LA", 4},
-	{"LB", "LB", 6},
-	{"LI", "LI", 4},
-	{"LK", "LK", 3},
-	{"LS", "LS", 2},
-	{"LT", "LT", 4},
-	{"LR", "LR", 2},
-	{"LU", "LU", 3},
-	{"LV", "LV", 4},
-	{"MA", "MA", 2},
-	{"MC", "MC", 1},
-	{"MD", "MD", 2},
-	{"ME", "ME", 2},
-	{"MK", "MK", 2},
-	{"MN", "MN", 0},
-	{"MO", "MO", 2},
-	{"MR", "MR", 2},
-	{"MT", "MT", 4},
-	{"MQ", "MQ", 2},
-	{"MU", "MU", 2},
-	{"MV", "MV", 3},
-	{"MX", "MX", 212},
-	{"MY", "MY", 212},
-	{"NI", "NI", 0},
-	{"NL", "NL", 212},
-	{"NO", "NO", 4},
-	{"NP", "NP", 3},
-	{"NZ", "NZ", 9},
-	{"OM", "OM", 4},
-	{"PA", "PA", 17},
-	{"PE", "PE", 212},
-	{"PG", "PG", 2},
-	{"PH", "PH", 212},
-	{"PL", "PL", 212},
-	{"PR", "PR", 25},
-	{"PT", "PT", 212},
-	{"PY", "PY", 4},
-	{"RE", "RE", 2},
-	{"RO", "RO", 212},
-	{"RS", "RS", 2},
-	{"RU", "RU", 212},
-	{"SA", "SA", 212},
-	{"SE", "SE", 212},
-	{"SG", "SG", 212},
-	{"SI", "SI", 4},
-	{"SK", "SK", 212},
-	{"SN", "SN", 2},
-	{"SV", "SV", 25},
-	{"TH", "TH", 212},
-	{"TR", "TR", 212},
-	{"TT", "TT", 5},
-	{"TW", "TW", 212},
-	{"UA", "UA", 212},
-	{"UG", "UG", 2},
-	{"US", "US", 212},
-	{"UY", "UY", 5},
-	{"VA", "VA", 2},
-	{"VE", "VE", 3},
-	{"VG", "VG", 2},
-	{"VI", "VI", 18},
-	{"VN", "VN", 4},
-	{"YT", "YT", 2},
-	{"ZA", "ZA", 212},
-	{"ZM", "ZM", 2},
-	{"XT", "XT", 212},
-	{"XZ", "XZ", 11},
-	{"XV", "XV", 17},
-	{"Q1", "Q1", 77},
-#endif /* (CUSTOMER_HW2 || BOARD_HIKEY) &&  CUSTOMER_HW5 */
+#endif /* BOARD_HIKEY */
 };
 
 /* Customized Locale convertor
@@ -434,4 +488,3 @@ get_customized_country_code(void *adapter, char *country_iso_code, wl_country_t 
 	*/
 #endif /* OEM_ANDROID */
 }
-#endif /* !CUSTOMER_HW4 */

@@ -2,7 +2,7 @@
  * SDIO spec header file
  * Protocol and standard (common) device definitions
  *
- * Copyright (C) 2020, Broadcom.
+ * Copyright (C) 2022, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -112,7 +112,7 @@ typedef volatile struct {
 /* io_en */
 #define SDIO_FUNC_ENABLE_1	0x02	/* function 1 I/O enable */
 #define SDIO_FUNC_ENABLE_2	0x04	/* function 2 I/O enable */
-#if defined (BT_OVER_SDIO)
+#if defined(BT_OVER_SDIO)
 #define SDIO_FUNC_ENABLE_3	0x08	/* function 2 I/O enable */
 #define SDIO_FUNC_DISABLE_3	0xF0	/* function 2 I/O enable */
 #endif /* defined (BT_OVER_SDIO) */
@@ -125,7 +125,7 @@ typedef volatile struct {
 #define INTR_CTL_MASTER_EN	0x1	/* interrupt enable master */
 #define INTR_CTL_FUNC1_EN	0x2	/* interrupt enable for function 1 */
 #define INTR_CTL_FUNC2_EN	0x4	/* interrupt enable for function 2 */
-#if defined (BT_OVER_SDIO)
+#if defined(BT_OVER_SDIO)
 #define INTR_CTL_FUNC3_EN	0x8	/* interrupt enable for function 3 */
 #endif /* defined (BT_OVER_SDIO) */
 /* intr_status */

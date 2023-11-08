@@ -1,7 +1,7 @@
 /*
  * BCMSDH Function Driver for the native SDIO/MMC driver in the Linux Kernel
  *
- * Copyright (C) 2020, Broadcom.
+ * Copyright (C) 2022, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -43,7 +43,7 @@
 #include <dhd.h>
 #include <dhd_dbg.h>
 
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 27)) && defined (CONFIG_PM_SLEEP)
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 27)) && defined(CONFIG_PM_SLEEP)
 #include <linux/suspend.h>
 extern volatile bool dhd_mmc_suspend;
 #endif
@@ -82,9 +82,23 @@ static void IRQHandler(struct sdio_func *func);
 static void IRQHandlerF2(struct sdio_func *func);
 #endif /* !defined(OOB_INTR_ONLY) */
 static int sdioh_sdmmc_get_cisaddr(sdioh_info_t *sd, uint32 regaddr);
-#if defined(ENABLE_INSMOD_NO_FW_LOAD) && !defined(BUS_POWER_RESTORE)
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 18, 0) && defined(MMC_SW_RESET)
+#if defined(ENABLE_INSMOD_NO_FW_LOAD)
+#if defined(MMC_SW_RESET) && LINUX_VERSION_CODE >= KERNEL_VERSION(4, 18, 0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 19, 0)
+extern int mmc_sw_reset(struct mmc_card *card);
+#else
 extern int mmc_sw_reset(struct mmc_host *host);
+#endif
+#elif defined(MMC_HW_RESET) && LINUX_VERSION_CODE >= KERNEL_VERSION(4, 2, 0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 18, 0)
+extern int mmc_hw_reset(struct mmc_card *card);
+#else
+extern int mmc_hw_reset(struct mmc_host *host);
+#endif
+#elif defined(BUS_POWER_RESTORE) && \
+LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 32) && LINUX_VERSION_CODE < KERNEL_VERSION(4, 19, 0)
+#undef MMC_SW_RESET
+#undef MMC_HW_RESET
 #else
 extern int sdio_reset_comm(struct mmc_card *card);
 #endif
@@ -103,13 +117,15 @@ extern PBCMSDH_SDMMC_INSTANCE gInstance;
 #define CUSTOM_SDIO_F1_BLKSIZE		DEFAULT_SDIO_F1_BLKSIZE
 #endif
 
+#define COPY_BUF_SIZE	(SDPCM_MAXGLOM_SIZE * 1600)
+
 #define MAX_IO_RW_EXTENDED_BLK		511
 
 uint sd_sdmode = SDIOH_MODE_SD4;	/* Use SD4 mode by default */
 uint sd_f2_blocksize = CUSTOM_SDIO_F2_BLKSIZE;
 uint sd_f1_blocksize = CUSTOM_SDIO_F1_BLKSIZE;
 
-#if defined (BT_OVER_SDIO)
+#if defined(BT_OVER_SDIO)
 uint sd_f3_blocksize = 64;
 #endif /* defined (BT_OVER_SDIO) */
 
@@ -139,7 +155,7 @@ static int
 sdioh_sdmmc_card_regwrite(sdioh_info_t *sd, int func, uint32 regaddr, int regsize, uint32 data);
 #endif /* NOTYET */
 
-#if defined (BT_OVER_SDIO)
+#if defined(BT_OVER_SDIO)
 extern
 void sdioh_sdmmc_card_enable_func_f3(sdioh_info_t *sd, struct sdio_func *func)
 {
@@ -148,6 +164,8 @@ void sdioh_sdmmc_card_enable_func_f3(sdioh_info_t *sd, struct sdio_func *func)
 }
 #endif /* defined (BT_OVER_SDIO) */
 
+void  sdmmc_set_timing(sdioh_info_t *sd, uint8 timing);
+uint8 sdmmc_get_timing(sdioh_info_t *sd);
 void  sdmmc_set_clock_rate(sdioh_info_t *sd, uint hz);
 uint  sdmmc_get_clock_rate(sdioh_info_t *sd);
 void  sdmmc_set_clock_divisor(sdioh_info_t *sd, uint sd_div);
@@ -182,10 +200,47 @@ sdioh_sdmmc_card_enablefuncs(sdioh_info_t *sd)
 	err_ret = sdio_enable_func(sd->func[1]);
 	sdio_release_host(sd->func[1]);
 	if (err_ret) {
-		sd_err(("bcmsdh_sdmmc: Failed to enable F1 Err: 0x%08x\n", err_ret));
+		sd_err(("bcmsdh_sdmmc: Failed to enable F1 Err: %d\n", err_ret));
 	}
 
 	return FALSE;
+}
+
+/*
+ *  Set standard CCCR driver strength. Default value is type B.
+ *  Type: Value, driver strength
+ *     A:  0x10, x1.5
+ *     B:  0x00, x1
+ *     C:  0x20, x0.75
+ *     D:  0x30, x0.5
+ */
+int
+sdioh_set_driver_strength(struct sdio_func *func, uint8 level)
+{
+	int reg;
+	int err = 0;
+
+	sdio_claim_host(func);
+	reg = sdio_readb(func, SDIOD_CCCR_DRIVER_STRENGTH, &err);
+	if (err) {
+		sd_err(("sd_ds error for read SDIOD_CCCR_DRIVER_STRENGTH : 0x%x\n", err));
+		goto done;
+	} else {
+		sd_info(("SYNA: sd_ds get cccr driver strength 0x%x\n", reg));
+	}
+
+	reg = ((reg & 0xf) | level);
+	sdio_writeb(func, reg, SDIOD_CCCR_DRIVER_STRENGTH, &err);
+
+	if (err) {
+		sd_err(("sd_ds error for write SDIOD_CCCR_DRIVER_STRENGTH : 0x%x\n", err));
+		goto done;
+	} else {
+		sd_info(("SYNA: sd_ds set cccr driver strength 0x%x\n", reg));
+	}
+done:
+	sdio_release_host(func);
+	return err;
 }
 
 /*
@@ -209,6 +264,14 @@ sdioh_attach(osl_t *osh, struct sdio_func *func)
 		return NULL;
 	}
 	bzero((char *)sd, sizeof(sdioh_info_t));
+#if defined(BCMSDIOH_TXGLOM) && defined(BCMSDIOH_STATIC_COPY_BUF)
+	sd->copy_buf = MALLOC(osh, COPY_BUF_SIZE);
+	if (sd->copy_buf == NULL) {
+		sd_err(("%s: MALLOC of %d-byte copy_buf failed\n",
+			__FUNCTION__, COPY_BUF_SIZE));
+		goto fail;
+	}
+#endif
 	sd->osh = osh;
 	sd->fake_func0.num = 0;
 	sd->fake_func0.card = func->card;
@@ -224,7 +287,7 @@ sdioh_attach(osl_t *osh, struct sdio_func *func)
 	sd->func[func->num] = func;
 #endif
 
-#if defined (BT_OVER_SDIO)
+#if defined(BT_OVER_SDIO)
 	sd->func[3] = NULL;
 #endif /* defined (BT_OVER_SDIO) */
 
@@ -273,6 +336,9 @@ sdioh_attach(osl_t *osh, struct sdio_func *func)
 	return sd;
 
 fail:
+#if defined(BCMSDIOH_TXGLOM) && defined(BCMSDIOH_STATIC_COPY_BUF)
+	MFREE(sd->osh, sd->copy_buf, COPY_BUF_SIZE);
+#endif
 	MFREE(sd->osh, sd, sizeof(sdioh_info_t));
 	return NULL;
 }
@@ -301,6 +367,9 @@ sdioh_detach(osl_t *osh, sdioh_info_t *sd)
 		sd->func[1] = NULL;
 		sd->func[2] = NULL;
 
+#if defined(BCMSDIOH_TXGLOM) && defined(BCMSDIOH_STATIC_COPY_BUF)
+		MFREE(sd->osh, sd->copy_buf, COPY_BUF_SIZE);
+#endif
 		MFREE(sd->osh, sd, sizeof(sdioh_info_t));
 	}
 	return SDIOH_API_RC_SUCCESS;
@@ -329,7 +398,7 @@ sdioh_enable_func_intr(sdioh_info_t *sd)
 	/* Enable F1 and F2 interrupts, clear master enable */
 	reg &= ~INTR_CTL_MASTER_EN;
 	reg |= (INTR_CTL_FUNC1_EN | INTR_CTL_FUNC2_EN);
-#if defined (BT_OVER_SDIO)
+#if defined(BT_OVER_SDIO)
 	reg |= (INTR_CTL_FUNC3_EN);
 #endif /* defined (BT_OVER_SDIO) */
 	sdio_writeb(sd->func[0], reg, SDIOD_CCCR_INTEN, &err);
@@ -357,7 +426,8 @@ sdioh_disable_func_intr(sdioh_info_t *sd)
 	sdio_claim_host(sd->func[0]);
 	reg = sdio_readb(sd->func[0], SDIOD_CCCR_INTEN, &err);
 	if (err) {
-		sd_err(("%s: error for read SDIO_CCCR_IENx : 0x%x\n", __FUNCTION__, err));
+		sd_err(("%s: error for read SDIO_CCCR_IENx : 0x%x (ignore when remove)\n",
+			__FUNCTION__, err));
 		sdio_release_host(sd->func[0]);
 		return SDIOH_API_RC_FAIL;
 	}
@@ -483,7 +553,8 @@ enum {
 	IOV_HCIREGS,
 	IOV_POWER,
 	IOV_CLOCK,
-	IOV_RXCHAIN
+	IOV_RXCHAIN,
+	IOV_DS
 };
 
 const bcm_iovar_t sdioh_iovars[] = {
@@ -494,10 +565,6 @@ const bcm_iovar_t sdioh_iovars[] = {
 	{"sd_ints",	IOV_USEINTS,	0, 0,	IOVT_BOOL,	0 },
 	{"sd_numints",	IOV_NUMINTS,	0, 0,	IOVT_UINT32,	0 },
 	{"sd_numlocalints", IOV_NUMLOCALINTS, 0, 0, IOVT_UINT32,	0 },
-#ifdef BCMINTERNAL
-	{"sd_hostreg",	IOV_HOSTREG,	0, 0,	IOVT_BUFFER,	sizeof(sdreg_t) },
-	{"sd_devreg",	IOV_DEVREG,	0, 0,	IOVT_BUFFER,	sizeof(sdreg_t) },
-#endif /* BCMINTERNAL */
 	{"sd_divisor",	IOV_DIVISOR,	0, 0,	IOVT_UINT32,	0 },
 	{"sd_power",	IOV_POWER,	0, 0,	IOVT_UINT32,	0 },
 	{"sd_clock",	IOV_CLOCK,	0, 0,	IOVT_UINT32,	0 },
@@ -507,6 +574,7 @@ const bcm_iovar_t sdioh_iovars[] = {
 #ifdef BCMDBG
 	{"sd_hciregs",	IOV_HCIREGS,	0, 0,	IOVT_BUFFER,	0 },
 #endif
+	{"sd_ds",	IOV_DS,		0, 0,	IOVT_UINT32,	0 },
 	{NULL, 0, 0, 0, 0, 0 }
 };
 
@@ -721,88 +789,52 @@ sdioh_iovar_op(sdioh_info_t *si, const char *name,
 		int_val = (int32)0;
 		bcopy(&int_val, arg, val_size);
 		break;
-#ifdef BCMINTERNAL
-	case IOV_GVAL(IOV_HOSTREG):
+
+	case IOV_GVAL(IOV_DS):
 	{
-		/* XXX Should copy for alignment reasons */
-		sdreg_t *sd_ptr = (sdreg_t *)params;
+		uint8 reg2;
+		int err;
 
-		if (sd_ptr->offset < SD_SysAddr || sd_ptr->offset > SD_MaxCurCap) {
-			sd_err(("%s: bad offset 0x%x\n", __FUNCTION__, sd_ptr->offset));
-			bcmerror = BCME_BADARG;
-			break;
+		sdio_claim_host(si->func[0]);
+		reg2 = sdio_readb(si->func[0], SDIOD_CCCR_DRIVER_STRENGTH, &err);
+		if (err) {
+			sd_err(("sd_ds error for read SDIOD_CCCR_DRIVER_STRENGTH : 0x%x\n", err));
+			bcmerror = BCME_SDIO_ERROR;
+		} else {
+			sd_trace(("sd_ds get cccr driver strength 0x%x\n", reg2));
 		}
+		sdio_release_host(si->func[0]);
 
-		sd_trace(("%s: rreg%d at offset %d\n", __FUNCTION__,
-		                  (sd_ptr->offset & 1) ? 8 : ((sd_ptr->offset & 2) ? 16 : 32),
-		                  sd_ptr->offset));
-		if (sd_ptr->offset & 1)
-			int_val = 8; /* sdioh_sdmmc_rreg8(si, sd_ptr->offset); */
-		else if (sd_ptr->offset & 2)
-			int_val = 16; /* sdioh_sdmmc_rreg16(si, sd_ptr->offset); */
-		else
-			int_val = 32; /* sdioh_sdmmc_rreg(si, sd_ptr->offset); */
-
+		int_val = (int)reg2;
 		bcopy(&int_val, arg, sizeof(int_val));
 		break;
 	}
 
-	case IOV_SVAL(IOV_HOSTREG):
+	case IOV_SVAL(IOV_DS):
 	{
-		/* XXX Should copy for alignment reasons */
-		sdreg_t *sd_ptr = (sdreg_t *)params;
+		uint8 type;
+		int err;
 
-		if (sd_ptr->offset < SD_SysAddr || sd_ptr->offset > SD_MaxCurCap) {
-			sd_err(("%s: bad offset 0x%x\n", __FUNCTION__, sd_ptr->offset));
+		if (int_val == 0) {
+			type = 0x0;
+		} else if (int_val == 1) {
+			type = 0x10;
+		} else if (int_val == 2) {
+			type = 0x20;
+		} else if (int_val == 3) {
+			type = 0x30;
+		} else {
 			bcmerror = BCME_BADARG;
 			break;
 		}
 
-		sd_trace(("%s: wreg%d value 0x%08x at offset %d\n", __FUNCTION__, sd_ptr->value,
-		                  (sd_ptr->offset & 1) ? 8 : ((sd_ptr->offset & 2) ? 16 : 32),
-		                  sd_ptr->offset));
-		break;
-	}
-
-	case IOV_GVAL(IOV_DEVREG):
-	{
-		/* XXX Should copy for alignment reasons */
-		sdreg_t *sd_ptr = (sdreg_t *)params;
-		uint8 data = 0;
-
-		if ((uint)sd_ptr->func > si->num_funcs) {
-			bcmerror = BCME_BADARG;
-			break;
-		}
-
-		if (sdioh_cfg_read(si, sd_ptr->func, sd_ptr->offset, &data)) {
-			bcmerror = BCME_SDIO_ERROR;
-			break;
-		}
-
-		int_val = (int)data;
-		bcopy(&int_val, arg, sizeof(int_val));
-		break;
-	}
-
-	case IOV_SVAL(IOV_DEVREG):
-	{
-		/* XXX Should copy for alignment reasons */
-		sdreg_t *sd_ptr = (sdreg_t *)params;
-		uint8 data = (uint8)sd_ptr->value;
-
-		if ((uint)sd_ptr->func > si->num_funcs) {
-			bcmerror = BCME_BADARG;
-			break;
-		}
-
-		if (sdioh_cfg_write(si, sd_ptr->func, sd_ptr->offset, &data)) {
-			bcmerror = BCME_SDIO_ERROR;
-			break;
+		err = sdioh_set_driver_strength(si->func[0], type);
+		if (err) {
+			sd_err(("sd_ds error write SDIOD_CCCR_DRIVER_STRENGTH : 0x%x\n", err));
 		}
 		break;
 	}
-#endif /* BCMINTERNAL */
+
 	default:
 		bcmerror = BCME_UNSUPPORTED;
 		break;
@@ -949,7 +981,7 @@ sdioh_request_byte(sdioh_info_t *sd, uint rw, uint func, uint regaddr, uint8 *by
 			 * as a special case.
 			 */
 			if (regaddr == SDIOD_CCCR_IOEN) {
-#if defined (BT_OVER_SDIO)
+#if defined(BT_OVER_SDIO)
 				do {
 				if (sd->func[3]) {
 					sd_info(("bcmsdh_sdmmc F3: *byte 0x%x\n", *byte));
@@ -1014,7 +1046,7 @@ sdioh_request_byte(sdioh_info_t *sd, uint rw, uint func, uint regaddr, uint8 *by
 					}
 					sdio_release_host(sd->func[2]);
 				}
-#if defined (BT_OVER_SDIO)
+#if defined(BT_OVER_SDIO)
 			} while (0);
 #endif /* defined (BT_OVER_SDIO) */
 		}
@@ -1206,7 +1238,7 @@ sdioh_request_word(sdioh_info_t *sd, uint cmd_type, uint rw, uint func, uint add
 		if (err_ret)
 #endif /* MMC_SDIO_ABORT */
 		{
-			sd_err(("bcmsdh_sdmmc: Failed to %s word F%d:@0x%05x=%02x, Err: 0x%08x\n",
+			sd_err(("bcmsdh_sdmmc: Failed to %s word F%d:@0x%05x=%02x, Err: %d\n",
 				rw ? "Write" : "Read", func, addr, *word, err_ret));
 		}
 	}
@@ -1356,7 +1388,8 @@ sdioh_request_packet_chain(sdioh_info_t *sd, uint fix_inc, uint write, uint func
 			return SDIOH_API_RC_FAIL;
 		}
 	}
-	} else if(sd->txglom_mode == SDPCM_TXGLOM_CPY) {
+	}
+	else if(sd->txglom_mode == SDPCM_TXGLOM_CPY) {
 		for (pnext = pkt; pnext; pnext = PKTNEXT(sd->osh, pnext)) {
 			ttl_len += PKTLEN(sd->osh, pnext);
 		}
@@ -1365,16 +1398,20 @@ sdioh_request_packet_chain(sdioh_info_t *sd, uint fix_inc, uint write, uint func
 		for (pnext = pkt; pnext; pnext = PKTNEXT(sd->osh, pnext)) {
 			uint8 *buf = (uint8*)PKTDATA(sd->osh, pnext);
 			pkt_len = PKTLEN(sd->osh, pnext);
-
 			if (!localbuf) {
+#ifdef BCMSDIOH_STATIC_COPY_BUF
+				if (ttl_len <= COPY_BUF_SIZE)
+					localbuf = sd->copy_buf;
+#else
 				localbuf = (uint8 *)MALLOC(sd->osh, ttl_len);
+#endif
 				if (localbuf == NULL) {
-					sd_err(("%s: %s TXGLOM: localbuf malloc FAILED\n",
-						__FUNCTION__, (write) ? "TX" : "RX"));
+					sd_err(("%s: %s localbuf malloc FAILED ttl_len=%d\n",
+						__FUNCTION__, (write) ? "TX" : "RX", ttl_len));
+					ttl_len -= pkt_len;
 					goto txglomfail;
 				}
 			}
-
 			bcopy(buf, (localbuf + local_plen), pkt_len);
 			local_plen += pkt_len;
 			if (PKTNEXT(sd->osh, pnext))
@@ -1419,8 +1456,10 @@ txglomfail:
 		return SDIOH_API_RC_FAIL;
 	}
 
+#ifndef BCMSDIOH_STATIC_COPY_BUF
 	if (localbuf)
 		MFREE(sd->osh, localbuf, ttl_len);
+#endif
 
 #ifndef PKT_STATICS
 	if (sd_msglevel & SDH_COST_VAL)
@@ -1746,21 +1785,44 @@ sdioh_sdmmc_card_regwrite(sdioh_info_t *sd, int func, uint32 regaddr, int regsiz
 }
 #endif /* NOTUSED */
 
-#if defined(ENABLE_INSMOD_NO_FW_LOAD) && !defined(BUS_POWER_RESTORE)
+#if defined(ENABLE_INSMOD_NO_FW_LOAD)
 static int sdio_sw_reset(sdioh_info_t *sd)
 {
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 18, 0) && defined(MMC_SW_RESET)
-	struct mmc_host *host = sd->func[0]->card->host;
-#endif
+	struct mmc_card *card = sd->func[0]->card;
 	int err = 0;
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 18, 0) && defined(MMC_SW_RESET)
-	printf("%s: Enter\n", __FUNCTION__);
+#if defined(MMC_SW_RESET) && LINUX_VERSION_CODE >= KERNEL_VERSION(4, 18, 0)
+	/* MMC_SW_RESET */
+	printf("%s: call mmc_sw_reset\n", __FUNCTION__);
 	sdio_claim_host(sd->func[0]);
-	err = mmc_sw_reset(host);
-	sdio_release_host(sd->func[0]);
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 19, 0)
+	err = mmc_sw_reset(card);
 #else
-	err = sdio_reset_comm(sd->func[0]->card);
+	err = mmc_sw_reset(card->host);
+#endif
+	sdio_release_host(sd->func[0]);
+#elif defined(MMC_HW_RESET) && LINUX_VERSION_CODE >= KERNEL_VERSION(4, 2, 0)
+	/* MMC_HW_RESET */
+	printf("%s: call mmc_hw_reset\n", __FUNCTION__);
+	sdio_claim_host(sd->func[0]);
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0)
+	while (atomic_read(&card->sdio_funcs_probed) > 1) {
+		atomic_dec(&card->sdio_funcs_probed);
+	}
+#endif
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 18, 0)
+	err = mmc_hw_reset(card);
+#else
+	err = mmc_hw_reset(card->host);
+#endif
+	sdio_release_host(sd->func[0]);
+#elif defined(BUS_POWER_RESTORE) && \
+LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 32) && LINUX_VERSION_CODE < KERNEL_VERSION(4, 19, 0)
+	printf("%s: call mmc_power_restore_host\n", __FUNCTION__);
+	mmc_power_restore_host(card->host);
+#else
+	/* sdio_reset_comm */
+	err = sdio_reset_comm(card);
 #endif
 
 	if (err)
@@ -1786,60 +1848,60 @@ sdioh_start(sdioh_info_t *sd, int stage)
 		sdio access will come in way
 	*/
 	if (sd->func[0]) {
-			if (stage == 0) {
-		/* Since the power to the chip is killed, we will have
-			re enumerate the device again. Set the block size
-			and enable the fucntion 1 for in preparation for
-			downloading the code
-		*/
-		/* sdio_reset_comm() - has been fixed in latest kernel/msm.git for Linux
-		   2.6.27. The implementation prior to that is buggy, and needs broadcom's
-		   patch for it
-		*/
-#if defined(ENABLE_INSMOD_NO_FW_LOAD) && !defined(BUS_POWER_RESTORE)
-		if ((ret = sdio_sw_reset(sd))) {
-			sd_err(("%s Failed, error = %d\n", __FUNCTION__, ret));
-			return ret;
-		} else
+		if (stage == 0) {
+			/* Since the power to the chip is killed, we will have
+			   re enumerate the device again. Set the block size
+			   and enable the fucntion 1 for in preparation for
+			   downloading the code
+			*/
+			/* sdio_reset_comm() - has been fixed in latest kernel/msm.git for Linux
+			   2.6.27. The implementation prior to that is buggy, and needs broadcom's
+			   patch for it
+			*/
+#if defined(ENABLE_INSMOD_NO_FW_LOAD)
+			if ((ret = sdio_sw_reset(sd))) {
+				sd_err(("%s Failed, error = %d\n", __FUNCTION__, ret));
+				return ret;
+			} else
 #endif
-		{
-			sd->num_funcs = 2;
-			sd->sd_blockmode = TRUE;
-			sd->use_client_ints = TRUE;
-			sd->client_block_size[0] = 64;
+			{
+				sd->num_funcs = 2;
+				sd->sd_blockmode = TRUE;
+				sd->use_client_ints = TRUE;
+				sd->client_block_size[0] = 64;
 
-			if (sd->func[1]) {
-				/* Claim host controller */
-				sdio_claim_host(sd->func[1]);
+				if (sd->func[1]) {
+					/* Claim host controller */
+					sdio_claim_host(sd->func[1]);
 
-				sd->client_block_size[1] = 64;
-				ret = sdio_set_block_size(sd->func[1], 64);
-				if (ret) {
-					sd_err(("bcmsdh_sdmmc: Failed to set F1 "
-						"blocksize(%d)\n", ret));
+					sd->client_block_size[1] = 64;
+					ret = sdio_set_block_size(sd->func[1], 64);
+					if (ret) {
+						sd_err(("bcmsdh_sdmmc: Failed to set F1 "
+							"blocksize(%d)\n", ret));
+					}
+
+					/* Release host controller F1 */
+					sdio_release_host(sd->func[1]);
 				}
 
-				/* Release host controller F1 */
-				sdio_release_host(sd->func[1]);
-			}
+				if (sd->func[2]) {
+					/* Claim host controller F2 */
+					sdio_claim_host(sd->func[2]);
 
-			if (sd->func[2]) {
-				/* Claim host controller F2 */
-				sdio_claim_host(sd->func[2]);
+					sd->client_block_size[2] = sd_f2_blocksize;
+					printf("%s: set sd_f2_blocksize %d\n", __FUNCTION__, sd_f2_blocksize);
+					ret = sdio_set_block_size(sd->func[2], sd_f2_blocksize);
+					if (ret) {
+						sd_err(("bcmsdh_sdmmc: Failed to set F2 blocksize"
+							" to %d(%d)\n", sd_f2_blocksize, ret));
+					}
 
-				sd->client_block_size[2] = sd_f2_blocksize;
-				printf("%s: set sd_f2_blocksize %d\n", __FUNCTION__, sd_f2_blocksize);
-				ret = sdio_set_block_size(sd->func[2], sd_f2_blocksize);
-				if (ret) {
-					sd_err(("bcmsdh_sdmmc: Failed to set F2 "
-						"blocksize to %d(%d)\n", sd_f2_blocksize, ret));
+					/* Release host controller F2 */
+					sdio_release_host(sd->func[2]);
 				}
 
-				/* Release host controller F2 */
-				sdio_release_host(sd->func[2]);
-			}
-
-			sdioh_sdmmc_card_enablefuncs(sd);
+				sdioh_sdmmc_card_enablefuncs(sd);
 			}
 		} else {
 #if !defined(OOB_INTR_ONLY)
@@ -1856,8 +1918,7 @@ sdioh_start(sdioh_info_t *sd, int stage)
 			bcmsdh_oob_intr_set(sd->bcmsdh, TRUE);
 #endif /* !defined(OOB_INTR_ONLY) */
 		}
-	}
-	else
+	} else
 		sd_err(("%s Failed\n", __FUNCTION__));
 #endif /* defined(OEM_ANDROID) */
 
@@ -1894,10 +1955,20 @@ sdioh_stop(sdioh_info_t *sd)
 	}
 	else
 		sd_err(("%s Failed\n", __FUNCTION__));
-#endif /* defined(OEM_ANDROID) */
+#if !defined(MMC_SW_RESET) && !defined(MMC_HW_RESET)
+#if defined(BUS_POWER_RESTORE) && \
+LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 32) && LINUX_VERSION_CODE < KERNEL_VERSION(4, 19, 0)
+	if (sd->func[0]) {
+		struct mmc_card *card = sd->func[0]->card;
+		printf("%s: call mmc_power_save_host\n", __FUNCTION__);
+		mmc_power_save_host(card->host);
+	}
+#endif
+#endif
 #if !defined(OOB_INTR_ONLY)
 	sdio_claim_host_unlock_local(sd);
 #endif
+#endif /* defined(OEM_ANDROID) */
 	return (0);
 }
 
@@ -1906,16 +1977,6 @@ sdioh_waitlockfree(sdioh_info_t *sd)
 {
 	return (1);
 }
-
-#ifdef BCMINTERNAL
-extern SDIOH_API_RC
-sdioh_test_diag(sdioh_info_t *sd)
-{
-	sd_trace(("%s: Enter\n", __FUNCTION__));
-	sd_trace(("%s: Exit\n", __FUNCTION__));
-	return (0);
-}
-#endif /* BCMINTERNAL */
 
 SDIOH_API_RC
 sdioh_gpioouten(sdioh_info_t *sd, uint32 gpio)
@@ -1939,6 +2000,29 @@ SDIOH_API_RC
 sdioh_gpio_init(sdioh_info_t *sd)
 {
 	return SDIOH_API_RC_FAIL;
+}
+
+uint8
+sdmmc_get_timing(sdioh_info_t *sd)
+{
+	struct sdio_func *sdio_func = sd->func[0];
+	struct mmc_host *host = sdio_func->card->host;
+	return host->ios.timing;
+}
+
+void
+sdmmc_set_timing(sdioh_info_t *sd, uint8 timing)
+{
+	struct sdio_func *sdio_func = sd->func[0];
+	struct mmc_host *host = sdio_func->card->host;
+	struct mmc_ios *ios = &host->ios;
+
+	mmc_host_clk_hold(host);
+	DHD_INFO(("%s: Before change: sd current timing is %u\n", __FUNCTION__, ios->timing));
+	ios->timing = timing;
+	host->ops->set_ios(host, ios);
+	DHD_ERROR(("%s: After change: sd timing is %u\n", __FUNCTION__, ios->timing));
+	mmc_host_clk_release(host);
 }
 
 uint
