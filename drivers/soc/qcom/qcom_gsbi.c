@@ -1,14 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2014, The Linux foundation. All rights reserved.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License rev 2 and
- * only rev 2 as published by the free Software foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or fITNESS fOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include <linux/clk.h>
@@ -122,7 +114,7 @@ struct gsbi_info {
 	struct regmap *tcsr;
 };
 
-static const struct of_device_id tcsr_dt_match[] = {
+static const struct of_device_id tcsr_dt_match[] __maybe_unused = {
 	{ .compatible = "qcom,tcsr-ipq8064", .data = &config_ipq8064},
 	{ .compatible = "qcom,tcsr-apq8064", .data = &config_apq8064},
 	{ .compatible = "qcom,tcsr-msm8960", .data = &config_msm8960},
@@ -135,7 +127,6 @@ static int gsbi_probe(struct platform_device *pdev)
 	struct device_node *node = pdev->dev.of_node;
 	struct device_node *tcsr_node;
 	const struct of_device_id *match;
-	struct resource *res;
 	void __iomem *base;
 	struct gsbi_info *gsbi;
 	int i;
@@ -147,8 +138,7 @@ static int gsbi_probe(struct platform_device *pdev)
 	if (!gsbi)
 		return -ENOMEM;
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	base = devm_ioremap_resource(&pdev->dev, res);
+	base = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(base))
 		return PTR_ERR(base);
 
@@ -188,11 +178,9 @@ static int gsbi_probe(struct platform_device *pdev)
 
 	dev_info(&pdev->dev, "GSBI port protocol: %d crci: %d\n",
 		 gsbi->mode, gsbi->crci);
-	gsbi->hclk = devm_clk_get(&pdev->dev, "iface");
+	gsbi->hclk = devm_clk_get_enabled(&pdev->dev, "iface");
 	if (IS_ERR(gsbi->hclk))
 		return PTR_ERR(gsbi->hclk);
-
-	clk_prepare_enable(gsbi->hclk);
 
 	writel_relaxed((gsbi->mode << GSBI_PROTOCOL_SHIFT) | gsbi->crci,
 				base + GSBI_CTRL_REG);

@@ -1,19 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * MELFAS MIP4 Touchscreen
  *
  * Copyright (C) 2016 MELFAS Inc.
  *
  * Author : Sangwon Jee <jeesw@melfas.com>
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- * GNU General Public License for more details.
  */
 
 #include <linux/acpi.h>
@@ -33,7 +24,7 @@
 
 /*****************************************************************
  * Protocol
- * Version : MIP 4.0 Rev 4.6
+ * Version : MIP 4.0 Rev 5.4
  *****************************************************************/
 
 /* Address */
@@ -81,6 +72,9 @@
 #define MIP4_R1_INFO_IC_HW_CATEGORY		0x77
 #define MIP4_R1_INFO_CONTACT_THD_SCR		0x78
 #define MIP4_R1_INFO_CONTACT_THD_KEY		0x7A
+#define MIP4_R1_INFO_PID				0x7C
+#define MIP4_R1_INFO_VID				0x7E
+#define MIP4_R1_INFO_SLAVE_ADDR			0x80
 
 #define MIP4_R0_EVENT				0x02
 #define MIP4_R1_EVENT_SUPPORTED_FUNC		0x00
@@ -157,7 +151,9 @@ struct mip4_ts {
 
 	char phys[32];
 	char product_name[16];
+	u16 product_id;
 	char ic_name[4];
+	char fw_name[32];
 
 	unsigned int max_x;
 	unsigned int max_y;
@@ -248,9 +244,20 @@ static int mip4_get_fw_version(struct mip4_ts *ts)
  */
 static int mip4_query_device(struct mip4_ts *ts)
 {
+	union i2c_smbus_data dummy;
 	int error;
 	u8 cmd[2];
 	u8 buf[14];
+
+	/*
+	 * Make sure there is something at this address as we do not
+	 * consider subsequent failures as fatal.
+	 */
+	if (i2c_smbus_xfer(ts->client->adapter, ts->client->addr,
+			   0, I2C_SMBUS_READ, 0, I2C_SMBUS_BYTE, &dummy) < 0) {
+		dev_err(&ts->client->dev, "nothing at this address\n");
+		return -ENXIO;
+	}
 
 	/* Product name */
 	cmd[0] = MIP4_R0_INFO;
@@ -263,6 +270,23 @@ static int mip4_query_device(struct mip4_ts *ts)
 	else
 		dev_dbg(&ts->client->dev, "product name: %.*s\n",
 			(int)sizeof(ts->product_name), ts->product_name);
+
+	/* Product ID */
+	cmd[0] = MIP4_R0_INFO;
+	cmd[1] = MIP4_R1_INFO_PID;
+	error = mip4_i2c_xfer(ts, cmd, sizeof(cmd), buf, 2);
+	if (error) {
+		dev_warn(&ts->client->dev,
+			 "Failed to retrieve product id: %d\n", error);
+	} else {
+		ts->product_id = get_unaligned_le16(&buf[0]);
+		dev_dbg(&ts->client->dev, "product id: %04X\n", ts->product_id);
+	}
+
+	/* Firmware name */
+	snprintf(ts->fw_name, sizeof(ts->fw_name),
+		"melfas_mip4_%04X.fw", ts->product_id);
+	dev_dbg(&ts->client->dev, "firmware name: %s\n", ts->fw_name);
 
 	/* IC name */
 	cmd[0] = MIP4_R0_INFO;
@@ -367,7 +391,7 @@ static void mip4_clear_input(struct mip4_ts *ts)
 	/* Screen */
 	for (i = 0; i < MIP4_MAX_FINGERS; i++) {
 		input_mt_slot(ts->input, i);
-		input_mt_report_slot_state(ts->input, MT_TOOL_FINGER, 0);
+		input_mt_report_slot_inactive(ts->input);
 	}
 
 	/* Keys */
@@ -441,13 +465,13 @@ static void mip4_report_keys(struct mip4_ts *ts, u8 *packet)
 static void mip4_report_touch(struct mip4_ts *ts, u8 *packet)
 {
 	int id;
-	bool hover;
+	bool __always_unused hover;
 	bool palm;
 	bool state;
 	u16 x, y;
-	u8 pressure_stage = 0;
+	u8 __always_unused pressure_stage = 0;
 	u8 pressure;
-	u8 size;
+	u8 __always_unused size;
 	u8 touch_major;
 	u8 touch_minor;
 
@@ -498,21 +522,21 @@ static void mip4_report_touch(struct mip4_ts *ts, u8 *packet)
 
 	if (unlikely(id < 0 || id >= MIP4_MAX_FINGERS)) {
 		dev_err(&ts->client->dev, "Screen - invalid slot ID: %d\n", id);
-	} else if (state) {
-		/* Press or Move event */
-		input_mt_slot(ts->input, id);
-		input_mt_report_slot_state(ts->input, MT_TOOL_FINGER, true);
+		goto out;
+	}
+
+	input_mt_slot(ts->input, id);
+	if (input_mt_report_slot_state(ts->input,
+				       palm ? MT_TOOL_PALM : MT_TOOL_FINGER,
+				       state)) {
 		input_report_abs(ts->input, ABS_MT_POSITION_X, x);
 		input_report_abs(ts->input, ABS_MT_POSITION_Y, y);
 		input_report_abs(ts->input, ABS_MT_PRESSURE, pressure);
 		input_report_abs(ts->input, ABS_MT_TOUCH_MAJOR, touch_major);
 		input_report_abs(ts->input, ABS_MT_TOUCH_MINOR, touch_minor);
-	} else {
-		/* Release event */
-		input_mt_slot(ts->input, id);
-		input_mt_report_slot_state(ts->input, MT_TOOL_FINGER, 0);
 	}
 
+out:
 	input_mt_sync_frame(ts->input);
 }
 
@@ -1232,7 +1256,7 @@ static int mip4_execute_fw_update(struct mip4_ts *ts, const struct firmware *fw)
 	if (error)
 		return error;
 
-	if (ts->input->users) {
+	if (input_device_enabled(ts->input)) {
 		disable_irq(ts->client->irq);
 	} else {
 		error = mip4_power_on(ts);
@@ -1252,7 +1276,7 @@ static int mip4_execute_fw_update(struct mip4_ts *ts, const struct firmware *fw)
 			"Failed to flash firmware: %d\n", error);
 
 	/* Enable IRQ */
-	if (ts->input->users)
+	if (input_device_enabled(ts->input))
 		enable_irq(ts->client->irq);
 	else
 		mip4_power_off(ts);
@@ -1269,11 +1293,11 @@ static ssize_t mip4_sysfs_fw_update(struct device *dev,
 	const struct firmware *fw;
 	int error;
 
-	error = request_firmware(&fw, MIP4_FW_NAME, dev);
+	error = request_firmware(&fw, ts->fw_name, dev);
 	if (error) {
 		dev_err(&ts->client->dev,
 			"Failed to retrieve firmware %s: %d\n",
-			MIP4_FW_NAME, error);
+			ts->fw_name, error);
 		return error;
 	}
 
@@ -1348,6 +1372,25 @@ static ssize_t mip4_sysfs_read_hw_version(struct device *dev,
 
 static DEVICE_ATTR(hw_version, S_IRUGO, mip4_sysfs_read_hw_version, NULL);
 
+static ssize_t mip4_sysfs_read_product_id(struct device *dev,
+					  struct device_attribute *attr,
+					  char *buf)
+{
+	struct i2c_client *client = to_i2c_client(dev);
+	struct mip4_ts *ts = i2c_get_clientdata(client);
+	size_t count;
+
+	mutex_lock(&ts->input->mutex);
+
+	count = snprintf(buf, PAGE_SIZE, "%04X\n", ts->product_id);
+
+	mutex_unlock(&ts->input->mutex);
+
+	return count;
+}
+
+static DEVICE_ATTR(product_id, S_IRUGO, mip4_sysfs_read_product_id, NULL);
+
 static ssize_t mip4_sysfs_read_ic_name(struct device *dev,
 					  struct device_attribute *attr,
 					  char *buf)
@@ -1371,6 +1414,7 @@ static DEVICE_ATTR(ic_name, S_IRUGO, mip4_sysfs_read_ic_name, NULL);
 static struct attribute *mip4_attrs[] = {
 	&dev_attr_fw_version.attr,
 	&dev_attr_hw_version.attr,
+	&dev_attr_product_id.attr,
 	&dev_attr_ic_name.attr,
 	&dev_attr_update_fw.attr,
 	NULL,
@@ -1380,14 +1424,7 @@ static const struct attribute_group mip4_attr_group = {
 	.attrs = mip4_attrs,
 };
 
-static void mip4_sysfs_remove(void *_data)
-{
-	struct mip4_ts *ts = _data;
-
-	sysfs_remove_group(&ts->client->dev.kobj, &mip4_attr_group);
-}
-
-static int mip4_probe(struct i2c_client *client, const struct i2c_device_id *id)
+static int mip4_probe(struct i2c_client *client)
 {
 	struct mip4_ts *ts;
 	struct input_dev *input;
@@ -1414,13 +1451,8 @@ static int mip4_probe(struct i2c_client *client, const struct i2c_device_id *id)
 
 	ts->gpio_ce = devm_gpiod_get_optional(&client->dev,
 					      "ce", GPIOD_OUT_LOW);
-	if (IS_ERR(ts->gpio_ce)) {
-		error = PTR_ERR(ts->gpio_ce);
-		if (error != EPROBE_DEFER)
-			dev_err(&client->dev,
-				"Failed to get gpio: %d\n", error);
-		return error;
-	}
+	if (IS_ERR(ts->gpio_ce))
+		return dev_err_probe(&client->dev, PTR_ERR(ts->gpio_ce), "Failed to get gpio\n");
 
 	error = mip4_power_on(ts);
 	if (error)
@@ -1435,6 +1467,7 @@ static int mip4_probe(struct i2c_client *client, const struct i2c_device_id *id)
 
 	input->id.bustype = BUS_I2C;
 	input->id.vendor = 0x13c5;
+	input->id.product = ts->product_id;
 
 	input->open = mip4_input_open;
 	input->close = mip4_input_close;
@@ -1445,6 +1478,7 @@ static int mip4_probe(struct i2c_client *client, const struct i2c_device_id *id)
 	input->keycodesize = sizeof(*ts->key_code);
 	input->keycodemax = ts->key_num;
 
+	input_set_abs_params(input, ABS_MT_TOOL_TYPE, 0, MT_TOOL_PALM, 0, 0);
 	input_set_abs_params(input, ABS_MT_POSITION_X, 0, ts->max_x, 0, 0);
 	input_set_abs_params(input, ABS_MT_POSITION_Y, 0, ts->max_y, 0, 0);
 	input_set_abs_params(input, ABS_MT_PRESSURE,
@@ -1464,15 +1498,14 @@ static int mip4_probe(struct i2c_client *client, const struct i2c_device_id *id)
 
 	error = devm_request_threaded_irq(&client->dev, client->irq,
 					  NULL, mip4_interrupt,
-					  IRQF_ONESHOT, MIP4_DEVICE_NAME, ts);
+					  IRQF_ONESHOT | IRQF_NO_AUTOEN,
+					  MIP4_DEVICE_NAME, ts);
 	if (error) {
 		dev_err(&client->dev,
 			"Failed to request interrupt %d: %d\n",
 			client->irq, error);
 		return error;
 	}
-
-	disable_irq(client->irq);
 
 	error = input_register_device(input);
 	if (error) {
@@ -1481,25 +1514,17 @@ static int mip4_probe(struct i2c_client *client, const struct i2c_device_id *id)
 		return error;
 	}
 
-	error = sysfs_create_group(&client->dev.kobj, &mip4_attr_group);
+	error = devm_device_add_group(&client->dev, &mip4_attr_group);
 	if (error) {
 		dev_err(&client->dev,
 			"Failed to create sysfs attribute group: %d\n", error);
 		return error;
 	}
 
-	error = devm_add_action(&client->dev, mip4_sysfs_remove, ts);
-	if (error) {
-		mip4_sysfs_remove(ts);
-		dev_err(&client->dev,
-			"Failed to install sysfs remoce action: %d\n", error);
-		return error;
-	}
-
 	return 0;
 }
 
-static int __maybe_unused mip4_suspend(struct device *dev)
+static int mip4_suspend(struct device *dev)
 {
 	struct i2c_client *client = to_i2c_client(dev);
 	struct mip4_ts *ts = i2c_get_clientdata(client);
@@ -1509,7 +1534,7 @@ static int __maybe_unused mip4_suspend(struct device *dev)
 
 	if (device_may_wakeup(dev))
 		ts->wake_irq_enabled = enable_irq_wake(client->irq) == 0;
-	else if (input->users)
+	else if (input_device_enabled(input))
 		mip4_disable(ts);
 
 	mutex_unlock(&input->mutex);
@@ -1517,7 +1542,7 @@ static int __maybe_unused mip4_suspend(struct device *dev)
 	return 0;
 }
 
-static int __maybe_unused mip4_resume(struct device *dev)
+static int mip4_resume(struct device *dev)
 {
 	struct i2c_client *client = to_i2c_client(dev);
 	struct mip4_ts *ts = i2c_get_clientdata(client);
@@ -1527,7 +1552,7 @@ static int __maybe_unused mip4_resume(struct device *dev)
 
 	if (ts->wake_irq_enabled)
 		disable_irq_wake(client->irq);
-	else if (input->users)
+	else if (input_device_enabled(input))
 		mip4_enable(ts);
 
 	mutex_unlock(&input->mutex);
@@ -1535,7 +1560,7 @@ static int __maybe_unused mip4_resume(struct device *dev)
 	return 0;
 }
 
-static SIMPLE_DEV_PM_OPS(mip4_pm_ops, mip4_suspend, mip4_resume);
+static DEFINE_SIMPLE_DEV_PM_OPS(mip4_pm_ops, mip4_suspend, mip4_resume);
 
 #ifdef CONFIG_OF
 static const struct of_device_id mip4_of_match[] = {
@@ -1566,12 +1591,11 @@ static struct i2c_driver mip4_driver = {
 		.name = MIP4_DEVICE_NAME,
 		.of_match_table = of_match_ptr(mip4_of_match),
 		.acpi_match_table = ACPI_PTR(mip4_acpi_match),
-		.pm = &mip4_pm_ops,
+		.pm = pm_sleep_ptr(&mip4_pm_ops),
 	},
 };
 module_i2c_driver(mip4_driver);
 
 MODULE_DESCRIPTION("MELFAS MIP4 Touchscreen");
-MODULE_VERSION("2016.09.28");
 MODULE_AUTHOR("Sangwon Jee <jeesw@melfas.com>");
 MODULE_LICENSE("GPL");

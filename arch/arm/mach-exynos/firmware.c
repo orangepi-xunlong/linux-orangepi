@@ -1,12 +1,8 @@
-/*
- * Copyright (C) 2012 Samsung Electronics.
- * Kyungmin Park <kyungmin.park@samsung.com>
- * Tomasz Figa <t.figa@samsung.com>
- *
- * This program is free software,you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- */
+// SPDX-License-Identifier: GPL-2.0
+//
+// Copyright (C) 2012 Samsung Electronics.
+// Kyungmin Park <kyungmin.park@samsung.com>
+// Tomasz Figa <t.figa@samsung.com>
 
 #include <linux/kernel.h>
 #include <linux/io.h>
@@ -41,7 +37,7 @@ static int exynos_do_idle(unsigned long mode)
 	case FW_DO_IDLE_AFTR:
 		if (read_cpuid_part() == ARM_CPU_PART_CORTEX_A9)
 			exynos_save_cp15();
-		writel_relaxed(virt_to_phys(exynos_cpu_resume_ns),
+		writel_relaxed(__pa_symbol(exynos_cpu_resume_ns),
 			       sysram_ns_base_addr + 0x24);
 		writel_relaxed(EXYNOS_AFTR_MAGIC, sysram_ns_base_addr + 0x20);
 		if (soc_is_exynos3250()) {
@@ -64,8 +60,11 @@ static int exynos_cpu_boot(int cpu)
 	/*
 	 * Exynos3250 doesn't need to send smc command for secondary CPU boot
 	 * because Exynos3250 removes WFE in secure mode.
+	 *
+	 * On Exynos5 devices the call is ignored by trustzone firmware.
 	 */
-	if (soc_is_exynos3250())
+	if (!soc_is_exynos4210() && !soc_is_exynos4212() &&
+	    !soc_is_exynos4412())
 		return 0;
 
 	/*
@@ -135,7 +134,7 @@ static int exynos_suspend(void)
 		exynos_save_cp15();
 
 	writel(EXYNOS_SLEEP_MAGIC, sysram_ns_base_addr + EXYNOS_BOOT_FLAG);
-	writel(virt_to_phys(exynos_cpu_resume_ns),
+	writel(__pa_symbol(exynos_cpu_resume_ns),
 		sysram_ns_base_addr + EXYNOS_BOOT_ADDR);
 
 	return cpu_suspend(0, exynos_cpu_suspend);
@@ -194,7 +193,7 @@ static void exynos_l2_configure(const struct l2x0_regs *regs)
 	exynos_smc(SMC_CMD_L2X0SETUP2, regs->pwr_ctrl, regs->aux_ctrl, 0);
 }
 
-void __init exynos_firmware_init(void)
+bool __init exynos_secure_firmware_available(void)
 {
 	struct device_node *nd;
 	const __be32 *addr;
@@ -202,13 +201,22 @@ void __init exynos_firmware_init(void)
 	nd = of_find_compatible_node(NULL, NULL,
 					"samsung,secure-firmware");
 	if (!nd)
-		return;
+		return false;
 
 	addr = of_get_address(nd, 0, NULL, NULL);
+	of_node_put(nd);
 	if (!addr) {
 		pr_err("%s: No address specified.\n", __func__);
-		return;
+		return false;
 	}
+
+	return true;
+}
+
+void __init exynos_firmware_init(void)
+{
+	if (!exynos_secure_firmware_available())
+		return;
 
 	pr_info("Running under secure firmware.\n");
 

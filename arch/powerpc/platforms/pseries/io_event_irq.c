@@ -1,10 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright 2010 2011 Mark Nelson and Tseng-Hui (Frank) Lin, IBM Corporation
- *
- *  This program is free software; you can redistribute it and/or
- *  modify it under the terms of the GNU General Public License
- *  as published by the Free Software Foundation; either version
- *  2 of the License, or (at your option) any later version.
  */
 
 #include <linux/errno.h>
@@ -147,7 +143,7 @@ static int __init ioei_init(void)
 {
 	struct device_node *np;
 
-	ioei_check_exception_token = rtas_token("check-exception");
+	ioei_check_exception_token = rtas_function_token(RTAS_FN_CHECK_EXCEPTION);
 	if (ioei_check_exception_token == RTAS_UNKNOWN_SERVICE)
 		return -ENODEV;
 

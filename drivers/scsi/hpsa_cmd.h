@@ -1,5 +1,6 @@
 /*
  *    Disk Array driver for HP Smart Array SAS controllers
+ *    Copyright (c) 2019-2020 Microchip Technology Inc. and its subsidiaries
  *    Copyright 2016 Microsemi Corporation
  *    Copyright 2014-2015 PMC-Sierra, Inc.
  *    Copyright 2000,2009-2015 Hewlett-Packard Development Company, L.P.
@@ -18,6 +19,11 @@
  */
 #ifndef HPSA_CMD_H
 #define HPSA_CMD_H
+
+#include <linux/compiler.h>
+
+#include <linux/build_bug.h> /* static_assert */
+#include <linux/stddef.h> /* offsetof */
 
 /* general boundary defintions */
 #define SENSEINFOBYTES          32 /* may vary between hbas */
@@ -142,6 +148,7 @@
 #define DOORBELL_CTLR_RESET	0x00000004l
 #define DOORBELL_CTLR_RESET2	0x00000020l
 #define DOORBELL_CLEAR_EVENTS	0x00000040l
+#define DOORBELL_GENERATE_CHKPT	0x00000080l
 
 #define CFGTBL_Trans_Simple     0x00000002l
 #define CFGTBL_Trans_Performant 0x00000004l
@@ -198,12 +205,10 @@ union u64bit {
 	MAX_EXT_TARGETS + 1) /* + 1 is for the controller itself */
 
 /* SCSI-3 Commands */
-#pragma pack(1)
-
 #define HPSA_INQUIRY 0x12
 struct InquiryData {
 	u8 data_byte[36];
-};
+} __packed;
 
 #define HPSA_REPORT_LOG 0xc2    /* Report Logical LUNs */
 #define HPSA_REPORT_PHYS 0xc3   /* Report Physical LUNs */
@@ -219,7 +224,7 @@ struct raid_map_disk_data {
 	u8    xor_mult[2];            /**< XOR multipliers for this position,
 					*  valid for data disks only */
 	u8    reserved[2];
-};
+} __packed;
 
 struct raid_map_data {
 	__le32   structure_size;	/* Size of entire structure in bytes */
@@ -245,14 +250,14 @@ struct raid_map_data {
 	__le16   dekindex;		/* Data encryption key index. */
 	u8    reserved[16];
 	struct raid_map_disk_data data[RAID_MAP_MAX_ENTRIES];
-};
+} __packed;
 
 struct ReportLUNdata {
 	u8 LUNListLength[4];
 	u8 extended_response_flag;
 	u8 reserved[3];
 	u8 LUN[HPSA_MAX_LUN][8];
-};
+} __packed;
 
 struct ext_report_lun_entry {
 	u8 lunid[8];
@@ -267,20 +272,20 @@ struct ext_report_lun_entry {
 	u8 lun_count; /* multi-lun device, how many luns */
 	u8 redundant_paths;
 	u32 ioaccel_handle; /* ioaccel1 only uses lower 16 bits */
-};
+} __packed;
 
 struct ReportExtendedLUNdata {
 	u8 LUNListLength[4];
 	u8 extended_response_flag;
 	u8 reserved[3];
 	struct ext_report_lun_entry LUN[HPSA_MAX_PHYS_LUN];
-};
+} __packed;
 
 struct SenseSubsystem_info {
 	u8 reserved[36];
 	u8 portname[8];
 	u8 reserved1[1108];
-};
+} __packed;
 
 /* BMIC commands */
 #define BMIC_READ 0x26
@@ -315,7 +320,7 @@ union SCSI3Addr {
 		u8 Targ:6;
 		u8 Mode:2;        /* b10 */
 	} LogUnit;
-};
+} __packed;
 
 struct PhysDevAddr {
 	u32             TargetId:24;
@@ -323,20 +328,20 @@ struct PhysDevAddr {
 	u32             Mode:2;
 	/* 2 level target device addr */
 	union SCSI3Addr  Target[2];
-};
+} __packed;
 
 struct LogDevAddr {
 	u32            VolId:30;
 	u32            Mode:2;
 	u8             reserved[4];
-};
+} __packed;
 
 union LUNAddr {
 	u8               LunAddrBytes[8];
 	union SCSI3Addr    SCSI3Lun[4];
 	struct PhysDevAddr PhysDev;
 	struct LogDevAddr  LogDev;
-};
+} __packed;
 
 struct CommandListHeader {
 	u8              ReplyQueue;
@@ -344,7 +349,7 @@ struct CommandListHeader {
 	__le16          SGTotal;
 	__le64		tag;
 	union LUNAddr     LUN;
-};
+} __packed;
 
 struct RequestBlock {
 	u8   CDBLen;
@@ -363,18 +368,18 @@ struct RequestBlock {
 #define GET_DIR(tad) (((tad) >> 6) & 0x03)
 	u16  Timeout;
 	u8   CDB[16];
-};
+} __packed;
 
 struct ErrDescriptor {
 	__le64 Addr;
 	__le32 Len;
-};
+} __packed;
 
 struct SGDescriptor {
 	__le64 Addr;
 	__le32 Len;
 	__le32 Ext;
-};
+} __packed;
 
 union MoreErrInfo {
 	struct {
@@ -388,7 +393,8 @@ union MoreErrInfo {
 		u8  offense_num;  /* byte # of offense 0-base */
 		u32 offense_value;
 	} Invalid_Cmd;
-};
+} __packed;
+
 struct ErrorInfo {
 	u8               ScsiStatus;
 	u8               SenseLen;
@@ -396,7 +402,7 @@ struct ErrorInfo {
 	u32              ResidualCnt;
 	union MoreErrInfo  MoreErrInfo;
 	u8               SenseInfo[SENSEINFOBYTES];
-};
+} __packed;
 /* Command types */
 #define CMD_IOCTL_PEND  0x01
 #define CMD_SCSI	0x03
@@ -446,10 +452,19 @@ struct CommandList {
 	 */
 	struct hpsa_scsi_dev_t *phys_disk;
 
-	int abort_pending;
-	struct hpsa_scsi_dev_t *reset_pending;
+	bool retry_pending;
+	struct hpsa_scsi_dev_t *device;
 	atomic_t refcount; /* Must be last to avoid memset in hpsa_cmd_init() */
 } __aligned(COMMANDLIST_ALIGNMENT);
+
+/*
+ * Make sure our embedded atomic variable is aligned. Otherwise we break atomic
+ * operations on architectures that don't support unaligned atomics like IA64.
+ *
+ * The assert guards against reintroductin against unwanted __packed to
+ * the struct CommandList.
+ */
+static_assert(offsetof(struct CommandList, refcount) % __alignof__(atomic_t) == 0);
 
 /* Max S/G elements in I/O accelerator command */
 #define IOACCEL1_MAXSGENTRIES           24
@@ -487,7 +502,7 @@ struct io_accel1_cmd {
 	__le64 host_addr;		/* 0x70 - 0x77 */
 	u8  CISS_LUN[8];		/* 0x78 - 0x7F */
 	struct SGDescriptor SG[IOACCEL1_MAXSGENTRIES];
-} __aligned(IOACCEL1_COMMANDLIST_ALIGNMENT);
+} __packed __aligned(IOACCEL1_COMMANDLIST_ALIGNMENT);
 
 #define IOACCEL1_FUNCTION_SCSIIO        0x00
 #define IOACCEL1_SGLOFFSET              32
@@ -516,7 +531,8 @@ struct ioaccel2_sg_element {
 	u8 reserved[3];
 	u8 chain_indicator;
 #define IOACCEL2_CHAIN 0x80
-};
+#define IOACCEL2_LAST_SG 0x40
+} __packed;
 
 /*
  * SCSI Response Format structure for IO Accelerator Mode 2
@@ -556,7 +572,7 @@ struct io_accel2_scsi_response {
 	u8 sense_data_len;		/* sense/response data length */
 	u8 resid_cnt[4];		/* residual count */
 	u8 sense_data_buff[32];		/* sense/response data buffer */
-};
+} __packed;
 
 /*
  * Structure for I/O accelerator (mode 2 or m2) commands.
@@ -589,7 +605,7 @@ struct io_accel2_cmd {
 	__le32 tweak_upper;		/* Encryption tweak, upper 4 bytes */
 	struct ioaccel2_sg_element sg[IOACCEL2_MAXSGENTRIES];
 	struct io_accel2_scsi_response error_data;
-} __aligned(IOACCEL2_COMMANDLIST_ALIGNMENT);
+} __packed __aligned(IOACCEL2_COMMANDLIST_ALIGNMENT);
 
 /*
  * defines for Mode 2 command struct
@@ -615,7 +631,7 @@ struct hpsa_tmf_struct {
 	__le64 abort_tag;	/* cciss tag of SCSI cmd or TMF to abort */
 	__le64 error_ptr;		/* Error Pointer */
 	__le32 error_len;		/* Error Length */
-} __aligned(IOACCEL2_COMMANDLIST_ALIGNMENT);
+} __packed __aligned(IOACCEL2_COMMANDLIST_ALIGNMENT);
 
 /* Configuration Table Structure */
 struct HostWrite {
@@ -623,7 +639,7 @@ struct HostWrite {
 	__le32		command_pool_addr_hi;
 	__le32		CoalIntDelay;
 	__le32		CoalIntCount;
-};
+} __packed;
 
 #define SIMPLE_MODE     0x02
 #define PERFORMANT_MODE 0x04
@@ -672,7 +688,7 @@ struct CfgTable {
 #define		HPSA_EVENT_NOTIFY_ACCEL_IO_PATH_STATE_CHANGE (1 << 30)
 #define		HPSA_EVENT_NOTIFY_ACCEL_IO_PATH_CONFIG_CHANGE (1 << 31)
 	__le32		clear_event_notify;
-};
+} __packed;
 
 #define NUM_BLOCKFETCH_ENTRIES 8
 struct TransTable_struct {
@@ -683,14 +699,14 @@ struct TransTable_struct {
 	__le32		RepQCtrAddrHigh32;
 #define MAX_REPLY_QUEUES 64
 	struct vals32  RepQAddr[MAX_REPLY_QUEUES];
-};
+} __packed;
 
 struct hpsa_pci_info {
 	unsigned char	bus;
 	unsigned char	dev_fn;
 	unsigned short	domain;
 	u32		board_id;
-};
+} __packed;
 
 struct bmic_identify_controller {
 	u8	configured_logical_drive_count;	/* offset 0 */
@@ -699,7 +715,7 @@ struct bmic_identify_controller {
 	u8	pad2[136];
 	u8	controller_mode;	/* offset 292 */
 	u8	pad3[32];
-};
+} __packed;
 
 
 struct bmic_identify_physical_device {
@@ -779,6 +795,8 @@ struct bmic_identify_physical_device {
 	u8     phys_bay_in_box;  /* phys drv bay this drive resides */
 	__le32 rpm;              /* Drive rotational speed in rpm */
 	u8     device_type;       /* type of drive */
+#define BMIC_DEVICE_TYPE_CONTROLLER	0x07
+
 	u8     sata_version;     /* only valid when drive_type is SATA */
 	__le64 big_total_block_count;
 	__le64 ris_starting_lba;
@@ -809,10 +827,7 @@ struct bmic_identify_physical_device {
 	u8     max_temperature_degreesC;
 	u8     logical_blocks_per_phys_block_exp; /* phyblocksize = 512*2^exp */
 	__le16 current_queue_depth_limit;
-	u8     switch_name[10];
-	__le16 switch_port;
-	u8     alternate_paths_switch_name[40];
-	u8     alternate_paths_switch_port[8];
+	u8     reserved_switch_stuff[60];
 	__le16 power_on_hours; /* valid only if gas gauge supported */
 	__le16 percent_endurance_used; /* valid only if gas gauge supported. */
 #define BMIC_PHYS_DRIVE_SSD_WEAROUT(idphydrv) \
@@ -828,11 +843,22 @@ struct bmic_identify_physical_device {
 	(idphydrv->smart_carrier_authentication == 0x01)
 	u8     smart_carrier_app_fw_version;
 	u8     smart_carrier_bootloader_fw_version;
+	u8     sanitize_support_flags;
+	u8     drive_key_flags;
 	u8     encryption_key_name[64];
 	__le32 misc_drive_flags;
 	__le16 dek_index;
-	u8     padding[112];
-};
+	__le16 hba_drive_encryption_flags;
+	__le16 max_overwrite_time;
+	__le16 max_block_erase_time;
+	__le16 max_crypto_erase_time;
+	u8     device_connector_info[5];
+	u8     connector_name[8][8];
+	u8     page_83_id[16];
+	u8     max_link_rate[256];
+	u8     neg_phys_link_rate[256];
+	u8     box_conn_name[8];
+} __packed __attribute((aligned(512)));
 
 struct bmic_sense_subsystem_info {
 	u8	primary_slot_number;
@@ -845,7 +871,7 @@ struct bmic_sense_subsystem_info {
 	u8	secondary_array_serial_number[32];
 	u8	secondary_cache_serial_number[32];
 	u8	pad[332];
-};
+} __packed;
 
 struct bmic_sense_storage_box_params {
 	u8	reserved[36];
@@ -857,7 +883,6 @@ struct bmic_sense_storage_box_params {
 	u8	reserver_3[84];
 	u8	phys_connector[2];
 	u8	reserved_4[296];
-};
+} __packed;
 
-#pragma pack()
 #endif /* HPSA_CMD_H */

@@ -1,20 +1,11 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2014, Sony Mobile Communications AB.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 and
- * only version 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include <linux/module.h>
 #include <linux/of.h>
 #include <linux/platform_device.h>
-#include <linux/pinctrl/pinctrl.h>
 
 #include "pinctrl-msm.h"
 
@@ -217,18 +208,11 @@ static const unsigned int sdc3_clk_pins[] = { 93 };
 static const unsigned int sdc3_cmd_pins[] = { 94 };
 static const unsigned int sdc3_data_pins[] = { 95 };
 
-#define FUNCTION(fname)					\
-	[APQ_MUX_##fname] = {				\
-		.name = #fname,				\
-		.groups = fname##_groups,		\
-		.ngroups = ARRAY_SIZE(fname##_groups),	\
-	}
-
 #define PINGROUP(id, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10) \
 	{						\
-		.name = "gpio" #id,			\
-		.pins = gpio##id##_pins,		\
-		.npins = ARRAY_SIZE(gpio##id##_pins),	\
+		.grp = PINCTRL_PINGROUP("gpio" #id, 	\
+			gpio##id##_pins, 		\
+			ARRAY_SIZE(gpio##id##_pins)),	\
 		.funcs = (int[]){			\
 			APQ_MUX_gpio,			\
 			APQ_MUX_##f1,			\
@@ -267,9 +251,9 @@ static const unsigned int sdc3_data_pins[] = { 95 };
 
 #define SDC_PINGROUP(pg_name, ctl, pull, drv)		\
 	{						\
-		.name = #pg_name,			\
-		.pins = pg_name##_pins,			\
-		.npins = ARRAY_SIZE(pg_name##_pins),	\
+		.grp = PINCTRL_PINGROUP(#pg_name, 	\
+			pg_name##_pins, 		\
+			ARRAY_SIZE(pg_name##_pins)),	\
 		.ctl_reg = ctl,				\
 		.io_reg = 0,				\
 		.intr_cfg_reg = 0,			\
@@ -295,6 +279,12 @@ enum apq8064_functions {
 	APQ_MUX_cam_mclk,
 	APQ_MUX_codec_mic_i2s,
 	APQ_MUX_codec_spkr_i2s,
+	APQ_MUX_gp_clk_0a,
+	APQ_MUX_gp_clk_0b,
+	APQ_MUX_gp_clk_1a,
+	APQ_MUX_gp_clk_1b,
+	APQ_MUX_gp_clk_2a,
+	APQ_MUX_gp_clk_2b,
 	APQ_MUX_gpio,
 	APQ_MUX_gsbi1,
 	APQ_MUX_gsbi2,
@@ -353,6 +343,24 @@ static const char * const gpio_groups[] = {
 	"gpio71", "gpio72", "gpio73", "gpio74", "gpio75", "gpio76", "gpio77",
 	"gpio78", "gpio79", "gpio80", "gpio81", "gpio82", "gpio83", "gpio84",
 	"gpio85", "gpio86", "gpio87", "gpio88", "gpio89"
+};
+static const char * const gp_clk_0a_groups[] = {
+	"gpio3"
+};
+static const char * const gp_clk_0b_groups[] = {
+	"gpio34"
+};
+static const char * const gp_clk_1a_groups[] = {
+	"gpio4"
+};
+static const char * const gp_clk_1b_groups[] = {
+	"gpio50"
+};
+static const char * const gp_clk_2a_groups[] = {
+	"gpio32"
+};
+static const char * const gp_clk_2b_groups[] = {
+	"gpio25"
 };
 static const char * const ps_hold_groups[] = {
 	"gpio78"
@@ -448,50 +456,56 @@ static const char * const usb2_hsic_groups[] = {
 	"gpio88", "gpio89"
 };
 
-static const struct msm_function apq8064_functions[] = {
-	FUNCTION(cam_mclk),
-	FUNCTION(codec_mic_i2s),
-	FUNCTION(codec_spkr_i2s),
-	FUNCTION(gpio),
-	FUNCTION(gsbi1),
-	FUNCTION(gsbi2),
-	FUNCTION(gsbi3),
-	FUNCTION(gsbi4),
-	FUNCTION(gsbi4_cam_i2c),
-	FUNCTION(gsbi5),
-	FUNCTION(gsbi5_spi_cs1),
-	FUNCTION(gsbi5_spi_cs2),
-	FUNCTION(gsbi5_spi_cs3),
-	FUNCTION(gsbi6),
-	FUNCTION(gsbi6_spi_cs1),
-	FUNCTION(gsbi6_spi_cs2),
-	FUNCTION(gsbi6_spi_cs3),
-	FUNCTION(gsbi7),
-	FUNCTION(gsbi7_spi_cs1),
-	FUNCTION(gsbi7_spi_cs2),
-	FUNCTION(gsbi7_spi_cs3),
-	FUNCTION(gsbi_cam_i2c),
-	FUNCTION(hdmi),
-	FUNCTION(mi2s),
-	FUNCTION(riva_bt),
-	FUNCTION(riva_fm),
-	FUNCTION(riva_wlan),
-	FUNCTION(sdc2),
-	FUNCTION(sdc4),
-	FUNCTION(slimbus),
-	FUNCTION(spkr_i2s),
-	FUNCTION(tsif1),
-	FUNCTION(tsif2),
-	FUNCTION(usb2_hsic),
-	FUNCTION(ps_hold),
+static const struct pinfunction apq8064_functions[] = {
+	APQ_PIN_FUNCTION(cam_mclk),
+	APQ_PIN_FUNCTION(codec_mic_i2s),
+	APQ_PIN_FUNCTION(codec_spkr_i2s),
+	APQ_PIN_FUNCTION(gp_clk_0a),
+	APQ_PIN_FUNCTION(gp_clk_0b),
+	APQ_PIN_FUNCTION(gp_clk_1a),
+	APQ_PIN_FUNCTION(gp_clk_1b),
+	APQ_PIN_FUNCTION(gp_clk_2a),
+	APQ_PIN_FUNCTION(gp_clk_2b),
+	APQ_PIN_FUNCTION(gpio),
+	APQ_PIN_FUNCTION(gsbi1),
+	APQ_PIN_FUNCTION(gsbi2),
+	APQ_PIN_FUNCTION(gsbi3),
+	APQ_PIN_FUNCTION(gsbi4),
+	APQ_PIN_FUNCTION(gsbi4_cam_i2c),
+	APQ_PIN_FUNCTION(gsbi5),
+	APQ_PIN_FUNCTION(gsbi5_spi_cs1),
+	APQ_PIN_FUNCTION(gsbi5_spi_cs2),
+	APQ_PIN_FUNCTION(gsbi5_spi_cs3),
+	APQ_PIN_FUNCTION(gsbi6),
+	APQ_PIN_FUNCTION(gsbi6_spi_cs1),
+	APQ_PIN_FUNCTION(gsbi6_spi_cs2),
+	APQ_PIN_FUNCTION(gsbi6_spi_cs3),
+	APQ_PIN_FUNCTION(gsbi7),
+	APQ_PIN_FUNCTION(gsbi7_spi_cs1),
+	APQ_PIN_FUNCTION(gsbi7_spi_cs2),
+	APQ_PIN_FUNCTION(gsbi7_spi_cs3),
+	APQ_PIN_FUNCTION(gsbi_cam_i2c),
+	APQ_PIN_FUNCTION(hdmi),
+	APQ_PIN_FUNCTION(mi2s),
+	APQ_PIN_FUNCTION(riva_bt),
+	APQ_PIN_FUNCTION(riva_fm),
+	APQ_PIN_FUNCTION(riva_wlan),
+	APQ_PIN_FUNCTION(sdc2),
+	APQ_PIN_FUNCTION(sdc4),
+	APQ_PIN_FUNCTION(slimbus),
+	APQ_PIN_FUNCTION(spkr_i2s),
+	APQ_PIN_FUNCTION(tsif1),
+	APQ_PIN_FUNCTION(tsif2),
+	APQ_PIN_FUNCTION(usb2_hsic),
+	APQ_PIN_FUNCTION(ps_hold),
 };
 
 static const struct msm_pingroup apq8064_groups[] = {
 	PINGROUP(0, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA),
 	PINGROUP(1, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA),
 	PINGROUP(2, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA),
-	PINGROUP(3, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA),
-	PINGROUP(4, NA, NA, cam_mclk, NA, NA, NA, NA, NA, NA, NA),
+	PINGROUP(3, NA, gp_clk_0a, NA, NA, NA, NA, NA, NA, NA, NA),
+	PINGROUP(4, NA, NA, cam_mclk, gp_clk_1a, NA, NA, NA, NA, NA, NA),
 	PINGROUP(5, NA, cam_mclk, NA, NA, NA, NA, NA, NA, NA, NA),
 	PINGROUP(6, gsbi3, NA, NA, NA, NA, NA, NA, NA, NA, NA),
 	PINGROUP(7, gsbi3, NA, NA, NA, NA, NA, NA, NA, NA, NA),
@@ -512,16 +526,16 @@ static const struct msm_pingroup apq8064_groups[] = {
 	PINGROUP(22, gsbi2, NA, NA, NA, NA, NA, NA, NA, NA, NA),
 	PINGROUP(23, gsbi2, NA, NA, NA, NA, NA, NA, NA, NA, NA),
 	PINGROUP(24, gsbi2, NA, NA, NA, NA, NA, NA, NA, NA, NA),
-	PINGROUP(25, gsbi2, NA, NA, NA, NA, NA, NA, NA, NA, NA),
+	PINGROUP(25, gsbi2, gp_clk_2b, NA, NA, NA, NA, NA, NA, NA, NA),
 	PINGROUP(26, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA),
 	PINGROUP(27, mi2s, NA, NA, NA, NA, NA, NA, NA, NA, NA),
 	PINGROUP(28, mi2s, NA, NA, NA, NA, NA, NA, NA, NA, NA),
 	PINGROUP(29, mi2s, NA, NA, NA, NA, NA, NA, NA, NA, NA),
 	PINGROUP(30, mi2s, NA, NA, NA, NA, NA, NA, NA, NA, NA),
 	PINGROUP(31, mi2s, NA, gsbi5_spi_cs2, gsbi6_spi_cs2, gsbi7_spi_cs2, NA, NA, NA, NA, NA),
-	PINGROUP(32, mi2s, NA, NA, NA, NA, gsbi5_spi_cs3, gsbi6_spi_cs3, gsbi7_spi_cs3, NA, NA),
+	PINGROUP(32, mi2s, gp_clk_2a, NA, NA, NA, gsbi5_spi_cs3, gsbi6_spi_cs3, gsbi7_spi_cs3, NA, NA),
 	PINGROUP(33, mi2s, NA, NA, NA, NA, NA, NA, NA, NA, NA),
-	PINGROUP(34, codec_mic_i2s, NA, NA, NA, NA, NA, NA, NA, NA, NA),
+	PINGROUP(34, codec_mic_i2s, gp_clk_0b, NA, NA, NA, NA, NA, NA, NA, NA),
 	PINGROUP(35, codec_mic_i2s, NA, NA, NA, NA, NA, NA, NA, NA, NA),
 	PINGROUP(36, codec_mic_i2s, NA, NA, NA, NA, NA, NA, NA, NA, NA),
 	PINGROUP(37, codec_mic_i2s, NA, NA, NA, NA, NA, NA, NA, NA, NA),
@@ -537,7 +551,7 @@ static const struct msm_pingroup apq8064_groups[] = {
 	PINGROUP(47, spkr_i2s, gsbi5_spi_cs1, gsbi6_spi_cs1, gsbi7_spi_cs1, NA, NA, NA, NA, NA, NA),
 	PINGROUP(48, spkr_i2s, NA, NA, NA, NA, NA, NA, NA, NA, NA),
 	PINGROUP(49, spkr_i2s, NA, NA, NA, NA, NA, NA, NA, NA, NA),
-	PINGROUP(50, spkr_i2s, NA, NA, NA, NA, NA, NA, NA, NA, NA),
+	PINGROUP(50, spkr_i2s, gp_clk_1b, NA, NA, NA, NA, NA, NA, NA, NA),
 	PINGROUP(51, NA, gsbi5, NA, NA, NA, NA, NA, NA, NA, NA),
 	PINGROUP(52, NA, gsbi5, NA, NA, NA, NA, NA, NA, NA, NA),
 	PINGROUP(53, NA, gsbi5, NA, NA, NA, NA, NA, NA, NA, NA),

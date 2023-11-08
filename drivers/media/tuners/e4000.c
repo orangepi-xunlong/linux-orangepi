@@ -1,21 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Elonics E4000 silicon tuner driver
  *
  * Copyright (C) 2012 Antti Palosaari <crope@iki.fi>
- *
- *    This program is free software; you can redistribute it and/or modify
- *    it under the terms of the GNU General Public License as published by
- *    the Free Software Foundation; either version 2 of the License, or
- *    (at your option) any later version.
- *
- *    This program is distributed in the hope that it will be useful,
- *    but WITHOUT ANY WARRANTY; without even the implied warranty of
- *    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *    GNU General Public License for more details.
- *
- *    You should have received a copy of the GNU General Public License along
- *    with this program; if not, write to the Free Software Foundation, Inc.,
- *    51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
 #include "e4000_priv.h"
@@ -270,7 +257,7 @@ err:
 /*
  * V4L2 API
  */
-#if IS_ENABLED(CONFIG_VIDEO_V4L2)
+#if IS_ENABLED(CONFIG_VIDEO_DEV)
 static const struct v4l2_frequency_band bands[] = {
 	{
 		.type = V4L2_TUNER_RF,
@@ -293,27 +280,17 @@ static inline struct e4000_dev *e4000_subdev_to_dev(struct v4l2_subdev *sd)
 	return container_of(sd, struct e4000_dev, sd);
 }
 
-static int e4000_s_power(struct v4l2_subdev *sd, int on)
+static int e4000_standby(struct v4l2_subdev *sd)
 {
 	struct e4000_dev *dev = e4000_subdev_to_dev(sd);
-	struct i2c_client *client = dev->client;
 	int ret;
 
-	dev_dbg(&client->dev, "on=%d\n", on);
-
-	if (on)
-		ret = e4000_init(dev);
-	else
-		ret = e4000_sleep(dev);
+	ret = e4000_sleep(dev);
 	if (ret)
 		return ret;
 
 	return e4000_set_params(dev);
 }
-
-static const struct v4l2_subdev_core_ops e4000_subdev_core_ops = {
-	.s_power                  = e4000_s_power,
-};
 
 static int e4000_g_tuner(struct v4l2_subdev *sd, struct v4l2_tuner *v)
 {
@@ -322,7 +299,7 @@ static int e4000_g_tuner(struct v4l2_subdev *sd, struct v4l2_tuner *v)
 
 	dev_dbg(&client->dev, "index=%d\n", v->index);
 
-	strlcpy(v->name, "Elonics E4000", sizeof(v->name));
+	strscpy(v->name, "Elonics E4000", sizeof(v->name));
 	v->type = V4L2_TUNER_RF;
 	v->capability = V4L2_TUNER_CAP_1HZ | V4L2_TUNER_CAP_FREQ_BANDS;
 	v->rangelow  = bands[0].rangelow;
@@ -382,6 +359,7 @@ static int e4000_enum_freq_bands(struct v4l2_subdev *sd,
 }
 
 static const struct v4l2_subdev_tuner_ops e4000_subdev_tuner_ops = {
+	.standby                  = e4000_standby,
 	.g_tuner                  = e4000_g_tuner,
 	.s_tuner                  = e4000_s_tuner,
 	.g_frequency              = e4000_g_frequency,
@@ -390,7 +368,6 @@ static const struct v4l2_subdev_tuner_ops e4000_subdev_tuner_ops = {
 };
 
 static const struct v4l2_subdev_ops e4000_subdev_ops = {
-	.core                     = &e4000_subdev_core_ops,
 	.tuner                    = &e4000_subdev_tuner_ops,
 };
 
@@ -620,9 +597,9 @@ static int e4000_dvb_get_if_frequency(struct dvb_frontend *fe, u32 *frequency)
 
 static const struct dvb_tuner_ops e4000_dvb_tuner_ops = {
 	.info = {
-		.name           = "Elonics E4000",
-		.frequency_min  = 174000000,
-		.frequency_max  = 862000000,
+		.name              = "Elonics E4000",
+		.frequency_min_hz  = 174 * MHz,
+		.frequency_max_hz  = 862 * MHz,
 	},
 
 	.init = e4000_dvb_init,
@@ -632,8 +609,7 @@ static const struct dvb_tuner_ops e4000_dvb_tuner_ops = {
 	.get_if_frequency = e4000_dvb_get_if_frequency,
 };
 
-static int e4000_probe(struct i2c_client *client,
-		       const struct i2c_device_id *id)
+static int e4000_probe(struct i2c_client *client)
 {
 	struct e4000_dev *dev;
 	struct e4000_config *cfg = client->dev.platform_data;
@@ -677,7 +653,7 @@ static int e4000_probe(struct i2c_client *client,
 	if (ret)
 		goto err_kfree;
 
-#if IS_ENABLED(CONFIG_VIDEO_V4L2)
+#if IS_ENABLED(CONFIG_VIDEO_DEV)
 	/* Register controls */
 	v4l2_ctrl_handler_init(&dev->hdl, 9);
 	dev->bandwidth_auto = v4l2_ctrl_new_std(&dev->hdl, &e4000_ctrl_ops,
@@ -729,19 +705,17 @@ err:
 	return ret;
 }
 
-static int e4000_remove(struct i2c_client *client)
+static void e4000_remove(struct i2c_client *client)
 {
 	struct v4l2_subdev *sd = i2c_get_clientdata(client);
 	struct e4000_dev *dev = container_of(sd, struct e4000_dev, sd);
 
 	dev_dbg(&client->dev, "\n");
 
-#if IS_ENABLED(CONFIG_VIDEO_V4L2)
+#if IS_ENABLED(CONFIG_VIDEO_DEV)
 	v4l2_ctrl_handler_free(&dev->hdl);
 #endif
 	kfree(dev);
-
-	return 0;
 }
 
 static const struct i2c_device_id e4000_id_table[] = {

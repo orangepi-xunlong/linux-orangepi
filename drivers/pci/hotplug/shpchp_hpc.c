@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0+
 /*
  * Standard PCI Hot Plug Driver
  *
@@ -7,21 +8,6 @@
  * Copyright (C) 2003-2004 Intel Corporation
  *
  * All rights reserved.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or (at
- * your option) any later version.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE, GOOD TITLE or
- * NON INFRINGEMENT.  See the GNU General Public License for more
- * details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  *
  * Send feedback to <greg@kroah.com>,<kristen.c.accardi@intel.com>
  *
@@ -188,11 +174,6 @@ static inline u8 shpc_readb(struct controller *ctrl, int reg)
 	return readb(ctrl->creg + reg);
 }
 
-static inline void shpc_writeb(struct controller *ctrl, int reg, u8 val)
-{
-	writeb(val, ctrl->creg + reg);
-}
-
 static inline u16 shpc_readw(struct controller *ctrl, int reg)
 {
 	return readw(ctrl->creg + reg);
@@ -229,14 +210,13 @@ static inline int shpc_indirect_read(struct controller *ctrl, int index,
 /*
  * This is the interrupt polling timeout function.
  */
-static void int_poll_timeout(unsigned long data)
+static void int_poll_timeout(struct timer_list *t)
 {
-	struct controller *ctrl = (struct controller *)data;
+	struct controller *ctrl = from_timer(ctrl, t, poll_timer);
 
 	/* Poll for interrupt events.  regs == NULL => polling */
 	shpc_isr(0, ctrl);
 
-	init_timer(&ctrl->poll_timer);
 	if (!shpchp_poll_time)
 		shpchp_poll_time = 2; /* default polling interval is 2 sec */
 
@@ -252,8 +232,6 @@ static void start_int_poll_timer(struct controller *ctrl, int sec)
 	if ((sec <= 0) || (sec > 60))
 		sec = 2;
 
-	ctrl->poll_timer.function = &int_poll_timeout;
-	ctrl->poll_timer.data = (unsigned long)ctrl;
 	ctrl->poll_timer.expires = jiffies + sec * HZ;
 	add_timer(&ctrl->poll_timer);
 }
@@ -317,7 +295,7 @@ static int shpc_write_cmd(struct slot *slot, u8 t_slot, u8 cmd)
 	mutex_lock(&slot->ctrl->cmd_lock);
 
 	if (!shpc_poll_ctrl_busy(ctrl)) {
-		/* After 1 sec and and the controller is still busy */
+		/* After 1 sec and the controller is still busy */
 		ctrl_err(ctrl, "Controller is still busy after 1 sec\n");
 		retval = -EBUSY;
 		goto out;
@@ -508,23 +486,6 @@ static int hpc_get_adapter_speed(struct slot *slot, enum pci_bus_speed *value)
 	}
 
 	ctrl_dbg(ctrl, "Adapter speed = %d\n", *value);
-	return retval;
-}
-
-static int hpc_get_mode1_ECC_cap(struct slot *slot, u8 *mode)
-{
-	int retval = 0;
-	struct controller *ctrl = slot->ctrl;
-	u16 sec_bus_status = shpc_readw(ctrl, SEC_BUS_CONFIG);
-	u8 pi = shpc_readb(ctrl, PROG_INTERFACE);
-
-	if (pi == 2) {
-		*mode = (sec_bus_status & 0x0100) >> 8;
-	} else {
-		retval = -1;
-	}
-
-	ctrl_dbg(ctrl, "Mode 1 ECC cap = %d\n", *mode);
 	return retval;
 }
 
@@ -922,7 +883,6 @@ static const struct hpc_ops shpchp_hpc_ops = {
 	.get_adapter_status		= hpc_get_adapter_status,
 
 	.get_adapter_speed		= hpc_get_adapter_speed,
-	.get_mode1_ECC_cap		= hpc_get_mode1_ECC_cap,
 	.get_prog_int			= hpc_get_prog_int,
 
 	.query_power_fault		= hpc_query_power_fault,
@@ -1054,7 +1014,7 @@ int shpc_init(struct controller *ctrl, struct pci_dev *pdev)
 
 	if (shpchp_poll_mode) {
 		/* Install interrupt polling timer. Start with 10 sec delay */
-		init_timer(&ctrl->poll_timer);
+		timer_setup(&ctrl->poll_timer, int_poll_timeout, 0);
 		start_int_poll_timer(ctrl, 10);
 	} else {
 		/* Installs the interrupt handler */

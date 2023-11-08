@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0+ */
 /*
  * CompactPCI Hot Plug Core Functions
  *
@@ -6,21 +7,6 @@
  * Copyright (C) 2001 IBM Corp.
  *
  * All rights reserved.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or (at
- * your option) any later version.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE, GOOD TITLE or
- * NON INFRINGEMENT.  See the GNU General Public License for more
- * details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  *
  * Send feedback to <scottm@somanetworks.com>
  */
@@ -46,8 +32,10 @@ struct slot {
 	unsigned int devfn;
 	struct pci_bus *bus;
 	struct pci_dev *dev;
+	unsigned int latch_status:1;
+	unsigned int adapter_status:1;
 	unsigned int extracting;
-	struct hotplug_slot *hotplug_slot;
+	struct hotplug_slot hotplug_slot;
 	struct list_head slot_list;
 };
 
@@ -72,7 +60,12 @@ struct cpci_hp_controller {
 
 static inline const char *slot_name(struct slot *slot)
 {
-	return hotplug_slot_name(slot->hotplug_slot);
+	return hotplug_slot_name(&slot->hotplug_slot);
+}
+
+static inline struct slot *to_slot(struct hotplug_slot *hotplug_slot)
+{
+	return container_of(hotplug_slot, struct slot, hotplug_slot);
 }
 
 int cpci_hp_register_controller(struct cpci_hp_controller *controller);
@@ -82,13 +75,14 @@ int cpci_hp_unregister_bus(struct pci_bus *bus);
 int cpci_hp_start(void);
 int cpci_hp_stop(void);
 
+/* Global variables */
+extern int cpci_debug;
+
 /*
  * Internal function prototypes, these functions should not be used by
  * board/chassis drivers.
  */
 u8 cpci_get_attention_status(struct slot *slot);
-u8 cpci_get_latch_status(struct slot *slot);
-u8 cpci_get_adapter_status(struct slot *slot);
 u16 cpci_get_hs_csr(struct slot *slot);
 int cpci_set_attention_status(struct slot *slot, int status);
 int cpci_check_and_clear_ins(struct slot *slot);

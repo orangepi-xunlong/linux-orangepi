@@ -1,22 +1,13 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * TI BQ24257 charger driver
  *
  * Copyright (C) 2015 Intel Corporation
  *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
  * Datasheets:
- * http://www.ti.com/product/bq24250
- * http://www.ti.com/product/bq24251
- * http://www.ti.com/product/bq24257
+ * https://www.ti.com/product/bq24250
+ * https://www.ti.com/product/bq24251
+ * https://www.ti.com/product/bq24257
  */
 
 #include <linux/module.h>
@@ -296,7 +287,7 @@ static int bq24257_set_input_current_limit(struct bq24257_device *bq,
 {
 	/*
 	 * Address the case where the user manually sets an input current limit
-	 * while the charger auto-detection mechanism is is active. In this
+	 * while the charger auto-detection mechanism is active. In this
 	 * case we want to abort and go straight to the user-specified value.
 	 */
 	if (bq->iilimit_autoset_enable)
@@ -776,8 +767,7 @@ static ssize_t bq24257_show_ovp_voltage(struct device *dev,
 	struct power_supply *psy = dev_get_drvdata(dev);
 	struct bq24257_device *bq = power_supply_get_drvdata(psy);
 
-	return scnprintf(buf, PAGE_SIZE, "%u\n",
-			 bq24257_vovp_map[bq->init_data.vovp]);
+	return sysfs_emit(buf, "%u\n", bq24257_vovp_map[bq->init_data.vovp]);
 }
 
 static ssize_t bq24257_show_in_dpm_voltage(struct device *dev,
@@ -787,8 +777,7 @@ static ssize_t bq24257_show_in_dpm_voltage(struct device *dev,
 	struct power_supply *psy = dev_get_drvdata(dev);
 	struct bq24257_device *bq = power_supply_get_drvdata(psy);
 
-	return scnprintf(buf, PAGE_SIZE, "%u\n",
-			 bq24257_vindpm_map[bq->init_data.vindpm]);
+	return sysfs_emit(buf, "%u\n", bq24257_vindpm_map[bq->init_data.vindpm]);
 }
 
 static ssize_t bq24257_sysfs_show_enable(struct device *dev,
@@ -809,7 +798,7 @@ static ssize_t bq24257_sysfs_show_enable(struct device *dev,
 	if (ret < 0)
 		return ret;
 
-	return scnprintf(buf, PAGE_SIZE, "%d\n", ret);
+	return sysfs_emit(buf, "%d\n", ret);
 }
 
 static ssize_t bq24257_sysfs_set_enable(struct device *dev,
@@ -845,7 +834,7 @@ static DEVICE_ATTR(high_impedance_enable, S_IWUSR | S_IRUGO,
 static DEVICE_ATTR(sysoff_enable, S_IWUSR | S_IRUGO,
 		   bq24257_sysfs_show_enable, bq24257_sysfs_set_enable);
 
-static struct attribute *bq24257_charger_attr[] = {
+static struct attribute *bq24257_charger_sysfs_attrs[] = {
 	&dev_attr_ovp_voltage.attr,
 	&dev_attr_in_dpm_voltage.attr,
 	&dev_attr_high_impedance_enable.attr,
@@ -853,14 +842,13 @@ static struct attribute *bq24257_charger_attr[] = {
 	NULL,
 };
 
-static const struct attribute_group bq24257_attr_group = {
-	.attrs = bq24257_charger_attr,
-};
+ATTRIBUTE_GROUPS(bq24257_charger_sysfs);
 
 static int bq24257_power_supply_init(struct bq24257_device *bq)
 {
 	struct power_supply_config psy_cfg = { .drv_data = bq, };
 
+	psy_cfg.attr_grp = bq24257_charger_sysfs_groups;
 	psy_cfg.supplied_to = bq24257_charger_supplied_to;
 	psy_cfg.num_supplicants = ARRAY_SIZE(bq24257_charger_supplied_to);
 
@@ -957,10 +945,10 @@ static int bq24257_fw_probe(struct bq24257_device *bq)
 	return 0;
 }
 
-static int bq24257_probe(struct i2c_client *client,
-			 const struct i2c_device_id *id)
+static int bq24257_probe(struct i2c_client *client)
 {
-	struct i2c_adapter *adapter = to_i2c_adapter(client->dev.parent);
+	const struct i2c_device_id *id = i2c_client_get_device_id(client);
+	struct i2c_adapter *adapter = client->adapter;
 	struct device *dev = &client->dev;
 	const struct acpi_device_id *acpi_id;
 	struct bq24257_device *bq;
@@ -1084,27 +1072,17 @@ static int bq24257_probe(struct i2c_client *client,
 		return ret;
 	}
 
-	ret = sysfs_create_group(&bq->charger->dev.kobj, &bq24257_attr_group);
-	if (ret < 0) {
-		dev_err(dev, "Can't create sysfs entries\n");
-		return ret;
-	}
-
 	return 0;
 }
 
-static int bq24257_remove(struct i2c_client *client)
+static void bq24257_remove(struct i2c_client *client)
 {
 	struct bq24257_device *bq = i2c_get_clientdata(client);
 
 	if (bq->iilimit_autoset_enable)
 		cancel_delayed_work_sync(&bq->iilimit_setup_work);
 
-	sysfs_remove_group(&bq->charger->dev.kobj, &bq24257_attr_group);
-
 	bq24257_field_write(bq, F_RESET, 1); /* reset to defaults */
-
-	return 0;
 }
 
 #ifdef CONFIG_PM_SLEEP
@@ -1162,7 +1140,7 @@ static const struct i2c_device_id bq24257_i2c_ids[] = {
 };
 MODULE_DEVICE_TABLE(i2c, bq24257_i2c_ids);
 
-static const struct of_device_id bq24257_of_match[] = {
+static const struct of_device_id bq24257_of_match[] __maybe_unused = {
 	{ .compatible = "ti,bq24250", },
 	{ .compatible = "ti,bq24251", },
 	{ .compatible = "ti,bq24257", },
@@ -1170,6 +1148,7 @@ static const struct of_device_id bq24257_of_match[] = {
 };
 MODULE_DEVICE_TABLE(of, bq24257_of_match);
 
+#ifdef CONFIG_ACPI
 static const struct acpi_device_id bq24257_acpi_match[] = {
 	{ "BQ242500", BQ24250 },
 	{ "BQ242510", BQ24251 },
@@ -1177,6 +1156,7 @@ static const struct acpi_device_id bq24257_acpi_match[] = {
 	{},
 };
 MODULE_DEVICE_TABLE(acpi, bq24257_acpi_match);
+#endif
 
 static struct i2c_driver bq24257_driver = {
 	.driver = {

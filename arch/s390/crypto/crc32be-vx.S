@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Hardware-accelerated CRC-32 variants for Linux on z Systems
  *
@@ -23,15 +24,15 @@
 #define CONST_RU_POLY		%v13
 #define CONST_CRC_POLY		%v14
 
-.data
-.align 8
+	.data
+	.balign	8
 
 /*
  * The CRC-32 constant block contains reduction constants to fold and
  * process particular chunks of the input data stream in parallel.
  *
  * For the CRC-32 variants, the constants are precomputed according to
- * these defintions:
+ * these definitions:
  *
  *	R1 = x4*128+64 mod P(x)
  *	R2 = x4*128    mod P(x)
@@ -47,7 +48,7 @@
  *
  * Note that the constant definitions below are extended in order to compute
  * intermediate results with a single VECTOR GALOIS FIELD MULTIPLY instruction.
- * The righmost doubleword can be 0 to prevent contribution to the result or
+ * The rightmost doubleword can be 0 to prevent contribution to the result or
  * can be multiplied by 1 to perform an XOR without the need for a separate
  * VECTOR EXCLUSIVE OR instruction.
  *
@@ -57,19 +58,20 @@
  *	P'(x) = 0xEDB88320
  */
 
-.Lconstants_CRC_32_BE:
+SYM_DATA_START_LOCAL(constants_CRC_32_BE)
 	.quad		0x08833794c, 0x0e6228b11	# R1, R2
 	.quad		0x0c5b9cd4c, 0x0e8a45605	# R3, R4
 	.quad		0x0f200aa66, 1 << 32		# R5, x32
 	.quad		0x0490d678d, 1			# R6, 1
 	.quad		0x104d101df, 0			# u
 	.quad		0x104C11DB7, 0			# P(x)
+SYM_DATA_END(constants_CRC_32_BE)
 
-.previous
+	.previous
 
 	GEN_BR_THUNK %r14
 
-.text
+	.text
 /*
  * The CRC-32 function(s) use these calling conventions:
  *
@@ -89,9 +91,9 @@
  *
  *	V9..V14: CRC-32 constants.
  */
-ENTRY(crc32_be_vgfm_16)
+SYM_FUNC_START(crc32_be_vgfm_16)
 	/* Load CRC-32 constants */
-	larl	%r5,.Lconstants_CRC_32_BE
+	larl	%r5,constants_CRC_32_BE
 	VLM	CONST_R1R2,CONST_CRC_POLY,0,%r5
 
 	/* Load the initial CRC value into the leftmost word of V0. */
@@ -188,7 +190,7 @@ ENTRY(crc32_be_vgfm_16)
 	 * Note: To compensate the division by x^32, use the vector unpack
 	 * instruction to move the leftmost word into the leftmost doubleword
 	 * of the vector register.  The rightmost doubleword is multiplied
-	 * with zero to not contribute to the intermedate results.
+	 * with zero to not contribute to the intermediate results.
 	 */
 
 	/* T1(x) = floor( R(x) / x^32 ) GF2MUL u */
@@ -206,5 +208,6 @@ ENTRY(crc32_be_vgfm_16)
 .Ldone:
 	VLGVF	%r2,%v2,3
 	BR_EX	%r14
+SYM_FUNC_END(crc32_be_vgfm_16)
 
 .previous

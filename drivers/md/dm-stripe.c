@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2001-2003 Sistina Software (UK) Limited.
  *
@@ -11,8 +12,11 @@
 #include <linux/init.h>
 #include <linux/blkdev.h>
 #include <linux/bio.h>
+#include <linux/dax.h>
 #include <linux/slab.h>
 #include <linux/log2.h>
+
+static struct workqueue_struct *dm_stripe_wq;
 
 #define DM_MSG_PREFIX "striped"
 #define DM_IO_ERROR_THRESHOLD 15
@@ -40,7 +44,7 @@ struct stripe_c {
 	/* Work struct used for triggering events*/
 	struct work_struct trigger_event;
 
-	struct stripe stripe[0];
+	struct stripe stripe[];
 };
 
 /*
@@ -52,19 +56,6 @@ static void trigger_event(struct work_struct *work)
 	struct stripe_c *sc = container_of(work, struct stripe_c,
 					   trigger_event);
 	dm_table_event(sc->ti->table);
-}
-
-static inline struct stripe_c *alloc_context(unsigned int stripes)
-{
-	size_t len;
-
-	if (dm_array_too_big(sizeof(struct stripe_c), sizeof(struct stripe),
-			     stripes))
-		return NULL;
-
-	len = sizeof(struct stripe_c) + (sizeof(struct stripe) * stripes);
-
-	return kmalloc(len, GFP_KERNEL);
 }
 
 /*
@@ -120,15 +111,13 @@ static int stripe_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 
 	width = ti->len;
 	if (sector_div(width, stripes)) {
-		ti->error = "Target length not divisible by "
-		    "number of stripes";
+		ti->error = "Target length not divisible by number of stripes";
 		return -EINVAL;
 	}
 
 	tmp_len = width;
 	if (sector_div(tmp_len, chunk_size)) {
-		ti->error = "Target length not divisible by "
-		    "chunk size";
+		ti->error = "Target length not divisible by chunk size";
 		return -EINVAL;
 	}
 
@@ -136,15 +125,13 @@ static int stripe_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	 * Do we have enough arguments for that many stripes ?
 	 */
 	if (argc != (2 + 2 * stripes)) {
-		ti->error = "Not enough destinations "
-			"specified";
+		ti->error = "Not enough destinations specified";
 		return -EINVAL;
 	}
 
-	sc = alloc_context(stripes);
+	sc = kmalloc(struct_size(sc, stripe, stripes), GFP_KERNEL);
 	if (!sc) {
-		ti->error = "Memory allocation for striped context "
-		    "failed";
+		ti->error = "Memory allocation for striped context failed";
 		return -ENOMEM;
 	}
 
@@ -168,7 +155,8 @@ static int stripe_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 
 	ti->num_flush_bios = stripes;
 	ti->num_discard_bios = stripes;
-	ti->num_write_same_bios = stripes;
+	ti->num_secure_erase_bios = stripes;
+	ti->num_write_zeroes_bios = stripes;
 
 	sc->chunk_size = chunk_size;
 	if (chunk_size & (chunk_size - 1))
@@ -201,7 +189,7 @@ static int stripe_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 static void stripe_dtr(struct dm_target *ti)
 {
 	unsigned int i;
-	struct stripe_c *sc = (struct stripe_c *) ti->private;
+	struct stripe_c *sc = ti->private;
 
 	for (i = 0; i < sc->stripes; i++)
 		dm_put_device(ti, sc->stripe[i].dev);
@@ -268,32 +256,33 @@ static int stripe_map_range(struct stripe_c *sc, struct bio *bio,
 	stripe_map_range_sector(sc, bio_end_sector(bio),
 				target_stripe, &end);
 	if (begin < end) {
-		bio->bi_bdev = sc->stripe[target_stripe].dev->bdev;
+		bio_set_dev(bio, sc->stripe[target_stripe].dev->bdev);
 		bio->bi_iter.bi_sector = begin +
 			sc->stripe[target_stripe].physical_start;
 		bio->bi_iter.bi_size = to_bytes(end - begin);
 		return DM_MAPIO_REMAPPED;
-	} else {
-		/* The range doesn't map to the target stripe */
-		bio_endio(bio);
-		return DM_MAPIO_SUBMITTED;
 	}
+
+	/* The range doesn't map to the target stripe */
+	bio_endio(bio);
+	return DM_MAPIO_SUBMITTED;
 }
 
 static int stripe_map(struct dm_target *ti, struct bio *bio)
 {
 	struct stripe_c *sc = ti->private;
 	uint32_t stripe;
-	unsigned target_bio_nr;
+	unsigned int target_bio_nr;
 
 	if (bio->bi_opf & REQ_PREFLUSH) {
 		target_bio_nr = dm_bio_get_target_bio_nr(bio);
 		BUG_ON(target_bio_nr >= sc->stripes);
-		bio->bi_bdev = sc->stripe[target_bio_nr].dev->bdev;
+		bio_set_dev(bio, sc->stripe[target_bio_nr].dev->bdev);
 		return DM_MAPIO_REMAPPED;
 	}
 	if (unlikely(bio_op(bio) == REQ_OP_DISCARD) ||
-	    unlikely(bio_op(bio) == REQ_OP_WRITE_SAME)) {
+	    unlikely(bio_op(bio) == REQ_OP_SECURE_ERASE) ||
+	    unlikely(bio_op(bio) == REQ_OP_WRITE_ZEROES)) {
 		target_bio_nr = dm_bio_get_target_bio_nr(bio);
 		BUG_ON(target_bio_nr >= sc->stripes);
 		return stripe_map_range(sc, bio, target_bio_nr);
@@ -303,33 +292,57 @@ static int stripe_map(struct dm_target *ti, struct bio *bio)
 			  &stripe, &bio->bi_iter.bi_sector);
 
 	bio->bi_iter.bi_sector += sc->stripe[stripe].physical_start;
-	bio->bi_bdev = sc->stripe[stripe].dev->bdev;
+	bio_set_dev(bio, sc->stripe[stripe].dev->bdev);
 
 	return DM_MAPIO_REMAPPED;
 }
 
-static long stripe_direct_access(struct dm_target *ti, sector_t sector,
-				 void **kaddr, pfn_t *pfn, long size)
+#if IS_ENABLED(CONFIG_FS_DAX)
+static struct dax_device *stripe_dax_pgoff(struct dm_target *ti, pgoff_t *pgoff)
 {
 	struct stripe_c *sc = ti->private;
-	uint32_t stripe;
 	struct block_device *bdev;
-	struct blk_dax_ctl dax = {
-		.size = size,
-	};
-	long ret;
+	sector_t dev_sector;
+	uint32_t stripe;
 
-	stripe_map_sector(sc, sector, &stripe, &dax.sector);
-
-	dax.sector += sc->stripe[stripe].physical_start;
+	stripe_map_sector(sc, *pgoff * PAGE_SECTORS, &stripe, &dev_sector);
+	dev_sector += sc->stripe[stripe].physical_start;
 	bdev = sc->stripe[stripe].dev->bdev;
 
-	ret = bdev_direct_access(bdev, &dax);
-	*kaddr = dax.addr;
-	*pfn = dax.pfn;
-
-	return ret;
+	*pgoff = (get_start_sect(bdev) + dev_sector) >> PAGE_SECTORS_SHIFT;
+	return sc->stripe[stripe].dev->dax_dev;
 }
+
+static long stripe_dax_direct_access(struct dm_target *ti, pgoff_t pgoff,
+		long nr_pages, enum dax_access_mode mode, void **kaddr,
+		pfn_t *pfn)
+{
+	struct dax_device *dax_dev = stripe_dax_pgoff(ti, &pgoff);
+
+	return dax_direct_access(dax_dev, pgoff, nr_pages, mode, kaddr, pfn);
+}
+
+static int stripe_dax_zero_page_range(struct dm_target *ti, pgoff_t pgoff,
+				      size_t nr_pages)
+{
+	struct dax_device *dax_dev = stripe_dax_pgoff(ti, &pgoff);
+
+	return dax_zero_page_range(dax_dev, pgoff, nr_pages);
+}
+
+static size_t stripe_dax_recovery_write(struct dm_target *ti, pgoff_t pgoff,
+		void *addr, size_t bytes, struct iov_iter *i)
+{
+	struct dax_device *dax_dev = stripe_dax_pgoff(ti, &pgoff);
+
+	return dax_recovery_write(dax_dev, pgoff, addr, bytes, i);
+}
+
+#else
+#define stripe_dax_direct_access NULL
+#define stripe_dax_zero_page_range NULL
+#define stripe_dax_recovery_write NULL
+#endif
 
 /*
  * Stripe status:
@@ -345,23 +358,21 @@ static long stripe_direct_access(struct dm_target *ti, sector_t sector,
  */
 
 static void stripe_status(struct dm_target *ti, status_type_t type,
-			  unsigned status_flags, char *result, unsigned maxlen)
+			  unsigned int status_flags, char *result, unsigned int maxlen)
 {
-	struct stripe_c *sc = (struct stripe_c *) ti->private;
-	char buffer[sc->stripes + 1];
+	struct stripe_c *sc = ti->private;
 	unsigned int sz = 0;
 	unsigned int i;
 
 	switch (type) {
 	case STATUSTYPE_INFO:
 		DMEMIT("%d ", sc->stripes);
-		for (i = 0; i < sc->stripes; i++)  {
+		for (i = 0; i < sc->stripes; i++)
 			DMEMIT("%s ", sc->stripe[i].dev->name);
-			buffer[i] = atomic_read(&(sc->stripe[i].error_count)) ?
-				'D' : 'A';
-		}
-		buffer[i] = '\0';
-		DMEMIT("1 %s", buffer);
+
+		DMEMIT("1 ");
+		for (i = 0; i < sc->stripes; i++)
+			DMEMIT("%c", atomic_read(&(sc->stripe[i].error_count)) ?  'D' : 'A');
 		break;
 
 	case STATUSTYPE_TABLE:
@@ -371,28 +382,42 @@ static void stripe_status(struct dm_target *ti, status_type_t type,
 			DMEMIT(" %s %llu", sc->stripe[i].dev->name,
 			    (unsigned long long)sc->stripe[i].physical_start);
 		break;
+
+	case STATUSTYPE_IMA:
+		DMEMIT_TARGET_NAME_VERSION(ti->type);
+		DMEMIT(",stripes=%d,chunk_size=%llu", sc->stripes,
+		       (unsigned long long)sc->chunk_size);
+
+		for (i = 0; i < sc->stripes; i++) {
+			DMEMIT(",stripe_%d_device_name=%s", i, sc->stripe[i].dev->name);
+			DMEMIT(",stripe_%d_physical_start=%llu", i,
+			       (unsigned long long)sc->stripe[i].physical_start);
+			DMEMIT(",stripe_%d_status=%c", i,
+			       atomic_read(&(sc->stripe[i].error_count)) ? 'D' : 'A');
+		}
+		DMEMIT(";");
+		break;
 	}
 }
 
-static int stripe_end_io(struct dm_target *ti, struct bio *bio, int error)
+static int stripe_end_io(struct dm_target *ti, struct bio *bio,
+		blk_status_t *error)
 {
-	unsigned i;
+	unsigned int i;
 	char major_minor[16];
 	struct stripe_c *sc = ti->private;
 
-	if (!error)
-		return 0; /* I/O complete */
+	if (!*error)
+		return DM_ENDIO_DONE; /* I/O complete */
 
-	if ((error == -EWOULDBLOCK) && (bio->bi_opf & REQ_RAHEAD))
-		return error;
+	if (bio->bi_opf & REQ_RAHEAD)
+		return DM_ENDIO_DONE;
 
-	if (error == -EOPNOTSUPP)
-		return error;
+	if (*error == BLK_STS_NOTSUPP)
+		return DM_ENDIO_DONE;
 
 	memset(major_minor, 0, sizeof(major_minor));
-	sprintf(major_minor, "%d:%d",
-		MAJOR(disk_devt(bio->bi_bdev->bd_disk)),
-		MINOR(disk_devt(bio->bi_bdev->bd_disk)));
+	sprintf(major_minor, "%d:%d", MAJOR(bio_dev(bio)), MINOR(bio_dev(bio)));
 
 	/*
 	 * Test to see which stripe drive triggered the event
@@ -405,10 +430,10 @@ static int stripe_end_io(struct dm_target *ti, struct bio *bio, int error)
 			atomic_inc(&(sc->stripe[i].error_count));
 			if (atomic_read(&(sc->stripe[i].error_count)) <
 			    DM_IO_ERROR_THRESHOLD)
-				schedule_work(&sc->trigger_event);
+				queue_work(dm_stripe_wq, &sc->trigger_event);
 		}
 
-	return error;
+	return DM_ENDIO_DONE;
 }
 
 static int stripe_iterate_devices(struct dm_target *ti,
@@ -416,7 +441,7 @@ static int stripe_iterate_devices(struct dm_target *ti,
 {
 	struct stripe_c *sc = ti->private;
 	int ret = 0;
-	unsigned i = 0;
+	unsigned int i = 0;
 
 	do {
 		ret = fn(ti, sc->stripe[i].dev,
@@ -431,7 +456,7 @@ static void stripe_io_hints(struct dm_target *ti,
 			    struct queue_limits *limits)
 {
 	struct stripe_c *sc = ti->private;
-	unsigned chunk_size = sc->chunk_size << SECTOR_SHIFT;
+	unsigned int chunk_size = sc->chunk_size << SECTOR_SHIFT;
 
 	blk_limits_io_min(limits, chunk_size);
 	blk_limits_io_opt(limits, chunk_size * sc->stripes);
@@ -440,6 +465,7 @@ static void stripe_io_hints(struct dm_target *ti,
 static struct target_type stripe_target = {
 	.name   = "striped",
 	.version = {1, 6, 0},
+	.features = DM_TARGET_PASSES_INTEGRITY | DM_TARGET_NOWAIT,
 	.module = THIS_MODULE,
 	.ctr    = stripe_ctr,
 	.dtr    = stripe_dtr,
@@ -448,16 +474,23 @@ static struct target_type stripe_target = {
 	.status = stripe_status,
 	.iterate_devices = stripe_iterate_devices,
 	.io_hints = stripe_io_hints,
-	.direct_access = stripe_direct_access,
+	.direct_access = stripe_dax_direct_access,
+	.dax_zero_page_range = stripe_dax_zero_page_range,
+	.dax_recovery_write = stripe_dax_recovery_write,
 };
 
 int __init dm_stripe_init(void)
 {
 	int r;
 
+	dm_stripe_wq = alloc_workqueue("dm_stripe_wq", 0, 0);
+	if (!dm_stripe_wq)
+		return -ENOMEM;
 	r = dm_register_target(&stripe_target);
-	if (r < 0)
+	if (r < 0) {
+		destroy_workqueue(dm_stripe_wq);
 		DMWARN("target registration failed");
+	}
 
 	return r;
 }
@@ -465,4 +498,5 @@ int __init dm_stripe_init(void)
 void dm_stripe_exit(void)
 {
 	dm_unregister_target(&stripe_target);
+	destroy_workqueue(dm_stripe_wq);
 }

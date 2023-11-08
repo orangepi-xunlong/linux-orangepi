@@ -1,16 +1,13 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  *  arch/arm/include/asm/pgtable-2level.h
  *
  *  Copyright (C) 1995-2002 Russell King
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 #ifndef _ASM_PGTABLE_2LEVEL_H
 #define _ASM_PGTABLE_2LEVEL_H
 
-#define __PAGETABLE_PMD_FOLDED
+#define __PAGETABLE_PMD_FOLDED 1
 
 /*
  * Hardware-wise, we have a two level page table structure, where the first
@@ -78,6 +75,8 @@
 #define PTE_HWTABLE_OFF		(PTE_HWTABLE_PTRS * sizeof(pte_t))
 #define PTE_HWTABLE_SIZE	(PTRS_PER_PTE * sizeof(u32))
 
+#define MAX_POSSIBLE_PHYSMEM_BITS	32
+
 /*
  * PMD_SHIFT determines the size of the area a second-level page table can map
  * PGDIR_SHIFT determines what a third-level page table entry can map
@@ -126,6 +125,9 @@
 #define L_PTE_XN		(_AT(pteval_t, 1) << 9)
 #define L_PTE_SHARED		(_AT(pteval_t, 1) << 10)	/* shared(v6), coherent(xsc3) */
 #define L_PTE_NONE		(_AT(pteval_t, 1) << 11)
+
+/* We borrow bit 7 to store the exclusive marker in swap PTEs. */
+#define L_PTE_SWP_EXCLUSIVE	L_PTE_RDONLY
 
 /*
  * These are the memory types, defined to be compatible with
@@ -180,18 +182,39 @@
  * the pud: the pud entry is never bad, always exists, and can't be set or
  * cleared.
  */
-#define pud_none(pud)		(0)
-#define pud_bad(pud)		(0)
-#define pud_present(pud)	(1)
-#define pud_clear(pudp)		do { } while (0)
-#define set_pud(pud,pudp)	do { } while (0)
+static inline int pud_none(pud_t pud)
+{
+	return 0;
+}
+
+static inline int pud_bad(pud_t pud)
+{
+	return 0;
+}
+
+static inline int pud_present(pud_t pud)
+{
+	return 1;
+}
+
+static inline void pud_clear(pud_t *pudp)
+{
+}
+
+static inline void set_pud(pud_t *pudp, pud_t pud)
+{
+}
 
 static inline pmd_t *pmd_offset(pud_t *pud, unsigned long addr)
 {
 	return (pmd_t *)pud;
 }
+#define pmd_offset pmd_offset
+
+#define pmd_pfn(pmd)		(__phys_to_pfn(pmd_val(pmd) & PHYS_MASK))
 
 #define pmd_large(pmd)		(pmd_val(pmd) & 2)
+#define pmd_leaf(pmd)		(pmd_val(pmd) & 2)
 #define pmd_bad(pmd)		(pmd_val(pmd) & 2)
 #define pmd_present(pmd)	(pmd_val(pmd))
 
@@ -213,8 +236,6 @@ static inline pmd_t *pmd_offset(pud_t *pud, unsigned long addr)
 #define pmd_addr_end(addr,end) (end)
 
 #define set_pte_ext(ptep,pte,ext) cpu_set_pte_ext(ptep,pte,ext)
-#define pte_special(pte)	(0)
-static inline pte_t pte_mkspecial(pte_t pte) { return pte; }
 
 /*
  * We don't have huge page support for short descriptors, for the moment

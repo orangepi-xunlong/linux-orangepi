@@ -1,22 +1,18 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright (C) 2010 DENX Software Engineering
  *
  * Anatolij Gustschin, <agust@denx.de>
  *
  * PDM360NG board setup
- *
- * This is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
  */
 
+#include <linux/device.h>
 #include <linux/kernel.h>
 #include <linux/io.h>
+#include <linux/of.h>
 #include <linux/of_address.h>
 #include <linux/of_fdt.h>
-#include <linux/of_platform.h>
 
 #include <asm/machdep.h>
 #include <asm/ipic.h>
@@ -113,9 +109,6 @@ void __init pdm360ng_init(void)
 
 static int __init pdm360ng_probe(void)
 {
-	if (!of_machine_is_compatible("ifm,pdm360ng"))
-		return 0;
-
 	mpc512x_init_early();
 
 	return 1;
@@ -123,11 +116,11 @@ static int __init pdm360ng_probe(void)
 
 define_machine(pdm360ng) {
 	.name			= "PDM360NG",
+	.compatible		= "ifm,pdm360ng",
 	.probe			= pdm360ng_probe,
 	.setup_arch		= mpc512x_setup_arch,
 	.init			= pdm360ng_init,
 	.init_IRQ		= mpc512x_init_IRQ,
 	.get_irq		= ipic_get_irq,
-	.calibrate_decr		= generic_calibrate_decr,
 	.restart		= mpc512x_restart,
 };

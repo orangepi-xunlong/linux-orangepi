@@ -1,14 +1,17 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (C) 2016 Red Hat, Inc.
  * Author: Michael S. Tsirkin <mst@redhat.com>
- * This work is licensed under the terms of the GNU GPL, version 2.
  *
  * Common macros and functions for ring benchmarking.
  */
 #ifndef MAIN_H
 #define MAIN_H
 
+#include <assert.h>
 #include <stdbool.h>
+
+extern int param;
 
 extern bool do_exit;
 
@@ -25,6 +28,16 @@ static inline void wait_cycles(unsigned long long cycles)
 
 #define VMEXIT_CYCLES 500
 #define VMENTRY_CYCLES 500
+
+#elif defined(__s390x__)
+static inline void wait_cycles(unsigned long long cycles)
+{
+	asm volatile("0: brctg %0,0b" : : "d" (cycles));
+}
+
+/* tweak me */
+#define VMEXIT_CYCLES 200
+#define VMENTRY_CYCLES 200
 
 #else
 static inline void wait_cycles(unsigned long long cycles)
@@ -81,6 +94,10 @@ extern unsigned ring_size;
 /* Is there a portable way to do this? */
 #if defined(__x86_64__) || defined(__i386__)
 #define cpu_relax() asm ("rep; nop" ::: "memory")
+#elif defined(__s390x__)
+#define cpu_relax() barrier()
+#elif defined(__aarch64__)
+#define cpu_relax() asm ("yield" ::: "memory")
 #else
 #define cpu_relax() assert(0)
 #endif
@@ -96,11 +113,17 @@ static inline void busy_wait(void)
 		barrier();
 } 
 
+#if defined(__x86_64__) || defined(__i386__)
+#define smp_mb()     asm volatile("lock; addl $0,-132(%%rsp)" ::: "memory", "cc")
+#elif defined(__aarch64__)
+#define smp_mb()     asm volatile("dmb ish" ::: "memory")
+#else
 /*
  * Not using __ATOMIC_SEQ_CST since gcc docs say they are only synchronized
  * with other __ATOMIC_SEQ_CST calls.
  */
 #define smp_mb() __sync_synchronize()
+#endif
 
 /*
  * This abuses the atomic builtins for thread fences, and
@@ -115,5 +138,71 @@ static inline void busy_wait(void)
     __atomic_thread_fence(__ATOMIC_ACQUIRE); \
     barrier(); \
 } while (0)
+
+#if defined(__i386__) || defined(__x86_64__) || defined(__s390x__)
+#define smp_wmb() barrier()
+#elif defined(__aarch64__)
+#define smp_wmb() asm volatile("dmb ishst" ::: "memory")
+#else
+#define smp_wmb() smp_release()
+#endif
+
+#ifndef __always_inline
+#define __always_inline inline __attribute__((always_inline))
+#endif
+
+static __always_inline
+void __read_once_size(const volatile void *p, void *res, int size)
+{
+	switch (size) {
+	case 1: *(unsigned char *)res = *(volatile unsigned char *)p; break;
+	case 2: *(unsigned short *)res = *(volatile unsigned short *)p; break;
+	case 4: *(unsigned int *)res = *(volatile unsigned int *)p; break;
+	case 8: *(unsigned long long *)res = *(volatile unsigned long long *)p; break;
+	default:
+		barrier();
+		__builtin_memcpy((void *)res, (const void *)p, size);
+		barrier();
+	}
+}
+
+static __always_inline void __write_once_size(volatile void *p, void *res, int size)
+{
+	switch (size) {
+	case 1: *(volatile unsigned char *)p = *(unsigned char *)res; break;
+	case 2: *(volatile unsigned short *)p = *(unsigned short *)res; break;
+	case 4: *(volatile unsigned int *)p = *(unsigned int *)res; break;
+	case 8: *(volatile unsigned long long *)p = *(unsigned long long *)res; break;
+	default:
+		barrier();
+		__builtin_memcpy((void *)p, (const void *)res, size);
+		barrier();
+	}
+}
+
+#ifdef __alpha__
+#define READ_ONCE(x) \
+({									\
+	union { typeof(x) __val; char __c[1]; } __u;			\
+	__read_once_size(&(x), __u.__c, sizeof(x));		\
+	smp_mb(); /* Enforce dependency ordering from x */		\
+	__u.__val;							\
+})
+#else
+#define READ_ONCE(x)							\
+({									\
+	union { typeof(x) __val; char __c[1]; } __u;			\
+	__read_once_size(&(x), __u.__c, sizeof(x));			\
+	__u.__val;							\
+})
+#endif
+
+#define WRITE_ONCE(x, val) \
+({							\
+	union { typeof(x) __val; char __c[1]; } __u =	\
+		{ .__val = (typeof(x)) (val) }; \
+	__write_once_size(&(x), __u.__c, sizeof(x));	\
+	__u.__val;					\
+})
 
 #endif

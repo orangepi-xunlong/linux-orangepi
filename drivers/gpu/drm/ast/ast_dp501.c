@@ -1,22 +1,34 @@
+// SPDX-License-Identifier: GPL-2.0
 
+#include <linux/delay.h>
 #include <linux/firmware.h>
-#include <drm/drmP.h>
+#include <linux/module.h>
+
 #include "ast_drv.h"
+
 MODULE_FIRMWARE("ast_dp501_fw.bin");
 
-int ast_load_dp501_microcode(struct drm_device *dev)
+static void ast_release_firmware(void *data)
 {
-	struct ast_private *ast = dev->dev_private;
-	static char *fw_name = "ast_dp501_fw.bin";
-	int err;
-	err = request_firmware(&ast->dp501_fw, fw_name, dev->dev);
-	if (err)
-		return err;
+	struct ast_device *ast = data;
 
-	return 0;
+	release_firmware(ast->dp501_fw);
+	ast->dp501_fw = NULL;
 }
 
-static void send_ack(struct ast_private *ast)
+static int ast_load_dp501_microcode(struct drm_device *dev)
+{
+	struct ast_device *ast = to_ast_device(dev);
+	int ret;
+
+	ret = request_firmware(&ast->dp501_fw, "ast_dp501_fw.bin", dev->dev);
+	if (ret)
+		return ret;
+
+	return devm_add_action_or_reset(dev->dev, ast_release_firmware, ast);
+}
+
+static void send_ack(struct ast_device *ast)
 {
 	u8 sendack;
 	sendack = ast_get_index_reg_mask(ast, AST_IO_CRTC_PORT, 0x9b, 0xff);
@@ -24,7 +36,7 @@ static void send_ack(struct ast_private *ast)
 	ast_set_index_reg_mask(ast, AST_IO_CRTC_PORT, 0x9b, 0x00, sendack);
 }
 
-static void send_nack(struct ast_private *ast)
+static void send_nack(struct ast_device *ast)
 {
 	u8 sendack;
 	sendack = ast_get_index_reg_mask(ast, AST_IO_CRTC_PORT, 0x9b, 0xff);
@@ -32,7 +44,7 @@ static void send_nack(struct ast_private *ast)
 	ast_set_index_reg_mask(ast, AST_IO_CRTC_PORT, 0x9b, 0x00, sendack);
 }
 
-static bool wait_ack(struct ast_private *ast)
+static bool wait_ack(struct ast_device *ast)
 {
 	u8 waitack;
 	u32 retry = 0;
@@ -48,7 +60,7 @@ static bool wait_ack(struct ast_private *ast)
 		return false;
 }
 
-static bool wait_nack(struct ast_private *ast)
+static bool wait_nack(struct ast_device *ast)
 {
 	u8 waitack;
 	u32 retry = 0;
@@ -64,18 +76,18 @@ static bool wait_nack(struct ast_private *ast)
 		return false;
 }
 
-static void set_cmd_trigger(struct ast_private *ast)
+static void set_cmd_trigger(struct ast_device *ast)
 {
 	ast_set_index_reg_mask(ast, AST_IO_CRTC_PORT, 0x9b, ~0x40, 0x40);
 }
 
-static void clear_cmd_trigger(struct ast_private *ast)
+static void clear_cmd_trigger(struct ast_device *ast)
 {
 	ast_set_index_reg_mask(ast, AST_IO_CRTC_PORT, 0x9b, ~0x40, 0x00);
 }
 
 #if 0
-static bool wait_fw_ready(struct ast_private *ast)
+static bool wait_fw_ready(struct ast_device *ast)
 {
 	u8 waitready;
 	u32 retry = 0;
@@ -94,7 +106,7 @@ static bool wait_fw_ready(struct ast_private *ast)
 
 static bool ast_write_cmd(struct drm_device *dev, u8 data)
 {
-	struct ast_private *ast = dev->dev_private;
+	struct ast_device *ast = to_ast_device(dev);
 	int retry = 0;
 	if (wait_nack(ast)) {
 		send_nack(ast);
@@ -116,7 +128,7 @@ static bool ast_write_cmd(struct drm_device *dev, u8 data)
 
 static bool ast_write_data(struct drm_device *dev, u8 data)
 {
-	struct ast_private *ast = dev->dev_private;
+	struct ast_device *ast = to_ast_device(dev);
 
 	if (wait_nack(ast)) {
 		send_nack(ast);
@@ -134,7 +146,7 @@ static bool ast_write_data(struct drm_device *dev, u8 data)
 #if 0
 static bool ast_read_data(struct drm_device *dev, u8 *data)
 {
-	struct ast_private *ast = dev->dev_private;
+	struct ast_device *ast = to_ast_device(dev);
 	u8 tmp;
 
 	*data = 0;
@@ -151,7 +163,7 @@ static bool ast_read_data(struct drm_device *dev, u8 *data)
 	return true;
 }
 
-static void clear_cmd(struct ast_private *ast)
+static void clear_cmd(struct ast_device *ast)
 {
 	send_nack(ast);
 	ast_set_index_reg_mask(ast, AST_IO_CRTC_PORT, 0x9a, 0x00, 0x00);
@@ -166,16 +178,19 @@ void ast_set_dp501_video_output(struct drm_device *dev, u8 mode)
 	msleep(10);
 }
 
-static u32 get_fw_base(struct ast_private *ast)
+static u32 get_fw_base(struct ast_device *ast)
 {
 	return ast_mindwm(ast, 0x1e6e2104) & 0x7fffffff;
 }
 
 bool ast_backup_fw(struct drm_device *dev, u8 *addr, u32 size)
 {
-	struct ast_private *ast = dev->dev_private;
+	struct ast_device *ast = to_ast_device(dev);
 	u32 i, data;
 	u32 boot_address;
+
+	if (ast->config_mode != ast_use_p2a)
+		return false;
 
 	data = ast_mindwm(ast, 0x1e6e2100) & 0x01;
 	if (data) {
@@ -187,13 +202,16 @@ bool ast_backup_fw(struct drm_device *dev, u8 *addr, u32 size)
 	return false;
 }
 
-bool ast_launch_m68k(struct drm_device *dev)
+static bool ast_launch_m68k(struct drm_device *dev)
 {
-	struct ast_private *ast = dev->dev_private;
+	struct ast_device *ast = to_ast_device(dev);
 	u32 i, data, len = 0;
 	u32 boot_address;
 	u8 *fw_addr = NULL;
 	u8 jreg;
+
+	if (ast->config_mode != ast_use_p2a)
+		return false;
 
 	data = ast_mindwm(ast, 0x1e6e2100) & 0x01;
 	if (!data) {
@@ -201,7 +219,11 @@ bool ast_launch_m68k(struct drm_device *dev)
 		if (ast->dp501_fw_addr) {
 			fw_addr = ast->dp501_fw_addr;
 			len = 32*1024;
-		} else if (ast->dp501_fw) {
+		} else {
+			if (!ast->dp501_fw &&
+			    ast_load_dp501_microcode(dev) < 0)
+				return false;
+
 			fw_addr = (u8 *)ast->dp501_fw->data;
 			len = ast->dp501_fw->size;
 		}
@@ -250,58 +272,74 @@ bool ast_launch_m68k(struct drm_device *dev)
 	return true;
 }
 
-u8 ast_get_dp501_max_clk(struct drm_device *dev)
+bool ast_dp501_is_connected(struct ast_device *ast)
 {
-	struct ast_private *ast = dev->dev_private;
 	u32 boot_address, offset, data;
-	u8 linkcap[4], linkrate, linklanes, maxclk = 0xff;
 
-	boot_address = get_fw_base(ast);
+	if (ast->config_mode == ast_use_p2a) {
+		boot_address = get_fw_base(ast);
 
-	/* validate FW version */
-	offset = 0xf000;
-	data = ast_mindwm(ast, boot_address + offset);
-	if ((data & 0xf0) != 0x10) /* version: 1x */
-		return maxclk;
+		/* validate FW version */
+		offset = AST_DP501_GBL_VERSION;
+		data = ast_mindwm(ast, boot_address + offset);
+		if ((data & AST_DP501_FW_VERSION_MASK) != AST_DP501_FW_VERSION_1)
+			return false;
 
-	/* Read Link Capability */
-	offset  = 0xf014;
-	*(u32 *)linkcap = ast_mindwm(ast, boot_address + offset);
-	if (linkcap[2] == 0) {
-		linkrate = linkcap[0];
-		linklanes = linkcap[1];
-		data = (linkrate == 0x0a) ? (90 * linklanes) : (54 * linklanes);
-		if (data > 0xff)
-			data = 0xff;
-		maxclk = (u8)data;
+		/* validate PnP Monitor */
+		offset = AST_DP501_PNPMONITOR;
+		data = ast_mindwm(ast, boot_address + offset);
+		if (!(data & AST_DP501_PNP_CONNECTED))
+			return false;
+	} else {
+		if (!ast->dp501_fw_buf)
+			return false;
+
+		/* dummy read */
+		offset = 0x0000;
+		data = readl(ast->dp501_fw_buf + offset);
+
+		/* validate FW version */
+		offset = AST_DP501_GBL_VERSION;
+		data = readl(ast->dp501_fw_buf + offset);
+		if ((data & AST_DP501_FW_VERSION_MASK) != AST_DP501_FW_VERSION_1)
+			return false;
+
+		/* validate PnP Monitor */
+		offset = AST_DP501_PNPMONITOR;
+		data = readl(ast->dp501_fw_buf + offset);
+		if (!(data & AST_DP501_PNP_CONNECTED))
+			return false;
 	}
-	return maxclk;
+	return true;
 }
 
 bool ast_dp501_read_edid(struct drm_device *dev, u8 *ediddata)
 {
-	struct ast_private *ast = dev->dev_private;
+	struct ast_device *ast = to_ast_device(dev);
 	u32 i, boot_address, offset, data;
+	u32 *pEDIDidx;
 
-	boot_address = get_fw_base(ast);
-
-	/* validate FW version */
-	offset = 0xf000;
-	data = ast_mindwm(ast, boot_address + offset);
-	if ((data & 0xf0) != 0x10)
+	if (!ast_dp501_is_connected(ast))
 		return false;
 
-	/* validate PnP Monitor */
-	offset = 0xf010;
-	data = ast_mindwm(ast, boot_address + offset);
-	if (!(data & 0x01))
-		return false;
+	if (ast->config_mode == ast_use_p2a) {
+		boot_address = get_fw_base(ast);
 
-	/* Read EDID */
-	offset = 0xf020;
-	for (i = 0; i < 128; i += 4) {
-		data = ast_mindwm(ast, boot_address + offset + i);
-		*(u32 *)(ediddata + i) = data;
+		/* Read EDID */
+		offset = AST_DP501_EDID_DATA;
+		for (i = 0; i < 128; i += 4) {
+			data = ast_mindwm(ast, boot_address + offset + i);
+			pEDIDidx = (u32 *)(ediddata + i);
+			*pEDIDidx = data;
+		}
+	} else {
+		/* Read EDID */
+		offset = AST_DP501_EDID_DATA;
+		for (i = 0; i < 128; i += 4) {
+			data = readl(ast->dp501_fw_buf + offset + i);
+			pEDIDidx = (u32 *)(ediddata + i);
+			*pEDIDidx = data;
+		}
 	}
 
 	return true;
@@ -309,7 +347,7 @@ bool ast_dp501_read_edid(struct drm_device *dev, u8 *ediddata)
 
 static bool ast_init_dvo(struct drm_device *dev)
 {
-	struct ast_private *ast = dev->dev_private;
+	struct ast_device *ast = to_ast_device(dev);
 	u8 jreg;
 	u32 data;
 	ast_write32(ast, 0xf004, 0x1e6e0000);
@@ -325,7 +363,7 @@ static bool ast_init_dvo(struct drm_device *dev)
 		data |= 0x00000500;
 		ast_write32(ast, 0x12008, data);
 
-		if (ast->chip == AST2300) {
+		if (IS_AST_GEN4(ast)) {
 			data = ast_read32(ast, 0x12084);
 			/* multi-pins for DVO single-edge */
 			data |= 0xfffe0000;
@@ -341,7 +379,7 @@ static bool ast_init_dvo(struct drm_device *dev)
 			data &= 0xffffffcf;
 			data |= 0x00000020;
 			ast_write32(ast, 0x12090, data);
-		} else { /* AST2400 */
+		} else { /* AST GEN5+ */
 			data = ast_read32(ast, 0x12088);
 			/* multi-pins for DVO single-edge */
 			data |= 0x30000000;
@@ -382,7 +420,7 @@ static bool ast_init_dvo(struct drm_device *dev)
 
 static void ast_init_analog(struct drm_device *dev)
 {
-	struct ast_private *ast = dev->dev_private;
+	struct ast_device *ast = to_ast_device(dev);
 	u32 data;
 
 	/*
@@ -409,10 +447,10 @@ static void ast_init_analog(struct drm_device *dev)
 
 void ast_init_3rdtx(struct drm_device *dev)
 {
-	struct ast_private *ast = dev->dev_private;
+	struct ast_device *ast = to_ast_device(dev);
 	u8 jreg;
 
-	if (ast->chip == AST2300 || ast->chip == AST2400) {
+	if (IS_AST_GEN4(ast) || IS_AST_GEN5(ast)) {
 		jreg = ast_get_index_reg_mask(ast, AST_IO_CRTC_PORT, 0xd1, 0xff);
 		switch (jreg & 0x0e) {
 		case 0x04:
@@ -425,7 +463,7 @@ void ast_init_3rdtx(struct drm_device *dev)
 			ast_init_dvo(dev);
 			break;
 		default:
-			if (ast->tx_chip_type == AST_TX_SIL164)
+			if (ast->tx_chip_types & BIT(AST_TX_SIL164))
 				ast_init_dvo(dev);
 			else
 				ast_init_analog(dev);

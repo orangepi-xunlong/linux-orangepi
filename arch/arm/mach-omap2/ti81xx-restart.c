@@ -1,8 +1,4 @@
-/*
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- */
+// SPDX-License-Identifier: GPL-2.0-only
 #include <linux/kernel.h>
 #include <linux/init.h>
 #include <linux/reboot.h>
@@ -30,5 +26,6 @@ void ti81xx_restart(enum reboot_mode mode, const char *cmd)
 {
 	omap2_prm_set_mod_reg_bits(TI81XX_GLOBAL_RST_COLD, 0,
 				   TI81XX_PRM_DEVICE_RSTCTRL);
-	while (1);
+	while (1)
+		;
 }

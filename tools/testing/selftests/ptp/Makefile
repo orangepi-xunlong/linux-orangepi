@@ -1,8 +1,7 @@
-TEST_PROGS := testptp
+# SPDX-License-Identifier: GPL-2.0
+CFLAGS += $(KHDR_INCLUDES)
+TEST_GEN_PROGS := testptp
 LDLIBS += -lrt
-all: $(TEST_PROGS)
+TEST_PROGS = phc.sh
 
 include ../lib.mk
-
-clean:
-	rm -fr $(TEST_PROGS)

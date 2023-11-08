@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * PPC476 board specific routines
  *
@@ -12,11 +13,6 @@
  *
  *    Rewritten and ported to the merged powerpc tree:
  *    Copyright 2007 David Gibson <dwg@au1.ibm.com>, IBM Corporation.
- *
- * This program is free software; you can redistribute  it and/or modify it
- * under  the terms of  the GNU General  Public License as published by the
- * Free Software Foundation;  either version 2 of the  License, or (at your
- * option) any later version.
  */
 
 #include <linux/init.h>
@@ -56,7 +52,7 @@ static void __init iss4xx_init_irq(void)
 
 	/* Find top level interrupt controller */
 	for_each_node_with_property(np, "interrupt-controller") {
-		if (of_get_property(np, "interrupts", NULL) == NULL)
+		if (!of_property_present(np, "interrupts"))
 			break;
 	}
 	if (np == NULL)
@@ -144,23 +140,11 @@ static void __init iss4xx_setup_arch(void)
 	iss4xx_smp_init();
 }
 
-/*
- * Called very early, MMU is off, device-tree isn't unflattened
- */
-static int __init iss4xx_probe(void)
-{
-	if (!of_machine_is_compatible("ibm,iss-4xx"))
-		return 0;
-
-	return 1;
-}
-
 define_machine(iss4xx) {
 	.name			= "ISS-4xx",
-	.probe			= iss4xx_probe,
+	.compatible		= "ibm,iss-4xx",
 	.progress		= udbg_progress,
 	.init_IRQ		= iss4xx_init_irq,
 	.setup_arch		= iss4xx_setup_arch,
 	.restart		= ppc4xx_reset_system,
-	.calibrate_decr		= generic_calibrate_decr,
 };

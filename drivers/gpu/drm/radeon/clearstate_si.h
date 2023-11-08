@@ -21,8 +21,9 @@
  *
  */
 
-static const u32 si_SECT_CONTEXT_def_1[] =
-{
+#include "clearstate_defs.h"
+
+static const u32 si_SECT_CONTEXT_def_1[] = {
     0x00000000, // DB_RENDER_CONTROL
     0x00000000, // DB_COUNT_CONTROL
     0x00000000, // DB_DEPTH_VIEW

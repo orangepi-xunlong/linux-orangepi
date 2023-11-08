@@ -186,8 +186,7 @@ static int p2wi_probe(struct platform_device *pdev)
 	struct device_node *np = dev->of_node;
 	struct device_node *childnp;
 	unsigned long parent_clk_freq;
-	u32 clk_freq = 100000;
-	struct resource *r;
+	u32 clk_freq = I2C_MAX_STANDARD_MODE_FREQ;
 	struct p2wi *p2wi;
 	u32 slave_addr;
 	int clk_div;
@@ -223,52 +222,43 @@ static int p2wi_probe(struct platform_device *pdev)
 	if (childnp) {
 		ret = of_property_read_u32(childnp, "reg", &slave_addr);
 		if (ret) {
-			dev_err(dev, "invalid slave address on node %s\n",
-				childnp->full_name);
+			dev_err(dev, "invalid slave address on node %pOF\n",
+				childnp);
 			return -EINVAL;
 		}
 
 		p2wi->slave_addr = slave_addr;
 	}
 
-	r = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	p2wi->regs = devm_ioremap_resource(dev, r);
+	p2wi->regs = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(p2wi->regs))
 		return PTR_ERR(p2wi->regs);
 
-	strlcpy(p2wi->adapter.name, pdev->name, sizeof(p2wi->adapter.name));
+	strscpy(p2wi->adapter.name, pdev->name, sizeof(p2wi->adapter.name));
 	irq = platform_get_irq(pdev, 0);
-	if (irq < 0) {
-		dev_err(dev, "failed to retrieve irq: %d\n", irq);
+	if (irq < 0)
 		return irq;
-	}
 
-	p2wi->clk = devm_clk_get(dev, NULL);
+	p2wi->clk = devm_clk_get_enabled(dev, NULL);
 	if (IS_ERR(p2wi->clk)) {
 		ret = PTR_ERR(p2wi->clk);
-		dev_err(dev, "failed to retrieve clk: %d\n", ret);
-		return ret;
-	}
-
-	ret = clk_prepare_enable(p2wi->clk);
-	if (ret) {
 		dev_err(dev, "failed to enable clk: %d\n", ret);
 		return ret;
 	}
 
 	parent_clk_freq = clk_get_rate(p2wi->clk);
 
-	p2wi->rstc = devm_reset_control_get(dev, NULL);
+	p2wi->rstc = devm_reset_control_get_exclusive(dev, NULL);
 	if (IS_ERR(p2wi->rstc)) {
-		ret = PTR_ERR(p2wi->rstc);
-		dev_err(dev, "failed to retrieve reset controller: %d\n", ret);
-		goto err_clk_disable;
+		dev_err(dev, "failed to retrieve reset controller: %pe\n",
+			p2wi->rstc);
+		return PTR_ERR(p2wi->rstc);
 	}
 
 	ret = reset_control_deassert(p2wi->rstc);
 	if (ret) {
 		dev_err(dev, "failed to deassert reset line: %d\n", ret);
-		goto err_clk_disable;
+		return ret;
 	}
 
 	init_completion(&p2wi->complete);
@@ -311,26 +301,20 @@ static int p2wi_probe(struct platform_device *pdev)
 err_reset_assert:
 	reset_control_assert(p2wi->rstc);
 
-err_clk_disable:
-	clk_disable_unprepare(p2wi->clk);
-
 	return ret;
 }
 
-static int p2wi_remove(struct platform_device *dev)
+static void p2wi_remove(struct platform_device *dev)
 {
 	struct p2wi *p2wi = platform_get_drvdata(dev);
 
 	reset_control_assert(p2wi->rstc);
-	clk_disable_unprepare(p2wi->clk);
 	i2c_del_adapter(&p2wi->adapter);
-
-	return 0;
 }
 
 static struct platform_driver p2wi_driver = {
 	.probe	= p2wi_probe,
-	.remove	= p2wi_remove,
+	.remove_new = p2wi_remove,
 	.driver	= {
 		.name = "i2c-sunxi-p2wi",
 		.of_match_table = p2wi_of_match_table,

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-2.0-only
 menuconfig ARCH_STI
 	bool "STMicroelectronics Consumer Electronics SOCs"
 	depends on ARCH_MULTI_V7
@@ -20,7 +21,7 @@ menuconfig ARCH_STI
 	help
 	  Include support for STMicroelectronics' STiH415/416, STiH407/10 and
 	  STiH418 family SoCs using the Device Tree for discovery.  More
-	  information can be found in Documentation/arm/sti/ and
+	  information can be found in Documentation/arch/arm/sti/ and
 	  Documentation/devicetree.
 
 if ARCH_STI
@@ -28,7 +29,6 @@ if ARCH_STI
 config SOC_STIH415
 	bool "STiH415 STMicroelectronics Consumer Electronics family"
 	default y
-	select STIH415_RESET
 	help
 	  This enables support for STMicroelectronics Digital Consumer
 	  Electronics family StiH415 parts, primarily targeted at set-top-box
@@ -38,7 +38,6 @@ config SOC_STIH415
 config SOC_STIH416
 	bool "STiH416 STMicroelectronics Consumer Electronics family"
 	default y
-	select STIH416_RESET
 	help
 	  This enables support for STMicroelectronics Digital Consumer
 	  Electronics family StiH416 parts, primarily targeted at set-top-box

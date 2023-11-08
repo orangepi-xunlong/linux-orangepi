@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * misc.c
  *
@@ -13,8 +14,10 @@
 
 #include "misc.h"
 #include "error.h"
+#include "pgtable.h"
 #include "../string.h"
 #include "../voffset.h"
+#include <asm/bootparam_utils.h>
 
 /*
  * WARNING!!
@@ -25,31 +28,37 @@
 
 /* Macros used by the included decompressor code below. */
 #define STATIC		static
+/* Define an externally visible malloc()/free(). */
+#define MALLOC_VISIBLE
+#include <linux/decompress/mm.h>
 
 /*
- * Use normal definitions of mem*() from string.c. There are already
- * included header files which expect a definition of memset() and by
- * the time we define memset macro, it is too late.
+ * Provide definitions of memzero and memmove as some of the decompressors will
+ * try to define their own functions if these are not defined as macros.
  */
-#undef memcpy
-#undef memset
 #define memzero(s, n)	memset((s), 0, (n))
+#ifndef memmove
 #define memmove		memmove
-
 /* Functions used by the included decompressor code below. */
 void *memmove(void *dest, const void *src, size_t n);
+#endif
 
 /*
  * This is set up by the setup-routine at boot-time
  */
 struct boot_params *boot_params;
 
+struct port_io_ops pio_ops;
+
 memptr free_mem_ptr;
 memptr free_mem_end_ptr;
 
 static char *vidmem;
 static int vidport;
-static int lines, cols;
+
+/* These might be accessed before .bss is cleared, so use .data instead. */
+static int lines __section(".data");
+static int cols __section(".data");
 
 #ifdef CONFIG_KERNEL_GZIP
 #include "../../../../lib/decompress_inflate.c"
@@ -73,6 +82,10 @@ static int lines, cols;
 
 #ifdef CONFIG_KERNEL_LZ4
 #include "../../../../lib/decompress_unlz4.c"
+#endif
+
+#ifdef CONFIG_KERNEL_ZSTD
+#include "../../../../lib/decompress_unzstd.c"
 #endif
 /*
  * NOTE: When adding a new decompressor, please update the analysis in
@@ -116,8 +129,7 @@ void __putstr(const char *s)
 		}
 	}
 
-	if (boot_params->screen_info.orig_video_mode == 0 &&
-	    lines == 0 && cols == 0)
+	if (lines == 0 || cols == 0)
 		return;
 
 	x = boot_params->screen_info.orig_x;
@@ -169,7 +181,7 @@ void __puthex(unsigned long value)
 	}
 }
 
-#if CONFIG_X86_NEED_RELOCS
+#ifdef CONFIG_X86_NEED_RELOCS
 static void handle_relocations(void *output, unsigned long output_len,
 			       unsigned long virt_addr)
 {
@@ -265,7 +277,7 @@ static inline void handle_relocations(void *output, unsigned long output_len,
 { }
 #endif
 
-static void parse_elf(void *output)
+static size_t parse_elf(void *output)
 {
 #ifdef CONFIG_X86_64
 	Elf64_Ehdr ehdr;
@@ -281,10 +293,8 @@ static void parse_elf(void *output)
 	if (ehdr.e_ident[EI_MAG0] != ELFMAG0 ||
 	   ehdr.e_ident[EI_MAG1] != ELFMAG1 ||
 	   ehdr.e_ident[EI_MAG2] != ELFMAG2 ||
-	   ehdr.e_ident[EI_MAG3] != ELFMAG3) {
+	   ehdr.e_ident[EI_MAG3] != ELFMAG3)
 		error("Kernel is not a valid ELF file");
-		return;
-	}
 
 	debug_putstr("Parsing ELF... ");
 
@@ -316,6 +326,35 @@ static void parse_elf(void *output)
 	}
 
 	free(phdrs);
+
+	return ehdr.e_entry - LOAD_PHYSICAL_ADDR;
+}
+
+const unsigned long kernel_total_size = VO__end - VO__text;
+
+static u8 boot_heap[BOOT_HEAP_SIZE] __aligned(4);
+
+extern unsigned char input_data[];
+extern unsigned int input_len, output_len;
+
+unsigned long decompress_kernel(unsigned char *outbuf, unsigned long virt_addr,
+				void (*error)(char *x))
+{
+	unsigned long entry;
+
+	if (!free_mem_ptr) {
+		free_mem_ptr     = (unsigned long)boot_heap;
+		free_mem_end_ptr = (unsigned long)boot_heap + sizeof(boot_heap);
+	}
+
+	if (__decompress(input_data, input_len, NULL, NULL, outbuf, output_len,
+			 NULL, error) < 0)
+		return ULONG_MAX;
+
+	entry = parse_elf(outbuf);
+	handle_relocations(outbuf, output_len, virt_addr);
+
+	return entry;
 }
 
 /*
@@ -335,14 +374,12 @@ static void parse_elf(void *output)
  *             |-------uncompressed kernel image---------|
  *
  */
-asmlinkage __visible void *extract_kernel(void *rmode, memptr heap,
-				  unsigned char *input_data,
-				  unsigned long input_len,
-				  unsigned char *output,
-				  unsigned long output_len)
+asmlinkage __visible void *extract_kernel(void *rmode, unsigned char *output)
 {
-	const unsigned long kernel_total_size = VO__end - VO__text;
 	unsigned long virt_addr = LOAD_PHYSICAL_ADDR;
+	memptr heap = (memptr)boot_heap;
+	unsigned long needed_size;
+	size_t entry_offset;
 
 	/* Retain x86 boot parameters pointer passed from startup_32/64. */
 	boot_params = rmode;
@@ -363,11 +400,45 @@ asmlinkage __visible void *extract_kernel(void *rmode, memptr heap,
 	lines = boot_params->screen_info.orig_video_lines;
 	cols = boot_params->screen_info.orig_video_cols;
 
+	init_default_io_ops();
+
+	/*
+	 * Detect TDX guest environment.
+	 *
+	 * It has to be done before console_init() in order to use
+	 * paravirtualized port I/O operations if needed.
+	 */
+	early_tdx_detect();
+
 	console_init();
+
+	/*
+	 * Save RSDP address for later use. Have this after console_init()
+	 * so that early debugging output from the RSDP parsing code can be
+	 * collected.
+	 */
+	boot_params->acpi_rsdp_addr = get_rsdp_addr();
+
 	debug_putstr("early console in extract_kernel\n");
 
 	free_mem_ptr     = heap;	/* Heap */
 	free_mem_end_ptr = heap + BOOT_HEAP_SIZE;
+
+	/*
+	 * The memory hole needed for the kernel is the larger of either
+	 * the entire decompressed kernel plus relocation table, or the
+	 * entire decompressed kernel plus .bss and .brk sections.
+	 *
+	 * On X86_64, the memory is mapped with PMD pages. Round the
+	 * size up so that the full extent of PMD pages mapped is
+	 * included in the check against the valid memory table
+	 * entries. This ensures the full mapped area is usable RAM
+	 * and doesn't include any reserved areas.
+	 */
+	needed_size = max_t(unsigned long, output_len, kernel_total_size);
+#ifdef CONFIG_X86_64
+	needed_size = ALIGN(needed_size, MIN_KERNEL_ALIGN);
+#endif
 
 	/* Report initial kernel position details. */
 	debug_putaddr(input_data);
@@ -375,15 +446,16 @@ asmlinkage __visible void *extract_kernel(void *rmode, memptr heap,
 	debug_putaddr(output);
 	debug_putaddr(output_len);
 	debug_putaddr(kernel_total_size);
+	debug_putaddr(needed_size);
 
-	/*
-	 * The memory hole needed for the kernel is the larger of either
-	 * the entire decompressed kernel plus relocation table, or the
-	 * entire decompressed kernel plus .bss and .brk sections.
-	 */
+#ifdef CONFIG_X86_64
+	/* Report address of 32-bit trampoline */
+	debug_putaddr(trampoline_32bit);
+#endif
+
 	choose_random_location((unsigned long)input_data, input_len,
 				(unsigned long *)&output,
-				max(output_len, kernel_total_size),
+				needed_size,
 				&virt_addr);
 
 	/* Validate memory location choices. */
@@ -394,22 +466,37 @@ asmlinkage __visible void *extract_kernel(void *rmode, memptr heap,
 #ifdef CONFIG_X86_64
 	if (heap > 0x3fffffffffffUL)
 		error("Destination address too large");
+	if (virt_addr + needed_size > KERNEL_IMAGE_SIZE)
+		error("Destination virtual address is beyond the kernel mapping area");
 #else
 	if (heap > ((-__PAGE_OFFSET-(128<<20)-1) & 0x7fffffff))
 		error("Destination address too large");
 #endif
 #ifndef CONFIG_RELOCATABLE
-	if ((unsigned long)output != LOAD_PHYSICAL_ADDR)
-		error("Destination address does not match LOAD_PHYSICAL_ADDR");
 	if (virt_addr != LOAD_PHYSICAL_ADDR)
 		error("Destination virtual address changed when not relocatable");
 #endif
 
 	debug_putstr("\nDecompressing Linux... ");
-	__decompress(input_data, input_len, NULL, NULL, output, output_len,
-			NULL, error);
-	parse_elf(output);
-	handle_relocations(output, output_len, virt_addr);
-	debug_putstr("done.\nBooting the kernel.\n");
-	return output;
+
+	if (init_unaccepted_memory()) {
+		debug_putstr("Accepting memory... ");
+		accept_memory(__pa(output), __pa(output) + needed_size);
+	}
+
+	entry_offset = decompress_kernel(output, virt_addr, error);
+
+	debug_putstr("done.\nBooting the kernel (entry_offset: 0x");
+	debug_puthex(entry_offset);
+	debug_putstr(").\n");
+
+	/* Disable exception handling before booting the kernel */
+	cleanup_exception_handling();
+
+	return output + entry_offset;
+}
+
+void fortify_panic(const char *name)
+{
+	error("detected buffer overflow");
 }

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2016 BayLibre SAS.
  * Author: Neil Armstrong <narmstrong@baylibre.com>
@@ -5,15 +6,6 @@
  * Copyright (C) 2013-2015 Fujitsu Semiconductor Ltd.
  * Copyright (C) 2015 Linaro Ltd.
  * Author: Jassi Brar <jaswinder.singh@linaro.org>
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, version 2 of the License.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include <linux/interrupt.h>
@@ -23,6 +15,7 @@
 #include <linux/slab.h>
 #include <linux/err.h>
 #include <linux/io.h>
+#include <linux/mod_devicetable.h>
 #include <linux/module.h>
 #include <linux/platform_device.h>
 #include <linux/mailbox_controller.h>
@@ -125,7 +118,6 @@ static int platform_mhu_probe(struct platform_device *pdev)
 	int i, err;
 	struct platform_mhu *mhu;
 	struct device *dev = &pdev->dev;
-	struct resource *res;
 	int platform_mhu_reg[MHU_CHANS] = {
 		MHU_SEC_OFFSET, MHU_LP_OFFSET, MHU_HP_OFFSET
 	};
@@ -135,8 +127,7 @@ static int platform_mhu_probe(struct platform_device *pdev)
 	if (!mhu)
 		return -ENOMEM;
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	mhu->base = devm_ioremap_resource(dev, res);
+	mhu->base = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(mhu->base)) {
 		dev_err(dev, "ioremap failed\n");
 		return PTR_ERR(mhu->base);
@@ -145,10 +136,8 @@ static int platform_mhu_probe(struct platform_device *pdev)
 	for (i = 0; i < MHU_CHANS; i++) {
 		mhu->chan[i].con_priv = &mhu->mlink[i];
 		mhu->mlink[i].irq = platform_get_irq(pdev, i);
-		if (mhu->mlink[i].irq < 0) {
-			dev_err(dev, "failed to get irq%d\n", i);
+		if (mhu->mlink[i].irq < 0)
 			return mhu->mlink[i].irq;
-		}
 		mhu->mlink[i].rx_reg = mhu->base + platform_mhu_reg[i];
 		mhu->mlink[i].tx_reg = mhu->mlink[i].rx_reg + TX_REG_OFFSET;
 	}
@@ -163,22 +152,13 @@ static int platform_mhu_probe(struct platform_device *pdev)
 
 	platform_set_drvdata(pdev, mhu);
 
-	err = mbox_controller_register(&mhu->mbox);
+	err = devm_mbox_controller_register(dev, &mhu->mbox);
 	if (err) {
 		dev_err(dev, "Failed to register mailboxes %d\n", err);
 		return err;
 	}
 
 	dev_info(dev, "Platform MHU Mailbox registered\n");
-	return 0;
-}
-
-static int platform_mhu_remove(struct platform_device *pdev)
-{
-	struct platform_mhu *mhu = platform_get_drvdata(pdev);
-
-	mbox_controller_unregister(&mhu->mbox);
-
 	return 0;
 }
 
@@ -190,7 +170,6 @@ MODULE_DEVICE_TABLE(of, platform_mhu_dt_ids);
 
 static struct platform_driver platform_mhu_driver = {
 	.probe	= platform_mhu_probe,
-	.remove	= platform_mhu_remove,
 	.driver = {
 		.name = "platform-mhu",
 		.of_match_table	= platform_mhu_dt_ids,

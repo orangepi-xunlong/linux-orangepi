@@ -1,14 +1,14 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 as published
- * by the Free Software Foundation.
  *
  * Copyright (C) 2013 John Crispin <john@phrozen.org>
  */
 
 #include <linux/interrupt.h>
+#include <linux/of.h>
 #include <linux/of_platform.h>
 #include <linux/of_irq.h>
+#include <linux/platform_device.h>
 
 #include <asm/mach-ralink/ralink_regs.h>
 
@@ -62,18 +62,22 @@ static int __init ill_acc_of_setup(void)
 
 	pdev = of_find_device_by_node(np);
 	if (!pdev) {
-		pr_err("%s: failed to lookup pdev\n", np->name);
+		pr_err("%pOFn: failed to lookup pdev\n", np);
+		of_node_put(np);
 		return -EINVAL;
 	}
 
 	irq = irq_of_parse_and_map(np, 0);
+	of_node_put(np);
 	if (!irq) {
 		dev_err(&pdev->dev, "failed to get irq\n");
+		put_device(&pdev->dev);
 		return -EINVAL;
 	}
 
 	if (request_irq(irq, ill_acc_irq_handler, 0, "ill_acc", &pdev->dev)) {
 		dev_err(&pdev->dev, "failed to request irq\n");
+		put_device(&pdev->dev);
 		return -EINVAL;
 	}
 

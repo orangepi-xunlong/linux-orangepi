@@ -1,17 +1,8 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * des3_ede-asm_64.S  -  x86-64 assembly implementation of 3DES cipher
  *
  * Copyright © 2014 Jussi Kivilinna <jussi.kivilinna@iki.fi>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include <linux/linkage.h>
@@ -64,12 +55,12 @@
 #define RW2bh %ch
 
 #define RT0 %r15
-#define RT1 %rbp
+#define RT1 %rsi
 #define RT2 %r14
 #define RT3 %rdx
 
 #define RT0d %r15d
-#define RT1d %ebp
+#define RT1d %esi
 #define RT2d %r14d
 #define RT3d %edx
 
@@ -138,21 +129,29 @@
 	movzbl RW0bl, RT2d; \
 	movzbl RW0bh, RT3d; \
 	shrq $16, RW0; \
-	movq s8(, RT0, 8), RT0; \
-	xorq s6(, RT1, 8), to; \
+	leaq s8(%rip), RW1; \
+	movq (RW1, RT0, 8), RT0; \
+	leaq s6(%rip), RW1; \
+	xorq (RW1, RT1, 8), to; \
 	movzbl RW0bl, RL1d; \
 	movzbl RW0bh, RT1d; \
 	shrl $16, RW0d; \
-	xorq s4(, RT2, 8), RT0; \
-	xorq s2(, RT3, 8), to; \
+	leaq s4(%rip), RW1; \
+	xorq (RW1, RT2, 8), RT0; \
+	leaq s2(%rip), RW1; \
+	xorq (RW1, RT3, 8), to; \
 	movzbl RW0bl, RT2d; \
 	movzbl RW0bh, RT3d; \
-	xorq s7(, RL1, 8), RT0; \
-	xorq s5(, RT1, 8), to; \
-	xorq s3(, RT2, 8), RT0; \
+	leaq s7(%rip), RW1; \
+	xorq (RW1, RL1, 8), RT0; \
+	leaq s5(%rip), RW1; \
+	xorq (RW1, RT1, 8), to; \
+	leaq s3(%rip), RW1; \
+	xorq (RW1, RT2, 8), RT0; \
 	load_next_key(n, RW0); \
 	xorq RT0, to; \
-	xorq s1(, RT3, 8), to; \
+	leaq s1(%rip), RW1; \
+	xorq (RW1, RT3, 8), to; \
 
 #define load_next_key(n, RWx) \
 	movq (((n) + 1) * 8)(CTX), RWx;
@@ -171,18 +170,19 @@
 	movl   left##d,   (io); \
 	movl   right##d, 4(io);
 
-ENTRY(des3_ede_x86_64_crypt_blk)
+SYM_FUNC_START(des3_ede_x86_64_crypt_blk)
 	/* input:
 	 *	%rdi: round keys, CTX
 	 *	%rsi: dst
 	 *	%rdx: src
 	 */
-	pushq %rbp;
 	pushq %rbx;
 	pushq %r12;
 	pushq %r13;
 	pushq %r14;
 	pushq %r15;
+
+	pushq %rsi; /* dst */
 
 	read_block(%rdx, RL0, RR0);
 	initial_permutation(RL0, RR0);
@@ -241,6 +241,8 @@ ENTRY(des3_ede_x86_64_crypt_blk)
 	round1(32+15, RL0, RR0, dummy2);
 
 	final_permutation(RR0, RL0);
+
+	popq %rsi /* dst */
 	write_block(%rsi, RR0, RL0);
 
 	popq %r15;
@@ -248,10 +250,9 @@ ENTRY(des3_ede_x86_64_crypt_blk)
 	popq %r13;
 	popq %r12;
 	popq %rbx;
-	popq %rbp;
 
-	ret;
-ENDPROC(des3_ede_x86_64_crypt_blk)
+	RET;
+SYM_FUNC_END(des3_ede_x86_64_crypt_blk)
 
 /***********************************************************************
  * 3-way 3DES
@@ -362,82 +363,107 @@ ENDPROC(des3_ede_x86_64_crypt_blk)
 	movzbl RW0bl, RT3d; \
 	movzbl RW0bh, RT1d; \
 	shrq $16, RW0; \
-	xorq s8(, RT3, 8), to##0; \
-	xorq s6(, RT1, 8), to##0; \
+	leaq s8(%rip), RT2; \
+	xorq (RT2, RT3, 8), to##0; \
+	leaq s6(%rip), RT2; \
+	xorq (RT2, RT1, 8), to##0; \
 	movzbl RW0bl, RT3d; \
 	movzbl RW0bh, RT1d; \
 	shrq $16, RW0; \
-	xorq s4(, RT3, 8), to##0; \
-	xorq s2(, RT1, 8), to##0; \
+	leaq s4(%rip), RT2; \
+	xorq (RT2, RT3, 8), to##0; \
+	leaq s2(%rip), RT2; \
+	xorq (RT2, RT1, 8), to##0; \
 	movzbl RW0bl, RT3d; \
 	movzbl RW0bh, RT1d; \
 	shrl $16, RW0d; \
-	xorq s7(, RT3, 8), to##0; \
-	xorq s5(, RT1, 8), to##0; \
+	leaq s7(%rip), RT2; \
+	xorq (RT2, RT3, 8), to##0; \
+	leaq s5(%rip), RT2; \
+	xorq (RT2, RT1, 8), to##0; \
 	movzbl RW0bl, RT3d; \
 	movzbl RW0bh, RT1d; \
 	load_next_key(n, RW0); \
-	xorq s3(, RT3, 8), to##0; \
-	xorq s1(, RT1, 8), to##0; \
+	leaq s3(%rip), RT2; \
+	xorq (RT2, RT3, 8), to##0; \
+	leaq s1(%rip), RT2; \
+	xorq (RT2, RT1, 8), to##0; \
 		xorq from##1, RW1; \
 		movzbl RW1bl, RT3d; \
 		movzbl RW1bh, RT1d; \
 		shrq $16, RW1; \
-		xorq s8(, RT3, 8), to##1; \
-		xorq s6(, RT1, 8), to##1; \
+		leaq s8(%rip), RT2; \
+		xorq (RT2, RT3, 8), to##1; \
+		leaq s6(%rip), RT2; \
+		xorq (RT2, RT1, 8), to##1; \
 		movzbl RW1bl, RT3d; \
 		movzbl RW1bh, RT1d; \
 		shrq $16, RW1; \
-		xorq s4(, RT3, 8), to##1; \
-		xorq s2(, RT1, 8), to##1; \
+		leaq s4(%rip), RT2; \
+		xorq (RT2, RT3, 8), to##1; \
+		leaq s2(%rip), RT2; \
+		xorq (RT2, RT1, 8), to##1; \
 		movzbl RW1bl, RT3d; \
 		movzbl RW1bh, RT1d; \
 		shrl $16, RW1d; \
-		xorq s7(, RT3, 8), to##1; \
-		xorq s5(, RT1, 8), to##1; \
+		leaq s7(%rip), RT2; \
+		xorq (RT2, RT3, 8), to##1; \
+		leaq s5(%rip), RT2; \
+		xorq (RT2, RT1, 8), to##1; \
 		movzbl RW1bl, RT3d; \
 		movzbl RW1bh, RT1d; \
 		do_movq(RW0, RW1); \
-		xorq s3(, RT3, 8), to##1; \
-		xorq s1(, RT1, 8), to##1; \
+		leaq s3(%rip), RT2; \
+		xorq (RT2, RT3, 8), to##1; \
+		leaq s1(%rip), RT2; \
+		xorq (RT2, RT1, 8), to##1; \
 			xorq from##2, RW2; \
 			movzbl RW2bl, RT3d; \
 			movzbl RW2bh, RT1d; \
 			shrq $16, RW2; \
-			xorq s8(, RT3, 8), to##2; \
-			xorq s6(, RT1, 8), to##2; \
+			leaq s8(%rip), RT2; \
+			xorq (RT2, RT3, 8), to##2; \
+			leaq s6(%rip), RT2; \
+			xorq (RT2, RT1, 8), to##2; \
 			movzbl RW2bl, RT3d; \
 			movzbl RW2bh, RT1d; \
 			shrq $16, RW2; \
-			xorq s4(, RT3, 8), to##2; \
-			xorq s2(, RT1, 8), to##2; \
+			leaq s4(%rip), RT2; \
+			xorq (RT2, RT3, 8), to##2; \
+			leaq s2(%rip), RT2; \
+			xorq (RT2, RT1, 8), to##2; \
 			movzbl RW2bl, RT3d; \
 			movzbl RW2bh, RT1d; \
 			shrl $16, RW2d; \
-			xorq s7(, RT3, 8), to##2; \
-			xorq s5(, RT1, 8), to##2; \
+			leaq s7(%rip), RT2; \
+			xorq (RT2, RT3, 8), to##2; \
+			leaq s5(%rip), RT2; \
+			xorq (RT2, RT1, 8), to##2; \
 			movzbl RW2bl, RT3d; \
 			movzbl RW2bh, RT1d; \
 			do_movq(RW0, RW2); \
-			xorq s3(, RT3, 8), to##2; \
-			xorq s1(, RT1, 8), to##2;
+			leaq s3(%rip), RT2; \
+			xorq (RT2, RT3, 8), to##2; \
+			leaq s1(%rip), RT2; \
+			xorq (RT2, RT1, 8), to##2;
 
 #define __movq(src, dst) \
 	movq src, dst;
 
-ENTRY(des3_ede_x86_64_crypt_blk_3way)
+SYM_FUNC_START(des3_ede_x86_64_crypt_blk_3way)
 	/* input:
 	 *	%rdi: ctx, round keys
 	 *	%rsi: dst (3 blocks)
 	 *	%rdx: src (3 blocks)
 	 */
 
-	pushq %rbp;
 	pushq %rbx;
 	pushq %r12;
 	pushq %r13;
 	pushq %r14;
 	pushq %r15;
+
+	pushq %rsi /* dst */
 
 	/* load input */
 	movl 0 * 4(%rdx), RL0d;
@@ -520,6 +546,7 @@ ENTRY(des3_ede_x86_64_crypt_blk_3way)
 	bswapl RR2d;
 	bswapl RL2d;
 
+	popq %rsi /* dst */
 	movl RR0d, 0 * 4(%rsi);
 	movl RL0d, 1 * 4(%rsi);
 	movl RR1d, 2 * 4(%rsi);
@@ -532,12 +559,11 @@ ENTRY(des3_ede_x86_64_crypt_blk_3way)
 	popq %r13;
 	popq %r12;
 	popq %rbx;
-	popq %rbp;
 
-	ret;
-ENDPROC(des3_ede_x86_64_crypt_blk_3way)
+	RET;
+SYM_FUNC_END(des3_ede_x86_64_crypt_blk_3way)
 
-.data
+.section	.rodata, "a", @progbits
 .align 16
 .L_s1:
 	.quad 0x0010100001010400, 0x0000000000000000

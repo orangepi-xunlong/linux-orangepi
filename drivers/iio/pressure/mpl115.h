@@ -1,13 +1,12 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Freescale MPL115A pressure/temperature sensor
  *
  * Copyright (c) 2014 Peter Meerwald <pmeerw@pmeerw.net>
  * Copyright (c) 2016 Akinobu Mita <akinobu.mita@gmail.com>
- *
- * This file is subject to the terms and conditions of version 2 of
- * the GNU General Public License.  See the file COPYING in the main
- * directory of this archive for more details.
  */
+
+#include <linux/pm_runtime.h>
 
 #ifndef _MPL115_H_
 #define _MPL115_H_
@@ -20,5 +19,8 @@ struct mpl115_ops {
 
 int mpl115_probe(struct device *dev, const char *name,
 			const struct mpl115_ops *ops);
+
+/*PM ops */
+extern const struct dev_pm_ops mpl115_dev_pm_ops;
 
 #endif

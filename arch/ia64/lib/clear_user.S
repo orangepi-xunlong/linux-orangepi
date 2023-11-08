@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * This routine clears to zero a linear memory buffer in user space.
  *
@@ -11,8 +12,8 @@
  *	Stephane Eranian <eranian@hpl.hp.com>
  */
 
+#include <linux/export.h>
 #include <asm/asmmacro.h>
-#include <asm/export.h>
 
 //
 // arguments

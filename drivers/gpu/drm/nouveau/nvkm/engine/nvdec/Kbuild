@@ -1,1 +1,4 @@
-#nvkm-y += nvkm/engine/nvdec/base.o
+# SPDX-License-Identifier: MIT
+nvkm-y += nvkm/engine/nvdec/base.o
+nvkm-y += nvkm/engine/nvdec/gm107.o
+nvkm-y += nvkm/engine/nvdec/ga102.o

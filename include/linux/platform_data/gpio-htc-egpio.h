@@ -1,11 +1,10 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * HTC simple EGPIO irq and gpio extender
  */
 
 #ifndef __HTC_EGPIO_H__
 #define __HTC_EGPIO_H__
-
-#include <linux/gpio.h>
 
 /* Descriptive values for all-in or all-out htc_egpio_chip descriptors. */
 #define HTC_EGPIO_OUTPUT (~0)
@@ -50,8 +49,5 @@ struct htc_egpio_platform_data {
 	struct htc_egpio_chip *chip;
 	int                   num_chips;
 };
-
-/* Determine the wakeup irq, to be called during early resume */
-extern int htc_egpio_get_wakeup_irq(struct device *dev);
 
 #endif

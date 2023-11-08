@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * TI Palmas
  *
@@ -5,12 +6,6 @@
  *
  * Author: Graeme Gregory <gg@slimlogic.co.uk>
  * Author: Ian Lartey <ian@slimlogic.co.uk>
- *
- *  This program is free software; you can redistribute it and/or modify it
- *  under  the terms of the GNU General  Public License as published by the
- *  Free Software Foundation;  either version 2 of the License, or (at your
- *  option) any later version.
- *
  */
 
 #ifndef __LINUX_MFD_PALMAS_H
@@ -20,8 +15,7 @@
 #include <linux/leds.h>
 #include <linux/regmap.h>
 #include <linux/regulator/driver.h>
-#include <linux/extcon.h>
-#include <linux/of_gpio.h>
+#include <linux/extcon-provider.h>
 #include <linux/usb/phy_companion.h>
 
 #define PALMAS_NUM_CLIENTS		3
@@ -134,12 +128,6 @@ struct palmas_pmic_driver_data {
 			    struct regulator_config config);
 };
 
-struct palmas_adc_wakeup_property {
-	int adc_channel_number;
-	int adc_high_threshold;
-	int adc_low_threshold;
-};
-
 struct palmas_gpadc_platform_data {
 	/* Channel 3 current source is only enabled during conversion */
 	int ch3_current;	/* 0: off; 1: 10uA; 2: 400uA; 3: 800 uA */
@@ -158,8 +146,6 @@ struct palmas_gpadc_platform_data {
 	int start_polarity;
 
 	int auto_conversion_period_ms;
-	struct palmas_adc_wakeup_property *adc_wakeup1_data;
-	struct palmas_adc_wakeup_property *adc_wakeup2_data;
 };
 
 struct palmas_reg_init {
@@ -250,6 +236,7 @@ enum tps65917_regulators {
 	TPS65917_REG_SMPS3,
 	TPS65917_REG_SMPS4,
 	TPS65917_REG_SMPS5,
+	TPS65917_REG_SMPS12,
 	/* LDO regulators */
 	TPS65917_REG_LDO1,
 	TPS65917_REG_LDO2,
@@ -317,6 +304,7 @@ enum tps65917_external_requestor_id {
 	TPS65917_EXTERNAL_REQSTR_ID_SMPS3,
 	TPS65917_EXTERNAL_REQSTR_ID_SMPS4,
 	TPS65917_EXTERNAL_REQSTR_ID_SMPS5,
+	TPS65917_EXTERNAL_REQSTR_ID_SMPS12,
 	TPS65917_EXTERNAL_REQSTR_ID_LDO1,
 	TPS65917_EXTERNAL_REQSTR_ID_LDO2,
 	TPS65917_EXTERNAL_REQSTR_ID_LDO3,
@@ -551,7 +539,6 @@ struct palmas_pmic {
 	struct palmas *palmas;
 	struct device *dev;
 	struct regulator_desc desc[PALMAS_NUM_REGS];
-	struct regulator_dev *rdev[PALMAS_NUM_REGS];
 	struct mutex mutex;
 
 	int smps123;
@@ -3730,6 +3717,9 @@ enum usb_irq_events {
 #define TPS65917_REGEN3_CTRL_MODE_SLEEP_SHIFT			0x02
 #define TPS65917_REGEN3_CTRL_MODE_ACTIVE			0x01
 #define TPS65917_REGEN3_CTRL_MODE_ACTIVE_SHIFT			0x00
+
+/* POWERHOLD Mask field for PRIMARY_SECONDARY_PAD2 register */
+#define TPS65917_PRIMARY_SECONDARY_PAD2_GPIO_5_MASK		0xC
 
 /* Registers for function RESOURCE */
 #define TPS65917_REGEN1_CTRL					0x2

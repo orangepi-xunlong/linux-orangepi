@@ -1,32 +1,22 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Core driver for TI TPS65090 PMIC family
  *
  * Copyright (c) 2012, NVIDIA CORPORATION.  All rights reserved.
-
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
-
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
-
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ *
+ * Author: Venu Byravarasu <vbyravarasu@nvidia.com>
  */
 
 #include <linux/interrupt.h>
 #include <linux/irq.h>
 #include <linux/kernel.h>
-#include <linux/module.h>
+#include <linux/init.h>
 #include <linux/mutex.h>
 #include <linux/slab.h>
 #include <linux/i2c.h>
 #include <linux/mfd/core.h>
 #include <linux/mfd/tps65090.h>
 #include <linux/of.h>
-#include <linux/of_device.h>
 #include <linux/err.h>
 
 #define NUM_INT_REG 2
@@ -47,7 +37,7 @@
 #define TPS65090_INT2_MASK_OVERLOAD_FET6		6
 #define TPS65090_INT2_MASK_OVERLOAD_FET7		7
 
-static struct resource charger_resources[] = {
+static const struct resource charger_resources[] = {
 	{
 		.start  = TPS65090_IRQ_VAC_STATUS_CHANGE,
 		.end    = TPS65090_IRQ_VAC_STATUS_CHANGE,
@@ -136,8 +126,7 @@ static struct regmap_irq_chip tps65090_irq_chip = {
 	.num_irqs = ARRAY_SIZE(tps65090_irqs),
 	.num_regs = NUM_INT_REG,
 	.status_base = TPS65090_REG_INTR_STS,
-	.mask_base = TPS65090_REG_INTR_MASK,
-	.mask_invert = true,
+	.unmask_base = TPS65090_REG_INTR_MASK,
 };
 
 static bool is_volatile_reg(struct device *dev, unsigned int reg)
@@ -171,11 +160,9 @@ static const struct of_device_id tps65090_of_match[] = {
 	{ .compatible = "ti,tps65090",},
 	{},
 };
-MODULE_DEVICE_TABLE(of, tps65090_of_match);
 #endif
 
-static int tps65090_i2c_probe(struct i2c_client *client,
-			      const struct i2c_device_id *id)
+static int tps65090_i2c_probe(struct i2c_client *client)
 {
 	struct tps65090_platform_data *pdata = dev_get_platdata(&client->dev);
 	int irq_base = 0;
@@ -192,10 +179,8 @@ static int tps65090_i2c_probe(struct i2c_client *client,
 		irq_base = pdata->irq_base;
 
 	tps65090 = devm_kzalloc(&client->dev, sizeof(*tps65090), GFP_KERNEL);
-	if (!tps65090) {
-		dev_err(&client->dev, "mem alloc for tps65090 failed\n");
+	if (!tps65090)
 		return -ENOMEM;
-	}
 
 	tps65090->dev = &client->dev;
 	i2c_set_clientdata(client, tps65090);
@@ -238,30 +223,19 @@ err_irq_exit:
 	return ret;
 }
 
-static int tps65090_i2c_remove(struct i2c_client *client)
-{
-	struct tps65090 *tps65090 = i2c_get_clientdata(client);
-
-	mfd_remove_devices(tps65090->dev);
-	if (client->irq)
-		regmap_del_irq_chip(client->irq, tps65090->irq_data);
-
-	return 0;
-}
 
 static const struct i2c_device_id tps65090_id_table[] = {
 	{ "tps65090", 0 },
 	{ },
 };
-MODULE_DEVICE_TABLE(i2c, tps65090_id_table);
 
 static struct i2c_driver tps65090_driver = {
 	.driver	= {
 		.name	= "tps65090",
+		.suppress_bind_attrs = true,
 		.of_match_table = of_match_ptr(tps65090_of_match),
 	},
 	.probe		= tps65090_i2c_probe,
-	.remove		= tps65090_i2c_remove,
 	.id_table	= tps65090_id_table,
 };
 
@@ -270,13 +244,3 @@ static int __init tps65090_init(void)
 	return i2c_add_driver(&tps65090_driver);
 }
 subsys_initcall(tps65090_init);
-
-static void __exit tps65090_exit(void)
-{
-	i2c_del_driver(&tps65090_driver);
-}
-module_exit(tps65090_exit);
-
-MODULE_DESCRIPTION("TPS65090 core driver");
-MODULE_AUTHOR("Venu Byravarasu <vbyravarasu@nvidia.com>");
-MODULE_LICENSE("GPL v2");

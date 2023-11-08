@@ -1,12 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * TUSB6010 USB 2.0 OTG Dual Role controller
  *
  * Copyright (C) 2006 Nokia Corporation
  * Tony Lindgren <tony@atomide.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  *
  * Notes:
  * - Driver assumes that interface to external host (main CPU) is
@@ -14,6 +11,8 @@
  *   interface.
  */
 
+#include <linux/gpio/consumer.h>
+#include <linux/delay.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/errno.h>
@@ -22,6 +21,7 @@
 #include <linux/usb.h>
 #include <linux/irq.h>
 #include <linux/io.h>
+#include <linux/iopoll.h>
 #include <linux/device.h>
 #include <linux/platform_device.h>
 #include <linux/dma-mapping.h>
@@ -33,6 +33,8 @@ struct tusb6010_glue {
 	struct device		*dev;
 	struct platform_device	*musb;
 	struct platform_device	*phy;
+	struct gpio_desc	*enable;
+	struct gpio_desc	*intpin;
 };
 
 static void tusb_musb_set_vbus(struct musb *musb, int is_on);
@@ -145,7 +147,7 @@ static void tusb_ep_select(void __iomem *mbase, u8 epnum)
 /*
  * TUSB6010 doesn't allow 8-bit access; 16-bit access is the minimum.
  */
-static u8 tusb_readb(const void __iomem *addr, unsigned offset)
+static u8 tusb_readb(void __iomem *addr, u32 offset)
 {
 	u16 tmp;
 	u8 val;
@@ -159,7 +161,7 @@ static u8 tusb_readb(const void __iomem *addr, unsigned offset)
 	return val;
 }
 
-static void tusb_writeb(void __iomem *addr, unsigned offset, u8 data)
+static void tusb_writeb(void __iomem *addr, u32 offset, u8 data)
 {
 	u16 tmp;
 
@@ -193,6 +195,7 @@ tusb_fifo_write_unaligned(void __iomem *fifo, const u8 *buf, u16 len)
 	}
 	if (len > 0) {
 		/* Write the rest 1 - 3 bytes to FIFO */
+		val = 0;
 		memcpy(&val, buf, len);
 		musb_writel(fifo, 0, val);
 	}
@@ -452,11 +455,9 @@ static int tusb_musb_vbus_status(struct musb *musb)
 	return ret;
 }
 
-static struct timer_list musb_idle_timer;
-
-static void musb_do_idle(unsigned long _musb)
+static void musb_do_idle(struct timer_list *t)
 {
-	struct musb	*musb = (void *)_musb;
+	struct musb	*musb = from_timer(musb, t, dev_timer);
 	unsigned long	flags;
 
 	spin_lock_irqsave(&musb->lock, flags);
@@ -469,9 +470,10 @@ static void musb_do_idle(unsigned long _musb)
 			dev_dbg(musb->controller, "Nothing connected %s, turning off VBUS\n",
 					usb_otg_state_string(musb->xceiv->otg->state));
 		}
-		/* FALLTHROUGH */
+		fallthrough;
 	case OTG_STATE_A_IDLE:
 		tusb_musb_set_vbus(musb, 0);
+		break;
 	default:
 		break;
 	}
@@ -498,7 +500,7 @@ done:
 }
 
 /*
- * Maybe put TUSB6010 into idle mode mode depending on USB link status,
+ * Maybe put TUSB6010 into idle mode depending on USB link status,
  * like "disconnected" or "suspended".  We'll be woken out of it by
  * connect, resume, or disconnect.
  *
@@ -523,13 +525,13 @@ static void tusb_musb_try_idle(struct musb *musb, unsigned long timeout)
 			&& (musb->xceiv->otg->state == OTG_STATE_A_WAIT_BCON))) {
 		dev_dbg(musb->controller, "%s active, deleting timer\n",
 			usb_otg_state_string(musb->xceiv->otg->state));
-		del_timer(&musb_idle_timer);
+		del_timer(&musb->dev_timer);
 		last_timer = jiffies;
 		return;
 	}
 
 	if (time_after(last_timer, timeout)) {
-		if (!timer_pending(&musb_idle_timer))
+		if (!timer_pending(&musb->dev_timer))
 			last_timer = timeout;
 		else {
 			dev_dbg(musb->controller, "Longer idle timer already pending, ignoring\n");
@@ -541,7 +543,7 @@ static void tusb_musb_try_idle(struct musb *musb, unsigned long timeout)
 	dev_dbg(musb->controller, "%s inactive, for idle timer for %lu ms\n",
 		usb_otg_state_string(musb->xceiv->otg->state),
 		(unsigned long)jiffies_to_msecs(timeout - jiffies));
-	mod_timer(&musb_idle_timer, timeout);
+	mod_timer(&musb->dev_timer, timeout);
 }
 
 /* ticks of 60 MHz clock */
@@ -873,7 +875,7 @@ static irqreturn_t tusb_musb_interrupt(int irq, void *__hci)
 	}
 
 	if (int_src & TUSB_INT_SRC_USB_IP_CONN)
-		del_timer(&musb_idle_timer);
+		del_timer(&musb->dev_timer);
 
 	/* OTG state change reports (annoyingly) not issued by Mentor core */
 	if (int_src & (TUSB_INT_SRC_VBUS_SENSE_CHNG
@@ -881,26 +883,14 @@ static irqreturn_t tusb_musb_interrupt(int irq, void *__hci)
 				| TUSB_INT_SRC_ID_STATUS_CHNG))
 		idle_timeout = tusb_otg_ints(musb, int_src, tbase);
 
-	/* TX dma callback must be handled here, RX dma callback is
-	 * handled in tusb_omap_dma_cb.
+	/*
+	 * Just clear the DMA interrupt if it comes as the completion for both
+	 * TX and RX is handled by the DMA callback in tusb6010_omap
 	 */
 	if ((int_src & TUSB_INT_SRC_TXRX_DMA_DONE)) {
 		u32	dma_src = musb_readl(tbase, TUSB_DMA_INT_SRC);
-		u32	real_dma_src = musb_readl(tbase, TUSB_DMA_INT_MASK);
 
 		dev_dbg(musb->controller, "DMA IRQ %08x\n", dma_src);
-		real_dma_src = ~real_dma_src & dma_src;
-		if (tusb_dma_omap(musb) && real_dma_src) {
-			int	tx_source = (real_dma_src & 0xffff);
-			int	i;
-
-			for (i = 1; i <= 15; i++) {
-				if (tx_source & (1 << i)) {
-					dev_dbg(musb->controller, "completing ep%i %s\n", i, "tx");
-					musb_dma_completion(musb, i, 1);
-				}
-			}
-		}
 		musb_writel(tbase, TUSB_DMA_INT_CLEAR, dma_src);
 	}
 
@@ -994,7 +984,7 @@ static void tusb_musb_disable(struct musb *musb)
 	musb_writel(tbase, TUSB_DMA_INT_MASK, 0x7fffffff);
 	musb_writel(tbase, TUSB_GPIO_INT_MASK, 0x1ff);
 
-	del_timer(&musb_idle_timer);
+	del_timer(&musb->dev_timer);
 
 	if (is_dma_capable() && !dma_off) {
 		printk(KERN_WARNING "%s %s: dma still active\n",
@@ -1036,15 +1026,24 @@ static void tusb_setup_cpu_interface(struct musb *musb)
 
 static int tusb_musb_start(struct musb *musb)
 {
+	struct tusb6010_glue *glue = dev_get_drvdata(musb->controller->parent);
 	void __iomem	*tbase = musb->ctrl_base;
-	int		ret = 0;
 	unsigned long	flags;
 	u32		reg;
+	int		ret;
 
-	if (musb->board_set_power)
-		ret = musb->board_set_power(1);
-	if (ret != 0) {
-		printk(KERN_ERR "tusb: Cannot enable TUSB6010\n");
+	/*
+	 * Enable or disable power to TUSB6010. When enabling, turn on 3.3 V and
+	 * 1.5 V voltage regulators of PM companion chip. Companion chip will then
+	 * provide then PGOOD signal to TUSB6010 which will release it from reset.
+	 */
+	gpiod_set_value(glue->enable, 1);
+
+	/* Wait for 100ms until TUSB6010 pulls INT pin down */
+	ret = read_poll_timeout(gpiod_get_value, reg, !reg, 5000, 100000, true,
+				glue->intpin);
+	if (ret) {
+		pr_err("tusb: Powerup response failed\n");
 		return ret;
 	}
 
@@ -1098,8 +1097,8 @@ static int tusb_musb_start(struct musb *musb)
 err:
 	spin_unlock_irqrestore(&musb->lock, flags);
 
-	if (musb->board_set_power)
-		musb->board_set_power(0);
+	gpiod_set_value(glue->enable, 0);
+	msleep(10);
 
 	return -ENODEV;
 }
@@ -1119,6 +1118,11 @@ static int tusb_musb_init(struct musb *musb)
 
 	/* dma address for async dma */
 	mem = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+	if (!mem) {
+		pr_debug("no async dma resource?\n");
+		ret = -ENODEV;
+		goto done;
+	}
 	musb->async = mem->start;
 
 	/* dma address for sync dma */
@@ -1154,7 +1158,7 @@ static int tusb_musb_init(struct musb *musb)
 	musb->xceiv->set_power = tusb_draw_power;
 	the_musb = musb;
 
-	setup_timer(&musb_idle_timer, musb_do_idle, (unsigned long) musb);
+	timer_setup(&musb->dev_timer, musb_do_idle, 0);
 
 done:
 	if (ret < 0) {
@@ -1168,11 +1172,13 @@ done:
 
 static int tusb_musb_exit(struct musb *musb)
 {
-	del_timer_sync(&musb_idle_timer);
+	struct tusb6010_glue *glue = dev_get_drvdata(musb->controller->parent);
+
+	del_timer_sync(&musb->dev_timer);
 	the_musb = NULL;
 
-	if (musb->board_set_power)
-		musb->board_set_power(0);
+	gpiod_set_value(glue->enable, 0);
+	msleep(10);
 
 	iounmap(musb->sync_va);
 
@@ -1181,7 +1187,8 @@ static int tusb_musb_exit(struct musb *musb)
 }
 
 static const struct musb_platform_ops tusb_ops = {
-	.quirks		= MUSB_DMA_TUSB_OMAP | MUSB_IN_TUSB,
+	.quirks		= MUSB_DMA_TUSB_OMAP | MUSB_IN_TUSB |
+			  MUSB_G_NO_SKB_RESERVE,
 	.init		= tusb_musb_init,
 	.exit		= tusb_musb_exit,
 
@@ -1227,6 +1234,15 @@ static int tusb_probe(struct platform_device *pdev)
 
 	glue->dev			= &pdev->dev;
 
+	glue->enable = devm_gpiod_get(glue->dev, "enable", GPIOD_OUT_LOW);
+	if (IS_ERR(glue->enable))
+		return dev_err_probe(glue->dev, PTR_ERR(glue->enable),
+				     "could not obtain power on/off GPIO\n");
+	glue->intpin = devm_gpiod_get(glue->dev, "int", GPIOD_IN);
+	if (IS_ERR(glue->intpin))
+		return dev_err_probe(glue->dev, PTR_ERR(glue->intpin),
+				     "could not obtain INT GPIO\n");
+
 	pdata->platform_ops		= &tusb_ops;
 
 	usb_phy_generic_register();
@@ -1245,10 +1261,7 @@ static int tusb_probe(struct platform_device *pdev)
 	musb_resources[1].end = pdev->resource[1].end;
 	musb_resources[1].flags = pdev->resource[1].flags;
 
-	musb_resources[2].name = pdev->resource[2].name;
-	musb_resources[2].start = pdev->resource[2].start;
-	musb_resources[2].end = pdev->resource[2].end;
-	musb_resources[2].flags = pdev->resource[2].flags;
+	musb_resources[2] = DEFINE_RES_IRQ_NAMED(gpiod_to_irq(glue->intpin), "mc");
 
 	pinfo = tusb_dev_info;
 	pinfo.parent = &pdev->dev;
@@ -1267,19 +1280,17 @@ static int tusb_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int tusb_remove(struct platform_device *pdev)
+static void tusb_remove(struct platform_device *pdev)
 {
 	struct tusb6010_glue		*glue = platform_get_drvdata(pdev);
 
 	platform_device_unregister(glue->musb);
 	usb_phy_generic_unregister(glue->phy);
-
-	return 0;
 }
 
 static struct platform_driver tusb_driver = {
 	.probe		= tusb_probe,
-	.remove		= tusb_remove,
+	.remove_new	= tusb_remove,
 	.driver		= {
 		.name	= "musb-tusb",
 	},

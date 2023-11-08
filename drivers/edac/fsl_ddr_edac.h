@@ -1,17 +1,14 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Freescale Memory Controller kernel module
  *
  * Support  Power-based SoCs including MPC85xx, MPC86xx, MPC83xx and
- * ARM-based Layerscape SoCs including LS2xxx. Originally split
- * out from mpc85xx_edac EDAC driver.
+ * ARM-based Layerscape SoCs including LS2xxx and LS1021A. Originally
+ * split out from mpc85xx_edac EDAC driver.
  *
  * Author: Dave Jiang <djiang@mvista.com>
  *
- * 2006-2007 (c) MontaVista Software, Inc. This file is licensed under
- * the terms of the GNU General Public License version 2. This program
- * is licensed "as is" without any warranty of any kind, whether express
- * or implied.
- *
+ * 2006-2007 (c) MontaVista Software, Inc.
  */
 #ifndef _FSL_DDR_EDAC_H_
 #define _FSL_DDR_EDAC_H_

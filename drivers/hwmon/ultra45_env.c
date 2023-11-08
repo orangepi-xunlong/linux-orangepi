@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * ultra45_env.c: Driver for Ultra45 PIC16F747 environmental monitor.
  *
@@ -8,7 +9,8 @@
 #include <linux/types.h>
 #include <linux/slab.h>
 #include <linux/module.h>
-#include <linux/of_device.h>
+#include <linux/of.h>
+#include <linux/platform_device.h>
 #include <linux/io.h>
 #include <linux/hwmon.h>
 #include <linux/hwmon-sysfs.h>

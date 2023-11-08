@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Xilinx Video Timing Controller
  *
@@ -6,10 +7,6 @@
  *
  * Contacts: Hyun Kwon <hyun.kwon@xilinx.com>
  *           Laurent Pinchart <laurent.pinchart@ideasonboard.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/clk.h>
@@ -257,7 +254,7 @@ struct xvtc_device *xvtc_of_get(struct device_node *np)
 	struct xvtc_device *found = NULL;
 	struct xvtc_device *xvtc;
 
-	if (!of_find_property(np, "xlnx,vtc", NULL))
+	if (!of_property_present(np, "xlnx,vtc"))
 		return NULL;
 
 	xvtc_node = of_parse_phandle(np, "xlnx,vtc", 0);
@@ -347,15 +344,13 @@ static int xvtc_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int xvtc_remove(struct platform_device *pdev)
+static void xvtc_remove(struct platform_device *pdev)
 {
 	struct xvtc_device *xvtc = platform_get_drvdata(pdev);
 
 	xvtc_unregister_device(xvtc);
 
 	xvip_cleanup_resources(&xvtc->xvip);
-
-	return 0;
 }
 
 static const struct of_device_id xvtc_of_id_table[] = {
@@ -370,7 +365,7 @@ static struct platform_driver xvtc_driver = {
 		.of_match_table = xvtc_of_id_table,
 	},
 	.probe = xvtc_probe,
-	.remove = xvtc_remove,
+	.remove_new = xvtc_remove,
 };
 
 module_platform_driver(xvtc_driver);

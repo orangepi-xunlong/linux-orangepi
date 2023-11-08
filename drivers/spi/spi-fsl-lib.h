@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * Freescale SPI/eSPI controller driver library.
  *
@@ -9,11 +10,6 @@
  * CPM SPI and QE buffer descriptors mode support:
  * Copyright (c) 2009  MontaVista Software, Inc.
  * Author: Anton Vorontsov <avorontsov@ru.mvista.com>
- *
- * This program is free software; you can redistribute  it and/or modify it
- * under  the terms of  the GNU General  Public License as published by the
- * Free Software Foundation;  either version 2 of the  License, or (at your
- * option) any later version.
  */
 #ifndef __SPI_FSL_LIB_H__
 #define __SPI_FSL_LIB_H__
@@ -28,10 +24,6 @@ struct mpc8xxx_spi {
 	/* rx & tx bufs from the spi_transfer */
 	const void *tx;
 	void *rx;
-#if IS_ENABLED(CONFIG_SPI_FSL_ESPI)
-	int len;
-	u8 *local_buf;
-#endif
 
 	int subblock;
 	struct spi_pram __iomem *pram;
@@ -99,8 +91,7 @@ static inline u32 mpc8xxx_spi_read_reg(__be32 __iomem *reg)
 
 struct mpc8xxx_spi_probe_info {
 	struct fsl_spi_platform_data pdata;
-	int *gpios;
-	bool *alow_flags;
+	__be32 __iomem *immr_spi_cs;
 };
 
 extern u32 mpc8xxx_spi_tx_buf_u8(struct mpc8xxx_spi *mpc8xxx_spi);
@@ -112,12 +103,9 @@ extern void mpc8xxx_spi_rx_buf_u32(u32 data, struct mpc8xxx_spi *mpc8xxx_spi);
 
 extern struct mpc8xxx_spi_probe_info *to_of_pinfo(
 		struct fsl_spi_platform_data *pdata);
-extern int mpc8xxx_spi_bufs(struct mpc8xxx_spi *mspi,
-		struct spi_transfer *t, unsigned int len);
 extern const char *mpc8xxx_spi_strmode(unsigned int flags);
 extern void mpc8xxx_spi_probe(struct device *dev, struct resource *mem,
 		unsigned int irq);
-extern int mpc8xxx_spi_remove(struct device *dev);
 extern int of_mpc8xxx_spi_probe(struct platform_device *ofdev);
 
 #endif /* __SPI_FSL_LIB_H__ */

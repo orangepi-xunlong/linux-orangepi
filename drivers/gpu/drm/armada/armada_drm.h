@@ -1,9 +1,6 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (C) 2012 Russell King
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 #ifndef ARMADA_DRM_H
 #define ARMADA_DRM_H
@@ -11,12 +8,14 @@
 #include <linux/kfifo.h>
 #include <linux/io.h>
 #include <linux/workqueue.h>
-#include <drm/drmP.h>
+
+#include <drm/drm_device.h>
+#include <drm/drm_mm.h>
 
 struct armada_crtc;
 struct armada_gem_object;
 struct clk;
-struct drm_fb_helper;
+struct drm_display_mode;
 
 static inline void
 armada_updatel(uint32_t val, uint32_t mask, void __iomem *ptr)
@@ -42,25 +41,22 @@ struct armada_private;
 
 struct armada_variant {
 	bool has_spu_adv_reg;
-	uint32_t spu_adv_reg;
 	int (*init)(struct armada_crtc *, struct device *);
 	int (*compute_clock)(struct armada_crtc *,
 			     const struct drm_display_mode *,
 			     uint32_t *);
+	void (*disable)(struct armada_crtc *);
+	void (*enable)(struct armada_crtc *, const struct drm_display_mode *);
 };
 
 /* Variant ops */
 extern const struct armada_variant armada510_ops;
 
 struct armada_private {
-	struct work_struct	fb_unref_work;
-	DECLARE_KFIFO(fb_unref, struct drm_framebuffer *, 8);
-	struct drm_fb_helper	*fbdev;
+	struct drm_device	drm;
 	struct armada_crtc	*dcrtc[2];
 	struct drm_mm		linear; /* protected by linear_lock */
 	struct mutex		linear_lock;
-	struct drm_property	*csc_yuv_prop;
-	struct drm_property	*csc_rgb_prop;
 	struct drm_property	*colorkey_prop;
 	struct drm_property	*colorkey_min_prop;
 	struct drm_property	*colorkey_max_prop;
@@ -75,20 +71,18 @@ struct armada_private {
 #endif
 };
 
-void __armada_drm_queue_unref_work(struct drm_device *,
-	struct drm_framebuffer *);
-void armada_drm_queue_unref_work(struct drm_device *,
-	struct drm_framebuffer *);
+#define drm_to_armada_dev(dev) container_of(dev, struct armada_private, drm)
 
-extern const struct drm_mode_config_funcs armada_drm_mode_config_funcs;
-
-int armada_fbdev_init(struct drm_device *);
-void armada_fbdev_lastclose(struct drm_device *);
-void armada_fbdev_fini(struct drm_device *);
+#if defined(CONFIG_DRM_FBDEV_EMULATION)
+void armada_fbdev_setup(struct drm_device *dev);
+#else
+static inline void armada_fbdev_setup(struct drm_device *dev)
+{ }
+#endif
 
 int armada_overlay_plane_create(struct drm_device *, unsigned long);
 
+void armada_drm_crtc_debugfs_init(struct armada_crtc *dcrtc);
 int armada_drm_debugfs_init(struct drm_minor *);
-void armada_drm_debugfs_cleanup(struct drm_minor *);
 
 #endif

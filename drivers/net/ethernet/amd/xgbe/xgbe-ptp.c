@@ -122,7 +122,7 @@
 #include "xgbe.h"
 #include "xgbe-common.h"
 
-static cycle_t xgbe_cc_read(const struct cyclecounter *cc)
+static u64 xgbe_cc_read(const struct cyclecounter *cc)
 {
 	struct xgbe_prv_data *pdata = container_of(cc,
 						   struct xgbe_prv_data,
@@ -134,27 +134,15 @@ static cycle_t xgbe_cc_read(const struct cyclecounter *cc)
 	return nsec;
 }
 
-static int xgbe_adjfreq(struct ptp_clock_info *info, s32 delta)
+static int xgbe_adjfine(struct ptp_clock_info *info, long scaled_ppm)
 {
 	struct xgbe_prv_data *pdata = container_of(info,
 						   struct xgbe_prv_data,
 						   ptp_clock_info);
 	unsigned long flags;
-	u64 adjust;
-	u32 addend, diff;
-	unsigned int neg_adjust = 0;
+	u64 addend;
 
-	if (delta < 0) {
-		neg_adjust = 1;
-		delta = -delta;
-	}
-
-	adjust = pdata->tstamp_addend;
-	adjust *= delta;
-	diff = div_u64(adjust, 1000000000UL);
-
-	addend = (neg_adjust) ? pdata->tstamp_addend - diff :
-				pdata->tstamp_addend + diff;
+	addend = adjust_by_scaled_ppm(pdata->tstamp_addend, scaled_ppm);
 
 	spin_lock_irqsave(&pdata->tstamp_lock, flags);
 
@@ -235,7 +223,7 @@ void xgbe_ptp_register(struct xgbe_prv_data *pdata)
 		 netdev_name(pdata->netdev));
 	info->owner = THIS_MODULE;
 	info->max_adj = pdata->ptpclk_rate;
-	info->adjfreq = xgbe_adjfreq;
+	info->adjfine = xgbe_adjfine;
 	info->adjtime = xgbe_adjtime;
 	info->gettime64 = xgbe_gettime;
 	info->settime64 = xgbe_settime;
@@ -267,7 +255,7 @@ void xgbe_ptp_register(struct xgbe_prv_data *pdata)
 			 ktime_to_ns(ktime_get_real()));
 
 	/* Disable all timestamping to start */
-	XGMAC_IOWRITE(pdata, MAC_TCR, 0);
+	XGMAC_IOWRITE(pdata, MAC_TSCR, 0);
 	pdata->tstamp_config.tx_type = HWTSTAMP_TX_OFF;
 	pdata->tstamp_config.rx_filter = HWTSTAMP_FILTER_NONE;
 }

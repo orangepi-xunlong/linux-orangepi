@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Here is where the ball gets rolling as far as the kernel is concerned.
  * When control is transferred to _start, the bootload has already
@@ -19,20 +20,19 @@
  *   Support for CPU Hotplug
  */
 
-
+#include <linux/export.h>
+#include <linux/pgtable.h>
 #include <asm/asmmacro.h>
 #include <asm/fpu.h>
 #include <asm/kregs.h>
 #include <asm/mmu_context.h>
 #include <asm/asm-offsets.h>
 #include <asm/pal.h>
-#include <asm/pgtable.h>
 #include <asm/processor.h>
 #include <asm/ptrace.h>
 #include <asm/mca_asm.h>
 #include <linux/init.h>
 #include <linux/linkage.h>
-#include <asm/export.h>
 
 #ifdef CONFIG_HOTPLUG_CPU
 #define SAL_PSR_BITS_TO_SET				\
@@ -169,7 +169,7 @@ RestRR:											\
 	__PAGE_ALIGNED_DATA
 
 	.global empty_zero_page
-EXPORT_DATA_SYMBOL_GPL(empty_zero_page)
+EXPORT_SYMBOL_GPL(empty_zero_page)
 empty_zero_page:
 	.skip PAGE_SIZE
 
@@ -403,11 +403,6 @@ start_ap:
 
 	// This is executed by the bootstrap processor (bsp) only:
 
-#ifdef CONFIG_IA64_FW_EMU
-	// initialize PAL & SAL emulator:
-	br.call.sptk.many rp=sys_fw_init
-.ret1:
-#endif
 	br.call.sptk.many rp=start_kernel
 .ret2:	addl r3=@ltoff(halt_msg),gp
 	;;
@@ -1031,7 +1026,7 @@ GLOBAL_ENTRY(ia64_native_sched_clock)
 END(ia64_native_sched_clock)
 
 #ifdef CONFIG_VIRT_CPU_ACCOUNTING_NATIVE
-GLOBAL_ENTRY(cycle_to_cputime)
+GLOBAL_ENTRY(cycle_to_nsec)
 	alloc r16=ar.pfs,1,0,0,0
 	addl r8=THIS_CPU(ia64_cpu_info) + IA64_CPUINFO_NSEC_PER_CYC_OFFSET,r0
 	;;
@@ -1047,7 +1042,7 @@ GLOBAL_ENTRY(cycle_to_cputime)
 	;;
 	shrp r8=r9,r8,IA64_NSEC_PER_CYC_SHIFT
 	br.ret.sptk.many rp
-END(cycle_to_cputime)
+END(cycle_to_nsec)
 #endif /* CONFIG_VIRT_CPU_ACCOUNTING_NATIVE */
 
 #ifdef CONFIG_IA64_BRL_EMU

@@ -10,12 +10,12 @@
  * Copyright (C) 2000 MIPS Technologies, Inc.
  *    written by Carsten Langgaard, carstenl@mips.com
  */
+#include <asm/asm.h>
+#include <asm/asm-offsets.h>
+#include <asm/mipsregs.h>
+#include <asm/regdef.h>
+#include <asm/stackframe.h>
 
-#define USE_ALTERNATE_RESUME_IMPL 1
-	.set push
-	.set arch=mips64r2
-#include "r4k_switch.S"
-	.set pop
 /*
  * task_struct *resume(task_struct *prev, task_struct *next,
  *		       struct thread_info *next_ti)
@@ -60,7 +60,7 @@
 #endif
 3:
 
-#if defined(CONFIG_CC_STACKPROTECTOR) && !defined(CONFIG_SMP)
+#if defined(CONFIG_STACKPROTECTOR) && !defined(CONFIG_SMP)
 	PTR_LA	t8, __stack_chk_guard
 	LONG_L	t9, TASK_STACK_CANARY(a1)
 	LONG_S	t9, 0(t8)
@@ -427,7 +427,6 @@ done_restore:
 	jr	ra
 	 nop
 	.space 30 * 4, 0
-octeon_mult_save_end:
 	EXPORT(octeon_mult_save_end)
 	END(octeon_mult_save)
 
@@ -447,7 +446,6 @@ octeon_mult_save_end:
 	sd	k0, PT_MPL+8(sp)      /* PT_MPL+8  has MPL1 */
 	jr	ra
 	 sd	k1, PT_MPL+16(sp)     /* PT_MPL+16 has MPL2 */
-octeon_mult_save2_end:
 	EXPORT(octeon_mult_save2_end)
 	END(octeon_mult_save2)
 
@@ -479,7 +477,6 @@ octeon_mult_save2_end:
 	sd	$10, PT_MPL+(4*8)(sp)	/* store MPL4 */
 	jr	ra
 	 sd	$11, PT_MPL+(5*8)(sp)	/* store MPL5 */
-octeon_mult_save3_end:
 	EXPORT(octeon_mult_save3_end)
 	END(octeon_mult_save3)
 	.set pop
@@ -497,7 +494,6 @@ octeon_mult_save3_end:
 	jr	ra
 	 nop
 	.space 30 * 4, 0
-octeon_mult_restore_end:
 	EXPORT(octeon_mult_restore_end)
 	END(octeon_mult_restore)
 
@@ -516,7 +512,6 @@ octeon_mult_restore_end:
 	mtp1	v0			/* P1 */
 	jr	ra
 	 mtp0	v1			/* P0 */
-octeon_mult_restore2_end:
 	EXPORT(octeon_mult_restore2_end)
 	END(octeon_mult_restore2)
 
@@ -547,7 +542,6 @@ octeon_mult_restore2_end:
 	.word	0x714b000b
 	/* mtp2	$10, $11		   restore P2 and P5 */
 
-octeon_mult_restore3_end:
 	EXPORT(octeon_mult_restore3_end)
 	END(octeon_mult_restore3)
 	.set pop

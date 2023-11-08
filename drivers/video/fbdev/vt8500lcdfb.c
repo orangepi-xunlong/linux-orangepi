@@ -1,18 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  linux/drivers/video/vt8500lcdfb.c
  *
  *  Copyright (C) 2010 Alexey Charkov <alchark@gmail.com>
  *
  * Based on skeletonfb.c and pxafb.c
- *
- * This software is licensed under the terms of the GNU General Public
- * License version 2, as published by the Free Software Foundation, and
- * may be copied, distributed, and modified under those terms.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include <linux/delay.h>
@@ -238,6 +230,7 @@ static int vt8500lcd_blank(int blank, struct fb_info *info)
 		    info->fix.visual == FB_VISUAL_STATIC_PSEUDOCOLOR)
 			for (i = 0; i < 256; i++)
 				vt8500lcd_setcolreg(i, 0, 0, 0, 0, info);
+		fallthrough;
 	case FB_BLANK_UNBLANK:
 		if (info->fix.visual == FB_VISUAL_PSEUDOCOLOR ||
 		    info->fix.visual == FB_VISUAL_STATIC_PSEUDOCOLOR)
@@ -246,7 +239,7 @@ static int vt8500lcd_blank(int blank, struct fb_info *info)
 	return 0;
 }
 
-static struct fb_ops vt8500lcd_ops = {
+static const struct fb_ops vt8500lcd_ops = {
 	.owner		= THIS_MODULE,
 	.fb_set_par	= vt8500lcd_set_par,
 	.fb_setcolreg	= vt8500lcd_setcolreg,
@@ -289,10 +282,8 @@ static int vt8500lcd_probe(struct platform_device *pdev)
 
 	fbi = devm_kzalloc(&pdev->dev, sizeof(struct vt8500lcd_info)
 			+ sizeof(u32) * 16, GFP_KERNEL);
-	if (!fbi) {
-		dev_err(&pdev->dev, "Failed to initialize framebuffer device\n");
+	if (!fbi)
 		return -ENOMEM;
-	}
 
 	strcpy(fbi->fb.fix.id, "VT8500 LCD");
 
@@ -309,8 +300,7 @@ static int vt8500lcd_probe(struct platform_device *pdev)
 	fbi->fb.var.vmode	= FB_VMODE_NONINTERLACED;
 
 	fbi->fb.fbops		= &vt8500lcd_ops;
-	fbi->fb.flags		= FBINFO_DEFAULT
-				| FBINFO_HWACCEL_COPYAREA
+	fbi->fb.flags		= FBINFO_HWACCEL_COPYAREA
 				| FBINFO_HWACCEL_FILLRECT
 				| FBINFO_HWACCEL_YPAN
 				| FBINFO_VIRTFB
@@ -448,7 +438,7 @@ failed_free_res:
 	return ret;
 }
 
-static int vt8500lcd_remove(struct platform_device *pdev)
+static void vt8500lcd_remove(struct platform_device *pdev)
 {
 	struct vt8500lcd_info *fbi = platform_get_drvdata(pdev);
 	struct resource *res;
@@ -471,8 +461,6 @@ static int vt8500lcd_remove(struct platform_device *pdev)
 
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	release_mem_region(res->start, resource_size(res));
-
-	return 0;
 }
 
 static const struct of_device_id via_dt_ids[] = {
@@ -482,7 +470,7 @@ static const struct of_device_id via_dt_ids[] = {
 
 static struct platform_driver vt8500lcd_driver = {
 	.probe		= vt8500lcd_probe,
-	.remove		= vt8500lcd_remove,
+	.remove_new	= vt8500lcd_remove,
 	.driver		= {
 		.name	= "vt8500-lcd",
 		.of_match_table = of_match_ptr(via_dt_ids),

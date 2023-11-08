@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Network device driver for the MACE ethernet controller on
  * Apple Powermacs.  Assumes it's under a DBDMA controller.
@@ -18,10 +19,9 @@
 #include <linux/spinlock.h>
 #include <linux/bitrev.h>
 #include <linux/slab.h>
-#include <asm/prom.h>
+#include <linux/pgtable.h>
 #include <asm/dbdma.h>
 #include <asm/io.h>
-#include <asm/pgtable.h>
 #include <asm/macio.h>
 
 #include "mace.h"
@@ -78,7 +78,7 @@ struct mace_data {
 
 static int mace_open(struct net_device *dev);
 static int mace_close(struct net_device *dev);
-static int mace_xmit_start(struct sk_buff *skb, struct net_device *dev);
+static netdev_tx_t mace_xmit_start(struct sk_buff *skb, struct net_device *dev);
 static void mace_set_multicast(struct net_device *dev);
 static void mace_reset(struct net_device *dev);
 static int mace_set_address(struct net_device *dev, void *addr);
@@ -86,10 +86,10 @@ static irqreturn_t mace_interrupt(int irq, void *dev_id);
 static irqreturn_t mace_txdma_intr(int irq, void *dev_id);
 static irqreturn_t mace_rxdma_intr(int irq, void *dev_id);
 static void mace_set_timeout(struct net_device *dev);
-static void mace_tx_timeout(unsigned long data);
+static void mace_tx_timeout(struct timer_list *t);
 static inline void dbdma_reset(volatile struct dbdma_regs __iomem *dma);
 static inline void mace_clean_rings(struct mace_data *mp);
-static void __mace_set_address(struct net_device *dev, void *addr);
+static void __mace_set_address(struct net_device *dev, const void *addr);
 
 /*
  * If we can't get a skbuff when we need it, we use this area for DMA.
@@ -102,7 +102,6 @@ static const struct net_device_ops mace_netdev_ops = {
 	.ndo_start_xmit		= mace_xmit_start,
 	.ndo_set_rx_mode	= mace_set_multicast,
 	.ndo_set_mac_address	= mace_set_address,
-	.ndo_change_mtu		= eth_change_mtu,
 	.ndo_validate_addr	= eth_validate_addr,
 };
 
@@ -112,11 +111,12 @@ static int mace_probe(struct macio_dev *mdev, const struct of_device_id *match)
 	struct net_device *dev;
 	struct mace_data *mp;
 	const unsigned char *addr;
+	u8 macaddr[ETH_ALEN];
 	int j, rev, rc = -EBUSY;
 
 	if (macio_resource_count(mdev) != 3 || macio_irq_count(mdev) != 3) {
-		printk(KERN_ERR "can't use MACE %s: need 3 addrs and 3 irqs\n",
-		       mace->full_name);
+		printk(KERN_ERR "can't use MACE %pOF: need 3 addrs and 3 irqs\n",
+		       mace);
 		return -ENODEV;
 	}
 
@@ -124,8 +124,8 @@ static int mace_probe(struct macio_dev *mdev, const struct of_device_id *match)
 	if (addr == NULL) {
 		addr = of_get_property(mace, "local-mac-address", NULL);
 		if (addr == NULL) {
-			printk(KERN_ERR "Can't get mac-address for MACE %s\n",
-			       mace->full_name);
+			printk(KERN_ERR "Can't get mac-address for MACE %pOF\n",
+			       mace);
 			return -ENODEV;
 		}
 	}
@@ -167,8 +167,9 @@ static int mace_probe(struct macio_dev *mdev, const struct of_device_id *match)
 
 	rev = addr[0] == 0 && addr[1] == 0xA0;
 	for (j = 0; j < 6; ++j) {
-		dev->dev_addr[j] = rev ? bitrev8(addr[j]): addr[j];
+		macaddr[j] = rev ? bitrev8(addr[j]): addr[j];
 	}
+	eth_hw_addr_set(dev, macaddr);
 	mp->chipid = (in_8(&mp->mace->chipid_hi) << 8) |
 			in_8(&mp->mace->chipid_lo);
 
@@ -197,7 +198,7 @@ static int mace_probe(struct macio_dev *mdev, const struct of_device_id *match)
 
 	memset((char *) mp->tx_cmds, 0,
 	       (NCMDS_TX*N_TX_RING + N_RX_RING + 2) * sizeof(struct dbdma_cmd));
-	init_timer(&mp->tx_timeout);
+	timer_setup(&mp->tx_timeout, mace_tx_timeout, 0);
 	spin_lock_init(&mp->lock);
 	mp->timeout_active = 0;
 
@@ -364,28 +365,32 @@ static void mace_reset(struct net_device *dev)
 	out_8(&mb->iac, 0);
 
     if (mp->port_aaui)
-    	out_8(&mb->plscc, PORTSEL_AUI + ENPLSIO);
+	out_8(&mb->plscc, PORTSEL_AUI + ENPLSIO);
     else
-    	out_8(&mb->plscc, PORTSEL_GPSI + ENPLSIO);
+	out_8(&mb->plscc, PORTSEL_GPSI + ENPLSIO);
 }
 
-static void __mace_set_address(struct net_device *dev, void *addr)
+static void __mace_set_address(struct net_device *dev, const void *addr)
 {
     struct mace_data *mp = netdev_priv(dev);
     volatile struct mace __iomem *mb = mp->mace;
-    unsigned char *p = addr;
+    const unsigned char *p = addr;
+    u8 macaddr[ETH_ALEN];
     int i;
 
     /* load up the hardware address */
     if (mp->chipid == BROKEN_ADDRCHG_REV)
-    	out_8(&mb->iac, PHYADDR);
+	out_8(&mb->iac, PHYADDR);
     else {
-    	out_8(&mb->iac, ADDRCHG | PHYADDR);
+	out_8(&mb->iac, ADDRCHG | PHYADDR);
 	while ((in_8(&mb->iac) & ADDRCHG) != 0)
 	    ;
     }
     for (i = 0; i < 6; ++i)
-	out_8(&mb->padr, dev->dev_addr[i] = p[i]);
+        out_8(&mb->padr, macaddr[i] = p[i]);
+
+    eth_hw_addr_set(dev, macaddr);
+
     if (mp->chipid != BROKEN_ADDRCHG_REV)
         out_8(&mb->iac, 0);
 }
@@ -522,13 +527,11 @@ static inline void mace_set_timeout(struct net_device *dev)
     if (mp->timeout_active)
 	del_timer(&mp->tx_timeout);
     mp->tx_timeout.expires = jiffies + TX_TIMEOUT;
-    mp->tx_timeout.function = mace_tx_timeout;
-    mp->tx_timeout.data = (unsigned long) dev;
     add_timer(&mp->tx_timeout);
     mp->timeout_active = 1;
 }
 
-static int mace_xmit_start(struct sk_buff *skb, struct net_device *dev)
+static netdev_tx_t mace_xmit_start(struct sk_buff *skb, struct net_device *dev)
 {
     struct mace_data *mp = netdev_priv(dev);
     volatile struct dbdma_regs __iomem *td = mp->tx_dma;
@@ -767,7 +770,7 @@ static irqreturn_t mace_interrupt(int irq, void *dev_id)
 	    dev->stats.tx_bytes += mp->tx_bufs[i]->len;
 	    ++dev->stats.tx_packets;
 	}
-	dev_kfree_skb_irq(mp->tx_bufs[i]);
+	dev_consume_skb_irq(mp->tx_bufs[i]);
 	--mp->tx_active;
 	if (++i >= N_TX_RING)
 	    i = 0;
@@ -802,10 +805,10 @@ static irqreturn_t mace_interrupt(int irq, void *dev_id)
     return IRQ_HANDLED;
 }
 
-static void mace_tx_timeout(unsigned long data)
+static void mace_tx_timeout(struct timer_list *t)
 {
-    struct net_device *dev = (struct net_device *) data;
-    struct mace_data *mp = netdev_priv(dev);
+    struct mace_data *mp = from_timer(mp, t, tx_timeout);
+    struct net_device *dev = macio_get_drvdata(mp->mdev);
     volatile struct mace __iomem *mb = mp->mace;
     volatile struct dbdma_regs __iomem *td = mp->tx_dma;
     volatile struct dbdma_regs __iomem *rd = mp->rx_dma;
@@ -843,7 +846,7 @@ static void mace_tx_timeout(unsigned long data)
     if (mp->tx_bad_runt) {
 	mp->tx_bad_runt = 0;
     } else if (i != mp->tx_fill) {
-	dev_kfree_skb(mp->tx_bufs[i]);
+	dev_kfree_skb_irq(mp->tx_bufs[i]);
 	if (++i >= N_TX_RING)
 	    i = 0;
 	mp->tx_empty = i;

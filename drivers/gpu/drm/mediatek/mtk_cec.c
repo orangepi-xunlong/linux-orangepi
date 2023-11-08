@@ -1,23 +1,19 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2014 MediaTek Inc.
  * Author: Jie Qiu <jie.qiu@mediatek.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 #include <linux/clk.h>
 #include <linux/delay.h>
 #include <linux/io.h>
 #include <linux/interrupt.h>
+#include <linux/module.h>
+#include <linux/mod_devicetable.h>
 #include <linux/platform_device.h>
 
 #include "mtk_cec.h"
+#include "mtk_hdmi.h"
+#include "mtk_drm_drv.h"
 
 #define TR_CONFIG		0x00
 #define CLEAR_CEC_IRQ			BIT(15)
@@ -91,7 +87,7 @@ static void mtk_cec_mask(struct mtk_cec *cec, unsigned int offset,
 	u32 tmp = readl(cec->regs + offset) & ~mask;
 
 	tmp |= val & mask;
-	writel(val, cec->regs + offset);
+	writel(tmp, cec->regs + offset);
 }
 
 void mtk_cec_set_hpd_event(struct device *dev,
@@ -215,10 +211,8 @@ static int mtk_cec_probe(struct platform_device *pdev)
 	}
 
 	cec->irq = platform_get_irq(pdev, 0);
-	if (cec->irq < 0) {
-		dev_err(dev, "Failed to get cec irq: %d\n", cec->irq);
+	if (cec->irq < 0)
 		return cec->irq;
-	}
 
 	ret = devm_request_threaded_irq(dev, cec->irq, NULL,
 					mtk_cec_htplg_isr_thread,
@@ -241,23 +235,23 @@ static int mtk_cec_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int mtk_cec_remove(struct platform_device *pdev)
+static void mtk_cec_remove(struct platform_device *pdev)
 {
 	struct mtk_cec *cec = platform_get_drvdata(pdev);
 
 	mtk_cec_htplg_irq_disable(cec);
 	clk_disable_unprepare(cec->clk);
-	return 0;
 }
 
 static const struct of_device_id mtk_cec_of_ids[] = {
 	{ .compatible = "mediatek,mt8173-cec", },
 	{}
 };
+MODULE_DEVICE_TABLE(of, mtk_cec_of_ids);
 
 struct platform_driver mtk_cec_driver = {
 	.probe = mtk_cec_probe,
-	.remove = mtk_cec_remove,
+	.remove_new = mtk_cec_remove,
 	.driver = {
 		.name = "mediatek-cec",
 		.of_match_table = mtk_cec_of_ids,

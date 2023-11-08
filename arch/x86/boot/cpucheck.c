@@ -1,10 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /* -*- linux-c -*- ------------------------------------------------------- *
  *
  *   Copyright (C) 1991, 1992 Linus Torvalds
  *   Copyright 2007 rPath, Inc. - All Rights Reserved
- *
- *   This file is part of the Linux kernel, and is made available under
- *   the terms of the GNU General Public License version 2.
  *
  * ----------------------------------------------------------------------- */
 
@@ -29,6 +27,7 @@
 #include <asm/required-features.h>
 #include <asm/msr-index.h>
 #include "string.h"
+#include "msr.h"
 
 static u32 err_flags[NCAPINTS];
 
@@ -44,6 +43,15 @@ static const u32 req_flags[NCAPINTS] =
 	0, /* REQUIRED_MASK5 not implemented in this file */
 	REQUIRED_MASK6,
 	0, /* REQUIRED_MASK7 not implemented in this file */
+	0, /* REQUIRED_MASK8 not implemented in this file */
+	0, /* REQUIRED_MASK9 not implemented in this file */
+	0, /* REQUIRED_MASK10 not implemented in this file */
+	0, /* REQUIRED_MASK11 not implemented in this file */
+	0, /* REQUIRED_MASK12 not implemented in this file */
+	0, /* REQUIRED_MASK13 not implemented in this file */
+	0, /* REQUIRED_MASK14 not implemented in this file */
+	0, /* REQUIRED_MASK15 not implemented in this file */
+	REQUIRED_MASK16,
 };
 
 #define A32(a, b, c, d) (((d) << 24)+((c) << 16)+((b) << 8)+(a))
@@ -104,7 +112,7 @@ int check_cpu(int *cpu_level_ptr, int *req_level_ptr, u32 **err_flags_ptr)
 {
 	int err;
 
-	memset(&cpu.flags, 0, sizeof cpu.flags);
+	memset(&cpu.flags, 0, sizeof(cpu.flags));
 	cpu.level = 3;
 
 	if (has_eflag(X86_EFLAGS_AC))
@@ -123,12 +131,11 @@ int check_cpu(int *cpu_level_ptr, int *req_level_ptr, u32 **err_flags_ptr)
 		/* If this is an AMD and we're only missing SSE+SSE2, try to
 		   turn them on */
 
-		u32 ecx = MSR_K7_HWCR;
-		u32 eax, edx;
+		struct msr m;
 
-		asm("rdmsr" : "=a" (eax), "=d" (edx) : "c" (ecx));
-		eax &= ~(1 << 15);
-		asm("wrmsr" : : "a" (eax), "d" (edx), "c" (ecx));
+		boot_rdmsr(MSR_K7_HWCR, &m);
+		m.l &= ~(1 << 15);
+		boot_wrmsr(MSR_K7_HWCR, &m);
 
 		get_cpuflags();	/* Make sure it really did something */
 		err = check_cpuflags();
@@ -138,28 +145,28 @@ int check_cpu(int *cpu_level_ptr, int *req_level_ptr, u32 **err_flags_ptr)
 		/* If this is a VIA C3, we might have to enable CX8
 		   explicitly */
 
-		u32 ecx = MSR_VIA_FCR;
-		u32 eax, edx;
+		struct msr m;
 
-		asm("rdmsr" : "=a" (eax), "=d" (edx) : "c" (ecx));
-		eax |= (1<<1)|(1<<7);
-		asm("wrmsr" : : "a" (eax), "d" (edx), "c" (ecx));
+		boot_rdmsr(MSR_VIA_FCR, &m);
+		m.l |= (1 << 1) | (1 << 7);
+		boot_wrmsr(MSR_VIA_FCR, &m);
 
 		set_bit(X86_FEATURE_CX8, cpu.flags);
 		err = check_cpuflags();
 	} else if (err == 0x01 && is_transmeta()) {
 		/* Transmeta might have masked feature bits in word 0 */
 
-		u32 ecx = 0x80860004;
-		u32 eax, edx;
+		struct msr m, m_tmp;
 		u32 level = 1;
 
-		asm("rdmsr" : "=a" (eax), "=d" (edx) : "c" (ecx));
-		asm("wrmsr" : : "a" (~0), "d" (edx), "c" (ecx));
+		boot_rdmsr(0x80860004, &m);
+		m_tmp = m;
+		m_tmp.l = ~0;
+		boot_wrmsr(0x80860004, &m_tmp);
 		asm("cpuid"
 		    : "+a" (level), "=d" (cpu.flags[0])
 		    : : "ecx", "ebx");
-		asm("wrmsr" : : "a" (eax), "d" (edx), "c" (ecx));
+		boot_wrmsr(0x80860004, &m);
 
 		err = check_cpuflags();
 	} else if (err == 0x01 &&

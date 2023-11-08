@@ -1,14 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * TI LP8860 4-Channel LED Driver
  *
  * Copyright (C) 2014 Texas Instruments
  *
  * Author: Dan Murphy <dmurphy@ti.com>
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * version 2 as published by the Free Software Foundation.
- *
  */
 
 #include <linux/i2c.h>
@@ -19,7 +15,6 @@
 #include <linux/module.h>
 #include <linux/mutex.h>
 #include <linux/of.h>
-#include <linux/of_gpio.h>
 #include <linux/gpio/consumer.h>
 #include <linux/slab.h>
 
@@ -86,19 +81,18 @@
 
 #define LP8860_CLEAR_FAULTS		0x01
 
-#define LP8860_DISP_LED_NAME		"display_cluster"
+#define LP8860_NAME			"lp8860"
 
 /**
- * struct lp8860_led -
- * @lock - Lock for reading/writing the device
- * @client - Pointer to the I2C client
- * @led_dev - led class device pointer
- * @regmap - Devices register map
- * @eeprom_regmap - EEPROM register map
- * @enable_gpio - VDDIO/EN gpio to enable communication interface
- * @regulator - LED supply regulator pointer
- * @label - LED label
-**/
+ * struct lp8860_led
+ * @lock: Lock for reading/writing the device
+ * @client: Pointer to the I2C client
+ * @led_dev: led class device pointer
+ * @regmap: Devices register map
+ * @eeprom_regmap: EEPROM register map
+ * @enable_gpio: VDDIO/EN gpio to enable communication interface
+ * @regulator: LED supply regulator pointer
+ */
 struct lp8860_led {
 	struct mutex lock;
 	struct i2c_client *client;
@@ -107,7 +101,6 @@ struct lp8860_led {
 	struct regmap *eeprom_regmap;
 	struct gpio_desc *enable_gpio;
 	struct regulator *regulator;
-	const char *label;
 };
 
 struct lp8860_eeprom_reg {
@@ -247,8 +240,16 @@ static int lp8860_init(struct lp8860_led *led)
 	unsigned int read_buf;
 	int ret, i, reg_count;
 
-	if (led->enable_gpio)
-		gpiod_direction_output(led->enable_gpio, 1);
+	if (led->regulator) {
+		ret = regulator_enable(led->regulator);
+		if (ret) {
+			dev_err(&led->client->dev,
+				"Failed to enable regulator\n");
+			return ret;
+		}
+	}
+
+	gpiod_direction_output(led->enable_gpio, 1);
 
 	ret = lp8860_fault_check(led);
 	if (ret)
@@ -282,12 +283,24 @@ static int lp8860_init(struct lp8860_led *led)
 	ret = regmap_write(led->regmap,
 			LP8860_EEPROM_CNTRL,
 			LP8860_PROGRAM_EEPROM);
-	if (ret)
+	if (ret) {
 		dev_err(&led->client->dev, "Failed programming EEPROM\n");
+		goto out;
+	}
+
+	return ret;
+
 out:
 	if (ret)
-		if (led->enable_gpio)
-			gpiod_direction_output(led->enable_gpio, 0);
+		gpiod_direction_output(led->enable_gpio, 0);
+
+	if (led->regulator) {
+		ret = regulator_disable(led->regulator);
+		if (ret)
+			dev_err(&led->client->dev,
+				"Failed to disable regulator\n");
+	}
+
 	return ret;
 }
 
@@ -359,26 +372,21 @@ static const struct regmap_config lp8860_eeprom_regmap_config = {
 	.cache_type = REGCACHE_NONE,
 };
 
-static int lp8860_probe(struct i2c_client *client,
-			const struct i2c_device_id *id)
+static int lp8860_probe(struct i2c_client *client)
 {
 	int ret;
 	struct lp8860_led *led;
-	struct device_node *np = client->dev.of_node;
+	struct device_node *np = dev_of_node(&client->dev);
+	struct device_node *child_node;
+	struct led_init_data init_data = {};
 
 	led = devm_kzalloc(&client->dev, sizeof(*led), GFP_KERNEL);
 	if (!led)
 		return -ENOMEM;
 
-	led->label = LP8860_DISP_LED_NAME;
-
-	if (client->dev.of_node) {
-		ret = of_property_read_string(np, "label", &led->label);
-		if (ret) {
-			dev_err(&client->dev, "Missing label in dt\n");
-			return -EINVAL;
-		}
-	}
+	child_node = of_get_next_available_child(np, NULL);
+	if (!child_node)
+		return -EINVAL;
 
 	led->enable_gpio = devm_gpiod_get_optional(&client->dev,
 						   "enable", GPIOD_OUT_LOW);
@@ -393,8 +401,6 @@ static int lp8860_probe(struct i2c_client *client,
 		led->regulator = NULL;
 
 	led->client = client;
-	led->led_dev.name = led->label;
-	led->led_dev.max_brightness = LED_FULL;
 	led->led_dev.brightness_set_blocking = lp8860_brightness_set;
 
 	mutex_init(&led->lock);
@@ -421,7 +427,12 @@ static int lp8860_probe(struct i2c_client *client,
 	if (ret)
 		return ret;
 
-	ret = led_classdev_register(&client->dev, &led->led_dev);
+	init_data.fwnode = of_fwnode_handle(child_node);
+	init_data.devicename = LP8860_NAME;
+	init_data.default_label = ":display_cluster";
+
+	ret = devm_led_classdev_register_ext(&client->dev, &led->led_dev,
+					     &init_data);
 	if (ret) {
 		dev_err(&client->dev, "led register err: %d\n", ret);
 		return ret;
@@ -430,15 +441,12 @@ static int lp8860_probe(struct i2c_client *client,
 	return 0;
 }
 
-static int lp8860_remove(struct i2c_client *client)
+static void lp8860_remove(struct i2c_client *client)
 {
 	struct lp8860_led *led = i2c_get_clientdata(client);
 	int ret;
 
-	led_classdev_unregister(&led->led_dev);
-
-	if (led->enable_gpio)
-		gpiod_direction_output(led->enable_gpio, 0);
+	gpiod_direction_output(led->enable_gpio, 0);
 
 	if (led->regulator) {
 		ret = regulator_disable(led->regulator);
@@ -447,7 +455,7 @@ static int lp8860_remove(struct i2c_client *client)
 				"Failed to disable regulator\n");
 	}
 
-	return 0;
+	mutex_destroy(&led->lock);
 }
 
 static const struct i2c_device_id lp8860_id[] = {
@@ -456,18 +464,16 @@ static const struct i2c_device_id lp8860_id[] = {
 };
 MODULE_DEVICE_TABLE(i2c, lp8860_id);
 
-#ifdef CONFIG_OF
 static const struct of_device_id of_lp8860_leds_match[] = {
 	{ .compatible = "ti,lp8860", },
 	{},
 };
 MODULE_DEVICE_TABLE(of, of_lp8860_leds_match);
-#endif
 
 static struct i2c_driver lp8860_driver = {
 	.driver = {
 		.name	= "lp8860",
-		.of_match_table = of_match_ptr(of_lp8860_leds_match),
+		.of_match_table = of_lp8860_leds_match,
 	},
 	.probe		= lp8860_probe,
 	.remove		= lp8860_remove,
@@ -477,4 +483,4 @@ module_i2c_driver(lp8860_driver);
 
 MODULE_DESCRIPTION("Texas Instruments LP8860 LED driver");
 MODULE_AUTHOR("Dan Murphy <dmurphy@ti.com>");
-MODULE_LICENSE("GPL");
+MODULE_LICENSE("GPL v2");

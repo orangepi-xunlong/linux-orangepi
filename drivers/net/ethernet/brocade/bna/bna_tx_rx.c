@@ -1,14 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Linux network driver for QLogic BR-series Converged Network Adapter.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License (GPL) Version 2 as
- * published by the Free Software Foundation
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
   */
 /*
  * Copyright (c) 2005-2014 Brocade Communications Systems, Inc.
@@ -1644,7 +1636,7 @@ bna_bfi_rx_enet_start(struct bna_rx *rx)
 						&q1->qpt);
 			cfg_req->q_cfg[i].qs.rx_buffer_size =
 				htons((u16)q1->buffer_size);
-			/* Fall through */
+			fallthrough;
 
 		case BNA_RXP_SINGLE:
 			/* Large/Single RxQ */
@@ -1964,7 +1956,7 @@ static void
 bna_rx_stop(struct bna_rx *rx)
 {
 	rx->rx_flags &= ~BNA_RX_F_ENET_STARTED;
-	if (rx->fsm == (bfa_fsm_t) bna_rx_sm_stopped)
+	if (rx->fsm == bna_rx_sm_stopped)
 		bna_rx_mod_cb_rx_stopped(&rx->bna->rx_mod, rx);
 	else {
 		rx->stop_cbfn = bna_rx_mod_cb_rx_stopped;
@@ -2543,7 +2535,7 @@ bna_rx_destroy(struct bna_rx *rx)
 void
 bna_rx_enable(struct bna_rx *rx)
 {
-	if (rx->fsm != (bfa_sm_t)bna_rx_sm_stopped)
+	if (rx->fsm != bna_rx_sm_stopped)
 		return;
 
 	rx->rx_flags |= BNA_RX_F_ENABLED;
@@ -3531,7 +3523,7 @@ bna_tx_destroy(struct bna_tx *tx)
 void
 bna_tx_enable(struct bna_tx *tx)
 {
-	if (tx->fsm != (bfa_sm_t)bna_tx_sm_stopped)
+	if (tx->fsm != bna_tx_sm_stopped)
 		return;
 
 	tx->flags |= BNA_TX_F_ENABLED;

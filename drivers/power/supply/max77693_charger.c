@@ -1,19 +1,9 @@
-/*
- * max77693_charger.c - Battery charger driver for the Maxim 77693
- *
- * Copyright (C) 2014 Samsung Electronics
- * Krzysztof Kozlowski <krzk@kernel.org>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- */
+// SPDX-License-Identifier: GPL-2.0+
+//
+// max77693_charger.c - Battery charger driver for the Maxim 77693
+//
+// Copyright (C) 2014 Samsung Electronics
+// Krzysztof Kozlowski <krzk@kernel.org>
 
 #include <linux/module.h>
 #include <linux/platform_device.h>
@@ -306,7 +296,7 @@ static ssize_t fast_charge_timer_show(struct device *dev,
 		break;
 	}
 
-	return scnprintf(buf, PAGE_SIZE, "%u\n", val);
+	return sysfs_emit(buf, "%u\n", val);
 }
 
 static int max77693_set_fast_charge_timer(struct max77693_charger *chg,
@@ -367,7 +357,7 @@ static ssize_t top_off_threshold_current_show(struct device *dev,
 	else
 		val = data * 50000;
 
-	return scnprintf(buf, PAGE_SIZE, "%u\n", val);
+	return sysfs_emit(buf, "%u\n", val);
 }
 
 static int max77693_set_top_off_threshold_current(struct max77693_charger *chg,
@@ -415,7 +405,7 @@ static ssize_t top_off_timer_show(struct device *dev,
 
 	val = data * 10;
 
-	return scnprintf(buf, PAGE_SIZE, "%u\n", val);
+	return sysfs_emit(buf, "%u\n", val);
 }
 
 static int max77693_set_top_off_timer(struct max77693_charger *chg,
@@ -567,6 +557,7 @@ static int max77693_set_charge_input_threshold_volt(struct max77693_charger *chg
 	case 4800000:
 	case 4900000:
 		data = (uvolt - 4700000) / 100000;
+		break;
 	default:
 		dev_err(chg->dev, "Wrong value for charge input voltage regulation threshold\n");
 		return -EINVAL;

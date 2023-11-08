@@ -5,9 +5,15 @@
 
 #ifndef _LINUX_NOSPEC_H
 #define _LINUX_NOSPEC_H
+
+#include <linux/compiler.h>
 #include <asm/barrier.h>
 
 struct task_struct;
+
+#ifndef barrier_nospec
+# define barrier_nospec() do { } while (0)
+#endif
 
 /**
  * array_index_mask_nospec() - generate a ~0 mask when index < size, 0 otherwise
@@ -62,5 +68,7 @@ static inline unsigned long array_index_mask_nospec(unsigned long index,
 int arch_prctl_spec_ctrl_get(struct task_struct *task, unsigned long which);
 int arch_prctl_spec_ctrl_set(struct task_struct *task, unsigned long which,
 			     unsigned long ctrl);
+/* Speculation control for seccomp enforced mitigation */
+void arch_seccomp_spec_mitigate(struct task_struct *task);
 
 #endif /* _LINUX_NOSPEC_H */

@@ -1,100 +1,119 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2015 MediaTek Inc.
  * Author: Andrew-CT Chen <andrew-ct.chen@mediatek.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include <linux/device.h>
 #include <linux/module.h>
+#include <linux/mod_devicetable.h>
 #include <linux/io.h>
 #include <linux/nvmem-provider.h>
 #include <linux/platform_device.h>
+#include <linux/property.h>
+
+struct mtk_efuse_pdata {
+	bool uses_post_processing;
+};
+
+struct mtk_efuse_priv {
+	void __iomem *base;
+};
 
 static int mtk_reg_read(void *context,
 			unsigned int reg, void *_val, size_t bytes)
 {
-	void __iomem *base = context;
-	u32 *val = _val;
-	int i = 0, words = bytes / 4;
+	struct mtk_efuse_priv *priv = context;
+	void __iomem *addr = priv->base + reg;
+	u8 *val = _val;
+	int i;
 
-	while (words--)
-		*val++ = readl(base + reg + (i++ * 4));
+	for (i = 0; i < bytes; i++, val++)
+		*val = readb(addr + i);
 
 	return 0;
 }
 
-static int mtk_reg_write(void *context,
-			 unsigned int reg, void *_val, size_t bytes)
+static int mtk_efuse_gpu_speedbin_pp(void *context, const char *id, int index,
+				     unsigned int offset, void *data, size_t bytes)
 {
-	void __iomem *base = context;
-	u32 *val = _val;
-	int i = 0, words = bytes / 4;
+	u8 *val = data;
 
-	while (words--)
-		writel(*val++, base + reg + (i++ * 4));
+	if (val[0] < 8)
+		val[0] = BIT(val[0]);
 
 	return 0;
 }
+
+static void mtk_efuse_fixup_cell_info(struct nvmem_device *nvmem,
+				      struct nvmem_layout *layout,
+				      struct nvmem_cell_info *cell)
+{
+	size_t sz = strlen(cell->name);
+
+	/*
+	 * On some SoCs, the GPU speedbin is not read as bitmask but as
+	 * a number with range [0-7] (max 3 bits): post process to use
+	 * it in OPP tables to describe supported-hw.
+	 */
+	if (cell->nbits <= 3 &&
+	    strncmp(cell->name, "gpu-speedbin", min(sz, strlen("gpu-speedbin"))) == 0)
+		cell->read_post_process = mtk_efuse_gpu_speedbin_pp;
+}
+
+static struct nvmem_layout mtk_efuse_layout = {
+	.fixup_cell_info = mtk_efuse_fixup_cell_info,
+};
 
 static int mtk_efuse_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
 	struct resource *res;
 	struct nvmem_device *nvmem;
-	struct nvmem_config *econfig;
-	void __iomem *base;
+	struct nvmem_config econfig = {};
+	struct mtk_efuse_priv *priv;
+	const struct mtk_efuse_pdata *pdata;
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	base = devm_ioremap_resource(dev, res);
-	if (IS_ERR(base))
-		return PTR_ERR(base);
-
-	econfig = devm_kzalloc(dev, sizeof(*econfig), GFP_KERNEL);
-	if (!econfig)
+	priv = devm_kzalloc(dev, sizeof(*priv), GFP_KERNEL);
+	if (!priv)
 		return -ENOMEM;
 
-	econfig->stride = 4;
-	econfig->word_size = 4;
-	econfig->reg_read = mtk_reg_read;
-	econfig->reg_write = mtk_reg_write;
-	econfig->size = resource_size(res);
-	econfig->priv = base;
-	econfig->dev = dev;
-	econfig->owner = THIS_MODULE;
-	nvmem = nvmem_register(econfig);
-	if (IS_ERR(nvmem))
-		return PTR_ERR(nvmem);
+	priv->base = devm_platform_get_and_ioremap_resource(pdev, 0, &res);
+	if (IS_ERR(priv->base))
+		return PTR_ERR(priv->base);
 
-	platform_set_drvdata(pdev, nvmem);
+	pdata = device_get_match_data(dev);
+	econfig.stride = 1;
+	econfig.word_size = 1;
+	econfig.reg_read = mtk_reg_read;
+	econfig.size = resource_size(res);
+	econfig.priv = priv;
+	econfig.dev = dev;
+	if (pdata->uses_post_processing)
+		econfig.layout = &mtk_efuse_layout;
+	nvmem = devm_nvmem_register(dev, &econfig);
 
-	return 0;
+	return PTR_ERR_OR_ZERO(nvmem);
 }
 
-static int mtk_efuse_remove(struct platform_device *pdev)
-{
-	struct nvmem_device *nvmem = platform_get_drvdata(pdev);
+static const struct mtk_efuse_pdata mtk_mt8186_efuse_pdata = {
+	.uses_post_processing = true,
+};
 
-	return nvmem_unregister(nvmem);
-}
+static const struct mtk_efuse_pdata mtk_efuse_pdata = {
+	.uses_post_processing = false,
+};
 
 static const struct of_device_id mtk_efuse_of_match[] = {
-	{ .compatible = "mediatek,mt8173-efuse",},
-	{ .compatible = "mediatek,efuse",},
+	{ .compatible = "mediatek,mt8173-efuse", .data = &mtk_efuse_pdata },
+	{ .compatible = "mediatek,mt8186-efuse", .data = &mtk_mt8186_efuse_pdata },
+	{ .compatible = "mediatek,efuse", .data = &mtk_efuse_pdata },
 	{/* sentinel */},
 };
 MODULE_DEVICE_TABLE(of, mtk_efuse_of_match);
 
 static struct platform_driver mtk_efuse_driver = {
 	.probe = mtk_efuse_probe,
-	.remove = mtk_efuse_remove,
 	.driver = {
 		.name = "mediatek,efuse",
 		.of_match_table = mtk_efuse_of_match,

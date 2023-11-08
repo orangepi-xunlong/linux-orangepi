@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: ((GPL-2.0 WITH Linux-syscall-note) OR MIT) */
 /******************************************************************************
  * evtchn.h
  *
@@ -98,6 +99,15 @@ struct ioctl_evtchn_notify {
 	_IOC(_IOC_NONE, 'E', 6, sizeof(struct ioctl_evtchn_restrict_domid))
 struct ioctl_evtchn_restrict_domid {
 	domid_t domid;
+};
+
+/*
+ * Bind statically allocated @port.
+ */
+#define IOCTL_EVTCHN_BIND_STATIC			\
+	_IOC(_IOC_NONE, 'E', 7, sizeof(struct ioctl_evtchn_bind))
+struct ioctl_evtchn_bind {
+	unsigned int port;
 };
 
 #endif /* __LINUX_PUBLIC_EVTCHN_H__ */

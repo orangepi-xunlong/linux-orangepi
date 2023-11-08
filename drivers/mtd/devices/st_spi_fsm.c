@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * st_spi_fsm.c	- ST Fast Sequence Mode (FSM) Serial Flash Controller
  *
@@ -6,11 +7,6 @@
  * Copyright (C) 2010-2014 STMicroelectronics Limited
  *
  * JEDEC probe based on drivers/mtd/devices/m25p80.c
- *
- * This code is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
  */
 #include <linux/kernel.h>
 #include <linux/module.h>
@@ -259,7 +255,6 @@ struct stfsm_seq {
 struct stfsm {
 	struct device		*dev;
 	void __iomem		*base;
-	struct resource		*region;
 	struct mtd_info		mtd;
 	struct mutex		lock;
 	struct flash_info       *info;
@@ -507,13 +502,13 @@ static struct seq_rw_config n25q_read3_configs[] = {
  *	- 'FAST' variants configured for 8 dummy cycles (see note above.)
  */
 static struct seq_rw_config n25q_read4_configs[] = {
-	{FLASH_FLAG_READ_1_4_4, SPINOR_OP_READ4_1_4_4,	0, 4, 4, 0x00, 0, 8},
-	{FLASH_FLAG_READ_1_1_4, SPINOR_OP_READ4_1_1_4,	0, 1, 4, 0x00, 0, 8},
-	{FLASH_FLAG_READ_1_2_2, SPINOR_OP_READ4_1_2_2,	0, 2, 2, 0x00, 0, 8},
-	{FLASH_FLAG_READ_1_1_2, SPINOR_OP_READ4_1_1_2,	0, 1, 2, 0x00, 0, 8},
-	{FLASH_FLAG_READ_FAST,	SPINOR_OP_READ4_FAST,	0, 1, 1, 0x00, 0, 8},
-	{FLASH_FLAG_READ_WRITE, SPINOR_OP_READ4,	0, 1, 1, 0x00, 0, 0},
-	{0x00,			0,			0, 0, 0, 0x00, 0, 0},
+	{FLASH_FLAG_READ_1_4_4, SPINOR_OP_READ_1_4_4_4B, 0, 4, 4, 0x00, 0, 8},
+	{FLASH_FLAG_READ_1_1_4, SPINOR_OP_READ_1_1_4_4B, 0, 1, 4, 0x00, 0, 8},
+	{FLASH_FLAG_READ_1_2_2, SPINOR_OP_READ_1_2_2_4B, 0, 2, 2, 0x00, 0, 8},
+	{FLASH_FLAG_READ_1_1_2, SPINOR_OP_READ_1_1_2_4B, 0, 1, 2, 0x00, 0, 8},
+	{FLASH_FLAG_READ_FAST,	SPINOR_OP_READ_FAST_4B,  0, 1, 1, 0x00, 0, 8},
+	{FLASH_FLAG_READ_WRITE, SPINOR_OP_READ_4B,       0, 1, 1, 0x00, 0, 0},
+	{0x00,			0,                       0, 0, 0, 0x00, 0, 0},
 };
 
 /*
@@ -553,13 +548,13 @@ static int stfsm_mx25_en_32bit_addr_seq(struct stfsm_seq *seq)
  * entering a state that is incompatible with the SPIBoot Controller.
  */
 static struct seq_rw_config stfsm_s25fl_read4_configs[] = {
-	{FLASH_FLAG_READ_1_4_4,  SPINOR_OP_READ4_1_4_4,  0, 4, 4, 0x00, 2, 4},
-	{FLASH_FLAG_READ_1_1_4,  SPINOR_OP_READ4_1_1_4,  0, 1, 4, 0x00, 0, 8},
-	{FLASH_FLAG_READ_1_2_2,  SPINOR_OP_READ4_1_2_2,  0, 2, 2, 0x00, 4, 0},
-	{FLASH_FLAG_READ_1_1_2,  SPINOR_OP_READ4_1_1_2,  0, 1, 2, 0x00, 0, 8},
-	{FLASH_FLAG_READ_FAST,   SPINOR_OP_READ4_FAST,   0, 1, 1, 0x00, 0, 8},
-	{FLASH_FLAG_READ_WRITE,  SPINOR_OP_READ4,        0, 1, 1, 0x00, 0, 0},
-	{0x00,                   0,                      0, 0, 0, 0x00, 0, 0},
+	{FLASH_FLAG_READ_1_4_4,  SPINOR_OP_READ_1_4_4_4B,  0, 4, 4, 0x00, 2, 4},
+	{FLASH_FLAG_READ_1_1_4,  SPINOR_OP_READ_1_1_4_4B,  0, 1, 4, 0x00, 0, 8},
+	{FLASH_FLAG_READ_1_2_2,  SPINOR_OP_READ_1_2_2_4B,  0, 2, 2, 0x00, 4, 0},
+	{FLASH_FLAG_READ_1_1_2,  SPINOR_OP_READ_1_1_2_4B,  0, 1, 2, 0x00, 0, 8},
+	{FLASH_FLAG_READ_FAST,   SPINOR_OP_READ_FAST_4B,   0, 1, 1, 0x00, 0, 8},
+	{FLASH_FLAG_READ_WRITE,  SPINOR_OP_READ_4B,        0, 1, 1, 0x00, 0, 0},
+	{0x00,                   0,                        0, 0, 0, 0x00, 0, 0},
 };
 
 static struct seq_rw_config stfsm_s25fl_write4_configs[] = {
@@ -929,7 +924,7 @@ static int stfsm_read_status(struct stfsm *fsm, uint8_t cmd,
 	BUG_ON(bytes != 1 && bytes != 2);
 
 	seq->seq_opc[0] = (SEQ_OPC_PADS_1 | SEQ_OPC_CYCLES(8) |
-			   SEQ_OPC_OPCODE(cmd)),
+			   SEQ_OPC_OPCODE(cmd));
 
 	stfsm_load_seq(fsm, seq);
 
@@ -1445,7 +1440,7 @@ static int stfsm_s25fl_config(struct stfsm *fsm)
 	}
 
 	/* Check status of 'QE' bit, update if required. */
-	stfsm_read_status(fsm, SPINOR_OP_RDSR2, &cr1, 1);
+	stfsm_read_status(fsm, SPINOR_OP_RDCR, &cr1, 1);
 	data_pads = ((fsm->stfsm_seq_read.seq_cfg >> 16) & 0x3) + 1;
 	if (data_pads == 4) {
 		if (!(cr1 & STFSM_S25FL_CONFIG_QE)) {
@@ -1490,7 +1485,7 @@ static int stfsm_w25q_config(struct stfsm *fsm)
 		return ret;
 
 	/* Check status of 'QE' bit, update if required. */
-	stfsm_read_status(fsm, SPINOR_OP_RDSR2, &sr2, 1);
+	stfsm_read_status(fsm, SPINOR_OP_RDCR, &sr2, 1);
 	data_pads = ((fsm->stfsm_seq_read.seq_cfg >> 16) & 0x3) + 1;
 	if (data_pads == 4) {
 		if (!(sr2 & W25Q_STATUS_QE)) {
@@ -1825,13 +1820,9 @@ static int stfsm_mtd_erase(struct mtd_info *mtd, struct erase_info *instr)
 
 	mutex_unlock(&fsm->lock);
 
-	instr->state = MTD_ERASE_DONE;
-	mtd_erase_callback(instr);
-
 	return 0;
 
 out1:
-	instr->state = MTD_ERASE_FAILED;
 	mutex_unlock(&fsm->lock);
 
 	return ret;
@@ -1868,8 +1859,7 @@ static struct flash_info *stfsm_jedec_probe(struct stfsm *fsm)
 	 */
 	ext_jedec = id[3] << 8  | id[4];
 
-	dev_dbg(fsm->dev, "JEDEC =  0x%08x [%02x %02x %02x %02x %02x]\n",
-		jedec, id[0], id[1], id[2], id[3], id[4]);
+	dev_dbg(fsm->dev, "JEDEC =  0x%08x [%5ph]\n", jedec, id);
 
 	for (info = flash_types; info->name; info++) {
 		if (info->jedec_id == jedec) {
@@ -2026,7 +2016,6 @@ static int stfsm_probe(struct platform_device *pdev)
 {
 	struct device_node *np = pdev->dev.of_node;
 	struct flash_info *info;
-	struct resource *res;
 	struct stfsm *fsm;
 	int ret;
 
@@ -2043,29 +2032,14 @@ static int stfsm_probe(struct platform_device *pdev)
 
 	platform_set_drvdata(pdev, fsm);
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	if (!res) {
-		dev_err(&pdev->dev, "Resource not found\n");
-		return -ENODEV;
-	}
-
-	fsm->base = devm_ioremap_resource(&pdev->dev, res);
-	if (IS_ERR(fsm->base)) {
-		dev_err(&pdev->dev,
-			"Failed to reserve memory region %pR\n", res);
+	fsm->base = devm_platform_ioremap_resource(pdev, 0);
+	if (IS_ERR(fsm->base))
 		return PTR_ERR(fsm->base);
-	}
 
-	fsm->clk = devm_clk_get(&pdev->dev, NULL);
+	fsm->clk = devm_clk_get_enabled(&pdev->dev, NULL);
 	if (IS_ERR(fsm->clk)) {
 		dev_err(fsm->dev, "Couldn't find EMI clock.\n");
 		return PTR_ERR(fsm->clk);
-	}
-
-	ret = clk_prepare_enable(fsm->clk);
-	if (ret) {
-		dev_err(fsm->dev, "Failed to enable EMI clock.\n");
-		return ret;
 	}
 
 	mutex_init(&fsm->lock);
@@ -2092,15 +2066,12 @@ static int stfsm_probe(struct platform_device *pdev)
 	 * Configure READ/WRITE/ERASE sequences according to platform and
 	 * device flags.
 	 */
-	if (info->config) {
+	if (info->config)
 		ret = info->config(fsm);
-		if (ret)
-			return ret;
-	} else {
+	else
 		ret = stfsm_prepare_rwe_seqs_default(fsm);
-		if (ret)
-			return ret;
-	}
+	if (ret)
+		return ret;
 
 	fsm->mtd.name		= info->name;
 	fsm->mtd.dev.parent	= &pdev->dev;
@@ -2130,7 +2101,9 @@ static int stfsm_remove(struct platform_device *pdev)
 {
 	struct stfsm *fsm = platform_get_drvdata(pdev);
 
-	return mtd_device_unregister(&fsm->mtd);
+	WARN_ON(mtd_device_unregister(&fsm->mtd));
+
+	return 0;
 }
 
 #ifdef CONFIG_PM_SLEEP
@@ -2147,9 +2120,7 @@ static int stfsmfsm_resume(struct device *dev)
 {
 	struct stfsm *fsm = dev_get_drvdata(dev);
 
-	clk_prepare_enable(fsm->clk);
-
-	return 0;
+	return clk_prepare_enable(fsm->clk);
 }
 #endif
 

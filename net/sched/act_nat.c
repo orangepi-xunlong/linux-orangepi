@@ -1,12 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Stateless NAT actions
  *
  * Copyright (c) 2007 Herbert Xu <herbert@gondor.apana.org.au>
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the Free
- * Software Foundation; either version 2 of the License, or (at your option)
- * any later version.
  */
 
 #include <linux/errno.h>
@@ -21,17 +17,15 @@
 #include <linux/string.h>
 #include <linux/tc_act/tc_nat.h>
 #include <net/act_api.h>
+#include <net/pkt_cls.h>
 #include <net/icmp.h>
 #include <net/ip.h>
 #include <net/netlink.h>
 #include <net/tc_act/tc_nat.h>
 #include <net/tcp.h>
 #include <net/udp.h>
+#include <net/tc_wrapper.h>
 
-
-#define NAT_TAB_MASK	15
-
-static int nat_net_id;
 static struct tc_action_ops act_nat_ops;
 
 static const struct nla_policy nat_policy[TCA_NAT_MAX + 1] = {
@@ -39,59 +33,90 @@ static const struct nla_policy nat_policy[TCA_NAT_MAX + 1] = {
 };
 
 static int tcf_nat_init(struct net *net, struct nlattr *nla, struct nlattr *est,
-			struct tc_action **a, int ovr, int bind)
+			struct tc_action **a, struct tcf_proto *tp,
+			u32 flags, struct netlink_ext_ack *extack)
 {
-	struct tc_action_net *tn = net_generic(net, nat_net_id);
+	struct tc_action_net *tn = net_generic(net, act_nat_ops.net_id);
+	bool bind = flags & TCA_ACT_FLAGS_BIND;
+	struct tcf_nat_parms *nparm, *oparm;
 	struct nlattr *tb[TCA_NAT_MAX + 1];
+	struct tcf_chain *goto_ch = NULL;
 	struct tc_nat *parm;
 	int ret = 0, err;
 	struct tcf_nat *p;
+	u32 index;
 
 	if (nla == NULL)
 		return -EINVAL;
 
-	err = nla_parse_nested(tb, TCA_NAT_MAX, nla, nat_policy);
+	err = nla_parse_nested_deprecated(tb, TCA_NAT_MAX, nla, nat_policy,
+					  NULL);
 	if (err < 0)
 		return err;
 
 	if (tb[TCA_NAT_PARMS] == NULL)
 		return -EINVAL;
 	parm = nla_data(tb[TCA_NAT_PARMS]);
-
-	if (!tcf_hash_check(tn, parm->index, a, bind)) {
-		ret = tcf_hash_create(tn, parm->index, est, a,
-				      &act_nat_ops, bind, false);
-		if (ret)
+	index = parm->index;
+	err = tcf_idr_check_alloc(tn, &index, a, bind);
+	if (!err) {
+		ret = tcf_idr_create_from_flags(tn, index, est, a, &act_nat_ops,
+						bind, flags);
+		if (ret) {
+			tcf_idr_cleanup(tn, index);
 			return ret;
+		}
 		ret = ACT_P_CREATED;
-	} else {
+	} else if (err > 0) {
 		if (bind)
 			return 0;
-		tcf_hash_release(*a, bind);
-		if (!ovr)
+		if (!(flags & TCA_ACT_FLAGS_REPLACE)) {
+			tcf_idr_release(*a, bind);
 			return -EEXIST;
+		}
+	} else {
+		return err;
 	}
+	err = tcf_action_check_ctrlact(parm->action, tp, &goto_ch, extack);
+	if (err < 0)
+		goto release_idr;
+
+	nparm = kzalloc(sizeof(*nparm), GFP_KERNEL);
+	if (!nparm) {
+		err = -ENOMEM;
+		goto release_idr;
+	}
+
+	nparm->old_addr = parm->old_addr;
+	nparm->new_addr = parm->new_addr;
+	nparm->mask = parm->mask;
+	nparm->flags = parm->flags;
+
 	p = to_tcf_nat(*a);
 
 	spin_lock_bh(&p->tcf_lock);
-	p->old_addr = parm->old_addr;
-	p->new_addr = parm->new_addr;
-	p->mask = parm->mask;
-	p->flags = parm->flags;
-
-	p->tcf_action = parm->action;
+	goto_ch = tcf_action_set_ctrlact(*a, parm->action, goto_ch);
+	oparm = rcu_replace_pointer(p->parms, nparm, lockdep_is_held(&p->tcf_lock));
 	spin_unlock_bh(&p->tcf_lock);
 
-	if (ret == ACT_P_CREATED)
-		tcf_hash_insert(tn, *a);
+	if (goto_ch)
+		tcf_chain_put_by_act(goto_ch);
+
+	if (oparm)
+		kfree_rcu(oparm, rcu);
 
 	return ret;
+release_idr:
+	tcf_idr_release(*a, bind);
+	return err;
 }
 
-static int tcf_nat(struct sk_buff *skb, const struct tc_action *a,
-		   struct tcf_result *res)
+TC_INDIRECT_SCOPE int tcf_nat_act(struct sk_buff *skb,
+				  const struct tc_action *a,
+				  struct tcf_result *res)
 {
 	struct tcf_nat *p = to_tcf_nat(a);
+	struct tcf_nat_parms *parms;
 	struct iphdr *iph;
 	__be32 old_addr;
 	__be32 new_addr;
@@ -102,18 +127,16 @@ static int tcf_nat(struct sk_buff *skb, const struct tc_action *a,
 	int ihl;
 	int noff;
 
-	spin_lock(&p->tcf_lock);
-
 	tcf_lastuse_update(&p->tcf_tm);
-	old_addr = p->old_addr;
-	new_addr = p->new_addr;
-	mask = p->mask;
-	egress = p->flags & TCA_NAT_FLAG_EGRESS;
-	action = p->tcf_action;
+	tcf_action_update_bstats(&p->common, skb);
 
-	bstats_update(&p->tcf_bstats, skb);
+	action = READ_ONCE(p->tcf_action);
 
-	spin_unlock(&p->tcf_lock);
+	parms = rcu_dereference_bh(p->parms);
+	old_addr = parms->old_addr;
+	new_addr = parms->new_addr;
+	mask = parms->mask;
+	egress = parms->flags & TCA_NAT_FLAG_EGRESS;
 
 	if (unlikely(action == TC_ACT_SHOT))
 		goto drop;
@@ -192,9 +215,7 @@ static int tcf_nat(struct sk_buff *skb, const struct tc_action *a,
 
 		icmph = (void *)(skb_network_header(skb) + ihl);
 
-		if ((icmph->type != ICMP_DEST_UNREACH) &&
-		    (icmph->type != ICMP_TIME_EXCEEDED) &&
-		    (icmph->type != ICMP_PARAMETERPROB))
+		if (!icmp_is_err(icmph->type))
 			break;
 
 		if (!pskb_may_pull(skb, ihl + sizeof(*icmph) + sizeof(*iph) +
@@ -239,9 +260,7 @@ out:
 	return action;
 
 drop:
-	spin_lock(&p->tcf_lock);
-	p->tcf_qstats.drops++;
-	spin_unlock(&p->tcf_lock);
+	tcf_action_inc_drop_qstats(&p->common);
 	return TC_ACT_SHOT;
 }
 
@@ -251,17 +270,23 @@ static int tcf_nat_dump(struct sk_buff *skb, struct tc_action *a,
 	unsigned char *b = skb_tail_pointer(skb);
 	struct tcf_nat *p = to_tcf_nat(a);
 	struct tc_nat opt = {
-		.old_addr = p->old_addr,
-		.new_addr = p->new_addr,
-		.mask     = p->mask,
-		.flags    = p->flags,
-
 		.index    = p->tcf_index,
-		.action   = p->tcf_action,
-		.refcnt   = p->tcf_refcnt - ref,
-		.bindcnt  = p->tcf_bindcnt - bind,
+		.refcnt   = refcount_read(&p->tcf_refcnt) - ref,
+		.bindcnt  = atomic_read(&p->tcf_bindcnt) - bind,
 	};
+	struct tcf_nat_parms *parms;
 	struct tcf_t t;
+
+	spin_lock_bh(&p->tcf_lock);
+
+	opt.action = p->tcf_action;
+
+	parms = rcu_dereference_protected(p->parms, lockdep_is_held(&p->tcf_lock));
+
+	opt.old_addr = parms->old_addr;
+	opt.new_addr = parms->new_addr;
+	opt.mask = parms->mask;
+	opt.flags = parms->flags;
 
 	if (nla_put(skb, TCA_NAT_PARMS, sizeof(opt), &opt))
 		goto nla_put_failure;
@@ -269,60 +294,53 @@ static int tcf_nat_dump(struct sk_buff *skb, struct tc_action *a,
 	tcf_tm_dump(&t, &p->tcf_tm);
 	if (nla_put_64bit(skb, TCA_NAT_TM, sizeof(t), &t, TCA_NAT_PAD))
 		goto nla_put_failure;
+	spin_unlock_bh(&p->tcf_lock);
 
 	return skb->len;
 
 nla_put_failure:
+	spin_unlock_bh(&p->tcf_lock);
 	nlmsg_trim(skb, b);
 	return -1;
 }
 
-static int tcf_nat_walker(struct net *net, struct sk_buff *skb,
-			  struct netlink_callback *cb, int type,
-			  const struct tc_action_ops *ops)
+static void tcf_nat_cleanup(struct tc_action *a)
 {
-	struct tc_action_net *tn = net_generic(net, nat_net_id);
+	struct tcf_nat *p = to_tcf_nat(a);
+	struct tcf_nat_parms *parms;
 
-	return tcf_generic_walker(tn, skb, cb, type, ops);
-}
-
-static int tcf_nat_search(struct net *net, struct tc_action **a, u32 index)
-{
-	struct tc_action_net *tn = net_generic(net, nat_net_id);
-
-	return tcf_hash_search(tn, a, index);
+	parms = rcu_dereference_protected(p->parms, 1);
+	if (parms)
+		kfree_rcu(parms, rcu);
 }
 
 static struct tc_action_ops act_nat_ops = {
 	.kind		=	"nat",
-	.type		=	TCA_ACT_NAT,
+	.id		=	TCA_ID_NAT,
 	.owner		=	THIS_MODULE,
-	.act		=	tcf_nat,
+	.act		=	tcf_nat_act,
 	.dump		=	tcf_nat_dump,
 	.init		=	tcf_nat_init,
-	.walk		=	tcf_nat_walker,
-	.lookup		=	tcf_nat_search,
+	.cleanup	=	tcf_nat_cleanup,
 	.size		=	sizeof(struct tcf_nat),
 };
 
 static __net_init int nat_init_net(struct net *net)
 {
-	struct tc_action_net *tn = net_generic(net, nat_net_id);
+	struct tc_action_net *tn = net_generic(net, act_nat_ops.net_id);
 
-	return tc_action_net_init(tn, &act_nat_ops, NAT_TAB_MASK);
+	return tc_action_net_init(net, tn, &act_nat_ops);
 }
 
-static void __net_exit nat_exit_net(struct net *net)
+static void __net_exit nat_exit_net(struct list_head *net_list)
 {
-	struct tc_action_net *tn = net_generic(net, nat_net_id);
-
-	tc_action_net_exit(tn);
+	tc_action_net_exit(net_list, act_nat_ops.net_id);
 }
 
 static struct pernet_operations nat_net_ops = {
 	.init = nat_init_net,
-	.exit = nat_exit_net,
-	.id   = &nat_net_id,
+	.exit_batch = nat_exit_net,
+	.id   = &act_nat_ops.net_id,
 	.size = sizeof(struct tc_action_net),
 };
 

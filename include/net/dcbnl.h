@@ -1,17 +1,6 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (c) 2008, Intel Corporation.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * You should have received a copy of the GNU General Public License along with
- * this program; if not, see <http://www.gnu.org/licenses/>.
  *
  * Author: Lucy Liu <lucy.liu@intel.com>
  */
@@ -21,6 +10,8 @@
 
 #include <linux/dcbnl.h>
 
+struct net_device;
+
 struct dcb_app_type {
 	int	ifindex;
 	struct dcb_app	  app;
@@ -28,11 +19,38 @@ struct dcb_app_type {
 	u8	dcbx;
 };
 
+u16 dcb_getrewr(struct net_device *dev, struct dcb_app *app);
+int dcb_setrewr(struct net_device *dev, struct dcb_app *app);
+int dcb_delrewr(struct net_device *dev, struct dcb_app *app);
+
 int dcb_setapp(struct net_device *, struct dcb_app *);
 u8 dcb_getapp(struct net_device *, struct dcb_app *);
 int dcb_ieee_setapp(struct net_device *, struct dcb_app *);
 int dcb_ieee_delapp(struct net_device *, struct dcb_app *);
 u8 dcb_ieee_getapp_mask(struct net_device *, struct dcb_app *);
+
+struct dcb_rewr_prio_pcp_map {
+	u16 map[IEEE_8021QAZ_MAX_TCS];
+};
+
+void dcb_getrewr_prio_pcp_mask_map(const struct net_device *dev,
+				   struct dcb_rewr_prio_pcp_map *p_map);
+
+struct dcb_ieee_app_prio_map {
+	u64 map[IEEE_8021QAZ_MAX_TCS];
+};
+void dcb_ieee_getapp_prio_dscp_mask_map(const struct net_device *dev,
+					struct dcb_ieee_app_prio_map *p_map);
+
+void dcb_getrewr_prio_dscp_mask_map(const struct net_device *dev,
+				    struct dcb_ieee_app_prio_map *p_map);
+
+struct dcb_ieee_app_dscp_map {
+	u8 map[64];
+};
+void dcb_ieee_getapp_dscp_prio_mask_map(const struct net_device *dev,
+					struct dcb_ieee_app_dscp_map *p_map);
+u8 dcb_ieee_getapp_default_prio_mask(const struct net_device *dev);
 
 int dcbnl_ieee_notify(struct net_device *dev, int event, int cmd,
 		      u32 seq, u32 pid);
@@ -101,6 +119,18 @@ struct dcbnl_rtnl_ops {
 	/* CEE peer */
 	int (*cee_peer_getpg) (struct net_device *, struct cee_pg *);
 	int (*cee_peer_getpfc) (struct net_device *, struct cee_pfc *);
+
+	/* buffer settings */
+	int (*dcbnl_getbuffer)(struct net_device *, struct dcbnl_buffer *);
+	int (*dcbnl_setbuffer)(struct net_device *, struct dcbnl_buffer *);
+
+	/* apptrust */
+	int (*dcbnl_setapptrust)(struct net_device *, u8 *, int);
+	int (*dcbnl_getapptrust)(struct net_device *, u8 *, int *);
+
+	/* rewrite */
+	int (*dcbnl_setrewr)(struct net_device *dev, struct dcb_app *app);
+	int (*dcbnl_delrewr)(struct net_device *dev, struct dcb_app *app);
 };
 
 #endif /* __NET_DCBNL_H__ */

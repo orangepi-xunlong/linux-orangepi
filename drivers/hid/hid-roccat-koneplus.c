@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Roccat Kone[+] driver for Linux
  *
@@ -5,10 +6,6 @@
  */
 
 /*
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the Free
- * Software Foundation; either version 2 of the License, or (at your option)
- * any later version.
  */
 
 /*
@@ -28,8 +25,6 @@
 #include "hid-roccat-koneplus.h"
 
 static uint profile_numbers[5] = {0, 1, 2, 3, 4};
-
-static struct class *koneplus_class;
 
 static void koneplus_profile_activated(struct koneplus_device *koneplus,
 		uint new_profile)
@@ -359,6 +354,11 @@ static const struct attribute_group *koneplus_groups[] = {
 	NULL,
 };
 
+static const struct class koneplus_class = {
+	.name = "koneplus",
+	.dev_groups = koneplus_groups,
+};
+
 static int koneplus_init_koneplus_device_struct(struct usb_device *usb_dev,
 		struct koneplus_device *koneplus)
 {
@@ -397,8 +397,8 @@ static int koneplus_init_specials(struct hid_device *hdev)
 			goto exit_free;
 		}
 
-		retval = roccat_connect(koneplus_class, hdev,
-				sizeof(struct koneplus_roccat_report));
+		retval = roccat_connect(&koneplus_class, hdev,
+					sizeof(struct koneplus_roccat_report));
 		if (retval < 0) {
 			hid_err(hdev, "couldn't init char dev\n");
 		} else {
@@ -433,6 +433,9 @@ static int koneplus_probe(struct hid_device *hdev,
 		const struct hid_device_id *id)
 {
 	int retval;
+
+	if (!hid_is_usb(hdev))
+		return -EINVAL;
 
 	retval = hid_parse(hdev);
 	if (retval) {
@@ -549,21 +552,20 @@ static int __init koneplus_init(void)
 	int retval;
 
 	/* class name has to be same as driver name */
-	koneplus_class = class_create(THIS_MODULE, "koneplus");
-	if (IS_ERR(koneplus_class))
-		return PTR_ERR(koneplus_class);
-	koneplus_class->dev_groups = koneplus_groups;
+	retval = class_register(&koneplus_class);
+	if (retval)
+		return retval;
 
 	retval = hid_register_driver(&koneplus_driver);
 	if (retval)
-		class_destroy(koneplus_class);
+		class_unregister(&koneplus_class);
 	return retval;
 }
 
 static void __exit koneplus_exit(void)
 {
 	hid_unregister_driver(&koneplus_driver);
-	class_destroy(koneplus_class);
+	class_unregister(&koneplus_class);
 }
 
 module_init(koneplus_init);

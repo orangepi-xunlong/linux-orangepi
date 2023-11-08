@@ -1,13 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * OMAP4+ Power Management Routines
  *
  * Copyright (C) 2010-2013 Texas Instruments, Inc.
  * Rajendra Nayak <rnayak@ti.com>
  * Santosh Shilimkar <santosh.shilimkar@ti.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/pm.h>
@@ -79,7 +76,7 @@ static int omap4_pm_suspend(void)
 	 * domain CSWR is not supported by hardware.
 	 * More details can be found in OMAP4430 TRM section 4.3.4.2.
 	 */
-	omap4_enter_lowpower(cpu_id, cpu_suspend_state);
+	omap4_enter_lowpower(cpu_id, cpu_suspend_state, false);
 
 	/* Restore next powerdomain state */
 	list_for_each_entry(pwrst, &pwrst_list, node) {
@@ -102,7 +99,7 @@ static int omap4_pm_suspend(void)
 		 * possible causes.
 		 * http://www.spinics.net/lists/arm-kernel/msg218641.html
 		 */
-		pr_warn("A possible cause could be an old bootloader - try u-boot >= v2012.07\n");
+		pr_debug("A possible cause could be an old bootloader - try u-boot >= v2012.07\n");
 	} else {
 		pr_info("Successfully put all powerdomains to target state\n");
 	}
@@ -130,6 +127,10 @@ static int __init pwrdms_setup(struct powerdomain *pwrdm, void *unused)
 			cpu_suspend_state = PWRDM_POWER_RET;
 		return 0;
 	}
+
+	if (!strncmp(pwrdm->name, "core", 4) ||
+	    !strncmp(pwrdm->name, "l4per", 5))
+		pwrdm_set_logic_retst(pwrdm, PWRDM_POWER_OFF);
 
 	pwrst = kmalloc(sizeof(struct power_state), GFP_ATOMIC);
 	if (!pwrst)
@@ -256,7 +257,7 @@ int __init omap4_pm_init(void)
 	 * http://www.spinics.net/lists/arm-kernel/msg218641.html
 	 */
 	if (cpu_is_omap44xx())
-		pr_warn("OMAP4 PM: u-boot >= v2012.07 is required for full PM support\n");
+		pr_debug("OMAP4 PM: u-boot >= v2012.07 is required for full PM support\n");
 
 	ret = pwrdm_for_each(pwrdms_setup, NULL);
 	if (ret) {
@@ -287,7 +288,7 @@ int __init omap4_pm_init(void)
 	/* Overwrite the default cpu_do_idle() */
 	arm_pm_idle = omap_default_idle;
 
-	if (cpu_is_omap44xx())
+	if (cpu_is_omap44xx() || soc_is_omap54xx())
 		omap4_idle_init();
 
 err2:

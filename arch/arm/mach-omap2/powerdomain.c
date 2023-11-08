@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * OMAP powerdomain control
  *
@@ -7,13 +8,10 @@
  * Written by Paul Walmsley
  * Added OMAP4 specific support by Abhijit Pagare <abhijitpagare@ti.com>
  * State counting code by Tero Kristo <tero.kristo@nokia.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 #undef DEBUG
 
+#include <linux/cpu_pm.h>
 #include <linux/kernel.h>
 #include <linux/types.h>
 #include <linux/list.h>
@@ -38,6 +36,9 @@
 #include "pm.h"
 
 #define PWRDM_TRACE_STATES_FLAG	(1<<31)
+
+static void pwrdms_save_context(void);
+static void pwrdms_restore_context(void);
 
 enum {
 	PWRDM_STATE_NOW = 0,
@@ -173,7 +174,7 @@ static int _pwrdm_state_switch(struct powerdomain *pwrdm, int flag)
 		break;
 	case PWRDM_STATE_PREV:
 		prev = pwrdm_read_prev_pwrst(pwrdm);
-		if (pwrdm->state != prev)
+		if (prev >= 0 && pwrdm->state != prev)
 			pwrdm->state_counter[prev]++;
 		if (prev == PWRDM_POWER_RET)
 			_update_logic_membank_counters(pwrdm);
@@ -186,9 +187,9 @@ static int _pwrdm_state_switch(struct powerdomain *pwrdm, int flag)
 			trace_state = (PWRDM_TRACE_STATES_FLAG |
 				       ((next & OMAP_POWERSTATE_MASK) << 8) |
 				       ((prev & OMAP_POWERSTATE_MASK) << 0));
-			trace_power_domain_target_rcuidle(pwrdm->name,
-							  trace_state,
-							  smp_processor_id());
+			trace_power_domain_target(pwrdm->name,
+						  trace_state,
+						  raw_smp_processor_id());
 		}
 		break;
 	default:
@@ -333,6 +334,22 @@ int pwrdm_register_pwrdms(struct powerdomain **ps)
 	return 0;
 }
 
+static int cpu_notifier(struct notifier_block *nb, unsigned long cmd, void *v)
+{
+	switch (cmd) {
+	case CPU_CLUSTER_PM_ENTER:
+		if (enable_off_mode)
+			pwrdms_save_context();
+		break;
+	case CPU_CLUSTER_PM_EXIT:
+		if (enable_off_mode)
+			pwrdms_restore_context();
+		break;
+	}
+
+	return NOTIFY_OK;
+}
+
 /**
  * pwrdm_complete_init - set up the powerdomain layer
  *
@@ -347,12 +364,19 @@ int pwrdm_register_pwrdms(struct powerdomain **ps)
 int pwrdm_complete_init(void)
 {
 	struct powerdomain *temp_p;
+	static struct notifier_block nb;
 
 	if (list_empty(&pwrdm_list))
 		return -EACCES;
 
 	list_for_each_entry(temp_p, &pwrdm_list, node)
 		pwrdm_set_next_pwrst(temp_p, PWRDM_POWER_ON);
+
+	/* Only AM43XX can lose pwrdm context during rtc-ddr suspend */
+	if (soc_is_am43xx()) {
+		nb.notifier_call = cpu_notifier;
+		cpu_pm_register_notifier(&nb);
+	}
 
 	return 0;
 }
@@ -517,8 +541,8 @@ int pwrdm_set_next_pwrst(struct powerdomain *pwrdm, u8 pwrst)
 
 	if (arch_pwrdm && arch_pwrdm->pwrdm_set_next_pwrst) {
 		/* Trace the pwrdm desired target state */
-		trace_power_domain_target_rcuidle(pwrdm->name, pwrst,
-						  smp_processor_id());
+		trace_power_domain_target(pwrdm->name, pwrst,
+					  raw_smp_processor_id());
 		/* Program the pwrdm desired target state */
 		ret = arch_pwrdm->pwrdm_set_next_pwrst(pwrdm, pwrst);
 	}
@@ -602,7 +626,7 @@ int pwrdm_read_prev_pwrst(struct powerdomain *pwrdm)
  * powerdomain @pwrdm will enter when the powerdomain enters retention.
  * This will be either RETENTION or OFF, if supported.  Returns
  * -EINVAL if the powerdomain pointer is null or the target power
- * state is not not supported, or returns 0 upon success.
+ * state is not supported, or returns 0 upon success.
  */
 int pwrdm_set_logic_retst(struct powerdomain *pwrdm, u8 pwrst)
 {
@@ -634,7 +658,7 @@ int pwrdm_set_logic_retst(struct powerdomain *pwrdm, u8 pwrst)
  * state.  @bank will be a number from 0 to 3, and represents different
  * types of memory, depending on the powerdomain.  Returns -EINVAL if
  * the powerdomain pointer is null or the target power state is not
- * not supported for this memory bank, -EEXIST if the target memory
+ * supported for this memory bank, -EEXIST if the target memory
  * bank does not exist or is not controllable, or returns 0 upon
  * success.
  */
@@ -672,7 +696,7 @@ int pwrdm_set_mem_onst(struct powerdomain *pwrdm, u8 bank, u8 pwrst)
  * different types of memory, depending on the powerdomain.  @pwrst
  * will be either RETENTION or OFF, if supported.  Returns -EINVAL if
  * the powerdomain pointer is null or the target power state is not
- * not supported for this memory bank, -EEXIST if the target memory
+ * supported for this memory bank, -EEXIST if the target memory
  * bank does not exist or is not controllable, or returns 0 upon
  * success.
  */
@@ -1125,77 +1149,37 @@ osps_out:
 }
 
 /**
- * pwrdm_get_context_loss_count - get powerdomain's context loss count
- * @pwrdm: struct powerdomain * to wait for
+ * pwrdm_save_context - save powerdomain registers
  *
- * Context loss count is the sum of powerdomain off-mode counter, the
- * logic off counter and the per-bank memory off counter.  Returns negative
- * (and WARNs) upon error, otherwise, returns the context loss count.
+ * Register state is going to be lost due to a suspend or hibernate
+ * event. Save the powerdomain registers.
  */
-int pwrdm_get_context_loss_count(struct powerdomain *pwrdm)
+static int pwrdm_save_context(struct powerdomain *pwrdm, void *unused)
 {
-	int i, count;
-
-	if (!pwrdm) {
-		WARN(1, "powerdomain: %s: pwrdm is null\n", __func__);
-		return -ENODEV;
-	}
-
-	count = pwrdm->state_counter[PWRDM_POWER_OFF];
-	count += pwrdm->ret_logic_off_counter;
-
-	for (i = 0; i < pwrdm->banks; i++)
-		count += pwrdm->ret_mem_off_counter[i];
-
-	/*
-	 * Context loss count has to be a non-negative value. Clear the sign
-	 * bit to get a value range from 0 to INT_MAX.
-	 */
-	count &= INT_MAX;
-
-	pr_debug("powerdomain: %s: context loss count = %d\n",
-		 pwrdm->name, count);
-
-	return count;
+	if (arch_pwrdm && arch_pwrdm->pwrdm_save_context)
+		arch_pwrdm->pwrdm_save_context(pwrdm);
+	return 0;
 }
 
 /**
- * pwrdm_can_ever_lose_context - can this powerdomain ever lose context?
- * @pwrdm: struct powerdomain *
+ * pwrdm_save_context - restore powerdomain registers
  *
- * Given a struct powerdomain * @pwrdm, returns 1 if the powerdomain
- * can lose either memory or logic context or if @pwrdm is invalid, or
- * returns 0 otherwise.  This function is not concerned with how the
- * powerdomain registers are programmed (i.e., to go off or not); it's
- * concerned with whether it's ever possible for this powerdomain to
- * go off while some other part of the chip is active.  This function
- * assumes that every powerdomain can go to either ON or INACTIVE.
+ * Restore powerdomain control registers after a suspend or resume
+ * event.
  */
-bool pwrdm_can_ever_lose_context(struct powerdomain *pwrdm)
+static int pwrdm_restore_context(struct powerdomain *pwrdm, void *unused)
 {
-	int i;
-
-	if (!pwrdm) {
-		pr_debug("powerdomain: %s: invalid powerdomain pointer\n",
-			 __func__);
-		return 1;
-	}
-
-	if (pwrdm->pwrsts & PWRSTS_OFF)
-		return 1;
-
-	if (pwrdm->pwrsts & PWRSTS_RET) {
-		if (pwrdm->pwrsts_logic_ret & PWRSTS_OFF)
-			return 1;
-
-		for (i = 0; i < pwrdm->banks; i++)
-			if (pwrdm->pwrsts_mem_ret[i] & PWRSTS_OFF)
-				return 1;
-	}
-
-	for (i = 0; i < pwrdm->banks; i++)
-		if (pwrdm->pwrsts_mem_on[i] & PWRSTS_OFF)
-			return 1;
-
+	if (arch_pwrdm && arch_pwrdm->pwrdm_restore_context)
+		arch_pwrdm->pwrdm_restore_context(pwrdm);
 	return 0;
+}
+
+static void pwrdms_save_context(void)
+{
+	pwrdm_for_each(pwrdm_save_context, NULL);
+}
+
+static void pwrdms_restore_context(void)
+{
+	pwrdm_for_each(pwrdm_restore_context, NULL);
 }

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note */
 /*
  * 25-Jul-1998 Major changes to allow for ip chain table
  *
@@ -242,7 +243,7 @@ struct ip6t_replace {
 	struct xt_counters __user *counters;
 
 	/* The entries (hang off end: not really an array). */
-	struct ip6t_entry entries[0];
+	struct ip6t_entry entries[];
 };
 
 /* The argument to IP6T_SO_GET_ENTRIES. */
@@ -254,14 +255,14 @@ struct ip6t_get_entries {
 	unsigned int size;
 
 	/* The entries. */
-	struct ip6t_entry entrytable[0];
+	struct ip6t_entry entrytable[];
 };
 
 /* Helper functions */
 static __inline__ struct xt_entry_target *
 ip6t_get_target(struct ip6t_entry *e)
 {
-	return (void *)e + e->target_offset;
+	return (struct xt_entry_target *)((char *)e + e->target_offset);
 }
 
 /*

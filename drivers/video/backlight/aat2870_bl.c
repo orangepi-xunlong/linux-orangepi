@@ -1,22 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * linux/drivers/video/backlight/aat2870_bl.c
  *
  * Copyright (c) 2011, NVIDIA Corporation.
  * Author: Jin Park <jinyoungp@nvidia.com>
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * version 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA
- * 02110-1301 USA
  */
 
 #include <linux/module.h>
@@ -72,7 +59,7 @@ static int aat2870_bl_update_status(struct backlight_device *bd)
 	struct aat2870_bl_driver_data *aat2870_bl = bl_get_data(bd);
 	struct aat2870_data *aat2870 =
 			dev_get_drvdata(aat2870_bl->pdev->dev.parent);
-	int brightness = bd->props.brightness;
+	int brightness = backlight_get_brightness(bd);
 	int ret;
 
 	if ((brightness < 0) || (bd->props.max_brightness < brightness)) {
@@ -82,11 +69,6 @@ static int aat2870_bl_update_status(struct backlight_device *bd)
 
 	dev_dbg(&bd->dev, "brightness=%d, power=%d, state=%d\n",
 		 bd->props.brightness, bd->props.power, bd->props.state);
-
-	if ((bd->props.power != FB_BLANK_UNBLANK) ||
-			(bd->props.state & BL_CORE_FBBLANK) ||
-			(bd->props.state & BL_CORE_SUSPENDED))
-		brightness = 0;
 
 	ret = aat2870->write(aat2870, AAT2870_BLM,
 			     (u8)aat2870_brightness(aat2870_bl, brightness));
@@ -196,7 +178,7 @@ out:
 	return ret;
 }
 
-static int aat2870_bl_remove(struct platform_device *pdev)
+static void aat2870_bl_remove(struct platform_device *pdev)
 {
 	struct aat2870_bl_driver_data *aat2870_bl = platform_get_drvdata(pdev);
 	struct backlight_device *bd = aat2870_bl->bd;
@@ -204,8 +186,6 @@ static int aat2870_bl_remove(struct platform_device *pdev)
 	bd->props.power = FB_BLANK_POWERDOWN;
 	bd->props.brightness = 0;
 	backlight_update_status(bd);
-
-	return 0;
 }
 
 static struct platform_driver aat2870_bl_driver = {
@@ -213,7 +193,7 @@ static struct platform_driver aat2870_bl_driver = {
 		.name	= "aat2870-backlight",
 	},
 	.probe		= aat2870_bl_probe,
-	.remove		= aat2870_bl_remove,
+	.remove_new	= aat2870_bl_remove,
 };
 
 static int __init aat2870_bl_init(void)

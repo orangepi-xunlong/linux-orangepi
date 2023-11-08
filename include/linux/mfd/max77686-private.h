@@ -1,22 +1,9 @@
+/* SPDX-License-Identifier: GPL-2.0+ */
 /*
  * max77686-private.h - Voltage regulator driver for the Maxim 77686/802
  *
  *  Copyright (C) 2012 Samsung Electrnoics
  *  Chiwoong Byun <woong.byun@samsung.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
 #ifndef __LINUX_MFD_MAX77686_PRIV_H
@@ -146,35 +133,35 @@ enum max77686_pmic_reg {
 	/* Reserved: 0x7A-0x7D */
 
 	MAX77686_REG_BBAT_CHG		= 0x7E,
-	MAX77686_REG_32KHZ			= 0x7F,
+	MAX77686_REG_32KHZ		= 0x7F,
 
 	MAX77686_REG_PMIC_END		= 0x80,
 };
 
 enum max77686_rtc_reg {
-	MAX77686_RTC_INT			= 0x00,
-	MAX77686_RTC_INTM			= 0x01,
+	MAX77686_RTC_INT		= 0x00,
+	MAX77686_RTC_INTM		= 0x01,
 	MAX77686_RTC_CONTROLM		= 0x02,
 	MAX77686_RTC_CONTROL		= 0x03,
 	MAX77686_RTC_UPDATE0		= 0x04,
 	/* Reserved: 0x5 */
 	MAX77686_WTSR_SMPL_CNTL		= 0x06,
-	MAX77686_RTC_SEC			= 0x07,
-	MAX77686_RTC_MIN			= 0x08,
-	MAX77686_RTC_HOUR			= 0x09,
+	MAX77686_RTC_SEC		= 0x07,
+	MAX77686_RTC_MIN		= 0x08,
+	MAX77686_RTC_HOUR		= 0x09,
 	MAX77686_RTC_WEEKDAY		= 0x0A,
-	MAX77686_RTC_MONTH			= 0x0B,
-	MAX77686_RTC_YEAR			= 0x0C,
-	MAX77686_RTC_DATE			= 0x0D,
-	MAX77686_ALARM1_SEC			= 0x0E,
-	MAX77686_ALARM1_MIN			= 0x0F,
+	MAX77686_RTC_MONTH		= 0x0B,
+	MAX77686_RTC_YEAR		= 0x0C,
+	MAX77686_RTC_MONTHDAY		= 0x0D,
+	MAX77686_ALARM1_SEC		= 0x0E,
+	MAX77686_ALARM1_MIN		= 0x0F,
 	MAX77686_ALARM1_HOUR		= 0x10,
 	MAX77686_ALARM1_WEEKDAY		= 0x11,
 	MAX77686_ALARM1_MONTH		= 0x12,
 	MAX77686_ALARM1_YEAR		= 0x13,
 	MAX77686_ALARM1_DATE		= 0x14,
-	MAX77686_ALARM2_SEC			= 0x15,
-	MAX77686_ALARM2_MIN			= 0x16,
+	MAX77686_ALARM2_SEC		= 0x15,
+	MAX77686_ALARM2_MIN		= 0x16,
 	MAX77686_ALARM2_HOUR		= 0x17,
 	MAX77686_ALARM2_WEEKDAY		= 0x18,
 	MAX77686_ALARM2_MONTH		= 0x19,
@@ -365,7 +352,7 @@ enum max77802_rtc_reg {
 	MAX77802_RTC_WEEKDAY		= 0xCA,
 	MAX77802_RTC_MONTH		= 0xCB,
 	MAX77802_RTC_YEAR		= 0xCC,
-	MAX77802_RTC_DATE		= 0xCD,
+	MAX77802_RTC_MONTHDAY		= 0xCD,
 	MAX77802_RTC_AE1		= 0xCE,
 	MAX77802_ALARM1_SEC		= 0xCF,
 	MAX77802_ALARM1_MIN		= 0xD0,
@@ -453,9 +440,5 @@ enum max77686_types {
 	TYPE_MAX77686,
 	TYPE_MAX77802,
 };
-
-extern int max77686_irq_init(struct max77686_dev *max77686);
-extern void max77686_irq_exit(struct max77686_dev *max77686);
-extern int max77686_irq_resume(struct max77686_dev *max77686);
 
 #endif /*  __LINUX_MFD_MAX77686_PRIV_H */

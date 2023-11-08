@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * arch/alpha/lib/ev67-strncat.S
  * 21264 version contributed by Rick Gorton <rick.gorton@api-networks.com>
@@ -20,7 +21,7 @@
  * Try not to change the actual algorithm if possible for consistency.
  */
 
-#include <asm/export.h>
+#include <linux/export.h>
 	.text
 
 	.align 4

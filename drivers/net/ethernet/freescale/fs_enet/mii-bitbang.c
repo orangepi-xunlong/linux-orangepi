@@ -29,8 +29,8 @@
 
 struct bb_info {
 	struct mdiobb_ctrl ctrl;
-	__be32 __iomem *dir;
-	__be32 __iomem *dat;
+	u32 __iomem *dir;
+	u32 __iomem *dat;
 	u32 mdio_msk;
 	u32 mdc_msk;
 };
@@ -100,7 +100,7 @@ static inline void mdc(struct mdiobb_ctrl *ctrl, int what)
 	in_be32(bitbang->dat);
 }
 
-static struct mdiobb_ops bb_ops = {
+static const struct mdiobb_ops bb_ops = {
 	.owner = THIS_MODULE,
 	.set_mdc = mdc,
 	.set_mdio_dir = mdio_dir,
@@ -192,7 +192,7 @@ out:
 	return ret;
 }
 
-static int fs_enet_mdio_remove(struct platform_device *ofdev)
+static void fs_enet_mdio_remove(struct platform_device *ofdev)
 {
 	struct mii_bus *bus = platform_get_drvdata(ofdev);
 	struct bb_info *bitbang = bus->priv;
@@ -201,8 +201,6 @@ static int fs_enet_mdio_remove(struct platform_device *ofdev)
 	free_mdio_bitbang(bus);
 	iounmap(bitbang->dir);
 	kfree(bitbang);
-
-	return 0;
 }
 
 static const struct of_device_id fs_enet_mdio_bb_match[] = {
@@ -219,7 +217,8 @@ static struct platform_driver fs_enet_bb_mdio_driver = {
 		.of_match_table = fs_enet_mdio_bb_match,
 	},
 	.probe = fs_enet_mdio_probe,
-	.remove = fs_enet_mdio_remove,
+	.remove_new = fs_enet_mdio_remove,
 };
 
 module_platform_driver(fs_enet_bb_mdio_driver);
+MODULE_LICENSE("GPL");

@@ -1,10 +1,7 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Copyright (c) 2014 Samsung Electronics Co., Ltd.
  * Author: Chanwoo Choi <cw00.choi@samsung.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #ifndef _DT_BINDINGS_CLOCK_EXYNOS5433_H
@@ -159,7 +156,7 @@
 #define CLK_ACLK_G2D_266		220
 #define CLK_ACLK_G2D_400		221
 #define CLK_ACLK_G3D_400		222
-#define CLK_ACLK_IMEM_SSX_266		223
+#define CLK_ACLK_IMEM_SSSX_266		223
 #define CLK_ACLK_BUS0_400		224
 #define CLK_ACLK_BUS1_400		225
 #define CLK_ACLK_IMEM_200		226
@@ -191,8 +188,6 @@
 #define CLK_SCLK_ISP_SPI0_CAM1		252
 #define CLK_SCLK_HDMI_SPDIF_DISP	253
 
-#define TOP_NR_CLK			254
-
 /* CMU_CPIF */
 #define CLK_FOUT_MPHY_PLL		1
 
@@ -202,8 +197,6 @@
 
 #define CLK_SCLK_MPHY_PLL		11
 #define CLK_SCLK_UFS_MPHY		11
-
-#define CPIF_NR_CLK			12
 
 /* CMU_MIF */
 #define CLK_FOUT_MEM0_PLL		1
@@ -399,8 +392,6 @@
 #define CLK_SCLK_BUS_PLL_APOLLO		199
 #define CLK_SCLK_BUS_PLL_ATLAS		200
 
-#define MIF_NR_CLK			201
-
 /* CMU_PERIC */
 #define CLK_PCLK_SPI2			1
 #define CLK_PCLK_SPI1			2
@@ -471,8 +462,6 @@
 #define CLK_DIV_SCLK_SCI		70
 #define CLK_DIV_SCLK_SC_IN		71
 
-#define PERIC_NR_CLK			72
-
 /* CMU_PERIS */
 #define CLK_PCLK_HPM_APBIF		1
 #define CLK_PCLK_TMU1_APBIF		2
@@ -515,8 +504,6 @@
 #define CLK_SCLK_CUSTOM_EFUSE		39
 #define CLK_SCLK_ANTIRBK_CNT		40
 #define CLK_SCLK_OTP_CON		41
-
-#define PERIS_NR_CLK			42
 
 /* CMU_FSYS */
 #define CLK_MOUT_ACLK_FSYS_200_USER	1
@@ -624,8 +611,6 @@
 #define CLK_SCLK_USBDRD30		114
 #define CLK_PCIE			115
 
-#define FSYS_NR_CLK			116
-
 /* CMU_G2D */
 #define CLK_MUX_ACLK_G2D_266_USER	1
 #define CLK_MUX_ACLK_G2D_400_USER	2
@@ -655,8 +640,6 @@
 #define CLK_PCLK_SYSREG_G2D		24
 #define CLK_PCLK_G2D			25
 #define CLK_PCLK_SMMU_G2D		26
-
-#define G2D_NR_CLK			27
 
 /* CMU_DISP */
 #define CLK_FOUT_DISP_PLL				1
@@ -774,8 +757,6 @@
 #define CLK_PHYCLK_MIPIDPHY0_BITCLKDIV8_PHY		114
 #define CLK_PHYCLK_MIPIDPHY0_RXCLKESC0_PHY		115
 
-#define DISP_NR_CLK					116
-
 /* CMU_AUD */
 #define CLK_MOUT_AUD_PLL_USER				1
 #define CLK_MOUT_SCLK_AUD_PCM				2
@@ -827,8 +808,6 @@
 #define CLK_SCLK_I2S_BCLK				46
 #define CLK_SCLK_AUD_I2S				47
 
-#define AUD_NR_CLK					48
-
 /* CMU_BUS{0|1|2} */
 #define CLK_DIV_PCLK_BUS_133				1
 
@@ -842,8 +821,6 @@
 #define CLK_MOUT_ACLK_BUS2_400_USER			8  /* Only CMU_BUS2 */
 #define CLK_ACLK_BUS2BEND_400				9  /* Only CMU_BUS2 */
 #define CLK_ACLK_BUS2RTND_400				10 /* Only CMU_BUS2 */
-
-#define BUSx_NR_CLK					11
 
 /* CMU_G3D */
 #define CLK_FOUT_G3D_PLL				1
@@ -867,8 +844,6 @@
 #define CLK_PCLK_PMU_G3D				17
 #define CLK_PCLK_SYSREG_G3D				18
 #define CLK_SCLK_HPM_G3D				19
-
-#define G3D_NR_CLK					20
 
 /* CMU_GSCL */
 #define CLK_MOUT_ACLK_GSCL_111_USER			1
@@ -900,8 +875,6 @@
 #define CLK_PCLK_SMMU_GSCL0				26
 #define CLK_PCLK_SMMU_GSCL1				27
 #define CLK_PCLK_SMMU_GSCL2				28
-
-#define GSCL_NR_CLK					29
 
 /* CMU_APOLLO */
 #define CLK_FOUT_APOLLO_PLL				1
@@ -937,8 +910,6 @@
 #define CLK_CNTCLK_APOLLO				28
 #define CLK_SCLK_HPM_APOLLO				29
 #define CLK_SCLK_APOLLO					30
-
-#define APOLLO_NR_CLK					31
 
 /* CMU_ATLAS */
 #define CLK_FOUT_ATLAS_PLL				1
@@ -984,8 +955,6 @@
 #define CLK_ATCLK					38
 #define CLK_SCLK_ATLAS					39
 
-#define ATLAS_NR_CLK					40
-
 /* CMU_MSCL */
 #define CLK_MOUT_SCLK_JPEG_USER				1
 #define CLK_MOUT_ACLK_MSCL_400_USER			2
@@ -1019,8 +988,6 @@
 #define CLK_PCLK_SMMU_JPEG				28
 #define CLK_SCLK_JPEG					29
 
-#define MSCL_NR_CLK					30
-
 /* CMU_MFC */
 #define CLK_MOUT_ACLK_MFC_400_USER			1
 
@@ -1043,8 +1010,6 @@
 #define CLK_PCLK_SMMU_MFC_1				17
 #define CLK_PCLK_SMMU_MFC_0				18
 
-#define MFC_NR_CLK					19
-
 /* CMU_HEVC */
 #define CLK_MOUT_ACLK_HEVC_400_USER			1
 
@@ -1066,8 +1031,6 @@
 #define CLK_PCLK_HEVC					16
 #define CLK_PCLK_SMMU_HEVC_1				17
 #define CLK_PCLK_SMMU_HEVC_0				18
-
-#define HEVC_NR_CLK					19
 
 /* CMU_ISP */
 #define CLK_MOUT_ACLK_ISP_DIS_400_USER			1
@@ -1149,8 +1112,6 @@
 #define CLK_SCLK_PIXELASYNCM_ISPD			75
 #define CLK_SCLK_PIXELASYNCS_ISPC			76
 #define CLK_SCLK_PIXELASYNCM_ISPC			77
-
-#define ISP_NR_CLK					78
 
 /* CMU_CAM0 */
 #define CLK_PHYCLK_RXBYTEECLKHS0_S4_PHY			1
@@ -1288,8 +1249,6 @@
 #define CLK_SCLK_PIXELASYNCM_LITE_C_INIT		132
 #define CLK_SCLK_PIXELASYNCS_LITE_C_INIT		133
 
-#define CAM0_NR_CLK					134
-
 /* CMU_CAM1 */
 #define CLK_PHYCLK_RXBYTEECLKHS0_S2B			1
 
@@ -1407,6 +1366,8 @@
 #define CLK_ATCLK_ISP					111
 #define CLK_SCLK_ISP_CA5				112
 
-#define CAM1_NR_CLK					113
+/* CMU_IMEM */
+#define CLK_ACLK_SLIMSSS		2
+#define CLK_PCLK_SLIMSSS		35
 
 #endif /* _DT_BINDINGS_CLOCK_EXYNOS5433_H */

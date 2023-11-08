@@ -7,43 +7,18 @@
  *   written by Ralf Baechle <ralf@linux-mips.org>
  */
 #include <linux/compiler.h>
+#include <linux/elf-randomize.h>
 #include <linux/errno.h>
 #include <linux/mm.h>
 #include <linux/mman.h>
 #include <linux/export.h>
 #include <linux/personality.h>
 #include <linux/random.h>
-#include <linux/sched.h>
+#include <linux/sched/signal.h>
+#include <linux/sched/mm.h>
 
 unsigned long shm_align_mask = PAGE_SIZE - 1;	/* Sane caches */
 EXPORT_SYMBOL(shm_align_mask);
-
-/* gap between mmap and stack */
-#define MIN_GAP (128*1024*1024UL)
-#define MAX_GAP ((TASK_SIZE)/6*5)
-
-static int mmap_is_legacy(void)
-{
-	if (current->personality & ADDR_COMPAT_LAYOUT)
-		return 1;
-
-	if (rlimit(RLIMIT_STACK) == RLIM_INFINITY)
-		return 1;
-
-	return sysctl_legacy_va_layout;
-}
-
-static unsigned long mmap_base(unsigned long rnd)
-{
-	unsigned long gap = rlimit(RLIMIT_STACK);
-
-	if (gap < MIN_GAP)
-		gap = MIN_GAP;
-	else if (gap > MAX_GAP)
-		gap = MAX_GAP;
-
-	return PAGE_ALIGN(TASK_SIZE - gap - rnd);
-}
 
 #define COLOUR_ALIGN(addr, pgoff)				\
 	((((addr) + shm_align_mask) & ~shm_align_mask) +	\
@@ -142,65 +117,13 @@ unsigned long arch_get_unmapped_area_topdown(struct file *filp,
 			addr0, len, pgoff, flags, DOWN);
 }
 
-unsigned long arch_mmap_rnd(void)
+bool __virt_addr_valid(const volatile void *kaddr)
 {
-	unsigned long rnd;
+	unsigned long vaddr = (unsigned long)kaddr;
 
-	rnd = get_random_long();
-	rnd <<= PAGE_SHIFT;
-	if (TASK_IS_32BIT_ADDR)
-		rnd &= 0xfffffful;
-	else
-		rnd &= 0xffffffful;
+	if ((vaddr < PAGE_OFFSET) || (vaddr >= MAP_BASE))
+		return false;
 
-	return rnd;
-}
-
-void arch_pick_mmap_layout(struct mm_struct *mm)
-{
-	unsigned long random_factor = 0UL;
-
-	if (current->flags & PF_RANDOMIZE)
-		random_factor = arch_mmap_rnd();
-
-	if (mmap_is_legacy()) {
-		mm->mmap_base = TASK_UNMAPPED_BASE + random_factor;
-		mm->get_unmapped_area = arch_get_unmapped_area;
-	} else {
-		mm->mmap_base = mmap_base(random_factor);
-		mm->get_unmapped_area = arch_get_unmapped_area_topdown;
-	}
-}
-
-static inline unsigned long brk_rnd(void)
-{
-	unsigned long rnd = get_random_long();
-
-	rnd = rnd << PAGE_SHIFT;
-	/* 8MB for 32bit, 256MB for 64bit */
-	if (TASK_IS_32BIT_ADDR)
-		rnd = rnd & 0x7ffffful;
-	else
-		rnd = rnd & 0xffffffful;
-
-	return rnd;
-}
-
-unsigned long arch_randomize_brk(struct mm_struct *mm)
-{
-	unsigned long base = mm->brk;
-	unsigned long ret;
-
-	ret = PAGE_ALIGN(base + brk_rnd());
-
-	if (ret < mm->brk)
-		return mm->brk;
-
-	return ret;
-}
-
-int __virt_addr_valid(const volatile void *kaddr)
-{
 	return pfn_valid(PFN_DOWN(virt_to_phys(kaddr)));
 }
 EXPORT_SYMBOL_GPL(__virt_addr_valid);

@@ -1,5 +1,6 @@
+/* SPDX-License-Identifier: (GPL-2.0 OR MPL-1.1) */
 /*
- * p80211types.h
+ *
  *
  * Macros, constants, types, and funcs for p80211 data types
  *
@@ -7,27 +8,6 @@
  * --------------------------------------------------------------------
  *
  * linux-wlan
- *
- *   The contents of this file are subject to the Mozilla Public
- *   License Version 1.1 (the "License"); you may not use this file
- *   except in compliance with the License. You may obtain a copy of
- *   the License at http://www.mozilla.org/MPL/
- *
- *   Software distributed under the License is distributed on an "AS
- *   IS" basis, WITHOUT WARRANTY OF ANY KIND, either express or
- *   implied. See the License for the specific language governing
- *   rights and limitations under the License.
- *
- *   Alternatively, the contents of this file may be used under the
- *   terms of the GNU Public License version 2 (the "GPL"), in which
- *   case the provisions of the GPL are applicable instead of the
- *   above.  If you wish to allow the use of your version of this file
- *   only under the terms of the GPL and not to allow others to use
- *   your version of this file under the MPL, indicate your decision
- *   by deleting the provisions above and replace them with the notice
- *   and other provisions required by the GPL.  If you do not delete
- *   the provisions above, a recipient may use your version of this
- *   file under either the MPL or the GPL.
  *
  * --------------------------------------------------------------------
  *
@@ -118,11 +98,6 @@
 					/* is a DID-LEN-DATA triple */
 					/* with a max size of 4+4+384 */
 
-/*----------------------------------------------------------------*/
-/* The following macro creates a name for an enum */
-
-#define MKENUMNAME(name) p80211enum_ ## name
-
 /*----------------------------------------------------------------
  * The following constants and macros are used to construct and
  * deconstruct the Data ID codes.  The coding is as follows:
@@ -198,20 +173,6 @@
 					P80211DID_LSB_ACCESS)
 
 /*----------------------------------------------------------------*/
-/* The following structure types are used for the representation */
-/*  of ENUMint type metadata. */
-
-struct p80211enumpair {
-	u32 val;
-	char *name;
-};
-
-struct p80211enum {
-	int nitems;
-	struct p80211enumpair *list;
-};
-
-/*----------------------------------------------------------------*/
 /* The following structure types are used to store data items in */
 /*  messages. */
 
@@ -222,7 +183,7 @@ struct p80211pstr {
 
 struct p80211pstrd {
 	u8 len;
-	u8 data[0];
+	u8 data[];
 } __packed;
 
 /* Maximum pascal string */
@@ -249,12 +210,6 @@ struct p80211pstr32 {
 	u8 data[MAXLEN_PSTR32];
 } __packed;
 
-/* MAC address array */
-struct p80211macarray {
-	u32 cnt;
-	u8 data[1][MAXLEN_PSTR6];
-} __packed;
-
 /* prototype template */
 struct p80211item {
 	u32 did;
@@ -267,7 +222,7 @@ struct p80211itemd {
 	u32 did;
 	u16 status;
 	u16 len;
-	u8 data[0];
+	u8 data[];
 } __packed;
 
 /* message data item for int, BOUNDEDINT, ENUMINT */
@@ -333,44 +288,5 @@ struct p80211item_unk4096 {
 	u16 len;
 	u8 data[4096];
 } __packed;
-
-struct catlistitem;
-
-/*----------------------------------------------------------------*/
-/* The following structure type is used to represent all of the */
-/*  metadata items.  Some components may choose to use more, */
-/*  less or different metadata items. */
-
-typedef void (*p80211_totext_t) (struct catlistitem *, u32 did, u8 *itembuf,
-				 char *textbuf);
-typedef void (*p80211_fromtext_t) (struct catlistitem *, u32 did, u8 *itembuf,
-				   char *textbuf);
-typedef u32(*p80211_valid_t) (struct catlistitem *, u32 did, u8 *itembuf);
-
-/*----------------------------------------------------------------*/
-/* Enumeration Lists */
-/*  The following are the external declarations */
-/*  for all enumerations  */
-
-extern struct p80211enum MKENUMNAME(truth);
-extern struct p80211enum MKENUMNAME(ifstate);
-extern struct p80211enum MKENUMNAME(powermgmt);
-extern struct p80211enum MKENUMNAME(bsstype);
-extern struct p80211enum MKENUMNAME(authalg);
-extern struct p80211enum MKENUMNAME(phytype);
-extern struct p80211enum MKENUMNAME(temptype);
-extern struct p80211enum MKENUMNAME(regdomain);
-extern struct p80211enum MKENUMNAME(ccamode);
-extern struct p80211enum MKENUMNAME(diversity);
-extern struct p80211enum MKENUMNAME(scantype);
-extern struct p80211enum MKENUMNAME(resultcode);
-extern struct p80211enum MKENUMNAME(reason);
-extern struct p80211enum MKENUMNAME(status);
-extern struct p80211enum MKENUMNAME(msgcode);
-extern struct p80211enum MKENUMNAME(msgitem_status);
-
-extern struct p80211enum MKENUMNAME(lnxroam_reason);
-
-extern struct p80211enum MKENUMNAME(p2preamble);
 
 #endif /* _P80211TYPES_H */

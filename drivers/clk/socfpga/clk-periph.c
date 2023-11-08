@@ -1,19 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  Copyright 2011-2012 Calxeda, Inc.
  *  Copyright (C) 2012-2013 Altera Corporation <www.altera.com>
  *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
  * Based from clk-highbank.c
- *
  */
 #include <linux/slab.h>
 #include <linux/clk-provider.h>
@@ -57,11 +47,11 @@ static const struct clk_ops periclk_ops = {
 	.get_parent = clk_periclk_get_parent,
 };
 
-static __init void __socfpga_periph_init(struct device_node *node,
-	const struct clk_ops *ops)
+static void __init __socfpga_periph_init(struct device_node *node,
+					 const struct clk_ops *ops)
 {
 	u32 reg;
-	struct clk *clk;
+	struct clk_hw *hw_clk;
 	struct socfpga_periph_clk *periph_clk;
 	const char *clk_name = node->name;
 	const char *parent_name[SOCFPGA_MAX_PARENTS];
@@ -104,13 +94,27 @@ static __init void __socfpga_periph_init(struct device_node *node,
 	init.parent_names = parent_name;
 
 	periph_clk->hw.hw.init = &init;
+	hw_clk = &periph_clk->hw.hw;
 
-	clk = clk_register(NULL, &periph_clk->hw.hw);
-	if (WARN_ON(IS_ERR(clk))) {
-		kfree(periph_clk);
-		return;
+	rc = clk_hw_register(NULL, hw_clk);
+	if (rc) {
+		pr_err("Could not register clock:%s\n", clk_name);
+		goto err_clk_hw_register;
 	}
-	rc = of_clk_add_provider(node, of_clk_src_simple_get, clk);
+
+	rc = of_clk_add_hw_provider(node, of_clk_hw_simple_get, hw_clk);
+	if (rc) {
+		pr_err("Could not register clock provider for node:%s\n",
+		       clk_name);
+		goto err_of_clk_add_hw_provider;
+	}
+
+	return;
+
+err_of_clk_add_hw_provider:
+	clk_hw_unregister(hw_clk);
+err_clk_hw_register:
+	kfree(periph_clk);
 }
 
 void __init socfpga_periph_init(struct device_node *node)

@@ -1,10 +1,7 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Copyright (c) 2014 Samsung Electronics Co., Ltd.
  * 	Author: Tomasz Figa <t.figa@samsung.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  *
  * Device Tree binding constants for Samsung Exynos3250 clock controllers.
  */
@@ -260,12 +257,6 @@
 #define CLK_SCLK_MMC2			249
 
 /*
- * Total number of clocks of main CMU.
- * NOTE: Must be equal to last clock ID increased by one.
- */
-#define CLK_NR_CLKS			250
-
-/*
  * CMU DMC
  */
 
@@ -285,12 +276,6 @@
 #define CLK_DIV_DMC_PRE			18
 #define CLK_DIV_DMCP			19
 #define CLK_DIV_DMCD			20
-
-/*
- * Total number of clocks of main CMU.
- * NOTE: Must be equal to last clock ID increased by one.
- */
-#define NR_CLKS_DMC			21
 
 /*
  * CMU ISP
@@ -346,11 +331,5 @@
 #define CLK_SMMU_ISPCX			45
 #define CLK_ASYNCAXIM			46
 #define CLK_SCLK_MPWM_ISP		47
-
-/*
- * Total number of clocks of CMU_ISP.
- * NOTE: Must be equal to last clock ID increased by one.
- */
-#define NR_CLKS_ISP			48
 
 #endif /* _DT_BINDINGS_CLOCK_SAMSUNG_EXYNOS3250_CLOCK_H */

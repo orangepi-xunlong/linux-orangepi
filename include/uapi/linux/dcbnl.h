@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note */
 /*
  * Copyright (c) 2008-2011, Intel Corporation.
  *
@@ -162,6 +163,16 @@ struct ieee_pfc {
 	__u64	indications[IEEE_8021QAZ_MAX_TCS];
 };
 
+#define IEEE_8021Q_MAX_PRIORITIES 8
+#define DCBX_MAX_BUFFERS  8
+struct dcbnl_buffer {
+	/* priority to buffer mapping */
+	__u8    prio2buffer[IEEE_8021Q_MAX_PRIORITIES];
+	/* buffer size in Bytes */
+	__u32   buffer_size[DCBX_MAX_BUFFERS];
+	__u32   total_size;
+};
+
 /* CEE DCBX std supported values */
 #define CEE_DCBX_MAX_PGS	8
 #define CEE_DCBX_MAX_PRIO	8
@@ -205,6 +216,10 @@ struct cee_pfc {
 #define IEEE_8021QAZ_APP_SEL_STREAM	2
 #define IEEE_8021QAZ_APP_SEL_DGRAM	3
 #define IEEE_8021QAZ_APP_SEL_ANY	4
+#define IEEE_8021QAZ_APP_SEL_DSCP       5
+
+/* Non-std selector values */
+#define DCB_APP_SEL_PCP 255
 
 /* This structure contains the IEEE 802.1Qaz APP managed object. This
  * object is also used for the CEE std as well.
@@ -221,7 +236,8 @@ struct cee_pfc {
  *	2	Well known port number over TCP or SCTP
  *	3	Well known port number over UDP or DCCP
  *	4	Well known port number over TCP, SCTP, UDP, or DCCP
- *	5-7	Reserved
+ *	5	Differentiated Services Code Point (DSCP) value
+ *	6-7	Reserved
  *
  *  Selector field values for CEE
  *	0	Ethertype
@@ -233,6 +249,8 @@ struct dcb_app {
 	__u8	priority;
 	__u16	protocol;
 };
+
+#define IEEE_8021QAZ_APP_SEL_MAX 255
 
 /**
  * struct dcb_peer_app_info - APP feature information sent by the peer
@@ -273,7 +291,7 @@ struct dcbmsg {
  * @DCB_CMD_GNUMTCS: get the number of traffic classes currently supported
  * @DCB_CMD_SNUMTCS: set the number of traffic classes
  * @DCB_CMD_GBCN: set backward congestion notification configuration
- * @DCB_CMD_SBCN: get backward congestion notification configration.
+ * @DCB_CMD_SBCN: get backward congestion notification configuration.
  * @DCB_CMD_GAPP: get application protocol configuration
  * @DCB_CMD_SAPP: set application protocol configuration
  * @DCB_CMD_IEEE_SET: set IEEE 802.1Qaz configuration
@@ -392,6 +410,8 @@ enum dcbnl_attrs {
  * @DCB_ATTR_IEEE_PEER_ETS: peer ETS configuration - get only
  * @DCB_ATTR_IEEE_PEER_PFC: peer PFC configuration - get only
  * @DCB_ATTR_IEEE_PEER_APP: peer APP tlv - get only
+ * @DCB_ATTR_DCB_APP_TRUST_TABLE: selector trust table
+ * @DCB_ATTR_DCB_REWR_TABLE: rewrite configuration
  */
 enum ieee_attrs {
 	DCB_ATTR_IEEE_UNSPEC,
@@ -404,6 +424,9 @@ enum ieee_attrs {
 	DCB_ATTR_IEEE_MAXRATE,
 	DCB_ATTR_IEEE_QCN,
 	DCB_ATTR_IEEE_QCN_STATS,
+	DCB_ATTR_DCB_BUFFER,
+	DCB_ATTR_DCB_APP_TRUST_TABLE,
+	DCB_ATTR_DCB_REWR_TABLE,
 	__DCB_ATTR_IEEE_MAX
 };
 #define DCB_ATTR_IEEE_MAX (__DCB_ATTR_IEEE_MAX - 1)
@@ -411,6 +434,7 @@ enum ieee_attrs {
 enum ieee_attrs_app {
 	DCB_ATTR_IEEE_APP_UNSPEC,
 	DCB_ATTR_IEEE_APP,
+	DCB_ATTR_DCB_APP,
 	__DCB_ATTR_IEEE_APP_MAX
 };
 #define DCB_ATTR_IEEE_APP_MAX (__DCB_ATTR_IEEE_APP_MAX - 1)

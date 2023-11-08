@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _ASMARM_TRAP_H
 #define _ASMARM_TRAP_H
 
@@ -27,22 +28,20 @@ static inline int __in_irqentry_text(unsigned long ptr)
 	       ptr < (unsigned long)&__irqentry_text_end;
 }
 
-static inline int in_exception_text(unsigned long ptr)
-{
-	extern char __exception_text_start[];
-	extern char __exception_text_end[];
-	int in;
-
-	in = ptr >= (unsigned long)&__exception_text_start &&
-	     ptr < (unsigned long)&__exception_text_end;
-
-	return in ? : __in_irqentry_text(ptr);
-}
-
 extern void __init early_trap_init(void *);
-extern void dump_backtrace_entry(unsigned long where, unsigned long from, unsigned long frame);
-extern void ptrace_break(struct task_struct *tsk, struct pt_regs *regs);
+extern void dump_backtrace_entry(unsigned long where, unsigned long from,
+				 unsigned long frame, const char *loglvl);
+extern void ptrace_break(struct pt_regs *regs);
 
 extern void *vectors_page;
+
+asmlinkage void dump_backtrace_stm(u32 *stack, u32 instruction, const char *loglvl);
+asmlinkage void do_undefinstr(struct pt_regs *regs);
+asmlinkage void handle_fiq_as_nmi(struct pt_regs *regs);
+asmlinkage void bad_mode(struct pt_regs *regs, int reason);
+asmlinkage int arm_syscall(int no, struct pt_regs *regs);
+asmlinkage void baddataabort(int code, unsigned long instr, struct pt_regs *regs);
+asmlinkage void __div0(void);
+asmlinkage void handle_bad_stack(struct pt_regs *regs);
 
 #endif

@@ -4,17 +4,19 @@ Driver Basics
 Driver Entry and Exit points
 ----------------------------
 
-.. kernel-doc:: include/linux/init.h
+.. kernel-doc:: include/linux/module.h
    :internal:
 
-Atomic and pointer manipulation
--------------------------------
+Driver device table
+-------------------
 
-.. kernel-doc:: arch/x86/include/asm/atomic.h
+.. kernel-doc:: include/linux/mod_devicetable.h
    :internal:
+   :no-identifiers: pci_device_id
 
-Delaying, scheduling, and timer routines
-----------------------------------------
+
+Delaying and scheduling routines
+--------------------------------
 
 .. kernel-doc:: include/linux/sched.h
    :internal:
@@ -31,16 +33,16 @@ Delaying, scheduling, and timer routines
 .. kernel-doc:: include/linux/completion.h
    :internal:
 
-.. kernel-doc:: kernel/time/timer.c
-   :export:
+Time and timer routines
+-----------------------
 
-Wait queues and Wake events
----------------------------
-
-.. kernel-doc:: include/linux/wait.h
+.. kernel-doc:: include/linux/jiffies.h
    :internal:
 
-.. kernel-doc:: kernel/sched/wait.c
+.. kernel-doc:: kernel/time/time.c
+   :export:
+
+.. kernel-doc:: kernel/time/timer.c
    :export:
 
 High-resolution timers
@@ -55,13 +57,13 @@ High-resolution timers
 .. kernel-doc:: kernel/time/hrtimer.c
    :export:
 
-Workqueues and Kevents
-----------------------
+Wait queues and Wake events
+---------------------------
 
-.. kernel-doc:: include/linux/workqueue.h
+.. kernel-doc:: include/linux/wait.h
    :internal:
 
-.. kernel-doc:: kernel/workqueue.c
+.. kernel-doc:: kernel/sched/wait.c
    :export:
 
 Internal Functions
@@ -79,6 +81,27 @@ Internal Functions
 .. kernel-doc:: kernel/kthread.c
    :export:
 
+Reference counting
+------------------
+
+.. kernel-doc:: include/linux/refcount.h
+   :internal:
+
+.. kernel-doc:: lib/refcount.c
+   :export:
+
+Atomics
+-------
+
+.. kernel-doc:: include/linux/atomic/atomic-instrumented.h
+   :internal:
+
+.. kernel-doc:: include/linux/atomic/atomic-arch-fallback.h
+   :internal:
+
+.. kernel-doc:: include/linux/atomic/atomic-long.h
+   :internal:
+
 Kernel objects manipulation
 ---------------------------
 
@@ -90,26 +113,13 @@ Kernel utility functions
 
 .. kernel-doc:: include/linux/kernel.h
    :internal:
+   :no-identifiers: kstrtol kstrtoul
 
 .. kernel-doc:: kernel/printk/printk.c
    :export:
+   :no-identifiers: printk
 
 .. kernel-doc:: kernel/panic.c
-   :export:
-
-.. kernel-doc:: kernel/sys.c
-   :export:
-
-.. kernel-doc:: kernel/rcu/srcu.c
-   :export:
-
-.. kernel-doc:: kernel/rcu/tree.c
-   :export:
-
-.. kernel-doc:: kernel/rcu/tree_plugin.h
-   :export:
-
-.. kernel-doc:: kernel/rcu/update.c
    :export:
 
 Device Resource Management

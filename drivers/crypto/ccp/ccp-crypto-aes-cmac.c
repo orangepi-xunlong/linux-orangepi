@@ -1,13 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * AMD Cryptographic Coprocessor (CCP) AES CMAC crypto API support
  *
- * Copyright (C) 2013 Advanced Micro Devices, Inc.
+ * Copyright (C) 2013,2018 Advanced Micro Devices, Inc.
  *
  * Author: Tom Lendacky <thomas.lendacky@amd.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/module.h>
@@ -28,7 +25,7 @@ static int ccp_aes_cmac_complete(struct crypto_async_request *async_req,
 {
 	struct ahash_request *req = ahash_request_cast(async_req);
 	struct crypto_ahash *tfm = crypto_ahash_reqtfm(req);
-	struct ccp_aes_cmac_req_ctx *rctx = ahash_request_ctx(req);
+	struct ccp_aes_cmac_req_ctx *rctx = ahash_request_ctx_dma(req);
 	unsigned int digest_size = crypto_ahash_digestsize(tfm);
 
 	if (ret)
@@ -46,7 +43,7 @@ static int ccp_aes_cmac_complete(struct crypto_async_request *async_req,
 	}
 
 	/* Update result area if supplied */
-	if (req->result)
+	if (req->result && rctx->final)
 		memcpy(req->result, rctx->iv, digest_size);
 
 e_free:
@@ -59,8 +56,8 @@ static int ccp_do_cmac_update(struct ahash_request *req, unsigned int nbytes,
 			      unsigned int final)
 {
 	struct crypto_ahash *tfm = crypto_ahash_reqtfm(req);
-	struct ccp_ctx *ctx = crypto_ahash_ctx(tfm);
-	struct ccp_aes_cmac_req_ctx *rctx = ahash_request_ctx(req);
+	struct ccp_ctx *ctx = crypto_ahash_ctx_dma(tfm);
+	struct ccp_aes_cmac_req_ctx *rctx = ahash_request_ctx_dma(req);
 	struct scatterlist *sg, *cmac_key_sg = NULL;
 	unsigned int block_size =
 		crypto_tfm_alg_blocksize(crypto_ahash_tfm(tfm));
@@ -185,7 +182,7 @@ e_free:
 
 static int ccp_aes_cmac_init(struct ahash_request *req)
 {
-	struct ccp_aes_cmac_req_ctx *rctx = ahash_request_ctx(req);
+	struct ccp_aes_cmac_req_ctx *rctx = ahash_request_ctx_dma(req);
 
 	memset(rctx, 0, sizeof(*rctx));
 
@@ -222,7 +219,7 @@ static int ccp_aes_cmac_digest(struct ahash_request *req)
 
 static int ccp_aes_cmac_export(struct ahash_request *req, void *out)
 {
-	struct ccp_aes_cmac_req_ctx *rctx = ahash_request_ctx(req);
+	struct ccp_aes_cmac_req_ctx *rctx = ahash_request_ctx_dma(req);
 	struct ccp_aes_cmac_exp_ctx state;
 
 	/* Don't let anything leak to 'out' */
@@ -241,7 +238,7 @@ static int ccp_aes_cmac_export(struct ahash_request *req, void *out)
 
 static int ccp_aes_cmac_import(struct ahash_request *req, const void *in)
 {
-	struct ccp_aes_cmac_req_ctx *rctx = ahash_request_ctx(req);
+	struct ccp_aes_cmac_req_ctx *rctx = ahash_request_ctx_dma(req);
 	struct ccp_aes_cmac_exp_ctx state;
 
 	/* 'in' may not be aligned so memcpy to local variable */
@@ -259,11 +256,12 @@ static int ccp_aes_cmac_import(struct ahash_request *req, const void *in)
 static int ccp_aes_cmac_setkey(struct crypto_ahash *tfm, const u8 *key,
 			       unsigned int key_len)
 {
-	struct ccp_ctx *ctx = crypto_tfm_ctx(crypto_ahash_tfm(tfm));
+	struct ccp_ctx *ctx = crypto_ahash_ctx_dma(tfm);
 	struct ccp_crypto_ahash_alg *alg =
 		ccp_crypto_ahash_alg(crypto_ahash_tfm(tfm));
 	u64 k0_hi, k0_lo, k1_hi, k1_lo, k2_hi, k2_lo;
 	u64 rb_hi = 0x00, rb_lo = 0x87;
+	struct crypto_aes_ctx aes;
 	__be64 *gk;
 	int ret;
 
@@ -278,7 +276,6 @@ static int ccp_aes_cmac_setkey(struct crypto_ahash *tfm, const u8 *key,
 		ctx->u.aes.type = CCP_AES_TYPE_256;
 		break;
 	default:
-		crypto_ahash_set_flags(tfm, CRYPTO_TFM_RES_BAD_KEY_LEN);
 		return -EINVAL;
 	}
 	ctx->u.aes.mode = alg->mode;
@@ -287,14 +284,14 @@ static int ccp_aes_cmac_setkey(struct crypto_ahash *tfm, const u8 *key,
 	ctx->u.aes.key_len = 0;
 
 	/* Set the key for the AES cipher used to generate the keys */
-	ret = crypto_cipher_setkey(ctx->u.aes.tfm_cipher, key, key_len);
+	ret = aes_expandkey(&aes, key, key_len);
 	if (ret)
 		return ret;
 
 	/* Encrypt a block of zeroes - use key area in context */
 	memset(ctx->u.aes.key, 0, sizeof(ctx->u.aes.key));
-	crypto_cipher_encrypt_one(ctx->u.aes.tfm_cipher, ctx->u.aes.key,
-				  ctx->u.aes.key);
+	aes_encrypt(&aes, ctx->u.aes.key, ctx->u.aes.key);
+	memzero_explicit(&aes, sizeof(aes));
 
 	/* Generate K1 and K2 */
 	k0_hi = be64_to_cpu(*((__be64 *)ctx->u.aes.key));
@@ -337,34 +334,16 @@ static int ccp_aes_cmac_setkey(struct crypto_ahash *tfm, const u8 *key,
 
 static int ccp_aes_cmac_cra_init(struct crypto_tfm *tfm)
 {
-	struct ccp_ctx *ctx = crypto_tfm_ctx(tfm);
+	struct ccp_ctx *ctx = crypto_tfm_ctx_dma(tfm);
 	struct crypto_ahash *ahash = __crypto_ahash_cast(tfm);
-	struct crypto_cipher *cipher_tfm;
 
 	ctx->complete = ccp_aes_cmac_complete;
 	ctx->u.aes.key_len = 0;
 
-	crypto_ahash_set_reqsize(ahash, sizeof(struct ccp_aes_cmac_req_ctx));
-
-	cipher_tfm = crypto_alloc_cipher("aes", 0,
-					 CRYPTO_ALG_ASYNC |
-					 CRYPTO_ALG_NEED_FALLBACK);
-	if (IS_ERR(cipher_tfm)) {
-		pr_warn("could not load aes cipher driver\n");
-		return PTR_ERR(cipher_tfm);
-	}
-	ctx->u.aes.tfm_cipher = cipher_tfm;
+	crypto_ahash_set_reqsize_dma(ahash,
+				     sizeof(struct ccp_aes_cmac_req_ctx));
 
 	return 0;
-}
-
-static void ccp_aes_cmac_cra_exit(struct crypto_tfm *tfm)
-{
-	struct ccp_ctx *ctx = crypto_tfm_ctx(tfm);
-
-	if (ctx->u.aes.tfm_cipher)
-		crypto_free_cipher(ctx->u.aes.tfm_cipher);
-	ctx->u.aes.tfm_cipher = NULL;
 }
 
 int ccp_register_aes_cmac_algs(struct list_head *head)
@@ -399,15 +378,14 @@ int ccp_register_aes_cmac_algs(struct list_head *head)
 	base = &halg->base;
 	snprintf(base->cra_name, CRYPTO_MAX_ALG_NAME, "cmac(aes)");
 	snprintf(base->cra_driver_name, CRYPTO_MAX_ALG_NAME, "cmac-aes-ccp");
-	base->cra_flags = CRYPTO_ALG_TYPE_AHASH | CRYPTO_ALG_ASYNC |
+	base->cra_flags = CRYPTO_ALG_ASYNC |
+			  CRYPTO_ALG_ALLOCATES_MEMORY |
 			  CRYPTO_ALG_KERN_DRIVER_ONLY |
 			  CRYPTO_ALG_NEED_FALLBACK;
 	base->cra_blocksize = AES_BLOCK_SIZE;
-	base->cra_ctxsize = sizeof(struct ccp_ctx);
+	base->cra_ctxsize = sizeof(struct ccp_ctx) + crypto_dma_padding();
 	base->cra_priority = CCP_CRA_PRIORITY;
-	base->cra_type = &crypto_ahash_type;
 	base->cra_init = ccp_aes_cmac_cra_init;
-	base->cra_exit = ccp_aes_cmac_cra_exit;
 	base->cra_module = THIS_MODULE;
 
 	ret = crypto_register_ahash(alg);

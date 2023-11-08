@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Glue code for the SHA1 Secure Hash Algorithm assembler implementation using
  * ARM NEON instructions.
@@ -10,42 +11,35 @@
  *  Copyright (c) Jean-Francois Dive <jef@linuxbe.org>
  *  Copyright (c) Mathias Krause <minipli@googlemail.com>
  *  Copyright (c) Chandramouli Narayanan <mouli@linux.intel.com>
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the Free
- * Software Foundation; either version 2 of the License, or (at your option)
- * any later version.
- *
  */
 
 #include <crypto/internal/hash.h>
+#include <crypto/internal/simd.h>
 #include <linux/init.h>
 #include <linux/module.h>
 #include <linux/mm.h>
-#include <linux/cryptohash.h>
 #include <linux/types.h>
-#include <crypto/sha.h>
+#include <crypto/sha1.h>
 #include <crypto/sha1_base.h>
 #include <asm/neon.h>
 #include <asm/simd.h>
 
 #include "sha1.h"
 
-asmlinkage void sha1_transform_neon(void *state_h, const char *data,
-				    unsigned int rounds);
+asmlinkage void sha1_transform_neon(struct sha1_state *state_h,
+				    const u8 *data, int rounds);
 
 static int sha1_neon_update(struct shash_desc *desc, const u8 *data,
 			  unsigned int len)
 {
 	struct sha1_state *sctx = shash_desc_ctx(desc);
 
-	if (!may_use_simd() ||
+	if (!crypto_simd_usable() ||
 	    (sctx->count % SHA1_BLOCK_SIZE) + len < SHA1_BLOCK_SIZE)
 		return sha1_update_arm(desc, data, len);
 
 	kernel_neon_begin();
-	sha1_base_do_update(desc, data, len,
-			    (sha1_block_fn *)sha1_transform_neon);
+	sha1_base_do_update(desc, data, len, sha1_transform_neon);
 	kernel_neon_end();
 
 	return 0;
@@ -54,14 +48,13 @@ static int sha1_neon_update(struct shash_desc *desc, const u8 *data,
 static int sha1_neon_finup(struct shash_desc *desc, const u8 *data,
 			   unsigned int len, u8 *out)
 {
-	if (!may_use_simd())
+	if (!crypto_simd_usable())
 		return sha1_finup_arm(desc, data, len, out);
 
 	kernel_neon_begin();
 	if (len)
-		sha1_base_do_update(desc, data, len,
-				    (sha1_block_fn *)sha1_transform_neon);
-	sha1_base_do_finalize(desc, (sha1_block_fn *)sha1_transform_neon);
+		sha1_base_do_update(desc, data, len, sha1_transform_neon);
+	sha1_base_do_finalize(desc, sha1_transform_neon);
 	kernel_neon_end();
 
 	return sha1_base_finish(desc, out);
@@ -83,7 +76,6 @@ static struct shash_alg alg = {
 		.cra_name		= "sha1",
 		.cra_driver_name	= "sha1-neon",
 		.cra_priority		= 250,
-		.cra_flags		= CRYPTO_ALG_TYPE_SHASH,
 		.cra_blocksize		= SHA1_BLOCK_SIZE,
 		.cra_module		= THIS_MODULE,
 	}

@@ -1,11 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * linux/arch/arm/common/locomo.c
  *
  * Sharp LoCoMo support
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  *
  * This file contains all generic LoCoMo support.
  *
@@ -26,7 +23,6 @@
 #include <linux/spinlock.h>
 #include <linux/io.h>
 
-#include <mach/hardware.h>
 #include <asm/irq.h>
 #include <asm/mach/irq.h>
 
@@ -354,19 +350,6 @@ static int locomo_resume(struct platform_device *dev)
 }
 #endif
 
-
-/**
- *	locomo_probe - probe for a single LoCoMo chip.
- *	@phys_addr: physical address of device.
- *
- *	Probe for a LoCoMo chip.  This must be called
- *	before any other locomo-specific code.
- *
- *	Returns:
- *	%-ENODEV	device not found.
- *	%-EBUSY		physical address already marked in-use.
- *	%0		successful.
- */
 static int
 __locomo_probe(struct device *me, struct resource *mem, int irq)
 {
@@ -483,6 +466,21 @@ static void __locomo_remove(struct locomo *lchip)
 	kfree(lchip);
 }
 
+/**
+ *	locomo_probe - probe for a single LoCoMo chip.
+ *	@dev: platform device
+ *
+ *	Probe for a LoCoMo chip.  This must be called
+ *	before any other locomo-specific code.
+ *
+ *	Returns:
+ *	* %-EINVAL	- device's IORESOURCE_MEM not found
+ *	* %-ENXIO	- could not allocate an IRQ for the device
+ *	* %-ENODEV	- device not found.
+ *	* %-EBUSY	- physical address already marked in-use.
+ *	* %-ENOMEM	- could not allocate or iomap memory.
+ *	* %0		- successful.
+ */
 static int locomo_probe(struct platform_device *dev)
 {
 	struct resource *mem;
@@ -498,7 +496,7 @@ static int locomo_probe(struct platform_device *dev)
 	return __locomo_probe(&dev->dev, mem, irq);
 }
 
-static int locomo_remove(struct platform_device *dev)
+static void locomo_remove(struct platform_device *dev)
 {
 	struct locomo *lchip = platform_get_drvdata(dev);
 
@@ -506,8 +504,6 @@ static int locomo_remove(struct platform_device *dev)
 		__locomo_remove(lchip);
 		platform_set_drvdata(dev, NULL);
 	}
-
-	return 0;
 }
 
 /*
@@ -518,7 +514,7 @@ static int locomo_remove(struct platform_device *dev)
  */
 static struct platform_driver locomo_device_driver = {
 	.probe		= locomo_probe,
-	.remove		= locomo_remove,
+	.remove_new	= locomo_remove,
 #ifdef CONFIG_PM
 	.suspend	= locomo_suspend,
 	.resume		= locomo_resume,
@@ -826,28 +822,6 @@ static int locomo_match(struct device *_dev, struct device_driver *_drv)
 	return dev->devid == drv->devid;
 }
 
-static int locomo_bus_suspend(struct device *dev, pm_message_t state)
-{
-	struct locomo_dev *ldev = LOCOMO_DEV(dev);
-	struct locomo_driver *drv = LOCOMO_DRV(dev->driver);
-	int ret = 0;
-
-	if (drv && drv->suspend)
-		ret = drv->suspend(ldev, state);
-	return ret;
-}
-
-static int locomo_bus_resume(struct device *dev)
-{
-	struct locomo_dev *ldev = LOCOMO_DEV(dev);
-	struct locomo_driver *drv = LOCOMO_DRV(dev->driver);
-	int ret = 0;
-
-	if (drv && drv->resume)
-		ret = drv->resume(ldev);
-	return ret;
-}
-
 static int locomo_bus_probe(struct device *dev)
 {
 	struct locomo_dev *ldev = LOCOMO_DEV(dev);
@@ -859,15 +833,13 @@ static int locomo_bus_probe(struct device *dev)
 	return ret;
 }
 
-static int locomo_bus_remove(struct device *dev)
+static void locomo_bus_remove(struct device *dev)
 {
 	struct locomo_dev *ldev = LOCOMO_DEV(dev);
 	struct locomo_driver *drv = LOCOMO_DRV(dev->driver);
-	int ret = 0;
 
 	if (drv->remove)
-		ret = drv->remove(ldev);
-	return ret;
+		drv->remove(ldev);
 }
 
 struct bus_type locomo_bus_type = {
@@ -875,8 +847,6 @@ struct bus_type locomo_bus_type = {
 	.match		= locomo_match,
 	.probe		= locomo_bus_probe,
 	.remove		= locomo_bus_remove,
-	.suspend	= locomo_bus_suspend,
-	.resume		= locomo_bus_resume,
 };
 
 int locomo_driver_register(struct locomo_driver *driver)

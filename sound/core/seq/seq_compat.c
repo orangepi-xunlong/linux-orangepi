@@ -1,21 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *   32bit -> 64bit ioctl wrapper for sequencer API
  *   Copyright (c) by Takashi Iwai <tiwai@suse.de>
- *
- *   This program is free software; you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation; either version 2 of the License, or
- *   (at your option) any later version.
- *
- *   This program is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with this program; if not, write to the Free Software
- *   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
- *
  */
 
 /* This file included from seq.c */
@@ -95,10 +81,13 @@ static long snd_seq_ioctl_compat(struct file *file, unsigned int cmd, unsigned l
 
 	switch (cmd) {
 	case SNDRV_SEQ_IOCTL_PVERSION:
+	case SNDRV_SEQ_IOCTL_USER_PVERSION:
 	case SNDRV_SEQ_IOCTL_CLIENT_ID:
 	case SNDRV_SEQ_IOCTL_SYSTEM_INFO:
 	case SNDRV_SEQ_IOCTL_GET_CLIENT_INFO:
 	case SNDRV_SEQ_IOCTL_SET_CLIENT_INFO:
+	case SNDRV_SEQ_IOCTL_GET_CLIENT_UMP_INFO:
+	case SNDRV_SEQ_IOCTL_SET_CLIENT_UMP_INFO:
 	case SNDRV_SEQ_IOCTL_SUBSCRIBE_PORT:
 	case SNDRV_SEQ_IOCTL_UNSUBSCRIBE_PORT:
 	case SNDRV_SEQ_IOCTL_CREATE_QUEUE:

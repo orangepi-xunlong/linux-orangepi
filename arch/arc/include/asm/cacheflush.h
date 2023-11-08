@@ -1,9 +1,6 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (C) 2004, 2007-2010, 2011-2012 Synopsys, Inc. (www.synopsys.com)
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  *
  *  vineetg: May 2011: for Non-aliasing VIPT D-cache following can be NOPs
  *   -flush_cache_dup_mm (fork)
@@ -21,24 +18,18 @@
 #include <linux/mm.h>
 #include <asm/shmparam.h>
 
-/*
- * Semantically we need this because icache doesn't snoop dcache/dma.
- * However ARC Cache flush requires paddr as well as vaddr, latter not available
- * in the flush_icache_page() API. So we no-op it but do the equivalent work
- * in update_mmu_cache()
- */
-#define flush_icache_page(vma, page)
-
 void flush_cache_all(void);
 
 void flush_icache_range(unsigned long kstart, unsigned long kend);
 void __sync_icache_dcache(phys_addr_t paddr, unsigned long vaddr, int len);
-void __inv_icache_page(phys_addr_t paddr, unsigned long vaddr);
-void __flush_dcache_page(phys_addr_t paddr, unsigned long vaddr);
+void __inv_icache_pages(phys_addr_t paddr, unsigned long vaddr, unsigned nr);
+void __flush_dcache_pages(phys_addr_t paddr, unsigned long vaddr, unsigned nr);
 
 #define ARCH_IMPLEMENTS_FLUSH_DCACHE_PAGE 1
 
 void flush_dcache_page(struct page *page);
+void flush_dcache_folio(struct folio *folio);
+#define flush_dcache_folio flush_dcache_folio
 
 void dma_cache_wback_inv(phys_addr_t start, unsigned long sz);
 void dma_cache_inv(phys_addr_t start, unsigned long sz);

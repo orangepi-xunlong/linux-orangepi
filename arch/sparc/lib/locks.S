@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * locks.S: SMP low-level lock primitives on Sparc.
  *
@@ -6,11 +7,11 @@
  * Copyright (C) 1998 Jakub Jelinek   (jj@ultra.linux.cz)
  */
 
+#include <linux/export.h>
 #include <asm/ptrace.h>
 #include <asm/psr.h>
 #include <asm/smp.h>
 #include <asm/spinlock.h>
-#include <asm/export.h>
 
 	.text
 	.align	4

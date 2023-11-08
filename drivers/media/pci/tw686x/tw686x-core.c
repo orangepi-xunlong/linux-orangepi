@@ -1,13 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2015 VanguardiaSur - www.vanguardiasur.com.ar
  *
  * Based on original driver by Krzysztof Ha?asa:
  * Copyright (C) 2015 Industrial Research Institute for Automation
  * and Measurements PIAP
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of version 2 of the GNU General Public License
- * as published by the Free Software Foundation.
  *
  * Notes
  * -----
@@ -74,7 +71,7 @@ static const char *dma_mode_name(unsigned int mode)
 
 static int tw686x_dma_mode_get(char *buffer, const struct kernel_param *kp)
 {
-	return sprintf(buffer, dma_mode_name(dma_mode));
+	return sprintf(buffer, "%s", dma_mode_name(dma_mode));
 }
 
 static int tw686x_dma_mode_set(const char *val, const struct kernel_param *kp)
@@ -126,9 +123,9 @@ void tw686x_enable_channel(struct tw686x_dev *dev, unsigned int channel)
  * channels "too fast" which makes some TW686x devices very
  * angry and freeze the CPU (see note 1).
  */
-static void tw686x_dma_delay(unsigned long data)
+static void tw686x_dma_delay(struct timer_list *t)
 {
-	struct tw686x_dev *dev = (struct tw686x_dev *)data;
+	struct tw686x_dev *dev = from_timer(dev, t, dma_delay_timer);
 	unsigned long flags;
 
 	spin_lock_irqsave(&dev->lock, flags);
@@ -279,7 +276,7 @@ static int tw686x_probe(struct pci_dev *pci_dev,
 	}
 
 	pci_set_master(pci_dev);
-	err = pci_set_dma_mask(pci_dev, DMA_BIT_MASK(32));
+	err = dma_set_mask(&pci_dev->dev, DMA_BIT_MASK(32));
 	if (err) {
 		dev_err(&pci_dev->dev, "32-bit PCI DMA not supported\n");
 		err = -EIO;
@@ -318,15 +315,7 @@ static int tw686x_probe(struct pci_dev *pci_dev,
 
 	spin_lock_init(&dev->lock);
 
-	err = request_irq(pci_dev->irq, tw686x_irq, IRQF_SHARED,
-			  dev->name, dev);
-	if (err < 0) {
-		dev_err(&pci_dev->dev, "unable to request interrupt\n");
-		goto iounmap;
-	}
-
-	setup_timer(&dev->dma_delay_timer,
-		    tw686x_dma_delay, (unsigned long) dev);
+	timer_setup(&dev->dma_delay_timer, tw686x_dma_delay, 0);
 
 	/*
 	 * This must be set right before initializing v4l2_dev.
@@ -337,18 +326,26 @@ static int tw686x_probe(struct pci_dev *pci_dev,
 	err = tw686x_video_init(dev);
 	if (err) {
 		dev_err(&pci_dev->dev, "can't register video\n");
-		goto free_irq;
+		goto iounmap;
 	}
 
 	err = tw686x_audio_init(dev);
 	if (err)
 		dev_warn(&pci_dev->dev, "can't register audio\n");
 
+	err = request_irq(pci_dev->irq, tw686x_irq, IRQF_SHARED,
+			  dev->name, dev);
+	if (err < 0) {
+		dev_err(&pci_dev->dev, "unable to request interrupt\n");
+		goto tw686x_free;
+	}
+
 	pci_set_drvdata(pci_dev, dev);
 	return 0;
 
-free_irq:
-	free_irq(pci_dev->irq, dev);
+tw686x_free:
+	tw686x_video_free(dev);
+	tw686x_audio_free(dev);
 iounmap:
 	pci_iounmap(pci_dev, dev->mmio);
 free_region:

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Returns 0 if exception before NUL or reaching the supplied limit (N),
  * a value greater than N if the string is longer than the limit, else
@@ -12,8 +13,8 @@
  * Copyright (C) 1999, 2001 David Mosberger-Tang <davidm@hpl.hp.com>
  */
 
+#include <linux/export.h>
 #include <asm/asmmacro.h>
-#include <asm/export.h>
 
 GLOBAL_ENTRY(__strnlen_user)
 	.prologue

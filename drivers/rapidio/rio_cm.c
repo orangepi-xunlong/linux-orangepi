@@ -1,19 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * rio_cm - RapidIO Channelized Messaging Driver
  *
  * Copyright 2013-2016 Integrated Device Technology, Inc.
  * Copyright (c) 2015, Prodrive Technologies
  * Copyright (c) 2015, RapidIO Trade Association
- *
- * This program is free software; you can redistribute  it and/or modify it
- * under  the terms of  the GNU General  Public License as published by the
- * Free Software Foundation;  either version 2 of the  License, or (at your
- * option) any later version.
- *
- * THIS PROGRAM IS DISTRIBUTED IN THE HOPE THAT IT WILL BE USEFUL,
- * BUT WITHOUT ANY WARRANTY; WITHOUT EVEN THE IMPLIED WARRANTY OF
- * MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE.  SEE THE
- * GNU GENERAL PUBLIC LICENSE FOR MORE DETAILS.
  */
 
 #include <linux/module.h>
@@ -1215,7 +1206,9 @@ static int riocm_ch_listen(u16 ch_id)
 	riocm_debug(CHOP, "(ch_%d)", ch_id);
 
 	ch = riocm_get_channel(ch_id);
-	if (!ch || !riocm_cmp_exch(ch, RIO_CM_CHAN_BOUND, RIO_CM_LISTEN))
+	if (!ch)
+		return -EINVAL;
+	if (!riocm_cmp_exch(ch, RIO_CM_CHAN_BOUND, RIO_CM_LISTEN))
 		ret = -EINVAL;
 	riocm_put_channel(ch);
 	return ret;
@@ -2094,13 +2087,11 @@ static int riocm_cdev_add(dev_t devno)
 /*
  * riocm_add_mport - add new local mport device into channel management core
  * @dev: device object associated with mport
- * @class_intf: class interface
  *
  * When a new mport device is added, CM immediately reserves inbound and
  * outbound RapidIO mailboxes that will be used.
  */
-static int riocm_add_mport(struct device *dev,
-			   struct class_interface *class_intf)
+static int riocm_add_mport(struct device *dev)
 {
 	int rc;
 	int i;
@@ -2134,6 +2125,14 @@ static int riocm_add_mport(struct device *dev,
 		return -ENODEV;
 	}
 
+	cm->rx_wq = create_workqueue(DRV_NAME "/rxq");
+	if (!cm->rx_wq) {
+		rio_release_inb_mbox(mport, cmbox);
+		rio_release_outb_mbox(mport, cmbox);
+		kfree(cm);
+		return -ENOMEM;
+	}
+
 	/*
 	 * Allocate and register inbound messaging buffers to be ready
 	 * to receive channel and system management requests
@@ -2144,7 +2143,6 @@ static int riocm_add_mport(struct device *dev,
 	cm->rx_slots = RIOCM_RX_RING_SIZE;
 	mutex_init(&cm->rx_lock);
 	riocm_rx_fill(cm, RIOCM_RX_RING_SIZE);
-	cm->rx_wq = create_workqueue(DRV_NAME "/rxq");
 	INIT_WORK(&cm->rx_work, rio_ibmsg_handler);
 
 	cm->tx_slot = 0;
@@ -2166,14 +2164,12 @@ static int riocm_add_mport(struct device *dev,
 /*
  * riocm_remove_mport - remove local mport device from channel management core
  * @dev: device object associated with mport
- * @class_intf: class interface
  *
  * Removes a local mport device from the list of registered devices that provide
  * channel management services. Returns an error if the specified mport is not
  * registered with the CM core.
  */
-static void riocm_remove_mport(struct device *dev,
-			       struct class_interface *class_intf)
+static void riocm_remove_mport(struct device *dev)
 {
 	struct rio_mport *mport = to_rio_mport(dev);
 	struct cm_dev *cm;
@@ -2297,7 +2293,7 @@ static int __init riocm_init(void)
 	int ret;
 
 	/* Create device class needed by udev */
-	dev_class = class_create(THIS_MODULE, DRV_NAME);
+	dev_class = class_create(DRV_NAME);
 	if (IS_ERR(dev_class)) {
 		riocm_error("Cannot create " DRV_NAME " class");
 		return PTR_ERR(dev_class);

@@ -1,19 +1,15 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Reset driver for NXP LPC18xx/43xx Reset Generation Unit (RGU).
  *
  * Copyright (C) 2015 Joachim Eastwood <manabian@gmail.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
  */
 
 #include <linux/clk.h>
 #include <linux/delay.h>
 #include <linux/err.h>
 #include <linux/io.h>
-#include <linux/module.h>
+#include <linux/init.h>
 #include <linux/of.h>
 #include <linux/platform_device.h>
 #include <linux/reboot.h>
@@ -143,7 +139,6 @@ static const struct reset_control_ops lpc18xx_rgu_ops = {
 static int lpc18xx_rgu_probe(struct platform_device *pdev)
 {
 	struct lpc18xx_rgu_data *rc;
-	struct resource *res;
 	u32 fcclk, firc;
 	int ret;
 
@@ -151,8 +146,7 @@ static int lpc18xx_rgu_probe(struct platform_device *pdev)
 	if (!rc)
 		return -ENOMEM;
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	rc->base = devm_ioremap_resource(&pdev->dev, res);
+	rc->base = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(rc->base))
 		return PTR_ERR(rc->base);
 
@@ -194,8 +188,6 @@ static int lpc18xx_rgu_probe(struct platform_device *pdev)
 	rc->rcdev.ops = &lpc18xx_rgu_ops;
 	rc->rcdev.of_node = pdev->dev.of_node;
 
-	platform_set_drvdata(pdev, rc);
-
 	ret = reset_controller_register(&rc->rcdev);
 	if (ret) {
 		dev_err(&pdev->dev, "unable to register device\n");
@@ -218,39 +210,17 @@ dis_clk_reg:
 	return ret;
 }
 
-static int lpc18xx_rgu_remove(struct platform_device *pdev)
-{
-	struct lpc18xx_rgu_data *rc = platform_get_drvdata(pdev);
-	int ret;
-
-	ret = unregister_restart_handler(&rc->restart_nb);
-	if (ret)
-		dev_warn(&pdev->dev, "failed to unregister restart handler\n");
-
-	reset_controller_unregister(&rc->rcdev);
-
-	clk_disable_unprepare(rc->clk_delay);
-	clk_disable_unprepare(rc->clk_reg);
-
-	return 0;
-}
-
 static const struct of_device_id lpc18xx_rgu_match[] = {
 	{ .compatible = "nxp,lpc1850-rgu" },
 	{ }
 };
-MODULE_DEVICE_TABLE(of, lpc18xx_rgu_match);
 
 static struct platform_driver lpc18xx_rgu_driver = {
 	.probe	= lpc18xx_rgu_probe,
-	.remove	= lpc18xx_rgu_remove,
 	.driver	= {
-		.name		= "lpc18xx-reset",
-		.of_match_table	= lpc18xx_rgu_match,
+		.name			= "lpc18xx-reset",
+		.of_match_table		= lpc18xx_rgu_match,
+		.suppress_bind_attrs	= true,
 	},
 };
-module_platform_driver(lpc18xx_rgu_driver);
-
-MODULE_AUTHOR("Joachim Eastwood <manabian@gmail.com>");
-MODULE_DESCRIPTION("Reset driver for LPC18xx/43xx RGU");
-MODULE_LICENSE("GPL v2");
+builtin_platform_driver(lpc18xx_rgu_driver);

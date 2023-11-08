@@ -1,15 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* NXP PCF50633 Power Management Unit (PMU) driver
  *
  * (C) 2006-2008 by Openmoko, Inc.
  * Author: Harald Welte <laforge@openmoko.org>
  * 	   Balaji Rao <balajirrao@openmoko.org>
  * All rights reserved.
- *
- *  This program is free software; you can redistribute  it and/or modify it
- *  under  the terms of  the GNU General  Public License as published by the
- *  Free Software Foundation;  either version 2 of the  License, or (at your
- *  option) any later version.
- *
  */
 
 #include <linux/kernel.h>
@@ -82,8 +77,8 @@ int pcf50633_reg_clear_bits(struct pcf50633 *pcf, u8 reg, u8 val)
 EXPORT_SYMBOL_GPL(pcf50633_reg_clear_bits);
 
 /* sysfs attributes */
-static ssize_t show_dump_regs(struct device *dev, struct device_attribute *attr,
-			    char *buf)
+static ssize_t dump_regs_show(struct device *dev,
+			      struct device_attribute *attr, char *buf)
 {
 	struct pcf50633 *pcf = dev_get_drvdata(dev);
 	u8 dump[16];
@@ -111,10 +106,10 @@ static ssize_t show_dump_regs(struct device *dev, struct device_attribute *attr,
 
 	return buf1 - buf;
 }
-static DEVICE_ATTR(dump_regs, 0400, show_dump_regs, NULL);
+static DEVICE_ATTR_ADMIN_RO(dump_regs);
 
-static ssize_t show_resume_reason(struct device *dev,
-				struct device_attribute *attr, char *buf)
+static ssize_t resume_reason_show(struct device *dev,
+				  struct device_attribute *attr, char *buf)
 {
 	struct pcf50633 *pcf = dev_get_drvdata(dev);
 	int n;
@@ -128,7 +123,7 @@ static ssize_t show_resume_reason(struct device *dev,
 
 	return n;
 }
-static DEVICE_ATTR(resume_reason, 0400, show_resume_reason, NULL);
+static DEVICE_ATTR_ADMIN_RO(resume_reason);
 
 static struct attribute *pcf_sysfs_entries[] = {
 	&dev_attr_dump_regs.attr,
@@ -149,7 +144,7 @@ pcf50633_client_dev_register(struct pcf50633 *pcf, const char *name,
 
 	*pdev = platform_device_alloc(name, -1);
 	if (!*pdev) {
-		dev_err(pcf->dev, "Falied to allocate %s\n", name);
+		dev_err(pcf->dev, "Failed to allocate %s\n", name);
 		return;
 	}
 
@@ -163,33 +158,12 @@ pcf50633_client_dev_register(struct pcf50633 *pcf, const char *name,
 	}
 }
 
-#ifdef CONFIG_PM_SLEEP
-static int pcf50633_suspend(struct device *dev)
-{
-	struct i2c_client *client = to_i2c_client(dev);
-	struct pcf50633 *pcf = i2c_get_clientdata(client);
-
-	return pcf50633_irq_suspend(pcf);
-}
-
-static int pcf50633_resume(struct device *dev)
-{
-	struct i2c_client *client = to_i2c_client(dev);
-	struct pcf50633 *pcf = i2c_get_clientdata(client);
-
-	return pcf50633_irq_resume(pcf);
-}
-#endif
-
-static SIMPLE_DEV_PM_OPS(pcf50633_pm, pcf50633_suspend, pcf50633_resume);
-
 static const struct regmap_config pcf50633_regmap_config = {
 	.reg_bits = 8,
 	.val_bits = 8,
 };
 
-static int pcf50633_probe(struct i2c_client *client,
-				const struct i2c_device_id *ids)
+static int pcf50633_probe(struct i2c_client *client)
 {
 	struct pcf50633 *pcf;
 	struct platform_device *pdev;
@@ -242,8 +216,10 @@ static int pcf50633_probe(struct i2c_client *client,
 
 	for (i = 0; i < PCF50633_NUM_REGULATORS; i++) {
 		pdev = platform_device_alloc("pcf50633-regulator", i);
-		if (!pdev)
-			return -ENOMEM;
+		if (!pdev) {
+			ret = -ENOMEM;
+			goto err2;
+		}
 
 		pdev->dev.parent = pcf->dev;
 		ret = platform_device_add_data(pdev, &pdata->reg_init_data[i],
@@ -269,13 +245,14 @@ static int pcf50633_probe(struct i2c_client *client,
 
 err:
 	platform_device_put(pdev);
+err2:
 	for (j = 0; j < i; j++)
 		platform_device_put(pcf->regulator_pdev[j]);
 
 	return ret;
 }
 
-static int pcf50633_remove(struct i2c_client *client)
+static void pcf50633_remove(struct i2c_client *client)
 {
 	struct pcf50633 *pcf = i2c_get_clientdata(client);
 	int i;
@@ -291,8 +268,6 @@ static int pcf50633_remove(struct i2c_client *client)
 
 	for (i = 0; i < PCF50633_NUM_REGULATORS; i++)
 		platform_device_unregister(pcf->regulator_pdev[i]);
-
-	return 0;
 }
 
 static const struct i2c_device_id pcf50633_id_table[] = {
@@ -304,7 +279,7 @@ MODULE_DEVICE_TABLE(i2c, pcf50633_id_table);
 static struct i2c_driver pcf50633_driver = {
 	.driver = {
 		.name	= "pcf50633",
-		.pm	= &pcf50633_pm,
+		.pm	= pm_sleep_ptr(&pcf50633_pm),
 	},
 	.id_table = pcf50633_id_table,
 	.probe = pcf50633_probe,

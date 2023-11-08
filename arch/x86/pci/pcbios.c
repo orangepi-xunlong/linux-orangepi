@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * BIOS32 and PCI BIOS handling.
  */
@@ -7,9 +8,11 @@
 #include <linux/slab.h>
 #include <linux/module.h>
 #include <linux/uaccess.h>
+
 #include <asm/pci_x86.h>
+#include <asm/e820/types.h>
 #include <asm/pci-functions.h>
-#include <asm/cacheflush.h>
+#include <asm/set_memory.h>
 
 /* BIOS32 signature: "_32_" */
 #define BIOS32_SIGNATURE	(('_' << 0) + ('3' << 8) + ('2' << 16) + ('_' << 24))
@@ -44,7 +47,7 @@ static inline void set_bios_x(void)
 	pcibios_enabled = 1;
 	set_memory_x(PAGE_OFFSET + BIOS_BEGIN, (BIOS_END - BIOS_BEGIN) >> PAGE_SHIFT);
 	if (__supported_pte_mask & _PAGE_NX)
-		printk(KERN_INFO "PCI : PCI BIOS area is rw and x. Use pci=nobios if you want it NX.\n");
+		printk(KERN_INFO "PCI: PCI BIOS area is rw and x. Use pci=nobios if you want it NX.\n");
 }
 
 /*
@@ -299,7 +302,7 @@ static const struct pci_raw_ops *__init pci_find_bios(void)
 	     check <= (union bios32 *) __va(0xffff0);
 	     ++check) {
 		long sig;
-		if (probe_kernel_address(&check->fields.signature, sig))
+		if (get_kernel_nofault(sig, &check->fields.signature))
 			continue;
 
 		if (check->fields.signature != BIOS32_SIGNATURE)

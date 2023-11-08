@@ -1,22 +1,17 @@
-/*
- * imx6q pinctrl driver based on imx pinmux core
- *
- * Copyright (C) 2012 Freescale Semiconductor, Inc.
- * Copyright (C) 2012 Linaro, Inc.
- *
- * Author: Dong Aisheng <dong.aisheng@linaro.org>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- */
+// SPDX-License-Identifier: GPL-2.0+
+//
+// imx6q pinctrl driver based on imx pinmux core
+//
+// Copyright (C) 2012 Freescale Semiconductor, Inc.
+// Copyright (C) 2012 Linaro, Inc.
+//
+// Author: Dong Aisheng <dong.aisheng@linaro.org>
 
 #include <linux/err.h>
 #include <linux/init.h>
 #include <linux/io.h>
-#include <linux/of.h>
-#include <linux/of_device.h>
+#include <linux/mod_devicetable.h>
+#include <linux/platform_device.h>
 #include <linux/pinctrl/pinctrl.h>
 
 #include "pinctrl-imx.h"
@@ -460,7 +455,7 @@ static const struct pinctrl_pin_desc imx6q_pinctrl_pads[] = {
 	IMX_PINCTRL_PIN(MX6Q_PAD_SD2_DAT3),
 };
 
-static struct imx_pinctrl_soc_info imx6q_pinctrl_info = {
+static const struct imx_pinctrl_soc_info imx6q_pinctrl_info = {
 	.pins = imx6q_pinctrl_pads,
 	.npins = ARRAY_SIZE(imx6q_pinctrl_pads),
 	.gpr_compatible = "fsl,imx6q-iomuxc-gpr",
@@ -480,6 +475,7 @@ static struct platform_driver imx6q_pinctrl_driver = {
 	.driver = {
 		.name = "imx6q-pinctrl",
 		.of_match_table = imx6q_pinctrl_of_match,
+		.suppress_bind_attrs = true,
 	},
 	.probe = imx6q_pinctrl_probe,
 };

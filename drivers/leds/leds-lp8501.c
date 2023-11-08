@@ -1,14 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * TI LP8501 9 channel LED Driver
  *
  * Copyright (C) 2013 Texas Instruments
  *
  * Author: Milo(Woogyom) Kim <milo.kim@ti.com>
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * version 2 as published by the Free Software Foundation.
- *
  */
 
 #include <linux/delay.h>
@@ -57,10 +53,10 @@
 #define LP8501_PWM_PSAVE		BIT(7)
 #define LP8501_AUTO_INC			BIT(6)
 #define LP8501_PWR_SAVE			BIT(5)
-#define LP8501_CP_AUTO			0x18
+#define LP8501_CP_MODE_MASK		0x18
+#define LP8501_CP_MODE_SHIFT		3
 #define LP8501_INT_CLK			BIT(0)
-#define LP8501_DEFAULT_CFG	\
-	(LP8501_PWM_PSAVE | LP8501_AUTO_INC | LP8501_PWR_SAVE | LP8501_CP_AUTO)
+#define LP8501_DEFAULT_CFG (LP8501_PWM_PSAVE | LP8501_AUTO_INC | LP8501_PWR_SAVE)
 
 #define LP8501_REG_RESET		0x3D
 #define LP8501_RESET			0xFF
@@ -106,6 +102,8 @@ static int lp8501_post_init_device(struct lp55xx_chip *chip)
 	if (chip->pdata->clock_mode != LP55XX_CLOCK_EXT)
 		val |= LP8501_INT_CLK;
 
+	val |= (chip->pdata->charge_pump_mode << LP8501_CP_MODE_SHIFT) & LP8501_CP_MODE_MASK;
+
 	ret = lp55xx_write(chip, LP8501_REG_CONFIG, val);
 	if (ret)
 		return ret;
@@ -118,19 +116,19 @@ static int lp8501_post_init_device(struct lp55xx_chip *chip)
 static void lp8501_load_engine(struct lp55xx_chip *chip)
 {
 	enum lp55xx_engine_index idx = chip->engine_idx;
-	u8 mask[] = {
+	static const u8 mask[] = {
 		[LP55XX_ENGINE_1] = LP8501_MODE_ENG1_M,
 		[LP55XX_ENGINE_2] = LP8501_MODE_ENG2_M,
 		[LP55XX_ENGINE_3] = LP8501_MODE_ENG3_M,
 	};
 
-	u8 val[] = {
+	static const u8 val[] = {
 		[LP55XX_ENGINE_1] = LP8501_LOAD_ENG1,
 		[LP55XX_ENGINE_2] = LP8501_LOAD_ENG2,
 		[LP55XX_ENGINE_3] = LP8501_LOAD_ENG3,
 	};
 
-	u8 page_sel[] = {
+	static const u8 page_sel[] = {
 		[LP55XX_ENGINE_1] = LP8501_PAGE_ENG1,
 		[LP55XX_ENGINE_2] = LP8501_PAGE_ENG2,
 		[LP55XX_ENGINE_3] = LP8501_PAGE_ENG3,
@@ -303,18 +301,25 @@ static struct lp55xx_device_config lp8501_cfg = {
 	.run_engine         = lp8501_run_engine,
 };
 
-static int lp8501_probe(struct i2c_client *client,
-			const struct i2c_device_id *id)
+static int lp8501_probe(struct i2c_client *client)
 {
+	const struct i2c_device_id *id = i2c_client_get_device_id(client);
 	int ret;
 	struct lp55xx_chip *chip;
 	struct lp55xx_led *led;
 	struct lp55xx_platform_data *pdata = dev_get_platdata(&client->dev);
-	struct device_node *np = client->dev.of_node;
+	struct device_node *np = dev_of_node(&client->dev);
+
+	chip = devm_kzalloc(&client->dev, sizeof(*chip), GFP_KERNEL);
+	if (!chip)
+		return -ENOMEM;
+
+	chip->cfg = &lp8501_cfg;
 
 	if (!pdata) {
 		if (np) {
-			pdata = lp55xx_of_populate_pdata(&client->dev, np);
+			pdata = lp55xx_of_populate_pdata(&client->dev, np,
+							 chip);
 			if (IS_ERR(pdata))
 				return PTR_ERR(pdata);
 		} else {
@@ -323,18 +328,13 @@ static int lp8501_probe(struct i2c_client *client,
 		}
 	}
 
-	chip = devm_kzalloc(&client->dev, sizeof(*chip), GFP_KERNEL);
-	if (!chip)
-		return -ENOMEM;
-
-	led = devm_kzalloc(&client->dev,
-			sizeof(*led) * pdata->num_channels, GFP_KERNEL);
+	led = devm_kcalloc(&client->dev,
+			pdata->num_channels, sizeof(*led), GFP_KERNEL);
 	if (!led)
 		return -ENOMEM;
 
 	chip->cl = client;
 	chip->pdata = pdata;
-	chip->cfg = &lp8501_cfg;
 
 	mutex_init(&chip->lock);
 
@@ -348,35 +348,30 @@ static int lp8501_probe(struct i2c_client *client,
 
 	ret = lp55xx_register_leds(led, chip);
 	if (ret)
-		goto err_register_leds;
+		goto err_out;
 
 	ret = lp55xx_register_sysfs(chip);
 	if (ret) {
 		dev_err(&client->dev, "registering sysfs failed\n");
-		goto err_register_sysfs;
+		goto err_out;
 	}
 
 	return 0;
 
-err_register_sysfs:
-	lp55xx_unregister_leds(led, chip);
-err_register_leds:
+err_out:
 	lp55xx_deinit_device(chip);
 err_init:
 	return ret;
 }
 
-static int lp8501_remove(struct i2c_client *client)
+static void lp8501_remove(struct i2c_client *client)
 {
 	struct lp55xx_led *led = i2c_get_clientdata(client);
 	struct lp55xx_chip *chip = led->chip;
 
 	lp8501_stop_engine(chip);
 	lp55xx_unregister_sysfs(chip);
-	lp55xx_unregister_leds(led, chip);
 	lp55xx_deinit_device(chip);
-
-	return 0;
 }
 
 static const struct i2c_device_id lp8501_id[] = {
@@ -385,19 +380,17 @@ static const struct i2c_device_id lp8501_id[] = {
 };
 MODULE_DEVICE_TABLE(i2c, lp8501_id);
 
-#ifdef CONFIG_OF
 static const struct of_device_id of_lp8501_leds_match[] = {
 	{ .compatible = "ti,lp8501", },
 	{},
 };
 
 MODULE_DEVICE_TABLE(of, of_lp8501_leds_match);
-#endif
 
 static struct i2c_driver lp8501_driver = {
 	.driver = {
 		.name	= "lp8501",
-		.of_match_table = of_match_ptr(of_lp8501_leds_match),
+		.of_match_table = of_lp8501_leds_match,
 	},
 	.probe		= lp8501_probe,
 	.remove		= lp8501_remove,

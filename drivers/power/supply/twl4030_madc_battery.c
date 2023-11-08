@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Dumb driver for LiIon batteries using TWL4030 madc.
  *
@@ -17,7 +18,6 @@
 #include <linux/power_supply.h>
 #include <linux/slab.h>
 #include <linux/sort.h>
-#include <linux/i2c/twl4030-madc.h>
 #include <linux/power/twl4030_madc_battery.h>
 #include <linux/iio/consumer.h>
 
@@ -168,19 +168,13 @@ static int twl4030_madc_bat_get_property(struct power_supply *psy,
 	return 0;
 }
 
-static void twl4030_madc_bat_ext_changed(struct power_supply *psy)
-{
-	power_supply_changed(psy);
-}
-
 static const struct power_supply_desc twl4030_madc_bat_desc = {
 	.name			= "twl4030_battery",
 	.type			= POWER_SUPPLY_TYPE_BATTERY,
 	.properties		= twl4030_madc_bat_props,
 	.num_properties		= ARRAY_SIZE(twl4030_madc_bat_props),
 	.get_property		= twl4030_madc_bat_get_property,
-	.external_power_changed	= twl4030_madc_bat_ext_changed,
-
+	.external_power_changed	= power_supply_changed,
 };
 
 static int twl4030_cmp(const void *a, const void *b)

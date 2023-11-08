@@ -1,13 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Driver for ELAN eKTF2127 i2c touchscreen controller
  *
  * For this driver the layout of the Chipone icn8318 i2c
  * touchscreencontroller is used.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
  *
  * Author:
  * Michel Verlaan <michel.verl@gmail.com>
@@ -32,6 +28,7 @@
 #define EKTF2127_RESPONSE		0x52
 #define EKTF2127_REQUEST		0x53
 #define EKTF2127_HELLO			0x55
+#define EKTF2127_REPORT2		0x5a
 #define EKTF2127_REPORT			0x5d
 #define EKTF2127_CALIB_DONE		0x66
 
@@ -51,7 +48,7 @@ struct ektf2127_ts {
 	struct touchscreen_properties prop;
 };
 
-static void ektf2127_parse_coordinates(const u8* buf, unsigned int touch_count,
+static void ektf2127_parse_coordinates(const u8 *buf, unsigned int touch_count,
 				       struct input_mt_pos *touches)
 {
 	int index = 0;
@@ -99,6 +96,29 @@ static void ektf2127_report_event(struct ektf2127_ts *ts, const u8 *buf)
 	input_sync(ts->input);
 }
 
+static void ektf2127_report2_contact(struct ektf2127_ts *ts, int slot,
+				     const u8 *buf, bool active)
+{
+	input_mt_slot(ts->input, slot);
+	input_mt_report_slot_state(ts->input, MT_TOOL_FINGER, active);
+
+	if (active) {
+		int x = (buf[0] & 0xf0) << 4 | buf[1];
+		int y = (buf[0] & 0x0f) << 8 | buf[2];
+
+		touchscreen_report_pos(ts->input, &ts->prop, x, y, true);
+	}
+}
+
+static void ektf2127_report2_event(struct ektf2127_ts *ts, const u8 *buf)
+{
+	ektf2127_report2_contact(ts, 0, &buf[1], !!(buf[7] & 2));
+	ektf2127_report2_contact(ts, 1, &buf[4], !!(buf[7] & 4));
+
+	input_mt_sync_frame(ts->input);
+	input_sync(ts->input);
+}
+
 static irqreturn_t ektf2127_irq(int irq, void *dev_id)
 {
 	struct ektf2127_ts *ts = dev_id;
@@ -115,6 +135,10 @@ static irqreturn_t ektf2127_irq(int irq, void *dev_id)
 	switch (buf[0]) {
 	case EKTF2127_REPORT:
 		ektf2127_report_event(ts, buf);
+		break;
+
+	case EKTF2127_REPORT2:
+		ektf2127_report2_event(ts, buf);
 		break;
 
 	case EKTF2127_NOISE:
@@ -153,32 +177,32 @@ static void ektf2127_stop(struct input_dev *dev)
 	gpiod_set_value_cansleep(ts->power_gpios, 0);
 }
 
-static int __maybe_unused ektf2127_suspend(struct device *dev)
+static int ektf2127_suspend(struct device *dev)
 {
 	struct ektf2127_ts *ts = i2c_get_clientdata(to_i2c_client(dev));
 
 	mutex_lock(&ts->input->mutex);
-	if (ts->input->users)
+	if (input_device_enabled(ts->input))
 		ektf2127_stop(ts->input);
 	mutex_unlock(&ts->input->mutex);
 
 	return 0;
 }
 
-static int __maybe_unused ektf2127_resume(struct device *dev)
+static int ektf2127_resume(struct device *dev)
 {
 	struct ektf2127_ts *ts = i2c_get_clientdata(to_i2c_client(dev));
 
 	mutex_lock(&ts->input->mutex);
-	if (ts->input->users)
+	if (input_device_enabled(ts->input))
 		ektf2127_start(ts->input);
 	mutex_unlock(&ts->input->mutex);
 
 	return 0;
 }
 
-static SIMPLE_DEV_PM_OPS(ektf2127_pm_ops, ektf2127_suspend,
-			 ektf2127_resume);
+static DEFINE_SIMPLE_DEV_PM_OPS(ektf2127_pm_ops, ektf2127_suspend,
+				ektf2127_resume);
 
 static int ektf2127_query_dimension(struct i2c_client *client, bool width)
 {
@@ -220,8 +244,7 @@ static int ektf2127_query_dimension(struct i2c_client *client, bool width)
 	return (((buf[3] & 0xf0) << 4) | buf[2]) - 1;
 }
 
-static int ektf2127_probe(struct i2c_client *client,
-			  const struct i2c_device_id *id)
+static int ektf2127_probe(struct i2c_client *client)
 {
 	struct device *dev = &client->dev;
 	struct ektf2127_ts *ts;
@@ -241,12 +264,8 @@ static int ektf2127_probe(struct i2c_client *client,
 
 	/* This requests the gpio *and* turns on the touchscreen controller */
 	ts->power_gpios = devm_gpiod_get(dev, "power", GPIOD_OUT_HIGH);
-	if (IS_ERR(ts->power_gpios)) {
-		error = PTR_ERR(ts->power_gpios);
-		if (error != -EPROBE_DEFER)
-			dev_err(dev, "Error getting power gpio: %d\n", error);
-		return error;
-	}
+	if (IS_ERR(ts->power_gpios))
+		return dev_err_probe(dev, PTR_ERR(ts->power_gpios), "Error getting power gpio\n");
 
 	input = devm_input_allocate_device(dev);
 	if (!input)
@@ -309,6 +328,7 @@ static int ektf2127_probe(struct i2c_client *client,
 #ifdef CONFIG_OF
 static const struct of_device_id ektf2127_of_match[] = {
 	{ .compatible = "elan,ektf2127" },
+	{ .compatible = "elan,ektf2132" },
 	{}
 };
 MODULE_DEVICE_TABLE(of, ektf2127_of_match);
@@ -316,6 +336,7 @@ MODULE_DEVICE_TABLE(of, ektf2127_of_match);
 
 static const struct i2c_device_id ektf2127_i2c_id[] = {
 	{ "ektf2127", 0 },
+	{ "ektf2132", 0 },
 	{}
 };
 MODULE_DEVICE_TABLE(i2c, ektf2127_i2c_id);
@@ -323,7 +344,7 @@ MODULE_DEVICE_TABLE(i2c, ektf2127_i2c_id);
 static struct i2c_driver ektf2127_driver = {
 	.driver = {
 		.name	= "elan_ektf2127",
-		.pm	= &ektf2127_pm_ops,
+		.pm	= pm_sleep_ptr(&ektf2127_pm_ops),
 		.of_match_table = of_match_ptr(ektf2127_of_match),
 	},
 	.probe = ektf2127_probe,
@@ -331,6 +352,6 @@ static struct i2c_driver ektf2127_driver = {
 };
 module_i2c_driver(ektf2127_driver);
 
-MODULE_DESCRIPTION("ELAN eKTF2127 I2C Touchscreen Driver");
+MODULE_DESCRIPTION("ELAN eKTF2127/eKTF2132 I2C Touchscreen Driver");
 MODULE_AUTHOR("Michel Verlaan, Siebren Vroegindeweij");
 MODULE_LICENSE("GPL");

@@ -19,6 +19,7 @@
 #include <linux/nl80211.h>
 #include <linux/platform_device.h>
 #include <linux/module.h>
+#include <linux/mod_devicetable.h>
 #include "ath9k.h"
 
 static const struct platform_device_id ath9k_platform_id_table[] = {
@@ -62,7 +63,7 @@ static bool ath_ahb_eeprom_read(struct ath_common *common, u32 off, u16 *data)
 	return false;
 }
 
-static struct ath_bus_ops ath_ahb_bus_ops  = {
+static const struct ath_bus_ops ath_ahb_bus_ops  = {
 	.ath_bus_type = ATH_AHB,
 	.read_cachesize = ath_ahb_read_cachesize,
 	.eeprom_read = ath_ahb_eeprom_read,
@@ -91,19 +92,15 @@ static int ath_ahb_probe(struct platform_device *pdev)
 		return -ENXIO;
 	}
 
-	mem = devm_ioremap_nocache(&pdev->dev, res->start, resource_size(res));
+	mem = devm_ioremap(&pdev->dev, res->start, resource_size(res));
 	if (mem == NULL) {
 		dev_err(&pdev->dev, "ioremap failed\n");
 		return -ENOMEM;
 	}
 
-	res = platform_get_resource(pdev, IORESOURCE_IRQ, 0);
-	if (res == NULL) {
-		dev_err(&pdev->dev, "no IRQ resource found\n");
-		return -ENXIO;
-	}
-
-	irq = res->start;
+	irq = platform_get_irq(pdev, 0);
+	if (irq < 0)
+		return irq;
 
 	ath9k_fill_chanctx_ops();
 	hw = ieee80211_alloc_hw(sizeof(struct ath_softc), &ath9k_ops);
@@ -135,8 +132,8 @@ static int ath_ahb_probe(struct platform_device *pdev)
 
 	ah = sc->sc_ah;
 	ath9k_hw_name(ah, hw_name, sizeof(hw_name));
-	wiphy_info(hw->wiphy, "%s mem=0x%lx, irq=%d\n",
-		   hw_name, (unsigned long)mem, irq);
+	wiphy_info(hw->wiphy, "%s mem=0x%p, irq=%d\n",
+		   hw_name, mem, irq);
 
 	return 0;
 

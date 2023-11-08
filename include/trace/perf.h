@@ -1,24 +1,10 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 
 #undef TRACE_SYSTEM_VAR
 
 #ifdef CONFIG_PERF_EVENTS
 
-#undef __entry
-#define __entry entry
-
-#undef __get_dynamic_array
-#define __get_dynamic_array(field)	\
-		((void *)__entry + (__entry->__data_loc_##field & 0xffff))
-
-#undef __get_dynamic_array_len
-#define __get_dynamic_array_len(field)	\
-		((__entry->__data_loc_##field >> 16) & 0xffff)
-
-#undef __get_str
-#define __get_str(field) ((char *)__get_dynamic_array(field))
-
-#undef __get_bitmask
-#define __get_bitmask(field) (char *)__get_dynamic_array(field)
+#include "stages/stage6_event_callback.h"
 
 #undef __perf_count
 #define __perf_count(c)	(__count = (c))
@@ -34,7 +20,6 @@ perf_trace_##call(void *__data, proto)					\
 	struct trace_event_call *event_call = __data;			\
 	struct trace_event_data_offsets_##call __maybe_unused __data_offsets;\
 	struct trace_event_raw_##call *entry;				\
-	struct bpf_prog *prog = event_call->prog;			\
 	struct pt_regs *__regs;						\
 	u64 __count = 1;						\
 	struct task_struct *__task = NULL;				\
@@ -46,8 +31,9 @@ perf_trace_##call(void *__data, proto)					\
 	__data_size = trace_event_get_offsets_##call(&__data_offsets, args); \
 									\
 	head = this_cpu_ptr(event_call->perf_events);			\
-	if (!prog && __builtin_constant_p(!__task) && !__task &&	\
-				hlist_empty(head))			\
+	if (!bpf_prog_array_valid(event_call) &&			\
+	    __builtin_constant_p(!__task) && !__task &&			\
+	    hlist_empty(head))						\
 		return;							\
 									\
 	__entry_size = ALIGN(__data_size + sizeof(*entry) + sizeof(u32),\

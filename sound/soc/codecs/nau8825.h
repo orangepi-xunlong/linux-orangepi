@@ -1,12 +1,9 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * NAU8825 ALSA SoC audio driver
  *
  * Copyright 2015 Google Inc.
  * Author: Anatol Pomozov <anatol.pomozov@chrominium.org>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #ifndef __NAU8825_H__
@@ -78,6 +75,8 @@
 #define NAU8825_REG_MISC_CTRL		0x55
 #define NAU8825_REG_I2C_DEVICE_ID		0x58
 #define NAU8825_REG_SARDOUT_RAM_STATUS		0x59
+#define NAU8825_REG_FLL2_LOWER		0x5a
+#define NAU8825_REG_FLL2_UPPER		0x5b
 #define NAU8825_REG_BIAS_ADJ		0x66
 #define NAU8825_REG_TRIM_SETTINGS		0x68
 #define NAU8825_REG_ANALOG_CONTROL_1		0x69
@@ -115,12 +114,20 @@
 #define NAU8825_CLK_SRC_MASK			(1 << NAU8825_CLK_SRC_SFT)
 #define NAU8825_CLK_SRC_VCO			(1 << NAU8825_CLK_SRC_SFT)
 #define NAU8825_CLK_SRC_MCLK			(0 << NAU8825_CLK_SRC_SFT)
+#define NAU8825_CLK_ADC_SRC_SFT		6
+#define NAU8825_CLK_ADC_SRC_MASK		(0x3 << NAU8825_CLK_ADC_SRC_SFT)
+#define NAU8825_CLK_DAC_SRC_SFT		4
+#define NAU8825_CLK_DAC_SRC_MASK		(0x3 << NAU8825_CLK_DAC_SRC_SFT)
 #define NAU8825_CLK_MCLK_SRC_MASK		(0xf << 0)
 
 /* FLL1 (0x04) */
+#define NAU8825_ICTRL_LATCH_SFT	10
+#define NAU8825_ICTRL_LATCH_MASK	(0x7 << NAU8825_ICTRL_LATCH_SFT)
 #define NAU8825_FLL_RATIO_MASK			(0x7f << 0)
 
 /* FLL3 (0x06) */
+#define NAU8825_GAIN_ERR_SFT			12
+#define NAU8825_GAIN_ERR_MASK			(0xf << NAU8825_GAIN_ERR_SFT)
 #define NAU8825_FLL_INTEGER_MASK		(0x3ff << 0)
 #define NAU8825_FLL_CLK_SRC_SFT		10
 #define NAU8825_FLL_CLK_SRC_MASK		(0x3 << NAU8825_FLL_CLK_SRC_SFT)
@@ -145,10 +152,13 @@
 /* FLL6 (0x9) */
 #define NAU8825_DCO_EN				(0x1 << 15)
 #define NAU8825_SDM_EN				(0x1 << 14)
+#define NAU8825_CUTOFF500			(0x1 << 13)
 
 /* HSD_CTRL (0xc) */
 #define NAU8825_HSD_AUTO_MODE	(1 << 6)
 /* 0 - open, 1 - short to GND */
+#define NAU8825_SPKR_ENGND1	(1 << 3)
+#define NAU8825_SPKR_ENGND2	(1 << 2)
 #define NAU8825_SPKR_DWN1R	(1 << 1)
 #define NAU8825_SPKR_DWN1L	(1 << 0)
 
@@ -162,6 +172,8 @@
 #define NAU8825_JACK_POLARITY	(1 << 1) /* 0 - active low, 1 - active high */
 
 /* INTERRUPT_MASK (0xf) */
+#define NAU8825_IRQ_PIN_PULLUP (1 << 14)
+#define NAU8825_IRQ_PIN_PULL_EN (1 << 13)
 #define NAU8825_IRQ_OUTPUT_EN (1 << 11)
 #define NAU8825_IRQ_HEADSET_COMPLETE_EN (1 << 10)
 #define NAU8825_IRQ_RMS_EN (1 << 8)
@@ -199,6 +211,17 @@
 #define NAU8825_SAR_INPUT_JKR2	(0 << 11)
 #define NAU8825_SAR_TRACKING_GAIN_SFT	8
 #define NAU8825_SAR_TRACKING_GAIN_MASK	(0x7 << NAU8825_SAR_TRACKING_GAIN_SFT)
+#define NAU8825_SAR_HV_SEL_SFT		7
+#define NAU8825_SAR_HV_SEL_MASK		(1 << NAU8825_SAR_HV_SEL_SFT)
+#define NAU8825_SAR_HV_SEL_MICBIAS	(0 << NAU8825_SAR_HV_SEL_SFT)
+#define NAU8825_SAR_HV_SEL_VDDMIC	(1 << NAU8825_SAR_HV_SEL_SFT)
+#define NAU8825_SAR_RES_SEL_SFT		4
+#define NAU8825_SAR_RES_SEL_MASK	(0x7 << NAU8825_SAR_RES_SEL_SFT)
+#define NAU8825_SAR_RES_SEL_35K		(0 << NAU8825_SAR_RES_SEL_SFT)
+#define NAU8825_SAR_RES_SEL_70K		(1 << NAU8825_SAR_RES_SEL_SFT)
+#define NAU8825_SAR_RES_SEL_170K	(2 << NAU8825_SAR_RES_SEL_SFT)
+#define NAU8825_SAR_RES_SEL_360K	(3 << NAU8825_SAR_RES_SEL_SFT)
+#define NAU8825_SAR_RES_SEL_SHORTED	(4 << NAU8825_SAR_RES_SEL_SFT)
 #define NAU8825_SAR_COMPARE_TIME_SFT	2
 #define NAU8825_SAR_COMPARE_TIME_MASK	(3 << 2)
 #define NAU8825_SAR_SAMPLING_TIME_SFT	0
@@ -216,6 +239,15 @@
 #define NAU8825_JKDET_PULL_UP	(1 << 11) /* 0 - pull down, 1 - pull up */
 #define NAU8825_JKDET_PULL_EN	(1 << 9) /* 0 - enable pull, 1 - disable */
 #define NAU8825_JKDET_OUTPUT_EN	(1 << 8) /* 0 - enable input, 1 - enable output */
+
+/* TDM_CTRL (0x1b) */
+#define NAU8825_TDM_MODE		(0x1 << 15)
+#define NAU8825_TDM_OFFSET_EN		(0x1 << 14)
+#define NAU8825_TDM_DACL_RX_SFT		6
+#define NAU8825_TDM_DACL_RX_MASK	(0x3 << NAU8825_TDM_DACL_RX_SFT)
+#define NAU8825_TDM_DACR_RX_SFT		4
+#define NAU8825_TDM_DACR_RX_MASK	(0x3 << NAU8825_TDM_DACR_RX_SFT)
+#define NAU8825_TDM_TX_MASK		0x3
 
 /* I2S_PCM_CTRL1 (0x1c) */
 #define NAU8825_I2S_BP_SFT	7
@@ -239,13 +271,23 @@
 
 /* I2S_PCM_CTRL2 (0x1d) */
 #define NAU8825_I2S_TRISTATE	(1 << 15) /* 0 - normal mode, 1 - Hi-Z output */
-#define NAU8825_I2S_DRV_SFT	12
-#define NAU8825_I2S_DRV_MASK	(0x3 << NAU8825_I2S_DRV_SFT)
+#define NAU8825_I2S_LRC_DIV_SFT	12
+#define NAU8825_I2S_LRC_DIV_MASK	(0x3 << NAU8825_I2S_LRC_DIV_SFT)
+#define NAU8825_I2S_PCM_TS_EN_SFT	10
+#define NAU8825_I2S_PCM_TS_EN_MASK	(1 << NAU8825_I2S_PCM_TS_EN_SFT)
+#define NAU8825_I2S_PCM_TS_EN		(1 << NAU8825_I2S_PCM_TS_EN_SFT)
 #define NAU8825_I2S_MS_SFT	3
 #define NAU8825_I2S_MS_MASK	(1 << NAU8825_I2S_MS_SFT)
 #define NAU8825_I2S_MS_MASTER	(1 << NAU8825_I2S_MS_SFT)
 #define NAU8825_I2S_MS_SLAVE	(0 << NAU8825_I2S_MS_SFT)
 #define NAU8825_I2S_BLK_DIV_MASK	0x7
+
+/* LEFT_TIME_SLOT (0x1e) */
+#define NAU8825_FS_ERR_CMP_SEL_SFT	14
+#define NAU8825_FS_ERR_CMP_SEL_MASK	(0x3 << NAU8825_FS_ERR_CMP_SEL_SFT)
+#define NAU8825_DIS_FS_SHORT_DET	(1 << 13)
+#define NAU8825_TSLOT_L0_MASK		0x3ff
+#define NAU8825_TSLOT_R0_MASK		0x3ff
 
 /* BIQ_CTRL (0x20) */
 #define NAU8825_BIQ_WRT_SFT   4
@@ -256,6 +298,8 @@
 #define NAU8825_BIQ_PATH_DAC   (1 << NAU8825_BIQ_PATH_SFT)
 
 /* ADC_RATE (0x2b) */
+#define NAU8825_ADC_SINC4_SFT		4
+#define NAU8825_ADC_SINC4_EN		(1 << NAU8825_ADC_SINC4_SFT)
 #define NAU8825_ADC_SYNC_DOWN_SFT	0
 #define NAU8825_ADC_SYNC_DOWN_MASK	0x3
 #define NAU8825_ADC_SYNC_DOWN_32	0
@@ -344,6 +388,7 @@
 #define NAU8825_GPIO2JD1	(1 << 7)
 #define NAU8825_SOFTWARE_ID_MASK	0x3
 #define NAU8825_SOFTWARE_ID_NAU8825	0x0
+#define NAU8825_SOFTWARE_ID_NAU8825C	0x1
 
 /* BIAS_ADJ (0x66) */
 #define NAU8825_BIAS_HPR_IMP		(1 << 15)
@@ -355,6 +400,13 @@
 #define NAU8825_BIAS_VMID	(1 << 6)
 #define NAU8825_BIAS_VMID_SEL_SFT	4
 #define NAU8825_BIAS_VMID_SEL_MASK	(3 << NAU8825_BIAS_VMID_SEL_SFT)
+
+/* ANALOG_CONTROL_1 (0x69) */
+#define NAU8825_TESTDACIN_SFT		14
+#define NAU8825_TESTDACIN_MASK		(0x3 << NAU8825_TESTDACIN_SFT)
+#define NAU8825_TESTDACIN_HIGH		(1 << NAU8825_TESTDACIN_SFT)
+#define NAU8825_TESTDACIN_LOW		(2 << NAU8825_TESTDACIN_SFT)
+#define NAU8825_TESTDACIN_GND		(3 << NAU8825_TESTDACIN_SFT)
 
 /* ANALOG_CONTROL_2 (0x6a) */
 #define NAU8825_HP_NON_CLASSG_CURRENT_2xADJ (1 << 12)
@@ -383,6 +435,9 @@
 /* MIC_BIAS (0x74) */
 #define NAU8825_MICBIAS_JKSLV	(1 << 14)
 #define NAU8825_MICBIAS_JKR2	(1 << 12)
+#define NAU8825_MICBIAS_LOWNOISE_SFT	10
+#define NAU8825_MICBIAS_LOWNOISE_MASK	(0x1 << NAU8825_MICBIAS_LOWNOISE_SFT)
+#define NAU8825_MICBIAS_LOWNOISE_EN	(0x1 << NAU8825_MICBIAS_LOWNOISE_SFT)
 #define NAU8825_MICBIAS_POWERUP_SFT	8
 #define NAU8825_MICBIAS_VOLTAGE_SFT	0
 #define NAU8825_MICBIAS_VOLTAGE_MASK	0x7
@@ -390,9 +445,16 @@
 /* BOOST (0x76) */
 #define NAU8825_PRECHARGE_DIS	(1 << 13)
 #define NAU8825_GLOBAL_BIAS_EN	(1 << 12)
+#define NAU8825_DISCHRG_EN	(1 << 11)
 #define NAU8825_HP_BOOST_DIS		(1 << 9)
 #define NAU8825_HP_BOOST_G_DIS	(1 << 8)
 #define NAU8825_SHORT_SHUTDOWN_EN	(1 << 6)
+
+/* FEPGA (0x77) */
+#define NAU8825_ACDC_CTRL_SFT		14
+#define NAU8825_ACDC_CTRL_MASK		(0x3 << NAU8825_ACDC_CTRL_SFT)
+#define NAU8825_ACDC_VREF_MICP		(0x1 << NAU8825_ACDC_CTRL_SFT)
+#define NAU8825_ACDC_VREF_MICN		(0x2 << NAU8825_ACDC_CTRL_SFT)
 
 /* POWER_UP_CONTROL (0x7f) */
 #define NAU8825_POWERUP_INTEGR_R	(1 << 5)
@@ -403,6 +465,8 @@
 #define NAU8825_POWERUP_HP_DRV_L	(1 << 0)
 
 /* CHARGE_PUMP (0x80) */
+#define NAU8825_ADCOUT_DS_SFT	12
+#define NAU8825_ADCOUT_DS_MASK	(1 << NAU8825_ADCOUT_DS_SFT)
 #define NAU8825_JAMNODCLOW	(1 << 10)
 #define NAU8825_POWER_DOWN_DACR	(1 << 9)
 #define NAU8825_POWER_DOWN_DACL	(1 << 8)
@@ -436,6 +500,7 @@ struct nau8825 {
 	struct clk *mclk;
 	struct work_struct xtalk_work;
 	struct semaphore xtalk_sem;
+	int sw_id;
 	int irq;
 	int mclk_freq; /* 0 - mclk is disabled */
 	int button_pressed;
@@ -460,9 +525,13 @@ struct nau8825 {
 	int xtalk_event_mask;
 	bool xtalk_protect;
 	int imp_rms[NAU8825_XTALK_IMM];
+	int xtalk_enable;
+	bool xtalk_baktab_initialized; /* True if initialized. */
+	bool adcout_ds;
+	int adc_delay;
 };
 
-int nau8825_enable_jack_detect(struct snd_soc_codec *codec,
+int nau8825_enable_jack_detect(struct snd_soc_component *component,
 				struct snd_soc_jack *jack);
 
 

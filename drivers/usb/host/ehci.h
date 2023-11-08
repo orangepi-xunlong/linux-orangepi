@@ -1,19 +1,6 @@
+/* SPDX-License-Identifier: GPL-2.0+ */
 /*
  * Copyright (c) 2001-2002 by David Brownell
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the
- * Free Software Foundation; either version 2 of the License, or (at your
- * option) any later version.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
- * or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
- * for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software Foundation,
- * Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 
 #ifndef __LINUX_EHCI_HCD_H
@@ -219,6 +206,8 @@ struct ehci_hcd {			/* one per controller */
 	unsigned		no_selective_suspend:1;
 	unsigned		has_fsl_port_bug:1; /* FreeScale */
 	unsigned		has_fsl_hs_errata:1;	/* Freescale HS quirk */
+	unsigned		has_fsl_susp_errata:1;	/* NXP SUSP quirk */
+	unsigned		has_ci_pec_bug:1;	/* ChipIdea PEC bug */
 	unsigned		big_endian_mmio:1;
 	unsigned		big_endian_desc:1;
 	unsigned		big_endian_capbase:1;
@@ -230,6 +219,9 @@ struct ehci_hcd {			/* one per controller */
 	unsigned		frame_index_bug:1; /* MosChip (AKA NetMos) */
 	unsigned		need_oc_pp_cycle:1; /* MPC834X port power */
 	unsigned		imx28_write_fix:1; /* For Freescale i.MX28 */
+	unsigned		spurious_oc:1;
+	unsigned		is_aspeed:1;
+	unsigned		zx_wakeup_clear_needed:1;
 
 	/* required for usb32 quirk */
 	#define OHCI_CTRL_HCFS          (3 << 6)
@@ -247,9 +239,9 @@ struct ehci_hcd {			/* one per controller */
 	/* irq statistics */
 #ifdef EHCI_STATS
 	struct ehci_stats	stats;
-#	define COUNT(x) ((x)++)
+#	define INCR(x) ((x)++)
 #else
-#	define COUNT(x)
+#	define INCR(x) do {} while (0)
 #endif
 
 	/* debug files */
@@ -267,7 +259,7 @@ struct ehci_hcd {			/* one per controller */
 	struct list_head	tt_list;
 
 	/* platform-specific data -- must come last */
-	unsigned long		priv[0] __aligned(sizeof(s64));
+	unsigned long		priv[] __aligned(sizeof(s64));
 };
 
 /* convert between an HCD pointer and the corresponding EHCI_HCD */
@@ -472,7 +464,7 @@ struct ehci_iso_sched {
 	struct list_head	td_list;
 	unsigned		span;
 	unsigned		first_packet;
-	struct ehci_iso_packet	packet[0];
+	struct ehci_iso_packet	packet[];
 };
 
 /*
@@ -480,7 +472,7 @@ struct ehci_iso_sched {
  * acts like a qh would, if EHCI had them for ISO.
  */
 struct ehci_iso_stream {
-	/* first field matches ehci_hq, but is NULL */
+	/* first field matches ehci_qh, but is NULL */
 	struct ehci_qh_hw	*hw;
 
 	u8			bEndpointAddress;
@@ -708,6 +700,22 @@ ehci_port_speed(struct ehci_hcd *ehci, unsigned int portsc)
 #else
 #define ehci_has_fsl_hs_errata(e)	(0)
 #endif
+
+/*
+ * Some Freescale/NXP processors have an erratum (USB A-005697)
+ * in which we need to wait for 10ms for bus to enter suspend mode
+ * after setting SUSP bit.
+ */
+#define ehci_has_fsl_susp_errata(e)	((e)->has_fsl_susp_errata)
+
+/*
+ * Some Freescale/NXP processors using ChipIdea IP have a bug in which
+ * disabling the port (PE is cleared) does not cause PEC to be asserted
+ * when frame babble is detected.
+ */
+#define ehci_has_ci_pec_bug(e, portsc) \
+	((e)->has_ci_pec_bug && ((e)->command & CMD_PSE) \
+	 && !(portsc & PORT_PEC) && !(portsc & PORT_PE))
 
 /*
  * While most USB host controllers implement their registers in

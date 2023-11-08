@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * i2c-au1550.c: SMBus (i2c) adapter for Alchemy PSC interface
  * Copyright (C) 2004 Embedded Edge, LLC <dan@embeddededge.com>
@@ -11,16 +12,6 @@
  * This is just a skeleton adapter to use with the Au1550 PSC
  * algorithm.  It was developed for the Pb1550, but will work with
  * any Au1550 board that has a similar PSC configuration.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include <linux/delay.h>
@@ -311,7 +302,6 @@ static int
 i2c_au1550_probe(struct platform_device *pdev)
 {
 	struct i2c_au1550_data *priv;
-	struct resource *r;
 	int ret;
 
 	priv = devm_kzalloc(&pdev->dev, sizeof(struct i2c_au1550_data),
@@ -319,8 +309,7 @@ i2c_au1550_probe(struct platform_device *pdev)
 	if (!priv)
 		return -ENOMEM;
 
-	r = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	priv->psc_base = devm_ioremap_resource(&pdev->dev, r);
+	priv->psc_base = devm_platform_get_and_ioremap_resource(pdev, 0, NULL);
 	if (IS_ERR(priv->psc_base))
 		return PTR_ERR(priv->psc_base);
 
@@ -330,7 +319,7 @@ i2c_au1550_probe(struct platform_device *pdev)
 	priv->adap.algo = &au1550_algo;
 	priv->adap.algo_data = priv;
 	priv->adap.dev.parent = &pdev->dev;
-	strlcpy(priv->adap.name, "Au1xxx PSC I2C", sizeof(priv->adap.name));
+	strscpy(priv->adap.name, "Au1xxx PSC I2C", sizeof(priv->adap.name));
 
 	/* Now, set up the PSC for SMBus PIO mode. */
 	i2c_au1550_setup(priv);
@@ -345,16 +334,14 @@ i2c_au1550_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int i2c_au1550_remove(struct platform_device *pdev)
+static void i2c_au1550_remove(struct platform_device *pdev)
 {
 	struct i2c_au1550_data *priv = platform_get_drvdata(pdev);
 
 	i2c_del_adapter(&priv->adap);
 	i2c_au1550_disable(priv);
-	return 0;
 }
 
-#ifdef CONFIG_PM
 static int i2c_au1550_suspend(struct device *dev)
 {
 	struct i2c_au1550_data *priv = dev_get_drvdata(dev);
@@ -373,24 +360,16 @@ static int i2c_au1550_resume(struct device *dev)
 	return 0;
 }
 
-static const struct dev_pm_ops i2c_au1550_pmops = {
-	.suspend	= i2c_au1550_suspend,
-	.resume		= i2c_au1550_resume,
-};
-
-#define AU1XPSC_SMBUS_PMOPS (&i2c_au1550_pmops)
-
-#else
-#define AU1XPSC_SMBUS_PMOPS NULL
-#endif
+static DEFINE_SIMPLE_DEV_PM_OPS(i2c_au1550_pmops,
+				i2c_au1550_suspend, i2c_au1550_resume);
 
 static struct platform_driver au1xpsc_smbus_driver = {
 	.driver = {
 		.name	= "au1xpsc_smbus",
-		.pm	= AU1XPSC_SMBUS_PMOPS,
+		.pm	= pm_sleep_ptr(&i2c_au1550_pmops),
 	},
 	.probe		= i2c_au1550_probe,
-	.remove		= i2c_au1550_remove,
+	.remove_new	= i2c_au1550_remove,
 };
 
 module_platform_driver(au1xpsc_smbus_driver);

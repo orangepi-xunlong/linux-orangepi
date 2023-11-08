@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * linux/drivers/video/omap2/omapfb-sysfs.c
  *
@@ -6,18 +7,6 @@
  *
  * Some code and ideas taken from drivers/video/omap/ driver
  * by Imre Deak.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 as published by
- * the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * You should have received a copy of the GNU General Public License along with
- * this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include <linux/fb.h>
@@ -26,6 +15,7 @@
 #include <linux/uaccess.h>
 #include <linux/platform_device.h>
 #include <linux/kernel.h>
+#include <linux/kstrtox.h>
 #include <linux/mm.h>
 #include <linux/omapfb.h>
 
@@ -40,7 +30,7 @@ static ssize_t show_rotate_type(struct device *dev,
 	struct fb_info *fbi = dev_get_drvdata(dev);
 	struct omapfb_info *ofbi = FB2OFB(fbi);
 
-	return snprintf(buf, PAGE_SIZE, "%d\n", ofbi->rotation_type);
+	return sysfs_emit(buf, "%d\n", ofbi->rotation_type);
 }
 
 static ssize_t store_rotate_type(struct device *dev,
@@ -60,8 +50,7 @@ static ssize_t store_rotate_type(struct device *dev,
 	if (rot_type != OMAP_DSS_ROT_DMA && rot_type != OMAP_DSS_ROT_VRFB)
 		return -EINVAL;
 
-	if (!lock_fb_info(fbi))
-		return -ENODEV;
+	lock_fb_info(fbi);
 
 	r = 0;
 	if (rot_type == ofbi->rotation_type)
@@ -95,7 +84,7 @@ static ssize_t show_mirror(struct device *dev,
 	struct fb_info *fbi = dev_get_drvdata(dev);
 	struct omapfb_info *ofbi = FB2OFB(fbi);
 
-	return snprintf(buf, PAGE_SIZE, "%d\n", ofbi->mirror);
+	return sysfs_emit(buf, "%d\n", ofbi->mirror);
 }
 
 static ssize_t store_mirror(struct device *dev,
@@ -108,12 +97,11 @@ static ssize_t store_mirror(struct device *dev,
 	int r;
 	struct fb_var_screeninfo new_var;
 
-	r = strtobool(buf, &mirror);
+	r = kstrtobool(buf, &mirror);
 	if (r)
 		return r;
 
-	if (!lock_fb_info(fbi))
-		return -ENODEV;
+	lock_fb_info(fbi);
 
 	ofbi->mirror = mirror;
 
@@ -149,8 +137,7 @@ static ssize_t show_overlays(struct device *dev,
 	ssize_t l = 0;
 	int t;
 
-	if (!lock_fb_info(fbi))
-		return -ENODEV;
+	lock_fb_info(fbi);
 	omapfb_lock(fbdev);
 
 	for (t = 0; t < ofbi->num_overlays; t++) {
@@ -161,11 +148,11 @@ static ssize_t show_overlays(struct device *dev,
 			if (ovl == fbdev->overlays[ovlnum])
 				break;
 
-		l += snprintf(buf + l, PAGE_SIZE - l, "%s%d",
+		l += scnprintf(buf + l, PAGE_SIZE - l, "%s%d",
 				t == 0 ? "" : ",", ovlnum);
 	}
 
-	l += snprintf(buf + l, PAGE_SIZE - l, "\n");
+	l += scnprintf(buf + l, PAGE_SIZE - l, "\n");
 
 	omapfb_unlock(fbdev);
 	unlock_fb_info(fbi);
@@ -208,8 +195,7 @@ static ssize_t store_overlays(struct device *dev, struct device_attribute *attr,
 	if (buf[len - 1] == '\n')
 		len = len - 1;
 
-	if (!lock_fb_info(fbi))
-		return -ENODEV;
+	lock_fb_info(fbi);
 	omapfb_lock(fbdev);
 
 	if (len > 0) {
@@ -340,15 +326,14 @@ static ssize_t show_overlays_rotate(struct device *dev,
 	ssize_t l = 0;
 	int t;
 
-	if (!lock_fb_info(fbi))
-		return -ENODEV;
+	lock_fb_info(fbi);
 
 	for (t = 0; t < ofbi->num_overlays; t++) {
-		l += snprintf(buf + l, PAGE_SIZE - l, "%s%d",
+		l += scnprintf(buf + l, PAGE_SIZE - l, "%s%d",
 				t == 0 ? "" : ",", ofbi->rotation[t]);
 	}
 
-	l += snprintf(buf + l, PAGE_SIZE - l, "\n");
+	l += scnprintf(buf + l, PAGE_SIZE - l, "\n");
 
 	unlock_fb_info(fbi);
 
@@ -369,8 +354,7 @@ static ssize_t store_overlays_rotate(struct device *dev,
 	if (buf[len - 1] == '\n')
 		len = len - 1;
 
-	if (!lock_fb_info(fbi))
-		return -ENODEV;
+	lock_fb_info(fbi);
 
 	if (len > 0) {
 		char *p = (char *)buf;
@@ -432,7 +416,7 @@ static ssize_t show_size(struct device *dev,
 	struct fb_info *fbi = dev_get_drvdata(dev);
 	struct omapfb_info *ofbi = FB2OFB(fbi);
 
-	return snprintf(buf, PAGE_SIZE, "%lu\n", ofbi->region->size);
+	return sysfs_emit(buf, "%lu\n", ofbi->region->size);
 }
 
 static ssize_t store_size(struct device *dev, struct device_attribute *attr,
@@ -453,8 +437,7 @@ static ssize_t store_size(struct device *dev, struct device_attribute *attr,
 
 	size = PAGE_ALIGN(size);
 
-	if (!lock_fb_info(fbi))
-		return -ENODEV;
+	lock_fb_info(fbi);
 
 	if (display && display->driver->sync)
 		display->driver->sync(display);
@@ -510,7 +493,7 @@ static ssize_t show_phys(struct device *dev,
 	struct fb_info *fbi = dev_get_drvdata(dev);
 	struct omapfb_info *ofbi = FB2OFB(fbi);
 
-	return snprintf(buf, PAGE_SIZE, "%0x\n", ofbi->region->paddr);
+	return sysfs_emit(buf, "%0x\n", ofbi->region->paddr);
 }
 
 static ssize_t show_virt(struct device *dev,
@@ -519,7 +502,7 @@ static ssize_t show_virt(struct device *dev,
 	struct fb_info *fbi = dev_get_drvdata(dev);
 	struct omapfb_info *ofbi = FB2OFB(fbi);
 
-	return snprintf(buf, PAGE_SIZE, "%p\n", ofbi->region->vaddr);
+	return sysfs_emit(buf, "%p\n", ofbi->region->vaddr);
 }
 
 static ssize_t show_upd_mode(struct device *dev,
@@ -534,7 +517,7 @@ static ssize_t show_upd_mode(struct device *dev,
 	if (r)
 		return r;
 
-	return snprintf(buf, PAGE_SIZE, "%u\n", (unsigned)mode);
+	return sysfs_emit(buf, "%u\n", (unsigned int)mode);
 }
 
 static ssize_t store_upd_mode(struct device *dev, struct device_attribute *attr,

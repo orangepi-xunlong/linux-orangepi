@@ -1,19 +1,13 @@
-/*
- * Freescale i.MX23 pinctrl driver
- *
- * Author: Shawn Guo <shawn.guo@linaro.org>
- * Copyright 2012 Freescale Semiconductor, Inc.
- *
- * The code contained herein is licensed under the GNU General Public
- * License. You may obtain a copy of the GNU General Public License
- * Version 2 or later at the following locations:
- *
- * http://www.opensource.org/licenses/gpl-license.html
- * http://www.gnu.org/copyleft/gpl.html
- */
+// SPDX-License-Identifier: GPL-2.0+
+//
+// Freescale i.MX23 pinctrl driver
+//
+// Author: Shawn Guo <shawn.guo@linaro.org>
+// Copyright 2012 Freescale Semiconductor, Inc.
 
 #include <linux/init.h>
-#include <linux/of_device.h>
+#include <linux/mod_devicetable.h>
+#include <linux/platform_device.h>
 #include <linux/pinctrl/pinctrl.h>
 #include "pinctrl-mxs.h"
 
@@ -257,7 +251,7 @@ static const struct pinctrl_pin_desc imx23_pins[] = {
 	MXS_PINCTRL_PIN(EMI_CLKN),
 };
 
-static struct mxs_regs imx23_regs = {
+static const struct mxs_regs imx23_regs = {
 	.muxsel = 0x100,
 	.drive = 0x200,
 	.pull = 0x400,

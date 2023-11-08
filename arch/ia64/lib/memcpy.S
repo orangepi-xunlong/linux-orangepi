@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  *
  * Optimized version of the standard memcpy() function
@@ -13,8 +14,8 @@
  *	Stephane Eranian <eranian@hpl.hp.com>
  *	David Mosberger-Tang <davidm@hpl.hp.com>
  */
+#include <linux/export.h>
 #include <asm/asmmacro.h>
-#include <asm/export.h>
 
 GLOBAL_ENTRY(memcpy)
 

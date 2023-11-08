@@ -1,12 +1,6 @@
+/* SPDX-License-Identifier: GPL-2.0+ */
 /*
  * Copyright 2012 Freescale Semiconductor, Inc.
- *
- * The code contained herein is licensed under the GNU General Public
- * License. You may obtain a copy of the GNU General Public License
- * Version 2 or later at the following locations:
- *
- * http://www.opensource.org/licenses/gpl-license.html
- * http://www.gnu.org/copyleft/gpl.html
  */
 
 #ifndef __PINCTRL_MXS_H
@@ -50,9 +44,9 @@
 #define VOL_SHIFT		3
 #define MA_PRESENT		(1 << 2)
 #define MA_SHIFT		0
-#define CONFIG_TO_PULL(c)	((c) >> PULL_SHIFT & 0x1)
-#define CONFIG_TO_VOL(c)	((c) >> VOL_SHIFT & 0x1)
-#define CONFIG_TO_MA(c)		((c) >> MA_SHIFT & 0x3)
+#define PIN_CONFIG_TO_PULL(c)	((c) >> PULL_SHIFT & 0x1)
+#define PIN_CONFIG_TO_VOL(c)	((c) >> VOL_SHIFT & 0x1)
+#define PIN_CONFIG_TO_MA(c)	((c) >> MA_SHIFT & 0x3)
 
 struct mxs_function {
 	const char *name;

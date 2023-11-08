@@ -1,18 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Texas Instruments' TPS65217 and TPS65218 Power Button Input Driver
  *
  * Copyright (C) 2014 Texas Instruments Incorporated - http://www.ti.com/
  * Author: Felipe Balbi <balbi@ti.com>
  * Author: Marcin Niestroj <m.niestroj@grinn-global.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
- * This program is distributed "as is" WITHOUT ANY WARRANTY of any
- * kind, whether express or implied; without even the implied warranty
- * of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include <linux/init.h>
@@ -95,7 +87,7 @@ static int tps6521x_pb_probe(struct platform_device *pdev)
 	int error;
 	int irq;
 
-	match = of_match_node(of_tps6521x_pb_match, pdev->dev.of_node);
+	match = of_match_node(of_tps6521x_pb_match, dev->of_node);
 	if (!match)
 		return -ENXIO;
 
@@ -118,17 +110,14 @@ static int tps6521x_pb_probe(struct platform_device *pdev)
 
 	input_set_capability(idev, EV_KEY, KEY_POWER);
 
-	pwr->regmap = dev_get_regmap(pdev->dev.parent, NULL);
+	pwr->regmap = dev_get_regmap(dev->parent, NULL);
 	pwr->dev = dev;
 	pwr->idev = idev;
-	platform_set_drvdata(pdev, pwr);
 	device_init_wakeup(dev, true);
 
 	irq = platform_get_irq(pdev, 0);
-	if (irq < 0) {
-		dev_err(dev, "No IRQ resource!\n");
+	if (irq < 0)
 		return -EINVAL;
-	}
 
 	error = devm_request_threaded_irq(dev, irq, NULL, tps6521x_pb_irq,
 					  IRQF_TRIGGER_RISING |
@@ -136,8 +125,7 @@ static int tps6521x_pb_probe(struct platform_device *pdev)
 						IRQF_ONESHOT,
 					  pwr->data->name, pwr);
 	if (error) {
-		dev_err(dev, "failed to request IRQ #%d: %d\n",
-			irq, error);
+		dev_err(dev, "failed to request IRQ #%d: %d\n", irq, error);
 		return error;
 	}
 
@@ -150,12 +138,20 @@ static int tps6521x_pb_probe(struct platform_device *pdev)
 	return 0;
 }
 
+static const struct platform_device_id tps6521x_pwrbtn_id_table[] = {
+	{ "tps65218-pwrbutton", },
+	{ "tps65217-pwrbutton", },
+	{ /* sentinel */ }
+};
+MODULE_DEVICE_TABLE(platform, tps6521x_pwrbtn_id_table);
+
 static struct platform_driver tps6521x_pb_driver = {
 	.probe	= tps6521x_pb_probe,
 	.driver	= {
 		.name	= "tps6521x_pwrbutton",
 		.of_match_table = of_tps6521x_pb_match,
 	},
+	.id_table = tps6521x_pwrbtn_id_table,
 };
 module_platform_driver(tps6521x_pb_driver);
 

@@ -1,10 +1,11 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * arch/alpha/lib/strcat.S
  * Contributed by Richard Henderson (rth@tamu.edu)
  *
  * Append a null-terminated string from SRC to DST.
  */
-#include <asm/export.h>
+#include <linux/export.h>
 
 	.text
 

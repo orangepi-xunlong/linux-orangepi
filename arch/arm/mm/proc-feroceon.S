@@ -1,30 +1,17 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  *  linux/arch/arm/mm/proc-feroceon.S: MMU functions for Feroceon
  *
  *  Heavily based on proc-arm926.S
  *  Maintainer: Assaf Hoffman <hoffman@marvell.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
 #include <linux/linkage.h>
 #include <linux/init.h>
+#include <linux/pgtable.h>
 #include <asm/assembler.h>
 #include <asm/hwcap.h>
 #include <asm/pgtable-hwdef.h>
-#include <asm/pgtable.h>
 #include <asm/page.h>
 #include <asm/ptrace.h>
 #include "proc-macros.S"
@@ -69,6 +56,10 @@ ENTRY(cpu_feroceon_proc_init)
 	movne	r2, r2, lsr #2			@ turned into # of sets
 	sub	r2, r2, #(1 << 5)
 	stmia	r1, {r2, r3}
+#ifdef CONFIG_VFP
+	mov	r1, #1				@ disable quirky VFP
+	str_l	r1, VFP_arch_feroceon, r2
+#endif
 	ret	lr
 
 /*
@@ -584,7 +575,7 @@ feroceon_crval:
 
 	.align
 
-	.section ".proc.info.init", #alloc
+	.section ".proc.info.init", "a"
 
 .macro feroceon_proc_info name:req, cpu_val:req, cpu_mask:req, cpu_name:req, cache:req
 	.type	__\name\()_proc_info,#object

@@ -1,13 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2013 STMicroelectronics
  *
  * I2C master mode controller driver, used in STMicroelectronics devices.
  *
  * Author: Maxime Coquelin <maxime.coquelin@st.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2, as
- * published by the Free Software Foundation.
  */
 
 #include <linux/clk.h>
@@ -216,7 +213,7 @@ static inline void st_i2c_clr_bits(void __iomem *reg, u32 mask)
  */
 static struct st_i2c_timings i2c_timings[] = {
 	[I2C_MODE_STANDARD] = {
-		.rate			= 100000,
+		.rate			= I2C_MAX_STANDARD_MODE_FREQ,
 		.rep_start_hold		= 4400,
 		.rep_start_setup	= 5170,
 		.start_hold		= 4400,
@@ -225,7 +222,7 @@ static struct st_i2c_timings i2c_timings[] = {
 		.bus_free_time		= 5170,
 	},
 	[I2C_MODE_FAST] = {
-		.rate			= 400000,
+		.rate			= I2C_MAX_FAST_MODE_FREQ,
 		.rep_start_hold		= 660,
 		.rep_start_setup	= 660,
 		.start_hold		= 660,
@@ -437,6 +434,7 @@ static void st_i2c_wr_fill_tx_fifo(struct st_i2c_dev *i2c_dev)
 /**
  * st_i2c_rd_fill_tx_fifo() - Fill the Tx FIFO in read mode
  * @i2c_dev: Controller's private data
+ * @max: Maximum amount of data to fill into the Tx FIFO
  *
  * This functions fills the Tx FIFO with fixed pattern when
  * in read mode to trigger clock.
@@ -526,7 +524,7 @@ static void st_i2c_handle_write(struct st_i2c_dev *i2c_dev)
 }
 
 /**
- * st_i2c_handle_write() - Handle FIFO enmpty interrupt in case of read
+ * st_i2c_handle_read() - Handle FIFO empty interrupt in case of read
  * @i2c_dev: Controller's private data
  */
 static void st_i2c_handle_read(struct st_i2c_dev *i2c_dev)
@@ -560,7 +558,7 @@ static void st_i2c_handle_read(struct st_i2c_dev *i2c_dev)
 }
 
 /**
- * st_i2c_isr() - Interrupt routine
+ * st_i2c_isr_thread() - Interrupt routine
  * @irq: interrupt number
  * @data: Controller's private data
  */
@@ -742,11 +740,9 @@ static int st_i2c_xfer(struct i2c_adapter *i2c_adap,
 	return (ret < 0) ? ret : i;
 }
 
-#ifdef CONFIG_PM_SLEEP
 static int st_i2c_suspend(struct device *dev)
 {
-	struct platform_device *pdev = to_platform_device(dev);
-	struct st_i2c_dev *i2c_dev = platform_get_drvdata(pdev);
+	struct st_i2c_dev *i2c_dev = dev_get_drvdata(dev);
 
 	if (i2c_dev->busy)
 		return -EBUSY;
@@ -765,18 +761,14 @@ static int st_i2c_resume(struct device *dev)
 	return 0;
 }
 
-static SIMPLE_DEV_PM_OPS(st_i2c_pm, st_i2c_suspend, st_i2c_resume);
-#define ST_I2C_PM	(&st_i2c_pm)
-#else
-#define ST_I2C_PM	NULL
-#endif
+static DEFINE_SIMPLE_DEV_PM_OPS(st_i2c_pm, st_i2c_suspend, st_i2c_resume);
 
 static u32 st_i2c_func(struct i2c_adapter *adap)
 {
 	return I2C_FUNC_I2C | I2C_FUNC_SMBUS_EMUL;
 }
 
-static struct i2c_algorithm st_i2c_algo = {
+static const struct i2c_algorithm st_i2c_algo = {
 	.master_xfer = st_i2c_xfer,
 	.functionality = st_i2c_func,
 };
@@ -820,8 +812,7 @@ static int st_i2c_probe(struct platform_device *pdev)
 	if (!i2c_dev)
 		return -ENOMEM;
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	i2c_dev->base = devm_ioremap_resource(&pdev->dev, res);
+	i2c_dev->base = devm_platform_get_and_ioremap_resource(pdev, 0, &res);
 	if (IS_ERR(i2c_dev->base))
 		return PTR_ERR(i2c_dev->base);
 
@@ -839,7 +830,7 @@ static int st_i2c_probe(struct platform_device *pdev)
 
 	i2c_dev->mode = I2C_MODE_STANDARD;
 	ret = of_property_read_u32(np, "clock-frequency", &clk_rate);
-	if ((!ret) && (clk_rate == 400000))
+	if (!ret && (clk_rate == I2C_MAX_FAST_MODE_FREQ))
 		i2c_dev->mode = I2C_MODE_FAST;
 
 	i2c_dev->dev = &pdev->dev;
@@ -884,13 +875,11 @@ static int st_i2c_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int st_i2c_remove(struct platform_device *pdev)
+static void st_i2c_remove(struct platform_device *pdev)
 {
 	struct st_i2c_dev *i2c_dev = platform_get_drvdata(pdev);
 
 	i2c_del_adapter(&i2c_dev->adap);
-
-	return 0;
 }
 
 static const struct of_device_id st_i2c_match[] = {
@@ -904,10 +893,10 @@ static struct platform_driver st_i2c_driver = {
 	.driver = {
 		.name = "st-i2c",
 		.of_match_table = st_i2c_match,
-		.pm = ST_I2C_PM,
+		.pm = pm_sleep_ptr(&st_i2c_pm),
 	},
 	.probe = st_i2c_probe,
-	.remove = st_i2c_remove,
+	.remove_new = st_i2c_remove,
 };
 
 module_platform_driver(st_i2c_driver);

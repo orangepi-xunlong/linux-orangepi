@@ -1,9 +1,11 @@
+
 #ifndef __NET_REGULATORY_H
 #define __NET_REGULATORY_H
 /*
  * regulatory support structures
  *
  * Copyright 2008-2009	Luis R. Rodriguez <mcgrof@qca.qualcomm.com>
+ * Copyright (C) 2018 Intel Corporation
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -18,6 +20,8 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
+#include <linux/ieee80211.h>
+#include <linux/nl80211.h>
 #include <linux/rcupdate.h>
 
 /**
@@ -43,7 +47,7 @@ enum environment_cap {
  *	and potentially inform users of which devices specifically
  *	cased the conflicts.
  * @initiator: indicates who sent this request, could be any of
- *	of those set in nl80211_reg_initiator (%NL80211_REGDOM_SET_BY_*)
+ *	those set in nl80211_reg_initiator (%NL80211_REGDOM_SET_BY_*)
  * @alpha2: the ISO / IEC 3166 alpha2 country code of the requested
  *	regulatory domain. We have a few special codes:
  *	00 - World regulatory domain
@@ -136,17 +140,6 @@ struct regulatory_request {
  *      otherwise initiating radiation is not allowed. This will enable the
  *      relaxations enabled under the CFG80211_REG_RELAX_NO_IR configuration
  *      option
- * @REGULATORY_IGNORE_STALE_KICKOFF: the regulatory core will _not_ make sure
- *	all interfaces on this wiphy reside on allowed channels. If this flag
- *	is not set, upon a regdomain change, the interfaces are given a grace
- *	period (currently 60 seconds) to disconnect or move to an allowed
- *	channel. Interfaces on forbidden channels are forcibly disconnected.
- *	Currently these types of interfaces are supported for enforcement:
- *	NL80211_IFTYPE_ADHOC, NL80211_IFTYPE_STATION, NL80211_IFTYPE_AP,
- *	NL80211_IFTYPE_AP_VLAN, NL80211_IFTYPE_MONITOR,
- *	NL80211_IFTYPE_P2P_CLIENT, NL80211_IFTYPE_P2P_GO,
- *	NL80211_IFTYPE_P2P_DEVICE. The flag will be set by default if a device
- *	includes any modes unsupported for enforcement checking.
  * @REGULATORY_WIPHY_SELF_MANAGED: for devices that employ wiphy-specific
  *	regdom management. These devices will ignore all regdom changes not
  *	originating from their own wiphy.
@@ -173,7 +166,7 @@ enum ieee80211_regulatory_flags {
 	REGULATORY_COUNTRY_IE_FOLLOW_POWER	= BIT(3),
 	REGULATORY_COUNTRY_IE_IGNORE		= BIT(4),
 	REGULATORY_ENABLE_RELAX_NO_IR           = BIT(5),
-	REGULATORY_IGNORE_STALE_KICKOFF         = BIT(6),
+	/* reuse bit 6 next time */
 	REGULATORY_WIPHY_SELF_MANAGED		= BIT(7),
 };
 
@@ -188,11 +181,38 @@ struct ieee80211_power_rule {
 	u32 max_eirp;
 };
 
+/**
+ * struct ieee80211_wmm_ac - used to store per ac wmm regulatory limitation
+ *
+ * The information provided in this structure is required for QoS
+ * transmit queue configuration. Cf. IEEE 802.11 7.3.2.29.
+ *
+ * @cw_min: minimum contention window [a value of the form
+ *      2^n-1 in the range 1..32767]
+ * @cw_max: maximum contention window [like @cw_min]
+ * @cot: maximum burst time in units of 32 usecs, 0 meaning disabled
+ * @aifsn: arbitration interframe space [0..255]
+ *
+ */
+struct ieee80211_wmm_ac {
+	u16 cw_min;
+	u16 cw_max;
+	u16 cot;
+	u8 aifsn;
+};
+
+struct ieee80211_wmm_rule {
+	struct ieee80211_wmm_ac client[IEEE80211_NUM_ACS];
+	struct ieee80211_wmm_ac ap[IEEE80211_NUM_ACS];
+};
+
 struct ieee80211_reg_rule {
 	struct ieee80211_freq_range freq_range;
 	struct ieee80211_power_rule power_rule;
+	struct ieee80211_wmm_rule wmm_rule;
 	u32 flags;
 	u32 dfs_cac_ms;
+	bool has_wmm;
 };
 
 struct ieee80211_regdomain {
@@ -202,13 +222,6 @@ struct ieee80211_regdomain {
 	enum nl80211_dfs_regions dfs_region;
 	struct ieee80211_reg_rule reg_rules[];
 };
-
-#define MHZ_TO_KHZ(freq) ((freq) * 1000)
-#define KHZ_TO_MHZ(freq) ((freq) / 1000)
-#define DBI_TO_MBI(gain) ((gain) * 100)
-#define MBI_TO_DBI(gain) ((gain) / 100)
-#define DBM_TO_MBM(gain) ((gain) * 100)
-#define MBM_TO_DBM(gain) ((gain) / 100)
 
 #define REG_RULE_EXT(start, end, bw, gain, eirp, dfs_cac, reg_flags)	\
 {									\

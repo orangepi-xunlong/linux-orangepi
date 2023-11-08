@@ -186,8 +186,13 @@ int agp_add_bridge(struct agp_bridge_data *bridge);
 void agp_remove_bridge(struct agp_bridge_data *bridge);
 
 /* Frontend routines. */
+#if IS_ENABLED(CONFIG_DRM_LEGACY)
 int agp_frontend_initialize(void);
 void agp_frontend_cleanup(void);
+#else
+static inline int agp_frontend_initialize(void) { return 0; }
+static inline void agp_frontend_cleanup(void) {}
+#endif
 
 /* Generic routines. */
 void agp_generic_enable(struct agp_bridge_data *bridge, u32 mode);
@@ -230,6 +235,12 @@ int agp3_generic_fetch_size(void);
 void agp3_generic_tlbflush(struct agp_memory *mem);
 int agp3_generic_configure(void);
 void agp3_generic_cleanup(void);
+
+/* GATT allocation. Returns/accepts GATT kernel virtual address. */
+#define alloc_gatt_pages(order)		\
+	((char *)__get_free_pages(GFP_KERNEL, (order)))
+#define free_gatt_pages(table, order)	\
+	free_pages((unsigned long)(table), (order))
 
 /* aperture sizes have been standardised since v3 */
 #define AGP_GENERIC_SIZES_ENTRIES 11

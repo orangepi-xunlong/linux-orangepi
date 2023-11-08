@@ -33,7 +33,6 @@
 #ifndef _UAPI_LINUX_QUOTA_
 #define _UAPI_LINUX_QUOTA_
 
-#include <linux/errno.h>
 #include <linux/types.h>
 
 #define __DQUOT_VERSION__	"dquot_6.6.0"
@@ -78,6 +77,7 @@
 #define	QFMT_VFS_V0 2
 #define QFMT_OCFS2 3
 #define	QFMT_VFS_V1 4
+#define	QFMT_SHMEM 5
 
 /* Size of block in which space limits are passed through the quota
  * interface */

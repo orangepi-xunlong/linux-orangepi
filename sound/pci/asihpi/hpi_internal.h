@@ -1,20 +1,9 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /******************************************************************************
 
     AudioScience HPI driver
     Copyright (C) 1997-2012  AudioScience Inc. <support@audioscience.com>
 
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of version 2 of the GNU General Public License as
-    published by the Free Software Foundation;
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 
 HPI internal definitions
 
@@ -64,7 +53,7 @@ If handle is invalid *pPhysicalAddr is set to zero and return 1
 u16 hpios_locked_mem_get_phys_addr(struct consistent_dma_area
 	*locked_mem_handle, u32 *p_physical_addr);
 
-/** Get the CPU address of of memory represented by LockedMemHandle.
+/** Get the CPU address of memory represented by LockedMemHandle.
 
 If handle is NULL *ppvVirtualAddr is set to NULL and return 1
 */
@@ -1405,16 +1394,11 @@ u32 hpi_indexes_to_handle(const char c_object, const u16 adapter_index,
 void hpi_send_recv(struct hpi_message *phm, struct hpi_response *phr);
 
 /* used in PnP OS/driver */
-u16 hpi_subsys_create_adapter(const struct hpi_resource *p_resource,
-	u16 *pw_adapter_index);
-
 u16 hpi_outstream_host_buffer_get_info(u32 h_outstream, u8 **pp_buffer,
 	struct hpi_hostbuffer_status **pp_status);
 
 u16 hpi_instream_host_buffer_get_info(u32 h_instream, u8 **pp_buffer,
 	struct hpi_hostbuffer_status **pp_status);
-
-u16 hpi_adapter_restart(u16 adapter_index);
 
 /*
 The following 3 functions were last declared in header files for

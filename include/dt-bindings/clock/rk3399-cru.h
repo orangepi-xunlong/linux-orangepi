@@ -1,16 +1,7 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * Copyright (c) 2016 Rockchip Electronics Co. Ltd.
  * Author: Xing Zheng <zhengxing@rock-chips.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #ifndef _DT_BINDINGS_CLK_ROCKCHIP_RK3399_H
@@ -28,6 +19,7 @@
 #define ARMCLKB				9
 
 /* sclk gates (special clocks) */
+#define SCLK_I2SOUT_SRC			64
 #define SCLK_I2C1			65
 #define SCLK_I2C2			66
 #define SCLK_I2C3			67
@@ -132,6 +124,8 @@
 #define SCLK_RMII_SRC			166
 #define SCLK_PCIEPHY_REF100M		167
 #define SCLK_DDRC			168
+#define SCLK_TESTCLKOUT1		169
+#define SCLK_TESTCLKOUT2		170
 
 #define DCLK_VOP0			180
 #define DCLK_VOP1			181
@@ -554,8 +548,8 @@
 #define SRST_H_PERILP0			171
 #define SRST_H_PERILP0_NOC		172
 #define SRST_ROM			173
-#define SRST_CRYPTO_S			174
-#define SRST_CRYPTO_M			175
+#define SRST_CRYPTO0_S			174
+#define SRST_CRYPTO0_M			175
 
 /* cru_softrst_con11 */
 #define SRST_P_DCF			176
@@ -563,7 +557,7 @@
 #define SRST_CM0S			178
 #define SRST_CM0S_DBG			179
 #define SRST_CM0S_PO			180
-#define SRST_CRYPTO			181
+#define SRST_CRYPTO0			181
 #define SRST_P_PERILP1_SGRF		182
 #define SRST_P_PERILP1_GRF		183
 #define SRST_CRYPTO1_S			184

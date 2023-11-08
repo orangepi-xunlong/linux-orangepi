@@ -1,31 +1,25 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright (c) 2015, Daniel Thompson
- *
- * This file is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This file is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include <linux/clk.h>
 #include <linux/delay.h>
 #include <linux/hw_random.h>
 #include <linux/io.h>
+#include <linux/iopoll.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
+#include <linux/of.h>
 #include <linux/of_address.h>
-#include <linux/of_platform.h>
+#include <linux/platform_device.h>
 #include <linux/pm_runtime.h>
 #include <linux/reset.h>
 #include <linux/slab.h>
 
 #define RNG_CR 0x00
 #define RNG_CR_RNGEN BIT(2)
+#define RNG_CR_CED BIT(5)
 
 #define RNG_SR 0x04
 #define RNG_SR_SEIS BIT(6)
@@ -34,20 +28,12 @@
 
 #define RNG_DR 0x08
 
-/*
- * It takes 40 cycles @ 48MHz to generate each random number (e.g. <1us).
- * At the time of writing STM32 parts max out at ~200MHz meaning a timeout
- * of 500 leaves us a very comfortable margin for error. The loop to which
- * the timeout applies takes at least 4 instructions per iteration so the
- * timeout is enough to take us up to multi-GHz parts!
- */
-#define RNG_TIMEOUT 500
-
 struct stm32_rng_private {
 	struct hwrng rng;
 	void __iomem *base;
 	struct clk *clk;
 	struct reset_control *rst;
+	bool ced;
 };
 
 static int stm32_rng_read(struct hwrng *rng, void *data, size_t max, bool wait)
@@ -59,15 +45,20 @@ static int stm32_rng_read(struct hwrng *rng, void *data, size_t max, bool wait)
 
 	pm_runtime_get_sync((struct device *) priv->rng.priv);
 
-	while (max > sizeof(u32)) {
+	while (max >= sizeof(u32)) {
 		sr = readl_relaxed(priv->base + RNG_SR);
+		/* Manage timeout which is based on timer and take */
+		/* care of initial delay time when enabling rng	*/
 		if (!sr && wait) {
-			unsigned int timeout = RNG_TIMEOUT;
+			int err;
 
-			do {
-				cpu_relax();
-				sr = readl_relaxed(priv->base + RNG_SR);
-			} while (!sr && --timeout);
+			err = readl_relaxed_poll_timeout_atomic(priv->base
+								   + RNG_SR,
+								   sr, sr,
+								   10, 50000);
+			if (err)
+				dev_err((struct device *)priv->rng.priv,
+					"%s: timeout %x!\n", __func__, sr);
 		}
 
 		/* If error detected or data not ready... */
@@ -101,7 +92,11 @@ static int stm32_rng_init(struct hwrng *rng)
 	if (err)
 		return err;
 
-	writel_relaxed(RNG_CR_RNGEN, priv->base + RNG_CR);
+	if (priv->ced)
+		writel_relaxed(RNG_CR_RNGEN, priv->base + RNG_CR);
+	else
+		writel_relaxed(RNG_CR_RNGEN | RNG_CR_CED,
+			       priv->base + RNG_CR);
 
 	/* clear error indicators */
 	writel_relaxed(0, priv->base + RNG_SR);
@@ -149,21 +144,31 @@ static int stm32_rng_probe(struct platform_device *ofdev)
 		reset_control_deassert(priv->rst);
 	}
 
+	priv->ced = of_property_read_bool(np, "clock-error-detect");
+
 	dev_set_drvdata(dev, priv);
 
-	priv->rng.name = dev_driver_string(dev),
+	priv->rng.name = dev_driver_string(dev);
 #ifndef CONFIG_PM
-	priv->rng.init = stm32_rng_init,
-	priv->rng.cleanup = stm32_rng_cleanup,
+	priv->rng.init = stm32_rng_init;
+	priv->rng.cleanup = stm32_rng_cleanup;
 #endif
-	priv->rng.read = stm32_rng_read,
+	priv->rng.read = stm32_rng_read;
 	priv->rng.priv = (unsigned long) dev;
+	priv->rng.quality = 900;
 
 	pm_runtime_set_autosuspend_delay(dev, 100);
 	pm_runtime_use_autosuspend(dev);
 	pm_runtime_enable(dev);
 
 	return devm_hwrng_register(dev, &priv->rng);
+}
+
+static int stm32_rng_remove(struct platform_device *ofdev)
+{
+	pm_runtime_disable(&ofdev->dev);
+
+	return 0;
 }
 
 #ifdef CONFIG_PM
@@ -184,8 +189,13 @@ static int stm32_rng_runtime_resume(struct device *dev)
 }
 #endif
 
-static UNIVERSAL_DEV_PM_OPS(stm32_rng_pm_ops, stm32_rng_runtime_suspend,
-			    stm32_rng_runtime_resume, NULL);
+static const struct dev_pm_ops stm32_rng_pm_ops = {
+	SET_RUNTIME_PM_OPS(stm32_rng_runtime_suspend,
+			   stm32_rng_runtime_resume, NULL)
+	SET_SYSTEM_SLEEP_PM_OPS(pm_runtime_force_suspend,
+				pm_runtime_force_resume)
+};
+
 
 static const struct of_device_id stm32_rng_match[] = {
 	{
@@ -202,6 +212,7 @@ static struct platform_driver stm32_rng_driver = {
 		.of_match_table = stm32_rng_match,
 	},
 	.probe = stm32_rng_probe,
+	.remove = stm32_rng_remove,
 };
 
 module_platform_driver(stm32_rng_driver);

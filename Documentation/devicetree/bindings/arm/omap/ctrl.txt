@@ -8,7 +8,7 @@ control module driver itself.
 
 See [2] for documentation about clock/clockdomain nodes.
 
-[1] Documentation/devicetree/bindings/pinctrl/pinctrl-single.txt
+[1] Documentation/devicetree/bindings/pinctrl/pinctrl-single.yaml
 [2] Documentation/devicetree/bindings/clock/ti/*
 
 Required properties:
@@ -21,8 +21,11 @@ Required properties:
 		"ti,omap3-scm"
 		"ti,omap4-scm-core"
 		"ti,omap4-scm-padconf-core"
+		"ti,omap4-scm-wkup"
+		"ti,omap4-scm-padconf-wkup"
 		"ti,omap5-scm-core"
 		"ti,omap5-scm-padconf-core"
+		"ti,omap5-scm-wkup-pad-conf"
 		"ti,dra7-scm-core"
 - reg:		Contains Control Module register address range
 		(base address and length)

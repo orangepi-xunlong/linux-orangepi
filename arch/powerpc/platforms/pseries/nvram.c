@@ -1,14 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  c 2001 PPC 64 Team, IBM Corp
  *
- *      This program is free software; you can redistribute it and/or
- *      modify it under the terms of the GNU General Public License
- *      as published by the Free Software Foundation; either version
- *      2 of the License, or (at your option) any later version.
- *
  * /dev/nvram driver for PPC64
- *
- * This perhaps should live in drivers/char
  */
 
 
@@ -18,10 +12,10 @@
 #include <linux/spinlock.h>
 #include <linux/slab.h>
 #include <linux/ctype.h>
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
+#include <linux/of.h>
 #include <asm/nvram.h>
 #include <asm/rtas.h>
-#include <asm/prom.h>
 #include <asm/machdep.h>
 
 /* Max bytes to read/write in one go */
@@ -233,8 +227,8 @@ int __init pSeries_nvram_init(void)
 
 	nvram_size = be32_to_cpup(nbytes_p);
 
-	nvram_fetch = rtas_token("nvram-fetch");
-	nvram_store = rtas_token("nvram-store");
+	nvram_fetch = rtas_function_token(RTAS_FN_NVRAM_FETCH);
+	nvram_store = rtas_function_token(RTAS_FN_NVRAM_STORE);
 	printk(KERN_INFO "PPC64 nvram contains %d bytes\n", nvram_size);
 	of_node_put(nvram);
 

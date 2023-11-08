@@ -26,7 +26,8 @@
 #define ATOM_H
 
 #include <linux/types.h>
-#include <drm/drmP.h>
+
+struct drm_device;
 
 #define ATOM_BIOS_MAGIC		0xAA55
 #define ATOM_ATI_MAGIC_PTR	0x30
@@ -110,16 +111,21 @@
 #define ATOM_IO_SYSIO		2
 #define ATOM_IO_IIO		0x80
 
+#define STRLEN_NORMAL		32
+#define STRLEN_LONG		64
+#define STRLEN_VERYLONG		254
+
 struct card_info {
 	struct drm_device *dev;
-	void (* reg_write)(struct card_info *, uint32_t, uint32_t);   /*  filled by driver */
-	uint32_t (* reg_read)(struct card_info *, uint32_t);          /*  filled by driver */
-	void (* ioreg_write)(struct card_info *, uint32_t, uint32_t);   /*  filled by driver */
-	uint32_t (* ioreg_read)(struct card_info *, uint32_t);          /*  filled by driver */
-	void (* mc_write)(struct card_info *, uint32_t, uint32_t);   /*  filled by driver */
-	uint32_t (* mc_read)(struct card_info *, uint32_t);          /*  filled by driver */
-	void (* pll_write)(struct card_info *, uint32_t, uint32_t);   /*  filled by driver */
-	uint32_t (* pll_read)(struct card_info *, uint32_t);          /*  filled by driver */
+	void (*reg_write)(struct card_info *info,
+			  u32 reg, uint32_t val);   /*  filled by driver */
+	uint32_t (*reg_read)(struct card_info *info, uint32_t reg);          /*  filled by driver */
+	void (*mc_write)(struct card_info *info,
+			 u32 reg, uint32_t val);   /*  filled by driver */
+	uint32_t (*mc_read)(struct card_info *info, uint32_t reg);          /*  filled by driver */
+	void (*pll_write)(struct card_info *info,
+			  u32 reg, uint32_t val);   /*  filled by driver */
+	uint32_t (*pll_read)(struct card_info *info, uint32_t reg);          /*  filled by driver */
 };
 
 struct atom_context {
@@ -139,19 +145,24 @@ struct atom_context {
 	int io_mode;
 	uint32_t *scratch;
 	int scratch_size_bytes;
+
+	uint8_t name[STRLEN_LONG];
+	uint8_t vbios_pn[STRLEN_LONG];
+	uint32_t version;
+	uint8_t vbios_ver_str[STRLEN_NORMAL];
+	uint8_t date[STRLEN_NORMAL];
 };
 
 extern int amdgpu_atom_debug;
 
-struct atom_context *amdgpu_atom_parse(struct card_info *, void *);
-int amdgpu_atom_execute_table(struct atom_context *, int, uint32_t *);
-int amdgpu_atom_asic_init(struct atom_context *);
-void amdgpu_atom_destroy(struct atom_context *);
+struct atom_context *amdgpu_atom_parse(struct card_info *card, void *bios);
+int amdgpu_atom_execute_table(struct atom_context *ctx, int index, uint32_t *params);
+int amdgpu_atom_asic_init(struct atom_context *ctx);
+void amdgpu_atom_destroy(struct atom_context *ctx);
 bool amdgpu_atom_parse_data_header(struct atom_context *ctx, int index, uint16_t *size,
 			    uint8_t *frev, uint8_t *crev, uint16_t *data_start);
 bool amdgpu_atom_parse_cmd_header(struct atom_context *ctx, int index,
 			   uint8_t *frev, uint8_t *crev);
-int amdgpu_atom_allocate_fb_scratch(struct atom_context *ctx);
 #include "atom-types.h"
 #include "atombios.h"
 #include "ObjectID.h"

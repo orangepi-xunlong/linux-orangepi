@@ -1,11 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Voltage and current regulation for AD5398 and AD5821
  *
  * Copyright 2010 Analog Devices Inc.
  *
  * Enter bugs at http://blackfin.uclinux.org/
- *
- * Licensed under the GPL-2 or later.
  */
 
 #include <linux/module.h>
@@ -181,7 +180,7 @@ static int ad5398_disable(struct regulator_dev *rdev)
 	return ret;
 }
 
-static struct regulator_ops ad5398_ops = {
+static const struct regulator_ops ad5398_ops = {
 	.get_current_limit = ad5398_get_current_limit,
 	.set_current_limit = ad5398_set_current_limit,
 	.enable = ad5398_enable,
@@ -213,9 +212,9 @@ static const struct i2c_device_id ad5398_id[] = {
 };
 MODULE_DEVICE_TABLE(i2c, ad5398_id);
 
-static int ad5398_probe(struct i2c_client *client,
-				const struct i2c_device_id *id)
+static int ad5398_probe(struct i2c_client *client)
 {
+	const struct i2c_device_id *id = i2c_client_get_device_id(client);
 	struct regulator_init_data *init_data = dev_get_platdata(&client->dev);
 	struct regulator_config config = { };
 	struct ad5398_chip_info *chip;
@@ -258,6 +257,7 @@ static struct i2c_driver ad5398_driver = {
 	.probe = ad5398_probe,
 	.driver		= {
 		.name	= "ad5398",
+		.probe_type = PROBE_PREFER_ASYNCHRONOUS,
 	},
 	.id_table	= ad5398_id,
 };

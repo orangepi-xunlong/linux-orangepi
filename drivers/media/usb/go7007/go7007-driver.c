@@ -1,14 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2005-2006 Micronas USA Inc.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License (Version 2) as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include <linux/module.h>
@@ -208,7 +200,7 @@ static int init_i2c_module(struct i2c_adapter *adapter, const struct go_i2c *con
 	struct i2c_board_info info;
 
 	memset(&info, 0, sizeof(info));
-	strlcpy(info.type, i2c->type, sizeof(info.type));
+	strscpy(info.type, i2c->type, sizeof(info.type));
 	info.addr = i2c->addr;
 	info.flags = i2c->flags;
 
@@ -448,13 +440,14 @@ static struct go7007_buffer *frame_boundary(struct go7007 *go, struct go7007_buf
 {
 	u32 *bytesused;
 	struct go7007_buffer *vb_tmp = NULL;
+	unsigned long flags;
 
 	if (vb == NULL) {
-		spin_lock(&go->spinlock);
+		spin_lock_irqsave(&go->spinlock, flags);
 		if (!list_empty(&go->vidq_active))
 			vb = go->active_buf =
 				list_first_entry(&go->vidq_active, struct go7007_buffer, list);
-		spin_unlock(&go->spinlock);
+		spin_unlock_irqrestore(&go->spinlock, flags);
 		go->next_seq++;
 		return vb;
 	}
@@ -468,7 +461,7 @@ static struct go7007_buffer *frame_boundary(struct go7007 *go, struct go7007_buf
 
 	vb->vb.vb2_buf.timestamp = ktime_get_ns();
 	vb_tmp = vb;
-	spin_lock(&go->spinlock);
+	spin_lock_irqsave(&go->spinlock, flags);
 	list_del(&vb->list);
 	if (list_empty(&go->vidq_active))
 		vb = NULL;
@@ -476,7 +469,7 @@ static struct go7007_buffer *frame_boundary(struct go7007 *go, struct go7007_buf
 		vb = list_first_entry(&go->vidq_active,
 				struct go7007_buffer, list);
 	go->active_buf = vb;
-	spin_unlock(&go->spinlock);
+	spin_unlock_irqrestore(&go->spinlock, flags);
 	vb2_buffer_done(&vb_tmp->vb.vb2_buf, VB2_BUF_STATE_DONE);
 	return vb;
 }
@@ -523,7 +516,7 @@ void go7007_parse_video_stream(struct go7007 *go, u8 *buf, int length)
 		if (vb && vb->vb.vb2_buf.planes[0].bytesused >=
 				GO7007_BUF_SIZE - 3) {
 			v4l2_info(&go->v4l2_dev, "dropping oversized frame\n");
-			vb->vb.vb2_buf.planes[0].bytesused = 0;
+			vb2_set_plane_payload(&vb->vb.vb2_buf, 0, 0);
 			vb->frame_offset = 0;
 			vb->modet_active = 0;
 			vb = go->active_buf = NULL;
@@ -650,7 +643,7 @@ void go7007_parse_video_stream(struct go7007 *go, u8 *buf, int length)
 			case 0xD8:
 				if (go->format == V4L2_PIX_FMT_MJPEG)
 					vb = frame_boundary(go, vb);
-				/* fall through */
+				fallthrough;
 			default:
 				store_byte(vb, 0xFF);
 				store_byte(vb, buf[i]);
@@ -698,49 +691,23 @@ struct go7007 *go7007_alloc(const struct go7007_board_info *board,
 						struct device *dev)
 {
 	struct go7007 *go;
-	int i;
 
 	go = kzalloc(sizeof(struct go7007), GFP_KERNEL);
 	if (go == NULL)
 		return NULL;
 	go->dev = dev;
 	go->board_info = board;
-	go->board_id = 0;
 	go->tuner_type = -1;
-	go->channel_number = 0;
-	go->name[0] = 0;
 	mutex_init(&go->hw_lock);
 	init_waitqueue_head(&go->frame_waitq);
 	spin_lock_init(&go->spinlock);
 	go->status = STATUS_INIT;
-	memset(&go->i2c_adapter, 0, sizeof(go->i2c_adapter));
-	go->i2c_adapter_online = 0;
-	go->interrupt_available = 0;
 	init_waitqueue_head(&go->interrupt_waitq);
-	go->input = 0;
 	go7007_update_board(go);
-	go->encoder_h_halve = 0;
-	go->encoder_v_halve = 0;
-	go->encoder_subsample = 0;
 	go->format = V4L2_PIX_FMT_MJPEG;
 	go->bitrate = 1500000;
 	go->fps_scale = 1;
-	go->pali = 0;
 	go->aspect_ratio = GO7007_RATIO_1_1;
-	go->gop_size = 0;
-	go->ipb = 0;
-	go->closed_gop = 0;
-	go->repeat_seqhead = 0;
-	go->seq_header_enable = 0;
-	go->gop_header_enable = 0;
-	go->dvd_mode = 0;
-	go->interlace_coding = 0;
-	for (i = 0; i < 4; ++i)
-		go->modet[i].enable = 0;
-	for (i = 0; i < 1624; ++i)
-		go->modet_map[i] = 0;
-	go->audio_deliver = NULL;
-	go->audio_enabled = 0;
 
 	return go;
 }

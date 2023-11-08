@@ -1,12 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * base MPC5121 Device Tree Source
  *
  * Copyright 2007-2008 Freescale Semiconductor Inc.
- *
- * This program is free software; you can redistribute  it and/or modify it
- * under  the terms of  the GNU General  Public License as published by the
- * Free Software Foundation;  either version 2 of the  License, or (at your
- * option) any later version.
  */
 
 #include <dt-bindings/clock/mpc512x-clock.h>
@@ -144,7 +140,7 @@
 		};
 
 		/* Power Management Controller */
-		pmc@1000{
+		pmc@1000 {
 			compatible = "fsl,mpc5121-pmc";
 			reg = <0x1000 0x100>;
 			interrupts = <83 0x8>;

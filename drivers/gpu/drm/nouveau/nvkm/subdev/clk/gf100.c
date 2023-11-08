@@ -457,7 +457,7 @@ gf100_clk = {
 		{ nv_clk_src_hubk06 , 0x00 },
 		{ nv_clk_src_hubk01 , 0x01 },
 		{ nv_clk_src_copy   , 0x02 },
-		{ nv_clk_src_gpc    , 0x03, 0, "core", 2000 },
+		{ nv_clk_src_gpc    , 0x03, NVKM_CLK_DOM_FLAG_VPSTATE, "core", 2000 },
 		{ nv_clk_src_rop    , 0x04 },
 		{ nv_clk_src_mem    , 0x05, 0, "memory", 1000 },
 		{ nv_clk_src_vdec   , 0x06 },
@@ -468,7 +468,8 @@ gf100_clk = {
 };
 
 int
-gf100_clk_new(struct nvkm_device *device, int index, struct nvkm_clk **pclk)
+gf100_clk_new(struct nvkm_device *device, enum nvkm_subdev_type type, int inst,
+	      struct nvkm_clk **pclk)
 {
 	struct gf100_clk *clk;
 
@@ -476,5 +477,5 @@ gf100_clk_new(struct nvkm_device *device, int index, struct nvkm_clk **pclk)
 		return -ENOMEM;
 	*pclk = &clk->base;
 
-	return nvkm_clk_ctor(&gf100_clk, device, index, false, &clk->base);
+	return nvkm_clk_ctor(&gf100_clk, device, type, inst, false, &clk->base);
 }

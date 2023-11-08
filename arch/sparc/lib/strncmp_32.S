@@ -1,10 +1,11 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * strncmp.S: Hand optimized Sparc assembly of GCC output from GNU libc
  *            generic strncmp routine.
  */
 
+#include <linux/export.h>
 #include <linux/linkage.h>
-#include <asm/export.h>
 
 	.text
 ENTRY(strncmp)

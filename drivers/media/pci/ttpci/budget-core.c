@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * budget-core.c: driver for the SAA7146 based Budget DVB cards
  *
@@ -12,24 +13,6 @@
  *	     Michael Dreher <michael@5dot1.de>,
  *	     Oliver Endriss <o.endriss@gmx.de>,
  *	     Andreas 'randy' Weinberger
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.	 See the
- * GNU General Public License for more details.
- *
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
- * Or, point your browser to http://www.gnu.org/copyleft/gpl.html
- *
  *
  * the project's page is at https://linuxtv.org
  */
@@ -164,7 +147,7 @@ static int start_ts_capture(struct budget *budget)
 static int budget_read_fe_status(struct dvb_frontend *fe,
 				 enum fe_status *status)
 {
-	struct budget *budget = (struct budget *) fe->dvb->priv;
+	struct budget *budget = fe->dvb->priv;
 	int synced;
 	int ret;
 
@@ -188,16 +171,17 @@ static int budget_read_fe_status(struct dvb_frontend *fe,
 	return ret;
 }
 
-static void vpeirq(unsigned long data)
+static void vpeirq(struct tasklet_struct *t)
 {
-	struct budget *budget = (struct budget *) data;
+	struct budget *budget = from_tasklet(budget, t, vpe_tasklet);
 	u8 *mem = (u8 *) (budget->grabbing);
 	u32 olddma = budget->ttbp;
 	u32 newdma = saa7146_read(budget->dev, PCI_VDP3);
 	u32 count;
 
 	/* Ensure streamed PCI data is synced to CPU */
-	pci_dma_sync_sg_for_cpu(budget->dev->pci, budget->pt.slist, budget->pt.nents, PCI_DMA_FROMDEVICE);
+	dma_sync_sg_for_cpu(&budget->dev->pci->dev, budget->pt.slist,
+			    budget->pt.nents, DMA_FROM_DEVICE);
 
 	/* nearest lower position divisible by 188 */
 	newdma -= newdma % 188;
@@ -324,7 +308,7 @@ int ttpci_budget_debiwrite(struct budget *budget, u32 config, int addr,
 static int budget_start_feed(struct dvb_demux_feed *feed)
 {
 	struct dvb_demux *demux = feed->demux;
-	struct budget *budget = (struct budget *) demux->priv;
+	struct budget *budget = demux->priv;
 	int status = 0;
 
 	dprintk(2, "budget: %p\n", budget);
@@ -333,7 +317,7 @@ static int budget_start_feed(struct dvb_demux_feed *feed)
 		return -EINVAL;
 
 	spin_lock(&budget->feedlock);
-	feed->pusi_seen = 0; /* have a clean section start */
+	feed->pusi_seen = false; /* have a clean section start */
 	if (budget->feeding++ == 0)
 		status = start_ts_capture(budget);
 	spin_unlock(&budget->feedlock);
@@ -343,7 +327,7 @@ static int budget_start_feed(struct dvb_demux_feed *feed)
 static int budget_stop_feed(struct dvb_demux_feed *feed)
 {
 	struct dvb_demux *demux = feed->demux;
-	struct budget *budget = (struct budget *) demux->priv;
+	struct budget *budget = demux->priv;
 	int status = 0;
 
 	dprintk(2, "budget: %p\n", budget);
@@ -386,20 +370,25 @@ static int budget_register(struct budget *budget)
 	ret = dvbdemux->dmx.add_frontend(&dvbdemux->dmx, &budget->hw_frontend);
 
 	if (ret < 0)
-		return ret;
+		goto err_release_dmx;
 
 	budget->mem_frontend.source = DMX_MEMORY_FE;
 	ret = dvbdemux->dmx.add_frontend(&dvbdemux->dmx, &budget->mem_frontend);
 	if (ret < 0)
-		return ret;
+		goto err_release_dmx;
 
 	ret = dvbdemux->dmx.connect_frontend(&dvbdemux->dmx, &budget->hw_frontend);
 	if (ret < 0)
-		return ret;
+		goto err_release_dmx;
 
 	dvb_net_init(&budget->dvb_adapter, &budget->dvb_net, &dvbdemux->dmx);
 
 	return 0;
+
+err_release_dmx:
+	dvb_dmxdev_release(&budget->dmxdev);
+	dvb_dmx_release(&budget->demux);
+	return ret;
 }
 
 static void budget_unregister(struct budget *budget)
@@ -507,10 +496,12 @@ int ttpci_budget_init(struct budget *budget, struct saa7146_dev *dev,
 	if (bi->type != BUDGET_FS_ACTIVY)
 		saa7146_write(dev, GPIO_CTRL, 0x500000);	/* GPIO 3 = 1 */
 
-	strlcpy(budget->i2c_adap.name, budget->card->name, sizeof(budget->i2c_adap.name));
+	strscpy(budget->i2c_adap.name, budget->card->name,
+		sizeof(budget->i2c_adap.name));
 
 	saa7146_i2c_adapter_prepare(dev, &budget->i2c_adap, SAA7146_I2C_BUS_BIT_RATE_120);
-	strcpy(budget->i2c_adap.name, budget->card->name);
+	strscpy(budget->i2c_adap.name, budget->card->name,
+		sizeof(budget->i2c_adap.name));
 
 	if (i2c_add_adapter(&budget->i2c_adap) < 0) {
 		ret = -ENOMEM;
@@ -529,7 +520,7 @@ int ttpci_budget_init(struct budget *budget, struct saa7146_dev *dev,
 	/* upload all */
 	saa7146_write(dev, GPIO_CTRL, 0x000000);
 
-	tasklet_init(&budget->vpe_tasklet, vpeirq, (unsigned long) budget);
+	tasklet_setup(&budget->vpe_tasklet, vpeirq);
 
 	/* frontend power on */
 	if (bi->type != BUDGET_FS_ACTIVY)
@@ -579,7 +570,7 @@ int ttpci_budget_deinit(struct budget *budget)
 
 void ttpci_budget_irq10_handler(struct saa7146_dev *dev, u32 * isr)
 {
-	struct budget *budget = (struct budget *) dev->ext_priv;
+	struct budget *budget = dev->ext_priv;
 
 	dprintk(8, "dev: %p, budget: %p\n", dev, budget);
 
@@ -589,7 +580,7 @@ void ttpci_budget_irq10_handler(struct saa7146_dev *dev, u32 * isr)
 
 void ttpci_budget_set_video_port(struct saa7146_dev *dev, int video_port)
 {
-	struct budget *budget = (struct budget *) dev->ext_priv;
+	struct budget *budget = dev->ext_priv;
 
 	spin_lock(&budget->feedlock);
 	budget->video_port = video_port;

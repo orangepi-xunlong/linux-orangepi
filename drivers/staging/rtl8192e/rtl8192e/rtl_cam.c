@@ -1,23 +1,12 @@
-/******************************************************************************
+// SPDX-License-Identifier: GPL-2.0
+/*
  * Copyright(c) 2008 - 2010 Realtek Corporation. All rights reserved.
  *
  * Based on the r8180 driver, which is:
  * Copyright 2004-2005 Andrea Merello <andrea.merello@gmail.com>, et al.
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of version 2 of the GNU General Public License as
- * published by the Free Software Foundation.
  *
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * The full GNU General Public License is included in this distribution in the
- * file called LICENSE.
- *
- * Contact Information:
- * wlanfae <wlanfae@realtek.com>
-******************************************************************************/
+ * Contact Information: wlanfae <wlanfae@realtek.com>
+ */
 #include "rtl_core.h"
 #include "r8192E_phy.h"
 #include "r8192E_phyreg.h"
@@ -28,7 +17,7 @@ void rtl92e_cam_reset(struct net_device *dev)
 {
 	u32 ulcommand = 0;
 
-	ulcommand |= BIT31|BIT30;
+	ulcommand |= BIT31 | BIT30;
 	rtl92e_writel(dev, RWCAM, ulcommand);
 }
 
@@ -51,41 +40,29 @@ void rtl92e_enable_hw_security_config(struct net_device *dev)
 		SECR_value |= SCR_TxUseDK;
 	}
 
-
 	ieee->hwsec_active = 1;
-	if ((ieee->pHTInfo->IOTAction&HT_IOT_ACT_PURE_N_MODE) || !hwwep) {
+	if ((ieee->ht_info->iot_action & HT_IOT_ACT_PURE_N_MODE) || !hwwep) {
 		ieee->hwsec_active = 0;
 		SECR_value &= ~SCR_RxDecEnable;
 	}
-
-	RT_TRACE(COMP_SEC, "%s:, hwsec:%d, pairwise_key:%d, SECR_value:%x\n",
-		 __func__, ieee->hwsec_active, ieee->pairwise_key_type,
-		 SECR_value);
 	rtl92e_writeb(dev, SECR, SECR_value);
 }
 
 void rtl92e_set_swcam(struct net_device *dev, u8 EntryNo, u8 KeyIndex,
-		      u16 KeyType, const u8 *MacAddr, u8 DefaultKey,
-		      u32 *KeyContent, u8 is_mesh)
+		      u16 KeyType, const u8 *MacAddr, u32 *KeyContent)
 {
 	struct r8192_priv *priv = rtllib_priv(dev);
 	struct rtllib_device *ieee = priv->rtllib;
 
-	RT_TRACE(COMP_DBG,
-		 "===========>%s():EntryNo is %d,KeyIndex is %d,KeyType is %d,is_mesh is %d\n",
-		 __func__, EntryNo, KeyIndex, KeyType, is_mesh);
-
 	if (EntryNo >= TOTAL_CAM_ENTRY)
 		return;
 
-	if (!is_mesh) {
-		ieee->swcamtable[EntryNo].bused = true;
-		ieee->swcamtable[EntryNo].key_index = KeyIndex;
-		ieee->swcamtable[EntryNo].key_type = KeyType;
-		memcpy(ieee->swcamtable[EntryNo].macaddr, MacAddr, 6);
-		ieee->swcamtable[EntryNo].useDK = DefaultKey;
-		memcpy(ieee->swcamtable[EntryNo].key_buf, (u8 *)KeyContent, 16);
-	}
+	ieee->swcamtable[EntryNo].bused = true;
+	ieee->swcamtable[EntryNo].key_index = KeyIndex;
+	ieee->swcamtable[EntryNo].key_type = KeyType;
+	memcpy(ieee->swcamtable[EntryNo].macaddr, MacAddr, 6);
+	ieee->swcamtable[EntryNo].useDK = 0;
+	memcpy(ieee->swcamtable[EntryNo].key_buf, (u8 *)KeyContent, 16);
 }
 
 void rtl92e_set_key(struct net_device *dev, u8 EntryNo, u8 KeyIndex,
@@ -97,20 +74,18 @@ void rtl92e_set_key(struct net_device *dev, u8 EntryNo, u8 KeyIndex,
 	u16 usConfig = 0;
 	u8 i;
 	struct r8192_priv *priv = (struct r8192_priv *)rtllib_priv(dev);
-	enum rt_rf_power_state rtState;
+	enum rt_rf_power_state rt_state;
 
-	rtState = priv->rtllib->eRFPowerState;
-	if (priv->rtllib->PowerSaveControl.bInactivePs) {
-		if (rtState == eRfOff) {
-			if (priv->rtllib->RfOffReason > RF_CHANGE_BY_IPS) {
-				netdev_warn(dev, "%s(): RF is OFF.\n",
-					    __func__);
-				return;
-			}
-			mutex_lock(&priv->rtllib->ips_mutex);
-			rtl92e_ips_leave(dev);
-			mutex_unlock(&priv->rtllib->ips_mutex);
+	rt_state = priv->rtllib->rf_power_state;
+	if (rt_state == rf_off) {
+		if (priv->rtllib->rf_off_reason > RF_CHANGE_BY_IPS) {
+			netdev_warn(dev, "%s(): RF is OFF.\n",
+				    __func__);
+			return;
 		}
+		mutex_lock(&priv->rtllib->ips_mutex);
+		rtl92e_ips_leave(dev);
+		mutex_unlock(&priv->rtllib->ips_mutex);
 	}
 	priv->rtllib->is_set_key = true;
 	if (EntryNo >= TOTAL_CAM_ENTRY) {
@@ -118,44 +93,38 @@ void rtl92e_set_key(struct net_device *dev, u8 EntryNo, u8 KeyIndex,
 		return;
 	}
 
-	RT_TRACE(COMP_SEC,
-		 "====>to rtl92e_set_key(), dev:%p, EntryNo:%d, KeyIndex:%d,KeyType:%d, MacAddr %pM\n",
-		 dev, EntryNo, KeyIndex, KeyType, MacAddr);
-
 	if (DefaultKey)
-		usConfig |= BIT15 | (KeyType<<2);
+		usConfig |= BIT15 | (KeyType << 2);
 	else
-		usConfig |= BIT15 | (KeyType<<2) | KeyIndex;
-
+		usConfig |= BIT15 | (KeyType << 2) | KeyIndex;
 
 	for (i = 0; i < CAM_CONTENT_COUNT; i++) {
 		TargetCommand  = i + CAM_CONTENT_COUNT * EntryNo;
-		TargetCommand |= BIT31|BIT16;
+		TargetCommand |= BIT31 | BIT16;
 
 		if (i == 0) {
-			TargetContent = (u32)(*(MacAddr+0)) << 16 |
-				(u32)(*(MacAddr+1)) << 24 |
+			TargetContent = (u32)(*(MacAddr + 0)) << 16 |
+				(u32)(*(MacAddr + 1)) << 24 |
 				(u32)usConfig;
 
 			rtl92e_writel(dev, WCAMI, TargetContent);
 			rtl92e_writel(dev, RWCAM, TargetCommand);
 		} else if (i == 1) {
-			TargetContent = (u32)(*(MacAddr+2)) |
-				(u32)(*(MacAddr+3)) <<  8 |
-				(u32)(*(MacAddr+4)) << 16 |
-				(u32)(*(MacAddr+5)) << 24;
+			TargetContent = (u32)(*(MacAddr + 2)) |
+				(u32)(*(MacAddr + 3)) <<  8 |
+				(u32)(*(MacAddr + 4)) << 16 |
+				(u32)(*(MacAddr + 5)) << 24;
 			rtl92e_writel(dev, WCAMI, TargetContent);
 			rtl92e_writel(dev, RWCAM, TargetCommand);
 		} else {
 			if (KeyContent != NULL) {
 				rtl92e_writel(dev, WCAMI,
-					      (u32)(*(KeyContent+i-2)));
+					      (u32)(*(KeyContent + i - 2)));
 				rtl92e_writel(dev, RWCAM, TargetCommand);
 				udelay(100);
 			}
 		}
 	}
-	RT_TRACE(COMP_SEC, "=========>after set key, usconfig:%x\n", usConfig);
 }
 
 void rtl92e_cam_restore(struct net_device *dev)
@@ -174,12 +143,8 @@ void rtl92e_cam_restore(struct net_device *dev)
 		0xff, 0xff, 0xff, 0xff, 0xff, 0xff
 	};
 
-	RT_TRACE(COMP_SEC, "rtl92e_cam_restore:\n");
-
-
 	if ((priv->rtllib->pairwise_key_type == KEY_TYPE_WEP40) ||
 	    (priv->rtllib->pairwise_key_type == KEY_TYPE_WEP104)) {
-
 		for (EntryId = 0; EntryId < 4; EntryId++) {
 			MacAddr = CAM_CONST_ADDR[EntryId];
 			if (priv->rtllib->swcamtable[EntryId].bused) {
@@ -195,29 +160,25 @@ void rtl92e_cam_restore(struct net_device *dev)
 		if (priv->rtllib->iw_mode == IW_MODE_ADHOC) {
 			rtl92e_set_key(dev, 4, 0,
 				       priv->rtllib->pairwise_key_type,
-				       (u8 *)dev->dev_addr, 0,
-				       (u32 *)(&priv->rtllib->swcamtable[4].
-				       key_buf[0]));
+				       (const u8 *)dev->dev_addr, 0,
+				       (u32 *)(&priv->rtllib->swcamtable[4].key_buf[0]));
 		} else {
 			rtl92e_set_key(dev, 4, 0,
 				       priv->rtllib->pairwise_key_type,
 				       MacAddr, 0,
-				       (u32 *)(&priv->rtllib->swcamtable[4].
-				       key_buf[0]));
+				       (u32 *)(&priv->rtllib->swcamtable[4].key_buf[0]));
 		}
 
 	} else if (priv->rtllib->pairwise_key_type == KEY_TYPE_CCMP) {
 		if (priv->rtllib->iw_mode == IW_MODE_ADHOC) {
 			rtl92e_set_key(dev, 4, 0,
 				       priv->rtllib->pairwise_key_type,
-				       (u8 *)dev->dev_addr, 0,
-				       (u32 *)(&priv->rtllib->swcamtable[4].
-				       key_buf[0]));
+				       (const u8 *)dev->dev_addr, 0,
+				       (u32 *)(&priv->rtllib->swcamtable[4].key_buf[0]));
 		} else {
 			rtl92e_set_key(dev, 4, 0,
 				       priv->rtllib->pairwise_key_type, MacAddr,
-				       0, (u32 *)(&priv->rtllib->swcamtable[4].
-				       key_buf[0]));
+				       0, (u32 *)(&priv->rtllib->swcamtable[4].key_buf[0]));
 			}
 	}
 

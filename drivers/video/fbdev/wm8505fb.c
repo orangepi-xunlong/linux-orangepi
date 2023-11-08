@@ -1,17 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  WonderMedia WM8505 Frame Buffer device driver
  *
  *  Copyright (C) 2010 Ed Spiridonov <edo.rus@gmail.com>
  *    Based on vt8500lcdfb.c
- *
- * This software is licensed under the terms of the GNU General Public
- * License version 2, as published by the Free Software Foundation, and
- * may be copied, distributed, and modified under those terms.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include <linux/delay.h>
@@ -182,7 +174,13 @@ static ssize_t contrast_store(struct device *dev,
 	return count;
 }
 
-static DEVICE_ATTR(contrast, 0644, contrast_show, contrast_store);
+static DEVICE_ATTR_RW(contrast);
+
+static struct attribute *wm8505fb_attrs[] = {
+	&dev_attr_contrast.attr,
+	NULL,
+};
+ATTRIBUTE_GROUPS(wm8505fb);
 
 static inline u_int chan_to_field(u_int chan, struct fb_bitfield *bf)
 {
@@ -248,7 +246,7 @@ static int wm8505fb_blank(int blank, struct fb_info *info)
 	return 0;
 }
 
-static struct fb_ops wm8505fb_ops = {
+static const struct fb_ops wm8505fb_ops = {
 	.owner		= THIS_MODULE,
 	.fb_set_par	= wm8505fb_set_par,
 	.fb_setcolreg	= wm8505fb_setcolreg,
@@ -263,7 +261,6 @@ static struct fb_ops wm8505fb_ops = {
 static int wm8505fb_probe(struct platform_device *pdev)
 {
 	struct wm8505fb_info	*fbi;
-	struct resource	*res;
 	struct display_timings *disp_timing;
 	void			*addr;
 	int ret;
@@ -276,10 +273,8 @@ static int wm8505fb_probe(struct platform_device *pdev)
 
 	fbi = devm_kzalloc(&pdev->dev, sizeof(struct wm8505fb_info) +
 			sizeof(u32) * 16, GFP_KERNEL);
-	if (!fbi) {
-		dev_err(&pdev->dev, "Failed to initialize framebuffer device\n");
+	if (!fbi)
 		return -ENOMEM;
-	}
 
 	strcpy(fbi->fb.fix.id, DRIVER_NAME);
 
@@ -290,8 +285,7 @@ static int wm8505fb_probe(struct platform_device *pdev)
 	fbi->fb.fix.accel	= FB_ACCEL_NONE;
 
 	fbi->fb.fbops		= &wm8505fb_ops;
-	fbi->fb.flags		= FBINFO_DEFAULT
-				| FBINFO_HWACCEL_COPYAREA
+	fbi->fb.flags		= FBINFO_HWACCEL_COPYAREA
 				| FBINFO_HWACCEL_FILLRECT
 				| FBINFO_HWACCEL_XPAN
 				| FBINFO_HWACCEL_YPAN
@@ -303,8 +297,7 @@ static int wm8505fb_probe(struct platform_device *pdev)
 	addr = addr + sizeof(struct wm8505fb_info);
 	fbi->fb.pseudo_palette	= addr;
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	fbi->regbase = devm_ioremap_resource(&pdev->dev, res);
+	fbi->regbase = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(fbi->regbase))
 		return PTR_ERR(fbi->regbase);
 
@@ -343,7 +336,7 @@ static int wm8505fb_probe(struct platform_device *pdev)
 
 	fbi->fb.fix.smem_start		= fb_mem_phys;
 	fbi->fb.fix.smem_len		= fb_mem_len;
-	fbi->fb.screen_base		= fb_mem_virt;
+	fbi->fb.screen_buffer		= fb_mem_virt;
 	fbi->fb.screen_size		= fb_mem_len;
 
 	fbi->contrast = 0x10;
@@ -371,10 +364,6 @@ static int wm8505fb_probe(struct platform_device *pdev)
 		return ret;
 	}
 
-	ret = device_create_file(&pdev->dev, &dev_attr_contrast);
-	if (ret < 0)
-		fb_warn(&fbi->fb, "failed to register attributes (%d)\n", ret);
-
 	fb_info(&fbi->fb, "%s frame buffer at 0x%lx-0x%lx\n",
 		fbi->fb.fix.id, fbi->fb.fix.smem_start,
 		fbi->fb.fix.smem_start + fbi->fb.fix.smem_len - 1);
@@ -382,11 +371,9 @@ static int wm8505fb_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int wm8505fb_remove(struct platform_device *pdev)
+static void wm8505fb_remove(struct platform_device *pdev)
 {
 	struct wm8505fb_info *fbi = platform_get_drvdata(pdev);
-
-	device_remove_file(&pdev->dev, &dev_attr_contrast);
 
 	unregister_framebuffer(&fbi->fb);
 
@@ -394,8 +381,6 @@ static int wm8505fb_remove(struct platform_device *pdev)
 
 	if (fbi->fb.cmap.len)
 		fb_dealloc_cmap(&fbi->fb.cmap);
-
-	return 0;
 }
 
 static const struct of_device_id wmt_dt_ids[] = {
@@ -405,10 +390,11 @@ static const struct of_device_id wmt_dt_ids[] = {
 
 static struct platform_driver wm8505fb_driver = {
 	.probe		= wm8505fb_probe,
-	.remove		= wm8505fb_remove,
+	.remove_new	= wm8505fb_remove,
 	.driver		= {
 		.name	= DRIVER_NAME,
 		.of_match_table = wmt_dt_ids,
+		.dev_groups	= wm8505fb_groups,
 	},
 };
 
@@ -416,5 +402,4 @@ module_platform_driver(wm8505fb_driver);
 
 MODULE_AUTHOR("Ed Spiridonov <edo.rus@gmail.com>");
 MODULE_DESCRIPTION("Framebuffer driver for WMT WM8505");
-MODULE_LICENSE("GPL v2");
 MODULE_DEVICE_TABLE(of, wmt_dt_ids);

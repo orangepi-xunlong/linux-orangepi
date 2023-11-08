@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Sam440ep board specific routines based off bamboo.c code
  * original copyrights below
@@ -11,17 +12,11 @@
  *
  * Modified from bamboo.c for sam440ep:
  * Copyright 2008 Giuseppe Coviello <gicoviello@gmail.com>
- *
- * This program is free software; you can redistribute  it and/or modify it
- * under  the terms of  the GNU General  Public License as published by the
- * Free Software Foundation;  either version 2 of the  License, or (at your
- * option) any later version.
  */
 #include <linux/init.h>
 #include <linux/of_platform.h>
 
 #include <asm/machdep.h>
-#include <asm/prom.h>
 #include <asm/udbg.h>
 #include <asm/time.h>
 #include <asm/uic.h>
@@ -46,9 +41,6 @@ machine_device_initcall(sam440ep, sam440ep_device_probe);
 
 static int __init sam440ep_probe(void)
 {
-	if (!of_machine_is_compatible("acube,sam440ep"))
-		return 0;
-
 	pci_set_flags(PCI_REASSIGN_ALL_RSRC);
 
 	return 1;
@@ -56,12 +48,12 @@ static int __init sam440ep_probe(void)
 
 define_machine(sam440ep) {
 	.name 			= "Sam440ep",
+	.compatible		= "acube,sam440ep",
 	.probe 			= sam440ep_probe,
 	.progress 		= udbg_progress,
 	.init_IRQ 		= uic_init_tree,
 	.get_irq 		= uic_get_irq,
 	.restart		= ppc4xx_reset_system,
-	.calibrate_decr 	= generic_calibrate_decr,
 };
 
 static struct i2c_board_info sam440ep_rtc_info = {
@@ -70,7 +62,7 @@ static struct i2c_board_info sam440ep_rtc_info = {
 	.irq = -1,
 };
 
-static int sam440ep_setup_rtc(void)
+static int __init sam440ep_setup_rtc(void)
 {
 	return i2c_register_board_info(0, &sam440ep_rtc_info, 1);
 }

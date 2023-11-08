@@ -1,13 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * OMAP2+ common Power & Reset Management (PRM) IP block functions
  *
  * Copyright (C) 2011 Texas Instruments, Inc.
  * Tero Kristo <t-kristo@ti.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
  *
  * For historical purposes, the API used to configure the PRM
  * interrupt handler refers to it as the "PRCM interrupt."  The
@@ -66,7 +62,7 @@ static struct irq_chip_generic **prcm_irq_chips;
 static struct omap_prcm_irq_setup *prcm_irq_setup;
 
 /* prm_base: base virtual address of the PRM IP block */
-void __iomem *prm_base;
+struct omap_domain_base prm_base;
 
 u16 prm_features;
 
@@ -191,7 +187,7 @@ int omap_prcm_event_to_irq(const char *name)
  *
  * No return value.
  */
-void omap_prcm_irq_cleanup(void)
+static void omap_prcm_irq_cleanup(void)
 {
 	unsigned int irq;
 	int i;
@@ -218,10 +214,7 @@ void omap_prcm_irq_cleanup(void)
 	kfree(prcm_irq_setup->priority_mask);
 	prcm_irq_setup->priority_mask = NULL;
 
-	if (prcm_irq_setup->xlate_irq)
-		irq = prcm_irq_setup->xlate_irq(prcm_irq_setup->irq);
-	else
-		irq = prcm_irq_setup->irq;
+	irq = prcm_irq_setup->irq;
 	irq_set_chained_handler(irq, NULL);
 
 	if (prcm_irq_setup->base_irq > 0)
@@ -267,10 +260,9 @@ int omap_prcm_register_chain_handler(struct omap_prcm_irq_setup *irq_setup)
 {
 	int nr_regs;
 	u32 mask[OMAP_PRCM_MAX_NR_PENDING_REG];
-	int offset, i;
+	int offset, i, irq;
 	struct irq_chip_generic *gc;
 	struct irq_chip_type *ct;
-	unsigned int irq;
 
 	if (!irq_setup)
 		return -EINVAL;
@@ -289,16 +281,15 @@ int omap_prcm_register_chain_handler(struct omap_prcm_irq_setup *irq_setup)
 
 	prcm_irq_setup = irq_setup;
 
-	prcm_irq_chips = kzalloc(sizeof(void *) * nr_regs, GFP_KERNEL);
-	prcm_irq_setup->saved_mask = kzalloc(sizeof(u32) * nr_regs, GFP_KERNEL);
-	prcm_irq_setup->priority_mask = kzalloc(sizeof(u32) * nr_regs,
-		GFP_KERNEL);
+	prcm_irq_chips = kcalloc(nr_regs, sizeof(void *), GFP_KERNEL);
+	prcm_irq_setup->saved_mask = kcalloc(nr_regs, sizeof(u32),
+					     GFP_KERNEL);
+	prcm_irq_setup->priority_mask = kcalloc(nr_regs, sizeof(u32),
+						GFP_KERNEL);
 
 	if (!prcm_irq_chips || !prcm_irq_setup->saved_mask ||
-	    !prcm_irq_setup->priority_mask) {
-		pr_err("PRCM: kzalloc failed\n");
+	    !prcm_irq_setup->priority_mask)
 		goto err;
-	}
 
 	memset(mask, 0, sizeof(mask));
 
@@ -310,10 +301,7 @@ int omap_prcm_register_chain_handler(struct omap_prcm_irq_setup *irq_setup)
 				1 << (offset & 0x1f);
 	}
 
-	if (irq_setup->xlate_irq)
-		irq = irq_setup->xlate_irq(irq_setup->irq);
-	else
-		irq = irq_setup->irq;
+	irq = irq_setup->irq;
 	irq_set_chained_handler(irq, omap_prcm_irq_handler);
 
 	irq_setup->base_irq = irq_alloc_descs(-1, 0, irq_setup->nr_regs * 32,
@@ -327,7 +315,7 @@ int omap_prcm_register_chain_handler(struct omap_prcm_irq_setup *irq_setup)
 
 	for (i = 0; i < irq_setup->nr_regs; i++) {
 		gc = irq_alloc_generic_chip("PRCM", 1,
-			irq_setup->base_irq + i * 32, prm_base,
+			irq_setup->base_irq + i * 32, prm_base.va,
 			handle_level_irq);
 
 		if (!gc) {
@@ -346,51 +334,14 @@ int omap_prcm_register_chain_handler(struct omap_prcm_irq_setup *irq_setup)
 		prcm_irq_chips[i] = gc;
 	}
 
-	if (of_have_populated_dt()) {
-		int irq = omap_prcm_event_to_irq("io");
-		omap_pcs_legacy_init(irq, irq_setup->reconfigure_io_chain);
-	}
+	irq = omap_prcm_event_to_irq("io");
+	omap_pcs_legacy_init(irq, irq_setup->reconfigure_io_chain);
 
 	return 0;
 
 err:
 	omap_prcm_irq_cleanup();
 	return -ENOMEM;
-}
-
-/**
- * omap2_set_globals_prm - set the PRM base address (for early use)
- * @prm: PRM base virtual address
- *
- * XXX Will be replaced when the PRM/CM drivers are completed.
- */
-void __init omap2_set_globals_prm(void __iomem *prm)
-{
-	prm_base = prm;
-}
-
-/**
- * prm_read_reset_sources - return the sources of the SoC's last reset
- *
- * Return a u32 bitmask representing the reset sources that caused the
- * SoC to reset.  The low-level per-SoC functions called by this
- * function remap the SoC-specific reset source bits into an
- * OMAP-common set of reset source bits, defined in
- * arch/arm/mach-omap2/prm.h.  Returns the standardized reset source
- * u32 bitmask from the hardware upon success, or returns (1 <<
- * OMAP_UNKNOWN_RST_SRC_ID_SHIFT) if no low-level read_reset_sources()
- * function was registered.
- */
-u32 prm_read_reset_sources(void)
-{
-	u32 ret = 1 << OMAP_UNKNOWN_RST_SRC_ID_SHIFT;
-
-	if (prm_ll_data->read_reset_sources)
-		ret = prm_ll_data->read_reset_sources();
-	else
-		WARN_ONCE(1, "prm: %s: no mapping function defined for reset sources\n", __func__);
-
-	return ret;
 }
 
 /**
@@ -503,22 +454,6 @@ int omap_prm_is_hardreset_asserted(u8 shift, u8 part, s16 prm_mod, u16 offset)
 }
 
 /**
- * omap_prm_reconfigure_io_chain - clear latches and reconfigure I/O chain
- *
- * Clear any previously-latched I/O wakeup events and ensure that the
- * I/O wakeup gates are aligned with the current mux settings.
- * Calls SoC specific I/O chain reconfigure function if available,
- * otherwise does nothing.
- */
-void omap_prm_reconfigure_io_chain(void)
-{
-	if (!prcm_irq_setup || !prcm_irq_setup->reconfigure_io_chain)
-		return;
-
-	prcm_irq_setup->reconfigure_io_chain();
-}
-
-/**
  * omap_prm_reset_system - trigger global SW reset
  *
  * Triggers SoC specific global warm reset to reboot the device.
@@ -533,8 +468,10 @@ void omap_prm_reset_system(void)
 
 	prm_ll_data->reset_system();
 
-	while (1)
+	while (1) {
 		cpu_relax();
+		wfe();
+	}
 }
 
 /**
@@ -676,7 +613,7 @@ static struct omap_prcm_init_data omap4_prm_data __initdata = {
 	.index = TI_CLKM_PRM,
 	.init = omap44xx_prm_init,
 	.device_inst_offset = OMAP4430_PRM_DEVICE_INST,
-	.flags = PRM_HAS_IO_WAKEUP | PRM_HAS_VOLTAGE | PRM_IRQ_DEFAULT,
+	.flags = PRM_HAS_IO_WAKEUP | PRM_HAS_VOLTAGE,
 };
 #endif
 
@@ -752,24 +689,29 @@ static const struct of_device_id omap_prcm_dt_match_table[] __initconst = {
  * on the DT data. Returns 0 in success, negative error value
  * otherwise.
  */
-int __init omap2_prm_base_init(void)
+static int __init omap2_prm_base_init(void)
 {
 	struct device_node *np;
 	const struct of_device_id *match;
 	struct omap_prcm_init_data *data;
-	void __iomem *mem;
+	struct resource res;
+	int ret;
 
 	for_each_matching_node_and_match(np, omap_prcm_dt_match_table, &match) {
 		data = (struct omap_prcm_init_data *)match->data;
 
-		mem = of_iomap(np, 0);
-		if (!mem)
-			return -ENOMEM;
+		ret = of_address_to_resource(np, 0, &res);
+		if (ret) {
+			of_node_put(np);
+			return ret;
+		}
 
-		if (data->index == TI_CLKM_PRM)
-			prm_base = mem + data->offset;
+		data->mem = ioremap(res.start, resource_size(&res));
 
-		data->mem = mem;
+		if (data->index == TI_CLKM_PRM) {
+			prm_base.va = data->mem + data->offset;
+			prm_base.pa = res.start + data->offset;
+		}
 
 		data->np = np;
 
@@ -808,8 +750,10 @@ int __init omap_prcm_init(void)
 		data = match->data;
 
 		ret = omap2_clk_provider_init(np, data->index, NULL, data->mem);
-		if (ret)
+		if (ret) {
+			of_node_put(np);
 			return ret;
+		}
 	}
 
 	omap_cm_init();

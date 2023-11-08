@@ -1,29 +1,29 @@
+/* SPDX-License-Identifier: MIT */
 #ifndef __NVKM_DISP_CONN_H__
 #define __NVKM_DISP_CONN_H__
-#include <engine/disp.h>
+#include "priv.h"
 
-#include <core/notify.h>
 #include <subdev/bios.h>
 #include <subdev/bios/conn.h>
 
-struct nvkm_connector {
+struct nvkm_conn {
 	struct nvkm_disp *disp;
 	int index;
 	struct nvbios_connE info;
 
-	struct nvkm_notify hpd;
-
 	struct list_head head;
+
+	struct nvkm_object object;
 };
 
-int  nvkm_connector_new(struct nvkm_disp *, int index, struct nvbios_connE *,
-			struct nvkm_connector **);
-void nvkm_connector_del(struct nvkm_connector **);
-void nvkm_connector_init(struct nvkm_connector *);
-void nvkm_connector_fini(struct nvkm_connector *);
+int nvkm_conn_new(struct nvkm_disp *, int index, struct nvbios_connE *,
+		  struct nvkm_conn **);
+void nvkm_conn_del(struct nvkm_conn **);
+void nvkm_conn_init(struct nvkm_conn *);
+void nvkm_conn_fini(struct nvkm_conn *);
 
 #define CONN_MSG(c,l,f,a...) do {                                              \
-	struct nvkm_connector *_conn = (c);                                    \
+	struct nvkm_conn *_conn = (c);                                    \
 	nvkm_##l(&_conn->disp->engine.subdev, "conn %02x:%02x%02x: "f"\n",     \
 		 _conn->index, _conn->info.location, _conn->info.type, ##a);   \
 } while(0)

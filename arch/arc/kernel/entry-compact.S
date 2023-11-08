@@ -1,12 +1,9 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Low Level Interrupts/Traps/Exceptions(non-TLB) Handling for ARCompact ISA
  *
  * Copyright (C) 2014-15 Synopsys, Inc. (www.synopsys.com)
  * Copyright (C) 2004, 2007-2010, 2011-2012 Synopsys, Inc. (www.synopsys.com)
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  *
  * vineetg: May 2011
  *  -Userspace unaligned access emulation
@@ -25,12 +22,12 @@
  *
  * vineetg: Nov 2009 (Everything needed for TIF_RESTORE_SIGMASK)
  *  -do_signal()invoked upon TIF_RESTORE_SIGMASK as well
- *  -Wrappers for sys_{,rt_}sigsuspend() nolonger needed as they don't
+ *  -Wrappers for sys_{,rt_}sigsuspend() no longer needed as they don't
  *   need ptregs anymore
  *
  * Vineetg: Oct 2009
  *  -In a rare scenario, Process gets a Priv-V exception and gets scheduled
- *   out. Since we don't do FAKE RTIE for Priv-V, CPU excpetion state remains
+ *   out. Since we don't do FAKE RTIE for Priv-V, CPU exception state remains
  *   active (AE bit enabled).  This causes a double fault for a subseq valid
  *   exception. Thus FAKE RTIE needed in low level Priv-Violation handler.
  *   Instr Error could also cause similar scenario, so same there as well.
@@ -59,7 +56,7 @@
  */
 
 #include <linux/errno.h>
-#include <linux/linkage.h>	/* {EXTRY,EXIT} */
+#include <linux/linkage.h>	/* {ENTRY,EXIT} */
 #include <asm/entry.h>
 #include <asm/irqflags.h>
 
@@ -80,8 +77,8 @@
 	.align 4
 
 /* Each entry in the vector table must occupy 2 words. Since it is a jump
- * across sections (.vector to .text) we are gauranteed that 'j somewhere'
- * will use the 'j limm' form of the intrsuction as long as somewhere is in
+ * across sections (.vector to .text) we are guaranteed that 'j somewhere'
+ * will use the 'j limm' form of the instruction as long as somewhere is in
  * a section other than .vector.
  */
 
@@ -105,13 +102,13 @@ VECTOR   handle_interrupt_level1 ; Other devices
 
 ; ******************** Exceptions **********************
 VECTOR   EV_MachineCheck         ; 0x100, Fatal Machine check   (0x20)
-VECTOR   EV_TLBMissI             ; 0x108, Intruction TLB miss   (0x21)
+VECTOR   EV_TLBMissI             ; 0x108, Instruction TLB miss  (0x21)
 VECTOR   EV_TLBMissD             ; 0x110, Data TLB miss         (0x22)
 VECTOR   EV_TLBProtV             ; 0x118, Protection Violation  (0x23)
 				 ;         or Misaligned Access
 VECTOR   EV_PrivilegeV           ; 0x120, Privilege Violation   (0x24)
 VECTOR   EV_Trap                 ; 0x128, Trap exception        (0x25)
-VECTOR   EV_Extension            ; 0x130, Extn Intruction Excp  (0x26)
+VECTOR   EV_Extension            ; 0x130, Extn Instruction Excp (0x26)
 
 .rept   24
 VECTOR   reserved                ; Reserved Exceptions
@@ -199,7 +196,7 @@ END(handle_interrupt_level2)
 
 ; ---------------------------------------------
 ; User Mode Memory Bus Error Interrupt Handler
-; (Kernel mode memory errors handled via seperate exception vectors)
+; (Kernel mode memory errors handled via separate exception vectors)
 ; ---------------------------------------------
 ENTRY(mem_service)
 
@@ -257,27 +254,15 @@ END(handle_interrupt_level1)
 
 ENTRY(EV_TLBProtV)
 
-	EXCEPTION_PROLOGUE
-
-	lr  r2, [ecr]
-	lr  r0, [efa]	; Faulting Data address (not part of pt_regs saved above)
-
-	; Exception auto-disables further Intr/exceptions.
-	; Re-enable them by pretending to return from exception
-	; (so rest of handler executes in pure K mode)
-
-	FAKE_RET_FROM_EXCPN
-
-	mov   r1, sp	; Handle to pt_regs
+	EXCEPTION_PROLOGUE	; ECR returned in r10
 
 	;------ (5) Type of Protection Violation? ----------
 	;
 	; ProtV Hardware Exception is triggered for Access Faults of 2 types
-	;   -Access Violaton	: 00_23_(00|01|02|03)_00
+	;   -Access Violation	: 00_23_(00|01|02|03)_00
 	;			         x  r  w  r+w
 	;   -Unaligned Access	: 00_23_04_00
-	;
-	bbit1 r2, ECR_C_BIT_PROTV_MISALIG_DATA, 4f
+	bbit1 r10, ECR_C_BIT_PROTV_MISALIG_DATA, 4f
 
 	;========= (6a) Access Violation Processing ========
 	bl  do_page_fault
@@ -306,9 +291,6 @@ END(EV_TLBProtV)
 ENTRY(call_do_page_fault)
 
 	EXCEPTION_PROLOGUE
-	lr  r0, [efa]	; Faulting Data address
-	mov   r1, sp
-	FAKE_RET_FROM_EXCPN
 
 	mov blink, ret_from_exception
 	b  do_page_fault
@@ -327,7 +309,7 @@ END(call_do_page_fault)
 
 .Lrestore_regs:
 
-	# Interrpts are actually disabled from this point on, but will get
+	# Interrupts are actually disabled from this point on, but will get
 	# reenabled after we return from interrupt/exception.
 	# But irq tracer needs to be told now...
 	TRACE_ASM_IRQ_ENABLE
@@ -335,7 +317,7 @@ END(call_do_page_fault)
 	lr	r10, [status32]
 
 	; Restore REG File. In case multiple Events outstanding,
-	; use the same priorty as rtie: EXCPN, L2 IRQ, L1 IRQ, None
+	; use the same priority as rtie: EXCPN, L2 IRQ, L1 IRQ, None
 	; Note that we use realtime STATUS32 (not pt_regs->status32) to
 	; decide that.
 

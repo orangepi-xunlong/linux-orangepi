@@ -1,15 +1,8 @@
 #!/bin/sh
+# SPDX-License-Identifier: GPL-2.0-only
 #
 # Copyright 2015, Daniel Axtens, IBM Corporation
 #
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-#  the Free Software Foundation; version 2 of the License.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-# GNU General Public License for more details.
 
 
 # do we have ./getscom, ./putscom?
@@ -43,7 +36,7 @@ trap "ppc64_cpu --smt-snooze-delay=100" 0 1
 
 # for each chip+core combination
 # todo - less fragile parsing
-egrep -o 'OCC: Chip [0-9a-f]+ Core [0-9a-f]' < /sys/firmware/opal/msglog |
+grep -E -o 'OCC: Chip [0-9a-f]+ Core [0-9a-f]' < /sys/firmware/opal/msglog |
 while read chipcore; do
 	chip=$(echo "$chipcore"|awk '{print $3}')
 	core=$(echo "$chipcore"|awk '{print $5}')

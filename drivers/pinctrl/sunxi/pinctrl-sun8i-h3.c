@@ -15,7 +15,6 @@
 #include <linux/module.h>
 #include <linux/platform_device.h>
 #include <linux/of.h>
-#include <linux/of_device.h>
 #include <linux/pinctrl/pinctrl.h>
 
 #include "pinctrl-sunxi.h"
@@ -491,7 +490,8 @@ static const struct sunxi_pinctrl_desc sun8i_h3_pinctrl_data = {
 	.pins = sun8i_h3_pins,
 	.npins = ARRAY_SIZE(sun8i_h3_pins),
 	.irq_banks = 2,
-	.irq_read_needs_mux = true
+	.irq_read_needs_mux = true,
+	.disable_strict_mode = true,
 };
 
 static int sun8i_h3_pinctrl_probe(struct platform_device *pdev)

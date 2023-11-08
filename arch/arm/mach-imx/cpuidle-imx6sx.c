@@ -1,9 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2014 Freescale Semiconductor, Inc.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/cpuidle.h>
@@ -15,6 +12,7 @@
 
 #include "common.h"
 #include "cpuidle.h"
+#include "hardware.h"
 
 static int imx6sx_idle_finish(unsigned long val)
 {
@@ -32,8 +30,8 @@ static int imx6sx_idle_finish(unsigned long val)
 	return 0;
 }
 
-static int imx6sx_enter_wait(struct cpuidle_device *dev,
-			    struct cpuidle_driver *drv, int index)
+static __cpuidle int imx6sx_enter_wait(struct cpuidle_device *dev,
+				       struct cpuidle_driver *drv, int index)
 {
 	imx6_set_lpm(WAIT_UNCLOCKED);
 
@@ -49,7 +47,9 @@ static int imx6sx_enter_wait(struct cpuidle_device *dev,
 		cpu_pm_enter();
 		cpu_cluster_pm_enter();
 
+		ct_cpuidle_enter();
 		cpu_suspend(0, imx6sx_idle_finish);
+		ct_cpuidle_exit();
 
 		cpu_cluster_pm_exit();
 		cpu_pm_exit();
@@ -89,6 +89,8 @@ static struct cpuidle_driver imx6sx_cpuidle_driver = {
 			 */
 			.exit_latency = 300,
 			.target_residency = 500,
+			.flags = CPUIDLE_FLAG_TIMER_STOP |
+				 CPUIDLE_FLAG_RCU_IDLE,
 			.enter = imx6sx_enter_wait,
 			.name = "LOW-POWER-IDLE",
 			.desc = "ARM power off",
@@ -102,13 +104,14 @@ int __init imx6sx_cpuidle_init(void)
 {
 	imx6_set_int_mem_clk_lpm(true);
 	imx6_enable_rbc(false);
+	imx_gpc_set_l2_mem_power_in_lpm(false);
 	/*
 	 * set ARM power up/down timing to the fastest,
 	 * sw2iso and sw can be set to one 32K cycle = 31us
 	 * except for power up sw2iso which need to be
 	 * larger than LDO ramp up time.
 	 */
-	imx_gpc_set_arm_power_up_timing(2, 1);
+	imx_gpc_set_arm_power_up_timing(cpu_is_imx6sx() ? 0xf : 0x2, 1);
 	imx_gpc_set_arm_power_down_timing(1, 1);
 
 	return cpuidle_register(&imx6sx_cpuidle_driver, NULL);

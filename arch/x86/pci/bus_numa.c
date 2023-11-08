@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 #include <linux/init.h>
 #include <linux/pci.h>
 #include <linux/range.h>
@@ -100,7 +101,7 @@ void update_res(struct pci_root_info *info, resource_size_t start,
 	if (start > end)
 		return;
 
-	if (start == MAX_RESOURCE)
+	if (start == RESOURCE_SIZE_MAX)
 		return;
 
 	if (!merge)

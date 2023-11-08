@@ -1,18 +1,7 @@
-/* Copyright (C) 2007-2016  B.A.T.M.A.N. contributors:
+// SPDX-License-Identifier: GPL-2.0
+/* Copyright (C) B.A.T.M.A.N. contributors:
  *
  * Marek Lindner, Simon Wunderlich
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of version 2 of the GNU General Public
- * License as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
- * General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, see <http://www.gnu.org/licenses/>.
  */
 
 #include "main.h"
@@ -22,7 +11,6 @@
 #include <linux/moduleparam.h>
 #include <linux/netlink.h>
 #include <linux/printk.h>
-#include <linux/seq_file.h>
 #include <linux/skbuff.h>
 #include <linux/stddef.h>
 #include <linux/string.h>
@@ -37,14 +25,21 @@ char batadv_routing_algo[20] = "BATMAN_IV";
 static struct hlist_head batadv_algo_list;
 
 /**
- * batadv_algo_init - Initialize batman-adv algorithm management data structures
+ * batadv_algo_init() - Initialize batman-adv algorithm management data
+ *  structures
  */
 void batadv_algo_init(void)
 {
 	INIT_HLIST_HEAD(&batadv_algo_list);
 }
 
-static struct batadv_algo_ops *batadv_algo_get(char *name)
+/**
+ * batadv_algo_get() - Search for algorithm with specific name
+ * @name: algorithm name to find
+ *
+ * Return: Pointer to batadv_algo_ops on success, NULL otherwise
+ */
+struct batadv_algo_ops *batadv_algo_get(const char *name)
 {
 	struct batadv_algo_ops *bat_algo_ops = NULL, *bat_algo_ops_tmp;
 
@@ -59,6 +54,12 @@ static struct batadv_algo_ops *batadv_algo_get(char *name)
 	return bat_algo_ops;
 }
 
+/**
+ * batadv_algo_register() - Register callbacks for a mesh algorithm
+ * @bat_algo_ops: mesh algorithm callbacks to add
+ *
+ * Return: 0 on success or negative error number in case of failure
+ */
 int batadv_algo_register(struct batadv_algo_ops *bat_algo_ops)
 {
 	struct batadv_algo_ops *bat_algo_ops_tmp;
@@ -88,7 +89,20 @@ int batadv_algo_register(struct batadv_algo_ops *bat_algo_ops)
 	return 0;
 }
 
-int batadv_algo_select(struct batadv_priv *bat_priv, char *name)
+/**
+ * batadv_algo_select() - Select algorithm of soft interface
+ * @bat_priv: the bat priv with all the soft interface information
+ * @name: name of the algorithm to select
+ *
+ * The algorithm callbacks for the soft interface will be set when the algorithm
+ * with the correct name was found. Any previous selected algorithm will not be
+ * deinitialized and the new selected algorithm will also not be initialized.
+ * It is therefore not allowed to call batadv_algo_select outside the creation
+ * function of the soft interface.
+ *
+ * Return: 0 on success or negative error number in case of failure
+ */
+int batadv_algo_select(struct batadv_priv *bat_priv, const char *name)
 {
 	struct batadv_algo_ops *bat_algo_ops;
 
@@ -100,21 +114,6 @@ int batadv_algo_select(struct batadv_priv *bat_priv, char *name)
 
 	return 0;
 }
-
-#ifdef CONFIG_BATMAN_ADV_DEBUGFS
-int batadv_algo_seq_print_text(struct seq_file *seq, void *offset)
-{
-	struct batadv_algo_ops *bat_algo_ops;
-
-	seq_puts(seq, "Available routing algorithms:\n");
-
-	hlist_for_each_entry(bat_algo_ops, &batadv_algo_list, list) {
-		seq_printf(seq, " * %s\n", bat_algo_ops->name);
-	}
-
-	return 0;
-}
-#endif
 
 static int batadv_param_set_ra(const char *val, const struct kernel_param *kp)
 {
@@ -148,7 +147,7 @@ module_param_cb(routing_algo, &batadv_param_ops_ra, &batadv_param_string_ra,
 		0644);
 
 /**
- * batadv_algo_dump_entry - fill in information about one supported routing
+ * batadv_algo_dump_entry() - fill in information about one supported routing
  *  algorithm
  * @msg: netlink message to be sent back
  * @portid: Port to reply to
@@ -179,7 +178,7 @@ static int batadv_algo_dump_entry(struct sk_buff *msg, u32 portid, u32 seq,
 }
 
 /**
- * batadv_algo_dump - fill in information about supported routing
+ * batadv_algo_dump() - fill in information about supported routing
  *  algorithms
  * @msg: netlink message to be sent back
  * @cb: Parameters to the netlink request

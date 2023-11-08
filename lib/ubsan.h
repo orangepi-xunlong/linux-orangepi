@@ -1,5 +1,38 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _LIB_UBSAN_H
 #define _LIB_UBSAN_H
+
+/*
+ * ABI defined by Clang's UBSAN enum SanitizerHandler:
+ * https://github.com/llvm/llvm-project/blob/release/16.x/clang/lib/CodeGen/CodeGenFunction.h#L113
+ */
+enum ubsan_checks {
+	ubsan_add_overflow,
+	ubsan_builtin_unreachable,
+	ubsan_cfi_check_fail,
+	ubsan_divrem_overflow,
+	ubsan_dynamic_type_cache_miss,
+	ubsan_float_cast_overflow,
+	ubsan_function_type_mismatch,
+	ubsan_implicit_conversion,
+	ubsan_invalid_builtin,
+	ubsan_invalid_objc_cast,
+	ubsan_load_invalid_value,
+	ubsan_missing_return,
+	ubsan_mul_overflow,
+	ubsan_negate_overflow,
+	ubsan_nullability_arg,
+	ubsan_nullability_return,
+	ubsan_nonnull_arg,
+	ubsan_nonnull_return,
+	ubsan_out_of_bounds,
+	ubsan_pointer_overflow,
+	ubsan_shift_out_of_bounds,
+	ubsan_sub_overflow,
+	ubsan_type_mismatch,
+	ubsan_alignment_assumption,
+	ubsan_vla_bound_not_positive,
+};
 
 enum {
 	type_kind_int = 0,
@@ -56,16 +89,6 @@ struct nonnull_arg_data {
 	int arg_index;
 };
 
-struct nonnull_return_data {
-	struct source_location location;
-	struct source_location attr_location;
-};
-
-struct vla_bound_data {
-	struct source_location location;
-	struct type_descriptor *type;
-};
-
 struct out_of_bounds_data {
 	struct source_location location;
 	struct type_descriptor *array_type;
@@ -87,12 +110,29 @@ struct invalid_value_data {
 	struct type_descriptor *type;
 };
 
-#if defined(CONFIG_ARCH_SUPPORTS_INT128) && defined(__SIZEOF_INT128__)
+struct alignment_assumption_data {
+	struct source_location location;
+	struct source_location assumption_location;
+	struct type_descriptor *type;
+};
+
+#if defined(CONFIG_ARCH_SUPPORTS_INT128)
 typedef __int128 s_max;
 typedef unsigned __int128 u_max;
 #else
 typedef s64 s_max;
 typedef u64 u_max;
 #endif
+
+void __ubsan_handle_divrem_overflow(void *_data, void *lhs, void *rhs);
+void __ubsan_handle_type_mismatch(struct type_mismatch_data *data, void *ptr);
+void __ubsan_handle_type_mismatch_v1(void *_data, void *ptr);
+void __ubsan_handle_out_of_bounds(void *_data, void *index);
+void __ubsan_handle_shift_out_of_bounds(void *_data, void *lhs, void *rhs);
+void __ubsan_handle_builtin_unreachable(void *_data);
+void __ubsan_handle_load_invalid_value(void *_data, void *val);
+void __ubsan_handle_alignment_assumption(void *_data, unsigned long ptr,
+					 unsigned long align,
+					 unsigned long offset);
 
 #endif

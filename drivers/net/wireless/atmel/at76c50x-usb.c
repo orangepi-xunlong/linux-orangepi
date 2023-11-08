@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * at76c503/at76c505 USB driver
  *
@@ -9,20 +10,14 @@
  * Copyright (c) 2007 Kalle Valo <kalle.valo@iki.fi>
  * Copyright (c) 2010 Sebastian Smolorz <sesmo@gmx.net>
  *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as
- * published by the Free Software Foundation; either version 2 of
- * the License, or (at your option) any later version.
- *
- * This file is part of the Berlios driver for WLAN USB devices based on the
+ * This file is part of the Berlios driver for USB WLAN devices based on the
  * Atmel AT76C503A/505/505A.
  *
  * Some iw_handler code was taken from airo.c, (C) 1999 Benjamin Reed
  *
  * TODO list is at the wiki:
  *
- * http://wireless.kernel.org/en/users/Drivers/at76c50x-usb#TODO
- *
+ * https://wireless.wiki.kernel.org/en/users/Drivers/at76c50x-usb#TODO
  */
 
 #include <linux/init.h>
@@ -106,7 +101,7 @@ do {									\
 static uint at76_debug = DBG_DEFAULTS;
 
 /* Protect against concurrent firmware loading and parsing */
-static struct mutex fw_mutex;
+static DEFINE_MUTEX(fw_mutex);
 
 static struct fwentry firmwares[] = {
 	[0] = { "" },
@@ -130,7 +125,7 @@ MODULE_FIRMWARE("atmel_at76c505amx-rfmd.bin");
 
 #define USB_DEVICE_DATA(__ops)	.driver_info = (kernel_ulong_t)(__ops)
 
-static struct usb_device_id dev_table[] = {
+static const struct usb_device_id dev_table[] = {
 	/*
 	 * at76c503-i3861
 	 */
@@ -148,7 +143,7 @@ static struct usb_device_id dev_table[] = {
 	{ USB_DEVICE(0x0cde, 0x0001), USB_DEVICE_DATA(BOARD_503_ISL3861) },
 	/* Dynalink/Askey WLL013 (intersil) */
 	{ USB_DEVICE(0x069a, 0x0320), USB_DEVICE_DATA(BOARD_503_ISL3861) },
-	/* EZ connect 11Mpbs Wireless USB Adapter SMC2662W v1 */
+	/* EZ connect 11Mpbs USB Wireless Adapter SMC2662W v1 */
 	{ USB_DEVICE(0x0d5c, 0xa001), USB_DEVICE_DATA(BOARD_503_ISL3861) },
 	/* BenQ AWL300 */
 	{ USB_DEVICE(0x04a5, 0x9000), USB_DEVICE_DATA(BOARD_503_ISL3861) },
@@ -200,7 +195,7 @@ static struct usb_device_id dev_table[] = {
 	{ USB_DEVICE(0x04a5, 0x9001), USB_DEVICE_DATA(BOARD_503) },
 	/* 3Com 3CRSHEW696 */
 	{ USB_DEVICE(0x0506, 0x0a01), USB_DEVICE_DATA(BOARD_503) },
-	/* Siemens Santis ADSL WLAN USB adapter WLL 013 */
+	/* Siemens Santis ADSL USB WLAN adapter WLL 013 */
 	{ USB_DEVICE(0x0681, 0x001b), USB_DEVICE_DATA(BOARD_503) },
 	/* Belkin F5D6050, version 2 */
 	{ USB_DEVICE(0x050d, 0x0050), USB_DEVICE_DATA(BOARD_503) },
@@ -243,7 +238,7 @@ static struct usb_device_id dev_table[] = {
 	{ USB_DEVICE(0x1915, 0x2233), USB_DEVICE_DATA(BOARD_505_2958) },
 	/* Xterasys XN-2122B, IBlitzz BWU613B/BWU613SB */
 	{ USB_DEVICE(0x12fd, 0x1001), USB_DEVICE_DATA(BOARD_505_2958) },
-	/* Corega WLAN USB Stick 11 */
+	/* Corega USB WLAN Stick 11 */
 	{ USB_DEVICE(0x07aa, 0x7613), USB_DEVICE_DATA(BOARD_505_2958) },
 	/* Microstar MSI Box MS6978 */
 	{ USB_DEVICE(0x0db0, 0x1020), USB_DEVICE_DATA(BOARD_505_2958) },
@@ -437,7 +432,7 @@ static int at76_usbdfu_download(struct usb_device *udev, u8 *buf, u32 size,
 
 		case STATE_DFU_DOWNLOAD_IDLE:
 			at76_dbg(DBG_DFU, "DOWNLOAD...");
-			/* fall through */
+			fallthrough;
 		case STATE_DFU_IDLE:
 			at76_dbg(DBG_DFU, "DFU IDLE");
 
@@ -518,11 +513,11 @@ exit:
 
 /* LED trigger */
 static int tx_activity;
-static void at76_ledtrig_tx_timerfunc(unsigned long data);
-static DEFINE_TIMER(ledtrig_tx_timer, at76_ledtrig_tx_timerfunc, 0, 0);
+static void at76_ledtrig_tx_timerfunc(struct timer_list *unused);
+static DEFINE_TIMER(ledtrig_tx_timer, at76_ledtrig_tx_timerfunc);
 DEFINE_LED_TRIGGER(ledtrig_tx);
 
-static void at76_ledtrig_tx_timerfunc(unsigned long data)
+static void at76_ledtrig_tx_timerfunc(struct timer_list *unused)
 {
 	static int tx_lastactivity;
 
@@ -1204,7 +1199,6 @@ static void at76_rx_callback(struct urb *urb)
 {
 	struct at76_priv *priv = urb->context;
 
-	priv->rx_tasklet.data = (unsigned long)urb;
 	tasklet_schedule(&priv->rx_tasklet);
 }
 
@@ -1550,10 +1544,10 @@ exit:
 	return ieee80211_channel_to_frequency(channel, NL80211_BAND_2GHZ);
 }
 
-static void at76_rx_tasklet(unsigned long param)
+static void at76_rx_tasklet(struct tasklet_struct *t)
 {
-	struct urb *urb = (struct urb *)param;
-	struct at76_priv *priv = urb->context;
+	struct at76_priv *priv = from_tasklet(priv, t, rx_tasklet);
+	struct urb *urb = priv->rx_urb;
 	struct at76_rx_buffer *buf;
 	struct ieee80211_rx_status rx_status = { 0 };
 
@@ -2039,7 +2033,7 @@ static int at76_config(struct ieee80211_hw *hw, u32 changed)
 static void at76_bss_info_changed(struct ieee80211_hw *hw,
 				  struct ieee80211_vif *vif,
 				  struct ieee80211_bss_conf *conf,
-				  u32 changed)
+				  u64 changed)
 {
 	struct at76_priv *priv = hw->priv;
 
@@ -2185,6 +2179,7 @@ static int at76_set_key(struct ieee80211_hw *hw, enum set_key_cmd cmd,
 
 static const struct ieee80211_ops at76_ops = {
 	.tx = at76_mac80211_tx,
+	.wake_tx_queue = ieee80211_handle_wake_tx_queue,
 	.add_interface = at76_add_interface,
 	.remove_interface = at76_remove_interface,
 	.config = at76_config,
@@ -2220,7 +2215,7 @@ static struct at76_priv *at76_alloc_new_device(struct usb_device *udev)
 	INIT_WORK(&priv->work_join_bssid, at76_work_join_bssid);
 	INIT_DELAYED_WORK(&priv->dwork_hw_scan, at76_dwork_hw_scan);
 
-	tasklet_init(&priv->rx_tasklet, at76_rx_tasklet, 0);
+	tasklet_setup(&priv->rx_tasklet, at76_rx_tasklet);
 
 	priv->pm_mode = AT76_PM_OFF;
 	priv->pm_period = 0;
@@ -2241,7 +2236,7 @@ static int at76_alloc_urbs(struct at76_priv *priv,
 	at76_dbg(DBG_PROC_ENTRY, "%s: ENTER", __func__);
 
 	at76_dbg(DBG_URB, "%s: NumEndpoints %d ", __func__,
-		 interface->altsetting[0].desc.bNumEndpoints);
+		 interface->cur_altsetting->desc.bNumEndpoints);
 
 	ep_in = NULL;
 	ep_out = NULL;
@@ -2376,6 +2371,8 @@ static int at76_init_new_device(struct at76_priv *priv,
 		 priv->fw_version.patch, priv->fw_version.build);
 
 	wiphy->hw_version = priv->board_type;
+
+	wiphy_ext_feature_set(wiphy, NL80211_EXT_FEATURE_CQM_RSSI_LIST);
 
 	ret = ieee80211_register_hw(priv->hw);
 	if (ret) {
@@ -2576,15 +2573,13 @@ static int __init at76_mod_init(void)
 
 	printk(KERN_INFO DRIVER_DESC " " DRIVER_VERSION " loading\n");
 
-	mutex_init(&fw_mutex);
-
 	/* register this driver with the USB subsystem */
 	result = usb_register(&at76_driver);
 	if (result < 0)
 		printk(KERN_ERR DRIVER_NAME
 		       ": usb_register failed (status %d)\n", result);
-
-	led_trigger_register_simple("at76_usb-tx", &ledtrig_tx);
+	else
+		led_trigger_register_simple("at76_usb-tx", &ledtrig_tx);
 	return result;
 }
 

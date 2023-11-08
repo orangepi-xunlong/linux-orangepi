@@ -1,19 +1,7 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /******************************************************************************
  *
  * Copyright(c) 2007 - 2010 Realtek Corporation. All rights reserved.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of version 2 of the GNU General Public License as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
- * more details.
- *
- * You should have received a copy of the GNU General Public License along with
- * this program; if not, write to the Free Software Foundation, Inc.,
- * 51 Franklin Street, Fifth Floor, Boston, MA 02110, USA
  *
  * Modifications for inclusion into the Linux staging tree are
  * Copyright(c) 2010 Larry Finger. All rights reserved.
@@ -129,19 +117,16 @@
 						       * Block's Bandgap.
 						       */
 
-
 /*--------------------------------------------------------------------------*/
 /*       SPS1_CTRL bits				(Offset 0x18-1E, 56bits)*/
 /*--------------------------------------------------------------------------*/
 #define	SPS1_SWEN		BIT(1)	/* Enable vsps18 SW Macro Block.*/
 #define	SPS1_LDEN		BIT(0)	/* Enable VSPS12 LDO Macro block.*/
 
-
 /*----------------------------------------------------------------------------*/
 /*       LDOA15_CTRL bits		(Offset 0x20, 8bits)*/
 /*----------------------------------------------------------------------------*/
 #define	LDA15_EN		BIT(0)	/* Enable LDOA15 Macro Block*/
-
 
 /*----------------------------------------------------------------------------*/
 /*       8192S LDOV12D_CTRL bit		(Offset 0x21, 8bits)*/
@@ -151,7 +136,6 @@
 
 /*CLK_PS_CTRL*/
 #define	_CLK_GATE_EN		BIT(0)
-
 
 /* EFUSE_CTRL*/
 #define EF_FLAG			BIT(31)		/* Access Flag, Write:1;

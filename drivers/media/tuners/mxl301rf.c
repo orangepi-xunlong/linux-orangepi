@@ -1,17 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * MaxLinear MxL301RF OFDM tuner driver
  *
  * Copyright (C) 2014 Akihiro Tsukada <tskd08@gmail.com>
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as
- * published by the Free Software Foundation version 2.
- *
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 /*
@@ -280,8 +271,8 @@ static const struct dvb_tuner_ops mxl301rf_ops = {
 	.info = {
 		.name = "MaxLinear MxL301RF",
 
-		.frequency_min =  93000000,
-		.frequency_max = 803142857,
+		.frequency_min_hz =  93 * MHz,
+		.frequency_max_hz = 803 * MHz + 142857,
 	},
 
 	.init = mxl301rf_init,
@@ -292,8 +283,7 @@ static const struct dvb_tuner_ops mxl301rf_ops = {
 };
 
 
-static int mxl301rf_probe(struct i2c_client *client,
-			  const struct i2c_device_id *id)
+static int mxl301rf_probe(struct i2c_client *client)
 {
 	struct mxl301rf_state *state;
 	struct mxl301rf_config *cfg;
@@ -316,14 +306,13 @@ static int mxl301rf_probe(struct i2c_client *client,
 	return 0;
 }
 
-static int mxl301rf_remove(struct i2c_client *client)
+static void mxl301rf_remove(struct i2c_client *client)
 {
 	struct mxl301rf_state *state;
 
 	state = cfg_to_state(i2c_get_clientdata(client));
 	state->cfg.fe->tuner_priv = NULL;
 	kfree(state);
-	return 0;
 }
 
 

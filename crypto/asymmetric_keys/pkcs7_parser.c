@@ -1,23 +1,24 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* PKCS#7 parser
  *
  * Copyright (C) 2012 Red Hat, Inc. All Rights Reserved.
  * Written by David Howells (dhowells@redhat.com)
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public Licence
- * as published by the Free Software Foundation; either version
- * 2 of the Licence, or (at your option) any later version.
  */
 
 #define pr_fmt(fmt) "PKCS7: "fmt
 #include <linux/kernel.h>
+#include <linux/module.h>
 #include <linux/export.h>
 #include <linux/slab.h>
 #include <linux/err.h>
 #include <linux/oid_registry.h>
 #include <crypto/public_key.h>
 #include "pkcs7_parser.h"
-#include "pkcs7-asn1.h"
+#include "pkcs7.asn1.h"
+
+MODULE_DESCRIPTION("PKCS#7 parser");
+MODULE_AUTHOR("Red Hat, Inc.");
+MODULE_LICENSE("GPL");
 
 struct pkcs7_parse_context {
 	struct pkcs7_message	*msg;		/* Message being constructed */
@@ -143,8 +144,10 @@ struct pkcs7_message *pkcs7_parse_message(const void *data, size_t datalen)
 	}
 
 	ret = pkcs7_check_authattrs(ctx->msg);
-	if (ret < 0)
+	if (ret < 0) {
+		msg = ERR_PTR(ret);
 		goto out;
+	}
 
 	msg = ctx->msg;
 	ctx->msg = NULL;
@@ -245,6 +248,15 @@ int pkcs7_sig_note_digest_algo(void *context, size_t hdrlen,
 	case OID_sha224:
 		ctx->sinfo->sig->hash_algo = "sha224";
 		break;
+	case OID_sm3:
+		ctx->sinfo->sig->hash_algo = "sm3";
+		break;
+	case OID_gost2012Digest256:
+		ctx->sinfo->sig->hash_algo = "streebog256";
+		break;
+	case OID_gost2012Digest512:
+		ctx->sinfo->sig->hash_algo = "streebog512";
+		break;
 	default:
 		printk("Unsupported digest algo: %u\n", ctx->last_oid);
 		return -ENOPKG;
@@ -264,6 +276,24 @@ int pkcs7_sig_note_pkey_algo(void *context, size_t hdrlen,
 	switch (ctx->last_oid) {
 	case OID_rsaEncryption:
 		ctx->sinfo->sig->pkey_algo = "rsa";
+		ctx->sinfo->sig->encoding = "pkcs1";
+		break;
+	case OID_id_ecdsa_with_sha1:
+	case OID_id_ecdsa_with_sha224:
+	case OID_id_ecdsa_with_sha256:
+	case OID_id_ecdsa_with_sha384:
+	case OID_id_ecdsa_with_sha512:
+		ctx->sinfo->sig->pkey_algo = "ecdsa";
+		ctx->sinfo->sig->encoding = "x962";
+		break;
+	case OID_SM2_with_SM3:
+		ctx->sinfo->sig->pkey_algo = "sm2";
+		ctx->sinfo->sig->encoding = "raw";
+		break;
+	case OID_gost2012PKey256:
+	case OID_gost2012PKey512:
+		ctx->sinfo->sig->pkey_algo = "ecrdsa";
+		ctx->sinfo->sig->encoding = "raw";
 		break;
 	default:
 		printk("Unsupported pkey algo: %u\n", ctx->last_oid);

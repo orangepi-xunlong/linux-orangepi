@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * linux/drivers/clocksource/acpi_pm.c
  *
@@ -12,8 +13,6 @@
  *
  * Based on parts of linux/drivers/acpi/hardware/hwtimer.c, timer_pit.c,
  * timer_hpet.c, and on Arjan van de Ven's implementation for 2.4.
- *
- * This file is licensed under the GPL v2.
  */
 
 #include <linux/acpi_pmtmr.h>
@@ -24,6 +23,7 @@
 #include <linux/pci.h>
 #include <linux/delay.h>
 #include <asm/io.h>
+#include <asm/time.h>
 
 /*
  * The I/O port the PMTMR resides at.
@@ -58,16 +58,16 @@ u32 acpi_pm_read_verified(void)
 	return v2;
 }
 
-static cycle_t acpi_pm_read(struct clocksource *cs)
+static u64 acpi_pm_read(struct clocksource *cs)
 {
-	return (cycle_t)read_pmtmr();
+	return (u64)read_pmtmr();
 }
 
 static struct clocksource clocksource_acpi_pm = {
 	.name		= "acpi_pm",
 	.rating		= 200,
 	.read		= acpi_pm_read,
-	.mask		= (cycle_t)ACPI_PM_MASK,
+	.mask		= (u64)ACPI_PM_MASK,
 	.flags		= CLOCK_SOURCE_IS_CONTINUOUS,
 };
 
@@ -81,9 +81,9 @@ static int __init acpi_pm_good_setup(char *__str)
 }
 __setup("acpi_pm_good", acpi_pm_good_setup);
 
-static cycle_t acpi_pm_read_slow(struct clocksource *cs)
+static u64 acpi_pm_read_slow(struct clocksource *cs)
 {
-	return (cycle_t)acpi_pm_read_verified();
+	return (u64)acpi_pm_read_verified();
 }
 
 static inline void acpi_pm_need_workaround(void)
@@ -145,7 +145,7 @@ DECLARE_PCI_FIXUP_EARLY(PCI_VENDOR_ID_SERVERWORKS, PCI_DEVICE_ID_SERVERWORKS_LE,
  */
 static int verify_pmtmr_rate(void)
 {
-	cycle_t value1, value2;
+	u64 value1, value2;
 	unsigned long count, delta;
 
 	mach_prepare_counter();
@@ -175,7 +175,7 @@ static int verify_pmtmr_rate(void)
 
 static int __init init_acpi_pm_clocksource(void)
 {
-	cycle_t value1, value2;
+	u64 value1, value2;
 	unsigned int i, j = 0;
 
 	if (!pmtmr_ioport)
@@ -211,8 +211,9 @@ static int __init init_acpi_pm_clocksource(void)
 		return -ENODEV;
 	}
 
-	return clocksource_register_hz(&clocksource_acpi_pm,
-						PMTMR_TICKS_PER_SEC);
+	if (tsc_clocksource_watchdog_disabled())
+		clocksource_acpi_pm.flags |= CLOCK_SOURCE_MUST_VERIFY;
+	return clocksource_register_hz(&clocksource_acpi_pm, PMTMR_TICKS_PER_SEC);
 }
 
 /* We use fs_initcall because we want the PCI fixups to have run
@@ -230,8 +231,10 @@ static int __init parse_pmtmr(char *arg)
 	int ret;
 
 	ret = kstrtouint(arg, 16, &base);
-	if (ret)
-		return ret;
+	if (ret) {
+		pr_warn("PMTMR: invalid 'pmtmr=' value: '%s'\n", arg);
+		return 1;
+	}
 
 	pr_info("PMTMR IOPort override: 0x%04x -> 0x%04x\n", pmtmr_ioport,
 		base);

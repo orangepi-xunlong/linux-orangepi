@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * driver.c - device id matching, driver model, etc.
  *
@@ -67,6 +68,7 @@ int pnp_device_attach(struct pnp_dev *pnp_dev)
 	mutex_unlock(&pnp_lock);
 	return 0;
 }
+EXPORT_SYMBOL(pnp_device_attach);
 
 void pnp_device_detach(struct pnp_dev *pnp_dev)
 {
@@ -75,6 +77,7 @@ void pnp_device_detach(struct pnp_dev *pnp_dev)
 		pnp_dev->status = PNP_READY;
 	mutex_unlock(&pnp_lock);
 }
+EXPORT_SYMBOL(pnp_device_detach);
 
 static int pnp_device_probe(struct device *dev)
 {
@@ -120,7 +123,7 @@ fail:
 	return error;
 }
 
-static int pnp_device_remove(struct device *dev)
+static void pnp_device_remove(struct device *dev)
 {
 	struct pnp_dev *pnp_dev = to_pnp_dev(dev);
 	struct pnp_driver *drv = pnp_dev->driver;
@@ -136,7 +139,6 @@ static int pnp_device_remove(struct device *dev)
 		pnp_disable_dev(pnp_dev);
 
 	pnp_device_detach(pnp_dev);
-	return 0;
 }
 
 static void pnp_device_shutdown(struct device *dev)
@@ -169,7 +171,7 @@ static int __pnp_bus_suspend(struct device *dev, pm_message_t state)
 
 	if (pnp_drv->driver.pm && pnp_drv->driver.pm->suspend) {
 		error = pnp_drv->driver.pm->suspend(dev);
-		suspend_report_result(pnp_drv->driver.pm->suspend, error);
+		suspend_report_result(dev, pnp_drv->driver.pm->suspend, error);
 		if (error)
 			return error;
 	}
@@ -180,7 +182,8 @@ static int __pnp_bus_suspend(struct device *dev, pm_message_t state)
 			return error;
 	}
 
-	if (pnp_can_disable(pnp_dev)) {
+	/* can_write is necessary to be able to re-start the device on resume */
+	if (pnp_can_disable(pnp_dev) && pnp_can_write(pnp_dev)) {
 		error = pnp_stop_dev(pnp_dev);
 		if (error)
 			return error;
@@ -270,11 +273,13 @@ int pnp_register_driver(struct pnp_driver *drv)
 
 	return driver_register(&drv->driver);
 }
+EXPORT_SYMBOL(pnp_register_driver);
 
 void pnp_unregister_driver(struct pnp_driver *drv)
 {
 	driver_unregister(&drv->driver);
 }
+EXPORT_SYMBOL(pnp_unregister_driver);
 
 /**
  * pnp_add_id - adds an EISA id to the specified device
@@ -309,8 +314,3 @@ struct pnp_id *pnp_add_id(struct pnp_dev *dev, const char *id)
 
 	return dev_id;
 }
-
-EXPORT_SYMBOL(pnp_register_driver);
-EXPORT_SYMBOL(pnp_unregister_driver);
-EXPORT_SYMBOL(pnp_device_attach);
-EXPORT_SYMBOL(pnp_device_detach);

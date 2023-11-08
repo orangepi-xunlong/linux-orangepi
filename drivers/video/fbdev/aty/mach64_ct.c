@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 
 /*
  *  ATI Mach64 CT/VT/GT/LT Support
@@ -21,13 +22,11 @@ static u32 aty_pll_to_var_ct(const struct fb_info *info, const union aty_pll *pl
 
 u8 aty_ld_pll_ct(int offset, const struct atyfb_par *par)
 {
-	u8 res;
 
 	/* write addr byte */
 	aty_st_8(CLOCK_CNTL_ADDR, (offset << 2) & PLL_ADDR, par);
 	/* read the register value */
-	res = aty_ld_8(CLOCK_CNTL_DATA, par);
-	return res;
+	return aty_ld_8(CLOCK_CNTL_DATA, par);
 }
 
 static void aty_st_pll_ct(int offset, u8 val, const struct atyfb_par *par)
@@ -114,7 +113,7 @@ static void aty_st_pll_ct(int offset, u8 val, const struct atyfb_par *par)
  */
 
 #define Maximum_DSP_PRECISION 7
-static u8 postdividers[] = {1,2,4,8,3};
+const u8 aty_postdividers[8] = {1,2,4,8,3,5,6,12};
 
 static int aty_dsp_gt(const struct fb_info *info, u32 bpp, struct pll_ct *pll)
 {
@@ -179,7 +178,7 @@ static int aty_dsp_gt(const struct fb_info *info, u32 bpp, struct pll_ct *pll)
 		dsp_on = ((multiplier << vshift) + divider) / divider;
 		tmp = ((ras_multiplier << xshift) + ras_divider) / ras_divider;
 		if (dsp_on < tmp)
-		dsp_on = tmp;
+			dsp_on = tmp;
 		dsp_on = dsp_on + (tmp * 2) + (pll->xclkpagefaultdelay << xshift);
 	}
 
@@ -221,7 +220,7 @@ static int aty_valid_pll_ct(const struct fb_info *info, u32 vclk_per, struct pll
 		pll->vclk_post_div += (q <  64*8);
 		pll->vclk_post_div += (q <  32*8);
 	}
-	pll->vclk_post_div_real = postdividers[pll->vclk_post_div];
+	pll->vclk_post_div_real = aty_postdividers[pll->vclk_post_div];
 	//    pll->vclk_post_div <<= 6;
 	pll->vclk_fb_div = q * pll->vclk_post_div_real / 8;
 	pllvclk = (1000000 * 2 * pll->vclk_fb_div) /
@@ -280,10 +279,13 @@ static u32 aty_pll_to_var_ct(const struct fb_info *info, const union aty_pll *pl
 void aty_set_pll_ct(const struct fb_info *info, const union aty_pll *pll)
 {
 	struct atyfb_par *par = (struct atyfb_par *) info->par;
-	u32 crtc_gen_cntl, lcd_gen_cntrl;
+	u32 crtc_gen_cntl;
 	u8 tmp, tmp2;
 
-	lcd_gen_cntrl = 0;
+#ifdef CONFIG_FB_ATY_GENERIC_LCD
+	u32 lcd_gen_cntrl = 0;
+#endif
+
 #ifdef DEBUG
 	printk("atyfb(%s): about to program:\n"
 		"pll_ext_cntl=0x%02x pll_gen_cntl=0x%02x pll_vclk_cntl=0x%02x\n",
@@ -401,7 +403,7 @@ static int aty_init_pll_ct(const struct fb_info *info, union aty_pll *pll)
 	struct atyfb_par *par = (struct atyfb_par *) info->par;
 	u8 mpost_div, xpost_div, sclk_post_div_real;
 	u32 q, memcntl, trp;
-	u32 dsp_config, dsp_on_off, vga_dsp_config, vga_dsp_on_off;
+	u32 dsp_config;
 #ifdef DEBUG
 	int pllmclk, pllsclk;
 #endif
@@ -487,9 +489,9 @@ static int aty_init_pll_ct(const struct fb_info *info, union aty_pll *pll)
 
 	/* Allow BIOS to override */
 	dsp_config = aty_ld_le32(DSP_CONFIG, par);
-	dsp_on_off = aty_ld_le32(DSP_ON_OFF, par);
-	vga_dsp_config = aty_ld_le32(VGA_DSP_CONFIG, par);
-	vga_dsp_on_off = aty_ld_le32(VGA_DSP_ON_OFF, par);
+	aty_ld_le32(DSP_ON_OFF, par);
+	aty_ld_le32(VGA_DSP_CONFIG, par);
+	aty_ld_le32(VGA_DSP_ON_OFF, par);
 
 	if (dsp_config)
 		pll->ct.dsp_loop_latency = (dsp_config & DSP_LOOP_LATENCY) >> 16;
@@ -512,7 +514,7 @@ static int aty_init_pll_ct(const struct fb_info *info, union aty_pll *pll)
 		u8 mclk_fb_div, pll_ext_cntl;
 		pll->ct.pll_ref_div = aty_ld_pll_ct(PLL_REF_DIV, par);
 		pll_ext_cntl = aty_ld_pll_ct(PLL_EXT_CNTL, par);
-		pll->ct.xclk_post_div_real = postdividers[pll_ext_cntl & 0x07];
+		pll->ct.xclk_post_div_real = aty_postdividers[pll_ext_cntl & 0x07];
 		mclk_fb_div = aty_ld_pll_ct(MCLK_FB_DIV, par);
 		if (pll_ext_cntl & PLL_MFB_TIMES_4_2B)
 			mclk_fb_div <<= 1;
@@ -534,7 +536,7 @@ static int aty_init_pll_ct(const struct fb_info *info, union aty_pll *pll)
 		xpost_div += (q <  64*8);
 		xpost_div += (q <  32*8);
 	}
-	pll->ct.xclk_post_div_real = postdividers[xpost_div];
+	pll->ct.xclk_post_div_real = aty_postdividers[xpost_div];
 	pll->ct.mclk_fb_div = q * pll->ct.xclk_post_div_real / 8;
 
 #ifdef CONFIG_PPC
@@ -583,7 +585,7 @@ static int aty_init_pll_ct(const struct fb_info *info, union aty_pll *pll)
 			mpost_div += (q <  64*8);
 			mpost_div += (q <  32*8);
 		}
-		sclk_post_div_real = postdividers[mpost_div];
+		sclk_post_div_real = aty_postdividers[mpost_div];
 		pll->ct.sclk_fb_div = q * sclk_post_div_real / 8;
 		pll->ct.spll_cntl2 = mpost_div << 4;
 #ifdef DEBUG

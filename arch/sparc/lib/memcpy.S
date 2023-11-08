@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /* memcpy.S: Sparc optimized memcpy and memmove code
  * Hand optimized from GNU libc's memcpy and memmove
  * Copyright (C) 1991,1996 Free Software Foundation
@@ -7,7 +8,8 @@
  * Copyright (C) 1996 Jakub Jelinek (jj@sunsite.mff.cuni.cz)
  */
 
-#include <asm/export.h>
+#include <linux/export.h>
+
 #define FUNC(x) 		\
 	.globl	x;		\
 	.type	x,@function;	\

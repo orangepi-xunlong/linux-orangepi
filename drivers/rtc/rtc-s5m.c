@@ -1,19 +1,9 @@
-/*
- * Copyright (c) 2013-2014 Samsung Electronics Co., Ltd
- *	http://www.samsung.com
- *
- *  Copyright (C) 2013 Google, Inc
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- */
+// SPDX-License-Identifier: GPL-2.0+
+//
+// Copyright (c) 2013-2014 Samsung Electronics Co., Ltd
+//	http://www.samsung.com
+//
+//  Copyright (C) 2013 Google, Inc
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
@@ -37,6 +27,19 @@
  * been transferred.
  */
 #define UDR_READ_RETRY_CNT	5
+
+enum {
+	RTC_SEC = 0,
+	RTC_MIN,
+	RTC_HOUR,
+	RTC_WEEKDAY,
+	RTC_DATE,
+	RTC_MONTH,
+	RTC_YEAR1,
+	RTC_YEAR2,
+	/* Make sure this is always the last enum name. */
+	RTC_MAX_NUM_TIME_REGS
+};
 
 /*
  * Registers used by the driver which are different between chipsets.
@@ -82,7 +85,7 @@ struct s5m_rtc_reg_config {
 	unsigned int write_alarm_udr_mask;
 };
 
-/* Register map for S5M8763 and S5M8767 */
+/* Register map for S5M8767 */
 static const struct s5m_rtc_reg_config s5m_rtc_regs = {
 	.regs_count		= 8,
 	.time			= S5M_RTC_SEC,
@@ -201,15 +204,9 @@ static int s5m8767_tm_to_data(struct rtc_time *tm, u8 *data)
 	data[RTC_WEEKDAY] = 1 << tm->tm_wday;
 	data[RTC_DATE] = tm->tm_mday;
 	data[RTC_MONTH] = tm->tm_mon + 1;
-	data[RTC_YEAR1] = tm->tm_year > 100 ? (tm->tm_year - 100) : 0;
+	data[RTC_YEAR1] = tm->tm_year - 100;
 
-	if (tm->tm_year < 100) {
-		pr_err("RTC cannot handle the year %d\n",
-		       1900 + tm->tm_year);
-		return -EINVAL;
-	} else {
-		return 0;
-	}
+	return 0;
 }
 
 /*
@@ -239,7 +236,6 @@ static int s5m_check_peding_alarm_interrupt(struct s5m_rtc_info *info,
 
 	switch (info->device_type) {
 	case S5M8767X:
-	case S5M8763X:
 		ret = regmap_read(info->regmap, S5M_RTC_STATUS, &val);
 		val &= S5M_ALARM0_STATUS;
 		break;
@@ -302,7 +298,6 @@ static int s5m8767_rtc_set_alarm_reg(struct s5m_rtc_info *info)
 
 	data |= info->regs->write_alarm_udr_mask;
 	switch (info->device_type) {
-	case S5M8763X:
 	case S5M8767X:
 		data &= ~S5M_RTC_TIME_EN_MASK;
 		break;
@@ -332,42 +327,10 @@ static int s5m8767_rtc_set_alarm_reg(struct s5m_rtc_info *info)
 	return ret;
 }
 
-static void s5m8763_data_to_tm(u8 *data, struct rtc_time *tm)
-{
-	tm->tm_sec = bcd2bin(data[RTC_SEC]);
-	tm->tm_min = bcd2bin(data[RTC_MIN]);
-
-	if (data[RTC_HOUR] & HOUR_12) {
-		tm->tm_hour = bcd2bin(data[RTC_HOUR] & 0x1f);
-		if (data[RTC_HOUR] & HOUR_PM)
-			tm->tm_hour += 12;
-	} else {
-		tm->tm_hour = bcd2bin(data[RTC_HOUR] & 0x3f);
-	}
-
-	tm->tm_wday = data[RTC_WEEKDAY] & 0x07;
-	tm->tm_mday = bcd2bin(data[RTC_DATE]);
-	tm->tm_mon = bcd2bin(data[RTC_MONTH]);
-	tm->tm_year = bcd2bin(data[RTC_YEAR1]) + bcd2bin(data[RTC_YEAR2]) * 100;
-	tm->tm_year -= 1900;
-}
-
-static void s5m8763_tm_to_data(struct rtc_time *tm, u8 *data)
-{
-	data[RTC_SEC] = bin2bcd(tm->tm_sec);
-	data[RTC_MIN] = bin2bcd(tm->tm_min);
-	data[RTC_HOUR] = bin2bcd(tm->tm_hour);
-	data[RTC_WEEKDAY] = tm->tm_wday;
-	data[RTC_DATE] = bin2bcd(tm->tm_mday);
-	data[RTC_MONTH] = bin2bcd(tm->tm_mon);
-	data[RTC_YEAR1] = bin2bcd(tm->tm_year % 100);
-	data[RTC_YEAR2] = bin2bcd((tm->tm_year + 1900) / 100);
-}
-
 static int s5m_rtc_read_time(struct device *dev, struct rtc_time *tm)
 {
 	struct s5m_rtc_info *info = dev_get_drvdata(dev);
-	u8 data[info->regs->regs_count];
+	u8 data[RTC_MAX_NUM_TIME_REGS];
 	int ret;
 
 	if (info->regs->read_time_udr_mask) {
@@ -388,10 +351,6 @@ static int s5m_rtc_read_time(struct device *dev, struct rtc_time *tm)
 		return ret;
 
 	switch (info->device_type) {
-	case S5M8763X:
-		s5m8763_data_to_tm(data, tm);
-		break;
-
 	case S5M8767X:
 	case S2MPS15X:
 	case S2MPS14X:
@@ -403,23 +362,18 @@ static int s5m_rtc_read_time(struct device *dev, struct rtc_time *tm)
 		return -EINVAL;
 	}
 
-	dev_dbg(dev, "%s: %d/%d/%d %d:%d:%d(%d)\n", __func__,
-		1900 + tm->tm_year, 1 + tm->tm_mon, tm->tm_mday,
-		tm->tm_hour, tm->tm_min, tm->tm_sec, tm->tm_wday);
+	dev_dbg(dev, "%s: %ptR(%d)\n", __func__, tm, tm->tm_wday);
 
-	return rtc_valid_tm(tm);
+	return 0;
 }
 
 static int s5m_rtc_set_time(struct device *dev, struct rtc_time *tm)
 {
 	struct s5m_rtc_info *info = dev_get_drvdata(dev);
-	u8 data[info->regs->regs_count];
+	u8 data[RTC_MAX_NUM_TIME_REGS];
 	int ret = 0;
 
 	switch (info->device_type) {
-	case S5M8763X:
-		s5m8763_tm_to_data(tm, data);
-		break;
 	case S5M8767X:
 	case S2MPS15X:
 	case S2MPS14X:
@@ -433,9 +387,7 @@ static int s5m_rtc_set_time(struct device *dev, struct rtc_time *tm)
 	if (ret < 0)
 		return ret;
 
-	dev_dbg(dev, "%s: %d/%d/%d %d:%d:%d(%d)\n", __func__,
-		1900 + tm->tm_year, 1 + tm->tm_mon, tm->tm_mday,
-		tm->tm_hour, tm->tm_min, tm->tm_sec, tm->tm_wday);
+	dev_dbg(dev, "%s: %ptR(%d)\n", __func__, tm, tm->tm_wday);
 
 	ret = regmap_raw_write(info->regmap, info->regs->time, data,
 			info->regs->regs_count);
@@ -450,8 +402,7 @@ static int s5m_rtc_set_time(struct device *dev, struct rtc_time *tm)
 static int s5m_rtc_read_alarm(struct device *dev, struct rtc_wkalrm *alrm)
 {
 	struct s5m_rtc_info *info = dev_get_drvdata(dev);
-	u8 data[info->regs->regs_count];
-	unsigned int val;
+	u8 data[RTC_MAX_NUM_TIME_REGS];
 	int ret, i;
 
 	ret = regmap_bulk_read(info->regmap, info->regs->alarm0, data,
@@ -460,15 +411,6 @@ static int s5m_rtc_read_alarm(struct device *dev, struct rtc_wkalrm *alrm)
 		return ret;
 
 	switch (info->device_type) {
-	case S5M8763X:
-		s5m8763_data_to_tm(data, &alrm->time);
-		ret = regmap_read(info->regmap, S5M_ALARM0_CONF, &val);
-		if (ret < 0)
-			return ret;
-
-		alrm->enabled = !!val;
-		break;
-
 	case S5M8767X:
 	case S2MPS15X:
 	case S2MPS14X:
@@ -487,20 +429,14 @@ static int s5m_rtc_read_alarm(struct device *dev, struct rtc_wkalrm *alrm)
 		return -EINVAL;
 	}
 
-	dev_dbg(dev, "%s: %d/%d/%d %d:%d:%d(%d)\n", __func__,
-		1900 + alrm->time.tm_year, 1 + alrm->time.tm_mon,
-		alrm->time.tm_mday, alrm->time.tm_hour,
-		alrm->time.tm_min, alrm->time.tm_sec,
-		alrm->time.tm_wday);
+	dev_dbg(dev, "%s: %ptR(%d)\n", __func__, &alrm->time, alrm->time.tm_wday);
 
-	ret = s5m_check_peding_alarm_interrupt(info, alrm);
-
-	return 0;
+	return s5m_check_peding_alarm_interrupt(info, alrm);
 }
 
 static int s5m_rtc_stop_alarm(struct s5m_rtc_info *info)
 {
-	u8 data[info->regs->regs_count];
+	u8 data[RTC_MAX_NUM_TIME_REGS];
 	int ret, i;
 	struct rtc_time tm;
 
@@ -510,15 +446,9 @@ static int s5m_rtc_stop_alarm(struct s5m_rtc_info *info)
 		return ret;
 
 	s5m8767_data_to_tm(data, &tm, info->rtc_24hr_mode);
-	dev_dbg(info->dev, "%s: %d/%d/%d %d:%d:%d(%d)\n", __func__,
-		1900 + tm.tm_year, 1 + tm.tm_mon, tm.tm_mday,
-		tm.tm_hour, tm.tm_min, tm.tm_sec, tm.tm_wday);
+	dev_dbg(info->dev, "%s: %ptR(%d)\n", __func__, &tm, tm.tm_wday);
 
 	switch (info->device_type) {
-	case S5M8763X:
-		ret = regmap_write(info->regmap, S5M_ALARM0_CONF, 0);
-		break;
-
 	case S5M8767X:
 	case S2MPS15X:
 	case S2MPS14X:
@@ -545,8 +475,7 @@ static int s5m_rtc_stop_alarm(struct s5m_rtc_info *info)
 static int s5m_rtc_start_alarm(struct s5m_rtc_info *info)
 {
 	int ret;
-	u8 data[info->regs->regs_count];
-	u8 alarm0_conf;
+	u8 data[RTC_MAX_NUM_TIME_REGS];
 	struct rtc_time tm;
 
 	ret = regmap_bulk_read(info->regmap, info->regs->alarm0, data,
@@ -555,16 +484,9 @@ static int s5m_rtc_start_alarm(struct s5m_rtc_info *info)
 		return ret;
 
 	s5m8767_data_to_tm(data, &tm, info->rtc_24hr_mode);
-	dev_dbg(info->dev, "%s: %d/%d/%d %d:%d:%d(%d)\n", __func__,
-		1900 + tm.tm_year, 1 + tm.tm_mon, tm.tm_mday,
-		tm.tm_hour, tm.tm_min, tm.tm_sec, tm.tm_wday);
+	dev_dbg(info->dev, "%s: %ptR(%d)\n", __func__, &tm, tm.tm_wday);
 
 	switch (info->device_type) {
-	case S5M8763X:
-		alarm0_conf = 0x77;
-		ret = regmap_write(info->regmap, S5M_ALARM0_CONF, alarm0_conf);
-		break;
-
 	case S5M8767X:
 	case S2MPS15X:
 	case S2MPS14X:
@@ -598,14 +520,10 @@ static int s5m_rtc_start_alarm(struct s5m_rtc_info *info)
 static int s5m_rtc_set_alarm(struct device *dev, struct rtc_wkalrm *alrm)
 {
 	struct s5m_rtc_info *info = dev_get_drvdata(dev);
-	u8 data[info->regs->regs_count];
+	u8 data[RTC_MAX_NUM_TIME_REGS];
 	int ret;
 
 	switch (info->device_type) {
-	case S5M8763X:
-		s5m8763_tm_to_data(&alrm->time, data);
-		break;
-
 	case S5M8767X:
 	case S2MPS15X:
 	case S2MPS14X:
@@ -617,10 +535,7 @@ static int s5m_rtc_set_alarm(struct device *dev, struct rtc_wkalrm *alrm)
 		return -EINVAL;
 	}
 
-	dev_dbg(dev, "%s: %d/%d/%d %d:%d:%d(%d)\n", __func__,
-		1900 + alrm->time.tm_year, 1 + alrm->time.tm_mon,
-		alrm->time.tm_mday, alrm->time.tm_hour, alrm->time.tm_min,
-		alrm->time.tm_sec, alrm->time.tm_wday);
+	dev_dbg(dev, "%s: %ptR(%d)\n", __func__, &alrm->time, alrm->time.tm_wday);
 
 	ret = s5m_rtc_stop_alarm(info);
 	if (ret < 0)
@@ -675,7 +590,6 @@ static int s5m8767_rtc_init_reg(struct s5m_rtc_info *info)
 	int ret;
 
 	switch (info->device_type) {
-	case S5M8763X:
 	case S5M8767X:
 		/* UDR update time. Default of 7.32 ms is too long. */
 		ret = regmap_update_bits(info->regmap, S5M_RTC_UDR_CON,
@@ -725,15 +639,9 @@ static int s5m8767_rtc_init_reg(struct s5m_rtc_info *info)
 static int s5m_rtc_probe(struct platform_device *pdev)
 {
 	struct sec_pmic_dev *s5m87xx = dev_get_drvdata(pdev->dev.parent);
-	struct sec_platform_data *pdata = s5m87xx->pdata;
 	struct s5m_rtc_info *info;
 	const struct regmap_config *regmap_cfg;
 	int ret, alarm_irq;
-
-	if (!pdata) {
-		dev_err(pdev->dev.parent, "Platform data not supplied\n");
-		return -ENODEV;
-	}
 
 	info = devm_kzalloc(&pdev->dev, sizeof(*info), GFP_KERNEL);
 	if (!info)
@@ -755,11 +663,6 @@ static int s5m_rtc_probe(struct platform_device *pdev)
 		info->regs = &s2mps13_rtc_regs;
 		alarm_irq = S2MPS14_IRQ_RTCA0;
 		break;
-	case S5M8763X:
-		regmap_cfg = &s5m_rtc_regmap_config;
-		info->regs = &s5m_rtc_regs;
-		alarm_irq = S5M8763_IRQ_ALARM0;
-		break;
 	case S5M8767X:
 		regmap_cfg = &s5m_rtc_regmap_config;
 		info->regs = &s5m_rtc_regs;
@@ -772,10 +675,11 @@ static int s5m_rtc_probe(struct platform_device *pdev)
 		return -ENODEV;
 	}
 
-	info->i2c = i2c_new_dummy(s5m87xx->i2c->adapter, RTC_I2C_ADDR);
-	if (!info->i2c) {
+	info->i2c = devm_i2c_new_dummy_device(&pdev->dev, s5m87xx->i2c->adapter,
+					      RTC_I2C_ADDR);
+	if (IS_ERR(info->i2c)) {
 		dev_err(&pdev->dev, "Failed to allocate I2C for RTC\n");
-		return -ENODEV;
+		return PTR_ERR(info->i2c);
 	}
 
 	info->regmap = devm_regmap_init_i2c(info->i2c, regmap_cfg);
@@ -783,7 +687,7 @@ static int s5m_rtc_probe(struct platform_device *pdev)
 		ret = PTR_ERR(info->regmap);
 		dev_err(&pdev->dev, "Failed to allocate RTC register map: %d\n",
 				ret);
-		goto err;
+		return ret;
 	}
 
 	info->dev = &pdev->dev;
@@ -793,56 +697,42 @@ static int s5m_rtc_probe(struct platform_device *pdev)
 	if (s5m87xx->irq_data) {
 		info->irq = regmap_irq_get_virq(s5m87xx->irq_data, alarm_irq);
 		if (info->irq <= 0) {
-			ret = -EINVAL;
 			dev_err(&pdev->dev, "Failed to get virtual IRQ %d\n",
 				alarm_irq);
-			goto err;
+			return -EINVAL;
 		}
 	}
 
 	platform_set_drvdata(pdev, info);
 
 	ret = s5m8767_rtc_init_reg(info);
+	if (ret)
+		return ret;
 
-	device_init_wakeup(&pdev->dev, 1);
+	info->rtc_dev = devm_rtc_allocate_device(&pdev->dev);
+	if (IS_ERR(info->rtc_dev))
+		return PTR_ERR(info->rtc_dev);
 
-	info->rtc_dev = devm_rtc_device_register(&pdev->dev, "s5m-rtc",
-						 &s5m_rtc_ops, THIS_MODULE);
+	info->rtc_dev->ops = &s5m_rtc_ops;
 
-	if (IS_ERR(info->rtc_dev)) {
-		ret = PTR_ERR(info->rtc_dev);
-		goto err;
-	}
+	info->rtc_dev->range_min = RTC_TIMESTAMP_BEGIN_2000;
+	info->rtc_dev->range_max = RTC_TIMESTAMP_END_2099;
 
 	if (!info->irq) {
-		dev_info(&pdev->dev, "Alarm IRQ not available\n");
-		return 0;
+		clear_bit(RTC_FEATURE_ALARM, info->rtc_dev->features);
+	} else {
+		ret = devm_request_threaded_irq(&pdev->dev, info->irq, NULL,
+						s5m_rtc_alarm_irq, 0, "rtc-alarm0",
+						info);
+		if (ret < 0) {
+			dev_err(&pdev->dev, "Failed to request alarm IRQ: %d: %d\n",
+				info->irq, ret);
+			return ret;
+		}
+		device_init_wakeup(&pdev->dev, 1);
 	}
 
-	ret = devm_request_threaded_irq(&pdev->dev, info->irq, NULL,
-					s5m_rtc_alarm_irq, 0, "rtc-alarm0",
-					info);
-	if (ret < 0) {
-		dev_err(&pdev->dev, "Failed to request alarm IRQ: %d: %d\n",
-			info->irq, ret);
-		goto err;
-	}
-
-	return 0;
-
-err:
-	i2c_unregister_device(info->i2c);
-
-	return ret;
-}
-
-static int s5m_rtc_remove(struct platform_device *pdev)
-{
-	struct s5m_rtc_info *info = platform_get_drvdata(pdev);
-
-	i2c_unregister_device(info->i2c);
-
-	return 0;
+	return devm_rtc_register_device(info->rtc_dev);
 }
 
 #ifdef CONFIG_PM_SLEEP
@@ -886,7 +776,6 @@ static struct platform_driver s5m_rtc_driver = {
 		.pm	= &s5m_rtc_pm_ops,
 	},
 	.probe		= s5m_rtc_probe,
-	.remove		= s5m_rtc_remove,
 	.id_table	= s5m_rtc_id,
 };
 
@@ -896,4 +785,3 @@ module_platform_driver(s5m_rtc_driver);
 MODULE_AUTHOR("Sangbeom Kim <sbkim73@samsung.com>");
 MODULE_DESCRIPTION("Samsung S5M/S2MPS14 RTC driver");
 MODULE_LICENSE("GPL");
-MODULE_ALIAS("platform:s5m-rtc");

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * arch/alpha/lib/divide.S
  *
@@ -45,7 +46,7 @@
  *	$28 - compare status
  */
 
-#include <asm/export.h>
+#include <linux/export.h>
 #define halt .long 0
 
 /*

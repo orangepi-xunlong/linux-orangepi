@@ -1,9 +1,10 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * arch/alpha/lib/copy_page.S
  *
  * Copy an entire page.
  */
-#include <asm/export.h>
+#include <linux/export.h>
 	.text
 	.align 4
 	.global copy_page

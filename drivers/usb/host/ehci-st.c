@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * ST EHCI driver
  *
@@ -6,10 +7,6 @@
  * Author: Peter Griffin <peter.griffin@linaro.org>
  *
  * Derived from ehci-platform.c
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/clk.h>
@@ -26,6 +23,7 @@
 #include <linux/usb.h>
 #include <linux/usb/hcd.h>
 #include <linux/usb/ehci_pdriver.h>
+#include <linux/pinctrl/consumer.h>
 
 #include "ehci.h"
 
@@ -43,8 +41,6 @@ struct st_ehci_platform_priv {
 
 #define hcd_to_ehci_priv(h) \
 	((struct st_ehci_platform_priv *)hcd_to_ehci(h)->priv)
-
-static const char hcd_name[] = "ehci-st";
 
 #define EHCI_CAPS_SIZE 0x10
 #define AHB2STBUS_INSREG01 (EHCI_CAPS_SIZE + 0x84)
@@ -154,22 +150,14 @@ static int st_ehci_platform_probe(struct platform_device *dev)
 	struct resource *res_mem;
 	struct usb_ehci_pdata *pdata = &ehci_platform_defaults;
 	struct st_ehci_platform_priv *priv;
-	struct ehci_hcd *ehci;
 	int err, irq, clk = 0;
 
 	if (usb_disabled())
 		return -ENODEV;
 
 	irq = platform_get_irq(dev, 0);
-	if (irq < 0) {
-		dev_err(&dev->dev, "no irq provided");
+	if (irq < 0)
 		return irq;
-	}
-	res_mem = platform_get_resource(dev, IORESOURCE_MEM, 0);
-	if (!res_mem) {
-		dev_err(&dev->dev, "no memory resource provided");
-		return -ENXIO;
-	}
 
 	hcd = usb_create_hcd(&ehci_platform_hc_driver, &dev->dev,
 			     dev_name(&dev->dev));
@@ -179,7 +167,6 @@ static int st_ehci_platform_probe(struct platform_device *dev)
 	platform_set_drvdata(dev, hcd);
 	dev->dev.platform_data = pdata;
 	priv = hcd_to_ehci_priv(hcd);
-	ehci = hcd_to_ehci(hcd);
 
 	priv->phy = devm_phy_get(&dev->dev, "usb");
 	if (IS_ERR(priv->phy)) {
@@ -230,14 +217,13 @@ static int st_ehci_platform_probe(struct platform_device *dev)
 			goto err_put_clks;
 	}
 
-	hcd->rsrc_start = res_mem->start;
-	hcd->rsrc_len = resource_size(res_mem);
-
-	hcd->regs = devm_ioremap_resource(&dev->dev, res_mem);
+	hcd->regs = devm_platform_get_and_ioremap_resource(dev, 0, &res_mem);
 	if (IS_ERR(hcd->regs)) {
 		err = PTR_ERR(hcd->regs);
 		goto err_put_clks;
 	}
+	hcd->rsrc_start = res_mem->start;
+	hcd->rsrc_len = resource_size(res_mem);
 
 	err = usb_add_hcd(hcd, irq, IRQF_SHARED);
 	if (err)
@@ -260,7 +246,7 @@ err_put_hcd:
 	return err;
 }
 
-static int st_ehci_platform_remove(struct platform_device *dev)
+static void st_ehci_platform_remove(struct platform_device *dev)
 {
 	struct usb_hcd *hcd = platform_get_drvdata(dev);
 	struct usb_ehci_pdata *pdata = dev_get_platdata(&dev->dev);
@@ -279,8 +265,6 @@ static int st_ehci_platform_remove(struct platform_device *dev)
 
 	if (pdata == &ehci_platform_defaults)
 		dev->dev.platform_data = NULL;
-
-	return 0;
 }
 
 #ifdef CONFIG_PM_SLEEP
@@ -336,7 +320,7 @@ MODULE_DEVICE_TABLE(of, st_ehci_ids);
 
 static struct platform_driver ehci_platform_driver = {
 	.probe		= st_ehci_platform_probe,
-	.remove		= st_ehci_platform_remove,
+	.remove_new	= st_ehci_platform_remove,
 	.shutdown	= usb_hcd_platform_shutdown,
 	.driver		= {
 		.name	= "st-ehci",
@@ -351,8 +335,6 @@ static int __init ehci_platform_init(void)
 {
 	if (usb_disabled())
 		return -ENODEV;
-
-	pr_info("%s: " DRIVER_DESC "\n", hcd_name);
 
 	ehci_init_driver(&ehci_platform_hc_driver, &platform_overrides);
 	return platform_driver_register(&ehci_platform_driver);

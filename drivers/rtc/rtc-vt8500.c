@@ -1,18 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * drivers/rtc/rtc-vt8500.c
  *
  *  Copyright (C) 2010 Alexey Charkov <alchark@gmail.com>
  *
  * Based on rtc-pxa.c
- *
- * This software is licensed under the terms of the GNU General Public
- * License version 2, as published by the Free Software Foundation, and
- * may be copied, distributed, and modified under those terms.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include <linux/module.h>
@@ -130,12 +122,6 @@ static int vt8500_rtc_set_time(struct device *dev, struct rtc_time *tm)
 {
 	struct vt8500_rtc *vt8500_rtc = dev_get_drvdata(dev);
 
-	if (tm->tm_year < 100) {
-		dev_warn(dev, "Only years 2000-2199 are supported by the "
-			      "hardware!\n");
-		return -EINVAL;
-	}
-
 	writel((bin2bcd(tm->tm_year % 100) << DATE_YEAR_S)
 		| (bin2bcd(tm->tm_mon + 1) << DATE_MONTH_S)
 		| (bin2bcd(tm->tm_mday))
@@ -208,7 +194,6 @@ static const struct rtc_class_ops vt8500_rtc_ops = {
 static int vt8500_rtc_probe(struct platform_device *pdev)
 {
 	struct vt8500_rtc *vt8500_rtc;
-	struct resource	*res;
 	int ret;
 
 	vt8500_rtc = devm_kzalloc(&pdev->dev,
@@ -220,13 +205,10 @@ static int vt8500_rtc_probe(struct platform_device *pdev)
 	platform_set_drvdata(pdev, vt8500_rtc);
 
 	vt8500_rtc->irq_alarm = platform_get_irq(pdev, 0);
-	if (vt8500_rtc->irq_alarm < 0) {
-		dev_err(&pdev->dev, "No alarm IRQ resource defined\n");
+	if (vt8500_rtc->irq_alarm < 0)
 		return vt8500_rtc->irq_alarm;
-	}
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	vt8500_rtc->regbase = devm_ioremap_resource(&pdev->dev, res);
+	vt8500_rtc->regbase = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(vt8500_rtc->regbase))
 		return PTR_ERR(vt8500_rtc->regbase);
 
@@ -234,37 +216,31 @@ static int vt8500_rtc_probe(struct platform_device *pdev)
 	writel(VT8500_RTC_CR_ENABLE,
 	       vt8500_rtc->regbase + VT8500_RTC_CR);
 
-	vt8500_rtc->rtc = devm_rtc_device_register(&pdev->dev, "vt8500-rtc",
-					      &vt8500_rtc_ops, THIS_MODULE);
-	if (IS_ERR(vt8500_rtc->rtc)) {
-		ret = PTR_ERR(vt8500_rtc->rtc);
-		dev_err(&pdev->dev,
-			"Failed to register RTC device -> %d\n", ret);
-		goto err_return;
-	}
+	vt8500_rtc->rtc = devm_rtc_allocate_device(&pdev->dev);
+	if (IS_ERR(vt8500_rtc->rtc))
+		return PTR_ERR(vt8500_rtc->rtc);
+
+	vt8500_rtc->rtc->ops = &vt8500_rtc_ops;
+	vt8500_rtc->rtc->range_min = RTC_TIMESTAMP_BEGIN_2000;
+	vt8500_rtc->rtc->range_max = RTC_TIMESTAMP_END_2199;
 
 	ret = devm_request_irq(&pdev->dev, vt8500_rtc->irq_alarm,
 				vt8500_rtc_irq, 0, "rtc alarm", vt8500_rtc);
 	if (ret < 0) {
 		dev_err(&pdev->dev, "can't get irq %i, err %d\n",
 			vt8500_rtc->irq_alarm, ret);
-		goto err_return;
+		return ret;
 	}
 
-	return 0;
-
-err_return:
-	return ret;
+	return devm_rtc_register_device(vt8500_rtc->rtc);
 }
 
-static int vt8500_rtc_remove(struct platform_device *pdev)
+static void vt8500_rtc_remove(struct platform_device *pdev)
 {
 	struct vt8500_rtc *vt8500_rtc = platform_get_drvdata(pdev);
 
 	/* Disable alarm matching */
 	writel(0, vt8500_rtc->regbase + VT8500_RTC_IS);
-
-	return 0;
 }
 
 static const struct of_device_id wmt_dt_ids[] = {
@@ -275,7 +251,7 @@ MODULE_DEVICE_TABLE(of, wmt_dt_ids);
 
 static struct platform_driver vt8500_rtc_driver = {
 	.probe		= vt8500_rtc_probe,
-	.remove		= vt8500_rtc_remove,
+	.remove_new	= vt8500_rtc_remove,
 	.driver		= {
 		.name	= "vt8500-rtc",
 		.of_match_table = wmt_dt_ids,

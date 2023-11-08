@@ -45,7 +45,7 @@
 #if 0
 #define dbg(fmt, args...) do { printk(KERN_INFO fmt, ## args); } while(0)
 #else
-#define dbg(fmt, args...) do { } while (0)
+#define dbg(fmt, args...) do { no_printk(KERN_INFO fmt, ## args); } while (0)
 #endif
 
 /*
@@ -96,18 +96,12 @@ static const struct fb_fix_screeninfo s1d13xxxfb_fix = {
 static inline u8
 s1d13xxxfb_readreg(struct s1d13xxxfb_par *par, u16 regno)
 {
-#if defined(CONFIG_PLAT_M32700UT) || defined(CONFIG_PLAT_OPSPUT) || defined(CONFIG_PLAT_MAPPI3)
-	regno=((regno & 1) ? (regno & ~1L) : (regno + 1));
-#endif
 	return readb(par->regs + regno);
 }
 
 static inline void
 s1d13xxxfb_writereg(struct s1d13xxxfb_par *par, u16 regno, u8 value)
 {
-#if defined(CONFIG_PLAT_M32700UT) || defined(CONFIG_PLAT_OPSPUT) || defined(CONFIG_PLAT_MAPPI3)
-	regno=((regno & 1) ? (regno & ~1L) : (regno + 1));
-#endif
 	writeb(value, par->regs + regno);
 }
 
@@ -296,11 +290,7 @@ s1d13xxxfb_setcolreg(u_int regno, u_int red, u_int green, u_int blue,
 			dbg("s1d13xxxfb_setcolreg: pseudo %d, val %08x\n",
 				    regno, pseudo_val);
 
-#if defined(CONFIG_PLAT_MAPPI)
-			((u32 *)info->pseudo_palette)[regno] = cpu_to_le16(pseudo_val);
-#else
 			((u32 *)info->pseudo_palette)[regno] = pseudo_val;
-#endif
 
 			break;
 		case FB_VISUAL_PSEUDOCOLOR:
@@ -522,7 +512,6 @@ s1d13xxxfb_bitblt_copyarea(struct fb_info *info, const struct fb_copyarea *area)
 }
 
 /**
- *
  *	s1d13xxxfb_bitblt_solidfill - accelerated solidfill function
  *	@info : framebuffer structure
  *	@rect : fb_fillrect structure
@@ -731,9 +720,7 @@ static void s1d13xxxfb_fetch_hw_state(struct fb_info *info)
 		xres, yres, xres_virtual, yres_virtual, is_color, is_dual, is_tft);
 }
 
-
-static int
-s1d13xxxfb_remove(struct platform_device *pdev)
+static void __s1d13xxxfb_remove(struct platform_device *pdev)
 {
 	struct fb_info *info = platform_get_drvdata(pdev);
 	struct s1d13xxxfb_par *par = NULL;
@@ -756,10 +743,17 @@ s1d13xxxfb_remove(struct platform_device *pdev)
 	}
 
 	release_mem_region(pdev->resource[0].start,
-			pdev->resource[0].end - pdev->resource[0].start +1);
+			   resource_size(&pdev->resource[0]));
 	release_mem_region(pdev->resource[1].start,
-			pdev->resource[1].end - pdev->resource[1].start +1);
-	return 0;
+			   resource_size(&pdev->resource[1]));
+}
+
+static void s1d13xxxfb_remove(struct platform_device *pdev)
+{
+	struct fb_info *info = platform_get_drvdata(pdev);
+
+	unregister_framebuffer(info);
+	__s1d13xxxfb_remove(pdev);
 }
 
 static int s1d13xxxfb_probe(struct platform_device *pdev)
@@ -798,14 +792,14 @@ static int s1d13xxxfb_probe(struct platform_device *pdev)
 	}
 
 	if (!request_mem_region(pdev->resource[0].start,
-		pdev->resource[0].end - pdev->resource[0].start +1, "s1d13xxxfb mem")) {
+		resource_size(&pdev->resource[0]), "s1d13xxxfb mem")) {
 		dev_dbg(&pdev->dev, "request_mem_region failed\n");
 		ret = -EBUSY;
 		goto bail;
 	}
 
 	if (!request_mem_region(pdev->resource[1].start,
-		pdev->resource[1].end - pdev->resource[1].start +1, "s1d13xxxfb regs")) {
+		resource_size(&pdev->resource[1]), "s1d13xxxfb regs")) {
 		dev_dbg(&pdev->dev, "request_mem_region failed\n");
 		ret = -EBUSY;
 		goto bail;
@@ -819,8 +813,8 @@ static int s1d13xxxfb_probe(struct platform_device *pdev)
 
 	platform_set_drvdata(pdev, info);
 	default_par = info->par;
-	default_par->regs = ioremap_nocache(pdev->resource[1].start,
-			pdev->resource[1].end - pdev->resource[1].start +1);
+	default_par->regs = ioremap(pdev->resource[1].start,
+				    resource_size(&pdev->resource[1]));
 	if (!default_par->regs) {
 		printk(KERN_ERR PFX "unable to map registers\n");
 		ret = -ENOMEM;
@@ -828,8 +822,8 @@ static int s1d13xxxfb_probe(struct platform_device *pdev)
 	}
 	info->pseudo_palette = default_par->pseudo_palette;
 
-	info->screen_base = ioremap_nocache(pdev->resource[0].start,
-			pdev->resource[0].end - pdev->resource[0].start +1);
+	info->screen_base = ioremap(pdev->resource[0].start,
+				    resource_size(&pdev->resource[0]));
 
 	if (!info->screen_base) {
 		printk(KERN_ERR PFX "unable to map framebuffer\n");
@@ -867,22 +861,22 @@ static int s1d13xxxfb_probe(struct platform_device *pdev)
 
 	info->fix = s1d13xxxfb_fix;
 	info->fix.mmio_start = pdev->resource[1].start;
-	info->fix.mmio_len = pdev->resource[1].end - pdev->resource[1].start + 1;
+	info->fix.mmio_len = resource_size(&pdev->resource[1]);
 	info->fix.smem_start = pdev->resource[0].start;
-	info->fix.smem_len = pdev->resource[0].end - pdev->resource[0].start + 1;
+	info->fix.smem_len = resource_size(&pdev->resource[0]);
 
 	printk(KERN_INFO PFX "regs mapped at 0x%p, fb %d KiB mapped at 0x%p\n",
 	       default_par->regs, info->fix.smem_len / 1024, info->screen_base);
 
 	info->par = default_par;
-	info->flags = FBINFO_DEFAULT | FBINFO_HWACCEL_YPAN;
+	info->flags = FBINFO_HWACCEL_YPAN;
 	info->fbops = &s1d13xxxfb_fbops;
 
 	switch(prod_id) {
 	case S1D13506_PROD_ID:	/* activate acceleration */
 		s1d13xxxfb_fbops.fb_fillrect = s1d13xxxfb_bitblt_solidfill;
 		s1d13xxxfb_fbops.fb_copyarea = s1d13xxxfb_bitblt_copyarea;
-		info->flags = FBINFO_DEFAULT | FBINFO_HWACCEL_YPAN |
+		info->flags = FBINFO_HWACCEL_YPAN |
 			FBINFO_HWACCEL_FILLRECT | FBINFO_HWACCEL_COPYAREA;
 		break;
 	default:
@@ -905,7 +899,7 @@ static int s1d13xxxfb_probe(struct platform_device *pdev)
 	return 0;
 
 bail:
-	s1d13xxxfb_remove(pdev);
+	__s1d13xxxfb_remove(pdev);
 	return ret;
 
 }
@@ -1000,7 +994,7 @@ static int s1d13xxxfb_resume(struct platform_device *dev)
 
 static struct platform_driver s1d13xxxfb_driver = {
 	.probe		= s1d13xxxfb_probe,
-	.remove		= s1d13xxxfb_remove,
+	.remove_new	= s1d13xxxfb_remove,
 #ifdef CONFIG_PM
 	.suspend	= s1d13xxxfb_suspend,
 	.resume		= s1d13xxxfb_resume,

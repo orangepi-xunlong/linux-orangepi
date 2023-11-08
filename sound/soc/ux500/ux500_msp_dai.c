@@ -1,15 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) ST-Ericsson SA 2012
  *
  * Author: Ola Lilja <ola.o.lilja@stericsson.com>,
  *         Roger Nilsson <roger.xr.nilsson@stericsson.com>
  *         for ST-Ericsson.
- *
- * License terms:
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as published
- * by the Free Software Foundation.
  */
 
 #include <linux/module.h>
@@ -20,7 +15,6 @@
 #include <linux/of.h>
 #include <linux/regulator/consumer.h>
 #include <linux/mfd/dbx500-prcmu.h>
-#include <linux/platform_data/asoc-ux500-msp.h>
 
 #include <sound/soc.h>
 #include <sound/soc-dai.h>
@@ -133,6 +127,7 @@ static int setup_pcm_framing(struct snd_soc_dai *dai, unsigned int rate,
 	struct ux500_msp_i2s_drvdata *drvdata = dev_get_drvdata(dai->dev);
 
 	u32 frame_length = MSP_FRAME_LEN_1;
+
 	prot_desc->frame_width = 0;
 
 	switch (drvdata->slots) {
@@ -193,8 +188,8 @@ static int setup_clocking(struct snd_soc_dai *dai,
 		return -EINVAL;
 	}
 
-	switch (fmt & SND_SOC_DAIFMT_MASTER_MASK) {
-	case SND_SOC_DAIFMT_CBM_CFM:
+	switch (fmt & SND_SOC_DAIFMT_CLOCK_PROVIDER_MASK) {
+	case SND_SOC_DAIFMT_BC_FC:
 		dev_dbg(dai->dev, "%s: Codec is master.\n", __func__);
 
 		msp_config->iodelay = 0x20;
@@ -206,7 +201,7 @@ static int setup_clocking(struct snd_soc_dai *dai,
 
 		break;
 
-	case SND_SOC_DAIFMT_CBS_CFS:
+	case SND_SOC_DAIFMT_BP_FP:
 		dev_dbg(dai->dev, "%s: Codec is slave.\n", __func__);
 
 		msp_config->tx_clk_sel = TX_CLK_SEL_SRG;
@@ -330,15 +325,15 @@ static int setup_msp_config(struct snd_pcm_substream *substream,
 	dev_dbg(dai->dev, "%s: rate: %u, channels: %d.\n", __func__,
 		runtime->rate, runtime->channels);
 	switch (fmt &
-		(SND_SOC_DAIFMT_FORMAT_MASK | SND_SOC_DAIFMT_MASTER_MASK)) {
-	case SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_CBS_CFS:
+		(SND_SOC_DAIFMT_FORMAT_MASK | SND_SOC_DAIFMT_CLOCK_PROVIDER_MASK)) {
+	case SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_BP_FP:
 		dev_dbg(dai->dev, "%s: SND_SOC_DAIFMT_I2S.\n", __func__);
 
 		msp_config->default_protdesc = 1;
 		msp_config->protocol = MSP_I2S_PROTOCOL;
 		break;
 
-	case SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_CBM_CFM:
+	case SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_BC_FC:
 		dev_dbg(dai->dev, "%s: SND_SOC_DAIFMT_I2S.\n", __func__);
 
 		msp_config->data_size = MSP_DATA_BITS_16;
@@ -350,10 +345,10 @@ static int setup_msp_config(struct snd_pcm_substream *substream,
 
 		break;
 
-	case SND_SOC_DAIFMT_DSP_A | SND_SOC_DAIFMT_CBS_CFS:
-	case SND_SOC_DAIFMT_DSP_A | SND_SOC_DAIFMT_CBM_CFM:
-	case SND_SOC_DAIFMT_DSP_B | SND_SOC_DAIFMT_CBS_CFS:
-	case SND_SOC_DAIFMT_DSP_B | SND_SOC_DAIFMT_CBM_CFM:
+	case SND_SOC_DAIFMT_DSP_A | SND_SOC_DAIFMT_BP_FP:
+	case SND_SOC_DAIFMT_DSP_A | SND_SOC_DAIFMT_BC_FC:
+	case SND_SOC_DAIFMT_DSP_B | SND_SOC_DAIFMT_BP_FP:
+	case SND_SOC_DAIFMT_DSP_B | SND_SOC_DAIFMT_BC_FC:
 		dev_dbg(dai->dev, "%s: PCM format.\n", __func__);
 
 		msp_config->data_size = MSP_DATA_BITS_16;
@@ -479,10 +474,11 @@ static int ux500_msp_dai_prepare(struct snd_pcm_substream *substream,
 	}
 
 	/* Set OPP-level */
-	if ((drvdata->fmt & SND_SOC_DAIFMT_MASTER_MASK) &&
+	if ((drvdata->fmt & SND_SOC_DAIFMT_CLOCK_PROVIDER_MASK) &&
 		(drvdata->msp->f_bitclk > 19200000)) {
 		/* If the bit-clock is higher than 19.2MHz, Vape should be
-		 * run in 100% OPP. Only when bit-clock is used (MSP master) */
+		 * run in 100% OPP. Only when bit-clock is used (MSP master)
+		 */
 		prcmu_qos_update_requirement(PRCMU_QOS_APE_OPP,
 					"ux500-msp-i2s", 100);
 		drvdata->vape_opp_constraint = 1;
@@ -545,13 +541,13 @@ static int ux500_msp_dai_set_dai_fmt(struct snd_soc_dai *dai,
 	dev_dbg(dai->dev, "%s: MSP %d: Enter.\n", __func__, dai->id);
 
 	switch (fmt & (SND_SOC_DAIFMT_FORMAT_MASK |
-		SND_SOC_DAIFMT_MASTER_MASK)) {
-	case SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_CBS_CFS:
-	case SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_CBM_CFM:
-	case SND_SOC_DAIFMT_DSP_B | SND_SOC_DAIFMT_CBS_CFS:
-	case SND_SOC_DAIFMT_DSP_B | SND_SOC_DAIFMT_CBM_CFM:
-	case SND_SOC_DAIFMT_DSP_A | SND_SOC_DAIFMT_CBS_CFS:
-	case SND_SOC_DAIFMT_DSP_A | SND_SOC_DAIFMT_CBM_CFM:
+		SND_SOC_DAIFMT_CLOCK_PROVIDER_MASK)) {
+	case SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_BP_FP:
+	case SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_BC_FC:
+	case SND_SOC_DAIFMT_DSP_B | SND_SOC_DAIFMT_BP_FP:
+	case SND_SOC_DAIFMT_DSP_B | SND_SOC_DAIFMT_BC_FC:
+	case SND_SOC_DAIFMT_DSP_A | SND_SOC_DAIFMT_BP_FP:
+	case SND_SOC_DAIFMT_DSP_A | SND_SOC_DAIFMT_BC_FC:
 		break;
 
 	default:
@@ -674,8 +670,8 @@ static int ux500_msp_dai_of_probe(struct snd_soc_dai *dai)
 	if (!capture_dma_data)
 		return -ENOMEM;
 
-	playback_dma_data->addr = drvdata->msp->playback_dma_data.tx_rx_addr;
-	capture_dma_data->addr = drvdata->msp->capture_dma_data.tx_rx_addr;
+	playback_dma_data->addr = drvdata->msp->tx_rx_addr;
+	capture_dma_data->addr = drvdata->msp->tx_rx_addr;
 
 	playback_dma_data->maxburst = 4;
 	capture_dma_data->maxburst = 4;
@@ -685,28 +681,9 @@ static int ux500_msp_dai_of_probe(struct snd_soc_dai *dai)
 	return 0;
 }
 
-static int ux500_msp_dai_probe(struct snd_soc_dai *dai)
-{
-	struct ux500_msp_i2s_drvdata *drvdata = dev_get_drvdata(dai->dev);
-	struct msp_i2s_platform_data *pdata = dai->dev->platform_data;
-	int ret;
-
-	if (!pdata) {
-		ret = ux500_msp_dai_of_probe(dai);
-		return ret;
-	}
-
-	drvdata->msp->playback_dma_data.data_size = drvdata->slot_width;
-	drvdata->msp->capture_dma_data.data_size = drvdata->slot_width;
-
-	snd_soc_dai_init_dma_data(dai,
-				  &drvdata->msp->playback_dma_data,
-				  &drvdata->msp->capture_dma_data);
-	return 0;
-}
-
-static struct snd_soc_dai_ops ux500_msp_dai_ops[] = {
+static const struct snd_soc_dai_ops ux500_msp_dai_ops[] = {
 	{
+		.probe = ux500_msp_dai_of_probe,
 		.set_sysclk = ux500_msp_dai_set_dai_sysclk,
 		.set_fmt = ux500_msp_dai_set_dai_fmt,
 		.set_tdm_slot = ux500_msp_dai_set_tdm_slot,
@@ -719,9 +696,6 @@ static struct snd_soc_dai_ops ux500_msp_dai_ops[] = {
 };
 
 static struct snd_soc_dai_driver ux500_msp_dai_drv = {
-	.probe                 = ux500_msp_dai_probe,
-	.suspend               = NULL,
-	.resume                = NULL,
 	.playback.channels_min = UX500_MSP_MIN_CHANNELS,
 	.playback.channels_max = UX500_MSP_MAX_CHANNELS,
 	.playback.rates        = UX500_I2S_RATES,
@@ -734,21 +708,15 @@ static struct snd_soc_dai_driver ux500_msp_dai_drv = {
 };
 
 static const struct snd_soc_component_driver ux500_msp_component = {
-	.name		= "ux500-msp",
+	.name			= "ux500-msp",
+	.legacy_dai_naming	= 1,
 };
 
 
 static int ux500_msp_drv_probe(struct platform_device *pdev)
 {
 	struct ux500_msp_i2s_drvdata *drvdata;
-	struct msp_i2s_platform_data *pdata = pdev->dev.platform_data;
-	struct device_node *np = pdev->dev.of_node;
 	int ret = 0;
-
-	if (!pdata && !np) {
-		dev_err(&pdev->dev, "No platform data or Device Tree found\n");
-		return -ENODEV;
-	}
 
 	drvdata = devm_kzalloc(&pdev->dev,
 				sizeof(struct ux500_msp_i2s_drvdata),
@@ -791,8 +759,7 @@ static int ux500_msp_drv_probe(struct platform_device *pdev)
 		return ret;
 	}
 
-	ret = ux500_msp_i2s_init_msp(pdev, &drvdata->msp,
-				pdev->dev.platform_data);
+	ret = ux500_msp_i2s_init_msp(pdev, &drvdata->msp);
 	if (!drvdata->msp) {
 		dev_err(&pdev->dev,
 			"%s: ERROR: Failed to init MSP-struct (%d)!",
@@ -824,7 +791,7 @@ err_reg_plat:
 	return ret;
 }
 
-static int ux500_msp_drv_remove(struct platform_device *pdev)
+static void ux500_msp_drv_remove(struct platform_device *pdev)
 {
 	struct ux500_msp_i2s_drvdata *drvdata = dev_get_drvdata(&pdev->dev);
 
@@ -835,8 +802,6 @@ static int ux500_msp_drv_remove(struct platform_device *pdev)
 	prcmu_qos_remove_requirement(PRCMU_QOS_APE_OPP, "ux500_msp_i2s");
 
 	ux500_msp_i2s_cleanup_msp(pdev, drvdata->msp);
-
-	return 0;
 }
 
 static const struct of_device_id ux500_msp_i2s_match[] = {
@@ -851,7 +816,7 @@ static struct platform_driver msp_i2s_driver = {
 		.of_match_table = ux500_msp_i2s_match,
 	},
 	.probe = ux500_msp_drv_probe,
-	.remove = ux500_msp_drv_remove,
+	.remove_new = ux500_msp_drv_remove,
 };
 module_platform_driver(msp_i2s_driver);
 

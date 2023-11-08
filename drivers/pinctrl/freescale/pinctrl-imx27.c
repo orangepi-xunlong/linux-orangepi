@@ -1,21 +1,16 @@
-/*
- * imx27 pinctrl driver based on imx pinmux core
- *
- * Copyright (C) 2013 Pengutronix
- *
- * Author: Markus Pargmann <mpa@pengutronix.de>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- */
+// SPDX-License-Identifier: GPL-2.0+
+//
+// imx27 pinctrl driver based on imx pinmux core
+//
+// Copyright (C) 2013 Pengutronix
+//
+// Author: Markus Pargmann <mpa@pengutronix.de>
 
 #include <linux/err.h>
 #include <linux/init.h>
 #include <linux/io.h>
-#include <linux/of.h>
-#include <linux/of_device.h>
+#include <linux/mod_devicetable.h>
+#include <linux/platform_device.h>
 #include <linux/pinctrl/pinctrl.h>
 
 #include "pinctrl-imx1.h"
@@ -401,7 +396,8 @@ static int imx27_pinctrl_probe(struct platform_device *pdev)
 static struct platform_driver imx27_pinctrl_driver = {
 	.driver = {
 		.name = "imx27-pinctrl",
-		.of_match_table = of_match_ptr(imx27_pinctrl_of_match),
+		.of_match_table = imx27_pinctrl_of_match,
+		.suppress_bind_attrs = true,
 	},
 	.probe = imx27_pinctrl_probe,
 };

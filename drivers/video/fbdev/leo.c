@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /* leo.c: LEO frame buffer driver
  *
  * Copyright (C) 2003, 2006 David S. Miller (davem@davemloft.net)
@@ -15,8 +16,9 @@
 #include <linux/init.h>
 #include <linux/fb.h>
 #include <linux/mm.h>
-#include <linux/of_device.h>
 #include <linux/io.h>
+#include <linux/of.h>
+#include <linux/platform_device.h>
 
 #include <asm/fbio.h>
 
@@ -38,7 +40,7 @@ static int leo_pan_display(struct fb_var_screeninfo *, struct fb_info *);
  *  Frame buffer operations
  */
 
-static struct fb_ops leo_ops = {
+static const struct fb_ops leo_ops = {
 	.owner			= THIS_MODULE,
 	.fb_setcolreg		= leo_setcolreg,
 	.fb_blank		= leo_blank,
@@ -307,7 +309,7 @@ static int leo_setcolreg(unsigned regno,
 
 /**
  *      leo_blank - Optional function.  Blanks the display.
- *      @blank_mode: the blank mode we want.
+ *      @blank: the blank mode we want.
  *      @info: frame buffer structure that represents a single frame buffer
  */
 static int leo_blank(int blank, struct fb_info *info)
@@ -434,7 +436,7 @@ static int leo_ioctl(struct fb_info *info, unsigned int cmd, unsigned long arg)
 static void
 leo_init_fix(struct fb_info *info, struct device_node *dp)
 {
-	strlcpy(info->fix.id, dp->name, sizeof(info->fix.id));
+	snprintf(info->fix.id, sizeof(info->fix.id), "%pOFn", dp);
 
 	info->fix.type = FB_TYPE_PACKED_PIXELS;
 	info->fix.visual = FB_VISUAL_TRUECOLOR;
@@ -599,7 +601,6 @@ static int leo_probe(struct platform_device *op)
 	    !info->screen_base)
 		goto out_unmap_regs;
 
-	info->flags = FBINFO_DEFAULT;
 	info->fbops = &leo_ops;
 	info->pseudo_palette = par->clut_data;
 
@@ -619,8 +620,8 @@ static int leo_probe(struct platform_device *op)
 
 	dev_set_drvdata(&op->dev, info);
 
-	printk(KERN_INFO "%s: leo at %lx:%lx\n",
-	       dp->full_name,
+	printk(KERN_INFO "%pOF: leo at %lx:%lx\n",
+	       dp,
 	       par->which_io, info->fix.smem_start);
 
 	return 0;
@@ -636,7 +637,7 @@ out_err:
 	return err;
 }
 
-static int leo_remove(struct platform_device *op)
+static void leo_remove(struct platform_device *op)
 {
 	struct fb_info *info = dev_get_drvdata(&op->dev);
 	struct leo_par *par = info->par;
@@ -647,8 +648,6 @@ static int leo_remove(struct platform_device *op)
 	leo_unmap_regs(op, info, par);
 
 	framebuffer_release(info);
-
-	return 0;
 }
 
 static const struct of_device_id leo_match[] = {
@@ -665,7 +664,7 @@ static struct platform_driver leo_driver = {
 		.of_match_table = leo_match,
 	},
 	.probe		= leo_probe,
-	.remove		= leo_remove,
+	.remove_new	= leo_remove,
 };
 
 static int __init leo_init(void)

@@ -1,10 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
- *  This program is free software; you can redistribute it and/or modify it
- *  under the terms of the GNU General Public License version 2 as published
- *  by the Free Software Foundation.
  *
  *  Copyright (C) 2004 Liu Peng Infineon IFAP DC COM CPE
- *  Copyright (C) 2010 John Crispin <blogic@openwrt.org>
+ *  Copyright (C) 2010 John Crispin <john@phrozen.org>
  */
 
 #include <linux/err.h>
@@ -114,23 +112,15 @@ ltq_mtd_probe(struct platform_device *pdev)
 	struct cfi_private *cfi;
 	int err;
 
-	if (of_machine_is_compatible("lantiq,falcon") &&
-			(ltq_boot_select() != BS_FLASH)) {
-		dev_err(&pdev->dev, "invalid bootstrap options\n");
-		return -ENODEV;
-	}
-
 	ltq_mtd = devm_kzalloc(&pdev->dev, sizeof(struct ltq_mtd), GFP_KERNEL);
 	if (!ltq_mtd)
 		return -ENOMEM;
 
 	platform_set_drvdata(pdev, ltq_mtd);
 
-	ltq_mtd->res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	if (!ltq_mtd->res) {
-		dev_err(&pdev->dev, "failed to get memory resource\n");
-		return -ENOENT;
-	}
+	ltq_mtd->map->virt = devm_platform_get_and_ioremap_resource(pdev, 0, &ltq_mtd->res);
+	if (IS_ERR(ltq_mtd->map->virt))
+		return PTR_ERR(ltq_mtd->map->virt);
 
 	ltq_mtd->map = devm_kzalloc(&pdev->dev, sizeof(struct map_info),
 				    GFP_KERNEL);
@@ -139,9 +129,6 @@ ltq_mtd_probe(struct platform_device *pdev)
 
 	ltq_mtd->map->phys = ltq_mtd->res->start;
 	ltq_mtd->map->size = resource_size(ltq_mtd->res);
-	ltq_mtd->map->virt = devm_ioremap_resource(&pdev->dev, ltq_mtd->res);
-	if (IS_ERR(ltq_mtd->map->virt))
-		return PTR_ERR(ltq_mtd->map->virt);
 
 	ltq_mtd->map->name = ltq_map_name;
 	ltq_mtd->map->bankwidth = 2;
@@ -209,5 +196,5 @@ static struct platform_driver ltq_mtd_driver = {
 module_platform_driver(ltq_mtd_driver);
 
 MODULE_LICENSE("GPL");
-MODULE_AUTHOR("John Crispin <blogic@openwrt.org>");
+MODULE_AUTHOR("John Crispin <john@phrozen.org>");
 MODULE_DESCRIPTION("Lantiq SoC NOR");

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef LINUX_EXPORTFS_H
 #define LINUX_EXPORTFS_H 1
 
@@ -104,6 +105,11 @@ enum fid_type {
 	FILEID_LUSTRE = 0x97,
 
 	/*
+	 * 64 bit unique kernfs id
+	 */
+	FILEID_KERNFS = 0xfe,
+
+	/*
 	 * Filesystems must not use 0xff file ID.
 	 */
 	FILEID_INVALID = 0xff,
@@ -125,9 +131,12 @@ struct fid {
  			u32 parent_block;
  			u32 parent_generation;
  		} udf;
-		__u32 raw[0];
+		DECLARE_FLEX_ARRAY(__u32, raw);
 	};
 };
+
+#define EXPORT_FH_CONNECTABLE	0x1 /* Encode file handle with parent */
+#define EXPORT_FH_FID		0x2 /* File handle may be non-decodeable */
 
 /**
  * struct export_operations - for nfsd to communicate with file systems
@@ -138,13 +147,13 @@ struct fid {
  * @get_parent:     find the parent of a given directory
  * @commit_metadata: commit metadata changes to stable storage
  *
- * See Documentation/filesystems/nfs/Exporting for details on how to use
+ * See Documentation/filesystems/nfs/exporting.rst for details on how to use
  * this interface correctly.
  *
  * encode_fh:
  *    @encode_fh should store in the file handle fragment @fh (using at most
  *    @max_len bytes) information that can be used by @decode_fh to recover the
- *    file referred to by the &struct dentry @de.  If the @connectable flag is
+ *    file referred to by the &struct dentry @de.  If @flag has CONNECTABLE bit
  *    set, the encode_fh() should store sufficient information so that a good
  *    attempt can be made to find not only the file but also it's place in the
  *    filesystem.   This typically means storing a reference to de->d_parent in
@@ -172,7 +181,7 @@ struct fid {
  * get_name:
  *    @get_name should find a name for the given @child in the given @parent
  *    directory.  The name should be stored in the @name (with the
- *    understanding that it is already pointing to a a %NAME_MAX+1 sized
+ *    understanding that it is already pointing to a %NAME_MAX+1 sized
  *    buffer.   get_name() should return %0 on success, a negative error code
  *    or error.  @get_name will be called without @parent->i_mutex held.
  *
@@ -207,12 +216,35 @@ struct export_operations {
 			  bool write, u32 *device_generation);
 	int (*commit_blocks)(struct inode *inode, struct iomap *iomaps,
 			     int nr_iomaps, struct iattr *iattr);
+#define	EXPORT_OP_NOWCC			(0x1) /* don't collect v3 wcc data */
+#define	EXPORT_OP_NOSUBTREECHK		(0x2) /* no subtree checking */
+#define	EXPORT_OP_CLOSE_BEFORE_UNLINK	(0x4) /* close files before unlink */
+#define EXPORT_OP_REMOTE_FS		(0x8) /* Filesystem is remote */
+#define EXPORT_OP_NOATOMIC_ATTR		(0x10) /* Filesystem cannot supply
+						  atomic attribute updates
+						*/
+#define EXPORT_OP_FLUSH_ON_CLOSE	(0x20) /* fs flushes file data on close */
+	unsigned long	flags;
 };
 
 extern int exportfs_encode_inode_fh(struct inode *inode, struct fid *fid,
-				    int *max_len, struct inode *parent);
+				    int *max_len, struct inode *parent,
+				    int flags);
 extern int exportfs_encode_fh(struct dentry *dentry, struct fid *fid,
-	int *max_len, int connectable);
+			      int *max_len, int flags);
+
+static inline int exportfs_encode_fid(struct inode *inode, struct fid *fid,
+				      int *max_len)
+{
+	return exportfs_encode_inode_fh(inode, fid, max_len, NULL,
+					EXPORT_FH_FID);
+}
+
+extern struct dentry *exportfs_decode_fh_raw(struct vfsmount *mnt,
+					     struct fid *fid, int fh_len,
+					     int fileid_type,
+					     int (*acceptable)(void *, struct dentry *),
+					     void *context);
 extern struct dentry *exportfs_decode_fh(struct vfsmount *mnt, struct fid *fid,
 	int fh_len, int fileid_type, int (*acceptable)(void *, struct dentry *),
 	void *context);

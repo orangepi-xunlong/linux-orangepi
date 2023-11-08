@@ -1,10 +1,11 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * memscan.S: Optimized memscan for the Sparc.
  *
  * Copyright (C) 1996 David S. Miller (davem@caip.rutgers.edu)
  */
 
-#include <asm/export.h>
+#include <linux/export.h>
 
 /* In essence, this is just a fancy strlen. */
 

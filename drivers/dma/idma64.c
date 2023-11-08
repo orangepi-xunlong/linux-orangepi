@@ -1,12 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Core driver for the Intel integrated DMA 64-bit
  *
  * Copyright (C) 2015 Intel Corporation
  * Author: Andy Shevchenko <andriy.shevchenko@linux.intel.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/bitops.h>
@@ -19,10 +16,9 @@
 #include <linux/platform_device.h>
 #include <linux/slab.h>
 
-#include "idma64.h"
+#include <linux/dma/idma64.h>
 
-/* Platform driver name */
-#define DRV_NAME		"idma64"
+#include "idma64.h"
 
 /* For now we support only two channels */
 #define IDMA64_NR_CHAN		2
@@ -141,10 +137,12 @@ static void idma64_chan_irq(struct idma64 *idma64, unsigned short c,
 		u32 status_err, u32 status_xfer)
 {
 	struct idma64_chan *idma64c = &idma64->chan[c];
+	struct dma_chan_percpu *stat;
 	struct idma64_desc *desc;
-	unsigned long flags;
 
-	spin_lock_irqsave(&idma64c->vchan.lock, flags);
+	stat = this_cpu_ptr(idma64c->vchan.chan.local);
+
+	spin_lock(&idma64c->vchan.lock);
 	desc = idma64c->desc;
 	if (desc) {
 		if (status_err & (1 << c)) {
@@ -154,6 +152,7 @@ static void idma64_chan_irq(struct idma64 *idma64, unsigned short c,
 			dma_writel(idma64, CLEAR(XFER), idma64c->mask);
 			desc->status = DMA_COMPLETE;
 			vchan_cookie_complete(&desc->vdesc);
+			stat->bytes_transferred += desc->length;
 			idma64_start_transfer(idma64c);
 		}
 
@@ -161,7 +160,7 @@ static void idma64_chan_irq(struct idma64 *idma64, unsigned short c,
 		if (idma64c->desc == NULL || desc->status == DMA_ERROR)
 			idma64_stop_transfer(idma64c);
 	}
-	spin_unlock_irqrestore(&idma64c->vchan.lock, flags);
+	spin_unlock(&idma64c->vchan.lock);
 }
 
 static irqreturn_t idma64_irq(int irq, void *dev)
@@ -408,10 +407,6 @@ static int idma64_slave_config(struct dma_chan *chan,
 {
 	struct idma64_chan *idma64c = to_idma64_chan(chan);
 
-	/* Check if chan will be configured for slave transfers */
-	if (!is_slave_direction(config->direction))
-		return -EINVAL;
-
 	memcpy(&idma64c->config, config, sizeof(idma64c->config));
 
 	convert_burst(&idma64c->config.src_maxburst);
@@ -494,6 +489,13 @@ static int idma64_terminate_all(struct dma_chan *chan)
 
 	vchan_dma_desc_free_list(&idma64c->vchan, &head);
 	return 0;
+}
+
+static void idma64_synchronize(struct dma_chan *chan)
+{
+	struct idma64_chan *idma64c = to_idma64_chan(chan);
+
+	vchan_synchronize(&idma64c->vchan);
 }
 
 static int idma64_alloc_chan_resources(struct dma_chan *chan)
@@ -583,13 +585,14 @@ static int idma64_probe(struct idma64_chip *chip)
 	idma64->dma.device_pause = idma64_pause;
 	idma64->dma.device_resume = idma64_resume;
 	idma64->dma.device_terminate_all = idma64_terminate_all;
+	idma64->dma.device_synchronize = idma64_synchronize;
 
 	idma64->dma.src_addr_widths = IDMA64_BUSWIDTHS;
 	idma64->dma.dst_addr_widths = IDMA64_BUSWIDTHS;
 	idma64->dma.directions = BIT(DMA_DEV_TO_MEM) | BIT(DMA_MEM_TO_DEV);
 	idma64->dma.residue_granularity = DMA_RESIDUE_GRANULARITY_BURST;
 
-	idma64->dma.dev = chip->dev;
+	idma64->dma.dev = chip->sysdev;
 
 	dma_set_max_seg_size(idma64->dma.dev, IDMA64C_CTLH_BLOCK_TS_MASK);
 
@@ -601,7 +604,7 @@ static int idma64_probe(struct idma64_chip *chip)
 	return 0;
 }
 
-static int idma64_remove(struct idma64_chip *chip)
+static void idma64_remove(struct idma64_chip *chip)
 {
 	struct idma64 *idma64 = chip->idma64;
 	unsigned short i;
@@ -619,8 +622,6 @@ static int idma64_remove(struct idma64_chip *chip)
 
 		tasklet_kill(&idma64c->vchan.task);
 	}
-
-	return 0;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -629,7 +630,7 @@ static int idma64_platform_probe(struct platform_device *pdev)
 {
 	struct idma64_chip *chip;
 	struct device *dev = &pdev->dev;
-	struct resource *mem;
+	struct device *sysdev = dev->parent;
 	int ret;
 
 	chip = devm_kzalloc(dev, sizeof(*chip), GFP_KERNEL);
@@ -640,16 +641,16 @@ static int idma64_platform_probe(struct platform_device *pdev)
 	if (chip->irq < 0)
 		return chip->irq;
 
-	mem = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	chip->regs = devm_ioremap_resource(dev, mem);
+	chip->regs = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(chip->regs))
 		return PTR_ERR(chip->regs);
 
-	ret = dma_coerce_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(64));
+	ret = dma_coerce_mask_and_coherent(sysdev, DMA_BIT_MASK(64));
 	if (ret)
 		return ret;
 
 	chip->dev = dev;
+	chip->sysdev = sysdev;
 
 	ret = idma64_probe(chip);
 	if (ret)
@@ -663,30 +664,26 @@ static int idma64_platform_remove(struct platform_device *pdev)
 {
 	struct idma64_chip *chip = platform_get_drvdata(pdev);
 
-	return idma64_remove(chip);
+	idma64_remove(chip);
+
+	return 0;
 }
 
-#ifdef CONFIG_PM_SLEEP
-
-static int idma64_pm_suspend(struct device *dev)
+static int __maybe_unused idma64_pm_suspend(struct device *dev)
 {
-	struct platform_device *pdev = to_platform_device(dev);
-	struct idma64_chip *chip = platform_get_drvdata(pdev);
+	struct idma64_chip *chip = dev_get_drvdata(dev);
 
 	idma64_off(chip->idma64);
 	return 0;
 }
 
-static int idma64_pm_resume(struct device *dev)
+static int __maybe_unused idma64_pm_resume(struct device *dev)
 {
-	struct platform_device *pdev = to_platform_device(dev);
-	struct idma64_chip *chip = platform_get_drvdata(pdev);
+	struct idma64_chip *chip = dev_get_drvdata(dev);
 
 	idma64_on(chip->idma64);
 	return 0;
 }
-
-#endif /* CONFIG_PM_SLEEP */
 
 static const struct dev_pm_ops idma64_dev_pm_ops = {
 	SET_SYSTEM_SLEEP_PM_OPS(idma64_pm_suspend, idma64_pm_resume)
@@ -696,7 +693,7 @@ static struct platform_driver idma64_platform_driver = {
 	.probe		= idma64_platform_probe,
 	.remove		= idma64_platform_remove,
 	.driver = {
-		.name	= DRV_NAME,
+		.name	= LPSS_IDMA64_DRIVER_NAME,
 		.pm	= &idma64_dev_pm_ops,
 	},
 };
@@ -706,4 +703,4 @@ module_platform_driver(idma64_platform_driver);
 MODULE_LICENSE("GPL v2");
 MODULE_DESCRIPTION("iDMA64 core driver");
 MODULE_AUTHOR("Andy Shevchenko <andriy.shevchenko@linux.intel.com>");
-MODULE_ALIAS("platform:" DRV_NAME);
+MODULE_ALIAS("platform:" LPSS_IDMA64_DRIVER_NAME);

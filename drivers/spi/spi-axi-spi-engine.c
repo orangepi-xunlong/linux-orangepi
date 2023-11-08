@@ -1,9 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * SPI-Engine SPI controller driver
  * Copyright 2015 Analog Devices Inc.
  *  Author: Lars-Peter Clausen <lars@metafoo.de>
- *
- * Licensed under the GPL-2.
  */
 
 #include <linux/clk.h>
@@ -164,10 +163,17 @@ static void spi_engine_gen_xfer(struct spi_engine_program *p, bool dry,
 }
 
 static void spi_engine_gen_sleep(struct spi_engine_program *p, bool dry,
-	struct spi_engine *spi_engine, unsigned int clk_div, unsigned int delay)
+	struct spi_engine *spi_engine, unsigned int clk_div,
+	struct spi_transfer *xfer)
 {
 	unsigned int spi_clk = clk_get_rate(spi_engine->ref_clk);
 	unsigned int t;
+	int delay;
+
+	delay = spi_delay_to_ns(&xfer->delay, xfer);
+	if (delay < 0)
+		return;
+	delay /= 1000;
 
 	if (delay == 0)
 		return;
@@ -187,7 +193,7 @@ static void spi_engine_gen_cs(struct spi_engine_program *p, bool dry,
 	unsigned int mask = 0xff;
 
 	if (assert)
-		mask ^= BIT(spi->chip_select);
+		mask ^= BIT(spi_get_chipselect(spi, 0));
 
 	spi_engine_program_add_cmd(p, dry, SPI_ENGINE_CMD_ASSERT(1, mask));
 }
@@ -219,8 +225,7 @@ static int spi_engine_compile_message(struct spi_engine *spi_engine,
 			spi_engine_gen_cs(p, dry, spi, true);
 
 		spi_engine_gen_xfer(p, dry, xfer);
-		spi_engine_gen_sleep(p, dry, spi_engine, clk_div,
-			xfer->delay_usecs);
+		spi_engine_gen_sleep(p, dry, spi_engine, clk_div, xfer);
 
 		cs_change = xfer->cs_change;
 		if (list_is_last(&xfer->transfer_list, &msg->transfers))
@@ -351,8 +356,8 @@ static bool spi_engine_read_rx_fifo(struct spi_engine *spi_engine)
 
 static irqreturn_t spi_engine_irq(int irq, void *devid)
 {
-	struct spi_master *master = devid;
-	struct spi_engine *spi_engine = spi_master_get_devdata(master);
+	struct spi_controller *host = devid;
+	struct spi_engine *spi_engine = spi_controller_get_devdata(host);
 	unsigned int disable_int = 0;
 	unsigned int pending;
 
@@ -391,7 +396,7 @@ static irqreturn_t spi_engine_irq(int irq, void *devid)
 			msg->status = 0;
 			msg->actual_length = msg->frame_length;
 			spi_engine->msg = NULL;
-			spi_finalize_current_message(master);
+			spi_finalize_current_message(host);
 			disable_int |= SPI_ENGINE_INT_SYNC;
 		}
 	}
@@ -407,11 +412,11 @@ static irqreturn_t spi_engine_irq(int irq, void *devid)
 	return IRQ_HANDLED;
 }
 
-static int spi_engine_transfer_one_message(struct spi_master *master,
+static int spi_engine_transfer_one_message(struct spi_controller *host,
 	struct spi_message *msg)
 {
 	struct spi_engine_program p_dry, *p;
-	struct spi_engine *spi_engine = spi_master_get_devdata(master);
+	struct spi_engine *spi_engine = spi_controller_get_devdata(host);
 	unsigned int int_enable = 0;
 	unsigned long flags;
 	size_t size;
@@ -459,33 +464,51 @@ static int spi_engine_transfer_one_message(struct spi_master *master,
 static int spi_engine_probe(struct platform_device *pdev)
 {
 	struct spi_engine *spi_engine;
-	struct spi_master *master;
+	struct spi_controller *host;
 	unsigned int version;
-	struct resource *res;
 	int irq;
 	int ret;
 
 	irq = platform_get_irq(pdev, 0);
-	if (irq <= 0)
-		return -ENXIO;
+	if (irq < 0)
+		return irq;
 
 	spi_engine = devm_kzalloc(&pdev->dev, sizeof(*spi_engine), GFP_KERNEL);
 	if (!spi_engine)
 		return -ENOMEM;
 
-	master = spi_alloc_master(&pdev->dev, 0);
-	if (!master)
+	host = spi_alloc_host(&pdev->dev, 0);
+	if (!host)
 		return -ENOMEM;
 
-	spi_master_set_devdata(master, spi_engine);
+	spi_controller_set_devdata(host, spi_engine);
 
 	spin_lock_init(&spi_engine->lock);
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	spi_engine->base = devm_ioremap_resource(&pdev->dev, res);
+	spi_engine->clk = devm_clk_get(&pdev->dev, "s_axi_aclk");
+	if (IS_ERR(spi_engine->clk)) {
+		ret = PTR_ERR(spi_engine->clk);
+		goto err_put_host;
+	}
+
+	spi_engine->ref_clk = devm_clk_get(&pdev->dev, "spi_clk");
+	if (IS_ERR(spi_engine->ref_clk)) {
+		ret = PTR_ERR(spi_engine->ref_clk);
+		goto err_put_host;
+	}
+
+	ret = clk_prepare_enable(spi_engine->clk);
+	if (ret)
+		goto err_put_host;
+
+	ret = clk_prepare_enable(spi_engine->ref_clk);
+	if (ret)
+		goto err_clk_disable;
+
+	spi_engine->base = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(spi_engine->base)) {
 		ret = PTR_ERR(spi_engine->base);
-		goto err_put_master;
+		goto err_ref_clk_disable;
 	}
 
 	version = readl(spi_engine->base + SPI_ENGINE_REG_VERSION);
@@ -495,73 +518,53 @@ static int spi_engine_probe(struct platform_device *pdev)
 			SPI_ENGINE_VERSION_MINOR(version),
 			SPI_ENGINE_VERSION_PATCH(version));
 		ret = -ENODEV;
-		goto err_put_master;
+		goto err_ref_clk_disable;
 	}
-
-	spi_engine->clk = devm_clk_get(&pdev->dev, "s_axi_aclk");
-	if (IS_ERR(spi_engine->clk)) {
-		ret = PTR_ERR(spi_engine->clk);
-		goto err_put_master;
-	}
-
-	spi_engine->ref_clk = devm_clk_get(&pdev->dev, "spi_clk");
-	if (IS_ERR(spi_engine->ref_clk)) {
-		ret = PTR_ERR(spi_engine->ref_clk);
-		goto err_put_master;
-	}
-
-	ret = clk_prepare_enable(spi_engine->clk);
-	if (ret)
-		goto err_put_master;
-
-	ret = clk_prepare_enable(spi_engine->ref_clk);
-	if (ret)
-		goto err_clk_disable;
 
 	writel_relaxed(0x00, spi_engine->base + SPI_ENGINE_REG_RESET);
 	writel_relaxed(0xff, spi_engine->base + SPI_ENGINE_REG_INT_PENDING);
 	writel_relaxed(0x00, spi_engine->base + SPI_ENGINE_REG_INT_ENABLE);
 
-	ret = request_irq(irq, spi_engine_irq, 0, pdev->name, master);
+	ret = request_irq(irq, spi_engine_irq, 0, pdev->name, host);
 	if (ret)
 		goto err_ref_clk_disable;
 
-	master->dev.of_node = pdev->dev.of_node;
-	master->mode_bits = SPI_CPOL | SPI_CPHA | SPI_3WIRE;
-	master->bits_per_word_mask = SPI_BPW_MASK(8);
-	master->max_speed_hz = clk_get_rate(spi_engine->ref_clk) / 2;
-	master->transfer_one_message = spi_engine_transfer_one_message;
-	master->num_chipselect = 8;
+	host->dev.of_node = pdev->dev.of_node;
+	host->mode_bits = SPI_CPOL | SPI_CPHA | SPI_3WIRE;
+	host->bits_per_word_mask = SPI_BPW_MASK(8);
+	host->max_speed_hz = clk_get_rate(spi_engine->ref_clk) / 2;
+	host->transfer_one_message = spi_engine_transfer_one_message;
+	host->num_chipselect = 8;
 
-	ret = spi_register_master(master);
+	ret = spi_register_controller(host);
 	if (ret)
 		goto err_free_irq;
 
-	platform_set_drvdata(pdev, master);
+	platform_set_drvdata(pdev, host);
 
 	return 0;
 err_free_irq:
-	free_irq(irq, master);
+	free_irq(irq, host);
 err_ref_clk_disable:
 	clk_disable_unprepare(spi_engine->ref_clk);
 err_clk_disable:
 	clk_disable_unprepare(spi_engine->clk);
-err_put_master:
-	spi_master_put(master);
+err_put_host:
+	spi_controller_put(host);
 	return ret;
 }
 
-static int spi_engine_remove(struct platform_device *pdev)
+static void spi_engine_remove(struct platform_device *pdev)
 {
-	struct spi_master *master = spi_master_get(platform_get_drvdata(pdev));
-	struct spi_engine *spi_engine = spi_master_get_devdata(master);
+	struct spi_controller *host = spi_controller_get(platform_get_drvdata(pdev));
+	struct spi_engine *spi_engine = spi_controller_get_devdata(host);
 	int irq = platform_get_irq(pdev, 0);
 
-	spi_unregister_master(master);
+	spi_unregister_controller(host);
 
-	free_irq(irq, master);
+	free_irq(irq, host);
 
-	spi_master_put(master);
+	spi_controller_put(host);
 
 	writel_relaxed(0xff, spi_engine->base + SPI_ENGINE_REG_INT_PENDING);
 	writel_relaxed(0x00, spi_engine->base + SPI_ENGINE_REG_INT_ENABLE);
@@ -569,18 +572,17 @@ static int spi_engine_remove(struct platform_device *pdev)
 
 	clk_disable_unprepare(spi_engine->ref_clk);
 	clk_disable_unprepare(spi_engine->clk);
-
-	return 0;
 }
 
 static const struct of_device_id spi_engine_match_table[] = {
 	{ .compatible = "adi,axi-spi-engine-1.00.a" },
 	{ },
 };
+MODULE_DEVICE_TABLE(of, spi_engine_match_table);
 
 static struct platform_driver spi_engine_driver = {
 	.probe = spi_engine_probe,
-	.remove = spi_engine_remove,
+	.remove_new = spi_engine_remove,
 	.driver = {
 		.name = "spi-engine",
 		.of_match_table = spi_engine_match_table,

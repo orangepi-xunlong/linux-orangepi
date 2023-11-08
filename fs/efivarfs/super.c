@@ -1,20 +1,19 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2012 Red Hat, Inc.
  * Copyright (C) 2012 Jeremy Kerr <jeremy.kerr@canonical.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/ctype.h>
 #include <linux/efi.h>
 #include <linux/fs.h>
+#include <linux/fs_context.h>
 #include <linux/module.h>
 #include <linux/pagemap.h>
 #include <linux/ucs2_string.h>
 #include <linux/slab.h>
 #include <linux/magic.h>
+#include <linux/statfs.h>
 
 #include "internal.h"
 
@@ -25,14 +24,53 @@ static void efivarfs_evict_inode(struct inode *inode)
 	clear_inode(inode);
 }
 
+static int efivarfs_statfs(struct dentry *dentry, struct kstatfs *buf)
+{
+	const u32 attr = EFI_VARIABLE_NON_VOLATILE |
+			 EFI_VARIABLE_BOOTSERVICE_ACCESS |
+			 EFI_VARIABLE_RUNTIME_ACCESS;
+	u64 storage_space, remaining_space, max_variable_size;
+	efi_status_t status;
+
+	/* Some UEFI firmware does not implement QueryVariableInfo() */
+	storage_space = remaining_space = 0;
+	if (efi_rt_services_supported(EFI_RT_SUPPORTED_QUERY_VARIABLE_INFO)) {
+		status = efivar_query_variable_info(attr, &storage_space,
+						    &remaining_space,
+						    &max_variable_size);
+		if (status != EFI_SUCCESS && status != EFI_UNSUPPORTED)
+			pr_warn_ratelimited("query_variable_info() failed: 0x%lx\n",
+					    status);
+	}
+
+	/*
+	 * This is not a normal filesystem, so no point in pretending it has a block
+	 * size; we declare f_bsize to 1, so that we can then report the exact value
+	 * sent by EFI QueryVariableInfo in f_blocks and f_bfree
+	 */
+	buf->f_bsize	= 1;
+	buf->f_namelen	= NAME_MAX;
+	buf->f_blocks	= storage_space;
+	buf->f_bfree	= remaining_space;
+	buf->f_type	= dentry->d_sb->s_magic;
+
+	/*
+	 * In f_bavail we declare the free space that the kernel will allow writing
+	 * when the storage_paranoia x86 quirk is active. To use more, users
+	 * should boot the kernel with efi_no_storage_paranoia.
+	 */
+	if (remaining_space > efivar_reserved_space())
+		buf->f_bavail = remaining_space - efivar_reserved_space();
+	else
+		buf->f_bavail = 0;
+
+	return 0;
+}
 static const struct super_operations efivarfs_ops = {
-	.statfs = simple_statfs,
+	.statfs = efivarfs_statfs,
 	.drop_inode = generic_delete_inode,
 	.evict_inode = efivarfs_evict_inode,
-	.show_options = generic_show_options,
 };
-
-static struct super_block *efivarfs_sb;
 
 /*
  * Compare two efivarfs file names.
@@ -121,6 +159,9 @@ static int efivarfs_callback(efi_char16_t *name16, efi_guid_t vendor,
 	int err = -ENOMEM;
 	bool is_removable = false;
 
+	if (guid_equal(&vendor, &LINUX_EFI_RANDOM_SEED_TABLE_GUID))
+		return 0;
+
 	entry = kzalloc(sizeof(*entry), GFP_KERNEL);
 	if (!entry)
 		return err;
@@ -146,6 +187,9 @@ static int efivarfs_callback(efi_char16_t *name16, efi_guid_t vendor,
 
 	name[len + EFI_VARIABLE_GUID_LEN+1] = '\0';
 
+	/* replace invalid slashes like kobject_set_name_vargs does for /sys/firmware/efi/vars. */
+	strreplace(name, '/', '!');
+
 	inode = efivarfs_get_inode(sb, d_inode(root), S_IFREG | 0644, 0,
 				   is_removable);
 	if (!inode)
@@ -157,10 +201,8 @@ static int efivarfs_callback(efi_char16_t *name16, efi_guid_t vendor,
 		goto fail_inode;
 	}
 
-	efivar_entry_size(entry, &size);
-	err = efivar_entry_add(entry, &efivarfs_list);
-	if (err)
-		goto fail_inode;
+	__efivar_entry_get(entry, NULL, &size, NULL);
+	__efivar_entry_add(entry, &efivarfs_list);
 
 	/* copied by the above to local storage in the dentry. */
 	kfree(name);
@@ -184,21 +226,19 @@ fail:
 
 static int efivarfs_destroy(struct efivar_entry *entry, void *data)
 {
-	int err = efivar_entry_remove(entry);
-
-	if (err)
-		return err;
+	efivar_entry_remove(entry);
 	kfree(entry);
 	return 0;
 }
 
-static int efivarfs_fill_super(struct super_block *sb, void *data, int silent)
+static int efivarfs_fill_super(struct super_block *sb, struct fs_context *fc)
 {
 	struct inode *inode = NULL;
 	struct dentry *root;
 	int err;
 
-	efivarfs_sb = sb;
+	if (!efivar_is_available())
+		return -EOPNOTSUPP;
 
 	sb->s_maxbytes          = MAX_LFS_FILESIZE;
 	sb->s_blocksize         = PAGE_SIZE;
@@ -207,6 +247,9 @@ static int efivarfs_fill_super(struct super_block *sb, void *data, int silent)
 	sb->s_op                = &efivarfs_ops;
 	sb->s_d_op		= &efivarfs_d_ops;
 	sb->s_time_gran         = 1;
+
+	if (!efivar_supports_writes())
+		sb->s_flags |= SB_RDONLY;
 
 	inode = efivarfs_get_inode(sb, NULL, S_IFDIR | 0755, 0, true);
 	if (!inode)
@@ -222,41 +265,46 @@ static int efivarfs_fill_super(struct super_block *sb, void *data, int silent)
 
 	err = efivar_init(efivarfs_callback, (void *)sb, true, &efivarfs_list);
 	if (err)
-		__efivar_entry_iter(efivarfs_destroy, &efivarfs_list, NULL, NULL);
+		efivar_entry_iter(efivarfs_destroy, &efivarfs_list, NULL);
 
 	return err;
 }
 
-static struct dentry *efivarfs_mount(struct file_system_type *fs_type,
-				    int flags, const char *dev_name, void *data)
+static int efivarfs_get_tree(struct fs_context *fc)
 {
-	return mount_single(fs_type, flags, data, efivarfs_fill_super);
+	return get_tree_single(fc, efivarfs_fill_super);
+}
+
+static const struct fs_context_operations efivarfs_context_ops = {
+	.get_tree	= efivarfs_get_tree,
+};
+
+static int efivarfs_init_fs_context(struct fs_context *fc)
+{
+	fc->ops = &efivarfs_context_ops;
+	return 0;
 }
 
 static void efivarfs_kill_sb(struct super_block *sb)
 {
 	kill_litter_super(sb);
-	efivarfs_sb = NULL;
+
+	if (!efivar_is_available())
+		return;
 
 	/* Remove all entries and destroy */
-	__efivar_entry_iter(efivarfs_destroy, &efivarfs_list, NULL, NULL);
+	efivar_entry_iter(efivarfs_destroy, &efivarfs_list, NULL);
 }
 
 static struct file_system_type efivarfs_type = {
 	.owner   = THIS_MODULE,
 	.name    = "efivarfs",
-	.mount   = efivarfs_mount,
+	.init_fs_context = efivarfs_init_fs_context,
 	.kill_sb = efivarfs_kill_sb,
 };
 
 static __init int efivarfs_init(void)
 {
-	if (!efi_enabled(EFI_RUNTIME_SERVICES))
-		return -ENODEV;
-
-	if (!efivars_kobject())
-		return -ENODEV;
-
 	return register_filesystem(&efivarfs_type);
 }
 

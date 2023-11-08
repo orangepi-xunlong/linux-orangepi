@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 #include <linux/of.h>	/* linux/of.h gets to determine #include ordering */
 #ifndef _SPARC_PROM_H
 #define _SPARC_PROM_H
@@ -11,11 +12,6 @@
  *
  * Updates for PPC64 by Peter Bergner & David Engebretsen, IBM Corp.
  * Updates for SPARC by David S. Miller
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version
- * 2 of the License, or (at your option) any later version.
  */
 #include <linux/types.h>
 #include <linux/of_pdt.h>
@@ -23,13 +19,13 @@
 #include <linux/mutex.h>
 #include <linux/atomic.h>
 #include <linux/irqdomain.h>
-
-#define OF_ROOT_NODE_ADDR_CELLS_DEFAULT	2
-#define OF_ROOT_NODE_SIZE_CELLS_DEFAULT	1
+#include <linux/spinlock.h>
 
 #define of_compat_cmp(s1, s2, l)	strncmp((s1), (s2), (l))
 #define of_prop_cmp(s1, s2)		strcasecmp((s1), (s2))
 #define of_node_cmp(s1, s2)		strcmp((s1), (s2))
+
+extern raw_spinlock_t devtree_lock;
 
 struct of_irq_controller {
 	unsigned int	(*irq_build)(struct device_node *, unsigned int, void *);

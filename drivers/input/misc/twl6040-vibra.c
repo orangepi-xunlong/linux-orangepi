@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * twl6040-vibra.c - TWL6040 Vibrator driver
  *
@@ -9,21 +10,6 @@
  * Based on twl4030-vibra.c by Henrik Saari <henrik.saari@nokia.com>
  *				Felipe Balbi <felipe.balbi@nokia.com>
  *				Jari Vanhala <ext-javi.vanhala@nokia.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA
- * 02110-1301 USA
- *
  */
 #include <linux/module.h>
 #include <linux/platform_device.h>
@@ -224,7 +210,7 @@ static void twl6040_vibra_close(struct input_dev *input)
 		twl6040_vibra_disable(info);
 }
 
-static int __maybe_unused twl6040_vibra_suspend(struct device *dev)
+static int twl6040_vibra_suspend(struct device *dev)
 {
 	struct platform_device *pdev = to_platform_device(dev);
 	struct vibra_info *info = platform_get_drvdata(pdev);
@@ -237,7 +223,8 @@ static int __maybe_unused twl6040_vibra_suspend(struct device *dev)
 	return 0;
 }
 
-static SIMPLE_DEV_PM_OPS(twl6040_vibra_pm_ops, twl6040_vibra_suspend, NULL);
+static DEFINE_SIMPLE_DEV_PM_OPS(twl6040_vibra_pm_ops,
+				twl6040_vibra_suspend, NULL);
 
 static int twl6040_vibra_probe(struct platform_device *pdev)
 {
@@ -286,10 +273,8 @@ static int twl6040_vibra_probe(struct platform_device *pdev)
 	}
 
 	info->irq = platform_get_irq(pdev, 0);
-	if (info->irq < 0) {
-		dev_err(info->dev, "invalid irq\n");
+	if (info->irq < 0)
 		return -EINVAL;
-	}
 
 	error = devm_request_threaded_irq(&pdev->dev, info->irq, NULL,
 					  twl6040_vib_irq_handler,
@@ -370,7 +355,7 @@ static struct platform_driver twl6040_vibra_driver = {
 	.probe		= twl6040_vibra_probe,
 	.driver		= {
 		.name	= "twl6040-vibra",
-		.pm	= &twl6040_vibra_pm_ops,
+		.pm	= pm_sleep_ptr(&twl6040_vibra_pm_ops),
 	},
 };
 module_platform_driver(twl6040_vibra_driver);

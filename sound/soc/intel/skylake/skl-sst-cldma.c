@@ -1,24 +1,17 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * skl-sst-cldma.c - Code Loader DMA handler
  *
  * Copyright (C) 2015, Intel Corporation.
  * Author: Subhransu S. Prusty <subhransu.s.prusty@intel.com>
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as version 2, as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
  */
 
 #include <linux/device.h>
+#include <linux/io.h>
 #include <linux/mm.h>
-#include <linux/kthread.h>
 #include <linux/delay.h>
+#include <sound/hda_register.h>
 #include "../common/sst-dsp.h"
 #include "../common/sst-dsp-priv.h"
 
@@ -84,24 +77,28 @@ static void skl_cldma_stream_clear(struct sst_dsp  *ctx)
 /* Code loader helper APIs */
 static void skl_cldma_setup_bdle(struct sst_dsp *ctx,
 		struct snd_dma_buffer *dmab_data,
-		u32 **bdlp, int size, int with_ioc)
+		__le32 **bdlp, int size, int with_ioc)
 {
-	u32 *bdl = *bdlp;
+	__le32 *bdl = *bdlp;
+	int remaining = ctx->cl_dev.bufsize;
+	int offset = 0;
 
 	ctx->cl_dev.frags = 0;
-	while (size > 0) {
-		phys_addr_t addr = virt_to_phys(dmab_data->area +
-				(ctx->cl_dev.frags * ctx->cl_dev.bufsize));
+	while (remaining > 0) {
+		phys_addr_t addr;
+		int chunk;
 
+		addr = snd_sgbuf_get_addr(dmab_data, offset);
 		bdl[0] = cpu_to_le32(lower_32_bits(addr));
 		bdl[1] = cpu_to_le32(upper_32_bits(addr));
+		chunk = snd_sgbuf_get_chunk_size(dmab_data, offset, size);
+		bdl[2] = cpu_to_le32(chunk);
 
-		bdl[2] = cpu_to_le32(ctx->cl_dev.bufsize);
-
-		size -= ctx->cl_dev.bufsize;
-		bdl[3] = (size || !with_ioc) ? 0 : cpu_to_le32(0x01);
+		remaining -= chunk;
+		bdl[3] = (remaining > 0) ? 0 : cpu_to_le32(0x01);
 
 		bdl += 4;
+		offset += chunk;
 		ctx->cl_dev.frags++;
 	}
 }
@@ -165,7 +162,7 @@ static void skl_cldma_cleanup(struct sst_dsp  *ctx)
 	ctx->dsp_ops.free_dma_buf(ctx->dev, &ctx->cl_dev.dmab_bdl);
 }
 
-static int skl_cldma_wait_interruptible(struct sst_dsp *ctx)
+int skl_cldma_wait_interruptible(struct sst_dsp *ctx)
 {
 	int ret = 0;
 
@@ -244,11 +241,16 @@ static void skl_cldma_fill_buffer(struct sst_dsp *ctx, unsigned int size,
  * 2. Polling on fw register to identify if data left to transferred doesn't
  *    fill the ring buffer. Caller takes care of polling the required status
  *    register to identify the transfer status.
+ * 3. if wait flag is set, waits for DBL interrupt to copy the next chunk till
+ *    bytes_left is 0.
+ *    if wait flag is not set, doesn't wait for BDL interrupt. after ccopying
+ *    the first chunk return the no of bytes_left to be copied.
  */
 static int
-skl_cldma_copy_to_buf(struct sst_dsp *ctx, const void *bin, u32 total_size)
+skl_cldma_copy_to_buf(struct sst_dsp *ctx, const void *bin,
+			u32 total_size, bool wait)
 {
-	int ret = 0;
+	int ret;
 	bool start = true;
 	unsigned int excess_bytes;
 	u32 size;
@@ -273,13 +275,14 @@ skl_cldma_copy_to_buf(struct sst_dsp *ctx, const void *bin, u32 total_size)
 			size = ctx->cl_dev.bufsize;
 			skl_cldma_fill_buffer(ctx, size, curr_pos, true, start);
 
-			start = false;
-			ret = skl_cldma_wait_interruptible(ctx);
-			if (ret < 0) {
-				skl_cldma_stop(ctx);
-				return ret;
+			if (wait) {
+				start = false;
+				ret = skl_cldma_wait_interruptible(ctx);
+				if (ret < 0) {
+					skl_cldma_stop(ctx);
+					return ret;
+				}
 			}
-
 		} else {
 			skl_cldma_int_disable(ctx);
 
@@ -299,9 +302,11 @@ skl_cldma_copy_to_buf(struct sst_dsp *ctx, const void *bin, u32 total_size)
 		}
 		bytes_left -= size;
 		curr_pos = curr_pos + size;
+		if (!wait)
+			return bytes_left;
 	}
 
-	return ret;
+	return bytes_left;
 }
 
 void skl_cldma_process_intr(struct sst_dsp *ctx)
@@ -323,7 +328,7 @@ void skl_cldma_process_intr(struct sst_dsp *ctx)
 int skl_cldma_prepare(struct sst_dsp *ctx)
 {
 	int ret;
-	u32 *bdl;
+	__le32 *bdl;
 
 	ctx->cl_dev.bufsize = SKL_MAX_BUFFER_SIZE;
 
@@ -338,21 +343,21 @@ int skl_cldma_prepare(struct sst_dsp *ctx)
 	ctx->cl_dev.ops.cl_stop_dma = skl_cldma_stop;
 
 	/* Allocate buffer*/
-	ret = ctx->dsp_ops.alloc_dma_buf(ctx->dev,
-			&ctx->cl_dev.dmab_data, ctx->cl_dev.bufsize);
+	ret = snd_dma_alloc_pages(SNDRV_DMA_TYPE_DEV_SG, ctx->dev, ctx->cl_dev.bufsize,
+				  &ctx->cl_dev.dmab_data);
 	if (ret < 0) {
 		dev_err(ctx->dev, "Alloc buffer for base fw failed: %x\n", ret);
 		return ret;
 	}
+
 	/* Setup Code loader BDL */
-	ret = ctx->dsp_ops.alloc_dma_buf(ctx->dev,
-			&ctx->cl_dev.dmab_bdl, PAGE_SIZE);
+	ret = snd_dma_alloc_pages(SNDRV_DMA_TYPE_DEV, ctx->dev, BDL_SIZE, &ctx->cl_dev.dmab_bdl);
 	if (ret < 0) {
 		dev_err(ctx->dev, "Alloc buffer for blde failed: %x\n", ret);
 		ctx->dsp_ops.free_dma_buf(ctx->dev, &ctx->cl_dev.dmab_data);
 		return ret;
 	}
-	bdl = (u32 *)ctx->cl_dev.dmab_bdl.area;
+	bdl = (__le32 *)ctx->cl_dev.dmab_bdl.area;
 
 	/* Allocate BDLs */
 	ctx->cl_dev.ops.cl_setup_bdle(ctx, &ctx->cl_dev.dmab_data,

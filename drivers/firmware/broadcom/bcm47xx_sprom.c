@@ -27,6 +27,7 @@
  */
 
 #include <linux/bcm47xx_nvram.h>
+#include <linux/bcm47xx_sprom.h>
 #include <linux/bcma/bcma.h>
 #include <linux/etherdevice.h>
 #include <linux/if_ether.h>
@@ -137,20 +138,6 @@ static void nvram_read_leddc(const char *prefix, const char *name,
 	*leddc_off_time = (val >> 16) & 0xff;
 }
 
-static void bcm47xx_nvram_parse_macaddr(char *buf, u8 macaddr[6])
-{
-	if (strchr(buf, ':'))
-		sscanf(buf, "%hhx:%hhx:%hhx:%hhx:%hhx:%hhx", &macaddr[0],
-			&macaddr[1], &macaddr[2], &macaddr[3], &macaddr[4],
-			&macaddr[5]);
-	else if (strchr(buf, '-'))
-		sscanf(buf, "%hhx-%hhx-%hhx-%hhx-%hhx-%hhx", &macaddr[0],
-			&macaddr[1], &macaddr[2], &macaddr[3], &macaddr[4],
-			&macaddr[5]);
-	else
-		pr_warn("Can not parse mac address: %s\n", buf);
-}
-
 static void nvram_read_macaddr(const char *prefix, const char *name,
 			       u8 val[6], bool fallback)
 {
@@ -161,7 +148,9 @@ static void nvram_read_macaddr(const char *prefix, const char *name,
 	if (err < 0)
 		return;
 
-	bcm47xx_nvram_parse_macaddr(buf, val);
+	strreplace(buf, '-', ':');
+	if (!mac_pton(buf, val))
+		pr_warn("Can not parse mac address: %s\n", buf);
 }
 
 static void nvram_read_alpha2(const char *prefix, const char *name,

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Roccat Kone driver for Linux
  *
@@ -5,10 +6,6 @@
  */
 
 /*
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the Free
- * Software Foundation; either version 2 of the License, or (at your option)
- * any later version.
  */
 
 /*
@@ -91,9 +88,6 @@ static int kone_send(struct usb_device *usb_dev, uint usb_command,
 	kfree(buf);
 	return ((len < 0) ? len : ((len != size) ? -EIO : 0));
 }
-
-/* kone_class is used for creating sysfs attributes via roccat char device */
-static struct class *kone_class;
 
 static void kone_set_settings_checksum(struct kone_settings *settings)
 {
@@ -297,30 +291,39 @@ static ssize_t kone_sysfs_write_settings(struct file *fp, struct kobject *kobj,
 	struct kone_device *kone = hid_get_drvdata(dev_get_drvdata(dev));
 	struct usb_device *usb_dev = interface_to_usbdev(to_usb_interface(dev));
 	int retval = 0, difference, old_profile;
+	struct kone_settings *settings = (struct kone_settings *)buf;
 
 	/* I need to get my data in one piece */
 	if (off != 0 || count != sizeof(struct kone_settings))
 		return -EINVAL;
 
 	mutex_lock(&kone->kone_lock);
-	difference = memcmp(buf, &kone->settings, sizeof(struct kone_settings));
+	difference = memcmp(settings, &kone->settings,
+			    sizeof(struct kone_settings));
 	if (difference) {
-		retval = kone_set_settings(usb_dev,
-				(struct kone_settings const *)buf);
-		if (retval) {
-			mutex_unlock(&kone->kone_lock);
-			return retval;
+		if (settings->startup_profile < 1 ||
+		    settings->startup_profile > 5) {
+			retval = -EINVAL;
+			goto unlock;
 		}
 
+		retval = kone_set_settings(usb_dev, settings);
+		if (retval)
+			goto unlock;
+
 		old_profile = kone->settings.startup_profile;
-		memcpy(&kone->settings, buf, sizeof(struct kone_settings));
+		memcpy(&kone->settings, settings, sizeof(struct kone_settings));
 
 		kone_profile_activated(kone, kone->settings.startup_profile);
 
 		if (kone->settings.startup_profile != old_profile)
 			kone_profile_report(kone, kone->settings.startup_profile);
 	}
+unlock:
 	mutex_unlock(&kone->kone_lock);
+
+	if (retval)
+		return retval;
 
 	return sizeof(struct kone_settings);
 }
@@ -651,6 +654,12 @@ static const struct attribute_group *kone_groups[] = {
 	NULL,
 };
 
+/* kone_class is used for creating sysfs attributes via roccat char device */
+static const struct class kone_class = {
+	.name = "kone",
+	.dev_groups = kone_groups,
+};
+
 static int kone_init_kone_device_struct(struct usb_device *usb_dev,
 		struct kone_device *kone)
 {
@@ -706,8 +715,8 @@ static int kone_init_specials(struct hid_device *hdev)
 			goto exit_free;
 		}
 
-		retval = roccat_connect(kone_class, hdev,
-				sizeof(struct kone_roccat_report));
+		retval = roccat_connect(&kone_class, hdev,
+					sizeof(struct kone_roccat_report));
 		if (retval < 0) {
 			hid_err(hdev, "couldn't init char dev\n");
 			/* be tolerant about not getting chrdev */
@@ -742,6 +751,9 @@ static void kone_remove_specials(struct hid_device *hdev)
 static int kone_probe(struct hid_device *hdev, const struct hid_device_id *id)
 {
 	int retval;
+
+	if (!hid_is_usb(hdev))
+		return -EINVAL;
 
 	retval = hid_parse(hdev);
 	if (retval) {
@@ -783,6 +795,7 @@ static void kone_keep_values_up_to_date(struct kone_device *kone,
 	case kone_mouse_event_switch_profile:
 		kone->actual_dpi = kone->profiles[event->value - 1].
 				startup_dpi;
+		fallthrough;
 	case kone_mouse_event_osd_profile:
 		kone->actual_profile = event->value;
 		break;
@@ -850,7 +863,7 @@ static int kone_raw_event(struct hid_device *hdev, struct hid_report *report,
 		memcpy(&kone->last_mouse_event, event,
 				sizeof(struct kone_mouse_event));
 	else
-		memset(&event->tilt, 0, 5);
+		memset(&event->wipe, 0, sizeof(event->wipe));
 
 	kone_keep_values_up_to_date(kone, event);
 
@@ -880,21 +893,20 @@ static int __init kone_init(void)
 	int retval;
 
 	/* class name has to be same as driver name */
-	kone_class = class_create(THIS_MODULE, "kone");
-	if (IS_ERR(kone_class))
-		return PTR_ERR(kone_class);
-	kone_class->dev_groups = kone_groups;
+	retval = class_register(&kone_class);
+	if (retval)
+		return retval;
 
 	retval = hid_register_driver(&kone_driver);
 	if (retval)
-		class_destroy(kone_class);
+		class_unregister(&kone_class);
 	return retval;
 }
 
 static void __exit kone_exit(void)
 {
 	hid_unregister_driver(&kone_driver);
-	class_destroy(kone_class);
+	class_unregister(&kone_class);
 }
 
 module_init(kone_init);

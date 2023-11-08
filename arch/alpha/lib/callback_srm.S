@@ -1,9 +1,10 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  *	arch/alpha/lib/callback_srm.S
  */
 
+#include <linux/export.h>
 #include <asm/console.h>
-#include <asm/export.h>
 
 .text
 #define HWRPB_CRB_OFFSET 0xc0

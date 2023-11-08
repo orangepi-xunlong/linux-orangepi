@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef __IOCTL_H
 #define __IOCTL_H
 
@@ -11,7 +12,6 @@
 #ifndef OID_802_11_PMKID
 	#define OID_802_11_PMKID                        0x0d010123
 #endif
-
 
 /* For DDK-defined OIDs*/
 #define OID_NDIS_SEG1	0x00010100

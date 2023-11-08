@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * I2C driver for Marvell 88PM80x
  *
@@ -5,10 +6,6 @@
  * Haojian Zhuang <haojian.zhuang@marvell.com>
  * Joseph(Yossi) Hanin <yhanin@marvell.com>
  * Qiao Zhou <zhouqiao@marvell.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 #include <linux/kernel.h>
 #include <linux/module.h>
@@ -77,7 +74,6 @@ int pm80x_init(struct i2c_client *client)
 	chip->irq = client->irq;
 
 	chip->dev = &client->dev;
-	dev_set_drvdata(chip->dev, chip);
 	i2c_set_clientdata(chip->client, chip);
 
 	ret = regmap_read(chip->regmap, PM80X_CHIP_ID, &val);
@@ -132,7 +128,6 @@ int pm80x_deinit(void)
 }
 EXPORT_SYMBOL_GPL(pm80x_deinit);
 
-#ifdef CONFIG_PM_SLEEP
 static int pm80x_suspend(struct device *dev)
 {
 	struct i2c_client *client = to_i2c_client(dev);
@@ -156,10 +151,8 @@ static int pm80x_resume(struct device *dev)
 
 	return 0;
 }
-#endif
 
-SIMPLE_DEV_PM_OPS(pm80x_pm_ops, pm80x_suspend, pm80x_resume);
-EXPORT_SYMBOL_GPL(pm80x_pm_ops);
+EXPORT_GPL_SIMPLE_DEV_PM_OPS(pm80x_pm_ops, pm80x_suspend, pm80x_resume);
 
 MODULE_DESCRIPTION("I2C Driver for Marvell 88PM80x");
 MODULE_AUTHOR("Qiao Zhou <zhouqiao@marvell.com>");

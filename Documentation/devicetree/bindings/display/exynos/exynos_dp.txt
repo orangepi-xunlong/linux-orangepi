@@ -25,8 +25,6 @@ Required properties for dp-controller:
 		from common clock binding: handle to dp clock.
 	-clock-names:
 		from common clock binding: Shall be "dp".
-	-interrupt-parent:
-		phandle to Interrupt combiner node.
 	-phys:
 		from general PHY binding: the phandle for the PHY device.
 	-phy-names:
@@ -52,7 +50,7 @@ Optional properties for dp-controller:
 		Documentation/devicetree/bindings/display/panel/display-timing.txt
 
 For the below properties, please refer to Analogix DP binding document:
- * Documentation/devicetree/bindings/display/bridge/analogix_dp.txt
+ * Documentation/devicetree/bindings/display/bridge/analogix,dp.yaml
 	-phys (required)
 	-phy-names (required)
 	-hpd-gpios (optional)

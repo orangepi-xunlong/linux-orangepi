@@ -1,24 +1,15 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Power off driver for ams AS3722 device.
  *
  * Copyright (c) 2013, NVIDIA CORPORATION.  All rights reserved.
  *
  * Author: Laxman Dewangan <ldewangan@nvidia.com>
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
  */
 
 #include <linux/mfd/as3722.h>
 #include <linux/module.h>
 #include <linux/of.h>
-#include <linux/of_device.h>
 #include <linux/platform_device.h>
 #include <linux/slab.h>
 
@@ -92,4 +83,3 @@ module_platform_driver(as3722_poweroff_driver);
 MODULE_DESCRIPTION("Power off driver for ams AS3722 PMIC Device");
 MODULE_ALIAS("platform:as3722-power-off");
 MODULE_AUTHOR("Laxman Dewangan <ldewangan@nvidia.com>");
-MODULE_LICENSE("GPL v2");

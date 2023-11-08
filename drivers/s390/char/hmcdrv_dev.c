@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  *    HMC Drive CD/DVD Device
  *
@@ -89,7 +90,7 @@ static dev_t hmcdrv_dev_no; /* device number (major/minor) */
  *
  * Return: recommended device file name in /dev
  */
-static char *hmcdrv_dev_name(struct device *dev, umode_t *mode)
+static char *hmcdrv_dev_name(const struct device *dev, umode_t *mode)
 {
 	char *nodename = NULL;
 	const char *devname = dev_name(dev); /* kernel device name */
@@ -307,7 +308,7 @@ int hmcdrv_dev_init(void)
 	 * /proc/devices), but not under /dev nor /sys/devices/virtual. So
 	 * we have to create an associated class (see /sys/class).
 	 */
-	hmcdrv_dev_class = class_create(THIS_MODULE, HMCDRV_DEV_CLASS);
+	hmcdrv_dev_class = class_create(HMCDRV_DEV_CLASS);
 
 	if (IS_ERR(hmcdrv_dev_class)) {
 		rc = PTR_ERR(hmcdrv_dev_class);

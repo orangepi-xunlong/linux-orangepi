@@ -1,21 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  Cobalt CPLD functions
  *
  *  Copyright 2012-2015 Cisco Systems, Inc. and/or its affiliates.
  *  All rights reserved.
- *
- *  This program is free software; you may redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; version 2 of the License.
- *
- *  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
- *  EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
- *  MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
- *  NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
- *  BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
- *  ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
- *  CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- *  SOFTWARE.
  */
 
 #include <linux/delay.h>
@@ -71,9 +59,9 @@ static void cpld_info_ver3(struct cobalt *cobalt)
 	cobalt_info("\t\tMAXII program revision:  0x%04x\n",
 		    cpld_read(cobalt, 0x30));
 	cobalt_info("CPLD temp and voltage ADT7411 registers (read only)\n");
-	cobalt_info("\t\tBoard temperature:  %u Celcius\n",
+	cobalt_info("\t\tBoard temperature:  %u Celsius\n",
 		    cpld_read(cobalt, 0x34) / 4);
-	cobalt_info("\t\tFPGA temperature:   %u Celcius\n",
+	cobalt_info("\t\tFPGA temperature:   %u Celsius\n",
 		    cpld_read(cobalt, 0x38) / 4);
 	rd = cpld_read(cobalt, 0x3c);
 	tmp = (rd * 33 * 1000) / (483 * 10);
@@ -248,7 +236,6 @@ bool cobalt_cpld_set_freq(struct cobalt *cobalt, unsigned f_out)
 	u8 n1, hsdiv;
 	u8 regs[6];
 	int found = 0;
-	u16 clock_ctrl;
 	int retries = 3;
 
 	for (i = 0; i < ARRAY_SIZE(multipliers); i++) {
@@ -272,9 +259,7 @@ bool cobalt_cpld_set_freq(struct cobalt *cobalt, unsigned f_out)
 	hsdiv = multipliers[i_best].hsdiv - 4;
 	rfreq = div_u64(dco << 28, f_xtal);
 
-	clock_ctrl = cpld_read(cobalt, SI570_CLOCK_CTRL);
-	clock_ctrl |= S01755_REG_CLOCK_CTRL_BITMAP_CLKHSMA_FPGA_CTRL;
-	clock_ctrl |= S01755_REG_CLOCK_CTRL_BITMAP_CLKHSMA_EN;
+	cpld_read(cobalt, SI570_CLOCK_CTRL);
 
 	regs[0] = (hsdiv << 5) | (n1 >> 2);
 	regs[1] = ((n1 & 0x3) << 6) | (rfreq >> 32);

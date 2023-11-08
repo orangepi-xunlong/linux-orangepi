@@ -1,0 +1,11 @@
+# SPDX-License-Identifier: GPL-2.0-only
+config SSV6051
+        tristate "South Silicon Valley (ssv) 6051 family WLAN support"
+	depends on MAC80211
+	depends on (MMC = y)
+        default n
+	select FW_LOADER
+        help
+		Enable South Silicon Valley (SSV) 6051 family support.
+
+

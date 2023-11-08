@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  *  linux/fs/hpfs/namei.c
  *
@@ -10,16 +11,16 @@
 
 static void hpfs_update_directory_times(struct inode *dir)
 {
-	time_t t = get_seconds();
+	time64_t t = local_to_gmt(dir->i_sb, local_get_seconds(dir->i_sb));
 	if (t == dir->i_mtime.tv_sec &&
-	    t == dir->i_ctime.tv_sec)
+	    t == inode_get_ctime(dir).tv_sec)
 		return;
-	dir->i_mtime.tv_sec = dir->i_ctime.tv_sec = t;
-	dir->i_mtime.tv_nsec = dir->i_ctime.tv_nsec = 0;
+	dir->i_mtime = inode_set_ctime(dir, t, 0);
 	hpfs_write_inode_nolock(dir);
 }
 
-static int hpfs_mkdir(struct inode *dir, struct dentry *dentry, umode_t mode)
+static int hpfs_mkdir(struct mnt_idmap *idmap, struct inode *dir,
+		      struct dentry *dentry, umode_t mode)
 {
 	const unsigned char *name = dentry->d_name.name;
 	unsigned len = dentry->d_name.len;
@@ -49,7 +50,7 @@ static int hpfs_mkdir(struct inode *dir, struct dentry *dentry, umode_t mode)
 	/*dee.archive = 0;*/
 	dee.hidden = name[0] == '.';
 	dee.fnode = cpu_to_le32(fno);
-	dee.creation_date = dee.write_date = dee.read_date = cpu_to_le32(gmt_to_local(dir->i_sb, get_seconds()));
+	dee.creation_date = dee.write_date = dee.read_date = cpu_to_le32(local_get_seconds(dir->i_sb));
 	result = new_inode(dir->i_sb);
 	if (!result)
 		goto bail2;
@@ -57,10 +58,8 @@ static int hpfs_mkdir(struct inode *dir, struct dentry *dentry, umode_t mode)
 	result->i_ino = fno;
 	hpfs_i(result)->i_parent_dir = dir->i_ino;
 	hpfs_i(result)->i_dno = dno;
-	result->i_ctime.tv_sec = result->i_mtime.tv_sec = result->i_atime.tv_sec = local_to_gmt(dir->i_sb, le32_to_cpu(dee.creation_date));
-	result->i_ctime.tv_nsec = 0; 
-	result->i_mtime.tv_nsec = 0; 
-	result->i_atime.tv_nsec = 0; 
+	result->i_mtime = result->i_atime =
+		inode_set_ctime(result, local_to_gmt(dir->i_sb, le32_to_cpu(dee.creation_date)), 0);
 	hpfs_i(result)->i_ea_size = 0;
 	result->i_mode |= S_IFDIR;
 	result->i_op = &hpfs_dir_iops;
@@ -90,7 +89,7 @@ static int hpfs_mkdir(struct inode *dir, struct dentry *dentry, umode_t mode)
 	dnode->root_dnode = 1;
 	dnode->up = cpu_to_le32(fno);
 	de = hpfs_add_de(dir->i_sb, dnode, "\001\001", 2, 0);
-	de->creation_date = de->write_date = de->read_date = cpu_to_le32(gmt_to_local(dir->i_sb, get_seconds()));
+	de->creation_date = de->write_date = de->read_date = cpu_to_le32(local_get_seconds(dir->i_sb));
 	if (!(mode & 0222)) de->read_only = 1;
 	de->first = de->directory = 1;
 	/*de->hidden = de->system = 0;*/
@@ -127,7 +126,8 @@ bail:
 	return err;
 }
 
-static int hpfs_create(struct inode *dir, struct dentry *dentry, umode_t mode, bool excl)
+static int hpfs_create(struct mnt_idmap *idmap, struct inode *dir,
+		       struct dentry *dentry, umode_t mode, bool excl)
 {
 	const unsigned char *name = dentry->d_name.name;
 	unsigned len = dentry->d_name.len;
@@ -150,7 +150,7 @@ static int hpfs_create(struct inode *dir, struct dentry *dentry, umode_t mode, b
 	dee.archive = 1;
 	dee.hidden = name[0] == '.';
 	dee.fnode = cpu_to_le32(fno);
-	dee.creation_date = dee.write_date = dee.read_date = cpu_to_le32(gmt_to_local(dir->i_sb, get_seconds()));
+	dee.creation_date = dee.write_date = dee.read_date = cpu_to_le32(local_get_seconds(dir->i_sb));
 
 	result = new_inode(dir->i_sb);
 	if (!result)
@@ -164,10 +164,8 @@ static int hpfs_create(struct inode *dir, struct dentry *dentry, umode_t mode, b
 	result->i_fop = &hpfs_file_ops;
 	set_nlink(result, 1);
 	hpfs_i(result)->i_parent_dir = dir->i_ino;
-	result->i_ctime.tv_sec = result->i_mtime.tv_sec = result->i_atime.tv_sec = local_to_gmt(dir->i_sb, le32_to_cpu(dee.creation_date));
-	result->i_ctime.tv_nsec = 0;
-	result->i_mtime.tv_nsec = 0;
-	result->i_atime.tv_nsec = 0;
+	result->i_mtime = result->i_atime =
+		inode_set_ctime(result, local_to_gmt(dir->i_sb, le32_to_cpu(dee.creation_date)), 0);
 	hpfs_i(result)->i_ea_size = 0;
 	if (dee.read_only)
 		result->i_mode &= ~0222;
@@ -214,7 +212,8 @@ bail:
 	return err;
 }
 
-static int hpfs_mknod(struct inode *dir, struct dentry *dentry, umode_t mode, dev_t rdev)
+static int hpfs_mknod(struct mnt_idmap *idmap, struct inode *dir,
+		      struct dentry *dentry, umode_t mode, dev_t rdev)
 {
 	const unsigned char *name = dentry->d_name.name;
 	unsigned len = dentry->d_name.len;
@@ -237,7 +236,7 @@ static int hpfs_mknod(struct inode *dir, struct dentry *dentry, umode_t mode, de
 	dee.archive = 1;
 	dee.hidden = name[0] == '.';
 	dee.fnode = cpu_to_le32(fno);
-	dee.creation_date = dee.write_date = dee.read_date = cpu_to_le32(gmt_to_local(dir->i_sb, get_seconds()));
+	dee.creation_date = dee.write_date = dee.read_date = cpu_to_le32(local_get_seconds(dir->i_sb));
 
 	result = new_inode(dir->i_sb);
 	if (!result)
@@ -246,10 +245,8 @@ static int hpfs_mknod(struct inode *dir, struct dentry *dentry, umode_t mode, de
 	hpfs_init_inode(result);
 	result->i_ino = fno;
 	hpfs_i(result)->i_parent_dir = dir->i_ino;
-	result->i_ctime.tv_sec = result->i_mtime.tv_sec = result->i_atime.tv_sec = local_to_gmt(dir->i_sb, le32_to_cpu(dee.creation_date));
-	result->i_ctime.tv_nsec = 0;
-	result->i_mtime.tv_nsec = 0;
-	result->i_atime.tv_nsec = 0;
+	result->i_mtime = result->i_atime =
+		inode_set_ctime(result, local_to_gmt(dir->i_sb, le32_to_cpu(dee.creation_date)), 0);
 	hpfs_i(result)->i_ea_size = 0;
 	result->i_uid = current_fsuid();
 	result->i_gid = current_fsgid();
@@ -288,7 +285,8 @@ bail:
 	return err;
 }
 
-static int hpfs_symlink(struct inode *dir, struct dentry *dentry, const char *symlink)
+static int hpfs_symlink(struct mnt_idmap *idmap, struct inode *dir,
+			struct dentry *dentry, const char *symlink)
 {
 	const unsigned char *name = dentry->d_name.name;
 	unsigned len = dentry->d_name.len;
@@ -313,7 +311,7 @@ static int hpfs_symlink(struct inode *dir, struct dentry *dentry, const char *sy
 	dee.archive = 1;
 	dee.hidden = name[0] == '.';
 	dee.fnode = cpu_to_le32(fno);
-	dee.creation_date = dee.write_date = dee.read_date = cpu_to_le32(gmt_to_local(dir->i_sb, get_seconds()));
+	dee.creation_date = dee.write_date = dee.read_date = cpu_to_le32(local_get_seconds(dir->i_sb));
 
 	result = new_inode(dir->i_sb);
 	if (!result)
@@ -321,10 +319,8 @@ static int hpfs_symlink(struct inode *dir, struct dentry *dentry, const char *sy
 	result->i_ino = fno;
 	hpfs_init_inode(result);
 	hpfs_i(result)->i_parent_dir = dir->i_ino;
-	result->i_ctime.tv_sec = result->i_mtime.tv_sec = result->i_atime.tv_sec = local_to_gmt(dir->i_sb, le32_to_cpu(dee.creation_date));
-	result->i_ctime.tv_nsec = 0;
-	result->i_mtime.tv_nsec = 0;
-	result->i_atime.tv_nsec = 0;
+	result->i_mtime = result->i_atime =
+		inode_set_ctime(result, local_to_gmt(dir->i_sb, le32_to_cpu(dee.creation_date)), 0);
 	hpfs_i(result)->i_ea_size = 0;
 	result->i_mode = S_IFLNK | 0777;
 	result->i_uid = current_fsuid();
@@ -474,8 +470,9 @@ out:
 	return err;
 }
 
-static int hpfs_symlink_readpage(struct file *file, struct page *page)
+static int hpfs_symlink_read_folio(struct file *file, struct folio *folio)
 {
+	struct page *page = &folio->page;
 	char *link = page_address(page);
 	struct inode *i = page->mapping->host;
 	struct fnode *fnode;
@@ -503,12 +500,12 @@ fail:
 }
 
 const struct address_space_operations hpfs_symlink_aops = {
-	.readpage	= hpfs_symlink_readpage
+	.read_folio	= hpfs_symlink_read_folio
 };
-	
-static int hpfs_rename(struct inode *old_dir, struct dentry *old_dentry,
-		       struct inode *new_dir, struct dentry *new_dentry,
-		       unsigned int flags)
+
+static int hpfs_rename(struct mnt_idmap *idmap, struct inode *old_dir,
+		       struct dentry *old_dentry, struct inode *new_dir,
+		       struct dentry *new_dentry, unsigned int flags)
 {
 	const unsigned char *old_name = old_dentry->d_name.name;
 	unsigned old_len = old_dentry->d_name.len;
@@ -564,7 +561,7 @@ static int hpfs_rename(struct inode *old_dir, struct dentry *old_dentry,
 			err = -EFSERROR;
 			goto end1;
 		}
-		err = r == 2 ? -ENOSPC : r == 1 ? -EFSERROR : 0;
+		err = -ENOSPC;
 		goto end1;
 	}
 

@@ -1,23 +1,15 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Coldfire generic GPIO support.
  *
  * (C) Copyright 2009, Steven King <sfking@fdwdc.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; version 2 of the License.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #ifndef mcfgpio_h
 #define mcfgpio_h
 
 #ifdef CONFIG_GPIOLIB
-#include <asm-generic/gpio.h>
+#include <linux/gpio.h>
 #else
 
 int __mcfgpio_get_value(unsigned gpio);
@@ -40,14 +32,6 @@ static inline void __gpio_set_value(unsigned gpio, int value)
 {
 	if (gpio < MCFGPIO_PIN_MAX)
 		__mcfgpio_set_value(gpio, value);
-}
-
-static inline int __gpio_cansleep(unsigned gpio)
-{
-	if (gpio < MCFGPIO_PIN_MAX)
-		return 0;
-	else
-		return -EINVAL;
 }
 
 static inline int __gpio_to_irq(unsigned gpio)

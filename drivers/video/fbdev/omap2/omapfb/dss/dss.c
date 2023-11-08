@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * linux/drivers/video/omap2/dss/dss.c
  *
@@ -6,18 +7,6 @@
  *
  * Some code and ideas taken from drivers/video/omap/ driver
  * by Imre Deak.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 as published by
- * the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * You should have received a copy of the GNU General Public License along with
- * this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 #define DSS_SUBSYS_NAME "DSS"
@@ -40,6 +29,7 @@
 #include <linux/regulator/consumer.h>
 #include <linux/suspend.h>
 #include <linux/component.h>
+#include <linux/pinctrl/consumer.h>
 
 #include <video/omapfb_dss.h>
 
@@ -777,9 +767,10 @@ int dss_runtime_get(void)
 
 	DSSDBG("dss_runtime_get\n");
 
-	r = pm_runtime_get_sync(&dss.pdev->dev);
-	WARN_ON(r < 0);
-	return r < 0 ? r : 0;
+	r = pm_runtime_resume_and_get(&dss.pdev->dev);
+	if (WARN_ON(r < 0))
+		return r;
+	return 0;
 }
 
 void dss_runtime_put(void)
@@ -843,7 +834,7 @@ static const struct dss_features omap34xx_dss_feats = {
 };
 
 static const struct dss_features omap3630_dss_feats = {
-	.fck_div_max		=	32,
+	.fck_div_max		=	31,
 	.dss_fck_multiplier	=	1,
 	.parent_clk_name	=	"dpll4_ck",
 	.dpi_select_source	=	&dss_dpi_select_source_omap2_omap3,
@@ -887,58 +878,37 @@ static const struct dss_features dra7xx_dss_feats = {
 	.num_ports		=	ARRAY_SIZE(dra7xx_ports),
 };
 
-static int dss_init_features(struct platform_device *pdev)
+static const struct dss_features *dss_get_features(void)
 {
-	const struct dss_features *src;
-	struct dss_features *dst;
-
-	dst = devm_kzalloc(&pdev->dev, sizeof(*dst), GFP_KERNEL);
-	if (!dst) {
-		dev_err(&pdev->dev, "Failed to allocate local DSS Features\n");
-		return -ENOMEM;
-	}
-
 	switch (omapdss_get_version()) {
 	case OMAPDSS_VER_OMAP24xx:
-		src = &omap24xx_dss_feats;
-		break;
+		return &omap24xx_dss_feats;
 
 	case OMAPDSS_VER_OMAP34xx_ES1:
 	case OMAPDSS_VER_OMAP34xx_ES3:
 	case OMAPDSS_VER_AM35xx:
-		src = &omap34xx_dss_feats;
-		break;
+		return &omap34xx_dss_feats;
 
 	case OMAPDSS_VER_OMAP3630:
-		src = &omap3630_dss_feats;
-		break;
+		return &omap3630_dss_feats;
 
 	case OMAPDSS_VER_OMAP4430_ES1:
 	case OMAPDSS_VER_OMAP4430_ES2:
 	case OMAPDSS_VER_OMAP4:
-		src = &omap44xx_dss_feats;
-		break;
+		return &omap44xx_dss_feats;
 
 	case OMAPDSS_VER_OMAP5:
-		src = &omap54xx_dss_feats;
-		break;
+		return &omap54xx_dss_feats;
 
 	case OMAPDSS_VER_AM43xx:
-		src = &am43xx_dss_feats;
-		break;
+		return &am43xx_dss_feats;
 
 	case OMAPDSS_VER_DRA7xx:
-		src = &dra7xx_dss_feats;
-		break;
+		return &dra7xx_dss_feats;
 
 	default:
-		return -ENODEV;
+		return NULL;
 	}
-
-	memcpy(dst, src, sizeof(*dst));
-	dss.feat = dst;
-
-	return 0;
 }
 
 static void dss_uninit_ports(struct platform_device *pdev);
@@ -1104,9 +1074,9 @@ static int dss_bind(struct device *dev)
 
 	dss.pdev = pdev;
 
-	r = dss_init_features(dss.pdev);
-	if (r)
-		return r;
+	dss.feat = dss_get_features();
+	if (!dss.feat)
+		return -ENODEV;
 
 	dss_mem = platform_get_resource(dss.pdev, IORESOURCE_MEM, 0);
 	if (!dss_mem) {
@@ -1221,12 +1191,6 @@ static const struct component_master_ops dss_component_ops = {
 	.unbind = dss_unbind,
 };
 
-static int dss_component_compare(struct device *dev, void *data)
-{
-	struct device *child = data;
-	return dev == child;
-}
-
 static int dss_add_child_component(struct device *dev, void *data)
 {
 	struct component_match **match = data;
@@ -1240,7 +1204,7 @@ static int dss_add_child_component(struct device *dev, void *data)
 	if (strstr(dev_name(dev), "rfbi"))
 		return 0;
 
-	component_match_add(dev->parent, match, dss_component_compare, dev);
+	component_match_add(dev->parent, match, component_compare_dev, dev);
 
 	return 0;
 }
@@ -1260,10 +1224,9 @@ static int dss_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int dss_remove(struct platform_device *pdev)
+static void dss_remove(struct platform_device *pdev)
 {
 	component_master_del(&pdev->dev, &dss_component_ops);
-	return 0;
 }
 
 static int dss_runtime_suspend(struct device *dev)
@@ -1315,7 +1278,7 @@ MODULE_DEVICE_TABLE(of, dss_of_match);
 
 static struct platform_driver omap_dsshw_driver = {
 	.probe		= dss_probe,
-	.remove		= dss_remove,
+	.remove_new	= dss_remove,
 	.driver         = {
 		.name   = "omapdss_dss",
 		.pm	= &dss_pm_ops,

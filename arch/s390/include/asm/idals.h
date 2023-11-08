@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /* 
  * Author(s)......: Holger Smolinski <Holger.Smolinski@de.ibm.com>
  *		    Martin Schwidefsky <schwidefsky@de.ibm.com>
@@ -17,10 +18,13 @@
 #include <linux/types.h>
 #include <linux/slab.h>
 #include <asm/cio.h>
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 
 #define IDA_SIZE_LOG 12 /* 11 for 2k , 12 for 4k */
 #define IDA_BLOCK_SIZE (1L<<IDA_SIZE_LOG)
+
+#define IDA_2K_SIZE_LOG 11
+#define IDA_2K_BLOCK_SIZE (1L << IDA_2K_SIZE_LOG)
 
 /*
  * Test if an address/length pair needs an idal list.
@@ -39,6 +43,15 @@ static inline unsigned int idal_nr_words(void *vaddr, unsigned int length)
 {
 	return ((__pa(vaddr) & (IDA_BLOCK_SIZE-1)) + length +
 		(IDA_BLOCK_SIZE-1)) >> IDA_SIZE_LOG;
+}
+
+/*
+ * Return the number of 2K IDA words needed for an address/length pair.
+ */
+static inline unsigned int idal_2k_nr_words(void *vaddr, unsigned int length)
+{
+	return ((__pa(vaddr) & (IDA_2K_BLOCK_SIZE - 1)) + length +
+		(IDA_2K_BLOCK_SIZE - 1)) >> IDA_2K_SIZE_LOG;
 }
 
 /*
@@ -107,7 +120,7 @@ clear_normalized_cda(struct ccw1 * ccw)
 struct idal_buffer {
 	size_t size;
 	size_t page_order;
-	void *data[0];
+	void *data[];
 };
 
 /*
@@ -121,8 +134,7 @@ idal_buffer_alloc(size_t size, int page_order)
 
 	nr_ptrs = (size + IDA_BLOCK_SIZE - 1) >> IDA_SIZE_LOG;
 	nr_chunks = (4096 << page_order) >> IDA_SIZE_LOG;
-	ib = kmalloc(sizeof(struct idal_buffer) + nr_ptrs*sizeof(void *),
-		     GFP_DMA | GFP_KERNEL);
+	ib = kmalloc(struct_size(ib, data, nr_ptrs), GFP_DMA | GFP_KERNEL);
 	if (ib == NULL)
 		return ERR_PTR(-ENOMEM);
 	ib->size = size;

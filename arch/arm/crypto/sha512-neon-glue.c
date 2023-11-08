@@ -1,15 +1,13 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * sha512-neon-glue.c - accelerated SHA-384/512 for ARM NEON
  *
  * Copyright (C) 2015 Linaro Ltd <ard.biesheuvel@linaro.org>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <crypto/internal/hash.h>
-#include <crypto/sha.h>
+#include <crypto/internal/simd.h>
+#include <crypto/sha2.h>
 #include <crypto/sha512_base.h>
 #include <linux/crypto.h>
 #include <linux/module.h>
@@ -22,21 +20,20 @@
 MODULE_ALIAS_CRYPTO("sha384-neon");
 MODULE_ALIAS_CRYPTO("sha512-neon");
 
-asmlinkage void sha512_block_data_order_neon(u64 *state, u8 const *src,
-					     int blocks);
+asmlinkage void sha512_block_data_order_neon(struct sha512_state *state,
+					     const u8 *src, int blocks);
 
 static int sha512_neon_update(struct shash_desc *desc, const u8 *data,
 			      unsigned int len)
 {
 	struct sha512_state *sctx = shash_desc_ctx(desc);
 
-	if (!may_use_simd() ||
+	if (!crypto_simd_usable() ||
 	    (sctx->count[0] % SHA512_BLOCK_SIZE) + len < SHA512_BLOCK_SIZE)
 		return sha512_arm_update(desc, data, len);
 
 	kernel_neon_begin();
-	sha512_base_do_update(desc, data, len,
-		(sha512_block_fn *)sha512_block_data_order_neon);
+	sha512_base_do_update(desc, data, len, sha512_block_data_order_neon);
 	kernel_neon_end();
 
 	return 0;
@@ -45,15 +42,14 @@ static int sha512_neon_update(struct shash_desc *desc, const u8 *data,
 static int sha512_neon_finup(struct shash_desc *desc, const u8 *data,
 			     unsigned int len, u8 *out)
 {
-	if (!may_use_simd())
+	if (!crypto_simd_usable())
 		return sha512_arm_finup(desc, data, len, out);
 
 	kernel_neon_begin();
 	if (len)
 		sha512_base_do_update(desc, data, len,
-			(sha512_block_fn *)sha512_block_data_order_neon);
-	sha512_base_do_finalize(desc,
-		(sha512_block_fn *)sha512_block_data_order_neon);
+				      sha512_block_data_order_neon);
+	sha512_base_do_finalize(desc, sha512_block_data_order_neon);
 	kernel_neon_end();
 
 	return sha512_base_finish(desc, out);
@@ -75,7 +71,6 @@ struct shash_alg sha512_neon_algs[] = { {
 		.cra_name		= "sha384",
 		.cra_driver_name	= "sha384-neon",
 		.cra_priority		= 300,
-		.cra_flags		= CRYPTO_ALG_TYPE_SHASH,
 		.cra_blocksize		= SHA384_BLOCK_SIZE,
 		.cra_module		= THIS_MODULE,
 
@@ -91,7 +86,6 @@ struct shash_alg sha512_neon_algs[] = { {
 		.cra_name		= "sha512",
 		.cra_driver_name	= "sha512-neon",
 		.cra_priority		= 300,
-		.cra_flags		= CRYPTO_ALG_TYPE_SHASH,
 		.cra_blocksize		= SHA512_BLOCK_SIZE,
 		.cra_module		= THIS_MODULE,
 	}

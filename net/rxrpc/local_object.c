@@ -1,12 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Local endpoint object management
  *
  * Copyright (C) 2016 Red Hat, Inc. All Rights Reserved.
  * Written by David Howells (dhowells@redhat.com)
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public Licence
- * as published by the Free Software Foundation; either version
- * 2 of the Licence, or (at your option) any later version.
  */
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
@@ -19,14 +15,26 @@
 #include <linux/ip.h>
 #include <linux/hashtable.h>
 #include <net/sock.h>
+#include <net/udp.h>
+#include <net/udp_tunnel.h>
 #include <net/af_rxrpc.h>
 #include "ar-internal.h"
 
-static void rxrpc_local_processor(struct work_struct *);
 static void rxrpc_local_rcu(struct rcu_head *);
 
-static DEFINE_MUTEX(rxrpc_local_mutex);
-static LIST_HEAD(rxrpc_local_endpoints);
+/*
+ * Handle an ICMP/ICMP6 error turning up at the tunnel.  Push it through the
+ * usual mechanism so that it gets parsed and presented through the UDP
+ * socket's error_report().
+ */
+static void rxrpc_encap_err_rcv(struct sock *sk, struct sk_buff *skb, int err,
+				__be16 port, u32 info, u8 *payload)
+{
+	if (ip_hdr(skb)->version == IPVERSION)
+		return ip_icmp_error(sk, skb, err, port, info, payload);
+	if (IS_ENABLED(CONFIG_AF_RXRPC_IPV6))
+		return ipv6_icmp_error(sk, skb, err, port, info, payload);
+}
 
 /*
  * Compare a local to an address.  Return -ve, 0 or +ve to indicate less than,
@@ -74,27 +82,62 @@ static long rxrpc_local_cmp_key(const struct rxrpc_local *local,
 	}
 }
 
+static void rxrpc_client_conn_reap_timeout(struct timer_list *timer)
+{
+	struct rxrpc_local *local =
+		container_of(timer, struct rxrpc_local, client_conn_reap_timer);
+
+	if (local->kill_all_client_conns &&
+	    test_and_set_bit(RXRPC_CLIENT_CONN_REAP_TIMER, &local->client_conn_flags))
+		rxrpc_wake_up_io_thread(local);
+}
+
 /*
  * Allocate a new local endpoint.
  */
-static struct rxrpc_local *rxrpc_alloc_local(const struct sockaddr_rxrpc *srx)
+static struct rxrpc_local *rxrpc_alloc_local(struct net *net,
+					     const struct sockaddr_rxrpc *srx)
 {
 	struct rxrpc_local *local;
+	u32 tmp;
 
 	local = kzalloc(sizeof(struct rxrpc_local), GFP_KERNEL);
 	if (local) {
-		atomic_set(&local->usage, 1);
-		INIT_LIST_HEAD(&local->link);
-		INIT_WORK(&local->processor, rxrpc_local_processor);
-		init_rwsem(&local->defrag_sem);
-		skb_queue_head_init(&local->reject_queue);
-		skb_queue_head_init(&local->event_queue);
-		local->client_conns = RB_ROOT;
-		spin_lock_init(&local->client_conns_lock);
+		refcount_set(&local->ref, 1);
+		atomic_set(&local->active_users, 1);
+		local->net = net;
+		local->rxnet = rxrpc_net(net);
+		INIT_HLIST_NODE(&local->link);
+		init_completion(&local->io_thread_ready);
+#ifdef CONFIG_AF_RXRPC_INJECT_RX_DELAY
+		skb_queue_head_init(&local->rx_delay_queue);
+#endif
+		skb_queue_head_init(&local->rx_queue);
+		INIT_LIST_HEAD(&local->conn_attend_q);
+		INIT_LIST_HEAD(&local->call_attend_q);
+
+		local->client_bundles = RB_ROOT;
+		spin_lock_init(&local->client_bundles_lock);
+		local->kill_all_client_conns = false;
+		INIT_LIST_HEAD(&local->idle_client_conns);
+		timer_setup(&local->client_conn_reap_timer,
+			    rxrpc_client_conn_reap_timeout, 0);
+
 		spin_lock_init(&local->lock);
 		rwlock_init(&local->services_lock);
 		local->debug_id = atomic_inc_return(&rxrpc_debug_id);
 		memcpy(&local->srx, srx, sizeof(*srx));
+		local->srx.srx_service = 0;
+		idr_init(&local->conn_ids);
+		get_random_bytes(&tmp, sizeof(tmp));
+		tmp &= 0x3fffffff;
+		if (tmp == 0)
+			tmp = 1;
+		idr_set_cursor(&local->conn_ids, tmp);
+		INIT_LIST_HEAD(&local->new_client_calls);
+		spin_lock_init(&local->client_call_lock);
+
+		trace_rxrpc_local(local->debug_id, rxrpc_local_new, 1, 1);
 	}
 
 	_leave(" = %p", local);
@@ -105,96 +148,114 @@ static struct rxrpc_local *rxrpc_alloc_local(const struct sockaddr_rxrpc *srx)
  * create the local socket
  * - must be called with rxrpc_local_mutex locked
  */
-static int rxrpc_open_socket(struct rxrpc_local *local)
+static int rxrpc_open_socket(struct rxrpc_local *local, struct net *net)
 {
-	struct sock *sock;
-	int ret, opt;
+	struct udp_tunnel_sock_cfg tuncfg = {NULL};
+	struct sockaddr_rxrpc *srx = &local->srx;
+	struct udp_port_cfg udp_conf = {0};
+	struct task_struct *io_thread;
+	struct sock *usk;
+	int ret;
 
 	_enter("%p{%d,%d}",
-	       local, local->srx.transport_type, local->srx.transport.family);
+	       local, srx->transport_type, srx->transport.family);
 
-	/* create a socket to represent the local endpoint */
-	ret = sock_create_kern(&init_net, local->srx.transport.family,
-			       local->srx.transport_type, 0, &local->socket);
+	udp_conf.family = srx->transport.family;
+	udp_conf.use_udp_checksums = true;
+	if (udp_conf.family == AF_INET) {
+		udp_conf.local_ip = srx->transport.sin.sin_addr;
+		udp_conf.local_udp_port = srx->transport.sin.sin_port;
+#if IS_ENABLED(CONFIG_AF_RXRPC_IPV6)
+	} else {
+		udp_conf.local_ip6 = srx->transport.sin6.sin6_addr;
+		udp_conf.local_udp_port = srx->transport.sin6.sin6_port;
+		udp_conf.use_udp6_tx_checksums = true;
+		udp_conf.use_udp6_rx_checksums = true;
+#endif
+	}
+	ret = udp_sock_create(net, &udp_conf, &local->socket);
 	if (ret < 0) {
 		_leave(" = %d [socket]", ret);
 		return ret;
 	}
 
-	/* if a local address was supplied then bind it */
-	if (local->srx.transport_len > sizeof(sa_family_t)) {
-		_debug("bind");
-		ret = kernel_bind(local->socket,
-				  (struct sockaddr *)&local->srx.transport,
-				  local->srx.transport_len);
-		if (ret < 0) {
-			_debug("bind failed %d", ret);
-			goto error;
-		}
-	}
-
-	/* we want to receive ICMP errors */
-	opt = 1;
-	ret = kernel_setsockopt(local->socket, SOL_IP, IP_RECVERR,
-				(char *) &opt, sizeof(opt));
-	if (ret < 0) {
-		_debug("setsockopt failed");
-		goto error;
-	}
-
-	/* we want to set the don't fragment bit */
-	opt = IP_PMTUDISC_DO;
-	ret = kernel_setsockopt(local->socket, SOL_IP, IP_MTU_DISCOVER,
-				(char *) &opt, sizeof(opt));
-	if (ret < 0) {
-		_debug("setsockopt failed");
-		goto error;
-	}
+	tuncfg.encap_type = UDP_ENCAP_RXRPC;
+	tuncfg.encap_rcv = rxrpc_encap_rcv;
+	tuncfg.encap_err_rcv = rxrpc_encap_err_rcv;
+	tuncfg.sk_user_data = local;
+	setup_udp_tunnel_sock(net, local->socket, &tuncfg);
 
 	/* set the socket up */
-	sock = local->socket->sk;
-	sock->sk_user_data	= local;
-	sock->sk_data_ready	= rxrpc_data_ready;
-	sock->sk_error_report	= rxrpc_error_report;
+	usk = local->socket->sk;
+	usk->sk_error_report = rxrpc_error_report;
+
+	switch (srx->transport.family) {
+	case AF_INET6:
+		/* we want to receive ICMPv6 errors */
+		ip6_sock_set_recverr(usk);
+
+		/* Fall through and set IPv4 options too otherwise we don't get
+		 * errors from IPv4 packets sent through the IPv6 socket.
+		 */
+		fallthrough;
+	case AF_INET:
+		/* we want to receive ICMP errors */
+		ip_sock_set_recverr(usk);
+
+		/* we want to set the don't fragment bit */
+		ip_sock_set_mtu_discover(usk, IP_PMTUDISC_DO);
+
+		/* We want receive timestamps. */
+		sock_enable_timestamps(usk);
+		break;
+
+	default:
+		BUG();
+	}
+
+	io_thread = kthread_run(rxrpc_io_thread, local,
+				"krxrpcio/%u", ntohs(udp_conf.local_udp_port));
+	if (IS_ERR(io_thread)) {
+		ret = PTR_ERR(io_thread);
+		goto error_sock;
+	}
+
+	wait_for_completion(&local->io_thread_ready);
+	local->io_thread = io_thread;
 	_leave(" = 0");
 	return 0;
 
-error:
+error_sock:
 	kernel_sock_shutdown(local->socket, SHUT_RDWR);
 	local->socket->sk->sk_user_data = NULL;
 	sock_release(local->socket);
 	local->socket = NULL;
-
-	_leave(" = %d", ret);
 	return ret;
 }
 
 /*
  * Look up or create a new local endpoint using the specified local address.
  */
-struct rxrpc_local *rxrpc_lookup_local(const struct sockaddr_rxrpc *srx)
+struct rxrpc_local *rxrpc_lookup_local(struct net *net,
+				       const struct sockaddr_rxrpc *srx)
 {
 	struct rxrpc_local *local;
-	struct list_head *cursor;
-	const char *age;
+	struct rxrpc_net *rxnet = rxrpc_net(net);
+	struct hlist_node *cursor;
 	long diff;
 	int ret;
 
 	_enter("{%d,%d,%pISp}",
 	       srx->transport_type, srx->transport.family, &srx->transport);
 
-	mutex_lock(&rxrpc_local_mutex);
+	mutex_lock(&rxnet->local_mutex);
 
-	for (cursor = rxrpc_local_endpoints.next;
-	     cursor != &rxrpc_local_endpoints;
-	     cursor = cursor->next) {
-		local = list_entry(cursor, struct rxrpc_local, link);
+	hlist_for_each(cursor, &rxnet->local_endpoints) {
+		local = hlist_entry(cursor, struct rxrpc_local, link);
 
 		diff = rxrpc_local_cmp_key(local, srx);
-		if (diff < 0)
+		if (diff != 0)
 			continue;
-		if (diff > 0)
-			break;
 
 		/* Services aren't allowed to share transport sockets, so
 		 * reject that here.  It is possible that the object is dying -
@@ -206,61 +267,139 @@ struct rxrpc_local *rxrpc_lookup_local(const struct sockaddr_rxrpc *srx)
 			goto addr_in_use;
 		}
 
-		/* Found a match.  We replace a dying object.  Attempting to
-		 * bind the transport socket may still fail if we're attempting
-		 * to use a local address that the dying object is still using.
+		/* Found a match.  We want to replace a dying object.
+		 * Attempting to bind the transport socket may still fail if
+		 * we're attempting to use a local address that the dying
+		 * object is still using.
 		 */
-		if (!rxrpc_get_local_maybe(local)) {
-			cursor = cursor->next;
-			list_del_init(&local->link);
+		if (!rxrpc_use_local(local, rxrpc_local_use_lookup))
 			break;
-		}
 
-		age = "old";
 		goto found;
 	}
 
-	local = rxrpc_alloc_local(srx);
+	local = rxrpc_alloc_local(net, srx);
 	if (!local)
 		goto nomem;
 
-	ret = rxrpc_open_socket(local);
+	ret = rxrpc_open_socket(local, net);
 	if (ret < 0)
 		goto sock_error;
 
-	list_add_tail(&local->link, cursor);
-	age = "new";
+	if (cursor) {
+		hlist_replace_rcu(cursor, &local->link);
+		cursor->pprev = NULL;
+	} else {
+		hlist_add_head_rcu(&local->link, &rxnet->local_endpoints);
+	}
 
 found:
-	mutex_unlock(&rxrpc_local_mutex);
-
-	_net("LOCAL %s %d {%pISp}",
-	     age, local->debug_id, &local->srx.transport);
-
+	mutex_unlock(&rxnet->local_mutex);
 	_leave(" = %p", local);
 	return local;
 
 nomem:
 	ret = -ENOMEM;
 sock_error:
-	mutex_unlock(&rxrpc_local_mutex);
-	kfree(local);
+	mutex_unlock(&rxnet->local_mutex);
+	if (local)
+		call_rcu(&local->rcu, rxrpc_local_rcu);
 	_leave(" = %d", ret);
 	return ERR_PTR(ret);
 
 addr_in_use:
-	mutex_unlock(&rxrpc_local_mutex);
+	mutex_unlock(&rxnet->local_mutex);
 	_leave(" = -EADDRINUSE");
 	return ERR_PTR(-EADDRINUSE);
 }
 
 /*
- * A local endpoint reached its end of life.
+ * Get a ref on a local endpoint.
  */
-void __rxrpc_put_local(struct rxrpc_local *local)
+struct rxrpc_local *rxrpc_get_local(struct rxrpc_local *local,
+				    enum rxrpc_local_trace why)
 {
-	_enter("%d", local->debug_id);
-	rxrpc_queue_work(&local->processor);
+	int r, u;
+
+	u = atomic_read(&local->active_users);
+	__refcount_inc(&local->ref, &r);
+	trace_rxrpc_local(local->debug_id, why, r + 1, u);
+	return local;
+}
+
+/*
+ * Get a ref on a local endpoint unless its usage has already reached 0.
+ */
+struct rxrpc_local *rxrpc_get_local_maybe(struct rxrpc_local *local,
+					  enum rxrpc_local_trace why)
+{
+	int r, u;
+
+	if (local && __refcount_inc_not_zero(&local->ref, &r)) {
+		u = atomic_read(&local->active_users);
+		trace_rxrpc_local(local->debug_id, why, r + 1, u);
+		return local;
+	}
+
+	return NULL;
+}
+
+/*
+ * Drop a ref on a local endpoint.
+ */
+void rxrpc_put_local(struct rxrpc_local *local, enum rxrpc_local_trace why)
+{
+	unsigned int debug_id;
+	bool dead;
+	int r, u;
+
+	if (local) {
+		debug_id = local->debug_id;
+
+		u = atomic_read(&local->active_users);
+		dead = __refcount_dec_and_test(&local->ref, &r);
+		trace_rxrpc_local(debug_id, why, r, u);
+
+		if (dead)
+			call_rcu(&local->rcu, rxrpc_local_rcu);
+	}
+}
+
+/*
+ * Start using a local endpoint.
+ */
+struct rxrpc_local *rxrpc_use_local(struct rxrpc_local *local,
+				    enum rxrpc_local_trace why)
+{
+	local = rxrpc_get_local_maybe(local, rxrpc_local_get_for_use);
+	if (!local)
+		return NULL;
+
+	if (!__rxrpc_use_local(local, why)) {
+		rxrpc_put_local(local, rxrpc_local_put_for_use);
+		return NULL;
+	}
+
+	return local;
+}
+
+/*
+ * Cease using a local endpoint.  Once the number of active users reaches 0, we
+ * start the closure of the transport in the I/O thread..
+ */
+void rxrpc_unuse_local(struct rxrpc_local *local, enum rxrpc_local_trace why)
+{
+	unsigned int debug_id;
+	int r, u;
+
+	if (local) {
+		debug_id = local->debug_id;
+		r = refcount_read(&local->ref);
+		u = atomic_dec_return(&local->active_users);
+		trace_rxrpc_local(debug_id, why, r, u);
+		if (u == 0)
+			kthread_stop(local->io_thread);
+	}
 }
 
 /*
@@ -270,27 +409,21 @@ void __rxrpc_put_local(struct rxrpc_local *local)
  * Closing the socket cannot be done from bottom half context or RCU callback
  * context because it might sleep.
  */
-static void rxrpc_local_destroyer(struct rxrpc_local *local)
+void rxrpc_destroy_local(struct rxrpc_local *local)
 {
 	struct socket *socket = local->socket;
+	struct rxrpc_net *rxnet = local->rxnet;
 
 	_enter("%d", local->debug_id);
 
-	/* We can get a race between an incoming call packet queueing the
-	 * processor again and the work processor starting the destruction
-	 * process which will shut down the UDP socket.
-	 */
-	if (local->dead) {
-		_leave(" [already dead]");
-		return;
-	}
 	local->dead = true;
 
-	mutex_lock(&rxrpc_local_mutex);
-	list_del_init(&local->link);
-	mutex_unlock(&rxrpc_local_mutex);
+	mutex_lock(&rxnet->local_mutex);
+	hlist_del_init_rcu(&local->link);
+	mutex_unlock(&rxnet->local_mutex);
 
-	ASSERT(RB_EMPTY_ROOT(&local->client_conns));
+	rxrpc_clean_up_local_conns(local);
+	rxrpc_service_connection_reaper(&rxnet->service_conn_reaper);
 	ASSERT(!local->service);
 
 	if (socket) {
@@ -303,39 +436,11 @@ static void rxrpc_local_destroyer(struct rxrpc_local *local)
 	/* At this point, there should be no more packets coming in to the
 	 * local endpoint.
 	 */
-	rxrpc_purge_queue(&local->reject_queue);
-	rxrpc_purge_queue(&local->event_queue);
-
-	_debug("rcu local %d", local->debug_id);
-	call_rcu(&local->rcu, rxrpc_local_rcu);
-}
-
-/*
- * Process events on an endpoint
- */
-static void rxrpc_local_processor(struct work_struct *work)
-{
-	struct rxrpc_local *local =
-		container_of(work, struct rxrpc_local, processor);
-	bool again;
-
-	_enter("%d", local->debug_id);
-
-	do {
-		again = false;
-		if (atomic_read(&local->usage) == 0)
-			return rxrpc_local_destroyer(local);
-
-		if (!skb_queue_empty(&local->reject_queue)) {
-			rxrpc_reject_packets(local);
-			again = true;
-		}
-
-		if (!skb_queue_empty(&local->event_queue)) {
-			rxrpc_process_local_events(local);
-			again = true;
-		}
-	} while (again);
+#ifdef CONFIG_AF_RXRPC_INJECT_RX_DELAY
+	rxrpc_purge_queue(&local->rx_delay_queue);
+#endif
+	rxrpc_purge_queue(&local->rx_queue);
+	rxrpc_purge_client_connections(local);
 }
 
 /*
@@ -345,19 +450,14 @@ static void rxrpc_local_rcu(struct rcu_head *rcu)
 {
 	struct rxrpc_local *local = container_of(rcu, struct rxrpc_local, rcu);
 
-	_enter("%d", local->debug_id);
-
-	ASSERT(!work_pending(&local->processor));
-
-	_net("DESTROY LOCAL %d", local->debug_id);
+	rxrpc_see_local(local, rxrpc_local_free);
 	kfree(local);
-	_leave("");
 }
 
 /*
  * Verify the local endpoint list is empty by this point.
  */
-void __exit rxrpc_destroy_all_locals(void)
+void rxrpc_destroy_all_locals(struct rxrpc_net *rxnet)
 {
 	struct rxrpc_local *local;
 
@@ -365,15 +465,13 @@ void __exit rxrpc_destroy_all_locals(void)
 
 	flush_workqueue(rxrpc_workqueue);
 
-	if (!list_empty(&rxrpc_local_endpoints)) {
-		mutex_lock(&rxrpc_local_mutex);
-		list_for_each_entry(local, &rxrpc_local_endpoints, link) {
+	if (!hlist_empty(&rxnet->local_endpoints)) {
+		mutex_lock(&rxnet->local_mutex);
+		hlist_for_each_entry(local, &rxnet->local_endpoints, link) {
 			pr_err("AF_RXRPC: Leaked local %p {%d}\n",
-			       local, atomic_read(&local->usage));
+			       local, refcount_read(&local->ref));
 		}
-		mutex_unlock(&rxrpc_local_mutex);
+		mutex_unlock(&rxnet->local_mutex);
 		BUG();
 	}
-
-	rcu_barrier();
 }

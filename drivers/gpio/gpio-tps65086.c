@@ -1,20 +1,12 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (C) 2015 Texas Instruments Incorporated - http://www.ti.com/
- *	Andrew F. Davis <afd@ti.com>
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
- * This program is distributed "as is" WITHOUT ANY WARRANTY of any
- * kind, whether expressed or implied; without even the implied warranty
- * of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License version 2 for more details.
+ * Copyright (C) 2015-2023 Texas Instruments Incorporated - https://www.ti.com/
+ *	Andrew Davis <afd@ti.com>
  *
  * Based on the TPS65912 driver
  */
 
-#include <linux/gpio.h>
+#include <linux/gpio/driver.h>
 #include <linux/module.h>
 #include <linux/platform_device.h>
 
@@ -29,7 +21,7 @@ static int tps65086_gpio_get_direction(struct gpio_chip *chip,
 				       unsigned offset)
 {
 	/* This device is output only */
-	return 0;
+	return GPIO_LINE_DIRECTION_OUT;
 }
 
 static int tps65086_gpio_direction_input(struct gpio_chip *chip,
@@ -88,34 +80,16 @@ static const struct gpio_chip template_chip = {
 static int tps65086_gpio_probe(struct platform_device *pdev)
 {
 	struct tps65086_gpio *gpio;
-	int ret;
 
 	gpio = devm_kzalloc(&pdev->dev, sizeof(*gpio), GFP_KERNEL);
 	if (!gpio)
 		return -ENOMEM;
 
-	platform_set_drvdata(pdev, gpio);
-
 	gpio->tps = dev_get_drvdata(pdev->dev.parent);
 	gpio->chip = template_chip;
 	gpio->chip.parent = gpio->tps->dev;
 
-	ret = gpiochip_add_data(&gpio->chip, gpio);
-	if (ret < 0) {
-		dev_err(&pdev->dev, "Could not register gpiochip, %d\n", ret);
-		return ret;
-	}
-
-	return 0;
-}
-
-static int tps65086_gpio_remove(struct platform_device *pdev)
-{
-	struct tps65086_gpio *gpio = platform_get_drvdata(pdev);
-
-	gpiochip_remove(&gpio->chip);
-
-	return 0;
+	return devm_gpiochip_add_data(&pdev->dev, &gpio->chip, gpio);
 }
 
 static const struct platform_device_id tps65086_gpio_id_table[] = {
@@ -129,11 +103,10 @@ static struct platform_driver tps65086_gpio_driver = {
 		.name = "tps65086-gpio",
 	},
 	.probe = tps65086_gpio_probe,
-	.remove = tps65086_gpio_remove,
 	.id_table = tps65086_gpio_id_table,
 };
 module_platform_driver(tps65086_gpio_driver);
 
-MODULE_AUTHOR("Andrew F. Davis <afd@ti.com>");
+MODULE_AUTHOR("Andrew Davis <afd@ti.com>");
 MODULE_DESCRIPTION("TPS65086 GPIO driver");
 MODULE_LICENSE("GPL v2");

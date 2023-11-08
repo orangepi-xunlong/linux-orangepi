@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /* arch/sparc64/mm/tlb.c
  *
  * Copyright (C) 2004 David S. Miller <davem@redhat.com>
@@ -8,9 +9,8 @@
 #include <linux/mm.h>
 #include <linux/swap.h>
 #include <linux/preempt.h>
+#include <linux/pagemap.h>
 
-#include <asm/pgtable.h>
-#include <asm/pgalloc.h>
 #include <asm/tlbflush.h>
 #include <asm/cacheflush.h>
 #include <asm/mmu_context.h>
@@ -67,7 +67,7 @@ void arch_leave_lazy_mmu_mode(void)
 }
 
 static void tlb_batch_add_one(struct mm_struct *mm, unsigned long vaddr,
-			      bool exec, bool huge)
+			      bool exec, unsigned int hugepage_shift)
 {
 	struct tlb_batch *tb = &get_cpu_var(tlb_batch);
 	unsigned long nr;
@@ -84,19 +84,19 @@ static void tlb_batch_add_one(struct mm_struct *mm, unsigned long vaddr,
 	}
 
 	if (!tb->active) {
-		flush_tsb_user_page(mm, vaddr, huge);
+		flush_tsb_user_page(mm, vaddr, hugepage_shift);
 		global_flush_tlb_page(mm, vaddr);
 		goto out;
 	}
 
 	if (nr == 0) {
 		tb->mm = mm;
-		tb->huge = huge;
+		tb->hugepage_shift = hugepage_shift;
 	}
 
-	if (tb->huge != huge) {
+	if (tb->hugepage_shift != hugepage_shift) {
 		flush_tlb_pending();
-		tb->huge = huge;
+		tb->hugepage_shift = hugepage_shift;
 		nr = 0;
 	}
 
@@ -110,15 +110,15 @@ out:
 }
 
 void tlb_batch_add(struct mm_struct *mm, unsigned long vaddr,
-		   pte_t *ptep, pte_t orig, int fullmm)
+		   pte_t *ptep, pte_t orig, int fullmm,
+		   unsigned int hugepage_shift)
 {
-	bool huge = is_hugetlb_pte(orig);
-
 	if (tlb_type != hypervisor &&
 	    pte_dirty(orig)) {
 		unsigned long paddr, pfn = pte_pfn(orig);
 		struct address_space *mapping;
 		struct page *page;
+		struct folio *folio;
 
 		if (!pfn_valid(pfn))
 			goto no_cache_flush;
@@ -128,18 +128,19 @@ void tlb_batch_add(struct mm_struct *mm, unsigned long vaddr,
 			goto no_cache_flush;
 
 		/* A real file page? */
-		mapping = page_mapping(page);
+		folio = page_folio(page);
+		mapping = folio_flush_mapping(folio);
 		if (!mapping)
 			goto no_cache_flush;
 
 		paddr = (unsigned long) page_address(page);
 		if ((paddr ^ vaddr) & (1 << 13))
-			flush_dcache_page_all(mm, page);
+			flush_dcache_folio_all(mm, folio);
 	}
 
 no_cache_flush:
 	if (!fullmm)
-		tlb_batch_add_one(mm, vaddr, pte_exec(orig), huge);
+		tlb_batch_add_one(mm, vaddr, pte_exec(orig), hugepage_shift);
 }
 
 #ifdef CONFIG_TRANSPARENT_HUGEPAGE
@@ -150,12 +151,14 @@ static void tlb_batch_pmd_scan(struct mm_struct *mm, unsigned long vaddr,
 	pte_t *pte;
 
 	pte = pte_offset_map(&pmd, vaddr);
+	if (!pte)
+		return;
 	end = vaddr + HPAGE_SIZE;
 	while (vaddr < end) {
 		if (pte_val(*pte) & _PAGE_VALID) {
 			bool exec = pte_exec(*pte);
 
-			tlb_batch_add_one(mm, vaddr, exec, false);
+			tlb_batch_add_one(mm, vaddr, exec, PAGE_SHIFT);
 		}
 		pte++;
 		vaddr += PAGE_SIZE;
@@ -163,13 +166,10 @@ static void tlb_batch_pmd_scan(struct mm_struct *mm, unsigned long vaddr,
 	pte_unmap(pte);
 }
 
-void set_pmd_at(struct mm_struct *mm, unsigned long addr,
-		pmd_t *pmdp, pmd_t pmd)
+
+static void __set_pmd_acct(struct mm_struct *mm, unsigned long addr,
+			   pmd_t orig, pmd_t pmd)
 {
-	pmd_t orig = *pmdp;
-
-	*pmdp = pmd;
-
 	if (mm == &init_mm)
 		return;
 
@@ -210,13 +210,22 @@ void set_pmd_at(struct mm_struct *mm, unsigned long addr,
 			pte_t orig_pte = __pte(pmd_val(orig));
 			bool exec = pte_exec(orig_pte);
 
-			tlb_batch_add_one(mm, addr, exec, true);
+			tlb_batch_add_one(mm, addr, exec, REAL_HPAGE_SHIFT);
 			tlb_batch_add_one(mm, addr + REAL_HPAGE_SIZE, exec,
-					true);
+					  REAL_HPAGE_SHIFT);
 		} else {
 			tlb_batch_pmd_scan(mm, addr, orig);
 		}
 	}
+}
+
+void set_pmd_at(struct mm_struct *mm, unsigned long addr,
+		pmd_t *pmdp, pmd_t pmd)
+{
+	pmd_t orig = *pmdp;
+
+	*pmdp = pmd;
+	__set_pmd_acct(mm, addr, orig, pmd);
 }
 
 static inline pmd_t pmdp_establish(struct vm_area_struct *vma,
@@ -227,6 +236,7 @@ static inline pmd_t pmdp_establish(struct vm_area_struct *vma,
 	do {
 		old = *pmdp;
 	} while (cmpxchg64(&pmdp->pmd, old.pmd, pmd.pmd) != old.pmd);
+	__set_pmd_acct(vma->vm_mm, address, old, pmd);
 
 	return old;
 }

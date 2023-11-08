@@ -1,45 +1,9 @@
+// SPDX-License-Identifier: BSD-3-Clause OR GPL-2.0
 /*******************************************************************************
  *
  * Module Name: dbcmds - Miscellaneous debug commands and output routines
  *
  ******************************************************************************/
-
-/*
- * Copyright (C) 2000 - 2016, Intel Corp.
- * All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions, and the following disclaimer,
- *    without modification.
- * 2. Redistributions in binary form must reproduce at minimum a disclaimer
- *    substantially similar to the "NO WARRANTY" disclaimer below
- *    ("Disclaimer") and any redistribution must be conditioned upon
- *    including a substantially similar Disclaimer requirement for further
- *    binary redistribution.
- * 3. Neither the names of the above-listed copyright holders nor the names
- *    of any contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
- *
- * Alternatively, this software may be distributed under the terms of the
- * GNU General Public License ("GPL") version 2 as published by the Free
- * Software Foundation.
- *
- * NO WARRANTY
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTIBILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * HOLDERS OR CONTRIBUTORS BE LIABLE FOR SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
- * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
- * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
- * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
- * STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING
- * IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGES.
- */
 
 #include <acpi/acpi.h>
 #include "accommon.h"
@@ -1044,6 +1008,64 @@ void acpi_db_display_resources(char *object_arg)
 	}
 
 	acpi_db_set_output_destination(ACPI_DB_CONSOLE_OUTPUT);
+}
+
+/*******************************************************************************
+ *
+ * FUNCTION:    acpi_db_generate_ged
+ *
+ * PARAMETERS:  ged_arg             - Raw GED number, ascii string
+ *
+ * RETURN:      None
+ *
+ * DESCRIPTION: Simulate firing of a GED
+ *
+ ******************************************************************************/
+
+void acpi_db_generate_interrupt(char *gsiv_arg)
+{
+	u32 gsiv_number;
+	struct acpi_ged_handler_info *ged_info = acpi_gbl_ged_handler_list;
+
+	if (!ged_info) {
+		acpi_os_printf("No GED handling present\n");
+	}
+
+	gsiv_number = strtoul(gsiv_arg, NULL, 0);
+
+	while (ged_info) {
+
+		if (ged_info->int_id == gsiv_number) {
+			struct acpi_object_list arg_list;
+			union acpi_object arg0;
+			acpi_handle evt_handle = ged_info->evt_method;
+			acpi_status status;
+
+			acpi_os_printf("Evaluate GED _EVT (GSIV=%d)\n",
+				       gsiv_number);
+
+			if (!evt_handle) {
+				acpi_os_printf("Undefined _EVT method\n");
+				return;
+			}
+
+			arg0.integer.type = ACPI_TYPE_INTEGER;
+			arg0.integer.value = gsiv_number;
+
+			arg_list.count = 1;
+			arg_list.pointer = &arg0;
+
+			status =
+			    acpi_evaluate_object(evt_handle, NULL, &arg_list,
+						 NULL);
+			if (ACPI_FAILURE(status)) {
+				acpi_os_printf("Could not evaluate _EVT\n");
+				return;
+			}
+
+		}
+		ged_info = ged_info->next;
+	}
 }
 
 #if (!ACPI_REDUCED_HARDWARE)

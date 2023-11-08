@@ -1,14 +1,6 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Linux network driver for QLogic BR-series Converged Network Adapter.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License (GPL) Version 2 as
- * published by the Free Software Foundation
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
  */
 /*
  * Copyright (c) 2005-2014 Brocade Communications Systems, Inc.
@@ -155,16 +147,20 @@ struct bfa_ioc_notify {
 	(__notify)->cbarg = (__cbarg);				\
 } while (0)
 
+enum iocpf_event;
+
 struct bfa_iocpf {
-	bfa_fsm_t		fsm;
+	void (*fsm)(struct bfa_iocpf *s, enum iocpf_event e);
 	struct bfa_ioc		*ioc;
 	bool			fw_mismatch_notified;
 	bool			auto_recover;
 	u32			poll_time;
 };
 
+enum ioc_event;
+
 struct bfa_ioc {
-	bfa_fsm_t		fsm;
+	void (*fsm)(struct bfa_ioc *s, enum ioc_event e);
 	struct bfa		*bfa;
 	struct bfa_pcidev	pcidev;
 	struct timer_list	ioc_timer;

@@ -1,11 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Freescale MPL115A2 pressure/temperature sensor
  *
  * Copyright (c) 2014 Peter Meerwald <pmeerw@pmeerw.net>
- *
- * This file is subject to the terms and conditions of version 2 of
- * the GNU General Public License.  See the file COPYING in the main
- * directory of this archive for more details.
  *
  * (7-bit I2C slave address 0x60)
  *
@@ -38,9 +35,9 @@ static const struct mpl115_ops mpl115_i2c_ops = {
 	.write = mpl115_i2c_write,
 };
 
-static int mpl115_i2c_probe(struct i2c_client *client,
-			 const struct i2c_device_id *id)
+static int mpl115_i2c_probe(struct i2c_client *client)
 {
+	const struct i2c_device_id *id = i2c_client_get_device_id(client);
 	if (!i2c_check_functionality(client->adapter, I2C_FUNC_SMBUS_WORD_DATA))
 		return -EOPNOTSUPP;
 
@@ -56,6 +53,7 @@ MODULE_DEVICE_TABLE(i2c, mpl115_i2c_id);
 static struct i2c_driver mpl115_i2c_driver = {
 	.driver = {
 		.name	= "mpl115",
+		.pm = pm_ptr(&mpl115_dev_pm_ops),
 	},
 	.probe = mpl115_i2c_probe,
 	.id_table = mpl115_i2c_id,
@@ -65,3 +63,4 @@ module_i2c_driver(mpl115_i2c_driver);
 MODULE_AUTHOR("Peter Meerwald <pmeerw@pmeerw.net>");
 MODULE_DESCRIPTION("Freescale MPL115A2 pressure/temperature driver");
 MODULE_LICENSE("GPL");
+MODULE_IMPORT_NS(IIO_MPL115);

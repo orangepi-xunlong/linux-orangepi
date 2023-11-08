@@ -1,12 +1,13 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /* bitops.S: Sparc64 atomic bit operations.
  *
  * Copyright (C) 2000, 2007 David S. Miller (davem@davemloft.net)
  */
 
+#include <linux/export.h>
 #include <linux/linkage.h>
 #include <asm/asi.h>
 #include <asm/backoff.h>
-#include <asm/export.h>
 
 	.text
 

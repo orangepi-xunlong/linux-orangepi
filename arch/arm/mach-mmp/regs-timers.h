@@ -1,18 +1,10 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  *   Timers Module
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #ifndef __ASM_MACH_REGS_TIMERS_H
 #define __ASM_MACH_REGS_TIMERS_H
-
-#include "addr-map.h"
-
-#define TIMERS1_VIRT_BASE	(APB_VIRT_BASE + 0x14000)
-#define TIMERS2_VIRT_BASE	(APB_VIRT_BASE + 0x16000)
 
 #define TMR_CCR		(0x0000)
 #define TMR_TN_MM(n, m)	(0x0004 + ((n) << 3) + (((n) + (m)) << 2))

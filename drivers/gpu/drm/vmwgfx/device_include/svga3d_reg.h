@@ -1,5 +1,6 @@
-/**********************************************************
- * Copyright 1998-2015 VMware, Inc.  All rights reserved.
+/* SPDX-License-Identifier: GPL-2.0 OR MIT */
+/*
+ * Copyright 1998-2015 VMware, Inc.
  *
  * Permission is hereby granted, free of charge, to any person
  * obtaining a copy of this software and associated documentation
@@ -21,22 +22,18 @@
  * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  * SOFTWARE.
  *
- **********************************************************/
+ */
 
 /*
  * svga3d_reg.h --
  *
- *       SVGA 3d hardware definitions
+ *    SVGA 3d hardware definitions
  */
+
+
 
 #ifndef _SVGA3D_REG_H_
 #define _SVGA3D_REG_H_
-
-#define INCLUDE_ALLOW_MODULE
-#define INCLUDE_ALLOW_USERLEVEL
-#define INCLUDE_ALLOW_VMCORE
-
-#include "includeCheck.h"
 
 #include "svga_reg.h"
 
@@ -46,5 +43,4 @@
 #include "svga3d_dx.h"
 #include "svga3d_devcaps.h"
 
-
-#endif /* _SVGA3D_REG_H_ */
+#endif

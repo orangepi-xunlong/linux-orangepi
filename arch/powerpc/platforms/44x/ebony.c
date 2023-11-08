@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Ebony board specific routines
  *
@@ -9,11 +10,6 @@
  *
  * Rewritten and ported to the merged powerpc tree:
  * Copyright 2007 David Gibson <dwg@au1.ibm.com>, IBM Corporation.
- *
- * This program is free software; you can redistribute  it and/or modify it
- * under  the terms of  the GNU General  Public License as published by the
- * Free Software Foundation;  either version 2 of the  License, or (at your
- * option) any later version.
  */
 
 #include <linux/init.h>
@@ -49,9 +45,6 @@ machine_device_initcall(ebony, ebony_device_probe);
  */
 static int __init ebony_probe(void)
 {
-	if (!of_machine_is_compatible("ibm,ebony"))
-		return 0;
-
 	pci_set_flags(PCI_REASSIGN_ALL_RSRC);
 
 	return 1;
@@ -59,10 +52,10 @@ static int __init ebony_probe(void)
 
 define_machine(ebony) {
 	.name			= "Ebony",
+	.compatible		= "ibm,ebony",
 	.probe			= ebony_probe,
 	.progress		= udbg_progress,
 	.init_IRQ		= uic_init_tree,
 	.get_irq		= uic_get_irq,
 	.restart		= ppc4xx_reset_system,
-	.calibrate_decr		= generic_calibrate_decr,
 };

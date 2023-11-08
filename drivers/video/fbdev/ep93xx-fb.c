@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * linux/drivers/video/ep93xx-fb.c
  *
@@ -10,11 +11,6 @@
  *
  * Based on the Cirrus Logic ep93xxfb driver, and various other ep93xxfb
  * drivers.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
  */
 
 #include <linux/platform_device.h>
@@ -316,7 +312,7 @@ static int ep93xxfb_mmap(struct fb_info *info, struct vm_area_struct *vma)
 	unsigned int offset = vma->vm_pgoff << PAGE_SHIFT;
 
 	if (offset < info->fix.smem_len) {
-		return dma_mmap_wc(info->dev, vma, info->screen_base,
+		return dma_mmap_wc(info->device, vma, info->screen_base,
 				   info->fix.smem_start, info->fix.smem_len);
 	}
 
@@ -406,7 +402,7 @@ static int ep93xxfb_setcolreg(unsigned int regno, unsigned int red,
 	return 0;
 }
 
-static struct fb_ops ep93xxfb_ops = {
+static const struct fb_ops ep93xxfb_ops = {
 	.owner		= THIS_MODULE,
 	.fb_check_var	= ep93xxfb_check_var,
 	.fb_set_par	= ep93xxfb_set_par,
@@ -427,24 +423,24 @@ static int ep93xxfb_alloc_videomem(struct fb_info *info)
 	/* Maximum 16bpp -> used memory is maximum x*y*2 bytes */
 	fb_size = EP93XXFB_MAX_XRES * EP93XXFB_MAX_YRES * 2;
 
-	virt_addr = dma_alloc_wc(info->dev, fb_size, &phys_addr, GFP_KERNEL);
+	virt_addr = dma_alloc_wc(info->device, fb_size, &phys_addr, GFP_KERNEL);
 	if (!virt_addr)
 		return -ENOMEM;
 
 	/*
 	 * There is a bug in the ep93xx framebuffer which causes problems
 	 * if bit 27 of the physical address is set.
-	 * See: http://marc.info/?l=linux-arm-kernel&m=110061245502000&w=2
+	 * See: https://marc.info/?l=linux-arm-kernel&m=110061245502000&w=2
 	 * There does not seem to be any official errata for this, but I
 	 * have confirmed the problem exists on my hardware (ep9315) at
 	 * least.
 	 */
 	if (check_screenpage_bug && phys_addr & (1 << 27)) {
-		dev_err(info->dev, "ep93xx framebuffer bug. phys addr (0x%x) "
-			"has bit 27 set: cannot init framebuffer\n",
-			phys_addr);
+		fb_err(info, "ep93xx framebuffer bug. phys addr (0x%x) "
+		       "has bit 27 set: cannot init framebuffer\n",
+		       phys_addr);
 
-		dma_free_coherent(info->dev, fb_size, virt_addr, phys_addr);
+		dma_free_coherent(info->device, fb_size, virt_addr, phys_addr);
 		return -ENOMEM;
 	}
 
@@ -458,7 +454,7 @@ static int ep93xxfb_alloc_videomem(struct fb_info *info)
 static void ep93xxfb_dealloc_videomem(struct fb_info *info)
 {
 	if (info->screen_base)
-		dma_free_coherent(info->dev, info->fix.smem_len,
+		dma_free_coherent(info->device, info->fix.smem_len,
 				  info->screen_base, info->fix.smem_start);
 }
 
@@ -478,7 +474,6 @@ static int ep93xxfb_probe(struct platform_device *pdev)
 	if (!info)
 		return -ENOMEM;
 
-	info->dev = &pdev->dev;
 	platform_set_drvdata(pdev, info);
 	fbi = info->par;
 	fbi->mach_info = mach_info;
@@ -520,7 +515,6 @@ static int ep93xxfb_probe(struct platform_device *pdev)
 	info->fix.accel		= FB_ACCEL_NONE;
 	info->var.activate	= FB_ACTIVATE_NOW;
 	info->var.vmode		= FB_VMODE_NONINTERLACED;
-	info->flags		= FBINFO_DEFAULT;
 	info->node		= -1;
 	info->state		= FBINFO_STATE_RUNNING;
 	info->pseudo_palette	= &fbi->pseudo_palette;
@@ -529,7 +523,7 @@ static int ep93xxfb_probe(struct platform_device *pdev)
 	err = fb_find_mode(&info->var, info, video_mode,
 			   NULL, 0, NULL, 16);
 	if (err == 0) {
-		dev_err(info->dev, "No suitable video mode found\n");
+		fb_err(info, "No suitable video mode found\n");
 		err = -EINVAL;
 		goto failed_resource;
 	}
@@ -552,16 +546,20 @@ static int ep93xxfb_probe(struct platform_device *pdev)
 	}
 
 	ep93xxfb_set_par(info);
-	clk_enable(fbi->clk);
-
-	err = register_framebuffer(info);
+	err = clk_prepare_enable(fbi->clk);
 	if (err)
 		goto failed_check;
 
-	dev_info(info->dev, "registered. Mode = %dx%d-%d\n",
-		 info->var.xres, info->var.yres, info->var.bits_per_pixel);
+	err = register_framebuffer(info);
+	if (err)
+		goto failed_framebuffer;
+
+	fb_info(info, "registered. Mode = %dx%d-%d\n",
+		info->var.xres, info->var.yres, info->var.bits_per_pixel);
 	return 0;
 
+failed_framebuffer:
+	clk_disable_unprepare(fbi->clk);
 failed_check:
 	if (fbi->mach_info->teardown)
 		fbi->mach_info->teardown(pdev);
@@ -575,13 +573,13 @@ failed_cmap:
 	return err;
 }
 
-static int ep93xxfb_remove(struct platform_device *pdev)
+static void ep93xxfb_remove(struct platform_device *pdev)
 {
 	struct fb_info *info = platform_get_drvdata(pdev);
 	struct ep93xx_fbi *fbi = info->par;
 
 	unregister_framebuffer(info);
-	clk_disable(fbi->clk);
+	clk_disable_unprepare(fbi->clk);
 	ep93xxfb_dealloc_videomem(info);
 	fb_dealloc_cmap(&info->cmap);
 
@@ -589,13 +587,11 @@ static int ep93xxfb_remove(struct platform_device *pdev)
 		fbi->mach_info->teardown(pdev);
 
 	kfree(info);
-
-	return 0;
 }
 
 static struct platform_driver ep93xxfb_driver = {
 	.probe		= ep93xxfb_probe,
-	.remove		= ep93xxfb_remove,
+	.remove_new	= ep93xxfb_remove,
 	.driver = {
 		.name	= "ep93xx-fb",
 	},

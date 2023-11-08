@@ -1,19 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0+
 /*
  * Copyright (C) 2006, 2007 Eugene Konev
  *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  */
 
 #include <linux/module.h>
@@ -544,7 +532,7 @@ fatal_error:
 
 }
 
-static int cpmac_start_xmit(struct sk_buff *skb, struct net_device *dev)
+static netdev_tx_t cpmac_start_xmit(struct sk_buff *skb, struct net_device *dev)
 {
 	int queue;
 	unsigned int len;
@@ -608,7 +596,7 @@ static void cpmac_end_xmit(struct net_device *dev, int queue)
 			netdev_dbg(dev, "sent 0x%p, len=%d\n",
 				   desc->skb, desc->skb->len);
 
-		dev_kfree_skb_irq(desc->skb);
+		dev_consume_skb_irq(desc->skb);
 		desc->skb = NULL;
 		if (__netif_subqueue_stopped(dev, queue))
 			netif_wake_subqueue(dev, queue);
@@ -809,7 +797,7 @@ static irqreturn_t cpmac_irq(int irq, void *dev_id)
 	return IRQ_HANDLED;
 }
 
-static void cpmac_tx_timeout(struct net_device *dev)
+static void cpmac_tx_timeout(struct net_device *dev, unsigned int txqueue)
 {
 	struct cpmac_priv *priv = netdev_priv(dev);
 
@@ -828,18 +816,10 @@ static void cpmac_tx_timeout(struct net_device *dev)
 	netif_tx_wake_all_queues(priv->dev);
 }
 
-static int cpmac_ioctl(struct net_device *dev, struct ifreq *ifr, int cmd)
-{
-	if (!(netif_running(dev)))
-		return -EINVAL;
-	if (!dev->phydev)
-		return -EINVAL;
-
-	return phy_mii_ioctl(dev->phydev, ifr, cmd);
-}
-
 static void cpmac_get_ringparam(struct net_device *dev,
-						struct ethtool_ringparam *ring)
+				struct ethtool_ringparam *ring,
+				struct kernel_ethtool_ringparam *kernel_ring,
+				struct netlink_ext_ack *extack)
 {
 	struct cpmac_priv *priv = netdev_priv(dev);
 
@@ -855,7 +835,9 @@ static void cpmac_get_ringparam(struct net_device *dev,
 }
 
 static int cpmac_set_ringparam(struct net_device *dev,
-						struct ethtool_ringparam *ring)
+			       struct ethtool_ringparam *ring,
+			       struct kernel_ethtool_ringparam *kernel_ring,
+			       struct netlink_ext_ack *extack)
 {
 	struct cpmac_priv *priv = netdev_priv(dev);
 
@@ -869,8 +851,8 @@ static int cpmac_set_ringparam(struct net_device *dev,
 static void cpmac_get_drvinfo(struct net_device *dev,
 			      struct ethtool_drvinfo *info)
 {
-	strlcpy(info->driver, "cpmac", sizeof(info->driver));
-	strlcpy(info->version, CPMAC_VERSION, sizeof(info->version));
+	strscpy(info->driver, "cpmac", sizeof(info->driver));
+	strscpy(info->version, CPMAC_VERSION, sizeof(info->version));
 	snprintf(info->bus_info, sizeof(info->bus_info), "%s", "cpmac");
 }
 
@@ -991,7 +973,6 @@ static int cpmac_open(struct net_device *dev)
 	cpmac_hw_start(dev);
 
 	napi_enable(&priv->napi);
-	dev->phydev->state = PHY_CHANGELINK;
 	phy_start(dev->phydev);
 
 	return 0;
@@ -1067,8 +1048,7 @@ static const struct net_device_ops cpmac_netdev_ops = {
 	.ndo_start_xmit		= cpmac_start_xmit,
 	.ndo_tx_timeout		= cpmac_tx_timeout,
 	.ndo_set_rx_mode	= cpmac_set_multicast_list,
-	.ndo_do_ioctl		= cpmac_ioctl,
-	.ndo_change_mtu		= eth_change_mtu,
+	.ndo_eth_ioctl		= phy_do_ioctl_running,
 	.ndo_validate_addr	= eth_validate_addr,
 	.ndo_set_mac_address	= eth_mac_addr,
 };
@@ -1129,14 +1109,14 @@ static int cpmac_probe(struct platform_device *pdev)
 	dev->netdev_ops = &cpmac_netdev_ops;
 	dev->ethtool_ops = &cpmac_ethtool_ops;
 
-	netif_napi_add(dev, &priv->napi, cpmac_poll, 64);
+	netif_napi_add(dev, &priv->napi, cpmac_poll);
 
 	spin_lock_init(&priv->lock);
 	spin_lock_init(&priv->rx_lock);
 	priv->dev = dev;
 	priv->ring_size = 64;
 	priv->msg_enable = netif_msg_init(debug_level, 0xff);
-	memcpy(dev->dev_addr, pdata->dev_addr, sizeof(pdata->dev_addr));
+	eth_hw_addr_set(dev, pdata->dev_addr);
 
 	snprintf(priv->phy_name, MII_BUS_ID_SIZE, PHY_ID_FMT,
 						mdio_bus_id, phy_id);
@@ -1189,7 +1169,7 @@ static struct platform_driver cpmac_driver = {
 	.remove = cpmac_remove,
 };
 
-int cpmac_init(void)
+int __init cpmac_init(void)
 {
 	u32 mask;
 	int i, res;
@@ -1259,7 +1239,7 @@ fail_alloc:
 	return res;
 }
 
-void cpmac_exit(void)
+void __exit cpmac_exit(void)
 {
 	platform_driver_unregister(&cpmac_driver);
 	mdiobus_unregister(cpmac_mii);

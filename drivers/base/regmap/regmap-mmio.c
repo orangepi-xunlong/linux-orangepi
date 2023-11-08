@@ -1,20 +1,8 @@
-/*
- * Register map access API - MMIO support
- *
- * Copyright (c) 2012, NVIDIA CORPORATION.  All rights reserved.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
- */
+// SPDX-License-Identifier: GPL-2.0
+//
+// Register map access API - MMIO support
+//
+// Copyright (c) 2012, NVIDIA CORPORATION.  All rights reserved.
 
 #include <linux/clk.h>
 #include <linux/err.h>
@@ -22,12 +10,16 @@
 #include <linux/module.h>
 #include <linux/regmap.h>
 #include <linux/slab.h>
+#include <linux/swab.h>
 
 #include "internal.h"
 
 struct regmap_mmio_context {
 	void __iomem *regs;
-	unsigned val_bytes;
+	unsigned int val_bytes;
+	bool big_endian;
+
+	bool attached_clk;
 	struct clk *clk;
 
 	void (*reg_write)(struct regmap_mmio_context *ctx,
@@ -42,9 +34,6 @@ static int regmap_mmio_regbits_check(size_t reg_bits)
 	case 8:
 	case 16:
 	case 32:
-#ifdef CONFIG_64BIT
-	case 64:
-#endif
 		return 0;
 	default:
 		return -EINVAL;
@@ -59,18 +48,13 @@ static int regmap_mmio_get_min_stride(size_t val_bits)
 	case 8:
 		/* The core treats 0 as 1 */
 		min_stride = 0;
-		return 0;
+		break;
 	case 16:
 		min_stride = 2;
 		break;
 	case 32:
 		min_stride = 4;
 		break;
-#ifdef CONFIG_64BIT
-	case 64:
-		min_stride = 8;
-		break;
-#endif
 	default:
 		return -EINVAL;
 	}
@@ -85,6 +69,19 @@ static void regmap_mmio_write8(struct regmap_mmio_context *ctx,
 	writeb(val, ctx->regs + reg);
 }
 
+static void regmap_mmio_write8_relaxed(struct regmap_mmio_context *ctx,
+				unsigned int reg,
+				unsigned int val)
+{
+	writeb_relaxed(val, ctx->regs + reg);
+}
+
+static void regmap_mmio_iowrite8(struct regmap_mmio_context *ctx,
+				 unsigned int reg, unsigned int val)
+{
+	iowrite8(val, ctx->regs + reg);
+}
+
 static void regmap_mmio_write16le(struct regmap_mmio_context *ctx,
 				  unsigned int reg,
 				  unsigned int val)
@@ -92,9 +89,28 @@ static void regmap_mmio_write16le(struct regmap_mmio_context *ctx,
 	writew(val, ctx->regs + reg);
 }
 
+static void regmap_mmio_write16le_relaxed(struct regmap_mmio_context *ctx,
+				  unsigned int reg,
+				  unsigned int val)
+{
+	writew_relaxed(val, ctx->regs + reg);
+}
+
+static void regmap_mmio_iowrite16le(struct regmap_mmio_context *ctx,
+				    unsigned int reg, unsigned int val)
+{
+	iowrite16(val, ctx->regs + reg);
+}
+
 static void regmap_mmio_write16be(struct regmap_mmio_context *ctx,
 				  unsigned int reg,
 				  unsigned int val)
+{
+	writew(swab16(val), ctx->regs + reg);
+}
+
+static void regmap_mmio_iowrite16be(struct regmap_mmio_context *ctx,
+				    unsigned int reg, unsigned int val)
 {
 	iowrite16be(val, ctx->regs + reg);
 }
@@ -106,21 +122,31 @@ static void regmap_mmio_write32le(struct regmap_mmio_context *ctx,
 	writel(val, ctx->regs + reg);
 }
 
+static void regmap_mmio_write32le_relaxed(struct regmap_mmio_context *ctx,
+				  unsigned int reg,
+				  unsigned int val)
+{
+	writel_relaxed(val, ctx->regs + reg);
+}
+
+static void regmap_mmio_iowrite32le(struct regmap_mmio_context *ctx,
+				    unsigned int reg, unsigned int val)
+{
+	iowrite32(val, ctx->regs + reg);
+}
+
 static void regmap_mmio_write32be(struct regmap_mmio_context *ctx,
 				  unsigned int reg,
 				  unsigned int val)
 {
-	iowrite32be(val, ctx->regs + reg);
+	writel(swab32(val), ctx->regs + reg);
 }
 
-#ifdef CONFIG_64BIT
-static void regmap_mmio_write64le(struct regmap_mmio_context *ctx,
-				  unsigned int reg,
-				  unsigned int val)
+static void regmap_mmio_iowrite32be(struct regmap_mmio_context *ctx,
+				    unsigned int reg, unsigned int val)
 {
-	writeq(val, ctx->regs + reg);
+	iowrite32be(val, ctx->regs + reg);
 }
-#endif
 
 static int regmap_mmio_write(void *context, unsigned int reg, unsigned int val)
 {
@@ -141,10 +167,85 @@ static int regmap_mmio_write(void *context, unsigned int reg, unsigned int val)
 	return 0;
 }
 
+static int regmap_mmio_noinc_write(void *context, unsigned int reg,
+				   const void *val, size_t val_count)
+{
+	struct regmap_mmio_context *ctx = context;
+	int ret = 0;
+	int i;
+
+	if (!IS_ERR(ctx->clk)) {
+		ret = clk_enable(ctx->clk);
+		if (ret < 0)
+			return ret;
+	}
+
+	/*
+	 * There are no native, assembly-optimized write single register
+	 * operations for big endian, so fall back to emulation if this
+	 * is needed. (Single bytes are fine, they are not affected by
+	 * endianness.)
+	 */
+	if (ctx->big_endian && (ctx->val_bytes > 1)) {
+		switch (ctx->val_bytes) {
+		case 2:
+		{
+			const u16 *valp = (const u16 *)val;
+			for (i = 0; i < val_count; i++)
+				writew(swab16(valp[i]), ctx->regs + reg);
+			goto out_clk;
+		}
+		case 4:
+		{
+			const u32 *valp = (const u32 *)val;
+			for (i = 0; i < val_count; i++)
+				writel(swab32(valp[i]), ctx->regs + reg);
+			goto out_clk;
+		}
+		default:
+			ret = -EINVAL;
+			goto out_clk;
+		}
+	}
+
+	switch (ctx->val_bytes) {
+	case 1:
+		writesb(ctx->regs + reg, (const u8 *)val, val_count);
+		break;
+	case 2:
+		writesw(ctx->regs + reg, (const u16 *)val, val_count);
+		break;
+	case 4:
+		writesl(ctx->regs + reg, (const u32 *)val, val_count);
+		break;
+	default:
+		ret = -EINVAL;
+		break;
+	}
+
+out_clk:
+	if (!IS_ERR(ctx->clk))
+		clk_disable(ctx->clk);
+
+	return ret;
+}
+
 static unsigned int regmap_mmio_read8(struct regmap_mmio_context *ctx,
 				      unsigned int reg)
 {
 	return readb(ctx->regs + reg);
+}
+
+static unsigned int regmap_mmio_read8_relaxed(struct regmap_mmio_context *ctx,
+				      unsigned int reg)
+{
+	return readb_relaxed(ctx->regs + reg);
+}
+
+static unsigned int regmap_mmio_ioread8(struct regmap_mmio_context *ctx,
+					unsigned int reg)
+{
+	return ioread8(ctx->regs + reg);
 }
 
 static unsigned int regmap_mmio_read16le(struct regmap_mmio_context *ctx,
@@ -153,8 +254,26 @@ static unsigned int regmap_mmio_read16le(struct regmap_mmio_context *ctx,
 	return readw(ctx->regs + reg);
 }
 
+static unsigned int regmap_mmio_read16le_relaxed(struct regmap_mmio_context *ctx,
+						 unsigned int reg)
+{
+	return readw_relaxed(ctx->regs + reg);
+}
+
+static unsigned int regmap_mmio_ioread16le(struct regmap_mmio_context *ctx,
+					   unsigned int reg)
+{
+	return ioread16(ctx->regs + reg);
+}
+
 static unsigned int regmap_mmio_read16be(struct regmap_mmio_context *ctx,
 				         unsigned int reg)
+{
+	return swab16(readw(ctx->regs + reg));
+}
+
+static unsigned int regmap_mmio_ioread16be(struct regmap_mmio_context *ctx,
+					   unsigned int reg)
 {
 	return ioread16be(ctx->regs + reg);
 }
@@ -165,19 +284,29 @@ static unsigned int regmap_mmio_read32le(struct regmap_mmio_context *ctx,
 	return readl(ctx->regs + reg);
 }
 
+static unsigned int regmap_mmio_read32le_relaxed(struct regmap_mmio_context *ctx,
+						 unsigned int reg)
+{
+	return readl_relaxed(ctx->regs + reg);
+}
+
+static unsigned int regmap_mmio_ioread32le(struct regmap_mmio_context *ctx,
+					   unsigned int reg)
+{
+	return ioread32(ctx->regs + reg);
+}
+
 static unsigned int regmap_mmio_read32be(struct regmap_mmio_context *ctx,
 				         unsigned int reg)
 {
-	return ioread32be(ctx->regs + reg);
+	return swab32(readl(ctx->regs + reg));
 }
 
-#ifdef CONFIG_64BIT
-static unsigned int regmap_mmio_read64le(struct regmap_mmio_context *ctx,
-				         unsigned int reg)
+static unsigned int regmap_mmio_ioread32be(struct regmap_mmio_context *ctx,
+					   unsigned int reg)
 {
-	return readq(ctx->regs + reg);
+	return ioread32be(ctx->regs + reg);
 }
-#endif
 
 static int regmap_mmio_read(void *context, unsigned int reg, unsigned int *val)
 {
@@ -198,13 +327,69 @@ static int regmap_mmio_read(void *context, unsigned int reg, unsigned int *val)
 	return 0;
 }
 
+static int regmap_mmio_noinc_read(void *context, unsigned int reg,
+				  void *val, size_t val_count)
+{
+	struct regmap_mmio_context *ctx = context;
+	int ret = 0;
+
+	if (!IS_ERR(ctx->clk)) {
+		ret = clk_enable(ctx->clk);
+		if (ret < 0)
+			return ret;
+	}
+
+	switch (ctx->val_bytes) {
+	case 1:
+		readsb(ctx->regs + reg, (u8 *)val, val_count);
+		break;
+	case 2:
+		readsw(ctx->regs + reg, (u16 *)val, val_count);
+		break;
+	case 4:
+		readsl(ctx->regs + reg, (u32 *)val, val_count);
+		break;
+	default:
+		ret = -EINVAL;
+		goto out_clk;
+	}
+
+	/*
+	 * There are no native, assembly-optimized write single register
+	 * operations for big endian, so fall back to emulation if this
+	 * is needed. (Single bytes are fine, they are not affected by
+	 * endianness.)
+	 */
+	if (ctx->big_endian && (ctx->val_bytes > 1)) {
+		switch (ctx->val_bytes) {
+		case 2:
+			swab16_array(val, val_count);
+			break;
+		case 4:
+			swab32_array(val, val_count);
+			break;
+		default:
+			ret = -EINVAL;
+			break;
+		}
+	}
+
+out_clk:
+	if (!IS_ERR(ctx->clk))
+		clk_disable(ctx->clk);
+
+	return ret;
+}
+
+
 static void regmap_mmio_free_context(void *context)
 {
 	struct regmap_mmio_context *ctx = context;
 
 	if (!IS_ERR(ctx->clk)) {
 		clk_unprepare(ctx->clk);
-		clk_put(ctx->clk);
+		if (!ctx->attached_clk)
+			clk_put(ctx->clk);
 	}
 	kfree(context);
 }
@@ -213,6 +398,8 @@ static const struct regmap_bus regmap_mmio = {
 	.fast_io = true,
 	.reg_write = regmap_mmio_write,
 	.reg_read = regmap_mmio_read,
+	.reg_noinc_write = regmap_mmio_noinc_write,
+	.reg_noinc_read = regmap_mmio_noinc_read,
 	.free_context = regmap_mmio_free_context,
 	.val_format_endian_default = REGMAP_ENDIAN_LITTLE,
 };
@@ -237,7 +424,10 @@ static struct regmap_mmio_context *regmap_mmio_gen_context(struct device *dev,
 	if (min_stride < 0)
 		return ERR_PTR(min_stride);
 
-	if (config->reg_stride < min_stride)
+	if (config->reg_stride && config->reg_stride < min_stride)
+		return ERR_PTR(-EINVAL);
+
+	if (config->use_relaxed_mmio && config->io_port)
 		return ERR_PTR(-EINVAL);
 
 	ctx = kzalloc(sizeof(*ctx), GFP_KERNEL);
@@ -256,23 +446,41 @@ static struct regmap_mmio_context *regmap_mmio_gen_context(struct device *dev,
 #endif
 		switch (config->val_bits) {
 		case 8:
-			ctx->reg_read = regmap_mmio_read8;
-			ctx->reg_write = regmap_mmio_write8;
+			if (config->io_port) {
+				ctx->reg_read = regmap_mmio_ioread8;
+				ctx->reg_write = regmap_mmio_iowrite8;
+			} else if (config->use_relaxed_mmio) {
+				ctx->reg_read = regmap_mmio_read8_relaxed;
+				ctx->reg_write = regmap_mmio_write8_relaxed;
+			} else {
+				ctx->reg_read = regmap_mmio_read8;
+				ctx->reg_write = regmap_mmio_write8;
+			}
 			break;
 		case 16:
-			ctx->reg_read = regmap_mmio_read16le;
-			ctx->reg_write = regmap_mmio_write16le;
+			if (config->io_port) {
+				ctx->reg_read = regmap_mmio_ioread16le;
+				ctx->reg_write = regmap_mmio_iowrite16le;
+			} else if (config->use_relaxed_mmio) {
+				ctx->reg_read = regmap_mmio_read16le_relaxed;
+				ctx->reg_write = regmap_mmio_write16le_relaxed;
+			} else {
+				ctx->reg_read = regmap_mmio_read16le;
+				ctx->reg_write = regmap_mmio_write16le;
+			}
 			break;
 		case 32:
-			ctx->reg_read = regmap_mmio_read32le;
-			ctx->reg_write = regmap_mmio_write32le;
+			if (config->io_port) {
+				ctx->reg_read = regmap_mmio_ioread32le;
+				ctx->reg_write = regmap_mmio_iowrite32le;
+			} else if (config->use_relaxed_mmio) {
+				ctx->reg_read = regmap_mmio_read32le_relaxed;
+				ctx->reg_write = regmap_mmio_write32le_relaxed;
+			} else {
+				ctx->reg_read = regmap_mmio_read32le;
+				ctx->reg_write = regmap_mmio_write32le;
+			}
 			break;
-#ifdef CONFIG_64BIT
-		case 64:
-			ctx->reg_read = regmap_mmio_read64le;
-			ctx->reg_write = regmap_mmio_write64le;
-			break;
-#endif
 		default:
 			ret = -EINVAL;
 			goto err_free;
@@ -282,18 +490,34 @@ static struct regmap_mmio_context *regmap_mmio_gen_context(struct device *dev,
 #ifdef __BIG_ENDIAN
 	case REGMAP_ENDIAN_NATIVE:
 #endif
+		ctx->big_endian = true;
 		switch (config->val_bits) {
 		case 8:
-			ctx->reg_read = regmap_mmio_read8;
-			ctx->reg_write = regmap_mmio_write8;
+			if (config->io_port) {
+				ctx->reg_read = regmap_mmio_ioread8;
+				ctx->reg_write = regmap_mmio_iowrite8;
+			} else {
+				ctx->reg_read = regmap_mmio_read8;
+				ctx->reg_write = regmap_mmio_write8;
+			}
 			break;
 		case 16:
-			ctx->reg_read = regmap_mmio_read16be;
-			ctx->reg_write = regmap_mmio_write16be;
+			if (config->io_port) {
+				ctx->reg_read = regmap_mmio_ioread16be;
+				ctx->reg_write = regmap_mmio_iowrite16be;
+			} else {
+				ctx->reg_read = regmap_mmio_read16be;
+				ctx->reg_write = regmap_mmio_write16be;
+			}
 			break;
 		case 32:
-			ctx->reg_read = regmap_mmio_read32be;
-			ctx->reg_write = regmap_mmio_write32be;
+			if (config->io_port) {
+				ctx->reg_read = regmap_mmio_ioread32be;
+				ctx->reg_write = regmap_mmio_iowrite32be;
+			} else {
+				ctx->reg_read = regmap_mmio_read32be;
+				ctx->reg_write = regmap_mmio_write32be;
+			}
 			break;
 		default:
 			ret = -EINVAL;
@@ -362,5 +586,27 @@ struct regmap *__devm_regmap_init_mmio_clk(struct device *dev,
 				  lock_key, lock_name);
 }
 EXPORT_SYMBOL_GPL(__devm_regmap_init_mmio_clk);
+
+int regmap_mmio_attach_clk(struct regmap *map, struct clk *clk)
+{
+	struct regmap_mmio_context *ctx = map->bus_context;
+
+	ctx->clk = clk;
+	ctx->attached_clk = true;
+
+	return clk_prepare(ctx->clk);
+}
+EXPORT_SYMBOL_GPL(regmap_mmio_attach_clk);
+
+void regmap_mmio_detach_clk(struct regmap *map)
+{
+	struct regmap_mmio_context *ctx = map->bus_context;
+
+	clk_unprepare(ctx->clk);
+
+	ctx->attached_clk = false;
+	ctx->clk = NULL;
+}
+EXPORT_SYMBOL_GPL(regmap_mmio_detach_clk);
 
 MODULE_LICENSE("GPL v2");

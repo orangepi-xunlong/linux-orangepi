@@ -1,15 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * System Trace Module (STM) infrastructure apis
  * Copyright (C) 2014 Intel Corporation.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
  */
 
 #ifndef _STM_H_
@@ -65,7 +57,7 @@ struct stm_device;
  *
  * Normally, an STM device will have a range of masters available to software
  * and the rest being statically assigned to various hardware trace sources.
- * The former is defined by the the range [@sw_start..@sw_end] of the device
+ * The former is defined by the range [@sw_start..@sw_end] of the device
  * description. That is, the lowest master that can be allocated to software
  * writers is @sw_start and data from this writer will appear is @sw_start
  * master in the STP stream.
@@ -133,7 +125,7 @@ int stm_source_register_device(struct device *parent,
 			       struct stm_source_data *data);
 void stm_source_unregister_device(struct stm_source_data *data);
 
-int stm_source_write(struct stm_source_data *data, unsigned int chan,
-		     const char *buf, size_t count);
+int notrace stm_source_write(struct stm_source_data *data, unsigned int chan,
+			     const char *buf, size_t count);
 
 #endif /* _STM_H_ */

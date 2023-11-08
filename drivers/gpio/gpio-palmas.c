@@ -1,29 +1,17 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * TI Palma series PMIC's GPIO driver.
  *
  * Copyright (c) 2012, NVIDIA CORPORATION.  All rights reserved.
  *
  * Author: Laxman Dewangan <ldewangan@nvidia.com>
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include <linux/gpio.h>
+#include <linux/gpio/driver.h>
 #include <linux/kernel.h>
 #include <linux/init.h>
 #include <linux/mfd/palmas.h>
 #include <linux/of.h>
-#include <linux/of_device.h>
 #include <linux/platform_device.h>
 
 struct palmas_gpio {
@@ -159,13 +147,9 @@ static int palmas_gpio_probe(struct platform_device *pdev)
 	struct palmas_platform_data *palmas_pdata;
 	struct palmas_gpio *palmas_gpio;
 	int ret;
-	const struct of_device_id *match;
 	const struct palmas_device_data *dev_data;
 
-	match = of_match_device(of_palmas_gpio_match, &pdev->dev);
-	if (!match)
-		return -ENODEV;
-	dev_data = match->data;
+	dev_data = of_device_get_match_data(&pdev->dev);
 	if (!dev_data)
 		dev_data = &palmas_dev_data;
 
@@ -185,9 +169,7 @@ static int palmas_gpio_probe(struct platform_device *pdev)
 	palmas_gpio->gpio_chip.set	= palmas_gpio_set;
 	palmas_gpio->gpio_chip.get	= palmas_gpio_get;
 	palmas_gpio->gpio_chip.parent = &pdev->dev;
-#ifdef CONFIG_OF_GPIO
-	palmas_gpio->gpio_chip.of_node = pdev->dev.of_node;
-#endif
+
 	palmas_pdata = dev_get_platdata(palmas->dev);
 	if (palmas_pdata && palmas_pdata->gpio_base)
 		palmas_gpio->gpio_chip.base = palmas_pdata->gpio_base;
@@ -201,7 +183,6 @@ static int palmas_gpio_probe(struct platform_device *pdev)
 		return ret;
 	}
 
-	platform_set_drvdata(pdev, palmas_gpio);
 	return ret;
 }
 

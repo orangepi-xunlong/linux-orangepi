@@ -1,15 +1,21 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Copyright (C) STMicroelectronics SA 2014
  * Authors: Benjamin Gaignard <benjamin.gaignard@st.com>
  *          Fabien Dessenne <fabien.dessenne@st.com>
  *          for STMicroelectronics.
- * License terms:  GNU General Public License (GPL), version 2
  */
+
+#include <linux/dma-mapping.h>
+#include <linux/of.h>
 #include <linux/seq_file.h>
 
 #include <drm/drm_atomic.h>
-#include <drm/drm_fb_cma_helper.h>
-#include <drm/drm_gem_cma_helper.h>
+#include <drm/drm_device.h>
+#include <drm/drm_fb_dma_helper.h>
+#include <drm/drm_fourcc.h>
+#include <drm/drm_framebuffer.h>
+#include <drm/drm_gem_dma_helper.h>
 
 #include "sti_compositor.h"
 #include "sti_gdp.h"
@@ -99,7 +105,7 @@ struct sti_gdp_node_list {
 	dma_addr_t btm_field_paddr;
 };
 
-/**
+/*
  * STI GDP structure
  *
  * @sti_plane:          sti_plane structure
@@ -149,7 +155,7 @@ static void gdp_dbg_ctl(struct seq_file *s, int val)
 	seq_puts(s, "\tColor:");
 	for (i = 0; i < ARRAY_SIZE(gdp_format_to_str); i++) {
 		if (gdp_format_to_str[i].format == (val & 0x1F)) {
-			seq_printf(s, gdp_format_to_str[i].name);
+			seq_puts(s, gdp_format_to_str[i].name);
 			break;
 		}
 	}
@@ -211,7 +217,11 @@ static int gdp_dbg_show(struct seq_file *s, void *data)
 	struct drm_info_node *node = s->private;
 	struct sti_gdp *gdp = (struct sti_gdp *)node->info_ent->data;
 	struct drm_plane *drm_plane = &gdp->plane.drm_plane;
-	struct drm_crtc *crtc = drm_plane->crtc;
+	struct drm_crtc *crtc;
+
+	drm_modeset_lock(&drm_plane->mutex, NULL);
+	crtc = drm_plane->state->crtc;
+	drm_modeset_unlock(&drm_plane->mutex);
 
 	seq_printf(s, "%s: (vaddr = 0x%p)",
 		   sti_plane_to_str(&gdp->plane), gdp->regs);
@@ -266,8 +276,7 @@ static void gdp_node_dump_node(struct seq_file *s, struct sti_gdp_node *node)
 	seq_printf(s, "\n\tKEY2 0x%08X", node->gam_gdp_key2);
 	seq_printf(s, "\n\tPPT  0x%08X", node->gam_gdp_ppt);
 	gdp_dbg_ppt(s, node->gam_gdp_ppt);
-	seq_printf(s, "\n\tCML  0x%08X", node->gam_gdp_cml);
-	seq_puts(s, "\n");
+	seq_printf(s, "\n\tCML  0x%08X\n", node->gam_gdp_cml);
 }
 
 static int gdp_node_dbg_show(struct seq_file *s, void *arg)
@@ -336,9 +345,10 @@ static int gdp_debugfs_init(struct sti_gdp *gdp, struct drm_minor *minor)
 	for (i = 0; i < nb_files; i++)
 		gdp_debugfs_files[i].data = gdp;
 
-	return drm_debugfs_create_files(gdp_debugfs_files,
-					nb_files,
-					minor->debugfs_root, minor);
+	drm_debugfs_create_files(gdp_debugfs_files,
+				 nb_files,
+				 minor->debugfs_root, minor);
+	return 0;
 }
 
 static int sti_gdp_fourcc2format(int fourcc)
@@ -398,7 +408,7 @@ static struct sti_gdp_node_list *sti_gdp_get_free_nodes(struct sti_gdp *gdp)
 		    (hw_nvn != gdp->node_list[i].top_field_paddr))
 			return &gdp->node_list[i];
 
-	/* in hazardious cases restart with the first node */
+	/* in hazardous cases restart with the first node */
 	DRM_ERROR("inconsistent NVN for %s: 0x%08X\n",
 			sti_plane_to_str(&gdp->plane), hw_nvn);
 
@@ -514,7 +524,7 @@ static void sti_gdp_init(struct sti_gdp *gdp)
 	/* Allocate all the nodes within a single memory page */
 	size = sizeof(struct sti_gdp_node) *
 	    GDP_NODE_PER_FIELD * GDP_NODE_NB_BANK;
-	base = dma_alloc_wc(gdp->dev, size, &dma_addr, GFP_KERNEL | GFP_DMA);
+	base = dma_alloc_wc(gdp->dev, size, &dma_addr, GFP_KERNEL);
 
 	if (!base) {
 		DRM_ERROR("Failed to allocate memory for GDP node\n");
@@ -607,13 +617,14 @@ static int sti_gdp_get_dst(struct device *dev, int dst, int src)
 }
 
 static int sti_gdp_atomic_check(struct drm_plane *drm_plane,
-				struct drm_plane_state *state)
+				struct drm_atomic_state *state)
 {
+	struct drm_plane_state *new_plane_state = drm_atomic_get_new_plane_state(state,
+										 drm_plane);
 	struct sti_plane *plane = to_sti_plane(drm_plane);
 	struct sti_gdp *gdp = to_sti_gdp(plane);
-	struct drm_crtc *crtc = state->crtc;
-	struct sti_compositor *compo = dev_get_drvdata(gdp->dev);
-	struct drm_framebuffer *fb =  state->fb;
+	struct drm_crtc *crtc = new_plane_state->crtc;
+	struct drm_framebuffer *fb =  new_plane_state->fb;
 	struct drm_crtc_state *crtc_state;
 	struct sti_mixer *mixer;
 	struct drm_display_mode *mode;
@@ -626,68 +637,55 @@ static int sti_gdp_atomic_check(struct drm_plane *drm_plane,
 		return 0;
 
 	mixer = to_sti_mixer(crtc);
-	crtc_state = drm_atomic_get_crtc_state(state->state, crtc);
+	crtc_state = drm_atomic_get_crtc_state(state, crtc);
 	mode = &crtc_state->mode;
-	dst_x = state->crtc_x;
-	dst_y = state->crtc_y;
-	dst_w = clamp_val(state->crtc_w, 0, mode->hdisplay - dst_x);
-	dst_h = clamp_val(state->crtc_h, 0, mode->vdisplay - dst_y);
+	dst_x = new_plane_state->crtc_x;
+	dst_y = new_plane_state->crtc_y;
+	dst_w = clamp_val(new_plane_state->crtc_w, 0, mode->hdisplay - dst_x);
+	dst_h = clamp_val(new_plane_state->crtc_h, 0, mode->vdisplay - dst_y);
 	/* src_x are in 16.16 format */
-	src_x = state->src_x >> 16;
-	src_y = state->src_y >> 16;
-	src_w = clamp_val(state->src_w >> 16, 0, GAM_GDP_SIZE_MAX_WIDTH);
-	src_h = clamp_val(state->src_h >> 16, 0, GAM_GDP_SIZE_MAX_HEIGHT);
+	src_x = new_plane_state->src_x >> 16;
+	src_y = new_plane_state->src_y >> 16;
+	src_w = clamp_val(new_plane_state->src_w >> 16, 0,
+			  GAM_GDP_SIZE_MAX_WIDTH);
+	src_h = clamp_val(new_plane_state->src_h >> 16, 0,
+			  GAM_GDP_SIZE_MAX_HEIGHT);
 
-	format = sti_gdp_fourcc2format(fb->pixel_format);
+	format = sti_gdp_fourcc2format(fb->format->format);
 	if (format == -1) {
 		DRM_ERROR("Format not supported by GDP %.4s\n",
-			  (char *)&fb->pixel_format);
+			  (char *)&fb->format->format);
 		return -EINVAL;
 	}
 
-	if (!drm_fb_cma_get_gem_obj(fb, 0)) {
-		DRM_ERROR("Can't get CMA GEM object for fb\n");
+	if (!drm_fb_dma_get_gem_obj(fb, 0)) {
+		DRM_ERROR("Can't get DMA GEM object for fb\n");
 		return -EINVAL;
 	}
 
-	if (!gdp->vtg) {
-		/* Register gdp callback */
-		gdp->vtg = compo->vtg[mixer->id];
-		if (sti_vtg_register_client(gdp->vtg,
-					    &gdp->vtg_field_nb, crtc)) {
-			DRM_ERROR("Cannot register VTG notifier\n");
+	/* Set gdp clock */
+	if (mode->clock && gdp->clk_pix) {
+		struct clk *clkp;
+		int rate = mode->clock * 1000;
+		int res;
+
+		/*
+		 * According to the mixer used, the gdp pixel clock
+		 * should have a different parent clock.
+		 */
+		if (mixer->id == STI_MIXER_MAIN)
+			clkp = gdp->clk_main_parent;
+		else
+			clkp = gdp->clk_aux_parent;
+
+		if (clkp)
+			clk_set_parent(gdp->clk_pix, clkp);
+
+		res = clk_set_rate(gdp->clk_pix, rate);
+		if (res < 0) {
+			DRM_ERROR("Cannot set rate (%dHz) for gdp\n",
+				  rate);
 			return -EINVAL;
-		}
-
-		/* Set and enable gdp clock */
-		if (gdp->clk_pix) {
-			struct clk *clkp;
-			int rate = mode->clock * 1000;
-			int res;
-
-			/*
-			 * According to the mixer used, the gdp pixel clock
-			 * should have a different parent clock.
-			 */
-			if (mixer->id == STI_MIXER_MAIN)
-				clkp = gdp->clk_main_parent;
-			else
-				clkp = gdp->clk_aux_parent;
-
-			if (clkp)
-				clk_set_parent(gdp->clk_pix, clkp);
-
-			res = clk_set_rate(gdp->clk_pix, rate);
-			if (res < 0) {
-				DRM_ERROR("Cannot set rate (%dHz) for gdp\n",
-					  rate);
-				return -EINVAL;
-			}
-
-			if (clk_prepare_enable(gdp->clk_pix)) {
-				DRM_ERROR("Failed to prepare/enable gdp\n");
-				return -EINVAL;
-			}
 		}
 	}
 
@@ -703,17 +701,20 @@ static int sti_gdp_atomic_check(struct drm_plane *drm_plane,
 }
 
 static void sti_gdp_atomic_update(struct drm_plane *drm_plane,
-				  struct drm_plane_state *oldstate)
+				  struct drm_atomic_state *state)
 {
-	struct drm_plane_state *state = drm_plane->state;
+	struct drm_plane_state *oldstate = drm_atomic_get_old_plane_state(state,
+									  drm_plane);
+	struct drm_plane_state *newstate = drm_atomic_get_new_plane_state(state,
+									  drm_plane);
 	struct sti_plane *plane = to_sti_plane(drm_plane);
 	struct sti_gdp *gdp = to_sti_gdp(plane);
-	struct drm_crtc *crtc = state->crtc;
-	struct drm_framebuffer *fb =  state->fb;
+	struct drm_crtc *crtc = newstate->crtc;
+	struct drm_framebuffer *fb =  newstate->fb;
 	struct drm_display_mode *mode;
 	int dst_x, dst_y, dst_w, dst_h;
 	int src_x, src_y, src_w, src_h;
-	struct drm_gem_cma_object *cma_obj;
+	struct drm_gem_dma_object *dma_obj;
 	struct sti_gdp_node_list *list;
 	struct sti_gdp_node_list *curr_list;
 	struct sti_gdp_node *top_field, *btm_field;
@@ -726,16 +727,41 @@ static void sti_gdp_atomic_update(struct drm_plane *drm_plane,
 	if (!crtc || !fb)
 		return;
 
+	if ((oldstate->fb == newstate->fb) &&
+	    (oldstate->crtc_x == newstate->crtc_x) &&
+	    (oldstate->crtc_y == newstate->crtc_y) &&
+	    (oldstate->crtc_w == newstate->crtc_w) &&
+	    (oldstate->crtc_h == newstate->crtc_h) &&
+	    (oldstate->src_x == newstate->src_x) &&
+	    (oldstate->src_y == newstate->src_y) &&
+	    (oldstate->src_w == newstate->src_w) &&
+	    (oldstate->src_h == newstate->src_h)) {
+		/* No change since last update, do not post cmd */
+		DRM_DEBUG_DRIVER("No change, not posting cmd\n");
+		plane->status = STI_PLANE_UPDATED;
+		return;
+	}
+
+	if (!gdp->vtg) {
+		struct sti_compositor *compo = dev_get_drvdata(gdp->dev);
+		struct sti_mixer *mixer = to_sti_mixer(crtc);
+
+		/* Register gdp callback */
+		gdp->vtg = compo->vtg[mixer->id];
+		sti_vtg_register_client(gdp->vtg, &gdp->vtg_field_nb, crtc);
+		clk_prepare_enable(gdp->clk_pix);
+	}
+
 	mode = &crtc->mode;
-	dst_x = state->crtc_x;
-	dst_y = state->crtc_y;
-	dst_w = clamp_val(state->crtc_w, 0, mode->hdisplay - dst_x);
-	dst_h = clamp_val(state->crtc_h, 0, mode->vdisplay - dst_y);
+	dst_x = newstate->crtc_x;
+	dst_y = newstate->crtc_y;
+	dst_w = clamp_val(newstate->crtc_w, 0, mode->hdisplay - dst_x);
+	dst_h = clamp_val(newstate->crtc_h, 0, mode->vdisplay - dst_y);
 	/* src_x are in 16.16 format */
-	src_x = state->src_x >> 16;
-	src_y = state->src_y >> 16;
-	src_w = clamp_val(state->src_w >> 16, 0, GAM_GDP_SIZE_MAX_WIDTH);
-	src_h = clamp_val(state->src_h >> 16, 0, GAM_GDP_SIZE_MAX_HEIGHT);
+	src_x = newstate->src_x >> 16;
+	src_y = newstate->src_y >> 16;
+	src_w = clamp_val(newstate->src_w >> 16, 0, GAM_GDP_SIZE_MAX_WIDTH);
+	src_h = clamp_val(newstate->src_h >> 16, 0, GAM_GDP_SIZE_MAX_HEIGHT);
 
 	list = sti_gdp_get_free_nodes(gdp);
 	top_field = list->top_field;
@@ -747,20 +773,20 @@ static void sti_gdp_atomic_update(struct drm_plane *drm_plane,
 	/* build the top field */
 	top_field->gam_gdp_agc = GAM_GDP_AGC_FULL_RANGE;
 	top_field->gam_gdp_ctl = WAIT_NEXT_VSYNC;
-	format = sti_gdp_fourcc2format(fb->pixel_format);
+	format = sti_gdp_fourcc2format(fb->format->format);
 	top_field->gam_gdp_ctl |= format;
 	top_field->gam_gdp_ctl |= sti_gdp_get_alpharange(format);
 	top_field->gam_gdp_ppt &= ~GAM_GDP_PPT_IGNORE;
 
-	cma_obj = drm_fb_cma_get_gem_obj(fb, 0);
+	dma_obj = drm_fb_dma_get_gem_obj(fb, 0);
 
 	DRM_DEBUG_DRIVER("drm FB:%d format:%.4s phys@:0x%lx\n", fb->base.id,
-			 (char *)&fb->pixel_format,
-			 (unsigned long)cma_obj->paddr);
+			 (char *)&fb->format->format,
+			 (unsigned long) dma_obj->dma_addr);
 
 	/* pixel memory location */
-	bpp = drm_format_plane_cpp(fb->pixel_format, 0);
-	top_field->gam_gdp_pml = (u32)cma_obj->paddr + fb->offsets[0];
+	bpp = fb->format->cpp[0];
+	top_field->gam_gdp_pml = (u32) dma_obj->dma_addr + fb->offsets[0];
 	top_field->gam_gdp_pml += src_x * bpp;
 	top_field->gam_gdp_pml += src_y * fb->pitches[0];
 
@@ -805,7 +831,7 @@ static void sti_gdp_atomic_update(struct drm_plane *drm_plane,
 	dev_dbg(gdp->dev, "Current NVN:0x%X\n",
 		readl(gdp->regs + GAM_GDP_NVN_OFFSET));
 	dev_dbg(gdp->dev, "Posted buff: %lx current buff: %x\n",
-		(unsigned long)cma_obj->paddr,
+		(unsigned long) dma_obj->dma_addr,
 		readl(gdp->regs + GAM_GDP_PML_OFFSET));
 
 	if (!curr_list) {
@@ -843,8 +869,10 @@ end:
 }
 
 static void sti_gdp_atomic_disable(struct drm_plane *drm_plane,
-				   struct drm_plane_state *oldstate)
+				   struct drm_atomic_state *state)
 {
+	struct drm_plane_state *oldstate = drm_atomic_get_old_plane_state(state,
+									  drm_plane);
 	struct sti_plane *plane = to_sti_plane(drm_plane);
 
 	if (!oldstate->crtc) {
@@ -867,14 +895,6 @@ static const struct drm_plane_helper_funcs sti_gdp_helpers_funcs = {
 	.atomic_disable = sti_gdp_atomic_disable,
 };
 
-static void sti_gdp_destroy(struct drm_plane *drm_plane)
-{
-	DRM_DEBUG_DRIVER("\n");
-
-	drm_plane_helper_disable(drm_plane);
-	drm_plane_cleanup(drm_plane);
-}
-
 static int sti_gdp_late_register(struct drm_plane *drm_plane)
 {
 	struct sti_plane *plane = to_sti_plane(drm_plane);
@@ -886,9 +906,8 @@ static int sti_gdp_late_register(struct drm_plane *drm_plane)
 static const struct drm_plane_funcs sti_gdp_plane_helpers_funcs = {
 	.update_plane = drm_atomic_helper_update_plane,
 	.disable_plane = drm_atomic_helper_disable_plane,
-	.destroy = sti_gdp_destroy,
-	.set_property = drm_atomic_helper_plane_set_property,
-	.reset = sti_plane_reset,
+	.destroy = drm_plane_cleanup,
+	.reset = drm_atomic_helper_plane_reset,
 	.atomic_duplicate_state = drm_atomic_helper_plane_duplicate_state,
 	.atomic_destroy_state = drm_atomic_helper_plane_destroy_state,
 	.late_register = sti_gdp_late_register,
@@ -923,7 +942,7 @@ struct drm_plane *sti_gdp_create(struct drm_device *drm_dev,
 				       &sti_gdp_plane_helpers_funcs,
 				       gdp_supported_formats,
 				       ARRAY_SIZE(gdp_supported_formats),
-				       type, NULL);
+				       NULL, type, NULL);
 	if (res) {
 		DRM_ERROR("Failed to initialize universal plane\n");
 		goto err;

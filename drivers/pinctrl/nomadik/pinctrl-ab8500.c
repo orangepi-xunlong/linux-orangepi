@@ -1,17 +1,15 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) ST-Ericsson SA 2012
  *
  * Author: Patrice Chotard <patrice.chotard@stericsson.com> for ST-Ericsson.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/kernel.h>
-#include <linux/gpio.h>
 #include <linux/pinctrl/pinctrl.h>
+
 #include <linux/mfd/abx500/ab8500.h>
+
 #include "pinctrl-abx500.h"
 
 /* All the pins that can be used for GPIO and some other functions */

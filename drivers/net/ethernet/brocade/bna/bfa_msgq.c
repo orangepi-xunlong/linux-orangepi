@@ -1,14 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Linux network driver for QLogic BR-series Converged Network Adapter.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License (GPL) Version 2 as
- * published by the Free Software Foundation
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
  */
 /*
  * Copyright (c) 2005-2014 Brocade Communications Systems, Inc.
@@ -210,7 +202,6 @@ static void
 __cmd_copy(struct bfa_msgq_cmdq *cmdq, struct bfa_msgq_cmd_entry *cmd)
 {
 	size_t len = cmd->msg_size;
-	int num_entries = 0;
 	size_t to_copy;
 	u8 *src, *dst;
 
@@ -227,7 +218,6 @@ __cmd_copy(struct bfa_msgq_cmdq *cmdq, struct bfa_msgq_cmd_entry *cmd)
 		BFA_MSGQ_INDX_ADD(cmdq->producer_index, 1, cmdq->depth);
 		dst = (u8 *)cmdq->addr.kva;
 		dst += (cmdq->producer_index * BFI_MSGQ_CMD_ENTRY_SIZE);
-		num_entries++;
 	}
 
 }

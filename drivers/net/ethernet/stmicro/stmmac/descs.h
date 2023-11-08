@@ -1,22 +1,8 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*******************************************************************************
   Header File to describe the DMA descriptors and related definitions.
   This is for DWMAC100 and 1000 cores.
 
-  This program is free software; you can redistribute it and/or modify it
-  under the terms and conditions of the GNU General Public License,
-  version 2, as published by the Free Software Foundation.
-
-  This program is distributed in the hope it will be useful, but WITHOUT
-  ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
-  FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
-  more details.
-
-  You should have received a copy of the GNU General Public License along with
-  this program; if not, write to the Free Software Foundation, Inc.,
-  51 Franklin St - Fifth Floor, Boston, MA 02110-1301 USA.
-
-  The full GNU General Public License is included in this distribution in
-  the file called "COPYING".
 
   Author: Giuseppe Cavallaro <peppe.cavallaro@st.com>
 *******************************************************************************/
@@ -87,7 +73,7 @@
 #define	TDES0_ERROR_SUMMARY		BIT(15)
 #define	TDES0_IP_HEADER_ERROR		BIT(16)
 #define	TDES0_TIME_STAMP_STATUS		BIT(17)
-#define	TDES0_OWN			BIT(31)
+#define	TDES0_OWN			((u32)BIT(31))	/* silence sparse */
 /* TDES1 */
 #define	TDES1_BUFFER1_SIZE_MASK		GENMASK(10, 0)
 #define	TDES1_BUFFER2_SIZE_MASK		GENMASK(21, 11)
@@ -130,14 +116,14 @@
 #define	ETDES0_FIRST_SEGMENT		BIT(28)
 #define	ETDES0_LAST_SEGMENT		BIT(29)
 #define	ETDES0_INTERRUPT		BIT(30)
-#define	ETDES0_OWN			BIT(31)
+#define	ETDES0_OWN			((u32)BIT(31))	/* silence sparse */
 /* TDES1 */
 #define	ETDES1_BUFFER1_SIZE_MASK	GENMASK(12, 0)
 #define	ETDES1_BUFFER2_SIZE_MASK	GENMASK(28, 16)
 #define	ETDES1_BUFFER2_SIZE_SHIFT	16
 
 /* Extended Receive descriptor definitions */
-#define	ERDES4_IP_PAYLOAD_TYPE_MASK	GENMASK(2, 6)
+#define	ERDES4_IP_PAYLOAD_TYPE_MASK	GENMASK(6, 2)
 #define	ERDES4_IP_HDR_ERR		BIT(3)
 #define	ERDES4_IP_PAYLOAD_ERR		BIT(4)
 #define	ERDES4_IP_CSUM_BYPASSED		BIT(5)
@@ -170,19 +156,28 @@
 
 /* Basic descriptor structure for normal and alternate descriptors */
 struct dma_desc {
-	unsigned int des0;
-	unsigned int des1;
-	unsigned int des2;
-	unsigned int des3;
+	__le32 des0;
+	__le32 des1;
+	__le32 des2;
+	__le32 des3;
 };
 
 /* Extended descriptor structure (e.g. >= databook 3.50a) */
 struct dma_extended_desc {
 	struct dma_desc basic;	/* Basic descriptors */
-	unsigned int des4;	/* Extended Status */
-	unsigned int des5;	/* Reserved */
-	unsigned int des6;	/* Tx/Rx Timestamp Low */
-	unsigned int des7;	/* Tx/Rx Timestamp High */
+	__le32 des4;	/* Extended Status */
+	__le32 des5;	/* Reserved */
+	__le32 des6;	/* Tx/Rx Timestamp Low */
+	__le32 des7;	/* Tx/Rx Timestamp High */
+};
+
+/* Enhanced descriptor for TBS */
+struct dma_edesc {
+	__le32 des4;
+	__le32 des5;
+	__le32 des6;
+	__le32 des7;
+	struct dma_desc basic;
 };
 
 /* Transmit checksum insertion control */

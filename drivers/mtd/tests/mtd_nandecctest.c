@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 #define pr_fmt(fmt)	KBUILD_MODNAME ": " fmt
 
 #include <linux/kernel.h>
@@ -7,7 +8,7 @@
 #include <linux/string.h>
 #include <linux/bitops.h>
 #include <linux/slab.h>
-#include <linux/mtd/nand_ecc.h>
+#include <linux/mtd/nand-ecc-sw-hamming.h>
 
 #include "mtd_test.h"
 
@@ -21,7 +22,7 @@
  * or detected.
  */
 
-#if IS_ENABLED(CONFIG_MTD_NAND)
+#if IS_ENABLED(CONFIG_MTD_RAW_NAND)
 
 struct nand_ecc_test {
 	const char *name;
@@ -46,7 +47,7 @@ struct nand_ecc_test {
 static void single_bit_error_data(void *error_data, void *correct_data,
 				size_t size)
 {
-	unsigned int offset = prandom_u32() % (size * BITS_PER_BYTE);
+	unsigned int offset = get_random_u32_below(size * BITS_PER_BYTE);
 
 	memcpy(error_data, correct_data, size);
 	__change_bit_le(offset, error_data);
@@ -57,9 +58,9 @@ static void double_bit_error_data(void *error_data, void *correct_data,
 {
 	unsigned int offset[2];
 
-	offset[0] = prandom_u32() % (size * BITS_PER_BYTE);
+	offset[0] = get_random_u32_below(size * BITS_PER_BYTE);
 	do {
-		offset[1] = prandom_u32() % (size * BITS_PER_BYTE);
+		offset[1] = get_random_u32_below(size * BITS_PER_BYTE);
 	} while (offset[0] == offset[1]);
 
 	memcpy(error_data, correct_data, size);
@@ -70,7 +71,7 @@ static void double_bit_error_data(void *error_data, void *correct_data,
 
 static unsigned int random_ecc_bit(size_t size)
 {
-	unsigned int offset = prandom_u32() % (3 * BITS_PER_BYTE);
+	unsigned int offset = get_random_u32_below(3 * BITS_PER_BYTE);
 
 	if (size == 256) {
 		/*
@@ -78,7 +79,7 @@ static unsigned int random_ecc_bit(size_t size)
 		 * and 17th bit) in ECC code for 256 byte data block
 		 */
 		while (offset == 16 || offset == 17)
-			offset = prandom_u32() % (3 * BITS_PER_BYTE);
+			offset = get_random_u32_below(3 * BITS_PER_BYTE);
 	}
 
 	return offset;
@@ -118,11 +119,13 @@ static void no_bit_error(void *error_data, void *error_ecc,
 static int no_bit_error_verify(void *error_data, void *error_ecc,
 				void *correct_data, const size_t size)
 {
+	bool sm_order = IS_ENABLED(CONFIG_MTD_NAND_ECC_SW_HAMMING_SMC);
 	unsigned char calc_ecc[3];
 	int ret;
 
-	__nand_calculate_ecc(error_data, size, calc_ecc);
-	ret = __nand_correct_data(error_data, error_ecc, calc_ecc, size);
+	ecc_sw_hamming_calculate(error_data, size, calc_ecc, sm_order);
+	ret = ecc_sw_hamming_correct(error_data, error_ecc, calc_ecc, size,
+				     sm_order);
 	if (ret == 0 && !memcmp(correct_data, error_data, size))
 		return 0;
 
@@ -146,11 +149,13 @@ static void single_bit_error_in_ecc(void *error_data, void *error_ecc,
 static int single_bit_error_correct(void *error_data, void *error_ecc,
 				void *correct_data, const size_t size)
 {
+	bool sm_order = IS_ENABLED(CONFIG_MTD_NAND_ECC_SW_HAMMING_SMC);
 	unsigned char calc_ecc[3];
 	int ret;
 
-	__nand_calculate_ecc(error_data, size, calc_ecc);
-	ret = __nand_correct_data(error_data, error_ecc, calc_ecc, size);
+	ecc_sw_hamming_calculate(error_data, size, calc_ecc, sm_order);
+	ret = ecc_sw_hamming_correct(error_data, error_ecc, calc_ecc, size,
+				     sm_order);
 	if (ret == 1 && !memcmp(correct_data, error_data, size))
 		return 0;
 
@@ -181,11 +186,13 @@ static void double_bit_error_in_ecc(void *error_data, void *error_ecc,
 static int double_bit_error_detect(void *error_data, void *error_ecc,
 				void *correct_data, const size_t size)
 {
+	bool sm_order = IS_ENABLED(CONFIG_MTD_NAND_ECC_SW_HAMMING_SMC);
 	unsigned char calc_ecc[3];
 	int ret;
 
-	__nand_calculate_ecc(error_data, size, calc_ecc);
-	ret = __nand_correct_data(error_data, error_ecc, calc_ecc, size);
+	ecc_sw_hamming_calculate(error_data, size, calc_ecc, sm_order);
+	ret = ecc_sw_hamming_correct(error_data, error_ecc, calc_ecc, size,
+				     sm_order);
 
 	return (ret == -EBADMSG) ? 0 : -EINVAL;
 }
@@ -241,6 +248,7 @@ static void dump_data_ecc(void *error_data, void *error_ecc, void *correct_data,
 
 static int nand_ecc_test_run(const size_t size)
 {
+	bool sm_order = IS_ENABLED(CONFIG_MTD_NAND_ECC_SW_HAMMING_SMC);
 	int i;
 	int err = 0;
 	void *error_data;
@@ -258,9 +266,8 @@ static int nand_ecc_test_run(const size_t size)
 		goto error;
 	}
 
-	prandom_bytes(correct_data, size);
-	__nand_calculate_ecc(correct_data, size, correct_ecc);
-
+	get_random_bytes(correct_data, size);
+	ecc_sw_hamming_calculate(correct_data, size, correct_ecc, sm_order);
 	for (i = 0; i < ARRAY_SIZE(nand_ecc_test); i++) {
 		nand_ecc_test[i].prepare(error_data, error_ecc,
 				correct_data, correct_ecc, size);

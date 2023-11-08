@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 #include <linux/module.h>
 
 #include <net/sock.h>
@@ -17,6 +18,27 @@ static int sk_diag_dump_groups(struct sock *sk, struct sk_buff *nlskb)
 
 	return nla_put(nlskb, NETLINK_DIAG_GROUPS, NLGRPSZ(nlk->ngroups),
 		       nlk->groups);
+}
+
+static int sk_diag_put_flags(struct sock *sk, struct sk_buff *skb)
+{
+	struct netlink_sock *nlk = nlk_sk(sk);
+	u32 flags = 0;
+
+	if (nlk->cb_running)
+		flags |= NDIAG_FLAG_CB_RUNNING;
+	if (nlk_test_bit(RECV_PKTINFO, sk))
+		flags |= NDIAG_FLAG_PKTINFO;
+	if (nlk_test_bit(BROADCAST_SEND_ERROR, sk))
+		flags |= NDIAG_FLAG_BROADCAST_ERROR;
+	if (nlk_test_bit(RECV_NO_ENOBUFS, sk))
+		flags |= NDIAG_FLAG_NO_ENOBUFS;
+	if (nlk_test_bit(LISTEN_ALL_NSID, sk))
+		flags |= NDIAG_FLAG_LISTEN_ALL_NSID;
+	if (nlk_test_bit(CAP_ACK, sk))
+		flags |= NDIAG_FLAG_CAP_ACK;
+
+	return nla_put_u32(skb, NETLINK_DIAG_FLAGS, flags);
 }
 
 static int sk_diag_fill(struct sock *sk, struct sk_buff *skb,
@@ -52,6 +74,10 @@ static int sk_diag_fill(struct sock *sk, struct sk_buff *skb,
 	    sock_diag_put_meminfo(sk, skb, NETLINK_DIAG_MEMINFO))
 		goto out_nlmsg_trim;
 
+	if ((req->ndiag_show & NDIAG_SHOW_FLAGS) &&
+	    sk_diag_put_flags(sk, skb))
+		goto out_nlmsg_trim;
+
 	nlmsg_end(skb, nlh);
 	return 0;
 
@@ -68,6 +94,7 @@ static int __netlink_diag_dump(struct sk_buff *skb, struct netlink_callback *cb,
 	struct net *net = sock_net(skb->sk);
 	struct netlink_diag_req *req;
 	struct netlink_sock *nlsk;
+	unsigned long flags;
 	struct sock *sk;
 	int num = 2;
 	int ret = 0;
@@ -90,11 +117,7 @@ static int __netlink_diag_dump(struct sk_buff *skb, struct netlink_callback *cb,
 	if (!s_num)
 		rhashtable_walk_enter(&tbl->hash, hti);
 
-	ret = rhashtable_walk_start(hti);
-	if (ret == -EAGAIN)
-		ret = 0;
-	if (ret)
-		goto stop;
+	rhashtable_walk_start(hti);
 
 	while ((nlsk = rhashtable_walk_next(hti))) {
 		if (IS_ERR(nlsk)) {
@@ -121,8 +144,8 @@ static int __netlink_diag_dump(struct sk_buff *skb, struct netlink_callback *cb,
 		}
 	}
 
-stop:
 	rhashtable_walk_stop(hti);
+
 	if (ret)
 		goto done;
 
@@ -130,7 +153,7 @@ stop:
 	num++;
 
 mc_list:
-	read_lock(&nl_table_lock);
+	read_lock_irqsave(&nl_table_lock, flags);
 	sk_for_each_bound(sk, &tbl->mc_list) {
 		if (sk_hashed(sk))
 			continue;
@@ -145,13 +168,13 @@ mc_list:
 				 NETLINK_CB(cb->skb).portid,
 				 cb->nlh->nlmsg_seq,
 				 NLM_F_MULTI,
-				 sock_i_ino(sk)) < 0) {
+				 __sock_i_ino(sk)) < 0) {
 			ret = 1;
 			break;
 		}
 		num++;
 	}
-	read_unlock(&nl_table_lock);
+	read_unlock_irqrestore(&nl_table_lock, flags);
 
 done:
 	cb->args[0] = num;

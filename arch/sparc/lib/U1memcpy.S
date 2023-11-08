@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /* U1memcpy.S: UltraSPARC-I/II/IIi/IIe optimized memcpy.
  *
  * Copyright (C) 1997, 2004 David S. Miller (davem@redhat.com)
@@ -5,10 +6,10 @@
  */
 
 #ifdef __KERNEL__
+#include <linux/export.h>
 #include <linux/linkage.h>
 #include <asm/visasm.h>
 #include <asm/asi.h>
-#include <asm/export.h>
 #define GLOBAL_SPARE	g7
 #else
 #define GLOBAL_SPARE	g5

@@ -1,21 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * max1586.c  --  Voltage and current regulation for the Maxim 1586
  *
  * Copyright (C) 2008 Robert Jarzmik
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 #include <linux/module.h>
 #include <linux/err.h>
@@ -126,14 +113,14 @@ static int max1586_v6_set_voltage_sel(struct regulator_dev *rdev,
  * The Maxim 1586 controls V3 and V6 voltages, but offers no way of reading back
  * the set up value.
  */
-static struct regulator_ops max1586_v3_ops = {
+static const struct regulator_ops max1586_v3_ops = {
 	.get_voltage_sel = max1586_v3_get_voltage_sel,
 	.set_voltage_sel = max1586_v3_set_voltage_sel,
 	.list_voltage = regulator_list_voltage_linear,
 	.map_voltage = regulator_map_voltage_linear,
 };
 
-static struct regulator_ops max1586_v6_ops = {
+static const struct regulator_ops max1586_v6_ops = {
 	.get_voltage_sel = max1586_v6_get_voltage_sel,
 	.set_voltage_sel = max1586_v6_set_voltage_sel,
 	.list_voltage = regulator_list_voltage_table,
@@ -169,7 +156,7 @@ static int of_get_max1586_platform_data(struct device *dev,
 
 	if (of_property_read_u32(np, "v3-gain",
 				 &pdata->v3_gain) < 0) {
-		dev_err(dev, "%s has no 'v3-gain' property\n", np->full_name);
+		dev_err(dev, "%pOF has no 'v3-gain' property\n", np);
 		return -EINVAL;
 	}
 
@@ -194,8 +181,10 @@ static int of_get_max1586_platform_data(struct device *dev,
 	if (matched <= 0)
 		return matched;
 
-	pdata->subdevs = devm_kzalloc(dev, sizeof(struct max1586_subdev_data) *
-						matched, GFP_KERNEL);
+	pdata->subdevs = devm_kcalloc(dev,
+				      matched,
+				      sizeof(struct max1586_subdev_data),
+				      GFP_KERNEL);
 	if (!pdata->subdevs)
 		return -ENOMEM;
 
@@ -212,14 +201,13 @@ static int of_get_max1586_platform_data(struct device *dev,
 	return 0;
 }
 
-static const struct of_device_id max1586_of_match[] = {
+static const struct of_device_id __maybe_unused max1586_of_match[] = {
 	{ .compatible = "maxim,max1586", },
 	{},
 };
 MODULE_DEVICE_TABLE(of, max1586_of_match);
 
-static int max1586_pmic_probe(struct i2c_client *client,
-					const struct i2c_device_id *i2c_id)
+static int max1586_pmic_probe(struct i2c_client *client)
 {
 	struct max1586_platform_data *pdata, pdata_of;
 	struct regulator_config config = { };
@@ -304,6 +292,7 @@ static struct i2c_driver max1586_pmic_driver = {
 	.probe = max1586_pmic_probe,
 	.driver		= {
 		.name	= "max1586",
+		.probe_type = PROBE_PREFER_ASYNCHRONOUS,
 		.of_match_table = of_match_ptr(max1586_of_match),
 	},
 	.id_table	= max1586_id,

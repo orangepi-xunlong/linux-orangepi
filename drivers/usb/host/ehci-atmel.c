@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Driver for EHCI UHP on Atmel chips
  *
@@ -5,10 +6,6 @@
  *                     Nicolas Ferre <nicolas.ferre@atmel.com>
  *
  *  Based on various ehci-*.c drivers
- *
- * This file is subject to the terms and conditions of the GNU General Public
- * License.  See the file COPYING in the main directory of this archive for
- * more details.
  */
 
 #include <linux/clk.h>
@@ -21,12 +18,15 @@
 #include <linux/platform_device.h>
 #include <linux/usb.h>
 #include <linux/usb/hcd.h>
+#include <linux/usb/phy.h>
+#include <linux/usb/of.h>
 
 #include "ehci.h"
 
 #define DRIVER_DESC "EHCI Atmel driver"
 
-static const char hcd_name[] = "ehci-atmel";
+#define EHCI_INSNREG(index)			((index) * 4 + 0x90)
+#define EHCI_INSNREG08_HSIC_EN			BIT(2)
 
 /* interface and function clocks */
 #define hcd_to_atmel_ehci_priv(h) \
@@ -102,11 +102,8 @@ static int ehci_atmel_drv_probe(struct platform_device *pdev)
 	pr_debug("Initializing Atmel-SoC USB Host Controller\n");
 
 	irq = platform_get_irq(pdev, 0);
-	if (irq <= 0) {
-		dev_err(&pdev->dev,
-			"Found HC with no IRQ. Check %s setup!\n",
-			dev_name(&pdev->dev));
-		retval = -ENODEV;
+	if (irq < 0) {
+		retval = irq;
 		goto fail_create_hcd;
 	}
 
@@ -125,8 +122,7 @@ static int ehci_atmel_drv_probe(struct platform_device *pdev)
 	}
 	atmel_ehci = hcd_to_atmel_ehci_priv(hcd);
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	hcd->regs = devm_ioremap_resource(&pdev->dev, res);
+	hcd->regs = devm_platform_get_and_ioremap_resource(pdev, 0, &res);
 	if (IS_ERR(hcd->regs)) {
 		retval = PTR_ERR(hcd->regs);
 		goto fail_request_resource;
@@ -160,6 +156,9 @@ static int ehci_atmel_drv_probe(struct platform_device *pdev)
 		goto fail_add_hcd;
 	device_wakeup_enable(hcd->self.controller);
 
+	if (of_usb_get_phy_mode(pdev->dev.of_node) == USBPHY_INTERFACE_MODE_HSIC)
+		writel(EHCI_INSNREG08_HSIC_EN, hcd->regs + EHCI_INSNREG(8));
+
 	return retval;
 
 fail_add_hcd:
@@ -173,7 +172,7 @@ fail_create_hcd:
 	return retval;
 }
 
-static int ehci_atmel_drv_remove(struct platform_device *pdev)
+static void ehci_atmel_drv_remove(struct platform_device *pdev)
 {
 	struct usb_hcd *hcd = platform_get_drvdata(pdev);
 
@@ -181,8 +180,6 @@ static int ehci_atmel_drv_remove(struct platform_device *pdev)
 	usb_put_hcd(hcd);
 
 	atmel_stop_ehci(pdev);
-
-	return 0;
 }
 
 static int __maybe_unused ehci_atmel_drv_suspend(struct device *dev)
@@ -205,7 +202,8 @@ static int __maybe_unused ehci_atmel_drv_resume(struct device *dev)
 	struct atmel_ehci_priv *atmel_ehci = hcd_to_atmel_ehci_priv(hcd);
 
 	atmel_start_clock(atmel_ehci);
-	return ehci_resume(hcd, false);
+	ehci_resume(hcd, false);
+	return 0;
 }
 
 #ifdef CONFIG_OF
@@ -222,7 +220,7 @@ static SIMPLE_DEV_PM_OPS(ehci_atmel_pm_ops, ehci_atmel_drv_suspend,
 
 static struct platform_driver ehci_atmel_driver = {
 	.probe		= ehci_atmel_drv_probe,
-	.remove		= ehci_atmel_drv_remove,
+	.remove_new	= ehci_atmel_drv_remove,
 	.shutdown	= usb_hcd_platform_shutdown,
 	.driver		= {
 		.name	= "atmel-ehci",
@@ -236,7 +234,6 @@ static int __init ehci_atmel_init(void)
 	if (usb_disabled())
 		return -ENODEV;
 
-	pr_info("%s: " DRIVER_DESC "\n", hcd_name);
 	ehci_init_driver(&ehci_atmel_hc_driver, &ehci_atmel_drv_overrides);
 	return platform_driver_register(&ehci_atmel_driver);
 }

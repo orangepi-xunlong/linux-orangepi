@@ -1,5 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0
 #include <linux/kernel.h>
+#include <linux/types.h>
+
 #include <linux/pinctrl/pinctrl.h>
+
 #include "pinctrl-nomadik.h"
 
 /* All the pins that can be used for GPIO and some other functions */
@@ -379,13 +383,33 @@ static const unsigned msp0txrx_a_1_pins[] = { DB8500_PIN_AC4, DB8500_PIN_AC3 };
 static const unsigned msp0tfstck_a_1_pins[] = { DB8500_PIN_AF3, DB8500_PIN_AE3 };
 static const unsigned msp0rfsrck_a_1_pins[] = { DB8500_PIN_AD3, DB8500_PIN_AD4 };
 /* Basic pins of the MMC/SD card 0 interface */
-static const unsigned mc0_a_1_pins[] = { DB8500_PIN_AC2, DB8500_PIN_AC1,
-	DB8500_PIN_AB4, DB8500_PIN_AA3, DB8500_PIN_AA4, DB8500_PIN_AB2,
-	DB8500_PIN_Y4, DB8500_PIN_Y2, DB8500_PIN_AA2, DB8500_PIN_AA1 };
+static const unsigned mc0_a_1_pins[] = { DB8500_PIN_AC2, /* MC0_CMDDIR */
+					 DB8500_PIN_AC1, /* MC0_DAT0DIR */
+					 DB8500_PIN_AB4, /* MC0_DAT2DIR */
+					 DB8500_PIN_AA3, /* MC0_FBCLK */
+					 DB8500_PIN_AA4, /* MC0_CLK */
+					 DB8500_PIN_AB2, /* MC0_CMD */
+					 DB8500_PIN_Y4,  /* MC0_DAT0 */
+					 DB8500_PIN_Y2,  /* MC0_DAT1 */
+					 DB8500_PIN_AA2, /* MC0_DAT2 */
+					 DB8500_PIN_AA1  /* MC0_DAT3 */
+};
+/* MMC/SD card 0 interface without CMD/DAT0/DAT2 direction control */
+static const unsigned mc0_a_2_pins[] = { DB8500_PIN_AA3, /* MC0_FBCLK */
+					 DB8500_PIN_AA4, /* MC0_CLK */
+					 DB8500_PIN_AB2, /* MC0_CMD */
+					 DB8500_PIN_Y4,  /* MC0_DAT0 */
+					 DB8500_PIN_Y2,  /* MC0_DAT1 */
+					 DB8500_PIN_AA2, /* MC0_DAT2 */
+					 DB8500_PIN_AA1  /* MC0_DAT3 */
+};
 /* Often only 4 bits are used, then these are not needed (only used for MMC) */
-static const unsigned mc0_dat47_a_1_pins[] = { DB8500_PIN_W2, DB8500_PIN_W3,
-	DB8500_PIN_V3, DB8500_PIN_V2};
-static const unsigned mc0dat31dir_a_1_pins[] = { DB8500_PIN_AB3 };
+static const unsigned mc0_dat47_a_1_pins[] = { DB8500_PIN_W2, /* MC0_DAT4 */
+					       DB8500_PIN_W3, /* MC0_DAT5 */
+					       DB8500_PIN_V3, /* MC0_DAT6 */
+					       DB8500_PIN_V2  /* MC0_DAT7 */
+};
+static const unsigned mc0dat31dir_a_1_pins[] = { DB8500_PIN_AB3 }; /* MC0_DAT31DIR */
 /* MSP1 can only be on these pins, but TXD and RXD can be flipped */
 static const unsigned msp1txrx_a_1_pins[] = { DB8500_PIN_AF2, DB8500_PIN_AG2 };
 static const unsigned msp1_a_1_pins[] = { DB8500_PIN_AE1, DB8500_PIN_AE2 };
@@ -400,6 +424,8 @@ static const unsigned lcd_d0_d7_a_1_pins[] = {
 /* D8 thru D11 often used as TVOUT lines */
 static const unsigned lcd_d8_d11_a_1_pins[] = { DB8500_PIN_F4,
 	DB8500_PIN_E3, DB8500_PIN_E4, DB8500_PIN_D2 };
+static const unsigned lcd_d12_d15_a_1_pins[] = {
+	DB8500_PIN_C1, DB8500_PIN_D3, DB8500_PIN_C2, DB8500_PIN_D5 };
 static const unsigned lcd_d12_d23_a_1_pins[] = {
 	DB8500_PIN_C1, DB8500_PIN_D3, DB8500_PIN_C2, DB8500_PIN_D5,
 	DB8500_PIN_C6, DB8500_PIN_B3, DB8500_PIN_C4, DB8500_PIN_E6,
@@ -417,6 +443,10 @@ static const unsigned mc2_a_1_pins[] = { DB8500_PIN_A5, DB8500_PIN_B4,
 	DB8500_PIN_C8, DB8500_PIN_A12, DB8500_PIN_C10, DB8500_PIN_B10,
 	DB8500_PIN_B9, DB8500_PIN_A9, DB8500_PIN_C7, DB8500_PIN_A7,
 	DB8500_PIN_C5 };
+/* MC2 without the feedback clock */
+static const unsigned mc2_a_2_pins[] = { DB8500_PIN_A5, DB8500_PIN_B4,
+	DB8500_PIN_A12, DB8500_PIN_C10, DB8500_PIN_B10, DB8500_PIN_B9,
+	DB8500_PIN_A9, DB8500_PIN_C7, DB8500_PIN_A7, DB8500_PIN_C5 };
 static const unsigned ssp1_a_1_pins[] = { DB8500_PIN_C9, DB8500_PIN_B11,
 					  DB8500_PIN_C12, DB8500_PIN_C11 };
 static const unsigned ssp0_a_1_pins[] = { DB8500_PIN_D12, DB8500_PIN_B13,
@@ -512,6 +542,9 @@ static const unsigned lcda_b_1_pins[] = { DB8500_PIN_D22,
 static const unsigned lcd_b_1_pins[] = { DB8500_PIN_D17, DB8500_PIN_D16,
 	DB8500_PIN_B17, DB8500_PIN_C16, DB8500_PIN_C19, DB8500_PIN_C17,
 	DB8500_PIN_A18, DB8500_PIN_C18, DB8500_PIN_B19, DB8500_PIN_B20,
+	DB8500_PIN_D21, DB8500_PIN_D20, DB8500_PIN_C20, DB8500_PIN_B21,
+	DB8500_PIN_C21, DB8500_PIN_A22, DB8500_PIN_B24, DB8500_PIN_C22 };
+static const unsigned lcd_d16_d23_b_1_pins[] = {
 	DB8500_PIN_D21, DB8500_PIN_D20, DB8500_PIN_C20, DB8500_PIN_B21,
 	DB8500_PIN_C21, DB8500_PIN_A22, DB8500_PIN_B24, DB8500_PIN_C22 };
 static const unsigned ddrtrig_b_1_pins[] = { DB8500_PIN_AJ27 };
@@ -644,156 +677,160 @@ static const unsigned hwobs_oc4_1_pins[] = { DB8500_PIN_D17, DB8500_PIN_D16,
 	DB8500_PIN_D21, DB8500_PIN_D20,	DB8500_PIN_C20, DB8500_PIN_B21,
 	DB8500_PIN_C21, DB8500_PIN_A22, DB8500_PIN_B24, DB8500_PIN_C22 };
 
-#define DB8500_PIN_GROUP(a, b) { .name = #a, .pins = a##_pins,		\
-			.npins = ARRAY_SIZE(a##_pins), .altsetting = b }
-
 static const struct nmk_pingroup nmk_db8500_groups[] = {
 	/* Altfunction A column */
-	DB8500_PIN_GROUP(u0_a_1, NMK_GPIO_ALT_A),
-	DB8500_PIN_GROUP(u1rxtx_a_1, NMK_GPIO_ALT_A),
-	DB8500_PIN_GROUP(u1ctsrts_a_1, NMK_GPIO_ALT_A),
-	DB8500_PIN_GROUP(ipi2c_a_1, NMK_GPIO_ALT_A),
-	DB8500_PIN_GROUP(ipi2c_a_2, NMK_GPIO_ALT_A),
-	DB8500_PIN_GROUP(msp0txrx_a_1, NMK_GPIO_ALT_A),
-	DB8500_PIN_GROUP(msp0tfstck_a_1, NMK_GPIO_ALT_A),
-	DB8500_PIN_GROUP(msp0rfsrck_a_1, NMK_GPIO_ALT_A),
-	DB8500_PIN_GROUP(mc0_a_1, NMK_GPIO_ALT_A),
-	DB8500_PIN_GROUP(mc0_dat47_a_1, NMK_GPIO_ALT_A),
-	DB8500_PIN_GROUP(mc0dat31dir_a_1, NMK_GPIO_ALT_A),
-	DB8500_PIN_GROUP(msp1txrx_a_1, NMK_GPIO_ALT_A),
-	DB8500_PIN_GROUP(msp1_a_1, NMK_GPIO_ALT_A),
-	DB8500_PIN_GROUP(lcdb_a_1, NMK_GPIO_ALT_A),
-	DB8500_PIN_GROUP(lcdvsi0_a_1, NMK_GPIO_ALT_A),
-	DB8500_PIN_GROUP(lcdvsi1_a_1, NMK_GPIO_ALT_A),
-	DB8500_PIN_GROUP(lcd_d0_d7_a_1, NMK_GPIO_ALT_A),
-	DB8500_PIN_GROUP(lcd_d8_d11_a_1, NMK_GPIO_ALT_A),
-	DB8500_PIN_GROUP(lcd_d12_d23_a_1, NMK_GPIO_ALT_A),
-	DB8500_PIN_GROUP(kp_a_1, NMK_GPIO_ALT_A),
-	DB8500_PIN_GROUP(mc2_a_1, NMK_GPIO_ALT_A),
-	DB8500_PIN_GROUP(ssp1_a_1, NMK_GPIO_ALT_A),
-	DB8500_PIN_GROUP(ssp0_a_1, NMK_GPIO_ALT_A),
-	DB8500_PIN_GROUP(i2c0_a_1, NMK_GPIO_ALT_A),
-	DB8500_PIN_GROUP(ipgpio0_a_1, NMK_GPIO_ALT_A),
-	DB8500_PIN_GROUP(ipgpio1_a_1, NMK_GPIO_ALT_A),
-	DB8500_PIN_GROUP(kp_a_2, NMK_GPIO_ALT_A),
-	DB8500_PIN_GROUP(msp2sck_a_1, NMK_GPIO_ALT_A),
-	DB8500_PIN_GROUP(msp2_a_1, NMK_GPIO_ALT_A),
-	DB8500_PIN_GROUP(mc4_a_1, NMK_GPIO_ALT_A),
-	DB8500_PIN_GROUP(mc1_a_1, NMK_GPIO_ALT_A),
-	DB8500_PIN_GROUP(mc1_a_2, NMK_GPIO_ALT_A),
-	DB8500_PIN_GROUP(hsir_a_1, NMK_GPIO_ALT_A),
-	DB8500_PIN_GROUP(hsit_a_1, NMK_GPIO_ALT_A),
-	DB8500_PIN_GROUP(hsit_a_2, NMK_GPIO_ALT_A),
-	DB8500_PIN_GROUP(clkout1_a_1, NMK_GPIO_ALT_A),
-	DB8500_PIN_GROUP(clkout1_a_2, NMK_GPIO_ALT_A),
-	DB8500_PIN_GROUP(clkout2_a_1, NMK_GPIO_ALT_A),
-	DB8500_PIN_GROUP(clkout2_a_2, NMK_GPIO_ALT_A),
-	DB8500_PIN_GROUP(usb_a_1, NMK_GPIO_ALT_A),
+	NMK_PIN_GROUP(u0_a_1, NMK_GPIO_ALT_A),
+	NMK_PIN_GROUP(u1rxtx_a_1, NMK_GPIO_ALT_A),
+	NMK_PIN_GROUP(u1ctsrts_a_1, NMK_GPIO_ALT_A),
+	NMK_PIN_GROUP(ipi2c_a_1, NMK_GPIO_ALT_A),
+	NMK_PIN_GROUP(ipi2c_a_2, NMK_GPIO_ALT_A),
+	NMK_PIN_GROUP(msp0txrx_a_1, NMK_GPIO_ALT_A),
+	NMK_PIN_GROUP(msp0tfstck_a_1, NMK_GPIO_ALT_A),
+	NMK_PIN_GROUP(msp0rfsrck_a_1, NMK_GPIO_ALT_A),
+	NMK_PIN_GROUP(mc0_a_1, NMK_GPIO_ALT_A),
+	NMK_PIN_GROUP(mc0_a_2, NMK_GPIO_ALT_A),
+	NMK_PIN_GROUP(mc0_dat47_a_1, NMK_GPIO_ALT_A),
+	NMK_PIN_GROUP(mc0dat31dir_a_1, NMK_GPIO_ALT_A),
+	NMK_PIN_GROUP(msp1txrx_a_1, NMK_GPIO_ALT_A),
+	NMK_PIN_GROUP(msp1_a_1, NMK_GPIO_ALT_A),
+	NMK_PIN_GROUP(lcdb_a_1, NMK_GPIO_ALT_A),
+	NMK_PIN_GROUP(lcdvsi0_a_1, NMK_GPIO_ALT_A),
+	NMK_PIN_GROUP(lcdvsi1_a_1, NMK_GPIO_ALT_A),
+	NMK_PIN_GROUP(lcd_d0_d7_a_1, NMK_GPIO_ALT_A),
+	NMK_PIN_GROUP(lcd_d8_d11_a_1, NMK_GPIO_ALT_A),
+	NMK_PIN_GROUP(lcd_d12_d15_a_1, NMK_GPIO_ALT_A),
+	NMK_PIN_GROUP(lcd_d12_d23_a_1, NMK_GPIO_ALT_A),
+	NMK_PIN_GROUP(kp_a_1, NMK_GPIO_ALT_A),
+	NMK_PIN_GROUP(kpskaskb_a_1, NMK_GPIO_ALT_A),
+	NMK_PIN_GROUP(mc2_a_1, NMK_GPIO_ALT_A),
+	NMK_PIN_GROUP(mc2_a_2, NMK_GPIO_ALT_A),
+	NMK_PIN_GROUP(ssp1_a_1, NMK_GPIO_ALT_A),
+	NMK_PIN_GROUP(ssp0_a_1, NMK_GPIO_ALT_A),
+	NMK_PIN_GROUP(i2c0_a_1, NMK_GPIO_ALT_A),
+	NMK_PIN_GROUP(ipgpio0_a_1, NMK_GPIO_ALT_A),
+	NMK_PIN_GROUP(ipgpio1_a_1, NMK_GPIO_ALT_A),
+	NMK_PIN_GROUP(modem_a_1, NMK_GPIO_ALT_A),
+	NMK_PIN_GROUP(kp_a_2, NMK_GPIO_ALT_A),
+	NMK_PIN_GROUP(msp2sck_a_1, NMK_GPIO_ALT_A),
+	NMK_PIN_GROUP(msp2_a_1, NMK_GPIO_ALT_A),
+	NMK_PIN_GROUP(mc4_a_1, NMK_GPIO_ALT_A),
+	NMK_PIN_GROUP(mc1_a_1, NMK_GPIO_ALT_A),
+	NMK_PIN_GROUP(mc1_a_2, NMK_GPIO_ALT_A),
+	NMK_PIN_GROUP(mc1dir_a_1, NMK_GPIO_ALT_A),
+	NMK_PIN_GROUP(hsir_a_1, NMK_GPIO_ALT_A),
+	NMK_PIN_GROUP(hsit_a_1, NMK_GPIO_ALT_A),
+	NMK_PIN_GROUP(hsit_a_2, NMK_GPIO_ALT_A),
+	NMK_PIN_GROUP(clkout1_a_1, NMK_GPIO_ALT_A),
+	NMK_PIN_GROUP(clkout1_a_2, NMK_GPIO_ALT_A),
+	NMK_PIN_GROUP(clkout2_a_1, NMK_GPIO_ALT_A),
+	NMK_PIN_GROUP(clkout2_a_2, NMK_GPIO_ALT_A),
+	NMK_PIN_GROUP(usb_a_1, NMK_GPIO_ALT_A),
 	/* Altfunction B column */
-	DB8500_PIN_GROUP(trig_b_1, NMK_GPIO_ALT_B),
-	DB8500_PIN_GROUP(i2c4_b_1, NMK_GPIO_ALT_B),
-	DB8500_PIN_GROUP(i2c1_b_1, NMK_GPIO_ALT_B),
-	DB8500_PIN_GROUP(i2c2_b_1, NMK_GPIO_ALT_B),
-	DB8500_PIN_GROUP(i2c2_b_2, NMK_GPIO_ALT_B),
-	DB8500_PIN_GROUP(msp0txrx_b_1, NMK_GPIO_ALT_B),
-	DB8500_PIN_GROUP(i2c1_b_2, NMK_GPIO_ALT_B),
-	DB8500_PIN_GROUP(u2rxtx_b_1, NMK_GPIO_ALT_B),
-	DB8500_PIN_GROUP(uartmodtx_b_1, NMK_GPIO_ALT_B),
-	DB8500_PIN_GROUP(msp0sck_b_1, NMK_GPIO_ALT_B),
-	DB8500_PIN_GROUP(uartmodrx_b_1, NMK_GPIO_ALT_B),
-	DB8500_PIN_GROUP(stmmod_b_1, NMK_GPIO_ALT_B),
-	DB8500_PIN_GROUP(uartmodrx_b_2, NMK_GPIO_ALT_B),
-	DB8500_PIN_GROUP(spi3_b_1, NMK_GPIO_ALT_B),
-	DB8500_PIN_GROUP(msp1txrx_b_1, NMK_GPIO_ALT_B),
-	DB8500_PIN_GROUP(kp_b_1, NMK_GPIO_ALT_B),
-	DB8500_PIN_GROUP(kp_b_2, NMK_GPIO_ALT_B),
-	DB8500_PIN_GROUP(sm_b_1, NMK_GPIO_ALT_B),
-	DB8500_PIN_GROUP(smcs0_b_1, NMK_GPIO_ALT_B),
-	DB8500_PIN_GROUP(smcs1_b_1, NMK_GPIO_ALT_B),
-	DB8500_PIN_GROUP(ipgpio7_b_1, NMK_GPIO_ALT_B),
-	DB8500_PIN_GROUP(ipgpio2_b_1, NMK_GPIO_ALT_B),
-	DB8500_PIN_GROUP(ipgpio3_b_1, NMK_GPIO_ALT_B),
-	DB8500_PIN_GROUP(lcdaclk_b_1, NMK_GPIO_ALT_B),
-	DB8500_PIN_GROUP(lcda_b_1, NMK_GPIO_ALT_B),
-	DB8500_PIN_GROUP(lcd_b_1, NMK_GPIO_ALT_B),
-	DB8500_PIN_GROUP(ddrtrig_b_1, NMK_GPIO_ALT_B),
-	DB8500_PIN_GROUP(pwl_b_1, NMK_GPIO_ALT_B),
-	DB8500_PIN_GROUP(spi1_b_1, NMK_GPIO_ALT_B),
-	DB8500_PIN_GROUP(mc3_b_1, NMK_GPIO_ALT_B),
-	DB8500_PIN_GROUP(pwl_b_2, NMK_GPIO_ALT_B),
-	DB8500_PIN_GROUP(pwl_b_3, NMK_GPIO_ALT_B),
-	DB8500_PIN_GROUP(pwl_b_4, NMK_GPIO_ALT_B),
+	NMK_PIN_GROUP(trig_b_1, NMK_GPIO_ALT_B),
+	NMK_PIN_GROUP(i2c4_b_1, NMK_GPIO_ALT_B),
+	NMK_PIN_GROUP(i2c1_b_1, NMK_GPIO_ALT_B),
+	NMK_PIN_GROUP(i2c2_b_1, NMK_GPIO_ALT_B),
+	NMK_PIN_GROUP(i2c2_b_2, NMK_GPIO_ALT_B),
+	NMK_PIN_GROUP(msp0txrx_b_1, NMK_GPIO_ALT_B),
+	NMK_PIN_GROUP(i2c1_b_2, NMK_GPIO_ALT_B),
+	NMK_PIN_GROUP(u2rxtx_b_1, NMK_GPIO_ALT_B),
+	NMK_PIN_GROUP(uartmodtx_b_1, NMK_GPIO_ALT_B),
+	NMK_PIN_GROUP(msp0sck_b_1, NMK_GPIO_ALT_B),
+	NMK_PIN_GROUP(uartmodrx_b_1, NMK_GPIO_ALT_B),
+	NMK_PIN_GROUP(stmmod_b_1, NMK_GPIO_ALT_B),
+	NMK_PIN_GROUP(uartmodrx_b_2, NMK_GPIO_ALT_B),
+	NMK_PIN_GROUP(spi3_b_1, NMK_GPIO_ALT_B),
+	NMK_PIN_GROUP(msp1txrx_b_1, NMK_GPIO_ALT_B),
+	NMK_PIN_GROUP(kp_b_1, NMK_GPIO_ALT_B),
+	NMK_PIN_GROUP(kp_b_2, NMK_GPIO_ALT_B),
+	NMK_PIN_GROUP(sm_b_1, NMK_GPIO_ALT_B),
+	NMK_PIN_GROUP(smcs0_b_1, NMK_GPIO_ALT_B),
+	NMK_PIN_GROUP(smcs1_b_1, NMK_GPIO_ALT_B),
+	NMK_PIN_GROUP(ipgpio7_b_1, NMK_GPIO_ALT_B),
+	NMK_PIN_GROUP(ipgpio2_b_1, NMK_GPIO_ALT_B),
+	NMK_PIN_GROUP(ipgpio3_b_1, NMK_GPIO_ALT_B),
+	NMK_PIN_GROUP(lcdaclk_b_1, NMK_GPIO_ALT_B),
+	NMK_PIN_GROUP(lcda_b_1, NMK_GPIO_ALT_B),
+	NMK_PIN_GROUP(lcd_b_1, NMK_GPIO_ALT_B),
+	NMK_PIN_GROUP(lcd_d16_d23_b_1, NMK_GPIO_ALT_B),
+	NMK_PIN_GROUP(ddrtrig_b_1, NMK_GPIO_ALT_B),
+	NMK_PIN_GROUP(pwl_b_1, NMK_GPIO_ALT_B),
+	NMK_PIN_GROUP(spi1_b_1, NMK_GPIO_ALT_B),
+	NMK_PIN_GROUP(mc3_b_1, NMK_GPIO_ALT_B),
+	NMK_PIN_GROUP(pwl_b_2, NMK_GPIO_ALT_B),
+	NMK_PIN_GROUP(pwl_b_3, NMK_GPIO_ALT_B),
+	NMK_PIN_GROUP(pwl_b_4, NMK_GPIO_ALT_B),
 	/* Altfunction C column */
-	DB8500_PIN_GROUP(ipjtag_c_1, NMK_GPIO_ALT_C),
-	DB8500_PIN_GROUP(ipgpio6_c_1, NMK_GPIO_ALT_C),
-	DB8500_PIN_GROUP(ipgpio0_c_1, NMK_GPIO_ALT_C),
-	DB8500_PIN_GROUP(ipgpio1_c_1, NMK_GPIO_ALT_C),
-	DB8500_PIN_GROUP(ipgpio3_c_1, NMK_GPIO_ALT_C),
-	DB8500_PIN_GROUP(ipgpio2_c_1, NMK_GPIO_ALT_C),
-	DB8500_PIN_GROUP(slim0_c_1, NMK_GPIO_ALT_C),
-	DB8500_PIN_GROUP(ms_c_1, NMK_GPIO_ALT_C),
-	DB8500_PIN_GROUP(iptrigout_c_1, NMK_GPIO_ALT_C),
-	DB8500_PIN_GROUP(u2rxtx_c_1, NMK_GPIO_ALT_C),
-	DB8500_PIN_GROUP(u2ctsrts_c_1, NMK_GPIO_ALT_C),
-	DB8500_PIN_GROUP(u0_c_1, NMK_GPIO_ALT_C),
-	DB8500_PIN_GROUP(ipgpio4_c_1, NMK_GPIO_ALT_C),
-	DB8500_PIN_GROUP(ipgpio5_c_1, NMK_GPIO_ALT_C),
-	DB8500_PIN_GROUP(ipgpio6_c_1, NMK_GPIO_ALT_C),
-	DB8500_PIN_GROUP(ipgpio7_c_1, NMK_GPIO_ALT_C),
-	DB8500_PIN_GROUP(smcleale_c_1, NMK_GPIO_ALT_C),
-	DB8500_PIN_GROUP(stmape_c_1, NMK_GPIO_ALT_C),
-	DB8500_PIN_GROUP(u2rxtx_c_2, NMK_GPIO_ALT_C),
-	DB8500_PIN_GROUP(ipgpio2_c_2, NMK_GPIO_ALT_C),
-	DB8500_PIN_GROUP(ipgpio3_c_2, NMK_GPIO_ALT_C),
-	DB8500_PIN_GROUP(ipgpio4_c_2, NMK_GPIO_ALT_C),
-	DB8500_PIN_GROUP(ipgpio5_c_2, NMK_GPIO_ALT_C),
-	DB8500_PIN_GROUP(mc5_c_1, NMK_GPIO_ALT_C),
-	DB8500_PIN_GROUP(mc2rstn_c_1, NMK_GPIO_ALT_C),
-	DB8500_PIN_GROUP(kp_c_1, NMK_GPIO_ALT_C),
-	DB8500_PIN_GROUP(smps0_c_1, NMK_GPIO_ALT_C),
-	DB8500_PIN_GROUP(smps1_c_1, NMK_GPIO_ALT_C),
-	DB8500_PIN_GROUP(u2rxtx_c_3, NMK_GPIO_ALT_C),
-	DB8500_PIN_GROUP(stmape_c_2, NMK_GPIO_ALT_C),
-	DB8500_PIN_GROUP(uartmodrx_c_1, NMK_GPIO_ALT_C),
-	DB8500_PIN_GROUP(uartmodtx_c_1, NMK_GPIO_ALT_C),
-	DB8500_PIN_GROUP(stmmod_c_1, NMK_GPIO_ALT_C),
-	DB8500_PIN_GROUP(usbsim_c_1, NMK_GPIO_ALT_C),
-	DB8500_PIN_GROUP(mc4rstn_c_1, NMK_GPIO_ALT_C),
-	DB8500_PIN_GROUP(clkout1_c_1, NMK_GPIO_ALT_C),
-	DB8500_PIN_GROUP(clkout2_c_1, NMK_GPIO_ALT_C),
-	DB8500_PIN_GROUP(i2c3_c_1, NMK_GPIO_ALT_C),
-	DB8500_PIN_GROUP(spi0_c_1, NMK_GPIO_ALT_C),
-	DB8500_PIN_GROUP(usbsim_c_2, NMK_GPIO_ALT_C),
-	DB8500_PIN_GROUP(i2c3_c_2, NMK_GPIO_ALT_C),
+	NMK_PIN_GROUP(ipjtag_c_1, NMK_GPIO_ALT_C),
+	NMK_PIN_GROUP(ipgpio6_c_1, NMK_GPIO_ALT_C),
+	NMK_PIN_GROUP(ipgpio0_c_1, NMK_GPIO_ALT_C),
+	NMK_PIN_GROUP(ipgpio1_c_1, NMK_GPIO_ALT_C),
+	NMK_PIN_GROUP(ipgpio3_c_1, NMK_GPIO_ALT_C),
+	NMK_PIN_GROUP(ipgpio2_c_1, NMK_GPIO_ALT_C),
+	NMK_PIN_GROUP(slim0_c_1, NMK_GPIO_ALT_C),
+	NMK_PIN_GROUP(ms_c_1, NMK_GPIO_ALT_C),
+	NMK_PIN_GROUP(iptrigout_c_1, NMK_GPIO_ALT_C),
+	NMK_PIN_GROUP(u2rxtx_c_1, NMK_GPIO_ALT_C),
+	NMK_PIN_GROUP(u2ctsrts_c_1, NMK_GPIO_ALT_C),
+	NMK_PIN_GROUP(u0_c_1, NMK_GPIO_ALT_C),
+	NMK_PIN_GROUP(ipgpio4_c_1, NMK_GPIO_ALT_C),
+	NMK_PIN_GROUP(ipgpio5_c_1, NMK_GPIO_ALT_C),
+	NMK_PIN_GROUP(ipgpio6_c_2, NMK_GPIO_ALT_C),
+	NMK_PIN_GROUP(ipgpio7_c_1, NMK_GPIO_ALT_C),
+	NMK_PIN_GROUP(smcleale_c_1, NMK_GPIO_ALT_C),
+	NMK_PIN_GROUP(stmape_c_1, NMK_GPIO_ALT_C),
+	NMK_PIN_GROUP(u2rxtx_c_2, NMK_GPIO_ALT_C),
+	NMK_PIN_GROUP(ipgpio2_c_2, NMK_GPIO_ALT_C),
+	NMK_PIN_GROUP(ipgpio3_c_2, NMK_GPIO_ALT_C),
+	NMK_PIN_GROUP(ipgpio4_c_2, NMK_GPIO_ALT_C),
+	NMK_PIN_GROUP(ipgpio5_c_2, NMK_GPIO_ALT_C),
+	NMK_PIN_GROUP(mc5_c_1, NMK_GPIO_ALT_C),
+	NMK_PIN_GROUP(mc2rstn_c_1, NMK_GPIO_ALT_C),
+	NMK_PIN_GROUP(kp_c_1, NMK_GPIO_ALT_C),
+	NMK_PIN_GROUP(smps0_c_1, NMK_GPIO_ALT_C),
+	NMK_PIN_GROUP(smps1_c_1, NMK_GPIO_ALT_C),
+	NMK_PIN_GROUP(u2rxtx_c_3, NMK_GPIO_ALT_C),
+	NMK_PIN_GROUP(stmape_c_2, NMK_GPIO_ALT_C),
+	NMK_PIN_GROUP(uartmodrx_c_1, NMK_GPIO_ALT_C),
+	NMK_PIN_GROUP(uartmodtx_c_1, NMK_GPIO_ALT_C),
+	NMK_PIN_GROUP(stmmod_c_1, NMK_GPIO_ALT_C),
+	NMK_PIN_GROUP(usbsim_c_1, NMK_GPIO_ALT_C),
+	NMK_PIN_GROUP(mc4rstn_c_1, NMK_GPIO_ALT_C),
+	NMK_PIN_GROUP(clkout1_c_1, NMK_GPIO_ALT_C),
+	NMK_PIN_GROUP(clkout2_c_1, NMK_GPIO_ALT_C),
+	NMK_PIN_GROUP(i2c3_c_1, NMK_GPIO_ALT_C),
+	NMK_PIN_GROUP(spi0_c_1, NMK_GPIO_ALT_C),
+	NMK_PIN_GROUP(usbsim_c_2, NMK_GPIO_ALT_C),
+	NMK_PIN_GROUP(i2c3_c_2, NMK_GPIO_ALT_C),
 	/* Other alt C1 column */
-	DB8500_PIN_GROUP(u2rx_oc1_1, NMK_GPIO_ALT_C1),
-	DB8500_PIN_GROUP(stmape_oc1_1, NMK_GPIO_ALT_C1),
-	DB8500_PIN_GROUP(remap0_oc1_1, NMK_GPIO_ALT_C1),
-	DB8500_PIN_GROUP(remap1_oc1_1, NMK_GPIO_ALT_C1),
-	DB8500_PIN_GROUP(ptma9_oc1_1, NMK_GPIO_ALT_C1),
-	DB8500_PIN_GROUP(kp_oc1_1, NMK_GPIO_ALT_C1),
-	DB8500_PIN_GROUP(rf_oc1_1, NMK_GPIO_ALT_C1),
-	DB8500_PIN_GROUP(hxclk_oc1_1, NMK_GPIO_ALT_C1),
-	DB8500_PIN_GROUP(uartmodrx_oc1_1, NMK_GPIO_ALT_C1),
-	DB8500_PIN_GROUP(uartmodtx_oc1_1, NMK_GPIO_ALT_C1),
-	DB8500_PIN_GROUP(stmmod_oc1_1, NMK_GPIO_ALT_C1),
-	DB8500_PIN_GROUP(hxgpio_oc1_1, NMK_GPIO_ALT_C1),
-	DB8500_PIN_GROUP(rf_oc1_2, NMK_GPIO_ALT_C1),
-	DB8500_PIN_GROUP(spi2_oc1_1, NMK_GPIO_ALT_C1),
-	DB8500_PIN_GROUP(spi2_oc1_2, NMK_GPIO_ALT_C1),
+	NMK_PIN_GROUP(u2rx_oc1_1, NMK_GPIO_ALT_C1),
+	NMK_PIN_GROUP(stmape_oc1_1, NMK_GPIO_ALT_C1),
+	NMK_PIN_GROUP(remap0_oc1_1, NMK_GPIO_ALT_C1),
+	NMK_PIN_GROUP(remap1_oc1_1, NMK_GPIO_ALT_C1),
+	NMK_PIN_GROUP(ptma9_oc1_1, NMK_GPIO_ALT_C1),
+	NMK_PIN_GROUP(kp_oc1_1, NMK_GPIO_ALT_C1),
+	NMK_PIN_GROUP(rf_oc1_1, NMK_GPIO_ALT_C1),
+	NMK_PIN_GROUP(hxclk_oc1_1, NMK_GPIO_ALT_C1),
+	NMK_PIN_GROUP(uartmodrx_oc1_1, NMK_GPIO_ALT_C1),
+	NMK_PIN_GROUP(uartmodtx_oc1_1, NMK_GPIO_ALT_C1),
+	NMK_PIN_GROUP(stmmod_oc1_1, NMK_GPIO_ALT_C1),
+	NMK_PIN_GROUP(hxgpio_oc1_1, NMK_GPIO_ALT_C1),
+	NMK_PIN_GROUP(rf_oc1_2, NMK_GPIO_ALT_C1),
+	NMK_PIN_GROUP(spi2_oc1_1, NMK_GPIO_ALT_C1),
+	NMK_PIN_GROUP(spi2_oc1_2, NMK_GPIO_ALT_C1),
 	/* Other alt C2 column */
-	DB8500_PIN_GROUP(sbag_oc2_1, NMK_GPIO_ALT_C2),
-	DB8500_PIN_GROUP(etmr4_oc2_1, NMK_GPIO_ALT_C2),
-	DB8500_PIN_GROUP(ptma9_oc2_1, NMK_GPIO_ALT_C2),
+	NMK_PIN_GROUP(sbag_oc2_1, NMK_GPIO_ALT_C2),
+	NMK_PIN_GROUP(etmr4_oc2_1, NMK_GPIO_ALT_C2),
+	NMK_PIN_GROUP(ptma9_oc2_1, NMK_GPIO_ALT_C2),
 	/* Other alt C3 column */
-	DB8500_PIN_GROUP(stmmod_oc3_1, NMK_GPIO_ALT_C3),
-	DB8500_PIN_GROUP(stmmod_oc3_2, NMK_GPIO_ALT_C3),
-	DB8500_PIN_GROUP(uartmodrx_oc3_1, NMK_GPIO_ALT_C3),
-	DB8500_PIN_GROUP(uartmodtx_oc3_1, NMK_GPIO_ALT_C3),
-	DB8500_PIN_GROUP(etmr4_oc3_1, NMK_GPIO_ALT_C3),
+	NMK_PIN_GROUP(stmmod_oc3_1, NMK_GPIO_ALT_C3),
+	NMK_PIN_GROUP(stmmod_oc3_2, NMK_GPIO_ALT_C3),
+	NMK_PIN_GROUP(uartmodrx_oc3_1, NMK_GPIO_ALT_C3),
+	NMK_PIN_GROUP(uartmodtx_oc3_1, NMK_GPIO_ALT_C3),
+	NMK_PIN_GROUP(etmr4_oc3_1, NMK_GPIO_ALT_C3),
 	/* Other alt C4 column */
-	DB8500_PIN_GROUP(sbag_oc4_1, NMK_GPIO_ALT_C4),
-	DB8500_PIN_GROUP(hwobs_oc4_1, NMK_GPIO_ALT_C4),
+	NMK_PIN_GROUP(sbag_oc4_1, NMK_GPIO_ALT_C4),
+	NMK_PIN_GROUP(hwobs_oc4_1, NMK_GPIO_ALT_C4),
 };
 
 /* We use this macro to define the groups applicable to a function */
@@ -816,14 +853,15 @@ DB8500_FUNC_GROUPS(ipi2c, "ipi2c_a_1", "ipi2c_a_2");
  */
 DB8500_FUNC_GROUPS(msp0, "msp0txrx_a_1", "msp0tfstck_a_1", "msp0rfstck_a_1",
 		   "msp0txrx_b_1", "msp0sck_b_1");
-DB8500_FUNC_GROUPS(mc0, "mc0_a_1", "mc0_dat47_a_1", "mc0dat31dir_a_1");
+DB8500_FUNC_GROUPS(mc0, "mc0_a_1", "mc0_a_2", "mc0_dat47_a_1", "mc0dat31dir_a_1");
 /* MSP0 can swap RX/TX like MSP0 but has no SCK pin available */
 DB8500_FUNC_GROUPS(msp1, "msp1txrx_a_1", "msp1_a_1", "msp1txrx_b_1");
 DB8500_FUNC_GROUPS(lcdb, "lcdb_a_1");
 DB8500_FUNC_GROUPS(lcd, "lcdvsi0_a_1", "lcdvsi1_a_1", "lcd_d0_d7_a_1",
-	"lcd_d8_d11_a_1", "lcd_d12_d23_a_1", "lcd_b_1");
+		   "lcd_d8_d11_a_1", "lcd_d12_d15_a_1", "lcd_d12_d23_a_1", "lcd_b_1",
+		   "lcd_d16_d23_b_1");
 DB8500_FUNC_GROUPS(kp, "kp_a_1", "kp_a_2", "kp_b_1", "kp_b_2", "kp_c_1", "kp_oc1_1");
-DB8500_FUNC_GROUPS(mc2, "mc2_a_1", "mc2rstn_c_1");
+DB8500_FUNC_GROUPS(mc2, "mc2_a_1", "mc2_a_2", "mc2rstn_c_1");
 DB8500_FUNC_GROUPS(ssp1, "ssp1_a_1");
 DB8500_FUNC_GROUPS(ssp0, "ssp0_a_1");
 DB8500_FUNC_GROUPS(i2c0, "i2c0_a_1");
@@ -933,6 +971,7 @@ static const struct nmk_function nmk_db8500_functions[] = {
 	FUNCTION(spi0),
 	FUNCTION(spi2),
 	FUNCTION(remap),
+	FUNCTION(sbag),
 	FUNCTION(ptm),
 	FUNCTION(rf),
 	FUNCTION(hx),

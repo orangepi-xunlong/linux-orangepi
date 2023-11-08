@@ -1,16 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * NFC hardware simulation driver
  * Copyright (c) 2013, Intel Corporation.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
  */
 
 #include <linux/device.h>
@@ -201,8 +192,7 @@ static void nfcsim_recv_wq(struct work_struct *work)
 
 		if (!IS_ERR(skb))
 			dev_kfree_skb(skb);
-
-		skb = ERR_PTR(-ENODEV);
+		return;
 	}
 
 	dev->cb(dev->nfc_digital_dev, dev->arg, skb);
@@ -249,7 +239,7 @@ static int nfcsim_send(struct nfc_digital_dev *ddev, struct sk_buff *skb,
 
 static void nfcsim_abort_cmd(struct nfc_digital_dev *ddev)
 {
-	struct nfcsim *dev = nfc_digital_get_drvdata(ddev);
+	const struct nfcsim *dev = nfc_digital_get_drvdata(ddev);
 
 	nfcsim_link_recv_cancel(dev->link_in);
 }
@@ -329,7 +319,7 @@ static int nfcsim_tg_listen(struct nfc_digital_dev *ddev, u16 timeout,
 	return nfcsim_send(ddev, NULL, timeout, cb, arg);
 }
 
-static struct nfc_digital_ops nfcsim_digital_ops = {
+static const struct nfc_digital_ops nfcsim_digital_ops = {
 	.in_configure_hw = nfcsim_in_configure_hw,
 	.in_send_cmd = nfcsim_in_send_cmd,
 
@@ -346,10 +336,6 @@ static struct dentry *nfcsim_debugfs_root;
 static void nfcsim_debugfs_init(void)
 {
 	nfcsim_debugfs_root = debugfs_create_dir("nfcsim", NULL);
-
-	if (!nfcsim_debugfs_root)
-		pr_err("Could not create debugfs entry\n");
-
 }
 
 static void nfcsim_debugfs_remove(void)
@@ -377,11 +363,6 @@ static void nfcsim_debugfs_init_dev(struct nfcsim *dev)
 	}
 
 	dev_dir = debugfs_create_dir(devname, nfcsim_debugfs_root);
-	if (!dev_dir) {
-		NFCSIM_ERR(dev, "Could not create debugfs entries for nfc%d\n",
-			   idx);
-		return;
-	}
 
 	debugfs_create_u8("dropframe", 0664, dev_dir, &dev->dropframe);
 }
@@ -482,8 +463,10 @@ static int __init nfcsim_init(void)
 exit_err:
 	pr_err("Failed to initialize nfcsim driver (%d)\n", rc);
 
-	nfcsim_link_free(link0);
-	nfcsim_link_free(link1);
+	if (link0)
+		nfcsim_link_free(link0);
+	if (link1)
+		nfcsim_link_free(link1);
 
 	return rc;
 }

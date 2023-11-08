@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*  linux/include/linux/clockchips.h
  *
  *  This file contains the structure definitions for clockchips.
@@ -182,7 +183,6 @@ extern u64 clockevent_delta2ns(unsigned long latch, struct clock_event_device *e
 extern void clockevents_register_device(struct clock_event_device *dev);
 extern int clockevents_unbind_device(struct clock_event_device *ced, int cpu);
 
-extern void clockevents_config(struct clock_event_device *dev, u32 freq);
 extern void clockevents_config_and_register(struct clock_event_device *dev,
 					    u32 freq, unsigned long min_delta,
 					    unsigned long max_delta);
@@ -211,7 +211,7 @@ extern int tick_receive_broadcast(void);
 extern void tick_setup_hrtimer_broadcast(void);
 extern int tick_check_broadcast_expired(void);
 # else
-static inline int tick_check_broadcast_expired(void) { return 0; }
+static __always_inline int tick_check_broadcast_expired(void) { return 0; }
 static inline void tick_setup_hrtimer_broadcast(void) { }
 # endif
 
@@ -219,7 +219,7 @@ static inline void tick_setup_hrtimer_broadcast(void) { }
 
 static inline void clockevents_suspend(void) { }
 static inline void clockevents_resume(void) { }
-static inline int tick_check_broadcast_expired(void) { return 0; }
+static __always_inline int tick_check_broadcast_expired(void) { return 0; }
 static inline void tick_setup_hrtimer_broadcast(void) { }
 
 #endif /* !CONFIG_GENERIC_CLOCKEVENTS */

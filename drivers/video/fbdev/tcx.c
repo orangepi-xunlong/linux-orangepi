@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /* tcx.c: TCX frame buffer driver
  *
  * Copyright (C) 2003, 2006 David S. Miller (davem@davemloft.net)
@@ -16,7 +17,8 @@
 #include <linux/init.h>
 #include <linux/fb.h>
 #include <linux/mm.h>
-#include <linux/of_device.h>
+#include <linux/of.h>
+#include <linux/platform_device.h>
 
 #include <asm/io.h>
 #include <asm/fbio.h>
@@ -39,7 +41,7 @@ static int tcx_pan_display(struct fb_var_screeninfo *, struct fb_info *);
  *  Frame buffer operations
  */
 
-static struct fb_ops tcx_ops = {
+static const struct fb_ops tcx_ops = {
 	.owner			= THIS_MODULE,
 	.fb_setcolreg		= tcx_setcolreg,
 	.fb_blank		= tcx_blank,
@@ -195,7 +197,7 @@ static int tcx_setcolreg(unsigned regno,
 
 /**
  *      tcx_blank - Optional function.  Blanks the display.
- *      @blank_mode: the blank mode we want.
+ *      @blank: the blank mode we want.
  *      @info: frame buffer structure that represents a single frame buffer
  */
 static int
@@ -332,7 +334,7 @@ tcx_init_fix(struct fb_info *info, int linebytes)
 	else
 		tcx_name = "TCX24";
 
-	strlcpy(info->fix.id, tcx_name, sizeof(info->fix.id));
+	strscpy(info->fix.id, tcx_name, sizeof(info->fix.id));
 
 	info->fix.type = FB_TYPE_PACKED_PIXELS;
 	info->fix.visual = FB_VISUAL_PSEUDOCOLOR;
@@ -378,8 +380,7 @@ static int tcx_probe(struct platform_device *op)
 
 	spin_lock_init(&par->lock);
 
-	par->lowdepth =
-		(of_find_property(dp, "tcx-8-bit", NULL) != NULL);
+	par->lowdepth = of_property_read_bool(dp, "tcx-8-bit");
 
 	sbusfb_fill_var(&info->var, dp, 8);
 	info->var.red.length = 8;
@@ -438,7 +439,6 @@ static int tcx_probe(struct platform_device *op)
 		par->mmap_map[i].poff = op->resource[j].start;
 	}
 
-	info->flags = FBINFO_DEFAULT;
 	info->fbops = &tcx_ops;
 
 	/* Initialize brooktree DAC. */
@@ -467,8 +467,8 @@ static int tcx_probe(struct platform_device *op)
 
 	dev_set_drvdata(&op->dev, info);
 
-	printk(KERN_INFO "%s: TCX at %lx:%lx, %s\n",
-	       dp->full_name,
+	printk(KERN_INFO "%pOF: TCX at %lx:%lx, %s\n",
+	       dp,
 	       par->which_io,
 	       info->fix.smem_start,
 	       par->lowdepth ? "8-bit only" : "24-bit depth");
@@ -486,7 +486,7 @@ out_err:
 	return err;
 }
 
-static int tcx_remove(struct platform_device *op)
+static void tcx_remove(struct platform_device *op)
 {
 	struct fb_info *info = dev_get_drvdata(&op->dev);
 	struct tcx_par *par = info->par;
@@ -497,8 +497,6 @@ static int tcx_remove(struct platform_device *op)
 	tcx_unmap_regs(op, info, par);
 
 	framebuffer_release(info);
-
-	return 0;
 }
 
 static const struct of_device_id tcx_match[] = {
@@ -515,7 +513,7 @@ static struct platform_driver tcx_driver = {
 		.of_match_table = tcx_match,
 	},
 	.probe		= tcx_probe,
-	.remove		= tcx_remove,
+	.remove_new	= tcx_remove,
 };
 
 static int __init tcx_init(void)

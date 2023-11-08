@@ -36,6 +36,7 @@ static void stat64_to_hostfs(const struct stat64 *buf, struct hostfs_stat *p)
 	p->blocks = buf->st_blocks;
 	p->maj = os_major(buf->st_rdev);
 	p->min = os_minor(buf->st_rdev);
+	p->dev = buf->st_dev;
 }
 
 int stat_file(const char *path, struct hostfs_stat *p, int fd)
@@ -304,7 +305,7 @@ int do_mkdir(const char *file, int mode)
 	return 0;
 }
 
-int do_rmdir(const char *file)
+int hostfs_do_rmdir(const char *file)
 {
 	int err;
 

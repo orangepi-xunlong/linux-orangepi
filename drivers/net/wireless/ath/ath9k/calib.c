@@ -58,9 +58,15 @@ static struct ath_nf_limits *ath9k_hw_get_nf_limits(struct ath_hw *ah,
 }
 
 static s16 ath9k_hw_get_default_nf(struct ath_hw *ah,
-				   struct ath9k_channel *chan)
+				   struct ath9k_channel *chan,
+				   int chain)
 {
-	return ath9k_hw_get_nf_limits(ah, chan)->nominal;
+	s16 calib_nf = ath9k_hw_get_nf_limits(ah, chan)->cal[chain];
+
+	if (calib_nf)
+		return calib_nf;
+	else
+		return ath9k_hw_get_nf_limits(ah, chan)->nominal;
 }
 
 s16 ath9k_hw_getchan_noise(struct ath_hw *ah, struct ath9k_channel *chan,
@@ -70,7 +76,7 @@ s16 ath9k_hw_getchan_noise(struct ath_hw *ah, struct ath9k_channel *chan,
 
 	if (nf) {
 		s8 delta = nf - ATH9K_NF_CAL_NOISE_THRESH -
-			   ath9k_hw_get_default_nf(ah, chan);
+			   ath9k_hw_get_default_nf(ah, chan, 0);
 		if (delta > 0)
 			noise += delta;
 	}
@@ -170,6 +176,7 @@ void ath9k_hw_reset_calibration(struct ath_hw *ah,
 
 	ath9k_hw_setup_calibration(ah, currCal);
 
+	ah->cal_start_time = jiffies;
 	currCal->calState = CAL_RUNNING;
 
 	for (i = 0; i < AR5416_MAX_CHAINS; i++) {
@@ -203,14 +210,17 @@ bool ath9k_hw_reset_calvalid(struct ath_hw *ah)
 		return true;
 	}
 
-	if (!(ah->supp_cals & currCal->calData->calType))
-		return true;
+	currCal = ah->cal_list;
+	do {
+		ath_dbg(common, CALIBRATE, "Resetting Cal %d state for channel %u\n",
+			currCal->calData->calType,
+			ah->curchan->chan->center_freq);
 
-	ath_dbg(common, CALIBRATE, "Resetting Cal %d state for channel %u\n",
-		currCal->calData->calType, ah->curchan->chan->center_freq);
+		ah->caldata->CalValid &= ~currCal->calData->calType;
+		currCal->calState = CAL_WAITING;
 
-	ah->caldata->CalValid &= ~currCal->calData->calType;
-	currCal->calState = CAL_WAITING;
+		currCal = currCal->calNext;
+	} while (currCal != ah->cal_list);
 
 	return false;
 }
@@ -221,17 +231,17 @@ void ath9k_hw_start_nfcal(struct ath_hw *ah, bool update)
 	if (ah->caldata)
 		set_bit(NFCAL_PENDING, &ah->caldata->cal_flags);
 
-	REG_SET_BIT(ah, AR_PHY_AGC_CONTROL,
+	REG_SET_BIT(ah, AR_PHY_AGC_CONTROL(ah),
 		    AR_PHY_AGC_CONTROL_ENABLE_NF);
 
 	if (update)
-		REG_CLR_BIT(ah, AR_PHY_AGC_CONTROL,
+		REG_CLR_BIT(ah, AR_PHY_AGC_CONTROL(ah),
 		    AR_PHY_AGC_CONTROL_NO_UPDATE_NF);
 	else
-		REG_SET_BIT(ah, AR_PHY_AGC_CONTROL,
+		REG_SET_BIT(ah, AR_PHY_AGC_CONTROL(ah),
 		    AR_PHY_AGC_CONTROL_NO_UPDATE_NF);
 
-	REG_SET_BIT(ah, AR_PHY_AGC_CONTROL, AR_PHY_AGC_CONTROL_NF);
+	REG_SET_BIT(ah, AR_PHY_AGC_CONTROL(ah), AR_PHY_AGC_CONTROL_NF);
 }
 
 int ath9k_hw_loadnf(struct ath_hw *ah, struct ath9k_channel *chan)
@@ -240,8 +250,8 @@ int ath9k_hw_loadnf(struct ath_hw *ah, struct ath9k_channel *chan)
 	unsigned i, j;
 	u8 chainmask = (ah->rxchainmask << 3) | ah->rxchainmask;
 	struct ath_common *common = ath9k_hw_common(ah);
-	s16 default_nf = ath9k_hw_get_default_nf(ah, chan);
-	u32 bb_agc_ctl = REG_READ(ah, AR_PHY_AGC_CONTROL);
+	s16 default_nf = ath9k_hw_get_nf_limits(ah, chan)->nominal;
+	u32 bb_agc_ctl = REG_READ(ah, AR_PHY_AGC_CONTROL(ah));
 
 	if (ah->caldata)
 		h = ah->caldata->nfCalHist;
@@ -254,10 +264,17 @@ int ath9k_hw_loadnf(struct ath_hw *ah, struct ath9k_channel *chan)
 			if ((i >= AR5416_MAX_CHAINS) && !IS_CHAN_HT40(chan))
 				continue;
 
-			if (h)
+			if (ah->nf_override)
+				nfval = ah->nf_override;
+			else if (h)
 				nfval = h[i].privNF;
-			else
-				nfval = default_nf;
+			else {
+				/* Try to get calibrated noise floor value */
+				nfval =
+				    ath9k_hw_get_nf_limits(ah, chan)->cal[i];
+				if (nfval > -60 || nfval < -127)
+					nfval = default_nf;
+			}
 
 			REG_RMW(ah, ah->nf_regs[i],
 				(((u32) nfval << 1) & 0x1ff), 0x1ff);
@@ -269,7 +286,7 @@ int ath9k_hw_loadnf(struct ath_hw *ah, struct ath9k_channel *chan)
 	 * (or after end rx/tx frame if ongoing)
 	 */
 	if (bb_agc_ctl & AR_PHY_AGC_CONTROL_NF) {
-		REG_CLR_BIT(ah, AR_PHY_AGC_CONTROL, AR_PHY_AGC_CONTROL_NF);
+		REG_CLR_BIT(ah, AR_PHY_AGC_CONTROL(ah), AR_PHY_AGC_CONTROL_NF);
 		REG_RMW_BUFFER_FLUSH(ah);
 		ENABLE_REG_RMW_BUFFER(ah);
 	}
@@ -278,11 +295,11 @@ int ath9k_hw_loadnf(struct ath_hw *ah, struct ath9k_channel *chan)
 	 * Load software filtered NF value into baseband internal minCCApwr
 	 * variable.
 	 */
-	REG_CLR_BIT(ah, AR_PHY_AGC_CONTROL,
+	REG_CLR_BIT(ah, AR_PHY_AGC_CONTROL(ah),
 		    AR_PHY_AGC_CONTROL_ENABLE_NF);
-	REG_CLR_BIT(ah, AR_PHY_AGC_CONTROL,
+	REG_CLR_BIT(ah, AR_PHY_AGC_CONTROL(ah),
 		    AR_PHY_AGC_CONTROL_NO_UPDATE_NF);
-	REG_SET_BIT(ah, AR_PHY_AGC_CONTROL, AR_PHY_AGC_CONTROL_NF);
+	REG_SET_BIT(ah, AR_PHY_AGC_CONTROL(ah), AR_PHY_AGC_CONTROL_NF);
 	REG_RMW_BUFFER_FLUSH(ah);
 
 	/*
@@ -292,7 +309,7 @@ int ath9k_hw_loadnf(struct ath_hw *ah, struct ath9k_channel *chan)
 	 * (11n max length 22.1 msec)
 	 */
 	for (j = 0; j < 22200; j++) {
-		if ((REG_READ(ah, AR_PHY_AGC_CONTROL) &
+		if ((REG_READ(ah, AR_PHY_AGC_CONTROL(ah)) &
 			      AR_PHY_AGC_CONTROL_NF) == 0)
 			break;
 		udelay(10);
@@ -304,12 +321,12 @@ int ath9k_hw_loadnf(struct ath_hw *ah, struct ath9k_channel *chan)
 	if (bb_agc_ctl & AR_PHY_AGC_CONTROL_NF) {
 		ENABLE_REG_RMW_BUFFER(ah);
 		if (bb_agc_ctl & AR_PHY_AGC_CONTROL_ENABLE_NF)
-			REG_SET_BIT(ah, AR_PHY_AGC_CONTROL,
+			REG_SET_BIT(ah, AR_PHY_AGC_CONTROL(ah),
 				    AR_PHY_AGC_CONTROL_ENABLE_NF);
 		if (bb_agc_ctl & AR_PHY_AGC_CONTROL_NO_UPDATE_NF)
-			REG_SET_BIT(ah, AR_PHY_AGC_CONTROL,
+			REG_SET_BIT(ah, AR_PHY_AGC_CONTROL(ah),
 				    AR_PHY_AGC_CONTROL_NO_UPDATE_NF);
-		REG_SET_BIT(ah, AR_PHY_AGC_CONTROL, AR_PHY_AGC_CONTROL_NF);
+		REG_SET_BIT(ah, AR_PHY_AGC_CONTROL(ah), AR_PHY_AGC_CONTROL_NF);
 		REG_RMW_BUFFER_FLUSH(ah);
 	}
 
@@ -325,7 +342,7 @@ int ath9k_hw_loadnf(struct ath_hw *ah, struct ath9k_channel *chan)
 	if (j == 22200) {
 		ath_dbg(common, ANY,
 			"Timeout while waiting for nf to load: AR_PHY_AGC_CONTROL=0x%x\n",
-			REG_READ(ah, AR_PHY_AGC_CONTROL));
+			REG_READ(ah, AR_PHY_AGC_CONTROL(ah)));
 		return -ETIMEDOUT;
 	}
 
@@ -348,6 +365,7 @@ int ath9k_hw_loadnf(struct ath_hw *ah, struct ath9k_channel *chan)
 
 	return 0;
 }
+EXPORT_SYMBOL(ath9k_hw_loadnf);
 
 
 static void ath9k_hw_nf_sanitize(struct ath_hw *ah, s16 *nf)
@@ -392,7 +410,7 @@ bool ath9k_hw_getnf(struct ath_hw *ah, struct ath9k_channel *chan)
 	struct ieee80211_channel *c = chan->chan;
 	struct ath9k_hw_cal_data *caldata = ah->caldata;
 
-	if (REG_READ(ah, AR_PHY_AGC_CONTROL) & AR_PHY_AGC_CONTROL_NF) {
+	if (REG_READ(ah, AR_PHY_AGC_CONTROL(ah)) & AR_PHY_AGC_CONTROL_NF) {
 		ath_dbg(common, CALIBRATE,
 			"NF did not complete in calibration window\n");
 		return false;
@@ -426,20 +444,19 @@ void ath9k_init_nfcal_hist_buffer(struct ath_hw *ah,
 				  struct ath9k_channel *chan)
 {
 	struct ath9k_nfcal_hist *h;
-	s16 default_nf;
-	int i, j;
+	int i, j, k = 0;
 
 	ah->caldata->channel = chan->channel;
 	ah->caldata->channelFlags = chan->channelFlags;
 	h = ah->caldata->nfCalHist;
-	default_nf = ath9k_hw_get_default_nf(ah, chan);
 	for (i = 0; i < NUM_NF_READINGS; i++) {
 		h[i].currIndex = 0;
-		h[i].privNF = default_nf;
+		h[i].privNF = ath9k_hw_get_default_nf(ah, chan, k);
 		h[i].invalidNFcount = AR_PHY_CCA_FILTERWINDOW_LENGTH;
-		for (j = 0; j < ATH9K_NF_CAL_HIST_MAX; j++) {
-			h[i].nfCalBuffer[j] = default_nf;
-		}
+		for (j = 0; j < ATH9K_NF_CAL_HIST_MAX; j++)
+			h[i].nfCalBuffer[j] = h[i].privNF;
+		if (++k >= AR5416_MAX_CHAINS)
+			k = 0;
 	}
 }
 
@@ -461,7 +478,7 @@ void ath9k_hw_bstuck_nfcal(struct ath_hw *ah)
 	 */
 	if (!test_bit(NFCAL_PENDING, &caldata->cal_flags))
 		ath9k_hw_start_nfcal(ah, true);
-	else if (!(REG_READ(ah, AR_PHY_AGC_CONTROL) & AR_PHY_AGC_CONTROL_NF))
+	else if (!(REG_READ(ah, AR_PHY_AGC_CONTROL(ah)) & AR_PHY_AGC_CONTROL_NF))
 		ath9k_hw_getnf(ah, ah->curchan);
 
 	set_bit(NFCAL_INTF, &caldata->cal_flags);

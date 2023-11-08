@@ -1,9 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  Copyright (C) 2014 Linaro Ltd
  *
  * Author: Ulf Hansson <ulf.hansson@linaro.org>
- *
- * License terms: GNU General Public License (GPL) version 2
  *
  *  Simple MMC power sequence management
  */
@@ -27,6 +26,7 @@ struct mmc_pwrseq_simple {
 	struct mmc_pwrseq pwrseq;
 	bool clk_enabled;
 	u32 post_power_on_delay_ms;
+	u32 power_off_delay_us;
 	struct clk *ext_clk;
 	struct gpio_descs *reset_gpios;
 };
@@ -39,18 +39,22 @@ static void mmc_pwrseq_simple_set_gpios_value(struct mmc_pwrseq_simple *pwrseq,
 	struct gpio_descs *reset_gpios = pwrseq->reset_gpios;
 
 	if (!IS_ERR(reset_gpios)) {
-		int i, *values;
+		unsigned long *values;
 		int nvalues = reset_gpios->ndescs;
 
-		values = kmalloc_array(nvalues, sizeof(int), GFP_KERNEL);
+		values = bitmap_alloc(nvalues, GFP_KERNEL);
 		if (!values)
 			return;
 
-		for (i = 0; i < nvalues; i++)
-			values[i] = value;
+		if (value)
+			bitmap_fill(values, nvalues);
+		else
+			bitmap_zero(values, nvalues);
 
-		gpiod_set_array_value_cansleep(nvalues, reset_gpios->desc, values);
-		kfree(values);
+		gpiod_set_array_value_cansleep(nvalues, reset_gpios->desc,
+					       reset_gpios->info, values);
+
+		bitmap_free(values);
 	}
 }
 
@@ -82,6 +86,10 @@ static void mmc_pwrseq_simple_power_off(struct mmc_host *host)
 
 	mmc_pwrseq_simple_set_gpios_value(pwrseq, 1);
 
+	if (pwrseq->power_off_delay_us)
+		usleep_range(pwrseq->power_off_delay_us,
+			2 * pwrseq->power_off_delay_us);
+
 	if (!IS_ERR(pwrseq->ext_clk) && pwrseq->clk_enabled) {
 		clk_disable_unprepare(pwrseq->ext_clk);
 		pwrseq->clk_enabled = false;
@@ -111,18 +119,20 @@ static int mmc_pwrseq_simple_probe(struct platform_device *pdev)
 
 	pwrseq->ext_clk = devm_clk_get(dev, "ext_clock");
 	if (IS_ERR(pwrseq->ext_clk) && PTR_ERR(pwrseq->ext_clk) != -ENOENT)
-		return PTR_ERR(pwrseq->ext_clk);
+		return dev_err_probe(dev, PTR_ERR(pwrseq->ext_clk), "external clock not ready\n");
 
 	pwrseq->reset_gpios = devm_gpiod_get_array(dev, "reset",
 							GPIOD_OUT_HIGH);
 	if (IS_ERR(pwrseq->reset_gpios) &&
 	    PTR_ERR(pwrseq->reset_gpios) != -ENOENT &&
 	    PTR_ERR(pwrseq->reset_gpios) != -ENOSYS) {
-		return PTR_ERR(pwrseq->reset_gpios);
+		return dev_err_probe(dev, PTR_ERR(pwrseq->reset_gpios), "reset GPIOs not ready\n");
 	}
 
 	device_property_read_u32(dev, "post-power-on-delay-ms",
 				 &pwrseq->post_power_on_delay_ms);
+	device_property_read_u32(dev, "power-off-delay-us",
+				 &pwrseq->power_off_delay_us);
 
 	pwrseq->pwrseq.dev = dev;
 	pwrseq->pwrseq.ops = &mmc_pwrseq_simple_ops;
@@ -132,18 +142,16 @@ static int mmc_pwrseq_simple_probe(struct platform_device *pdev)
 	return mmc_pwrseq_register(&pwrseq->pwrseq);
 }
 
-static int mmc_pwrseq_simple_remove(struct platform_device *pdev)
+static void mmc_pwrseq_simple_remove(struct platform_device *pdev)
 {
 	struct mmc_pwrseq_simple *pwrseq = platform_get_drvdata(pdev);
 
 	mmc_pwrseq_unregister(&pwrseq->pwrseq);
-
-	return 0;
 }
 
 static struct platform_driver mmc_pwrseq_simple_driver = {
 	.probe = mmc_pwrseq_simple_probe,
-	.remove = mmc_pwrseq_simple_remove,
+	.remove_new = mmc_pwrseq_simple_remove,
 	.driver = {
 		.name = "pwrseq_simple",
 		.of_match_table = mmc_pwrseq_simple_of_match,

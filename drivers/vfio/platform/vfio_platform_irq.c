@@ -1,17 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * VFIO platform devices interrupt handling
  *
  * Copyright (C) 2013 - Virtual Open Systems
  * Author: Antonios Motakis <a.motakis@virtualopensystems.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License, version 2, as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include <linux/eventfd.h>
@@ -194,9 +186,8 @@ static int vfio_set_trigger(struct vfio_platform_device *vdev, int index,
 
 	if (fd < 0) /* Disable only */
 		return 0;
-
-	irq->name = kasprintf(GFP_KERNEL, "vfio-irq[%d](%s)",
-						irq->hwirq, vdev->name);
+	irq->name = kasprintf(GFP_KERNEL_ACCOUNT, "vfio-irq[%d](%s)",
+			      irq->hwirq, vdev->name);
 	if (!irq->name)
 		return -ENOMEM;
 
@@ -294,7 +285,8 @@ int vfio_platform_irq_init(struct vfio_platform_device *vdev)
 	while (vdev->get_irq(vdev, cnt) >= 0)
 		cnt++;
 
-	vdev->irqs = kcalloc(cnt, sizeof(struct vfio_platform_irq), GFP_KERNEL);
+	vdev->irqs = kcalloc(cnt, sizeof(struct vfio_platform_irq),
+			     GFP_KERNEL_ACCOUNT);
 	if (!vdev->irqs)
 		return -ENOMEM;
 

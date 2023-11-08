@@ -1,28 +1,20 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
- * OnKey device driver for DA9063 and DA9062 PMICs
+ * OnKey device driver for DA9063, DA9062 and DA9061 PMICs
  * Copyright (C) 2015  Dialog Semiconductor Ltd.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
+#include <linux/devm-helpers.h>
 #include <linux/module.h>
 #include <linux/errno.h>
 #include <linux/input.h>
 #include <linux/interrupt.h>
 #include <linux/platform_device.h>
+#include <linux/pm_wakeirq.h>
 #include <linux/workqueue.h>
 #include <linux/regmap.h>
 #include <linux/of.h>
 #include <linux/mfd/da9063/core.h>
-#include <linux/mfd/da9063/pdata.h>
 #include <linux/mfd/da9063/registers.h>
 #include <linux/mfd/da9062/core.h>
 #include <linux/mfd/da9062/registers.h>
@@ -87,6 +79,7 @@ static const struct of_device_id da9063_compatible_reg_id_table[] = {
 	{ .compatible = "dlg,da9062-onkey", .data = &da9062_regs },
 	{ },
 };
+MODULE_DEVICE_TABLE(of, da9063_compatible_reg_id_table);
 
 static void da9063_poll_on(struct work_struct *work)
 {
@@ -149,13 +142,13 @@ static void da9063_poll_on(struct work_struct *work)
 			 * and then send shutdown command
 			 */
 			dev_dbg(&onkey->input->dev,
-				"Sending SHUTDOWN to DA9063 ...\n");
+				"Sending SHUTDOWN to PMIC ...\n");
 			error = regmap_write(onkey->regmap,
 					     config->onkey_shutdown,
 					     config->onkey_shutdown_mask);
 			if (error)
 				dev_err(&onkey->input->dev,
-					"Cannot SHUTDOWN DA9063: %d\n",
+					"Cannot SHUTDOWN PMIC: %d\n",
 					error);
 		}
 	}
@@ -191,17 +184,8 @@ static irqreturn_t da9063_onkey_irq_handler(int irq, void *data)
 	return IRQ_HANDLED;
 }
 
-static void da9063_cancel_poll(void *data)
-{
-	struct da9063_onkey *onkey = data;
-
-	cancel_delayed_work_sync(&onkey->work);
-}
-
 static int da9063_onkey_probe(struct platform_device *pdev)
 {
-	struct da9063 *da9063 = dev_get_drvdata(pdev->dev.parent);
-	struct da9063_pdata *pdata = dev_get_platdata(da9063->dev);
 	struct da9063_onkey *onkey;
 	const struct of_device_id *match;
 	int irq;
@@ -228,12 +212,8 @@ static int da9063_onkey_probe(struct platform_device *pdev)
 		return -ENXIO;
 	}
 
-	if (pdata)
-		onkey->key_power = pdata->key_power;
-	else
-		onkey->key_power =
-			!of_property_read_bool(pdev->dev.of_node,
-					       "dlg,disable-key-power");
+	onkey->key_power = !of_property_read_bool(pdev->dev.of_node,
+						  "dlg,disable-key-power");
 
 	onkey->input = devm_input_allocate_device(&pdev->dev);
 	if (!onkey->input) {
@@ -247,14 +227,10 @@ static int da9063_onkey_probe(struct platform_device *pdev)
 	onkey->input->phys = onkey->phys;
 	onkey->input->dev.parent = &pdev->dev;
 
-	if (onkey->key_power)
-		input_set_capability(onkey->input, EV_KEY, KEY_POWER);
+	input_set_capability(onkey->input, EV_KEY, KEY_POWER);
 
-	input_set_capability(onkey->input, EV_KEY, KEY_SLEEP);
-
-	INIT_DELAYED_WORK(&onkey->work, da9063_poll_on);
-
-	error = devm_add_action(&pdev->dev, da9063_cancel_poll, onkey);
+	error = devm_delayed_work_autocancel(&pdev->dev, &onkey->work,
+					     da9063_poll_on);
 	if (error) {
 		dev_err(&pdev->dev,
 			"Failed to add cancel poll action: %d\n",
@@ -263,11 +239,8 @@ static int da9063_onkey_probe(struct platform_device *pdev)
 	}
 
 	irq = platform_get_irq_byname(pdev, "ONKEY");
-	if (irq < 0) {
-		error = irq;
-		dev_err(&pdev->dev, "Failed to get platform IRQ: %d\n", error);
-		return error;
-	}
+	if (irq < 0)
+		return irq;
 
 	error = devm_request_threaded_irq(&pdev->dev, irq,
 					  NULL, da9063_onkey_irq_handler,
@@ -279,6 +252,14 @@ static int da9063_onkey_probe(struct platform_device *pdev)
 		return error;
 	}
 
+	error = dev_pm_set_wake_irq(&pdev->dev, irq);
+	if (error)
+		dev_warn(&pdev->dev,
+			 "Failed to set IRQ %d as a wake IRQ: %d\n",
+			 irq, error);
+	else
+		device_init_wakeup(&pdev->dev, true);
+
 	error = input_register_device(onkey->input);
 	if (error) {
 		dev_err(&pdev->dev,
@@ -286,7 +267,6 @@ static int da9063_onkey_probe(struct platform_device *pdev)
 		return error;
 	}
 
-	platform_set_drvdata(pdev, onkey);
 	return 0;
 }
 
@@ -300,6 +280,6 @@ static struct platform_driver da9063_onkey_driver = {
 module_platform_driver(da9063_onkey_driver);
 
 MODULE_AUTHOR("S Twiss <stwiss.opensource@diasemi.com>");
-MODULE_DESCRIPTION("Onkey device driver for Dialog DA9063 and DA9062");
+MODULE_DESCRIPTION("Onkey device driver for Dialog DA9063, DA9062 and DA9061");
 MODULE_LICENSE("GPL");
 MODULE_ALIAS("platform:" DA9063_DRVNAME_ONKEY);

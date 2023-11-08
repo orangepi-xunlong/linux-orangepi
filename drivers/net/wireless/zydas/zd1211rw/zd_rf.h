@@ -1,20 +1,8 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /* ZD1211 USB-WLAN driver for Linux
  *
  * Copyright (C) 2005-2007 Ulrich Kunitz <kune@deine-taler.de>
  * Copyright (C) 2006-2007 Daniel Drake <dsd@gentoo.org>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, see <http://www.gnu.org/licenses/>.
  */
 
 #ifndef _ZD_RF_H
@@ -96,9 +84,6 @@ static inline int zd_rf_should_patch_cck_gain(struct zd_rf *rf)
 {
 	return rf->patch_cck_gain;
 }
-
-int zd_rf_patch_6m_band_edge(struct zd_rf *rf, u8 channel);
-int zd_rf_generic_patch_6m(struct zd_rf *rf, u8 channel);
 
 /* Functions for individual RF chips */
 

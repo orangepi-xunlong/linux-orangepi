@@ -26,20 +26,21 @@
 
 #ifndef __NOUVEAU_CRTC_H__
 #define __NOUVEAU_CRTC_H__
+#include <drm/drm_crtc.h>
 
-#include <nvif/notify.h>
+#include <nvif/head.h>
+#include <nvif/event.h>
 
 struct nouveau_crtc {
 	struct drm_crtc base;
 
+	struct nvif_head head;
 	int index;
-	struct nvif_notify vblank;
+	struct nvif_event vblank;
 
 	uint32_t dpms_saved_fp_control;
 	uint32_t fp_users;
 	int saturation;
-	int color_vibrance;
-	int vibrant_hue;
 	int sharpness;
 	int last_dpms;
 
@@ -54,7 +55,6 @@ struct nouveau_crtc {
 
 	struct {
 		struct nouveau_bo *nvbo;
-		bool visible;
 		uint32_t offset;
 		void (*set_offset)(struct nouveau_crtc *, uint32_t offset);
 		void (*set_pos)(struct nouveau_crtc *, int x, int y);
@@ -63,16 +63,8 @@ struct nouveau_crtc {
 	} cursor;
 
 	struct {
-		struct nouveau_bo *nvbo;
-		uint16_t r[256];
-		uint16_t g[256];
-		uint16_t b[256];
 		int depth;
 	} lut;
-
-	int (*set_dither)(struct nouveau_crtc *crtc, bool update);
-	int (*set_scale)(struct nouveau_crtc *crtc, bool update);
-	int (*set_color_vibrance)(struct nouveau_crtc *crtc, bool update);
 
 	void (*save)(struct drm_crtc *crtc);
 	void (*restore)(struct drm_crtc *crtc);

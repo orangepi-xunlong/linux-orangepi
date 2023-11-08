@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * max1111.c - +2.7V, Low-Power, Multichannel, Serial 8-bit ADCs
  *
@@ -7,10 +8,6 @@
  *
  * Copyright (C) 2008 Marvell International Ltd.
  *	Eric Miao <eric.miao@marvell.com>
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License version 2 as
- *  publishhed by the Free Software Foundation.
  */
 
 #include <linux/module.h>
@@ -83,6 +80,7 @@ static int max1111_read(struct device *dev, int channel)
 #ifdef CONFIG_SHARPSL_PM
 static struct max1111_data *the_max1111;
 
+int max1111_read_channel(int channel);
 int max1111_read_channel(int channel)
 {
 	if (!the_max1111 || !the_max1111->spi)
@@ -98,7 +96,7 @@ EXPORT_SYMBOL(max1111_read_channel);
  * likely to be used by hwmon applications to distinguish between
  * different devices, explicitly add a name attribute here.
  */
-static ssize_t show_name(struct device *dev,
+static ssize_t name_show(struct device *dev,
 			 struct device_attribute *attr, char *buf)
 {
 	return sprintf(buf, "%s\n", to_spi_device(dev)->modalias);
@@ -125,7 +123,7 @@ static ssize_t show_adc(struct device *dev,
 #define MAX1111_ADC_ATTR(_id)		\
 	SENSOR_DEVICE_ATTR(in##_id##_input, S_IRUGO, show_adc, NULL, _id)
 
-static DEVICE_ATTR(name, S_IRUGO, show_name, NULL);
+static DEVICE_ATTR_RO(name);
 static MAX1111_ADC_ATTR(0);
 static MAX1111_ADC_ATTR(1);
 static MAX1111_ADC_ATTR(2);
@@ -257,7 +255,7 @@ err_remove:
 	return err;
 }
 
-static int max1111_remove(struct spi_device *spi)
+static void max1111_remove(struct spi_device *spi)
 {
 	struct max1111_data *data = spi_get_drvdata(spi);
 
@@ -268,7 +266,6 @@ static int max1111_remove(struct spi_device *spi)
 	sysfs_remove_group(&spi->dev.kobj, &max1110_attr_group);
 	sysfs_remove_group(&spi->dev.kobj, &max1111_attr_group);
 	mutex_destroy(&data->drvdata_lock);
-	return 0;
 }
 
 static const struct spi_device_id max1111_ids[] = {

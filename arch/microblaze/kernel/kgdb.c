@@ -31,7 +31,7 @@
 #define GDB_RTLBLO	55
 #define GDB_RTLBHI	56
 
-/* keep pvr separately because it is unchangeble */
+/* keep pvr separately because it is unchangeable */
 static struct pvr_s pvr;
 
 void pt_regs_to_gdb_regs(unsigned long *gdb_regs, struct pt_regs *regs)
@@ -143,7 +143,7 @@ void kgdb_arch_exit(void)
 /*
  * Global data
  */
-struct kgdb_arch arch_kgdb_ops = {
+const struct kgdb_arch arch_kgdb_ops = {
 #ifdef __MICROBLAZEEL__
 	.gdb_bpt_instr = {0x18, 0x00, 0x0c, 0xba}, /* brki r16, 0x18 */
 #else

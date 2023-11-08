@@ -1,10 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright 2015, Cyril Bur, IBM Corp.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version
- * 2 of the License, or (at your option) any later version.
  *
  * This test attempts to see if the VMX registers are correctly reported in a
  * signal context. Each worker just spins checking its VMX registers, at some
@@ -100,6 +96,9 @@ int test_signal_vmx(void)
 	void *rc_p;
 	pthread_t *tids;
 
+	// vcmpequd used in vmx_asm.S is v2.07
+	SKIP_IF(!have_hwcap2(PPC_FEATURE2_ARCH_2_07));
+
 	threads = sysconf(_SC_NPROCESSORS_ONLN) * THREAD_FACTOR;
 	tids = malloc(threads * sizeof(pthread_t));
 	FAIL_IF(!tids);
@@ -152,5 +151,6 @@ int test_signal_vmx(void)
 
 int main(int argc, char *argv[])
 {
+	test_harness_set_timeout(360);
 	return test_harness(test_signal_vmx, "vmx_signal");
 }

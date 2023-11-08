@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * arch/alpha/lib/ev6-divide.S
  *
@@ -55,7 +56,7 @@
  * Try not to change the actual algorithm if possible for consistency.
  */
 
-#include <asm/export.h>
+#include <linux/export.h>
 #define halt .long 0
 
 /*

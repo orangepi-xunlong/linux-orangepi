@@ -1,7 +1,5 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
- *  This program is free software; you can redistribute it and/or modify it
- *  under the terms of the GNU General Public License version 2 as published
- *  by the Free Software Foundation.
  *
  *  Copyright (C) 2012 John Crispin <john@phrozen.org>
  *  Copyright (C) 2012 Lantiq GmbH
@@ -9,9 +7,10 @@
 
 #include <linux/interrupt.h>
 #include <linux/ioport.h>
-#include <linux/module.h>
-#include <linux/of_platform.h>
+#include <linux/init.h>
+#include <linux/mod_devicetable.h>
 #include <linux/of_irq.h>
+#include <linux/platform_device.h>
 
 #include <lantiq_soc.h>
 #include "../clk.h"
@@ -124,6 +123,8 @@ static inline void clkdev_add_gptu(struct device *dev, const char *con,
 {
 	struct clk *clk = kzalloc(sizeof(struct clk), GFP_KERNEL);
 
+	if (!clk)
+		return;
 	clk->cl.dev_id = dev_name(dev);
 	clk->cl.con_id = con;
 	clk->cl.clk = clk;
@@ -136,17 +137,14 @@ static inline void clkdev_add_gptu(struct device *dev, const char *con,
 static int gptu_probe(struct platform_device *pdev)
 {
 	struct clk *clk;
-	struct resource *res;
 
 	if (of_irq_to_resource_table(pdev->dev.of_node, irqres, 6) != 6) {
 		dev_err(&pdev->dev, "Failed to get IRQ list\n");
 		return -EINVAL;
 	}
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-
 	/* remap gptu register range */
-	gptu_membase = devm_ioremap_resource(&pdev->dev, res);
+	gptu_membase = devm_platform_get_and_ioremap_resource(pdev, 0, NULL);
 	if (IS_ERR(gptu_membase))
 		return PTR_ERR(gptu_membase);
 
@@ -187,7 +185,6 @@ static const struct of_device_id gptu_match[] = {
 	{ .compatible = "lantiq,gptu-xway" },
 	{},
 };
-MODULE_DEVICE_TABLE(of, dma_match);
 
 static struct platform_driver dma_driver = {
 	.probe = gptu_probe,

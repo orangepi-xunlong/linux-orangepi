@@ -1,16 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * AT86RF230/RF231 driver
  *
  * Copyright (C) 2009-2012 Siemens AG
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2
- * as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  *
  * Written by:
  * Dmitry Eremin-Solenikov <dbaryshkov@gmail.com>
@@ -25,13 +17,12 @@
 #include <linux/irq.h>
 #include <linux/gpio.h>
 #include <linux/delay.h>
+#include <linux/property.h>
 #include <linux/spi/spi.h>
-#include <linux/spi/at86rf230.h>
 #include <linux/regmap.h>
 #include <linux/skbuff.h>
 #include <linux/of_gpio.h>
 #include <linux/ieee802154.h>
-#include <linux/debugfs.h>
 
 #include <net/mac802154.h>
 #include <net/cfg802154.h>
@@ -80,17 +71,9 @@ struct at86rf230_state_change {
 	void (*complete)(void *context);
 	u8 from_state;
 	u8 to_state;
+	int trac;
 
 	bool free;
-};
-
-struct at86rf230_trac {
-	u64 success;
-	u64 success_data_pending;
-	u64 success_wait_for_ack;
-	u64 channel_access_failure;
-	u64 no_ack;
-	u64 invalid;
 };
 
 struct at86rf230_local {
@@ -99,7 +82,7 @@ struct at86rf230_local {
 	struct ieee802154_hw *hw;
 	struct at86rf2xx_chip_data *data;
 	struct regmap *regmap;
-	int slp_tr;
+	struct gpio_desc *slp_tr;
 	bool sleep;
 
 	struct completion state_complete;
@@ -108,11 +91,10 @@ struct at86rf230_local {
 	unsigned long cal_timeout;
 	bool is_tx;
 	bool is_tx_from_off;
+	bool was_tx;
 	u8 tx_retry;
 	struct sk_buff *tx_skb;
 	struct at86rf230_state_change tx;
-
-	struct at86rf230_trac trac;
 };
 
 #define AT86RF2XX_NUMREGS 0x3F
@@ -125,8 +107,8 @@ at86rf230_async_state_change(struct at86rf230_local *lp,
 static inline void
 at86rf230_sleep(struct at86rf230_local *lp)
 {
-	if (gpio_is_valid(lp->slp_tr)) {
-		gpio_set_value(lp->slp_tr, 1);
+	if (lp->slp_tr) {
+		gpiod_set_value(lp->slp_tr, 1);
 		usleep_range(lp->data->t_off_to_sleep,
 			     lp->data->t_off_to_sleep + 10);
 		lp->sleep = true;
@@ -136,8 +118,8 @@ at86rf230_sleep(struct at86rf230_local *lp)
 static inline void
 at86rf230_awake(struct at86rf230_local *lp)
 {
-	if (gpio_is_valid(lp->slp_tr)) {
-		gpio_set_value(lp->slp_tr, 0);
+	if (lp->slp_tr) {
+		gpiod_set_value(lp->slp_tr, 0);
 		usleep_range(lp->data->t_sleep_to_off,
 			     lp->data->t_sleep_to_off + 100);
 		lp->sleep = false;
@@ -222,9 +204,9 @@ at86rf230_write_subreg(struct at86rf230_local *lp,
 static inline void
 at86rf230_slp_tr_rising_edge(struct at86rf230_local *lp)
 {
-	gpio_set_value(lp->slp_tr, 1);
+	gpiod_set_value(lp->slp_tr, 1);
 	udelay(1);
-	gpio_set_value(lp->slp_tr, 0);
+	gpiod_set_value(lp->slp_tr, 0);
 }
 
 static bool
@@ -351,7 +333,10 @@ at86rf230_async_error_recover_complete(void *context)
 	if (ctx->free)
 		kfree(ctx);
 
-	ieee802154_wake_queue(lp->hw);
+	if (lp->was_tx) {
+		lp->was_tx = 0;
+		ieee802154_xmit_hw_error(lp->hw, lp->tx_skb);
+	}
 }
 
 static void
@@ -360,7 +345,11 @@ at86rf230_async_error_recover(void *context)
 	struct at86rf230_state_change *ctx = context;
 	struct at86rf230_local *lp = ctx->lp;
 
-	lp->is_tx = 0;
+	if (lp->is_tx) {
+		lp->was_tx = 1;
+		lp->is_tx = 0;
+	}
+
 	at86rf230_async_state_change(lp, ctx, STATE_RX_AACK_ON,
 				     at86rf230_async_error_recover_complete);
 }
@@ -510,7 +499,7 @@ at86rf230_async_state_delay(void *context)
 	case STATE_TRX_OFF:
 		switch (ctx->to_state) {
 		case STATE_RX_AACK_ON:
-			tim = ktime_set(0, c->t_off_to_aack * NSEC_PER_USEC);
+			tim = c->t_off_to_aack * NSEC_PER_USEC;
 			/* state change from TRX_OFF to RX_AACK_ON to do a
 			 * calibration, we need to reset the timeout for the
 			 * next one.
@@ -519,7 +508,7 @@ at86rf230_async_state_delay(void *context)
 			goto change;
 		case STATE_TX_ARET_ON:
 		case STATE_TX_ON:
-			tim = ktime_set(0, c->t_off_to_tx_on * NSEC_PER_USEC);
+			tim = c->t_off_to_tx_on * NSEC_PER_USEC;
 			/* state change from TRX_OFF to TX_ON or ARET_ON to do
 			 * a calibration, we need to reset the timeout for the
 			 * next one.
@@ -539,8 +528,7 @@ at86rf230_async_state_delay(void *context)
 			 * to TX_ON or TRX_OFF.
 			 */
 			if (!force) {
-				tim = ktime_set(0, (c->t_frame + c->t_p_ack) *
-						   NSEC_PER_USEC);
+				tim = (c->t_frame + c->t_p_ack) * NSEC_PER_USEC;
 				goto change;
 			}
 			break;
@@ -552,7 +540,7 @@ at86rf230_async_state_delay(void *context)
 	case STATE_P_ON:
 		switch (ctx->to_state) {
 		case STATE_TRX_OFF:
-			tim = ktime_set(0, c->t_reset_to_off * NSEC_PER_USEC);
+			tim = c->t_reset_to_off * NSEC_PER_USEC;
 			goto change;
 		default:
 			break;
@@ -653,7 +641,11 @@ at86rf230_tx_complete(void *context)
 	struct at86rf230_state_change *ctx = context;
 	struct at86rf230_local *lp = ctx->lp;
 
-	ieee802154_xmit_complete(lp->hw, lp->tx_skb, false);
+	if (ctx->trac == IEEE802154_SUCCESS)
+		ieee802154_xmit_complete(lp->hw, lp->tx_skb, false);
+	else
+		ieee802154_xmit_error(lp->hw, lp->tx_skb, ctx->trac);
+
 	kfree(ctx);
 }
 
@@ -672,30 +664,21 @@ at86rf230_tx_trac_check(void *context)
 {
 	struct at86rf230_state_change *ctx = context;
 	struct at86rf230_local *lp = ctx->lp;
+	u8 trac = TRAC_MASK(ctx->buf[1]);
 
-	if (IS_ENABLED(CONFIG_IEEE802154_AT86RF230_DEBUGFS)) {
-		u8 trac = TRAC_MASK(ctx->buf[1]);
-
-		switch (trac) {
-		case TRAC_SUCCESS:
-			lp->trac.success++;
-			break;
-		case TRAC_SUCCESS_DATA_PENDING:
-			lp->trac.success_data_pending++;
-			break;
-		case TRAC_CHANNEL_ACCESS_FAILURE:
-			lp->trac.channel_access_failure++;
-			break;
-		case TRAC_NO_ACK:
-			lp->trac.no_ack++;
-			break;
-		case TRAC_INVALID:
-			lp->trac.invalid++;
-			break;
-		default:
-			WARN_ONCE(1, "received tx trac status %d\n", trac);
-			break;
-		}
+	switch (trac) {
+	case TRAC_SUCCESS:
+	case TRAC_SUCCESS_DATA_PENDING:
+		ctx->trac = IEEE802154_SUCCESS;
+		break;
+	case TRAC_CHANNEL_ACCESS_FAILURE:
+		ctx->trac = IEEE802154_CHANNEL_ACCESS_FAILURE;
+		break;
+	case TRAC_NO_ACK:
+		ctx->trac = IEEE802154_NO_ACK;
+		break;
+	default:
+		ctx->trac = IEEE802154_SYSTEM_ERROR;
 	}
 
 	at86rf230_async_state_change(lp, ctx, STATE_TX_ON, at86rf230_tx_on);
@@ -724,7 +707,7 @@ at86rf230_rx_read_frame_complete(void *context)
 		return;
 	}
 
-	memcpy(skb_put(skb, len), buf + 2, len);
+	skb_put_data(skb, buf + 2, len);
 	ieee802154_rx_irqsafe(lp->hw, skb, lqi);
 	kfree(ctx);
 }
@@ -736,25 +719,6 @@ at86rf230_rx_trac_check(void *context)
 	struct at86rf230_local *lp = ctx->lp;
 	u8 *buf = ctx->buf;
 	int rc;
-
-	if (IS_ENABLED(CONFIG_IEEE802154_AT86RF230_DEBUGFS)) {
-		u8 trac = TRAC_MASK(buf[1]);
-
-		switch (trac) {
-		case TRAC_SUCCESS:
-			lp->trac.success++;
-			break;
-		case TRAC_SUCCESS_WAIT_FOR_ACK:
-			lp->trac.success_wait_for_ack++;
-			break;
-		case TRAC_INVALID:
-			lp->trac.invalid++;
-			break;
-		default:
-			WARN_ONCE(1, "received rx trac status %d\n", trac);
-			break;
-		}
-	}
 
 	buf[0] = CMD_FB;
 	ctx->trx.len = AT86RF2XX_MAX_BUF;
@@ -855,7 +819,7 @@ at86rf230_write_frame_complete(void *context)
 
 	ctx->trx.len = 2;
 
-	if (gpio_is_valid(lp->slp_tr))
+	if (lp->slp_tr)
 		at86rf230_slp_tr_rising_edge(lp);
 	else
 		at86rf230_async_write_reg(lp, RG_TRX_STATE, STATE_BUSY_TX, ctx,
@@ -941,7 +905,7 @@ at86rf230_xmit(struct ieee802154_hw *hw, struct sk_buff *skb)
 static int
 at86rf230_ed(struct ieee802154_hw *hw, u8 *level)
 {
-	BUG_ON(!level);
+	WARN_ON(!level);
 	*level = 0xbe;
 	return 0;
 }
@@ -950,10 +914,6 @@ static int
 at86rf230_start(struct ieee802154_hw *hw)
 {
 	struct at86rf230_local *lp = hw->priv;
-
-	/* reset trac stats on start */
-	if (IS_ENABLED(CONFIG_IEEE802154_AT86RF230_DEBUGFS))
-		memset(&lp->trac, 0, sizeof(struct at86rf230_trac));
 
 	at86rf230_awake(lp);
 	enable_irq(lp->spi->irq);
@@ -990,7 +950,12 @@ at86rf23x_set_channel(struct at86rf230_local *lp, u8 page, u8 channel)
 }
 
 #define AT86RF2XX_MAX_ED_LEVELS 0xF
-static const s32 at86rf23x_ed_levels[AT86RF2XX_MAX_ED_LEVELS + 1] = {
+static const s32 at86rf233_ed_levels[AT86RF2XX_MAX_ED_LEVELS + 1] = {
+	-9400, -9200, -9000, -8800, -8600, -8400, -8200, -8000, -7800, -7600,
+	-7400, -7200, -7000, -6800, -6600, -6400,
+};
+
+static const s32 at86rf231_ed_levels[AT86RF2XX_MAX_ED_LEVELS + 1] = {
 	-9100, -8900, -8700, -8500, -8300, -8100, -7900, -7700, -7500, -7300,
 	-7100, -6900, -6700, -6500, -6300, -6100,
 };
@@ -1059,36 +1024,6 @@ at86rf212_set_channel(struct at86rf230_local *lp, u8 page, u8 channel)
 	if (rc < 0)
 		return rc;
 
-	/* This sets the symbol_duration according frequency on the 212.
-	 * TODO move this handling while set channel and page in cfg802154.
-	 * We can do that, this timings are according 802.15.4 standard.
-	 * If we do that in cfg802154, this is a more generic calculation.
-	 *
-	 * This should also protected from ifs_timer. Means cancel timer and
-	 * init with a new value. For now, this is okay.
-	 */
-	if (channel == 0) {
-		if (page == 0) {
-			/* SUB:0 and BPSK:0 -> BPSK-20 */
-			lp->hw->phy->symbol_duration = 50;
-		} else {
-			/* SUB:1 and BPSK:0 -> BPSK-40 */
-			lp->hw->phy->symbol_duration = 25;
-		}
-	} else {
-		if (page == 0)
-			/* SUB:0 and BPSK:1 -> OQPSK-100/200/400 */
-			lp->hw->phy->symbol_duration = 40;
-		else
-			/* SUB:1 and BPSK:1 -> OQPSK-250/500/1000 */
-			lp->hw->phy->symbol_duration = 16;
-	}
-
-	lp->hw->phy->lifs_period = IEEE802154_LIFS_PERIOD *
-				   lp->hw->phy->symbol_duration;
-	lp->hw->phy->sifs_period = IEEE802154_SIFS_PERIOD *
-				   lp->hw->phy->symbol_duration;
-
 	return at86rf230_write_subreg(lp, SR_CHANNEL, channel);
 }
 
@@ -1117,8 +1052,7 @@ at86rf230_set_hw_addr_filt(struct ieee802154_hw *hw,
 	if (changed & IEEE802154_AFILT_SADDR_CHANGED) {
 		u16 addr = le16_to_cpu(filt->short_addr);
 
-		dev_vdbg(&lp->spi->dev,
-			 "at86rf230_set_hw_addr_filt called for saddr\n");
+		dev_vdbg(&lp->spi->dev, "%s called for saddr\n", __func__);
 		__at86rf230_write(lp, RG_SHORT_ADDR_0, addr);
 		__at86rf230_write(lp, RG_SHORT_ADDR_1, addr >> 8);
 	}
@@ -1126,8 +1060,7 @@ at86rf230_set_hw_addr_filt(struct ieee802154_hw *hw,
 	if (changed & IEEE802154_AFILT_PANID_CHANGED) {
 		u16 pan = le16_to_cpu(filt->pan_id);
 
-		dev_vdbg(&lp->spi->dev,
-			 "at86rf230_set_hw_addr_filt called for pan id\n");
+		dev_vdbg(&lp->spi->dev, "%s called for pan id\n", __func__);
 		__at86rf230_write(lp, RG_PAN_ID_0, pan);
 		__at86rf230_write(lp, RG_PAN_ID_1, pan >> 8);
 	}
@@ -1136,15 +1069,13 @@ at86rf230_set_hw_addr_filt(struct ieee802154_hw *hw,
 		u8 i, addr[8];
 
 		memcpy(addr, &filt->ieee_addr, 8);
-		dev_vdbg(&lp->spi->dev,
-			 "at86rf230_set_hw_addr_filt called for IEEE addr\n");
+		dev_vdbg(&lp->spi->dev, "%s called for IEEE addr\n", __func__);
 		for (i = 0; i < 8; i++)
 			__at86rf230_write(lp, RG_IEEE_ADDR_0 + i, addr[i]);
 	}
 
 	if (changed & IEEE802154_AFILT_PANC_CHANGED) {
-		dev_vdbg(&lp->spi->dev,
-			 "at86rf230_set_hw_addr_filt called for panc change\n");
+		dev_vdbg(&lp->spi->dev, "%s called for panc change\n", __func__);
 		if (filt->pan_coord)
 			at86rf230_write_subreg(lp, SR_AACK_I_AM_COORD, 1);
 		else
@@ -1248,7 +1179,6 @@ at86rf230_set_cca_mode(struct ieee802154_hw *hw,
 	return at86rf230_write_subreg(lp, SR_CCA_MODE, val);
 }
 
-
 static int
 at86rf230_set_cca_ed_level(struct ieee802154_hw *hw, s32 mbm)
 {
@@ -1343,7 +1273,7 @@ static struct at86rf2xx_chip_data at86rf233_data = {
 	.t_sleep_to_off = 1000,
 	.t_frame = 4096,
 	.t_p_ack = 545,
-	.rssi_base_val = -91,
+	.rssi_base_val = -94,
 	.set_channel = at86rf23x_set_channel,
 	.set_txpower = at86rf23x_set_txpower,
 };
@@ -1486,32 +1416,6 @@ static int at86rf230_hw_init(struct at86rf230_local *lp, u8 xtal_trim)
 }
 
 static int
-at86rf230_get_pdata(struct spi_device *spi, int *rstn, int *slp_tr,
-		    u8 *xtal_trim)
-{
-	struct at86rf230_platform_data *pdata = spi->dev.platform_data;
-	int ret;
-
-	if (!IS_ENABLED(CONFIG_OF) || !spi->dev.of_node) {
-		if (!pdata)
-			return -ENOENT;
-
-		*rstn = pdata->rstn;
-		*slp_tr = pdata->slp_tr;
-		*xtal_trim = pdata->xtal_trim;
-		return 0;
-	}
-
-	*rstn = of_get_named_gpio(spi->dev.of_node, "reset-gpio", 0);
-	*slp_tr = of_get_named_gpio(spi->dev.of_node, "sleep-gpio", 0);
-	ret = of_property_read_u8(spi->dev.of_node, "xtal-trim", xtal_trim);
-	if (ret < 0 && ret != -EINVAL)
-		return ret;
-
-	return 0;
-}
-
-static int
 at86rf230_detect_device(struct at86rf230_local *lp)
 {
 	unsigned int part, version, val;
@@ -1557,9 +1461,6 @@ at86rf230_detect_device(struct at86rf230_local *lp)
 	lp->hw->phy->supported.cca_opts = BIT(NL802154_CCA_OPT_ENERGY_CARRIER_AND) |
 		BIT(NL802154_CCA_OPT_ENERGY_CARRIER_OR);
 
-	lp->hw->phy->supported.cca_ed_levels = at86rf23x_ed_levels;
-	lp->hw->phy->supported.cca_ed_levels_size = ARRAY_SIZE(at86rf23x_ed_levels);
-
 	lp->hw->phy->cca.mode = NL802154_CCA_ENERGY;
 
 	switch (part) {
@@ -1572,9 +1473,10 @@ at86rf230_detect_device(struct at86rf230_local *lp)
 		lp->data = &at86rf231_data;
 		lp->hw->phy->supported.channels[0] = 0x7FFF800;
 		lp->hw->phy->current_channel = 11;
-		lp->hw->phy->symbol_duration = 16;
 		lp->hw->phy->supported.tx_powers = at86rf231_powers;
 		lp->hw->phy->supported.tx_powers_size = ARRAY_SIZE(at86rf231_powers);
+		lp->hw->phy->supported.cca_ed_levels = at86rf231_ed_levels;
+		lp->hw->phy->supported.cca_ed_levels_size = ARRAY_SIZE(at86rf231_ed_levels);
 		break;
 	case 7:
 		chip = "at86rf212";
@@ -1583,7 +1485,6 @@ at86rf230_detect_device(struct at86rf230_local *lp)
 		lp->hw->phy->supported.channels[0] = 0x00007FF;
 		lp->hw->phy->supported.channels[2] = 0x00007FF;
 		lp->hw->phy->current_channel = 5;
-		lp->hw->phy->symbol_duration = 25;
 		lp->hw->phy->supported.lbt = NL802154_SUPPORTED_BOOL_BOTH;
 		lp->hw->phy->supported.tx_powers = at86rf212_powers;
 		lp->hw->phy->supported.tx_powers_size = ARRAY_SIZE(at86rf212_powers);
@@ -1595,9 +1496,10 @@ at86rf230_detect_device(struct at86rf230_local *lp)
 		lp->data = &at86rf233_data;
 		lp->hw->phy->supported.channels[0] = 0x7FFF800;
 		lp->hw->phy->current_channel = 13;
-		lp->hw->phy->symbol_duration = 16;
 		lp->hw->phy->supported.tx_powers = at86rf233_powers;
 		lp->hw->phy->supported.tx_powers_size = ARRAY_SIZE(at86rf233_powers);
+		lp->hw->phy->supported.cca_ed_levels = at86rf233_ed_levels;
+		lp->hw->phy->supported.cca_ed_levels_size = ARRAY_SIZE(at86rf233_ed_levels);
 		break;
 	default:
 		chip = "unknown";
@@ -1614,105 +1516,51 @@ not_supp:
 	return rc;
 }
 
-#ifdef CONFIG_IEEE802154_AT86RF230_DEBUGFS
-static struct dentry *at86rf230_debugfs_root;
-
-static int at86rf230_stats_show(struct seq_file *file, void *offset)
-{
-	struct at86rf230_local *lp = file->private;
-
-	seq_printf(file, "SUCCESS:\t\t%8llu\n", lp->trac.success);
-	seq_printf(file, "SUCCESS_DATA_PENDING:\t%8llu\n",
-		   lp->trac.success_data_pending);
-	seq_printf(file, "SUCCESS_WAIT_FOR_ACK:\t%8llu\n",
-		   lp->trac.success_wait_for_ack);
-	seq_printf(file, "CHANNEL_ACCESS_FAILURE:\t%8llu\n",
-		   lp->trac.channel_access_failure);
-	seq_printf(file, "NO_ACK:\t\t\t%8llu\n", lp->trac.no_ack);
-	seq_printf(file, "INVALID:\t\t%8llu\n", lp->trac.invalid);
-	return 0;
-}
-
-static int at86rf230_stats_open(struct inode *inode, struct file *file)
-{
-	return single_open(file, at86rf230_stats_show, inode->i_private);
-}
-
-static const struct file_operations at86rf230_stats_fops = {
-	.open		= at86rf230_stats_open,
-	.read		= seq_read,
-	.llseek		= seq_lseek,
-	.release	= single_release,
-};
-
-static int at86rf230_debugfs_init(struct at86rf230_local *lp)
-{
-	char debugfs_dir_name[DNAME_INLINE_LEN + 1] = "at86rf230-";
-	struct dentry *stats;
-
-	strncat(debugfs_dir_name, dev_name(&lp->spi->dev), DNAME_INLINE_LEN);
-
-	at86rf230_debugfs_root = debugfs_create_dir(debugfs_dir_name, NULL);
-	if (!at86rf230_debugfs_root)
-		return -ENOMEM;
-
-	stats = debugfs_create_file("trac_stats", S_IRUGO,
-				    at86rf230_debugfs_root, lp,
-				    &at86rf230_stats_fops);
-	if (!stats)
-		return -ENOMEM;
-
-	return 0;
-}
-
-static void at86rf230_debugfs_remove(void)
-{
-	debugfs_remove_recursive(at86rf230_debugfs_root);
-}
-#else
-static int at86rf230_debugfs_init(struct at86rf230_local *lp) { return 0; }
-static void at86rf230_debugfs_remove(void) { }
-#endif
-
 static int at86rf230_probe(struct spi_device *spi)
 {
 	struct ieee802154_hw *hw;
 	struct at86rf230_local *lp;
+	struct gpio_desc *slp_tr;
+	struct gpio_desc *rstn;
 	unsigned int status;
-	int rc, irq_type, rstn, slp_tr;
-	u8 xtal_trim = 0;
+	int rc, irq_type;
+	u8 xtal_trim;
 
 	if (!spi->irq) {
 		dev_err(&spi->dev, "no IRQ specified\n");
 		return -EINVAL;
 	}
 
-	rc = at86rf230_get_pdata(spi, &rstn, &slp_tr, &xtal_trim);
+	rc = device_property_read_u8(&spi->dev, "xtal-trim", &xtal_trim);
 	if (rc < 0) {
-		dev_err(&spi->dev, "failed to parse platform_data: %d\n", rc);
+		if (rc != -EINVAL) {
+			dev_err(&spi->dev,
+				"failed to parse xtal-trim: %d\n", rc);
+			return rc;
+		}
+		xtal_trim = 0;
+	}
+
+	rstn = devm_gpiod_get_optional(&spi->dev, "reset", GPIOD_OUT_LOW);
+	rc = PTR_ERR_OR_ZERO(rstn);
+	if (rc)
 		return rc;
-	}
 
-	if (gpio_is_valid(rstn)) {
-		rc = devm_gpio_request_one(&spi->dev, rstn,
-					   GPIOF_OUT_INIT_HIGH, "rstn");
-		if (rc)
-			return rc;
-	}
+	gpiod_set_consumer_name(rstn, "rstn");
 
-	if (gpio_is_valid(slp_tr)) {
-		rc = devm_gpio_request_one(&spi->dev, slp_tr,
-					   GPIOF_OUT_INIT_LOW, "slp_tr");
-		if (rc)
-			return rc;
-	}
+	slp_tr = devm_gpiod_get_optional(&spi->dev, "sleep", GPIOD_OUT_LOW);
+	rc = PTR_ERR_OR_ZERO(slp_tr);
+	if (rc)
+		return rc;
+
+	gpiod_set_consumer_name(slp_tr, "slp_tr");
 
 	/* Reset */
-	if (gpio_is_valid(rstn)) {
+	if (rstn) {
 		udelay(1);
-		gpio_set_value(rstn, 0);
+		gpiod_set_value_cansleep(rstn, 1);
 		udelay(1);
-		gpio_set_value(rstn, 1);
+		gpiod_set_value_cansleep(rstn, 0);
 		usleep_range(120, 240);
 	}
 
@@ -1770,25 +1618,19 @@ static int at86rf230_probe(struct spi_device *spi)
 	/* going into sleep by default */
 	at86rf230_sleep(lp);
 
-	rc = at86rf230_debugfs_init(lp);
+	rc = ieee802154_register_hw(lp->hw);
 	if (rc)
 		goto free_dev;
 
-	rc = ieee802154_register_hw(lp->hw);
-	if (rc)
-		goto free_debugfs;
-
 	return rc;
 
-free_debugfs:
-	at86rf230_debugfs_remove();
 free_dev:
 	ieee802154_free_hw(lp->hw);
 
 	return rc;
 }
 
-static int at86rf230_remove(struct spi_device *spi)
+static void at86rf230_remove(struct spi_device *spi)
 {
 	struct at86rf230_local *lp = spi_get_drvdata(spi);
 
@@ -1796,10 +1638,7 @@ static int at86rf230_remove(struct spi_device *spi)
 	at86rf230_write_subreg(lp, SR_IRQ_MASK, 0);
 	ieee802154_unregister_hw(lp->hw);
 	ieee802154_free_hw(lp->hw);
-	at86rf230_debugfs_remove();
 	dev_dbg(&spi->dev, "unregistered at86rf230\n");
-
-	return 0;
 }
 
 static const struct of_device_id at86rf230_of_match[] = {
@@ -1823,7 +1662,7 @@ MODULE_DEVICE_TABLE(spi, at86rf230_device_id);
 static struct spi_driver at86rf230_driver = {
 	.id_table = at86rf230_device_id,
 	.driver = {
-		.of_match_table = of_match_ptr(at86rf230_of_match),
+		.of_match_table = at86rf230_of_match,
 		.name	= "at86rf230",
 	},
 	.probe      = at86rf230_probe,

@@ -268,8 +268,8 @@
 		};
 
 		i2c@118000 {
-			pca9547@77 {
-				compatible = "philips,pca9547";
+			i2c-mux@77 {
+				compatible = "nxp,pca9547";
 				reg = <0x77>;
 			};
 			rtc@68 {

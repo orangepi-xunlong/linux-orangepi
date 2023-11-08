@@ -1,16 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Atmel Atmegaxx Capacitive Touch Button Driver
  *
  * Copyright (C) 2016 Google, inc.
- *
- * This software is licensed under the terms of the GNU General Public
- * License version 2, as published by the Free Software Foundation, and
- * may be copied, distributed, and modified under those terms.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 /*
@@ -169,8 +161,7 @@ out:
 /*
  * Probe function to setup the device, input system and interrupt
  */
-static int atmel_captouch_probe(struct i2c_client *client,
-		const struct i2c_device_id *id)
+static int atmel_captouch_probe(struct i2c_client *client)
 {
 	struct atmel_captouch_device *capdev;
 	struct device *dev = &client->dev;
@@ -191,7 +182,6 @@ static int atmel_captouch_probe(struct i2c_client *client,
 		return -ENOMEM;
 
 	capdev->client = client;
-	i2c_set_clientdata(client, capdev);
 
 	err = atmel_read(capdev, REG_KEY_STATE,
 			    &capdev->prev_btn, sizeof(capdev->prev_btn));
@@ -258,7 +248,6 @@ static int atmel_captouch_probe(struct i2c_client *client,
 	return 0;
 }
 
-#ifdef CONFIG_OF
 static const struct of_device_id atmel_captouch_of_id[] = {
 	{
 		.compatible = "atmel,captouch",
@@ -266,7 +255,6 @@ static const struct of_device_id atmel_captouch_of_id[] = {
 	{ /* sentinel */ }
 };
 MODULE_DEVICE_TABLE(of, atmel_captouch_of_id);
-#endif
 
 static const struct i2c_device_id atmel_captouch_id[] = {
 	{ "atmel_captouch", 0 },
@@ -279,7 +267,7 @@ static struct i2c_driver atmel_captouch_driver = {
 	.id_table	= atmel_captouch_id,
 	.driver		= {
 		.name	= "atmel_captouch",
-		.of_match_table = of_match_ptr(atmel_captouch_of_id),
+		.of_match_table = atmel_captouch_of_id,
 	},
 };
 module_i2c_driver(atmel_captouch_driver);

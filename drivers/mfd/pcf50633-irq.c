@@ -1,17 +1,13 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* NXP PCF50633 Power Management Unit (PMU) driver
  *
  * (C) 2006-2008 by Openmoko, Inc.
  * Author: Harald Welte <laforge@openmoko.org>
  * 	   Balaji Rao <balajirrao@openmoko.org>
  * All rights reserved.
- *
- *  This program is free software; you can redistribute  it and/or modify it
- *  under  the terms of  the GNU General  Public License as published by the
- *  Free Software Foundation;  either version 2 of the  License, or (at your
- *  option) any later version.
- *
  */
 
+#include <linux/i2c.h>
 #include <linux/interrupt.h>
 #include <linux/kernel.h>
 #include <linux/mutex.h>
@@ -223,10 +219,10 @@ out:
 	return IRQ_HANDLED;
 }
 
-#ifdef CONFIG_PM
-
-int pcf50633_irq_suspend(struct pcf50633 *pcf)
+static int pcf50633_suspend(struct device *dev)
 {
+	struct i2c_client *client = to_i2c_client(dev);
+	struct pcf50633 *pcf = i2c_get_clientdata(client);
 	int ret;
 	int i;
 	u8 res[5];
@@ -262,8 +258,10 @@ out:
 	return ret;
 }
 
-int pcf50633_irq_resume(struct pcf50633 *pcf)
+static int pcf50633_resume(struct device *dev)
 {
+	struct i2c_client *client = to_i2c_client(dev);
+	struct pcf50633 *pcf = i2c_get_clientdata(client);
 	int ret;
 
 	/* Write the saved mask registers */
@@ -278,7 +276,7 @@ int pcf50633_irq_resume(struct pcf50633 *pcf)
 	return ret;
 }
 
-#endif
+EXPORT_GPL_SIMPLE_DEV_PM_OPS(pcf50633_pm, pcf50633_suspend, pcf50633_resume);
 
 int pcf50633_irq_init(struct pcf50633 *pcf, int irq)
 {

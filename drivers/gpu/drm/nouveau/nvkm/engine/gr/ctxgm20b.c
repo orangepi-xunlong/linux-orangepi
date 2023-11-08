@@ -22,40 +22,26 @@
 #include "ctxgf100.h"
 
 static void
-gm20b_grctx_generate_r406028(struct gf100_gr *gr)
+gm20b_grctx_generate_main(struct gf100_gr_chan *chan)
 {
-	struct nvkm_device *device = gr->base.engine.subdev.device;
-	u32 tpc_per_gpc = 0;
-	int i;
-
-	for (i = 0; i < gr->gpc_nr; i++)
-		tpc_per_gpc |= gr->tpc_nr[i] << (4 * i);
-
-	nvkm_wr32(device, 0x406028, tpc_per_gpc);
-	nvkm_wr32(device, 0x405870, tpc_per_gpc);
-}
-
-static void
-gm20b_grctx_generate_main(struct gf100_gr *gr, struct gf100_grctx *info)
-{
+	struct gf100_gr *gr = chan->gr;
 	struct nvkm_device *device = gr->base.engine.subdev.device;
 	const struct gf100_grctx_func *grctx = gr->func->grctx;
 	u32 idle_timeout;
 	int i, tmp;
 
-	gf100_gr_mmio(gr, gr->fuc_sw_ctx);
+	gf100_gr_mmio(gr, gr->sw_ctx);
 
 	gf100_gr_wait_idle(gr);
 
 	idle_timeout = nvkm_mask(device, 0x404154, 0xffffffff, 0x00000000);
 
-	grctx->attrib(info);
+	grctx->attrib_cb(chan, chan->attrib_cb->addr, grctx->attrib_cb_size(gr));
+	grctx->attrib(chan);
 
 	grctx->unkn(gr);
 
-	gm200_grctx_generate_tpcid(gr);
-	gm20b_grctx_generate_r406028(gr);
-	gk104_grctx_generate_r418bb8(gr);
+	gf100_grctx_generate_floorsweep(gr);
 
 	for (i = 0; i < 8; i++)
 		nvkm_wr32(device, 0x4064d0 + (i * 0x04), 0x00000000);
@@ -68,19 +54,19 @@ gm20b_grctx_generate_main(struct gf100_gr *gr, struct gf100_grctx *info)
 		tmp |= ((1 << gr->tpc_nr[i]) - 1) << (i * 4);
 	nvkm_wr32(device, 0x4041c4, tmp);
 
-	gm200_grctx_generate_405b60(gr);
+	gm200_grctx_generate_smid_config(gr);
 
 	gf100_gr_wait_idle(gr);
 
 	nvkm_wr32(device, 0x404154, idle_timeout);
 	gf100_gr_wait_idle(gr);
 
-	gf100_gr_mthd(gr, gr->fuc_method);
+	gf100_gr_mthd(gr, gr->method);
 	gf100_gr_wait_idle(gr);
 
-	gf100_gr_icmd(gr, gr->fuc_bundle);
-	grctx->pagepool(info);
-	grctx->bundle(info);
+	gf100_gr_icmd(gr, gr->bundle);
+	grctx->pagepool(chan, chan->pagepool->addr);
+	grctx->bundle(chan, chan->bundle_cb->addr, grctx->bundle_size);
 }
 
 const struct gf100_grctx_func
@@ -93,9 +79,13 @@ gm20b_grctx = {
 	.bundle_token_limit = 0x1c0,
 	.pagepool = gm107_grctx_generate_pagepool,
 	.pagepool_size = 0x8000,
+	.attrib_cb_size = gf100_grctx_generate_attrib_cb_size,
+	.attrib_cb = gm107_grctx_generate_attrib_cb,
 	.attrib = gm107_grctx_generate_attrib,
 	.attrib_nr_max = 0x600,
 	.attrib_nr = 0x400,
 	.alpha_nr_max = 0xc00,
 	.alpha_nr = 0x800,
+	.sm_id = gm107_grctx_generate_sm_id,
+	.rop_mapping = gf117_grctx_generate_rop_mapping,
 };

@@ -1,6 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <linux/string.h>
 #include <termios.h>
 #include <sys/ioctl.h>
 #include <sys/types.h>
@@ -14,6 +16,8 @@
 void add_cmdname(struct cmdnames *cmds, const char *name, size_t len)
 {
 	struct cmdname *ent = malloc(sizeof(*ent) + len + 1);
+	if (!ent)
+		return;
 
 	ent->len = len;
 	memcpy(ent->name, name, len);
@@ -63,17 +67,29 @@ void exclude_cmds(struct cmdnames *cmds, struct cmdnames *excludes)
 	ci = cj = ei = 0;
 	while (ci < cmds->cnt && ei < excludes->cnt) {
 		cmp = strcmp(cmds->names[ci]->name, excludes->names[ei]->name);
-		if (cmp < 0)
-			cmds->names[cj++] = cmds->names[ci++];
-		else if (cmp == 0)
-			ci++, ei++;
-		else if (cmp > 0)
+		if (cmp < 0) {
+			if (ci == cj) {
+				ci++;
+				cj++;
+			} else {
+				zfree(&cmds->names[cj]);
+				cmds->names[cj++] = cmds->names[ci++];
+			}
+		} else if (cmp == 0) {
+			ci++;
 			ei++;
+		} else if (cmp > 0) {
+			ei++;
+		}
 	}
-
-	while (ci < cmds->cnt)
-		cmds->names[cj++] = cmds->names[ci++];
-
+	if (ci != cj) {
+		while (ci < cmds->cnt) {
+			zfree(&cmds->names[cj]);
+			cmds->names[cj++] = cmds->names[ci++];
+		}
+	}
+	for (ci = cj; ci < cmds->cnt; ci++)
+		zfree(&cmds->names[ci]);
 	cmds->cnt = cj;
 }
 
@@ -170,7 +186,7 @@ static void list_commands_in_dir(struct cmdnames *cmds,
 	while ((de = readdir(dir)) != NULL) {
 		int entlen;
 
-		if (prefixcmp(de->d_name, prefix))
+		if (!strstarts(de->d_name, prefix))
 			continue;
 
 		astrcat(&buf, de->d_name);

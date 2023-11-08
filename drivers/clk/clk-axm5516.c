@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * drivers/clk/clk-axm5516.c
  *
@@ -5,10 +6,6 @@
  * the Axxia device: PLL clock, a clock divider and a clock mux.
  *
  * Copyright (C) 2014 LSI Corporation
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 as published by
- * the Free Software Foundation.
  */
 #include <linux/module.h>
 #include <linux/kernel.h>
@@ -311,7 +308,6 @@ static struct axxia_divclk clk_per_div = {
 			"clk_sm1_pll"
 		},
 		.num_parents = 1,
-		.flags = CLK_IS_BASIC,
 		.ops = &axxia_divclk_ops,
 	},
 	.reg   = 0x1000c,
@@ -326,7 +322,6 @@ static struct axxia_divclk clk_mmc_div = {
 			"clk_sm1_pll"
 		},
 		.num_parents = 1,
-		.flags = CLK_IS_BASIC,
 		.ops = &axxia_divclk_ops,
 	},
 	.reg   = 0x1000c,
@@ -546,14 +541,12 @@ MODULE_DEVICE_TABLE(of, axmclk_match_table);
 static int axmclk_probe(struct platform_device *pdev)
 {
 	void __iomem *base;
-	struct resource *res;
 	int i, ret;
 	struct device *dev = &pdev->dev;
 	struct regmap *regmap;
 	size_t num_clks;
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	base = devm_ioremap_resource(dev, res);
+	base = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(base))
 		return PTR_ERR(base);
 
@@ -574,18 +567,11 @@ static int axmclk_probe(struct platform_device *pdev)
 			return ret;
 	}
 
-	return of_clk_add_hw_provider(dev->of_node, of_clk_axmclk_get, NULL);
-}
-
-static int axmclk_remove(struct platform_device *pdev)
-{
-	of_clk_del_provider(pdev->dev.of_node);
-	return 0;
+	return devm_of_clk_add_hw_provider(dev, of_clk_axmclk_get, NULL);
 }
 
 static struct platform_driver axmclk_driver = {
 	.probe		= axmclk_probe,
-	.remove		= axmclk_remove,
 	.driver		= {
 		.name	= "clk-axm5516",
 		.of_match_table = axmclk_match_table,

@@ -1,13 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Driver for LP8727 Micro/Mini USB IC with integrated charger
  *
  *			Copyright (C) 2011 Texas Instruments
  *			Copyright (C) 2011 National Semiconductor
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
  */
 
 #include <linux/module.h>
@@ -544,7 +540,7 @@ static struct lp8727_platform_data *lp8727_parse_dt(struct device *dev)
 }
 #endif
 
-static int lp8727_probe(struct i2c_client *cl, const struct i2c_device_id *id)
+static int lp8727_probe(struct i2c_client *cl)
 {
 	struct lp8727_chg *pchg;
 	struct lp8727_platform_data *pdata;
@@ -594,16 +590,15 @@ static int lp8727_probe(struct i2c_client *cl, const struct i2c_device_id *id)
 	return 0;
 }
 
-static int lp8727_remove(struct i2c_client *cl)
+static void lp8727_remove(struct i2c_client *cl)
 {
 	struct lp8727_chg *pchg = i2c_get_clientdata(cl);
 
 	lp8727_release_irq(pchg);
 	lp8727_unregister_psy(pchg);
-	return 0;
 }
 
-static const struct of_device_id lp8727_dt_ids[] = {
+static const struct of_device_id lp8727_dt_ids[] __maybe_unused = {
 	{ .compatible = "ti,lp8727", },
 	{ }
 };

@@ -1,13 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * VFIO generic eventfd code for IRQFD support.
  * Derived from drivers/vfio/pci/vfio_pci_intrs.c
  *
  * Copyright (C) 2012 Red Hat, Inc.  All rights reserved.
  *     Author: Alex Williamson <alex.williamson@redhat.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/vfio.h>
@@ -15,15 +12,12 @@
 #include <linux/file.h>
 #include <linux/module.h>
 #include <linux/slab.h>
-
-#define DRIVER_VERSION  "0.1"
-#define DRIVER_AUTHOR   "Alex Williamson <alex.williamson@redhat.com>"
-#define DRIVER_DESC     "IRQFD support for VFIO bus drivers"
+#include "vfio.h"
 
 static struct workqueue_struct *vfio_irqfd_cleanup_wq;
 static DEFINE_SPINLOCK(virqfd_lock);
 
-static int __init vfio_virqfd_init(void)
+int __init vfio_virqfd_init(void)
 {
 	vfio_irqfd_cleanup_wq =
 		create_singlethread_workqueue("vfio-irqfd-cleanup");
@@ -33,7 +27,7 @@ static int __init vfio_virqfd_init(void)
 	return 0;
 }
 
-static void __exit vfio_virqfd_exit(void)
+void vfio_virqfd_exit(void)
 {
 	destroy_workqueue(vfio_irqfd_cleanup_wq);
 }
@@ -43,12 +37,15 @@ static void virqfd_deactivate(struct virqfd *virqfd)
 	queue_work(vfio_irqfd_cleanup_wq, &virqfd->shutdown);
 }
 
-static int virqfd_wakeup(wait_queue_t *wait, unsigned mode, int sync, void *key)
+static int virqfd_wakeup(wait_queue_entry_t *wait, unsigned mode, int sync, void *key)
 {
 	struct virqfd *virqfd = container_of(wait, struct virqfd, wait);
-	unsigned long flags = (unsigned long)key;
+	__poll_t flags = key_to_poll(key);
 
-	if (flags & POLLIN) {
+	if (flags & EPOLLIN) {
+		u64 cnt;
+		eventfd_ctx_do_read(virqfd->eventfd, &cnt);
+
 		/* An event has been signaled, call function */
 		if ((!virqfd->handler ||
 		     virqfd->handler(virqfd->opaque, virqfd->data)) &&
@@ -56,7 +53,7 @@ static int virqfd_wakeup(wait_queue_t *wait, unsigned mode, int sync, void *key)
 			schedule_work(&virqfd->inject);
 	}
 
-	if (flags & POLLHUP) {
+	if (flags & EPOLLHUP) {
 		unsigned long flags;
 		spin_lock_irqsave(&virqfd_lock, flags);
 
@@ -113,9 +110,9 @@ int vfio_virqfd_enable(void *opaque,
 	struct eventfd_ctx *ctx;
 	struct virqfd *virqfd;
 	int ret = 0;
-	unsigned int events;
+	__poll_t events;
 
-	virqfd = kzalloc(sizeof(*virqfd), GFP_KERNEL);
+	virqfd = kzalloc(sizeof(*virqfd), GFP_KERNEL_ACCOUNT);
 	if (!virqfd)
 		return -ENOMEM;
 
@@ -166,20 +163,20 @@ int vfio_virqfd_enable(void *opaque,
 	init_waitqueue_func_entry(&virqfd->wait, virqfd_wakeup);
 	init_poll_funcptr(&virqfd->pt, virqfd_ptable_queue_proc);
 
-	events = irqfd.file->f_op->poll(irqfd.file, &virqfd->pt);
+	events = vfs_poll(irqfd.file, &virqfd->pt);
 
 	/*
 	 * Check if there was an event already pending on the eventfd
 	 * before we registered and trigger it as if we didn't miss it.
 	 */
-	if (events & POLLIN) {
+	if (events & EPOLLIN) {
 		if ((!handler || handler(opaque, data)) && thread)
 			schedule_work(&virqfd->inject);
 	}
 
 	/*
 	 * Do not drop the file until the irqfd is fully initialized,
-	 * otherwise we might race against the POLLHUP.
+	 * otherwise we might race against the EPOLLHUP.
 	 */
 	fdput(irqfd);
 
@@ -216,11 +213,3 @@ void vfio_virqfd_disable(struct virqfd **pvirqfd)
 	flush_workqueue(vfio_irqfd_cleanup_wq);
 }
 EXPORT_SYMBOL_GPL(vfio_virqfd_disable);
-
-module_init(vfio_virqfd_init);
-module_exit(vfio_virqfd_exit);
-
-MODULE_VERSION(DRIVER_VERSION);
-MODULE_LICENSE("GPL v2");
-MODULE_AUTHOR(DRIVER_AUTHOR);
-MODULE_DESCRIPTION(DRIVER_DESC);

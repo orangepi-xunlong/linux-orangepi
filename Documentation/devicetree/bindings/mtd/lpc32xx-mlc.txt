@@ -19,11 +19,11 @@ accuracy:)
 - nxp,wr_low: WR_LOW
 
 Optional subnodes:
-- Partitions, see Documentation/devicetree/bindings/mtd/partition.txt
+- Partitions, see Documentation/devicetree/bindings/mtd/mtd.yaml
 
 Example:
 
-	mlc: flash@200A8000 {
+	mlc: flash@200a8000 {
 		compatible = "nxp,lpc3220-mlc";
 		reg = <0x200A8000 0x11000>;
 		interrupts = <11 0>;

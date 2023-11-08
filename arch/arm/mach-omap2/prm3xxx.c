@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * OMAP3xxx PRM module functions
  *
@@ -6,10 +7,6 @@
  * Benoît Cousson
  * Paul Walmsley
  * Rajendra Nayak <rnayak@ti.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/kernel.h>
@@ -35,6 +32,7 @@ static void omap3xxx_prm_read_pending_irqs(unsigned long *events);
 static void omap3xxx_prm_ocp_barrier(void);
 static void omap3xxx_prm_save_and_clear_irqen(u32 *saved_mask);
 static void omap3xxx_prm_restore_irqen(u32 *saved_mask);
+static void omap3xxx_prm_iva_idle(void);
 
 static const struct omap_prcm_irq omap3_prcm_irqs[] = {
 	OMAP_PRCM_IRQ("wkup",	0,	0),
@@ -271,7 +269,7 @@ static int omap3xxx_prm_clear_mod_irqs(s16 module, u8 regs, u32 wkst_mask)
  * Toggles the reset signal to modem IP block. Required to allow
  * OMAP3430 without stacked modem to idle properly.
  */
-void __init omap3_prm_reset_modem(void)
+static void __init omap3_prm_reset_modem(void)
 {
 	omap2_prm_write_mod_reg(
 		OMAP3430_RM_RSTCTRL_CORE_MODEM_SW_RSTPWRON_MASK |
@@ -433,7 +431,7 @@ static void omap3_prm_reconfigure_io_chain(void)
  * registers, and omap3xxx_prm_reconfigure_io_chain() must be called.
  * No return value.
  */
-static void __init omap3xxx_prm_enable_io_wakeup(void)
+static void omap3xxx_prm_enable_io_wakeup(void)
 {
 	if (prm_features & PRM_HAS_IO_WAKEUP)
 		omap2_prm_set_mod_reg_bits(OMAP3430_EN_IO_MASK, WKUP_MOD,
@@ -472,7 +470,7 @@ static u32 omap3xxx_prm_read_reset_sources(void)
  * function forces the IVA2 into idle state so it can go
  * into retention/off and thus allow full-chip retention/off.
  */
-void omap3xxx_prm_iva_idle(void)
+static void omap3xxx_prm_iva_idle(void)
 {
 	/* ensure IVA2 clock is disabled */
 	omap2_cm_write_mod_reg(0, OMAP3430_IVA2_MOD, CM_FCLKEN);
@@ -676,7 +674,7 @@ static struct prm_ll_data omap3xxx_prm_ll_data = {
 int __init omap3xxx_prm_init(const struct omap_prcm_init_data *data)
 {
 	omap2_clk_legacy_provider_init(TI_CLKM_PRM,
-				       prm_base + OMAP3430_IVA2_MOD);
+				       prm_base.va + OMAP3430_IVA2_MOD);
 	if (omap3_has_io_wakeup())
 		prm_features |= PRM_HAS_IO_WAKEUP;
 
@@ -690,7 +688,8 @@ static const struct of_device_id omap3_prm_dt_match_table[] = {
 
 static int omap3xxx_prm_late_init(void)
 {
-	int ret;
+	struct device_node *np;
+	int irq_num;
 
 	if (!(prm_features & PRM_HAS_IO_WAKEUP))
 		return 0;
@@ -702,25 +701,23 @@ static int omap3xxx_prm_late_init(void)
 		omap3_prcm_irq_setup.reconfigure_io_chain =
 			omap3430_pre_es3_1_reconfigure_io_chain;
 
-	if (of_have_populated_dt()) {
-		struct device_node *np;
-		int irq_num;
+	np = of_find_matching_node(NULL, omap3_prm_dt_match_table);
+	if (!np) {
+		pr_err("PRM: no device tree node for interrupt?\n");
 
-		np = of_find_matching_node(NULL, omap3_prm_dt_match_table);
-		if (np) {
-			irq_num = of_irq_get(np, 0);
-			if (irq_num >= 0)
-				omap3_prcm_irq_setup.irq = irq_num;
-		}
+		return -ENODEV;
 	}
 
-	omap3xxx_prm_enable_io_wakeup();
-	ret = omap_prcm_register_chain_handler(&omap3_prcm_irq_setup);
-	if (!ret)
-		irq_set_status_flags(omap_prcm_event_to_irq("io"),
-				     IRQ_NOAUTOEN);
+	irq_num = of_irq_get(np, 0);
+	of_node_put(np);
+	if (irq_num == -EPROBE_DEFER)
+		return irq_num;
 
-	return ret;
+	omap3_prcm_irq_setup.irq = irq_num;
+
+	omap3xxx_prm_enable_io_wakeup();
+
+	return omap_prcm_register_chain_handler(&omap3_prcm_irq_setup);
 }
 
 static void __exit omap3xxx_prm_exit(void)

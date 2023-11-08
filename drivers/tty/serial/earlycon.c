@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Copyright (C) 2014 Linaro Ltd.
  * Author: Rob Herring <robh@kernel.org>
@@ -5,10 +6,6 @@
  * Based on 8250 earlycon:
  * (c) Copyright 2004 Hewlett-Packard Development Company, L.P.
  *	Bjorn Helgaas <bjorn.helgaas@hp.com>
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #define pr_fmt(fmt)	KBUILD_MODNAME ": " fmt
@@ -59,7 +56,6 @@ static void __init earlycon_init(struct earlycon_device *device,
 				 const char *name)
 {
 	struct console *earlycon = device->con;
-	struct uart_port *port = &device->port;
 	const char *s;
 	size_t len;
 
@@ -71,8 +67,14 @@ static void __init earlycon_init(struct earlycon_device *device,
 	if (*s)
 		earlycon->index = simple_strtoul(s, NULL, 10);
 	len = s - name;
-	strlcpy(earlycon->name, name, min(len + 1, sizeof(earlycon->name)));
+	strscpy(earlycon->name, name, min(len + 1, sizeof(earlycon->name)));
 	earlycon->data = &early_console_dev;
+}
+
+static void __init earlycon_print_info(struct earlycon_device *device)
+{
+	struct console *earlycon = device->con;
+	struct uart_port *port = &device->port;
 
 	if (port->iotype == UPIO_MEM || port->iotype == UPIO_MEM16 ||
 	    port->iotype == UPIO_MEM32 || port->iotype == UPIO_MEM32BE)
@@ -118,10 +120,16 @@ static int __init parse_options(struct earlycon_device *device, char *options)
 	}
 
 	if (options) {
+		char *uartclk;
+
 		device->baud = simple_strtoul(options, NULL, 0);
+		uartclk = strchr(options, ',');
+		if (uartclk && kstrtouint(uartclk + 1, 0, &port->uartclk) < 0)
+			pr_warn("[%s] unsupported earlycon uart clkrate option\n",
+				options);
 		length = min(strcspn(options, " ") + 1,
 			     (size_t)(sizeof(device->options)));
-		strlcpy(device->options, options, length);
+		strscpy(device->options, options, length);
 	}
 
 	return 0;
@@ -137,12 +145,14 @@ static int __init register_earlycon(char *buf, const struct earlycon_id *match)
 		buf = NULL;
 
 	spin_lock_init(&port->lock);
-	port->uartclk = BASE_BAUD * 16;
+	if (!port->uartclk)
+		port->uartclk = BASE_BAUD * 16;
 	if (port->mapbase)
 		port->membase = earlycon_map(port->mapbase, 64);
 
 	earlycon_init(&early_console_dev, match->name);
 	err = match->setup(&early_console_dev, buf);
+	earlycon_print_info(&early_console_dev);
 	if (err < 0)
 		return err;
 	if (!early_console_dev.con->write)
@@ -172,20 +182,24 @@ static int __init register_earlycon(char *buf, const struct earlycon_id *match)
  */
 int __init setup_earlycon(char *buf)
 {
-	const struct earlycon_id **p_match;
+	const struct earlycon_id *match;
+	bool empty_compatible = true;
 
 	if (!buf || !buf[0])
 		return -EINVAL;
 
-	if (early_con.flags & CON_ENABLED)
+	if (console_is_registered(&early_con))
 		return -EALREADY;
 
-	for (p_match = __earlycon_table; p_match < __earlycon_table_end;
-	     p_match++) {
-		const struct earlycon_id *match = *p_match;
+again:
+	for (match = __earlycon_table; match < __earlycon_table_end; match++) {
 		size_t len = strlen(match->name);
 
 		if (strncmp(buf, match->name, len))
+			continue;
+
+		/* prefer entries with empty compatible */
+		if (empty_compatible && *match->compatible)
 			continue;
 
 		if (buf[len]) {
@@ -198,31 +212,31 @@ int __init setup_earlycon(char *buf)
 		return register_earlycon(buf, match);
 	}
 
+	if (empty_compatible) {
+		empty_compatible = false;
+		goto again;
+	}
+
 	return -ENOENT;
 }
 
 /*
- * When CONFIG_ACPI_SPCR_TABLE is defined, "earlycon" without parameters in
- * command line does not start DT earlycon immediately, instead it defers
- * starting it until DT/ACPI decision is made.  At that time if ACPI is enabled
- * call parse_spcr(), else call early_init_dt_scan_chosen_stdout()
+ * This defers the initialization of the early console until after ACPI has
+ * been initialized.
  */
-bool earlycon_init_is_deferred __initdata;
+bool earlycon_acpi_spcr_enable __initdata;
 
 /* early_param wrapper for setup_earlycon() */
 static int __init param_setup_earlycon(char *buf)
 {
 	int err;
 
-	/*
-	 * Just 'earlycon' is a valid param for devicetree earlycons;
-	 * don't generate a warning from parse_early_params() in that case
-	 */
+	/* Just 'earlycon' is a valid param for devicetree and ACPI SPCR. */
 	if (!buf || !buf[0]) {
 		if (IS_ENABLED(CONFIG_ACPI_SPCR_TABLE)) {
-			earlycon_init_is_deferred = true;
+			earlycon_acpi_spcr_enable = true;
 			return 0;
-		} else {
+		} else if (!buf) {
 			return early_init_dt_scan_chosen_stdout();
 		}
 	}
@@ -246,6 +260,9 @@ int __init of_setup_earlycon(const struct earlycon_id *match,
 	bool big_endian;
 	u64 addr;
 
+	if (console_is_registered(&early_con))
+		return -EALREADY;
+
 	spin_lock_init(&port->lock);
 	port->iotype = UPIO_MEM;
 	addr = of_flat_dt_translate_address(node);
@@ -254,7 +271,6 @@ int __init of_setup_earlycon(const struct earlycon_id *match,
 		return -ENXIO;
 	}
 	port->mapbase = addr;
-	port->uartclk = BASE_BAUD * 16;
 
 	val = of_get_flat_dt_prop(node, "reg-offset", NULL);
 	if (val)
@@ -285,12 +301,22 @@ int __init of_setup_earlycon(const struct earlycon_id *match,
 		}
 	}
 
+	val = of_get_flat_dt_prop(node, "current-speed", NULL);
+	if (val)
+		early_console_dev.baud = be32_to_cpu(*val);
+
+	val = of_get_flat_dt_prop(node, "clock-frequency", NULL);
+	if (val)
+		port->uartclk = be32_to_cpu(*val);
+
 	if (options) {
-		strlcpy(early_console_dev.options, options,
+		early_console_dev.baud = simple_strtoul(options, NULL, 0);
+		strscpy(early_console_dev.options, options,
 			sizeof(early_console_dev.options));
 	}
 	earlycon_init(&early_console_dev, match->name);
 	err = match->setup(&early_console_dev, options);
+	earlycon_print_info(&early_console_dev);
 	if (err < 0)
 		return err;
 	if (!early_console_dev.con->write)

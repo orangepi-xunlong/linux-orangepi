@@ -1,17 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright 2016 Broadcom
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License, version 2, as
- * published by the Free Software Foundation (the "GPL").
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License version 2 (GPLv2) for more details.
- *
- * You should have received a copy of the GNU General Public License
- * version 2 (GPLv2) along with this source code.
  */
 
 #include <linux/device.h>
@@ -32,14 +21,14 @@ static int brcmstb_qspi_probe(struct platform_device *pdev)
 	return bcm_qspi_probe(pdev, NULL);
 }
 
-static int brcmstb_qspi_remove(struct platform_device *pdev)
+static void brcmstb_qspi_remove(struct platform_device *pdev)
 {
-	return bcm_qspi_remove(pdev);
+	bcm_qspi_remove(pdev);
 }
 
 static struct platform_driver brcmstb_qspi_driver = {
 	.probe			= brcmstb_qspi_probe,
-	.remove			= brcmstb_qspi_remove,
+	.remove_new		= brcmstb_qspi_remove,
 	.driver = {
 		.name		= "brcmstb_qspi",
 		.pm		= &bcm_qspi_pm_ops,

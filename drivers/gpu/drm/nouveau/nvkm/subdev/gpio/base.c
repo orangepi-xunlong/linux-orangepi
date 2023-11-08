@@ -23,7 +23,7 @@
  */
 #include "priv.h"
 
-#include <core/notify.h>
+#include <core/option.h>
 
 static int
 nvkm_gpio_drive(struct nvkm_gpio *gpio, int idx, int line, int dir, int out)
@@ -122,23 +122,8 @@ nvkm_gpio_intr_init(struct nvkm_event *event, int type, int index)
 	gpio->func->intr_mask(gpio, type, 1 << index, 1 << index);
 }
 
-static int
-nvkm_gpio_intr_ctor(struct nvkm_object *object, void *data, u32 size,
-		    struct nvkm_notify *notify)
-{
-	struct nvkm_gpio_ntfy_req *req = data;
-	if (!WARN_ON(size != sizeof(*req))) {
-		notify->size  = sizeof(struct nvkm_gpio_ntfy_rep);
-		notify->types = req->mask;
-		notify->index = req->line;
-		return 0;
-	}
-	return -EINVAL;
-}
-
 static const struct nvkm_event_func
 nvkm_gpio_intr_func = {
-	.ctor = nvkm_gpio_intr_ctor,
 	.init = nvkm_gpio_intr_init,
 	.fini = nvkm_gpio_intr_fini,
 };
@@ -152,11 +137,9 @@ nvkm_gpio_intr(struct nvkm_subdev *subdev)
 	gpio->func->intr_stat(gpio, &hi, &lo);
 
 	for (i = 0; (hi | lo) && i < gpio->func->lines; i++) {
-		struct nvkm_gpio_ntfy_rep rep = {
-			.mask = (NVKM_GPIO_HI * !!(hi & (1 << i))) |
-				(NVKM_GPIO_LO * !!(lo & (1 << i))),
-		};
-		nvkm_event_send(&gpio->event, rep.mask, i, &rep, sizeof(rep));
+		u32 mask = (NVKM_GPIO_HI * !!(hi & (1 << i))) |
+			   (NVKM_GPIO_LO * !!(lo & (1 << i)));
+		nvkm_event_ntfy(&gpio->event, i, mask);
 	}
 }
 
@@ -164,14 +147,14 @@ static int
 nvkm_gpio_fini(struct nvkm_subdev *subdev, bool suspend)
 {
 	struct nvkm_gpio *gpio = nvkm_gpio(subdev);
-	u32 mask = (1 << gpio->func->lines) - 1;
+	u32 mask = (1ULL << gpio->func->lines) - 1;
 
 	gpio->func->intr_mask(gpio, NVKM_GPIO_TOGGLED, mask, 0);
 	gpio->func->intr_stat(gpio, &mask, &mask);
 	return 0;
 }
 
-static struct dmi_system_id gpio_reset_ids[] = {
+static const struct dmi_system_id gpio_reset_ids[] = {
 	{
 		.ident = "Apple Macbook 10,1",
 		.matches = {
@@ -182,12 +165,43 @@ static struct dmi_system_id gpio_reset_ids[] = {
 	{ }
 };
 
+static enum dcb_gpio_func_name power_checks[] = {
+	DCB_GPIO_THERM_EXT_POWER_EVENT,
+	DCB_GPIO_POWER_ALERT,
+	DCB_GPIO_EXT_POWER_LOW,
+};
+
 static int
 nvkm_gpio_init(struct nvkm_subdev *subdev)
 {
 	struct nvkm_gpio *gpio = nvkm_gpio(subdev);
+	struct dcb_gpio_func func;
+	int ret;
+	int i;
+
 	if (dmi_check_system(gpio_reset_ids))
 		nvkm_gpio_reset(gpio, DCB_GPIO_UNUSED);
+
+	if (nvkm_boolopt(subdev->device->cfgopt, "NvPowerChecks", true)) {
+		for (i = 0; i < ARRAY_SIZE(power_checks); ++i) {
+			ret = nvkm_gpio_find(gpio, 0, power_checks[i],
+					     DCB_GPIO_UNUSED, &func);
+			if (ret)
+				continue;
+
+			ret = nvkm_gpio_get(gpio, 0, func.func, func.line);
+			if (!ret)
+				continue;
+
+			nvkm_error(&gpio->subdev,
+				   "GPU is missing power, check its power "
+				   "cables.  Boot with "
+				   "nouveau.config=NvPowerChecks=0 to "
+				   "disable.\n");
+			return -EINVAL;
+		}
+	}
+
 	return 0;
 }
 
@@ -209,16 +223,15 @@ nvkm_gpio = {
 
 int
 nvkm_gpio_new_(const struct nvkm_gpio_func *func, struct nvkm_device *device,
-	       int index, struct nvkm_gpio **pgpio)
+	       enum nvkm_subdev_type type, int inst, struct nvkm_gpio **pgpio)
 {
 	struct nvkm_gpio *gpio;
 
 	if (!(gpio = *pgpio = kzalloc(sizeof(*gpio), GFP_KERNEL)))
 		return -ENOMEM;
 
-	nvkm_subdev_ctor(&nvkm_gpio, device, index, &gpio->subdev);
+	nvkm_subdev_ctor(&nvkm_gpio, device, type, inst, &gpio->subdev);
 	gpio->func = func;
 
-	return nvkm_event_init(&nvkm_gpio_intr_func, 2, func->lines,
-			       &gpio->event);
+	return nvkm_event_init(&nvkm_gpio_intr_func, &gpio->subdev, 2, func->lines, &gpio->event);
 }

@@ -1,12 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0+
 /*
  * Copyright (C) 2004 by Thomas Rathbone, HP Labs
  * Copyright (C) 2005 by Ivan Kokshaysky
  * Copyright (C) 2006 by SAN People
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
  */
 
 #ifndef AT91_UDC_H
@@ -113,11 +109,9 @@ struct at91_udc_caps {
 };
 
 struct at91_udc_data {
-	int	vbus_pin;		/* high == host powering us */
-	u8	vbus_active_low;	/* vbus polarity */
-	u8	vbus_polled;		/* Use polling, not interrupt */
-	int	pullup_pin;		/* active == D+ pulled up */
-	u8	pullup_active_low;	/* true == pullup_pin is active low */
+	struct gpio_desc  *vbus_pin;		/* high == host powering us */
+	u8	          vbus_polled;		/* Use polling, not interrupt */
+	struct gpio_desc  *pullup_pin;		/* active == D+ pulled up */
 };
 
 /*
@@ -175,7 +169,7 @@ struct at91_request {
 #endif
 
 #define ERR(stuff...)		pr_err("udc: " stuff)
-#define WARNING(stuff...)	pr_warning("udc: " stuff)
+#define WARNING(stuff...)	pr_warn("udc: " stuff)
 #define INFO(stuff...)		pr_info("udc: " stuff)
 #define DBG(stuff...)		pr_debug("udc: " stuff)
 

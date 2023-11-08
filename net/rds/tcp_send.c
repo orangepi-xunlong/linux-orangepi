@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2006 Oracle.  All rights reserved.
+ * Copyright (c) 2006, 2017 Oracle and/or its affiliates. All rights reserved.
  *
  * This software is available to you under a choice of one of two
  * licenses.  You may choose to be licensed under the terms of the GNU
@@ -38,29 +38,18 @@
 #include "rds.h"
 #include "tcp.h"
 
-static void rds_tcp_cork(struct socket *sock, int val)
-{
-	mm_segment_t oldfs;
-
-	oldfs = get_fs();
-	set_fs(KERNEL_DS);
-	sock->ops->setsockopt(sock, SOL_TCP, TCP_CORK, (char __user *)&val,
-			      sizeof(val));
-	set_fs(oldfs);
-}
-
 void rds_tcp_xmit_path_prepare(struct rds_conn_path *cp)
 {
 	struct rds_tcp_connection *tc = cp->cp_transport_data;
 
-	rds_tcp_cork(tc->t_sock, 1);
+	tcp_sock_set_cork(tc->t_sock->sk, true);
 }
 
 void rds_tcp_xmit_path_complete(struct rds_conn_path *cp)
 {
 	struct rds_tcp_connection *tc = cp->cp_transport_data;
 
-	rds_tcp_cork(tc->t_sock, 0);
+	tcp_sock_set_cork(tc->t_sock->sk, false);
 }
 
 /* the core send_sem serializes this with other xmit and shutdown */
@@ -83,16 +72,17 @@ int rds_tcp_xmit(struct rds_connection *conn, struct rds_message *rm,
 {
 	struct rds_conn_path *cp = rm->m_inc.i_conn_path;
 	struct rds_tcp_connection *tc = cp->cp_transport_data;
+	struct msghdr msg = {};
+	struct bio_vec bvec;
 	int done = 0;
 	int ret = 0;
-	int more;
 
 	if (hdr_off == 0) {
 		/*
 		 * m_ack_seq is set to the sequence number of the last byte of
 		 * header and data.  see rds_tcp_is_acked().
 		 */
-		tc->t_last_sent_nxt = rds_tcp_snd_nxt(tc);
+		tc->t_last_sent_nxt = rds_tcp_write_seq(tc);
 		rm->m_ack_seq = tc->t_last_sent_nxt +
 				sizeof(struct rds_header) +
 				be32_to_cpu(rm->m_inc.i_hdr.h_len) - 1;
@@ -100,8 +90,11 @@ int rds_tcp_xmit(struct rds_connection *conn, struct rds_message *rm,
 		set_bit(RDS_MSG_HAS_ACK_SEQ, &rm->m_flags);
 		tc->t_last_expected_una = rm->m_ack_seq + 1;
 
+		if (test_bit(RDS_MSG_RETRANSMITTED, &rm->m_flags))
+			rm->m_inc.i_hdr.h_flags |= RDS_FLAG_RETRANSMITTED;
+
 		rdsdebug("rm %p tcp nxt %u ack_seq %llu\n",
-			 rm, rds_tcp_snd_nxt(tc),
+			 rm, rds_tcp_write_seq(tc),
 			 (unsigned long long)rm->m_ack_seq);
 	}
 
@@ -119,15 +112,17 @@ int rds_tcp_xmit(struct rds_connection *conn, struct rds_message *rm,
 			goto out;
 	}
 
-	more = rm->data.op_nents > 1 ? (MSG_MORE | MSG_SENDPAGE_NOTLAST) : 0;
 	while (sg < rm->data.op_nents) {
-		int flags = MSG_DONTWAIT | MSG_NOSIGNAL | more;
+		msg.msg_flags = MSG_SPLICE_PAGES | MSG_DONTWAIT | MSG_NOSIGNAL;
+		if (sg + 1 < rm->data.op_nents)
+			msg.msg_flags |= MSG_MORE;
 
-		ret = tc->t_sock->ops->sendpage(tc->t_sock,
-						sg_page(&rm->data.op_sg[sg]),
-						rm->data.op_sg[sg].offset + off,
-						rm->data.op_sg[sg].length - off,
-						flags);
+		bvec_set_page(&bvec, sg_page(&rm->data.op_sg[sg]),
+			      rm->data.op_sg[sg].length - off,
+			      rm->data.op_sg[sg].offset + off);
+		iov_iter_bvec(&msg.msg_iter, ITER_SOURCE, &bvec, 1,
+			      rm->data.op_sg[sg].length - off);
+		ret = sock_sendmsg(tc->t_sock, &msg);
 		rdsdebug("tcp sendpage %p:%u:%u ret %d\n", (void *)sg_page(&rm->data.op_sg[sg]),
 			 rm->data.op_sg[sg].offset + off, rm->data.op_sg[sg].length - off,
 			 ret);
@@ -140,8 +135,6 @@ int rds_tcp_xmit(struct rds_connection *conn, struct rds_message *rm,
 			off = 0;
 			sg++;
 		}
-		if (sg == rm->data.op_nents - 1)
-			more = 0;
 	}
 
 out:
@@ -156,11 +149,11 @@ out:
 			 * an incoming RST.
 			 */
 			if (rds_conn_path_up(cp)) {
-				pr_warn("RDS/tcp: send to %pI4 on cp [%d]"
+				pr_warn("RDS/tcp: send to %pI6c on cp [%d]"
 					"returned %d, "
 					"disconnecting and reconnecting\n",
 					&conn->c_faddr, cp->cp_index, ret);
-				rds_conn_path_drop(cp);
+				rds_conn_path_drop(cp, false);
 			}
 		}
 	}
@@ -205,8 +198,11 @@ void rds_tcp_write_space(struct sock *sk)
 	tc->t_last_seen_una = rds_tcp_snd_una(tc);
 	rds_send_path_drop_acked(cp, rds_tcp_snd_una(tc), rds_tcp_is_acked);
 
-	if ((atomic_read(&sk->sk_wmem_alloc) << 1) <= sk->sk_sndbuf)
+	rcu_read_lock();
+	if ((refcount_read(&sk->sk_wmem_alloc) << 1) <= sk->sk_sndbuf &&
+	    !rds_destroy_pending(cp->cp_conn))
 		queue_delayed_work(rds_wq, &cp->cp_send_w, 0);
+	rcu_read_unlock();
 
 out:
 	read_unlock_bh(&sk->sk_callback_lock);

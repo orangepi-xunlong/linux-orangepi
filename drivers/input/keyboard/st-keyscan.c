@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * STMicroelectronics Key Scanning driver
  *
@@ -5,18 +6,16 @@
  * Author: Stuart Menefy <stuart.menefy@st.com>
  *
  * Based on sh_keysc.c, copyright 2008 Magnus Damm
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
-#include <linux/module.h>
-#include <linux/interrupt.h>
-#include <linux/platform_device.h>
 #include <linux/clk.h>
-#include <linux/io.h>
+#include <linux/input.h>
 #include <linux/input/matrix_keypad.h>
+#include <linux/io.h>
+#include <linux/interrupt.h>
+#include <linux/module.h>
+#include <linux/of.h>
+#include <linux/platform_device.h>
 
 #define ST_KEYSCAN_MAXKEYS 16
 
@@ -106,8 +105,8 @@ static int keypad_matrix_key_parse_dt(struct st_keyscan *keypad_data)
 	struct device_node *np = dev->of_node;
 	int error;
 
-	error = matrix_keypad_parse_of_params(dev, &keypad_data->n_rows,
-					      &keypad_data->n_cols);
+	error = matrix_keypad_parse_properties(dev, &keypad_data->n_rows,
+					       &keypad_data->n_cols);
 	if (error) {
 		dev_err(dev, "failed to parse keypad params\n");
 		return error;
@@ -126,7 +125,6 @@ static int keyscan_probe(struct platform_device *pdev)
 {
 	struct st_keyscan *keypad_data;
 	struct input_dev *input_dev;
-	struct resource *res;
 	int error;
 
 	if (!pdev->dev.of_node) {
@@ -153,6 +151,8 @@ static int keyscan_probe(struct platform_device *pdev)
 
 	input_dev->id.bustype = BUS_HOST;
 
+	keypad_data->input_dev = input_dev;
+
 	error = keypad_matrix_key_parse_dt(keypad_data);
 	if (error)
 		return error;
@@ -168,10 +168,7 @@ static int keyscan_probe(struct platform_device *pdev)
 
 	input_set_drvdata(input_dev, keypad_data);
 
-	keypad_data->input_dev = input_dev;
-
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	keypad_data->base = devm_ioremap_resource(&pdev->dev, res);
+	keypad_data->base = devm_platform_get_and_ioremap_resource(pdev, 0, NULL);
 	if (IS_ERR(keypad_data->base))
 		return PTR_ERR(keypad_data->base);
 
@@ -190,10 +187,8 @@ static int keyscan_probe(struct platform_device *pdev)
 	keyscan_stop(keypad_data);
 
 	keypad_data->irq = platform_get_irq(pdev, 0);
-	if (keypad_data->irq < 0) {
-		dev_err(&pdev->dev, "no IRQ specified\n");
+	if (keypad_data->irq < 0)
 		return -EINVAL;
-	}
 
 	error = devm_request_irq(&pdev->dev, keypad_data->irq, keyscan_isr, 0,
 				 pdev->name, keypad_data);
@@ -215,7 +210,6 @@ static int keyscan_probe(struct platform_device *pdev)
 	return 0;
 }
 
-#ifdef CONFIG_PM_SLEEP
 static int keyscan_suspend(struct device *dev)
 {
 	struct platform_device *pdev = to_platform_device(dev);
@@ -226,7 +220,7 @@ static int keyscan_suspend(struct device *dev)
 
 	if (device_may_wakeup(dev))
 		enable_irq_wake(keypad->irq);
-	else if (input->users)
+	else if (input_device_enabled(input))
 		keyscan_stop(keypad);
 
 	mutex_unlock(&input->mutex);
@@ -244,15 +238,15 @@ static int keyscan_resume(struct device *dev)
 
 	if (device_may_wakeup(dev))
 		disable_irq_wake(keypad->irq);
-	else if (input->users)
+	else if (input_device_enabled(input))
 		retval = keyscan_start(keypad);
 
 	mutex_unlock(&input->mutex);
 	return retval;
 }
-#endif
 
-static SIMPLE_DEV_PM_OPS(keyscan_dev_pm_ops, keyscan_suspend, keyscan_resume);
+static DEFINE_SIMPLE_DEV_PM_OPS(keyscan_dev_pm_ops,
+				keyscan_suspend, keyscan_resume);
 
 static const struct of_device_id keyscan_of_match[] = {
 	{ .compatible = "st,sti-keyscan" },
@@ -264,8 +258,8 @@ static struct platform_driver keyscan_device_driver = {
 	.probe		= keyscan_probe,
 	.driver		= {
 		.name	= "st-keyscan",
-		.pm	= &keyscan_dev_pm_ops,
-		.of_match_table = of_match_ptr(keyscan_of_match),
+		.pm	= pm_sleep_ptr(&keyscan_dev_pm_ops),
+		.of_match_table = keyscan_of_match,
 	}
 };
 

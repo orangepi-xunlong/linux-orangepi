@@ -1,13 +1,9 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * ST Thermal Sensor Driver for STi series of SoCs
  * Author: Ajit Pal Singh <ajitpal.singh@st.com>
  *
  * Copyright (C) 2003-2014 STMicroelectronics (R&D) Limited
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
  */
 
 #ifndef __STI_THERMAL_SYSCFG_H
@@ -98,7 +94,7 @@ struct st_thermal_sensor {
 
 extern int st_thermal_register(struct platform_device *pdev,
 			       const struct of_device_id *st_thermal_of_match);
-extern int st_thermal_unregister(struct platform_device *pdev);
+extern void st_thermal_unregister(struct platform_device *pdev);
 extern const struct dev_pm_ops st_thermal_pm_ops;
 
 #endif /* __STI_RESET_SYSCFG_H */

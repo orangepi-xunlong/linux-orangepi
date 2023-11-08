@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  linux/drivers/mmc/host/omap.c
  *
@@ -5,10 +6,6 @@
  *  Written by Tuukka Tikkanen and Juha Yrjölä<juha.yrjola@nokia.com>
  *  Misc hacks here and there by Tony Lindgren <tony@atomide.com>
  *  Other hacks (DMA, SD, etc) by David Brownell
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/module.h>
@@ -29,6 +26,7 @@
 #include <linux/clk.h>
 #include <linux/scatterlist.h>
 #include <linux/slab.h>
+#include <linux/gpio/consumer.h>
 #include <linux/platform_data/mmc-omap.h>
 
 
@@ -104,6 +102,7 @@ struct mmc_omap_slot {
 	unsigned int		vdd;
 	u16			saved_con;
 	u16			bus_mode;
+	u16			power_mode;
 	unsigned int		fclk_freq;
 
 	struct tasklet_struct	cover_tasklet;
@@ -113,6 +112,9 @@ struct mmc_omap_slot {
 	struct mmc_request      *mrq;
 	struct mmc_omap_host    *host;
 	struct mmc_host		*mmc;
+	struct gpio_desc	*vsd;
+	struct gpio_desc	*vio;
+	struct gpio_desc	*cover;
 	struct omap_mmc_slot_data *pdata;
 };
 
@@ -135,6 +137,7 @@ struct mmc_omap_host {
 	int			irq;
 	unsigned char		bus_mode;
 	unsigned int		reg_shift;
+	struct gpio_desc	*slot_switch;
 
 	struct work_struct	cmd_abort_work;
 	unsigned		abort:1;
@@ -218,8 +221,13 @@ no_claim:
 
 	if (host->current_slot != slot) {
 		OMAP_MMC_WRITE(host, CON, slot->saved_con & 0xFC00);
-		if (host->pdata->switch_slot != NULL)
-			host->pdata->switch_slot(mmc_dev(slot->mmc), slot->id);
+		if (host->slot_switch)
+			/*
+			 * With two slots and a simple GPIO switch, setting
+			 * the GPIO to 0 selects slot ID 0, setting it to 1
+			 * selects slot ID 1.
+			 */
+			gpiod_set_value(host->slot_switch, slot->id);
 		host->current_slot = slot;
 	}
 
@@ -299,6 +307,9 @@ static void mmc_omap_release_slot(struct mmc_omap_slot *slot, int clk_enabled)
 static inline
 int mmc_omap_cover_is_open(struct mmc_omap_slot *slot)
 {
+	/* If we have a GPIO then use that */
+	if (slot->cover)
+		return gpiod_get_value(slot->cover);
 	if (slot->pdata->get_cover_state)
 		return slot->pdata->get_cover_state(mmc_dev(slot->mmc),
 						    slot->id);
@@ -625,9 +636,9 @@ static void mmc_omap_abort_command(struct work_struct *work)
 }
 
 static void
-mmc_omap_cmd_timer(unsigned long data)
+mmc_omap_cmd_timer(struct timer_list *t)
 {
-	struct mmc_omap_host *host = (struct mmc_omap_host *) data;
+	struct mmc_omap_host *host = from_timer(host, t, cmd_abort_timer);
 	unsigned long flags;
 
 	spin_lock_irqsave(&host->slot_lock, flags);
@@ -654,9 +665,9 @@ mmc_omap_sg_to_buf(struct mmc_omap_host *host)
 }
 
 static void
-mmc_omap_clk_timer(unsigned long data)
+mmc_omap_clk_timer(struct timer_list *t)
 {
-	struct mmc_omap_host *host = (struct mmc_omap_host *) data;
+	struct mmc_omap_host *host = from_timer(host, t, clk_timer);
 
 	mmc_omap_fclk_enable(host, 0);
 }
@@ -874,15 +885,15 @@ void omap_mmc_notify_cover_event(struct device *dev, int num, int is_closed)
 	tasklet_hi_schedule(&slot->cover_tasklet);
 }
 
-static void mmc_omap_cover_timer(unsigned long arg)
+static void mmc_omap_cover_timer(struct timer_list *t)
 {
-	struct mmc_omap_slot *slot = (struct mmc_omap_slot *) arg;
+	struct mmc_omap_slot *slot = from_timer(slot, t, cover_timer);
 	tasklet_schedule(&slot->cover_tasklet);
 }
 
-static void mmc_omap_cover_handler(unsigned long param)
+static void mmc_omap_cover_handler(struct tasklet_struct *t)
 {
-	struct mmc_omap_slot *slot = (struct mmc_omap_slot *)param;
+	struct mmc_omap_slot *slot = from_tasklet(slot, t, cover_tasklet);
 	int cover_open = mmc_omap_cover_is_open(slot);
 
 	mmc_detect_change(slot->mmc, 0);
@@ -893,7 +904,7 @@ static void mmc_omap_cover_handler(unsigned long param)
 	 * If no card is inserted, we postpone polling until
 	 * the cover has been closed.
 	 */
-	if (slot->mmc->card == NULL || !mmc_card_present(slot->mmc->card))
+	if (slot->mmc->card == NULL)
 		return;
 
 	mod_timer(&slot->cover_timer,
@@ -919,7 +930,7 @@ static inline void set_cmd_timeout(struct mmc_omap_host *host, struct mmc_reques
 	reg &= ~(1 << 5);
 	OMAP_MMC_WRITE(host, SDIO, reg);
 	/* Set maximum timeout */
-	OMAP_MMC_WRITE(host, CTO, 0xff);
+	OMAP_MMC_WRITE(host, CTO, 0xfd);
 }
 
 static inline void set_data_timeout(struct mmc_omap_host *host, struct mmc_request *req)
@@ -1108,6 +1119,11 @@ static void mmc_omap_set_power(struct mmc_omap_slot *slot, int power_on,
 
 	host = slot->host;
 
+	if (slot->vsd)
+		gpiod_set_value(slot->vsd, power_on);
+	if (slot->vio)
+		gpiod_set_value(slot->vio, power_on);
+
 	if (slot->pdata->set_power != NULL)
 		slot->pdata->set_power(mmc_dev(slot->mmc), slot->id, power_on,
 					vdd);
@@ -1157,7 +1173,7 @@ static void mmc_omap_set_ios(struct mmc_host *mmc, struct mmc_ios *ios)
 	struct mmc_omap_slot *slot = mmc_priv(mmc);
 	struct mmc_omap_host *host = slot->host;
 	int i, dsor;
-	int clk_enabled;
+	int clk_enabled, init_stream;
 
 	mmc_omap_select_slot(slot, 0);
 
@@ -1167,6 +1183,7 @@ static void mmc_omap_set_ios(struct mmc_host *mmc, struct mmc_ios *ios)
 		slot->vdd = ios->vdd;
 
 	clk_enabled = 0;
+	init_stream = 0;
 	switch (ios->power_mode) {
 	case MMC_POWER_OFF:
 		mmc_omap_set_power(slot, 0, ios->vdd);
@@ -1174,13 +1191,17 @@ static void mmc_omap_set_ios(struct mmc_host *mmc, struct mmc_ios *ios)
 	case MMC_POWER_UP:
 		/* Cannot touch dsor yet, just power up MMC */
 		mmc_omap_set_power(slot, 1, ios->vdd);
+		slot->power_mode = ios->power_mode;
 		goto exit;
 	case MMC_POWER_ON:
 		mmc_omap_fclk_enable(host, 1);
 		clk_enabled = 1;
 		dsor |= 1 << 11;
+		if (slot->power_mode != MMC_POWER_ON)
+			init_stream = 1;
 		break;
 	}
+	slot->power_mode = ios->power_mode;
 
 	if (slot->bus_mode != ios->bus_mode) {
 		if (slot->pdata->set_bus_mode != NULL)
@@ -1196,7 +1217,7 @@ static void mmc_omap_set_ios(struct mmc_host *mmc, struct mmc_ios *ios)
 	for (i = 0; i < 2; i++)
 		OMAP_MMC_WRITE(host, CON, dsor);
 	slot->saved_con = dsor;
-	if (ios->power_mode == MMC_POWER_ON) {
+	if (init_stream) {
 		/* worst case at 400kHz, 80 cycles makes 200 microsecs */
 		int usecs = 250;
 
@@ -1234,13 +1255,31 @@ static int mmc_omap_new_slot(struct mmc_omap_host *host, int id)
 	slot->host = host;
 	slot->mmc = mmc;
 	slot->id = id;
+	slot->power_mode = MMC_POWER_UNDEFINED;
 	slot->pdata = &host->pdata->slots[id];
+
+	/* Check for some optional GPIO controls */
+	slot->vsd = gpiod_get_index_optional(host->dev, "vsd",
+					     id, GPIOD_OUT_LOW);
+	if (IS_ERR(slot->vsd))
+		return dev_err_probe(host->dev, PTR_ERR(slot->vsd),
+				     "error looking up VSD GPIO\n");
+	slot->vio = gpiod_get_index_optional(host->dev, "vio",
+					     id, GPIOD_OUT_LOW);
+	if (IS_ERR(slot->vio))
+		return dev_err_probe(host->dev, PTR_ERR(slot->vio),
+				     "error looking up VIO GPIO\n");
+	slot->cover = gpiod_get_index_optional(host->dev, "cover",
+						id, GPIOD_IN);
+	if (IS_ERR(slot->cover))
+		return dev_err_probe(host->dev, PTR_ERR(slot->cover),
+				     "error looking up cover switch GPIO\n");
 
 	host->slots[id] = slot;
 
 	mmc->caps = 0;
 	if (host->pdata->slots[id].wires >= 4)
-		mmc->caps |= MMC_CAP_4_BIT_DATA | MMC_CAP_ERASE;
+		mmc->caps |= MMC_CAP_4_BIT_DATA;
 
 	mmc->ops = &mmc_omap_ops;
 	mmc->f_min = 400000;
@@ -1264,10 +1303,8 @@ static int mmc_omap_new_slot(struct mmc_omap_host *host, int id)
 	mmc->max_seg_size = mmc->max_req_size;
 
 	if (slot->pdata->get_cover_state != NULL) {
-		setup_timer(&slot->cover_timer, mmc_omap_cover_timer,
-			    (unsigned long)slot);
-		tasklet_init(&slot->cover_tasklet, mmc_omap_cover_handler,
-			     (unsigned long)slot);
+		timer_setup(&slot->cover_timer, mmc_omap_cover_timer, 0);
+		tasklet_setup(&slot->cover_tasklet, mmc_omap_cover_handler);
 	}
 
 	r = mmc_add_host(mmc);
@@ -1341,22 +1378,27 @@ static int mmc_omap_probe(struct platform_device *pdev)
 
 	irq = platform_get_irq(pdev, 0);
 	if (irq < 0)
-		return -ENXIO;
+		return irq;
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	host->virt_base = devm_ioremap_resource(&pdev->dev, res);
+	host->virt_base = devm_platform_get_and_ioremap_resource(pdev, 0, &res);
 	if (IS_ERR(host->virt_base))
 		return PTR_ERR(host->virt_base);
+
+	host->slot_switch = gpiod_get_optional(host->dev, "switch",
+					       GPIOD_OUT_LOW);
+	if (IS_ERR(host->slot_switch))
+		return dev_err_probe(host->dev, PTR_ERR(host->slot_switch),
+				     "error looking up slot switch GPIO\n");
+
 
 	INIT_WORK(&host->slot_release_work, mmc_omap_slot_release_work);
 	INIT_WORK(&host->send_stop_work, mmc_omap_send_stop_work);
 
 	INIT_WORK(&host->cmd_abort_work, mmc_omap_abort_command);
-	setup_timer(&host->cmd_abort_timer, mmc_omap_cmd_timer,
-		    (unsigned long) host);
+	timer_setup(&host->cmd_abort_timer, mmc_omap_cmd_timer, 0);
 
 	spin_lock_init(&host->clk_lock);
-	setup_timer(&host->clk_timer, mmc_omap_clk_timer, (unsigned long) host);
+	timer_setup(&host->clk_timer, mmc_omap_clk_timer, 0);
 
 	spin_lock_init(&host->dma_lock);
 	spin_lock_init(&host->slot_lock);
@@ -1373,7 +1415,7 @@ static int mmc_omap_probe(struct platform_device *pdev)
 	host->iclk = clk_get(&pdev->dev, "ick");
 	if (IS_ERR(host->iclk))
 		return PTR_ERR(host->iclk);
-	clk_enable(host->iclk);
+	clk_prepare_enable(host->iclk);
 
 	host->fclk = clk_get(&pdev->dev, "fck");
 	if (IS_ERR(host->fclk)) {
@@ -1381,16 +1423,18 @@ static int mmc_omap_probe(struct platform_device *pdev)
 		goto err_free_iclk;
 	}
 
+	ret = clk_prepare(host->fclk);
+	if (ret)
+		goto err_put_fclk;
+
 	host->dma_tx_burst = -1;
 	host->dma_rx_burst = -1;
 
 	host->dma_tx = dma_request_chan(&pdev->dev, "tx");
 	if (IS_ERR(host->dma_tx)) {
 		ret = PTR_ERR(host->dma_tx);
-		if (ret == -EPROBE_DEFER) {
-			clk_put(host->fclk);
-			goto err_free_iclk;
-		}
+		if (ret == -EPROBE_DEFER)
+			goto err_free_fclk;
 
 		host->dma_tx = NULL;
 		dev_warn(host->dev, "TX DMA channel request failed\n");
@@ -1402,8 +1446,7 @@ static int mmc_omap_probe(struct platform_device *pdev)
 		if (ret == -EPROBE_DEFER) {
 			if (host->dma_tx)
 				dma_release_channel(host->dma_tx);
-			clk_put(host->fclk);
-			goto err_free_iclk;
+			goto err_free_fclk;
 		}
 
 		host->dma_rx = NULL;
@@ -1453,14 +1496,17 @@ err_free_dma:
 		dma_release_channel(host->dma_tx);
 	if (host->dma_rx)
 		dma_release_channel(host->dma_rx);
+err_free_fclk:
+	clk_unprepare(host->fclk);
+err_put_fclk:
 	clk_put(host->fclk);
 err_free_iclk:
-	clk_disable(host->iclk);
+	clk_disable_unprepare(host->iclk);
 	clk_put(host->iclk);
 	return ret;
 }
 
-static int mmc_omap_remove(struct platform_device *pdev)
+static void mmc_omap_remove(struct platform_device *pdev)
 {
 	struct mmc_omap_host *host = platform_get_drvdata(pdev);
 	int i;
@@ -1475,8 +1521,9 @@ static int mmc_omap_remove(struct platform_device *pdev)
 
 	mmc_omap_fclk_enable(host, 0);
 	free_irq(host->irq, host);
+	clk_unprepare(host->fclk);
 	clk_put(host->fclk);
-	clk_disable(host->iclk);
+	clk_disable_unprepare(host->iclk);
 	clk_put(host->iclk);
 
 	if (host->dma_tx)
@@ -1485,8 +1532,6 @@ static int mmc_omap_remove(struct platform_device *pdev)
 		dma_release_channel(host->dma_rx);
 
 	destroy_workqueue(host->mmc_omap_wq);
-
-	return 0;
 }
 
 #if IS_BUILTIN(CONFIG_OF)
@@ -1499,9 +1544,10 @@ MODULE_DEVICE_TABLE(of, mmc_omap_match);
 
 static struct platform_driver mmc_omap_driver = {
 	.probe		= mmc_omap_probe,
-	.remove		= mmc_omap_remove,
+	.remove_new	= mmc_omap_remove,
 	.driver		= {
 		.name	= DRIVER_NAME,
+		.probe_type = PROBE_PREFER_ASYNCHRONOUS,
 		.of_match_table = of_match_ptr(mmc_omap_match),
 	},
 };

@@ -1,9 +1,10 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef __KVM_IO_APIC_H
 #define __KVM_IO_APIC_H
 
 #include <linux/kvm_host.h>
-
 #include <kvm/iodev.h>
+#include "irq.h"
 
 struct kvm;
 struct kvm_vcpu;
@@ -34,21 +35,17 @@ struct kvm_vcpu;
 #define	IOAPIC_INIT			0x5
 #define	IOAPIC_EXTINT			0x7
 
-#ifdef CONFIG_X86
 #define RTC_GSI 8
-#else
-#define RTC_GSI -1U
-#endif
 
 struct dest_map {
 	/* vcpu bitmap where IRQ has been sent */
-	DECLARE_BITMAP(map, KVM_MAX_VCPU_ID);
+	DECLARE_BITMAP(map, KVM_MAX_VCPU_IDS);
 
 	/*
 	 * Vector sent to a given vcpu, only valid when
 	 * the vcpu's bit in map is set
 	 */
-	u8 vectors[KVM_MAX_VCPU_ID];
+	u8 vectors[KVM_MAX_VCPU_IDS];
 };
 
 
@@ -84,7 +81,6 @@ struct kvm_ioapic {
 	unsigned long irq_states[IOAPIC_NUM_PINS];
 	struct kvm_io_device dev;
 	struct kvm *kvm;
-	void (*ack_notifier)(void *opaque, int irq);
 	spinlock_t lock;
 	struct rtc_status rtc_status;
 	struct delayed_work eoi_inject;
@@ -105,23 +101,12 @@ do {									\
 #define ASSERT(x) do { } while (0)
 #endif
 
-static inline struct kvm_ioapic *ioapic_irqchip(struct kvm *kvm)
-{
-	return kvm->arch.vioapic;
-}
-
 static inline int ioapic_in_kernel(struct kvm *kvm)
 {
-	int ret;
-
-	ret = (ioapic_irqchip(kvm) != NULL);
-	return ret;
+	return irqchip_kernel(kvm);
 }
 
 void kvm_rtc_eoi_tracking_restore_one(struct kvm_vcpu *vcpu);
-bool kvm_apic_match_dest(struct kvm_vcpu *vcpu, struct kvm_lapic *source,
-		int short_hand, unsigned int dest, int dest_mode);
-int kvm_apic_compare_prio(struct kvm_vcpu *vcpu1, struct kvm_vcpu *vcpu2);
 void kvm_ioapic_update_eoi(struct kvm_vcpu *vcpu, int vector,
 			int trigger_mode);
 int kvm_ioapic_init(struct kvm *kvm);
@@ -129,11 +114,8 @@ void kvm_ioapic_destroy(struct kvm *kvm);
 int kvm_ioapic_set_irq(struct kvm_ioapic *ioapic, int irq, int irq_source_id,
 		       int level, bool line_status);
 void kvm_ioapic_clear_all(struct kvm_ioapic *ioapic, int irq_source_id);
-int kvm_irq_delivery_to_apic(struct kvm *kvm, struct kvm_lapic *src,
-			     struct kvm_lapic_irq *irq,
-			     struct dest_map *dest_map);
-int kvm_get_ioapic(struct kvm *kvm, struct kvm_ioapic_state *state);
-int kvm_set_ioapic(struct kvm *kvm, struct kvm_ioapic_state *state);
+void kvm_get_ioapic(struct kvm *kvm, struct kvm_ioapic_state *state);
+void kvm_set_ioapic(struct kvm *kvm, struct kvm_ioapic_state *state);
 void kvm_ioapic_scan_entry(struct kvm_vcpu *vcpu,
 			   ulong *ioapic_handled_vectors);
 void kvm_scan_ioapic_routes(struct kvm_vcpu *vcpu,

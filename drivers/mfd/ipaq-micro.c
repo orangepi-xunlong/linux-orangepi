@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Compaq iPAQ h3xxx Atmel microcontroller companion support
  *
@@ -8,10 +9,6 @@
  * Author : Alessandro Gardich <gremlin@gremlin.it>
  * Author : Dmitry Artamonow <mad_soft@inbox.ru>
  * Author : Linus Walleij <linus.walleij@linaro.org>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/module.h>
@@ -53,8 +50,6 @@ static void ipaq_micro_trigger_tx(struct ipaq_micro *micro)
 	tx->buf[bp++] = checksum;
 	tx->len = bp;
 	tx->index = 0;
-	print_hex_dump_debug("data: ", DUMP_PREFIX_OFFSET, 16, 1,
-			     tx->buf, tx->len, true);
 
 	/* Enable interrupt */
 	val = readl(micro->base + UTCR3);
@@ -83,8 +78,6 @@ EXPORT_SYMBOL(ipaq_micro_tx_msg);
 
 static void micro_rx_msg(struct ipaq_micro *micro, u8 id, int len, u8 *data)
 {
-	int i;
-
 	dev_dbg(micro->dev, "RX msg: %02x, %d bytes\n", id, len);
 
 	spin_lock(&micro->lock);
@@ -136,10 +129,7 @@ static void micro_rx_msg(struct ipaq_micro *micro, u8 id, int len, u8 *data)
 		break;
 	default:
 		dev_err(micro->dev,
-			"unknown msg %d [%d] ", id, len);
-		for (i = 0; i < len; ++i)
-			pr_cont("0x%02x ", data[i]);
-		pr_cont("\n");
+			"unknown msg %d [%d] %*ph\n", id, len, len, data);
 	}
 	spin_unlock(&micro->lock);
 }
@@ -281,9 +271,6 @@ static void __init ipaq_micro_eeprom_dump(struct ipaq_micro *micro)
 	dev_info(micro->dev, "RAM size: %u KiB\n", ipaq_micro_to_u16(dump+92));
 	dev_info(micro->dev, "screen: %u x %u\n",
 		 ipaq_micro_to_u16(dump+94), ipaq_micro_to_u16(dump+96));
-	print_hex_dump_debug("eeprom: ", DUMP_PREFIX_OFFSET, 16, 1,
-			     dump, 256, true);
-
 }
 
 static void micro_tx_chars(struct ipaq_micro *micro)
@@ -389,7 +376,6 @@ static int __maybe_unused micro_resume(struct device *dev)
 static int __init micro_probe(struct platform_device *pdev)
 {
 	struct ipaq_micro *micro;
-	struct resource *res;
 	int ret;
 	int irq;
 
@@ -399,26 +385,18 @@ static int __init micro_probe(struct platform_device *pdev)
 
 	micro->dev = &pdev->dev;
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	if (!res)
-		return -EINVAL;
-
-	micro->base = devm_ioremap_resource(&pdev->dev, res);
+	micro->base = devm_platform_get_and_ioremap_resource(pdev, 0, NULL);
 	if (IS_ERR(micro->base))
 		return PTR_ERR(micro->base);
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 1);
-	if (!res)
-		return -EINVAL;
-
-	micro->sdlc = devm_ioremap_resource(&pdev->dev, res);
+	micro->sdlc = devm_platform_ioremap_resource(pdev, 1);
 	if (IS_ERR(micro->sdlc))
 		return PTR_ERR(micro->sdlc);
 
 	micro_reset_comm(micro);
 
 	irq = platform_get_irq(pdev, 0);
-	if (!irq)
+	if (irq < 0)
 		return -EINVAL;
 	ret = devm_request_irq(&pdev->dev, irq, micro_serial_isr,
 			       IRQF_SHARED, "ipaq-micro",

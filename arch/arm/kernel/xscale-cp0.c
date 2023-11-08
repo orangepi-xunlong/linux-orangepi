@@ -1,11 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * linux/arch/arm/kernel/xscale-cp0.c
  *
  * XScale DSP and iWMMXt coprocessor context switching and handling
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/types.h>
@@ -169,6 +166,7 @@ static int __init xscale_cp0_init(void)
 		pr_info("XScale iWMMXt coprocessor detected.\n");
 		elf_hwcap |= HWCAP_IWMMXT;
 		thread_register_notifier(&iwmmxt_notifier_block);
+		register_iwmmxt_undef_handler();
 #endif
 	} else {
 		pr_info("XScale DSP coprocessor detected.\n");

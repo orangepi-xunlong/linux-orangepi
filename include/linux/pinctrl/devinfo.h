@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Per-device information from the pin control system.
  * This is the stuff that get included into the device
@@ -8,17 +9,21 @@
  * This interface is used in the core to keep track of pins.
  *
  * Author: Linus Walleij <linus.walleij@linaro.org>
- *
- * License terms: GNU General Public License (GPL) version 2
  */
 
 #ifndef PINCTRL_DEVINFO_H
 #define PINCTRL_DEVINFO_H
 
+struct device;
+
 #ifdef CONFIG_PINCTRL
+
+#include <linux/device.h>
 
 /* The device core acts as a consumer toward pinctrl */
 #include <linux/pinctrl/consumer.h>
+
+struct pinctrl;
 
 /**
  * struct dev_pin_info - pin state container for devices
@@ -41,6 +46,14 @@ struct dev_pin_info {
 extern int pinctrl_bind_pins(struct device *dev);
 extern int pinctrl_init_done(struct device *dev);
 
+static inline struct pinctrl *dev_pinctrl(struct device *dev)
+{
+	if (!dev->pins)
+		return NULL;
+
+	return dev->pins->p;
+}
+
 #else
 
 /* Stubs if we're not using pinctrl */
@@ -53,6 +66,11 @@ static inline int pinctrl_bind_pins(struct device *dev)
 static inline int pinctrl_init_done(struct device *dev)
 {
 	return 0;
+}
+
+static inline struct pinctrl *dev_pinctrl(struct device *dev)
+{
+	return NULL;
 }
 
 #endif /* CONFIG_PINCTRL */

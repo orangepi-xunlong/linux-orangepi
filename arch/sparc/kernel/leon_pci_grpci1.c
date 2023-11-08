@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * leon_pci_grpci1.c: GRPCI1 Host PCI driver
  *
@@ -12,10 +13,11 @@
  * Contributors: Daniel Hellstrom <daniel@gaisler.com>
  */
 
-#include <linux/of_device.h>
 #include <linux/export.h>
 #include <linux/kernel.h>
+#include <linux/of.h>
 #include <linux/of_irq.h>
+#include <linux/platform_device.h>
 #include <linux/delay.h>
 #include <linux/pci.h>
 
@@ -695,7 +697,7 @@ err1:
 	return err;
 }
 
-static struct of_device_id grpci1_of_match[] = {
+static const struct of_device_id grpci1_of_match[] __initconst = {
 	{
 	 .name = "GAISLER_PCIFBRG",
 	 },

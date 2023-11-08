@@ -1,13 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * PCM3168A codec i2c driver
  *
  * Copyright (C) 2015 Imagination Technologies Ltd.
  *
  * Author: Damien Horsley <Damien.Horsley@imgtec.com>
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
  */
 
 #include <linux/i2c.h>
@@ -18,8 +15,7 @@
 
 #include "pcm3168a.h"
 
-static int pcm3168a_i2c_probe(struct i2c_client *i2c,
-			     const struct i2c_device_id *id)
+static int pcm3168a_i2c_probe(struct i2c_client *i2c)
 {
 	struct regmap *regmap;
 
@@ -30,11 +26,9 @@ static int pcm3168a_i2c_probe(struct i2c_client *i2c,
 	return pcm3168a_probe(&i2c->dev, regmap);
 }
 
-static int pcm3168a_i2c_remove(struct i2c_client *i2c)
+static void pcm3168a_i2c_remove(struct i2c_client *i2c)
 {
 	pcm3168a_remove(&i2c->dev);
-
-	return 0;
 }
 
 static const struct i2c_device_id pcm3168a_i2c_id[] = {

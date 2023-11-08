@@ -1,14 +1,5 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /* Copyright (c) 2013, The Linux Foundation. All rights reserved.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 and
- * only version 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
  */
 
 #include <linux/delay.h>
@@ -23,7 +14,7 @@
 #include <linux/pm.h>
 
 static void __iomem *msm_ps_hold;
-static int do_msm_restart(struct notifier_block *nb, unsigned long action,
+static int deassert_pshold(struct notifier_block *nb, unsigned long action,
 			   void *data)
 {
 	writel(0, msm_ps_hold);
@@ -33,23 +24,18 @@ static int do_msm_restart(struct notifier_block *nb, unsigned long action,
 }
 
 static struct notifier_block restart_nb = {
-	.notifier_call = do_msm_restart,
+	.notifier_call = deassert_pshold,
 	.priority = 128,
 };
 
 static void do_msm_poweroff(void)
 {
-	/* TODO: Add poweroff capability */
-	do_msm_restart(&restart_nb, 0, NULL);
+	deassert_pshold(&restart_nb, 0, NULL);
 }
 
 static int msm_restart_probe(struct platform_device *pdev)
 {
-	struct device *dev = &pdev->dev;
-	struct resource *mem;
-
-	mem = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	msm_ps_hold = devm_ioremap_resource(dev, mem);
+	msm_ps_hold = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(msm_ps_hold))
 		return PTR_ERR(msm_ps_hold);
 

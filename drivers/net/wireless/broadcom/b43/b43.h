@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef B43_H_
 #define B43_H_
 
@@ -650,7 +651,7 @@ struct b43_iv {
 	union {
 		__be16 d16;
 		__be32 d32;
-	} data __packed;
+	} __packed data;
 } __packed;
 
 
@@ -908,7 +909,7 @@ struct b43_wl {
 
 	/* Set this if we call ieee80211_register_hw() and check if we call
 	 * ieee80211_unregister_hw(). */
-	bool hw_registred;
+	bool hw_registered;
 
 	/* We can only have one operating interface (802.11 core)
 	 * at a time. General information about this interface follows.

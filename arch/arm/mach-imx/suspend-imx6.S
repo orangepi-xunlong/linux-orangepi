@@ -1,12 +1,6 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * Copyright 2014 Freescale Semiconductor, Inc.
- *
- * The code contained herein is licensed under the GNU General Public
- * License. You may obtain a copy of the GNU General Public License
- * Version 2 or later at the following locations:
- *
- * http://www.opensource.org/licenses/gpl-license.html
- * http://www.gnu.org/copyleft/gpl.html
  */
 
 #include <linux/linkage.h>
@@ -14,6 +8,8 @@
 #include <asm/asm-offsets.h>
 #include <asm/hardware/cache-l2x0.h>
 #include "hardware.h"
+
+.arch armv7-a
 
 /*
  * ==================== low level suspend ====================
@@ -73,6 +69,7 @@
 #define MX6Q_CCM_CCR	0x0
 
 	.align 3
+	.arm
 
 	.macro  sync_l2_cache
 
@@ -333,17 +330,3 @@ resume:
 
 	ret	lr
 ENDPROC(imx6_suspend)
-
-/*
- * The following code must assume it is running from physical address
- * where absolute virtual addresses to the data section have to be
- * turned into relative ones.
- */
-
-ENTRY(v7_cpu_resume)
-	bl	v7_invalidate_l1
-#ifdef CONFIG_CACHE_L2X0
-	bl	l2c310_early_resume
-#endif
-	b	cpu_resume
-ENDPROC(v7_cpu_resume)

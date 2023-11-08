@@ -1,5 +1,9 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _NET_PPTP_H
 #define _NET_PPTP_H
+
+#include <linux/types.h>
+#include <net/gre.h>
 
 #define PPP_LCP_ECHOREQ 0x09
 #define PPP_LCP_ECHOREP 0x0A

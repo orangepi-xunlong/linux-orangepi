@@ -1,20 +1,18 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright 2008 Freescale Semiconductor, Inc.
- *
- * This program is free software; you can redistribute  it and/or modify it
- * under  the terms of  the GNU General  Public License as published by the
- * Free Software Foundation;  either version 2 of the  License, or (at your
- * option) any later version.
  */
 
 #include <linux/stddef.h>
 #include <linux/kernel.h>
 #include <linux/interrupt.h>
+#include <linux/of.h>
 #include <linux/of_irq.h>
-#include <linux/of_platform.h>
 
 #include <asm/mpic.h>
 #include <asm/i8259.h>
+
+#include "mpc86xx.h"
 
 #ifdef CONFIG_PPC_I8259
 static void mpc86xx_8259_cascade(struct irq_desc *desc)

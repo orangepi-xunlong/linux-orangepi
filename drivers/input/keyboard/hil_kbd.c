@@ -512,6 +512,7 @@ static int hil_dev_connect(struct serio *serio, struct serio_driver *drv)
 		    HIL_IDD_NUM_AXES_PER_SET(*idd)) {
 			printk(KERN_INFO PREFIX
 				"combo devices are not supported.\n");
+			error = -EINVAL;
 			goto bail1;
 		}
 
@@ -559,7 +560,7 @@ static int hil_dev_connect(struct serio *serio, struct serio_driver *drv)
 	return error;
 }
 
-static struct serio_device_id hil_dev_ids[] = {
+static const struct serio_device_id hil_dev_ids[] = {
 	{
 		.type = SERIO_HIL_MLC,
 		.proto = SERIO_HIL,

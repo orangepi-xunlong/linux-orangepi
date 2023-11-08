@@ -1,10 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Analog Devices AD-FMCOMMS1-EBZ board I2C-SPI bridge driver
  *
  * Copyright 2012 Analog Devices Inc.
  * Author: Lars-Peter Clausen <lars@metafoo.de>
- *
- * Licensed under the GPL-2 or later.
  */
 
 #include <linux/kernel.h>
@@ -59,7 +58,7 @@ static int spi_xcomm_sync_config(struct spi_xcomm *spi_xcomm, unsigned int len)
 static void spi_xcomm_chipselect(struct spi_xcomm *spi_xcomm,
 	struct spi_device *spi, int is_active)
 {
-	unsigned long cs = spi->chip_select;
+	unsigned long cs = spi_get_chipselect(spi, 0);
 	uint16_t chipselect = spi_xcomm->chipselect;
 
 	if (is_active)
@@ -189,8 +188,7 @@ static int spi_xcomm_transfer_one(struct spi_master *master,
 		}
 		status = 0;
 
-		if (t->delay_usecs)
-			udelay(t->delay_usecs);
+		spi_transfer_delay_exec(t);
 
 		is_first = false;
 	}
@@ -204,8 +202,7 @@ static int spi_xcomm_transfer_one(struct spi_master *master,
 	return status;
 }
 
-static int spi_xcomm_probe(struct i2c_client *i2c,
-	const struct i2c_device_id *id)
+static int spi_xcomm_probe(struct i2c_client *i2c)
 {
 	struct spi_xcomm *spi_xcomm;
 	struct spi_master *master;
@@ -221,7 +218,7 @@ static int spi_xcomm_probe(struct i2c_client *i2c,
 	master->num_chipselect = 16;
 	master->mode_bits = SPI_CPHA | SPI_CPOL | SPI_3WIRE;
 	master->bits_per_word_mask = SPI_BPW_MASK(8);
-	master->flags = SPI_MASTER_HALF_DUPLEX;
+	master->flags = SPI_CONTROLLER_HALF_DUPLEX;
 	master->transfer_one_message = spi_xcomm_transfer_one;
 	master->dev.of_node = i2c->dev.of_node;
 	i2c_set_clientdata(i2c, master);

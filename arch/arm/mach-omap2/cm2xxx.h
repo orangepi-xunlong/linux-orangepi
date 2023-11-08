@@ -1,13 +1,10 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * OMAP2xxx Clock Management (CM) register definitions
  *
  * Copyright (C) 2007-2009, 2012 Texas Instruments, Inc.
  * Copyright (C) 2007-2010 Nokia Corporation
  * Paul Walmsley
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  *
  * The CM hardware modules on the OMAP2/3 are quite similar to each
  * other.  The CM modules/instances on OMAP4 are quite different, so
@@ -49,13 +46,6 @@
 extern void omap2xxx_cm_set_dpll_disable_autoidle(void);
 extern void omap2xxx_cm_set_dpll_auto_low_power_stop(void);
 
-extern void omap2xxx_cm_set_apll54_disable_autoidle(void);
-extern void omap2xxx_cm_set_apll54_auto_low_power_stop(void);
-extern void omap2xxx_cm_set_apll96_disable_autoidle(void);
-extern void omap2xxx_cm_set_apll96_auto_low_power_stop(void);
-
-int omap2xxx_cm_wait_module_ready(u8 part, s16 prcm_mod, u16 idlest_id,
-				  u8 idlest_shift);
 extern int omap2xxx_cm_fclks_active(void);
 extern int omap2xxx_cm_mpu_retention_allowed(void);
 extern u32 omap2xxx_cm_get_core_clk_src(void);

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *	HP300 Topcat framebuffer support (derived from macfb of all things)
  *	Phil Blundell <philb@gnu.org> 1998
@@ -16,7 +17,7 @@
 #include <linux/dio.h>
 
 #include <asm/io.h>
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 
 static struct fb_info fb_info = {
 	.fix = {
@@ -91,7 +92,7 @@ static int hpfb_setcolreg(unsigned regno, unsigned red, unsigned green,
 
 	if (regno >= info->cmap.len)
 		return 1;
-	
+
 	while (in_be16(fb_regs + 0x6002) & 0x4) udelay(1);
 
 	out_be16(fb_regs + 0x60ba, 0xff);
@@ -142,7 +143,7 @@ static void topcat_blit(int x0, int y0, int x1, int y1, int w, int h, int rr)
 	out_8(fb_regs + WMOVE, fb_bitmask);
 }
 
-static void hpfb_copyarea(struct fb_info *info, const struct fb_copyarea *area) 
+static void hpfb_copyarea(struct fb_info *info, const struct fb_copyarea *area)
 {
 	topcat_blit(area->sx, area->sy, area->dx, area->dy, area->width, area->height, RR_COPY);
 }
@@ -183,7 +184,7 @@ static int hpfb_sync(struct fb_info *info)
 	return 0;
 }
 
-static struct fb_ops hpfb_ops = {
+static const struct fb_ops hpfb_ops = {
 	.owner		= THIS_MODULE,
 	.fb_setcolreg	= hpfb_setcolreg,
 	.fb_blank	= hpfb_blank,
@@ -286,7 +287,6 @@ static int hpfb_init_one(unsigned long phys_base, unsigned long virt_base)
 	else
 		strcat(fb_info.fix.id, "Catseye");
 	fb_info.fbops = &hpfb_ops;
-	fb_info.flags = FBINFO_DEFAULT;
 	fb_info.var   = hpfb_defined;
 	fb_info.screen_base = (char *)fb_start;
 
@@ -314,7 +314,7 @@ unmap_screen_base:
 	return ret;
 }
 
-/* 
+/*
  * Check that the secondary ID indicates that we have some hope of working with this
  * framebuffer.  The catseye boards are pretty much like topcats and we can muddle through.
  */
@@ -322,7 +322,7 @@ unmap_screen_base:
 #define topcat_sid_ok(x)  (((x) == DIO_ID2_LRCATSEYE) || ((x) == DIO_ID2_HRCCATSEYE)    \
 			   || ((x) == DIO_ID2_HRMCATSEYE) || ((x) == DIO_ID2_TOPCAT))
 
-/* 
+/*
  * Initialise the framebuffer
  */
 static int hpfb_dio_probe(struct dio_dev *d, const struct dio_device_id *ent)
@@ -374,10 +374,9 @@ static struct dio_driver hpfb_driver = {
     .remove    = hpfb_remove_one,
 };
 
-int __init hpfb_init(void)
+static int __init hpfb_init(void)
 {
 	unsigned int sid;
-	mm_segment_t fs;
 	unsigned char i;
 	int err;
 
@@ -402,10 +401,7 @@ int __init hpfb_init(void)
 	if (err)
 		return err;
 
-	fs = get_fs();
-	set_fs(KERNEL_DS);
-	err = get_user(i, (unsigned char *)INTFBVADDR + DIO_IDOFF);
-	set_fs(fs);
+	err = copy_from_kernel_nofault(&i, (unsigned char *)INTFBVADDR + DIO_IDOFF, 1);
 
 	if (!err && (i == DIO_ID_FBUFFER) && topcat_sid_ok(sid = DIO_SECID(INTFBVADDR))) {
 		if (!request_mem_region(INTFBPADDR, DIO_DEVSIZE, "Internal Topcat"))
@@ -418,7 +414,7 @@ int __init hpfb_init(void)
 	return 0;
 }
 
-void __exit hpfb_cleanup_module(void)
+static void __exit hpfb_cleanup_module(void)
 {
 	dio_unregister_driver(&hpfb_driver);
 }

@@ -1,26 +1,10 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Marvell 88SE64xx/88SE94xx main function head file
  *
  * Copyright 2007 Red Hat, Inc.
  * Copyright 2008 Marvell. <kewei@marvell.com>
  * Copyright 2009-2011 Marvell. <yuxiangl@marvell.com>
- *
- * This file is licensed under GPLv2.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as
- * published by the Free Software Foundation; version 2 of the
- * License.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307
- * USA
 */
 
 #ifndef _MV_SAS_H_
@@ -56,7 +40,7 @@
 #define mv_dprintk(format, arg...)	\
 	printk(KERN_DEBUG"%s %d:" format, __FILE__, __LINE__, ## arg)
 #else
-#define mv_dprintk(format, arg...)
+#define mv_dprintk(format, arg...) no_printk(format, ## arg)
 #endif
 #define MV_MAX_U32			0xffffffff
 
@@ -65,9 +49,6 @@ extern struct mvs_tgt_initiator mvs_tgt;
 extern struct mvs_info *tgt_mvi;
 extern const struct mvs_dispatch mvs_64xx_dispatch;
 extern const struct mvs_dispatch mvs_94xx_dispatch;
-
-#define DEV_IS_EXPANDER(type)	\
-	((type == SAS_EDGE_EXPANDER_DEVICE) || (type == SAS_FANOUT_EXPANDER_DEVICE))
 
 #define bit(n) ((u64)1 << n)
 
@@ -247,7 +228,6 @@ struct mvs_device {
 	enum sas_device_type dev_type;
 	struct mvs_info *mvi_info;
 	struct domain_device *sas_device;
-	struct timer_list timer;
 	u32 attached_phy;
 	u32 device_id;
 	u32 running_req;
@@ -390,8 +370,7 @@ struct mvs_info {
 	u32 chip_id;
 	const struct mvs_chip_info *chip;
 
-	int tags_num;
-	unsigned long *tags;
+	unsigned long *rsvd_tags;
 	/* further per-slot information */
 	struct mvs_phy phy[MVS_MAX_PHYS];
 	struct mvs_port port[MVS_MAX_PHYS];
@@ -414,7 +393,7 @@ struct mvs_info {
 	dma_addr_t bulk_buffer_dma1;
 #define TRASH_BUCKET_SIZE    	0x20000
 	void *dma_pool;
-	struct mvs_slot_info slot_info[0];
+	struct mvs_slot_info slot_info[];
 };
 
 struct mvs_prv_info{
@@ -444,11 +423,6 @@ struct mvs_task_exec_info {
 
 /******************** function prototype *********************/
 void mvs_get_sas_addr(void *buf, u32 buflen);
-void mvs_tag_clear(struct mvs_info *mvi, u32 tag);
-void mvs_tag_free(struct mvs_info *mvi, u32 tag);
-void mvs_tag_set(struct mvs_info *mvi, unsigned int tag);
-int mvs_tag_alloc(struct mvs_info *mvi, u32 *tag_out);
-void mvs_tag_init(struct mvs_info *mvi);
 void mvs_iounmap(void __iomem *regs);
 int mvs_ioremap(struct mvs_info *mvi, int bar, int bar_ex);
 void mvs_phys_reset(struct mvs_info *mvi, u32 phy_mask, int hard);
@@ -460,9 +434,6 @@ void mvs_scan_start(struct Scsi_Host *shost);
 int mvs_scan_finished(struct Scsi_Host *shost, unsigned long time);
 int mvs_queue_command(struct sas_task *task, gfp_t gfp_flags);
 int mvs_abort_task(struct sas_task *task);
-int mvs_abort_task_set(struct domain_device *dev, u8 *lun);
-int mvs_clear_aca(struct domain_device *dev, u8 *lun);
-int mvs_clear_task_set(struct domain_device *dev, u8 * lun);
 void mvs_port_formed(struct asd_sas_phy *sas_phy);
 void mvs_port_deformed(struct asd_sas_phy *sas_phy);
 int mvs_dev_found(struct domain_device *dev);

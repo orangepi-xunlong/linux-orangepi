@@ -1,10 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2014 Samsung Electronics Co., Ltd.
  * Author: Rahul Sharma <rahul.sharma@samsung.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  *
  * Common Clock Framework support for Exynos5260 SoC.
  */
@@ -18,62 +15,77 @@
 
 #include <dt-bindings/clock/exynos5260-clk.h>
 
+/* NOTE: Must be equal to the last clock ID increased by one */
+#define CLKS_NR_TOP			(PHYCLK_USBDRD30_UDRD30_PHYCLOCK + 1)
+#define CLKS_NR_EGL			(EGL_DOUT_EGL1 + 1)
+#define CLKS_NR_KFC			(KFC_DOUT_KFC1 + 1)
+#define CLKS_NR_MIF			(MIF_SCLK_LPDDR3PHY_WRAP_U0 + 1)
+#define CLKS_NR_G3D			(G3D_CLK_G3D + 1)
+#define CLKS_NR_AUD			(AUD_SCLK_I2S + 1)
+#define CLKS_NR_MFC			(MFC_CLK_SMMU2_MFCM0 + 1)
+#define CLKS_NR_GSCL			(GSCL_SCLK_CSIS0_WRAP + 1)
+#define CLKS_NR_FSYS			(FSYS_PHYCLK_USBHOST20 + 1)
+#define CLKS_NR_PERI			(PERI_SCLK_PCM1 + 1)
+#define CLKS_NR_DISP			(DISP_MOUT_HDMI_PHY_PIXEL_USER + 1)
+#define CLKS_NR_G2D			(G2D_CLK_SMMU3_G2D + 1)
+#define CLKS_NR_ISP			(ISP_SCLK_UART_EXT + 1)
+
 /*
  * Applicable for all 2550 Type PLLS for Exynos5260, listed below
  * DISP_PLL, EGL_PLL, KFC_PLL, MEM_PLL, BUS_PLL, MEDIA_PLL, G3D_PLL.
  */
 static const struct samsung_pll_rate_table pll2550_24mhz_tbl[] __initconst = {
-	PLL_35XX_RATE(1700000000, 425, 6, 0),
-	PLL_35XX_RATE(1600000000, 200, 3, 0),
-	PLL_35XX_RATE(1500000000, 250, 4, 0),
-	PLL_35XX_RATE(1400000000, 175, 3, 0),
-	PLL_35XX_RATE(1300000000, 325, 6, 0),
-	PLL_35XX_RATE(1200000000, 400, 4, 1),
-	PLL_35XX_RATE(1100000000, 275, 3, 1),
-	PLL_35XX_RATE(1000000000, 250, 3, 1),
-	PLL_35XX_RATE(933000000, 311, 4, 1),
-	PLL_35XX_RATE(900000000, 300, 4, 1),
-	PLL_35XX_RATE(800000000, 200, 3, 1),
-	PLL_35XX_RATE(733000000, 733, 12, 1),
-	PLL_35XX_RATE(700000000, 175, 3, 1),
-	PLL_35XX_RATE(667000000, 667, 12, 1),
-	PLL_35XX_RATE(633000000, 211, 4, 1),
-	PLL_35XX_RATE(620000000, 310, 3, 2),
-	PLL_35XX_RATE(600000000, 400, 4, 2),
-	PLL_35XX_RATE(543000000, 362, 4, 2),
-	PLL_35XX_RATE(533000000, 533, 6, 2),
-	PLL_35XX_RATE(500000000, 250, 3, 2),
-	PLL_35XX_RATE(450000000, 300, 4, 2),
-	PLL_35XX_RATE(400000000, 200, 3, 2),
-	PLL_35XX_RATE(350000000, 175, 3, 2),
-	PLL_35XX_RATE(300000000, 400, 4, 3),
-	PLL_35XX_RATE(266000000, 266, 3, 3),
-	PLL_35XX_RATE(200000000, 200, 3, 3),
-	PLL_35XX_RATE(160000000, 160, 3, 3),
+	PLL_35XX_RATE(24 * MHZ, 1700000000, 425, 6, 0),
+	PLL_35XX_RATE(24 * MHZ, 1600000000, 200, 3, 0),
+	PLL_35XX_RATE(24 * MHZ, 1500000000, 250, 4, 0),
+	PLL_35XX_RATE(24 * MHZ, 1400000000, 175, 3, 0),
+	PLL_35XX_RATE(24 * MHZ, 1300000000, 325, 6, 0),
+	PLL_35XX_RATE(24 * MHZ, 1200000000, 400, 4, 1),
+	PLL_35XX_RATE(24 * MHZ, 1100000000, 275, 3, 1),
+	PLL_35XX_RATE(24 * MHZ, 1000000000, 250, 3, 1),
+	PLL_35XX_RATE(24 * MHZ, 933000000, 311, 4, 1),
+	PLL_35XX_RATE(24 * MHZ, 900000000, 300, 4, 1),
+	PLL_35XX_RATE(24 * MHZ, 800000000, 200, 3, 1),
+	PLL_35XX_RATE(24 * MHZ, 733000000, 733, 12, 1),
+	PLL_35XX_RATE(24 * MHZ, 700000000, 175, 3, 1),
+	PLL_35XX_RATE(24 * MHZ, 667000000, 667, 12, 1),
+	PLL_35XX_RATE(24 * MHZ, 633000000, 211, 4, 1),
+	PLL_35XX_RATE(24 * MHZ, 620000000, 310, 3, 2),
+	PLL_35XX_RATE(24 * MHZ, 600000000, 400, 4, 2),
+	PLL_35XX_RATE(24 * MHZ, 543000000, 362, 4, 2),
+	PLL_35XX_RATE(24 * MHZ, 533000000, 533, 6, 2),
+	PLL_35XX_RATE(24 * MHZ, 500000000, 250, 3, 2),
+	PLL_35XX_RATE(24 * MHZ, 450000000, 300, 4, 2),
+	PLL_35XX_RATE(24 * MHZ, 400000000, 200, 3, 2),
+	PLL_35XX_RATE(24 * MHZ, 350000000, 175, 3, 2),
+	PLL_35XX_RATE(24 * MHZ, 300000000, 400, 4, 3),
+	PLL_35XX_RATE(24 * MHZ, 266000000, 266, 3, 3),
+	PLL_35XX_RATE(24 * MHZ, 200000000, 200, 3, 3),
+	PLL_35XX_RATE(24 * MHZ, 160000000, 160, 3, 3),
 };
 
 /*
  * Applicable for 2650 Type PLL for AUD_PLL.
  */
 static const struct samsung_pll_rate_table pll2650_24mhz_tbl[] __initconst = {
-	PLL_36XX_RATE(1600000000, 200, 3, 0, 0),
-	PLL_36XX_RATE(1200000000, 100, 2, 0, 0),
-	PLL_36XX_RATE(1000000000, 250, 3, 1, 0),
-	PLL_36XX_RATE(800000000, 200, 3, 1, 0),
-	PLL_36XX_RATE(600000000, 100, 2, 1, 0),
-	PLL_36XX_RATE(532000000, 266, 3, 2, 0),
-	PLL_36XX_RATE(480000000, 160, 2, 2, 0),
-	PLL_36XX_RATE(432000000, 144, 2, 2, 0),
-	PLL_36XX_RATE(400000000, 200, 3, 2, 0),
-	PLL_36XX_RATE(394073128, 459, 7, 2, 49282),
-	PLL_36XX_RATE(333000000, 111, 2, 2, 0),
-	PLL_36XX_RATE(300000000, 100, 2, 2, 0),
-	PLL_36XX_RATE(266000000, 266, 3, 3, 0),
-	PLL_36XX_RATE(200000000, 200, 3, 3, 0),
-	PLL_36XX_RATE(166000000, 166, 3, 3, 0),
-	PLL_36XX_RATE(133000000, 266, 3, 4, 0),
-	PLL_36XX_RATE(100000000, 200, 3, 4, 0),
-	PLL_36XX_RATE(66000000, 176, 2, 5, 0),
+	PLL_36XX_RATE(24 * MHZ, 1600000000, 200, 3, 0, 0),
+	PLL_36XX_RATE(24 * MHZ, 1200000000, 100, 2, 0, 0),
+	PLL_36XX_RATE(24 * MHZ, 1000000000, 250, 3, 1, 0),
+	PLL_36XX_RATE(24 * MHZ, 800000000, 200, 3, 1, 0),
+	PLL_36XX_RATE(24 * MHZ, 600000000, 100, 2, 1, 0),
+	PLL_36XX_RATE(24 * MHZ, 532000000, 266, 3, 2, 0),
+	PLL_36XX_RATE(24 * MHZ, 480000000, 160, 2, 2, 0),
+	PLL_36XX_RATE(24 * MHZ, 432000000, 144, 2, 2, 0),
+	PLL_36XX_RATE(24 * MHZ, 400000000, 200, 3, 2, 0),
+	PLL_36XX_RATE(24 * MHZ, 394073128, 459, 7, 2, 49282),
+	PLL_36XX_RATE(24 * MHZ, 333000000, 111, 2, 2, 0),
+	PLL_36XX_RATE(24 * MHZ, 300000000, 100, 2, 2, 0),
+	PLL_36XX_RATE(24 * MHZ, 266000000, 266, 3, 3, 0),
+	PLL_36XX_RATE(24 * MHZ, 200000000, 200, 3, 3, 0),
+	PLL_36XX_RATE(24 * MHZ, 166000000, 166, 3, 3, 0),
+	PLL_36XX_RATE(24 * MHZ, 133000000, 266, 3, 4, 0),
+	PLL_36XX_RATE(24 * MHZ, 100000000, 200, 3, 4, 0),
+	PLL_36XX_RATE(24 * MHZ, 66000000, 176, 2, 5, 0),
 };
 
 /* CMU_AUD */
@@ -138,7 +150,7 @@ static const struct samsung_cmu_info aud_cmu __initconst = {
 	.nr_div_clks	= ARRAY_SIZE(aud_div_clks),
 	.gate_clks	= aud_gate_clks,
 	.nr_gate_clks	= ARRAY_SIZE(aud_gate_clks),
-	.nr_clk_ids	= AUD_NR_CLK,
+	.nr_clk_ids	= CLKS_NR_AUD,
 	.clk_regs	= aud_clk_regs,
 	.nr_clk_regs	= ARRAY_SIZE(aud_clk_regs),
 };
@@ -328,7 +340,7 @@ static const struct samsung_cmu_info disp_cmu __initconst = {
 	.nr_div_clks	= ARRAY_SIZE(disp_div_clks),
 	.gate_clks	= disp_gate_clks,
 	.nr_gate_clks	= ARRAY_SIZE(disp_gate_clks),
-	.nr_clk_ids	= DISP_NR_CLK,
+	.nr_clk_ids	= CLKS_NR_DISP,
 	.clk_regs	= disp_clk_regs,
 	.nr_clk_regs	= ARRAY_SIZE(disp_clk_regs),
 };
@@ -392,7 +404,7 @@ static const struct samsung_cmu_info egl_cmu __initconst = {
 	.nr_mux_clks	= ARRAY_SIZE(egl_mux_clks),
 	.div_clks	= egl_div_clks,
 	.nr_div_clks	= ARRAY_SIZE(egl_div_clks),
-	.nr_clk_ids	= EGL_NR_CLK,
+	.nr_clk_ids	= CLKS_NR_EGL,
 	.clk_regs	= egl_clk_regs,
 	.nr_clk_regs	= ARRAY_SIZE(egl_clk_regs),
 };
@@ -492,7 +504,7 @@ static const struct samsung_cmu_info fsys_cmu __initconst = {
 	.nr_mux_clks	= ARRAY_SIZE(fsys_mux_clks),
 	.gate_clks	= fsys_gate_clks,
 	.nr_gate_clks	= ARRAY_SIZE(fsys_gate_clks),
-	.nr_clk_ids	= FSYS_NR_CLK,
+	.nr_clk_ids	= CLKS_NR_FSYS,
 	.clk_regs	= fsys_clk_regs,
 	.nr_clk_regs	= ARRAY_SIZE(fsys_clk_regs),
 };
@@ -583,7 +595,7 @@ static const struct samsung_cmu_info g2d_cmu __initconst = {
 	.nr_div_clks	= ARRAY_SIZE(g2d_div_clks),
 	.gate_clks	= g2d_gate_clks,
 	.nr_gate_clks	= ARRAY_SIZE(g2d_gate_clks),
-	.nr_clk_ids	= G2D_NR_CLK,
+	.nr_clk_ids	= CLKS_NR_G2D,
 	.clk_regs	= g2d_clk_regs,
 	.nr_clk_regs	= ARRAY_SIZE(g2d_clk_regs),
 };
@@ -646,7 +658,7 @@ static const struct samsung_cmu_info g3d_cmu __initconst = {
 	.nr_div_clks	= ARRAY_SIZE(g3d_div_clks),
 	.gate_clks	= g3d_gate_clks,
 	.nr_gate_clks	= ARRAY_SIZE(g3d_gate_clks),
-	.nr_clk_ids	= G3D_NR_CLK,
+	.nr_clk_ids	= CLKS_NR_G3D,
 	.clk_regs	= g3d_clk_regs,
 	.nr_clk_regs	= ARRAY_SIZE(g3d_clk_regs),
 };
@@ -779,7 +791,7 @@ static const struct samsung_cmu_info gscl_cmu __initconst = {
 	.nr_div_clks	= ARRAY_SIZE(gscl_div_clks),
 	.gate_clks	= gscl_gate_clks,
 	.nr_gate_clks	= ARRAY_SIZE(gscl_gate_clks),
-	.nr_clk_ids	= GSCL_NR_CLK,
+	.nr_clk_ids	= CLKS_NR_GSCL,
 	.clk_regs	= gscl_clk_regs,
 	.nr_clk_regs	= ARRAY_SIZE(gscl_clk_regs),
 };
@@ -898,7 +910,7 @@ static const struct samsung_cmu_info isp_cmu __initconst = {
 	.nr_div_clks	= ARRAY_SIZE(isp_div_clks),
 	.gate_clks	= isp_gate_clks,
 	.nr_gate_clks	= ARRAY_SIZE(isp_gate_clks),
-	.nr_clk_ids	= ISP_NR_CLK,
+	.nr_clk_ids	= CLKS_NR_ISP,
 	.clk_regs	= isp_clk_regs,
 	.nr_clk_regs	= ARRAY_SIZE(isp_clk_regs),
 };
@@ -962,7 +974,7 @@ static const struct samsung_cmu_info kfc_cmu __initconst = {
 	.nr_mux_clks	= ARRAY_SIZE(kfc_mux_clks),
 	.div_clks	= kfc_div_clks,
 	.nr_div_clks	= ARRAY_SIZE(kfc_div_clks),
-	.nr_clk_ids	= KFC_NR_CLK,
+	.nr_clk_ids	= CLKS_NR_KFC,
 	.clk_regs	= kfc_clk_regs,
 	.nr_clk_regs	= ARRAY_SIZE(kfc_clk_regs),
 };
@@ -1018,7 +1030,7 @@ static const struct samsung_cmu_info mfc_cmu __initconst = {
 	.nr_div_clks	= ARRAY_SIZE(mfc_div_clks),
 	.gate_clks	= mfc_gate_clks,
 	.nr_gate_clks	= ARRAY_SIZE(mfc_gate_clks),
-	.nr_clk_ids	= MFC_NR_CLK,
+	.nr_clk_ids	= CLKS_NR_MFC,
 	.clk_regs	= mfc_clk_regs,
 	.nr_clk_regs	= ARRAY_SIZE(mfc_clk_regs),
 };
@@ -1167,7 +1179,7 @@ static const struct samsung_cmu_info mif_cmu __initconst = {
 	.nr_div_clks	= ARRAY_SIZE(mif_div_clks),
 	.gate_clks	= mif_gate_clks,
 	.nr_gate_clks	= ARRAY_SIZE(mif_gate_clks),
-	.nr_clk_ids	= MIF_NR_CLK,
+	.nr_clk_ids	= CLKS_NR_MIF,
 	.clk_regs	= mif_clk_regs,
 	.nr_clk_regs	= ARRAY_SIZE(mif_clk_regs),
 };
@@ -1373,7 +1385,7 @@ static const struct samsung_cmu_info peri_cmu __initconst = {
 	.nr_div_clks	= ARRAY_SIZE(peri_div_clks),
 	.gate_clks	= peri_gate_clks,
 	.nr_gate_clks	= ARRAY_SIZE(peri_gate_clks),
-	.nr_clk_ids	= PERI_NR_CLK,
+	.nr_clk_ids	= CLKS_NR_PERI,
 	.clk_regs	= peri_clk_regs,
 	.nr_clk_regs	= ARRAY_SIZE(peri_clk_regs),
 };
@@ -1829,7 +1841,7 @@ static const struct samsung_cmu_info top_cmu __initconst = {
 	.nr_gate_clks	= ARRAY_SIZE(top_gate_clks),
 	.fixed_clks	= fixed_rate_clks,
 	.nr_fixed_clks	= ARRAY_SIZE(fixed_rate_clks),
-	.nr_clk_ids	= TOP_NR_CLK,
+	.nr_clk_ids	= CLKS_NR_TOP,
 	.clk_regs	= top_clk_regs,
 	.nr_clk_regs	= ARRAY_SIZE(top_clk_regs),
 };

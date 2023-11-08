@@ -1,7 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
- *  drivers/extcon/extcon.c - External Connector (extcon) framework.
- *
- *  External connector (extcon) class driver
+ * drivers/extcon/extcon.c - External Connector (extcon) framework.
  *
  * Copyright (C) 2015 Samsung Electronics
  * Author: Chanwoo Choi <cw00.choi@samsung.com>
@@ -13,32 +12,24 @@
  * based on android/drivers/switch/switch_class.c
  * Copyright (C) 2008 Google, Inc.
  * Author: Mike Lockwood <lockwood@android.com>
- *
- * This software is licensed under the terms of the GNU General Public
- * License version 2, as published by the Free Software Foundation, and
- * may be copied, distributed, and modified under those terms.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include <linux/module.h>
 #include <linux/types.h>
+#include <linux/idr.h>
 #include <linux/init.h>
 #include <linux/device.h>
 #include <linux/fs.h>
 #include <linux/err.h>
-#include <linux/extcon.h>
 #include <linux/of.h>
 #include <linux/slab.h>
 #include <linux/sysfs.h>
 
-#define SUPPORTED_CABLE_MAX	32
-#define CABLE_NAME_MAX		30
+#include "extcon.h"
 
-struct __extcon_info {
+#define SUPPORTED_CABLE_MAX	32
+
+static const struct __extcon_info {
 	unsigned int type;
 	unsigned int id;
 	const char *name;
@@ -59,7 +50,7 @@ struct __extcon_info {
 	[EXTCON_USB_HOST] = {
 		.type = EXTCON_TYPE_USB,
 		.id = EXTCON_USB_HOST,
-		.name = "USB_HOST",
+		.name = "USB-HOST",
 	},
 
 	/* Charging external connector */
@@ -97,6 +88,11 @@ struct __extcon_info {
 		.type = EXTCON_TYPE_CHG,
 		.id = EXTCON_CHG_WPT,
 		.name = "WPT",
+	},
+	[EXTCON_CHG_USB_PD] = {
+		.type = EXTCON_TYPE_CHG | EXTCON_TYPE_USB,
+		.id = EXTCON_CHG_USB_PD,
+		.name = "PD",
 	},
 
 	/* Jack external connector */
@@ -177,11 +173,6 @@ struct __extcon_info {
 		.id = EXTCON_DISP_CVBS,
 		.name = "CVBS",
 	},
-	[EXTCON_DISP_TVD] = {
-		.type = EXTCON_TYPE_DISP,
-		.id = EXTCON_DISP_TVD,
-		.name = "TVD",
-	},
 	[EXTCON_DISP_EDP] = {
 		.type = EXTCON_TYPE_DISP,
 		.id = EXTCON_DISP_EDP,
@@ -209,13 +200,21 @@ struct __extcon_info {
 };
 
 /**
- * struct extcon_cable - An internal data for each cable of extcon device.
- * @edev:		The extcon device
- * @cable_index:	Index of this cable in the edev
- * @attr_g:		Attribute group for the cable
+ * struct extcon_cable - An internal data for an external connector.
+ * @edev:		the extcon device
+ * @cable_index:	the index of this cable in the edev
+ * @attr_g:		the attribute group for the cable
  * @attr_name:		"name" sysfs entry
  * @attr_state:		"state" sysfs entry
- * @attrs:		Array pointing to attr_name and attr_state for attr_g
+ * @attrs:		the array pointing to attr_name and attr_state for attr_g
+ * @usb_propval:	the array of USB connector properties
+ * @chg_propval:	the array of charger connector properties
+ * @jack_propval:	the array of jack connector properties
+ * @disp_propval:	the array of display connector properties
+ * @usb_bits:		the bit array of the USB connector property capabilities
+ * @chg_bits:		the bit array of the charger connector property capabilities
+ * @jack_bits:		the bit array of the jack connector property capabilities
+ * @disp_bits:		the bit array of the display connector property capabilities
  */
 struct extcon_cable {
 	struct extcon_dev *edev;
@@ -232,32 +231,21 @@ struct extcon_cable {
 	union extcon_property_value jack_propval[EXTCON_PROP_JACK_CNT];
 	union extcon_property_value disp_propval[EXTCON_PROP_DISP_CNT];
 
-	unsigned long usb_bits[BITS_TO_LONGS(EXTCON_PROP_USB_CNT)];
-	unsigned long chg_bits[BITS_TO_LONGS(EXTCON_PROP_CHG_CNT)];
-	unsigned long jack_bits[BITS_TO_LONGS(EXTCON_PROP_JACK_CNT)];
-	unsigned long disp_bits[BITS_TO_LONGS(EXTCON_PROP_DISP_CNT)];
+	DECLARE_BITMAP(usb_bits, EXTCON_PROP_USB_CNT);
+	DECLARE_BITMAP(chg_bits, EXTCON_PROP_CHG_CNT);
+	DECLARE_BITMAP(jack_bits, EXTCON_PROP_JACK_CNT);
+	DECLARE_BITMAP(disp_bits, EXTCON_PROP_DISP_CNT);
 };
 
 static struct class *extcon_class;
-#if defined(CONFIG_ANDROID)
-static struct class_compat *switch_class;
-#endif /* CONFIG_ANDROID */
 
+static DEFINE_IDA(extcon_dev_ids);
 static LIST_HEAD(extcon_dev_list);
 static DEFINE_MUTEX(extcon_dev_list_lock);
 
-/**
- * check_mutually_exclusive - Check if new_state violates mutually_exclusive
- *			      condition.
- * @edev:	the extcon device
- * @new_state:	new cable attach status for @edev
- *
- * Returns 0 if nothing violates. Returns the index + 1 for the first
- * violated condition.
- */
 static int check_mutually_exclusive(struct extcon_dev *edev, u32 new_state)
 {
-	int i = 0;
+	int i;
 
 	if (!edev->mutually_exclusive)
 		return 0;
@@ -279,7 +267,7 @@ static int find_cable_index_by_id(struct extcon_dev *edev, const unsigned int id
 {
 	int i;
 
-	/* Find the the index of extcon cable in edev->supported_cable */
+	/* Find the index of extcon cable in edev->supported_cable */
 	for (i = 0; i < edev->max_supported; i++) {
 		if (edev->supported_cable[i] == id)
 			return i;
@@ -384,12 +372,12 @@ static ssize_t state_show(struct device *dev, struct device_attribute *attr,
 	struct extcon_dev *edev = dev_get_drvdata(dev);
 
 	if (edev->max_supported == 0)
-		return sprintf(buf, "%u\n", edev->state);
+		return sysfs_emit(buf, "%u\n", edev->state);
 
 	for (i = 0; i < edev->max_supported; i++) {
-		count += sprintf(buf + count, "%s=%d\n",
-				extcon_info[edev->supported_cable[i]].name,
-				 !!(edev->state & (1 << i)));
+		count += sysfs_emit_at(buf, count, "%s=%d\n",
+				       extcon_info[edev->supported_cable[i]].name,
+				       !!(edev->state & BIT(i)));
 	}
 
 	return count;
@@ -401,7 +389,7 @@ static ssize_t name_show(struct device *dev, struct device_attribute *attr,
 {
 	struct extcon_dev *edev = dev_get_drvdata(dev);
 
-	return sprintf(buf, "%s\n", edev->name);
+	return sysfs_emit(buf, "%s\n", edev->name);
 }
 static DEVICE_ATTR_RO(name);
 
@@ -412,8 +400,8 @@ static ssize_t cable_name_show(struct device *dev,
 						  attr_name);
 	int i = cable->cable_index;
 
-	return sprintf(buf, "%s\n",
-			extcon_info[cable->edev->supported_cable[i]].name);
+	return sysfs_emit(buf, "%s\n",
+			  extcon_info[cable->edev->supported_cable[i]].name);
 }
 
 static ssize_t cable_state_show(struct device *dev,
@@ -424,16 +412,19 @@ static ssize_t cable_state_show(struct device *dev,
 
 	int i = cable->cable_index;
 
-	return sprintf(buf, "%d\n",
-		extcon_get_state(cable->edev, cable->edev->supported_cable[i]));
+	return sysfs_emit(buf, "%d\n",
+			  extcon_get_state(cable->edev, cable->edev->supported_cable[i]));
 }
 
 /**
- * extcon_sync()	- Synchronize the states for both the attached/detached
- * @edev:		the extcon device that has the cable.
+ * extcon_sync() - Synchronize the state for an external connector.
+ * @edev:	the extcon device
+ * @id:		the unique id indicating an external connector
  *
- * This function send a notification to synchronize the all states of a
- * specific external connector
+ * Note that this function send a notification in order to synchronize
+ * the state and property of an external connector.
+ *
+ * Returns 0 if success or error number if fail.
  */
 int extcon_sync(struct extcon_dev *edev, unsigned int id)
 {
@@ -455,10 +446,22 @@ int extcon_sync(struct extcon_dev *edev, unsigned int id)
 		return index;
 
 	spin_lock_irqsave(&edev->lock, flags);
-
 	state = !!(edev->state & BIT(index));
+	spin_unlock_irqrestore(&edev->lock, flags);
+
+	/*
+	 * Call functions in a raw notifier chain for the specific one
+	 * external connector.
+	 */
 	raw_notifier_call_chain(&edev->nh[index], state, edev);
 
+	/*
+	 * Call functions in a raw notifier chain for the all supported
+	 * external connectors.
+	 */
+	raw_notifier_call_chain(&edev->nh_all, state, edev);
+
+	spin_lock_irqsave(&edev->lock, flags);
 	/* This could be in interrupt handler */
 	prop_buf = (char *)get_zeroed_page(GFP_ATOMIC);
 	if (!prop_buf) {
@@ -498,9 +501,11 @@ int extcon_sync(struct extcon_dev *edev, unsigned int id)
 EXPORT_SYMBOL_GPL(extcon_sync);
 
 /**
- * extcon_get_state() - Get the state of a external connector.
- * @edev:	the extcon device that has the cable.
- * @id:		the unique id of each external connector in extcon enumeration.
+ * extcon_get_state() - Get the state of an external connector.
+ * @edev:	the extcon device
+ * @id:		the unique id indicating an external connector
+ *
+ * Returns 0 if success or error number if fail.
  */
 int extcon_get_state(struct extcon_dev *edev, const unsigned int id)
 {
@@ -523,20 +528,19 @@ int extcon_get_state(struct extcon_dev *edev, const unsigned int id)
 EXPORT_SYMBOL_GPL(extcon_get_state);
 
 /**
- * extcon_set_state() - Set the state of a external connector.
- *			without a notification.
- * @edev:		the extcon device that has the cable.
- * @id:			the unique id of each external connector
- *			in extcon enumeration.
- * @state:		the new cable status. The default semantics is
- *			true: attached / false: detached.
+ * extcon_set_state() - Set the state of an external connector.
+ * @edev:	the extcon device
+ * @id:		the unique id indicating an external connector
+ * @state:	the new state of an external connector.
+ *		the default semantics is true: attached / false: detached.
  *
- * This function only set the state of a external connector without
- * a notification. To synchronize the data of a external connector,
- * use extcon_set_state_sync() and extcon_sync().
+ * Note that this function set the state of an external connector without
+ * a notification. To synchronize the state of an external connector,
+ * have to use extcon_set_state_sync() and extcon_sync().
+ *
+ * Returns 0 if success or error number if fail.
  */
-int extcon_set_state(struct extcon_dev *edev, unsigned int id,
-				bool cable_state)
+int extcon_set_state(struct extcon_dev *edev, unsigned int id, bool state)
 {
 	unsigned long flags;
 	int index, ret = 0;
@@ -551,11 +555,11 @@ int extcon_set_state(struct extcon_dev *edev, unsigned int id,
 	spin_lock_irqsave(&edev->lock, flags);
 
 	/* Check whether the external connector's state is changed. */
-	if (!is_extcon_changed(edev, index, cable_state))
+	if (!is_extcon_changed(edev, index, state))
 		goto out;
 
 	if (check_mutually_exclusive(edev,
-		(edev->state & ~BIT(index)) | (cable_state & BIT(index)))) {
+		(edev->state & ~BIT(index)) | (state & BIT(index)))) {
 		ret = -EPERM;
 		goto out;
 	}
@@ -564,11 +568,11 @@ int extcon_set_state(struct extcon_dev *edev, unsigned int id,
 	 * Initialize the value of extcon property before setting
 	 * the detached state for an external connector.
 	 */
-	if (!cable_state)
+	if (!state)
 		init_property(edev, id, index);
 
-	/* Update the state for a external connector. */
-	if (cable_state)
+	/* Update the state for an external connector. */
+	if (state)
 		edev->state |= BIT(index);
 	else
 		edev->state &= ~(BIT(index));
@@ -580,35 +584,22 @@ out:
 EXPORT_SYMBOL_GPL(extcon_set_state);
 
 /**
- * extcon_set_state_sync() - Set the state of a external connector
- *			with a notification.
- * @edev:		the extcon device that has the cable.
- * @id:			the unique id of each external connector
- *			in extcon enumeration.
- * @state:		the new cable status. The default semantics is
- *			true: attached / false: detached.
+ * extcon_set_state_sync() - Set the state of an external connector with sync.
+ * @edev:	the extcon device
+ * @id:		the unique id indicating an external connector
+ * @state:	the new state of external connector.
+ *		the default semantics is true: attached / false: detached.
  *
- * This function set the state of external connector and synchronize the data
- * by usning a notification.
+ * Note that this function set the state of external connector
+ * and synchronize the state by sending a notification.
+ *
+ * Returns 0 if success or error number if fail.
  */
-int extcon_set_state_sync(struct extcon_dev *edev, unsigned int id,
-				bool cable_state)
+int extcon_set_state_sync(struct extcon_dev *edev, unsigned int id, bool state)
 {
-	int ret, index;
-	unsigned long flags;
+	int ret;
 
-	index = find_cable_index_by_id(edev, id);
-	if (index < 0)
-		return index;
-
-	/* Check whether the external connector's state is changed. */
-	spin_lock_irqsave(&edev->lock, flags);
-	ret = is_extcon_changed(edev, index, cable_state);
-	spin_unlock_irqrestore(&edev->lock, flags);
-	if (!ret)
-		return 0;
-
-	ret = extcon_set_state(edev, id, cable_state);
+	ret = extcon_set_state(edev, id, state);
 	if (ret < 0)
 		return ret;
 
@@ -617,19 +608,18 @@ int extcon_set_state_sync(struct extcon_dev *edev, unsigned int id,
 EXPORT_SYMBOL_GPL(extcon_set_state_sync);
 
 /**
- * extcon_get_property() - Get the property value of a specific cable.
- * @edev:		the extcon device that has the cable.
- * @id:			the unique id of each external connector
- *			in extcon enumeration.
- * @prop:		the property id among enum extcon_property.
- * @prop_val:		the pointer which store the value of property.
+ * extcon_get_property() - Get the property value of an external connector.
+ * @edev:	the extcon device
+ * @id:		the unique id indicating an external connector
+ * @prop:	the property id indicating an extcon property
+ * @prop_val:	the pointer which store the value of extcon property
  *
- * When getting the property value of external connector, the external connector
- * should be attached. If detached state, function just return 0 without
- * property value. Also, the each property should be included in the list of
- * supported properties according to the type of external connectors.
+ * Note that when getting the property value of external connector,
+ * the external connector should be attached. If detached state, function
+ * return 0 without property value. Also, the each property should be
+ * included in the list of supported properties according to extcon type.
  *
- * Returns 0 if success or error number if fail
+ * Returns 0 if success or error number if fail.
  */
 int extcon_get_property(struct extcon_dev *edev, unsigned int id,
 				unsigned int prop,
@@ -639,7 +629,7 @@ int extcon_get_property(struct extcon_dev *edev, unsigned int id,
 	unsigned long flags;
 	int index, ret = 0;
 
-	*prop_val = (union extcon_property_value)(0);
+	*prop_val = (union extcon_property_value){0};
 
 	if (!edev)
 		return -EINVAL;
@@ -699,17 +689,16 @@ int extcon_get_property(struct extcon_dev *edev, unsigned int id,
 EXPORT_SYMBOL_GPL(extcon_get_property);
 
 /**
- * extcon_set_property() - Set the property value of a specific cable.
- * @edev:		the extcon device that has the cable.
- * @id:			the unique id of each external connector
- *			in extcon enumeration.
- * @prop:		the property id among enum extcon_property.
- * @prop_val:		the pointer including the new value of property.
+ * extcon_set_property() - Set the property value of an external connector.
+ * @edev:	the extcon device
+ * @id:		the unique id indicating an external connector
+ * @prop:	the property id indicating an extcon property
+ * @prop_val:	the pointer including the new value of extcon property
  *
- * The each property should be included in the list of supported properties
- * according to the type of external connectors.
+ * Note that each property should be included in the list of supported
+ * properties according to the extcon type.
  *
- * Returns 0 if success or error number if fail
+ * Returns 0 if success or error number if fail.
  */
 int extcon_set_property(struct extcon_dev *edev, unsigned int id,
 				unsigned int prop,
@@ -767,15 +756,17 @@ int extcon_set_property(struct extcon_dev *edev, unsigned int id,
 EXPORT_SYMBOL_GPL(extcon_set_property);
 
 /**
- * extcon_set_property_sync() - Set the property value of a specific cable
-			with a notification.
- * @prop_val:		the pointer including the new value of property.
+ * extcon_set_property_sync() - Set property of an external connector with sync.
+ * @edev:	the extcon device
+ * @id:		the unique id indicating an external connector
+ * @prop:	the property id indicating an extcon property
+ * @prop_val:	the pointer including the new value of extcon property
  *
- * When setting the property value of external connector, the external connector
- * should be attached. The each property should be included in the list of
- * supported properties according to the type of external connectors.
+ * Note that when setting the property value of external connector,
+ * the external connector should be attached. The each property should
+ * be included in the list of supported properties according to extcon type.
  *
- * Returns 0 if success or error number if fail
+ * Returns 0 if success or error number if fail.
  */
 int extcon_set_property_sync(struct extcon_dev *edev, unsigned int id,
 				unsigned int prop,
@@ -792,12 +783,11 @@ int extcon_set_property_sync(struct extcon_dev *edev, unsigned int id,
 EXPORT_SYMBOL_GPL(extcon_set_property_sync);
 
 /**
- * extcon_get_property_capability() - Get the capability of property
- *			of an external connector.
- * @edev:		the extcon device that has the cable.
- * @id:			the unique id of each external connector
- *			in extcon enumeration.
- * @prop:		the property id among enum extcon_property.
+ * extcon_get_property_capability() - Get the capability of the property
+ *					for an external connector.
+ * @edev:	the extcon device
+ * @id:		the unique id indicating an external connector
+ * @prop:	the property id indicating an extcon property
  *
  * Returns 1 if the property is available or 0 if not available.
  */
@@ -823,18 +813,17 @@ int extcon_get_property_capability(struct extcon_dev *edev, unsigned int id,
 EXPORT_SYMBOL_GPL(extcon_get_property_capability);
 
 /**
- * extcon_set_property_capability() - Set the capability of a property
- *			of an external connector.
- * @edev:		the extcon device that has the cable.
- * @id:			the unique id of each external connector
- *			in extcon enumeration.
- * @prop:		the property id among enum extcon_property.
+ * extcon_set_property_capability() - Set the capability of the property
+ *					for an external connector.
+ * @edev:	the extcon device
+ * @id:		the unique id indicating an external connector
+ * @prop:	the property id indicating an extcon property
  *
- * This function set the capability of a property for an external connector
- * to mark the bit in capability bitmap which mean the available state of
- * a property.
+ * Note that this function set the capability of the property
+ * for an external connector in order to mark the bit in capability
+ * bitmap which mean the available state of the property.
  *
- * Returns 0 if success or error number if fail
+ * Returns 0 if success or error number if fail.
  */
 int extcon_set_property_capability(struct extcon_dev *edev, unsigned int id,
 					unsigned int prop)
@@ -882,8 +871,12 @@ int extcon_set_property_capability(struct extcon_dev *edev, unsigned int id,
 EXPORT_SYMBOL_GPL(extcon_set_property_capability);
 
 /**
- * extcon_get_extcon_dev() - Get the extcon device instance from the name
- * @extcon_name:	The extcon name provided with extcon_dev_register()
+ * extcon_get_extcon_dev() - Get the extcon device instance from the name.
+ * @extcon_name:	the extcon name provided with extcon_dev_register()
+ *
+ * Return the pointer of extcon device if success or ERR_PTR(err) if fail.
+ * NOTE: This function returns -EPROBE_DEFER so it may only be called from
+ * probe() functions.
  */
 struct extcon_dev *extcon_get_extcon_dev(const char *extcon_name)
 {
@@ -897,7 +890,7 @@ struct extcon_dev *extcon_get_extcon_dev(const char *extcon_name)
 		if (!strcmp(sd->name, extcon_name))
 			goto out;
 	}
-	sd = NULL;
+	sd = ERR_PTR(-EPROBE_DEFER);
 out:
 	mutex_unlock(&extcon_dev_list_lock);
 	return sd;
@@ -905,21 +898,23 @@ out:
 EXPORT_SYMBOL_GPL(extcon_get_extcon_dev);
 
 /**
- * extcon_register_notifier() - Register a notifiee to get notified by
- *				any attach status changes from the extcon.
- * @edev:	the extcon device that has the external connecotr.
- * @id:		the unique id of each external connector in extcon enumeration.
- * @nb:		a notifier block to be registered.
+ * extcon_register_notifier() - Register a notifier block to get notified by
+ *				any state changes from the extcon.
+ * @edev:	the extcon device
+ * @id:		the unique id indicating an external connector
+ * @nb:		a notifier block to be registered
  *
  * Note that the second parameter given to the callback of nb (val) is
- * "old_state", not the current state. The current state can be retrieved
- * by looking at the third pameter (edev pointer)'s state value.
+ * the current state of an external connector and the third pameter
+ * is the pointer of extcon device.
+ *
+ * Returns 0 if success or error number if fail.
  */
 int extcon_register_notifier(struct extcon_dev *edev, unsigned int id,
 			     struct notifier_block *nb)
 {
 	unsigned long flags;
-	int ret, idx = -EINVAL;
+	int ret, idx;
 
 	if (!edev || !nb)
 		return -EINVAL;
@@ -937,10 +932,12 @@ int extcon_register_notifier(struct extcon_dev *edev, unsigned int id,
 EXPORT_SYMBOL_GPL(extcon_register_notifier);
 
 /**
- * extcon_unregister_notifier() - Unregister a notifiee from the extcon device.
- * @edev:	the extcon device that has the external connecotr.
- * @id:		the unique id of each external connector in extcon enumeration.
- * @nb:		a notifier block to be registered.
+ * extcon_unregister_notifier() - Unregister a notifier block from the extcon.
+ * @edev:	the extcon device
+ * @id:		the unique id indicating an external connector
+ * @nb:		a notifier block to be registered
+ *
+ * Returns 0 if success or error number if fail.
  */
 int extcon_unregister_notifier(struct extcon_dev *edev, unsigned int id,
 				struct notifier_block *nb)
@@ -963,6 +960,59 @@ int extcon_unregister_notifier(struct extcon_dev *edev, unsigned int id,
 }
 EXPORT_SYMBOL_GPL(extcon_unregister_notifier);
 
+/**
+ * extcon_register_notifier_all() - Register a notifier block for all connectors.
+ * @edev:	the extcon device
+ * @nb:		a notifier block to be registered
+ *
+ * Note that this function registers a notifier block in order to receive
+ * the state change of all supported external connectors from extcon device.
+ * And the second parameter given to the callback of nb (val) is
+ * the current state and the third pameter is the pointer of extcon device.
+ *
+ * Returns 0 if success or error number if fail.
+ */
+int extcon_register_notifier_all(struct extcon_dev *edev,
+				struct notifier_block *nb)
+{
+	unsigned long flags;
+	int ret;
+
+	if (!edev || !nb)
+		return -EINVAL;
+
+	spin_lock_irqsave(&edev->lock, flags);
+	ret = raw_notifier_chain_register(&edev->nh_all, nb);
+	spin_unlock_irqrestore(&edev->lock, flags);
+
+	return ret;
+}
+EXPORT_SYMBOL_GPL(extcon_register_notifier_all);
+
+/**
+ * extcon_unregister_notifier_all() - Unregister a notifier block from extcon.
+ * @edev:	the extcon device
+ * @nb:		a notifier block to be registered
+ *
+ * Returns 0 if success or error number if fail.
+ */
+int extcon_unregister_notifier_all(struct extcon_dev *edev,
+				struct notifier_block *nb)
+{
+	unsigned long flags;
+	int ret;
+
+	if (!edev || !nb)
+		return -EINVAL;
+
+	spin_lock_irqsave(&edev->lock, flags);
+	ret = raw_notifier_chain_unregister(&edev->nh_all, nb);
+	spin_unlock_irqrestore(&edev->lock, flags);
+
+	return ret;
+}
+EXPORT_SYMBOL_GPL(extcon_unregister_notifier_all);
+
 static struct attribute *extcon_attrs[] = {
 	&dev_attr_state.attr,
 	&dev_attr_name.attr,
@@ -972,18 +1022,13 @@ ATTRIBUTE_GROUPS(extcon);
 
 static int create_extcon_class(void)
 {
-	if (!extcon_class) {
-		extcon_class = class_create(THIS_MODULE, "extcon");
-		if (IS_ERR(extcon_class))
-			return PTR_ERR(extcon_class);
-		extcon_class->dev_groups = extcon_groups;
+	if (extcon_class)
+		return 0;
 
-#if defined(CONFIG_ANDROID)
-		switch_class = class_compat_register("switch");
-		if (WARN(!switch_class, "cannot allocate"))
-			return -ENOMEM;
-#endif /* CONFIG_ANDROID */
-	}
+	extcon_class = class_create("extcon");
+	if (IS_ERR(extcon_class))
+		return PTR_ERR(extcon_class);
+	extcon_class->dev_groups = extcon_groups;
 
 	return 0;
 }
@@ -999,15 +1044,14 @@ static void dummy_sysfs_dev_release(struct device *dev)
 
 /*
  * extcon_dev_allocate() - Allocate the memory of extcon device.
- * @supported_cable:	Array of supported extcon ending with EXTCON_NONE.
- *			If supported_cable is NULL, cable name related APIs
- *			are disabled.
+ * @supported_cable:	the array of the supported external connectors
+ *			ending with EXTCON_NONE.
  *
- * This function allocates the memory for extcon device without allocating
- * memory in each extcon provider driver and initialize default setting for
- * extcon device.
+ * Note that this function allocates the memory for extcon device 
+ * and initialize default setting for the extcon device.
  *
- * Return the pointer of extcon device if success or ERR_PTR(err) if fail
+ * Returns the pointer memory of allocated extcon_dev if success
+ * or ERR_PTR(err) if fail.
  */
 struct extcon_dev *extcon_dev_allocate(const unsigned int *supported_cable)
 {
@@ -1028,7 +1072,7 @@ struct extcon_dev *extcon_dev_allocate(const unsigned int *supported_cable)
 
 /*
  * extcon_dev_free() - Free the memory of extcon device.
- * @edev:	the extcon device to free
+ * @edev:	the extcon device
  */
 void extcon_dev_free(struct extcon_dev *edev)
 {
@@ -1037,29 +1081,181 @@ void extcon_dev_free(struct extcon_dev *edev)
 EXPORT_SYMBOL_GPL(extcon_dev_free);
 
 /**
- * extcon_dev_register() - Register a new extcon device
- * @edev	: the new extcon device (should be allocated before calling)
+ * extcon_alloc_cables() - alloc the cables for extcon device
+ * @edev:	extcon device which has cables
+ *
+ * Returns 0 if success or error number if fail.
+ */
+static int extcon_alloc_cables(struct extcon_dev *edev)
+{
+	int index;
+	char *str;
+	struct extcon_cable *cable;
+
+	if (!edev)
+		return -EINVAL;
+
+	if (!edev->max_supported)
+		return 0;
+
+	edev->cables = kcalloc(edev->max_supported, sizeof(*edev->cables),
+			       GFP_KERNEL);
+	if (!edev->cables)
+		return -ENOMEM;
+
+	for (index = 0; index < edev->max_supported; index++) {
+		cable = &edev->cables[index];
+
+		str = kasprintf(GFP_KERNEL, "cable.%d", index);
+		if (!str) {
+			for (index--; index >= 0; index--) {
+				cable = &edev->cables[index];
+				kfree(cable->attr_g.name);
+			}
+
+			kfree(edev->cables);
+			return -ENOMEM;
+		}
+
+		cable->edev = edev;
+		cable->cable_index = index;
+		cable->attrs[0] = &cable->attr_name.attr;
+		cable->attrs[1] = &cable->attr_state.attr;
+		cable->attrs[2] = NULL;
+		cable->attr_g.name = str;
+		cable->attr_g.attrs = cable->attrs;
+
+		sysfs_attr_init(&cable->attr_name.attr);
+		cable->attr_name.attr.name = "name";
+		cable->attr_name.attr.mode = 0444;
+		cable->attr_name.show = cable_name_show;
+
+		sysfs_attr_init(&cable->attr_state.attr);
+		cable->attr_state.attr.name = "state";
+		cable->attr_state.attr.mode = 0444;
+		cable->attr_state.show = cable_state_show;
+	}
+
+	return 0;
+}
+
+/**
+ * extcon_alloc_muex() - alloc the mutual exclusive for extcon device
+ * @edev:	extcon device
+ *
+ * Returns 0 if success or error number if fail.
+ */
+static int extcon_alloc_muex(struct extcon_dev *edev)
+{
+	char *name;
+	int index;
+
+	if (!edev)
+		return -EINVAL;
+
+	if (!(edev->max_supported && edev->mutually_exclusive))
+		return 0;
+
+	/* Count the size of mutually_exclusive array */
+	for (index = 0; edev->mutually_exclusive[index]; index++)
+		;
+
+	edev->attrs_muex = kcalloc(index + 1, sizeof(*edev->attrs_muex),
+				   GFP_KERNEL);
+	if (!edev->attrs_muex)
+		return -ENOMEM;
+
+	edev->d_attrs_muex = kcalloc(index, sizeof(*edev->d_attrs_muex),
+				     GFP_KERNEL);
+	if (!edev->d_attrs_muex) {
+		kfree(edev->attrs_muex);
+		return -ENOMEM;
+	}
+
+	for (index = 0; edev->mutually_exclusive[index]; index++) {
+		name = kasprintf(GFP_KERNEL, "0x%x",
+				 edev->mutually_exclusive[index]);
+		if (!name) {
+			for (index--; index >= 0; index--)
+				kfree(edev->d_attrs_muex[index].attr.name);
+
+			kfree(edev->d_attrs_muex);
+			kfree(edev->attrs_muex);
+			return -ENOMEM;
+		}
+		sysfs_attr_init(&edev->d_attrs_muex[index].attr);
+		edev->d_attrs_muex[index].attr.name = name;
+		edev->d_attrs_muex[index].attr.mode = 0000;
+		edev->attrs_muex[index] = &edev->d_attrs_muex[index].attr;
+	}
+	edev->attr_g_muex.name = muex_name;
+	edev->attr_g_muex.attrs = edev->attrs_muex;
+
+	return 0;
+}
+
+/**
+ * extcon_alloc_groups() - alloc the groups for extcon device
+ * @edev:	extcon device
+ *
+ * Returns 0 if success or error number if fail.
+ */
+static int extcon_alloc_groups(struct extcon_dev *edev)
+{
+	int index;
+
+	if (!edev)
+		return -EINVAL;
+
+	if (!edev->max_supported)
+		return 0;
+
+	edev->extcon_dev_type.groups = kcalloc(edev->max_supported + 2,
+					  sizeof(*edev->extcon_dev_type.groups),
+					  GFP_KERNEL);
+	if (!edev->extcon_dev_type.groups)
+		return -ENOMEM;
+
+	edev->extcon_dev_type.name = dev_name(&edev->dev);
+	edev->extcon_dev_type.release = dummy_sysfs_dev_release;
+
+	for (index = 0; index < edev->max_supported; index++)
+		edev->extcon_dev_type.groups[index] = &edev->cables[index].attr_g;
+
+	if (edev->mutually_exclusive)
+		edev->extcon_dev_type.groups[index] = &edev->attr_g_muex;
+
+	edev->dev.type = &edev->extcon_dev_type;
+
+	return 0;
+}
+
+/**
+ * extcon_dev_register() - Register an new extcon device
+ * @edev:	the extcon device to be registered
  *
  * Among the members of edev struct, please set the "user initializing data"
- * in any case and set the "optional callbacks" if required. However, please
  * do not set the values of "internal data", which are initialized by
  * this function.
+ *
+ * Note that before calling this funciton, have to allocate the memory
+ * of an extcon device by using the extcon_dev_allocate(). And the extcon
+ * dev should include the supported_cable information.
+ *
+ * Returns 0 if success or error number if fail.
  */
 int extcon_dev_register(struct extcon_dev *edev)
 {
-	int ret, index = 0;
-	static atomic_t edev_no = ATOMIC_INIT(-1);
+	int ret, index;
 
-	if (!extcon_class) {
-		ret = create_extcon_class();
-		if (ret < 0)
-			return ret;
-	}
+	ret = create_extcon_class();
+	if (ret < 0)
+		return ret;
 
 	if (!edev || !edev->supported_cable)
 		return -EINVAL;
 
-	for (; edev->supported_cable[index] != EXTCON_NONE; index++);
+	for (index = 0; edev->supported_cable[index] != EXTCON_NONE; index++);
 
 	edev->max_supported = index;
 	if (index > SUPPORTED_CABLE_MAX) {
@@ -1071,162 +1267,56 @@ int extcon_dev_register(struct extcon_dev *edev)
 	edev->dev.class = extcon_class;
 	edev->dev.release = extcon_dev_release;
 
+	edev->name = dev_name(edev->dev.parent);
 	if (IS_ERR_OR_NULL(edev->name)) {
-		dev_set_name(&edev->dev, "extcon%lu",
-			     (unsigned long)atomic_inc_return(&edev_no));
-		edev->name = dev_name(edev->dev.parent);
-	} else {
-		dev_set_name(&edev->dev, edev->name);
-	}
-
-	if (IS_ERR_OR_NULL(edev->name)) {
-		dev_err(&edev->dev, "extcon device name is null\n");
+		dev_err(&edev->dev,
+			"extcon device name is null\n");
 		return -EINVAL;
 	}
 
+	ret = ida_alloc(&extcon_dev_ids, GFP_KERNEL);
+	if (ret < 0)
+		return ret;
+
+	edev->id = ret;
+
+	dev_set_name(&edev->dev, "extcon%d", edev->id);
+
+	ret = extcon_alloc_cables(edev);
+	if (ret < 0)
+		goto err_alloc_cables;
+
+	ret = extcon_alloc_muex(edev);
+	if (ret < 0)
+		goto err_alloc_muex;
+
+	ret = extcon_alloc_groups(edev);
+	if (ret < 0)
+		goto err_alloc_groups;
+
+	spin_lock_init(&edev->lock);
 	if (edev->max_supported) {
-		char buf[10];
-		char *str;
-		struct extcon_cable *cable;
-
-		edev->cables = kzalloc(sizeof(struct extcon_cable) *
-				       edev->max_supported, GFP_KERNEL);
-		if (!edev->cables) {
+		edev->nh = kcalloc(edev->max_supported, sizeof(*edev->nh),
+				GFP_KERNEL);
+		if (!edev->nh) {
 			ret = -ENOMEM;
-			goto err_sysfs_alloc;
-		}
-		for (index = 0; index < edev->max_supported; index++) {
-			cable = &edev->cables[index];
-
-			snprintf(buf, 10, "cable.%d", index);
-			str = kzalloc(sizeof(char) * (strlen(buf) + 1),
-				      GFP_KERNEL);
-			if (!str) {
-				for (index--; index >= 0; index--) {
-					cable = &edev->cables[index];
-					kfree(cable->attr_g.name);
-				}
-				ret = -ENOMEM;
-
-				goto err_alloc_cables;
-			}
-			strcpy(str, buf);
-
-			cable->edev = edev;
-			cable->cable_index = index;
-			cable->attrs[0] = &cable->attr_name.attr;
-			cable->attrs[1] = &cable->attr_state.attr;
-			cable->attrs[2] = NULL;
-			cable->attr_g.name = str;
-			cable->attr_g.attrs = cable->attrs;
-
-			sysfs_attr_init(&cable->attr_name.attr);
-			cable->attr_name.attr.name = "name";
-			cable->attr_name.attr.mode = 0444;
-			cable->attr_name.show = cable_name_show;
-
-			sysfs_attr_init(&cable->attr_state.attr);
-			cable->attr_state.attr.name = "state";
-			cable->attr_state.attr.mode = 0444;
-			cable->attr_state.show = cable_state_show;
+			goto err_alloc_nh;
 		}
 	}
 
-	if (edev->max_supported && edev->mutually_exclusive) {
-		char buf[80];
-		char *name;
+	for (index = 0; index < edev->max_supported; index++)
+		RAW_INIT_NOTIFIER_HEAD(&edev->nh[index]);
 
-		/* Count the size of mutually_exclusive array */
-		for (index = 0; edev->mutually_exclusive[index]; index++)
-			;
+	RAW_INIT_NOTIFIER_HEAD(&edev->nh_all);
 
-		edev->attrs_muex = kzalloc(sizeof(struct attribute *) *
-					   (index + 1), GFP_KERNEL);
-		if (!edev->attrs_muex) {
-			ret = -ENOMEM;
-			goto err_muex;
-		}
-
-		edev->d_attrs_muex = kzalloc(sizeof(struct device_attribute) *
-					     index, GFP_KERNEL);
-		if (!edev->d_attrs_muex) {
-			ret = -ENOMEM;
-			kfree(edev->attrs_muex);
-			goto err_muex;
-		}
-
-		for (index = 0; edev->mutually_exclusive[index]; index++) {
-			sprintf(buf, "0x%x", edev->mutually_exclusive[index]);
-			name = kzalloc(sizeof(char) * (strlen(buf) + 1),
-				       GFP_KERNEL);
-			if (!name) {
-				for (index--; index >= 0; index--) {
-					kfree(edev->d_attrs_muex[index].attr.
-					      name);
-				}
-				kfree(edev->d_attrs_muex);
-				kfree(edev->attrs_muex);
-				ret = -ENOMEM;
-				goto err_muex;
-			}
-			strcpy(name, buf);
-			sysfs_attr_init(&edev->d_attrs_muex[index].attr);
-			edev->d_attrs_muex[index].attr.name = name;
-			edev->d_attrs_muex[index].attr.mode = 0000;
-			edev->attrs_muex[index] = &edev->d_attrs_muex[index]
-							.attr;
-		}
-		edev->attr_g_muex.name = muex_name;
-		edev->attr_g_muex.attrs = edev->attrs_muex;
-
-	}
-
-	if (edev->max_supported) {
-		edev->extcon_dev_type.groups =
-			kzalloc(sizeof(struct attribute_group *) *
-				(edev->max_supported + 2), GFP_KERNEL);
-		if (!edev->extcon_dev_type.groups) {
-			ret = -ENOMEM;
-			goto err_alloc_groups;
-		}
-
-		edev->extcon_dev_type.name = dev_name(&edev->dev);
-		edev->extcon_dev_type.release = dummy_sysfs_dev_release;
-
-		for (index = 0; index < edev->max_supported; index++)
-			edev->extcon_dev_type.groups[index] =
-				&edev->cables[index].attr_g;
-		if (edev->mutually_exclusive)
-			edev->extcon_dev_type.groups[index] =
-				&edev->attr_g_muex;
-
-		edev->dev.type = &edev->extcon_dev_type;
-	}
+	dev_set_drvdata(&edev->dev, edev);
+	edev->state = 0;
 
 	ret = device_register(&edev->dev);
 	if (ret) {
 		put_device(&edev->dev);
 		goto err_dev;
 	}
-#if defined(CONFIG_ANDROID)
-	if (switch_class)
-		ret = class_compat_create_link(switch_class, &edev->dev, NULL);
-#endif /* CONFIG_ANDROID */
-
-	spin_lock_init(&edev->lock);
-
-	edev->nh = devm_kzalloc(&edev->dev,
-			sizeof(*edev->nh) * edev->max_supported, GFP_KERNEL);
-	if (!edev->nh) {
-		ret = -ENOMEM;
-		goto err_dev;
-	}
-
-	for (index = 0; index < edev->max_supported; index++)
-		RAW_INIT_NOTIFIER_HEAD(&edev->nh[index]);
-
-	dev_set_drvdata(&edev->dev, edev);
-	edev->state = 0;
 
 	mutex_lock(&extcon_dev_list_lock);
 	list_add(&edev->entry, &extcon_dev_list);
@@ -1236,6 +1326,9 @@ int extcon_dev_register(struct extcon_dev *edev)
 
 err_dev:
 	if (edev->max_supported)
+		kfree(edev->nh);
+err_alloc_nh:
+	if (edev->max_supported)
 		kfree(edev->extcon_dev_type.groups);
 err_alloc_groups:
 	if (edev->max_supported && edev->mutually_exclusive) {
@@ -1244,20 +1337,21 @@ err_alloc_groups:
 		kfree(edev->d_attrs_muex);
 		kfree(edev->attrs_muex);
 	}
-err_muex:
+err_alloc_muex:
 	for (index = 0; index < edev->max_supported; index++)
 		kfree(edev->cables[index].attr_g.name);
-err_alloc_cables:
 	if (edev->max_supported)
 		kfree(edev->cables);
-err_sysfs_alloc:
+err_alloc_cables:
+	ida_free(&extcon_dev_ids, edev->id);
+
 	return ret;
 }
 EXPORT_SYMBOL_GPL(extcon_dev_register);
 
 /**
  * extcon_dev_unregister() - Unregister the extcon device.
- * @edev:	the extcon device instance to be unregistered.
+ * @edev:	the extcon device to be unregistered.
  *
  * Note that this does not call kfree(edev) because edev was not allocated
  * by this class.
@@ -1273,11 +1367,12 @@ void extcon_dev_unregister(struct extcon_dev *edev)
 	list_del(&edev->entry);
 	mutex_unlock(&extcon_dev_list_lock);
 
-	if (IS_ERR_OR_NULL(get_device(&edev->dev))) {
-		dev_err(&edev->dev, "Failed to unregister extcon_dev (%s)\n",
-				dev_name(&edev->dev));
+	if (!get_device(&edev->dev)) {
+		dev_err(&edev->dev, "Failed to unregister extcon_dev\n");
 		return;
 	}
+
+	ida_free(&extcon_dev_ids, edev->id);
 
 	device_unregister(&edev->dev);
 
@@ -1295,63 +1390,80 @@ void extcon_dev_unregister(struct extcon_dev *edev)
 	if (edev->max_supported) {
 		kfree(edev->extcon_dev_type.groups);
 		kfree(edev->cables);
+		kfree(edev->nh);
 	}
 
-#if defined(CONFIG_ANDROID)
-	if (switch_class)
-		class_compat_remove_link(switch_class, &edev->dev, NULL);
-#endif
 	put_device(&edev->dev);
 }
 EXPORT_SYMBOL_GPL(extcon_dev_unregister);
 
 #ifdef CONFIG_OF
+
 /*
- * extcon_get_edev_by_phandle - Get the extcon device from devicetree
- * @dev - instance to the given device
- * @index - index into list of extcon_dev
+ * extcon_find_edev_by_node - Find the extcon device from devicetree.
+ * @node	: OF node identifying edev
  *
- * return the instance of extcon device
+ * Return the pointer of extcon device if success or ERR_PTR(err) if fail.
+ */
+struct extcon_dev *extcon_find_edev_by_node(struct device_node *node)
+{
+	struct extcon_dev *edev;
+
+	mutex_lock(&extcon_dev_list_lock);
+	list_for_each_entry(edev, &extcon_dev_list, entry)
+		if (edev->dev.parent && device_match_of_node(edev->dev.parent, node))
+			goto out;
+	edev = ERR_PTR(-EPROBE_DEFER);
+out:
+	mutex_unlock(&extcon_dev_list_lock);
+
+	return edev;
+}
+
+/*
+ * extcon_get_edev_by_phandle - Get the extcon device from devicetree.
+ * @dev		: the instance to the given device
+ * @index	: the index into list of extcon_dev
+ *
+ * Return the pointer of extcon device if success or ERR_PTR(err) if fail.
  */
 struct extcon_dev *extcon_get_edev_by_phandle(struct device *dev, int index)
 {
-	struct device_node *node;
+	struct device_node *node, *np = dev_of_node(dev);
 	struct extcon_dev *edev;
 
-	if (!dev)
-		return ERR_PTR(-EINVAL);
-
-	if (!dev->of_node) {
+	if (!np) {
 		dev_dbg(dev, "device does not have a device node entry\n");
 		return ERR_PTR(-EINVAL);
 	}
 
-	node = of_parse_phandle(dev->of_node, "extcon", index);
+	node = of_parse_phandle(np, "extcon", index);
 	if (!node) {
-		dev_dbg(dev, "failed to get phandle in %s node\n",
-			dev->of_node->full_name);
+		dev_dbg(dev, "failed to get phandle in %pOF node\n", np);
 		return ERR_PTR(-ENODEV);
 	}
 
-	mutex_lock(&extcon_dev_list_lock);
-	list_for_each_entry(edev, &extcon_dev_list, entry) {
-		if (edev->dev.parent && edev->dev.parent->of_node == node) {
-			mutex_unlock(&extcon_dev_list_lock);
-			of_node_put(node);
-			return edev;
-		}
-	}
-	mutex_unlock(&extcon_dev_list_lock);
+	edev = extcon_find_edev_by_node(node);
 	of_node_put(node);
 
-	return ERR_PTR(-EPROBE_DEFER);
+	return edev;
 }
+
 #else
+
+struct extcon_dev *extcon_find_edev_by_node(struct device_node *node)
+{
+	return ERR_PTR(-ENOSYS);
+}
+
 struct extcon_dev *extcon_get_edev_by_phandle(struct device *dev, int index)
 {
 	return ERR_PTR(-ENOSYS);
 }
+
 #endif /* CONFIG_OF */
+
+EXPORT_SYMBOL_GPL(extcon_find_edev_by_node);
 EXPORT_SYMBOL_GPL(extcon_get_edev_by_phandle);
 
 /**
@@ -1362,6 +1474,7 @@ const char *extcon_get_edev_name(struct extcon_dev *edev)
 {
 	return !edev ? NULL : edev->name;
 }
+EXPORT_SYMBOL_GPL(extcon_get_edev_name);
 
 static int __init extcon_class_init(void)
 {
@@ -1371,16 +1484,11 @@ module_init(extcon_class_init);
 
 static void __exit extcon_class_exit(void)
 {
-#if defined(CONFIG_ANDROID)
-	class_compat_unregister(switch_class);
-#endif
 	class_destroy(extcon_class);
 }
 module_exit(extcon_class_exit);
 
 MODULE_AUTHOR("Chanwoo Choi <cw00.choi@samsung.com>");
-MODULE_AUTHOR("Mike Lockwood <lockwood@android.com>");
-MODULE_AUTHOR("Donggeun Kim <dg77.kim@samsung.com>");
 MODULE_AUTHOR("MyungJoo Ham <myungjoo.ham@samsung.com>");
-MODULE_DESCRIPTION("External connector (extcon) class driver");
-MODULE_LICENSE("GPL");
+MODULE_DESCRIPTION("External Connector (extcon) framework");
+MODULE_LICENSE("GPL v2");

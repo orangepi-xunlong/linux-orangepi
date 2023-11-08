@@ -1,12 +1,9 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * OMAP GPMC Platform data
  *
- * Copyright (C) 2014 Texas Instruments, Inc. - http://www.ti.com
+ * Copyright (C) 2014 Texas Instruments, Inc. - https://www.ti.com
  *	Roger Quadros <rogerq@ti.com>
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
  */
 
 #ifndef _GPMC_OMAP_H_
@@ -139,6 +136,13 @@ struct gpmc_device_timings {
 #define GPMC_MUX_AAD			1	/* Addr-Addr-Data multiplex */
 #define GPMC_MUX_AD			2	/* Addr-Data multiplex */
 
+/* Wait pin polarity values */
+#define GPMC_WAITPINPOLARITY_INVALID UINT_MAX
+#define GPMC_WAITPINPOLARITY_ACTIVE_LOW 0
+#define GPMC_WAITPINPOLARITY_ACTIVE_HIGH 1
+
+#define GPMC_WAITPIN_INVALID UINT_MAX
+
 struct gpmc_settings {
 	bool burst_wrap;	/* enables wrap bursting */
 	bool burst_read;	/* enables read page/burst mode */
@@ -152,6 +156,7 @@ struct gpmc_settings {
 	u32 device_width;	/* device bus width (8 or 16 bit) */
 	u32 mux_add_data;	/* multiplex address & data */
 	u32 wait_pin;		/* wait-pin to be used */
+	u32 wait_pin_polarity;
 };
 
 /* Data for each chip select */

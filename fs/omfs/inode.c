@@ -1,17 +1,19 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Optimized MPEG FS - inode and super operations.
  * Copyright (C) 2006 Bob Copeland <me@bobcopeland.com>
- * Released under GPL v2.
  */
 #include <linux/module.h>
 #include <linux/sched.h>
 #include <linux/slab.h>
 #include <linux/fs.h>
 #include <linux/vfs.h>
+#include <linux/cred.h>
 #include <linux/parser.h>
 #include <linux/buffer_head.h>
 #include <linux/vmalloc.h>
 #include <linux/writeback.h>
+#include <linux/seq_file.h>
 #include <linux/crc-itu-t.h>
 #include "omfs.h"
 
@@ -46,10 +48,10 @@ struct inode *omfs_new_inode(struct inode *dir, umode_t mode)
 		goto fail;
 
 	inode->i_ino = new_block;
-	inode_init_owner(inode, NULL, mode);
+	inode_init_owner(&nop_mnt_idmap, inode, NULL, mode);
 	inode->i_mapping->a_ops = &omfs_aops;
 
-	inode->i_atime = inode->i_mtime = inode->i_ctime = current_time(inode);
+	inode->i_atime = inode->i_mtime = inode_set_ctime_current(inode);
 	switch (mode & S_IFMT) {
 	case S_IFDIR:
 		inode->i_op = &omfs_dir_inops;
@@ -132,8 +134,8 @@ static int __omfs_write_inode(struct inode *inode, int wait)
 	oi->i_head.h_magic = OMFS_IMAGIC;
 	oi->i_size = cpu_to_be64(inode->i_size);
 
-	ctime = inode->i_ctime.tv_sec * 1000LL +
-		((inode->i_ctime.tv_nsec + 999)/1000);
+	ctime = inode_get_ctime(inode).tv_sec * 1000LL +
+		((inode_get_ctime(inode).tv_nsec + 999)/1000);
 	oi->i_ctime = cpu_to_be64(ctime);
 
 	omfs_update_checksums(oi);
@@ -230,10 +232,9 @@ struct inode *omfs_iget(struct super_block *sb, ino_t ino)
 
 	inode->i_atime.tv_sec = ctime;
 	inode->i_mtime.tv_sec = ctime;
-	inode->i_ctime.tv_sec = ctime;
+	inode_set_ctime(inode, ctime, nsecs);
 	inode->i_atime.tv_nsec = nsecs;
 	inode->i_mtime.tv_nsec = nsecs;
-	inode->i_ctime.tv_nsec = nsecs;
 
 	inode->i_mapping->a_ops = &omfs_aops;
 
@@ -280,11 +281,38 @@ static int omfs_statfs(struct dentry *dentry, struct kstatfs *buf)
 	buf->f_blocks = sbi->s_num_blocks;
 	buf->f_files = sbi->s_num_blocks;
 	buf->f_namelen = OMFS_NAMELEN;
-	buf->f_fsid.val[0] = (u32)id;
-	buf->f_fsid.val[1] = (u32)(id >> 32);
+	buf->f_fsid = u64_to_fsid(id);
 
 	buf->f_bfree = buf->f_bavail = buf->f_ffree =
 		omfs_count_free(s);
+
+	return 0;
+}
+
+/*
+ * Display the mount options in /proc/mounts.
+ */
+static int omfs_show_options(struct seq_file *m, struct dentry *root)
+{
+	struct omfs_sb_info *sbi = OMFS_SB(root->d_sb);
+	umode_t cur_umask = current_umask();
+
+	if (!uid_eq(sbi->s_uid, current_uid()))
+		seq_printf(m, ",uid=%u",
+			   from_kuid_munged(&init_user_ns, sbi->s_uid));
+	if (!gid_eq(sbi->s_gid, current_gid()))
+		seq_printf(m, ",gid=%u",
+			   from_kgid_munged(&init_user_ns, sbi->s_gid));
+
+	if (sbi->s_dmask == sbi->s_fmask) {
+		if (sbi->s_fmask != cur_umask)
+			seq_printf(m, ",umask=%o", sbi->s_fmask);
+	} else {
+		if (sbi->s_dmask != cur_umask)
+			seq_printf(m, ",dmask=%o", sbi->s_dmask);
+		if (sbi->s_fmask != cur_umask)
+			seq_printf(m, ",fmask=%o", sbi->s_fmask);
+	}
 
 	return 0;
 }
@@ -294,7 +322,7 @@ static const struct super_operations omfs_sops = {
 	.evict_inode	= omfs_evict_inode,
 	.put_super	= omfs_put_super,
 	.statfs		= omfs_statfs,
-	.show_options	= generic_show_options,
+	.show_options	= omfs_show_options,
 };
 
 /*
@@ -333,12 +361,11 @@ static int omfs_get_imap(struct super_block *sb)
 		bh = sb_bread(sb, block++);
 		if (!bh)
 			goto nomem_free;
-		*ptr = kmalloc(sb->s_blocksize, GFP_KERNEL);
+		*ptr = kmemdup(bh->b_data, sb->s_blocksize, GFP_KERNEL);
 		if (!*ptr) {
 			brelse(bh);
 			goto nomem_free;
 		}
-		memcpy(*ptr, bh->b_data, sb->s_blocksize);
 		if (count < sb->s_blocksize)
 			memset((void *)*ptr + count, 0xff,
 				sb->s_blocksize - count);
@@ -433,8 +460,6 @@ static int omfs_fill_super(struct super_block *sb, void *data, int silent)
 	struct inode *root;
 	int ret = -EINVAL;
 
-	save_mount_options(sb, (char *) data);
-
 	sbi = kzalloc(sizeof(struct omfs_sb_info), GFP_KERNEL);
 	if (!sbi)
 		return -ENOMEM;
@@ -449,6 +474,10 @@ static int omfs_fill_super(struct super_block *sb, void *data, int silent)
 		goto end;
 
 	sb->s_maxbytes = 0xffffffff;
+
+	sb->s_time_gran = NSEC_PER_MSEC;
+	sb->s_time_min = 0;
+	sb->s_time_max = U64_MAX / MSEC_PER_SEC;
 
 	sb_set_blocksize(sb, 0x200);
 

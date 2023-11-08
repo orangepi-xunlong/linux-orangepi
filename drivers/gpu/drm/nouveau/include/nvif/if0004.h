@@ -1,7 +1,11 @@
+/* SPDX-License-Identifier: MIT */
 #ifndef __NVIF_IF0004_H__
 #define __NVIF_IF0004_H__
 
-#define NV04_NVSW_NTFY_UEVENT                                              0x00
+union nv04_nvsw_event_args {
+	struct nv04_nvsw_event_vn {
+	} vn;
+};
 
 #define NV04_NVSW_GET_REF                                                  0x00
 

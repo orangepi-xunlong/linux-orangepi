@@ -41,6 +41,7 @@
 #include <linux/vmalloc.h>
 #include <linux/delay.h>
 #include <linux/interrupt.h>
+#include <linux/io.h>
 #include <linux/fb.h>
 #include <linux/init.h>
 #include <linux/arcfb.h>
@@ -260,7 +261,7 @@ static void arcfb_lcd_update_page(struct arcfb_par *par, unsigned int upper,
 	ks108_set_yaddr(par, chipindex, upper/8);
 
 	linesize = par->info->var.xres/8;
-	src = (unsigned char __force *) par->info->screen_base + (left/8) +
+	src = (unsigned char *)par->info->screen_buffer + (left/8) +
 		(upper * linesize);
 	ks108_set_xaddr(par, chipindex, left);
 
@@ -419,6 +420,8 @@ static int arcfb_ioctl(struct fb_info *info,
 			schedule();
 			finish_wait(&arcfb_waitq, &wait);
 		}
+		fallthrough;
+
 		case FBIO_GETCONTROL2:
 		{
 			unsigned char ctl2;
@@ -444,10 +447,13 @@ static ssize_t arcfb_write(struct fb_info *info, const char __user *buf,
 	/* modded from epson 1355 */
 
 	unsigned long p;
-	int err=-EINVAL;
+	int err;
 	unsigned int fbmemlength,x,y,w,h, bitppos, startpos, endpos, bitcount;
 	struct arcfb_par *par;
 	unsigned int xres;
+
+	if (!info->screen_buffer)
+		return -ENODEV;
 
 	p = *ppos;
 	par = info->par;
@@ -466,7 +472,7 @@ static ssize_t arcfb_write(struct fb_info *info, const char __user *buf,
 	if (count) {
 		char *base_addr;
 
-		base_addr = (char __force *)info->screen_base;
+		base_addr = info->screen_buffer;
 		count -= copy_from_user(base_addr + p, buf, count);
 		*ppos += count;
 		err = -EFAULT;
@@ -489,7 +495,7 @@ static ssize_t arcfb_write(struct fb_info *info, const char __user *buf,
 	return err;
 }
 
-static struct fb_ops arcfb_ops = {
+static const struct fb_ops arcfb_ops = {
 	.owner		= THIS_MODULE,
 	.fb_open	= arcfb_open,
 	.fb_read        = fb_sys_read,
@@ -521,9 +527,9 @@ static int arcfb_probe(struct platform_device *dev)
 
 	info = framebuffer_alloc(sizeof(struct arcfb_par), &dev->dev);
 	if (!info)
-		goto err;
+		goto err_fb_alloc;
 
-	info->screen_base = (char __iomem *)videomemory;
+	info->screen_buffer = videomemory;
 	info->fbops = &arcfb_ops;
 
 	info->var = arcfb_var;
@@ -533,19 +539,14 @@ static int arcfb_probe(struct platform_device *dev)
 
 	if (!dio_addr || !cio_addr || !c2io_addr) {
 		printk(KERN_WARNING "no IO addresses supplied\n");
-		goto err1;
+		goto err_addr;
 	}
 	par->dio_addr = dio_addr;
 	par->cio_addr = cio_addr;
 	par->c2io_addr = c2io_addr;
 	par->cslut[0] = 0x00;
 	par->cslut[1] = 0x06;
-	info->flags = FBINFO_FLAG_DEFAULT;
 	spin_lock_init(&par->lock);
-	retval = register_framebuffer(info);
-	if (retval < 0)
-		goto err1;
-	platform_set_drvdata(dev, info);
 	if (irq) {
 		par->irq = irq;
 		if (request_irq(par->irq, &arcfb_interrupt, IRQF_SHARED,
@@ -553,9 +554,13 @@ static int arcfb_probe(struct platform_device *dev)
 			printk(KERN_INFO
 				"arcfb: Failed req IRQ %d\n", par->irq);
 			retval = -EBUSY;
-			goto err1;
+			goto err_addr;
 		}
 	}
+	retval = register_framebuffer(info);
+	if (retval < 0)
+		goto err_register_fb;
+	platform_set_drvdata(dev, info);
 	fb_info(info, "Arc frame buffer device, using %dK of video memory\n",
 		videomemorysize >> 10);
 
@@ -578,28 +583,32 @@ static int arcfb_probe(struct platform_device *dev)
 	}
 
 	return 0;
-err1:
+
+err_register_fb:
+	free_irq(par->irq, info);
+err_addr:
 	framebuffer_release(info);
-err:
+err_fb_alloc:
 	vfree(videomemory);
 	return retval;
 }
 
-static int arcfb_remove(struct platform_device *dev)
+static void arcfb_remove(struct platform_device *dev)
 {
 	struct fb_info *info = platform_get_drvdata(dev);
 
 	if (info) {
 		unregister_framebuffer(info);
-		vfree((void __force *)info->screen_base);
+		if (irq)
+			free_irq(((struct arcfb_par *)(info->par))->irq, info);
+		vfree(info->screen_buffer);
 		framebuffer_release(info);
 	}
-	return 0;
 }
 
 static struct platform_driver arcfb_driver = {
 	.probe	= arcfb_probe,
-	.remove = arcfb_remove,
+	.remove_new = arcfb_remove,
 	.driver	= {
 		.name	= "arcfb",
 	},
@@ -645,17 +654,17 @@ module_param(nosplash, uint, 0);
 MODULE_PARM_DESC(nosplash, "Disable doing the splash screen");
 module_param(arcfb_enable, uint, 0);
 MODULE_PARM_DESC(arcfb_enable, "Enable communication with Arc board");
-module_param(dio_addr, ulong, 0);
+module_param_hw(dio_addr, ulong, ioport, 0);
 MODULE_PARM_DESC(dio_addr, "IO address for data, eg: 0x480");
-module_param(cio_addr, ulong, 0);
+module_param_hw(cio_addr, ulong, ioport, 0);
 MODULE_PARM_DESC(cio_addr, "IO address for control, eg: 0x400");
-module_param(c2io_addr, ulong, 0);
+module_param_hw(c2io_addr, ulong, ioport, 0);
 MODULE_PARM_DESC(c2io_addr, "IO address for secondary control, eg: 0x408");
 module_param(splashval, ulong, 0);
 MODULE_PARM_DESC(splashval, "Splash pattern: 0xFF is black, 0x00 is green");
 module_param(tuhold, ulong, 0);
 MODULE_PARM_DESC(tuhold, "Time to hold between strobing data to Arc board");
-module_param(irq, uint, 0);
+module_param_hw(irq, uint, irq, 0);
 MODULE_PARM_DESC(irq, "IRQ for the Arc board");
 
 module_init(arcfb_init);

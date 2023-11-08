@@ -1,20 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Hi3519 Clock Driver
  *
  * Copyright (c) 2015-2016 HiSilicon Technologies Co., Ltd.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include <dt-bindings/clock/hi3519-clock.h>
@@ -174,13 +162,12 @@ static int hi3519_clk_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int hi3519_clk_remove(struct platform_device *pdev)
+static void hi3519_clk_remove(struct platform_device *pdev)
 {
 	struct hi3519_crg_data *crg = platform_get_drvdata(pdev);
 
 	hisi_reset_exit(crg->rstc);
 	hi3519_clk_unregister(pdev);
-	return 0;
 }
 
 
@@ -192,7 +179,7 @@ MODULE_DEVICE_TABLE(of, hi3519_clk_match_table);
 
 static struct platform_driver hi3519_clk_driver = {
 	.probe          = hi3519_clk_probe,
-	.remove		= hi3519_clk_remove,
+	.remove_new	= hi3519_clk_remove,
 	.driver         = {
 		.name   = "hi3519-clk",
 		.of_match_table = hi3519_clk_match_table,

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * drivers/mmc/host/sdhci-of-hlwd.c
  *
@@ -12,11 +13,6 @@
  *
  * Authors: Xiaobo Xie <X.Xie@freescale.com>
  *	    Anton Vorontsov <avorontsov@ru.mvista.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or (at
- * your option) any later version.
  */
 
 #include <linux/delay.h>
@@ -72,7 +68,7 @@ static const struct sdhci_pltfm_data sdhci_hlwd_pdata = {
 
 static int sdhci_hlwd_probe(struct platform_device *pdev)
 {
-	return sdhci_pltfm_register(pdev, &sdhci_hlwd_pdata, 0);
+	return sdhci_pltfm_init_and_add_host(pdev, &sdhci_hlwd_pdata, 0);
 }
 
 static const struct of_device_id sdhci_hlwd_of_match[] = {
@@ -84,11 +80,12 @@ MODULE_DEVICE_TABLE(of, sdhci_hlwd_of_match);
 static struct platform_driver sdhci_hlwd_driver = {
 	.driver = {
 		.name = "sdhci-hlwd",
+		.probe_type = PROBE_PREFER_ASYNCHRONOUS,
 		.of_match_table = sdhci_hlwd_of_match,
 		.pm = &sdhci_pltfm_pmops,
 	},
 	.probe = sdhci_hlwd_probe,
-	.remove = sdhci_pltfm_unregister,
+	.remove_new = sdhci_pltfm_remove,
 };
 
 module_platform_driver(sdhci_hlwd_driver);

@@ -1,8 +1,8 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (C) STMicroelectronics SA 2015
  * Authors: Arnaud Pouliquen <arnaud.pouliquen@st.com>
  *          for STMicroelectronics.
- * License terms:  GNU General Public License (GPL), version 2
  */
 
 #ifndef __SND_ST_AUD_UNIPERIF_H
@@ -1299,6 +1299,7 @@ struct uniperif {
 	int ver; /* IP version, used by register access macros */
 	struct regmap_field *clk_sel;
 	struct regmap_field *valid_sel;
+	spinlock_t irq_lock; /* use to prevent race condition with IRQ */
 
 	/* capabilities */
 	const struct snd_pcm_hardware *hw;
@@ -1347,7 +1348,7 @@ struct sti_uniperiph_data {
 	struct sti_uniperiph_dai dai_data;
 };
 
-static const struct snd_pcm_hardware uni_tdm_hw = {
+static __maybe_unused const struct snd_pcm_hardware uni_tdm_hw = {
 	.info = SNDRV_PCM_INFO_INTERLEAVED | SNDRV_PCM_INFO_BLOCK_TRANSFER |
 		SNDRV_PCM_INFO_PAUSE | SNDRV_PCM_INFO_MMAP |
 		SNDRV_PCM_INFO_MMAP_VALID,
@@ -1371,12 +1372,12 @@ static const struct snd_pcm_hardware uni_tdm_hw = {
 
 /* uniperiph player*/
 int uni_player_init(struct platform_device *pdev,
-		    struct uniperif *uni_player);
+		    struct uniperif *player);
 int uni_player_resume(struct uniperif *player);
 
 /* uniperiph reader */
 int uni_reader_init(struct platform_device *pdev,
-		    struct uniperif *uni_reader);
+		    struct uniperif *reader);
 
 /* common */
 int sti_uniperiph_dai_set_fmt(struct snd_soc_dai *dai,
@@ -1396,6 +1397,8 @@ static inline int sti_uniperiph_get_unip_tdm_frame_size(struct uniperif *uni)
 {
 	return (uni->tdm_slot.slots * uni->tdm_slot.slot_width / 8);
 }
+
+int  sti_uniperiph_reset(struct uniperif *uni);
 
 int sti_uniperiph_set_tdm_slot(struct snd_soc_dai *dai, unsigned int tx_mask,
 			       unsigned int rx_mask, int slots,

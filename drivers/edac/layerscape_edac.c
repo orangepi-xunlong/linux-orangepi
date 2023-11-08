@@ -16,7 +16,7 @@
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
-#include "edac_core.h"
+#include "edac_module.h"
 #include "fsl_ddr_edac.h"
 
 static const struct of_device_id fsl_ddr_mc_err_of_match[] = {
@@ -37,6 +37,9 @@ static struct platform_driver fsl_ddr_mc_err_driver = {
 static int __init fsl_ddr_mc_init(void)
 {
 	int res;
+
+	if (ghes_get_devices())
+		return -EBUSY;
 
 	/* make sure error reporting method is sane */
 	switch (edac_op_state) {
@@ -69,5 +72,4 @@ module_exit(fsl_ddr_mc_exit);
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("NXP Semiconductor");
 module_param(edac_op_state, int, 0444);
-MODULE_PARM_DESC(edac_op_state,
-		 "EDAC Error Reporting state: 0=Poll, 2=Interrupt");
+MODULE_PARM_DESC(edac_op_state, "EDAC Error Reporting state: 0=Poll, 2=Interrupt");

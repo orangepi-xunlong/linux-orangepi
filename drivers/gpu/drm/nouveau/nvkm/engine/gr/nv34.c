@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 #include "nv20.h"
 #include "regs.h"
 
@@ -17,7 +18,7 @@ nv34_gr_chan = {
 };
 
 static int
-nv34_gr_chan_new(struct nvkm_gr *base, struct nvkm_fifo_chan *fifoch,
+nv34_gr_chan_new(struct nvkm_gr *base, struct nvkm_chan *fifoch,
 		 const struct nvkm_oclass *oclass, struct nvkm_object **pobject)
 {
 	struct nv20_gr *gr = nv20_gr(base);
@@ -28,7 +29,7 @@ nv34_gr_chan_new(struct nvkm_gr *base, struct nvkm_fifo_chan *fifoch,
 		return -ENOMEM;
 	nvkm_object_ctor(&nv34_gr_chan, oclass, &chan->object);
 	chan->gr = gr;
-	chan->chid = fifoch->chid;
+	chan->chid = fifoch->id;
 	*pobject = &chan->object;
 
 	ret = nvkm_memory_new(gr->base.engine.subdev.device,
@@ -123,13 +124,14 @@ nv34_gr = {
 		{ -1, -1, 0x0389, &nv04_gr_object }, /* sifm (nv30) */
 		{ -1, -1, 0x038a, &nv04_gr_object }, /* ifc (nv30) */
 		{ -1, -1, 0x039e, &nv04_gr_object }, /* swzsurf (nv30) */
+		{ -1, -1, 0x0597, &nv04_gr_object }, /* kelvin */
 		{ -1, -1, 0x0697, &nv04_gr_object }, /* rankine */
 		{}
 	}
 };
 
 int
-nv34_gr_new(struct nvkm_device *device, int index, struct nvkm_gr **pgr)
+nv34_gr_new(struct nvkm_device *device, enum nvkm_subdev_type type, int inst, struct nvkm_gr **pgr)
 {
-	return nv20_gr_new_(&nv34_gr, device, index, pgr);
+	return nv20_gr_new_(&nv34_gr, device, type, inst, pgr);
 }

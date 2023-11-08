@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright (C) 2007,2008 Freescale Semiconductor, Inc. All rights reserved.
  *
@@ -5,20 +6,13 @@
  *
  * Description:
  * MPC512x SoC setup
- *
- * This is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
  */
 
 #include <linux/kernel.h>
-#include <linux/of_platform.h>
+#include <linux/of.h>
 
 #include <asm/machdep.h>
 #include <asm/ipic.h>
-#include <asm/prom.h>
 #include <asm/time.h>
 
 #include "mpc512x.h"
@@ -53,6 +47,5 @@ define_machine(mpc512x_generic) {
 	.setup_arch		= mpc512x_setup_arch,
 	.init_IRQ		= mpc512x_init_IRQ,
 	.get_irq		= ipic_get_irq,
-	.calibrate_decr		= generic_calibrate_decr,
 	.restart		= mpc512x_restart,
 };

@@ -1,2 +1,2 @@
-obj-$(CONFIG_RASPBERRYPI_POWER)	+= raspberrypi-power.o
+# SPDX-License-Identifier: GPL-2.0-only
 obj-$(CONFIG_SOC_BRCMSTB)	+= brcmstb/

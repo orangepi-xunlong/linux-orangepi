@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0+
 /*
  * Transport & Protocol Driver for In-System Design, Inc. ISD200 ASIC
  *
@@ -13,20 +14,6 @@
  * The ISD200 ASIC does not natively support ATA devices.  The chip
  * does implement an interface, the ATA Command Block (ATACB) which provides
  * a means of passing ATA commands and ATA register accesses to a device.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the
- * Free Software Foundation; either version 2, or (at your option) any
- * later version.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License along
- * with this program; if not, write to the Free Software Foundation, Inc.,
- * 675 Mass Ave, Cambridge, MA 02139, USA.
  *
  * History:
  *
@@ -66,6 +53,7 @@
 MODULE_DESCRIPTION("Driver for In-System Design, Inc. ISD200 ASIC");
 MODULE_AUTHOR("Björn Stenberg <bjorn@haxx.se>");
 MODULE_LICENSE("GPL");
+MODULE_IMPORT_NS(USB_STORAGE);
 
 static int isd200_Initialization(struct us_data *us);
 
@@ -338,7 +326,7 @@ struct isd200_info {
 
 	/* maximum number of LUNs supported */
 	unsigned char MaxLUNs;
-	unsigned char cmnd[BLK_MAX_CDB];
+	unsigned char cmnd[MAX_COMMAND_SIZE];
 	struct scsi_cmnd srb;
 	struct scatterlist sg;
 };
@@ -497,7 +485,7 @@ static int isd200_action( struct us_data *us, int action,
 	int status;
 
 	memset(&ata, 0, sizeof(ata));
-	srb->cmnd = info->cmnd;
+	memcpy(srb->cmnd, info->cmnd, MAX_COMMAND_SIZE);
 	srb->device = &srb_dev;
 
 	ata.generic.SignatureByte0 = info->ConfigData.ATAMajorCommand;
@@ -1166,7 +1154,7 @@ static int isd200_get_inquiry_data( struct us_data *us )
 				/* Fill in vendor identification fields */
 				src = (__be16 *)&id[ATA_ID_PROD];
 				dest = (__u16*)info->InquiryData.VendorId;
-				for (i=0;i<4;i++)
+				for (i = 0; i < 4; i++)
 					dest[i] = be16_to_cpu(src[i]);
 
 				src = (__be16 *)&id[ATA_ID_PROD + 8/2];
@@ -1395,7 +1383,7 @@ static int isd200_scsi_to_ata(struct scsi_cmnd *srb, struct us_data *us,
 				ATA_CMD_MEDIA_LOCK : ATA_CMD_MEDIA_UNLOCK;
 			isd200_srb_set_bufflen(srb, 0);
 		} else {
-			usb_stor_dbg(us, "   Not removeable media, just report okay\n");
+			usb_stor_dbg(us, "   Not removable media, just report okay\n");
 			srb->result = SAM_STAT_GOOD;
 			sendToTransport = 0;
 		}
@@ -1461,7 +1449,7 @@ static void isd200_free_info_ptrs(void *info_)
  * Allocates (if necessary) and initializes the driver structure.
  *
  * RETURNS:
- *    ISD status code
+ *    error status code
  */
 static int isd200_init_info(struct us_data *us)
 {
@@ -1469,7 +1457,7 @@ static int isd200_init_info(struct us_data *us)
 
 	info = kzalloc(sizeof(struct isd200_info), GFP_KERNEL);
 	if (!info)
-		return ISD200_ERROR;
+		return -ENOMEM;
 
 	info->id = kzalloc(ATA_ID_WORDS * 2, GFP_KERNEL);
 	info->RegsBuf = kmalloc(sizeof(info->ATARegs), GFP_KERNEL);
@@ -1478,13 +1466,13 @@ static int isd200_init_info(struct us_data *us)
 	if (!info->id || !info->RegsBuf || !info->srb.sense_buffer) {
 		isd200_free_info_ptrs(info);
 		kfree(info);
-		return ISD200_ERROR;
+		return -ENOMEM;
 	}
 
 	us->extra = info;
 	us->extra_destructor = isd200_free_info_ptrs;
 
-	return ISD200_GOOD;
+	return 0;
 }
 
 /**************************************************************************
@@ -1524,7 +1512,7 @@ static int isd200_Initialization(struct us_data *us)
 
 static void isd200_ata_command(struct scsi_cmnd *srb, struct us_data *us)
 {
-	int sendToTransport = 1, orig_bufflen;
+	int sendToTransport, orig_bufflen;
 	union ata_cdb ataCdb;
 
 	/* Make sure driver was initialized */

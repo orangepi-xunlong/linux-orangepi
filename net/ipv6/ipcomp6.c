@@ -1,22 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * IP Payload Compression Protocol (IPComp) for IPv6 - RFC3173
  *
  * Copyright (C)2003 USAGI/WIDE Project
  *
  * Author	Mitsuru KANDA  <mk@linux-ipv6.org>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, see <http://www.gnu.org/licenses/>.
  */
 /*
  * [Memo]
@@ -103,6 +91,7 @@ static struct xfrm_state *ipcomp6_tunnel_create(struct xfrm_state *x)
 	t->props.mode = x->props.mode;
 	memcpy(t->props.saddr.a6, x->props.saddr.a6, sizeof(struct in6_addr));
 	memcpy(&t->mark, &x->mark, sizeof(t->mark));
+	t->if_id = x->if_id;
 
 	if (xfrm_init_state(t))
 		goto error;
@@ -147,7 +136,8 @@ out:
 	return err;
 }
 
-static int ipcomp6_init_state(struct xfrm_state *x)
+static int ipcomp6_init_state(struct xfrm_state *x,
+			      struct netlink_ext_ack *extack)
 {
 	int err = -EINVAL;
 
@@ -159,17 +149,20 @@ static int ipcomp6_init_state(struct xfrm_state *x)
 		x->props.header_len += sizeof(struct ipv6hdr);
 		break;
 	default:
+		NL_SET_ERR_MSG(extack, "Unsupported XFRM mode for IPcomp");
 		goto out;
 	}
 
-	err = ipcomp_init_state(x);
+	err = ipcomp_init_state(x, extack);
 	if (err)
 		goto out;
 
 	if (x->props.mode == XFRM_MODE_TUNNEL) {
 		err = ipcomp6_tunnel_attach(x);
-		if (err)
+		if (err) {
+			NL_SET_ERR_MSG(extack, "Kernel error: failed to initialize the associated state");
 			goto out;
+		}
 	}
 
 	err = 0;
@@ -183,18 +176,17 @@ static int ipcomp6_rcv_cb(struct sk_buff *skb, int err)
 }
 
 static const struct xfrm_type ipcomp6_type = {
-	.description	= "IPCOMP6",
 	.owner		= THIS_MODULE,
 	.proto		= IPPROTO_COMP,
 	.init_state	= ipcomp6_init_state,
 	.destructor	= ipcomp_destroy,
 	.input		= ipcomp_input,
 	.output		= ipcomp_output,
-	.hdr_offset	= xfrm6_find_1stfragopt,
 };
 
 static struct xfrm6_protocol ipcomp6_protocol = {
 	.handler	= xfrm6_rcv,
+	.input_handler	= xfrm_input,
 	.cb_handler	= ipcomp6_rcv_cb,
 	.err_handler	= ipcomp6_err,
 	.priority	= 0,
@@ -218,8 +210,7 @@ static void __exit ipcomp6_fini(void)
 {
 	if (xfrm6_protocol_deregister(&ipcomp6_protocol, IPPROTO_COMP) < 0)
 		pr_info("%s: can't remove protocol\n", __func__);
-	if (xfrm_unregister_type(&ipcomp6_type, AF_INET6) < 0)
-		pr_info("%s: can't remove xfrm type\n", __func__);
+	xfrm_unregister_type(&ipcomp6_type, AF_INET6);
 }
 
 module_init(ipcomp6_init);

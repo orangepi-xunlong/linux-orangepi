@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Driver for Broadcom BCM2835 auxiliary SPI Controllers
  *
@@ -7,20 +8,11 @@
  * Based on: spi-bcm2835.c
  *
  * Copyright (C) 2015 Martin Sperl
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include <linux/clk.h>
 #include <linux/completion.h>
+#include <linux/debugfs.h>
 #include <linux/delay.h>
 #include <linux/err.h>
 #include <linux/interrupt.h>
@@ -28,13 +20,16 @@
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/of.h>
-#include <linux/of_address.h>
-#include <linux/of_device.h>
-#include <linux/of_gpio.h>
-#include <linux/of_irq.h>
+#include <linux/platform_device.h>
 #include <linux/regmap.h>
 #include <linux/spi/spi.h>
 #include <linux/spinlock.h>
+
+/* define polling limits */
+static unsigned int polling_limit_us = 30;
+module_param(polling_limit_us, uint, 0664);
+MODULE_PARM_DESC(polling_limit_us,
+		 "time in us to run a transfer in polling mode - if zero no polling is used\n");
 
 /*
  * spi register defines
@@ -88,10 +83,6 @@
 #define BCM2835_AUX_SPI_STAT_BUSY	0x00000040
 #define BCM2835_AUX_SPI_STAT_BITCOUNT	0x0000003F
 
-/* timeout values */
-#define BCM2835_AUX_SPI_POLLING_LIMIT_US	30
-#define BCM2835_AUX_SPI_POLLING_JIFFIES		2
-
 struct bcm2835aux_spi {
 	void __iomem *regs;
 	struct clk *clk;
@@ -102,14 +93,59 @@ struct bcm2835aux_spi {
 	int tx_len;
 	int rx_len;
 	int pending;
+
+	u64 count_transfer_polling;
+	u64 count_transfer_irq;
+	u64 count_transfer_irq_after_poll;
+
+	struct dentry *debugfs_dir;
 };
 
-static inline u32 bcm2835aux_rd(struct bcm2835aux_spi *bs, unsigned reg)
+#if defined(CONFIG_DEBUG_FS)
+static void bcm2835aux_debugfs_create(struct bcm2835aux_spi *bs,
+				      const char *dname)
+{
+	char name[64];
+	struct dentry *dir;
+
+	/* get full name */
+	snprintf(name, sizeof(name), "spi-bcm2835aux-%s", dname);
+
+	/* the base directory */
+	dir = debugfs_create_dir(name, NULL);
+	bs->debugfs_dir = dir;
+
+	/* the counters */
+	debugfs_create_u64("count_transfer_polling", 0444, dir,
+			   &bs->count_transfer_polling);
+	debugfs_create_u64("count_transfer_irq", 0444, dir,
+			   &bs->count_transfer_irq);
+	debugfs_create_u64("count_transfer_irq_after_poll", 0444, dir,
+			   &bs->count_transfer_irq_after_poll);
+}
+
+static void bcm2835aux_debugfs_remove(struct bcm2835aux_spi *bs)
+{
+	debugfs_remove_recursive(bs->debugfs_dir);
+	bs->debugfs_dir = NULL;
+}
+#else
+static void bcm2835aux_debugfs_create(struct bcm2835aux_spi *bs,
+				      const char *dname)
+{
+}
+
+static void bcm2835aux_debugfs_remove(struct bcm2835aux_spi *bs)
+{
+}
+#endif /* CONFIG_DEBUG_FS */
+
+static inline u32 bcm2835aux_rd(struct bcm2835aux_spi *bs, unsigned int reg)
 {
 	return readl(bs->regs + reg);
 }
 
-static inline void bcm2835aux_wr(struct bcm2835aux_spi *bs, unsigned reg,
+static inline void bcm2835aux_wr(struct bcm2835aux_spi *bs, unsigned int reg,
 				 u32 val)
 {
 	writel(val, bs->regs + reg);
@@ -123,15 +159,12 @@ static inline void bcm2835aux_rd_fifo(struct bcm2835aux_spi *bs)
 	data = bcm2835aux_rd(bs, BCM2835_AUX_SPI_IO);
 	if (bs->rx_buf) {
 		switch (count) {
-		case 4:
-			*bs->rx_buf++ = (data >> 24) & 0xff;
-			/* fallthrough */
 		case 3:
 			*bs->rx_buf++ = (data >> 16) & 0xff;
-			/* fallthrough */
+			fallthrough;
 		case 2:
 			*bs->rx_buf++ = (data >> 8) & 0xff;
-			/* fallthrough */
+			fallthrough;
 		case 1:
 			*bs->rx_buf++ = (data >> 0) & 0xff;
 			/* fallthrough - no default */
@@ -178,19 +211,14 @@ static void bcm2835aux_spi_reset_hw(struct bcm2835aux_spi *bs)
 		      BCM2835_AUX_SPI_CNTL0_CLEARFIFO);
 }
 
-static irqreturn_t bcm2835aux_spi_interrupt(int irq, void *dev_id)
+static void bcm2835aux_spi_transfer_helper(struct bcm2835aux_spi *bs)
 {
-	struct spi_master *master = dev_id;
-	struct bcm2835aux_spi *bs = spi_master_get_devdata(master);
-	irqreturn_t ret = IRQ_NONE;
+	u32 stat = bcm2835aux_rd(bs, BCM2835_AUX_SPI_STAT);
 
 	/* check if we have data to read */
-	while (bs->rx_len &&
-	       (!(bcm2835aux_rd(bs, BCM2835_AUX_SPI_STAT) &
-		  BCM2835_AUX_SPI_STAT_RX_EMPTY))) {
+	for (; bs->rx_len && (stat & BCM2835_AUX_SPI_STAT_RX_LVL);
+	     stat = bcm2835aux_rd(bs, BCM2835_AUX_SPI_STAT))
 		bcm2835aux_rd_fifo(bs);
-		ret = IRQ_HANDLED;
-	}
 
 	/* check if we have data to write */
 	while (bs->tx_len &&
@@ -198,16 +226,21 @@ static irqreturn_t bcm2835aux_spi_interrupt(int irq, void *dev_id)
 	       (!(bcm2835aux_rd(bs, BCM2835_AUX_SPI_STAT) &
 		  BCM2835_AUX_SPI_STAT_TX_FULL))) {
 		bcm2835aux_wr_fifo(bs);
-		ret = IRQ_HANDLED;
 	}
+}
 
-	/* and check if we have reached "done" */
-	while (bs->rx_len &&
-	       (!(bcm2835aux_rd(bs, BCM2835_AUX_SPI_STAT) &
-		  BCM2835_AUX_SPI_STAT_BUSY))) {
-		bcm2835aux_rd_fifo(bs);
-		ret = IRQ_HANDLED;
-	}
+static irqreturn_t bcm2835aux_spi_interrupt(int irq, void *dev_id)
+{
+	struct spi_controller *host = dev_id;
+	struct bcm2835aux_spi *bs = spi_controller_get_devdata(host);
+
+	/* IRQ may be shared, so return if our interrupts are disabled */
+	if (!(bcm2835aux_rd(bs, BCM2835_AUX_SPI_CNTL1) &
+	      (BCM2835_AUX_SPI_CNTL1_TXEMPTY | BCM2835_AUX_SPI_CNTL1_IDLE)))
+		return IRQ_NONE;
+
+	/* do common fifo handling */
+	bcm2835aux_spi_transfer_helper(bs);
 
 	if (!bs->tx_len) {
 		/* disable tx fifo empty interrupt */
@@ -218,18 +251,17 @@ static irqreturn_t bcm2835aux_spi_interrupt(int irq, void *dev_id)
 	/* and if rx_len is 0 then disable interrupts and wake up completion */
 	if (!bs->rx_len) {
 		bcm2835aux_wr(bs, BCM2835_AUX_SPI_CNTL1, bs->cntl[1]);
-		complete(&master->xfer_completion);
+		spi_finalize_current_transfer(host);
 	}
 
-	/* and return */
-	return ret;
+	return IRQ_HANDLED;
 }
 
-static int __bcm2835aux_spi_transfer_one_irq(struct spi_master *master,
+static int __bcm2835aux_spi_transfer_one_irq(struct spi_controller *host,
 					     struct spi_device *spi,
 					     struct spi_transfer *tfr)
 {
-	struct bcm2835aux_spi *bs = spi_master_get_devdata(master);
+	struct bcm2835aux_spi *bs = spi_controller_get_devdata(host);
 
 	/* enable interrupts */
 	bcm2835aux_wr(bs, BCM2835_AUX_SPI_CNTL1, bs->cntl[1] |
@@ -240,11 +272,14 @@ static int __bcm2835aux_spi_transfer_one_irq(struct spi_master *master,
 	return 1;
 }
 
-static int bcm2835aux_spi_transfer_one_irq(struct spi_master *master,
+static int bcm2835aux_spi_transfer_one_irq(struct spi_controller *host,
 					   struct spi_device *spi,
 					   struct spi_transfer *tfr)
 {
-	struct bcm2835aux_spi *bs = spi_master_get_devdata(master);
+	struct bcm2835aux_spi *bs = spi_controller_get_devdata(host);
+
+	/* update statistics */
+	bs->count_transfer_irq++;
 
 	/* fill in registers and fifos before enabling interrupts */
 	bcm2835aux_wr(bs, BCM2835_AUX_SPI_CNTL1, bs->cntl[1]);
@@ -259,44 +294,31 @@ static int bcm2835aux_spi_transfer_one_irq(struct spi_master *master,
 	}
 
 	/* now run the interrupt mode */
-	return __bcm2835aux_spi_transfer_one_irq(master, spi, tfr);
+	return __bcm2835aux_spi_transfer_one_irq(host, spi, tfr);
 }
 
-static int bcm2835aux_spi_transfer_one_poll(struct spi_master *master,
+static int bcm2835aux_spi_transfer_one_poll(struct spi_controller *host,
 					    struct spi_device *spi,
 					struct spi_transfer *tfr)
 {
-	struct bcm2835aux_spi *bs = spi_master_get_devdata(master);
+	struct bcm2835aux_spi *bs = spi_controller_get_devdata(host);
 	unsigned long timeout;
-	u32 stat;
+
+	/* update statistics */
+	bs->count_transfer_polling++;
 
 	/* configure spi */
 	bcm2835aux_wr(bs, BCM2835_AUX_SPI_CNTL1, bs->cntl[1]);
 	bcm2835aux_wr(bs, BCM2835_AUX_SPI_CNTL0, bs->cntl[0]);
 
-	/* set the timeout */
-	timeout = jiffies + BCM2835_AUX_SPI_POLLING_JIFFIES;
+	/* set the timeout to at least 2 jiffies */
+	timeout = jiffies + 2 + HZ * polling_limit_us / 1000000;
 
 	/* loop until finished the transfer */
 	while (bs->rx_len) {
-		/* read status */
-		stat = bcm2835aux_rd(bs, BCM2835_AUX_SPI_STAT);
 
-		/* fill in tx fifo with remaining data */
-		if ((bs->tx_len) && (!(stat & BCM2835_AUX_SPI_STAT_TX_FULL))) {
-			bcm2835aux_wr_fifo(bs);
-			continue;
-		}
-
-		/* read data from fifo for both cases */
-		if (!(stat & BCM2835_AUX_SPI_STAT_RX_EMPTY)) {
-			bcm2835aux_rd_fifo(bs);
-			continue;
-		}
-		if (!(stat & BCM2835_AUX_SPI_STAT_BUSY)) {
-			bcm2835aux_rd_fifo(bs);
-			continue;
-		}
+		/* do common fifo handling */
+		bcm2835aux_spi_transfer_helper(bs);
 
 		/* there is still data pending to read check the timeout */
 		if (bs->rx_len && time_after(jiffies, timeout)) {
@@ -305,7 +327,8 @@ static int bcm2835aux_spi_transfer_one_poll(struct spi_master *master,
 					    jiffies - timeout,
 					    bs->tx_len, bs->rx_len);
 			/* forward to interrupt handler */
-			return __bcm2835aux_spi_transfer_one_irq(master,
+			bs->count_transfer_irq_after_poll++;
+			return __bcm2835aux_spi_transfer_one_irq(host,
 							       spi, tfr);
 		}
 	}
@@ -314,14 +337,13 @@ static int bcm2835aux_spi_transfer_one_poll(struct spi_master *master,
 	return 0;
 }
 
-static int bcm2835aux_spi_transfer_one(struct spi_master *master,
+static int bcm2835aux_spi_transfer_one(struct spi_controller *host,
 				       struct spi_device *spi,
 				       struct spi_transfer *tfr)
 {
-	struct bcm2835aux_spi *bs = spi_master_get_devdata(master);
+	struct bcm2835aux_spi *bs = spi_controller_get_devdata(host);
 	unsigned long spi_hz, clk_hz, speed;
-	unsigned long spi_used_hz;
-	unsigned long long xfer_time_us;
+	unsigned long hz_per_byte, byte_limit;
 
 	/* calculate the registers to handle
 	 *
@@ -349,7 +371,7 @@ static int bcm2835aux_spi_transfer_one(struct spi_master *master,
 	/* set the new speed */
 	bs->cntl[0] |= speed << BCM2835_AUX_SPI_CNTL0_SPEED_SHIFT;
 
-	spi_used_hz = clk_hz / (2 * (speed + 1));
+	tfr->effective_speed_hz = clk_hz / (2 * (speed + 1));
 
 	/* set transmit buffers and length */
 	bs->tx_buf = tfr->tx_buf;
@@ -358,27 +380,29 @@ static int bcm2835aux_spi_transfer_one(struct spi_master *master,
 	bs->rx_len = tfr->len;
 	bs->pending = 0;
 
-	/* calculate the estimated time in us the transfer runs
-	 * note that there are are 2 idle clocks after each
-	 * chunk getting transferred - in our case the chunk size
-	 * is 3 bytes, so we approximate this by 9 bits/byte
+	/* Calculate the estimated time in us the transfer runs.  Note that
+	 * there are 2 idle clocks cycles after each chunk getting
+	 * transferred - in our case the chunk size is 3 bytes, so we
+	 * approximate this by 9 cycles/byte.  This is used to find the number
+	 * of Hz per byte per polling limit.  E.g., we can transfer 1 byte in
+	 * 30 µs per 300,000 Hz of bus clock.
 	 */
-	xfer_time_us = tfr->len * 9 * 1000000;
-	do_div(xfer_time_us, spi_used_hz);
+	hz_per_byte = polling_limit_us ? (9 * 1000000) / polling_limit_us : 0;
+	byte_limit = hz_per_byte ? tfr->effective_speed_hz / hz_per_byte : 1;
 
 	/* run in polling mode for short transfers */
-	if (xfer_time_us < BCM2835_AUX_SPI_POLLING_LIMIT_US)
-		return bcm2835aux_spi_transfer_one_poll(master, spi, tfr);
+	if (tfr->len < byte_limit)
+		return bcm2835aux_spi_transfer_one_poll(host, spi, tfr);
 
 	/* run in interrupt mode for all others */
-	return bcm2835aux_spi_transfer_one_irq(master, spi, tfr);
+	return bcm2835aux_spi_transfer_one_irq(host, spi, tfr);
 }
 
-static int bcm2835aux_spi_prepare_message(struct spi_master *master,
+static int bcm2835aux_spi_prepare_message(struct spi_controller *host,
 					  struct spi_message *msg)
 {
 	struct spi_device *spi = msg->spi;
-	struct bcm2835aux_spi *bs = spi_master_get_devdata(master);
+	struct bcm2835aux_spi *bs = spi_controller_get_devdata(host);
 
 	bs->cntl[0] = BCM2835_AUX_SPI_CNTL0_ENABLE |
 		      BCM2835_AUX_SPI_CNTL0_VAR_WIDTH |
@@ -398,77 +422,112 @@ static int bcm2835aux_spi_prepare_message(struct spi_master *master,
 	return 0;
 }
 
-static int bcm2835aux_spi_unprepare_message(struct spi_master *master,
+static int bcm2835aux_spi_unprepare_message(struct spi_controller *host,
 					    struct spi_message *msg)
 {
-	struct bcm2835aux_spi *bs = spi_master_get_devdata(master);
+	struct bcm2835aux_spi *bs = spi_controller_get_devdata(host);
 
 	bcm2835aux_spi_reset_hw(bs);
 
 	return 0;
 }
 
-static void bcm2835aux_spi_handle_err(struct spi_master *master,
+static void bcm2835aux_spi_handle_err(struct spi_controller *host,
 				      struct spi_message *msg)
 {
-	struct bcm2835aux_spi *bs = spi_master_get_devdata(master);
+	struct bcm2835aux_spi *bs = spi_controller_get_devdata(host);
 
 	bcm2835aux_spi_reset_hw(bs);
 }
 
+static int bcm2835aux_spi_setup(struct spi_device *spi)
+{
+	/* sanity check for native cs */
+	if (spi->mode & SPI_NO_CS)
+		return 0;
+
+	if (spi_get_csgpiod(spi, 0))
+		return 0;
+
+	/* for dt-backwards compatibility: only support native on CS0
+	 * known things not supported with broken native CS:
+	 * * multiple chip-selects: cs0-cs2 are all
+	 *     simultaniously asserted whenever there is a transfer
+	 *     this even includes SPI_NO_CS
+	 * * SPI_CS_HIGH: cs are always asserted low
+	 * * cs_change: cs is deasserted after each spi_transfer
+	 * * cs_delay_usec: cs is always deasserted one SCK cycle
+	 *     after the last transfer
+	 * probably more...
+	 */
+	dev_warn(&spi->dev,
+		 "Native CS is not supported - please configure cs-gpio in device-tree\n");
+
+	if (spi_get_chipselect(spi, 0) == 0)
+		return 0;
+
+	dev_warn(&spi->dev, "Native CS is not working for cs > 0\n");
+
+	return -EINVAL;
+}
+
 static int bcm2835aux_spi_probe(struct platform_device *pdev)
 {
-	struct spi_master *master;
+	struct spi_controller *host;
 	struct bcm2835aux_spi *bs;
-	struct resource *res;
 	unsigned long clk_hz;
 	int err;
 
-	master = spi_alloc_master(&pdev->dev, sizeof(*bs));
-	if (!master) {
-		dev_err(&pdev->dev, "spi_alloc_master() failed\n");
+	host = devm_spi_alloc_host(&pdev->dev, sizeof(*bs));
+	if (!host)
 		return -ENOMEM;
-	}
 
-	platform_set_drvdata(pdev, master);
-	master->mode_bits = (SPI_CPOL | SPI_CS_HIGH | SPI_NO_CS);
-	master->bits_per_word_mask = SPI_BPW_MASK(8);
-	master->num_chipselect = -1;
-	master->transfer_one = bcm2835aux_spi_transfer_one;
-	master->handle_err = bcm2835aux_spi_handle_err;
-	master->prepare_message = bcm2835aux_spi_prepare_message;
-	master->unprepare_message = bcm2835aux_spi_unprepare_message;
-	master->dev.of_node = pdev->dev.of_node;
+	platform_set_drvdata(pdev, host);
+	host->mode_bits = (SPI_CPOL | SPI_CS_HIGH | SPI_NO_CS);
+	host->bits_per_word_mask = SPI_BPW_MASK(8);
+	/* even though the driver never officially supported native CS
+	 * allow a single native CS for legacy DT support purposes when
+	 * no cs-gpio is configured.
+	 * Known limitations for native cs are:
+	 * * multiple chip-selects: cs0-cs2 are all simultaniously asserted
+	 *     whenever there is a transfer -  this even includes SPI_NO_CS
+	 * * SPI_CS_HIGH: is ignores - cs are always asserted low
+	 * * cs_change: cs is deasserted after each spi_transfer
+	 * * cs_delay_usec: cs is always deasserted one SCK cycle after
+	 *     a spi_transfer
+	 */
+	host->num_chipselect = 1;
+	host->setup = bcm2835aux_spi_setup;
+	host->transfer_one = bcm2835aux_spi_transfer_one;
+	host->handle_err = bcm2835aux_spi_handle_err;
+	host->prepare_message = bcm2835aux_spi_prepare_message;
+	host->unprepare_message = bcm2835aux_spi_unprepare_message;
+	host->dev.of_node = pdev->dev.of_node;
+	host->use_gpio_descriptors = true;
 
-	bs = spi_master_get_devdata(master);
+	bs = spi_controller_get_devdata(host);
 
 	/* the main area */
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	bs->regs = devm_ioremap_resource(&pdev->dev, res);
-	if (IS_ERR(bs->regs)) {
-		err = PTR_ERR(bs->regs);
-		goto out_master_put;
-	}
+	bs->regs = devm_platform_ioremap_resource(pdev, 0);
+	if (IS_ERR(bs->regs))
+		return PTR_ERR(bs->regs);
 
 	bs->clk = devm_clk_get(&pdev->dev, NULL);
-	if ((!bs->clk) || (IS_ERR(bs->clk))) {
+	if (IS_ERR(bs->clk)) {
 		err = PTR_ERR(bs->clk);
 		dev_err(&pdev->dev, "could not get clk: %d\n", err);
-		goto out_master_put;
+		return err;
 	}
 
 	bs->irq = platform_get_irq(pdev, 0);
-	if (bs->irq <= 0) {
-		dev_err(&pdev->dev, "could not get IRQ: %d\n", bs->irq);
-		err = bs->irq ? bs->irq : -ENODEV;
-		goto out_master_put;
-	}
+	if (bs->irq < 0)
+		return bs->irq;
 
 	/* this also enables the HW block */
 	err = clk_prepare_enable(bs->clk);
 	if (err) {
 		dev_err(&pdev->dev, "could not prepare clock: %d\n", err);
-		goto out_master_put;
+		return err;
 	}
 
 	/* just checking if the clock returns a sane value */
@@ -485,38 +544,40 @@ static int bcm2835aux_spi_probe(struct platform_device *pdev)
 	err = devm_request_irq(&pdev->dev, bs->irq,
 			       bcm2835aux_spi_interrupt,
 			       IRQF_SHARED,
-			       dev_name(&pdev->dev), master);
+			       dev_name(&pdev->dev), host);
 	if (err) {
 		dev_err(&pdev->dev, "could not request IRQ: %d\n", err);
 		goto out_clk_disable;
 	}
 
-	err = devm_spi_register_master(&pdev->dev, master);
+	err = spi_register_controller(host);
 	if (err) {
-		dev_err(&pdev->dev, "could not register SPI master: %d\n", err);
+		dev_err(&pdev->dev, "could not register SPI host: %d\n", err);
 		goto out_clk_disable;
 	}
+
+	bcm2835aux_debugfs_create(bs, dev_name(&pdev->dev));
 
 	return 0;
 
 out_clk_disable:
 	clk_disable_unprepare(bs->clk);
-out_master_put:
-	spi_master_put(master);
 	return err;
 }
 
-static int bcm2835aux_spi_remove(struct platform_device *pdev)
+static void bcm2835aux_spi_remove(struct platform_device *pdev)
 {
-	struct spi_master *master = platform_get_drvdata(pdev);
-	struct bcm2835aux_spi *bs = spi_master_get_devdata(master);
+	struct spi_controller *host = platform_get_drvdata(pdev);
+	struct bcm2835aux_spi *bs = spi_controller_get_devdata(host);
+
+	bcm2835aux_debugfs_remove(bs);
+
+	spi_unregister_controller(host);
 
 	bcm2835aux_spi_reset_hw(bs);
 
 	/* disable the HW block by releasing the clock */
 	clk_disable_unprepare(bs->clk);
-
-	return 0;
 }
 
 static const struct of_device_id bcm2835aux_spi_match[] = {
@@ -531,10 +592,10 @@ static struct platform_driver bcm2835aux_spi_driver = {
 		.of_match_table	= bcm2835aux_spi_match,
 	},
 	.probe		= bcm2835aux_spi_probe,
-	.remove		= bcm2835aux_spi_remove,
+	.remove_new	= bcm2835aux_spi_remove,
 };
 module_platform_driver(bcm2835aux_spi_driver);
 
 MODULE_DESCRIPTION("SPI controller driver for Broadcom BCM2835 aux");
 MODULE_AUTHOR("Martin Sperl <kernel@martin.sperl.org>");
-MODULE_LICENSE("GPL v2");
+MODULE_LICENSE("GPL");

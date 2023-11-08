@@ -1,22 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
- *	w1.c
- *
  * Copyright (c) 2004 Evgeniy Polyakov <zbr@ioremap.net>
- *
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
 #include <linux/delay.h>
@@ -32,29 +16,27 @@
 #include <linux/sched.h>
 #include <linux/kthread.h>
 #include <linux/freezer.h>
+#include <linux/hwmon.h>
+#include <linux/of.h>
 
 #include <linux/atomic.h>
 
-#include "w1.h"
-#include "w1_log.h"
-#include "w1_int.h"
-#include "w1_family.h"
+#include "w1_internal.h"
 #include "w1_netlink.h"
 
-MODULE_LICENSE("GPL");
-MODULE_AUTHOR("Evgeniy Polyakov <zbr@ioremap.net>");
-MODULE_DESCRIPTION("Driver for 1-wire Dallas network protocol.");
+#define W1_FAMILY_DEFAULT	0
+#define W1_FAMILY_DS28E04       0x1C /* for crc quirk */
+
 
 static int w1_timeout = 10;
-static int w1_timeout_us = 0;
-int w1_max_slave_count = 64;
-int w1_max_slave_ttl = 10;
-
 module_param_named(timeout, w1_timeout, int, 0);
 MODULE_PARM_DESC(timeout, "time in seconds between automatic slave searches");
+
+static int w1_timeout_us;
 module_param_named(timeout_us, w1_timeout_us, int, 0);
 MODULE_PARM_DESC(timeout_us,
 		 "time in microseconds between automatic slave searches");
+
 /* A search stops when w1_max_slave_count devices have been found in that
  * search.  The next search will start over and detect the same set of devices
  * on a static 1-wire bus.  Memory is not allocated based on this number, just
@@ -63,20 +45,18 @@ MODULE_PARM_DESC(timeout_us,
  * device on the network and w1_max_slave_count is set to 1, the device id can
  * be read directly skipping the normal slower search process.
  */
+int w1_max_slave_count = 64;
 module_param_named(max_slave_count, w1_max_slave_count, int, 0);
 MODULE_PARM_DESC(max_slave_count,
 	"maximum number of slaves detected in a search");
+
+int w1_max_slave_ttl = 10;
 module_param_named(slave_ttl, w1_max_slave_ttl, int, 0);
 MODULE_PARM_DESC(slave_ttl,
 	"Number of searches not seeing a slave before it will be removed");
 
 DEFINE_MUTEX(w1_mlock);
 LIST_HEAD(w1_masters);
-
-static int w1_master_match(struct device *dev, struct device_driver *drv)
-{
-	return 1;
-}
 
 static int w1_master_probe(struct device *dev)
 {
@@ -177,7 +157,7 @@ static const struct attribute_group *w1_slave_default_groups[] = {
 	NULL,
 };
 
-static struct w1_family_ops w1_default_fops = {
+static const struct w1_family_ops w1_default_fops = {
 	.groups		= w1_slave_default_groups,
 };
 
@@ -185,11 +165,10 @@ static struct w1_family w1_default_family = {
 	.fops = &w1_default_fops,
 };
 
-static int w1_uevent(struct device *dev, struct kobj_uevent_env *env);
+static int w1_uevent(const struct device *dev, struct kobj_uevent_env *env);
 
 static struct bus_type w1_bus_type = {
 	.name = "w1",
-	.match = w1_master_match,
 	.uevent = w1_uevent,
 };
 
@@ -316,17 +295,13 @@ static ssize_t w1_master_attribute_show_pointer(struct device *dev, struct devic
 
 static ssize_t w1_master_attribute_show_timeout(struct device *dev, struct device_attribute *attr, char *buf)
 {
-	ssize_t count;
-	count = sprintf(buf, "%d\n", w1_timeout);
-	return count;
+	return sprintf(buf, "%d\n", w1_timeout);
 }
 
 static ssize_t w1_master_attribute_show_timeout_us(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
-	ssize_t count;
-	count = sprintf(buf, "%d\n", w1_timeout_us);
-	return count;
+	return sprintf(buf, "%d\n", w1_timeout_us);
 }
 
 static ssize_t w1_master_attribute_store_max_slave_count(struct device *dev,
@@ -516,7 +491,7 @@ static ssize_t w1_master_attribute_store_remove(struct device *dev,
 	struct w1_master *md = dev_to_w1_master(dev);
 	struct w1_reg_num rn;
 	struct w1_slave *sl;
-	ssize_t result = count;
+	ssize_t result;
 
 	if (w1_atoreg_num(dev, buf, count, &rn))
 		return -EINVAL;
@@ -578,7 +553,7 @@ static struct attribute *w1_master_default_attrs[] = {
 	NULL
 };
 
-static struct attribute_group w1_master_defattr_group = {
+static const struct attribute_group w1_master_defattr_group = {
 	.attrs = w1_master_default_attrs,
 };
 
@@ -592,11 +567,11 @@ void w1_destroy_master_attributes(struct w1_master *master)
 	sysfs_remove_group(&master->dev.kobj, &w1_master_defattr_group);
 }
 
-static int w1_uevent(struct device *dev, struct kobj_uevent_env *env)
+static int w1_uevent(const struct device *dev, struct kobj_uevent_env *env)
 {
-	struct w1_master *md = NULL;
-	struct w1_slave *sl = NULL;
-	char *event_owner, *name;
+	const struct w1_master *md = NULL;
+	const struct w1_slave *sl = NULL;
+	const char *event_owner, *name;
 	int err = 0;
 
 	if (dev->driver == &w1_master_driver) {
@@ -630,7 +605,7 @@ end:
 
 static int w1_family_notify(unsigned long action, struct w1_slave *sl)
 {
-	struct w1_family_ops *fops;
+	const struct w1_family_ops *fops;
 	int err;
 
 	fops = sl->family->fops;
@@ -659,9 +634,24 @@ static int w1_family_notify(unsigned long action, struct w1_slave *sl)
 				return err;
 			}
 		}
-
+		if (IS_REACHABLE(CONFIG_HWMON) && fops->chip_info) {
+			struct device *hwmon
+				= hwmon_device_register_with_info(&sl->dev,
+						"w1_slave_temp", sl,
+						fops->chip_info,
+						NULL);
+			if (IS_ERR(hwmon)) {
+				dev_warn(&sl->dev,
+					 "could not create hwmon device\n");
+			} else {
+				sl->hwmon = hwmon;
+			}
+		}
 		break;
 	case BUS_NOTIFY_DEL_DEVICE:
+		if (IS_REACHABLE(CONFIG_HWMON) && fops->chip_info &&
+			    sl->hwmon)
+			hwmon_device_unregister(sl->hwmon);
 		if (fops->remove_slave)
 			sl->family->fops->remove_slave(sl);
 		if (fops->groups)
@@ -680,6 +670,8 @@ static int __w1_attach_slave_device(struct w1_slave *sl)
 	sl->dev.bus = &w1_bus_type;
 	sl->dev.release = &w1_slave_release;
 	sl->dev.groups = w1_slave_groups;
+	sl->dev.of_node = of_find_matching_node(sl->master->dev.of_node,
+						sl->family->of_match_table);
 
 	dev_set_name(&sl->dev, "%02x-%012llx",
 		 (unsigned int) sl->reg_num.family,
@@ -700,6 +692,8 @@ static int __w1_attach_slave_device(struct w1_slave *sl)
 		dev_err(&sl->dev,
 			"Device registration [%s] failed. err=%d\n",
 			dev_name(&sl->dev), err);
+		of_node_put(sl->dev.of_node);
+		put_device(&sl->dev);
 		return err;
 	}
 	w1_family_notify(BUS_NOTIFY_ADD_DEVICE, sl);
@@ -738,6 +732,9 @@ int w1_attach_slave_device(struct w1_master *dev, struct w1_reg_num *rn)
 	memcpy(&sl->reg_num, rn, sizeof(sl->reg_num));
 	atomic_set(&sl->refcnt, 1);
 	atomic_inc(&sl->master->refcnt);
+	dev->slave_count++;
+	dev_info(&dev->dev, "Attaching one wire slave %02x.%012llx crc %02x\n",
+		  rn->family, (unsigned long long)rn->id, rn->crc);
 
 	/* slave modules need to be loaded in a context with unlocked mutex */
 	mutex_unlock(&dev->mutex);
@@ -757,11 +754,11 @@ int w1_attach_slave_device(struct w1_master *dev, struct w1_reg_num *rn)
 
 	sl->family = f;
 
-
 	err = __w1_attach_slave_device(sl);
 	if (err < 0) {
 		dev_err(&dev->dev, "%s: Attaching %s failed.\n", __func__,
 			 sl->name);
+		dev->slave_count--;
 		w1_family_put(sl->family);
 		atomic_dec(&sl->master->refcnt);
 		kfree(sl);
@@ -769,7 +766,6 @@ int w1_attach_slave_device(struct w1_master *dev, struct w1_reg_num *rn)
 	}
 
 	sl->ttl = dev->slave_ttl;
-	dev->slave_count++;
 
 	memcpy(msg.id.id, rn, sizeof(msg.id));
 	msg.type = W1_SLAVE_ADD;
@@ -825,49 +821,47 @@ int w1_slave_detach(struct w1_slave *sl)
 
 struct w1_master *w1_search_master_id(u32 id)
 {
-	struct w1_master *dev;
-	int found = 0;
+	struct w1_master *dev = NULL, *iter;
 
 	mutex_lock(&w1_mlock);
-	list_for_each_entry(dev, &w1_masters, w1_master_entry) {
-		if (dev->id == id) {
-			found = 1;
-			atomic_inc(&dev->refcnt);
+	list_for_each_entry(iter, &w1_masters, w1_master_entry) {
+		if (iter->id == id) {
+			dev = iter;
+			atomic_inc(&iter->refcnt);
 			break;
 		}
 	}
 	mutex_unlock(&w1_mlock);
 
-	return (found)?dev:NULL;
+	return dev;
 }
 
 struct w1_slave *w1_search_slave(struct w1_reg_num *id)
 {
 	struct w1_master *dev;
-	struct w1_slave *sl = NULL;
-	int found = 0;
+	struct w1_slave *sl = NULL, *iter;
 
 	mutex_lock(&w1_mlock);
 	list_for_each_entry(dev, &w1_masters, w1_master_entry) {
 		mutex_lock(&dev->list_mutex);
-		list_for_each_entry(sl, &dev->slist, w1_slave_entry) {
-			if (sl->reg_num.family == id->family &&
-					sl->reg_num.id == id->id &&
-					sl->reg_num.crc == id->crc) {
-				found = 1;
+		list_for_each_entry(iter, &dev->slist, w1_slave_entry) {
+			if (iter->reg_num.family == id->family &&
+			    iter->reg_num.id == id->id &&
+			    iter->reg_num.crc == id->crc) {
+				sl = iter;
 				atomic_inc(&dev->refcnt);
-				atomic_inc(&sl->refcnt);
+				atomic_inc(&iter->refcnt);
 				break;
 			}
 		}
 		mutex_unlock(&dev->list_mutex);
 
-		if (found)
+		if (sl)
 			break;
 	}
 	mutex_unlock(&w1_mlock);
 
-	return (found)?sl:NULL;
+	return sl;
 }
 
 void w1_reconnect_slaves(struct w1_family *f, int attach)
@@ -910,11 +904,44 @@ void w1_reconnect_slaves(struct w1_family *f, int attach)
 	mutex_unlock(&w1_mlock);
 }
 
+static int w1_addr_crc_is_valid(struct w1_master *dev, u64 rn)
+{
+	u64 rn_le = cpu_to_le64(rn);
+	struct w1_reg_num *tmp = (struct w1_reg_num *)&rn;
+	u8 crc;
+
+	crc = w1_calc_crc8((u8 *)&rn_le, 7);
+
+	/* quirk:
+	 *   DS28E04 (1w eeprom) has strapping pins to change
+	 *   address, but will not update the crc. So normal rules
+	 *   for consistent w1 addresses are violated. We test
+	 *   with the 7 LSBs of the address forced high.
+	 *
+	 *   (char*)&rn_le = { family, addr_lsb, ..., addr_msb, crc }.
+	 */
+	if (crc != tmp->crc && tmp->family == W1_FAMILY_DS28E04) {
+		u64 corr_le = rn_le;
+
+		((u8 *)&corr_le)[1] |= 0x7f;
+		crc = w1_calc_crc8((u8 *)&corr_le, 7);
+
+		dev_info(&dev->dev, "DS28E04 crc workaround on %02x.%012llx.%02x\n",
+			tmp->family, (unsigned long long)tmp->id, tmp->crc);
+	}
+
+	if (crc != tmp->crc) {
+		dev_dbg(&dev->dev, "w1 addr crc mismatch: %02x.%012llx.%02x != 0x%02x.\n",
+			tmp->family, (unsigned long long)tmp->id, tmp->crc, crc);
+		return 0;
+	}
+	return 1;
+}
+
 void w1_slave_found(struct w1_master *dev, u64 rn)
 {
 	struct w1_slave *sl;
 	struct w1_reg_num *tmp;
-	u64 rn_le = cpu_to_le64(rn);
 
 	atomic_inc(&dev->refcnt);
 
@@ -924,7 +951,7 @@ void w1_slave_found(struct w1_master *dev, u64 rn)
 	if (sl) {
 		set_bit(W1_SLAVE_ACTIVE, &sl->flags);
 	} else {
-		if (rn && tmp->crc == w1_calc_crc8((u8 *)&rn_le, 7))
+		if (rn && w1_addr_crc_is_valid(dev, rn))
 			w1_attach_slave_device(dev, tmp);
 	}
 
@@ -1128,6 +1155,8 @@ int w1_process(void *data)
 	/* remainder if it woke up early */
 	unsigned long jremain = 0;
 
+	atomic_inc(&dev->refcnt);
+
 	for (;;) {
 
 		if (!jremain && dev->search_count) {
@@ -1155,8 +1184,10 @@ int w1_process(void *data)
 		 */
 		mutex_unlock(&dev->list_mutex);
 
-		if (kthread_should_stop())
+		if (kthread_should_stop()) {
+			__set_current_state(TASK_RUNNING);
 			break;
+		}
 
 		/* Only sleep when the search is active. */
 		if (dev->search_count) {
@@ -1221,10 +1252,10 @@ err_out_exit_init:
 
 static void __exit w1_fini(void)
 {
-	struct w1_master *dev;
+	struct w1_master *dev, *n;
 
 	/* Set netlink removal messages and some cleanup */
-	list_for_each_entry(dev, &w1_masters, w1_master_entry)
+	list_for_each_entry_safe(dev, n, &w1_masters, w1_master_entry)
 		__w1_remove_master_device(dev);
 
 	w1_fini_netlink();
@@ -1236,3 +1267,7 @@ static void __exit w1_fini(void)
 
 module_init(w1_init);
 module_exit(w1_fini);
+
+MODULE_AUTHOR("Evgeniy Polyakov <zbr@ioremap.net>");
+MODULE_DESCRIPTION("Driver for 1-wire Dallas network protocol.");
+MODULE_LICENSE("GPL");

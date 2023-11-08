@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * MIPS specific sysrq operations.
  *
@@ -43,7 +44,7 @@ static void sysrq_tlbdump_othercpus(struct work_struct *dummy)
 static DECLARE_WORK(sysrq_tlbdump, sysrq_tlbdump_othercpus);
 #endif
 
-static void sysrq_handle_tlbdump(int key)
+static void sysrq_handle_tlbdump(u8 key)
 {
 	sysrq_tlbdump_single(NULL);
 #ifdef CONFIG_SMP
@@ -51,7 +52,7 @@ static void sysrq_handle_tlbdump(int key)
 #endif
 }
 
-static struct sysrq_key_op sysrq_tlbdump_op = {
+static const struct sysrq_key_op sysrq_tlbdump_op = {
 	.handler        = sysrq_handle_tlbdump,
 	.help_msg       = "show-tlbs(x)",
 	.action_msg     = "Show TLB entries",

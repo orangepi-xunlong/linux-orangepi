@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Most of the string-functions are rather heavily hand-optimized,
  * see especially strsep,strstr,str[c]spn. They should work, but are not
@@ -10,6 +11,7 @@
  * strings.
  */
 
+#define __NO_FORTIFY
 #include <linux/string.h>
 #include <linux/export.h>
 

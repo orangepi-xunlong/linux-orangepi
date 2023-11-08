@@ -1,45 +1,9 @@
+// SPDX-License-Identifier: BSD-3-Clause OR GPL-2.0
 /*******************************************************************************
  *
  * Module Name: rsmisc - Miscellaneous resource descriptors
  *
  ******************************************************************************/
-
-/*
- * Copyright (C) 2000 - 2016, Intel Corp.
- * All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions, and the following disclaimer,
- *    without modification.
- * 2. Redistributions in binary form must reproduce at minimum a disclaimer
- *    substantially similar to the "NO WARRANTY" disclaimer below
- *    ("Disclaimer") and any redistribution must be conditioned upon
- *    including a substantially similar Disclaimer requirement for further
- *    binary redistribution.
- * 3. Neither the names of the above-listed copyright holders nor the names
- *    of any contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
- *
- * Alternatively, this software may be distributed under the terms of the
- * GNU General Public License ("GPL") version 2 as published by the Free
- * Software Foundation.
- *
- * NO WARRANTY
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTIBILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * HOLDERS OR CONTRIBUTORS BE LIABLE FOR SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
- * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
- * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
- * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
- * STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING
- * IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGES.
- */
 
 #include <acpi/acpi.h>
 #include "accommon.h"
@@ -106,6 +70,8 @@ acpi_rs_convert_aml_to_resource(struct acpi_resource *resource,
 	 */
 	count = INIT_TABLE_LENGTH(info);
 	while (count) {
+		target = NULL;
+
 		/*
 		 * Source is the external AML byte stream buffer,
 		 * destination is the internal resource descriptor
@@ -154,6 +120,14 @@ acpi_rs_convert_aml_to_resource(struct acpi_resource *resource,
 			 */
 			ACPI_SET8(destination,
 				  ((ACPI_GET8(source) >> info->value) & 0x07));
+			break;
+
+		case ACPI_RSC_6BITFLAG:
+			/*
+			 * Mask and shift the flag bits
+			 */
+			ACPI_SET8(destination,
+				  ((ACPI_GET8(source) >> info->value) & 0x3F));
 			break;
 
 		case ACPI_RSC_COUNT:
@@ -220,7 +194,8 @@ acpi_rs_convert_aml_to_resource(struct acpi_resource *resource,
 
 		case ACPI_RSC_COUNT_SERIAL_VEN:
 
-			item_count = ACPI_GET16(source) - info->value;
+			ACPI_MOVE_16_TO_16(&temp16, source);
+			item_count = temp16 - info->value;
 
 			resource->length = resource->length + item_count;
 			ACPI_SET16(destination, item_count);
@@ -228,9 +203,10 @@ acpi_rs_convert_aml_to_resource(struct acpi_resource *resource,
 
 		case ACPI_RSC_COUNT_SERIAL_RES:
 
+			ACPI_MOVE_16_TO_16(&temp16, source);
 			item_count = (aml_resource_length +
 				      sizeof(struct aml_resource_large_header))
-			    - ACPI_GET16(source) - info->value;
+			    - temp16 - info->value;
 
 			resource->length = resource->length + item_count;
 			ACPI_SET16(destination, item_count);
@@ -315,9 +291,9 @@ acpi_rs_convert_aml_to_resource(struct acpi_resource *resource,
 
 			/* Copy the resource_source string */
 
+			ACPI_MOVE_16_TO_16(&temp16, source);
 			source =
-			    ACPI_ADD_PTR(void, aml,
-					 (ACPI_GET16(source) + info->value));
+			    ACPI_ADD_PTR(void, aml, (temp16 + info->value));
 			acpi_rs_move_data(target, source, item_count,
 					  info->opcode);
 			break;
@@ -545,6 +521,15 @@ acpi_rs_convert_resource_to_aml(struct acpi_resource *resource,
 				      value));
 			break;
 
+		case ACPI_RSC_6BITFLAG:
+			/*
+			 * Mask and shift the flag bits
+			 */
+			ACPI_SET_BIT(*ACPI_CAST8(destination), (u8)
+				     ((ACPI_GET8(source) & 0x3F) << info->
+				      value));
+			break;
+
 		case ACPI_RSC_COUNT:
 
 			item_count = ACPI_GET8(source);
@@ -596,9 +581,7 @@ acpi_rs_convert_resource_to_aml(struct acpi_resource *resource,
 
 			/* Set vendor offset only if there is vendor data */
 
-			if (resource->data.gpio.vendor_length) {
-				ACPI_SET16(target, aml_length);
-			}
+			ACPI_SET16(target, aml_length);
 
 			acpi_rs_set_resource_length(aml_length, aml);
 			break;

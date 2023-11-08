@@ -1,23 +1,16 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Purna Chandra Mandal,<purna.mandal@microchip.com>
  * Copyright (C) 2015 Microchip Technology Inc.  All rights reserved.
- *
- * This program is free software; you can distribute it and/or modify it
- * under the terms of the GNU General Public License (Version 2) as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
- * for more details.
  */
 #include <dt-bindings/clock/microchip,pic32-clock.h>
 #include <linux/clk.h>
 #include <linux/clk-provider.h>
 #include <linux/clkdev.h>
+#include <linux/io.h>
 #include <linux/module.h>
+#include <linux/of.h>
 #include <linux/of_address.h>
-#include <linux/of_platform.h>
 #include <linux/platform_device.h>
 #include <asm/traps.h>
 
@@ -191,7 +184,7 @@ static int pic32mzda_clk_probe(struct platform_device *pdev)
 	clks[UPLLCLK] = clk_register_fixed_rate(&pdev->dev, "usbphy_clk", NULL,
 						0, 24000000);
 	/* fixed rate (optional) clock */
-	if (of_find_property(np, "microchip,pic32mzda-sosc", NULL)) {
+	if (of_property_read_bool(np, "microchip,pic32mzda-sosc")) {
 		pr_info("pic32-clk: dt requests SOSC.\n");
 		clks[SOSCCLK] = pic32_sosc_clk_register(&sosc_clk, core);
 	}

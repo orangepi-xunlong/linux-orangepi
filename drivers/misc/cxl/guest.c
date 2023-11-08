@@ -1,15 +1,13 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright 2015 IBM Corp.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version
- * 2 of the License, or (at your option) any later version.
  */
 
 #include <linux/spinlock.h>
 #include <linux/uaccess.h>
 #include <linux/delay.h>
+#include <linux/irqdomain.h>
+#include <linux/platform_device.h>
 
 #include "cxl.h"
 #include "hcalls.h"
@@ -24,34 +22,38 @@ static void pci_error_handlers(struct cxl_afu *afu,
 				pci_channel_state_t state)
 {
 	struct pci_dev *afu_dev;
+	struct pci_driver *afu_drv;
+	const struct pci_error_handlers *err_handler;
 
 	if (afu->phb == NULL)
 		return;
 
 	list_for_each_entry(afu_dev, &afu->phb->bus->devices, bus_list) {
-		if (!afu_dev->driver)
+		afu_drv = to_pci_driver(afu_dev->dev.driver);
+		if (!afu_drv)
 			continue;
 
+		err_handler = afu_drv->err_handler;
 		switch (bus_error_event) {
 		case CXL_ERROR_DETECTED_EVENT:
 			afu_dev->error_state = state;
 
-			if (afu_dev->driver->err_handler &&
-			    afu_dev->driver->err_handler->error_detected)
-				afu_dev->driver->err_handler->error_detected(afu_dev, state);
-		break;
+			if (err_handler &&
+			    err_handler->error_detected)
+				err_handler->error_detected(afu_dev, state);
+			break;
 		case CXL_SLOT_RESET_EVENT:
 			afu_dev->error_state = state;
 
-			if (afu_dev->driver->err_handler &&
-			    afu_dev->driver->err_handler->slot_reset)
-				afu_dev->driver->err_handler->slot_reset(afu_dev);
-		break;
+			if (err_handler &&
+			    err_handler->slot_reset)
+				err_handler->slot_reset(afu_dev);
+			break;
 		case CXL_RESUME_EVENT:
-			if (afu_dev->driver->err_handler &&
-			    afu_dev->driver->err_handler->resume)
-				afu_dev->driver->err_handler->resume(afu_dev);
-		break;
+			if (err_handler &&
+			    err_handler->resume)
+				err_handler->resume(afu_dev);
+			break;
 		}
 	}
 }
@@ -89,7 +91,7 @@ static ssize_t guest_collect_vpd(struct cxl *adapter, struct cxl_afu *afu,
 		mod = 0;
 	}
 
-	vpd_buf = kzalloc(entries * sizeof(unsigned long *), GFP_KERNEL);
+	vpd_buf = kcalloc(entries, sizeof(unsigned long *), GFP_KERNEL);
 	if (!vpd_buf)
 		return -ENOMEM;
 
@@ -169,7 +171,7 @@ static irqreturn_t guest_psl_irq(int irq, void *data)
 		return IRQ_HANDLED;
 	}
 
-	rc = cxl_irq(irq, ctx, &irq_info);
+	rc = cxl_irq_psl8(irq, ctx, &irq_info);
 	return rc;
 }
 
@@ -267,6 +269,7 @@ static int guest_reset(struct cxl *adapter)
 	int i, rc;
 
 	pr_devel("Adapter reset request\n");
+	spin_lock(&adapter->afu_list_lock);
 	for (i = 0; i < adapter->slices; i++) {
 		if ((afu = adapter->afu[i])) {
 			pci_error_handlers(afu, CXL_ERROR_DETECTED_EVENT,
@@ -283,6 +286,7 @@ static int guest_reset(struct cxl *adapter)
 			pci_error_handlers(afu, CXL_RESUME_EVENT, 0);
 		}
 	}
+	spin_unlock(&adapter->afu_list_lock);
 	return rc;
 }
 
@@ -551,13 +555,13 @@ static int attach_afu_directed(struct cxl_context *ctx, u64 wed, u64 amr)
 	elem->common.tid    = cpu_to_be32(0); /* Unused */
 	elem->common.pid    = cpu_to_be32(pid);
 	elem->common.csrp   = cpu_to_be64(0); /* disable */
-	elem->common.aurp0  = cpu_to_be64(0); /* disable */
-	elem->common.aurp1  = cpu_to_be64(0); /* disable */
+	elem->common.u.psl8.aurp0  = cpu_to_be64(0); /* disable */
+	elem->common.u.psl8.aurp1  = cpu_to_be64(0); /* disable */
 
 	cxl_prefault(ctx, wed);
 
-	elem->common.sstp0  = cpu_to_be64(ctx->sstp0);
-	elem->common.sstp1  = cpu_to_be64(ctx->sstp1);
+	elem->common.u.psl8.sstp0  = cpu_to_be64(ctx->sstp0);
+	elem->common.u.psl8.sstp1  = cpu_to_be64(ctx->sstp1);
 
 	/*
 	 * Ensure we have at least one interrupt allocated to take faults for
@@ -622,9 +626,6 @@ out_free:
 static int guest_attach_process(struct cxl_context *ctx, bool kernel, u64 wed, u64 amr)
 {
 	pr_devel("in %s\n", __func__);
-
-	if (ctx->real_mode)
-		return -EPERM;
 
 	ctx->kernel = kernel;
 	if (ctx->afu->current_mode == CXL_MODE_DIRECTED)
@@ -887,7 +888,7 @@ static void afu_handle_errstate(struct work_struct *work)
 	    afu_guest->previous_state == H_STATE_PERM_UNAVAILABLE)
 		return;
 
-	if (afu_guest->handle_err == true)
+	if (afu_guest->handle_err)
 		schedule_delayed_work(&afu_guest->work_err,
 				      msecs_to_jiffies(3000));
 }
@@ -913,11 +914,6 @@ static int afu_properties_look_ok(struct cxl_afu *afu)
 
 	if (afu->max_procs_virtualised < 1) {
 		dev_err(&afu->dev, "Unexpected max number of processes virtualised value\n");
-		return -EINVAL;
-	}
-
-	if (afu->crs_len < 0) {
-		dev_err(&afu->dev, "Unexpected configuration record size value\n");
 		return -EINVAL;
 	}
 
@@ -969,10 +965,10 @@ int cxl_guest_init_afu(struct cxl *adapter, int slice, struct device_node *afu_n
 	 * if it returns an error!
 	 */
 	if ((rc = cxl_register_afu(afu)))
-		goto err_put1;
+		goto err_put_dev;
 
 	if ((rc = cxl_sysfs_afu_add(afu)))
-		goto err_put1;
+		goto err_del_dev;
 
 	/*
 	 * pHyp doesn't expose the programming models supported by the
@@ -988,7 +984,7 @@ int cxl_guest_init_afu(struct cxl *adapter, int slice, struct device_node *afu_n
 		afu->modes_supported = CXL_MODE_DIRECTED;
 
 	if ((rc = cxl_afu_select_best_mode(afu)))
-		goto err_put2;
+		goto err_remove_sysfs;
 
 	adapter->afu[afu->slice] = afu;
 
@@ -1008,10 +1004,12 @@ int cxl_guest_init_afu(struct cxl *adapter, int slice, struct device_node *afu_n
 
 	return 0;
 
-err_put2:
+err_remove_sysfs:
 	cxl_sysfs_afu_remove(afu);
-err_put1:
-	device_unregister(&afu->dev);
+err_del_dev:
+	device_del(&afu->dev);
+err_put_dev:
+	put_device(&afu->dev);
 	free = false;
 	guest_release_serr_irq(afu);
 err2:
@@ -1026,8 +1024,6 @@ err1:
 
 void cxl_guest_remove_afu(struct cxl_afu *afu)
 {
-	pr_devel("in %s - AFU(%d)\n", __func__, afu->slice);
-
 	if (!afu)
 		return;
 
@@ -1059,7 +1055,7 @@ static void free_adapter(struct cxl *adapter)
 		if (adapter->guest->irq_avail) {
 			for (i = 0; i < adapter->guest->irq_nranges; i++) {
 				cur = &adapter->guest->irq_avail[i];
-				kfree(cur->bitmap);
+				bitmap_free(cur->bitmap);
 			}
 			kfree(adapter->guest->irq_avail);
 		}
@@ -1147,18 +1143,20 @@ struct cxl *cxl_guest_init_adapter(struct device_node *np, struct platform_devic
 	 * even if it returns an error!
 	 */
 	if ((rc = cxl_register_adapter(adapter)))
-		goto err_put1;
+		goto err_put_dev;
 
 	if ((rc = cxl_sysfs_adapter_add(adapter)))
-		goto err_put1;
+		goto err_del_dev;
 
 	/* release the context lock as the adapter is configured */
 	cxl_adapter_context_unlock(adapter);
 
 	return adapter;
 
-err_put1:
-	device_unregister(&adapter->dev);
+err_del_dev:
+	device_del(&adapter->dev);
+err_put_dev:
+	put_device(&adapter->dev);
 	free = false;
 	cxl_guest_remove_chardev(adapter);
 err1:

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * HD-audio bus
  */
@@ -64,7 +65,7 @@ static int hda_bus_match(struct device *dev, struct device_driver *drv)
 	return 1;
 }
 
-static int hda_uevent(struct device *dev, struct kobj_uevent_env *env)
+static int hda_uevent(const struct device *dev, struct kobj_uevent_env *env)
 {
 	char modalias[32];
 

@@ -1,24 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright 2011 Freescale Semiconductor, Inc. All Rights Reserved.
  * Copyright 2011 Linaro Ltd.
- *
- * The code contained herein is licensed under the GNU General Public
- * License. You may obtain a copy of the GNU General Public License
- * Version 2 or later at the following locations:
- *
- * http://www.opensource.org/licenses/gpl-license.html
- * http://www.gnu.org/copyleft/gpl.html
  */
 
-#include <linux/clk.h>
-#include <linux/clkdev.h>
-#include <linux/err.h>
-#include <linux/io.h>
-#include <linux/irq.h>
-#include <linux/of_irq.h>
-#include <linux/of_platform.h>
 #include <asm/mach/arch.h>
-#include <asm/mach/time.h>
 
 #include "common.h"
 #include "hardware.h"
@@ -31,7 +17,7 @@ static void __init imx53_init_early(void)
 static void __init imx53_dt_init(void)
 {
 	imx_src_init();
-
+	imx5_pmu_init();
 	imx_aips_allow_unprivileged_access("fsl,imx53-aipstz");
 }
 

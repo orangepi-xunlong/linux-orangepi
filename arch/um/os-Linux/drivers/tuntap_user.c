@@ -1,6 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0
 /* 
  * Copyright (C) 2001 - 2007 Jeff Dike (jdike@{addtoit,linux.intel}.com)
- * Licensed under the GPL
  */
 
 #include <stdio.h>
@@ -80,7 +80,7 @@ static int tuntap_open_tramp(char *gate, int *fd_out, int me, int remote,
 	pid = run_helper(tuntap_pre_exec, &data, argv);
 
 	if (pid < 0)
-		return -pid;
+		return pid;
 
 	close(remote);
 
@@ -146,7 +146,7 @@ static int tuntap_open(void *data)
 		}
 		memset(&ifr, 0, sizeof(ifr));
 		ifr.ifr_flags = IFF_TAP | IFF_NO_PI;
-		strlcpy(ifr.ifr_name, pri->dev_name, sizeof(ifr.ifr_name));
+		strscpy(ifr.ifr_name, pri->dev_name, sizeof(ifr.ifr_name));
 		if (ioctl(pri->fd, TUNSETIFF, &ifr) < 0) {
 			err = -errno;
 			printk(UM_KERN_ERR "TUNSETIFF failed, errno = %d\n",

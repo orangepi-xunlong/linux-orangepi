@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 #include "hfa384x_usb.c"
 #include "prism2mgmt.c"
 #include "prism2mib.c"
@@ -10,46 +11,45 @@
 
 static const struct usb_device_id usb_prism_tbl[] = {
 	PRISM_DEV(0x04bb, 0x0922, "IOData AirPort WN-B11/USBS"),
-	PRISM_DEV(0x07aa, 0x0012, "Corega Wireless LAN USB Stick-11"),
-	PRISM_DEV(0x09aa, 0x3642, "Prism2.x 11Mbps WLAN USB Adapter"),
-	PRISM_DEV(0x1668, 0x0408, "Actiontec Prism2.5 11Mbps WLAN USB Adapter"),
-	PRISM_DEV(0x1668, 0x0421, "Actiontec Prism2.5 11Mbps WLAN USB Adapter"),
-	PRISM_DEV(0x1915, 0x2236, "Linksys WUSB11v3.0 11Mbps WLAN USB Adapter"),
-	PRISM_DEV(0x066b, 0x2212, "Linksys WUSB11v2.5 11Mbps WLAN USB Adapter"),
-	PRISM_DEV(0x066b, 0x2213, "Linksys WUSB12v1.1 11Mbps WLAN USB Adapter"),
+	PRISM_DEV(0x07aa, 0x0012, "Corega USB Wireless LAN Stick-11"),
+	PRISM_DEV(0x09aa, 0x3642, "Prism2.x 11Mbps USB WLAN Adapter"),
+	PRISM_DEV(0x1668, 0x0408, "Actiontec Prism2.5 11Mbps USB WLAN Adapter"),
+	PRISM_DEV(0x1668, 0x0421, "Actiontec Prism2.5 11Mbps USB WLAN Adapter"),
+	PRISM_DEV(0x1915, 0x2236, "Linksys WUSB11v3.0 11Mbps USB WLAN Adapter"),
+	PRISM_DEV(0x066b, 0x2212, "Linksys WUSB11v2.5 11Mbps USB WLAN Adapter"),
+	PRISM_DEV(0x066b, 0x2213, "Linksys WUSB12v1.1 11Mbps USB WLAN Adapter"),
 	PRISM_DEV(0x0411, 0x0016, "Melco WLI-USB-S11 11Mbps WLAN Adapter"),
-	PRISM_DEV(0x08de, 0x7a01, "PRISM25 IEEE 802.11 Mini USB Adapter"),
-	PRISM_DEV(0x8086, 0x1111, "Intel PRO/Wireless 2011B LAN USB Adapter"),
+	PRISM_DEV(0x08de, 0x7a01, "PRISM25 USB IEEE 802.11 Mini Adapter"),
+	PRISM_DEV(0x8086, 0x1111, "Intel PRO/Wireless 2011B USB LAN Adapter"),
 	PRISM_DEV(0x0d8e, 0x7a01, "PRISM25 IEEE 802.11 Mini USB Adapter"),
-	PRISM_DEV(0x045e, 0x006e, "Microsoft MN510 Wireless USB Adapter"),
+	PRISM_DEV(0x045e, 0x006e, "Microsoft MN510 USB Wireless Adapter"),
 	PRISM_DEV(0x0967, 0x0204, "Acer Warplink USB Adapter"),
 	PRISM_DEV(0x0cde, 0x0002, "Z-Com 725/726 Prism2.5 USB/USB Integrated"),
-	PRISM_DEV(0x0cde, 0x0005, "Z-Com Xl735 Wireless 802.11b USB Adapter"),
-	PRISM_DEV(0x413c, 0x8100, "Dell TrueMobile 1180 Wireless USB Adapter"),
-	PRISM_DEV(0x0b3b, 0x1601, "ALLNET 0193 11Mbps WLAN USB Adapter"),
-	PRISM_DEV(0x0b3b, 0x1602, "ZyXEL ZyAIR B200 Wireless USB Adapter"),
-	PRISM_DEV(0x0baf, 0x00eb, "USRobotics USR1120 Wireless USB Adapter"),
+	PRISM_DEV(0x0cde, 0x0005, "Z-Com Xl735 USB Wireless 802.11b Adapter"),
+	PRISM_DEV(0x413c, 0x8100, "Dell TrueMobile 1180 USB Wireless Adapter"),
+	PRISM_DEV(0x0b3b, 0x1601, "ALLNET 0193 11Mbps USB WLAN Adapter"),
+	PRISM_DEV(0x0b3b, 0x1602, "ZyXEL ZyAIR B200 USB Wireless Adapter"),
+	PRISM_DEV(0x0baf, 0x00eb, "USRobotics USR1120 USB Wireless Adapter"),
 	PRISM_DEV(0x0411, 0x0027, "Melco WLI-USB-KS11G 11Mbps WLAN Adapter"),
 	PRISM_DEV(0x04f1, 0x3009, "JVC MP-XP7250 Builtin USB WLAN Adapter"),
 	PRISM_DEV(0x0846, 0x4110, "NetGear MA111"),
 	PRISM_DEV(0x03f3, 0x0020, "Adaptec AWN-8020 USB WLAN Adapter"),
-	PRISM_DEV(0x2821, 0x3300, "ASUS-WL140 Wireless USB Adapter"),
-	PRISM_DEV(0x2001, 0x3700, "DWL-122 Wireless USB Adapter"),
-	PRISM_DEV(0x2001, 0x3702, "DWL-120 Rev F Wireless USB Adapter"),
+	PRISM_DEV(0x2821, 0x3300, "ASUS-WL140 / Hawking HighDB USB Wireless Adapter"),
+	PRISM_DEV(0x2001, 0x3700, "DWL-122 USB Wireless Adapter"),
+	PRISM_DEV(0x2001, 0x3702, "DWL-120 Rev F USB Wireless Adapter"),
 	PRISM_DEV(0x50c2, 0x4013, "Averatec USB WLAN Adapter"),
-	PRISM_DEV(0x2c02, 0x14ea, "Planex GW-US11H WLAN USB Adapter"),
-	PRISM_DEV(0x124a, 0x168b, "Airvast PRISM3 WLAN USB Adapter"),
+	PRISM_DEV(0x2c02, 0x14ea, "Planex GW-US11H USB WLAN Adapter"),
+	PRISM_DEV(0x124a, 0x168b, "Airvast PRISM3 USB WLAN Adapter"),
 	PRISM_DEV(0x083a, 0x3503, "T-Sinus 111 USB WLAN Adapter"),
-	PRISM_DEV(0x2821, 0x3300, "Hawking HighDB USB Adapter"),
 	PRISM_DEV(0x0411, 0x0044, "Melco WLI-USB-KB11 11Mbps WLAN Adapter"),
-	PRISM_DEV(0x1668, 0x6106, "ROPEX FreeLan 802.11b USB Adapter"),
-	PRISM_DEV(0x124a, 0x4017, "Pheenet WL-503IA 802.11b USB Adapter"),
+	PRISM_DEV(0x1668, 0x6106, "ROPEX FreeLan USB 802.11b Adapter"),
+	PRISM_DEV(0x124a, 0x4017, "Pheenet WL-503IA USB 802.11b Adapter"),
 	PRISM_DEV(0x0bb2, 0x0302, "Ambit Microsystems Corp."),
-	PRISM_DEV(0x9016, 0x182d, "Sitecom WL-022 802.11b USB Adapter"),
+	PRISM_DEV(0x9016, 0x182d, "Sitecom WL-022 USB 802.11b Adapter"),
 	PRISM_DEV(0x0543, 0x0f01,
 		  "ViewSonic Airsync USB Adapter 11Mbps (Prism2.5)"),
 	PRISM_DEV(0x067c, 0x1022,
-		  "Siemens SpeedStream 1022 11Mbps WLAN USB Adapter"),
+		  "Siemens SpeedStream 1022 11Mbps USB WLAN Adapter"),
 	PRISM_DEV(0x049f, 0x0033,
 		  "Compaq/Intel W100 PRO/Wireless 11Mbps multiport WLAN Adapter"),
 	{ } /* terminator */
@@ -60,10 +60,15 @@ static int prism2sta_probe_usb(struct usb_interface *interface,
 			       const struct usb_device_id *id)
 {
 	struct usb_device *dev;
-
+	struct usb_endpoint_descriptor *bulk_in, *bulk_out;
+	struct usb_host_interface *iface_desc = interface->cur_altsetting;
 	struct wlandevice *wlandev = NULL;
 	struct hfa384x *hw = NULL;
 	int result = 0;
+
+	result = usb_find_common_endpoints(iface_desc, &bulk_in, &bulk_out, NULL, NULL);
+	if (result)
+		goto failed;
 
 	dev = interface_to_usbdev(interface);
 	wlandev = create_wlan();
@@ -81,6 +86,8 @@ static int prism2sta_probe_usb(struct usb_interface *interface,
 	}
 
 	/* Initialize the hw data */
+	hw->endp_in = usb_rcvbulkpipe(dev, bulk_in->bEndpointAddress);
+	hw->endp_out = usb_sndbulkpipe(dev, bulk_out->bEndpointAddress);
 	hfa384x_create(hw, dev);
 	hw->wlandev = wlandev;
 
@@ -136,7 +143,7 @@ static void prism2sta_disconnect_usb(struct usb_interface *interface)
 {
 	struct wlandevice *wlandev;
 
-	wlandev = (struct wlandevice *)usb_get_intfdata(interface);
+	wlandev = usb_get_intfdata(interface);
 	if (wlandev) {
 		LIST_HEAD(cleanlist);
 		struct hfa384x_usbctlx *ctlx, *temp;
@@ -158,14 +165,14 @@ static void prism2sta_disconnect_usb(struct usb_interface *interface)
 		spin_unlock_irqrestore(&hw->ctlxq.lock, flags);
 
 		/* There's no hardware to shutdown, but the driver
-		 * might have some tasks or tasklets that must be
-		 * stopped before we can tear everything down.
+		 * might have some tasks that must be stopped before
+		 * we can tear everything down.
 		 */
 		prism2sta_ifstate(wlandev, P80211ENUM_ifstate_disable);
 
-		del_singleshot_timer_sync(&hw->throttle);
-		del_singleshot_timer_sync(&hw->reqtimer);
-		del_singleshot_timer_sync(&hw->resptimer);
+		timer_shutdown_sync(&hw->throttle);
+		timer_shutdown_sync(&hw->reqtimer);
+		timer_shutdown_sync(&hw->resptimer);
 
 		/* Unlink all the URBs. This "removes the wheels"
 		 * from the entire CTLX handling mechanism.
@@ -174,11 +181,12 @@ static void prism2sta_disconnect_usb(struct usb_interface *interface)
 		usb_kill_urb(&hw->tx_urb);
 		usb_kill_urb(&hw->ctlx_urb);
 
-		tasklet_kill(&hw->completion_bh);
-		tasklet_kill(&hw->reaper_bh);
+		cancel_work_sync(&hw->completion_bh);
+		cancel_work_sync(&hw->reaper_bh);
 
 		cancel_work_sync(&hw->link_bh);
 		cancel_work_sync(&hw->commsqual_bh);
+		cancel_work_sync(&hw->usb_work);
 
 		/* Now we complete any outstanding commands
 		 * and tell everyone who is waiting for their
@@ -221,7 +229,7 @@ static int prism2sta_suspend(struct usb_interface *interface,
 	struct hfa384x *hw = NULL;
 	struct wlandevice *wlandev;
 
-	wlandev = (struct wlandevice *)usb_get_intfdata(interface);
+	wlandev = usb_get_intfdata(interface);
 	if (!wlandev)
 		return -ENODEV;
 
@@ -244,7 +252,7 @@ static int prism2sta_resume(struct usb_interface *interface)
 	struct hfa384x *hw = NULL;
 	struct wlandevice *wlandev;
 
-	wlandev = (struct wlandevice *)usb_get_intfdata(interface);
+	wlandev = usb_get_intfdata(interface);
 	if (!wlandev)
 		return -ENODEV;
 

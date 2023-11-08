@@ -1,15 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Backlight Driver for Dialog DA9052 PMICs
  *
  * Copyright(c) 2012 Dialog Semiconductor Ltd.
  *
  * Author: David Dajun Chen <dchen@diasemi.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
  */
 
 #include <linux/backlight.h>
@@ -140,7 +135,7 @@ static int da9052_backlight_probe(struct platform_device *pdev)
 	return da9052_adjust_wled_brightness(wleds);
 }
 
-static int da9052_backlight_remove(struct platform_device *pdev)
+static void da9052_backlight_remove(struct platform_device *pdev)
 {
 	struct backlight_device *bl = platform_get_drvdata(pdev);
 	struct da9052_bl *wleds = bl_get_data(bl);
@@ -148,8 +143,6 @@ static int da9052_backlight_remove(struct platform_device *pdev)
 	wleds->brightness = 0;
 	wleds->state = DA9052_WLEDS_OFF;
 	da9052_adjust_wled_brightness(wleds);
-
-	return 0;
 }
 
 static const struct platform_device_id da9052_wled_ids[] = {
@@ -167,10 +160,11 @@ static const struct platform_device_id da9052_wled_ids[] = {
 	},
 	{ },
 };
+MODULE_DEVICE_TABLE(platform, da9052_wled_ids);
 
 static struct platform_driver da9052_wled_driver = {
 	.probe		= da9052_backlight_probe,
-	.remove		= da9052_backlight_remove,
+	.remove_new	= da9052_backlight_remove,
 	.id_table	= da9052_wled_ids,
 	.driver	= {
 		.name	= "da9052-wled",
@@ -182,4 +176,3 @@ module_platform_driver(da9052_wled_driver);
 MODULE_AUTHOR("David Dajun Chen <dchen@diasemi.com>");
 MODULE_DESCRIPTION("Backlight driver for DA9052 PMIC");
 MODULE_LICENSE("GPL");
-MODULE_ALIAS("platform:da9052-backlight");

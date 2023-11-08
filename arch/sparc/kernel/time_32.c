@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /* linux/arch/sparc/kernel/time.c
  *
  * Copyright (C) 1995 David S. Miller (davem@davemloft.net)
@@ -32,7 +33,6 @@
 #include <linux/ioport.h>
 #include <linux/profile.h>
 #include <linux/of.h>
-#include <linux/of_device.h>
 #include <linux/platform_device.h>
 
 #include <asm/mc146818rtc.h>
@@ -148,7 +148,7 @@ static unsigned int sbus_cycles_offset(void)
 	return offset;
 }
 
-static cycle_t timer_cs_read(struct clocksource *cs)
+static u64 timer_cs_read(struct clocksource *cs)
 {
 	unsigned int seq, offset;
 	u64 cycles;
@@ -228,7 +228,9 @@ void register_percpu_ce(int cpu)
 	ce->mult           = div_sc(sparc_config.clock_rate, NSEC_PER_SEC,
 	                            ce->shift);
 	ce->max_delta_ns   = clockevent_delta2ns(sparc_config.clock_rate, ce);
+	ce->max_delta_ticks = (unsigned long)sparc_config.clock_rate;
 	ce->min_delta_ns   = clockevent_delta2ns(100, ce);
+	ce->min_delta_ticks = 100;
 
 	clockevents_register_device(ce);
 }
@@ -274,7 +276,7 @@ static int clock_probe(struct platform_device *op)
 		return -ENODEV;
 
 	/* Only the primary RTC has an address property */
-	if (!of_find_property(dp, "address", NULL))
+	if (!of_property_present(dp, "address"))
 		return -ENODEV;
 
 	m48t59_rtc.resource = &op->resource[0];
@@ -296,7 +298,7 @@ static int clock_probe(struct platform_device *op)
 	return 0;
 }
 
-static struct of_device_id clock_match[] = {
+static const struct of_device_id clock_match[] = {
 	{
 		.name = "eeprom",
 	},

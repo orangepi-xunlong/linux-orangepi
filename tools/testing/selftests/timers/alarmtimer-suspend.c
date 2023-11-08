@@ -28,18 +28,7 @@
 #include <signal.h>
 #include <stdlib.h>
 #include <pthread.h>
-#ifdef KTEST
 #include "../kselftest.h"
-#else
-static inline int ksft_exit_pass(void)
-{
-	exit(0);
-}
-static inline int ksft_exit_fail(void)
-{
-	exit(1);
-}
-#endif
 
 #define CLOCK_REALTIME			0
 #define CLOCK_MONOTONIC			1
@@ -90,7 +79,7 @@ char *clockstring(int clockid)
 		return "CLOCK_BOOTTIME_ALARM";
 	case CLOCK_TAI:
 		return "CLOCK_TAI";
-	};
+	}
 	return "UNKNOWN_CLOCKID";
 }
 
@@ -103,7 +92,7 @@ long long timespec_sub(struct timespec a, struct timespec b)
 	return ret;
 }
 
-int final_ret = 0;
+int final_ret;
 
 void sigalarm(int signo)
 {

@@ -39,7 +39,7 @@
 
 static struct fb_info fb_info;
 
-static struct fb_var_screeninfo maxinefb_defined = {
+static const struct fb_var_screeninfo maxinefb_defined = {
 	.xres =		1024,
 	.yres =		768,
 	.xres_virtual =	1024,
@@ -51,7 +51,7 @@ static struct fb_var_screeninfo maxinefb_defined = {
 	.vmode =	FB_VMODE_NONINTERLACED,
 };
 
-static struct fb_fix_screeninfo maxinefb_fix = {
+static struct fb_fix_screeninfo maxinefb_fix __initdata = {
 	.id =		"Maxine",
 	.smem_len =	(1024*768),
 	.type =		FB_TYPE_PACKED_PIXELS,
@@ -105,12 +105,10 @@ static int maxinefb_setcolreg(unsigned regno, unsigned red, unsigned green,
 	return 0;
 }
 
-static struct fb_ops maxinefb_ops = {
+static const struct fb_ops maxinefb_ops = {
 	.owner		= THIS_MODULE,
+	FB_DEFAULT_IOMEM_OPS,
 	.fb_setcolreg	= maxinefb_setcolreg,
-	.fb_fillrect	= cfb_fillrect,
-	.fb_copyarea	= cfb_copyarea,
-	.fb_imageblit	= cfb_imageblit,
 };
 
 int __init maxinefb_init(void)
@@ -138,7 +136,7 @@ int __init maxinefb_init(void)
 		*(volatile unsigned char *)fboff = 0x0;
 
 	maxinefb_fix.smem_start = fb_start;
-	
+
 	/* erase hardware cursor */
 	for (i = 0; i < 512; i++) {
 		maxinefb_ims332_write_register(IMS332_REG_CURSOR_RAM + i,
@@ -155,7 +153,6 @@ int __init maxinefb_init(void)
 	fb_info.screen_base = (char *)maxinefb_fix.smem_start;
 	fb_info.var = maxinefb_defined;
 	fb_info.fix = maxinefb_fix;
-	fb_info.flags = FBINFO_DEFAULT;
 
 	fb_alloc_cmap(&fb_info.cmap, 256, 0);
 

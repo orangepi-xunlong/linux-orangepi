@@ -1,12 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  Ralink MT7620A SoC PCI support
  *
  *  Copyright (C) 2007-2013 Bruce Chang (Mediatek)
  *  Copyright (C) 2013-2016 John Crispin <john@phrozen.org>
- *
- *  This program is free software; you can redistribute it and/or modify it
- *  under the terms of the GNU General Public License version 2 as published
- *  by the Free Software Foundation.
  */
 
 #include <linux/types.h>
@@ -33,14 +30,14 @@
 #define RALINK_GPIOMODE			0x60
 
 #define PPLL_CFG1			0x9c
-#define PDRV_SW_SET			BIT(23)
+#define PPLL_LD				BIT(23)
 
 #define PPLL_DRV			0xa0
-#define PDRV_SW_SET			(1<<31)
-#define LC_CKDRVPD			(1<<19)
-#define LC_CKDRVOHZ			(1<<18)
-#define LC_CKDRVHZ			(1<<17)
-#define LC_CKTEST			(1<<16)
+#define PDRV_SW_SET			BIT(31)
+#define LC_CKDRVPD			BIT(19)
+#define LC_CKDRVOHZ			BIT(18)
+#define LC_CKDRVHZ			BIT(17)
+#define LC_CKTEST			BIT(16)
 
 /* PCI Bridge registers */
 #define RALINK_PCI_PCICFG_ADDR		0x00
@@ -66,7 +63,7 @@
 #define PCIEPHY0_CFG			0x90
 
 #define RALINK_PCIEPHY_P0_CTL_OFFSET	0x7498
-#define RALINK_PCIE0_CLK_EN		(1 << 26)
+#define RALINK_PCIE0_CLK_EN		BIT(26)
 
 #define BUSY				0x80000000
 #define WAITRETRY_MAX			10
@@ -243,8 +240,8 @@ static int mt7620_pci_hw_init(struct platform_device *pdev)
 	rt_sysc_m32(0, RALINK_PCIE0_CLK_EN, RALINK_CLKCFG1);
 	mdelay(100);
 
-	if (!(rt_sysc_r32(PPLL_CFG1) & PDRV_SW_SET)) {
-		dev_err(&pdev->dev, "MT7620 PPLL unlock\n");
+	if (!(rt_sysc_r32(PPLL_CFG1) & PPLL_LD)) {
+		dev_err(&pdev->dev, "pcie PLL not locked, aborting init\n");
 		reset_control_assert(rstpcie0);
 		rt_sysc_m32(RALINK_PCIE0_CLK_EN, 0, RALINK_CLKCFG1);
 		return -1;
@@ -277,29 +274,22 @@ static int mt7628_pci_hw_init(struct platform_device *pdev)
 	val |= 0x50 << 8;
 	pci_config_write(NULL, 0, 0x70c, 4, val);
 
-	pci_config_read(NULL, 0, 0x70c, 4, &val);
-	dev_err(&pdev->dev, "Port 0 N_FTS = %x\n", (unsigned int) val);
-
 	return 0;
 }
 
 static int mt7620_pci_probe(struct platform_device *pdev)
 {
-	struct resource *bridge_res = platform_get_resource(pdev,
-							    IORESOURCE_MEM, 0);
-	struct resource *pcie_res = platform_get_resource(pdev,
-							  IORESOURCE_MEM, 1);
 	u32 val = 0;
 
-	rstpcie0 = devm_reset_control_get(&pdev->dev, "pcie0");
+	rstpcie0 = devm_reset_control_get_exclusive(&pdev->dev, "pcie0");
 	if (IS_ERR(rstpcie0))
 		return PTR_ERR(rstpcie0);
 
-	bridge_base = devm_ioremap_resource(&pdev->dev, bridge_res);
+	bridge_base = devm_platform_get_and_ioremap_resource(pdev, 0, NULL);
 	if (IS_ERR(bridge_base))
 		return PTR_ERR(bridge_base);
 
-	pcie_base = devm_ioremap_resource(&pdev->dev, pcie_res);
+	pcie_base = devm_platform_get_and_ioremap_resource(pdev, 1, NULL);
 	if (IS_ERR(pcie_base))
 		return PTR_ERR(pcie_base);
 
@@ -316,6 +306,7 @@ static int mt7620_pci_probe(struct platform_device *pdev)
 		break;
 
 	case MT762X_SOC_MT7628AN:
+	case MT762X_SOC_MT7688:
 		if (mt7628_pci_hw_init(pdev))
 			return -1;
 		break;
@@ -336,7 +327,7 @@ static int mt7620_pci_probe(struct platform_device *pdev)
 		rt_sysc_m32(RALINK_PCIE0_CLK_EN, 0, RALINK_CLKCFG1);
 		if (ralink_soc == MT762X_SOC_MT7620A)
 			rt_sysc_m32(LC_CKDRVPD, PDRV_SW_SET, PPLL_DRV);
-		dev_err(&pdev->dev, "PCIE0 no card, disable it(RST&CLK)\n");
+		dev_info(&pdev->dev, "PCIE0 no card, disable it(RST&CLK)\n");
 		return -1;
 	}
 
@@ -361,7 +352,7 @@ static int mt7620_pci_probe(struct platform_device *pdev)
 	return 0;
 }
 
-int __init pcibios_map_irq(const struct pci_dev *dev, u8 slot, u8 pin)
+int pcibios_map_irq(const struct pci_dev *dev, u8 slot, u8 pin)
 {
 	u16 cmd;
 	u32 val;
@@ -379,7 +370,7 @@ int __init pcibios_map_irq(const struct pci_dev *dev, u8 slot, u8 pin)
 			dev->bus->number, slot);
 		return 0;
 	}
-	dev_err(&dev->dev, "card - bus=0x%x, slot = 0x%x irq=%d\n",
+	dev_info(&dev->dev, "card - bus=0x%x, slot = 0x%x irq=%d\n",
 		dev->bus->number, slot, irq);
 
 	/* configure the cache line size to 0x14 */

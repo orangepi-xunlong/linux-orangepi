@@ -1,14 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0+
 /*
  * TI OMAP4 ISS V4L2 Driver
  *
  * Copyright (C) 2012, Texas Instruments
  *
  * Author: Sergio Aguirre <sergio.a.aguirre@gmail.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
  */
 
 #include <linux/clk.h>
@@ -59,7 +55,7 @@ static void iss_print_status(struct iss_device *iss)
  * readback the same register, in this case the revision register.
  *
  * See this link for reference:
- *   http://www.mail-archive.com/linux-omap@vger.kernel.org/msg08149.html
+ *   https://www.mail-archive.com/linux-omap@vger.kernel.org/msg08149.html
  */
 static void omap4iss_flush(struct iss_device *iss)
 {
@@ -399,7 +395,7 @@ static int iss_pipeline_disable(struct iss_pipeline *pipe,
 		if (!(pad->flags & MEDIA_PAD_FL_SINK))
 			break;
 
-		pad = media_entity_remote_pad(pad);
+		pad = media_pad_remote_pad_first(pad);
 		if (!pad || !is_media_entity_v4l2_subdev(pad->entity))
 			break;
 
@@ -460,13 +456,15 @@ static int iss_pipeline_enable(struct iss_pipeline *pipe,
 
 	pipe->do_propagation = false;
 
+	mutex_lock(&iss->media_dev.graph_mutex);
+
 	entity = &pipe->output->video.entity;
 	while (1) {
 		pad = &entity->pads[0];
 		if (!(pad->flags & MEDIA_PAD_FL_SINK))
 			break;
 
-		pad = media_entity_remote_pad(pad);
+		pad = media_pad_remote_pad_first(pad);
 		if (!pad || !is_media_entity_v4l2_subdev(pad->entity))
 			break;
 
@@ -476,6 +474,7 @@ static int iss_pipeline_enable(struct iss_pipeline *pipe,
 		ret = v4l2_subdev_call(subdev, video, s_stream, mode);
 		if (ret < 0 && ret != -ENOIOCTLCMD) {
 			iss_pipeline_disable(pipe, entity);
+			mutex_unlock(&iss->media_dev.graph_mutex);
 			return ret;
 		}
 
@@ -484,7 +483,9 @@ static int iss_pipeline_enable(struct iss_pipeline *pipe,
 			pipe->do_propagation = true;
 	}
 
+	mutex_unlock(&iss->media_dev.graph_mutex);
 	iss_print_status(pipe->output->iss);
+
 	return 0;
 }
 
@@ -547,12 +548,10 @@ static int iss_pipeline_is_last(struct media_entity *me)
 	struct iss_pipeline *pipe;
 	struct media_pad *pad;
 
-	if (!me->pipe)
-		return 0;
 	pipe = to_iss_pipeline(me);
-	if (pipe->stream_state == ISS_PIPELINE_STREAM_STOPPED)
+	if (!pipe || pipe->stream_state == ISS_PIPELINE_STREAM_STOPPED)
 		return 0;
-	pad = media_entity_remote_pad(&pipe->output->pad);
+	pad = media_pad_remote_pad_first(&pipe->output->pad);
 	return pad->entity == me;
 }
 
@@ -893,7 +892,7 @@ void omap4iss_put(struct iss_device *iss)
 		return;
 
 	mutex_lock(&iss->iss_mutex);
-	BUG_ON(iss->ref_count == 0);
+	WARN_ON(iss->ref_count == 0);
 	if (--iss->ref_count == 0) {
 		iss_disable_interrupts(iss);
 		/* Reset the ISS if an entity has failed to stop. This is the
@@ -912,11 +911,7 @@ static int iss_map_mem_resource(struct platform_device *pdev,
 				struct iss_device *iss,
 				enum iss_mem_resources res)
 {
-	struct resource *mem;
-
-	mem = platform_get_resource(pdev, IORESOURCE_MEM, res);
-
-	iss->regs[res] = devm_ioremap_resource(iss->dev, mem);
+	iss->regs[res] = devm_platform_ioremap_resource(pdev, res);
 
 	return PTR_ERR_OR_ZERO(iss->regs[res]);
 }
@@ -968,7 +963,7 @@ iss_register_subdev_group(struct iss_device *iss,
 		}
 
 		subdev = v4l2_i2c_new_subdev_board(&iss->v4l2_dev, adapter,
-				board_info->board_info, NULL);
+						   board_info->board_info, NULL);
 		if (!subdev) {
 			dev_err(iss->dev, "Unable to register subdev %s\n",
 				board_info->board_info->type);
@@ -989,7 +984,7 @@ static int iss_register_entities(struct iss_device *iss)
 	int ret;
 
 	iss->media_dev.dev = iss->dev;
-	strlcpy(iss->media_dev.model, "TI OMAP4 ISS",
+	strscpy(iss->media_dev.model, "TI OMAP4 ISS",
 		sizeof(iss->media_dev.model));
 	iss->media_dev.hw_revision = iss->revision;
 	iss->media_dev.ops = &iss_media_ops;
@@ -1244,8 +1239,10 @@ static int iss_probe(struct platform_device *pdev)
 	if (ret < 0)
 		goto error;
 
-	if (!omap4iss_get(iss))
+	if (!omap4iss_get(iss)) {
+		ret = -EINVAL;
 		goto error;
+	}
 
 	ret = iss_reset(iss);
 	if (ret < 0)
@@ -1280,7 +1277,6 @@ static int iss_probe(struct platform_device *pdev)
 	/* Interrupt */
 	ret = platform_get_irq(pdev, 0);
 	if (ret <= 0) {
-		dev_err(iss->dev, "No IRQ resource\n");
 		ret = -ENODEV;
 		goto error_iss;
 	}
@@ -1327,15 +1323,13 @@ error:
 	return ret;
 }
 
-static int iss_remove(struct platform_device *pdev)
+static void iss_remove(struct platform_device *pdev)
 {
 	struct iss_device *iss = platform_get_drvdata(pdev);
 
 	iss_unregister_entities(iss);
 	media_entity_enum_cleanup(&iss->crashed);
 	iss_cleanup_modules(iss);
-
-	return 0;
 }
 
 static const struct platform_device_id omap4iss_id_table[] = {
@@ -1346,7 +1340,7 @@ MODULE_DEVICE_TABLE(platform, omap4iss_id_table);
 
 static struct platform_driver iss_driver = {
 	.probe		= iss_probe,
-	.remove		= iss_remove,
+	.remove_new	= iss_remove,
 	.id_table	= omap4iss_id_table,
 	.driver = {
 		.name	= "omap4iss",
@@ -1358,4 +1352,3 @@ module_platform_driver(iss_driver);
 MODULE_DESCRIPTION("TI OMAP4 ISS driver");
 MODULE_AUTHOR("Sergio Aguirre <sergio.a.aguirre@gmail.com>");
 MODULE_LICENSE("GPL");
-MODULE_VERSION(ISS_VIDEO_DRIVER_VERSION);

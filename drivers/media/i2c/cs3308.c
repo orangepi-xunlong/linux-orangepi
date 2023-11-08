@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Cirrus Logic cs3308 8-Channel Analog Volume Control
  *
@@ -5,16 +6,6 @@
  * Copyright (C) 2012 Steven Toth <stoth@kernellabs.com>
  *
  * Derived from cs5345.c Copyright (C) 2007 Hans Verkuil
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 
@@ -73,8 +64,7 @@ static const struct v4l2_subdev_ops cs3308_ops = {
 
 /* ----------------------------------------------------------------------- */
 
-static int cs3308_probe(struct i2c_client *client,
-			const struct i2c_device_id *id)
+static int cs3308_probe(struct i2c_client *client)
 {
 	struct v4l2_subdev *sd;
 	unsigned i;
@@ -108,13 +98,12 @@ static int cs3308_probe(struct i2c_client *client,
 
 /* ----------------------------------------------------------------------- */
 
-static int cs3308_remove(struct i2c_client *client)
+static void cs3308_remove(struct i2c_client *client)
 {
 	struct v4l2_subdev *sd = i2c_get_clientdata(client);
 
 	v4l2_device_unregister_subdev(sd);
 	kfree(sd);
-	return 0;
 }
 
 /* ----------------------------------------------------------------------- */

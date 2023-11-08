@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /* cg6.c: CGSIX (GX, GXplus, TGX) frame buffer driver
  *
  * Copyright (C) 2003, 2006 David S. Miller (davem@davemloft.net)
@@ -16,7 +17,8 @@
 #include <linux/init.h>
 #include <linux/fb.h>
 #include <linux/mm.h>
-#include <linux/of_device.h>
+#include <linux/of.h>
+#include <linux/platform_device.h>
 
 #include <asm/io.h>
 #include <asm/fbio.h>
@@ -43,7 +45,7 @@ static int cg6_pan_display(struct fb_var_screeninfo *, struct fb_info *);
  *  Frame buffer operations
  */
 
-static struct fb_ops cg6_ops = {
+static const struct fb_ops cg6_ops = {
 	.owner			= THIS_MODULE,
 	.fb_setcolreg		= cg6_setcolreg,
 	.fb_blank		= cg6_blank,
@@ -510,7 +512,7 @@ static int cg6_setcolreg(unsigned regno,
 /**
  *	cg6_blank - Blanks the display.
  *
- *	@blank_mode: the blank mode we want.
+ *	@blank: the blank mode we want.
  *	@info: frame buffer structure that represents a single frame buffer
  */
 static int cg6_blank(int blank, struct fb_info *info)
@@ -781,7 +783,7 @@ static int cg6_probe(struct platform_device *op)
 	par->fhc = of_ioremap(&op->resource[0], CG6_FHC_OFFSET,
 				sizeof(u32), "cgsix fhc");
 
-	info->flags = FBINFO_DEFAULT | FBINFO_HWACCEL_IMAGEBLIT |
+	info->flags = FBINFO_HWACCEL_IMAGEBLIT |
 			FBINFO_HWACCEL_COPYAREA | FBINFO_HWACCEL_FILLRECT |
 			FBINFO_READS_FAST;
 	info->fbops = &cg6_ops;
@@ -810,8 +812,8 @@ static int cg6_probe(struct platform_device *op)
 
 	dev_set_drvdata(&op->dev, info);
 
-	printk(KERN_INFO "%s: CGsix [%s] at %lx:%lx\n",
-	       dp->full_name, info->fix.id,
+	printk(KERN_INFO "%pOF: CGsix [%s] at %lx:%lx\n",
+	       dp, info->fix.id,
 	       par->which_io, info->fix.smem_start);
 
 	return 0;
@@ -827,7 +829,7 @@ out_err:
 	return err;
 }
 
-static int cg6_remove(struct platform_device *op)
+static void cg6_remove(struct platform_device *op)
 {
 	struct fb_info *info = dev_get_drvdata(&op->dev);
 	struct cg6_par *par = info->par;
@@ -838,8 +840,6 @@ static int cg6_remove(struct platform_device *op)
 	cg6_unmap_regs(op, info, par);
 
 	framebuffer_release(info);
-
-	return 0;
 }
 
 static const struct of_device_id cg6_match[] = {
@@ -859,7 +859,7 @@ static struct platform_driver cg6_driver = {
 		.of_match_table = cg6_match,
 	},
 	.probe		= cg6_probe,
-	.remove		= cg6_remove,
+	.remove_new	= cg6_remove,
 };
 
 static int __init cg6_init(void)

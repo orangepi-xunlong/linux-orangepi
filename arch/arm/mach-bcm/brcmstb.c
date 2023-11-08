@@ -1,20 +1,8 @@
-/*
- * Copyright (C) 2013-2014 Broadcom Corporation
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as
- * published by the Free Software Foundation version 2.
- *
- * This program is distributed "as is" WITHOUT ANY WARRANTY of any
- * kind, whether express or implied; without even the implied warranty
- * of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- */
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2013-2014 Broadcom Corporation
 
 #include <linux/init.h>
 #include <linux/irqchip.h>
-#include <linux/of_platform.h>
-#include <linux/soc/brcmstb/brcmstb.h>
 
 #include <asm/mach-types.h>
 #include <asm/mach/arch.h>
@@ -38,7 +26,6 @@ u32 brcmstb_uart_config[3] = {
 static void __init brcmstb_init_irq(void)
 {
 	irqchip_init();
-	brcmstb_biuctrl_init();
 }
 
 static const char *const brcmstb_match[] __initconst = {

@@ -1,23 +1,16 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright 2012 Linaro Ltd.
- *
- * The code contained herein is licensed under the GNU General Public
- * License. You may obtain a copy of the GNU General Public License
- * Version 2 or later at the following locations:
- *
- * http://www.opensource.org/licenses/gpl-license.html
- * http://www.gnu.org/copyleft/gpl.html
  */
 
 #include <linux/cpuidle.h>
 #include <linux/of.h>
-#include <linux/of_device.h>
 #include <asm/cpuidle.h>
 
 extern struct of_cpuidle_method __cpuidle_method_of_table[];
 
 static const struct of_cpuidle_method __cpuidle_method_of_table_sentinel
-	__used __section(__cpuidle_method_of_table_end);
+	__used __section("__cpuidle_method_of_table_end");
 
 static struct cpuidle_ops cpuidle_ops[NR_CPUS] __ro_after_init;
 
@@ -32,8 +25,8 @@ static struct cpuidle_ops cpuidle_ops[NR_CPUS] __ro_after_init;
  *
  * Returns the index passed as parameter
  */
-int arm_cpuidle_simple_enter(struct cpuidle_device *dev,
-		struct cpuidle_driver *drv, int index)
+__cpuidle int arm_cpuidle_simple_enter(struct cpuidle_device *dev, struct
+				       cpuidle_driver *drv, int index)
 {
 	cpu_do_idle();
 
@@ -101,8 +94,8 @@ static int __init arm_cpuidle_read_ops(struct device_node *dn, int cpu)
 
 	ops = arm_cpuidle_get_ops(enable_method);
 	if (!ops) {
-		pr_warn("%s: unsupported enable-method property: %s\n",
-			dn->full_name, enable_method);
+		pr_warn("%pOF: unsupported enable-method property: %s\n",
+			dn, enable_method);
 		return -EOPNOTSUPP;
 	}
 

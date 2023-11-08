@@ -43,7 +43,7 @@ struct pmagbafb_par {
 };
 
 
-static struct fb_var_screeninfo pmagbafb_defined = {
+static const struct fb_var_screeninfo pmagbafb_defined = {
 	.xres		= 1024,
 	.yres		= 864,
 	.xres_virtual	= 1024,
@@ -67,7 +67,7 @@ static struct fb_var_screeninfo pmagbafb_defined = {
 	.vmode		= FB_VMODE_NONINTERLACED,
 };
 
-static struct fb_fix_screeninfo pmagbafb_fix = {
+static const struct fb_fix_screeninfo pmagbafb_fix = {
 	.id		= "PMAG-BA",
 	.smem_len	= (1024 * 1024),
 	.type		= FB_TYPE_PACKED_PIXELS,
@@ -117,12 +117,10 @@ static int pmagbafb_setcolreg(unsigned int regno, unsigned int red,
 	return 0;
 }
 
-static struct fb_ops pmagbafb_ops = {
+static const struct fb_ops pmagbafb_ops = {
 	.owner		= THIS_MODULE,
+	FB_DEFAULT_IOMEM_OPS,
 	.fb_setcolreg	= pmagbafb_setcolreg,
-	.fb_fillrect	= cfb_fillrect,
-	.fb_copyarea	= cfb_copyarea,
-	.fb_imageblit	= cfb_imageblit,
 };
 
 
@@ -150,10 +148,8 @@ static int pmagbafb_probe(struct device *dev)
 	int err;
 
 	info = framebuffer_alloc(sizeof(struct pmagbafb_par), dev);
-	if (!info) {
-		printk(KERN_ERR "%s: Cannot allocate memory\n", dev_name(dev));
+	if (!info)
 		return -ENOMEM;
-	}
 
 	par = info->par;
 	dev_set_drvdata(dev, info);
@@ -168,7 +164,6 @@ static int pmagbafb_probe(struct device *dev)
 	info->fbops = &pmagbafb_ops;
 	info->fix = pmagbafb_fix;
 	info->var = pmagbafb_defined;
-	info->flags = FBINFO_DEFAULT;
 
 	/* Request the I/O MEM resource.  */
 	start = tdev->resource.start;
@@ -182,7 +177,7 @@ static int pmagbafb_probe(struct device *dev)
 
 	/* MMIO mapping setup.  */
 	info->fix.mmio_start = start;
-	par->mmio = ioremap_nocache(info->fix.mmio_start, info->fix.mmio_len);
+	par->mmio = ioremap(info->fix.mmio_start, info->fix.mmio_len);
 	if (!par->mmio) {
 		printk(KERN_ERR "%s: Cannot map MMIO\n", dev_name(dev));
 		err = -ENOMEM;
@@ -192,7 +187,7 @@ static int pmagbafb_probe(struct device *dev)
 
 	/* Frame buffer mapping setup.  */
 	info->fix.smem_start = start + PMAG_BA_FBMEM;
-	info->screen_base = ioremap_nocache(info->fix.smem_start,
+	info->screen_base = ioremap(info->fix.smem_start,
 					    info->fix.smem_len);
 	if (!info->screen_base) {
 		printk(KERN_ERR "%s: Cannot map FB\n", dev_name(dev));
@@ -235,7 +230,7 @@ err_alloc:
 	return err;
 }
 
-static int __exit pmagbafb_remove(struct device *dev)
+static int pmagbafb_remove(struct device *dev)
 {
 	struct tc_dev *tdev = to_tc_dev(dev);
 	struct fb_info *info = dev_get_drvdata(dev);
@@ -270,7 +265,7 @@ static struct tc_driver pmagbafb_driver = {
 		.name	= "pmagbafb",
 		.bus	= &tc_bus_type,
 		.probe	= pmagbafb_probe,
-		.remove	= __exit_p(pmagbafb_remove),
+		.remove	= pmagbafb_remove,
 	},
 };
 

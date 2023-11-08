@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * asmmacro.h: Assembler macros to make things easier to read.
  *
@@ -14,7 +15,7 @@
 
 	.macro	fpu_save_single thread tmp=t0
 	.set push
-	SET_HARDFLOAT
+	.set hardfloat
 	cfc1	\tmp,  fcr31
 	s.d	$f0,  THREAD_FPR0(\thread)
 	s.d	$f2,  THREAD_FPR2(\thread)
@@ -38,7 +39,7 @@
 
 	.macro	fpu_restore_single thread tmp=t0
 	.set push
-	SET_HARDFLOAT
+	.set hardfloat
 	lw	\tmp, THREAD_FCR31(\thread)
 	l.d	$f0,  THREAD_FPR0(\thread)
 	l.d	$f2,  THREAD_FPR2(\thread)

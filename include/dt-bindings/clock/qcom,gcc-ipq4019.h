@@ -81,6 +81,17 @@
 #define GCC_WCSS5G_CLK					62
 #define GCC_WCSS5G_REF_CLK				63
 #define GCC_WCSS5G_RTC_CLK				64
+#define GCC_APSS_DDRPLL_VCO				65
+#define GCC_SDCC_PLLDIV_CLK				66
+#define GCC_FEPLL_VCO					67
+#define GCC_FEPLL125_CLK				68
+#define GCC_FEPLL125DLY_CLK				69
+#define GCC_FEPLL200_CLK				70
+#define GCC_FEPLL500_CLK				71
+#define GCC_FEPLL_WCSS2G_CLK				72
+#define GCC_FEPLL_WCSS5G_CLK				73
+#define GCC_APSS_CPU_PLLDIV_CLK				74
+#define GCC_PCNOC_AHB_CLK_SRC				75
 
 #define WIFI0_CPU_INIT_RESET				0
 #define WIFI0_RADIO_SRIF_RESET				1
@@ -154,5 +165,11 @@
 #define GCC_QDSS_BCR					69
 #define GCC_MPM_BCR					70
 #define GCC_SPDM_BCR					71
+#define ESS_MAC1_ARES					72
+#define ESS_MAC2_ARES					73
+#define ESS_MAC3_ARES					74
+#define ESS_MAC4_ARES					75
+#define ESS_MAC5_ARES					76
+#define ESS_PSGMII_ARES					77
 
 #endif

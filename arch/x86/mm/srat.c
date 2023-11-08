@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * ACPI 3.0 based NUMA setup
  * Copyright 2004 Andi Kleen, SuSE Labs.
@@ -18,7 +19,7 @@
 #include <linux/mm.h>
 #include <asm/proto.h>
 #include <asm/numa.h>
-#include <asm/e820.h>
+#include <asm/e820/api.h>
 #include <asm/apic.h>
 #include <asm/uv/uv.h>
 
@@ -39,9 +40,8 @@ acpi_numa_x2apic_affinity_init(struct acpi_srat_x2apic_cpu_affinity *pa)
 		return;
 	pxm = pa->proximity_domain;
 	apic_id = pa->apic_id;
-	if (!apic->apic_id_valid(apic_id)) {
-		printk(KERN_INFO "SRAT: PXM %u -> X2APIC 0x%04x ignored\n",
-			 pxm, apic_id);
+	if (!apic_id_valid(apic_id)) {
+		pr_info("SRAT: PXM %u -> X2APIC 0x%04x ignored\n", pxm, apic_id);
 		return;
 	}
 	node = acpi_map_pxm_to_node(pxm);

@@ -1,8 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
- * Handlers for board audio hooks, splitted from bttv-cards
+ * Handlers for board audio hooks, split from bttv-cards
  *
- * Copyright (c) 2006 Mauro Carvalho Chehab (mchehab@infradead.org)
- * This code is placed under the terms of the GNU General Public License
+ * Copyright (c) 2006 Mauro Carvalho Chehab <mchehab@kernel.org>
  */
 
 #include "bttv-audio-hook.h"
@@ -293,16 +293,8 @@ void winfast2000_audio(struct bttv *btv, struct v4l2_tuner *t, int set)
 {
 	unsigned long val;
 
-	if (!set) {
-		/* Not much to do here */
-		t->audmode = V4L2_TUNER_MODE_LANG1;
-		t->rxsubchans = V4L2_TUNER_SUB_MONO |
-				V4L2_TUNER_SUB_STEREO |
-				V4L2_TUNER_SUB_LANG1 |
-				V4L2_TUNER_SUB_LANG2;
-
+	if (!set)
 		return;
-	}
 
 	/*btor (0xc32000, BT848_GPIO_OUT_EN);*/
 	switch (t->audmode) {

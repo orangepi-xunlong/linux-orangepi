@@ -48,7 +48,7 @@
 #include <linux/timer.h>
 #include <asm/byteorder.h>
 #include <asm/io.h>
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 #include <linux/module.h>
 #include <linux/netdevice.h>
 #include <linux/etherdevice.h>
@@ -75,7 +75,6 @@
 MODULE_AUTHOR("Simon Kelley");
 MODULE_DESCRIPTION("Support for Atmel at76c50x 802.11 wireless ethernet cards.");
 MODULE_LICENSE("GPL");
-MODULE_SUPPORTED_DEVICE("Atmel at76c50x wireless cards");
 
 /* The name of the firmware file to be loaded
    over-rides any automatic selection */
@@ -513,7 +512,7 @@ struct atmel_private {
 	} station_state;
 
 	int operating_mode, power_mode;
-	time_t last_qual;
+	unsigned long last_qual;
 	int beacons_this_sec;
 	int channel;
 	int reg_domain, config_reg_domain;
@@ -586,7 +585,7 @@ static int atmel_validate_channel(struct atmel_private *priv, int channel);
 static void atmel_management_frame(struct atmel_private *priv,
 				   struct ieee80211_hdr *header,
 				   u16 frame_len, u8 rssi);
-static void atmel_management_timer(u_long a);
+static void atmel_management_timer(struct timer_list *t);
 static void atmel_send_command(struct atmel_private *priv, int command,
 			       void *cmd, int cmd_size);
 static int atmel_send_command_wait(struct atmel_private *priv, int command,
@@ -601,7 +600,7 @@ static void atmel_set_mib8(struct atmel_private *priv, u8 type, u8 index,
 static void atmel_set_mib16(struct atmel_private *priv, u8 type, u8 index,
 			    u16 data);
 static void atmel_set_mib(struct atmel_private *priv, u8 type, u8 index,
-			  u8 *data, int data_len);
+			  const u8 *data, int data_len);
 static void atmel_get_mib(struct atmel_private *priv, u8 type, u8 index,
 			  u8 *data, int data_len);
 static void atmel_scan(struct atmel_private *priv, int specific_ssid);
@@ -798,7 +797,6 @@ static void tx_update_descriptor(struct atmel_private *priv, int is_bcast,
 
 static netdev_tx_t start_tx(struct sk_buff *skb, struct net_device *dev)
 {
-	static const u8 SNAP_RFC1024[6] = { 0xaa, 0xaa, 0x03, 0x00, 0x00, 0x00 };
 	struct atmel_private *priv = netdev_priv(dev);
 	struct ieee80211_hdr header;
 	unsigned long flags;
@@ -853,7 +851,7 @@ static netdev_tx_t start_tx(struct sk_buff *skb, struct net_device *dev)
 	}
 
 	if (priv->use_wpa)
-		memcpy(&header.addr4, SNAP_RFC1024, ETH_ALEN);
+		memcpy(&header.addr4, rfc1042_header, ETH_ALEN);
 
 	header.frame_control = cpu_to_le16(frame_ctl);
 	/* Copy the wireless header into the card */
@@ -1036,9 +1034,8 @@ static void frag_rx_path(struct atmel_private *priv,
 				priv->dev->stats.rx_dropped++;
 			} else {
 				skb_reserve(skb, 2);
-				memcpy(skb_put(skb, priv->frag_len + 12),
-				       priv->rx_buf,
-				       priv->frag_len + 12);
+				skb_put_data(skb, priv->rx_buf,
+				             priv->frag_len + 12);
 				skb->protocol = eth_type_trans(skb, priv->dev);
 				skb->ip_summed = CHECKSUM_NONE;
 				netif_rx(skb);
@@ -1229,7 +1226,7 @@ static irqreturn_t service_interrupt(int irq, void *dev_id)
 
 		case ISR_RxFRAMELOST:
 			priv->wstats.discard.misc++;
-			/* fall through */
+			fallthrough;
 		case ISR_RxCOMPLETE:
 			rx_done_irq(priv);
 			break;
@@ -1295,19 +1292,11 @@ static struct iw_statistics *atmel_get_wireless_stats(struct net_device *dev)
 	return &priv->wstats;
 }
 
-static int atmel_change_mtu(struct net_device *dev, int new_mtu)
-{
-	if ((new_mtu < 68) || (new_mtu > 2312))
-		return -EINVAL;
-	dev->mtu = new_mtu;
-	return 0;
-}
-
 static int atmel_set_mac_address(struct net_device *dev, void *p)
 {
 	struct sockaddr *addr = p;
 
-	memcpy (dev->dev_addr, addr->sa_data, dev->addr_len);
+	eth_hw_addr_set(dev, addr->sa_data);
 	return atmel_open(dev);
 }
 
@@ -1408,6 +1397,7 @@ static int atmel_validate_channel(struct atmel_private *priv, int channel)
 	return 0;
 }
 
+#ifdef CONFIG_PROC_FS
 static int atmel_proc_show(struct seq_file *m, void *v)
 {
 	struct atmel_private *priv = m->private;
@@ -1490,23 +1480,11 @@ static int atmel_proc_show(struct seq_file *m, void *v)
 	seq_printf(m, "Current state:\t\t%s\n", s);
 	return 0;
 }
-
-static int atmel_proc_open(struct inode *inode, struct file *file)
-{
-	return single_open(file, atmel_proc_show, PDE_DATA(inode));
-}
-
-static const struct file_operations atmel_proc_fops = {
-	.open		= atmel_proc_open,
-	.read		= seq_read,
-	.llseek		= seq_lseek,
-	.release	= single_release,
-};
+#endif
 
 static const struct net_device_ops atmel_netdev_ops = {
 	.ndo_open 		= atmel_open,
 	.ndo_stop		= atmel_close,
-	.ndo_change_mtu 	= atmel_change_mtu,
 	.ndo_set_mac_address 	= atmel_set_mac_address,
 	.ndo_start_xmit 	= start_tx,
 	.ndo_do_ioctl 		= atmel_ioctl,
@@ -1538,10 +1516,9 @@ struct net_device *init_atmel_card(unsigned short irq, unsigned long port,
 	priv->present_callback = card_present;
 	priv->card = card;
 	priv->firmware = NULL;
-	priv->firmware_id[0] = '\0';
 	priv->firmware_type = fw_type;
 	if (firmware) /* module parameter */
-		strcpy(priv->firmware_id, firmware);
+		strscpy(priv->firmware_id, firmware, sizeof(priv->firmware_id));
 	priv->bus_type = card_present ? BUS_TYPE_PCCARD : BUS_TYPE_PCI;
 	priv->station_state = STATION_STATE_DOWN;
 	priv->do_rx_crc = 0;
@@ -1589,16 +1566,18 @@ struct net_device *init_atmel_card(unsigned short irq, unsigned long port,
 	priv->default_beacon_period = priv->beacon_period = 100;
 	priv->listen_interval = 1;
 
-	init_timer(&priv->management_timer);
+	timer_setup(&priv->management_timer, atmel_management_timer, 0);
 	spin_lock_init(&priv->irqlock);
 	spin_lock_init(&priv->timerlock);
-	priv->management_timer.function = atmel_management_timer;
-	priv->management_timer.data = (unsigned long) dev;
 
 	dev->netdev_ops = &atmel_netdev_ops;
 	dev->wireless_handlers = &atmel_handler_def;
 	dev->irq = irq;
 	dev->base_addr = port;
+
+	/* MTU range: 68 - 2312 */
+	dev->min_mtu = 68;
+	dev->max_mtu = MAX_WIRELESS_BODY - ETH_FCS_LEN;
 
 	SET_NETDEV_DEV(dev, sys_dev);
 
@@ -1622,7 +1601,8 @@ struct net_device *init_atmel_card(unsigned short irq, unsigned long port,
 
 	netif_carrier_off(dev);
 
-	if (!proc_create_data("driver/atmel", 0, NULL, &atmel_proc_fops, priv))
+	if (!proc_create_single_data("driver/atmel", 0, NULL, atmel_proc_show,
+			priv))
 		printk(KERN_WARNING "atmel: unable to create /proc entry.\n");
 
 	printk(KERN_INFO "%s: Atmel at76c50x. Version %d.%d. MAC %pM\n",
@@ -1663,9 +1643,10 @@ EXPORT_SYMBOL(stop_atmel_card);
 
 static int atmel_set_essid(struct net_device *dev,
 			   struct iw_request_info *info,
-			   struct iw_point *dwrq,
+			   union iwreq_data *wrqu,
 			   char *extra)
 {
+	struct iw_point *dwrq = &wrqu->essid;
 	struct atmel_private *priv = netdev_priv(dev);
 
 	/* Check if we asked for `any' */
@@ -1691,9 +1672,10 @@ static int atmel_set_essid(struct net_device *dev,
 
 static int atmel_get_essid(struct net_device *dev,
 			   struct iw_request_info *info,
-			   struct iw_point *dwrq,
+			   union iwreq_data *wrqu,
 			   char *extra)
 {
+	struct iw_point *dwrq = &wrqu->essid;
 	struct atmel_private *priv = netdev_priv(dev);
 
 	/* Get the current SSID */
@@ -1712,9 +1694,10 @@ static int atmel_get_essid(struct net_device *dev,
 
 static int atmel_get_wap(struct net_device *dev,
 			 struct iw_request_info *info,
-			 struct sockaddr *awrq,
+			 union iwreq_data *wrqu,
 			 char *extra)
 {
+	struct sockaddr *awrq = &wrqu->ap_addr;
 	struct atmel_private *priv = netdev_priv(dev);
 	memcpy(awrq->sa_data, priv->CurrentBSSID, ETH_ALEN);
 	awrq->sa_family = ARPHRD_ETHER;
@@ -1724,9 +1707,10 @@ static int atmel_get_wap(struct net_device *dev,
 
 static int atmel_set_encode(struct net_device *dev,
 			    struct iw_request_info *info,
-			    struct iw_point *dwrq,
+			    union iwreq_data *wrqu,
 			    char *extra)
 {
+	struct iw_point *dwrq = &wrqu->encoding;
 	struct atmel_private *priv = netdev_priv(dev);
 
 	/* Basic checking: do we have a key to set ?
@@ -1813,9 +1797,10 @@ static int atmel_set_encode(struct net_device *dev,
 
 static int atmel_get_encode(struct net_device *dev,
 			    struct iw_request_info *info,
-			    struct iw_point *dwrq,
+			    union iwreq_data *wrqu,
 			    char *extra)
 {
+	struct iw_point *dwrq = &wrqu->encoding;
 	struct atmel_private *priv = netdev_priv(dev);
 	int index = (dwrq->flags & IW_ENCODE_INDEX) - 1;
 
@@ -2023,18 +2008,19 @@ static int atmel_get_auth(struct net_device *dev,
 
 static int atmel_get_name(struct net_device *dev,
 			  struct iw_request_info *info,
-			  char *cwrq,
+			  union iwreq_data *wrqu,
 			  char *extra)
 {
-	strcpy(cwrq, "IEEE 802.11-DS");
+	strcpy(wrqu->name, "IEEE 802.11-DS");
 	return 0;
 }
 
 static int atmel_set_rate(struct net_device *dev,
 			  struct iw_request_info *info,
-			  struct iw_param *vwrq,
+			  union iwreq_data *wrqu,
 			  char *extra)
 {
+	struct iw_param *vwrq = &wrqu->bitrate;
 	struct atmel_private *priv = netdev_priv(dev);
 
 	if (vwrq->fixed == 0) {
@@ -2073,9 +2059,10 @@ static int atmel_set_rate(struct net_device *dev,
 
 static int atmel_set_mode(struct net_device *dev,
 			  struct iw_request_info *info,
-			  __u32 *uwrq,
+			  union iwreq_data *wrqu,
 			  char *extra)
 {
+	__u32 *uwrq = &wrqu->mode;
 	struct atmel_private *priv = netdev_priv(dev);
 
 	if (*uwrq != IW_MODE_ADHOC && *uwrq != IW_MODE_INFRA)
@@ -2087,9 +2074,10 @@ static int atmel_set_mode(struct net_device *dev,
 
 static int atmel_get_mode(struct net_device *dev,
 			  struct iw_request_info *info,
-			  __u32 *uwrq,
+			  union iwreq_data *wrqu,
 			  char *extra)
 {
+	__u32 *uwrq = &wrqu->mode;
 	struct atmel_private *priv = netdev_priv(dev);
 
 	*uwrq = priv->operating_mode;
@@ -2098,9 +2086,10 @@ static int atmel_get_mode(struct net_device *dev,
 
 static int atmel_get_rate(struct net_device *dev,
 			 struct iw_request_info *info,
-			 struct iw_param *vwrq,
+			 union iwreq_data *wrqu,
 			 char *extra)
 {
+	struct iw_param *vwrq = &wrqu->bitrate;
 	struct atmel_private *priv = netdev_priv(dev);
 
 	if (priv->auto_tx_rate) {
@@ -2128,9 +2117,10 @@ static int atmel_get_rate(struct net_device *dev,
 
 static int atmel_set_power(struct net_device *dev,
 			   struct iw_request_info *info,
-			   struct iw_param *vwrq,
+			   union iwreq_data *wrqu,
 			   char *extra)
 {
+	struct iw_param *vwrq = &wrqu->power;
 	struct atmel_private *priv = netdev_priv(dev);
 	priv->power_mode = vwrq->disabled ? 0 : 1;
 	return -EINPROGRESS;
@@ -2138,9 +2128,10 @@ static int atmel_set_power(struct net_device *dev,
 
 static int atmel_get_power(struct net_device *dev,
 			   struct iw_request_info *info,
-			   struct iw_param *vwrq,
+			   union iwreq_data *wrqu,
 			   char *extra)
 {
+	struct iw_param *vwrq = &wrqu->power;
 	struct atmel_private *priv = netdev_priv(dev);
 	vwrq->disabled = priv->power_mode ? 0 : 1;
 	vwrq->flags = IW_POWER_ON;
@@ -2149,9 +2140,10 @@ static int atmel_get_power(struct net_device *dev,
 
 static int atmel_set_retry(struct net_device *dev,
 			   struct iw_request_info *info,
-			   struct iw_param *vwrq,
+			   union iwreq_data *wrqu,
 			   char *extra)
 {
+	struct iw_param *vwrq = &wrqu->retry;
 	struct atmel_private *priv = netdev_priv(dev);
 
 	if (!vwrq->disabled && (vwrq->flags & IW_RETRY_LIMIT)) {
@@ -2172,9 +2164,10 @@ static int atmel_set_retry(struct net_device *dev,
 
 static int atmel_get_retry(struct net_device *dev,
 			   struct iw_request_info *info,
-			   struct iw_param *vwrq,
+			   union iwreq_data *wrqu,
 			   char *extra)
 {
+	struct iw_param *vwrq = &wrqu->retry;
 	struct atmel_private *priv = netdev_priv(dev);
 
 	vwrq->disabled = 0;      /* Can't be disabled */
@@ -2195,9 +2188,10 @@ static int atmel_get_retry(struct net_device *dev,
 
 static int atmel_set_rts(struct net_device *dev,
 			 struct iw_request_info *info,
-			 struct iw_param *vwrq,
+			 union iwreq_data *wrqu,
 			 char *extra)
 {
+	struct iw_param *vwrq = &wrqu->rts;
 	struct atmel_private *priv = netdev_priv(dev);
 	int rthr = vwrq->value;
 
@@ -2213,9 +2207,10 @@ static int atmel_set_rts(struct net_device *dev,
 
 static int atmel_get_rts(struct net_device *dev,
 			 struct iw_request_info *info,
-			 struct iw_param *vwrq,
+			 union iwreq_data *wrqu,
 			 char *extra)
 {
+	struct iw_param *vwrq = &wrqu->rts;
 	struct atmel_private *priv = netdev_priv(dev);
 
 	vwrq->value = priv->rts_threshold;
@@ -2227,9 +2222,10 @@ static int atmel_get_rts(struct net_device *dev,
 
 static int atmel_set_frag(struct net_device *dev,
 			  struct iw_request_info *info,
-			  struct iw_param *vwrq,
+			  union iwreq_data *wrqu,
 			  char *extra)
 {
+	struct iw_param *vwrq = &wrqu->frag;
 	struct atmel_private *priv = netdev_priv(dev);
 	int fthr = vwrq->value;
 
@@ -2246,9 +2242,10 @@ static int atmel_set_frag(struct net_device *dev,
 
 static int atmel_get_frag(struct net_device *dev,
 			  struct iw_request_info *info,
-			  struct iw_param *vwrq,
+			  union iwreq_data *wrqu,
 			  char *extra)
 {
+	struct iw_param *vwrq = &wrqu->frag;
 	struct atmel_private *priv = netdev_priv(dev);
 
 	vwrq->value = priv->frag_threshold;
@@ -2260,9 +2257,10 @@ static int atmel_get_frag(struct net_device *dev,
 
 static int atmel_set_freq(struct net_device *dev,
 			  struct iw_request_info *info,
-			  struct iw_freq *fwrq,
+			  union iwreq_data *wrqu,
 			  char *extra)
 {
+	struct iw_freq *fwrq = &wrqu->freq;
 	struct atmel_private *priv = netdev_priv(dev);
 	int rc = -EINPROGRESS;		/* Call commit handler */
 
@@ -2290,9 +2288,10 @@ static int atmel_set_freq(struct net_device *dev,
 
 static int atmel_get_freq(struct net_device *dev,
 			  struct iw_request_info *info,
-			  struct iw_freq *fwrq,
+			  union iwreq_data *wrqu,
 			  char *extra)
 {
+	struct iw_freq *fwrq = &wrqu->freq;
 	struct atmel_private *priv = netdev_priv(dev);
 
 	fwrq->m = priv->channel;
@@ -2302,7 +2301,7 @@ static int atmel_get_freq(struct net_device *dev,
 
 static int atmel_set_scan(struct net_device *dev,
 			  struct iw_request_info *info,
-			  struct iw_point *dwrq,
+			  union iwreq_data *dwrq,
 			  char *extra)
 {
 	struct atmel_private *priv = netdev_priv(dev);
@@ -2340,9 +2339,10 @@ static int atmel_set_scan(struct net_device *dev,
 
 static int atmel_get_scan(struct net_device *dev,
 			  struct iw_request_info *info,
-			  struct iw_point *dwrq,
+			  union iwreq_data *wrqu,
 			  char *extra)
 {
+	struct iw_point *dwrq = &wrqu->data;
 	struct atmel_private *priv = netdev_priv(dev);
 	int i;
 	char *current_ev = extra;
@@ -2411,9 +2411,10 @@ static int atmel_get_scan(struct net_device *dev,
 
 static int atmel_get_range(struct net_device *dev,
 			   struct iw_request_info *info,
-			   struct iw_point *dwrq,
+			   union iwreq_data *wrqu,
 			   char *extra)
 {
+	struct iw_point *dwrq = &wrqu->data;
 	struct atmel_private *priv = netdev_priv(dev);
 	struct iw_range *range = (struct iw_range *) extra;
 	int k, i, j;
@@ -2485,9 +2486,10 @@ static int atmel_get_range(struct net_device *dev,
 
 static int atmel_set_wap(struct net_device *dev,
 			 struct iw_request_info *info,
-			 struct sockaddr *awrq,
+			 union iwreq_data *wrqu,
 			 char *extra)
 {
+	struct sockaddr *awrq = &wrqu->ap_addr;
 	struct atmel_private *priv = netdev_priv(dev);
 	int i;
 	static const u8 any[] = { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
@@ -2527,7 +2529,7 @@ static int atmel_set_wap(struct net_device *dev,
 
 static int atmel_config_commit(struct net_device *dev,
 			       struct iw_request_info *info,	/* NULL */
-			       void *zwrq,			/* NULL */
+			       union iwreq_data *zwrq,		/* NULL */
 			       char *extra)			/* NULL */
 {
 	return atmel_open(dev);
@@ -2535,61 +2537,35 @@ static int atmel_config_commit(struct net_device *dev,
 
 static const iw_handler atmel_handler[] =
 {
-	(iw_handler) atmel_config_commit,	/* SIOCSIWCOMMIT */
-	(iw_handler) atmel_get_name,		/* SIOCGIWNAME */
-	(iw_handler) NULL,			/* SIOCSIWNWID */
-	(iw_handler) NULL,			/* SIOCGIWNWID */
-	(iw_handler) atmel_set_freq,		/* SIOCSIWFREQ */
-	(iw_handler) atmel_get_freq,		/* SIOCGIWFREQ */
-	(iw_handler) atmel_set_mode,		/* SIOCSIWMODE */
-	(iw_handler) atmel_get_mode,		/* SIOCGIWMODE */
-	(iw_handler) NULL,			/* SIOCSIWSENS */
-	(iw_handler) NULL,			/* SIOCGIWSENS */
-	(iw_handler) NULL,			/* SIOCSIWRANGE */
-	(iw_handler) atmel_get_range,           /* SIOCGIWRANGE */
-	(iw_handler) NULL,			/* SIOCSIWPRIV */
-	(iw_handler) NULL,			/* SIOCGIWPRIV */
-	(iw_handler) NULL,			/* SIOCSIWSTATS */
-	(iw_handler) NULL,			/* SIOCGIWSTATS */
-	(iw_handler) NULL,			/* SIOCSIWSPY */
-	(iw_handler) NULL,			/* SIOCGIWSPY */
-	(iw_handler) NULL,			/* -- hole -- */
-	(iw_handler) NULL,			/* -- hole -- */
-	(iw_handler) atmel_set_wap,		/* SIOCSIWAP */
-	(iw_handler) atmel_get_wap,		/* SIOCGIWAP */
-	(iw_handler) NULL,			/* -- hole -- */
-	(iw_handler) NULL,			/* SIOCGIWAPLIST */
-	(iw_handler) atmel_set_scan,		/* SIOCSIWSCAN */
-	(iw_handler) atmel_get_scan,		/* SIOCGIWSCAN */
-	(iw_handler) atmel_set_essid,		/* SIOCSIWESSID */
-	(iw_handler) atmel_get_essid,		/* SIOCGIWESSID */
-	(iw_handler) NULL,			/* SIOCSIWNICKN */
-	(iw_handler) NULL,			/* SIOCGIWNICKN */
-	(iw_handler) NULL,			/* -- hole -- */
-	(iw_handler) NULL,			/* -- hole -- */
-	(iw_handler) atmel_set_rate,		/* SIOCSIWRATE */
-	(iw_handler) atmel_get_rate,		/* SIOCGIWRATE */
-	(iw_handler) atmel_set_rts,		/* SIOCSIWRTS */
-	(iw_handler) atmel_get_rts,		/* SIOCGIWRTS */
-	(iw_handler) atmel_set_frag,		/* SIOCSIWFRAG */
-	(iw_handler) atmel_get_frag,		/* SIOCGIWFRAG */
-	(iw_handler) NULL,			/* SIOCSIWTXPOW */
-	(iw_handler) NULL,			/* SIOCGIWTXPOW */
-	(iw_handler) atmel_set_retry,		/* SIOCSIWRETRY */
-	(iw_handler) atmel_get_retry,		/* SIOCGIWRETRY */
-	(iw_handler) atmel_set_encode,		/* SIOCSIWENCODE */
-	(iw_handler) atmel_get_encode,		/* SIOCGIWENCODE */
-	(iw_handler) atmel_set_power,		/* SIOCSIWPOWER */
-	(iw_handler) atmel_get_power,		/* SIOCGIWPOWER */
-	(iw_handler) NULL,			/* -- hole -- */
-	(iw_handler) NULL,			/* -- hole -- */
-	(iw_handler) NULL,			/* SIOCSIWGENIE */
-	(iw_handler) NULL,			/* SIOCGIWGENIE */
-	(iw_handler) atmel_set_auth,		/* SIOCSIWAUTH */
-	(iw_handler) atmel_get_auth,		/* SIOCGIWAUTH */
-	(iw_handler) atmel_set_encodeext,	/* SIOCSIWENCODEEXT */
-	(iw_handler) atmel_get_encodeext,	/* SIOCGIWENCODEEXT */
-	(iw_handler) NULL,			/* SIOCSIWPMKSA */
+	IW_HANDLER(SIOCSIWCOMMIT,	atmel_config_commit),
+	IW_HANDLER(SIOCGIWNAME,		atmel_get_name),
+	IW_HANDLER(SIOCSIWFREQ,		atmel_set_freq),
+	IW_HANDLER(SIOCGIWFREQ,		atmel_get_freq),
+	IW_HANDLER(SIOCSIWMODE,		atmel_set_mode),
+	IW_HANDLER(SIOCGIWMODE,		atmel_get_mode),
+	IW_HANDLER(SIOCGIWRANGE,	atmel_get_range),
+	IW_HANDLER(SIOCSIWAP,		atmel_set_wap),
+	IW_HANDLER(SIOCGIWAP,		atmel_get_wap),
+	IW_HANDLER(SIOCSIWSCAN,		atmel_set_scan),
+	IW_HANDLER(SIOCGIWSCAN,		atmel_get_scan),
+	IW_HANDLER(SIOCSIWESSID,	atmel_set_essid),
+	IW_HANDLER(SIOCGIWESSID,	atmel_get_essid),
+	IW_HANDLER(SIOCSIWRATE,		atmel_set_rate),
+	IW_HANDLER(SIOCGIWRATE,		atmel_get_rate),
+	IW_HANDLER(SIOCSIWRTS,		atmel_set_rts),
+	IW_HANDLER(SIOCGIWRTS,		atmel_get_rts),
+	IW_HANDLER(SIOCSIWFRAG,		atmel_set_frag),
+	IW_HANDLER(SIOCGIWFRAG,		atmel_get_frag),
+	IW_HANDLER(SIOCSIWRETRY,	atmel_set_retry),
+	IW_HANDLER(SIOCGIWRETRY,	atmel_get_retry),
+	IW_HANDLER(SIOCSIWENCODE,	atmel_set_encode),
+	IW_HANDLER(SIOCGIWENCODE,	atmel_get_encode),
+	IW_HANDLER(SIOCSIWPOWER,	atmel_set_power),
+	IW_HANDLER(SIOCGIWPOWER,	atmel_get_power),
+	IW_HANDLER(SIOCSIWAUTH,		atmel_set_auth),
+	IW_HANDLER(SIOCGIWAUTH,		atmel_get_auth),
+	IW_HANDLER(SIOCSIWENCODEEXT,	atmel_set_encodeext),
+	IW_HANDLER(SIOCGIWENCODEEXT,	atmel_get_encodeext),
 };
 
 static const iw_handler atmel_private_handler[] =
@@ -2634,8 +2610,8 @@ static const struct iw_handler_def atmel_handler_def = {
 	.num_standard	= ARRAY_SIZE(atmel_handler),
 	.num_private	= ARRAY_SIZE(atmel_private_handler),
 	.num_private_args = ARRAY_SIZE(atmel_private_args),
-	.standard	= (iw_handler *) atmel_handler,
-	.private	= (iw_handler *) atmel_private_handler,
+	.standard	= atmel_handler,
+	.private	= atmel_private_handler,
 	.private_args	= (struct iw_priv_args *) atmel_private_args,
 	.get_wireless_stats = atmel_get_wireless_stats
 };
@@ -2665,14 +2641,9 @@ static int atmel_ioctl(struct net_device *dev, struct ifreq *rq, int cmd)
 			break;
 		}
 
-		if (!(new_firmware = kmalloc(com.len, GFP_KERNEL))) {
-			rc = -ENOMEM;
-			break;
-		}
-
-		if (copy_from_user(new_firmware, com.data, com.len)) {
-			kfree(new_firmware);
-			rc = -EFAULT;
+		new_firmware = memdup_user(com.data, com.len);
+		if (IS_ERR(new_firmware)) {
+			rc = PTR_ERR(new_firmware);
 			break;
 		}
 
@@ -3378,7 +3349,7 @@ static void atmel_management_frame(struct atmel_private *priv,
 					priv->beacons_this_sec++;
 					atmel_smooth_qual(priv);
 					if (priv->last_beacon_timestamp) {
-						/* Note truncate this to 32 bits - kernel can't divide a long long */
+						/* Note truncate this to 32 bits - kernel can't divide a long */
 						u32 beacon_delay = timestamp - priv->last_beacon_timestamp;
 						int beacons = beacon_delay / (beacon_interval * 1000);
 						if (beacons > 1)
@@ -3441,10 +3412,9 @@ static void atmel_management_frame(struct atmel_private *priv,
 }
 
 /* run when timer expires */
-static void atmel_management_timer(u_long a)
+static void atmel_management_timer(struct timer_list *t)
 {
-	struct net_device *dev = (struct net_device *) a;
-	struct atmel_private *priv = netdev_priv(dev);
+	struct atmel_private *priv = from_timer(priv, t, management_timer);
 	unsigned long flags;
 
 	/* Check if the card has been yanked. */
@@ -3695,13 +3665,14 @@ static int probe_atmel_card(struct net_device *dev)
 {
 	int rc = 0;
 	struct atmel_private *priv = netdev_priv(dev);
+	u8 addr[ETH_ALEN] = {};
 
 	/* reset pccard */
 	if (priv->bus_type == BUS_TYPE_PCCARD)
 		atmel_write16(dev, GCR, 0x0060);
 
 	atmel_write16(dev, GCR, 0x0040);
-	mdelay(500);
+	msleep(500);
 
 	if (atmel_read16(dev, MR2) == 0) {
 		/* No stored firmware so load a small stub which just
@@ -3719,7 +3690,9 @@ static int probe_atmel_card(struct net_device *dev)
 		if (i == 0) {
 			printk(KERN_ALERT "%s: MAC failed to boot MAC address reader.\n", dev->name);
 		} else {
-			atmel_copy_to_host(dev, dev->dev_addr, atmel_read16(dev, MR2), 6);
+
+			atmel_copy_to_host(dev, addr, atmel_read16(dev, MR2), 6);
+			eth_hw_addr_set(dev, addr);
 			/* got address, now squash it again until the network
 			   interface is opened */
 			if (priv->bus_type == BUS_TYPE_PCCARD)
@@ -3731,7 +3704,8 @@ static int probe_atmel_card(struct net_device *dev)
 		/* Mac address easy in this case. */
 		priv->card_type = CARD_TYPE_PARALLEL_FLASH;
 		atmel_write16(dev,  BSR, 1);
-		atmel_copy_to_host(dev, dev->dev_addr, 0xc000, 6);
+		atmel_copy_to_host(dev, addr, 0xc000, 6);
+		eth_hw_addr_set(dev, addr);
 		atmel_write16(dev,  BSR, 0x200);
 		rc = 1;
 	} else {
@@ -3739,7 +3713,8 @@ static int probe_atmel_card(struct net_device *dev)
 		   for the Mac Address */
 		priv->card_type = CARD_TYPE_SPI_FLASH;
 		if (atmel_wakeup_firmware(priv) == 0) {
-			atmel_get_mib(priv, Mac_Address_Mib_Type, 0, dev->dev_addr, 6);
+			atmel_get_mib(priv, Mac_Address_Mib_Type, 0, addr, 6);
+			eth_hw_addr_set(dev, addr);
 
 			/* got address, now squash it again until the network
 			   interface is opened */
@@ -3756,7 +3731,7 @@ static int probe_atmel_card(struct net_device *dev)
 				0x00, 0x04, 0x25, 0x00, 0x00, 0x00
 			};
 			printk(KERN_ALERT "%s: *** Invalid MAC address. UPGRADE Firmware ****\n", dev->name);
-			memcpy(dev->dev_addr, default_mac, ETH_ALEN);
+			eth_hw_addr_set(dev, default_mac);
 		}
 	}
 
@@ -3870,7 +3845,7 @@ static int reset_atmel_card(struct net_device *dev)
 
 	   set all the Mib values which matter in the card to match
 	   their settings in the atmel_private structure. Some of these
-	   can be altered on the fly, but many (WEP, infrastucture or ad-hoc)
+	   can be altered on the fly, but many (WEP, infrastructure or ad-hoc)
 	   can only be changed by tearing down the world and coming back through
 	   here.
 
@@ -4129,7 +4104,7 @@ static void atmel_set_mib16(struct atmel_private *priv, u8 type, u8 index,
 }
 
 static void atmel_set_mib(struct atmel_private *priv, u8 type, u8 index,
-			  u8 *data, int data_len)
+			  const u8 *data, int data_len)
 {
 	struct get_set_mib m;
 	m.type = type;
@@ -4253,7 +4228,7 @@ static void atmel_wmem32(struct atmel_private *priv, u16 pos, u32 data)
 /* Copyright 2003 Matthew T. Russotto                                      */
 /* But derived from the Atmel 76C502 firmware written by Atmel and         */
 /* included in "atmel wireless lan drivers" package                        */
-/**
+/*
     This file is part of net.russotto.AtmelMACFW, hereto referred to
     as AtmelMACFW
 

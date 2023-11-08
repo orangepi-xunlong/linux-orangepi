@@ -1,19 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * PL-2301/2302 USB host-to-host link cables
  * Copyright (C) 2000-2005 by David Brownell
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, see <http://www.gnu.org/licenses/>.
  */
 
 // #define	DEBUG			// error path messages, extra info
@@ -30,7 +18,7 @@
 
 
 /*
- * Prolific PL-2301/PL-2302 driver ... http://www.prolific.com.tw/ 
+ * Prolific PL-2301/PL-2302 driver ... http://www.prolific.com.tw/
  *
  * The protocol and handshaking used here should be bug-compatible
  * with the Linux 2.2 "plusb" driver, by Deti Fliegl.
@@ -69,16 +57,8 @@
 static inline int
 pl_vendor_req(struct usbnet *dev, u8 req, u8 val, u8 index)
 {
-	return usbnet_read_cmd(dev, req,
-				USB_DIR_IN | USB_TYPE_VENDOR |
-				USB_RECIP_DEVICE,
+	return usbnet_write_cmd(dev, req, USB_TYPE_VENDOR | USB_RECIP_DEVICE,
 				val, index, NULL, 0);
-}
-
-static inline int
-pl_clear_QuickLink_features(struct usbnet *dev, int val)
-{
-	return pl_vendor_req(dev, 1, (u8) val, 0);
 }
 
 static inline int

@@ -1,5 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0
 #include <linux/ioport.h>
-#include <asm/e820.h>
+#include <linux/printk.h>
+#include <asm/e820/api.h>
+#include <asm/pci_x86.h>
 
 static void resource_clip(struct resource *res, resource_size_t start,
 			  resource_size_t end)
@@ -25,13 +28,32 @@ static void resource_clip(struct resource *res, resource_size_t start,
 static void remove_e820_regions(struct resource *avail)
 {
 	int i;
-	struct e820entry *entry;
+	struct e820_entry *entry;
+	u64 e820_start, e820_end;
+	struct resource orig = *avail;
 
-	for (i = 0; i < e820->nr_map; i++) {
-		entry = &e820->map[i];
+	if (!pci_use_e820)
+		return;
 
-		resource_clip(avail, entry->addr,
-			      entry->addr + entry->size - 1);
+	for (i = 0; i < e820_table->nr_entries; i++) {
+		entry = &e820_table->entries[i];
+		e820_start = entry->addr;
+		e820_end = entry->addr + entry->size - 1;
+
+		resource_clip(avail, e820_start, e820_end);
+		if (orig.start != avail->start || orig.end != avail->end) {
+			pr_info("resource: avoiding allocation from e820 entry [mem %#010Lx-%#010Lx]\n",
+				e820_start, e820_end);
+			if (avail->end > avail->start)
+				/*
+				 * Use %pa instead of %pR because "avail"
+				 * is typically IORESOURCE_UNSET, so %pR
+				 * shows the size instead of addresses.
+				 */
+				pr_info("resource: remaining [mem %pa-%pa] available\n",
+					&avail->start, &avail->end);
+			orig = *avail;
+		}
 	}
 }
 

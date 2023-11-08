@@ -1,31 +1,18 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2006-2007 PA Semi, Inc
  *
  * Maintained by: Olof Johansson <olof@lixom.net>
  *
  * Driver for the PWRficient onchip rng
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
  */
 
 #include <linux/module.h>
 #include <linux/kernel.h>
+#include <linux/mod_devicetable.h>
 #include <linux/platform_device.h>
 #include <linux/hw_random.h>
 #include <linux/delay.h>
-#include <linux/of_address.h>
-#include <linux/of_platform.h>
 #include <linux/io.h>
 
 #define SDCRNG_CTL_REG			0x00
@@ -98,10 +85,8 @@ static struct hwrng pasemi_rng = {
 static int rng_probe(struct platform_device *pdev)
 {
 	void __iomem *rng_regs;
-	struct resource *res;
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	rng_regs = devm_ioremap_resource(&pdev->dev, res);
+	rng_regs = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(rng_regs))
 		return PTR_ERR(rng_regs);
 

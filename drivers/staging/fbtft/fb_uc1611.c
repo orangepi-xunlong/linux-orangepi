@@ -1,25 +1,16 @@
+// SPDX-License-Identifier: GPL-2.0+
 /*
  * FB driver for the UltraChip UC1611 LCD controller
  *
  * The display is 4-bit grayscale (16 shades) 240x160.
  *
  * Copyright (C) 2015 Henri Chain
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/init.h>
-#include <linux/gpio.h>
+#include <linux/gpio/consumer.h>
 #include <linux/spi/spi.h>
 #include <linux/delay.h>
 
@@ -42,41 +33,47 @@
 
 /* BR -> actual ratio: 0-3 -> 5, 10, 11, 13 */
 static unsigned int ratio = 2;
-module_param(ratio, uint, 0);
+module_param(ratio, uint, 0000);
 MODULE_PARM_DESC(ratio, "BR[1:0] Bias voltage ratio: 0-3 (default: 2)");
 
 static unsigned int gain = 3;
-module_param(gain, uint, 0);
+module_param(gain, uint, 0000);
 MODULE_PARM_DESC(gain, "GN[1:0] Bias voltage gain: 0-3 (default: 3)");
 
 static unsigned int pot = 16;
-module_param(pot, uint, 0);
+module_param(pot, uint, 0000);
 MODULE_PARM_DESC(pot, "PM[6:0] Bias voltage pot.: 0-63 (default: 16)");
 
 /* TC -> % compensation per deg C: 0-3 -> -.05, -.10, -.015, -.20 */
 static unsigned int temp;
-module_param(temp, uint, 0);
+module_param(temp, uint, 0000);
 MODULE_PARM_DESC(temp, "TC[1:0] Temperature compensation: 0-3 (default: 0)");
 
 /* PC[1:0] -> LCD capacitance: 0-3 -> <20nF, 20-28 nF, 29-40 nF, 40-56 nF */
 static unsigned int load = 1;
-module_param(load, uint, 0);
+module_param(load, uint, 0000);
 MODULE_PARM_DESC(load, "PC[1:0] Panel Loading: 0-3 (default: 1)");
 
 /* PC[3:2] -> V_LCD: 0, 1, 3 -> ext., int. with ratio = 5, int. standard */
 static unsigned int pump = 3;
-module_param(pump, uint, 0);
+module_param(pump, uint, 0000);
 MODULE_PARM_DESC(pump, "PC[3:2] Pump control: 0,1,3 (default: 3)");
 
 static int init_display(struct fbtft_par *par)
 {
 	int ret;
 
-	/* Set CS active high */
-	par->spi->mode |= SPI_CS_HIGH;
+	/*
+	 * Set CS active inverse polarity: just setting SPI_CS_HIGH does not
+	 * work with GPIO based chip selects that are logically active high
+	 * but inverted inside the GPIO library, so enforce inverted
+	 * semantics.
+	 */
+	par->spi->mode ^= SPI_CS_HIGH;
 	ret = spi_setup(par->spi);
 	if (ret) {
-		dev_err(par->info->device, "Could not set SPI_CS_HIGH\n");
+		dev_err(par->info->device,
+			"Could not set inverse CS polarity\n");
 		return ret;
 	}
 
@@ -100,7 +97,7 @@ static int init_display(struct fbtft_par *par)
 	write_reg(par, 0x2C | (pump & 0x03));
 
 	/* Set inverse display */
-	write_reg(par, 0xA6 | (0x01 & 0x01));
+	write_reg(par, 0xA6 | 0x01);
 
 	/* Set 4-bit grayscale mode */
 	write_reg(par, 0xD0 | (0x02 & 0x03));
@@ -138,7 +135,7 @@ static void set_addr_win(struct fbtft_par *par, int xs, int ys, int xe, int ye)
 
 static int blank(struct fbtft_par *par, bool on)
 {
-	fbtft_par_dbg(DEBUG_BLANK, par, "%s(blank=%s)\n",
+	fbtft_par_dbg(DEBUG_BLANK, par, "(%s=%s)\n",
 		      __func__, on ? "true" : "false");
 
 	if (on)
@@ -166,8 +163,8 @@ static int set_var(struct fbtft_par *par)
 		/* Set RAM address control */
 		write_reg(par, 0x88
 			| (0x0 & 0x1) << 2 /* Increment positively */
-			| (0x1 & 0x1) << 1 /* Increment page first */
-			| (0x1 & 0x1));    /* Wrap around (default) */
+			| (0x1 << 1)	   /* Increment page first */
+			| 0x1);		   /* Wrap around (default) */
 
 		/* Set LCD mapping */
 		write_reg(par, 0xC0
@@ -180,11 +177,11 @@ static int set_var(struct fbtft_par *par)
 		write_reg(par, 0x88
 			| (0x0 & 0x1) << 2 /* Increment positively */
 			| (0x0 & 0x1) << 1 /* Increment column first */
-			| (0x1 & 0x1));    /* Wrap around (default) */
+			| 0x1);		   /* Wrap around (default) */
 
 		/* Set LCD mapping */
 		write_reg(par, 0xC0
-			| (0x1 & 0x1) << 2 /* Mirror Y ON */
+			| (0x1 << 2)	   /* Mirror Y ON */
 			| (0x0 & 0x1) << 1 /* Mirror X OFF */
 			| (0x0 & 0x1));    /* MS nibble last (default) */
 		break;
@@ -192,13 +189,13 @@ static int set_var(struct fbtft_par *par)
 		/* Set RAM address control */
 		write_reg(par, 0x88
 			| (0x0 & 0x1) << 2 /* Increment positively */
-			| (0x1 & 0x1) << 1 /* Increment page first */
-			| (0x1 & 0x1));    /* Wrap around (default) */
+			| (0x1 << 1)	   /* Increment page first */
+			| 0x1);		   /* Wrap around (default) */
 
 		/* Set LCD mapping */
 		write_reg(par, 0xC0
-			| (0x1 & 0x1) << 2 /* Mirror Y ON */
-			| (0x1 & 0x1) << 1 /* Mirror X ON */
+			| (0x1 << 2)	   /* Mirror Y ON */
+			| (0x1 << 1)	   /* Mirror X ON */
 			| (0x0 & 0x1));    /* MS nibble last (default) */
 		break;
 	default:
@@ -206,12 +203,12 @@ static int set_var(struct fbtft_par *par)
 		write_reg(par, 0x88
 			| (0x0 & 0x1) << 2 /* Increment positively */
 			| (0x0 & 0x1) << 1 /* Increment column first */
-			| (0x1 & 0x1));    /* Wrap around (default) */
+			| 0x1);		   /* Wrap around (default) */
 
 		/* Set LCD mapping */
 		write_reg(par, 0xC0
 			| (0x0 & 0x1) << 2 /* Mirror Y OFF */
-			| (0x1 & 0x1) << 1 /* Mirror X ON */
+			| (0x1 << 1)	   /* Mirror X ON */
 			| (0x0 & 0x1));    /* MS nibble last (default) */
 		break;
 	}
@@ -225,7 +222,7 @@ static int write_vmem(struct fbtft_par *par, size_t offset, size_t len)
 	u8 *buf8 = par->txbuf.buf;
 	u16 *buf16 = par->txbuf.buf;
 	int line_length = par->info->fix.line_length;
-	int y_start = (offset / line_length);
+	int y_start = offset / line_length;
 	int y_end = (offset + len - 1) / line_length;
 	int x, y, i;
 	int ret = 0;
@@ -260,7 +257,7 @@ static int write_vmem(struct fbtft_par *par, size_t offset, size_t len)
 			}
 			break;
 		}
-		gpio_set_value(par->gpio.dc, 1);
+		gpiod_set_value(par->gpio.dc, 1);
 
 		/* Write data */
 		ret = par->fbtftops.write(par, par->txbuf.buf, len / 2);

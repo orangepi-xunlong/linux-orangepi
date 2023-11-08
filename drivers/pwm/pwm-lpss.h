@@ -1,37 +1,31 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Intel Low Power Subsystem PWM controller driver
  *
  * Copyright (C) 2014, Intel Corporation
  *
  * Derived from the original pwm-lpss.c
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #ifndef __PWM_LPSS_H
 #define __PWM_LPSS_H
 
-#include <linux/device.h>
 #include <linux/pwm.h>
+#include <linux/types.h>
 
-struct pwm_lpss_chip;
+#include <linux/platform_data/x86/pwm-lpss.h>
 
-struct pwm_lpss_boardinfo {
-	unsigned long clk_rate;
-	unsigned int npwm;
-	unsigned long base_unit_bits;
+#define LPSS_MAX_PWMS			4
+
+struct pwm_lpss_chip {
+	struct pwm_chip chip;
+	void __iomem *regs;
+	const struct pwm_lpss_boardinfo *info;
 };
 
 extern const struct pwm_lpss_boardinfo pwm_lpss_byt_info;
 extern const struct pwm_lpss_boardinfo pwm_lpss_bsw_info;
 extern const struct pwm_lpss_boardinfo pwm_lpss_bxt_info;
-
-struct pwm_lpss_chip *pwm_lpss_probe(struct device *dev, struct resource *r,
-				     const struct pwm_lpss_boardinfo *info);
-int pwm_lpss_remove(struct pwm_lpss_chip *lpwm);
-int pwm_lpss_suspend(struct device *dev);
-int pwm_lpss_resume(struct device *dev);
+extern const struct pwm_lpss_boardinfo pwm_lpss_tng_info;
 
 #endif	/* __PWM_LPSS_H */

@@ -12,6 +12,7 @@
  * Copyright (C) 2000 MIPS Technologies, Inc.
  * Copyright (C) 1999, 2001 Silicon Graphics, Inc.
  */
+#include <linux/export.h>
 #include <asm/asm.h>
 #include <asm/asmmacro.h>
 #include <asm/errno.h>
@@ -25,14 +26,65 @@
 
 	.macro	EX insn, reg, src
 	.set	push
-	SET_HARDFLOAT
+	.set	hardfloat
 	.set	nomacro
 .ex\@:	\insn	\reg, \src
 	.set	pop
 	.section __ex_table,"a"
-	PTR	.ex\@, fault
+	PTR_WD	.ex\@, fault
 	.previous
 	.endm
+
+/*
+ * Save a thread's fp context.
+ */
+LEAF(_save_fp)
+EXPORT_SYMBOL(_save_fp)
+#if defined(CONFIG_64BIT) || defined(CONFIG_CPU_MIPSR2) || \
+    defined(CONFIG_CPU_MIPSR5) || defined(CONFIG_CPU_MIPSR6)
+	mfc0	t0, CP0_STATUS
+#endif
+	fpu_save_double a0 t0 t1		# clobbers t1
+	jr	ra
+	END(_save_fp)
+
+/*
+ * Restore a thread's fp context.
+ */
+LEAF(_restore_fp)
+#if defined(CONFIG_64BIT) || defined(CONFIG_CPU_MIPSR2) || \
+    defined(CONFIG_CPU_MIPSR5) || defined(CONFIG_CPU_MIPSR6)
+	mfc0	t0, CP0_STATUS
+#endif
+	fpu_restore_double a0 t0 t1		# clobbers t1
+	jr	ra
+	END(_restore_fp)
+
+#ifdef CONFIG_CPU_HAS_MSA
+
+/*
+ * Save a thread's MSA vector context.
+ */
+LEAF(_save_msa)
+EXPORT_SYMBOL(_save_msa)
+	msa_save_all	a0
+	jr	ra
+	END(_save_msa)
+
+/*
+ * Restore a thread's MSA vector context.
+ */
+LEAF(_restore_msa)
+	msa_restore_all	a0
+	jr	ra
+	END(_restore_msa)
+
+LEAF(_init_msa_upper)
+	msa_init_all_upper
+	jr	ra
+	END(_init_msa_upper)
+
+#endif
 
 	.set	noreorder
 
@@ -46,15 +98,15 @@
  */
 LEAF(_save_fp_context)
 	.set	push
-	SET_HARDFLOAT
+	.set	hardfloat
 	cfc1	t1, fcr31
 	.set	pop
 
-#if defined(CONFIG_64BIT) || defined(CONFIG_CPU_MIPS32_R2) || \
-		defined(CONFIG_CPU_MIPS32_R6)
+#if defined(CONFIG_64BIT) || defined(CONFIG_CPU_MIPSR2) || \
+    defined(CONFIG_CPU_MIPSR5) || defined(CONFIG_CPU_MIPSR6)
 	.set	push
-	SET_HARDFLOAT
-#ifdef CONFIG_CPU_MIPS32_R2
+	.set	hardfloat
+#if defined(CONFIG_CPU_MIPSR2) || defined(CONFIG_CPU_MIPSR5)
 	.set	mips32r2
 	.set	fp=64
 	mfc0	t0, CP0_STATUS
@@ -83,7 +135,7 @@ LEAF(_save_fp_context)
 #endif
 
 	.set push
-	SET_HARDFLOAT
+	.set	hardfloat
 	/* Store the 16 even double precision registers */
 	EX	sdc1 $f0, 0(a0)
 	EX	sdc1 $f2, 16(a0)
@@ -118,11 +170,11 @@ LEAF(_save_fp_context)
 LEAF(_restore_fp_context)
 	EX	lw t1, 0(a1)
 
-#if defined(CONFIG_64BIT) || defined(CONFIG_CPU_MIPS32_R2)  || \
-		defined(CONFIG_CPU_MIPS32_R6)
+#if defined(CONFIG_64BIT) || defined(CONFIG_CPU_MIPSR2) || \
+    defined(CONFIG_CPU_MIPSR5) || defined(CONFIG_CPU_MIPSR6)
 	.set	push
-	SET_HARDFLOAT
-#ifdef CONFIG_CPU_MIPS32_R2
+	.set	hardfloat
+#if defined(CONFIG_CPU_MIPSR2) || defined(CONFIG_CPU_MIPSR5)
 	.set	mips32r2
 	.set	fp=64
 	mfc0	t0, CP0_STATUS
@@ -149,7 +201,7 @@ LEAF(_restore_fp_context)
 1:	.set pop
 #endif
 	.set push
-	SET_HARDFLOAT
+	.set hardfloat
 	EX	ldc1 $f0, 0(a0)
 	EX	ldc1 $f2, 16(a0)
 	EX	ldc1 $f4, 32(a0)

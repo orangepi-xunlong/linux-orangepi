@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  *  linux/fs/ufs/file.c
  *
@@ -40,5 +41,5 @@ const struct file_operations ufs_file_operations = {
 	.mmap		= generic_file_mmap,
 	.open           = generic_file_open,
 	.fsync		= generic_file_fsync,
-	.splice_read	= generic_file_splice_read,
+	.splice_read	= filemap_splice_read,
 };

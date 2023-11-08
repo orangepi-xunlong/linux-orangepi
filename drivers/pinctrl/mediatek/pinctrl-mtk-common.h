@@ -1,15 +1,7 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (c) 2014 MediaTek Inc.
  * Author: Hongzhou.Yang <hongzhou.yang@mediatek.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #ifndef __PINCTRL_MTK_COMMON_H
@@ -18,6 +10,8 @@
 #include <linux/pinctrl/pinctrl.h>
 #include <linux/regmap.h>
 #include <linux/pinctrl/pinconf-generic.h>
+
+#include "mtk-eint.h"
 
 #define NO_EINT_SUPPORT    255
 #define MT_EDGE_SENSITIVE           0
@@ -199,6 +193,12 @@ struct mtk_eint_offsets {
  *
  * @grp_desc: The driving group info.
  * @pin_drv_grp: The driving group for all pins.
+ * @spec_ies: Special pin setting for input enable
+ * @n_spec_ies: Number of entries in spec_ies
+ * @spec_pupd: Special pull up/down setting
+ * @n_spec_pupd: Number of entries in spec_pupd
+ * @spec_smt: Special pin setting for schmitt
+ * @n_spec_smt: Number of entries in spec_smt
  * @spec_pull_set: Each SoC may have special pins for pull up/down setting,
  *  these pins' pull setting are very different, they have separate pull
  *  up/down bit, R0 and R1 resistor bit, so they need special pull setting.
@@ -216,7 +216,10 @@ struct mtk_eint_offsets {
  * @spec_dir_set: In very few SoCs, direction control registers are not
  * arranged continuously, they may be cut to parts. So they need special
  * dir setting.
-
+ * @mt8365_set_clr_mode: In mt8365, some pins won't set correcty because they
+ * need to use the main R/W register to read/update/write the modes instead of
+ * the SET/CLR register.
+ *
  * @dir_offset: The direction register offset.
  * @pullen_offset: The pull-up/pull-down enable register offset.
  * @pinmux_offset: The pinmux register offset.
@@ -237,13 +240,24 @@ struct mtk_pinctrl_devdata {
 	unsigned int	n_grp_cls;
 	const struct mtk_pin_drv_grp	*pin_drv_grp;
 	unsigned int	n_pin_drv_grps;
-	int (*spec_pull_set)(struct regmap *reg, unsigned int pin,
-			unsigned char align, bool isup, unsigned int arg);
-	int (*spec_ies_smt_set)(struct regmap *reg, unsigned int pin,
-			unsigned char align, int value, enum pin_config_param arg);
+	const struct mtk_pin_ies_smt_set *spec_ies;
+	unsigned int n_spec_ies;
+	const struct mtk_pin_spec_pupd_set_samereg *spec_pupd;
+	unsigned int n_spec_pupd;
+	const struct mtk_pin_ies_smt_set *spec_smt;
+	unsigned int n_spec_smt;
+	int (*spec_pull_set)(struct regmap *regmap,
+			const struct mtk_pinctrl_devdata *devdata,
+			unsigned int pin, bool isup, unsigned int r1r0);
+	int (*spec_ies_smt_set)(struct regmap *reg,
+			const struct mtk_pinctrl_devdata *devdata,
+			unsigned int pin, int value, enum pin_config_param arg);
 	void (*spec_pinmux_set)(struct regmap *reg, unsigned int pin,
 			unsigned int mode);
 	void (*spec_dir_set)(unsigned int *reg_addr, unsigned int pin);
+	int (*mt8365_set_clr_mode)(struct regmap *regmap,
+			unsigned int bit, unsigned int reg_pullen, unsigned int reg_pullsel,
+			bool enable, bool isup);
 	unsigned int dir_offset;
 	unsigned int ies_offset;
 	unsigned int smt_offset;
@@ -258,9 +272,11 @@ struct mtk_pinctrl_devdata {
 	unsigned char  port_shf;
 	unsigned char  port_mask;
 	unsigned char  port_align;
-	struct mtk_eint_offsets eint_offsets;
-	unsigned int	ap_num;
-	unsigned int	db_cnt;
+	struct mtk_eint_hw eint_hw;
+	struct mtk_eint_regs *eint_regs;
+	unsigned int mode_mask;
+	unsigned int mode_per_reg;
+	unsigned int mode_shf;
 };
 
 struct mtk_pinctrl {
@@ -274,25 +290,22 @@ struct mtk_pinctrl {
 	const char          **grp_names;
 	struct pinctrl_dev      *pctl_dev;
 	const struct mtk_pinctrl_devdata  *devdata;
-	void __iomem		*eint_reg_base;
-	struct irq_domain	*domain;
-	int			*eint_dual_edges;
-	u32 *wake_mask;
-	u32 *cur_mask;
+	struct mtk_eint *eint;
 };
 
 int mtk_pctrl_init(struct platform_device *pdev,
 		const struct mtk_pinctrl_devdata *data,
 		struct regmap *regmap);
 
+int mtk_pctrl_common_probe(struct platform_device *pdev);
+
 int mtk_pctrl_spec_pull_set_samereg(struct regmap *regmap,
-		const struct mtk_pin_spec_pupd_set_samereg *pupd_infos,
-		unsigned int info_num, unsigned int pin,
-		unsigned char align, bool isup, unsigned int r1r0);
+		const struct mtk_pinctrl_devdata *devdata,
+		unsigned int pin, bool isup, unsigned int r1r0);
 
 int mtk_pconf_spec_set_ies_smt_range(struct regmap *regmap,
-		const struct mtk_pin_ies_smt_set *ies_smt_infos, unsigned int info_num,
-		unsigned int pin, unsigned char align, int value);
+		const struct mtk_pinctrl_devdata *devdata,
+		unsigned int pin, int value, enum pin_config_param arg);
 
 extern const struct dev_pm_ops mtk_eint_pm_ops;
 

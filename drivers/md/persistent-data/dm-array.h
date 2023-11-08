@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (C) 2012 Red Hat, Inc.
  *
@@ -198,7 +199,7 @@ struct dm_array_cursor {
 
 	struct dm_block *block;
 	struct array_block *ab;
-	unsigned index;
+	unsigned int index;
 };
 
 int dm_array_cursor_begin(struct dm_array_info *info,
@@ -207,6 +208,7 @@ void dm_array_cursor_end(struct dm_array_cursor *c);
 
 uint32_t dm_array_cursor_index(struct dm_array_cursor *c);
 int dm_array_cursor_next(struct dm_array_cursor *c);
+int dm_array_cursor_skip(struct dm_array_cursor *c, uint32_t count);
 
 /*
  * value_le is only valid while the cursor points at the current value.

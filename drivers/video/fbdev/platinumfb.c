@@ -30,11 +30,9 @@
 #include <linux/fb.h>
 #include <linux/init.h>
 #include <linux/nvram.h>
-#include <linux/of_device.h>
-#include <linux/of_platform.h>
-#include <asm/io.h>
-#include <asm/prom.h>
-#include <asm/pgtable.h>
+#include <linux/of.h>
+#include <linux/of_address.h>
+#include <linux/platform_device.h>
 
 #include "macmodes.h"
 #include "platinumfb.h"
@@ -54,17 +52,17 @@ struct fb_info_platinum {
 		__u8 red, green, blue;
 	}				palette[256];
 	u32				pseudo_palette[16];
-	
+
 	volatile struct cmap_regs	__iomem *cmap_regs;
 	unsigned long			cmap_regs_phys;
-	
+
 	volatile struct platinum_regs	__iomem *platinum_regs;
 	unsigned long			platinum_regs_phys;
-	
+
 	__u8				__iomem *frame_buffer;
 	volatile __u8			__iomem *base_frame_buffer;
 	unsigned long			frame_buffer_phys;
-	
+
 	unsigned long			total_vram;
 	int				clktype;
 	int				dactype;
@@ -98,15 +96,13 @@ static int platinum_var_to_par(struct fb_var_screeninfo *var,
  * Interface used by the world
  */
 
-static struct fb_ops platinumfb_ops = {
+static const struct fb_ops platinumfb_ops = {
 	.owner =	THIS_MODULE,
+	FB_DEFAULT_IOMEM_OPS,
 	.fb_check_var	= platinumfb_check_var,
 	.fb_set_par	= platinumfb_set_par,
 	.fb_setcolreg	= platinumfb_setcolreg,
 	.fb_blank	= platinumfb_blank,
-	.fb_fillrect	= cfb_fillrect,
-	.fb_copyarea	= cfb_copyarea,
-	.fb_imageblit	= cfb_imageblit,
 };
 
 /*
@@ -135,7 +131,7 @@ static int platinumfb_set_par (struct fb_info *info)
 	platinum_set_hardware(pinfo);
 
 	init = platinum_reg_init[pinfo->vmode-1];
-	
+
  	if ((pinfo->vmode == VMODE_832_624_75) && (pinfo->cmode > CMODE_8))
   		offset = 0x10;
 
@@ -216,7 +212,7 @@ static int platinumfb_setcolreg(u_int regno, u_int red, u_int green, u_int blue,
 			break;
 		}
 	}
-	
+
 	return 0;
 }
 
@@ -271,7 +267,7 @@ static void platinum_set_hardware(struct fb_info_platinum *pinfo)
 	struct platinum_regvals		*init;
 	int				i;
 	int				vmode, cmode;
-	
+
 	vmode = pinfo->vmode;
 	cmode = pinfo->cmode;
 
@@ -319,7 +315,6 @@ static void platinum_init_info(struct fb_info *info,
 	/* Fill fb_info */
 	info->fbops = &platinumfb_ops;
 	info->pseudo_palette = pinfo->pseudo_palette;
-        info->flags = FBINFO_DEFAULT;
 	info->screen_base = pinfo->frame_buffer + 0x20;
 
 	fb_alloc_cmap(&info->cmap, 256, 0);
@@ -347,23 +342,18 @@ static int platinum_init_fb(struct fb_info *info)
 
 	sense = read_platinum_sense(pinfo);
 	printk(KERN_INFO "platinumfb: Monitor sense value = 0x%x, ", sense);
-	if (default_vmode == VMODE_NVRAM) {
-#ifdef CONFIG_NVRAM
+
+	if (IS_REACHABLE(CONFIG_NVRAM) && default_vmode == VMODE_NVRAM)
 		default_vmode = nvram_read_byte(NV_VMODE);
-		if (default_vmode <= 0 || default_vmode > VMODE_MAX ||
-		    !platinum_reg_init[default_vmode-1])
-#endif
-			default_vmode = VMODE_CHOOSE;
-	}
-	if (default_vmode == VMODE_CHOOSE) {
+	if (default_vmode <= 0 || default_vmode > VMODE_MAX ||
+	    !platinum_reg_init[default_vmode - 1]) {
 		default_vmode = mac_map_monitor_sense(sense);
+		if (!platinum_reg_init[default_vmode - 1])
+			default_vmode = VMODE_640_480_60;
 	}
-	if (default_vmode <= 0 || default_vmode > VMODE_MAX)
-		default_vmode = VMODE_640_480_60;
-#ifdef CONFIG_NVRAM
-	if (default_cmode == CMODE_NVRAM)
+
+	if (IS_REACHABLE(CONFIG_NVRAM) && default_cmode == CMODE_NVRAM)
 		default_cmode = nvram_read_byte(NV_CMODE);
-#endif
 	if (default_cmode < CMODE_8 || default_cmode > CMODE_32)
 		default_cmode = CMODE_8;
 	/*
@@ -443,7 +433,7 @@ static int read_platinum_sense(struct fb_info_platinum *info)
  * This routine takes a user-supplied var, and picks the best vmode/cmode from it.
  * It also updates the var structure to the actual mode data obtained
  */
-static int platinum_var_to_par(struct fb_var_screeninfo *var, 
+static int platinum_var_to_par(struct fb_var_screeninfo *var,
 			       struct fb_info_platinum *pinfo,
 			       int check_only)
 {
@@ -485,12 +475,12 @@ static int platinum_var_to_par(struct fb_var_screeninfo *var,
 	pinfo->yoffset = 0;
 	pinfo->vxres = pinfo->xres;
 	pinfo->vyres = pinfo->yres;
-	
+
 	return 0;
 }
 
 
-/* 
+/*
  * Parse user specified options (`video=platinumfb:')
  */
 static int __init platinumfb_setup(char *options)
@@ -545,10 +535,9 @@ static int platinumfb_probe(struct platform_device* odev)
 	dev_info(&odev->dev, "Found Apple Platinum video hardware\n");
 
 	info = framebuffer_alloc(sizeof(*pinfo), &odev->dev);
-	if (info == NULL) {
-		dev_err(&odev->dev, "Failed to allocate fbdev !\n");
+	if (!info)
 		return -ENOMEM;
-	}
+
 	pinfo = info->par;
 
 	if (of_address_to_resource(dp, 0, &pinfo->rsrc_reg) ||
@@ -577,8 +566,7 @@ static int platinumfb_probe(struct platform_device* odev)
 
 	/* frame buffer - map only 4MB */
 	pinfo->frame_buffer_phys = pinfo->rsrc_fb.start;
-	pinfo->frame_buffer = __ioremap(pinfo->rsrc_fb.start, 0x400000,
-					_PAGE_WRITETHRU);
+	pinfo->frame_buffer = ioremap_wt(pinfo->rsrc_fb.start, 0x400000);
 	pinfo->base_frame_buffer = pinfo->frame_buffer;
 
 	/* registers */
@@ -633,7 +621,7 @@ static int platinumfb_probe(struct platform_device* odev)
 		break;
 	}
 	dev_set_drvdata(&odev->dev, info);
-	
+
 	rc = platinum_init_fb(info);
 	if (rc != 0) {
 		iounmap(pinfo->frame_buffer);
@@ -645,13 +633,13 @@ static int platinumfb_probe(struct platform_device* odev)
 	return rc;
 }
 
-static int platinumfb_remove(struct platform_device* odev)
+static void platinumfb_remove(struct platform_device* odev)
 {
 	struct fb_info		*info = dev_get_drvdata(&odev->dev);
 	struct fb_info_platinum	*pinfo = info->par;
-	
+
         unregister_framebuffer (info);
-	
+
 	/* Unmap frame buffer and registers */
 	iounmap(pinfo->frame_buffer);
 	iounmap(pinfo->platinum_regs);
@@ -663,11 +651,9 @@ static int platinumfb_remove(struct platform_device* odev)
 	release_mem_region(pinfo->cmap_regs_phys, 0x1000);
 
 	framebuffer_release(info);
-
-	return 0;
 }
 
-static struct of_device_id platinumfb_match[] = 
+static struct of_device_id platinumfb_match[] =
 {
 	{
 	.name 		= "platinum",
@@ -675,14 +661,14 @@ static struct of_device_id platinumfb_match[] =
 	{},
 };
 
-static struct platform_driver platinum_driver = 
+static struct platform_driver platinum_driver =
 {
 	.driver = {
 		.name = "platinumfb",
 		.of_match_table = platinumfb_match,
 	},
 	.probe		= platinumfb_probe,
-	.remove		= platinumfb_remove,
+	.remove_new	= platinumfb_remove,
 };
 
 static int __init platinumfb_init(void)

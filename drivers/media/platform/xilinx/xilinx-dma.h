@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Xilinx Video DMA
  *
@@ -6,10 +7,6 @@
  *
  * Contacts: Hyun Kwon <hyun.kwon@xilinx.com>
  *           Laurent Pinchart <laurent.pinchart@ideasonboard.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #ifndef __XILINX_VIP_DMA_H__
@@ -48,9 +45,14 @@ struct xvip_pipeline {
 	struct xvip_dma *output;
 };
 
-static inline struct xvip_pipeline *to_xvip_pipeline(struct media_entity *e)
+static inline struct xvip_pipeline *to_xvip_pipeline(struct video_device *vdev)
 {
-	return container_of(e->pipe, struct xvip_pipeline, pipe);
+	struct media_pipeline *pipe = video_device_pipeline(vdev);
+
+	if (!pipe)
+		return NULL;
+
+	return container_of(pipe, struct xvip_pipeline, pipe);
 }
 
 /**

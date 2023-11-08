@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * OMAP3/OMAP4 Voltage Management Routines
  *
@@ -13,10 +14,6 @@
  *
  * Copyright (C) 2010 Texas Instruments, Inc.
  * Thara Gopinath <thara@ti.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/delay.h>
@@ -70,7 +67,7 @@ unsigned long voltdm_get_voltage(struct voltagedomain *voltdm)
  * This API should be called by the kernel to do the voltage scaling
  * for a particular voltage domain during DVFS.
  */
-int voltdm_scale(struct voltagedomain *voltdm,
+static int voltdm_scale(struct voltagedomain *voltdm,
 		 unsigned long target_volt)
 {
 	int ret, i;

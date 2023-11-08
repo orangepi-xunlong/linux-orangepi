@@ -1,13 +1,10 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * OMAP3xxx Power/Reset Management (PRM) register definitions
  *
  * Copyright (C) 2007-2009, 2011-2012 Texas Instruments, Inc.
  * Copyright (C) 2008-2010 Nokia Corporation
  * Paul Walmsley
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  *
  * The PRM hardware modules on the OMAP2/3 are quite similar to each
  * other.  The PRM on OMAP4 has a new register layout, and is handled
@@ -141,8 +138,6 @@ extern void omap3_prm_vcvp_write(u32 val, u8 offset);
 extern u32 omap3_prm_vcvp_rmw(u32 mask, u32 bits, u8 offset);
 
 int __init omap3xxx_prm_init(const struct omap_prcm_init_data *data);
-void omap3xxx_prm_iva_idle(void);
-void omap3_prm_reset_modem(void);
 int omap3xxx_prm_clear_global_cold_reset(void);
 void omap3_prm_save_scratchpad_contents(u32 *ptr);
 void omap3_prm_init_pm(bool has_uart4, bool has_iva);

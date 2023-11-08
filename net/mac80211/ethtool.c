@@ -1,11 +1,11 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * mac80211 ethtool hooks for cfg80211
  *
  * Copied from cfg.c - originally
  * Copyright 2006-2010	Johannes Berg <johannes@sipsolutions.net>
  * Copyright 2014	Intel Corporation (Author: Johannes Berg)
- *
- * This file is GPLv2 as found in COPYING.
+ * Copyright (C) 2018, 2022 Intel Corporation
  */
 #include <linux/types.h>
 #include <net/cfg80211.h>
@@ -14,7 +14,9 @@
 #include "driver-ops.h"
 
 static int ieee80211_set_ringparam(struct net_device *dev,
-				   struct ethtool_ringparam *rp)
+				   struct ethtool_ringparam *rp,
+				   struct kernel_ethtool_ringparam *kernel_rp,
+				   struct netlink_ext_ack *extack)
 {
 	struct ieee80211_local *local = wiphy_priv(dev->ieee80211_ptr->wiphy);
 
@@ -25,7 +27,9 @@ static int ieee80211_set_ringparam(struct net_device *dev,
 }
 
 static void ieee80211_get_ringparam(struct net_device *dev,
-				    struct ethtool_ringparam *rp)
+				    struct ethtool_ringparam *rp,
+				    struct kernel_ethtool_ringparam *kernel_rp,
+				    struct netlink_ext_ack *extack)
 {
 	struct ieee80211_local *local = wiphy_priv(dev->ieee80211_ptr->wiphy);
 
@@ -79,17 +83,17 @@ static void ieee80211_get_stats(struct net_device *dev,
 
 #define ADD_STA_STATS(sta)					\
 	do {							\
-		data[i++] += sta->rx_stats.packets;		\
-		data[i++] += sta->rx_stats.bytes;		\
-		data[i++] += sta->rx_stats.num_duplicates;	\
-		data[i++] += sta->rx_stats.fragments;		\
-		data[i++] += sta->rx_stats.dropped;		\
+		data[i++] += sinfo.rx_packets;			\
+		data[i++] += sinfo.rx_bytes;			\
+		data[i++] += (sta)->rx_stats.num_duplicates;	\
+		data[i++] += (sta)->rx_stats.fragments;		\
+		data[i++] += sinfo.rx_dropped_misc;		\
 								\
 		data[i++] += sinfo.tx_packets;			\
 		data[i++] += sinfo.tx_bytes;			\
-		data[i++] += sta->status_stats.filtered;	\
-		data[i++] += sta->status_stats.retry_failed;	\
-		data[i++] += sta->status_stats.retry_count;	\
+		data[i++] += (sta)->status_stats.filtered;	\
+		data[i++] += sinfo.tx_failed;			\
+		data[i++] += sinfo.tx_retries;			\
 	} while (0)
 
 	/* For Managed stations, find the single station based on BSSID
@@ -101,30 +105,30 @@ static void ieee80211_get_stats(struct net_device *dev,
 	mutex_lock(&local->sta_mtx);
 
 	if (sdata->vif.type == NL80211_IFTYPE_STATION) {
-		sta = sta_info_get_bss(sdata, sdata->u.mgd.bssid);
+		sta = sta_info_get_bss(sdata, sdata->deflink.u.mgd.bssid);
 
 		if (!(sta && !WARN_ON(sta->sdata->dev != dev)))
 			goto do_survey;
 
-		sinfo.filled = 0;
-		sta_set_sinfo(sta, &sinfo);
+		memset(&sinfo, 0, sizeof(sinfo));
+		sta_set_sinfo(sta, &sinfo, false);
 
 		i = 0;
-		ADD_STA_STATS(sta);
+		ADD_STA_STATS(&sta->deflink);
 
 		data[i++] = sta->sta_state;
 
 
-		if (sinfo.filled & BIT(NL80211_STA_INFO_TX_BITRATE))
-			data[i] = 100000 *
+		if (sinfo.filled & BIT_ULL(NL80211_STA_INFO_TX_BITRATE))
+			data[i] = 100000ULL *
 				cfg80211_calculate_bitrate(&sinfo.txrate);
 		i++;
-		if (sinfo.filled & BIT(NL80211_STA_INFO_RX_BITRATE))
-			data[i] = 100000 *
+		if (sinfo.filled & BIT_ULL(NL80211_STA_INFO_RX_BITRATE))
+			data[i] = 100000ULL *
 				cfg80211_calculate_bitrate(&sinfo.rxrate);
 		i++;
 
-		if (sinfo.filled & BIT(NL80211_STA_INFO_SIGNAL_AVG))
+		if (sinfo.filled & BIT_ULL(NL80211_STA_INFO_SIGNAL_AVG))
 			data[i] = (u8)sinfo.signal_avg;
 		i++;
 	} else {
@@ -133,10 +137,10 @@ static void ieee80211_get_stats(struct net_device *dev,
 			if (sta->sdata->dev != dev)
 				continue;
 
-			sinfo.filled = 0;
-			sta_set_sinfo(sta, &sinfo);
+			memset(&sinfo, 0, sizeof(sinfo));
+			sta_set_sinfo(sta, &sinfo, false);
 			i = 0;
-			ADD_STA_STATS(sta);
+			ADD_STA_STATS(&sta->deflink);
 		}
 	}
 
@@ -146,7 +150,7 @@ do_survey:
 	survey.filled = 0;
 
 	rcu_read_lock();
-	chanctx_conf = rcu_dereference(sdata->vif.chanctx_conf);
+	chanctx_conf = rcu_dereference(sdata->vif.bss_conf.chanctx_conf);
 	if (chanctx_conf)
 		channel = chanctx_conf->def.chan;
 	else

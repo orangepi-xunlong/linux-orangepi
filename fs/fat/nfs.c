@@ -1,14 +1,5 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /* fs/fat/nfs.c
- *
- * This software is licensed under the terms of the GNU General Public
- * License version 2, as published by the Free Software Foundation, and
- * may be copied, distributed, and modified under those terms.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
  */
 
 #include <linux/exportfs.h>
@@ -26,7 +17,7 @@ struct fat_fid {
 #define FAT_FID_SIZE_WITHOUT_PARENT 3
 #define FAT_FID_SIZE_WITH_PARENT (sizeof(struct fat_fid)/sizeof(u32))
 
-/**
+/*
  * Look up a directory inode given its starting cluster.
  */
 static struct inode *fat_dget(struct super_block *sb, int i_logstart)
@@ -144,7 +135,7 @@ fat_encode_fh_nostale(struct inode *inode, __u32 *fh, int *lenp,
 	return type;
 }
 
-/**
+/*
  * Map a NFS file handle to a corresponding dentry.
  * The dentry may or may not be connected to the filesystem root.
  */

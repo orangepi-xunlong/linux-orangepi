@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * inode.c
  *
@@ -13,16 +14,18 @@
 #include "efs.h"
 #include <linux/efs_fs_sb.h>
 
-static int efs_readpage(struct file *file, struct page *page)
+static int efs_read_folio(struct file *file, struct folio *folio)
 {
-	return block_read_full_page(page,efs_get_block);
+	return block_read_full_folio(folio, efs_get_block);
 }
+
 static sector_t _efs_bmap(struct address_space *mapping, sector_t block)
 {
 	return generic_block_bmap(mapping,block,efs_get_block);
 }
+
 static const struct address_space_operations efs_aops = {
-	.readpage = efs_readpage,
+	.read_folio = efs_read_folio,
 	.bmap = _efs_bmap
 };
 
@@ -102,8 +105,8 @@ struct inode *efs_iget(struct super_block *super, unsigned long ino)
 	inode->i_size  = be32_to_cpu(efs_inode->di_size);
 	inode->i_atime.tv_sec = be32_to_cpu(efs_inode->di_atime);
 	inode->i_mtime.tv_sec = be32_to_cpu(efs_inode->di_mtime);
-	inode->i_ctime.tv_sec = be32_to_cpu(efs_inode->di_ctime);
-	inode->i_atime.tv_nsec = inode->i_mtime.tv_nsec = inode->i_ctime.tv_nsec = 0;
+	inode_set_ctime(inode, be32_to_cpu(efs_inode->di_ctime), 0);
+	inode->i_atime.tv_nsec = inode->i_mtime.tv_nsec = 0;
 
 	/* this is the number of blocks in the file */
 	if (inode->i_size == 0) {

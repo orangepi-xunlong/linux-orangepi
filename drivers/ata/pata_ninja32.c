@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * pata_ninja32.c 	- Ninja32 PATA for new ATA layer
  *			  (C) 2007 Red Hat Inc
@@ -76,7 +77,7 @@ static void ninja32_dev_select(struct ata_port *ap, unsigned int device)
 	}
 }
 
-static struct scsi_host_template ninja32_sht = {
+static const struct scsi_host_template ninja32_sht = {
 	ATA_BMDMA_SHT(DRV_NAME),
 };
 
@@ -122,10 +123,7 @@ static int ninja32_init_one(struct pci_dev *dev, const struct pci_device_id *id)
 		return rc;
 
 	host->iomap = pcim_iomap_table(dev);
-	rc = dma_set_mask(&dev->dev, ATA_DMA_MASK);
-	if (rc)
-		return rc;
-	rc = dma_set_coherent_mask(&dev->dev, ATA_DMA_MASK);
+	rc = dma_set_mask_and_coherent(&dev->dev, ATA_DMA_MASK);
 	if (rc)
 		return rc;
 	pci_set_master(dev);

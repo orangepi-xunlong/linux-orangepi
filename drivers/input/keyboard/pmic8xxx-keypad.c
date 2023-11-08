@@ -1,13 +1,5 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /* Copyright (c) 2009-2011, Code Aurora Forum. All rights reserved.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 and
- * only version 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include <linux/module.h>
@@ -84,17 +76,17 @@
 
 /**
  * struct pmic8xxx_kp - internal keypad data structure
- * @num_cols - number of columns of keypad
- * @num_rows - number of row of keypad
- * @input - input device pointer for keypad
- * @regmap - regmap handle
- * @key_sense_irq - key press/release irq number
- * @key_stuck_irq - key stuck notification irq number
- * @keycodes - array to hold the key codes
- * @dev - parent device pointer
- * @keystate - present key press/release state
- * @stuckstate - present state when key stuck irq
- * @ctrl_reg - control register value
+ * @num_cols: number of columns of keypad
+ * @num_rows: number of row of keypad
+ * @input: input device pointer for keypad
+ * @regmap: regmap handle
+ * @key_sense_irq: key press/release irq number
+ * @key_stuck_irq: key stuck notification irq number
+ * @keycodes: array to hold the key codes
+ * @dev: parent device pointer
+ * @keystate: present key press/release state
+ * @stuckstate: present state when key stuck irq
+ * @ctrl_reg: control register value
  */
 struct pmic8xxx_kp {
 	unsigned int num_rows;
@@ -515,7 +507,7 @@ static int pmic8xxx_kp_probe(struct platform_device *pdev)
 	int rc;
 	unsigned int ctrl_val;
 
-	rc = matrix_keypad_parse_of_params(&pdev->dev, &rows, &cols);
+	rc = matrix_keypad_parse_properties(&pdev->dev, &rows, &cols);
 	if (rc)
 		return rc;
 
@@ -552,16 +544,12 @@ static int pmic8xxx_kp_probe(struct platform_device *pdev)
 	}
 
 	kp->key_sense_irq = platform_get_irq(pdev, 0);
-	if (kp->key_sense_irq < 0) {
-		dev_err(&pdev->dev, "unable to get keypad sense irq\n");
+	if (kp->key_sense_irq < 0)
 		return kp->key_sense_irq;
-	}
 
 	kp->key_stuck_irq = platform_get_irq(pdev, 1);
-	if (kp->key_stuck_irq < 0) {
-		dev_err(&pdev->dev, "unable to get keypad stuck irq\n");
+	if (kp->key_stuck_irq < 0)
 		return kp->key_stuck_irq;
-	}
 
 	kp->input->name = "PMIC8XXX keypad";
 	kp->input->phys = "pmic8xxx_keypad/input0";
@@ -633,7 +621,6 @@ static int pmic8xxx_kp_probe(struct platform_device *pdev)
 	return 0;
 }
 
-#ifdef CONFIG_PM_SLEEP
 static int pmic8xxx_kp_suspend(struct device *dev)
 {
 	struct platform_device *pdev = to_platform_device(dev);
@@ -645,7 +632,7 @@ static int pmic8xxx_kp_suspend(struct device *dev)
 	} else {
 		mutex_lock(&input_dev->mutex);
 
-		if (input_dev->users)
+		if (input_device_enabled(input_dev))
 			pmic8xxx_kp_disable(kp);
 
 		mutex_unlock(&input_dev->mutex);
@@ -665,7 +652,7 @@ static int pmic8xxx_kp_resume(struct device *dev)
 	} else {
 		mutex_lock(&input_dev->mutex);
 
-		if (input_dev->users)
+		if (input_device_enabled(input_dev))
 			pmic8xxx_kp_enable(kp);
 
 		mutex_unlock(&input_dev->mutex);
@@ -673,10 +660,9 @@ static int pmic8xxx_kp_resume(struct device *dev)
 
 	return 0;
 }
-#endif
 
-static SIMPLE_DEV_PM_OPS(pm8xxx_kp_pm_ops,
-			 pmic8xxx_kp_suspend, pmic8xxx_kp_resume);
+static DEFINE_SIMPLE_DEV_PM_OPS(pm8xxx_kp_pm_ops,
+				pmic8xxx_kp_suspend, pmic8xxx_kp_resume);
 
 static const struct of_device_id pm8xxx_match_table[] = {
 	{ .compatible = "qcom,pm8058-keypad" },
@@ -689,7 +675,7 @@ static struct platform_driver pmic8xxx_kp_driver = {
 	.probe		= pmic8xxx_kp_probe,
 	.driver		= {
 		.name = "pm8xxx-keypad",
-		.pm = &pm8xxx_kp_pm_ops,
+		.pm = pm_sleep_ptr(&pm8xxx_kp_pm_ops),
 		.of_match_table = pm8xxx_match_table,
 	},
 };
@@ -697,6 +683,5 @@ module_platform_driver(pmic8xxx_kp_driver);
 
 MODULE_LICENSE("GPL v2");
 MODULE_DESCRIPTION("PMIC8XXX keypad driver");
-MODULE_VERSION("1.0");
 MODULE_ALIAS("platform:pmic8xxx_keypad");
 MODULE_AUTHOR("Trilok Soni <tsoni@codeaurora.org>");

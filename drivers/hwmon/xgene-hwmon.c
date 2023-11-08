@@ -1,22 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * APM X-Gene SoC Hardware Monitoring Driver
  *
  * Copyright (c) 2016, Applied Micro Circuits Corporation
  * Author: Loc Ho <lho@apm.com>
  *         Hoan Tran <hotran@apm.com>
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as
- * published by the Free Software Foundation; either version 2 of
- * the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, see <http://www.gnu.org/licenses/>.
  *
  * This driver provides the following features:
  *  - Retrieve CPU total power (uW)
@@ -91,6 +79,11 @@
 #define to_xgene_hwmon_dev(cl)		\
 	container_of(cl, struct xgene_hwmon_dev, mbox_client)
 
+enum xgene_hwmon_version {
+	XGENE_HWMON_V1 = 0,
+	XGENE_HWMON_V2 = 1,
+};
+
 struct slimpro_resp_msg {
 	u32 msg;
 	u32 param1;
@@ -100,6 +93,7 @@ struct slimpro_resp_msg {
 struct xgene_hwmon_dev {
 	struct device		*dev;
 	struct mbox_chan	*mbox_chan;
+	struct pcc_mbox_chan	*pcc_chan;
 	struct mbox_client	mbox_client;
 	int			mbox_idx;
 
@@ -336,14 +330,14 @@ static ssize_t temp1_input_show(struct device *dev,
 
 	temp = sign_extend32(val, TEMP_NEGATIVE_BIT);
 
-	return snprintf(buf, PAGE_SIZE, "%d\n", CELSIUS_TO_mCELSIUS(temp));
+	return sysfs_emit(buf, "%d\n", CELSIUS_TO_mCELSIUS(temp));
 }
 
 static ssize_t temp1_label_show(struct device *dev,
 				struct device_attribute *attr,
 				char *buf)
 {
-	return snprintf(buf, PAGE_SIZE, "SoC Temperature\n");
+	return sysfs_emit(buf, "SoC Temperature\n");
 }
 
 static ssize_t temp1_critical_alarm_show(struct device *dev,
@@ -352,21 +346,21 @@ static ssize_t temp1_critical_alarm_show(struct device *dev,
 {
 	struct xgene_hwmon_dev *ctx = dev_get_drvdata(dev);
 
-	return snprintf(buf, PAGE_SIZE, "%d\n", ctx->temp_critical_alarm);
+	return sysfs_emit(buf, "%d\n", ctx->temp_critical_alarm);
 }
 
 static ssize_t power1_label_show(struct device *dev,
 				 struct device_attribute *attr,
 				 char *buf)
 {
-	return snprintf(buf, PAGE_SIZE, "CPU power\n");
+	return sysfs_emit(buf, "CPU power\n");
 }
 
 static ssize_t power2_label_show(struct device *dev,
 				 struct device_attribute *attr,
 				 char *buf)
 {
-	return snprintf(buf, PAGE_SIZE, "IO power\n");
+	return sysfs_emit(buf, "IO power\n");
 }
 
 static ssize_t power1_input_show(struct device *dev,
@@ -381,7 +375,7 @@ static ssize_t power1_input_show(struct device *dev,
 	if (rc < 0)
 		return rc;
 
-	return snprintf(buf, PAGE_SIZE, "%u\n", mWATT_TO_uWATT(val));
+	return sysfs_emit(buf, "%u\n", mWATT_TO_uWATT(val));
 }
 
 static ssize_t power2_input_show(struct device *dev,
@@ -396,7 +390,7 @@ static ssize_t power2_input_show(struct device *dev,
 	if (rc < 0)
 		return rc;
 
-	return snprintf(buf, PAGE_SIZE, "%u\n", mWATT_TO_uWATT(val));
+	return sysfs_emit(buf, "%u\n", mWATT_TO_uWATT(val));
 }
 
 static DEVICE_ATTR_RO(temp1_label);
@@ -609,6 +603,15 @@ static void xgene_hwmon_tx_done(struct mbox_client *cl, void *msg, int ret)
 	}
 }
 
+#ifdef CONFIG_ACPI
+static const struct acpi_device_id xgene_hwmon_acpi_match[] = {
+	{"APMC0D29", XGENE_HWMON_V1},
+	{"APMC0D8A", XGENE_HWMON_V2},
+	{},
+};
+MODULE_DEVICE_TABLE(acpi, xgene_hwmon_acpi_match);
+#endif
+
 static int xgene_hwmon_probe(struct platform_device *pdev)
 {
 	struct xgene_hwmon_dev *ctx;
@@ -630,7 +633,7 @@ static int xgene_hwmon_probe(struct platform_device *pdev)
 			 sizeof(struct slimpro_resp_msg) * ASYNC_MSG_FIFO_SIZE,
 			 GFP_KERNEL);
 	if (rc)
-		goto out_mbox_free;
+		return -ENOMEM;
 
 	INIT_WORK(&ctx->workq, xgene_hwmon_evt_work);
 
@@ -646,72 +649,82 @@ static int xgene_hwmon_probe(struct platform_device *pdev)
 		if (IS_ERR(ctx->mbox_chan)) {
 			dev_err(&pdev->dev,
 				"SLIMpro mailbox channel request failed\n");
-			return -ENODEV;
+			rc = -ENODEV;
+			goto out_mbox_free;
 		}
 	} else {
-		struct acpi_pcct_hw_reduced *cppc_ss;
+		struct pcc_mbox_chan *pcc_chan;
+		const struct acpi_device_id *acpi_id;
+		int version;
+
+		acpi_id = acpi_match_device(pdev->dev.driver->acpi_match_table,
+					    &pdev->dev);
+		if (!acpi_id) {
+			rc = -EINVAL;
+			goto out_mbox_free;
+		}
+
+		version = (int)acpi_id->driver_data;
 
 		if (device_property_read_u32(&pdev->dev, "pcc-channel",
 					     &ctx->mbox_idx)) {
 			dev_err(&pdev->dev, "no pcc-channel property\n");
-			return -ENODEV;
-		}
-
-		cl->rx_callback = xgene_hwmon_pcc_rx_cb;
-		ctx->mbox_chan = pcc_mbox_request_channel(cl, ctx->mbox_idx);
-		if (IS_ERR(ctx->mbox_chan)) {
-			dev_err(&pdev->dev,
-				"PPC channel request failed\n");
-			return -ENODEV;
-		}
-
-		/*
-		 * The PCC mailbox controller driver should
-		 * have parsed the PCCT (global table of all
-		 * PCC channels) and stored pointers to the
-		 * subspace communication region in con_priv.
-		 */
-		cppc_ss = ctx->mbox_chan->con_priv;
-		if (!cppc_ss) {
-			dev_err(&pdev->dev, "PPC subspace not found\n");
 			rc = -ENODEV;
 			goto out_mbox_free;
 		}
+
+		cl->rx_callback = xgene_hwmon_pcc_rx_cb;
+		pcc_chan = pcc_mbox_request_channel(cl, ctx->mbox_idx);
+		if (IS_ERR(pcc_chan)) {
+			dev_err(&pdev->dev,
+				"PPC channel request failed\n");
+			rc = -ENODEV;
+			goto out_mbox_free;
+		}
+
+		ctx->pcc_chan = pcc_chan;
+		ctx->mbox_chan = pcc_chan->mchan;
 
 		if (!ctx->mbox_chan->mbox->txdone_irq) {
 			dev_err(&pdev->dev, "PCC IRQ not supported\n");
 			rc = -ENODEV;
-			goto out_mbox_free;
+			goto out;
 		}
 
 		/*
 		 * This is the shared communication region
 		 * for the OS and Platform to communicate over.
 		 */
-		ctx->comm_base_addr = cppc_ss->base_address;
+		ctx->comm_base_addr = pcc_chan->shmem_base_addr;
 		if (ctx->comm_base_addr) {
-			ctx->pcc_comm_addr = memremap(ctx->comm_base_addr,
-							cppc_ss->length,
-							MEMREMAP_WB);
+			if (version == XGENE_HWMON_V2)
+				ctx->pcc_comm_addr = (void __force *)devm_ioremap(&pdev->dev,
+								  ctx->comm_base_addr,
+								  pcc_chan->shmem_size);
+			else
+				ctx->pcc_comm_addr = devm_memremap(&pdev->dev,
+								   ctx->comm_base_addr,
+								   pcc_chan->shmem_size,
+								   MEMREMAP_WB);
 		} else {
 			dev_err(&pdev->dev, "Failed to get PCC comm region\n");
 			rc = -ENODEV;
-			goto out_mbox_free;
+			goto out;
 		}
 
 		if (!ctx->pcc_comm_addr) {
 			dev_err(&pdev->dev,
 				"Failed to ioremap PCC comm region\n");
 			rc = -ENOMEM;
-			goto out_mbox_free;
+			goto out;
 		}
 
 		/*
-		 * cppc_ss->latency is just a Nominal value. In reality
+		 * pcc_chan->latency is just a Nominal value. In reality
 		 * the remote processor could be much slower to reply.
 		 * So add an arbitrary amount of wait on top of Nominal.
 		 */
-		ctx->usecs_lat = PCC_NUM_RETRIES * cppc_ss->latency;
+		ctx->usecs_lat = PCC_NUM_RETRIES * pcc_chan->latency;
 	}
 
 	ctx->hwmon_dev = hwmon_device_register_with_groups(ctx->dev,
@@ -737,7 +750,7 @@ out:
 	if (acpi_disabled)
 		mbox_free_channel(ctx->mbox_chan);
 	else
-		pcc_mbox_free_channel(ctx->mbox_chan);
+		pcc_mbox_free_channel(ctx->pcc_chan);
 out_mbox_free:
 	kfifo_free(&ctx->async_msg_fifo);
 
@@ -748,23 +761,16 @@ static int xgene_hwmon_remove(struct platform_device *pdev)
 {
 	struct xgene_hwmon_dev *ctx = platform_get_drvdata(pdev);
 
+	cancel_work_sync(&ctx->workq);
 	hwmon_device_unregister(ctx->hwmon_dev);
 	kfifo_free(&ctx->async_msg_fifo);
 	if (acpi_disabled)
 		mbox_free_channel(ctx->mbox_chan);
 	else
-		pcc_mbox_free_channel(ctx->mbox_chan);
+		pcc_mbox_free_channel(ctx->pcc_chan);
 
 	return 0;
 }
-
-#ifdef CONFIG_ACPI
-static const struct acpi_device_id xgene_hwmon_acpi_match[] = {
-	{"APMC0D29", 0},
-	{},
-};
-MODULE_DEVICE_TABLE(acpi, xgene_hwmon_acpi_match);
-#endif
 
 static const struct of_device_id xgene_hwmon_of_match[] = {
 	{.compatible = "apm,xgene-slimpro-hwmon"},
@@ -772,7 +778,7 @@ static const struct of_device_id xgene_hwmon_of_match[] = {
 };
 MODULE_DEVICE_TABLE(of, xgene_hwmon_of_match);
 
-static struct platform_driver xgene_hwmon_driver __refdata = {
+static struct platform_driver xgene_hwmon_driver = {
 	.probe = xgene_hwmon_probe,
 	.remove = xgene_hwmon_remove,
 	.driver = {

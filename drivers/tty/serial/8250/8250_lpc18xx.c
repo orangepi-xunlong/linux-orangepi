@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Serial port driver for NXP LPC18xx/43xx UART
  *
@@ -6,11 +7,6 @@
  * Based on 8250_mtk.c:
  * Copyright (c) 2014 MundoReader S.L.
  * Matthias Brugger <matthias.bgg@gmail.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
  */
 
 #include <linux/clk.h>
@@ -36,7 +32,7 @@ struct lpc18xx_uart_data {
 	int line;
 };
 
-static int lpc18xx_rs485_config(struct uart_port *port,
+static int lpc18xx_rs485_config(struct uart_port *port, struct ktermios *termios,
 				struct serial_rs485 *rs485)
 {
 	struct uart_8250_port *up = up_to_u8250p(port);
@@ -44,24 +40,12 @@ static int lpc18xx_rs485_config(struct uart_port *port,
 	u32 rs485_dly_reg = 0;
 	unsigned baud_clk;
 
-	if (rs485->flags & SER_RS485_ENABLED)
-		memset(rs485->padding, 0, sizeof(rs485->padding));
-	else
-		memset(rs485, 0, sizeof(*rs485));
-
-	rs485->flags &= SER_RS485_ENABLED | SER_RS485_RTS_ON_SEND |
-			SER_RS485_RTS_AFTER_SEND;
-
 	if (rs485->flags & SER_RS485_ENABLED) {
 		rs485_ctrl_reg |= LPC18XX_UART_RS485CTRL_NMMEN |
 				  LPC18XX_UART_RS485CTRL_DCTRL;
 
-		if (rs485->flags & SER_RS485_RTS_ON_SEND) {
+		if (rs485->flags & SER_RS485_RTS_ON_SEND)
 			rs485_ctrl_reg |= LPC18XX_UART_RS485CTRL_OINV;
-			rs485->flags &= ~SER_RS485_RTS_AFTER_SEND;
-		} else {
-			rs485->flags |= SER_RS485_RTS_AFTER_SEND;
-		}
 	}
 
 	if (rs485->delay_rts_after_send) {
@@ -77,13 +61,8 @@ static int lpc18xx_rs485_config(struct uart_port *port,
 						/ baud_clk;
 	}
 
-	/* Delay RTS before send not supported */
-	rs485->delay_rts_before_send = 0;
-
 	serial_out(up, LPC18XX_UART_RS485CTRL, rs485_ctrl_reg);
 	serial_out(up, LPC18XX_UART_RS485DLY, rs485_dly_reg);
-
-	port->rs485 = *rs485;
 
 	return 0;
 }
@@ -102,6 +81,12 @@ static void lpc18xx_uart_serial_out(struct uart_port *p, int offset, int value)
 	writel(value, p->membase + offset);
 }
 
+static const struct serial_rs485 lpc18xx_rs485_supported = {
+	.flags = SER_RS485_ENABLED | SER_RS485_RTS_ON_SEND | SER_RS485_RTS_AFTER_SEND,
+	.delay_rts_after_send = 1,
+	/* Delay RTS before send is not supported */
+};
+
 static int lpc18xx_serial_probe(struct platform_device *pdev)
 {
 	struct lpc18xx_uart_data *data;
@@ -110,10 +95,8 @@ static int lpc18xx_serial_probe(struct platform_device *pdev)
 	int irq, ret;
 
 	irq = platform_get_irq(pdev, 0);
-	if (irq < 0) {
-		dev_err(&pdev->dev, "irq not found");
+	if (irq < 0)
 		return irq;
-	}
 
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	if (!res) {
@@ -174,6 +157,7 @@ static int lpc18xx_serial_probe(struct platform_device *pdev)
 	uart.port.uartclk = clk_get_rate(data->clk_uart);
 	uart.port.private_data = data;
 	uart.port.rs485_config = lpc18xx_rs485_config;
+	uart.port.rs485_supported = lpc18xx_rs485_supported;
 	uart.port.serial_out = lpc18xx_uart_serial_out;
 
 	uart.dma = &data->dma;

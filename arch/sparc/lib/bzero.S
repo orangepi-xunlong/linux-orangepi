@@ -1,11 +1,12 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /* bzero.S: Simple prefetching memset, bzero, and clear_user
  *          implementations.
  *
  * Copyright (C) 2005 David S. Miller <davem@davemloft.net>
  */
 
+#include <linux/export.h>
 #include <linux/linkage.h>
-#include <asm/export.h>
 
 	.text
 

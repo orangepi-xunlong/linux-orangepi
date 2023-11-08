@@ -1,17 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Raydium touchscreen I2C driver.
  *
  * Copyright (C) 2012-2014, Raydium Semiconductor Corporation.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * version 2, and only version 2, as published by the
- * Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  *
  * Raydium reserves the right to make changes without further notice
  * to the materials described herein. Raydium does not assume any
@@ -30,6 +21,7 @@
 #include <linux/interrupt.h>
 #include <linux/module.h>
 #include <linux/of.h>
+#include <linux/pm_wakeirq.h>
 #include <linux/regulator/consumer.h>
 #include <linux/slab.h>
 #include <asm/unaligned.h>
@@ -46,6 +38,7 @@
 #define RM_CMD_BOOT_READ	0x44		/* send wait bl data ready*/
 
 #define RM_BOOT_RDY		0xFF		/* bl data ready */
+#define RM_BOOT_CMD_READHWID	0x0E		/* read hwid */
 
 /* I2C main commands */
 #define RM_CMD_QUERY_BANK	0x2B
@@ -60,6 +53,7 @@
 
 /* Touch relative info */
 #define RM_MAX_RETRIES		3
+#define RM_RETRY_DELAY_MS	20
 #define RM_MAX_TOUCH_NUM	10
 #define RM_BOOT_DELAY_MS	100
 
@@ -141,87 +135,136 @@ struct raydium_data {
 	u8 pkg_size;
 
 	enum raydium_boot_mode boot_mode;
-
-	bool wake_irq_enabled;
 };
 
-static int raydium_i2c_send(struct i2c_client *client,
-			    u8 addr, const void *data, size_t len)
-{
-	u8 *buf;
-	int tries = 0;
-	int ret;
+/*
+ * Header to be sent for RM_CMD_BANK_SWITCH command. This is used by
+ * raydium_i2c_{read|send} below.
+ */
+struct __packed raydium_bank_switch_header {
+	u8 cmd;
+	__be32 be_addr;
+};
 
-	buf = kmalloc(len + 1, GFP_KERNEL);
-	if (!buf)
+static int raydium_i2c_xfer(struct i2c_client *client, u32 addr,
+			    struct i2c_msg *xfer, size_t xfer_count)
+{
+	int ret;
+	/*
+	 * If address is greater than 255, then RM_CMD_BANK_SWITCH needs to be
+	 * sent first. Else, skip the header i.e. xfer[0].
+	 */
+	int xfer_start_idx = (addr > 0xff) ? 0 : 1;
+	xfer_count -= xfer_start_idx;
+
+	ret = i2c_transfer(client->adapter, &xfer[xfer_start_idx], xfer_count);
+	if (likely(ret == xfer_count))
+		return 0;
+
+	return ret < 0 ? ret : -EIO;
+}
+
+static int raydium_i2c_send(struct i2c_client *client,
+			    u32 addr, const void *data, size_t len)
+{
+	int tries = 0;
+	int error;
+	u8 *tx_buf;
+	u8 reg_addr = addr & 0xff;
+
+	tx_buf = kmalloc(len + 1, GFP_KERNEL);
+	if (!tx_buf)
 		return -ENOMEM;
 
-	buf[0] = addr;
-	memcpy(buf + 1, data, len);
+	tx_buf[0] = reg_addr;
+	memcpy(tx_buf + 1, data, len);
 
 	do {
-		ret = i2c_master_send(client, buf, len + 1);
-		if (likely(ret == len + 1))
-			break;
+		struct raydium_bank_switch_header header = {
+			.cmd = RM_CMD_BANK_SWITCH,
+			.be_addr = cpu_to_be32(addr),
+		};
 
-		msleep(20);
+		/*
+		 * Perform as a single i2c_transfer transaction to ensure that
+		 * no other I2C transactions are initiated on the bus to any
+		 * other device in between. Initiating transacations to other
+		 * devices after RM_CMD_BANK_SWITCH is sent is known to cause
+		 * issues. This is also why regmap infrastructure cannot be used
+		 * for this driver. Regmap handles page(bank) switch and reads
+		 * as separate i2c_transfer() operations. This can result in
+		 * problems if the Raydium device is on a shared I2C bus.
+		 */
+		struct i2c_msg xfer[] = {
+			{
+				.addr = client->addr,
+				.len = sizeof(header),
+				.buf = (u8 *)&header,
+			},
+			{
+				.addr = client->addr,
+				.len = len + 1,
+				.buf = tx_buf,
+			},
+		};
+
+		error = raydium_i2c_xfer(client, addr, xfer, ARRAY_SIZE(xfer));
+		if (likely(!error))
+			goto out;
+
+		msleep(RM_RETRY_DELAY_MS);
 	} while (++tries < RM_MAX_RETRIES);
 
-	kfree(buf);
-
-	if (unlikely(ret != len + 1)) {
-		if (ret >= 0)
-			ret = -EIO;
-		dev_err(&client->dev, "%s failed: %d\n", __func__, ret);
-		return ret;
-	}
-
-	return 0;
+	dev_err(&client->dev, "%s failed: %d\n", __func__, error);
+out:
+	kfree(tx_buf);
+	return error;
 }
 
 static int raydium_i2c_read(struct i2c_client *client,
-			    u8 addr, void *data, size_t len)
+			    u32 addr, void *data, size_t len)
 {
-	struct i2c_msg xfer[] = {
-		{
-			.addr = client->addr,
-			.len = 1,
-			.buf = &addr,
-		},
-		{
-			.addr = client->addr,
-			.flags = I2C_M_RD,
-			.len = len,
-			.buf = data,
-		}
-	};
-	int ret;
-
-	ret = i2c_transfer(client->adapter, xfer, ARRAY_SIZE(xfer));
-	if (unlikely(ret != ARRAY_SIZE(xfer)))
-		return ret < 0 ? ret : -EIO;
-
-	return 0;
-}
-
-static int raydium_i2c_read_message(struct i2c_client *client,
-				    u32 addr, void *data, size_t len)
-{
-	__be32 be_addr;
-	size_t xfer_len;
 	int error;
 
 	while (len) {
-		xfer_len = min_t(size_t, len, RM_MAX_READ_SIZE);
+		u8 reg_addr = addr & 0xff;
+		struct raydium_bank_switch_header header = {
+			.cmd = RM_CMD_BANK_SWITCH,
+			.be_addr = cpu_to_be32(addr),
+		};
+		size_t xfer_len = min_t(size_t, len, RM_MAX_READ_SIZE);
 
-		be_addr = cpu_to_be32(addr);
+		/*
+		 * Perform as a single i2c_transfer transaction to ensure that
+		 * no other I2C transactions are initiated on the bus to any
+		 * other device in between. Initiating transacations to other
+		 * devices after RM_CMD_BANK_SWITCH is sent is known to cause
+		 * issues. This is also why regmap infrastructure cannot be used
+		 * for this driver. Regmap handles page(bank) switch and writes
+		 * as separate i2c_transfer() operations. This can result in
+		 * problems if the Raydium device is on a shared I2C bus.
+		 */
+		struct i2c_msg xfer[] = {
+			{
+				.addr = client->addr,
+				.len = sizeof(header),
+				.buf = (u8 *)&header,
+			},
+			{
+				.addr = client->addr,
+				.len = 1,
+				.buf = &reg_addr,
+			},
+			{
+				.addr = client->addr,
+				.len = xfer_len,
+				.buf = data,
+				.flags = I2C_M_RD,
+			}
+		};
 
-		error = raydium_i2c_send(client, RM_CMD_BANK_SWITCH,
-					 &be_addr, sizeof(be_addr));
-		if (!error)
-			error = raydium_i2c_read(client, addr & 0xff,
-						 data, xfer_len);
-		if (error)
+		error = raydium_i2c_xfer(client, addr, xfer, ARRAY_SIZE(xfer));
+		if (unlikely(error))
 			return error;
 
 		len -= xfer_len;
@@ -232,27 +275,13 @@ static int raydium_i2c_read_message(struct i2c_client *client,
 	return 0;
 }
 
-static int raydium_i2c_send_message(struct i2c_client *client,
-				    u32 addr, const void *data, size_t len)
-{
-	__be32 be_addr = cpu_to_be32(addr);
-	int error;
-
-	error = raydium_i2c_send(client, RM_CMD_BANK_SWITCH,
-				 &be_addr, sizeof(be_addr));
-	if (!error)
-		error = raydium_i2c_send(client, addr & 0xff, data, len);
-
-	return error;
-}
-
 static int raydium_i2c_sw_reset(struct i2c_client *client)
 {
 	const u8 soft_rst_cmd = 0x01;
 	int error;
 
-	error = raydium_i2c_send_message(client, RM_RESET_MSG_ADDR,
-					 &soft_rst_cmd, sizeof(soft_rst_cmd));
+	error = raydium_i2c_send(client, RM_RESET_MSG_ADDR, &soft_rst_cmd,
+				 sizeof(soft_rst_cmd));
 	if (error) {
 		dev_err(&client->dev, "software reset failed: %d\n", error);
 		return error;
@@ -261,6 +290,44 @@ static int raydium_i2c_sw_reset(struct i2c_client *client)
 	msleep(RM_RESET_DELAY_MSEC);
 
 	return 0;
+}
+
+static int raydium_i2c_query_ts_bootloader_info(struct raydium_data *ts)
+{
+	struct i2c_client *client = ts->client;
+	static const u8 get_hwid[] = { RM_BOOT_CMD_READHWID,
+				       0x10, 0xc0, 0x01, 0x00, 0x04, 0x00 };
+	u8 rbuf[5] = { 0 };
+	u32 hw_ver;
+	int error;
+
+	error = raydium_i2c_send(client, RM_CMD_BOOT_WRT,
+				 get_hwid, sizeof(get_hwid));
+	if (error) {
+		dev_err(&client->dev, "WRT HWID command failed: %d\n", error);
+		return error;
+	}
+
+	error = raydium_i2c_send(client, RM_CMD_BOOT_ACK, rbuf, 1);
+	if (error) {
+		dev_err(&client->dev, "Ack HWID command failed: %d\n", error);
+		return error;
+	}
+
+	error = raydium_i2c_read(client, RM_CMD_BOOT_CHK, rbuf, sizeof(rbuf));
+	if (error) {
+		dev_err(&client->dev, "Read HWID command failed: %d (%4ph)\n",
+			error, rbuf + 1);
+		hw_ver = 0xffffffffUL;
+	} else {
+		hw_ver = get_unaligned_be32(rbuf + 1);
+	}
+
+	ts->info.hw_ver = cpu_to_le32(hw_ver);
+	ts->info.main_ver = 0xff;
+	ts->info.sub_ver = 0xff;
+
+	return error;
 }
 
 static int raydium_i2c_query_ts_info(struct raydium_data *ts)
@@ -304,9 +371,8 @@ static int raydium_i2c_query_ts_info(struct raydium_data *ts)
 		if (error)
 			continue;
 
-		error = raydium_i2c_read_message(client,
-						 le32_to_cpu(query_bank_addr),
-						 &ts->info, sizeof(ts->info));
+		error = raydium_i2c_read(client, le32_to_cpu(query_bank_addr),
+					 &ts->info, sizeof(ts->info));
 		if (error)
 			continue;
 
@@ -362,13 +428,10 @@ static int raydium_i2c_initialize(struct raydium_data *ts)
 	if (error)
 		ts->boot_mode = RAYDIUM_TS_BLDR;
 
-	if (ts->boot_mode == RAYDIUM_TS_BLDR) {
-		ts->info.hw_ver = cpu_to_le32(0xffffffffUL);
-		ts->info.main_ver = 0xff;
-		ts->info.sub_ver = 0xff;
-	} else {
+	if (ts->boot_mode == RAYDIUM_TS_BLDR)
+		raydium_i2c_query_ts_bootloader_info(ts);
+	else
 		raydium_i2c_query_ts_info(ts);
-	}
 
 	return error;
 }
@@ -419,6 +482,7 @@ static int raydium_i2c_write_object(struct i2c_client *client,
 				    enum raydium_bl_ack state)
 {
 	int error;
+	static const u8 cmd[] = { 0xFF, 0x39 };
 
 	error = raydium_i2c_send(client, RM_CMD_BOOT_WRT, data, len);
 	if (error) {
@@ -427,7 +491,7 @@ static int raydium_i2c_write_object(struct i2c_client *client,
 		return error;
 	}
 
-	error = raydium_i2c_send(client, RM_CMD_BOOT_ACK, NULL, 0);
+	error = raydium_i2c_send(client, RM_CMD_BOOT_ACK, cmd, sizeof(cmd));
 	if (error) {
 		dev_err(&client->dev, "Ack obj command failed: %d\n", error);
 		return error;
@@ -441,7 +505,7 @@ static int raydium_i2c_write_object(struct i2c_client *client,
 	return 0;
 }
 
-static bool raydium_i2c_boot_trigger(struct i2c_client *client)
+static int raydium_i2c_boot_trigger(struct i2c_client *client)
 {
 	static const u8 cmd[7][6] = {
 		{ 0x08, 0x0C, 0x09, 0x00, 0x50, 0xD7 },
@@ -469,7 +533,7 @@ static bool raydium_i2c_boot_trigger(struct i2c_client *client)
 	return 0;
 }
 
-static bool raydium_i2c_fw_trigger(struct i2c_client *client)
+static int raydium_i2c_fw_trigger(struct i2c_client *client)
 {
 	static const u8 cmd[5][11] = {
 		{ 0, 0x09, 0x71, 0x0C, 0x09, 0x00, 0x50, 0xD7, 0, 0, 0 },
@@ -669,7 +733,7 @@ static int raydium_i2c_do_update_firmware(struct raydium_data *ts,
 
 		if (ts->boot_mode == RAYDIUM_TS_MAIN) {
 			dev_err(&client->dev,
-				"failied to jump to boot loader: %d\n",
+				"failed to jump to boot loader: %d\n",
 				error);
 			return -EIO;
 		}
@@ -752,13 +816,20 @@ static int raydium_i2c_fw_update(struct raydium_data *ts)
 {
 	struct i2c_client *client = ts->client;
 	const struct firmware *fw = NULL;
-	const char *fw_file = "raydium.fw";
+	char *fw_file;
 	int error;
+
+	fw_file = kasprintf(GFP_KERNEL, "raydium_%#04x.fw",
+			    le32_to_cpu(ts->info.hw_ver));
+	if (!fw_file)
+		return -ENOMEM;
+
+	dev_dbg(&client->dev, "firmware name: %s\n", fw_file);
 
 	error = request_firmware(&fw, fw_file, &client->dev);
 	if (error) {
 		dev_err(&client->dev, "Unable to open firmware %s\n", fw_file);
-		return error;
+		goto out_free_fw_file;
 	}
 
 	disable_irq(client->irq);
@@ -786,6 +857,9 @@ out_enable_irq:
 	msleep(100);
 
 	release_firmware(fw);
+
+out_free_fw_file:
+	kfree(fw_file);
 
 	return error;
 }
@@ -833,8 +907,8 @@ static irqreturn_t raydium_i2c_irq(int irq, void *_dev)
 	if (ts->boot_mode != RAYDIUM_TS_MAIN)
 		goto out;
 
-	error = raydium_i2c_read_message(ts->client, ts->data_bank_addr,
-					 ts->report_data, ts->pkg_size);
+	error = raydium_i2c_read(ts->client, ts->data_bank_addr,
+				 ts->report_data, ts->pkg_size);
 	if (error)
 		goto out;
 
@@ -939,16 +1013,9 @@ static struct attribute *raydium_i2c_attributes[] = {
 	NULL
 };
 
-static struct attribute_group raydium_i2c_attribute_group = {
+static const struct attribute_group raydium_i2c_attribute_group = {
 	.attrs = raydium_i2c_attributes,
 };
-
-static void raydium_i2c_remove_sysfs_group(void *_data)
-{
-	struct raydium_data *ts = _data;
-
-	sysfs_remove_group(&ts->client->dev.kobj, &raydium_i2c_attribute_group);
-}
 
 static int raydium_i2c_power_on(struct raydium_data *ts)
 {
@@ -998,8 +1065,7 @@ static void raydium_i2c_power_off(void *_data)
 	}
 }
 
-static int raydium_i2c_probe(struct i2c_client *client,
-			     const struct i2c_device_id *id)
+static int raydium_i2c_probe(struct i2c_client *client)
 {
 	union i2c_smbus_data dummy;
 	struct raydium_data *ts;
@@ -1021,42 +1087,30 @@ static int raydium_i2c_probe(struct i2c_client *client,
 	i2c_set_clientdata(client, ts);
 
 	ts->avdd = devm_regulator_get(&client->dev, "avdd");
-	if (IS_ERR(ts->avdd)) {
-		error = PTR_ERR(ts->avdd);
-		if (error != -EPROBE_DEFER)
-			dev_err(&client->dev,
-				"Failed to get 'avdd' regulator: %d\n", error);
-		return error;
-	}
+	if (IS_ERR(ts->avdd))
+		return dev_err_probe(&client->dev, PTR_ERR(ts->avdd),
+				     "Failed to get 'avdd' regulator\n");
 
 	ts->vccio = devm_regulator_get(&client->dev, "vccio");
-	if (IS_ERR(ts->vccio)) {
-		error = PTR_ERR(ts->vccio);
-		if (error != -EPROBE_DEFER)
-			dev_err(&client->dev,
-				"Failed to get 'vccio' regulator: %d\n", error);
-		return error;
-	}
+	if (IS_ERR(ts->vccio))
+		return dev_err_probe(&client->dev, PTR_ERR(ts->vccio),
+				     "Failed to get 'vccio' regulator\n");
 
 	ts->reset_gpio = devm_gpiod_get_optional(&client->dev, "reset",
 						 GPIOD_OUT_LOW);
-	if (IS_ERR(ts->reset_gpio)) {
-		error = PTR_ERR(ts->reset_gpio);
-		if (error != -EPROBE_DEFER)
-			dev_err(&client->dev,
-				"failed to get reset gpio: %d\n", error);
-		return error;
-	}
+	if (IS_ERR(ts->reset_gpio))
+		return dev_err_probe(&client->dev, PTR_ERR(ts->reset_gpio),
+				     "Failed to get reset gpio\n");
 
 	error = raydium_i2c_power_on(ts);
 	if (error)
 		return error;
 
-	error = devm_add_action(&client->dev, raydium_i2c_power_off, ts);
+	error = devm_add_action_or_reset(&client->dev,
+					 raydium_i2c_power_off, ts);
 	if (error) {
 		dev_err(&client->dev,
 			"failed to install power off action: %d\n", error);
-		raydium_i2c_power_off(ts);
 		return error;
 	}
 
@@ -1086,8 +1140,6 @@ static int raydium_i2c_probe(struct i2c_client *client,
 
 	ts->input->name = "Raydium Touchscreen";
 	ts->input->id.bustype = BUS_I2C;
-
-	input_set_drvdata(ts->input, ts);
 
 	input_set_abs_params(ts->input, ABS_MT_POSITION_X,
 			     0, le16_to_cpu(ts->info.x_max), 0, 0);
@@ -1122,7 +1174,7 @@ static int raydium_i2c_probe(struct i2c_client *client,
 		return error;
 	}
 
-	error = sysfs_create_group(&client->dev.kobj,
+	error = devm_device_add_group(&client->dev,
 				   &raydium_i2c_attribute_group);
 	if (error) {
 		dev_err(&client->dev, "failed to create sysfs attributes: %d\n",
@@ -1130,19 +1182,10 @@ static int raydium_i2c_probe(struct i2c_client *client,
 		return error;
 	}
 
-	error = devm_add_action(&client->dev,
-				raydium_i2c_remove_sysfs_group, ts);
-	if (error) {
-		raydium_i2c_remove_sysfs_group(ts);
-		dev_err(&client->dev,
-			"Failed to add sysfs cleanup action: %d\n", error);
-		return error;
-	}
-
 	return 0;
 }
 
-static void __maybe_unused raydium_enter_sleep(struct i2c_client *client)
+static void raydium_enter_sleep(struct i2c_client *client)
 {
 	static const u8 sleep_cmd[] = { 0x5A, 0xff, 0x00, 0x0f };
 	int error;
@@ -1154,7 +1197,7 @@ static void __maybe_unused raydium_enter_sleep(struct i2c_client *client)
 			"sleep command failed: %d\n", error);
 }
 
-static int __maybe_unused raydium_i2c_suspend(struct device *dev)
+static int raydium_i2c_suspend(struct device *dev)
 {
 	struct i2c_client *client = to_i2c_client(dev);
 	struct raydium_data *ts = i2c_get_clientdata(client);
@@ -1167,8 +1210,6 @@ static int __maybe_unused raydium_i2c_suspend(struct device *dev)
 
 	if (device_may_wakeup(dev)) {
 		raydium_enter_sleep(client);
-
-		ts->wake_irq_enabled = (enable_irq_wake(client->irq) == 0);
 	} else {
 		raydium_i2c_power_off(ts);
 	}
@@ -1176,14 +1217,12 @@ static int __maybe_unused raydium_i2c_suspend(struct device *dev)
 	return 0;
 }
 
-static int __maybe_unused raydium_i2c_resume(struct device *dev)
+static int raydium_i2c_resume(struct device *dev)
 {
 	struct i2c_client *client = to_i2c_client(dev);
 	struct raydium_data *ts = i2c_get_clientdata(client);
 
 	if (device_may_wakeup(dev)) {
-		if (ts->wake_irq_enabled)
-			disable_irq_wake(client->irq);
 		raydium_i2c_sw_reset(client);
 	} else {
 		raydium_i2c_power_on(ts);
@@ -1195,11 +1234,11 @@ static int __maybe_unused raydium_i2c_resume(struct device *dev)
 	return 0;
 }
 
-static SIMPLE_DEV_PM_OPS(raydium_i2c_pm_ops,
-			 raydium_i2c_suspend, raydium_i2c_resume);
+static DEFINE_SIMPLE_DEV_PM_OPS(raydium_i2c_pm_ops,
+				raydium_i2c_suspend, raydium_i2c_resume);
 
 static const struct i2c_device_id raydium_i2c_id[] = {
-	{ "raydium_i2c" , 0 },
+	{ "raydium_i2c", 0 },
 	{ "rm32380", 0 },
 	{ /* sentinel */ }
 };
@@ -1226,7 +1265,7 @@ static struct i2c_driver raydium_i2c_driver = {
 	.id_table = raydium_i2c_id,
 	.driver = {
 		.name = "raydium_ts",
-		.pm = &raydium_i2c_pm_ops,
+		.pm = pm_sleep_ptr(&raydium_i2c_pm_ops),
 		.acpi_match_table = ACPI_PTR(raydium_acpi_id),
 		.of_match_table = of_match_ptr(raydium_of_match),
 	},

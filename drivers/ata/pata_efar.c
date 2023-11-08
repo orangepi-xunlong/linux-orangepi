@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *    pata_efar.c - EFAR PIIX clone controller driver
  *
@@ -233,7 +234,7 @@ static void efar_set_dmamode (struct ata_port *ap, struct ata_device *adev)
 	spin_unlock_irqrestore(&efar_lock, flags);
 }
 
-static struct scsi_host_template efar_sht = {
+static const struct scsi_host_template efar_sht = {
 	ATA_BMDMA_SHT(DRV_NAME),
 };
 

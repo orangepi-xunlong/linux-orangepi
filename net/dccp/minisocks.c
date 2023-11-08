@@ -1,13 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  net/dccp/minisocks.c
  *
  *  An implementation of the DCCP protocol
  *  Arnaldo Carvalho de Melo <acme@conectiva.com.br>
- *
- *	This program is free software; you can redistribute it and/or
- *	modify it under the terms of the GNU General Public License
- *	as published by the Free Software Foundation; either version
- *	2 of the License, or (at your option) any later version.
  */
 
 #include <linux/dccp.h>
@@ -26,6 +22,7 @@
 #include "feat.h"
 
 struct inet_timewait_death_row dccp_death_row = {
+	.tw_refcount = REFCOUNT_INIT(1),
 	.sysctl_max_tw_buckets = NR_FILE * 2,
 	.hashinfo	= &dccp_hashinfo,
 };
@@ -53,7 +50,6 @@ void dccp_time_wait(struct sock *sk, int state, int timeo)
 		if (timeo < rto)
 			timeo = rto;
 
-		tw->tw_timeout = DCCP_TIMEWAIT_LEN;
 		if (state == DCCP_TIME_WAIT)
 			timeo = DCCP_TIMEWAIT_LEN;
 
@@ -63,9 +59,10 @@ void dccp_time_wait(struct sock *sk, int state, int timeo)
 		 */
 		local_bh_disable();
 		inet_twsk_schedule(tw, timeo);
-		/* Linkage updates. */
-		__inet_twsk_hashdance(tw, sk, &dccp_hashinfo);
-		inet_twsk_put(tw);
+		/* Linkage updates.
+		 * Note that access to tw after this point is illegal.
+		 */
+		inet_twsk_hashdance(tw, sk, &dccp_hashinfo);
 		local_bh_enable();
 	} else {
 		/* Sorry, if we're out of memory, just CLOSE this
@@ -98,6 +95,8 @@ struct sock *dccp_create_openreq_child(const struct sock *sk,
 		newdp->dccps_role	    = DCCP_ROLE_SERVER;
 		newdp->dccps_hc_rx_ackvec   = NULL;
 		newdp->dccps_service_list   = NULL;
+		newdp->dccps_hc_rx_ccid     = NULL;
+		newdp->dccps_hc_tx_ccid     = NULL;
 		newdp->dccps_service	    = dreq->dreq_service;
 		newdp->dccps_timestamp_echo = dreq->dreq_timestamp_echo;
 		newdp->dccps_timestamp_time = dreq->dreq_timestamp_time;
@@ -125,11 +124,7 @@ struct sock *dccp_create_openreq_child(const struct sock *sk,
 		 * Activate features: initialise CCIDs, sequence windows etc.
 		 */
 		if (dccp_feat_activate_values(newsk, &dreq->dreq_featneg)) {
-			/* It is still raw copy of parent, so invalidate
-			 * destructor and make plain sk_free() */
-			newsk->sk_destruct = NULL;
-			bh_unlock_sock(newsk);
-			sk_free(newsk);
+			sk_free_unlock_clone(newsk);
 			return NULL;
 		}
 		dccp_init_xmit_timers(newsk);
@@ -224,6 +219,7 @@ EXPORT_SYMBOL_GPL(dccp_check_req);
  */
 int dccp_child_process(struct sock *parent, struct sock *child,
 		       struct sk_buff *skb)
+	__releases(child)
 {
 	int ret = 0;
 	const int state = child->sk_state;

@@ -1,12 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Dallas DS1302 RTC Support
  *
  *  Copyright (C) 2002 David McCullough
  *  Copyright (C) 2003 - 2007 Paul Mundt
- *
- * This file is subject to the terms and conditions of the GNU General Public
- * License version 2. See the file "COPYING" in the main directory of
- * this archive for more details.
  */
 
 #include <linux/bcd.h>
@@ -17,8 +14,6 @@
 #include <linux/of.h>
 #include <linux/rtc.h>
 #include <linux/spi/spi.h>
-
-#define DRV_NAME	"rtc-ds1302"
 
 #define	RTC_CMD_READ	0x81		/* Read command */
 #define	RTC_CMD_WRITE	0x80		/* Write command */
@@ -43,7 +38,7 @@ static int ds1302_rtc_set_time(struct device *dev, struct rtc_time *time)
 {
 	struct spi_device	*spi = dev_get_drvdata(dev);
 	u8		buf[1 + RTC_CLCK_LEN];
-	u8		*bp = buf;
+	u8		*bp;
 	int		status;
 
 	/* Enable writing */
@@ -98,8 +93,7 @@ static int ds1302_rtc_get_time(struct device *dev, struct rtc_time *time)
 	time->tm_mon = bcd2bin(buf[RTC_ADDR_MON]) - 1;
 	time->tm_year = bcd2bin(buf[RTC_ADDR_YEAR]) + 100;
 
-	/* Time may not be set */
-	return rtc_valid_tm(time);
+	return 0;
 }
 
 static const struct rtc_class_ops ds1302_rtc_ops = {
@@ -112,7 +106,7 @@ static int ds1302_probe(struct spi_device *spi)
 	struct rtc_device	*rtc;
 	u8		addr;
 	u8		buf[4];
-	u8		*bp = buf;
+	u8		*bp;
 	int		status;
 
 	/* Sanity check board setup data.  This may be hooked up
@@ -191,12 +185,6 @@ static int ds1302_probe(struct spi_device *spi)
 	return 0;
 }
 
-static int ds1302_remove(struct spi_device *spi)
-{
-	spi_set_drvdata(spi, NULL);
-	return 0;
-}
-
 #ifdef CONFIG_OF
 static const struct of_device_id ds1302_dt_ids[] = {
 	{ .compatible = "maxim,ds1302", },
@@ -205,11 +193,17 @@ static const struct of_device_id ds1302_dt_ids[] = {
 MODULE_DEVICE_TABLE(of, ds1302_dt_ids);
 #endif
 
+static const struct spi_device_id ds1302_spi_ids[] = {
+	{ .name = "ds1302", },
+	{ /* sentinel */ }
+};
+MODULE_DEVICE_TABLE(spi, ds1302_spi_ids);
+
 static struct spi_driver ds1302_driver = {
 	.driver.name	= "rtc-ds1302",
 	.driver.of_match_table = of_match_ptr(ds1302_dt_ids),
 	.probe		= ds1302_probe,
-	.remove		= ds1302_remove,
+	.id_table	= ds1302_spi_ids,
 };
 
 module_spi_driver(ds1302_driver);

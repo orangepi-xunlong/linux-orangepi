@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 #ifndef __WEXT_COMPAT
 #define __WEXT_COMPAT
 
@@ -12,7 +13,7 @@
 
 int cfg80211_ibss_wext_siwfreq(struct net_device *dev,
 			       struct iw_request_info *info,
-			       struct iw_freq *freq, char *extra);
+			       struct iw_freq *wextfreq, char *extra);
 int cfg80211_ibss_wext_giwfreq(struct net_device *dev,
 			       struct iw_request_info *info,
 			       struct iw_freq *freq, char *extra);
@@ -31,7 +32,7 @@ int cfg80211_ibss_wext_giwessid(struct net_device *dev,
 
 int cfg80211_mgd_wext_siwfreq(struct net_device *dev,
 			      struct iw_request_info *info,
-			      struct iw_freq *freq, char *extra);
+			      struct iw_freq *wextfreq, char *extra);
 int cfg80211_mgd_wext_giwfreq(struct net_device *dev,
 			      struct iw_request_info *info,
 			      struct iw_freq *freq, char *extra);
@@ -50,10 +51,10 @@ int cfg80211_mgd_wext_giwessid(struct net_device *dev,
 
 int cfg80211_wext_siwmlme(struct net_device *dev,
 			  struct iw_request_info *info,
-			  struct iw_point *data, char *extra);
+			  union iwreq_data *wrqu, char *extra);
 int cfg80211_wext_siwgenie(struct net_device *dev,
 			   struct iw_request_info *info,
-			   struct iw_point *data, char *extra);
+			   union iwreq_data *wrqu, char *extra);
 
 
 int cfg80211_wext_freq(struct iw_freq *freq);
