@@ -1105,6 +1105,10 @@ static int yt8531_probe(struct phy_device *phydev)
 		return -EINVAL;
 	}
 
+	ytphy_write_ext(phydev, 0xa00d, 0x670);
+	ytphy_write_ext(phydev, 0xa00e, 0x2070);
+	ytphy_write_ext(phydev, 0xa00f, 0x7e);
+
 	return ytphy_modify_ext_with_lock(phydev, YTPHY_SYNCE_CFG_REG, mask,
 					  val);
 }

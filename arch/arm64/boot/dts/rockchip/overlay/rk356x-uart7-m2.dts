@@ -1,13 +1,13 @@
 /dts-v1/;
+/plugin/;
 
 / {
-	compatible = "rockchip,rk3328";
-
 	fragment@0 {
-		target-path = "/i2c@ff150000";
+		target = <&uart7>;
 
 		__overlay__ {
 			status = "okay";
+			pinctrl-0 = <&uart7m2_xfer>;
 		};
 	};
 };

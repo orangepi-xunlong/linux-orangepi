@@ -267,7 +267,7 @@
 
 &gpu {
 	mali-supply = <&vdd_gpu>;
-	status = "okay";
+	status = "disabled";
 };
 
 &hdmi {
@@ -279,12 +279,14 @@
 &hdmi_in {
 	hdmi_in_vp0: endpoint {
 		remote-endpoint = <&vp0_out_hdmi>;
+		status = "okay";
 	};
 };
 
 &hdmi_out {
 	hdmi_out_con: endpoint {
 		remote-endpoint = <&hdmi_con_in>;
+		status = "okay";
 	};
 };
 
@@ -562,13 +564,34 @@
 	};
 };
 
+&spi3 {
+	status = "disabled";
+	pinctrl-names = "default";
+	pinctrl-0 = <&spi3m0_cs1 &spi3m0_pins>;
+
+	spi_dev@0 {
+		compatible = "armbian,spi-dev";
+		reg = <0>;
+		spi-max-frequency = <50000000>;
+	};
+};
+
 /*
  * i2c3_m0 is exposed on the 40-pin (green connectors)
  * pin 27 - i2c3_sda_m0
  * pin 28 - i2c3_scl_m0
  */
 &i2c3 {
-	status = "okay";
+	status = "disabled";
+};
+
+&i2c2 {
+	pinctrl-0 = <&i2c2m1_xfer>;
+	status = "disabled";
+};
+
+&i2c4 {
+	status = "disabled";
 };
 
 &i2s0_8ch {
@@ -728,6 +751,16 @@
 	status = "okay";
 };
 
+&pwm11 {
+	pinctrl-0 = <&pwm11m1_pins>;
+	status = "disabled";
+};
+
+&pwm15 {
+	pinctrl-0 = <&pwm15m1_pins>;
+	status = "disabled";
+};
+
 &saradc {
 	status = "okay";
 	vref-supply = <&vcca_1v8>;
@@ -800,6 +833,20 @@
 	status = "okay";
 };
 
+&uart3 {
+	status = "disabled";
+};
+
+&uart7 {
+	pinctrl-0 = <&uart7m2_xfer>;
+	status = "disabled";
+};
+
+&uart9 {
+    pinctrl-0 = <&uart9m2_xfer>;
+    status = "disabled";
+};
+
 &usb2phy0 {
 	status = "okay";
 };
@@ -865,5 +912,6 @@
 	vp0_out_hdmi: endpoint@ROCKCHIP_VOP2_EP_HDMI0 {
 		reg = <ROCKCHIP_VOP2_EP_HDMI0>;
 		remote-endpoint = <&hdmi_in_vp0>;
+		status = "okay";
 	};
 };
