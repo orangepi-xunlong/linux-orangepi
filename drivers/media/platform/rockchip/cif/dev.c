@@ -1470,11 +1470,13 @@ static int subdev_asyn_register_itf(struct rkcif_device *dev)
 	struct sditf_priv *sditf = NULL;
 	int ret = 0;
 
-	ret = rkcif_update_sensor_info(&dev->stream[0]);
-	if (ret) {
-		v4l2_err(&dev->v4l2_dev,
-			 "There is not terminal subdev, not synchronized with ISP\n");
-		return 0;
+	if (IS_ENABLED(CONFIG_NO_GKI)) {
+		ret = rkcif_update_sensor_info(&dev->stream[0]);
+		if (ret) {
+			v4l2_err(&dev->v4l2_dev,
+				 "There is not terminal subdev, not synchronized with ISP\n");
+			return 0;
+		}
 	}
 	sditf = dev->sditf[0];
 	if (sditf && (!sditf->is_combine_mode) && (!dev->is_notifier_isp)) {
