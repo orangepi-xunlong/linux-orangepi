@@ -177,6 +177,7 @@ config SND_SOC_ALL_CODECS
 	imply SND_SOC_RK3528
 	imply SND_SOC_RK730
 	imply SND_SOC_RK817
+	imply SND_SOC_ROCKCHIP_SPI_CODEC
 	imply SND_SOC_RT274
 	imply SND_SOC_RT286
 	imply SND_SOC_RT298
@@ -1345,6 +1346,15 @@ config SND_SOC_RL6347A
 	default m if SND_SOC_RT274=m
 	default m if SND_SOC_RT286=m
 	default m if SND_SOC_RT298=m
+
+config SND_SOC_ROCKCHIP_SPI_CODEC
+	tristate "Rockchip SPI CODEC"
+	depends on ARCH_ROCKCHIP
+	depends on SPI_MASTER
+	select REGMAP_SPI
+	help
+	  Enable support for a remote audio dsp which act as a codec.
+	  Control the adsp by spi.
 
 config SND_SOC_RT274
 	tristate
