@@ -1,0 +1,54 @@
+/dts-v1/;
+/plugin/;
+/ {
+	compatible = "allwinner,sun50i-h616";
+};
+
+&pio {
+	spdif_pins: spdif-pins {
+		pins = "PH2", "PH4"; // MCLK, SPDIF-TX
+		function = "spdif";
+	};
+	spdif_tx_pin: spdif-tx-pin {
+		pins = "PH4";
+		function = "spdif";
+	};
+};
+
+&{/soc} {
+	spdif: spdif@5093000 {
+		#sound-dai-cells = <0>;
+		// H6 spdif is compatible as long as only tx is used. Now sun4i-spdif module only supports tx.
+		compatible = "allwinner,sun50i-h616-spdif", "allwinner,sun50i-h6-spdif";
+		reg = <0x05093000 0x400>;
+		interrupts = <0 21 4>; // <GIC_SPI 21 IRQ_TYPE_LEVEL_HIGH>;
+		clocks = <&ccu 88>, <&ccu 87>; // <&ccu CLK_BUS_SPDIF>, <&ccu CLK_SPDIF>;
+		clock-names = "apb", "spdif";
+		resets = <&ccu 34>; // <&ccu RST_BUS_SPDIF>;
+		dmas = <&dma 2>;
+		dma-names = "tx";
+		pinctrl-names = "default";
+		pinctrl-0 = <&spdif_tx_pin>;
+		status = "okay";
+	};
+};
+
+&{/} {
+	sound {
+		compatible = "simple-audio-card";
+		simple-audio-card,name = "On-board SPDIF";
+
+		simple-audio-card,cpu {
+			sound-dai = <&spdif>;
+		};
+
+		simple-audio-card,codec {
+			sound-dai = <&spdif_out>;
+		};
+	};
+
+	spdif_out: spdif-out {
+		#sound-dai-cells = <0>;
+		compatible = "linux,spdif-dit";
+	};
+};
