@@ -353,7 +353,7 @@ static int sun4i_spdif_hw_params(struct snd_pcm_substream *substream,
 	}
 
 	reg_val = 0;
-	reg_val |= SUN4I_SPDIF_TXCFG_ASS;
+	reg_val |= SUN4I_SPDIF_TXCFG_ASS; /* send last sample on underrun */
 	reg_val |= fmt; /* set non audio and bit depth */
 	reg_val |= SUN4I_SPDIF_TXCFG_CHSTMODE;
 	reg_val |= SUN4I_SPDIF_TXCFG_TXRATIO(mclk_div - 1);
