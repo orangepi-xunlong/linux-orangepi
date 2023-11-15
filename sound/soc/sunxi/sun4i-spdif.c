@@ -286,12 +286,15 @@ static int sun4i_spdif_hw_params(struct snd_pcm_substream *substream,
 	switch (params_format(params)) {
 	case SNDRV_PCM_FORMAT_S16_LE:
 		fmt |= SUN4I_SPDIF_TXCFG_FMT16BIT;
+		host->dma_params_tx.addr_width = DMA_SLAVE_BUSWIDTH_2_BYTES;
 		break;
 	case SNDRV_PCM_FORMAT_S20_3LE:
 		fmt |= SUN4I_SPDIF_TXCFG_FMT20BIT;
+		host->dma_params_tx.addr_width = DMA_SLAVE_BUSWIDTH_4_BYTES;
 		break;
 	case SNDRV_PCM_FORMAT_S24_LE:
 		fmt |= SUN4I_SPDIF_TXCFG_FMT24BIT;
+		host->dma_params_tx.addr_width = DMA_SLAVE_BUSWIDTH_4_BYTES;
 		break;
 	default:
 		return -EINVAL;
