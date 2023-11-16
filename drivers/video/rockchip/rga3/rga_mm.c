@@ -840,6 +840,11 @@ static int rga_mm_handle_remove(int id, void *ptr, void *data)
 	return 0;
 }
 
+static void rga_mm_buffer_destroy(struct rga_internal_buffer *buffer)
+{
+	rga_mm_kref_release_buffer(&buffer->refcount);
+}
+
 static struct rga_internal_buffer *
 rga_mm_lookup_external(struct rga_mm *mm_session,
 		       struct rga_external_buffer *external_buffer,
@@ -1991,6 +1996,7 @@ error_unmap_buffer:
 int rga_mm_map_job_info(struct rga_job *job)
 {
 	int ret;
+	ktime_t timestamp = ktime_get();
 
 	if (job->flags & RGA_JOB_USE_HANDLE) {
 		ret = rga_mm_get_handle_info(job);
@@ -1998,12 +2004,20 @@ int rga_mm_map_job_info(struct rga_job *job)
 			pr_err("failed to get buffer from handle\n");
 			return ret;
 		}
+
+		if (DEBUGGER_EN(TIME))
+			pr_info("request[%d], get buffer_handle info cost %lld us\n",
+				job->request_id, ktime_us_delta(ktime_get(), timestamp));
 	} else {
 		ret = rga_mm_map_buffer_info(job);
 		if (ret < 0) {
 			pr_err("failed to map buffer\n");
 			return ret;
 		}
+
+		if (DEBUGGER_EN(TIME))
+			pr_info("request[%d], map buffer cost %lld us\n",
+				job->request_id, ktime_us_delta(ktime_get(), timestamp));
 	}
 
 	return 0;
@@ -2011,10 +2025,21 @@ int rga_mm_map_job_info(struct rga_job *job)
 
 void rga_mm_unmap_job_info(struct rga_job *job)
 {
-	if (job->flags & RGA_JOB_USE_HANDLE)
+	ktime_t timestamp = ktime_get();
+
+	if (job->flags & RGA_JOB_USE_HANDLE) {
 		rga_mm_put_handle_info(job);
-	else
+
+		if (DEBUGGER_EN(TIME))
+			pr_info("request[%d], put buffer_handle info cost %lld us\n",
+				job->request_id, ktime_us_delta(ktime_get(), timestamp));
+	} else {
 		rga_mm_unmap_buffer_info(job);
+
+		if (DEBUGGER_EN(TIME))
+			pr_info("request[%d], unmap buffer cost %lld us\n",
+				job->request_id, ktime_us_delta(ktime_get(), timestamp));
+	}
 }
 
 uint32_t rga_mm_import_buffer(struct rga_external_buffer *external_buffer,
@@ -2142,9 +2167,9 @@ int rga_mm_session_release_buffer(struct rga_session *session)
 
 	idr_for_each_entry(&mm->memory_idr, buffer, i) {
 		if (session == buffer->session) {
-			pr_err("[tgid:%d] Decrement the reference of handle[%d] when the user exits\n",
+			pr_err("[tgid:%d] Destroy handle[%d] when the user exits\n",
 			       session->tgid, buffer->handle);
-			kref_put(&buffer->refcount, rga_mm_kref_release_buffer);
+			rga_mm_buffer_destroy(buffer);
 		}
 	}
 
