@@ -381,6 +381,7 @@ static int csi2_media_init(struct v4l2_subdev *sd)
 	csi2->crop.left = 0;
 	csi2->crop.width = RKCIF_DEFAULT_WIDTH;
 	csi2->crop.height = RKCIF_DEFAULT_HEIGHT;
+	csi2->bus.num_data_lanes = 4;
 
 	return media_entity_pads_init(&sd->entity, num_pads, csi2->pad);
 }
