@@ -2336,6 +2336,7 @@ static void dw_mci_tasklet_func(struct tasklet_struct *t)
 								((fifo_count >> 17) & 0x7FF) <= RV1106_RAMDON_DATA_SIZE / 4,
 								0, 5000 * USEC_PER_MSEC))
 							data->error = -ETIMEDOUT;
+						udelay(1);
 						dw_mci_reset(host);
 					}
 					send_stop_abort(host, data);
