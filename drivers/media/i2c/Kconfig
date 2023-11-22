@@ -791,6 +791,26 @@ config VIDEO_JX_K17
 config VIDEO_MAX9271_LIB
 	tristate
 
+config VIDEO_MIS2031
+	tristate "ImageDesign mis2031 sensor support"
+	depends on I2C && VIDEO_DEV
+	select MEDIA_CONTROLLER
+	select VIDEO_V4L2_SUBDEV_API
+	select V4L2_FWNODE
+	help
+	  This is a Video4Linux2 sensor driver for the ImageDesign
+	  MIS2031 camera.
+
+config VIDEO_MIS4001
+	tristate "ImageDesign mis4001 sensor support"
+	depends on I2C && VIDEO_DEV
+	select MEDIA_CONTROLLER
+	select VIDEO_V4L2_SUBDEV_API
+	select V4L2_FWNODE
+	help
+	  This is a Video4Linux2 sensor driver for the ImageDesign
+	  MIS4001 camera.
+
 config VIDEO_MT9M001
 	tristate "mt9m001 support"
 	depends on I2C && VIDEO_DEV
@@ -1711,6 +1731,17 @@ config VIDEO_SC2336
 	help
 	  This is a Video4Linux2 sensor driver for the SmartSens
 	  SC2336 camera.
+
+config VIDEO_SC2355
+	tristate "SmartSens SC2355 sensor support"
+	depends on I2C && VIDEO_DEV
+	select MEDIA_CONTROLLER
+	select VIDEO_V4L2_SUBDEV_API
+	select V4L2_FWNODE
+	help
+	  Support for the SmartSens SC2355 sensor.
+	  To compile this driver as a module, choose M here: the
+	  module will be called sc2355.
 
 config VIDEO_SC301IOT
     tristate "SmartSens SC301IOT sensor support"
