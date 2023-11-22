@@ -769,6 +769,10 @@ static int yt8531_config_init(struct phy_device *phydev)
 	if (ret < 0)
 		return ret;
 
+	ytphy_write_ext(phydev, 0xa00d, 0x670);
+	ytphy_write_ext(phydev, 0xa00e, 0x2070);
+	ytphy_write_ext(phydev, 0xa00f, 0x7e);
+
 	return ret;
 }
 
