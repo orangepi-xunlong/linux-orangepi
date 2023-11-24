@@ -1540,7 +1540,7 @@ static bool svdm_consume_svids(struct tcpm_port *port, const u32 *p, int cnt)
 	 * 0x0000 in the last VDO, so we need to break the Discover SVIDs
 	 * request and return false here.
 	 */
-	return cnt == 7 ? true : false;
+	return cnt == 7;
 abort:
 	tcpm_log(port, "SVID_DISCOVERY_MAX(%d) too low!", SVID_DISCOVERY_MAX);
 	return false;
