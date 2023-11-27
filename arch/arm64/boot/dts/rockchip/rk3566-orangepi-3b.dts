@@ -919,6 +919,7 @@
 };
 
 &u2phy0_otg {
+	vbus-supply = <&vcc5v0_otg>;
 	status = "okay";
 };
 
@@ -955,7 +956,7 @@
 };
 
 &usbdrd_dwc3 {
-	dr_mode = "host";
+	dr_mode = "otg";
 	extcon = <&usb2phy0>;
 	status = "okay";
 };
