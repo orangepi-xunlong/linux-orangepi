@@ -95,6 +95,8 @@ struct pvtpll_opp_table {
  * @regulator_count:	Number of power supply regulators.
  * @init_freq:		Set the initial frequency when init opp table.
  * @is_rate_volt_checked: Marks if device has checked initial rate and voltage.
+ * @pvtpll_clk_id:      Device's clock id.
+ * @pvtpll_low_temp:    Marks if device has low temperature pvtpll config.
  */
 struct rockchip_opp_info {
 	struct device *dev;
@@ -129,6 +131,9 @@ struct rockchip_opp_info {
 	int regulator_count;
 	unsigned int init_freq;
 	bool is_rate_volt_checked;
+
+	u32 pvtpll_clk_id;
+	bool pvtpll_low_temp;
 };
 
 #if IS_ENABLED(CONFIG_ROCKCHIP_OPP)
