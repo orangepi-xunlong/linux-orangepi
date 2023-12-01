@@ -3235,6 +3235,7 @@ static int rockchip_dmcfreq_probe(struct platform_device *pdev)
 		return -ENOMEM;
 
 	data->dev = dev;
+	data->dev->init_name = "dmc";
 	data->info.dev = dev;
 	mutex_init(&data->lock);
 	INIT_LIST_HEAD(&data->video_info_list);
