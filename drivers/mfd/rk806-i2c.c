@@ -38,13 +38,11 @@ static int rk806_i2c_probe(struct i2c_client *client,
 	return rk806_device_init(rk806);
 }
 
-static int rk806_remove(struct i2c_client *client)
+static void rk806_remove(struct i2c_client *client)
 {
 	struct rk806 *rk806 = i2c_get_clientdata(client);
 
 	rk806_device_exit(rk806);
-
-	return 0;
 }
 
 static struct i2c_driver rk806_i2c_driver = {
