@@ -905,6 +905,17 @@ config VIDEO_NOON010PC30
 	help
 	  This driver supports NOON010PC30 CIF camera from Siliconfile
 
+config VIDEO_OG01A10
+	tristate "OmniVision OG01A10 sensor support"
+	depends on I2C && VIDEO_DEV
+	depends on MEDIA_CAMERA_SUPPORT
+	select MEDIA_CONTROLLER
+	select VIDEO_V4L2_SUBDEV_API
+	select V4L2_FWNODE
+	help
+	  This is a Video4Linux2 sensor driver for the OmniVision
+	  OG01A10 camera.
+
 config VIDEO_OG01A1B
 	tristate "OmniVision OG01A1B sensor support"
 	depends on I2C && VIDEO_DEV
@@ -917,6 +928,17 @@ config VIDEO_OG01A1B
 
 	  To compile this driver as a module, choose M here: the
 	  module will be called og01a1b.
+
+config VIDEO_OG02B10
+	tristate "OmniVision OG02B10 sensor support"
+	depends on I2C && VIDEO_DEV
+	depends on MEDIA_CAMERA_SUPPORT
+	select MEDIA_CONTROLLER
+	select VIDEO_V4L2_SUBDEV_API
+	select V4L2_FWNODE
+	help
+	  This is a Video4Linux2 sensor driver for the OmniVision
+	  OG02B10 camera.
 
 config VIDEO_OS02G10
 	tristate "OmniVision OS02G10 sensor support"
