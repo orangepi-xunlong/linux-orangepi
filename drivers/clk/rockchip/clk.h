@@ -499,6 +499,7 @@ enum rockchip_pll_type {
  * @clk_data: holds clock related data like clk* and number of clocks.
  * @cru_node: device-node of the clock-provider
  * @grf: regmap of the general-register-files syscon
+ * @list_node: node in the global ctx list
  * @lock: maintains exclusion between callbacks for a given clock-provider.
  */
 struct rockchip_clk_provider {
@@ -507,6 +508,7 @@ struct rockchip_clk_provider {
 	struct device_node *cru_node;
 	struct regmap *grf;
 	struct regmap *pmugrf;
+	struct hlist_node list_node;
 	spinlock_t lock;
 };
 
@@ -1314,6 +1316,7 @@ extern void (*rk_dump_cru)(void);
 int rockchip_clk_protect(struct rockchip_clk_provider *ctx,
 			 unsigned int *clocks, unsigned int nclocks);
 void rockchip_clk_unprotect(void);
+void rockchip_clk_disable_unused(void);
 #else
 static inline int rockchip_clk_protect(struct rockchip_clk_provider *ctx,
 				       unsigned int *clocks,
@@ -1323,6 +1326,10 @@ static inline int rockchip_clk_protect(struct rockchip_clk_provider *ctx,
 }
 
 static inline void rockchip_clk_unprotect(void)
+{
+}
+
+static inline void rockchip_clk_disable_unused(void)
 {
 }
 #endif

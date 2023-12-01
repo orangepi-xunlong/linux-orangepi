@@ -67,4 +67,12 @@ static inline void rockchip_dump_pmu(void)
 
 #endif /* CONFIG_ROCKCHIP_PM_DOMAINS */
 
+#if IS_MODULE(CONFIG_ROCKCHIP_PM_DOMAINS)
+void rockchip_pd_disable_unused(void);
+#else
+static inline void rockchip_pd_disable_unused(void)
+{
+}
+#endif
+
 #endif /* __SOC_ROCKCHIP_PM_DOMAINS_H__ */
