@@ -8,6 +8,7 @@
  * Author: Simon Xue <xxm@rock-chips.com>
  */
 
+#include <dt-bindings/phy/phy.h>
 #include <linux/clk.h>
 #include <linux/gpio.h>
 #include <linux/iopoll.h>
@@ -2174,6 +2175,12 @@ static int __maybe_unused rockchip_dw_pcie_suspend(struct device *dev)
 
 no_l2:
 	rk_pcie_disable_ltssm(rk_pcie);
+
+	ret = phy_validate(rk_pcie->phy, PHY_TYPE_PCIE, 0, NULL);
+	if (ret && ret != -EOPNOTSUPP) {
+		dev_err(dev, "PHY is reused by other controller, check the dts!\n");
+		return ret;
+	}
 
 	/* make sure assert phy success */
 	usleep_range(200, 300);

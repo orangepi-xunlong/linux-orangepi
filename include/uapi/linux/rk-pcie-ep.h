@@ -74,6 +74,9 @@ enum pcie_ep_mmap_resource {
 	PCIE_EP_MMAP_RESOURCE_BAR0,
 	PCIE_EP_MMAP_RESOURCE_BAR2,
 	PCIE_EP_MMAP_RESOURCE_BAR4,
+	PCIE_EP_MMAP_RESOURCE_USER_MEM,
+	PCIE_EP_MMAP_RESOURCE_RK3568_RC_DBI,
+	PCIE_EP_MMAP_RESOURCE_RK3588_RC_DBI,
 	PCIE_EP_MMAP_RESOURCE_MAX,
 };
 
@@ -87,7 +90,8 @@ struct pcie_ep_obj_info {
 		__u16 mode;
 		__u16 submode;
 	} devmode;
-	__u8 reserved[0x1F4];
+	__u32 msi_data[0x8];
+	__u8 reserved[0x1D4];
 
 	__u32 irq_type_rc;					/* Generate in ep isr, valid only for rc, clear in rc */
 	struct pcie_ep_obj_irq_dma_status dma_status_rc;	/* Generate in ep isr, valid only for rc, clear in rc */
@@ -103,7 +107,7 @@ struct pcie_ep_obj_info {
 #define PCIE_DMA_IRQ_MASK_ALL		_IOW(PCIE_BASE, 3, int)
 #define PCIE_DMA_RAISE_MSI_OBJ_IRQ_USER	_IOW(PCIE_BASE, 4, int)
 #define PCIE_EP_GET_USER_INFO		_IOR(PCIE_BASE, 5, struct pcie_ep_user_data)
-#define PCIE_EP_SET_MMAP_RESOURCE	_IOW(PCIE_BASE, 6, enum pcie_ep_mmap_resource)
+#define PCIE_EP_SET_MMAP_RESOURCE	_IOW(PCIE_BASE, 6, int)
 #define PCIE_EP_RAISE_ELBI		_IOW(PCIE_BASE, 7, int)
 #define PCIE_EP_REQUEST_VIRTUAL_ID	_IOR(PCIE_BASE, 16, int)
 #define PCIE_EP_RELEASE_VIRTUAL_ID	_IOW(PCIE_BASE, 17, int)
