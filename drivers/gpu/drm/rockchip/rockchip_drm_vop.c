@@ -1878,6 +1878,21 @@ static int vop_plane_atomic_check(struct drm_plane *plane,
 		return -EINVAL;
 	}
 
+	if (rockchip_afbc(plane, new_plane_state->fb->modifier)) {
+		if (new_plane_state->src.x1 || new_plane_state->src.y1) {
+			DRM_ERROR("AFBC does not support offset display, xpos=%d, ypos=%d, offset=%d\n",
+				  new_plane_state->src.x1,
+				  new_plane_state->src.y1, fb->offsets[0]);
+			return -EINVAL;
+		}
+
+		if (new_plane_state->rotation && new_plane_state->rotation != DRM_MODE_ROTATE_0) {
+			DRM_ERROR("No rotation support in AFBC, rotation=%d\n",
+				  new_plane_state->rotation);
+			return -EINVAL;
+		}
+	}
+
 	offset = (src->x1 >> 16) * fb->format->cpp[0];
 	vop_plane_state->offset = offset + fb->offsets[0];
 	if (new_plane_state->rotation & DRM_MODE_REFLECT_Y)
@@ -1891,19 +1906,6 @@ static int vop_plane_atomic_check(struct drm_plane *plane,
 	if (fb->format->is_yuv) {
 		int hsub = fb->format->hsub;
 		int vsub = fb->format->vsub;
-
-		if (new_plane_state->src.x1 || new_plane_state->src.y1) {
-			DRM_ERROR("AFBC does not support offset display, xpos=%d, ypos=%d, offset=%d\n",
-				  new_plane_state->src.x1,
-				  new_plane_state->src.y1, fb->offsets[0]);
-			return -EINVAL;
-		}
-
-		if (new_plane_state->rotation && new_plane_state->rotation != DRM_MODE_ROTATE_0) {
-			DRM_ERROR("No rotation support in AFBC, rotation=%d\n",
-				  new_plane_state->rotation);
-			return -EINVAL;
-		}
 
 		offset = (src->x1 >> 16) * fb->format->cpp[1] / hsub;
 		offset += (src->y1 >> 16) * fb->pitches[1] / vsub;
