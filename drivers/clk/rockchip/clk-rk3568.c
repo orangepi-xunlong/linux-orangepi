@@ -599,7 +599,7 @@ static struct rockchip_clk_branch rk3568_clk_branches[] __initdata = {
 	MUXGRF(CLK_DDR1X, "clk_ddr1x", clk_ddr1x_p, CLK_SET_RATE_PARENT,
 			RK3568_CLKSEL_CON(9), 15, 1, MFLAGS),
 
-	COMPOSITE_NOMUX(CLK_MSCH, "clk_msch", "clk_ddr1x", CLK_IGNORE_UNUSED,
+	COMPOSITE_NOMUX(CLK_MSCH, "clk_msch", "clk_ddr1x", CLK_IS_CRITICAL,
 			RK3568_CLKSEL_CON(10), 0, 2, DFLAGS,
 			RK3568_CLKGATE_CON(4), 2, GFLAGS),
 	GATE(CLK24_DDRMON, "clk24_ddrmon", "xin24m", CLK_IGNORE_UNUSED,
