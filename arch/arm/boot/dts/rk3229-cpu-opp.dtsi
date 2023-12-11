@@ -54,7 +54,7 @@
 			9   254   1
 		>;
 		nvmem-cells = <&cpu_leakage>;
-		nvmem-cell-names = "cpu_leakage";
+		nvmem-cell-names = "leakage";
 
 		opp-408000000 {
 			opp-hz = /bits/ 64 <408000000>;
