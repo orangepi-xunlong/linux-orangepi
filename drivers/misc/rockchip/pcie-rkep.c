@@ -40,8 +40,7 @@
 
 static DEFINE_MUTEX(rkep_mutex);
 #define BAR_0_SZ			SZ_4M
-#define RKEP_NUM_MSI_VECTORS		4
-#define RKEP_NUM_MSIX_VECTORS		8
+#define RKEP_NUM_IRQ_VECTORS		4
 
 #define PCIe_CLIENT_MSI_IRQ_OBJ		0	/* rockchip ep object special irq */
 
@@ -92,19 +91,19 @@ static DEFINE_MUTEX(rkep_mutex);
 #define RKEP_USER_MEM_SIZE		SZ_64M
 
 #define PCIE_CFG_ELBI_APP_OFFSET	0xe00
+#define PCIE_CFG_ELBI_USER_DATA_OFF	0x10
+
 #define PCIE_ELBI_REG_NUM		0x2
 
-#define RKEP_EP_VIRTUAL_ID_MAX		(8 * 4096)
 #define RKEP_EP_ELBI_TIEMOUT_US		100000
 
 #define PCIE_RK3568_RC_DBI_BASE		0xf6000000
 #define PCIE_RK3588_RC_DBI_BASE		0xf5000000
 #define PCIE_DBI_SIZE			0x400000
 
-struct pcie_rkep_msix_context {
+struct pcie_rkep_irq_context {
 	struct pci_dev *dev;
 	u16 msg_id;
-	u8 *name;
 };
 
 struct pcie_rkep {
@@ -113,19 +112,17 @@ struct pcie_rkep {
 	void __iomem *bar2;
 	void __iomem *bar4;
 	int cur_mmap_res;
-	struct msix_entry msix_entries[RKEP_NUM_MSIX_VECTORS];
-	struct pcie_rkep_msix_context msix_ctx[RKEP_NUM_MSIX_VECTORS];
-	struct pcie_rkep_msix_context msi_ctx[RKEP_NUM_MSI_VECTORS];
-	bool msi_enable;
-	bool msix_enable;
+	struct pcie_rkep_irq_context irq_ctx[RKEP_NUM_IRQ_VECTORS];
+	int irq_valid;
 
 	struct miscdevice dev;
 	struct dma_trx_obj *dma_obj;
 	struct pcie_ep_obj_info *obj_info;
 	struct page *user_pages; /* Allocated physical memory for user space */
-	struct fasync_struct *async;
 	struct mutex dev_lock_mutex;
 	DECLARE_BITMAP(virtual_id_bitmap, RKEP_EP_VIRTUAL_ID_MAX);
+	DECLARE_BITMAP(virtual_id_irq_bitmap, RKEP_EP_VIRTUAL_ID_MAX);
+	wait_queue_head_t wq_head;
 };
 
 struct pcie_file {
@@ -158,11 +155,11 @@ static int rkep_ep_request_virtual_id(struct pcie_file *pcie_file)
 		mutex_unlock(&pcie_rkep->dev_lock_mutex);
 		return -EINVAL;
 	}
-	__set_bit(index, pcie_rkep->virtual_id_bitmap);
+	set_bit(index, pcie_rkep->virtual_id_bitmap);
 	mutex_unlock(&pcie_rkep->dev_lock_mutex);
 
 	mutex_lock(&pcie_file->file_lock_mutex);
-	__set_bit(index, pcie_file->child_vid_bitmap);
+	set_bit(index, pcie_file->child_vid_bitmap);
 	mutex_unlock(&pcie_file->file_lock_mutex);
 
 	dev_dbg(&pcie_rkep->pdev->dev, "request virtual id %d\n", index);
@@ -196,11 +193,13 @@ static int rkep_ep_release_virtual_id(struct pcie_file *pcie_file, int index)
 	return 0;
 }
 
-static int rkep_ep_raise_elbi_irq_user(struct pcie_rkep *pcie_rkep, u32 interrupt_num)
+static int rkep_ep_raise_elbi_irq(struct pcie_file *pcie_file, u32 interrupt_num)
 {
+	struct pcie_rkep *pcie_rkep = pcie_file->pcie_rkep;
 	u32 index, off;
 	int i, gap_us = 100;
 	u32 val;
+	int ret;
 
 	if (interrupt_num >= (PCIE_ELBI_REG_NUM * 16)) {
 		dev_err(&pcie_rkep->pdev->dev, "elbi int num out of max count\n");
@@ -221,16 +220,57 @@ static int rkep_ep_raise_elbi_irq_user(struct pcie_rkep *pcie_rkep, u32 interrup
 	if (i >= gap_us)
 		dev_err(&pcie_rkep->pdev->dev, "elbi int is not clear, status=%x\n", val);
 
-	return pci_write_config_dword(pcie_rkep->pdev, PCIE_CFG_ELBI_APP_OFFSET + 4 * index,
+	mutex_lock(&pcie_file->file_lock_mutex);
+	ret = pci_write_config_dword(pcie_rkep->pdev, PCIE_CFG_ELBI_APP_OFFSET + 4 * index,
 				      (1 << (off + 16)) | (1 << off));
+	mutex_unlock(&pcie_file->file_lock_mutex);
+	return ret;
 }
 
-static int pcie_rkep_fasync(int fd, struct file *file, int mode)
+static int rkep_ep_raise_irq_user_obj(struct pcie_file *pcie_file, u32 index)
 {
-	struct pcie_file *pcie_file = file->private_data;
 	struct pcie_rkep *pcie_rkep = pcie_file->pcie_rkep;
+	int ret;
 
-	return fasync_helper(fd, file, mode, &pcie_rkep->async);
+	if (index >= RKEP_EP_VIRTUAL_ID_MAX) {
+		dev_err(&pcie_rkep->pdev->dev, "raise irq_user, virtual id %d out of range\n", index);
+
+		return -EINVAL;
+	}
+
+	pcie_rkep->obj_info->irq_type_ep = OBJ_IRQ_USER;
+	pcie_rkep->obj_info->irq_user_data_ep = index;
+	ret = rkep_ep_raise_elbi_irq(pcie_file, 0);
+
+	return ret;
+}
+
+static int rkep_ep_poll_irq_user(struct pcie_file *pcie_file, struct pcie_ep_obj_poll_virtual_id_cfg *cfg)
+{
+	struct pcie_rkep *pcie_rkep = pcie_file->pcie_rkep;
+	u32 index = cfg->virtual_id;
+
+	if (index >= RKEP_EP_VIRTUAL_ID_MAX) {
+		dev_err(&pcie_rkep->pdev->dev, "poll irq_user, virtual id %d out of range\n", index);
+
+		return -EINVAL;
+	}
+
+	cfg->poll_status = NSIGPOLL;
+	if (cfg->sync) {
+		wait_event_interruptible(pcie_rkep->wq_head,
+					 test_bit(index, pcie_rkep->virtual_id_irq_bitmap));
+	} else {
+		wait_event_interruptible_timeout(pcie_rkep->wq_head,
+						 test_bit(index, pcie_rkep->virtual_id_irq_bitmap),
+						 cfg->timeout_ms);
+	}
+	if (test_and_clear_bit(index, pcie_rkep->virtual_id_irq_bitmap))
+		cfg->poll_status = POLL_IN;
+
+	dev_dbg(&pcie_rkep->pdev->dev, "poll virtual id %d, ret=%d\n", index, cfg->poll_status);
+
+	return 0;
 }
 
 static int pcie_rkep_open(struct inode *inode, struct file *file)
@@ -257,8 +297,6 @@ static int pcie_rkep_release(struct inode *inode, struct file *file)
 	struct pcie_file *pcie_file = file->private_data;
 	struct pcie_rkep *pcie_rkep = pcie_file->pcie_rkep;
 	int index;
-
-	pcie_rkep_fasync(-1, file, 0);//TODO
 
 	while (1) {
 		mutex_lock(&pcie_file->file_lock_mutex);
@@ -531,6 +569,7 @@ static long pcie_rkep_ioctl(struct file *file, unsigned int cmd, unsigned long a
 	struct pcie_ep_dma_cache_cfg cfg;
 	struct pcie_ep_dma_block_req dma;
 	void __user *uarg = (void __user *)args;
+	struct pcie_ep_obj_poll_virtual_id_cfg poll_cfg;
 	int mmap_res;
 	int ret;
 	int index;
@@ -571,7 +610,8 @@ static long pcie_rkep_ioctl(struct file *file, unsigned int cmd, unsigned long a
 	case PCIE_EP_DMA_XFER_BLOCK:
 		ret = copy_from_user(&dma, uarg, sizeof(dma));
 		if (ret) {
-			dev_err(&pcie_rkep->pdev->dev, "failed to get dma_data copy from userspace\n");
+			dev_err(&pcie_rkep->pdev->dev,
+				"failed to get dma_data copy from userspace\n");
 			return -EFAULT;
 		}
 		ret = rkep_ep_dma_xfer(pcie_rkep, &dma);
@@ -594,7 +634,8 @@ static long pcie_rkep_ioctl(struct file *file, unsigned int cmd, unsigned long a
 	case PCIE_EP_RELEASE_VIRTUAL_ID:
 		ret = copy_from_user(&index, uarg, sizeof(index));
 		if (ret) {
-			dev_err(&pcie_rkep->pdev->dev, "failed to get dma_data copy from userspace\n");
+			dev_err(&pcie_rkep->pdev->dev,
+				"failed to get release data copy from userspace\n");
 			return -EFAULT;
 		}
 		ret = rkep_ep_release_virtual_id(pcie_file, index);
@@ -605,13 +646,42 @@ static long pcie_rkep_ioctl(struct file *file, unsigned int cmd, unsigned long a
 			return -EFAULT;
 		}
 		break;
+	case PCIE_EP_RAISE_IRQ_USER:
+		ret = copy_from_user(&index, uarg, sizeof(index));
+		if (ret) {
+			dev_err(&pcie_rkep->pdev->dev,
+				"failed to get raise irq data copy from userspace\n");
+			return -EFAULT;
+		}
+
+		ret = rkep_ep_raise_irq_user_obj(pcie_file, index);
+		if (ret < 0)
+			return -EFAULT;
+		break;
+	case PCIE_EP_POLL_IRQ_USER:
+		ret = copy_from_user(&poll_cfg, uarg, sizeof(poll_cfg));
+		if (ret) {
+			dev_err(&pcie_rkep->pdev->dev,
+				"failed to get poll irq data copy from userspace\n");
+
+			return -EFAULT;
+		}
+
+		ret = rkep_ep_poll_irq_user(pcie_file, &poll_cfg);
+		if (ret < 0)
+			return -EFAULT;
+
+		if (copy_to_user(argp, &poll_cfg, sizeof(poll_cfg)))
+			return -EFAULT;
+		break;
 	case PCIE_EP_RAISE_ELBI:
 		ret = copy_from_user(&index, uarg, sizeof(index));
 		if (ret) {
-			dev_err(&pcie_rkep->pdev->dev, "failed to get dma_data copy from userspace\n");
+			dev_err(&pcie_rkep->pdev->dev,
+				"failed to get raise elbi data copy from userspace\n");
 			return -EFAULT;
 		}
-		ret = rkep_ep_raise_elbi_irq_user(pcie_rkep, index);
+		ret = rkep_ep_raise_elbi_irq(pcie_file, index);
 		if (ret < 0) {
 			dev_err(&pcie_rkep->pdev->dev,
 				"raise elbi %d failed, ret=%d\n", index, ret);
@@ -647,7 +717,6 @@ static const struct file_operations pcie_rkep_fops = {
 	.read		= pcie_rkep_read,
 	.unlocked_ioctl = pcie_rkep_ioctl,
 	.mmap		= pcie_rkep_mmap,
-	.fasync		= pcie_rkep_fasync,
 	.release	= pcie_rkep_release,
 	.llseek		= default_llseek,
 };
@@ -770,7 +839,7 @@ static void pcie_rkep_start_dma_rd(struct dma_trx_obj *obj, struct dma_table *cu
 		pcie_rkep_writel_dbi(pcie_rkep, PCIE_DMA_OFFSET + PCIE_DMA_RD_DOORBELL,
 				cur->start.asdword);
 	}
-	// pcie_rkep_dma_debug(obj, cur);
+	/* pcie_rkep_dma_debug(obj, cur); */
 }
 
 static void pcie_rkep_start_dma_wr(struct dma_trx_obj *obj, struct dma_table *cur, int ctr_off)
@@ -813,7 +882,7 @@ static void pcie_rkep_start_dma_wr(struct dma_trx_obj *obj, struct dma_table *cu
 		pcie_rkep_writel_dbi(pcie_rkep, PCIE_DMA_OFFSET + PCIE_DMA_WR_DOORBELL,
 				cur->start.asdword);
 	}
-	// pcie_rkep_dma_debug(obj, cur);
+	/* pcie_rkep_dma_debug(obj, cur); */
 }
 
 static void pcie_rkep_start_dma_dwc(struct dma_trx_obj *obj, struct dma_table *table)
@@ -921,8 +990,8 @@ static int pcie_rkep_obj_handler(struct pcie_rkep *pcie_rkep, struct pci_dev *pd
 	u32 irq_type;
 	u32 chn;
 	union int_clear clears;
+	u32 reg;
 
-	kill_fasync(&pcie_rkep->async, SIGIO, POLL_IN);
 	irq_type = pcie_rkep->obj_info->irq_type_rc;
 	if (irq_type == OBJ_IRQ_DMA) {
 		/* DMA helper */
@@ -965,6 +1034,12 @@ static int pcie_rkep_obj_handler(struct pcie_rkep *pcie_rkep, struct pci_dev *pd
 				}
 			}
 		}
+	} else if (irq_type == OBJ_IRQ_USER) {
+		reg = pcie_rkep->obj_info->irq_user_data_rc;
+		if (reg < RKEP_EP_VIRTUAL_ID_MAX) {
+			set_bit(reg, pcie_rkep->virtual_id_irq_bitmap);
+			wake_up_interruptible(&pcie_rkep->wq_head);
+		}
 	}
 
 	return 0;
@@ -972,99 +1047,64 @@ static int pcie_rkep_obj_handler(struct pcie_rkep *pcie_rkep, struct pci_dev *pd
 
 static irqreturn_t pcie_rkep_pcie_interrupt(int irq, void *context)
 {
-	struct pcie_rkep_msix_context *ctx = context;
+	struct pcie_rkep_irq_context *ctx = context;
 	struct pci_dev *pdev = ctx->dev;
 	struct pcie_rkep *pcie_rkep = pci_get_drvdata(pdev);
 
 	if (!pcie_rkep)
 		return IRQ_HANDLED;
 
-	if (pcie_rkep->msix_enable)
-		dev_info(&pdev->dev, "MSI-X is triggered for 0x%x\n", ctx->msg_id);
-
-	else /* pcie_rkep->msi_enable */ {
-		/*
-		 * The msi 0 is the dedicated interrupt for obj to issue remote rc device.
-		 */
-		if (irq == pci_irq_vector(pcie_rkep->pdev, PCIe_CLIENT_MSI_IRQ_OBJ))
-			pcie_rkep_obj_handler(pcie_rkep, pdev);
-	}
+	/*
+	 * The irq 0 is the dedicated interrupt for obj to issue remote rc device.
+	 */
+	if (irq == pci_irq_vector(pcie_rkep->pdev, PCIe_CLIENT_MSI_IRQ_OBJ))
+		pcie_rkep_obj_handler(pcie_rkep, pdev);
 
 	return IRQ_HANDLED;
 }
 
-static int __maybe_unused pcie_rkep_request_msi_irq(struct pcie_rkep *pcie_rkep)
+static void pcie_rkep_release_irq(struct pcie_rkep *pcie_rkep)
 {
-	int nvec, ret = -EINVAL, i, j;
+	int i;
+
+	if (pcie_rkep->irq_valid) {
+		for (i = 0; i < pcie_rkep->irq_valid; i++)
+			pci_free_irq(pcie_rkep->pdev, i, &pcie_rkep->irq_ctx[i]);
+
+		pci_free_irq_vectors(pcie_rkep->pdev);
+	}
+	pcie_rkep->irq_valid = 0;
+}
+
+static int pcie_rkep_request_irq(struct pcie_rkep *pcie_rkep, u32 irq_type)
+{
+	int nvec, ret = -EINVAL, i;
 
 	/* Using msi as default */
-	nvec = pci_alloc_irq_vectors(pcie_rkep->pdev, 1, RKEP_NUM_MSI_VECTORS, PCI_IRQ_MSI);
+	nvec = pci_alloc_irq_vectors(pcie_rkep->pdev, 1, RKEP_NUM_IRQ_VECTORS, irq_type);
 	if (nvec < 0)
 		return nvec;
 
-	if (nvec != RKEP_NUM_MSI_VECTORS)
-		dev_err(&pcie_rkep->pdev->dev, "only allocate %d msi interrupt\n", nvec);
+	if (nvec != RKEP_NUM_IRQ_VECTORS)
+		dev_err(&pcie_rkep->pdev->dev, "only allocate %d irq interrupt, irq_type=%d\n", nvec, irq_type);
 
+	pcie_rkep->irq_valid = 0;
 	for (i = 0; i < nvec; i++) {
-		pcie_rkep->msi_ctx[i].dev = pcie_rkep->pdev;
-		pcie_rkep->msi_ctx[i].msg_id = i;
-		pcie_rkep->msi_ctx[i].name =
-			devm_kzalloc(&pcie_rkep->pdev->dev, RKEP_NUM_MSIX_VECTORS, GFP_KERNEL);
-		sprintf(pcie_rkep->msi_ctx[i].name, "%s-%d\n", pcie_rkep->dev.name, i);
-		ret = request_irq(pci_irq_vector(pcie_rkep->pdev, i),
-				  pcie_rkep_pcie_interrupt, IRQF_SHARED,
-				  pcie_rkep->msi_ctx[i].name, &pcie_rkep->msi_ctx[i]);
+		pcie_rkep->irq_ctx[i].dev = pcie_rkep->pdev;
+		pcie_rkep->irq_ctx[i].msg_id = i;
+		ret = pci_request_irq(pcie_rkep->pdev, i,
+				      pcie_rkep_pcie_interrupt, NULL,
+				      &pcie_rkep->irq_ctx[i], "%s-%d", pcie_rkep->dev.name, i);
 		if (ret)
 			break;
+		pcie_rkep->irq_valid++;
 	}
 
 	if (ret) {
-		for (j = 0; j < i; j++)
-			free_irq(pci_irq_vector(pcie_rkep->pdev, j), &pcie_rkep->msi_ctx[j]);
-		pci_disable_msi(pcie_rkep->pdev);
+		pcie_rkep_release_irq(pcie_rkep);
 		dev_err(&pcie_rkep->pdev->dev, "fail to allocate msi interrupt\n");
 	} else {
-		pcie_rkep->msi_enable = true;
 		dev_err(&pcie_rkep->pdev->dev, "success to request msi irq\n");
-	}
-
-	return ret;
-}
-
-static int __maybe_unused pcie_rkep_request_msix_irq(struct pcie_rkep *pcie_rkep)
-{
-	int ret, i, j;
-
-	for (i = 0; i < RKEP_NUM_MSIX_VECTORS; i++)
-		pcie_rkep->msix_entries[i].entry = i;
-
-	ret = pci_enable_msix_exact(pcie_rkep->pdev, pcie_rkep->msix_entries,
-				    RKEP_NUM_MSIX_VECTORS);
-	if (ret)
-		return ret;
-
-	for (i = 0; i < RKEP_NUM_MSIX_VECTORS; i++) {
-		pcie_rkep->msix_ctx[i].dev = pcie_rkep->pdev;
-		pcie_rkep->msix_ctx[i].msg_id = i;
-		pcie_rkep->msix_ctx[i].name =
-			devm_kzalloc(&pcie_rkep->pdev->dev, RKEP_NUM_MSIX_VECTORS, GFP_KERNEL);
-		sprintf(pcie_rkep->msix_ctx[i].name, "%s-%d\n", pcie_rkep->dev.name, i);
-		ret = request_irq(pcie_rkep->msix_entries[i].vector,
-				  pcie_rkep_pcie_interrupt, 0, pcie_rkep->msix_ctx[i].name,
-				  &pcie_rkep->msix_ctx[i]);
-
-		if (ret)
-			break;
-	}
-
-	if (ret) {
-		for (j = 0; j < i; j++)
-			free_irq(pcie_rkep->msix_entries[j].vector, &pcie_rkep->msix_ctx[j]);
-		pci_disable_msix(pcie_rkep->pdev);
-		dev_err(&pcie_rkep->pdev->dev, "fail to allocate msi-x interrupt\n");
-	} else {
-		pcie_rkep->msix_enable = true;
-		dev_err(&pcie_rkep->pdev->dev, "success to request msi-x irq\n");
 	}
 
 	return ret;
@@ -1120,7 +1160,7 @@ static DEVICE_ATTR_WO(rkep);
 
 static int pcie_rkep_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 {
-	int ret, i;
+	int ret;
 	struct pcie_rkep *pcie_rkep;
 	u8 *name;
 	u16 val;
@@ -1134,7 +1174,7 @@ static int pcie_rkep_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	if (!name)
 		return -ENOMEM;
 
-	__set_bit(0, pcie_rkep->virtual_id_bitmap);
+	set_bit(0, pcie_rkep->virtual_id_bitmap);
 
 	ret = pci_enable_device(pdev);
 	if (ret) {
@@ -1192,7 +1232,8 @@ static int pcie_rkep_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 
 	pci_set_drvdata(pdev, pcie_rkep);
 
-	ret = pcie_rkep_request_msi_irq(pcie_rkep);
+	init_waitqueue_head(&pcie_rkep->wq_head);
+	ret = pcie_rkep_request_irq(pcie_rkep, PCI_IRQ_MSI);
 	if (ret)
 		goto err_register_irq;
 
@@ -1244,18 +1285,7 @@ static int pcie_rkep_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 
 	return 0;
 err_register_obj:
-	if (pcie_rkep->msix_enable) {
-		for (i = 0; i < RKEP_NUM_MSIX_VECTORS; i++)
-			free_irq(pcie_rkep->msix_entries[i].vector, &pcie_rkep->msix_ctx[i]);
-		pci_disable_msix(pdev);
-	} else if (pcie_rkep->msi_enable) {
-		for (i = 0; i < RKEP_NUM_MSI_VECTORS; i++) {
-			if (pcie_rkep->msi_ctx[i].dev)
-				free_irq(pci_irq_vector(pdev, i), &pcie_rkep->msi_ctx[i]);
-		}
-
-		pci_disable_msi(pcie_rkep->pdev);
-	}
+	pcie_rkep_release_irq(pcie_rkep);
 err_register_irq:
 	misc_deregister(&pcie_rkep->dev);
 err_pci_iomap:
@@ -1276,7 +1306,6 @@ err_pci_enable_dev:
 static void pcie_rkep_remove(struct pci_dev *pdev)
 {
 	struct pcie_rkep *pcie_rkep = pci_get_drvdata(pdev);
-	int i;
 
 	if (pcie_rkep->dma_obj)
 		pcie_dw_dmatest_unregister(pcie_rkep->dma_obj);
@@ -1285,6 +1314,8 @@ static void pcie_rkep_remove(struct pci_dev *pdev)
 #if IS_ENABLED(CONFIG_PCIE_FUNC_RKEP_USERPAGES)
 	free_contig_range(page_to_pfn(pcie_rkep->user_pages), RKEP_USER_MEM_SIZE >> PAGE_SHIFT);
 #endif
+	pcie_rkep_release_irq(pcie_rkep);
+
 	if (pcie_rkep->bar0)
 		pci_iounmap(pdev, pcie_rkep->bar0);
 	if (pcie_rkep->bar2)
@@ -1294,17 +1325,6 @@ static void pcie_rkep_remove(struct pci_dev *pdev)
 	pci_release_regions(pdev);
 	pci_disable_device(pdev);
 	misc_deregister(&pcie_rkep->dev);
-
-	if (pcie_rkep->msix_enable) {
-		for (i = 0; i < RKEP_NUM_MSIX_VECTORS; i++)
-			free_irq(pcie_rkep->msix_entries[i].vector, &pcie_rkep->msix_ctx[i]);
-		pci_disable_msix(pdev);
-	} else if (pcie_rkep->msi_enable) {
-		for (i = 0; i < RKEP_NUM_MSI_VECTORS; i++)
-			if (pcie_rkep->msi_ctx[i].dev)
-				free_irq(pci_irq_vector(pdev, i), &pcie_rkep->msi_ctx[i]);
-		pci_disable_msi(pcie_rkep->pdev);
-	}
 }
 
 static const struct pci_device_id pcie_rkep_pcidev_id[] = {
