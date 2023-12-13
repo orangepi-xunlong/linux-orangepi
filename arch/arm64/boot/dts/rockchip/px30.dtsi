@@ -136,7 +136,7 @@
 		rockchip,max-volt = <1350000>;
 		rockchip,evb-irdrop = <25000>;
 		nvmem-cells = <&cpu_leakage>, <&performance>;
-		nvmem-cell-names = "cpu_leakage", "performance";
+		nvmem-cell-names = "leakage", "performance";
 		rockchip,bin-scaling-sel = <
 			0               13
 			1               15
@@ -247,7 +247,7 @@
 		opp-shared;
 
 		nvmem-cells = <&cpu_leakage>;
-		nvmem-cell-names = "cpu_leakage";
+		nvmem-cell-names = "leakage";
 
 		rockchip,pvtm-voltage-sel = <
 			0        69850   0
