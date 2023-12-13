@@ -16,7 +16,7 @@
 
 		nvmem-cells = <&cpul_leakage>, <&specification_serial_number>,
 			      <&customer_demand>;
-		nvmem-cell-names = "cpu_leakage",
+		nvmem-cell-names = "leakage",
 				   "specification_serial_number",
 				   "customer_demand";
 		clocks = <&cru PLL_APLLL>;
@@ -109,7 +109,7 @@
 
 		nvmem-cells = <&cpub_leakage>, <&specification_serial_number>,
 			      <&customer_demand>;
-		nvmem-cell-names = "cpu_leakage",
+		nvmem-cell-names = "leakage",
 				   "specification_serial_number",
 				   "customer_demand";
 		clocks = <&cru PLL_APLLB>;
@@ -228,7 +228,7 @@
 		rockchip,low-temp-min-volt = <900000>;
 
 		nvmem-cells = <&gpu_leakage>;
-		nvmem-cell-names = "gpu_leakage";
+		nvmem-cell-names = "leakage";
 
 		rockchip,pvtm-voltage-sel = <
 			0        121000   0
