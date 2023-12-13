@@ -123,7 +123,7 @@
 			11  254   1
 		>;
 		nvmem-cells = <&cpu_leakage>;
-		nvmem-cell-names = "cpu_leakage";
+		nvmem-cell-names = "leakage";
 
 		opp-408000000 {
 			opp-hz = /bits/ 64 <408000000>;
@@ -203,7 +203,7 @@
 			11  254   1
 		>;
 		nvmem-cells = <&logic_leakage>;
-		nvmem-cell-names = "ddr_leakage";
+		nvmem-cell-names = "leakage";
 
 		opp-400000000 {
 			opp-hz = /bits/ 64 <400000000>;
@@ -891,7 +891,7 @@
 			11  254   1
 		>;
 		nvmem-cells = <&logic_leakage>;
-		nvmem-cell-names = "gpu_leakage";
+		nvmem-cell-names = "leakage";
 
 		opp-200000000 {
 			opp-hz = /bits/ 64 <200000000>;
@@ -1058,7 +1058,7 @@
 			11  254   1
 		>;
 		nvmem-cells = <&logic_leakage>;
-		nvmem-cell-names = "rkvdec_leakage";
+		nvmem-cell-names = "leakage";
 
 		opp-100000000 {
 			opp-hz = /bits/ 64 <100000000>;
