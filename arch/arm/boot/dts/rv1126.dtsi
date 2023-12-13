@@ -534,6 +534,16 @@
 			sustainable-power = <977>; /* milliwatts */
 
 			thermal-sensors = <&npu_tsadc 0>;
+
+			trips {
+				npu_crit: npu-crit {
+					/* millicelsius */
+					temperature = <115000>;
+					/* millicelsius */
+					hysteresis = <2000>;
+					type = "critical";
+				};
+			};
 		};
 	};
 
