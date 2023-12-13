@@ -891,6 +891,14 @@
 			polling-delay = <1000>;
 
 			thermal-sensors = <&tsadc 1>;
+
+			trips {
+				gpu_crit: gpu_crit {
+					temperature = <115000>; /* millicelsius */
+					hysteresis = <2000>; /* millicelsius */
+					type = "critical";
+				};
+			};
 		};
 	};
 
