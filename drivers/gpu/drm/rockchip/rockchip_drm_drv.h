@@ -587,6 +587,8 @@ int rockchip_drm_parse_next_hdr(struct next_hdr_sink_data *sink_data,
 				const struct edid *edid);
 int rockchip_drm_parse_colorimetry_data_block(u8 *colorimetry, const struct edid *edid);
 struct dma_buf *rockchip_drm_gem_prime_export(struct drm_gem_object *obj, int flags);
+long rockchip_drm_dclk_round_rate(u32 version, struct clk *dclk, unsigned long rate);
+int rockchip_drm_dclk_set_rate(u32 version, struct clk *dclk, unsigned long rate);
 
 __printf(3, 4)
 void rockchip_drm_dbg(const struct device *dev, enum rockchip_drm_debug_category category,
