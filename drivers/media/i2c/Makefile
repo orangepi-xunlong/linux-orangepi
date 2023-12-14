@@ -205,6 +205,7 @@ obj-$(CONFIG_VIDEO_RK_IRCUT) += rk_ircut.o
 obj-$(CONFIG_VIDEO_ROCKCHIP_THUNDER_BOOT_ISP)	+= cam-tb-setup.o
 obj-$(CONFIG_VIDEO_S5C73M3) += s5c73m3/
 obj-$(CONFIG_VIDEO_S5K3L6XX) += s5k3l6xx.o
+obj-$(CONFIG_VIDEO_S5K3L8XX) += s5k3l8xx.o
 obj-$(CONFIG_VIDEO_S5K4ECGX) += s5k4ecgx.o
 obj-$(CONFIG_VIDEO_S5K5BAF) += s5k5baf.o
 obj-$(CONFIG_VIDEO_S5K6A3) += s5k6a3.o

@@ -1617,6 +1617,15 @@ config VIDEO_S5K3L6XX
 	  This is a Video4Linux2 sensor driver for the Samsung
 	  S5K3L6XX camera.
 
+config VIDEO_S5K3L8XX
+	tristate "Samsung S5K3L8XX sensor support"
+	depends on I2C && VIDEO_DEV
+	depends on MEDIA_CAMERA_SUPPORT
+	select V4L2_FWNODE
+	help
+	  This is a Video4Linux2 sensor driver for the Samsung
+	  S5K3L8XX camera.
+
 config VIDEO_S5K4ECGX
 	tristate "Samsung S5K4ECGX sensor support"
 	depends on I2C && VIDEO_DEV
