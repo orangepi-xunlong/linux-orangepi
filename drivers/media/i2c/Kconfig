@@ -990,6 +990,17 @@ config VIDEO_OS04A10
 	  This is a Video4Linux2 sensor driver for the OmniVision
 	  OS04A10 camera.
 
+config VIDEO_OS04D10
+	tristate "OmniVision OS04D10 sensor support"
+	depends on I2C && VIDEO_DEV
+	depends on MEDIA_CAMERA_SUPPORT
+	select MEDIA_CONTROLLER
+	select VIDEO_V4L2_SUBDEV_API
+	select V4L2_FWNODE
+	help
+	  This is a Video4Linux2 sensor driver for the OmniVision
+	  OS04D10 camera.
+
 config VIDEO_OS05A20
 	tristate "OmniVision OS05A20 sensor support"
 	depends on I2C && VIDEO_DEV
@@ -1112,6 +1123,17 @@ config VIDEO_OV13B10
 	help
 	  This is a Video4Linux2 sensor driver for the OmniVision
 	  OV13B10 camera.
+
+config VIDEO_OV16885
+	tristate "OmniVision OV16885 sensor support"
+	depends on I2C && VIDEO_DEV
+	depends on MEDIA_CAMERA_SUPPORT
+	select MEDIA_CONTROLLER
+	select VIDEO_V4L2_SUBDEV_API
+	select V4L2_FWNODE
+	help
+	  This is a Video4Linux2 sensor driver for the OmniVision
+	  OV16885 camera.
 
 config VIDEO_OV16A10
 	tristate "OmniVision OV16A10 sensor support"
@@ -2032,6 +2054,18 @@ config VIDEO_DW9768
 	  This is a driver for the DW9768 camera lens voice coil.
 	  DW9768 is a 10 bit DAC with 100mA output current sink
 	  capability. This is designed for linear control of
+	  voice coil motors, controlled via I2C serial interface.
+
+config VIDEO_DW9800V
+	tristate "DW9800V lens voice coil support"
+	depends on I2C && VIDEO_DEV
+	select MEDIA_CONTROLLER
+	select VIDEO_V4L2_SUBDEV_API
+	select V4L2_FWNODE
+	help
+	  This is a driver for the DW9800V camera lens voice coil.
+	  DW9800W is a 10 bit DAC with ±130mA output current sink
+	  capability. This is designed for linear control of bi-direction
 	  voice coil motors, controlled via I2C serial interface.
 
 config VIDEO_DW9800W
