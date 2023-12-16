@@ -262,6 +262,19 @@ static const struct of_device_id rockchip_pcie_phy_dt_ids[] = {
 
 MODULE_DEVICE_TABLE(of, rockchip_pcie_phy_dt_ids);
 
+static void rockchip_pcie_phy_reset(struct rockchip_pcie_phy *rk_phy)
+{
+	int i;
+
+	for (i = 0; i < PHY_MAX_LANE_NUM; i++)
+		regmap_write(rk_phy->reg_base,
+			     rk_phy->phy_data->pcie_laneoff,
+			     FIELD_PREP_WM16(PHY_LANE_IDLE_MASK,
+					   PHY_LANE_IDLE_OFF) << i);
+
+	reset_control_assert(rk_phy->phy_rst);
+}
+
 static int rockchip_pcie_phy_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
@@ -305,6 +318,8 @@ static int rockchip_pcie_phy_probe(struct platform_device *pdev)
 
 	phy_num = (phy_num == 0) ? 1 : PHY_MAX_LANE_NUM;
 	dev_dbg(dev, "phy number is %d\n", phy_num);
+
+	rockchip_pcie_phy_reset(rk_phy);
 
 	for (i = 0; i < phy_num; i++) {
 		rk_phy->phys[i].phy = devm_phy_create(dev, dev->of_node, &ops);
