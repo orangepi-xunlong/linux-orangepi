@@ -577,6 +577,18 @@ config TOUCHSCREEN_WACOM_W8001
 	  To compile this driver as a module, choose M here: the
 	  module will be called wacom_w8001.
 
+config TOUCHSCREEN_WACOM_W9013
+	tristate "Wacom W9013 penabled serial touchscreen"
+	depends on I2C
+	help
+	  Say Y here if you have an Wacom W9013 penabled serial touchscreen
+	  connected to your system.
+
+	  If unsure, say N.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called wacom_w9013.
+
 config TOUCHSCREEN_WACOM_I2C
 	tristate "Wacom Tablet support (I2C)"
 	depends on I2C
