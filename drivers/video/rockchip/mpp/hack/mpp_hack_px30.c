@@ -176,6 +176,10 @@ int px30_workaround_combo_init(struct mpp_dev *mpp)
 			iommu->mmu_num++;
 		}
 		iommu->grf_val = mpp->grf_info->val & MPP_GRF_VAL_MASK;
+		/*
+		 * switch grf ctrl bit to ensure working in current hardware
+		 */
+		mpp_set_grf(mpp->grf_info);
 		if (mpp->hw_ops->clk_on)
 			mpp->hw_ops->clk_on(mpp);
 		/*
