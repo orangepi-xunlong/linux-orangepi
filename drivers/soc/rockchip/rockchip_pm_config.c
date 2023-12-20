@@ -18,6 +18,7 @@
 #include <linux/reboot.h>
 #include <linux/regulator/driver.h>
 #include <linux/regulator/machine.h>
+#include <linux/rockchip/rockchip_pm_config.h>
 #include <linux/rockchip/rockchip_sip.h>
 #include <linux/suspend.h>
 #include <dt-bindings/input/input.h>
@@ -52,11 +53,6 @@ static struct rk_on_off_regulator_list {
 } on_off_regs_list[RK_PM_STATE_MAX];
 #endif
 
-static struct rk_sleep_config {
-	u32 mode_config;
-	u32 wakeup_config;
-} sleep_config[RK_PM_STATE_MAX];
-
 /* rk_tag related defines */
 #define sleep_tag_next(t)	\
 	((struct rk_sleep_tag *)((__u32 *)(t) + (t)->hdr.size))
@@ -82,7 +78,10 @@ struct rk_mcu_sleep_tags {
 	struct rk_sleep_tag slp_tags;
 };
 
+struct rk_sleep_config *sleep_config;
+
 static const struct of_device_id pm_match_table[] = {
+	{ .compatible = "rockchip,pm-config",},
 	{ .compatible = "rockchip,pm-px30",},
 	{ .compatible = "rockchip,pm-rk1808",},
 	{ .compatible = "rockchip,pm-rk322x",},
@@ -263,6 +262,18 @@ static int parse_on_off_regulator(struct device_node *node, enum rk_pm_state sta
 
 	return 0;
 }
+
+const struct rk_sleep_config *rockchip_get_cur_sleep_config(void)
+{
+	suspend_state_t suspend_state = mem_sleep_current;
+	enum rk_pm_state state = suspend_state - PM_SUSPEND_MEM;
+
+	if (state >= RK_PM_STATE_MAX)
+		return NULL;
+
+	return &sleep_config[state];
+}
+EXPORT_SYMBOL_GPL(rockchip_get_cur_sleep_config);
 #endif
 
 static int parse_mcu_sleep_config(struct device_node *node)
@@ -374,17 +385,43 @@ out:
 	return ret;
 }
 
+static int parse_io_config(struct device *dev)
+{
+	int ret = 0, cnt;
+	struct device_node *node = dev->of_node;
+	struct rk_sleep_config *config = &sleep_config[RK_PM_MEM];
+
+	cnt = of_property_count_u32_elems(node, "rockchip,sleep-io-config");
+	if (cnt > 0) {
+		/* 0 as the last element of virtual_pwroff_irqs */
+		config->sleep_io_config =
+			devm_kmalloc_array(dev, cnt, sizeof(u32), GFP_KERNEL);
+		if (!config->sleep_io_config) {
+			ret = -ENOMEM;
+			goto out;
+		}
+
+		ret = of_property_read_u32_array(node, "rockchip,sleep-io-config",
+						 config->sleep_io_config, cnt);
+		if (ret) {
+			dev_err(dev, "get rockchip,sleep-io-config error\n");
+			goto out;
+		}
+
+		config->sleep_io_config_cnt = cnt;
+	} else {
+		dev_dbg(dev, "not set sleep-pin-config\n");
+	}
+
+out:
+	return ret;
+}
+
 static int pm_config_probe(struct platform_device *pdev)
 {
 	const struct of_device_id *match_id;
 	struct device_node *node;
-	struct rk_sleep_config *config = &sleep_config[RK_PM_MEM];
-	u32 pwm_regulator_config = 0;
-	int gpio_temp[10];
-	u32 sleep_debug_en = 0;
-	u32 apios_suspend = 0;
-	u32 io_ret_config = 0;
-	u32 sleep_pin_config[2] = {0};
+	struct rk_sleep_config *config;
 
 	enum of_gpio_flags flags;
 	int i = 0;
@@ -402,6 +439,14 @@ static int pm_config_probe(struct platform_device *pdev)
 		return -ENODEV;
 	}
 
+	sleep_config =
+		devm_kmalloc_array(&pdev->dev, RK_PM_STATE_MAX,
+				   sizeof(*sleep_config), GFP_KERNEL);
+	if (!sleep_config)
+		return -ENOMEM;
+
+	config = &sleep_config[RK_PM_MEM];
+
 	if (of_property_read_u32_array(node,
 				       "rockchip,sleep-mode-config",
 				       &config->mode_config, 1))
@@ -418,48 +463,56 @@ static int pm_config_probe(struct platform_device *pdev)
 
 	if (of_property_read_u32_array(node,
 				       "rockchip,pwm-regulator-config",
-				       &pwm_regulator_config, 1))
+				       &config->pwm_regulator_config, 1))
 		dev_warn(&pdev->dev, "not set pwm-regulator-config\n");
 	else
 		sip_smc_set_suspend_mode(PWM_REGULATOR_CONFIG,
-					 pwm_regulator_config,
+					 config->pwm_regulator_config,
 					 0);
 
 	length = of_gpio_named_count(node, "rockchip,power-ctrl");
 
 	if (length > 0 && length < 10) {
+		config->power_ctrl_config_cnt = length;
+		config->power_ctrl_config =
+			devm_kmalloc_array(&pdev->dev, length,
+					   sizeof(u32), GFP_KERNEL);
+		if (!config->power_ctrl_config)
+			return -ENOMEM;
+
 		for (i = 0; i < length; i++) {
-			gpio_temp[i] = of_get_named_gpio_flags(node,
-							     "rockchip,power-ctrl",
-							     i,
-							     &flags);
-			if (!gpio_is_valid(gpio_temp[i]))
+			config->power_ctrl_config[i] =
+				of_get_named_gpio_flags(node,
+							"rockchip,power-ctrl",
+							i,
+							&flags);
+			if (!gpio_is_valid(config->power_ctrl_config[i]))
 				break;
 			sip_smc_set_suspend_mode(GPIO_POWER_CONFIG,
 						 i,
-						 gpio_temp[i]);
+						 config->power_ctrl_config[i]);
 		}
 	}
 	sip_smc_set_suspend_mode(GPIO_POWER_CONFIG, i, PM_INVALID_GPIO);
 
 	if (!of_property_read_u32_array(node,
 					"rockchip,sleep-debug-en",
-					&sleep_debug_en, 1))
+					&config->sleep_debug_en, 1))
 		sip_smc_set_suspend_mode(SUSPEND_DEBUG_ENABLE,
-					 sleep_debug_en,
+					 config->sleep_debug_en,
 					 0);
 
 	if (!of_property_read_u32_array(node,
 					"rockchip,apios-suspend",
-					&apios_suspend, 1))
+					&config->apios_suspend, 1))
 		sip_smc_set_suspend_mode(APIOS_SUSPEND_CONFIG,
-					 apios_suspend,
+					 config->apios_suspend,
 					 0);
 
 	if (!of_property_read_u32_array(node,
 					"rockchip,sleep-io-ret-config",
-					&io_ret_config, 1)) {
-		ret = sip_smc_set_suspend_mode(SUSPEND_IO_RET_CONFIG, io_ret_config, 0);
+					&config->io_ret_config, 1)) {
+		ret = sip_smc_set_suspend_mode(SUSPEND_IO_RET_CONFIG, config->io_ret_config, 0);
 		if (ret)
 			dev_warn(&pdev->dev,
 				 "sleep-io-ret-config failed (%d), check parameters or update trust\n",
@@ -468,14 +521,17 @@ static int pm_config_probe(struct platform_device *pdev)
 
 	if (!of_property_read_u32_array(node,
 					"rockchip,sleep-pin-config",
-					sleep_pin_config, 2)) {
-		ret = sip_smc_set_suspend_mode(SLEEP_PIN_CONFIG, sleep_pin_config[0], sleep_pin_config[1]);
+					config->sleep_pin_config, 2)) {
+		ret = sip_smc_set_suspend_mode(SLEEP_PIN_CONFIG,
+					       config->sleep_pin_config[0],
+					       config->sleep_pin_config[1]);
 		if (ret)
 			dev_warn(&pdev->dev,
 				 "sleep-pin-config failed (%d), check parameters or update trust\n",
 				 ret);
 	}
 
+	parse_io_config(&pdev->dev);
 	parse_mcu_sleep_config(node);
 
 #ifndef MODULE
