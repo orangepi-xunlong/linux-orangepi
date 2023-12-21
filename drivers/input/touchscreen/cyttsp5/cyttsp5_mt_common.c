@@ -235,7 +235,7 @@ static void cyttsp5_get_mt_touches(struct cyttsp5_mt_data *md,
 	struct cyttsp5_sysinfo *si = md->si;
 	int sig;
 	int i, j, t = 0;
-	DECLARE_BITMAP(ids, si->tch_abs[CY_TCH_T].max);
+	DECLARE_BITMAP(ids, 32);
 	int mt_sync_count = 0;
 	u8 *tch_addr;
 
