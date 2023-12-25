@@ -49,7 +49,7 @@
 		enable-active-high;
 		regulator-boot-on;
 		regulator-always-on;
-		gpios = <&gpio0 RK_PC5 GPIO_ACTIVE_HIGH>;
+		gpios = <&gpio2 RK_PA1 GPIO_ACTIVE_HIGH>;
 		startup-delay-us = <50000>;
 		vin-supply = <&vcc5v0_sys>;
 	};
@@ -66,6 +66,22 @@
 			linux,default-trigger = "heartbeat";
 			linux,default-trigger-delay-ms = <0>;
 		};
+	};
+
+	fan: pwm-fan {
+		compatible = "pwm-fan";
+		#cooling-cells = <2>;
+		pwms = <&pwm12 0 50000 0>;
+		cooling-levels = <0 50 100 150 200 255>;
+		rockchip,temp-trips = <
+			50000   1
+			55000   2
+			60000   3
+			65000   4
+			70000   5
+		>;
+
+		status = "okay";
 	};
 };
 
@@ -212,6 +228,12 @@
 	status = "disabled";
 	pinctrl-names = "default";
 	pinctrl-0 = <&uart1m1_xfer>;
+};
+
+&pwm12 {
+	status = "okay";
+	pinctrl-names = "active";
+	pinctrl-0 = <&pwm12m1_pins>;
 };
 
 &pwm13 {
