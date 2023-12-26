@@ -1657,7 +1657,7 @@ void dw_hdmi_phy_i2c_write(struct dw_hdmi *hdmi, unsigned short data,
 		    HDMI_PHY_I2CM_DATAO_0_ADDR);
 	hdmi_writeb(hdmi, HDMI_PHY_I2CM_OPERATION_ADDR_WRITE,
 		    HDMI_PHY_I2CM_OPERATION_ADDR);
-	hdmi_phy_wait_i2c_done(hdmi, 1000);
+	hdmi_phy_wait_i2c_done(hdmi, 50);
 }
 EXPORT_SYMBOL_GPL(dw_hdmi_phy_i2c_write);
 
@@ -1699,7 +1699,7 @@ static int hdmi_phy_i2c_read(struct dw_hdmi *hdmi, unsigned char addr)
 	hdmi_writeb(hdmi, 0, HDMI_PHY_I2CM_DATAI_0_ADDR);
 	hdmi_writeb(hdmi, HDMI_PHY_I2CM_OPERATION_ADDR_READ,
 		    HDMI_PHY_I2CM_OPERATION_ADDR);
-	hdmi_phy_wait_i2c_done(hdmi, 1000);
+	hdmi_phy_wait_i2c_done(hdmi, 50);
 	val = hdmi_readb(hdmi, HDMI_PHY_I2CM_DATAI_1_ADDR);
 	val = (val & 0xff) << 8;
 	val += hdmi_readb(hdmi, HDMI_PHY_I2CM_DATAI_0_ADDR) & 0xff;
@@ -4005,10 +4005,10 @@ static void dw_hdmi_bridge_atomic_disable(struct drm_bridge *bridge,
 		hdmi->plat_data->dclk_set(hdmi->plat_data->phy_data, false, 0);
 	mutex_unlock(&hdmi->mutex);
 
-	mutex_lock(&hdmi->i2c->lock);
+	//mutex_lock(&hdmi->i2c->lock);
 	if (hdmi->plat_data->set_ddc_io)
 		hdmi->plat_data->set_ddc_io(data, false);
-	mutex_unlock(&hdmi->i2c->lock);
+	//mutex_unlock(&hdmi->i2c->lock);
 }
 
 static void dw_hdmi_bridge_atomic_enable(struct drm_bridge *bridge,

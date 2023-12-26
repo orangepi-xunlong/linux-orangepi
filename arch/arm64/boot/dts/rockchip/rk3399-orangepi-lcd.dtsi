@@ -1,0 +1,620 @@
+&pinctrl {
+	lcd {
+		lcd0_pin: lcd0-pin {
+			rockchip,pins = <0 RK_PB4 RK_FUNC_GPIO &pcfg_pull_none>,
+					<1 RK_PB5 RK_FUNC_GPIO &pcfg_pull_none>;
+		};
+
+		lcd1_pin: lcd1-pin {
+			rockchip,pins = <0 RK_PB0 RK_FUNC_GPIO &pcfg_pull_none>,
+					<4 RK_PD6 RK_FUNC_GPIO &pcfg_pull_none>;
+		};
+	};
+};
+
+&dsi {
+	status = "disabled";
+
+	afj101_panel: afj101-panel {
+		compatible = "simple-panel-dsi";
+		status = "disabled";
+		reg = <0>;
+		backlight = <&pwm_bl>;
+		enable-gpios = <&gpio0 RK_PB4 GPIO_ACTIVE_HIGH>;
+		reset-gpios = <&gpio1 RK_PB5 GPIO_ACTIVE_LOW>;
+
+		reset-delay-ms = <5>;
+		init-delay-ms = <200>;
+		prepare-delay-ms = <15>;
+
+		dsi,flags = <(MIPI_DSI_MODE_VIDEO | MIPI_DSI_MODE_VIDEO_BURST | MIPI_DSI_MODE_LPM)>;
+		dsi,format = <MIPI_DSI_FMT_RGB888>;
+		bus-format = <0x100a>;
+		dsi,lanes = <4>;
+
+		panel-init-sequence = [
+			39 00 04 FF 98 81 03
+
+			39 00 02 01 00
+			39 00 02 02 00
+			39 00 02 03 53
+			39 00 02 04 D3
+			39 00 02 05 00
+			39 00 02 06 0D
+			39 00 02 07 08
+			39 00 02 08 00
+			39 00 02 09 00
+			39 00 02 0a 00
+			39 00 02 0b 00
+			39 00 02 0c 00
+			39 00 02 0d 00
+			39 00 02 0e 00
+			39 00 02 0f 28
+			39 00 02 10 28
+			39 00 02 11 00
+			39 00 02 12 00
+			39 00 02 13 00
+			39 00 02 14 00
+			39 00 02 15 00
+			39 00 02 16 00
+			39 00 02 17 00
+			39 00 02 18 00
+			39 00 02 19 00
+			39 00 02 1a 00
+			39 00 02 1b 00
+			39 00 02 1c 00
+			39 00 02 1d 00
+			39 00 02 1e 40
+			39 00 02 1f 80
+			39 00 02 20 06
+			39 00 02 21 01
+			39 00 02 22 00
+			39 00 02 23 00
+			39 00 02 24 00
+			39 00 02 25 00
+			39 00 02 26 00
+			39 00 02 27 00
+			39 00 02 28 33
+			39 00 02 29 33
+			39 00 02 2a 00
+			39 00 02 2b 00
+			39 00 02 2c 00
+			39 00 02 2d 00
+			39 00 02 2e 00
+			39 00 02 2f 00
+			39 00 02 30 00
+			39 00 02 31 00
+			39 00 02 32 00
+			39 00 02 33 00
+			39 00 02 34 03
+			39 00 02 35 00
+			39 00 02 36 00
+			39 00 02 37 00
+			39 00 02 38 96
+			39 00 02 39 00
+			39 00 02 3a 00
+			39 00 02 3b 00
+			39 00 02 3c 00
+			39 00 02 3d 00
+			39 00 02 3e 00
+			39 00 02 3f 00
+			39 00 02 40 00
+			39 00 02 41 00
+			39 00 02 42 00
+			39 00 02 43 00
+			39 00 02 44 00
+
+			39 00 02 50 00
+			39 00 02 51 23
+			39 00 02 52 45
+			39 00 02 53 67
+			39 00 02 54 89
+			39 00 02 55 AB
+			39 00 02 56 01
+			39 00 02 57 23
+			39 00 02 58 45
+			39 00 02 59 67
+			39 00 02 5a 89
+			39 00 02 5b AB
+			39 00 02 5c CD
+			39 00 02 5d EF
+
+			39 00 02 5e 00
+			39 00 02 5f 08
+			39 00 02 60 08
+			39 00 02 61 06
+			39 00 02 62 06
+			39 00 02 63 01
+			39 00 02 64 01
+			39 00 02 65 00
+			39 00 02 66 00
+			39 00 02 67 02
+			39 00 02 68 15
+			39 00 02 69 15
+			39 00 02 6a 14
+			39 00 02 6b 14
+			39 00 02 6c 0D
+			39 00 02 6d 0D
+			39 00 02 6e 0C
+			39 00 02 6f 0C
+			39 00 02 70 0F
+			39 00 02 71 0F
+			39 00 02 72 0E
+			39 00 02 73 0E
+			39 00 02 74 02
+
+			39 00 02 75 08
+			39 00 02 76 08
+			39 00 02 77 06
+			39 00 02 78 06
+			39 00 02 79 01
+			39 00 02 7a 01
+			39 00 02 7b 00
+			39 00 02 7c 00
+			39 00 02 7d 02
+			39 00 02 7e 15
+			39 00 02 7f 15
+			39 00 02 80 14
+			39 00 02 81 14
+			39 00 02 82 0D
+			39 00 02 83 0D
+			39 00 02 84 0C
+			39 00 02 85 0C
+			39 00 02 86 0F
+			39 00 02 87 0F
+			39 00 02 88 0E
+			39 00 02 89 0E
+			39 00 02 8A 02
+
+			39 00 04 FF 98 81 04
+
+			39 00 02 6E 2B
+			39 00 02 6F 37
+			39 00 02 3A A4
+			39 00 02 8D 1A
+			39 00 02 87 BA
+			39 00 02 B2 D1
+			39 00 02 88 0B
+			39 00 02 38 01
+			39 00 02 39 00
+			39 00 02 B5 07
+			39 00 02 31 75
+			39 00 02 3B 98
+
+			39 00 04 FF 98 81 01
+			39 00 02 43 33
+			39 00 02 22 0A
+			39 00 02 31 00
+			39 00 02 53 48
+			39 00 02 55 48
+			39 00 02 50 99
+			39 00 02 51 94
+			39 00 02 60 10
+			39 00 02 62 20
+
+			39 00 02 A0 00
+			39 00 02 A1 00
+			39 00 02 A2 15
+			39 00 02 A3 14
+			39 00 02 A4 1B
+			39 00 02 A5 2F
+			39 00 02 A6 25
+			39 00 02 A7 24
+			39 00 02 A8 80
+			39 00 02 A9 1F
+			39 00 02 AA 2C
+			39 00 02 AB 6C
+			39 00 02 AC 16
+			39 00 02 AD 14
+			39 00 02 AE 4D
+			39 00 02 AF 20
+			39 00 02 B0 29
+			39 00 02 B1 4F
+			39 00 02 B2 5F
+			39 00 02 B3 23
+
+			39 00 02 C0 00
+			39 00 02 C1 2E
+			39 00 02 C2 3B
+			39 00 02 C3 15
+			39 00 02 C4 16
+			39 00 02 C5 28
+			39 00 02 C6 1A
+			39 00 02 C7 1C
+			39 00 02 C8 A7
+			39 00 02 C9 1B
+			39 00 02 CA 28
+			39 00 02 CB 92
+			39 00 02 CC 1F
+			39 00 02 CD 1C
+			39 00 02 CE 4B
+			39 00 02 CF 1F
+			39 00 02 D0 28
+			39 00 02 D1 4E
+			39 00 02 D2 5C
+			39 00 02 D3 23
+
+			39 00 04 FF 98 81 00
+			39 00 02 11 00
+			39 78 02 29 00
+			39 00 02 35 00
+		];
+
+		panel-exit-sequence = [
+			05 00 01 28
+			05 78 01 10
+		];
+
+		display-timings {
+			native-mode = <&afj101_timing>;
+
+			afj101_timing: afj101-timing {
+				clock-frequency = <66000000>;
+				screen-type = <7>;
+				out-face    = <0>;
+				hactive = <800>;
+				vactive = <1280>;
+				hback-porch = <20>;
+				hfront-porch = <40>;
+				vback-porch = <12>;
+				vfront-porch = <30>;
+				hsync-len = <5>;
+				vsync-len = <5>;
+				hsync-active = <20>;
+				vsync-active = <4>;
+				de-active = <0>;
+				pixelclk-active = <0>;
+				swap-rb = <0>;
+				swap-rg = <0>;
+				swap-gb = <0>;
+			};
+		};
+
+		ports {
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			port@0 {
+				reg = <0>;
+				panel_in_dsi: endpoint {
+					remote-endpoint = <&dsi_out_panel>;
+				};
+			};
+		};
+	};
+
+	ports {
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		port@1 {
+			reg = <1>;
+			dsi_out_panel: endpoint {
+				remote-endpoint = <&panel_in_dsi>;
+			};
+		};
+	};
+};
+
+&dsi1 {
+	status = "disabled";
+
+	afj101_panel1: afj101-panel1 {
+		compatible = "simple-panel-dsi";
+		status = "disabled";
+		reg = <0>;
+		backlight = <&pwm_bl>;
+		enable-gpios = <&gpio4 RK_PD6 GPIO_ACTIVE_HIGH>;
+		reset-gpios = <&gpio0 RK_PB0 GPIO_ACTIVE_LOW>;
+
+		reset-delay-ms = <5>;
+		init-delay-ms = <200>;
+		prepare-delay-ms = <15>;
+
+		dsi,flags = <(MIPI_DSI_MODE_VIDEO | MIPI_DSI_MODE_VIDEO_BURST | MIPI_DSI_MODE_LPM)>;
+		dsi,format = <MIPI_DSI_FMT_RGB888>;
+		bus-format = <0x100a>;
+		dsi,lanes = <4>;
+
+		panel-init-sequence = [
+			39 00 04 FF 98 81 03
+
+			39 00 02 01 00
+			39 00 02 02 00
+			39 00 02 03 53
+			39 00 02 04 D3
+			39 00 02 05 00
+			39 00 02 06 0D
+			39 00 02 07 08
+			39 00 02 08 00
+			39 00 02 09 00
+			39 00 02 0a 00
+			39 00 02 0b 00
+			39 00 02 0c 00
+			39 00 02 0d 00
+			39 00 02 0e 00
+			39 00 02 0f 28
+			39 00 02 10 28
+			39 00 02 11 00
+			39 00 02 12 00
+			39 00 02 13 00
+			39 00 02 14 00
+			39 00 02 15 00
+			39 00 02 16 00
+			39 00 02 17 00
+			39 00 02 18 00
+			39 00 02 19 00
+			39 00 02 1a 00
+			39 00 02 1b 00
+			39 00 02 1c 00
+			39 00 02 1d 00
+			39 00 02 1e 40
+			39 00 02 1f 80
+			39 00 02 20 06
+			39 00 02 21 01
+			39 00 02 22 00
+			39 00 02 23 00
+			39 00 02 24 00
+			39 00 02 25 00
+			39 00 02 26 00
+			39 00 02 27 00
+			39 00 02 28 33
+			39 00 02 29 33
+			39 00 02 2a 00
+			39 00 02 2b 00
+			39 00 02 2c 00
+			39 00 02 2d 00
+			39 00 02 2e 00
+			39 00 02 2f 00
+			39 00 02 30 00
+			39 00 02 31 00
+			39 00 02 32 00
+			39 00 02 33 00
+			39 00 02 34 03
+			39 00 02 35 00
+			39 00 02 36 00
+			39 00 02 37 00
+			39 00 02 38 96
+			39 00 02 39 00
+			39 00 02 3a 00
+			39 00 02 3b 00
+			39 00 02 3c 00
+			39 00 02 3d 00
+			39 00 02 3e 00
+			39 00 02 3f 00
+			39 00 02 40 00
+			39 00 02 41 00
+			39 00 02 42 00
+			39 00 02 43 00
+			39 00 02 44 00
+
+			39 00 02 50 00
+			39 00 02 51 23
+			39 00 02 52 45
+			39 00 02 53 67
+			39 00 02 54 89
+			39 00 02 55 AB
+			39 00 02 56 01
+			39 00 02 57 23
+			39 00 02 58 45
+			39 00 02 59 67
+			39 00 02 5a 89
+			39 00 02 5b AB
+			39 00 02 5c CD
+			39 00 02 5d EF
+
+			39 00 02 5e 00
+			39 00 02 5f 08
+			39 00 02 60 08
+			39 00 02 61 06
+			39 00 02 62 06
+			39 00 02 63 01
+			39 00 02 64 01
+			39 00 02 65 00
+			39 00 02 66 00
+			39 00 02 67 02
+			39 00 02 68 15
+			39 00 02 69 15
+			39 00 02 6a 14
+			39 00 02 6b 14
+			39 00 02 6c 0D
+			39 00 02 6d 0D
+			39 00 02 6e 0C
+			39 00 02 6f 0C
+			39 00 02 70 0F
+			39 00 02 71 0F
+			39 00 02 72 0E
+			39 00 02 73 0E
+			39 00 02 74 02
+
+			39 00 02 75 08
+			39 00 02 76 08
+			39 00 02 77 06
+			39 00 02 78 06
+			39 00 02 79 01
+			39 00 02 7a 01
+			39 00 02 7b 00
+			39 00 02 7c 00
+			39 00 02 7d 02
+			39 00 02 7e 15
+			39 00 02 7f 15
+			39 00 02 80 14
+			39 00 02 81 14
+			39 00 02 82 0D
+			39 00 02 83 0D
+			39 00 02 84 0C
+			39 00 02 85 0C
+			39 00 02 86 0F
+			39 00 02 87 0F
+			39 00 02 88 0E
+			39 00 02 89 0E
+			39 00 02 8A 02
+
+			39 00 04 FF 98 81 04
+
+			39 00 02 6E 2B
+			39 00 02 6F 37
+			39 00 02 3A A4
+			39 00 02 8D 1A
+			39 00 02 87 BA
+			39 00 02 B2 D1
+			39 00 02 88 0B
+			39 00 02 38 01
+			39 00 02 39 00
+			39 00 02 B5 07
+			39 00 02 31 75
+			39 00 02 3B 98
+
+			39 00 04 FF 98 81 01
+			39 00 02 43 33
+			39 00 02 22 0A
+			39 00 02 31 00
+			39 00 02 53 48
+			39 00 02 55 48
+			39 00 02 50 99
+			39 00 02 51 94
+			39 00 02 60 10
+			39 00 02 62 20
+
+			39 00 02 A0 00
+			39 00 02 A1 00
+			39 00 02 A2 15
+			39 00 02 A3 14
+			39 00 02 A4 1B
+			39 00 02 A5 2F
+			39 00 02 A6 25
+			39 00 02 A7 24
+			39 00 02 A8 80
+			39 00 02 A9 1F
+			39 00 02 AA 2C
+			39 00 02 AB 6C
+			39 00 02 AC 16
+			39 00 02 AD 14
+			39 00 02 AE 4D
+			39 00 02 AF 20
+			39 00 02 B0 29
+			39 00 02 B1 4F
+			39 00 02 B2 5F
+			39 00 02 B3 23
+
+			39 00 02 C0 00
+			39 00 02 C1 2E
+			39 00 02 C2 3B
+			39 00 02 C3 15
+			39 00 02 C4 16
+			39 00 02 C5 28
+			39 00 02 C6 1A
+			39 00 02 C7 1C
+			39 00 02 C8 A7
+			39 00 02 C9 1B
+			39 00 02 CA 28
+			39 00 02 CB 92
+			39 00 02 CC 1F
+			39 00 02 CD 1C
+			39 00 02 CE 4B
+			39 00 02 CF 1F
+			39 00 02 D0 28
+			39 00 02 D1 4E
+			39 00 02 D2 5C
+			39 00 02 D3 23
+
+			39 00 04 FF 98 81 00
+			39 00 02 11 00
+			39 78 02 29 00
+			39 00 02 35 00
+		];
+
+		panel-exit-sequence = [
+			05 00 01 28
+			05 78 01 10
+		];
+
+		display-timings {
+			native-mode = <&afj101_timing1>;
+
+			afj101_timing1: afj101-timing1 {
+				clock-frequency = <66000000>;
+				screen-type = <7>;
+				out-face    = <0>;
+				hactive = <800>;
+				vactive = <1280>;
+				hback-porch = <20>;
+				hfront-porch = <40>;
+				vback-porch = <12>;
+				vfront-porch = <30>;
+				hsync-len = <5>;
+				vsync-len = <5>;
+				hsync-active = <20>;
+				vsync-active = <4>;
+				de-active = <0>;
+				pixelclk-active = <0>;
+				swap-rb = <0>;
+				swap-rg = <0>;
+				swap-gb = <0>;
+			};
+		};
+
+		ports {
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			port@0 {
+				reg = <0>;
+				panel_in_dsi1: endpoint {
+					remote-endpoint = <&dsi1_out_panel>;
+				};
+			};
+		};
+
+	};
+
+	ports {
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		port@1 {
+			reg = <1>;
+			dsi1_out_panel: endpoint {
+				remote-endpoint = <&panel_in_dsi1>;
+			};
+		};
+	};
+};
+
+&i2c1 {
+	status = "okay";
+
+	gt9xx_1: touchscreen@14 {
+		compatible = "goodix,gt9271";
+		reg = <0x14>;
+		interrupt-parent = <&gpio4>;
+		interrupts = <RK_PD5 IRQ_TYPE_LEVEL_LOW>;
+		irq-gpios = <&gpio4 RK_PD5 IRQ_TYPE_LEVEL_LOW>;
+		reset-gpios = <&gpio4 RK_PD2 GPIO_ACTIVE_HIGH>;
+		touchscreen-inverted-x;
+		//touchscreen-inverted-y;
+		touchscreen-swapped-x-y;
+		touchscreen-size-x = <1280>;
+		touchscreen-size-y = <800>;
+		status = "disabled";
+	};
+};
+
+&i2c2 {
+	status = "okay";
+
+	gt9xx_0: touchscreen@14 {
+		compatible = "goodix,gt9271";
+		reg = <0x14>;
+		interrupt-parent = <&gpio4>;
+		interrupts = <RK_PD0 IRQ_TYPE_LEVEL_LOW>;
+		irq-gpios = <&gpio4 RK_PD0 IRQ_TYPE_LEVEL_LOW>;
+		reset-gpios = <&gpio4 RK_PD1 GPIO_ACTIVE_HIGH>;
+		touchscreen-inverted-x;
+		//touchscreen-inverted-y;
+		touchscreen-swapped-x-y;
+		touchscreen-size-x = <1280>;
+		touchscreen-size-y = <800>;
+		status = "disabled";
+	};
+};

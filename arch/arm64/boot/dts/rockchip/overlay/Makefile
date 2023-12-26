@@ -96,11 +96,20 @@ dtbo-$(CONFIG_ARCH_ROCKCHIP) += \
 	rk356x-pwm15-m1.dtbo \
 	rk356x-pwm7.dtbo \
 	rk356x-ov5647-c1.dtbo \
-	rk356x-ov5647-c2.dtbo
+	rk356x-ov5647-c2.dtbo \
+	rk3399-lcd1.dtbo \
+	rk3399-lcd2.dtbo \
+	rk3399-camera1.dtbo \
+	rk3399-camera2.dtbo \
+	rk3399-i2c3.dtbo \
+	rk3399-i2c8.dtbo \
+	rk3399-uart4.dtbo \
+	rk3399-spi1-spidev.dtbo
 
 scr-$(CONFIG_ARCH_ROCKCHIP) += \
 	rk3588-fixup.scr \
-	rk356x-fixup.scr
+	rk356x-fixup.scr \
+	rk3399-fixup.scr
 
 dtbotxt-$(CONFIG_ARCH_ROCKCHIP) += \
 	README.rockchip-overlays
