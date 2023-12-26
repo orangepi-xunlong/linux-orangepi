@@ -11938,7 +11938,10 @@ static int vop2_devfreq_set_aclk(struct drm_crtc *crtc, enum rockchip_drm_vop_ac
 		return 0;
 
 	vop2->aclk_target_freq = vop2->aclk_mode_rate[aclk_mode];
+
+	mutex_lock(&vop2->devfreq->lock);
 	ret = update_devfreq(vop2->devfreq);
+	mutex_unlock(&vop2->devfreq->lock);
 	if (ret)
 		dev_err(vop2->dev, "failed to set rate %lu\n", vop2->aclk_target_freq);
 
