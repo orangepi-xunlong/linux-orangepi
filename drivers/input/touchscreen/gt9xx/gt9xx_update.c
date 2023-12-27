@@ -101,7 +101,9 @@ typedef struct
     struct file *file; 
     struct file *cfg_file;
     st_fw_head  ic_fw_msg;
+#if 0
     mm_segment_t old_fs;
+#endif
     u32 fw_total_len;
     u32 fw_burned_len;
 }st_update_msg;
@@ -3445,8 +3447,10 @@ static s32 gup_prepare_fl_fw(char *path, st_fw_head *fw_head)
         return FAIL;
     }
     
+#if 0
     update_msg.old_fs = get_fs();
     set_fs(KERNEL_DS);
+#endif
     
     update_msg.file->f_op->llseek(update_msg.file, 0, SEEK_SET);
     update_msg.fw_total_len = update_msg.file->f_op->llseek(update_msg.file, 0, SEEK_END);
@@ -3460,7 +3464,9 @@ static s32 gup_prepare_fl_fw(char *path, st_fw_head *fw_head)
 				  (unsigned int)sizeof(gtp_default_FW_fl) / 1024,
 				  update_msg.fw_total_len,
 				  update_msg.fw_total_len / 1024);
+#if 0
         set_fs(update_msg.old_fs);
+#endif
         _CLOSE_FILE(update_msg.file);
         return FAIL;
     }
@@ -3472,7 +3478,9 @@ static s32 gup_prepare_fl_fw(char *path, st_fw_head *fw_head)
     ret = update_msg.file->f_op->read(update_msg.file, (char*)gtp_default_FW_fl, 
                              update_msg.fw_total_len + FW_HEAD_LENGTH,
                                 &update_msg.file->f_pos);
+#if 0
     set_fs(update_msg.old_fs);
+#endif
     _CLOSE_FILE(update_msg.file);
     
     if (ret < 0)
