@@ -99,6 +99,8 @@
  */
 #define RKCIF_STOP_MAX_WAIT_TIME_MS	(500)
 
+#define RKCIF_SKIP_FRAME_MAX		(16)
+
 enum rkcif_workmode {
 	RKCIF_WORKMODE_ONEFRAME = 0x00,
 	RKCIF_WORKMODE_PINGPONG = 0x01,
@@ -476,6 +478,18 @@ struct rkcif_sync_cfg {
 	u32 group;
 };
 
+enum rkcif_toisp_buf_update_state {
+	RKCIF_TOISP_BUF_ROTATE,
+	RKCIF_TOISP_BUF_THESAME,
+	RKCIF_TOISP_BUF_LOSS,
+};
+
+struct rkcif_toisp_buf_state {
+	enum rkcif_toisp_buf_update_state state;
+	int check_cnt;
+	bool is_early_update;
+};
+
 /*
  * struct rkcif_stream - Stream states TODO
  *
@@ -547,6 +561,9 @@ struct rkcif_stream {
 	int				new_fource_idx;
 	atomic_t			buf_cnt;
 	struct completion		stop_complete;
+	struct rkcif_toisp_buf_state	toisp_buf_state;
+	u32				skip_frame;
+	u32				cur_skip_frame;
 	bool				stopping;
 	bool				crop_enable;
 	bool				crop_dyn_en;
@@ -1006,5 +1023,13 @@ void rkcif_rockit_dev_deinit(void);
 void rkcif_err_print_work(struct work_struct *work);
 int rkcif_stream_suspend(struct rkcif_device *cif_dev, int mode);
 int rkcif_stream_resume(struct rkcif_device *cif_dev, int mode);
+
+static inline u64 rkcif_time_get_ns(struct rkcif_device *dev)
+{
+	if (dev->chip_id == CHIP_RV1106_CIF)
+		return ktime_get_boottime_ns();
+	else
+		return ktime_get_ns();
+}
 
 #endif
