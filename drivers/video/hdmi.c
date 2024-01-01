@@ -1087,6 +1087,8 @@ hdmi_picture_aspect_get_name(enum hdmi_picture_aspect picture_aspect)
 		return "64:27";
 	case HDMI_PICTURE_ASPECT_256_135:
 		return "256:135";
+	case HDMI_PICTURE_ASPECT_5_3:
+		return "5:3";
 	case HDMI_PICTURE_ASPECT_RESERVED:
 		return "Reserved";
 	}

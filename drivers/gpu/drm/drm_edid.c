@@ -1561,6 +1561,16 @@ static const struct drm_display_mode edid_cea_modes_193[] = {
 		   4272, 4400, 0, 2160, 2168, 2178, 2250, 0,
 		   DRM_MODE_FLAG_PHSYNC | DRM_MODE_FLAG_PVSYNC),
 	  .picture_aspect_ratio = HDMI_PICTURE_ASPECT_256_135, },
+	/* 220 - 800x480@60Hz 5:3 */
+	{ DRM_MODE("800x480", DRM_MODE_TYPE_DRIVER, 30240, 800, 850,
+		   920, 960, 0, 480, 510, 513, 525, 0,
+		   DRM_MODE_FLAG_PHSYNC | DRM_MODE_FLAG_PVSYNC),
+	  .picture_aspect_ratio = HDMI_PICTURE_ASPECT_5_3, },
+	/* 221 - 800x480@60Hz 5:3, MKS IPS50 */
+	{ DRM_MODE("800x480", DRM_MODE_TYPE_DRIVER, 30240, 800, 850,
+		   950, 960, 0, 480, 510, 513, 525, 0,
+		   DRM_MODE_FLAG_PHSYNC | DRM_MODE_FLAG_PVSYNC),
+	  .picture_aspect_ratio = HDMI_PICTURE_ASPECT_5_3, },
 };
 
 /*
@@ -4236,7 +4246,7 @@ static bool drm_edid_has_cta_extension(const struct drm_edid *drm_edid)
 static __always_inline const struct drm_display_mode *cea_mode_for_vic(u8 vic)
 {
 	BUILD_BUG_ON(1 + ARRAY_SIZE(edid_cea_modes_1) - 1 != 127);
-	BUILD_BUG_ON(193 + ARRAY_SIZE(edid_cea_modes_193) - 1 != 219);
+	BUILD_BUG_ON(193 + ARRAY_SIZE(edid_cea_modes_193) - 1 != 221);
 
 	if (vic >= 1 && vic < 1 + ARRAY_SIZE(edid_cea_modes_1))
 		return &edid_cea_modes_1[vic - 1];
