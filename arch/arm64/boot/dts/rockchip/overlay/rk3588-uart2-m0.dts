@@ -1,0 +1,21 @@
+/dts-v1/;
+/plugin/;
+
+/ {
+	fragment@0 {
+		target = <&uart2>;
+
+		__overlay__ {
+			status = "okay";
+			pinctrl-0 = <&uart2m0_xfer>;
+		};
+	};
+
+	fragment@1 {
+		target = <&fiq_debugger>;
+
+		__overlay__ {
+			status = "disabled";
+		};
+	};
+};
