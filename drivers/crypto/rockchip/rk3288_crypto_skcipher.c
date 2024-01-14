@@ -363,6 +363,7 @@ static int rk_cipher_run(struct crypto_engine *engine, void *async_req)
 			}
 		}
 		err = 0;
+		mutex_unlock(&rkc->lock);
 		rk_cipher_hw_init(rkc, areq);
 		if (ivsize) {
 			if (ivsize == DES_BLOCK_SIZE)
@@ -378,6 +379,7 @@ static int rk_cipher_run(struct crypto_engine *engine, void *async_req)
 		crypto_dma_start(rkc, sgs, sgd, todo / 4);
 		wait_for_completion_interruptible_timeout(&rkc->complete,
 							  msecs_to_jiffies(2000));
+		mutex_unlock(&rkc->lock);
 		if (!rkc->status) {
 			dev_err(rkc->dev, "DMA timeout\n");
 			err = -EFAULT;

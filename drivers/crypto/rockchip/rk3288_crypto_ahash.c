@@ -298,6 +298,7 @@ static int rk_hash_run(struct crypto_engine *engine, void *breq)
 		goto theend;
 	}
 
+	mutex_lock(&rkc->lock);
 	rk_ahash_reg_init(areq, rkc);
 
 	while (sg) {
@@ -332,6 +333,7 @@ static int rk_hash_run(struct crypto_engine *engine, void *breq)
 	}
 
 theend:
+	mutex_unlock(&rkc->lock);
 	pm_runtime_put_autosuspend(rkc->dev);
 
 	rk_hash_unprepare(engine, breq);
