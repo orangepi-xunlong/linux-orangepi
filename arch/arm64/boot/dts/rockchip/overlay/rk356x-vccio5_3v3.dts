@@ -1,0 +1,12 @@
+/dts-v1/;
+/plugin/;
+
+/ {
+	fragment@0 {
+		target = <&pmu_io_domains>;
+
+		__overlay__ {
+			vccio5-supply = <&vcc_3v3>;
+		};
+	};
+};
