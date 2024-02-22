@@ -712,7 +712,7 @@
 		status = "okay";
 		#sound-dai-cells = <0>;
 		compatible = "everest,es8388", "everest,es8323";
-		reg = <0x10>;
+		reg = <0x11>;
 		clocks = <&mclkout_i2s2>;
 		clock-names = "mclk";
 		assigned-clocks = <&mclkout_i2s2>;
@@ -749,9 +749,9 @@
 		compatible = "goodix,gt9271";
 		reg = <0x14>;
 		interrupt-parent = <&gpio0>;
-		interrupts = <RK_PD3 IRQ_TYPE_LEVEL_LOW>;
-		irq-gpios = <&gpio0 RK_PD3 IRQ_TYPE_LEVEL_LOW>;
-		reset-gpios = <&gpio0 RK_PD4 GPIO_ACTIVE_HIGH>;
+		interrupts = <RK_PD4 IRQ_TYPE_LEVEL_LOW>;
+		irq-gpios = <&gpio0 RK_PD4 IRQ_TYPE_LEVEL_LOW>;
+		reset-gpios = <&gpio0 RK_PD3 GPIO_ACTIVE_HIGH>;
 		touchscreen-inverted-x;
 		//touchscreen-inverted-y;
 		touchscreen-swapped-x-y;
@@ -763,6 +763,10 @@
 
 &i2s2_2ch {
 	status = "okay";
+	pinctrl-0 = <&i2s2m1_lrck
+		     &i2s2m1_sclk
+		     &i2s2m1_sdi
+		     &i2s2m1_sdo>;
 };
 
 &i2s5_8ch {
