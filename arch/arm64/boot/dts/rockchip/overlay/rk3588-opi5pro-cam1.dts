@@ -56,6 +56,14 @@
 		__overlay__ {
 			status = "okay";
 
+			vm149c-p1@c {
+				status = "okay";
+			};
+
+			ov13850-1@10 {
+				status = "okay";
+			};
+
 			dw9714-p1@c {
 				status = "okay";
 			};
