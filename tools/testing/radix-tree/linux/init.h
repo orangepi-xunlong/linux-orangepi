@@ -1,1 +1,2 @@
-/* An empty file stub that allows radix-tree.c to compile. */
+#define __init
+#define __exit

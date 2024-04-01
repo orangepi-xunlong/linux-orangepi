@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 #ifndef _DRIVERS_VIRTIO_VIRTIO_PCI_COMMON_H
 #define _DRIVERS_VIRTIO_VIRTIO_PCI_COMMON_H
 /*
@@ -13,10 +14,6 @@
  *  Anthony Liguori  <aliguori@us.ibm.com>
  *  Rusty Russell <rusty@rustcorp.com.au>
  *  Michael S. Tsirkin <mst@redhat.com>
- *
- * This work is licensed under the terms of the GNU GPL, version 2 or later.
- * See the COPYING file in the top-level directory.
- *
  */
 
 #include <linux/module.h>
@@ -28,6 +25,8 @@
 #include <linux/virtio_config.h>
 #include <linux/virtio_ring.h>
 #include <linux/virtio_pci.h>
+#include <linux/virtio_pci_legacy.h>
+#include <linux/virtio_pci_modern.h>
 #include <linux/highmem.h>
 #include <linux/spinlock.h>
 
@@ -39,41 +38,20 @@ struct virtio_pci_vq_info {
 	struct list_head node;
 
 	/* MSI-X vector (or none) */
-	unsigned msix_vector;
+	unsigned int msix_vector;
 };
 
 /* Our device structure */
 struct virtio_pci_device {
 	struct virtio_device vdev;
 	struct pci_dev *pci_dev;
+	struct virtio_pci_legacy_device ldev;
+	struct virtio_pci_modern_device mdev;
 
-	/* In legacy mode, these two point to within ->legacy. */
+	bool is_legacy;
+
 	/* Where to read and clear interrupt */
 	u8 __iomem *isr;
-
-	/* Modern only fields */
-	/* The IO mapping for the PCI config space (non-legacy mode) */
-	struct virtio_pci_common_cfg __iomem *common;
-	/* Device-specific data (non-legacy mode)  */
-	void __iomem *device;
-	/* Base of vq notifications (non-legacy mode). */
-	void __iomem *notify_base;
-
-	/* So we can sanity-check accesses. */
-	size_t notify_len;
-	size_t device_len;
-
-	/* Capability for when we need to map notifications per-vq. */
-	int notify_map_cap;
-
-	/* Multiply queue_notify_off by this value. (non-legacy mode). */
-	u32 notify_offset_multiplier;
-
-	int modern_bars;
-
-	/* Legacy only field */
-	/* the IO mapping for the PCI config space */
-	void __iomem *ioaddr;
 
 	/* a list of queues so we can dispatch IRQs */
 	spinlock_t lock;
@@ -85,24 +63,24 @@ struct virtio_pci_device {
 	/* MSI-X support */
 	int msix_enabled;
 	int intx_enabled;
-	struct msix_entry *msix_entries;
 	cpumask_var_t *msix_affinity_masks;
 	/* Name strings for interrupts. This size should be enough,
 	 * and I'm too lazy to allocate each name separately. */
 	char (*msix_names)[256];
 	/* Number of available vectors */
-	unsigned msix_vectors;
+	unsigned int msix_vectors;
 	/* Vectors allocated, excluding per-vq vectors if any */
-	unsigned msix_used_vectors;
+	unsigned int msix_used_vectors;
 
 	/* Whether we have vector per vq */
 	bool per_vq_vectors;
 
 	struct virtqueue *(*setup_vq)(struct virtio_pci_device *vp_dev,
 				      struct virtio_pci_vq_info *info,
-				      unsigned idx,
+				      unsigned int idx,
 				      void (*callback)(struct virtqueue *vq),
 				      const char *name,
+				      bool ctx,
 				      u16 msix_vec);
 	void (*del_vq)(struct virtio_pci_vq_info *info);
 
@@ -130,10 +108,10 @@ bool vp_notify(struct virtqueue *vq);
 /* the config->del_vqs() implementation */
 void vp_del_vqs(struct virtio_device *vdev);
 /* the config->find_vqs() implementation */
-int vp_find_vqs(struct virtio_device *vdev, unsigned nvqs,
-		       struct virtqueue *vqs[],
-		       vq_callback_t *callbacks[],
-		       const char * const names[]);
+int vp_find_vqs(struct virtio_device *vdev, unsigned int nvqs,
+		struct virtqueue *vqs[], vq_callback_t *callbacks[],
+		const char * const names[], const bool *ctx,
+		struct irq_affinity *desc);
 const char *vp_bus_name(struct virtio_device *vdev);
 
 /* Setup the affinity for a virtqueue:
@@ -141,7 +119,9 @@ const char *vp_bus_name(struct virtio_device *vdev);
  * - OR over all affinities for shared MSI
  * - ignore the affinity request if we're using INTX
  */
-int vp_set_vq_affinity(struct virtqueue *vq, int cpu);
+int vp_set_vq_affinity(struct virtqueue *vq, const struct cpumask *cpu_mask);
+
+const struct cpumask *vp_get_vq_affinity(struct virtio_device *vdev, int index);
 
 #if IS_ENABLED(CONFIG_VIRTIO_PCI_LEGACY)
 int virtio_pci_legacy_probe(struct virtio_pci_device *);

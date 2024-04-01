@@ -1,12 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Hitachi UL SolutionEngine 7722 FPGA IRQ Support.
  *
  * Copyright (C) 2007  Nobuhiro Iwamatsu
  * Copyright (C) 2012  Paul Mundt
- *
- * This file is subject to the terms and conditions of the GNU General Public
- * License.  See the file "COPYING" in the main directory of this archive
- * for more details.
  */
 #define DRV_NAME "SE7722-FPGA"
 #define pr_fmt(fmt) DRV_NAME ": " fmt
@@ -17,7 +14,7 @@
 #include <linux/irqdomain.h>
 #include <linux/io.h>
 #include <linux/err.h>
-#include <asm/sizes.h>
+#include <linux/sizes.h>
 #include <mach-se/mach/se7722.h>
 
 #define IRQ01_BASE_ADDR	0x11800000
@@ -40,7 +37,7 @@ static void se7722_irq_demux(struct irq_desc *desc)
 	mask = ioread16(se7722_irq_regs + IRQ01_STS_REG);
 
 	for_each_set_bit(bit, &mask, SE7722_FPGA_IRQ_NR)
-		generic_handle_irq(irq_linear_revmap(se7722_irq_domain, bit));
+		generic_handle_domain_irq(se7722_irq_domain, bit);
 
 	chip->irq_unmask(data);
 }

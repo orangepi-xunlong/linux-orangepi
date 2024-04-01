@@ -1,10 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * ADAU1977/ADAU1978/ADAU1979 driver
  *
  * Copyright 2014 Analog Devices Inc.
  *  Author: Lars-Peter Clausen <lars@metafoo.de>
- *
- * Licensed under the GPL-2.
  */
 
 #include <linux/delay.h>
@@ -13,7 +12,6 @@
 #include <linux/i2c.h>
 #include <linux/init.h>
 #include <linux/module.h>
-#include <linux/platform_data/adau1977.h>
 #include <linux/regmap.h>
 #include <linux/regulator/consumer.h>
 #include <linux/slab.h>
@@ -24,6 +22,8 @@
 #include <sound/pcm_params.h>
 #include <sound/soc.h>
 #include <sound/tlv.h>
+
+#include <dt-bindings/sound/adi,adau1977.h>
 
 #include "adau1977.h"
 
@@ -124,10 +124,10 @@ struct adau1977 {
 	struct device *dev;
 	void (*switch_mode)(struct device *dev);
 
-	unsigned int max_master_fs;
+	unsigned int max_clock_provider_fs;
 	unsigned int slot_width;
 	bool enabled;
-	bool master;
+	bool clock_provider;
 };
 
 static const struct reg_default adau1977_reg_defaults[] = {
@@ -236,8 +236,6 @@ static int adau1977_reset(struct adau1977 *adau1977)
 	ret = regmap_write(adau1977->regmap, ADAU1977_REG_POWER,
 			ADAU1977_POWER_RESET);
 	regcache_cache_bypass(adau1977->regmap, false);
-	if (ret)
-		return ret;
 
 	return ret;
 }
@@ -294,8 +292,8 @@ static int adau1977_lookup_mcs(struct adau1977 *adau1977, unsigned int rate,
 static int adau1977_hw_params(struct snd_pcm_substream *substream,
 	struct snd_pcm_hw_params *params, struct snd_soc_dai *dai)
 {
-	struct snd_soc_codec *codec = dai->codec;
-	struct adau1977 *adau1977 = snd_soc_codec_get_drvdata(codec);
+	struct snd_soc_component *component = dai->component;
+	struct adau1977 *adau1977 = snd_soc_component_get_drvdata(component);
 	unsigned int rate = params_rate(params);
 	unsigned int slot_width;
 	unsigned int ctrl0, ctrl0_mask;
@@ -332,7 +330,7 @@ static int adau1977_hw_params(struct snd_pcm_substream *substream,
 		ctrl0_mask |= ADAU1977_SAI_CTRL0_FMT_MASK;
 	}
 
-	if (adau1977->master) {
+	if (adau1977->clock_provider) {
 		switch (params_width(params)) {
 		case 16:
 			ctrl1 = ADAU1977_SAI_CTRL1_DATA_WIDTH_16BIT;
@@ -388,8 +386,7 @@ static int adau1977_power_disable(struct adau1977 *adau1977)
 
 	regcache_mark_dirty(adau1977->regmap);
 
-	if (adau1977->reset_gpio)
-		gpiod_set_value_cansleep(adau1977->reset_gpio, 0);
+	gpiod_set_value_cansleep(adau1977->reset_gpio, 0);
 
 	regcache_cache_only(adau1977->regmap, true);
 
@@ -420,8 +417,7 @@ static int adau1977_power_enable(struct adau1977 *adau1977)
 			goto err_disable_avdd;
 	}
 
-	if (adau1977->reset_gpio)
-		gpiod_set_value_cansleep(adau1977->reset_gpio, 1);
+	gpiod_set_value_cansleep(adau1977->reset_gpio, 1);
 
 	regcache_cache_only(adau1977->regmap, false);
 
@@ -473,10 +469,10 @@ err_disable_avdd:
 	return ret;
 }
 
-static int adau1977_set_bias_level(struct snd_soc_codec *codec,
+static int adau1977_set_bias_level(struct snd_soc_component *component,
 	enum snd_soc_bias_level level)
 {
-	struct adau1977 *adau1977 = snd_soc_codec_get_drvdata(codec);
+	struct adau1977 *adau1977 = snd_soc_component_get_drvdata(component);
 	int ret = 0;
 
 	switch (level) {
@@ -485,7 +481,7 @@ static int adau1977_set_bias_level(struct snd_soc_codec *codec,
 	case SND_SOC_BIAS_PREPARE:
 		break;
 	case SND_SOC_BIAS_STANDBY:
-		if (snd_soc_codec_get_bias_level(codec) == SND_SOC_BIAS_OFF)
+		if (snd_soc_component_get_bias_level(component) == SND_SOC_BIAS_OFF)
 			ret = adau1977_power_enable(adau1977);
 		break;
 	case SND_SOC_BIAS_OFF:
@@ -499,7 +495,7 @@ static int adau1977_set_bias_level(struct snd_soc_codec *codec,
 static int adau1977_set_tdm_slot(struct snd_soc_dai *dai, unsigned int tx_mask,
 	unsigned int rx_mask, int slots, int width)
 {
-	struct adau1977 *adau1977 = snd_soc_codec_get_drvdata(dai->codec);
+	struct adau1977 *adau1977 = snd_soc_component_get_drvdata(dai->component);
 	unsigned int ctrl0, ctrl1, drv;
 	unsigned int slot[4];
 	unsigned int i;
@@ -508,7 +504,7 @@ static int adau1977_set_tdm_slot(struct snd_soc_dai *dai, unsigned int tx_mask,
 	if (slots == 0) {
 		/* 0 = No fixed slot width */
 		adau1977->slot_width = 0;
-		adau1977->max_master_fs = 192000;
+		adau1977->max_clock_provider_fs = 192000;
 		return regmap_update_bits(adau1977->regmap,
 			ADAU1977_REG_SAI_CTRL0, ADAU1977_SAI_CTRL0_SAI_MASK,
 			ADAU1977_SAI_CTRL0_SAI_I2S);
@@ -537,7 +533,7 @@ static int adau1977_set_tdm_slot(struct snd_soc_dai *dai, unsigned int tx_mask,
 		break;
 	case 24:
 		/* We can only generate 16 bit or 32 bit wide slots */
-		if (adau1977->master)
+		if (adau1977->clock_provider)
 			return -EINVAL;
 		ctrl1 = ADAU1977_SAI_CTRL1_SLOT_WIDTH_24;
 		break;
@@ -597,15 +593,15 @@ static int adau1977_set_tdm_slot(struct snd_soc_dai *dai, unsigned int tx_mask,
 
 	adau1977->slot_width = width;
 
-	/* In master mode the maximum bitclock is 24.576 MHz */
-	adau1977->max_master_fs = min(192000, 24576000 / width / slots);
+	/* In clock provider mode the maximum bitclock is 24.576 MHz */
+	adau1977->max_clock_provider_fs = min(192000, 24576000 / width / slots);
 
 	return 0;
 }
 
 static int adau1977_mute(struct snd_soc_dai *dai, int mute, int stream)
 {
-	struct adau1977 *adau1977 = snd_soc_codec_get_drvdata(dai->codec);
+	struct adau1977 *adau1977 = snd_soc_component_get_drvdata(dai->component);
 	unsigned int val;
 
 	if (mute)
@@ -619,18 +615,18 @@ static int adau1977_mute(struct snd_soc_dai *dai, int mute, int stream)
 
 static int adau1977_set_dai_fmt(struct snd_soc_dai *dai, unsigned int fmt)
 {
-	struct adau1977 *adau1977 = snd_soc_codec_get_drvdata(dai->codec);
+	struct adau1977 *adau1977 = snd_soc_component_get_drvdata(dai->component);
 	unsigned int ctrl0 = 0, ctrl1 = 0, block_power = 0;
 	bool invert_lrclk;
 	int ret;
 
-	switch (fmt & SND_SOC_DAIFMT_MASTER_MASK) {
-	case SND_SOC_DAIFMT_CBS_CFS:
-		adau1977->master = false;
+	switch (fmt & SND_SOC_DAIFMT_CLOCK_PROVIDER_MASK) {
+	case SND_SOC_DAIFMT_CBC_CFC:
+		adau1977->clock_provider = false;
 		break;
-	case SND_SOC_DAIFMT_CBM_CFM:
+	case SND_SOC_DAIFMT_CBP_CFP:
 		ctrl1 |= ADAU1977_SAI_CTRL1_MASTER;
-		adau1977->master = true;
+		adau1977->clock_provider = true;
 		break;
 	default:
 		return -EINVAL;
@@ -706,7 +702,7 @@ static int adau1977_set_dai_fmt(struct snd_soc_dai *dai, unsigned int fmt)
 static int adau1977_startup(struct snd_pcm_substream *substream,
 	struct snd_soc_dai *dai)
 {
-	struct adau1977 *adau1977 = snd_soc_codec_get_drvdata(dai->codec);
+	struct adau1977 *adau1977 = snd_soc_component_get_drvdata(dai->component);
 	u64 formats = 0;
 
 	if (adau1977->slot_width == 16)
@@ -718,9 +714,10 @@ static int adau1977_startup(struct snd_pcm_substream *substream,
 	snd_pcm_hw_constraint_list(substream->runtime, 0,
 		SNDRV_PCM_HW_PARAM_RATE, &adau1977->constraints);
 
-	if (adau1977->master)
+	if (adau1977->clock_provider)
 		snd_pcm_hw_constraint_minmax(substream->runtime,
-			SNDRV_PCM_HW_PARAM_RATE, 8000, adau1977->max_master_fs);
+			SNDRV_PCM_HW_PARAM_RATE, 8000,
+					     adau1977->max_clock_provider_fs);
 
 	if (formats != 0)
 		snd_pcm_hw_constraint_mask64(substream->runtime,
@@ -731,7 +728,7 @@ static int adau1977_startup(struct snd_pcm_substream *substream,
 
 static int adau1977_set_tristate(struct snd_soc_dai *dai, int tristate)
 {
-	struct adau1977 *adau1977 = snd_soc_codec_get_drvdata(dai->codec);
+	struct adau1977 *adau1977 = snd_soc_component_get_drvdata(dai->component);
 	unsigned int val;
 
 	if (tristate)
@@ -792,10 +789,10 @@ static bool adau1977_check_sysclk(unsigned int mclk, unsigned int base_freq)
 	return true;
 }
 
-static int adau1977_set_sysclk(struct snd_soc_codec *codec,
+static int adau1977_set_sysclk(struct snd_soc_component *component,
 	int clk_id, int source, unsigned int freq, int dir)
 {
-	struct adau1977 *adau1977 = snd_soc_codec_get_drvdata(codec);
+	struct adau1977 *adau1977 = snd_soc_component_get_drvdata(component);
 	unsigned int mask = 0;
 	unsigned int clk_src;
 	unsigned int ret;
@@ -846,10 +843,10 @@ static int adau1977_set_sysclk(struct snd_soc_codec *codec,
 	return 0;
 }
 
-static int adau1977_codec_probe(struct snd_soc_codec *codec)
+static int adau1977_component_probe(struct snd_soc_component *component)
 {
-	struct snd_soc_dapm_context *dapm = snd_soc_codec_get_dapm(codec);
-	struct adau1977 *adau1977 = snd_soc_codec_get_drvdata(codec);
+	struct snd_soc_dapm_context *dapm = snd_soc_component_get_dapm(component);
+	struct adau1977 *adau1977 = snd_soc_component_get_drvdata(component);
 	int ret;
 
 	switch (adau1977->type) {
@@ -867,34 +864,30 @@ static int adau1977_codec_probe(struct snd_soc_codec *codec)
 	return 0;
 }
 
-static struct snd_soc_codec_driver adau1977_codec_driver = {
-	.probe = adau1977_codec_probe,
-	.set_bias_level = adau1977_set_bias_level,
-	.set_sysclk = adau1977_set_sysclk,
-	.idle_bias_off = true,
-
-	.component_driver = {
-		.controls		= adau1977_snd_controls,
-		.num_controls		= ARRAY_SIZE(adau1977_snd_controls),
-		.dapm_widgets		= adau1977_dapm_widgets,
-		.num_dapm_widgets	= ARRAY_SIZE(adau1977_dapm_widgets),
-		.dapm_routes		= adau1977_dapm_routes,
-		.num_dapm_routes	= ARRAY_SIZE(adau1977_dapm_routes),
-	},
+static const struct snd_soc_component_driver adau1977_component_driver = {
+	.probe			= adau1977_component_probe,
+	.set_bias_level		= adau1977_set_bias_level,
+	.set_sysclk		= adau1977_set_sysclk,
+	.controls		= adau1977_snd_controls,
+	.num_controls		= ARRAY_SIZE(adau1977_snd_controls),
+	.dapm_widgets		= adau1977_dapm_widgets,
+	.num_dapm_widgets	= ARRAY_SIZE(adau1977_dapm_widgets),
+	.dapm_routes		= adau1977_dapm_routes,
+	.num_dapm_routes	= ARRAY_SIZE(adau1977_dapm_routes),
+	.use_pmdown_time	= 1,
+	.endianness		= 1,
 };
 
 static int adau1977_setup_micbias(struct adau1977 *adau1977)
 {
-	struct adau1977_platform_data *pdata = adau1977->dev->platform_data;
 	unsigned int micbias;
 
-	if (pdata) {
-		micbias = pdata->micbias;
-		if (micbias > ADAU1977_MICBIAS_9V0)
-			return -EINVAL;
-
-	} else {
+	if (device_property_read_u32(adau1977->dev, "adi,micbias", &micbias))
 		micbias = ADAU1977_MICBIAS_8V5;
+
+	if (micbias > ADAU1977_MICBIAS_9V0) {
+		dev_err(adau1977->dev, "Invalid value for 'adi,micbias'\n");
+		return -EINVAL;
 	}
 
 	return regmap_update_bits(adau1977->regmap, ADAU1977_REG_MICBIAS,
@@ -920,7 +913,7 @@ int adau1977_probe(struct device *dev, struct regmap *regmap,
 	adau1977->type = type;
 	adau1977->regmap = regmap;
 	adau1977->switch_mode = switch_mode;
-	adau1977->max_master_fs = 192000;
+	adau1977->max_clock_provider_fs = 192000;
 
 	adau1977->constraints.list = adau1977_rates;
 	adau1977->constraints.count = ARRAY_SIZE(adau1977_rates);
@@ -970,7 +963,7 @@ int adau1977_probe(struct device *dev, struct regmap *regmap,
 	if (ret)
 		return ret;
 
-	return snd_soc_register_codec(dev, &adau1977_codec_driver,
+	return devm_snd_soc_register_component(dev, &adau1977_component_driver,
 			&adau1977_dai, 1);
 
 err_poweroff:

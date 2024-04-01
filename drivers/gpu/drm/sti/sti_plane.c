@@ -1,14 +1,17 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Copyright (C) STMicroelectronics SA 2014
  * Authors: Benjamin Gaignard <benjamin.gaignard@st.com>
  *          Fabien Dessenne <fabien.dessenne@st.com>
  *          for STMicroelectronics.
- * License terms:  GNU General Public License (GPL), version 2
  */
 
-#include <drm/drmP.h>
-#include <drm/drm_fb_cma_helper.h>
-#include <drm/drm_gem_cma_helper.h>
+#include <linux/types.h>
+
+#include <drm/drm_blend.h>
+#include <drm/drm_fourcc.h>
+#include <drm/drm_framebuffer.h>
+#include <drm/drm_gem_dma_helper.h>
 
 #include "sti_compositor.h"
 #include "sti_drv.h"
@@ -40,6 +43,7 @@ void sti_plane_update_fps(struct sti_plane *plane,
 			  bool new_frame,
 			  bool new_field)
 {
+	struct drm_plane_state *state = plane->drm_plane.state;
 	ktime_t now;
 	struct sti_fps_info *fps;
 	int fpks, fipks, ms_since_last, num_frames, num_fields;
@@ -65,9 +69,18 @@ void sti_plane_update_fps(struct sti_plane *plane,
 
 	fps->last_timestamp = now;
 	fps->last_frame_counter = fps->curr_frame_counter;
-	fpks = (num_frames * 1000000) / ms_since_last;
-	snprintf(plane->fps_info.fps_str, FPS_LENGTH, "%-6s @ %d.%.3d fps",
-		 sti_plane_to_str(plane), fpks / 1000, fpks % 1000);
+
+	if (state->fb) {
+		fpks = (num_frames * 1000000) / ms_since_last;
+		snprintf(plane->fps_info.fps_str, FPS_LENGTH,
+			 "%-8s %4dx%-4d %.4s @ %3d.%-3.3d fps (%s)",
+			 plane->drm_plane.name,
+			 state->fb->width,
+			 state->fb->height,
+			 (char *)&state->fb->format->format,
+			 fpks / 1000, fpks % 1000,
+			 sti_plane_to_str(plane));
+	}
 
 	if (fps->curr_field_counter) {
 		/* Compute number of field updates */
@@ -75,7 +88,7 @@ void sti_plane_update_fps(struct sti_plane *plane,
 		fps->last_field_counter = fps->curr_field_counter;
 		fipks = (num_fields * 1000000) / ms_since_last;
 		snprintf(plane->fps_info.fips_str,
-			 FPS_LENGTH, " - %d.%.3d field/sec",
+			 FPS_LENGTH, " - %3d.%-3.3d field/sec",
 			 fipks / 1000, fipks % 1000);
 	} else {
 		plane->fps_info.fips_str[0] = '\0';
@@ -98,12 +111,6 @@ static int sti_plane_get_default_zpos(enum drm_plane_type type)
 		return 7;
 	}
 	return 0;
-}
-
-void sti_plane_reset(struct drm_plane *plane)
-{
-	drm_atomic_helper_plane_reset(plane);
-	plane->state->zpos = sti_plane_get_default_zpos(plane->type);
 }
 
 static void sti_plane_attach_zorder_property(struct drm_plane *drm_plane,

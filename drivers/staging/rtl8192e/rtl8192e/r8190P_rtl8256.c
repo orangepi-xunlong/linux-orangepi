@@ -1,25 +1,16 @@
-/******************************************************************************
+// SPDX-License-Identifier: GPL-2.0
+/*
  * Copyright(c) 2008 - 2010 Realtek Corporation. All rights reserved.
  *
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * The full GNU General Public License is included in this distribution in the
- * file called LICENSE.
- *
- * Contact Information:
- * wlanfae <wlanfae@realtek.com>
-******************************************************************************/
-
+ * Contact Information: wlanfae <wlanfae@realtek.com>
+ */
 #include "rtl_core.h"
 #include "r8192E_phyreg.h"
 #include "r8192E_phy.h"
 #include "r8190P_rtl8256.h"
 
 void rtl92e_set_bandwidth(struct net_device *dev,
-			  enum ht_channel_width Bandwidth)
+			  enum ht_channel_width bandwidth)
 {
 	u8	eRFPath;
 	struct r8192_priv *priv = rtllib_priv(dev);
@@ -34,7 +25,7 @@ void rtl92e_set_bandwidth(struct net_device *dev,
 		if (!rtl92e_is_legal_rf_path(dev, eRFPath))
 			continue;
 
-		switch (Bandwidth) {
+		switch (bandwidth) {
 		case HT_CHANNEL_WIDTH_20:
 			rtl92e_set_rf_reg(dev, (enum rf90_radio_path)eRFPath,
 					  0x0b, bMask12Bits, 0x100);
@@ -53,9 +44,8 @@ void rtl92e_set_bandwidth(struct net_device *dev,
 			break;
 		default:
 			netdev_err(dev, "%s(): Unknown bandwidth: %#X\n",
-				   __func__, Bandwidth);
+				   __func__, bandwidth);
 			break;
-
 		}
 	}
 }
@@ -81,7 +71,6 @@ bool rtl92e_config_rf(struct net_device *dev)
 			continue;
 
 		pPhyReg = &priv->PHYRegDef[eRFPath];
-
 
 		switch (eRFPath) {
 		case RF90_PATH_A:
@@ -126,10 +115,6 @@ bool rtl92e_config_rf(struct net_device *dev)
 						(enum rf90_radio_path)eRFPath,
 						RegOffSetToBeCheck,
 						bMask12Bits);
-			RT_TRACE(COMP_RF,
-				 "RF %d %d register final value: %x\n",
-				 eRFPath, RegOffSetToBeCheck,
-				 RF3_Final_Value);
 			RetryTimes--;
 		}
 
@@ -152,10 +137,7 @@ bool rtl92e_config_rf(struct net_device *dev)
 				   __func__, eRFPath);
 			goto fail;
 		}
-
 	}
-
-	RT_TRACE(COMP_PHY, "PHY Initialization Success\n");
 	return true;
 
 fail:
@@ -179,7 +161,6 @@ void rtl92e_set_cck_tx_power(struct net_device *dev, u8 powerlevel)
 	rtl92e_set_bb_reg(dev, rTxAGC_CCK_Mcs32, bTxAGCRateCCK, TxAGC);
 }
 
-
 void rtl92e_set_ofdm_tx_power(struct net_device *dev, u8 powerlevel)
 {
 	struct r8192_priv *priv = rtllib_priv(dev);
@@ -198,10 +179,10 @@ void rtl92e_set_ofdm_tx_power(struct net_device *dev, u8 powerlevel)
 	for (index = 0; index < 6; index++) {
 		writeVal = (u32)(priv->MCSTxPowerLevelOriginalOffset[index] +
 			   ((index < 2) ? powerBase0 : powerBase1));
-		byte0 = (u8)(writeVal & 0x7f);
-		byte1 = (u8)((writeVal & 0x7f00)>>8);
-		byte2 = (u8)((writeVal & 0x7f0000)>>16);
-		byte3 = (u8)((writeVal & 0x7f000000)>>24);
+		byte0 = writeVal & 0x7f;
+		byte1 = (writeVal & 0x7f00) >> 8;
+		byte2 = (writeVal & 0x7f0000) >> 16;
+		byte3 = (writeVal & 0x7f000000) >> 24;
 		if (byte0 > 0x24)
 			byte0 = 0x24;
 		if (byte1 > 0x24)
@@ -224,5 +205,4 @@ void rtl92e_set_ofdm_tx_power(struct net_device *dev, u8 powerlevel)
 				   (byte1 << 8) | byte0;
 		rtl92e_set_bb_reg(dev, RegOffset[index], 0x7f7f7f7f, writeVal);
 	}
-
 }

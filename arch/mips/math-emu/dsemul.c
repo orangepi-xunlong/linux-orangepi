@@ -1,12 +1,15 @@
+// SPDX-License-Identifier: GPL-2.0
 #include <linux/err.h>
 #include <linux/slab.h>
+#include <linux/mm_types.h>
+#include <linux/sched/task.h>
 
 #include <asm/branch.h>
 #include <asm/cacheflush.h>
 #include <asm/fpu_emulator.h>
 #include <asm/inst.h>
 #include <asm/mipsregs.h>
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 
 /**
  * struct emuframe - The 'emulation' frame structure
@@ -79,11 +82,8 @@ retry:
 
 	/* Ensure we have an allocation bitmap */
 	if (!mm_ctx->bd_emupage_allocmap) {
-		mm_ctx->bd_emupage_allocmap =
-			kcalloc(BITS_TO_LONGS(emupage_frame_count),
-					      sizeof(unsigned long),
-				GFP_ATOMIC);
-
+		mm_ctx->bd_emupage_allocmap = bitmap_zalloc(emupage_frame_count,
+							    GFP_ATOMIC);
 		if (!mm_ctx->bd_emupage_allocmap) {
 			idx = BD_EMUFRAME_NONE;
 			goto out_unlock;
@@ -203,7 +203,7 @@ void dsemul_mm_cleanup(struct mm_struct *mm)
 {
 	mm_context_t *mm_ctx = &mm->context;
 
-	kfree(mm_ctx->bd_emupage_allocmap);
+	bitmap_free(mm_ctx->bd_emupage_allocmap);
 }
 
 int mips_dsemul(struct pt_regs *regs, mips_instruction ir,

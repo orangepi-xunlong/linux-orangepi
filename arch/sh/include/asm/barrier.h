@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Copyright (C) 1999, 2000  Niibe Yutaka  &  Kaz Kojima
  * Copyright (C) 2002 Paul Mundt
@@ -5,7 +6,7 @@
 #ifndef __ASM_SH_BARRIER_H
 #define __ASM_SH_BARRIER_H
 
-#if defined(CONFIG_CPU_SH4A) || defined(CONFIG_CPU_SH5)
+#if defined(CONFIG_CPU_SH4A)
 #include <asm/cache_insns.h>
 #endif
 
@@ -23,7 +24,7 @@
  * Historically we have only done this type of barrier for the MMUCR, but
  * it's also necessary for the CCR, so we make it generic here instead.
  */
-#if defined(CONFIG_CPU_SH4A) || defined(CONFIG_CPU_SH5)
+#if defined(CONFIG_CPU_SH4A)
 #define mb()		__asm__ __volatile__ ("synco": : :"memory")
 #define rmb()		mb()
 #define wmb()		mb()

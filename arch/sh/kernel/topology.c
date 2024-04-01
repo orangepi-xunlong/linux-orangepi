@@ -1,11 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * arch/sh/kernel/topology.c
  *
  *  Copyright (C) 2007  Paul Mundt
- *
- * This file is subject to the terms and conditions of the GNU General Public
- * License.  See the file "COPYING" in the main directory of this archive
- * for more details.
  */
 #include <linux/cpu.h>
 #include <linux/cpumask.h>
@@ -48,11 +45,6 @@ int arch_update_cpu_topology(void)
 static int __init topology_init(void)
 {
 	int i, ret;
-
-#ifdef CONFIG_NEED_MULTIPLE_NODES
-	for_each_online_node(i)
-		register_one_node(i);
-#endif
 
 	for_each_present_cpu(i) {
 		struct cpu *c = &per_cpu(cpu_devices, i);

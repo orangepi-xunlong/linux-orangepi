@@ -1,12 +1,8 @@
-/**
+// SPDX-License-Identifier: GPL-2.0-or-later
+/*
  * mCube MC3230 3-Axis Accelerometer
  *
  * Copyright (c) 2016 Hans de Goede <hdegoede@redhat.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
  *
  * IIO driver for mCube MC3230; 7-bit I2C address: 0x4c.
  */
@@ -107,7 +103,6 @@ static int mc3230_read_raw(struct iio_dev *indio_dev,
 }
 
 static const struct iio_info mc3230_info = {
-	.driver_module	= THIS_MODULE,
 	.read_raw	= mc3230_read_raw,
 };
 
@@ -137,7 +132,6 @@ static int mc3230_probe(struct i2c_client *client,
 	data->client = client;
 	i2c_set_clientdata(client, indio_dev);
 
-	indio_dev->dev.parent = &client->dev;
 	indio_dev->info = &mc3230_info;
 	indio_dev->name = "mc3230";
 	indio_dev->modes = INDIO_DIRECT_MODE;
@@ -157,16 +151,15 @@ static int mc3230_probe(struct i2c_client *client,
 	return ret;
 }
 
-static int mc3230_remove(struct i2c_client *client)
+static void mc3230_remove(struct i2c_client *client)
 {
 	struct iio_dev *indio_dev = i2c_get_clientdata(client);
 
 	iio_device_unregister(indio_dev);
 
-	return mc3230_set_opcon(iio_priv(indio_dev), MC3230_MODE_OPCON_STANDBY);
+	mc3230_set_opcon(iio_priv(indio_dev), MC3230_MODE_OPCON_STANDBY);
 }
 
-#ifdef CONFIG_PM_SLEEP
 static int mc3230_suspend(struct device *dev)
 {
 	struct mc3230_data *data;
@@ -184,9 +177,8 @@ static int mc3230_resume(struct device *dev)
 
 	return mc3230_set_opcon(data, MC3230_MODE_OPCON_WAKE);
 }
-#endif
 
-static SIMPLE_DEV_PM_OPS(mc3230_pm_ops, mc3230_suspend, mc3230_resume);
+static DEFINE_SIMPLE_DEV_PM_OPS(mc3230_pm_ops, mc3230_suspend, mc3230_resume);
 
 static const struct i2c_device_id mc3230_i2c_id[] = {
 	{"mc3230", 0},
@@ -197,7 +189,7 @@ MODULE_DEVICE_TABLE(i2c, mc3230_i2c_id);
 static struct i2c_driver mc3230_driver = {
 	.driver = {
 		.name = "mc3230",
-		.pm = &mc3230_pm_ops,
+		.pm = pm_sleep_ptr(&mc3230_pm_ops),
 	},
 	.probe		= mc3230_probe,
 	.remove		= mc3230_remove,

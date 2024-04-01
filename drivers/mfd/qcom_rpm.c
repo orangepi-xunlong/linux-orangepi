@@ -1,16 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2014, Sony Mobile Communications AB.
  * Copyright (c) 2013, The Linux Foundation. All rights reserved.
  * Author: Bjorn Andersson <bjorn.andersson@sonymobile.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 and
- * only version 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include <linux/module.h>
@@ -555,7 +547,7 @@ static int qcom_rpm_probe(struct platform_device *pdev)
 	init_completion(&rpm->ack);
 
 	/* Enable message RAM clock */
-	rpm->ramclk = devm_clk_get(&pdev->dev, "ram");
+	rpm->ramclk = devm_clk_get_enabled(&pdev->dev, "ram");
 	if (IS_ERR(rpm->ramclk)) {
 		ret = PTR_ERR(rpm->ramclk);
 		if (ret == -EPROBE_DEFER)
@@ -566,25 +558,18 @@ static int qcom_rpm_probe(struct platform_device *pdev)
 		 */
 		rpm->ramclk = NULL;
 	}
-	clk_prepare_enable(rpm->ramclk); /* Accepts NULL */
 
 	irq_ack = platform_get_irq_byname(pdev, "ack");
-	if (irq_ack < 0) {
-		dev_err(&pdev->dev, "required ack interrupt missing\n");
+	if (irq_ack < 0)
 		return irq_ack;
-	}
 
 	irq_err = platform_get_irq_byname(pdev, "err");
-	if (irq_err < 0) {
-		dev_err(&pdev->dev, "required err interrupt missing\n");
+	if (irq_err < 0)
 		return irq_err;
-	}
 
 	irq_wakeup = platform_get_irq_byname(pdev, "wakeup");
-	if (irq_wakeup < 0) {
-		dev_err(&pdev->dev, "required wakeup interrupt missing\n");
+	if (irq_wakeup < 0)
 		return irq_wakeup;
-	}
 
 	match = of_match_device(qcom_rpm_of_match, &pdev->dev);
 	if (!match)
@@ -687,22 +672,11 @@ static int qcom_rpm_probe(struct platform_device *pdev)
 	if (ret)
 		dev_warn(&pdev->dev, "failed to mark wakeup irq as wakeup\n");
 
-	return of_platform_populate(pdev->dev.of_node, NULL, NULL, &pdev->dev);
-}
-
-static int qcom_rpm_remove(struct platform_device *pdev)
-{
-	struct qcom_rpm *rpm = dev_get_drvdata(&pdev->dev);
-
-	of_platform_depopulate(&pdev->dev);
-	clk_disable_unprepare(rpm->ramclk);
-
-	return 0;
+	return devm_of_platform_populate(&pdev->dev);
 }
 
 static struct platform_driver qcom_rpm_driver = {
 	.probe = qcom_rpm_probe,
-	.remove = qcom_rpm_remove,
 	.driver  = {
 		.name  = "qcom_rpm",
 		.of_match_table = qcom_rpm_of_match,

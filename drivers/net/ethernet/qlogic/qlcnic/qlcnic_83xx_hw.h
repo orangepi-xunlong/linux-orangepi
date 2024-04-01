@@ -1,8 +1,7 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * QLogic qlcnic NIC Driver
  * Copyright (c) 2009-2013 QLogic Corporation
- *
- * See LICENSE.qlcnic for copyright and licensing details.
  */
 
 #ifndef __QLCNIC_83XX_HW_H
@@ -610,7 +609,7 @@ int qlcnic_83xx_read_flash_descriptor_table(struct qlcnic_adapter *);
 int qlcnic_83xx_flash_read32(struct qlcnic_adapter *, u32, u8 *, int);
 int qlcnic_83xx_lockless_flash_read32(struct qlcnic_adapter *,
 				      u32, u8 *, int);
-int qlcnic_83xx_init(struct qlcnic_adapter *, int);
+int qlcnic_83xx_init(struct qlcnic_adapter *);
 int qlcnic_83xx_idc_ready_state_entry(struct qlcnic_adapter *);
 void qlcnic_83xx_idc_poll_dev_state(struct work_struct *);
 void qlcnic_83xx_idc_exit(struct qlcnic_adapter *);
@@ -629,13 +628,16 @@ int qlcnic_83xx_set_port_eswitch_status(struct qlcnic_adapter *, int, int *);
 void qlcnic_83xx_get_minidump_template(struct qlcnic_adapter *);
 void qlcnic_83xx_get_stats(struct qlcnic_adapter *adapter, u64 *data);
 int qlcnic_83xx_extend_md_capab(struct qlcnic_adapter *);
-int qlcnic_83xx_get_settings(struct qlcnic_adapter *, struct ethtool_cmd *);
-int qlcnic_83xx_set_settings(struct qlcnic_adapter *, struct ethtool_cmd *);
+int qlcnic_83xx_get_link_ksettings(struct qlcnic_adapter *adapter,
+				   struct ethtool_link_ksettings *ecmd);
+int qlcnic_83xx_set_link_ksettings(struct qlcnic_adapter *adapter,
+				   const struct ethtool_link_ksettings *ecmd);
 void qlcnic_83xx_get_pauseparam(struct qlcnic_adapter *,
 				struct ethtool_pauseparam *);
 int qlcnic_83xx_set_pauseparam(struct qlcnic_adapter *,
 			       struct ethtool_pauseparam *);
 int qlcnic_83xx_test_link(struct qlcnic_adapter *);
+void qlcnic_83xx_get_port_type(struct qlcnic_adapter *adapter);
 int qlcnic_83xx_reg_test(struct qlcnic_adapter *);
 int qlcnic_83xx_get_regs_len(struct qlcnic_adapter *);
 int qlcnic_83xx_get_registers(struct qlcnic_adapter *, u32 *);

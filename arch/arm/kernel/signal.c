@@ -1,80 +1,67 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  linux/arch/arm/kernel/signal.c
  *
  *  Copyright (C) 1995-2009 Russell King
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 #include <linux/errno.h>
 #include <linux/random.h>
 #include <linux/signal.h>
 #include <linux/personality.h>
 #include <linux/uaccess.h>
-#include <linux/tracehook.h>
+#include <linux/resume_user_mode.h>
 #include <linux/uprobes.h>
 #include <linux/syscalls.h>
 
 #include <asm/elf.h>
 #include <asm/cacheflush.h>
 #include <asm/traps.h>
-#include <asm/ucontext.h>
 #include <asm/unistd.h>
 #include <asm/vfp.h>
 
-extern const unsigned long sigreturn_codes[7];
+#include "signal.h"
+
+extern const unsigned long sigreturn_codes[17];
 
 static unsigned long signal_return_offset;
 
-#ifdef CONFIG_CRUNCH
-static int preserve_crunch_context(struct crunch_sigframe __user *frame)
-{
-	char kbuf[sizeof(*frame) + 8];
-	struct crunch_sigframe *kframe;
-
-	/* the crunch context must be 64 bit aligned */
-	kframe = (struct crunch_sigframe *)((unsigned long)(kbuf + 8) & ~7);
-	kframe->magic = CRUNCH_MAGIC;
-	kframe->size = CRUNCH_STORAGE_SIZE;
-	crunch_task_copy(current_thread_info(), &kframe->storage);
-	return __copy_to_user(frame, kframe, sizeof(*frame));
-}
-
-static int restore_crunch_context(struct crunch_sigframe __user *frame)
-{
-	char kbuf[sizeof(*frame) + 8];
-	struct crunch_sigframe *kframe;
-
-	/* the crunch context must be 64 bit aligned */
-	kframe = (struct crunch_sigframe *)((unsigned long)(kbuf + 8) & ~7);
-	if (__copy_from_user(kframe, frame, sizeof(*frame)))
-		return -1;
-	if (kframe->magic != CRUNCH_MAGIC ||
-	    kframe->size != CRUNCH_STORAGE_SIZE)
-		return -1;
-	crunch_task_restore(current_thread_info(), &kframe->storage);
-	return 0;
-}
-#endif
-
 #ifdef CONFIG_IWMMXT
 
-static int preserve_iwmmxt_context(struct iwmmxt_sigframe *frame)
+static int preserve_iwmmxt_context(struct iwmmxt_sigframe __user *frame)
 {
 	char kbuf[sizeof(*frame) + 8];
 	struct iwmmxt_sigframe *kframe;
+	int err = 0;
 
 	/* the iWMMXt context must be 64 bit aligned */
 	kframe = (struct iwmmxt_sigframe *)((unsigned long)(kbuf + 8) & ~7);
-	kframe->magic = IWMMXT_MAGIC;
-	kframe->size = IWMMXT_STORAGE_SIZE;
-	iwmmxt_task_copy(current_thread_info(), &kframe->storage);
-	return __copy_to_user(frame, kframe, sizeof(*frame));
+
+	if (test_thread_flag(TIF_USING_IWMMXT)) {
+		kframe->magic = IWMMXT_MAGIC;
+		kframe->size = IWMMXT_STORAGE_SIZE;
+		iwmmxt_task_copy(current_thread_info(), &kframe->storage);
+	} else {
+		/*
+		 * For bug-compatibility with older kernels, some space
+		 * has to be reserved for iWMMXt even if it's not used.
+		 * Set the magic and size appropriately so that properly
+		 * written userspace can skip it reliably:
+		 */
+		*kframe = (struct iwmmxt_sigframe) {
+			.magic = DUMMY_MAGIC,
+			.size  = IWMMXT_STORAGE_SIZE,
+		};
+	}
+
+	err = __copy_to_user(frame, kframe, sizeof(*kframe));
+
+	return err;
 }
 
-static int restore_iwmmxt_context(struct iwmmxt_sigframe *frame)
+static int restore_iwmmxt_context(char __user **auxp)
 {
+	struct iwmmxt_sigframe __user *frame =
+		(struct iwmmxt_sigframe __user *)*auxp;
 	char kbuf[sizeof(*frame) + 8];
 	struct iwmmxt_sigframe *kframe;
 
@@ -82,10 +69,28 @@ static int restore_iwmmxt_context(struct iwmmxt_sigframe *frame)
 	kframe = (struct iwmmxt_sigframe *)((unsigned long)(kbuf + 8) & ~7);
 	if (__copy_from_user(kframe, frame, sizeof(*frame)))
 		return -1;
-	if (kframe->magic != IWMMXT_MAGIC ||
-	    kframe->size != IWMMXT_STORAGE_SIZE)
+
+	/*
+	 * For non-iWMMXt threads: a single iwmmxt_sigframe-sized dummy
+	 * block is discarded for compatibility with setup_sigframe() if
+	 * present, but we don't mandate its presence.  If some other
+	 * magic is here, it's not for us:
+	 */
+	if (!test_thread_flag(TIF_USING_IWMMXT) &&
+	    kframe->magic != DUMMY_MAGIC)
+		return 0;
+
+	if (kframe->size != IWMMXT_STORAGE_SIZE)
 		return -1;
-	iwmmxt_task_restore(current_thread_info(), &kframe->storage);
+
+	if (test_thread_flag(TIF_USING_IWMMXT)) {
+		if (kframe->magic != IWMMXT_MAGIC)
+			return -1;
+
+		iwmmxt_task_restore(current_thread_info(), &kframe->storage);
+	}
+
+	*auxp += IWMMXT_STORAGE_SIZE;
 	return 0;
 }
 
@@ -109,19 +114,19 @@ static int preserve_vfp_context(struct vfp_sigframe __user *frame)
 	return __copy_to_user(frame, &kframe, sizeof(kframe));
 }
 
-static int restore_vfp_context(struct vfp_sigframe __user *auxp)
+static int restore_vfp_context(char __user **auxp)
 {
 	struct vfp_sigframe frame;
 	int err;
 
-	err = __copy_from_user(&frame, (char __user *) auxp, sizeof(frame));
-
+	err = __copy_from_user(&frame, *auxp, sizeof(frame));
 	if (err)
 		return err;
 
 	if (frame.magic != VFP_MAGIC || frame.size != VFP_STORAGE_SIZE)
 		return -EINVAL;
 
+	*auxp += sizeof(frame);
 	return vfp_restore_user_hwstate(&frame.ufp, &frame.ufp_exc);
 }
 
@@ -130,20 +135,11 @@ static int restore_vfp_context(struct vfp_sigframe __user *auxp)
 /*
  * Do a signal return; undo the signal stack.  These are aligned to 64-bit.
  */
-struct sigframe {
-	struct ucontext uc;
-	unsigned long retcode[2];
-};
-
-struct rt_sigframe {
-	struct siginfo info;
-	struct sigframe sig;
-};
 
 static int restore_sigframe(struct pt_regs *regs, struct sigframe __user *sf)
 {
 	struct sigcontext context;
-	struct aux_sigframe __user *aux;
+	char __user *aux;
 	sigset_t set;
 	int err;
 
@@ -174,18 +170,14 @@ static int restore_sigframe(struct pt_regs *regs, struct sigframe __user *sf)
 
 	err |= !valid_user_regs(regs);
 
-	aux = (struct aux_sigframe __user *) sf->uc.uc_regspace;
-#ifdef CONFIG_CRUNCH
-	if (err == 0)
-		err |= restore_crunch_context(&aux->crunch);
-#endif
+	aux = (char __user *) sf->uc.uc_regspace;
 #ifdef CONFIG_IWMMXT
-	if (err == 0 && test_thread_flag(TIF_USING_IWMMXT))
-		err |= restore_iwmmxt_context(&aux->iwmmxt);
+	if (err == 0)
+		err |= restore_iwmmxt_context(&aux);
 #endif
 #ifdef CONFIG_VFP
 	if (err == 0)
-		err |= restore_vfp_context(&aux->vfp);
+		err |= restore_vfp_context(&aux);
 #endif
 
 	return err;
@@ -208,7 +200,7 @@ asmlinkage int sys_sigreturn(struct pt_regs *regs)
 
 	frame = (struct sigframe __user *)regs->ARM_sp;
 
-	if (!access_ok(VERIFY_READ, frame, sizeof (*frame)))
+	if (!access_ok(frame, sizeof (*frame)))
 		goto badframe;
 
 	if (restore_sigframe(regs, frame))
@@ -217,7 +209,7 @@ asmlinkage int sys_sigreturn(struct pt_regs *regs)
 	return regs->ARM_r0;
 
 badframe:
-	force_sig(SIGSEGV, current);
+	force_sig(SIGSEGV);
 	return 0;
 }
 
@@ -238,7 +230,7 @@ asmlinkage int sys_rt_sigreturn(struct pt_regs *regs)
 
 	frame = (struct rt_sigframe __user *)regs->ARM_sp;
 
-	if (!access_ok(VERIFY_READ, frame, sizeof (*frame)))
+	if (!access_ok(frame, sizeof (*frame)))
 		goto badframe;
 
 	if (restore_sigframe(regs, &frame->sig))
@@ -250,7 +242,7 @@ asmlinkage int sys_rt_sigreturn(struct pt_regs *regs)
 	return regs->ARM_r0;
 
 badframe:
-	force_sig(SIGSEGV, current);
+	force_sig(SIGSEGV);
 	return 0;
 }
 
@@ -291,12 +283,8 @@ setup_sigframe(struct sigframe __user *sf, struct pt_regs *regs, sigset_t *set)
 	err |= __copy_to_user(&sf->uc.uc_sigmask, set, sizeof(*set));
 
 	aux = (struct aux_sigframe __user *) sf->uc.uc_regspace;
-#ifdef CONFIG_CRUNCH
-	if (err == 0)
-		err |= preserve_crunch_context(&aux->crunch);
-#endif
 #ifdef CONFIG_IWMMXT
-	if (err == 0 && test_thread_flag(TIF_USING_IWMMXT))
+	if (err == 0)
 		err |= preserve_iwmmxt_context(&aux->iwmmxt);
 #endif
 #ifdef CONFIG_VFP
@@ -322,7 +310,7 @@ get_sigframe(struct ksignal *ksig, struct pt_regs *regs, int framesize)
 	/*
 	 * Check that we can actually write to the signal frame.
 	 */
-	if (!access_ok(VERIFY_WRITE, frame, framesize))
+	if (!access_ok(frame, framesize))
 		frame = NULL;
 
 	return frame;
@@ -333,9 +321,20 @@ setup_return(struct pt_regs *regs, struct ksignal *ksig,
 	     unsigned long __user *rc, void __user *frame)
 {
 	unsigned long handler = (unsigned long)ksig->ka.sa.sa_handler;
+	unsigned long handler_fdpic_GOT = 0;
 	unsigned long retcode;
-	int thumb = 0;
+	unsigned int idx, thumb = 0;
 	unsigned long cpsr = regs->ARM_cpsr & ~(PSR_f | PSR_E_BIT);
+	bool fdpic = IS_ENABLED(CONFIG_BINFMT_ELF_FDPIC) &&
+		     (current->personality & FDPIC_FUNCPTRS);
+
+	if (fdpic) {
+		unsigned long __user *fdpic_func_desc =
+					(unsigned long __user *)handler;
+		if (__get_user(handler, &fdpic_func_desc[0]) ||
+		    __get_user(handler_fdpic_GOT, &fdpic_func_desc[1]))
+			return 1;
+	}
 
 	cpsr |= PSR_ENDSTATE;
 
@@ -375,9 +374,26 @@ setup_return(struct pt_regs *regs, struct ksignal *ksig,
 
 	if (ksig->ka.sa.sa_flags & SA_RESTORER) {
 		retcode = (unsigned long)ksig->ka.sa.sa_restorer;
+		if (fdpic) {
+			/*
+			 * We need code to load the function descriptor.
+			 * That code follows the standard sigreturn code
+			 * (6 words), and is made of 3 + 2 words for each
+			 * variant. The 4th copied word is the actual FD
+			 * address that the assembly code expects.
+			 */
+			idx = 6 + thumb * 3;
+			if (ksig->ka.sa.sa_flags & SA_SIGINFO)
+				idx += 5;
+			if (__put_user(sigreturn_codes[idx],   rc  ) ||
+			    __put_user(sigreturn_codes[idx+1], rc+1) ||
+			    __put_user(sigreturn_codes[idx+2], rc+2) ||
+			    __put_user(retcode,                rc+3))
+				return 1;
+			goto rc_finish;
+		}
 	} else {
-		unsigned int idx = thumb << 1;
-
+		idx = thumb << 1;
 		if (ksig->ka.sa.sa_flags & SA_SIGINFO)
 			idx += 3;
 
@@ -389,6 +405,7 @@ setup_return(struct pt_regs *regs, struct ksignal *ksig,
 		    __put_user(sigreturn_codes[idx+1], rc+1))
 			return 1;
 
+rc_finish:
 #ifdef CONFIG_MMU
 		if (cpsr & MODE32_BIT) {
 			struct mm_struct *mm = current->mm;
@@ -408,7 +425,7 @@ setup_return(struct pt_regs *regs, struct ksignal *ksig,
 			 * the return code written onto the stack.
 			 */
 			flush_icache_range((unsigned long)rc,
-					   (unsigned long)(rc + 2));
+					   (unsigned long)(rc + 3));
 
 			retcode = ((unsigned long)rc) + thumb;
 		}
@@ -418,6 +435,8 @@ setup_return(struct pt_regs *regs, struct ksignal *ksig,
 	regs->ARM_sp = (unsigned long)frame;
 	regs->ARM_lr = retcode;
 	regs->ARM_pc = handler;
+	if (fdpic)
+		regs->ARM_r9 = handler_fdpic_GOT;
 	regs->ARM_cpsr = cpsr;
 
 	return 0;
@@ -485,6 +504,11 @@ static void handle_signal(struct ksignal *ksig, struct pt_regs *regs)
 	int ret;
 
 	/*
+	 * Perform fixup for the pre-signal frame.
+	 */
+	rseq_signal_deliver(ksig, regs);
+
+	/*
 	 * Set up the stack frame
 	 */
 	if (ksig->ka.sa.sa_flags & SA_SIGINFO)
@@ -530,6 +554,7 @@ static int do_signal(struct pt_regs *regs, int syscall)
 		switch (retval) {
 		case -ERESTART_RESTARTBLOCK:
 			restart -= 2;
+			fallthrough;
 		case -ERESTARTNOHAND:
 		case -ERESTARTSYS:
 		case -ERESTARTNOINTR:
@@ -588,7 +613,7 @@ do_work_pending(struct pt_regs *regs, unsigned int thread_flags, int syscall)
 			if (unlikely(!user_mode(regs)))
 				return 0;
 			local_irq_enable();
-			if (thread_flags & _TIF_SIGPENDING) {
+			if (thread_flags & (_TIF_SIGPENDING | _TIF_NOTIFY_SIGNAL)) {
 				int restart = do_signal(regs, syscall);
 				if (unlikely(restart)) {
 					/*
@@ -602,12 +627,11 @@ do_work_pending(struct pt_regs *regs, unsigned int thread_flags, int syscall)
 			} else if (thread_flags & _TIF_UPROBE) {
 				uprobe_notify_resume(regs);
 			} else {
-				clear_thread_flag(TIF_NOTIFY_RESUME);
-				tracehook_notify_resume(regs);
+				resume_user_mode_work(regs);
 			}
 		}
 		local_irq_disable();
-		thread_flags = current_thread_info()->flags;
+		thread_flags = read_thread_flags();
 	} while (thread_flags & _TIF_WORK_MASK);
 	return 0;
 }
@@ -626,24 +650,67 @@ struct page *get_signal_page(void)
 
 	addr = page_address(page);
 
+	/* Poison the entire page */
+	memset32(addr, __opcode_to_mem_arm(0xe7fddef1),
+		 PAGE_SIZE / sizeof(u32));
+
 	/* Give the signal return code some randomness */
-	offset = 0x200 + (get_random_int() & 0x7fc);
+	offset = 0x200 + (get_random_u16() & 0x7fc);
 	signal_return_offset = offset;
 
-	/*
-	 * Copy signal return handlers into the vector page, and
-	 * set sigreturn to be a pointer to these.
-	 */
+	/* Copy signal return handlers into the page */
 	memcpy(addr + offset, sigreturn_codes, sizeof(sigreturn_codes));
 
-	ptr = (unsigned long)addr + offset;
-	flush_icache_range(ptr, ptr + sizeof(sigreturn_codes));
+	/* Flush out all instructions in this page */
+	ptr = (unsigned long)addr;
+	flush_icache_range(ptr, ptr + PAGE_SIZE);
 
 	return page;
 }
 
-/* Defer to generic check */
-asmlinkage void addr_limit_check_failed(void)
+#ifdef CONFIG_DEBUG_RSEQ
+asmlinkage void do_rseq_syscall(struct pt_regs *regs)
 {
-	addr_limit_user_check();
+	rseq_syscall(regs);
 }
+#endif
+
+/*
+ * Compile-time assertions for siginfo_t offsets. Check NSIG* as well, as
+ * changes likely come with new fields that should be added below.
+ */
+static_assert(NSIGILL	== 11);
+static_assert(NSIGFPE	== 15);
+static_assert(NSIGSEGV	== 9);
+static_assert(NSIGBUS	== 5);
+static_assert(NSIGTRAP	== 6);
+static_assert(NSIGCHLD	== 6);
+static_assert(NSIGSYS	== 2);
+static_assert(sizeof(siginfo_t) == 128);
+static_assert(__alignof__(siginfo_t) == 4);
+static_assert(offsetof(siginfo_t, si_signo)	== 0x00);
+static_assert(offsetof(siginfo_t, si_errno)	== 0x04);
+static_assert(offsetof(siginfo_t, si_code)	== 0x08);
+static_assert(offsetof(siginfo_t, si_pid)	== 0x0c);
+static_assert(offsetof(siginfo_t, si_uid)	== 0x10);
+static_assert(offsetof(siginfo_t, si_tid)	== 0x0c);
+static_assert(offsetof(siginfo_t, si_overrun)	== 0x10);
+static_assert(offsetof(siginfo_t, si_status)	== 0x14);
+static_assert(offsetof(siginfo_t, si_utime)	== 0x18);
+static_assert(offsetof(siginfo_t, si_stime)	== 0x1c);
+static_assert(offsetof(siginfo_t, si_value)	== 0x14);
+static_assert(offsetof(siginfo_t, si_int)	== 0x14);
+static_assert(offsetof(siginfo_t, si_ptr)	== 0x14);
+static_assert(offsetof(siginfo_t, si_addr)	== 0x0c);
+static_assert(offsetof(siginfo_t, si_addr_lsb)	== 0x10);
+static_assert(offsetof(siginfo_t, si_lower)	== 0x14);
+static_assert(offsetof(siginfo_t, si_upper)	== 0x18);
+static_assert(offsetof(siginfo_t, si_pkey)	== 0x14);
+static_assert(offsetof(siginfo_t, si_perf_data)	== 0x10);
+static_assert(offsetof(siginfo_t, si_perf_type)	== 0x14);
+static_assert(offsetof(siginfo_t, si_perf_flags) == 0x18);
+static_assert(offsetof(siginfo_t, si_band)	== 0x0c);
+static_assert(offsetof(siginfo_t, si_fd)	== 0x10);
+static_assert(offsetof(siginfo_t, si_call_addr)	== 0x0c);
+static_assert(offsetof(siginfo_t, si_syscall)	== 0x10);
+static_assert(offsetof(siginfo_t, si_arch)	== 0x14);

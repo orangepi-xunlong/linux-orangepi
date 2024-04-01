@@ -17,21 +17,6 @@
 struct mapped_device;
 
 /*
- * One of these is allocated per request.
- */
-struct dm_rq_target_io {
-	struct mapped_device *md;
-	struct dm_target *ti;
-	struct request *orig, *clone;
-	struct kthread_work work;
-	int error;
-	union map_info info;
-	struct dm_stats_aux stats_aux;
-	unsigned long duration_jiffies;
-	unsigned n_sectors;
-};
-
-/*
  * For request-based dm - the bio clones we allocate are embedded in these
  * structs.
  *
@@ -45,10 +30,6 @@ struct dm_rq_clone_bio_info {
 	struct bio clone;
 };
 
-bool dm_use_blk_mq_default(void);
-bool dm_use_blk_mq(struct mapped_device *md);
-
-int dm_old_init_request_queue(struct mapped_device *md);
 int dm_mq_init_request_queue(struct mapped_device *md, struct dm_table *t);
 void dm_mq_cleanup_mapped_device(struct mapped_device *md);
 
@@ -57,7 +38,7 @@ void dm_stop_queue(struct request_queue *q);
 
 void dm_mq_kick_requeue_list(struct mapped_device *md);
 
-unsigned dm_get_reserved_rq_based_ios(void);
+unsigned int dm_get_reserved_rq_based_ios(void);
 
 ssize_t dm_attr_rq_based_seq_io_merge_deadline_show(struct mapped_device *md, char *buf);
 ssize_t dm_attr_rq_based_seq_io_merge_deadline_store(struct mapped_device *md,

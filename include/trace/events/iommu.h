@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * iommu trace points
  *
@@ -11,7 +12,6 @@
 #define _TRACE_IOMMU_H
 
 #include <linux/tracepoint.h>
-#include <linux/pci.h>
 
 struct device;
 
@@ -101,8 +101,9 @@ TRACE_EVENT(map,
 		__entry->size = size;
 	),
 
-	TP_printk("IOMMU: iova=0x%016llx paddr=0x%016llx size=%zu",
-			__entry->iova, __entry->paddr, __entry->size
+	TP_printk("IOMMU: iova=0x%016llx - 0x%016llx paddr=0x%016llx size=%zu",
+		  __entry->iova, __entry->iova + __entry->size, __entry->paddr,
+		  __entry->size
 	)
 );
 
@@ -124,73 +125,9 @@ TRACE_EVENT(unmap,
 		__entry->unmapped_size = unmapped_size;
 	),
 
-	TP_printk("IOMMU: iova=0x%016llx size=%zu unmapped_size=%zu",
-			__entry->iova, __entry->size, __entry->unmapped_size
-	)
-);
-
-TRACE_EVENT(sunxi_map,
-
-	TP_PROTO(unsigned long iova, phys_addr_t paddr, size_t size),
-
-	TP_ARGS(iova, paddr, size),
-
-	TP_STRUCT__entry(
-		__field(u64, iova)
-		__field(u64, paddr)
-		__field(size_t, size)
-	),
-
-	TP_fast_assign(
-		__entry->iova = iova;
-		__entry->paddr = paddr;
-		__entry->size = size;
-	),
-
-	TP_printk("IOMMU: iova=0x%016llx paddr=0x%016llx size=%zu",
-			__entry->iova, __entry->paddr, __entry->size
-	)
-);
-
-TRACE_EVENT(sunxi_unmap,
-
-	TP_PROTO(unsigned long iova, size_t size),
-
-	TP_ARGS(iova, size),
-
-	TP_STRUCT__entry(
-		__field(u64, iova)
-		__field(size_t, size)
-	),
-
-	TP_fast_assign(
-		__entry->iova = iova;
-		__entry->size = size;
-	),
-
-	TP_printk("IOMMU: iova=0x%016llx size=%zu",
-			__entry->iova, __entry->size
-	)
-);
-
-TRACE_EVENT(sunxi_map_sg,
-
-	TP_PROTO(unsigned long iova, size_t size),
-
-	TP_ARGS(iova, size),
-
-	TP_STRUCT__entry(
-		__field(u64, iova)
-		__field(size_t, size)
-	),
-
-	TP_fast_assign(
-		__entry->iova = iova;
-		__entry->size = size;
-	),
-
-	TP_printk("IOMMU: iova=0x%016llx size=%zu",
-			__entry->iova, __entry->size
+	TP_printk("IOMMU: iova=0x%016llx - 0x%016llx size=%zu unmapped_size=%zu",
+		  __entry->iova, __entry->iova + __entry->size,
+		  __entry->size, __entry->unmapped_size
 	)
 );
 

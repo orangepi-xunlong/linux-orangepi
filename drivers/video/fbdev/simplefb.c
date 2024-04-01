@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Simplest possible simple frame-buffer driver, as a platform device
  *
@@ -9,15 +10,6 @@
  * Also based on offb.c, which was:
  * Copyright (C) 1997 Geert Uytterhoeven
  * Copyright (C) 1996 Paul Mackerras
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
  */
 
 #include <linux/errno.h>
@@ -27,8 +19,8 @@
 #include <linux/platform_data/simplefb.h>
 #include <linux/platform_device.h>
 #include <linux/clk.h>
-#include <linux/clk-provider.h>
 #include <linux/of.h>
+#include <linux/of_clk.h>
 #include <linux/of_platform.h>
 #include <linux/parser.h>
 #include <linux/regulator/consumer.h>
@@ -74,19 +66,45 @@ static int simplefb_setcolreg(u_int regno, u_int red, u_int green, u_int blue,
 	return 0;
 }
 
-struct simplefb_par;
+struct simplefb_par {
+	u32 palette[PSEUDO_PALETTE_SIZE];
+	struct resource *mem;
+#if defined CONFIG_OF && defined CONFIG_COMMON_CLK
+	bool clks_enabled;
+	unsigned int clk_count;
+	struct clk **clks;
+#endif
+#if defined CONFIG_OF && defined CONFIG_REGULATOR
+	bool regulators_enabled;
+	u32 regulator_count;
+	struct regulator **regulators;
+#endif
+};
+
 static void simplefb_clocks_destroy(struct simplefb_par *par);
 static void simplefb_regulators_destroy(struct simplefb_par *par);
 
+/*
+ * fb_ops.fb_destroy is called by the last put_fb_info() call at the end
+ * of unregister_framebuffer() or fb_release(). Do any cleanup here.
+ */
 static void simplefb_destroy(struct fb_info *info)
 {
+	struct simplefb_par *par = info->par;
+	struct resource *mem = par->mem;
+
 	simplefb_regulators_destroy(info->par);
 	simplefb_clocks_destroy(info->par);
 	if (info->screen_base)
 		iounmap(info->screen_base);
+
+	framebuffer_release(info);
+
+	if (mem)
+		release_mem_region(mem->start, resource_size(mem));
 }
 
-static struct fb_ops simplefb_ops = {
+static const struct fb_ops simplefb_ops = {
 	.owner		= THIS_MODULE,
 	.fb_destroy	= simplefb_destroy,
 	.fb_setcolreg	= simplefb_setcolreg,
@@ -177,18 +195,6 @@ static int simplefb_parse_pd(struct platform_device *pdev,
 	return 0;
 }
 
-struct simplefb_par {
-	u32 palette[PSEUDO_PALETTE_SIZE];
-#if defined CONFIG_OF && defined CONFIG_COMMON_CLK
-	unsigned int clk_count;
-	struct clk **clks;
-#endif
-#if defined CONFIG_OF && defined CONFIG_REGULATOR
-	u32 regulator_count;
-	struct regulator **regulators;
-#endif
-};
-
 #if defined CONFIG_OF && defined CONFIG_COMMON_CLK
 /*
  * Clock handling code.
@@ -208,12 +214,12 @@ struct simplefb_par {
  * the fb probe will not help us much either. So just complain and carry on,
  * and hope that the user actually gets a working fb at the end of things.
  */
-static int simplefb_clocks_init(struct simplefb_par *par,
-				struct platform_device *pdev)
+static int simplefb_clocks_get(struct simplefb_par *par,
+			       struct platform_device *pdev)
 {
 	struct device_node *np = pdev->dev.of_node;
 	struct clk *clock;
-	int i, ret;
+	int i;
 
 	if (dev_get_platdata(&pdev->dev) || !np)
 		return 0;
@@ -231,8 +237,7 @@ static int simplefb_clocks_init(struct simplefb_par *par,
 		if (IS_ERR(clock)) {
 			if (PTR_ERR(clock) == -EPROBE_DEFER) {
 				while (--i >= 0) {
-					if (par->clks[i])
-						clk_put(par->clks[i]);
+					clk_put(par->clks[i]);
 				}
 				kfree(par->clks);
 				return -EPROBE_DEFER;
@@ -243,6 +248,14 @@ static int simplefb_clocks_init(struct simplefb_par *par,
 		}
 		par->clks[i] = clock;
 	}
+
+	return 0;
+}
+
+static void simplefb_clocks_enable(struct simplefb_par *par,
+				   struct platform_device *pdev)
+{
+	int i, ret;
 
 	for (i = 0; i < par->clk_count; i++) {
 		if (par->clks[i]) {
@@ -256,8 +269,7 @@ static int simplefb_clocks_init(struct simplefb_par *par,
 			}
 		}
 	}
-
-	return 0;
+	par->clks_enabled = true;
 }
 
 static void simplefb_clocks_destroy(struct simplefb_par *par)
@@ -269,7 +281,8 @@ static void simplefb_clocks_destroy(struct simplefb_par *par)
 
 	for (i = 0; i < par->clk_count; i++) {
 		if (par->clks[i]) {
-			clk_disable_unprepare(par->clks[i]);
+			if (par->clks_enabled)
+				clk_disable_unprepare(par->clks[i]);
 			clk_put(par->clks[i]);
 		}
 	}
@@ -277,8 +290,10 @@ static void simplefb_clocks_destroy(struct simplefb_par *par)
 	kfree(par->clks);
 }
 #else
-static int simplefb_clocks_init(struct simplefb_par *par,
+static int simplefb_clocks_get(struct simplefb_par *par,
 	struct platform_device *pdev) { return 0; }
+static void simplefb_clocks_enable(struct simplefb_par *par,
+	struct platform_device *pdev) { }
 static void simplefb_clocks_destroy(struct simplefb_par *par) { }
 #endif
 
@@ -305,14 +320,14 @@ static void simplefb_clocks_destroy(struct simplefb_par *par) { }
  * the fb probe will not help us much either. So just complain and carry on,
  * and hope that the user actually gets a working fb at the end of things.
  */
-static int simplefb_regulators_init(struct simplefb_par *par,
-	struct platform_device *pdev)
+static int simplefb_regulators_get(struct simplefb_par *par,
+				   struct platform_device *pdev)
 {
 	struct device_node *np = pdev->dev.of_node;
 	struct property *prop;
 	struct regulator *regulator;
 	const char *p;
-	int count = 0, i = 0, ret;
+	int count = 0, i = 0;
 
 	if (dev_get_platdata(&pdev->dev) || !np)
 		return 0;
@@ -340,7 +355,7 @@ static int simplefb_regulators_init(struct simplefb_par *par,
 		if (!p || p == prop->name)
 			continue;
 
-		strlcpy(name, prop->name,
+		strscpy(name, prop->name,
 			strlen(prop->name) - strlen(SUPPLY_SUFFIX) + 1);
 		regulator = devm_regulator_get_optional(&pdev->dev, name);
 		if (IS_ERR(regulator)) {
@@ -354,6 +369,14 @@ static int simplefb_regulators_init(struct simplefb_par *par,
 	}
 	par->regulator_count = i;
 
+	return 0;
+}
+
+static void simplefb_regulators_enable(struct simplefb_par *par,
+				       struct platform_device *pdev)
+{
+	int i, ret;
+
 	/* Enable all the regulators */
 	for (i = 0; i < par->regulator_count; i++) {
 		ret = regulator_enable(par->regulators[i]);
@@ -365,15 +388,14 @@ static int simplefb_regulators_init(struct simplefb_par *par,
 			par->regulators[i] = NULL;
 		}
 	}
-
-	return 0;
+	par->regulators_enabled = true;
 }
 
 static void simplefb_regulators_destroy(struct simplefb_par *par)
 {
 	int i;
 
-	if (!par->regulators)
+	if (!par->regulators || !par->regulators_enabled)
 		return;
 
 	for (i = 0; i < par->regulator_count; i++)
@@ -381,8 +403,10 @@ static void simplefb_regulators_destroy(struct simplefb_par *par)
 			regulator_disable(par->regulators[i]);
 }
 #else
-static int simplefb_regulators_init(struct simplefb_par *par,
+static int simplefb_regulators_get(struct simplefb_par *par,
 	struct platform_device *pdev) { return 0; }
+static void simplefb_regulators_enable(struct simplefb_par *par,
+	struct platform_device *pdev) { }
 static void simplefb_regulators_destroy(struct simplefb_par *par) { }
 #endif
 
@@ -392,7 +416,7 @@ static int simplefb_probe(struct platform_device *pdev)
 	struct simplefb_params params;
 	struct fb_info *info;
 	struct simplefb_par *par;
-	struct resource *mem;
+	struct resource *res, *mem;
 
 	if (fb_get_options("simplefb", NULL))
 		return -ENODEV;
@@ -406,15 +430,28 @@ static int simplefb_probe(struct platform_device *pdev)
 	if (ret)
 		return ret;
 
-	mem = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	if (!mem) {
+	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+	if (!res) {
 		dev_err(&pdev->dev, "No memory resource\n");
 		return -EINVAL;
 	}
 
+	mem = request_mem_region(res->start, resource_size(res), "simplefb");
+	if (!mem) {
+		/*
+		 * We cannot make this fatal. Sometimes this comes from magic
+		 * spaces our resource handlers simply don't know about. Use
+		 * the I/O-memory resource as-is and try to map that instead.
+		 */
+		dev_warn(&pdev->dev, "simplefb: cannot reserve video memory at %pR\n", res);
+		mem = res;
+	}
+
 	info = framebuffer_alloc(sizeof(struct simplefb_par), &pdev->dev);
-	if (!info)
-		return -ENOMEM;
+	if (!info) {
+		ret = -ENOMEM;
+		goto error_release_mem_region;
+	}
 	platform_set_drvdata(pdev, info);
 
 	par = info->par;
@@ -453,21 +490,26 @@ static int simplefb_probe(struct platform_device *pdev)
 	}
 	info->pseudo_palette = par->palette;
 
-	ret = simplefb_clocks_init(par, pdev);
+	ret = simplefb_clocks_get(par, pdev);
 	if (ret < 0)
 		goto error_unmap;
 
-	ret = simplefb_regulators_init(par, pdev);
+	ret = simplefb_regulators_get(par, pdev);
 	if (ret < 0)
 		goto error_clocks;
 
-	dev_info(&pdev->dev, "framebuffer at 0x%lx, 0x%x bytes, mapped to 0x%p\n",
-			     info->fix.smem_start, info->fix.smem_len,
-			     info->screen_base);
+	simplefb_clocks_enable(par, pdev);
+	simplefb_regulators_enable(par, pdev);
+
+	dev_info(&pdev->dev, "framebuffer at 0x%lx, 0x%x bytes\n",
+			     info->fix.smem_start, info->fix.smem_len);
 	dev_info(&pdev->dev, "format=%s, mode=%dx%dx%d, linelength=%d\n",
 			     params.format->name,
 			     info->var.xres, info->var.yres,
 			     info->var.bits_per_pixel, info->fix.line_length);
+
+	if (mem != res)
+		par->mem = mem; /* release in clean-up handler */
 
 	ret = register_framebuffer(info);
 	if (ret < 0) {
@@ -487,6 +529,9 @@ error_unmap:
 	iounmap(info->screen_base);
 error_fb_release:
 	framebuffer_release(info);
+error_release_mem_region:
+	if (mem != res)
+		release_mem_region(mem->start, resource_size(mem));
 	return ret;
 }
 
@@ -494,8 +539,8 @@ static int simplefb_remove(struct platform_device *pdev)
 {
 	struct fb_info *info = platform_get_drvdata(pdev);
 
+	/* simplefb_destroy takes care of info cleanup */
 	unregister_framebuffer(info);
-	framebuffer_release(info);
 
 	return 0;
 }
@@ -515,26 +560,7 @@ static struct platform_driver simplefb_driver = {
 	.remove = simplefb_remove,
 };
 
-static int __init simplefb_init(void)
-{
-	int ret;
-	struct device_node *np;
-
-	ret = platform_driver_register(&simplefb_driver);
-	if (ret)
-		return ret;
-
-	if (IS_ENABLED(CONFIG_OF_ADDRESS) && of_chosen) {
-		for_each_child_of_node(of_chosen, np) {
-			if (of_device_is_compatible(np, "simple-framebuffer"))
-				of_platform_device_create(np, NULL, NULL);
-		}
-	}
-
-	return 0;
-}
-
-fs_initcall(simplefb_init);
+module_platform_driver(simplefb_driver);
 
 MODULE_AUTHOR("Stephen Warren <swarren@wwwdotorg.org>");
 MODULE_DESCRIPTION("Simple framebuffer driver");

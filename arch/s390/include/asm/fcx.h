@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  *  Functions for assembling fcx enabled I/O control blocks.
  *
@@ -213,7 +214,7 @@ struct dcw_intrg_data {
 	u32 :32;
 	u64 time;
 	u64 prog_id;
-	u8  prog_data[0];
+	u8  prog_data[];
 } __attribute__ ((packed));
 
 #define DCW_FLAGS_CC		(1 << (7 - 1))
@@ -240,7 +241,7 @@ struct dcw {
 	u32 :8;
 	u32 cd_count:8;
 	u32 count;
-	u8 cd[0];
+	u8 cd[];
 } __attribute__ ((packed));
 
 #define TCCB_FORMAT_DEFAULT	0x7f

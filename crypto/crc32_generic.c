@@ -1,26 +1,4 @@
-/* GPL HEADER START
- *
- * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 only,
- * as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License version 2 for more details (a copy is included
- * in the LICENSE file that accompanied this code).
- *
- * You should have received a copy of the GNU General Public License
- * version 2 along with this program; If not, see http://www.gnu.org/licenses
- *
- * Please  visit http://www.xyratex.com/contact if you need additional
- * information or have any questions.
- *
- * GPL HEADER END
- */
-
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright 2012 Xyratex Technology Limited
  */
@@ -29,6 +7,7 @@
  * This is crypto api shash wrappers to crc32_le.
  */
 
+#include <asm/unaligned.h>
 #include <linux/crc32.h>
 #include <crypto/internal/hash.h>
 #include <linux/init.h>
@@ -38,11 +17,6 @@
 
 #define CHKSUM_BLOCK_SIZE	1
 #define CHKSUM_DIGEST_SIZE	4
-
-static u32 __crc32_le(u32 crc, unsigned char const *p, size_t len)
-{
-	return crc32_le(crc, p, len);
-}
 
 /** No default init with ~0 */
 static int crc32_cra_init(struct crypto_tfm *tfm)
@@ -54,7 +28,6 @@ static int crc32_cra_init(struct crypto_tfm *tfm)
 	return 0;
 }
 
-
 /*
  * Setting the seed allows arbitrary accumulators and flexible XOR policy
  * If your algorithm starts with ~0, then XOR with ~0 before you set
@@ -65,11 +38,9 @@ static int crc32_setkey(struct crypto_shash *hash, const u8 *key,
 {
 	u32 *mctx = crypto_shash_ctx(hash);
 
-	if (keylen != sizeof(u32)) {
-		crypto_shash_set_flags(hash, CRYPTO_TFM_RES_BAD_KEY_LEN);
+	if (keylen != sizeof(u32))
 		return -EINVAL;
-	}
-	*mctx = le32_to_cpup((__le32 *)key);
+	*mctx = get_unaligned_le32(key);
 	return 0;
 }
 
@@ -88,7 +59,7 @@ static int crc32_update(struct shash_desc *desc, const u8 *data,
 {
 	u32 *crcp = shash_desc_ctx(desc);
 
-	*crcp = __crc32_le(*crcp, data, len);
+	*crcp = crc32_le(*crcp, data, len);
 	return 0;
 }
 
@@ -96,7 +67,7 @@ static int crc32_update(struct shash_desc *desc, const u8 *data,
 static int __crc32_finup(u32 *crcp, const u8 *data, unsigned int len,
 			 u8 *out)
 {
-	*(__le32 *)out = cpu_to_le32(__crc32_le(*crcp, data, len));
+	put_unaligned_le32(crc32_le(*crcp, data, len), out);
 	return 0;
 }
 
@@ -110,7 +81,7 @@ static int crc32_final(struct shash_desc *desc, u8 *out)
 {
 	u32 *crcp = shash_desc_ctx(desc);
 
-	*(__le32 *)out = cpu_to_le32p(crcp);
+	put_unaligned_le32(*crcp, out);
 	return 0;
 }
 
@@ -151,7 +122,7 @@ static void __exit crc32_mod_fini(void)
 	crypto_unregister_shash(&alg);
 }
 
-module_init(crc32_mod_init);
+subsys_initcall(crc32_mod_init);
 module_exit(crc32_mod_fini);
 
 MODULE_AUTHOR("Alexander Boyko <alexander_boyko@xyratex.com>");

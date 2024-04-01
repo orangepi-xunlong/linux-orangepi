@@ -1,15 +1,5 @@
-/*
- * Copyright (C) 2014 Broadcom Corporation
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as
- * published by the Free Software Foundation version 2.
- *
- * This program is distributed "as is" WITHOUT ANY WARRANTY of any
- * kind, whether express or implied; without even the implied warranty
- * of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- */
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2014 Broadcom Corporation
 
 #include <linux/bitops.h>
 #include <linux/clk.h>
@@ -183,8 +173,7 @@ static void bcm_kp_stop(const struct bcm_kp *kp)
 	writel(0xFFFFFFFF, kp->base + KPICR0_OFFSET);
 	writel(0xFFFFFFFF, kp->base + KPICR1_OFFSET);
 
-	if (kp->clk)
-		clk_disable_unprepare(kp->clk);
+	clk_disable_unprepare(kp->clk);
 }
 
 static int bcm_kp_open(struct input_dev *dev)
@@ -213,7 +202,7 @@ static int bcm_kp_matrix_key_parse_dt(struct bcm_kp *kp)
 	/* Initialize the KPCR Keypad Configuration Register */
 	kp->kpcr = KPCR_STATUSFILTERENABLE | KPCR_COLFILTERENABLE;
 
-	error = matrix_keypad_parse_of_params(dev, &kp->n_rows, &kp->n_cols);
+	error = matrix_keypad_parse_properties(dev, &kp->n_rows, &kp->n_cols);
 	if (error) {
 		dev_err(dev, "failed to parse kp params\n");
 		return error;
@@ -352,8 +341,6 @@ static int bcm_kp_probe(struct platform_device *pdev)
 
 	kp->input_dev = input_dev;
 
-	platform_set_drvdata(pdev, kp);
-
 	error = bcm_kp_matrix_key_parse_dt(kp);
 	if (error)
 		return error;
@@ -415,10 +402,8 @@ static int bcm_kp_probe(struct platform_device *pdev)
 	bcm_kp_stop(kp);
 
 	kp->irq = platform_get_irq(pdev, 0);
-	if (kp->irq < 0) {
-		dev_err(&pdev->dev, "no IRQ specified\n");
+	if (kp->irq < 0)
 		return -EINVAL;
-	}
 
 	error = devm_request_threaded_irq(&pdev->dev, kp->irq,
 					  NULL, bcm_kp_isr_thread,

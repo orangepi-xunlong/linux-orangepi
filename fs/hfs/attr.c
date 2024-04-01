@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  *  linux/fs/hfs/attr.c
  *
@@ -120,6 +121,7 @@ static int hfs_xattr_get(const struct xattr_handler *handler,
 }
 
 static int hfs_xattr_set(const struct xattr_handler *handler,
+			 struct user_namespace *mnt_userns,
 			 struct dentry *unused, struct inode *inode,
 			 const char *name, const void *value, size_t size,
 			 int flags)

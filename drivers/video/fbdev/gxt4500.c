@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Frame buffer device for IBM GXT4500P/6500P and GXT4000P/6000P
  * display adaptors
@@ -5,6 +6,7 @@
  * Copyright (C) 2006 Paul Mackerras, IBM Corp. <paulus@samba.org>
  */
 
+#include <linux/aperture.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/fb.h>
@@ -533,7 +535,7 @@ static int gxt4500_setcolreg(unsigned int reg, unsigned int red,
 			break;
 		case DFA_PIX_32BIT:
 			val |= (reg << 24);
-			/* fall through */
+			fallthrough;
 		case DFA_PIX_24BIT:
 			val |= (reg << 16) | (reg << 8);
 			break;
@@ -598,7 +600,7 @@ static const struct fb_fix_screeninfo gxt4500_fix = {
 	.mmio_len = 0x20000,
 };
 
-static struct fb_ops gxt4500_ops = {
+static const struct fb_ops gxt4500_ops = {
 	.owner = THIS_MODULE,
 	.fb_check_var = gxt4500_check_var,
 	.fb_set_par = gxt4500_set_par,
@@ -619,6 +621,10 @@ static int gxt4500_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	struct fb_info *info;
 	struct fb_var_screeninfo var;
 	enum gxt_cards cardtype;
+
+	err = aperture_remove_conflicting_pci_devices(pdev, "gxt4500fb");
+	if (err)
+		return err;
 
 	err = pci_enable_device(pdev);
 	if (err) {
@@ -642,15 +648,14 @@ static int gxt4500_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	}
 
 	info = framebuffer_alloc(sizeof(struct gxt4500_par), &pdev->dev);
-	if (!info) {
-		dev_err(&pdev->dev, "gxt4500: cannot alloc FB info record\n");
+	if (!info)
 		goto err_free_fb;
-	}
+
 	par = info->par;
 	cardtype = ent->driver_data;
 	par->refclk_ps = cardinfo[cardtype].refclk_ps;
 	info->fix = gxt4500_fix;
-	strlcpy(info->fix.id, cardinfo[cardtype].cardname,
+	strscpy(info->fix.id, cardinfo[cardtype].cardname,
 		sizeof(info->fix.id));
 	info->pseudo_palette = par->pseudo_palette;
 

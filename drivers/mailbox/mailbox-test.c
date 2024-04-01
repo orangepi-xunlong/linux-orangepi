@@ -1,24 +1,24 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright (C) 2015 ST Microelectronics
  *
  * Author: Lee Jones <lee.jones@linaro.org>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
  */
 
 #include <linux/debugfs.h>
 #include <linux/err.h>
+#include <linux/fs.h>
 #include <linux/io.h>
 #include <linux/kernel.h>
 #include <linux/mailbox_client.h>
 #include <linux/module.h>
+#include <linux/mutex.h>
 #include <linux/of.h>
 #include <linux/platform_device.h>
+#include <linux/poll.h>
 #include <linux/slab.h>
 #include <linux/uaccess.h>
+#include <linux/sched/signal.h>
 
 #define MBOX_MAX_SIG_LEN	8
 #define MBOX_MAX_MSG_LEN	128
@@ -27,7 +27,7 @@
 #define MBOX_HEXDUMP_MAX_LEN	(MBOX_HEXDUMP_LINE_LEN *		\
 				 (MBOX_MAX_MSG_LEN / MBOX_BYTES_PER_LINE))
 
-static struct dentry *root_debugfs_dir;
+static bool mbox_data_ready;
 
 struct mbox_test_device {
 	struct device		*dev;
@@ -39,6 +39,10 @@ struct mbox_test_device {
 	char			*signal;
 	char			*message;
 	spinlock_t		lock;
+	struct mutex		mutex;
+	wait_queue_head_t	waitq;
+	struct fasync_struct	*async_queue;
+	struct dentry		*root_debugfs_dir;
 };
 
 static ssize_t mbox_test_signal_write(struct file *filp,
@@ -81,11 +85,19 @@ static const struct file_operations mbox_test_signal_ops = {
 	.llseek	= generic_file_llseek,
 };
 
+static int mbox_test_message_fasync(int fd, struct file *filp, int on)
+{
+	struct mbox_test_device *tdev = filp->private_data;
+
+	return fasync_helper(fd, filp, on, &tdev->async_queue);
+}
+
 static ssize_t mbox_test_message_write(struct file *filp,
 				       const char __user *userbuf,
 				       size_t count, loff_t *ppos)
 {
 	struct mbox_test_device *tdev = filp->private_data;
+	char *message;
 	void *data;
 	int ret;
 
@@ -101,10 +113,13 @@ static ssize_t mbox_test_message_write(struct file *filp,
 		return -EINVAL;
 	}
 
-	tdev->message = kzalloc(MBOX_MAX_MSG_LEN, GFP_KERNEL);
-	if (!tdev->message)
+	message = kzalloc(MBOX_MAX_MSG_LEN, GFP_KERNEL);
+	if (!message)
 		return -ENOMEM;
 
+	mutex_lock(&tdev->mutex);
+
+	tdev->message = message;
 	ret = copy_from_user(tdev->message, userbuf, count);
 	if (ret) {
 		ret = -EFAULT;
@@ -135,7 +150,21 @@ out:
 	kfree(tdev->message);
 	tdev->signal = NULL;
 
+	mutex_unlock(&tdev->mutex);
+
 	return ret < 0 ? ret : count;
+}
+
+static bool mbox_test_message_data_ready(struct mbox_test_device *tdev)
+{
+	bool data_ready;
+	unsigned long flags;
+
+	spin_lock_irqsave(&tdev->lock, flags);
+	data_ready = mbox_data_ready;
+	spin_unlock_irqrestore(&tdev->lock, flags);
+
+	return data_ready;
 }
 
 static ssize_t mbox_test_message_read(struct file *filp, char __user *userbuf,
@@ -147,6 +176,8 @@ static ssize_t mbox_test_message_read(struct file *filp, char __user *userbuf,
 	int l = 0;
 	int ret;
 
+	DECLARE_WAITQUEUE(wait, current);
+
 	touser = kzalloc(MBOX_HEXDUMP_MAX_LEN + 1, GFP_KERNEL);
 	if (!touser)
 		return -ENOMEM;
@@ -155,15 +186,29 @@ static ssize_t mbox_test_message_read(struct file *filp, char __user *userbuf,
 		ret = snprintf(touser, 20, "<NO RX CAPABILITY>\n");
 		ret = simple_read_from_buffer(userbuf, count, ppos,
 					      touser, ret);
-		goto out;
+		goto kfree_err;
 	}
 
-	if (tdev->rx_buffer[0] == '\0') {
-		ret = snprintf(touser, 9, "<EMPTY>\n");
-		ret = simple_read_from_buffer(userbuf, count, ppos,
-					      touser, ret);
-		goto out;
-	}
+	add_wait_queue(&tdev->waitq, &wait);
+
+	do {
+		__set_current_state(TASK_INTERRUPTIBLE);
+
+		if (mbox_test_message_data_ready(tdev))
+			break;
+
+		if (filp->f_flags & O_NONBLOCK) {
+			ret = -EAGAIN;
+			goto waitq_err;
+		}
+
+		if (signal_pending(current)) {
+			ret = -ERESTARTSYS;
+			goto waitq_err;
+		}
+		schedule();
+
+	} while (1);
 
 	spin_lock_irqsave(&tdev->lock, flags);
 
@@ -181,18 +226,36 @@ static ssize_t mbox_test_message_read(struct file *filp, char __user *userbuf,
 	*(touser + l) = '\0';
 
 	memset(tdev->rx_buffer, 0, MBOX_MAX_MSG_LEN);
+	mbox_data_ready = false;
 
 	spin_unlock_irqrestore(&tdev->lock, flags);
 
 	ret = simple_read_from_buffer(userbuf, count, ppos, touser, MBOX_HEXDUMP_MAX_LEN);
-out:
+waitq_err:
+	__set_current_state(TASK_RUNNING);
+	remove_wait_queue(&tdev->waitq, &wait);
+kfree_err:
 	kfree(touser);
 	return ret;
+}
+
+static __poll_t
+mbox_test_message_poll(struct file *filp, struct poll_table_struct *wait)
+{
+	struct mbox_test_device *tdev = filp->private_data;
+
+	poll_wait(filp, &tdev->waitq, wait);
+
+	if (mbox_test_message_data_ready(tdev))
+		return EPOLLIN | EPOLLRDNORM;
+	return 0;
 }
 
 static const struct file_operations mbox_test_message_ops = {
 	.write	= mbox_test_message_write,
 	.read	= mbox_test_message_read,
+	.fasync	= mbox_test_message_fasync,
+	.poll	= mbox_test_message_poll,
 	.open	= simple_open,
 	.llseek	= generic_file_llseek,
 };
@@ -203,16 +266,16 @@ static int mbox_test_add_debugfs(struct platform_device *pdev,
 	if (!debugfs_initialized())
 		return 0;
 
-	root_debugfs_dir = debugfs_create_dir("mailbox", NULL);
-	if (!root_debugfs_dir) {
+	tdev->root_debugfs_dir = debugfs_create_dir(dev_name(&pdev->dev), NULL);
+	if (!tdev->root_debugfs_dir) {
 		dev_err(&pdev->dev, "Failed to create Mailbox debugfs\n");
 		return -EINVAL;
 	}
 
-	debugfs_create_file("message", 0600, root_debugfs_dir,
+	debugfs_create_file("message", 0600, tdev->root_debugfs_dir,
 			    tdev, &mbox_test_message_ops);
 
-	debugfs_create_file("signal", 0200, root_debugfs_dir,
+	debugfs_create_file("signal", 0200, tdev->root_debugfs_dir,
 			    tdev, &mbox_test_signal_ops);
 
 	return 0;
@@ -233,7 +296,12 @@ static void mbox_test_receive_message(struct mbox_client *client, void *message)
 				     message, MBOX_MAX_MSG_LEN);
 		memcpy(tdev->rx_buffer, message, MBOX_MAX_MSG_LEN);
 	}
+	mbox_data_ready = true;
 	spin_unlock_irqrestore(&tdev->lock, flags);
+
+	wake_up_interruptible(&tdev->waitq);
+
+	kill_fasync(&tdev->async_queue, SIGIO, POLL_IN);
 }
 
 static void mbox_test_prepare_message(struct mbox_client *client, void *message)
@@ -290,6 +358,7 @@ static int mbox_test_probe(struct platform_device *pdev)
 {
 	struct mbox_test_device *tdev;
 	struct resource *res;
+	resource_size_t size;
 	int ret;
 
 	tdev = devm_kzalloc(&pdev->dev, sizeof(*tdev), GFP_KERNEL);
@@ -299,14 +368,23 @@ static int mbox_test_probe(struct platform_device *pdev)
 	/* It's okay for MMIO to be NULL */
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	tdev->tx_mmio = devm_ioremap_resource(&pdev->dev, res);
-	if (IS_ERR(tdev->tx_mmio))
+	if (PTR_ERR(tdev->tx_mmio) == -EBUSY) {
+		/* if reserved area in SRAM, try just ioremap */
+		size = resource_size(res);
+		tdev->tx_mmio = devm_ioremap(&pdev->dev, res->start, size);
+	} else if (IS_ERR(tdev->tx_mmio)) {
 		tdev->tx_mmio = NULL;
+	}
 
 	/* If specified, second reg entry is Rx MMIO */
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 1);
 	tdev->rx_mmio = devm_ioremap_resource(&pdev->dev, res);
-	if (IS_ERR(tdev->rx_mmio))
+	if (PTR_ERR(tdev->rx_mmio) == -EBUSY) {
+		size = resource_size(res);
+		tdev->rx_mmio = devm_ioremap(&pdev->dev, res->start, size);
+	} else if (IS_ERR(tdev->rx_mmio)) {
 		tdev->rx_mmio = tdev->tx_mmio;
+	}
 
 	tdev->tx_channel = mbox_test_request_channel(pdev, "tx");
 	tdev->rx_channel = mbox_test_request_channel(pdev, "rx");
@@ -322,6 +400,7 @@ static int mbox_test_probe(struct platform_device *pdev)
 	platform_set_drvdata(pdev, tdev);
 
 	spin_lock_init(&tdev->lock);
+	mutex_init(&tdev->mutex);
 
 	if (tdev->rx_channel) {
 		tdev->rx_buffer = devm_kzalloc(&pdev->dev,
@@ -334,6 +413,7 @@ static int mbox_test_probe(struct platform_device *pdev)
 	if (ret)
 		return ret;
 
+	init_waitqueue_head(&tdev->waitq);
 	dev_info(&pdev->dev, "Successfully registered\n");
 
 	return 0;
@@ -343,7 +423,7 @@ static int mbox_test_remove(struct platform_device *pdev)
 {
 	struct mbox_test_device *tdev = platform_get_drvdata(pdev);
 
-	debugfs_remove_recursive(root_debugfs_dir);
+	debugfs_remove_recursive(tdev->root_debugfs_dir);
 
 	if (tdev->tx_channel)
 		mbox_free_channel(tdev->tx_channel);
@@ -357,6 +437,7 @@ static const struct of_device_id mbox_test_match[] = {
 	{ .compatible = "mailbox-test" },
 	{},
 };
+MODULE_DEVICE_TABLE(of, mbox_test_match);
 
 static struct platform_driver mbox_test_driver = {
 	.driver = {

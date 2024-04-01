@@ -1,17 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Earthsoft PT3 driver
  *
  * Copyright (C) 2014 Akihiro Tsukada <tskd08@gmail.com>
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as
- * published by the Free Software Foundation version 2.
- *
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include <linux/freezer.h>
@@ -21,11 +12,12 @@
 #include <linux/module.h>
 #include <linux/pci.h>
 #include <linux/string.h>
+#include <linux/sched/signal.h>
 
-#include "dmxdev.h"
-#include "dvbdev.h"
-#include "dvb_demux.h"
-#include "dvb_frontend.h"
+#include <media/dmxdev.h>
+#include <media/dvbdev.h>
+#include <media/dvb_demux.h>
+#include <media/dvb_frontend.h>
 
 #include "pt3.h"
 
@@ -375,25 +367,22 @@ static int pt3_fe_init(struct pt3_board *pt3)
 
 static int pt3_attach_fe(struct pt3_board *pt3, int i)
 {
-	struct i2c_board_info info;
+	const struct i2c_board_info *info;
 	struct tc90522_config cfg;
 	struct i2c_client *cl;
 	struct dvb_adapter *dvb_adap;
 	int ret;
 
-	info = adap_conf[i].demod_info;
+	info = &adap_conf[i].demod_info;
 	cfg = adap_conf[i].demod_cfg;
 	cfg.tuner_i2c = NULL;
-	info.platform_data = &cfg;
 
 	ret = -ENODEV;
-	request_module("tc90522");
-	cl = i2c_new_device(&pt3->i2c_adap, &info);
-	if (!cl || !cl->dev.driver)
+	cl = dvb_module_probe("tc90522", info->type, &pt3->i2c_adap,
+			      info->addr, &cfg);
+	if (!cl)
 		return -ENODEV;
 	pt3->adaps[i]->i2c_demod = cl;
-	if (!try_module_get(cl->dev.driver->owner))
-		goto err_demod_i2c_unregister_device;
 
 	if (!strncmp(cl->name, TC90522_I2C_DEV_SAT,
 		     strlen(TC90522_I2C_DEV_SAT))) {
@@ -401,41 +390,33 @@ static int pt3_attach_fe(struct pt3_board *pt3, int i)
 
 		tcfg = adap_conf[i].tuner_cfg.qm1d1c0042;
 		tcfg.fe = cfg.fe;
-		info = adap_conf[i].tuner_info;
-		info.platform_data = &tcfg;
-		request_module("qm1d1c0042");
-		cl = i2c_new_device(cfg.tuner_i2c, &info);
+		info = &adap_conf[i].tuner_info;
+		cl = dvb_module_probe("qm1d1c0042", info->type, cfg.tuner_i2c,
+				      info->addr, &tcfg);
 	} else {
 		struct mxl301rf_config tcfg;
 
 		tcfg = adap_conf[i].tuner_cfg.mxl301rf;
 		tcfg.fe = cfg.fe;
-		info = adap_conf[i].tuner_info;
-		info.platform_data = &tcfg;
-		request_module("mxl301rf");
-		cl = i2c_new_device(cfg.tuner_i2c, &info);
+		info = &adap_conf[i].tuner_info;
+		cl = dvb_module_probe("mxl301rf", info->type, cfg.tuner_i2c,
+				      info->addr, &tcfg);
 	}
-	if (!cl || !cl->dev.driver)
-		goto err_demod_module_put;
+	if (!cl)
+		goto err_demod_module_release;
 	pt3->adaps[i]->i2c_tuner = cl;
-	if (!try_module_get(cl->dev.driver->owner))
-		goto err_tuner_i2c_unregister_device;
 
 	dvb_adap = &pt3->adaps[one_adapter ? 0 : i]->dvb_adap;
 	ret = dvb_register_frontend(dvb_adap, cfg.fe);
 	if (ret < 0)
-		goto err_tuner_module_put;
+		goto err_tuner_module_release;
 	pt3->adaps[i]->fe = cfg.fe;
 	return 0;
 
-err_tuner_module_put:
-	module_put(pt3->adaps[i]->i2c_tuner->dev.driver->owner);
-err_tuner_i2c_unregister_device:
-	i2c_unregister_device(pt3->adaps[i]->i2c_tuner);
-err_demod_module_put:
-	module_put(pt3->adaps[i]->i2c_demod->dev.driver->owner);
-err_demod_i2c_unregister_device:
-	i2c_unregister_device(pt3->adaps[i]->i2c_demod);
+err_tuner_module_release:
+	dvb_module_release(pt3->adaps[i]->i2c_tuner);
+err_demod_module_release:
+	dvb_module_release(pt3->adaps[i]->i2c_demod);
 
 	return ret;
 }
@@ -464,14 +445,13 @@ static int pt3_fetch_thread(void *data)
 		pt3_proc_dma(adap);
 
 		delay = ktime_set(0, PT3_FETCH_DELAY * NSEC_PER_MSEC);
-		set_current_state(TASK_UNINTERRUPTIBLE);
-		freezable_schedule_hrtimeout_range(&delay,
+		set_current_state(TASK_UNINTERRUPTIBLE|TASK_FREEZABLE);
+		schedule_hrtimeout_range(&delay,
 					PT3_FETCH_DELAY_DELTA * NSEC_PER_MSEC,
 					HRTIMER_MODE_REL);
 	}
 	dev_dbg(adap->dvb_adap.device, "PT3: [%s] exited\n",
 		adap->thread->comm);
-	adap->thread = NULL;
 	return 0;
 }
 
@@ -485,6 +465,7 @@ static int pt3_start_streaming(struct pt3_adapter *adap)
 	if (IS_ERR(thread)) {
 		int ret = PTR_ERR(thread);
 
+		adap->thread = NULL;
 		dev_warn(adap->dvb_adap.device,
 			 "PT3 (adap:%d, dmx:%d): failed to start kthread\n",
 			 adap->dvb_adap.num, adap->dmxdev.dvbdev->id);
@@ -507,6 +488,7 @@ static int pt3_stop_streaming(struct pt3_adapter *adap)
 
 	/* kill the fetching thread */
 	ret = kthread_stop(adap->thread);
+	adap->thread = NULL;
 	return ret;
 }
 
@@ -519,14 +501,8 @@ static int pt3_start_feed(struct dvb_demux_feed *feed)
 
 	adap = container_of(feed->demux, struct pt3_adapter, demux);
 	adap->num_feeds++;
-	if (adap->thread)
+	if (adap->num_feeds > 1)
 		return 0;
-	if (adap->num_feeds != 1) {
-		dev_warn(adap->dvb_adap.device,
-			 "%s: unmatched start/stop_feed in adap:%i/dmx:%i\n",
-			 __func__, adap->dvb_adap.num, adap->dmxdev.dvbdev->id);
-		adap->num_feeds = 1;
-	}
 
 	return pt3_start_streaming(adap);
 
@@ -634,14 +610,8 @@ static void pt3_cleanup_adapter(struct pt3_board *pt3, int index)
 		adap->fe->callback = NULL;
 		if (adap->fe->frontend_priv)
 			dvb_unregister_frontend(adap->fe);
-		if (adap->i2c_tuner) {
-			module_put(adap->i2c_tuner->dev.driver->owner);
-			i2c_unregister_device(adap->i2c_tuner);
-		}
-		if (adap->i2c_demod) {
-			module_put(adap->i2c_demod->dev.driver->owner);
-			i2c_unregister_device(adap->i2c_demod);
-		}
+		dvb_module_release(adap->i2c_tuner);
+		dvb_module_release(adap->i2c_demod);
 	}
 	pt3_free_dmabuf(adap);
 	dvb_dmxdev_release(&adap->dmxdev);
@@ -656,8 +626,7 @@ static void pt3_cleanup_adapter(struct pt3_board *pt3, int index)
 
 static int pt3_suspend(struct device *dev)
 {
-	struct pci_dev *pdev = to_pci_dev(dev);
-	struct pt3_board *pt3 = pci_get_drvdata(pdev);
+	struct pt3_board *pt3 = dev_get_drvdata(dev);
 	int i;
 	struct pt3_adapter *adap;
 
@@ -676,8 +645,7 @@ static int pt3_suspend(struct device *dev)
 
 static int pt3_resume(struct device *dev)
 {
-	struct pci_dev *pdev = to_pci_dev(dev);
-	struct pt3_board *pt3 = pci_get_drvdata(pdev);
+	struct pt3_board *pt3 = dev_get_drvdata(dev);
 	int i, ret;
 	struct pt3_adapter *adap;
 
@@ -717,12 +685,6 @@ static void pt3_remove(struct pci_dev *pdev)
 	for (i = PT3_NUM_FE - 1; i >= 0; i--)
 		pt3_cleanup_adapter(pt3, i);
 	i2c_del_adapter(&pt3->i2c_adap);
-	kfree(pt3->i2c_buf);
-	pci_iounmap(pt3->pdev, pt3->regs[0]);
-	pci_iounmap(pt3->pdev, pt3->regs[1]);
-	pci_release_regions(pdev);
-	pci_disable_device(pdev);
-	kfree(pt3);
 }
 
 static int pt3_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
@@ -736,14 +698,14 @@ static int pt3_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	if (pci_read_config_byte(pdev, PCI_REVISION_ID, &rev) || rev != 1)
 		return -ENODEV;
 
-	ret = pci_enable_device(pdev);
+	ret = pcim_enable_device(pdev);
 	if (ret < 0)
 		return -ENODEV;
 	pci_set_master(pdev);
 
-	ret = pci_request_regions(pdev, DRV_NAME);
+	ret = pcim_iomap_regions(pdev, BIT(0) | BIT(2), DRV_NAME);
 	if (ret < 0)
-		goto err_disable_device;
+		return ret;
 
 	ret = dma_set_mask(&pdev->dev, DMA_BIT_MASK(64));
 	if (ret == 0)
@@ -754,52 +716,42 @@ static int pt3_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 			dma_set_coherent_mask(&pdev->dev, DMA_BIT_MASK(32));
 		else {
 			dev_err(&pdev->dev, "Failed to set DMA mask\n");
-			goto err_release_regions;
+			return ret;
 		}
 		dev_info(&pdev->dev, "Use 32bit DMA\n");
 	}
 
-	pt3 = kzalloc(sizeof(*pt3), GFP_KERNEL);
-	if (!pt3) {
-		ret = -ENOMEM;
-		goto err_release_regions;
-	}
+	pt3 = devm_kzalloc(&pdev->dev, sizeof(*pt3), GFP_KERNEL);
+	if (!pt3)
+		return -ENOMEM;
 	pci_set_drvdata(pdev, pt3);
 	pt3->pdev = pdev;
 	mutex_init(&pt3->lock);
-	pt3->regs[0] = pci_ioremap_bar(pdev, 0);
-	pt3->regs[1] = pci_ioremap_bar(pdev, 2);
-	if (pt3->regs[0] == NULL || pt3->regs[1] == NULL) {
-		dev_err(&pdev->dev, "Failed to ioremap\n");
-		ret = -ENOMEM;
-		goto err_kfree;
-	}
+	pt3->regs[0] = pcim_iomap_table(pdev)[0];
+	pt3->regs[1] = pcim_iomap_table(pdev)[2];
 
 	ver = ioread32(pt3->regs[0] + REG_VERSION);
 	if ((ver >> 16) != 0x0301) {
 		dev_warn(&pdev->dev, "PT%d, I/F-ver.:%d not supported\n",
 			 ver >> 24, (ver & 0x00ff0000) >> 16);
-		ret = -ENODEV;
-		goto err_iounmap;
+		return -ENODEV;
 	}
 
 	pt3->num_bufs = clamp_val(num_bufs, MIN_DATA_BUFS, MAX_DATA_BUFS);
 
-	pt3->i2c_buf = kmalloc(sizeof(*pt3->i2c_buf), GFP_KERNEL);
-	if (pt3->i2c_buf == NULL) {
-		ret = -ENOMEM;
-		goto err_iounmap;
-	}
+	pt3->i2c_buf = devm_kmalloc(&pdev->dev, sizeof(*pt3->i2c_buf), GFP_KERNEL);
+	if (!pt3->i2c_buf)
+		return -ENOMEM;
 	i2c = &pt3->i2c_adap;
 	i2c->owner = THIS_MODULE;
 	i2c->algo = &pt3_i2c_algo;
 	i2c->algo_data = NULL;
 	i2c->dev.parent = &pdev->dev;
-	strlcpy(i2c->name, DRV_NAME, sizeof(i2c->name));
+	strscpy(i2c->name, DRV_NAME, sizeof(i2c->name));
 	i2c_set_adapdata(i2c, pt3);
 	ret = i2c_add_adapter(i2c);
 	if (ret < 0)
-		goto err_i2cbuf;
+		return ret;
 
 	for (i = 0; i < PT3_NUM_FE; i++) {
 		ret = pt3_alloc_adapter(pt3, i);
@@ -831,21 +783,7 @@ err_cleanup_adapters:
 	while (i >= 0)
 		pt3_cleanup_adapter(pt3, i--);
 	i2c_del_adapter(i2c);
-err_i2cbuf:
-	kfree(pt3->i2c_buf);
-err_iounmap:
-	if (pt3->regs[0])
-		pci_iounmap(pdev, pt3->regs[0]);
-	if (pt3->regs[1])
-		pci_iounmap(pdev, pt3->regs[1]);
-err_kfree:
-	kfree(pt3);
-err_release_regions:
-	pci_release_regions(pdev);
-err_disable_device:
-	pci_disable_device(pdev);
 	return ret;
-
 }
 
 static const struct pci_device_id pt3_id_table[] = {

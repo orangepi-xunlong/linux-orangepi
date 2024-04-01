@@ -1,20 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /******************************************************************************
 
     AudioScience HPI driver
     Copyright (C) 1997-2014  AudioScience Inc. <support@audioscience.com>
 
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of version 2 of the GNU General Public License as
-    published by the Free Software Foundation;
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 
 Extended Message Function With Response Caching
 
@@ -28,7 +17,7 @@ Extended Message Function With Response Caching
 #include "hpimsgx.h"
 #include "hpidebug.h"
 
-static struct pci_device_id asihpi_pci_tbl[] = {
+static const struct pci_device_id asihpi_pci_tbl[] = {
 #include "hpipcida.h"
 };
 
@@ -103,11 +92,6 @@ static void HPIMSGX__cleanup(u16 adapter_index, void *h_owner);
 #ifndef DISABLE_PRAGMA_PACK1
 #pragma pack(push, 1)
 #endif
-
-struct hpi_subsys_response {
-	struct hpi_response_header h;
-	struct hpi_subsys_res s;
-};
 
 struct hpi_adapter_response {
 	struct hpi_response_header h;

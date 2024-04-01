@@ -1,10 +1,7 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (c) 2013 Samsung Electronics Co., Ltd.
  * Copyright (c) 2013 Linaro Ltd.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  *
  * Common Clock Framework support for all PLL's in Samsung platforms
 */
@@ -35,41 +32,72 @@ enum samsung_pll_type {
 	pll_2550xx,
 	pll_2650x,
 	pll_2650xx,
+	pll_1417x,
 	pll_1450x,
 	pll_1451x,
 	pll_1452x,
 	pll_1460x,
+	pll_0822x,
+	pll_0831x,
+	pll_142xx,
 };
 
-#define PLL_35XX_RATE(_rate, _m, _p, _s)			\
+#define PLL_RATE(_fin, _m, _p, _s, _k, _ks) \
+	((u64)(_fin) * (BIT(_ks) * (_m) + (_k)) / BIT(_ks) / ((_p) << (_s)))
+#define PLL_VALID_RATE(_fin, _fout, _m, _p, _s, _k, _ks) ((_fout) + \
+	BUILD_BUG_ON_ZERO(PLL_RATE(_fin, _m, _p, _s, _k, _ks) != (_fout)))
+
+#define PLL_35XX_RATE(_fin, _rate, _m, _p, _s)			\
 	{							\
-		.rate	=	(_rate),				\
+		.rate	=	PLL_VALID_RATE(_fin, _rate,	\
+				_m, _p, _s, 0, 16),		\
 		.mdiv	=	(_m),				\
 		.pdiv	=	(_p),				\
 		.sdiv	=	(_s),				\
 	}
 
-#define PLL_36XX_RATE(_rate, _m, _p, _s, _k)			\
+#define PLL_S3C2410_MPLL_RATE(_fin, _rate, _m, _p, _s)		\
 	{							\
-		.rate	=	(_rate),				\
+		.rate	=	PLL_VALID_RATE(_fin, _rate,	\
+				_m + 8, _p + 2, _s, 0, 16),	\
+		.mdiv	=	(_m),				\
+		.pdiv	=	(_p),				\
+		.sdiv	=	(_s),				\
+	}
+
+#define PLL_S3C2440_MPLL_RATE(_fin, _rate, _m, _p, _s)		\
+	{							\
+		.rate	=	PLL_VALID_RATE(_fin, _rate,	\
+				2 * (_m + 8), _p + 2, _s, 0, 16), \
+		.mdiv	=	(_m),				\
+		.pdiv	=	(_p),				\
+		.sdiv	=	(_s),				\
+	}
+
+#define PLL_36XX_RATE(_fin, _rate, _m, _p, _s, _k)		\
+	{							\
+		.rate	=	PLL_VALID_RATE(_fin, _rate,	\
+				_m, _p, _s, _k, 16),		\
 		.mdiv	=	(_m),				\
 		.pdiv	=	(_p),				\
 		.sdiv	=	(_s),				\
 		.kdiv	=	(_k),				\
 	}
 
-#define PLL_45XX_RATE(_rate, _m, _p, _s, _afc)			\
+#define PLL_4508_RATE(_fin, _rate, _m, _p, _s, _afc)		\
 	{							\
-		.rate	=	(_rate),			\
+		.rate	=	PLL_VALID_RATE(_fin, _rate,	\
+				_m, _p, _s - 1, 0, 16),		\
 		.mdiv	=	(_m),				\
 		.pdiv	=	(_p),				\
 		.sdiv	=	(_s),				\
 		.afc	=	(_afc),				\
 	}
 
-#define PLL_4600_RATE(_rate, _m, _p, _s, _k, _vsel)		\
+#define PLL_4600_RATE(_fin, _rate, _m, _p, _s, _k, _vsel)	\
 	{							\
-		.rate	=	(_rate),			\
+		.rate	=	PLL_VALID_RATE(_fin, _rate,	\
+				_m, _p, _s, _k, 16),		\
 		.mdiv	=	(_m),				\
 		.pdiv	=	(_p),				\
 		.sdiv	=	(_s),				\
@@ -77,9 +105,10 @@ enum samsung_pll_type {
 		.vsel	=	(_vsel),			\
 	}
 
-#define PLL_4650_RATE(_rate, _m, _p, _s, _k, _mfr, _mrr, _vsel)	\
+#define PLL_4650_RATE(_fin, _rate, _m, _p, _s, _k, _mfr, _mrr, _vsel) \
 	{							\
-		.rate	=	(_rate),			\
+		.rate	=	PLL_VALID_RATE(_fin, _rate,	\
+				_m, _p, _s, _k, 10),		\
 		.mdiv	=	(_m),				\
 		.pdiv	=	(_p),				\
 		.sdiv	=	(_s),				\
@@ -102,9 +131,5 @@ struct samsung_pll_rate_table {
 	unsigned int mrr;
 	unsigned int vsel;
 };
-
-extern struct clk * __init samsung_clk_register_pll2550x(const char *name,
-			const char *pname, const void __iomem *reg_base,
-			const unsigned long offset);
 
 #endif /* __SAMSUNG_CLK_PLL_H */

@@ -1,13 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * es8328-i2c.c  --  ES8328 ALSA SoC I2C Audio driver
  *
  * Copyright 2014 Sutajio Ko-Usagi PTE LTD
  *
  * Author: Sean Cross <xobs@kosagi.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/module.h>
@@ -20,27 +17,22 @@
 
 static const struct i2c_device_id es8328_id[] = {
 	{ "es8328", 0 },
+	{ "es8388", 0 },
 	{ }
 };
 MODULE_DEVICE_TABLE(i2c, es8328_id);
 
 static const struct of_device_id es8328_of_match[] = {
 	{ .compatible = "everest,es8328", },
+	{ .compatible = "everest,es8388", },
 	{ }
 };
 MODULE_DEVICE_TABLE(of, es8328_of_match);
 
-static int es8328_i2c_probe(struct i2c_client *i2c,
-			    const struct i2c_device_id *id)
+static int es8328_i2c_probe(struct i2c_client *i2c)
 {
 	return es8328_probe(&i2c->dev,
 			devm_regmap_init_i2c(i2c, &es8328_regmap_config));
-}
-
-static int es8328_i2c_remove(struct i2c_client *i2c)
-{
-	snd_soc_unregister_codec(&i2c->dev);
-	return 0;
 }
 
 static struct i2c_driver es8328_i2c_driver = {
@@ -48,8 +40,7 @@ static struct i2c_driver es8328_i2c_driver = {
 		.name		= "es8328",
 		.of_match_table = es8328_of_match,
 	},
-	.probe    = es8328_i2c_probe,
-	.remove   = es8328_i2c_remove,
+	.probe_new = es8328_i2c_probe,
 	.id_table = es8328_id,
 };
 

@@ -1,7 +1,9 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _I8042_SPARCIO_H
 #define _I8042_SPARCIO_H
 
 #include <linux/of_device.h>
+#include <linux/types.h>
 
 #include <asm/io.h>
 #include <asm/oplib.h>
@@ -52,12 +54,11 @@ static struct resource *kbd_res;
 
 static int sparc_i8042_probe(struct platform_device *op)
 {
-	struct device_node *dp = op->dev.of_node;
+	struct device_node *dp;
 
-	dp = dp->child;
-	while (dp) {
-		if (!strcmp(dp->name, OBP_PS2KBD_NAME1) ||
-		    !strcmp(dp->name, OBP_PS2KBD_NAME2)) {
+	for_each_child_of_node(op->dev.of_node, dp) {
+		if (of_node_name_eq(dp, OBP_PS2KBD_NAME1) ||
+		    of_node_name_eq(dp, OBP_PS2KBD_NAME2)) {
 			struct platform_device *kbd = of_find_device_by_node(dp);
 			unsigned int irq = kbd->archdata.irqs[0];
 			if (irq == 0xffffffff)
@@ -66,16 +67,14 @@ static int sparc_i8042_probe(struct platform_device *op)
 			kbd_iobase = of_ioremap(&kbd->resource[0],
 						0, 8, "kbd");
 			kbd_res = &kbd->resource[0];
-		} else if (!strcmp(dp->name, OBP_PS2MS_NAME1) ||
-			   !strcmp(dp->name, OBP_PS2MS_NAME2)) {
+		} else if (of_node_name_eq(dp, OBP_PS2MS_NAME1) ||
+			   of_node_name_eq(dp, OBP_PS2MS_NAME2)) {
 			struct platform_device *ms = of_find_device_by_node(dp);
 			unsigned int irq = ms->archdata.irqs[0];
 			if (irq == 0xffffffff)
 				irq = op->archdata.irqs[0];
 			i8042_aux_irq = irq;
 		}
-
-		dp = dp->sibling;
 	}
 
 	return 0;
@@ -105,11 +104,25 @@ static struct platform_driver sparc_i8042_driver = {
 	.remove		= sparc_i8042_remove,
 };
 
+static bool i8042_is_mr_coffee(void)
+{
+	struct device_node *root;
+	const char *name;
+	bool is_mr_coffee;
+
+	root = of_find_node_by_path("/");
+
+	name = of_get_property(root, "name", NULL);
+	is_mr_coffee = name && !strcmp(name, "SUNW,JavaStation-1");
+
+	of_node_put(root);
+
+	return is_mr_coffee;
+}
+
 static int __init i8042_platform_init(void)
 {
-	struct device_node *root = of_find_node_by_path("/");
-
-	if (!strcmp(root->name, "SUNW,JavaStation-1")) {
+	if (i8042_is_mr_coffee()) {
 		/* Hardcoded values for MrCoffee.  */
 		i8042_kbd_irq = i8042_aux_irq = 13 | 0x20;
 		kbd_iobase = ioremap(0x71300060, 8);
@@ -137,9 +150,7 @@ static int __init i8042_platform_init(void)
 
 static inline void i8042_platform_exit(void)
 {
-	struct device_node *root = of_find_node_by_path("/");
-
-	if (strcmp(root->name, "SUNW,JavaStation-1"))
+	if (!i8042_is_mr_coffee())
 		platform_driver_unregister(&sparc_i8042_driver);
 }
 

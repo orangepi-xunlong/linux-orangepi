@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _SPARC64_VIO_H
 #define _SPARC64_VIO_H
 
@@ -52,6 +53,7 @@ struct vio_ver_info {
 #define VDEV_NETWORK_SWITCH	0x02
 #define VDEV_DISK		0x03
 #define VDEV_DISK_SERVER	0x04
+#define VDEV_CONSOLE_CON	0x05
 
 	u8			resv1[3];
 	u64			resv2[5];
@@ -68,7 +70,7 @@ struct vio_dring_register {
 #define VIO_RX_DRING_DATA	0x0004
 	u16			resv;
 	u32			num_cookies;
-	struct ldc_trans_cookie	cookies[0];
+	struct ldc_trans_cookie	cookies[];
 };
 
 struct vio_dring_unregister {
@@ -159,7 +161,7 @@ struct vio_disk_desc {
 	u64			size;
 	u32			ncookies;
 	u32			resv2;
-	struct ldc_trans_cookie	cookies[0];
+	struct ldc_trans_cookie	cookies[];
 };
 
 #define VIO_DISK_VNAME_LEN	8
@@ -198,13 +200,13 @@ struct vio_disk_devid {
 	u16			resv;
 	u16			type;
 	u32			len;
-	char			id[0];
+	char			id[];
 };
 
 struct vio_disk_efi {
 	u64			lba;
 	u64			len;
-	char			data[0];
+	char			data[];
 };
 
 /* VIO net specific structures and defines */
@@ -244,7 +246,7 @@ struct vio_net_desc {
 	struct vio_dring_hdr	hdr;
 	u32			size;
 	u32			ncookies;
-	struct ldc_trans_cookie	cookies[0];
+	struct ldc_trans_cookie	cookies[];
 };
 
 struct vio_net_dext {
@@ -282,6 +284,14 @@ struct vio_dring_state {
 	struct ldc_trans_cookie	cookies[VIO_MAX_RING_COOKIES];
 };
 
+#define VIO_TAG_SIZE		((int)sizeof(struct vio_msg_tag))
+#define VIO_VCC_MTU_SIZE	(LDC_PACKET_SIZE - VIO_TAG_SIZE)
+
+struct vio_vcc {
+	struct vio_msg_tag	tag;
+	char			data[VIO_VCC_MTU_SIZE];
+};
+
 static inline void *vio_dring_cur(struct vio_dring_state *dr)
 {
 	return dr->base + (dr->entry_size * dr->prod);
@@ -316,24 +326,33 @@ static inline u32 vio_dring_prev(struct vio_dring_state *dr, u32 index)
 }
 
 #define VIO_MAX_TYPE_LEN	32
+#define VIO_MAX_NAME_LEN	32
 #define VIO_MAX_COMPAT_LEN	64
 
 struct vio_dev {
 	u64			mp;
 	struct device_node	*dp;
 
+	char			node_name[VIO_MAX_NAME_LEN];
 	char			type[VIO_MAX_TYPE_LEN];
 	char			compat[VIO_MAX_COMPAT_LEN];
 	int			compat_len;
 
 	u64			dev_no;
-	u64			id;
 
+	unsigned long		port_id;
 	unsigned long		channel_id;
 
 	unsigned int		tx_irq;
 	unsigned int		rx_irq;
 	u64			rx_ino;
+	u64			tx_ino;
+
+	/* Handle to the root of "channel-devices" sub-tree in MDESC */
+	u64			cdev_handle;
+
+	/* MD specific data used to identify the vdev in MD */
+	union md_node_info	md_node_info;
 
 	struct device		dev;
 };
@@ -343,10 +362,11 @@ struct vio_driver {
 	struct list_head		node;
 	const struct vio_device_id	*id_table;
 	int (*probe)(struct vio_dev *dev, const struct vio_device_id *id);
-	int (*remove)(struct vio_dev *dev);
+	void (*remove)(struct vio_dev *dev);
 	void (*shutdown)(struct vio_dev *dev);
 	unsigned long			driver_data;
 	struct device_driver		driver;
+	bool				no_irq;
 };
 
 struct vio_version {
@@ -490,5 +510,6 @@ int vio_driver_init(struct vio_driver_state *vio, struct vio_dev *vdev,
 
 void vio_port_up(struct vio_driver_state *vio);
 int vio_set_intr(unsigned long dev_ino, int state);
+u64 vio_vdev_node(struct mdesc_handle *hp, struct vio_dev *vdev);
 
 #endif /* _SPARC64_VIO_H */

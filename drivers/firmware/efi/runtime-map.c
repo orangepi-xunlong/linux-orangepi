@@ -1,8 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * linux/drivers/efi/runtime-map.c
  * Copyright (C) 2013 Red Hat, Inc., Dave Young <dyoung@redhat.com>
- *
- * This file is released under the GPLv2.
  */
 
 #include <linux/string.h>
@@ -80,6 +79,7 @@ static struct attribute *def_attrs[] = {
 	&map_attribute_attr.attr,
 	NULL
 };
+ATTRIBUTE_GROUPS(def);
 
 static const struct sysfs_ops map_attr_ops = {
 	.show = map_attr_show,
@@ -95,7 +95,7 @@ static void map_release(struct kobject *kobj)
 
 static struct kobj_type __refdata map_ktype = {
 	.sysfs_ops	= &map_attr_ops,
-	.default_attrs	= def_attrs,
+	.default_groups	= def_groups,
 	.release	= map_release,
 };
 
@@ -166,7 +166,7 @@ int __init efi_runtime_map_init(struct kobject *efi_kobj)
 	if (!efi_enabled(EFI_MEMMAP))
 		return 0;
 
-	map_entries = kzalloc(efi.memmap.nr_map * sizeof(entry), GFP_KERNEL);
+	map_entries = kcalloc(efi.memmap.nr_map, sizeof(entry), GFP_KERNEL);
 	if (!map_entries) {
 		ret = -ENOMEM;
 		goto out;

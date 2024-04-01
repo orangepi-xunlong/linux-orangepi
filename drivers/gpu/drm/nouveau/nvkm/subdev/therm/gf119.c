@@ -41,6 +41,7 @@ pwm_info(struct nvkm_therm *therm, int line)
 		default:
 			break;
 		}
+		break;
 	default:
 		break;
 	}
@@ -49,7 +50,7 @@ pwm_info(struct nvkm_therm *therm, int line)
 	return -ENODEV;
 }
 
-static int
+int
 gf119_fan_pwm_ctrl(struct nvkm_therm *therm, int line, bool enable)
 {
 	struct nvkm_device *device = therm->subdev.device;
@@ -63,7 +64,7 @@ gf119_fan_pwm_ctrl(struct nvkm_therm *therm, int line, bool enable)
 	return 0;
 }
 
-static int
+int
 gf119_fan_pwm_get(struct nvkm_therm *therm, int line, u32 *divs, u32 *duty)
 {
 	struct nvkm_device *device = therm->subdev.device;
@@ -85,7 +86,7 @@ gf119_fan_pwm_get(struct nvkm_therm *therm, int line, u32 *divs, u32 *duty)
 	return -EINVAL;
 }
 
-static int
+int
 gf119_fan_pwm_set(struct nvkm_therm *therm, int line, u32 divs, u32 duty)
 {
 	struct nvkm_device *device = therm->subdev.device;
@@ -102,7 +103,7 @@ gf119_fan_pwm_set(struct nvkm_therm *therm, int line, u32 divs, u32 duty)
 	return 0;
 }
 
-static int
+int
 gf119_fan_pwm_clock(struct nvkm_therm *therm, int line)
 {
 	struct nvkm_device *device = therm->subdev.device;
@@ -146,8 +147,8 @@ gf119_therm = {
 };
 
 int
-gf119_therm_new(struct nvkm_device *device, int index,
-	       struct nvkm_therm **ptherm)
+gf119_therm_new(struct nvkm_device *device, enum nvkm_subdev_type type, int inst,
+		struct nvkm_therm **ptherm)
 {
-	return nvkm_therm_new_(&gf119_therm, device, index, ptherm);
+	return nvkm_therm_new_(&gf119_therm, device, type, inst, ptherm);
 }

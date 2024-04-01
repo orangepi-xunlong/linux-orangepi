@@ -1,13 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * extcon-rt8973a.c - Richtek RT8973A extcon driver to support USB switches
  *
  * Copyright (c) 2014 Samsung Electronics Co., Ltd
  * Author: Chanwoo Choi <cw00.choi@samsung.com>
- *
- * This program is free software; you can redistribute  it and/or modify it
- * under  the terms of  the GNU General  Public License as published by the
- * Free Software Foundation;  either version 2 of the  License, or (at your
- * option) any later version.
  */
 
 #include <linux/err.h>
@@ -20,7 +16,7 @@
 #include <linux/platform_device.h>
 #include <linux/regmap.h>
 #include <linux/slab.h>
-#include <linux/extcon.h>
+#include <linux/extcon-provider.h>
 
 #include "extcon-rt8973a.h"
 
@@ -142,8 +138,10 @@ enum rt8973a_muic_acc_type {
 	RT8973A_MUIC_ADC_UNKNOWN_ACC_5,
 	RT8973A_MUIC_ADC_OPEN = 0x1f,
 
-	/* The below accessories has same ADC value (0x1f).
-	   So, Device type1 is used to separate specific accessory. */
+	/*
+	 * The below accessories has same ADC value (0x1f).
+	 * So, Device type1 is used to separate specific accessory.
+	 */
 					/* |---------|--ADC| */
 					/* |    [7:5]|[4:0]| */
 	RT8973A_MUIC_ADC_USB = 0x3f,	/* |      001|11111| */
@@ -194,7 +192,6 @@ static const struct regmap_irq_chip rt8973a_muic_irq_chip = {
 	.name			= "rt8973a",
 	.status_base		= RT8973A_REG_INT1,
 	.mask_base		= RT8973A_REG_INTM1,
-	.mask_invert		= false,
 	.num_regs		= 2,
 	.irqs			= rt8973a_irqs,
 	.num_irqs		= ARRAY_SIZE(rt8973a_irqs),
@@ -535,7 +532,7 @@ static void rt8973a_init_dev_type(struct rt8973a_muic_info *info)
 		regmap_update_bits(info->regmap, reg, mask, val);
 	}
 
-	/* Check whether RT8973A is auto swithcing mode or not */
+	/* Check whether RT8973A is auto switching mode or not */
 	ret = regmap_read(info->regmap, RT8973A_REG_CONTROL1, &data);
 	if (ret) {
 		dev_err(info->dev,
@@ -649,13 +646,11 @@ static int rt8973a_muic_i2c_probe(struct i2c_client *i2c,
 	return 0;
 }
 
-static int rt8973a_muic_i2c_remove(struct i2c_client *i2c)
+static void rt8973a_muic_i2c_remove(struct i2c_client *i2c)
 {
 	struct rt8973a_muic_info *info = i2c_get_clientdata(i2c);
 
 	regmap_del_irq_chip(info->irq, info->irq_data);
-
-	return 0;
 }
 
 static const struct of_device_id rt8973a_dt_match[] = {

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Device Tree for the ST-Ericsson Nomadik S8815 board
  * Produced by Calao Systems
@@ -138,7 +139,7 @@
 			status = "okay";
 		};
 		/* Configure card detect for the uSD slot */
-		mmcsd: sdi@101f6000 {
+		mmc@101f6000 {
 			cd-gpios = <&gpio3 15 GPIO_ACTIVE_LOW>;
 		};
 	};

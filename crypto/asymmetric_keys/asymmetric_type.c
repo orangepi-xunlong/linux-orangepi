@@ -1,14 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Asymmetric public-key cryptography key type
  *
- * See Documentation/security/asymmetric-keys.txt
+ * See Documentation/crypto/asymmetric-keys.rst
  *
  * Copyright (C) 2012 Red Hat, Inc. All Rights Reserved.
  * Written by David Howells (dhowells@redhat.com)
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public Licence
- * as published by the Free Software Foundation; either version
- * 2 of the Licence, or (at your option) any later version.
  */
 #include <keys/asymmetric-subtype.h>
 #include <keys/asymmetric-parser.h>
@@ -17,6 +13,8 @@
 #include <linux/module.h>
 #include <linux/slab.h>
 #include <linux/ctype.h>
+#include <keys/system_keyring.h>
+#include <keys/user-type.h>
 #include "asymmetric_keys.h"
 
 MODULE_LICENSE("GPL");
@@ -38,16 +36,23 @@ static DECLARE_RWSEM(asymmetric_key_parsers_sem);
  * find_asymmetric_key - Find a key by ID.
  * @keyring: The keys to search.
  * @id_0: The first ID to look for or NULL.
- * @id_1: The second ID to look for or NULL.
- * @partial: Use partial match if true, exact if false.
+ * @id_1: The second ID to look for or NULL, matched together with @id_0
+ * against @keyring keys' id[0] and id[1].
+ * @id_2: The fallback ID to match against @keyring keys' id[2] if both of the
+ * other IDs are NULL.
+ * @partial: Use partial match for @id_0 and @id_1 if true, exact if false.
  *
  * Find a key in the given keyring by identifier.  The preferred identifier is
  * the id_0 and the fallback identifier is the id_1.  If both are given, the
- * lookup is by the former, but the latter must also match.
+ * former is matched (exactly or partially) against either of the sought key's
+ * identifiers and the latter must match the found key's second identifier
+ * exactly.  If both are missing, id_2 must match the sought key's third
+ * identifier exactly.
  */
 struct key *find_asymmetric_key(struct key *keyring,
 				const struct asymmetric_key_id *id_0,
 				const struct asymmetric_key_id *id_1,
+				const struct asymmetric_key_id *id_2,
 				bool partial)
 {
 	struct key *key;
@@ -56,12 +61,17 @@ struct key *find_asymmetric_key(struct key *keyring,
 	char *req, *p;
 	int len;
 
+	WARN_ON(!id_0 && !id_1 && !id_2);
+
 	if (id_0) {
 		lookup = id_0->data;
 		len = id_0->len;
-	} else {
+	} else if (id_1) {
 		lookup = id_1->data;
 		len = id_1->len;
+	} else {
+		lookup = id_2->data;
+		len = id_2->len;
 	}
 
 	/* Construct an identifier "id:<keyid>". */
@@ -69,7 +79,10 @@ struct key *find_asymmetric_key(struct key *keyring,
 	if (!req)
 		return ERR_PTR(-ENOMEM);
 
-	if (partial) {
+	if (!id_0 && !id_1) {
+		*p++ = 'd';
+		*p++ = 'n';
+	} else if (partial) {
 		*p++ = 'i';
 		*p++ = 'd';
 	} else {
@@ -83,7 +96,7 @@ struct key *find_asymmetric_key(struct key *keyring,
 	pr_debug("Look up: \"%s\"\n", req);
 
 	ref = keyring_search(make_key_ref(keyring, 1),
-			     &key_type_asymmetric, req);
+			     &key_type_asymmetric, req, true);
 	if (IS_ERR(ref))
 		pr_debug("Request for key '%s' err %ld\n", req, PTR_ERR(ref));
 	kfree(req);
@@ -104,7 +117,7 @@ struct key *find_asymmetric_key(struct key *keyring,
 	if (id_0 && id_1) {
 		const struct asymmetric_key_ids *kids = asymmetric_key_ids(key);
 
-		if (!kids->id[0]) {
+		if (!kids->id[1]) {
 			pr_debug("First ID matches, but second is missing\n");
 			goto reject;
 		}
@@ -152,7 +165,8 @@ EXPORT_SYMBOL_GPL(asymmetric_key_generate_id);
 
 /**
  * asymmetric_key_id_same - Return true if two asymmetric keys IDs are the same.
- * @kid_1, @kid_2: The key IDs to compare
+ * @kid1: The key ID to compare
+ * @kid2: The key ID to compare
  */
 bool asymmetric_key_id_same(const struct asymmetric_key_id *kid1,
 			    const struct asymmetric_key_id *kid2)
@@ -168,7 +182,8 @@ EXPORT_SYMBOL_GPL(asymmetric_key_id_same);
 /**
  * asymmetric_key_id_partial - Return true if two asymmetric keys IDs
  * partially match
- * @kid_1, @kid_2: The key IDs to compare
+ * @kid1: The key ID to compare
+ * @kid2: The key ID to compare
  */
 bool asymmetric_key_id_partial(const struct asymmetric_key_id *kid1,
 			       const struct asymmetric_key_id *kid2)
@@ -183,8 +198,8 @@ bool asymmetric_key_id_partial(const struct asymmetric_key_id *kid1,
 EXPORT_SYMBOL_GPL(asymmetric_key_id_partial);
 
 /**
- * asymmetric_match_key_ids - Search asymmetric key IDs
- * @kids: The list of key IDs to check
+ * asymmetric_match_key_ids - Search asymmetric key IDs 1 & 2
+ * @kids: The pair of key IDs to check
  * @match_id: The key ID we're looking for
  * @match: The match function to use
  */
@@ -198,7 +213,7 @@ static bool asymmetric_match_key_ids(
 
 	if (!kids || !match_id)
 		return false;
-	for (i = 0; i < ARRAY_SIZE(kids->id); i++)
+	for (i = 0; i < 2; i++)
 		if (match(kids->id[i], match_id))
 			return true;
 	return false;
@@ -242,7 +257,7 @@ struct asymmetric_key_id *asymmetric_key_hex_to_key_id(const char *id)
 }
 
 /*
- * Match asymmetric keys by an exact match on an ID.
+ * Match asymmetric keys by an exact match on one of the first two IDs.
  */
 static bool asymmetric_key_cmp(const struct key *key,
 			       const struct key_match_data *match_data)
@@ -255,7 +270,7 @@ static bool asymmetric_key_cmp(const struct key *key,
 }
 
 /*
- * Match asymmetric keys by a partial match on an IDs.
+ * Match asymmetric keys by a partial match on one of the first two IDs.
  */
 static bool asymmetric_key_cmp_partial(const struct key *key,
 				       const struct key_match_data *match_data)
@@ -268,14 +283,27 @@ static bool asymmetric_key_cmp_partial(const struct key *key,
 }
 
 /*
+ * Match asymmetric keys by an exact match on the third IDs.
+ */
+static bool asymmetric_key_cmp_name(const struct key *key,
+				    const struct key_match_data *match_data)
+{
+	const struct asymmetric_key_ids *kids = asymmetric_key_ids(key);
+	const struct asymmetric_key_id *match_id = match_data->preparsed;
+
+	return kids && asymmetric_key_id_same(kids->id[2], match_id);
+}
+
+/*
  * Preparse the match criterion.  If we don't set lookup_type and cmp,
  * the default will be an exact match on the key description.
  *
  * There are some specifiers for matching key IDs rather than by the key
  * description:
  *
- *	"id:<id>" - find a key by partial match on any available ID
- *	"ex:<id>" - find a key by exact match on any available ID
+ *	"id:<id>" - find a key by partial match on one of the first two IDs
+ *	"ex:<id>" - find a key by exact match on one of the first two IDs
+ *	"dn:<id>" - find a key by exact match on the third ID
  *
  * These have to be searched by iteration rather than by direct lookup because
  * the key is hashed according to its description.
@@ -299,6 +327,11 @@ static int asymmetric_key_match_preparse(struct key_match_data *match_data)
 		   spec[1] == 'x' &&
 		   spec[2] == ':') {
 		id = spec + 3;
+	} else if (spec[0] == 'd' &&
+		   spec[1] == 'n' &&
+		   spec[2] == ':') {
+		id = spec + 3;
+		cmp = asymmetric_key_cmp_name;
 	} else {
 		goto default_match;
 	}
@@ -451,15 +484,142 @@ static void asymmetric_key_destroy(struct key *key)
 	asymmetric_key_free_kids(kids);
 }
 
+static struct key_restriction *asymmetric_restriction_alloc(
+	key_restrict_link_func_t check,
+	struct key *key)
+{
+	struct key_restriction *keyres =
+		kzalloc(sizeof(struct key_restriction), GFP_KERNEL);
+
+	if (!keyres)
+		return ERR_PTR(-ENOMEM);
+
+	keyres->check = check;
+	keyres->key = key;
+	keyres->keytype = &key_type_asymmetric;
+
+	return keyres;
+}
+
+/*
+ * look up keyring restrict functions for asymmetric keys
+ */
+static struct key_restriction *asymmetric_lookup_restriction(
+	const char *restriction)
+{
+	char *restrict_method;
+	char *parse_buf;
+	char *next;
+	struct key_restriction *ret = ERR_PTR(-EINVAL);
+
+	if (strcmp("builtin_trusted", restriction) == 0)
+		return asymmetric_restriction_alloc(
+			restrict_link_by_builtin_trusted, NULL);
+
+	if (strcmp("builtin_and_secondary_trusted", restriction) == 0)
+		return asymmetric_restriction_alloc(
+			restrict_link_by_builtin_and_secondary_trusted, NULL);
+
+	parse_buf = kstrndup(restriction, PAGE_SIZE, GFP_KERNEL);
+	if (!parse_buf)
+		return ERR_PTR(-ENOMEM);
+
+	next = parse_buf;
+	restrict_method = strsep(&next, ":");
+
+	if ((strcmp(restrict_method, "key_or_keyring") == 0) && next) {
+		char *key_text;
+		key_serial_t serial;
+		struct key *key;
+		key_restrict_link_func_t link_fn =
+			restrict_link_by_key_or_keyring;
+		bool allow_null_key = false;
+
+		key_text = strsep(&next, ":");
+
+		if (next) {
+			if (strcmp(next, "chain") != 0)
+				goto out;
+
+			link_fn = restrict_link_by_key_or_keyring_chain;
+			allow_null_key = true;
+		}
+
+		if (kstrtos32(key_text, 0, &serial) < 0)
+			goto out;
+
+		if ((serial == 0) && allow_null_key) {
+			key = NULL;
+		} else {
+			key = key_lookup(serial);
+			if (IS_ERR(key)) {
+				ret = ERR_CAST(key);
+				goto out;
+			}
+		}
+
+		ret = asymmetric_restriction_alloc(link_fn, key);
+		if (IS_ERR(ret))
+			key_put(key);
+	}
+
+out:
+	kfree(parse_buf);
+	return ret;
+}
+
+int asymmetric_key_eds_op(struct kernel_pkey_params *params,
+			  const void *in, void *out)
+{
+	const struct asymmetric_key_subtype *subtype;
+	struct key *key = params->key;
+	int ret;
+
+	pr_devel("==>%s()\n", __func__);
+
+	if (key->type != &key_type_asymmetric)
+		return -EINVAL;
+	subtype = asymmetric_key_subtype(key);
+	if (!subtype ||
+	    !key->payload.data[0])
+		return -EINVAL;
+	if (!subtype->eds_op)
+		return -ENOTSUPP;
+
+	ret = subtype->eds_op(params, in, out);
+
+	pr_devel("<==%s() = %d\n", __func__, ret);
+	return ret;
+}
+
+static int asymmetric_key_verify_signature(struct kernel_pkey_params *params,
+					   const void *in, const void *in2)
+{
+	struct public_key_signature sig = {
+		.s_size		= params->in2_len,
+		.digest_size	= params->in_len,
+		.encoding	= params->encoding,
+		.hash_algo	= params->hash_algo,
+		.digest		= (void *)in,
+		.s		= (void *)in2,
+	};
+
+	return verify_signature(params->key, &sig);
+}
+
 struct key_type key_type_asymmetric = {
-	.name		= "asymmetric",
-	.preparse	= asymmetric_key_preparse,
-	.free_preparse	= asymmetric_key_free_preparse,
-	.instantiate	= generic_key_instantiate,
-	.match_preparse	= asymmetric_key_match_preparse,
-	.match_free	= asymmetric_key_match_free,
-	.destroy	= asymmetric_key_destroy,
-	.describe	= asymmetric_key_describe,
+	.name			= "asymmetric",
+	.preparse		= asymmetric_key_preparse,
+	.free_preparse		= asymmetric_key_free_preparse,
+	.instantiate		= generic_key_instantiate,
+	.match_preparse		= asymmetric_key_match_preparse,
+	.match_free		= asymmetric_key_match_free,
+	.destroy		= asymmetric_key_destroy,
+	.describe		= asymmetric_key_describe,
+	.lookup_restriction	= asymmetric_lookup_restriction,
+	.asym_query		= query_asymmetric_key,
+	.asym_eds_op		= asymmetric_key_eds_op,
+	.asym_verify_signature	= asymmetric_key_verify_signature,
 };
 EXPORT_SYMBOL_GPL(key_type_asymmetric);
 

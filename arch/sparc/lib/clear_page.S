@@ -1,13 +1,14 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /* clear_page.S: UltraSparc optimized clear page.
  *
  * Copyright (C) 1996, 1998, 1999, 2000, 2004 David S. Miller (davem@redhat.com)
  * Copyright (C) 1997 Jakub Jelinek (jakub@redhat.com)
  */
 
+#include <linux/pgtable.h>
 #include <asm/visasm.h>
 #include <asm/thread_info.h>
 #include <asm/page.h>
-#include <asm/pgtable.h>
 #include <asm/spitfire.h>
 #include <asm/head.h>
 #include <asm/export.h>

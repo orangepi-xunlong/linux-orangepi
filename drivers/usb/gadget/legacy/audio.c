@@ -1,12 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0+
 /*
  * audio.c -- Audio gadget driver
  *
  * Copyright (C) 2008 Bryan Wu <cooloney@kernel.org>
  * Copyright (C) 2008 Analog Devices, Inc
- *
- * Enter bugs at http://blackfin.uclinux.org/
- *
- * Licensed under the GPL-2 or later.
  */
 
 /* #define VERBOSE_DEBUG */
@@ -25,59 +22,110 @@ USB_GADGET_COMPOSITE_OPTIONS();
 
 /* Playback(USB-IN) Default Stereo - Fl/Fr */
 static int p_chmask = UAC2_DEF_PCHMASK;
-module_param(p_chmask, uint, S_IRUGO);
+module_param(p_chmask, uint, 0444);
 MODULE_PARM_DESC(p_chmask, "Playback Channel Mask");
 
 /* Playback Default 48 KHz */
-static int p_srate = UAC2_DEF_PSRATE;
-module_param(p_srate, uint, S_IRUGO);
-MODULE_PARM_DESC(p_srate, "Playback Sampling Rate");
+static int p_srates[UAC_MAX_RATES] = {UAC2_DEF_PSRATE};
+static int p_srates_cnt = 1;
+module_param_array_named(p_srate, p_srates, uint, &p_srates_cnt, 0444);
+MODULE_PARM_DESC(p_srate, "Playback Sampling Rates (array)");
 
 /* Playback Default 16bits/sample */
 static int p_ssize = UAC2_DEF_PSSIZE;
-module_param(p_ssize, uint, S_IRUGO);
+module_param(p_ssize, uint, 0444);
 MODULE_PARM_DESC(p_ssize, "Playback Sample Size(bytes)");
+
+/* Playback bInterval for HS/SS (1-4: fixed, 0: auto) */
+static u8 p_hs_bint = UAC2_DEF_PHSBINT;
+module_param(p_hs_bint, byte, 0444);
+MODULE_PARM_DESC(p_hs_bint,
+		"Playback bInterval for HS/SS (1-4: fixed, 0: auto)");
 
 /* Capture(USB-OUT) Default Stereo - Fl/Fr */
 static int c_chmask = UAC2_DEF_CCHMASK;
-module_param(c_chmask, uint, S_IRUGO);
+module_param(c_chmask, uint, 0444);
 MODULE_PARM_DESC(c_chmask, "Capture Channel Mask");
 
 /* Capture Default 64 KHz */
-static int c_srate = UAC2_DEF_CSRATE;
-module_param(c_srate, uint, S_IRUGO);
-MODULE_PARM_DESC(c_srate, "Capture Sampling Rate");
+static int c_srates[UAC_MAX_RATES] = {UAC2_DEF_CSRATE};
+static int c_srates_cnt = 1;
+module_param_array_named(c_srate, c_srates, uint, &c_srates_cnt, 0444);
+MODULE_PARM_DESC(c_srate, "Capture Sampling Rates (array)");
 
 /* Capture Default 16bits/sample */
 static int c_ssize = UAC2_DEF_CSSIZE;
-module_param(c_ssize, uint, S_IRUGO);
+module_param(c_ssize, uint, 0444);
 MODULE_PARM_DESC(c_ssize, "Capture Sample Size(bytes)");
+
+/* capture bInterval for HS/SS (1-4: fixed, 0: auto) */
+static u8 c_hs_bint = UAC2_DEF_CHSBINT;
+module_param(c_hs_bint, byte, 0444);
+MODULE_PARM_DESC(c_hs_bint,
+		"Capture bInterval for HS/SS (1-4: fixed, 0: auto)");
+
 #else
+#ifndef CONFIG_GADGET_UAC1_LEGACY
 #include "u_uac1.h"
 
+/* Playback(USB-IN) Default Stereo - Fl/Fr */
+static int p_chmask = UAC1_DEF_PCHMASK;
+module_param(p_chmask, uint, 0444);
+MODULE_PARM_DESC(p_chmask, "Playback Channel Mask");
+
+/* Playback Default 48 KHz */
+static int p_srates[UAC_MAX_RATES] = {UAC1_DEF_PSRATE};
+static int p_srates_cnt = 1;
+module_param_array_named(p_srate, p_srates, uint, &p_srates_cnt, 0444);
+MODULE_PARM_DESC(p_srate, "Playback Sampling Rates (array)");
+
+/* Playback Default 16bits/sample */
+static int p_ssize = UAC1_DEF_PSSIZE;
+module_param(p_ssize, uint, 0444);
+MODULE_PARM_DESC(p_ssize, "Playback Sample Size(bytes)");
+
+/* Capture(USB-OUT) Default Stereo - Fl/Fr */
+static int c_chmask = UAC1_DEF_CCHMASK;
+module_param(c_chmask, uint, 0444);
+MODULE_PARM_DESC(c_chmask, "Capture Channel Mask");
+
+/* Capture Default 48 KHz */
+static int c_srates[UAC_MAX_RATES] = {UAC1_DEF_CSRATE};
+static int c_srates_cnt = 1;
+module_param_array_named(c_srate, c_srates, uint, &c_srates_cnt, 0444);
+MODULE_PARM_DESC(c_srate, "Capture Sampling Rates (array)");
+
+/* Capture Default 16bits/sample */
+static int c_ssize = UAC1_DEF_CSSIZE;
+module_param(c_ssize, uint, 0444);
+MODULE_PARM_DESC(c_ssize, "Capture Sample Size(bytes)");
+#else /* CONFIG_GADGET_UAC1_LEGACY */
+#include "u_uac1_legacy.h"
+
 static char *fn_play = FILE_PCM_PLAYBACK;
-module_param(fn_play, charp, S_IRUGO);
+module_param(fn_play, charp, 0444);
 MODULE_PARM_DESC(fn_play, "Playback PCM device file name");
 
 static char *fn_cap = FILE_PCM_CAPTURE;
-module_param(fn_cap, charp, S_IRUGO);
+module_param(fn_cap, charp, 0444);
 MODULE_PARM_DESC(fn_cap, "Capture PCM device file name");
 
 static char *fn_cntl = FILE_CONTROL;
-module_param(fn_cntl, charp, S_IRUGO);
+module_param(fn_cntl, charp, 0444);
 MODULE_PARM_DESC(fn_cntl, "Control device file name");
 
 static int req_buf_size = UAC1_OUT_EP_MAX_PACKET_SIZE;
-module_param(req_buf_size, int, S_IRUGO);
+module_param(req_buf_size, int, 0444);
 MODULE_PARM_DESC(req_buf_size, "ISO OUT endpoint request buffer size");
 
 static int req_count = UAC1_REQ_COUNT;
-module_param(req_count, int, S_IRUGO);
+module_param(req_count, int, 0444);
 MODULE_PARM_DESC(req_count, "ISO OUT endpoint request count");
 
 static int audio_buf_size = UAC1_AUDIO_BUF_SIZE;
-module_param(audio_buf_size, int, S_IRUGO);
+module_param(audio_buf_size, int, 0444);
 MODULE_PARM_DESC(audio_buf_size, "Audio buffer size");
+#endif /* CONFIG_GADGET_UAC1_LEGACY */
 #endif
 
 /* string IDs are assigned dynamically */
@@ -125,7 +173,7 @@ static struct usb_device_descriptor device_desc = {
 
 	/* .bcdUSB = DYNAMIC */
 
-#ifdef CONFIG_GADGET_UAC1
+#ifdef CONFIG_GADGET_UAC1_LEGACY
 	.bDeviceClass =		USB_CLASS_PER_INTERFACE,
 	.bDeviceSubClass =	0,
 	.bDeviceProtocol =	0,
@@ -206,8 +254,14 @@ static int audio_bind(struct usb_composite_dev *cdev)
 {
 #ifndef CONFIG_GADGET_UAC1
 	struct f_uac2_opts	*uac2_opts;
+	int i;
 #else
+#ifndef CONFIG_GADGET_UAC1_LEGACY
 	struct f_uac1_opts	*uac1_opts;
+	int i;
+#else
+	struct f_uac1_legacy_opts	*uac1_opts;
+#endif
 #endif
 	int			status;
 
@@ -216,7 +270,11 @@ static int audio_bind(struct usb_composite_dev *cdev)
 	if (IS_ERR(fi_uac2))
 		return PTR_ERR(fi_uac2);
 #else
+#ifndef CONFIG_GADGET_UAC1_LEGACY
 	fi_uac1 = usb_get_function_instance("uac1");
+#else
+	fi_uac1 = usb_get_function_instance("uac1_legacy");
+#endif
 	if (IS_ERR(fi_uac1))
 		return PTR_ERR(fi_uac1);
 #endif
@@ -224,19 +282,45 @@ static int audio_bind(struct usb_composite_dev *cdev)
 #ifndef CONFIG_GADGET_UAC1
 	uac2_opts = container_of(fi_uac2, struct f_uac2_opts, func_inst);
 	uac2_opts->p_chmask = p_chmask;
-	uac2_opts->p_srate = p_srate;
+
+	for (i = 0; i < p_srates_cnt; ++i)
+		uac2_opts->p_srates[i] = p_srates[i];
+
 	uac2_opts->p_ssize = p_ssize;
+	uac2_opts->p_hs_bint = p_hs_bint;
 	uac2_opts->c_chmask = c_chmask;
-	uac2_opts->c_srate = c_srate;
+
+	for (i = 0; i < c_srates_cnt; ++i)
+		uac2_opts->c_srates[i] = c_srates[i];
+
 	uac2_opts->c_ssize = c_ssize;
+	uac2_opts->c_hs_bint = c_hs_bint;
+	uac2_opts->req_number = UAC2_DEF_REQ_NUM;
 #else
+#ifndef CONFIG_GADGET_UAC1_LEGACY
 	uac1_opts = container_of(fi_uac1, struct f_uac1_opts, func_inst);
+	uac1_opts->p_chmask = p_chmask;
+
+	for (i = 0; i < p_srates_cnt; ++i)
+		uac1_opts->p_srates[i] = p_srates[i];
+
+	uac1_opts->p_ssize = p_ssize;
+	uac1_opts->c_chmask = c_chmask;
+
+	for (i = 0; i < c_srates_cnt; ++i)
+		uac1_opts->c_srates[i] = c_srates[i];
+
+	uac1_opts->c_ssize = c_ssize;
+	uac1_opts->req_number = UAC1_DEF_REQ_NUM;
+#else /* CONFIG_GADGET_UAC1_LEGACY */
+	uac1_opts = container_of(fi_uac1, struct f_uac1_legacy_opts, func_inst);
 	uac1_opts->fn_play = fn_play;
 	uac1_opts->fn_cap = fn_cap;
 	uac1_opts->fn_cntl = fn_cntl;
 	uac1_opts->req_buf_size = req_buf_size;
 	uac1_opts->req_count = req_count;
 	uac1_opts->audio_buf_size = audio_buf_size;
+#endif /* CONFIG_GADGET_UAC1_LEGACY */
 #endif
 
 	status = usb_string_ids_tab(cdev, strings_dev);
@@ -249,8 +333,10 @@ static int audio_bind(struct usb_composite_dev *cdev)
 		struct usb_descriptor_header *usb_desc;
 
 		usb_desc = usb_otg_descriptor_alloc(cdev->gadget);
-		if (!usb_desc)
+		if (!usb_desc) {
+			status = -ENOMEM;
 			goto fail;
+		}
 		usb_otg_descriptor_init(cdev->gadget, usb_desc);
 		otg_desc[0] = usb_desc;
 		otg_desc[1] = NULL;

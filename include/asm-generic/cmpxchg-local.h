@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef __ASM_GENERIC_CMPXCHG_LOCAL_H
 #define __ASM_GENERIC_CMPXCHG_LOCAL_H
 
@@ -11,7 +12,7 @@ extern unsigned long wrong_size_cmpxchg(volatile void *ptr)
  * Generic version of __cmpxchg_local (disables interrupts). Takes an unsigned
  * long parameter, supporting various types of architectures.
  */
-static inline unsigned long __cmpxchg_local_generic(volatile void *ptr,
+static inline unsigned long __generic_cmpxchg_local(volatile void *ptr,
 		unsigned long old, unsigned long new, int size)
 {
 	unsigned long flags, prev;
@@ -50,7 +51,7 @@ static inline unsigned long __cmpxchg_local_generic(volatile void *ptr,
 /*
  * Generic version of __cmpxchg64_local. Takes an u64 parameter.
  */
-static inline u64 __cmpxchg64_local_generic(volatile void *ptr,
+static inline u64 __generic_cmpxchg64_local(volatile void *ptr,
 		u64 old, u64 new)
 {
 	u64 prev;

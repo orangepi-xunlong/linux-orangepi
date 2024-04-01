@@ -1,19 +1,11 @@
-/*
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as
- * published by the Free Software Foundation version 2.
- *
- * This program is distributed "as is" WITHOUT ANY WARRANTY of any
- * kind, whether express or implied; without even the implied warranty
- * of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- * GNU General Public License for more details.
- */
+// SPDX-License-Identifier: GPL-2.0-only
 
 #include <linux/clk.h>
 #include <linux/clkdev.h>
 #include <linux/clk-provider.h>
 #include <linux/delay.h>
 #include <linux/err.h>
+#include <linux/io.h>
 #include <linux/math64.h>
 #include <linux/module.h>
 #include <linux/of_device.h>
@@ -193,15 +185,8 @@ static const char *ti_adpll_clk_get_name(struct ti_adpll_data *d,
 		if (err)
 			return NULL;
 	} else {
-		const char *base_name = "adpll";
-		char *buf;
-
-		buf = devm_kzalloc(d->dev, 8 + 1 + strlen(base_name) + 1 +
-				    strlen(postfix), GFP_KERNEL);
-		if (!buf)
-			return NULL;
-		sprintf(buf, "%08lx.%s.%s", d->pa, base_name, postfix);
-		name = buf;
+		name = devm_kasprintf(d->dev, GFP_KERNEL, "%08lx.adpll.%s",
+				      d->pa, postfix);
 	}
 
 	return name;
@@ -222,7 +207,7 @@ static int ti_adpll_setup_clock(struct ti_adpll_data *d, struct clk *clock,
 
 	/* Separate con_id in format "pll040dcoclkldo" to fit MAX_CON_ID */
 	postfix = strrchr(name, '.');
-	if (strlen(postfix) > 1) {
+	if (postfix && strlen(postfix) > 1) {
 		if (strlen(postfix) > ADPLL_MAX_CON_ID)
 			dev_warn(d->dev, "clock %s con_id lookup may fail\n",
 				 name);
@@ -486,7 +471,7 @@ static u8 ti_adpll_get_parent(struct clk_hw *hw)
 	return 0;
 }
 
-static struct clk_ops ti_adpll_ops = {
+static const struct clk_ops ti_adpll_ops = {
 	.prepare = ti_adpll_prepare,
 	.unprepare = ti_adpll_unprepare,
 	.is_prepared = ti_adpll_is_prepared,
@@ -501,8 +486,9 @@ static int ti_adpll_init_dco(struct ti_adpll_data *d)
 	const char *postfix;
 	int width, err;
 
-	d->outputs.clks = devm_kzalloc(d->dev, sizeof(struct clk *) *
+	d->outputs.clks = devm_kcalloc(d->dev,
 				       MAX_ADPLL_OUTPUTS,
+				       sizeof(struct clk *),
 				       GFP_KERNEL);
 	if (!d->outputs.clks)
 		return -ENOMEM;
@@ -613,7 +599,7 @@ static int ti_adpll_init_clkout(struct ti_adpll_data *d,
 
 	init.name = child_name;
 	init.ops = ops;
-	init.flags = CLK_IS_BASIC;
+	init.flags = 0;
 	co->hw.init = &init;
 	parent_names[0] = __clk_get_name(clk0);
 	parent_names[1] = __clk_get_name(clk1);
@@ -812,7 +798,7 @@ static int ti_adpll_init_registers(struct ti_adpll_data *d)
 
 static int ti_adpll_init_inputs(struct ti_adpll_data *d)
 {
-	const char *error = "need at least %i inputs";
+	static const char error[] = "need at least %i inputs";
 	struct clk *clock;
 	int nr_inputs;
 
@@ -901,11 +887,8 @@ static int ti_adpll_probe(struct platform_device *pdev)
 	d->pa = res->start;
 
 	d->iobase = devm_ioremap_resource(dev, res);
-	if (IS_ERR(d->iobase)) {
-		dev_err(dev, "could not get IO base: %li\n",
-			PTR_ERR(d->iobase));
+	if (IS_ERR(d->iobase))
 		return PTR_ERR(d->iobase);
-	}
 
 	err = ti_adpll_init_registers(d);
 	if (err)
@@ -915,8 +898,9 @@ static int ti_adpll_probe(struct platform_device *pdev)
 	if (err)
 		return err;
 
-	d->clocks = devm_kzalloc(d->dev, sizeof(struct ti_adpll_clock) *
+	d->clocks = devm_kcalloc(d->dev,
 				 TI_ADPLL_NR_CLOCKS,
+				 sizeof(struct ti_adpll_clock),
 				 GFP_KERNEL);
 	if (!d->clocks)
 		return -ENOMEM;

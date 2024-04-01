@@ -1,17 +1,9 @@
-/******************************************************************************
+/* SPDX-License-Identifier: GPL-2.0 */
+/*
  * Copyright(c) 2008 - 2010 Realtek Corporation. All rights reserved.
  *
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * The full GNU General Public License is included in this distribution in the
- * file called LICENSE.
- *
- * Contact Information:
- * wlanfae <wlanfae@realtek.com>
-******************************************************************************/
+ * Contact Information: wlanfae <wlanfae@realtek.com>
+ */
 #ifndef	__R8192UDM_H__
 #define __R8192UDM_H__
 
@@ -50,9 +42,9 @@
 #define	 TX_POWER_ATHEROAP_THRESH_HIGH	   78
 #define		TX_POWER_ATHEROAP_THRESH_LOW		72
 
-#define			Current_Tx_Rate_Reg	 0x1e0
-#define			Initial_Tx_Rate_Reg	 0x1e1
-#define			Tx_Retry_Count_Reg	 0x1ac
+#define		CURRENT_TX_RATE_REG		0x1e0
+#define		INITIAL_TX_RATE_REG		0x1e1
+#define		TX_RETRY_COUNT_REG		0x1ac
 #define		RegC38_TH				 20
 
 #define		DM_Type_ByDriver		1

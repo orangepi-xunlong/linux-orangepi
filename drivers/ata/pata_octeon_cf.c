@@ -19,7 +19,7 @@
 #include <linux/of_platform.h>
 #include <linux/platform_device.h>
 #include <scsi/scsi_host.h>
-
+#include <trace/events/libata.h>
 #include <asm/byteorder.h>
 #include <asm/octeon/octeon.h>
 
@@ -73,16 +73,12 @@ MODULE_PARM_DESC(enable_dma,
  */
 static unsigned int ns_to_tim_reg(unsigned int tim_mult, unsigned int nsecs)
 {
-	unsigned int val;
-
 	/*
 	 * Compute # of eclock periods to get desired duration in
 	 * nanoseconds.
 	 */
-	val = DIV_ROUND_UP(nsecs * (octeon_get_io_clock_rate() / 1000000),
+	return DIV_ROUND_UP(nsecs * (octeon_get_io_clock_rate() / 1000000),
 			  1000 * tim_mult);
-
-	return val;
 }
 
 static void octeon_cf_set_boot_reg_cfg(int cs, unsigned int multiplier)
@@ -138,9 +134,7 @@ static void octeon_cf_set_piomode(struct ata_port *ap, struct ata_device *dev)
 	int trh;
 	int pause;
 	/* These names are timing parameters from the ATA spec */
-	int t1;
 	int t2;
-	int t2i;
 
 	/*
 	 * A divisor value of four will overflow the timing fields at
@@ -154,15 +148,9 @@ static void octeon_cf_set_piomode(struct ata_port *ap, struct ata_device *dev)
 
 	BUG_ON(ata_timing_compute(dev, dev->pio_mode, &timing, T, T));
 
-	t1 = timing.setup;
-	if (t1)
-		t1--;
 	t2 = timing.active;
 	if (t2)
 		t2--;
-	t2i = timing.act8b;
-	if (t2i)
-		t2i--;
 
 	trh = ns_to_tim_reg(div, 20);
 	if (trh)
@@ -281,9 +269,9 @@ static void octeon_cf_set_dmamode(struct ata_port *ap, struct ata_device *dev)
 	dma_tim.s.we_n = ns_to_tim_reg(tim_mult, oe_n);
 	dma_tim.s.we_a = ns_to_tim_reg(tim_mult, oe_a);
 
-	pr_debug("ns to ticks (mult %d) of %d is: %d\n", tim_mult, 60,
+	ata_dev_dbg(dev, "ns to ticks (mult %d) of %d is: %d\n", tim_mult, 60,
 		 ns_to_tim_reg(tim_mult, 60));
-	pr_debug("oe_n: %d, oe_a: %d, dmack_s: %d, dmack_h: %d, dmarq: %d, pause: %d\n",
+	ata_dev_dbg(dev, "oe_n: %d, oe_a: %d, dmack_s: %d, dmack_h: %d, dmarq: %d, pause: %d\n",
 		 dma_tim.s.oe_n, dma_tim.s.oe_a, dma_tim.s.dmack_s,
 		 dma_tim.s.dmack_h, dma_tim.s.dmarq, dma_tim.s.pause);
 
@@ -293,17 +281,17 @@ static void octeon_cf_set_dmamode(struct ata_port *ap, struct ata_device *dev)
 /**
  * Handle an 8 bit I/O request.
  *
- * @dev:        Device to access
+ * @qc:         Queued command
  * @buffer:     Data buffer
  * @buflen:     Length of the buffer.
  * @rw:         True to write.
  */
-static unsigned int octeon_cf_data_xfer8(struct ata_device *dev,
+static unsigned int octeon_cf_data_xfer8(struct ata_queued_cmd *qc,
 					 unsigned char *buffer,
 					 unsigned int buflen,
 					 int rw)
 {
-	struct ata_port *ap		= dev->link->ap;
+	struct ata_port *ap		= qc->dev->link->ap;
 	void __iomem *data_addr		= ap->ioaddr.data_addr;
 	unsigned long words;
 	int count;
@@ -332,17 +320,17 @@ static unsigned int octeon_cf_data_xfer8(struct ata_device *dev,
 /**
  * Handle a 16 bit I/O request.
  *
- * @dev:        Device to access
+ * @qc:         Queued command
  * @buffer:     Data buffer
  * @buflen:     Length of the buffer.
  * @rw:         True to write.
  */
-static unsigned int octeon_cf_data_xfer16(struct ata_device *dev,
+static unsigned int octeon_cf_data_xfer16(struct ata_queued_cmd *qc,
 					  unsigned char *buffer,
 					  unsigned int buflen,
 					  int rw)
 {
-	struct ata_port *ap		= dev->link->ap;
+	struct ata_port *ap		= qc->dev->link->ap;
 	void __iomem *data_addr		= ap->ioaddr.data_addr;
 	unsigned long words;
 	int count;
@@ -394,7 +382,7 @@ static void octeon_cf_tf_read16(struct ata_port *ap, struct ata_taskfile *tf)
 	void __iomem *base = ap->ioaddr.data_addr;
 
 	blob = __raw_readw(base + 0xc);
-	tf->feature = blob >> 8;
+	tf->error = blob >> 8;
 
 	blob = __raw_readw(base + 2);
 	tf->nsect = blob & 0xff;
@@ -406,7 +394,7 @@ static void octeon_cf_tf_read16(struct ata_port *ap, struct ata_taskfile *tf)
 
 	blob = __raw_readw(base + 6);
 	tf->device = blob & 0xff;
-	tf->command = blob >> 8;
+	tf->status = blob >> 8;
 
 	if (tf->flags & ATA_TFLAG_LBA48) {
 		if (likely(ap->ioaddr.ctl_addr)) {
@@ -448,7 +436,6 @@ static int octeon_cf_softreset16(struct ata_link *link, unsigned int *classes,
 	int rc;
 	u8 err;
 
-	DPRINTK("about to softreset\n");
 	__raw_writew(ap->ctl, base + 0xe);
 	udelay(20);
 	__raw_writew(ap->ctl | ATA_SRST, base + 0xe);
@@ -463,7 +450,6 @@ static int octeon_cf_softreset16(struct ata_link *link, unsigned int *classes,
 
 	/* determine by signature whether we have ATA or ATAPI devices */
 	classes[0] = ata_sff_dev_classify(&link->device[0], 1, &err);
-	DPRINTK("EXIT, classes[0]=%u [1]=%u\n", classes[0], classes[1]);
 	return 0;
 }
 
@@ -487,23 +473,11 @@ static void octeon_cf_tf_load16(struct ata_port *ap,
 		__raw_writew(tf->hob_feature << 8, base + 0xc);
 		__raw_writew(tf->hob_nsect | tf->hob_lbal << 8, base + 2);
 		__raw_writew(tf->hob_lbam | tf->hob_lbah << 8, base + 4);
-		VPRINTK("hob: feat 0x%X nsect 0x%X, lba 0x%X 0x%X 0x%X\n",
-			tf->hob_feature,
-			tf->hob_nsect,
-			tf->hob_lbal,
-			tf->hob_lbam,
-			tf->hob_lbah);
 	}
 	if (is_addr) {
 		__raw_writew(tf->feature << 8, base + 0xc);
 		__raw_writew(tf->nsect | tf->lbal << 8, base + 2);
 		__raw_writew(tf->lbam | tf->lbah << 8, base + 4);
-		VPRINTK("feat 0x%X nsect 0x%X, lba 0x%X 0x%X 0x%X\n",
-			tf->feature,
-			tf->nsect,
-			tf->lbal,
-			tf->lbam,
-			tf->lbah);
 	}
 	ata_wait_idle(ap);
 }
@@ -524,19 +498,13 @@ static void octeon_cf_exec_command16(struct ata_port *ap,
 {
 	/* The base of the registers is at ioaddr.data_addr. */
 	void __iomem *base = ap->ioaddr.data_addr;
-	u16 blob;
+	u16 blob = 0;
 
-	if (tf->flags & ATA_TFLAG_DEVICE) {
-		VPRINTK("device 0x%X\n", tf->device);
+	if (tf->flags & ATA_TFLAG_DEVICE)
 		blob = tf->device;
-	} else {
-		blob = 0;
-	}
 
-	DPRINTK("ata%u: cmd 0x%X\n", ap->print_id, tf->command);
 	blob |= (tf->command << 8);
 	__raw_writew(blob, base + 6);
-
 
 	ata_wait_idle(ap);
 }
@@ -551,12 +519,10 @@ static void octeon_cf_dma_setup(struct ata_queued_cmd *qc)
 	struct octeon_cf_port *cf_port;
 
 	cf_port = ap->private_data;
-	DPRINTK("ENTER\n");
 	/* issue r/w command */
 	qc->cursg = qc->sg;
 	cf_port->dma_finished = 0;
 	ap->ops->sff_exec_command(ap, &qc->tf);
-	DPRINTK("EXIT\n");
 }
 
 /**
@@ -570,8 +536,6 @@ static void octeon_cf_dma_start(struct ata_queued_cmd *qc)
 	union cvmx_mio_boot_dma_cfgx mio_boot_dma_cfg;
 	union cvmx_mio_boot_dma_intx mio_boot_dma_int;
 	struct scatterlist *sg;
-
-	VPRINTK("%d scatterlists\n", qc->n_elem);
 
 	/* Get the scatter list entry we need to DMA into */
 	sg = qc->cursg;
@@ -613,10 +577,6 @@ static void octeon_cf_dma_start(struct ata_queued_cmd *qc)
 
 	mio_boot_dma_cfg.s.adr = sg_dma_address(sg);
 
-	VPRINTK("%s %d bytes address=%p\n",
-		(mio_boot_dma_cfg.s.rw) ? "write" : "read", sg->length,
-		(void *)(unsigned long)mio_boot_dma_cfg.s.adr);
-
 	cvmx_write_csr(cf_port->dma_base + DMA_CFG, mio_boot_dma_cfg.u64);
 }
 
@@ -635,9 +595,7 @@ static unsigned int octeon_cf_dma_finished(struct ata_port *ap,
 	union cvmx_mio_boot_dma_intx dma_int;
 	u8 status;
 
-	VPRINTK("ata%u: protocol %d task_state %d\n",
-		ap->print_id, qc->tf.protocol, ap->hsm_task_state);
-
+	trace_ata_bmdma_stop(ap, &qc->tf, qc->tag);
 
 	if (ap->hsm_task_state != HSM_ST_LAST)
 		return 0;
@@ -686,7 +644,6 @@ static irqreturn_t octeon_cf_interrupt(int irq, void *dev_instance)
 
 	spin_lock_irqsave(&host->lock, flags);
 
-	DPRINTK("ENTER\n");
 	for (i = 0; i < host->n_ports; i++) {
 		u8 status;
 		struct ata_port *ap;
@@ -709,6 +666,7 @@ static irqreturn_t octeon_cf_interrupt(int irq, void *dev_instance)
 			if (!sg_is_last(qc->cursg)) {
 				qc->cursg = sg_next(qc->cursg);
 				handled = 1;
+				trace_ata_bmdma_start(ap, &qc->tf, qc->tag);
 				octeon_cf_dma_start(qc);
 				continue;
 			} else {
@@ -740,7 +698,6 @@ static irqreturn_t octeon_cf_interrupt(int irq, void *dev_instance)
 		}
 	}
 	spin_unlock_irqrestore(&host->lock, flags);
-	DPRINTK("EXIT\n");
 	return IRQ_RETVAL(handled);
 }
 
@@ -808,8 +765,11 @@ static unsigned int octeon_cf_qc_issue(struct ata_queued_cmd *qc)
 	case ATA_PROT_DMA:
 		WARN_ON(qc->tf.flags & ATA_TFLAG_POLLING);
 
+		trace_ata_tf_load(ap, &qc->tf);
 		ap->ops->sff_tf_load(ap, &qc->tf);  /* load tf registers */
+		trace_ata_bmdma_setup(ap, &qc->tf, qc->tag);
 		octeon_cf_dma_setup(qc);	    /* set up dma */
+		trace_ata_bmdma_start(ap, &qc->tf, qc->tag);
 		octeon_cf_dma_start(qc);	    /* initiate dma */
 		ap->hsm_task_state = HSM_ST_LAST;
 		break;
@@ -848,7 +808,6 @@ static int octeon_cf_probe(struct platform_device *pdev)
 	struct property *reg_prop;
 	int n_addr, n_size, reg_len;
 	struct device_node *node;
-	const void *prop;
 	void __iomem *cs0;
 	void __iomem *cs1 = NULL;
 	struct ata_host *host;
@@ -858,7 +817,7 @@ static int octeon_cf_probe(struct platform_device *pdev)
 	void __iomem *base;
 	struct octeon_cf_port *cf_port;
 	int rv = -ENOMEM;
-
+	u32 bus_width;
 
 	node = pdev->dev.of_node;
 	if (node == NULL)
@@ -868,11 +827,10 @@ static int octeon_cf_probe(struct platform_device *pdev)
 	if (!cf_port)
 		return -ENOMEM;
 
-	cf_port->is_true_ide = (of_find_property(node, "cavium,true-ide", NULL) != NULL);
+	cf_port->is_true_ide = of_property_read_bool(node, "cavium,true-ide");
 
-	prop = of_get_property(node, "cavium,bus-width", NULL);
-	if (prop)
-		is_16bit = (be32_to_cpup(prop) == 16);
+	if (of_property_read_u32(node, "cavium,bus-width", &bus_width) == 0)
+		is_16bit = (bus_width == 16);
 	else
 		is_16bit = false;
 
@@ -898,20 +856,24 @@ static int octeon_cf_probe(struct platform_device *pdev)
 				int i;
 				res_dma = platform_get_resource(dma_dev, IORESOURCE_MEM, 0);
 				if (!res_dma) {
+					put_device(&dma_dev->dev);
 					of_node_put(dma_node);
 					return -EINVAL;
 				}
-				cf_port->dma_base = (u64)devm_ioremap_nocache(&pdev->dev, res_dma->start,
+				cf_port->dma_base = (u64)devm_ioremap(&pdev->dev, res_dma->start,
 									 resource_size(res_dma));
 				if (!cf_port->dma_base) {
+					put_device(&dma_dev->dev);
 					of_node_put(dma_node);
 					return -EINVAL;
 				}
 
-				irq_handler = octeon_cf_interrupt;
 				i = platform_get_irq(dma_dev, 0);
-				if (i > 0)
+				if (i > 0) {
 					irq = i;
+					irq_handler = octeon_cf_interrupt;
+				}
+				put_device(&dma_dev->dev);
 			}
 			of_node_put(dma_node);
 		}
@@ -919,7 +881,7 @@ static int octeon_cf_probe(struct platform_device *pdev)
 		if (!res_cs1)
 			return -EINVAL;
 
-		cs1 = devm_ioremap_nocache(&pdev->dev, res_cs1->start,
+		cs1 = devm_ioremap(&pdev->dev, res_cs1->start,
 					   resource_size(res_cs1));
 		if (!cs1)
 			return rv;
@@ -935,7 +897,7 @@ static int octeon_cf_probe(struct platform_device *pdev)
 	if (!res_cs0)
 		return -EINVAL;
 
-	cs0 = devm_ioremap_nocache(&pdev->dev, res_cs0->start,
+	cs0 = devm_ioremap(&pdev->dev, res_cs0->start,
 				   resource_size(res_cs0));
 	if (!cs0)
 		return rv;
@@ -1046,11 +1008,9 @@ static void octeon_cf_shutdown(struct device *dev)
 	}
 }
 
-static struct of_device_id octeon_cf_match[] = {
-	{
-		.compatible = "cavium,ebt3000-compact-flash",
-	},
-	{},
+static const struct of_device_id octeon_cf_match[] = {
+	{ .compatible = "cavium,ebt3000-compact-flash", },
+	{ /* sentinel */ }
 };
 MODULE_DEVICE_TABLE(of, octeon_cf_match);
 

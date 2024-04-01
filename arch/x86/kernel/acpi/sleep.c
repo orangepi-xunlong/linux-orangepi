@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * sleep.c - x86-specific ACPI sleep support.
  *
@@ -6,15 +7,15 @@
  */
 
 #include <linux/acpi.h>
-#include <linux/bootmem.h>
 #include <linux/memblock.h>
 #include <linux/dmi.h>
 #include <linux/cpumask.h>
+#include <linux/pgtable.h>
 #include <asm/segment.h>
 #include <asm/desc.h>
-#include <asm/pgtable.h>
 #include <asm/cacheflush.h>
 #include <asm/realmode.h>
+#include <asm/hypervisor.h>
 
 #include <linux/ftrace.h>
 #include "../../realmode/rm/wakeup.h"
@@ -27,12 +28,23 @@ static char temp_stack[4096];
 #endif
 
 /**
+ * acpi_get_wakeup_address - provide physical address for S3 wakeup
+ *
+ * Returns the physical address where the kernel should be resumed after the
+ * system awakes from S3, e.g. for programming into the firmware waking vector.
+ */
+unsigned long acpi_get_wakeup_address(void)
+{
+	return ((unsigned long)(real_mode_header->wakeup_start));
+}
+
+/**
  * x86_acpi_enter_sleep_state - enter sleep state
  * @state: Sleep state to enter.
  *
- * Wrapper around acpi_enter_sleep_state() to be called by assmebly.
+ * Wrapper around acpi_enter_sleep_state() to be called by assembly.
  */
-acpi_status asmlinkage __visible x86_acpi_enter_sleep_state(u8 state)
+asmlinkage acpi_status __visible x86_acpi_enter_sleep_state(u8 state)
 {
 	return acpi_enter_sleep_state(state);
 }
@@ -101,7 +113,7 @@ int x86_acpi_suspend_lowlevel(void)
 #ifdef CONFIG_SMP
 	initial_stack = (unsigned long)temp_stack + sizeof(temp_stack);
 	early_gdt_descr.address =
-			(unsigned long)get_cpu_gdt_table(smp_processor_id());
+			(unsigned long)get_cpu_gdt_rw(smp_processor_id());
 	initial_gs = per_cpu_offset(smp_processor_id());
 #endif
 	initial_code = (unsigned long)wakeup_long64;
@@ -128,8 +140,10 @@ static int __init acpi_sleep_setup(char *str)
 		if (strncmp(str, "s3_beep", 7) == 0)
 			acpi_realmode_flags |= 4;
 #ifdef CONFIG_HIBERNATION
+		if (strncmp(str, "s4_hwsig", 8) == 0)
+			acpi_check_s4_hw_signature = 1;
 		if (strncmp(str, "s4_nohwsig", 10) == 0)
-			acpi_no_s4_hw_signature();
+			acpi_check_s4_hw_signature = 0;
 #endif
 		if (strncmp(str, "nonvs", 5) == 0)
 			acpi_nvs_nosave();
@@ -137,6 +151,8 @@ static int __init acpi_sleep_setup(char *str)
 			acpi_nvs_nosave_s3();
 		if (strncmp(str, "old_ordering", 12) == 0)
 			acpi_old_suspend_ordering();
+		if (strncmp(str, "nobl", 4) == 0)
+			acpi_sleep_no_blacklist();
 		str = strchr(str, ',');
 		if (str != NULL)
 			str += strspn(str, ", \t");
@@ -145,3 +161,21 @@ static int __init acpi_sleep_setup(char *str)
 }
 
 __setup("acpi_sleep=", acpi_sleep_setup);
+
+#if defined(CONFIG_HIBERNATION) && defined(CONFIG_HYPERVISOR_GUEST)
+static int __init init_s4_sigcheck(void)
+{
+	/*
+	 * If running on a hypervisor, honour the ACPI specification
+	 * by default and trigger a clean reboot when the hardware
+	 * signature in FACS is changed after hibernation.
+	 */
+	if (acpi_check_s4_hw_signature == -1 &&
+	    !hypervisor_is_type(X86_HYPER_NATIVE))
+		acpi_check_s4_hw_signature = 1;
+
+	return 0;
+}
+/* This must happen before acpi_init() which is a subsys initcall */
+arch_initcall(init_s4_sigcheck);
+#endif

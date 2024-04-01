@@ -1,18 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Murata ZPA2326 pressure and temperature sensor IIO driver
  *
  * Copyright (c) 2016 Parrot S.A.
  *
  * Author: Gregor Boirie <gregor.boirie@parrot.com>
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 as published by
- * the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
  */
 
 /**
@@ -72,6 +64,7 @@
 #include <linux/iio/trigger.h>
 #include <linux/iio/trigger_consumer.h>
 #include <linux/iio/triggered_buffer.h>
+#include <asm/unaligned.h>
 #include "zpa2326.h"
 
 /* 200 ms should be enough for the longest conversion time in one-shot mode. */
@@ -110,7 +103,7 @@ static const struct zpa2326_frequency *zpa2326_highest_frequency(void)
 }
 
 /**
- * struct zpa_private - Per-device internal private state
+ * struct zpa2326_private - Per-device internal private state
  * @timestamp:  Buffered samples ready datum.
  * @regmap:     Underlying I2C / SPI bus adapter used to abstract slave register
  *              accesses.
@@ -141,18 +134,14 @@ struct zpa2326_private {
 	struct regulator               *vdd;
 };
 
-#define zpa2326_err(_idev, _format, _arg...) \
-	dev_err(_idev->dev.parent, _format, ##_arg)
+#define zpa2326_err(idev, fmt, ...)					\
+	dev_err(idev->dev.parent, fmt "\n", ##__VA_ARGS__)
 
-#define zpa2326_warn(_idev, _format, _arg...) \
-	dev_warn(_idev->dev.parent, _format, ##_arg)
+#define zpa2326_warn(idev, fmt, ...)					\
+	dev_warn(idev->dev.parent, fmt "\n", ##__VA_ARGS__)
 
-#ifdef DEBUG
-#define zpa2326_dbg(_idev, _format, _arg...) \
-	dev_dbg(_idev->dev.parent, _format, ##_arg)
-#else
-#define zpa2326_dbg(_idev, _format, _arg...)
-#endif
+#define zpa2326_dbg(idev, fmt, ...)					\
+	dev_dbg(idev->dev.parent, fmt "\n", ##__VA_ARGS__)
 
 bool zpa2326_isreg_writeable(struct device *dev, unsigned int reg)
 {
@@ -173,7 +162,7 @@ bool zpa2326_isreg_writeable(struct device *dev, unsigned int reg)
 		return false;
 	}
 }
-EXPORT_SYMBOL_GPL(zpa2326_isreg_writeable);
+EXPORT_SYMBOL_NS_GPL(zpa2326_isreg_writeable, IIO_ZPA2326);
 
 bool zpa2326_isreg_readable(struct device *dev, unsigned int reg)
 {
@@ -202,7 +191,7 @@ bool zpa2326_isreg_readable(struct device *dev, unsigned int reg)
 		return false;
 	}
 }
-EXPORT_SYMBOL_GPL(zpa2326_isreg_readable);
+EXPORT_SYMBOL_NS_GPL(zpa2326_isreg_readable, IIO_ZPA2326);
 
 bool zpa2326_isreg_precious(struct device *dev, unsigned int reg)
 {
@@ -215,7 +204,7 @@ bool zpa2326_isreg_precious(struct device *dev, unsigned int reg)
 		return false;
 	}
 }
-EXPORT_SYMBOL_GPL(zpa2326_isreg_precious);
+EXPORT_SYMBOL_NS_GPL(zpa2326_isreg_precious, IIO_ZPA2326);
 
 /**
  * zpa2326_enable_device() - Enable device, i.e. get out of low power mode.
@@ -660,7 +649,7 @@ const struct dev_pm_ops zpa2326_pm_ops = {
 	SET_RUNTIME_PM_OPS(zpa2326_runtime_suspend, zpa2326_runtime_resume,
 			   NULL)
 };
-EXPORT_SYMBOL_GPL(zpa2326_pm_ops);
+EXPORT_SYMBOL_NS_GPL(zpa2326_pm_ops, IIO_ZPA2326);
 
 /**
  * zpa2326_resume() - Request the PM layer to power supply the device.
@@ -676,8 +665,10 @@ static int zpa2326_resume(const struct iio_dev *indio_dev)
 	int err;
 
 	err = pm_runtime_get_sync(indio_dev->dev.parent);
-	if (err < 0)
+	if (err < 0) {
+		pm_runtime_put(indio_dev->dev.parent);
 		return err;
+	}
 
 	if (err > 0) {
 		/*
@@ -755,7 +746,7 @@ static void zpa2326_suspend(struct iio_dev *indio_dev)
  */
 static irqreturn_t zpa2326_handle_irq(int irq, void *data)
 {
-	struct iio_dev *indio_dev = (struct iio_dev *)data;
+	struct iio_dev *indio_dev = data;
 
 	if (iio_buffer_enabled(indio_dev)) {
 		/* Timestamping needed for buffered sampling only. */
@@ -794,7 +785,7 @@ static irqreturn_t zpa2326_handle_irq(int irq, void *data)
  */
 static irqreturn_t zpa2326_handle_threaded_irq(int irq, void *data)
 {
-	struct iio_dev         *indio_dev = (struct iio_dev *)data;
+	struct iio_dev         *indio_dev = data;
 	struct zpa2326_private *priv = iio_priv(indio_dev);
 	unsigned int            val;
 	bool                    cont;
@@ -1017,22 +1008,20 @@ static int zpa2326_fetch_raw_sample(const struct iio_dev *indio_dev,
 	struct regmap *regs = ((struct zpa2326_private *)
 			       iio_priv(indio_dev))->regmap;
 	int            err;
+	u8             v[3];
 
 	switch (type) {
 	case IIO_PRESSURE:
 		zpa2326_dbg(indio_dev, "fetching raw pressure sample");
 
-		err = regmap_bulk_read(regs, ZPA2326_PRESS_OUT_XL_REG, value,
-				       3);
+		err = regmap_bulk_read(regs, ZPA2326_PRESS_OUT_XL_REG, v, sizeof(v));
 		if (err) {
 			zpa2326_warn(indio_dev, "failed to fetch pressure (%d)",
 				     err);
 			return err;
 		}
 
-		/* Pressure is a 24 bits wide little-endian unsigned int. */
-		*value = (((u8 *)value)[2] << 16) | (((u8 *)value)[1] << 8) |
-			 ((u8 *)value)[0];
+		*value = get_unaligned_le24(&v[0]);
 
 		return IIO_VAL_INT;
 
@@ -1261,8 +1250,11 @@ static int zpa2326_postenable_buffer(struct iio_dev *indio_dev)
 		 * get rid of samples acquired during previous rounds (if any).
 		 */
 		err = zpa2326_clear_fifo(indio_dev, 0);
-		if (err)
-			goto err;
+		if (err) {
+			zpa2326_err(indio_dev,
+				    "failed to enable buffering (%d)", err);
+			return err;
+		}
 	}
 
 	if (!iio_trigger_using_own(indio_dev) && priv->waken) {
@@ -1271,21 +1263,14 @@ static int zpa2326_postenable_buffer(struct iio_dev *indio_dev)
 		 * powered up: reconfigure one-shot mode.
 		 */
 		err = zpa2326_config_oneshot(indio_dev, priv->irq);
-		if (err)
-			goto err;
+		if (err) {
+			zpa2326_err(indio_dev,
+				    "failed to enable buffering (%d)", err);
+			return err;
+		}
 	}
 
-	/* Plug our own trigger event handler. */
-	err = iio_triggered_buffer_postenable(indio_dev);
-	if (err)
-		goto err;
-
 	return 0;
-
-err:
-	zpa2326_err(indio_dev, "failed to enable buffering (%d)", err);
-
-	return err;
 }
 
 static int zpa2326_postdisable_buffer(struct iio_dev *indio_dev)
@@ -1298,7 +1283,6 @@ static int zpa2326_postdisable_buffer(struct iio_dev *indio_dev)
 static const struct iio_buffer_setup_ops zpa2326_buffer_setup_ops = {
 	.preenable   = zpa2326_preenable_buffer,
 	.postenable  = zpa2326_postenable_buffer,
-	.predisable  = iio_triggered_buffer_predisable,
 	.postdisable = zpa2326_postdisable_buffer
 };
 
@@ -1394,12 +1378,11 @@ static int zpa2326_set_trigger_state(struct iio_trigger *trig, bool state)
 }
 
 static const struct iio_trigger_ops zpa2326_trigger_ops = {
-	.owner             = THIS_MODULE,
 	.set_trigger_state = zpa2326_set_trigger_state,
 };
 
 /**
- * zpa2326_init_trigger() - Create an interrupt driven / hardware trigger
+ * zpa2326_init_managed_trigger() - Create interrupt driven / hardware trigger
  *                          allowing to notify external devices a new sample is
  *                          ready.
  * @parent:    Hardware sampling device @indio_dev is a child of.
@@ -1425,12 +1408,12 @@ static int zpa2326_init_managed_trigger(struct device          *parent,
 		return 0;
 
 	trigger = devm_iio_trigger_alloc(parent, "%s-dev%d",
-					 indio_dev->name, indio_dev->id);
+					 indio_dev->name,
+					 iio_device_id(indio_dev));
 	if (!trigger)
 		return -ENOMEM;
 
 	/* Basic setup. */
-	trigger->dev.parent = parent;
 	trigger->ops = &zpa2326_trigger_ops;
 
 	private->trigger = trigger;
@@ -1594,7 +1577,6 @@ static const struct iio_chan_spec zpa2326_channels[] = {
 };
 
 static const struct iio_info zpa2326_info = {
-	.driver_module = THIS_MODULE,
 	.attrs         = &zpa2326_attribute_group,
 	.read_raw      = zpa2326_read_raw,
 	.write_raw     = zpa2326_write_raw,
@@ -1614,7 +1596,6 @@ static struct iio_dev *zpa2326_create_managed_iiodev(struct device *device,
 
 	/* Setup for userspace synchronous on demand sampling. */
 	indio_dev->modes = INDIO_DIRECT_MODE;
-	indio_dev->dev.parent = device;
 	indio_dev->channels = zpa2326_channels;
 	indio_dev->num_channels = ARRAY_SIZE(zpa2326_channels);
 	indio_dev->name = name;
@@ -1717,7 +1698,7 @@ poweroff:
 
 	return err;
 }
-EXPORT_SYMBOL_GPL(zpa2326_probe);
+EXPORT_SYMBOL_NS_GPL(zpa2326_probe, IIO_ZPA2326);
 
 void zpa2326_remove(const struct device *parent)
 {
@@ -1728,7 +1709,7 @@ void zpa2326_remove(const struct device *parent)
 	zpa2326_sleep(indio_dev);
 	zpa2326_power_off(indio_dev, iio_priv(indio_dev));
 }
-EXPORT_SYMBOL_GPL(zpa2326_remove);
+EXPORT_SYMBOL_NS_GPL(zpa2326_remove, IIO_ZPA2326);
 
 MODULE_AUTHOR("Gregor Boirie <gregor.boirie@parrot.com>");
 MODULE_DESCRIPTION("Core driver for Murata ZPA2326 pressure sensor");

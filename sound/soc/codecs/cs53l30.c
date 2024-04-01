@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * cs53l30.c  --  CS53l30 ALSA Soc Audio driver
  *
@@ -5,11 +6,6 @@
  *
  * Authors: Paul Handrigan <Paul.Handrigan@cirrus.com>,
  *          Tim Howe <Tim.Howe@cirrus.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
  */
 
 #include <linux/clk.h>
@@ -24,6 +20,7 @@
 #include <sound/tlv.h>
 
 #include "cs53l30.h"
+#include "cirrus_legacy.h"
 
 #define CS53L30_NUM_SUPPLIES 2
 static const char *const cs53l30_supply_names[CS53L30_NUM_SUPPLIES] = {
@@ -351,22 +348,22 @@ static const struct snd_kcontrol_new cs53l30_snd_controls[] = {
 	SOC_ENUM("ADC2 NG Delay", adc2_ng_delay_enum),
 
 	SOC_SINGLE_SX_TLV("ADC1A PGA Volume",
-		    CS53L30_ADC1A_AFE_CTL, 0, 0x34, 0x18, pga_tlv),
+		    CS53L30_ADC1A_AFE_CTL, 0, 0x34, 0x24, pga_tlv),
 	SOC_SINGLE_SX_TLV("ADC1B PGA Volume",
-		    CS53L30_ADC1B_AFE_CTL, 0, 0x34, 0x18, pga_tlv),
+		    CS53L30_ADC1B_AFE_CTL, 0, 0x34, 0x24, pga_tlv),
 	SOC_SINGLE_SX_TLV("ADC2A PGA Volume",
-		    CS53L30_ADC2A_AFE_CTL, 0, 0x34, 0x18, pga_tlv),
+		    CS53L30_ADC2A_AFE_CTL, 0, 0x34, 0x24, pga_tlv),
 	SOC_SINGLE_SX_TLV("ADC2B PGA Volume",
-		    CS53L30_ADC2B_AFE_CTL, 0, 0x34, 0x18, pga_tlv),
+		    CS53L30_ADC2B_AFE_CTL, 0, 0x34, 0x24, pga_tlv),
 
 	SOC_SINGLE_SX_TLV("ADC1A Digital Volume",
-		    CS53L30_ADC1A_DIG_VOL, 0, 0xA0, 0x0C, dig_tlv),
+		    CS53L30_ADC1A_DIG_VOL, 0, 0xA0, 0x6C, dig_tlv),
 	SOC_SINGLE_SX_TLV("ADC1B Digital Volume",
-		    CS53L30_ADC1B_DIG_VOL, 0, 0xA0, 0x0C, dig_tlv),
+		    CS53L30_ADC1B_DIG_VOL, 0, 0xA0, 0x6C, dig_tlv),
 	SOC_SINGLE_SX_TLV("ADC2A Digital Volume",
-		    CS53L30_ADC2A_DIG_VOL, 0, 0xA0, 0x0C, dig_tlv),
+		    CS53L30_ADC2A_DIG_VOL, 0, 0xA0, 0x6C, dig_tlv),
 	SOC_SINGLE_SX_TLV("ADC2B Digital Volume",
-		    CS53L30_ADC2B_DIG_VOL, 0, 0xA0, 0x0C, dig_tlv),
+		    CS53L30_ADC2B_DIG_VOL, 0, 0xA0, 0x6C, dig_tlv),
 };
 
 static const struct snd_soc_dapm_widget cs53l30_dapm_widgets[] = {
@@ -549,7 +546,7 @@ static int cs53l30_get_mclk_coeff(int mclk_rate, int srate)
 static int cs53l30_set_sysclk(struct snd_soc_dai *dai,
 			      int clk_id, unsigned int freq, int dir)
 {
-	struct cs53l30_private *priv = snd_soc_codec_get_drvdata(dai->codec);
+	struct cs53l30_private *priv = snd_soc_component_get_drvdata(dai->component);
 	int mclkx_coeff;
 	u32 mclk_rate;
 
@@ -572,7 +569,7 @@ static int cs53l30_set_sysclk(struct snd_soc_dai *dai,
 
 static int cs53l30_set_dai_fmt(struct snd_soc_dai *dai, unsigned int fmt)
 {
-	struct cs53l30_private *priv = snd_soc_codec_get_drvdata(dai->codec);
+	struct cs53l30_private *priv = snd_soc_component_get_drvdata(dai->component);
 	u8 aspcfg = 0, aspctl1 = 0;
 
 	switch (fmt & SND_SOC_DAIFMT_MASTER_MASK) {
@@ -626,7 +623,7 @@ static int cs53l30_pcm_hw_params(struct snd_pcm_substream *substream,
 				 struct snd_pcm_hw_params *params,
 				 struct snd_soc_dai *dai)
 {
-	struct cs53l30_private *priv = snd_soc_codec_get_drvdata(dai->codec);
+	struct cs53l30_private *priv = snd_soc_component_get_drvdata(dai->component);
 	int srate = params_rate(params);
 	int mclk_coeff;
 
@@ -650,11 +647,11 @@ static int cs53l30_pcm_hw_params(struct snd_pcm_substream *substream,
 	return 0;
 }
 
-static int cs53l30_set_bias_level(struct snd_soc_codec *codec,
+static int cs53l30_set_bias_level(struct snd_soc_component *component,
 				  enum snd_soc_bias_level level)
 {
-	struct snd_soc_dapm_context *dapm = snd_soc_codec_get_dapm(codec);
-	struct cs53l30_private *priv = snd_soc_codec_get_drvdata(codec);
+	struct snd_soc_dapm_context *dapm = snd_soc_component_get_dapm(component);
+	struct cs53l30_private *priv = snd_soc_component_get_drvdata(component);
 	unsigned int reg;
 	int i, inter_max_check, ret;
 
@@ -670,7 +667,7 @@ static int cs53l30_set_bias_level(struct snd_soc_codec *codec,
 		if (dapm->bias_level == SND_SOC_BIAS_OFF) {
 			ret = clk_prepare_enable(priv->mclk);
 			if (ret) {
-				dev_err(codec->dev,
+				dev_err(component->dev,
 					"failed to enable MCLK: %d\n", ret);
 				return ret;
 			}
@@ -736,7 +733,7 @@ static int cs53l30_set_bias_level(struct snd_soc_codec *codec,
 
 static int cs53l30_set_tristate(struct snd_soc_dai *dai, int tristate)
 {
-	struct cs53l30_private *priv = snd_soc_codec_get_drvdata(dai->codec);
+	struct cs53l30_private *priv = snd_soc_component_get_drvdata(dai->component);
 	u8 val = tristate ? CS53L30_ASP_3ST : 0;
 
 	return regmap_update_bits(priv->regmap, CS53L30_ASP_CTL1,
@@ -747,7 +744,7 @@ static unsigned int const cs53l30_src_rates[] = {
 	8000, 11025, 12000, 16000, 22050, 24000, 32000, 44100, 48000
 };
 
-static struct snd_pcm_hw_constraint_list src_constraints = {
+static const struct snd_pcm_hw_constraint_list src_constraints = {
 	.count = ARRAY_SIZE(cs53l30_src_rates),
 	.list = cs53l30_src_rates,
 };
@@ -770,7 +767,7 @@ static int cs53l30_set_dai_tdm_slot(struct snd_soc_dai *dai,
 				    unsigned int tx_mask, unsigned int rx_mask,
 				    int slots, int slot_width)
 {
-	struct cs53l30_private *priv = snd_soc_codec_get_drvdata(dai->codec);
+	struct cs53l30_private *priv = snd_soc_component_get_drvdata(dai->component);
 	unsigned int loc[CS53L30_TDM_SLOT_MAX] = {48, 48, 48, 48};
 	unsigned int slot_next, slot_step;
 	u64 tx_enable = 0;
@@ -840,10 +837,9 @@ static int cs53l30_set_dai_tdm_slot(struct snd_soc_dai *dai,
 
 static int cs53l30_mute_stream(struct snd_soc_dai *dai, int mute, int stream)
 {
-	struct cs53l30_private *priv = snd_soc_codec_get_drvdata(dai->codec);
+	struct cs53l30_private *priv = snd_soc_component_get_drvdata(dai->component);
 
-	if (priv->mute_gpio)
-		gpiod_set_value_cansleep(priv->mute_gpio, mute);
+	gpiod_set_value_cansleep(priv->mute_gpio, mute);
 
 	return 0;
 }
@@ -874,13 +870,13 @@ static struct snd_soc_dai_driver cs53l30_dai = {
 		.formats = CS53L30_FORMATS,
 	},
 	.ops = &cs53l30_ops,
-	.symmetric_rates = 1,
+	.symmetric_rate = 1,
 };
 
-static int cs53l30_codec_probe(struct snd_soc_codec *codec)
+static int cs53l30_component_probe(struct snd_soc_component *component)
 {
-	struct cs53l30_private *priv = snd_soc_codec_get_drvdata(codec);
-	struct snd_soc_dapm_context *dapm = snd_soc_codec_get_dapm(codec);
+	struct cs53l30_private *priv = snd_soc_component_get_drvdata(component);
+	struct snd_soc_dapm_context *dapm = snd_soc_component_get_dapm(component);
 
 	if (priv->use_sdout2)
 		snd_soc_dapm_add_routes(dapm, cs53l30_dapm_routes_sdout2,
@@ -892,19 +888,17 @@ static int cs53l30_codec_probe(struct snd_soc_codec *codec)
 	return 0;
 }
 
-static struct snd_soc_codec_driver cs53l30_driver = {
-	.probe = cs53l30_codec_probe,
-	.set_bias_level = cs53l30_set_bias_level,
-	.idle_bias_off = true,
-
-	.component_driver = {
-		.controls		= cs53l30_snd_controls,
-		.num_controls		= ARRAY_SIZE(cs53l30_snd_controls),
-		.dapm_widgets		= cs53l30_dapm_widgets,
-		.num_dapm_widgets	= ARRAY_SIZE(cs53l30_dapm_widgets),
-		.dapm_routes		= cs53l30_dapm_routes,
-		.num_dapm_routes	= ARRAY_SIZE(cs53l30_dapm_routes),
-	},
+static const struct snd_soc_component_driver cs53l30_driver = {
+	.probe			= cs53l30_component_probe,
+	.set_bias_level		= cs53l30_set_bias_level,
+	.controls		= cs53l30_snd_controls,
+	.num_controls		= ARRAY_SIZE(cs53l30_snd_controls),
+	.dapm_widgets		= cs53l30_dapm_widgets,
+	.num_dapm_widgets	= ARRAY_SIZE(cs53l30_dapm_widgets),
+	.dapm_routes		= cs53l30_dapm_routes,
+	.num_dapm_routes	= ARRAY_SIZE(cs53l30_dapm_routes),
+	.use_pmdown_time	= 1,
+	.endianness		= 1,
 };
 
 static struct regmap_config cs53l30_regmap = {
@@ -918,17 +912,18 @@ static struct regmap_config cs53l30_regmap = {
 	.writeable_reg = cs53l30_writeable_register,
 	.readable_reg = cs53l30_readable_register,
 	.cache_type = REGCACHE_RBTREE,
+
+	.use_single_read = true,
+	.use_single_write = true,
 };
 
-static int cs53l30_i2c_probe(struct i2c_client *client,
-			     const struct i2c_device_id *id)
+static int cs53l30_i2c_probe(struct i2c_client *client)
 {
 	const struct device_node *np = client->dev.of_node;
 	struct device *dev = &client->dev;
 	struct cs53l30_private *cs53l30;
-	unsigned int devid = 0;
 	unsigned int reg;
-	int ret = 0, i;
+	int ret = 0, i, devid;
 	u8 val;
 
 	cs53l30 = devm_kzalloc(dev, sizeof(*cs53l30), GFP_KERNEL);
@@ -957,11 +952,10 @@ static int cs53l30_i2c_probe(struct i2c_client *client,
 						      GPIOD_OUT_LOW);
 	if (IS_ERR(cs53l30->reset_gpio)) {
 		ret = PTR_ERR(cs53l30->reset_gpio);
-		goto error;
+		goto error_supplies;
 	}
 
-	if (cs53l30->reset_gpio)
-		gpiod_set_value_cansleep(cs53l30->reset_gpio, 1);
+	gpiod_set_value_cansleep(cs53l30->reset_gpio, 1);
 
 	i2c_set_clientdata(client, cs53l30);
 
@@ -975,14 +969,12 @@ static int cs53l30_i2c_probe(struct i2c_client *client,
 	}
 
 	/* Initialize codec */
-	ret = regmap_read(cs53l30->regmap, CS53L30_DEVID_AB, &reg);
-	devid = reg << 12;
-
-	ret = regmap_read(cs53l30->regmap, CS53L30_DEVID_CD, &reg);
-	devid |= reg << 4;
-
-	ret = regmap_read(cs53l30->regmap, CS53L30_DEVID_E, &reg);
-	devid |= (reg & 0xF0) >> 4;
+	devid = cirrus_read_device_id(cs53l30->regmap, CS53L30_DEVID_AB);
+	if (devid < 0) {
+		ret = devid;
+		dev_err(dev, "Failed to read device ID: %d\n", ret);
+		goto error;
+	}
 
 	if (devid != CS53L30_DEVID) {
 		ret = -ENODEV;
@@ -1035,34 +1027,31 @@ static int cs53l30_i2c_probe(struct i2c_client *client,
 
 	dev_info(dev, "Cirrus Logic CS53L30, Revision: %02X\n", reg & 0xFF);
 
-	ret = snd_soc_register_codec(dev, &cs53l30_driver, &cs53l30_dai, 1);
+	ret = devm_snd_soc_register_component(dev, &cs53l30_driver, &cs53l30_dai, 1);
 	if (ret) {
-		dev_err(dev, "failed to register codec: %d\n", ret);
+		dev_err(dev, "failed to register component: %d\n", ret);
 		goto error;
 	}
 
 	return 0;
 
 error:
+	gpiod_set_value_cansleep(cs53l30->reset_gpio, 0);
+error_supplies:
 	regulator_bulk_disable(ARRAY_SIZE(cs53l30->supplies),
 			       cs53l30->supplies);
 	return ret;
 }
 
-static int cs53l30_i2c_remove(struct i2c_client *client)
+static void cs53l30_i2c_remove(struct i2c_client *client)
 {
 	struct cs53l30_private *cs53l30 = i2c_get_clientdata(client);
 
-	snd_soc_unregister_codec(&client->dev);
-
 	/* Hold down reset */
-	if (cs53l30->reset_gpio)
-		gpiod_set_value_cansleep(cs53l30->reset_gpio, 0);
+	gpiod_set_value_cansleep(cs53l30->reset_gpio, 0);
 
 	regulator_bulk_disable(ARRAY_SIZE(cs53l30->supplies),
 			       cs53l30->supplies);
-
-	return 0;
 }
 
 #ifdef CONFIG_PM
@@ -1073,8 +1062,7 @@ static int cs53l30_runtime_suspend(struct device *dev)
 	regcache_cache_only(cs53l30->regmap, true);
 
 	/* Hold down reset */
-	if (cs53l30->reset_gpio)
-		gpiod_set_value_cansleep(cs53l30->reset_gpio, 0);
+	gpiod_set_value_cansleep(cs53l30->reset_gpio, 0);
 
 	regulator_bulk_disable(ARRAY_SIZE(cs53l30->supplies),
 			       cs53l30->supplies);
@@ -1094,8 +1082,7 @@ static int cs53l30_runtime_resume(struct device *dev)
 		return ret;
 	}
 
-	if (cs53l30->reset_gpio)
-		gpiod_set_value_cansleep(cs53l30->reset_gpio, 1);
+	gpiod_set_value_cansleep(cs53l30->reset_gpio, 1);
 
 	regcache_cache_only(cs53l30->regmap, false);
 	ret = regcache_sync(cs53l30->regmap);
@@ -1130,10 +1117,11 @@ MODULE_DEVICE_TABLE(i2c, cs53l30_id);
 static struct i2c_driver cs53l30_i2c_driver = {
 	.driver = {
 		.name = "cs53l30",
+		.of_match_table = cs53l30_of_match,
 		.pm = &cs53l30_runtime_pm,
 	},
 	.id_table = cs53l30_id,
-	.probe = cs53l30_i2c_probe,
+	.probe_new = cs53l30_i2c_probe,
 	.remove = cs53l30_i2c_remove,
 };
 

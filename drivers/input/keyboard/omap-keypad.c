@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * linux/drivers/input/keyboard/omap-keypad.c
  *
@@ -8,20 +9,6 @@
  *
  * Added support for H2 & H3 Keypad
  * Copyright (C) 2004 Texas Instruments
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
 #include <linux/module.h>
@@ -37,11 +24,12 @@
 #include <linux/gpio.h>
 #include <linux/platform_data/gpio-omap.h>
 #include <linux/platform_data/keypad-omap.h>
+#include <linux/soc/ti/omap1-io.h>
 
 #undef NEW_BOARD_LEARNING_MODE
 
 static void omap_kp_tasklet(unsigned long);
-static void omap_kp_timer(unsigned long);
+static void omap_kp_timer(struct timer_list *);
 
 static unsigned char keypad_state[8];
 static DEFINE_MUTEX(kp_enable_mutex);
@@ -59,7 +47,7 @@ struct omap_kp {
 	unsigned short keymap[];
 };
 
-static DECLARE_TASKLET_DISABLED(kp_tasklet, omap_kp_tasklet, 0);
+static DECLARE_TASKLET_DISABLED_OLD(kp_tasklet, omap_kp_tasklet);
 
 static unsigned int *row_gpios;
 static unsigned int *col_gpios;
@@ -74,7 +62,7 @@ static irqreturn_t omap_kp_interrupt(int irq, void *dev_id)
 	return IRQ_HANDLED;
 }
 
-static void omap_kp_timer(unsigned long data)
+static void omap_kp_timer(struct timer_list *unused)
 {
 	tasklet_schedule(&kp_tasklet);
 }
@@ -203,8 +191,7 @@ static int omap_kp_probe(struct platform_device *pdev)
 	row_shift = get_count_order(pdata->cols);
 	keycodemax = pdata->rows << row_shift;
 
-	omap_kp = kzalloc(sizeof(struct omap_kp) +
-			keycodemax * sizeof(unsigned short), GFP_KERNEL);
+	omap_kp = kzalloc(struct_size(omap_kp, keymap, keycodemax), GFP_KERNEL);
 	input_dev = input_allocate_device();
 	if (!omap_kp || !input_dev) {
 		kfree(omap_kp);
@@ -233,7 +220,7 @@ static int omap_kp_probe(struct platform_device *pdev)
 	col_idx = 0;
 	row_idx = 0;
 
-	setup_timer(&omap_kp->timer, omap_kp_timer, (unsigned long)omap_kp);
+	timer_setup(&omap_kp->timer, omap_kp_timer, 0);
 
 	/* get the irq and init timer*/
 	kp_tasklet.data = (unsigned long) omap_kp;

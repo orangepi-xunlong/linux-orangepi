@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  *  linux/fs/affs/symlink.c
  *
@@ -10,8 +11,9 @@
 
 #include "affs.h"
 
-static int affs_symlink_readpage(struct file *file, struct page *page)
+static int affs_symlink_read_folio(struct file *file, struct folio *folio)
 {
+	struct page *page = &folio->page;
 	struct buffer_head *bh;
 	struct inode *inode = page->mapping->host;
 	char *link = page_address(page);
@@ -66,11 +68,10 @@ fail:
 }
 
 const struct address_space_operations affs_symlink_aops = {
-	.readpage	= affs_symlink_readpage,
+	.read_folio	= affs_symlink_read_folio,
 };
 
 const struct inode_operations affs_symlink_inode_operations = {
-	.readlink	= generic_readlink,
 	.get_link	= page_get_link,
 	.setattr	= affs_notify_change,
 };

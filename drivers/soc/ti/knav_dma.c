@@ -1,17 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2014 Texas Instruments Incorporated
  * Authors:	Santosh Shilimkar <santosh.shilimkar@ti.com>
  *		Sandeep Nair <sandeep_n@ti.com>
  *		Cyril Chemparathy <cyril@ti.com>
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as
- * published by the Free Software Foundation version 2.
- *
- * This program is distributed "as is" WITHOUT ANY WARRANTY of any
- * kind, whether express or implied; without even the implied warranty
- * of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include <linux/io.h>
@@ -133,6 +125,13 @@ struct knav_dma_chan {
 			ch->channel : ch->flow)
 
 static struct knav_dma_pool_device *kdev;
+
+static bool device_ready;
+bool knav_dma_device_ready(void)
+{
+	return device_ready;
+}
+EXPORT_SYMBOL_GPL(knav_dma_device_ready);
 
 static bool check_config(struct knav_dma_chan *chan, struct knav_dma_cfg *cfg)
 {
@@ -348,7 +347,7 @@ static void dma_debug_show_devices(struct seq_file *s,
 	}
 }
 
-static int dma_debug_show(struct seq_file *s, void *v)
+static int knav_dma_debug_show(struct seq_file *s, void *v)
 {
 	struct knav_dma_device *dma;
 
@@ -363,17 +362,7 @@ static int dma_debug_show(struct seq_file *s, void *v)
 	return 0;
 }
 
-static int knav_dma_debug_open(struct inode *inode, struct file *file)
-{
-	return single_open(file, dma_debug_show, NULL);
-}
-
-static const struct file_operations knav_dma_debug_ops = {
-	.open		= knav_dma_debug_open,
-	.read		= seq_read,
-	.llseek		= seq_lseek,
-	.release	= single_release,
-};
+DEFINE_SHOW_ATTRIBUTE(knav_dma_debug);
 
 static int of_channel_match_helper(struct device_node *np, const char *name,
 					const char **dma_instance)
@@ -395,7 +384,7 @@ static int of_channel_match_helper(struct device_node *np, const char *name,
 
 	if (of_parse_phandle_with_fixed_args(np, "ti,navigator-dmas",
 					1, index, &args)) {
-		dev_err(kdev->dev, "Missing the pahndle args name %s\n", name);
+		dev_err(kdev->dev, "Missing the phandle args name %s\n", name);
 		return -ENODEV;
 	}
 
@@ -413,14 +402,13 @@ static int of_channel_match_helper(struct device_node *np, const char *name,
  * @name:	slave channel name
  * @config:	dma configuration parameters
  *
- * Returns pointer to appropriate DMA channel on success or NULL.
+ * Returns pointer to appropriate DMA channel on success or error.
  */
 void *knav_dma_open_channel(struct device *dev, const char *name,
 					struct knav_dma_cfg *config)
 {
-	struct knav_dma_chan *chan;
-	struct knav_dma_device *dma;
-	bool found = false;
+	struct knav_dma_device *dma = NULL, *iter1;
+	struct knav_dma_chan *chan = NULL, *iter2;
 	int chan_num = -1;
 	const char *instance;
 
@@ -431,12 +419,12 @@ void *knav_dma_open_channel(struct device *dev, const char *name,
 
 	chan_num = of_channel_match_helper(dev->of_node, name, &instance);
 	if (chan_num < 0) {
-		dev_err(kdev->dev, "No DMA instace with name %s\n", name);
+		dev_err(kdev->dev, "No DMA instance with name %s\n", name);
 		return (void *)-EINVAL;
 	}
 
 	dev_dbg(kdev->dev, "initializing %s channel %d from DMA %s\n",
-		  config->direction == DMA_MEM_TO_DEV   ? "transmit" :
+		  config->direction == DMA_MEM_TO_DEV ? "transmit" :
 		  config->direction == DMA_DEV_TO_MEM ? "receive"  :
 		  "unknown", chan_num, instance);
 
@@ -447,33 +435,32 @@ void *knav_dma_open_channel(struct device *dev, const char *name,
 	}
 
 	/* Look for correct dma instance */
-	list_for_each_entry(dma, &kdev->list, list) {
-		if (!strcmp(dma->name, instance)) {
-			found = true;
+	list_for_each_entry(iter1, &kdev->list, list) {
+		if (!strcmp(iter1->name, instance)) {
+			dma = iter1;
 			break;
 		}
 	}
-	if (!found) {
-		dev_err(kdev->dev, "No DMA instace with name %s\n", instance);
+	if (!dma) {
+		dev_err(kdev->dev, "No DMA instance with name %s\n", instance);
 		return (void *)-EINVAL;
 	}
 
 	/* Look for correct dma channel from dma instance */
-	found = false;
-	list_for_each_entry(chan, &dma->chan_list, list) {
+	list_for_each_entry(iter2, &dma->chan_list, list) {
 		if (config->direction == DMA_MEM_TO_DEV) {
-			if (chan->channel == chan_num) {
-				found = true;
+			if (iter2->channel == chan_num) {
+				chan = iter2;
 				break;
 			}
 		} else {
-			if (chan->flow == chan_num) {
-				found = true;
+			if (iter2->flow == chan_num) {
+				chan = iter2;
 				break;
 			}
 		}
 	}
-	if (!found) {
+	if (!chan) {
 		dev_err(kdev->dev, "channel %d is not in DMA %s\n",
 				chan_num, instance);
 		return (void *)-EINVAL;
@@ -503,7 +490,7 @@ EXPORT_SYMBOL_GPL(knav_dma_open_channel);
 /**
  * knav_dma_close_channel()	- Destroy a dma channel
  *
- * channel:	dma channel handle
+ * @channel:	dma channel handle
  *
  */
 void knav_dma_close_channel(void *channel)
@@ -537,15 +524,15 @@ static void __iomem *pktdma_get_regs(struct knav_dma_device *dma,
 
 	ret = of_address_to_resource(node, index, &res);
 	if (ret) {
-		dev_err(dev, "Can't translate of node(%s) address for index(%d)\n",
-			node->name, index);
+		dev_err(dev, "Can't translate of node(%pOFn) address for index(%d)\n",
+			node, index);
 		return ERR_PTR(ret);
 	}
 
 	regs = devm_ioremap_resource(kdev->dev, &res);
 	if (IS_ERR(regs))
-		dev_err(dev, "Failed to map register base for index(%d) node(%s)\n",
-			index, node->name);
+		dev_err(dev, "Failed to map register base for index(%d) node(%pOFn)\n",
+			index, node);
 	if (_size)
 		*_size = resource_size(&res);
 
@@ -591,7 +578,7 @@ static int pktdma_init_chan(struct knav_dma_device *dma,
 
 	INIT_LIST_HEAD(&chan->list);
 	chan->dma	= dma;
-	chan->direction	= DMA_NONE;
+	chan->direction	= DMA_TRANS_NONE;
 	atomic_set(&chan->ref_count, 0);
 	spin_lock_init(&chan->lock);
 
@@ -649,31 +636,31 @@ static int dma_init(struct device_node *cloud, struct device_node *dma_node)
 	}
 
 	dma->reg_global	 = pktdma_get_regs(dma, node, 0, &size);
-	if (!dma->reg_global)
-		return -ENODEV;
+	if (IS_ERR(dma->reg_global))
+		return PTR_ERR(dma->reg_global);
 	if (size < sizeof(struct reg_global)) {
 		dev_err(kdev->dev, "bad size %pa for global regs\n", &size);
 		return -ENODEV;
 	}
 
 	dma->reg_tx_chan = pktdma_get_regs(dma, node, 1, &size);
-	if (!dma->reg_tx_chan)
-		return -ENODEV;
+	if (IS_ERR(dma->reg_tx_chan))
+		return PTR_ERR(dma->reg_tx_chan);
 
 	max_tx_chan = size / sizeof(struct reg_chan);
 	dma->reg_rx_chan = pktdma_get_regs(dma, node, 2, &size);
-	if (!dma->reg_rx_chan)
-		return -ENODEV;
+	if (IS_ERR(dma->reg_rx_chan))
+		return PTR_ERR(dma->reg_rx_chan);
 
 	max_rx_chan = size / sizeof(struct reg_chan);
 	dma->reg_tx_sched = pktdma_get_regs(dma, node, 3, &size);
-	if (!dma->reg_tx_sched)
-		return -ENODEV;
+	if (IS_ERR(dma->reg_tx_sched))
+		return PTR_ERR(dma->reg_tx_sched);
 
 	max_tx_sched = size / sizeof(struct reg_tx_sched);
 	dma->reg_rx_flow = pktdma_get_regs(dma, node, 4, &size);
-	if (!dma->reg_rx_flow)
-		return -ENODEV;
+	if (IS_ERR(dma->reg_rx_flow))
+		return PTR_ERR(dma->reg_rx_flow);
 
 	max_rx_flow = size / sizeof(struct reg_rx_flow);
 	dma->rx_priority = DMA_PRIO_DEFAULT;
@@ -750,16 +737,17 @@ static int knav_dma_probe(struct platform_device *pdev)
 	INIT_LIST_HEAD(&kdev->list);
 
 	pm_runtime_enable(kdev->dev);
-	ret = pm_runtime_get_sync(kdev->dev);
+	ret = pm_runtime_resume_and_get(kdev->dev);
 	if (ret < 0) {
 		dev_err(kdev->dev, "unable to enable pktdma, err %d\n", ret);
-		return ret;
+		goto err_pm_disable;
 	}
 
 	/* Initialise all packet dmas */
 	for_each_child_of_node(node, child) {
 		ret = dma_init(node, child);
 		if (ret) {
+			of_node_put(child);
 			dev_err(&pdev->dev, "init failed with %d\n", ret);
 			break;
 		}
@@ -767,11 +755,20 @@ static int knav_dma_probe(struct platform_device *pdev)
 
 	if (list_empty(&kdev->list)) {
 		dev_err(dev, "no valid dma instance\n");
-		return -ENODEV;
+		ret = -ENODEV;
+		goto err_put_sync;
 	}
 
 	debugfs_create_file("knav_dma", S_IFREG | S_IRUGO, NULL, NULL,
-			    &knav_dma_debug_ops);
+			    &knav_dma_debug_fops);
+
+	device_ready = true;
+	return ret;
+
+err_put_sync:
+	pm_runtime_put_sync(kdev->dev);
+err_pm_disable:
+	pm_runtime_disable(kdev->dev);
 
 	return ret;
 }

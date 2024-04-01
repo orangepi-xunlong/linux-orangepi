@@ -130,11 +130,19 @@ enum {
 	MLX4_CQE_STATUS_IPOK		= 1 << 12,
 };
 
+/* L4_CSUM is logically part of status, but has to checked against badfcs_enc */
+enum {
+	MLX4_CQE_STATUS_L4_CSUM		= 1 << 2,
+};
+
 enum {
 	MLX4_CQE_LLC                     = 1,
 	MLX4_CQE_SNAP                    = 1 << 1,
 	MLX4_CQE_BAD_FCS                 = 1 << 4,
 };
+
+#define MLX4_MAX_CQ_PERIOD (BIT(16) - 1)
+#define MLX4_MAX_CQ_COUNT (BIT(16) - 1)
 
 static inline void mlx4_cq_arm(struct mlx4_cq *cq, u32 cmd,
 			       void __iomem *uar_page,

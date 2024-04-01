@@ -1,22 +1,12 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
- * tcm-sita.c
- *
  * SImple Tiler Allocator (SiTA): 2D and 1D allocation(reservation) algorithm
  *
  * Authors: Ravi Ramachandra <r.ramachandra@ti.com>,
  *          Lajos Molnar <molnar@ti.com>
  *          Andy Gross <andy.gross@ti.com>
  *
- * Copyright (C) 2012 Texas Instruments, Inc.
- *
- * This package is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
- * THIS PACKAGE IS PROVIDED ``AS IS'' AND WITHOUT ANY EXPRESS OR
- * IMPLIED WARRANTIES, INCLUDING, WITHOUT LIMITATION, THE IMPLIED
- * WARRANTIES OF MERCHANTIBILITY AND FITNESS FOR A PARTICULAR PURPOSE.
- *
+ * Copyright (C) 2012 Texas Instruments Incorporated - https://www.ti.com/
  */
 #include <linux/init.h>
 #include <linux/module.h>
@@ -35,8 +25,8 @@ static unsigned long mask[8];
  * map		ptr to bitmap
  * stride		slots in a row
  */
-static void free_slots(unsigned long pos, uint16_t w, uint16_t h,
-		unsigned long *map, uint16_t stride)
+static void free_slots(unsigned long pos, u16 w, u16 h,
+		unsigned long *map, u16 stride)
 {
 	int i;
 
@@ -50,7 +40,7 @@ static void free_slots(unsigned long pos, uint16_t w, uint16_t h,
  * map		ptr to bitmap
  * num_bits	number of bits in bitmap
  */
-static int r2l_b2t_1d(uint16_t w, unsigned long *pos, unsigned long *map,
+static int r2l_b2t_1d(u16 w, unsigned long *pos, unsigned long *map,
 		size_t num_bits)
 {
 	unsigned long search_count = 0;
@@ -86,13 +76,13 @@ static int r2l_b2t_1d(uint16_t w, unsigned long *pos, unsigned long *map,
  * num_bits = size of bitmap
  * stride = bits in one row of container
  */
-static int l2r_t2b(uint16_t w, uint16_t h, uint16_t a, int16_t offset,
+static int l2r_t2b(u16 w, u16 h, u16 a, s16 offset,
 		unsigned long *pos, unsigned long slot_bytes,
 		unsigned long *map, size_t num_bits, size_t slot_stride)
 {
 	int i;
 	unsigned long index;
-	bool area_free;
+	bool area_free = false;
 	unsigned long slots_per_band = PAGE_SIZE / slot_bytes;
 	unsigned long bit_offset = (offset > 0) ? offset / slot_bytes : 0;
 	unsigned long curr_bit = bit_offset;
@@ -181,7 +171,7 @@ static s32 sita_reserve_1d(struct tcm *tcm, u32 num_slots,
 }
 
 static s32 sita_reserve_2d(struct tcm *tcm, u16 h, u16 w, u16 align,
-				int16_t offset, uint16_t slot_bytes,
+				s16 offset, u16 slot_bytes,
 				struct tcm_area *area)
 {
 	unsigned long pos;
@@ -210,7 +200,7 @@ static void sita_deinit(struct tcm *tcm)
 static s32 sita_free(struct tcm *tcm, struct tcm_area *area)
 {
 	unsigned long pos;
-	uint16_t w, h;
+	u16 w, h;
 
 	pos = area->p0.x + area->p0.y * tcm->width;
 	if (area->is2d) {
@@ -256,6 +246,5 @@ struct tcm *sita_init(u16 width, u16 height)
 	return tcm;
 
 error:
-	kfree(tcm);
 	return NULL;
 }

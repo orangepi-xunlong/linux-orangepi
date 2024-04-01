@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  *  linux/include/asm-parisc/ide.h
  *
@@ -10,8 +11,6 @@
 
 #ifndef __ASM_PARISC_IDE_H
 #define __ASM_PARISC_IDE_H
-
-#ifdef __KERNEL__
 
 /* Generic I/O and MEMIO string operations.  */
 
@@ -51,7 +50,5 @@ static __inline__ void __ide_mm_outsl(void __iomem *port, void *addr, u32 count)
 		addr += 4;
 	}
 }
-
-#endif /* __KERNEL__ */
 
 #endif /* __ASM_PARISC_IDE_H */

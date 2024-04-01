@@ -1,19 +1,11 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Keystone Navigator Queue Management Sub-System header
  *
- * Copyright (C) 2014 Texas Instruments Incorporated - http://www.ti.com
+ * Copyright (C) 2014 Texas Instruments Incorporated - https://www.ti.com
  * Author:	Sandeep Nair <sandeep_n@ti.com>
  *		Cyril Chemparathy <cyril@ti.com>
  *		Santosh Shilimkar <santosh.shilimkar@ti.com>
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as
- * published by the Free Software Foundation version 2.
- *
- * This program is distributed "as is" WITHOUT ANY WARRANTY of any
- * kind, whether express or implied; without even the implied warranty
- * of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #ifndef __SOC_TI_KNAV_QMSS_H__
@@ -86,5 +78,6 @@ int knav_pool_desc_map(void *ph, void *desc, unsigned size,
 void *knav_pool_desc_unmap(void *ph, dma_addr_t dma, unsigned dma_sz);
 dma_addr_t knav_pool_desc_virt_to_dma(void *ph, void *virt);
 void *knav_pool_desc_dma_to_virt(void *ph, dma_addr_t dma);
+bool knav_qmss_device_ready(void);
 
 #endif /* __SOC_TI_KNAV_QMSS_H__ */

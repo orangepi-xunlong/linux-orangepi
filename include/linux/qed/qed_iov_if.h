@@ -1,9 +1,7 @@
+/* SPDX-License-Identifier: (GPL-2.0-only OR BSD-3-Clause) */
 /* QLogic qed NIC Driver
- * Copyright (c) 2015 QLogic Corporation
- *
- * This software is available under the terms of the GNU General Public License
- * (GPL) Version 2, available from the file COPYING in the main directory of
- * this source tree.
+ * Copyright (c) 2015-2017  QLogic Corporation
+ * Copyright (c) 2019-2020 Marvell International Ltd.
  */
 
 #ifndef _QED_IOV_IF_H
@@ -29,6 +27,8 @@ struct qed_iov_hv_ops {
 
 	int (*set_rate) (struct qed_dev *cdev, int vfid,
 			 u32 min_rate, u32 max_rate);
+
+	int (*set_trust) (struct qed_dev *cdev, int vfid, bool trust);
 };
 
 #endif

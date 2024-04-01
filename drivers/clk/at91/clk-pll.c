@@ -1,11 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  Copyright (C) 2013 Boris BREZILLON <b.brezillon@overkiz.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
  */
 
 #include <linux/clk-provider.h>
@@ -34,20 +29,6 @@
 #define PLL_OUT_SHIFT		14
 #define PLL_MAX_ID		1
 
-struct clk_pll_characteristics {
-	struct clk_range input;
-	int num_output;
-	struct clk_range *output;
-	u16 *icpll;
-	u8 *out;
-};
-
-struct clk_pll_layout {
-	u32 pllr_mask;
-	u16 mul_mask;
-	u8 mul_shift;
-};
-
 #define to_clk_pll(hw) container_of(hw, struct clk_pll, hw)
 
 struct clk_pll {
@@ -59,6 +40,7 @@ struct clk_pll {
 	u16 mul;
 	const struct clk_pll_layout *layout;
 	const struct clk_pll_characteristics *characteristics;
+	struct at91_clk_pms pms;
 };
 
 static inline bool clk_pll_ready(struct regmap *regmap, int id)
@@ -279,6 +261,42 @@ static int clk_pll_set_rate(struct clk_hw *hw, unsigned long rate,
 	return 0;
 }
 
+static int clk_pll_save_context(struct clk_hw *hw)
+{
+	struct clk_pll *pll = to_clk_pll(hw);
+	struct clk_hw *parent_hw = clk_hw_get_parent(hw);
+
+	pll->pms.parent_rate = clk_hw_get_rate(parent_hw);
+	pll->pms.rate = clk_pll_recalc_rate(&pll->hw, pll->pms.parent_rate);
+	pll->pms.status = clk_pll_ready(pll->regmap, PLL_REG(pll->id));
+
+	return 0;
+}
+
+static void clk_pll_restore_context(struct clk_hw *hw)
+{
+	struct clk_pll *pll = to_clk_pll(hw);
+	unsigned long calc_rate;
+	unsigned int pllr, pllr_out, pllr_count;
+	u8 out = 0;
+
+	if (pll->characteristics->out)
+		out = pll->characteristics->out[pll->range];
+
+	regmap_read(pll->regmap, PLL_REG(pll->id), &pllr);
+
+	calc_rate = (pll->pms.parent_rate / PLL_DIV(pllr)) *
+		     (PLL_MUL(pllr, pll->layout) + 1);
+	pllr_count = (pllr >> PLL_COUNT_SHIFT) & PLL_MAX_COUNT;
+	pllr_out = (pllr >> PLL_OUT_SHIFT) & out;
+
+	if (pll->pms.rate != calc_rate ||
+	    pll->pms.status != clk_pll_ready(pll->regmap, PLL_REG(pll->id)) ||
+	    pllr_count != PLL_MAX_COUNT ||
+	    (out && pllr_out != out))
+		pr_warn("PLLAR was not configured properly by firmware\n");
+}
+
 static const struct clk_ops pll_ops = {
 	.prepare = clk_pll_prepare,
 	.unprepare = clk_pll_unprepare,
@@ -286,9 +304,11 @@ static const struct clk_ops pll_ops = {
 	.recalc_rate = clk_pll_recalc_rate,
 	.round_rate = clk_pll_round_rate,
 	.set_rate = clk_pll_set_rate,
+	.save_context = clk_pll_save_context,
+	.restore_context = clk_pll_restore_context,
 };
 
-static struct clk_hw * __init
+struct clk_hw * __init
 at91_clk_register_pll(struct regmap *regmap, const char *name,
 		      const char *parent_name, u8 id,
 		      const struct clk_pll_layout *layout,
@@ -334,189 +354,26 @@ at91_clk_register_pll(struct regmap *regmap, const char *name,
 }
 
 
-static const struct clk_pll_layout at91rm9200_pll_layout = {
+const struct clk_pll_layout at91rm9200_pll_layout = {
 	.pllr_mask = 0x7FFFFFF,
 	.mul_shift = 16,
 	.mul_mask = 0x7FF,
 };
 
-static const struct clk_pll_layout at91sam9g45_pll_layout = {
+const struct clk_pll_layout at91sam9g45_pll_layout = {
 	.pllr_mask = 0xFFFFFF,
 	.mul_shift = 16,
 	.mul_mask = 0xFF,
 };
 
-static const struct clk_pll_layout at91sam9g20_pllb_layout = {
+const struct clk_pll_layout at91sam9g20_pllb_layout = {
 	.pllr_mask = 0x3FFFFF,
 	.mul_shift = 16,
 	.mul_mask = 0x3F,
 };
 
-static const struct clk_pll_layout sama5d3_pll_layout = {
+const struct clk_pll_layout sama5d3_pll_layout = {
 	.pllr_mask = 0x1FFFFFF,
 	.mul_shift = 18,
 	.mul_mask = 0x7F,
 };
-
-
-static struct clk_pll_characteristics * __init
-of_at91_clk_pll_get_characteristics(struct device_node *np)
-{
-	int i;
-	int offset;
-	u32 tmp;
-	int num_output;
-	u32 num_cells;
-	struct clk_range input;
-	struct clk_range *output;
-	u8 *out = NULL;
-	u16 *icpll = NULL;
-	struct clk_pll_characteristics *characteristics;
-
-	if (of_at91_get_clk_range(np, "atmel,clk-input-range", &input))
-		return NULL;
-
-	if (of_property_read_u32(np, "#atmel,pll-clk-output-range-cells",
-				 &num_cells))
-		return NULL;
-
-	if (num_cells < 2 || num_cells > 4)
-		return NULL;
-
-	if (!of_get_property(np, "atmel,pll-clk-output-ranges", &tmp))
-		return NULL;
-	num_output = tmp / (sizeof(u32) * num_cells);
-
-	characteristics = kzalloc(sizeof(*characteristics), GFP_KERNEL);
-	if (!characteristics)
-		return NULL;
-
-	output = kzalloc(sizeof(*output) * num_output, GFP_KERNEL);
-	if (!output)
-		goto out_free_characteristics;
-
-	if (num_cells > 2) {
-		out = kzalloc(sizeof(*out) * num_output, GFP_KERNEL);
-		if (!out)
-			goto out_free_output;
-	}
-
-	if (num_cells > 3) {
-		icpll = kzalloc(sizeof(*icpll) * num_output, GFP_KERNEL);
-		if (!icpll)
-			goto out_free_output;
-	}
-
-	for (i = 0; i < num_output; i++) {
-		offset = i * num_cells;
-		if (of_property_read_u32_index(np,
-					       "atmel,pll-clk-output-ranges",
-					       offset, &tmp))
-			goto out_free_output;
-		output[i].min = tmp;
-		if (of_property_read_u32_index(np,
-					       "atmel,pll-clk-output-ranges",
-					       offset + 1, &tmp))
-			goto out_free_output;
-		output[i].max = tmp;
-
-		if (num_cells == 2)
-			continue;
-
-		if (of_property_read_u32_index(np,
-					       "atmel,pll-clk-output-ranges",
-					       offset + 2, &tmp))
-			goto out_free_output;
-		out[i] = tmp;
-
-		if (num_cells == 3)
-			continue;
-
-		if (of_property_read_u32_index(np,
-					       "atmel,pll-clk-output-ranges",
-					       offset + 3, &tmp))
-			goto out_free_output;
-		icpll[i] = tmp;
-	}
-
-	characteristics->input = input;
-	characteristics->num_output = num_output;
-	characteristics->output = output;
-	characteristics->out = out;
-	characteristics->icpll = icpll;
-	return characteristics;
-
-out_free_output:
-	kfree(icpll);
-	kfree(out);
-	kfree(output);
-out_free_characteristics:
-	kfree(characteristics);
-	return NULL;
-}
-
-static void __init
-of_at91_clk_pll_setup(struct device_node *np,
-		      const struct clk_pll_layout *layout)
-{
-	u32 id;
-	struct clk_hw *hw;
-	struct regmap *regmap;
-	const char *parent_name;
-	const char *name = np->name;
-	struct clk_pll_characteristics *characteristics;
-
-	if (of_property_read_u32(np, "reg", &id))
-		return;
-
-	parent_name = of_clk_get_parent_name(np, 0);
-
-	of_property_read_string(np, "clock-output-names", &name);
-
-	regmap = syscon_node_to_regmap(of_get_parent(np));
-	if (IS_ERR(regmap))
-		return;
-
-	characteristics = of_at91_clk_pll_get_characteristics(np);
-	if (!characteristics)
-		return;
-
-	hw = at91_clk_register_pll(regmap, name, parent_name, id, layout,
-				    characteristics);
-	if (IS_ERR(hw))
-		goto out_free_characteristics;
-
-	of_clk_add_hw_provider(np, of_clk_hw_simple_get, hw);
-	return;
-
-out_free_characteristics:
-	kfree(characteristics);
-}
-
-static void __init of_at91rm9200_clk_pll_setup(struct device_node *np)
-{
-	of_at91_clk_pll_setup(np, &at91rm9200_pll_layout);
-}
-CLK_OF_DECLARE(at91rm9200_clk_pll, "atmel,at91rm9200-clk-pll",
-	       of_at91rm9200_clk_pll_setup);
-
-static void __init of_at91sam9g45_clk_pll_setup(struct device_node *np)
-{
-	of_at91_clk_pll_setup(np, &at91sam9g45_pll_layout);
-}
-CLK_OF_DECLARE(at91sam9g45_clk_pll, "atmel,at91sam9g45-clk-pll",
-	       of_at91sam9g45_clk_pll_setup);
-
-static void __init of_at91sam9g20_clk_pllb_setup(struct device_node *np)
-{
-	of_at91_clk_pll_setup(np, &at91sam9g20_pllb_layout);
-}
-CLK_OF_DECLARE(at91sam9g20_clk_pllb, "atmel,at91sam9g20-clk-pllb",
-	       of_at91sam9g20_clk_pllb_setup);
-
-static void __init of_sama5d3_clk_pll_setup(struct device_node *np)
-{
-	of_at91_clk_pll_setup(np, &sama5d3_pll_layout);
-}
-CLK_OF_DECLARE(sama5d3_clk_pll, "atmel,sama5d3-clk-pll",
-	       of_sama5d3_clk_pll_setup);

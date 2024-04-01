@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Crypto acceleration support for Rockchip RK3288
  *
@@ -5,14 +6,11 @@
  *
  * Author: Zain Wang <zain.wang@rock-chips.com>
  *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
  * Some ideas are from marvell-cesa.c and s5p-sss.c driver.
  */
 
 #include "rk3288_crypto.h"
+#include <linux/dma-mapping.h>
 #include <linux/module.h>
 #include <linux/platform_device.h>
 #include <linux/of.h>
@@ -67,152 +65,22 @@ static void rk_crypto_disable_clk(struct rk_crypto_info *dev)
 	clk_disable_unprepare(dev->sclk);
 }
 
-static int check_alignment(struct scatterlist *sg_src,
-			   struct scatterlist *sg_dst,
-			   int align_mask)
-{
-	int in, out, align;
-
-	in = IS_ALIGNED((uint32_t)sg_src->offset, 4) &&
-	     IS_ALIGNED((uint32_t)sg_src->length, align_mask);
-	if (!sg_dst)
-		return in;
-	out = IS_ALIGNED((uint32_t)sg_dst->offset, 4) &&
-	      IS_ALIGNED((uint32_t)sg_dst->length, align_mask);
-	align = in && out;
-
-	return (align && (sg_src->length == sg_dst->length));
-}
-
-static int rk_load_data(struct rk_crypto_info *dev,
-			struct scatterlist *sg_src,
-			struct scatterlist *sg_dst)
-{
-	unsigned int count;
-
-	dev->aligned = dev->aligned ?
-		check_alignment(sg_src, sg_dst, dev->align_size) :
-		dev->aligned;
-	if (dev->aligned) {
-		count = min(dev->left_bytes, sg_src->length);
-		dev->left_bytes -= count;
-
-		if (!dma_map_sg(dev->dev, sg_src, 1, DMA_TO_DEVICE)) {
-			dev_err(dev->dev, "[%s:%d] dma_map_sg(src)  error\n",
-				__func__, __LINE__);
-			return -EINVAL;
-		}
-		dev->addr_in = sg_dma_address(sg_src);
-
-		if (sg_dst) {
-			if (!dma_map_sg(dev->dev, sg_dst, 1, DMA_FROM_DEVICE)) {
-				dev_err(dev->dev,
-					"[%s:%d] dma_map_sg(dst)  error\n",
-					__func__, __LINE__);
-				dma_unmap_sg(dev->dev, sg_src, 1,
-					     DMA_TO_DEVICE);
-				return -EINVAL;
-			}
-			dev->addr_out = sg_dma_address(sg_dst);
-		}
-	} else {
-		count = (dev->left_bytes > PAGE_SIZE) ?
-			PAGE_SIZE : dev->left_bytes;
-
-		if (!sg_pcopy_to_buffer(dev->first, dev->nents,
-					dev->addr_vir, count,
-					dev->total - dev->left_bytes)) {
-			dev_err(dev->dev, "[%s:%d] pcopy err\n",
-				__func__, __LINE__);
-			return -EINVAL;
-		}
-		dev->left_bytes -= count;
-		sg_init_one(&dev->sg_tmp, dev->addr_vir, count);
-		if (!dma_map_sg(dev->dev, &dev->sg_tmp, 1, DMA_TO_DEVICE)) {
-			dev_err(dev->dev, "[%s:%d] dma_map_sg(sg_tmp)  error\n",
-				__func__, __LINE__);
-			return -ENOMEM;
-		}
-		dev->addr_in = sg_dma_address(&dev->sg_tmp);
-
-		if (sg_dst) {
-			if (!dma_map_sg(dev->dev, &dev->sg_tmp, 1,
-					DMA_FROM_DEVICE)) {
-				dev_err(dev->dev,
-					"[%s:%d] dma_map_sg(sg_tmp)  error\n",
-					__func__, __LINE__);
-				dma_unmap_sg(dev->dev, &dev->sg_tmp, 1,
-					     DMA_TO_DEVICE);
-				return -ENOMEM;
-			}
-			dev->addr_out = sg_dma_address(&dev->sg_tmp);
-		}
-	}
-	dev->count = count;
-	return 0;
-}
-
-static void rk_unload_data(struct rk_crypto_info *dev)
-{
-	struct scatterlist *sg_in, *sg_out;
-
-	sg_in = dev->aligned ? dev->sg_src : &dev->sg_tmp;
-	dma_unmap_sg(dev->dev, sg_in, 1, DMA_TO_DEVICE);
-
-	if (dev->sg_dst) {
-		sg_out = dev->aligned ? dev->sg_dst : &dev->sg_tmp;
-		dma_unmap_sg(dev->dev, sg_out, 1, DMA_FROM_DEVICE);
-	}
-}
-
 static irqreturn_t rk_crypto_irq_handle(int irq, void *dev_id)
 {
 	struct rk_crypto_info *dev  = platform_get_drvdata(dev_id);
 	u32 interrupt_status;
-	int err = 0;
 
-	spin_lock(&dev->lock);
 	interrupt_status = CRYPTO_READ(dev, RK_CRYPTO_INTSTS);
 	CRYPTO_WRITE(dev, RK_CRYPTO_INTSTS, interrupt_status);
+
+	dev->status = 1;
 	if (interrupt_status & 0x0a) {
 		dev_warn(dev->dev, "DMA Error\n");
-		err = -EFAULT;
-	} else if (interrupt_status & 0x05) {
-		err = dev->update(dev);
+		dev->status = 0;
 	}
-	if (err)
-		dev->complete(dev, err);
-	spin_unlock(&dev->lock);
+	complete(&dev->complete);
+
 	return IRQ_HANDLED;
-}
-
-static void rk_crypto_tasklet_cb(unsigned long data)
-{
-	struct rk_crypto_info *dev = (struct rk_crypto_info *)data;
-	struct crypto_async_request *async_req, *backlog;
-	unsigned long flags;
-	int err = 0;
-
-	spin_lock_irqsave(&dev->lock, flags);
-	backlog   = crypto_get_backlog(&dev->queue);
-	async_req = crypto_dequeue_request(&dev->queue);
-	spin_unlock_irqrestore(&dev->lock, flags);
-	if (!async_req) {
-		dev_err(dev->dev, "async_req is NULL !!\n");
-		return;
-	}
-	if (backlog) {
-		backlog->complete(backlog, -EINPROGRESS);
-		backlog = NULL;
-	}
-
-	if (crypto_tfm_alg_type(async_req->tfm) == CRYPTO_ALG_TYPE_ABLKCIPHER)
-		dev->ablk_req = ablkcipher_request_cast(async_req);
-	else
-		dev->ahash_req = ahash_request_cast(async_req);
-	err = dev->start(dev);
-	if (err)
-		dev->complete(dev, err);
 }
 
 static struct rk_crypto_tmp *rk_cipher_algs[] = {
@@ -235,8 +103,8 @@ static int rk_crypto_register(struct rk_crypto_info *crypto_info)
 	for (i = 0; i < ARRAY_SIZE(rk_cipher_algs); i++) {
 		rk_cipher_algs[i]->dev = crypto_info;
 		if (rk_cipher_algs[i]->type == ALG_TYPE_CIPHER)
-			err = crypto_register_alg(
-					&rk_cipher_algs[i]->alg.crypto);
+			err = crypto_register_skcipher(
+					&rk_cipher_algs[i]->alg.skcipher);
 		else
 			err = crypto_register_ahash(
 					&rk_cipher_algs[i]->alg.hash);
@@ -248,7 +116,7 @@ static int rk_crypto_register(struct rk_crypto_info *crypto_info)
 err_cipher_algs:
 	for (k = 0; k < i; k++) {
 		if (rk_cipher_algs[i]->type == ALG_TYPE_CIPHER)
-			crypto_unregister_alg(&rk_cipher_algs[k]->alg.crypto);
+			crypto_unregister_skcipher(&rk_cipher_algs[k]->alg.skcipher);
 		else
 			crypto_unregister_ahash(&rk_cipher_algs[i]->alg.hash);
 	}
@@ -261,7 +129,7 @@ static void rk_crypto_unregister(void)
 
 	for (i = 0; i < ARRAY_SIZE(rk_cipher_algs); i++) {
 		if (rk_cipher_algs[i]->type == ALG_TYPE_CIPHER)
-			crypto_unregister_alg(&rk_cipher_algs[i]->alg.crypto);
+			crypto_unregister_skcipher(&rk_cipher_algs[i]->alg.skcipher);
 		else
 			crypto_unregister_ahash(&rk_cipher_algs[i]->alg.hash);
 	}
@@ -282,7 +150,6 @@ MODULE_DEVICE_TABLE(of, crypto_of_id_table);
 
 static int rk_crypto_probe(struct platform_device *pdev)
 {
-	struct resource *res;
 	struct device *dev = &pdev->dev;
 	struct rk_crypto_info *crypto_info;
 	int err = 0;
@@ -308,10 +175,7 @@ static int rk_crypto_probe(struct platform_device *pdev)
 	if (err)
 		goto err_crypto;
 
-	spin_lock_init(&crypto_info->lock);
-
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	crypto_info->reg = devm_ioremap_resource(&pdev->dev, res);
+	crypto_info->reg = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(crypto_info->reg)) {
 		err = PTR_ERR(crypto_info->reg);
 		goto err_crypto;
@@ -361,14 +225,11 @@ static int rk_crypto_probe(struct platform_device *pdev)
 	crypto_info->dev = &pdev->dev;
 	platform_set_drvdata(pdev, crypto_info);
 
-	tasklet_init(&crypto_info->crypto_tasklet,
-		     rk_crypto_tasklet_cb, (unsigned long)crypto_info);
-	crypto_init_queue(&crypto_info->queue, 50);
+	crypto_info->engine = crypto_engine_alloc_init(&pdev->dev, true);
+	crypto_engine_start(crypto_info->engine);
+	init_completion(&crypto_info->complete);
 
-	crypto_info->enable_clk = rk_crypto_enable_clk;
-	crypto_info->disable_clk = rk_crypto_disable_clk;
-	crypto_info->load_data = rk_load_data;
-	crypto_info->unload_data = rk_unload_data;
+	rk_crypto_enable_clk(crypto_info);
 
 	err = rk_crypto_register(crypto_info);
 	if (err) {
@@ -380,8 +241,9 @@ static int rk_crypto_probe(struct platform_device *pdev)
 	return 0;
 
 err_register_alg:
-	tasklet_kill(&crypto_info->crypto_tasklet);
+	crypto_engine_exit(crypto_info->engine);
 err_crypto:
+	dev_err(dev, "Crypto Accelerator not successfully registered\n");
 	return err;
 }
 
@@ -390,7 +252,8 @@ static int rk_crypto_remove(struct platform_device *pdev)
 	struct rk_crypto_info *crypto_tmp = platform_get_drvdata(pdev);
 
 	rk_crypto_unregister();
-	tasklet_kill(&crypto_tmp->crypto_tasklet);
+	rk_crypto_disable_clk(crypto_tmp);
+	crypto_engine_exit(crypto_tmp->engine);
 	return 0;
 }
 

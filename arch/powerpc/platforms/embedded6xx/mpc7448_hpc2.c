@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * mpc7448_hpc2.c
  *
@@ -11,11 +12,6 @@
  * 	Add Flat Device Tree support fot mpc7448hpc2 board
  *
  * Copyright 2004-2006 Freescale Semiconductor, Inc.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version
- * 2 of the License, or (at your option) any later version.
  */
 
 #include <linux/stddef.h>
@@ -31,10 +27,10 @@
 #include <linux/serial.h>
 #include <linux/tty.h>
 #include <linux/serial_core.h>
+#include <linux/of_irq.h>
 
 #include <asm/time.h>
 #include <asm/machdep.h>
-#include <asm/prom.h>
 #include <asm/udbg.h>
 #include <asm/tsi108.h>
 #include <asm/pci-bridge.h>
@@ -62,16 +58,14 @@ int mpc7448_hpc2_exclude_device(struct pci_controller *hose,
 		return PCIBIOS_SUCCESSFUL;
 }
 
-static void __init mpc7448_hpc2_setup_arch(void)
+static void __init mpc7448_hpc2_setup_pci(void)
 {
+#ifdef CONFIG_PCI
 	struct device_node *np;
 	if (ppc_md.progress)
-		ppc_md.progress("mpc7448_hpc2_setup_arch():set_bridge", 0);
-
-	tsi108_csr_vir_base = get_vir_csrbase();
+		ppc_md.progress("mpc7448_hpc2_setup_pci():set_bridge", 0);
 
 	/* setup PCI host bridge */
-#ifdef CONFIG_PCI
 	for_each_compatible_node(np, "pci", "tsi108-pci")
 		tsi108_setup_pci(np, MPC7448HPC2_PCI_CFG_PHYS, 0);
 
@@ -79,6 +73,11 @@ static void __init mpc7448_hpc2_setup_arch(void)
 	if (ppc_md.progress)
 		ppc_md.progress("tsi108: resources set", 0x100);
 #endif
+}
+
+static void __init mpc7448_hpc2_setup_arch(void)
+{
+	tsi108_csr_vir_base = get_vir_csrbase();
 
 	printk(KERN_INFO "MPC7448HPC2 (TAIGA) Platform\n");
 	printk(KERN_INFO
@@ -136,6 +135,9 @@ static void __init mpc7448_hpc2_init_IRQ(void)
 	tsi108_pci_int_init(cascade_node);
 	irq_set_handler_data(cascade_pci_irq, mpic);
 	irq_set_chained_handler(cascade_pci_irq, tsi108_irq_cascade);
+
+	of_node_put(tsi_pci);
+	of_node_put(cascade_node);
 #endif
 	/* Configure MPIC outputs to CPU0 */
 	tsi108_write_reg(TSI108_MPIC_OFFSET + 0x30c, 0);
@@ -151,7 +153,8 @@ static void __noreturn mpc7448_hpc2_restart(char *cmd)
 	local_irq_disable();
 
 	/* Set exception prefix high - to the firmware */
-	_nmask_and_or_msr(0, MSR_IP);
+	mtmsr(mfmsr() | MSR_IP);
+	isync();
 
 	for (;;) ;		/* Spin until reset happens */
 }
@@ -173,8 +176,8 @@ static int mpc7448_machine_check_exception(struct pt_regs *regs)
 	/* Are we prepared to handle this fault */
 	if ((entry = search_exception_tables(regs->nip)) != NULL) {
 		tsi108_clear_pci_cfg_error();
-		regs->msr |= MSR_RI;
-		regs->nip = entry->fixup;
+		regs_set_recoverable(regs);
+		regs_set_return_ip(regs, extable_fixup(entry));
 		return 1;
 	}
 	return 0;
@@ -184,6 +187,7 @@ define_machine(mpc7448_hpc2){
 	.name 			= "MPC7448 HPC2",
 	.probe 			= mpc7448_hpc2_probe,
 	.setup_arch 		= mpc7448_hpc2_setup_arch,
+	.discover_phbs		= mpc7448_hpc2_setup_pci,
 	.init_IRQ 		= mpc7448_hpc2_init_IRQ,
 	.show_cpuinfo 		= mpc7448_hpc2_show_cpuinfo,
 	.get_irq 		= mpic_get_irq,

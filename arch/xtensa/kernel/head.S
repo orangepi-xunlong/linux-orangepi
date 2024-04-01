@@ -15,6 +15,7 @@
  * Kevin Chea
  */
 
+#include <asm/asmmacro.h>
 #include <asm/processor.h>
 #include <asm/page.h>
 #include <asm/cacheasm.h>
@@ -59,10 +60,6 @@ ENTRY(_start)
 
 	.align	4
 	.literal_position
-.Lstartup:
-	.word	_startup
-
-	.align	4
 _SetupOCD:
 	/*
 	 * Initialize WB, WS, and clear PS.EXCM (to allow loop instructions).
@@ -70,11 +67,13 @@ _SetupOCD:
 	 * xt-gdb to single step via DEBUG exceptions received directly
 	 * by ocd.
 	 */
+#if XCHAL_HAVE_WINDOWED
 	movi	a1, 1
 	movi	a0, 0
 	wsr	a1, windowstart
 	wsr	a0, windowbase
 	rsync
+#endif
 
 	movi	a1, LOCKLEVEL
 	wsr	a1, ps
@@ -99,12 +98,12 @@ _SetupMMU:
 1:
 #endif
 #endif
-	.end	no-absolute-literals
 
-	l32r	a0, .Lstartup
+	movi	a0, _startup
 	jx	a0
 
 ENDPROC(_start)
+	.end	no-absolute-literals
 
 	__REF
 	.literal_position
@@ -184,6 +183,8 @@ ENTRY(_startup)
 
 	isync
 
+	initialize_cacheattr
+
 #ifdef CONFIG_HAVE_SMP
 	movi	a2, CCON	# MX External Register to Configure Cache
 	movi	a3, 1
@@ -195,9 +196,10 @@ ENTRY(_startup)
 	movi	a1, start_info
 	l32i	a1, a1, 0
 
-	movi	a2, (1 << PS_WOE_BIT) | LOCKLEVEL
-					# WOE=1, INTLEVEL=LOCKLEVEL, UM=0
-	wsr	a2, ps			# (enable reg-windows; progmode stack)
+	/* Disable interrupts. */
+	/* Enable window exceptions if kernel is built with windowed ABI. */
+	movi	a2, KERNEL_PS_WOE_MASK | LOCKLEVEL
+	wsr	a2, ps
 	rsync
 
 #ifdef CONFIG_SMP
@@ -214,7 +216,7 @@ ENTRY(_startup)
 	 *
 	 * The linker script used to build the Linux kernel image
 	 * creates a table located at __boot_reloc_table_start
-	 * that contans the information what data needs to be unpacked.
+	 * that contains the information what data needs to be unpacked.
 	 *
 	 * Uses a2-a7.
 	 */
@@ -224,7 +226,7 @@ ENTRY(_startup)
 
 1:	beq	a2, a3, 3f	# no more entries?
 	l32i	a4, a2, 0	# start destination (in RAM)
-	l32i	a5, a2, 4	# end desination (in RAM)
+	l32i	a5, a2, 4	# end destination (in RAM)
 	l32i	a6, a2, 8	# start source (in ROM)
 	addi	a2, a2, 12	# next entry
 	beq	a4, a5, 1b	# skip, empty entry
@@ -262,16 +264,20 @@ ENTRY(_startup)
 	___invalidate_icache_all a2 a3
 	isync
 
-	movi	a6, 0
-	xsr	a6, excsave1
+#ifdef CONFIG_XIP_KERNEL
+	/* Setup bootstrap CPU stack in XIP kernel */
+
+	movi	a1, start_info
+	l32i	a1, a1, 0
+#endif
+
+	movi	abi_arg0, 0
+	xsr	abi_arg0, excsave1
 
 	/* init_arch kick-starts the linux kernel */
 
-	movi	a4, init_arch
-	callx4	a4
-
-	movi	a4, start_kernel
-	callx4	a4
+	abi_call	init_arch
+	abi_call	start_kernel
 
 should_never_return:
 	j	should_never_return
@@ -295,11 +301,10 @@ should_never_return:
 	s32i	a3, a2, 0
 	memw
 
-	movi	a6, 0
-	wsr	a6, excsave1
+	movi	abi_arg0, 0
+	wsr	abi_arg0, excsave1
 
-	movi	a4, secondary_start_kernel
-	callx4	a4
+	abi_call	secondary_start_kernel
 	j	should_never_return
 
 #endif  /* CONFIG_SMP */
@@ -361,10 +366,10 @@ ENDPROC(cpu_restart)
  * DATA section
  */
 
-        .section ".data.init.refok"
-        .align  4
+	__REFDATA
+	.align  4
 ENTRY(start_info)
-        .long   init_thread_union + KERNEL_STACK_SIZE
+	.long	init_thread_union + KERNEL_STACK_SIZE
 
 /*
  * BSS section

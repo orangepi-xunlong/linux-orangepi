@@ -1,11 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * gpio-hammer - example swiss army knife to shake GPIO lines on a system
  *
  * Copyright (C) 2016 Linus Walleij
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 as published by
- * the Free Software Foundation.
  *
  * Usage:
  *	gpio-hammer -n <device-name> -o <offset1> -o <offset2>
@@ -23,64 +20,48 @@
 #include <getopt.h>
 #include <sys/ioctl.h>
 #include <linux/gpio.h>
+#include "gpio-utils.h"
 
-int hammer_device(const char *device_name, unsigned int *lines, int nlines,
+int hammer_device(const char *device_name, unsigned int *lines, int num_lines,
 		  unsigned int loops)
 {
-	struct gpiohandle_request req;
-	struct gpiohandle_data data;
-	char *chrdev_name;
+	struct gpio_v2_line_values values;
+	struct gpio_v2_line_config config;
 	char swirr[] = "-\\|/";
 	int fd;
 	int ret;
 	int i, j;
 	unsigned int iteration = 0;
 
-	ret = asprintf(&chrdev_name, "/dev/%s", device_name);
+	memset(&config, 0, sizeof(config));
+	config.flags = GPIO_V2_LINE_FLAG_OUTPUT;
+
+	ret = gpiotools_request_line(device_name, lines, num_lines,
+				     &config, "gpio-hammer");
 	if (ret < 0)
-		return -ENOMEM;
+		goto exit_error;
+	else
+		fd = ret;
 
-	fd = open(chrdev_name, 0);
-	if (fd == -1) {
-		ret = -errno;
-		fprintf(stderr, "Failed to open %s\n", chrdev_name);
-		goto exit_close_error;
-	}
+	values.mask = 0;
+	values.bits = 0;
+	for (i = 0; i < num_lines; i++)
+		gpiotools_set_bit(&values.mask, i);
 
-	/* Request lines as output */
-	for (i = 0; i < nlines; i++)
-		req.lineoffsets[i] = lines[i];
-	req.flags = GPIOHANDLE_REQUEST_OUTPUT; /* Request as output */
-	strcpy(req.consumer_label, "gpio-hammer");
-	req.lines = nlines;
-	ret = ioctl(fd, GPIO_GET_LINEHANDLE_IOCTL, &req);
-	if (ret == -1) {
-		ret = -errno;
-		fprintf(stderr, "Failed to issue GET LINEHANDLE "
-			"IOCTL (%d)\n",
-			ret);
+	ret = gpiotools_get_values(fd, &values);
+	if (ret < 0)
 		goto exit_close_error;
-	}
 
-	/* Read initial states */
-	ret = ioctl(req.fd, GPIOHANDLE_GET_LINE_VALUES_IOCTL, &data);
-	if (ret == -1) {
-		ret = -errno;
-		fprintf(stderr, "Failed to issue GPIOHANDLE GET LINE "
-			"VALUES IOCTL (%d)\n",
-			ret);
-		goto exit_close_error;
-	}
 	fprintf(stdout, "Hammer lines [");
-	for (i = 0; i < nlines; i++) {
+	for (i = 0; i < num_lines; i++) {
 		fprintf(stdout, "%d", lines[i]);
-		if (i != (nlines - 1))
+		if (i != (num_lines - 1))
 			fprintf(stdout, ", ");
 	}
 	fprintf(stdout, "] on %s, initial states: [", device_name);
-	for (i = 0; i < nlines; i++) {
-		fprintf(stdout, "%d", data.values[i]);
-		if (i != (nlines - 1))
+	for (i = 0; i < num_lines; i++) {
+		fprintf(stdout, "%d", gpiotools_test_bit(values.bits, i));
+		if (i != (num_lines - 1))
 			fprintf(stdout, ", ");
 	}
 	fprintf(stdout, "]\n");
@@ -89,36 +70,28 @@ int hammer_device(const char *device_name, unsigned int *lines, int nlines,
 	j = 0;
 	while (1) {
 		/* Invert all lines so we blink */
-		for (i = 0; i < nlines; i++)
-			data.values[i] = !data.values[i];
+		for (i = 0; i < num_lines; i++)
+			gpiotools_change_bit(&values.bits, i);
 
-		ret = ioctl(req.fd, GPIOHANDLE_SET_LINE_VALUES_IOCTL, &data);
-		if (ret == -1) {
-			ret = -errno;
-			fprintf(stderr, "Failed to issue GPIOHANDLE SET LINE "
-				"VALUES IOCTL (%d)\n",
-				ret);
+		ret = gpiotools_set_values(fd, &values);
+		if (ret < 0)
 			goto exit_close_error;
-		}
+
 		/* Re-read values to get status */
-		ret = ioctl(req.fd, GPIOHANDLE_GET_LINE_VALUES_IOCTL, &data);
-		if (ret == -1) {
-			ret = -errno;
-			fprintf(stderr, "Failed to issue GPIOHANDLE GET LINE "
-				"VALUES IOCTL (%d)\n",
-				ret);
+		ret = gpiotools_get_values(fd, &values);
+		if (ret < 0)
 			goto exit_close_error;
-		}
 
 		fprintf(stdout, "[%c] ", swirr[j]);
 		j++;
-		if (j == sizeof(swirr)-1)
+		if (j == sizeof(swirr) - 1)
 			j = 0;
 
 		fprintf(stdout, "[");
-		for (i = 0; i < nlines; i++) {
-			fprintf(stdout, "%d: %d", lines[i], data.values[i]);
-			if (i != (nlines - 1))
+		for (i = 0; i < num_lines; i++) {
+			fprintf(stdout, "%d: %d", lines[i],
+				gpiotools_test_bit(values.bits, i));
+			if (i != (num_lines - 1))
 				fprintf(stdout, ", ");
 		}
 		fprintf(stdout, "]\r");
@@ -132,9 +105,8 @@ int hammer_device(const char *device_name, unsigned int *lines, int nlines,
 	ret = 0;
 
 exit_close_error:
-	if (close(fd) == -1)
-		perror("Failed to close GPIO character device file");
-	free(chrdev_name);
+	gpiotools_release_line(fd);
+exit_error:
 	return ret;
 }
 
@@ -157,7 +129,7 @@ int main(int argc, char **argv)
 	const char *device_name = NULL;
 	unsigned int lines[GPIOHANDLES_MAX];
 	unsigned int loops = 0;
-	int nlines;
+	int num_lines;
 	int c;
 	int i;
 
@@ -171,7 +143,14 @@ int main(int argc, char **argv)
 			device_name = optarg;
 			break;
 		case 'o':
-			lines[i] = strtoul(optarg, NULL, 10);
+			/*
+			 * Avoid overflow. Do not immediately error, we want to
+			 * be able to accurately report on the amount of times
+			 * '-o' was given to give an accurate error message
+			 */
+			if (i < GPIOHANDLES_MAX)
+				lines[i] = strtoul(optarg, NULL, 10);
+
 			i++;
 			break;
 		case '?':
@@ -179,11 +158,19 @@ int main(int argc, char **argv)
 			return -1;
 		}
 	}
-	nlines = i;
 
-	if (!device_name || !nlines) {
+	if (i >= GPIOHANDLES_MAX) {
+		fprintf(stderr,
+			"Only %d occurrences of '-o' are allowed, %d were found\n",
+			GPIOHANDLES_MAX, i + 1);
+		return -1;
+	}
+
+	num_lines = i;
+
+	if (!device_name || !num_lines) {
 		print_usage();
 		return -1;
 	}
-	return hammer_device(device_name, lines, nlines, loops);
+	return hammer_device(device_name, lines, num_lines, loops);
 }

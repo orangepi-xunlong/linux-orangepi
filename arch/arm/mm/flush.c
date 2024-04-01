@@ -1,11 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  linux/arch/arm/mm/flush.c
  *
  *  Copyright (C) 1995-2002 Russell King
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 #include <linux/module.h>
 #include <linux/mm.h>
@@ -207,18 +204,17 @@ void __flush_dcache_page(struct address_space *mapping, struct page *page)
 	 * coherent with the kernels mapping.
 	 */
 	if (!PageHighMem(page)) {
-		size_t page_size = PAGE_SIZE << compound_order(page);
-		__cpuc_flush_dcache_area(page_address(page), page_size);
+		__cpuc_flush_dcache_area(page_address(page), page_size(page));
 	} else {
 		unsigned long i;
 		if (cache_is_vipt_nonaliasing()) {
-			for (i = 0; i < (1 << compound_order(page)); i++) {
+			for (i = 0; i < compound_nr(page); i++) {
 				void *addr = kmap_atomic(page + i);
 				__cpuc_flush_dcache_area(addr, PAGE_SIZE);
 				kunmap_atomic(addr);
 			}
 		} else {
-			for (i = 0; i < (1 << compound_order(page)); i++) {
+			for (i = 0; i < compound_nr(page); i++) {
 				void *addr = kmap_high_get(page + i);
 				if (addr) {
 					__cpuc_flush_dcache_area(addr, PAGE_SIZE);
@@ -285,7 +281,7 @@ void __sync_icache_dcache(pte_t pteval)
 
 	page = pfn_to_page(pfn);
 	if (cache_is_vipt_aliasing())
-		mapping = page_mapping(page);
+		mapping = page_mapping_file(page);
 	else
 		mapping = NULL;
 
@@ -327,7 +323,13 @@ void flush_dcache_page(struct page *page)
 	if (page == ZERO_PAGE(0))
 		return;
 
-	mapping = page_mapping(page);
+	if (!cache_ops_need_broadcast() && cache_is_vipt_nonaliasing()) {
+		if (test_bit(PG_dcache_clean, &page->flags))
+			clear_bit(PG_dcache_clean, &page->flags);
+		return;
+	}
+
+	mapping = page_mapping_file(page);
 
 	if (!cache_ops_need_broadcast() &&
 	    mapping && !page_mapcount(page))
@@ -342,39 +344,6 @@ void flush_dcache_page(struct page *page)
 	}
 }
 EXPORT_SYMBOL(flush_dcache_page);
-
-/*
- * Ensure cache coherency for the kernel mapping of this page. We can
- * assume that the page is pinned via kmap.
- *
- * If the page only exists in the page cache and there are no user
- * space mappings, this is a no-op since the page was already marked
- * dirty at creation.  Otherwise, we need to flush the dirty kernel
- * cache lines directly.
- */
-void flush_kernel_dcache_page(struct page *page)
-{
-	if (cache_is_vivt() || cache_is_vipt_aliasing()) {
-		struct address_space *mapping;
-
-		mapping = page_mapping(page);
-
-		if (!mapping || mapping_mapped(mapping)) {
-			void *addr;
-
-			addr = page_address(page);
-			/*
-			 * kmap_atomic() doesn't set the page virtual
-			 * address for highmem pages, and
-			 * kunmap_atomic() takes care of cache
-			 * flushing already.
-			 */
-			if (!IS_ENABLED(CONFIG_HIGHMEM) || addr)
-				__cpuc_flush_dcache_area(addr, PAGE_SIZE);
-		}
-	}
-}
-EXPORT_SYMBOL(flush_kernel_dcache_page);
 
 /*
  * Flush an anonymous page so that users of get_user_pages()

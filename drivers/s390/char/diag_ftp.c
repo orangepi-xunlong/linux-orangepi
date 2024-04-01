@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  *    DIAGNOSE X'2C4' instruction based HMC FTP services, useable on z/VM
  *
@@ -14,6 +15,7 @@
 #include <linux/irq.h>
 #include <linux/wait.h>
 #include <linux/string.h>
+#include <asm/asm-extable.h>
 #include <asm/ctl_reg.h>
 #include <asm/diag.h>
 

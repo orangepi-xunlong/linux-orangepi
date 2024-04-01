@@ -1,19 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0+
 /*
  * Copyright 2012 Simon Arlott
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
 #include <linux/bitops.h>
@@ -44,7 +31,6 @@ struct bcm2835_timer {
 	void __iomem *compare;
 	int match_mask;
 	struct clock_event_device evt;
-	struct irqaction act;
 };
 
 static void __iomem *system_clock __read_mostly;
@@ -71,7 +57,7 @@ static irqreturn_t bcm2835_time_interrupt(int irq, void *dev_id)
 	if (readl_relaxed(timer->control) & timer->match_mask) {
 		writel_relaxed(timer->match_mask, timer->control);
 
-		event_handler = ACCESS_ONCE(timer->evt.event_handler);
+		event_handler = READ_ONCE(timer->evt.event_handler);
 		if (event_handler)
 			event_handler(&timer->evt);
 		return IRQ_HANDLED;
@@ -89,14 +75,14 @@ static int __init bcm2835_timer_init(struct device_node *node)
 
 	base = of_iomap(node, 0);
 	if (!base) {
-		pr_err("Can't remap registers");
+		pr_err("Can't remap registers\n");
 		return -ENXIO;
 	}
 
 	ret = of_property_read_u32(node, "clock-frequency", &freq);
 	if (ret) {
-		pr_err("Can't read clock-frequency");
-		return ret;
+		pr_err("Can't read clock-frequency\n");
+		goto err_iounmap;
 	}
 
 	system_clock = base + REG_COUNTER_LO;
@@ -107,14 +93,15 @@ static int __init bcm2835_timer_init(struct device_node *node)
 
 	irq = irq_of_parse_and_map(node, DEFAULT_TIMER);
 	if (irq <= 0) {
-		pr_err("Can't parse IRQ");
-		return -EINVAL;
+		pr_err("Can't parse IRQ\n");
+		ret = -EINVAL;
+		goto err_iounmap;
 	}
 
 	timer = kzalloc(sizeof(*timer), GFP_KERNEL);
 	if (!timer) {
-		pr_err("Can't allocate timer struct\n");
-		return -ENOMEM;
+		ret = -ENOMEM;
+		goto err_iounmap;
 	}
 
 	timer->control = base + REG_CONTROL;
@@ -125,15 +112,12 @@ static int __init bcm2835_timer_init(struct device_node *node)
 	timer->evt.features = CLOCK_EVT_FEAT_ONESHOT;
 	timer->evt.set_next_event = bcm2835_time_set_next_event;
 	timer->evt.cpumask = cpumask_of(0);
-	timer->act.name = node->name;
-	timer->act.flags = IRQF_TIMER | IRQF_SHARED;
-	timer->act.dev_id = timer;
-	timer->act.handler = bcm2835_time_interrupt;
 
-	ret = setup_irq(irq, &timer->act);
+	ret = request_irq(irq, bcm2835_time_interrupt, IRQF_TIMER | IRQF_SHARED,
+			  node->name, timer);
 	if (ret) {
 		pr_err("Can't set up timer IRQ\n");
-		return ret;
+		goto err_timer_free;
 	}
 
 	clockevents_config_and_register(&timer->evt, freq, 0xf, 0xffffffff);
@@ -141,6 +125,13 @@ static int __init bcm2835_timer_init(struct device_node *node)
 	pr_info("bcm2835: system timer (irq = %d)\n", irq);
 
 	return 0;
+
+err_timer_free:
+	kfree(timer);
+
+err_iounmap:
+	iounmap(base);
+	return ret;
 }
-CLOCKSOURCE_OF_DECLARE(bcm2835, "brcm,bcm2835-system-timer",
+TIMER_OF_DECLARE(bcm2835, "brcm,bcm2835-system-timer",
 			bcm2835_timer_init);

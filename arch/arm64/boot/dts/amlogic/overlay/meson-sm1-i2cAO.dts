@@ -1,0 +1,10 @@
+/dts-v1/;
+
+/ {
+    fragment@0 {
+	target-path = "/soc/bus@ff800000/i2c@5000";
+        __overlay__ {
+            status = "okay";
+        };
+    };
+};

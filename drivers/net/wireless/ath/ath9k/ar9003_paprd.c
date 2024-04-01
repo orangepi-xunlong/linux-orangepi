@@ -21,7 +21,7 @@
 void ar9003_paprd_enable(struct ath_hw *ah, bool val)
 {
 	struct ath9k_channel *chan = ah->curchan;
-	struct ar9300_eeprom *eep = &ah->eeprom.ar9300_eep;
+	bool is2ghz = IS_CHAN_2GHZ(chan);
 
 	/*
 	 * 3 bits for modalHeader5G.papdRateMaskHt20
@@ -36,17 +36,17 @@ void ar9003_paprd_enable(struct ath_hw *ah, bool val)
 	 * -- disable PAPRD for lower band 5GHz
 	 */
 
-	if (IS_CHAN_5GHZ(chan)) {
+	if (!is2ghz) {
 		if (chan->channel >= UPPER_5G_SUB_BAND_START) {
-			if (le32_to_cpu(eep->modalHeader5G.papdRateMaskHt20)
+			if (ar9003_get_paprd_rate_mask_ht20(ah, is2ghz)
 								  & BIT(30))
 				val = false;
 		} else if (chan->channel >= MID_5G_SUB_BAND_START) {
-			if (le32_to_cpu(eep->modalHeader5G.papdRateMaskHt20)
+			if (ar9003_get_paprd_rate_mask_ht20(ah, is2ghz)
 								  & BIT(29))
 				val = false;
 		} else {
-			if (le32_to_cpu(eep->modalHeader5G.papdRateMaskHt20)
+			if (ar9003_get_paprd_rate_mask_ht20(ah, is2ghz)
 								  & BIT(28))
 				val = false;
 		}
@@ -925,7 +925,7 @@ int ar9003_paprd_create_curve(struct ath_hw *ah,
 
 	memset(caldata->pa_table[chain], 0, sizeof(caldata->pa_table[chain]));
 
-	buf = kmalloc(2 * 48 * sizeof(u32), GFP_KERNEL);
+	buf = kmalloc_array(2 * 48, sizeof(u32), GFP_KERNEL);
 	if (!buf)
 		return -ENOMEM;
 

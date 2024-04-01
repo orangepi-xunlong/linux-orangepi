@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 #include <linux/highmem.h>
 #include <linux/kdebug.h>
 #include <linux/types.h>
@@ -74,7 +75,7 @@ bool is_trap_insn(uprobe_opcode_t *insn)
 		case tlt_op:
 		case tltu_op:
 		case tne_op:
-			return 1;
+			return true;
 		}
 		break;
 
@@ -86,12 +87,12 @@ bool is_trap_insn(uprobe_opcode_t *insn)
 		case tlti_op:
 		case tltiu_op:
 		case tnei_op:
-			return 1;
+			return true;
 		}
 		break;
 	}
 
-	return 0;
+	return false;
 }
 
 #define UPROBE_TRAP_NR	ULONG_MAX
@@ -111,9 +112,6 @@ int arch_uprobe_pre_xol(struct arch_uprobe *aup, struct pt_regs *regs)
 	 */
 	aup->resume_epc = regs->cp0_epc + 4;
 	if (insn_has_delay_slot((union mips_instruction) aup->insn[0])) {
-		unsigned long epc;
-
-		epc = regs->cp0_epc;
 		__compute_return_epc_for_insn(regs,
 			(union mips_instruction) aup->insn[0]);
 		aup->resume_epc = regs->cp0_epc;
@@ -175,6 +173,7 @@ int arch_uprobe_exception_notify(struct notifier_block *self,
 	case DIE_UPROBE_XOL:
 		if (uprobe_post_sstep_notifier(regs))
 			return NOTIFY_STOP;
+		break;
 	default:
 		break;
 	}
@@ -223,10 +222,10 @@ unsigned long arch_uretprobe_hijack_return_addr(
 int __weak set_swbp(struct arch_uprobe *auprobe, struct mm_struct *mm,
 	unsigned long vaddr)
 {
-	return uprobe_write_opcode(mm, vaddr, UPROBE_SWBP_INSN);
+	return uprobe_write_opcode(auprobe, mm, vaddr, UPROBE_SWBP_INSN);
 }
 
-void __weak arch_uprobe_copy_ixol(struct page *page, unsigned long vaddr,
+void arch_uprobe_copy_ixol(struct page *page, unsigned long vaddr,
 				  void *src, unsigned long len)
 {
 	unsigned long kaddr, kstart;
@@ -256,9 +255,9 @@ unsigned long uprobe_get_swbp_addr(struct pt_regs *regs)
  * See if the instruction can be emulated.
  * Returns true if instruction was emulated, false otherwise.
  *
- * For now we always emulate so this function just returns 0.
+ * For now we always emulate so this function just returns false.
  */
 bool arch_uprobe_skip_sstep(struct arch_uprobe *auprobe, struct pt_regs *regs)
 {
-	return 0;
+	return false;
 }

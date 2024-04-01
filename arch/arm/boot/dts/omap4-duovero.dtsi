@@ -1,16 +1,18 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2014 Florian Vaussard, EPFL Mobots group
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include "omap443x.dtsi"
+#include "omap4-mcpdm.dtsi"
 
 / {
 	model = "Gumstix Duovero";
 	compatible = "gumstix,omap4-duovero", "ti,omap4430", "ti,omap4";
+
+	chosen {
+		stdout-path = &uart3;
+	};
 
 	memory@80000000 {
 		device_type = "memory";
@@ -39,6 +41,7 @@
 	hsusb1_phy: hsusb1_phy {
 		compatible = "usb-nop-xceiv";
 		reset-gpios = <&gpio2 30 GPIO_ACTIVE_LOW>;	/* gpio_62 */
+		#phy-cells = <0>;
 
 		pinctrl-names = "default";
 		pinctrl-0 = <&hsusb1phy_pins>;
@@ -70,24 +73,14 @@
 			&hsusbb1_pins
 	>;
 
-	twl6040_pins: pinmux_twl6040_pins {
+	twl6040_pins: twl6040-pins {
 		pinctrl-single,pins = <
 			OMAP4_IOPAD(0x166, PIN_OUTPUT | MUX_MODE3)		/* usbb2_ulpitll_nxt.gpio_160 */
 			OMAP4_IOPAD(0x1a0, PIN_INPUT | MUX_MODE0)		/* sys_nirq2.sys_nirq2 */
 		>;
 	};
 
-	mcpdm_pins: pinmux_mcpdm_pins {
-		pinctrl-single,pins = <
-			OMAP4_IOPAD(0x106, PIN_INPUT_PULLDOWN | MUX_MODE0)	/* abe_pdm_ul_data.abe_pdm_ul_data */
-			OMAP4_IOPAD(0x108, PIN_INPUT_PULLDOWN | MUX_MODE0)	/* abe_pdm_dl_data.abe_pdm_dl_data */
-			OMAP4_IOPAD(0x10a, PIN_INPUT_PULLUP   | MUX_MODE0)	/* abe_pdm_frame.abe_pdm_frame */
-			OMAP4_IOPAD(0x10c, PIN_INPUT_PULLDOWN | MUX_MODE0)	/* abe_pdm_lb_clk.abe_pdm_lb_clk */
-			OMAP4_IOPAD(0x10e, PIN_INPUT_PULLDOWN | MUX_MODE0)	/* abe_clks.abe_clks */
-		>;
-	};
-
-	mcbsp1_pins: pinmux_mcbsp1_pins {
+	mcbsp1_pins: mcbsp1-pins {
 		pinctrl-single,pins = <
 			OMAP4_IOPAD(0x0fe, PIN_INPUT | MUX_MODE0)		/* abe_mcbsp1_clkx.abe_mcbsp1_clkx */
 			OMAP4_IOPAD(0x100, PIN_INPUT_PULLDOWN | MUX_MODE0)	/* abe_mcbsp1_dr.abe_mcbsp1_dr */
@@ -96,7 +89,7 @@
 		>;
 	};
 
-	hsusbb1_pins: pinmux_hsusbb1_pins {
+	hsusbb1_pins: hsusbb1-pins {
 		pinctrl-single,pins = <
 			OMAP4_IOPAD(0x0c2, PIN_INPUT_PULLDOWN | MUX_MODE4)	/* usbb1_ulpitll_clk.usbb1_ulpiphy_clk */
 			OMAP4_IOPAD(0x0c4, PIN_OUTPUT | MUX_MODE4)		/* usbb1_ulpitll_stp.usbb1_ulpiphy_stp */
@@ -113,34 +106,34 @@
 		>;
 	};
 
-	hsusb1phy_pins: pinmux_hsusb1phy_pins {
+	hsusb1phy_pins: hsusb1phy-pins {
 		pinctrl-single,pins = <
 			OMAP4_IOPAD(0x08c, PIN_OUTPUT | MUX_MODE3)		/* gpmc_wait1.gpio_62 */
 		>;
 	};
 
-	w2cbw0015_pins: pinmux_w2cbw0015_pins {
+	w2cbw0015_pins: w2cbw0015-pins {
 		pinctrl-single,pins = <
 			OMAP4_IOPAD(0x066, PIN_OUTPUT | MUX_MODE3)		/* gpmc_a19.gpio_43 */
 			OMAP4_IOPAD(0x07a, PIN_INPUT | MUX_MODE3)		/* gpmc_ncs3.gpio_53 */
 		>;
 	};
 
-	i2c1_pins: pinmux_i2c1_pins {
+	i2c1_pins: i2c1-pins {
 		pinctrl-single,pins = <
 			OMAP4_IOPAD(0x122, PIN_INPUT_PULLUP | MUX_MODE0)	/* i2c1_scl */
 			OMAP4_IOPAD(0x124, PIN_INPUT_PULLUP | MUX_MODE0)	/* i2c1_sda */
 		>;
 	};
 
-	i2c4_pins: pinmux_i2c4_pins {
+	i2c4_pins: i2c4-pins {
 		pinctrl-single,pins = <
 			OMAP4_IOPAD(0x12e, PIN_INPUT_PULLUP | MUX_MODE0)	/* i2c4_scl */
 			OMAP4_IOPAD(0x130, PIN_INPUT_PULLUP | MUX_MODE0)	/* i2c4_sda */
 		>;
 	};
 
-	mmc1_pins: pinmux_mmc1_pins {
+	mmc1_pins: mmc1-pins {
 		pinctrl-single,pins = <
 			OMAP4_IOPAD(0x0e2, PIN_INPUT_PULLUP | MUX_MODE0)	/* sdmmc1_clk */
 			OMAP4_IOPAD(0x0e4, PIN_INPUT_PULLUP | MUX_MODE0)	/* sdmcc1_cmd */
@@ -151,7 +144,7 @@
 		>;
 	};
 
-	mmc5_pins: pinmux_mmc5_pins {
+	mmc5_pins: mmc5-pins {
 		pinctrl-single,pins = <
 			OMAP4_IOPAD(0x148, PIN_INPUT_PULLUP | MUX_MODE0)	/* sdmmc5_clk */
 			OMAP4_IOPAD(0x14a, PIN_INPUT_PULLUP | MUX_MODE0)	/* sdmcc5_cmd */
@@ -205,16 +198,6 @@
 	status = "okay";
 };
 
-&mcpdm {
-	pinctrl-names = "default";
-	pinctrl-0 = <&mcpdm_pins>;
-
-	clocks = <&twl6040>;
-	clock-names = "pdmclk";
-
-	status = "okay";
-};
-
 &mmc1 {
 	pinctrl-names = "default";
 	pinctrl-0 = <&mmc1_pins>;
@@ -243,6 +226,7 @@
 	ti,bus-width = <4>;
 	ti,non-removable;
 	cap-power-off-card;
+	keep-power-in-suspend;
 };
 
 &twl_usb_comparator {

@@ -1,11 +1,7 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * This file contains the generic code to perform a call to the
  * pSeries LPAR hypervisor.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version
- * 2 of the License, or (at your option) any later version.
  */
 #include <linux/jump_label.h>
 #include <asm/hvcall.h>
@@ -13,17 +9,18 @@
 #include <asm/ppc_asm.h>
 #include <asm/asm-offsets.h>
 #include <asm/ptrace.h>
+#include <asm/feature-fixups.h>
 
 	.section	".text"
 	
 #ifdef CONFIG_TRACEPOINTS
 
-#ifndef HAVE_JUMP_LABEL
-	.section	".toc","aw"
+#ifndef CONFIG_JUMP_LABEL
+	.data
 
 	.globl hcall_tracepoint_refcount
 hcall_tracepoint_refcount:
-	.llong	0
+	.8byte	0
 
 	.section	".text"
 #endif
@@ -78,7 +75,7 @@ hcall_tracepoint_refcount:
 	mr	r5,BUFREG;					\
 	__HCALL_INST_POSTCALL
 
-#ifdef HAVE_JUMP_LABEL
+#ifdef CONFIG_JUMP_LABEL
 #define HCALL_BRANCH(LABEL)					\
 	ARCH_STATIC_BRANCH(LABEL, hcall_tracepoint_key)
 #else
@@ -91,7 +88,8 @@ hcall_tracepoint_refcount:
 BEGIN_FTR_SECTION;						\
 	b	1f;						\
 END_FTR_SECTION(0, 1);						\
-	ld	r12,hcall_tracepoint_refcount@toc(r2);		\
+	LOAD_REG_ADDR(r12, hcall_tracepoint_refcount) ;		\
+	ld	r12,0(r12);					\
 	std	r12,32(r1);					\
 	cmpdi	r12,0;						\
 	bne-	LABEL;						\
@@ -105,6 +103,20 @@ END_FTR_SECTION(0, 1);						\
 #define HCALL_BRANCH(LABEL)
 #endif
 
+_GLOBAL_TOC(plpar_hcall_norets_notrace)
+	HMT_MEDIUM
+
+	mfcr	r0
+	stw	r0,8(r1)
+	HVSC				/* invoke the hypervisor */
+
+	li	r4,0
+	stb	r4,PACASRR_VALID(r13)
+
+	lwz	r0,8(r1)
+	mtcrf	0xff,r0
+	blr				/* return r3 = status */
+
 _GLOBAL_TOC(plpar_hcall_norets)
 	HMT_MEDIUM
 
@@ -112,6 +124,9 @@ _GLOBAL_TOC(plpar_hcall_norets)
 	stw	r0,8(r1)
 	HCALL_BRANCH(plpar_hcall_norets_trace)
 	HVSC				/* invoke the hypervisor */
+
+	li	r4,0
+	stb	r4,PACASRR_VALID(r13)
 
 	lwz	r0,8(r1)
 	mtcrf	0xff,r0
@@ -122,6 +137,10 @@ plpar_hcall_norets_trace:
 	HCALL_INST_PRECALL(R4)
 	HVSC
 	HCALL_INST_POSTCALL_NORETS
+
+	li	r4,0
+	stb	r4,PACASRR_VALID(r13)
+
 	lwz	r0,8(r1)
 	mtcrf	0xff,r0
 	blr
@@ -152,6 +171,9 @@ _GLOBAL_TOC(plpar_hcall)
 	std	r6, 16(r12)
 	std	r7, 24(r12)
 
+	li	r4,0
+	stb	r4,PACASRR_VALID(r13)
+
 	lwz	r0,8(r1)
 	mtcrf	0xff,r0
 
@@ -180,6 +202,9 @@ plpar_hcall_trace:
 	std	r7,24(r12)
 
 	HCALL_INST_POSTCALL(r12)
+
+	li	r4,0
+	stb	r4,PACASRR_VALID(r13)
 
 	lwz	r0,8(r1)
 	mtcrf	0xff,r0
@@ -215,6 +240,9 @@ _GLOBAL(plpar_hcall_raw)
 	std	r5,  8(r12)
 	std	r6, 16(r12)
 	std	r7, 24(r12)
+
+	li	r4,0
+	stb	r4,PACASRR_VALID(r13)
 
 	lwz	r0,8(r1)
 	mtcrf	0xff,r0
@@ -255,6 +283,9 @@ _GLOBAL_TOC(plpar_hcall9)
 	std	r11,56(r12)
 	std	r0, 64(r12)
 
+	li	r4,0
+	stb	r4,PACASRR_VALID(r13)
+
 	lwz	r0,8(r1)
 	mtcrf	0xff,r0
 
@@ -292,6 +323,9 @@ plpar_hcall9_trace:
 	std	r0,64(r12)
 
 	HCALL_INST_POSTCALL(r12)
+
+	li	r4,0
+	stb	r4,PACASRR_VALID(r13)
 
 	lwz	r0,8(r1)
 	mtcrf	0xff,r0
@@ -331,6 +365,9 @@ _GLOBAL(plpar_hcall9_raw)
 	std	r10,48(r12)
 	std	r11,56(r12)
 	std	r0, 64(r12)
+
+	li	r4,0
+	stb	r4,PACASRR_VALID(r13)
 
 	lwz	r0,8(r1)
 	mtcrf	0xff,r0

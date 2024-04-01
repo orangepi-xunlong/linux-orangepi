@@ -10,7 +10,7 @@
  * Layout is based on skeletonfb.c by James Simmons and Geert Uytterhoeven.
  *
  * This work was made possible by help and equipment support from E-Ink
- * Corporation. http://www.eink.com/
+ * Corporation. https://www.eink.com/
  *
  * This driver is written to be used with the Metronome display controller.
  * It is intended to be architecture independent. A board specific driver
@@ -187,7 +187,7 @@ static int load_waveform(u8 *mem, size_t size, int m, int t,
 		epd_frame_table[par->dt].wfm_size = user_wfm_size;
 
 	if (size != epd_frame_table[par->dt].wfm_size) {
-		dev_err(dev, "Error: unexpected size %Zd != %d\n", size,
+		dev_err(dev, "Error: unexpected size %zd != %d\n", size,
 					epd_frame_table[par->dt].wfm_size);
 		return -EINVAL;
 	}
@@ -233,7 +233,7 @@ static int load_waveform(u8 *mem, size_t size, int m, int t,
 
 	/* check temperature range table checksum */
 	cksum_idx = sizeof(*wfm_hdr) + wfm_hdr->trc + 1;
-	if (cksum_idx > size)
+	if (cksum_idx >= size)
 		return -EINVAL;
 	cksum = calc_cksum(sizeof(*wfm_hdr), cksum_idx, mem);
 	if (cksum != mem[cksum_idx]) {
@@ -245,7 +245,7 @@ static int load_waveform(u8 *mem, size_t size, int m, int t,
 	/* check waveform mode table address checksum */
 	wmta = get_unaligned_le32(wfm_hdr->wmta) & 0x00FFFFFF;
 	cksum_idx = wmta + m*4 + 3;
-	if (cksum_idx > size)
+	if (cksum_idx >= size)
 		return -EINVAL;
 	cksum = calc_cksum(cksum_idx - 3, cksum_idx, mem);
 	if (cksum != mem[cksum_idx]) {
@@ -257,7 +257,7 @@ static int load_waveform(u8 *mem, size_t size, int m, int t,
 	/* check waveform temperature table address checksum */
 	tta = get_unaligned_le32(mem + wmta + m * 4) & 0x00FFFFFF;
 	cksum_idx = tta + trn*4 + 3;
-	if (cksum_idx > size)
+	if (cksum_idx >= size)
 		return -EINVAL;
 	cksum = calc_cksum(cksum_idx - 3, cksum_idx, mem);
 	if (cksum != mem[cksum_idx]) {
@@ -270,7 +270,7 @@ static int load_waveform(u8 *mem, size_t size, int m, int t,
 	metromem buffer. this does runlength decoding of the waveform */
 	wfm_idx = get_unaligned_le32(mem + tta + trn * 4) & 0x00FFFFFF;
 	owfm_idx = wfm_idx;
-	if (wfm_idx > size)
+	if (wfm_idx >= size)
 		return -EINVAL;
 	while (wfm_idx < size) {
 		unsigned char rl;
@@ -292,7 +292,7 @@ static int load_waveform(u8 *mem, size_t size, int m, int t,
 	}
 
 	cksum_idx = wfm_idx;
-	if (cksum_idx > size)
+	if (cksum_idx >= size)
 		return -EINVAL;
 	cksum = calc_cksum(owfm_idx, cksum_idx, mem);
 	if (cksum != mem[cksum_idx]) {
@@ -465,20 +465,18 @@ static u16 metronomefb_dpy_update_page(struct metronomefb_par *par, int index)
 }
 
 /* this is called back from the deferred io workqueue */
-static void metronomefb_dpy_deferred_io(struct fb_info *info,
-				struct list_head *pagelist)
+static void metronomefb_dpy_deferred_io(struct fb_info *info, struct list_head *pagereflist)
 {
 	u16 cksum;
-	struct page *cur;
-	struct fb_deferred_io *fbdefio = info->fbdefio;
+	struct fb_deferred_io_pageref *pageref;
 	struct metronomefb_par *par = info->par;
 
 	/* walk the written page list and swizzle the data */
-	list_for_each_entry(cur, &fbdefio->pagelist, lru) {
-		cksum = metronomefb_dpy_update_page(par,
-					(cur->index << PAGE_SHIFT));
-		par->metromem_img_csum -= par->csum_table[cur->index];
-		par->csum_table[cur->index] = cksum;
+	list_for_each_entry(pageref, pagereflist, list) {
+		unsigned long pgoffset = pageref->offset >> PAGE_SHIFT;
+		cksum = metronomefb_dpy_update_page(par, pageref->offset);
+		par->metromem_img_csum -= par->csum_table[pgoffset];
+		par->csum_table[pgoffset] = cksum;
 		par->metromem_img_csum += cksum;
 	}
 
@@ -558,17 +556,19 @@ static ssize_t metronomefb_write(struct fb_info *info, const char __user *buf,
 	return (err) ? err : count;
 }
 
-static struct fb_ops metronomefb_ops = {
+static const struct fb_ops metronomefb_ops = {
 	.owner		= THIS_MODULE,
 	.fb_write	= metronomefb_write,
 	.fb_fillrect	= metronomefb_fillrect,
 	.fb_copyarea	= metronomefb_copyarea,
 	.fb_imageblit	= metronomefb_imageblit,
+	.fb_mmap	= fb_deferred_io_mmap,
 };
 
 static struct fb_deferred_io metronomefb_defio = {
-	.delay		= HZ,
-	.deferred_io	= metronomefb_dpy_deferred_io,
+	.delay			= HZ,
+	.sort_pagereflist	= true,
+	.deferred_io		= metronomefb_dpy_deferred_io,
 };
 
 static int metronomefb_probe(struct platform_device *dev)

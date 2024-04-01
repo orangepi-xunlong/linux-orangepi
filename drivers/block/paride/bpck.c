@@ -28,6 +28,7 @@
 
 #undef r2
 #undef w2
+#undef PC
 
 #define PC			pi->private
 #define r2()			(PC=(in_p(2) & 0xff))
@@ -347,7 +348,7 @@ static int bpck_test_proto( PIA *pi, char * scratch, int verbose )
 
 static void bpck_read_eeprom ( PIA *pi, char * buf )
 
-{       int i,j,k,n,p,v,f, om, od;
+{       int i, j, k, p, v, f, om, od;
 
 	bpck_force_spp(pi);
 
@@ -356,7 +357,6 @@ static void bpck_read_eeprom ( PIA *pi, char * buf )
 
 	bpck_connect(pi);
 	
-	n = 0;
 	WR(4,0);
 	for (i=0;i<64;i++) {
 	    WR(6,8);  

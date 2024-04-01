@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _ASM_UACCESS_H
 #define _ASM_UACCESS_H
 
@@ -5,50 +6,20 @@
  * User space memory access functions
  */
 
-#ifdef __KERNEL__
-#include <linux/errno.h>
 #include <linux/compiler.h>
 #include <linux/string.h>
-#include <linux/thread_info.h>
 #include <asm/asi.h>
 #include <asm/spitfire.h>
-#include <asm-generic/uaccess-unaligned.h>
-#include <asm/extable_64.h>
-#endif
-
-#ifndef __ASSEMBLY__
 
 #include <asm/processor.h>
+#include <asm-generic/access_ok.h>
 
 /*
  * Sparc64 is segmented, though more like the M68K than the I386.
  * We use the secondary ASI to address user memory, which references a
  * completely different VM map, thus there is zero chance of the user
  * doing something queer and tricking us into poking kernel memory.
- *
- * What is left here is basically what is needed for the other parts of
- * the kernel that expect to be able to manipulate, erum, "segments".
- * Or perhaps more properly, permissions.
- *
- * "For historical reasons, these macros are grossly misnamed." -Linus
  */
-
-#define KERNEL_DS   ((mm_segment_t) { ASI_P })
-#define USER_DS     ((mm_segment_t) { ASI_AIUS })	/* har har har */
-
-#define VERIFY_READ	0
-#define VERIFY_WRITE	1
-
-#define get_fs() ((mm_segment_t){(current_thread_info()->current_ds)})
-#define get_ds() (KERNEL_DS)
-
-#define segment_eq(a, b)  ((a).seg == (b).seg)
-
-#define set_fs(val)								\
-do {										\
-	current_thread_info()->current_ds = (val).seg;				\
-	__asm__ __volatile__ ("wr %%g0, %0, %%asi" : : "r" ((val).seg));	\
-} while(0)
 
 /*
  * Test whether a block of memory is a valid user space address.
@@ -71,16 +42,6 @@ static inline bool __chk_range_not_ok(unsigned long addr, unsigned long size, un
 	__chk_user_ptr(addr);                                           \
 	__chk_range_not_ok((unsigned long __force)(addr), size, limit); \
 })
-
-static inline int __access_ok(const void __user * addr, unsigned long size)
-{
-	return 1;
-}
-
-static inline int access_ok(int type, const void __user * addr, unsigned long size)
-{
-	return 1;
-}
 
 void __retl_efault(void);
 
@@ -110,6 +71,42 @@ void __retl_efault(void);
 
 struct __large_struct { unsigned long buf[100]; };
 #define __m(x) ((struct __large_struct *)(x))
+
+#define __put_kernel_nofault(dst, src, type, label)			\
+do {									\
+	type *addr = (type __force *)(dst);				\
+	type data = *(type *)src;					\
+	register int __pu_ret;						\
+	switch (sizeof(type)) {						\
+	case 1: __put_kernel_asm(data, b, addr, __pu_ret); break;	\
+	case 2: __put_kernel_asm(data, h, addr, __pu_ret); break;	\
+	case 4: __put_kernel_asm(data, w, addr, __pu_ret); break;	\
+	case 8: __put_kernel_asm(data, x, addr, __pu_ret); break;	\
+	default: __pu_ret = __put_user_bad(); break;			\
+	}								\
+	if (__pu_ret)							\
+		goto label;						\
+} while (0)
+
+#define __put_kernel_asm(x, size, addr, ret)				\
+__asm__ __volatile__(							\
+		"/* Put kernel asm, inline. */\n"			\
+	"1:\t"	"st"#size " %1, [%2]\n\t"				\
+		"clr	%0\n"						\
+	"2:\n\n\t"							\
+		".section .fixup,#alloc,#execinstr\n\t"			\
+		".align	4\n"						\
+	"3:\n\t"							\
+		"sethi	%%hi(2b), %0\n\t"				\
+		"jmpl	%0 + %%lo(2b), %%g0\n\t"			\
+		" mov	%3, %0\n\n\t"					\
+		".previous\n\t"						\
+		".section __ex_table,\"a\"\n\t"				\
+		".align	4\n\t"						\
+		".word	1b, 3b\n\t"					\
+		".previous\n\n\t"					\
+	       : "=r" (ret) : "r" (x), "r" (__m(addr)),			\
+		 "i" (-EFAULT))
 
 #define __put_user_nocheck(data, addr, size) ({			\
 	register int __pu_ret;					\
@@ -144,6 +141,46 @@ __asm__ __volatile__(							\
 		 "i" (-EFAULT))
 
 int __put_user_bad(void);
+
+#define __get_kernel_nofault(dst, src, type, label)			     \
+do {									     \
+	type *addr = (type __force *)(src);		     		     \
+	register int __gu_ret;						     \
+	register unsigned long __gu_val;				     \
+	switch (sizeof(type)) {						     \
+		case 1: __get_kernel_asm(__gu_val, ub, addr, __gu_ret); break; \
+		case 2: __get_kernel_asm(__gu_val, uh, addr, __gu_ret); break; \
+		case 4: __get_kernel_asm(__gu_val, uw, addr, __gu_ret); break; \
+		case 8: __get_kernel_asm(__gu_val, x, addr, __gu_ret); break;  \
+		default:						     \
+			__gu_val = 0;					     \
+			__gu_ret = __get_user_bad();			     \
+			break;						     \
+	} 								     \
+	if (__gu_ret)							     \
+		goto label;						     \
+	*(type *)dst = (__force type) __gu_val;				     \
+} while (0)
+#define __get_kernel_asm(x, size, addr, ret)				\
+__asm__ __volatile__(							\
+		"/* Get kernel asm, inline. */\n"			\
+	"1:\t"	"ld"#size " [%2], %1\n\t"				\
+		"clr	%0\n"						\
+	"2:\n\n\t"							\
+		".section .fixup,#alloc,#execinstr\n\t"			\
+		".align	4\n"						\
+	"3:\n\t"							\
+		"sethi	%%hi(2b), %0\n\t"				\
+		"clr	%1\n\t"						\
+		"jmpl	%0 + %%lo(2b), %%g0\n\t"			\
+		" mov	%3, %0\n\n\t"					\
+		".previous\n\t"						\
+		".section __ex_table,\"a\"\n\t"				\
+		".align	4\n\t"						\
+		".word	1b, 3b\n\n\t"					\
+		".previous\n\t"						\
+	       : "=r" (ret), "=r" (x) : "r" (__m(addr)),		\
+		 "i" (-EFAULT))
 
 #define __get_user_nocheck(data, addr, size, type) ({			     \
 	register int __gu_ret;						     \
@@ -185,55 +222,29 @@ __asm__ __volatile__(							\
 
 int __get_user_bad(void);
 
-unsigned long __must_check ___copy_from_user(void *to,
+unsigned long __must_check raw_copy_from_user(void *to,
 					     const void __user *from,
 					     unsigned long size);
-static inline unsigned long __must_check
-copy_from_user(void *to, const void __user *from, unsigned long size)
-{
-	check_object_size(to, size, false);
 
-	return ___copy_from_user(to, from, size);
-}
-#define __copy_from_user copy_from_user
-
-unsigned long __must_check ___copy_to_user(void __user *to,
+unsigned long __must_check raw_copy_to_user(void __user *to,
 					   const void *from,
 					   unsigned long size);
-static inline unsigned long __must_check
-copy_to_user(void __user *to, const void *from, unsigned long size)
-{
-	check_object_size(from, size, true);
+#define INLINE_COPY_FROM_USER
+#define INLINE_COPY_TO_USER
 
-	return ___copy_to_user(to, from, size);
-}
-#define __copy_to_user copy_to_user
-
-unsigned long __must_check ___copy_in_user(void __user *to,
+unsigned long __must_check raw_copy_in_user(void __user *to,
 					   const void __user *from,
 					   unsigned long size);
-static inline unsigned long __must_check
-copy_in_user(void __user *to, void __user *from, unsigned long size)
-{
-	return ___copy_in_user(to, from, size);
-}
-#define __copy_in_user copy_in_user
 
 unsigned long __must_check __clear_user(void __user *, unsigned long);
 
 #define clear_user __clear_user
 
-__must_check long strlen_user(const char __user *str);
 __must_check long strnlen_user(const char __user *str, long n);
-
-#define __copy_to_user_inatomic __copy_to_user
-#define __copy_from_user_inatomic __copy_from_user
 
 struct pt_regs;
 unsigned long compute_effective_address(struct pt_regs *,
 					unsigned int insn,
 					unsigned int rd);
-
-#endif  /* __ASSEMBLY__ */
 
 #endif /* _ASM_UACCESS_H */

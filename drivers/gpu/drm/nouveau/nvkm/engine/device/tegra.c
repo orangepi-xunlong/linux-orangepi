@@ -32,46 +32,48 @@ nvkm_device_tegra_power_up(struct nvkm_device_tegra *tdev)
 {
 	int ret;
 
-	ret = regulator_enable(tdev->vdd);
-	if (ret)
-		goto err_power;
+	if (tdev->vdd) {
+		ret = regulator_enable(tdev->vdd);
+		if (ret)
+			goto err_power;
+	}
 
 	ret = clk_prepare_enable(tdev->clk);
 	if (ret)
 		goto err_clk;
-	if (tdev->clk_ref) {
-		ret = clk_prepare_enable(tdev->clk_ref);
-		if (ret)
-			goto err_clk_ref;
-	}
+	ret = clk_prepare_enable(tdev->clk_ref);
+	if (ret)
+		goto err_clk_ref;
 	ret = clk_prepare_enable(tdev->clk_pwr);
 	if (ret)
 		goto err_clk_pwr;
 	clk_set_rate(tdev->clk_pwr, 204000000);
 	udelay(10);
 
-	reset_control_assert(tdev->rst);
-	udelay(10);
+	if (!tdev->pdev->dev.pm_domain) {
+		reset_control_assert(tdev->rst);
+		udelay(10);
 
-	ret = tegra_powergate_remove_clamping(TEGRA_POWERGATE_3D);
-	if (ret)
-		goto err_clamp;
-	udelay(10);
+		ret = tegra_powergate_remove_clamping(TEGRA_POWERGATE_3D);
+		if (ret)
+			goto err_clamp;
+		udelay(10);
 
-	reset_control_deassert(tdev->rst);
-	udelay(10);
+		reset_control_deassert(tdev->rst);
+		udelay(10);
+	}
 
 	return 0;
 
 err_clamp:
 	clk_disable_unprepare(tdev->clk_pwr);
 err_clk_pwr:
-	if (tdev->clk_ref)
-		clk_disable_unprepare(tdev->clk_ref);
+	clk_disable_unprepare(tdev->clk_ref);
 err_clk_ref:
 	clk_disable_unprepare(tdev->clk);
 err_clk:
-	regulator_disable(tdev->vdd);
+	if (tdev->vdd)
+		regulator_disable(tdev->vdd);
 err_power:
 	return ret;
 }
@@ -79,16 +81,20 @@ err_power:
 static int
 nvkm_device_tegra_power_down(struct nvkm_device_tegra *tdev)
 {
-	reset_control_assert(tdev->rst);
-	udelay(10);
+	int ret;
 
 	clk_disable_unprepare(tdev->clk_pwr);
-	if (tdev->clk_ref)
-		clk_disable_unprepare(tdev->clk_ref);
+	clk_disable_unprepare(tdev->clk_ref);
 	clk_disable_unprepare(tdev->clk);
 	udelay(10);
 
-	return regulator_disable(tdev->vdd);
+	if (tdev->vdd) {
+		ret = regulator_disable(tdev->vdd);
+		if (ret)
+			return ret;
+	}
+
+	return 0;
 }
 
 static void
@@ -113,9 +119,9 @@ nvkm_device_tegra_probe_iommu(struct nvkm_device_tegra *tdev)
 
 	mutex_init(&tdev->iommu.mutex);
 
-	if (iommu_present(&platform_bus_type)) {
+	if (device_iommu_mapped(dev)) {
 		tdev->iommu.domain = iommu_domain_alloc(&platform_bus_type);
-		if (IS_ERR(tdev->iommu.domain))
+		if (!tdev->iommu.domain)
 			goto error;
 
 		/*
@@ -123,7 +129,7 @@ nvkm_device_tegra_probe_iommu(struct nvkm_device_tegra *tdev)
 		 * or equal to the system's PAGE_SIZE, with a preference if
 		 * both are equal.
 		 */
-		pgsize_bitmap = tdev->iommu.domain->ops->pgsize_bitmap;
+		pgsize_bitmap = tdev->iommu.domain->pgsize_bitmap;
 		if (pgsize_bitmap & PAGE_SIZE) {
 			tdev->iommu.pgshift = PAGE_SHIFT;
 		} else {
@@ -139,7 +145,7 @@ nvkm_device_tegra_probe_iommu(struct nvkm_device_tegra *tdev)
 		if (ret)
 			goto free_domain;
 
-		ret = nvkm_mm_init(&tdev->iommu.mm, 0,
+		ret = nvkm_mm_init(&tdev->iommu.mm, 0, 0,
 				   (1ULL << tdev->func->iommu_bit) >>
 				   tdev->iommu.pgshift, 1);
 		if (ret)
@@ -219,7 +225,7 @@ nvkm_device_tegra_fini(struct nvkm_device *device, bool suspend)
 	if (tdev->irq) {
 		free_irq(tdev->irq, tdev);
 		tdev->irq = 0;
-	};
+	}
 }
 
 static int
@@ -269,6 +275,7 @@ nvkm_device_tegra_new(const struct nvkm_device_tegra_func *func,
 		      struct nvkm_device **pdevice)
 {
 	struct nvkm_device_tegra *tdev;
+	unsigned long rate;
 	int ret;
 
 	if (!(tdev = kzalloc(sizeof(*tdev), GFP_KERNEL)))
@@ -277,10 +284,12 @@ nvkm_device_tegra_new(const struct nvkm_device_tegra_func *func,
 	tdev->func = func;
 	tdev->pdev = pdev;
 
-	tdev->vdd = devm_regulator_get(&pdev->dev, "vdd");
-	if (IS_ERR(tdev->vdd)) {
-		ret = PTR_ERR(tdev->vdd);
-		goto free;
+	if (func->require_vdd) {
+		tdev->vdd = devm_regulator_get(&pdev->dev, "vdd");
+		if (IS_ERR(tdev->vdd)) {
+			ret = PTR_ERR(tdev->vdd);
+			goto free;
+		}
 	}
 
 	tdev->rst = devm_reset_control_get(&pdev->dev, "gpu");
@@ -293,6 +302,17 @@ nvkm_device_tegra_new(const struct nvkm_device_tegra_func *func,
 	if (IS_ERR(tdev->clk)) {
 		ret = PTR_ERR(tdev->clk);
 		goto free;
+	}
+
+	rate = clk_get_rate(tdev->clk);
+	if (rate == 0) {
+		ret = clk_set_rate(tdev->clk, ULONG_MAX);
+		if (ret < 0)
+			goto free;
+
+		rate = clk_get_rate(tdev->clk);
+
+		dev_dbg(&pdev->dev, "GPU clock set to %lu\n", rate);
 	}
 
 	if (func->require_ref_clk)
@@ -310,8 +330,6 @@ nvkm_device_tegra_new(const struct nvkm_device_tegra_func *func,
 
 	/**
 	 * The IOMMU bit defines the upper limit of the GPU-addressable space.
-	 * This will be refined in nouveau_ttm_init but we need to do it early
-	 * for instmem to behave properly
 	 */
 	ret = dma_set_mask(&pdev->dev, DMA_BIT_MASK(tdev->func->iommu_bit));
 	if (ret)

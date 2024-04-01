@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /***************************************************************************/
 
 /*
@@ -12,6 +13,7 @@
 
 /***************************************************************************/
 
+#include <linux/clkdev.h>
 #include <linux/kernel.h>
 #include <linux/param.h>
 #include <linux/init.h>
@@ -26,31 +28,21 @@
 
 DEFINE_CLK(pll, "pll.0", MCF_CLK);
 DEFINE_CLK(sys, "sys.0", MCF_BUSCLK);
-DEFINE_CLK(mcfpit0, "mcfpit.0", MCF_CLK);
-DEFINE_CLK(mcfpit1, "mcfpit.1", MCF_CLK);
-DEFINE_CLK(mcfpit2, "mcfpit.2", MCF_CLK);
-DEFINE_CLK(mcfpit3, "mcfpit.3", MCF_CLK);
-DEFINE_CLK(mcfuart0, "mcfuart.0", MCF_BUSCLK);
-DEFINE_CLK(mcfuart1, "mcfuart.1", MCF_BUSCLK);
-DEFINE_CLK(mcfuart2, "mcfuart.2", MCF_BUSCLK);
-DEFINE_CLK(mcfqspi0, "mcfqspi.0", MCF_BUSCLK);
-DEFINE_CLK(fec0, "fec.0", MCF_BUSCLK);
-DEFINE_CLK(fec1, "fec.1", MCF_BUSCLK);
 
-struct clk *mcf_clks[] = {
-	&clk_pll,
-	&clk_sys,
-	&clk_mcfpit0,
-	&clk_mcfpit1,
-	&clk_mcfpit2,
-	&clk_mcfpit3,
-	&clk_mcfuart0,
-	&clk_mcfuart1,
-	&clk_mcfuart2,
-	&clk_mcfqspi0,
-	&clk_fec0,
-	&clk_fec1,
-	NULL
+static struct clk_lookup m527x_clk_lookup[] = {
+	CLKDEV_INIT(NULL, "pll.0", &clk_pll),
+	CLKDEV_INIT(NULL, "sys.0", &clk_sys),
+	CLKDEV_INIT("mcfpit.0", NULL, &clk_pll),
+	CLKDEV_INIT("mcfpit.1", NULL, &clk_pll),
+	CLKDEV_INIT("mcfpit.2", NULL, &clk_pll),
+	CLKDEV_INIT("mcfpit.3", NULL, &clk_pll),
+	CLKDEV_INIT("mcfuart.0", NULL, &clk_sys),
+	CLKDEV_INIT("mcfuart.1", NULL, &clk_sys),
+	CLKDEV_INIT("mcfuart.2", NULL, &clk_sys),
+	CLKDEV_INIT("mcfqspi.0", NULL, &clk_sys),
+	CLKDEV_INIT("fec.0", NULL, &clk_sys),
+	CLKDEV_INIT("fec.1", NULL, &clk_sys),
+	CLKDEV_INIT("imx1-i2c.0", NULL, &clk_sys),
 };
 
 /***************************************************************************/
@@ -72,6 +64,31 @@ static void __init m527x_qspi_init(void)
 	writew(0x003e, MCFGPIO_PAR_QSPI);
 #endif
 #endif /* IS_ENABLED(CONFIG_SPI_COLDFIRE_QSPI) */
+}
+
+/***************************************************************************/
+
+static void __init m527x_i2c_init(void)
+{
+#if IS_ENABLED(CONFIG_I2C_IMX)
+#if defined(CONFIG_M5271)
+	u8 par;
+
+	/* setup Port FECI2C Pin Assignment Register for I2C */
+	/*  set PAR_SCL to SCL and PAR_SDA to SDA */
+	par = readb(MCFGPIO_PAR_FECI2C);
+	par |= 0x0f;
+	writeb(par, MCFGPIO_PAR_FECI2C);
+#elif defined(CONFIG_M5275)
+	u16 par;
+
+	/* setup Port FECI2C Pin Assignment Register for I2C */
+	/*  set PAR_SCL to SCL and PAR_SDA to SDA */
+	par = readw(MCFGPIO_PAR_FECI2C);
+	par |= 0x0f;
+	writew(par, MCFGPIO_PAR_FECI2C);
+#endif
+#endif /* IS_ENABLED(CONFIG_I2C_IMX) */
 }
 
 /***************************************************************************/
@@ -122,6 +139,8 @@ void __init config_BSP(char *commandp, int size)
 	m527x_uarts_init();
 	m527x_fec_init();
 	m527x_qspi_init();
+	m527x_i2c_init();
+	clkdev_add_table(m527x_clk_lookup, ARRAY_SIZE(m527x_clk_lookup));
 }
 
 /***************************************************************************/

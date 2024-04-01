@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
  /*
   * iio/adc/max1363.c
   * Copyright (C) 2008-2010 Jonathan Cameron
@@ -9,10 +10,6 @@
   * Copyright (C) 2000 Russell King
   *
   * Driver for max1363 and similar chips.
-  *
-  * This program is free software; you can redistribute it and/or modify
-  * it under the terms of the GNU General Public License version 2 as
-  * published by the Free Software Foundation.
   */
 
 #include <linux/interrupt.h>
@@ -25,14 +22,13 @@
 #include <linux/slab.h>
 #include <linux/err.h>
 #include <linux/module.h>
-#include <linux/of.h>
-#include <linux/of_device.h>
+#include <linux/mod_devicetable.h>
+#include <linux/property.h>
 
 #include <linux/iio/iio.h>
 #include <linux/iio/sysfs.h>
 #include <linux/iio/events.h>
 #include <linux/iio/buffer.h>
-#include <linux/iio/driver.h>
 #include <linux/iio/kfifo_buf.h>
 #include <linux/iio/trigger_consumer.h>
 #include <linux/iio/triggered_buffer.h>
@@ -153,6 +149,7 @@ struct max1363_chip_info {
  * @current_mode:	the scan mode of this chip
  * @requestedmask:	a valid requested set of channels
  * @reg:		supply regulator
+ * @lock:		lock to ensure state is consistent
  * @monitor_on:		whether monitor mode is enabled
  * @monitor_speed:	parameter corresponding to device monitor speed setting
  * @mask_high:		bitmask for enabled high thresholds
@@ -172,6 +169,7 @@ struct max1363_state {
 	const struct max1363_mode	*current_mode;
 	u32				requestedmask;
 	struct regulator		*reg;
+	struct mutex			lock;
 
 	/* Using monitor modes and buffer at the same time is
 	   currently not supported */
@@ -367,7 +365,11 @@ static int max1363_read_single_chan(struct iio_dev *indio_dev,
 	struct max1363_state *st = iio_priv(indio_dev);
 	struct i2c_client *client = st->client;
 
-	mutex_lock(&indio_dev->mlock);
+	ret = iio_device_claim_direct_mode(indio_dev);
+	if (ret)
+		return ret;
+	mutex_lock(&st->lock);
+
 	/*
 	 * If monitor mode is enabled, the method for reading a single
 	 * channel will have to be rather different and has not yet
@@ -375,7 +377,7 @@ static int max1363_read_single_chan(struct iio_dev *indio_dev,
 	 *
 	 * Also, cannot read directly if buffered capture enabled.
 	 */
-	if (st->monitor_on || iio_buffer_enabled(indio_dev)) {
+	if (st->monitor_on) {
 		ret = -EBUSY;
 		goto error_ret;
 	}
@@ -407,8 +409,10 @@ static int max1363_read_single_chan(struct iio_dev *indio_dev,
 		data = rxbuf[0];
 	}
 	*val = data;
+
 error_ret:
-	mutex_unlock(&indio_dev->mlock);
+	mutex_unlock(&st->lock);
+	iio_device_release_direct_mode(indio_dev);
 	return ret;
 
 }
@@ -708,9 +712,9 @@ static ssize_t max1363_monitor_store_freq(struct device *dev,
 	if (!found)
 		return -EINVAL;
 
-	mutex_lock(&indio_dev->mlock);
+	mutex_lock(&st->lock);
 	st->monitor_speed = i;
-	mutex_unlock(&indio_dev->mlock);
+	mutex_unlock(&st->lock);
 
 	return 0;
 }
@@ -813,12 +817,12 @@ static int max1363_read_event_config(struct iio_dev *indio_dev,
 	int val;
 	int number = chan->channel;
 
-	mutex_lock(&indio_dev->mlock);
+	mutex_lock(&st->lock);
 	if (dir == IIO_EV_DIR_FALLING)
 		val = (1 << number) & st->mask_low;
 	else
 		val = (1 << number) & st->mask_high;
-	mutex_unlock(&indio_dev->mlock);
+	mutex_unlock(&st->lock);
 
 	return val;
 }
@@ -965,7 +969,11 @@ static int max1363_write_event_config(struct iio_dev *indio_dev,
 	u16 unifiedmask;
 	int number = chan->channel;
 
-	mutex_lock(&indio_dev->mlock);
+	ret = iio_device_claim_direct_mode(indio_dev);
+	if (ret)
+		return ret;
+	mutex_lock(&st->lock);
+
 	unifiedmask = st->mask_low | st->mask_high;
 	if (dir == IIO_EV_DIR_FALLING) {
 
@@ -992,7 +1000,8 @@ static int max1363_write_event_config(struct iio_dev *indio_dev,
 
 	max1363_monitor_mode_update(st, !!(st->mask_high | st->mask_low));
 error_ret:
-	mutex_unlock(&indio_dev->mlock);
+	mutex_unlock(&st->lock);
+	iio_device_release_direct_mode(indio_dev);
 
 	return ret;
 }
@@ -1007,7 +1016,7 @@ static struct attribute *max1363_event_attributes[] = {
 	NULL,
 };
 
-static struct attribute_group max1363_event_attribute_group = {
+static const struct attribute_group max1363_event_attribute_group = {
 	.attrs = max1363_event_attributes,
 };
 
@@ -1029,7 +1038,6 @@ static int max1363_update_scan_mode(struct iio_dev *indio_dev,
 
 static const struct iio_info max1238_info = {
 	.read_raw = &max1363_read_raw,
-	.driver_module = THIS_MODULE,
 	.update_scan_mode = &max1363_update_scan_mode,
 };
 
@@ -1040,7 +1048,6 @@ static const struct iio_info max1363_info = {
 	.write_event_config = &max1363_write_event_config,
 	.read_raw = &max1363_read_raw,
 	.update_scan_mode = &max1363_update_scan_mode,
-	.driver_module = THIS_MODULE,
 	.event_attrs = &max1363_event_attribute_group,
 };
 
@@ -1455,8 +1462,10 @@ static int max1363_alloc_scan_masks(struct iio_dev *indio_dev)
 	int i;
 
 	masks = devm_kzalloc(&indio_dev->dev,
-			BITS_TO_LONGS(MAX1363_MAX_CHANNELS) * sizeof(long) *
-			(st->chip_info->num_modes + 1), GFP_KERNEL);
+			array3_size(BITS_TO_LONGS(MAX1363_MAX_CHANNELS),
+				    sizeof(long),
+				    st->chip_info->num_modes + 1),
+			GFP_KERNEL);
 	if (!masks)
 		return -ENOMEM;
 
@@ -1519,8 +1528,6 @@ done:
 	return IRQ_HANDLED;
 }
 
-#ifdef CONFIG_OF
-
 #define MAX1363_COMPATIBLE(of_compatible, cfg) {		\
 			.compatible = of_compatible,		\
 			.data = &max1363_chip_info_tbl[cfg],	\
@@ -1567,7 +1574,12 @@ static const struct of_device_id max1363_of_match[] = {
 	MAX1363_COMPATIBLE("maxim,max11647", max11647),
 	{ /* sentinel */ }
 };
-#endif
+MODULE_DEVICE_TABLE(of, max1363_of_match);
+
+static void max1363_reg_disable(void *reg)
+{
+	regulator_disable(reg);
+}
 
 static int max1363_probe(struct i2c_client *client,
 			 const struct i2c_device_id *id)
@@ -1576,38 +1588,29 @@ static int max1363_probe(struct i2c_client *client,
 	struct max1363_state *st;
 	struct iio_dev *indio_dev;
 	struct regulator *vref;
-	const struct of_device_id *match;
 
 	indio_dev = devm_iio_device_alloc(&client->dev,
 					  sizeof(struct max1363_state));
 	if (!indio_dev)
 		return -ENOMEM;
 
-	indio_dev->dev.of_node = client->dev.of_node;
-	ret = iio_map_array_register(indio_dev, client->dev.platform_data);
-	if (ret < 0)
-		return ret;
-
 	st = iio_priv(indio_dev);
 
+	mutex_init(&st->lock);
 	st->reg = devm_regulator_get(&client->dev, "vcc");
-	if (IS_ERR(st->reg)) {
-		ret = PTR_ERR(st->reg);
-		goto error_unregister_map;
-	}
+	if (IS_ERR(st->reg))
+		return PTR_ERR(st->reg);
 
 	ret = regulator_enable(st->reg);
 	if (ret)
-		goto error_unregister_map;
+		return ret;
 
-	/* this is only used for device removal purposes */
-	i2c_set_clientdata(client, indio_dev);
+	ret = devm_add_action_or_reset(&client->dev, max1363_reg_disable, st->reg);
+	if (ret)
+		return ret;
 
-	match = of_match_device(of_match_ptr(max1363_of_match),
-				&client->dev);
-	if (match)
-		st->chip_info = of_device_get_match_data(&client->dev);
-	else
+	st->chip_info = device_get_match_data(&client->dev);
+	if (!st->chip_info)
 		st->chip_info = &max1363_chip_info_tbl[id->driver_data];
 	st->client = client;
 
@@ -1618,13 +1621,17 @@ static int max1363_probe(struct i2c_client *client,
 
 		ret = regulator_enable(vref);
 		if (ret)
-			goto error_disable_reg;
+			return ret;
+
+		ret = devm_add_action_or_reset(&client->dev, max1363_reg_disable, vref);
+		if (ret)
+			return ret;
+
 		st->vref = vref;
 		vref_uv = regulator_get_voltage(vref);
-		if (vref_uv <= 0) {
-			ret = -EINVAL;
-			goto error_disable_reg;
-		}
+		if (vref_uv <= 0)
+			return -EINVAL;
+
 		st->vref_uv = vref_uv;
 	}
 
@@ -1636,17 +1643,13 @@ static int max1363_probe(struct i2c_client *client,
 		st->send = max1363_smbus_send;
 		st->recv = max1363_smbus_recv;
 	} else {
-		ret = -EOPNOTSUPP;
-		goto error_disable_reg;
+		return -EOPNOTSUPP;
 	}
 
 	ret = max1363_alloc_scan_masks(indio_dev);
 	if (ret)
-		goto error_disable_reg;
+		return ret;
 
-	/* Establish that the iio_dev is a child of the i2c device */
-	indio_dev->dev.parent = &client->dev;
-	indio_dev->dev.of_node = client->dev.of_node;
 	indio_dev->name = id->name;
 	indio_dev->channels = st->chip_info->channels;
 	indio_dev->num_channels = st->chip_info->num_channels;
@@ -1654,12 +1657,12 @@ static int max1363_probe(struct i2c_client *client,
 	indio_dev->modes = INDIO_DIRECT_MODE;
 	ret = max1363_initial_setup(st);
 	if (ret < 0)
-		goto error_disable_reg;
+		return ret;
 
-	ret = iio_triggered_buffer_setup(indio_dev, NULL,
-		&max1363_trigger_handler, NULL);
+	ret = devm_iio_triggered_buffer_setup(&client->dev, indio_dev, NULL,
+					      &max1363_trigger_handler, NULL);
 	if (ret)
-		goto error_disable_reg;
+		return ret;
 
 	if (client->irq) {
 		ret = devm_request_threaded_irq(&client->dev, st->client->irq,
@@ -1670,39 +1673,10 @@ static int max1363_probe(struct i2c_client *client,
 					   indio_dev);
 
 		if (ret)
-			goto error_uninit_buffer;
+			return ret;
 	}
 
-	ret = iio_device_register(indio_dev);
-	if (ret < 0)
-		goto error_uninit_buffer;
-
-	return 0;
-
-error_uninit_buffer:
-	iio_triggered_buffer_cleanup(indio_dev);
-error_disable_reg:
-	if (st->vref)
-		regulator_disable(st->vref);
-	regulator_disable(st->reg);
-error_unregister_map:
-	iio_map_array_unregister(indio_dev);
-	return ret;
-}
-
-static int max1363_remove(struct i2c_client *client)
-{
-	struct iio_dev *indio_dev = i2c_get_clientdata(client);
-	struct max1363_state *st = iio_priv(indio_dev);
-
-	iio_device_unregister(indio_dev);
-	iio_triggered_buffer_cleanup(indio_dev);
-	if (st->vref)
-		regulator_disable(st->vref);
-	regulator_disable(st->reg);
-	iio_map_array_unregister(indio_dev);
-
-	return 0;
+	return devm_iio_device_register(&client->dev, indio_dev);
 }
 
 static const struct i2c_device_id max1363_id[] = {
@@ -1752,10 +1726,9 @@ MODULE_DEVICE_TABLE(i2c, max1363_id);
 static struct i2c_driver max1363_driver = {
 	.driver = {
 		.name = "max1363",
-		.of_match_table = of_match_ptr(max1363_of_match),
+		.of_match_table = max1363_of_match,
 	},
 	.probe = max1363_probe,
-	.remove = max1363_remove,
 	.id_table = max1363_id,
 };
 module_i2c_driver(max1363_driver);

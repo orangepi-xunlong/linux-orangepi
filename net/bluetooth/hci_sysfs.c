@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /* Bluetooth HCI driver model support. */
 
 #include <linux/module.h>
@@ -13,7 +14,7 @@ static void bt_link_release(struct device *dev)
 	kfree(conn);
 }
 
-static struct device_type bt_link = {
+static const struct device_type bt_link = {
 	.name    = "link",
 	.release = bt_link_release,
 };
@@ -47,10 +48,13 @@ void hci_conn_add_sysfs(struct hci_conn *conn)
 
 	BT_DBG("conn %p", conn);
 
+	if (device_is_registered(&conn->dev))
+		return;
+
 	dev_set_name(&conn->dev, "%s:%d", hdev->name, conn->handle);
 
 	if (device_add(&conn->dev) < 0) {
-		BT_ERR("Failed to register connection device");
+		bt_dev_err(hdev, "failed to register connection device");
 		return;
 	}
 
@@ -82,11 +86,15 @@ void hci_conn_del_sysfs(struct hci_conn *conn)
 static void bt_host_release(struct device *dev)
 {
 	struct hci_dev *hdev = to_hci_dev(dev);
-	kfree(hdev);
+
+	if (hci_dev_test_flag(hdev, HCI_UNREGISTER))
+		hci_release_dev(hdev);
+	else
+		kfree(hdev);
 	module_put(THIS_MODULE);
 }
 
-static struct device_type bt_host = {
+static const struct device_type bt_host = {
 	.name    = "host",
 	.release = bt_host_release,
 };

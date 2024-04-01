@@ -1,11 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Nomadik RNG support
  *  Copyright 2009 Alessandro Rubini
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
  */
 
 #include <linux/kernel.h>
@@ -16,8 +12,6 @@
 #include <linux/io.h>
 #include <linux/clk.h>
 #include <linux/err.h>
-
-static struct clk *rng_clk;
 
 static int nmk_rng_read(struct hwrng *rng, void *data, size_t max, bool wait)
 {
@@ -40,48 +34,42 @@ static struct hwrng nmk_rng = {
 
 static int nmk_rng_probe(struct amba_device *dev, const struct amba_id *id)
 {
+	struct clk *rng_clk;
 	void __iomem *base;
 	int ret;
 
-	rng_clk = devm_clk_get(&dev->dev, NULL);
+	rng_clk = devm_clk_get_enabled(&dev->dev, NULL);
 	if (IS_ERR(rng_clk)) {
 		dev_err(&dev->dev, "could not get rng clock\n");
 		ret = PTR_ERR(rng_clk);
 		return ret;
 	}
 
-	clk_prepare_enable(rng_clk);
-
 	ret = amba_request_regions(dev, dev->dev.init_name);
 	if (ret)
-		goto out_clk;
+		return ret;
 	ret = -ENOMEM;
 	base = devm_ioremap(&dev->dev, dev->res.start,
 			    resource_size(&dev->res));
 	if (!base)
 		goto out_release;
 	nmk_rng.priv = (unsigned long)base;
-	ret = hwrng_register(&nmk_rng);
+	ret = devm_hwrng_register(&dev->dev, &nmk_rng);
 	if (ret)
 		goto out_release;
 	return 0;
 
 out_release:
 	amba_release_regions(dev);
-out_clk:
-	clk_disable(rng_clk);
 	return ret;
 }
 
-static int nmk_rng_remove(struct amba_device *dev)
+static void nmk_rng_remove(struct amba_device *dev)
 {
-	hwrng_unregister(&nmk_rng);
 	amba_release_regions(dev);
-	clk_disable(rng_clk);
-	return 0;
 }
 
-static struct amba_id nmk_rng_ids[] = {
+static const struct amba_id nmk_rng_ids[] = {
 	{
 		.id	= 0x000805e1,
 		.mask	= 0x000fffff, /* top bits are rev and cfg: accept all */

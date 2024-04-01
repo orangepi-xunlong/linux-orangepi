@@ -1,23 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * SCSI Primary Commands (SPC) parsing and emulation.
  *
  * (c) Copyright 2002-2013 Datera, Inc.
  *
  * Nicholas A. Bellinger <nab@kernel.org>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
  */
 
 #include <linux/kernel.h>
@@ -53,17 +40,39 @@ static void spc_fill_alua_data(struct se_lun *lun, unsigned char *buf)
 	 *
 	 * See spc4r17 section 6.4.2 Table 135
 	 */
-	spin_lock(&lun->lun_tg_pt_gp_lock);
-	tg_pt_gp = lun->lun_tg_pt_gp;
+	rcu_read_lock();
+	tg_pt_gp = rcu_dereference(lun->lun_tg_pt_gp);
 	if (tg_pt_gp)
 		buf[5] |= tg_pt_gp->tg_pt_gp_alua_access_type;
-	spin_unlock(&lun->lun_tg_pt_gp_lock);
+	rcu_read_unlock();
+}
+
+static u16
+spc_find_scsi_transport_vd(int proto_id)
+{
+	switch (proto_id) {
+	case SCSI_PROTOCOL_FCP:
+		return SCSI_VERSION_DESCRIPTOR_FCP4;
+	case SCSI_PROTOCOL_ISCSI:
+		return SCSI_VERSION_DESCRIPTOR_ISCSI;
+	case SCSI_PROTOCOL_SAS:
+		return SCSI_VERSION_DESCRIPTOR_SAS3;
+	case SCSI_PROTOCOL_SBP:
+		return SCSI_VERSION_DESCRIPTOR_SBP3;
+	case SCSI_PROTOCOL_SRP:
+		return SCSI_VERSION_DESCRIPTOR_SRP;
+	default:
+		pr_warn("Cannot find VERSION DESCRIPTOR value for unknown SCSI"
+			" transport PROTOCOL IDENTIFIER %#x\n", proto_id);
+		return 0;
+	}
 }
 
 sense_reason_t
 spc_emulate_inquiry_std(struct se_cmd *cmd, unsigned char *buf)
 {
 	struct se_lun *lun = cmd->se_lun;
+	struct se_portal_group *tpg = lun->lun_tpg;
 	struct se_device *dev = cmd->se_dev;
 	struct se_session *sess = cmd->se_sess;
 
@@ -71,7 +80,7 @@ spc_emulate_inquiry_std(struct se_cmd *cmd, unsigned char *buf)
 	if (dev->transport->get_device_type(dev) == TYPE_TAPE)
 		buf[1] = 0x80;
 
-	buf[2] = 0x05; /* SPC-3 */
+	buf[2] = 0x06; /* SPC-4 */
 
 	/*
 	 * NORMACA and HISUP = 0, RESPONSE DATA FORMAT = 2
@@ -106,6 +115,12 @@ spc_emulate_inquiry_std(struct se_cmd *cmd, unsigned char *buf)
 			buf[5] |= 0x1;
 	}
 
+	/*
+	 * Set MULTIP bit to indicate presence of multiple SCSI target ports
+	 */
+	if (dev->export_count > 1)
+		buf[6] |= 0x10;
+
 	buf[7] = 0x2; /* CmdQue=1 */
 
 	/*
@@ -113,13 +128,25 @@ spc_emulate_inquiry_std(struct se_cmd *cmd, unsigned char *buf)
 	 * unused bytes at the end of the field (i.e., highest offset) and the
 	 * unused bytes shall be filled with ASCII space characters (20h).
 	 */
-	memset(&buf[8], 0x20, 8 + 16 + 4);
-	memcpy(&buf[8], "LIO-ORG", sizeof("LIO-ORG") - 1);
+	memset(&buf[8], 0x20,
+	       INQUIRY_VENDOR_LEN + INQUIRY_MODEL_LEN + INQUIRY_REVISION_LEN);
+	memcpy(&buf[8], dev->t10_wwn.vendor,
+	       strnlen(dev->t10_wwn.vendor, INQUIRY_VENDOR_LEN));
 	memcpy(&buf[16], dev->t10_wwn.model,
-	       strnlen(dev->t10_wwn.model, 16));
+	       strnlen(dev->t10_wwn.model, INQUIRY_MODEL_LEN));
 	memcpy(&buf[32], dev->t10_wwn.revision,
-	       strnlen(dev->t10_wwn.revision, 4));
-	buf[4] = 31; /* Set additional length to 31 */
+	       strnlen(dev->t10_wwn.revision, INQUIRY_REVISION_LEN));
+
+	/*
+	 * Set the VERSION DESCRIPTOR fields
+	 */
+	put_unaligned_be16(SCSI_VERSION_DESCRIPTOR_SAM5, &buf[58]);
+	put_unaligned_be16(spc_find_scsi_transport_vd(tpg->proto_id), &buf[60]);
+	put_unaligned_be16(SCSI_VERSION_DESCRIPTOR_SPC4, &buf[62]);
+	if (cmd->se_dev->transport->get_device_type(dev) == TYPE_DISK)
+		put_unaligned_be16(SCSI_VERSION_DESCRIPTOR_SBC3, &buf[64]);
+
+	buf[4] = 91; /* Set additional length to 91 */
 
 	return 0;
 }
@@ -140,12 +167,27 @@ spc_emulate_evpd_80(struct se_cmd *cmd, unsigned char *buf)
 	return 0;
 }
 
-void spc_parse_naa_6h_vendor_specific(struct se_device *dev,
-				      unsigned char *buf)
+/*
+ * Generate NAA IEEE Registered Extended designator
+ */
+void spc_gen_naa_6h_vendor_specific(struct se_device *dev,
+				    unsigned char *buf)
 {
 	unsigned char *p = &dev->t10_wwn.unit_serial[0];
-	int cnt;
+	u32 company_id = dev->t10_wwn.company_id;
+	int cnt, off = 0;
 	bool next = true;
+
+	/*
+	 * Start NAA IEEE Registered Extended Identifier/Designator
+	 */
+	buf[off] = 0x6 << 4;
+
+	/* IEEE COMPANY_ID */
+	buf[off++] |= (company_id >> 20) & 0xf;
+	buf[off++] = (company_id >> 12) & 0xff;
+	buf[off++] = (company_id >> 4) & 0xff;
+	buf[off] = (company_id & 0xf) << 4;
 
 	/*
 	 * Generate up to 36 bits of VENDOR SPECIFIC IDENTIFIER starting on
@@ -155,7 +197,7 @@ void spc_parse_naa_6h_vendor_specific(struct se_device *dev,
 	 * NUMBER set via vpd_unit_serial in target_core_configfs.c to ensure
 	 * per device uniqeness.
 	 */
-	for (cnt = 0; *p && cnt < 13; p++) {
+	for (cnt = off + 13; *p && off < cnt; p++) {
 		int val = hex_to_bin(*p);
 
 		if (val < 0)
@@ -163,10 +205,10 @@ void spc_parse_naa_6h_vendor_specific(struct se_device *dev,
 
 		if (next) {
 			next = false;
-			buf[cnt++] |= val;
+			buf[off++] |= val;
 		} else {
 			next = true;
-			buf[cnt] = val << 4;
+			buf[off] = val << 4;
 		}
 	}
 }
@@ -214,24 +256,8 @@ spc_emulate_evpd_83(struct se_cmd *cmd, unsigned char *buf)
 	/* Identifier/Designator length */
 	buf[off++] = 0x10;
 
-	/*
-	 * Start NAA IEEE Registered Extended Identifier/Designator
-	 */
-	buf[off++] = (0x6 << 4);
-
-	/*
-	 * Use OpenFabrics IEEE Company ID: 00 14 05
-	 */
-	buf[off++] = 0x01;
-	buf[off++] = 0x40;
-	buf[off] = (0x5 << 4);
-
-	/*
-	 * Return ConfigFS Unit Serial Number information for
-	 * VENDOR_SPECIFIC_IDENTIFIER and
-	 * VENDOR_SPECIFIC_IDENTIFIER_EXTENTION
-	 */
-	spc_parse_naa_6h_vendor_specific(dev, &buf[off]);
+	/* NAA IEEE Registered Extended designator */
+	spc_gen_naa_6h_vendor_specific(dev, &buf[off]);
 
 	len = 20;
 	off = (len + 4);
@@ -257,8 +283,9 @@ check_t10_vend_desc:
 	buf[off+1] = 0x1; /* T10 Vendor ID */
 	buf[off+2] = 0x0;
 	/* left align Vendor ID and pad with spaces */
-	memset(&buf[off+4], 0x20, 8);
-	memcpy(&buf[off+4], "LIO-ORG", sizeof("LIO-ORG") - 1);
+	memset(&buf[off+4], 0x20, INQUIRY_VENDOR_LEN);
+	memcpy(&buf[off+4], dev->t10_wwn.vendor,
+	       strnlen(dev->t10_wwn.vendor, INQUIRY_VENDOR_LEN));
 	/* Extra Byte for NULL Terminator */
 	id_len++;
 	/* Identifier Length */
@@ -294,8 +321,8 @@ check_t10_vend_desc:
 		/* Skip over Obsolete field in RTPI payload
 		 * in Table 472 */
 		off += 2;
-		buf[off++] = ((lun->lun_rtpi >> 8) & 0xff);
-		buf[off++] = (lun->lun_rtpi & 0xff);
+		put_unaligned_be16(lun->lun_rtpi, &buf[off]);
+		off += 2;
 		len += 8; /* Header size + Designation descriptor */
 		/*
 		 * Target port group identifier, see spc4r17
@@ -304,14 +331,14 @@ check_t10_vend_desc:
 		 * Get the PROTOCOL IDENTIFIER as defined by spc4r17
 		 * section 7.5.1 Table 362
 		 */
-		spin_lock(&lun->lun_tg_pt_gp_lock);
-		tg_pt_gp = lun->lun_tg_pt_gp;
+		rcu_read_lock();
+		tg_pt_gp = rcu_dereference(lun->lun_tg_pt_gp);
 		if (!tg_pt_gp) {
-			spin_unlock(&lun->lun_tg_pt_gp_lock);
+			rcu_read_unlock();
 			goto check_lu_gp;
 		}
 		tg_pt_gp_id = tg_pt_gp->tg_pt_gp_id;
-		spin_unlock(&lun->lun_tg_pt_gp_lock);
+		rcu_read_unlock();
 
 		buf[off] = tpg->proto_id << 4;
 		buf[off++] |= 0x1; /* CODE SET == Binary */
@@ -323,8 +350,8 @@ check_t10_vend_desc:
 		off++; /* Skip over Reserved */
 		buf[off++] = 4; /* DESIGNATOR LENGTH */
 		off += 2; /* Skip over Reserved Field */
-		buf[off++] = ((tg_pt_gp_id >> 8) & 0xff);
-		buf[off++] = (tg_pt_gp_id & 0xff);
+		put_unaligned_be16(tg_pt_gp_id, &buf[off]);
+		off += 2;
 		len += 8; /* Header size + Designation descriptor */
 		/*
 		 * Logical Unit Group identifier, see spc4r17
@@ -350,8 +377,8 @@ check_lu_gp:
 		off++; /* Skip over Reserved */
 		buf[off++] = 4; /* DESIGNATOR LENGTH */
 		off += 2; /* Skip over Reserved Field */
-		buf[off++] = ((lu_gp_id >> 8) & 0xff);
-		buf[off++] = (lu_gp_id & 0xff);
+		put_unaligned_be16(lu_gp_id, &buf[off]);
+		off += 2;
 		len += 8; /* Header size + Designation descriptor */
 		/*
 		 * SCSI name string designator, see spc4r17
@@ -438,8 +465,7 @@ check_scsi_name:
 		/* Header size + Designation descriptor */
 		len += (scsi_target_len + 4);
 	}
-	buf[2] = ((len >> 8) & 0xff);
-	buf[3] = (len & 0xff); /* Page Length for VPD 0x83 */
+	put_unaligned_be16(len, &buf[2]); /* Page Length for VPD 0x83 */
 	return 0;
 }
 EXPORT_SYMBOL(spc_emulate_evpd_83);
@@ -644,9 +670,9 @@ spc_emulate_evpd_b2(struct se_cmd *cmd, unsigned char *buf)
 
 	/*
 	 * The unmap_zeroes_data set means that the underlying device supports
-	 * REQ_DISCARD and has the discard_zeroes_data bit set. This satisfies
-	 * the SBC requirements for LBPRZ, meaning that a subsequent read
-	 * will return zeroes after an UNMAP or WRITE SAME (16) to an LBA
+	 * REQ_OP_DISCARD and has the discard_zeroes_data bit set. This
+	 * satisfies the SBC requirements for LBPRZ, meaning that a subsequent
+	 * read will return zeroes after an UNMAP or WRITE SAME (16) to an LBA
 	 * See sbc4r36 6.6.4.
 	 */
 	if (((dev->dev_attrib.emulate_tpu != 0) ||
@@ -712,7 +738,6 @@ static sense_reason_t
 spc_emulate_inquiry(struct se_cmd *cmd)
 {
 	struct se_device *dev = cmd->se_dev;
-	struct se_portal_group *tpg = cmd->se_lun->lun_tpg;
 	unsigned char *rbuf;
 	unsigned char *cdb = cmd->t_task_cdb;
 	unsigned char *buf;
@@ -726,10 +751,7 @@ spc_emulate_inquiry(struct se_cmd *cmd)
 		return TCM_LOGICAL_UNIT_COMMUNICATION_FAILURE;
 	}
 
-	if (dev == rcu_access_pointer(tpg->tpg_virt_lun0->lun_se_dev))
-		buf[0] = 0x3f; /* Not connected */
-	else
-		buf[0] = dev->transport->get_device_type(dev);
+	buf[0] = dev->transport->get_device_type(dev);
 
 	if (!(cdb[1] & 0x1)) {
 		if (cdb[2]) {
@@ -753,7 +775,7 @@ spc_emulate_inquiry(struct se_cmd *cmd)
 		}
 	}
 
-	pr_err("Unknown VPD Code: 0x%02x\n", cdb[2]);
+	pr_debug("Unknown VPD Code: 0x%02x\n", cdb[2]);
 	ret = TCM_INVALID_CDB_FIELD;
 
 out:
@@ -765,7 +787,7 @@ out:
 	kfree(buf);
 
 	if (!ret)
-		target_complete_cmd_with_length(cmd, GOOD, len);
+		target_complete_cmd_with_length(cmd, SAM_STAT_GOOD, len);
 	return ret;
 }
 
@@ -858,8 +880,17 @@ static int spc_modesense_control(struct se_cmd *cmd, u8 pc, u8 *p)
 	 * for a BUSY, TASK SET FULL, or RESERVATION CONFLICT status regardless
 	 * to the number of commands completed with one of those status codes.
 	 */
-	p[4] = (dev->dev_attrib.emulate_ua_intlck_ctrl == 2) ? 0x30 :
-	       (dev->dev_attrib.emulate_ua_intlck_ctrl == 1) ? 0x20 : 0x00;
+	switch (dev->dev_attrib.emulate_ua_intlck_ctrl) {
+	case TARGET_UA_INTLCK_CTRL_ESTABLISH_UA:
+		p[4] = 0x30;
+		break;
+	case TARGET_UA_INTLCK_CTRL_NO_CLEAR:
+		p[4] = 0x20;
+		break;
+	default:	/* TARGET_UA_INTLCK_CTRL_CLEAR */
+		p[4] = 0x00;
+		break;
+	}
 	/*
 	 * From spc4r17, section 7.4.6 Control mode Page
 	 *
@@ -1110,7 +1141,7 @@ set_length:
 		transport_kunmap_data_sg(cmd);
 	}
 
-	target_complete_cmd_with_length(cmd, GOOD, length);
+	target_complete_cmd_with_length(cmd, SAM_STAT_GOOD, length);
 	return 0;
 }
 
@@ -1128,7 +1159,7 @@ static sense_reason_t spc_emulate_modeselect(struct se_cmd *cmd)
 	int i;
 
 	if (!cmd->data_length) {
-		target_complete_cmd(cmd, GOOD);
+		target_complete_cmd(cmd, SAM_STAT_GOOD);
 		return 0;
 	}
 
@@ -1171,7 +1202,7 @@ out:
 	transport_kunmap_data_sg(cmd);
 
 	if (!ret)
-		target_complete_cmd(cmd, GOOD);
+		target_complete_cmd(cmd, SAM_STAT_GOOD);
 	return ret;
 }
 
@@ -1204,7 +1235,7 @@ static sense_reason_t spc_emulate_request_sense(struct se_cmd *cmd)
 	memcpy(rbuf, buf, min_t(u32, sizeof(buf), cmd->data_length));
 	transport_kunmap_data_sg(cmd);
 
-	target_complete_cmd(cmd, GOOD);
+	target_complete_cmd(cmd, SAM_STAT_GOOD);
 	return 0;
 }
 
@@ -1271,7 +1302,7 @@ done:
 		transport_kunmap_data_sg(cmd);
 	}
 
-	target_complete_cmd_with_length(cmd, GOOD, 8 + lun_count * 8);
+	target_complete_cmd_with_length(cmd, SAM_STAT_GOOD, 8 + lun_count * 8);
 	return 0;
 }
 EXPORT_SYMBOL(spc_emulate_report_luns);
@@ -1279,7 +1310,7 @@ EXPORT_SYMBOL(spc_emulate_report_luns);
 static sense_reason_t
 spc_emulate_testunitready(struct se_cmd *cmd)
 {
-	target_complete_cmd(cmd, GOOD);
+	target_complete_cmd(cmd, SAM_STAT_GOOD);
 	return 0;
 }
 
@@ -1289,13 +1320,21 @@ spc_parse_cdb(struct se_cmd *cmd, unsigned int *size)
 	struct se_device *dev = cmd->se_dev;
 	unsigned char *cdb = cmd->t_task_cdb;
 
+	if (!dev->dev_attrib.emulate_pr &&
+	    ((cdb[0] == PERSISTENT_RESERVE_IN) ||
+	     (cdb[0] == PERSISTENT_RESERVE_OUT) ||
+	     (cdb[0] == RELEASE || cdb[0] == RELEASE_10) ||
+	     (cdb[0] == RESERVE || cdb[0] == RESERVE_10))) {
+		return TCM_UNSUPPORTED_SCSI_OPCODE;
+	}
+
 	switch (cdb[0]) {
 	case MODE_SELECT:
 		*size = cdb[4];
 		cmd->execute_cmd = spc_emulate_modeselect;
 		break;
 	case MODE_SELECT_10:
-		*size = (cdb[7] << 8) + cdb[8];
+		*size = get_unaligned_be16(&cdb[7]);
 		cmd->execute_cmd = spc_emulate_modeselect;
 		break;
 	case MODE_SENSE:
@@ -1303,25 +1342,25 @@ spc_parse_cdb(struct se_cmd *cmd, unsigned int *size)
 		cmd->execute_cmd = spc_emulate_modesense;
 		break;
 	case MODE_SENSE_10:
-		*size = (cdb[7] << 8) + cdb[8];
+		*size = get_unaligned_be16(&cdb[7]);
 		cmd->execute_cmd = spc_emulate_modesense;
 		break;
 	case LOG_SELECT:
 	case LOG_SENSE:
-		*size = (cdb[7] << 8) + cdb[8];
+		*size = get_unaligned_be16(&cdb[7]);
 		break;
 	case PERSISTENT_RESERVE_IN:
-		*size = (cdb[7] << 8) + cdb[8];
+		*size = get_unaligned_be16(&cdb[7]);
 		cmd->execute_cmd = target_scsi3_emulate_pr_in;
 		break;
 	case PERSISTENT_RESERVE_OUT:
-		*size = (cdb[7] << 8) + cdb[8];
+		*size = get_unaligned_be32(&cdb[5]);
 		cmd->execute_cmd = target_scsi3_emulate_pr_out;
 		break;
 	case RELEASE:
 	case RELEASE_10:
 		if (cdb[0] == RELEASE_10)
-			*size = (cdb[7] << 8) | cdb[8];
+			*size = get_unaligned_be16(&cdb[7]);
 		else
 			*size = cmd->data_length;
 
@@ -1334,7 +1373,7 @@ spc_parse_cdb(struct se_cmd *cmd, unsigned int *size)
 		 * Assume the passthrough or $FABRIC_MOD will tell us about it.
 		 */
 		if (cdb[0] == RESERVE_10)
-			*size = (cdb[7] << 8) | cdb[8];
+			*size = get_unaligned_be16(&cdb[7]);
 		else
 			*size = cmd->data_length;
 
@@ -1345,7 +1384,7 @@ spc_parse_cdb(struct se_cmd *cmd, unsigned int *size)
 		cmd->execute_cmd = spc_emulate_request_sense;
 		break;
 	case INQUIRY:
-		*size = (cdb[3] << 8) + cdb[4];
+		*size = get_unaligned_be16(&cdb[3]);
 
 		/*
 		 * Do implicit HEAD_OF_QUEUE processing for INQUIRY.
@@ -1356,7 +1395,7 @@ spc_parse_cdb(struct se_cmd *cmd, unsigned int *size)
 		break;
 	case SECURITY_PROTOCOL_IN:
 	case SECURITY_PROTOCOL_OUT:
-		*size = (cdb[6] << 24) | (cdb[7] << 16) | (cdb[8] << 8) | cdb[9];
+		*size = get_unaligned_be32(&cdb[6]);
 		break;
 	case EXTENDED_COPY:
 		*size = get_unaligned_be32(&cdb[10]);
@@ -1368,19 +1407,18 @@ spc_parse_cdb(struct se_cmd *cmd, unsigned int *size)
 		break;
 	case READ_ATTRIBUTE:
 	case WRITE_ATTRIBUTE:
-		*size = (cdb[10] << 24) | (cdb[11] << 16) |
-		       (cdb[12] << 8) | cdb[13];
+		*size = get_unaligned_be32(&cdb[10]);
 		break;
 	case RECEIVE_DIAGNOSTIC:
 	case SEND_DIAGNOSTIC:
-		*size = (cdb[3] << 8) | cdb[4];
+		*size = get_unaligned_be16(&cdb[3]);
 		break;
 	case WRITE_BUFFER:
-		*size = (cdb[6] << 16) + (cdb[7] << 8) + cdb[8];
+		*size = get_unaligned_be24(&cdb[6]);
 		break;
 	case REPORT_LUNS:
 		cmd->execute_cmd = spc_emulate_report_luns;
-		*size = (cdb[6] << 24) | (cdb[7] << 16) | (cdb[8] << 8) | cdb[9];
+		*size = get_unaligned_be32(&cdb[6]);
 		/*
 		 * Do implicit HEAD_OF_QUEUE processing for REPORT_LUNS
 		 * See spc4r17 section 5.3

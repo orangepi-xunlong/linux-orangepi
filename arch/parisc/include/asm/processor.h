@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * include/asm-parisc/processor.h
  *
@@ -11,6 +12,7 @@
 #ifndef __ASSEMBLY__
 #include <linux/threads.h>
 
+#include <asm/assembly.h>
 #include <asm/prefetch.h>
 #include <asm/hardware.h>
 #include <asm/pdc.h>
@@ -18,17 +20,6 @@
 #include <asm/types.h>
 #include <asm/percpu.h>
 #endif /* __ASSEMBLY__ */
-
-/*
- * Default implementation of macro that returns current
- * instruction pointer ("program counter").
- */
-#ifdef CONFIG_PA20
-#define current_ia(x)	__asm__("mfia %0" : "=r"(x))
-#else /* mfia added in pa2.0 */
-#define current_ia(x)	__asm__("blr 0,%0\n\tnop" : "=r"(x))
-#endif
-#define current_text_addr() ({ void *pc; current_ia(pc); pc; })
 
 #define HAVE_ARCH_PICK_MMAP_LAYOUT
 
@@ -47,22 +38,15 @@
 #define DEFAULT_MAP_BASE	DEFAULT_MAP_BASE32
 #endif
 
-#ifdef __KERNEL__
-
 /* XXX: STACK_TOP actually should be STACK_BOTTOM for parisc.
  * prumpf */
 
 #define STACK_TOP	TASK_SIZE
 #define STACK_TOP_MAX	DEFAULT_TASK_SIZE
 
-/* Allow bigger stacks for 64-bit processes */
-#define STACK_SIZE_MAX	(USER_WIDE_MODE					\
-			 ? (1 << 30)	/* 1 GB */			\
-			 : (CONFIG_MAX_STACK_SIZE_MB*1024*1024))
-
-#endif
-
 #ifndef __ASSEMBLY__
+
+unsigned long calc_max_stack_size(unsigned long stack_max);
 
 /*
  * Data detected about CPUs at boot time which is the same for all CPU's.
@@ -93,9 +77,7 @@ struct system_cpuinfo_parisc {
 /* Per CPU data structure - ie varies per CPU.  */
 struct cpuinfo_parisc {
 	unsigned long it_value;     /* Interval Timer at last timer Intr */
-	unsigned long it_delta;     /* Interval delta (tic_10ms / HZ * 100) */
 	unsigned long irq_count;    /* number of IRQ's since boot */
-	unsigned long irq_max_cr16; /* longest time to handle a single IRQ */
 	unsigned long cpuid;        /* aka slot_number or set to NO_PROC_ID */
 	unsigned long hpa;          /* Host Physical address */
 	unsigned long txn_addr;     /* MMIO addr of EIR or id_eid */
@@ -103,25 +85,19 @@ struct cpuinfo_parisc {
 	unsigned long pending_ipi;  /* bitmap of type ipi_message_type */
 #endif
 	unsigned long bh_count;     /* number of times bh was invoked */
-	unsigned long prof_counter; /* per CPU profiling support */
-	unsigned long prof_multiplier;	/* per CPU profiling support */
 	unsigned long fp_rev;
 	unsigned long fp_model;
+	unsigned long cpu_num;      /* CPU number from PAT firmware */
+	unsigned long cpu_loc;      /* CPU location from PAT firmware */
 	unsigned int state;
 	struct parisc_device *dev;
-	unsigned long loops_per_jiffy;
 };
 
 extern struct system_cpuinfo_parisc boot_cpu_data;
 DECLARE_PER_CPU(struct cpuinfo_parisc, cpu_data);
+extern int time_keeper_id;		/* CPU used for timekeeping */
 
 #define CPU_HVERSION ((boot_cpu_data.hversion >> 4) & 0x0FFF)
-
-typedef struct {
-	int seg;  
-} mm_segment_t;
-
-#define ARCH_MIN_TASKALIGN	8
 
 struct thread_struct {
 	struct pt_regs regs;
@@ -167,12 +143,7 @@ struct thread_struct {
 	.flags		= 0 \
 	}
 
-/*
- * Return saved PC of a blocked thread.  This is used by ps mostly.
- */
-
 struct task_struct;
-unsigned long thread_saved_pc(struct task_struct *t);
 void show_trace(struct task_struct *task, unsigned long *stack);
 
 /*
@@ -262,15 +233,11 @@ on downward growing arches, it looks like this:
  * it in here from the current->personality
  */
 
-#ifdef CONFIG_64BIT
-#define USER_WIDE_MODE	(!test_thread_flag(TIF_32BIT))
-#else
-#define USER_WIDE_MODE	0
-#endif
+#define USER_WIDE_MODE	(!is_32bit_task())
 
 #define start_thread(regs, new_pc, new_sp) do {		\
 	elf_addr_t *sp = (elf_addr_t *)new_sp;		\
-	__u32 spaceid = (__u32)current->mm->context;	\
+	__u32 spaceid = (__u32)current->mm->context.space_id;	\
 	elf_addr_t pc = (elf_addr_t)new_pc | 3;		\
 	elf_caddr_t *argv = (elf_caddr_t *)bprm->exec + 1;	\
 							\
@@ -297,19 +264,14 @@ on downward growing arches, it looks like this:
 	regs->gr[23] = 0;				\
 } while(0)
 
-struct task_struct;
 struct mm_struct;
 
-/* Free all resources held by a thread. */
-extern void release_thread(struct task_struct *);
-
-extern unsigned long get_wchan(struct task_struct *p);
+extern unsigned long __get_wchan(struct task_struct *p);
 
 #define KSTK_EIP(tsk)	((tsk)->thread.regs.iaoq[0])
 #define KSTK_ESP(tsk)	((tsk)->thread.regs.gr[30])
 
 #define cpu_relax()	barrier()
-#define cpu_relax_lowlatency() cpu_relax()
 
 /*
  * parisc_requires_coherency() is used to identify the combined VIPT/PIPT
@@ -324,6 +286,11 @@ extern int _parisc_requires_coherency;
 #endif
 
 extern int running_on_qemu;
+
+extern void __noreturn toc_intr(struct pt_regs *regs);
+extern void toc_handler(void);
+extern unsigned int toc_handler_size;
+extern unsigned int toc_handler_csum;
 
 #endif /* __ASSEMBLY__ */
 

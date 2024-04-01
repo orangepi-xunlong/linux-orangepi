@@ -1,10 +1,4 @@
-dtb-$(CONFIG_ARCH_MESON) += meson-gxbb-odroidc2.dtb
-dtb-$(CONFIG_ARCH_MESON) += meson-gxbb-p200.dtb
-dtb-$(CONFIG_ARCH_MESON) += meson-gxbb-p201.dtb
-dtb-$(CONFIG_ARCH_MESON) += meson-gxbb-vega-s95-pro.dtb
-dtb-$(CONFIG_ARCH_MESON) += meson-gxbb-vega-s95-meta.dtb
-dtb-$(CONFIG_ARCH_MESON) += meson-gxbb-vega-s95-telos.dtb
+# SPDX-License-Identifier: GPL-2.0
+dtb-$(CONFIG_ARCH_MESON) += meson-sm1-orangepi-3-plus.dtb
 
-always		:= $(dtb-y)
-subdir-y	:= $(dts-dirs)
-clean-files	:= *.dtb
+subdir-y       := $(dts-dirs) overlay

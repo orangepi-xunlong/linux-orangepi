@@ -1,19 +1,16 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef ARCH_TESTS_H
 #define ARCH_TESTS_H
 
+struct test_suite;
+
 /* Tests */
-int test__rdpmc(int subtest);
-int test__perf_time_to_tsc(int subtest);
-int test__insn_x86(int subtest);
-int test__intel_cqm_count_nmi_context(int subtest);
+int test__rdpmc(struct test_suite *test, int subtest);
+int test__insn_x86(struct test_suite *test, int subtest);
+int test__intel_pt_pkt_decoder(struct test_suite *test, int subtest);
+int test__bp_modify(struct test_suite *test, int subtest);
+int test__x86_sample_parsing(struct test_suite *test, int subtest);
 
-#ifdef HAVE_DWARF_UNWIND_SUPPORT
-struct thread;
-struct perf_sample;
-int test__arch_unwind_sample(struct perf_sample *sample,
-			     struct thread *thread);
-#endif
-
-extern struct test arch_tests[];
+extern struct test_suite *arch_tests[];
 
 #endif

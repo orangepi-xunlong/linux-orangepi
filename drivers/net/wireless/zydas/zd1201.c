@@ -1,11 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *	Driver for ZyDAS zd1201 based wireless USB devices.
  *
  *	Copyright (c) 2004, 2005 Jeroen Vreeken (pe1rxq@amsat.org)
- *
- *	This program is free software; you can redistribute it and/or
- *	modify it under the terms of the GNU General Public License
- *	version 2 as published by the Free Software Foundation.
  *
  *	Parts of this driver have been derived from a wlan-ng version
  *	modified by ZyDAS. They also made documentation available, thanks!
@@ -25,7 +22,7 @@
 #include <linux/firmware.h>
 #include "zd1201.h"
 
-static struct usb_device_id zd1201_table[] = {
+static const struct usb_device_id zd1201_table[] = {
 	{USB_DEVICE(0x0586, 0x3400)}, /* Peabird Wireless USB Adapter */
 	{USB_DEVICE(0x0ace, 0x1201)}, /* ZyDAS ZD1201 Wireless USB Adapter */
 	{USB_DEVICE(0x050d, 0x6051)}, /* Belkin F5D6051 usb  adapter */
@@ -230,8 +227,7 @@ static void zd1201_usbrx(struct urb *urb)
 	/* Info frame */
 	if (type == ZD1201_PACKET_INQUIRE) {
 		int i = 0;
-		unsigned short infotype, framelen, copylen;
-		framelen = le16_to_cpu(*(__le16*)&data[4]);
+		unsigned short infotype, copylen;
 		infotype = le16_to_cpu(*(__le16*)&data[6]);
 
 		if (infotype == ZD1201_INF_LINKSTATUS) {
@@ -326,13 +322,13 @@ static void zd1201_usbrx(struct urb *urb)
 			if (!(skb = dev_alloc_skb(datalen+24)))
 				goto resubmit;
 			
-			memcpy(skb_put(skb, 2), &data[datalen-16], 2);
-			memcpy(skb_put(skb, 2), &data[datalen-2], 2);
-			memcpy(skb_put(skb, 6), &data[datalen-14], 6);
-			memcpy(skb_put(skb, 6), &data[datalen-22], 6);
-			memcpy(skb_put(skb, 6), &data[datalen-8], 6);
-			memcpy(skb_put(skb, 2), &data[datalen-24], 2);
-			memcpy(skb_put(skb, len), data, len);
+			skb_put_data(skb, &data[datalen - 16], 2);
+			skb_put_data(skb, &data[datalen - 2], 2);
+			skb_put_data(skb, &data[datalen - 14], 6);
+			skb_put_data(skb, &data[datalen - 22], 6);
+			skb_put_data(skb, &data[datalen - 8], 6);
+			skb_put_data(skb, &data[datalen - 24], 2);
+			skb_put_data(skb, data, len);
 			skb->protocol = eth_type_trans(skb, zd->dev);
 			zd->dev->stats.rx_packets++;
 			zd->dev->stats.rx_bytes += skb->len;
@@ -359,9 +355,9 @@ static void zd1201_usbrx(struct urb *urb)
 				frag->skb = skb;
 				frag->seq = seq & IEEE80211_SCTL_SEQ;
 				skb_reserve(skb, 2);
-				memcpy(skb_put(skb, 12), &data[datalen-14], 12);
-				memcpy(skb_put(skb, 2), &data[6], 2);
-				memcpy(skb_put(skb, len), data+8, len);
+				skb_put_data(skb, &data[datalen - 14], 12);
+				skb_put_data(skb, &data[6], 2);
+				skb_put_data(skb, data + 8, len);
 				hlist_add_head(&frag->fnode, &zd->fraglist);
 				goto resubmit;
 			}
@@ -385,9 +381,9 @@ static void zd1201_usbrx(struct urb *urb)
 			if (!skb)
 				goto resubmit;
 			skb_reserve(skb, 2);
-			memcpy(skb_put(skb, 12), &data[datalen-14], 12);
-			memcpy(skb_put(skb, 2), &data[6], 2);
-			memcpy(skb_put(skb, len), data+8, len);
+			skb_put_data(skb, &data[datalen - 14], 12);
+			skb_put_data(skb, &data[6], 2);
+			skb_put_data(skb, data + 8, len);
 		}
 		skb->protocol = eth_type_trans(skb, zd->dev);
 		zd->dev->stats.rx_packets++;
@@ -511,7 +507,7 @@ static int zd1201_getconfig(struct zd1201 *zd, int rid, void *riddata,
  *		byte	data[12]
  *	total: 16
  */
-static int zd1201_setconfig(struct zd1201 *zd, int rid, void *buf, int len, int wait)
+static int zd1201_setconfig(struct zd1201 *zd, int rid, const void *buf, int len, int wait)
 {
 	int err;
 	unsigned char *request;
@@ -525,7 +521,7 @@ static int zd1201_setconfig(struct zd1201 *zd, int rid, void *buf, int len, int 
 	zd->rxdatas = 0;
 	zd->rxlen = 0;
 	for (seq=0; len > 0; seq++) {
-		request = kmalloc(16, gfp_mask);
+		request = kzalloc(16, gfp_mask);
 		if (!request)
 			return -ENOMEM;
 		urb = usb_alloc_urb(0, gfp_mask);
@@ -533,7 +529,6 @@ static int zd1201_setconfig(struct zd1201 *zd, int rid, void *buf, int len, int 
 			kfree(request);
 			return -ENOMEM;
 		}
-		memset(request, 0, 16);
 		reqlen = len>12 ? 12 : len;
 		request[0] = ZD1201_USB_RESREQ;
 		request[1] = seq;
@@ -834,7 +829,7 @@ static netdev_tx_t zd1201_hard_start_xmit(struct sk_buff *skb,
 	return NETDEV_TX_OK;
 }
 
-static void zd1201_tx_timeout(struct net_device *dev)
+static void zd1201_tx_timeout(struct net_device *dev, unsigned int txqueue)
 {
 	struct zd1201 *zd = netdev_priv(dev);
 
@@ -861,7 +856,7 @@ static int zd1201_set_mac_address(struct net_device *dev, void *p)
 	    addr->sa_data, dev->addr_len, 1);
 	if (err)
 		return err;
-	memcpy(dev->dev_addr, addr->sa_data, dev->addr_len);
+	eth_hw_addr_set(dev, addr->sa_data);
 
 	return zd1201_mac_reset(zd);
 }
@@ -970,6 +965,7 @@ static int zd1201_set_mode(struct net_device *dev,
 			 */
 			zd1201_join(zd, "\0-*#\0", 5);
 			/* Put port in pIBSS */
+			fallthrough;
 		case 8: /* No pseudo-IBSS in wireless extensions (yet) */
 			porttype = ZD1201_PORTTYPE_PSEUDOIBSS;
 			break;
@@ -1655,15 +1651,11 @@ static int zd1201_set_maxassoc(struct net_device *dev,
     struct iw_request_info *info, struct iw_param *rrq, char *extra)
 {
 	struct zd1201 *zd = netdev_priv(dev);
-	int err;
 
 	if (!zd->ap)
 		return -EOPNOTSUPP;
 
-	err = zd1201_setconfig16(zd, ZD1201_RID_CNFMAXASSOCSTATIONS, rrq->value);
-	if (err)
-		return err;
-	return 0;
+	return zd1201_setconfig16(zd, ZD1201_RID_CNFMAXASSOCSTATIONS, rrq->value);
 }
 
 static int zd1201_get_maxassoc(struct net_device *dev,
@@ -1724,7 +1716,6 @@ static const struct net_device_ops zd1201_netdev_ops = {
 	.ndo_tx_timeout		= zd1201_tx_timeout,
 	.ndo_set_rx_mode	= zd1201_set_multicast,
 	.ndo_set_mac_address	= zd1201_set_mac_address,
-	.ndo_change_mtu		= eth_change_mtu,
 	.ndo_validate_addr	= eth_validate_addr,
 };
 
@@ -1737,6 +1728,7 @@ static int zd1201_probe(struct usb_interface *interface,
 	int err;
 	short porttype;
 	char buf[IW_ESSID_MAX_SIZE+2];
+	u8 addr[ETH_ALEN];
 
 	usb = interface_to_usbdev(interface);
 
@@ -1787,10 +1779,10 @@ static int zd1201_probe(struct usb_interface *interface,
 	dev->watchdog_timeo = ZD1201_TX_TIMEOUT;
 	strcpy(dev->name, "wlan%d");
 
-	err = zd1201_getconfig(zd, ZD1201_RID_CNFOWNMACADDR, 
-	    dev->dev_addr, dev->addr_len);
+	err = zd1201_getconfig(zd, ZD1201_RID_CNFOWNMACADDR, addr, ETH_ALEN);
 	if (err)
 		goto err_start;
+	eth_hw_addr_set(dev, addr);
 
 	/* Set wildcard essid to match zd->essid */
 	*(__le16 *)buf = cpu_to_le16(0);

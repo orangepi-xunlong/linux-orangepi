@@ -1,12 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2012 STMicroelectronics Limited
  *
  * Authors: Francesco Virlinzi <francesco.virlinzi@st.com>
  *	    Alexandre Torgue <alexandre.torgue@st.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/init.h>
@@ -147,7 +144,6 @@ static struct scsi_host_template ahci_platform_sht = {
 
 static int st_ahci_probe(struct platform_device *pdev)
 {
-	struct device *dev = &pdev->dev;
 	struct st_ahci_drv_data *drv_data;
 	struct ahci_host_priv *hpriv;
 	int err;
@@ -156,7 +152,7 @@ static int st_ahci_probe(struct platform_device *pdev)
 	if (!drv_data)
 		return -ENOMEM;
 
-	hpriv = ahci_platform_get_resources(pdev);
+	hpriv = ahci_platform_get_resources(pdev, 0);
 	if (IS_ERR(hpriv))
 		return PTR_ERR(hpriv);
 	hpriv->plat_data = drv_data;
@@ -170,9 +166,6 @@ static int st_ahci_probe(struct platform_device *pdev)
 		return err;
 
 	st_ahci_configure_oob(hpriv->mmio);
-
-	of_property_read_u32(dev->of_node,
-			     "ports-implemented", &hpriv->force_port_map);
 
 	err = ahci_platform_init_host(pdev, hpriv, &st_ahci_port_info,
 				      &ahci_platform_sht);
@@ -235,7 +228,7 @@ static SIMPLE_DEV_PM_OPS(st_ahci_pm_ops, st_ahci_suspend, st_ahci_resume);
 
 static const struct of_device_id st_ahci_match[] = {
 	{ .compatible = "st,ahci", },
-	{},
+	{ /* sentinel */ }
 };
 MODULE_DEVICE_TABLE(of, st_ahci_match);
 
@@ -243,7 +236,7 @@ static struct platform_driver st_ahci_driver = {
 	.driver = {
 		.name = DRV_NAME,
 		.pm = &st_ahci_pm_ops,
-		.of_match_table = of_match_ptr(st_ahci_match),
+		.of_match_table = st_ahci_match,
 	},
 	.probe = st_ahci_probe,
 	.remove = ata_platform_remove_one,

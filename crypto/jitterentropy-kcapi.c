@@ -37,30 +37,18 @@
  * DAMAGE.
  */
 
+#include <linux/fips.h>
+#include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/slab.h>
-#include <linux/module.h>
-#include <linux/fips.h>
 #include <linux/time.h>
-#include <linux/crypto.h>
 #include <crypto/internal/rng.h>
 
-struct rand_data;
-int jent_read_entropy(struct rand_data *ec, unsigned char *data,
-		      unsigned int len);
-int jent_entropy_init(void);
-struct rand_data *jent_entropy_collector_alloc(unsigned int osr,
-					       unsigned int flags);
-void jent_entropy_collector_free(struct rand_data *entropy_collector);
+#include "jitterentropy.h"
 
 /***************************************************************************
  * Helper function
  ***************************************************************************/
-
-__u64 jent_rol64(__u64 word, unsigned int shift)
-{
-	return rol64(word, shift);
-}
 
 void *jent_zalloc(unsigned int len)
 {
@@ -69,17 +57,7 @@ void *jent_zalloc(unsigned int len)
 
 void jent_zfree(void *ptr)
 {
-	kzfree(ptr);
-}
-
-int jent_fips_enabled(void)
-{
-	return fips_enabled;
-}
-
-void jent_panic(char *s)
-{
-	panic("%s", s);
+	kfree_sensitive(ptr);
 }
 
 void jent_memcpy(void *dest, const void *src, unsigned int n)
@@ -154,7 +132,31 @@ static int jent_kcapi_random(struct crypto_rng *tfm,
 	int ret = 0;
 
 	spin_lock(&rng->jent_lock);
+
 	ret = jent_read_entropy(rng->entropy_collector, rdata, dlen);
+
+	if (ret == -3) {
+		/* Handle permanent health test error */
+		/*
+		 * If the kernel was booted with fips=1, it implies that
+		 * the entire kernel acts as a FIPS 140 module. In this case
+		 * an SP800-90B permanent health test error is treated as
+		 * a FIPS module error.
+		 */
+		if (fips_enabled)
+			panic("Jitter RNG permanent health test failure\n");
+
+		pr_err("Jitter RNG permanent health test failure\n");
+		ret = -EFAULT;
+	} else if (ret == -2) {
+		/* Handle intermittent health test error */
+		pr_warn_ratelimited("Reset Jitter RNG due to intermittent health test failure\n");
+		ret = -EAGAIN;
+	} else if (ret == -1) {
+		/* Handle other errors */
+		ret = -EINVAL;
+	}
+
 	spin_unlock(&rng->jent_lock);
 
 	return ret;
@@ -188,6 +190,10 @@ static int __init jent_mod_init(void)
 
 	ret = jent_entropy_init();
 	if (ret) {
+		/* Handle permanent health test error */
+		if (fips_enabled)
+			panic("jitterentropy: Initialization failed with host not compliant with requirements: %d\n", ret);
+
 		pr_info("jitterentropy: Initialization failed with host not compliant with requirements: %d\n", ret);
 		return -EFAULT;
 	}

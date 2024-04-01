@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * OMAP MPUSS low power code
  *
@@ -30,11 +31,6 @@
  *
  * Note: CPU0 is the master core and it is the last CPU to go down
  * and first to wake-up when MPUSS low power states are excercised
- *
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/kernel.h>
@@ -46,7 +42,6 @@
 #include <asm/cacheflush.h>
 #include <asm/tlbflush.h>
 #include <asm/smp_scu.h>
-#include <asm/pgalloc.h>
 #include <asm/suspend.h>
 #include <asm/virt.h>
 #include <asm/hardware/cache-l2x0.h>
@@ -64,6 +59,7 @@
 #include "prm-regbits-44xx.h"
 
 static void __iomem *sar_base;
+static u32 old_cpu1_ns_pa_addr;
 
 #if defined(CONFIG_PM) && defined(CONFIG_SMP)
 
@@ -230,7 +226,6 @@ int omap4_enter_lowpower(unsigned int cpu, unsigned int power_state)
 {
 	struct omap4_cpu_pm_info *pm_info = &per_cpu(omap4_pm_info, cpu);
 	unsigned int save_state = 0, cpu_logic_state = PWRDM_POWER_RET;
-	unsigned int wakeup_cpu;
 
 	if (omap_rev() == OMAP4430_REV_ES1_0)
 		return -ENXIO;
@@ -273,7 +268,7 @@ int omap4_enter_lowpower(unsigned int cpu, unsigned int power_state)
 	cpu_clear_prev_logic_pwrst(cpu);
 	pwrdm_set_next_pwrst(pm_info->pwrdm, power_state);
 	pwrdm_set_logic_retst(pm_info->pwrdm, cpu_logic_state);
-	set_cpu_wakeup_addr(cpu, virt_to_phys(omap_pm_ops.resume));
+	set_cpu_wakeup_addr(cpu, __pa_symbol(omap_pm_ops.resume));
 	omap_pm_ops.scu_prepare(cpu, power_state);
 	l2x0_pwrst_prepare(cpu, save_state);
 
@@ -295,7 +290,6 @@ int omap4_enter_lowpower(unsigned int cpu, unsigned int power_state)
 	 * secure devices, CPUx does WFI which can result in
 	 * domain transition
 	 */
-	wakeup_cpu = smp_processor_id();
 	pwrdm_set_next_pwrst(pm_info->pwrdm, PWRDM_POWER_ON);
 
 	pwrdm_post_transition(NULL);
@@ -325,7 +319,7 @@ int omap4_hotplug_cpu(unsigned int cpu, unsigned int power_state)
 
 	pwrdm_clear_all_prev_pwrst(pm_info->pwrdm);
 	pwrdm_set_next_pwrst(pm_info->pwrdm, power_state);
-	set_cpu_wakeup_addr(cpu, virt_to_phys(omap_pm_ops.hotplug_restart));
+	set_cpu_wakeup_addr(cpu, __pa_symbol(omap_pm_ops.hotplug_restart));
 	omap_pm_ops.scu_prepare(cpu, power_state);
 
 	/*
@@ -451,6 +445,11 @@ int __init omap4_mpuss_init(void)
 
 #endif
 
+u32 omap4_get_cpu1_ns_pa_addr(void)
+{
+	return old_cpu1_ns_pa_addr;
+}
+
 /*
  * For kexec, we must set CPU1_WAKEUP_NS_PA_ADDR to point to
  * current kernel's secondary_startup() early before
@@ -460,22 +459,30 @@ int __init omap4_mpuss_init(void)
 void __init omap4_mpuss_early_init(void)
 {
 	unsigned long startup_pa;
+	void __iomem *ns_pa_addr;
 
-	if (!(cpu_is_omap44xx() || soc_is_omap54xx()))
+	if (!(soc_is_omap44xx() || soc_is_omap54xx()))
 		return;
 
 	sar_base = omap4_get_sar_ram_base();
 
-	if (cpu_is_omap443x())
-		startup_pa = virt_to_phys(omap4_secondary_startup);
-	else if (cpu_is_omap446x())
-		startup_pa = virt_to_phys(omap4460_secondary_startup);
-	else if ((__boot_cpu_mode & MODE_MASK) == HYP_MODE)
-		startup_pa = virt_to_phys(omap5_secondary_hyp_startup);
+	/* Save old NS_PA_ADDR for validity checks later on */
+	if (soc_is_omap44xx())
+		ns_pa_addr = sar_base + CPU1_WAKEUP_NS_PA_ADDR_OFFSET;
 	else
-		startup_pa = virt_to_phys(omap5_secondary_startup);
+		ns_pa_addr = sar_base + OMAP5_CPU1_WAKEUP_NS_PA_ADDR_OFFSET;
+	old_cpu1_ns_pa_addr = readl_relaxed(ns_pa_addr);
 
-	if (cpu_is_omap44xx())
+	if (soc_is_omap443x())
+		startup_pa = __pa_symbol(omap4_secondary_startup);
+	else if (soc_is_omap446x())
+		startup_pa = __pa_symbol(omap4460_secondary_startup);
+	else if ((__boot_cpu_mode & MODE_MASK) == HYP_MODE)
+		startup_pa = __pa_symbol(omap5_secondary_hyp_startup);
+	else
+		startup_pa = __pa_symbol(omap5_secondary_startup);
+
+	if (soc_is_omap44xx())
 		writel_relaxed(startup_pa, sar_base +
 			       CPU1_WAKEUP_NS_PA_ADDR_OFFSET);
 	else

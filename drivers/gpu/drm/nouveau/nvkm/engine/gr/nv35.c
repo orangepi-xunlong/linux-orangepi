@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 #include "nv20.h"
 #include "regs.h"
 
@@ -124,12 +125,13 @@ nv35_gr = {
 		{ -1, -1, 0x038a, &nv04_gr_object }, /* ifc (nv30) */
 		{ -1, -1, 0x039e, &nv04_gr_object }, /* swzsurf (nv30) */
 		{ -1, -1, 0x0497, &nv04_gr_object }, /* rankine */
+		{ -1, -1, 0x0597, &nv04_gr_object }, /* kelvin */
 		{}
 	}
 };
 
 int
-nv35_gr_new(struct nvkm_device *device, int index, struct nvkm_gr **pgr)
+nv35_gr_new(struct nvkm_device *device, enum nvkm_subdev_type type, int inst, struct nvkm_gr **pgr)
 {
-	return nv20_gr_new_(&nv35_gr, device, index, pgr);
+	return nv20_gr_new_(&nv35_gr, device, type, inst, pgr);
 }

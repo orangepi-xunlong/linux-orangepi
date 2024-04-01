@@ -18,7 +18,7 @@ static const unsigned char data_b[] = {
 
 static const unsigned char data_a[] = ".2.{....p..$}.4...1.....L...C...";
 
-static const char * const test_data_1_le[] __initconst = {
+static const char * const test_data_1[] __initconst = {
 	"be", "32", "db", "7b", "0a", "18", "93", "b2",
 	"70", "ba", "c4", "24", "7d", "83", "34", "9b",
 	"a6", "9c", "31", "ad", "9c", "0f", "ac", "e9",
@@ -32,14 +32,31 @@ static const char * const test_data_2_le[] __initconst = {
 	"d14c", "9919", "b143", "0caf",
 };
 
+static const char * const test_data_2_be[] __initconst = {
+	"be32", "db7b", "0a18", "93b2",
+	"70ba", "c424", "7d83", "349b",
+	"a69c", "31ad", "9c0f", "ace9",
+	"4cd1", "1999", "43b1", "af0c",
+};
+
 static const char * const test_data_4_le[] __initconst = {
 	"7bdb32be", "b293180a", "24c4ba70", "9b34837d",
 	"ad319ca6", "e9ac0f9c", "9919d14c", "0cafb143",
 };
 
+static const char * const test_data_4_be[] __initconst = {
+	"be32db7b", "0a1893b2", "70bac424", "7d83349b",
+	"a69c31ad", "9c0face9", "4cd11999", "43b1af0c",
+};
+
 static const char * const test_data_8_le[] __initconst = {
 	"b293180a7bdb32be", "9b34837d24c4ba70",
 	"e9ac0f9cad319ca6", "0cafb1439919d14c",
+};
+
+static const char * const test_data_8_be[] __initconst = {
+	"be32db7b0a1893b2", "70bac4247d83349b",
+	"a69c31ad9c0face9", "4cd1199943b1af0c",
 };
 
 #define FILL_CHAR	'#'
@@ -56,6 +73,7 @@ static void __init test_hexdump_prepare_test(size_t len, int rowsize,
 	size_t l = len;
 	int gs = groupsize, rs = rowsize;
 	unsigned int i;
+	const bool is_be = IS_ENABLED(CONFIG_CPU_BIG_ENDIAN);
 
 	if (rs != 16 && rs != 32)
 		rs = 16;
@@ -67,13 +85,13 @@ static void __init test_hexdump_prepare_test(size_t len, int rowsize,
 		gs = 1;
 
 	if (gs == 8)
-		result = test_data_8_le;
+		result = is_be ? test_data_8_be : test_data_8_le;
 	else if (gs == 4)
-		result = test_data_4_le;
+		result = is_be ? test_data_4_be : test_data_4_le;
 	else if (gs == 2)
-		result = test_data_2_le;
+		result = is_be ? test_data_2_be : test_data_2_le;
 	else
-		result = test_data_1_le;
+		result = test_data_1;
 
 	/* hex dump */
 	p = test;
@@ -131,7 +149,7 @@ static void __init test_hexdump(size_t len, int rowsize, int groupsize,
 static void __init test_hexdump_set(int rowsize, bool ascii)
 {
 	size_t d = min_t(size_t, sizeof(data_b), rowsize);
-	size_t len = get_random_int() % d + 1;
+	size_t len = prandom_u32_max(d) + 1;
 
 	test_hexdump(len, rowsize, 4, ascii);
 	test_hexdump(len, rowsize, 2, ascii);
@@ -190,11 +208,11 @@ static void __init test_hexdump_overflow(size_t buflen, size_t len,
 static void __init test_hexdump_overflow_set(size_t buflen, bool ascii)
 {
 	unsigned int i = 0;
-	int rs = (get_random_int() % 2 + 1) * 16;
+	int rs = (prandom_u32_max(2) + 1) * 16;
 
 	do {
 		int gs = 1 << i;
-		size_t len = get_random_int() % rs + gs;
+		size_t len = prandom_u32_max(rs) + gs;
 
 		test_hexdump_overflow(buflen, rounddown(len, gs), rs, gs, ascii);
 	} while (i++ < 3);
@@ -205,11 +223,11 @@ static int __init test_hexdump_init(void)
 	unsigned int i;
 	int rowsize;
 
-	rowsize = (get_random_int() % 2 + 1) * 16;
+	rowsize = (prandom_u32_max(2) + 1) * 16;
 	for (i = 0; i < 16; i++)
 		test_hexdump_set(rowsize, false);
 
-	rowsize = (get_random_int() % 2 + 1) * 16;
+	rowsize = (prandom_u32_max(2) + 1) * 16;
 	for (i = 0; i < 16; i++)
 		test_hexdump_set(rowsize, true);
 

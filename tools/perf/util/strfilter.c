@@ -1,6 +1,12 @@
-#include "util.h"
-#include "string.h"
+// SPDX-License-Identifier: GPL-2.0
+#include "string2.h"
 #include "strfilter.h"
+
+#include <errno.h>
+#include <stdlib.h>
+#include <linux/ctype.h>
+#include <linux/string.h>
+#include <linux/zalloc.h>
 
 /* Operators */
 static const char *OP_and	= "&";	/* Logical AND */
@@ -33,8 +39,7 @@ static const char *get_token(const char *s, const char **e)
 {
 	const char *p;
 
-	while (isspace(*s))	/* Skip spaces */
-		s++;
+	s = skip_spaces(s);
 
 	if (*s == '\0') {
 		p = s;

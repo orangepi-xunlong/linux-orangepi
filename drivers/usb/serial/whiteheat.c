@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0+
 /*
  * USB ConnectTech WhiteHEAT driver
  *
@@ -7,12 +8,7 @@
  *	Copyright (C) 1999 - 2001
  *	    Greg Kroah-Hartman (greg@kroah.com)
  *
- *	This program is free software; you can redistribute it and/or modify
- *	it under the terms of the GNU General Public License as published by
- *	the Free Software Foundation; either version 2 of the License, or
- *	(at your option) any later version.
- *
- * See Documentation/usb/usb-serial.txt for more information on using this
+ * See Documentation/usb/usb-serial.rst for more information on using this
  * driver
  */
 
@@ -33,10 +29,6 @@
 #include <linux/usb/serial.h>
 #include <linux/usb/ezusb.h>
 #include "whiteheat.h"			/* WhiteHEAT specific commands */
-
-#ifndef CMSPAR
-#define CMSPAR 0
-#endif
 
 /*
  * Version Information
@@ -80,19 +72,18 @@ static int  whiteheat_firmware_download(struct usb_serial *serial,
 static int  whiteheat_firmware_attach(struct usb_serial *serial);
 
 /* function prototypes for the Connect Tech WhiteHEAT serial converter */
-static int whiteheat_probe(struct usb_serial *serial,
-				const struct usb_device_id *id);
 static int  whiteheat_attach(struct usb_serial *serial);
 static void whiteheat_release(struct usb_serial *serial);
 static int  whiteheat_port_probe(struct usb_serial_port *port);
-static int  whiteheat_port_remove(struct usb_serial_port *port);
+static void whiteheat_port_remove(struct usb_serial_port *port);
 static int  whiteheat_open(struct tty_struct *tty,
 			struct usb_serial_port *port);
 static void whiteheat_close(struct usb_serial_port *port);
-static int  whiteheat_ioctl(struct tty_struct *tty,
-			unsigned int cmd, unsigned long arg);
+static void whiteheat_get_serial(struct tty_struct *tty,
+			struct serial_struct *ss);
 static void whiteheat_set_termios(struct tty_struct *tty,
-			struct usb_serial_port *port, struct ktermios *old);
+				  struct usb_serial_port *port,
+				  const struct ktermios *old_termios);
 static int  whiteheat_tiocmget(struct tty_struct *tty);
 static int  whiteheat_tiocmset(struct tty_struct *tty,
 			unsigned int set, unsigned int clear);
@@ -118,14 +109,15 @@ static struct usb_serial_driver whiteheat_device = {
 	.description =		"Connect Tech - WhiteHEAT",
 	.id_table =		id_table_std,
 	.num_ports =		4,
-	.probe =		whiteheat_probe,
+	.num_bulk_in =		5,
+	.num_bulk_out =		5,
 	.attach =		whiteheat_attach,
 	.release =		whiteheat_release,
 	.port_probe =		whiteheat_port_probe,
 	.port_remove =		whiteheat_port_remove,
 	.open =			whiteheat_open,
 	.close =		whiteheat_close,
-	.ioctl =		whiteheat_ioctl,
+	.get_serial =		whiteheat_get_serial,
 	.set_termios =		whiteheat_set_termios,
 	.break_ctl =		whiteheat_break_ctl,
 	.tiocmget =		whiteheat_tiocmget,
@@ -175,7 +167,6 @@ static int firm_report_tx_done(struct usb_serial_port *port);
 #define COMMAND_PORT		4
 #define COMMAND_TIMEOUT		(2*HZ)	/* 2 second timeout for a command */
 #define	COMMAND_TIMEOUT_MS	2000
-#define CLOSING_DELAY		(30 * HZ)
 
 
 /*****************************************************************************
@@ -220,33 +211,6 @@ static int whiteheat_firmware_attach(struct usb_serial *serial)
 /*****************************************************************************
  * Connect Tech's White Heat serial driver functions
  *****************************************************************************/
-
-static int whiteheat_probe(struct usb_serial *serial,
-				const struct usb_device_id *id)
-{
-	struct usb_host_interface *iface_desc;
-	struct usb_endpoint_descriptor *endpoint;
-	size_t num_bulk_in = 0;
-	size_t num_bulk_out = 0;
-	size_t min_num_bulk;
-	unsigned int i;
-
-	iface_desc = serial->interface->cur_altsetting;
-
-	for (i = 0; i < iface_desc->desc.bNumEndpoints; i++) {
-		endpoint = &iface_desc->endpoint[i].desc;
-		if (usb_endpoint_is_bulk_in(endpoint))
-			++num_bulk_in;
-		if (usb_endpoint_is_bulk_out(endpoint))
-			++num_bulk_out;
-	}
-
-	min_num_bulk = COMMAND_PORT + 1;
-	if (num_bulk_in < min_num_bulk || num_bulk_out < min_num_bulk)
-		return -ENODEV;
-
-	return 0;
-}
 
 static int whiteheat_attach(struct usb_serial *serial)
 {
@@ -377,14 +341,12 @@ static int whiteheat_port_probe(struct usb_serial_port *port)
 	return 0;
 }
 
-static int whiteheat_port_remove(struct usb_serial_port *port)
+static void whiteheat_port_remove(struct usb_serial_port *port)
 {
 	struct whiteheat_private *info;
 
 	info = usb_get_serial_port_data(port);
 	kfree(info);
-
-	return 0;
 }
 
 static int whiteheat_open(struct tty_struct *tty, struct usb_serial_port *port)
@@ -474,39 +436,15 @@ static int whiteheat_tiocmset(struct tty_struct *tty,
 }
 
 
-static int whiteheat_ioctl(struct tty_struct *tty,
-					unsigned int cmd, unsigned long arg)
+static void whiteheat_get_serial(struct tty_struct *tty, struct serial_struct *ss)
 {
-	struct usb_serial_port *port = tty->driver_data;
-	struct serial_struct serstruct;
-	void __user *user_arg = (void __user *)arg;
-
-	switch (cmd) {
-	case TIOCGSERIAL:
-		memset(&serstruct, 0, sizeof(serstruct));
-		serstruct.type = PORT_16654;
-		serstruct.line = port->minor;
-		serstruct.port = port->port_number;
-		serstruct.flags = ASYNC_SKIP_TEST | ASYNC_AUTO_IRQ;
-		serstruct.xmit_fifo_size = kfifo_size(&port->write_fifo);
-		serstruct.custom_divisor = 0;
-		serstruct.baud_base = 460800;
-		serstruct.close_delay = CLOSING_DELAY;
-		serstruct.closing_wait = CLOSING_DELAY;
-
-		if (copy_to_user(user_arg, &serstruct, sizeof(serstruct)))
-			return -EFAULT;
-		break;
-	default:
-		break;
-	}
-
-	return -ENOIOCTLCMD;
+	ss->baud_base = 460800;
 }
 
 
 static void whiteheat_set_termios(struct tty_struct *tty,
-	struct usb_serial_port *port, struct ktermios *old_termios)
+				  struct usb_serial_port *port,
+				  const struct ktermios *old_termios)
 {
 	firm_setup_port(tty);
 }
@@ -604,6 +542,10 @@ static int firm_send_command(struct usb_serial_port *port, __u8 command,
 
 	command_port = port->serial->port[COMMAND_PORT];
 	command_info = usb_get_serial_port_data(command_port);
+
+	if (command_port->bulk_out_size < datasize + 1)
+		return -EIO;
+
 	mutex_lock(&command_info->mutex);
 	command_info->command_finished = false;
 
@@ -640,9 +582,8 @@ static int firm_send_command(struct usb_serial_port *port, __u8 command,
 		switch (command) {
 		case WHITEHEAT_GET_DTR_RTS:
 			info = usb_get_serial_port_data(port);
-			memcpy(&info->mcr, command_info->result_buffer,
-					sizeof(struct whiteheat_dr_info));
-				break;
+			info->mcr = command_info->result_buffer[0];
+			break;
 		}
 	}
 exit:
@@ -677,17 +618,11 @@ static void firm_setup_port(struct tty_struct *tty)
 	struct device *dev = &port->dev;
 	struct whiteheat_port_settings port_settings;
 	unsigned int cflag = tty->termios.c_cflag;
+	speed_t baud;
 
 	port_settings.port = port->port_number + 1;
 
-	/* get the byte size */
-	switch (cflag & CSIZE) {
-	case CS5:	port_settings.bits = 5;   break;
-	case CS6:	port_settings.bits = 6;   break;
-	case CS7:	port_settings.bits = 7;   break;
-	default:
-	case CS8:	port_settings.bits = 8;   break;
-	}
+	port_settings.bits = tty_get_char_size(cflag);
 	dev_dbg(dev, "%s - data bits = %d\n", __func__, port_settings.bits);
 
 	/* determine the parity */
@@ -737,11 +672,13 @@ static void firm_setup_port(struct tty_struct *tty)
 	dev_dbg(dev, "%s - XON = %2x, XOFF = %2x\n", __func__, port_settings.xon, port_settings.xoff);
 
 	/* get the baud rate wanted */
-	port_settings.baud = tty_get_baud_rate(tty);
-	dev_dbg(dev, "%s - baud rate = %d\n", __func__, port_settings.baud);
+	baud = tty_get_baud_rate(tty);
+	port_settings.baud = cpu_to_le32(baud);
+	dev_dbg(dev, "%s - baud rate = %u\n", __func__, baud);
 
 	/* fixme: should set validated settings */
-	tty_encode_baud_rate(tty, port_settings.baud, port_settings.baud);
+	tty_encode_baud_rate(tty, baud, baud);
+
 	/* handle any settings that aren't specified in the tty structure */
 	port_settings.lloop = 0;
 

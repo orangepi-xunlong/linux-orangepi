@@ -37,17 +37,13 @@
 
 / {
 	model = "NorthStar Plus SVK (BCM988312HR)";
-	compatible = "brcm,bcm88312", "brcm,nsp";
-
-	aliases {
-		serial0 = &uart0;
-	};
+	compatible = "brcm,bcm988312hr", "brcm,bcm88312", "brcm,nsp";
 
 	chosen {
 		stdout-path = "serial0:115200n8";
 	};
 
-	memory {
+	memory@60000000 {
 		device_type = "memory";
 		reg = <0x60000000 0x80000000>;
 	};
@@ -60,14 +56,30 @@
 	};
 };
 
-/* USB 2/3 support needed to be complete */
+/* USB 3 support needed to be complete */
+
+&dma {
+	status = "okay";
+};
 
 &amac0 {
 	status = "okay";
 };
 
-&nand {
-	nandcs@0 {
+&amac1 {
+	status = "okay";
+};
+
+&amac2 {
+	status = "okay";
+};
+
+&ehci0 {
+	status = "okay";
+};
+
+&nand_controller {
+	nand@0 {
 		compatible = "brcm,nandcs";
 		reg = <0>;
 		nand-on-flash-bbt;
@@ -104,6 +116,10 @@
 	};
 };
 
+&ohci0 {
+	status = "okay";
+};
+
 &pcie0 {
 	status = "okay";
 };
@@ -118,6 +134,41 @@
 	nand_sel: nand_sel {
 		function = "nand";
 		groups = "nand_grp";
+	};
+};
+
+&qspi {
+	status = "okay";
+	bspi-sel = <0>;
+	flash: flash@0 {
+		#address-cells = <1>;
+		#size-cells = <1>;
+		compatible = "m25p80";
+		reg = <0x0>;
+		spi-max-frequency = <12500000>;
+		m25p,fast-read;
+		spi-cpol;
+		spi-cpha;
+
+		partition@0 {
+			label = "boot";
+			reg = <0x00000000 0x000a0000>;
+		};
+
+		partition@a0000 {
+			label = "env";
+			reg = <0x000a0000 0x00060000>;
+		};
+
+		partition@100000 {
+			label = "system";
+			reg = <0x00100000 0x00600000>;
+		};
+
+		partition@700000 {
+			label = "rootfs";
+			reg = <0x00700000 0x01900000>;
+		};
 	};
 };
 
@@ -138,9 +189,6 @@
 	status = "okay";
 
 	ports {
-		#address-cells = <1>;
-		#size-cells = <0>;
-
 		port@0 {
 			label = "port0";
 			reg = <0>;
@@ -166,10 +214,10 @@
 			reg = <4>;
 		};
 
-		port@5 {
-			ethernet = <&amac0>;
+		port@8 {
+			ethernet = <&amac2>;
 			label = "cpu";
-			reg = <5>;
+			reg = <8>;
 			fixed-link {
 				speed = <1000>;
 				full-duplex;

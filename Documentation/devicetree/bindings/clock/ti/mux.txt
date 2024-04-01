@@ -42,12 +42,16 @@ Required properties:
 - reg : register offset for register controlling adjustable mux
 
 Optional properties:
+- clock-output-names : from common clock binding.
 - ti,bit-shift : number of bits to shift the bit-mask, defaults to
   0 if not present
 - ti,index-starts-at-one : valid input select programming starts at 1, not
   zero
 - ti,set-rate-parent : clk_set_rate is propagated to parent clock,
   not supported by the composite-mux-clock subtype
+- ti,latch-bit : latch the mux value to HW, only needed if the register
+  access requires this. As an example, dra7x DPLL_GMAC H14 muxing
+  implements such behavior.
 
 Examples:
 

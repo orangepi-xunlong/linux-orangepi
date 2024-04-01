@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * In-kernel FPU support functions
  *
@@ -44,8 +45,11 @@
 #define _ASM_S390_FPU_API_H
 
 #include <linux/preempt.h>
+#include <asm/asm-extable.h>
 
 void save_fpu_regs(void);
+void load_fpu_regs(void);
+void __load_fpu_regs(void);
 
 static inline int test_fp_ctl(u32 fpc)
 {

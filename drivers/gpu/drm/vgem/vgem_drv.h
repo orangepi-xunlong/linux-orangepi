@@ -29,8 +29,8 @@
 #ifndef _VGEM_DRV_H_
 #define _VGEM_DRV_H_
 
-#include <drm/drmP.h>
 #include <drm/drm_gem.h>
+#include <drm/drm_cache.h>
 
 #include <uapi/drm/vgem_drm.h>
 
@@ -42,6 +42,12 @@ struct vgem_file {
 #define to_vgem_bo(x) container_of(x, struct drm_vgem_gem_object, base)
 struct drm_vgem_gem_object {
 	struct drm_gem_object base;
+
+	struct page **pages;
+	unsigned int pages_pin_count;
+	struct mutex pages_lock;
+
+	struct sg_table *table;
 };
 
 int vgem_fence_open(struct vgem_file *file);

@@ -1,13 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * arch/sh/kernel/cpu/sh2/probe.c
  *
  * CPU Subtype Probing for SH-2.
  *
  * Copyright (C) 2002 Paul Mundt
- *
- * This file is subject to the terms and conditions of the GNU General Public
- * License.  See the file "COPYING" in the main directory of this archive
- * for more details.
  */
 #include <linux/init.h>
 #include <linux/of_fdt.h>
@@ -24,7 +21,7 @@ static int __init scan_cache(unsigned long node, const char *uname,
 	if (!of_flat_dt_is_compatible(node, "jcore,cache"))
 		return 0;
 
-	j2_ccr_base = (u32 __iomem *)of_flat_dt_translate_address(node);
+	j2_ccr_base = ioremap(of_flat_dt_translate_address(node), 4);
 
 	return 1;
 }
@@ -43,7 +40,11 @@ void __ref cpu_probe(void)
 #endif
 
 #if defined(CONFIG_CPU_J2)
+#if defined(CONFIG_SMP)
 	unsigned cpu = hard_smp_processor_id();
+#else
+	unsigned cpu = 0;
+#endif
 	if (cpu == 0) of_scan_flat_dt(scan_cache, NULL);
 	if (j2_ccr_base) __raw_writel(0x80000303, j2_ccr_base + 4*cpu);
 	if (cpu != 0) return;

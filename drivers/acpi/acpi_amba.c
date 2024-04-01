@@ -1,13 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-only
 
 /*
  * ACPI support for platform bus type.
  *
  * Copyright (C) 2015, Linaro Ltd
  * Author: Graeme Gregory <graeme.gregory@linaro.org>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/acpi.h>
@@ -24,6 +21,16 @@
 
 static const struct acpi_device_id amba_id_list[] = {
 	{"ARMH0061", 0}, /* PL061 GPIO Device */
+	{"ARMH0330", 0}, /* ARM DMA Controller DMA-330 */
+	{"ARMHC500", 0}, /* ARM CoreSight ETM4x */
+	{"ARMHC501", 0}, /* ARM CoreSight ETR */
+	{"ARMHC502", 0}, /* ARM CoreSight STM */
+	{"ARMHC503", 0}, /* ARM CoreSight Debug */
+	{"ARMHC979", 0}, /* ARM CoreSight TPIU */
+	{"ARMHC97C", 0}, /* ARM CoreSight SoC-400 TMC, SoC-600 ETF/ETB */
+	{"ARMHC98D", 0}, /* ARM CoreSight Dynamic Replicator */
+	{"ARMHC9CA", 0}, /* ARM CoreSight CATU */
+	{"ARMHC9FF", 0}, /* ARM CoreSight Dynamic Funnel */
 	{"", 0},
 };
 
@@ -42,6 +49,7 @@ static void amba_register_dummy_clk(void)
 static int amba_handler_attach(struct acpi_device *adev,
 				const struct acpi_device_id *id)
 {
+	struct acpi_device *parent = acpi_dev_parent(adev);
 	struct amba_device *dev;
 	struct resource_entry *rentry;
 	struct list_head resource_list;
@@ -70,6 +78,7 @@ static int amba_handler_attach(struct acpi_device *adev,
 		case IORESOURCE_MEM:
 			if (!address_found) {
 				dev->res = *rentry->res;
+				dev->res.name = dev_name(&dev->dev);
 				address_found = true;
 			}
 			break;
@@ -90,8 +99,8 @@ static int amba_handler_attach(struct acpi_device *adev,
 	 * attached to it, that physical device should be the parent of
 	 * the amba device we are about to create.
 	 */
-	if (adev->parent)
-		dev->dev.parent = acpi_get_first_physical_node(adev->parent);
+	if (parent)
+		dev->dev.parent = acpi_get_first_physical_node(parent);
 
 	ACPI_COMPANION_SET(&dev->dev, adev);
 

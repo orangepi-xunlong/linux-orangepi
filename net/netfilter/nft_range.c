@@ -1,9 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2016 Pablo Neira Ayuso <pablo@netfilter.org>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/kernel.h>
@@ -18,14 +15,13 @@
 struct nft_range_expr {
 	struct nft_data		data_from;
 	struct nft_data		data_to;
-	enum nft_registers	sreg:8;
+	u8			sreg;
 	u8			len;
 	enum nft_range_ops	op:8;
 };
 
-static void nft_range_eval(const struct nft_expr *expr,
-			 struct nft_regs *regs,
-			 const struct nft_pktinfo *pkt)
+void nft_range_eval(const struct nft_expr *expr,
+		    struct nft_regs *regs, const struct nft_pktinfo *pkt)
 {
 	const struct nft_range_expr *priv = nft_expr_priv(expr);
 	int d1, d2;
@@ -55,7 +51,14 @@ static int nft_range_init(const struct nft_ctx *ctx, const struct nft_expr *expr
 			const struct nlattr * const tb[])
 {
 	struct nft_range_expr *priv = nft_expr_priv(expr);
-	struct nft_data_desc desc_from, desc_to;
+	struct nft_data_desc desc_from = {
+		.type	= NFT_DATA_VALUE,
+		.size	= sizeof(priv->data_from),
+	};
+	struct nft_data_desc desc_to = {
+		.type	= NFT_DATA_VALUE,
+		.size	= sizeof(priv->data_to),
+	};
 	int err;
 	u32 op;
 
@@ -65,13 +68,13 @@ static int nft_range_init(const struct nft_ctx *ctx, const struct nft_expr *expr
 	    !tb[NFTA_RANGE_TO_DATA])
 		return -EINVAL;
 
-	err = nft_data_init(NULL, &priv->data_from, sizeof(priv->data_from),
-			    &desc_from, tb[NFTA_RANGE_FROM_DATA]);
+	err = nft_data_init(NULL, &priv->data_from, &desc_from,
+			    tb[NFTA_RANGE_FROM_DATA]);
 	if (err < 0)
 		return err;
 
-	err = nft_data_init(NULL, &priv->data_to, sizeof(priv->data_to),
-			    &desc_to, tb[NFTA_RANGE_TO_DATA]);
+	err = nft_data_init(NULL, &priv->data_to, &desc_to,
+			    tb[NFTA_RANGE_TO_DATA]);
 	if (err < 0)
 		goto err1;
 
@@ -80,8 +83,8 @@ static int nft_range_init(const struct nft_ctx *ctx, const struct nft_expr *expr
 		goto err2;
 	}
 
-	priv->sreg = nft_parse_register(tb[NFTA_RANGE_SREG]);
-	err = nft_validate_register_load(priv->sreg, desc_from.len);
+	err = nft_parse_register_load(tb[NFTA_RANGE_SREG], &priv->sreg,
+				      desc_from.len);
 	if (err < 0)
 		goto err2;
 
@@ -102,9 +105,9 @@ static int nft_range_init(const struct nft_ctx *ctx, const struct nft_expr *expr
 	priv->len = desc_from.len;
 	return 0;
 err2:
-	nft_data_uninit(&priv->data_to, desc_to.type);
+	nft_data_release(&priv->data_to, desc_to.type);
 err1:
-	nft_data_uninit(&priv->data_from, desc_from.type);
+	nft_data_release(&priv->data_from, desc_from.type);
 	return err;
 }
 
@@ -128,29 +131,19 @@ nla_put_failure:
 	return -1;
 }
 
-static struct nft_expr_type nft_range_type;
 static const struct nft_expr_ops nft_range_ops = {
 	.type		= &nft_range_type,
 	.size		= NFT_EXPR_SIZE(sizeof(struct nft_range_expr)),
 	.eval		= nft_range_eval,
 	.init		= nft_range_init,
 	.dump		= nft_range_dump,
+	.reduce		= NFT_REDUCE_READONLY,
 };
 
-static struct nft_expr_type nft_range_type __read_mostly = {
+struct nft_expr_type nft_range_type __read_mostly = {
 	.name		= "range",
 	.ops		= &nft_range_ops,
 	.policy		= nft_range_policy,
 	.maxattr	= NFTA_RANGE_MAX,
 	.owner		= THIS_MODULE,
 };
-
-int __init nft_range_module_init(void)
-{
-	return nft_register_expr(&nft_range_type);
-}
-
-void nft_range_module_exit(void)
-{
-	nft_unregister_expr(&nft_range_type);
-}

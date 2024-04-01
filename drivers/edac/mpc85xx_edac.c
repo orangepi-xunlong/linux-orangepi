@@ -24,8 +24,9 @@
 
 #include <linux/of_platform.h>
 #include <linux/of_device.h>
+#include <linux/of_address.h>
+#include <linux/of_irq.h>
 #include "edac_module.h"
-#include "edac_core.h"
 #include "mpc85xx_edac.h"
 #include "fsl_ddr_edac.h"
 
@@ -300,6 +301,22 @@ err:
 	return res;
 }
 
+static int mpc85xx_pci_err_remove(struct platform_device *op)
+{
+	struct edac_pci_ctl_info *pci = dev_get_drvdata(&op->dev);
+	struct mpc85xx_pci_pdata *pdata = pci->pvt_info;
+
+	edac_dbg(0, "\n");
+
+	out_be32(pdata->pci_vbase + MPC85XX_PCI_ERR_ADDR, orig_pci_err_cap_dr);
+	out_be32(pdata->pci_vbase + MPC85XX_PCI_ERR_EN, orig_pci_err_en);
+
+	edac_pci_del_device(&op->dev);
+	edac_pci_free_ctl_info(pci);
+
+	return 0;
+}
+
 static const struct platform_device_id mpc85xx_pci_err_match[] = {
 	{
 		.name = "mpc85xx-pci-edac"
@@ -309,6 +326,7 @@ static const struct platform_device_id mpc85xx_pci_err_match[] = {
 
 static struct platform_driver mpc85xx_pci_err_driver = {
 	.probe = mpc85xx_pci_err_probe,
+	.remove = mpc85xx_pci_err_remove,
 	.id_table = mpc85xx_pci_err_match,
 	.driver = {
 		.name = "mpc85xx_pci_err",
@@ -593,13 +611,6 @@ static int mpc85xx_l2_err_remove(struct platform_device *op)
 }
 
 static const struct of_device_id mpc85xx_l2_err_of_match[] = {
-/* deprecate the fsl,85.. forms in the future, 2.6.30? */
-	{ .compatible = "fsl,8540-l2-cache-controller", },
-	{ .compatible = "fsl,8541-l2-cache-controller", },
-	{ .compatible = "fsl,8544-l2-cache-controller", },
-	{ .compatible = "fsl,8548-l2-cache-controller", },
-	{ .compatible = "fsl,8555-l2-cache-controller", },
-	{ .compatible = "fsl,8568-l2-cache-controller", },
 	{ .compatible = "fsl,mpc8536-l2-cache-controller", },
 	{ .compatible = "fsl,mpc8540-l2-cache-controller", },
 	{ .compatible = "fsl,mpc8541-l2-cache-controller", },
@@ -613,6 +624,7 @@ static const struct of_device_id mpc85xx_l2_err_of_match[] = {
 	{ .compatible = "fsl,p1020-l2-cache-controller", },
 	{ .compatible = "fsl,p1021-l2-cache-controller", },
 	{ .compatible = "fsl,p2020-l2-cache-controller", },
+	{ .compatible = "fsl,t2080-l2-cache-controller", },
 	{},
 };
 MODULE_DEVICE_TABLE(of, mpc85xx_l2_err_of_match);
@@ -627,13 +639,6 @@ static struct platform_driver mpc85xx_l2_err_driver = {
 };
 
 static const struct of_device_id mpc85xx_mc_err_of_match[] = {
-/* deprecate the fsl,85.. forms in the future, 2.6.30? */
-	{ .compatible = "fsl,8540-memory-controller", },
-	{ .compatible = "fsl,8541-memory-controller", },
-	{ .compatible = "fsl,8544-memory-controller", },
-	{ .compatible = "fsl,8548-memory-controller", },
-	{ .compatible = "fsl,8555-memory-controller", },
-	{ .compatible = "fsl,8568-memory-controller", },
 	{ .compatible = "fsl,mpc8536-memory-controller", },
 	{ .compatible = "fsl,mpc8540-memory-controller", },
 	{ .compatible = "fsl,mpc8541-memory-controller", },

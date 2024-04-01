@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Driver for M-5MOLS 8M Pixel camera sensor with ISP
  *
@@ -6,11 +7,6 @@
  *
  * Copyright (C) 2009 Samsung Electronics Co., Ltd.
  * Author: Dongsoo Nathaniel Kim <dongsoo45.kim@samsung.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
  */
 
 #include <linux/i2c.h>
@@ -18,7 +14,7 @@
 #include <linux/irq.h>
 #include <linux/interrupt.h>
 #include <linux/delay.h>
-#include <linux/gpio.h>
+#include <linux/gpio/consumer.h>
 #include <linux/regulator/consumer.h>
 #include <linux/videodev2.h>
 #include <linux/module.h>
@@ -114,7 +110,8 @@ static const struct m5mols_resolution m5mols_reg_res[] = {
 
 /**
  * m5mols_swap_byte - an byte array to integer conversion function
- * @size: size in bytes of I2C packet defined in the M-5MOLS datasheet
+ * @data: byte array
+ * @length: size in bytes of I2C packet defined in the M-5MOLS datasheet
  *
  * Convert I2C data byte array with performing any required byte
  * reordering to assure proper values for each data type, regardless
@@ -132,8 +129,9 @@ static u32 m5mols_swap_byte(u8 *data, u8 length)
 
 /**
  * m5mols_read -  I2C read function
- * @reg: combination of size, category and command for the I2C packet
+ * @sd: sub-device, as pointed by struct v4l2_subdev
  * @size: desired size of I2C packet
+ * @reg: combination of size, category and command for the I2C packet
  * @val: read value
  *
  * Returns 0 on success, or else negative errno.
@@ -168,7 +166,7 @@ static int m5mols_read(struct v4l2_subdev *sd, u32 size, u32 reg, u32 *val)
 	msg[1].buf = rbuf;
 
 	/* minimum stabilization time */
-	usleep_range(200, 200);
+	usleep_range(200, 300);
 
 	ret = i2c_transfer(client->adapter, msg, 2);
 
@@ -232,6 +230,7 @@ int m5mols_read_u32(struct v4l2_subdev *sd, u32 reg, u32 *val)
 
 /**
  * m5mols_write - I2C command write function
+ * @sd: sub-device, as pointed by struct v4l2_subdev
  * @reg: combination of size, category and command for the I2C packet
  * @val: value to write
  *
@@ -268,7 +267,8 @@ int m5mols_write(struct v4l2_subdev *sd, u32 reg, u32 val)
 
 	*buf = m5mols_swap_byte((u8 *)&val, size);
 
-	usleep_range(200, 200);
+	/* minimum stabilization time */
+	usleep_range(200, 300);
 
 	ret = i2c_transfer(client->adapter, msg, 1);
 	if (ret == 1)
@@ -283,10 +283,11 @@ int m5mols_write(struct v4l2_subdev *sd, u32 reg, u32 val)
 
 /**
  * m5mols_busy_wait - Busy waiting with I2C register polling
+ * @sd: sub-device, as pointed by struct v4l2_subdev
  * @reg: the I2C_REG() address of an 8-bit status register to check
  * @value: expected status register value
  * @mask: bit mask for the read status register value
- * @timeout: timeout in miliseconds, or -1 for default timeout
+ * @timeout: timeout in milliseconds, or -1 for default timeout
  *
  * The @reg register value is ORed with @mask before comparing with @value.
  *
@@ -315,6 +316,8 @@ int m5mols_busy_wait(struct v4l2_subdev *sd, u32 reg, u32 value, u32 mask,
 
 /**
  * m5mols_enable_interrupt - Clear interrupt pending bits and unmask interrupts
+ * @sd: sub-device, as pointed by struct v4l2_subdev
+ * @reg: combination of size, category and command for the I2C packet
  *
  * Before writing desired interrupt value the INT_FACTOR register should
  * be read to clear pending interrupts.
@@ -348,6 +351,8 @@ int m5mols_wait_interrupt(struct v4l2_subdev *sd, u8 irq_mask, u32 timeout)
 
 /**
  * m5mols_reg_mode - Write the mode and check busy status
+ * @sd: sub-device, as pointed by struct v4l2_subdev
+ * @mode: the required operation mode
  *
  * It always accompanies a little delay changing the M-5MOLS mode, so it is
  * needed checking current busy status to guarantee right mode.
@@ -363,6 +368,7 @@ static int m5mols_reg_mode(struct v4l2_subdev *sd, u8 mode)
 
 /**
  * m5mols_set_mode - set the M-5MOLS controller mode
+ * @info: M-5MOLS driver data structure
  * @mode: the required operation mode
  *
  * The commands of M-5MOLS are grouped into specific modes. Each functionality
@@ -420,6 +426,7 @@ int m5mols_set_mode(struct m5mols_info *info, u8 mode)
 
 /**
  * m5mols_get_version - retrieve full revisions information of M-5MOLS
+ * @sd: sub-device, as pointed by struct v4l2_subdev
  *
  * The version information includes revisions of hardware and firmware,
  * AutoFocus alghorithm version and the version string.
@@ -456,7 +463,7 @@ static int m5mols_get_version(struct v4l2_subdev *sd)
 
 	v4l2_info(sd, "Manufacturer\t[%s]\n",
 			is_manufacturer(info, REG_SAMSUNG_ELECTRO) ?
-			"Samsung Electro-Machanics" :
+			"Samsung Electro-Mechanics" :
 			is_manufacturer(info, REG_SAMSUNG_OPTICS) ?
 			"Samsung Fiber-Optics" :
 			is_manufacturer(info, REG_SAMSUNG_TECHWIN) ?
@@ -481,13 +488,14 @@ static enum m5mols_restype __find_restype(u32 code)
 	do {
 		if (code == m5mols_default_ffmt[type].code)
 			return type;
-	} while (type++ != SIZE_DEFAULT_FFMT);
+	} while (++type != SIZE_DEFAULT_FFMT);
 
 	return 0;
 }
 
 /**
  * __find_resolution - Lookup preset and type of M-5MOLS's resolution
+ * @sd: sub-device, as pointed by struct v4l2_subdev
  * @mf: pixel format to find/negotiate the resolution preset for
  * @type: M-5MOLS resolution type
  * @resolution:	M-5MOLS resolution preset register value
@@ -531,17 +539,19 @@ static int __find_resolution(struct v4l2_subdev *sd,
 }
 
 static struct v4l2_mbus_framefmt *__find_format(struct m5mols_info *info,
-				struct v4l2_subdev_pad_config *cfg,
+				struct v4l2_subdev_state *sd_state,
 				enum v4l2_subdev_format_whence which,
 				enum m5mols_restype type)
 {
 	if (which == V4L2_SUBDEV_FORMAT_TRY)
-		return cfg ? v4l2_subdev_get_try_format(&info->sd, cfg, 0) : NULL;
+		return sd_state ? v4l2_subdev_get_try_format(&info->sd,
+							     sd_state, 0) : NULL;
 
 	return &info->ffmt[type];
 }
 
-static int m5mols_get_fmt(struct v4l2_subdev *sd, struct v4l2_subdev_pad_config *cfg,
+static int m5mols_get_fmt(struct v4l2_subdev *sd,
+			  struct v4l2_subdev_state *sd_state,
 			  struct v4l2_subdev_format *fmt)
 {
 	struct m5mols_info *info = to_m5mols(sd);
@@ -550,7 +560,7 @@ static int m5mols_get_fmt(struct v4l2_subdev *sd, struct v4l2_subdev_pad_config 
 
 	mutex_lock(&info->lock);
 
-	format = __find_format(info, cfg, fmt->which, info->res_type);
+	format = __find_format(info, sd_state, fmt->which, info->res_type);
 	if (format)
 		fmt->format = *format;
 	else
@@ -560,7 +570,8 @@ static int m5mols_get_fmt(struct v4l2_subdev *sd, struct v4l2_subdev_pad_config 
 	return ret;
 }
 
-static int m5mols_set_fmt(struct v4l2_subdev *sd, struct v4l2_subdev_pad_config *cfg,
+static int m5mols_set_fmt(struct v4l2_subdev *sd,
+			  struct v4l2_subdev_state *sd_state,
 			  struct v4l2_subdev_format *fmt)
 {
 	struct m5mols_info *info = to_m5mols(sd);
@@ -574,7 +585,7 @@ static int m5mols_set_fmt(struct v4l2_subdev *sd, struct v4l2_subdev_pad_config 
 	if (ret < 0)
 		return ret;
 
-	sfmt = __find_format(info, cfg, fmt->which, type);
+	sfmt = __find_format(info, sd_state, fmt->which, type);
 	if (!sfmt)
 		return 0;
 
@@ -640,7 +651,7 @@ static int m5mols_set_frame_desc(struct v4l2_subdev *sd, unsigned int pad,
 
 
 static int m5mols_enum_mbus_code(struct v4l2_subdev *sd,
-				 struct v4l2_subdev_pad_config *cfg,
+				 struct v4l2_subdev_state *sd_state,
 				 struct v4l2_subdev_mbus_code_enum *code)
 {
 	if (!code || code->index >= SIZE_DEFAULT_FFMT)
@@ -651,7 +662,7 @@ static int m5mols_enum_mbus_code(struct v4l2_subdev *sd,
 	return 0;
 }
 
-static struct v4l2_subdev_pad_ops m5mols_pad_ops = {
+static const struct v4l2_subdev_pad_ops m5mols_pad_ops = {
 	.enum_mbus_code	= m5mols_enum_mbus_code,
 	.get_fmt	= m5mols_get_fmt,
 	.set_fmt	= m5mols_set_fmt,
@@ -661,6 +672,7 @@ static struct v4l2_subdev_pad_ops m5mols_pad_ops = {
 
 /**
  * m5mols_restore_controls - Apply current control values to the registers
+ * @info: M-5MOLS driver data structure
  *
  * m5mols_do_scenemode() handles all parameters for which there is yet no
  * individual control. It should be replaced at some point by setting each
@@ -685,6 +697,7 @@ int m5mols_restore_controls(struct m5mols_info *info)
 
 /**
  * m5mols_start_monitor - Start the monitor mode
+ * @info: M-5MOLS driver data structure
  *
  * Before applying the controls setup the resolution and frame rate
  * in PARAMETER mode, and then switch over to MONITOR mode.
@@ -739,7 +752,6 @@ static int m5mols_sensor_power(struct m5mols_info *info, bool enable)
 {
 	struct v4l2_subdev *sd = &info->sd;
 	struct i2c_client *client = v4l2_get_subdevdata(sd);
-	const struct m5mols_platform_data *pdata = info->pdata;
 	int ret;
 
 	if (info->power == enable)
@@ -754,11 +766,12 @@ static int m5mols_sensor_power(struct m5mols_info *info, bool enable)
 
 		ret = regulator_bulk_enable(ARRAY_SIZE(supplies), supplies);
 		if (ret) {
-			info->set_power(&client->dev, 0);
+			if (info->set_power)
+				info->set_power(&client->dev, 0);
 			return ret;
 		}
 
-		gpio_set_value(pdata->gpio_reset, !pdata->reset_polarity);
+		gpiod_set_value(info->reset, 0);
 		info->power = 1;
 
 		return ret;
@@ -771,7 +784,7 @@ static int m5mols_sensor_power(struct m5mols_info *info, bool enable)
 	if (info->set_power)
 		info->set_power(&client->dev, 0);
 
-	gpio_set_value(pdata->gpio_reset, pdata->reset_polarity);
+	gpiod_set_value(info->reset, 1);
 
 	info->isp_ready = 0;
 	info->power = 0;
@@ -788,6 +801,7 @@ int __attribute__ ((weak)) m5mols_update_fw(struct v4l2_subdev *sd,
 
 /**
  * m5mols_fw_start - M-5MOLS internal ARM controller initialization
+ * @sd: sub-device, as pointed by struct v4l2_subdev
  *
  * Execute the M-5MOLS internal ARM controller initialization sequence.
  * This function should be called after the supply voltage has been
@@ -843,6 +857,8 @@ static int m5mols_auto_focus_stop(struct m5mols_info *info)
 
 /**
  * m5mols_s_power - Main sensor power control function
+ * @sd: sub-device, as pointed by struct v4l2_subdev
+ * @on: if true, powers on the device; powers off otherwise.
  *
  * To prevent breaking the lens when the sensor is powered off the Soft-Landing
  * algorithm is called where available. The Soft-Landing algorithm availability
@@ -895,7 +911,9 @@ static const struct v4l2_subdev_core_ops m5mols_core_ops = {
  */
 static int m5mols_open(struct v4l2_subdev *sd, struct v4l2_subdev_fh *fh)
 {
-	struct v4l2_mbus_framefmt *format = v4l2_subdev_get_try_format(sd, fh->pad, 0);
+	struct v4l2_mbus_framefmt *format = v4l2_subdev_get_try_format(sd,
+								       fh->state,
+								       0);
 
 	*format = m5mols_default_ffmt[0];
 	return 0;
@@ -925,18 +943,12 @@ static int m5mols_probe(struct i2c_client *client,
 			const struct i2c_device_id *id)
 {
 	const struct m5mols_platform_data *pdata = client->dev.platform_data;
-	unsigned long gpio_flags;
 	struct m5mols_info *info;
 	struct v4l2_subdev *sd;
 	int ret;
 
 	if (pdata == NULL) {
 		dev_err(&client->dev, "No platform data\n");
-		return -EINVAL;
-	}
-
-	if (!gpio_is_valid(pdata->gpio_reset)) {
-		dev_err(&client->dev, "No valid RESET GPIO specified\n");
 		return -EINVAL;
 	}
 
@@ -949,17 +961,15 @@ static int m5mols_probe(struct i2c_client *client,
 	if (!info)
 		return -ENOMEM;
 
+	/* This asserts reset, descriptor shall have polarity specified */
+	info->reset = devm_gpiod_get(&client->dev, "reset", GPIOD_OUT_HIGH);
+	if (IS_ERR(info->reset))
+		return PTR_ERR(info->reset);
+	/* Notice: the "N" in M5MOLS_NRST implies active low */
+	gpiod_set_consumer_name(info->reset, "M5MOLS_NRST");
+
 	info->pdata = pdata;
 	info->set_power	= pdata->set_power;
-
-	gpio_flags = pdata->reset_polarity
-		   ? GPIOF_OUT_INIT_HIGH : GPIOF_OUT_INIT_LOW;
-	ret = devm_gpio_request_one(&client->dev, pdata->gpio_reset, gpio_flags,
-				    "M5MOLS_NRST");
-	if (ret) {
-		dev_err(&client->dev, "Failed to request gpio: %d\n", ret);
-		return ret;
-	}
 
 	ret = devm_regulator_bulk_get(&client->dev, ARRAY_SIZE(supplies),
 				      supplies);
@@ -970,7 +980,8 @@ static int m5mols_probe(struct i2c_client *client,
 
 	sd = &info->sd;
 	v4l2_i2c_subdev_init(sd, client, &m5mols_ops);
-	strlcpy(sd->name, MODULE_NAME, sizeof(sd->name));
+	/* Static name; NEVER use in new drivers! */
+	strscpy(sd->name, MODULE_NAME, sizeof(sd->name));
 	sd->flags |= V4L2_SUBDEV_FL_HAS_DEVNODE;
 
 	sd->internal_ops = &m5mols_subdev_internal_ops;
@@ -1009,15 +1020,13 @@ error:
 	return ret;
 }
 
-static int m5mols_remove(struct i2c_client *client)
+static void m5mols_remove(struct i2c_client *client)
 {
 	struct v4l2_subdev *sd = i2c_get_clientdata(client);
 
 	v4l2_device_unregister_subdev(sd);
 	v4l2_ctrl_handler_free(sd->ctrl_handler);
 	media_entity_cleanup(&sd->entity);
-
-	return 0;
 }
 
 static const struct i2c_device_id m5mols_id[] = {

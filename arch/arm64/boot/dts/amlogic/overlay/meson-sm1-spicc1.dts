@@ -1,0 +1,17 @@
+/dts-v1/;
+/plugin/;
+
+/ {
+	fragment@0 {
+		target = <&spicc1>;
+		__overlay__ {
+			status = "okay";
+			spidev@0 {
+				compatible = "rohm,dh2228fv";
+				status = "okay";
+				reg = <0>;
+				spi-max-frequency = <1000000>;
+			};
+		};
+	};
+};

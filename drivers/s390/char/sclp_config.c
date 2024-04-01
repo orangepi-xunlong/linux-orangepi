@@ -1,6 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  *    Copyright IBM Corp. 2007
- *    Author(s): Heiko Carstens <heiko.carstens@de.ibm.com>
  */
 
 #define KMSG_COMPONENT "sclp_config"
@@ -49,12 +49,12 @@ static void sclp_cpu_capability_notify(struct work_struct *work)
 
 	s390_update_cpu_mhz();
 	pr_info("CPU capability may have changed\n");
-	get_online_cpus();
+	cpus_read_lock();
 	for_each_online_cpu(cpu) {
 		dev = get_cpu_device(cpu);
 		kobject_uevent(&dev->kobj, KOBJ_CHANGE);
 	}
-	put_online_cpus();
+	cpus_read_unlock();
 }
 
 static void __ref sclp_cpu_change_notify(struct work_struct *work)
@@ -137,7 +137,7 @@ static ssize_t sysfs_ofb_data_write(struct file *filp, struct kobject *kobj,
 	return rc ?: count;
 }
 
-static struct bin_attribute ofb_bin_attr = {
+static const struct bin_attribute ofb_bin_attr = {
 	.attr = {
 		.name = "event_data",
 		.mode = S_IWUSR,

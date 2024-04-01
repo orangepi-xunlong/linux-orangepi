@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Kernel support for the ptrace() and syscall tracing interfaces.
  *
@@ -14,7 +15,6 @@
 #include <linux/elf.h>
 #include <linux/errno.h>
 #include <linux/ptrace.h>
-#include <linux/tracehook.h>
 #include <linux/user.h>
 #include <linux/personality.h>
 #include <linux/regset.h>
@@ -24,8 +24,7 @@
 #include <linux/signal.h>
 #include <linux/audit.h>
 
-#include <asm/uaccess.h>
-#include <asm/pgtable.h>
+#include <linux/uaccess.h>
 #include <asm/processor.h>
 #include <asm/asm-offsets.h>
 
@@ -75,8 +74,6 @@ void user_enable_single_step(struct task_struct *task)
 	set_tsk_thread_flag(task, TIF_SINGLESTEP);
 
 	if (pa_psw(task)->n) {
-		struct siginfo si;
-
 		/* Nullified, just crank over the queue. */
 		task_regs(task)->iaoq[0] = task_regs(task)->iaoq[1];
 		task_regs(task)->iasq[0] = task_regs(task)->iasq[1];
@@ -89,11 +86,9 @@ void user_enable_single_step(struct task_struct *task)
 		ptrace_disable(task);
 		/* Don't wake up the task, but let the
 		   parent know something happened. */
-		si.si_code = TRAP_TRACE;
-		si.si_addr = (void __user *) (task_regs(task)->iaoq[0] & ~3);
-		si.si_signo = SIGTRAP;
-		si.si_errno = 0;
-		force_sig_info(SIGTRAP, &si, task);
+		force_sig_fault_to_task(SIGTRAP, TRAP_TRACE,
+					(void __user *) (task_regs(task)->iaoq[0] & ~3),
+					task);
 		/* notify_parent(task, SIGCHLD); */
 		return;
 	}
@@ -130,6 +125,12 @@ long arch_ptrace(struct task_struct *child, long request,
 	unsigned long __user *datap = (unsigned long __user *)data;
 	unsigned long tmp;
 	long ret = -EIO;
+
+	unsigned long user_regs_struct_size = sizeof(struct user_regs_struct);
+#ifdef CONFIG_64BIT
+	if (is_compat_task())
+		user_regs_struct_size /= 2;
+#endif
 
 	switch (request) {
 
@@ -170,6 +171,9 @@ long arch_ptrace(struct task_struct *child, long request,
 		if ((addr & (sizeof(unsigned long)-1)) ||
 		     addr >= sizeof(struct pt_regs))
 			break;
+		if (addr == PT_IAOQ0 || addr == PT_IAOQ1) {
+			data |= PRIV_USER; /* ensure userspace privilege */
+		}
 		if ((addr >= PT_GR1 && addr <= PT_GR31) ||
 				addr == PT_IAOQ0 || addr == PT_IAOQ1 ||
 				(addr >= PT_FR0 && addr <= PT_FR31 + 4) ||
@@ -183,14 +187,14 @@ long arch_ptrace(struct task_struct *child, long request,
 		return copy_regset_to_user(child,
 					   task_user_regset_view(current),
 					   REGSET_GENERAL,
-					   0, sizeof(struct user_regs_struct),
+					   0, user_regs_struct_size,
 					   datap);
 
 	case PTRACE_SETREGS:	/* Set all gp regs in the child. */
 		return copy_regset_from_user(child,
 					     task_user_regset_view(current),
 					     REGSET_GENERAL,
-					     0, sizeof(struct user_regs_struct),
+					     0, user_regs_struct_size,
 					     datap);
 
 	case PTRACE_GETFPREGS:	/* Get the child FPU state. */
@@ -231,16 +235,18 @@ long arch_ptrace(struct task_struct *child, long request,
 
 static compat_ulong_t translate_usr_offset(compat_ulong_t offset)
 {
-	if (offset < 0)
-		return sizeof(struct pt_regs);
-	else if (offset <= 32*4)	/* gr[0..31] */
-		return offset * 2 + 4;
-	else if (offset <= 32*4+32*8)	/* gr[0..31] + fr[0..31] */
-		return offset + 32*4;
-	else if (offset < sizeof(struct pt_regs)/2 + 32*4)
-		return offset * 2 + 4 - 32*8;
+	compat_ulong_t pos;
+
+	if (offset < 32*4)	/* gr[0..31] */
+		pos = offset * 2 + 4;
+	else if (offset < 32*4+32*8)	/* fr[0] ... fr[31] */
+		pos = (offset - 32*4) + PT_FR0;
+	else if (offset < sizeof(struct pt_regs)/2 + 32*4) /* sr[0] ... ipsw */
+		pos = (offset - 32*4 - 32*8) * 2 + PT_SR0 + 4;
 	else
-		return sizeof(struct pt_regs);
+		pos = sizeof(struct pt_regs);
+
+	return pos;
 }
 
 long compat_arch_ptrace(struct task_struct *child, compat_long_t request,
@@ -284,9 +290,12 @@ long compat_arch_ptrace(struct task_struct *child, compat_long_t request,
 			addr = translate_usr_offset(addr);
 			if (addr >= sizeof(struct pt_regs))
 				break;
+			if (addr == PT_IAOQ0+4 || addr == PT_IAOQ1+4) {
+				data |= PRIV_USER; /* ensure userspace privilege */
+			}
 			if (addr >= PT_FR0 && addr <= PT_FR31 + 4) {
 				/* Special case, fp regs are 64 bits anyway */
-				*(__u64 *) ((char *) task_regs(child) + addr) = data;
+				*(__u32 *) ((char *) task_regs(child) + addr) = data;
 				ret = 0;
 			}
 			else if ((addr >= PT_GR1+4 && addr <= PT_GR31+4) ||
@@ -299,6 +308,11 @@ long compat_arch_ptrace(struct task_struct *child, compat_long_t request,
 			}
 		}
 		break;
+	case PTRACE_GETREGS:
+	case PTRACE_SETREGS:
+	case PTRACE_GETFPREGS:
+	case PTRACE_SETFPREGS:
+		return arch_ptrace(child, request, addr, data);
 
 	default:
 		ret = compat_ptrace_request(child, request, addr, data);
@@ -312,7 +326,7 @@ long compat_arch_ptrace(struct task_struct *child, compat_long_t request,
 long do_syscall_trace_enter(struct pt_regs *regs)
 {
 	if (test_thread_flag(TIF_SYSCALL_TRACE)) {
-		int rc = tracehook_report_syscall_entry(regs);
+		int rc = ptrace_report_syscall_entry(regs);
 
 		/*
 		 * As tracesys_next does not set %r28 to -ENOSYS
@@ -323,7 +337,7 @@ long do_syscall_trace_enter(struct pt_regs *regs)
 		if (rc) {
 			/*
 			 * A nonzero return code from
-			 * tracehook_report_syscall_entry() tells us
+			 * ptrace_report_syscall_entry() tells us
 			 * to prevent the syscall execution.  Skip
 			 * the syscall call and the syscall restart handling.
 			 *
@@ -337,7 +351,7 @@ long do_syscall_trace_enter(struct pt_regs *regs)
 	}
 
 	/* Do the secure computing check after ptrace. */
-	if (secure_computing(NULL) == -1)
+	if (secure_computing() == -1)
 		return -1;
 
 #ifdef CONFIG_HAVE_SYSCALL_TRACEPOINTS
@@ -377,7 +391,7 @@ void do_syscall_trace_exit(struct pt_regs *regs)
 #endif
 
 	if (stepping || test_thread_flag(TIF_SYSCALL_TRACE))
-		tracehook_report_syscall_exit(regs, stepping);
+		ptrace_report_syscall_exit(regs, stepping);
 }
 
 
@@ -387,31 +401,11 @@ void do_syscall_trace_exit(struct pt_regs *regs)
 
 static int fpr_get(struct task_struct *target,
 		     const struct user_regset *regset,
-		     unsigned int pos, unsigned int count,
-		     void *kbuf, void __user *ubuf)
+		     struct membuf to)
 {
 	struct pt_regs *regs = task_regs(target);
-	__u64 *k = kbuf;
-	__u64 __user *u = ubuf;
-	__u64 reg;
 
-	pos /= sizeof(reg);
-	count /= sizeof(reg);
-
-	if (kbuf)
-		for (; count > 0 && pos < ELF_NFPREG; --count)
-			*k++ = regs->fr[pos++];
-	else
-		for (; count > 0 && pos < ELF_NFPREG; --count)
-			if (__put_user(regs->fr[pos++], u++))
-				return -EFAULT;
-
-	kbuf = k;
-	ubuf = u;
-	pos *= sizeof(reg);
-	count *= sizeof(reg);
-	return user_regset_copyout_zero(&pos, &count, &kbuf, &ubuf,
-					ELF_NFPREG * sizeof(reg), -1);
+	return membuf_write(&to, regs->fr, ELF_NFPREG * sizeof(__u64));
 }
 
 static int fpr_set(struct task_struct *target,
@@ -499,7 +493,8 @@ static void set_reg(struct pt_regs *regs, int num, unsigned long val)
 			return;
 	case RI(iaoq[0]):
 	case RI(iaoq[1]):
-			regs->iaoq[num - RI(iaoq[0])] = val;
+			/* set 2 lowest bits to ensure userspace privilege: */
+			regs->iaoq[num - RI(iaoq[0])] = val | PRIV_USER;
 			return;
 	case RI(sar):	regs->sar = val;
 			return;
@@ -522,30 +517,14 @@ static void set_reg(struct pt_regs *regs, int num, unsigned long val)
 
 static int gpr_get(struct task_struct *target,
 		     const struct user_regset *regset,
-		     unsigned int pos, unsigned int count,
-		     void *kbuf, void __user *ubuf)
+		     struct membuf to)
 {
 	struct pt_regs *regs = task_regs(target);
-	unsigned long *k = kbuf;
-	unsigned long __user *u = ubuf;
-	unsigned long reg;
+	unsigned int pos;
 
-	pos /= sizeof(reg);
-	count /= sizeof(reg);
-
-	if (kbuf)
-		for (; count > 0 && pos < ELF_NGREG; --count)
-			*k++ = get_reg(regs, pos++);
-	else
-		for (; count > 0 && pos < ELF_NGREG; --count)
-			if (__put_user(get_reg(regs, pos++), u++))
-				return -EFAULT;
-	kbuf = k;
-	ubuf = u;
-	pos *= sizeof(reg);
-	count *= sizeof(reg);
-	return user_regset_copyout_zero(&pos, &count, &kbuf, &ubuf,
-					ELF_NGREG * sizeof(reg), -1);
+	for (pos = 0; pos < ELF_NGREG; pos++)
+		membuf_store(&to, get_reg(regs, pos));
+	return 0;
 }
 
 static int gpr_set(struct task_struct *target,
@@ -583,12 +562,12 @@ static const struct user_regset native_regsets[] = {
 	[REGSET_GENERAL] = {
 		.core_note_type = NT_PRSTATUS, .n = ELF_NGREG,
 		.size = sizeof(long), .align = sizeof(long),
-		.get = gpr_get, .set = gpr_set
+		.regset_get = gpr_get, .set = gpr_set
 	},
 	[REGSET_FP] = {
 		.core_note_type = NT_PRFPREG, .n = ELF_NFPREG,
 		.size = sizeof(__u64), .align = sizeof(__u64),
-		.get = fpr_get, .set = fpr_set
+		.regset_get = fpr_get, .set = fpr_set
 	}
 };
 
@@ -598,35 +577,17 @@ static const struct user_regset_view user_parisc_native_view = {
 };
 
 #ifdef CONFIG_64BIT
-#include <linux/compat.h>
-
 static int gpr32_get(struct task_struct *target,
 		     const struct user_regset *regset,
-		     unsigned int pos, unsigned int count,
-		     void *kbuf, void __user *ubuf)
+		     struct membuf to)
 {
 	struct pt_regs *regs = task_regs(target);
-	compat_ulong_t *k = kbuf;
-	compat_ulong_t __user *u = ubuf;
-	compat_ulong_t reg;
+	unsigned int pos;
 
-	pos /= sizeof(reg);
-	count /= sizeof(reg);
+	for (pos = 0; pos < ELF_NGREG; pos++)
+		membuf_store(&to, (compat_ulong_t)get_reg(regs, pos));
 
-	if (kbuf)
-		for (; count > 0 && pos < ELF_NGREG; --count)
-			*k++ = get_reg(regs, pos++);
-	else
-		for (; count > 0 && pos < ELF_NGREG; --count)
-			if (__put_user((compat_ulong_t) get_reg(regs, pos++), u++))
-				return -EFAULT;
-
-	kbuf = k;
-	ubuf = u;
-	pos *= sizeof(reg);
-	count *= sizeof(reg);
-	return user_regset_copyout_zero(&pos, &count, &kbuf, &ubuf,
-					ELF_NGREG * sizeof(reg), -1);
+	return 0;
 }
 
 static int gpr32_set(struct task_struct *target,
@@ -667,12 +628,12 @@ static const struct user_regset compat_regsets[] = {
 	[REGSET_GENERAL] = {
 		.core_note_type = NT_PRSTATUS, .n = ELF_NGREG,
 		.size = sizeof(compat_long_t), .align = sizeof(compat_long_t),
-		.get = gpr32_get, .set = gpr32_set
+		.regset_get = gpr32_get, .set = gpr32_set
 	},
 	[REGSET_FP] = {
 		.core_note_type = NT_PRFPREG, .n = ELF_NFPREG,
 		.size = sizeof(__u64), .align = sizeof(__u64),
-		.get = fpr_get, .set = fpr_set
+		.regset_get = fpr_get, .set = fpr_set
 	}
 };
 
@@ -691,4 +652,139 @@ const struct user_regset_view *task_user_regset_view(struct task_struct *task)
 		return &user_parisc_compat_view;
 #endif
 	return &user_parisc_native_view;
+}
+
+
+/* HAVE_REGS_AND_STACK_ACCESS_API feature */
+
+struct pt_regs_offset {
+	const char *name;
+	int offset;
+};
+
+#define REG_OFFSET_NAME(r)    {.name = #r, .offset = offsetof(struct pt_regs, r)}
+#define REG_OFFSET_INDEX(r,i) {.name = #r#i, .offset = offsetof(struct pt_regs, r[i])}
+#define REG_OFFSET_END {.name = NULL, .offset = 0}
+
+static const struct pt_regs_offset regoffset_table[] = {
+	REG_OFFSET_INDEX(gr,0),
+	REG_OFFSET_INDEX(gr,1),
+	REG_OFFSET_INDEX(gr,2),
+	REG_OFFSET_INDEX(gr,3),
+	REG_OFFSET_INDEX(gr,4),
+	REG_OFFSET_INDEX(gr,5),
+	REG_OFFSET_INDEX(gr,6),
+	REG_OFFSET_INDEX(gr,7),
+	REG_OFFSET_INDEX(gr,8),
+	REG_OFFSET_INDEX(gr,9),
+	REG_OFFSET_INDEX(gr,10),
+	REG_OFFSET_INDEX(gr,11),
+	REG_OFFSET_INDEX(gr,12),
+	REG_OFFSET_INDEX(gr,13),
+	REG_OFFSET_INDEX(gr,14),
+	REG_OFFSET_INDEX(gr,15),
+	REG_OFFSET_INDEX(gr,16),
+	REG_OFFSET_INDEX(gr,17),
+	REG_OFFSET_INDEX(gr,18),
+	REG_OFFSET_INDEX(gr,19),
+	REG_OFFSET_INDEX(gr,20),
+	REG_OFFSET_INDEX(gr,21),
+	REG_OFFSET_INDEX(gr,22),
+	REG_OFFSET_INDEX(gr,23),
+	REG_OFFSET_INDEX(gr,24),
+	REG_OFFSET_INDEX(gr,25),
+	REG_OFFSET_INDEX(gr,26),
+	REG_OFFSET_INDEX(gr,27),
+	REG_OFFSET_INDEX(gr,28),
+	REG_OFFSET_INDEX(gr,29),
+	REG_OFFSET_INDEX(gr,30),
+	REG_OFFSET_INDEX(gr,31),
+	REG_OFFSET_INDEX(sr,0),
+	REG_OFFSET_INDEX(sr,1),
+	REG_OFFSET_INDEX(sr,2),
+	REG_OFFSET_INDEX(sr,3),
+	REG_OFFSET_INDEX(sr,4),
+	REG_OFFSET_INDEX(sr,5),
+	REG_OFFSET_INDEX(sr,6),
+	REG_OFFSET_INDEX(sr,7),
+	REG_OFFSET_INDEX(iasq,0),
+	REG_OFFSET_INDEX(iasq,1),
+	REG_OFFSET_INDEX(iaoq,0),
+	REG_OFFSET_INDEX(iaoq,1),
+	REG_OFFSET_NAME(cr27),
+	REG_OFFSET_NAME(ksp),
+	REG_OFFSET_NAME(kpc),
+	REG_OFFSET_NAME(sar),
+	REG_OFFSET_NAME(iir),
+	REG_OFFSET_NAME(isr),
+	REG_OFFSET_NAME(ior),
+	REG_OFFSET_NAME(ipsw),
+	REG_OFFSET_END,
+};
+
+/**
+ * regs_query_register_offset() - query register offset from its name
+ * @name:	the name of a register
+ *
+ * regs_query_register_offset() returns the offset of a register in struct
+ * pt_regs from its name. If the name is invalid, this returns -EINVAL;
+ */
+int regs_query_register_offset(const char *name)
+{
+	const struct pt_regs_offset *roff;
+	for (roff = regoffset_table; roff->name != NULL; roff++)
+		if (!strcmp(roff->name, name))
+			return roff->offset;
+	return -EINVAL;
+}
+
+/**
+ * regs_query_register_name() - query register name from its offset
+ * @offset:	the offset of a register in struct pt_regs.
+ *
+ * regs_query_register_name() returns the name of a register from its
+ * offset in struct pt_regs. If the @offset is invalid, this returns NULL;
+ */
+const char *regs_query_register_name(unsigned int offset)
+{
+	const struct pt_regs_offset *roff;
+	for (roff = regoffset_table; roff->name != NULL; roff++)
+		if (roff->offset == offset)
+			return roff->name;
+	return NULL;
+}
+
+/**
+ * regs_within_kernel_stack() - check the address in the stack
+ * @regs:      pt_regs which contains kernel stack pointer.
+ * @addr:      address which is checked.
+ *
+ * regs_within_kernel_stack() checks @addr is within the kernel stack page(s).
+ * If @addr is within the kernel stack, it returns true. If not, returns false.
+ */
+int regs_within_kernel_stack(struct pt_regs *regs, unsigned long addr)
+{
+	return ((addr & ~(THREAD_SIZE - 1))  ==
+		(kernel_stack_pointer(regs) & ~(THREAD_SIZE - 1)));
+}
+
+/**
+ * regs_get_kernel_stack_nth() - get Nth entry of the stack
+ * @regs:	pt_regs which contains kernel stack pointer.
+ * @n:		stack entry number.
+ *
+ * regs_get_kernel_stack_nth() returns @n th entry of the kernel stack which
+ * is specified by @regs. If the @n th entry is NOT in the kernel stack,
+ * this returns 0.
+ */
+unsigned long regs_get_kernel_stack_nth(struct pt_regs *regs, unsigned int n)
+{
+	unsigned long *addr = (unsigned long *)kernel_stack_pointer(regs);
+
+	addr -= n;
+
+	if (!regs_within_kernel_stack(regs, (unsigned long)addr))
+		return 0;
+
+	return *addr;
 }

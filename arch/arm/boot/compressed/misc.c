@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * misc.c
  * 
@@ -21,9 +22,12 @@ unsigned int __machine_arch_type;
 #include <linux/compiler.h>	/* for inline */
 #include <linux/types.h>
 #include <linux/linkage.h>
+#include "misc.h"
+#ifdef CONFIG_ARCH_EP93XX
+#include "misc-ep93xx.h"
+#endif
 
 static void putstr(const char *ptr);
-extern void error(char *x);
 
 #include CONFIG_UNCOMPRESS_INCLUDE
 
@@ -127,18 +131,6 @@ asmlinkage void __div0(void)
 	error("Attempting division by 0!");
 }
 
-unsigned long __stack_chk_guard;
-
-void __stack_chk_guard_setup(void)
-{
-	__stack_chk_guard = 0x000a0dff;
-}
-
-void __stack_chk_fail(void)
-{
-	error("stack-protector: Kernel stack is corrupted\n");
-}
-
 extern int do_decompress(u8 *input, int len, u8 *output, void (*error)(char *x));
 
 
@@ -149,13 +141,14 @@ decompress_kernel(unsigned long output_start, unsigned long free_mem_ptr_p,
 {
 	int ret;
 
-	__stack_chk_guard_setup();
-
 	output_data		= (unsigned char *)output_start;
 	free_mem_ptr		= free_mem_ptr_p;
 	free_mem_end_ptr	= free_mem_ptr_end_p;
 	__machine_arch_type	= arch_id;
 
+#ifdef CONFIG_ARCH_EP93XX
+	ep93xx_decomp_setup();
+#endif
 	arch_decomp_setup();
 
 	putstr("Uncompressing Linux...");
@@ -165,4 +158,9 @@ decompress_kernel(unsigned long output_start, unsigned long free_mem_ptr_p,
 		error("decompressor returned an error");
 	else
 		putstr(" done, booting the kernel.\n");
+}
+
+void fortify_panic(const char *name)
+{
+	error("detected buffer overflow");
 }

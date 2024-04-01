@@ -7,6 +7,7 @@
 
 #include <linux/kernel.h>
 #include <asm/asm-compat.h>
+#include <asm/extable.h>
 
 #ifdef __BIG_ENDIAN__
 
@@ -33,7 +34,7 @@ static inline long find_zero(unsigned long mask)
 	return leading_zero_bits >> 3;
 }
 
-static inline bool has_zero(unsigned long val, unsigned long *data, const struct word_at_a_time *c)
+static inline unsigned long has_zero(unsigned long val, unsigned long *data, const struct word_at_a_time *c)
 {
 	unsigned long rhs = val | c->low_bits;
 	*data = rhs;
@@ -193,10 +194,7 @@ static inline unsigned long load_unaligned_zeropad(const void *addr)
 #endif
 	"b	2b\n"
 	".previous\n"
-	".section __ex_table,\"a\"\n\t"
-		PPC_LONG_ALIGN "\n\t"
-		PPC_LONG "1b,3b\n"
-	".previous"
+	EX_TABLE(1b, 3b)
 	: [tmp] "=&b" (tmp), [offset] "=&r" (offset), [ret] "=&r" (ret)
 	: [addr] "b" (addr), "m" (*(unsigned long *)addr));
 

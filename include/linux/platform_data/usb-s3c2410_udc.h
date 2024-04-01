@@ -1,12 +1,7 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /* arch/arm/plat-samsung/include/plat/udc.h
  *
  * Copyright (c) 2005 Arnaud Patard <arnaud.patard@rtp-net.org>
- *
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
  *
  *  Changelog:
  *	14-Mar-2005	RTP	Created file
@@ -27,12 +22,6 @@ enum s3c2410_udc_cmd_e {
 struct s3c2410_udc_mach_info {
 	void	(*udc_command)(enum s3c2410_udc_cmd_e);
 	void	(*vbus_draw)(unsigned int ma);
-
-	unsigned int pullup_pin;
-	unsigned int pullup_pin_inverted;
-
-	unsigned int vbus_pin;
-	unsigned char vbus_pin_inverted;
 };
 
 extern void __init s3c24xx_udc_set_platdata(struct s3c2410_udc_mach_info *);

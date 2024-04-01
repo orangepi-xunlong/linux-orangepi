@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * UHCI HCD (Host Controller Driver) PCI Bus Glue.
  *
@@ -118,11 +119,13 @@ static int uhci_pci_init(struct usb_hcd *hcd)
 
 	uhci->rh_numports = uhci_count_ports(hcd);
 
-	/* Intel controllers report the OverCurrent bit active on.
-	 * VIA controllers report it active off, so we'll adjust the
-	 * bit value.  (It's not standardized in the UHCI spec.)
+	/*
+	 * Intel controllers report the OverCurrent bit active on.  VIA
+	 * and ZHAOXIN controllers report it active off, so we'll adjust
+	 * the bit value.  (It's not standardized in the UHCI spec.)
 	 */
-	if (to_pci_dev(uhci_dev(uhci))->vendor == PCI_VENDOR_ID_VIA)
+	if (to_pci_dev(uhci_dev(uhci))->vendor == PCI_VENDOR_ID_VIA ||
+			to_pci_dev(uhci_dev(uhci))->vendor == PCI_VENDOR_ID_ZHAOXIN)
 		uhci->oc_low = 1;
 
 	/* HP's server management chip requires a longer port reset delay. */
@@ -131,7 +134,7 @@ static int uhci_pci_init(struct usb_hcd *hcd)
 
 	/* Intel controllers use non-PME wakeup signalling */
 	if (to_pci_dev(uhci_dev(uhci))->vendor == PCI_VENDOR_ID_INTEL)
-		device_set_run_wake(uhci_dev(uhci), 1);
+		device_set_wakeup_capable(uhci_dev(uhci), true);
 
 	/* Set up pointers to PCI-specific functions */
 	uhci->reset_hc = uhci_pci_reset_hc;
@@ -260,7 +263,7 @@ static const struct hc_driver uhci_driver = {
 
 	/* Generic hardware linkage */
 	.irq =			uhci_irq,
-	.flags =		HCD_USB11,
+	.flags =		HCD_DMA | HCD_USB11,
 
 	/* Basic lifecycle operations */
 	.reset =		uhci_pci_init,
@@ -286,17 +289,21 @@ static const struct hc_driver uhci_driver = {
 static const struct pci_device_id uhci_pci_ids[] = { {
 	/* handle any USB UHCI controller */
 	PCI_DEVICE_CLASS(PCI_CLASS_SERIAL_USB_UHCI, ~0),
-	.driver_data =	(unsigned long) &uhci_driver,
 	}, { /* end: all zeroes */ }
 };
 
 MODULE_DEVICE_TABLE(pci, uhci_pci_ids);
 
+static int uhci_pci_probe(struct pci_dev *dev, const struct pci_device_id *id)
+{
+	return usb_hcd_pci_probe(dev, &uhci_driver);
+}
+
 static struct pci_driver uhci_pci_driver = {
-	.name =		(char *)hcd_name,
+	.name =		hcd_name,
 	.id_table =	uhci_pci_ids,
 
-	.probe =	usb_hcd_pci_probe,
+	.probe =	uhci_pci_probe,
 	.remove =	usb_hcd_pci_remove,
 	.shutdown =	uhci_shutdown,
 

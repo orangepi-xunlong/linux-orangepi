@@ -1,28 +1,25 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Marvell MVEBU pinctrl core driver
  *
  * Authors: Sebastian Hesselbarth <sebastian.hesselbarth@gmail.com>
  *          Thomas Petazzoni <thomas.petazzoni@free-electrons.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
  */
 
 #include <linux/platform_device.h>
-#include <linux/module.h>
 #include <linux/slab.h>
 #include <linux/io.h>
 #include <linux/of.h>
 #include <linux/of_address.h>
 #include <linux/of_platform.h>
 #include <linux/err.h>
-#include <linux/gpio.h>
+#include <linux/gpio/driver.h>
 #include <linux/pinctrl/machine.h>
 #include <linux/pinctrl/pinconf.h>
 #include <linux/pinctrl/pinctrl.h>
 #include <linux/pinctrl/pinmux.h>
+#include <linux/mfd/syscon.h>
+#include <linux/regmap.h>
 
 #include "pinctrl-mvebu.h"
 
@@ -38,7 +35,8 @@ struct mvebu_pinctrl_function {
 
 struct mvebu_pinctrl_group {
 	const char *name;
-	struct mvebu_mpp_ctrl *ctrl;
+	const struct mvebu_mpp_ctrl *ctrl;
+	struct mvebu_mpp_ctrl_data *data;
 	struct mvebu_mpp_ctrl_setting *settings;
 	unsigned num_settings;
 	unsigned gid;
@@ -57,6 +55,30 @@ struct mvebu_pinctrl {
 	u8 variant;
 };
 
+int mvebu_mmio_mpp_ctrl_get(struct mvebu_mpp_ctrl_data *data,
+			     unsigned int pid, unsigned long *config)
+{
+	unsigned off = (pid / MVEBU_MPPS_PER_REG) * MVEBU_MPP_BITS;
+	unsigned shift = (pid % MVEBU_MPPS_PER_REG) * MVEBU_MPP_BITS;
+
+	*config = (readl(data->base + off) >> shift) & MVEBU_MPP_MASK;
+
+	return 0;
+}
+
+int mvebu_mmio_mpp_ctrl_set(struct mvebu_mpp_ctrl_data *data,
+			     unsigned int pid, unsigned long config)
+{
+	unsigned off = (pid / MVEBU_MPPS_PER_REG) * MVEBU_MPP_BITS;
+	unsigned shift = (pid % MVEBU_MPPS_PER_REG) * MVEBU_MPP_BITS;
+	unsigned long reg;
+
+	reg = readl(data->base + off) & ~(MVEBU_MPP_MASK << shift);
+	writel(reg | (config << shift), data->base + off);
+
+	return 0;
+}
+
 static struct mvebu_pinctrl_group *mvebu_pinctrl_find_group_by_pid(
 	struct mvebu_pinctrl *pctl, unsigned pid)
 {
@@ -74,10 +96,12 @@ static struct mvebu_pinctrl_group *mvebu_pinctrl_find_group_by_name(
 	struct mvebu_pinctrl *pctl, const char *name)
 {
 	unsigned n;
+
 	for (n = 0; n < pctl->num_groups; n++) {
 		if (strcmp(name, pctl->groups[n].name) == 0)
 			return &pctl->groups[n];
 	}
+
 	return NULL;
 }
 
@@ -86,6 +110,7 @@ static struct mvebu_mpp_ctrl_setting *mvebu_pinctrl_find_setting_by_val(
 	unsigned long config)
 {
 	unsigned n;
+
 	for (n = 0; n < grp->num_settings; n++) {
 		if (config == grp->settings[n].val) {
 			if (!pctl->variant || (pctl->variant &
@@ -93,6 +118,7 @@ static struct mvebu_mpp_ctrl_setting *mvebu_pinctrl_find_setting_by_val(
 				return &grp->settings[n];
 		}
 	}
+
 	return NULL;
 }
 
@@ -101,6 +127,7 @@ static struct mvebu_mpp_ctrl_setting *mvebu_pinctrl_find_setting_by_name(
 	const char *name)
 {
 	unsigned n;
+
 	for (n = 0; n < grp->num_settings; n++) {
 		if (strcmp(name, grp->settings[n].name) == 0) {
 			if (!pctl->variant || (pctl->variant &
@@ -108,6 +135,7 @@ static struct mvebu_mpp_ctrl_setting *mvebu_pinctrl_find_setting_by_name(
 				return &grp->settings[n];
 		}
 	}
+
 	return NULL;
 }
 
@@ -115,6 +143,7 @@ static struct mvebu_mpp_ctrl_setting *mvebu_pinctrl_find_gpio_setting(
 	struct mvebu_pinctrl *pctl, struct mvebu_pinctrl_group *grp)
 {
 	unsigned n;
+
 	for (n = 0; n < grp->num_settings; n++) {
 		if (grp->settings[n].flags &
 			(MVEBU_SETTING_GPO | MVEBU_SETTING_GPI)) {
@@ -123,6 +152,7 @@ static struct mvebu_mpp_ctrl_setting *mvebu_pinctrl_find_gpio_setting(
 				return &grp->settings[n];
 		}
 	}
+
 	return NULL;
 }
 
@@ -130,10 +160,12 @@ static struct mvebu_pinctrl_function *mvebu_pinctrl_find_function_by_name(
 	struct mvebu_pinctrl *pctl, const char *name)
 {
 	unsigned n;
+
 	for (n = 0; n < pctl->num_functions; n++) {
 		if (strcmp(name, pctl->functions[n].name) == 0)
 			return &pctl->functions[n];
 	}
+
 	return NULL;
 }
 
@@ -146,7 +178,7 @@ static int mvebu_pinconf_group_get(struct pinctrl_dev *pctldev,
 	if (!grp->ctrl)
 		return -EINVAL;
 
-	return grp->ctrl->mpp_get(grp->pins[0], config);
+	return grp->ctrl->mpp_get(grp->data, grp->pins[0], config);
 }
 
 static int mvebu_pinconf_group_set(struct pinctrl_dev *pctldev,
@@ -161,7 +193,7 @@ static int mvebu_pinconf_group_set(struct pinctrl_dev *pctldev,
 		return -EINVAL;
 
 	for (i = 0; i < num_configs; i++) {
-		ret = grp->ctrl->mpp_set(grp->pins[0], configs[i]);
+		ret = grp->ctrl->mpp_set(grp->data, grp->pins[0], configs[i]);
 		if (ret)
 			return ret;
 	} /* for each config */
@@ -188,18 +220,19 @@ static void mvebu_pinconf_group_dbg_show(struct pinctrl_dev *pctldev,
 		if (curr->subname)
 			seq_printf(s, "(%s)", curr->subname);
 		if (curr->flags & (MVEBU_SETTING_GPO | MVEBU_SETTING_GPI)) {
-			seq_printf(s, "(");
+			seq_putc(s, '(');
 			if (curr->flags & MVEBU_SETTING_GPI)
-				seq_printf(s, "i");
+				seq_putc(s, 'i');
 			if (curr->flags & MVEBU_SETTING_GPO)
-				seq_printf(s, "o");
-			seq_printf(s, ")");
+				seq_putc(s, 'o');
+			seq_putc(s, ')');
 		}
-	} else
-		seq_printf(s, "current: UNKNOWN");
+	} else {
+		seq_puts(s, "current: UNKNOWN");
+	}
 
 	if (grp->num_settings > 1) {
-		seq_printf(s, ", available = [");
+		seq_puts(s, ", available = [");
 		for (n = 0; n < grp->num_settings; n++) {
 			if (curr == &grp->settings[n])
 				continue;
@@ -214,17 +247,16 @@ static void mvebu_pinconf_group_dbg_show(struct pinctrl_dev *pctldev,
 				seq_printf(s, "(%s)", grp->settings[n].subname);
 			if (grp->settings[n].flags &
 				(MVEBU_SETTING_GPO | MVEBU_SETTING_GPI)) {
-				seq_printf(s, "(");
+				seq_putc(s, '(');
 				if (grp->settings[n].flags & MVEBU_SETTING_GPI)
-					seq_printf(s, "i");
+					seq_putc(s, 'i');
 				if (grp->settings[n].flags & MVEBU_SETTING_GPO)
-					seq_printf(s, "o");
-				seq_printf(s, ")");
+					seq_putc(s, 'o');
+				seq_putc(s, ')');
 			}
 		}
-		seq_printf(s, " ]");
+		seq_puts(s, " ]");
 	}
-	return;
 }
 
 static const struct pinconf_ops mvebu_pinconf_ops = {
@@ -302,7 +334,7 @@ static int mvebu_pinmux_gpio_request_enable(struct pinctrl_dev *pctldev,
 		return -EINVAL;
 
 	if (grp->ctrl->mpp_gpio_req)
-		return grp->ctrl->mpp_gpio_req(offset);
+		return grp->ctrl->mpp_gpio_req(grp->data, offset);
 
 	setting = mvebu_pinctrl_find_gpio_setting(pctl, grp);
 	if (!setting)
@@ -325,7 +357,7 @@ static int mvebu_pinmux_gpio_set_direction(struct pinctrl_dev *pctldev,
 		return -EINVAL;
 
 	if (grp->ctrl->mpp_gpio_dir)
-		return grp->ctrl->mpp_gpio_dir(offset, input);
+		return grp->ctrl->mpp_gpio_dir(grp->data, offset, input);
 
 	setting = mvebu_pinctrl_find_gpio_setting(pctl, grp);
 	if (!setting)
@@ -387,24 +419,20 @@ static int mvebu_pinctrl_dt_node_to_map(struct pinctrl_dev *pctldev,
 	ret = of_property_read_string(np, "marvell,function", &function);
 	if (ret) {
 		dev_err(pctl->dev,
-			"missing marvell,function in node %s\n", np->name);
+			"missing marvell,function in node %pOFn\n", np);
 		return 0;
 	}
 
 	nmaps = of_property_count_strings(np, "marvell,pins");
 	if (nmaps < 0) {
 		dev_err(pctl->dev,
-			"missing marvell,pins in node %s\n", np->name);
+			"missing marvell,pins in node %pOFn\n", np);
 		return 0;
 	}
 
-	*map = kmalloc(nmaps * sizeof(struct pinctrl_map), GFP_KERNEL);
-	if (*map == NULL) {
-		dev_err(pctl->dev,
-			"cannot allocate pinctrl_map memory for %s\n",
-			np->name);
+	*map = kmalloc_array(nmaps, sizeof(**map), GFP_KERNEL);
+	if (!*map)
 		return -ENOMEM;
-	}
 
 	n = 0;
 	of_property_for_each_string(np, "marvell,pins", prop, group) {
@@ -479,8 +507,9 @@ static int mvebu_pinctrl_build_functions(struct platform_device *pdev,
 
 	/* we allocate functions for number of pins and hope
 	 * there are fewer unique functions than pins available */
-	funcs = devm_kzalloc(&pdev->dev, funcsize *
-			     sizeof(struct mvebu_pinctrl_function), GFP_KERNEL);
+	funcs = devm_kcalloc(&pdev->dev,
+			     funcsize, sizeof(struct mvebu_pinctrl_function),
+			     GFP_KERNEL);
 	if (!funcs)
 		return -ENOMEM;
 
@@ -527,8 +556,9 @@ static int mvebu_pinctrl_build_functions(struct platform_device *pdev,
 
 			/* allocate group name array if not done already */
 			if (!f->groups) {
-				f->groups = devm_kzalloc(&pdev->dev,
-						 f->num_groups * sizeof(char *),
+				f->groups = devm_kcalloc(&pdev->dev,
+						 f->num_groups,
+						 sizeof(char *),
 						 GFP_KERNEL);
 				if (!f->groups)
 					return -ENOMEM;
@@ -563,10 +593,8 @@ int mvebu_pinctrl_probe(struct platform_device *pdev)
 
 	pctl = devm_kzalloc(&pdev->dev, sizeof(struct mvebu_pinctrl),
 			GFP_KERNEL);
-	if (!pctl) {
-		dev_err(&pdev->dev, "unable to alloc driver\n");
+	if (!pctl)
 		return -ENOMEM;
-	}
 
 	pctl->desc.name = dev_name(&pdev->dev);
 	pctl->desc.owner = THIS_MODULE;
@@ -582,7 +610,7 @@ int mvebu_pinctrl_probe(struct platform_device *pdev)
 	pctl->num_groups = 0;
 	pctl->desc.npins = 0;
 	for (n = 0; n < soc->ncontrols; n++) {
-		struct mvebu_mpp_ctrl *ctrl = &soc->controls[n];
+		const struct mvebu_mpp_ctrl *ctrl = &soc->controls[n];
 
 		pctl->desc.npins += ctrl->npins;
 		/* initialize control's pins[] array */
@@ -602,12 +630,12 @@ int mvebu_pinctrl_probe(struct platform_device *pdev)
 		}
 	}
 
-	pdesc = devm_kzalloc(&pdev->dev, pctl->desc.npins *
-			     sizeof(struct pinctrl_pin_desc), GFP_KERNEL);
-	if (!pdesc) {
-		dev_err(&pdev->dev, "failed to alloc pinctrl pins\n");
+	pdesc = devm_kcalloc(&pdev->dev,
+			     pctl->desc.npins,
+			     sizeof(struct pinctrl_pin_desc),
+			     GFP_KERNEL);
+	if (!pdesc)
 		return -ENOMEM;
-	}
 
 	for (n = 0; n < pctl->desc.npins; n++)
 		pdesc[n].number = n;
@@ -618,19 +646,22 @@ int mvebu_pinctrl_probe(struct platform_device *pdev)
 	 */
 	size = pctl->num_groups * sizeof(*pctl->groups) + noname * 8;
 	p = devm_kzalloc(&pdev->dev, size, GFP_KERNEL);
-	if (!p) {
-		dev_err(&pdev->dev, "failed to alloc group data\n");
+	if (!p)
 		return -ENOMEM;
-	}
+
 	pctl->groups = p;
 	noname_buf = p + pctl->num_groups * sizeof(*pctl->groups);
 
 	/* assign mpp controls to groups */
 	gid = 0;
 	for (n = 0; n < soc->ncontrols; n++) {
-		struct mvebu_mpp_ctrl *ctrl = &soc->controls[n];
+		const struct mvebu_mpp_ctrl *ctrl = &soc->controls[n];
+		struct mvebu_mpp_ctrl_data *data = soc->control_data ?
+						   &soc->control_data[n] : NULL;
+
 		pctl->groups[gid].gid = gid;
 		pctl->groups[gid].ctrl = ctrl;
+		pctl->groups[gid].data = data;
 		pctl->groups[gid].name = ctrl->name;
 		pctl->groups[gid].pins = ctrl->pins;
 		pctl->groups[gid].npins = ctrl->npins;
@@ -650,6 +681,7 @@ int mvebu_pinctrl_probe(struct platform_device *pdev)
 				gid++;
 				pctl->groups[gid].gid = gid;
 				pctl->groups[gid].ctrl = ctrl;
+				pctl->groups[gid].data = data;
 				pctl->groups[gid].name = noname_buf;
 				pctl->groups[gid].pins = &ctrl->pins[k];
 				pctl->groups[gid].npins = 1;
@@ -724,4 +756,89 @@ int mvebu_pinctrl_probe(struct platform_device *pdev)
 		pinctrl_add_gpio_range(pctl->pctldev, &soc->gpioranges[n]);
 
 	return 0;
+}
+
+/*
+ * mvebu_pinctrl_simple_mmio_probe - probe a simple mmio pinctrl
+ * @pdev: platform device (with platform data already attached)
+ *
+ * Initialise a simple (single base address) mmio pinctrl driver,
+ * assigning the MMIO base address to all mvebu mpp ctrl instances.
+ */
+int mvebu_pinctrl_simple_mmio_probe(struct platform_device *pdev)
+{
+	struct mvebu_pinctrl_soc_info *soc = dev_get_platdata(&pdev->dev);
+	struct mvebu_mpp_ctrl_data *mpp_data;
+	void __iomem *base;
+	int i;
+
+	base = devm_platform_ioremap_resource(pdev, 0);
+	if (IS_ERR(base))
+		return PTR_ERR(base);
+
+	mpp_data = devm_kcalloc(&pdev->dev, soc->ncontrols, sizeof(*mpp_data),
+				GFP_KERNEL);
+	if (!mpp_data)
+		return -ENOMEM;
+
+	for (i = 0; i < soc->ncontrols; i++)
+		mpp_data[i].base = base;
+
+	soc->control_data = mpp_data;
+
+	return mvebu_pinctrl_probe(pdev);
+}
+
+int mvebu_regmap_mpp_ctrl_get(struct mvebu_mpp_ctrl_data *data,
+			      unsigned int pid, unsigned long *config)
+{
+	unsigned off = (pid / MVEBU_MPPS_PER_REG) * MVEBU_MPP_BITS;
+	unsigned shift = (pid % MVEBU_MPPS_PER_REG) * MVEBU_MPP_BITS;
+	unsigned int val;
+	int err;
+
+	err = regmap_read(data->regmap.map, data->regmap.offset + off, &val);
+	if (err)
+		return err;
+
+	*config = (val >> shift) & MVEBU_MPP_MASK;
+
+	return 0;
+}
+
+int mvebu_regmap_mpp_ctrl_set(struct mvebu_mpp_ctrl_data *data,
+			      unsigned int pid, unsigned long config)
+{
+	unsigned off = (pid / MVEBU_MPPS_PER_REG) * MVEBU_MPP_BITS;
+	unsigned shift = (pid % MVEBU_MPPS_PER_REG) * MVEBU_MPP_BITS;
+
+	return regmap_update_bits(data->regmap.map, data->regmap.offset + off,
+				  MVEBU_MPP_MASK << shift, config << shift);
+}
+
+int mvebu_pinctrl_simple_regmap_probe(struct platform_device *pdev,
+				      struct device *syscon_dev, u32 offset)
+{
+	struct mvebu_pinctrl_soc_info *soc = dev_get_platdata(&pdev->dev);
+	struct mvebu_mpp_ctrl_data *mpp_data;
+	struct regmap *regmap;
+	int i;
+
+	regmap = syscon_node_to_regmap(syscon_dev->of_node);
+	if (IS_ERR(regmap))
+		return PTR_ERR(regmap);
+
+	mpp_data = devm_kcalloc(&pdev->dev, soc->ncontrols, sizeof(*mpp_data),
+				GFP_KERNEL);
+	if (!mpp_data)
+		return -ENOMEM;
+
+	for (i = 0; i < soc->ncontrols; i++) {
+		mpp_data[i].regmap.map = regmap;
+		mpp_data[i].regmap.offset = offset;
+	}
+
+	soc->control_data = mpp_data;
+
+	return mvebu_pinctrl_probe(pdev);
 }

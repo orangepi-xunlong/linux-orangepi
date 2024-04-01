@@ -1,51 +1,10 @@
+/* SPDX-License-Identifier: GPL-2.0 or BSD-3-Clause */
+/*
+ * Copyright(c) 2015 - 2018 Intel Corporation.
+ */
+
 #ifndef _HFI1_SDMA_H
 #define _HFI1_SDMA_H
-/*
- * Copyright(c) 2015, 2016 Intel Corporation.
- *
- * This file is provided under a dual BSD/GPLv2 license.  When using or
- * redistributing this file, you may do so under either license.
- *
- * GPL LICENSE SUMMARY
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of version 2 of the GNU General Public License as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- *
- * BSD LICENSE
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- *
- *  - Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- *  - Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- *  - Neither the name of Intel Corporation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *
- */
 
 #include <linux/types.h>
 #include <linux/list.h>
@@ -61,16 +20,6 @@
 #define MAX_DESC 64
 /* Hardware limit for SDMA packet size */
 #define MAX_SDMA_PKT_SIZE ((16 * 1024) - 1)
-
-#define SDMA_TXREQ_S_OK        0
-#define SDMA_TXREQ_S_SENDERROR 1
-#define SDMA_TXREQ_S_ABORTED   2
-#define SDMA_TXREQ_S_SHUTDOWN  3
-
-/* flags bits */
-#define SDMA_TXREQ_F_URGENT       0x0001
-#define SDMA_TXREQ_F_AHG_COPY     0x0002
-#define SDMA_TXREQ_F_USE_AHG      0x0004
 
 #define SDMA_MAP_NONE          0
 #define SDMA_MAP_SINGLE        1
@@ -392,6 +341,7 @@ struct sdma_engine {
 	u64                     progress_int_cnt;
 
 	/* private: */
+	seqlock_t            waitlock;
 	struct list_head      dmawait;
 
 	/* CONFIG SDMA for now, just blindly duplicate */
@@ -415,11 +365,13 @@ struct sdma_engine {
 	struct list_head flushlist;
 	struct cpumask cpu_mask;
 	struct kobject kobj;
+	u32 msix_intr;
 };
 
 int sdma_init(struct hfi1_devdata *dd, u8 port);
 void sdma_start(struct hfi1_devdata *dd);
 void sdma_exit(struct hfi1_devdata *dd);
+void sdma_clean(struct hfi1_devdata *dd, size_t num_engines);
 void sdma_all_running(struct hfi1_devdata *dd);
 void sdma_all_idle(struct hfi1_devdata *dd);
 void sdma_freeze_notify(struct hfi1_devdata *dd, int go_idle);
@@ -445,7 +397,7 @@ static inline u16 sdma_descq_freecnt(struct sdma_engine *sde)
 {
 	return sde->descq_cnt -
 		(sde->descq_tail -
-		 ACCESS_ONCE(sde->descq_head)) - 1;
+		 READ_ONCE(sde->descq_head)) - 1;
 }
 
 static inline u16 sdma_descq_inprocess(struct sdma_engine *sde)
@@ -643,7 +595,10 @@ static inline void make_tx_sdma_desc(
 	struct sdma_txreq *tx,
 	int type,
 	dma_addr_t addr,
-	size_t len)
+	size_t len,
+	void *pinning_ctx,
+	void (*ctx_get)(void *),
+	void (*ctx_put)(void *))
 {
 	struct sdma_desc *desc = &tx->descp[tx->num_desc];
 
@@ -660,6 +615,11 @@ static inline void make_tx_sdma_desc(
 				<< SDMA_DESC0_PHY_ADDR_SHIFT) |
 			(((u64)len & SDMA_DESC0_BYTE_COUNT_MASK)
 				<< SDMA_DESC0_BYTE_COUNT_SHIFT);
+
+	desc->pinning_ctx = pinning_ctx;
+	desc->ctx_put = ctx_put;
+	if (pinning_ctx && ctx_get)
+		ctx_get(pinning_ctx);
 }
 
 /* helper to extend txreq */
@@ -667,20 +627,25 @@ int ext_coal_sdma_tx_descs(struct hfi1_devdata *dd, struct sdma_txreq *tx,
 			   int type, void *kvaddr, struct page *page,
 			   unsigned long offset, u16 len);
 int _pad_sdma_tx_descs(struct hfi1_devdata *, struct sdma_txreq *);
-void sdma_txclean(struct hfi1_devdata *, struct sdma_txreq *);
+void __sdma_txclean(struct hfi1_devdata *, struct sdma_txreq *);
+
+static inline void sdma_txclean(struct hfi1_devdata *dd, struct sdma_txreq *tx)
+{
+	if (tx->num_desc)
+		__sdma_txclean(dd, tx);
+}
 
 /* helpers used by public routines */
 static inline void _sdma_close_tx(struct hfi1_devdata *dd,
 				  struct sdma_txreq *tx)
 {
-	tx->descp[tx->num_desc].qw[0] |=
-		SDMA_DESC0_LAST_DESC_FLAG;
-	tx->descp[tx->num_desc].qw[1] |=
-		dd->default_desc1;
+	u16 last_desc = tx->num_desc - 1;
+
+	tx->descp[last_desc].qw[0] |= SDMA_DESC0_LAST_DESC_FLAG;
+	tx->descp[last_desc].qw[1] |= dd->default_desc1;
 	if (tx->flags & SDMA_TXREQ_F_URGENT)
-		tx->descp[tx->num_desc].qw[1] |=
-			(SDMA_DESC1_HEAD_TO_HOST_FLAG |
-			 SDMA_DESC1_INT_REQ_FLAG);
+		tx->descp[last_desc].qw[1] |= (SDMA_DESC1_HEAD_TO_HOST_FLAG |
+					       SDMA_DESC1_INT_REQ_FLAG);
 }
 
 static inline int _sdma_txadd_daddr(
@@ -688,15 +653,20 @@ static inline int _sdma_txadd_daddr(
 	int type,
 	struct sdma_txreq *tx,
 	dma_addr_t addr,
-	u16 len)
+	u16 len,
+	void *pinning_ctx,
+	void (*ctx_get)(void *),
+	void (*ctx_put)(void *))
 {
 	int rval = 0;
 
 	make_tx_sdma_desc(
 		tx,
 		type,
-		addr, len);
+		addr, len,
+		pinning_ctx, ctx_get, ctx_put);
 	WARN_ON(len > tx->tlen);
+	tx->num_desc++;
 	tx->tlen -= len;
 	/* special cases for last */
 	if (!tx->tlen) {
@@ -708,7 +678,6 @@ static inline int _sdma_txadd_daddr(
 			_sdma_close_tx(dd, tx);
 		}
 	}
-	tx->num_desc++;
 	return rval;
 }
 
@@ -719,6 +688,14 @@ static inline int _sdma_txadd_daddr(
  * @page: page to map
  * @offset: offset within the page
  * @len: length in bytes
+ * @pinning_ctx: context to be stored on struct sdma_desc .pinning_ctx. Not
+ *               added if coalesce buffer is used. E.g. pointer to pinned-page
+ *               cache entry for the sdma_desc.
+ * @ctx_get: optional function to take reference to @pinning_ctx. Not called if
+ *           @pinning_ctx is NULL.
+ * @ctx_put: optional function to release reference to @pinning_ctx after
+ *           sdma_desc completes. May be called in interrupt context so must
+ *           not sleep. Not called if @pinning_ctx is NULL.
  *
  * This is used to add a page/offset/length descriptor.
  *
@@ -733,7 +710,10 @@ static inline int sdma_txadd_page(
 	struct sdma_txreq *tx,
 	struct page *page,
 	unsigned long offset,
-	u16 len)
+	u16 len,
+	void *pinning_ctx,
+	void (*ctx_get)(void *),
+	void (*ctx_put)(void *))
 {
 	dma_addr_t addr;
 	int rval;
@@ -753,12 +733,12 @@ static inline int sdma_txadd_page(
 		       DMA_TO_DEVICE);
 
 	if (unlikely(dma_mapping_error(&dd->pcidev->dev, addr))) {
-		sdma_txclean(dd, tx);
+		__sdma_txclean(dd, tx);
 		return -ENOSPC;
 	}
 
-	return _sdma_txadd_daddr(
-			dd, SDMA_MAP_PAGE, tx, addr, len);
+	return _sdma_txadd_daddr(dd, SDMA_MAP_PAGE, tx, addr, len,
+				 pinning_ctx, ctx_get, ctx_put);
 }
 
 /**
@@ -792,7 +772,8 @@ static inline int sdma_txadd_daddr(
 			return rval;
 	}
 
-	return _sdma_txadd_daddr(dd, SDMA_MAP_NONE, tx, addr, len);
+	return _sdma_txadd_daddr(dd, SDMA_MAP_NONE, tx, addr, len,
+				 NULL, NULL, NULL);
 }
 
 /**
@@ -834,23 +815,24 @@ static inline int sdma_txadd_kvaddr(
 		       DMA_TO_DEVICE);
 
 	if (unlikely(dma_mapping_error(&dd->pcidev->dev, addr))) {
-		sdma_txclean(dd, tx);
+		__sdma_txclean(dd, tx);
 		return -ENOSPC;
 	}
 
-	return _sdma_txadd_daddr(
-			dd, SDMA_MAP_SINGLE, tx, addr, len);
+	return _sdma_txadd_daddr(dd, SDMA_MAP_SINGLE, tx, addr, len,
+				 NULL, NULL, NULL);
 }
 
-struct iowait;
+struct iowait_work;
 
 int sdma_send_txreq(struct sdma_engine *sde,
-		    struct iowait *wait,
-		    struct sdma_txreq *tx);
+		    struct iowait_work *wait,
+		    struct sdma_txreq *tx,
+		    bool pkts_sent);
 int sdma_send_txlist(struct sdma_engine *sde,
-		     struct iowait *wait,
+		     struct iowait_work *wait,
 		     struct list_head *tx_list,
-		     u32 *count);
+		     u16 *count_out);
 
 int sdma_ahg_alloc(struct sdma_engine *sde);
 void sdma_ahg_free(struct sdma_engine *sde, int ahg_index);
@@ -907,24 +889,6 @@ static inline unsigned sdma_progress(struct sdma_engine *sde, unsigned seq,
 	return 0;
 }
 
-/**
- * sdma_iowait_schedule() - initialize wait structure
- * @sde: sdma_engine to schedule
- * @wait: wait struct to schedule
- *
- * This function initializes the iowait
- * structure embedded in the QP or PQ.
- *
- */
-static inline void sdma_iowait_schedule(
-	struct sdma_engine *sde,
-	struct iowait *wait)
-{
-	struct hfi1_pportdata *ppd = sde->dd->pport;
-
-	iowait_schedule(wait, ppd->hfi1_wq, sde->cpu);
-}
-
 /* for use by interrupt handling */
 void sdma_engine_error(struct sdma_engine *sde, u64 status);
 void sdma_engine_interrupt(struct sdma_engine *sde, u64 status);
@@ -960,34 +924,34 @@ void sdma_engine_interrupt(struct sdma_engine *sde, u64 status);
  *      |    mask                  |              --/  |--------------------|
  *      |--------------------------|            -/     |        *           |
  *      |    actual_vls (max 8)    |          -/       |--------------------|
- *      |--------------------------|       --/         | sde[n] -> eng n    |
+ *      |--------------------------|       --/         | sde[n-1] -> eng n  |
  *      |    vls (max 8)           |     -/            +--------------------+
  *      |--------------------------|  --/
  *      |    map[0]                |-/
- *      |--------------------------|                   +--------------------+
- *      |    map[1]                |---                |       mask         |
- *      |--------------------------|   \----           |--------------------|
- *      |           *              |        \--        | sde[0] -> eng 1+n  |
- *      |           *              |           \----   |--------------------|
- *      |           *              |                \->| sde[1] -> eng 2+n  |
- *      |--------------------------|                   |--------------------|
- *      |   map[vls - 1]           |-                  |         *          |
- *      +--------------------------+ \-                |--------------------|
- *                                     \-              | sde[m] -> eng m+n  |
- *                                       \             +--------------------+
+ *      |--------------------------|                   +---------------------+
+ *      |    map[1]                |---                |       mask          |
+ *      |--------------------------|   \----           |---------------------|
+ *      |           *              |        \--        | sde[0] -> eng 1+n   |
+ *      |           *              |           \----   |---------------------|
+ *      |           *              |                \->| sde[1] -> eng 2+n   |
+ *      |--------------------------|                   |---------------------|
+ *      |   map[vls - 1]           |-                  |         *           |
+ *      +--------------------------+ \-                |---------------------|
+ *                                     \-              | sde[m-1] -> eng m+n |
+ *                                       \             +---------------------+
  *                                        \-
  *                                          \
- *                                           \-        +--------------------+
- *                                             \-      |       mask         |
- *                                               \     |--------------------|
- *                                                \-   | sde[0] -> eng 1+m+n|
- *                                                  \- |--------------------|
- *                                                    >| sde[1] -> eng 2+m+n|
- *                                                     |--------------------|
- *                                                     |         *          |
- *                                                     |--------------------|
- *                                                     | sde[o] -> eng o+m+n|
- *                                                     +--------------------+
+ *                                           \-        +----------------------+
+ *                                             \-      |       mask           |
+ *                                               \     |----------------------|
+ *                                                \-   | sde[0] -> eng 1+m+n  |
+ *                                                  \- |----------------------|
+ *                                                    >| sde[1] -> eng 2+m+n  |
+ *                                                     |----------------------|
+ *                                                     |         *            |
+ *                                                     |----------------------|
+ *                                                     | sde[o-1] -> eng o+m+n|
+ *                                                     +----------------------+
  *
  */
 
@@ -1002,7 +966,7 @@ void sdma_engine_interrupt(struct sdma_engine *sde, u64 status);
  */
 struct sdma_map_elem {
 	u32 mask;
-	struct sdma_engine *sde[0];
+	struct sdma_engine *sde[];
 };
 
 /**
@@ -1024,7 +988,7 @@ struct sdma_vl_map {
 	u32 mask;
 	u8 actual_vls;
 	u8 vls;
-	struct sdma_map_elem *map[0];
+	struct sdma_map_elem *map[];
 };
 
 int sdma_map_init(
@@ -1089,5 +1053,4 @@ u16 sdma_get_descq_cnt(void);
 extern uint mod_num_sdma;
 
 void sdma_update_lmc(struct hfi1_devdata *dd, u64 mask, u32 lid);
-
 #endif

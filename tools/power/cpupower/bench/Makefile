@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-2.0
 OUTPUT := ./
 ifeq ("$(origin O)", "command line")
 ifneq ($(O),)
@@ -26,7 +27,7 @@ $(OUTPUT)cpufreq-bench: $(OBJS)
 
 all: $(OUTPUT)cpufreq-bench
 
-install:
+install: $(OUTPUT)cpufreq-bench
 	mkdir -p $(DESTDIR)/$(sbindir)
 	mkdir -p $(DESTDIR)/$(bindir)
 	mkdir -p $(DESTDIR)/$(docdir)

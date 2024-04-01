@@ -1,6 +1,10 @@
 #!/bin/bash
+# SPDX-License-Identifier: GPL-2.0
 
 SYSFS=
+# Kselftest framework requirement - SKIP code is 4.
+ksft_skip=4
+retval=0
 
 prerequisite()
 {
@@ -8,7 +12,7 @@ prerequisite()
 
 	if [ $UID != 0 ]; then
 		echo $msg must be run as root >&2
-		exit 0
+		exit $ksft_skip
 	fi
 
 	taskset -p 01 $$
@@ -17,17 +21,27 @@ prerequisite()
 
 	if [ ! -d "$SYSFS" ]; then
 		echo $msg sysfs is not mounted >&2
-		exit 0
+		exit $ksft_skip
 	fi
 
 	if ! ls $SYSFS/devices/system/cpu/cpu* > /dev/null 2>&1; then
 		echo $msg cpu hotplug is not supported >&2
-		exit 0
+		exit $ksft_skip
 	fi
 
 	echo "CPU online/offline summary:"
 	online_cpus=`cat $SYSFS/devices/system/cpu/online`
 	online_max=${online_cpus##*-}
+
+	if [[ "$online_cpus" = "$online_max" ]]; then
+		echo "$msg: since there is only one cpu: $online_cpus"
+		exit $ksft_skip
+	fi
+
+	present_cpus=`cat $SYSFS/devices/system/cpu/present`
+	present_max=${present_cpus##*-}
+	echo "present_cpus = $present_cpus present_max = $present_max"
+
 	echo -e "\t Cpus in online state: $online_cpus"
 
 	offline_cpus=`cat $SYSFS/devices/system/cpu/offline`
@@ -89,8 +103,10 @@ online_cpu_expect_success()
 
 	if ! online_cpu $cpu; then
 		echo $FUNCNAME $cpu: unexpected fail >&2
+		retval=1
 	elif ! cpu_is_online $cpu; then
 		echo $FUNCNAME $cpu: unexpected offline >&2
+		retval=1
 	fi
 }
 
@@ -100,8 +116,10 @@ online_cpu_expect_fail()
 
 	if online_cpu $cpu 2> /dev/null; then
 		echo $FUNCNAME $cpu: unexpected success >&2
+		retval=1
 	elif ! cpu_is_offline $cpu; then
 		echo $FUNCNAME $cpu: unexpected online >&2
+		retval=1
 	fi
 }
 
@@ -111,8 +129,10 @@ offline_cpu_expect_success()
 
 	if ! offline_cpu $cpu; then
 		echo $FUNCNAME $cpu: unexpected fail >&2
+		retval=1
 	elif ! cpu_is_offline $cpu; then
 		echo $FUNCNAME $cpu: unexpected offline >&2
+		retval=1
 	fi
 }
 
@@ -122,43 +142,53 @@ offline_cpu_expect_fail()
 
 	if offline_cpu $cpu 2> /dev/null; then
 		echo $FUNCNAME $cpu: unexpected success >&2
+		retval=1
 	elif ! cpu_is_online $cpu; then
 		echo $FUNCNAME $cpu: unexpected offline >&2
+		retval=1
 	fi
 }
 
-error=-12
+online_all_hot_pluggable_cpus()
+{
+	for cpu in `hotplaggable_offline_cpus`; do
+		online_cpu_expect_success $cpu
+	done
+}
+
+offline_all_hot_pluggable_cpus()
+{
+	local reserve_cpu=$online_max
+	for cpu in `hotpluggable_online_cpus`; do
+		# Reserve one cpu oneline at least.
+		if [ $cpu -eq $reserve_cpu ];then
+			continue
+		fi
+		offline_cpu_expect_success $cpu
+	done
+}
+
 allcpus=0
-priority=0
 online_cpus=0
 online_max=0
 offline_cpus=0
 offline_max=0
+present_cpus=0
+present_max=0
 
-while getopts e:ahp: opt; do
+while getopts ah opt; do
 	case $opt in
-	e)
-		error=$OPTARG
-		;;
 	a)
 		allcpus=1
 		;;
 	h)
-		echo "Usage $0 [ -a ] [ -e errno ] [ -p notifier-priority ]"
+		echo "Usage $0 [ -a ]"
 		echo -e "\t default offline one cpu"
 		echo -e "\t run with -a option to offline all cpus"
 		exit
 		;;
-	p)
-		priority=$OPTARG
-		;;
 	esac
 done
-
-if ! [ "$error" -ge -4095 -a "$error" -lt 0 ]; then
-	echo "error code must be -4095 <= errno < 0" >&2
-	exit 1
-fi
 
 prerequisite
 
@@ -173,11 +203,12 @@ if [ $allcpus -eq 0 ]; then
 	online_cpu_expect_success $online_max
 
 	if [[ $offline_cpus -gt 0 ]]; then
-		echo -e "\t offline to online to offline: cpu $offline_max"
-		online_cpu_expect_success $offline_max
-		offline_cpu_expect_success $offline_max
+		echo -e "\t online to offline to online: cpu $present_max"
+		online_cpu_expect_success $present_max
+		offline_cpu_expect_success $present_max
+		online_cpu $present_max
 	fi
-	exit 0
+	exit $retval
 else
 	echo "Full scope test: all hotplug cpus"
 	echo -e "\t online all offline cpus"
@@ -185,85 +216,10 @@ else
 	echo -e "\t online all offline cpus"
 fi
 
-#
-# Online all hot-pluggable CPUs
-#
-for cpu in `hotplaggable_offline_cpus`; do
-	online_cpu_expect_success $cpu
-done
+online_all_hot_pluggable_cpus
 
-#
-# Offline all hot-pluggable CPUs
-#
-for cpu in `hotpluggable_online_cpus`; do
-	offline_cpu_expect_success $cpu
-done
+offline_all_hot_pluggable_cpus
 
-#
-# Online all hot-pluggable CPUs again
-#
-for cpu in `hotplaggable_offline_cpus`; do
-	online_cpu_expect_success $cpu
-done
+online_all_hot_pluggable_cpus
 
-#
-# Test with cpu notifier error injection
-#
-
-DEBUGFS=`mount -t debugfs | head -1 | awk '{ print $3 }'`
-NOTIFIER_ERR_INJECT_DIR=$DEBUGFS/notifier-error-inject/cpu
-
-prerequisite_extra()
-{
-	msg="skip extra tests:"
-
-	/sbin/modprobe -q -r cpu-notifier-error-inject
-	/sbin/modprobe -q cpu-notifier-error-inject priority=$priority
-
-	if [ ! -d "$DEBUGFS" ]; then
-		echo $msg debugfs is not mounted >&2
-		exit 0
-	fi
-
-	if [ ! -d $NOTIFIER_ERR_INJECT_DIR ]; then
-		echo $msg cpu-notifier-error-inject module is not available >&2
-		exit 0
-	fi
-}
-
-prerequisite_extra
-
-#
-# Offline all hot-pluggable CPUs
-#
-echo 0 > $NOTIFIER_ERR_INJECT_DIR/actions/CPU_DOWN_PREPARE/error
-for cpu in `hotpluggable_online_cpus`; do
-	offline_cpu_expect_success $cpu
-done
-
-#
-# Test CPU hot-add error handling (offline => online)
-#
-echo $error > $NOTIFIER_ERR_INJECT_DIR/actions/CPU_UP_PREPARE/error
-for cpu in `hotplaggable_offline_cpus`; do
-	online_cpu_expect_fail $cpu
-done
-
-#
-# Online all hot-pluggable CPUs
-#
-echo 0 > $NOTIFIER_ERR_INJECT_DIR/actions/CPU_UP_PREPARE/error
-for cpu in `hotplaggable_offline_cpus`; do
-	online_cpu_expect_success $cpu
-done
-
-#
-# Test CPU hot-remove error handling (online => offline)
-#
-echo $error > $NOTIFIER_ERR_INJECT_DIR/actions/CPU_DOWN_PREPARE/error
-for cpu in `hotpluggable_online_cpus`; do
-	offline_cpu_expect_fail $cpu
-done
-
-echo 0 > $NOTIFIER_ERR_INJECT_DIR/actions/CPU_DOWN_PREPARE/error
-/sbin/modprobe -q -r cpu-notifier-error-inject
+exit $retval

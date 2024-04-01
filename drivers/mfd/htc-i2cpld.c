@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  htc-i2cpld.c
  *  Chip driver for an unknown CPLD chip found on omap850 HTC devices like
@@ -9,32 +10,19 @@
  *
  *  Based on work done in the linwizard project
  *  Copyright (C) 2008-2009 Angelo Arrifano <miknix@gmail.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 
 #include <linux/kernel.h>
 #include <linux/init.h>
-#include <linux/module.h>
 #include <linux/interrupt.h>
 #include <linux/platform_device.h>
 #include <linux/i2c.h>
 #include <linux/irq.h>
 #include <linux/spinlock.h>
 #include <linux/htcpld.h>
-#include <linux/gpio.h>
+#include <linux/gpio/driver.h>
+#include <linux/gpio/machine.h>
+#include <linux/gpio/consumer.h>
 #include <linux/slab.h>
 
 struct htcpld_chip {
@@ -72,8 +60,8 @@ struct htcpld_data {
 	uint               irq_start;
 	int                nirqs;
 	uint               chained_irq;
-	unsigned int       int_reset_gpio_hi;
-	unsigned int       int_reset_gpio_lo;
+	struct gpio_desc   *int_reset_gpio_hi;
+	struct gpio_desc   *int_reset_gpio_lo;
 
 	/* htcpld info */
 	struct htcpld_chip *chip;
@@ -210,9 +198,9 @@ static irqreturn_t htcpld_handler(int irq, void *dev)
 	 * be asserted.
 	 */
 	if (htcpld->int_reset_gpio_hi)
-		gpio_set_value(htcpld->int_reset_gpio_hi, 1);
+		gpiod_set_value(htcpld->int_reset_gpio_hi, 1);
 	if (htcpld->int_reset_gpio_lo)
-		gpio_set_value(htcpld->int_reset_gpio_lo, 0);
+		gpiod_set_value(htcpld->int_reset_gpio_lo, 0);
 
 	return IRQ_HANDLED;
 }
@@ -360,21 +348,23 @@ static int htcpld_register_chip_i2c(
 	if (!i2c_check_functionality(adapter, I2C_FUNC_SMBUS_READ_BYTE_DATA)) {
 		dev_warn(dev, "i2c adapter %d non-functional\n",
 			 pdata->i2c_adapter_id);
+		i2c_put_adapter(adapter);
 		return -EINVAL;
 	}
 
 	memset(&info, 0, sizeof(struct i2c_board_info));
 	info.addr = plat_chip_data->addr;
-	strlcpy(info.type, "htcpld-chip", I2C_NAME_SIZE);
+	strscpy(info.type, "htcpld-chip", I2C_NAME_SIZE);
 	info.platform_data = chip;
 
 	/* Add the I2C device.  This calls the probe() function. */
-	client = i2c_new_device(adapter, &info);
-	if (!client) {
+	client = i2c_new_client_device(adapter, &info);
+	if (IS_ERR(client)) {
 		/* I2C device registration failed, contineu with the next */
 		dev_warn(dev, "Unable to add I2C device for 0x%x\n",
 			 plat_chip_data->addr);
-		return -ENODEV;
+		i2c_put_adapter(adapter);
+		return PTR_ERR(client);
 	}
 
 	i2c_set_clientdata(client, chip);
@@ -399,8 +389,7 @@ static void htcpld_unregister_chip_i2c(
 	htcpld = platform_get_drvdata(pdev);
 	chip = &htcpld->chip[chip_index];
 
-	if (chip->client)
-		i2c_unregister_device(chip->client);
+	i2c_unregister_device(chip->client);
 }
 
 static int htcpld_register_chip_gpio(
@@ -477,12 +466,12 @@ static int htcpld_setup_chips(struct platform_device *pdev)
 
 	/* Setup each chip's output GPIOs */
 	htcpld->nchips = pdata->num_chip;
-	htcpld->chip = devm_kzalloc(dev, sizeof(struct htcpld_chip) * htcpld->nchips,
+	htcpld->chip = devm_kcalloc(dev,
+				    htcpld->nchips,
+				    sizeof(struct htcpld_chip),
 				    GFP_KERNEL);
-	if (!htcpld->chip) {
-		dev_warn(dev, "Unable to allocate memory for chips\n");
+	if (!htcpld->chip)
 		return -ENOMEM;
-	}
 
 	/* Add the chips as best we can */
 	for (i = 0; i < htcpld->nchips; i++) {
@@ -575,34 +564,28 @@ static int htcpld_core_probe(struct platform_device *pdev)
 		return ret;
 
 	/* Request the GPIO(s) for the int reset and set them up */
-	if (pdata->int_reset_gpio_hi) {
-		ret = gpio_request(pdata->int_reset_gpio_hi, "htcpld-core");
-		if (ret) {
-			/*
-			 * If it failed, that sucks, but we can probably
-			 * continue on without it.
-			 */
-			dev_warn(dev, "Unable to request int_reset_gpio_hi -- interrupts may not work\n");
-			htcpld->int_reset_gpio_hi = 0;
-		} else {
-			htcpld->int_reset_gpio_hi = pdata->int_reset_gpio_hi;
-			gpio_set_value(htcpld->int_reset_gpio_hi, 1);
-		}
+	htcpld->int_reset_gpio_hi = gpiochip_request_own_desc(&htcpld->chip[2].chip_out,
+							      7, "htcpld-core", GPIO_ACTIVE_HIGH,
+							      GPIOD_OUT_HIGH);
+	if (IS_ERR(htcpld->int_reset_gpio_hi)) {
+		/*
+		 * If it failed, that sucks, but we can probably
+		 * continue on without it.
+		 */
+		htcpld->int_reset_gpio_hi = NULL;
+		dev_warn(dev, "Unable to request int_reset_gpio_hi -- interrupts may not work\n");
 	}
 
-	if (pdata->int_reset_gpio_lo) {
-		ret = gpio_request(pdata->int_reset_gpio_lo, "htcpld-core");
-		if (ret) {
-			/*
-			 * If it failed, that sucks, but we can probably
-			 * continue on without it.
-			 */
-			dev_warn(dev, "Unable to request int_reset_gpio_lo -- interrupts may not work\n");
-			htcpld->int_reset_gpio_lo = 0;
-		} else {
-			htcpld->int_reset_gpio_lo = pdata->int_reset_gpio_lo;
-			gpio_set_value(htcpld->int_reset_gpio_lo, 0);
-		}
+	htcpld->int_reset_gpio_lo = gpiochip_request_own_desc(&htcpld->chip[2].chip_out,
+							      0, "htcpld-core", GPIO_ACTIVE_HIGH,
+							      GPIOD_OUT_LOW);
+	if (IS_ERR(htcpld->int_reset_gpio_lo)) {
+		/*
+		 * If it failed, that sucks, but we can probably
+		 * continue on without it.
+		 */
+		htcpld->int_reset_gpio_lo = NULL;
+		dev_warn(dev, "Unable to request int_reset_gpio_lo -- interrupts may not work\n");
 	}
 
 	dev_info(dev, "Initialized successfully\n");
@@ -614,8 +597,6 @@ static const struct i2c_device_id htcpld_chip_id[] = {
 	{ "htcpld-chip", 0 },
 	{ }
 };
-MODULE_DEVICE_TABLE(i2c, htcpld_chip_id);
-
 
 static struct i2c_driver htcpld_chip_driver = {
 	.driver = {
@@ -643,17 +624,4 @@ static int __init htcpld_core_init(void)
 	/* Probe for our chips */
 	return platform_driver_probe(&htcpld_core_driver, htcpld_core_probe);
 }
-
-static void __exit htcpld_core_exit(void)
-{
-	i2c_del_driver(&htcpld_chip_driver);
-	platform_driver_unregister(&htcpld_core_driver);
-}
-
-module_init(htcpld_core_init);
-module_exit(htcpld_core_exit);
-
-MODULE_AUTHOR("Cory Maccarrone <darkstar6262@gmail.com>");
-MODULE_DESCRIPTION("I2C HTC PLD Driver");
-MODULE_LICENSE("GPL");
-
+device_initcall(htcpld_core_init);

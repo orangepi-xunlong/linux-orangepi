@@ -359,10 +359,10 @@ static int ch7006_encoder_set_property(struct drm_encoder *encoder,
 	if (modes_changed) {
 		drm_helper_probe_single_connector_modes(connector, 0, 0);
 
-		/* Disable the crtc to ensure a full modeset is
-		 * performed whenever it's turned on again. */
 		if (crtc)
-			drm_crtc_force_disable(crtc);
+			drm_crtc_helper_set_mode(crtc, &crtc->mode,
+						 crtc->x, crtc->y,
+						 crtc->primary->fb);
 	}
 
 	return 0;
@@ -417,11 +417,9 @@ fail:
 	return -ENODEV;
 }
 
-static int ch7006_remove(struct i2c_client *client)
+static void ch7006_remove(struct i2c_client *client)
 {
 	ch7006_dbg(client, "\n");
-
-	return 0;
 }
 
 static int ch7006_resume(struct device *dev)
@@ -485,7 +483,7 @@ static int ch7006_encoder_init(struct i2c_client *client,
 	return 0;
 }
 
-static struct i2c_device_id ch7006_ids[] = {
+static const struct i2c_device_id ch7006_ids[] = {
 	{ "ch7006", 0 },
 	{ }
 };

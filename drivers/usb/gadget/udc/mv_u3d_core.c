@@ -1,9 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Copyright (C) 2011 Marvell International Ltd. All rights reserved.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
  */
 
 #include <linux/module.h>
@@ -35,7 +32,6 @@
 #define DRIVER_DESC		"Marvell PXA USB3.0 Device Controller driver"
 
 static const char driver_name[] = "mv_u3d";
-static const char driver_desc[] = DRIVER_DESC;
 
 static void mv_u3d_nuke(struct mv_u3d_ep *ep, int status);
 static void mv_u3d_stop_activity(struct mv_u3d *u3d,
@@ -462,6 +458,12 @@ static int mv_u3d_req_to_trb(struct mv_u3d_req *req)
 					req->trb_head->trb_hw,
 					trb_num * sizeof(*trb_hw),
 					DMA_BIDIRECTIONAL);
+		if (dma_mapping_error(u3d->gadget.dev.parent,
+					req->trb_head->trb_dma)) {
+			kfree(req->trb_head->trb_hw);
+			kfree(req->trb_head);
+			return -EFAULT;
+		}
 
 		req->chain = 1;
 	}
@@ -487,30 +489,32 @@ mv_u3d_start_queue(struct mv_u3d_ep *ep)
 	ret = usb_gadget_map_request(&u3d->gadget, &req->req,
 					mv_u3d_ep_dir(ep));
 	if (ret)
-		return ret;
+		goto break_processing;
 
 	req->req.status = -EINPROGRESS;
 	req->req.actual = 0;
 	req->trb_count = 0;
 
-	/* build trbs and push them to device queue */
-	if (!mv_u3d_req_to_trb(req)) {
-		ret = mv_u3d_queue_trb(ep, req);
-		if (ret) {
-			ep->processing = 0;
-			return ret;
-		}
-	} else {
-		ep->processing = 0;
+	/* build trbs */
+	ret = mv_u3d_req_to_trb(req);
+	if (ret) {
 		dev_err(u3d->dev, "%s, mv_u3d_req_to_trb fail\n", __func__);
-		return -ENOMEM;
+		goto break_processing;
 	}
 
+	/* and push them to device queue */
+	ret = mv_u3d_queue_trb(ep, req);
+	if (ret)
+		goto break_processing;
+
 	/* irq handler advances the queue */
-	if (req)
-		list_add_tail(&req->queue, &ep->queue);
+	list_add_tail(&req->queue, &ep->queue);
 
 	return 0;
+
+break_processing:
+	ep->processing = 0;
+	return ret;
 }
 
 static int mv_u3d_ep_enable(struct usb_ep *_ep,
@@ -840,7 +844,7 @@ mv_u3d_ep_queue(struct usb_ep *_ep, struct usb_request *_req, gfp_t gfp_flags)
 static int mv_u3d_ep_dequeue(struct usb_ep *_ep, struct usb_request *_req)
 {
 	struct mv_u3d_ep *ep;
-	struct mv_u3d_req *req;
+	struct mv_u3d_req *req = NULL, *iter;
 	struct mv_u3d *u3d;
 	struct mv_u3d_ep_context *ep_context;
 	struct mv_u3d_req *next_req;
@@ -857,11 +861,13 @@ static int mv_u3d_ep_dequeue(struct usb_ep *_ep, struct usb_request *_req)
 	spin_lock_irqsave(&ep->u3d->lock, flags);
 
 	/* make sure it's actually queued on this endpoint */
-	list_for_each_entry(req, &ep->queue, queue) {
-		if (&req->req == _req)
-			break;
+	list_for_each_entry(iter, &ep->queue, queue) {
+		if (&iter->req != _req)
+			continue;
+		req = iter;
+		break;
 	}
-	if (&req->req != _req) {
+	if (!req) {
 		ret = -EINVAL;
 		goto out;
 	}
@@ -937,7 +943,7 @@ mv_u3d_ep_set_stall(struct mv_u3d *u3d, u8 ep_num, u8 direction, int stall)
 static int mv_u3d_ep_set_halt_wedge(struct usb_ep *_ep, int halt, int wedge)
 {
 	struct mv_u3d_ep *ep;
-	unsigned long flags = 0;
+	unsigned long flags;
 	int status = 0;
 	struct mv_u3d *u3d;
 
@@ -987,7 +993,7 @@ static int mv_u3d_ep_set_wedge(struct usb_ep *_ep)
 	return mv_u3d_ep_set_halt_wedge(_ep, 1, 1);
 }
 
-static struct usb_ep_ops mv_u3d_ep_ops = {
+static const struct usb_ep_ops mv_u3d_ep_ops = {
 	.enable		= mv_u3d_ep_enable,
 	.disable	= mv_u3d_ep_disable,
 
@@ -1237,7 +1243,6 @@ static int mv_u3d_start(struct usb_gadget *g,
 	}
 
 	/* hook up the driver ... */
-	driver->driver.bus = NULL;
 	u3d->driver = driver;
 
 	u3d->ep0_dir = USB_DIR_OUT;
@@ -1543,7 +1548,7 @@ static void mv_u3d_handle_setup_packet(struct mv_u3d *u3d, u8 ep_num,
 		delegate = true;
 
 	/* delegate USB standard requests to the gadget driver */
-	if (delegate == true) {
+	if (delegate) {
 		/* USB requests handled by gadget */
 		if (setup->wLength) {
 			/* DATA phase from gadget, STATUS phase from u3d */
@@ -1827,13 +1832,18 @@ static int mv_u3d_probe(struct platform_device *dev)
 	}
 
 	/* we will access controller register, so enable the u3d controller */
-	clk_enable(u3d->clk);
+	retval = clk_enable(u3d->clk);
+	if (retval) {
+		dev_err(&dev->dev, "clk_enable error %d\n", retval);
+		goto err_u3d_enable;
+	}
 
 	if (pdata->phy_init) {
 		retval = pdata->phy_init(u3d->phy_regs);
 		if (retval) {
 			dev_err(&dev->dev, "init phy error %d\n", retval);
-			goto err_u3d_enable;
+			clk_disable(u3d->clk);
+			goto err_phy_init;
 		}
 	}
 
@@ -1912,14 +1922,6 @@ static int mv_u3d_probe(struct platform_device *dev)
 		goto err_get_irq;
 	}
 	u3d->irq = r->start;
-	if (request_irq(u3d->irq, mv_u3d_irq,
-		IRQF_SHARED, driver_name, u3d)) {
-		u3d->irq = 0;
-		dev_err(&dev->dev, "Request irq %d for u3d failed\n",
-			u3d->irq);
-		retval = -ENODEV;
-		goto err_request_irq;
-	}
 
 	/* initialize gadget structure */
 	u3d->gadget.ops = &mv_u3d_ops;	/* usb_gadget_ops */
@@ -1931,6 +1933,15 @@ static int mv_u3d_probe(struct platform_device *dev)
 	u3d->gadget.name = driver_name;		/* gadget name */
 
 	mv_u3d_eps_init(u3d);
+
+	if (request_irq(u3d->irq, mv_u3d_irq,
+		IRQF_SHARED, driver_name, u3d)) {
+		u3d->irq = 0;
+		dev_err(&dev->dev, "Request irq %d for u3d failed\n",
+			u3d->irq);
+		retval = -ENODEV;
+		goto err_request_irq;
+	}
 
 	/* external vbus detection */
 	if (u3d->vbus) {
@@ -1955,8 +1966,8 @@ static int mv_u3d_probe(struct platform_device *dev)
 
 err_unregister:
 	free_irq(u3d->irq, u3d);
-err_request_irq:
 err_get_irq:
+err_request_irq:
 	kfree(u3d->status_req);
 err_alloc_status_req:
 	kfree(u3d->eps);
@@ -1966,15 +1977,13 @@ err_alloc_trb_pool:
 	dma_free_coherent(&dev->dev, u3d->ep_context_size,
 		u3d->ep_context, u3d->ep_context_dma);
 err_alloc_ep_context:
-	if (pdata->phy_deinit)
-		pdata->phy_deinit(u3d->phy_regs);
-	clk_disable(u3d->clk);
+err_phy_init:
 err_u3d_enable:
 	iounmap(u3d->cap_regs);
 err_map_cap_regs:
 err_get_cap_regs:
-err_get_clk:
 	clk_put(u3d->clk);
+err_get_clk:
 	kfree(u3d);
 err_alloc_private:
 err_pdata:
