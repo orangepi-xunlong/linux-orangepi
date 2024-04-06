@@ -177,6 +177,46 @@ static const struct dw_hdmi_mpll_config rockchip_mpll_cfg[] = {
 	}
 };
 
+static const struct dw_hdmi_mpll_config rockchip_mpll_cfg_420[] = {
+	{
+		30666000, {
+			{ 0x00b7, 0x0000 },
+			{ 0x2157, 0x0000 },
+			{ 0x40f7, 0x0000 },
+		},
+	},  {
+		92000000, {
+			{ 0x00b7, 0x0000 },
+			{ 0x2143, 0x0001 },
+			{ 0x40a3, 0x0001 },
+		},
+	},  {
+		184000000, {
+			{ 0x0073, 0x0001 },
+			{ 0x2146, 0x0002 },
+			{ 0x4062, 0x0002 },
+		},
+	},  {
+		340000000, {
+			{ 0x0052, 0x0003 },
+			{ 0x214d, 0x0003 },
+			{ 0x4065, 0x0003 },
+		},
+	},  {
+		600000000, {
+			{ 0x0041, 0x0003 },
+			{ 0x3b4d, 0x0003 },
+			{ 0x5a65, 0x0003 },
+		},
+	},  {
+		~0UL, {
+			{ 0x0000, 0x0000 },
+			{ 0x0000, 0x0000 },
+			{ 0x0000, 0x0000 },
+		},
+	}
+};
+
 static const struct dw_hdmi_curr_ctrl rockchip_cur_ctr[] = {
 	/*      pixelclk    bpp8    bpp10   bpp12 */
 	{
@@ -335,6 +375,8 @@ static int dw_hdmi_rockchip_genphy_init(struct dw_hdmi *dw_hdmi, void *data,
 					const struct drm_display_mode *mode)
 {
 	struct rockchip_hdmi *hdmi = (struct rockchip_hdmi *)data;
+
+	dw_hdmi_set_high_tmds_clock_ratio(dw_hdmi, display);
 
 	dw_hdmi_set_high_tmds_clock_ratio(dw_hdmi, display);
 
