@@ -2,8 +2,6 @@
 /plugin/;
 
 / {
-	compatible = "rockchip,rk3588s-orangepi-5", "rockchip,rk3588";
-
 	fragment@0 {
 		target = <&csi2_dcphy0>;
 
@@ -44,51 +42,15 @@
 		};
 	};
 
-	fragment@6 {
-		target = <&i2c3>;
+	fragment@5 {
+		target = <&i2c6>;
 
 		__overlay__ {
 			status = "okay";
 
-			vm149c-p2@c {
+			ov5647@36 {
 				status = "okay";
 			};
-
-			ov13850-2@10 {
-				status = "okay";
-			};
-		};
-	};
-
-	fragment@7 {
-		target = <&rkcif>;
-
-		__overlay__ {
-		        status = "okay";
-		};
-	};
-
-	fragment@8 {
-		target = <&rkcif_mmu>;
-
-		__overlay__ {
-			status = "okay";
-		};
-	};
-
-	fragment@9 {
-		target = <&rkisp1>;
-
-		__overlay__ {
-			status = "okay";
-		};
-	};
-
-	fragment@10 {
-		target = <&isp1_mmu>;
-
-		__overlay__ {
-			status = "okay";
 		};
 	};
 };

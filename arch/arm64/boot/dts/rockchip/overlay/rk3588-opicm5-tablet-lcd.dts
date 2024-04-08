@@ -17,7 +17,7 @@
 	};
 
 	fragment@2 {
-		target = <&dsi1_in_vp3>;
+		target = <&dsi1_in_vp2>;
 		__overlay__ {
 			status = "okay";
 		};

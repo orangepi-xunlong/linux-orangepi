@@ -49,22 +49,21 @@ dtbo-$(CONFIG_ARCH_ROCKCHIP) += \
 	rk3588-lcd2.dtbo \
 	rk3588-opi5plus-lcd.dtbo \
 	rk3588-opi5pro-lcd.dtbo \
+	rk3588-opi5max-lcd.dtbo \
 	rk3588-ov13850-c1.dtbo \
 	rk3588-ov13850-c2.dtbo \
 	rk3588-ov13850-c3.dtbo \
 	rk3588-ov13855-c1.dtbo \
 	rk3588-ov13855-c2.dtbo \
 	rk3588-ov13855-c3.dtbo \
-	rk3588-opi5pro-ov13855-c1.dtbo \
-	rk3588-opi5pro-ov13855-c2.dtbo \
-	rk3588-opi5pro-ov13850-c1.dtbo \
-	rk3588-opi5pro-ov13850-c2.dtbo \
+	rk3588-opi5pro-cam1.dtbo \
+	rk3588-opi5pro-cam2.dtbo \
 	rk3588-opi5plus-gc5035.dtbo \
 	rk3588-opi5plus-ov13850.dtbo \
 	rk3588-opi5plus-ov13855.dtbo \
-	rk3588-opi5max-c0.dtbo \
-	rk3588-opi5max-c1.dtbo \
-	rk3588-opi5max-c2.dtbo \
+	rk3588-opi5max-cam0.dtbo \
+	rk3588-opi5max-cam1.dtbo \
+	rk3588-opi5max-cam2.dtbo \
 	rk3588-dmc.dtbo \
 	rk3588-ssd-sata0.dtbo \
 	rk3588-ssd-sata2.dtbo \
@@ -83,7 +82,13 @@ dtbo-$(CONFIG_ARCH_ROCKCHIP) += \
 	rk3588-disable-led.dtbo \
 	rk3588-opi5plus-disable-leds.dtbo \
 	rk3588-opi5pro-disable-leds.dtbo \
-	rk3588-opi5pro-sfc.dtbo
+	rk3588-opi5pro-sfc.dtbo \
+	rk3588-opicm5-blink-gpio.dtbo \
+	rk3588-opicm5-tablet-cam1.dtbo \
+	rk3588-opicm5-tablet-cam2.dtbo \
+	rk3588-opicm5-tablet-cam3.dtbo \
+	rk3588-opicm5-tablet-lcd.dtbo \
+	rk3588-opicm5-tablet-disable-led.dtbo
 
 scr-$(CONFIG_ARCH_ROCKCHIP) += \
 	rk3588-fixup.scr

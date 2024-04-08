@@ -51,10 +51,18 @@
 	};
 
 	fragment@6 {
-		target = <&i2c7>;
+		target = <&i2c1>;
 
 		__overlay__ {
 			status = "okay";
+
+			vm149c-p1@c {
+				status = "okay";
+			};
+
+			ov13850-1@10 {
+				status = "okay";
+			};
 
 			dw9714-p1@c {
 				status = "okay";

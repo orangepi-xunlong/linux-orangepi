@@ -407,13 +407,13 @@ static int aw_monitor_get_battery_capacity(struct device *dev,
 
 	psy = power_supply_get_by_name(name);
 	if (psy == NULL) {
-		AW_DEV_LOGE(dev, "no struct power supply name:%s", name);
+		//AW_DEV_LOGE(dev, "no struct power supply name:%s", name);
 		return -EINVAL;
 	}
 
 	ret = power_supply_get_property(psy, POWER_SUPPLY_PROP_CAPACITY, &prop);
 	if (ret < 0) {
-		AW_DEV_LOGE(dev, "get vbat capacity failed");
+		//AW_DEV_LOGE(dev, "get vbat capacity failed");
 		return -EINVAL;
 	}
 	*vbat_capacity = prop.intval;

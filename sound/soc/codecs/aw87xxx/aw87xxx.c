@@ -456,8 +456,8 @@ static int aw87xxx_profile_switch_get(struct snd_kcontrol *kcontrol,
 	}
 
 	profile = aw87xxx->current_profile;
-	AW_DEV_LOGI(aw87xxx->dev, "current profile:[%s]",
-		aw87xxx->current_profile);
+	//AW_DEV_LOGI(aw87xxx->dev, "current profile:[%s]",
+	//	aw87xxx->current_profile);
 
 
 	index = aw_acf_get_prof_index_form_name(aw87xxx->dev,

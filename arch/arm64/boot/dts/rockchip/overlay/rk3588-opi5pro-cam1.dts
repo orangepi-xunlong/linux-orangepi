@@ -63,6 +63,14 @@
 			ov13850-1@10 {
 				status = "okay";
 			};
+
+			dw9714-p1@c {
+				status = "okay";
+			};
+
+			ov13855-1@36 {
+				status = "okay";
+			};
 		};
 	};
 
