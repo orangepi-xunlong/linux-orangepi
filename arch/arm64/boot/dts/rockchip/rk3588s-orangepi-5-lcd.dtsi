@@ -50,8 +50,6 @@
 	};
 };
 
-
-
 &dsi1 {
 	status = "disabled";
 };

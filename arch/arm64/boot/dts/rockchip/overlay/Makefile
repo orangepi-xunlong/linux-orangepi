@@ -83,6 +83,12 @@ dtbo-$(CONFIG_ARCH_ROCKCHIP) += \
 	rk3588-opi5plus-disable-leds.dtbo \
 	rk3588-opi5pro-disable-leds.dtbo \
 	rk3588-opi5pro-sfc.dtbo \
+	rk3588-opicm5-blink-gpio.dtbo \
+	rk3588-opicm5-tablet-cam1.dtbo \
+	rk3588-opicm5-tablet-cam2.dtbo \
+	rk3588-opicm5-tablet-cam3.dtbo \
+	rk3588-opicm5-tablet-lcd.dtbo \
+	rk3588-opicm5-tablet-disable-led.dtbo \
 	rk356x-vccio5_3v3.dtbo \
 	rk356x-edp.dtbo \
 	rk356x-i2c2-m1.dtbo \

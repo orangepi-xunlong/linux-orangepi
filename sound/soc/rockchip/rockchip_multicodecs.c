@@ -210,6 +210,27 @@ static int mc_keys_load_keymap(struct device *dev,
 	return 0;
 }
 
+#ifdef CONFIG_SND_SOC_AW87XXX
+extern int aw87xxx_set_profile(int dev_index, char *profile);
+
+static char *aw_profile[] = {"Music", "Off"};
+enum aw87xxx_dev_index {
+	AW_DEV_0 = 0,
+	AW_DEV_1 = 1,
+};
+
+static int hook_spk_aw87xxx(int id, int on)
+{
+	pr_info("%s id: %d, on: %d\n", __func__, id, on);
+	if(on)
+		aw87xxx_set_profile(id, aw_profile[1]);
+	else
+		aw87xxx_set_profile(id, aw_profile[0]);
+
+	return 0;
+}
+#endif
+
 static void adc_jack_handler(struct work_struct *work)
 {
 	struct multicodecs_data *mc_data = container_of(to_delayed_work(work),
@@ -217,6 +238,11 @@ static void adc_jack_handler(struct work_struct *work)
 						  handler);
 	struct snd_soc_jack *jack_headset = mc_data->jack_headset;
 	int adc, ret = 0;
+
+#ifdef CONFIG_SND_SOC_AW87XXX
+	hook_spk_aw87xxx(AW_DEV_0, gpiod_get_value(mc_data->hp_det_gpio));
+	hook_spk_aw87xxx(AW_DEV_1, gpiod_get_value(mc_data->hp_det_gpio));
+#endif
 
 	if (!gpiod_get_value(mc_data->hp_det_gpio)) {
 		snd_soc_jack_report(jack_headset, 0, SND_JACK_HEADSET);
@@ -806,6 +832,10 @@ static int rk_multicodecs_probe(struct platform_device *pdev)
 		dev_warn(&pdev->dev, "Audio routing invalid/unspecified\n");
 
 	snd_soc_card_set_drvdata(card, mc_data);
+
+	ret = snd_soc_of_parse_aux_devs(card, "rockchip,aux-devs");
+	if (ret)
+		dev_warn(&pdev->dev, "Audio aux devs invalid/unspecified\n");
 
 	ret = devm_snd_soc_register_card(&pdev->dev, card);
 	if (ret == -EPROBE_DEFER)
