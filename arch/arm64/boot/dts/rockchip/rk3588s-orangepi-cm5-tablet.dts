@@ -782,6 +782,12 @@
 	status = "okay";
 };
 
+&sata0 {
+        pinctrl-names = "default";
+        pinctrl-0 = <&sata_reset>;
+        status = "disabled";
+};
+
 //phy0
 &pcie2x1l2 {
 	reset-gpios = <&gpio3 RK_PD1 GPIO_ACTIVE_HIGH>;
@@ -856,6 +862,12 @@
 	leds {
 		led_gpio: led-gpio {
 			rockchip,pins = <1 RK_PC6 RK_FUNC_GPIO &pcfg_pull_none>;
+		};
+	};
+
+	sata {
+		sata_reset:sata-reset{
+			rockchip,pins = <3 RK_PD1 RK_FUNC_GPIO &pcfg_pull_up>;
 		};
 	};
 };
