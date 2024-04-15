@@ -74,6 +74,7 @@ dtbo-$(CONFIG_ARCH_ROCKCHIP) += \
 	rk3588-spi0-m2-cs0-spidev.dtbo \
 	rk3588-spi0-m2-cs1-spidev.dtbo \
 	rk3588-spi0-m2-cs0-cs1-spidev.dtbo \
+	rk3588-spi1-m1-cs0-spidev.dtbo \
 	rk3588-spi4-m0-cs1-spidev.dtbo \
 	rk3588-spi4-m1-cs0-spidev.dtbo \
 	rk3588-spi4-m1-cs1-spidev.dtbo \
@@ -82,6 +83,7 @@ dtbo-$(CONFIG_ARCH_ROCKCHIP) += \
 	rk3588-disable-led.dtbo \
 	rk3588-opi5plus-disable-leds.dtbo \
 	rk3588-opi5pro-disable-leds.dtbo \
+	rk3588-opi5max-disable-leds.dtbo \
 	rk3588-opi5pro-sfc.dtbo \
 	rk3588-opicm5-blink-gpio.dtbo \
 	rk3588-opicm5-tablet-cam1.dtbo \
