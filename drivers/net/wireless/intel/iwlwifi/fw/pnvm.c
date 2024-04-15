@@ -256,7 +256,7 @@ int iwl_pnvm_load(struct iwl_trans *trans,
 		if (strlen(trans->cfg->fw_name_pre) < sizeof(pnvm_name))
 			pnvm_name[strlen(trans->cfg->fw_name_pre) - 1] = '.';
 
-		ret = firmware_request_nowarn(&pnvm, pnvm_name, trans->dev);
+		ret = -1;//firmware_request_nowarn(&pnvm, pnvm_name, trans->dev);
 		if (ret) {
 			IWL_DEBUG_FW(trans, "PNVM file %s not found %d\n",
 				     pnvm_name, ret);
