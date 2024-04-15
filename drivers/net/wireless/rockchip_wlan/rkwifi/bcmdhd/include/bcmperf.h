@@ -1,6 +1,5 @@
 /*
- * Common stats definitions for clients of dongle
- * ports
+ * Performance counters software interface.
  *
  * Copyright (C) 2022, Broadcom.
  *
@@ -21,23 +20,14 @@
  *
  * <<Broadcom-WL-IPTag/Dual:>>
  */
-
-#ifndef _dngl_stats_h_
-#define _dngl_stats_h_
-
-typedef struct {
-	unsigned long	rx_packets;		/* total packets received */
-	unsigned long	tx_packets;		/* total packets transmitted */
-	unsigned long	rx_bytes;		/* total bytes received */
-	unsigned long	tx_bytes;		/* total bytes transmitted */
-	unsigned long	rx_errors;		/* bad packets received */
-	unsigned long	tx_errors;		/* packet transmit problems */
-	unsigned long	rx_dropped;		/* packets dropped by dongle */
-	unsigned long	tx_dropped;		/* packets dropped by dongle */
-	unsigned long   multicast;		/* multicast packets received */
-} dngl_stats_t;
-
-// remove the conditional after moving all branches to use the new code
-#define USE_WIFI_STATS_H
-
-#endif /* _dngl_stats_h_ */
+/* essai */
+#ifndef _BCMPERF_H_
+#define _BCMPERF_H_
+/* get cache hits and misses */
+#define BCMPERF_ENABLE_INSTRCOUNT()
+#define BCMPERF_ENABLE_ICACHE_MISS()
+#define BCMPERF_ENABLE_ICACHE_HIT()
+#define	BCMPERF_GETICACHE_MISS(x)	((x) = 0)
+#define	BCMPERF_GETICACHE_HIT(x)	((x) = 0)
+#define	BCMPERF_GETINSTRCOUNT(x)	((x) = 0)
+#endif /* _BCMPERF_H_ */

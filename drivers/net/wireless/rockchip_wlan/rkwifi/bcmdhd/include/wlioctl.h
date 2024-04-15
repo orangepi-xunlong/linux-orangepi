@@ -1156,6 +1156,10 @@ typedef struct wl_iscan_results_v2 {
 	wl_scan_results_v2_t results;
 } wl_iscan_results_v2_t;
 
+/** size of wl_iscan_results not including variable length array */
+#define WL_ISCAN_RESULTS_V109_FIXED_SIZE \
+        (WL_SCAN_RESULTS_V109_FIXED_SIZE + OFFSETOF(wl_iscan_results_v109_t, results))
+
 typedef struct wl_probe_params {
 	wlc_ssid_t ssid;
 	struct ether_addr bssid;
@@ -29641,9 +29645,10 @@ typedef struct wl_aml_header_v1 {
 #define WL_AML_HEADER_VERSION	1u
 
 /* Flags for aml header */
-#define WL_AML_F_DIRECTION 0x0001	/* This flag indicates this is Tx mgmt, otherwise Rx */
-#define WL_AML_F_ACKED     0x0002	/* This flag indicates the frame is acked */
-#define WL_AML_F_EAPOL     0x0004	/* This flag indicates the frame is wpa supplicant */
+#define WL_AML_F_DIRECTION	0x0001	/* This flag indicates this is Tx mgmt, otherwise Rx */
+#define WL_AML_F_ACKED		0x0002	/* This flag indicates the frame is acked */
+#define WL_AML_F_MGMT		0x0004	/* This flag indicates the frame is 80211 mgmt */
+#define SDIO_HLEN		12	/* Sdio Header Length */
 
 /* Version for IOVAR 'aml' */
 #define WL_AML_IOV_MAJOR_VER_1 1u
@@ -31162,14 +31167,21 @@ typedef struct wl_ext_auth_evt {
 
 /* SAR related parameter and structure */
 #define MAX_5G_SUBBAND       4
+#define MAX_6G_SUBBAND	     6
 #define SAR_PARAM_V1_VSDB    1
 #define SAR_PARAM_V2_RSDB    2
+#define SAR_PARAM_6G_V3_VSDB    3
+#define SAR_PARAM_6G_V4_RSDB    4
 
 typedef struct _sarctrl_single_set {
 	uint32 sarctrl_2g;
 	uint32 sarctrl_2g_2;
 	uint32 sarctrl_5gs[MAX_5G_SUBBAND];
 	uint32 sarctrl_5gs_2[MAX_5G_SUBBAND];
+#if defined(WL_BAND6G) || defined(WL_6G_BAND)
+	uint32 sarctrl_6gs[MAX_6G_SUBBAND];
+	uint32 sarctrl_6gs_2[MAX_6G_SUBBAND];
+#endif /* WL_BAND6G || WL_6G_BAND */
 } sarctrl_single_set;
 #define CONST_SARCTRL_SINGLE_SET_QTY    (sizeof(sarctrl_single_set)/sizeof(uint32))
 

@@ -19,6 +19,12 @@
 			printf("[%s] ESCAN-TRACE) %s : " arg1, name, __func__, ## args); \
 		} \
 	} while (0)
+#define ESCAN_INFO(name, arg1, args...) \
+	do { \
+		if (android_msg_level & ANDROID_INFO_LEVEL) { \
+			printf("[%s] ESCAN-INFO) %s : " arg1, name, __func__, ## args); \
+		} \
+	} while (0)
 #define ESCAN_SCAN(name, arg1, args...) \
 	do { \
 		if (android_msg_level & ANDROID_SCAN_LEVEL) { \
@@ -40,6 +46,10 @@
 #define htodchanspec(i) (i)
 #define dtohchanspec(i) (i)
 #define WL_EXTRA_BUF_MAX 2048
+
+#ifdef WL_6G_BAND
+#define CHSPEC_IS_6G_PSC(chspec) (CHSPEC_IS6G(chspec) && ((wf_chspec_ctlchan(chspec) % 16) == 5))
+#endif /* WL_6G_BAND */
 
 #define wl_escan_get_buf(a) ((wl_scan_results_v109_t *) (a)->escan_buf)
 
@@ -232,8 +242,8 @@ wl_escan_dump_bss(struct net_device *dev, struct wl_escan_info *escan,
 #endif
 	chanspec = wl_chspec_driver_to_host(escan->ioctl_ver, bi->chanspec);
 	channel = wf_chspec_ctlchan(chanspec);
-	ESCAN_SCAN(dev->name, "BSSID %pM, channel %3d(%3d %sMHz), rssi %3d, SSID \"%s\"\n",
-		&bi->BSSID, channel, CHSPEC_CHANNEL(chanspec),
+	ESCAN_SCAN(dev->name, "BSSID %pM, channel %s-%-3d(%3d %sMHz), rssi %3d, SSID \"%s\"\n",
+		&bi->BSSID, CHSPEC2BANDSTR(chanspec), channel, CHSPEC_CHANNEL(chanspec),
 		CHSPEC_IS20(chanspec)?"20":
 		CHSPEC_IS40(chanspec)?"40":
 		CHSPEC_IS80(chanspec)?"80":"160",
@@ -524,8 +534,6 @@ wl_escan_ext_handler(struct net_device *dev, void *argu,
 		channel =
 			bi->ctl_ch ? bi->ctl_ch :
 			CHSPEC_CHANNEL(wl_chspec_driver_to_host(escan->ioctl_ver, bi->chanspec));
-		if (!dhd_conf_match_channel(escan->pub, channel))
-			goto exit;
 		/* ----- terence 20130524: skip invalid bss */
 
 		{
@@ -767,8 +775,8 @@ wl_escan_prep(struct net_device *dev, struct wl_escan_info *escan,
 				continue;
 			}
 			chan_list[j] = chanspec;
-			ESCAN_SCAN(dev->name, "Chan : %d, Channel spec: %x\n",
-				CHSPEC_CHANNEL(chanspec), chanspec);
+			ESCAN_SCAN(dev->name, "chan : %s-%d, chanspec: %x\n",
+				CHSPEC2BANDSTR(chanspec), wf_chspec_ctlchan(chanspec), chanspec);
 			chan_list[j] = wl_chspec_host_to_driver(escan->ioctl_ver,
 				chan_list[j]);
 			j++;
@@ -928,7 +936,7 @@ wl_escan_set_scan(struct net_device *dev, wl_scan_info_t *scan_info)
 	if (scan_info->channels.count) {
 		memcpy(list, &scan_info->channels, sizeof(wl_channel_list_t));
 	} else {
-		err = wl_construct_ctl_chanspec_list(dev, list);
+		err = wl_construct_ctl_chanspec_list(dev, list, FALSE);
 		if (err != 0) {
 			ESCAN_ERROR(dev->name, "get channels failed with %d\n", err);
 			goto exit;
@@ -995,6 +1003,156 @@ exit2:
 	mutex_unlock(&escan->usr_sync);
 	return err;
 }
+
+#ifdef WL_SOFTAP_ACS
+static void
+wl_construct_acs_list(struct net_device *net, uint32 band, wl_scan_info_t *scan_info)
+{
+	int i, cnt = 0;
+#ifdef WL_6G_BAND
+	chanspec_t chanspec;
+#endif /* WL_6G_BAND */
+
+	if (band == WLC_BAND_2G || band == WLC_BAND_AUTO) {
+		for (i=0; i<13; i++) {
+			scan_info->channels.chanspec[i+cnt] = wf_create_chspec_from_primary(i+1,
+				WL_CHANSPEC_BW_20, WL_CHANSPEC_BAND_2G);
+		}
+		cnt += 13;
+	}
+	if (band == WLC_BAND_5G || band == WLC_BAND_AUTO) {
+		for (i=0; i<4; i++) {
+			scan_info->channels.chanspec[i+cnt] = wf_create_chspec_from_primary(36+i*4,
+				WL_CHANSPEC_BW_20, WL_CHANSPEC_BAND_5G);
+		}
+		cnt += 4;
+		for (i=0; i<4; i++) {
+			scan_info->channels.chanspec[i+cnt] = wf_create_chspec_from_primary(149+i*4,
+				WL_CHANSPEC_BW_20, WL_CHANSPEC_BAND_5G);
+		}
+		cnt += 4;
+	}
+#ifdef WL_6G_BAND
+	if (band == WLC_BAND_6G) {
+		for (i=0; i<59; i++) {
+			chanspec = wf_create_chspec_from_primary(1+i*4,
+				WL_CHANSPEC_BW_20, WL_CHANSPEC_BAND_6G);
+			if (CHSPEC_IS_6G_PSC(chanspec)) {
+				scan_info->channels.chanspec[i+cnt] = chanspec;
+				cnt++;
+			}
+		}
+	}
+#endif /* WL_6G_BAND */
+	scan_info->channels.count = cnt;
+
+	return;
+}
+
+int
+wl_escan_drv_acs_scan(struct net_device *dev, uint32 band,
+	wl_scan_info_t *scan_info)
+{
+	int retry = 0, retry_max, retry_interval = 250, up = 1, ret = -1;
+	bool free_scan_info = FALSE;
+
+	if (!scan_info) {
+		scan_info = kzalloc(sizeof(wl_scan_info_t), GFP_KERNEL);
+		if (scan_info == NULL) {
+			ESCAN_ERROR(dev->name, "kzalloc failed\n");
+			ret = -ENOMEM;
+			goto exit;
+		}
+		free_scan_info = TRUE;
+		wl_construct_acs_list(dev, band, scan_info);
+	}
+
+	retry_max = WL_ESCAN_TIMER_INTERVAL_MS/retry_interval;
+	ret = wldev_ioctl_get(dev, WLC_GET_UP, &up, sizeof(s32));
+	if (ret < 0 || up == 0) {
+		ret = wldev_ioctl_set(dev, WLC_UP, &up, sizeof(s32));
+	}
+	scan_info->bcast_ssid = TRUE;
+	retry = retry_max;
+	while (retry--) {
+		ret = wl_escan_set_scan(dev, scan_info);
+		if (!ret)
+			break;
+		OSL_SLEEP(retry_interval);
+	}
+	if (retry == 0) {
+		ESCAN_ERROR(dev->name, "scan retry failed %d\n", retry_max);
+		ret = -1;
+	}
+
+exit:
+	if (free_scan_info && scan_info)
+		kfree(scan_info);
+
+	return ret;
+}
+
+static int
+wl_escan_get_drv_apcs(struct net_device *dev, uint32 band)
+{
+	struct dhd_pub *dhd = dhd_get_pub(dev);
+	struct wl_escan_info *escan = dhd->escan;
+	int retry = 0, retry_max, retry_interval = 250, chanspec = 0;
+
+	retry_max = WL_ESCAN_TIMER_INTERVAL_MS/retry_interval;
+	retry = retry_max;
+	while (retry--) {
+		if (escan->escan_state == ESCAN_STATE_IDLE) {
+			if (band == WLC_BAND_5G || band == WLC_BAND_AUTO) {
+				chanspec = wf_create_chspec_from_primary(
+					wf_chspec_primary20_chan(escan->best_5g_ch),
+					WL_CHANSPEC_BW_20, WL_CHANSPEC_BAND_5G);
+			}
+#ifdef WL_6G_BAND
+			else if (band == WLC_BAND_6G) {
+				chanspec = wf_create_chspec_from_primary(
+					wf_chspec_primary20_chan(escan->best_6g_ch),
+					WL_CHANSPEC_BW_20, WL_CHANSPEC_BAND_6G);
+			}
+#endif /* WL_6G_BAND */
+			else {
+				chanspec = wf_create_chspec_from_primary(
+					wf_chspec_primary20_chan(escan->best_2g_ch),
+					WL_CHANSPEC_BW_20, WL_CHANSPEC_BAND_2G);
+			}
+			WL_MSG(dev->name, "selected channel = %d(0x%x)\n",
+				wf_chspec_ctlchan(chanspec), chanspec);
+			goto exit;
+		}
+		ESCAN_INFO(dev->name, "escan_state=%d, %d tried\n",
+			escan->escan_state, (retry_max - retry));
+		OSL_SLEEP(retry_interval);
+	}
+
+exit:
+	return chanspec;
+}
+
+int
+wl_escan_drv_apcs(struct net_device *dev, uint32 band, wl_scan_info_t *scan_info)
+{
+	struct dhd_pub *dhd = dhd_get_pub(dev);
+	struct wl_escan_info *escan = dhd->escan;
+	int ret = 0, chanspec = 0;
+
+	WL_MSG(dev->name, "ACS_SCAN\n");
+	escan->autochannel = 1;
+
+	ret = wl_escan_drv_acs_scan(dev, band, scan_info);
+	if (ret < 0)
+		goto exit;
+	chanspec = wl_escan_get_drv_apcs(dev, band);
+
+exit:
+	escan->autochannel = 0;
+	return chanspec;
+}
+#endif /* WL_SOFTAP_ACS */
 
 #if defined(WL_WIRELESS_EXT)
 static int
@@ -1632,7 +1790,7 @@ wl_escan_up(struct net_device *dev)
 	}
 
 	if ((ret = wldev_iovar_getbuf(dev, "scan_ver", NULL, 0,
-		ioctl_buf, sizeof(ioctl_buf), NULL)) == BCME_OK) {
+			ioctl_buf, sizeof(ioctl_buf), NULL)) == BCME_OK) {
 		ESCAN_TRACE(dev->name, "scan_params v2\n");
 		/* use scan_params ver2 */
 		escan->scan_params_v2 = true;

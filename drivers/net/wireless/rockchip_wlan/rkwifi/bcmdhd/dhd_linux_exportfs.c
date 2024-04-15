@@ -31,6 +31,9 @@
 #include <dhd_dbg.h>
 #include <dhd_linux_priv.h>
 #include <dhd_proto.h>
+#if defined(WL_BAM)
+#include <wl_bam.h>
+#endif	/* WL_BAM */
 #ifdef PWRSTATS_SYSFS
 #include <wldev_common.h>
 #endif /* PWRSTATS_SYSFS */
@@ -967,9 +970,13 @@ static struct dhd_attr dhd_attr_macaddr =
  */
 
 #ifdef CONFIG_X86
+#if defined(OEM_ANDROID)
 #define MEMDUMPINFO_LIVE PLATFORM_PATH".memdump.info"
 #define MEMDUMPINFO_INST "/data/.memdump.info"
 #define MEMDUMPINFO MEMDUMPINFO_LIVE
+#else /* FC19 and Others */
+#define MEMDUMPINFO PLATFORM_PATH".memdump.info"
+#endif /* OEM_ANDROID */
 #else /* For non x86 platforms */
 #define MEMDUMPINFO PLATFORM_PATH".memdump.info"
 #endif /* CONFIG_X86 */
@@ -987,7 +994,7 @@ get_mem_val_from_file(void)
 	fp = dhd_filp_open(filepath, O_RDONLY, 0);
 	if (IS_ERR(fp) || (fp == NULL)) {
 		DHD_ERROR(("%s: File [%s] doesn't exist\n", __FUNCTION__, filepath));
-#if defined(CONFIG_X86)
+#if defined(CONFIG_X86) && defined(OEM_ANDROID)
 		/* Check if it is Live Brix Image */
 		if (strcmp(filepath, MEMDUMPINFO_LIVE) != 0) {
 			goto done;
@@ -1604,6 +1611,87 @@ static struct dhd_attr dhd_attr_proptx =
 #endif /* PROP_TXSTATUS */
 #endif /* USE_WFA_CERT_CONF */
 #endif /* DHD_EXPORT_CNTL_FILE */
+
+#if defined(WL_BAM)
+#define BAD_AP_MAC_ADDR_ELEMENT_NUM	6
+#define MACF_READ	"%02hhx:%02hhx:%02hhx:%02hhx:%02hhx:%02hhx"
+wl_bad_ap_mngr_t *g_bad_ap_mngr = NULL;
+
+static ssize_t
+show_adps_bam_list(struct dhd_info *dev, char *buf)
+{
+	int offset = 0;
+	ssize_t ret = 0;
+
+	wl_bad_ap_info_t *bad_ap;
+	wl_bad_ap_info_entry_t *entry;
+
+	if (g_bad_ap_mngr == NULL)
+		return ret;
+
+	GCC_DIAGNOSTIC_PUSH_SUPPRESS_CAST();
+	list_for_each_entry(entry, &g_bad_ap_mngr->list, list) {
+		bad_ap = &entry->bad_ap;
+
+		ret = scnprintf(buf + offset, PAGE_SIZE - 1, MACF"\n",
+			bad_ap->bssid.octet[0], bad_ap->bssid.octet[1],
+			bad_ap->bssid.octet[2], bad_ap->bssid.octet[3],
+			bad_ap->bssid.octet[4], bad_ap->bssid.octet[5]);
+
+		offset += ret;
+	}
+	GCC_DIAGNOSTIC_POP();
+
+	return offset;
+}
+
+static ssize_t
+store_adps_bam_list(struct dhd_info *dev, const char *buf, size_t count)
+{
+	int ret;
+	size_t len;
+	int offset;
+	char tmp[128];
+	wl_bad_ap_info_t bad_ap;
+
+	if (g_bad_ap_mngr == NULL)
+		return count;
+
+	len = count;
+	offset = 0;
+	do {
+		ret = sscanf(buf + offset, MACF_READ"\n",
+			&bad_ap.bssid.octet[0], &bad_ap.bssid.octet[1],
+			&bad_ap.bssid.octet[2], &bad_ap.bssid.octet[3],
+			&bad_ap.bssid.octet[4], &bad_ap.bssid.octet[5]);
+		if (ret != BAD_AP_MAC_ADDR_ELEMENT_NUM) {
+			DHD_ERROR(("%s - fail to parse bad ap data\n", __FUNCTION__));
+			return -EINVAL;
+		}
+
+		ret = wl_bad_ap_mngr_add(g_bad_ap_mngr, &bad_ap);
+		if (ret < 0)
+			return ret;
+
+		ret = snprintf(tmp, ARRAYSIZE(tmp), MACF"\n",
+			bad_ap.bssid.octet[0], bad_ap.bssid.octet[1],
+			bad_ap.bssid.octet[2], bad_ap.bssid.octet[3],
+			bad_ap.bssid.octet[4], bad_ap.bssid.octet[5]);
+		if (ret < 0) {
+			DHD_ERROR(("%s - fail to get bad ap data length(%d)\n", __FUNCTION__, ret));
+			return ret;
+		}
+
+		len -= ret;
+		offset += ret;
+	} while (len > 0);
+
+	return count;
+}
+
+static struct dhd_attr dhd_attr_adps_bam =
+	__ATTR(bad_ap_list, 0660, show_adps_bam_list, store_adps_bam_list);
+#endif	/* WL_BAM */
 
 uint32 report_hang_privcmd_err = 1;
 
@@ -2224,6 +2312,9 @@ static struct attribute *default_file_attrs[] = {
 #endif /* PROP_TXSTATUS */
 #endif /* USE_WFA_CERT_CONF */
 #endif /* DHD_EXPORT_CNTL_FILE */
+#if defined(WL_BAM)
+	&dhd_attr_adps_bam.attr,
+#endif	/* WL_BAM */
 #ifdef DHD_SEND_HANG_PRIVCMD_ERRORS
 	&dhd_attr_hang_privcmd_err.attr,
 #endif /* DHD_SEND_HANG_PRIVCMD_ERRORS */
@@ -2353,29 +2444,6 @@ static struct kobj_type dhd_ktype = {
 	.default_attrs = default_file_attrs,
 #endif /* LINUX_VER >= 5.18 */
 };
-
-#ifdef CSI_SUPPORT
-/* Function to show current ccode */
-static ssize_t read_csi_data(struct file *filp, struct kobject *kobj,
-	struct bin_attribute *bin_attr, char *buf, loff_t off, size_t count)
-{
-	dhd_info_t *dhd = to_dhd(kobj);
-	int n = 0;
-
-	n = dhd_csi_dump_list(&dhd->pub, buf);
-	DHD_INFO(("Dump data to file, size %d\n", n));
-	dhd_csi_clean_list(&dhd->pub);
-
-	return n;
-}
-
-static struct bin_attribute dhd_attr_csi = {
-	.attr = { .name = "csi" BUS_TYPE,
-		  .mode = 0660, },
-	.size = MAX_CSI_FILESZ,
-	.read = read_csi_data,
-};
-#endif /* CSI_SUPPORT */
 
 /*
  * sysfs for dhd_lb
@@ -2850,6 +2918,16 @@ static struct kobj_type dhd_lb_ktype = {
 };
 #endif /* DHD_LB */
 
+#ifdef BCMPCIE
+#define CONST_SYNA_DHD_KOBJ_NAME       "wifi_pcie"
+#define CONST_SYNA_DHD_CSI_OBJ_NAME    "csi"
+#define CONST_SYNA_DHD_LB_OBJ_NAME     "lb_pcie"
+#else /* BCMSDIO */
+#define CONST_SYNA_DHD_KOBJ_NAME       "wifi_sdio"
+#define CONST_SYNA_DHD_CSI_OBJ_NAME    "csi"
+#define CONST_SYNA_DHD_LB_OBJ_NAME     "lb_sdio"
+#endif /* BCMPCIE */
+
 /*
  * ************ DPC BOUNDS *************
  */
@@ -3055,10 +3133,36 @@ static struct kobj_type dhd_dpc_bounds_ktype = {
  * *************************************
  */
 
+#ifdef CSI_SUPPORT
+/* Function to show current ccode */
+static ssize_t read_csi_data(struct file *filp, struct kobject *kobj,
+	struct bin_attribute *bin_attr, char *buf, loff_t off, size_t count)
+{
+	dhd_info_t *dhd = to_dhd(kobj);
+	int n = 0;
+
+	n = dhd_csi_retrieve_queue_data(&dhd->pub, buf, (uint)count);
+	DHD_TRACE(("Dump data to file, size %d\n", n));
+
+	return n;
+}
+
+static struct bin_attribute dhd_attr_csi = {
+	.attr = {
+		.name = CONST_SYNA_DHD_CSI_OBJ_NAME,
+		.mode = 0660
+	},
+	.size = MAX_CSI_FILESZ,
+	.read = read_csi_data,
+};
+#endif /* CSI_SUPPORT */
+
 /* Create a kobject and attach to sysfs interface */
 int dhd_sysfs_init(dhd_info_t *dhd)
 {
 	int ret = -1;
+
+	dhd->flag_kobj = 0x0;
 
 	if (dhd == NULL) {
 		DHD_ERROR(("%s(): dhd is NULL \r\n", __FUNCTION__));
@@ -3071,16 +3175,9 @@ int dhd_sysfs_init(dhd_info_t *dhd)
 		kobject_put(&dhd->dhd_kobj);
 		DHD_ERROR(("%s(): Unable to allocate kobject \r\n", __FUNCTION__));
 		return ret;
+	} else {
+		dhd->flag_kobj |= 0x01;
 	}
-
-#ifdef CSI_SUPPORT
-	ret = sysfs_create_bin_file(&dhd->dhd_kobj, &dhd_attr_csi);
-	if (ret) {
-		DHD_ERROR(("%s: can't create %s\n", __FUNCTION__, dhd_attr_csi.attr.name));
-		kobject_put(&dhd->dhd_kobj);
-		return ret;
-	}
-#endif /* CSI_SUPPORT */
 
 	/*
 	 * We are always responsible for sending the uevent that the kobject
@@ -3095,6 +3192,8 @@ int dhd_sysfs_init(dhd_info_t *dhd)
 		kobject_put(&dhd->dhd_lb_kobj);
 		DHD_ERROR(("%s(): Unable to allocate kobject for 'lb'\r\n", __FUNCTION__));
 		return ret;
+	} else {
+		dhd->flag_kobj |= 0x02;
 	}
 
 	kobject_uevent(&dhd->dhd_lb_kobj, KOBJ_ADD);
@@ -3109,6 +3208,17 @@ int dhd_sysfs_init(dhd_info_t *dhd)
 		return ret;
 	}
 	kobject_uevent(&dhd->dhd_dpc_bounds_kobj, KOBJ_ADD);
+
+#ifdef CSI_SUPPORT
+	ret = sysfs_create_bin_file(&dhd->dhd_kobj, &dhd_attr_csi);
+	if (ret) {
+		DHD_ERROR(("%s: can't create %s\n", __func__, dhd_attr_csi.attr.name));
+		return ret;
+	} else {
+		dhd->flag_kobj |= 0x04;
+	}
+#endif /* CSI_SUPPORT */
+
 	return ret;
 }
 
@@ -3120,15 +3230,27 @@ void dhd_sysfs_exit(dhd_info_t *dhd)
 		return;
 	}
 
+#ifdef CSI_SUPPORT
+	if (0x04 & dhd->flag_kobj) {
+		sysfs_remove_bin_file(&dhd->dhd_kobj, &dhd_attr_csi);
+	}
+#endif /* CSI_SUPPORT */
+
 #ifdef DHD_LB
-	kobject_put(&dhd->dhd_lb_kobj);
+	if (0X02 & dhd->flag_kobj) {
+		kobject_put(&dhd->dhd_lb_kobj);
+	}
 #endif /* DHD_LB */
 
 	/* DPC bounds */
 	kobject_put(&dhd->dhd_dpc_bounds_kobj);
 
 	/* Release the kobject */
-	kobject_put(&dhd->dhd_kobj);
+	if (0X01 & dhd->flag_kobj) {
+		kobject_put(&dhd->dhd_kobj);
+	}
+
+	dhd->flag_kobj = 0X0;
 }
 
 #ifdef DHD_SUPPORT_HDM

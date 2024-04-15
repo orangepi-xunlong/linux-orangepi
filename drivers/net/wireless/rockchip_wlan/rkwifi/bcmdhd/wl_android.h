@@ -33,6 +33,9 @@
 #ifdef WL_EXT_IAPSTA
 #include <wl_iapsta.h>
 #endif /* WL_IAPSTA */
+#ifdef WL_ESCAN
+#include <wl_escan.h>
+#endif /* WL_ESCAN */
 #if defined(WL_EXT_IAPSTA) || defined(USE_IW) || defined(WL_ESCAN) || \
 	(defined(WL_EXT_GENL) && defined(SENDPROB))
 #ifndef WL_EVENT

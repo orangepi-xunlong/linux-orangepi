@@ -29,6 +29,9 @@
 #define _wl_cfg80211_h_
 
 #include <linux/wireless.h>
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0)
+#include <linux/sched/clock.h>
+#endif /* LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0) */
 #include <typedefs.h>
 #include <ethernet.h>
 #include <wlioctl.h>
@@ -74,6 +77,9 @@
 #ifdef WL_NAN
 #include <wl_cfgnan.h>
 #endif /* WL_NAN */
+#ifdef WL_BAM
+#include <wl_bam.h>
+#endif  /* WL_BAM */
 #include <dhd_dbg.h>
 
 struct wl_conf;
@@ -113,8 +119,10 @@ struct wl_ibss;
 #define WL_GCMP_SUPPORT
 #endif /* WL_GCMP_SUPPORT */
 
+#ifdef OEM_ANDROID
 /* mandatory for Android 11 */
 #define WL_ACT_FRAME_MAC_RAND
+#endif
 
 /* WPA3 R2 */
 #ifndef WL_SAE_FT
@@ -148,11 +156,14 @@ struct wl_ibss;
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 0, 0))
 /* Use driver managed regd */
+#define WL_AUTO_COUNTRY	1
 #define WL_SELF_MANAGED_REGDOM
 #endif /* KERNEL >= 4.0 */
 
+#ifdef OEM_ANDROID
 /* mandatory for Android 11 */
 #define WL_ACT_FRAME_MAC_RAND
+#endif
 
 #if defined(WL_6G_BAND) && !defined(WL_DISABLE_SOFTAP_6G)
 /* Unless exlicitly disabled, enable softap 6G when 6G band support is present */
@@ -199,10 +210,21 @@ typedef sta_info_v4_t wlcfg_sta_info_t;
 
 #define CH_TO_CHSPC(band, _channel) \
 	((_channel | band) | WL_CHANSPEC_BW_20 | WL_CHANSPEC_CTL_SB_NONE)
+#ifdef EXT_REG_INFO
+#define HW_VALUE_CHANNEL_2G(_channel) _channel
+#define HW_VALUE_CHANNEL_5G(_channel) _channel
+#define HW_VALUE_CHANNEL_6G(_channel) (CH_MAX_5G_CHANNEL  + _channel)
+#define HW_VALUE_CHANNEL_6G_2(_channel) (CH_MAX_5G_CHANNEL  + 2)
+#else
+#define HW_VALUE_CHANNEL_2G(_channel) CH_TO_CHSPC(WL_CHANSPEC_BAND_2G, _channel)
+#define HW_VALUE_CHANNEL_5G(_channel) CH_TO_CHSPC(WL_CHANSPEC_BAND_5G, _channel)
+#define HW_VALUE_CHANNEL_6G(_channel) CH_TO_CHSPC(WL_CHANSPEC_BAND_6G, _channel)
+#define HW_VALUE_CHANNEL_6G_2(_channel) 0x5002
+#endif /*  EXT_REG_INFO */
 #define CHAN2G(_channel, _freq, _flags) {			\
 	.band			= IEEE80211_BAND_2GHZ,		\
 	.center_freq		= (_freq),			\
-	.hw_value		= CH_TO_CHSPC(WL_CHANSPEC_BAND_2G, _channel),			\
+	.hw_value		= HW_VALUE_CHANNEL_2G(_channel),\
 	.flags			= (_flags),			\
 	.max_antenna_gain	= 0,				\
 	.max_power		= 30,				\
@@ -211,7 +233,7 @@ typedef sta_info_v4_t wlcfg_sta_info_t;
 #define CHAN5G(_channel, _flags) {				\
 	.band			= IEEE80211_BAND_5GHZ,		\
 	.center_freq		= 5000 + (5 * (_channel)),	\
-	.hw_value		= CH_TO_CHSPC(WL_CHANSPEC_BAND_5G, _channel),			\
+	.hw_value		= HW_VALUE_CHANNEL_5G(_channel),\
 	.flags			= (_flags),			\
 	.max_antenna_gain	= 0,				\
 	.max_power		= 30,				\
@@ -221,7 +243,7 @@ typedef sta_info_v4_t wlcfg_sta_info_t;
 #define CHAN6G(_channel, _flags) {				\
 	.band			= IEEE80211_BAND_6GHZ,		\
 	.center_freq		= 5950 + (5 * (_channel)),	\
-	.hw_value		= CH_TO_CHSPC(WL_CHANSPEC_BAND_6G, _channel),			\
+	.hw_value		= HW_VALUE_CHANNEL_6G(_channel),\
 	.flags			= (_flags),			\
 	.max_antenna_gain	= 0,				\
 	.max_power		= 30,				\
@@ -230,7 +252,7 @@ typedef sta_info_v4_t wlcfg_sta_info_t;
 #define CHAN6G_CHAN2(_flags) {					\
 	.band			= IEEE80211_BAND_6GHZ,		\
 	.center_freq		= 5935,				\
-	.hw_value		= 0x5002,			\
+	.hw_value		= HW_VALUE_CHANNEL_6G_2(_channel),\
 	.flags			= (_flags),			\
 	.max_antenna_gain	= 0,				\
 	.max_power		= 30,				\
@@ -239,7 +261,7 @@ typedef sta_info_v4_t wlcfg_sta_info_t;
 #define CHAN6G(_channel, _flags) {				\
 	.band			= IEEE80211_BAND_5GHZ,		\
 	.center_freq		= 5950 + (5 * (_channel)),	\
-	.hw_value		= CH_TO_CHSPC(WL_CHANSPEC_BAND_6G, _channel),			\
+	.hw_value		= HW_VALUE_CHANNEL_6G(_channel),\
 	.flags			= (_flags),			\
 	.max_antenna_gain	= 0,				\
 	.max_power		= 30,				\
@@ -248,7 +270,7 @@ typedef sta_info_v4_t wlcfg_sta_info_t;
 #define CHAN6G_CHAN2(_flags) {					\
 	.band			= IEEE80211_BAND_5GHZ,		\
 	.center_freq		= 5935,				\
-	.hw_value		= 0x5002,			\
+	.hw_value		= HW_VALUE_CHANNEL_6G_2(_channel),\
 	.flags			= (_flags),			\
 	.max_antenna_gain	= 0,				\
 	.max_power		= 30,				\
@@ -411,6 +433,7 @@ extern char *dhd_log_dump_get_timestamp(void);
 #endif /* SUPPORT_AP_RADIO_PWRSAVE */
 
 #ifdef BCMWAPI_WPI
+#ifdef OEM_ANDROID
 #ifdef CFG80211_WAPI_BKPORT
 #define IS_WAPI_VER(version) (version == NL80211_WAPI_VERSION_1)
 #undef WLAN_AKM_SUITE_WAPI_PSK
@@ -429,6 +452,17 @@ extern char *dhd_log_dump_get_timestamp(void);
 
 #define IS_WAPI_VER(version) (version == NL80211_WAPI_VERSION_1)
 #endif /* CFG80211_WAPI_BKPORT */
+#else
+#undef WLAN_AKM_SUITE_WAPI_PSK
+#define WLAN_AKM_SUITE_WAPI_PSK         0x000FAC13
+
+#undef WLAN_AKM_SUITE_WAPI_CERT
+#define WLAN_AKM_SUITE_WAPI_CERT        0x000FAC14
+
+#undef NL80211_WAPI_VERSION_1
+#define NL80211_WAPI_VERSION_1			1 << 3
+#define IS_WAPI_VER(version) (version & NL80211_WAPI_VERSION_1)
+#endif /* OEM_ANDROID */
 #endif /* BCMWAPI_WPI */
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 0, 0))
@@ -2096,8 +2130,10 @@ struct bcm_cfg80211 {
 #endif /* WL_HOST_BAND_MGMT */
 	bool scan_suppressed;
 
+#ifdef OEM_ANDROID
 	timer_list_compat_t scan_supp_timer;
 	struct work_struct wlan_work;
+#endif /* OEM_ANDROID */
 
 	struct mutex event_sync;	/* maily for up/down synchronization */
 	bool disable_roam_event;
@@ -2105,8 +2141,13 @@ struct bcm_cfg80211 {
 	struct delayed_work recovery_work;
 	u32 recovery_state;
 
+#ifdef OEM_ANDROID
 	struct workqueue_struct *event_workq;   /* workqueue for event */
+#endif /* OEM_ANDROID */
 
+#ifndef OEM_ANDROID
+	bool event_workq_init;
+#endif /* OEM_ANDROID */
 	struct work_struct event_work;		/* work item for event */
 	struct mutex pm_sync;	/* mainly for pm work synchronization */
 
@@ -2195,6 +2236,9 @@ struct bcm_cfg80211 {
 	spinlock_t wps_sync;	/* to protect wps states (and others if needed) */
 #endif /* WL_WPS_SYNC */
 	struct wl_fils_info fils_info;
+#ifdef WL_BAM
+	wl_bad_ap_mngr_t bad_ap_mngr;
+#endif  /* WL_BAM */
 
 	uint8 scanmac_enabled;
 	bool scanmac_config;
@@ -3283,10 +3327,12 @@ extern s32 wl_cfg80211_increase_p2p_bw(struct net_device *net, char* buf, int le
 extern s32 wl_cfg80211_set_p2p_resp_ap_chn(struct net_device *net, s32 enable);
 #endif /* P2PLISTEN_AP_SAMECHN */
 
+#if defined(OEM_ANDROID)
 /* btcoex functions */
 void* wl_cfg80211_btcoex_init(struct net_device *ndev);
 void wl_cfg80211_btcoex_deinit(void);
 void wl_cfg80211_btcoex_kill_handler(void);
+#endif /* defined(OEM_ANDROID) */
 
 extern chanspec_t wl_chspec_from_legacy(chanspec_t legacy_chspec);
 extern chanspec_t wl_chspec_driver_to_host(chanspec_t chanspec);
@@ -3339,7 +3385,7 @@ extern void wl_stop_wait_next_action_frame(struct bcm_cfg80211 *cfg, struct net_
 extern s32 wl_cfg80211_set_band(struct net_device *ndev, int band);
 #endif /* WL_HOST_BAND_MGMT */
 
-#if defined(DHCP_SCAN_SUPPRESS)
+#if defined(OEM_ANDROID) && defined(DHCP_SCAN_SUPPRESS)
 extern int wl_cfg80211_scan_suppress(struct net_device *dev, int suppress);
 #endif /* OEM_ANDROID */
 
@@ -3562,6 +3608,10 @@ extern int wl_cfg80211_stop_mkeep_alive(struct net_device *ndev, struct bcm_cfg8
 extern s32 wl_cfg80211_handle_macaddr_change(struct net_device *dev, u8 *macaddr);
 extern int wl_cfg80211_handle_hang_event(struct net_device *ndev,
 	uint16 hang_reason, uint32 memdump_type);
+#ifndef OEM_ANDROID
+extern s32 wl_cfg80211_resume(struct bcm_cfg80211 *cfg);
+extern s32 wl_cfg80211_suspend(struct bcm_cfg80211 *cfg);
+#endif /* !OEM_ANDROID */
 bool wl_cfg80211_is_dpp_frame(void *frame, u32 frame_len);
 const char *get_dpp_pa_ftype(enum wl_dpp_ftype ftype);
 bool wl_cfg80211_is_dpp_gas_action(void *frame, u32 frame_len);
@@ -3576,6 +3626,12 @@ extern int wl_cfgnan_get_stats(struct bcm_cfg80211 *cfg);
 
 extern s32 wl_cfg80211_set_wsec_info(struct net_device *dev, uint32 *data,
 	uint16 data_len, int tag);
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 16, 0))
+#define CH_DEFAULT_FLAGS    IEEE80211_CHAN_DISABLED | IEEE80211_CHAN_NO_20MHZ
+#else /* (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 16, 0)) */
+#define CH_DEFAULT_FLAGS    IEEE80211_CHAN_DISABLED
+#endif /* (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 16, 0)) */
+
 #define WL_CHANNEL_ARRAY_INIT(band_chan_arr)	\
 do {	\
 	u32 arr_size, k;	\

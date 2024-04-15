@@ -171,8 +171,8 @@ typedef union bcm_event_msg_u {
 #define WLC_E_ACTION_FRAME_COMPLETE	60	/* Action frame Tx complete */
 #define WLC_E_PRE_ASSOC_IND	61	/* assoc request received */
 #define WLC_E_PRE_REASSOC_IND	62	/* re-assoc request received */
-#ifdef CSI_SUPPORT
-#define WLC_E_CSI		63
+#if defined(CSI_SUPPORT)
+#define WLC_E_CSI		63	/* CSI used obsoleted event number */
 #else
 #define WLC_E_CHANNEL_ADOPTED	63	/* channel adopted (obsoleted) */
 #endif /* CSI_SUPPORT */

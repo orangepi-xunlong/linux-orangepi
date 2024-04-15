@@ -96,6 +96,9 @@
 #include <dhd_debug.h>
 #if defined(WL_CFG80211)
 #include <wl_cfg80211.h>
+#ifdef WL_BAM
+#include <wl_bam.h>
+#endif	/* WL_BAM */
 #endif	/* WL_CFG80211 */
 #ifdef PNO_SUPPORT
 #include <dhd_pno.h>
@@ -153,7 +156,9 @@
 #include <dhd_wlfc.h>
 #endif
 
+#if defined(OEM_ANDROID)
 #include <wl_android.h>
+#endif
 #include <dhd_config.h>
 
 #define WME_PRIO2AC(prio)  wme_fifo2ac[prio2fifo[(prio)]]
@@ -645,12 +650,14 @@ BCMFASTPATH(dhd_start_xmit)(struct sk_buff *skb, struct net_device *net)
 		DHD_ERROR(("%s: xmit rejected pub.up=%d busstate=%d \n",
 			__FUNCTION__, dhd->pub.up, dhd->pub.busstate));
 		dhd_tx_stop_queues(net);
+#if defined(OEM_ANDROID)
 		/* Send Event when bus down detected during data session */
 		if (dhd->pub.up && !dhd->pub.hang_was_sent && !DHD_BUS_CHECK_REMOVE(&dhd->pub)) {
 			DHD_ERROR(("%s: Event HANG sent up\n", __FUNCTION__));
 			dhd->pub.hang_reason = HANG_REASON_BUS_DOWN;
 			net_os_send_hang_message(net);
 		}
+#endif /* OEM_ANDROID */
 		DHD_BUS_BUSY_CLEAR_IN_TX(&dhd->pub);
 		dhd_os_busbusy_wake(&dhd->pub);
 		DHD_GENERAL_UNLOCK(&dhd->pub, flags);

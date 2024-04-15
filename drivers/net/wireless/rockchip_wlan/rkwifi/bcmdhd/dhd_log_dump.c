@@ -497,7 +497,7 @@ dhd_nla_put_sssr_dump_len(void *ndev, uint32 *arr_len)
 #endif /* DHD_SSSR_DUMP */
 
 uint32
-dhd_get_time_str_len()
+dhd_get_time_str_len(void)
 {
 	char *ts = NULL, time_str[128];
 
@@ -1239,7 +1239,7 @@ do_dhd_log_dump(dhd_pub_t *dhdp, log_dump_type_t *type)
 	fp = dhd_filp_open(dump_path, file_mode, 0664);
 	if (IS_ERR(fp) || (fp == NULL)) {
 		/* If android installed image, try '/data' directory */
-#if defined(CONFIG_X86)
+#if defined(CONFIG_X86) && defined(OEM_ANDROID)
 		DHD_ERROR(("%s: File open error on Installed android image, trying /data...\n",
 			__FUNCTION__));
 		snprintf(dump_path, sizeof(dump_path), "/data/" DHD_DEBUG_DUMP_TYPE);
@@ -2415,7 +2415,7 @@ clear_debug_dump_time(char *str)
 {
 	memset(str, 0, DEBUG_DUMP_TIME_BUF_LEN);
 }
-#if defined(DHD_PKT_LOGGING)
+#if defined(WL_CFGVENDOR_SEND_HANG_EVENT) || defined(DHD_PKT_LOGGING)
 void
 copy_debug_dump_time(char *dest, char *src)
 {

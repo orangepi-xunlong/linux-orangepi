@@ -1245,14 +1245,40 @@ extern int wl_cfgvendor_send_supp_advlog(const char *fmt, ...);
 #if (defined(CONFIG_ARCH_MSM) && defined(SUPPORT_WDEV_CFG80211_VENDOR_EVENT_ALLOC)) || \
 	LINUX_VERSION_CODE >= KERNEL_VERSION(4, 1, 0)
 #define CFG80211_VENDOR_EVENT_ALLOC(wiphy, wdev, len, type, kflags) \
-	cfg80211_vendor_event_alloc(wiphy, wdev, len, type, kflags);
+	cfg80211_vendor_event_alloc(wiphy, wdev, len, type, kflags)
+#define CFG80211_VENDOR_EVENT(msg, kflags)  cfg80211_vendor_event(msg, kflags)
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(3, 14, 0)
+#define CFG80211_VENDOR_EVENT_ALLOC(wiphy, wdev, len, type, kflags)  \
+({                                                                   \
+    UNUSED_PARAMETER(wdev);                                          \
+    cfg80211_vendor_event_alloc(wiphy, len, type, kflags);           \
+})
 #else
-#define CFG80211_VENDOR_EVENT_ALLOC(wiphy, wdev, len, type, kflags) \
-	cfg80211_vendor_event_alloc(wiphy, len, type, kflags);
-#endif /* (defined(CONFIG_ARCH_MSM) && defined(SUPPORT_WDEV_CFG80211_VENDOR_EVENT_ALLOC)) || */
-	/* LINUX_VERSION_CODE >= KERNEL_VERSION(4, 1, 0) */
+/* kernel < 3.14 doesn't provide vendor event alloc */
+#define CFG80211_VENDOR_EVENT_ALLOC(wiphy, wdev, len, type, kflags)  \
+({                                                                   \
+    UNUSED_PARAMETER(wiphy);                                         \
+    UNUSED_PARAMETER(wdev);                                          \
+    UNUSED_PARAMETER(len);                                           \
+    UNUSED_PARAMETER(type);                                          \
+    UNUSED_PARAMETER(kflags);                                        \
+    NULL;                                                            \
+})
+#define CFG80211_VENDOR_EVENT(msg, kflags)                           \
+({                                                                   \
+    UNUSED_PARAMETER(msg);                                           \
+    UNUSED_PARAMETER(kflags);                                        \
+})
+#endif /* LINUX_VERSION_CODE >= KERNEL_VERSION(3, 14, 0) */
+
 int wl_cfgvendor_nan_send_async_disable_resp(struct wireless_dev *wdev);
 
+#ifdef WL_CFGVENDOR_SEND_HANG_EVENT
+void wl_cfgvendor_send_hang_event(struct net_device *dev, u16 reason,
+	char *string, int hang_info_cnt);
+void wl_cfgvendor_simple_hang_event(struct net_device *dev, u16 reason);
+void wl_copy_hang_info_if_falure(struct net_device *dev, u16 reason, s32 ret);
+#endif /* WL_CFGVENDOR_SEND_HANG_EVENT */
 #ifdef DHD_PKT_LOGGING
 int wl_cfgvendor_dbg_send_pktlog_dbg_file_dump_evt(struct net_device *ndev);
 #endif /* DHD_PKT_LOGGING */

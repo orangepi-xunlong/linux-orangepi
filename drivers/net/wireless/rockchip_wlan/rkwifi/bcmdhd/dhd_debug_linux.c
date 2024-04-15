@@ -34,6 +34,9 @@
 
 #include <net/cfg80211.h>
 #include <wl_cfgvendor.h>
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0)
+#include <linux/sched/clock.h>
+#endif /* LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0) */
 #include <dhd_config.h>
 
 typedef void (*dbg_ring_send_sub_t)(void *ctx, const int ring_id, const void *data,

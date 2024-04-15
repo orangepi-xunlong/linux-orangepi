@@ -255,7 +255,9 @@ typedef struct dhd_debug_dump_ring_entry {
 /* below structure describe ring buffer. */
 struct dhd_log_dump_buf
 {
+#if defined(LINUX) || defined(linux) || defined(ANDROID) || defined(OEM_ANDROID)
 	spinlock_t lock;
+#endif
 	void *dhd_pub;
 	unsigned int enable;
 	unsigned int wraparound;
@@ -386,7 +388,7 @@ int dhd_log_flush(dhd_pub_t *dhdp, log_dump_type_t *type);
 
 extern void get_debug_dump_time(char *str);
 extern void clear_debug_dump_time(char *str);
-#if defined(DHD_PKT_LOGGING)
+#if defined(WL_CFGVENDOR_SEND_HANG_EVENT) || defined(DHD_PKT_LOGGING)
 extern void copy_debug_dump_time(char *dest, char *src);
 #endif
 

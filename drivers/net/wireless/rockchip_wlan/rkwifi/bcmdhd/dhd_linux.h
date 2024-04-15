@@ -62,7 +62,9 @@
 #include <linux/power/irq_history.h>
 #endif /* CONFIG_IRQ_HISTORY */
 
+#if defined(OEM_ANDROID)
 #include <linux/nl80211.h>
+#endif /* OEM_ANDROID */
 
 #ifdef WL_MONITOR
 #ifdef HOST_RADIOTAP_CONV
@@ -366,12 +368,12 @@ typedef struct dhd_tx_lb_pkttag_fr {
 #define ZERO_TYPE_STR	"00"
 #endif /* BLOCK_IPV6_PACKET */
 
-#if defined(SOFTAP)
+#if defined(OEM_ANDROID) && defined(SOFTAP)
 extern bool ap_cfg_running;
 extern bool ap_fw_loaded;
 #endif
 
-#if defined(BCMPCIE)
+#if defined(OEM_ANDROID) && defined(BCMPCIE)
 extern int dhd_get_suspend_bcn_li_dtim(dhd_pub_t *dhd, int *dtim_period, int *bcn_interval);
 #else
 extern int dhd_get_suspend_bcn_li_dtim(dhd_pub_t *dhd);
@@ -575,6 +577,7 @@ int dhd_net_bus_put(struct net_device *dev);
 #if defined(WLADPS)
 #define ADPS_ENABLE	1
 #define ADPS_DISABLE	0
+#define ADPS_MODE_PM2_ONLY	3
 
 int dhd_enable_adps(dhd_pub_t *dhd, uint8 on);
 #endif
@@ -599,5 +602,8 @@ void dhd_set_platform_ext_name_for_chip_version(char* chip_version);
 #endif /* USE_CID_CHECK */
 #endif /* SUPPORT_MULTIPLE_NVRAM || SUPPORT_MULTIPLE_CLMBLOB */
 void dhd_netif_rx_ni(struct sk_buff * skb);
+#if defined(DBG_PKT_MON) && !defined(PCIE_FULL_DONGLE)
+extern bool dhd_80211_mon_pkt(dhd_pub_t *dhdp, void *pkt, int ifidx);
+#endif /* DBG_PKT_MON */
 
 #endif /* __DHD_LINUX_H__ */

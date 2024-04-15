@@ -922,6 +922,15 @@ typedef atomic_t osl_atomic_t;
 #endif
 #endif /* BCMDRIVER */
 
+/* kvmalloc was added from kernel ver 4.12 */
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 12, 0))
+#define KVZALLOC(size, flags)	kzalloc(size, flags)
+#define KVFREE(osh, addr)	kfree(addr)
+#else
+#define KVZALLOC(size, flags)	kvzalloc(size, flags)
+#define KVFREE(osh, addr)	kvfree(addr)
+#endif /* LINUX_VERSION_CODE < KERNEL_VERSION(4, 12, 0) */
+
 extern void *osl_spin_lock_init(osl_t *osh);
 extern void osl_spin_lock_deinit(osl_t *osh, void *lock);
 extern unsigned long osl_spin_lock(void *lock);

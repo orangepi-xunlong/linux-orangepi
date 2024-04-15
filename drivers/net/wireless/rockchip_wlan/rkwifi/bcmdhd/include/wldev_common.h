@@ -103,7 +103,9 @@ extern void dhd_get_customized_country_code(struct net_device *dev, char *countr
 	wl_country_t *cspec);
 extern void dhd_bus_country_set(struct net_device *dev, wl_country_t *cspec, bool notify);
 
+#ifdef OEM_ANDROID
 extern bool dhd_force_country_change(struct net_device *dev);
+#endif
 
 extern void dhd_bus_band_set(struct net_device *dev, uint band);
 extern int wldev_set_country(struct net_device *dev, char *country_code, bool notify,
@@ -121,8 +123,10 @@ extern int net_os_set_max_dtim_enable(struct net_device *dev, int val);
 extern int net_os_set_disable_dtim_in_suspend(struct net_device *dev, int val);
 #endif /* DISABLE_DTIM_IN_SUSPEND */
 
+#if defined(OEM_ANDROID)
 extern int wl_parse_ssid_list_tlv(char** list_str, wlc_ssid_ext_t* ssid,
 	int max, int *bytes_left);
+#endif /* defined(OEM_ANDROID) */
 
 /* Get the link speed from dongle, speed is in kpbs */
 int wldev_get_link_speed(struct net_device *dev, int *plink_speed);

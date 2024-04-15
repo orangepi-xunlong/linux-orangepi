@@ -200,8 +200,14 @@ static inline int usb_submit_urb_linux(struct urb *urb)
 #define URB_QUEUE_BULK   0
 #endif /* WL_URB_ZPKT */
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 18, 0))
+#define CALLBACK_ARGS		struct urb *urb
+#define CALLBACK_ARGS_DATA	urb
+#else
 #define CALLBACK_ARGS		struct urb *urb, struct pt_regs *regs
 #define CALLBACK_ARGS_DATA	urb, regs
+#endif /* 5.18 */
+
 #define CONFIGDESC(usb)		(&((usb)->actconfig)->desc)
 #define IFPTR(usb, idx)		((usb)->actconfig->interface[idx])
 #define IFALTS(usb, idx)	(IFPTR((usb), (idx))->altsetting[0])
@@ -4555,7 +4561,7 @@ dbus_get_fwfile(int devid, int chiprev, uint8 **fw, int *fwlen,
 	const struct firmware *firmware = NULL;
 	s8 *device_id = NULL;
 	s8 *chip_rev = "";
-	s8 file_name[64];
+	s8 file_name[64] = {0, };
 	int ret;
 
 	switch (devid) {

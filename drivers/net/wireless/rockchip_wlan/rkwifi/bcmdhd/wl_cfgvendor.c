@@ -83,7 +83,9 @@
 #include <wl_cfgnan.h>
 #endif /* WL_NAN */
 
+#ifdef OEM_ANDROID
 #include <wl_android.h>
+#endif /* OEM_ANDROID */
 
 #include <wl_cfgvendor.h>
 #ifdef PROP_TXSTATUS
@@ -502,33 +504,6 @@ wl_cfgvendor_set_nodfs_flag(struct wiphy *wiphy,
 }
 #endif /* CUSTOM_FORCE_NODFS_FLAG */
 
-#ifdef WL_AUTO_COUNTRY
-static int
-wl_config_autocountry(struct bcm_cfg80211 *cfg,
-		struct net_device *ndev, char *country_code)
-{
-	bool val = FALSE;
-	s32 err;
-
-	if (!country_code) {
-		return -EINVAL;
-	}
-
-	if ((country_code[0] == '0') && (country_code[1] == '0')) {
-		/* Enable auto country for world domain (00) */
-		val = TRUE;
-	}
-
-	err = wldev_iovar_setint(ndev, "autocountry", val);
-	if (err) {
-		WL_ERR(("Failed to config auto country (%d) ret:%d\n", val, err));
-		return err;
-	}
-
-	return err;
-}
-#endif /* WL_AUTO_COUNTRY */
-
 static int
 wl_cfgvendor_set_country(struct wiphy *wiphy,
 	struct wireless_dev *wdev, const void *data, int len)
@@ -556,19 +531,13 @@ wl_cfgvendor_set_country(struct wiphy *wiphy,
 		}
 	}
 
-#ifdef WL_AUTO_COUNTRY
-	err = wl_config_autocountry(cfg, primary_ndev, country_code);
-	if (err) {
-		return err;
-	}
-#endif /* WL_AUTO_COUNTRY */
-
 	/* country code is unique for dongle..hence using primary interface. */
 	err = wl_cfg80211_set_country_code(primary_ndev, country_code, true, true, 0);
 	if (err < 0) {
 		WL_ERR(("Set country failed ret:%d\n", err));
 		goto exit;
 	}
+#ifdef OEM_ANDROID
 #ifdef FCC_PWR_LIMIT_2G
 	err = wldev_iovar_setint(primary_ndev, "fccpwrlimit2g", FALSE);
 	if (err < 0) {
@@ -578,6 +547,7 @@ wl_cfgvendor_set_country(struct wiphy *wiphy,
 		WL_ERR(("fccpwrlimit2g is deactivated\n"));
 	}
 #endif /* FCC_PWR_LIMIT_2G */
+#endif /* OEM_ANDROID */
 exit:
 	return err;
 }
@@ -3117,6 +3087,7 @@ wl_cfgvendor_priv_string_handler(struct wiphy *wiphy,
 	int maxmsglen = PAGE_SIZE - 0x100;
 	struct sk_buff *reply;
 
+#if defined(OEM_ANDROID)
 	dhd_pub_t *dhdp = wl_cfg80211_get_dhdp(wdev->netdev);
 
 	/* send to dongle only if we are not waiting for reload already */
@@ -3126,6 +3097,7 @@ wl_cfgvendor_priv_string_handler(struct wiphy *wiphy,
 		DHD_OS_WAKE_UNLOCK(dhdp);
 		return OSL_ERROR(BCME_DONGLE_DOWN);
 	}
+#endif /* (OEM_ANDROID) */
 
 	if (!data) {
 		WL_ERR(("data is not available\n"));
@@ -3482,7 +3454,8 @@ wl_cfgvendor_priv_bcm_handler(struct wiphy *wiphy,
 	struct net_device *net = NULL;
 	unsigned long int cmd_out = 0;
 
-#if defined(WL_ANDROID_PRIV_CMD_OVER_NL80211) || defined(WL_PRIV_CMD_OVER_NL80211)
+#if (defined(WL_ANDROID_PRIV_CMD_OVER_NL80211) && defined(OEM_ANDROID)) || \
+	defined(WL_PRIV_CMD_OVER_NL80211)
 	u32 cmd_buf_len = WL_DRIVER_PRIV_CMD_LEN;
 	char cmd_prefix[ANDROID_PRIV_CMD_IF_PREFIX_LEN + 1] = {0};
 	char *cmd_buf = NULL;
@@ -3507,7 +3480,8 @@ wl_cfgvendor_priv_bcm_handler(struct wiphy *wiphy,
 			goto exit;
 		}
 
-#if defined(WL_ANDROID_PRIV_CMD_OVER_NL80211) || defined(WL_PRIV_CMD_OVER_NL80211)
+#if (defined(WL_ANDROID_PRIV_CMD_OVER_NL80211) && defined(OEM_ANDROID)) || \
+	defined(WL_PRIV_CMD_OVER_NL80211)
 		if (type == BRCM_ATTR_DRIVER_CMD) {
 			if ((cmd_len >= WL_DRIVER_PRIV_CMD_LEN) ||
 				(cmd_len < ANDROID_PRIV_CMD_IF_PREFIX_LEN)) {
@@ -3563,6 +3537,7 @@ wl_cfgvendor_priv_bcm_handler(struct wiphy *wiphy,
 			cmd_buf[WL_DRIVER_PRIV_CMD_LEN - 1] = '\0';
 
 			WL_DBG(("vendor_command: %s len: %u \n", cmd_buf, cmd_buf_len));
+#ifdef OEM_ANDROID
 			bytes_written = wl_handle_private_cmd(net, cmd_buf, cmd_buf_len);
 			WL_DBG(("bytes_written: %d \n", bytes_written));
 			if (bytes_written == 0) {
@@ -3581,6 +3556,10 @@ wl_cfgvendor_priv_bcm_handler(struct wiphy *wiphy,
 				err = bytes_written;
 				goto exit;
 			}
+#else // OEM_ANDROID
+			err = bytes_written = -ENODEV;
+			goto exit;
+#endif // OEM_ANDROID
 			if ((data_len > 0) && (data_len < (cmd_buf_len - 1)) && cmd_buf) {
 				err =  wl_cfgvendor_send_cmd_reply(wiphy, cmd_buf, data_len);
 				if (unlikely(err)) {
@@ -3601,7 +3580,8 @@ wl_cfgvendor_priv_bcm_handler(struct wiphy *wiphy,
 
 exit:
 
-#if defined(WL_ANDROID_PRIV_CMD_OVER_NL80211) || defined(WL_PRIV_CMD_OVER_NL80211)
+#if (defined(WL_ANDROID_PRIV_CMD_OVER_NL80211) && defined(OEM_ANDROID)) || \
+	defined(WL_PRIV_CMD_OVER_NL80211)
 	if (cmd_buf) {
 		MFREE(cfg->osh, cmd_buf, cmd_buf_len);
 	}
@@ -10422,6 +10402,19 @@ wl_cfgvendor_tx_power_scenario(struct wiphy *wiphy,
 		}
 	}
 	WL_DBG_MEM(("SAR: sar_mode %d airplane_mode %d\n", sar_tx_power_val, airplane_mode));
+#ifdef SYNA_SAR_CUSTOMER_PARAMETER
+	if (sar_tx_power_val) {
+		struct bcm_cfg80211 *cfg = wiphy_priv(wiphy);
+		dhd_pub_t *dhd = (dhd_pub_t *)(cfg->pub);
+		err = dhd_sar_set_parameter(dhd, sar_tx_power_val);
+		if (unlikely(err)) {
+			WL_ERR(("SAR: Failed to set sar_params - error (%d)\n", err));
+			goto exit;
+		}
+		/* as already set sar_params for sar_enable 1 */
+		sar_tx_power_val = 1;
+	}
+#endif /* SYNA_SAR_CUSTOMER_PARAMETER */
 	err = wldev_iovar_setint(wdev_to_ndev(wdev), "fccpwrlimit2g", airplane_mode);
 	if (unlikely(err)) {
 		WL_ERR(("SAR: Failed to set airplane_mode - error (%d)\n", err));
@@ -11809,6 +11802,7 @@ exit:
 }
 #endif /* SUPPORT_OTA_UPDATE */
 
+#ifdef OEM_ANDROID
 static int
 wl_cfgvendor_set_dtim_config(struct wiphy *wiphy,
 	struct wireless_dev *wdev, const void  *data, int len)
@@ -11842,6 +11836,7 @@ wl_cfgvendor_set_dtim_config(struct wiphy *wiphy,
 	return err;
 
 }
+#endif /* OEM_ANDROID */
 
 #ifdef WL_USABLE_CHAN
 static int wl_cfgvendor_get_usable_channels(struct wiphy *wiphy,
@@ -12041,7 +12036,7 @@ wl_cfgvendor_get_radio_combo_matrix(struct wiphy *wiphy,
 	wifi_radio_combination_matrix *rc = NULL;
 
 	if (sizeof(buf) < MAX_RADIO_MATRIX_SIZE) {
-		WL_ERR(("Buff too short: %zu, exp max_radio matrix size: %zu\n",
+		WL_ERR(("Buff too short: %zd, exp max_radio matrix size: %zd\n",
 			sizeof(buf), MAX_RADIO_MATRIX_SIZE));
 		err = BCME_BUFTOOSHORT;
 		goto fail;
@@ -13727,6 +13722,7 @@ static struct wiphy_vendor_command wl_vendor_cmds [] = {
 #endif /* LINUX_VERSION >= 5.3 */
 	},
 #endif /* SUPPORT_OTA_UPDATE */
+#ifdef OEM_ANDROID
 	{
 		{
 			.vendor_id = OUI_GOOGLE,
@@ -13739,6 +13735,7 @@ static struct wiphy_vendor_command wl_vendor_cmds [] = {
 		.maxattr = ANDR_WIFI_ATTRIBUTE_MAX
 #endif /* LINUX_VERSION >= 5.3 */
 	},
+#endif /* OEM_ANDROID */
 #ifdef WL_USABLE_CHAN
 	{
 		{
@@ -13911,6 +13908,231 @@ int wl_cfgvendor_detach(struct wiphy *wiphy)
 	return 0;
 }
 #endif /* (LINUX_VERSION_CODE > KERNEL_VERSION(3, 13, 0)) || defined(WL_VENDOR_EXT_SUPPORT) */
+
+#ifdef WL_CFGVENDOR_SEND_HANG_EVENT
+void
+wl_cfgvendor_send_hang_event(struct net_device *dev, u16 reason, char *string, int hang_info_cnt)
+{
+	struct bcm_cfg80211 *cfg = wl_get_cfg(dev);
+	struct wiphy *wiphy;
+	char *hang_info;
+	int len = 0;
+	int bytes_written;
+	uint32 dummy_data = 0;
+	int reason_hang_info = 0;
+	int cnt = 0;
+	dhd_pub_t *dhd;
+	int hang_reason_mismatch = FALSE;
+
+	if (!cfg || !cfg->wdev) {
+		WL_ERR(("cfg=%p wdev=%p\n", cfg, (cfg ? cfg->wdev : NULL)));
+		return;
+	}
+
+	wiphy = cfg->wdev->wiphy;
+
+	if (!wiphy) {
+		WL_ERR(("wiphy is NULL\n"));
+		return;
+	}
+
+	hang_info = MALLOCZ(cfg->osh, VENDOR_SEND_HANG_EXT_INFO_LEN);
+	if (hang_info == NULL) {
+		WL_ERR(("alloc hang_info failed\n"));
+		return;
+	}
+
+	dhd = (dhd_pub_t *)(cfg->pub);
+
+#ifdef WL_BCNRECV
+	/* check fakeapscan in progress then stop scan */
+	if (cfg->bcnrecv_info.bcnrecv_state == BEACON_RECV_STARTED) {
+		wl_android_bcnrecv_stop(dev, WL_BCNRECV_HANG);
+	}
+#endif /* WL_BCNRECV */
+	sscanf(string, "%d", &reason_hang_info);
+	bytes_written = 0;
+	len = VENDOR_SEND_HANG_EXT_INFO_LEN - bytes_written;
+	if (strlen(string) == 0 || (reason_hang_info != reason)) {
+		WL_ERR(("hang reason mismatch: string len %d reason_hang_info %d\n",
+			(int)strlen(string), reason_hang_info));
+		hang_reason_mismatch = TRUE;
+		if (dhd) {
+			get_debug_dump_time(dhd->debug_dump_time_hang_str);
+			copy_debug_dump_time(dhd->debug_dump_time_str,
+					dhd->debug_dump_time_hang_str);
+		}
+		/* Fill bigdata key with */
+		bytes_written += scnprintf(&hang_info[bytes_written], len,
+				"%d %d %s %08x %08x %08x %08x %08x %08x %08x",
+				reason, VENDOR_SEND_HANG_EXT_INFO_VER,
+				dhd->debug_dump_time_hang_str,
+				0, 0, 0, 0, 0, 0, 0);
+		if (dhd) {
+			clear_debug_dump_time(dhd->debug_dump_time_hang_str);
+		}
+	} else {
+		bytes_written += scnprintf(&hang_info[bytes_written], len, "%s", string);
+	}
+
+	WL_ERR(("hang reason: %d info cnt: %d\n", reason, hang_info_cnt));
+
+	if (hang_reason_mismatch == FALSE) {
+		cnt = hang_info_cnt;
+	} else {
+		cnt = HANG_FIELD_MISMATCH_CNT;
+	}
+
+	while (cnt < HANG_FIELD_CNT_MAX) {
+		len = VENDOR_SEND_HANG_EXT_INFO_LEN - bytes_written;
+		if (len <= 0) {
+			break;
+		}
+		bytes_written += scnprintf(&hang_info[bytes_written], len,
+				"%c%08x", HANG_RAW_DEL, dummy_data);
+		cnt++;
+	}
+
+	WL_ERR(("hang info cnt: %d len: %d\n", cnt, (int)strlen(hang_info)));
+	WL_ERR(("hang info data: %s\n", hang_info));
+
+	wl_cfgvendor_send_async_event(wiphy,
+			bcmcfg_to_prmry_ndev(cfg), BRCM_VENDOR_EVENT_HANGED,
+			hang_info, (int)strlen(hang_info));
+
+	memset(string, 0, VENDOR_SEND_HANG_EXT_INFO_LEN);
+
+	if (hang_info) {
+		MFREE(cfg->osh, hang_info, VENDOR_SEND_HANG_EXT_INFO_LEN);
+	}
+
+#ifdef DHD_LOG_DUMP
+	dhd_logdump_cookie_save(dhd, dhd->debug_dump_time_hang_str, "HANG");
+#endif /*  DHD_LOG_DUMP */
+
+	if (dhd) {
+		clear_debug_dump_time(dhd->debug_dump_time_str);
+	}
+}
+
+void
+wl_cfgvendor_simple_hang_event(struct net_device *dev, u16 reason)
+{
+	struct bcm_cfg80211 *cfg;
+	struct wiphy *wiphy;
+	struct sk_buff *msg;
+	gfp_t kflags = in_atomic() ? GFP_ATOMIC : GFP_KERNEL;
+	int hang_event_len = 0;
+#ifdef DHD_COREDUMP
+	dhd_pub_t *dhd;
+#endif
+	WL_ERR(("0x%x\n", reason));
+
+	cfg = wl_cfg80211_get_bcmcfg();
+	if (!cfg || !cfg->wdev) {
+		WL_ERR(("fw dump evt invalid arg\n"));
+		return;
+	}
+
+	wiphy = bcmcfg_to_wiphy(cfg);
+	if (!wiphy) {
+		WL_ERR(("wiphy is NULL\n"));
+		return;
+	}
+
+#ifdef DHD_COREDUMP
+	hang_event_len = DHD_MEMDUMP_LONGSTR_LEN;
+#endif
+
+	/* Allocate the skb for vendor event */
+	msg = CFG80211_VENDOR_EVENT_ALLOC(wiphy, ndev_to_wdev(dev),
+			hang_event_len, BRCM_VENDOR_EVENT_HANGED, kflags);
+	if (!msg) {
+		WL_ERR(("%s: fail to allocate skb for vendor event\n", __FUNCTION__));
+		return;
+	}
+
+#ifdef DHD_COREDUMP
+	dhd = (dhd_pub_t *)(cfg->pub);
+
+	WL_ERR(("hang reason: %s\n", dhd->memdump_str));
+	nla_put(msg, DEBUG_ATTRIBUTE_HANG_REASON, DHD_MEMDUMP_LONGSTR_LEN, dhd->memdump_str);
+#endif
+
+	CFG80211_VENDOR_EVENT(msg, kflags);
+	return;
+}
+
+void
+wl_copy_hang_info_if_falure(struct net_device *dev, u16 reason, s32 ret)
+{
+	struct bcm_cfg80211 *cfg = NULL;
+	dhd_pub_t *dhd;
+	s32 err = 0;
+	char ioctl_buf[WLC_IOCTL_SMLEN];
+	memuse_info_t mu;
+	int bytes_written = 0;
+	int remain_len = 0;
+
+	if (!dev) {
+		WL_ERR(("dev is null\n"));
+		return;
+
+	}
+
+	cfg = wl_get_cfg(dev);
+	if (!cfg) {
+		WL_ERR(("dev=%p cfg=%p\n", dev, cfg));
+		return;
+	}
+
+	dhd = (dhd_pub_t *)(cfg->pub);
+
+	if (!dhd || !dhd->hang_info) {
+		WL_ERR(("%s dhd=%p hang_info=%p\n", __FUNCTION__,
+			dhd, (dhd ? dhd->hang_info : NULL)));
+		return;
+	}
+
+	err = wldev_iovar_getbuf_bsscfg(dev, "memuse",
+			NULL, 0, ioctl_buf, WLC_IOCTL_SMLEN, 0, NULL);
+	if (unlikely(err)) {
+		WL_ERR(("error (%d)\n", err));
+		return;
+	}
+
+	memcpy(&mu, ioctl_buf, sizeof(memuse_info_t));
+
+	if (mu.len >= sizeof(memuse_info_t)) {
+		WL_ERR(("Heap Total: %d(%dK)\n", mu.arena_size, KB(mu.arena_size)));
+		WL_ERR(("Free: %d(%dK), LWM: %d(%dK)\n",
+			mu.arena_free, KB(mu.arena_free),
+			mu.free_lwm, KB(mu.free_lwm)));
+		WL_ERR(("In use: %d(%dK), HWM: %d(%dK)\n",
+			mu.inuse_size, KB(mu.inuse_size),
+			mu.inuse_hwm, KB(mu.inuse_hwm)));
+		WL_ERR(("Malloc failure count: %d\n", mu.mf_count));
+	}
+
+	memset(dhd->hang_info, 0, VENDOR_SEND_HANG_EXT_INFO_LEN);
+	remain_len = VENDOR_SEND_HANG_EXT_INFO_LEN - bytes_written;
+
+	get_debug_dump_time(dhd->debug_dump_time_hang_str);
+	copy_debug_dump_time(dhd->debug_dump_time_str, dhd->debug_dump_time_hang_str);
+
+	bytes_written += scnprintf(&dhd->hang_info[bytes_written], remain_len,
+			"%d %d %s %d %d %d %d %d %08x %08x",
+			reason, VENDOR_SEND_HANG_EXT_INFO_VER,
+			dhd->debug_dump_time_hang_str,
+			ret, mu.arena_size, mu.arena_free, mu.inuse_size, mu.mf_count, 0, 0);
+
+	dhd->hang_info_cnt = HANG_FIELD_IF_FAILURE_CNT;
+
+	clear_debug_dump_time(dhd->debug_dump_time_hang_str);
+
+	return;
+}
+#endif /* WL_CFGVENDOR_SEND_HANG_EVENT */
 
 #ifdef WL_CFGVENDOR_SEND_ALERT_EVENT
 void

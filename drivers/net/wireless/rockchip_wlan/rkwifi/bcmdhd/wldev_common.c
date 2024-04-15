@@ -32,6 +32,8 @@
 #ifdef WL_CFG80211
 #include <wl_cfg80211.h>
 #include <wl_cfgscan.h>
+#else
+#define WL_DBG_PRINT_SYSTEM_TIME
 #endif /* WL_CFG80211 */
 #include <dhd_config.h>
 

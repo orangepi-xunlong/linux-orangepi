@@ -38,6 +38,7 @@
 #include <dhd_bus.h>
 
 #include <dhd_dbg.h>
+#include <dhd_debug.h>
 #include <dhd_config.h>
 #include <wl_android.h>
 
@@ -943,6 +944,9 @@ _dhd_wlfc_flow_control_check(athost_wl_status_info_t* ctx, struct pktq* pq, uint
 	dhdp = (dhd_pub_t *)ctx->dhdp;
 	ASSERT(dhdp);
 
+	/* Return for the bc/mc and unknown destinations configured by
+	 * &wlfc->destination_entries.other to prevent from out-of-boundary access
+	 * in array (BRK exception) kernel panic issue. */
 	if (if_id >= WLFC_MAX_IFNUM)
 		return;
 
@@ -4731,6 +4735,15 @@ int dhd_txpkt_log_and_dump(dhd_pub_t *dhdp, void* pkt, uint16 *pktfate_status)
 	pktlen -= bdc_len;
 	pktdata = pktdata + bdc_len;
 #endif /* BDC */
+
+#if defined(DBG_PKT_MON)
+	if (pktfate_status) {
+		DHD_DBG_PKT_MON_TX_STATUS(dhdp, pkt, pktid, *pktfate_status);
+	} else {
+		DHD_DBG_PKT_MON_TX(dhdp, pkt, pktid, FRAME_TYPE_ETHERNET_II, 0);
+	}
+#endif
+
 	dhd_handle_pktdata(dhdp, ifidx, pkt, pktdata, pktid, pktlen,
 		pktfate_status, NULL, NULL, TRUE, FALSE, TRUE);
 	return BCME_OK;

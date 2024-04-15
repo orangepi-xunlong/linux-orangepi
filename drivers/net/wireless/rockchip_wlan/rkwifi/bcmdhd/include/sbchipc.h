@@ -2825,6 +2825,8 @@ typedef volatile struct {
 #define PMU4369_PLL6VAL_PRE_SCALE		(1 << 17)
 #define PMU4369_PLL6VAL_POST_SCALE		(1 << 3)
 
+#define PMU_PLL_CTRL_REG6      6
+
 /* PLL usage in 4378
 * Temporay setting, update is needed.
 */
@@ -4237,6 +4239,7 @@ typedef volatile struct {
 #define CR4_43751_RAM_BASE                   (0x170000)
 #define CR4_43752_RAM_BASE                   (0x170000)
 #define CR4_43756_RAM_BASE                   (0x170000)
+#define CR4_43711_RAM_BASE                   (0x170000)
 #define CR4_4376_RAM_BASE                    (0x352000)
 #define CR4_4378_RAM_BASE                    (0x352000)
 #define CR4_4381_RAM_BASE                    (0x740000)

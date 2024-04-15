@@ -48,7 +48,9 @@
 #include <wl_cfgvif.h>
 #include <wldev_common.h>
 
+#ifdef OEM_ANDROID
 #include <wl_android.h>
+#endif
 
 #if defined(BCMDONGLEHOST)
 #include <dngl_stats.h>
@@ -595,8 +597,10 @@ wl_cfgp2p_handle_discovery_busy(struct bcm_cfg80211 *cfg)
 	}
 #endif /* DHD_DEBUG && DHD_FW_COREDUMP */
 
+#ifdef OEM_ANDROID
 	dhdp->hang_reason = HANG_REASON_P2P_DISC_BUSY;
 	dhd_os_send_hang_message(dhdp);
+#endif /* OEM_ANDROID */
 
 done:
 	return;
@@ -2662,7 +2666,13 @@ static int wl_cfgp2p_do_ioctl(struct net_device *net, struct ifreq *ifr, int cmd
 	 */
 	if (cmd == SIOCDEVPRIVATE+1) {
 
+#if defined(OEM_ANDROID)
 		ret = wl_android_priv_cmd(ndev, ifr);
+#endif /* defined(OEM_ANDROID) */
+
+#if !defined(OEM_ANDROID)
+	(void)ndev;
+#endif
 
 	} else {
 		CFGP2P_ERR(("%s: IOCTL req 0x%x on p2p0 I/F. Ignoring. \n",

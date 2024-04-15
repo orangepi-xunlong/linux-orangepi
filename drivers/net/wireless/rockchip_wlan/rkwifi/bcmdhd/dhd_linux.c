@@ -109,6 +109,9 @@
 #if defined(WL_CFG80211)
 #include <wl_cfg80211.h>
 #include <wl_cfgvif.h>
+#ifdef WL_BAM
+#include <wl_bam.h>
+#endif	/* WL_BAM */
 #endif	/* WL_CFG80211 */
 #ifdef PNO_SUPPORT
 #include <dhd_pno.h>
@@ -118,10 +121,6 @@
 #endif
 
 #include <dhd_linux_sock_qos.h>
-
-#ifdef CSI_SUPPORT
-#include <dhd_csi.h>
-#endif /* CSI_SUPPORT */
 
 #ifdef CONFIG_COMPAT
 #include <linux/compat.h>
@@ -205,7 +204,9 @@ static int dhd_wait_for_file_dump(dhd_pub_t *dhdp);
 #include <dhd_wlfc.h>
 #endif
 
+#if defined(OEM_ANDROID)
 #include <wl_android.h>
+#endif
 
 /* Maximum STA per radio */
 #if defined(BCM_ROUTER_DHD)
@@ -247,6 +248,10 @@ static void dhd_blk_tsfl_handler(struct work_struct * work);
 #include <bcmudp.h>
 #include <bcmproto.h>
 #endif /* defined(DHD_TX_PROFILE) */
+
+#ifdef CSI_SUPPORT
+#include <dhd_csi.h>
+#endif /* CSI_SUPPORT */
 
 #include <dhd_plat.h>
 
@@ -329,7 +334,9 @@ long long temp_raw;
 #if defined(OOB_INTR_ONLY) || defined(BCMSPI_ANDROID) || defined(FORCE_WOWLAN)
 extern void dhd_enable_oob_intr(struct dhd_bus *bus, bool enable);
 #endif /* defined(OOB_INTR_ONLY) || defined(BCMSPI_ANDROID) */
+#if defined(OEM_ANDROID)
 static void dhd_hang_process(struct work_struct *work_data);
+#endif /* OEM_ANDROID */
 MODULE_LICENSE("GPL and additional rights");
 
 #if defined(MULTIPLE_SUPPLICANT)
@@ -480,13 +487,20 @@ char nv_bak_path[MOD_PARAM_PATHLEN];
 /* information string to keep firmware, chio, cheip version info visiable from log */
 char info_string[MOD_PARAM_INFOLEN];
 module_param_string(info_string, info_string, MOD_PARAM_INFOLEN, 0444);
+
+#ifdef SYNA_SAR_CUSTOMER_PARAMETER
+char config_sar_path[MOD_PARAM_PATHLEN] = CONFIG_BCMDHD_CONFIG_SAR_PATH;
+module_param_string(config_sar_path, config_sar_path, MOD_PARAM_PATHLEN, 0660);
+#endif /* SYNA_SAR_CUSTOMER_PARAMETER */
 int op_mode = 0;
 int disable_proptx = 0;
 module_param(op_mode, int, 0644);
+#if defined(OEM_ANDROID)
 extern int wl_control_wl_start(struct net_device *dev);
 #if defined(BCMLXSDMMC) || defined(BCMDBUS)
 struct semaphore dhd_registration_sem;
 #endif /* BCMXSDMMC */
+#endif /* defined(OEM_ANDROID) */
 void dhd_generate_rand_mac_addr(struct ether_addr *ea_addr);
 
 #ifdef EWP_EDL
@@ -814,7 +828,11 @@ static void dhd_sta_list_snapshot_free(dhd_info_t *dhd, struct list_head *snapsh
 #ifdef BCMCCX
 uint dhd_roam_disable = 0;
 #else
+#ifdef OEM_ANDROID
 uint dhd_roam_disable = 0;
+#else
+uint dhd_roam_disable = 1;
+#endif
 #endif /* BCMCCX */
 
 #ifdef BCMDBGFS
@@ -918,8 +936,15 @@ module_param(dhd_use_idsup, uint, 0);
 #endif /* BCMSUP_4WAY_HANDSHAKE */
 
 #ifndef BCMDBUS
+#if defined(OEM_ANDROID)
 /* Allow delayed firmware download for debug purpose */
 int allow_delay_fwdl = FALSE;
+#elif defined(BCM_ROUTER_DHD)
+/* Allow delayed firmware download for debug purpose */
+int allow_delay_fwdl = FALSE;
+#else
+int allow_delay_fwdl = TRUE;
+#endif /* OEM_ANDROID */
 module_param(allow_delay_fwdl, int, 0);
 #endif /* !BCMDBUS */
 
@@ -2432,12 +2457,15 @@ static int dhd_set_suspend(int value, dhd_pub_t *dhd)
 					}
 
 					ndev = dhdinfo->iflist[i]->net;
+#ifdef WL_CFG80211
 					if (ndev->ieee80211_ptr->iftype == NL80211_IFTYPE_P2P_GO ||
 						ndev->ieee80211_ptr->iftype == NL80211_IFTYPE_AP) {
 						allmulti = 1;
 						DHD_LOG_MEM(("%s: IF[%s] is AP/GO, set allmulti.\n",
 							__FUNCTION__, ndev->name));
-					} else {
+					} else
+#endif /* WL_CFG80211 */
+					{
 						allmulti = 0;
 					}
 
@@ -3085,6 +3113,33 @@ int dhd_set_psta_mode(dhd_pub_t *dhdp, uint32 val)
 }
 #endif /* DHD_PSTA */
 
+#if (defined(DHD_WET) || defined(DHD_MCAST_REGEN) || defined(DHD_L2_FILTER))
+static void
+dhd_update_rx_pkt_chainable_state(dhd_pub_t* dhdp, uint32 idx)
+{
+	dhd_info_t *dhd = dhdp->info;
+	dhd_if_t *ifp;
+
+	ASSERT(idx < DHD_MAX_IFS);
+
+	ifp = dhd->iflist[idx];
+
+	if (
+#ifdef DHD_L2_FILTER
+		(ifp->block_ping) ||
+#endif
+#ifdef DHD_WET
+		(dhd->wet_mode) ||
+#endif
+#ifdef DHD_MCAST_REGEN
+		(ifp->mcast_regen_bss_enable) ||
+#endif
+		FALSE) {
+		ifp->rx_pkt_chainable = FALSE;
+	}
+}
+#endif /* DHD_WET || DHD_MCAST_REGEN || DHD_L2_FILTER */
+
 #ifdef DHD_WET
 /* Get wet configuration configuration */
 int dhd_get_wet_mode(dhd_pub_t *dhdp)
@@ -3468,11 +3523,6 @@ dhd_set_mcast_list_handler(void *handle, void *event_info, u8 event)
 	DHD_OS_WAKE_LOCK(&dhd->pub);
 
 	ifp = dhd->iflist[ifidx];
-
-	if (ifp == NULL || !dhd->pub.up) {
-		DHD_ERROR(("%s: interface info not available/down \n", __FUNCTION__));
-		goto done;
-	}
 
 	if (ifp == NULL || !dhd->pub.up) {
 		DHD_ERROR(("%s: interface info not available/down \n", __FUNCTION__));
@@ -5169,6 +5219,7 @@ dhd_ethtool(dhd_info_t *dhd, void *uaddr)
 /* XXX function to detect that FW is dead and send Event up */
 static bool dhd_check_hang(struct net_device *net, dhd_pub_t *dhdp, int error)
 {
+#if defined(OEM_ANDROID)
 	if (!dhdp) {
 		DHD_ERROR(("%s: dhdp is NULL\n", __FUNCTION__));
 		return FALSE;
@@ -5214,10 +5265,12 @@ static bool dhd_check_hang(struct net_device *net, dhd_pub_t *dhdp, int error)
 		net_os_send_hang_message(net);
 		return TRUE;
 	}
+#endif /* OEM_ANDROID */
 	return FALSE;
 }
 
-#if defined(DBG_PKT_MON) && defined(PCIE_FULL_DONGLE)
+#if defined(DBG_PKT_MON)
+#ifdef PCIE_FULL_DONGLE
 void
 dhd_80211_mon_pkt(dhd_pub_t *dhdp, host_rxbuf_cmpl_t* msg, void *pkt, int ifidx)
 {
@@ -5233,7 +5286,31 @@ dhd_80211_mon_pkt(dhd_pub_t *dhdp, host_rxbuf_cmpl_t* msg, void *pkt, int ifidx)
 		DHD_DBG_PKT_MON_RX(dhdp, (struct sk_buff *)pkt, FRAME_TYPE_80211_MGMT);
 	}
 }
-#endif /* DBG_PKT_MON && PCIE_FULL_DONGLE */
+#else
+bool
+dhd_80211_mon_pkt(dhd_pub_t *dhdp, void *pkt, int ifidx)
+{
+	/* Distinguish rx/tx frame */
+	wl_aml_header_v1_t hdr;
+
+	hdr = *(wl_aml_header_v1_t *)PKTDATA(dhdp->osh, pkt);
+	if (hdr.version == WL_AML_HEADER_VERSION) {
+		if (hdr.flags & WL_AML_F_MGMT) {
+			PKTPULL(dhdp->osh, pkt, sizeof(hdr));
+			if (hdr.flags & WL_AML_F_DIRECTION) {
+				bool ack = !!(hdr.flags & WL_AML_F_ACKED);
+				DHD_DBG_PKT_MON_TX(dhdp, pkt, 0, FRAME_TYPE_80211_MGMT, (uint8)ack);
+			} else {
+				DHD_DBG_PKT_MON_RX(dhdp, (struct sk_buff *)pkt,
+					FRAME_TYPE_80211_MGMT);
+			}
+			return TRUE;
+		}
+	}
+	return FALSE;
+}
+#endif /* PCIE_FULL_DONGLE */
+#endif /* DBG_PKT_MON */
 
 #ifdef WL_MONITOR
 bool
@@ -5287,6 +5364,7 @@ dhd_monitor_open(struct net_device *net)
 {
 	int ret = 0;
 	dhd_info_t *dhd = DHD_MON_DEV_INFO(net);
+	uint32 scan_suppress = FALSE;
 
 	if (!dhd) {
 		DHD_ERROR(("%s: dhd info not available \n", __FUNCTION__));
@@ -5305,6 +5383,16 @@ dhd_monitor_open(struct net_device *net)
 		return ret;
 	}
 
+	if (FW_SUPPORTED((&dhd->pub), monitor)) {
+		scan_suppress = TRUE;
+		/* Set the SCAN SUPPRESS Flag in the firmware to disable scan in Monitor mode */
+		ret = dhd_iovar(&dhd->pub, 0, "scansuppress", (char *)&scan_suppress,
+			sizeof(scan_suppress), NULL, 0, TRUE);
+		if (ret < 0) {
+			DHD_ERROR(("%s: scansuppress set failed, ret=%d\n", __FUNCTION__, ret));
+		}
+	}
+
 	return ret;
 }
 
@@ -5313,6 +5401,7 @@ dhd_monitor_stop(struct net_device *net)
 {
 	int ret = 0;
 	dhd_info_t *dhd = DHD_MON_DEV_INFO(net);
+	uint32 scan_suppress = FALSE;
 
 	if (!dhd) {
 		DHD_ERROR(("%s: dhd info not available \n", __FUNCTION__));
@@ -5323,6 +5412,16 @@ dhd_monitor_stop(struct net_device *net)
 		DHD_ERROR(("%s: Monitor mode is not enabled in FW cap\n",
 			__FUNCTION__));
 		return BCME_ERROR;
+	}
+
+	if (FW_SUPPORTED((&dhd->pub), monitor)) {
+		scan_suppress = FALSE;
+		/* Unset the SCAN SUPPRESS Flag in the firmware to enable scan */
+		ret = dhd_iovar(&dhd->pub, 0, "scansuppress", (char *)&scan_suppress,
+				sizeof(scan_suppress), NULL, 0, TRUE);
+		if (ret < 0) {
+			DHD_ERROR(("%s: scansuppress set failed, ret=%d\n", __FUNCTION__, ret));
+		}
 	}
 
 	ret = dhd_set_monitor_ioctl(&dhd->pub, FALSE);
@@ -5594,8 +5693,6 @@ dhd_add_monitor_if(dhd_info_t *dhd)
 #ifdef HOST_RADIOTAP_CONV
 	dhd_pub_t *dhdp = (dhd_pub_t *)&dhd->pub;
 #endif /* HOST_RADIOTAP_CONV */
-	uint32 scan_suppress = FALSE;
-	int ret = BCME_OK;
 	dhd_mon_dev_priv_t *dev_priv;
 
 	BCM_REFERENCE(dev_priv);
@@ -5650,16 +5747,6 @@ dhd_add_monitor_if(dhd_info_t *dhd)
 		return;
 	}
 
-	if (FW_SUPPORTED((&dhd->pub), monitor)) {
-		scan_suppress = TRUE;
-		/* Set the SCAN SUPPRESS Flag in the firmware to disable scan in Monitor mode */
-		ret = dhd_iovar(&dhd->pub, 0, "scansuppress", (char *)&scan_suppress,
-			sizeof(scan_suppress), NULL, 0, TRUE);
-		if (ret < 0) {
-			DHD_ERROR(("%s: scansuppress set failed, ret=%d\n", __FUNCTION__, ret));
-		}
-	}
-
 #ifdef HOST_RADIOTAP_CONV
 	bcmwifi_monitor_create(&dhd->monitor_info);
 	bcmwifi_set_corerev_major(dhd->monitor_info, dhdpcie_get_corerev_major(dhdp));
@@ -5676,8 +5763,6 @@ dhd_add_monitor_if(dhd_info_t *dhd)
 static void
 dhd_del_monitor_if(dhd_info_t *dhd)
 {
-	int ret = BCME_OK;
-	uint32 scan_suppress = FALSE;
 	dhd_mon_dev_priv_t *dev_priv;
 
 	BCM_REFERENCE(dev_priv);
@@ -5696,16 +5781,6 @@ dhd_del_monitor_if(dhd_info_t *dhd)
 	dev_priv->dhd = (dhd_info_t *)NULL;
 	bzero(&dev_priv->stats, sizeof(dev_priv->stats));
 #endif /* WL_CFG80211_MONITOR */
-
-	if (FW_SUPPORTED((&dhd->pub), monitor)) {
-		scan_suppress = FALSE;
-		/* Unset the SCAN SUPPRESS Flag in the firmware to enable scan */
-		ret = dhd_iovar(&dhd->pub, 0, "scansuppress", (char *)&scan_suppress,
-				sizeof(scan_suppress), NULL, 0, TRUE);
-		if (ret < 0) {
-			DHD_ERROR(("%s: scansuppress set failed, ret=%d\n", __FUNCTION__, ret));
-		}
-	}
 
 	if (dhd->monitor_dev) {
 		if (dhd->monitor_dev->reg_state == NETREG_UNINITIALIZED) {
@@ -5949,7 +6024,9 @@ int dhd_ioctl_process(dhd_pub_t *pub, int ifidx, dhd_ioctl_t *ioc, void *data_bu
 #endif  /* REPORT_FATAL_TIMEOUTS */
 
 done:
+#if defined(OEM_ANDROID)
 	dhd_check_hang(net, pub, bcmerror);
+#endif /* OEM_ANDROID */
 
 	return bcmerror;
 }
@@ -5986,12 +6063,14 @@ dhd_ioctl_entry(struct net_device *net, struct ifreq *ifr,
 
 	DHD_OS_WAKE_LOCK(&dhd->pub);
 
+#if defined(OEM_ANDROID)
 	/* Interface up check for built-in type */
 	if (!dhd_download_fw_on_driverload && dhd->pub.up == FALSE) {
 		DHD_ERROR(("%s: Interface is down \n", __FUNCTION__));
 		DHD_OS_WAKE_UNLOCK(&dhd->pub);
 		return OSL_ERROR(BCME_NOTUP);
 	}
+#endif /* (OEM_ANDROID) */
 
 	ifidx = dhd_net2idx(dhd, net);
 	DHD_TRACE(("%s: ifidx %d, cmd 0x%04x\n", __FUNCTION__, ifidx, cmd));
@@ -6026,12 +6105,15 @@ dhd_ioctl_entry(struct net_device *net, struct ifreq *ifr,
 		return ret;
 	}
 
+#if defined(OEM_ANDROID)
 	if (cmd == SIOCDEVPRIVATE+1) {
 		ret = wl_android_priv_cmd(net, ifr);
 		dhd_check_hang(net, &dhd->pub, ret);
 		DHD_OS_WAKE_UNLOCK(&dhd->pub);
 		return ret;
 	}
+
+#endif /* OEM_ANDROID */
 
 	if (cmd != SIOCDEVPRIVATE) {
 		DHD_OS_WAKE_UNLOCK(&dhd->pub);
@@ -6132,6 +6214,7 @@ dhd_ioctl_entry(struct net_device *net, struct ifreq *ifr,
 		ioc.buf = local_buf;
 	}
 
+#if defined(OEM_ANDROID)
 	/* Skip all the non DHD iovars (wl iovars) after f/w hang */
 	if (ioc.driver != DHD_IOCTL_MAGIC && dhd->pub.hang_was_sent) {
 		DHD_TRACE(("%s: HANG was sent up earlier\n", __FUNCTION__));
@@ -6139,6 +6222,7 @@ dhd_ioctl_entry(struct net_device *net, struct ifreq *ifr,
 		bcmerror = BCME_DONGLE_DOWN;
 		goto done;
 	}
+#endif /* OEM_ANDROID */
 
 	bcmerror = dhd_ioctl_process(&dhd->pub, ifidx, &ioc, local_buf);
 
@@ -6254,6 +6338,7 @@ dhd_ctrl_tcp_limit_output_bytes(int level)
 void
 dhd_force_collect_socram_during_wifi_onoff(dhd_pub_t *dhdp)
 {
+#ifdef OEM_ANDROID
 #ifdef DHD_FW_COREDUMP
 	if (dhdp->memdump_enabled && (dhdp->busstate != DHD_BUS_DOWN)) {
 #ifdef DHD_SSSR_DUMP
@@ -6263,6 +6348,7 @@ dhd_force_collect_socram_during_wifi_onoff(dhd_pub_t *dhdp)
 		dhd_bus_mem_dump(dhdp);
 	}
 #endif /* DHD_FW_COREDUMP */
+#endif /* OEM_ANDROID */
 }
 
 int
@@ -6587,7 +6673,7 @@ exit:
 	return 0;
 }
 
-#if defined(WL_CFG80211) && (defined(USE_INITIAL_2G_SCAN) || \
+#if defined(OEM_ANDROID) && defined(WL_CFG80211) && (defined(USE_INITIAL_2G_SCAN) || \
 	defined(USE_INITIAL_SHORT_DWELL_TIME))
 extern bool g_first_broadcast_scan;
 #endif /* OEM_ANDROID && WL_CFG80211 && (USE_INITIAL_2G_SCAN || USE_INITIAL_SHORT_DWELL_TIME) */
@@ -6654,6 +6740,7 @@ void
 dhd_force_collect_init_fail_dumps(dhd_pub_t *dhdp)
 {
 #ifndef SKIP_FORCE_INIT_DUMP
+#ifdef OEM_ANDROID
 
 #if defined(CUSTOMER_HW7_DEBUG)
 #ifdef DEBUG_DNGL_INIT_FAIL
@@ -6684,6 +6771,7 @@ dhd_force_collect_init_fail_dumps(dhd_pub_t *dhdp)
 		dhd_bus_mem_dump(dhdp);
 	}
 #endif /* DHD_FW_COREDUMP */
+#endif /* OEM_ANDROID */
 #endif /* SKIP_FORCE_INIT_DUMP */
 }
 
@@ -8840,6 +8928,9 @@ dhd_attach(osl_t *osh, struct dhd_bus *bus, uint bus_hdrlen
 	uint32 bus_type = -1;
 	uint32 bus_num = -1;
 	uint32 slot_num = -1;
+#if defined(SHOW_LOGTRACE) && !defined(OEM_ANDROID)
+	int ret;
+#endif /* SHOW_LOGTRACE && !OEM_ANDROID */
 	wifi_adapter_info_t *adapter = NULL;
 #elif defined(BCMDBUS)
 	wifi_adapter_info_t *adapter = data;
@@ -9056,11 +9147,13 @@ dhd_attach(osl_t *osh, struct dhd_bus *bus, uint bus_hdrlen
 	dhd_wake_lock_init(dhd->wl_wdwake, dhd_bus_to_dev(bus), "wlan_wd_wake");
 #endif /* CONFIG_HAS_WAKELOCK */
 
+#if defined(OEM_ANDROID)
 	mutex_init(&dhd->dhd_net_if_mutex);
 	mutex_init(&dhd->dhd_suspend_mutex);
 #if defined(APF)
 	mutex_init(&dhd->dhd_apf_mutex);
 #endif /* APF */
+#endif /* defined(OEM_ANDROID) */
 	dhd_state |= DHD_ATTACH_STATE_WAKELOCKS_INIT;
 
 	/* Attach and link in the protocol */
@@ -9081,6 +9174,16 @@ dhd_attach(osl_t *osh, struct dhd_bus *bus, uint bus_hdrlen
 	dhd_monitor_init(&dhd->pub);
 	dhd_state |= DHD_ATTACH_STATE_CFG80211;
 #endif
+
+#if defined(SHOW_LOGTRACE) && !defined(OEM_ANDROID)
+	ret = dhd_init_logstrs_array(osh, &dhd->event_data);
+	if (ret == BCME_OK) {
+		dhd_init_static_strs_array(osh, &dhd->event_data, st_str_file_path, map_file_path);
+		dhd_init_static_strs_array(osh, &dhd->event_data, rom_st_str_file_path,
+			rom_map_file_path);
+		dhd_state |= DHD_ATTACH_LOGTRACE_INIT;
+	}
+#endif /* SHOW_LOGTRACE && !OEM_ANDROID */
 
 #ifdef WL_EVENT
 	if (wl_ext_event_attach(net) != 0) {
@@ -9138,6 +9241,10 @@ dhd_attach(osl_t *osh, struct dhd_bus *bus, uint bus_hdrlen
 		goto fail;
 	}
 #ifdef DEBUGABILITY
+#if !defined(OEM_ANDROID) && defined(SHOW_LOGTRACE)
+	/* enable verbose ring to support dump_trace_buf */
+	dhd_os_start_logging(&dhd->pub, FW_VERBOSE_RING_NAME, 3, 0, 0, 0);
+#endif /* !OEM_ANDROID && SHOW_LOGTRACE */
 
 #ifdef DBG_PKT_MON
 	dhd->pub.dbg->pkt_mon_lock = osl_spin_lock_init(dhd->pub.osh);
@@ -9165,6 +9272,13 @@ dhd_attach(osl_t *osh, struct dhd_bus *bus, uint bus_hdrlen
 #ifdef RX_PKT_POOL
 	dhd_rx_pktpool_init(dhd);
 #endif /* RX_PKT_POOL */
+#ifdef WL_CFGVENDOR_SEND_HANG_EVENT
+	dhd->pub.hang_info = MALLOCZ(osh, VENDOR_SEND_HANG_EXT_INFO_LEN);
+	if (dhd->pub.hang_info == NULL) {
+		DHD_ERROR(("%s: alloc hang_info failed\n", __FUNCTION__));
+		goto fail;
+	}
+#endif /* WL_CFGVENDOR_SEND_HANG_EVENT */
 
 	if (dhd_sta_pool_init(&dhd->pub, DHD_MAX_STA) != BCME_OK) {
 		DHD_ERROR(("%s: Initializing %u sta\n", __FUNCTION__, DHD_MAX_STA));
@@ -9285,7 +9399,9 @@ dhd_attach(osl_t *osh, struct dhd_bus *bus, uint bus_hdrlen
 	}
 #endif /* CONFIG_IPV6 && IPV6_NDO_SUPPORT */
 	dhd->dhd_deferred_wq = dhd_deferred_work_init((void *)dhd);
+#if defined(OEM_ANDROID)
 	INIT_WORK(&dhd->dhd_hang_process_work, dhd_hang_process);
+#endif /* OEM_ANDROID */
 #ifdef DEBUG_CPU_FREQ
 	dhd->new_freq = alloc_percpu(int);
 	dhd->freq_trans.notifier_call = dhd_cpufreq_notifier;
@@ -9378,6 +9494,10 @@ dhd_attach(osl_t *osh, struct dhd_bus *bus, uint bus_hdrlen
 	dhd_state |= DHD_ATTACH_STATE_LB_ATTACH_DONE;
 #endif /* DHD_LB */
 
+#ifdef CSI_SUPPORT
+	dhd_csi_init(&dhd->pub);
+#endif /* CSI_SUPPORT */
+
 #if defined(DNGL_AXI_ERROR_LOGGING) && defined(DHD_USE_WQ_FOR_DNGL_AXI_ERROR)
 	INIT_WORK(&dhd->axi_error_dispatcher_work, dhd_axi_error_dispatcher_fn);
 #endif /* DNGL_AXI_ERROR_LOGGING && DHD_USE_WQ_FOR_DNGL_AXI_ERROR */
@@ -9443,17 +9563,17 @@ dhd_attach(osl_t *osh, struct dhd_bus *bus, uint bus_hdrlen
 
 	dhd_found++;
 
-#ifdef CSI_SUPPORT
-	dhd_csi_init(&dhd->pub);
-#endif /* CSI_SUPPORT */
-
 #ifdef DHD_FW_COREDUMP
 	/* Set memdump default values */
+#if defined(OEM_ANDROID)
 #ifdef DHD_COREDUMP
 	dhd->pub.memdump_enabled = DUMP_MEMFILE;
 #else
 	dhd->pub.memdump_enabled = DUMP_MEMFILE_BUGON;
 #endif /* DHD_COREDUMP */
+#else
+	dhd->pub.memdump_enabled = DUMP_MEMFILE;
+#endif /* OEM_ANDROID */
 	/* Check the memdump capability */
 	dhd_get_memdump_info(&dhd->pub);
 #endif /* DHD_FW_COREDUMP */
@@ -10307,6 +10427,48 @@ bool dhd_is_concurrent_mode(dhd_pub_t *dhd)
 }
 
 #if defined(WLADPS)
+#ifdef WL_BAM
+static int
+dhd_check_adps_bad_ap(dhd_pub_t *dhd)
+{
+	struct net_device *ndev;
+	struct bcm_cfg80211 *cfg;
+	struct wl_profile *profile;
+	struct ether_addr bssid;
+
+	if (!dhd_is_associated(dhd, 0, NULL)) {
+		DHD_ERROR(("%s - not associated\n", __FUNCTION__));
+		return BCME_OK;
+	}
+
+	ndev = dhd_linux_get_primary_netdev(dhd);
+	if (!ndev) {
+		DHD_ERROR(("%s: Cannot find primary netdev\n", __FUNCTION__));
+		return -ENODEV;
+	}
+
+	cfg = wl_get_cfg(ndev);
+	if (!cfg) {
+		DHD_ERROR(("%s: Cannot find cfg\n", __FUNCTION__));
+		return -EINVAL;
+	}
+
+	profile = wl_get_profile_by_netdev(cfg, ndev);
+	if (!profile) {
+		DHD_ERROR(("%s : Cannot get profile\n", __FUNCTION__));
+		return -EINVAL;
+	}
+
+	memcpy(bssid.octet, profile->bssid, ETHER_ADDR_LEN);
+	if (wl_adps_bad_ap_check(cfg, &bssid)) {
+		if (wl_adps_enabled(cfg, ndev)) {
+			wl_adps_set_suspend(cfg, ndev, ADPS_SUSPEND);
+		}
+	}
+
+	return BCME_OK;
+}
+#endif	/* WL_BAM */
 
 int
 dhd_enable_adps(dhd_pub_t *dhd, uint8 on)
@@ -10351,6 +10513,12 @@ dhd_enable_adps(dhd_pub_t *dhd, uint8 on)
 			}
 		}
 	}
+
+#ifdef WL_BAM
+	if (on) {
+		dhd_check_adps_bad_ap(dhd);
+	}
+#endif	/* WL_BAM */
 
 exit:
 	if (iov_buf) {
@@ -10426,6 +10594,45 @@ dhd_get_preserve_log_numbers(dhd_pub_t *dhd, uint64 *logset_mask)
 	return ret;
 }
 
+#ifndef OEM_ANDROID
+/* For non-android FC modular builds, override firmware preinited values */
+void
+dhd_override_fwprenit(dhd_pub_t * dhd)
+{
+	int ret = 0;
+
+	{
+		/* Disable bcn_li_bcn */
+		uint32 bcn_li_bcn = 0;
+		ret = dhd_iovar(dhd, 0, "bcn_li_bcn", (char *)&bcn_li_bcn,
+				sizeof(bcn_li_bcn), NULL, 0, TRUE);
+		if (ret < 0) {
+			DHD_ERROR(("%s: bcn_li_bcn failed:%d\n",
+				__FUNCTION__, ret));
+		}
+	}
+
+	{
+		/* Disable apsta */
+		uint32 apsta = 0;
+		ret = dhd_iovar(dhd, 0, "apsta", (char *)&apsta,
+				sizeof(apsta), NULL, 0, TRUE);
+		if (ret < 0) {
+			DHD_ERROR(("%s: apsta failed:%d\n",
+				__FUNCTION__, ret));
+		}
+	}
+
+	{
+		int ap_mode = 0;
+		if ((ret = dhd_wl_ioctl_cmd(dhd, WLC_SET_AP, (char *)&ap_mode,
+			sizeof(ap_mode), TRUE, 0)) < 0) {
+			DHD_ERROR(("%s: set apmode failed :%d\n", __FUNCTION__, ret));
+		}
+	}
+}
+#endif /* !OEM_ANDROID */
+
 int
 dhd_get_fw_capabilities(dhd_pub_t * dhd)
 {
@@ -10472,6 +10679,9 @@ dhd_optimised_preinit_ioctls(dhd_pub_t * dhd)
 
 	uint32 frameburst = CUSTOM_FRAMEBURST_SET;
 	uint wnm_bsstrans_resp = 0;
+#ifdef DHD_BUS_MEM_ACCESS
+	uint32 enable_memuse = 1;
+#endif /* DHD_BUS_MEM_ACCESS */
 #ifdef DHD_PM_CONTROL_FROM_FILE
 	uint power_mode = PM_FAST;
 #endif /* DHD_PM_CONTROL_FROM_FILE */
@@ -10619,7 +10829,7 @@ dhd_optimised_preinit_ioctls(dhd_pub_t * dhd)
 		dhd->op_mode = DHD_FLAG_STA_MODE;
 
 		BCM_REFERENCE(p2p_ea);
-#if !defined(AP) && defined(WLP2P)
+#if defined(OEM_ANDROID) && !defined(AP) && defined(WLP2P)
 		if ((concurrent_mode = dhd_get_concurrent_capabilites(dhd))) {
 			dhd->op_mode |= concurrent_mode;
 		}
@@ -10635,7 +10845,7 @@ dhd_optimised_preinit_ioctls(dhd_pub_t * dhd)
 			else
 				DHD_INFO(("dhd_preinit_ioctls: p2p_da_override succeeded\n"));
 		}
-#endif
+#endif /* defined(OEM_ANDROID) && !defined(AP) && defined(WLP2P) */
 
 	}
 
@@ -10779,7 +10989,9 @@ dhd_optimised_preinit_ioctls(dhd_pub_t * dhd)
 	if (ret < 0) {
 		DHD_ERROR(("%s roam_off failed %d\n", __FUNCTION__, ret));
 	}
+#ifdef WL_CFG80211
 	ROAMOFF_DBG_SAVE(dhd_linux_get_primary_netdev(dhd), SET_ROAM_PREINIT, roamvar);
+#endif /* WL_CFG80211 */
 #ifdef ROAM_AP_ENV_DETECTION
 	/* Changed to GET iovar to read roam_env_mode */
 	dhd->roam_env_detection = FALSE;
@@ -10826,11 +11038,11 @@ dhd_optimised_preinit_ioctls(dhd_pub_t * dhd)
 	dhd_sel_ant_from_file(dhd);
 #endif /* MIMO_ANT_SETTING */
 
-#if defined(SOFTAP)
+#if defined(OEM_ANDROID) && defined(SOFTAP)
 	if (ap_fw_loaded == TRUE) {
 		dhd_wl_ioctl_cmd(dhd, WLC_SET_DTIMPRD, (char *)&dtim, sizeof(dtim), TRUE, 0);
 	}
-#endif
+#endif /* defined(OEM_ANDROID) && defined(SOFTAP) */
 
 #if defined(KEEP_ALIVE)
 	/* Set Keep Alive : be sure to use FW with -keepalive */
@@ -10857,6 +11069,17 @@ dhd_optimised_preinit_ioctls(dhd_pub_t * dhd)
 	dhd->event_log_max_sets_queried = TRUE;
 	DHD_ERROR(("%s: event_log_max_sets: %d ret: %d\n",
 		__FUNCTION__, dhd->event_log_max_sets, ret));
+#ifdef DHD_BUS_MEM_ACCESS
+	ret = dhd_iovar(dhd, 0, "enable_memuse", (char *)&enable_memuse,
+			sizeof(enable_memuse), iovbuf, sizeof(iovbuf), FALSE);
+	if (ret < 0) {
+		DHD_ERROR(("%s: enable_memuse is failed ret=%d\n",
+			__FUNCTION__, ret));
+	} else {
+		DHD_ERROR(("%s: enable_memuse = %d\n",
+			__FUNCTION__, enable_memuse));
+	}
+#endif /* DHD_BUS_MEM_ACCESS */
 
 #ifdef USE_WFA_CERT_CONF
 #ifdef USE_WL_FRAMEBURST
@@ -11195,6 +11418,10 @@ dhd_optimised_preinit_ioctls(dhd_pub_t * dhd)
 		DHD_ERROR(("%s: fr_phase_nibble enabled\n", __FUNCTION__));
 	}
 
+#ifndef OEM_ANDROID
+	/* For non-android FC modular builds, override firmware preinited values */
+	dhd_override_fwprenit(dhd);
+#endif /* !OEM_ANDROID */
 	dhd_set_bandlock(dhd);
 
 #ifdef DHD_WAKE_EVENT_STATUS
@@ -11285,14 +11512,21 @@ dhd_legacy_preinit_ioctls(dhd_pub_t *dhd)
 #ifdef SUPPORT_SET_CAC
 	uint32 cac = 1;
 #endif /* SUPPORT_SET_CAC */
+#ifdef DHD_BUS_MEM_ACCESS
+	uint32 enable_memuse = 1;
+#endif /* DHD_BUS_MEM_ACCESS */
 #if defined(SUPPORT_2G_VHT) || defined(SUPPORT_5G_1024QAM_VHT)
 	uint32 vht_features = 0; /* init to 0, will be set based on each support */
 #endif /* SUPPORT_2G_VHT || SUPPORT_5G_1024QAM_VHT */
 
+#ifdef OEM_ANDROID
 #ifdef DHD_ENABLE_LPC
 	uint32 lpc = 1;
 #endif /* DHD_ENABLE_LPC */
 	uint power_mode = PM_FAST;
+#ifdef ASSOC_PREFER_RSSI_THRESH
+	int assoc_pref_rssi_thresh = ASSOC_PREFER_RSSI_THRESH;
+#endif /* ASSOC_PREFER_RSSI_THRESH */
 #if defined(BCMSDIO)
 	uint32 dongle_align = DHD_SDALIGN;
 	uint32 glom = CUSTOM_GLOM_SETTING;
@@ -11401,6 +11635,7 @@ dhd_legacy_preinit_ioctls(dhd_pub_t *dhd)
 #define EVENT_LOG_RATE_HC_THRESHOLD	1000
 	uint32 event_log_rate_hc = EVENT_LOG_RATE_HC_THRESHOLD;
 #endif /* EVENT_LOG_RATE_HC */
+#endif  /* OEM_ANDROID */
 #if defined(WBTEXT) && defined(WBTEXT_BTMDELTA)
 	uint32 btmdelta = WBTEXT_BTMDELTA;
 #endif /* WBTEXT && WBTEXT_BTMDELTA */
@@ -11411,7 +11646,7 @@ dhd_legacy_preinit_ioctls(dhd_pub_t *dhd)
 #ifdef CUSTOM_PSPRETEND_THR
 	uint32 pspretend_thr = CUSTOM_PSPRETEND_THR;
 #endif
-#if defined(DHD_8021X_DUMP) && defined(SHOW_LOGTRACE)
+#if (defined(DHD_8021X_DUMP) && defined(SHOW_LOGTRACE)) || defined(DEBUGABILITY)
 	wl_el_tag_params_t *el_tag = NULL;
 #endif /* DHD_8021X_DUMP */
 
@@ -11426,6 +11661,7 @@ dhd_legacy_preinit_ioctls(dhd_pub_t *dhd)
 	dhd->arpol_configured = FALSE;
 #endif /* ARP_OFFLOAD_SUPPORT */
 
+#ifdef OEM_ANDROID
 #ifdef PKT_FILTER_SUPPORT
 	dhd_pkt_filter_enable = TRUE;
 #endif /* PKT_FILTER_SUPPORT */
@@ -11533,7 +11769,7 @@ dhd_legacy_preinit_ioctls(dhd_pub_t *dhd)
 	}
 #ifdef GET_CUSTOM_MAC_ENABLE
 #ifdef GET_CUSTOM_MAC_FROM_CONFIG
-	else if (!memcmp(&ether_null, &dhd->conf->hw_ether, ETHER_ADDR_LEN)) {
+	else if (memcmp(&ether_null, &dhd->conf->hw_ether, ETHER_ADDR_LEN)) {
 		set_mac = TRUE;
 		memcpy(hw_ether, &dhd->conf->hw_ether, sizeof(dhd->conf->hw_ether));
 	}
@@ -11611,6 +11847,17 @@ dhd_legacy_preinit_ioctls(dhd_pub_t *dhd)
 		}
 	}
 #endif /* WL_STA_ASSOC_RAND && WL_STA_INIT_RAND */
+#ifdef BCMDBUS
+	if (dhd->info->clm_path[0] == '\0') {
+		if ((strlen(clm_path) > MOD_PARAM_PATHLEN) ||
+			(strlen(clm_path) >= sizeof(dhd->info->clm_path))) {
+			DHD_ERROR(("%s clm path exceeds max len\n", __FUNCTION__));
+			ret = BCME_BADLEN;
+			goto done;
+		}
+		strlcpy(dhd->info->clm_path, clm_path, sizeof(dhd->info->clm_path));
+	}
+#endif /* BCMDBUS */
 
 	if ((ret = dhd_apply_default_clm(dhd, dhd->info->clm_path)) < 0) {
 		DHD_ERROR(("%s: CLM set failed. Ignore and continue initialization.\n",
@@ -11727,7 +11974,7 @@ dhd_legacy_preinit_ioctls(dhd_pub_t *dhd)
 			dhd->op_mode = DHD_FLAG_IBSS_MODE;
 		} else
 			dhd->op_mode = DHD_FLAG_STA_MODE;
-#if !defined(AP) && defined(WLP2P)
+#if defined(OEM_ANDROID) && !defined(AP) && defined(WLP2P)
 		if (dhd->op_mode != DHD_FLAG_IBSS_MODE &&
 			(concurrent_mode = dhd_get_concurrent_capabilites(dhd))) {
 			dhd->op_mode |= concurrent_mode;
@@ -11757,7 +12004,7 @@ dhd_legacy_preinit_ioctls(dhd_pub_t *dhd)
 		}
 #else
 	(void)concurrent_mode;
-#endif
+#endif /* defined(OEM_ANDROID) && !defined(AP) && defined(WLP2P) */
 	}
 
 #ifdef DISABLE_PRUNED_SCAN
@@ -11927,7 +12174,7 @@ dhd_legacy_preinit_ioctls(dhd_pub_t *dhd)
 
 #ifdef WLADPS
 	if (dhd->op_mode & DHD_FLAG_STA_MODE) {
-		if ((ret = dhd_enable_adps(dhd, ADPS_ENABLE)) != BCME_OK &&
+		if ((ret = dhd_enable_adps(dhd, ADPS_MODE_PM2_ONLY)) != BCME_OK &&
 			(ret != BCME_UNSUPPORTED)) {
 			DHD_ERROR(("%s dhd_enable_adps failed %d\n",
 				__FUNCTION__, ret));
@@ -11941,7 +12188,13 @@ dhd_legacy_preinit_ioctls(dhd_pub_t *dhd)
 	/* Set PowerSave mode */
 	(void) dhd_wl_ioctl_cmd(dhd, WLC_SET_PM, (char *)&power_mode, sizeof(power_mode), TRUE, 0);
 #endif /* DHD_PM_CONTROL_FROM_FILE */
-
+#ifdef ASSOC_PREFER_RSSI_THRESH
+	ret = dhd_iovar(dhd, 0, "assoc_pref_rssi_thresh", (char *)&assoc_pref_rssi_thresh,
+		sizeof(assoc_pref_rssi_thresh), NULL, 0, TRUE);
+	if (ret < 0) {
+		DHD_ERROR(("%s set assoc_pref_rssi_thresh failed %d\n", __FUNCTION__, ret));
+	}
+#endif /* ASSOC_PREFER_RSSI_THRESH */
 #if defined(BCMSDIO)
 	/* Match Host and Dongle rx alignment */
 	ret = dhd_iovar(dhd, 0, "bus:txglomalign", (char *)&dongle_align, sizeof(dongle_align),
@@ -11990,20 +12243,20 @@ dhd_legacy_preinit_ioctls(dhd_pub_t *dhd)
 	dhd_sel_ant_from_file(dhd);
 #endif /* MIMO_ANT_SETTING */
 
-#if defined(SOFTAP)
+#if defined(OEM_ANDROID) && defined(SOFTAP)
 	if (ap_fw_loaded == TRUE) {
 		dhd_wl_ioctl_cmd(dhd, WLC_SET_DTIMPRD, (char *)&dtim, sizeof(dtim), TRUE, 0);
 	}
-#endif
+#endif /* defined(OEM_ANDROID) && defined(SOFTAP) */
 
 #if defined(KEEP_ALIVE)
 	{
 	/* Set Keep Alive : be sure to use FW with -keepalive */
 	int res;
 
-#if defined(SOFTAP)
+#if defined(OEM_ANDROID) && defined(SOFTAP)
 	if (ap_fw_loaded == FALSE)
-#endif
+#endif /* defined(OEM_ANDROID) && defined(SOFTAP) */
 		if (!(dhd->op_mode &
 			(DHD_FLAG_HOSTAP_MODE | DHD_FLAG_MFG_MODE))) {
 			if ((res = dhd_keep_alive_onoff(dhd)) < 0)
@@ -12026,6 +12279,42 @@ dhd_legacy_preinit_ioctls(dhd_pub_t *dhd)
 		DHD_ERROR(("%s Set scancache failed %d\n", __FUNCTION__, ret));
 	}
 
+#else /* OEM_ANDROID */
+#ifdef BCMDBUS
+	if (dhd->info->clm_path[0] == '\0') {
+		if (strlen(clm_path) > MOD_PARAM_PATHLEN) {
+			DHD_ERROR(("%s clm path exceeds max len\n", __FUNCTION__));
+			ret = BCME_BADLEN;
+			goto done;
+		}
+		strlcpy(dhd->info->clm_path, clm_path, strlen(clm_path)+1);
+	}
+#endif /* BCMDBUS */
+	if ((ret = dhd_apply_default_clm(dhd, dhd->info->clm_path)) < 0) {
+		DHD_ERROR(("%s: CLM set failed. Ignore and continue initialization.\n",
+			__FUNCTION__));
+	}
+
+#if defined(KEEP_ALIVE)
+	if (!(dhd->op_mode &
+		(DHD_FLAG_HOSTAP_MODE | DHD_FLAG_MFG_MODE))) {
+		if ((ret = dhd_keep_alive_onoff(dhd)) < 0)
+			DHD_ERROR(("%s set keeplive failed %d\n",
+			__FUNCTION__, ret));
+	}
+#endif
+
+	/* get a capabilities from firmware */
+	memset(dhd->fw_capabilities, 0, sizeof(dhd->fw_capabilities));
+	ret = dhd_iovar(dhd, 0, "cap", NULL, 0, dhd->fw_capabilities, sizeof(dhd->fw_capabilities),
+			FALSE);
+	if (ret < 0) {
+		DHD_ERROR(("%s: Get Capability failed (error=%d)\n",
+			__FUNCTION__, ret));
+		goto done;
+	}
+#endif  /* OEM_ANDROID */
+
 	ret = dhd_iovar(dhd, 0, "event_log_max_sets", NULL, 0, (char *)&event_log_max_sets,
 		sizeof(event_log_max_sets), FALSE);
 	if (ret == BCME_OK) {
@@ -12040,6 +12329,17 @@ dhd_legacy_preinit_ioctls(dhd_pub_t *dhd)
 	dhd->event_log_max_sets_queried = TRUE;
 	DHD_ERROR(("%s: event_log_max_sets: %d ret: %d\n",
 		__FUNCTION__, dhd->event_log_max_sets, ret));
+#ifdef DHD_BUS_MEM_ACCESS
+	ret = dhd_iovar(dhd, 0, "enable_memuse", (char *)&enable_memuse,
+			sizeof(enable_memuse), iovbuf, sizeof(iovbuf), FALSE);
+	if (ret < 0) {
+		DHD_ERROR(("%s: enable_memuse is failed ret=%d\n",
+			__FUNCTION__, ret));
+	} else {
+		DHD_ERROR(("%s: enable_memuse = %d\n",
+			__FUNCTION__, enable_memuse));
+	}
+#endif /* DHD_BUS_MEM_ACCESS */
 
 #ifdef DISABLE_TXBFR
 	ret = dhd_iovar(dhd, 0, "txbf_bfr_cap", (char *)&txbf_bfr_cap, sizeof(txbf_bfr_cap), NULL,
@@ -12313,15 +12613,15 @@ dhd_legacy_preinit_ioctls(dhd_pub_t *dhd)
 #ifdef WLTDLS
 	setbit(mask, WLC_E_TDLS_PEER_EVENT);
 #endif /* WLTDLS */
-#ifdef WL_ESCAN
-	setbit(mask, WLC_E_ESCAN_RESULT);
-#endif /* WL_ESCAN */
-#ifdef CSI_SUPPORT
-	setbit(mask, WLC_E_CSI);
-#endif /* CSI_SUPPORT */
 #ifdef RTT_SUPPORT
 	setbit(mask, WLC_E_PROXD);
 #endif /* RTT_SUPPORT */
+#ifdef WL_ESCAN
+	setbit(mask, WLC_E_ESCAN_RESULT);
+#endif /* WL_ESCAN */
+#if !defined(WL_CFG80211) && !defined(OEM_ANDROID)
+	setbit(mask, WLC_E_ESCAN_RESULT);
+#endif
 #ifdef WL_CFG80211
 	setbit(mask, WLC_E_ESCAN_RESULT);
 	setbit(mask, WLC_E_AP_STARTED);
@@ -12395,6 +12695,9 @@ dhd_legacy_preinit_ioctls(dhd_pub_t *dhd)
 	setbit(mask, WLC_E_DELTS_IND);
 #endif /* WL_BCNRECV */
 	setbit(mask, WLC_E_COUNTRY_CODE_CHANGED);
+#ifdef CSI_SUPPORT
+	setbit(mask, WLC_E_CSI);
+#endif /* CSI_SUPPORT */
 
 	/* Write updated Event mask */
 	eventmask_msg->ver = EVENTMSGS_VER;
@@ -12425,6 +12728,26 @@ dhd_legacy_preinit_ioctls(dhd_pub_t *dhd)
 		DHD_ERROR(("%s set event_log_tag_control fail %d\n", __FUNCTION__, ret));
 	}
 #endif /* DHD_8021X_DUMP */
+
+#ifdef DEBUGABILITY
+	/* Enabling event log trace for roam stats events */
+	el_tag = (wl_el_tag_params_t *)MALLOC(dhd->osh, sizeof(wl_el_tag_params_t));
+	if (el_tag == NULL) {
+		DHD_ERROR(("failed to allocate %d bytes for event_msg_ext\n",
+			(int)sizeof(wl_el_tag_params_t)));
+		ret = BCME_NOMEM;
+		goto done;
+	}
+	el_tag->tag = EVENT_LOG_TAG_ROAM_ENHANCED_LOG;
+	el_tag->set = 1;
+	el_tag->flags = EVENT_LOG_TAG_FLAG_LOG;
+	ret = dhd_iovar(dhd, 0, "event_log_tag_control", (char *)el_tag, sizeof(*el_tag), NULL,
+			0, TRUE);
+	if (ret < 0) {
+		DHD_ERROR(("%s set event_log_tag_control fail %d\n", __FUNCTION__, ret));
+	}
+#endif /* DEBUGABILITY */
+
 #ifdef DHD_RANDMAC_LOGGING
 	if (FW_SUPPORTED((dhd), event_log)) {
 		if (dhd_iovar(dhd, 0, "privacy_mask", (char *)&privacy_mask, sizeof(privacy_mask),
@@ -12437,6 +12760,7 @@ dhd_legacy_preinit_ioctls(dhd_pub_t *dhd)
 	}
 #endif /* DHD_RANDMAC_LOGGING */
 
+#ifdef OEM_ANDROID
 	dhd_wl_ioctl_cmd(dhd, WLC_SET_SCAN_CHANNEL_TIME, (char *)&scan_assoc_time,
 			sizeof(scan_assoc_time), TRUE, 0);
 	dhd_wl_ioctl_cmd(dhd, WLC_SET_SCAN_UNASSOC_TIME, (char *)&scan_unassoc_time,
@@ -12630,6 +12954,8 @@ dhd_legacy_preinit_ioctls(dhd_pub_t *dhd)
 		}
 	} while (0);
 #endif /* WRITE_WLANINFO */
+
+#endif /* defined(OEM_ANDROID) */
 #ifdef GEN_SOFTAP_INFO_FILE
 	sec_save_softap_info();
 #endif /* GEN_SOFTAP_INFO_FILE */
@@ -12715,6 +13041,11 @@ dhd_legacy_preinit_ioctls(dhd_pub_t *dhd)
 	dhd_conf_set_intiovar(dhd, 0, WLC_SET_VAR, "ampdu_hostreorder", 0, 0, TRUE);
 #endif /* PROP_TXSTATUS */
 #endif /* BCMSDIO || BCMDBUS */
+
+#if defined(SYNA_SAR_CUSTOMER_PARAMETER) && defined(READ_CONFIG_FROM_FILE)
+	dhd_sar_reset_parameter();
+	dhd_preinit_config(dhd, 0, config_sar_path);
+#endif /* SYNA_SAR_CUSTOMER_PARAMETER && READ_CONFIG_FROM_FILE */
 
 #ifndef PCIE_FULL_DONGLE
 	/* For FD we need all the packets at DHD to handle intra-BSS forwarding */
@@ -12914,7 +13245,7 @@ done:
 	if (iov_buf) {
 		MFREE(dhd->osh, iov_buf, WLC_IOCTL_SMLEN);
 	}
-#if defined(DHD_8021X_DUMP) && defined(SHOW_LOGTRACE)
+#if (defined(DHD_8021X_DUMP) && defined(SHOW_LOGTRACE)) || defined(DEBUGABILITY)
 	if (el_tag) {
 		MFREE(dhd->osh, el_tag, sizeof(wl_el_tag_params_t));
 	}
@@ -12932,6 +13263,11 @@ dhd_preinit_ioctls(dhd_pub_t *dhd)
 {
 	int ret = 0;
 
+#if defined(BCMSDIO)
+	extern void dhd_bus_check_srmemsize(dhd_pub_t *dhdp);
+	/* check if srmemsize consitant at fw and dhd side */
+	dhd_bus_check_srmemsize(dhd);
+#endif /* BCMSDIO */
 #ifdef DHD_PREINIT_OPTIMISATION
 	int preinit_status = 0;
 	ret = dhd_iovar(dhd, 0, "preinit_status", NULL, 0, (char *)&preinit_status,
@@ -13027,7 +13363,9 @@ static int dhd_wait_for_file_dump(dhd_pub_t *dhdp)
 {
 	int ret = BCME_OK;
 	struct net_device *primary_ndev;
+#ifdef WL_CFG80211
 	struct bcm_cfg80211 *cfg;
+#endif /* WL_CFG80211 */
 	unsigned long flags = 0;
 	primary_ndev = dhd_linux_get_primary_netdev(dhdp);
 
@@ -13035,12 +13373,14 @@ static int dhd_wait_for_file_dump(dhd_pub_t *dhdp)
 		DHD_ERROR(("%s: Cannot find primary netdev\n", __FUNCTION__));
 		return BCME_ERROR;
 	}
+#ifdef WL_CFG80211
 	cfg = wl_get_cfg(primary_ndev);
 
 	if (!cfg) {
 		DHD_ERROR(("%s: Cannot find cfg\n", __FUNCTION__));
 		return BCME_ERROR;
 	}
+#endif /* WL_CFG80211 */
 
 	if (dhdp->stop_in_progress) {
 		DHD_ERROR(("%s: dhd_stop in progress\n", __FUNCTION__));
@@ -13058,6 +13398,7 @@ static int dhd_wait_for_file_dump(dhd_pub_t *dhdp)
 	DHD_BUS_BUSY_SET_IN_HALDUMP(dhdp);
 	DHD_GENERAL_UNLOCK(dhdp, flags);
 
+#ifdef WL_CFG80211
 	DHD_OS_WAKE_LOCK(dhdp);
 	/* check for hal started and only then send event if not clear dump state here */
 	if (wl_cfg80211_is_hal_started(cfg)) {
@@ -13083,8 +13424,9 @@ static int dhd_wait_for_file_dump(dhd_pub_t *dhdp)
 		DHD_ERROR(("[DUMP] %s: HAL Not started. skip urgent event\n", __FUNCTION__));
 		ret = BCME_ERROR;
 	}
-
 	DHD_OS_WAKE_UNLOCK(dhdp);
+#endif /* WL_CFG80211 */
+
 	/* In case of dhd_os_busbusy_wait_bitmask() timeout,
 	 * hal dump bit will not be cleared. Hence clearing it here.
 	 */
@@ -13373,7 +13715,7 @@ int dhd_inet6addr_notifier_call(struct notifier_block *this, unsigned long event
 	dhd_pub_t *dhdp;
 	struct inet6_ifaddr *inet6_ifa = ptr;
 	struct ipv6_work_info_t *ndo_info;
-	int idx;
+	int idx = 0;
 
 	/* Filter notifications meant for non Broadcom devices */
 	if (inet6_ifa->idev->dev->netdev_ops != &dhd_ops_pri) {
@@ -13387,7 +13729,11 @@ int dhd_inet6addr_notifier_call(struct notifier_block *this, unsigned long event
 	dhdp = &dhd->pub;
 
 	idx = dhd_net2idx(dhd, inet6_ifa->idev->dev);
-	if ((idx >= 0 && idx < DHD_MAX_IFS) && IS_STA_IFACE(ndev_to_wdev(inet6_ifa->idev->dev))) {
+	if ((idx >= 0 && idx < DHD_MAX_IFS)
+#if defined(WL_CFG80211)
+		&& IS_STA_IFACE(ndev_to_wdev(inet6_ifa->idev->dev))
+#endif /* WL_CFG80211 */
+		&& 1) {
 		DHD_TRACE(("ifidx : %p %s %d\n", dhd->iflist[idx]->net,
 			dhd->iflist[idx]->name, dhd->iflist[idx]->idx));
 	} else {
@@ -13496,6 +13842,7 @@ dhd_register_if(dhd_pub_t *dhdp, int ifidx, bool need_rtnl_lock)
 		 * We have to use the primary MAC for virtual interfaces
 		 */
 		memcpy(temp_addr, ifp->mac_addr, ETHER_ADDR_LEN);
+#if defined(OEM_ANDROID)
 		/*
 		 * Android sets the locally administered bit to indicate that this is a
 		 * portable hotspot.  This will not work in simultaneous AP/STA mode,
@@ -13507,6 +13854,7 @@ dhd_register_if(dhd_pub_t *dhdp, int ifidx, bool need_rtnl_lock)
 			__func__, net->name));
 			temp_addr[0] |= 0x02;
 		}
+#endif /* defined(OEM_ANDROID) */
 	}
 
 	net->hard_header_len = ETH_HLEN + dhd->pub.hdrlen;
@@ -13602,7 +13950,7 @@ dhd_register_if(dhd_pub_t *dhdp, int ifidx, bool need_rtnl_lock)
 	DHD_CONS_ONLY(("Register interface [%s]  MAC: "MACDBG"\n\n", net->name,
 		MAC2STRDBG(net->dev_addr)));
 
-#if (defined(BCMPCIE) || defined(BCMLXSDMMC) || defined(BCMDBUS))
+#if defined(OEM_ANDROID) && (defined(BCMPCIE) || defined(BCMLXSDMMC) || defined(BCMDBUS))
 	if (ifidx == 0) {
 #if defined(BCMLXSDMMC) && !defined(DHD_PRELOAD)
 		up(&dhd_registration_sem);
@@ -13775,10 +14123,14 @@ void dhd_detach(dhd_pub_t *dhdp)
 
 	if (dhd->dhd_state & DHD_ATTACH_STATE_PROT_ATTACH) {
 
+#if defined(OEM_ANDROID) || !defined(BCMSDIO)
 		dhd_bus_detach(dhdp);
+#endif /* OEM_ANDROID || !BCMSDIO */
 #ifndef PCIE_FULL_DONGLE
+#if defined(OEM_ANDROID) || !defined(BCMSDIO)
 		if (dhdp->prot)
 			dhd_prot_detach(dhdp);
+#endif /* OEM_ANDROID || !BCMSDIO */
 #endif /* !PCIE_FULL_DONGLE */
 	}
 
@@ -13863,6 +14215,12 @@ void dhd_detach(dhd_pub_t *dhdp)
 #else
 			ifp->net = NULL;
 #endif /* PCIE_FULL_DONGLE */
+#if defined(BCMSDIO) && !defined(OEM_ANDROID)
+			dhd_bus_detach(dhdp);
+
+			if (dhdp->prot)
+				dhd_prot_detach(dhdp);
+#endif /* BCMSDIO && !OEM_ANDROID */
 
 #ifdef DHD_WMF
 			dhd_wmf_cleanup(dhdp, 0);
@@ -13946,10 +14304,6 @@ void dhd_detach(dhd_pub_t *dhdp)
 	}
 #endif /* DHD_LB */
 
-#ifdef CSI_SUPPORT
-	dhd_csi_deinit(dhdp);
-#endif /* CSI_SUPPORT */
-
 #if defined(DNGL_AXI_ERROR_LOGGING) && defined(DHD_USE_WQ_FOR_DNGL_AXI_ERROR)
 	cancel_work_sync(&dhd->axi_error_dispatcher_work);
 #endif /* DNGL_AXI_ERROR_LOGGING && DHD_USE_WQ_FOR_DNGL_AXI_ERROR */
@@ -14008,6 +14362,11 @@ void dhd_detach(dhd_pub_t *dhdp)
 #ifdef DHD_PKTDUMP_ROAM
 	dhd_dump_pkt_deinit(dhdp);
 #endif /* DHD_PKTDUMP_ROAM */
+#ifdef WL_CFGVENDOR_SEND_HANG_EVENT
+	if (dhd->pub.hang_info) {
+		MFREE(dhd->pub.osh, dhd->pub.hang_info, VENDOR_SEND_HANG_EXT_INFO_LEN);
+	}
+#endif /* WL_CFGVENDOR_SEND_HANG_EVENT */
 #ifdef SHOW_LOGTRACE
 	/* Release the skbs from queue for WLC_E_TRACE event */
 	dhd_event_logtrace_flush_queue(dhdp);
@@ -14152,6 +14511,10 @@ void dhd_detach(dhd_pub_t *dhdp)
 
 	(void)dhd_deinit_sock_flows_buf(dhd);
 
+#ifdef CSI_SUPPORT
+	dhd_csi_deinit(dhdp);
+#endif /* CSI_SUPPORT */
+
 #ifdef DHD_DUMP_MNGR
 	if (dhd->pub.dump_file_manage) {
 		MFREE(dhd->pub.osh, dhd->pub.dump_file_manage,
@@ -14295,15 +14658,28 @@ dhd_clear(dhd_pub_t *dhdp)
 static void
 dhd_module_cleanup(void)
 {
+#ifdef DHD_SR_FIX
+	uint wl_down = 1;
+	int ret = 0;
+#endif /* DHD_SR_FIX */
+
 #if defined(ENABLE_NOT_LOAD_DHD_MODULE)
 	DHD_ERROR(("%s ##### Do not clean-up due to secondary build\n", __FUNCTION__));
 	return;
 #endif /* ENABLE_NOT_LOAD_DHD_MODULE */
 	printf("%s: Enter\n", __FUNCTION__);
 
+#ifdef DHD_SR_FIX
+	ret = dhd_wl_ioctl_cmd(g_dhd_pub, WLC_DOWN,
+		(char *)&wl_down, sizeof(wl_down), TRUE, 0);
+	DHD_ERROR(("%s WL_DOWN : %d\n", __FUNCTION__, ret));
+#endif /* DHD_SR_FIX */
+
 	dhd_bus_unregister();
 
+#if defined(OEM_ANDROID)
 	wl_android_exit();
+#endif /* OEM_ANDROID */
 
 	dhd_wifi_platform_unregister_drv();
 #if defined(CONFIG_DHD_USE_STATIC_BUF) && defined(DHD_STATIC_IN_DRIVER)
@@ -14489,12 +14865,18 @@ dhd_reboot_callback(struct notifier_block *this, unsigned long code, void *unuse
 
 	BCM_REFERENCE(dhdp);
 	DHD_ERROR(("%s: code = %ld\n", __FUNCTION__, code));
+#ifdef OEM_ANDROID
 	if (!OSL_ATOMIC_INC_AND_TEST(dhdp->osh, &reboot_in_progress)) {
 		DHD_ERROR(("%s: Skip duplicated reboot callback!\n", __FUNCTION__));
 		return NOTIFY_DONE;
 	}
 
 	dhd_module_cleanup();
+#else
+	if (code == SYS_RESTART) {
+		dhd_module_cleanup();
+	}
+#endif /* OEM_ANDROID */
 	return NOTIFY_DONE;
 }
 
@@ -16290,7 +16672,7 @@ dhd_dev_set_whitelist_ssid(struct net_device *dev, wl_ssid_whitelist_t *ssid_whi
 	return err;
 }
 #endif /* GSCAN_SUPPORT || ROAMEXP_SUPPORT */
-#endif
+#endif /* defined(OEM_ANDROID) && defined(PNO_SUPPORT) */
 
 #ifdef RSSI_MONITOR_SUPPORT
 int
@@ -16897,6 +17279,7 @@ exit:
 }
 #endif /* APF */
 
+#if defined(OEM_ANDROID)
 static void dhd_hang_process(struct work_struct *work_data)
 {
 	struct net_device *dev;
@@ -17133,6 +17516,7 @@ int net_os_send_hang_message_reason(struct net_device *dev, const char *string_n
 
 	return net_os_send_hang_message(dev);
 }
+#endif /* OEM_ANDROID */
 
 int dhd_net_wifi_platform_set_power(struct net_device *dev, bool on, unsigned long delay_msec)
 {
@@ -17250,7 +17634,7 @@ int dhd_net_set_fw_path(struct net_device *dev, char *fw)
 
 	strlcpy(dhd->fw_path, fw, sizeof(dhd->fw_path));
 
-#if defined(SOFTAP)
+#if defined(OEM_ANDROID) && defined(SOFTAP)
 	if (strstr(fw, "apsta") != NULL) {
 		DHD_INFO(("GOT APSTA FIRMWARE\n"));
 		ap_fw_loaded = TRUE;
@@ -17258,7 +17642,7 @@ int dhd_net_set_fw_path(struct net_device *dev, char *fw)
 		DHD_INFO(("GOT STA FIRMWARE\n"));
 		ap_fw_loaded = FALSE;
 	}
-#endif
+#endif /* defined(OEM_ANDROID) && defined(SOFTAP) */
 	return 0;
 }
 
@@ -17288,28 +17672,36 @@ bool dhd_net_if_locked(struct net_device *dev)
 
 static void dhd_net_if_lock_local(dhd_info_t *dhd)
 {
+#if defined(OEM_ANDROID)
 	if (dhd)
 		mutex_lock(&dhd->dhd_net_if_mutex);
+#endif
 }
 
 static void dhd_net_if_unlock_local(dhd_info_t *dhd)
 {
+#if defined(OEM_ANDROID)
 	if (dhd)
 		mutex_unlock(&dhd->dhd_net_if_mutex);
+#endif
 }
 
 static void dhd_suspend_lock(dhd_pub_t *pub)
 {
+#if defined(OEM_ANDROID)
 	dhd_info_t *dhd = (dhd_info_t *)(pub->info);
 	if (dhd)
 		mutex_lock(&dhd->dhd_suspend_mutex);
+#endif
 }
 
 static void dhd_suspend_unlock(dhd_pub_t *pub)
 {
+#if defined(OEM_ANDROID)
 	dhd_info_t *dhd = (dhd_info_t *)(pub->info);
 	if (dhd)
 		mutex_unlock(&dhd->dhd_suspend_mutex);
+#endif
 }
 
 unsigned long dhd_os_general_spin_lock(dhd_pub_t *pub)
@@ -17468,9 +17860,9 @@ write_dump_to_file(dhd_pub_t *dhd, uint8 *buf, int size, char *fname)
 		DHD_COMMON_DUMP_PATH, fname, memdump_type, dhd->debug_dump_time_str);
 #if defined(BOARD_HIKEY)
 	file_mode = O_CREAT | O_WRONLY | O_SYNC;
-#elif defined(__ARM_ARCH_7A__)
+#elif defined(OEM_ANDROID) && defined(__ARM_ARCH_7A__)
 	file_mode = O_CREAT | O_WRONLY;
-#else
+#elif defined(OEM_ANDROID)
 	/* Extra flags O_DIRECT and O_SYNC are required for Brix Android, as we are
 	 * calling BUG_ON immediately after collecting the socram dump.
 	 * So the file write operation should directly write the contents into the
@@ -17489,6 +17881,8 @@ write_dump_to_file(dhd_pub_t *dhd, uint8 *buf, int size, char *fname)
 			dhd_filp_close(fp, NULL);
 		}
 	}
+#else
+	file_mode = O_CREAT | O_WRONLY;
 #endif /* BOARD_HIKEY */
 
 	/* print SOCRAM dump file path */
@@ -18785,16 +19179,16 @@ dhd_mem_dump(void *handle, void *event_info, u8 event)
 	dhd_info_t *dhd = handle;
 	dhd_pub_t *dhdp = NULL;
 	unsigned long flags = 0;
-#if defined(WL_CFG80211) && defined(DHD_LOG_DUMP)
+#if defined(DHD_LOG_DUMP)
 #if defined(DHD_FILE_DUMP_EVENT) || defined(DHD_DEBUGABILITY_DEBUG_DUMP)
 	log_dump_type_t type = DLD_BUF_TYPE_ALL;
 #endif /* DHD_FILE_DUMP_EVENT || DHD_DEBUGABILITY_DEBUG_DUMP */
-#endif /* WL_CFG80211 && DHD_LOG_DUMP */
+#endif /* DHD_LOG_DUMP */
 
-#if (defined(WL_CFG80211) && defined(DHD_FILE_DUMP_EVENT)) || \
-	(defined(DHD_SSSR_COREDUMP) && defined(DHD_COREDUMP))
+#if defined(DHD_FILE_DUMP_EVENT) || (defined(DHD_SSSR_COREDUMP) && \
+	defined(DHD_COREDUMP))
 	int ret = 0;
-#endif /* WL_CFG80211 && DHD_FILE_DUMP_EVENT || DHD_SSSR_COREDUMP && DHD_COREDUMP */
+#endif /* DHD_FILE_DUMP_EVENT || DHD_SSSR_COREDUMP && DHD_COREDUMP */
 	dhd_dump_t *dump = NULL;
 #ifdef DHD_COREDUMP
 	char pc_fn[DHD_FUNC_STR_LEN] = "\0";
@@ -18870,8 +19264,7 @@ dhd_mem_dump(void *handle, void *event_info, u8 event)
 	}
 #endif /* DHD_SDTC_ETB_DUMP */
 
-#if defined(WL_CFG80211) && (defined(DHD_FILE_DUMP_EVENT) || \
-	defined(DHD_DEBUGABILITY_DEBUG_DUMP))
+#if (defined(DHD_FILE_DUMP_EVENT) || defined(DHD_DEBUGABILITY_DEBUG_DUMP))
 	if (dhdp->memdump_enabled == DUMP_MEMONLY) {
 		DHD_ERROR(("%s: Force BUG_ON for memdump_enabled:%d\n",
 			__FUNCTION__, dhdp->memdump_enabled));
@@ -18900,7 +19293,7 @@ dhd_mem_dump(void *handle, void *event_info, u8 event)
 #elif defined(DHD_DEBUGABILITY_DEBUG_DUMP)
 	dhd_debug_dump_to_ring(dhdp);
 #endif /* DHD_FILE_DUMP_EVENT */
-#endif /* WL_CFG80211 && (DHD_FILE_DUMP_EVENT || DHD_DEBUGABILITY_DEBUG_DUMP) */
+#endif /* (DHD_FILE_DUMP_EVENT || DHD_DEBUGABILITY_DEBUG_DUMP) */
 
 #ifdef DHD_COREDUMP
 	memset_s(dhdp->memdump_str, DHD_MEMDUMP_LONGSTR_LEN, 0, DHD_MEMDUMP_LONGSTR_LEN);
@@ -19076,11 +19469,13 @@ exit:
 	DHD_GENERAL_UNLOCK(dhdp, flags);
 	dhd->scheduled_memdump = FALSE;
 
+#ifdef OEM_ANDROID
 	if (dhdp->hang_was_pending) {
 		DHD_ERROR(("%s: Send pending HANG event...\n", __FUNCTION__));
 		dhd_os_send_hang_message(dhdp);
 		dhdp->hang_was_pending = 0;
 	}
+#endif /* OEM_ANDROID */
 	DHD_ERROR(("%s: EXIT \n", __FUNCTION__));
 
 	return;
@@ -20631,9 +21026,11 @@ dhd_pktid_error_handler(dhd_pub_t *dhdp)
 	dhdp->memdump_type = DUMP_TYPE_PKTID_AUDIT_FAILURE;
 	dhd_bus_mem_dump(dhdp);
 #endif /* DHD_FW_COREDUMP */
+#ifdef OEM_ANDROID
 	/* XXX Send HANG event to Android Framework for recovery */
 	dhdp->hang_reason = HANG_REASON_PCIE_PKTID_ERROR;
 	dhd_os_check_hang(dhdp, 0, -EREMOTEIO);
+#endif /* OEM_ANDROID */
 	DHD_OS_WAKE_UNLOCK(dhdp);
 }
 #endif /* BCMPCIE && DHD_PKTID_AUDIT_ENABLED */
@@ -23411,10 +23808,12 @@ dhd_wbrc_wl_trap(void)
 	dhdpcie_db7_trap(dhdp->bus);
 	/* set that dongle trap has occured to stop other contests from firing IOVARS */
 	dhdp->dongle_trap_occured = TRUE;
+#ifdef OEM_ANDROID
 	/* Set chip big hammer */
 	dhdp->do_chip_bighammer = TRUE;
 	dhdp->hang_reason = HANG_REASON_BT2WL_REG_RESET;
 	dhd_os_send_hang_message(dhdp);
+#endif /* OEM_ANDROID */
 }
 #endif /* WBRC && WBRC_BT2WL_RESET */
 #endif /* PCIE_FULL_DONGLE */

@@ -9943,3 +9943,13 @@ si_pmu_res_state_wait(si_t *sih, uint rsrc)
 	SPINWAIT(!(PMU_REG(sih, res_state, 0, 0) & PMURES_BIT(rsrc)), PMU_MAX_TRANSITION_DLY);
 	ASSERT(PMU_REG(sih, res_state, 0, 0) & PMURES_BIT(rsrc));
 }
+
+void
+si_pmu_43711a0_pll_war(si_t *sih)
+{
+	uint32 ndiv_int = 0x022;
+
+	pmu_corereg(sih, SI_CC_IDX, pllcontrol_addr, ~0, PMU_PLL_CTRL_REG6);
+	pmu_corereg(sih, SI_CC_IDX, pllcontrol_data, PMU4369_PLL1_PC6_NDIV_INT_MASK,
+			ndiv_int << PMU4369_PLL1_PC6_NDIV_INT_SHIFT);
+}

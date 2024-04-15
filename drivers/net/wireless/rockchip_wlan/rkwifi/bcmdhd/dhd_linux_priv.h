@@ -143,6 +143,7 @@ typedef struct dhd_info {
 	struct wakeup_source *wl_nanwake; /* NAN wakelock */
 #endif /* CONFIG_HAS_WAKELOCK */
 
+#if defined(OEM_ANDROID)
 	/* net_device interface lock, prevent race conditions among net_dev interface
 	 * calls and wifi_on or wifi_off
 	 */
@@ -151,6 +152,11 @@ typedef struct dhd_info {
 #if defined(APF)
 	struct mutex dhd_apf_mutex;
 #endif /* APF */
+#else
+#if defined(APF)
+	struct mutex dhd_apf_mutex;
+#endif /* APF */
+#endif /* OEM_ANDROID */
 	spinlock_t wakelock_spinlock;
 	spinlock_t wakelock_evt_spinlock;
 	uint32 wakelock_counter;
@@ -379,8 +385,10 @@ typedef struct dhd_info {
 #if defined(BCMDBUS)
 	struct task_struct *fw_download_task;
 	struct semaphore fw_download_lock;
+	bool fw_download_thread_exit;
 #endif /* BCMDBUS */
 #endif /* defined(BCM_DNGL_EMBEDIMAGE) || defined(BCM_REQUEST_FW) */
+	uint32 flag_kobj;    /* Add for duplicate kobj processing */
 	struct kobject dhd_kobj;
 	timer_list_compat_t timesync_timer;
 #if defined(BT_OVER_SDIO)

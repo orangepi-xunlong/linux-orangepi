@@ -40,6 +40,9 @@
 #ifdef WL_NAN
 #include <wl_cfgnan.h>
 #endif /* WL_NAN */
+#ifdef WL_BAM
+#include <wl_bam.h>
+#endif  /* WL_BAM */
 
 #ifdef SUPPORT_AP_RADIO_PWRSAVE
 #define RADIO_PWRSAVE_PPS               10

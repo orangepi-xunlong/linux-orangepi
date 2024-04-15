@@ -83,6 +83,14 @@ typedef uint32 ratespec_t;
 
 #define HIGHEST_SINGLE_STREAM_MCS	7 /* MCS values greater than this enable multiple streams */
 
+#ifndef OEM_ANDROID
+/* 'proprietary' string should not exist in open source(OEM_ANDROID) */
+/* given a proprietary MCS, get number of spatial streams */
+#define GET_PROPRIETARY_11N_MCS_NSS(mcs) (1 + ((mcs) - 85) / 8)
+
+#define GET_11N_MCS_NSS(mcs) ((mcs) < 32 ? (1 + ((mcs) / 8)) \
+				: ((mcs) == 32 ? 1 : GET_PROPRIETARY_11N_MCS_NSS(mcs)))
+#endif /* !OEM_ANDROID */
 #endif /* USE_LEGACY_RSPEC_DEFS */
 
 /* Legacy defines for the nrate iovar */

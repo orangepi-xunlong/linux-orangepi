@@ -44,6 +44,8 @@ typedef uint16 chanspec_subband_t;
 #define CH_MAX_2G_CHANNEL                14u    /* Max channel in 2G band */
 #define CH_MIN_2G_40M_CHANNEL             3u    /* Min 40MHz center channel in 2G band */
 #define CH_MAX_2G_40M_CHANNEL            11u    /* Max 40MHz center channel in 2G band */
+#define CH_MIN_5G_CHANNEL                34u    /* Min channel in 5G band */
+#define CH_MAX_5G_CHANNEL               177u    /* Max channel in 5G band */
 
 #define CH_MIN_6G_CHANNEL                 1u    /* Min 20MHz channel in 6G band */
 #define CH_MAX_6G_CHANNEL               253u    /* Max 20MHz channel in 6G band */

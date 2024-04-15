@@ -151,6 +151,10 @@
 
 #define BCM43756_D11AX_ID	0x44a0		/* 43756 802.11ax dualband device */
 
+#define BCM43711_D11AX6E_ID	0x44b0          /* 43711 802.11ax dualband device */
+#define BCM43711_D11AC_ID	0x44b1          /* 43711 802.11ax 2.4G device */
+#define BCM43711_D11AX_ID	0x44b2          /* 43711 802.11ax 5G device */
+
 /* TBD change below values */
 #define BCM4369_D11AX_ID	0x4470		/* 4369 802.11ax dualband device */
 #define BCM4369_D11AX2G_ID	0x4471		/* 4369 802.11ax 2.4G device */
@@ -171,7 +175,8 @@
 
 #define BCM43143_CHIP_ID	43143		/* 43143 chipcommon chipid */
 #define	BCM43242_CHIP_ID	43242		/* 43242 chipcommon chipid */
-#define	BCM43460_CHIP_ID	43460		/* 4360  chipcommon chipid (OTP, RBBU) */
+#define BCM43430_CHIP_ID	43430		/* 43430 chipcommon chipid */
+#define BCM43460_CHIP_ID	43460		/* 4360  chipcommon chipid (OTP, RBBU) */
 #define BCM4360_CHIP_ID		0x4360          /* 4360 chipcommon chipid */
 #define BCM43362_CHIP_ID	43362		/* 43362 chipcommon chipid */
 #define BCM4330_CHIP_ID		0x4330		/* 4330 chipcommon chipid */
@@ -197,12 +202,12 @@
 
 #define BCM4345_CHIP_ID		0x4345		/* 4345 chipcommon chipid */
 #define BCM43454_CHIP_ID	43454		/* 43454 chipcommon chipid */
-#define BCM43430_CHIP_ID	43430		/* 43430 chipcommon chipid */
 #define BCM4359_CHIP_ID		0x4359		/* 4359 chipcommon chipid */
 #define BCM4362_CHIP_ID		0x4362          /* 4362 chipcommon chipid */
 #define BCM43751_CHIP_ID	0xAAE7          /* 43751 chipcommon chipid */
 #define BCM43752_CHIP_ID	0xAAE8          /* 43752 chipcommon chipid */
 #define BCM43756_CHIP_ID	0xAAEC          /* 43756 chipcommon chipid */
+#define BCM43711_CHIP_ID	0xAABF          /* 43711 chipcommon chipid */
 #define BCM4369_CHIP_ID		0x4369          /* 4369 chipcommon chipid */
 #define BCM4377_CHIP_ID		0x4377          /* 4377 chipcommon chipid */
 #define BCM4378_CHIP_ID		0x4378          /* 4378 chipcommon chipid */

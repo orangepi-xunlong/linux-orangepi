@@ -10216,7 +10216,7 @@ wl_cfgnan_register_nmi_ndev(struct bcm_cfg80211 *cfg)
 	cfg->nmi_wdev = wdev;
 	cfg->nmi_ndev = ndev;
 
-	WL_INFORM_MEM(("%s: NMI Interface Registered\n", ndev->name));
+	WL_MSG(ndev->name, "NMI Interface Registered\n");
 	return ret;
 fail:
 	free_netdev(ndev);

@@ -345,4 +345,5 @@ extern void si_pmu_reg_on_war_ext_wake_perst_clear(si_t *sih);
 
 extern pmuregs_t *hnd_pmur;	/* PMU core regs */
 extern void si_pmu_res_state_wait(si_t *sih, uint rsrc);
+extern void si_pmu_43711a0_pll_war(si_t *sih);
 #endif /* _hndpmu_h_ */

@@ -75,7 +75,7 @@
 #include <wl_cfg80211.h>
 #include <wl_cfgvif.h>
 #endif
-#if defined(PNO_SUPPORT)
+#if defined(OEM_ANDROID) && defined(PNO_SUPPORT)
 #include <dhd_pno.h>
 #endif /* (OEM_ANDROID) && (PNO_SUPPORT) */
 #ifdef RTT_SUPPORT
@@ -138,6 +138,10 @@
 #endif
 #endif /* DHD_LOG_DUMP */
 
+#ifdef CSI_SUPPORT
+#include <dhd_csi.h>
+#endif /* CSI_SUPPORT */
+
 #ifdef DHD_LOG_PRINT_RATE_LIMIT
 int log_print_threshold = 0;
 #endif /* DHD_LOG_PRINT_RATE_LIMIT */
@@ -168,6 +172,9 @@ int dhd_log_level = DHD_ERROR_VAL | DHD_FWLOG_VAL | DHD_EVENT_VAL
 #if !defined(BOARD_HIKEY)
 	| DHD_IOVAR_MEM_VAL
 #endif
+#ifndef OEM_ANDROID
+	| DHD_MSGTRACE_VAL
+#endif /* OEM_ANDROID */
 	| DHD_RPM_VAL
 	| DHD_PKT_MON_VAL;
 
@@ -192,10 +199,6 @@ extern uint wl_msg_level;
 #ifdef DHD_PCIE_NATIVE_RUNTIMEPM
 #include <linux/pm_runtime.h>
 #endif /* DHD_PCIE_NATIVE_RUNTIMEPM */
-
-#ifdef CSI_SUPPORT
-#include <dhd_csi.h>
-#endif /* CSI_SUPPORT */
 
 #if defined(DHD_LOGLEVEL) && !defined(DHD_DEBUG)
 #error "Log level control is supported only with DHD_DEBUG"
@@ -277,6 +280,10 @@ static int dngl_host_event(dhd_pub_t *dhdp, void *pktdata, bcm_dngl_event_msg_t 
 	size_t pktlen);
 #endif /* DNGL_EVENT_SUPPORT */
 
+#ifdef WL_CFGVENDOR_SEND_HANG_EVENT
+static void copy_hang_info_ioctl_timeout(dhd_pub_t *dhd, int ifidx, wl_ioctl_t *ioc);
+#endif /* WL_CFGVENDOR_SEND_HANG_EVENT */
+
 #ifdef REPORT_FATAL_TIMEOUTS
 static void dhd_set_join_error(dhd_pub_t *pub, uint32 mask);
 #endif /* REPORT_FATAL_TIMEOUTS */
@@ -289,9 +296,11 @@ static int ioctl_suspend_error = 0;
 /* Should ideally read this from target(taken from wlu) */
 #define MAX_CHUNK_LEN 1408 /* 8 * 8 * 22 */
 
+#if defined(OEM_ANDROID)
 /* note these variables will be used with wext */
 bool ap_cfg_running = FALSE;
 bool ap_fw_loaded = FALSE;
+#endif /* defined(OEM_ANDROID) && defined(SOFTAP) */
 
 #ifdef WLEASYMESH
 extern int dhd_set_1905_almac(dhd_pub_t *dhdp, uint8 ifidx, uint8* ea, bool mcast);
@@ -471,6 +480,12 @@ enum {
 #ifdef BCMPCIE
 	IOV_DUMP_FLOWRINGS,
 #endif
+#ifdef SYNA_SAR_CUSTOMER_PARAMETER
+	IOV_SAR_MODE,
+#endif /* SYNA_SAR_CUSTOMER_PARAMETER */
+#ifdef CSI_SUPPORT
+	IOV_CSI_CONFIG,
+#endif /* CSI_SUPPORT */
 #ifdef WLEASYMESH
 	IOV_1905_AL_UCAST,
 	IOV_1905_AL_MCAST,
@@ -641,6 +656,12 @@ const bcm_iovar_t dhd_iovars[] = {
 #ifdef BCMPCIE
 	{"dump_flowrings", IOV_DUMP_FLOWRINGS, 0, 0, IOVT_BUFFER, DHD_IOCTL_MAXLEN_32K},
 #endif
+#ifdef SYNA_SAR_CUSTOMER_PARAMETER
+	{"sarmode", IOV_SAR_MODE, (0), 0, IOVT_UINT32, 0},
+#endif /* SYNA_SAR_CUSTOMER_PARAMETER */
+#ifdef CSI_SUPPORT
+	{"csi_config", IOV_CSI_CONFIG, (0), 0, IOVT_BUFFER, sizeof(uint32)},
+#endif /* CSI_SUPPORT */
 	/* --- add new iovars *ABOVE* this line --- */
 #ifdef WLEASYMESH
 	{"1905_al_ucast", IOV_1905_AL_UCAST, 0, 0, IOVT_BUFFER, ETHER_ADDR_LEN},
@@ -668,8 +689,10 @@ dhd_query_bus_erros(dhd_pub_t *dhdp)
 		DHD_ERROR_RLMT(("%s: FW TRAP has occurred, cannot proceed\n",
 			__FUNCTION__));
 		ret = TRUE;
+#ifdef OEM_ANDROID
 		dhdp->hang_reason = HANG_REASON_DONGLE_TRAP;
 		dhd_os_send_hang_message(dhdp);
+#endif /* OEM_ANDROID */
 	}
 
 	if (dhdp->iovar_timeout_occured) {
@@ -852,9 +875,180 @@ dhd_sssr_reg_info_deinit(dhd_pub_t *dhd)
 	}
 }
 
+#ifdef DHD_PCIE_REG_ACCESS
+static void
+dhd_dump_sssr_reg_info_v2(dhd_pub_t *dhd)
+{
+	sssr_reg_info_cmn_t *sssr_reg_info_cmn = dhd->sssr_reg_info;
+	sssr_reg_info_v2_t *sssr_reg_info = (sssr_reg_info_v2_t *)&sssr_reg_info_cmn->rev2;
+	int i, j;
+	uint8 num_d11cores = dhd_d11_slices_num_get(dhd);
+	DHD_ERROR(("pmu_regs\n"));
+	DHD_ERROR(("pmuintmask0=0x%x pmuintmask1=0x%x resreqtimer=0x%x "
+		"macresreqtimer=0x%x macresreqtimer1=0x%x\n",
+		sssr_reg_info->pmu_regs.base_regs.pmuintmask0,
+		sssr_reg_info->pmu_regs.base_regs.pmuintmask1,
+		sssr_reg_info->pmu_regs.base_regs.resreqtimer,
+		sssr_reg_info->pmu_regs.base_regs.macresreqtimer,
+		sssr_reg_info->pmu_regs.base_regs.macresreqtimer1));
+	DHD_ERROR(("chipcommon_regs\n"));
+	DHD_ERROR(("intmask=0x%x powerctrl=0x%x clockcontrolstatus=0x%x powerctrl_mask=0x%x\n",
+		sssr_reg_info->chipcommon_regs.base_regs.intmask,
+		sssr_reg_info->chipcommon_regs.base_regs.powerctrl,
+		sssr_reg_info->chipcommon_regs.base_regs.clockcontrolstatus,
+		sssr_reg_info->chipcommon_regs.base_regs.powerctrl_mask));
+	DHD_ERROR(("arm_regs\n"));
+	DHD_ERROR(("clockcontrolstatus=0x%x clockcontrolstatus_val=0x%x"
+		" resetctrl=0x%x extrsrcreq=0x%x\n",
+		sssr_reg_info->arm_regs.base_regs.clockcontrolstatus,
+		sssr_reg_info->arm_regs.base_regs.clockcontrolstatus_val,
+		sssr_reg_info->arm_regs.wrapper_regs.resetctrl,
+		sssr_reg_info->arm_regs.wrapper_regs.extrsrcreq));
+	DHD_ERROR(("pcie_regs\n"));
+	DHD_ERROR(("ltrstate=0x%x clockcontrolstatus=0x%x "
+		"clockcontrolstatus_val=0x%x extrsrcreq=0x%x\n",
+		sssr_reg_info->pcie_regs.base_regs.ltrstate,
+		sssr_reg_info->pcie_regs.base_regs.clockcontrolstatus,
+		sssr_reg_info->pcie_regs.base_regs.clockcontrolstatus_val,
+		sssr_reg_info->pcie_regs.wrapper_regs.extrsrcreq));
+
+	for (i = 0; i < num_d11cores; i++) {
+		DHD_ERROR(("mac_regs core[%d]\n", i));
+		DHD_ERROR(("xmtaddress=0x%x xmtdata=0x%x clockcontrolstatus=0x%x "
+			"clockcontrolstatus_val=0x%x\n",
+			sssr_reg_info->mac_regs[i].base_regs.xmtaddress,
+			sssr_reg_info->mac_regs[i].base_regs.xmtdata,
+			sssr_reg_info->mac_regs[i].base_regs.clockcontrolstatus,
+			sssr_reg_info->mac_regs[i].base_regs.clockcontrolstatus_val));
+		DHD_ERROR(("resetctrl=0x%x extrsrcreq=0x%x ioctrl=0x%x\n",
+			sssr_reg_info->mac_regs[i].wrapper_regs.resetctrl,
+			sssr_reg_info->mac_regs[i].wrapper_regs.extrsrcreq,
+			sssr_reg_info->mac_regs[i].wrapper_regs.ioctrl));
+		for (j = 0; j < SSSR_D11_RESET_SEQ_STEPS; j++) {
+			DHD_ERROR(("ioctrl_resetseq_val[%d] 0x%x\n", j,
+				sssr_reg_info->mac_regs[i].wrapper_regs.ioctrl_resetseq_val[j]));
+		}
+		DHD_ERROR(("sr_size=0x%x\n", sssr_reg_info->mac_regs[i].sr_size));
+	}
+	DHD_ERROR(("dig_regs\n"));
+	DHD_ERROR(("dig_sr_addr=0x%x dig_sr_size=0x%x\n",
+		sssr_reg_info->dig_mem_info.dig_sr_addr,
+		sssr_reg_info->dig_mem_info.dig_sr_size));
+}
+
+static void
+dhd_dump_sssr_reg_info_v3(dhd_pub_t *dhd)
+{
+	sssr_reg_info_cmn_t *sssr_reg_info_cmn = dhd->sssr_reg_info;
+	sssr_reg_info_v3_t *sssr_reg_info = (sssr_reg_info_v3_t *)&sssr_reg_info_cmn->rev3;
+	int i;
+
+	dhd_dump_sssr_reg_info_v2(dhd);
+
+	DHD_ERROR(("FIS Enab in fw : %d\n", sssr_reg_info->fis_enab));
+
+	DHD_ERROR(("HWA regs for reset \n"));
+	DHD_ERROR(("clkenable 0x%x, clkgatingenable 0x%x, clkext 0x%x, "
+		"clkctlstatus 0x%x, ioctrl 0x%x, resetctrl 0x%x\n",
+		sssr_reg_info->hwa_regs.base_regs.clkenable,
+		sssr_reg_info->hwa_regs.base_regs.clkgatingenable,
+		sssr_reg_info->hwa_regs.base_regs.clkext,
+		sssr_reg_info->hwa_regs.base_regs.clkctlstatus,
+		sssr_reg_info->hwa_regs.wrapper_regs.ioctrl,
+		sssr_reg_info->hwa_regs.wrapper_regs.resetctrl));
+	DHD_ERROR(("HWA regs value seq for reset \n"));
+	for (i = 0; i < SSSR_HWA_RESET_SEQ_STEPS; i++) {
+		DHD_ERROR(("hwa_resetseq_val[%d] 0x%x\n", i,
+			sssr_reg_info->hwa_regs.hwa_resetseq_val[i]));
+	}
+}
+
+static void
+dhd_dump_sssr_reg_info_v1(dhd_pub_t *dhd)
+{
+	sssr_reg_info_cmn_t *sssr_reg_info_cmn = dhd->sssr_reg_info;
+	sssr_reg_info_v1_t *sssr_reg_info = (sssr_reg_info_v1_t *)&sssr_reg_info_cmn->rev1;
+	int i, j;
+	uint8 num_d11cores = dhd_d11_slices_num_get(dhd);
+
+	DHD_ERROR(("pmu_regs\n"));
+	DHD_ERROR(("pmuintmask0=0x%x pmuintmask1=0x%x resreqtimer=0x%x "
+		"macresreqtimer=0x%x macresreqtimer1=0x%x\n",
+		sssr_reg_info->pmu_regs.base_regs.pmuintmask0,
+		sssr_reg_info->pmu_regs.base_regs.pmuintmask1,
+		sssr_reg_info->pmu_regs.base_regs.resreqtimer,
+		sssr_reg_info->pmu_regs.base_regs.macresreqtimer,
+		sssr_reg_info->pmu_regs.base_regs.macresreqtimer1));
+	DHD_ERROR(("chipcommon_regs\n"));
+	DHD_ERROR(("intmask=0x%x powerctrl=0x%x clockcontrolstatus=0x%x powerctrl_mask=0x%x\n",
+		sssr_reg_info->chipcommon_regs.base_regs.intmask,
+		sssr_reg_info->chipcommon_regs.base_regs.powerctrl,
+		sssr_reg_info->chipcommon_regs.base_regs.clockcontrolstatus,
+		sssr_reg_info->chipcommon_regs.base_regs.powerctrl_mask));
+	DHD_ERROR(("arm_regs\n"));
+	DHD_ERROR(("clockcontrolstatus=0x%x clockcontrolstatus_val=0x%x"
+		" resetctrl=0x%x itopoobb=0x%x\n",
+		sssr_reg_info->arm_regs.base_regs.clockcontrolstatus,
+		sssr_reg_info->arm_regs.base_regs.clockcontrolstatus_val,
+		sssr_reg_info->arm_regs.wrapper_regs.resetctrl,
+		sssr_reg_info->arm_regs.wrapper_regs.itopoobb));
+	DHD_ERROR(("pcie_regs\n"));
+	DHD_ERROR(("ltrstate=0x%x clockcontrolstatus=0x%x "
+		"clockcontrolstatus_val=0x%x itopoobb=0x%x\n",
+		sssr_reg_info->pcie_regs.base_regs.ltrstate,
+		sssr_reg_info->pcie_regs.base_regs.clockcontrolstatus,
+		sssr_reg_info->pcie_regs.base_regs.clockcontrolstatus_val,
+		sssr_reg_info->pcie_regs.wrapper_regs.itopoobb));
+	DHD_ERROR(("vasip_regs\n"));
+	DHD_ERROR(("ioctrl=0x%x vasip_sr_addr=0x%x vasip_sr_size=0x%x\n",
+		sssr_reg_info->vasip_regs.wrapper_regs.ioctrl,
+		sssr_reg_info->vasip_regs.vasip_sr_addr,
+		sssr_reg_info->vasip_regs.vasip_sr_size));
+
+	for (i = 0; i < num_d11cores; i++) {
+		DHD_ERROR(("mac_regs core[%d]\n", i));
+		DHD_ERROR(("xmtaddress=0x%x xmtdata=0x%x clockcontrolstatus=0x%x "
+			"clockcontrolstatus_val=0x%x\n",
+			sssr_reg_info->mac_regs[i].base_regs.xmtaddress,
+			sssr_reg_info->mac_regs[i].base_regs.xmtdata,
+			sssr_reg_info->mac_regs[i].base_regs.clockcontrolstatus,
+			sssr_reg_info->mac_regs[i].base_regs.clockcontrolstatus_val));
+		DHD_ERROR(("resetctrl=0x%x itopoobb=0x%x ioctrl=0x%x\n",
+			sssr_reg_info->mac_regs[i].wrapper_regs.resetctrl,
+			sssr_reg_info->mac_regs[i].wrapper_regs.itopoobb,
+			sssr_reg_info->mac_regs[i].wrapper_regs.ioctrl));
+		for (j = 0; j < SSSR_D11_RESET_SEQ_STEPS; j++) {
+			DHD_ERROR(("ioctrl_resetseq_val[%d] 0x%x\n", j,
+				sssr_reg_info->mac_regs[i].wrapper_regs.ioctrl_resetseq_val[j]));
+		}
+		DHD_ERROR(("sr_size=0x%x\n", sssr_reg_info->mac_regs[i].sr_size));
+	}
+}
+
+#endif /* DHD_PCIE_REG_ACCESS */
+
 void
 dhd_dump_sssr_reg_info(dhd_pub_t *dhd)
 {
+#ifdef DHD_PCIE_REG_ACCESS
+	sssr_reg_info_cmn_t *sssr_reg_info_cmn = dhd->sssr_reg_info;
+	sssr_reg_info_v1_t *sssr_reg_info = (sssr_reg_info_v1_t *)&sssr_reg_info_cmn->rev1;
+
+	DHD_ERROR(("************** SSSR REG INFO start version:%d ****************\n",
+		sssr_reg_info->version));
+	switch (sssr_reg_info->version) {
+		case SSSR_REG_INFO_VER_3 :
+			dhd_dump_sssr_reg_info_v3(dhd);
+			break;
+		case SSSR_REG_INFO_VER_2 :
+			dhd_dump_sssr_reg_info_v2(dhd);
+			break;
+		default:
+			dhd_dump_sssr_reg_info_v1(dhd);
+			break;
+	}
+	DHD_ERROR(("************** SSSR REG INFO end ****************\n"));
+#endif /* DHD_PCIE_REG_ACCESS */
 }
 
 void dhdpcie_fill_sssr_reg_info(dhd_pub_t *dhd);
@@ -1928,6 +2122,7 @@ dhd_wl_ioctl(dhd_pub_t *dhd_pub, int ifidx, wl_ioctl_t *ioc, void *buf, int len)
 		DHD_BUS_BUSY_SET_IN_IOVAR(dhd_pub);
 		DHD_LINUX_GENERAL_UNLOCK(dhd_pub, flags);
 
+#ifdef OEM_ANDROID
 		/*
 		 * If system suspend started before ioctl, after getting d3 ack,
 		 * it will check for wakelock and as ioctl will hold wakelock,
@@ -1947,6 +2142,7 @@ dhd_wl_ioctl(dhd_pub_t *dhd_pub, int ifidx, wl_ioctl_t *ioc, void *buf, int len)
 					dhd_pub->dhd_bus_busy_state));
 			}
 		}
+#endif /* OEM_ANDROID */
 
 		DHD_LINUX_GENERAL_LOCK(dhd_pub, flags);
 		if (DHD_BUS_CHECK_SUSPEND_OR_ANY_SUSPEND_IN_PROGRESS(dhd_pub) ||
@@ -2046,6 +2242,11 @@ dhd_wl_ioctl(dhd_pub_t *dhd_pub, int ifidx, wl_ioctl_t *ioc, void *buf, int len)
 		}
 #endif /* DUMP_IOCTL_IOV_LIST */
 #endif /* defined(WL_WLC_SHIM) */
+#ifdef WL_CFGVENDOR_SEND_HANG_EVENT
+		if (ret == -ETIMEDOUT) {
+			copy_hang_info_ioctl_timeout(dhd_pub, ifidx, ioc);
+		}
+#endif /* WL_CFGVENDOR_SEND_HANG_EVENT */
 #ifdef DHD_LOG_DUMP
 		if ((ioc->cmd == WLC_GET_VAR || ioc->cmd == WLC_SET_VAR) &&
 				buf != NULL) {
@@ -2099,6 +2300,7 @@ dhd_wl_ioctl(dhd_pub_t *dhd_pub, int ifidx, wl_ioctl_t *ioc, void *buf, int len)
 			}
 		}
 #endif /* DHD_LOG_DUMP */
+#if defined(OEM_ANDROID)
 		if (ret && dhd_pub->up) {
 			/* Send hang event only if dhd_open() was success */
 			dhd_os_check_hang(dhd_pub, ifidx, ret);
@@ -2109,6 +2311,7 @@ dhd_wl_ioctl(dhd_pub_t *dhd_pub, int ifidx, wl_ioctl_t *ioc, void *buf, int len)
 				"occurred before the interface does not"
 				" bring up\n", __FUNCTION__));
 		}
+#endif /* defined(OEM_ANDROID) */
 
 exit:
 		DHD_LINUX_GENERAL_LOCK(dhd_pub, flags);
@@ -2476,6 +2679,8 @@ typedef struct _dhd_sar_parameters {
 	dhd_sar_parameter  fcc;
 	dhd_sar_parameter  eu;
 	dhd_sar_parameter  latam;
+	dhd_sar_parameter  canada;
+	dhd_sar_parameter  japan;
 } dhd_sar_parameters;
 
 static dhd_sar_parameters  gSAR_params;
@@ -2526,7 +2731,7 @@ static sarctrl_set *dhd_sar_ctrlset_get(
 	return sarctrl;
 }
 
-int dhd_sar_init_parameter(eCountry_flag_type type, int advance_mode,
+int dhd_sar_init_parameter(dhd_pub_t *dhd, eCountry_flag_type type, int advance_mode,
 	char *list_str)
 {
 	char          temp_str[16];
@@ -2551,6 +2756,12 @@ int dhd_sar_init_parameter(eCountry_flag_type type, int advance_mode,
 			break;
 		case SYNA_COUNTRY_TYPE_LATAM:
 			sarctrl = dhd_sar_ctrlset_get(&gSAR_params.latam, advance_mode);
+			break;
+		case SYNA_COUNTRY_TYPE_CANADA:
+			sarctrl = dhd_sar_ctrlset_get(&gSAR_params.canada, advance_mode);
+			break;
+		case SYNA_COUNTRY_TYPE_JAPAN:
+			sarctrl = dhd_sar_ctrlset_get(&gSAR_params.japan, advance_mode);
 			break;
 		case SYNA_COUNTRY_TYPE_DEFAULT:
 			sarctrl = dhd_sar_ctrlset_get(&gSAR_params.other, advance_mode);
@@ -2596,13 +2807,21 @@ int dhd_sar_init_parameter(eCountry_flag_type type, int advance_mode,
 	}
 
 #ifdef VSDB
-	sarctrl->ver = SAR_PARAM_V1_VSDB;
+	if (FW_SUPPORTED(dhd, 6g)) {
+		sarctrl->ver = SAR_PARAM_6G_V3_VSDB;
+	} else {
+		sarctrl->ver = SAR_PARAM_V1_VSDB;
+	}
 	if (CONST_SARCTRL_SINGLE_SET_QTY != idx) {
 		DHD_ERROR(("%s: *Waring, idx=%d mismatch VSDB expect=%d\n",
 		           __FUNCTION__, idx, (int)CONST_SARCTRL_SINGLE_SET_QTY));
 	}
 #else /* VSDB */
-	sarctrl->ver = SAR_PARAM_V2_RSDB;
+	if (FW_SUPPORTED(dhd, 6g)) {
+		sarctrl->ver = SAR_PARAM_6G_V4_RSDB;
+	} else {
+		sarctrl->ver = SAR_PARAM_V2_RSDB;
+	}
 	if (CONST_SARCTRL_SET_QTY != idx) {
 		DHD_ERROR(("%s: *Waring, idx=%d mismatch RSDB expect=%d\n",
 		           __FUNCTION__, idx, (int)CONST_SARCTRL_SET_QTY));
@@ -2657,6 +2876,12 @@ int dhd_sar_set_parameter(dhd_pub_t *dhd_pub, int advance_mode)
 			break;
 		case SYNA_COUNTRY_TYPE_LATAM:
 			sarctrl = dhd_sar_ctrlset_get(&gSAR_params.latam, advance_mode);
+			break;
+		case SYNA_COUNTRY_TYPE_CANADA:
+			sarctrl = dhd_sar_ctrlset_get(&gSAR_params.canada, advance_mode);
+			break;
+		case SYNA_COUNTRY_TYPE_JAPAN:
+			sarctrl = dhd_sar_ctrlset_get(&gSAR_params.japan, advance_mode);
 			break;
 		default:
 			sarctrl = dhd_sar_ctrlset_get(&gSAR_params.other, advance_mode);
@@ -2756,12 +2981,23 @@ int dhd_sar_set(dhd_pub_t *dhd_pub, int sar_val)
 
 	if (sar_tx_power_val) {
 		err = dhd_sar_set_parameter(dhd_pub, sar_tx_power_val);
-		if (unlikely(err)) {
+		if (!err) {
+			/* If dhd and FW all support this feature, it will return 0
+			 * DHD already set sar parameter to FW.
+			 * so only need to set sar_enable 1 to enable SAR
+			 */
+			sar_tx_power_val = 1;
+		} else if (err == BCME_UNSUPPORTED) {
+			/* If dhd or FW not support/set these parameters
+			 * use traditional way
+			 */
+			DHD_TRACE(("DHD/FW not support sar_param,"
+					"try to use SAR parameters in nvram"));
+		} else {
 			DHD_ERROR(("%s: Failed to set sar_params - error (%d)\n",
 			           __FUNCTION__, err));
 			goto exit;
 		}
-		sar_tx_power_val = 1; /* as we set sar_params for sar_enable 1 */
 	}
 
 	DHD_TRACE(("%s: sar_mode %d airplane_mode %d\n",
@@ -3830,8 +4066,10 @@ dhd_doiovar(dhd_pub_t *dhd_pub, const bcm_iovar_t *vi, uint32 actionid, const ch
 			}
 			if (dhd_pub->dhd_induce_error == DHD_INDUCE_PCIE_LINK_DOWN) {
 				dhd_bus_set_linkdown(dhd_pub, TRUE);
+#ifdef OEM_ANDROID
 				dhd_pub->hang_reason = HANG_REASON_PCIE_LINK_DOWN_EP_DETECT;
 				dhd_os_send_hang_message(dhd_pub);
+#endif /* OEM_ANDROID */
 			}
 #endif /* BCMPCIE */
 		}
@@ -4042,6 +4280,24 @@ dhd_doiovar(dhd_pub_t *dhd_pub, const bcm_iovar_t *vi, uint32 actionid, const ch
 			bcmerror = BCME_OK;
 		break;
 #endif /* BCMPCIE */
+#ifdef SYNA_SAR_CUSTOMER_PARAMETER
+	case IOV_GVAL(IOV_SAR_MODE):
+		int_val = dhd_pub->dhd_sar_mode;
+		(void)memcpy_s(arg, val_size, &int_val, sizeof(int_val));
+		break;
+	case IOV_SVAL(IOV_SAR_MODE):
+		dhd_sar_set(dhd_pub, int_val);
+		break;
+#endif /* SYNA_SAR_CUSTOMER_PARAMETER */
+
+#ifdef CSI_SUPPORT
+	case IOV_GVAL(IOV_CSI_CONFIG):
+		bcmerror = dhd_csi_config(dhd_pub, arg, val_size, FALSE);
+		break;
+	case IOV_SVAL(IOV_CSI_CONFIG):
+		bcmerror = dhd_csi_config(dhd_pub, arg, val_size, TRUE);
+		break;
+#endif /* CSI_SUPPORT */
 #ifdef WLEASYMESH
 	case IOV_SVAL(IOV_1905_AL_UCAST): {
 		uint32  bssidx;
@@ -5176,11 +5432,17 @@ wl_show_host_event(dhd_pub_t *dhd_pub, wl_event_msg_t *event, void *event_data,
 			const wl_escan_result_v2_t *escan_result =
 				(wl_escan_result_v2_t *)event_data;
 			BCM_REFERENCE(escan_result);
+#ifdef OEM_ANDROID
 			/* Because WLC_E_ESCAN_RESULT event log are being print too many.
 			* So, DHD_EVENT() changes to be used DHD_TRACE() in HW4 platform.
 			*/
 			DHD_EVENT(("MACEVENT: %s %d, MAC %s, status %d \n",
 				event_name, event_type, eabuf, (int)status));
+#else
+			DHD_EVENT(("MACEVENT: %s %d, MAC %s, status %d sync-id %u\n",
+				event_name, event_type, eabuf,
+				(int)status, dtoh16(escan_result->sync_id)));
+#endif
 #ifdef REPORT_FATAL_TIMEOUTS
 			/* a 'partial' status means the escan is still in progress
 			* any other status implies the escan has either finished or aborted
@@ -5355,6 +5617,11 @@ wl_show_host_event(dhd_pub_t *dhd_pub, wl_event_msg_t *event, void *event_data,
 		DHD_EVENT(("MACEVENT: %s: Country code changed to %s\n", event_name,
 			(char*)event_data));
 		break;
+#if defined(CSI_SUPPORT)
+	case WLC_E_CSI:
+		/* defferred the process due to extra IOVAR may execute */
+		break;
+#endif /* CSI_SUPPORT */
 	case WLC_E_SCAN:
 		{
 			const char *scan_state;
@@ -5988,12 +6255,12 @@ wl_process_host_event(dhd_pub_t *dhd_pub, int *ifidx, void *pktdata, uint pktlen
 	case WLC_E_PFN_SCAN_ALLGONE: /* share with WLC_E_PFN_BSSID_NET_LOST */
 	case WLC_E_PFN_NET_LOST:
 		break;
-#if defined(PNO_SUPPORT)
+#if defined(OEM_ANDROID) && defined(PNO_SUPPORT)
 	case WLC_E_PFN_BSSID_NET_FOUND:
 	case WLC_E_PFN_BEST_BATCHING:
 		dhd_pno_event_handler(dhd_pub, event, (void *)event_data);
 		break;
-#endif
+#endif /* #if defined(OEM_ANDROID) && defined(PNO_SUPPORT) */
 #if defined(RTT_SUPPORT)
 	case WLC_E_PROXD:
 #ifndef WL_CFG80211
@@ -7514,6 +7781,30 @@ bool dhd_is_associated(dhd_pub_t *dhd, uint8 ifidx, int *retval)
 	return TRUE;
 }
 
+#if defined(__linux__)
+/*
+ * returns = TRUE if anyone is associated, FALSE if all are disassociated
+ */
+bool dhd_scan_associated(dhd_pub_t *dhd, struct net_device *ndev)
+{
+	dhd_if_t *ifp = NULL;
+	u32 idx = 0;
+
+	for (idx = 0; idx < DHD_MAX_IFS; idx++) {
+		ifp = dhd_get_ifp(dhd, idx);
+		if (!ifp)
+			continue;
+		if (ifp->net == ndev)
+			continue;
+		if (!dhd_is_associated(dhd, idx, NULL))
+			continue;
+		return TRUE;
+	}
+
+	return FALSE;
+}
+#endif /* __linux__ */
+
 /* Check if the mode supports STA MODE */
 bool dhd_support_sta_mode(dhd_pub_t *dhd)
 {
@@ -7566,6 +7857,7 @@ int dhd_keep_alive_onoff(dhd_pub_t *dhd)
 	return res;
 }
 #endif /* defined(KEEP_ALIVE) */
+#if defined(OEM_ANDROID)
 #define	CSCAN_TLV_TYPE_SSID_IE	'S'
 /*
  *  SSIDs list parsing from cscan tlv list
@@ -7824,6 +8116,7 @@ wl_iw_parse_channel_list(char** list_str, uint16* channel_list, int channel_num)
 	return num;
 }
 #endif
+#endif /* defined(OEM_ANDROID) */
 
 #if defined(BCM_ROUTER_DHD)
 static int traffic_mgmt_add_dwm_filter(dhd_pub_t *dhd,
@@ -10281,6 +10574,74 @@ exit:
 }
 #endif /* LINUX && SHOW_LOGTRACE */
 
+#ifdef WL_CFGVENDOR_SEND_HANG_EVENT
+static void
+copy_hang_info_ioctl_timeout(dhd_pub_t *dhd, int ifidx, wl_ioctl_t *ioc)
+{
+	int remain_len;
+	int i;
+	int *cnt;
+	char *dest;
+	int bytes_written;
+	uint32 ioc_dwlen = 0;
+
+	if (!dhd || !dhd->hang_info) {
+		DHD_ERROR(("%s dhd=%p hang_info=%p\n",
+			__FUNCTION__, dhd, (dhd ? dhd->hang_info : NULL)));
+		return;
+	}
+
+	cnt = &dhd->hang_info_cnt;
+	dest = dhd->hang_info;
+
+	memset(dest, 0, VENDOR_SEND_HANG_EXT_INFO_LEN);
+	(*cnt) = 0;
+
+	bytes_written = 0;
+	remain_len = VENDOR_SEND_HANG_EXT_INFO_LEN - bytes_written;
+
+	get_debug_dump_time(dhd->debug_dump_time_hang_str);
+	copy_debug_dump_time(dhd->debug_dump_time_str, dhd->debug_dump_time_hang_str);
+
+	bytes_written += scnprintf(&dest[bytes_written], remain_len, "%d %d %s %d %d %d %d %d %d ",
+			HANG_REASON_IOCTL_RESP_TIMEOUT, VENDOR_SEND_HANG_EXT_INFO_VER,
+			dhd->debug_dump_time_hang_str,
+			ifidx, ioc->cmd, ioc->len, ioc->set, ioc->used, ioc->needed);
+	(*cnt) = HANG_FIELD_IOCTL_RESP_TIMEOUT_CNT;
+
+	clear_debug_dump_time(dhd->debug_dump_time_hang_str);
+
+	/* Access ioc->buf only if the ioc->len is more than 4 bytes */
+	ioc_dwlen = (uint32)(ioc->len / sizeof(uint32));
+	if (ioc_dwlen > 0) {
+		const uint32 *ioc_buf = (const uint32 *)ioc->buf;
+
+		remain_len = VENDOR_SEND_HANG_EXT_INFO_LEN - bytes_written;
+		GCC_DIAGNOSTIC_PUSH_SUPPRESS_CAST();
+		bytes_written += scnprintf(&dest[bytes_written], remain_len,
+			"%08x", *(uint32 *)(ioc_buf++));
+		GCC_DIAGNOSTIC_POP();
+		(*cnt)++;
+		if ((*cnt) >= HANG_FIELD_CNT_MAX) {
+			return;
+		}
+
+		for (i = 1; i < ioc_dwlen && *cnt <= HANG_FIELD_CNT_MAX;
+			i++, (*cnt)++) {
+			remain_len = VENDOR_SEND_HANG_EXT_INFO_LEN - bytes_written;
+			GCC_DIAGNOSTIC_PUSH_SUPPRESS_CAST();
+			bytes_written += scnprintf(&dest[bytes_written], remain_len, "%c%08x",
+				HANG_RAW_DEL, *(uint32 *)(ioc_buf++));
+			GCC_DIAGNOSTIC_POP();
+		}
+	}
+
+	DHD_INFO(("%s hang info len: %d data: %s\n",
+		__FUNCTION__, (int)strlen(dhd->hang_info), dhd->hang_info));
+}
+
+#endif /* WL_CFGVENDOR_SEND_HANG_EVENT */
+
 #if defined(DHD_H2D_LOG_TIME_SYNC)
 /*
  * Helper function:
@@ -11311,7 +11672,8 @@ dhd_ota_buf_clean(dhd_pub_t *dhdp)
 	return;
 }
 #endif /* SUPPORT_OTA_UPDATE */
-#if !defined(AP) && defined(WLP2P)
+
+#if defined(OEM_ANDROID) && !defined(AP) && defined(WLP2P)
 /* From Android JerryBean release, the concurrent mode is enabled by default and the firmware
  * name would be fw_bcmdhd.bin. So we need to determine whether P2P is enabled in the STA
  * firmware and accordingly enable concurrent mode (Apply P2P settings). SoftAP firmware
@@ -11368,7 +11730,7 @@ dhd_get_concurrent_capabilites(dhd_pub_t *dhd)
 	}
 	return 0;
 }
-#endif
+#endif /* defined(OEM_ANDROID) && !defined(AP) && defined(WLP2P) */
 
 #ifdef SUPPORT_AP_POWERSAVE
 int dhd_set_ap_powersave(dhd_pub_t *dhdp, int ifidx, int enable)

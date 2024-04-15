@@ -650,4 +650,5 @@ dhd_static_buf_exit(void)
 #ifndef DHD_STATIC_IN_DRIVER
 module_init(dhd_static_buf_init);
 module_exit(dhd_static_buf_exit);
+MODULE_LICENSE("GPL v2");
 #endif

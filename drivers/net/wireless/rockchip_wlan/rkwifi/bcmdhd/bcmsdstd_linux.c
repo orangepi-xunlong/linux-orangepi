@@ -515,8 +515,15 @@ static struct pci_device_id bcmsdh_pci_devid[] __devinitdata = {
 	class: 0,
 	class_mask: 0,
 	driver_data: 0,
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0))
+	override_only: 0,
+#endif /* (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0)) */
 	},
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0))
+	{ 0, 0, 0, 0, 0, 0, 0, 0}
+#else
 	{ 0, 0, 0, 0, 0, 0, 0}
+#endif /* (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0)) */
 };
 MODULE_DEVICE_TABLE(pci, bcmsdh_pci_devid);
 

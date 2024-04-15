@@ -1119,6 +1119,16 @@ dhd_napi_schedule(void *info)
 	 * rx performance drop of ~5Mbs(SWWLAN-349763).
 	 * So, excludes this prevention for Android platform.
 	 */
+#ifndef OEM_ANDROID
+	DHD_GENERAL_LOCK(&dhd->pub, flags);
+
+	if (DHD_BUS_BUSY_CHECK_SUSPEND_IN_PROGRESS(&dhd->pub)) {
+		DHD_GENERAL_UNLOCK(&dhd->pub, flags);
+		return;
+	}
+
+	DHD_GENERAL_UNLOCK(&dhd->pub, flags);
+#endif /* OEM_ANDROID */
 
 	/* add napi_struct to softnet data poll list and raise NET_RX_SOFTIRQ */
 	if (napi_schedule_prep(&dhd->rx_napi_struct)) {

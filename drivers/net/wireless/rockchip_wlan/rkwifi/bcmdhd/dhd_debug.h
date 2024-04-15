@@ -377,6 +377,7 @@ struct log_level_table {
 	char *desc;
 };
 
+#ifdef OEM_ANDROID
 /*
  * Assuming that the Ring lock is mutex, bailing out if the
  * callers are from atomic context. On a long term, one has to
@@ -392,6 +393,9 @@ struct log_level_table {
 				&state, sizeof(state));				\
 	} while (0);								\
 }
+#else
+#define DBG_EVENT_LOG(dhd, connect_state)
+#endif /* !OEM_ANDROID */
 
 /*
  * Packet logging - HAL specific data

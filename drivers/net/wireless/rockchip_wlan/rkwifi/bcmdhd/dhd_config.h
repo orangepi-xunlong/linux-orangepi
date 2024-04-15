@@ -67,12 +67,6 @@ typedef struct wl_chip_nv_path_list_ctrl {
 	struct wl_chip_nv_path *m_chip_nv_path_head;
 } wl_chip_nv_path_list_ctrl_t;
 
-#define MAX_CTRL_CHANSPECS 256
-typedef struct wl_channel_list {
-	uint32 count;
-	uint32 channel[MAX_CTRL_CHANSPECS];
-} wl_channel_list_t;
-
 typedef struct wmes_param {
 	int aifsn[AC_COUNT];
 	int ecwmin[AC_COUNT];
@@ -224,7 +218,6 @@ typedef struct dhd_conf {
 	int band;
 	int bw_cap[2];
 	wl_country_t cspec;
-	wl_channel_list_t channels;
 	uint roam_off;
 	uint roam_off_suspend;
 	int roam_trigger[2];
@@ -418,12 +411,12 @@ void dhd_conf_set_path_params(dhd_pub_t *dhd, char *fw_path, char *nv_path);
 int dhd_conf_set_intiovar(dhd_pub_t *dhd, int ifidx, uint cmd, char *name,
 	int val, int def, bool down);
 int dhd_conf_get_band(dhd_pub_t *dhd);
+bool dhd_conf_same_country(dhd_pub_t *dhd, char *buf);
 int dhd_conf_country(dhd_pub_t *dhd, char *cmd, char *buf);
 int dhd_conf_get_country(dhd_pub_t *dhd, wl_country_t *cspec);
 #ifdef CCODE_LIST
 int dhd_ccode_map_country_list(dhd_pub_t *dhd, wl_country_t *cspec);
 #endif
-bool dhd_conf_match_channel(dhd_pub_t *dhd, uint32 channel);
 void dhd_conf_set_wme(dhd_pub_t *dhd, int ifidx, int mode);
 void dhd_conf_set_mchan_bw(dhd_pub_t *dhd, int go, int source);
 void dhd_conf_add_pkt_filter(dhd_pub_t *dhd);
