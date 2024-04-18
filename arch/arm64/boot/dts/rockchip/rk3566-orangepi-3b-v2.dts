@@ -67,7 +67,7 @@
 		regulator-max-microvolt = <3300000>;
 		vin-supply = <&vcc12v_dcin>;
 	};
-		
+
 	hdmi_sound: hdmi-sound {
 		compatible = "simple-audio-card";
 		simple-audio-card,format = "i2s";
@@ -159,25 +159,25 @@
 		status = "okay";
 	};
 
-	unisoc_uwe_bsp: uwe-bsp {
-		compatible = "unisoc,uwe_bsp";
-		wl-reg-on = <&gpio0 RK_PD3 GPIO_ACTIVE_HIGH>;
-		bt-reg-on = <&gpio2 RK_PB7 GPIO_ACTIVE_HIGH>;
-		wl-wake-host-gpio = <&gpio0 RK_PD6 GPIO_ACTIVE_HIGH>;
-		bt-wake-host-gpio = <&gpio2 RK_PC0 GPIO_ACTIVE_HIGH>;
-		//sdio-ext-int-gpio = <&gpio2 RK_PC1 GPIO_ACTIVE_HIGH>;
-		unisoc,btwf-file-name = "/vendor/etc/firmware/wcnmodem.bin";
-		//adma-tx;
-		//adma-rx;
-		data-irq;
-		blksz-512;
-		keep-power-on;
+	wireless_wlan: wireless-wlan {
+		compatible = "wlan-platdata";
+		rockchip,grf = <&grf>;
+		wifi_chip_type = "ap6256";
+		WIFI,host_wake_irq = <&gpio0 RK_PD6 GPIO_ACTIVE_HIGH>;
 		status = "okay";
 	};
 
-	sprd-mtty {
-		compatible = "sprd,mtty";
-		sprd,name = "ttyBT";
+	wireless_bluetooth: wireless-bluetooth {
+		compatible = "bluetooth-platdata";
+		clocks = <&rk809 1>;
+		clock-names = "ext_clock";
+		uart_rts_gpios = <&gpio2 RK_PB5 GPIO_ACTIVE_LOW>;
+		pinctrl-names = "default", "rts_gpio";
+		pinctrl-0 = <&uart1m0_rtsn>;
+		pinctrl-1 = <&uart1_gpios>;
+		BT,reset_gpio    = <&gpio2 RK_PB7 GPIO_ACTIVE_HIGH>;
+		BT,wake_gpio     = <&gpio2 RK_PC1 GPIO_ACTIVE_HIGH>;
+		BT,wake_host_irq = <&gpio2 RK_PC0 GPIO_ACTIVE_HIGH>;
 		status = "okay";
 	};
 
@@ -204,6 +204,15 @@
 		regulator-min-microvolt = <3300000>;
 		regulator-name = "vcc_sd";
 		vin-supply = <&vcc3v3_sys>;
+	};
+
+	vccio_phy: vcc-phy-regulator {
+		compatible = "regulator-fixed";
+		regulator-max-microvolt = <1800000>;
+		regulator-min-microvolt = <1800000>;
+		regulator-name = "vccio_phy";
+		regulator-always-on;
+		regulator-boot-on;
 	};
 
 	vcc5v0_host: vcc5v0-host-regulator {
@@ -392,7 +401,6 @@
 		reg = <0x20>;
 		interrupt-parent = <&gpio0>;
 		interrupts = <3 IRQ_TYPE_LEVEL_LOW>;
-
 		pinctrl-names = "default", "pmic-sleep",
 				"pmic-power-off", "pmic-reset";
 		pinctrl-0 = <&pmic_int>;
@@ -788,13 +796,13 @@
 	};
 
 	edp {
-	        edp_hpd: edp-hpd {
-	                rockchip,pins = <0 RK_PA0 RK_FUNC_GPIO &pcfg_pull_none>;
-	        };
+		edp_hpd: edp-hpd {
+			rockchip,pins = <0 RK_PA0 RK_FUNC_GPIO &pcfg_pull_none>;
+		};
 
-	        bl_en: bl-en {
-	                rockchip,pins = <0 RK_PB5 RK_FUNC_GPIO &pcfg_output_high>;
-	        };
+		bl_en: bl-en {
+			rockchip,pins = <0 RK_PB5 RK_FUNC_GPIO &pcfg_output_high>;
+		};
 	};
 };
 
@@ -816,16 +824,16 @@
   */
 
 &pmu_io_domains {
-        status = "okay";
-        pmuio1-supply = <&vcc3v3_pmu>;
-        pmuio2-supply = <&vcc3v3_pmu>;
-        vccio1-supply = <&vcc_3v3>;
+	status = "okay";
+	pmuio1-supply = <&vcc3v3_pmu>;
+	pmuio2-supply = <&vcc3v3_pmu>;
+	vccio1-supply = <&vcc_3v3>;
 	vccio2-supply = <&vcc_1v8>;
-        vccio3-supply = <&vccio_sd>;
-        vccio4-supply = <&vcc_1v8>;
-        vccio5-supply = <&vcc_3v3>;
-        vccio6-supply = <&vcc_3v3>;
-        vccio7-supply = <&vcc_3v3>;
+	vccio3-supply = <&vccio_sd>;
+	vccio4-supply = <&vcc_1v8>;
+	vccio5-supply = <&vccio_phy>;
+	vccio6-supply = <&vcc_3v3>;
+	vccio7-supply = <&vcc_3v3>;
 };
 
 &rk_rga {
@@ -914,7 +922,7 @@
 };
 
 &u2phy0_host {
-	phy-supply = <&vbus>;	
+	phy-supply = <&vbus>;
 	status = "okay";
 };
 
@@ -1010,7 +1018,7 @@
 	phy-mode = "rgmii";
 	clock_in_out = "input";
 
-	snps,reset-gpio = <&gpio3 RK_PC2 GPIO_ACTIVE_LOW>;
+	snps,reset-gpio = <&gpio4 RK_PC4 GPIO_ACTIVE_LOW>;
 	snps,reset-active-low;
 	/* Reset time is 20ms, 100ms for rtl8211f */
 	//snps,reset-delays-us = <0 20000 100000>;
@@ -1022,11 +1030,11 @@
 
 	pinctrl-names = "default";
 	pinctrl-0 = <&gmac1m0_miim
-		     &gmac1m0_tx_bus2
-		     &gmac1m0_rx_bus2
-		     &gmac1m0_rgmii_clk
+			 &gmac1m0_tx_bus2
+			 &gmac1m0_rx_bus2
+			 &gmac1m0_rgmii_clk
 			 &gmac1m0_clkinout
-		     &gmac1m0_rgmii_bus>;
+			 &gmac1m0_rgmii_bus>;
 
 	tx_delay = <0x30>;
 	rx_delay = <0x10>;
@@ -1075,29 +1083,29 @@
 };
 
 &i2c1 {
-        status = "okay";
+	status = "okay";
 
-        ov5647: ov5647@36 {
-                status = "disabled";
-                compatible = "ovti,ov5647";
-                reg = <0x36>;
+	ov5647: ov5647@36 {
+		status = "disabled";
+		compatible = "ovti,ov5647";
+		reg = <0x36>;
 		clocks = <&ext_cam_ov5647_clk>;
-                clock-names = "ext_cam_ov5647_clk";
-                pwdn-gpios = <&gpio2 RK_PC6 GPIO_ACTIVE_LOW>;
+		clock-names = "ext_cam_ov5647_clk";
+		pwdn-gpios = <&gpio2 RK_PC6 GPIO_ACTIVE_LOW>;
 		rockchip,camera-module-index = <0>;
 		rockchip,camera-module-facing = "back";
 		rockchip,camera-module-name = "LMM248";
 		rockchip,camera-module-lens-name = "YXC-M804A2";
-                port {
-                        ov5647_out: endpoint {
-                                remote-endpoint = <&dphy1_in>;
-                                data-lanes = <1 2>;
-                        };
-                };
-        };
+		port {
+			ov5647_out: endpoint {
+				remote-endpoint = <&dphy1_in>;
+				data-lanes = <1 2>;
+			};
+		};
+	};
 
 	raspits_panel: raspits-panel@45 {
-                status = "disabled";
+		status = "disabled";
 		compatible = "raspberrypi,7inch-touchscreen-panel";
 		reg = <0x45>;
 
@@ -1109,75 +1117,75 @@
 	};
 
 	raspits_touch_ft5426: raspits-touch-ft5426@38 {
-                status = "disabled";
+	status = "disabled";
 		compatible = "raspits_ft5426";
 		reg = <0x38>;
 	};
 };
 
 &csi2_dphy_hw {
-      status = "disabled";
+	status = "disabled";
 };
 
 &csi2_dphy0 {
-        status = "disabled";
+	status = "disabled";
 };
 
 &csi2_dphy1 {
-        status = "disabled";
-        /*
-        * dphy1 only used for split mode,
-        * can be used  concurrently  with dphy2
-        * full mode and split mode are mutually exclusive
-        */
-        ports {
-                #address-cells = <1>;
-                #size-cells = <0>;
+	status = "disabled";
+	/*
+	* dphy1 only used for split mode,
+	* can be used  concurrently  with dphy2
+	* full mode and split mode are mutually exclusive
+	*/
+	ports {
+	#address-cells = <1>;
+	#size-cells = <0>;
 
-                port@0 {
-                        reg = <0>;
-                        #address-cells = <1>;
-                        #size-cells = <0>;
+	port@0 {
+		reg = <0>;
+		#address-cells = <1>;
+		#size-cells = <0>;
 
-                        dphy1_in: endpoint@1 {
-                                        reg = <1>;
-                                        remote-endpoint = <&ov5647_out>;
-                                        data-lanes = <1 2>;
-                        };
-                };
+		dphy1_in: endpoint@1 {
+			reg = <1>;
+			remote-endpoint = <&ov5647_out>;
+			data-lanes = <1 2>;
+		};
+	};
 
-                port@1 {
-                        reg = <1>;
-                        #address-cells = <1>;
-                        #size-cells = <0>;
+	port@1 {
+		reg = <1>;
+		#address-cells = <1>;
+		#size-cells = <0>;
 
-                        dphy1_out: endpoint@1 {
-                                        reg = <1>;
-                                        remote-endpoint = <&isp0_in>;
-                        };
-                };
-        };
+		dphy1_out: endpoint@1 {
+			reg = <1>;
+			remote-endpoint = <&isp0_in>;
+		};
+	};
+	};
 };
 
 &rkisp {
-        status = "disabled";
+	status = "disabled";
 };
 
 &rkisp_mmu {
-        status = "disabled";
+	status = "disabled";
 };
 
 &rkisp_vir0 {
-        status = "disabled";
-        port {
-                #address-cells = <1>;
-                #size-cells = <0>;
+	status = "disabled";
+	port {
+		#address-cells = <1>;
+		#size-cells = <0>;
 
-                isp0_in: endpoint@0 {
-                        reg = <0>;
-                        remote-endpoint = <&dphy1_out>;
-                };
-        };
+		isp0_in: endpoint@0 {
+			reg = <0>;
+			remote-endpoint = <&dphy1_out>;
+		};
+	};
 };
 
 &edp {
