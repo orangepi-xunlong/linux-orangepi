@@ -749,9 +749,9 @@
 		compatible = "goodix,gt9271";
 		reg = <0x14>;
 		interrupt-parent = <&gpio0>;
-		interrupts = <RK_PD3 IRQ_TYPE_LEVEL_LOW>;
-		irq-gpios = <&gpio0 RK_PD3 IRQ_TYPE_LEVEL_LOW>;
-		reset-gpios = <&gpio0 RK_PD4 GPIO_ACTIVE_HIGH>;
+		interrupts = <RK_PD4 IRQ_TYPE_LEVEL_LOW>;
+		irq-gpios = <&gpio0 RK_PD4 IRQ_TYPE_LEVEL_LOW>;
+		reset-gpios = <&gpio0 RK_PD3 GPIO_ACTIVE_HIGH>;
 		touchscreen-inverted-x;
 		//touchscreen-inverted-y;
 		touchscreen-swapped-x-y;
