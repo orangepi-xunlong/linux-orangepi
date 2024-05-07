@@ -4,10 +4,6 @@
  *
  */
 
-&csi2_dphy0_hw {
-	status = "disabled";
-};
-
 &csi2_dphy0 {
 	status = "disabled";
 	ports {
