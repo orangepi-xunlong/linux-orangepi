@@ -97,25 +97,9 @@ static const struct fxgmac_stats_desc fxgmac_gstring_stats[] = {
     FXGMAC_STAT("napi_poll_isr", napi_poll_isr),
     FXGMAC_STAT("napi_poll_txtimer", napi_poll_txtimer),
     FXGMAC_STAT("alive_cnt_txtimer", cnt_alive_txtimer),
-#if FXGMAC_TX_HANG_TIMER_EN
-    FXGMAC_STAT("alive_cnt_tx_hang_timer", cnt_alive_tx_hang_timer),
-    FXGMAC_STAT("cnt_tx_hang", cnt_tx_hang),
-#endif
-    FXGMAC_STAT("ephy_poll_timer", ephy_poll_timer_cnt),
-    FXGMAC_STAT("ephy_link_change_cnt", ephy_link_change_cnt),
-    FXGMAC_STAT("mgmt_int_isr", mgmt_int_isr),
-    FXGMAC_STAT("msix_int_isr", msix_int_isr),
-    FXGMAC_STAT("msix_int_isr_cur", msix_int_isr_cur),
-    FXGMAC_STAT("msix_ch0_napi_isr", msix_ch0_napi_isr),
-    FXGMAC_STAT("msix_ch1_napi_isr", msix_ch1_napi_isr),
-    FXGMAC_STAT("msix_ch2_napi_isr", msix_ch2_napi_isr),
-    FXGMAC_STAT("msix_ch3_napi_isr", msix_ch3_napi_isr),
-#if FXGMAC_TX_INTERRUPT_EN
-    FXGMAC_STAT("msix_ch0_napi_isr_tx", msix_ch0_napi_isr_tx),
-    FXGMAC_STAT("msix_ch0_napi_napi_tx", msix_ch0_napi_napi_tx),
-    FXGMAC_STAT("msix_ch0_napi_sch_tx", msix_ch0_napi_sch_tx),
-#endif		
 
+    FXGMAC_STAT("ephy_poll_timer", ephy_poll_timer_cnt),
+    FXGMAC_STAT("mgmt_int_isr", mgmt_int_isr),
 };
 
 #define FXGMAC_STATS_COUNT	ARRAY_SIZE(fxgmac_gstring_stats)
@@ -158,8 +142,7 @@ static void fxgmac_ethtool_set_msglevel(struct net_device *netdev,
 {
     struct fxgmac_pdata *pdata = netdev_priv(netdev);
 
-    DPRINTK("fxmac, set msglvl from %08x to %08x\n", pdata->msg_enable, msglevel); 
-    default_msg_level = msglevel;
+    DPRINTK("fxmac, set msglvl from %08x to %08x\n", pdata->msg_enable, msglevel);
     pdata->msg_enable = msglevel;
 }
 
@@ -202,8 +185,12 @@ static int fxgmac_ethtool_get_coalesce(struct net_device *netdev, struct ethtool
 
     memset(ec, 0, sizeof(struct ethtool_coalesce));
     ec->rx_coalesce_usecs = pdata->rx_usecs;
-    ec->rx_max_coalesced_frames = pdata->rx_frames;
-    ec->tx_max_coalesced_frames = pdata->tx_frames;
+    ec->tx_coalesce_usecs = pdata->tx_usecs;
+    /*If we need to assign values to other members, 
+    * we need to modify the supported_coalesce_params of fxgmac_ethtool_ops synchronously
+    */
+    //ec->rx_max_coalesced_frames = pdata->rx_frames;
+    //ec->tx_max_coalesced_frames = pdata->tx_frames;
 
     DPRINTK("fxmac, get coalesce\n"); 
     return 0;
@@ -225,7 +212,7 @@ static int fxgmac_ethtool_set_coalesce(struct net_device *netdev, struct ethtool
 
     /* Check for not supported parameters */
     if ((ec->rx_coalesce_usecs_irq) || (ec->rx_max_coalesced_frames_irq) ||
-        (ec->tx_coalesce_usecs) || (ec->tx_coalesce_usecs_high) ||
+        (ec->tx_coalesce_usecs_high) ||
         (ec->tx_max_coalesced_frames_irq) || (ec->tx_coalesce_usecs_irq) ||
         (ec->stats_block_coalesce_usecs) ||  (ec->pkt_rate_low) ||
         (ec->use_adaptive_rx_coalesce) || (ec->use_adaptive_tx_coalesce) ||
@@ -257,6 +244,9 @@ static int fxgmac_ethtool_set_coalesce(struct net_device *netdev, struct ethtool
 
     pdata->tx_frames = tx_frames;
     hw_ops->config_tx_coalesce(pdata);
+
+    pdata->tx_usecs = ec->tx_coalesce_usecs;
+    hw_ops->set_interrupt_moderation(pdata);
 
     DPRINTK("fxmac, set coalesce\n"); 
     return 0;
@@ -323,6 +313,7 @@ static int fxgmac_set_rxfh(struct net_device *netdev, const u32 *indir,
 			  const u8 *key, const u8 hfunc)
 {
     struct fxgmac_pdata *pdata = netdev_priv(netdev);
+    struct fxgmac_hw_ops *hw_ops = &pdata->hw_ops;
     int i;
     u32 reta_entries = fxgmac_rss_indir_size(netdev);
     int max_queues = FXGMAC_MAX_DMA_CHANNELS;
@@ -349,14 +340,13 @@ static int fxgmac_set_rxfh(struct net_device *netdev, const u32 *indir,
     	for (i = 0; i < reta_entries; i++)
     	    pdata->rss_table[i] = indir[i];
 
-    	fxgmac_write_rss_lookup_table(pdata);
+    	hw_ops->write_rss_lookup_table(pdata);
 #endif
     }
 
     /* Fill out the rss hash key */
     if (FXGMAC_RSS_HASH_KEY_LINUX && key) {
-    	memcpy(pdata->rss_key, key, fxgmac_get_rxfh_key_size(netdev));
-    	fxgmac_write_rss_hash_key(pdata);
+    	hw_ops->set_rss_hash_key(pdata, key);
     }
 
     return 0;
@@ -366,9 +356,10 @@ static int fxgmac_get_rss_hash_opts(struct fxgmac_pdata *pdata,
 				   struct ethtool_rxnfc *cmd)
 {
     u32 reg_opt;
+    struct fxgmac_hw_ops *hw_ops = &pdata->hw_ops;
     cmd->data = 0;
 
-    reg_opt = fxgmac_read_rss_options(pdata);
+    reg_opt = hw_ops->get_rss_options(pdata);
     DPRINTK ("fxgmac_get_rss_hash_opts, hw=%02x, %02x\n", reg_opt, pdata->rss_options);
 
     if(reg_opt != pdata->rss_options)
@@ -385,7 +376,7 @@ static int fxgmac_get_rss_hash_opts(struct fxgmac_pdata *pdata,
     	{
     		cmd->data |= RXH_L4_B_0_1 | RXH_L4_B_2_3;
     	}
-    	/* fall through */
+        fallthrough;
     case SCTP_V4_FLOW:
     case AH_ESP_V4_FLOW:
     case AH_V4_FLOW:
@@ -405,7 +396,7 @@ static int fxgmac_get_rss_hash_opts(struct fxgmac_pdata *pdata,
     	{
     		cmd->data |= RXH_L4_B_0_1 | RXH_L4_B_2_3;
     	}
-    	/* fall through */
+        fallthrough;
     case SCTP_V6_FLOW:
     case AH_ESP_V6_FLOW:
     case AH_V6_FLOW:
@@ -471,6 +462,7 @@ static int fxgmac_set_rss_hash_opt(struct fxgmac_pdata *pdata,
 				  struct ethtool_rxnfc *nfc)
 {
     u32 rssopt = 0; //pdata->rss_options;
+    struct fxgmac_hw_ops *hw_ops = &pdata->hw_ops;
 
     DPRINTK("fxgmac_set_rss_hash_opt call in,nfc_data=%llx,cur opt=%x\n", nfc->data, pdata->rss_options);
 
@@ -587,7 +579,7 @@ static int fxgmac_set_rss_hash_opt(struct fxgmac_pdata *pdata,
     DPRINTK("rss option changed from %x to %x\n", pdata->rss_options, rssopt);
     pdata->rss_options = rssopt;
 #if 1
-    fxgmac_write_rss_options(pdata);
+    hw_ops->set_rss_options(pdata);
 #else
     /* Perform hash on these packet types */
     mrqc |= IXGBE_MRQC_RSS_FIELD_IPV4
@@ -642,6 +634,7 @@ static int fxgmac_set_rxnfc(struct net_device *dev, struct ethtool_rxnfc *cmd)
 
     return ret;
 }
+#endif //FXGMAC_RSS_FEATURE_ENABLED
 
 #if ( LINUX_VERSION_CODE >= KERNEL_VERSION(5,17,0) )
 static void fxgmac_get_ringparam(struct net_device *netdev,
@@ -658,17 +651,43 @@ static void fxgmac_get_ringparam(struct net_device *netdev,
 
     DPRINTK("fxmac, get_ringparam callin\n"); 
 
-    ring->rx_max_pending = pdata->rx_ring_count;
-    ring->tx_max_pending = pdata->tx_ring_count;
+    ring->rx_max_pending = FXGMAC_RX_DESC_CNT;
+    ring->tx_max_pending = FXGMAC_TX_DESC_CNT;
     ring->rx_mini_max_pending = 0;
     ring->rx_jumbo_max_pending = 0;
-    ring->rx_pending = pdata->rx_ring_count;
-    ring->tx_pending = pdata->tx_ring_count;
+    ring->rx_pending = pdata->rx_desc_count;
+    ring->tx_pending = pdata->tx_desc_count;
     ring->rx_mini_pending = 0;
     ring->rx_jumbo_pending = 0;
 }
 
-#endif //FXGMAC_RSS_FEATURE_ENABLED
+#if ( LINUX_VERSION_CODE >= KERNEL_VERSION(5,17,0) )
+static int fxgmac_set_ringparam(struct net_device *netdev,
+             struct ethtool_ringparam *ring,
+             struct kernel_ethtool_ringparam *kernel_ring,
+             struct netlink_ext_ack *exact)
+
+#else
+static int fxgmac_set_ringparam(struct net_device *netdev,
+						struct ethtool_ringparam *ring)
+#endif
+{
+    struct fxgmac_pdata *pdata = netdev_priv(netdev);
+    struct fxgmac_desc_ops *desc_ops = &pdata->desc_ops;
+
+    DPRINTK("fxmac, set_ringparam callin\n");
+
+    pdata->tx_desc_count = ring->tx_pending;
+    pdata->rx_desc_count = ring->rx_pending;
+
+    fxgmac_stop(pdata);
+    fxgmac_free_tx_data(pdata);
+    fxgmac_free_rx_data(pdata);
+    desc_ops->alloc_channles_and_rings(pdata);
+    fxgmac_start(pdata);
+
+    return 0;
+}
 
 #if FXGMAC_WOL_FEATURE_ENABLED
 static void fxgmac_get_wol(struct net_device *netdev,
@@ -697,14 +716,15 @@ static void fxgmac_get_wol(struct net_device *netdev,
     wol->wolopts |= WAKE_BCAST;
     wol->wolopts |= WAKE_MAGIC;
 #else
-    wol->wolopts = pdata->wol;
+    wol->wolopts = pdata->expansion.wol;
 #endif
-    DPRINTK("fxmac, get_wol, 0x%x, 0x%x\n", wol->wolopts, pdata->wol); 
+    DPRINTK("fxmac, get_wol, 0x%x, 0x%x\n", wol->wolopts, pdata->expansion.wol); 
 }
 
 static int fxgmac_set_wol(struct net_device *netdev, struct ethtool_wolinfo *wol)
 {
     struct fxgmac_pdata *pdata = netdev_priv(netdev);
+    struct fxgmac_hw_ops *hw_ops = &pdata->hw_ops;
 
     //currently, we do not support these options
 #if FXGMAC_WOL_UPON_EPHY_LINK
@@ -730,28 +750,28 @@ static int fxgmac_set_wol(struct net_device *netdev, struct ethtool_wolinfo *wol
     }
 
 #if 1 /* normally, pls set this to 1.  */
-    pdata->wol = 0;
+    pdata->expansion.wol = 0;
     if (wol->wolopts & WAKE_UCAST)
-            pdata->wol |= WAKE_UCAST;
+            pdata->expansion.wol |= WAKE_UCAST;
 
     if (wol->wolopts & WAKE_MCAST)
-            pdata->wol |= WAKE_MCAST;
+            pdata->expansion.wol |= WAKE_MCAST;
 
     if (wol->wolopts & WAKE_BCAST)
-            pdata->wol |= WAKE_BCAST;
+            pdata->expansion.wol |= WAKE_BCAST;
 
     if (wol->wolopts & WAKE_MAGIC)
-            pdata->wol |= WAKE_MAGIC;
+            pdata->expansion.wol |= WAKE_MAGIC;
 
     if (wol->wolopts & WAKE_PHY)
-            pdata->wol |= WAKE_PHY;
+            pdata->expansion.wol |= WAKE_PHY;
 
     if (wol->wolopts & WAKE_ARP)
-            pdata->wol |= WAKE_ARP;
+            pdata->expansion.wol |= WAKE_ARP;
 
-    fxgmac_set_pattern_data(pdata);
+    hw_ops->set_pattern_data(pdata);
 
-    fxgmac_config_wol(pdata, (!!(pdata->wol)));
+    hw_ops->config_wol(pdata, (!!(pdata->expansion.wol)));
 #else
 
     /* for test only... */
@@ -771,13 +791,13 @@ static int fxgmac_set_wol(struct net_device *netdev, struct ethtool_wolinfo *wol
     }
     /*
     if (wol->wolopts & WAKE_BCAST) {
-    	extern int fxgmac_pci_config_modify(struct pci_dev *pdev);
+    	extern int fxgmac_disable_pci_msi_config(struct pci_dev *pdev);
     	DPRINTK("fxmac, set_wol, broadcast\n");
-    	fxgmac_pci_config_modify(struct pci_dev *pdev);
+    	fxgmac_disable_pci_msi_config(struct pci_dev *pdev);
     }
     */	
 #endif
-    DPRINTK("fxmac, set_wol, opt=0x%x, 0x%x\n", wol->wolopts, pdata->wol); 
+    DPRINTK("fxmac, set_wol, opt=0x%x, 0x%x\n", wol->wolopts, pdata->expansion.wol); 
 
     return 0;
 }
@@ -842,7 +862,11 @@ static int fxgmac_get_link_ksettings(struct net_device *netdev,
     hw_ops->read_ephy_reg(pdata, REG_MII_BMCR, &regval);
     regval = FXGMAC_GET_REG_BITS(regval, PHY_CR_AUTOENG_POS, PHY_CR_AUTOENG_LEN);
     if (regval) {
-        ethtool_link_ksettings_add_link_mode(cmd, advertising, Autoneg);
+        if (pdata->phy_autoeng)
+            ethtool_link_ksettings_add_link_mode(cmd, advertising, Autoneg);
+        else
+            clear_bit(ETHTOOL_LINK_MODE_Autoneg_BIT, cmd->link_modes.advertising);
+
         if (adv & FXGMAC_ADVERTISE_10HALF)
             ethtool_link_ksettings_add_link_mode(cmd, advertising, 10baseT_Half);
         if (adv & FXGMAC_ADVERTISE_10FULL)
@@ -879,7 +903,7 @@ static int fxgmac_get_link_ksettings(struct net_device *netdev,
                 break;
         }
     }
-    cmd->base.autoneg = regval;
+    cmd->base.autoneg = pdata->phy_autoeng ? regval : 0;
 
     hw_ops->read_ephy_reg(pdata, REG_MII_SPEC_STATUS, &regval);
     link_status = regval & (BIT(FUXI_EPHY_LINK_STATUS_BIT));
@@ -904,13 +928,16 @@ static int fxgmac_set_link_ksettings(struct net_device *netdev,
     struct fxgmac_pdata *pdata = netdev_priv(netdev);
     struct fxgmac_hw_ops *hw_ops = &pdata->hw_ops;
 
+    if (cmd->base.speed == SPEED_1000 && cmd->base.duplex == DUPLEX_HALF)
+        return -EINVAL;
+
     pdata->phy_autoeng = cmd->base.autoneg;
 
     ethtool_convert_link_mode_to_legacy_u32(&advertising, cmd->link_modes.advertising);
     ethtool_convert_link_mode_to_legacy_u32(&support, cmd->link_modes.supported);
     advertising &= support;
 
-    if (pdata->phy_autoeng){
+    if (pdata->phy_autoeng || (!pdata->phy_autoeng && cmd->base.speed == SPEED_1000)){
         ret = hw_ops->read_ephy_reg(pdata, REG_MII_ADVERTISE, &adv);
         if (ret < 0)
             return -ETIMEDOUT;
@@ -935,13 +962,21 @@ static int fxgmac_set_link_ksettings(struct net_device *netdev,
         ret = hw_ops->write_ephy_reg(pdata, REG_MII_BMCR, adv);
         if (ret < 0)
             return -ETIMEDOUT;
+
+        ret = hw_ops->read_ephy_reg(pdata, REG_MII_BMCR, &adv);
+        if (ret < 0)
+            return -ETIMEDOUT;
+        adv = FXGMAC_SET_REG_BITS(adv, PHY_CR_RE_AUTOENG_POS, PHY_CR_RE_AUTOENG_LEN, 1);
+        ret = hw_ops->write_ephy_reg(pdata, REG_MII_BMCR, adv);
+        if (ret < 0)
+            return -ETIMEDOUT;
     } else {
         pdata->phy_duplex = cmd->base.duplex;
         pdata->phy_speed = cmd->base.speed;
         fxgmac_phy_force_speed(pdata, pdata->phy_speed);
         fxgmac_phy_force_duplex(pdata, pdata->phy_duplex);
         fxgmac_phy_force_autoneg(pdata, pdata->phy_autoeng);
-        fxgmac_config_mac_speed(pdata);
+        //hw_ops->config_mac_speed(pdata);
     }
 
     ret = fxgmac_ephy_soft_reset(pdata);
@@ -1003,6 +1038,8 @@ static int fxgmac_set_pauseparam(struct net_device *netdev,
  * 2021.03.29
  */
 #define FXGMAC_ETH_GSTRING_LEN 32 
+
+#if 0
 static char fxgmac_gstrings_test[1024*7][FXGMAC_ETH_GSTRING_LEN]= {
 };
 
@@ -1012,12 +1049,11 @@ static char fxgmac_gstrings_header[7][10]= {
     "desc1  :", "desc2  :",
     "desc3  :"
 };
+#endif
 
 #define FXGMAC_TEST_LEN	(sizeof(fxgmac_gstrings_test) / FXGMAC_ETH_GSTRING_LEN)
-u16 fxgmac_ethtool_test_flag = 0xff; //invalid value, yzhang
-
 #define DBG_ETHTOOL_CHECK_NUM_OF_DESC 5
-static u16 fxgmac_ethtool_test_len = DBG_ETHTOOL_CHECK_NUM_OF_DESC; //default value, yzhang
+//static u16 fxgmac_ethtool_test_len = DBG_ETHTOOL_CHECK_NUM_OF_DESC; //default value, yzhang
 
 static void fxgmac_ethtool_get_strings(struct net_device *netdev,
 				       u32 stringset, u8 *data)
@@ -1025,16 +1061,10 @@ static void fxgmac_ethtool_get_strings(struct net_device *netdev,
     int i;
 
     switch (stringset) {
-    case ETH_SS_TEST:
-    	//netdev_warn(netdev, "Xlgmac diag, get string here, ...\n");
-    	memcpy(data, *fxgmac_gstrings_test,
-    		   /*FXGMAC_TEST_LEN*/fxgmac_ethtool_test_len * 7 * FXGMAC_ETH_GSTRING_LEN);
-    	break;
-    	
     case ETH_SS_STATS:
     	for (i = 0; i < FXGMAC_STATS_COUNT; i++) {
     		memcpy(data, fxgmac_gstring_stats[i].stat_string,
-    		       ETH_GSTRING_LEN);
+    		       strlen(fxgmac_gstring_stats[i].stat_string));
     		data += ETH_GSTRING_LEN;
     	}
     	break;
@@ -1050,10 +1080,6 @@ static int fxgmac_ethtool_get_sset_count(struct net_device *netdev,
     int ret;
 
     switch (stringset) {
-    case ETH_SS_TEST:
-    	ret = /*FXGMAC_TEST_LEN*/fxgmac_ethtool_test_len * 7;
-    	//DPRINTK("ethtool sset cnt ret=%d\n",ret);
-    	break;
     case ETH_SS_STATS:
     	ret = FXGMAC_STATS_COUNT;
     	break;
@@ -1075,7 +1101,7 @@ static void fxgmac_ethtool_get_ethtool_stats(struct net_device *netdev,
 
 #if FXGMAC_PM_FEATURE_ENABLED
     /* 20210709 for net power down */
-    if(!test_bit(FXGMAC_POWER_STATE_DOWN, &pdata->powerstate))
+    if(!test_bit(FXGMAC_POWER_STATE_DOWN, &pdata->expansion.powerstate))
 #endif
     {
     	//DPRINTK("fxgmac_ethtool_get_ethtool_stats, here\n");
@@ -1093,185 +1119,25 @@ static inline bool fxgmac_removed(void __iomem *addr)
     return unlikely(!addr);
 }
 #define FXGMAC_REMOVED(a) fxgmac_removed(a)
-extern u16 fxgmac_cur_tx_skb_q_mapping;
-extern u16 fxgmac_cur_rx_ch_polling;
-extern u16 fxgmac_cur_tx_desc_start_idx;
-static bool fxgmac_dbg_ethtool_tx_desc_access = 0;
-static bool fxgmac_dbg_ethtool_rx_desc_access = 0;
-
-bool fxgmac_diag_tx_test_is_ongoing ( void )
-{
-    return fxgmac_dbg_ethtool_tx_desc_access;
-}
-
-bool fxgmac_diag_rx_test_is_ongoing ( void )
-{
-    return fxgmac_dbg_ethtool_rx_desc_access;
-}
-
-static void fxgmac_diag_test(struct net_device *netdev,
-			    struct ethtool_test *eth_test, u64 *data)
-{
-    struct fxgmac_pdata *pdata = netdev_priv(netdev);
-    //bool if_running = netif_running(netdev);
-    struct fxgmac_desc_data *desc_data;
-    struct fxgmac_dma_desc *dma_desc;
-    struct fxgmac_channel *channel;
-    struct fxgmac_ring *ring;
-    unsigned int ring_idx;
-    unsigned int i,j, cur_desc;
-    u32 temp_desc;
-
-    if (FXGMAC_REMOVED(pdata->mac_addr)) {
-    	netdev_warn(netdev, "Xlgmac diag, adapter removed - test blocked\n");
-    	for(i = 0; i < fxgmac_ethtool_test_len; i++){
-                data[i*7+0] = 0;
-                data[i*7+1] = 0;
-                data[i*7+2] = 0;
-                data[i*7+3] = 0;
-                data[i*7+4] = 0;
-                data[i*7+5] = 0;
-                data[i*7+6] = 0;
-            }
-
-    	eth_test->flags |= ETH_TEST_FL_FAILED;
-    	return;
-    }
-
-    //netdev_info(netdev, "Xlgmac diag test - flag=%08x, %s here\n", eth_test->flags, ((eth_test->flags == ETH_TEST_FL_OFFLINE)?"TX":"RX"));
-    fxgmac_ethtool_test_flag = eth_test->flags;
-
-    //set_bit(__IXGBE_TESTING, &adapter->state);
-    if (eth_test->flags == ETH_TEST_FL_OFFLINE/*1, tx here*/) {
-    	fxgmac_dbg_ethtool_tx_desc_access = 1; //yzhang prevent access to desc both sides
-
-    	if(0xff != fxgmac_cur_tx_skb_q_mapping){
-    		channel = pdata->channel_head + fxgmac_cur_tx_skb_q_mapping;
-    		ring = channel->tx_ring;
-    		ring_idx = fxgmac_cur_tx_skb_q_mapping;
-    		cur_desc = (ring->cur & (ring->dma_desc_count-1));
-    		if(fxgmac_cur_tx_desc_start_idx <= cur_desc){
-    			fxgmac_ethtool_test_len = cur_desc - fxgmac_cur_tx_desc_start_idx;
-    		}
-    		else {
-    			fxgmac_ethtool_test_len = (1024 - fxgmac_cur_tx_desc_start_idx) + cur_desc;
-    		}
-    	}else{
-    		netdev_warn(netdev, "Xlgmac diag, tx is not started yet\n");
-    		for(i = 0; i < fxgmac_ethtool_test_len; i++){
-                	data[i*7+0] = 0;
-                	data[i*7+1] = 0;
-                	data[i*7+2] = 0;
-                	data[i*7+3] = 0;
-                	data[i*7+4] = 0;
-                	data[i*7+5] = 0;
-                	data[i*7+6] = 0;
-    	        }
-
-    		eth_test->flags |= ETH_TEST_FL_FAILED;
-    		fxgmac_dbg_ethtool_tx_desc_access = 0; //yzhang prevent access to desc both sides
-
-    		return;
-    	}
-
-    	//DPRINTK("ethtool dbg:tx ring desc,num=%d,cur=%d\n", fxgmac_ethtool_test_len, cur_desc);
-    	if(cur_desc >= DBG_ETHTOOL_CHECK_NUM_OF_DESC) i = cur_desc - DBG_ETHTOOL_CHECK_NUM_OF_DESC ;
-    	else i = 0;
-
-    	for(j=0/*, i = fxgmac_cur_tx_desc_start_idx*/; i < fxgmac_ethtool_test_len; i++){ 
-    		desc_data = FXGMAC_GET_DESC_DATA(ring, i);
-    		dma_desc = desc_data->dma_desc;
-
-    		temp_desc = dma_desc->desc0 | dma_desc->desc1 | dma_desc->desc2 | dma_desc->desc3;
-    		if(0 == temp_desc){
-    			j++;
-    			continue;
-    		}
-    		//DPRINTK("ethtool dbg:desc val of %d=%u\n", i, temp_desc);
-    		sprintf(&fxgmac_gstrings_test[j*7+0][0], "%s%s, %4u ",fxgmac_gstrings_header[0], ((eth_test->flags == ETH_TEST_FL_OFFLINE)?"TX":"RX"),ring_idx);
-    		sprintf(&fxgmac_gstrings_test[j*7+1][0], "%s%8u ", fxgmac_gstrings_header[1], i & (ring->dma_desc_count-1));
-    		sprintf(&fxgmac_gstrings_test[j*7+2][0], "%s%08x ",fxgmac_gstrings_header[2], (u32)desc_data->dma_desc_addr);
-    		sprintf(&fxgmac_gstrings_test[j*7+3][0], "%s%08x ",fxgmac_gstrings_header[3], (u32)dma_desc->desc0);
-    		sprintf(&fxgmac_gstrings_test[j*7+4][0], "%s%08x ",fxgmac_gstrings_header[4], (u32)dma_desc->desc1);
-    		sprintf(&fxgmac_gstrings_test[j*7+5][0], "%s%08x ",fxgmac_gstrings_header[5], (u32)dma_desc->desc2);
-    		sprintf(&fxgmac_gstrings_test[j*7+6][0], "%s%08x ",fxgmac_gstrings_header[6], (u32)dma_desc->desc3);
-    		//DPRINTK("ethtool dbg:tx ring desc %d, %s\n", i, &fxgmac_gstrings_test[i][0]);
-    		j++;
-    	}
-    	fxgmac_dbg_ethtool_tx_desc_access = 0; //yzhang prevent access to desc both sides
-
-    	fxgmac_ethtool_test_len = j;
-    	if(0 == fxgmac_ethtool_test_len) fxgmac_ethtool_test_len = 1;
-    	
-
-    } else {
-                if(0xff != fxgmac_cur_rx_ch_polling){
-                        channel = pdata->channel_head + fxgmac_cur_rx_ch_polling;
-                        ring = channel->rx_ring;
-                        ring_idx = fxgmac_cur_rx_ch_polling;
-                }else{
-                        netdev_warn(netdev, "Xlgmac diag, rx is not started yet\n");
-                        data[0] = 2;
-                        data[1] = 3;
-                        data[2] = 4;
-                        data[3] = 5;
-                        data[4] = 6;
-                        data[5] = 0;
-                        data[6] = 1;
-                        eth_test->flags |= ETH_TEST_FL_FAILED;
-                        return;
-                }
-
-
-    }
-    for(i = 0; i < fxgmac_ethtool_test_len; i++){
-        	data[i*7+0] = 0;
-        	data[i*7+1] = 0;
-        	data[i*7+2] = 0;
-        	data[i*7+3] = 0;
-        	data[i*7+4] = 0;
-        	data[i*7+5] = 0;
-        	data[i*7+6] = 0;
-    }
-    //skip_ol_tests:
-    //msleep_interruptible(4 * 1000);
-}
-
-
-void fxgmac_diag_get_rx_info(struct fxgmac_channel *channel)
-{
-    struct fxgmac_desc_data *desc_data;
-    struct fxgmac_dma_desc *dma_desc;
-    struct fxgmac_ring *ring;
-    unsigned int ring_idx;
-
-    ring = channel->rx_ring;
-    ring_idx = fxgmac_cur_rx_ch_polling;
-
-    desc_data = FXGMAC_GET_DESC_DATA(ring, ring->cur);
-    dma_desc = desc_data->dma_desc;
-    sprintf(&fxgmac_gstrings_test[0][8], "%s, %u", "RX",ring_idx);
-    sprintf(&fxgmac_gstrings_test[1][8], "%u", ring->cur & (ring->dma_desc_count-1));
-    sprintf(&fxgmac_gstrings_test[2][8], "%08x", (u32)desc_data->dma_desc_addr);
-    sprintf(&fxgmac_gstrings_test[3][8], "%08x", (u32)dma_desc->desc0);
-    sprintf(&fxgmac_gstrings_test[4][8], "%08x", (u32)dma_desc->desc1);
-    sprintf(&fxgmac_gstrings_test[5][8], "%08x", (u32)dma_desc->desc2);
-    sprintf(&fxgmac_gstrings_test[6][8], "%08x", (u32)dma_desc->desc3);
-    //DPRINTK("dev_read call in,diag rx info, ring=%u,desc0=%#x 1=%#x 2=%#x 3=%#x\n",ring->cur,dma_desc->desc0, dma_desc->desc1, dma_desc->desc2, dma_desc->desc3);
-
-}
-
 
 static const struct ethtool_ops fxgmac_ethtool_ops = {
     .get_drvinfo = fxgmac_ethtool_get_drvinfo,
     .get_link = ethtool_op_get_link,
     .get_msglevel = fxgmac_ethtool_get_msglevel,
     .set_msglevel = fxgmac_ethtool_set_msglevel,
-    .self_test		= fxgmac_diag_test,
     .get_channels = fxgmac_ethtool_get_channels,
     .get_coalesce = fxgmac_ethtool_get_coalesce,
     .set_coalesce = fxgmac_ethtool_set_coalesce,
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(5,10,0))
+    /*
+    * The process of set is to get first and then set, 
+    * and the result of get is preserved for values that have not been modified.
+    *
+    * Therefore, when using, it is necessary to ensure that this macro and the 
+    * assignment operation in the get_coalesce are one-to-one correspondence, 
+    * otherwise the macro and parameters will be verified when set, and the error
+    * of "Operation not supported " will be reported if the verification fails
+    */
 #ifdef ETHTOOL_COALESCE_USECS
     .supported_coalesce_params = ETHTOOL_COALESCE_USECS,
 #endif
@@ -1281,10 +1147,11 @@ static const struct ethtool_ops fxgmac_ethtool_ops = {
     .get_ethtool_stats = fxgmac_ethtool_get_ethtool_stats,
     .get_regs_len	= fxgmac_get_regs_len,
     .get_regs		= fxgmac_get_regs,
+    .get_ringparam	= fxgmac_get_ringparam,
+    .set_ringparam	= fxgmac_set_ringparam,
 #if (FXGMAC_RSS_FEATURE_ENABLED)
     .get_rxnfc		= fxgmac_get_rxnfc,
     .set_rxnfc		= fxgmac_set_rxnfc,
-    .get_ringparam	= fxgmac_get_ringparam,
     .get_rxfh_indir_size	= fxgmac_rss_indir_size,
     .get_rxfh_key_size	= fxgmac_get_rxfh_key_size,
     .get_rxfh		= fxgmac_get_rxfh,

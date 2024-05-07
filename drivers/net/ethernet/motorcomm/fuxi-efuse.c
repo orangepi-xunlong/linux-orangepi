@@ -12,13 +12,9 @@ distribute without commercial permission.
 #include "fuxi-gmac.h"
 #include "fuxi-gmac-reg.h"
 #include "fuxi-efuse.h"
-#if defined(UEFI)
+
+#ifdef UEFI
 #include "nic_sw.h"
-#elif defined(LINUX)
-#elif defined(_WIN32) || defined(_WIN64)
-#elif defined(UBOOT)
-#include "fuxi-dbg.h"
-#else
 #endif
 
 bool fxgmac_read_patch_from_efuse_per_index(struct fxgmac_pdata* pdata, u8 index, u32* offset, u32* value) /* read patch per index. */
@@ -626,7 +622,7 @@ bool fxgmac_efuse_write_data(struct fxgmac_pdata* pdata, u32 offset, u32 value)
     return succeed;
 }
 
-void fxgmac_read_led_efuse_config(struct fxgmac_pdata* pdata, struct led_setting* pfirst, struct led_setting* psecond)
+static void fxgmac_read_led_efuse_config(struct fxgmac_pdata* pdata, struct led_setting* pfirst, struct led_setting* psecond)
 {
     u32 val_high = 0, val_low = 0;
 

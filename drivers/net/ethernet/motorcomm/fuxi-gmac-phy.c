@@ -174,36 +174,6 @@ busy_exit:
     return -1;
 }
 
-/* this function used to double check the speed. for fiber, to correct there is no 10M */
-static int fxgmac_ephy_adjust_status(u32 lport, int val, int is_utp, int* speed, int* duplex)
-{
-    int speed_mode;
-
-    //DPRINTK ("8614 status adjust call in...\n");
-    *speed = -1;
-    *duplex = (val & BIT(FUXI_EPHY_DUPLEX_BIT)) >> FUXI_EPHY_DUPLEX_BIT;
-    speed_mode = (val & FUXI_EPHY_SPEED_MODE) >> FUXI_EPHY_SPEED_MODE_BIT;
-    switch (speed_mode) {
-    case 0:
-    	if (is_utp)
-    		*speed = SPEED_10M;
-    	break;
-    case 1:
-    	*speed = SPEED_100M;
-    	break;
-    case 2:
-    	*speed = SPEED_1000M;
-    	break;
-    case 3:
-    	break;
-    default:
-    	break;
-    }
-    //DPRINTK (KERN_INFO "8521 status adjust call out,regval=0x%04x,mode=%s,speed=%dm...\n", val,is_utp?"utp":"fiber", phydev->speed);
-
-    return 0;
-}
-
 int fxgmac_ephy_soft_reset(struct fxgmac_pdata *pdata)
 {
     struct fxgmac_hw_ops *hw_ops = &pdata->hw_ops;
@@ -234,6 +204,34 @@ busy_exit:
     DPRINTK("fxgmac_ephy_soft_reset exit due to ephy reg access fail.\n");
 
     return ret;
+}
+
+/* this function used to double check the speed. for fiber, to correct there is no 10M */
+static int fxgmac_ephy_adjust_status(u32 lport, int val, int is_utp, int* speed, int* duplex)
+{
+    int speed_mode;
+
+    *speed = -1;
+    *duplex = (val & BIT(FUXI_EPHY_DUPLEX_BIT)) >> FUXI_EPHY_DUPLEX_BIT;
+    speed_mode = (val & FUXI_EPHY_SPEED_MODE) >> FUXI_EPHY_SPEED_MODE_BIT;
+    switch (speed_mode) {
+    case 0:
+    	if (is_utp)
+    		*speed = SPEED_10M;
+    	break;
+    case 1:
+    	*speed = SPEED_100M;
+    	break;
+    case 2:
+    	*speed = SPEED_1000M;
+    	break;
+    case 3:
+    	break;
+    default:
+    	break;
+    }
+
+    return 0;
 }
 
 /*
@@ -279,7 +277,7 @@ int fxgmac_ephy_status_get(struct fxgmac_pdata *pdata, int* speed, int* duplex, 
     	*speed= -1;
     	*duplex = -1;
     }
-    //DPRINTK (KERN_INFO "8614 read status call out,link=%d,linkmode=%d\n", ret_link, link_mode_8614[lport] );
+
     return 0;
 
 busy_exit:
@@ -288,6 +286,7 @@ busy_exit:
     return ret;
 }
 
+#if 0
 /**
  * fxgmac_phy_update_link - update the phy link status
  * @adapter: pointer to the device adapter structure
@@ -339,12 +338,6 @@ static void fxgmac_phy_update_link(struct net_device *netdev)
             hw_ops->read_ephy_reg(pdata, 0x1/* ephy latched status */, (unsigned int *)&ephy_val1);
             hw_ops->read_ephy_reg(pdata, 0x1/* ephy latched status */, (unsigned int *)&ephy_val2);
             DPRINTK("%s phy reg1=0x%04x, 0x%04x\n", __FUNCTION__, ephy_val1 & 0xffff, ephy_val2 & 0xffff);
-        	
-            /* phy reg 1 bit2: link state */
-            if((ephy_val1 & 0x4) != (ephy_val2 & 0x4))
-            {
-                pdata->stats.ephy_link_change_cnt++;
-            }
     	}
     }
 }
@@ -356,7 +349,7 @@ static void fxgmac_phy_link_poll(unsigned long data)
 #endif
 {
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(4,15,0))
-    struct fxgmac_pdata *pdata = from_timer(pdata, t, phy_poll_tm);
+    struct fxgmac_pdata *pdata = from_timer(pdata, t, expansion.phy_poll_tm);
 #else
     struct fxgmac_pdata *pdata = (struct fxgmac_pdata*)data;
 #endif
@@ -371,7 +364,7 @@ static void fxgmac_phy_link_poll(unsigned long data)
 
 #if FXGMAC_PM_FEATURE_ENABLED
     /* 20210709 for net power down */
-    if(!test_bit(FXGMAC_POWER_STATE_DOWN, &pdata->powerstate))
+    if(!test_bit(FXGMAC_POWER_STATE_DOWN, &pdata->expansion.powerstate))
 #endif
     {
     	//yzhang if(2 > pdata->stats.ephy_poll_timer_cnt)
@@ -380,7 +373,7 @@ static void fxgmac_phy_link_poll(unsigned long data)
     	}
     	fxgmac_phy_update_link(pdata->netdev);
     }else {
-    	DPRINTK("fuxi_phy_timer polling, powerstate changed, %ld, netdev=%lx, tm=%lx\n", pdata->powerstate, (unsigned long)(pdata->netdev), (unsigned long)&pdata->phy_poll_tm);
+    	DPRINTK("fuxi_phy_timer polling, powerstate changed, %ld, netdev=%lx, tm=%lx\n", pdata->expansion.powerstate, (unsigned long)(pdata->netdev), (unsigned long)&pdata->phy_poll_tm);
     }		
 
     //DPRINTK("fuxi_phy_timer polled,%d\n",cnt_polling);
@@ -400,7 +393,7 @@ void fxgmac_phy_timer_resume(struct fxgmac_pdata *pdata)
 
     mod_timer(&pdata->phy_poll_tm,jiffies + HZ / 2);
 
-    DPRINTK("fxgmac_phy_timer_resume ok, fxgmac powerstate=%ld, netdev=%lx, tm=%lx\n", pdata->powerstate, (unsigned long)(pdata->netdev), (unsigned long)&pdata->phy_poll_tm);
+    DPRINTK("fxgmac_phy_timer_resume ok, fxgmac powerstate=%ld, netdev=%lx, tm=%lx\n", pdata->expansion.powerstate, (unsigned long)(pdata->netdev), (unsigned long)&pdata->phy_poll_tm);
 }
 
 int fxgmac_phy_timer_init(struct fxgmac_pdata *pdata)
@@ -426,3 +419,4 @@ void fxgmac_phy_timer_destroy(struct fxgmac_pdata *pdata)
     del_timer_sync(&pdata->phy_poll_tm);
     DPRINTK("fuxi_phy_timer removed\n");
 }
+#endif

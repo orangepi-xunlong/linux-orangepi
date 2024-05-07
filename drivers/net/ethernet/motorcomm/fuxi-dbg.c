@@ -19,11 +19,10 @@ Notes:
 
 --*/
 
-#include "fuxi-os.h"
+#include "fuxi-gmac.h"
 
 #if defined(UEFI)
 #include <Library/UefiLib.h>
-#include "fuxi-dbg.h"
 
 
 UINT32   MPDebugLevel = MP_LOUD;
@@ -67,16 +66,8 @@ void fxgmac_dump_buffer(unsigned char *skb, unsigned int len, int tx_rx)
 }
 
 #elif defined(_WIN64) || defined(_WIN32)
-
-//#include "precomp.h"
-#include <ntddk.h>
-#include <ndis.h>
-#include <stdio.h>
 #include "fuxi-gmac-reg.h"
-#include "fuxi-dbg.h"
-#include "fuxi-gmac.h"
 #include "fuxi-mp.h"
-
 #if DBG
 
 /**
@@ -510,7 +501,6 @@ DbgPrintAddress(
 #elif defined(LINUX)
 
 #elif defined(UBOOT)
-#include "fuxi-dbg.h"
 #ifdef DBG
 u32   MPDebugLevel = MP_LOUD;
 #endif

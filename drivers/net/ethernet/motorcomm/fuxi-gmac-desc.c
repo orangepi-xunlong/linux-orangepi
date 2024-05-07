@@ -15,13 +15,7 @@ distribute without commercial permission.
 #if defined(UEFI)
 #include "nic_sw.h"
 #elif defined(_WIN32) || defined(_WIN64)
-#define NTSTRSAFE_LIB
-#include <ntstrsafe.h>
 #include "fuxi-mp.h"
-#elif defined(LINUX)
-#elif defined(UBOOT)
-#include "fuxi-os.h"
-#else
 #endif
 
 static void fxgmac_unmap_desc_data(struct fxgmac_pdata* pdata,
@@ -399,9 +393,15 @@ static int fxgmac_alloc_channels(struct fxgmac_pdata *pdata)
     int ret = -ENOMEM;
     unsigned int i;
 
+#ifdef CONFIG_PCI_MSI
+    u32 msix = FXGMAC_GET_REG_BITS(pdata->expansion.int_flags,
+                                    FXGMAC_FLAG_MSIX_POS,
+                                    FXGMAC_FLAG_MSIX_LEN);
+#endif
+
     channel_head = kcalloc(pdata->channel_count,
     		       sizeof(struct fxgmac_channel), GFP_KERNEL);
-    if(netif_msg_drv(pdata)) DPRINTK("alloc_channels,channel_head=%p,size=ch_cnt %d*%ld\n", channel_head, pdata->channel_count,sizeof(struct fxgmac_channel));
+    if(netif_msg_drv(pdata)) DPRINTK("alloc_channels,channel_head=%p,size=%d*%ld\n", channel_head, pdata->channel_count,sizeof(struct fxgmac_channel));
 
     if (!channel_head)
     	return ret;
@@ -414,13 +414,13 @@ static int fxgmac_alloc_channels(struct fxgmac_pdata *pdata)
     if (!tx_ring)
     	goto err_tx_ring;
 
-    if(netif_msg_drv(pdata)) DPRINTK("alloc_channels,tx_ring=%p,size=cnt %d*%ld\n", tx_ring, pdata->tx_ring_count,sizeof(struct fxgmac_ring));
+    if(netif_msg_drv(pdata)) DPRINTK("alloc_channels,tx_ring=%p,size=%d*%ld\n", tx_ring, pdata->tx_ring_count,sizeof(struct fxgmac_ring));
     rx_ring = kcalloc(pdata->rx_ring_count, sizeof(struct fxgmac_ring),
     		  GFP_KERNEL);
     if (!rx_ring)
     	goto err_rx_ring;
 
-    if(netif_msg_drv(pdata)) DPRINTK("alloc_channels,rx_ring=%p,size=cnt %d*%ld\n", rx_ring, pdata->rx_ring_count,sizeof(struct fxgmac_ring));
+    if(netif_msg_drv(pdata)) DPRINTK("alloc_channels,rx_ring=%p,size=%d*%ld\n", rx_ring, pdata->rx_ring_count,sizeof(struct fxgmac_ring));
     //DPRINTK("fxgmac_alloc_channels ch_num=%d,rxring=%d,txring=%d\n",pdata->channel_count, pdata->rx_ring_count,pdata->tx_ring_count);
 
     for (i = 0, channel = channel_head; i < pdata->channel_count;
@@ -435,11 +435,10 @@ static int fxgmac_alloc_channels(struct fxgmac_pdata *pdata)
     		/* Get the per DMA interrupt */
 #ifdef CONFIG_PCI_MSI
     		//20210526 for MSIx
-    		if(pdata->int_flags & (FXGMAC_FLAG_MSIX_CAPABLE | FXGMAC_FLAG_MSIX_ENABLED)) {
-    			pdata->channel_irq[i] = pdata->p_msix_entries[i].vector;
-#if FXGMAC_TX_INTERRUPT_EN
+    		if(msix) {
+    			pdata->channel_irq[i] = pdata->expansion.msix_entries[i].vector;
     			if (FXGMAC_IS_CHANNEL_WITH_TX_IRQ(i)) {
-    				pdata->channel_irq[FXGMAC_MAX_DMA_CHANNELS] = pdata->p_msix_entries[FXGMAC_MAX_DMA_CHANNELS].vector;
+    				pdata->channel_irq[FXGMAC_MAX_DMA_CHANNELS] = pdata->expansion.msix_entries[FXGMAC_MAX_DMA_CHANNELS].vector;
 
     				if (pdata->channel_irq[FXGMAC_MAX_DMA_CHANNELS] < 0) {
     					netdev_err(pdata->netdev,
@@ -448,10 +447,9 @@ static int fxgmac_alloc_channels(struct fxgmac_pdata *pdata)
     					goto err_irq;
     				}
 
-    				channel->dma_irq_tx = pdata->channel_irq[FXGMAC_MAX_DMA_CHANNELS];
-    				DPRINTK("fxgmac_alloc_channels, for MSIx, channel %d dma_irq_tx=%u\n", i, channel->dma_irq_tx);
+    				channel->expansion.dma_irq_tx = pdata->channel_irq[FXGMAC_MAX_DMA_CHANNELS];
+    				DPRINTK("fxgmac_alloc_channels, for MSIx, channel %d dma_irq_tx=%u\n", i, channel->expansion.dma_irq_tx);
     			}
-#endif				
     		}
 #endif
     		ret = pdata->channel_irq[i];
@@ -595,9 +593,9 @@ static int fxgmac_alloc_channels(struct fxgmac_pdata* pdata)
 
          /* set tx/rx channel*/
 #if 1
-         pdata->tx_channel = pdata->channel_head;
+         pdata->expansion.tx_channel = pdata->channel_head;
 
-         pdata->rx_channel = pdata->channel_head;
+         pdata->expansion.rx_channel = pdata->channel_head;
 #else
          if(i == 0)
              pdata->tx_channel = &pdata->channel_head[i];
@@ -822,7 +820,7 @@ static int fxgmac_map_rx_buffer(struct fxgmac_pdata* pdata,
     	pdata->rx_buf_size);
 #endif
     struct sk_buff *skb;
-    skb = __netdev_alloc_skb_ip_align(pdata->netdev, pdata->rx_buf_size, GFP_KERNEL);
+    skb = __netdev_alloc_skb_ip_align(pdata->netdev, pdata->rx_buf_size, GFP_ATOMIC);
     if (!skb) {
         netdev_err(pdata->netdev,
                        "%s: Rx init fails; skb is NULL\n", __func__);
@@ -867,7 +865,7 @@ static void fxgmac_hw_tx_desc_init(struct fxgmac_channel *channel)
 
     /* Initialize all descriptors */
     for (i = 0; i < NIC_DEF_TBDS; i++) {
-        desc_data = pdata->tx_desc_list + i;
+        desc_data = pdata->expansion.tx_desc_list + i;
 
         /* Initialize Tx descriptor */
         yt6801_desc_reset(desc_data);
@@ -886,10 +884,10 @@ static void fxgmac_hw_tx_desc_init(struct fxgmac_channel *channel)
 #endif
     /* Update the starting address of descriptor ring */
     writereg(pdata->pAdapter, upper_32_bits(cpu_to_le64(bus_to_phys(pdata->pdev,
-	(pci_addr_t)(unsigned long)pdata->tx_desc_list))),//adpt->TbdPhyAddr
+	(pci_addr_t)(unsigned long)pdata->expansion.tx_desc_list))),//adpt->TbdPhyAddr
         FXGMAC_DMA_REG(channel, DMA_CH_TDLR_HI));
     writereg(pdata->pAdapter, lower_32_bits(cpu_to_le64(bus_to_phys(pdata->pdev,
-	(pci_addr_t)(unsigned long)pdata->tx_desc_list))),//adpt->TbdPhyAddr
+	(pci_addr_t)(unsigned long)pdata->expansion.tx_desc_list))),//adpt->TbdPhyAddr
         FXGMAC_DMA_REG(channel, DMA_CH_TDLR_LO));
 #if 0
     DbgPrintF(MP_TRACE, "Read tx starting high address:%x\n",
@@ -901,7 +899,7 @@ static void fxgmac_hw_tx_desc_init(struct fxgmac_channel *channel)
 
 static void fxgmac_tx_desc_init(struct fxgmac_pdata* pdata)
 {
-    fxgmac_hw_tx_desc_init(pdata->tx_channel);
+    fxgmac_hw_tx_desc_init(pdata->expansion.tx_channel);
 }
 
 static void fxgmac_hw_rx_desc_init(struct fxgmac_channel *channel)
@@ -913,12 +911,12 @@ static void fxgmac_hw_rx_desc_init(struct fxgmac_channel *channel)
 
     /* Initialize all descriptors */
     for (i = 0; i < NIC_DEF_RECV_BUFFERS; i++) {
-        desc_data = pdata->rx_desc_list + i;
+        desc_data = pdata->expansion.rx_desc_list + i;
 
         /* Initialize Rx descriptor */
         yt6801_desc_reset(desc_data);
-        desc_data->desc0 = lower_32_bits(bus_to_phys(pdata->pdev, (pci_addr_t)(unsigned long)(pdata->rx_buffer)));
-        desc_data->desc1 = upper_32_bits(bus_to_phys(pdata->pdev, (pci_addr_t)(unsigned long)(pdata->rx_buffer)));
+        desc_data->desc0 = lower_32_bits(bus_to_phys(pdata->pdev, (pci_addr_t)(unsigned long)(pdata->expansion.rx_buffer)));
+        desc_data->desc1 = upper_32_bits(bus_to_phys(pdata->pdev, (pci_addr_t)(unsigned long)(pdata->expansion.rx_buffer)));
 	    desc_data->desc3 = FXGMAC_SET_REG_BITS_LE(
                 desc_data->desc3,
                 RX_NORMAL_DESC3_BUF2V_POS,
@@ -948,10 +946,10 @@ static void fxgmac_hw_rx_desc_init(struct fxgmac_channel *channel)
 #endif
     /* Update the starting address of descriptor ring */
     writereg(pdata->pAdapter, upper_32_bits(cpu_to_le64(bus_to_phys(pdata->pdev,
-	(pci_addr_t)(unsigned long)pdata->rx_desc_list))),
+	(pci_addr_t)(unsigned long)pdata->expansion.rx_desc_list))),
         FXGMAC_DMA_REG(channel, DMA_CH_RDLR_HI));
     writereg(pdata->pAdapter, lower_32_bits(cpu_to_le64(bus_to_phys(pdata->pdev,
-	(pci_addr_t)(unsigned long)pdata->rx_desc_list))),
+	(pci_addr_t)(unsigned long)pdata->expansion.rx_desc_list))),
         FXGMAC_DMA_REG(channel, DMA_CH_RDLR_LO));
 #if 0
     DbgPrintF(MP_TRACE, "Read rx starting high address:%x\n",
@@ -960,7 +958,7 @@ static void fxgmac_hw_rx_desc_init(struct fxgmac_channel *channel)
 		    readreg(pdata->pAdapter, FXGMAC_DMA_REG(channel, DMA_CH_RDLR_LO)));
 #endif
 
-    HwRbdPa = (uint64_t)pdata->rx_desc_list + (NIC_DEF_RECV_BUFFERS) * sizeof(struct fxgmac_dma_desc);
+    HwRbdPa = (uint64_t)pdata->expansion.rx_desc_list + (NIC_DEF_RECV_BUFFERS) * sizeof(struct fxgmac_dma_desc);
     /* Update the Rx Descriptor Tail Pointer */
     writereg(pdata->pAdapter, lower_32_bits((unsigned long)HwRbdPa), FXGMAC_DMA_REG(channel, DMA_CH_RDTR_LO));
 
@@ -969,7 +967,7 @@ static void fxgmac_hw_rx_desc_init(struct fxgmac_channel *channel)
 
 static void fxgmac_rx_desc_init(struct fxgmac_pdata* pdata)
 {
-    fxgmac_hw_rx_desc_init(pdata->rx_channel);
+    fxgmac_hw_rx_desc_init(pdata->expansion.rx_channel);
 }
 
 #else
@@ -1082,13 +1080,17 @@ static int fxgmac_map_tx_skb(struct fxgmac_channel *channel,
     unsigned int offset, datalen, len;
     struct fxgmac_pkt_info *pkt_info;
 #if ( LINUX_VERSION_CODE >= KERNEL_VERSION(5,0,0) )
-    /*struct */skb_frag_t *frag;
+    skb_frag_t *frag;
 #else
     struct skb_frag_struct *frag;
 #endif
     unsigned int tso, vlan;
     dma_addr_t skb_dma;
     unsigned int i;
+#if 0
+    void* addr;
+    struct skb_shared_info *info = skb_shinfo(skb);
+#endif
 
     offset = 0;
     start_index = ring->cur;
@@ -1109,8 +1111,7 @@ static int fxgmac_map_tx_skb(struct fxgmac_channel *channel,
     if ((tso && (pkt_info->mss != ring->tx.cur_mss)) ||
         (vlan && (pkt_info->vlan_ctag != ring->tx.cur_vlan_ctag)))
     {
-    	//cur_index++;
-    	cur_index = FXGMAC_GET_ENTRY(cur_index, ring->dma_desc_count);
+        cur_index = FXGMAC_GET_ENTRY(cur_index, ring->dma_desc_count);
     }
     desc_data = FXGMAC_GET_DESC_DATA(ring, cur_index);
 
@@ -1132,7 +1133,6 @@ static int fxgmac_map_tx_skb(struct fxgmac_channel *channel,
 
     	pkt_info->length += pkt_info->header_len;
 
-    	//cur_index++;
     	cur_index = FXGMAC_GET_ENTRY(cur_index, ring->dma_desc_count);
     	desc_data = FXGMAC_GET_DESC_DATA(ring, cur_index);
     }
@@ -1158,7 +1158,6 @@ static int fxgmac_map_tx_skb(struct fxgmac_channel *channel,
 
     	pkt_info->length += len;
 
-    	//cur_index++;
     	cur_index = FXGMAC_GET_ENTRY(cur_index, ring->dma_desc_count);
     	desc_data = FXGMAC_GET_DESC_DATA(ring, cur_index);
     }
@@ -1166,17 +1165,25 @@ static int fxgmac_map_tx_skb(struct fxgmac_channel *channel,
     for (i = 0; i < skb_shinfo(skb)->nr_frags; i++) {
     	netif_dbg(pdata, tx_queued, pdata->netdev,
     		  "mapping frag %u\n", i);
-
-    	frag = &skb_shinfo(skb)->frags[i];
-
-    	offset = 0;
+#if 0
+        frag = info->frags + i;
+        len = skb_frag_size(frag);
+        addr = skb_frag_address(frag);
+#else
+        frag = &skb_shinfo(skb)->frags[i];
+#endif
+        offset = 0;
 
     	for (datalen = skb_frag_size(frag); datalen; ) {
     		len = min_t(unsigned int, datalen,
     			    FXGMAC_TX_MAX_BUF_SIZE);
 
-    		skb_dma = skb_frag_dma_map(pdata->dev, frag, offset,
-    					   len, DMA_TO_DEVICE);
+#if 1
+            skb_dma = skb_frag_dma_map(pdata->dev, frag, offset,
+                            len, DMA_TO_DEVICE);
+#else
+            skb_dma = dma_map_single(pdata->dev, addr + offset, len, DMA_TO_DEVICE);
+#endif
     		if (dma_mapping_error(pdata->dev, skb_dma)) {
     			netdev_alert(pdata->netdev,
     				     "skb_frag_dma_map failed\n");
@@ -1184,7 +1191,9 @@ static int fxgmac_map_tx_skb(struct fxgmac_channel *channel,
     		}
     		desc_data->skb_dma = skb_dma;
     		desc_data->skb_dma_len = len;
+#if 1
     		desc_data->mapped_as_page = 1;
+#endif
     		netif_dbg(pdata, tx_queued, pdata->netdev,
     			  "skb frag: index=%u, dma=%pad, len=%u\n",
     			  cur_index, &skb_dma, len);
@@ -1194,7 +1203,6 @@ static int fxgmac_map_tx_skb(struct fxgmac_channel *channel,
 
     		pkt_info->length += len;
 
-    		//cur_index++;
     		cur_index = FXGMAC_GET_ENTRY(cur_index, ring->dma_desc_count);
     		desc_data = FXGMAC_GET_DESC_DATA(ring, cur_index);
     	}
@@ -1204,12 +1212,10 @@ static int fxgmac_map_tx_skb(struct fxgmac_channel *channel,
      * that has been mapped so desc_data is always advanced past the last
      * piece of mapped data - use the entry pointed to by cur_index - 1.
      */
-    //desc_data = FXGMAC_GET_DESC_DATA(ring, cur_index - 1);
     desc_data = FXGMAC_GET_DESC_DATA(ring, (cur_index - 1) & (ring->dma_desc_count - 1));
     desc_data->skb = skb;
 
     /* Save the number of descriptor entries used */
-    //pkt_info->desc_count = cur_index - start_index;
     if (start_index <= cur_index)
     	pkt_info->desc_count = cur_index - start_index;
     else
@@ -1219,7 +1225,6 @@ static int fxgmac_map_tx_skb(struct fxgmac_channel *channel,
 
 err_out:
     while (start_index < cur_index) {
-    	//desc_data = FXGMAC_GET_DESC_DATA(ring, start_index++);
     	desc_data = FXGMAC_GET_DESC_DATA(ring, start_index);
     	start_index = FXGMAC_GET_ENTRY(start_index, ring->dma_desc_count);
     	fxgmac_unmap_desc_data(pdata, desc_data);

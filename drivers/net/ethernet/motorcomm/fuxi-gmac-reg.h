@@ -13,6 +13,9 @@ distribute without commercial permission.
 
 #define  AISC_MODE
 
+#define FUXI_REV_01                             0x01    // The first NTO version.
+#define FUXI_REV_03                             0x03    // ECO back on 07/2023.
+
 /* MAC register offsets */
 #define MAC_OFFSET                              0x2000
 #define MAC_CR                                  0x0000  //The MAC Configuration Register 
@@ -910,6 +913,8 @@ distribute without commercial permission.
                                                   the DA Filter in the MAC.*/
 #define RX_NORMAL_DESC2_WB_DAF_LEN          1
 
+#define RX_NORMAL_DESC3_WB_LD_POS           28
+#define RX_NORMAL_DESC3_WB_LD_LEN           1
 #define RX_NORMAL_DESC3_WB_RS0V_POS	        25 // When this bit is set, it indicates that the status in RDES0 is valid and it is written by the DMA.
 #define RX_NORMAL_DESC3_WB_RS0V_LEN         1
 #define RX_NORMAL_DESC3_WB_CE_POS	        24 // When this bit is set, it indicates that a Cyclic Redundancy Check (CRC) Error occurred on the
@@ -1010,16 +1015,18 @@ distribute without commercial permission.
 #define FXGMAC_EPHY_REGS_LEN                    32	//32 ethernet phy registers under spec
 
 #define REG_MII_BMCR                            0x00    /* Basic mode control register */
-#define PHY_CR_RESET_POS			              15
-#define PHY_CR_RESET_LEN			              1
-#define PHY_CR_SPEED_SEL_H_POS			6
-#define PHY_CR_SPEED_SEL_H_LEN			1
-#define PHY_CR_SPEED_SEL_L_POS			13
-#define PHY_CR_SPEED_SEL_L_LEN			1
-#define PHY_CR_AUTOENG_POS		    	12
-#define PHY_CR_AUTOENG_LEN	     		1
-#define PHY_CR_DUPLEX_POS		    	8
-#define PHY_CR_DUPLEX_LEN	     		1
+#define PHY_CR_RESET_POS                15
+#define PHY_CR_RESET_LEN                1
+#define PHY_CR_SPEED_SEL_H_POS          6
+#define PHY_CR_SPEED_SEL_H_LEN          1
+#define PHY_CR_SPEED_SEL_L_POS          13
+#define PHY_CR_SPEED_SEL_L_LEN          1
+#define PHY_CR_AUTOENG_POS              12
+#define PHY_CR_AUTOENG_LEN              1
+#define PHY_CR_RE_AUTOENG_POS           9
+#define PHY_CR_RE_AUTOENG_LEN           1
+#define PHY_CR_DUPLEX_POS               8
+#define PHY_CR_DUPLEX_LEN               1
 #define REG_MII_BMCR_ENABLE_LOOPBACK            0x8140
 #define REG_MII_BMCR_DISABLE_LOOPBACK           0x9140
 #define REG_MII_BMSR          0x01    /* Basic mode status register  */
@@ -1268,12 +1275,16 @@ distribute without commercial permission.
 #define MGMT_EPHY_CTRL_STA_EPHY_RESET           0 // 0: reset state.
 #define MGMT_EPHY_CTRL_STA_EPHY_RELEASE         1 // 1: release state.
 #define MGMT_EPHY_CTRL_STA_EPHY_LINKUP          2 // 1: link up; 0: link down.
+#define MGMT_EPHY_CTRL_STA_EPHY_LINKUP_POS      1
+#define MGMT_EPHY_CTRL_STA_EPHY_LINKUP_LEN      1
 #define MGMT_EPHY_CTRL_STA_EPHY_DUPLEX_POS      2 // ephy duplex  
 #define MGMT_EPHY_CTRL_STA_EPHY_DUPLEX_LEN      1 // 
 
 #define MGMT_EPHY_CTRL_STA_SPEED_POS	        3
 #define MGMT_EPHY_CTRL_STA_SPEED_LEN	        2
 #define MGMT_EPHY_CTRL_STA_SPEED_MASK           0x18
+
+#define MGMT_EPHY_CTRL_ERROR_VAULE              0xFFFFFFFF
 
 #define MGMT_PCIE_EP_CTRL                       0x1008
 
@@ -1329,10 +1340,9 @@ distribute without commercial permission.
 #define MGMT_INT_CTRL0_INT_STATUS_RXCH_POS  0
 #define MGMT_INT_CTRL0_INT_STATUS_RXCH_LEN  4
 #define MGMT_INT_CTRL0_INT_STATUS_RXCH_MASK 0xF
-#if FXGMAC_TX_INTERRUPT_EN
 #define MGMT_INT_CTRL0_INT_STATUS_RXTX_LEN	5
 #define MGMT_INT_CTRL0_INT_STATUS_RXTX_MASK	0x1F
-#endif
+#define MGMT_INT_CTRL0_INT_STATUS_RXTXPHY_MASK	0x3F
 
 #define MGMT_INT_CTRL0_INT_MASK_TXCH_POS	20
 #define MGMT_INT_CTRL0_INT_STATUS_TXCH_POS	4
@@ -1344,6 +1354,7 @@ distribute without commercial permission.
 #define INT_CTRL1                               0x1104
 #define INT_CTRL1_TMR_CNT_CFG_MAX_POS           0        /* Timer counter cfg max. Default 0x19, 1us. */
 #define INT_CTRL1_TMR_CNT_CFG_MAX_LEN           10
+#define INT_CTRL1_TMR_CNT_CFG_DEF_VAL           0x19
 #define INT_CTRL1_MSI_AIO_EN_POS                16
 #define INT_CTRL1_MSI_AIO_EN_LEN                1
 
@@ -1405,6 +1416,9 @@ system exit idle state, send out one LTR exit message.
 #define  LPW_CTRL                               0x1188
 #define  LPW_CTRL_L1SS_EN_POS                   22
 #define  LPW_CTRL_L1SS_EN_LEN                   1
+#define  LPW_CTRL_L1SS_SEL_POS                  21  /* 0 - up to both CFG0x158 and reg1188 L1ss setting. 1 - up to CFG0x158 L1ss setting. */
+#define  LPW_CTRL_L1SS_SEL_LEN                  1
+#define  LPW_CTRL_L1SS_SEL_CFG                  1   /* */
 #define  LPW_CTRL_ASPM_L1_CPM_POS               19  /*L1.CPM mode enable bit. Default 0,set as 1 enable this mode. clkreq pin need to connect RC*/
 #define  LPW_CTRL_ASPM_L1_CPM_LEN               1
 #define  LPW_CTRL_ASPM_L0S_EN_POS               17
@@ -1433,7 +1447,44 @@ system exit idle state, send out one LTR exit message.
 #define  SYS_RESET_POS                          31
 #define  SYS_RESET_LEN                          1
 
-#define  REG_PCIE_SERDES_PLL                    0X199C
+#define  REG_PCIE_PSM_STATE                     0x1994  /* PCIe PHY power state. */
+#define  PCIE_PSM_STATE_POS                     0
+#define  PCIE_PSM_STATE_LEN                     4
+#define  PCIE_PSM_STATE_P0                      2
+#define  PCIE_PSM_STATE_P0s                     3
+#define  PCIE_PSM_STATE_P1                      4
+#define  PCIE_PSM_STATE_P1_CPM                  5
+#define  PCIE_PSM_STATE_P1_1                    6
+#define  PCIE_PSM_STATE_P1_2                    7
+#define  PCIE_PSM_STATE_P2                      8
+
+#define  REG_PCIE_SERDES_STATUS                 0x1998
+#define  PCIE_SERDES_STATUS_DRV_ON_POS          11
+#define  PCIE_SERDES_STATUS_DRV_ON_LEN          1
+#define  PCIE_SERDES_STATUS_RX_PD_POS           10
+#define  PCIE_SERDES_STATUS_RX_PD_LEN           1
+#define  PCIE_SERDES_STATUS_PI_PD_POS           9
+#define  PCIE_SERDES_STATUS_PI_PD_LEN           1
+#define  PCIE_SERDES_STATUS_SIGDET_ON_POS       8
+#define  PCIE_SERDES_STATUS_SIGDET_ON_LEN       1
+#define  PCIE_SERDES_STATUS_TX_VCM_POS          7
+#define  PCIE_SERDES_STATUS_TX_VCM_LEN          1
+#define  PCIE_SERDES_STATUS_RX_RT50_POS         6
+#define  PCIE_SERDES_STATUS_RX_RT50_LEN         1
+#define  PCIE_SERDES_STATUS_BEACON_ON_POS       5
+#define  PCIE_SERDES_STATUS_BEACON_ON_LEN       1
+#define  PCIE_SERDES_STATUS_PLL_ON_POS          4
+#define  PCIE_SERDES_STATUS_PLL_ON_LEN          1
+#define  PCIE_SERDES_STATUS_REFCLK_ON_POS       3
+#define  PCIE_SERDES_STATUS_REFCLK_ON_LEN       1
+#define  PCIE_SERDES_STATUS_LDO_ON_POS          2
+#define  PCIE_SERDES_STATUS_LDO_ON_LEN          1
+#define  PCIE_SERDES_STATUS_HW_EN_SDS_BIAS_POS  1
+#define  PCIE_SERDES_STATUS_HW_EN_SDS_BIAS_LEN  1
+#define  PCIE_SERDES_STATUS_HW_BIAS_ON_POS      0
+#define  PCIE_SERDES_STATUS_HW_BIAS_ON_LEN      1
+
+#define  REG_PCIE_SERDES_PLL                    0x199C
 #define  PCIE_SERDES_PLL_AUTOOFF_POS            0
 #define  PCIE_SERDES_PLL_AUTOOFF_LEN            1
 
@@ -1699,8 +1750,9 @@ system exit idle state, send out one LTR exit message.
 #define EFUSE_LED_COMMON_SOLUTION       0x1F
 
 /******************** Below for pcie configuration register. *********************/
-#define REG_PCI_VENDOR_ID                       0x0     /* WORD reg */
+#define REG_PCI_VENDOR_ID                       0x0     /* WORD reg */ 
 #define REG_PCI_DEVICE_ID                       0x2     /* WORD reg */
+#define PCI_DEVICE_ID_FUXI                      0x6801
 
 #define REG_PCI_COMMAND                         0x4
 #define PCI_COMMAND_IO_SPACE_POS                0
@@ -1754,6 +1806,11 @@ system exit idle state, send out one LTR exit message.
 #define REG_PCI_LINK_CTRL                       0x80
 #define PCI_LINK_CTRL_CONTROL_POS               0
 #define PCI_LINK_CTRL_CONTROL_LEN               16
+#define PCI_LINK_CTRL_ASPM_CONTROL_POS          0
+#define PCI_LINK_CTRL_ASPM_CONTROL_LEN          2
+#define PCI_LINK_CTRL_L1_STATUS                 2
+#define PCI_LINK_CTRL_CONTROL_CPM_POS           8       /*L1.CPM mode enable bit. Default 0,set as 1 enable this mode. clkreq pin need to connect RC*/
+#define PCI_LINK_CTRL_CONTROL_CPM_LEN           1
 #define PCI_LINK_CTRL_STATUS_POS                16
 #define PCI_LINK_CTRL_STATUS_LEN                16
  
@@ -1783,6 +1840,7 @@ system exit idle state, send out one LTR exit message.
 #define ASPM_L1SS_CAP_P_PWR_ON_VALUE_LEN        5
 
 #define REG_ASPM_L1SS_CTRL1                     0x158
+#define REG_ASPM_L1SS_CTRL1_VALUE               0x405e000f
 #define ASPM_L1SS_CTRL1_L12_PCIPM_EN_POS        0       /* L1.2 in D3 state. */
 #define ASPM_L1SS_CTRL1_L12_PCIPM_EN_LEN        1
 #define ASPM_L1SS_CTRL1_L11_PCIPM_EN_POS        1       /* L1.1 in D3 state. */

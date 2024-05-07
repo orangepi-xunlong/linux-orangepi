@@ -16,7 +16,6 @@ distribute without commercial permission.
 #include <linux/inet.h>
 #include <net/addrconf.h>
 
-#include "fuxi-os.h"
 #include "fuxi-gmac.h"
 #include "fuxi-gmac-reg.h"
 
@@ -105,7 +104,7 @@ unsigned char * fxgmac_get_netdev_ip6addr(struct fxgmac_pdata *pdata, unsigned c
     return (err ? NULL : ipval);
 }
 
-static inline unsigned int fxgmac_tx_avail_desc(struct fxgmac_ring *ring)
+inline unsigned int fxgmac_tx_avail_desc(struct fxgmac_ring *ring)
 {
     //return (ring->dma_desc_count - (ring->cur - ring->dirty));
     unsigned int avail;
@@ -118,7 +117,7 @@ static inline unsigned int fxgmac_tx_avail_desc(struct fxgmac_ring *ring)
     return avail;
 }
 
-static inline unsigned int fxgmac_rx_dirty_desc(struct fxgmac_ring *ring)
+inline unsigned int fxgmac_rx_dirty_desc(struct fxgmac_ring *ring)
 {
     //return (ring->cur - ring->dirty);
     unsigned int dirty;
@@ -164,7 +163,7 @@ static void fxgmac_prep_vlan(struct sk_buff *skb,
         pkt_info->vlan_ctag = skb_vlan_tag_get(skb);
 }
 
-static int fxgmac_prep_tso(struct sk_buff *skb,
+static int fxgmac_prep_tso(struct fxgmac_pdata *pdata, struct sk_buff *skb,
                 struct fxgmac_pkt_info *pkt_info)
 {
     int ret;
@@ -183,7 +182,7 @@ static int fxgmac_prep_tso(struct sk_buff *skb,
     pkt_info->tcp_payload_len = skb->len - pkt_info->header_len;
     pkt_info->mss = skb_shinfo(skb)->gso_size;
 
-    if(default_msg_level & NETIF_MSG_TX_DONE){
+    if(netif_msg_tx_done(pdata)){
         DPRINTK("header_len=%u\n", pkt_info->header_len);
         DPRINTK("tcp_header_len=%u, tcp_payload_len=%u\n",
                 pkt_info->tcp_header_len, pkt_info->tcp_payload_len);
@@ -336,6 +335,7 @@ static void fxgmac_enable_rx_tx_ints(struct fxgmac_pdata *pdata)
     }
 }
 
+#if 0
 static void fxgmac_disable_rx_tx_ints(struct fxgmac_pdata *pdata)
 {
     struct fxgmac_hw_ops *hw_ops = &pdata->hw_ops;
@@ -357,88 +357,114 @@ static void fxgmac_disable_rx_tx_ints(struct fxgmac_pdata *pdata)
         hw_ops->disable_int(channel, int_id);
     }
 }
+#endif
+
+static void fxgmac_phy_process(struct fxgmac_pdata *pdata)
+{
+    int cur_link = 0;
+    int regval = 0;
+    int cur_speed = 0;
+    struct fxgmac_hw_ops *hw_ops = &pdata->hw_ops;
+
+    regval = hw_ops->get_ephy_state(pdata);
+
+    // We should make sure that PHY is done with the reset
+    if (regval & MGMT_EPHY_CTRL_STA_EPHY_RESET) {
+        pdata->expansion.phy_link = false;
+        return;
+    }
+
+    cur_link = FXGMAC_GET_REG_BITS(regval, 
+                                MGMT_EPHY_CTRL_STA_EPHY_LINKUP_POS, 
+                                MGMT_EPHY_CTRL_STA_EPHY_LINKUP_LEN);
+    if (pdata->expansion.phy_link != cur_link) {
+        pdata->expansion.phy_link = cur_link;
+        if (pdata->expansion.phy_link) {
+            cur_speed = FXGMAC_GET_REG_BITS(regval, 
+                                MGMT_EPHY_CTRL_STA_SPEED_POS, 
+                                MGMT_EPHY_CTRL_STA_SPEED_LEN);
+            pdata->phy_speed = (cur_speed == 2) ? SPEED_1000 : 
+                                (cur_speed == 1) ? SPEED_100 : SPEED_10;
+            pdata->phy_duplex = FXGMAC_GET_REG_BITS(regval, 
+                                MGMT_EPHY_CTRL_STA_EPHY_DUPLEX_POS, 
+                                MGMT_EPHY_CTRL_STA_EPHY_DUPLEX_LEN);
+            hw_ops->config_mac_speed(pdata);
+
+            hw_ops->enable_rx(pdata);
+            hw_ops->enable_tx(pdata);
+            netif_carrier_on(pdata->netdev);
+            if (netif_running(pdata->netdev))
+            {
+                netif_tx_wake_all_queues(pdata->netdev);
+                DPRINTK("%s now is link up, mac_speed=%d.\n", FXGMAC_DRV_NAME, 
+                                            pdata->phy_speed);
+            }
+        }else {
+            netif_carrier_off(pdata->netdev);
+            netif_tx_stop_all_queues(pdata->netdev);
+            pdata->phy_speed = SPEED_UNKNOWN;
+            pdata->phy_duplex = DUPLEX_UNKNOWN;
+            hw_ops->disable_rx(pdata);
+            hw_ops->disable_tx(pdata);
+            DPRINTK("%s now is link down\n", FXGMAC_DRV_NAME);
+        }
+    }
+}
+
+static int fxgmac_phy_poll(struct napi_struct *napi, int budget)
+{
+    struct fxgmac_pdata *pdata = container_of(napi, 
+                                            struct fxgmac_pdata, 
+                                            expansion.napi_phy);
+    struct fxgmac_hw_ops *hw_ops = &pdata->hw_ops;
+
+    fxgmac_phy_process(pdata);
+    if (napi_complete_done(napi, 0))
+        hw_ops->enable_msix_one_interrupt(pdata, MSI_ID_PHY_OTHER);
+
+    return 0;
+}
+
+static irqreturn_t fxgmac_phy_isr(int irq, void *data)
+{
+    struct fxgmac_pdata *pdata = data;
+    struct fxgmac_hw_ops *hw_ops = &pdata->hw_ops;
+    u32 regval;
+
+    regval = readreg(pdata->pAdapter, pdata->base_mem + MGMT_INT_CTRL0);
+    if (!(regval & MGMT_INT_CTRL0_INT_STATUS_PHY))
+        return IRQ_HANDLED;
+
+    hw_ops->disable_msix_one_interrupt(pdata, MSI_ID_PHY_OTHER);
+    hw_ops->read_ephy_reg(pdata, REG_MII_INT_STATUS, NULL);
+    if (napi_schedule_prep(&pdata->expansion.napi_phy)) {
+        __napi_schedule_irqoff(&pdata->expansion.napi_phy);
+    }
+
+    return IRQ_HANDLED;
+}
 
 static irqreturn_t fxgmac_isr(int irq, void *data)
 {
     unsigned int dma_isr, dma_ch_isr, mac_isr;
     struct fxgmac_pdata *pdata = data;
     struct fxgmac_channel *channel;
-    struct fxgmac_hw_ops *hw_ops;
+    struct fxgmac_hw_ops *hw_ops = &pdata->hw_ops;
     unsigned int i, ti, ri;
+    u32 val;
 
-#if FXGMAC_FPGA_VER_20210507
-    /* below line is added for fpga after 20210507 */
-    struct net_device *netdev = pdata->netdev;
-    u32 regval, val_mgmt_intcrtl0;
-#endif
+    dma_isr = readreg(pdata->pAdapter, pdata->mac_regs + DMA_ISR);
 
-    hw_ops = &pdata->hw_ops;
-
-    /* The DMA interrupt status register also reports MAC and MTL
-     * interrupts. So for polling mode, we just need to check for
-     * this register to be non-zero
-     */
-    dma_isr = readl(pdata->mac_regs + DMA_ISR);
-
-#if FXGMAC_FPGA_VER_B4_0507
-    if (!dma_isr)
-        return IRQ_HANDLED;
-#endif
-
-#if FXGMAC_FPGA_VER_20210507
-    //if (netdev->base_addr)
-    {
-        val_mgmt_intcrtl0 = (u32)(* ((u32 *)(netdev->base_addr + MGMT_INT_CTRL0)));
-    }
-
-#if FXGMAC_TX_INTERRUPT_EN
-    if (!(val_mgmt_intcrtl0 & MGMT_INT_CTRL0_INT_STATUS_RXTX_MASK/*MGMT_INT_CTRL0_INT_STATUS_MASK*/) && (!dma_isr))
-#else
-    if (!(val_mgmt_intcrtl0 & MGMT_INT_CTRL0_INT_STATUS_RXCH_MASK/*MGMT_INT_CTRL0_INT_STATUS_MASK*/) && (!dma_isr))
-#endif
+    val = readreg(pdata->pAdapter, pdata->base_mem + MGMT_INT_CTRL0);
+    if (!(val & MGMT_INT_CTRL0_INT_STATUS_RXTXPHY_MASK))
         return IRQ_HANDLED;
 
-    //disable all management interrupts. we actully use only Rx ch interrupts.
-    regval = FXGMAC_SET_REG_BITS(val_mgmt_intcrtl0, MGMT_INT_CTRL0_INT_MASK_POS,
-                    MGMT_INT_CTRL0_INT_MASK_LEN,
-                    MGMT_INT_CTRL0_INT_MASK_MASK);
-    writel(regval, (volatile void *)(netdev->base_addr + MGMT_INT_CTRL0));
-    //pdata->stats.mgmt_int_isr=(u64)dma_isr;
-    //pdata->stats.mgmt_int_isr=(u64)((pdata->stats.mgmt_int_isr << 32) + val_mgmt_intcrtl0);
+    hw_ops->disable_mgm_interrupt(pdata);
+    pdata->expansion.mgm_intctrl_val = val;
 
-#if FXGMAC_TX_INTERRUPT_EN
-    regval = FXGMAC_GET_REG_BITS(regval, MGMT_INT_CTRL0_INT_STATUS_RXCH_POS,
-                    MGMT_INT_CTRL0_INT_STATUS_RXTX_LEN);
-    regval = (regval | dma_isr) & MGMT_INT_CTRL0_INT_STATUS_RXTX_MASK ;
-#else
-    regval = FXGMAC_GET_REG_BITS(regval, MGMT_INT_CTRL0_INT_STATUS_RXCH_POS,
-                    MGMT_INT_CTRL0_INT_STATUS_RXCH_LEN);
-    regval = (regval | dma_isr) & MGMT_INT_CTRL0_INT_STATUS_RXCH_MASK ;
-#endif
-
-#ifdef CONFIG_PCI_MSI
-    //for msi/msix, we use it as debug counter
     pdata->stats.mgmt_int_isr++;
-#else
-    //pdata->stats.mgmt_int_isr=(u64)regval;
-    pdata->stats.mgmt_int_isr++;
-#endif
-#endif
-
-    netif_dbg(pdata, intr, pdata->netdev, "DMA_ISR=%#010x\n", dma_isr);
 
     for (i = 0; i < pdata->channel_count; i++) {
-#if FXGMAC_FPGA_VER_B4_0507
-        if (!(dma_isr & (1 << i)))
-#elif FXGMAC_FPGA_VER_20210507
-#if FXGMAC_TX_INTERRUPT_EN
-        if (FXGMAC_IS_CHANNEL_WITH_TX_IRQ(i) ? (!(regval & (1 << i)) && !(regval & (1 << MGMT_INT_CTRL0_INT_STATUS_TXCH_POS))): (!(regval & (1 << i))))   
-#else
-        if (!(regval & (1 << i)))
-#endif
-#endif
-            continue;
-
         channel = pdata->channel_head + i;
 
         dma_ch_isr = readl(FXGMAC_DMA_REG(channel, DMA_CH_SR));
@@ -454,20 +480,10 @@ static irqreturn_t fxgmac_isr(int irq, void *data)
         ri = FXGMAC_GET_REG_BITS(dma_ch_isr, DMA_CH_SR_RI_POS,
                      DMA_CH_SR_RI_LEN);
         if (!pdata->per_channel_irq && (ti || ri)) {
-            if (napi_schedule_prep(&pdata->napi)) {
-                /* Disable Tx and Rx interrupts */
-                fxgmac_disable_rx_tx_ints(pdata);
-
+            if (napi_schedule_prep(&pdata->expansion.napi)) {
                 pdata->stats.napi_poll_isr++;
-
-#if FXGMAC_TX_INTERRUPT_EN
-                if (ti || (regval & (1 << MGMT_INT_CTRL0_INT_STATUS_TXCH_POS))) {
-                    pdata->stats.msix_ch0_napi_isr_tx++;
-                }
-#endif
-
                 /* Turn on polling */
-                __napi_schedule_irqoff(&pdata->napi);
+                __napi_schedule_irqoff(&pdata->expansion.napi);
             }
         }
 
@@ -491,7 +507,7 @@ static irqreturn_t fxgmac_isr(int irq, void *data)
         if (FXGMAC_GET_REG_BITS(dma_ch_isr, DMA_CH_SR_FBE_POS,
                     DMA_CH_SR_FBE_LEN)) {
             pdata->stats.fatal_bus_error++;
-            schedule_work(&pdata->restart_work);
+            schedule_work(&pdata->expansion.restart_work);
         }
 
         /* Clear all interrupt signals */
@@ -514,7 +530,17 @@ static irqreturn_t fxgmac_isr(int irq, void *data)
         writel(mac_isr, (pdata->mac_regs + MAC_ISR));
     }
 
+    if (pdata->expansion.mgm_intctrl_val & MGMT_INT_CTRL0_INT_STATUS_PHY) {
+        hw_ops->read_ephy_reg(pdata, REG_MII_INT_STATUS, &val);
+        if (napi_schedule_prep(&pdata->expansion.napi)) {
+            pdata->stats.napi_poll_isr++;
+            /* Turn on polling */
+            __napi_schedule_irqoff(&pdata->expansion.napi);
+        }
+    }
+
     return IRQ_HANDLED;
+
 }
 
 static irqreturn_t fxgmac_dma_isr(int irq, void *data)
@@ -525,14 +551,14 @@ static irqreturn_t fxgmac_dma_isr(int irq, void *data)
     u32 regval;
     int message_id;
 
-    if (irq == channel->dma_irq_tx) {
+    if (irq == channel->expansion.dma_irq_tx) {
         message_id = MSI_ID_TXQ0;
         hw_ops->disable_msix_one_interrupt(pdata, message_id);
         regval = 0;
         regval = FXGMAC_SET_REG_BITS(regval, DMA_CH_SR_TI_POS, DMA_CH_SR_TI_LEN, 1);
         writereg(pdata->pAdapter, regval, FXGMAC_DMA_REG(channel, DMA_CH_SR));
-        if (napi_schedule_prep(&channel->napi_tx)) {
-            __napi_schedule_irqoff(&channel->napi_tx);
+        if (napi_schedule_prep(&channel->expansion.napi_tx)) {
+            __napi_schedule_irqoff(&channel->expansion.napi_tx);
         }
     } else {
         message_id = channel->queue_index;
@@ -541,44 +567,15 @@ static irqreturn_t fxgmac_dma_isr(int irq, void *data)
         regval = readreg(pdata->pAdapter, FXGMAC_DMA_REG(channel, DMA_CH_SR));
         regval = FXGMAC_SET_REG_BITS(regval, DMA_CH_SR_RI_POS, DMA_CH_SR_RI_LEN, 1);
         writereg(pdata->pAdapter, regval, FXGMAC_DMA_REG(channel, DMA_CH_SR));
-        if (napi_schedule_prep(&channel->napi_rx)) {
-            __napi_schedule_irqoff(&channel->napi_rx);
+        if (napi_schedule_prep(&channel->expansion.napi_rx)) {
+            __napi_schedule_irqoff(&channel->expansion.napi_rx);
         }
-    }
-
-    pdata->stats.msix_int_isr++;
-    pdata->stats.msix_int_isr_cur=(u64)channel->dma_irq;
-
-    switch(channel->queue_index){
-    case 0:
-#if FXGMAC_TX_INTERRUPT_EN
-        if(irq == channel->dma_irq) {
-            pdata->stats.msix_ch0_napi_isr++;
-        }
-        if (irq == channel->dma_irq_tx) {
-            pdata->stats.msix_ch0_napi_isr_tx++;
-            pdata->stats.msix_ch0_napi_sch_tx++;
-        }
-#else
-        pdata->stats.msix_ch0_napi_isr++;
-#endif
-        break;
-    case 1:
-        pdata->stats.msix_ch1_napi_isr++;
-        break;
-    case 2:
-        pdata->stats.msix_ch2_napi_isr++;
-        break;
-    case 3:
-        pdata->stats.msix_ch3_napi_isr++;
-        break;
-    default:
-        break;
     }
 
     return IRQ_HANDLED;
 }
 
+#if 0
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(4,14,0))
 static void fxgmac_tx_timer(struct timer_list *t)
 #else
@@ -601,21 +598,22 @@ static void fxgmac_tx_timer(unsigned long data)
         regval = 0;
         regval = FXGMAC_SET_REG_BITS(regval, DMA_CH_SR_TI_POS, DMA_CH_SR_TI_LEN, 1);
         writereg(pdata->pAdapter, regval, FXGMAC_DMA_REG(channel, DMA_CH_SR));
-        if (napi_schedule_prep(&channel->napi_tx)) {
+        if (napi_schedule_prep(&channel->expansion.napi_tx)) {
             pdata->stats.napi_poll_txtimer++;
-            __napi_schedule(&channel->napi_tx);
+            __napi_schedule(&channel->expansion.napi_tx);
         }
     } else {
         fxgmac_disable_rx_tx_ints(pdata);
-        if (napi_schedule_prep(&pdata->napi)) {
+        if (napi_schedule_prep(&pdata->expansion.napi)) {
             pdata->stats.napi_poll_txtimer++;
-            __napi_schedule(&pdata->napi);
+            __napi_schedule(&pdata->expansion.napi);
         }
     }
 
     pdata->stats.cnt_alive_txtimer++;
     channel->tx_timer_active = 0;
 }
+#endif
 
 #if FXGMAC_TX_HANG_TIMER_EN
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(4,14,0))
@@ -625,7 +623,7 @@ static void fxgmac_tx_hang_timer_handler(unsigned long data)
 #endif
 {
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(4,14,0))
-    struct fxgmac_channel *channel = from_timer(channel, t, tx_hang_timer);
+    struct fxgmac_channel *channel = from_timer(channel, t, expansion.tx_hang_timer);
 #else
     struct fxgmac_channel *channel = (struct fxgmac_channel *)data;
 #endif
@@ -643,13 +641,12 @@ static void fxgmac_tx_hang_timer_handler(unsigned long data)
 #else
     hw_reg_cur = readl(FXGMAC_DMA_REG(channel, 0x44/* tx desc curr pointer reg */));
 #endif
-    if(hw_reg_cur == channel->tx_hang_hw_cur) {
+    if(hw_reg_cur == channel->expansion.tx_hang_hw_cur) {
 
         /* hw current desc still stucked */
         if(!pdata->tx_hang_restart_queuing) {
             pdata->tx_hang_restart_queuing = 1;
-            pdata->stats.cnt_tx_hang++;
-            DPRINTK("tx_hang_timer_handler: restart scheduled, at desc %u, queuing=%u.\n", channel->tx_hang_hw_cur, pdata->tx_hang_restart_queuing);	
+            DPRINTK("tx_hang_timer_handler: restart scheduled, at desc %u, queuing=%u.\n", channel->expansion.tx_hang_hw_cur, pdata->tx_hang_restart_queuing);	
 
             netif_tx_stop_all_queues(netdev);
 
@@ -663,11 +660,11 @@ static void fxgmac_tx_hang_timer_handler(unsigned long data)
                              MAC_CR_RE_LEN, 0);
             writel(regval, pdata->mac_regs + MAC_CR);
 
-            schedule_work(&pdata->restart_work);
+            schedule_work(&pdata->expansion.restart_work);
         }
     }
 
-    channel->tx_hang_timer_active = 0;
+    channel->expansion.tx_hang_timer_active = 0;
 }
 
 static void fxgmac_tx_hang_timer_start(struct fxgmac_channel *channel)
@@ -675,18 +672,17 @@ static void fxgmac_tx_hang_timer_start(struct fxgmac_channel *channel)
     struct fxgmac_pdata *pdata = channel->pdata;
 
     /* Start the Tx hang timer */
-    if (1 && !channel->tx_hang_timer_active) {
-        channel->tx_hang_timer_active = 1;
+    if (1 && !channel->expansion.tx_hang_timer_active) {
+        channel->expansion.tx_hang_timer_active = 1;
 
         /* FXGMAC_INIT_DMA_TX_USECS is desc3 polling period, we give 2 more checking period */
-        mod_timer(&channel->tx_hang_timer,
+        mod_timer(&channel->expansion.tx_hang_timer,
                 jiffies + usecs_to_jiffies(FXGMAC_INIT_DMA_TX_USECS * 10));
-
-        pdata->stats.cnt_alive_tx_hang_timer++;
     }
 }
 #endif
 
+#if 0
 static void fxgmac_init_timers(struct fxgmac_pdata *pdata)
 {
     struct fxgmac_channel *channel;
@@ -732,6 +728,7 @@ static void fxgmac_stop_timers(struct fxgmac_pdata *pdata)
         }
     }
 }
+#endif
 
 static void fxgmac_napi_enable(struct fxgmac_pdata *pdata, unsigned int add)
 {
@@ -742,26 +739,59 @@ static void fxgmac_napi_enable(struct fxgmac_pdata *pdata, unsigned int add)
         channel = pdata->channel_head;
         for (i = 0; i < pdata->channel_count; i++, channel++) {
             if (add) {
-                netif_napi_add(pdata->netdev, &channel->napi_rx,
-                           fxgmac_one_poll_rx,
-                           NAPI_POLL_WEIGHT);
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6,1,0))
+                netif_napi_add_weight(pdata->netdev, &channel->expansion.napi_rx,
+                           fxgmac_one_poll_rx, NAPI_POLL_WEIGHT);
+#else
+                netif_napi_add(pdata->netdev, &channel->expansion.napi_rx,
+                           fxgmac_one_poll_rx, NAPI_POLL_WEIGHT);
+#endif
             }
-            napi_enable(&channel->napi_rx);
+            napi_enable(&channel->expansion.napi_rx);
 
             if (FXGMAC_IS_CHANNEL_WITH_TX_IRQ(i)) {
-                netif_napi_add(pdata->netdev, &channel->napi_tx,
-                           fxgmac_one_poll_tx,
-                           NAPI_POLL_WEIGHT);
-                napi_enable(&channel->napi_tx);
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6,1,0))
+                netif_napi_add_weight(pdata->netdev, &channel->expansion.napi_tx,
+                           fxgmac_one_poll_tx, NAPI_POLL_WEIGHT);
+#else
+                netif_napi_add(pdata->netdev, &channel->expansion.napi_tx,
+                           fxgmac_one_poll_tx, NAPI_POLL_WEIGHT);
+#endif
+                napi_enable(&channel->expansion.napi_tx);
             }
             if(netif_msg_drv(pdata)) DPRINTK("napi_enable, msix ch%d napi enabled done,add=%d\n", i, add);
         }
-    } else {
-        if (add)
-            netif_napi_add(pdata->netdev, &pdata->napi,
-                       fxgmac_all_poll, NAPI_POLL_WEIGHT);
 
-        napi_enable(&pdata->napi);
+        // for phy
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6,1,0))
+        netif_napi_add_weight(pdata->netdev, &pdata->expansion.napi_phy,
+                                   fxgmac_phy_poll, NAPI_POLL_WEIGHT);
+#else
+        netif_napi_add(pdata->netdev, &pdata->expansion.napi_phy, 
+                        fxgmac_phy_poll, NAPI_POLL_WEIGHT);
+#endif
+        napi_enable(&pdata->expansion.napi_phy);
+    } else {
+        i = FXGMAC_GET_REG_BITS(pdata->expansion.int_flags,
+                                    FXGMAC_FLAG_LEGACY_NAPI_FREE_POS,
+                                    FXGMAC_FLAG_LEGACY_NAPI_FREE_LEN);
+        if (!i) {
+            if (add) {
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6,1,0))
+                netif_napi_add_weight(pdata->netdev, &pdata->expansion.napi,
+                           fxgmac_all_poll, NAPI_POLL_WEIGHT);
+#else
+                netif_napi_add(pdata->netdev, &pdata->expansion.napi,
+                           fxgmac_all_poll, NAPI_POLL_WEIGHT);
+#endif
+            }
+
+            napi_enable(&pdata->expansion.napi);
+            pdata->expansion.int_flags = FXGMAC_SET_REG_BITS(pdata->expansion.int_flags,
+                                                FXGMAC_FLAG_LEGACY_NAPI_FREE_POS,
+                                                FXGMAC_FLAG_LEGACY_NAPI_FREE_LEN,
+                                                1);
+        }
     }
 }
 
@@ -774,24 +804,37 @@ static void fxgmac_napi_disable(struct fxgmac_pdata *pdata, unsigned int del)
         channel = pdata->channel_head;
         if (channel != NULL) {
             for (i = 0; i < pdata->channel_count; i++, channel++) {
-                napi_disable(&channel->napi_rx);
+                napi_disable(&channel->expansion.napi_rx);
 
                 if (del) {
-                    netif_napi_del(&channel->napi_rx);
+                    netif_napi_del(&channel->expansion.napi_rx);
                 }
 
                 if (FXGMAC_IS_CHANNEL_WITH_TX_IRQ(i)) {
-                    napi_disable(&channel->napi_tx);
-                    netif_napi_del(&channel->napi_tx);
+                    napi_disable(&channel->expansion.napi_tx);
+                    netif_napi_del(&channel->expansion.napi_tx);
                 }
                 if(netif_msg_drv(pdata)) DPRINTK("napi_disable, msix ch%d napi disabled done,del=%d\n", i, del);
             }
+
+            napi_disable(&pdata->expansion.napi_phy);
+            netif_napi_del(&pdata->expansion.napi_phy);
         }
     } else {
-        napi_disable(&pdata->napi);
+        i = FXGMAC_GET_REG_BITS(pdata->expansion.int_flags,
+                                    FXGMAC_FLAG_LEGACY_NAPI_FREE_POS,
+                                    FXGMAC_FLAG_LEGACY_NAPI_FREE_LEN);
+        if (i) {
+            napi_disable(&pdata->expansion.napi);
 
-        if (del)
-            netif_napi_del(&pdata->napi);
+            if (del)
+                netif_napi_del(&pdata->expansion.napi);
+            pdata->expansion.int_flags = FXGMAC_SET_REG_BITS(pdata->expansion.int_flags,
+                                                FXGMAC_FLAG_LEGACY_NAPI_FREE_POS,
+                                                FXGMAC_FLAG_LEGACY_NAPI_FREE_LEN,
+                                                0);
+
+        }
     }
 }
 
@@ -801,51 +844,77 @@ static int fxgmac_request_irqs(struct fxgmac_pdata *pdata)
     struct fxgmac_channel *channel;
     unsigned int i;
     int ret;
+    u32 msi, msix, need_free;
 
-    if(0 == (pdata->int_flags & FXGMAC_FLAG_MSIX_ENABLED))
-    {
-        ret = devm_request_irq(pdata->dev, pdata->dev_irq, fxgmac_isr,
-                         (pdata->int_flags & FXGMAC_FLAG_MSI_ENABLED) ? 0 : IRQF_SHARED, netdev->name, pdata);	
-        if (ret) {
-            netdev_alert(netdev, "error requesting irq %d, ret = %d\n", pdata->dev_irq, ret);
-            return ret;
+    msi = FXGMAC_GET_REG_BITS(pdata->expansion.int_flags,
+                                    FXGMAC_FLAG_MSI_POS,
+                                    FXGMAC_FLAG_MSI_LEN);
+
+    msix = FXGMAC_GET_REG_BITS(pdata->expansion.int_flags,
+                                    FXGMAC_FLAG_MSIX_POS,
+                                    FXGMAC_FLAG_MSIX_LEN);
+
+    need_free = FXGMAC_GET_REG_BITS(pdata->expansion.int_flags,
+                                    FXGMAC_FLAG_LEGACY_IRQ_FREE_POS,
+                                    FXGMAC_FLAG_LEGACY_IRQ_FREE_LEN);
+
+    if(!msix) {
+        if (!need_free) {
+            ret = devm_request_irq(pdata->dev, pdata->dev_irq, fxgmac_isr,
+                             msi ? 0 : IRQF_SHARED,
+                             netdev->name, pdata);
+            if (ret) {
+                netdev_alert(netdev, "error requesting irq %d, ret = %d\n", pdata->dev_irq, ret);
+                return ret;
+            }
+
+            pdata->expansion.int_flags = FXGMAC_SET_REG_BITS(pdata->expansion.int_flags,
+                                                FXGMAC_FLAG_LEGACY_IRQ_FREE_POS,
+                                                FXGMAC_FLAG_LEGACY_IRQ_FREE_LEN,
+                                                1);
         }
     }
 
     if (!pdata->per_channel_irq)
         return 0;
 
+    ret = devm_request_irq(pdata->dev, pdata->expansion.phy_irq, fxgmac_phy_isr, 0, netdev->name, pdata);
+    if (ret) {
+        netdev_alert(netdev, "error requesting phy irq %d, ret = %d\n", pdata->expansion.phy_irq, ret);
+        return ret;
+    }
+
     channel = pdata->channel_head;
     for (i = 0; i < pdata->channel_count; i++, channel++) {
-        snprintf(channel->dma_irq_name,
-             sizeof(channel->dma_irq_name) - 1,
+        snprintf(channel->expansion.dma_irq_name,
+             sizeof(channel->expansion.dma_irq_name) - 1,
                              "%s-ch%d-Rx-%u", netdev_name(netdev), i,
              channel->queue_index);
-#if FXGMAC_TX_INTERRUPT_EN
         if(FXGMAC_IS_CHANNEL_WITH_TX_IRQ(i)) {
-            snprintf(channel->dma_irq_name_tx,
-                 sizeof(channel->dma_irq_name_tx) - 1,
+            snprintf(channel->expansion.dma_irq_name_tx,
+                 sizeof(channel->expansion.dma_irq_name_tx) - 1,
                                  "%s-ch%d-Tx-%u", netdev_name(netdev), i,
                  channel->queue_index);
 
-            ret = devm_request_irq(pdata->dev, channel->dma_irq_tx,
+            ret = devm_request_irq(pdata->dev, channel->expansion.dma_irq_tx,
                              fxgmac_dma_isr, 0,
-                             channel->dma_irq_name_tx, channel);
+                             channel->expansion.dma_irq_name_tx, channel);
 
             if (ret) {
                 DPRINTK("fxgmac_req_irqs, err with MSIx irq request for ch %d tx, ret=%d\n", i, ret);
                 /* Using an unsigned int, 'i' will go to UINT_MAX and exit */
-                devm_free_irq(pdata->dev, channel->dma_irq_tx, channel);
-                devm_free_irq(pdata->dev, pdata->dev_irq, pdata);
+                devm_free_irq(pdata->dev, channel->expansion.dma_irq_tx, channel);
+                //devm_free_irq(pdata->dev, pdata->dev_irq, pdata);
                 return ret;
             }
 
-            if(netif_msg_drv(pdata)) DPRINTK("fxgmac_req_irqs, MSIx irq_tx request ok, ch=%d, irq=%d,%s\n", i, channel->dma_irq_tx, channel->dma_irq_name_tx);
+            if(netif_msg_drv(pdata)) 
+                DPRINTK("fxgmac_req_irqs, MSIx irq_tx request ok, ch=%d, irq=%d,%s\n", 
+                    i, channel->expansion.dma_irq_tx, channel->expansion.dma_irq_name_tx);
         }
-#endif
         ret = devm_request_irq(pdata->dev, channel->dma_irq,
                            fxgmac_dma_isr, 0,
-                           channel->dma_irq_name, channel);
+                           channel->expansion.dma_irq_name, channel);
         if (ret) {
             netdev_alert(netdev, "error requesting irq %d\n",
                      channel->dma_irq);
@@ -858,17 +927,17 @@ static int fxgmac_request_irqs(struct fxgmac_pdata *pdata)
 
 err_irq:
     DPRINTK("fxgmac_req_irqs, err with MSIx irq request at %d, ret=%d\n", i, ret);
-    /* Using an unsigned int, 'i' will go to UINT_MAX and exit */
-    for (i--, channel--; i < pdata->channel_count; i--, channel--) {
-#if FXGMAC_TX_INTERRUPT_EN
-        if(FXGMAC_IS_CHANNEL_WITH_TX_IRQ(i)) {
-            devm_free_irq(pdata->dev, channel->dma_irq_tx, channel);
-        }
-#endif
-        devm_free_irq(pdata->dev, channel->dma_irq, channel);
-    }
 
-    devm_free_irq(pdata->dev, pdata->dev_irq, pdata);
+    if (pdata->per_channel_irq) {
+        for (i--, channel--; i < pdata->channel_count; i--, channel--) {
+            if(FXGMAC_IS_CHANNEL_WITH_TX_IRQ(i)) {
+                devm_free_irq(pdata->dev, channel->expansion.dma_irq_tx, channel);
+            }
+            devm_free_irq(pdata->dev, channel->dma_irq, channel);
+        }
+
+        devm_free_irq(pdata->dev, pdata->expansion.phy_irq, pdata);
+    }
     return ret;
 }
 
@@ -876,9 +945,24 @@ static void fxgmac_free_irqs(struct fxgmac_pdata *pdata)
 {
     struct fxgmac_channel *channel;
     unsigned int i = 0;
+    u32 need_free, msix;
 
-    if(0 == (pdata->int_flags & FXGMAC_FLAG_MSIX_ENABLED)) {
-        devm_free_irq(pdata->dev, pdata->dev_irq, pdata);
+    msix = FXGMAC_GET_REG_BITS(pdata->expansion.int_flags,
+                                    FXGMAC_FLAG_MSIX_POS,
+                                    FXGMAC_FLAG_MSIX_LEN);
+
+    need_free = FXGMAC_GET_REG_BITS(pdata->expansion.int_flags,
+                                    FXGMAC_FLAG_LEGACY_IRQ_FREE_POS,
+                                    FXGMAC_FLAG_LEGACY_IRQ_FREE_LEN);
+
+    if(!msix) {
+        if (need_free) {
+            devm_free_irq(pdata->dev, pdata->dev_irq, pdata);
+            pdata->expansion.int_flags = FXGMAC_SET_REG_BITS(pdata->expansion.int_flags,
+                                            FXGMAC_FLAG_LEGACY_IRQ_FREE_POS,
+                                            FXGMAC_FLAG_LEGACY_IRQ_FREE_LEN,
+                                            0);
+        }
     }
 
     if (!pdata->per_channel_irq)
@@ -887,19 +971,19 @@ static void fxgmac_free_irqs(struct fxgmac_pdata *pdata)
     channel = pdata->channel_head;
     if (channel != NULL) {
         for (i = 0; i < pdata->channel_count; i++, channel++) {
-#if FXGMAC_TX_INTERRUPT_EN
             if(FXGMAC_IS_CHANNEL_WITH_TX_IRQ(i)) {
-                devm_free_irq(pdata->dev, channel->dma_irq_tx, channel);
+                devm_free_irq(pdata->dev, channel->expansion.dma_irq_tx, channel);
                 if(netif_msg_drv(pdata)) DPRINTK("fxgmac_free_irqs, MSIx irq_tx clear done, ch=%d\n", i);
             }
-#endif
             devm_free_irq(pdata->dev, channel->dma_irq, channel);
         }
+
+        devm_free_irq(pdata->dev, pdata->expansion.phy_irq, pdata);
     }
     if(netif_msg_drv(pdata)) DPRINTK("fxgmac_free_irqs, MSIx rx irq clear done, total=%d\n", i);
 }
 
-static void fxgmac_free_tx_data(struct fxgmac_pdata *pdata)
+void fxgmac_free_tx_data(struct fxgmac_pdata *pdata)
 {
     struct fxgmac_desc_ops *desc_ops = &pdata->desc_ops;
     struct fxgmac_desc_data *desc_data;
@@ -922,7 +1006,7 @@ static void fxgmac_free_tx_data(struct fxgmac_pdata *pdata)
     }
 }
 
-static void fxgmac_free_rx_data(struct fxgmac_pdata *pdata)
+void fxgmac_free_rx_data(struct fxgmac_pdata *pdata)
 {
     struct fxgmac_desc_ops *desc_ops = &pdata->desc_ops;
     struct fxgmac_desc_data *desc_data;
@@ -945,19 +1029,75 @@ static void fxgmac_free_rx_data(struct fxgmac_pdata *pdata)
     }
 }
 
+/*
+ * since kernel does not clear the MSI mask bits and 
+ * this function clear MSI mask bits when MSI is enabled.
+ */
+static int fxgmac_disable_pci_msi_config(struct pci_dev *pdev)
+{
+    u16 pcie_cap_offset;
+    u32 pcie_msi_mask_bits;
+    int ret = 0;
+
+    pcie_cap_offset = pci_find_capability(pdev, PCI_CAP_ID_MSI);
+    if (pcie_cap_offset) {
+        ret = pci_read_config_dword(pdev, pcie_cap_offset, &pcie_msi_mask_bits);
+        if (ret) {
+            printk(KERN_ERR "read pci config space MSI cap. failed, %d\n", ret);
+            ret = -EFAULT;
+        }
+    }
+
+    pcie_msi_mask_bits = FXGMAC_SET_REG_BITS(pcie_msi_mask_bits,
+                                            PCI_CAP_ID_MSI_ENABLE_POS,
+                                            PCI_CAP_ID_MSI_ENABLE_LEN,
+                                            0);
+    ret = pci_write_config_dword(pdev, pcie_cap_offset, pcie_msi_mask_bits);
+    if (ret) {
+        printk(KERN_ERR "write pci config space MSI mask failed, %d\n", ret);
+        ret = -EFAULT;
+    }
+
+    return ret;
+}
+
+static int fxgmac_disable_pci_msix_config(struct pci_dev *pdev)
+{
+    u16 pcie_cap_offset;
+    u32 pcie_msi_mask_bits;
+    int ret = 0;
+
+    pcie_cap_offset = pci_find_capability(pdev, PCI_CAP_ID_MSIX);
+    if (pcie_cap_offset) {
+        ret = pci_read_config_dword(pdev, pcie_cap_offset, &pcie_msi_mask_bits);
+        if (ret) {
+            printk(KERN_ERR "read pci config space MSIX cap. failed, %d\n", ret);
+            ret = -EFAULT;
+        }
+    }
+
+    pcie_msi_mask_bits = FXGMAC_SET_REG_BITS(pcie_msi_mask_bits,
+                                            PCI_CAP_ID_MSIX_ENABLE_POS,
+                                            PCI_CAP_ID_MSIX_ENABLE_LEN,
+                                            0);
+    ret = pci_write_config_dword(pdev, pcie_cap_offset, pcie_msi_mask_bits);
+    if (ret) {
+        printk(KERN_ERR "write pci config space MSIX mask failed, %d\n", ret);
+        ret = -EFAULT;
+    }
+
+    return ret;
+}
+
 extern int fxgmac_dismiss_all_int(struct fxgmac_pdata *pdata);
 
-static int fxgmac_start(struct fxgmac_pdata *pdata)
+int fxgmac_start(struct fxgmac_pdata *pdata)
 {
     struct fxgmac_hw_ops *hw_ops = &pdata->hw_ops;
     struct net_device *netdev = pdata->netdev;
     int ret;
-    bool b_linkup = false;
-    u32 phy_speed = 2; //default to 1000m
     unsigned int pcie_low_power = 0;
-#if FXGMAC_FPGA_VER_20210507
-    u32 regval,val_mgmt_intcrtl0;
-#endif
+    u32 regval;
 
     if(netif_msg_drv(pdata)) DPRINTK("fxgmac start callin here.\n");
 
@@ -965,6 +1105,25 @@ static int fxgmac_start(struct fxgmac_pdata *pdata)
     * when installing driver on the arm platform.
     */
     hw_ops->exit(pdata);
+
+    if (FXGMAC_GET_REG_BITS(pdata->expansion.int_flags,
+                            FXGMAC_FLAG_LEGACY_POS,
+                            FXGMAC_FLAG_LEGACY_LEN)) {
+        /*
+        * we should disable msi and msix here when we use legacy interrupt,for two reasons:
+        * 1. Exit will restore msi and msix config regisiter, that may enable them.
+        * 2. When the driver that uses the msix interrupt by default is compiled 
+        *   into the OS, uninstall the driver through rmmod, and then install the 
+        *   driver that uses the legacy interrupt, at which time the msix enable 
+        *   will be turned on again by default after waking up from S4 on some platform.
+        *   such as UOS platform.
+        */
+        ret = fxgmac_disable_pci_msi_config(pdata->pdev);
+        ret |= fxgmac_disable_pci_msix_config(pdata->pdev);
+        if (ret)
+            return ret;
+    }
+
     hw_ops->reset_phy(pdata);
     hw_ops->release_phy(pdata);
     hw_ops->pcie_init(pdata,
@@ -974,28 +1133,7 @@ static int fxgmac_start(struct fxgmac_pdata *pdata)
         pcie_low_power & PCIE_LP_ASPM_L0S);
     hw_ops->config_power_up(pdata);
 
-#if (FXGMAC_TXRX_EN_AFTER_PHY_RELEASE)
-    hw_ops->release_phy(pdata);
-#endif
-
     fxgmac_dismiss_all_int(pdata);
-    if(hw_ops->get_xlgmii_phy_status)
-        hw_ops->get_xlgmii_phy_status(pdata, (u32*)&phy_speed, (bool *)&b_linkup, 0);
-    switch(phy_speed){
-    case 2:
-        pdata->phy_speed = SPEED_1000;
-        break;
-    case 1:
-        pdata->phy_speed = SPEED_100;
-        break;
-    case 0:
-        pdata->phy_speed = SPEED_10;
-        break;
-    default:
-        pdata->phy_speed = SPEED_1000;
-        break;
-    }
-    pdata->phy_link = b_linkup;
 
     ret = hw_ops->init(pdata);
     if (ret) {
@@ -1010,42 +1148,27 @@ static int fxgmac_start(struct fxgmac_pdata *pdata)
 
     hw_ops->enable_tx(pdata);
     hw_ops->enable_rx(pdata);
-#if FXGMAC_FPGA_VER_20210507
+
     //config interrupt to level signal
     regval = (u32)readl((const volatile void *)(pdata->mac_regs + DMA_MR));
     regval = FXGMAC_SET_REG_BITS(regval, DMA_MR_INTM_POS,
                                      DMA_MR_INTM_LEN, 1);
-#if 1
     regval = FXGMAC_SET_REG_BITS(regval, DMA_MR_QUREAD_POS,
-                                 DMA_MR_QUREAD_LEN, 1); 	
-#endif	
+                                 DMA_MR_QUREAD_LEN, 1); 
     writel(regval, pdata->mac_regs + DMA_MR);
 
-    //enable management controlled interrupts
-    val_mgmt_intcrtl0 = (u32)readl((const volatile void *)(netdev->base_addr + MGMT_INT_CTRL0));
-
-    //enable RX channel interrupts
-    val_mgmt_intcrtl0 = FXGMAC_SET_REG_BITS(val_mgmt_intcrtl0, MGMT_INT_CTRL0_INT_MASK_RXCH_POS,
-                         MGMT_INT_CTRL0_INT_STATUS_RXCH_LEN,
-                         0);
-#if FXGMAC_TX_INTERRUPT_EN
-    //enable TX channel interrupts
-    val_mgmt_intcrtl0 = FXGMAC_SET_REG_BITS(val_mgmt_intcrtl0, MGMT_INT_CTRL0_INT_MASK_TXCH_POS,
-                         MGMT_INT_CTRL0_INT_STATUS_TXCH_LEN,
-                         0);
-#endif
-    writel(val_mgmt_intcrtl0, (volatile void *)(netdev->base_addr + MGMT_INT_CTRL0));
-#endif
+    writel(0xF0000000, (volatile void *)(netdev->base_addr + MGMT_INT_CTRL0));
 
     hw_ops->set_interrupt_moderation(pdata);
-    hw_ops->enable_msix_rxtxinterrupt(pdata);
+
+    if (pdata->per_channel_irq)
+        hw_ops->enable_msix_rxtxphyinterrupt(pdata);
+
     fxgmac_enable_rx_tx_ints(pdata);
 
-    fxgmac_act_phy_link(pdata);
-#if !(FXGMAC_TXRX_EN_AFTER_PHY_RELEASE)
-    hw_ops->release_phy(pdata);
-#endif
+#if 0
     netif_tx_start_all_queues(netdev);
+#endif
 
     hw_ops->led_under_active(pdata);
 
@@ -1058,34 +1181,28 @@ err_napi:
     return ret;
 }
 
-static void fxgmac_stop(struct fxgmac_pdata *pdata)
+void fxgmac_stop(struct fxgmac_pdata *pdata)
 {
     struct fxgmac_hw_ops *hw_ops = &pdata->hw_ops;
     struct net_device *netdev = pdata->netdev;
     struct fxgmac_channel *channel;
     struct netdev_queue *txq;
     unsigned int i;
-#if FXGMAC_FPGA_VER_20210507
-    u32 val_mgmt_intcrtl0;
 
-    //disable management controlled interrupts
-    //disable RX channel interrupts
-    val_mgmt_intcrtl0 = (u32)readl((const volatile void *)(netdev->base_addr + MGMT_INT_CTRL0));
-    val_mgmt_intcrtl0 = FXGMAC_SET_REG_BITS(val_mgmt_intcrtl0, MGMT_INT_CTRL0_INT_MASK_RXCH_POS,
-                                             MGMT_INT_CTRL0_INT_STATUS_RXCH_LEN,
-                                             MGMT_INT_CTRL0_INT_STATUS_RXCH_MASK);
-#if FXGMAC_TX_INTERRUPT_EN
-    //disable TX channel interrupts
-    val_mgmt_intcrtl0 = FXGMAC_SET_REG_BITS(val_mgmt_intcrtl0, MGMT_INT_CTRL0_INT_MASK_TXCH_POS,
-                         MGMT_INT_CTRL0_INT_STATUS_TXCH_LEN,
-                         MGMT_INT_CTRL0_INT_STATUS_TXCH_MASK);
-#endif
-    writel(val_mgmt_intcrtl0, (volatile void *)(netdev->base_addr + MGMT_INT_CTRL0));
-#endif
+    if (pdata->per_channel_irq) {
+        hw_ops->disable_msix_interrupt(pdata);
+    }
+    else {
+        hw_ops->disable_mgm_interrupt(pdata);
+    }
+
+    pdata->expansion.phy_link = false;
 
     netif_carrier_off(netdev);//yzhang added, 0324
     netif_tx_stop_all_queues(netdev);
+#if 0
     fxgmac_stop_timers(pdata);
+#endif
     hw_ops->disable_tx(pdata);
     hw_ops->disable_rx(pdata);
     fxgmac_free_irqs(pdata);
@@ -1102,7 +1219,7 @@ static void fxgmac_stop(struct fxgmac_pdata *pdata)
         }
     }
 
-    switch (pdata->current_state) {
+    switch (pdata->expansion.current_state) {
         case CURRENT_STATE_SUSPEND:
             hw_ops->led_under_sleep(pdata);
             break;
@@ -1126,7 +1243,7 @@ void fxgmac_restart_dev(struct fxgmac_pdata *pdata)
     if (!netif_running(pdata->netdev))
         return;
 
-    pdata->current_state = CURRENT_STATE_RESTART;
+    pdata->expansion.current_state = CURRENT_STATE_RESTART;
     fxgmac_stop(pdata);
 
     fxgmac_free_tx_data(pdata);
@@ -1142,7 +1259,7 @@ static void fxgmac_restart(struct work_struct *work)
 {
     struct fxgmac_pdata *pdata = container_of(work,
                             struct fxgmac_pdata,
-                            restart_work);
+                            expansion.restart_work);
 
     rtnl_lock();
 
@@ -1159,22 +1276,11 @@ void fxgmac_net_powerup(struct fxgmac_pdata *pdata)
     if(netif_msg_drv(pdata)) DPRINTK("fxgmac_net_powerup callin\n");
 
     /* signal that we are up now */
-    pdata->powerstate = 0; //clear all bits as normal now
-    if (__test_and_set_bit(FXGMAC_POWER_STATE_UP, &pdata->powerstate)) {
+    pdata->expansion.powerstate = 0; //clear all bits as normal now
+    if (__test_and_set_bit(FXGMAC_POWER_STATE_UP, &pdata->expansion.powerstate)) {
         return; /* do nothing if already up */
     }
-#if 0
-    hw_ops->exit(pdata);
 
-    /* wake mac to exit lowpower mode by soft or wol */
-    hw_ops->config_power_up(pdata);
-#endif
-
-    ret = fxgmac_init(pdata, true);
-    if (ret) {
-        printk("fxgmac_net_powerup: fxgmac_init error\n");
-        return;
-    }
     ret = fxgmac_start(pdata);
     if (ret) {
         printk("fxgmac_net_powerup: fxgmac_start error\n");
@@ -1184,10 +1290,8 @@ void fxgmac_net_powerup(struct fxgmac_pdata *pdata)
     // must call it after fxgmac_start,because it will be enable in fxgmac_start
     hw_ops->disable_arp_offload(pdata);
 
-    fxgmac_phy_timer_resume(pdata);
-
     if(netif_msg_drv(pdata)) {
-        DPRINTK("fxgmac_net_powerup callout, powerstate=%ld.\n", pdata->powerstate);
+        DPRINTK("fxgmac_net_powerup callout, powerstate=%ld.\n", pdata->expansion.powerstate);
     }
 }
 
@@ -1199,13 +1303,13 @@ void fxgmac_net_powerdown(struct fxgmac_pdata *pdata, unsigned int wol)
     if(netif_msg_drv(pdata)) DPRINTK("fxgmac_net_powerdown callin here.\n");
 
     /* signal that we are down to the interrupt handler */
-    if (__test_and_set_bit(FXGMAC_POWER_STATE_DOWN, &pdata->powerstate))
+    if (__test_and_set_bit(FXGMAC_POWER_STATE_DOWN, &pdata->expansion.powerstate))
         return; /* do nothing if already down */
 
     if(netif_msg_drv(pdata)) DPRINTK("fxgmac_net_powerdown continue with down process.\n");
     /* phy polling timer should detect the state of fxgmac and stop link status polling accordingly */
 
-    __clear_bit(FXGMAC_POWER_STATE_UP, &pdata->powerstate);
+    __clear_bit(FXGMAC_POWER_STATE_UP, &pdata->expansion.powerstate);
 
 #if 1
     /* Shut off incoming Tx traffic */
@@ -1237,7 +1341,7 @@ void fxgmac_net_powerdown(struct fxgmac_pdata *pdata, unsigned int wol)
     fxgmac_free_tx_data(pdata);
     fxgmac_free_rx_data(pdata);
 #endif
-    if(netif_msg_drv(pdata)) DPRINTK("fxgmac_net_powerdown callout, powerstate=%ld.\n", pdata->powerstate);
+    if(netif_msg_drv(pdata)) DPRINTK("fxgmac_net_powerdown callout, powerstate=%ld.\n", pdata->expansion.powerstate);
 }
 
 static int fxgmac_open(struct net_device *netdev)
@@ -1245,11 +1349,7 @@ static int fxgmac_open(struct net_device *netdev)
     struct fxgmac_pdata *pdata = netdev_priv(netdev);
     struct fxgmac_desc_ops *desc_ops;
     int ret;
-#if 0
-    struct fxgmac_hw_ops *hw_ops = &pdata->hw_ops;
-    bool b_linkup = false;
-    u32 phy_speed = 2; //default to 1000m
-#endif
+
     if(netif_msg_drv(pdata)) DPRINTK("fxgmac_open callin\n");
 
     desc_ops = &pdata->desc_ops;
@@ -1268,37 +1368,14 @@ static int fxgmac_open(struct net_device *netdev)
     if (ret)
         return ret;
 
-    INIT_WORK(&pdata->restart_work, fxgmac_restart);
+    INIT_WORK(&pdata->expansion.restart_work, fxgmac_restart);
+#if 0
     fxgmac_init_timers(pdata);
-#if 0 //move to fxgmac_start()
-    if(hw_ops->get_xlgmii_phy_status)
-        hw_ops->get_xlgmii_phy_status(pdata, (u32*)&phy_speed, (bool *)&b_linkup, 0);
-    switch(phy_speed){
-    case 2:
-        pdata->phy_speed = SPEED_1000;
-        break;
-    case 1:
-        pdata->phy_speed = SPEED_100;
-        break;
-    default:
-        pdata->phy_speed = SPEED_1000;
-        break;
-    }
-    pdata->phy_link = b_linkup;
 #endif
     ret = fxgmac_start(pdata);
     if (ret)
         goto err_channels_and_rings;
 
-    //use previous status
-    //pdata->hw_ops->get_xlgmii_phy_status(pdata, 0, (bool *)&b_linkup, 0);
-    //fxgmac_act_phy_link(pdata);
-    fxgmac_phy_timer_init(pdata);
-
-#if 0 /* yzhand debug to disable tx temporaly */
-    netif_tx_stop_all_queues(netdev);
-    DPRINTK("for debug and disable tx....\n");
-#endif
     if(netif_msg_drv(pdata)) DPRINTK("fxgmac_open callout\n");
 
     return 0;
@@ -1318,8 +1395,8 @@ static int fxgmac_close(struct net_device *netdev)
 
     desc_ops = &pdata->desc_ops;
 
-    pdata->current_state = (pdata->current_state == CURRENT_STATE_SHUTDOWN) ? 
-                        pdata->current_state : CURRENT_STATE_CLOSE;
+    pdata->expansion.current_state = (pdata->expansion.current_state == CURRENT_STATE_SHUTDOWN) ? 
+                        pdata->expansion.current_state : CURRENT_STATE_CLOSE;
 
     /* Stop the device */
     fxgmac_stop(pdata);
@@ -1328,8 +1405,6 @@ static int fxgmac_close(struct net_device *netdev)
     desc_ops->free_channels_and_rings(pdata);
 
     pdata->hw_ops.reset_phy(pdata);
-    /*clean timer*/
-    fxgmac_phy_timer_destroy(pdata);
 
     if(netif_msg_drv(pdata)) DPRINTK("fxgmac_close callout\n");
 
@@ -1347,14 +1422,11 @@ static void fxgmac_tx_timeout(struct net_device *netdev, unsigned int unused)
     netdev_warn(netdev, "tx timeout, device restarting\n");
 #if FXGMAC_TX_HANG_TIMER_EN
     if(!pdata->tx_hang_restart_queuing)
-        schedule_work(&pdata->restart_work);
+        schedule_work(&pdata->expansion.restart_work);
 #else
-    schedule_work(&pdata->restart_work);
+    schedule_work(&pdata->expansion.restart_work);
 #endif
 }
-
-u16 fxgmac_cur_tx_skb_q_mapping = 0xff; //invalid value, yzhang
-u16 fxgmac_cur_rx_ch_polling = 0xff; //invalid value, yzhang
 
 static int fxgmac_xmit(struct sk_buff *skb, struct net_device *netdev)
 {
@@ -1372,8 +1444,6 @@ static int fxgmac_xmit(struct sk_buff *skb, struct net_device *netdev)
 
     //yzhang disabled 
     if(netif_msg_tx_done(pdata)) DPRINTK("xmit callin, skb->len=%d,q=%d\n", skb->len, skb->queue_mapping);
-
-    fxgmac_cur_tx_skb_q_mapping = skb->queue_mapping;
 
     channel = pdata->channel_head + skb->queue_mapping;
     txq = netdev_get_tx_queue(netdev, channel->queue_index);
@@ -1406,7 +1476,7 @@ static int fxgmac_xmit(struct sk_buff *skb, struct net_device *netdev)
         return ret;
     }
 
-    ret = fxgmac_prep_tso(skb, tx_pkt_info);
+    ret = fxgmac_prep_tso(pdata, skb, tx_pkt_info);
     if (ret) {
         netif_err(pdata, tx_err, netdev,
                             "error processing TSO packet\n");
@@ -1424,7 +1494,7 @@ static int fxgmac_xmit(struct sk_buff *skb, struct net_device *netdev)
 
     /* Report on the actual number of bytes (to be) sent */
     netdev_tx_sent_queue(txq, tx_pkt_info->tx_bytes);
-    if(netif_msg_tx_done(pdata)) DPRINTK("xmit,before hw_xmit, byte len=%d,txtimeout=%lu\n", tx_pkt_info->tx_bytes, txq->trans_timeout);
+    if(netif_msg_tx_done(pdata)) DPRINTK("xmit,before hw_xmit, byte len=%d\n", tx_pkt_info->tx_bytes);
 
     /* Configure required descriptor fields for transmission */
     hw_ops->dev_xmit(channel);
@@ -1453,7 +1523,7 @@ static struct rtnl_link_stats64 * fxgmac_get_stats64(struct net_device *netdev,
 
 #if FXGMAC_PM_FEATURE_ENABLED
     /* 20210709 for net power down */
-    if(!test_bit(FXGMAC_POWER_STATE_DOWN, &pdata->powerstate))
+    if(!test_bit(FXGMAC_POWER_STATE_DOWN, &pdata->expansion.powerstate))
 #endif
     {
         //DPRINTK("get_stats64, ndo op, callin\n");
@@ -1489,10 +1559,14 @@ static int fxgmac_set_mac_address(struct net_device *netdev, void *addr)
     if (!is_valid_ether_addr(saddr->sa_data))
         return -EADDRNOTAVAIL;
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5,17,0))
+    eth_hw_addr_set(netdev, saddr->sa_data);
+#else
     memcpy(netdev->dev_addr, saddr->sa_data, netdev->addr_len);
+#endif
     memcpy(pdata->mac_addr, saddr->sa_data, netdev->addr_len);
 
-    hw_ops->set_mac_address(pdata, netdev->dev_addr);
+    hw_ops->set_mac_address(pdata, saddr->sa_data);
     hw_ops->set_mac_hash(pdata);
 
     DPRINTK("fxgmac,set mac addr to %02x:%02x:%02x:%02x:%02x:%02x\n",netdev->dev_addr[0], netdev->dev_addr[1], netdev->dev_addr[2],
@@ -1525,6 +1599,16 @@ static int fxgmac_ioctl(struct net_device *netdev,
     return ret;
 }
 
+#if ( LINUX_VERSION_CODE >= KERNEL_VERSION(5,15,0) )
+static int fxgmac_siocdevprivate(struct net_device *dev, 
+                                            struct ifreq *ifr,
+                                            void __user *data,
+                                            int cmd)
+{
+    return fxgmac_ioctl(dev, ifr, cmd);
+}
+#endif
+
 static int fxgmac_change_mtu(struct net_device *netdev, int mtu)
 {
     struct fxgmac_pdata *pdata = netdev_priv(netdev);
@@ -1532,6 +1616,13 @@ static int fxgmac_change_mtu(struct net_device *netdev, int mtu)
 #ifdef FXGMAC_DEBUG
     int old_mtu = netdev->mtu;
 #endif
+
+    fxgmac_stop(pdata);
+    fxgmac_free_tx_data(pdata);
+
+    // We must unmap rx desc's dma before we change rx_buf_size.
+    // Becaues the size of the unmapped DMA is set according to rx_buf_size
+    fxgmac_free_rx_data(pdata);
 
     pdata->jumbo = mtu > ETH_DATA_LEN ? 1 : 0;
 
@@ -1543,7 +1634,7 @@ static int fxgmac_change_mtu(struct net_device *netdev, int mtu)
     netdev->mtu = mtu;
 
     if (netif_running(netdev))
-        fxgmac_restart_dev(pdata);
+        fxgmac_start(pdata);
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(4,10,0))
     DPRINTK("fxgmac,set MTU from %d to %d. min, max=(%d,%d)\n",old_mtu, netdev->mtu, netdev->min_mtu, netdev->max_mtu);
@@ -1613,15 +1704,26 @@ static void fxgmac_poll_controller(struct net_device *netdev)
 static int fxgmac_set_features(struct net_device *netdev,
                  netdev_features_t features)
 {
-    netdev_features_t rxhash, rxcsum, rxvlan, rxvlan_filter;
+    netdev_features_t rxhash, rxcsum, rxvlan, rxvlan_filter, tso;
     struct fxgmac_pdata *pdata = netdev_priv(netdev);
     struct fxgmac_hw_ops *hw_ops = &pdata->hw_ops;
     int ret = 0;
 
-    rxhash = pdata->netdev_features & NETIF_F_RXHASH;
-    rxcsum = pdata->netdev_features & NETIF_F_RXCSUM;
-    rxvlan = pdata->netdev_features & NETIF_F_HW_VLAN_CTAG_RX;
-    rxvlan_filter = pdata->netdev_features & NETIF_F_HW_VLAN_CTAG_FILTER;
+    rxhash = pdata->expansion.netdev_features & NETIF_F_RXHASH;
+    rxcsum = pdata->expansion.netdev_features & NETIF_F_RXCSUM;
+    rxvlan = pdata->expansion.netdev_features & NETIF_F_HW_VLAN_CTAG_RX;
+    rxvlan_filter = pdata->expansion.netdev_features & NETIF_F_HW_VLAN_CTAG_FILTER;
+    tso = pdata->expansion.netdev_features & (NETIF_F_TSO | NETIF_F_TSO6);
+
+    if ((features & (NETIF_F_TSO | NETIF_F_TSO6)) && !tso) {
+        printk("enable tso.\n");
+        pdata->hw_feat.tso = 1;
+        hw_ops->config_tso(pdata);
+    } else if (!(features & (NETIF_F_TSO | NETIF_F_TSO6)) && tso) {
+        printk("disable tso.\n");
+        pdata->hw_feat.tso = 0;
+        hw_ops->config_tso(pdata);
+    }
 
     if ((features & NETIF_F_RXHASH) && !rxhash)
         ret = hw_ops->enable_rss(pdata);
@@ -1645,7 +1747,7 @@ static int fxgmac_set_features(struct net_device *netdev,
     else if (!(features & NETIF_F_HW_VLAN_CTAG_FILTER) && rxvlan_filter)
         hw_ops->disable_rx_vlan_filtering(pdata);
 
-    pdata->netdev_features = features;
+    pdata->expansion.netdev_features = features;
 
     DPRINTK("fxgmac,set features done,%llx\n", (u64)features);
     return 0;
@@ -1669,6 +1771,9 @@ static const struct net_device_ops fxgmac_netdev_ops = {
     .ndo_set_mac_address    = fxgmac_set_mac_address,
     .ndo_validate_addr      = eth_validate_addr,
     .ndo_do_ioctl           = fxgmac_ioctl,
+#if ( LINUX_VERSION_CODE >= KERNEL_VERSION(5,15,0) )
+    .ndo_siocdevprivate     = fxgmac_siocdevprivate,
+#endif
     .ndo_vlan_rx_add_vid    = fxgmac_vlan_rx_add_vid,
     .ndo_vlan_rx_kill_vid   = fxgmac_vlan_rx_kill_vid,
 #ifdef CONFIG_NET_POLL_CONTROLLER
@@ -1764,7 +1869,7 @@ static struct sk_buff *fxgmac_create_skb(struct fxgmac_pdata *pdata,
     return skb;
 #endif
     struct sk_buff *skb;
-    skb = __netdev_alloc_skb_ip_align(pdata->netdev, len, GFP_KERNEL);
+    skb = __netdev_alloc_skb_ip_align(pdata->netdev, len, GFP_ATOMIC);
     if (!skb) {
         netdev_err(pdata->netdev, "%s: Rx init fails; skb is NULL\n", __func__);
         return NULL;
@@ -1849,7 +1954,7 @@ static int fxgmac_tx_poll(struct fxgmac_channel *channel)
                     (* ((u32 *)(netdev->base_addr + 0x1000))) = 0xdbbb;
 
                     if(!fxgmac_restart_need ) {
-                        schedule_work(&pdata->restart_work);
+                        schedule_work(&pdata->expansion.restart_work);
                         fxgmac_restart_need = 1;
                         change_cnt = 0;
                     }
@@ -1858,7 +1963,7 @@ static int fxgmac_tx_poll(struct fxgmac_channel *channel)
                     (* ((u32 *)(netdev->base_addr + 0x1000))) = 0xdb00;
 
                     if(!fxgmac_restart_need ) {
-                        schedule_work(&pdata->restart_work);
+                        schedule_work(&pdata->expansion.restart_work);
                         fxgmac_restart_need = 1;
                         change_cnt = 0;
                     }
@@ -1866,7 +1971,7 @@ static int fxgmac_tx_poll(struct fxgmac_channel *channel)
             }
 #endif
 #if FXGMAC_TX_HANG_TIMER_EN
-            if((!pdata->tx_hang_restart_queuing) && (!channel->tx_hang_timer_active)) {
+            if((!pdata->tx_hang_restart_queuing) && (!channel->expansion.tx_hang_timer_active)) {
                 reg_cur = ring->dirty;
                 if(reg_cur_pre != reg_cur) {
                     reg_cur_pre = reg_cur;
@@ -1878,13 +1983,13 @@ static int fxgmac_tx_poll(struct fxgmac_channel *channel)
                 if (change_cnt > 4)
                 {
 #if FXGMAC_TX_HANG_CHECH_DIRTY
-                    channel->tx_hang_hw_cur = ring->dirty;
+                    channel->expansion.tx_hang_hw_cur = ring->dirty;
 #else
-                    channel->tx_hang_hw_cur = readl(FXGMAC_DMA_REG(channel, 0x44/* tx desc curr pointer reg */));
+                    channel->expansion.tx_hang_hw_cur = readl(FXGMAC_DMA_REG(channel, 0x44/* tx desc curr pointer reg */));
 #endif
                     /* double check for race conditione */
-                    if ((!pdata->tx_hang_restart_queuing) && (!channel->tx_hang_timer_active)) {
-                    DPRINTK("tx_hang polling: start timer at desc %u, timer act=%u, queuing=%u, qidx=%u.\n", reg_cur, channel->tx_hang_timer_active, pdata->tx_hang_restart_queuing, channel->queue_index);
+                    if ((!pdata->tx_hang_restart_queuing) && (!channel->expansion.tx_hang_timer_active)) {
+                    DPRINTK("tx_hang polling: start timer at desc %u, timer act=%u, queuing=%u, qidx=%u.\n", reg_cur, channel->expansion.tx_hang_timer_active, pdata->tx_hang_restart_queuing, channel->queue_index);
                     fxgmac_tx_hang_timer_start(channel);
                     }
                 }
@@ -1943,7 +2048,6 @@ static int fxgmac_tx_poll(struct fxgmac_channel *channel)
 extern void fxgmac_print_pkt(struct net_device *netdev,
                       struct sk_buff *skb, bool tx_rx);
 
-static unsigned int channel_is_onpolling = 0;
 static int fxgmac_rx_poll(struct fxgmac_channel *channel, int budget)
 {
     struct fxgmac_pdata *pdata = channel->pdata;
@@ -1969,7 +2073,7 @@ static int fxgmac_rx_poll(struct fxgmac_channel *channel, int budget)
     incomplete = 0;
     context_next = 0;
 
-    napi = (pdata->per_channel_irq) ? &channel->napi_rx : &pdata->napi;
+    napi = (pdata->per_channel_irq) ? &channel->expansion.napi_rx : &pdata->expansion.napi;
 
     desc_data = FXGMAC_GET_DESC_DATA(ring, ring->cur);
     pkt_info = &ring->pkt_info;
@@ -2024,6 +2128,7 @@ static int fxgmac_rx_poll(struct fxgmac_channel *channel, int budget)
             if (len == 0) {
                 if (net_ratelimit())
                     netdev_err(pdata->netdev,"A packet of length 0 was received\n");
+                pdata->netdev->stats.rx_length_errors++;
                 goto next_packet;
             }
 
@@ -2031,8 +2136,7 @@ static int fxgmac_rx_poll(struct fxgmac_channel *channel, int budget)
                 skb = fxgmac_create_skb(pdata, napi, desc_data, len);
                 if (unlikely(!skb)) {
                     if (net_ratelimit())
-                        netdev_warn(pdata->netdev, "packet dropped\n");
-                    pdata->netdev->stats.rx_length_errors++;
+                        netdev_warn(pdata->netdev, "create skb failed\n");
                     goto next_packet;
                 }
             }
@@ -2040,6 +2144,9 @@ static int fxgmac_rx_poll(struct fxgmac_channel *channel, int budget)
 
         if (!skb)
             goto next_packet;
+
+        if(netif_msg_pktdata(pdata))
+            fxgmac_print_pkt(netdev, skb, false);
 
         skb_checksum_none_assert(skb);
         if (netdev->features & NETIF_F_RXCSUM)
@@ -2075,27 +2182,27 @@ static int fxgmac_rx_poll(struct fxgmac_channel *channel, int budget)
         skb->protocol = eth_type_trans(skb, netdev);
         skb_record_rx_queue(skb, channel->queue_index);
 
-        if(pdata->fxgmac_test_tso_flag)
+        if(pdata->expansion.fxgmac_test_tso_flag)
         {
             /* tso test */
-            if(pdata->fxgmac_test_tso_seg_num == 1)
+            if(pdata->expansion.fxgmac_test_tso_seg_num == 1)
             {
                 /* last segment */
-                if(pdata->fxgmac_test_last_tso_len == skb->len + FXGMAC_TEST_MAC_HEAD_LEN)
+                if(pdata->expansion.fxgmac_test_last_tso_len == skb->len + FXGMAC_TEST_MAC_HEAD_LEN)
                 {
                     /* receive last segment, reset flag */
-                    pdata->fxgmac_test_tso_flag = false;
-                    pdata->fxgmac_test_tso_seg_num = 0;
-                    pdata->fxgmac_test_packet_len = 0;
-                    pdata->fxgmac_test_last_tso_len = 0;
+                    pdata->expansion.fxgmac_test_tso_flag = false;
+                    pdata->expansion.fxgmac_test_tso_seg_num = 0;
+                    pdata->expansion.fxgmac_test_packet_len = 0;
+                    pdata->expansion.fxgmac_test_last_tso_len = 0;
 
                     /* process packet */
-                    if((pdata->fxgmac_test_skb_arr_in_index + 1) % FXGMAC_MAX_DBG_TEST_PKT != pdata->fxgmac_test_skb_arr_out_index){
+                    if((pdata->expansion.fxgmac_test_skb_arr_in_index + 1) % FXGMAC_MAX_DBG_TEST_PKT != pdata->expansion.fxgmac_test_skb_arr_out_index){
                         struct sk_buff *tmpskb = skb_copy(skb, GFP_ATOMIC);
                         skb_push(tmpskb, FXGMAC_TEST_MAC_HEAD_LEN);
 
-                        pdata->fxgmac_test_skb_array[pdata->fxgmac_test_skb_arr_in_index] = tmpskb;
-                        pdata->fxgmac_test_skb_arr_in_index = (pdata->fxgmac_test_skb_arr_in_index + 1) % FXGMAC_MAX_DBG_TEST_PKT;
+                        pdata->expansion.fxgmac_test_skb_array[pdata->expansion.fxgmac_test_skb_arr_in_index] = tmpskb;
+                        pdata->expansion.fxgmac_test_skb_arr_in_index = (pdata->expansion.fxgmac_test_skb_arr_in_index + 1) % FXGMAC_MAX_DBG_TEST_PKT;
                     }
                     else{
                         DPRINTK("loopback test buffer is full.");
@@ -2104,17 +2211,17 @@ static int fxgmac_rx_poll(struct fxgmac_channel *channel, int budget)
             }
             else /* non last segment */
             {
-                if(pdata->fxgmac_test_packet_len == skb->len + FXGMAC_TEST_MAC_HEAD_LEN){
+                if(pdata->expansion.fxgmac_test_packet_len == skb->len + FXGMAC_TEST_MAC_HEAD_LEN){
                     /* receive a segment */
-                    pdata->fxgmac_test_tso_seg_num--;
+                    pdata->expansion.fxgmac_test_tso_seg_num--;
 
                     /* process packet */
-                    if((pdata->fxgmac_test_skb_arr_in_index + 1) % FXGMAC_MAX_DBG_TEST_PKT != pdata->fxgmac_test_skb_arr_out_index){
+                    if((pdata->expansion.fxgmac_test_skb_arr_in_index + 1) % FXGMAC_MAX_DBG_TEST_PKT != pdata->expansion.fxgmac_test_skb_arr_out_index){
                         struct sk_buff *tmpskb = skb_copy(skb, GFP_ATOMIC);
                         skb_push(tmpskb, FXGMAC_TEST_MAC_HEAD_LEN);
 
-                        pdata->fxgmac_test_skb_array[pdata->fxgmac_test_skb_arr_in_index] = tmpskb;
-                        pdata->fxgmac_test_skb_arr_in_index = (pdata->fxgmac_test_skb_arr_in_index + 1) % FXGMAC_MAX_DBG_TEST_PKT;
+                        pdata->expansion.fxgmac_test_skb_array[pdata->expansion.fxgmac_test_skb_arr_in_index] = tmpskb;
+                        pdata->expansion.fxgmac_test_skb_arr_in_index = (pdata->expansion.fxgmac_test_skb_arr_in_index + 1) % FXGMAC_MAX_DBG_TEST_PKT;
                     }
                     else{
                         DPRINTK("loopback test buffer is full.");
@@ -2122,20 +2229,20 @@ static int fxgmac_rx_poll(struct fxgmac_channel *channel, int budget)
                 }
             }
         }
-        else if(pdata->fxgmac_test_packet_len != 0)
+        else if(pdata->expansion.fxgmac_test_packet_len != 0)
         {
             /* xsum and phy loopback test */
-            if(pdata->fxgmac_test_packet_len == skb->len + FXGMAC_TEST_MAC_HEAD_LEN)
+            if(pdata->expansion.fxgmac_test_packet_len == skb->len + FXGMAC_TEST_MAC_HEAD_LEN)
             {
                 /* reset fxg_packet_len */
-                pdata->fxgmac_test_packet_len = 0;
+                pdata->expansion.fxgmac_test_packet_len = 0;
 
-                if((pdata->fxgmac_test_skb_arr_in_index + 1) % FXGMAC_MAX_DBG_TEST_PKT != pdata->fxgmac_test_skb_arr_out_index){
+                if((pdata->expansion.fxgmac_test_skb_arr_in_index + 1) % FXGMAC_MAX_DBG_TEST_PKT != pdata->expansion.fxgmac_test_skb_arr_out_index){
                     struct sk_buff *tmpskb = skb_copy(skb, GFP_ATOMIC);
                     skb_push(tmpskb, FXGMAC_TEST_MAC_HEAD_LEN); 
 
-                    pdata->fxgmac_test_skb_array[pdata->fxgmac_test_skb_arr_in_index] = tmpskb;
-                    pdata->fxgmac_test_skb_arr_in_index = (pdata->fxgmac_test_skb_arr_in_index + 1) % FXGMAC_MAX_DBG_TEST_PKT;
+                    pdata->expansion.fxgmac_test_skb_array[pdata->expansion.fxgmac_test_skb_arr_in_index] = tmpskb;
+                    pdata->expansion.fxgmac_test_skb_arr_in_index = (pdata->expansion.fxgmac_test_skb_arr_in_index + 1) % FXGMAC_MAX_DBG_TEST_PKT;
                 }
                 else{
                     DPRINTK("loopback test buffer is full.");
@@ -2164,12 +2271,10 @@ static int fxgmac_one_poll_tx(struct napi_struct *napi, int budget)
 {
     struct fxgmac_channel *channel = container_of(napi,
                         struct fxgmac_channel,
-                        napi_tx);
+                        expansion.napi_tx);
     int ret = 0;
     struct fxgmac_pdata *pdata = channel->pdata;
     struct fxgmac_hw_ops *hw_ops = &pdata->hw_ops;
-
-    pdata->stats.msix_ch0_napi_napi_tx++;
 
     ret = fxgmac_tx_poll(channel);
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(4,10,0))
@@ -2188,7 +2293,7 @@ static int fxgmac_one_poll_rx(struct napi_struct *napi, int budget)
 {
     struct fxgmac_channel *channel = container_of(napi,
                         struct fxgmac_channel,
-                        napi_rx);
+                        expansion.napi_rx);
     int processed = 0;
     struct fxgmac_pdata *pdata = channel->pdata;
     struct fxgmac_hw_ops *hw_ops = &pdata->hw_ops;
@@ -2210,7 +2315,6 @@ static int fxgmac_one_poll_rx(struct napi_struct *napi, int budget)
         hw_ops->enable_msix_one_interrupt(pdata, channel->queue_index);
 #endif
     }
-    channel_is_onpolling = channel->queue_index; 
 
     return processed;
 }
@@ -2219,17 +2323,11 @@ static int fxgmac_all_poll(struct napi_struct *napi, int budget)
 {
     struct fxgmac_pdata *pdata = container_of(napi,
                              struct fxgmac_pdata,
-                             napi);
+                             expansion.napi);
     struct fxgmac_channel *channel;
-    int processed, last_processed;
-    int ring_budget;
+    struct fxgmac_hw_ops *hw_ops = &pdata->hw_ops;
+    int processed;
     unsigned int i;
-
-#if FXGMAC_FPGA_VER_20210507
-    /* below line is added for fpga after 20210507 */
-    struct net_device *netdev = pdata->netdev;
-    u32 val_mgmt_intcrtl0;
-#endif
 
     //yzhang comment out
     if(netif_msg_rx_status(pdata)){
@@ -2237,58 +2335,27 @@ static int fxgmac_all_poll(struct napi_struct *napi, int budget)
     }
 
     processed = 0;
-    ring_budget = budget / pdata->rx_ring_count;
     do {
-        last_processed = processed;
-
         channel = pdata->channel_head;
+        /* Cleanup Tx ring first */
+        /*since only 1 tx channel supported in this version, poll ch 0 always. */
+        fxgmac_tx_poll(pdata->channel_head + 0);
         for (i = 0; i < pdata->channel_count; i++, channel++) {
-            fxgmac_cur_rx_ch_polling = i;
-            /* Cleanup Tx ring first */
-#if FXGMAC_FULL_TX_CHANNEL
-            fxgmac_tx_poll(channel);
-#else
-            /*since only 1 tx channel supported in this version, poll ch 0 always. */
-            fxgmac_tx_poll((struct fxgmac_channel *)(pdata->channel_head + (i % pdata->tx_q_count)));
-#endif
-            /* Process Rx ring next */
-            if (ring_budget > (budget - processed))
-                ring_budget = budget - processed;
-
-            channel_is_onpolling = i; 
-            processed += fxgmac_rx_poll(channel, ring_budget);
-
-#if FXGMAC_TX_INTERRUPT_EN
-            if (FXGMAC_IS_CHANNEL_WITH_TX_IRQ(i))
-                pdata->stats.msix_ch0_napi_napi_tx++;
-#endif
+            processed += fxgmac_rx_poll(channel, budget);
         }
-    } while ((processed < budget) && (processed != last_processed));
+    } while (false);
+
+    // for phy, we needn't to process any packet,so processed will be 0
+    if (pdata->expansion.mgm_intctrl_val & MGMT_INT_CTRL0_INT_STATUS_PHY) {
+        fxgmac_phy_process(pdata);
+        pdata->expansion.mgm_intctrl_val &= ~MGMT_INT_CTRL0_INT_STATUS_PHY;
+    }
 
     /* If we processed everything, we are done */
     if (processed < budget) {
         /* Turn off polling */
-        napi_complete_done(napi, processed);
-
-        /* Enable Tx and Rx interrupts */
-        fxgmac_enable_rx_tx_ints(pdata);
-
-#if FXGMAC_FPGA_VER_20210507
-        val_mgmt_intcrtl0 = (u32)readl((const volatile void *)(netdev->base_addr + MGMT_INT_CTRL0));
-
-        //enable RX channel interrupts
-        val_mgmt_intcrtl0 = FXGMAC_SET_REG_BITS(val_mgmt_intcrtl0, MGMT_INT_CTRL0_INT_MASK_RXCH_POS,
-                             MGMT_INT_CTRL0_INT_STATUS_RXCH_LEN,
-                             0);
-#if FXGMAC_TX_INTERRUPT_EN
-        //enable TX channel interrupts
-        val_mgmt_intcrtl0 = FXGMAC_SET_REG_BITS(val_mgmt_intcrtl0, MGMT_INT_CTRL0_INT_MASK_TXCH_POS,
-                             MGMT_INT_CTRL0_INT_STATUS_TXCH_LEN,
-                             0);
-#endif
-
-        writel(val_mgmt_intcrtl0, (volatile void *)(netdev->base_addr + MGMT_INT_CTRL0));
-#endif
+        if (napi_complete_done(napi, processed))
+            hw_ops->enable_mgm_interrupt(pdata);
     }
 
     if((processed) && (netif_msg_rx_status(pdata))) { //yzhang for debug

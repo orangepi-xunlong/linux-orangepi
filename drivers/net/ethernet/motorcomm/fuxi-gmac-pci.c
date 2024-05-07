@@ -19,15 +19,6 @@ distribute without commercial permission.
 #include "fuxi-gmac.h"
 #include "fuxi-gmac-reg.h"
 
-
-#ifdef CONFIG_PCI_MSI
-u32 pcidev_int_mode; // for msix
-
-//for MSIx, 20210526
-struct msix_entry *msix_entries = NULL;
-int req_vectors = 0;
-#endif
-
 #define FXGMAC_DBG         0
 /* for power state debug using, 20210629. */
 #if FXGMAC_DBG
@@ -130,49 +121,11 @@ int fxgmac_dbg_log_uninit( void )
     return 0;
 }
 
-/*
- * since kernel does not clear the MSI mask bits and 
- * this function clear MSI mask bits when MSI is enabled.
- */
-int fxgmac_pci_config_modify(struct pci_dev *pdev)
-{
-    //struct net_device *netdev = dev_get_drvdata(&pdev->dev);
-    //struct fxgmac_pdata *pdata = netdev_priv(netdev);
-    u16 pcie_cap_offset;
-    u32 pcie_msi_mask_bits;
-    int ret;
-
-    pcie_cap_offset = pci_find_capability(pdev, 0x05 /*MSI Capability ID*/);
-    if (pcie_cap_offset) {
-        ret = pci_read_config_dword(pdev,
-                                  pcie_cap_offset + 0x10 /* MSI mask bits */,
-                                  &pcie_msi_mask_bits);
-        if (ret)
-        {
-            DPRINTK(KERN_ERR "fxgmac_pci_config_modify read pci config space MSI cap. failed, %d\n", ret);
-            return -EFAULT;
-        }
-    }
-
-    ret = pci_write_config_word(pdev, pcie_cap_offset + 0xc /* MSI data */, 0x1234/* random val */);
-    ret = pci_write_config_dword(pdev, pcie_cap_offset + 0x10 /* MSI mask bits */, (pcie_msi_mask_bits & 0xffff0000) /*clear mask bits*/);
-    if (ret)
-    {
-        DPRINTK(KERN_ERR "fxgmac_pci_config_modify write pci config space MSI mask failed, %d\n", ret);
-    }
-
-    return ret;
-}
-
 static int fxgmac_probe(struct pci_dev *pcidev, const struct pci_device_id *id)
 {
     struct device *dev = &pcidev->dev;
     struct fxgmac_resources res;
     int i, ret;
-#ifdef CONFIG_PCI_MSI
-    //for MSIx, 20210526
-    int vectors, rc;
-#endif
 
     ret = pcim_enable_device(pcidev);
     if (ret) {
@@ -183,9 +136,6 @@ static int fxgmac_probe(struct pci_dev *pcidev, const struct pci_device_id *id)
     for (i = 0; i <= PCI_STD_RESOURCE_END; i++) {
         if (pci_resource_len(pcidev, i) == 0)
             continue;
-        /*if (0x100 != pci_resource_len(pcidev, i))
-            continue;
-        */
 
         ret = pcim_iomap_regions(pcidev, BIT(i), FXGMAC_DRV_NAME);
         if (ret)
@@ -202,103 +152,6 @@ static int fxgmac_probe(struct pci_dev *pcidev, const struct pci_device_id *id)
     memset(&res, 0, sizeof(res));
     res.irq = pcidev->irq;
     res.addr = pcim_iomap_table(pcidev)[i];
-    DPRINTK(KERN_INFO "fxgmac_probe res.addr=%p,val=%#x\n",res.addr,/*(int)(*((int*)(res.addr)))*/0);
-
-#ifdef CONFIG_PCI_MSI
-    /* added for MSIx feature, 20210526 */
-    pcidev_int_mode = 0; //init to legacy interrupt, and MSIx has the first priority
-
-    /* check cpu core number.
-     * since we have 4 channels, we must ensure the number of cpu core > 4
-     * otherwise, just roll back to legacy
-     */
-    vectors = num_online_cpus();
-    DPRINTK("fxgmac_probe, num of cpu=%d\n", vectors);
-    if(vectors >= FXGMAC_MAX_DMA_CHANNELS) {
-#if FXGMAC_TX_INTERRUPT_EN
-        req_vectors = FXGMAC_MAX_DMA_CHANNELS_PLUS_1TX;
-#else
-        req_vectors = FXGMAC_MAX_DMA_CHANNELS;
-#endif
-        msix_entries = kcalloc(/*vectors 20220211*/req_vectors,
-                        sizeof(struct msix_entry),
-                        GFP_KERNEL);
-        if (!msix_entries) {
-            DPRINTK("fxgmac_probe, MSIx, kcalloc err for msix entries, rollback to MSI..\n");
-            goto enable_msi_interrupt;
-        }else {
-            for (i = 0; i < /*vectors 20220211*/req_vectors; i++)
-                msix_entries[i].entry = i;
-#if 0
-            /* follow the requirement from pci_enable_msix():
-             *
-             * Setup the MSI-X capability structure of device function with the number
-             * of requested irqs upon its software driver call to request for
-             * MSI-X mode enabled on its hardware device function. A return of zero
-             * indicates the successful configuration of MSI-X capability structure
-             * with new allocated MSI-X irqs. A return of < 0 indicates a failure.
-             * Or a return of > 0 indicates that driver request is exceeding the number
-             * of irqs or MSI-X vectors available. Driver should use the returned value to
-             * re-send its request.
-             */
-            req_vectors = vectors;
-                do {
-                        rc = pci_enable_msix(pcidev, msix_entries, req_vectors);
-                        if (rc < 0) {
-                    //failure
-                    //DPRINTK("fxgmac_probe, enable MSIx failed,%d.\n", rc);
-                    rc = 0; //stop the loop
-                    req_vectors = 0; //indicate failure
-                        } else if (rc > 0) {
-                            //re-request with new number
-                            req_vectors = rc;
-                        }
-                } while (rc);
-#else
-            rc = pci_enable_msix_range(pcidev, msix_entries, req_vectors, req_vectors);
-            if (rc < 0) {
-                    //failure
-                    DPRINTK("fxgmac_probe, enable MSIx failed,%d.\n", rc);
-                    req_vectors = 0; //indicate failure
-            } else {
-                    req_vectors = rc;
-            }
-#endif
-
-#if FXGMAC_TX_INTERRUPT_EN
-            if(req_vectors >= FXGMAC_MAX_DMA_CHANNELS_PLUS_1TX) {
-#else
-            if(req_vectors >= FXGMAC_MAX_DMA_CHANNELS) {
-#endif
-                DPRINTK("fxgmac_probe, enable MSIx ok, cpu=%d,vectors=%d.\n", vectors, req_vectors);
-                pcidev_int_mode = FXGMAC_FLAG_MSIX_CAPABLE | FXGMAC_FLAG_MSIX_ENABLED;
-                goto drv_probe;
-            }else if (req_vectors){
-                DPRINTK("fxgmac_probe, enable MSIx with only %d vector, while we need %d, rollback to MSI.\n", req_vectors, vectors);
-                //roll back to msi
-                pci_disable_msix(pcidev);
-                kfree(msix_entries);
-                msix_entries = NULL;
-            }else {
-                DPRINTK("fxgmac_probe, enable MSIx failure and clear msix entries.\n");
-                //roll back to msi
-                kfree(msix_entries);
-                msix_entries = NULL;
-            }
-        }
-    }
-
-enable_msi_interrupt:
-    rc = pci_enable_msi(pcidev);
-    if (rc < 0)
-        DPRINTK("fxgmac_probe, enable MSI failure, rollback to LEGACY.\n");
-    else {
-        pcidev_int_mode = FXGMAC_FLAG_MSI_CAPABLE | FXGMAC_FLAG_MSI_ENABLED;
-        DPRINTK("fxgmac_probe, enable MSI ok, irq=%d.\n", pcidev->irq);
-    }
-
-drv_probe:
-#endif
 
     //fxgmac_dbg_log_init();
     fxgmac_dbg_log("fxpm,_fxgmac_probe\n");
@@ -311,16 +164,19 @@ static void fxgmac_remove(struct pci_dev *pcidev)
     struct net_device *netdev = dev_get_drvdata(&pcidev->dev);
     struct fxgmac_pdata * pdata = netdev_priv(netdev);
 
+#ifdef CONFIG_PCI_MSI
+    u32 msix = FXGMAC_GET_REG_BITS(pdata->expansion.int_flags,
+                                    FXGMAC_FLAG_MSIX_POS,
+                                    FXGMAC_FLAG_MSIX_LEN);
+#endif
+
     fxgmac_drv_remove(&pcidev->dev);
 #ifdef CONFIG_PCI_MSI
-    //20210526
-    if(pcidev_int_mode & (FXGMAC_FLAG_MSIX_CAPABLE | FXGMAC_FLAG_MSIX_ENABLED)){
+    if(msix){
         pci_disable_msix(pcidev);
-        kfree(msix_entries);
-        msix_entries = NULL;
-        req_vectors = 0;
+        kfree(pdata->expansion.msix_entries);
+        pdata->expansion.msix_entries = NULL;
     }
-    pcidev_int_mode = 0;
 #endif
 
     fxgmac_dbg_log("fxpm,_fxgmac_remove\n");
@@ -337,7 +193,7 @@ static int __fxgmac_shutdown(struct pci_dev *pdev, bool *enable_wake)
 {
     struct net_device *netdev = dev_get_drvdata(&pdev->dev);
     struct fxgmac_pdata *pdata = netdev_priv(netdev);
-    u32 wufc = pdata->wol;
+    u32 wufc = pdata->expansion.wol;
 #ifdef CONFIG_PM
     int retval = 0;
 #endif
@@ -385,7 +241,7 @@ static void fxgmac_shutdown(struct pci_dev *pdev)
     DPRINTK("fxpm, fxgmac_shutdown callin\n");
     fxgmac_dbg_log("fxpm, fxgmac_shutdown callin\n");
 
-    pdata->current_state = CURRENT_STATE_SHUTDOWN;
+    pdata->expansion.current_state = CURRENT_STATE_SHUTDOWN;
     __fxgmac_shutdown(pdev, &wake);
 
     if (system_state == SYSTEM_POWER_OFF) {
@@ -409,10 +265,15 @@ static int fxgmac_suspend(struct pci_dev *pdev,
     DPRINTK("fxpm, fxgmac_suspend callin\n");
     fxgmac_dbg_log("fxpm, fxgmac_suspend callin\n");
 
-    pdata->current_state = CURRENT_STATE_SUSPEND;
-    retval = __fxgmac_shutdown(pdev, &wake);
-    if (retval)
-        return retval;
+    pdata->expansion.current_state = CURRENT_STATE_SUSPEND;
+
+    if (netif_running(netdev)) {
+        retval = __fxgmac_shutdown(pdev, &wake);
+        if (retval)
+            return retval;
+    } else {
+        wake = !!(pdata->expansion.wol);
+    }
 
     if (wake) {
         pci_prepare_to_sleep(pdev);
@@ -439,7 +300,7 @@ static int fxgmac_resume(struct pci_dev *pdev)
     netdev = dev_get_drvdata(&pdev->dev);
     pdata = netdev_priv(netdev);
 
-    pdata->current_state = CURRENT_STATE_RESUME;
+    pdata->expansion.current_state = CURRENT_STATE_RESUME;
 
     pci_set_power_state(pdev, PCI_D0);
     pci_restore_state(pdev);
@@ -455,7 +316,7 @@ static int fxgmac_resume(struct pci_dev *pdev)
         return err;
     }
     smp_mb__before_atomic();
-    __clear_bit(FXGMAC_POWER_STATE_DOWN, &pdata->powerstate);
+    __clear_bit(FXGMAC_POWER_STATE_DOWN, &pdata->expansion.powerstate);
     pci_set_master(pdev);
 
     pci_wake_from_d3(pdev, false);
