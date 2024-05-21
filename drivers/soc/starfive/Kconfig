@@ -1,0 +1,9 @@
+# SPDX-License-Identifier: GPL-2.0
+
+config STARFIVE_PMU
+	bool "Support PMU for StarFive Soc"
+	depends on PM && (SOC_STARFIVE || COMPILE_TEST)
+	select PM_GENERIC_DOMAINS
+	help
+	  Say y here to enable power domain support.
+

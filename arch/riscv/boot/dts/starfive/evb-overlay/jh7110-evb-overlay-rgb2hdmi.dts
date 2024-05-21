@@ -1,0 +1,25 @@
+/dts-v1/;
+/plugin/;
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/pinctrl/starfive,jh7110-pinfunc.h>
+/ {
+	compatible = "starfive,jh7110";
+
+	//hdmi_output
+	fragment@0 {
+		target-path = "/soc/tda988x_pin";
+		__overlay__ {
+			status = "okay";
+		};
+	};
+
+	//uart1
+	fragment@1 {
+		target-path = "/soc/serial@10010000";
+		__overlay__ {
+			status = "okay";
+		};
+	};
+};
+
+ 

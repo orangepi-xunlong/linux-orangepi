@@ -1,0 +1,109 @@
+/dts-v1/;
+/plugin/;
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/pinctrl/starfive,jh7110-pinfunc.h>
+/ {
+	compatible = "starfive,jh7110";
+
+	//gpio
+	fragment@0 {
+		target-path = "/soc/gpio@13040000";
+		__overlay__ {
+			dt_sdcard1_pins: dt-sdcard1-pins {
+				sdcard1-pins0 {
+					starfive,pins = <PAD_GPIO56>;
+					starfive,pinmux = <PAD_GPIO56_FUNC_SEL 0>;
+					starfive,pin-ioconfig = <IO(GPIO_IE(1) | (GPIO_PU(1)))>;
+					starfive,pin-gpio-dout = <GPO_SDIO1_CCLK_OUT>;
+					starfive,pin-gpio-doen = <OEN_LOW>;
+				};
+
+				sdcard1-pins1 {
+					starfive,pins = <PAD_GPIO50>;
+					starfive,pinmux = <PAD_GPIO50_FUNC_SEL 0>;
+					starfive,pin-ioconfig = <IO(GPIO_IE(1) | (GPIO_PU(1)))>;
+					starfive,pin-gpio-dout = <GPO_SDIO1_CCMD_OUT>;
+					starfive,pin-gpio-doen = <OEN_SDIO1_CCMD_OUT_EN>;
+					starfive,pin-gpio-din =  <GPI_SDIO1_CCMD_IN>;
+				};
+
+				sdcard1-pins2 {
+					starfive,pins = <PAD_GPIO49>;
+					starfive,pinmux = <PAD_GPIO49_FUNC_SEL 0>;
+					starfive,pin-ioconfig = <IO(GPIO_IE(1) | (GPIO_PU(1)))>;
+					starfive,pin-gpio-dout = <GPO_SDIO1_CDATA_OUT_0>;
+					starfive,pin-gpio-doen = <OEN_SDIO1_CDATA_OUT_EN_0>;
+					starfive,pin-gpio-din =  <GPI_SDIO1_CDATA_IN_0>;
+				};
+
+				sdcard1-pins3 {
+					starfive,pins = <PAD_GPIO45>;
+					starfive,pinmux = <PAD_GPIO45_FUNC_SEL 0>;
+					starfive,pin-ioconfig = <IO(GPIO_IE(1) | (GPIO_PU(1)))>;
+					starfive,pin-gpio-dout = <GPO_SDIO1_CDATA_OUT_1>;
+					starfive,pin-gpio-doen = <OEN_SDIO1_CDATA_OUT_EN_1>;
+					starfive,pin-gpio-din =  <GPI_SDIO1_CDATA_IN_1>;
+				};
+
+				sdcard1-pins4 {
+					starfive,pins = <PAD_GPIO62>;
+					starfive,pinmux = <PAD_GPIO62_FUNC_SEL 0>;
+					starfive,pin-ioconfig = <IO(GPIO_IE(1) | (GPIO_PU(1)))>;
+					starfive,pin-gpio-dout = <GPO_SDIO1_CDATA_OUT_2>;
+					starfive,pin-gpio-doen = <OEN_SDIO1_CDATA_OUT_EN_2>;
+					starfive,pin-gpio-din =  <GPI_SDIO1_CDATA_IN_2>;
+				};
+
+				sdcard1-pins5 {
+					starfive,pins = <PAD_GPIO40>;
+					starfive,pinmux = <PAD_GPIO40_FUNC_SEL 0>;
+					starfive,pin-ioconfig = <IO(GPIO_IE(1) | (GPIO_PU(1)))>;
+					starfive,pin-gpio-dout = <GPO_SDIO1_CDATA_OUT_3>;
+					starfive,pin-gpio-doen = <OEN_SDIO1_CDATA_OUT_EN_3>;
+					starfive,pin-gpio-din =  <GPI_SDIO1_CDATA_IN_3>;
+				};
+			};
+		};
+	};
+
+	//uart3
+	fragment@1 {
+		target-path = "/soc/serial@12000000";
+		__overlay__ {
+			status = "okay";
+		};
+	};
+
+	//i2c0
+  	fragment@2 {
+		target-path = "/soc/i2c@10030000";
+		__overlay__ {
+			status = "okay";
+		};
+	};
+
+	//sdio1
+	fragment@3 {
+		target-path = "/soc/sdio1@16020000";
+		__overlay__ {
+			max-frequency = <100000000>;
+			card-detect-delay = <300>;
+			bus-width = <4>;
+			no-sdio;
+			no-mmc;
+			broken-cd;
+			sd-uhs-sdr12;
+			sd-uhs-sdr25;
+			sd-uhs-sdr50;
+			sd-uhs-sdr104;
+			sd-uhs-ddr50;
+			cap-sd-highspeed;
+			post-power-on-delay-ms = <200>;
+			pinctrl-names = "default";
+			pinctrl-0 = <&dt_sdcard1_pins>;
+			status = "okay";
+		};
+	};
+};
+
+ 
