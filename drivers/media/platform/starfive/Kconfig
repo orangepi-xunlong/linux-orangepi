@@ -18,6 +18,14 @@ config VIN_SENSOR_SC2235
 	help
 	  Say Y here if you want to have support for VIN sensor SC2235
 
+config VIN_SENSOR_OV5647
+	tristate "VIN SENSOR support OV5647"
+	depends on VIDEO_STF_VIN
+	select V4L2_FWNODE
+	default n
+	help
+	  Say Y here if you want to have support for VIN sensor OV5647
+
 config VIN_SENSOR_OV4689
 	tristate "VIN SENSOR support OV4689"
 	depends on VIDEO_STF_VIN
