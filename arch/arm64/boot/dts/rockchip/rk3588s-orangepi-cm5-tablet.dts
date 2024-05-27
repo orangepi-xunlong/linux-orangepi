@@ -284,7 +284,7 @@
 	fan: pwm-fan {
 		compatible = "pwm-fan";
 		#cooling-cells = <2>;
-		pwms = <&pwm1 0 50000 0>;
+		pwms = <&pwm15 0 50000 0>;
 		cooling-levels = <0 50 100 150 200 255>;
 		rockchip,temp-trips = <
 			40000   2
@@ -1035,10 +1035,16 @@
 	status = "disabled";
 };
 
+&pwm0 {
+	pinctrl-names = "active";
+	pinctrl-0 = <&pwm0m1_pins>;
+	status = "disabled";
+};
+
 &pwm1 {
 	pinctrl-names = "active";
-	pinctrl-0 = <&pwm1m1_pins>;
-	status = "okay";
+	pinctrl-0 = <&pwm1m2_pins>;
+	status = "disabled";
 };
 
 &pwm13 {
@@ -1055,8 +1061,8 @@
 
 &pwm15 {
 	pinctrl-names = "active";
-	pinctrl-0 = <&pwm15m3_pins>;
-	status = "disabled";
+	pinctrl-0 = <&pwm15m2_pins>;
+	status = "okay";
 };
 
 &spi0 {
@@ -1066,9 +1072,9 @@
 	num-cs = <2>;
 };
 
-&spi4 {
+&spi1 {
 	status = "disabled";
-	assigned-clocks = <&cru CLK_SPI4>;
+	assigned-clocks = <&cru CLK_SPI1>;
 	assigned-clock-rates = <200000000>;
 };
 
@@ -1118,12 +1124,6 @@
 	pinctrl-0 = <&i2c5m3_xfer>;
 };
 
-&i2c8 {
-	status = "disabled";
-	pinctrl-names = "default";
-	pinctrl-0 = <&i2c8m2_xfer>;
-};
-
 &pwm3 {
 	status = "disabled";
 	pinctrl-0 = <&pwm3m3_pins>;
@@ -1136,7 +1136,7 @@
 
 &uart6 {
 	status = "disabled";
-	pinctrl-0 = <&uart6m1_xfer>;
+	pinctrl-0 = <&uart6m2_xfer>;
 };
 
 &uart7 {
