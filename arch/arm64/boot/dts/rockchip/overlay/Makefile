@@ -10,6 +10,7 @@ dtbo-$(CONFIG_ARCH_ROCKCHIP) += \
 	rk3588-i2c5-m3.dtbo \
 	rk3588-i2c6-m4.dtbo \
 	rk3588-i2c8-m2.dtbo \
+	rk3588-i2c7-m3.dtbo \
 	rk3588-pwm0-m0.dtbo \
 	rk3588-pwm0-m1.dtbo \
 	rk3588-pwm0-m2.dtbo \
@@ -86,6 +87,10 @@ dtbo-$(CONFIG_ARCH_ROCKCHIP) += \
 	rk3588-opi5max-disable-leds.dtbo \
 	rk3588-opi5pro-sfc.dtbo \
 	rk3588-opicm5-blink-gpio.dtbo \
+	rk3588-opicm5-cam1.dtbo \
+	rk3588-opicm5-cam2.dtbo \
+	rk3588-opicm5-cam3.dtbo \
+	rk3588-opicm5-cam4.dtbo \
 	rk3588-opicm5-tablet-cam1.dtbo \
 	rk3588-opicm5-tablet-cam2.dtbo \
 	rk3588-opicm5-tablet-cam3.dtbo \

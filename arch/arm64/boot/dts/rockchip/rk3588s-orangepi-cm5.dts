@@ -18,6 +18,11 @@
 #include "rk3588-rk806-single.dtsi"
 #include "rk3588-linux.dtsi"
 
+#include "rk3588s-orangepi-cm5-camera1.dtsi"
+#include "rk3588s-orangepi-cm5-camera2.dtsi"
+#include "rk3588s-orangepi-cm5-camera3.dtsi"
+#include "rk3588s-orangepi-cm5-camera4.dtsi"
+
 / {
 	model = "RK3588S OPi CM5";
 	compatible = "rockchip,rk3588s-orangepi-cm5", "rockchip,rk3588";
@@ -118,28 +123,27 @@
 		status = "okay";
 
 		lan1@0 {
-			gpios = <&gpio0 RK_PC4 GPIO_ACTIVE_HIGH>;
+			gpios = <&gpio0 RK_PC6 GPIO_ACTIVE_LOW>;
 			label = "lan1";
-			default-state = "off";
+			default-state = "on";
 		};
 
 		lan2@1 {
-			gpios = <&gpio0 RK_PC5 GPIO_ACTIVE_LOW>;
+			gpios = <&gpio0 RK_PC7 GPIO_ACTIVE_HIGH>;
 			label = "lan2";
-			default-state = "off";
+			default-state = "on";
 		};
 
 		wan@3 {
-			gpios = <&gpio0 RK_PC7 GPIO_ACTIVE_HIGH>;
+			gpios = <&gpio0 RK_PC5 GPIO_ACTIVE_LOW>;
 			label = "wan";
-			default-state = "off";
+			default-state = "on";
 		};
 
 		power@4 {
-			gpios = <&gpio0 RK_PC6 GPIO_ACTIVE_HIGH>;
+			gpios = <&gpio0 RK_PC4 GPIO_ACTIVE_HIGH>;
 			label = "power";
-			linux,default-trigger = "default-on";
-			linux,default-trigger-delay-ms = <0>;
+			default-state = "off";
 		};
 	};
 
@@ -151,11 +155,34 @@
 
 		button@1 {
 			debounce-interval = <50>;
-			gpios = <&gpio4 RK_PB6 GPIO_ACTIVE_LOW>;
+			gpios = <&gpio3 RK_PC6 GPIO_ACTIVE_LOW>;
 			label = "K1";
 			linux,code = <KEY_POWER>;
 			wakeup-source;
 		};
+	};
+
+	fan: pwm-fan {
+		compatible = "pwm-fan";
+		#cooling-cells = <2>;
+		pwms = <&pwm13 0 50000 0>;
+		cooling-levels = <0 50 100 150 200 255>;
+		rockchip,temp-trips = <
+			50000   1
+			55000   2
+			60000   3
+			65000   4
+			70000   5
+		>;
+
+		status = "okay";
+	};
+
+	ext_cam_ov5647_clk: external-camera-ov5647-clock {
+		compatible = "fixed-clock";
+		clock-frequency = <25000000>;
+		clock-output-names = "ext_cam_ov5647_clk";
+		#clock-cells = <0>;
 	};
 };
 
@@ -489,10 +516,10 @@
 	};
 };
 
-&i2c3 {
+&i2c1 {
 	status = "okay";
 	pinctrl-names = "default";
-	pinctrl-0 = <&i2c3m1_xfer>;
+	pinctrl-0 = <&i2c1m2_xfer>;
 
 	hym8563: hym8563@51 {
 		compatible = "haoyu,hym8563";
@@ -539,14 +566,16 @@
 
 	gpio-key {
 		key1_pin: key1-pin {
-			rockchip,pins = <4 RK_PB6 RK_FUNC_GPIO &pcfg_pull_up>;
+			rockchip,pins = <3 RK_PC6 RK_FUNC_GPIO &pcfg_pull_up>;
 		};
 	};
 
 	gpio-func {
 		leds_gpio: leds-gpio {
 			rockchip,pins =
-				<1 RK_PA2 RK_FUNC_GPIO &pcfg_pull_none>;
+				<0 RK_PC5 RK_FUNC_GPIO &pcfg_pull_none>,
+				<0 RK_PC6 RK_FUNC_GPIO &pcfg_pull_none>,
+				<0 RK_PC7 RK_FUNC_GPIO &pcfg_pull_none>;
 		};
 	};
 };
@@ -600,6 +629,7 @@
 
 &usbdp_phy0 {
         status = "okay";
+        rockchip,dp-lane-mux = <2 3>;
 };
 
 &usbdp_phy0_dp {
@@ -620,8 +650,8 @@
 
 &usbdrd_dwc3_0 {
         status = "okay";
-        dr_mode = "host";
-        usb-role-switch;
+        dr_mode = "otg";
+        extcon = <&u2phy0>;
 };
 
 &hdmi0 {
@@ -733,6 +763,54 @@
 	};
 };
 
-&pwr_key {
+&pwm13 {
+	status = "okay";
+	pinctrl-names = "active";
+	pinctrl-0 = <&pwm13m1_pins>;
+};
+
+&pwm14 {
 	status = "disabled";
+	pinctrl-names = "active";
+	pinctrl-0 = <&pwm14m1_pins>;
+};
+
+&pwm15 {
+	status = "disabled";
+	pinctrl-names = "active";
+	pinctrl-0 = <&pwm15m1_pins>;
+};
+
+&i2c7 {
+	status = "disabled";
+	pinctrl-names = "default";
+	pinctrl-0 = <&i2c7m3_xfer>;
+};
+
+&uart4 {
+	status = "disabled";
+	pinctrl-names = "default";
+	pinctrl-0 = <&uart4m2_xfer>;
+};
+
+
+&uart7 {
+	status = "disabled";
+	pinctrl-names = "default";
+	pinctrl-0 = <&uart7m2_xfer>;
+};
+
+&can1 {
+	status = "disabled";
+	pinctrl-names = "default";
+	pinctrl-0 = <&can1m1_pins>;
+	assigned-clocks = <&cru CLK_CAN1>;
+	assigned-clock-rates = <200000000>;
+};
+
+&spi0 {
+	status = "disabled";
+	assigned-clocks = <&cru CLK_SPI0>;
+	assigned-clock-rates = <200000000>;
+	num-cs = <2>;
 };
