@@ -111,6 +111,7 @@ static void std_init_compound(const struct v4l2_ctrl *ctrl, u32 idx,
 	struct v4l2_ctrl_vp9_frame *p_vp9_frame;
 	struct v4l2_ctrl_fwht_params *p_fwht_params;
 	struct v4l2_ctrl_h264_scaling_matrix *p_h264_scaling_matrix;
+	struct v4l2_ctrl_h264_sps *p_h264_sps;
 	struct v4l2_ctrl_av1_sequence *p_av1_sequence;
 	void *p = ptr.p + idx * ctrl->elem_size;
 
@@ -178,6 +179,18 @@ static void std_init_compound(const struct v4l2_ctrl *ctrl, u32 idx,
 		 *  (7-8) and (7-9) of the specification.
 		 */
 		memset(p_h264_scaling_matrix, 16, sizeof(*p_h264_scaling_matrix));
+		break;
+	case V4L2_CTRL_TYPE_H264_SPS:
+		p_h264_sps = p;
+		/*
+		 * Without V4L2_H264_SPS_FLAG_FRAME_MBS_ONLY,
+		 * frame_mbs_only_flag set to 0 will translate to a miniumum
+		 * height of 32 (see H.264 specification 7-8). Some driver may
+		 * have a minimum size lower then 32, which would fail
+		 * validation with the SPS value. Set this flag, so that there
+		 * is now doubling in the height, allowing a valid default.
+		*/
+		p_h264_sps->flags = V4L2_H264_SPS_FLAG_FRAME_MBS_ONLY;
 		break;
 	}
 }
