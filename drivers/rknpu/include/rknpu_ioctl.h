@@ -31,11 +31,6 @@
 #define RKNPU_OFFSET_INT_STATUS 0x28
 #define RKNPU_OFFSET_INT_RAW_STATUS 0x2c
 
-#define RKNPU_OFFSET_CLR_ALL_RW_AMOUNT 0x8010
-#define RKNPU_OFFSET_DT_WR_AMOUNT 0x8034
-#define RKNPU_OFFSET_DT_RD_AMOUNT 0x8038
-#define RKNPU_OFFSET_WT_RD_AMOUNT 0x803c
-
 #define RKNPU_OFFSET_ENABLE_MASK 0xf008
 
 #define RKNPU_INT_CLEAR 0x1ffff
@@ -134,6 +129,8 @@ enum e_rknpu_action {
 	RKNPU_POWER_OFF = 21,
 	RKNPU_GET_TOTAL_SRAM_SIZE = 22,
 	RKNPU_GET_FREE_SRAM_SIZE = 23,
+	RKNPU_GET_IOMMU_DOMAIN_ID = 24,
+	RKNPU_SET_IOMMU_DOMAIN_ID = 25,
 };
 
 /**
@@ -147,6 +144,8 @@ enum e_rknpu_action {
  * @dma_addr: dma address that access by rknpu.
  * @sram_size: user-desired sram memory allocation size.
  *  - this size value would be page-aligned internally.
+ * @iommu_domain_id: iommu domain id
+ * @reserved: just padding to be 64-bit aligned.
  */
 struct rknpu_mem_create {
 	__u32 handle;
@@ -155,6 +154,8 @@ struct rknpu_mem_create {
 	__u64 obj_addr;
 	__u64 dma_addr;
 	__u64 sram_size;
+	__s32 iommu_domain_id;
+	__u32 reserved;
 };
 
 /**
@@ -249,9 +250,10 @@ struct rknpu_subcore_task {
  * @task_counter: task counter
  * @priority: submit priority
  * @task_obj_addr: address of task object
- * @regcfg_obj_addr: address of register config object
+ * @iommu_domain_id: iommu domain id
+ * @reserved: just padding to be 64-bit aligned.
  * @task_base_addr: task base address
- * @user_data: (optional) user data
+ * @hw_elapse_time: hardware elapse time
  * @core_mask: core mask of rknpu
  * @fence_fd: dma fence fd
  * @subcore_task: subcore task
@@ -265,9 +267,10 @@ struct rknpu_submit {
 	__u32 task_counter;
 	__s32 priority;
 	__u64 task_obj_addr;
-	__u64 regcfg_obj_addr;
+	__u32 iommu_domain_id;
+	__u32 reserved;
 	__u64 task_base_addr;
-	__u64 user_data;
+	__s64 hw_elapse_time;
 	__u32 core_mask;
 	__s32 fence_fd;
 	struct rknpu_subcore_task subcore_task[5];

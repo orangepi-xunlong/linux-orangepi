@@ -78,6 +78,8 @@ struct rockchip_opp_info {
 	u32 low_rm;
 	u32 current_rm;
 	u32 target_rm;
+	u32 pvtpll_clk_id;
+	bool pvtpll_low_temp;
 };
 
 #if IS_ENABLED(CONFIG_ROCKCHIP_OPP)
@@ -87,6 +89,7 @@ void rockchip_of_get_lkg_sel(struct device *dev, struct device_node *np,
 			     int *volt_sel, int *scale_sel);
 void rockchip_pvtpll_calibrate_opp(struct rockchip_opp_info *info);
 void rockchip_pvtpll_add_length(struct rockchip_opp_info *info);
+void rockchip_init_pvtpll_table(struct rockchip_opp_info *info, int bin);
 void rockchip_of_get_pvtm_sel(struct device *dev, struct device_node *np,
 			      char *reg_name, int bin, int process,
 			      int *volt_sel, int *scale_sel);
@@ -130,6 +133,8 @@ int rockchip_set_intermediate_rate(struct device *dev,
 int rockchip_init_opp_table(struct device *dev,
 			    struct rockchip_opp_info *info,
 			    char *lkg_name, char *reg_name);
+void rockchip_uninit_opp_table(struct device *dev,
+			       struct rockchip_opp_info *info);
 #else
 static inline int rockchip_of_get_leakage(struct device *dev, char *lkg_name,
 					  int *leakage)
@@ -149,6 +154,11 @@ static inline void rockchip_pvtpll_calibrate_opp(struct rockchip_opp_info *info)
 }
 
 static inline void rockchip_pvtpll_add_length(struct rockchip_opp_info *info)
+{
+}
+
+static inline void rockchip_init_pvtpll_table(struct rockchip_opp_info *info,
+					      int bin)
 {
 }
 
@@ -264,6 +274,11 @@ static inline int rockchip_init_opp_table(struct device *dev,
 					  char *lkg_name, char *reg_name)
 {
 	return -EOPNOTSUPP;
+}
+
+static inline void rockchip_uninit_opp_table(struct device *dev,
+					     struct rockchip_opp_info *info)
+{
 }
 
 #endif /* CONFIG_ROCKCHIP_OPP */

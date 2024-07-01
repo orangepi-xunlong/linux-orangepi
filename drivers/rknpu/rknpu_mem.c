@@ -17,8 +17,8 @@
 
 #ifdef CONFIG_ROCKCHIP_RKNPU_DMA_HEAP
 
-int rknpu_mem_create_ioctl(struct rknpu_device *rknpu_dev, unsigned long data,
-			   struct file *file)
+int rknpu_mem_create_ioctl(struct rknpu_device *rknpu_dev, struct file *file,
+			   unsigned int cmd, unsigned long data)
 {
 	struct rknpu_mem_create args;
 	int ret = -EINVAL;
@@ -33,13 +33,19 @@ int rknpu_mem_create_ioctl(struct rknpu_device *rknpu_dev, unsigned long data,
 	struct rknpu_session *session = NULL;
 	int i, fd;
 	unsigned int length, page_count;
+	unsigned int in_size = _IOC_SIZE(cmd);
+	unsigned int k_size = sizeof(struct rknpu_mem_create);
+	char *k_data = (char *)&args;
 
 	if (unlikely(copy_from_user(&args, (struct rknpu_mem_create *)data,
-				    sizeof(struct rknpu_mem_create)))) {
+				    in_size))) {
 		LOG_ERROR("%s: copy_from_user failed\n", __func__);
 		ret = -EFAULT;
 		return ret;
 	}
+
+	if (k_size > in_size)
+		memset(k_data + in_size, 0, k_size - in_size);
 
 	if (args.flags & RKNPU_MEM_NON_CONTIGUOUS) {
 		LOG_ERROR("%s: malloc iommu memory unsupported in current!\n",
@@ -109,22 +115,27 @@ int rknpu_mem_create_ioctl(struct rknpu_device *rknpu_dev, unsigned long data,
 			  __LINE__, &phys, length);
 	}
 
-	page_count = length >> PAGE_SHIFT;
-	pages = vmalloc(page_count * sizeof(struct page));
-	if (!pages) {
-		LOG_ERROR("alloc pages failed\n");
-		ret = -ENOMEM;
-		goto err_detach_dma_buf;
-	}
+	if (args.flags & RKNPU_MEM_KERNEL_MAPPING) {
+		page_count = length >> PAGE_SHIFT;
+		pages = vmalloc(page_count * sizeof(struct page));
+		if (!pages) {
+			LOG_ERROR("alloc pages failed\n");
+			ret = -ENOMEM;
+			goto err_detach_dma_buf;
+		}
 
-	for (i = 0; i < page_count; i++)
-		pages[i] = &page[i];
+		for (i = 0; i < page_count; i++)
+			pages[i] = &page[i];
 
-	rknpu_obj->kv_addr = vmap(pages, page_count, VM_MAP, PAGE_KERNEL);
-	if (!rknpu_obj->kv_addr) {
-		LOG_ERROR("vmap pages addr failed\n");
-		ret = -ENOMEM;
-		goto err_free_pages;
+		rknpu_obj->kv_addr =
+			vmap(pages, page_count, VM_MAP, PAGE_KERNEL);
+		if (!rknpu_obj->kv_addr) {
+			LOG_ERROR("vmap pages addr failed\n");
+			ret = -ENOMEM;
+			goto err_free_pages;
+		}
+		vfree(pages);
+		pages = NULL;
 	}
 
 	rknpu_obj->size = PAGE_ALIGN(args.size);
@@ -142,14 +153,12 @@ int rknpu_mem_create_ioctl(struct rknpu_device *rknpu_dev, unsigned long data,
 		(__u64)rknpu_obj->dma_addr);
 
 	if (unlikely(copy_to_user((struct rknpu_mem_create *)data, &args,
-				  sizeof(struct rknpu_mem_create)))) {
+				  in_size))) {
 		LOG_ERROR("%s: copy_to_user failed\n", __func__);
 		ret = -EFAULT;
 		goto err_unmap_kv_addr;
 	}
 
-	vfree(pages);
-	pages = NULL;
 	dma_buf_unmap_attachment(attachment, table, DMA_BIDIRECTIONAL);
 	dma_buf_detach(dmabuf, attachment);
 
@@ -191,8 +200,8 @@ err_free_obj:
 	return ret;
 }
 
-int rknpu_mem_destroy_ioctl(struct rknpu_device *rknpu_dev, unsigned long data,
-			    struct file *file)
+int rknpu_mem_destroy_ioctl(struct rknpu_device *rknpu_dev, struct file *file,
+			    unsigned long data)
 {
 	struct rknpu_mem_object *rknpu_obj, *entry, *q;
 	struct rknpu_session *session = NULL;

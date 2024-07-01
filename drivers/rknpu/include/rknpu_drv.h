@@ -10,6 +10,7 @@
 #include <linux/completion.h>
 #include <linux/device.h>
 #include <linux/kref.h>
+#include <linux/irq.h>
 #include <linux/platform_device.h>
 #include <linux/spinlock.h>
 #include <linux/regulator/consumer.h>
@@ -17,11 +18,9 @@
 #include <linux/hrtimer.h>
 #include <linux/miscdevice.h>
 
-#ifndef FPGA_PLATFORM
-#if KERNEL_VERSION(5, 10, 0) <= LINUX_VERSION_CODE
 #include <soc/rockchip/rockchip_opp_select.h>
-#endif
-#endif
+#include <soc/rockchip/rockchip_system_monitor.h>
+#include <soc/rockchip/rockchip_ipa.h>
 
 #include "rknpu_job.h"
 #include "rknpu_fence.h"
@@ -30,10 +29,10 @@
 
 #define DRIVER_NAME "rknpu"
 #define DRIVER_DESC "RKNPU driver"
-#define DRIVER_DATE "20231018"
+#define DRIVER_DATE "20240322"
 #define DRIVER_MAJOR 0
 #define DRIVER_MINOR 9
-#define DRIVER_PATCHLEVEL 2
+#define DRIVER_PATCHLEVEL 6
 
 #define LOG_TAG "RKNPU"
 
@@ -54,9 +53,18 @@
 #define LOG_DEV_DEBUG(dev, fmt, args...) dev_dbg(dev, LOG_TAG ": " fmt, ##args)
 #define LOG_DEV_ERROR(dev, fmt, args...) dev_err(dev, LOG_TAG ": " fmt, ##args)
 
-struct rknpu_reset_data {
-	const char *srst_a_name;
-	const char *srst_h_name;
+#define RKNPU_MAX_IOMMU_DOMAIN_NUM 16
+
+struct rknpu_irqs_data {
+	const char *name;
+	irqreturn_t (*irq_hdl)(int irq, void *ctx);
+};
+
+struct rknpu_amount_data {
+	uint16_t offset_clr_all;
+	uint16_t offset_dt_wr;
+	uint16_t offset_dt_rd;
+	uint16_t offset_wt_rd;
 };
 
 struct rknpu_config {
@@ -68,19 +76,19 @@ struct rknpu_config {
 	__u32 pc_task_number_mask;
 	__u32 pc_task_status_offset;
 	__u32 pc_dma_ctrl;
-	__u32 bw_enable;
 	const struct rknpu_irqs_data *irqs;
-	const struct rknpu_reset_data *resets;
 	int num_irqs;
-	int num_resets;
 	__u64 nbuf_phyaddr;
 	__u64 nbuf_size;
 	__u64 max_submit_number;
+	__u32 core_mask;
+	const struct rknpu_amount_data *amount_top;
+	const struct rknpu_amount_data *amount_core;
 };
 
 struct rknpu_timer {
-	__u32 busy_time;
-	__u32 busy_time_record;
+	ktime_t busy_time;
+	ktime_t total_busy_time;
 };
 
 struct rknpu_subcore_data {
@@ -114,13 +122,14 @@ struct rknpu_device {
 	spinlock_t irq_lock;
 	struct mutex power_lock;
 	struct mutex reset_lock;
+	struct mutex domain_lock;
 	struct rknpu_subcore_data subcore_datas[RKNPU_MAX_CORES];
 	const struct rknpu_config *config;
 	void __iomem *bw_priority_base;
 	struct rknpu_fence_context *fence_ctx;
 	bool iommu_en;
-	struct reset_control *srst_a[RKNPU_MAX_CORES];
-	struct reset_control *srst_h[RKNPU_MAX_CORES];
+	struct reset_control **srsts;
+	int num_srsts;
 	struct clk_bulk_data *clks;
 	int num_clks;
 	struct regulator *vdd;
@@ -130,11 +139,7 @@ struct rknpu_device {
 	struct thermal_cooling_device *devfreq_cooling;
 	struct devfreq *devfreq;
 	unsigned long ondemand_freq;
-#ifndef FPGA_PLATFORM
-#if KERNEL_VERSION(5, 10, 0) <= LINUX_VERSION_CODE
 	struct rockchip_opp_info opp_info;
-#endif
-#endif
 	unsigned long current_freq;
 	unsigned long current_volt;
 	int bypass_irq_handler;
@@ -161,6 +166,10 @@ struct rknpu_device {
 	void __iomem *nbuf_base_io;
 	struct rknpu_mm *sram_mm;
 	unsigned long power_put_delay;
+	struct iommu_group *iommu_group;
+	int iommu_domain_num;
+	int iommu_domain_id;
+	struct iommu_domain *iommu_domains[RKNPU_MAX_IOMMU_DOMAIN_NUM];
 };
 
 struct rknpu_session {
