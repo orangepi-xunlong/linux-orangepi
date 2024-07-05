@@ -51,6 +51,10 @@
 			ov5647-2@36 {
 				status = "okay";
 			};
+
+			imx219-2@10 {
+				status = "okay";
+			};
 		};
 	};
 };

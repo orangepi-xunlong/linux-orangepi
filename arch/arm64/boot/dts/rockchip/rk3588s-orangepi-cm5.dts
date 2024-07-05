@@ -165,7 +165,7 @@
 	fan: pwm-fan {
 		compatible = "pwm-fan";
 		#cooling-cells = <2>;
-		pwms = <&pwm13 0 50000 0>;
+		pwms = <&pwm13 0 20000000 0>;
 		cooling-levels = <0 50 100 150 200 255>;
 		rockchip,temp-trips = <
 			50000   1
@@ -681,6 +681,14 @@
 };
 
 &isp0_mmu {
+	status = "okay";
+};
+
+&rkisp1 {
+        status = "okay";
+};
+
+&isp1_mmu {
         status = "okay";
 };
 
