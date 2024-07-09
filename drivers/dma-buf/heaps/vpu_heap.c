@@ -12,54 +12,86 @@
 #include <linux/of_reserved_mem.h>
 #include <linux/slab.h>
 #include <linux/mutex.h>
+#include <linux/highmem.h>
+#include <linux/genalloc.h>
 
 struct vpu_heap {
 	struct dma_heap *heap;
-	phys_addr_t base;
-	phys_addr_t size;
-	unsigned long npages;
-	struct mutex page_map_lock;
-	unsigned long *page_map;
+	struct gen_pool *pool;
 };
 
 struct vpu_buffer {
-	struct dma_heap *heap;
+	struct vpu_heap *heap;
+	struct list_head attachments;
+	struct mutex lock;
 	struct dma_buf *dmabuf;
-	phys_addr_t *pages;
 	size_t size;
-	pgoff_t pagecount;
 	struct sg_table table;
+	int vmap_cnt;
+	void *vaddr;
 };
 
 struct vpu_heaps_attachment {
-	struct sg_table table;
+	struct device *dev;
+	struct sg_table *table;
+	struct list_head list;
+	bool mapped;
 };
+
+static struct sg_table *dup_sg_table(struct sg_table *table)
+{
+	struct sg_table *new_table;
+	int ret, i;
+	struct scatterlist *sg, *new_sg;
+
+	new_table = kzalloc(sizeof(*new_table), GFP_KERNEL);
+	if (!new_table)
+		return ERR_PTR(-ENOMEM);
+
+	ret = sg_alloc_table(new_table, table->orig_nents, GFP_KERNEL);
+	if (ret) {
+		kfree(new_table);
+		return ERR_PTR(-ENOMEM);
+	}
+
+	new_sg = new_table->sgl;
+	for_each_sgtable_sg(table, sg, i) {
+		sg_set_page(new_sg, sg_page(sg), sg->length, sg->offset);
+		sg_dma_address(new_sg) = sg_dma_address(sg);
+		sg_dma_len(new_sg) = sg->length;
+		new_sg = sg_next(new_sg);
+	}
+
+	return new_table;
+}
 
 static int vpu_heap_attach(struct dma_buf *dmabuf,
 			   struct dma_buf_attachment *attachment)
 {
 	struct vpu_heaps_attachment *a;
 	struct vpu_buffer *buffer = dmabuf->priv;
-	struct scatterlist *s;
-	int i;
-	int ret;
+	struct sg_table *table;
 
 	a = kzalloc(sizeof(*a), GFP_KERNEL);
 	if (!a)
 		return -ENOMEM;
 
-	ret = sg_alloc_table(&a->table,
-			buffer->pagecount, GFP_KERNEL);
-	if (ret)
-		return ret;
-
-	for_each_sgtable_sg(&a->table, s, i) {
-		sg_dma_address(s) = buffer->pages[i];
-		sg_dma_len(s) = PAGE_SIZE;
-		s->length = PAGE_SIZE;
+	table = dup_sg_table(&buffer->table);
+	if (IS_ERR(table)) {
+		kfree(a);
+		return -ENOMEM;
 	}
 
+	a->table = table;
+	a->dev = attachment->dev;
+	INIT_LIST_HEAD(&a->list);
+	a->mapped = false;
+
 	attachment->priv = a;
+
+	mutex_lock(&buffer->lock);
+	list_add(&a->list, &buffer->attachments);
+	mutex_unlock(&buffer->lock);
 
 	return 0;
 }
@@ -67,8 +99,14 @@ static int vpu_heap_attach(struct dma_buf *dmabuf,
 static void vpu_heap_detach(struct dma_buf *dmabuf,
 			    struct dma_buf_attachment *attachment)
 {
+	struct vpu_buffer *buffer = dmabuf->priv;
 	struct vpu_heaps_attachment *a = attachment->priv;
-	sg_free_table(&a->table);
+
+	mutex_lock(&buffer->lock);
+	list_del(&a->list);
+	mutex_unlock(&buffer->lock);
+
+	sg_free_table(a->table);
 	kfree(a);
 }
 
@@ -77,92 +115,195 @@ struct sg_table *vpu_heap_map_dma_buf(struct dma_buf_attachment *attachment,
 				      enum dma_data_direction direction)
 {
 	struct vpu_heaps_attachment *a = attachment->priv;
-	return &a->table;
+	struct sg_table *table = a->table;
+	int ret;
+
+	ret = dma_map_sgtable(attachment->dev, table, direction, 0);
+	if (ret)
+		return ERR_PTR(-ENOMEM);
+	a->mapped = true;
+	return a->table;
 }
 
 static void vpu_heap_unmap_dma_buf(struct dma_buf_attachment *attachment,
 				   struct sg_table *table,
 				   enum dma_data_direction direction)
 {
+	struct vpu_heaps_attachment *a = attachment->priv;
+	a->mapped = false;
+	dma_unmap_sgtable(attachment->dev, table, direction, 0);
 }
 
-static phys_addr_t vpu_heap_alloc_page(struct vpu_heap *vpu_heap)
+static int vpu_heap_dma_buf_begin_cpu_access(struct dma_buf *dmabuf,
+					     enum dma_data_direction direction)
 {
-	unsigned long id;
-	phys_addr_t pa;
-	mutex_lock(&vpu_heap->page_map_lock);
-	id = find_first_zero_bit(vpu_heap->page_map, vpu_heap->npages);
-	if (id >= vpu_heap->npages) {
-		mutex_unlock(&vpu_heap->page_map_lock);
-		return 0;
+	struct vpu_buffer *buffer = dmabuf->priv;
+	struct vpu_heaps_attachment *a;
+
+	mutex_lock(&buffer->lock);
+
+	if (buffer->vmap_cnt)
+		invalidate_kernel_vmap_range(buffer->vaddr, buffer->size);
+
+	list_for_each_entry(a, &buffer->attachments, list) {
+		if (!a->mapped)
+			continue;
+		dma_sync_sgtable_for_cpu(a->dev, a->table, direction);
 	}
-	set_bit(id, vpu_heap->page_map);
-	mutex_unlock(&vpu_heap->page_map_lock);
-	pa = vpu_heap->base + (id << PAGE_SHIFT);
-	return pa;
+	mutex_unlock(&buffer->lock);
+
+	return 0;
+}
+
+static int vpu_heap_dma_buf_end_cpu_access(struct dma_buf *dmabuf,
+					   enum dma_data_direction direction)
+{
+	struct vpu_buffer *buffer = dmabuf->priv;
+	struct vpu_heaps_attachment *a;
+
+	mutex_lock(&buffer->lock);
+
+	if (buffer->vmap_cnt)
+		flush_kernel_vmap_range(buffer->vaddr, buffer->size);
+
+	list_for_each_entry(a, &buffer->attachments, list) {
+		if (!a->mapped)
+			continue;
+		dma_sync_sgtable_for_device(a->dev, a->table, direction);
+	}
+	mutex_unlock(&buffer->lock);
+
+	return 0;
 }
 
 static int vpu_heap_mmap(struct dma_buf *dmabuf, struct vm_area_struct *vma)
 {
 	struct vpu_buffer *buffer = dmabuf->priv;
+	struct sg_table *table = &buffer->table;
+	unsigned long addr = vma->vm_start;
+	struct sg_page_iter piter;
 	int ret;
 
-	/* Make sure its contiguous memory before calling vm_iomap_memory() */
-	int i;
-	for (i = 1; i < buffer->pagecount; i++) {
-		if (buffer->pages[i] - buffer->pages[i-1] != PAGE_SIZE)
-			return -EINVAL;
-	}
+	vma->vm_page_prot = pgprot_writecombine(vma->vm_page_prot);
 
-	ret = vm_iomap_memory(vma, buffer->pages[0], buffer->size);
-	if (ret < 0)
-		return ret;
+	for_each_sgtable_page(table, &piter, vma->vm_pgoff) {
+		struct page *page = sg_page_iter_page(&piter);
+
+		ret = remap_pfn_range(vma, addr, page_to_pfn(page), PAGE_SIZE,
+				      vma->vm_page_prot);
+		if (ret)
+			return ret;
+		addr += PAGE_SIZE;
+	}
 
 	return 0;
 }
 
-static void vpu_heap_free_page(struct vpu_heap *vpu_heap,
-				 phys_addr_t page)
+static void *vpu_heap_do_vmap(struct vpu_buffer *buffer)
 {
-	phys_addr_t pa = page;
-	unsigned long id = (pa - vpu_heap->base) >> PAGE_SHIFT;
-	mutex_lock(&vpu_heap->page_map_lock);
-	clear_bit(id, vpu_heap->page_map);
-	mutex_unlock(&vpu_heap->page_map_lock);
+	struct sg_table *table = &buffer->table;
+	int npages = PAGE_ALIGN(buffer->size) / PAGE_SIZE;
+	struct page **pages = vmalloc(sizeof(struct page *) * npages);
+	struct page **tmp = pages;
+	struct sg_page_iter piter;
+	void *vaddr;
+
+	if (!pages)
+		return ERR_PTR(-ENOMEM);
+
+	for_each_sgtable_page(table, &piter, 0) {
+		WARN_ON(tmp - pages >= npages);
+		*tmp++ = sg_page_iter_page(&piter);
+	}
+
+	vaddr = vmap(pages, npages, VM_MAP, PAGE_KERNEL);
+	vfree(pages);
+
+	if (!vaddr)
+		return ERR_PTR(-ENOMEM);
+
+	return vaddr;
 }
 
-static void vpu_heap_free(struct vpu_buffer *buffer)
+static int vpu_heap_vmap(struct dma_buf *dmabuf, struct iosys_map *map)
 {
-	struct vpu_heap *vpu_heap = dma_heap_get_drvdata(buffer->heap);
-	pgoff_t pg;
+	struct vpu_buffer *buffer = dmabuf->priv;
+	void *vaddr;
+	int ret = 0;
 
-	for (pg = 0; pg < buffer->pagecount; pg++)
-		vpu_heap_free_page(vpu_heap, buffer->pages[pg]);
-	kfree(buffer->pages);
-	kfree(buffer);
+	mutex_lock(&buffer->lock);
+	if (buffer->vmap_cnt) {
+		buffer->vmap_cnt++;
+		iosys_map_set_vaddr(map, buffer->vaddr);
+		goto out;
+	}
+
+	vaddr = vpu_heap_do_vmap(buffer);
+	if (IS_ERR(vaddr)) {
+		ret = PTR_ERR(vaddr);
+		goto out;
+	}
+
+	buffer->vaddr = vaddr;
+	buffer->vmap_cnt++;
+	iosys_map_set_vaddr(map, buffer->vaddr);
+out:
+	mutex_unlock(&buffer->lock);
+
+	return ret;
+}
+
+static void vpu_heap_vunmap(struct dma_buf *dmabuf, struct iosys_map *map)
+{
+	struct vpu_buffer *buffer = dmabuf->priv;
+
+	mutex_lock(&buffer->lock);
+	if (!--buffer->vmap_cnt) {
+		vunmap(buffer->vaddr);
+		buffer->vaddr = NULL;
+	}
+	mutex_unlock(&buffer->lock);
+	iosys_map_clear(map);
 }
 
 static void vpu_heap_dma_buf_release(struct dma_buf *dmabuf)
 {
 	struct vpu_buffer *buffer = dmabuf->priv;
+	struct sg_table *table;
+	struct scatterlist *sg;
+	int i;
 
-	vpu_heap_free(buffer);
+	table = &buffer->table;
+	for_each_sgtable_sg(table, sg, i) {
+		struct page *page = sg_page(sg);
+
+		__free_pages(page, compound_order(page));
+	}
+	for_each_sg(table->sgl, sg, table->nents, i)
+		gen_pool_free(buffer->heap->pool, sg_dma_address(sg), sg_dma_len(sg));
+	sg_free_table(table);
+	kfree(buffer);
 }
 
 static const struct dma_buf_ops vpu_heap_dma_ops = {
 	.map_dma_buf = vpu_heap_map_dma_buf,
 	.unmap_dma_buf = vpu_heap_unmap_dma_buf,
+	.begin_cpu_access = vpu_heap_dma_buf_begin_cpu_access,
+	.end_cpu_access = vpu_heap_dma_buf_end_cpu_access,
 	.mmap = vpu_heap_mmap,
+	.vmap = vpu_heap_vmap,
+	.vunmap = vpu_heap_vunmap,
 	.release = vpu_heap_dma_buf_release,
 	.attach = vpu_heap_attach,
 	.detach = vpu_heap_detach,
 };
 
 static struct dma_buf *vpu_heap_export_dmabuf(struct vpu_buffer *buffer,
-					  int fd_flags)
+					  int fd_flags, const char *name)
 {
 	DEFINE_DMA_BUF_EXPORT_INFO(exp_info);
 
+	exp_info.exp_name = name;
 	exp_info.ops = &vpu_heap_dma_ops;
 	exp_info.size = buffer->size;
 	exp_info.flags = fd_flags;
@@ -179,58 +320,44 @@ static struct dma_buf *vpu_heap_allocate(struct dma_heap *heap,
 	struct vpu_heap *vpu_heap = dma_heap_get_drvdata(heap);
 	struct vpu_buffer *vpu_buffer;
 	struct dma_buf *dmabuf;
-	int ret = -ENOMEM;
-	pgoff_t pg;
+	struct sg_table *table;
+	unsigned long size = roundup(len, PAGE_SIZE);
+	unsigned long phy_addr = 0;
 
 	vpu_buffer = kzalloc(sizeof(*vpu_buffer), GFP_KERNEL);
 	if (!vpu_buffer)
 		return ERR_PTR(-ENOMEM);
 
-	vpu_buffer->heap = heap;
+	INIT_LIST_HEAD(&vpu_buffer->attachments);
+	mutex_init(&vpu_buffer->lock);
+
+	vpu_buffer->heap = vpu_heap;
 	vpu_buffer->size = len;
-	vpu_buffer->pagecount = len / PAGE_SIZE;
-	vpu_buffer->pages = kmalloc_array(vpu_buffer->pagecount,
-					     sizeof(*vpu_buffer->pages),
-					     GFP_KERNEL);
-	if (!vpu_buffer->pages) {
-		dmabuf = ERR_PTR(-ENOMEM);
-		goto err0;
-	}
+	phy_addr = gen_pool_alloc(vpu_heap->pool, size);
+	if (!phy_addr)
+		goto err;
 
-	for (pg = 0; pg < vpu_buffer->pagecount; pg++) {
-		/*
-		 * Avoid trying to allocate memory if the process
-		 * has been killed by by SIGKILL
-		 */
-		if (fatal_signal_pending(current))
-			goto err1;
+	table = &vpu_buffer->table;
+	if (sg_alloc_table(table, 1, GFP_KERNEL))
+		goto err;
 
-		vpu_buffer->pages[pg] = vpu_heap_alloc_page(vpu_heap);
-		if (!vpu_buffer->pages[pg])
-			goto err1;
-	}
+	sg_set_page(table->sgl,	phys_to_page(phy_addr),	size, 0);
+	sg_dma_address(table->sgl) = phy_addr;
+	sg_dma_len(table->sgl) = size;
 
 	/* create the dmabuf */
-	dmabuf = vpu_heap_export_dmabuf(vpu_buffer, fd_flags);
+	dmabuf = vpu_heap_export_dmabuf(vpu_buffer, fd_flags,
+								dma_heap_get_name(heap));
 	if (IS_ERR(dmabuf))
-		goto err1;
+		goto err;
 
 	vpu_buffer->dmabuf = dmabuf;
 
-	ret = dma_buf_fd(dmabuf, fd_flags);
-	if (ret < 0) {
-		dma_buf_put(dmabuf);
-		/* just return, as put will call release and that will free */
-		return ERR_PTR(ret);
-	}
-
 	return dmabuf;
 
-err1:
-	while (pg > 0)
-		vpu_heap_free_page(vpu_heap, vpu_buffer->pages[--pg]);
-	kfree(vpu_buffer->pages);
-err0:
+err:
+	if (phy_addr)
+		gen_pool_free(vpu_heap->pool, phy_addr, size);
 	kfree(vpu_buffer);
 
 	return dmabuf;
@@ -246,7 +373,7 @@ static int vpu_heap_create_single(const char *name)
 	struct vpu_heap *vpu_heap;
 	struct reserved_mem *rmem;
 	struct device_node np;
-	unsigned int npages;
+	struct gen_pool *pool = NULL;
 
 	np.full_name = name;
 	np.name = name;
@@ -265,19 +392,21 @@ static int vpu_heap_create_single(const char *name)
 	if (!vpu_heap)
 		return -ENOMEM;
 
-	npages = DIV_ROUND_UP(rmem->size, PAGE_SIZE);
-	vpu_heap->page_map = kcalloc(BITS_TO_LONGS(npages),
-					     sizeof(*vpu_heap->page_map),
-					     GFP_KERNEL);
-	if (!vpu_heap->page_map) {
+	pool = gen_pool_create(PAGE_SHIFT, -1);
+	if (!pool) {
+		pr_err("Failed to create gen pool\n");
 		kfree(vpu_heap);
 		return -ENOMEM;
 	}
 
-	vpu_heap->base = rmem->base;
-	vpu_heap->size = rmem->size;
-	vpu_heap->npages = npages;
-	mutex_init(&vpu_heap->page_map_lock);
+	if (gen_pool_add(pool, rmem->base, rmem->size, -1) < 0) {
+		pr_err("Failed to add reserved memory into pool\n");
+		gen_pool_destroy(pool);
+		kfree(vpu_heap);
+		return -ENOMEM;
+	}
+
+	vpu_heap->pool = pool;
 
 	exp_info.name = name;
 	exp_info.ops = &vpu_heap_ops;
@@ -286,7 +415,7 @@ static int vpu_heap_create_single(const char *name)
 	if (IS_ERR(vpu_heap->heap)) {
 		int ret = PTR_ERR(vpu_heap->heap);
 
-		kfree(vpu_heap->page_map);
+		gen_pool_destroy(pool);
 		kfree(vpu_heap);
 		return ret;
 	}
