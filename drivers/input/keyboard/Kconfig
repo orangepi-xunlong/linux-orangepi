@@ -777,6 +777,7 @@ config KEYBOARD_MTK_PMIC
 
 config KEYBOARD_SUNXI
 	tristate "softwinner KEY BOARD support"
+	depends on IIO
 	help
 	  Say Y here to enable the keyboard, support 7 keys.
 	  based on verify board.
