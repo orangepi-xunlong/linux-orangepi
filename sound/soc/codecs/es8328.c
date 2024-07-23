@@ -893,13 +893,6 @@ int es8328_probe(struct device *dev, struct regmap *regmap)
 
 	dev_set_drvdata(dev, es8328);
 
-#ifdef CONFIG_SND_SOC_AW87XXX
-	ret = aw87xxx_add_codec_controls((void *)component);
-	if (ret < 0) {
-	        pr_err("%s: add_codec_controls failed, ret %d\n", __func__, ret);
-	}
-#endif
-
 	return devm_snd_soc_register_component(dev,
 			&es8328_component_driver, &es8328_dai, 1);
 }

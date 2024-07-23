@@ -1,7 +1,18 @@
-/* SPDX-License-Identifier: GPL-2.0+ */
+/* SPDX-License-Identifier: GPL-2.0
+ * aw87xxx_bin_parse.h
+ *
+ * Copyright (c) 2020 AWINIC Technology CO., LTD
+ *
+ * Author: Barry <zhaozhongbo@awinic.com>
+ *
+ * This program is free software; you can redistribute it and/or modify it
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
+ * option) any later version.
+ */
 
-#ifndef __AW_BIN_PARSE_H__
-#define __AW_BIN_PARSE_H__
+#ifndef __AW87XXX_BIN_PARSE_H__
+#define __AW87XXX_BIN_PARSE_H__
 
 #define NULL    ((void *)0)
 #define GET_32_DATA(w, x, y, z) ((unsigned int)(((w) << 24) | ((x) << 16) | ((y) << 8) | (z)))
@@ -53,17 +64,17 @@ struct bin_header_info {
 };
 
 /************************************************************
-*
-* function define
-*
-************************************************************/
+ *
+ * function define
+ *
+ ************************************************************/
 struct bin_container {
 	unsigned int len; /* The size of the bin file obtained from the firmware */
 	unsigned char data[]; /* Store the bin file obtained from the firmware */
 };
 
 struct aw_bin {
-	char *p_addr; /* Offset pointer (backward offset pointer to obtain frame header information and important information) */
+	unsigned char *p_addr; /* Offset pointer (backward offset pointer to obtain frame header information and important information) */
 	unsigned int all_bin_parse_num; /* The number of all bin files */
 	unsigned int multi_bin_parse_num; /* The number of single bin files */
 	unsigned int single_bin_parse_num; /* The number of multiple bin files */
@@ -71,6 +82,5 @@ struct aw_bin {
 	struct bin_container info; /* Obtained bin file data that needs to be parsed */
 };
 
-extern int aw_parsing_bin_file(struct aw_bin *bin);
-int aw_parse_bin_header_1_0_0(struct aw_bin *bin);
+extern int aw87xxx_parsing_bin_file(struct aw_bin *bin);
 #endif
