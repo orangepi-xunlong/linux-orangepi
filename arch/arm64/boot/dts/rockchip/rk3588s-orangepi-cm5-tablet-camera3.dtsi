@@ -16,9 +16,15 @@
 			#address-cells = <1>;
 			#size-cells = <0>;
 
-			mipi_in_dcphy1: endpoint@0 {
+			mipi_in_dcphy0_cam3: endpoint@0 {
 				reg = <0>;
-				remote-endpoint = <&ov5647_out1>;
+				remote-endpoint = <&ov5647_out_cam3>;
+				data-lanes = <1 2>;
+			};
+
+			mipi_in_dcphy1_cam3: endpoint@1 {
+				reg = <0>;
+				remote-endpoint = <&imx219_out_cam3>;
 				data-lanes = <1 2>;
 			};
 		};
@@ -39,7 +45,7 @@
 &i2c7 {
 	status = "okay";
 
-	ov5647_1: ov5647-1@36 {
+	ov5647_cam3: ov5647-cam3@36 {
 		status = "disabled";
 		compatible = "ovti,ov5647";
 		reg = <0x36>;
@@ -48,14 +54,33 @@
 		pwdn-gpios = <&gpio1 RK_PC2 GPIO_ACTIVE_LOW>;
 		rockchip,camera-module-index = <2>;
 		rockchip,camera-module-facing = "back";
-		rockchip,camera-module-name = "LMM248";
-		rockchip,camera-module-lens-name = "YXC-M804A2";
+		rockchip,camera-module-name = "rpi-camera-v1";
+		rockchip,camera-module-lens-name = "default";
 		port {
-			ov5647_out1: endpoint {
-			        remote-endpoint = <&mipi_in_dcphy1>;
+			ov5647_out_cam3: endpoint {
+			        remote-endpoint = <&mipi_in_dcphy0_cam3>;
 			        data-lanes = <1 2>;
 			};
 		};
+	};
+
+	imx219_cam3: imx219-cam3@10 {
+	        status = "disabled";
+	        compatible = "sony,imx219";
+	        reg = <0x10>;
+	        clocks = <&ext_cam_ov5647_clk>;
+	        clock-names = "ext_cam_ov5647_clk";
+	        pwdn-gpios = <&gpio1 RK_PC2 GPIO_ACTIVE_LOW>;
+	        rockchip,camera-module-index = <0>;
+	        rockchip,camera-module-facing = "back";
+	        rockchip,camera-module-name = "rpi-camera-v2";
+	        rockchip,camera-module-lens-name = "default";
+	        port {
+	                imx219_out_cam3: endpoint {
+	                        remote-endpoint = <&mipi_in_dcphy0_cam3>;
+	                        data-lanes = <1 2>;
+	                };
+	        };
 	};
 };
 

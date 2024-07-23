@@ -274,7 +274,7 @@
 		status = "okay";
 
 		led@1 {
-			gpios = <&gpio1 RK_PC6 GPIO_ACTIVE_HIGH>;
+			gpios = <&gpio4 RK_PB6 GPIO_ACTIVE_HIGH>;
 			label = "status_led";
 			linux,default-trigger = "heartbeat";
 			linux,default-trigger-delay-ms = <0>;
@@ -664,6 +664,34 @@
 	pinctrl-names = "default";
 	pinctrl-0 = <&i2c6m3_xfer>;
 
+	sy6970: sy6970_charge@6a {
+		compatible = "ti,bq25895", "ti,bq25890";
+		reg = <0x6a>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&charger_ok>;
+		interrupt-parent = <&gpio1>;
+		interrupts = <RK_PC0 IRQ_TYPE_EDGE_FALLING>;
+		otg-mode-en-gpios = <&gpio1 RK_PC1 GPIO_ACTIVE_HIGH>;
+		//ti,usb-charger-detection = <&usbc0>;
+
+		ti,battery-regulation-voltage = <4400000>; /* 4.4V */
+		ti,charge-current = <1600000>; /* 1.6A */
+		ti,termination-current = <66000>;  /* 66mA */
+		ti,precharge-current = <130000>; /* 130mA */
+		ti,minimum-sys-voltage = <3000000>; /* 3V */
+		ti,boost-voltage = <5000000>; /* 5V */
+		ti,boost-max-current = <1600000>; /* 1600mA */
+		//regulators {
+		//      vbus5v0_typec: vbus5v0-typec {
+		//              regulator-compatible = "otg-vbus";
+		//              regulator-name = "vbus5v0_typec";
+		//      };
+		//};
+
+		//status = "okay";
+		status = "disabled";
+	};
+
 	usbc0: fusb302@22 {
 		compatible = "fcs,fusb302";
 		reg = <0x22>;
@@ -861,13 +889,20 @@
 
 	leds {
 		led_gpio: led-gpio {
-			rockchip,pins = <1 RK_PC6 RK_FUNC_GPIO &pcfg_pull_none>;
+			rockchip,pins = <4 RK_PB6 RK_FUNC_GPIO &pcfg_pull_none>;
 		};
 	};
 
 	sata {
 		sata_reset:sata-reset{
 			rockchip,pins = <3 RK_PD1 RK_FUNC_GPIO &pcfg_pull_up>;
+		};
+	};
+
+	charger {
+		charger_ok: charger_ok {
+			rockchip,pins = <1 RK_PC0 RK_FUNC_GPIO &pcfg_pull_up>,
+			                <1 RK_PC1 RK_FUNC_GPIO &pcfg_pull_up>;
 		};
 	};
 };

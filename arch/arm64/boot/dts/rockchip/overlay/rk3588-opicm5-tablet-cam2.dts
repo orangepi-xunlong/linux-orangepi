@@ -48,7 +48,11 @@
 		__overlay__ {
 			status = "okay";
 
-			ov5647@36 {
+			ov5647-cam2@36 {
+				status = "okay";
+			};
+
+			imx219-cam2@10 {
 				status = "okay";
 			};
 		};
