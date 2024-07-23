@@ -3,7 +3,7 @@
 
 / {
 	fragment@0 {
-		target = <&spi0>;
+		target = <&spi1>;
 
 		__overlay__ {
 			status = "okay";
