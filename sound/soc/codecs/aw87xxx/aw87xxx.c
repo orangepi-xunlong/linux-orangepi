@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * aw87xxx.c  aw87xxx pa module
  *
@@ -41,6 +42,7 @@
 #include <linux/hrtimer.h>
 #include <linux/ktime.h>
 #include <linux/kthread.h>
+#include <linux/miscdevice.h>
 #include <uapi/sound/asound.h>
 #include <sound/control.h>
 #include <sound/soc.h>
@@ -50,12 +52,13 @@
 #include "aw_monitor.h"
 #include "aw_acf_bin.h"
 #include "aw_bin_parse.h"
+#include "aw_dsp.h"
 
 /*****************************************************************
-* aw87xxx marco
-******************************************************************/
+ * aw87xxx marco
+ ******************************************************************/
 #define AW87XXX_I2C_NAME	"aw87xxx_pa"
-#define AW87XXX_DRIVER_VERSION	"v2.2.0"
+#define AW87XXX_DRIVER_VERSION	"v2.14.0"
 #define AW87XXX_FW_BIN_NAME	"aw87xxx_acf.bin"
 
 /*************************************************************************
@@ -63,8 +66,11 @@
  ************************************************************************/
 static LIST_HEAD(g_aw87xxx_list);
 static DEFINE_MUTEX(g_aw87xxx_mutex_lock);
-unsigned int g_aw87xxx_dev_cnt = 0;
+unsigned int g_aw87xxx_dev_cnt;
 
+static const char *const aw87xxx_monitor_switch[] = {"Disable", "Enable"};
+static const char *const aw87xxx_spin_switch[] = {"spin_0", "spin_90",
+					 "spin_180", "spin_270"};
 #ifdef AW_KERNEL_VER_OVER_4_19_1
 static struct aw_componet_codec_ops aw_componet_codec_ops = {
 	.add_codec_controls = snd_soc_add_component_controls,
@@ -83,20 +89,54 @@ static struct aw_componet_codec_ops aw_componet_codec_ops = {
  * aw87xxx device update profile
  *
  ************************************************************************/
-static int aw87xxx_update_off_prof(struct aw87xxx *aw87xxx, char *profile)
+#ifdef AW_ALGO_AUTH_DSP
+static void aw87xxx_algo_auth_work(struct work_struct *work)
+{
+	struct aw87xxx *aw87xxx = container_of(work,
+			struct aw87xxx, auth_work.work);
+
+	AW_DEV_LOGI(aw87xxx->dev, "enter");
+
+	aw87xxx_dev_algo_authentication(&aw87xxx->aw_dev);
+}
+#endif
+
+static void aw87xxx_update_voltage_max(struct aw87xxx *aw87xxx,
+				struct aw_data_container *data_container)
+{
+	int i = 0;
+	struct aw_voltage_desc *vol_desc = &aw87xxx->aw_dev.vol_desc;
+
+	if (data_container == NULL || data_container->len <= 2
+		|| vol_desc->addr == AW_REG_NONE)
+		return;
+
+	for (i = 0; i < data_container->len; i = i + 2) {
+		if (data_container->data[i] == vol_desc->addr) {
+			vol_desc->vol_max = data_container->data[i + 1];
+			AW_DEV_LOGD(aw87xxx->dev, "get voltage max = 0x%02x",
+			data_container->data[i + 1]);
+			return;
+		}
+	}
+}
+
+static int aw87xxx_power_down(struct aw87xxx *aw87xxx, char *profile)
 {
 	int ret = 0;
 	struct aw_prof_desc *prof_desc = NULL;
+	struct aw_prof_info *prof_info = &aw87xxx->acf_info.prof_info;
 	struct aw_data_container *data_container = NULL;
 	struct aw_device *aw_dev = &aw87xxx->aw_dev;
 
 	AW_DEV_LOGD(aw87xxx->dev, "enter");
 
-	mutex_lock(&aw87xxx->reg_lock);
+	if (!prof_info->status) {
+		AW_DEV_LOGE(aw87xxx->dev, "profile_cfg not load");
+		return -EINVAL;
+	}
 
-	aw_monitor_stop(&aw87xxx->monitor);
-
-	prof_desc = aw_acf_get_prof_desc_form_name(aw87xxx->dev, &aw87xxx->acf_info, profile);
+	prof_desc = aw87xxx_acf_get_prof_desc_form_name(aw87xxx->dev, &aw87xxx->acf_info, profile);
 	if (prof_desc == NULL)
 		goto no_bin_pwr_off;
 
@@ -118,7 +158,7 @@ static int aw87xxx_update_off_prof(struct aw87xxx *aw87xxx, char *profile)
 				goto pwr_off_failed;
 			}
 		} else {
-			ret = aw_dev_default_pwr_off(aw_dev, data_container);
+			ret = aw87xxx_dev_default_pwr_off(aw_dev, data_container);
 			if (ret < 0) {
 				AW_DEV_LOGE(aw87xxx->dev, "load profile[%s] failed ", profile);
 				goto pwr_off_failed;
@@ -127,19 +167,22 @@ static int aw87xxx_update_off_prof(struct aw87xxx *aw87xxx, char *profile)
 	}
 
 	aw87xxx->current_profile = prof_desc->prof_name;
-	mutex_unlock(&aw87xxx->reg_lock);
+
+#ifdef AW_ALGO_AUTH_DSP
+	g_algo_auth_st = AW_ALGO_AUTH_WAIT;
+	cancel_delayed_work_sync(&aw87xxx->auth_work);
+#endif
 
 	return 0;
 
 pwr_off_failed:
 no_bin_pwr_off:
-	aw_dev_hw_pwr_ctrl(&aw87xxx->aw_dev, false);
+	aw87xxx_dev_hw_pwr_ctrl(&aw87xxx->aw_dev, false);
 	aw87xxx->current_profile = aw87xxx->prof_off_name;
-	mutex_unlock(&aw87xxx->reg_lock);
 	return ret;
 }
 
-int aw87xxx_update_profile(struct aw87xxx *aw87xxx, char *profile)
+static int aw87xxx_power_on(struct aw87xxx *aw87xxx, char *profile)
 {
 	int ret = -EINVAL;
 	struct aw_prof_desc *prof_desc = NULL;
@@ -154,55 +197,89 @@ int aw87xxx_update_profile(struct aw87xxx *aw87xxx, char *profile)
 		return -EINVAL;
 	}
 
-	if (0 == strncmp(profile, aw87xxx->prof_off_name, AW_PROFILE_STR_MAX))
-		return aw87xxx_update_off_prof(aw87xxx, profile);
+	if (strncmp(profile, aw87xxx->prof_off_name, AW_PROFILE_STR_MAX) == 0)
+		return aw87xxx_power_down(aw87xxx, profile);
 
-	mutex_lock(&aw87xxx->reg_lock);
-
-	prof_desc = aw_acf_get_prof_desc_form_name(aw87xxx->dev, &aw87xxx->acf_info, profile);
+	prof_desc = aw87xxx_acf_get_prof_desc_form_name(aw87xxx->dev, &aw87xxx->acf_info, profile);
 	if (prof_desc == NULL) {
 		AW_DEV_LOGE(aw87xxx->dev, "not found [%s] parameter", profile);
-		mutex_unlock(&aw87xxx->reg_lock);
 		return -EINVAL;
 	}
 
 	if (!prof_desc->prof_st) {
 		AW_DEV_LOGE(aw87xxx->dev, "not found data container");
-		mutex_unlock(&aw87xxx->reg_lock);
 		return -EINVAL;
 	}
 
 	data_container = &prof_desc->data_container;
 	AW_DEV_LOGD(aw87xxx->dev, "get profile[%s] data len [%d]",
 			profile, data_container->len);
-
-	aw_monitor_stop(&aw87xxx->monitor);
-
+	aw87xxx_update_voltage_max(aw87xxx, data_container);
 	if (aw_dev->ops.pwr_on_func) {
 		ret = aw_dev->ops.pwr_on_func(aw_dev, data_container);
 		if (ret < 0) {
 			AW_DEV_LOGE(aw87xxx->dev, "load profile[%s] failed ",
 				profile);
-			mutex_unlock(&aw87xxx->reg_lock);
-			return aw87xxx_update_off_prof(aw87xxx, aw87xxx->prof_off_name);
+			return aw87xxx_power_down(aw87xxx, aw87xxx->prof_off_name);
 		}
 	} else {
-		ret = aw_dev_default_pwr_on(aw_dev, data_container);
+		ret = aw87xxx_dev_default_pwr_on(aw_dev, data_container);
 		if (ret < 0) {
 			AW_DEV_LOGE(aw87xxx->dev, "load profile[%s] failed ",
 				profile);
-			mutex_unlock(&aw87xxx->reg_lock);
-			return aw87xxx_update_off_prof(aw87xxx, aw87xxx->prof_off_name);
+			return aw87xxx_power_down(aw87xxx, aw87xxx->prof_off_name);
 		}
 	}
 
 	aw87xxx->current_profile = prof_desc->prof_name;
-	aw_monitor_start(&aw87xxx->monitor);
-	mutex_unlock(&aw87xxx->reg_lock);
 
+#ifdef AW_ALGO_AUTH_DSP
+	INIT_DELAYED_WORK(&aw87xxx->auth_work, aw87xxx_algo_auth_work);
+	schedule_delayed_work(&aw87xxx->auth_work, msecs_to_jiffies(3000));
+#endif
 	AW_DEV_LOGD(aw87xxx->dev, "load profile[%s] succeed", profile);
 
 	return 0;
+}
+
+int aw87xxx_update_profile(struct aw87xxx *aw87xxx, char *profile)
+{
+	int ret = -1;
+
+	AW_DEV_LOGD(aw87xxx->dev, "load profile[%s] enter", profile);
+
+	mutex_lock(&aw87xxx->reg_lock);
+	aw87xxx_monitor_stop(&aw87xxx->monitor);
+	if (strncmp(profile, aw87xxx->prof_off_name, AW_PROFILE_STR_MAX) == 0) {
+		ret = aw87xxx_power_down(aw87xxx, profile);
+	} else {
+		ret = aw87xxx_power_down(aw87xxx, aw87xxx->prof_off_name);
+		if (ret < 0) {
+			AW_DEV_LOGE(aw87xxx->dev, "load profile[%s] failed!", aw87xxx->prof_off_name);
+			mutex_unlock(&aw87xxx->reg_lock);
+			return ret;
+		}
+
+		ret = aw87xxx_power_on(aw87xxx, profile);
+		if (!ret)
+			aw87xxx_monitor_start(&aw87xxx->monitor);
+	}
+	mutex_unlock(&aw87xxx->reg_lock);
+
+	return ret;
+}
+
+int aw87xxx_update_profile_esd(struct aw87xxx *aw87xxx, char *profile)
+{
+	int ret = -1;
+
+	aw87xxx_dev_soft_reset(&aw87xxx->aw_dev);
+	if (strncmp(profile, aw87xxx->prof_off_name, AW_PROFILE_STR_MAX) == 0)
+		ret = aw87xxx_power_down(aw87xxx, profile);
+	else
+		ret = aw87xxx_power_on(aw87xxx, profile);
+
+	return ret;
 }
 
 char *aw87xxx_show_current_profile(int dev_index)
@@ -212,11 +289,6 @@ char *aw87xxx_show_current_profile(int dev_index)
 
 	list_for_each(pos, &g_aw87xxx_list) {
 		aw87xxx = list_entry(pos, struct aw87xxx, list);
-		if (aw87xxx == NULL) {
-			AW_LOGE("struct aw87xxx not ready");
-			return NULL;
-		}
-
 		if (aw87xxx->dev_index == dev_index) {
 			AW_DEV_LOGI(aw87xxx->dev, "current profile is [%s]",
 				aw87xxx->current_profile);
@@ -234,15 +306,18 @@ int aw87xxx_set_profile(int dev_index, char *profile)
 	struct list_head *pos = NULL;
 	struct aw87xxx *aw87xxx = NULL;
 
+	if (!profile) {
+		AW_LOGE("profile is NULL");
+		return -EINVAL;
+	}
+
 	list_for_each(pos, &g_aw87xxx_list) {
 		aw87xxx = list_entry(pos, struct aw87xxx, list);
-		if (aw87xxx == NULL) {
-			AW_LOGE("struct aw87xxx not ready");
-			return -EINVAL;
-		}
-
-		if (profile && aw87xxx->dev_index == dev_index)
+		if (aw87xxx->dev_index == dev_index) {
+			AW_DEV_LOGD(aw87xxx->dev, "set dev_index = %d, profile = %s",
+				dev_index, profile);
 			return aw87xxx_update_profile(aw87xxx, profile);
+		}
 	}
 
 	AW_LOGE("not found struct aw87xxx, dev_index = [%d]", dev_index);
@@ -250,111 +325,299 @@ int aw87xxx_set_profile(int dev_index, char *profile)
 }
 EXPORT_SYMBOL(aw87xxx_set_profile);
 
-/************************************************************************
- *
- * aw87xxx esd update profile
- *
- ************************************************************************/
-static int aw87xxx_esd_update_off_prof(struct aw87xxx *aw87xxx, char *profile)
+int aw87xxx_set_profile_by_id(int dev_index, int profile_id)
+{
+	char *profile = NULL;
+
+	profile = aw87xxx_ctos_get_prof_name(profile_id);
+	if (profile == NULL) {
+		AW_LOGE("aw87xxx, dev_index[%d] profile[%d] not support!",
+					dev_index, profile_id);
+		return -EINVAL;
+	}
+
+	AW_LOGI("aw87xxx, dev_index[%d] set profile[%s] by id[%d]",
+					dev_index, profile, profile_id);
+	return aw87xxx_set_profile(dev_index, profile);
+}
+EXPORT_SYMBOL(aw87xxx_set_profile_by_id);
+
+int aw87xxx_set_boost_voltage(int dev_index, int status)
 {
 	int ret = 0;
-	struct aw_prof_desc *prof_desc = NULL;
-	struct aw_data_container *data_container = NULL;
-	struct aw_device *aw_dev = &aw87xxx->aw_dev;
+	struct list_head *pos = NULL;
+	struct aw87xxx *aw87xxx = NULL;
+	struct aw_voltage_desc *vol_desc = NULL;
 
-	AW_DEV_LOGD(aw87xxx->dev, "enter");
-	prof_desc = aw_acf_get_prof_desc_form_name(aw87xxx->dev, &aw87xxx->acf_info, profile);
-	if (prof_desc == NULL)
-		goto no_bin_pwr_off;
+	list_for_each(pos, &g_aw87xxx_list) {
+		aw87xxx = list_entry(pos, struct aw87xxx, list);
+		if (aw87xxx == NULL) {
+			AW_LOGE("struct aw87xxx not ready");
+			return -EINVAL;
+		}
 
-	if (!prof_desc->prof_st)
-		goto no_bin_pwr_off;
-
-	data_container = &prof_desc->data_container;
-	AW_DEV_LOGD(aw87xxx->dev, "get profile[%s] data len [%d]",
-			profile, data_container->len);
-
-	if (aw_dev->hwen_status == AW_DEV_HWEN_OFF) {
-		AW_DEV_LOGI(aw87xxx->dev, "profile[%s] has already load ", profile);
-	} else {
-		if (aw_dev->ops.pwr_off_func) {
-			ret = aw_dev->ops.pwr_off_func(aw_dev, data_container);
-			if (ret < 0) {
-				AW_DEV_LOGE(aw87xxx->dev, "load profile[%s] failed ", profile);
-				goto pwr_off_failed;
+		if (aw87xxx->dev_index == dev_index) {
+			AW_DEV_LOGD(aw87xxx->dev, "enter, set dev_index = %d, status = %d", dev_index, status);
+			if (strncmp(aw87xxx->current_profile, aw87xxx->prof_off_name, AW_PROFILE_STR_MAX) == 0) {
+				AW_DEV_LOGE(aw87xxx->dev, "PA is power down, can not set voltage!");
+				return -EINVAL;
 			}
-		} else {
-			ret = aw_dev_default_pwr_off(aw_dev, data_container);
-			if (ret < 0) {
-				AW_DEV_LOGE(aw87xxx->dev, "load profile[%s] failed ", profile);
-				goto pwr_off_failed;
+
+			vol_desc = &aw87xxx->aw_dev.vol_desc;
+			if (vol_desc->addr == AW_REG_NONE) {
+				AW_DEV_LOGI(aw87xxx->dev, "PA unsupport set boost voltage!");
+				return -EINVAL;
 			}
+			if (status == AW_VOLTAGE_HIGH) {
+				AW_DEV_LOGI(aw87xxx->dev, "set reg voltage max: 0x%02x = 0x%02x",
+					vol_desc->addr, vol_desc->vol_max);
+				ret = aw87xxx_dev_i2c_write_byte(&aw87xxx->aw_dev,
+					vol_desc->addr, vol_desc->vol_max);
+				if (ret < 0)
+					return ret;
+			} else if (status == AW_VOLTAGE_LOW) {
+				AW_DEV_LOGI(aw87xxx->dev, "set reg voltage min: 0x%02x = 0x%02x",
+					vol_desc->addr, vol_desc->vol_min);
+				ret = aw87xxx_dev_i2c_write_byte(&aw87xxx->aw_dev,
+					vol_desc->addr, vol_desc->vol_min);
+				if (ret < 0)
+					return ret;
+			} else {
+				AW_DEV_LOGE(aw87xxx->dev, "unsupport status: %d", status);
+				return -EINVAL;
+			}
+
+			return 0;
 		}
 	}
 
-	aw87xxx->current_profile = prof_desc->prof_name;
-	return 0;
+	AW_LOGE("not found struct aw87xxx, dev_index = [%d]", dev_index);
+	return -EINVAL;
+}
+EXPORT_SYMBOL(aw87xxx_set_boost_voltage);
 
-pwr_off_failed:
-no_bin_pwr_off:
-	aw_dev_hw_pwr_ctrl(&aw87xxx->aw_dev, false);
-	aw87xxx->current_profile = aw87xxx->prof_off_name;
+int aw87xxx_get_boost_voltage(int dev_index, int *status)
+{
+	int ret = 0;
+	struct list_head *pos = NULL;
+	struct aw87xxx *aw87xxx = NULL;
+	uint8_t reg_voltage_val = 0;
+	struct aw_voltage_desc *vol_desc = NULL;
+
+	list_for_each(pos, &g_aw87xxx_list) {
+		aw87xxx = list_entry(pos, struct aw87xxx, list);
+		if (aw87xxx == NULL) {
+			AW_LOGE("struct aw87xxx not ready");
+			return -EINVAL;
+		}
+
+		if (aw87xxx->dev_index == dev_index) {
+			if (strncmp(aw87xxx->current_profile, aw87xxx->prof_off_name, AW_PROFILE_STR_MAX) == 0) {
+				AW_DEV_LOGE(aw87xxx->dev, "PA is power down, can not get voltage!");
+				return -EINVAL;
+			}
+
+			vol_desc = &aw87xxx->aw_dev.vol_desc;
+			if (vol_desc->addr == AW_REG_NONE) {
+				AW_DEV_LOGI(aw87xxx->dev, "PA unsupport get boost voltage!");
+				return -EINVAL;
+			}
+			ret = aw87xxx_dev_i2c_read_byte(&aw87xxx->aw_dev,
+					vol_desc->addr, &reg_voltage_val);
+				if (ret < 0)
+					return ret;
+
+			if (reg_voltage_val ==  vol_desc->vol_max) {
+				*status = AW_VOLTAGE_HIGH;
+			} else if (reg_voltage_val ==  vol_desc->vol_min) {
+				*status = AW_VOLTAGE_LOW;
+			} else {
+				AW_DEV_LOGE(aw87xxx->dev, "undefined reg val 0x%02x = 0x%02x",
+					vol_desc->addr, reg_voltage_val);
+				return -EINVAL;
+			}
+
+			return 0;
+		}
+	}
+
+	AW_LOGE("not found struct aw87xxx, dev_index = [%d]", dev_index);
+	return -EINVAL;
+}
+EXPORT_SYMBOL(aw87xxx_get_boost_voltage);
+
+/*********************************algo_auth_misc*************************************/
+static int aw87xxx_algo_auth_misc_ops_write(struct aw87xxx *aw87xxx,
+		unsigned int cmd, unsigned long arg)
+{
+	int ret = 0;
+	unsigned int data_len = _IOC_SIZE(cmd);
+	struct aw_device *aw_dev = &aw87xxx->aw_dev;
+	struct algo_auth_data algo_data;
+
+	AW_DEV_LOGD(aw_dev->dev, "write algo auth data, len=%d", data_len);
+
+	if (copy_from_user(&algo_data, (void __user *)arg, data_len))
+		ret = -EFAULT;
+
+	aw87xxx_dev_algo_auth_mode(aw_dev, &algo_data);
+
+	AW_DEV_LOGD(aw_dev->dev, "ret=%d,mode=%d,reg_crc=0x%x,random=0x%x,id=0x%x,res=%d",
+		ret, algo_data.auth_mode, algo_data.reg_crc, algo_data.random,
+		algo_data.chip_id, algo_data.check_result);
+
 	return ret;
 }
 
-int aw87xxx_esd_update_profile(struct aw87xxx *aw87xxx, char *profile)
+static int aw87xxx_algo_auth_misc_ops_read(struct aw87xxx *aw87xxx,
+		unsigned int cmd, unsigned long arg)
 {
-	int ret = -EINVAL;
-	struct aw_prof_desc *prof_desc = NULL;
-	struct aw_prof_info *prof_info = &aw87xxx->acf_info.prof_info;
-	struct aw_data_container *data_container = NULL;
+	int ret = 0;
+	int16_t data_len = _IOC_SIZE(cmd);
 	struct aw_device *aw_dev = &aw87xxx->aw_dev;
+	struct algo_auth_data algo_data;
 
-	AW_DEV_LOGD(aw87xxx->dev, "enter");
+	AW_DEV_LOGD(aw_dev->dev, "read algo auth data, len=%d", data_len);
+	memset(&algo_data, 0x0, sizeof(struct algo_auth_data));
 
-	if (!prof_info->status) {
-		AW_DEV_LOGE(aw87xxx->dev, "profile_cfg not load");
+	algo_data.auth_mode = aw_dev->auth_desc.auth_mode;
+	algo_data.chip_id = aw_dev->auth_desc.chip_id;
+	algo_data.random = aw_dev->auth_desc.random;
+	algo_data.reg_crc = aw_dev->auth_desc.reg_crc;
+	algo_data.check_result = aw_dev->auth_desc.check_result;
+
+	if (copy_to_user((void __user *)arg, (char *)&algo_data, data_len))
+		ret = -EFAULT;
+
+	AW_DEV_LOGD(aw_dev->dev, "ret=%d,mode=%d,reg_crc=0x%x,random=0x%x,id=0x%x,res=%d",
+		ret, algo_data.auth_mode, algo_data.reg_crc, algo_data.random,
+		algo_data.chip_id, algo_data.check_result);
+
+	return ret;
+}
+
+static int aw87xxx_algo_auth_misc_ops(struct aw87xxx *aw87xxx,
+			unsigned int cmd, unsigned long arg)
+{
+	int ret = 0;
+
+	switch (cmd) {
+	case AW_IOCTL_SET_ALGO_AUTH: {
+		ret = aw87xxx_algo_auth_misc_ops_write(aw87xxx, cmd, arg);
+	} break;
+	case AW_IOCTL_GET_ALGO_AUTH: {
+		ret = aw87xxx_algo_auth_misc_ops_read(aw87xxx, cmd, arg);
+	} break;
+	default:
+		AW_DEV_LOGE(aw87xxx->dev, "unsupported  cmd %d", cmd);
+		ret = -EINVAL;
+		break;
+	}
+
+	return ret;
+}
+
+static long aw87xxx_algo_auth_misc_unlocked_ioctl(struct file *file,
+			unsigned int cmd, unsigned long arg)
+{
+	int ret = 0;
+	struct aw87xxx *aw87xxx = NULL;
+
+	if (((_IOC_TYPE(cmd)) != (AW_IOCTL_MAGIC_S))) {
+		AW_LOGE("cmd magic err");
 		return -EINVAL;
 	}
-
-	if (0 == strncmp(profile, aw87xxx->prof_off_name, AW_PROFILE_STR_MAX))
-		return aw87xxx_esd_update_off_prof(aw87xxx, profile);
-
-	prof_desc = aw_acf_get_prof_desc_form_name(aw87xxx->dev, &aw87xxx->acf_info,
-					profile);
-	if (prof_desc == NULL) {
-		AW_DEV_LOGE(aw87xxx->dev, "not found [%s] parameter", profile);
+	aw87xxx = (struct aw87xxx *)file->private_data;
+	ret = aw87xxx_algo_auth_misc_ops(aw87xxx, cmd, arg);
+	if (ret)
 		return -EINVAL;
-	}
-
-	if (!prof_desc->prof_st) {
-		AW_DEV_LOGE(aw87xxx->dev, "not found data container");
-		return -EINVAL;
-	}
-
-	data_container = &prof_desc->data_container;
-	AW_DEV_LOGD(aw87xxx->dev, "get profile[%s] data len [%d]",
-			profile, data_container->len);
-
-	if (aw_dev->ops.pwr_on_func) {
-		ret = aw_dev->ops.pwr_on_func(aw_dev, data_container);
-		if (ret < 0) {
-			AW_DEV_LOGE(aw87xxx->dev, "load profile[%s] failed ",
-				profile);
-			return ret;
-		}
-	} else {
-		ret = aw_dev_default_pwr_on(aw_dev, data_container);
-		if (ret < 0) {
-			AW_DEV_LOGE(aw87xxx->dev, "load profile[%s] failed ",
-				profile);
-			return ret;
-		}
-	}
-	aw87xxx->current_profile = prof_desc->prof_name;
-	AW_DEV_LOGD(aw87xxx->dev, "recover load profile[%s] succeed", profile);
 
 	return 0;
+}
+
+#ifdef CONFIG_COMPAT
+static long aw87xxx_algo_auth_misc_compat_ioctl(struct file *file,
+	unsigned int cmd, unsigned long arg)
+{
+	int ret = 0;
+	struct aw87xxx *aw87xxx = NULL;
+
+	if (((_IOC_TYPE(cmd)) != (AW_IOCTL_MAGIC_S))) {
+		AW_LOGE("cmd magic err");
+		return -EINVAL;
+	}
+	aw87xxx = (struct aw87xxx *)file->private_data;
+	ret = aw87xxx_algo_auth_misc_ops(aw87xxx, cmd, arg);
+	if (ret)
+		return -EINVAL;
+
+	return 0;
+}
+#endif
+
+static int aw87xxx_algo_auth_misc_open(struct inode *inode, struct file *file)
+{
+	struct list_head *pos = NULL;
+	struct aw87xxx *list_aw87xxx = NULL;
+
+	list_for_each(pos, &g_aw87xxx_list) {
+		list_aw87xxx = list_entry(pos, struct aw87xxx, list);
+		if (list_aw87xxx->dev_index == 0)
+			break;
+	}
+
+	if (list_aw87xxx == NULL) {
+		AW_LOGE("can't find dev num %d", 0);
+		return -EINVAL;
+	}
+
+	file->private_data = (void *)list_aw87xxx;
+
+	AW_DEV_LOGD(list_aw87xxx->dev, "misc open success");
+
+	return 0;
+}
+
+static int aw87xxx_algo_auth_misc_release(struct inode *inode, struct file *file)
+{
+	file->private_data = (void *)NULL;
+
+	AW_LOGD("misc release success");
+	return 0;
+}
+
+static const struct file_operations aw_algo_auth_misc_fops = {
+	.owner = THIS_MODULE,
+	.open = aw87xxx_algo_auth_misc_open,
+	.release = aw87xxx_algo_auth_misc_release,
+	.unlocked_ioctl = aw87xxx_algo_auth_misc_unlocked_ioctl,
+#ifdef CONFIG_COMPAT
+	.compat_ioctl = aw87xxx_algo_auth_misc_compat_ioctl,
+#endif
+};
+
+static struct miscdevice misc_algo_auth = {
+	.name = "awinic_ctl",
+	.minor = MISC_DYNAMIC_MINOR,
+	.fops  = &aw_algo_auth_misc_fops,
+};
+
+static int aw87xxx_algo_auth_misc_init(struct aw_device *aw_dev)
+{
+	int ret;
+
+	ret = misc_register(&misc_algo_auth);
+	if (ret)
+		AW_DEV_LOGE(aw_dev->dev, "misc register fail: %d\n", ret);
+
+	return ret;
+}
+
+static void aw87xxx_algo_auth_misc_deinit(struct aw_device *aw_dev)
+{
+	misc_deregister(&misc_algo_auth);
+
+	AW_DEV_LOGD(aw_dev->dev, " misc unregister done");
 }
 
 /****************************************************************************
@@ -368,18 +631,19 @@ static int aw87xxx_profile_switch_info(struct snd_kcontrol *kcontrol,
 	int count = 0;
 	char *name = NULL;
 	char *profile_name = NULL;
+	int ret = 0;
 	struct aw87xxx *aw87xxx = (struct aw87xxx *)kcontrol->private_value;
 
 	if (aw87xxx == NULL) {
 		AW_LOGE("get struct aw87xxx failed");
-		return -EINVAL;
+		return 0;
 	}
 
 	uinfo->type = SNDRV_CTL_ELEM_TYPE_ENUMERATED;
 	uinfo->count = 1;
 
 	/*make sure have prof */
-	count = aw_acf_get_profile_count(aw87xxx->dev, &aw87xxx->acf_info);
+	count = aw87xxx_acf_get_profile_count(aw87xxx->dev, &aw87xxx->acf_info);
 	if (count <= 0) {
 		uinfo->value.enumerated.items = 0;
 		AW_DEV_LOGE(aw87xxx->dev, "get count[%d] failed", count);
@@ -392,15 +656,19 @@ static int aw87xxx_profile_switch_info(struct snd_kcontrol *kcontrol,
 
 	name = uinfo->value.enumerated.name;
 	count = uinfo->value.enumerated.item;
-	profile_name = aw_acf_get_prof_name_form_index(aw87xxx->dev,
+	profile_name = aw87xxx_acf_get_prof_name_form_index(aw87xxx->dev,
 		&aw87xxx->acf_info, count);
 	if (profile_name == NULL) {
-		strlcpy(uinfo->value.enumerated.name, "NULL",
+		ret = strscpy(uinfo->value.enumerated.name, "NULL",
 			strlen("NULL") + 1);
+		if (ret < 0)
+			AW_DEV_LOGE(aw87xxx->dev, "copy enumerated name failed");
 		return 0;
 	}
 
-	strlcpy(name, profile_name, sizeof(uinfo->value.enumerated.name));
+	ret = strscpy(name, profile_name, sizeof(uinfo->value.enumerated.name));
+	if (ret < 0)
+		AW_DEV_LOGE(aw87xxx->dev, "copy enumerated name failed");
 
 	return 0;
 }
@@ -412,14 +680,16 @@ static int aw87xxx_profile_switch_put(struct snd_kcontrol *kcontrol,
 	char *profile_name = NULL;
 	int index = ucontrol->value.integer.value[0];
 	struct aw87xxx *aw87xxx = (struct aw87xxx *)kcontrol->private_value;
-	struct acf_bin_info *acf_info = &aw87xxx->acf_info;
+	struct acf_bin_info *acf_info = NULL;
 
 	if (aw87xxx == NULL) {
 		AW_LOGE("get struct aw87xxx failed");
 		return -EINVAL;
 	}
 
-	profile_name = aw_acf_get_prof_name_form_index(aw87xxx->dev, acf_info, index);
+	acf_info = &aw87xxx->acf_info;
+
+	profile_name = aw87xxx_acf_get_prof_name_form_index(aw87xxx->dev, acf_info, index);
 	if (!profile_name) {
 		AW_DEV_LOGE(aw87xxx->dev, "not found profile name,index=[%d]",
 				index);
@@ -432,7 +702,7 @@ static int aw87xxx_profile_switch_put(struct snd_kcontrol *kcontrol,
 	if (ret < 0) {
 		AW_DEV_LOGE(aw87xxx->dev, "set dev_index[%d] profile failed, profile = %s",
 			aw87xxx->dev_index, profile_name);
-		return ret;
+		return -EINVAL;
 	}
 
 	return 0;
@@ -456,15 +726,15 @@ static int aw87xxx_profile_switch_get(struct snd_kcontrol *kcontrol,
 	}
 
 	profile = aw87xxx->current_profile;
-	//AW_DEV_LOGI(aw87xxx->dev, "current profile:[%s]",
-	//	aw87xxx->current_profile);
+	AW_DEV_LOGI(aw87xxx->dev, "current profile:[%s]",
+		aw87xxx->current_profile);
 
 
-	index = aw_acf_get_prof_index_form_name(aw87xxx->dev,
+	index = aw87xxx_acf_get_prof_index_form_name(aw87xxx->dev,
 		&aw87xxx->acf_info, aw87xxx->current_profile);
 	if (index < 0) {
 		AW_DEV_LOGE(aw87xxx->dev, "get profile index failed");
-		return index;
+		return -EINVAL;
 	}
 
 	ucontrol->value.integer.value[0] = index;
@@ -483,7 +753,7 @@ static int aw87xxx_vmax_get_info(struct snd_kcontrol *kcontrol,
 	return 0;
 }
 
-static int aw87xxxx_vmax_get(struct snd_kcontrol *kcontrol,
+static int aw87xxx_vmax_get(struct snd_kcontrol *kcontrol,
 			struct snd_ctl_elem_value *ucontrol)
 {
 	int ret = -1;
@@ -495,12 +765,210 @@ static int aw87xxxx_vmax_get(struct snd_kcontrol *kcontrol,
 		return -EINVAL;
 	}
 
-	ret = aw_monitor_no_dsp_get_vmax(&aw87xxx->monitor, &vmax_val);
+	ret = aw87xxx_monitor_no_dsp_get_vmax(&aw87xxx->monitor, &vmax_val);
 	if (ret < 0)
-		return ret;
+		return -EINVAL;
 
 	ucontrol->value.integer.value[0] = vmax_val;
 	AW_DEV_LOGI(aw87xxx->dev, "get vmax = [0x%x]", vmax_val);
+
+	return 0;
+}
+
+static int aw87xxx_monitor_switch_info(struct snd_kcontrol *kcontrol,
+			struct snd_ctl_elem_info *uinfo)
+{
+	int count = 0;
+	int ret = 0;
+
+	uinfo->type = SNDRV_CTL_ELEM_TYPE_ENUMERATED;
+	uinfo->count = 1;
+	count = ARRAY_SIZE(aw87xxx_monitor_switch);
+
+	uinfo->value.enumerated.items = count;
+
+	if (uinfo->value.enumerated.item >= count)
+		uinfo->value.enumerated.item = count - 1;
+
+	ret = strscpy(uinfo->value.enumerated.name,
+		aw87xxx_monitor_switch[uinfo->value.enumerated.item],
+		strlen(aw87xxx_monitor_switch[uinfo->value.enumerated.item]) + 1);
+	if (ret < 0)
+		AW_LOGE("copy enumerated name failed");
+
+	return 0;
+}
+
+static int aw87xxx_monitor_switch_put(struct snd_kcontrol *kcontrol,
+			struct snd_ctl_elem_value *ucontrol)
+{
+	uint32_t ctrl_value = ucontrol->value.integer.value[0];
+	struct aw87xxx *aw87xxx = (struct aw87xxx *)kcontrol->private_value;
+	struct aw_monitor *aw_monitor = &aw87xxx->monitor;
+	int ret = -1;
+
+	ret = aw87xxx_dev_monitor_switch_set(aw_monitor, ctrl_value);
+	if (ret)
+		return -EINVAL;
+
+	return 0;
+}
+
+static int aw87xxx_monitor_switch_get(struct snd_kcontrol *kcontrol,
+			struct snd_ctl_elem_value *ucontrol)
+{
+	struct aw87xxx *aw87xxx = (struct aw87xxx *)kcontrol->private_value;
+	struct aw_monitor *aw_monitor = &aw87xxx->monitor;
+
+	if (aw_monitor->version == AW_MONITOR_HDR_VER_0_1_2)
+		ucontrol->value.integer.value[0] = aw_monitor->monitor_cfg.monitor_switch;
+	else
+		ucontrol->value.integer.value[0] = aw_monitor->monitor_hdr.monitor_switch;
+
+	AW_DEV_LOGD(aw87xxx->dev, "monitor switch is %ld", ucontrol->value.integer.value[0]);
+	return 0;
+}
+
+static int aw87xxx_algo_auth_info(struct snd_kcontrol *kcontrol,
+			struct snd_ctl_elem_info *uinfo)
+{
+	uinfo->type = SNDRV_CTL_ELEM_TYPE_BYTES;
+	uinfo->count = sizeof(struct algo_auth_data);
+	return 0;
+}
+
+/*op_flag: SNDRV_CTL_TLV_OP_READ = 0, SNDRV_CTL_TLV_OP_WRITE = 1*/
+static int aw87xxx_algo_auth_tlv_rw(struct snd_kcontrol *kcontrol, int op_flag,
+			unsigned int size, unsigned int __user *tlv)
+{
+	int ret = 0;
+	struct aw87xxx *aw87xxx = (struct aw87xxx *)kcontrol->private_value;
+	struct aw_device *aw_dev = &aw87xxx->aw_dev;
+	struct algo_auth_data algo_data;
+
+	AW_DEV_LOGD(aw87xxx->dev, "op_flag = [%d]", op_flag);
+
+	if (!tlv) {
+		AW_DEV_LOGE(aw87xxx->dev, "tlv is NULL");
+		return -EINVAL;
+	}
+
+	if (size != sizeof(struct algo_auth_data)) {
+		AW_DEV_LOGE(aw87xxx->dev, "size != algo_auth_data");
+		return -EINVAL;
+	}
+
+	switch (op_flag) {
+	case SNDRV_CTL_TLV_OP_READ:
+		AW_DEV_LOGD(aw87xxx->dev, "get algo auth data");
+		memset(&algo_data, 0x0, sizeof(struct algo_auth_data));
+
+		algo_data.auth_mode = aw_dev->auth_desc.auth_mode;
+		algo_data.chip_id = aw_dev->auth_desc.chip_id;
+		algo_data.random = aw_dev->auth_desc.random;
+		algo_data.reg_crc = aw_dev->auth_desc.reg_crc;
+		algo_data.check_result = aw_dev->auth_desc.check_result;
+
+		if (copy_to_user((void __user *)tlv, (char *)&algo_data, size))
+			ret = -EFAULT;
+		break;
+	case SNDRV_CTL_TLV_OP_WRITE:
+		AW_DEV_LOGD(aw87xxx->dev, "set algo auth data");
+		if (copy_from_user(&algo_data, (void __user *)tlv, size))
+			ret = -EFAULT;
+
+		aw87xxx_dev_algo_auth_mode(aw_dev, &algo_data);
+		break;
+	default:
+		AW_DEV_LOGD(aw_dev->dev, "unsupport op flag[0x%x]", op_flag);
+		return -EINVAL;
+	}
+
+	AW_DEV_LOGD(aw87xxx->dev, "mode=%d,reg_crc=0x%x,random=0x%x,id=0x%x,res=%d",
+		algo_data.auth_mode, algo_data.reg_crc, algo_data.random,
+		algo_data.chip_id, algo_data.check_result);
+
+	return ret;
+}
+
+static int aw87xxx_spin_switch_info(struct snd_kcontrol *kcontrol,
+			struct snd_ctl_elem_info *uinfo)
+{
+	int count = 0;
+	int ret = 0;
+
+	uinfo->type = SNDRV_CTL_ELEM_TYPE_ENUMERATED;
+	uinfo->count = 1;
+	count = ARRAY_SIZE(aw87xxx_spin_switch);
+
+	uinfo->value.enumerated.items = count;
+
+	if (uinfo->value.enumerated.item >= count)
+		uinfo->value.enumerated.item = count - 1;
+
+	ret = strscpy(uinfo->value.enumerated.name,
+		aw87xxx_spin_switch[uinfo->value.enumerated.item],
+		strlen(aw87xxx_spin_switch[uinfo->value.enumerated.item]) + 1);
+	if (ret < 0)
+		AW_LOGE("copy enumerated name failed");
+
+	return 0;
+}
+
+static int aw87xxx_spin_switch_put(struct snd_kcontrol *kcontrol,
+			struct snd_ctl_elem_value *ucontrol)
+{
+	uint32_t ctrl_value = 0;
+	int ret = 0;
+	struct aw87xxx *aw87xxx = (struct aw87xxx *)kcontrol->private_value;
+
+	ctrl_value = ucontrol->value.integer.value[0];
+
+	ret = aw87xxx_dsp_set_spin(ctrl_value);
+	if (ret) {
+		AW_DEV_LOGE(aw87xxx->dev, "write spin failed");
+		return ret;
+	}
+	AW_DEV_LOGD(aw87xxx->dev, "write spin done ctrl_value=%d", ctrl_value);
+	return 0;
+}
+
+static int aw87xxx_spin_switch_get(struct snd_kcontrol *kcontrol,
+	struct snd_ctl_elem_value *ucontrol)
+{
+	struct aw87xxx *aw87xxx = (struct aw87xxx *)kcontrol->private_value;
+
+	ucontrol->value.integer.value[0] = aw87xxx_dsp_get_spin();
+	AW_DEV_LOGD(aw87xxx->dev, "current spin is %ld", ucontrol->value.integer.value[0]);
+
+	return 0;
+}
+
+static int aw87xxx_hal_monitor_time_info(struct snd_kcontrol *kcontrol,
+		struct snd_ctl_elem_info *uinfo)
+{
+	uinfo->type = SNDRV_CTL_ELEM_TYPE_INTEGER;
+	uinfo->count = 1;
+	uinfo->value.integer.min = AW_MONITOR_TIME_MIN;
+	uinfo->value.integer.max = AW_MONITOR_TIME_MAX;
+
+	return 0;
+}
+
+static int aw87xxx_hal_monitor_time_get(struct snd_kcontrol *kcontrol,
+		struct snd_ctl_elem_value *ucontrol)
+{
+	struct aw87xxx *aw87xxx = (struct aw87xxx *)kcontrol->private_value;
+
+	if (aw87xxx == NULL) {
+		AW_LOGE("get struct aw87xxx failed");
+		return -EINVAL;
+	}
+
+	ucontrol->value.integer.value[0] =
+			aw87xxx->monitor.monitor_hdr.monitor_time;
+
+	AW_LOGI("get monitor time %ld", ucontrol->value.integer.value[0]);
 
 	return 0;
 }
@@ -510,8 +978,8 @@ static int aw87xxx_kcontrol_dynamic_create(struct aw87xxx *aw87xxx,
 {
 	struct snd_kcontrol_new *aw87xxx_kcontrol = NULL;
 	aw_snd_soc_codec_t *soc_codec = (aw_snd_soc_codec_t *)codec;
-	char *kctl_name[AW87XXX_KCONTROL_NUM];
-	int kcontrol_num = AW87XXX_KCONTROL_NUM;
+	char *kctl_name[AW87XXX_PRIVATE_KCONTROL_NUM];
+	int kcontrol_num = AW87XXX_PRIVATE_KCONTROL_NUM;
 	int ret = -1;
 
 	AW_DEV_LOGD(aw87xxx->dev, "enter");
@@ -552,8 +1020,23 @@ static int aw87xxx_kcontrol_dynamic_create(struct aw87xxx *aw87xxx,
 	aw87xxx_kcontrol[1].iface = SNDRV_CTL_ELEM_IFACE_MIXER;
 	aw87xxx_kcontrol[1].access = SNDRV_CTL_ELEM_ACCESS_READ;
 	aw87xxx_kcontrol[1].info = aw87xxx_vmax_get_info;
-	aw87xxx_kcontrol[1].get = aw87xxxx_vmax_get;
+	aw87xxx_kcontrol[1].get = aw87xxx_vmax_get;
 	aw87xxx_kcontrol[1].private_value = (unsigned long)aw87xxx;
+
+	kctl_name[2] = devm_kzalloc(aw87xxx->codec->dev, AW_NAME_BUF_MAX,
+			GFP_KERNEL);
+	if (kctl_name[2] == NULL)
+		return -ENOMEM;
+
+	snprintf(kctl_name[2], AW_NAME_BUF_MAX, "aw87xxx_monitor_switch_%d",
+			aw87xxx->dev_index);
+
+	aw87xxx_kcontrol[2].name = kctl_name[2];
+	aw87xxx_kcontrol[2].iface = SNDRV_CTL_ELEM_IFACE_MIXER;
+	aw87xxx_kcontrol[2].info = aw87xxx_monitor_switch_info;
+	aw87xxx_kcontrol[2].get = aw87xxx_monitor_switch_get;
+	aw87xxx_kcontrol[2].put = aw87xxx_monitor_switch_put;
+	aw87xxx_kcontrol[2].private_value = (unsigned long)aw87xxx;
 
 	ret = aw_componet_codec_ops.add_codec_controls(aw87xxx->codec,
 				aw87xxx_kcontrol, kcontrol_num);
@@ -563,9 +1046,87 @@ static int aw87xxx_kcontrol_dynamic_create(struct aw87xxx *aw87xxx,
 		return ret;
 	}
 
-	AW_DEV_LOGI(aw87xxx->dev, "add codec controls[%s,%s]",
+	AW_DEV_LOGI(aw87xxx->dev, "add codec controls[%s,%s,%s]",
 		aw87xxx_kcontrol[0].name,
-		aw87xxx_kcontrol[1].name);
+		aw87xxx_kcontrol[1].name,
+		aw87xxx_kcontrol[2].name);
+
+	return 0;
+}
+
+static int aw87xxx_public_kcontrol_create(struct aw87xxx *aw87xxx,
+						void *codec)
+{
+	struct snd_kcontrol_new *aw87xxx_kcontrol = NULL;
+	aw_snd_soc_codec_t *soc_codec = (aw_snd_soc_codec_t *)codec;
+	char *kctl_name[AW87XXX_PUBLIC_KCONTROL_NUM];
+	int kcontrol_num = AW87XXX_PUBLIC_KCONTROL_NUM;
+	int ret = -1;
+
+	AW_DEV_LOGD(aw87xxx->dev, "enter");
+	aw87xxx->codec = soc_codec;
+
+	aw87xxx_kcontrol = devm_kzalloc(aw87xxx->dev,
+			sizeof(struct snd_kcontrol_new) * kcontrol_num,
+			GFP_KERNEL);
+	if (aw87xxx_kcontrol == NULL) {
+		AW_DEV_LOGE(aw87xxx->dev, "aw87xxx_kcontrol devm_kzalloc failed");
+		return -ENOMEM;
+	}
+
+	kctl_name[0] = devm_kzalloc(aw87xxx->dev, AW_NAME_BUF_MAX,
+			GFP_KERNEL);
+	if (kctl_name[0] == NULL)
+		return -ENOMEM;
+
+	snprintf(kctl_name[0], AW_NAME_BUF_MAX, "aw87xxx_spin_switch");
+
+	aw87xxx_kcontrol[0].name = kctl_name[0];
+	aw87xxx_kcontrol[0].iface = SNDRV_CTL_ELEM_IFACE_MIXER;
+	aw87xxx_kcontrol[0].info = aw87xxx_spin_switch_info;
+	aw87xxx_kcontrol[0].get = aw87xxx_spin_switch_get;
+	aw87xxx_kcontrol[0].put = aw87xxx_spin_switch_put;
+	aw87xxx_kcontrol[0].private_value = (unsigned long)aw87xxx;
+
+	kctl_name[1] = devm_kzalloc(aw87xxx->dev, AW_NAME_BUF_MAX,
+			GFP_KERNEL);
+	if (kctl_name[1] == NULL)
+		return -ENOMEM;
+
+	snprintf(kctl_name[1], AW_NAME_BUF_MAX, "aw87xxx_hal_monitor_time");
+
+	aw87xxx_kcontrol[1].name = kctl_name[1];
+	aw87xxx_kcontrol[1].iface = SNDRV_CTL_ELEM_IFACE_MIXER;
+	aw87xxx_kcontrol[1].access = SNDRV_CTL_ELEM_ACCESS_READ;
+	aw87xxx_kcontrol[1].info = aw87xxx_hal_monitor_time_info;
+	aw87xxx_kcontrol[1].get = aw87xxx_hal_monitor_time_get;
+	aw87xxx_kcontrol[1].private_value = (unsigned long)aw87xxx;
+
+	kctl_name[2] = devm_kzalloc(aw87xxx->dev, AW_NAME_BUF_MAX,
+			GFP_KERNEL);
+	if (kctl_name[2] == NULL)
+		return -ENOMEM;
+
+	snprintf(kctl_name[2], AW_NAME_BUF_MAX, "aw_algo_auth");
+
+	aw87xxx_kcontrol[2].name = kctl_name[2];
+	aw87xxx_kcontrol[2].iface = SNDRV_CTL_ELEM_IFACE_MIXER;
+	aw87xxx_kcontrol[2].access = SNDRV_CTL_ELEM_ACCESS_TLV_CALLBACK|SNDRV_CTL_ELEM_ACCESS_TLV_READWRITE;
+	aw87xxx_kcontrol[2].info = aw87xxx_algo_auth_info;
+	aw87xxx_kcontrol[2].tlv.c = aw87xxx_algo_auth_tlv_rw;
+	aw87xxx_kcontrol[2].private_value = (unsigned long)aw87xxx;
+
+	ret = aw_componet_codec_ops.add_codec_controls(aw87xxx->codec,
+				aw87xxx_kcontrol, kcontrol_num);
+	if (ret < 0) {
+		AW_DEV_LOGE(aw87xxx->dev, "add codec controls failed, ret = %d",
+			ret);
+		return ret;
+	}
+
+	AW_DEV_LOGI(aw87xxx->dev, "add public codec controls[%s,%s,%s]",
+		aw87xxx_kcontrol[0].name, aw87xxx_kcontrol[1].name,
+		aw87xxx_kcontrol[2].name);
 
 	return 0;
 }
@@ -583,14 +1144,15 @@ int aw87xxx_add_codec_controls(void *codec)
 
 	list_for_each(pos, &g_aw87xxx_list) {
 		aw87xxx = list_entry(pos, struct aw87xxx, list);
-		if (aw87xxx == NULL) {
-			AW_LOGE("struct aw87xxx not ready");
-			return ret;
-		}
-
 		ret = aw87xxx_kcontrol_dynamic_create(aw87xxx, codec);
 		if (ret < 0)
 			return ret;
+
+		if (aw87xxx->dev_index == 0) {
+			ret = aw87xxx_public_kcontrol_create(aw87xxx, codec);
+			if (ret < 0)
+				return ret;
+		}
 	}
 
 	return 0;
@@ -606,15 +1168,15 @@ EXPORT_SYMBOL(aw87xxx_add_codec_controls);
 static void aw87xxx_fw_cfg_free(struct aw87xxx *aw87xxx)
 {
 	AW_DEV_LOGD(aw87xxx->dev, "enter");
-	aw_acf_profile_free(aw87xxx->dev, &aw87xxx->acf_info);
-	aw_monitor_cfg_free(&aw87xxx->monitor);
+	aw87xxx_acf_profile_free(aw87xxx->dev, &aw87xxx->acf_info);
+	aw87xxx_monitor_cfg_free(&aw87xxx->monitor);
 }
 
 static int aw87xxx_init_default_prof(struct aw87xxx *aw87xxx)
 {
 	char *profile = NULL;
 
-	profile = aw_acf_get_prof_off_name(aw87xxx->dev, &aw87xxx->acf_info);
+	profile = aw87xxx_acf_get_prof_off_name(aw87xxx->dev, &aw87xxx->acf_info);
 	if (profile == NULL) {
 		AW_DEV_LOGE(aw87xxx->dev, "get profile off name failed");
 		return -EINVAL;
@@ -628,55 +1190,46 @@ static int aw87xxx_init_default_prof(struct aw87xxx *aw87xxx)
 	return 0;
 }
 
-static void aw87xxx_fw_load_retry(struct aw87xxx *aw87xxx)
-{
-	struct acf_bin_info *acf_info = &aw87xxx->acf_info;
-	int ram_timer_val = 2000;
-
-	AW_DEV_LOGD(aw87xxx->dev, "failed to read [%s]",
-			aw87xxx->fw_name);
-
-	if (acf_info->load_count < AW_LOAD_FW_RETRIES) {
-		AW_DEV_LOGD(aw87xxx->dev,
-			"restart hrtimer to load firmware");
-		schedule_delayed_work(&aw87xxx->fw_load_work,
-			msecs_to_jiffies(ram_timer_val));
-	} else {
-		acf_info->load_count = 0;
-		AW_DEV_LOGE(aw87xxx->dev,
-			"can not load firmware,please check name or file exists");
-		return;
-	}
-	acf_info->load_count++;
-}
-
-static void aw87xxx_fw_load(const struct firmware *fw, void *context)
+static void aw87xxx_fw_load_work(struct work_struct *work)
 {
 	int ret = -1;
-	struct aw87xxx *aw87xxx = context;
+	struct aw87xxx *aw87xxx = container_of(work,
+			struct aw87xxx, fw_load_work.work);
 	struct acf_bin_info *acf_info = &aw87xxx->acf_info;
+	const struct firmware *cont = NULL;
 
 	AW_DEV_LOGD(aw87xxx->dev, "enter");
 
-	if (!fw) {
-		aw87xxx_fw_load_retry(aw87xxx);
+	ret = request_firmware(&cont, aw87xxx->fw_name, aw87xxx->dev);
+	if ((ret) || (!cont)) {
+		AW_DEV_LOGD(aw87xxx->dev, "load [%s] failed!", aw87xxx->fw_name);
+		if (acf_info->load_count == AW_READ_CHIPID_RETRIES) {
+			acf_info->load_count = 0;
+		} else {
+			acf_info->load_count++;
+			/* sleep 1s */
+			msleep(1000);
+			AW_DEV_LOGD(aw87xxx->dev, "load [%s] try [%d]!",
+						aw87xxx->fw_name, acf_info->load_count);
+			aw87xxx_fw_load_work(work);
+		}
 		return;
 	}
 
-	AW_DEV_LOGD(aw87xxx->dev, "loaded %s - size: %ld",
-		aw87xxx->fw_name, (u_long)(fw ? fw->size : 0));
+	AW_DEV_LOGD(aw87xxx->dev, "loaded %s - size: %zu",
+		aw87xxx->fw_name, (cont ? cont->size : 0));
 
 	mutex_lock(&aw87xxx->reg_lock);
-	acf_info->fw_data = vmalloc(fw->size);
+	acf_info->fw_data = vmalloc(cont->size);
 	if (!acf_info->fw_data) {
 		AW_DEV_LOGE(aw87xxx->dev, "fw_data kzalloc memory failed");
 		goto exit_vmalloc_failed;
 	}
-	memset(acf_info->fw_data, 0, fw->size);
-	memcpy(acf_info->fw_data, fw->data, fw->size);
-	acf_info->fw_size = fw->size;
+	memset(acf_info->fw_data, 0, cont->size);
+	memcpy(acf_info->fw_data, cont->data, cont->size);
+	acf_info->fw_size = cont->size;
 
-	ret = aw_acf_parse(aw87xxx->dev, &aw87xxx->acf_info);
+	ret = aw87xxx_acf_parse(aw87xxx->dev, &aw87xxx->acf_info);
 	if (ret < 0) {
 		AW_DEV_LOGE(aw87xxx->dev, "fw_data parse failed");
 		goto exit_acf_parse_failed;
@@ -687,36 +1240,12 @@ static void aw87xxx_fw_load(const struct firmware *fw, void *context)
 		aw87xxx_fw_cfg_free(aw87xxx);
 		goto exit_acf_parse_failed;
 	}
-
 	AW_DEV_LOGI(aw87xxx->dev, "acf parse succeed");
-	mutex_unlock(&aw87xxx->reg_lock);
-	release_firmware(fw);
-	return;
 
 exit_acf_parse_failed:
 exit_vmalloc_failed:
-	release_firmware(fw);
 	mutex_unlock(&aw87xxx->reg_lock);
-}
-
-static void aw87xxx_fw_load_work_routine(struct work_struct *work)
-{
-	struct aw87xxx *aw87xxx = container_of(work,
-			struct aw87xxx, fw_load_work.work);
-	struct aw_prof_info *prof_info = &aw87xxx->acf_info.prof_info;
-
-	AW_DEV_LOGD(aw87xxx->dev, "enter");
-
-	if (prof_info->status == AW_ACF_WAIT) {
-		const struct firmware *fw;
-		int ret;
-
-		ret = request_firmware(&fw, aw87xxx->fw_name, aw87xxx->dev);
-		if (!ret) {
-			AW_DEV_LOGD(aw87xxx->dev, "loader firmware %s success\n", aw87xxx->fw_name);
-			aw87xxx_fw_load(fw, aw87xxx);
-		}
-	}
+	release_firmware(cont);
 }
 
 static void aw87xxx_fw_load_init(struct aw87xxx *aw87xxx)
@@ -728,9 +1257,9 @@ static void aw87xxx_fw_load_init(struct aw87xxx *aw87xxx)
 #endif
 	AW_DEV_LOGI(aw87xxx->dev, "enter");
 	snprintf(aw87xxx->fw_name, AW87XXX_FW_NAME_MAX, "%s", AW87XXX_FW_BIN_NAME);
-	aw_acf_init(&aw87xxx->aw_dev, &aw87xxx->acf_info, aw87xxx->dev_index);
+	aw87xxx_acf_init(&aw87xxx->aw_dev, &aw87xxx->acf_info, aw87xxx->dev_index);
 
-	INIT_DELAYED_WORK(&aw87xxx->fw_load_work, aw87xxx_fw_load_work_routine);
+	INIT_DELAYED_WORK(&aw87xxx->fw_load_work, aw87xxx_fw_load_work);
 	schedule_delayed_work(&aw87xxx->fw_load_work,
 			msecs_to_jiffies(cfg_timer_val));
 }
@@ -740,7 +1269,7 @@ static void aw87xxx_fw_load_init(struct aw87xxx *aw87xxx)
  *aw87xxx attribute node
  *
  ****************************************************************************/
-static ssize_t aw87xxx_attr_get_reg(struct device *dev,
+static ssize_t reg_show(struct device *dev,
 			struct device_attribute *attr, char *buf)
 {
 	ssize_t len = 0;
@@ -754,7 +1283,7 @@ static ssize_t aw87xxx_attr_get_reg(struct device *dev,
 	for (i = 0; i < aw_dev->reg_max_addr; i++) {
 		if (!(aw_dev->reg_access[i] & AW_DEV_REG_RD_ACCESS))
 			continue;
-		ret = aw_dev_i2c_read_byte(&aw87xxx->aw_dev, i, &reg_val);
+		ret = aw87xxx_dev_i2c_read_byte(&aw87xxx->aw_dev, i, &reg_val);
 		if (ret < 0) {
 			len += snprintf(buf + len, PAGE_SIZE - len,
 					"read reg [0x%x] failed\n", i);
@@ -771,7 +1300,7 @@ static ssize_t aw87xxx_attr_get_reg(struct device *dev,
 	return len;
 }
 
-static ssize_t aw87xxx_attr_set_reg(struct device *dev,
+static ssize_t reg_store(struct device *dev,
 			struct device_attribute *attr, const char *buf,
 			size_t len)
 {
@@ -788,7 +1317,7 @@ static ssize_t aw87xxx_attr_set_reg(struct device *dev,
 			return -EINVAL;
 		}
 
-		ret = aw_dev_i2c_write_byte(&aw87xxx->aw_dev,
+		ret = aw87xxx_dev_i2c_write_byte(&aw87xxx->aw_dev,
 					databuf[0], databuf[1]);
 		if (ret < 0)
 			AW_DEV_LOGE(aw87xxx->dev, "set [0x%x]=0x%x failed",
@@ -804,7 +1333,7 @@ static ssize_t aw87xxx_attr_set_reg(struct device *dev,
 	return len;
 }
 
-static ssize_t aw87xxx_attr_get_profile(struct device *dev,
+static ssize_t profile_show(struct device *dev,
 			struct device_attribute *attr, char *buf)
 {
 	ssize_t len = 0;
@@ -833,7 +1362,7 @@ static ssize_t aw87xxx_attr_get_profile(struct device *dev,
 	return len;
 }
 
-static ssize_t aw87xxx_attr_set_profile(struct device *dev,
+static ssize_t profile_store(struct device *dev,
 			struct device_attribute *attr, const char *buf,
 			size_t len)
 {
@@ -841,7 +1370,13 @@ static ssize_t aw87xxx_attr_set_profile(struct device *dev,
 	int ret = 0;
 	struct aw87xxx *aw87xxx = dev_get_drvdata(dev);
 
-	if (sscanf(buf, "%s", profile) == 1) {
+	if (strlen(buf) > AW_PROFILE_STR_MAX) {
+		AW_DEV_LOGE(aw87xxx->dev, "input profile_str_len is out of max[%d]",
+				AW_PROFILE_STR_MAX);
+		return -EINVAL;
+	}
+
+	if (sscanf(buf, "%31s", profile) == 1) {
 		AW_DEV_LOGD(aw87xxx->dev, "set profile [%s]", profile);
 		ret = aw87xxx_update_profile(aw87xxx, profile);
 		if (ret < 0) {
@@ -854,7 +1389,7 @@ static ssize_t aw87xxx_attr_set_profile(struct device *dev,
 	return len;
 }
 
-static ssize_t aw87xxx_attr_get_hwen(struct device *dev,
+static ssize_t hwen_show(struct device *dev,
 				struct device_attribute *attr, char *buf)
 {
 	ssize_t len = 0;
@@ -871,7 +1406,7 @@ static ssize_t aw87xxx_attr_get_hwen(struct device *dev,
 	return len;
 }
 
-static ssize_t aw87xxx_attr_set_hwen(struct device *dev,
+static ssize_t hwen_store(struct device *dev,
 				struct device_attribute *attr, const char *buf,
 				size_t len)
 {
@@ -887,9 +1422,9 @@ static ssize_t aw87xxx_attr_set_hwen(struct device *dev,
 
 	mutex_lock(&aw87xxx->reg_lock);
 	if (state == AW_DEV_HWEN_OFF)
-		aw_dev_hw_pwr_ctrl(&aw87xxx->aw_dev, false); /*OFF*/
+		aw87xxx_dev_hw_pwr_ctrl(&aw87xxx->aw_dev, false); /*OFF*/
 	else if (state == AW_DEV_HWEN_ON)
-		aw_dev_hw_pwr_ctrl(&aw87xxx->aw_dev, true); /*ON*/
+		aw87xxx_dev_hw_pwr_ctrl(&aw87xxx->aw_dev, true); /*ON*/
 	else
 		AW_DEV_LOGE(aw87xxx->dev, "input [%d] error, hwen_on=[%d],hwen_off=[%d]",
 			state, AW_DEV_HWEN_ON, AW_DEV_HWEN_OFF);
@@ -903,7 +1438,7 @@ int aw87xxx_awrw_write(struct aw87xxx *aw87xxx,
 	int i = 0, ret = -1;
 	char *data_buf = NULL;
 	int buf_len = 0;
-	int temp_data = 0;
+	unsigned int temp_data = 0;
 	int data_str_size = 0;
 	char *reg_data;
 	struct aw_i2c_packet *packet = &aw87xxx->i2c_packet;
@@ -934,6 +1469,8 @@ int aw87xxx_awrw_write(struct aw87xxx *aw87xxx,
 			"0x%x", &temp_data);
 		if (ret != 1) {
 			AW_DEV_LOGE(aw87xxx->dev, "sscanf failed,ret=%d", ret);
+			vfree(data_buf);
+			data_buf = NULL;
 			return ret;
 		}
 		reg_data[i] = temp_data;
@@ -946,7 +1483,6 @@ int aw87xxx_awrw_write(struct aw87xxx *aw87xxx,
 		AW_DEV_LOGE(aw87xxx->dev, "write failed");
 		vfree(data_buf);
 		data_buf = NULL;
-		mutex_unlock(&aw87xxx->reg_lock);
 		return -EFAULT;
 	}
 	mutex_unlock(&aw87xxx->reg_lock);
@@ -996,7 +1532,7 @@ static int aw87xxx_awrw_data_check(struct aw87xxx *aw87xxx,
 static int aw87xxx_awrw_parse_buf(struct aw87xxx *aw87xxx,
 			const char *buf, size_t count, int *wr_status)
 {
-	int data[AWRW_HDR_MAX] = {0};
+	unsigned int data[AWRW_HDR_MAX] = {0};
 	struct aw_i2c_packet *packet = &aw87xxx->i2c_packet;
 	int ret = -1;
 
@@ -1018,7 +1554,7 @@ static int aw87xxx_awrw_parse_buf(struct aw87xxx *aw87xxx,
 	return -EINVAL;
 }
 
-static ssize_t aw87xxx_attr_awrw_store(struct device *dev,
+static ssize_t awrw_store(struct device *dev,
 	struct device_attribute *attr, const char *buf, size_t count)
 {
 	struct aw87xxx *aw87xxx = dev_get_drvdata(dev);
@@ -1057,7 +1593,7 @@ static ssize_t aw87xxx_attr_awrw_store(struct device *dev,
 	return count;
 }
 
-static ssize_t aw87xxx_attr_awrw_show(struct device *dev,
+static ssize_t awrw_show(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
 	struct aw87xxx *aw87xxx = dev_get_drvdata(dev);
@@ -1073,7 +1609,7 @@ static ssize_t aw87xxx_attr_awrw_show(struct device *dev,
 	}
 
 	data_len = AWRW_DATA_BYTES * packet->reg_num;
-	reg_data = (char *)vmalloc(data_len);
+	reg_data = vmalloc(data_len);
 	if (reg_data == NULL) {
 		AW_DEV_LOGE(aw87xxx->dev, "memory alloc failed");
 		ret = -EINVAL;
@@ -1081,7 +1617,7 @@ static ssize_t aw87xxx_attr_awrw_show(struct device *dev,
 	}
 
 	mutex_lock(&aw87xxx->reg_lock);
-	ret = aw_dev_i2c_read_msg(&aw87xxx->aw_dev, packet->reg_addr,
+	ret = aw87xxx_dev_i2c_read_msg(&aw87xxx->aw_dev, packet->reg_addr,
 				(char *)reg_data, data_len);
 	if (ret < 0) {
 		ret = -EFAULT;
@@ -1110,26 +1646,22 @@ exit:
 	return ret;
 }
 
-static ssize_t aw87xxx_drv_ver_show(struct device *dev,
+static ssize_t drv_ver_show(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
 	ssize_t len = 0;
 
 	len += snprintf(buf + len, PAGE_SIZE - len,
-		"driver_ver: %s \n", AW87XXX_DRIVER_VERSION);
+		"driver_ver: %s\n", AW87XXX_DRIVER_VERSION);
 
 	return len;
 }
 
-static DEVICE_ATTR(reg, S_IWUSR | S_IRUGO,
-		aw87xxx_attr_get_reg, aw87xxx_attr_set_reg);
-static DEVICE_ATTR(profile, S_IWUSR | S_IRUGO,
-		aw87xxx_attr_get_profile, aw87xxx_attr_set_profile);
-static DEVICE_ATTR(hwen, S_IWUSR | S_IRUGO,
-		aw87xxx_attr_get_hwen, aw87xxx_attr_set_hwen);
-static DEVICE_ATTR(awrw, S_IWUSR | S_IRUGO,
-	aw87xxx_attr_awrw_show, aw87xxx_attr_awrw_store);
-static DEVICE_ATTR(drv_ver, S_IRUGO, aw87xxx_drv_ver_show, NULL);
+static DEVICE_ATTR_RW(reg);
+static DEVICE_ATTR_RW(profile);
+static DEVICE_ATTR_RW(hwen);
+static DEVICE_ATTR_RW(awrw);
+static DEVICE_ATTR_RO(drv_ver);
 
 static struct attribute *aw87xxx_attributes[] = {
 	&dev_attr_reg.attr,
@@ -1157,9 +1689,6 @@ int aw87xxx_dtsi_dev_index_check(struct aw87xxx *cur_aw87xxx)
 
 	list_for_each(pos, &g_aw87xxx_list) {
 		list_aw87xxx = list_entry(pos, struct aw87xxx, list);
-		if (list_aw87xxx == NULL)
-			continue;
-
 		if (list_aw87xxx->dev_index == cur_aw87xxx->dev_index) {
 			AW_DEV_LOGE(cur_aw87xxx->dev, "dev_index has already existing,check failed");
 			return -EINVAL;
@@ -1174,6 +1703,8 @@ static int aw87xxx_dtsi_parse(struct aw87xxx *aw87xxx,
 {
 	int ret = -1;
 	int32_t dev_index = -EINVAL;
+	int32_t voltage_min = -EINVAL;
+	struct aw_voltage_desc *vol_desc = &aw87xxx->aw_dev.vol_desc;
 
 	ret = of_property_read_u32(dev_node, "dev_index", &dev_index);
 	if (ret < 0) {
@@ -1208,29 +1739,22 @@ static int aw87xxx_dtsi_parse(struct aw87xxx *aw87xxx,
 				return ret;
 			}
 		}
-		return 0;
 	}
 
-	/* In order to compatible with stereo share only one reset gpio */
-	ret = of_get_named_gpio(dev_node, "reset-shared-gpio", 0);
+	ret = of_property_read_u32(dev_node, "aw-voltage-min", &voltage_min);
 	if (ret < 0) {
-		AW_DEV_LOGI(aw87xxx->dev, "no reset shared gpio provided, hardware reset unavailable");
-		aw87xxx->aw_dev.rst_shared_gpio = AW_NO_RESET_GPIO;
+		AW_DEV_LOGI(aw87xxx->dev, "voltage_min parse failed, user default[0x%02x]",
+				AW_BOOST_VOLTAGE_MIN);
+		vol_desc->vol_min = AW_BOOST_VOLTAGE_MIN;
 	} else {
-		aw87xxx->aw_dev.rst_shared_gpio = ret;
-		AW_DEV_LOGI(aw87xxx->dev, "reset shared gpio[%d] parse succeed", ret);
-		if (gpio_is_valid(aw87xxx->aw_dev.rst_shared_gpio)) {
-			ret = devm_gpio_request_one(aw87xxx->dev,
-					aw87xxx->aw_dev.rst_shared_gpio,
-					GPIOF_OUT_INIT_LOW, "aw87xxx_reset-shared");
-			if (ret < 0) {
-				AW_DEV_LOGE(aw87xxx->dev, "aw87xxx_reset-shared reset request failed");
-				return ret;
-			}
-			msleep(20);
-			gpio_set_value_cansleep(aw87xxx->aw_dev.rst_shared_gpio, AW_GPIO_HIGHT_LEVEL);
-		}
+		vol_desc->vol_min = voltage_min;
+		AW_DEV_LOGI(aw87xxx->dev, "parse aw_voltage_min=[0x%02x]",
+				vol_desc->vol_min);
 	}
+
+	aw87xxx_device_parse_port_id_dt(&aw87xxx->aw_dev);
+	aw87xxx_device_parse_topo_id_dt(&aw87xxx->aw_dev);
+
 	return 0;
 }
 
@@ -1289,45 +1813,45 @@ static int aw87xxx_i2c_probe(struct i2c_client *client,
 	struct aw87xxx *aw87xxx = NULL;
 	int ret = -1;
 
-	dev_info(&client->dev, "%s\n", __func__);
 	if (!i2c_check_functionality(client->adapter, I2C_FUNC_I2C)) {
 		AW_DEV_LOGE(&client->dev, "check_functionality failed");
-		return -ENODEV;
+		ret = -ENODEV;
+		goto exit_check_functionality_failed;
 	}
 
 	/* aw87xxx i2c_dev struct init */
 	aw87xxx = aw87xxx_malloc_init(client);
 	if (aw87xxx == NULL)
-		return -ENOMEM;
+		goto exit_malloc_init_failed;
 
 	i2c_set_clientdata(client, aw87xxx);
 
 	/* aw87xxx dev_node parse */
 	ret = aw87xxx_dtsi_parse(aw87xxx, dev_node);
 	if (ret < 0)
-		goto exit;
+		goto exit_dtsi_parse_failed;
 
 	/*hw power on PA*/
-	aw_dev_hw_pwr_ctrl(&aw87xxx->aw_dev, true);
+	aw87xxx_dev_hw_pwr_ctrl(&aw87xxx->aw_dev, true);
 
 	/* aw87xxx devices private attributes init */
-	ret = aw_dev_init(&aw87xxx->aw_dev);
+	ret = aw87xxx_dev_init(&aw87xxx->aw_dev);
 	if (ret < 0)
-		goto exit;
+		goto exit_device_init_failed;
 
 	ret = devm_snd_soc_register_component(aw87xxx->dev, &aw87xxx_component_driver,
 					      NULL, 0);
 	if (ret < 0) {
 		dev_err(aw87xxx->dev, "%s() register codec error %d\n",
 			__func__, ret);
-		goto exit;
+		goto exit_check_functionality_failed;
 	}
 
 	/*product register reset */
-	aw_dev_soft_reset(&aw87xxx->aw_dev);
+	aw87xxx_dev_soft_reset(&aw87xxx->aw_dev);
 
 	/*hw power off */
-	aw_dev_hw_pwr_ctrl(&aw87xxx->aw_dev, false);
+	aw87xxx_dev_hw_pwr_ctrl(&aw87xxx->aw_dev, false);
 
 	/* create debug attrbute nodes */
 	ret = sysfs_create_group(&aw87xxx->dev->kobj, &aw87xxx_attribute_group);
@@ -1338,7 +1862,13 @@ static int aw87xxx_i2c_probe(struct i2c_client *client,
 	aw87xxx_fw_load_init(aw87xxx);
 
 	/*monitor init*/
-	aw_monitor_init(aw87xxx->dev, &aw87xxx->monitor, dev_node);
+	aw87xxx_monitor_init(aw87xxx->dev, &aw87xxx->monitor, dev_node);
+
+	/* enable wake source */
+	device_init_wakeup(aw87xxx->dev, true);
+
+	if (aw87xxx->dev_index == 0)
+		aw87xxx_algo_auth_misc_init(&aw87xxx->aw_dev);
 
 	/*add device to total list */
 	mutex_lock(&g_aw87xxx_mutex_lock);
@@ -1346,19 +1876,34 @@ static int aw87xxx_i2c_probe(struct i2c_client *client,
 	list_add(&aw87xxx->list, &g_aw87xxx_list);
 	mutex_unlock(&g_aw87xxx_mutex_lock);
 
-	AW_DEV_LOGI(aw87xxx->dev, "succeed");
+	AW_DEV_LOGI(aw87xxx->dev, "succeed, dev_index=[%d], g_aw87xxx_dev_cnt= [%d]",
+			aw87xxx->dev_index, g_aw87xxx_dev_cnt);
 
 	return 0;
-exit:
+
+exit_device_init_failed:
+	aw87xxx_dev_hw_pwr_ctrl(&aw87xxx->aw_dev, false);
+exit_dtsi_parse_failed:
 	AW_DEV_LOGE(aw87xxx->dev, "pa init failed");
+	devm_kfree(&client->dev, aw87xxx);
+	aw87xxx = NULL;
+exit_malloc_init_failed:
+exit_check_functionality_failed:
 	return ret;
 }
 
+#ifdef AW_KERNEL_VER_OVER_6_1_0
 static void aw87xxx_i2c_remove(struct i2c_client *client)
+#else
+static int aw87xxx_i2c_remove(struct i2c_client *client)
+#endif
 {
 	struct aw87xxx *aw87xxx = i2c_get_clientdata(client);
 
-	aw_monitor_exit(&aw87xxx->monitor);
+	if (aw87xxx->dev_index == 0)
+		aw87xxx_algo_auth_misc_deinit(&aw87xxx->aw_dev);
+
+	aw87xxx_monitor_exit(&aw87xxx->monitor);
 
 	/*rm attr node*/
 	sysfs_remove_group(&aw87xxx->dev->kobj, &aw87xxx_attribute_group);
@@ -1369,6 +1914,14 @@ static void aw87xxx_i2c_remove(struct i2c_client *client)
 	g_aw87xxx_dev_cnt--;
 	list_del(&aw87xxx->list);
 	mutex_unlock(&g_aw87xxx_mutex_lock);
+
+	devm_kfree(&client->dev, aw87xxx);
+	aw87xxx = NULL;
+
+#ifdef AW_KERNEL_VER_OVER_6_1_0
+#else
+	return 0;
+#endif
 }
 
 static void aw87xxx_i2c_shutdown(struct i2c_client *client)
@@ -1392,11 +1945,44 @@ static const struct of_device_id extpa_of_match[] = {
 	{},
 };
 
+#ifdef CONFIG_PM
+static int aw87xxx_i2c_resume(struct device *dev)
+{
+	struct i2c_client *client = to_i2c_client(dev);
+	struct aw87xxx *aw87xxx = i2c_get_clientdata(client);
+
+	AW_DEV_LOGI(&client->dev, "enter");
+	aw87xxx->is_suspend = false;
+
+	return 0;
+}
+
+static int aw87xxx_i2c_suspend(struct device *dev)
+{
+	struct i2c_client *client = to_i2c_client(dev);
+	struct aw87xxx *aw87xxx = i2c_get_clientdata(client);
+
+	AW_DEV_LOGI(&client->dev, "enter");
+	aw87xxx->is_suspend = true;
+
+	return 0;
+
+}
+
+static const struct dev_pm_ops aw87xxx_dev_pm_ops = {
+	.suspend = aw87xxx_i2c_suspend,
+	.resume  = aw87xxx_i2c_resume,
+};
+#endif
+
 static struct i2c_driver aw87xxx_i2c_driver = {
 	.driver = {
 		.owner = THIS_MODULE,
 		.name = AW87XXX_I2C_NAME,
 		.of_match_table = extpa_of_match,
+#ifdef CONFIG_PM
+		.pm = &aw87xxx_dev_pm_ops,
+#endif
 		},
 	.probe = aw87xxx_i2c_probe,
 	.remove = aw87xxx_i2c_remove,

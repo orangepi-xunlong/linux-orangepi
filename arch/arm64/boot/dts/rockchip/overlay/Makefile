@@ -40,6 +40,7 @@ dtbo-$(CONFIG_ARCH_ROCKCHIP) += \
 	rk3588-uart4-m0.dtbo \
 	rk3588-uart4-m2.dtbo \
 	rk3588-uart6-m1.dtbo \
+	rk3588-uart6-m2.dtbo \
 	rk3588-uart7-m2.dtbo \
 	rk3588-uart8-m1.dtbo \
 	rk3588-can0-m0.dtbo \
@@ -76,6 +77,7 @@ dtbo-$(CONFIG_ARCH_ROCKCHIP) += \
 	rk3588-spi0-m2-cs1-spidev.dtbo \
 	rk3588-spi0-m2-cs0-cs1-spidev.dtbo \
 	rk3588-spi1-m1-cs0-spidev.dtbo \
+	rk3588-spi1-m2-cs0-spidev.dtbo \
 	rk3588-spi4-m0-cs1-spidev.dtbo \
 	rk3588-spi4-m1-cs0-spidev.dtbo \
 	rk3588-spi4-m1-cs1-spidev.dtbo \
@@ -95,7 +97,7 @@ dtbo-$(CONFIG_ARCH_ROCKCHIP) += \
 	rk3588-opicm5-tablet-cam2.dtbo \
 	rk3588-opicm5-tablet-cam3.dtbo \
 	rk3588-opicm5-tablet-lcd.dtbo \
-	rk3588-opicm5-tablet-disable-led.dtbo
+	rk3588-opicm5-tablet-disable-leds.dtbo
 
 scr-$(CONFIG_ARCH_ROCKCHIP) += \
 	rk3588-fixup.scr

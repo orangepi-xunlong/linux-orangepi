@@ -431,12 +431,13 @@ static irqreturn_t __sc89890_handle_irq(struct sc89890_device *sc89890)
 		return IRQ_NONE;
 
 	if (!new_state.online && sc89890->state.online) {	/* power removed */
+		regmap_write(sc89890->rmap, 3, 0x0e);
 		/* disable ADC */
 		ret = sc89890_field_write(sc89890, F_CONV_START, 0);
 		if (ret < 0)
 			goto error;
 	} else if (new_state.online && !sc89890->state.online) { /* power inserted */
-
+		regmap_write(sc89890->rmap, 3, 0x1e);
 		/* enable ADC, to have control of charge current/voltage */
 		ret = sc89890_field_write(sc89890, F_CONV_START, 1);
 		if (ret < 0)
@@ -680,11 +681,11 @@ static int sc89890_hw_init(struct sc89890_device *sc89890)
 		{F_VCLAMP, sc89890->init_data.vclamp},
 	};
 
-	ret = sc89890_chip_reset(sc89890);
-	if (ret < 0) {
-		dev_dbg(sc89890->dev, "Reset failed %d\n", ret);
-		return ret;
-	}
+	//ret = sc89890_chip_reset(sc89890);
+	//if (ret < 0) {
+	//	dev_dbg(sc89890->dev, "Reset failed %d\n", ret);
+	//	return ret;
+	//}
 
 	/* disable watchdog */
 	ret = sc89890_field_write(sc89890, F_WD, 0);
@@ -750,7 +751,7 @@ static const enum power_supply_property sc89890_power_supply_props[] = {
 };
 
 static char *sc89890_charger_supplied_to[] = {
-	"usb",
+	"charger",
 };
 
 static const struct power_supply_desc sc89890_power_supply_desc = {
@@ -795,7 +796,7 @@ static int sc89890_get_chip_version(struct sc89890_device *sc89890)
 		return -ENODEV;
 	}
 
-	DBG("charge IC: SC89890\n");
+	printk("charge IC: SC89890\n");
 
 	return 0;
 }
@@ -985,8 +986,8 @@ static int sc89890_fw_read_u32_props(struct sc89890_device *sc89890)
 		{"sc,termination-current", false, TBL_ITERM, &init->iterm},
 		{"sc,precharge-current", false, TBL_ITERM, &init->iprechg},
 		{"sc,minimum-sys-voltage", false, TBL_SYSVMIN, &init->sysvmin},
-		{"sc,boost-voltage", false, TBL_BOOSTV, &init->boostv},
-		{"sc,boost-max-current", false, TBL_BOOSTI, &init->boosti},
+		//{"sc,boost-voltage", false, TBL_BOOSTV, &init->boostv},
+		//{"sc,boost-max-current", false, TBL_BOOSTI, &init->boosti},
 
 		/* optional properties */
 		{"sc,thermal-regulation-threshold", true, TBL_TREG, &init->treg},
@@ -1001,8 +1002,8 @@ static int sc89890_fw_read_u32_props(struct sc89890_device *sc89890)
 
 	for (i = 0; i < ARRAY_SIZE(props); i++) {
 		ret = device_property_read_u32(sc89890->dev,
-					       props[i].name,
-					       &property);
+						props[i].name,
+						&property);
 		if (ret < 0) {
 			if (props[i].optional)
 				continue;
@@ -1099,7 +1100,6 @@ static int sc89890_probe(struct i2c_client *client,
 		return ret;
 	}
 
-
 	if (client->irq < 0) {
 		dev_err(dev, "No irq resource found.\n");
 		return client->irq;
@@ -1114,6 +1114,8 @@ static int sc89890_probe(struct i2c_client *client,
 
 	sc89890_register_otg_vbus_regulator(sc89890);
 	sc89890_create_device_node(sc89890->dev);
+
+	regmap_write(sc89890->rmap, 3, 0x0e);
 
 	return 0;
 
