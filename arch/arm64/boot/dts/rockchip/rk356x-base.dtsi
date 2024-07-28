@@ -380,6 +380,19 @@
 		reg = <0x0 0xfdca8000 0x0 0x8000>;
 	};
 
+	sram@fdcc0000 {
+		compatible = "mmio-sram";
+		reg = <0x0 0xfdcc0000 0x0 0xb000>;
+		#address-cells = <1>;
+		#size-cells = <1>;
+		ranges = <0x0 0x0 0xfdcc0000 0xb000>;
+
+		vdec_sram: rkvdec-sram@0 {
+			reg = <0x0 0xb000>;
+			pool;
+		};
+	};
+
 	pmucru: clock-controller@fdd00000 {
 		compatible = "rockchip,rk3568-pmucru";
 		reg = <0x0 0xfdd00000 0x0 0x1000>;
@@ -565,7 +578,7 @@
 	};
 
 	vpu: video-codec@fdea0400 {
-		compatible = "rockchip,rk3568-vpu";
+		compatible = "rockchip,rk3328-vpu";
 		reg = <0x0 0xfdea0000 0x0 0x800>;
 		interrupts = <GIC_SPI 139 IRQ_TYPE_LEVEL_HIGH>;
 		interrupt-names = "vdpu";
@@ -614,6 +627,26 @@
 		clock-names = "aclk", "iface";
 		power-domains = <&power RK3568_PD_RGA>;
 		#iommu-cells = <0>;
+	};
+
+	vdec: video-codec@fdf80200 {
+		compatible = "rockchip,rk3588-vdec";
+		reg = <0x0 0xfdf80100 0x0 0x100>, <0x0 0xfdf80200 0x0 0x500>, <0x0 0xfdf80700 0x0 0x100>;
+		reg-names = "link", "function", "cache";
+		interrupts = <GIC_SPI 91 IRQ_TYPE_LEVEL_HIGH>;
+		clocks = <&cru ACLK_RKVDEC>, <&cru HCLK_RKVDEC>, <&cru CLK_RKVDEC_CA>,
+			 <&cru CLK_RKVDEC_CORE>, <&cru CLK_RKVDEC_HEVC_CA>;
+		clock-names = "axi", "ahb", "cabac", "core", "hevc_cabac";
+		assigned-clocks = <&cru ACLK_RKVDEC>, <&cru CLK_RKVDEC_CORE>,
+				  <&cru CLK_RKVDEC_CA>, <&cru CLK_RKVDEC_HEVC_CA>;
+		assigned-clock-rates = <297000000>, <297000000>,
+				       <297000000>, <297000000>;
+		resets = <&cru SRST_A_RKVDEC>, <&cru SRST_H_RKVDEC>, <&cru SRST_RKVDEC_CA>,
+			 <&cru SRST_RKVDEC_CORE>, <&cru SRST_RKVDEC_HEVC_CA>;
+		reset-names = "rst_axi", "rst_ahb", "rst_cabac",
+			      "rst_core", "rst_hevc_cabac";
+		power-domains = <&power RK3568_PD_RKVDEC>;
+		sram = <&vdec_sram>;
 	};
 
 	sdmmc2: mmc@fe000000 {
