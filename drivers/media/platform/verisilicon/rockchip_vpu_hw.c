@@ -724,10 +724,9 @@ const struct hantro_variant rk3288_vpu_variant = {
 
 const struct hantro_variant rk3328_vpu_variant = {
 	.dec_offset = 0x400,
-	.dec_fmts = rockchip_vdpu2_dec_fmts,
-	.num_dec_fmts = ARRAY_SIZE(rockchip_vdpu2_dec_fmts),
-	.codec = HANTRO_MPEG2_DECODER | HANTRO_VP8_DECODER |
-		 HANTRO_H264_DECODER,
+	.dec_fmts = rk3399_vpu_dec_fmts,
+	.num_dec_fmts = ARRAY_SIZE(rk3399_vpu_dec_fmts),
+	.codec = HANTRO_MPEG2_DECODER | HANTRO_VP8_DECODER,
 	.codec_ops = rk3399_vpu_codec_ops,
 	.irqs = rockchip_vdpu2_irqs,
 	.num_irqs = ARRAY_SIZE(rockchip_vdpu2_irqs),
@@ -766,20 +765,6 @@ const struct hantro_variant rk3568_vepu_variant = {
 	.codec_ops = rk3568_vepu_codec_ops,
 	.irqs = rk3568_vepu_irqs,
 	.num_irqs = ARRAY_SIZE(rk3568_vepu_irqs),
-	.init = rockchip_vpu_hw_init,
-	.clk_names = rockchip_vpu_clk_names,
-	.num_clocks = ARRAY_SIZE(rockchip_vpu_clk_names)
-};
-
-const struct hantro_variant rk3568_vpu_variant = {
-	.dec_offset = 0x400,
-	.dec_fmts = rockchip_vdpu2_dec_fmts,
-	.num_dec_fmts = ARRAY_SIZE(rockchip_vdpu2_dec_fmts),
-	.codec = HANTRO_MPEG2_DECODER |
-		 HANTRO_VP8_DECODER | HANTRO_H264_DECODER,
-	.codec_ops = rk3399_vpu_codec_ops,
-	.irqs = rockchip_vdpu2_irqs,
-	.num_irqs = ARRAY_SIZE(rockchip_vdpu2_irqs),
 	.init = rockchip_vpu_hw_init,
 	.clk_names = rockchip_vpu_clk_names,
 	.num_clocks = ARRAY_SIZE(rockchip_vpu_clk_names)

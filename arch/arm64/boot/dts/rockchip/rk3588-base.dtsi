@@ -1242,7 +1242,7 @@
 	};
 
 	vpu121: video-codec@fdb50000 {
-		compatible = "rockchip,rk3588-vpu121", "rockchip,rk3568-vpu";
+		compatible = "rockchip,rk3588-vpu121", "rockchip,rk3328-vpu";
 		reg = <0x0 0xfdb50000 0x0 0x800>;
 		interrupts = <GIC_SPI 119 IRQ_TYPE_LEVEL_HIGH 0>;
 		interrupt-names = "vdpu";
