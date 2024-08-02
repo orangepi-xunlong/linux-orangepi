@@ -100,7 +100,7 @@ dtbo-$(CONFIG_ARCH_ROCKCHIP) += \
 	rk3588-opicm5-tablet-cam2.dtbo \
 	rk3588-opicm5-tablet-cam3.dtbo \
 	rk3588-opicm5-tablet-lcd.dtbo \
-	rk3588-opicm5-tablet-disable-led.dtbo \
+	rk3588-opicm5-tablet-disable-leds.dtbo \
 	rk356x-edp.dtbo \
 	rk356x-i2c2-m1.dtbo \
 	rk356x-i2c3-m0.dtbo \
