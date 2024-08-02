@@ -664,32 +664,25 @@
 	pinctrl-names = "default";
 	pinctrl-0 = <&i2c6m3_xfer>;
 
-	sy6970: sy6970_charge@6a {
-		compatible = "ti,bq25895", "ti,bq25890";
+	sc89890: sc89890@6a {
+		compatible = "sc,sc89890";
 		reg = <0x6a>;
+		status = "okay";
 		pinctrl-names = "default";
 		pinctrl-0 = <&charger_ok>;
+
 		interrupt-parent = <&gpio1>;
 		interrupts = <RK_PC0 IRQ_TYPE_EDGE_FALLING>;
-		otg-mode-en-gpios = <&gpio1 RK_PC1 GPIO_ACTIVE_HIGH>;
-		//ti,usb-charger-detection = <&usbc0>;
+		//otg-mode-en-gpios = <&gpio1 RK_PC1 GPIO_ACTIVE_HIGH>;
 
-		ti,battery-regulation-voltage = <4400000>; /* 4.4V */
-		ti,charge-current = <1600000>; /* 1.6A */
-		ti,termination-current = <66000>;  /* 66mA */
-		ti,precharge-current = <130000>; /* 130mA */
-		ti,minimum-sys-voltage = <3000000>; /* 3V */
-		ti,boost-voltage = <5000000>; /* 5V */
-		ti,boost-max-current = <1600000>; /* 1600mA */
-		//regulators {
-		//      vbus5v0_typec: vbus5v0-typec {
-		//              regulator-compatible = "otg-vbus";
-		//              regulator-name = "vbus5v0_typec";
-		//      };
-		//};
-
-		//status = "okay";
-		status = "disabled";
+		sc,battery-regulation-voltage = <4350000>; /* 4.4V */
+		sc,charge-current = <4000000>; /* 4.0A */
+		sc,termination-current = <100000>;  /* 100mA */
+		sc,precharge-current = <500000>; /* 130mA */
+		sc,minimum-sys-voltage = <3400000>; /* 3V */
+		sc,thermal-regulation-threshold = <4000000>;
+		sc,ibatcomp-clamp-microvolt = <100000>;
+		sc,ibatcomp-micro-ohms = <20>;
 	};
 
 	usbc0: fusb302@22 {
@@ -757,26 +750,6 @@
 			};
 		};
 	};
-
-	sgm41542: sgm41542@3b {
-		compatible = "sgm,sgm41542";
-		reg = <0x3b>;
-		status = "okay";
-
-		pinctrl-names = "default";
-		pinctrl-0 = <&charger_ok>;
-		interrupt-parent = <&gpio1>;
-		interrupts = <RK_PC0 IRQ_TYPE_EDGE_FALLING>;
-
-		input-voltage-limit-microvolt = <4500000>;
-		input-current-limit-microamp = <3000000>;
-		regulators {
-			vbus5v0_typecc: vbus5v0-typec {
-				regulator-compatible = "otg-vbus";
-				regulator-name = "vbus5v0_typecc";
-			};
-		};
-	};
 };
 
 &i2c7 {
@@ -823,12 +796,6 @@
 };
 
 &pinctrl {
-	charger {
-		charger_ok: charger_ok {
-			rockchip,pins = <1 RK_PC0 RK_FUNC_GPIO &pcfg_pull_up>;
-		};
-	};
-
 	usb-typec {
 		usbc0_int: usbc0-int {
 			rockchip,pins = <4 RK_PA3 RK_FUNC_GPIO &pcfg_pull_up>;
