@@ -55,6 +55,7 @@ dtbo-$(CONFIG_ARCH_ROCKCHIP) += \
 	rk3588-opi5plus-lcd.dtbo \
 	rk3588-opi5pro-lcd.dtbo \
 	rk3588-opi5max-lcd.dtbo \
+	rk3588-opi5ultra-lcd.dtbo \
 	rk3588-ov13850-c1.dtbo \
 	rk3588-ov13850-c2.dtbo \
 	rk3588-ov13850-c3.dtbo \
@@ -69,6 +70,9 @@ dtbo-$(CONFIG_ARCH_ROCKCHIP) += \
 	rk3588-opi5max-cam0.dtbo \
 	rk3588-opi5max-cam1.dtbo \
 	rk3588-opi5max-cam2.dtbo \
+	rk3588-opi5ultra-cam0.dtbo \
+	rk3588-opi5ultra-cam1.dtbo \
+	rk3588-opi5ultra-cam2.dtbo \
 	rk3588-dmc.dtbo \
 	rk3588-ssd-sata0.dtbo \
 	rk3588-ssd-sata2.dtbo \
