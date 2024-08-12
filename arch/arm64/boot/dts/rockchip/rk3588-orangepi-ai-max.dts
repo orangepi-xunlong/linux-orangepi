@@ -185,6 +185,36 @@
 	};
 };
 
+&i2c1 {
+	status = "okay";
+	pinctrl-names = "default";
+	pinctrl-0 = <&i2c1m2_xfer>;
+};
+
+&i2c3 {
+	status = "okay";
+	pinctrl-names = "default";
+	pinctrl-0 = <&i2c3m0_xfer>;
+
+	bq25713: bq25713@6b {
+		status = "okay";
+		compatible = "ti,bq25713-aimax";
+		reg = <0x6b>;
+
+		ti,charge-current = <2000000>;
+		ti,max-input-voltage = <21000000>;
+		ti,max-input-current = <3000000>;
+		ti,max-charge-voltage = <12600000>;
+		ti,input-current = <500000>;
+		ti,input-current-sdp = <500000>;
+		ti,input-current-dcp = <2000000>;
+		ti,input-current-cdp = <2000000>;
+		ti,minimum-sys-voltage = <7400000>;
+		ti,otg-voltage = <5000000>;
+		ti,otg-current = <1500000>;
+	};
+};
+
 /*** 40 pins ***/
 &i2c2 {
 	status = "disabled";

@@ -87,6 +87,7 @@ obj-$(CONFIG_CHARGER_BQ24257)	+= bq24257_charger.o
 obj-$(CONFIG_CHARGER_BQ24735)	+= bq24735-charger.o
 obj-$(CONFIG_CHARGER_BQ2515X)	+= bq2515x_charger.o
 obj-$(CONFIG_CHARGER_BQ25700)	+= bq25700_charger.o
+obj-$(CONFIG_CHARGER_BQ25713)	+= bq25713_charger.o
 obj-$(CONFIG_CHARGER_BQ25890)	+= bq25890_charger.o
 obj-$(CONFIG_CHARGER_BQ25980)	+= bq25980_charger.o
 obj-$(CONFIG_CHARGER_SMB347)	+= smb347-charger.o
