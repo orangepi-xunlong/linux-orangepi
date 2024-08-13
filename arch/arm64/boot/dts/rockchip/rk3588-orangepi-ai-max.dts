@@ -6,7 +6,7 @@
 
 /dts-v1/;
 
-#include "rk3588-orangepi-5-plus.dtsi"
+#include "rk3588-orangepi-ai-max.dtsi"
 #include "rk3588-linux.dtsi"
 #include "rk3588-orangepi-5-plus-lcd.dtsi"
 #include "rk3588-orangepi-5-plus-camera1.dtsi"
@@ -48,6 +48,19 @@
 			60000   4
 			65000   5
 		>;
+
+		status = "okay";
+	};
+
+	over-temp-shutdown@0 {
+		compatible = "orangepi,over-temp-shutdown";
+
+		pinctrl-names = "default";
+		pinctrl-0 = <&over_temp_gpio>;
+
+		input-gpio = <&gpio3 RK_PB4 GPIO_ACTIVE_HIGH>;
+		output1-gpio = <&gpio1 RK_PA0 GPIO_ACTIVE_HIGH>;
+		output2-gpio = <&gpio1 RK_PA1 GPIO_ACTIVE_HIGH>;
 
 		status = "okay";
 	};
@@ -182,6 +195,12 @@
 		        rockchip,pins = <3 RK_PA6 RK_FUNC_GPIO &pcfg_pull_up>,
 					<3 RK_PB1 RK_FUNC_GPIO &pcfg_pull_up>;
 		};
+	};
+
+	over_temp_gpio {
+	        over_temp_gpio: over-temp-gpio {
+	                rockchip,pins = <3 RK_PB4 RK_FUNC_GPIO &pcfg_pull_down>;
+	        };
 	};
 };
 
