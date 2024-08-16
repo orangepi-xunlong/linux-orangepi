@@ -13,6 +13,7 @@
 #include <linux/slab.h>
 #include <linux/tee_drv.h>
 #include <linux/uaccess.h>
+#include <linux/dma-mapping.h>
 #include <crypto/hash.h>
 #include <crypto/sha1.h>
 #include "tee_private.h"
@@ -42,6 +43,7 @@ static DEFINE_SPINLOCK(driver_lock);
 
 static struct class *tee_class;
 static dev_t tee_devt;
+static uint64_t tee_dma_mask = DMA_BIT_MASK(32);
 
 struct tee_context *teedev_open(struct tee_device *teedev)
 {
@@ -344,6 +346,42 @@ tee_ioctl_shm_register(struct tee_context *ctx,
 		ret = -EFAULT;
 	else
 		ret = tee_shm_get_fd(shm);
+	/*
+	 * When user space closes the file descriptor the shared memory
+	 * should be freed or if tee_shm_get_fd() failed then it will
+	 * be freed immediately.
+	 */
+	tee_shm_put(shm);
+	return ret;
+}
+
+static int tee_ioctl_shm_register_fd(struct tee_context *ctx,
+				     struct tee_ioctl_shm_register_fd_data __user *udata)
+{
+	struct tee_ioctl_shm_register_fd_data data;
+	struct tee_shm *shm;
+	long ret;
+
+	if (copy_from_user(&data, udata, sizeof(data)))
+		return -EFAULT;
+
+	/* Currently no input flags are supported */
+	if (data.flags)
+		return -EINVAL;
+
+	shm = tee_shm_register_fd(ctx, data.fd);
+	if (IS_ERR(shm))
+		return -EINVAL;
+
+	data.id = shm->id;
+	data.flags = shm->flags;
+	data.size = shm->size;
+
+	if (copy_to_user(udata, &data, sizeof(data)))
+		ret = -EFAULT;
+	else
+		ret = tee_shm_get_fd(shm);
+
 	/*
 	 * When user space closes the file descriptor the shared memory
 	 * should be freed or if tee_shm_get_fd() failed then it will
@@ -827,6 +865,8 @@ static long tee_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 		return tee_ioctl_shm_alloc(ctx, uarg);
 	case TEE_IOC_SHM_REGISTER:
 		return tee_ioctl_shm_register(ctx, uarg);
+	case TEE_IOC_SHM_REGISTER_FD:
+		return tee_ioctl_shm_register_fd(ctx, uarg);
 	case TEE_IOC_OPEN_SESSION:
 		return tee_ioctl_open_session(ctx, uarg);
 	case TEE_IOC_INVOKE:
@@ -924,6 +964,9 @@ struct tee_device *tee_device_alloc(const struct tee_desc *teedesc,
 	teedev->dev.parent = dev;
 
 	teedev->dev.devt = MKDEV(MAJOR(tee_devt), teedev->id);
+
+	teedev->dev.dma_mask = &tee_dma_mask;
+	teedev->dev.coherent_dma_mask = tee_dma_mask;
 
 	rc = dev_set_name(&teedev->dev, "%s", teedev->name);
 	if (rc) {
