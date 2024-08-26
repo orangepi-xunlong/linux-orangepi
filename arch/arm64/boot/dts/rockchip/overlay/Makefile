@@ -94,6 +94,7 @@ dtbo-$(CONFIG_ARCH_ROCKCHIP) += \
 	rk3588-opi5plus-disable-leds.dtbo \
 	rk3588-opi5pro-disable-leds.dtbo \
 	rk3588-opi5max-disable-leds.dtbo \
+	rk3588-opi5ultra-disable-leds.dtbo \
 	rk3588-opi5pro-sfc.dtbo \
 	rk3588-opicm5-blink-gpio.dtbo \
 	rk3588-opicm5-cam1.dtbo \
