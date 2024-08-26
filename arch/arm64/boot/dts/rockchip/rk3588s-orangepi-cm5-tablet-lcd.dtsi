@@ -1,0 +1,73 @@
+&pinctrl {
+	lcd {
+		lcd_rst_gpio: lcd-rst-gpio {
+			rockchip,pins = <3 RK_PA7 RK_FUNC_GPIO &pcfg_pull_none>,
+					<3 RK_PB1 RK_FUNC_GPIO &pcfg_pull_none>;
+		};
+	};
+
+};
+
+&dsi1 {
+	status = "disabled";
+	pinctrl-names = "default";
+	pinctrl-0 = <&mipi_te1>;
+
+	dsi1_panel: panel@0 {
+		status = "disabled";
+		compatible = "innolux,afj101-ba2131";
+		reg = <0>;
+		backlight = <&backlight>;
+		reset-gpios = <&gpio3 RK_PA7 GPIO_ACTIVE_LOW>;
+		enable-gpios = <&gpio3 RK_PB1 GPIO_ACTIVE_HIGH>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&lcd_rst_gpio>;
+
+		ports {
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			port@0 {
+				reg = <0>;
+				panel_in_dsi1: endpoint {
+					remote-endpoint = <&dsi1_out_panel>;
+				};
+			};
+		};
+	};
+
+	ports {
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		port@1 {
+			reg = <1>;
+			dsi1_out_panel: endpoint {
+				remote-endpoint = <&panel_in_dsi1>;
+			};
+		};
+	};
+};
+
+&i2c1 {
+	status = "okay";
+
+	gt9xx_0: touchscreen@14 {
+		compatible = "goodix,gt9271";
+		reg = <0x14>;
+		interrupt-parent = <&gpio0>;
+		interrupts = <RK_PC4 IRQ_TYPE_LEVEL_LOW>;
+		irq-gpios = <&gpio0 RK_PC4 IRQ_TYPE_LEVEL_LOW>;
+		reset-gpios = <&gpio0 RK_PC7 GPIO_ACTIVE_HIGH>;
+		touchscreen-inverted-x;
+		//touchscreen-inverted-y;
+		touchscreen-swapped-x-y;
+		touchscreen-size-x = <1280>;
+		touchscreen-size-y = <800>;
+		status = "okay";
+	};
+};
+
+&dsi1_in_vp2 {
+	status = "disabled";
+};

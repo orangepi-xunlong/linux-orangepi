@@ -199,6 +199,16 @@
 			#clock-cells = <0>;
 		};
 
+		mclkout_i2s2: mclkout-i2s2@fd58c318 {
+			compatible = "rockchip,clk-out";
+			reg = <0 0xfd58c318 0 0x4>;
+			clocks = <&cru I2S2_2CH_MCLKOUT>;
+			#clock-cells = <0>;
+			clock-output-names = "i2s2_mclkout_to_io";
+			rockchip,bit-shift = <2>;
+			rockchip,bit-set-to-disable;
+		};
+		
 		hclk_rkvdec1_pre: hclk_rkvdec1_pre@fd7c08a4 {
 			compatible = "rockchip,rk3588-clock-gate-link";
 			reg = <0 0xfd7c08a4 0 0x10>;
