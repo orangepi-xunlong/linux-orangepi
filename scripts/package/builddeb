@@ -64,6 +64,7 @@ EOT
 cat >> $pdir/DEBIAN/postinst << EOT
 cd /usr/src/linux-headers-$version
 rm -rf scripts/kconfig/conf scripts/basic/fixdep scripts/mod/mk_elfconfig
+find -name *.o |xargs rm -rf
 echo "Compiling headers - please wait ..."
 find -type f -exec touch {} +
 yes "" | make oldconfig >/dev/null

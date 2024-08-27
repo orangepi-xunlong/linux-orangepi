@@ -50,6 +50,7 @@ dtbo-$(CONFIG_ARCH_ROCKCHIP) += \
 	rk3588-lcd1.dtbo \
 	rk3588-lcd2.dtbo \
 	rk3588-opi5plus-lcd.dtbo \
+	rk3588-opiaimax-lcd.dtbo \
 	rk3588-opi5pro-lcd.dtbo \
 	rk3588-opi5max-lcd.dtbo \
 	rk3588-opi5ultra-lcd.dtbo \
@@ -64,6 +65,8 @@ dtbo-$(CONFIG_ARCH_ROCKCHIP) += \
 	rk3588-opi5plus-gc5035.dtbo \
 	rk3588-opi5plus-ov13850.dtbo \
 	rk3588-opi5plus-ov13855.dtbo \
+	rk3588-opiaimax-ov13850.dtbo \
+	rk3588-opiaimax-ov13855.dtbo \
 	rk3588-opi5max-cam0.dtbo \
 	rk3588-opi5max-cam1.dtbo \
 	rk3588-opi5max-cam2.dtbo \
@@ -92,6 +95,7 @@ dtbo-$(CONFIG_ARCH_ROCKCHIP) += \
 	rk3588-opi5pro-disable-leds.dtbo \
 	rk3588-opi5max-disable-leds.dtbo \
 	rk3588-opi5ultra-disable-leds.dtbo \
+	rk3588-opiaimax-disable-leds.dtbo \
 	rk3588-opi5pro-sfc.dtbo \
 	rk3588-opicm5-blink-gpio.dtbo \
 	rk3588-opicm5-cam1.dtbo \

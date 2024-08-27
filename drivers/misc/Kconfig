@@ -513,6 +513,14 @@ config VCPU_STALL_DETECTOR
 
 	  If you do not intend to run this kernel as a guest, say N.
 
+config OVER_TEMP_SHUTDOWN
+        tristate "Orange Pi Ai MAX over temp shutdown"
+        depends on (OF && GPIOLIB)
+        help
+          If you are using Opiaimax, please enable this configuration. It will
+          turn off the power to the two 310B units when the temperature
+          reaches 105 degrees.
+
 source "drivers/misc/c2port/Kconfig"
 source "drivers/misc/eeprom/Kconfig"
 source "drivers/misc/cb710/Kconfig"
