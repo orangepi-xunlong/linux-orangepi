@@ -370,7 +370,7 @@
 /*** 40 pins ***/
 
 &hdmirx_ctrler {
-	status = "disabled";
+	status = "okay";
 };
 
 &pcie30phy {
