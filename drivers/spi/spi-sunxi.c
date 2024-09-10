@@ -1488,7 +1488,7 @@ static void sunxi_spi_work(struct work_struct *work)
 			if (t->delay_usecs)
 				udelay(t->delay_usecs);
 			/* if zero ,keep active,otherwise deactived. */
-			if (cs_change)
+			if (!cs_change)
 				sspi->cs_control(spi, 0);
 		}
 
