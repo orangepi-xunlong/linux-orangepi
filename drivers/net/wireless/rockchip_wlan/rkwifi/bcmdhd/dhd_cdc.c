@@ -1,7 +1,26 @@
 /*
  * DHD Protocol Module for CDC and BDC.
  *
- * Copyright (C) 2022, Broadcom.
+ * Copyright (C) 2024 Synaptics Incorporated. All rights reserved.
+ *
+ * This software is licensed to you under the terms of the
+ * GNU General Public License version 2 (the "GPL") with Broadcom special exception.
+ *
+ * INFORMATION CONTAINED IN THIS DOCUMENT IS PROVIDED "AS-IS," AND SYNAPTICS
+ * EXPRESSLY DISCLAIMS ALL EXPRESS AND IMPLIED WARRANTIES, INCLUDING ANY
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE,
+ * AND ANY WARRANTIES OF NON-INFRINGEMENT OF ANY INTELLECTUAL PROPERTY RIGHTS.
+ * IN NO EVENT SHALL SYNAPTICS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+ * SPECIAL, PUNITIVE, OR CONSEQUENTIAL DAMAGES ARISING OUT OF OR IN CONNECTION
+ * WITH THE USE OF THE INFORMATION CONTAINED IN THIS DOCUMENT, HOWEVER CAUSED
+ * AND BASED ON ANY THEORY OF LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+ * NEGLIGENCE OR OTHER TORTIOUS ACTION, AND EVEN IF SYNAPTICS WAS ADVISED OF
+ * THE POSSIBILITY OF SUCH DAMAGE. IF A TRIBUNAL OF COMPETENT JURISDICTION
+ * DOES NOT PERMIT THE DISCLAIMER OF DIRECT DAMAGES OR ANY OTHER DAMAGES,
+ * SYNAPTICS' TOTAL CUMULATIVE LIABILITY TO ANY PARTY SHALL NOT
+ * EXCEED ONE HUNDRED U.S. DOLLARS
+ *
+ * Copyright (C) 2024, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -50,6 +69,10 @@
 #include <wlfc_proto.h>
 #include <dhd_wlfc.h>
 #endif
+
+#ifdef DHD_HWTSTAMP
+#include <dhd_linux_priv.h>
+#endif /* DHD_HWTSTAMP */
 #ifdef BCMDBUS
 #include <dhd_config.h>
 #endif /* BCMDBUS */
@@ -521,6 +544,7 @@ dhd_prot_hdrpull(dhd_pub_t *dhd, int *ifidx, void *pktbuf, uchar *reorder_buf_in
 	struct bdc_header *h;
 #endif
 	uint8 data_offset = 0;
+	uint32 bdc_hdr_len = BDC_HEADER_LEN;
 
 	DHD_TRACE(("%s: Enter\n", __FUNCTION__));
 
@@ -536,11 +560,36 @@ dhd_prot_hdrpull(dhd_pub_t *dhd, int *ifidx, void *pktbuf, uchar *reorder_buf_in
 	}
 
 	h = (struct bdc_header *)PKTDATA(dhd->osh, pktbuf);
+#ifdef DHD_HWTSTAMP
+	if (h->flags2 & BDC_FLAG2_TSF_FLAG) {
+		struct bdc_header_tsf *h_tsf = (struct bdc_header_tsf *)PKTDATA(dhd->osh, pktbuf);
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 30))
+		if (dhd->info->stmpconf.rx_filter) {
+			ktime_t tsf;
+			struct skb_shared_hwtstamps *tst;
+			tst = skb_hwtstamps(((struct sk_buff*)(pktbuf)));
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 10, 0))
+			tsf = (s64) h_tsf->tsf_h;
+			tsf = tsf << 32 | h_tsf->tsf_l;
+			/* Convert micro sec tsf to nano sec kernel hw timestamp */
+			tst->hwtstamp = tsf * 1000;
+#else
+			tsf.tv64 = (s64) h_tsf->tsf_h;
+			tsf.tv64 = tsf.tv64 << 32 | h_tsf->tsf_l;
+			/* Convert micro sec tsf to nano sec kernel hw timestamp */
+			tst->hwtstamp.tv64 = tsf.tv64 * 1000;
+#endif /* (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 10, 0)) */
+		}
+#endif /* (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 30)) */
+		h_tsf->dataOffset = h_tsf->dataOffset - 2;
+		bdc_hdr_len = bdc_hdr_len + 8;
+	}
+#endif /* DHD_HWTSTAMP */
 	if (!ifidx) {
 		/* for tx packet, skip the analysis */
 		data_offset = h->dataOffset;
-		PKTPULL(dhd->osh, pktbuf, BDC_HEADER_LEN);
+		PKTPULL(dhd->osh, pktbuf, bdc_hdr_len);
 		goto exit;
 	}
 
@@ -563,7 +612,7 @@ dhd_prot_hdrpull(dhd_pub_t *dhd, int *ifidx, void *pktbuf, uchar *reorder_buf_in
 
 	PKTSETPRIO(pktbuf, (h->priority & BDC_PRIORITY_MASK));
 	data_offset = h->dataOffset;
-	PKTPULL(dhd->osh, pktbuf, BDC_HEADER_LEN);
+	PKTPULL(dhd->osh, pktbuf, bdc_hdr_len);
 #endif /* BDC */
 
 #ifdef PROP_TXSTATUS

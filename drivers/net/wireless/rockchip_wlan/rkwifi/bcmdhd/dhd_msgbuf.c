@@ -3,7 +3,26 @@
  * Provides type definitions and function prototypes used to link the
  * DHD OS, bus, and protocol modules.
  *
- * Copyright (C) 2022, Broadcom.
+ * Copyright (C) 2024 Synaptics Incorporated. All rights reserved.
+ *
+ * This software is licensed to you under the terms of the
+ * GNU General Public License version 2 (the "GPL") with Broadcom special exception.
+ *
+ * INFORMATION CONTAINED IN THIS DOCUMENT IS PROVIDED "AS-IS," AND SYNAPTICS
+ * EXPRESSLY DISCLAIMS ALL EXPRESS AND IMPLIED WARRANTIES, INCLUDING ANY
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE,
+ * AND ANY WARRANTIES OF NON-INFRINGEMENT OF ANY INTELLECTUAL PROPERTY RIGHTS.
+ * IN NO EVENT SHALL SYNAPTICS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+ * SPECIAL, PUNITIVE, OR CONSEQUENTIAL DAMAGES ARISING OUT OF OR IN CONNECTION
+ * WITH THE USE OF THE INFORMATION CONTAINED IN THIS DOCUMENT, HOWEVER CAUSED
+ * AND BASED ON ANY THEORY OF LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+ * NEGLIGENCE OR OTHER TORTIOUS ACTION, AND EVEN IF SYNAPTICS WAS ADVISED OF
+ * THE POSSIBILITY OF SUCH DAMAGE. IF A TRIBUNAL OF COMPETENT JURISDICTION
+ * DOES NOT PERMIT THE DISCLAIMER OF DIRECT DAMAGES OR ANY OTHER DAMAGES,
+ * SYNAPTICS' TOTAL CUMULATIVE LIABILITY TO ANY PARTY SHALL NOT
+ * EXCEED ONE HUNDRED U.S. DOLLARS
+ *
+ * Copyright (C) 2024, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -2825,6 +2844,10 @@ dhd_pktid_map_reset_ioctl(dhd_pub_t *dhd, dhd_pktid_map_handle_t *handle)
 	uint32 map_items;
 	unsigned long flags;
 
+	if (handle == NULL) {
+		return;
+	}
+
 	map = (dhd_pktid_map_t *)handle;
 	DHD_PKTID_LOCK(map->pktid_lock, flags);
 
@@ -3318,6 +3341,10 @@ dhd_pktid_map_reset(dhd_pub_t *dhd, pktlists_t *handle)
 {
 	osl_t *osh = dhd->osh;
 
+	if (handle == NULL) {
+		return;
+	}
+
 	if (handle->ctrl_pkt_list) {
 		PKTLIST_FINI(handle->ctrl_pkt_list);
 		MFREE(osh, handle->ctrl_pkt_list, sizeof(PKT_LIST));
@@ -3639,7 +3666,7 @@ dhd_prot_attach(dhd_pub_t *dhd)
 		goto fail;
 
 	prot->pktid_tx_map = DHD_NATIVE_TO_PKTID_INIT(dhd, MAX_PKTID_TX);
-	if (prot->pktid_rx_map == NULL)
+	if (prot->pktid_tx_map == NULL)
 		goto fail;
 
 #ifdef IOCTLRESP_USE_CONSTMEM
@@ -5467,11 +5494,13 @@ BCMFASTPATH(dhd_prot_rxbuf_post)(dhd_pub_t *dhd, uint16 count, bool use_rsv_pkti
 	pktlen = (uint32 *)((uint8 *)pktbuf_pa + sizeof(dmaaddr_t) * prot->rx_buf_burst);
 
 	for (i = 0; i < count; i++) {
+		if (
+#if defined(DHD_LB_RXP)
 		/* First try to dequeue from emergency queue which will be filled
 		 * during rx flow control.
 		*/
-		p = dhd_rx_emerge_dequeue(dhd);
-		if ((p == NULL) &&
+		((p = dhd_rx_emerge_dequeue(dhd)) == NULL) &&
+#endif /* DHD_LB_RXP */
 			((p = PKTGET(dhd->osh, prot->rxbufpost_alloc_sz, FALSE)) == NULL)) {
 			dhd->rx_pktgetfail++;
 			DHD_ERROR_RLMT(("%s:%d: PKTGET for rxbuf failed, rx_pktget_fail :%lu\n",
@@ -6753,6 +6782,11 @@ BCMFASTPATH(dhd_prot_process_msgbuf_rxcpl)(dhd_pub_t *dhd, int ringtype, uint32 
 					DHD_ERROR(("Received non 802.11 packet, "
 						"when monitor mode is enabled\n"));
 				}
+			} else if (dhd->op_mode == DHD_FLAG_MFG_MODE &&
+					msg->flags & BCMPCIE_PKT_FLAGS_FRAME_802_11) {
+				DHD_TRACE(("Monitor disable, PKTFREE\n"));
+				PKTFREE(dhd->osh, pkt, TRUE);
+				continue;
 #ifdef DBG_PKT_MON
 			} else {
 				if (msg->flags & BCMPCIE_PKT_FLAGS_FRAME_802_11) {
@@ -9465,10 +9499,16 @@ dhd_msgbuf_iovar_timeout_dump(dhd_pub_t *dhd)
 			g_assert_type = 2;
 			/* use ASSERT() to trigger panic */
 			ASSERT(0);
+			return;
 		}
 #endif /* DHD_KERNEL_SCHED_DEBUG && DHD_FW_COREDUMP */
 
 	/* Check the PCIe link status by reading intstatus register */
+	if (!dhd || !dhd->bus || !dhd->bus->sih) {
+		DHD_ERROR(("%s: skip due to invalid parameter\n", __FUNCTION__));
+		ASSERT(0);
+		return;
+	}
 	intstatus = si_corereg(dhd->bus->sih,
 		dhd->bus->sih->buscoreidx, dhd->bus->pcie_mailbox_int, 0, 0);
 	if (intstatus == (uint32)-1) {

@@ -2,7 +2,26 @@
  * Misc utility routines for accessing chip-specific features
  * of the SiliconBackplane-based Broadcom chips.
  *
- * Copyright (C) 2022, Broadcom.
+ * Copyright (C) 2024 Synaptics Incorporated. All rights reserved.
+ *
+ * This software is licensed to you under the terms of the
+ * GNU General Public License version 2 (the "GPL") with Broadcom special exception.
+ *
+ * INFORMATION CONTAINED IN THIS DOCUMENT IS PROVIDED "AS-IS," AND SYNAPTICS
+ * EXPRESSLY DISCLAIMS ALL EXPRESS AND IMPLIED WARRANTIES, INCLUDING ANY
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE,
+ * AND ANY WARRANTIES OF NON-INFRINGEMENT OF ANY INTELLECTUAL PROPERTY RIGHTS.
+ * IN NO EVENT SHALL SYNAPTICS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+ * SPECIAL, PUNITIVE, OR CONSEQUENTIAL DAMAGES ARISING OUT OF OR IN CONNECTION
+ * WITH THE USE OF THE INFORMATION CONTAINED IN THIS DOCUMENT, HOWEVER CAUSED
+ * AND BASED ON ANY THEORY OF LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+ * NEGLIGENCE OR OTHER TORTIOUS ACTION, AND EVEN IF SYNAPTICS WAS ADVISED OF
+ * THE POSSIBILITY OF SUCH DAMAGE. IF A TRIBUNAL OF COMPETENT JURISDICTION
+ * DOES NOT PERMIT THE DISCLAIMER OF DIRECT DAMAGES OR ANY OTHER DAMAGES,
+ * SYNAPTICS' TOTAL CUMULATIVE LIABILITY TO ANY PARTY SHALL NOT
+ * EXCEED ONE HUNDRED U.S. DOLLARS
+ *
+ * Copyright (C) 2024, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -1238,8 +1257,8 @@ ai_core_disable(const si_t *sih, uint32 bits)
  * bits - core specific bits that are set during and after reset sequence
  * resetbits - core specific bits that are set only during reset sequence
  */
-static void
-BCMPOSTTRAPFN(_ai_core_reset)(const si_t *sih, uint32 bits, uint32 resetbits)
+static bool
+_ai_core_reset(const si_t *sih, uint32 bits, uint32 resetbits)
 {
 	const si_info_t *sii = SI_INFO(sih);
 	aidmp_t *ai;
@@ -1249,6 +1268,12 @@ BCMPOSTTRAPFN(_ai_core_reset)(const si_t *sih, uint32 bits, uint32 resetbits)
 	ASSERT(GOODREGS(sii->curwrap));
 	ai = sii->curwrap;
 
+	if (R_REG(sii->osh, &ai->resetstatus) == 0xffffffff &&
+		R_REG(sii->osh, &ai->ioctrl) == 0xffffffff &&
+		R_REG(sii->osh, &ai->resetctrl) == 0xffffffff) {
+		SI_ERROR(("%s: fail, resetstatus&ioctrl&resetctrl is 0xffffffff\n", __func__));
+		return FALSE;
+	}
 	/* ensure there are no pending backplane operations */
 	SPINWAIT(((dummy = R_REG(sii->osh, &ai->resetstatus)) != 0), 300);
 
@@ -1257,6 +1282,12 @@ BCMPOSTTRAPFN(_ai_core_reset)(const si_t *sih, uint32 bits, uint32 resetbits)
 		SI_ERROR(("_ai_core_reset: WARN1: resetstatus=0x%0x\n", dummy));
 	}
 #endif /* BCMDBG_ERR */
+
+	SI_ERROR(("%s: &ai->ioctrl = 0x%x, &ai->resetctrl = 0x%x, &ai->resetstatus = 0x%x\n",
+			__func__,
+			R_REG(sii->osh, &ai->ioctrl),
+			R_REG(sii->osh, &ai->resetctrl),
+			R_REG(sii->osh, &ai->resetstatus)));
 
 	/* put core into reset state */
 	W_REG(sii->osh, &ai->resetctrl, AIRC_RESET);
@@ -1322,28 +1353,31 @@ BCMPOSTTRAPFN(_ai_core_reset)(const si_t *sih, uint32 bits, uint32 resetbits)
 	}
 #endif /* UCM_CORRUPTION_WAR */
 	OSL_DELAY(1);
+	return TRUE;
 }
 
-void
-BCMPOSTTRAPFN(ai_core_reset)(si_t *sih, uint32 bits, uint32 resetbits)
+bool
+ai_core_reset(si_t *sih, uint32 bits, uint32 resetbits)
 {
 	si_info_t *sii = SI_INFO(sih);
 	const si_cores_info_t *cores_info = (const si_cores_info_t *)sii->cores_info;
 	uint idx = sii->curidx;
+	bool ret = TRUE;
 
 	if (cores_info->wrapba3[idx] != 0) {
 		ai_setcoreidx_3rdwrap(sih, idx);
-		_ai_core_reset(sih, bits, resetbits);
+		ret = _ai_core_reset(sih, bits, resetbits);
 		ai_setcoreidx(sih, idx);
 	}
 
 	if (cores_info->wrapba2[idx] != 0) {
 		ai_setcoreidx_2ndwrap(sih, idx);
-		_ai_core_reset(sih, bits, resetbits);
+		ret = _ai_core_reset(sih, bits, resetbits);
 		ai_setcoreidx(sih, idx);
 	}
 
-	_ai_core_reset(sih, bits, resetbits);
+	ret = _ai_core_reset(sih, bits, resetbits);
+	return ret;
 }
 
 #ifdef BOOKER_NIC400_INF

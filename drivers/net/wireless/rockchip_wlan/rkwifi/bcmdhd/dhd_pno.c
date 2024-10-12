@@ -2,7 +2,26 @@
  * Broadcom Dongle Host Driver (DHD)
  * Prefered Network Offload and Wi-Fi Location Service(WLS) code.
  *
- * Copyright (C) 2022, Broadcom.
+ * Copyright (C) 2024 Synaptics Incorporated. All rights reserved.
+ *
+ * This software is licensed to you under the terms of the
+ * GNU General Public License version 2 (the "GPL") with Broadcom special exception.
+ *
+ * INFORMATION CONTAINED IN THIS DOCUMENT IS PROVIDED "AS-IS," AND SYNAPTICS
+ * EXPRESSLY DISCLAIMS ALL EXPRESS AND IMPLIED WARRANTIES, INCLUDING ANY
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE,
+ * AND ANY WARRANTIES OF NON-INFRINGEMENT OF ANY INTELLECTUAL PROPERTY RIGHTS.
+ * IN NO EVENT SHALL SYNAPTICS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+ * SPECIAL, PUNITIVE, OR CONSEQUENTIAL DAMAGES ARISING OUT OF OR IN CONNECTION
+ * WITH THE USE OF THE INFORMATION CONTAINED IN THIS DOCUMENT, HOWEVER CAUSED
+ * AND BASED ON ANY THEORY OF LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+ * NEGLIGENCE OR OTHER TORTIOUS ACTION, AND EVEN IF SYNAPTICS WAS ADVISED OF
+ * THE POSSIBILITY OF SUCH DAMAGE. IF A TRIBUNAL OF COMPETENT JURISDICTION
+ * DOES NOT PERMIT THE DISCLAIMER OF DIRECT DAMAGES OR ANY OTHER DAMAGES,
+ * SYNAPTICS' TOTAL CUMULATIVE LIABILITY TO ANY PARTY SHALL NOT
+ * EXCEED ONE HUNDRED U.S. DOLLARS
+ *
+ * Copyright (C) 2024, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -803,7 +822,7 @@ _dhd_pno_get_channels(dhd_pub_t *dhd, uint16 *d_chan_list,
 	}
 	for (i = 0, j = 0; i < dtoh32(list->count) && i < *nchan; i++) {
 		if (IS_2G_CHANNEL(dtoh32(list->element[i]))) {
-			if (!(band & WLC_BAND_2G)) {
+			if (!(band & WLC_BAND_2G) && !(band & WLC_BAND_AUTO)) {
 				/* Skip, if not 2g */
 				continue;
 			}
@@ -811,7 +830,7 @@ _dhd_pno_get_channels(dhd_pub_t *dhd, uint16 *d_chan_list,
 		} else if (IS_5G_CHANNEL(dtoh32(list->element[i]))) {
 			bool dfs_channel = is_dfs(dhd, dtoh32(list->element[i]));
 			if ((skip_dfs && dfs_channel) ||
-				(!(band & WLC_BAND_5G) && !dfs_channel)) {
+				(!(band & WLC_BAND_5G) && !(band & WLC_BAND_AUTO) && !dfs_channel)) {
 				/* Skip the channel if:
 				* the DFS bit is NOT set & the channel is a dfs channel
 				* the band 5G is not set & the channel is a non DFS 5G channel
@@ -1021,13 +1040,13 @@ _dhd_pno_cfg(dhd_pub_t *dhd, uint16 *channel_list, int nchan)
 	int i = 0;
 	wl_pfn_cfg_t pfncfg_param;
 	bool use_chanspec = FALSE;
+	struct bcm_cfg80211 *cfg = wl_get_cfg(dhd_linux_get_primary_netdev(dhd));
 
-#if defined(WL_6G_BAND) || defined(CFG80211_6G_SUPPORT)
 	/* When enable 6G, force to use chanspec list */
-	if (FW_SUPPORTED((dhd), 6g)) {
+	if (FW_SUPPORTED((dhd), 6g) ||
+		(cfg && FW_MAJOR_VER_PNO_CHSPEC_BACK_PORTED(cfg->wlc_ver))) {
 		use_chanspec = TRUE;
 	}
-#endif /* WL_6G_BAND || CFG80211_6G_SUPPORT */
 
 	NULL_CHECK(dhd, "dhd is NULL", err);
 	if (nchan) {
@@ -3086,7 +3105,8 @@ dhd_pno_get_gscan(dhd_pub_t *dhd, dhd_pno_gscan_cmd_cfg_t type,
 					for (i = 0; i < nchan; i++) {
 						p[i] = wl_channel_to_frequency(
 							(ch_list[i]),
-							CHSPEC_BAND(ch_list[i]));
+							(ch_list[i] <= CH_MAX_2G_CHANNEL?
+							WL_CHANSPEC_BAND_2G : WL_CHANSPEC_BAND_5G));
 					}
 					ret = p;
 					*len = mem_needed;

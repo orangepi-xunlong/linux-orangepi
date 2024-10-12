@@ -307,6 +307,7 @@ dhd_wlan_init_gpio(wifi_adapter_info_t *adapter)
 	adapter->gpio_wl_reg_on = gpio_wl_reg_on;
 
 #ifdef CUSTOMER_OOB
+	adapter->gpio_wl_host_wake = -1;
 	if (gpio_wl_host_wake >= 0) {
 		err = gpio_request(gpio_wl_host_wake, "bcmdhd");
 		if (err < 0) {

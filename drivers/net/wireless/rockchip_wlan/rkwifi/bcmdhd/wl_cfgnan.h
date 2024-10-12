@@ -1,7 +1,26 @@
 /*
  * Neighbor Awareness Networking
  *
- * Copyright (C) 2022, Broadcom.
+ * Copyright (C) 2024 Synaptics Incorporated. All rights reserved.
+ *
+ * This software is licensed to you under the terms of the
+ * GNU General Public License version 2 (the "GPL") with Broadcom special exception.
+ *
+ * INFORMATION CONTAINED IN THIS DOCUMENT IS PROVIDED "AS-IS," AND SYNAPTICS
+ * EXPRESSLY DISCLAIMS ALL EXPRESS AND IMPLIED WARRANTIES, INCLUDING ANY
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE,
+ * AND ANY WARRANTIES OF NON-INFRINGEMENT OF ANY INTELLECTUAL PROPERTY RIGHTS.
+ * IN NO EVENT SHALL SYNAPTICS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+ * SPECIAL, PUNITIVE, OR CONSEQUENTIAL DAMAGES ARISING OUT OF OR IN CONNECTION
+ * WITH THE USE OF THE INFORMATION CONTAINED IN THIS DOCUMENT, HOWEVER CAUSED
+ * AND BASED ON ANY THEORY OF LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+ * NEGLIGENCE OR OTHER TORTIOUS ACTION, AND EVEN IF SYNAPTICS WAS ADVISED OF
+ * THE POSSIBILITY OF SUCH DAMAGE. IF A TRIBUNAL OF COMPETENT JURISDICTION
+ * DOES NOT PERMIT THE DISCLAIMER OF DIRECT DAMAGES OR ANY OTHER DAMAGES,
+ * SYNAPTICS' TOTAL CUMULATIVE LIABILITY TO ANY PARTY SHALL NOT
+ * EXCEED ONE HUNDRED U.S. DOLLARS
+ *
+ * Copyright (C) 2024, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -232,6 +251,8 @@
 */
 #define NAN_DISC_BCN_INTERVAL_2G_DEF 128u
 #define NAN_DISC_BCN_INTERVAL_5G_DEF 176u
+#define NAN_RAND_MAC_RETRIES 10
+#define IS_NDI_IFACE(ifname) strstr(ifname, "aware")
 
 typedef uint32 nan_data_path_id;
 
@@ -281,6 +302,7 @@ typedef struct nan_svc_info {
 	uint8 tx_match_filter[MAX_MATCH_FILTER_LEN];        /* TX match filter */
 	uint8 tx_match_filter_len;
 	uint8 svc_range_status; /* For managing any svc range status flags */
+	uint8 num_ftm; /**< Number of FTMs per burts */
 } nan_svc_info_t;
 
 /* NAN Peer DP state */
@@ -459,6 +481,7 @@ typedef struct nan_discover_cmd_data {
 	bool response;
 	uint8 service_responder_policy;
 	bool svc_update;
+	uint8 ranging_num_ftm; /**< Number of FTMs per burst */
 } nan_discover_cmd_data_t;
 
 typedef struct nan_datapath_cmd_data {
@@ -770,6 +793,10 @@ typedef struct wl_nancfg
 	bool ranging_enable;
 	struct delayed_work nan_nmi_rand; /* WQ for periodic nmi randomization */
 	uint32 nmi_rand_intvl; /* nmi randomization interval */
+	uint32 nan_ctrl;
+	uint32 nan_ctrl2_flag1;
+	uint32 nan_ctrl2_flag2;
+	nan_hal_capabilities_t capabilities;
 } wl_nancfg_t;
 
 #define NAN_RTT_ENABLED(cfg) (wl_cfgnan_is_enabled(cfg) && \
@@ -871,6 +898,10 @@ bool wl_cfgnan_ranging_is_in_prog_for_peer(struct bcm_cfg80211 *cfg,
 #else
 static INLINE bool wl_cfgnan_ranging_allowed(struct bcm_cfg80211 *cfg) { return FALSE; }
 #endif /* RTT_SUPPORT */
+extern s32 wl_cfgnan_get_ndi_idx(struct bcm_cfg80211 *cfg);
+extern void wl_cfgnan_add_ndi_data(struct bcm_cfg80211 *cfg, s32 idx,
+	char const *name, struct wireless_dev *wdev);
+extern s32 wl_cfgnan_del_ndi_data(struct bcm_cfg80211 *cfg, char *name);
 
 typedef enum {
 	NAN_ATTRIBUTE_INVALID				= 0,
@@ -1010,7 +1041,9 @@ typedef enum {
 	NAN_ATTRIBUTE_INSTANT_MODE_ENABLE		= 230,
 	NAN_ATTRIBUTE_INSTANT_COMM_CHAN			= 231,
 	NAN_ATTRIBUTE_CHRE_REQUEST			= 232,
-	NAN_ATTRIBUTE_MAX				= 233
+	NAN_ATTRIBUTE_SVC_CFG_SUSPENDABLE		= 233,
+	NAN_ATTRIBUTE_RANGING_NUM_FTM			= 234,
+	NAN_ATTRIBUTE_MAX				= 235
 } NAN_ATTRIBUTE;
 
 enum geofence_suspend_reason {

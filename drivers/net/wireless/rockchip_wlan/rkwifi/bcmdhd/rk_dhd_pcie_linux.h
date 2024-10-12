@@ -24,7 +24,7 @@ rk_dhd_bus_l1ss_enable_rc_ep(dhd_bus_t *bus, bool enable)
 	}
 
 	/* Disable ASPM of RC and EP */
-	printf("%s: %s L1ss\n", __FUNCTION__, enable?"enable":"disable");
+	pr_err("%s: %s L1ss\n", __FUNCTION__, enable ? "enable" : "disable");
 	pcie_aspm_ext_l1ss_enable(bus->dev, bus->rc_dev, enable);
 }
 
@@ -32,6 +32,30 @@ static inline bool
 rk_dhd_bus_is_rc_ep_l1ss_capable(dhd_bus_t *bus)
 {
 	return pcie_aspm_ext_is_rc_ep_l1ss_capable(bus->dev, bus->rc_dev);
+}
+
+static inline int
+rk_dhd_bus_pcie_wait_for_l1ss(dhd_bus_t *bus)
+{
+	u32 val;
+	int i;
+
+	if (!bus->rc_ep_aspm_cap || !bus->rc_ep_l1ss_cap) {
+		return -1;
+	}
+
+	pci_read_config_dword(bus->dev, PCIECFGREG_STATUS_CMD, &val);
+	if (val == (uint32)-1)
+		return -1;
+
+	for (i = 0; i < 5; i++) {
+		if (pcie_aspm_ext_is_in_l1sub_state(bus->rc_dev))
+			return 0;
+		msleep(20);
+	}
+	pr_err("%s failed\n", __FUNCTION__);
+
+	return -1;
 }
 
 #endif /* __RK_DHD_PCIE_LINUX_H__ */

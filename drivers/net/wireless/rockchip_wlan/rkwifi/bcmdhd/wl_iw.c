@@ -2867,8 +2867,13 @@ wl_iw_set_pmksa(
 		bzero((char *)pmk_list, sizeof(struct pmk_list));
 	}
 	if (iwpmksa->cmd == IW_PMKSA_REMOVE) {
-		pmkid_list_v1_t pmkid, *pmkidptr;
-		pmkidptr = &pmkid;
+		pmkid_list_v1_t *pmkidptr;
+		u32 v1_list_size = (u32)(sizeof(pmkid_list_v1_t) + sizeof(pmkid_v1_t));
+
+		if (!(pmkidptr = kmalloc(v1_list_size, GFP_KERNEL))) {
+			WL_ERROR(("kmalloc failed\n"));
+			return -ENOMEM;
+		}
 		bcopy(&iwpmksa->bssid.sa_data[0], &pmkidptr->pmkid[0].BSSID, ETHER_ADDR_LEN);
 		bcopy(&iwpmksa->pmkid[0], &pmkidptr->pmkid[0].PMKID, WPA2_PMKID_LEN);
 		{
@@ -2880,6 +2885,8 @@ wl_iw_set_pmksa(
 				WL_TRACE(("%02x ", pmkidptr->pmkid[0].PMKID[j]));
 			WL_TRACE(("\n"));
 		}
+		if (pmkidptr)
+			kfree(pmkidptr);
 		for (i = 0; i < pmk_list->pmkids.npmkid; i++)
 			if (!bcmp(&iwpmksa->bssid.sa_data[0], &pmkid_array[i].BSSID,
 				ETHER_ADDR_LEN))

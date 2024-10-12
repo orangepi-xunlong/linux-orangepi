@@ -1,7 +1,26 @@
 /*
  * Wifi Virtual Interface implementaion
  *
- * Copyright (C) 2022, Broadcom.
+ * Copyright (C) 2024 Synaptics Incorporated. All rights reserved.
+ *
+ * This software is licensed to you under the terms of the
+ * GNU General Public License version 2 (the "GPL") with Broadcom special exception.
+ *
+ * INFORMATION CONTAINED IN THIS DOCUMENT IS PROVIDED "AS-IS," AND SYNAPTICS
+ * EXPRESSLY DISCLAIMS ALL EXPRESS AND IMPLIED WARRANTIES, INCLUDING ANY
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE,
+ * AND ANY WARRANTIES OF NON-INFRINGEMENT OF ANY INTELLECTUAL PROPERTY RIGHTS.
+ * IN NO EVENT SHALL SYNAPTICS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+ * SPECIAL, PUNITIVE, OR CONSEQUENTIAL DAMAGES ARISING OUT OF OR IN CONNECTION
+ * WITH THE USE OF THE INFORMATION CONTAINED IN THIS DOCUMENT, HOWEVER CAUSED
+ * AND BASED ON ANY THEORY OF LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+ * NEGLIGENCE OR OTHER TORTIOUS ACTION, AND EVEN IF SYNAPTICS WAS ADVISED OF
+ * THE POSSIBILITY OF SUCH DAMAGE. IF A TRIBUNAL OF COMPETENT JURISDICTION
+ * DOES NOT PERMIT THE DISCLAIMER OF DIRECT DAMAGES OR ANY OTHER DAMAGES,
+ * SYNAPTICS' TOTAL CUMULATIVE LIABILITY TO ANY PARTY SHALL NOT
+ * EXCEED ONE HUNDRED U.S. DOLLARS
+ *
+ * Copyright (C) 2024, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -157,6 +176,10 @@ extern int wl_get_bandwidth_cap(struct net_device *ndev, uint32 band, uint32 *ba
 extern s32 wl_cfg80211_tdls_mgmt(struct wiphy *wiphy, struct net_device *dev,
 	u8 *peer, u8 action_code, u8 dialog_token, u16 status_code,
 	u32 peer_capability, const u8 *buf, size_t len);
+#elif (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0))
+extern s32 wl_cfg80211_tdls_mgmt(struct wiphy *wiphy, struct net_device *dev,
+       const u8 *peer, int link_id, u8 action_code, u8 dialog_token, u16 status_code,
+       u32 peer_capability, bool initiator, const u8 *buf, size_t len);
 #elif ((LINUX_VERSION_CODE >= KERNEL_VERSION(3, 16, 0)) && \
 		(LINUX_VERSION_CODE < KERNEL_VERSION(3, 18, 0)))
 extern s32 wl_cfg80211_tdls_mgmt(struct wiphy *wiphy, struct net_device *dev,
@@ -211,7 +234,12 @@ extern s32 wl_cfg80211_stop_ap(struct wiphy *wiphy, struct net_device *dev,
 extern s32 wl_cfg80211_stop_ap(struct wiphy *wiphy, struct net_device *dev);
 #endif /* LINUX_VER >= 5.19.2 || CFG80211_BKPORT_MLO */
 extern s32 wl_cfg80211_change_beacon(struct wiphy *wiphy, struct net_device *dev,
-	struct cfg80211_beacon_data *info);
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 7, 0))
+	struct cfg80211_ap_update *ap_info
+#else
+	struct cfg80211_beacon_data *info
+#endif /* LINUX_VERSION_CODE >= KERNEL_VERSION(6, 7, 0) */
+);
 #else
 extern s32 wl_cfg80211_add_set_beacon(struct wiphy *wiphy, struct net_device *dev,
 	struct beacon_parameters *info);
@@ -249,7 +277,12 @@ wl_cfg80211_add_virtual_iface(struct wiphy *wiphy,
 	struct vif_params *params);
 extern s32 wl_cfg80211_del_virtual_iface(struct wiphy *wiphy, bcm_struct_cfgdev *cfgdev);
 extern s32 wl_cfg80211_change_beacon(struct wiphy *wiphy, struct net_device *dev,
-	struct cfg80211_beacon_data *info);
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 7, 0))
+	struct cfg80211_ap_update *ap_info
+#else
+	struct cfg80211_beacon_data *info
+#endif /* LINUX_VERSION_CODE >= KERNEL_VERSION(6, 7, 0) */
+);
 
 extern s32 wl_get_auth_assoc_status(struct bcm_cfg80211 *cfg, struct net_device *ndev,
 	const wl_event_msg_t *e, void *data);
@@ -286,8 +319,14 @@ chanspec_t wl_cfg80211_get_ap_bw_limited_chspec(struct bcm_cfg80211 *cfg,
 int wl_cfg80211_set_softap_bw(struct bcm_cfg80211 *cfg, uint32 band, uint32 limit);
 #endif /* LIMIT_AP_BW */
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0))
+extern void wl_cfgvif_delayed_remove_iface_work(struct work_struct *work);
+#endif /* LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0) */
+
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION (3, 8, 0))
 extern int wl_chspec_chandef(chanspec_t chanspec,
 	struct cfg80211_chan_def *chandef, struct wiphy *wiphy);
 #endif /* (LINUX_VERSION_CODE >= KERNEL_VERSION (3, 8, 0))) */
+extern chanspec_t
+wl_channel_to_chanspec(struct wiphy *wiphy, struct net_device *dev, u32 channel, u32 bw_cap);
 #endif /* _wl_cfgvif_h_ */
