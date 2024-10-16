@@ -6,7 +6,26 @@
  *
  * Definitions subject to change without notice.
  *
- * Copyright (C) 2022, Broadcom.
+ * Copyright (C) 2024 Synaptics Incorporated. All rights reserved.
+ *
+ * This software is licensed to you under the terms of the
+ * GNU General Public License version 2 (the "GPL") with Broadcom special exception.
+ *
+ * INFORMATION CONTAINED IN THIS DOCUMENT IS PROVIDED "AS-IS," AND SYNAPTICS
+ * EXPRESSLY DISCLAIMS ALL EXPRESS AND IMPLIED WARRANTIES, INCLUDING ANY
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE,
+ * AND ANY WARRANTIES OF NON-INFRINGEMENT OF ANY INTELLECTUAL PROPERTY RIGHTS.
+ * IN NO EVENT SHALL SYNAPTICS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+ * SPECIAL, PUNITIVE, OR CONSEQUENTIAL DAMAGES ARISING OUT OF OR IN CONNECTION
+ * WITH THE USE OF THE INFORMATION CONTAINED IN THIS DOCUMENT, HOWEVER CAUSED
+ * AND BASED ON ANY THEORY OF LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+ * NEGLIGENCE OR OTHER TORTIOUS ACTION, AND EVEN IF SYNAPTICS WAS ADVISED OF
+ * THE POSSIBILITY OF SUCH DAMAGE. IF A TRIBUNAL OF COMPETENT JURISDICTION
+ * DOES NOT PERMIT THE DISCLAIMER OF DIRECT DAMAGES OR ANY OTHER DAMAGES,
+ * SYNAPTICS' TOTAL CUMULATIVE LIABILITY TO ANY PARTY SHALL NOT
+ * EXCEED ONE HUNDRED U.S. DOLLARS
+ *
+ * Copyright (C) 2024, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -9757,7 +9776,16 @@ typedef enum event_msgs_ext_command {
 } event_msgs_ext_command_t;
 
 #define EVENTMSGS_VER 1
+
+#define __CHK_EMPTY(VAL) VAL ## 1
+#define CHK_EMPTY(VAL) __CHK_EMPTY(VAL)
+
+#if defined(BCM_FLEX_ARRAY) && (CHK_EMPTY(BCM_FLEX_ARRAY) == 1)
+/* Do not need to -1 since the BCM_FLEX_ARRAY is empty. */
+#define EVENTMSGS_EXT_STRUCT_SIZE	((uint)(sizeof(eventmsgs_ext_t)))
+#else
 #define EVENTMSGS_EXT_STRUCT_SIZE	((uint)(sizeof(eventmsgs_ext_t) - 1))
+#endif /* BCM_FLEX_ARRAY && CHECK_EMPTY(BCM_FLEX_ARRAY) */
 
 /* len-	for SET it would be mask size from the application to the firmware */
 /*		for GET it would be actual firmware mask size */
@@ -10745,6 +10773,9 @@ typedef BWL_PRE_PACKED_STRUCT struct {
 } BWL_POST_PACKED_STRUCT vndr_ie_info_t;
 #include <packed_section_end.h>
 
+/* buffer contains only 1 IE */
+#define VNDR_IE_SET_ONE_BUF_LEN (sizeof(vndr_ie_setbuf_t) + sizeof(vndr_ie_info_t))
+
 #include <packed_section_start.h>
 typedef BWL_PRE_PACKED_STRUCT struct {
 	int32 iecount;					/**< entries in the vndr_ie_list[] */
@@ -10774,6 +10805,9 @@ typedef BWL_PRE_PACKED_STRUCT struct {
 	tlv_t ie_data;		/**< IE data */
 } BWL_POST_PACKED_STRUCT ie_info_t;
 #include <packed_section_end.h>
+
+/* buffer contains only 1 IE */
+#define IE_SET_ONE_BUF_LEN (sizeof(ie_setbuf_t) + sizeof(ie_info_t))
 
 #include <packed_section_start.h>
 typedef BWL_PRE_PACKED_STRUCT struct {
@@ -15593,6 +15627,8 @@ enum wl_nan_cfg_ctrl2_flags1 {
 	WL_NAN_CTRL2_FLAG1_STRML_ENABLE				= 0x08000000,
 	/* Control flag to enable NAN EMLSR */
 	WL_NAN_CTRL2_FLAG1_EMLSR_ENABLE				= 0x10000000,
+	/* Control flag to enable greedy ranging */
+	WL_NAN_CTRL2_FLAG1_GREEDY_RNG_ENABLE			= 0x20000000,
 	/* Allow election (role change) outside of DW */
 	WL_NAN_CTRL2_FLAG1_ELECTION_OUTOF_DW			= 0x40000000
 };
@@ -17101,6 +17137,8 @@ typedef struct wl_nan_range_req {
 	uint32 ingress; /* ingress limit in mm */
 	uint32 egress; /* egress limit in mm */
 	uint32 interval; /* max interval(in TU) b/w two ranging measurements */
+	/** Number of FTMs per burst */
+	uint8 num_ftm;
 } wl_nan_range_req_t;
 
 #define NAN_RNG_REQ_IOV_LEN	24
@@ -31172,6 +31210,12 @@ typedef struct wl_ext_auth_evt {
 #define SAR_PARAM_V2_RSDB    2
 #define SAR_PARAM_6G_V3_VSDB    3
 #define SAR_PARAM_6G_V4_RSDB    4
+#define SAR_PARAM_DYN           5
+#define SAR_PARAM_VER_MASK      0xffff
+#define SAR_PARAM_NUM_MASK      0xffff0000
+#define SAR_PARAM_NUM_OFFSET	16
+/* MAX_NUM (2g * 2 + 5g * 10 + 6g * 12) * 2 (RSDB) */
+#define MAX_SAR_PARAMS_NUM      48
 
 typedef struct _sarctrl_single_set {
 	uint32 sarctrl_2g;
@@ -31186,10 +31230,21 @@ typedef struct _sarctrl_single_set {
 #define CONST_SARCTRL_SINGLE_SET_QTY    (sizeof(sarctrl_single_set)/sizeof(uint32))
 
 typedef struct _sarctrl_set {
-	uint32              ver;
+	/* ver MASK 0xffff, num MASK 0xffff0000
+	 * ver = 5, add num,
+	 * else set ver only, without num to adapt old FW
+	 */
+	uint32 ver;
 
-	sarctrl_single_set  basic;
-	sarctrl_single_set  rsdb;
+	union {
+		struct {
+			sarctrl_single_set  basic;
+			sarctrl_single_set  rsdb;
+		};
+		struct {
+			uint32 sarctrl[MAX_SAR_PARAMS_NUM];
+		};
+	};
 } sarctrl_set;
 #define CONST_SARCTRL_SET_QTY    (sizeof(sarctrl_set)/sizeof(uint32) - 1)
 

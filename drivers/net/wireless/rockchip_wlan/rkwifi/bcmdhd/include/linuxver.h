@@ -2,7 +2,26 @@
  * Linux-specific abstractions to gain some independence from linux kernel versions.
  * Pave over some 2.2 versus 2.4 versus 2.6 kernel differences.
  *
- * Copyright (C) 2022, Broadcom.
+ * Copyright (C) 2024 Synaptics Incorporated. All rights reserved.
+ *
+ * This software is licensed to you under the terms of the
+ * GNU General Public License version 2 (the "GPL") with Broadcom special exception.
+ *
+ * INFORMATION CONTAINED IN THIS DOCUMENT IS PROVIDED "AS-IS," AND SYNAPTICS
+ * EXPRESSLY DISCLAIMS ALL EXPRESS AND IMPLIED WARRANTIES, INCLUDING ANY
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE,
+ * AND ANY WARRANTIES OF NON-INFRINGEMENT OF ANY INTELLECTUAL PROPERTY RIGHTS.
+ * IN NO EVENT SHALL SYNAPTICS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+ * SPECIAL, PUNITIVE, OR CONSEQUENTIAL DAMAGES ARISING OUT OF OR IN CONNECTION
+ * WITH THE USE OF THE INFORMATION CONTAINED IN THIS DOCUMENT, HOWEVER CAUSED
+ * AND BASED ON ANY THEORY OF LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+ * NEGLIGENCE OR OTHER TORTIOUS ACTION, AND EVEN IF SYNAPTICS WAS ADVISED OF
+ * THE POSSIBILITY OF SUCH DAMAGE. IF A TRIBUNAL OF COMPETENT JURISDICTION
+ * DOES NOT PERMIT THE DISCLAIMER OF DIRECT DAMAGES OR ANY OTHER DAMAGES,
+ * SYNAPTICS' TOTAL CUMULATIVE LIABILITY TO ANY PARTY SHALL NOT
+ * EXCEED ONE HUNDRED U.S. DOLLARS
+ *
+ * Copyright (C) 2024, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -95,6 +114,9 @@
 #include <linux/interrupt.h>
 #include <linux/kthread.h>
 #include <linux/netdevice.h>
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0))
+#include <net/netdev_rx_queue.h>
+#endif
 #include <linux/time.h>
 #include <linux/rtc.h>
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 27))
@@ -1039,12 +1061,13 @@ static inline void do_gettimeofday(struct timeval *tv)
 
 #ifdef ANDROID_BKPORT
 #if (ANDROID_VERSION >= 13) && (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 41))
-#define ANDROID13_KERNEL515_BKPORT
+//#define ANDROID13_KERNEL515_BKPORT
 #define CFG80211_BKPORT_MLO
 #endif /* ANDROID_VERSION >= 13 && KERNEL >= 5.15.41 */
 #endif /* ANDROID_BKPORT */
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 19, 2) || defined(CFG80211_BKPORT_MLO)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 19, 2) || \
+	defined(CFG80211_BKPORT_MLO)
 #define	WDEV_CLIENT(wdev, field)	(wdev->u.client.field)
 #else
 #define	WDEV_CLIENT(wdev, field)	(wdev->field)
@@ -1064,5 +1087,13 @@ static inline void do_gettimeofday(struct timeval *tv)
 #define	PCI_DMA_FROMDEVICE	2
 #endif
 #endif
+
+#if !defined(FREEBSD) && !defined(MACOSX) && !defined(BCM_USE_PLATFORM_STRLCPY)
+#include <bcmstdlib_s.h>
+#else
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 7, 0))
+#define strlcpy(a, b, c)	strscpy(a, b, c)
+#endif /* LINUX_VERSION_CODE >= KERNEL_VERSION(6, 7, 0) */
+#endif /* !defined(FREEBSD) && !defined(MACOSX) && !defined(BCM_USE_PLATFORM_STRLCPY) */
 
 #endif /* _linuxver_h_ */

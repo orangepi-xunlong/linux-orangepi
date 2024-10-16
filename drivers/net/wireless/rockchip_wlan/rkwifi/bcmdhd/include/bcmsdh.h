@@ -3,7 +3,26 @@
  *     export functions to client drivers
  *     abstract OS and BUS specific details of SDIO
  *
- * Copyright (C) 2022, Broadcom.
+ * Copyright (C) 2024 Synaptics Incorporated. All rights reserved.
+ *
+ * This software is licensed to you under the terms of the
+ * GNU General Public License version 2 (the "GPL") with Broadcom special exception.
+ *
+ * INFORMATION CONTAINED IN THIS DOCUMENT IS PROVIDED "AS-IS," AND SYNAPTICS
+ * EXPRESSLY DISCLAIMS ALL EXPRESS AND IMPLIED WARRANTIES, INCLUDING ANY
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE,
+ * AND ANY WARRANTIES OF NON-INFRINGEMENT OF ANY INTELLECTUAL PROPERTY RIGHTS.
+ * IN NO EVENT SHALL SYNAPTICS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+ * SPECIAL, PUNITIVE, OR CONSEQUENTIAL DAMAGES ARISING OUT OF OR IN CONNECTION
+ * WITH THE USE OF THE INFORMATION CONTAINED IN THIS DOCUMENT, HOWEVER CAUSED
+ * AND BASED ON ANY THEORY OF LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+ * NEGLIGENCE OR OTHER TORTIOUS ACTION, AND EVEN IF SYNAPTICS WAS ADVISED OF
+ * THE POSSIBILITY OF SUCH DAMAGE. IF A TRIBUNAL OF COMPETENT JURISDICTION
+ * DOES NOT PERMIT THE DISCLAIMER OF DIRECT DAMAGES OR ANY OTHER DAMAGES,
+ * SYNAPTICS' TOTAL CUMULATIVE LIABILITY TO ANY PARTY SHALL NOT
+ * EXCEED ONE HUNDRED U.S. DOLLARS
+ *
+ * Copyright (C) 2024, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -239,6 +258,12 @@ typedef struct {
 	int (*suspend)(void *context);
 	/* resume from suspend */
 	int (*resume)(void *context);
+#ifdef DEVICE_PM_CALLBACK
+	/* prepare before suspend */
+	int (*prepare)(void *context);
+	/* complete after resume */
+	int (*complete)(void *context);
+#endif /* DEVICE_PM_CALLBACK */
 } bcmsdh_driver_t;
 
 /* platform specific/high level functions */
@@ -264,6 +289,10 @@ extern bool bcmsdh_dev_pm_enabled(bcmsdh_info_t *sdh);
 
 int bcmsdh_suspend(bcmsdh_info_t *bcmsdh);
 int bcmsdh_resume(bcmsdh_info_t *bcmsdh);
+#ifdef DEVICE_PM_CALLBACK
+int bcmsdh_prepare(bcmsdh_info_t *bcmsdh);
+int bcmsdh_complete(bcmsdh_info_t *bcmsdh);
+#endif /* DEVICE_PM_CALLBACK */
 
 /* Function to pass device-status bits to DHD. */
 extern uint32 bcmsdh_get_dstatus(void *sdh);

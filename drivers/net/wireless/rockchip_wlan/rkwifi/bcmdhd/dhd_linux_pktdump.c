@@ -1,7 +1,26 @@
 /*
  * Packet dump helper functions
  *
- * Copyright (C) 2022, Broadcom.
+ * Copyright (C) 2024 Synaptics Incorporated. All rights reserved.
+ *
+ * This software is licensed to you under the terms of the
+ * GNU General Public License version 2 (the "GPL") with Broadcom special exception.
+ *
+ * INFORMATION CONTAINED IN THIS DOCUMENT IS PROVIDED "AS-IS," AND SYNAPTICS
+ * EXPRESSLY DISCLAIMS ALL EXPRESS AND IMPLIED WARRANTIES, INCLUDING ANY
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE,
+ * AND ANY WARRANTIES OF NON-INFRINGEMENT OF ANY INTELLECTUAL PROPERTY RIGHTS.
+ * IN NO EVENT SHALL SYNAPTICS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+ * SPECIAL, PUNITIVE, OR CONSEQUENTIAL DAMAGES ARISING OUT OF OR IN CONNECTION
+ * WITH THE USE OF THE INFORMATION CONTAINED IN THIS DOCUMENT, HOWEVER CAUSED
+ * AND BASED ON ANY THEORY OF LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+ * NEGLIGENCE OR OTHER TORTIOUS ACTION, AND EVEN IF SYNAPTICS WAS ADVISED OF
+ * THE POSSIBILITY OF SUCH DAMAGE. IF A TRIBUNAL OF COMPETENT JURISDICTION
+ * DOES NOT PERMIT THE DISCLAIMER OF DIRECT DAMAGES OR ANY OTHER DAMAGES,
+ * SYNAPTICS' TOTAL CUMULATIVE LIABILITY TO ANY PARTY SHALL NOT
+ * EXCEED ONE HUNDRED U.S. DOLLARS
+ *
+ * Copyright (C) 2024, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -344,6 +363,38 @@ typedef struct hdr_fmt {
 	struct bcmudp_hdr udph;
 } PACKED_STRUCT hdr_fmt_t;
 
+#ifdef DHD_IPV6_DUMP
+typedef struct ipv6hdr_fmt {
+	struct ipv6_hdr ip6h;
+	struct bcmudp_hdr udph;
+} PACKED_STRUCT ipv6hdr_fmt_t;
+
+typedef struct dhcp6_fmt {
+	struct ipv6_hdr iph;
+	struct bcmudp_hdr udph;
+	uint8 msgtype;
+} PACKED_STRUCT dhcp6_fmt_t;
+
+typedef struct icmpv6 {
+	uint8   icmp6_type;
+	uint8   icmp6_code;
+	uint16  icmp6_cksum;
+	uint16  id;
+	uint16  seq;
+} PACKED_STRUCT icmpv6_hdr_t;
+
+typedef struct dns6_fmt {
+	struct ipv6_hdr ip6h;
+	struct bcmudp_hdr udph;
+	uint16 id;
+	uint16 flags;
+	uint16 qdcount;
+	uint16 ancount;
+	uint16 nscount;
+	uint16 arcount;
+} PACKED_STRUCT dns6_fmt_t;
+#endif /* DHD_IPV6_DUMP */
+
 msg_eapol_t
 dhd_is_4way_msg(uint8 *pktdata)
 {
@@ -437,7 +488,7 @@ dhd_dump_pkt(dhd_pub_t *dhdp, int ifidx, uint8 *pktdata, uint32 pktlen,
 		return;
 	}
 
-#if defined(BCMPCIE) && defined(DHD_PKT_LOGGING)
+#if 0 // defined(BCMPCIE) && defined(DHD_PKT_LOGGING)
 	if (tx && !pkthash && !pktfate) {
 		return;
 	}
@@ -1139,6 +1190,64 @@ static char dhcp_types[MAX_DHCP_TYPES_STR][10] = {
 #define DHCP_TYPES_STR(type)	((type < MAX_DHCP_TYPES_STR) ? \
 				(dhcp_types[type]) : "UNKNOWN_DHCP_TYPE")
 
+#ifdef DHD_IPV6_DUMP
+#define DHCP6_PRINT(str) \
+		do { \
+			if (tx) { \
+				DHD_PKTDUMP_MEM((str " %s[%s] [TX] -" TXFATE_FMT "\n", \
+					typestr, ifname, \
+					TX_PKTHASH(pkthash), TX_FATE(pktfate))); \
+			} else { \
+				DHD_PKTDUMP_MEM((str " %s[%s] [RX]\n", \
+					typestr, ifname)); \
+			} \
+		} while (0)
+
+#define ICMPv6_PRINT(str) \
+	do { \
+		if (tx) { \
+			DHD_PKTDUMP_MEM((str " %s[%s] [TX] -" TXFATE_FMT "\n", \
+				typestr, ifname, \
+				TX_PKTHASH(pkthash), TX_FATE(pktfate))); \
+		} else { \
+			if (msgtype == ICMPV6_PKT_TYPE_RA) { \
+				DHD_PKTDUMP_MEM((str " %s[%s] flags 0x%x [RX]\n", \
+					typestr, ifname, icmp6_ra_flag)); \
+			} else { \
+				DHD_PKTDUMP_MEM((str " %s[%s] [RX]\n", \
+					typestr, ifname)); \
+			} \
+		} \
+	} while (0)
+
+#define MAX_DHCP6_TYPES_STR 11
+#define MAX_DHCP6_TYPES_STAT 11
+
+static char dhcp6_types[MAX_DHCP6_TYPES_STR][10] = {
+	"NA", "SOLICIT", "ADVERTISE", "REQUEST", "CONFIRM",
+	"RENEW", "REBIND", "REPLY", "RELEASE", "DECLINE", "RECONFIG"
+};
+#define DHCP6_TYPES_STR(type)    ((type < MAX_DHCP6_TYPES_STR) ? \
+		(dhcp6_types[type]) : "UNKNOWN_DHCP_TYPE")
+
+static const int dhcp6_types_stat[MAX_DHCP6_TYPES_STAT] = {
+	ST(INVALID), ST(SOLICIT), ST(ADVERTISE), ST(REQUEST),
+	ST(CONFIRM), ST(RENEW), ST(REBIND), ST(REPLY),
+	ST(RELEASE), ST(DECLINE), ST(RECONFIGURE)
+};
+#define DHCP6_TYPES_STAT(type)   ((type < MAX_DHCP6_TYPES_STAT) ? \
+		(dhcp6_types_stat[type]) : ST(INVALID))
+
+#define MAX_ICMPV6_TYPES_STAT 10
+static const int icmpv6_types_stat[MAX_ICMPV6_TYPES_STAT] = {
+	ST(INVALID), ST(ECHO_REQ), ST(ECHO_REPLY), ST(MULTI_QUERY),
+	ST(MULTI_REPORT), ST(MULTI_DONE), ST(ROUTER_SOLIC), ST(ROUTER_ADV),
+	ST(NEIGHBOR_SOLIC), ST(NEIGHBOR_ADV)
+};
+#define ICMPV6_TYPES_STAT(type)   ((type < MAX_ICMPV6_TYPES_STAT) ? \
+		(icmpv6_types_stat[type]) : ST(INVALID))
+#endif /* DHD_IPV6_DUMP */
+
 #ifdef DHD_STATUS_LOGGING
 #define MAX_DHCP_TYPES_STAT	9
 #define DHCP_TYPES_STAT(type)	((type < MAX_DHCP_TYPES_STAT) ? \
@@ -1564,6 +1673,172 @@ dhd_dns_dump(dhd_pub_t *dhdp, int ifidx, uint8 *pktdata, bool tx,
 	}
 }
 #endif /* DHD_DNS_DUMP */
+
+#ifdef DHD_IPV6_DUMP
+void
+dhd_dhcp6_dump(dhd_pub_t *dhdp, int ifidx, uint8 *pktdata, bool tx,
+uint32 *pkthash, uint16 *pktfate)
+{
+	dhcp6_fmt_t *b = (dhcp6_fmt_t *)&pktdata[ETHER_HDR_LEN];
+	char *ifname = NULL, *typestr = NULL;
+	uint8 msgtype;
+	bool cond;
+
+	ifname = dhd_ifname(dhdp, ifidx);
+	msgtype = ntoh16(b->msgtype);
+	cond = (tx && pktfate) ? FALSE : TRUE;
+
+	/* only handle DHCPv6 msgtype from 1 ~ 10 */
+	if (msgtype > 10)
+		return;
+
+	typestr = DHCP6_TYPES_STR(msgtype);
+	DHD_STATLOG_DATA(dhdp, DHCP6_TYPES_STAT(msgtype),
+			ifidx, tx, cond);
+	DHCP6_PRINT("DHCPv6");
+	return;
+}
+
+void
+dhd_dns6_dump(dhd_pub_t *dhdp, int ifidx, uint8 *pktdata, bool tx,
+	uint32 *pkthash, uint16 *pktfate)
+{
+	dns6_fmt_t *dns6h = (dns6_fmt_t *)&pktdata[ETHER_HDR_LEN];
+	uint16 flags, opcode, id;
+	char *ifname;
+	bool cond, dump_enabled;
+
+	ifname = dhd_ifname(dhdp, ifidx);
+	cond = (tx && pktfate) ? FALSE : TRUE;
+	dump_enabled = dhd_dump_pkt_enabled(dhdp);
+	flags = hton16(dns6h->flags);
+	opcode = GET_DNS_OPCODE(flags);
+	id = hton16(dns6h->id);
+	if (GET_DNS_QR(flags)) {
+		/* Response */
+		DHD_STATLOG_DATA(dhdp, ST(DNS_RESP), ifidx, tx, cond);
+		DNS_RESP_PRINT("DNS6 RESPONSE");
+	} else {
+		/* Request */
+		DHD_STATLOG_DATA(dhdp, ST(DNS_QUERY), ifidx, tx, cond);
+		DNS_REQ_PRINT("DNS6 REQUEST");
+	}
+}
+
+char*
+icmpv6_types(uint8 type)
+{
+	switch (type) {
+		case ICMPV6_PKT_TYPE_ECHO_REQ:
+			return "Echo Request";
+		case ICMPV6_PKT_TYPE_ECHO_REPLY:
+			return "Echo Reply";
+		case ICMPV6_PKT_TYPE_MULTI_LST_QUERY:
+			return "Multicast Listener Query";
+		case ICMPV6_PKT_TYPE_MULTI_LST_REPORT:
+			return "Multicast Listener Report";
+		case ICMPV6_PKT_TYPE_MULTI_LST_DONE:
+			return "Multicast Listener Done";
+		case ICMPV6_PKT_TYPE_RS:
+			return "Router Solicitation";
+		case ICMPV6_PKT_TYPE_RA:
+			return "Router Advertisement";
+		case ICMPV6_PKT_TYPE_NS:
+			return "Neighbor Solicitation";
+		case ICMPV6_PKT_TYPE_NA:
+			return "Neighbor Advertisement";
+		default:
+			return NULL;
+	}
+}
+
+void
+dhd_icmpv6_dump(dhd_pub_t *dhdp, int ifidx, uint8 *pktdata, bool tx,
+uint32 *pkthash, uint16 *pktfate)
+{
+	struct ipv6_hdr *ip6h = (struct ipv6_hdr *)&pktdata[ETHER_HDR_LEN];
+	struct icmp6_hdr *icmpv6;
+	char *ifname = NULL, *typestr = NULL;
+	uint8 icmp6_ra_flag;
+	uint8 msgtype;
+	bool cond;
+
+	uint8 nexthdr = ip6h->nexthdr;
+
+	if (nexthdr != ICMPV6_HEADER_TYPE)
+		return;
+
+	icmpv6 = (struct icmp6_hdr *) ((uint8 *)ip6h + sizeof(struct ipv6_hdr));
+	ifname = dhd_ifname(dhdp, ifidx);
+	msgtype = icmpv6->icmp6_type;
+	cond = (tx && pktfate) ? FALSE : TRUE;
+	typestr = icmpv6_types(msgtype);
+
+	/* only handle ICMPv6 msgtype from 128 ~ 136 */
+	if (!typestr)
+		return;
+
+	if (msgtype == ICMPV6_PKT_TYPE_RA) {
+		/* check IPv6 configuration is stateless or stateful DHCPv6 */
+		icmp6_ra_flag = *((uint8 *)ip6h + sizeof(struct ipv6_hdr) + ICMPV6_RA_FLAG_OFFSET);
+	}
+
+	DHD_STATLOG_DATA(dhdp, ICMPV6_TYPES_STAT(msgtype - 127),
+			ifidx, tx, cond);
+	ICMPv6_PRINT("ICMPv6");
+	return;
+}
+
+bool
+dhd_check_dhcp6(uint8 *pktdata, uint32 plen)
+{
+	ipv6hdr_fmt_t *b = (ipv6hdr_fmt_t *)&pktdata[ETHER_HDR_LEN];
+	struct ipv6_hdr *ip6h = &b->ip6h;
+
+	/* check header length */
+	if (plen <= IPV6_MIN_HLEN) {
+		return FALSE;
+	}
+
+	if (IPV6_PROT(ip6h) != IP_PROT_UDP) {
+		return FALSE;
+	}
+
+	/* check UDP port for bootp (546, 547) */
+	if (b->udph.src_port != htons(DHCP6_PORT_SERVER) &&
+			b->udph.src_port != htons(DHCP6_PORT_CLIENT) &&
+			b->udph.dst_port != htons(DHCP6_PORT_SERVER) &&
+			b->udph.dst_port != htons(DHCP6_PORT_CLIENT)) {
+		return FALSE;
+	}
+
+	return TRUE;
+}
+
+bool
+dhd_check_dns6(uint8 *pktdata, uint32 plen)
+{
+	ipv6hdr_fmt_t *b = (ipv6hdr_fmt_t *)&pktdata[ETHER_HDR_LEN];
+	struct ipv6_hdr *ip6h = &b->ip6h;
+
+	/* check header length */
+	if (plen <= IPV6_MIN_HLEN) {
+		return FALSE;
+	}
+
+	if (IPV6_PROT(ip6h) != IP_PROT_UDP) {
+		return FALSE;
+	}
+
+	/* check UDP port for DNS */
+	if (b->udph.src_port != hton16(UDP_PORT_DNS) &&
+		b->udph.dst_port != hton16(UDP_PORT_DNS)) {
+		return FALSE;
+	}
+
+	return TRUE;
+}
+#endif /* DHD_IPV6_DUMP */
 
 #ifdef DHD_TRX_DUMP
 void

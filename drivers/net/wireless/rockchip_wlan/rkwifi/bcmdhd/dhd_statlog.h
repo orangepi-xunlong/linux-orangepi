@@ -1,7 +1,26 @@
 /*
  * DHD debugability: Header file for the Status Information Logging
  *
- * Copyright (C) 2022, Broadcom.
+ * Copyright (C) 2024 Synaptics Incorporated. All rights reserved.
+ *
+ * This software is licensed to you under the terms of the
+ * GNU General Public License version 2 (the "GPL") with Broadcom special exception.
+ *
+ * INFORMATION CONTAINED IN THIS DOCUMENT IS PROVIDED "AS-IS," AND SYNAPTICS
+ * EXPRESSLY DISCLAIMS ALL EXPRESS AND IMPLIED WARRANTIES, INCLUDING ANY
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE,
+ * AND ANY WARRANTIES OF NON-INFRINGEMENT OF ANY INTELLECTUAL PROPERTY RIGHTS.
+ * IN NO EVENT SHALL SYNAPTICS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+ * SPECIAL, PUNITIVE, OR CONSEQUENTIAL DAMAGES ARISING OUT OF OR IN CONNECTION
+ * WITH THE USE OF THE INFORMATION CONTAINED IN THIS DOCUMENT, HOWEVER CAUSED
+ * AND BASED ON ANY THEORY OF LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+ * NEGLIGENCE OR OTHER TORTIOUS ACTION, AND EVEN IF SYNAPTICS WAS ADVISED OF
+ * THE POSSIBILITY OF SUCH DAMAGE. IF A TRIBUNAL OF COMPETENT JURISDICTION
+ * DOES NOT PERMIT THE DISCLAIMER OF DIRECT DAMAGES OR ANY OTHER DAMAGES,
+ * SYNAPTICS' TOTAL CUMULATIVE LIABILITY TO ANY PARTY SHALL NOT
+ * EXCEED ONE HUNDRED U.S. DOLLARS
+ *
+ * Copyright (C) 2024, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -171,7 +190,26 @@ typedef enum stat_log_stat {
 	ST(ASSOC_NO_NETWORKS)	= 86,	/* association failure due to no networks */
 	ST(ASSOC_OTHERS)	= 87,	/* association failure due to no networks */
 	ST(REASSOC_DONE_OTHERS)	= 88,	/* complete to reassoc with other reason */
-	ST(MAX)			= 89	/* Max Status */
+	ST(SOLICIT) 		= 89,	/* DHCPv6 Solicit */
+	ST(ADVERTISE) 		= 90,	/* DHCPv6 Advertise */
+	ST(REQUEST) 		= 91,	/* DHCPv6 Request */
+	ST(CONFIRM) 		= 92,	/* DHCPv6 Confirm */
+	ST(RENEW) 		= 93,	/* DHCPv6 Renew */
+	ST(REBIND) 		= 94,	/* DHCPv6 Rebind */
+	ST(REPLY) 		= 95,	/* DHCPv6 Reply */
+	ST(RELEASE) 		= 96,	/* DHCPv6 Release */
+	ST(DECLINE) 		= 97,	/* DHCPv6 Decline */
+	ST(RECONFIGURE) 	= 98,	/* ICMPv6 Reconfigure */
+	ST(ECHO_REQ) 		= 99,	/* ICMPv6 Echo Req */
+	ST(ECHO_REPLY) 		= 100,	/* ICMPv6 Echo Reply */
+	ST(MULTI_QUERY) 	= 101,	/* ICMPv6 Multi Query */
+	ST(MULTI_REPORT) 	= 102,	/* ICMPv6 Multi Report */
+	ST(MULTI_DONE) 		= 103,	/* ICMPv6 Multi Done */
+	ST(ROUTER_SOLIC) 	= 104,	/* ICMPv6 Router Solic */
+	ST(ROUTER_ADV) 		= 105,	/* ICMPv6 Router Adv */
+	ST(NEIGHBOR_SOLIC) 	= 106,	/* ICMPv6 Neighbor Solic */
+	ST(NEIGHBOR_ADV) 	= 107,	/* ICMPv6 Neighbor Adv */
+	ST(MAX)			= 108	/* Max Status */
 } stat_log_stat_t;
 
 /* functions */

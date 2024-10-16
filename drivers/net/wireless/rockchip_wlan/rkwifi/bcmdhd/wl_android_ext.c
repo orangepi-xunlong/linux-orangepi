@@ -560,23 +560,8 @@ void
 wl_ext_bss_iovar_war(struct net_device *ndev, s32 *val)
 {
 	dhd_pub_t *dhd = dhd_get_pub(ndev);
-	uint chip;
-	bool need_war = false;
 
-	chip = dhd_conf_get_chip(dhd);
-
-	if (chip == BCM43362_CHIP_ID || chip == BCM4330_CHIP_ID ||
-		chip == BCM4354_CHIP_ID || chip == BCM4356_CHIP_ID ||
-		chip == BCM4371_CHIP_ID ||
-		chip == BCM43430_CHIP_ID ||
-		chip == BCM4345_CHIP_ID || chip == BCM43454_CHIP_ID ||
-		chip == BCM4359_CHIP_ID ||
-		chip == BCM43143_CHIP_ID || chip == BCM43242_CHIP_ID ||
-		chip == BCM43569_CHIP_ID) {
-		need_war = true;
-	}
-
-	if (need_war) {
+	if (dhd_conf_legacy_chip_check(dhd)) {
 		/* Few firmware branches have issues in bss iovar handling and
 		 * that can't be changed since they are in production.
 		 */
@@ -919,9 +904,6 @@ wl_ext_connect(struct net_device *dev, struct wl_conn_info *conn_info)
 	u32 chan_cnt = 0;
 	s8 *iovar_buf = NULL;
 	char sec[64];
-
-	if (dhd->conf->chip == BCM43362_CHIP_ID)
-		goto set_ssid;
 
 	if (conn_info->channel) {
 		chan_cnt = 1;
@@ -2208,6 +2190,8 @@ wl_ext_gtk_key_info(struct net_device *dev, char *data, char *command, int total
 		}
 
 		memset(&bcol_keyinfo, 0, sizeof(bcol_keyinfo));
+		memset(&keyinfo, 0, sizeof(keyinfo));
+
 		bcol_keyinfo.enable = 1;
 		bcol_keyinfo.ptk_len = 64;
 		memcpy(&bcol_keyinfo.ptk, data, RSN_KCK_LENGTH+RSN_KEK_LENGTH);
@@ -2217,7 +2201,6 @@ wl_ext_gtk_key_info(struct net_device *dev, char *data, char *command, int total
 			goto exit;
 		}
 
-		memset(&keyinfo, 0, sizeof(keyinfo));
 		memcpy(&keyinfo, data, RSN_KCK_LENGTH+RSN_KEK_LENGTH+RSN_REPLAY_LEN);
 		err = wl_ext_iovar_setbuf(dev, "gtk_key_info", &keyinfo, sizeof(keyinfo),
 			iovar_buf, sizeof(iovar_buf), NULL);
@@ -2228,7 +2211,7 @@ wl_ext_gtk_key_info(struct net_device *dev, char *data, char *command, int total
 	}
 
 exit:
-	if (android_msg_level & ANDROID_INFO_LEVEL) {
+	if (data && android_msg_level & ANDROID_INFO_LEVEL) {
 		prhex("kck", (uchar *)keyinfo.KCK, RSN_KCK_LENGTH);
 		prhex("kek", (uchar *)keyinfo.KEK, RSN_KEK_LENGTH);
 		prhex("replay_ctr", (uchar *)keyinfo.ReplayCounter, RSN_REPLAY_LEN);
@@ -2860,7 +2843,17 @@ wl_ext_conf_iovar(struct net_device *dev, char *command, int total_len)
 			bytes_written = snprintf(command, total_len, "%d", dhd->conf->pm);
 			ret = bytes_written;
 		}
-	} else {
+	}
+	else if (!strcmp(name, "tput_monitor_ms")) {
+		if (data) {
+			dhd->conf->tput_monitor_ms = simple_strtol(data, NULL, 0);
+			ret = 0;
+		} else {
+			bytes_written = snprintf(command, total_len, "%d", dhd->conf->tput_monitor_ms);
+			ret = bytes_written;
+		}
+	}
+	else {
 		AEXT_ERROR(dev->name, "no config parameter found\n");
 	}
 
@@ -3109,7 +3102,6 @@ wl_ext_get_best_channel(struct net_device *net,
 {
 	struct dhd_pub *dhd = dhd_get_pub(net);
 	struct wl_bss_info *bi = NULL;	/* must be initialized */
-	struct wl_chan_info chan_info;
 	s32 i, j;
 #if defined(BSSCACHE)
 	wl_bss_cache_t *node;
@@ -3150,8 +3142,6 @@ wl_ext_get_best_channel(struct net_device *net,
 		for (i = 0; i < list->count; i++) {
 			chspec = list->element[i];
 			channel = wf_chspec_ctlchan(chspec);
-			chan_info.band = CHSPEC2WLC_BAND(chspec);
-			chan_info.chan = channel;
 			if (CHSPEC_IS2G(chspec) && (channel >= CH_MIN_2G_CHANNEL) &&
 					(channel <= CH_MAX_2G_CHANNEL)) {
 				b_band[channel-1] = 0;

@@ -1,7 +1,26 @@
 /*
  * Linux cfgp2p driver
  *
- * Copyright (C) 2022, Broadcom.
+ * Copyright (C) 2024 Synaptics Incorporated. All rights reserved.
+ *
+ * This software is licensed to you under the terms of the
+ * GNU General Public License version 2 (the "GPL") with Broadcom special exception.
+ *
+ * INFORMATION CONTAINED IN THIS DOCUMENT IS PROVIDED "AS-IS," AND SYNAPTICS
+ * EXPRESSLY DISCLAIMS ALL EXPRESS AND IMPLIED WARRANTIES, INCLUDING ANY
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE,
+ * AND ANY WARRANTIES OF NON-INFRINGEMENT OF ANY INTELLECTUAL PROPERTY RIGHTS.
+ * IN NO EVENT SHALL SYNAPTICS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+ * SPECIAL, PUNITIVE, OR CONSEQUENTIAL DAMAGES ARISING OUT OF OR IN CONNECTION
+ * WITH THE USE OF THE INFORMATION CONTAINED IN THIS DOCUMENT, HOWEVER CAUSED
+ * AND BASED ON ANY THEORY OF LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+ * NEGLIGENCE OR OTHER TORTIOUS ACTION, AND EVEN IF SYNAPTICS WAS ADVISED OF
+ * THE POSSIBILITY OF SUCH DAMAGE. IF A TRIBUNAL OF COMPETENT JURISDICTION
+ * DOES NOT PERMIT THE DISCLAIMER OF DIRECT DAMAGES OR ANY OTHER DAMAGES,
+ * SYNAPTICS' TOTAL CUMULATIVE LIABILITY TO ANY PARTY SHALL NOT
+ * EXCEED ONE HUNDRED U.S. DOLLARS
+ *
+ * Copyright (C) 2024, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -435,6 +454,7 @@ wl_cfgp2p_ifadd(struct bcm_cfg80211 *cfg, struct ether_addr *mac, u8 if_type,
 	s32 err;
 	struct net_device *ndev = bcmcfg_to_prmry_ndev(cfg);
 
+	memset(&ifreq, 0, sizeof(wl_p2p_if_t));
 	ifreq.type = if_type;
 	ifreq.chspec = chspec;
 	memcpy(ifreq.addr.octet, mac->octet, sizeof(ifreq.addr.octet));
@@ -511,6 +531,7 @@ wl_cfgp2p_ifchange(struct bcm_cfg80211 *cfg, struct ether_addr *mac, u8 if_type,
 
 	struct net_device *netdev =  wl_to_p2p_bss_ndev(cfg, conn_idx);
 
+	memset(&ifreq, 0, sizeof(wl_p2p_if_t));
 	ifreq.type = if_type;
 	ifreq.chspec = chspec;
 	memcpy(ifreq.addr.octet, mac->octet, sizeof(ifreq.addr.octet));
@@ -686,6 +707,7 @@ wl_cfgp2p_set_p2p_mode(struct bcm_cfg80211 *cfg, u8 mode, u32 channel, u16 liste
 #endif /* P2PLISTEN_AP_SAMECHN */
 
 	/* Put the WL driver into P2P Listen Mode to respond to P2P probe reqs */
+	memset(&discovery_mode, 0, sizeof(wl_p2p_disc_st_t));
 	discovery_mode.state = mode;
 	discovery_mode.chspec = wl_ch_host_to_driver(channel);
 	discovery_mode.dwell = listen_ms;
@@ -763,6 +785,13 @@ wl_cfgp2p_init_discovery(struct bcm_cfg80211 *cfg)
 		goto exit;
 	}
 
+	/* In case of CFG80211 case, check if p2p_discovery interface has allocated p2p_wdev */
+	if (!cfg->p2p_wdev) {
+		CFGP2P_ERR(("p2p_wdev is NULL.\n"));
+		ret = -ENODEV;
+		goto exit;
+	}
+
 	ret = wl_cfgp2p_set_discovery(cfg, 1);
 	if (ret < 0) {
 		CFGP2P_ERR(("set discover error\n"));
@@ -771,13 +800,6 @@ wl_cfgp2p_init_discovery(struct bcm_cfg80211 *cfg)
 	/* Enable P2P Discovery in the WL Driver */
 	ret = wl_cfgp2p_get_disc_idx(cfg, &bssidx);
 	if (ret < 0) {
-		goto exit;
-	}
-
-	/* In case of CFG80211 case, check if p2p_discovery interface has allocated p2p_wdev */
-	if (!cfg->p2p_wdev) {
-		CFGP2P_ERR(("p2p_wdev is NULL.\n"));
-		ret = -ENODEV;
 		goto exit;
 	}
 
@@ -803,6 +825,7 @@ wl_cfgp2p_init_discovery(struct bcm_cfg80211 *cfg)
 	if (unlikely(ret != 0)) {
 		CFGP2P_ERR(("unable to set WL_P2P_DISC_ST_SCAN\n"));
 		wl_cfgp2p_set_discovery(cfg, 0);
+		wl_dealloc_netinfo_by_wdev(cfg, cfg->p2p_wdev);
 		wl_to_p2p_bss_bssidx(cfg, P2PAPI_BSSCFG_DEVICE) = 0;
 		wl_to_p2p_bss_ndev(cfg, P2PAPI_BSSCFG_DEVICE) = NULL;
 		ret = 0;
@@ -814,6 +837,8 @@ wl_cfgp2p_init_discovery(struct bcm_cfg80211 *cfg)
 exit:
 	if (ret) {
 		wl_flush_fw_log_buffer(ndev, FW_LOGSET_MASK_ALL);
+		// disable the discovery when error
+		wl_cfgp2p_set_discovery(cfg, 0);
 	}
 	return ret;
 }
@@ -1343,9 +1368,12 @@ u32
 wl_cfgp2p_vndr_ie(struct bcm_cfg80211 *cfg, u8 *iebuf, s32 pktflag,
             s8 *oui, s32 ie_id, const s8 *data, s32 datalen, const s8* add_del_cmd)
 {
-	vndr_ie_setbuf_t hdr;	/* aligned temporary vndr_ie buffer header */
+	vndr_ie_setbuf_t *hdr;	/* aligned temporary vndr_ie buffer header */
 	s32 iecount;
 	u32 data_offset;
+	u8 buf[VNDR_IE_SET_ONE_BUF_LEN];
+
+	hdr = (vndr_ie_setbuf_t *)buf;
 
 	/* Validate the pktflag parameter */
 	if ((pktflag & ~(VNDR_IE_BEACON_FLAG | VNDR_IE_PRBRSP_FLAG |
@@ -1356,12 +1384,13 @@ wl_cfgp2p_vndr_ie(struct bcm_cfg80211 *cfg, u8 *iebuf, s32 pktflag,
 		return -1;
 	}
 
+	memset((u8*)hdr, 0, sizeof(vndr_ie_setbuf_t));
 	/* Copy the vndr_ie SET command ("add"/"del") to the buffer */
-	strlcpy(hdr.cmd, add_del_cmd, sizeof(hdr.cmd));
+	strlcpy(hdr->cmd, add_del_cmd, sizeof(hdr->cmd));
 
 	/* Set the IE count - the buffer contains only 1 IE */
 	iecount = htod32(1);
-	memcpy((void *)&hdr.vndr_ie_buffer.iecount, &iecount, sizeof(s32));
+	hdr->vndr_ie_buffer.iecount = iecount;
 
 	/* For vendor ID DOT11_MNG_ID_EXT_ID, need to set pkt flag to VNDR_IE_CUSTOM_FLAG */
 	if (ie_id == DOT11_MNG_ID_EXT_ID) {
@@ -1370,31 +1399,30 @@ wl_cfgp2p_vndr_ie(struct bcm_cfg80211 *cfg, u8 *iebuf, s32 pktflag,
 
 	/* Copy packet flags that indicate which packets will contain this IE */
 	pktflag = htod32(pktflag);
-	memcpy((void *)&hdr.vndr_ie_buffer.vndr_ie_list[0].pktflag, &pktflag,
-		sizeof(u32));
+
+	hdr->vndr_ie_buffer.vndr_ie_list[0].pktflag = pktflag;
 
 	/* Add the IE ID to the buffer */
-	hdr.vndr_ie_buffer.vndr_ie_list[0].vndr_ie_data.id = ie_id;
+	hdr->vndr_ie_buffer.vndr_ie_list[0].vndr_ie_data.id = ie_id;
 
 	/* Add the IE length to the buffer */
-	hdr.vndr_ie_buffer.vndr_ie_list[0].vndr_ie_data.len =
+	hdr->vndr_ie_buffer.vndr_ie_list[0].vndr_ie_data.len =
 		(uint8) VNDR_IE_MIN_LEN + datalen;
 
 	/* Add the IE OUI to the buffer */
-	hdr.vndr_ie_buffer.vndr_ie_list[0].vndr_ie_data.oui[0] = oui[0];
-	hdr.vndr_ie_buffer.vndr_ie_list[0].vndr_ie_data.oui[1] = oui[1];
-	hdr.vndr_ie_buffer.vndr_ie_list[0].vndr_ie_data.oui[2] = oui[2];
+	hdr->vndr_ie_buffer.vndr_ie_list[0].vndr_ie_data.oui[0] = oui[0];
+	hdr->vndr_ie_buffer.vndr_ie_list[0].vndr_ie_data.oui[1] = oui[1];
+	hdr->vndr_ie_buffer.vndr_ie_list[0].vndr_ie_data.oui[2] = oui[2];
 
 	/* Copy the aligned temporary vndr_ie buffer header to the IE buffer */
-	memcpy(iebuf, &hdr, sizeof(hdr) - 1);
+	memcpy(iebuf, (u8*)hdr, VNDR_IE_SET_ONE_BUF_LEN - 1);
 
 	/* Copy the IE data to the IE buffer */
 	data_offset =
-		(u8*)&hdr.vndr_ie_buffer.vndr_ie_list[0].vndr_ie_data.data[0] -
-		(u8*)&hdr;
+		(u8*)&(hdr->vndr_ie_buffer.vndr_ie_list[0].vndr_ie_data.data[0]) -
+		(u8*)hdr;
 	memcpy(iebuf + data_offset, data, datalen);
 	return data_offset + datalen;
-
 }
 
 struct net_device *
@@ -1871,7 +1899,8 @@ wl_cfgp2p_tx_action_frame(struct bcm_cfg80211 *cfg, bcm_struct_cfgdev *cfgdev,
 
 	cfg->af_sent_channel  = af_params->channel;
 	/* For older FW versions actframe does not support chanspec format */
-	if (cfg->wlc_ver.wlc_ver_major < FW_MAJOR_VER_ACTFRAME_CHSPEC) {
+	if (cfg->wlc_ver.wlc_ver_major < FW_MAJOR_VER_ACTFRAME_CHSPEC &&
+		!FW_MAJOR_VER_ACTFRAME_CHSPEC_PORTED(cfg->wlc_ver)) {
 		af_params->channel = CHSPEC_CHANNEL(af_params->channel);
 	}
 #ifdef WL_CFG80211_SYNC_GON
@@ -2601,7 +2630,7 @@ wl_cfgp2p_register_ndev(struct bcm_cfg80211 *cfg)
 	wdev->netdev = net;
 #endif /* WL_NEWCFG_PRIVCMD_SUPPORT */
 
-	ret = register_netdev(net);
+	ret = dhd_register_net(net, true);
 	if (ret) {
 		CFGP2P_ERR((" register_netdevice failed (%d)\n", ret));
 		free_netdev(net);
@@ -2635,7 +2664,7 @@ wl_cfgp2p_unregister_ndev(struct bcm_cfg80211 *cfg)
 		return -EINVAL;
 	}
 
-	unregister_netdev(cfg->p2p_net);
+	dhd_unregister_net(cfg->p2p_net, true);
 	free_netdev(cfg->p2p_net);
 
 	return 0;
@@ -2895,7 +2924,7 @@ wl_cfgp2p_stop_p2p_device(struct wiphy *wiphy, struct wireless_dev *wdev)
 
 	p2p_on(cfg) = false;
 
-	printf("Exit. P2P interface stopped\n");
+	printf("P2P interface stopped\n");
 
 	return;
 }
@@ -2944,7 +2973,7 @@ wl_cfgp2p_del_p2p_disc_if(struct wireless_dev *wdev, struct bcm_cfg80211 *cfg)
 
 	cfg->p2p_wdev = NULL;
 
-	CFGP2P_ERR(("P2P interface unregistered\n"));
+	printf("P2P interface unregistered\n");
 
 	return 0;
 }

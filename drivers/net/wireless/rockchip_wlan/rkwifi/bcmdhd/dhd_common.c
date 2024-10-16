@@ -1,7 +1,26 @@
 /*
  * Broadcom Dongle Host Driver (DHD), common DHD core.
  *
- * Copyright (C) 2022, Broadcom.
+ * Copyright (C) 2024 Synaptics Incorporated. All rights reserved.
+ *
+ * This software is licensed to you under the terms of the
+ * GNU General Public License version 2 (the "GPL") with Broadcom special exception.
+ *
+ * INFORMATION CONTAINED IN THIS DOCUMENT IS PROVIDED "AS-IS," AND SYNAPTICS
+ * EXPRESSLY DISCLAIMS ALL EXPRESS AND IMPLIED WARRANTIES, INCLUDING ANY
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE,
+ * AND ANY WARRANTIES OF NON-INFRINGEMENT OF ANY INTELLECTUAL PROPERTY RIGHTS.
+ * IN NO EVENT SHALL SYNAPTICS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+ * SPECIAL, PUNITIVE, OR CONSEQUENTIAL DAMAGES ARISING OUT OF OR IN CONNECTION
+ * WITH THE USE OF THE INFORMATION CONTAINED IN THIS DOCUMENT, HOWEVER CAUSED
+ * AND BASED ON ANY THEORY OF LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+ * NEGLIGENCE OR OTHER TORTIOUS ACTION, AND EVEN IF SYNAPTICS WAS ADVISED OF
+ * THE POSSIBILITY OF SUCH DAMAGE. IF A TRIBUNAL OF COMPETENT JURISDICTION
+ * DOES NOT PERMIT THE DISCLAIMER OF DIRECT DAMAGES OR ANY OTHER DAMAGES,
+ * SYNAPTICS' TOTAL CUMULATIVE LIABILITY TO ANY PARTY SHALL NOT
+ * EXCEED ONE HUNDRED U.S. DOLLARS
+ *
+ * Copyright (C) 2024, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -497,8 +516,10 @@ const bcm_iovar_t dhd_iovars[] = {
 	/* name         varid                   flags   flags2 type     minlen */
 	{"version",	IOV_VERSION,		0,	0, IOVT_BUFFER,	0},
 	{"wlmsglevel",	IOV_WLMSGLEVEL,	0,	0,	IOVT_UINT32,	0 },
-#ifdef DHD_DEBUG
+#if defined(DHD_DEBUG) || defined(DHD_MSG_LEVEL_SUPPORT)
 	{"msglevel",	IOV_MSGLEVEL,		0,	0, IOVT_UINT32,	0},
+#endif /* DHD_DEBUG || DHD_MSG_LEVEL_SUPPORT */
+#ifdef DHD_DEBUG
 	{"mem_debug",   IOV_MEM_DEBUG,  0,      0,      IOVT_BUFFER,    0 },
 #ifdef BCMPCIE
 	{"flow_ring_debug", IOV_FLOW_RING_DEBUG, 0, 0, IOVT_BUFFER, 0 },
@@ -2808,9 +2829,9 @@ int dhd_sar_init_parameter(dhd_pub_t *dhd, eCountry_flag_type type, int advance_
 
 #ifdef VSDB
 	if (FW_SUPPORTED(dhd, 6g)) {
-		sarctrl->ver = SAR_PARAM_6G_V3_VSDB;
+		sarctrl->ver = SAR_PARAM_6G_V3_VSDB | (idx << SAR_PARAM_NUM_OFFSET);
 	} else {
-		sarctrl->ver = SAR_PARAM_V1_VSDB;
+		sarctrl->ver = SAR_PARAM_V1_VSDB | (idx << SAR_PARAM_NUM_OFFSET);
 	}
 	if (CONST_SARCTRL_SINGLE_SET_QTY != idx) {
 		DHD_ERROR(("%s: *Waring, idx=%d mismatch VSDB expect=%d\n",
@@ -2818,9 +2839,9 @@ int dhd_sar_init_parameter(dhd_pub_t *dhd, eCountry_flag_type type, int advance_
 	}
 #else /* VSDB */
 	if (FW_SUPPORTED(dhd, 6g)) {
-		sarctrl->ver = SAR_PARAM_6G_V4_RSDB;
+		sarctrl->ver = SAR_PARAM_6G_V4_RSDB | (idx << SAR_PARAM_NUM_OFFSET);
 	} else {
-		sarctrl->ver = SAR_PARAM_V2_RSDB;
+		sarctrl->ver = SAR_PARAM_V2_RSDB | (idx << SAR_PARAM_NUM_OFFSET);
 	}
 	if (CONST_SARCTRL_SET_QTY != idx) {
 		DHD_ERROR(("%s: *Waring, idx=%d mismatch RSDB expect=%d\n",
@@ -2845,6 +2866,7 @@ int dhd_sar_set_parameter(dhd_pub_t *dhd_pub, int advance_mode)
 	wl_country_t       *cspec = NULL;
 	sarctrl_set         sarctrl_iov = { 0 }, *sarctrl = NULL;
 	eCountry_flag_type  type = SYNA_COUNTRY_TYPE_INVALID;
+	int sar_ver = 0, sar_param_num = 0;
 
 	if (dhd_pub == NULL) {
 		DHD_ERROR(("%s: bcm_mkiovar failed.", __FUNCTION__));
@@ -2900,12 +2922,39 @@ int dhd_sar_set_parameter(dhd_pub_t *dhd_pub, int advance_mode)
 	}
 	DHD_TRACE(("%s: country='%s', type=%d, advance_mode=%d\n",
 	           __FUNCTION__, cspec->ccode, type, advance_mode));
+	/* Try to get sar version from FW */
+	err = dhd_iovar(dhd_pub, 0, "sar_params", NULL, 0,
+		(char *)&sarctrl_iov, sizeof(sarctrl_iov), FALSE);
+	if (err) {
+		/* Not support sar_params read */
+	} else {
+		sar_ver = sarctrl_iov.ver & SAR_PARAM_VER_MASK;
+		sar_param_num = (sarctrl_iov.ver & SAR_PARAM_NUM_MASK) >> SAR_PARAM_NUM_OFFSET;
+	}
 
-	/* prepare IOVAR */
-	sarctrl_iov.ver   = sarctrl->ver;
-	sarctrl_iov.basic = sarctrl->basic;
-	sarctrl_iov.rsdb  = sarctrl->rsdb;
-	DHD_TRACE(("%s: sarctrl_iov=0x%p, ver=%d, sarctrl_2g=0x%X, sarctrl_2g_2=0x%X\n",
+	memset(&sarctrl_iov, 0, sizeof(sarctrl_iov));
+	if (sar_ver == SAR_PARAM_DYN) {
+		int file_sar_num = (sarctrl->ver & SAR_PARAM_NUM_MASK) >> SAR_PARAM_NUM_OFFSET;
+		if (file_sar_num  != sar_param_num) {
+			DHD_ERROR(("%s: Need confirm SAR PARAMETERS configuration based on FW\n",
+				__FUNCTION__));
+			return BCME_BADARG;
+		}
+		sarctrl_iov.ver = sarctrl->ver;
+		err = memcpy_s(sarctrl_iov.sarctrl, MAX_SAR_PARAMS_NUM * sizeof(u32),
+			sarctrl->sarctrl, file_sar_num * sizeof(u32));
+		if (err) {
+			DHD_ERROR(("%s: memcpy error num = %d\n",
+				__FUNCTION__, file_sar_num));
+			return BCME_BADARG;
+		}
+	} else {
+		/* prepare IOVAR for old version*/
+		sarctrl_iov.ver   = sarctrl->ver & SAR_PARAM_VER_MASK;
+		sarctrl_iov.basic = sarctrl->basic;
+		sarctrl_iov.rsdb  = sarctrl->rsdb;
+	}
+	DHD_TRACE(("%s: sarctrl_iov=0x%p, ver=%x, sarctrl_2g=0x%X, sarctrl_2g_2=0x%X\n",
 	           __FUNCTION__, &sarctrl_iov, sarctrl_iov.ver,
 	           sarctrl_iov.basic.sarctrl_2g,
 	           sarctrl_iov.basic.sarctrl_2g_2));
@@ -6179,7 +6228,7 @@ wl_process_host_event(dhd_pub_t *dhd_pub, int *ifidx, void *pktdata, uint pktlen
 		{
 			uint8* ea = pvt_data->eth.ether_dhost;
 			WLFC_DBGMESG(("WLC_E_IF: idx:%d, action:%s, iftype:%s, ["MACDBG"]\n"
-						  ifevent->ifidx,
+						  ,ifevent->ifidx,
 						  ((ifevent->opcode == WLC_E_IF_ADD) ? "ADD":"DEL"),
 						  ((ifevent->role == 0) ? "STA":"AP "),
 						  MAC2STRDBG(ea)));
@@ -6189,11 +6238,27 @@ wl_process_host_event(dhd_pub_t *dhd_pub, int *ifidx, void *pktdata, uint pktlen
 				dhd_wlfc_interface_event(dhd_pub,
 					eWLFC_MAC_ENTRY_ACTION_UPDATE,
 					ifevent->ifidx, ifevent->role, ea);
-			else
+			else {
+#if defined(__linux__)
+				/* Early set interface "del_in_progress" to prevent from packets
+				 * flooding to interface which is going to be removed. That would
+				 * cause proptx transit_count not consistent and has entry suppressed issue.
+				 */
+				if (ifevent->opcode == WLC_E_IF_DEL) {
+					unsigned long fl;
+					ifp = dhd_get_ifp(dhd_pub, ifevent->ifidx);
+					if (ifp) {
+						DHD_GENERAL_LOCK(dhd_pub, fl);
+						ifp->del_in_progress = true;
+						DHD_GENERAL_UNLOCK(dhd_pub, fl);
+					}
+				}
+#endif /* __linux__ */
 				dhd_wlfc_interface_event(dhd_pub,
 					((ifevent->opcode == WLC_E_IF_ADD) ?
 					eWLFC_MAC_ENTRY_ACTION_ADD : eWLFC_MAC_ENTRY_ACTION_DEL),
 					ifevent->ifidx, ifevent->role, ea);
+			}
 
 			/* dhd already has created an interface by default, for 0 */
 			if (ifevent->ifidx == 0)
@@ -6330,11 +6395,12 @@ wl_process_host_event(dhd_pub_t *dhd_pub, int *ifidx, void *pktdata, uint pktlen
 		if (!ifp)
 			break;
 
-		/* Consider STA role only since roam is disabled on P2P GC.
-		 * Drop EAPOL M1 frame only if roam is done to same BSS.
+		/* Consider both STA and GC due to CSA.
+		 * Drop EAPOL M1 frame only if roam is done to the same BSSID.
+		 * wpa_supplicant only handles different BSSID case.
 		 */
 		if ((status == WLC_E_STATUS_SUCCESS) &&
-			IS_STA_IFACE(ndev_to_wdev(ifp->net)) &&
+			(IS_STA_IFACE(ndev_to_wdev(ifp->net)) || IS_P2P_GC(ndev_to_wdev(ifp->net))) &&
 			wl_cfg80211_is_event_from_connected_bssid(ifp->net, event, event->ifidx)) {
 			ifp->recv_reassoc_evt = TRUE;
 		}
@@ -6361,6 +6427,31 @@ wl_process_host_event(dhd_pub_t *dhd_pub, int *ifidx, void *pktdata, uint pktlen
 			dhd_flow_rings_delete(dhd_pub, (uint8)dhd_ifname2idx(dhd_pub->info,
 				event->ifname));
 		}
+#else
+#ifdef PROP_TXSTATUS
+		/* Link down */
+		if (!flags) {
+			struct wl_event_data_if *ifevent = (struct wl_event_data_if *)event_data;
+			uint8* ea = pvt_data->eth.ether_dhost;
+			WLFC_DBGMESG(("WLC_E_LINK: idx:%d, action:%s, "
+			              "iftype:%s, ["MACDBG"]\n",
+			              ifevent->ifidx,
+			              ((flags) ? "UP":"DOWN"),
+			              ((ifevent->role == 0) ? "STA":"AP "),
+			              MAC2STRDBG(ea)));
+			(void)ea;
+
+			/* only need to handle STA here */
+			if (!ifevent->role) {
+				dhd_wlfc_interface_event(dhd_pub,
+					eWLFC_MAC_ENTRY_ACTION_DEL,
+					ifevent->ifidx, ifevent->role, ea);
+				dhd_wlfc_interface_event(dhd_pub,
+					eWLFC_MAC_ENTRY_ACTION_ADD,
+					ifevent->ifidx, ifevent->role, ea);
+			}
+		}
+#endif /* PROP_TXSTATUS */
 #endif /* PCIE_FULL_DONGLE */
 		/* fall through */
 		fallthrough;
@@ -6403,6 +6494,7 @@ wl_process_host_event(dhd_pub_t *dhd_pub, int *ifidx, void *pktdata, uint pktlen
 		}
 #endif /* PCIE_FULL_DONGLE */
 #ifdef DHD_POST_EAPOL_M1_AFTER_ROAM_EVT
+		/* fall through */
 		ifp = dhd_get_ifp(dhd_pub, event->ifidx);
 		if (ifp) {
 			ifp->recv_reassoc_evt = FALSE;
@@ -6549,6 +6641,22 @@ pattern_atoh_len(char *src, char *dst, int len)
 #endif /* PKT_FILTER_SUPPORT || DHD_PKT_LOGGING */
 
 #ifdef PKT_FILTER_SUPPORT
+
+int
+dhd_pktfilter_mode_change(dhd_pub_t * dhd, int enable)
+{
+	int   rc = 0;
+    uint  operation_mode = PKT_FILTER_MODE_DISABLE;
+
+    operation_mode =  dhd_master_mode
+                       | ((enable)?(0):(PKT_FILTER_MODE_DISABLE));
+
+    /* Contorl the master mode */
+    rc = dhd_wl_ioctl_set_intiovar(dhd, "pkt_filter_mode", operation_mode, WLC_SET_VAR, TRUE, 0);
+
+	return rc;
+}
+
 void
 dhd_pktfilter_offload_enable(dhd_pub_t * dhd, char *arg, int enable, int master_mode)
 {
@@ -6992,6 +7100,14 @@ void
 dhd_arp_offload_enable(dhd_pub_t * dhd, int arp_enable)
 {
 	int retcode;
+
+#ifdef DISABLE_ARP_OFFLOAD_ON_SOFTAP
+	/* IF SoftAP is enabled, do NOT enable ARP Offload */
+	if (dhd->pfaoe_enab && (dhd->op_mode & DHD_FLAG_HOSTAP_MODE) && arp_enable) {
+		DHD_ERROR(("%s: Skip enabling ARP offload when SoftAP is enabled\n", __FUNCTION__));
+		return;
+	}
+#endif /* DISABLE_ARP_OFFLOAD_ON_SOFTAP */
 
 	if (!dhd->arpol_configured) {
 		/* If arpol is not applied, apply it */
@@ -7822,7 +7938,7 @@ int dhd_keep_alive_onoff(dhd_pub_t *dhd)
 {
 	char				buf[32] = {0};
 	const char			*str;
-	wl_mkeep_alive_pkt_v1_t	mkeep_alive_pkt = {0, 0, 0, 0, 0, {0}};
+	wl_mkeep_alive_pkt_v1_t	mkeep_alive_pkt;
 	wl_mkeep_alive_pkt_v1_t	*mkeep_alive_pktp;
 	int					buf_len;
 	int					str_len;
@@ -7837,6 +7953,7 @@ int dhd_keep_alive_onoff(dhd_pub_t *dhd)
 	str_len = strlen(str);
 	strlcpy(buf, str, sizeof(buf));
 	mkeep_alive_pktp = (wl_mkeep_alive_pkt_v1_t *) (buf + str_len + 1);
+	bzero(&mkeep_alive_pkt, sizeof(mkeep_alive_pkt));
 	mkeep_alive_pkt.period_msec = dhd->conf->keep_alive_period;
 	buf_len = str_len + 1;
 	mkeep_alive_pkt.version = htod16(WL_MKEEP_ALIVE_VERSION_1);
@@ -7845,7 +7962,6 @@ int dhd_keep_alive_onoff(dhd_pub_t *dhd)
 	mkeep_alive_pkt.keep_alive_id = 0;
 	mkeep_alive_pkt.len_bytes = 0;
 	buf_len += WL_MKEEP_ALIVE_FIXED_LEN;
-	bzero(mkeep_alive_pkt.data, sizeof(mkeep_alive_pkt.data));
 	/* Keep-alive attributes are set in local	variable (mkeep_alive_pkt), and
 	 * then memcpy'ed into buffer (mkeep_alive_pktp) since there is no
 	 * guarantee that the buffer is properly aligned.

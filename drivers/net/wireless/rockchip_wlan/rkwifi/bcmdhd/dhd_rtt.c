@@ -1,7 +1,26 @@
 /*
  * Broadcom Dongle Host Driver (DHD), RTT
  *
- * Copyright (C) 2022, Broadcom.
+ * Copyright (C) 2024 Synaptics Incorporated. All rights reserved.
+ *
+ * This software is licensed to you under the terms of the
+ * GNU General Public License version 2 (the "GPL") with Broadcom special exception.
+ *
+ * INFORMATION CONTAINED IN THIS DOCUMENT IS PROVIDED "AS-IS," AND SYNAPTICS
+ * EXPRESSLY DISCLAIMS ALL EXPRESS AND IMPLIED WARRANTIES, INCLUDING ANY
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE,
+ * AND ANY WARRANTIES OF NON-INFRINGEMENT OF ANY INTELLECTUAL PROPERTY RIGHTS.
+ * IN NO EVENT SHALL SYNAPTICS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+ * SPECIAL, PUNITIVE, OR CONSEQUENTIAL DAMAGES ARISING OUT OF OR IN CONNECTION
+ * WITH THE USE OF THE INFORMATION CONTAINED IN THIS DOCUMENT, HOWEVER CAUSED
+ * AND BASED ON ANY THEORY OF LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+ * NEGLIGENCE OR OTHER TORTIOUS ACTION, AND EVEN IF SYNAPTICS WAS ADVISED OF
+ * THE POSSIBILITY OF SUCH DAMAGE. IF A TRIBUNAL OF COMPETENT JURISDICTION
+ * DOES NOT PERMIT THE DISCLAIMER OF DIRECT DAMAGES OR ANY OTHER DAMAGES,
+ * SYNAPTICS' TOTAL CUMULATIVE LIABILITY TO ANY PARTY SHALL NOT
+ * EXCEED ONE HUNDRED U.S. DOLLARS
+ *
+ * Copyright (C) 2024, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -124,7 +143,7 @@ static DEFINE_SPINLOCK(noti_list_lock);
  * Parallel RTT Sessions are supported
  * with this major and minor verion onwards
  */
-#define RTT_PARALLEL_SSNS_SUPPORTED_MAJ_VER	14
+#define RTT_PARALLEL_SSNS_SUPPORTED_MAJ_VER	12
 #define RTT_PARALLEL_SSNS_SUPPORTED_MIN_VER	2
 
 /* PROXD TIMEOUT */
@@ -716,7 +735,7 @@ rtt_alloc_getset_buf(dhd_pub_t *dhd, wl_proxd_method_t method, wl_proxd_session_
 
 	*p_out_bufsize = 0;	/* init */
 	/* calculate the whole buffer size, including one reserve-tlv entry in the header */
-	proxd_iovsize = sizeof(wl_proxd_iov_t) + tlvs_bufsize;
+	proxd_iovsize = sizeof(wl_proxd_iov_t) + sizeof(wl_proxd_tlv_t) + tlvs_bufsize;
 
 	p_proxd_iov = (wl_proxd_iov_t *)MALLOCZ(dhd->osh, proxd_iovsize);
 	if (p_proxd_iov == NULL) {
@@ -1494,6 +1513,7 @@ dhd_rtt_nan_start_session(dhd_pub_t *dhd, rtt_target_info_t *rtt_target)
 	rtt_status_info_t *rtt_status = GET_RTTSTATE(dhd);
 	ftm_config_param_info_t ftm_params[FTM_MAX_PARAMS];
 	int ftm_param_cnt = 0;
+	nan_svc_info_t svc = {0, };
 
 	memset(ftm_params, 0, sizeof(ftm_params));
 
@@ -1532,14 +1552,17 @@ dhd_rtt_nan_start_session(dhd_pub_t *dhd, rtt_target_info_t *rtt_target)
 		goto done;
 	}
 
+	/* Other fields are 0 per on-stack initialization */
+	svc.num_ftm = rtt_target->num_frames_per_burst;
+
 	/* apply event mask */
 	dhd_rtt_set_ftm_config_param(ftm_params, &ftm_param_cnt, rtt_target,
 		WL_PROXD_TLV_ID_EVENT_MASK);
 	dhd_rtt_ftm_config(dhd, 0, NULL, 0, ftm_params, ftm_param_cnt);
 
-	DHD_RTT(("Trigger nan based range request\n"));
+	DHD_RTT_ERR(("Trigger nan based range request - n:%d\n", svc.num_ftm));
 	err = wl_cfgnan_trigger_ranging(bcmcfg_to_prmry_ndev(cfg),
-			cfg, ranging_inst, NULL, NAN_RANGE_REQ_CMD, TRUE);
+			cfg, ranging_inst, &svc, NAN_RANGE_REQ_CMD, TRUE);
 	if (unlikely(err)) {
 		goto done;
 	}
@@ -4970,6 +4993,7 @@ dhd_rtt_event_handler(dhd_pub_t *dhd, wl_event_msg_t *event, void *event_data)
 				MFREE(dhd->osh, buffer, tlvs_len);
 				goto exit;
 			}
+#ifdef WL_CFG80211
 			if (event_type == WL_PROXD_EVENT_LCI_MEAS_REP) {
 				/* free previous one and update it */
 				if (target->LCI) {
@@ -4987,6 +5011,7 @@ dhd_rtt_event_handler(dhd_pub_t *dhd, wl_event_msg_t *event, void *event_data)
 				DHD_RTT(("WL_PROXD_EVENT_CIVIC_MEAS_REP: cache the LCR tlv\n"));
 				target->LCR = (bcm_xtlv_t *)buffer;
 			}
+#endif /* WL_CFG80211 */
 		}
 		break;
 #endif /* WL_RTT_LCI */

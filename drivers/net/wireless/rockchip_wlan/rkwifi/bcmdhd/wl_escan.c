@@ -494,7 +494,6 @@ wl_escan_ext_handler(struct net_device *dev, void *argu,
 	wl_scan_results_v109_t *list;
 	u32 bi_length;
 	u32 i;
-	u16 channel;
 
 	mutex_lock(&escan->usr_sync);
 	escan_result = (wl_escan_result_v109_t *)data;
@@ -529,12 +528,6 @@ wl_escan_ext_handler(struct net_device *dev, void *argu,
 				bi_length);
 			goto exit;
 		}
-
-		/* +++++ terence 20130524: skip invalid bss */
-		channel =
-			bi->ctl_ch ? bi->ctl_ch :
-			CHSPEC_CHANNEL(wl_chspec_driver_to_host(escan->ioctl_ver, bi->chanspec));
-		/* ----- terence 20130524: skip invalid bss */
 
 		{
 			int cur_len = WL_SCAN_RESULTS_V109_FIXED_SIZE;

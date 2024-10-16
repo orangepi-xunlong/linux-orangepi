@@ -4,7 +4,26 @@
  * Provides type definitions and function prototypes used to link the
  * DHD OS, bus, and protocol modules.
  *
- * Copyright (C) 2022, Broadcom.
+ * Copyright (C) 2024 Synaptics Incorporated. All rights reserved.
+ *
+ * This software is licensed to you under the terms of the
+ * GNU General Public License version 2 (the "GPL") with Broadcom special exception.
+ *
+ * INFORMATION CONTAINED IN THIS DOCUMENT IS PROVIDED "AS-IS," AND SYNAPTICS
+ * EXPRESSLY DISCLAIMS ALL EXPRESS AND IMPLIED WARRANTIES, INCLUDING ANY
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE,
+ * AND ANY WARRANTIES OF NON-INFRINGEMENT OF ANY INTELLECTUAL PROPERTY RIGHTS.
+ * IN NO EVENT SHALL SYNAPTICS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+ * SPECIAL, PUNITIVE, OR CONSEQUENTIAL DAMAGES ARISING OUT OF OR IN CONNECTION
+ * WITH THE USE OF THE INFORMATION CONTAINED IN THIS DOCUMENT, HOWEVER CAUSED
+ * AND BASED ON ANY THEORY OF LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+ * NEGLIGENCE OR OTHER TORTIOUS ACTION, AND EVEN IF SYNAPTICS WAS ADVISED OF
+ * THE POSSIBILITY OF SUCH DAMAGE. IF A TRIBUNAL OF COMPETENT JURISDICTION
+ * DOES NOT PERMIT THE DISCLAIMER OF DIRECT DAMAGES OR ANY OTHER DAMAGES,
+ * SYNAPTICS' TOTAL CUMULATIVE LIABILITY TO ANY PARTY SHALL NOT
+ * EXCEED ONE HUNDRED U.S. DOLLARS
+ *
+ * Copyright (C) 2024, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -1874,6 +1893,13 @@ typedef struct dhd_pub {
 #endif /* DEVICE_TX_STUCK_DETECT && ASSOC_CHECK_SR */
 	uint32 p2p_disc_busy_cnt;
 	bool skip_memdump_map_read;
+#if defined(DHD_SI_WD_RESET)
+	bool si_wd;
+#endif
+#ifdef PKT_FILTER_SUPPORT
+	uint8 pfaoe_enab;
+#endif /* PKT_FILTER_SUPPORT */
+
 #ifdef CSI_SUPPORT
 	struct list_head csi_list;
 	int csi_count;
@@ -2138,16 +2164,19 @@ inline static void MUTEX_UNLOCK_SOFTAP_SET(dhd_pub_t * dhdp)
 }
 
 #ifdef DHD_DEBUG_WAKE_LOCK
+extern int dhd_wakelock_counter_get(dhd_pub_t *pub);
+extern int dhd_wakelock_wd_counter_get(dhd_pub_t *pub);
+
 #define DHD_OS_WAKE_LOCK(pub) \
 	do { \
-		printf("call wake_lock: %s %d\n", \
-			__FUNCTION__, __LINE__); \
+		printf("call wake_lock: %s %d (%d)\n", \
+			__FUNCTION__, __LINE__, dhd_wakelock_counter_get(pub)); \
 		dhd_os_wake_lock(pub); \
 	} while (0)
 #define DHD_OS_WAKE_UNLOCK(pub) \
 	do { \
-		printf("call wake_unlock: %s %d\n", \
-			__FUNCTION__, __LINE__); \
+		printf("call wake_unlock: %s %d (%d)\n", \
+			__FUNCTION__, __LINE__, dhd_wakelock_counter_get(pub)); \
 		dhd_os_wake_unlock(pub); \
 	} while (0)
 #define DHD_EVENT_WAKE_LOCK(pub) \
@@ -2246,6 +2275,18 @@ inline static void MUTEX_UNLOCK_SOFTAP_SET(dhd_pub_t * dhdp)
 			__FUNCTION__, __LINE__); \
 		dhd_os_wake_lock_destroy(dhd); \
 	} while (0)
+#define DHD_OS_WD_WAKE_LOCK(pub) \
+	do { \
+		printf("call dhd_os_WD_wake_lock: %s %d (%d)\n", \
+			__FUNCTION__, __LINE__, dhd_wakelock_wd_counter_get(pub)); \
+		dhd_os_wd_wake_lock(pub); \
+	} while (0)
+#define DHD_OS_WD_WAKE_UNLOCK(pub) \
+	do { \
+		printf("call dhd_os_WD_wake_unlock: %s %d (%d)\n", \
+			__FUNCTION__, __LINE__, dhd_wakelock_wd_counter_get(pub)); \
+		dhd_os_wd_wake_unlock(pub); \
+	} while (0)
 #else
 #define DHD_OS_WAKE_LOCK(pub)			dhd_os_wake_lock(pub)
 #define DHD_OS_WAKE_UNLOCK(pub)		dhd_os_wake_unlock(pub)
@@ -2268,10 +2309,9 @@ inline static void MUTEX_UNLOCK_SOFTAP_SET(dhd_pub_t * dhdp)
 #define DHD_OS_WAKE_LOCK_RESTORE(pub)		dhd_os_wake_lock_restore(pub)
 #define DHD_OS_WAKE_LOCK_INIT(dhd)		dhd_os_wake_lock_init(dhd);
 #define DHD_OS_WAKE_LOCK_DESTROY(dhd)		dhd_os_wake_lock_destroy(dhd);
-#endif /* DHD_DEBUG_WAKE_LOCK */
-
 #define DHD_OS_WD_WAKE_LOCK(pub)		dhd_os_wd_wake_lock(pub)
 #define DHD_OS_WD_WAKE_UNLOCK(pub)		dhd_os_wd_wake_unlock(pub)
+#endif /* DHD_DEBUG_WAKE_LOCK */
 
 #ifdef DHD_USE_SCAN_WAKELOCK
 #ifdef DHD_DEBUG_SCAN_WAKELOCK
@@ -2554,6 +2594,7 @@ extern void dhd_bus_wakeup_work(dhd_pub_t *dhdp);
 #define MAX_FEATURE_SET_CONCURRRENT_GROUPS  3
 
 #if defined(linux) || defined(LINUX) || defined(OEM_ANDROID)
+extern int dhd_dev_indoor_cfg(struct net_device *dev, u8 enable);
 extern int dhd_dev_get_feature_set(struct net_device *dev);
 extern int dhd_dev_get_feature_set_matrix(struct net_device *dev, int num);
 extern int dhd_dev_cfg_rand_mac_oui(struct net_device *dev, uint8 *oui);
@@ -3278,7 +3319,7 @@ extern uint dhd_force_tx_queueing;
 #define CUSTOM_RXF_PRIO_SETTING		MAX((CUSTOM_DPC_PRIO_SETTING - 1), 1)
 #endif
 
-#define DEFAULT_WIFI_TURNOFF_DELAY		0
+#define DEFAULT_WIFI_TURNOFF_DELAY		10
 #ifndef WIFI_TURNOFF_DELAY
 #define WIFI_TURNOFF_DELAY		DEFAULT_WIFI_TURNOFF_DELAY
 #endif /* WIFI_TURNOFF_DELAY */
@@ -4109,6 +4150,7 @@ extern int dhd_prot_debug_info_print(dhd_pub_t *dhd);
 extern bool dhd_bus_skip_clm(dhd_pub_t *dhdp);
 extern void dhd_pcie_dump_rc_conf_space_cap(dhd_pub_t *dhd);
 extern bool dhd_pcie_dump_int_regs(dhd_pub_t *dhd);
+extern bool dhd_pcie_check_lps_d3_acked(dhd_pub_t *dhd);
 void dhd_prot_ctrl_info_print(dhd_pub_t *dhd);
 #else
 #define dhd_prot_debug_info_print(x)
@@ -4391,6 +4433,7 @@ typedef struct dhd_gdb_proxy_probe_data {
 #endif /* GDB_PROXY */
 
 #ifdef PKT_FILTER_SUPPORT
+extern int dhd_pktfilter_mode_change(dhd_pub_t * dhd, int enable);
 extern void dhd_pktfilter_offload_set(dhd_pub_t * dhd, char *arg);
 extern void dhd_pktfilter_offload_enable(dhd_pub_t * dhd, char *arg, int enable, int master_mode);
 extern void dhd_pktfilter_offload_delete(dhd_pub_t *dhd, int id);
@@ -4536,6 +4579,9 @@ static inline uint32 next_larger_power2(uint32 num)
 
 extern struct dhd_if * dhd_get_ifp(dhd_pub_t *dhdp, uint32 ifidx);
 uint8 dhd_d11_slices_num_get(dhd_pub_t *dhdp);
+#if defined(WL_AUTO_QOS) && defined(DHD_QOS_ON_SOCK_FLOW)
+extern void dhd_wl_sock_qos_set_status(dhd_pub_t *dhdp, unsigned long on_off);
+#endif /* WL_AUTO_QOS && DHD_QOS_ON_SOCK_FLOW */
 
 extern void *dhd_get_roam_evt(dhd_pub_t *dhdp);
 #if defined(DISABLE_HE_ENAB) || defined(CUSTOM_CONTROL_HE_ENAB)
@@ -4704,8 +4750,8 @@ static INLINE int dhd_kern_path(char *name, int flags, struct path *file_path)
 #define DHD_VFS_INODE(dir) d_inode(dir)
 #endif /* LINUX_VERSION_CODE < KERNEL_VERSION(3, 19, 0) */
 
-#if (LINUX_VERSION_CODE < KERNEL_VERSION(3, 13, 0)) && (RHEL_RELEASE_CODE < \
-	RHEL_RELEASE_VERSION(7, 6))
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(3, 13, 0)) && \
+	(RHEL_RELEASE_CODE < RHEL_RELEASE_VERSION(7, 6))
 #define DHD_VFS_UNLINK(dir, file_path, c) vfs_unlink(DHD_VFS_INODE(dir), file_path.dentry)
 #elif (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0))
 #define DHD_VFS_UNLINK(dir, file_path, c)  \
@@ -4762,6 +4808,14 @@ extern uint32 dhd_get_concurrent_capabilites(dhd_pub_t *dhd);
 #endif
 int dhd_config_rts_in_suspend(dhd_pub_t *dhdp, bool suspend);
 #endif /* DHD_CUSTOM_CONFIG_RTS_IN_SUSPEND */
+
+extern void dhd_unregister_net(struct net_device *net, bool need_rtnl_lock);
+extern int dhd_register_net(struct net_device *net, bool need_rtnl_lock);
+
+#if defined(DHD_HWTSTAMP)
+extern int dhd_hwtstamp_txtype(dhd_pub_t *dhdp);
+#endif /* DHD_HWTSTAMP */
+
 #ifdef WL_MONITOR
 void dhd_set_monitor(dhd_pub_t *pub, int ifidx, int val);
 #ifdef BCMSDIO
@@ -4769,4 +4823,11 @@ extern void dhd_rx_mon_pkt_sdio(dhd_pub_t *dhdp, void *pkt, int ifidx);
 bool dhd_monitor_enabled(dhd_pub_t *dhd, int ifidx);
 #endif /* BCMSDIO */
 #endif /* WL_MONITOR */
+int dhd_pm_callback(
+#ifdef DEVICE_PM_CALLBACK
+	dhd_pub_t *dhd,
+#else
+	struct notifier_block *nfb,
+#endif
+	unsigned long action, void *ignored);
 #endif /* _dhd_h_ */
