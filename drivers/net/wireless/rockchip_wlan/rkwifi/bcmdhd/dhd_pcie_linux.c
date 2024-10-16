@@ -2422,10 +2422,6 @@ dhdpcie_start_host_dev(dhd_bus_t *bus)
 	ret = msm_pcie_pm_control(MSM_PCIE_RESUME, bus->dev->bus->number,
 		bus->dev, NULL, 0);
 #endif /* CONFIG_ARCH_MSM */
-#if defined(CUSTOMER_HW_ROCKCHIP) && defined(CONFIG_ARCH_ROCKCHIP)
-	if (bus->rc_dev)
-		ret = rockchip_dw_pcie_pm_ctrl_for_user(bus->rc_dev, ROCKCHIP_PCIE_PM_CTRL_RESET);
-#endif /* CUSTOMER_HW_ROCKCHIP && CONFIG_ARCH_ROCKCHIP */
 
 	if (ret) {
 		DHD_ERROR(("%s Failed to bring up PCIe link\n", __FUNCTION__));
