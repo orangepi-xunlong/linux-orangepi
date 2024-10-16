@@ -6095,7 +6095,7 @@ wl_cfg80211_ch_switch_notify(struct net_device *dev, uint16 chanspec, struct wip
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0) || \
 		((ANDROID_VERSION >= 14) && (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 144))) || \
 		((ANDROID_VERSION == 13) && (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 94)))
-	cfg80211_ch_switch_notify(dev, &chandef, 0, 0);
+	cfg80211_ch_switch_notify(dev, &chandef, 0);
 #elif LINUX_VERSION_CODE >= KERNEL_VERSION(5, 19, 2) || defined(CFG80211_BKPORT_MLO)
 	cfg80211_ch_switch_notify(dev, &chandef, 0);
 #else
