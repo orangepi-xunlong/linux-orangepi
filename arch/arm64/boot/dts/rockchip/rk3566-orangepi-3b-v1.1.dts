@@ -7,6 +7,23 @@
 / {
 	model = "Xunlong Orange Pi 3B v1.1";
 	compatible = "xunlong,orangepi-3b-v1.1", "xunlong,orangepi-3b", "rockchip,rk3566";
+
+	sprd-mtty {
+		compatible = "sprd,mtty";
+		sprd,name = "ttyBT";
+	};
+
+	uwe-bsp {
+		compatible = "unisoc,uwe_bsp";
+		wl-reg-on = <&gpio0 RK_PD3 GPIO_ACTIVE_HIGH>;
+		bt-reg-on = <&gpio2 RK_PB7 GPIO_ACTIVE_HIGH>;
+		wl-wake-host-gpio = <&gpio0 RK_PD6 GPIO_ACTIVE_HIGH>;
+		bt-wake-host-gpio = <&gpio2 RK_PC0 GPIO_ACTIVE_HIGH>;
+		sdio-ext-int-gpio = <&gpio2 RK_PC1 GPIO_ACTIVE_HIGH>;
+		data-irq;
+		blksz-512;
+		keep-power-on;
+	};
 };
 
 &pmu_io_domains {
