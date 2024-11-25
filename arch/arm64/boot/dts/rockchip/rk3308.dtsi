@@ -170,6 +170,21 @@
 		clock-output-names = "xin24m";
 	};
 
+	rng: rng@ff2f0000 {
+		compatible = "rockchip,cryptov2-rng";
+		reg = <0x0 0xff2f0000 0x0 0x4000>;
+		clocks = <&cru SCLK_CRYPTO>, <&cru SCLK_CRYPTO_APK>,
+			<&cru ACLK_CRYPTO>, <&cru HCLK_CRYPTO>;
+		clock-names = "clk_crypto", "clk_crypto_apk",
+				"aclk_crypto", "hclk_crypto";
+		assigned-clocks = <&cru SCLK_CRYPTO>, <&cru SCLK_CRYPTO_APK>,
+				<&cru ACLK_CRYPTO>, <&cru HCLK_CRYPTO>;
+		assigned-clock-rates = <150000000>, <150000000>,
+					<200000000>, <100000000>;
+		resets = <&cru SRST_CRYPTO>;
+		reset-names = "reset";
+	};
+
 	grf: grf@ff000000 {
 		compatible = "rockchip,rk3308-grf", "syscon", "simple-mfd";
 		reg = <0x0 0xff000000 0x0 0x08000>;
