@@ -148,6 +148,9 @@ int rknpu_soft_reset(struct rknpu_device *rknpu_dev)
 
 	rknpu_dev->soft_reseting = false;
 
+	if (rknpu_dev->config->state_init != NULL)
+		rknpu_dev->config->state_init(rknpu_dev);
+
 	mutex_unlock(&rknpu_dev->reset_lock);
 #endif
 

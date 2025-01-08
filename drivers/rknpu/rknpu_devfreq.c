@@ -234,6 +234,7 @@ static int npu_opp_config_clks(struct device *dev, struct opp_table *opp_table,
 
 static const struct rockchip_opp_data rk3576_npu_opp_data = {
 	.set_read_margin = rk3576_npu_set_read_margin,
+//	.set_soc_info = rockchip_opp_set_low_length,
 #if KERNEL_VERSION(6, 1, 0) <= LINUX_VERSION_CODE
 	.config_regulators = npu_opp_config_regulators,
 	.config_clks = npu_opp_config_clks,
@@ -395,7 +396,11 @@ int rknpu_devfreq_init(struct rknpu_device *rknpu_dev)
 err_remove_governor:
 	devfreq_remove_governor(&devfreq_rknpu_ondemand);
 err_uinit_table:
+#if KERNEL_VERSION(5, 10, 198) <= LINUX_VERSION_CODE
 	rockchip_uninit_opp_table(dev, info);
+#else
+	dev_pm_opp_of_remove_table(dev);
+#endif
 
 	return ret;
 }
@@ -729,7 +734,11 @@ out:
 err_remove_governor:
 	devfreq_remove_governor(&devfreq_rknpu_ondemand);
 err_remove_table:
+#if KERNEL_VERSION(5, 10, 198) <= LINUX_VERSION_CODE
 	rockchip_uninit_opp_table(dev, &rknpu_dev->opp_info);
+#else
+	dev_pm_opp_of_remove_table(dev);
+#endif
 
 	rknpu_dev->devfreq = NULL;
 
@@ -790,6 +799,10 @@ void rknpu_devfreq_remove(struct rknpu_device *rknpu_dev)
 	}
 	if (rknpu_dev->devfreq)
 		devfreq_remove_governor(&devfreq_rknpu_ondemand);
+#if KERNEL_VERSION(5, 10, 198) <= LINUX_VERSION_CODE
 	rockchip_uninit_opp_table(rknpu_dev->dev, &rknpu_dev->opp_info);
+#else
+	dev_pm_opp_of_remove_table(rknpu_dev->dev);
+#endif
 }
 EXPORT_SYMBOL(rknpu_devfreq_remove);

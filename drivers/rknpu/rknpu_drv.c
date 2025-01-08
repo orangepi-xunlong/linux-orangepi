@@ -108,6 +108,57 @@ static const struct rknpu_amount_data rknpu_core_amount = {
 	.offset_wt_rd = 0x243c,
 };
 
+static void rk3576_state_init(struct rknpu_device *rknpu_dev)
+{
+	void __iomem *rknpu_core_base = rknpu_dev->base[0];
+
+	writel(0x1, rknpu_core_base + 0x10);
+	writel(0, rknpu_core_base + 0x1004);
+	writel(0x80000000, rknpu_core_base + 0x1024);
+	writel(1, rknpu_core_base + 0x1004);
+	writel(0x80000000, rknpu_core_base + 0x1024);
+	writel(0x1e, rknpu_core_base + 0x1004);
+}
+
+static int rk3576_cache_sgt_init(struct rknpu_device *rknpu_dev)
+{
+	struct sg_table *sgt = NULL;
+	struct scatterlist *sgl = NULL;
+	uint64_t block_size_kb[4] = { 448, 64, 448, 64 };
+	uint64_t block_offset_kb[4] = { 0, 896, 448, 960 };
+	int core_num = rknpu_dev->config->num_irqs;
+	int ret = 0, i = 0, j = 0;
+
+	for (i = 0; i < core_num; i++) {
+		sgt = kzalloc(sizeof(struct sg_table), GFP_KERNEL);
+		if (!sgt)
+			goto out_free_table;
+		ret = sg_alloc_table(sgt, core_num, GFP_KERNEL);
+		if (ret) {
+			kfree(sgt);
+			goto out_free_table;
+		}
+		rknpu_dev->cache_sgt[i] = sgt;
+		for_each_sgtable_sg(sgt, sgl, j) {
+			sg_set_page(sgl, NULL,
+				    block_size_kb[i * core_num + j] * 1024,
+				    block_offset_kb[i * core_num + j] * 1024);
+		}
+	}
+	return 0;
+
+out_free_table:
+	for (i = 0; i < core_num; i++) {
+		if (rknpu_dev->cache_sgt[i]) {
+			sg_free_table(rknpu_dev->cache_sgt[i]);
+			kfree(rknpu_dev->cache_sgt[i]);
+			rknpu_dev->cache_sgt[i] = NULL;
+		}
+	}
+
+	return ret;
+}
+
 static const struct rknpu_config rk356x_rknpu_config = {
 	.bw_priority_addr = 0xfe180008,
 	.bw_priority_length = 0x10,
@@ -125,6 +176,8 @@ static const struct rknpu_config rk356x_rknpu_config = {
 	.core_mask = 0x1,
 	.amount_top = &rknpu_old_top_amount,
 	.amount_core = NULL,
+	.state_init = NULL,
+	.cache_sgt_init = NULL,
 };
 
 static const struct rknpu_config rk3588_rknpu_config = {
@@ -144,6 +197,8 @@ static const struct rknpu_config rk3588_rknpu_config = {
 	.core_mask = 0x7,
 	.amount_top = NULL,
 	.amount_core = NULL,
+	.state_init = NULL,
+	.cache_sgt_init = NULL,
 };
 
 static const struct rknpu_config rk3583_rknpu_config = {
@@ -163,6 +218,8 @@ static const struct rknpu_config rk3583_rknpu_config = {
 	.core_mask = 0x3,
 	.amount_top = NULL,
 	.amount_core = NULL,
+	.state_init = NULL,
+	.cache_sgt_init = NULL,
 };
 
 static const struct rknpu_config rv1106_rknpu_config = {
@@ -182,6 +239,8 @@ static const struct rknpu_config rv1106_rknpu_config = {
 	.core_mask = 0x1,
 	.amount_top = &rknpu_old_top_amount,
 	.amount_core = NULL,
+	.state_init = NULL,
+	.cache_sgt_init = NULL,
 };
 
 static const struct rknpu_config rk3562_rknpu_config = {
@@ -201,6 +260,8 @@ static const struct rknpu_config rk3562_rknpu_config = {
 	.core_mask = 0x1,
 	.amount_top = &rknpu_old_top_amount,
 	.amount_core = NULL,
+	.state_init = NULL,
+	.cache_sgt_init = NULL,
 };
 
 static const struct rknpu_config rk3576_rknpu_config = {
@@ -220,6 +281,8 @@ static const struct rknpu_config rk3576_rknpu_config = {
 	.core_mask = 0x3,
 	.amount_top = &rknpu_top_amount,
 	.amount_core = &rknpu_core_amount,
+	.state_init = rk3576_state_init,
+	.cache_sgt_init = rk3576_cache_sgt_init,
 };
 
 /* driver probe and init */
@@ -263,13 +326,20 @@ static int rknpu_power_off(struct rknpu_device *rknpu_dev);
 
 static void rknpu_power_off_delay_work(struct work_struct *power_off_work)
 {
+	int ret = 0;
 	struct rknpu_device *rknpu_dev =
 		container_of(to_delayed_work(power_off_work),
 			     struct rknpu_device, power_off_work);
 	mutex_lock(&rknpu_dev->power_lock);
-	if (atomic_dec_if_positive(&rknpu_dev->power_refcount) == 0)
-		rknpu_power_off(rknpu_dev);
+	if (atomic_dec_if_positive(&rknpu_dev->power_refcount) == 0) {
+		ret = rknpu_power_off(rknpu_dev);
+		if (ret)
+			atomic_inc(&rknpu_dev->power_refcount);
+	}
 	mutex_unlock(&rknpu_dev->power_lock);
+
+	if (ret)
+		rknpu_power_put_delay(rknpu_dev);
 }
 
 int rknpu_power_get(struct rknpu_device *rknpu_dev)
@@ -289,14 +359,20 @@ int rknpu_power_put(struct rknpu_device *rknpu_dev)
 	int ret = 0;
 
 	mutex_lock(&rknpu_dev->power_lock);
-	if (atomic_dec_if_positive(&rknpu_dev->power_refcount) == 0)
+	if (atomic_dec_if_positive(&rknpu_dev->power_refcount) == 0) {
 		ret = rknpu_power_off(rknpu_dev);
+		if (ret)
+			atomic_inc(&rknpu_dev->power_refcount);
+	}
 	mutex_unlock(&rknpu_dev->power_lock);
+
+	if (ret)
+		rknpu_power_put_delay(rknpu_dev);
 
 	return ret;
 }
 
-static int rknpu_power_put_delay(struct rknpu_device *rknpu_dev)
+int rknpu_power_put_delay(struct rknpu_device *rknpu_dev)
 {
 	if (rknpu_dev->power_put_delay == 0)
 		return rknpu_power_put(rknpu_dev);
@@ -409,8 +485,11 @@ static int rknpu_action(struct rknpu_device *rknpu_dev,
 		ret = 0;
 		break;
 	case RKNPU_SET_IOMMU_DOMAIN_ID: {
-		ret = rknpu_iommu_switch_domain(rknpu_dev,
-						*(int32_t *)&args->value);
+		ret = rknpu_iommu_domain_get_and_switch(
+			rknpu_dev, *(int32_t *)&args->value);
+		if (ret)
+			break;
+		rknpu_iommu_domain_put(rknpu_dev);
 		break;
 	}
 	default:
@@ -568,16 +647,16 @@ static int rknpu_action_ioctl(struct drm_device *dev, void *data,
 	return rknpu_action(rknpu_dev, (struct rknpu_action *)data);
 }
 
-#define RKNPU_IOCTL(func)                                                      \
-	static int __##func(struct drm_device *dev, void *data,                \
-			    struct drm_file *file_priv)                        \
-	{                                                                      \
-		struct rknpu_device *rknpu_dev = dev_get_drvdata(dev->dev);    \
-		int ret = -EINVAL;                                             \
-		rknpu_power_get(rknpu_dev);                                    \
-		ret = func(dev, data, file_priv);                              \
-		rknpu_power_put_delay(rknpu_dev);                              \
-		return ret;                                                    \
+#define RKNPU_IOCTL(func)                                                   \
+	static int __##func(struct drm_device *dev, void *data,             \
+			    struct drm_file *file_priv)                     \
+	{                                                                   \
+		struct rknpu_device *rknpu_dev = dev_get_drvdata(dev->dev); \
+		int ret = -EINVAL;                                          \
+		rknpu_power_get(rknpu_dev);                                 \
+		ret = func(dev, data, file_priv);                           \
+		rknpu_power_put_delay(rknpu_dev);                           \
+		return ret;                                                 \
 	}
 
 RKNPU_IOCTL(rknpu_action_ioctl);
@@ -916,6 +995,9 @@ static int rknpu_power_on(struct rknpu_device *rknpu_dev)
 			      ret);
 	}
 
+	if (rknpu_dev->config->state_init != NULL)
+		rknpu_dev->config->state_init(rknpu_dev);
+
 out:
 #ifndef FPGA_PLATFORM
 	rknpu_devfreq_unlock(rknpu_dev);
@@ -1207,6 +1289,7 @@ static int rknpu_probe(struct platform_device *pdev)
 
 	rknpu_dev->config = config;
 	rknpu_dev->dev = dev;
+	dev_set_drvdata(dev, rknpu_dev);
 
 	rknpu_dev->iommu_en = rknpu_is_iommu_enable(dev);
 	if (rknpu_dev->iommu_en) {
@@ -1405,8 +1488,11 @@ static int rknpu_probe(struct platform_device *pdev)
 	}
 
 	if (IS_ENABLED(CONFIG_NO_GKI) && rknpu_dev->iommu_en &&
-	    rknpu_dev->config->nbuf_size > 0)
+	    rknpu_dev->config->nbuf_size > 0) {
 		rknpu_find_nbuf_resource(rknpu_dev);
+		if (rknpu_dev->config->cache_sgt_init != NULL)
+			rknpu_dev->config->cache_sgt_init(rknpu_dev);
+	}
 
 	if (rknpu_dev->iommu_en)
 		rknpu_iommu_init_domain(rknpu_dev);
@@ -1414,6 +1500,7 @@ static int rknpu_probe(struct platform_device *pdev)
 	rknpu_power_off(rknpu_dev);
 	atomic_set(&rknpu_dev->power_refcount, 0);
 	atomic_set(&rknpu_dev->cmdline_power_refcount, 0);
+	atomic_set(&rknpu_dev->iommu_domain_refcount, 0);
 
 	rknpu_debugger_init(rknpu_dev);
 	rknpu_init_timer(rknpu_dev);
@@ -1449,6 +1536,16 @@ static int rknpu_remove(struct platform_device *pdev)
 
 	rknpu_debugger_remove(rknpu_dev);
 	rknpu_cancel_timer(rknpu_dev);
+
+	if (rknpu_dev->config->cache_sgt_init != NULL) {
+		for (i = 0; i < RKNPU_CACHE_SG_TABLE_NUM; i++) {
+			if (rknpu_dev->cache_sgt[i]) {
+				sg_free_table(rknpu_dev->cache_sgt[i]);
+				kfree(rknpu_dev->cache_sgt[i]);
+				rknpu_dev->cache_sgt[i] = NULL;
+			}
+		}
+	}
 
 	for (i = 0; i < rknpu_dev->config->num_irqs; i++) {
 		WARN_ON(rknpu_dev->subcore_datas[i].job);
@@ -1494,6 +1591,26 @@ static int rknpu_remove(struct platform_device *pdev)
 }
 
 #ifndef FPGA_PLATFORM
+#ifdef CONFIG_PM_SLEEP
+static int rknpu_suspend(struct device *dev)
+{
+	struct rknpu_device *rknpu_dev = dev_get_drvdata(dev);
+
+	rknpu_power_get(rknpu_dev);
+
+	return pm_runtime_force_suspend(dev);
+}
+
+static int rknpu_resume(struct device *dev)
+{
+	struct rknpu_device *rknpu_dev = dev_get_drvdata(dev);
+
+	rknpu_power_put_delay(rknpu_dev);
+
+	return pm_runtime_force_resume(dev);
+}
+#endif
+
 static int rknpu_runtime_suspend(struct device *dev)
 {
 	return rknpu_devfreq_runtime_suspend(dev);
@@ -1505,10 +1622,8 @@ static int rknpu_runtime_resume(struct device *dev)
 }
 
 static const struct dev_pm_ops rknpu_pm_ops = {
-	SET_SYSTEM_SLEEP_PM_OPS(pm_runtime_force_suspend,
-				pm_runtime_force_resume)
-		SET_RUNTIME_PM_OPS(rknpu_runtime_suspend, rknpu_runtime_resume,
-				   NULL)
+	SET_SYSTEM_SLEEP_PM_OPS(rknpu_suspend, rknpu_resume) SET_RUNTIME_PM_OPS(
+		rknpu_runtime_suspend, rknpu_runtime_resume, NULL)
 };
 #endif
 
