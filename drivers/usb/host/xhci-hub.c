@@ -12,6 +12,7 @@
 #include <linux/slab.h>
 #include <asm/unaligned.h>
 #include <linux/bitfield.h>
+#include <linux/usb/phy.h>
 
 #include "xhci.h"
 #include "xhci-trace.h"
@@ -608,6 +609,10 @@ static void xhci_disable_port(struct xhci_hcd *xhci, struct xhci_port *port)
 		 hcd->self.busnum, port->hcd_portnum + 1, portsc);
 }
 
+#if defined(CONFIG_SOC_KY_X1)
+extern void dwc3_ky_clear_disconnect(struct device *dev);
+#endif
+
 static void xhci_clear_port_change_bit(struct xhci_hcd *xhci, u16 wValue,
 		u16 wIndex, __le32 __iomem *addr, u32 port_status)
 {
@@ -625,6 +630,10 @@ static void xhci_clear_port_change_bit(struct xhci_hcd *xhci, u16 wValue,
 		break;
 	case USB_PORT_FEAT_C_CONNECTION:
 		status = PORT_CSC;
+#if defined(CONFIG_SOC_KY_X1)
+		dwc3_ky_clear_disconnect(xhci_to_hcd(xhci)->
+			self.controller->parent->parent);
+#endif
 		port_change_bit = "connect";
 		break;
 	case USB_PORT_FEAT_C_OVER_CURRENT:

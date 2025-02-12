@@ -318,6 +318,24 @@ config RESET_ZYNQ
 	help
 	  This enables the reset controller driver for Xilinx Zynq SoCs.
 
+config RESET_X1PRO_KY
+	tristate "Reset controller driver for Ky X1PRO SoCs"
+	depends on SOC_KY_X1PRO
+	help
+	  Support for reset controllers on Ky X1PRO SoCs.
+
+config RESET_X1_KY
+	tristate "Reset controller driver for Ky X1 SoCs"
+	depends on SOC_KY_X1
+	help
+	  Support for reset controllers on Ky X1 SoCs.
+
+config RESET_X1MATRIX_KY
+	tristate "Reset controller driver for Ky X1MATRIX SoCs"
+	default y
+	help
+	  Support for reset controllers on Ky X1MATRIX SoCs.
+
 source "drivers/reset/starfive/Kconfig"
 source "drivers/reset/sti/Kconfig"
 source "drivers/reset/hisilicon/Kconfig"

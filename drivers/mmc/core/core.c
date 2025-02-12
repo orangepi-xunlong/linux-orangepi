@@ -1421,6 +1421,12 @@ void _mmc_detect_change(struct mmc_host *host, unsigned long delay, bool cd_irq)
 		__pm_wakeup_event(host->ws, 5000);
 
 	host->detect_change = 1;
+#ifdef CONFIG_SOC_KY_X1
+	if (!(host->caps2 & MMC_CAP2_NO_MMC)) {
+		mmc_rescan(&host->detect.work);
+		return;
+	}
+#endif
 	mmc_schedule_delayed_work(&host->detect, delay);
 }
 
@@ -2084,6 +2090,11 @@ static int mmc_rescan_try_freq(struct mmc_host *host, unsigned freq)
 			return 0;
 	}
 
+#ifdef CONFIG_SOC_KY_X1
+	if (host->ops->encrypt_config)
+		host->ops->encrypt_config(host, 0);
+#endif
+
 	/* Order's important: probe SDIO, then SD, then MMC */
 	if (!(host->caps2 & MMC_CAP2_NO_SDIO))
 		if (!mmc_attach_sdio(host))
@@ -2096,6 +2107,11 @@ static int mmc_rescan_try_freq(struct mmc_host *host, unsigned freq)
 	if (!(host->caps2 & MMC_CAP2_NO_MMC))
 		if (!mmc_attach_mmc(host))
 			return 0;
+
+#ifdef CONFIG_SOC_KY_X1
+	if (host->ops->encrypt_config)
+		host->ops->encrypt_config(host, 1);
+#endif
 
 out:
 	mmc_power_off(host);
@@ -2291,6 +2307,10 @@ void mmc_start_host(struct mmc_host *host)
 	}
 
 	mmc_gpiod_request_cd_irq(host);
+#ifdef CONFIG_SOC_KY_X1
+	if (host->caps2 & MMC_CAP2_DISABLE_PROBE_SCAN)
+		return;
+#endif
 	_mmc_detect_change(host, 0, false);
 }
 

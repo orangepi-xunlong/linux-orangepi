@@ -378,7 +378,10 @@ static int dw_pcie_msi_host_init(struct dw_pcie_rp *pp)
 	 * done by allocating from the artificially limited DMA-coherent
 	 * memory.
 	 */
-	ret = dma_set_coherent_mask(dev, DMA_BIT_MASK(32));
+	if (IS_ENABLED(CONFIG_SOC_KY_X1PRO))
+		ret = dma_set_coherent_mask(dev, DMA_BIT_MASK(40));
+	else
+		ret = dma_set_coherent_mask(dev, DMA_BIT_MASK(32));
 	if (ret)
 		dev_warn(dev, "Failed to set DMA mask to 32-bit. Devices with only 32-bit MSI support may not work properly\n");
 

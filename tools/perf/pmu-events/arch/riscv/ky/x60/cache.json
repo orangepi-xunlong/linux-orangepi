@@ -1,0 +1,122 @@
+[
+  {
+    "EventName": "l1d_load_miss",
+    "EventCode": "5",
+    "BriefDescription": "L1 D-cache load misses"
+  },
+  {
+    "EventName": "l1d_load_access",
+    "EventCode": "6",
+    "BriefDescription": "L1 D-cache load accesses"
+  },
+  {
+    "EventName": "l1d_store_miss",
+    "EventCode": "9",
+    "BriefDescription": "L1 D-cache store misses"
+  },
+  {
+    "EventName": "l1d_store_access",
+    "EventCode": "10",
+    "BriefDescription": "L1 D-cache store accesses"
+  },
+  {
+    "EventName": "l1i_load_miss",
+    "EventCode": "11",
+    "BriefDescription": "L1 I-cache load misses"
+  },
+  {
+    "EventName": "l1i_load_access",
+    "EventCode": "12",
+    "BriefDescription": "L1 I-cache load accesses"
+  },
+  {
+    "EventName": "l1i_prefetch_miss",
+    "EventCode": "13",
+    "BriefDescription": "L1 I-cache prefetch misses"
+  },
+  {
+    "EventName": "l1i_prefetch",
+    "EventCode": "14",
+    "BriefDescription": "L1 I-cache prefetches"
+  },
+  {
+    "EventName": "dtlb_load_miss",
+    "EventCode": "21",
+    "BriefDescription": "DTLB load misses"
+  },
+  {
+    "EventName": "dtlb_store_miss",
+    "EventCode": "25",
+    "BriefDescription": "DTLB store misses"
+  },
+  {
+    "EventName": "itlb_load_miss",
+    "EventCode": "27",
+    "BriefDescription": "ITLB load misses"
+  },
+  {
+    "EventName": "jtlb_miss",
+    "EventCode": "163",
+    "BriefDescription": "JTLB misses"
+  },
+  {
+    "EventName": "l1d_access",
+    "EventCode": "170",
+    "BriefDescription": "L1 D-cache accesses"
+  },
+  {
+    "EventName": "l1d_miss",
+    "EventCode": "171",
+    "BriefDescription": "L1 D-cache misses"
+  },
+  {
+    "EventName": "l1d_excl_evict",
+    "EventCode": "172",
+    "BriefDescription": "L1 D-cache exclusive evictions to L2"
+  },
+  {
+    "EventName": "l1d_amr_active",
+    "EventCode": "173",
+    "BriefDescription": "L1 D-cache AMR actives"
+  },
+  {
+    "EventName": "l1d_prefetch_refill",
+    "EventCode": "174",
+    "BriefDescription": "L1 D-cache prefetch refills"
+  },
+  {
+    "EventName": "l1d_prefetch_hit",
+    "EventCode": "175",
+    "BriefDescription": "L1 D-cache prefetch hits"
+  },
+  {
+    "EventName": "l2_access",
+    "EventCode": "184",
+    "BriefDescription": "L2 cache accesses"
+  },
+  {
+    "EventName": "l2_miss",
+    "EventCode": "185",
+    "BriefDescription": "L2 cache misses"
+  },
+  {
+    "EventName": "l2_load_access",
+    "EventCode": "186",
+    "BriefDescription": "L2 cache load accesses"
+  },
+  {
+    "EventName": "l2_load_stall",
+    "EventCode": "187",
+    "BriefDescription": "L2 cache load stalls"
+  },
+  {
+    "EventName": "l2_store_access",
+    "EventCode": "188",
+    "BriefDescription": "L2 cache store accesses"
+  },
+  {
+    "EventName": "l2_store_stall",
+    "EventCode": "189",
+    "BriefDescription": "L2 cache store stalls"
+  }
+]

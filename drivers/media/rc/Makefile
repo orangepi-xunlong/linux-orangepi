@@ -48,6 +48,7 @@ obj-$(CONFIG_IR_SERIAL) += serial_ir.o
 obj-$(CONFIG_IR_SPI) += ir-spi.o
 obj-$(CONFIG_IR_STREAMZAP) += streamzap.o
 obj-$(CONFIG_IR_SUNXI) += sunxi-cir.o
+obj-$(CONFIG_IR_KY) += ir-ky.o
 obj-$(CONFIG_IR_TOY) += ir_toy.o
 obj-$(CONFIG_IR_TTUSBIR) += ttusbir.o
 obj-$(CONFIG_IR_WINBOND_CIR) += winbond-cir.o

@@ -409,12 +409,39 @@ config MILBEAUT_XDMAC
 	  Say yes here to support the Socionext Milbeaut
 	  XDMAC device.
 
+menuconfig MMP_PDMA_DRIVER
+	bool "MMP_PDMA driver"
+	help
+	  choice mmp_pdma driver
+
+if MMP_PDMA_DRIVER
 config MMP_PDMA
 	tristate "MMP PDMA support"
 	depends on ARCH_MMP || ARCH_PXA || COMPILE_TEST
 	select DMA_ENGINE
 	help
 	  Support the MMP PDMA engine for PXA and MMP platform.
+
+config MMP_PDMA_KY_X1
+	bool "Ky mmp_pdma support"
+	depends on ARCH_MMP || ARCH_PXA || COMPILE_TEST || SOC_KY_X1
+	select DMA_ENGINE
+	help
+	  Support the MMP PDMA engine for Ky-x1 platform.
+endif
+
+config KY_PDMA_SUPPORT_64BIT
+	bool "MMP PDMA support the 64-bit address"
+	default y
+	help
+	  Support 64-bit address in the MMP PDMA
+
+config ADMA_KY_X1
+	bool "Ky adma support"
+	depends on SOC_KY_X1 && RPMSG_VIRTIO
+	select DMA_ENGINE
+	help
+	  Support the AMDA engine for Ky-x1 sspa.
 
 config MMP_TDMA
 	tristate "MMP Two-Channel DMA support"
@@ -432,7 +459,7 @@ config MOXART_DMA
 	select DMA_VIRTUAL_CHANNELS
 	help
 	  Enable support for the MOXA ART SoC DMA controller.
- 
+
 	  Say Y here if you enabled MMP ADMA, otherwise say N.
 
 config MPC512X_DMA
@@ -732,6 +759,12 @@ config XILINX_ZYNQMP_DPDMA
 	  if you have a Xilinx ZynqMP SoC with a DisplayPort subsystem. The
 	  driver provides the dmaengine required by the DisplayPort subsystem
 	  display driver.
+
+config USERSPACE_DMA
+	bool "userspace dma driver support"
+	depends on DMA_ENGINE
+	help
+	  Support dma operation in userspace
 
 # driver files
 source "drivers/dma/bestcomm/Kconfig"

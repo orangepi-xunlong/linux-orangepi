@@ -1,0 +1,51 @@
+#
+# ChipSemi CHSC5XXX Touchscreen driver
+#
+
+config CHSC5XXX_TOUCHPANEL_DRIVER
+	tristate "ChipSemi CHSC5XXX touchpanel driver"
+	depends on TOUCHSCREEN_CHSC5XXX
+	default y
+	help
+	  This is the main file for touchpanel driver for ChipSemi CHSC5XXX
+	  touchscreens.
+
+	  Say Y here if you have a ChipSemi CHSC5XXX touchscreen connected
+	  to your system.
+
+	  If unsure, say N.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called semi_touch_driver.
+
+config SEMI_TOUCH_AUTO_UPDATE_EN
+	tristate "ChipSemi CHSC5XXX touchpanel auto update support"
+	depends on CHSC5XXX_TOUCHPANEL_DRIVER
+	default n
+	help
+	  This enables support for firmware update for ChipSemi CHSC5XXX
+	  touchscreens.
+
+	  Say Y here if you have a ChipSemi CHSC5XXX touchscreen connected
+	  to your system.
+
+	  If unsure, say N.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called semi_touch_upgrade.
+
+config SEMI_TOUCH_APK_NODE_EN
+	tristate "ChipSemi CHSC5XXX Node for debuging"
+	depends on CHSC5XXX_TOUCHPANEL_DRIVER
+	default n
+	help
+	  This is application debug interface support for ChipSemi CHSC5XXX
+	  touchscreens.
+
+	  Say Y here if you want to have a Android app debug interface
+	  to your system.
+
+	  If unsure, say N.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called semi_touch_apk.

@@ -2728,6 +2728,34 @@ static int dwc3_gadget_soft_connect(struct dwc3 *dwc)
 	return dwc3_gadget_run_stop(dwc, true);
 }
 
+#ifdef CONFIG_SOC_KY_X1
+static void dwc3_gadget_disconnect_interrupt(struct dwc3 *dwc);
+
+static int dwc3_gadget_vbus_session(struct usb_gadget *g, int vbus_on)
+{
+	struct dwc3		*dwc = gadget_to_dwc(g);
+	unsigned long flags;
+
+	vbus_on = !!vbus_on;
+
+	dwc->vbus_session = vbus_on;
+
+	if (vbus_on || !dwc->connected || !dwc->gadget_driver) {
+		dev_dbg(dwc->dev, "do nothing when vbus %d\n", vbus_on);
+		return 0;
+	}
+
+	dev_dbg(dwc->dev, "phy/connector report vbus disconnected\n");
+	local_bh_disable();
+	spin_lock_irqsave(&dwc->lock, flags);
+	dwc3_gadget_disconnect_interrupt(dwc);
+	spin_unlock_irqrestore(&dwc->lock, flags);
+	local_bh_enable();
+
+	return 0;
+}
+#endif
+
 static int dwc3_gadget_pullup(struct usb_gadget *g, int is_on)
 {
 	struct dwc3		*dwc = gadget_to_dwc(g);
@@ -3134,6 +3162,9 @@ static const struct usb_gadget_ops dwc3_gadget_ops = {
 	.func_wakeup		= dwc3_gadget_func_wakeup,
 	.set_remote_wakeup	= dwc3_gadget_set_remote_wakeup,
 	.set_selfpowered	= dwc3_gadget_set_selfpowered,
+#ifdef CONFIG_SOC_KY_X1
+	.vbus_session		= dwc3_gadget_vbus_session,
+#endif
 	.pullup			= dwc3_gadget_pullup,
 	.udc_start		= dwc3_gadget_start,
 	.udc_stop		= dwc3_gadget_stop,
@@ -4619,7 +4650,12 @@ int dwc3_gadget_init(struct dwc3 *dwc)
 	dwc->gadget->name		= "dwc3-gadget";
 	dwc->gadget->lpm_capable	= !dwc->usb2_gadget_lpm_disable;
 	dwc->gadget->wakeup_capable	= true;
-
+#ifdef CONFIG_SOC_KY_X1
+	dwc->monitor_vbus = device_property_read_bool(dwc->dev, "monitor-vbus");
+	dwc->vbus_session = !dwc->monitor_vbus;
+	if (dwc->monitor_vbus)
+		dev_info(dev, "enable vbus monitoring\n");
+#endif
 	/*
 	 * FIXME We might be setting max_speed to <SUPER, however versions
 	 * <2.20a of dwc3 have an issue with metastability (documented

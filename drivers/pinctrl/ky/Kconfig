@@ -1,0 +1,15 @@
+# SPDX-License-Identifier: GPL-2.0-only
+config PINCTRL_KY
+	tristate
+	depends on OF
+	select GENERIC_PINCTRL_GROUPS
+	select GENERIC_PINMUX_FUNCTIONS
+	select GENERIC_PINCONF
+
+config PINCTRL_X1PRO
+	bool "Ky X1PRO pinctrl driver"
+	depends on OF
+	depends on SOC_KY_X1_FPGA
+	select PINCTRL_KY
+	help
+	  Say Y here to enable the x1-pro pinctrl driver

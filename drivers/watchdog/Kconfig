@@ -2257,4 +2257,18 @@ config KEEMBAY_WATCHDOG
 	  To compile this driver as a module, choose M here: the
 	  module will be called keembay_wdt.
 
+config KY_WATCHDOG
+	tristate "Ky-x1 SoC Watchdog"
+	depends on SOC_KY_X1
+	select WATCHDOG_CORE
+	help
+	  ky x1 plat SoC Watchdog timer. This will reboot your system when
+	  the timeout is reached.
+
+config X1_WDT_TEST
+	bool "Support X1 watchdog test"
+	depends on SOC_KY_X1 && KY_WATCHDOG
+	help
+	  This will enable X1 watchdog timer test
+
 endif # WATCHDOG

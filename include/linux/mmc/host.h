@@ -218,6 +218,14 @@ struct mmc_host_ops {
 
 	/* Initialize an SD express card, mandatory for MMC_CAP2_SD_EXP. */
 	int	(*init_sd_express)(struct mmc_host *host, struct mmc_ios *ios);
+#ifdef CONFIG_SOC_KY_X1
+	void	(*auto_clk_gate)(struct mmc_host *host, int auto_gate);
+	void    (*pre_select_hs400)(struct mmc_host *host);
+	void    (*post_select_hs400)(struct mmc_host *host);
+	void    (*pre_hs400_to_hs200)(struct mmc_host *host);
+	void    (*dump_host_register)(struct mmc_host *host);
+	void	(*encrypt_config)(struct mmc_host *host, unsigned int enc_flag);
+#endif
 };
 
 struct mmc_cqe_ops {
@@ -427,6 +435,10 @@ struct mmc_host {
 #define MMC_CAP2_CRYPTO		0
 #endif
 #define MMC_CAP2_ALT_GPT_TEGRA	(1 << 28)	/* Host with eMMC that has GPT entry at a non-standard location */
+#ifdef CONFIG_SOC_KY_X1
+#define MMC_CAP2_DISABLE_PROBE_SCAN	(1 << 29)
+#define MMC_CAP2_CRC_SW_RETRY	(1 << 30)
+#endif
 
 	int			fixed_drv_type;	/* fixed driver type for non-removable media */
 

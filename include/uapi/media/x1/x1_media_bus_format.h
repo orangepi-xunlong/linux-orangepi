@@ -1,0 +1,45 @@
+/* SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note */
+/*
+ * x1_videodev2 - Driver uapi for KY X1 media bus format
+ *
+ * Copyright (C) 2019 KY Micro Limited
+ */
+
+#ifndef __LINUX_X1_MEDIA_BUS_FORMAT_H
+#define __LINUX_X1_MEDIA_BUS_FORMAT_H
+
+#ifndef BIT
+#define BIT(nr)         (1 << (nr))
+#endif
+#define KY_VI_SWITCH_FLAGS_SHIFT		(8)
+#define KY_VI_FLAG_BACK_TO_PREVIEW	BIT(0)
+#define KY_VI_FLAG_CLK_HIGH		BIT(1)
+#define KY_VI_FLAG_FORCE_SW_GAP		BIT(2)
+#define KY_VI_PRI_DATA_MASK		(0xff)
+#define KY_VI_MIPI_LANE_MASK		(BIT(0) | BIT(1) | BIT(2))
+#define KY_VI_SENSOR_ID_SHIFT		(3)
+#define KY_VI_SENSOR_ID_MASK		(BIT(3) | BIT(4))
+
+#define MEDIA_BUS_FMT_UYVY10_1_5X10			0x3104
+#define MEDIA_BUS_FMT_VYUY10_1_5X10			0x3105
+#define MEDIA_BUS_FMT_YUYV10_1_5X10			0x3106
+#define MEDIA_BUS_FMT_YVYU10_1_5X10			0x3107
+//nv12 dwt
+#define MEDIA_BUS_FMT_YUYV10_1_5X10_D1		0x3108
+#define MEDIA_BUS_FMT_YUYV10_1_5X10_D2		0x3109
+#define MEDIA_BUS_FMT_YUYV10_1_5X10_D3		0x310A
+#define MEDIA_BUS_FMT_YUYV10_1_5X10_D4		0x310B
+//Bayer raw
+#define MEDIA_BUS_FMT_SRGB8_KYPACK_1X8				0x310C
+#define MEDIA_BUS_FMT_SRGB10_KYPACK_1X10			0x310D
+#define MEDIA_BUS_FMT_SRGB12_KYPACK_1X12			0x310E
+#define MEDIA_BUS_FMT_SRGB14_KYPACK_1X14			0x310F
+//afbc
+#define MEDIA_BUS_FMT_YUYV8_1_5X8_AFBC		0x3110
+//nv21 dwt
+#define MEDIA_BUS_FMT_YVYU10_1_5X10_D1		0x3111
+#define MEDIA_BUS_FMT_YVYU10_1_5X10_D2		0x3112
+#define MEDIA_BUS_FMT_YVYU10_1_5X10_D3		0x3113
+#define MEDIA_BUS_FMT_YVYU10_1_5X10_D4		0x3114
+
+#endif

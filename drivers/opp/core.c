@@ -654,8 +654,13 @@ EXPORT_SYMBOL_GPL(dev_pm_opp_find_freq_exact_indexed);
 static noinline struct dev_pm_opp *_find_freq_ceil(struct opp_table *opp_table,
 						   unsigned long *freq)
 {
+#ifndef CONFIG_SOC_KY
 	return _opp_table_find_key_ceil(opp_table, freq, 0, true, _read_freq,
 					assert_single_clk);
+#else
+	return _opp_table_find_key_ceil(opp_table, freq, 0, true, _read_freq,
+					NULL);
+#endif
 }
 
 /**
@@ -679,7 +684,11 @@ static noinline struct dev_pm_opp *_find_freq_ceil(struct opp_table *opp_table,
 struct dev_pm_opp *dev_pm_opp_find_freq_ceil(struct device *dev,
 					     unsigned long *freq)
 {
+#ifndef CONFIG_SOC_KY
 	return _find_key_ceil(dev, freq, 0, true, _read_freq, assert_single_clk);
+#else
+	return _find_key_ceil(dev, freq, 0, true, _read_freq, NULL);
+#endif
 }
 EXPORT_SYMBOL_GPL(dev_pm_opp_find_freq_ceil);
 
@@ -2639,6 +2648,110 @@ err:
 	return ret;
 }
 EXPORT_SYMBOL_GPL(dev_pm_opp_set_config);
+
+#ifdef CONFIG_SOC_KY
+int dev_pm_opp_set_config_indexed(struct device *dev, struct dev_pm_opp_config *config, int index)
+{
+	struct opp_table *opp_table;
+	struct opp_config_data *data;
+	unsigned int id;
+	int ret;
+
+	data = kmalloc(sizeof(*data), GFP_KERNEL);
+	if (!data)
+		return -ENOMEM;
+
+	opp_table = _add_opp_table_indexed(dev, index, false);
+	if (IS_ERR(opp_table)) {
+		kfree(data);
+		return PTR_ERR(opp_table);
+	}
+
+	data->opp_table = opp_table;
+	data->flags = 0;
+
+	/* This should be called before OPPs are initialized */
+	if (WARN_ON(!list_empty(&opp_table->opp_list))) {
+		ret = -EBUSY;
+		goto err;
+	}
+
+	/* Configure clocks */
+	if (config->clk_names) {
+		ret = _opp_set_clknames(opp_table, dev, config->clk_names,
+					config->config_clks);
+		if (ret)
+			goto err;
+
+		data->flags |= OPP_CONFIG_CLK;
+	} else if (config->config_clks) {
+		/* Don't allow config callback without clocks */
+		ret = -EINVAL;
+		goto err;
+	}
+
+	/* Configure property names */
+	if (config->prop_name) {
+		ret = _opp_set_prop_name(opp_table, config->prop_name);
+		if (ret)
+			goto err;
+
+		data->flags |= OPP_CONFIG_PROP_NAME;
+	}
+
+	/* Configure config_regulators helper */
+	if (config->config_regulators) {
+		ret = _opp_set_config_regulators_helper(opp_table, dev,
+						config->config_regulators);
+		if (ret)
+			goto err;
+
+		data->flags |= OPP_CONFIG_REGULATOR_HELPER;
+	}
+
+	/* Configure supported hardware */
+	if (config->supported_hw) {
+		ret = _opp_set_supported_hw(opp_table, config->supported_hw,
+					    config->supported_hw_count);
+		if (ret)
+			goto err;
+
+		data->flags |= OPP_CONFIG_SUPPORTED_HW;
+	}
+
+	/* Configure supplies */
+	if (config->regulator_names) {
+		ret = _opp_set_regulators(opp_table, dev,
+					  config->regulator_names);
+		if (ret)
+			goto err;
+
+		data->flags |= OPP_CONFIG_REGULATOR;
+	}
+
+	/* Attach genpds */
+	if (config->genpd_names) {
+		ret = _opp_attach_genpd(opp_table, dev, config->genpd_names,
+					config->virt_devs);
+		if (ret)
+			goto err;
+
+		data->flags |= OPP_CONFIG_GENPD;
+	}
+
+	ret = xa_alloc(&opp_configs, &id, data, XA_LIMIT(1, INT_MAX),
+		       GFP_KERNEL);
+	if (ret)
+		goto err;
+
+	return id;
+
+err:
+	_opp_clear_config(data);
+	return ret;
+}
+EXPORT_SYMBOL_GPL(dev_pm_opp_set_config_indexed);
+#endif
 
 /**
  * dev_pm_opp_clear_config() - Releases resources blocked for OPP configuration.

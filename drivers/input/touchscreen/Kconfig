@@ -24,6 +24,16 @@ config TOUCHSCREEN_88PM860X
 	  To compile this driver as a module, choose M here: the
 	  module will be called 88pm860x-ts.
 
+config TOUCHSCREEN_GT9XX
+        tristate "Goodix touchpanel GT9xx series"
+        depends on I2C
+        help
+          Say Y here if you have a Goodix GT9xx touchscreen
+          controller.
+
+                If build module, say M.
+                If unsure, say N.
+
 config TOUCHSCREEN_ADS7846
 	tristate "ADS7846/TSC2046/AD7873 and AD(S)7843 based touchscreens"
 	depends on SPI_MASTER
@@ -1399,4 +1409,20 @@ config TOUCHSCREEN_HIMAX_HX83112B
 	  To compile this driver as a module, choose M here: the
 	  module will be called himax_hx83112b.
 
+config TOUCHSCREEN_CHIPONE_TDDI
+	tristate "Chipone-tddi touchscreen support"
+	depends on SPI
+	help
+	  Say Y here if you have a touchscreen using Chipone-tddi.
+
+	  If unsure, say N.
+
+config TOUCHSCREEN_CHSC5XXX
+	tristate "Chsc5xxx touchscreen support"
+	depends on I2C
+	help
+	  Say Y here if you have a touchscreen using Chsc5xxx.
+
+source "drivers/input/touchscreen/chsc5xxx/Kconfig"
+source "drivers/input/touchscreen/focaltech_touch/Kconfig"
 endif

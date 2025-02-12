@@ -403,6 +403,17 @@ config PINCTRL_RK805
 	help
 	  This selects the pinctrl driver for RK805.
 
+config PINCTRL_KY_PMIC
+	tristate "Pinctrl and GPIO driver for Ky PMIC"
+	depends on MFD_KY_PMIC
+	select GPIOLIB
+	select PINMUX
+	select GENERIC_PINCTRL_GROUPS
+	select GENERIC_PINMUX_FUNCTIONS
+	select GENERIC_PINCONF
+	help
+	  This selects the pinctrl driver for ky pmic.
+
 config PINCTRL_ROCKCHIP
 	tristate "Rockchip gpio and pinctrl driver"
 	depends on ARCH_ROCKCHIP || COMPILE_TEST
@@ -533,5 +544,6 @@ source "drivers/pinctrl/ti/Kconfig"
 source "drivers/pinctrl/uniphier/Kconfig"
 source "drivers/pinctrl/visconti/Kconfig"
 source "drivers/pinctrl/vt8500/Kconfig"
+source "drivers/pinctrl/ky/Kconfig"
 
 endif

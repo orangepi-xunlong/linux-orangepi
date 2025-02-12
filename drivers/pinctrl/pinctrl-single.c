@@ -28,6 +28,12 @@
 #include <linux/pinctrl/pinmux.h>
 
 #include <linux/platform_data/pinctrl-single.h>
+#ifdef CONFIG_SOC_KY_X1
+#include <linux/pm_wakeirq.h>
+#include <linux/reset.h>
+#include <linux/clk.h>
+#include <linux/syscore_ops.h>
+#endif
 
 #include "core.h"
 #include "devicetree.h"
@@ -36,6 +42,12 @@
 
 #define DRIVER_NAME			"pinctrl-single"
 #define PCS_OFF_DISABLED		~0U
+
+#ifdef CONFIG_SOC_KY_X1
+#define EDGE_CLEAR			6
+#define EDGE_FALL_EN			5
+#define EDGE_RISE_EN			4
+#endif
 
 /**
  * struct pcs_func_vals - mux function register offset and value pair
@@ -175,6 +187,14 @@ struct pcs_soc_data {
 struct pcs_device {
 	struct resource *res;
 	void __iomem *base;
+#ifdef CONFIG_SOC_KY_X1
+	struct resource *gedge_flag_res;
+	void __iomem *gedge_flag_base;
+	unsigned gedge_flag_size;
+	struct resource gpio_res;
+	void __iomem *gpio_base;
+	unsigned gpio_size;
+#endif
 	void *saved_vals;
 	unsigned size;
 	struct device *dev;
@@ -547,6 +567,25 @@ static int pcs_pinconf_get(struct pinctrl_dev *pctldev,
 	return -ENOTSUPP;
 }
 
+#ifdef CONFIG_SOC_KY_X1
+static int pin_to_gpio_number[] = {
+0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11,
+12, 13, 14, 15, 16, 17, 18, 19, 20, 21,
+22, 23, 24, 25, 26, 27, 28, 29, 30, 31,
+32, 33, 34, 35, 36, 37, 38, 39, 40, 41,
+42, 43, 44, 45, 46, 47, 48, 49, 50, 51,
+52, 53, 54, 55, 56, 57, 58, 59, 60, 61,
+62, 63, 64, 65, 66, 67, 68, 69, 70, 71,
+72, 73, 74, 75, 76, 77, 78, 79, 80, 81,
+82, 83, 84, 85, 0, 0, 0, 101, 100, 99, 98,
+103, 102, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+0, 0, 0, 104, 105, 106, 107, 108, 109, 110,
+93, 94, 95, 96, 97, 0, 86, 87, 88, 89, 90,
+91, 92, 0, 111, 112, 113, 114, 115, 116, 117,
+118, 119, 120, 121, 122, 123, 124, 125, 126, 127
+};
+#endif
+
 static int pcs_pinconf_set(struct pinctrl_dev *pctldev,
 				unsigned pin, unsigned long *configs,
 				unsigned num_configs)
@@ -556,6 +595,10 @@ static int pcs_pinconf_set(struct pinctrl_dev *pctldev,
 	unsigned offset = 0, shift = 0, i, data, ret;
 	u32 arg;
 	int j;
+#ifdef CONFIG_SOC_KY_X1
+	int gpio_number;
+	void __iomem *gpio_base;
+#endif
 
 	ret = pcs_get_function(pctldev, pin, &func);
 	if (ret)
@@ -570,8 +613,72 @@ static int pcs_pinconf_set(struct pinctrl_dev *pctldev,
 			offset = pin * (pcs->width / BITS_PER_BYTE);
 			data = pcs->read(pcs->base + offset);
 			arg = pinconf_to_config_argument(configs[j]);
+
 			switch (func->conf[i].param) {
 			/* 2 parameters */
+#ifdef CONFIG_SOC_KY_X1
+			case PIN_CONFIG_OUTPUT_ENABLE:
+				gpio_number = pin_to_gpio_number[pin - 1];
+				switch (gpio_number) {
+				case 0 ... 31:
+					gpio_base = pcs->gpio_base + 0xc;
+					offset = gpio_number;
+					break;
+				case 32 ... 63:
+					gpio_base = pcs->gpio_base + 0x4 + 0xc;
+					offset = gpio_number - 32;
+					break;
+				case 64 ... 95:
+					gpio_base = pcs->gpio_base + 0x8 + 0xc;
+					offset = gpio_number - 64;
+					break;
+				case 96 ... 127:
+					gpio_base = pcs->gpio_base + 0x100 + 0xc;
+					offset = gpio_number - 96;
+					break;
+				default:
+					pr_err("Bad pin number\n");
+					break;
+				}
+
+				data = pcs->read(gpio_base);
+				data |= (arg << offset);
+				pcs->write(data, gpio_base);
+
+				break;
+			case PIN_CONFIG_OUTPUT:
+				gpio_number = pin_to_gpio_number[pin - 1];
+				switch (gpio_number) {
+				case 0 ... 31:
+					gpio_base = pcs->gpio_base + ((arg == 1) ? 0x18 : 0x24);
+					offset = gpio_number;
+					break;
+				case 32 ... 63:
+					gpio_base = pcs->gpio_base + 0x4 + ((arg == 1) ? 0x18 : 0x24);
+					offset = gpio_number - 32;
+					break;
+				case 64 ... 95:
+					gpio_base = pcs->gpio_base + 0x8 + ((arg == 1) ? 0x18 : 0x24);
+					offset = gpio_number - 64;
+					break;
+				case 96 ... 127:
+					gpio_base = pcs->gpio_base + 0x100 + ((arg == 1) ? 0x18 : 0x24);
+					offset = gpio_number - 96;
+					break;
+				default:
+					pr_err("Bad pin number\n");
+					break;
+				}
+
+				/* if we want to set output low, we should set the arg to 1 */
+				if (arg == 0)
+					arg = 1;
+
+				data = 0;
+				data |= (arg << offset);
+				pcs->write(data, gpio_base);
+				break;
+#endif
 			case PIN_CONFIG_INPUT_SCHMITT:
 			case PIN_CONFIG_DRIVE_STRENGTH:
 			case PIN_CONFIG_SLEW_RATE:
@@ -580,10 +687,12 @@ static int pcs_pinconf_set(struct pinctrl_dev *pctldev,
 				shift = ffs(func->conf[i].mask) - 1;
 				data &= ~func->conf[i].mask;
 				data |= (arg << shift) & func->conf[i].mask;
+				pcs->write(data, pcs->base + offset);
 				break;
 			/* 4 parameters */
 			case PIN_CONFIG_BIAS_DISABLE:
 				pcs_pinconf_clear_bias(pctldev, pin);
+				pcs->write(data, pcs->base + offset);
 				break;
 			case PIN_CONFIG_BIAS_PULL_DOWN:
 			case PIN_CONFIG_BIAS_PULL_UP:
@@ -596,11 +705,11 @@ static int pcs_pinconf_set(struct pinctrl_dev *pctldev,
 					data |= func->conf[i].enable;
 				else
 					data |= func->conf[i].disable;
+				pcs->write(data, pcs->base + offset);
 				break;
 			default:
 				return -ENOTSUPP;
 			}
-			pcs->write(data, pcs->base + offset);
 
 			break;
 		}
@@ -925,6 +1034,10 @@ static int pcs_parse_pinconf(struct pcs_device *pcs, struct device_node *np,
 		{ "pinctrl-single,slew-rate", PIN_CONFIG_SLEW_RATE, },
 		{ "pinctrl-single,input-enable", PIN_CONFIG_INPUT_ENABLE, },
 		{ "pinctrl-single,input-schmitt", PIN_CONFIG_INPUT_SCHMITT, },
+#ifdef CONFIG_SOC_KY_X1
+		{ "pinctrl-single,output-enable", PIN_CONFIG_OUTPUT_ENABLE, },
+		{ "pinctrl-single,output", PIN_CONFIG_OUTPUT, },
+#endif
 		{ "pinctrl-single,low-power-mode", PIN_CONFIG_MODE_LOW_POWER, },
 	};
 	static const struct pcs_conf_type prop4[] = {
@@ -1432,7 +1545,11 @@ static void pcs_irq_mask(struct irq_data *d)
 {
 	struct pcs_soc_data *pcs_soc = irq_data_get_irq_chip_data(d);
 
+#ifdef CONFIG_SOC_KY_X1
+	pcs_irq_set(pcs_soc, d->irq, true);
+#else
 	pcs_irq_set(pcs_soc, d->irq, false);
+#endif
 }
 
 /**
@@ -1443,7 +1560,11 @@ static void pcs_irq_unmask(struct irq_data *d)
 {
 	struct pcs_soc_data *pcs_soc = irq_data_get_irq_chip_data(d);
 
+#ifdef CONFIG_SOC_KY_X1
+	pcs_irq_set(pcs_soc, d->irq, false);
+#else
 	pcs_irq_set(pcs_soc, d->irq, true);
+#endif
 }
 
 /**
@@ -1463,6 +1584,57 @@ static int pcs_irq_set_wake(struct irq_data *d, unsigned int state)
 
 	return 0;
 }
+
+#ifdef CONFIG_SOC_KY_X1
+static inline void _pcs_irq_set_type(struct pcs_soc_data *pcs_soc,
+			       int irq, int flow_type)
+{
+	struct pcs_device *pcs;
+	struct list_head *pos;
+	unsigned mask;
+
+	pcs = container_of(pcs_soc, struct pcs_device, socdata);
+	list_for_each(pos, &pcs->irqs) {
+		struct pcs_interrupt *pcswi;
+		unsigned soc_mask;
+
+		pcswi = list_entry(pos, struct pcs_interrupt, node);
+		if (irq != pcswi->irq)
+			continue;
+
+		soc_mask = pcs_soc->irq_enable_mask;
+		raw_spin_lock(&pcs->lock);
+		mask = pcs->read(pcswi->reg);
+
+		if (flow_type == IRQ_TYPE_EDGE_RISING) {
+			mask |= (1 << EDGE_RISE_EN);
+		} else {
+			mask &= ~(1 << EDGE_RISE_EN);
+		}
+
+		if (flow_type == IRQ_TYPE_EDGE_FALLING) {
+			mask |= (1 << EDGE_FALL_EN);
+		} else {
+			mask &= ~(1 << EDGE_FALL_EN);
+		}
+
+		pcs->write(mask, pcswi->reg);
+
+		/* flush posted write */
+		mask = pcs->read(pcswi->reg);
+		raw_spin_unlock(&pcs->lock);
+	}
+}
+
+static int pcs_irq_set_type(struct irq_data *d, unsigned int flow_type)
+{
+	struct pcs_soc_data *pcs_soc = irq_data_get_irq_chip_data(d);
+
+	_pcs_irq_set_type(pcs_soc, d->irq, flow_type);
+
+	return 0;
+}
+#endif
 
 /**
  * pcs_irq_handle() - common interrupt handler
@@ -1484,6 +1656,7 @@ static int pcs_irq_handle(struct pcs_soc_data *pcs_soc)
 		unsigned mask;
 
 		pcswi = list_entry(pos, struct pcs_interrupt, node);
+#ifndef CONFIG_SOC_KY_X1
 		raw_spin_lock(&pcs->lock);
 		mask = pcs->read(pcswi->reg);
 		raw_spin_unlock(&pcs->lock);
@@ -1492,6 +1665,22 @@ static int pcs_irq_handle(struct pcs_soc_data *pcs_soc)
 						  pcswi->hwirq);
 			count++;
 		}
+#else
+		unsigned reg_offset, bit_offset;
+
+		reg_offset = (pcswi->hwirq / 4 - 1) / 32 * 4;
+		bit_offset = (pcswi->hwirq / 4 - 1) - reg_offset / 4 * 32;
+
+		raw_spin_lock(&pcs->lock);
+		mask = pcs->read(pcs->gedge_flag_base + reg_offset);
+		raw_spin_unlock(&pcs->lock);
+
+		if (mask & (1 << bit_offset)) {
+			generic_handle_domain_irq(pcs->domain,
+						pcswi->hwirq);
+			count++;
+		}
+#endif
 	}
 
 	return count;
@@ -1589,6 +1778,10 @@ static int pcs_irq_init_chained_handler(struct pcs_device *pcs,
 	pcs->chip.irq_mask = pcs_irq_mask;
 	pcs->chip.irq_unmask = pcs_irq_unmask;
 	pcs->chip.irq_set_wake = pcs_irq_set_wake;
+#ifdef CONFIG_SOC_KY_X1
+	pcs->chip.flags = IRQCHIP_SKIP_SET_WAKE;
+	pcs->chip.irq_set_type = pcs_irq_set_type;
+#endif
 
 	if (PCS_QUIRK_HAS_SHARED_IRQ) {
 		int res;
@@ -1627,6 +1820,7 @@ static int pcs_irq_init_chained_handler(struct pcs_device *pcs,
 }
 
 #ifdef CONFIG_PM
+#ifndef CONFIG_SOC_KY_X1
 static int pcs_save_context(struct pcs_device *pcs)
 {
 	int i, mux_bytes;
@@ -1724,6 +1918,31 @@ static int pinctrl_single_resume(struct platform_device *pdev)
 
 	return pinctrl_force_default(pcs->pctl);
 }
+
+#else
+
+#ifdef CONFIG_PM_SLEEP
+static struct pcs_device *pinctrl_pcs;
+
+static int pinctrl_syscore_suspend(void)
+{
+	pinctrl_force_sleep(pinctrl_pcs->pctl);
+
+	return 0;
+}
+
+static void pinctrl_syscore_resume(void)
+{
+	pinctrl_force_default(pinctrl_pcs->pctl);
+}
+
+static struct syscore_ops pinctrl_syscore_ops = {
+	.suspend = pinctrl_syscore_suspend,
+	.resume = pinctrl_syscore_resume,
+};
+#endif
+
+#endif
 #endif
 
 /**
@@ -1775,6 +1994,11 @@ static int pcs_quirk_missing_pinctrl_cells(struct pcs_device *pcs,
 	return error;
 }
 
+#ifdef CONFIG_SOC_KY_X1
+static struct clk *psc_clk;
+static struct reset_control *psc_rst;
+#endif
+
 static int pcs_probe(struct platform_device *pdev)
 {
 	struct device_node *np = pdev->dev.of_node;
@@ -1783,10 +2007,42 @@ static int pcs_probe(struct platform_device *pdev)
 	struct pcs_device *pcs;
 	const struct pcs_soc_data *soc;
 	int ret;
-
+#ifdef CONFIG_SOC_KY_X1
+	u32 regval, i;
+	void __iomem *base;
+#endif
 	soc = of_device_get_match_data(&pdev->dev);
 	if (WARN_ON(!soc))
 		return -EINVAL;
+
+#ifdef CONFIG_SOC_KY_X1
+	psc_rst = devm_reset_control_get_exclusive(&pdev->dev, "aib_rst");
+	if (IS_ERR(psc_rst)) {
+		ret = PTR_ERR(psc_rst);
+		dev_err(&pdev->dev, "Failed to get reset: %d\n", ret);
+		return -EINVAL;
+	}
+
+	/* deasser clk  */
+	ret = reset_control_deassert(psc_rst);
+	if (ret) {
+		dev_err(&pdev->dev, "Failed to deassert reset: %d\n", ret);
+		return -EINVAL;
+	}
+
+	psc_clk = devm_clk_get(&pdev->dev, NULL);
+	if (IS_ERR(psc_clk)) {
+		dev_err(&pdev->dev, "Fail to get pinctrl clock, error %ld.\n",
+			PTR_ERR(psc_clk));
+		return PTR_ERR(psc_clk);
+	}
+
+	ret = clk_prepare_enable(psc_clk);
+	if (ret) {
+		dev_err(&pdev->dev, "Fail to enable pinctrl clock, error %d.\n", ret);
+		return ret;
+	}
+#endif
 
 	pcs = devm_kzalloc(&pdev->dev, sizeof(*pcs), GFP_KERNEL);
 	if (!pcs)
@@ -1855,6 +2111,41 @@ static int pcs_probe(struct platform_device *pdev)
 		return -ENODEV;
 	}
 
+#ifdef CONFIG_SOC_KY_X1
+	res = platform_get_resource(pdev, IORESOURCE_MEM, 1);
+	if (!res) {
+		dev_err(pcs->dev, "could not get resource\n");
+		return -ENODEV;
+	}
+
+	pcs->gedge_flag_res = devm_request_mem_region(pcs->dev, res->start,
+			resource_size(res), DRIVER_NAME);
+	if (!pcs->gedge_flag_res) {
+		dev_err(pcs->dev, "could not get mem_region\n");
+		return -EBUSY;
+	}
+
+	pcs->gedge_flag_size = resource_size(pcs->gedge_flag_res);
+	pcs->gedge_flag_base = devm_ioremap(pcs->dev, pcs->gedge_flag_res->start,
+			pcs->gedge_flag_size);
+	if (!pcs->gedge_flag_base) {
+		dev_err(pcs->dev, "could not ioremap\n");
+		return -ENODEV;
+	}
+
+	res = platform_get_resource(pdev, IORESOURCE_MEM, 2);
+	if (!res) {
+		dev_err(pcs->dev, "could not get resource\n");
+		return -ENODEV;
+	}
+
+	pcs->gpio_base = ioremap(res->start, resource_size(res));
+	if (!pcs->gpio_base) {
+		dev_err(pcs->dev, "could not ioremap\n");
+		return -ENODEV;
+	}
+#endif
+
 	platform_set_drvdata(pdev, pcs);
 
 	switch (pcs->width) {
@@ -1880,6 +2171,16 @@ static int pcs_probe(struct platform_device *pdev)
 	if (PCS_HAS_PINCONF)
 		pcs->desc.confops = &pcs_pinconf_ops;
 	pcs->desc.owner = THIS_MODULE;
+
+#ifdef CONFIG_SOC_KY_X1
+	for (i = 4, base = pcs->base + 4; i < pcs->size; i += 4, base += 4) {
+		regval = pcs->read((void __iomem *)base);
+		regval |= (1 << EDGE_CLEAR);
+		regval &= ~(1 << EDGE_FALL_EN);
+		regval &= ~(1 << EDGE_RISE_EN);
+		pcs->write(regval, (void __iomem *)base);
+	}
+#endif
 
 	ret = pcs_allocate_pin_table(pcs);
 	if (ret < 0)
@@ -1918,6 +2219,16 @@ static int pcs_probe(struct platform_device *pdev)
 
 	dev_info(pcs->dev, "%i pins, size %u\n", pcs->desc.npins, pcs->size);
 
+#ifdef CONFIG_SOC_KY_X1
+	dev_pm_set_wake_irq(&pdev->dev, pcs->socdata.irq);
+	device_init_wakeup(&pdev->dev, true);
+
+#ifdef CONFIG_PM_SLEEP
+	pinctrl_pcs = pcs;
+	register_syscore_ops(&pinctrl_syscore_ops);
+#endif
+#endif
+
 	ret = pinctrl_enable(pcs->pctl);
 	if (ret)
 		goto free;
@@ -1937,6 +2248,12 @@ static int pcs_remove(struct platform_device *pdev)
 		return 0;
 
 	pcs_free_resources(pcs);
+
+#ifdef CONFIG_SOC_KY_X1
+	clk_disable_unprepare(psc_clk);
+
+	reset_control_assert(psc_rst);
+#endif
 
 	return 0;
 }
@@ -1964,6 +2281,14 @@ static const struct pcs_soc_data pinctrl_single_am654 = {
 	.irq_status_mask = (1 << 30),   /* WKUP_EVT */
 };
 
+#ifdef CONFIG_SOC_KY_X1
+static const struct pcs_soc_data pinconf_single_aib = {
+	.flags = PCS_QUIRK_SHARED_IRQ | PCS_FEAT_PINCONF,
+	.irq_enable_mask = (1 << EDGE_CLEAR),	/* WAKEUPENABLE */
+	.irq_status_mask = (1 << EDGE_CLEAR),       /* WAKEUPENABLE */
+};
+#endif
+
 static const struct pcs_soc_data pinctrl_single = {
 };
 
@@ -1980,6 +2305,9 @@ static const struct of_device_id pcs_of_match[] = {
 	{ .compatible = "ti,omap5-padconf", .data = &pinctrl_single_omap_wkup },
 	{ .compatible = "pinctrl-single", .data = &pinctrl_single },
 	{ .compatible = "pinconf-single", .data = &pinconf_single },
+#ifdef CONFIG_SOC_KY_X1
+	{ .compatible = "pinconf-single-aib", .data = &pinconf_single_aib },
+#endif
 	{ },
 };
 MODULE_DEVICE_TABLE(of, pcs_of_match);
@@ -1991,13 +2319,29 @@ static struct platform_driver pcs_driver = {
 		.name		= DRIVER_NAME,
 		.of_match_table	= pcs_of_match,
 	},
+#ifndef CONFIG_SOC_KY_X1
 #ifdef CONFIG_PM
 	.suspend = pinctrl_single_suspend,
 	.resume = pinctrl_single_resume,
 #endif
+#endif
 };
 
+#ifdef CONFIG_SOC_KY
+static int __init pcs_driver_init(void)
+{
+	return platform_driver_register(&pcs_driver);
+}
+postcore_initcall(pcs_driver_init);
+
+static void __exit pcs_driver_exit(void)
+{
+	platform_driver_unregister(&pcs_driver);
+}
+module_exit(pcs_driver_exit);
+#else
 module_platform_driver(pcs_driver);
+#endif
 
 MODULE_AUTHOR("Tony Lindgren <tony@atomide.com>");
 MODULE_DESCRIPTION("One-register-per-pin type device tree based pinctrl driver");

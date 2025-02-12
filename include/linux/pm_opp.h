@@ -169,6 +169,9 @@ int dev_pm_opp_register_notifier(struct device *dev, struct notifier_block *nb);
 int dev_pm_opp_unregister_notifier(struct device *dev, struct notifier_block *nb);
 
 int dev_pm_opp_set_config(struct device *dev, struct dev_pm_opp_config *config);
+#ifdef CONFIG_SOC_KY
+int dev_pm_opp_set_config_indexed(struct device *dev, struct dev_pm_opp_config *config, int index);
+#endif
 int devm_pm_opp_set_config(struct device *dev, struct dev_pm_opp_config *config);
 void dev_pm_opp_clear_config(int token);
 int dev_pm_opp_config_clks_simple(struct device *dev,

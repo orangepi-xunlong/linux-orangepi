@@ -1,0 +1,6 @@
+config USB_NET_ASIX
+	tristate "ASIX USB 3.0/2.0 to Gigabit Ethernet"
+	depends on USB_USBNET
+	help
+	  This option adds support for ASIX USB3.0/2.0 Gigabit Ethernet Network
+	  Adapter Driver Compilation & Configuration on Linux

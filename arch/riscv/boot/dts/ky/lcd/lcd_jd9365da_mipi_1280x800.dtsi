@@ -1,0 +1,66 @@
+// SPDX-License-Identifier: GPL-2.0
+
+/ { lcds: lcds {
+	lcd_jd9365da_mipi_1280x800: lcd_jd9365da_mipi_1280x800 {
+		dsi-work-mode = <1>; /* video burst mode*/
+		dsi-lane-number = <4>;
+		dsi-color-format = "rgb888";
+		width-mm = <72>;
+		height-mm = <126>;
+		use-dcs-write;
+
+		/*mipi info*/
+		height = <1280>;
+		width = <800>;
+		hfp = <16>;
+		hbp = <48>;
+		hsync = <4>;
+		vfp = <150>;
+		vbp = <32>;
+		vsync = <4>;
+		fps = <60>;
+		work-mode = <0>;
+		rgb-mode = <3>;
+		lane-number = <4>;
+		phy-bit-clock = <624000000>;
+		split-enable = <0>;
+		eotp-enable = <0>;
+		burst-mode = <2>;
+		esd-check-enable = <0>;
+
+		/* DSI_CMD, DSI_MODE, timeout, len, cmd */
+		initial-command = [
+			39 01 96 01 11
+			39 01 32 01 29
+		];
+		sleep-in-command = [
+			39 01 00 02 26 08
+			39 01 78 01 28
+			39 01 78 01 10
+		];
+		sleep-out-command = [
+			39 01 96 01 11
+			39 01 32 01 29
+		];
+		read-id-command = [
+			37 01 00 01 01
+			14 01 00 01 04
+		];
+
+		display-timings {
+			timing0 {
+				clock-frequency = <76800000>;
+				hactive = <800>;
+				hfront-porch = <16>;
+				hback-porch = <48>;
+				hsync-len = <4>;
+				vactive = <1280>;
+				vfront-porch = <150>;
+				vback-porch = <32>;
+				vsync-len = <4>;
+				vsync-active = <1>;
+				hsync-active = <1>;
+			};
+		};
+	};
+};};

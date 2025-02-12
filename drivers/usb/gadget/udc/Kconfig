@@ -236,6 +236,13 @@ config USB_MV_UDC
 	  USB2.0 OTG controller, which can be configured as high speed or
 	  full speed USB peripheral.
 
+config USB_X1_UDC
+	tristate "Ky X1 USB2.0 Device Controller"
+	depends on HAS_DMA
+	help
+	  Include a high speed USB2.0 OTG controller, which can be configured 
+	  as high speed or full speed USB peripheral.
+
 config USB_MV_U3D
 	depends on HAS_DMA
 	tristate "MARVELL PXA2128 USB 3.0 controller"

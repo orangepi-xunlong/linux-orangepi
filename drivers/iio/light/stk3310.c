@@ -16,6 +16,7 @@
 #include <linux/iio/events.h>
 #include <linux/iio/iio.h>
 #include <linux/iio/sysfs.h>
+#include <linux/gpio.h>
 
 #define STK3310_REG_STATE			0x00
 #define STK3310_REG_PSCTRL			0x01
@@ -591,6 +592,9 @@ static int stk3310_probe(struct i2c_client *client)
 	int ret;
 	struct iio_dev *indio_dev;
 	struct stk3310_data *data;
+#ifdef CONFIG_SOC_KY_X1
+	struct gpio_desc *pwr;
+#endif
 
 	indio_dev = devm_iio_device_alloc(&client->dev, sizeof(*data));
 	if (!indio_dev) {
@@ -604,6 +608,13 @@ static int stk3310_probe(struct i2c_client *client)
 
 	device_property_read_u32(&client->dev, "proximity-near-level",
 				 &data->ps_near_level);
+
+#ifdef CONFIG_SOC_KY_X1
+	pwr = devm_gpiod_get(&client->dev, "pwr", GPIOD_OUT_LOW);
+	if(IS_ERR(pwr))
+		return PTR_ERR(pwr);
+	gpiod_set_value(pwr, 1);
+#endif
 
 	mutex_init(&data->lock);
 

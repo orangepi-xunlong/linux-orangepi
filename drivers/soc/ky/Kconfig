@@ -1,0 +1,54 @@
+# SPDX-License-Identifier: GPL-2.0-only
+if SOC_KY
+
+#
+# ky Soc drivers
+#
+config KY_PM_DOMAINS
+	bool "Ky generic power domain"
+	depends on PM
+	select PM_GENERIC_DOMAINS
+	help
+	  Say y here to enable power domain support.
+	  In order to meet high performance and low power requirements, a power
+	  management unit is designed or saving power.
+
+endif
+
+config KY_REBOOT_CONTROL
+	tristate "Ky x1 reboot handler"
+	depends on SOC_KY_X1
+	help
+	  Ky reboot into fastboot mode
+
+config KY_LID_CONTROL
+	tristate "Ky lid control"
+	depends on SOC_KY_X1
+	help
+	  Ky screen lid control
+
+config KY_X1_DMA_RANGE
+	tristate "Ky dram range driver for x1"
+	depends on SOC_KY_X1
+	help
+	  This driver is an empty shell, in order to make the dma-ranges function
+          effective
+
+config KY_SOCINFO
+	tristate "Socinfo driver for ky SoCs"
+	depends on SOC_KY && NVMEM_KY_EFUSE
+	select MFD_SYSCON
+	select SOC_BUS
+	help
+	  Ky SoCs information driver, which get information from efuse and
+	  report to userspace.
+
+config KY_DDRBW
+	tristate "ddr_bw driver for ky x1 soc"
+	depends on SOC_KY_X1
+	help
+	  Ky x1 soc ddrbw driver.
+
+source "drivers/soc/ky/jpu/Kconfig"
+source "drivers/soc/ky/v2d/Kconfig"
+source "drivers/soc/ky/ky-rf/Kconfig"

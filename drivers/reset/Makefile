@@ -41,3 +41,6 @@ obj-$(CONFIG_RESET_UNIPHIER) += reset-uniphier.o
 obj-$(CONFIG_RESET_UNIPHIER_GLUE) += reset-uniphier-glue.o
 obj-$(CONFIG_RESET_ZYNQ) += reset-zynq.o
 obj-$(CONFIG_ARCH_ZYNQMP) += reset-zynqmp.o
+obj-$(CONFIG_RESET_X1PRO_KY) += reset-ky-x1pro.o
+obj-$(CONFIG_RESET_X1_KY) += reset-ky-x1.o
+obj-$(CONFIG_RESET_X1_MATRIX_KY) += reset-ky-x1matrix.o

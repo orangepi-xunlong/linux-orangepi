@@ -315,6 +315,12 @@ config USB_EHCI_MV
 	  Dova, Armada 370 and Armada XP. See "Support for Marvell EBU
 	  on-chip EHCI USB controller" for those.
 
+config USB_EHCI_X1
+	bool "EHCI support for Ky x1 USB controller"
+	select USB_EHCI_ROOT_HUB_TT
+	help
+	  Enable support for Ky x1 SoC's on-chip EHCI controller.
+
 config USB_OCTEON_HCD
 	tristate "Cavium Networks Octeon USB support"
 	depends on CAVIUM_OCTEON_SOC && USB

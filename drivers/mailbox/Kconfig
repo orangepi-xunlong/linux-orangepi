@@ -295,4 +295,31 @@ config QCOM_IPCC
 	  acts as an interrupt controller for receiving interrupts from clients.
 	  Say Y here if you want to build this driver.
 
+config KY_MAILBOX
+	tristate "Ky Message Box"
+	depends on SOC_KY
+	help
+	  Mailbox implementation for the hardware message box present in
+	  various Ky SoCs. This mailbox is used for communication
+	  between the application CPUs and the power management coprocessor.
+
+if KY_MAILBOX
+
+config X1PRO_MAILBOX
+	tristate "Ky X1pro Message Box"
+	depends on SOC_KY
+	help
+	  Mailbox implementation for the hardware message box present in
+	  various Ky SoCs. This mailbox is used for communication
+	  between the application CPUs and the power management coprocessor.
+
+config X1_MAILBOX
+	tristate "Ky X1x Message Box"
+	depends on SOC_KY
+	help
+	  Mailbox implementation for the hardware message box present in
+	  various Ky SoCs. This mailbox is used for communication
+	  between the application CPUs and the power management coprocessor.
+endif
+
 endif

@@ -41,6 +41,13 @@ config EXTCON_FSA9480
 	  I2C and enables USB data, stereo and mono audio, video, microphone
 	  and UART data to use a common connector port.
 
+config EXTCON_USB_X1CI
+	tristate "Ky X1-x USB extcon support"
+	depends on GPIOLIB || COMPILE_TEST
+	help
+	  say Y here to enable ky x1 usb wakeup irq based USB cable detection extcon support.
+	  Used typically if wakeup irq is used for USB ID pin detection.
+
 config EXTCON_GPIO
 	tristate "GPIO extcon support"
 	depends on GPIOLIB || COMPILE_TEST

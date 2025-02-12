@@ -1663,4 +1663,12 @@ config REGULATOR_QCOM_LABIBB
 	  boost regulator and IBB can be used as a negative boost regulator
 	  for LCD display panel.
 
+config REGULATOR_KY
+	tristate "Ky regulator support"
+	depends on MFD_KY_PMIC
+	select REGULATOR_FIXED_VOLTAGE
+	help
+	  This driver provides support for the voltage regulators on the
+	   ky pmic.
+	
 endif

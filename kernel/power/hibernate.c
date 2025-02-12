@@ -171,8 +171,13 @@ static void platform_end(int platform_mode)
 
 static int platform_pre_snapshot(int platform_mode)
 {
+#ifdef CONFIG_SOC_KY_X1
+	return (/* platform_mode && */ hibernation_ops) ?
+		hibernation_ops->pre_snapshot() : 0;
+#else
 	return (platform_mode && hibernation_ops) ?
 		hibernation_ops->pre_snapshot() : 0;
+#endif
 }
 
 /**
@@ -201,8 +206,13 @@ static void platform_leave(int platform_mode)
  */
 static void platform_finish(int platform_mode)
 {
+#ifdef CONFIG_SOC_KY_X1
+	if (/* platform_mode && */ hibernation_ops)
+		hibernation_ops->finish();
+#else
 	if (platform_mode && hibernation_ops)
 		hibernation_ops->finish();
+#endif
 }
 
 /**
@@ -217,8 +227,13 @@ static void platform_finish(int platform_mode)
  */
 static int platform_pre_restore(int platform_mode)
 {
+#ifdef CONFIG_SOC_KY_X1
+	return (/* platform_mode && */ hibernation_ops) ?
+		hibernation_ops->pre_restore() : 0;
+#else
 	return (platform_mode && hibernation_ops) ?
 		hibernation_ops->pre_restore() : 0;
+#endif
 }
 
 /**

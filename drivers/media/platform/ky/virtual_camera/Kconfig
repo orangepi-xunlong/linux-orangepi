@@ -1,0 +1,25 @@
+# SPDX-License-Identifier: GPL-2.0
+#
+# KY X1 camera configuration
+#
+
+comment "KY X1 Virtual Camera Driver"
+
+menuconfig KY_X1_VIR_CAMERA
+    tristate "KY X1 virtual camera support"
+	select MEDIA_CONTROLLER
+	select VIDEO_V4L2_SUBDEV_API
+    help
+	  Say Y here to enable selecting the video adapters for
+	  KY X1 virtual camera and video v2
+
+config KY_X1_VIR_CAMERA
+    tristate "KY X1 VIRTUAL CAMERA support"
+    select VIDEOBUF2_CORE
+    select VIDEOBUF2_V4L2
+    select VIDEOBUF2_DMA_CONTIG
+    select VIDEOBUF2_DMA_SG
+    select KY_X1_CCIC_V2
+    depends on KY_X1_CAMERA_V2
+    help
+      Enable support for ky virtual camera

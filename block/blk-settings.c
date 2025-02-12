@@ -290,7 +290,9 @@ void blk_queue_max_segment_size(struct request_queue *q, unsigned int max_size)
 	}
 
 	/* see blk_queue_virt_boundary() for the explanation */
+#ifndef CONFIG_SOC_KY_X1
 	WARN_ON_ONCE(q->limits.virt_boundary_mask);
+#endif
 
 	q->limits.max_segment_size = max_size;
 }

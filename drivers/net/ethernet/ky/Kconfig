@@ -1,0 +1,24 @@
+config NET_VENDOR_KY
+	bool "Ky devices"
+	default y
+	depends on SOC_KY
+	help
+	  If you have a network (Ethernet) chipset belonging to this class,
+	  say Y.
+
+	  Note that the answer to this question does not directly affect
+	  the kernel: saying N will just cause the configurator to skip all
+	  the questions regarding Ky chipsets. If you say Y, you will
+	  be asked for your specific chipset/driver in the following questions.
+
+if NET_VENDOR_KY
+
+config X1_EMAC
+	bool "x1 Emac Driver"
+	depends on SOC_KY_X1
+	select PHYLIB
+	help
+	  This Driver support Ky x1-x Ethernet MAC
+	  Say Y to enable support for the Ky Ethernet.
+
+endif # NET_VENDOR_KY

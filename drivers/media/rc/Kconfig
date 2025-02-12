@@ -393,6 +393,15 @@ config IR_SUNXI
 	   To compile this driver as a module, choose M here: the module will
 	   be called sunxi-ir.
 
+config IR_KY
+	tristate "KY IR remote Recriver control"
+	depends on SOC_KY
+	help
+	   Say Y if you want to use ky IR Controller
+
+	   To compile this driver as a module, choose M here: the module will be
+	   called ky-ir
+
 config IR_TOY
 	tristate "Infrared Toy and IR Droid"
 	depends on USB

@@ -900,6 +900,22 @@ config INPUT_HISI_POWERKEY
 	  To compile this driver as a module, choose M here: the
 	  module will be called hisi_powerkey.
 
+config INPUT_KY_POWERKEY
+	tristate "Ky PMIC pwrkey support"
+	depends on MFD_KY_PMIC
+	help
+	  Say Y to enable support for PMIC PWRKEY.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called ky-pwrkey.
+
+config HALL_SENSOR_AS1911
+	tristate "Ky Hall Sensor Driver"
+	depends on INPUT
+	help
+	  Say Y here if you want to enable the Hall sensor AS1911 driver with
+	  interrupt support.
+
 config INPUT_RAVE_SP_PWRBUTTON
 	tristate "RAVE SP Power button Driver"
 	depends on RAVE_SP_CORE

@@ -607,6 +607,21 @@ static int sbs_get_battery_presence_and_health(
 	return 0;
 }
 
+static int sbs_get_property_index(struct i2c_client *client,
+	enum power_supply_property psp)
+{
+	int count;
+
+	for (count = 0; count < ARRAY_SIZE(sbs_data); count++)
+		if (psp == sbs_data[count].psp)
+			return count;
+
+	dev_warn(&client->dev,
+		"%s: Invalid Property - %d\n", __func__, psp);
+
+	return -EINVAL;
+}
+
 static int sbs_get_battery_property(struct i2c_client *client,
 	int reg_offset, enum power_supply_property psp,
 	union power_supply_propval *val)
@@ -639,25 +654,41 @@ static int sbs_get_battery_property(struct i2c_client *client,
 				val->intval =
 					POWER_SUPPLY_CAPACITY_LEVEL_NORMAL;
 			return 0;
-		} else if (psp != POWER_SUPPLY_PROP_STATUS) {
-			return 0;
-		}
+		} else if (psp == POWER_SUPPLY_PROP_STATUS) {
+			if (ret & BATTERY_FULL_CHARGED)
+				val->intval = POWER_SUPPLY_STATUS_FULL;
+			else if (ret & BATTERY_DISCHARGING)
+				val->intval = POWER_SUPPLY_STATUS_DISCHARGING;
+			else
+				val->intval = POWER_SUPPLY_STATUS_CHARGING;
 
-		if (ret & BATTERY_FULL_CHARGED)
-			val->intval = POWER_SUPPLY_STATUS_FULL;
-		else if (ret & BATTERY_DISCHARGING)
-			val->intval = POWER_SUPPLY_STATUS_DISCHARGING;
-		else
-			val->intval = POWER_SUPPLY_STATUS_CHARGING;
+			sbs_status_correct(client, &val->intval);
 
-		sbs_status_correct(client, &val->intval);
-
-		if (chip->poll_time == 0)
-			chip->last_state = val->intval;
-		else if (chip->last_state != val->intval) {
-			cancel_delayed_work_sync(&chip->work);
-			power_supply_changed(chip->power_supply);
-			chip->poll_time = 0;
+			if (chip->poll_time == 0)
+				chip->last_state = val->intval;
+			else if (chip->last_state != val->intval) {
+				cancel_delayed_work_sync(&chip->work);
+				power_supply_changed(chip->power_supply);
+				chip->poll_time = 0;
+			}
+		} else if (psp == POWER_SUPPLY_PROP_CAPACITY) {
+			/* Check if the battery is fully charged or nearly full and not charging */
+			union power_supply_propval status_val;
+			int status_index = sbs_get_property_index(client, POWER_SUPPLY_PROP_STATUS);
+			if (status_index >= 0) {
+				sbs_get_battery_property(client, status_index, POWER_SUPPLY_PROP_STATUS, &status_val);
+				if (status_val.intval == POWER_SUPPLY_STATUS_FULL) {
+					val->intval = 100;
+				} else if (ret >= 98 && status_val.intval == POWER_SUPPLY_STATUS_NOT_CHARGING) {
+					val->intval = 100;
+				} else {
+					val->intval = min(ret, 100);
+				}
+			} else {
+				val->intval = min(ret, 100);
+			}
+		} else {
+			val->intval = ret;
 		}
 	} else {
 		if (psp == POWER_SUPPLY_PROP_STATUS)
@@ -674,20 +705,6 @@ static int sbs_get_battery_property(struct i2c_client *client,
 	return 0;
 }
 
-static int sbs_get_property_index(struct i2c_client *client,
-	enum power_supply_property psp)
-{
-	int count;
-
-	for (count = 0; count < ARRAY_SIZE(sbs_data); count++)
-		if (psp == sbs_data[count].psp)
-			return count;
-
-	dev_warn(&client->dev,
-		"%s: Invalid Property - %d\n", __func__, psp);
-
-	return -EINVAL;
-}
 
 static const char *sbs_get_constant_string(struct sbs_info *chip,
 			enum power_supply_property psp)

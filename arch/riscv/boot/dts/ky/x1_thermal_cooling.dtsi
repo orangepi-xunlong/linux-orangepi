@@ -1,0 +1,130 @@
+// SPDX-License-Identifier: (GPL-2.0 OR MIT)
+/* Copyright (c) 2023 Ky, Inc */
+
+&thermal_zones {
+	cluster0_thermal {
+		polling-delay = <0>;
+		polling-delay-passive = <0>;
+		thermal-sensors = <&thermal 3>;
+
+		thermal0_trips: trips {
+			cls0_trip0: cls0-trip-point0 {
+				temperature = <75000>;
+				hysteresis = <5000>;
+				type = "passive";
+			};
+
+			cls0_trip1: cls0-trip-point1 {
+				temperature = <85000>;
+				hysteresis = <5000>;
+				type = "passive";
+			};
+
+			cls0_trip2: cls0-trip-point2 {
+				temperature = <95000>;
+				hysteresis = <5000>;
+				type = "passive";
+			};
+
+			cls0_trip3: cls0-trip-point3 {
+				temperature = <105000>;
+				hysteresis = <5000>;
+				type = "passive";
+			};
+
+			cls0_trip4: cls0-trip-point4 {
+				temperature = <115000>;
+				hysteresis = <5000>;
+				type = "critical";
+			};
+		};
+
+		cooling-maps {
+			map0 {
+				trip = <&cls0_trip0>;
+				cooling-device = <&cpu_0 0 0>,
+						 <&cpu_1 0 0>,
+						 <&cpu_2 0 0>,
+						 <&cpu_3 0 0>,
+						 <&cpu_4 0 0>,
+						 <&cpu_5 0 0>,
+						 <&cpu_6 0 0>,
+						 <&cpu_7 0 0>;
+			};
+
+			map1 {
+				trip = <&cls0_trip1>;
+				cooling-device = <&cpu_0 1 1>,
+						 <&cpu_1 1 1>,
+						 <&cpu_2 1 1>,
+						 <&cpu_3 1 1>,
+						 <&cpu_4 1 1>,
+						 <&cpu_5 1 1>,
+						 <&cpu_6 1 1>,
+						 <&cpu_7 1 1>;
+			};
+
+			map2 {
+				trip = <&cls0_trip2>;
+				cooling-device = <&cpu_0 2 3>,
+						 <&cpu_1 2 3>,
+						 <&cpu_2 2 3>,
+						 <&cpu_3 2 3>,
+						 <&cpu_4 2 3>,
+						 <&cpu_5 2 3>,
+						 <&cpu_6 2 3>,
+						 <&cpu_7 2 3>;
+			};
+
+			map3 {
+				trip = <&cls0_trip3>;
+				cooling-device = <&cpu_0 4 5>,
+						 <&cpu_1 4 5>,
+						 <&cpu_2 4 5>,
+						 <&cpu_3 4 5>,
+						 <&cpu_4 4 5>,
+						 <&cpu_5 4 5>,
+						 <&cpu_6 4 5>,
+						 <&cpu_7 4 5>;
+			};
+		};
+	};
+
+	cluster1_thermal {
+		polling-delay = <0>;
+		polling-delay-passive = <0>;
+		thermal-sensors = <&thermal 4>;
+
+		thermal1_trips: trips {
+			cls1_trip0: cls1-trip-point0 {
+				temperature = <75000>;
+				hysteresis = <5000>;
+				type = "passive";
+			};
+
+			cls1_trip1: cls1-trip-point1 {
+				temperature = <85000>;
+				hysteresis = <5000>;
+				type = "passive";
+			};
+
+			cls1_trip2: cls1-trip-point2 {
+				temperature = <95000>;
+				hysteresis = <5000>;
+				type = "passive";
+			};
+
+			cls1_trip3: cls1-trip-point3 {
+				temperature = <105000>;
+				hysteresis = <5000>;
+				type = "passive";
+			};
+
+			cls1_trip4: cls1-trip-point4 {
+				temperature = <115000>;
+				hysteresis = <5000>;
+				type = "critical";
+			};
+		};
+	};
+};

@@ -408,10 +408,9 @@ config SERIAL_21285_CONSOLE
 
 config SERIAL_PXA
 	bool "PXA serial port support (DEPRECATED)"
-	depends on ARCH_PXA || ARCH_MMP
+	depends on ARCH_PXA || ARCH_MMP || SOC_KY_X1
 	select SERIAL_CORE
 	select SERIAL_8250_PXA if SERIAL_8250=y
-	select SERIAL_PXA_NON8250 if !SERIAL_8250=y
 	help
 	  If you have a machine based on an Intel XScale PXA2xx CPU you
 	  can enable its onboard serial ports by enabling this option.
@@ -419,9 +418,26 @@ config SERIAL_PXA
 	  Unless you have a specific need, you should use SERIAL_8250_PXA
 	  instead of this.
 
+if !SERIAL_8250
+choice
+	prompt "PXA serial driver"
+	default SERIAL_PXA_NON8250
+	help
+	  choice PXA serial driver
+
 config SERIAL_PXA_NON8250
-	bool
+	bool "PXA driver support"
 	depends on !SERIAL_8250 || COMPILE_TEST
+	help
+	  PXA serial driver
+
+config SERIAL_PXA_KY_X1
+	bool "Ky PXA driver suppor"
+	depends on !SERIAL_8250 || COMPILE_TEST
+	help
+	  Ky PXA serial driver
+endchoice
+endif
 
 config SERIAL_PXA_CONSOLE
 	bool "Console on PXA serial port (DEPRECATED)"

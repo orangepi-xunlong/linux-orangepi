@@ -2728,7 +2728,12 @@ static void _fsg_common_free_buffers(struct fsg_buffhd *buffhds, unsigned n)
 	if (buffhds) {
 		struct fsg_buffhd *bh = buffhds;
 		while (n--) {
+#if defined(CONFIG_SOC_KY_X1)
+			put_page(bh->page);
+			bh->page = NULL;
+#else
 			kfree(bh->buf);
+#endif
 			++bh;
 		}
 		kfree(buffhds);
@@ -2752,7 +2757,13 @@ int fsg_common_set_num_buffers(struct fsg_common *common, unsigned int n)
 		bh->next = bh + 1;
 		++bh;
 buffhds_first_it:
+#if defined(CONFIG_SOC_KY_X1)
+		bh->page = alloc_pages(GFP_KERNEL | __GFP_COMP | __GFP_NOWARN | GFP_DMA32,
+			get_order(FSG_BUFLEN));
+		bh->buf = page_address(bh->page);
+#else
 		bh->buf = kmalloc(FSG_BUFLEN, GFP_KERNEL);
+#endif
 		if (unlikely(!bh->buf))
 			goto error_release;
 	} while (--i);

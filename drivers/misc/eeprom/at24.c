@@ -433,7 +433,8 @@ static int at24_read(void *priv, unsigned int off, void *val, size_t count)
 
 	ret = pm_runtime_get_sync(dev);
 	if (ret < 0) {
-		pm_runtime_put_noidle(dev);
+		pm_runtime_mark_last_busy(dev);
+		pm_runtime_put_autosuspend(dev);
 		return ret;
 	}
 
@@ -447,14 +448,16 @@ static int at24_read(void *priv, unsigned int off, void *val, size_t count)
 		ret = at24_regmap_read(at24, buf + i, off + i, count);
 		if (ret < 0) {
 			mutex_unlock(&at24->lock);
-			pm_runtime_put(dev);
+			pm_runtime_mark_last_busy(dev);
+			pm_runtime_put_autosuspend(dev);
 			return ret;
 		}
 	}
 
 	mutex_unlock(&at24->lock);
 
-	pm_runtime_put(dev);
+	pm_runtime_mark_last_busy(dev);
+	pm_runtime_put_autosuspend(dev);
 
 	if (unlikely(at24->read_post))
 		at24->read_post(off, buf, i);
@@ -480,7 +483,8 @@ static int at24_write(void *priv, unsigned int off, void *val, size_t count)
 
 	ret = pm_runtime_get_sync(dev);
 	if (ret < 0) {
-		pm_runtime_put_noidle(dev);
+		pm_runtime_mark_last_busy(dev);
+		pm_runtime_put_autosuspend(dev);
 		return ret;
 	}
 
@@ -494,7 +498,8 @@ static int at24_write(void *priv, unsigned int off, void *val, size_t count)
 		ret = at24_regmap_write(at24, buf, off, count);
 		if (ret < 0) {
 			mutex_unlock(&at24->lock);
-			pm_runtime_put(dev);
+			pm_runtime_mark_last_busy(dev);
+			pm_runtime_put_autosuspend(dev);
 			return ret;
 		}
 		buf += ret;
@@ -504,7 +509,8 @@ static int at24_write(void *priv, unsigned int off, void *val, size_t count)
 
 	mutex_unlock(&at24->lock);
 
-	pm_runtime_put(dev);
+	pm_runtime_mark_last_busy(dev);
+	pm_runtime_put_autosuspend(dev);
 
 	return 0;
 }
@@ -616,10 +622,8 @@ static int at24_probe(struct i2c_client *client)
 	bool i2c_fn_i2c, i2c_fn_block;
 	unsigned int i, num_addresses;
 	struct at24_data *at24;
-	bool full_power;
 	struct regmap *regmap;
 	bool writable;
-	u8 test_byte;
 	int err;
 
 	i2c_fn_i2c = i2c_check_functionality(client->adapter, I2C_FUNC_I2C);
@@ -716,10 +720,6 @@ static int at24_probe(struct i2c_client *client)
 	at24->offset_adj = at24_get_offset_adj(flags, byte_len);
 	at24->client_regmaps[0] = regmap;
 
-	at24->vcc_reg = devm_regulator_get(dev, "vcc");
-	if (IS_ERR(at24->vcc_reg))
-		return PTR_ERR(at24->vcc_reg);
-
 	writable = !(flags & AT24_FLAG_READONLY);
 	if (writable) {
 		at24->write_max = min_t(unsigned int,
@@ -769,38 +769,16 @@ static int at24_probe(struct i2c_client *client)
 
 	i2c_set_clientdata(client, at24);
 
-	full_power = acpi_dev_state_d0(&client->dev);
-	if (full_power) {
-		err = regulator_enable(at24->vcc_reg);
-		if (err) {
-			dev_err(dev, "Failed to enable vcc regulator\n");
-			return err;
-		}
 
-		pm_runtime_set_active(dev);
-	}
-	pm_runtime_enable(dev);
-
-	/*
-	 * Perform a one-byte test read to verify that the chip is functional,
-	 * unless powering on the device is to be avoided during probe (i.e.
-	 * it's powered off right now).
-	 */
-	if (full_power) {
-		err = at24_read(at24, 0, &test_byte, 1);
-		if (err) {
-			pm_runtime_disable(dev);
-			if (!pm_runtime_status_suspended(dev))
-				regulator_disable(at24->vcc_reg);
-			return -ENODEV;
-		}
-	}
+	pm_runtime_use_autosuspend(dev);
+	pm_runtime_set_autosuspend_delay(dev, 10);
+ 	pm_runtime_enable(dev);
+ 
+	pm_runtime_get_sync(dev);
 
 	at24->nvmem = devm_nvmem_register(dev, &nvmem_config);
 	if (IS_ERR(at24->nvmem)) {
 		pm_runtime_disable(dev);
-		if (!pm_runtime_status_suspended(dev))
-			regulator_disable(at24->vcc_reg);
 		return dev_err_probe(dev, PTR_ERR(at24->nvmem),
 				     "failed to register nvmem\n");
 	}
@@ -809,7 +787,8 @@ static int at24_probe(struct i2c_client *client)
 	if (cdata == &at24_data_spd)
 		at24_probe_temp_sensor(client);
 
-	pm_runtime_idle(dev);
+	pm_runtime_mark_last_busy(dev);
+	pm_runtime_put_autosuspend(dev);
 
 	if (writable)
 		dev_info(dev, "%u byte %s EEPROM, writable, %u bytes/write\n",
@@ -823,30 +802,20 @@ static int at24_probe(struct i2c_client *client)
 
 static void at24_remove(struct i2c_client *client)
 {
-	struct at24_data *at24 = i2c_get_clientdata(client);
-
 	pm_runtime_disable(&client->dev);
 	if (acpi_dev_state_d0(&client->dev)) {
-		if (!pm_runtime_status_suspended(&client->dev))
-			regulator_disable(at24->vcc_reg);
 		pm_runtime_set_suspended(&client->dev);
 	}
 }
 
 static int __maybe_unused at24_suspend(struct device *dev)
 {
-	struct i2c_client *client = to_i2c_client(dev);
-	struct at24_data *at24 = i2c_get_clientdata(client);
-
-	return regulator_disable(at24->vcc_reg);
+	return 0;
 }
 
 static int __maybe_unused at24_resume(struct device *dev)
 {
-	struct i2c_client *client = to_i2c_client(dev);
-	struct at24_data *at24 = i2c_get_clientdata(client);
-
-	return regulator_enable(at24->vcc_reg);
+	return 0;
 }
 
 static const struct dev_pm_ops at24_pm_ops = {

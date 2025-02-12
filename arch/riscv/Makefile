@@ -51,7 +51,16 @@ ifndef CONFIG_AS_IS_LLVM
 	KBUILD_CFLAGS += -Wa,-mno-relax
 	KBUILD_AFLAGS += -Wa,-mno-relax
 endif
+# LLVM has an issue with target-features and LTO: https://github.com/llvm/llvm-project/issues/59350
+# Ensure it is aware of linker relaxation with LTO, otherwise relocations may
+# be incorrect: https://github.com/llvm/llvm-project/issues/65090
+else ifeq ($(CONFIG_LTO_CLANG),y)
+	KBUILD_LDFLAGS += -mllvm -mattr=+c -mllvm -mattr=+relax
 endif
+endif
+
+ifeq ($(CONFIG_SHADOW_CALL_STACK),y)
+	KBUILD_LDFLAGS += --no-relax-gp
 endif
 
 # ISA string setting
@@ -60,6 +69,11 @@ riscv-march-$(CONFIG_ARCH_RV64I)	:= rv64ima
 riscv-march-$(CONFIG_FPU)		:= $(riscv-march-y)fd
 riscv-march-$(CONFIG_RISCV_ISA_C)	:= $(riscv-march-y)c
 riscv-march-$(CONFIG_RISCV_ISA_V)	:= $(riscv-march-y)v
+riscv-march-$(CONFIG_RISCV_ISA_ZBA)	:= $(riscv-march-y)_zba
+riscv-march-$(CONFIG_RISCV_ISA_ZBB)	:= $(riscv-march-y)_zbb
+riscv-march-$(CONFIG_RISCV_ISA_ZBC)	:= $(riscv-march-y)_zbc
+riscv-march-$(CONFIG_RISCV_ISA_ZBS)	:= $(riscv-march-y)_zbs
+riscv-march-$(CONFIG_RISCV_ISA_ZICOND)	:= $(riscv-march-y)_zicond
 
 ifdef CONFIG_TOOLCHAIN_NEEDS_OLD_ISA_SPEC
 KBUILD_CFLAGS += -Wa,-misa-spec=2.2
@@ -104,7 +118,9 @@ KBUILD_AFLAGS_MODULE += $(call as-option,-Wa$(comma)-mno-relax)
 # unaligned accesses.  While unaligned accesses are explicitly allowed in the
 # RISC-V ISA, they're emulated by machine mode traps on all extant
 # architectures.  It's faster to have GCC emit only aligned accesses.
+ifneq ($(CONFIG_HAVE_EFFICIENT_UNALIGNED_ACCESS),y)
 KBUILD_CFLAGS += $(call cc-option,-mstrict-align)
+endif
 
 ifeq ($(CONFIG_STACKPROTECTOR_PER_TASK),y)
 prepare: stack_protector_prepare
@@ -124,7 +140,7 @@ boot		:= arch/riscv/boot
 ifeq ($(CONFIG_XIP_KERNEL),y)
 KBUILD_IMAGE := $(boot)/xipImage
 else
-KBUILD_IMAGE	:= $(boot)/Image.gz
+KBUILD_IMAGE	:= $(boot)/Image
 endif
 
 libs-y += arch/riscv/lib/
@@ -149,7 +165,7 @@ ifeq ($(CONFIG_RISCV_M_MODE)$(CONFIG_ARCH_CANAAN),yy)
 KBUILD_IMAGE := $(boot)/loader.bin
 else
 ifeq ($(CONFIG_EFI_ZBOOT),)
-KBUILD_IMAGE := $(boot)/Image.gz
+KBUILD_IMAGE := $(boot)/Image
 else
 KBUILD_IMAGE := $(boot)/vmlinuz.efi
 endif
@@ -157,14 +173,20 @@ endif
 endif
 BOOT_TARGETS := Image Image.gz loader loader.bin xipImage vmlinuz.efi
 
-all:	$(notdir $(KBUILD_IMAGE))
+#
+# extra files
+#
+include $(srctree)/arch/riscv/generic/Platform
+bootvars-y	= ITS_INPUTS="$(its-y)"
+
+all:	$(notdir $(KBUILD_IMAGE)) Image.itb Image.gz.itb
 
 $(BOOT_TARGETS): vmlinux
 	$(Q)$(MAKE) $(build)=$(boot) $(boot)/$@
 	@$(kecho) '  Kernel: $(boot)/$@ is ready'
 
-Image.%: Image
-	$(Q)$(MAKE) $(build)=$(boot) $(boot)/$@
+Image.%: Image Image.gz
+	$(Q)$(MAKE) $(build)=$(boot) $(bootvars-y) $(boot)/$@
 
 install: KBUILD_IMAGE := $(boot)/Image
 zinstall: KBUILD_IMAGE := $(boot)/Image.gz

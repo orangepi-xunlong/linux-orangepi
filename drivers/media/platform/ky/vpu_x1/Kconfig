@@ -1,0 +1,26 @@
+config VIDEO_LINLON_X1
+	tristate "Linlon VPU support."
+	depends on VIDEO_DEV && SOC_KY_X1
+#	depends on VIDEO_V4L2
+	select VIDEOBUF2_VMALLOC
+	select VIDEOBUF2_CORE
+	select DMA_SHARED_BUFFER
+	select VIDEOBUF2_MEMOPS
+	select VIDEOBUF2_DMA_SG
+	default n
+	help
+	  This enables support for the Linlon VPU family.
+
+config VIDEO_LINLON_FTRACE_X1
+	depends on VIDEO_LINLON_X1
+	bool "Send kernel space logs to ftrace."
+	default n
+	help
+	  Send kernel space logs to ftrace.
+
+config VIDEO_LINLON_PRINT_FILE_X1
+	depends on VIDEO_LINLON_X1
+	bool "Append file and line number to kernel space log messages."
+	default y
+	help
+	  Append file and line number to kernel space log messages.

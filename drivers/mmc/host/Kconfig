@@ -251,6 +251,32 @@ config MMC_SDHCI_OF_SPARX5
 
 	  If unsure, say N.
 
+config MMC_SDHCI_OF_X1PRO
+	tristate "SDHCI OF support for the Ky X1PRO SDHCI controllers"
+	depends on MMC_SDHCI_PLTFM
+	depends on OF
+	depends on COMMON_CLK
+	help
+	  This selects the Secure Digital Host Controller Interface (SDHCI)
+	  found in the Ky SoC X1PRO.
+
+	  If you have a controller with this interface, say Y or M here.
+
+	  If unsure, say N.
+
+config MMC_SDHCI_OF_X1
+	tristate "SDHCI OF support for the Ky X1 SDHCI controllers"
+	depends on MMC_SDHCI_PLTFM
+	depends on OF
+	depends on COMMON_CLK
+	help
+	  This selects the Secure Digital Host Controller Interface (SDHCI)
+	  found in the Ky SoC X1.
+
+	  If you have a controller with this interface, say Y or M here.
+
+	  If unsure, say N.
+
 config MMC_SDHCI_CADENCE
 	tristate "SDHCI support for the Cadence SD/SDIO/eMMC controller"
 	depends on MMC_SDHCI_PLTFM
@@ -1071,3 +1097,4 @@ config MMC_LITEX
 	  module will be called litex_mmc.
 
 	  If unsure, say N.
+

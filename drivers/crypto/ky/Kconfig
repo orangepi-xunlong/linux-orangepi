@@ -1,0 +1,29 @@
+# SPDX-License-Identifier: GPL-2.0
+
+config KY_REE_ENGINE
+	tristate "KY REE Crypto Engine"
+	depends on SOC_KY_X1
+	default n
+	help
+	  Support KY REE Crypto Engine.
+
+config KY_REE_AES
+        tristate "Enable AES in KY REE Crytpo Engine"
+        depends on KY_REE_ENGINE
+        default n
+        help
+          Support AES using KY REE Crypto Engine.
+
+config KY_CRYPTO_DEBUG
+	tristate "Enable KY REE Crytpo Engine Debug Interface"
+        depends on KY_REE_ENGINE
+        default n
+        help
+	  Enable ky crypto engine debug interface in userspace
+
+config KY_CRYPTO_SELF_TEST
+	tristate "Enable KY REE Crytpo Engine Selftest"
+	depends on KY_REE_ENGINE
+	default n
+	help
+	  KY REE Crypto Engine support selftest when probe

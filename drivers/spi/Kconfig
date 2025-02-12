@@ -295,6 +295,26 @@ config SPI_DAVINCI
 	help
 	  SPI master controller for DaVinci/DA8x/OMAP-L/AM1x SPI modules.
 
+config SPI_DESIGNWARE_EXT
+	tristate "DesignWare enhanced SPI controller core support"
+        imply SPI_MEM
+	help
+	  general driver for enhanced SPI controller core from  DesignWare
+
+config SPI_X1
+	tristate "X1 SPI Controller"
+	depends on SOC_KY_X1
+	help
+	  Enable support for the Ky X1 SPI controller.
+
+config SPI_X1_QSPI
+	tristate "X1 QuadSPI Controller"
+	depends on SPI_MEM
+	help
+	  This enables support for the Ky X1 QuadSPI controller in master mode.
+	  This controller does only support the high-level SPI memory interface
+	  and not support generic SPI messages.
+
 config SPI_DESIGNWARE
 	tristate "DesignWare SPI controller core support"
 	imply SPI_MEM

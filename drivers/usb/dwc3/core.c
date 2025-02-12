@@ -1972,6 +1972,17 @@ static int dwc3_probe(struct platform_device *pdev)
 		ret = dma_set_mask_and_coherent(dwc->sysdev, DMA_BIT_MASK(64));
 		if (ret)
 			goto err_disable_clks;
+	} else if(!dwc->sysdev_is_parent &&
+		IS_ENABLED(CONFIG_SOC_KY_X1PRO)) {
+		ret = dma_set_mask_and_coherent(dwc->sysdev, DMA_BIT_MASK(40));
+		if (ret)
+			goto err_disable_clks;
+	}
+
+	if (IS_ENABLED(CONFIG_SOC_KY_X1)) {
+		ret = dma_set_mask_and_coherent(dwc->sysdev, DMA_BIT_MASK(32));
+		if (ret)
+			goto err_disable_clks;
 	}
 
 	spin_lock_init(&dwc->lock);

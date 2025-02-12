@@ -1,0 +1,9 @@
+#
+# Ky rfkill driver.
+#
+config KY_RFKILL
+  tristate "Ky rfkill driver"
+  depends on WIRELESS || RFKILL
+  help
+    Ky rfkill driver
+

@@ -24,7 +24,7 @@
 #include <linux/of_irq.h>
 #include <clocksource/timer-riscv.h>
 #include <asm/smp.h>
-#include <asm/hwcap.h>
+#include <asm/cpufeature.h>
 #include <asm/sbi.h>
 #include <asm/timex.h>
 
@@ -35,8 +35,46 @@ static int riscv_clock_next_event(unsigned long delta,
 		struct clock_event_device *ce)
 {
 	u64 next_tval = get_cycles64() + delta;
+	csr_set(CSR_IE, IE_TIE);
+
+	if (static_branch_likely(&riscv_sstc_available)) {
+#if defined(CONFIG_32BIT)
+		csr_write(CSR_STIMECMP, next_tval & 0xFFFFFFFF);
+		csr_write(CSR_STIMECMPH, next_tval >> 32);
+#else
+		csr_write(CSR_STIMECMP, next_tval);
+#endif
+	} else
+		sbi_set_timer(next_tval);
+
+	return 0;
+}
+
+static int riscv_set_state_shutdown(struct clock_event_device *ce)
+{
+	u64 next_tval = 0xffffffffffffffff;
+
+        csr_clear(CSR_IE, IE_TIE);
+
+	if (static_branch_likely(&riscv_sstc_available)) {
+#if defined(CONFIG_32BIT)
+		csr_write(CSR_STIMECMP, next_tval & 0xFFFFFFFF);
+		csr_write(CSR_STIMECMPH, next_tval >> 32);
+#else
+		csr_write(CSR_STIMECMP, next_tval);
+#endif
+	} else
+		sbi_set_timer(next_tval);
+
+        return 0;
+}
+
+static int riscv_set_state_oneshot(struct clock_event_device *ce)
+{
+	u64 next_tval = 0xffffffffffffffff;
 
 	csr_set(CSR_IE, IE_TIE);
+
 	if (static_branch_likely(&riscv_sstc_available)) {
 #if defined(CONFIG_32BIT)
 		csr_write(CSR_STIMECMP, next_tval & 0xFFFFFFFF);
@@ -53,9 +91,12 @@ static int riscv_clock_next_event(unsigned long delta,
 static unsigned int riscv_clock_event_irq;
 static DEFINE_PER_CPU(struct clock_event_device, riscv_clock_event) = {
 	.name			= "riscv_timer_clockevent",
-	.features		= CLOCK_EVT_FEAT_ONESHOT,
+	.features               = CLOCK_EVT_FEAT_ONESHOT | CLOCK_EVT_FEAT_C3STOP,
 	.rating			= 100,
 	.set_next_event		= riscv_clock_next_event,
+        .set_state_shutdown     = riscv_set_state_shutdown,
+        .set_state_oneshot_stopped = riscv_set_state_shutdown,
+	.set_state_oneshot = riscv_set_state_oneshot,
 };
 
 /*
@@ -144,6 +185,13 @@ static int __init riscv_timer_init_common(void)
 		return -ENODEV;
 	}
 
+#ifdef CONFIG_SOC_KY
+	if (riscv_isa_extension_available(NULL, SSTC)) {
+		pr_info("Timer interrupt in S-mode is available via sstc extension\n");
+		static_branch_enable(&riscv_sstc_available);
+	}
+#endif
+
 	error = clocksource_register_hz(&riscv_clocksource, riscv_timebase);
 	if (error) {
 		pr_err("RISCV timer registration failed [%d]\n", error);
@@ -160,10 +208,12 @@ static int __init riscv_timer_init_common(void)
 		return error;
 	}
 
+#ifndef CONFIG_SOC_KY
 	if (riscv_isa_extension_available(NULL, SSTC)) {
 		pr_info("Timer interrupt in S-mode is available via sstc extension\n");
 		static_branch_enable(&riscv_sstc_available);
 	}
+#endif
 
 	error = cpuhp_setup_state(CPUHP_AP_RISCV_TIMER_STARTING,
 			 "clockevents/riscv/timer:starting",

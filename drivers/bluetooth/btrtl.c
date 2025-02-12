@@ -398,7 +398,7 @@ static int btrtl_vendor_read_reg16(struct hci_dev *hdev,
 
 	skb = __hci_cmd_sync(hdev, 0xfc61, sizeof(*cmd), cmd,
 			     HCI_INIT_TIMEOUT);
-	if (IS_ERR(skb)) {
+	if (IS_ERR_OR_NULL(skb)) {
 		err = PTR_ERR(skb);
 		rtl_dev_err(hdev, "RTL: Read reg16 failed (%d)", err);
 		return err;

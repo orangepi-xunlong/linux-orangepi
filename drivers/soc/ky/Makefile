@@ -1,0 +1,10 @@
+obj-$(CONFIG_KY_X1_DMA_RANGE) += x1-dma-range.o
+obj-$(CONFIG_KY_LID_CONTROL)	+= ky_lid.o
+obj-$(CONFIG_KY_REBOOT_CONTROL)	+= ky_reboot.o
+obj-$(CONFIG_KY_SOCINFO) += ky-socinfo.o
+obj-$(CONFIG_CHIP_MEDIA_JPU)    += jpu/
+obj-$(CONFIG_PM) += pm/
+obj-$(CONFIG_KY_PM_DOMAINS) += pm_domain/
+obj-$(CONFIG_KY_RFKILL)   += ky-rf/
+obj-$(CONFIG_KY_V2D)    += v2d/
+obj-$(CONFIG_KY_DDRBW) += ddr-bw/

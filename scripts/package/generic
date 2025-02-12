@@ -1,0 +1,16 @@
+#!/bin/bash
+full_version=`uname -r`
+
+# First check for a fully qualified version.
+this="/usr/lib/linux-tools/$full_version/`basename $0`"
+if [ -f "$this" ]; then
+	exec "$this" "$@"
+fi
+
+# Give them a hint as to what to install.
+echo "WARNING: `basename $0` not found for kernel $full_version" >&2
+echo "" >&2
+echo "  You may need to install the following packages for this specific kernel:" >&2
+echo "    linux-tools-$full_version" >&2
+
+exit 2

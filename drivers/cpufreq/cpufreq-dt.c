@@ -42,6 +42,7 @@ static struct freq_attr *cpufreq_dt_attr[] = {
 	NULL,
 };
 
+#ifndef CONFIG_SOC_KY
 static struct private_data *cpufreq_dt_find_data(int cpu)
 {
 	struct private_data *priv;
@@ -53,6 +54,24 @@ static struct private_data *cpufreq_dt_find_data(int cpu)
 
 	return NULL;
 }
+#else
+struct private_data *cpufreq_dt_find_data(int cpu)
+{
+	struct private_data *priv;
+
+	list_for_each_entry(priv, &priv_list, node) {
+		if (cpumask_test_cpu(cpu, priv->cpus))
+			return priv;
+	}
+
+	return NULL;
+}
+
+void cpufreq_dt_add_data(struct private_data *priv)
+{
+	list_add(&priv->node, &priv_list);
+}
+#endif
 
 static int set_target(struct cpufreq_policy *policy, unsigned int index)
 {
@@ -172,10 +191,20 @@ static int cpufreq_exit(struct cpufreq_policy *policy)
 	return 0;
 }
 
+#ifdef CONFIG_SOC_KY_X1
+extern int spacmeit_cpufreq_veritfy(struct cpufreq_policy_data *policy);
+extern void ky_cpufreq_ready(struct cpufreq_policy *policy);
+#endif
+
 static struct cpufreq_driver dt_cpufreq_driver = {
 	.flags = CPUFREQ_NEED_INITIAL_FREQ_CHECK |
 		 CPUFREQ_IS_COOLING_DEV,
+#ifndef CONFIG_SOC_KY_X1
 	.verify = cpufreq_generic_frequency_table_verify,
+#else
+	.verify = spacmeit_cpufreq_veritfy,
+	.ready = ky_cpufreq_ready,
+#endif
 	.target_index = set_target,
 	.get = cpufreq_generic_get,
 	.init = cpufreq_init,

@@ -89,6 +89,7 @@ obj-$(CONFIG_NET_VENDOR_SOLARFLARE) += sfc/
 obj-$(CONFIG_NET_VENDOR_SGI) += sgi/
 obj-$(CONFIG_NET_VENDOR_SMSC) += smsc/
 obj-$(CONFIG_NET_VENDOR_SOCIONEXT) += socionext/
+obj-$(CONFIG_NET_VENDOR_KY) += ky/
 obj-$(CONFIG_NET_VENDOR_STMICRO) += stmicro/
 obj-$(CONFIG_NET_VENDOR_SUN) += sun/
 obj-$(CONFIG_NET_VENDOR_SUNPLUS) += sunplus/

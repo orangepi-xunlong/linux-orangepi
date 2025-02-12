@@ -141,6 +141,9 @@ enum fsg_buffer_state {
 };
 
 struct fsg_buffhd {
+#if defined(CONFIG_SOC_KY_X1)
+	struct page			*page;
+#endif
 	void				*buf;
 	enum fsg_buffer_state		state;
 	struct fsg_buffhd		*next;

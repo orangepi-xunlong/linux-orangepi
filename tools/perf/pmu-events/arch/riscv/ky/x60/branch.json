@@ -1,0 +1,62 @@
+[
+  {
+    "EventName": "cond_br_inst",
+    "EventCode": "1",
+    "BriefDescription": "Conditional branch instructions"
+  },
+  {
+    "EventName": "cond_br_mispred",
+    "EventCode": "2",
+    "BriefDescription": "Conditional branch mispredictions"
+  },
+  {
+    "EventName": "br_inst",
+    "EventCode": "60",
+    "BriefDescription": "Branch instructions"
+  },
+  {
+    "EventName": "uncond_br_inst",
+    "EventCode": "61",
+    "BriefDescription": "Unconditional branch instructions"
+  },
+  {
+    "EventName": "indirect_br_inst",
+    "EventCode": "62",
+    "BriefDescription": "Indirect branch instructions"
+  },
+  {
+    "EventName": "indirect_br_mispred",
+    "EventCode": "66",
+    "BriefDescription": "Indirect branch mispredictions"
+  },
+  {
+    "EventName": "br_mispred",
+    "EventCode": "69",
+    "BriefDescription": "Branch mispredictions"
+  },
+  {
+    "EventName": "uncond_br_mispred",
+    "EventCode": "70",
+    "BriefDescription": "Unconditional branch mispredictions"
+  },
+  {
+    "EventName": "taken_br_mispred",
+    "EventCode": "71",
+    "BriefDescription": "Taken branch mispredictions"
+  },
+  {
+    "EventName": "taken_cond_br_inst",
+    "EventCode": "72",
+    "BriefDescription": "Taken conditional branch instructions"
+  },
+  {
+    "EventName": "taken_cond_br_mispred",
+    "EventCode": "73",
+    "BriefDescription": "Taken conditional branch mispredictions"
+  },
+  {
+    "EventName": "long_jump",
+    "EventCode": "74",
+    "BriefDescription": "Long jumps"
+  }
+]

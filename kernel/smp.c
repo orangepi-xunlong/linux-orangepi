@@ -987,6 +987,10 @@ void __init smp_init(void)
 
 	/* Any cleanup work */
 	smp_cpus_done(setup_max_cpus);
+
+#ifdef CONFIG_BIND_THREAD_TO_AICORES
+	ai_core_mask_get();
+#endif
 }
 
 /*

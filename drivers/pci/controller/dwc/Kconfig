@@ -415,4 +415,39 @@ config PCIE_VISCONTI_HOST
 	  Say Y here if you want PCIe controller support on Toshiba Visconti SoC.
 	  This driver supports TMPV7708 SoC.
 
+config PCIE_KY
+	bool "Ky PCIe controller"
+	depends on SOC_KY || COMPILE_TEST
+	depends on PCI_MSI_IRQ_DOMAIN
+	select PCIE_DW_HOST
+	help
+	  Say Y here to enable PCIe controller support on Ky SoCs. The
+	  PCIe controller uses the DesignWare core plus Ky hardware wrappers.
+
+config PCI_X1
+	bool
+
+config PCI_X1_HOST
+	bool "Ky X1 PCIe Controller - Host Mode"
+	depends on SOC_KY_X1
+	depends on PCI && PCI_MSI
+	depends on OF && HAS_IOMEM
+	select PCIE_DW_HOST
+	select PCI_X1
+	default y
+	help
+	  Enables support for the PCIe controller in the X1 SoC to work in
+          host mode.
+
+config PCI_X1_EP
+	bool "Ky X1 PCIE Controller - Endpoint Mode"
+	depends on SOC_KY_X1
+	depends on PCI_ENDPOINT
+	depends on OF && HAS_IOMEM
+	select PCIE_DW_EP
+	select PCI_X1
+	help
+	  Enables support for the PCIe controller in the X1 SoC to work in
+          endpoint mode.
+
 endmenu

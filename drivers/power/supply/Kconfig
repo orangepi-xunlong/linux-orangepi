@@ -126,6 +126,18 @@ config BATTERY_CW2015
 	  This driver can also be built as a module. If so, the module will be
 	  called cw2015_battery.
 
+config KY_BATTERY_CW2015
+	tristate "Ky CW2015 Battery driver"
+	depends on I2C
+	select REGMAP_I2C
+	help
+	  Say Y here to enable support for the cellwise cw2015
+	  battery fuel gauge (used in the Pinebook Pro & others)
+	  on ky chip
+
+	  This driver can also be built as a module. If so, the module will be
+	  called cw2015_battery.
+
 config BATTERY_DS2760
 	tristate "DS2760 battery driver (HP iPAQ & others)"
 	depends on W1
@@ -239,6 +251,15 @@ config CHARGER_SBS
 	select REGMAP_I2C
 	help
 	  Say Y to include support for SBS compliant battery chargers.
+
+config CHARGER_SBS_VIRTUAL
+	tristate "Virtual SBS Compliant charger"
+	depends on POWER_SUPPLY
+	help
+	  Say Y to include support for a virtual SBS compliant battery charger.
+	  This driver provides a software interface for systems where charging
+	  is handled externally, but still need to report charging status
+	  through the kernel's power supply framework.
 
 config MANAGER_SBS
 	tristate "Smart Battery System Manager"
@@ -951,5 +972,15 @@ config CHARGER_QCOM_SMB2
 	  Say Y here to enable the Qualcomm PMIC Charger driver. This
 	  adds support for the SMB2 switch mode battery charger found
 	  in PMI8998 and related PMICs.
+
+config CHARGER_SGM415XX
+	tristate "Charger Driver for SGM415XX Charger IC"
+	depends on I2C
+	default n
+	help
+	  Say Yes to enable SGM415XX driver.
+	  It is mainly used as cap divider charger
+	  for Mediatek Pump Express 5.0.
+	  It depends on config MTK_CHARGER
 
 endif # POWER_SUPPLY

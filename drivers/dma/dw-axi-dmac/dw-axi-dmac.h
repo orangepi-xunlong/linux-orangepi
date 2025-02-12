@@ -25,6 +25,7 @@
 struct dw_axi_dma_hcfg {
 	u32	nr_channels;
 	u32	nr_masters;
+	u32	nr_hs_if;
 	u32	m_data_width;
 	u32	block_size[DMAC_MAX_CHANNELS];
 	u32	priority[DMAC_MAX_CHANNELS];
@@ -41,6 +42,7 @@ struct axi_dma_chan {
 	void __iomem			*chan_regs;
 	u8				id;
 	u8				hw_handshake_num;
+	s8				burst_trans_len;
 	atomic_t			descs_allocated;
 
 	struct dma_pool			*desc_pool;
@@ -49,6 +51,7 @@ struct axi_dma_chan {
 	struct axi_dma_desc		*desc;
 	struct dma_slave_config		config;
 	enum dma_transfer_direction	direction;
+	bool 				fixed_burst_trans_len;
 	bool				cyclic;
 	/* these other elements are all protected by vc.lock */
 	bool				is_paused;
@@ -205,6 +208,7 @@ static inline struct axi_dma_chan *dchan_to_axi_dma_chan(struct dma_chan *dchan)
 #define DMA_APB_HS_SEL_MASK	0xFF /* HW handshake select masks */
 #define MAX_BLOCK_SIZE		0x1000 /* 1024 blocks * 4 bytes data width */
 #define DMA_REG_MAP_CH_REF	0x08 /* Channel count to choose register map */
+#define DMA_REG_MAP_HS_IF_REF	0x10 /* handshake num to choose register map */
 
 /* DMAC_CFG */
 #define DMAC_EN_POS			0

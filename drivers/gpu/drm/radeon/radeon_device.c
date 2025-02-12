@@ -1361,7 +1361,7 @@ int radeon_device_init(struct radeon_device *rdev,
 	 * AGP - generally dma32 is safest
 	 * PCI - dma32 for legacy pci gart, 40 bits on newer asics
 	 */
-	dma_bits = 40;
+	dma_bits = 32;
 	if (rdev->flags & RADEON_IS_AGP)
 		dma_bits = 32;
 	if ((rdev->flags & RADEON_IS_PCI) &&

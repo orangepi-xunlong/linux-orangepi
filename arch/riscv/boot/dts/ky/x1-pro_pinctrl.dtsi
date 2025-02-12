@@ -1,0 +1,252 @@
+// SPDX-License-Identifier: (GPL-2.0 OR MIT)
+/* Copyright (c) 2022 Ky, Inc */
+
+#include <dt-bindings/pinctrl/x1-pro-pinctrl.h>
+
+/* Pin Configuration Node: */
+/* Format: <pin_id  muxsel  pull_up/pull_down  driving_strength> */
+/* driving_strength  0~0xf     */
+&pinctrl {
+	pinctrl_qspi0: qspi0_grp {
+		ky,pins = <
+			GPIOA1    0x0    PULL_UP    0xf	 /* sclk */
+			GPIOA2    0x0    PULL_UP    0xf	 /* csn0 */
+			GPIOA3    0x0    PULL_UP    0xf	 /* csn1 */
+			GPIOA4    0x0    PULL_UP    0xf	 /* d0_mosi */
+			GPIOA5    0x0    PULL_UP    0xf	 /* d1_miso */
+			GPIOA6    0x0    PULL_UP    0xf	 /* d2_wp */
+			GPIOA7    0x0    PULL_UP    0xf	 /* d3_hold */
+		>;
+	};
+
+	pinctrl_pwm0: pwm0_grp {
+		ky,pins = <
+			GPIOA3    0x1    PULL_UP    0xf	 /* pwm0 */
+		>;
+	};
+
+	pinctrl_pwm1: pwm1_grp {
+		ky,pins = <
+			GPIOA8    0x1    PULL_UP    0xf	 /* pwm1 */
+		>;
+	};
+
+	pinctrl_pwm2: pwm2_grp {
+		ky,pins = <
+			GPIOA9    0x1    PULL_UP    0xf	 /* pwm2 */
+		>;
+	};
+
+	pinctrl_uart4_0:uart4_0_grp {
+		ky,pins = <
+			GPIOA10    0x3    PULL_UP    0xf	/* txd */
+			GPIOA11    0x3    PULL_UP    0xf	/* rxd */
+			GPIOA12    0x3    PULL_UP    0xf	/* ctsn */
+			GPIOA13    0x3    PULL_UP    0xf	/* rtsn */
+		>;
+	};
+
+	pinctrl_can: can_grp {
+		ky,pins = <
+			GPIOA12    0x0    PULL_UP    0xf	/* txd */
+			GPIOA13    0x0    PULL_UP    0xf	/* rxd */
+		>;
+	};
+
+	pinctrl_i2c4: i2c4_grp {
+		ky,pins = <
+			GPIOA12    0x1    PULL_UP    0xf	/* scl */
+			GPIOA13    0x1    PULL_UP    0xf	/* sda */
+		>;
+	};
+
+	pinctrl_sdio: sdio_grp {
+		ky,pins = <
+			GPIOA14    0x0    PULL_UP    0xf	/* wprtn */
+			GPIOA15    0x0    PULL_UP    0xf	/* detn */
+		>;
+	};
+
+	pinctrl_gmac: gmac_grp {
+		ky,pins = <
+			GPIOA16    0x0    PULL_UP    0xf	/* tx clk */
+			GPIOA17    0x0    PULL_UP    0xf	/* rx clk */
+			GPIOA18    0x0    PULL_UP    0xf	/* tx en */
+			GPIOA19    0x0    PULL_UP    0xf	/* txd[0] */
+			GPIOA20    0x0    PULL_UP    0xf	/* txd[1] */
+			GPIOA21    0x0    PULL_UP    0xf	/* txd[2] */
+			GPIOA22    0x0    PULL_UP    0xf	/* txd[3] */
+			GPIOA23    0x0    PULL_UP    0xf	/* rxdv */
+			GPIOA24    0x0    PULL_UP    0xf	/* rxd[0] */
+			GPIOA25    0x0    PULL_UP    0xf	/* rxd[1] */
+			GPIOA26    0x0    PULL_UP    0xf	/* rxd[2] */
+			GPIOA27    0x0    PULL_UP    0xf	/* rxd[3] */
+			GPIOA28    0x0    PULL_UP    0xf	/* mdc */
+			GPIOA29    0x0    PULL_UP    0xf	/* mdio */
+		>;
+	};
+
+	pinctrl_uart0: uart0_grp {
+		ky,pins = <
+			GPIOB5    0x0    PULL_UP    0xf	 /* txd */
+			GPIOB6    0x0    PULL_UP    0xf	 /* rxd */
+		>;
+	};
+
+	pinctrl_i2c0: i2c0_grp {
+		ky,pins = <
+			GPIOB7    0x0    PULL_UP    0xf	 /* scl */
+			GPIOB8    0x0    PULL_UP    0xf	 /* sda */
+		>;
+	};
+
+	pinctrl_i2c1: i2c1_grp {
+		ky,pins = <
+			GPIOB9     0x0    PULL_UP    0xf	/* scl */
+			GPIOB10    0x0    PULL_UP    0xf	/* sda */
+		>;
+	};
+
+	pinctrl_i2c2: i2c2_grp {
+		ky,pins = <
+			GPIOB11    0x0    PULL_UP    0xf	/* scl */
+			GPIOB12    0x0    PULL_UP    0xf	/* sda */
+		>;
+	};
+
+	pinctrl_uart1:uart1_grp {
+		ky,pins = <
+			GPIOB13    0x0    PULL_UP    0xf	/* txd */
+			GPIOA14    0x0    PULL_UP    0xf	/* rxd */
+			GPIOA15    0x0    PULL_UP    0xf	/* ctsn */
+			GPIOA16    0x0    PULL_UP    0xf	/* rtsn */
+		>;
+	};
+
+	pinctrl_i2c3: i2c3_grp {
+		ky,pins = <
+			GPIOB15    0x1    PULL_UP    0xf	/* scl */
+			GPIOB16    0x1    PULL_UP    0xf	/* sda */
+		>;
+	};
+
+	pinctrl_uart2:uart2_grp {
+		ky,pins = <
+			GPIOB17    0x0    PULL_UP    0xf	/* txd */
+			GPIOA18    0x0    PULL_UP    0xf	/* rxd */
+			GPIOA19    0x0    PULL_UP    0xf	/* ctsn */
+			GPIOA20    0x0    PULL_UP    0xf	/* rtsn */
+		>;
+	};
+
+	pinctrl_i2s1: i2s1_grp {
+		ky,pins = <
+			GPIOB17    0x2    PULL_UP    0xf	/* mclk */
+			GPIOB18    0x2    PULL_UP    0xf	/* bclk */
+			GPIOB19    0x2    PULL_UP    0xf	/* lrclk */
+			GPIOB20    0x2    PULL_UP    0xf	/* sdata_io0 */
+			GPIOB21    0x2    PULL_UP    0xf	/* sdata_io1 */
+			GPIOB22    0x2    PULL_UP    0xf	/* sdata_io2 */
+			GPIOB23    0x2    PULL_UP    0xf	/* sdata_io3 */
+		>;
+	};
+
+	pinctrl_uart3_0:uart3_0_grp {
+		ky,pins = <
+			GPIOB21    0x0    PULL_UP    0xf	/* txd */
+			GPIOB22    0x0    PULL_UP    0xf	/* rxd */
+			GPIOB23    0x0    PULL_UP    0xf	/* ctsn */
+			GPIOB24    0x0    PULL_UP    0xf	/* rtsn */
+		>;
+	};
+
+	pinctrl_pwm3: pwm3_grp {
+		ky,pins = <
+			GPIOB24    0x1    PULL_UP    0xf	/* pwm3 */
+		>;
+	};
+
+	pinctrl_qspi2: qspi2_grp {
+		ky,pins = <
+			GPIOC0    0x1    PULL_UP    0xf	 /* sclk */
+			GPIOC1    0x1    PULL_UP    0xf	 /* csn */
+			GPIOC2    0x1    PULL_UP    0xf	 /* d1_mosi */
+			GPIOC3    0x1    PULL_UP    0xf	 /* d2_miso */
+			GPIOC4    0x1    PULL_UP    0xf	 /* d3_wp */
+			GPIOC5    0x1    PULL_UP    0xf	 /* d4_hold */
+		>;
+	};
+
+	pinctrl_uart4_1:uart4_1_grp {
+		ky,pins = <
+			GPIOC2     0x0    PULL_UP    0xf	/* txd */
+			GPIOC3     0x0    PULL_UP    0xf	/* rxd */
+			GPIOC4     0x0    PULL_UP    0xf	/* ctsn */
+			GPIOC5     0x0    PULL_UP    0xf	/* rtsn */
+		>;
+	};
+
+	pinctrl_qspi1: qspi1_grp {
+		ky,pins = <
+			GPIOC6     0x0    PULL_UP    0xf	/* sclk */
+			GPIOC7     0x0    PULL_UP    0xf	/* csn */
+			GPIOC8     0x0    PULL_UP    0xf	/* d1_mosi */
+			GPIOC9     0x0    PULL_UP    0xf	/* d2_miso */
+			GPIOC10    0x0    PULL_UP    0xf	/* d3_wp */
+			GPIOC11    0x0    PULL_UP    0xf	/* d4_hold */
+		>;
+	};
+
+	pinctrl_pwm4: pwm4_grp {
+		ky,pins = <
+			GPIOC10    0x1    PULL_UP    0xf	/* pwm4 */
+		>;
+	};
+
+	pinctrl_pwm5: pwm5_grp {
+		ky,pins = <
+			GPIOC11    0x1    PULL_UP    0xf	/* pwm5 */
+		>;
+	};
+
+	pinctrl_i2s0_0: i2s0_0_grp {
+		ky,pins = <
+			GPIOC16    0x0    PULL_UP    0xf	/* mclk */
+			GPIOC17    0x0    PULL_UP    0xf	/* bclk_m */
+			GPIOC18    0x0    PULL_UP    0xf	/* lrclk_m */
+			GPIOC19    0x0    PULL_UP    0xf	/* sdata_m_in0 */
+			GPIOC20    0x0    PULL_UP    0xf	/* sdata_m_out0 */
+		>;
+	};
+
+	pinctrl_i2s0_1: i2s0_1_grp {
+		ky,pins = <
+			GPIOC16    0x1    PULL_UP    0xf	/* mclk */
+			GPIOC17    0x1    PULL_UP    0xf	/* bclk_s */
+			GPIOC18    0x1    PULL_UP    0xf	/* lrclk_s */
+			GPIOC19    0x1    PULL_UP    0xf	/* sdata_s_in0 */
+			GPIOC20    0x1    PULL_UP    0xf	/* sdata_s_out0 */
+		>;
+	};
+
+	pinctrl_pwm6: pwm6_grp {
+		ky,pins = <
+			GPIOC21    0x1    PULL_UP    0xf	/* pwm6 */
+		>;
+	};
+
+	pinctrl_pwm7: pwm7_grp {
+		ky,pins = <
+			GPIOC22    0x1    PULL_UP    0xf	/* pwm7 */
+		>;
+	};
+
+	pinctrl_uart3_1:uart3_1_grp {
+		ky,pins = <
+			GPIOC21     0x2    PULL_UP    0xf       /* txd */
+			GPIOC22     0x2    PULL_UP    0xf       /* rxd */
+			GPIOC23     0x2    PULL_UP    0xf       /* ctsn */
+			GPIOC24     0x2    PULL_UP    0xf       /* rtsn */
+		>;
+	};
+};

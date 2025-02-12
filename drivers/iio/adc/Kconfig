@@ -1448,4 +1448,10 @@ config XILINX_AMS
 	  The driver can also be built as a module. If so, the module will be called
 	  xilinx-ams.
 
+config KY_P1_ADC
+	tristate "Ky P1 adc driver"
+	depends on MFD_KY_PMIC
+	help
+	  Say yes here to support for Ky P1 analog-to-digital converter.
+
 endmenu

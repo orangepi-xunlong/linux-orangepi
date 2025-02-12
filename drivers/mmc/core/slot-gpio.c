@@ -16,6 +16,10 @@
 
 #include "slot-gpio.h"
 
+#ifdef CONFIG_SOC_KY_X1
+#include <linux/regulator/consumer.h>
+#endif
+
 struct mmc_gpio {
 	struct gpio_desc *ro_gpio;
 	struct gpio_desc *cd_gpio;
@@ -32,6 +36,11 @@ static irqreturn_t mmc_gpio_cd_irqt(int irq, void *dev_id)
 	struct mmc_host *host = dev_id;
 	struct mmc_gpio *ctx = host->slot.handler_priv;
 
+#ifdef CONFIG_SOC_KY_X1
+	if (!(host->caps2 & MMC_CAP2_NO_SD) && !IS_ERR(host->supply.vqmmc) &&
+		host->card && (host->ios.signal_voltage != MMC_SIGNAL_VOLTAGE_330))
+		regulator_set_voltage(host->supply.vqmmc, 3300000, 3600000);
+#endif
 	host->trigger_card_event = true;
 	mmc_detect_change(host, msecs_to_jiffies(ctx->cd_debounce_delay_ms));
 

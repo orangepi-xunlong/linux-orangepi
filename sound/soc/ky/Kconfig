@@ -1,0 +1,61 @@
+config SND_SOC_KY
+	tristate "SoC Audio for KY System-on-Chip"
+	select SND_SOC_COMPRESS
+	select SND_SOC_GENERIC_DMAENGINE_PCM if (SND_SOC && SND)
+	help
+	  Say Y or N here if you want support for audio on KY SoC.
+
+config KY_CARD
+        tristate "Audio Simple Card"
+        depends on SND_SOC_KY
+        help
+          Say Y or M here if you want to enable audio data dump function
+
+config KY_PCM
+        tristate "Audio Platform Pcm"
+        depends on SND_SOC_KY
+        help
+          Say Y or M here if you want to enable audio data dump function
+
+config KY_I2S
+        tristate "Audio Cpudai I2S"
+        depends on SND_SOC_KY
+        help
+          Say Y or M here if you want to enable audio data dump function
+
+config KY_HDMIAUDIO
+        tristate "Audio Cpudai HDMI Audio"
+        depends on SND_SOC_KY && KY_HDMI
+        help
+          Say Y or M here if you want to enable audio data dump function
+
+config KY_DUMMYCODEC
+        tristate "Audio CodecDai Dummy Codec"
+        depends on SND_SOC_KY
+        help
+          Say Y or M here if you want to enable audio data dump function
+
+config KY_AUDIO_DATA_DEBUG
+        bool "Audio Data Dump"
+        depends on SND_SOC_KY
+        help
+          Say Y or N here if you want to enable audio data dump function
+
+config KY_PLAY_DEBUG
+        bool "Audio Playback Debug"
+        depends on KY_AUDIO_DATA_DEBUG
+        help
+          Say Y or N here if you want to open playback debug
+
+config KY_CAPT_DEBUG
+        bool "Audio Capture Debug"
+        depends on KY_AUDIO_DATA_DEBUG
+        help
+          Say Y or N here if you want to open capture debug
+
+config  ADD_WAV_HEADER
+        bool "Dump File Adds Wave Header"
+        depends on KY_AUDIO_DATA_DEBUG
+        help
+          Say Y or N here if you want to add wave header to dump file
+

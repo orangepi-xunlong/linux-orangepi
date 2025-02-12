@@ -2764,6 +2764,9 @@ target_alloc_sgl(struct scatterlist **sgl, unsigned int *nents, u32 length,
 {
 	gfp_t gfp = GFP_KERNEL | (zero_page ? __GFP_ZERO : 0);
 
+#if defined(CONFIG_SOC_KY_X1)
+	gfp |= GFP_DMA32;
+#endif
 	*sgl = sgl_alloc_order(length, 0, chainable, gfp, nents);
 	return *sgl ? 0 : -ENOMEM;
 }
@@ -3133,6 +3136,10 @@ static const char *target_tmf_name(enum tcm_tmreq_table tmf)
 	case TMR_TARGET_WARM_RESET:	return "TARGET_WARM_RESET";
 	case TMR_TARGET_COLD_RESET:	return "TARGET_COLD_RESET";
 	case TMR_LUN_RESET_PRO:		return "LUN_RESET_PRO";
+	case TMR_I_T_NEXUS_RESET:	return "I_T_NEXUS_RESET";
+	case TMR_QUERY_TASK:		return "QUERY_TASK";
+	case TMR_QUERY_TASK_SET:	return "QUERY_TASK_SET";
+	case TMR_QUERY_ASYNC_EVENT:	return "QUERY_ASYNC_EVENT";
 	case TMR_UNKNOWN:		break;
 	}
 	return "(?)";
@@ -3599,6 +3606,12 @@ static void target_tmr_work(struct work_struct *work)
 		tmr->response = TMR_FUNCTION_REJECTED;
 		break;
 	case TMR_TARGET_COLD_RESET:
+		tmr->response = TMR_FUNCTION_REJECTED;
+		break;
+	case TMR_I_T_NEXUS_RESET:
+	case TMR_QUERY_TASK:
+	case TMR_QUERY_TASK_SET:
+	case TMR_QUERY_ASYNC_EVENT:
 		tmr->response = TMR_FUNCTION_REJECTED;
 		break;
 	default:

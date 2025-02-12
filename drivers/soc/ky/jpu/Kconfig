@@ -1,0 +1,11 @@
+config CHIP_MEDIA_JPU
+	tristate "chip media jpu driver"
+	help
+		This enables the chip media jpu driver
+
+config JPU_ENABLE_DEBUG_MSG
+	depends on CHIP_MEDIA_JPU
+	bool "chip media jpu driver debug"
+	default n
+	help
+		This enabled debug message output

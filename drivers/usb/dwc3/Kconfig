@@ -178,4 +178,10 @@ config USB_DWC3_OCTEON
 	  Only the host mode is currently supported.
 	  Say 'Y' or 'M' here if you have one such device.
 
+config USB_DWC3_KY
+	tristate "Ky Platforms"
+	default USB_DWC3
+	help
+	  Support KY platforms with DesignWare Core USB3 IP.
+	  Say 'Y' or 'M' here if you have one such device
 endif

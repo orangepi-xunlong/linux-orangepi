@@ -28,6 +28,7 @@ obj-$(CONFIG_SERIAL_AMBA_PL010) += amba-pl010.o
 obj-$(CONFIG_SERIAL_AMBA_PL011) += amba-pl011.o
 obj-$(CONFIG_SERIAL_CLPS711X) += clps711x.o
 obj-$(CONFIG_SERIAL_PXA_NON8250) += pxa.o
+obj-$(CONFIG_SERIAL_PXA_KY_X1) += pxa_x1.o
 obj-$(CONFIG_SERIAL_SA1100) += sa1100.o
 obj-$(CONFIG_SERIAL_BCM63XX) += bcm63xx_uart.o
 obj-$(CONFIG_SERIAL_SAMSUNG) += samsung_tty.o

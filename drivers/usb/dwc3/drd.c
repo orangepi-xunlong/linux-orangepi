@@ -452,6 +452,17 @@ static int dwc3_usb_role_switch_set(struct usb_role_switch *sw,
 		break;
 	case USB_ROLE_DEVICE:
 		mode = DWC3_GCTL_PRTCAP_DEVICE;
+#ifdef CONFIG_SOC_KY_X1
+		if (dwc->monitor_vbus && dwc->gadget)
+			usb_gadget_vbus_connect(dwc->gadget);
+		break;
+#endif
+#ifdef CONFIG_SOC_KY_X1
+	case USB_ROLE_NONE:
+		mode = DWC3_GCTL_PRTCAP_DEVICE;
+		if (dwc->monitor_vbus && dwc->gadget)
+			usb_gadget_vbus_disconnect(dwc->gadget);
+#endif
 		break;
 	default:
 		if (dwc->role_switch_default_mode == USB_DR_MODE_HOST)
@@ -477,7 +488,14 @@ static enum usb_role dwc3_usb_role_switch_get(struct usb_role_switch *sw)
 		role = USB_ROLE_HOST;
 		break;
 	case DWC3_GCTL_PRTCAP_DEVICE:
+#ifdef CONFIG_SOC_KY_X1
+		if (dwc->vbus_session)
+			role = USB_ROLE_DEVICE;
+		else
+			role = USB_ROLE_NONE;
+#else
 		role = USB_ROLE_DEVICE;
+#endif
 		break;
 	case DWC3_GCTL_PRTCAP_OTG:
 		role = dwc->current_otg_role;

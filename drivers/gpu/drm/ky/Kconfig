@@ -1,0 +1,54 @@
+# SPDX-License-Identifier: GPL-2.0
+
+config DRM_KY
+	tristate "DRM Support for Ky"
+	select DRM
+	select DRM_KMS_HELPER
+	select DRM_GEM_CMA_HELPER
+	select DRM_KMS_CMA_HELPER
+	select DRM_MIPI_DSI
+	select DRM_PANEL
+	select VIDEOMODE_HELPERS
+	select BACKLIGHT_CLASS_DEVICE
+	select GKI_FIX_WORKAROUND if DRM_KY=m
+	default n
+	help
+	  Choose this option if you have a Ky soc chipsets.
+	  This driver provides Ky kernel mode
+	  setting and buffer management. If M is selected the module will be called ky-drm.
+
+config KY_MIPI_PANEL
+	tristate "MIPI Panel Support For Ky"
+	depends on DRM_KY
+
+config KY_HDMI
+	tristate "HDMI Support For Ky"
+	depends on DRM_KY
+
+config DRM_LT8911EXB
+	tristate "Lontium LT8911EXB DSI to eDP"
+	default y
+	depends on DRM_KY
+	select DRM_KMS_HELPER
+	select REGMAP_I2C
+	select DRM_PANEL
+	select DRM_MIPI_DSI
+	select AUXILIARY_BUS
+	select DRM_DP_AUX_BUS
+
+	help
+	  Support for Lontium LT8911EXB DSI to eDP driver.
+
+config DRM_LT9711
+	tristate "Lontium LT9711 DSI to DP"
+	default y
+	depends on DRM_KY
+	select DRM_KMS_HELPER
+	select REGMAP_I2C
+	select DRM_PANEL
+	select DRM_MIPI_DSI
+	select AUXILIARY_BUS
+	select DRM_DP_AUX_BUS
+
+	help
+	  Support for Lontium LT9711 DSI to eDP driver.

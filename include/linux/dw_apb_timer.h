@@ -12,6 +12,7 @@
 
 #include <linux/clockchips.h>
 #include <linux/clocksource.h>
+#include <linux/spinlock.h>
 #include <linux/interrupt.h>
 
 #define APBTMRS_REG_SIZE       0x14
@@ -26,6 +27,7 @@ struct dw_apb_clock_event_device {
 	struct clock_event_device		ced;
 	struct dw_apb_timer			timer;
 	void					(*eoi)(struct dw_apb_timer *);
+	raw_spinlock_t				timer_lock;
 };
 
 struct dw_apb_clocksource {

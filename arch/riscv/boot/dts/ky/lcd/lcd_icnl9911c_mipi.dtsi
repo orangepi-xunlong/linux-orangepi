@@ -1,0 +1,96 @@
+// SPDX-License-Identifier: GPL-2.0
+
+/ { lcds: lcds {
+	lcd_icnl9911c_mipi: lcd_icnl9911c_mipi {
+		dsi-work-mode = <1>; /* video burst mode*/
+		dsi-lane-number = <4>;
+		dsi-color-format = "rgb888";
+		width-mm = <72>;
+		height-mm = <126>;
+		use-dcs-write;
+
+		/*mipi info*/
+		height = <1600>;
+		width = <720>;
+		hfp = <48>;
+		hbp = <48>;
+		hsync = <4>;
+		vfp = <150>;
+		vbp = <32>;
+		vsync = <4>;
+		fps = <60>;
+		work-mode = <0>;
+		rgb-mode = <3>;
+		lane-number = <4>;
+		phy-bit-clock = <624000000>;
+		split-enable = <0>;
+		eotp-enable = <0>;
+		burst-mode = <2>;
+		esd-check-enable = <0>;
+
+		/* DSI_CMD, DSI_MODE, timeout, len, cmd */
+		initial-command = [
+			39 01 00 03 F0 5A 59
+			39 01 00 03 F1 A5 A6
+			39 01 00 21 B0 83 82 86 87 06 07 04 05 33 33 33 33 20 00 00 77 00 00 3F 05 04 03 02 01 02 03 04 00 00 00 00 00
+			39 01 00 1e B1 13 91 8E 81 20 00 00 77 00 00 04 08 54 00 00 00 44 40 02 01 40 02 01 40 02 01 40 02 01
+			39 01 00 12 B2 54 C4 82 05 40 02 01 40 02 01 05 05 54 0C 0C 0D 0B
+			39 01 00 20 B3 12 00 00 00 00 26 26 91 91 91 91 3C 26 00 18 01 02 08 20 30 08 09 44 20 40 20 40 08 09 22 33
+			39 01 00 1D B4 03 00 00 06 1E 1F 0C 0E 10 12 14 16 04 03 03 03 03 03 03 03 03 03 FF FF FC 00 00 00
+			39 01 00 1D B5 03 00 00 07 1E 1F 0D 0F 11 13 15 17 05 03 03 03 03 03 03 03 03 03 FF FF FC 00 00 00
+			39 01 00 19 B8 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+			39 01 00 03 BA 6B 6B
+			39 01 00 0E BB 01 05 09 11 0D 19 1D 55 25 69 00 21 25
+			39 01 00 0F BC 00 00 00 00 02 20 FF 00 03 33 01 73 33 02
+			39 01 00 0B BD E9 02 4F CF 72 A4 08 44 AE 15
+			39 01 00 0D BE 7D 7D 5A 46 0C 77 43 07 0E 0E 00 00
+			39 01 00 09 BF 07 25 07 25 7F 00 11 04
+			39 01 00 0D C0 10 FF FF FF FF FF 00 FF 00 00 00 00
+			39 01 00 14 C1 C0 20 20 96 04 32 32 04 2A 40 36 00 07 CF FF FF C0 00 C0
+			39 01 00 02 C2 00
+			39 01 00 10 C2 CC 01 10 00 01 30 02 21 43 00 01 30 02 21 43
+			39 01 00 0D C3 06 00 FF 00 FF 00 00 81 01 00 00 00
+			39 01 00 0D C4 84 03 2B 41 00 3C 00 03 03 3E 00 00
+			39 01 00 0C C5 03 1C C0 C0 40 10 42 44 0F 0A 14
+			39 01 00 0B C6 87 A0 2A 29 29 00 64 37 08 04
+			39 01 00 17 C7 F7 D3 BA A5 80 63 36 8B 56 2A FF CE 23 F4 D3 A4 86 5A 1A 7F E4 00
+			39 01 00 17 C8 F7 D3 BA A5 80 63 36 8B 56 2A FF CE 23 F4 D3 A4 86 5A 1A 7F E4 00
+			39 01 00 09 D0 80 0D FF 0F 61 0B 08 0C
+			39 01 00 0E D2 42 0C 30 01 80 26 04 00 00 C3 00 00 00
+			39 01 00 03 F1 5A 59
+			39 01 00 03 F0 A5 A6
+			39 01 00 02 35 00
+			39 01 96 01 11
+			39 01 32 01 29
+		];
+		sleep-in-command = [
+			39 01 00 02 26 08
+			39 01 78 01 28
+			39 01 78 01 10
+		];
+		sleep-out-command = [
+			39 01 96 01 11
+			39 01 32 01 29
+		];
+		read-id-command = [
+			37 01 00 01 01
+			14 01 00 01 04
+		];
+
+		display-timings {
+			timing0 {
+				clock-frequency = <87870000>;
+				hactive = <720>;
+				hfront-porch = <48>;
+				hback-porch = <48>;
+				hsync-len = <4>;
+				vactive = <1600>;
+				vfront-porch = <150>;
+				vback-porch = <32>;
+				vsync-len = <4>;
+				vsync-active = <1>;
+				hsync-active = <1>;
+			};
+		};
+	};
+};};

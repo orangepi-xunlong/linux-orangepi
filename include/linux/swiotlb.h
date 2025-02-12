@@ -23,7 +23,11 @@ struct scatterlist;
  * must be a power of 2.  What is the appropriate value ?
  * The complexity of {map,unmap}_single is linearly dependent on this value.
  */
+#if defined(CONFIG_SOC_KY_X1)
+#define IO_TLB_SEGSIZE	256
+#else
 #define IO_TLB_SEGSIZE	128
+#endif
 
 /*
  * log of the size of each IO TLB slab.  The number of slabs is command line

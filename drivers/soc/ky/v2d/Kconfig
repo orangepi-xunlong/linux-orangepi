@@ -1,0 +1,7 @@
+# SPDX-License-Identifier: GPL-2.0
+config KY_V2D
+        tristate "Ky V2D Engine Driver"
+        depends on SYNC_FILE
+        default m
+        help
+          This enables Ky V2D Engine driver

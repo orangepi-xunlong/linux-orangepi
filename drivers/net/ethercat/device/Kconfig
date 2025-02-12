@@ -1,0 +1,18 @@
+# SPDX-License-Identifier: GPL-2.0-only
+#
+# Ethercat device configuration
+#
+
+config EC_GENERIC
+	tristate "Ethercat generic device driver support"
+	depends on ETHERCAT
+	default n
+	help
+	  generic native ethercat device driver support.
+
+config EC_X1_EMAC
+	tristate "x1 native thercat device driver support"
+	depends on ETHERCAT
+	default n
+	help
+	  Ethercat generic device driver support.

@@ -262,7 +262,12 @@ static void __init setup_bootmem(void)
 	max_low_pfn = max_pfn = PFN_DOWN(phys_ram_end);
 	high_memory = (void *)(__va(PFN_PHYS(max_low_pfn)));
 
+	#ifdef CONFIG_SOC_KY_X1
+	/* 2GB~4GB is IO area on ky-x1, will be reserved when early_init_fdt_scan_reserved_mem */
+	dma32_phys_limit = min(2UL * SZ_1G, (unsigned long)PFN_PHYS(max_low_pfn));
+	#else
 	dma32_phys_limit = min(4UL * SZ_1G, (unsigned long)PFN_PHYS(max_low_pfn));
+	#endif
 	set_max_mapnr(max_low_pfn - ARCH_PFN_OFFSET);
 
 	reserve_initrd_mem();
@@ -283,7 +288,12 @@ static void __init setup_bootmem(void)
 	if (!IS_ENABLED(CONFIG_BUILTIN_DTB))
 		memblock_reserve(dtb_early_pa, fdt_totalsize(dtb_early_va));
 
+#ifdef CONFIG_ZONE_DMA32
 	dma_contiguous_reserve(dma32_phys_limit);
+#else
+	dma_contiguous_reserve(PFN_PHYS(max_low_pfn));
+#endif
+
 	if (IS_ENABLED(CONFIG_64BIT))
 		hugetlb_cma_reserve(PUD_SHIFT - PAGE_SHIFT);
 }

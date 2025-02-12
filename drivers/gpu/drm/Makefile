@@ -198,3 +198,6 @@ obj-$(CONFIG_DRM_HYPERV) += hyperv/
 obj-y			+= solomon/
 obj-$(CONFIG_DRM_SPRD) += sprd/
 obj-$(CONFIG_DRM_LOONGSON) += loongson/
+obj-$(CONFIG_DRM_KY) += ky/
+obj-$(CONFIG_POWERVR_ROGUE_NULLDRMDISP) += nulldisp/
+obj-$(CONFIG_POWERVR_ROGUE) += img-rogue/

@@ -1,0 +1,56 @@
+# SPDX-License-Identifier: GPL-2.0
+#
+# KY X1 camera configuration
+#
+
+comment "KY X1 Camera And Video V2"
+
+menuconfig KY_X1_CAMERA_V2
+    tristate "KY X1 camera and video capture V2 support"
+	select MEDIA_CONTROLLER
+	select VIDEO_V4L2_SUBDEV_API
+    help
+	  Say Y here to enable selecting the video adapters for
+	  KY X1 camera and video v2
+
+config KY_X1_CCIC_V2
+    tristate "KY X1 CCIC V2 support"
+    depends on KY_X1_CAMERA_V2
+    help
+      Enable support for ccic v2
+
+config KY_X1_VI_V2
+    tristate "KY X1 VI V2 support"
+    select VIDEOBUF2_CORE
+    select VIDEOBUF2_V4L2
+    select VIDEOBUF2_DMA_CONTIG
+    select VIDEOBUF2_DMA_SG
+    select KY_X1_CCIC_V2
+    depends on KY_X1_CAMERA_V2
+    help
+      Enable support for vi
+
+config KY_X1_VI_IOMMU
+	bool "KY X1 VI IOMMU support"
+	depends on KY_X1_VI_V2
+    help
+      Enable support for vi iommu
+
+
+config KY_X1_ISP_V2
+    tristate "KY X1 ISP V2 support"
+    depends on KY_X1_CAMERA_V2
+    help
+      Enable support for isp v2
+
+config KY_X1_CPP_V2
+    tristate "KY X1 CPP V2 support"
+    depends on KY_X1_CAMERA_V2
+    help
+      Enable support for cpp v2
+
+config KY_X1_SENSOR_V2
+    tristate "KY X1 SENSOR V2 support"
+    depends on KY_X1_CAMERA_V2 && I2C
+    help
+      Enable support for sensor v2

@@ -245,6 +245,11 @@ static bool radeon_msi_ok(struct radeon_device *rdev)
 	if (rdev->flags & RADEON_IS_AGP)
 		return false;
 
+#if IS_ENABLED(CONFIG_SOC_KY_X1)
+	/* Chips <= GCN1 cannot get MSI to work on K1 */
+	return false;
+#endif
+
 	/*
 	 * Older chips have a HW limitation, they can only generate 40 bits
 	 * of address for "64-bit" MSIs which breaks on some platforms, notably

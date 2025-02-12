@@ -1,0 +1,122 @@
+[
+  {
+    "EventName": "alu_inst",
+    "EventCode": "36",
+    "BriefDescription": "ALU (integer) instructions"
+  },
+  {
+    "EventName": "mult_inst",
+    "EventCode": "37",
+    "BriefDescription": "Multiplication instructions"
+  },
+  {
+    "EventName": "div_inst",
+    "EventCode": "38",
+    "BriefDescription": "Division instructions"
+  },
+  {
+    "EventName": "vector_div_inst",
+    "EventCode": "39",
+    "BriefDescription": "Vector division instructions"
+  },
+  {
+    "EventName": "fp_div_inst",
+    "EventCode": "40",
+    "BriefDescription": "Floating-point division instructions"
+  },
+  {
+    "EventName": "csr_inst",
+    "EventCode": "41",
+    "BriefDescription": "CSR instructions"
+  },
+  {
+    "EventName": "ecall_inst",
+    "EventCode": "42",
+    "BriefDescription": "ECALL instructions"
+  },
+  {
+    "EventName": "fp_inst",
+    "EventCode": "43",
+    "BriefDescription": "Floating-point instructions"
+  },
+  {
+    "EventName": "store_inst",
+    "EventCode": "44",
+    "BriefDescription": "Store instructions"
+  },
+  {
+    "EventName": "load_inst",
+    "EventCode": "45",
+    "BriefDescription": "Load instructions"
+  },
+  {
+    "EventName": "unaligned_load_inst",
+    "EventCode": "46",
+    "BriefDescription": "Unaligned load instructions"
+  },
+  {
+    "EventName": "unaligned_store_inst",
+    "EventCode": "47",
+    "BriefDescription": "Unaligned store instructions"
+  },
+  {
+    "EventName": "atomic_inst",
+    "EventCode": "48",
+    "BriefDescription": "Atomic instructions"
+  },
+  {
+    "EventName": "lr_inst",
+    "EventCode": "49",
+    "BriefDescription": "LR instructions"
+  },
+  {
+    "EventName": "sc_inst",
+    "EventCode": "50",
+    "BriefDescription": "SC instructions"
+  },
+  {
+    "EventName": "amo_inst",
+    "EventCode": "51",
+    "BriefDescription": "AMO instructions"
+  },
+  {
+    "EventName": "fence_inst",
+    "EventCode": "52",
+    "BriefDescription": "FENCE instructions"
+  },
+  {
+    "EventName": "failed_sc_inst",
+    "EventCode": "53",
+    "BriefDescription": "Failed SC instructions"
+  },
+  {
+    "EventName": "bus_fence_inst",
+    "EventCode": "54",
+    "BriefDescription": "Bus FENCE instructions"
+  },
+  {
+    "EventName": "fp_load_inst",
+    "EventCode": "55",
+    "BriefDescription": "Floating-point load instructions"
+  },
+  {
+    "EventName": "fp_store_inst",
+    "EventCode": "56",
+    "BriefDescription": "Floating-point store instructions"
+  },
+  {
+    "EventName": "vector_load_inst",
+    "EventCode": "57",
+    "BriefDescription": "Vector load instructions"
+  },
+  {
+    "EventName": "vector_store_inst",
+    "EventCode": "58",
+    "BriefDescription": "Vector store instructions"
+  },
+  {
+    "EventName": "vector_inst",
+    "EventCode": "59",
+    "BriefDescription": "Vector instructions"
+  }
+]

@@ -693,10 +693,7 @@ static int pwm_backlight_resume(struct device *dev)
 
 static const struct dev_pm_ops pwm_backlight_pm_ops = {
 #ifdef CONFIG_PM_SLEEP
-	.suspend = pwm_backlight_suspend,
-	.resume = pwm_backlight_resume,
-	.poweroff = pwm_backlight_suspend,
-	.restore = pwm_backlight_resume,
+	SET_SYSTEM_SLEEP_PM_OPS(pwm_backlight_suspend, pwm_backlight_resume)
 #endif
 };
 

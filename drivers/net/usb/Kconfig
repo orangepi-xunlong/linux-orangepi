@@ -529,6 +529,29 @@ config USB_NET_KALMIA
 	  To compile this driver as a module, choose M here: the
 	  module will be called kalmia.
 
+config USB_NET_QMI_WWAN_F
+	tristate "QMI WWAN driver for Fibocom Qualcomm MSM based 3G and LTE modems"
+	depends on USB_USBNET
+	select USB_WDM
+	help
+	  Support Fibocom WWAN LTE/3G devices based on Qualcomm Modem chipsets.
+	  Examples of such devices are
+	    * Fibocom NL668
+	    * Fibocom FG150
+
+	  This driver will only drive the ethernet part of the chips.
+	  The devices require additional configuration to be usable.
+	  Multiple management interfaces with linux drivers are
+	  available:
+
+	    * option: AT commands on /dev/ttyUSBx
+	    * cdc-wdm: Qualcomm MSM Interface (QMI) protocol on /dev/cdc-wdmx
+
+	  Fibocom QMI dial app is recommended to use.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called qmi_wwan_f.
+
 config USB_NET_QMI_WWAN
 	tristate "QMI WWAN driver for Qualcomm MSM based 3G and LTE modems"
 	depends on USB_USBNET
@@ -643,4 +666,5 @@ config USB_RTL8153_ECM
 	  CONFIG_USB_RTL8152 is not set, or the RTL8153 device is not
 	  supported by r8152 driver.
 
+source "drivers/net/usb/asix_usb/Kconfig"
 endif # USB_NET_DRIVERS

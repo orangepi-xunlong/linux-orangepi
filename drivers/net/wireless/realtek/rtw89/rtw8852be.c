@@ -83,7 +83,24 @@ static struct pci_driver rtw89_8852be_driver = {
 	.remove		= rtw89_pci_remove,
 	.driver.pm	= &rtw89_pm_ops,
 };
+
+#if defined(CONFIG_SOC_KY_X1)
+extern int ky_wlan_set_power(int on);
+static int __init rtw89_8852be_driver_init(void)
+{
+	ky_wlan_set_power(1);
+	return pci_register_driver(&rtw89_8852be_driver);
+}
+module_init(rtw89_8852be_driver_init);
+static void __exit rtw89_8852be_driver_exit(void)
+{
+	pci_unregister_driver(&rtw89_8852be_driver);
+	ky_wlan_set_power(0);
+}
+module_exit(rtw89_8852be_driver_exit);
+#elif
 module_pci_driver(rtw89_8852be_driver);
+#endif
 
 MODULE_AUTHOR("Realtek Corporation");
 MODULE_DESCRIPTION("Realtek 802.11ax wireless 8852BE driver");

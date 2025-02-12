@@ -80,6 +80,10 @@ static int sbi_suspend_finisher(unsigned long suspend_type,
 {
 	struct sbiret ret;
 
+#if defined(CONFIG_SOC_KY_X1PRO) || defined(CONFIG_SOC_KY_X1)
+       /* flush the local cache */
+       sbi_flush_local_dcache_all();
+#endif
 	ret = sbi_ecall(SBI_EXT_HSM, SBI_EXT_HSM_HART_SUSPEND,
 			suspend_type, resume_addr, opaque, 0, 0, 0);
 

@@ -12,6 +12,8 @@
 #include <asm/cpu_ops_sbi.h>
 #include <asm/sbi.h>
 #include <asm/smp.h>
+#include <linux/delay.h>
+#include <linux/jiffies.h>
 
 extern char secondary_start_sbi[];
 const struct cpu_operations cpu_ops_sbi;
@@ -108,11 +110,37 @@ static int sbi_cpu_is_stopped(unsigned int cpuid)
 {
 	int rc;
 	unsigned long hartid = cpuid_to_hartid_map(cpuid);
-
+#ifndef CONFIG_SOC_KY_X1
 	rc = sbi_hsm_hart_get_status(hartid);
 
 	if (rc == SBI_HSM_STATE_STOPPED)
 		return 0;
+#else
+        unsigned long start, end;
+
+        /*
+         * cpu_kill could race with cpu_die and we can
+         * potentially end up declaring this cpu undead
+         * while it is dying. So, try again a few times.
+         */
+        start = jiffies;
+        end = start + msecs_to_jiffies(100);
+        do {
+                rc = sbi_hsm_hart_get_status(hartid);
+                if (rc == SBI_HSM_STATE_STOPPED) {
+                        pr_info("CPU%d killed (polled %d ms)\n", cpuid,
+                                jiffies_to_msecs(jiffies - start));
+                        return 0;
+                }
+
+                usleep_range(100, 1000);
+        } while (time_before(jiffies, end));
+
+        pr_warn("CPU%d may not have shut down cleanly (AFFINITY_INFO reports %d)\n",
+                        cpuid, rc);
+        rc = -ETIMEDOUT;
+
+#endif
 	return rc;
 }
 #endif

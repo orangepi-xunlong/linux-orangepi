@@ -17,6 +17,7 @@ struct sa1100_rtc {
 	int			irq_alarm;
 	struct rtc_device	*rtc;
 	struct clk		*clk;
+	struct reset_control	*reset;
 };
 
 int sa1100_rtc_init(struct platform_device *pdev, struct sa1100_rtc *info);

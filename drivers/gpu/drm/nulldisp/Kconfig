@@ -1,0 +1,8 @@
+# SPDX-License-Identifier: GPL-2.0
+config POWERVR_ROGUE_NULLDRMDISP
+	tristate "null drm disp"
+	default n
+	depends on DRM && POWERVR_ROGUE
+	select DRM_KMS_HELPER
+        help
+          This enables powervr null drm display driver

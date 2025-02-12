@@ -138,6 +138,23 @@ config USB_MV_OTG
 
 	  To compile this driver as a module, choose M here.
 
+config USB_X1CI_OTG
+	tristate "Ky X1-x USB OTG support"
+	depends on USB_EHCI_X1 && USB_X1_UDC && USB_OTG
+	depends on USB_GADGET || !USB_GADGET # if USB_GADGET=m, this can't be 'y'
+	select USB_PHY
+	help
+	  Say Y here if you want to build Ky X1-x USB OTG transciever driver.
+	  This driver implements role switch between EHCI host driver and gadget driver.
+
+config X1CI_USB2_PHY
+	tristate "X1 ci USB 2.0 PHY Driver"
+	depends on USB || USB_GADGET
+	select USB_PHY
+	help
+	  Enable this to support USB 2.0 PHY driver. This driver will do the PHY
+	  initialization and shutdown. The PHY driver will be used by X1 udc/ehci/otg driver.
+
 config USB_MXS_PHY
 	tristate "Freescale MXS USB PHY support"
 	depends on ARCH_MXC || ARCH_MXS

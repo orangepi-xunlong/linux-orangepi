@@ -1,0 +1,61 @@
+// SPDX-License-Identifier: GPL-2.0
+
+/ { lcds: lcds {
+	lcd_lt9711_dp_1920x1080: lcd_lt9711_dp_1920x1080 {
+		dsi-work-mode = <1>; /* video burst mode*/
+		dsi-lane-number = <4>;
+		dsi-color-format = "rgb888";
+		width-mm = <309>;
+		height-mm = <174>;
+		use-dcs-write;
+
+		/*mipi info*/
+		height = <1080>;
+		width = <1920>;
+		hfp = <88>;
+		hbp = <148>;
+		hsync = <44>;
+		vfp = <4>;
+		vbp = <36>;
+		vsync = <5>;
+		fps = <60>;
+		work-mode = <0>;
+		rgb-mode = <3>;
+		lane-number = <4>;
+		phy-bit-clock = <1000000000>;
+		phy-esc-clock = <76800000>;
+		split-enable = <0>;
+		eotp-enable = <0>;
+		burst-mode = <2>;
+		esd-check-enable = <0>;
+
+		/* DSI_CMD, DSI_MODE, timeout, len, cmd */
+		initial-command = [
+		];
+
+		sleep-in-command = [
+		];
+
+		sleep-out-command = [
+		];
+
+		read-id-command = [
+		];
+
+		display-timings {
+			timing0 {
+				clock-frequency = <143000000>;
+				hactive = <1920>;
+				hfront-porch = <88>;
+				hback-porch = <148>;
+				hsync-len = <44>;
+				vactive = <1080>;
+				vfront-porch = <4>;
+				vback-porch = <36>;
+				vsync-len = <5>;
+				vsync-active = <1>;
+				hsync-active = <1>;
+			};
+		};
+	};
+};};

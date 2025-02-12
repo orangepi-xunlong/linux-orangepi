@@ -255,6 +255,25 @@ config DWMAC_VISCONTI
 	help
 	  Support for ethernet controller on Visconti SoCs.
 
+config DWMAC_KY
+	tristate "Ky DWMAC support"
+	help
+	  Support for ethernet controller on Ky SOCs.
+
+	  This selects Ky SoC glue layer support for the stmmac
+	  device driver. This driver is used for the Ky series
+	  SOCs GMAC ethernet controller.
+
+config DWMAC_KY_ETHQOS
+	tristate "Ky ETHQOS support"
+	default CONFIG_SOC_KY
+	depends on OF && (CONFIG_SOC_KY || COMPILE_TEST)
+	help
+	  Support for the Ky ETHQOS core.
+
+	  This selects the Ky ETHQOS glue layer support for the
+	  stmmac device driver.
+
 endif
 
 config DWMAC_INTEL

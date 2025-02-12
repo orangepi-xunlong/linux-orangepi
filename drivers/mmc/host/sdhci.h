@@ -486,6 +486,19 @@ struct sdhci_host {
 #define SDHCI_QUIRK2_USE_32BIT_BLK_CNT			(1<<18)
 /* Issue CMD and DATA reset together */
 #define SDHCI_QUIRK2_ISSUE_CMD_DAT_RESET_TOGETHER	(1<<19)
+#ifdef CONFIG_SOC_KY_X1
+/* Support SDH controller on FPGA */
+#define SDHCI_QUIRK2_SUPPORT_PHY_BYPASS			(1<<25)
+/* Disable scan card at probe phase */
+#define SDHCI_QUIRK2_DISABLE_PROBE_CDSCAN		(1<<26)
+/* Need to set IO capability by SOC part register */
+#define SDHCI_QUIRK2_SET_AIB_MMC			(1<<27)
+/* Controller not support phy module */
+#define SDHCI_QUIRK2_BROKEN_PHY_MODULE			(1<<28)
+/* Controller support encrypt module */
+#define SDHCI_QUIRK2_SUPPORT_ENCRYPT			(1<<29)
+#endif
+
 
 	int irq;		/* Device IRQ */
 	void __iomem *ioaddr;	/* Mapped address */
@@ -669,6 +682,9 @@ struct sdhci_ops {
 	void	(*request_done)(struct sdhci_host *host,
 				struct mmc_request *mrq);
 	void    (*dump_vendor_regs)(struct sdhci_host *host);
+#ifdef CONFIG_SOC_KY_X1
+	void	(*set_encrypt_feature)(struct sdhci_host *host, unsigned int enc_flag);
+#endif
 };
 
 #ifdef CONFIG_MMC_SDHCI_IO_ACCESSORS

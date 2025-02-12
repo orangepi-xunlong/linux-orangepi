@@ -49,12 +49,18 @@ static dev_t dma_heap_devt;
 static struct class *dma_heap_class;
 static DEFINE_XARRAY_ALLOC(dma_heap_minors);
 
+struct dma_buf *gdmabuf[10] = {NULL};
+int gfd_dmabuf[10] = { -1 };
+
 static int dma_heap_buffer_alloc(struct dma_heap *heap, size_t len,
 				 unsigned int fd_flags,
 				 unsigned int heap_flags)
 {
+	static int push_count = 0;
+	static int pop_count = 0;
 	struct dma_buf *dmabuf;
 	int fd;
+	int fd_dma;
 
 	/*
 	 * Allocations from all heaps have to begin
@@ -63,6 +69,22 @@ static int dma_heap_buffer_alloc(struct dma_heap *heap, size_t len,
 	len = PAGE_ALIGN(len);
 	if (!len)
 		return -EINVAL;
+
+	//if v4l2-app heap_flags, pop env
+	if (heap_flags == 0xf0) {
+		dmabuf = gdmabuf[pop_count];
+		fd_dma = gfd_dmabuf[pop_count];
+		pop_count ++;
+		fd = dma_buf_fd(dmabuf, fd_flags);
+		if (fd < 0) {
+			printk("%s %d: error! heap_flags:%x, fd: %d\n",__func__,__LINE__, heap_flags, fd);
+			dma_buf_put(dmabuf);
+			return fd;
+		}
+		printk("%s,%d: get fd%d, %p to v4l2-app success, heap_flags:%x\n",  __func__, __LINE__, fd, dma_buf_get(fd_dma), heap_flags);
+
+		return fd;
+	}
 
 	dmabuf = heap->ops->allocate(heap, len, fd_flags, heap_flags);
 	if (IS_ERR(dmabuf))
@@ -73,6 +95,16 @@ static int dma_heap_buffer_alloc(struct dma_heap *heap, size_t len,
 		dma_buf_put(dmabuf);
 		/* just return, as put will call release and that will free */
 	}
+	//if cam-test heap_flags, push env
+	if (heap_flags == 0xff) {
+		gdmabuf[push_count] = dmabuf;
+		gfd_dmabuf[push_count] = fd;
+		dma_buf_get(fd);	//for increase refcount
+		push_count++;
+		printk("%s,%d: alloc buf%p fd:%d, heap_flags:%x, cnt:%d, %d",
+			__func__,__LINE__, dmabuf, fd, heap_flags, push_count, pop_count);
+	}
+
 	return fd;
 }
 
@@ -105,8 +137,13 @@ static long dma_heap_ioctl_allocate(struct file *file, void *data)
 	if (heap_allocation->fd_flags & ~DMA_HEAP_VALID_FD_FLAGS)
 		return -EINVAL;
 
-	if (heap_allocation->heap_flags & ~DMA_HEAP_VALID_HEAP_FLAGS)
-		return -EINVAL;
+	if (heap_allocation->heap_flags & ~DMA_HEAP_VALID_HEAP_FLAGS) {
+		//TODO: flags define
+		if (heap_allocation->heap_flags == 0xff || heap_allocation->heap_flags == 0xf0)
+			printk("%s,%d: heap_flas: %llx\n", __func__, __LINE__, heap_allocation->heap_flags);
+		else
+			return -EINVAL;
+	}
 
 	fd = dma_heap_buffer_alloc(heap, heap_allocation->len,
 				   heap_allocation->fd_flags,

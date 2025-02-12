@@ -212,6 +212,66 @@ int dev_pm_set_dedicated_wake_irq(struct device *dev, int irq)
 }
 EXPORT_SYMBOL_GPL(dev_pm_set_dedicated_wake_irq);
 
+#ifdef CONFIG_SOC_KY_X1
+static int __dev_pm_set_dedicated_wake_irq_ky(struct device *dev, int irq, unsigned int flag, int trigger_type)
+{
+	struct wake_irq *wirq;
+	int err;
+
+	if (irq < 0)
+		return -EINVAL;
+
+	wirq = kzalloc(sizeof(*wirq), GFP_KERNEL);
+	if (!wirq)
+		return -ENOMEM;
+
+	wirq->name = kasprintf(GFP_KERNEL, "%s:wakeup", dev_name(dev));
+	if (!wirq->name) {
+		err = -ENOMEM;
+		goto err_free;
+	}
+
+	wirq->dev = dev;
+	wirq->irq = irq;
+
+	/* Prevent deferred spurious wakeirqs with disable_irq_nosync() */
+	irq_set_status_flags(irq, IRQ_DISABLE_UNLAZY);
+
+	/*
+	 * Consumer device may need to power up and restore state
+	 * so we use a threaded irq.
+	 */
+	err = request_threaded_irq(irq, NULL, handle_threaded_wake_irq,
+				   IRQF_ONESHOT | IRQF_NO_AUTOEN | trigger_type,
+				   wirq->name, wirq);
+	if (err)
+		goto err_free_name;
+
+	err = dev_pm_attach_wake_irq(dev, wirq);
+	if (err)
+		goto err_free_irq;
+
+	wirq->status = WAKE_IRQ_DEDICATED_ALLOCATED | flag;
+
+	return err;
+
+err_free_irq:
+	free_irq(irq, wirq);
+err_free_name:
+	kfree(wirq->name);
+err_free:
+	kfree(wirq);
+
+	return err;
+}
+
+int dev_pm_set_dedicated_wake_irq_ky(struct device *dev, int irq, int trigger_type)
+{
+	return __dev_pm_set_dedicated_wake_irq_ky(dev, irq, 0, trigger_type);
+}
+EXPORT_SYMBOL_GPL(dev_pm_set_dedicated_wake_irq_ky);
+#endif
+
 /**
  * dev_pm_set_dedicated_wake_irq_reverse - Request a dedicated wake-up interrupt
  *                                         with reverse enable ordering

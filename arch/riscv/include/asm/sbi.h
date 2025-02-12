@@ -29,6 +29,7 @@ enum sbi_ext_id {
 	SBI_EXT_RFENCE = 0x52464E43,
 	SBI_EXT_HSM = 0x48534D,
 	SBI_EXT_SRST = 0x53525354,
+	SBI_EXT_SUSP = 0x53555350,
 	SBI_EXT_PMU = 0x504D55,
 
 	/* Experimentals extensions must lie within this range */
@@ -48,6 +49,9 @@ enum sbi_ext_base_fid {
 	SBI_EXT_BASE_GET_MVENDORID,
 	SBI_EXT_BASE_GET_MARCHID,
 	SBI_EXT_BASE_GET_MIMPID,
+#if defined(CONFIG_SOC_KY_X1PRO) || defined(CONFIG_SOC_KY_X1)
+	SBI_EXT_BASE_FLUSH_CACHE_ALL,
+#endif
 };
 
 enum sbi_ext_time_fid {
@@ -111,6 +115,14 @@ enum sbi_srst_reset_type {
 enum sbi_srst_reset_reason {
 	SBI_SRST_RESET_REASON_NONE = 0,
 	SBI_SRST_RESET_REASON_SYS_FAILURE,
+};
+
+enum sbi_ext_susp_fid {
+	SBI_EXT_SUSP_SYSTEM_SUSPEND = 0,
+};
+
+enum sbi_ext_susp_sleep_type {
+	SBI_SUSP_SLEEP_TYPE_SUSPEND_TO_RAM = 0,
 };
 
 enum sbi_ext_pmu_fid {
@@ -273,6 +285,10 @@ void sbi_set_timer(uint64_t stime_value);
 void sbi_shutdown(void);
 void sbi_send_ipi(unsigned int cpu);
 int sbi_remote_fence_i(const struct cpumask *cpu_mask);
+
+#if defined(CONFIG_SOC_KY_X1PRO) || defined(CONFIG_SOC_KY_X1)
+void sbi_flush_local_dcache_all(void);
+#endif
 
 int sbi_remote_sfence_vma_asid(const struct cpumask *cpu_mask,
 				unsigned long start,

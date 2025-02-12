@@ -55,6 +55,8 @@ unsigned long module_emit_plt_entry(struct module *mod, unsigned long val)
 	return (unsigned long)&plt[i];
 }
 
+/* it seems that the duplicate check is not necessary */
+#ifndef CONFIG_SOC_KY
 static int is_rela_equal(const Elf_Rela *x, const Elf_Rela *y)
 {
 	return x->r_info == y->r_info && x->r_addend == y->r_addend;
@@ -69,6 +71,7 @@ static bool duplicate_rela(const Elf_Rela *rela, int idx)
 	}
 	return false;
 }
+#endif
 
 static void count_max_entries(Elf_Rela *relas, int num,
 			      unsigned int *plts, unsigned int *gots)
@@ -78,10 +81,16 @@ static void count_max_entries(Elf_Rela *relas, int num,
 	for (i = 0; i < num; i++) {
 		type = ELF_RISCV_R_TYPE(relas[i].r_info);
 		if (type == R_RISCV_CALL_PLT) {
+#ifndef CONFIG_SOC_KY
+/* it seems that the duplicate check is not necessary */
 			if (!duplicate_rela(relas, i))
+#endif
 				(*plts)++;
 		} else if (type == R_RISCV_GOT_HI20) {
+#ifndef CONFIG_SOC_KY
+/* it seems that the duplicate check is not necessary */
 			if (!duplicate_rela(relas, i))
+#endif
 				(*gots)++;
 		}
 	}

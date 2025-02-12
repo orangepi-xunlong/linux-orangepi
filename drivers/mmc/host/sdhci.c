@@ -2632,7 +2632,6 @@ int sdhci_start_signal_voltage_switch(struct mmc_host *mmc,
 		/* Set 1.8V Signal Enable in the Host Control2 register to 0 */
 		ctrl &= ~SDHCI_CTRL_VDD_180;
 		sdhci_writew(host, ctrl, SDHCI_HOST_CONTROL2);
-
 		if (!IS_ERR(mmc->supply.vqmmc)) {
 			ret = mmc_regulator_set_vqmmc(mmc, ios);
 			if (ret < 0) {
@@ -2714,6 +2713,16 @@ static int sdhci_card_busy(struct mmc_host *mmc)
 
 	return !(present_state & SDHCI_DATA_0_LVL_MASK);
 }
+
+#ifdef CONFIG_SOC_KY_X1
+static void sdhci_encrypt_config(struct mmc_host *mmc, unsigned int enc_flag)
+{
+	struct sdhci_host *host = mmc_priv(mmc);
+
+	if (host->ops->set_encrypt_feature)
+		host->ops->set_encrypt_feature(host, enc_flag);
+}
+#endif
 
 static int sdhci_prepare_hs400_tuning(struct mmc_host *mmc, struct mmc_ios *ios)
 {
@@ -3065,6 +3074,9 @@ static const struct mmc_host_ops sdhci_ops = {
 	.execute_tuning			= sdhci_execute_tuning,
 	.card_event			= sdhci_card_event,
 	.card_busy	= sdhci_card_busy,
+#ifdef CONFIG_SOC_KY_X1
+	.encrypt_config = sdhci_encrypt_config,
+#endif
 };
 
 /*****************************************************************************\

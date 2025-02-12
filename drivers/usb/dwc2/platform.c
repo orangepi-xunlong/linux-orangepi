@@ -450,7 +450,7 @@ static int dwc2_driver_probe(struct platform_device *dev)
 	 */
 	if (!dev->dev.dma_mask)
 		dev->dev.dma_mask = &dev->dev.coherent_dma_mask;
-	retval = dma_set_coherent_mask(&dev->dev, DMA_BIT_MASK(32));
+	retval = dma_set_mask_and_coherent(&dev->dev, DMA_BIT_MASK(40));
 	if (retval) {
 		dev_err(&dev->dev, "can't set coherent DMA mask: %d\n", retval);
 		return retval;

@@ -111,4 +111,38 @@ config SOC_CANAAN_K210_DTB_SOURCE
 
 endif # ARCH_CANAAN
 
+config SOC_KY
+	bool "Ky SoCs"
+	select SIFIVE_PLIC
+	help
+	  This enables support for Ky SoCs platform hardware.
+
+if SOC_KY
+
+choice
+	prompt "Ky SOCs platform"
+	help
+	  choice Ky soc platform
+
+	config SOC_KY_X1
+		bool "x1"
+		help
+		  select Ky x1 Platform SOCs.
+endchoice
+
+config BIND_THREAD_TO_AICORES
+	bool "enable bind ai cores when use AI instruction"
+	default y
+	help
+	  This enable bind ai cores when use AI instruction.
+
+config KY_ERRATA_LOAD_ATOMIC
+	bool "enable issue fix which caused by readforward and writeback"
+	depends on SOC_KY_X1
+	default y
+	help
+	  This enable fix errata caused by readforward and writeback.
+
+endif
+
 endmenu # "SoC selection"

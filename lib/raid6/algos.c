@@ -18,6 +18,9 @@
 #else
 #include <linux/module.h>
 #include <linux/gfp.h>
+#include <linux/platform_device.h>
+#include <linux/of.h>
+#include <linux/async.h>
 /* In .bss so it's zeroed */
 const char raid6_empty_zero_page[PAGE_SIZE] __attribute__((aligned(256)));
 EXPORT_SYMBOL(raid6_empty_zero_page);
@@ -289,7 +292,18 @@ static void raid6_exit(void)
 	do { } while (0);
 }
 
-subsys_initcall(raid6_select_algo);
+static void __init raid6_select_algo_wrapper(void *data, long long unsigned int arg)
+{
+	raid6_select_algo();
+}
+
+static int __init raid6_select_algo_async_init(void)
+{
+	async_schedule(raid6_select_algo_wrapper, NULL);
+	return 0;
+}
+
+subsys_initcall(raid6_select_algo_async_init);
 module_exit(raid6_exit);
 MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION("RAID6 Q-syndrome calculations");

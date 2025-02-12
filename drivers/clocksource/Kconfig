@@ -134,6 +134,13 @@ config RDA_TIMER
 	help
 	  Enables the support for the RDA Micro timer driver.
 
+config KY_X1_TIMER
+	bool "Ky x1 timer driver" if COMPILE_TEST
+	select CLKSRC_MMIO
+	select TIMER_OF
+	help
+	  Enables the support for the ky x1 timer driver.
+
 config SUN4I_TIMER
 	bool "Sun4i timer driver" if COMPILE_TEST
 	depends on HAS_IOMEM

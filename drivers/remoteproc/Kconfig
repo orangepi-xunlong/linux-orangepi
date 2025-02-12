@@ -161,6 +161,18 @@ config PRU_REMOTEPROC
 	  processors on various TI SoCs. It's safe to say N here if you're
 	  not interested in the PRU or if you are unsure.
 
+config X1PRO_REMOTEPROC
+	tristate "Ky x1pro remoteproc support"
+	help
+	  Say Y here here to support ky remote processors
+	  via the remote processor framework.
+
+config X1_REMOTEPROC
+	tristate "Ky x1 remoteproc support"
+	help
+	  Say Y here here to support ky remote processors
+	  via the remote processor framework.
+
 config QCOM_PIL_INFO
 	tristate
 

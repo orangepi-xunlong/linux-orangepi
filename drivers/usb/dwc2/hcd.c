@@ -5146,9 +5146,9 @@ int dwc2_hcd_init(struct dwc2_hsotg *hsotg)
 
 	/* Set device flags indicating whether the HCD supports DMA */
 	if (hsotg->params.host_dma) {
-		if (dma_set_mask(hsotg->dev, DMA_BIT_MASK(32)) < 0)
+		if (dma_set_mask(hsotg->dev, DMA_BIT_MASK(40)) < 0)
 			dev_warn(hsotg->dev, "can't set DMA mask\n");
-		if (dma_set_coherent_mask(hsotg->dev, DMA_BIT_MASK(32)) < 0)
+		if (dma_set_coherent_mask(hsotg->dev, DMA_BIT_MASK(40)) < 0)
 			dev_warn(hsotg->dev, "can't set coherent DMA mask\n");
 	}
 

@@ -1,0 +1,36 @@
+import os
+
+Import('env')
+
+# Get source path to current directory.
+path = env.Dir('.').srcnode().path
+
+prints = ""
+if env['log_ftrace'] == '1':
+    prints += " CONFIG_VIDEO_LINLON_FTRACE=y"
+if env['log_print_file'] == '1':
+    prints += " CONFIG_VIDEO_LINLON_PRINT_FILE=y"
+
+if env['mode'] == 'mono':
+    targets = [os.path.join('#', path, 'amvx.ko')]
+else:
+    targets = [os.path.join('#', path, 'amvx_if.ko'), os.path.join('#', path, 'amvx_dev.ko')]
+
+extra_ccflags=""
+if 'EXTRA_CCFLAGS' in os.environ:
+    extra_ccflags = os.environ['EXTRA_CCFLAGS']
+if env['coverage']:
+    extra_ccflags += ' -fprofile-arcs -ftest-coverage'
+
+amvx = env.Command(targets, [],
+                   'make -C %s %s_%s KDIR=%s EXTRA_CCFLAGS="%s" %s' %
+                   (path, env['mode'], env['interface'], env['KDIR'], extra_ccflags, prints))
+
+# Flag to always build.
+env.AlwaysBuild(amvx)
+
+# Install kernel module in bin directory.
+env.Install(env['BIN_DIR'], [amvx])
+
+# Install user space header files
+env.Install(env['INCLUDE_DIR'], ['if/v4l2/mvx-v4l2-controls.h'])

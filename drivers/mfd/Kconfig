@@ -2218,6 +2218,16 @@ config MFD_QCOM_PM8008
 	  under it in the device tree. Additional drivers must be enabled in
 	  order to use the functionality of the device.
 
+config MFD_KY_PMIC
+	tristate "Ky Power Management IC"
+	depends on I2C && OF
+	depends on SOC_KY
+	select MFD_CORE
+	select REGMAP_I2C
+	select REGMAP_IRQ
+	help
+	  Select this option to get support for the KY Power Management ICs.
+
 menu "Multimedia Capabilities Port drivers"
 	depends on ARCH_SA1100
 

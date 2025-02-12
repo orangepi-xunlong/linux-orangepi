@@ -1,0 +1,11 @@
+# SPDX-License-Identifier: GPL-2.0
+#
+# Phy drivers for Ky platforms
+#
+config PHY_KY_X1_COMBPHY
+	tristate "Ky X1-x USB3&PCIE combo PHY driver"
+	depends on OF
+	select GENERIC_PHY
+	default SOC_KY_X1 && USB_DWC3_KY
+	help
+	  USB3 and PCIE Combo PHY Support for Ky x1-x Soc

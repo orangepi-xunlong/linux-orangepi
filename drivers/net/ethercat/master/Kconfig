@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: GPL-2.0-only
+#
+# Ethercat device configuration
+#
+
+config EC_MASTER
+	tristate "Ethercat master driver support"
+	depends on ETHERCAT
+	default n
+	help
+	  Ethercat master driver support.
+

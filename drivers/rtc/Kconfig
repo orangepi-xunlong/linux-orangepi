@@ -718,6 +718,13 @@ config RTC_DRV_SD3078
 	  This driver can also be built as a module. If so, the module
 	  will be called rtc-sd3078
 
+config RTC_DRV_SPT_PMIC
+	tristate "Ky spm8xxx RTC"
+	depends on MFD_KY_PMIC
+	help
+	  If you say yes here you will get support for the
+	  RTC of Ky spm8xxx PMIC.
+
 endif # I2C
 
 comment "SPI RTC drivers"
@@ -1432,7 +1439,7 @@ config RTC_DRV_EP93XX
 
 config RTC_DRV_SA1100
 	tristate "SA11x0/PXA2xx/PXA910"
-	depends on ARCH_SA1100 || ARCH_PXA || ARCH_MMP
+	depends on ARCH_SA1100 || ARCH_PXA || ARCH_MMP || SOC_KY_X1
 	help
 	  If you say Y here you will get access to the real time clock
 	  built into your SA11x0 or PXA2xx CPU.

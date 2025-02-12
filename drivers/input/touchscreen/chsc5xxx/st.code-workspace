@@ -1,0 +1,19 @@
+{
+    "folders": [
+        {
+            "path": "."
+        }
+    ],
+    "settings": {
+        "files.associations": {
+            "semi_touch_function.h": "c",
+            "basic_util.h": "c",
+            "semi_touch_custom.h": "c",
+            "head_def.h": "c",
+            "platform.h": "c",
+            "xutility": "c",
+            "semi_touch_interface.h": "c",
+            "fw_update_packet.h": "c"
+        }
+    }
+}

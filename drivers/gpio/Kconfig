@@ -1818,6 +1818,15 @@ config GPIO_SIM
 	  This enables the GPIO simulator - a configfs-based GPIO testing
 	  driver.
 
+config GPIO_X1
+	bool "KY-X1 GPIO support"
+	depends on SOC_KY_X1
+	help
+	  Say yes here to support the X1 GPIO device.
+	  The X1 GPIO device may have several banks, and each
+	  bank control at most 32 GPIO pins. The number of banks
+	  is passed by device tree or platform data.
+
 endmenu
 
 endif

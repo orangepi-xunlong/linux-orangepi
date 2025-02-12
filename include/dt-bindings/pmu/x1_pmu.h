@@ -1,0 +1,16 @@
+/* SPDX-License-Identifier: GPL-2.0 */
+
+#ifndef __DT_BINDINGS_PMU_X1_H__
+#define __DT_BINDINGS_PMU_X1_H__
+
+#define X1_PMU_BUS_PWR_DOMAIN	0
+#define X1_PMU_VPU_PWR_DOMAIN	1
+#define X1_PMU_GPU_PWR_DOMAIN	2
+#define X1_PMU_LCD_PWR_DOMAIN	3
+#define X1_PMU_ISP_PWR_DOMAIN	4
+#define X1_PMU_AUD_PWR_DOMAIN	5
+#define X1_PMU_GNSS_PWR_DOMAIN	6
+#define X1_PMU_HDMI_PWR_DOMAIN	7
+#define X1_PMU_DUMMY_PWR_DOMAIN	8
+
+#endif

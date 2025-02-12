@@ -573,6 +573,15 @@ config HW_RANDOM_JH7110
 	  To compile this driver as a module, choose M here.
 	  The module will be called jh7110-trng.
 
+config HW_RANDOM_KY
+	tristate "KY X1 Random Number Generator support"
+	depends on SOC_KY_X1
+	help
+	  This driver provides support for the True Random Number
+	  Generator in Ky X1.
+
+	  To compile this driver as a module, choose M here.
+	  The module will be called ky-crng.
 endif # HW_RANDOM
 
 config UML_RANDOM

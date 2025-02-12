@@ -99,6 +99,7 @@ struct flexcan_priv {
 
 	struct clk *clk_ipg;
 	struct clk *clk_per;
+	struct reset_control *reset;
 	struct flexcan_devtype_data devtype_data;
 	struct regulator *reg_xceiver;
 	struct flexcan_stop_mode stm;

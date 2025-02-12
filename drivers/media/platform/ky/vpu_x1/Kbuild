@@ -1,0 +1,58 @@
+###########################################################
+# Set the include-path according to the defined interface.
+###########################################################
+
+ccflags-y += -I$(srctree)/drivers/media/platform/ky/vpu_x1
+ccflags-y += -I$(srctree)/drivers/media/platform/ky/vpu_x1/if
+ccflags-y += -I$(srctree)/drivers/media/platform/ky/vpu_x1/dev
+ccflags-y += -I$(srctree)/drivers/media/platform/ky/vpu_x1/if/v4l2
+ccflags-y += -I$(srctree)/drivers/media/platform/ky/vpu_x1/external
+
+ccflags-$(CONFIG_VIDEO_LINLON_X1_FTRACE) += -DMVX_LOG_FTRACE_ENABLE
+ccflags-$(CONFIG_VIDEO_LINLON_X1_PRINT_FILE) += -DMVX_LOG_PRINT_FILE_ENABLE
+ccflags-y += $(EXTRA_CCFLAGS)
+
+###########################################################
+# Define build targets and what files to include.
+###########################################################
+
+# Amvx module
+obj-$(CONFIG_VIDEO_LINLON_X1) := amvx.o
+
+# Add objects for if module.
+if-y := if/mvx_if.o \
+	if/mvx_buffer.o \
+	if/mvx_firmware_cache.o \
+	if/mvx_firmware.o \
+	if/mvx_firmware_v2.o \
+	if/mvx_firmware_v3.o \
+	if/mvx_mmu.o \
+	if/mvx_secure.o \
+	if/mvx_session.o
+
+# Add external interface.
+if-y += if/v4l2/mvx_ext_v4l2.o \
+	if/v4l2/mvx_v4l2_buffer.o \
+	if/v4l2/mvx_v4l2_session.o \
+	if/v4l2/mvx_v4l2_vidioc.o \
+	if/v4l2/mvx_v4l2_fops.o \
+	if/v4l2/mvx_v4l2_ctrls.o
+
+# Add objects for dev module.
+dev-y := dev/mvx_dev.o \
+	 dev/mvx_hwreg.o \
+	 dev/mvx_hwreg_v500.o \
+	 dev/mvx_hwreg_v550.o \
+	 dev/mvx_hwreg_v61.o \
+	 dev/mvx_hwreg_v52_v76.o \
+	 dev/mvx_lsid.o \
+	 dev/mvx_scheduler.o \
+	 mvx_pm_runtime.o
+
+# Add driver objects.
+amvx-y := mvx_driver.o \
+	  mvx_seq.o \
+	  mvx_log.o \
+	  mvx_log_group.o \
+          mvx_dvfs.o \
+	  $(if-y) $(dev-y)

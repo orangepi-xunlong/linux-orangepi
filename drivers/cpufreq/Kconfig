@@ -231,7 +231,7 @@ if X86
 source "drivers/cpufreq/Kconfig.x86"
 endif
 
-if ARM || ARM64
+if ARM || ARM64 || RISCV
 source "drivers/cpufreq/Kconfig.arm"
 endif
 
@@ -308,6 +308,15 @@ config QORIQ_CPUFREQ
 	depends on OF && COMMON_CLK
 	depends on PPC_E500MC || SOC_LS1021A || ARCH_LAYERSCAPE || COMPILE_TEST
 	select CLK_QORIQ
+	help
+	  This adds the CPUFreq driver support for Freescale QorIQ SoCs
+	  which are capable of changing the CPU's frequency dynamically.
+
+config KY_X1_CPUFREQ
+	tristate "CPU frequency scaling driver for Ky X1"
+	depends on OF && COMMON_CLK
+	select CPUFREQ_DT
+	select CPUFREQ_DT_PLATDEV
 	help
 	  This adds the CPUFreq driver support for Freescale QorIQ SoCs
 	  which are capable of changing the CPU's frequency dynamically.

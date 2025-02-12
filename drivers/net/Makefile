@@ -52,6 +52,7 @@ ifdef CONFIG_NET_DSA
 obj-y += dsa/
 endif
 obj-$(CONFIG_ETHERNET) += ethernet/
+obj-$(CONFIG_ETHERCAT) += ethercat/
 obj-$(CONFIG_FDDI) += fddi/
 obj-$(CONFIG_HIPPI) += hippi/
 obj-$(CONFIG_HAMRADIO) += hamradio/

@@ -1,0 +1,18 @@
+# SPDX-License-Identifier: GPL-2.0-only
+#
+# Ethercat device configuration
+#
+
+menuconfig ETHERCAT
+	bool "Ethercat native network driver support"
+	depends on NET
+	default y
+	help
+	  This section contains all the Ethercat drivers.
+
+if ETHERCAT
+
+source "drivers/net/ethercat/master/Kconfig"
+source "drivers/net/ethercat/device/Kconfig"
+
+endif # ETHERCAT

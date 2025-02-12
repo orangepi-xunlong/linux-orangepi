@@ -1912,6 +1912,9 @@ static void nvme_update_disk_info(struct gendisk *disk,
 	 * value of the Atomic Write Unit Power Fail parameter.
 	 */
 	blk_queue_physical_block_size(disk->queue, min(phys_bs, atomic_bs));
+#if defined(CONFIG_SOC_KY_X1)
+	blk_queue_max_segment_size(disk->queue, 0x80000);
+#endif
 	blk_queue_io_min(disk->queue, phys_bs);
 	blk_queue_io_opt(disk->queue, io_opt);
 

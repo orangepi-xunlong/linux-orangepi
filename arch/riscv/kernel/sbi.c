@@ -460,6 +460,15 @@ int sbi_remote_hfence_vvma(const struct cpumask *cpu_mask,
 }
 EXPORT_SYMBOL(sbi_remote_hfence_vvma);
 
+#if defined(CONFIG_SOC_KY_X1PRO) || defined(CONFIG_SOC_KY_X1)
+void sbi_flush_local_dcache_all(void)
+{
+	sbi_ecall(SBI_EXT_BASE, SBI_EXT_BASE_FLUSH_CACHE_ALL, 0,
+			0, 0, 0, 0, 0);
+}
+EXPORT_SYMBOL(sbi_flush_local_dcache_all);
+#endif
+
 /**
  * sbi_remote_hfence_vvma_asid() - Execute HFENCE.VVMA instructions on given
  * remote harts for current guest virtual address range belonging to a specific

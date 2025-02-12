@@ -1410,6 +1410,9 @@ static int mmc_sd_init_card(struct mmc_host *host, u32 ocr,
 	u32 rocr = 0;
 	bool v18_fixup_failed = false;
 
+#ifdef CONFIG_SOC_KY_X1
+	u8 tuning_fail = 0;
+#endif
 	WARN_ON(!host->claimed);
 retry:
 	err = mmc_sd_get_cid(host, ocr, cid, &rocr);
@@ -1502,9 +1505,22 @@ retry:
 		goto cont;
 	}
 
+#ifdef CONFIG_SOC_KY_X1
+	if (tuning_fail)
+		card->sw_caps.sd3_bus_mode &= ~SD_MODE_UHS_SDR104;
+#endif
 	/* Initialization sequence for UHS-I cards */
 	if (rocr & SD_ROCR_S18A && mmc_host_uhs(host)) {
 		err = mmc_sd_init_uhs_card(card);
+#ifdef CONFIG_SOC_KY_X1
+		if (err && err == -EIO) {
+			mmc_power_off(host);
+			mmc_delay(1);
+			mmc_power_up(host, host->ocr_avail);
+			tuning_fail = 1;
+			goto retry;
+		}
+#endif
 		if (err)
 			goto free_card;
 	} else {
@@ -1807,8 +1823,23 @@ static int mmc_sd_runtime_resume(struct mmc_host *host)
 
 static int mmc_sd_hw_reset(struct mmc_host *host)
 {
+#ifdef CONFIG_SOC_KY_X1
+	int ret;
+	int sdr104;
+#endif
 	mmc_power_cycle(host, host->card->ocr);
+#ifdef CONFIG_SOC_KY_X1
+	/* if all selected delaycode have crc, reset to DDR50 */
+	sdr104 = host->caps & MMC_CAP_UHS_SDR104;
+	if (sdr104)
+		host->caps &= ~MMC_CAP_UHS_SDR104;
+	ret = mmc_sd_init_card(host, host->card->ocr, host->card);
+	if (sdr104)
+		host->caps |= MMC_CAP_UHS_SDR104;
+	return ret;
+#else
 	return mmc_sd_init_card(host, host->card->ocr, host->card);
+#endif
 }
 
 static const struct mmc_bus_ops mmc_sd_ops = {

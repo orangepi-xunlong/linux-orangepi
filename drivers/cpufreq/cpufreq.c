@@ -2811,11 +2811,31 @@ static int create_boost_sysfs_file(void)
 	return ret;
 }
 
+#ifndef CONFIG_SOC_KY_X1
 static void remove_boost_sysfs_file(void)
 {
 	if (cpufreq_boost_supported())
 		sysfs_remove_file(cpufreq_global_kobject, &boost.attr);
 }
+#else
+void remove_boost_sysfs_file(void)
+{
+	if (cpufreq_boost_supported())
+		sysfs_remove_file(cpufreq_global_kobject, &boost.attr);
+}
+
+void remove_policy_boost_sysfs_file(struct cpufreq_policy *policy)
+{
+	if (cpufreq_driver->attr[CPUFREQ_BOOST_FREQ]) {
+		sysfs_remove_file(&policy->kobj,
+				&((cpufreq_driver->attr[CPUFREQ_BOOST_FREQ])->attr));
+	}
+
+	if (cpufreq_boost_supported()) {
+		sysfs_remove_file(&policy->kobj, &local_boost.attr);
+	}
+}
+#endif
 
 int cpufreq_enable_boost_support(void)
 {

@@ -1,0 +1,7 @@
+# SPDX-License-Identifier: GPL-2.0-only
+
+comment "Ky media platform drivers"
+
+source "drivers/media/platform/ky/vpu_x1/Kconfig"
+source "drivers/media/platform/ky/camera/Kconfig"
+source "drivers/media/platform/ky/virtual_camera/Kconfig"
