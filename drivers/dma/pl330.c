@@ -1737,11 +1737,11 @@ static void dma_pl330_rqcb(struct dma_pl330_desc *desc, enum pl330_op_err err)
 	if (!pch)
 		return;
 
-	spin_lock_irqsave(&pch->lock, flags);
-
-	desc->status = DONE;
-
-	spin_unlock_irqrestore(&pch->lock, flags);
+	if (!desc->cyclic) {
+		spin_lock_irqsave(&pch->lock, flags);
+		desc->status = DONE;
+		spin_unlock_irqrestore(&pch->lock, flags);
+	}
 
 	tasklet_schedule(&pch->task);
 }
@@ -2248,23 +2248,23 @@ static void pl330_tasklet(struct tasklet_struct *t)
 
 	/* Pick up ripe tomatoes */
 	list_for_each_entry_safe(desc, _dt, &pch->work_list, node) {
-		if (desc->status == DONE) {
-			if (!desc->cyclic) {
-				dma_cookie_complete(&desc->txd);
-				list_move_tail(&desc->node, &pch->completed_list);
-			} else {
-				struct dmaengine_desc_callback cb;
 
+		if (desc->cyclic) {
+			if (desc->status == BUSY || desc->status == DONE) {
+				struct dmaengine_desc_callback cb;
 				desc->status = BUSY;
 				dmaengine_desc_get_callback(&desc->txd, &cb);
-
 				if (dmaengine_desc_callback_valid(&cb)) {
 					spin_unlock_irqrestore(&pch->lock, flags);
 					dmaengine_desc_callback_invoke(&cb, NULL);
 					spin_lock_irqsave(&pch->lock, flags);
 				}
 			}
+		} else if (desc->status == DONE) {
+			dma_cookie_complete(&desc->txd);
+			list_move_tail(&desc->node, &pch->completed_list);
 		}
+
 	}
 
 	/* Try to submit a req imm. next to the last completed cookie */
