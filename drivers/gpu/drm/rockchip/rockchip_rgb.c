@@ -8,6 +8,7 @@
 #include <linux/component.h>
 #include <linux/media-bus-format.h>
 #include <linux/of_graph.h>
+#include <linux/pinctrl/consumer.h>
 
 #include <drm/display/drm_dp_helper.h>
 #include <drm/drm_atomic_helper.h>
@@ -167,6 +168,8 @@ struct rockchip_rgb *rockchip_rgb_init(struct device *dev,
 			      "failed to attach encoder: %d\n", ret);
 		goto err_free_connector;
 	}
+
+	pinctrl_pm_select_default_state(dev);
 
 	return rgb;
 
