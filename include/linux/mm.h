@@ -3486,6 +3486,40 @@ static inline int seal_check_future_write(int seals, struct vm_area_struct *vma)
 	return 0;
 }
 
+/**
+ * vm_flags_set - Set specific flags in the vm_flags of a VMA
+ * @vma: the vm_area_struct to modify
+ * @flags: the flags to set
+ *
+ * This function sets the specified flags in the vm_flags field of the given
+ * vm_area_struct. It is used to enable specific behaviors or properties for
+ * the memory region represented by the VMA.
+ *
+ * Example:
+ *   vm_flags_set(vma, VM_SHARED);
+ *   This will enable the VM_SHARED flag in the vma->vm_flags.
+ */
+static inline void vm_flags_set(struct vm_area_struct *vma, vm_flags_t flags){
+	vma->vm_flags |= flags;
+}
+
+/**
+ * vm_flags_clear - Clear specific flags in the vm_flags of a VMA
+ * @vma: the vm_area_struct to modify
+ * @flags: the flags to clear
+ *
+ * This function clears the specified flags in the vm_flags field of the given
+ * vm_area_struct. It is used to disable specific behaviors or properties for
+ * the memory region represented by the VMA.
+ *
+ * Example:
+ *   vm_flags_clear(vma, VM_MAYWRITE);
+ *   This will disable the VM_MAYWRITE flag in the vma->vm_flags.
+ */
+static inline void vm_flags_clear(struct vm_area_struct *vma, vm_flags_t flags) {
+	vma->vm_flags &= ~flags;
+}
+
 #ifdef CONFIG_ANON_VMA_NAME
 int madvise_set_anon_name(struct mm_struct *mm, unsigned long start,
 			  unsigned long len_in,
