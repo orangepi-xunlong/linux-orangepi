@@ -49,6 +49,22 @@
 	status = "okay";
 };
 
+&hdmi0_sound {
+	status = "okay";
+};
+
+&hdmi1_sound {
+	status = "okay";
+};
+
+&i2s5_8ch {
+	status = "okay";
+};
+
+&i2s6_8ch {
+	status = "okay";
+};
+
 &hdmi0_in {
 	hdmi0_in_vp0: endpoint {
 		remote-endpoint = <&vp0_out_hdmi0>;
