@@ -118,10 +118,15 @@ struct sg_table *vpu_heap_map_dma_buf(struct dma_buf_attachment *attachment,
 	struct sg_table *table = a->table;
 	int ret;
 
+#if 0
+	/* The vpu heap used to media protected memory region, so we shouldn't map
+	 * and access it. Keep the code here for debug purpose.
+	 */
 	ret = dma_map_sgtable(attachment->dev, table, direction, 0);
 	if (ret)
 		return ERR_PTR(-ENOMEM);
 	a->mapped = true;
+#endif
 	return a->table;
 }
 
@@ -129,9 +134,11 @@ static void vpu_heap_unmap_dma_buf(struct dma_buf_attachment *attachment,
 				   struct sg_table *table,
 				   enum dma_data_direction direction)
 {
+#if 0
 	struct vpu_heaps_attachment *a = attachment->priv;
 	a->mapped = false;
 	dma_unmap_sgtable(attachment->dev, table, direction, 0);
+#endif
 }
 
 static int vpu_heap_dma_buf_begin_cpu_access(struct dma_buf *dmabuf,
