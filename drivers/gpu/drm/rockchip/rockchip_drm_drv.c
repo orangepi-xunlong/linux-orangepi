@@ -475,7 +475,9 @@ static int rockchip_drm_platform_probe(struct platform_device *pdev)
 		return ret;
 	}
 
-	return 0;
+	ret = dma_coerce_mask_and_coherent(dev, DMA_BIT_MASK(64));
+
+	return ret;
 }
 
 static void rockchip_drm_platform_remove(struct platform_device *pdev)
