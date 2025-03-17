@@ -417,15 +417,28 @@ void dwc3_otg_update(struct dwc3 *dwc, bool ignore_idstatus)
 
 static void dwc3_drd_update(struct dwc3 *dwc)
 {
-	int id;
+	u32 mode = DWC3_GCTL_PRTCAP_DEVICE_DISCONNECTED;
+	int ret;
 
 	if (dwc->edev) {
-		id = extcon_get_state(dwc->edev, EXTCON_USB_HOST);
-		if (id < 0)
-			id = 0;
-		dwc3_set_mode(dwc, id ?
-			      DWC3_GCTL_PRTCAP_HOST :
-			      DWC3_GCTL_PRTCAP_DEVICE);
+		ret = extcon_get_state(dwc->edev, EXTCON_USB_HOST);
+		if (ret > 0)
+			mode = DWC3_GCTL_PRTCAP_HOST;
+
+		if (dwc->usb3_phy_reset_quirk) {
+			/*
+			 * With this quirk enabled, we want to pass 0
+			 * to dwc3_set_mode to signal no USB connection
+			 * state.
+			 */
+			ret = extcon_get_state(dwc->edev, EXTCON_USB);
+			if (ret > 0)
+				mode = DWC3_GCTL_PRTCAP_DEVICE;
+		} else {
+			mode = DWC3_GCTL_PRTCAP_DEVICE;
+		}
+
+		dwc3_set_mode(dwc, mode);
 	}
 }
 
@@ -434,9 +447,7 @@ static int dwc3_drd_notifier(struct notifier_block *nb,
 {
 	struct dwc3 *dwc = container_of(nb, struct dwc3, edev_nb);
 
-	dwc3_set_mode(dwc, event ?
-		      DWC3_GCTL_PRTCAP_HOST :
-		      DWC3_GCTL_PRTCAP_DEVICE);
+	dwc3_drd_update(dwc);
 
 	return NOTIFY_DONE;
 }
@@ -548,8 +559,7 @@ int dwc3_drd_init(struct dwc3 *dwc)
 
 	if (dwc->edev) {
 		dwc->edev_nb.notifier_call = dwc3_drd_notifier;
-		ret = extcon_register_notifier(dwc->edev, EXTCON_USB_HOST,
-					       &dwc->edev_nb);
+		ret = extcon_register_notifier_all(dwc->edev, &dwc->edev_nb);
 		if (ret < 0) {
 			dev_err(dwc->dev, "couldn't register cable notifier\n");
 			return ret;
