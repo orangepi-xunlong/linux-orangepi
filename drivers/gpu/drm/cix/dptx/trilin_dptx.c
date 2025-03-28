@@ -2502,9 +2502,8 @@ static void trilin_dp_display_mst_init(struct trilin_dp *dp)
 
 bool trilin_dp_get_hpd_state(struct trilin_dp *dp)
 {
-	return (trilin_dp_read(dp, TRILIN_DPTX_HPD_INPUT_STATE) & 0x0001ul) ?
-		       true :
-		       false;
+	return (!!(trilin_dp_read(dp, TRILIN_DPTX_HPD_INPUT_STATE) & 0x0001ul) ||
+		(dp->force_hpd == connector_status_connected) ? true : false);
 }
 
 static bool trilin_dp_is_sink_count_zero(struct trilin_dp *dp)
@@ -3191,7 +3190,7 @@ int trilin_dp_probe(struct trilin_dpsub *dpsub, struct drm_device *drm)
 	}
 
 	dp->drm = dpsub->drm; //DP_DEBUG needs dp->drm[0]
-
+	dp->force_hpd = connector_status_unknown;
 	dp->num_lanes = TRILIN_DPTX_MAX_LANES;
 	dp->max_rate = DP_HIGH_BIT_RATE3;
 	dp->max_streams = 2;

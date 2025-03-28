@@ -445,6 +445,7 @@ struct trilin_dp {
 	struct delayed_work hpd_event_work;
 	struct delayed_work hpd_irq_work;
 	enum drm_connector_status status;
+	enum drm_connector_status force_hpd;
 	bool enabled;
 	bool psr_default_on;
 	bool fasttrain_default_on;
