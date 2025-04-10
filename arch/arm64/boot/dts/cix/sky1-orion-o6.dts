@@ -213,6 +213,19 @@
 		off-on-delay-us = <15000>;
 	};
 
+	ssd_3v3_pcie: regulator-ssd-3v3-pcie {
+		compatible = "regulator-fixed";
+		regulator-name = "ssd_3v3_pcie";
+		pinctrl-names = "default";
+		pinctrl-0 = <&ssd_pwren_gpio>;
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		gpio = <&s5_gpio0 11 GPIO_ACTIVE_HIGH>;
+		regulator-pull-down;
+		enable-active-high;
+		off-on-delay-us = <15000>;
+	};
+
 	vdd_3v3_pcie: regulator-vdd-3v3-pcie {
 		compatible = "regulator-fixed";
 		regulator-name = "vdd_3v3_pcie";
@@ -316,9 +329,15 @@
 		>;
 	};
 
-	wifi_vbat_gpio: wifi_vbat_gpio {
+	ssd_pwren_gpio: ssd_pwren_gpio {
 		sky1,pins = <
 			CIX_PAD_GPIO012_FUNC_GPIO012  (PULL_UP|DS_LEVEL4) /* GPIO0-12 */
+		>;
+	};
+
+	wifi_vbat_gpio: wifi_vbat_gpio {
+		sky1,pins = <
+			CIX_PAD_GPIO013_FUNC_GPIO013  (PULL_UP|DS_LEVEL4) /* GPIO0-13 */
 		>;
 	};
 
@@ -510,7 +529,7 @@
 
 	gbe1_poweren_gpio: gbe1_poweren_gpio {
 		sky1,pins = <
-			CIX_PAD_GPIO022_FUNC_GPIO022 (PULL_UP|ST|DS_LEVEL7) /* GPIO022 - S5_gpio2 7 */
+			CIX_PAD_GPIO022_FUNC_SFI_GPIO7 (PULL_UP|ST|DS_LEVEL7) /* GPIO022 - S5_gpio2 7 */
 		>;
 	};
 
@@ -2090,6 +2109,7 @@
 	pinctrl-names = "default";
 	pinctrl-0 = <&pinctrl_pcie_x4_rc>;
 	reset-gpios = <&s5_gpio0 3 GPIO_ACTIVE_HIGH>;
+	vcc-pcie-supply = <&ssd_3v3_pcie>;
 	status = "okay";
 };
 
