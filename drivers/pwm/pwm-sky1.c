@@ -285,10 +285,6 @@ static int pwm_sky1_probe(struct platform_device *pdev)
 	if (screen_info.lfb_linelength && (pwmcr & (PWM_MODE|ENABLE|ENPWM)))
 		return pwmchip_add(&sky1->chip); /* already init in uefi */
 
-	/* reset pwm */
-	if (!screen_info.lfb_linelength)
-		reset_control_reset(sky1->func_reset);
-
 	/* Configure timer to pwm module */
 	writel(PWM_MODE, sky1->mmio_base + TCTL);
 
