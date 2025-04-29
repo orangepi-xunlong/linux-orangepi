@@ -111,7 +111,7 @@ static int sun50i_cpufreq_get_efuse(const struct sunxi_cpufreq_soc_data *soc_dat
 static int sun50i_cpufreq_nvmem_probe(struct platform_device *pdev)
 {
 	const struct of_device_id *match;
-	struct opp_table **opp_tables;
+	int *opp_tables;
 	char name[MAX_NAME_LEN];
 	unsigned int cpu;
 	u32 speed = 0;
