@@ -91,9 +91,9 @@ static int phy_yt8531_led_fixup(struct mii_bus *bus, int addr)
 {
         //printk("%s in\n", __func__);
 
-        ytphy_mii_wr_ext(bus, addr, 0xa00d, 0x670);
+        ytphy_mii_wr_ext(bus, addr, 0xa00d, 0x2600);
         ytphy_mii_wr_ext(bus, addr, 0xa00e, 0x2070);
-        ytphy_mii_wr_ext(bus, addr, 0xa00f, 0x7e);
+        ytphy_mii_wr_ext(bus, addr, 0xa00f, 0x0a);
 
         return 0;
 }

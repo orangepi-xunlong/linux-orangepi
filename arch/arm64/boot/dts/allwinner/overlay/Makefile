@@ -26,9 +26,28 @@ dtbo-$(CONFIG_ARCH_SUNXI) += \
 	sun55i-t527-pwm6.dtbo \
 	sun55i-t527-pwm7.dtbo \
 	sun55i-t527-pwm8.dtbo \
-	sun55i-t527-pwm9.dtbo
-
-
+	sun55i-t527-pwm9.dtbo \
+	sun60i-t736-lcd.dtbo \
+	sun60i-t736-spi4-spidev.dtbo  \
+	sun60i-t736-uart5.dtbo \
+	sun60i-t736-i2c3.dtbo \
+	sun60i-t736-pwm1.dtbo \
+        sun60i-a733-i2c0.dtbo \
+        sun60i-a733-i2c1.dtbo \
+        sun60i-a733-i2c2.dtbo \
+        sun60i-a733-i2c3.dtbo \
+        sun60i-a733-lcd.dtbo \
+        sun60i-a733-pwm0.dtbo \
+        sun60i-a733-pwm2.dtbo \
+        sun60i-a733-pwm3.dtbo \
+        sun60i-a733-pwm4.dtbo \
+        sun60i-a733-pwm5.dtbo \
+        sun60i-a733-pwm6.dtbo \
+        sun60i-a733-pwm7.dtbo \
+        sun60i-a733-spi3-cs0-cs1-spidev.dtbo \
+        sun60i-a733-spwm2.dtbo \
+        sun60i-a733-uart7.dtbo \
+        sun60i-a733-uart8.dtbo \
 
 scr-$(CONFIG_ARCH_SUNXI) += \
 	sun55i-t527-fixup.scr
