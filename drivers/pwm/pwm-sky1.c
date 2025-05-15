@@ -74,11 +74,6 @@ static int pwm_sky1_get_state(struct pwm_chip *chip,
 	struct pwm_sky1_chip *sky1 = to_pwm_sky1_chip(chip);
 	u32 val, period;
 	u64 tmp, clkrate;
-	int ret;
-
-	ret = pwm_sky1_clk_prepare_enable(sky1);
-	if (ret < 0)
-		return ret;
 
 	val = readl(sky1->mmio_base + TCTL);
 
@@ -96,8 +91,6 @@ static int pwm_sky1_get_state(struct pwm_chip *chip,
 	tmp = NSEC_PER_SEC * (u64)val;
 	state->duty_cycle = DIV_ROUND_UP_ULL(tmp, clkrate);
 
-	pwm_sky1_clk_disable_unprepare(sky1);
-
 	return 0;
 }
 
@@ -108,12 +101,8 @@ static int pwm_sky1_apply(struct pwm_chip *chip, struct pwm_device *pwm,
 	struct pwm_sky1_chip *sky1 = to_pwm_sky1_chip(chip);
 	struct pwm_state cstate;
 	u32 cr;
-	int ret;
-	pwm_get_state(pwm, &cstate);
 
-	ret = pwm_sky1_clk_prepare_enable(sky1);
-	if (ret)
-		return ret;
+	pwm_get_state(pwm, &cstate);
 
 	cr = readl(sky1->mmio_base + TCTL);
 	/* Confirm configure timer to pwm module */
@@ -141,7 +130,6 @@ static int pwm_sky1_apply(struct pwm_chip *chip, struct pwm_device *pwm,
 		/* disable pwm for configure */
 		cr &= ~(ENPWM|ENABLE);
 		writel(cr, sky1->mmio_base + TCTL);
-		pwm_sky1_clk_disable_unprepare(sky1);
 	}
 
 	return 0;
@@ -287,10 +275,6 @@ static int pwm_sky1_probe(struct platform_device *pdev)
 
 	/* Configure timer to pwm module */
 	writel(PWM_MODE, sky1->mmio_base + TCTL);
-
-	/* keep clks on if pwm is running */
-	if (!(pwmcr & (ENABLE|ENPWM)))
-		pwm_sky1_clk_disable_unprepare(sky1);
 
 	return pwmchip_add(&sky1->chip);
 
