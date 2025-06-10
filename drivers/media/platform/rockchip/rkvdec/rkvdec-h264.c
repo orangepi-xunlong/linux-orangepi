@@ -16,8 +16,6 @@
 #include "rkvdec-regs.h"
 #include "rkvdec-h264-common.h"
 
-extern const s8 rkvdec_h264_cabac_table[4][464][2];
-
 /* Size with u32 units. */
 #define RKV_CABAC_INIT_BUFFER_SIZE	(3680 + 128)
 #define RKV_ERROR_INFO_SIZE		(256 * 144 * 4)

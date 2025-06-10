@@ -29,6 +29,7 @@
 
 #include "rkvdec.h"
 #include "rkvdec-regs.h"
+#include "rkvdec-vdpu381-regs.h"
 #include "rkvdec-rcb.h"
 
 static bool rkvdec_image_fmt_match(enum rkvdec_image_fmt fmt1,
@@ -85,11 +86,50 @@ static bool rkvdec_is_valid_fmt(struct rkvdec_ctx *ctx, u32 fourcc,
 	return false;
 }
 
+#define VDPU38X_STRIDE_ALIGN	16
+
+/**
+ * The default v4l2_fill_pixfmt_mp() function doesn't allow for specific alignment values.
+ * As the VDPU381 and VDPU383 need lines to be aligned on 16, use our own implementation here.
+ */
+static int vdpu38x_fill_pixfmt_mp(struct v4l2_pix_format_mplane *pix_mp, u32 pixelformat,
+				  u32 width, u32 height)
+{
+	const struct v4l2_format_info *info = v4l2_format_info(pix_mp->pixelformat);
+	struct v4l2_plane_pix_format *plane = &pix_mp->plane_fmt[0];
+
+	if (!info)
+		return -EINVAL;
+
+	pix_mp->num_planes = 1;
+
+	memset(plane, 0, sizeof(*plane));
+
+	plane->bytesperline = pix_mp->width * info->bpp[0] / info->bpp_div[0];
+	plane->bytesperline = ALIGN(plane->bytesperline, VDPU38X_STRIDE_ALIGN);
+
+	for (int i = 0; i < info->comp_planes; i++) {
+		unsigned int vdiv = i ? info->vdiv : 1;
+		unsigned int hdiv = i ? info->hdiv : 1;
+		unsigned int stride = DIV_ROUND_UP(pix_mp->width, hdiv)
+				    * info->bpp[i] / info->bpp_div[i];
+		unsigned int height = DIV_ROUND_UP(pix_mp->height, vdiv);
+
+		plane->sizeimage += ALIGN(stride, VDPU38X_STRIDE_ALIGN) * height;
+	}
+
+	return 0;
+}
+
 static void rkvdec_fill_decoded_pixfmt(struct rkvdec_ctx *ctx,
 				       struct v4l2_pix_format_mplane *pix_mp)
 {
-	v4l2_fill_pixfmt_mp(pix_mp, pix_mp->pixelformat,
-			    pix_mp->width, pix_mp->height);
+	const struct rkvdec_config *cfg = ctx->dev->config;
+
+	cfg->fill_pixfmt_mp(pix_mp, pix_mp->pixelformat, pix_mp->width, pix_mp->height);
+
+	ctx->colmv_offset = pix_mp->plane_fmt[0].sizeimage;
+
 	pix_mp->plane_fmt[0].sizeimage += 128 *
 		DIV_ROUND_UP(pix_mp->width, 16) *
 		DIV_ROUND_UP(pix_mp->height, 16);
@@ -365,6 +405,26 @@ static const struct rkvdec_coded_fmt_desc rkvdec_coded_fmts[] = {
 		.decoded_fmts = rkvdec_vp9_decoded_fmts,
 		.capability = RKVDEC_CAPABILITY_VP9,
 	}
+};
+
+static const struct rkvdec_coded_fmt_desc vdpu381_coded_fmts[] = {
+	{
+		.fourcc = V4L2_PIX_FMT_H264_SLICE,
+		.frmsize = {
+			.min_width = 64,
+			.max_width =  65520,
+			.step_width = 64,
+			.min_height = 16,
+			.max_height =  65520,
+			.step_height = 16,
+		},
+		.ctrls = &rkvdec_h264_ctrls,
+		.ops = &rkvdec_vdpu381_h264_fmt_ops,
+		.num_decoded_fmts = ARRAY_SIZE(rkvdec_h264_decoded_fmts),
+		.decoded_fmts = rkvdec_h264_decoded_fmts,
+		.subsystem_flags = VB2_V4L2_FL_SUPPORTS_M2M_HOLD_CAPTURE_BUF,
+		.capability = RKVDEC_CAPABILITY_H264,
+	},
 };
 
 static bool rkvdec_is_capable(struct rkvdec_ctx *ctx, unsigned int capability)
@@ -1228,6 +1288,35 @@ static irqreturn_t rk3399_irq_handler(struct rkvdec_ctx *ctx)
 	return IRQ_HANDLED;
 }
 
+static irqreturn_t vdpu381_irq_handler(struct rkvdec_ctx *ctx)
+{
+	struct rkvdec_dev *rkvdec = ctx->dev;
+	enum vb2_buffer_state state;
+	bool need_reset = 0;
+	u32 status;
+
+	status = readl(rkvdec->regs + VDPU381_REG_STA_INT);
+	writel(0, rkvdec->regs + VDPU381_REG_STA_INT);
+
+	if (status & VDPU381_STA_INT_DEC_RDY_STA) {
+		state = VB2_BUF_STATE_DONE;
+	} else {
+		state = VB2_BUF_STATE_ERROR;
+		if (status & (VDPU381_STA_INT_SOFTRESET_RDY |
+			      VDPU381_STA_INT_TIMEOUT |
+			      VDPU381_STA_INT_ERROR))
+			rkvdec_iommu_restore(rkvdec);
+	}
+
+	if (need_reset)
+		rkvdec_iommu_restore(rkvdec);
+
+	if (cancel_delayed_work(&rkvdec->watchdog_work))
+		rkvdec_job_finish(ctx, state);
+
+	return IRQ_HANDLED;
+}
+
 static irqreturn_t rkvdec_irq_handler(int irq, void *priv)
 {
 	struct rkvdec_dev *rkvdec = priv;
@@ -1252,10 +1341,76 @@ static void rkvdec_watchdog_func(struct work_struct *work)
 	}
 }
 
+/*
+ * Some SoCs, like RK3588 have multiple identical VDPU cores, but the
+ * kernel is currently missing support for multi-core handling. Exposing
+ * separate devices for each core to userspace is bad, since that does
+ * not allow scheduling tasks properly (and creates ABI). With this workaround
+ * the driver will only probe for the first core and early exit for the other
+ * cores. Once the driver gains multi-core support, the same technique
+ * for detecting the first core can be used to cluster all cores together.
+ */
+static int rkvdec_disable_multicore(struct rkvdec_dev *rkvdec)
+{
+	struct device_node *node = NULL;
+	const char *compatible;
+	bool is_first_core;
+	int ret;
+
+	/* Intentionally ignores the fallback strings */
+	ret = of_property_read_string(rkvdec->dev->of_node, "compatible", &compatible);
+	if (ret)
+		return ret;
+
+	/* The first compatible and available node found is considered the main core */
+	do {
+		node = of_find_compatible_node(node, NULL, compatible);
+		if (of_device_is_available(node))
+			break;
+	} while (node);
+
+	if (!node)
+		return -EINVAL;
+
+	is_first_core = (rkvdec->dev->of_node == node);
+
+	of_node_put(node);
+
+	if (!is_first_core) {
+		dev_info(rkvdec->dev, "missing multi-core support, ignoring this instance\n");
+		return -ENODEV;
+	}
+
+	return 0;
+}
+
 static const struct rkvdec_config config_rkvdec = {
 	.coded_fmts = (struct rkvdec_coded_fmt_desc *)rkvdec_coded_fmts,
 	.coded_fmts_num = ARRAY_SIZE(rkvdec_coded_fmts),
 	.irq_handler = rk3399_irq_handler,
+	.fill_pixfmt_mp = v4l2_fill_pixfmt_mp,
+};
+
+static struct rcb_size_info vdpu381_rcb_sizes[] = {
+	{6,	PIC_WIDTH},	// intrar
+	{1,	PIC_WIDTH},	// transdr (Is actually 0.4*pic_width)
+	{1,	PIC_HEIGHT},	// transdc (Is actually 0.1*pic_height)
+	{3,	PIC_WIDTH},	// streamdr
+	{6,	PIC_WIDTH},	// interr
+	{3,	PIC_HEIGHT},	// interc
+	{22,	PIC_WIDTH},	// dblkr
+	{6,	PIC_WIDTH},	// saor
+	{11,	PIC_WIDTH},	// fbcr
+	{67,	PIC_HEIGHT},	// filtc col
+};
+
+static const struct rkvdec_config config_vdpu381 = {
+	.coded_fmts = (struct rkvdec_coded_fmt_desc *)vdpu381_coded_fmts,
+	.coded_fmts_num = ARRAY_SIZE(vdpu381_coded_fmts),
+	.rcb_size_info = vdpu381_rcb_sizes,
+	.rcb_num = ARRAY_SIZE(vdpu381_rcb_sizes),
+	.irq_handler = vdpu381_irq_handler,
+	.fill_pixfmt_mp = vdpu38x_fill_pixfmt_mp,
 };
 
 static const struct rkvdec_variant rk3288_rkvdec_variant = {
@@ -1278,6 +1433,11 @@ static const struct rkvdec_variant rk3399_rkvdec_variant = {
 			RKVDEC_CAPABILITY_VP9,
 };
 
+static const struct rkvdec_variant rk3588_vdpu381_variant = {
+	.config = &config_vdpu381,
+	.capabilities = RKVDEC_CAPABILITY_H264,
+};
+
 static const struct of_device_id of_rkvdec_match[] = {
 	{
 		.compatible = "rockchip,rk3288-vdec",
@@ -1290,6 +1450,10 @@ static const struct of_device_id of_rkvdec_match[] = {
 	{
 		.compatible = "rockchip,rk3399-vdec",
 		.data = &rk3399_rkvdec_variant,
+	},
+	{
+		.compatible = "rockchip,rk3588-vdec",
+		.data = &rk3588_vdpu381_variant,
 	},
 	{ /* sentinel */ }
 };
@@ -1317,11 +1481,16 @@ static int rkvdec_probe(struct platform_device *pdev)
 	mutex_init(&rkvdec->vdev_lock);
 	INIT_DELAYED_WORK(&rkvdec->watchdog_work, rkvdec_watchdog_func);
 
+	ret = rkvdec_disable_multicore(rkvdec);
+	if (ret)
+		return ret;
+
 	ret = devm_clk_bulk_get_all_enabled(&pdev->dev, &rkvdec->clocks);
 	if (ret < 0)
 		return ret;
 
 	rkvdec->clk_count = ret;
+	rkvdec->axi_clk = devm_clk_get(&pdev->dev, "axi");
 
 	rkvdec->regs = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(rkvdec->regs))

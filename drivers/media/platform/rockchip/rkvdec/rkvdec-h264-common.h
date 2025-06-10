@@ -66,6 +66,8 @@ struct rkvdec_rps {
 	u32 reserved1[66];
 } __packed;
 
+extern const s8 rkvdec_h264_cabac_table[4][464][2];
+
 void lookup_ref_buf_idx(struct rkvdec_ctx *ctx, struct rkvdec_h264_run *run);
 void assemble_hw_rps(struct v4l2_h264_reflist_builder *builder,
 		     struct rkvdec_h264_run *run,
