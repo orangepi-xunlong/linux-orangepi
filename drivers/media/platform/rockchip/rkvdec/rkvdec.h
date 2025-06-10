@@ -123,6 +123,8 @@ struct rkvdec_config {
 	irqreturn_t (*irq_handler)(struct rkvdec_ctx *ctx);
 	int (*fill_pixfmt_mp)(struct v4l2_pix_format_mplane *pix_mp, u32 pixelformat,
 			      u32 width, u32 height);
+	u32 (*colmv_size)(u16 width, u16 height);
+	bool named_regs;
 };
 
 struct rkvdec_dev {
@@ -135,6 +137,7 @@ struct rkvdec_dev {
 	unsigned int clk_count;
 	struct clk *axi_clk;
 	void __iomem *regs;
+	void __iomem *link;
 	struct mutex vdev_lock; /* serializes ioctls */
 	struct delayed_work watchdog_work;
 	struct gen_pool *sram_pool;
@@ -179,10 +182,16 @@ void rkvdec_run_preamble(struct rkvdec_ctx *ctx, struct rkvdec_run *run);
 void rkvdec_run_postamble(struct rkvdec_ctx *ctx, struct rkvdec_run *run);
 void rkvdec_memcpy_toio(void __iomem *dst, void *src, size_t len);
 
+/* RKVDEC ops */
 extern const struct rkvdec_coded_fmt_ops rkvdec_h264_fmt_ops;
 extern const struct rkvdec_coded_fmt_ops rkvdec_hevc_fmt_ops;
 extern const struct rkvdec_coded_fmt_ops rkvdec_vp9_fmt_ops;
 
+/* VDPU381 ops */
 extern const struct rkvdec_coded_fmt_ops rkvdec_vdpu381_h264_fmt_ops;
+extern const struct rkvdec_coded_fmt_ops rkvdec_vdpu381_hevc_fmt_ops;
+
+/* VDPU383 ops */
+extern const struct rkvdec_coded_fmt_ops rkvdec_vdpu383_h264_fmt_ops;
 
 #endif /* RKVDEC_H_ */

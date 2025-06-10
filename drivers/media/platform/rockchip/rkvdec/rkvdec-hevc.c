@@ -25,9 +25,6 @@
 #define RKV_RPS_SIZE			(32 / 4)
 #define RKV_RPS_LEN			600
 
-#define RKV_HEVC_CABAC_TABLE_SIZE		27456
-extern const u8 rkvdec_hevc_cabac_table[RKV_HEVC_CABAC_TABLE_SIZE];
-
 struct rkvdec_sps_pps_packet {
 	u32 info[RKV_PPS_SIZE];
 };
@@ -550,7 +547,7 @@ static int rkvdec_hevc_run(struct rkvdec_ctx *ctx)
 
 	rkvdec_hevc_run_preamble(ctx, &run);
 
-	rkvdec_hevc_assemble_hw_scaling_list(&run, &tbl->scaling_list,
+	rkvdec_hevc_assemble_hw_scaling_list(rkvdec, &run, &tbl->scaling_list,
 					     &hevc_ctx->scaling_matrix_cache);
 	assemble_hw_pps(ctx, &run);
 	assemble_hw_rps(ctx, &run);

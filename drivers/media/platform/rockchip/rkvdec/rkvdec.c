@@ -9,6 +9,7 @@
  * Copyright (C) 2011 Samsung Electronics Co., Ltd.
  */
 
+#include <linux/hw_bitfield.h>
 #include <linux/clk.h>
 #include <linux/genalloc.h>
 #include <linux/interrupt.h>
@@ -30,6 +31,7 @@
 #include "rkvdec.h"
 #include "rkvdec-regs.h"
 #include "rkvdec-vdpu381-regs.h"
+#include "rkvdec-vdpu383-regs.h"
 #include "rkvdec-rcb.h"
 
 static bool rkvdec_image_fmt_match(enum rkvdec_image_fmt fmt1,
@@ -121,6 +123,16 @@ static int vdpu38x_fill_pixfmt_mp(struct v4l2_pix_format_mplane *pix_mp, u32 pix
 	return 0;
 }
 
+static u32 rkvdec_colmv_size(u16 width, u16 height)
+{
+	return 128 * DIV_ROUND_UP(width, 16) * DIV_ROUND_UP(height, 16);
+}
+
+static u32 rkvdec_vdpu383_colmv_size(u16 width, u16 height)
+{
+	return ALIGN(width, 64) * ALIGN(height, 16);
+}
+
 static void rkvdec_fill_decoded_pixfmt(struct rkvdec_ctx *ctx,
 				       struct v4l2_pix_format_mplane *pix_mp)
 {
@@ -130,9 +142,7 @@ static void rkvdec_fill_decoded_pixfmt(struct rkvdec_ctx *ctx,
 
 	ctx->colmv_offset = pix_mp->plane_fmt[0].sizeimage;
 
-	pix_mp->plane_fmt[0].sizeimage += 128 *
-		DIV_ROUND_UP(pix_mp->width, 16) *
-		DIV_ROUND_UP(pix_mp->height, 16);
+	pix_mp->plane_fmt[0].sizeimage += cfg->colmv_size(pix_mp->width, pix_mp->height);
 }
 
 static void rkvdec_reset_fmt(struct rkvdec_ctx *ctx, struct v4l2_format *f,
@@ -251,17 +261,6 @@ static const struct rkvdec_ctrls rkvdec_hevc_ctrls = {
 	.num_ctrls = ARRAY_SIZE(rkvdec_hevc_ctrl_descs),
 };
 
-static const struct rkvdec_decoded_fmt_desc rkvdec_hevc_decoded_fmts[] = {
-	{
-		.fourcc = V4L2_PIX_FMT_NV12,
-		.image_fmt = RKVDEC_IMG_FMT_420_8BIT,
-	},
-	{
-		.fourcc = V4L2_PIX_FMT_NV15,
-		.image_fmt = RKVDEC_IMG_FMT_420_10BIT,
-	},
-};
-
 static const struct rkvdec_ctrl_desc rkvdec_h264_ctrl_descs[] = {
 	{
 		.cfg.id = V4L2_CID_STATELESS_H264_DECODE_PARAMS,
@@ -309,6 +308,60 @@ static const struct rkvdec_ctrls rkvdec_h264_ctrls = {
 	.num_ctrls = ARRAY_SIZE(rkvdec_h264_ctrl_descs),
 };
 
+static const struct rkvdec_ctrl_desc vdpu38x_hevc_ctrl_descs[] = {
+	{
+		.cfg.id = V4L2_CID_STATELESS_HEVC_DECODE_PARAMS,
+	},
+	{
+		.cfg.id = V4L2_CID_STATELESS_HEVC_SPS,
+		.cfg.ops = &rkvdec_ctrl_ops,
+	},
+	{
+		.cfg.id = V4L2_CID_STATELESS_HEVC_PPS,
+	},
+	{
+		.cfg.id = V4L2_CID_STATELESS_HEVC_SCALING_MATRIX,
+	},
+	{
+		.cfg.id = V4L2_CID_STATELESS_HEVC_DECODE_MODE,
+		.cfg.min = V4L2_STATELESS_HEVC_DECODE_MODE_FRAME_BASED,
+		.cfg.max = V4L2_STATELESS_HEVC_DECODE_MODE_FRAME_BASED,
+		.cfg.def = V4L2_STATELESS_HEVC_DECODE_MODE_FRAME_BASED,
+	},
+	{
+		.cfg.id = V4L2_CID_STATELESS_HEVC_START_CODE,
+		.cfg.min = V4L2_STATELESS_HEVC_START_CODE_ANNEX_B,
+		.cfg.def = V4L2_STATELESS_HEVC_START_CODE_ANNEX_B,
+		.cfg.max = V4L2_STATELESS_HEVC_START_CODE_ANNEX_B,
+	},
+	{
+		.cfg.id = V4L2_CID_MPEG_VIDEO_HEVC_PROFILE,
+		.cfg.min = V4L2_MPEG_VIDEO_HEVC_PROFILE_MAIN,
+		.cfg.max = V4L2_MPEG_VIDEO_HEVC_PROFILE_MAIN_10,
+		.cfg.menu_skip_mask =
+			BIT(V4L2_MPEG_VIDEO_HEVC_PROFILE_MAIN_STILL_PICTURE),
+		.cfg.def = V4L2_MPEG_VIDEO_HEVC_PROFILE_MAIN,
+	},
+	{
+		.cfg.id = V4L2_CID_MPEG_VIDEO_HEVC_LEVEL,
+		.cfg.min = V4L2_MPEG_VIDEO_HEVC_LEVEL_1,
+		.cfg.max = V4L2_MPEG_VIDEO_HEVC_LEVEL_6_1,
+	},
+	{
+		.cfg.id = V4L2_CID_STATELESS_HEVC_EXT_SPS_ST_RPS,
+		.cfg.dims = { 65 },
+	},
+	{
+		.cfg.id = V4L2_CID_STATELESS_HEVC_EXT_SPS_LT_RPS,
+		.cfg.dims = { 65 },
+	},
+};
+
+static const struct rkvdec_ctrls vdpu38x_hevc_ctrls = {
+	.ctrls = vdpu38x_hevc_ctrl_descs,
+	.num_ctrls = ARRAY_SIZE(vdpu38x_hevc_ctrl_descs),
+};
+
 static const struct rkvdec_decoded_fmt_desc rkvdec_h264_decoded_fmts[] = {
 	{
 		.fourcc = V4L2_PIX_FMT_NV12,
@@ -325,6 +378,17 @@ static const struct rkvdec_decoded_fmt_desc rkvdec_h264_decoded_fmts[] = {
 	{
 		.fourcc = V4L2_PIX_FMT_NV20,
 		.image_fmt = RKVDEC_IMG_FMT_422_10BIT,
+	},
+};
+
+static const struct rkvdec_decoded_fmt_desc rkvdec_hevc_decoded_fmts[] = {
+	{
+		.fourcc = V4L2_PIX_FMT_NV12,
+		.image_fmt = RKVDEC_IMG_FMT_420_8BIT,
+	},
+	{
+		.fourcc = V4L2_PIX_FMT_NV15,
+		.image_fmt = RKVDEC_IMG_FMT_420_10BIT,
 	},
 };
 
@@ -420,6 +484,43 @@ static const struct rkvdec_coded_fmt_desc vdpu381_coded_fmts[] = {
 		},
 		.ctrls = &rkvdec_h264_ctrls,
 		.ops = &rkvdec_vdpu381_h264_fmt_ops,
+		.num_decoded_fmts = ARRAY_SIZE(rkvdec_h264_decoded_fmts),
+		.decoded_fmts = rkvdec_h264_decoded_fmts,
+		.subsystem_flags = VB2_V4L2_FL_SUPPORTS_M2M_HOLD_CAPTURE_BUF,
+		.capability = RKVDEC_CAPABILITY_H264,
+	},
+	{
+		.fourcc = V4L2_PIX_FMT_HEVC_SLICE,
+		.frmsize = {
+			.min_width = 16,
+			.max_width = 65472,
+			.step_width = 16,
+			.min_height = 16,
+			.max_height = 65472,
+			.step_height = 16,
+		},
+		.ctrls = &vdpu38x_hevc_ctrls,
+		.ops = &rkvdec_vdpu381_hevc_fmt_ops,
+		.num_decoded_fmts = ARRAY_SIZE(rkvdec_hevc_decoded_fmts),
+		.decoded_fmts = rkvdec_hevc_decoded_fmts,
+		.subsystem_flags = VB2_V4L2_FL_SUPPORTS_M2M_HOLD_CAPTURE_BUF,
+		.capability = RKVDEC_CAPABILITY_HEVC,
+	},
+};
+
+static const struct rkvdec_coded_fmt_desc vdpu383_coded_fmts[] = {
+	{
+		.fourcc = V4L2_PIX_FMT_H264_SLICE,
+		.frmsize = {
+			.min_width = 64,
+			.max_width =  65520,
+			.step_width = 64,
+			.min_height = 16,
+			.max_height =  65520,
+			.step_height = 16,
+		},
+		.ctrls = &rkvdec_h264_ctrls,
+		.ops = &rkvdec_vdpu383_h264_fmt_ops,
 		.num_decoded_fmts = ARRAY_SIZE(rkvdec_h264_decoded_fmts),
 		.decoded_fmts = rkvdec_h264_decoded_fmts,
 		.subsystem_flags = VB2_V4L2_FL_SUPPORTS_M2M_HOLD_CAPTURE_BUF,
@@ -1317,6 +1418,35 @@ static irqreturn_t vdpu381_irq_handler(struct rkvdec_ctx *ctx)
 	return IRQ_HANDLED;
 }
 
+static irqreturn_t vdpu383_irq_handler(struct rkvdec_ctx *ctx)
+{
+	struct rkvdec_dev *rkvdec = ctx->dev;
+	enum vb2_buffer_state state;
+	bool need_reset = 0;
+	u32 status;
+
+	status = readl(rkvdec->link + VDPU383_LINK_STA_INT);
+	writel(FIELD_PREP_WM16(VDPU383_STA_INT_ALL, 0), rkvdec->link + VDPU383_LINK_STA_INT);
+	/* On vdpu383, the interrupts must be disabled */
+	writel(FIELD_PREP_WM16(VDPU383_INT_EN_IRQ | VDPU383_INT_EN_LINE_IRQ, 0),
+	       rkvdec->link + VDPU383_LINK_INT_EN);
+
+	if (status & VDPU383_STA_INT_DEC_RDY_STA) {
+		state = VB2_BUF_STATE_DONE;
+	} else {
+		state = VB2_BUF_STATE_ERROR;
+		rkvdec_iommu_restore(rkvdec);
+	}
+
+	if (need_reset)
+		rkvdec_iommu_restore(rkvdec);
+
+	if (cancel_delayed_work(&rkvdec->watchdog_work))
+		rkvdec_job_finish(ctx, state);
+
+	return IRQ_HANDLED;
+}
+
 static irqreturn_t rkvdec_irq_handler(int irq, void *priv)
 {
 	struct rkvdec_dev *rkvdec = priv;
@@ -1389,6 +1519,7 @@ static const struct rkvdec_config config_rkvdec = {
 	.coded_fmts_num = ARRAY_SIZE(rkvdec_coded_fmts),
 	.irq_handler = rk3399_irq_handler,
 	.fill_pixfmt_mp = v4l2_fill_pixfmt_mp,
+	.colmv_size = rkvdec_colmv_size,
 };
 
 static struct rcb_size_info vdpu381_rcb_sizes[] = {
@@ -1411,6 +1542,33 @@ static const struct rkvdec_config config_vdpu381 = {
 	.rcb_num = ARRAY_SIZE(vdpu381_rcb_sizes),
 	.irq_handler = vdpu381_irq_handler,
 	.fill_pixfmt_mp = vdpu38x_fill_pixfmt_mp,
+	.colmv_size = rkvdec_colmv_size,
+	.named_regs = true,
+};
+
+static struct rcb_size_info vdpu383_rcb_sizes[] = {
+	{6,	PIC_WIDTH},	// streamd
+	{6,	PIC_WIDTH},	// streamd_tile
+	{12,	PIC_WIDTH},	// inter
+	{12,	PIC_WIDTH},	// inter_tile
+	{16,	PIC_WIDTH},	// intra
+	{10,	PIC_WIDTH},	// intra_tile
+	{120,	PIC_WIDTH},	// filterd
+	{120,	PIC_WIDTH},	// filterd_protect
+	{120,	PIC_WIDTH},	// filterd_tile_row
+	{180,	PIC_HEIGHT},	// filterd_tile_col
+};
+
+const struct rkvdec_config config_vdpu383 = {
+	.coded_fmts = (struct rkvdec_coded_fmt_desc *)vdpu383_coded_fmts,
+	.coded_fmts_num = ARRAY_SIZE(vdpu383_coded_fmts),
+	.rcb_size_info = vdpu383_rcb_sizes,
+	.rcb_num = ARRAY_SIZE(vdpu383_rcb_sizes),
+	.irq_handler = vdpu383_irq_handler,
+	.fill_pixfmt_mp = vdpu38x_fill_pixfmt_mp,
+	.colmv_size = rkvdec_vdpu383_colmv_size,
+	.fill_pixfmt_mp = vdpu38x_fill_pixfmt_mp,
+	.named_regs = true,
 };
 
 static const struct rkvdec_variant rk3288_rkvdec_variant = {
@@ -1435,6 +1593,12 @@ static const struct rkvdec_variant rk3399_rkvdec_variant = {
 
 static const struct rkvdec_variant rk3588_vdpu381_variant = {
 	.config = &config_vdpu381,
+	.capabilities = RKVDEC_CAPABILITY_H264 |
+			RKVDEC_CAPABILITY_HEVC,
+};
+
+static const struct rkvdec_variant rk3576_vdpu383_variant = {
+	.config = &config_vdpu383,
 	.capabilities = RKVDEC_CAPABILITY_H264,
 };
 
@@ -1454,6 +1618,10 @@ static const struct of_device_id of_rkvdec_match[] = {
 	{
 		.compatible = "rockchip,rk3588-vdec",
 		.data = &rk3588_vdpu381_variant,
+	},
+	{
+		.compatible = "rockchip,rk3576-vdec",
+		.data = &rk3576_vdpu383_variant
 	},
 	{ /* sentinel */ }
 };
@@ -1492,9 +1660,19 @@ static int rkvdec_probe(struct platform_device *pdev)
 	rkvdec->clk_count = ret;
 	rkvdec->axi_clk = devm_clk_get(&pdev->dev, "axi");
 
-	rkvdec->regs = devm_platform_ioremap_resource(pdev, 0);
-	if (IS_ERR(rkvdec->regs))
-		return PTR_ERR(rkvdec->regs);
+	if (rkvdec->config->named_regs) {
+		rkvdec->regs = devm_platform_ioremap_resource_byname(pdev, "function");
+		if (IS_ERR(rkvdec->regs))
+			return PTR_ERR(rkvdec->regs);
+
+		rkvdec->link = devm_platform_ioremap_resource_byname(pdev, "link");
+		if (IS_ERR(rkvdec->link))
+			return PTR_ERR(rkvdec->link);
+	} else {
+		rkvdec->regs = devm_platform_ioremap_resource(pdev, 0);
+		if (IS_ERR(rkvdec->regs))
+			return PTR_ERR(rkvdec->regs);
+	}
 
 	ret = dma_set_coherent_mask(&pdev->dev, DMA_BIT_MASK(32));
 	if (ret) {
