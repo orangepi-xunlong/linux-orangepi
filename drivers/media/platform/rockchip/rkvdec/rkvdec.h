@@ -19,6 +19,7 @@
 #include <media/v4l2-ctrls.h>
 #include <media/v4l2-device.h>
 #include <media/v4l2-ioctl.h>
+#include <media/v4l2-mem2mem.h>
 #include <media/videobuf2-core.h>
 #include <media/videobuf2-dma-contig.h>
 
@@ -29,6 +30,7 @@
 #define RKVDEC_QUIRK_DISABLE_QOS	BIT(0)
 
 struct rkvdec_ctx;
+struct rkvdec_rcb_config;
 
 struct rkvdec_ctrl_desc {
 	struct v4l2_ctrl_config cfg;
@@ -116,6 +118,8 @@ struct rkvdec_coded_fmt_desc {
 struct rkvdec_config {
 	struct rkvdec_coded_fmt_desc *coded_fmts;
 	size_t coded_fmts_num;
+	struct rcb_size_info *rcb_size_info;
+	size_t rcb_num;
 };
 
 struct rkvdec_dev {
@@ -128,6 +132,8 @@ struct rkvdec_dev {
 	void __iomem *regs;
 	struct mutex vdev_lock; /* serializes ioctls */
 	struct delayed_work watchdog_work;
+	struct gen_pool *sram_pool;
+	struct iommu_domain *iommu_domain;
 	struct iommu_domain *empty_domain;
 	unsigned int capabilities;
 	unsigned int quirks;
@@ -142,6 +148,7 @@ struct rkvdec_ctx {
 	struct v4l2_ctrl_handler ctrl_hdl;
 	struct rkvdec_dev *dev;
 	enum rkvdec_image_fmt image_fmt;
+	struct rkvdec_rcb_config *rcb_config;
 	void *priv;
 };
 
@@ -150,10 +157,16 @@ static inline struct rkvdec_ctx *file_to_rkvdec_ctx(struct file *filp)
 	return container_of(file_to_v4l2_fh(filp), struct rkvdec_ctx, fh);
 }
 
+enum rkvdec_alloc_type {
+	RKVDEC2_ALLOC_DMA  = 0,
+	RKVDEC2_ALLOC_SRAM = 1,
+};
+
 struct rkvdec_aux_buf {
 	void *cpu;
 	dma_addr_t dma;
 	size_t size;
+	enum rkvdec_alloc_type type;
 };
 
 void rkvdec_run_preamble(struct rkvdec_ctx *ctx, struct rkvdec_run *run);
