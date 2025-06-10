@@ -16,7 +16,6 @@
 
 #include "rkvdec.h"
 #include "rkvdec-regs.h"
-#include "rkvdec-hevc-data.c"
 
 /* Size in u8/u32 units. */
 #define RKV_SCALING_LIST_SIZE		1360
@@ -24,6 +23,9 @@
 #define RKV_PPS_LEN			64
 #define RKV_RPS_SIZE			(32 / 4)
 #define RKV_RPS_LEN			600
+
+#define RKV_HEVC_CABAC_TABLE_SIZE		27456
+extern const u8 rkvdec_hevc_cabac_table[RKV_HEVC_CABAC_TABLE_SIZE];
 
 struct rkvdec_sps_pps_packet {
 	u32 info[RKV_PPS_SIZE];
@@ -110,7 +112,7 @@ struct rkvdec_ps_field {
 
 /* Data structure describing auxiliary buffer format. */
 struct rkvdec_hevc_priv_tbl {
-	u8 cabac_table[RKV_CABAC_TABLE_SIZE];
+	u8 cabac_table[RKV_HEVC_CABAC_TABLE_SIZE];
 	u8 scaling_list[RKV_SCALING_LIST_SIZE];
 	struct rkvdec_sps_pps_packet param_set[RKV_PPS_LEN];
 	struct rkvdec_rps_packet rps[RKV_RPS_LEN];
