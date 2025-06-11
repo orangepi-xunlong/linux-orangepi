@@ -155,60 +155,25 @@ static void set_ref_poc(struct rkvdec_rps_short_term_ref_set *set, int poc, int 
 	}
 }
 
-/*
- * Flip one or more matrices along their main diagonal and flatten them
- * before writing it to the memory.
- * Convert:
- * ABCD         AEIM
- * EFGH     =>  BFJN     =>     AEIMBFJNCGKODHLP
- * IJKL         CGKO
- * MNOP         DHLP
- */
-static void transpose_and_flatten_matrices(u8 *output, const u8 *input,
-					   int matrices, int row_length)
-{
-	int i, j, row, x_offset, matrix_offset, rot_index, y_offset, matrix_size, new_value;
-
-	matrix_size = row_length * row_length;
-	for (i = 0; i < matrices; i++) {
-		row = 0;
-		x_offset = 0;
-		matrix_offset = i * matrix_size;
-		for (j = 0; j < matrix_size; j++) {
-			y_offset = j - (row * row_length);
-			rot_index = y_offset * row_length + x_offset;
-			new_value = *(input + i * matrix_size + j);
-			output[matrix_offset + rot_index] = new_value;
-			if ((j + 1) % row_length == 0) {
-				row += 1;
-				x_offset += 1;
-			}
-		}
-	}
-}
-
 static void assemble_scalingfactor0(struct rkvdec_dev *rkvdec, u8 *output,
 				    const struct v4l2_ctrl_hevc_scaling_matrix *input)
 {
+	const struct rkvdec_config *cfg = rkvdec->config;
 	int offset = 0;
 
-	transpose_and_flatten_matrices(output, (const u8 *)input->scaling_list_4x4, 6, 4);
+	cfg->flatten_matrices(output, (const u8 *)input->scaling_list_4x4, 6, 4);
 	offset = 6 * 16 * sizeof(u8);
-	transpose_and_flatten_matrices(output + offset,
-				       (const u8 *)input->scaling_list_8x8, 6, 8);
+	cfg->flatten_matrices(output + offset, (const u8 *)input->scaling_list_8x8, 6, 8);
 	offset += 6 * 64 * sizeof(u8);
-	transpose_and_flatten_matrices(output + offset,
-				       (const u8 *)input->scaling_list_16x16, 6, 8);
+	cfg->flatten_matrices(output + offset, (const u8 *)input->scaling_list_16x16, 6, 8);
 	offset += 6 * 64 * sizeof(u8);
 	/* Add a 128 byte padding with 0s between the two 32x32 matrices */
-	transpose_and_flatten_matrices(output + offset,
-				       (const u8 *)input->scaling_list_32x32, 1, 8);
+	cfg->flatten_matrices(output + offset, (const u8 *)input->scaling_list_32x32, 1, 8);
 	offset += 64 * sizeof(u8);
 	memset(output + offset, 0, 128);
 	offset += 128 * sizeof(u8);
-	transpose_and_flatten_matrices(output + offset,
-				       (const u8 *)input->scaling_list_32x32 + (64 * sizeof(u8)),
-				       1, 8);
+	cfg->flatten_matrices(output + offset,
+			      (const u8 *)input->scaling_list_32x32 + (64 * sizeof(u8)), 1, 8);
 	offset += 64 * sizeof(u8);
 	memset(output + offset, 0, 128);
 }

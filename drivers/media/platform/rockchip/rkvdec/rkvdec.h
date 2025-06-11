@@ -124,6 +124,7 @@ struct rkvdec_config {
 	int (*fill_pixfmt_mp)(struct v4l2_pix_format_mplane *pix_mp, u32 pixelformat,
 			      u32 width, u32 height);
 	u32 (*colmv_size)(u16 width, u16 height);
+	void (*flatten_matrices)(u8 *output, const u8 *input, int matrices, int row_length);
 	bool named_regs;
 };
 
@@ -193,5 +194,6 @@ extern const struct rkvdec_coded_fmt_ops rkvdec_vdpu381_hevc_fmt_ops;
 
 /* VDPU383 ops */
 extern const struct rkvdec_coded_fmt_ops rkvdec_vdpu383_h264_fmt_ops;
+extern const struct rkvdec_coded_fmt_ops rkvdec_vdpu383_hevc_fmt_ops;
 
 #endif /* RKVDEC_H_ */
