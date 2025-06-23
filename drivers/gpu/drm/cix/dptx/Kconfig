@@ -1,0 +1,22 @@
+# SPDX-License-Identifier: GPL-2.0-only
+config DRM_TRILIN_DPSUB
+	tristate "Trilinear Technologies DisplayPort Controller Driver"
+	depends on COMMON_CLK && DRM && OF
+	select DRM_KMS_HELPER
+	select DRM_DISPLAY_HELPER
+	select DRM_DISPLAY_DP_HELPER
+	select DRM_DISPLAY_HDMI_HELPER
+	select DRM_DP_AUX_CHARDEV
+	select GENERIC_PHY
+	select SND_SOC_HDMI_CODEC if SND_SOC
+	help
+	  This is a DRM/KMS driver for Trilinear Technologies DisplayPort controller.
+	  Choose this option if you are using an SoC with a Trilinear Technologies
+	  DisplayPort subsystem.
+
+config DRM_TRILIN_CADENCE_PHY
+	tristate "Trilinear DisplayPort Controller with Cadence PHY"
+	depends on DRM_TRILIN_DPSUB
+	help
+	  Choose this option if you are using a proper platform with a Trilinear
+	  Technologies DisplayPort subsystem.

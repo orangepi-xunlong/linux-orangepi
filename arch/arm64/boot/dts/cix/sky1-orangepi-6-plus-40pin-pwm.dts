@@ -1,0 +1,94 @@
+/*
+ * Copyright 2024 Cix Technology Group Co., Ltd.
+ *
+ * SPDX-License-Identifier: BSD-3-Clause
+ */
+
+/dts-v1/;
+
+#include "sky1-orangepi-6-plus.dts"
+
+&iomuxc_s5 {
+	pinctrl_hog_s5: pinctrl_hog_s5 {
+		sky1,pins = <
+			CIX_PAD_GPIO014_FUNC_GPIO014   (PULL_UP|DS_LEVEL4) /* GPIO14 hp det */
+			CIX_PAD_GPIO040_FUNC_GPIO040   (PULL_UP|DS_LEVEL4) /* GPIO40 */
+		>;
+	};
+};
+
+&iomuxc {
+	pinctrl_hog: pinctrl_hog {
+		sky1,pins = <
+			CIX_PAD_GPIO144_FUNC_GPIO144 (PULL_DOWN|DS_LEVEL4) /* GPIO144 pdb0 */
+			CIX_PAD_GPIO145_FUNC_GPIO145 (PULL_DOWN|DS_LEVEL4) /* GPIO145 pdb1 */
+			CIX_PAD_GPIO146_FUNC_GPIO146 (PULL_DOWN|DS_LEVEL4) /* GPIO146 pdb2 */
+			CIX_PAD_GPIO147_FUNC_GPIO147 (PULL_DOWN|DS_LEVEL4) /* GPIO147 pdb3 */
+		>;
+	};
+};
+
+//40pin
+&i2c2 {
+	status = "okay";
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_fch_i2c2>;
+};
+
+//40pin
+&i2c4 {
+	status = "okay";
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_fch_i2c4>;
+};
+
+//40pin
+&i2c5 {
+	status = "okay";
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_fch_i2c5>;
+};
+
+//40pin
+&uart1{
+	status = "disabled";
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_fch_uart1>;
+	dmas = <&fch_dmac 2 4>, <&fch_dmac 3 5>;
+	dma-names = "tx","rx";
+};
+
+//40pin
+&uart3{
+	status = "okay";
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_fch_uart3>;
+	dmas = <&fch_dmac 6 6>, <&fch_dmac 7 7>;
+	dma-names = "tx","rx";
+};
+
+//40pin
+&spi0{
+	status = "okay";
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_fch_spi0>;
+	/* Character device nodes for device communication on CS0(/dev/spidev0.0) */
+	spidev0_0:spi@0_0{
+		compatible = "rohm,dh2228fv";
+		reg = <0>;
+		spi-max-frequency = <5000000>;
+	};
+	/* Character device nodes for device communication on CS1(/dev/spidev0.1) */
+	spidev0_1:spi@0_1{
+		compatible = "rohm,dh2228fv";
+		reg = <1>;
+		spi-max-frequency = <5000000>;
+	};
+};
+
+//40pin 04113000
+&pwm3 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_fch_pwm3>;
+	status = "okay";
+};

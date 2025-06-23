@@ -1,0 +1,103 @@
+/*
+ * Copyright 2024 Cix Technology Group Co., Ltd.
+ *
+ * SPDX-License-Identifier: BSD-3-Clause
+ */
+
+/dts-v1/;
+#include "sky1-orangepi-6-plus.dts"
+/ {
+	chosen {
+		status = "disabled";
+	};
+
+	dp_to_hdmi_ps185: dp_to_hdmi_ps185 {
+		compatible = "regulator-fixed";
+		regulator-name = "DP_TO_HDMI_PS185";
+		pinctrl-names = "default";
+		pinctrl-0 = <&pinctrl_dp_to_hdmi_ps185>;
+		regulator-min-microvolt = <1800000>;
+		regulator-max-microvolt = <1800000>;
+		gpio = <&fch_gpio0 31 GPIO_ACTIVE_LOW>;
+		enable-active-low;
+		regulator-boot-on;
+		regulator-always-on;
+		status = "okay";
+	};
+};
+
+&dp2_backlight {
+	status = "disabled";
+};
+
+&panel_edp0 {
+	status = "disabled";
+};
+
+&fch_gpio1 {
+	status = "disabled";
+};
+
+&fch_gpio3 {
+	status = "disabled";
+};
+
+&gpt_timer3 {
+	status = "disabled";
+};
+
+&pwm0 {
+	status = "disabled";
+};
+
+&pwm1 {
+	status = "disabled";
+};
+
+&dp0 {
+	status = "disabled";
+};
+
+&dp1 {
+	status = "disabled";
+};
+
+&dp2 {
+	status = "disabled";
+};
+
+&dp3 {
+	status = "disabled";
+};
+
+&dp4 {
+	status = "disabled";
+};
+
+&dpu0 {
+	status = "disabled";
+};
+
+&dpu1 {
+	status = "disabled";
+};
+
+&dpu2 {
+	status = "disabled";
+};
+
+&dpu3 {
+	status = "disabled";
+};
+
+&dpu4 {
+	status = "disabled";
+};
+
+&smmu_mmhub{
+	status = "disabled";
+};
+
+&uart2 {
+	status = "disabled";
+};

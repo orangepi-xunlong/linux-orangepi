@@ -1,0 +1,34 @@
+/*
+ * Copyright 2024 Cix Technology Group Co., Ltd.
+ *
+ * SPDX-License-Identifier: BSD-3-Clause
+ */
+
+/dts-v1/;
+
+#include "sky1-evb.dts"
+
+/ {
+	reserved-memory {
+		#address-cells = <2>;
+		#size-cells = <2>;
+		ranges;
+
+		aipu_reserve_0: memory@100000000 {
+			compatible = "shared-dma-pool";
+			no-map;
+			reg = <0x1 0x00000000 0x1 0x00000000>;
+			asid = <0 1>;
+		};
+	};
+};
+
+&npu {
+	memory-region = <&aipu_reserve_0>;
+	/delete-property/ iommus;
+	status = "okay";
+};
+
+&smmu_mmhub{
+	status = "disabled";
+};

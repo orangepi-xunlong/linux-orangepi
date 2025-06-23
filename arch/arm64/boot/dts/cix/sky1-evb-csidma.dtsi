@@ -1,0 +1,417 @@
+
+&cix_csi_rcsu_0 {
+	status = "okay";
+};
+
+&cix_csi_rcsu_1 {
+	status = "disabled";
+};
+
+&cix_bridge_0 {
+	status = "okay";
+	port {
+		cix_bridge_0_in: endpoint {
+			remote-endpoint = <&mipi_csi2_0_out>;
+		};
+	};
+};
+
+&cix_bridge_1 {
+	status = "disabled";
+	port {
+		cix_bridge_1_in: endpoint {
+			remote-endpoint = <&mipi_csi2_1_out>;
+		};
+	};
+};
+
+&cix_bridge_2 {
+	status = "disabled";
+	port {
+		cix_bridge_2_in: endpoint {
+			remote-endpoint = <&mipi_csi2_2_out>;
+		};
+	};
+};
+
+&cix_bridge_3 {
+	status = "disabled";
+	port {
+		cix_bridge_3_in: endpoint {
+			remote-endpoint = <&mipi_csi2_3_out>;
+		};
+	};
+};
+
+&cix_mipi_csi_0 {
+	lanes = <4>;
+	status = "okay";
+	ports {
+		#address-cells = <1>;
+		#size-cells = <0>;
+		port@0 {
+			reg = <0>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			mipi_csi2_0_in: endpoint@1 {
+				reg = <1>;
+				remote-endpoint = <&dphy1_out>;
+			};
+		};
+		port@1 {
+			reg = <1>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			mipi_csi2_0_out: endpoint@0 {
+				reg = <0>;
+				remote-endpoint = <&cix_bridge_0_in>;
+			};
+		};
+	};
+};
+
+&cix_mipi_csi_1 {
+	lanes = <4>;
+	status = "disabled";
+	ports {
+		#address-cells = <1>;
+		#size-cells = <0>;
+		port@0 {
+			reg = <0>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			mipi_csi2_1_in: endpoint@1 {
+				reg = <1>;
+				remote-endpoint = <&dphy2_out>;
+			};
+		};
+		port@1 {
+			reg = <1>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			mipi_csi2_1_out: endpoint@0 {
+				reg = <0>;
+				remote-endpoint = <&cix_bridge_1_in>;
+			};
+		};
+	};
+};
+
+&cix_mipi_csi_2 {
+	lanes = <4>;
+	status = "disabled";
+	ports {
+		#address-cells = <1>;
+		#size-cells = <0>;
+		port@0 {
+			reg = <0>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			mipi_csi2_2_in: endpoint@1 {
+				reg = <1>;
+				remote-endpoint = <&dphy4_out>;
+			};
+		};
+		port@1 {
+			reg = <1>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			mipi_csi2_2_out: endpoint@0 {
+				reg = <0>;
+				remote-endpoint = <&cix_bridge_2_in>;
+			};
+		};
+	};
+};
+
+&cix_mipi_csi_3 {
+	lanes = <4>;
+	status = "disabled";
+	ports {
+		#address-cells = <1>;
+		#size-cells = <0>;
+		port@0 {
+			reg = <0>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			mipi_csi2_3_in: endpoint@1 {
+				reg = <1>;
+				remote-endpoint = <&dphy5_out>;
+			};
+		};
+		port@1 {
+			reg = <1>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			mipi_csi2_3_out: endpoint@0 {
+			   reg = <0>;
+			   remote-endpoint = <&cix_bridge_3_in>;
+			};
+		};
+	};
+};
+
+&cix_dphy_0 {
+	status = "disabled";
+	#address-cells = <1>;
+	#size-cells = <0>;
+	ports {
+		#address-cells = <1>;
+		#size-cells = <0>;
+		port@0 {
+			reg = <0>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			dphy0_in: endpoint@1 {
+				reg = <1>;
+				remote-endpoint = <&lt7911uxc_out>;
+				data-lanes = <1 2 3 4>;
+				clock-lanes = <0>;
+			};
+		};
+		port@1 {
+			reg = <1>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			dphy0_out: endpoint@0 {
+				reg = <0>;
+				remote-endpoint = <&mipi_csi2_0_in>;
+			};
+		};
+	};
+};
+
+&cix_dphy_1 {
+	status = "okay";
+	#address-cells = <1>;
+	#size-cells = <0>;
+	ports {
+		#address-cells = <1>;
+		#size-cells = <0>;
+		port@0 {
+			reg = <0>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			dphy1_in: endpoint@1 {
+				reg = <1>;
+				remote-endpoint = <&lt7911uxc_out>;
+				data-lanes = <1 2 3 4>;
+				clock-lanes = <0>;
+			};
+		};
+
+		port@1 {
+			reg = <1>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			dphy1_out: endpoint@0 {
+				reg = <0>;
+				remote-endpoint = <&mipi_csi2_0_in>;
+			};
+		};
+	};
+};
+
+&cix_dphy_2 {
+	status = "disabled";
+	#address-cells = <1>;
+	#size-cells = <0>;
+	ports {
+		#address-cells = <1>;
+		#size-cells = <0>;
+		port@0 {
+			reg = <0>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			dphy2_in: endpoint@1 {
+				reg = <1>;
+				remote-endpoint = <&virt_lt7911uxc_0_out>;
+				data-lanes = <1 2 3 4>;
+				clock-lanes = <0>;
+			};
+		};
+		port@1 {
+			reg = <1>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			dphy2_out: endpoint@0 {
+				reg = <0>;
+				remote-endpoint = <&mipi_csi2_1_in>;
+			};
+		};
+	};
+
+};
+
+&cix_dphy_3 {
+	status = "disabled";
+	#address-cells = <1>;
+	#size-cells = <0>;
+	ports {
+		#address-cells = <1>;
+		#size-cells = <0>;
+		port@0 {
+			reg = <0>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			dphy3_in: endpoint@1 {
+				reg = <1>;
+				/*this not active*/
+				remote-endpoint = <&lt7911uxc_out>;
+				data-lanes = <1 2 3 4>;
+				clock-lanes = <0>;
+			};
+		};
+		port@1 {
+			reg = <1>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			dphy3_out: endpoint@0 {
+				reg = <0>;
+				remote-endpoint = <&mipi_csi2_2_in>;
+			};
+		};
+	};
+};
+
+&cix_dphy_4 {
+	status = "disabled";
+	#address-cells = <1>;
+	#size-cells = <0>;
+	ports {
+		#address-cells = <1>;
+		#size-cells = <0>;
+		port@0 {
+			reg = <0>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			dphy4_in: endpoint@1 {
+				reg = <1>;
+				remote-endpoint = <&virt_lt7911uxc_1_out>;
+				data-lanes = <1 2 3 4>;
+				clock-lanes = <0>;
+			};
+		};
+
+		port@1 {
+			reg = <1>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			dphy4_out: endpoint@0 {
+				reg = <0>;
+				remote-endpoint = <&mipi_csi2_2_in>;
+			};
+		};
+	};
+};
+
+&cix_dphy_5 {
+	status = "disabled";
+	#address-cells = <1>;
+	#size-cells = <0>;
+	ports {
+		#address-cells = <1>;
+		#size-cells = <0>;
+		port@0 {
+			reg = <0>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			dphy5_in: endpoint@1 {
+				reg = <1>;
+				remote-endpoint = <&virt_lt7911uxc_2_out>;
+				data-lanes = <1 2 3 4>;
+				clock-lanes = <0>;
+			};
+		};
+		port@1 {
+			reg = <1>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			dphy5_out: endpoint@0 {
+				reg = <0>;
+				remote-endpoint = <&mipi_csi2_3_in>;
+			};
+		};
+	};
+};
+
+&cix_dphy_hw_0 {
+	status = "okay";
+};
+
+&cix_dphy_hw_1 {
+	status = "disabled";
+};
+
+&i2c0 {
+	lt7911uxc: lt7911uxc@43 {
+		compatible = "lontium,lt7911uxc";
+		#sound-dai-cells = <0>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+		reg = <0x43>;
+		/*interrupt-parent = <&gpio0>;*/
+		/*interrupts = <RK_PB7 IRQ_TYPE_EDGE_RISING>;*/
+		pinctrl-names = "default","gpio";
+		pinctrl-0 = <&pinctrl_lt7911_hw>;
+		pinctrl-1 = <&pinctrl_lt7911_hw>;
+		pwdn-gpios = <&fch_gpio0 15 GPIO_ACTIVE_HIGH>;
+		power-gpios = <&fch_gpio1 16 GPIO_ACTIVE_HIGH>;
+		power1-gpios = <&fch_gpio1 18 GPIO_ACTIVE_HIGH>;
+		reset-gpios = <&fch_gpio1 12 GPIO_ACTIVE_HIGH>;
+		status = "okay";
+		port {
+			lt7911uxc_out: endpoint {
+				//remote-endpoint = <&dphy0_in>;
+				remote-endpoint = <&dphy1_in>;
+				data-lanes = <4>;
+				clock-lanes = <0>;
+			};
+		};
+	};
+
+	virtual_lt7911uxc_0: virtual_lt7911uxc_0@0d {
+		compatible = "lontium,lt7911uxc";
+		#address-cells = <1>;
+		#size-cells = <0>;
+		reg = <0x0d>;
+		status = "disabled";
+		port {
+			virt_lt7911uxc_0_out: endpoint {
+				remote-endpoint = <&dphy2_in>;
+				data-lanes = <4>;
+				clock-lanes = <0>;
+			};
+		};
+	};
+
+	virtual_lt7911uxc_1: virtual_lt7911uxc_1@1d {
+		compatible = "lontium,lt7911uxc";
+		#address-cells = <1>;
+		#size-cells = <0>;
+		reg = <0x1d>;
+		status = "disabled";
+		port {
+			virt_lt7911uxc_1_out: endpoint {
+				remote-endpoint = <&dphy4_in>;
+				data-lanes = <4>;
+				clock-lanes = <0>;
+			};
+		};
+	};
+
+	virtual_lt7911uxc_2: virtual_lt7911uxc_2@2d {
+		compatible = "lontium,lt7911uxc";
+		#address-cells = <1>;
+		#size-cells = <0>;
+		reg = <0x2d>;
+		status = "disabled";
+		port {
+			virt_lt7911uxc_2_out: endpoint {
+				remote-endpoint = <&dphy5_in>;
+				data-lanes = <4>;
+				clock-lanes = <0>;
+			};
+		};
+	};
+};

@@ -1,0 +1,14 @@
+config PLAT_KERNELDUMP
+	bool "Support CIX KERNELDUMP"
+	default n
+	help
+	  This driver supports Cix SkyX KERNELDUMP,
+	  including kerneldump driver.
+
+config KERNELDUMP_RESERVED_DESC
+	hex "KERNELDUMP Reserve memory size"
+	depends on PLAT_KERNELDUMP
+	default 0x83e02000
+	help
+	  KERNELDUMP requires running an efi file within the UEFI environment,
+	  allocating memory for its execution.

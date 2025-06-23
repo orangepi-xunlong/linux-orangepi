@@ -1,0 +1,19 @@
+/*
+ * Copyright 2024 Cix Technology Group Co., Ltd.
+ *
+ * SPDX-License-Identifier: BSD-3-Clause
+ */
+
+/dts-v1/;
+
+#include "sky1.dtsi"
+
+/ {
+	model = "CIX sky1 BATURA board";
+	compatible = "cix,sky1";
+
+	chosen {
+		stdout-path = "serial2:115200n8";
+	};
+};
+

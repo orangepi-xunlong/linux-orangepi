@@ -1,0 +1,43 @@
+# SPDX-License-Identifier: GPL-2.0-only
+menu "ASoC support for Cixtech"
+
+comment "ASoC options for Cixtech CPUs:"
+
+config SND_SOC_CIX
+	tristate "CIX ASoC"
+	imply SND_SOC_RT5682S
+	default n
+	help
+	  Select Y or M to add support for CIX sound card
+
+
+config SND_SOC_CDNS_I2S_SC
+	tristate "Cadence I2S-SC Controller Driver"
+	select SND_SOC_GENERIC_DMAENGINE_PCM
+	help
+	  Say Y or M if you want to add driver support for Cadence
+	  I2S-SC (SingleChannel) controller.
+
+config SND_SOC_CDNS_I2S_MC
+	tristate "Cadence I2S-MC Controller Driver"
+	select SND_SOC_GENERIC_DMAENGINE_PCM
+	help
+	  Say Y or M if you want to add driver support for Cadence
+	  I2S-MC (MultiChannel) controller.
+
+config SND_SOC_IPBLOQ_HDA
+	tristate "IPBLOG HDA Driver"
+	select SND_HDA_CORE
+	select SND_HDA_EXT_CORE
+	select SND_HDA_ALIGNED_MMIO
+	help
+	  Say Y or M if you want add support for ipbloq hda
+
+config SND_HDACODEC_REALTEK
+        tristate "Build Realtek HD-audio codec support"
+	depends on SND_SOC_IPBLOQ_HDA
+        help
+          Say Y or M here to include Realtek HD-audio codec support in
+          snd-soc-hda driver, such as ALC256.
+
+endmenu

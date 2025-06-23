@@ -1,0 +1,21 @@
+/*
+ * Copyright 2024 Cix Technology Group Co., Ltd.
+ *
+ * SPDX-License-Identifier: BSD-3-Clause
+ */
+
+/dts-v1/;
+
+#include "sky1-evb.dts"
+
+&usbss_4 {
+	status = "okay";
+	dr_mode = "otg";
+	usb-role-switch;
+};
+
+&usbss_5 {
+	status = "okay";
+	dr_mode = "otg";
+	usb-role-switch;
+};

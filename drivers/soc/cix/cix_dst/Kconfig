@@ -1,0 +1,147 @@
+# SPDX-License-Identifier: GPL-2.0
+
+menuconfig CIX_DST
+	bool "Cix DST support"
+	default n
+	help
+	  Say yes here to support the cix DST
+
+if CIX_DST
+
+config PLAT_PRINTK_EXT
+	default n
+	bool "Enable support for log level control"
+	help
+	  This option enables log level control in no log load, Debug kernel log
+	  will not be saved to memory if this option is enabled.
+
+config PLAT_BOOT_TIME
+	default n
+	bool "platform boot time"
+	help
+	  only open on eng mode.
+
+config PLAT_BOOT_POSTCODE
+	bool "Platform OS boot postcode support"
+	default n
+	help
+	  Platform OS boot postcode support
+
+config PLAT_REBOOT_REASON
+	bool "Platform hardware reboot reason"
+	default n
+	help
+	  Platform hardware reboot reason support
+
+config SKY1_REBOOT_REASON
+	bool "Platform hardware reboot reason"
+	default n
+	depends on PLAT_REBOOT_REASON && ARM_SDE_INTERFACE
+	help
+	  Platform hardware reboot reason support
+
+config PLAT_MNTNDUMP
+	bool "CIX platform mntn dump driver"
+	default n
+	help
+	  Say 'Y' here if you want to support mntn dump.
+
+config PLAT_SDEI_EXCEPTIONS
+	bool "Platform exceptions debug by SDEI support"
+	depends on SKY1_WATCHDOG && PLAT_BBOX
+	default n
+	select ARM_SDE_INTERFACE
+	help
+	  Platform watchdog debug by SDEI support
+
+config PLAT_SDEI_EXCEPTIONS_TEST
+	bool "Platform test for SDEI exceptions"
+	depends on PLAT_SDEI_EXCEPTIONS
+	default n
+	help
+          Platform test for SDEI exceptions
+
+config PLAT_FDLEAK
+	depends on PLAT_LOGGER
+	bool "Platform fd leak driver"
+	default n
+	help
+	  This feature support to catch fd leak log
+
+config PLAT_IDM_DETECT
+	bool "Platform ni700 idm error detection"
+	depends on PLAT_BBOX
+	default n
+	select ARM_SDE_INTERFACE
+	help
+	  This feature support to detect idm error
+
+config PLAT_TEE_EXCEPTIONS
+	bool "Platform tee error detection"
+	depends on PLAT_BBOX
+	default n
+	select ARM_SDE_INTERFACE
+	help
+	  This feature support to detect tee error
+
+
+config PLAT_TZC400_DETECT
+	bool "Platform tzc400 error detection"
+	depends on PLAT_BBOX
+	default n
+	select ARM_SDE_INTERFACE
+	help
+	  This feature support to detect idm error
+
+config PLAT_SKY1_AUDIO_TIMEOUT
+	bool "Sky1 platform audiot timeout error detection"
+	depends on PLAT_BBOX
+	default n
+	help
+	  This feature support to detect rcsu gasket error
+
+config PLAT_SKY1_RCSU_GASKET_ERROR
+	bool "Platform sky1 rcsu gasket error detection"
+	depends on PLAT_BBOX
+	default n
+	help
+	  This feature support to detect sky1 rcsu gasket error
+
+config PLAT_SKY1_SE_PM_CRASH
+	bool "Platform sky1 pm se crash monitor"
+	depends on PLAT_BBOX
+	default n
+	help
+	  This feature support to detect sky1 se pm error
+
+config PLAT_TFA_TRACE
+	bool "Platform tfa trace info"
+	depends on PLAT_BBOX
+	default n
+	select ARM_SDE_INTERFACE
+	help
+	  This feature support trace tfa info
+
+config PLAT_DDR_EXCEPTION_DETECT
+	bool "Detect DDR abnormalities."
+	default n
+	help
+	  This feature support detect ddr exceptions
+
+if PLAT_MNTNDUMP
+source "drivers/soc/cix/cix_dst/memory_dump/Kconfig"
+endif #PLAT_MNTNDUMP
+
+source "drivers/soc/cix/cix_dst/blackbox/Kconfig"
+
+source "drivers/soc/cix/cix_dst/logger/Kconfig"
+
+source "drivers/soc/cix/cix_dst/dsm/Kconfig"
+
+source "drivers/soc/cix/cix_dst/hw_breakpoint/Kconfig"
+
+source "drivers/soc/cix/cix_dst/pm_exception_monitor/Kconfig"
+
+source "drivers/soc/cix/cix_dst/cache_exception_monitor/Kconfig"
+
+endif #CIX_DST

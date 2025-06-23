@@ -1,0 +1,29 @@
+/*
+ * Copyright 2024 Cix Technology Group Co., Ltd.
+ *
+ * SPDX-License-Identifier: BSD-3-Clause
+ */
+
+/dts-v1/;
+
+#include "sky1-evb.dts"
+
+&pcie_x8_rc {
+	status = "disabled";
+};
+
+&pcie_x4_rc {
+	status = "okay";
+};
+
+&pcie_x2_rc {
+	status = "disabled";
+};
+
+&pcie_x1_1_rc {
+	status = "disabled";
+};
+
+&pcie_x1_0_rc {
+	status = "disabled";
+};

@@ -1,0 +1,78 @@
+# SPDX-License-Identifier: GPL-2.0
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/sound/cux,sky1-card.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: CIX, sky1 sound card
+
+maintainers:
+  - Xing Wang <xing.wang@cixtech.com>
+
+properties:
+  compatible:
+    items:
+      - const: cix,sky1-sound-card
+
+  model:
+    $ref: /schemas/types.yaml#/definitions/string
+    description: User specified audio sound card name
+
+patternProperties:
+  "dai link name":
+    type: object
+    description: |-
+      dai-link child nodes, for i2s sc0~3, i2s mc , hda
+        Container for dai-link properties, cpu and codec sub-nodes.
+        There should be at least one (and probably more) subnode of this type
+
+    patternProperties:
+      "cpu":
+        type: object
+        description: |-
+          cpus:
+          cpu dai node
+
+        properties:
+          sound-dai:
+            $ref: /schemas/types.yaml#/definitions/phandle-array
+            description: phandle of the CPU DAI
+
+        required:
+          - sound-dai
+
+    patternProperties:
+      "codec":
+        type: object
+        description: |-
+          codec:
+          codec dai node
+
+        properties:
+          sound-dai:
+            $ref: /schemas/types.yaml#/definitions/phandle-array
+            description: phandle of the Codec DAI
+
+        required:
+          - sound-dai
+
+required:
+  - model
+  - dai link name
+
+examples:
+  - |
+    sound {
+            compatible = "cix,sky1-sound-card";
+            model = "cix,sky1";
+            status = "okay";
+
+            i2s-sc0 {
+                    cpu {
+                            sound-dai = <&i2s_sc0>;
+                    };
+                    codec {
+                            sound-dai = <&codec>;
+                    };
+            };
+    }

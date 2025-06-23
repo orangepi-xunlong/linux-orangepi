@@ -1,0 +1,32 @@
+# SPDX-License-Identifier: GPL-2.0
+
+menu "RDR - Running data recorder menu"
+
+config PLAT_BBOX
+	bool "kernel run data recorder"
+	depends on SYSFS
+	default n
+	help
+	  This module can record some data about kernel internal info.
+	  Include:
+	  the task switch,
+	  interrupts switch,
+	  arm exception info,
+	  etc ...
+
+config PLAT_AP_HOOK
+	bool "kernel ap hook config"
+	depends on SYSFS && PLAT_BBOX
+	select PLAT_REBOOT_REASON
+	default n
+	help
+	  Enable AP hook.
+
+config PLAT_BBOX_TEST
+	bool "rdr exception test"
+	depends on PLAT_BBOX
+	default n
+	help
+	  rdr exception test.
+
+endmenu

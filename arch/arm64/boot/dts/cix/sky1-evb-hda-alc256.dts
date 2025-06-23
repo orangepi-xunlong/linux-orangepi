@@ -1,0 +1,57 @@
+/*
+ * Copyright 2024 Cix Technology Group Co., Ltd.
+ *
+ * SPDX-License-Identifier: BSD-3-Clause
+ */
+
+/dts-v1/;
+
+#include "sky1-evb.dts"
+
+&sound {
+	/delete-property/ pdb0-gpios;
+};
+
+&hda {
+	status = "okay";
+};
+
+&alc256_codec {
+	status = "okay";
+};
+
+&ipb_hda {
+	status = "okay";
+};
+
+&pa_alc1019 {
+	status = "disabled";
+};
+
+&codec_alc5682 {
+	status = "disabled";
+};
+
+&i2s_lp {
+	status = "disabled";
+};
+
+&alc5682 {
+	status = "disabled";
+};
+
+&dummy_codec {
+	status = "disabled";
+};
+
+&i2s0 {
+	status = "disabled";
+};
+
+&i2s2 {
+	status = "disabled";
+};
+
+&i2s3 {
+	status = "disabled";
+};

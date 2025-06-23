@@ -1,0 +1,49 @@
+# SPDX-License-Identifier: GPL-2.0-only
+config DRM_CIX
+	tristate "DRM Support for CiX Socs"
+	select DRM_KMS_HELPER
+	select VIDEOMODE_HELPERS
+	select DRM_GEM_DMA_HELPER
+	depends on DRM && ARCH_CIX
+	help
+	  enable CiX DRM display support
+
+config DRM_LINLONDP
+	tristate "ARMCHINA LINLON display driver"
+	depends on DRM && OF
+	depends on COMMON_CLK
+	depends on DRM_CIX
+	select DRM_KMS_HELPER
+	select DRM_GEM_DMA_HELPER
+	select VIDEOMODE_HELPERS
+	help
+	  Choose this option if you want to compile the ARMCHINA Linlon display
+	  Processor driver. It supports the DP variants of the hardware.
+	  If compiled as a module it will be called linlondp.
+
+config DRM_CIX_VIRTUAL
+	tristate "DRM Support for CiX Virtual Encoder"
+	depends on DRM_CIX
+	default y
+	help
+	  This is a virtual encoder and connector support which is
+	  mainly used on EMU and FPGA. Disabled in default.
+
+config DRM_LINLONDP_CLOCK_FIXED
+	bool "linlondp clocks use fixed frequency"
+	depends on DRM_CIX
+	help
+	  Choose this if linlondp clocks use fixed frequency
+
+config DRM_TRILIN_DP_CIX
+	tristate "DRM Support for Trilinear DisplayPort on CiX platforms"
+	depends on DRM_CIX
+	help
+	  Choose this if you want to use DP display on CiX Socs
+
+config DRM_CIX_EDP_PANEL
+	tristate "DRM Support for edp panel on CiX platforms"
+	help
+	  Choose this if you want to use edp panel on CiX Socs
+
+source "drivers/gpu/drm/cix/dptx/Kconfig"

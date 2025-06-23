@@ -1,0 +1,49 @@
+# SPDX-License-Identifier: (GPL-2.0 OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/watchdog/sky1-watchdog.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Cixtech Sky1 Watchdog Timer (WDT) Controller
+
+maintainers:
+  - Jerry Zhu <Jerry.Zhu@cixtech.com>
+
+description:
+    The cix watchdog meets arm systemready requirement, and
+    is used in sky1 board for global reset. The watchdog
+    has two output signals ws0 and ws1. If ws0 is asserted and
+    timeout refresh occurs, ws1 is asserted.
+
+properties:
+  compatible:
+    const: cix,sky1-wdt
+
+  reg:
+    maxItems: 1
+
+  interrupts:
+    maxItems: 1
+
+  clocks:
+    maxItems: 1
+
+required:
+  - compatible
+  - reg
+  - interrupts
+  - clocks
+
+unevaluatedProperties: false
+
+examples:
+  - |
+    #include <dt-bindings/interrupt-controller/arm-gic.h>
+
+    watchdog: watchdog@16003000 {
+        compatible = "cix,sky1-wdt";
+        reg = <0x0 0x16003000 0x0 0x10000>;
+	interrupts = <GIC_SPI 175 IRQ_TYPE_LEVEL_HIGH>;
+	//clocks = < >; /* TBD */
+	status = "okay";
+    };

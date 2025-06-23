@@ -1,0 +1,41 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/hwlock/sky1-hwspinlock.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Sky1 Hardware Mutex Block
+
+maintainers:
+  - Jerry.Zhu <jerry.zhu@cixtech.com>
+
+description:
+  The hardware block provides mutexes utilized between different processors on
+  the SoC as part of the communication protocol used by these processors.
+
+properties:
+  compatible:
+    oneOf:
+      - enum:
+          - sky1,hwspinlock
+  reg:
+    maxItems: 1
+
+  '#hwlock-cells':
+    const: 1
+
+required:
+  - compatible
+  - reg
+  - '#hwlock-cells'
+
+additionalProperties: false
+
+examples:
+  - |
+    hwclock: hwspinlock@06510000 {
+    	compatible = "sky1,hwspinlock";
+    	reg = <0x0 0x06510000 0x0 0x1000>;
+    	#hwlock-cells = <1>;
+    };
+...

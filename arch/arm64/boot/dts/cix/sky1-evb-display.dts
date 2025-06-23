@@ -1,0 +1,85 @@
+/*
+ * Copyright 2024 Cix Technology Group Co., Ltd.
+ *
+ * SPDX-License-Identifier: BSD-3-Clause
+ */
+
+/dts-v1/;
+
+#include "sky1-evb.dts"
+
+&dpu0 {
+	side_by_side_master = <0>;
+	pipeline@0 {
+		pixel_per_clock = /bits/ 8 <2>;
+	};
+};
+
+&dpu1 {
+	side_by_side_master = <0>;
+	pipeline@0 {
+		pixel_per_clock = /bits/ 8 <2>;
+	};
+};
+
+&dpu2 {
+	side_by_side_master = <0>;
+	pipeline@0 {
+		pixel_per_clock = /bits/ 8 <2>;
+	};
+};
+
+&dpu3 {
+	side_by_side_master = <0>;
+	pipeline@0 {
+		pixel_per_clock = /bits/ 8 <2>;
+	};
+};
+
+&dpu4 {
+	side_by_side_master = <0>;
+	pipeline@0 {
+		pixel_per_clock = /bits/ 8 <2>;
+	};
+};
+
+&dp0 {
+	cix,dp-max-rate = <810000>;
+	pixel_per_clock = /bits/ 8 <2>;
+};
+
+&dp1 {
+	cix,dp-max-rate = <810000>;
+	pixel_per_clock = /bits/ 8 <2>;
+};
+
+&dp2 {
+	cix,dp-max-rate = <810000>;
+	pixel_per_clock = /bits/ 8 <2>;
+};
+
+&dp3 {
+	cix,dp-max-rate = <810000>;
+	pixel_per_clock = /bits/ 8 <2>;
+};
+
+&dp4 {
+	cix,dp-max-rate = <810000>;
+	pixel_per_clock = /bits/ 8 <2>;
+};
+
+&usbc_phy0 {
+	dp-4k120;
+};
+
+&usbc_phy1 {
+	dp-4k120;
+};
+
+&usbc_phy2 {
+	dp-4k120;
+};
+
+&usbc_phy3 {
+	dp-4k120;
+};

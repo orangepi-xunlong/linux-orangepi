@@ -1,0 +1,26 @@
+# SPDX-License-Identifier: GPL-2.0-only OR BSD-2-Clause
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/arm/cix.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Cixcomputing SoC series device tree bindings
+
+maintainers:
+  - fugang.duan <fugang.duan@cixcomputing.com>
+
+properties:
+  $nodename:
+    const: "/"
+  compatible:
+    oneOf:
+      - description: sky1 based Boards
+        items:
+          - enum:
+              - cix,sky1-evk       # sky1 EVK Board
+              - cix,sky1-batura    # sky1 BATURA Board
+          - const: cix,sky1
+
+additionalProperties: true
+
+...

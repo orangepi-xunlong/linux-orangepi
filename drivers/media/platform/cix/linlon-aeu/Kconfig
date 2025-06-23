@@ -1,0 +1,9 @@
+# SPDX-License-Identifier: GPL-2.0-only
+config LINLON_AEU
+	tristate "armchina LINLON AFBC Encoder Unit"
+	depends on OF && (ARM || ARM64)
+	depends on VIDEO_DEV
+	select V4L2_MEM2MEM_DEV
+	help
+	  Support AEU device which could transfer the uncompressed buffer
+	  to compressed buffer in AFBC format.

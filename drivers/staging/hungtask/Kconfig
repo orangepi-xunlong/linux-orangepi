@@ -1,0 +1,14 @@
+# SPDX-License-Identifier: GPL-2.0
+config DFX_HUNGTASK
+	bool "DFX hungtask"
+	depends on DETECT_HUNG_TASK
+	default n
+	help
+	  Base DFX hungtask module
+
+config DFX_HUNGTASK_USER
+	bool "DFX hungtask user watchdog module"
+	depends on DFX_HUNGTASK
+	default n
+	help
+	  DFX hungtask user watchdog module

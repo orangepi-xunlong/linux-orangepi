@@ -1,0 +1,6 @@
+# SPDX-License-Identifier: GPL-2.0
+
+config DSM_EARLYBOOT_CLIENT
+    default n
+    help
+This module adds support for bus dmd.

@@ -1,0 +1,59 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/reset/cix,sky1-src.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Cix Sky1 System Reset Controller
+
+maintainers:
+  - Jerry Zhu <jerry.zhu@cixtech.com>
+
+description: |
+  The system reset controller can be used to reset various set of
+  peripherals. Device nodes that need access to reset lines should
+  specify them as a reset phandle in their corresponding node as
+  specified in reset.txt.
+
+  For list of all valid reset indices see
+    <dt-bindings/reset/sky1-reset.h> for Sky1
+properties:
+  compatible:
+    oneOf:
+      - items:
+          - enum:
+              - cix,sky1-src
+          - const: syscon
+      - items:
+          - enum:
+              - cix,sky1-src
+          - const: cix,sky1-src
+          - const: syscon
+
+  reg:
+    maxItems: 1
+
+  interrupts:
+    maxItems: 1
+
+  '#reset-cells':
+    const: 1
+
+required:
+  - compatible
+  - reg
+  - interrupts
+  - '#reset-cells'
+
+additionalProperties: false
+
+examples:
+  - |
+    #include <dt-bindings/interrupt-controller/arm-gic.h>
+
+    reset-controller@30390000 {
+        compatible = "cix,sky1-src", "syscon";
+	reg = <0x0 0x16000000 0x0 0x10000>;
+        interrupts = <GIC_SPI 176 IRQ_TYPE_LEVEL_HIGH>;
+        #reset-cells = <1>;
+    };

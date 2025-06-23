@@ -1,0 +1,7 @@
+config CIX_SENSORHUB
+	tristate "sensorhub architecture for CIX package"
+	help
+	  It support CIX sensorhub architecture.
+	  If this option is set,
+	  it will support
+	  cix sensorhub architecture.

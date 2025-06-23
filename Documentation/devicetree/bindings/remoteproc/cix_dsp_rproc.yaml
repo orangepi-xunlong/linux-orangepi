@@ -1,0 +1,113 @@
+# SPDX-License-Identifier: (GPL-2.0 OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: "http://devicetree.org/schemas/remoteproc/cix_dsp_rproc.yaml#"
+$schema: "http://devicetree.org/meta-schemas/core.yaml#"
+
+title: Cix DSP Remoteproc Driver bindings
+
+maintainers:
+  - Lihua Liu <Lihua.Liu@cixcomputing.com>
+
+description:
+  CIX DSP remoteproc driver is used to control audio dsp core,
+  such as start, stop and boot dsp. Mailbox will be
+  used for msg exchange between AP and dsp. In additional,
+  crash dump and recovery are supported with this driver when remote
+  processor crash happen.
+
+properties:
+  compatible:
+    const: cix,sky1-hifi5
+
+  reg:
+    maxItems: 1
+
+  interrupts:
+    description: Should contain the watchdog reset interrupt
+    maxItems: 1
+
+  clocks:
+    maxItems: 6
+
+  clock-names:
+    items:
+      - const: clk
+      - const: bclk
+      - const: pbclk
+      - const: sramclk
+      - const: mb0clk
+      - const: mb1clk
+
+  "#mbox-cells":
+    description: |
+      <&phandle channel>
+      phandle   : Label name of controller
+      channel   : Channel index
+
+      channel 0_7 - Fast channel with 32bit transmit register and IRQ support.
+      channel 8   - Reg based channel with 32*32bit transsmit register and
+                    Doorbell+transmit acknowledgment IRQ support
+      channel 9   - Fifo based channel with 32*32bit depth fifo and IRQ support.
+    const: 1
+
+  firmware-name:
+    description: Default name of the firmware to load to the remote processor.
+
+  memory-region:
+    description:
+      List of phandles to the reserved memory regions associated with the
+      remoteproc device. It describes the memories shared with
+      the remote processor (e.g. remoteproc firmware and carveouts, rpmsg
+      vrings, ...).
+
+  wakeup-source: true
+
+  resets:
+    maxItems: 1
+    description: signal to reset HIFI5 DSP.
+
+  reset-names:
+    maxItems: 1
+      - const: dsp
+
+  cix,dsp-ctrl:
+    description: Phandle to syscon block which provide access to Control Register Unit.
+
+required:
+  - compatible
+  - reg
+  - interrupts
+  - clocks
+  - clock-names
+  - "#mbox-cells"
+  - "firmware-name"
+  - "memroy-region"
+  - resets
+  - reset-names
+  - cix,dsp-ctrl
+
+additionalProperties: false
+
+examples:
+  - |
+    #include <dt-bindings/interrupt-controller/arm-gic.h>
+
+  audio-dsp {
+    compatible = "cix,sky1-hifi5";
+    reg = <0x0 0x30000000 0x0 0x100000>; /* TBD */
+    interrupts = <GIC_SPI 88 IRQ_TYPE_LEVEL_HIGH>;/* TBD.IRQ? */
+    firmware-name = "cix/hifi5.bin";
+    mbox-names = "tx0", "rx0";
+    mboxes = <&mbox0 9>,	/* index=9: fifo base channel */
+        <&mbox1 9>;
+    memory-region = <&dsp_vdev0buffer>, <&dsp_vdev0vring0>,
+        <&dsp_vdev0vring1>;
+  };
+
+    /* Reserve memory node */
+    dsp_vdev0buffer: vdev0buffer@82008000 {	/* 1M for tx/rx buffer */
+      compatible = "shared-dma-pool";
+      reg = <0x0 0x82008000 0x0 0x100000>;
+      no-map;
+    };
