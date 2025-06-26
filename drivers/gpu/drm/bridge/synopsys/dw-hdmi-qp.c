@@ -278,8 +278,7 @@ static unsigned int dw_hdmi_qp_find_n(struct dw_hdmi_qp *hdmi, unsigned long pix
 	if (n > 0)
 		return n;
 
-	dev_warn(hdmi->dev, "Rate %lu missing; compute N dynamically\n",
-		 pixel_clk);
+	dev_dbg(hdmi->dev, "Rate %lu missing; compute N dynamically\n", pixel_clk);
 
 	return dw_hdmi_qp_compute_n(hdmi, pixel_clk, sample_rate);
 }
