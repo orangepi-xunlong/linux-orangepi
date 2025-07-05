@@ -836,11 +836,14 @@
 		compatible = "rockchip,rk3308-codec";
 		reg = <0x0 0xff560000 0x0 0x10000>;
 		rockchip,grf = <&grf>;
-		clock-names = "mclk_tx", "mclk_rx", "hclk";
+		rockchip,detect-grf = <&detect_grf>;
+		clock-names = "mclk_tx", "mclk_rx", "acodec";
 		clocks = <&cru SCLK_I2S2_8CH_TX_OUT>,
 			 <&cru SCLK_I2S2_8CH_RX_OUT>,
 			 <&cru PCLK_ACODEC>;
-		reset-names = "codec";
+		interrupts = <&gic 114 IRQ_TYPE_LEVEL_HIGH>,
+			     <&gic 115 IRQ_TYPE_LEVEL_HIGH>;
+		reset-names = "acodec-reset";
 		resets = <&cru SRST_ACODEC_P>;
 		#sound-dai-cells = <0>;
 		status = "disabled";
