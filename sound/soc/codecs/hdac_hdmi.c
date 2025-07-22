@@ -1232,7 +1232,7 @@ static int hdac_hdmi_parse_eld(struct hdac_device *hdev,
 						>> DRM_ELD_VER_SHIFT;
 
 	if (ver != ELD_VER_CEA_861D && ver != ELD_VER_PARTIAL) {
-		dev_err_ratelimited(&hdev->dev,
+		dev_info_ratelimited(&hdev->dev,
 				    "HDMI: Unknown ELD version %d\n", ver);
 		return -EINVAL;
 	}
