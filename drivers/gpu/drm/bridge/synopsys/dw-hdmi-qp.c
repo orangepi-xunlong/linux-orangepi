@@ -460,8 +460,16 @@ static int dw_hdmi_qp_audio_prepare(struct drm_bridge *bridge,
 	struct dw_hdmi_qp *hdmi = dw_hdmi_qp_from_bridge(bridge);
 	bool ref2stream = false;
 
+	/*
+	 * Silently return if tmds_char_rate is not set.
+	 *
+	 * Writing audio registers requires that the clock of the Video Port currently in
+	 * use by the VOP (dclk_vp<id>) is enabled.
+	 * That clock is guaranteed to be enabled when hdmi->tmds_char_rate is set, so we
+	 * only configure audio when it is set.
+	 */
 	if (!hdmi->tmds_char_rate)
-		return -ENODEV;
+		return 0;
 
 	if (fmt->bit_clk_provider | fmt->frame_clk_provider) {
 		dev_err(hdmi->dev, "unsupported clock settings\n");
