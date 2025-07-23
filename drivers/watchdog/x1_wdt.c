@@ -74,7 +74,6 @@
 #define REBOOT_CMD_VALID	0x5
 
 static bool nowayout	= WATCHDOG_NOWAYOUT ? true : false;
-static spinlock_t reboot_lock;
 static DEFINE_MUTEX(wdt_clk_lock);
 
 phys_addr_t reboot_cmd_mem = 0;
@@ -310,8 +309,7 @@ static int spa_wdt_ping(struct watchdog_device *wdd)
 
 	struct spa_wdt_info *info =
 		container_of(wdd, struct spa_wdt_info, wdt_dev);
-
-	spin_lock(&reboot_lock);
+	
 	spin_lock(&info->wdt_lock);
 
 	/* reset counter */
@@ -321,7 +319,6 @@ static int spa_wdt_ping(struct watchdog_device *wdd)
 		ret = -EINVAL;
 
 	spin_unlock(&info->wdt_lock);
-	spin_unlock(&reboot_lock);
 
 	return ret;
 }
@@ -525,15 +522,19 @@ static int spa_wdt_restart_handler(struct notifier_block *this, unsigned long mo
 			restart_handler);
 	void __iomem *mpmu_aprr;
 	u32 reg;
+	unsigned long flags = 0;
 
-	spin_lock(&reboot_lock);
-	spa_wdt_shutdown_reason(cmd);
-
+	spin_lock_irqsave(&info->wdt_lock, flags);
+        spa_wdt_shutdown_reason(cmd);
 	spa_enable_wdt_clk(info);
 
+	/* clear WDT status */
 	spa_wdt_write(info, WDT_WSR, 0x0);
-	spa_wdt_write(info, WDT_WMR, 0x1);
+	/* set timeout to 1 seconds */
+	spa_wdt_write(info, WDT_WMR, 1 << DEFAULT_SHIFT);
+	/* enable counter and reset/interrupt */
 	spa_wdt_write(info, WDT_WMER, 0x3);
+        /* reset counter */
 	spa_wdt_write(info, WDT_WCR, 0x1);
 
 	mpmu_aprr = info->mpmu_base + MPMU_APRR;
@@ -543,7 +544,7 @@ static int spa_wdt_restart_handler(struct notifier_block *this, unsigned long mo
 
 	mdelay(5000);
 	panic("reboot system failed");
-	spin_unlock(&reboot_lock);
+	spin_unlock_irqrestore(&info->wdt_lock, flags);
 
 	pr_err("reboot system failed: this line shouldn't appear.\n");
 	return NOTIFY_DONE;
@@ -564,7 +565,7 @@ static int spa_wdt_dt_init(struct device_node *np, struct device *dev,
 	if (of_get_property(np, "spa,wdt-enable-restart-handler", NULL))
 		info->enable_restart_handler = 1;
 	else
-		info->enable_restart_handler = 0;
+		info->enable_restart_handler = 1;
 	return 0;
 }
 
