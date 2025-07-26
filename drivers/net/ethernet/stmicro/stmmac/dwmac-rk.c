@@ -1544,23 +1544,23 @@ static struct rk_priv_data *rk_gmac_setup(struct platform_device *pdev,
 
 	ret = of_property_read_u32(dev->of_node, "tx_delay", &value);
 	if (ret) {
-		bsp_priv->tx_delay = 0x30;
-		dev_err(dev, "Can not read property: tx_delay.");
-		dev_err(dev, "set tx_delay to 0x%x\n",
-			bsp_priv->tx_delay);
+		if (plat->phy_interface == PHY_INTERFACE_MODE_RGMII_ID ||
+		    plat->phy_interface == PHY_INTERFACE_MODE_RGMII_TXID)
+			bsp_priv->tx_delay = 0;
+		else
+			bsp_priv->tx_delay = 0x30;
 	} else {
-		dev_info(dev, "TX delay(0x%x).\n", value);
 		bsp_priv->tx_delay = value;
 	}
 
 	ret = of_property_read_u32(dev->of_node, "rx_delay", &value);
 	if (ret) {
-		bsp_priv->rx_delay = 0x10;
-		dev_err(dev, "Can not read property: rx_delay.");
-		dev_err(dev, "set rx_delay to 0x%x\n",
-			bsp_priv->rx_delay);
+		if (plat->phy_interface == PHY_INTERFACE_MODE_RGMII_ID ||
+		    plat->phy_interface == PHY_INTERFACE_MODE_RGMII_RXID)
+			bsp_priv->rx_delay = 0;
+		else
+			bsp_priv->rx_delay = 0x10;
 	} else {
-		dev_info(dev, "RX delay(0x%x).\n", value);
 		bsp_priv->rx_delay = value;
 	}
 
@@ -1639,21 +1639,14 @@ static int rk_gmac_powerup(struct rk_priv_data *bsp_priv)
 	/*rmii or rgmii*/
 	switch (bsp_priv->phy_iface) {
 	case PHY_INTERFACE_MODE_RGMII:
-		dev_info(dev, "init for RGMII\n");
+	case PHY_INTERFACE_MODE_RGMII_ID:
+	case PHY_INTERFACE_MODE_RGMII_RXID:
+	case PHY_INTERFACE_MODE_RGMII_TXID:
+		dev_info(dev, "init for %s with delay (tx: 0x%x, rx: 0x%x)\n",
+			 phy_modes(bsp_priv->phy_iface),
+			 bsp_priv->tx_delay, bsp_priv->rx_delay);
 		bsp_priv->ops->set_to_rgmii(bsp_priv, bsp_priv->tx_delay,
 					    bsp_priv->rx_delay);
-		break;
-	case PHY_INTERFACE_MODE_RGMII_ID:
-		dev_info(dev, "init for RGMII_ID\n");
-		bsp_priv->ops->set_to_rgmii(bsp_priv, 0, 0);
-		break;
-	case PHY_INTERFACE_MODE_RGMII_RXID:
-		dev_info(dev, "init for RGMII_RXID\n");
-		bsp_priv->ops->set_to_rgmii(bsp_priv, bsp_priv->tx_delay, 0);
-		break;
-	case PHY_INTERFACE_MODE_RGMII_TXID:
-		dev_info(dev, "init for RGMII_TXID\n");
-		bsp_priv->ops->set_to_rgmii(bsp_priv, 0, bsp_priv->rx_delay);
 		break;
 	case PHY_INTERFACE_MODE_RMII:
 		dev_info(dev, "init for RMII\n");
