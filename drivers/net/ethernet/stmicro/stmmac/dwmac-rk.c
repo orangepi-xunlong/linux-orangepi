@@ -1531,16 +1531,21 @@ static struct rk_priv_data *rk_gmac_setup(struct platform_device *pdev,
 
 	ret = of_property_read_string(dev->of_node, "clock_in_out", &strings);
 	if (ret) {
-		dev_err(dev, "Can not read property: clock_in_out.\n");
 		bsp_priv->clock_input = true;
 	} else {
-		dev_info(dev, "clock input or output? (%s).\n",
-			 strings);
 		if (!strcmp(strings, "input"))
 			bsp_priv->clock_input = true;
 		else
 			bsp_priv->clock_input = false;
 	}
+
+	/* For RGMII, clock_in_out 'input' means main 125MHz clock is sourced
+	 * from PHY and not from an internal PLL. Use of PHY or PLL as clock
+	 * source for the 125MHz clock only affect the CRU clock tree.
+	 * For RGMII modes, GMAC must always use CRU as the TX clock source.
+	 */
+	if (phy_interface_mode_is_rgmii(plat->phy_interface))
+		bsp_priv->clock_input = false;
 
 	ret = of_property_read_u32(dev->of_node, "tx_delay", &value);
 	if (ret) {
@@ -1649,7 +1654,9 @@ static int rk_gmac_powerup(struct rk_priv_data *bsp_priv)
 					    bsp_priv->rx_delay);
 		break;
 	case PHY_INTERFACE_MODE_RMII:
-		dev_info(dev, "init for RMII\n");
+		dev_info(dev, "init for %s with %s clock\n",
+			 phy_modes(bsp_priv->phy_iface),
+			 bsp_priv->clock_input ? "input" : "output");
 		bsp_priv->ops->set_to_rmii(bsp_priv);
 		break;
 	default:
