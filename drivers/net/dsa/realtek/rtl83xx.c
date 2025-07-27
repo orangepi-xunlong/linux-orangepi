@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0+
 
+#include <linux/irqdomain.h>
 #include <linux/module.h>
 #include <linux/regmap.h>
 #include <linux/of_mdio.h>
@@ -64,7 +65,7 @@ static int rtl83xx_user_mdio_write(struct mii_bus *bus, int addr, int regnum,
  * @ds: DSA switch associated with this user_mii_bus
  *
  * Registers the MDIO bus for built-in Ethernet PHYs, and associates it with
- * the mandatory 'mdio' child OF node of the switch.
+ * the optional 'mdio' child OF node of the switch.
  *
  * Context: Can sleep.
  * Return: 0 on success, negative value for failure.
@@ -75,11 +76,14 @@ int rtl83xx_setup_user_mdio(struct dsa_switch *ds)
 	struct device_node *mdio_np;
 	struct mii_bus *bus;
 	int ret = 0;
+	int irq;
+	int i;
 
 	mdio_np = of_get_child_by_name(priv->dev->of_node, "mdio");
-	if (!mdio_np) {
-		dev_err(priv->dev, "no MDIO bus node\n");
-		return -ENODEV;
+	if (mdio_np && !of_device_is_available(mdio_np)) {
+		dev_err(priv->dev, "no available MDIO bus node\n");
+		ret = -ENODEV;
+		goto err_put_node;
 	}
 
 	bus = devm_mdiobus_alloc(priv->dev);
@@ -94,6 +98,20 @@ int rtl83xx_setup_user_mdio(struct dsa_switch *ds)
 	bus->write = rtl83xx_user_mdio_write;
 	snprintf(bus->id, MII_BUS_ID_SIZE, "%s:user_mii", dev_name(priv->dev));
 	bus->parent = priv->dev;
+
+	if (!mdio_np) {
+		ds->user_mii_bus = bus;
+		bus->phy_mask = ~ds->phys_mii_mask;
+
+		if (priv->irqdomain) {
+			for (i = 0; i < priv->num_ports; i++) {
+				irq = irq_find_mapping(priv->irqdomain, i);
+				if (irq < 0)
+					continue;
+				bus->irq[i] = irq;
+			}
+		}
+	}
 
 	ret = devm_of_mdiobus_register(priv->dev, bus, mdio_np);
 	if (ret) {
