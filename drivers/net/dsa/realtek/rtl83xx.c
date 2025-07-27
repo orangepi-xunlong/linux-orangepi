@@ -102,8 +102,6 @@ int rtl83xx_setup_user_mdio(struct dsa_switch *ds)
 		goto err_put_node;
 	}
 
-	priv->user_mii_bus = bus;
-
 err_put_node:
 	of_node_put(mdio_np);
 
