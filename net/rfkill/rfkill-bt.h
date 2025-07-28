@@ -20,7 +20,7 @@
 #define BT_NAME			 	"bluetooth"
 #define DEBUG				1
 #if DEBUG
-#define DBG(x...) pr_err("[BT_RFKILL]: " x)
+#define DBG(x...) pr_info("[BT_RFKILL]: " x)
 #define LOG(x...) pr_err("[BT_RFKILL]: " x)
 #else
 #define DBG(x...)

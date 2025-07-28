@@ -114,11 +114,11 @@ static int rfkill_cix_set_power(void *data, bool blocked)
 	DBG("Enter %s\n", __func__);
 
 	if (!blocked) {
-		LOG("bt turn on power\n");
+		DBG("bt turn on power\n");
 		gpiod_set_value_cansleep(pdata->gpiod_reset, 1);
-
+		msleep(500);
 	} else {
-		LOG("bt shut off power\n");
+		DBG("bt shut off power\n");
 		gpiod_set_value_cansleep(pdata->gpiod_reset, 0);
 	}
 
