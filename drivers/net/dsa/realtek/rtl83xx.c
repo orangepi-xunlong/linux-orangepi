@@ -184,16 +184,17 @@ rtl83xx_probe(struct device *dev,
 						    "realtek,disable-leds");
 
 	/* TODO: if power is software controlled, set up any regulators here */
-	priv->reset_ctl = devm_reset_control_get_optional(dev, NULL);
-	if (IS_ERR(priv->reset_ctl))
-		return dev_err_cast_probe(dev, priv->reset_ctl,
-					  "failed to get reset control\n");
-
 	priv->reset = devm_gpiod_get_optional(dev, "reset", GPIOD_OUT_LOW);
 	if (IS_ERR(priv->reset)) {
 		dev_err(dev, "failed to get RESET GPIO\n");
 		return ERR_CAST(priv->reset);
 	}
+
+	if (!priv->reset)
+		priv->reset_ctl = devm_reset_control_get_optional(dev, NULL);
+	if (IS_ERR(priv->reset_ctl))
+		return dev_err_cast_probe(dev, priv->reset_ctl,
+					  "failed to get reset control\n");
 
 	dev_set_drvdata(dev, priv);
 
