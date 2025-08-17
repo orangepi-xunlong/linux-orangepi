@@ -526,6 +526,15 @@ config SEG_LED_GPIO
 	  This driver can also be built as a module. If so, the module
 	  will be called seg-led-gpio.
 
+config TM16XX
+	tristate
+	select LEDS_CLASS
+	select LEDS_TRIGGERS
+	select LINEDISP
+	select NEW_LEDS
+	help
+	  Core TM16XX-compatible 7-segment LED controllers module
+
 #
 # Character LCD with non-conforming interface section
 #
