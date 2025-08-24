@@ -560,6 +560,22 @@ config TM16XX_I2C
 	  will be called tm16xx_i2c and you will also get tm16xx for the
 	  core module.
 
+config TM16XX_SPI
+	tristate "TM16XX-compatible SPI 7-segment LED controllers with keyscan"
+	depends on SPI
+	select TM16XX
+	help
+	  This driver supports the following TM16XX compatible
+	  SPI (3-wire) 7-segment led display chips:
+	  - Titanmec: TM1618, TM1620, TM1628, TM1638
+	  - Fuda Hisi: FD620, FD628
+	  - i-Core: AiP1618, AiP1628
+	  - Princeton: PT6964
+
+	  To compile this driver as a module, choose M here: the module
+	  will be called tm16xx_spi and you will also get tm16xx for the
+	  core module.
+
 #
 # Character LCD with non-conforming interface section
 #
