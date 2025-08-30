@@ -103,6 +103,7 @@
 struct tm16xx_display;
 struct tm16xx_digit;
 struct tm16xx_led;
+struct tm16xx_keypad;
 
 /**
  * DOC: struct tm16xx_controller - Controller-specific operations and limits
@@ -133,6 +134,7 @@ struct tm16xx_controller {
  * @dev: Pointer to device struct.
  * @controller: Controller-specific function table and limits.
  * @linedisp: character line display structure
+ * @keypad: Opaque pointer to tm16xx_keypad struct.
  * @spi_buffer: DMA-safe buffer for SPI transactions, or NULL for I2C.
  * @num_hwgrid: Number of controller grids in use.
  * @num_hwseg: Number of controller segments in use.
@@ -150,6 +152,7 @@ struct tm16xx_controller {
 struct tm16xx_display {
 	struct device *dev;
 	const struct tm16xx_controller *controller;
+	struct tm16xx_keypad *keypad;
 	struct linedisp linedisp;
 	u8 *spi_buffer;
 	u8 num_hwgrid;
@@ -168,5 +171,27 @@ struct tm16xx_display {
 
 int tm16xx_probe(struct tm16xx_display *display);
 void tm16xx_remove(struct tm16xx_display *display);
+
+/* keypad support */
+#if IS_ENABLED(CONFIG_TM16XX_KEYPAD)
+int tm16xx_keypad_probe(struct tm16xx_display *display);
+void tm16xx_set_key(const struct tm16xx_display *display, const int row,
+		    const int col, const bool pressed);
+#else
+static inline int tm16xx_keypad_probe(struct tm16xx_display *display)
+{
+	return 0;
+}
+
+static inline void tm16xx_set_key(const struct tm16xx_display *display,
+				  const int row, const int col,
+				  const bool pressed)
+{
+}
+#endif
+
+#define tm16xx_for_each_key(display, _r, _c) \
+	for (int _r = 0; _r < (display)->controller->max_key_rows; _r++) \
+		for (int _c = 0; _c < (display)->controller->max_key_cols; _c++)
 
 #endif /* _TM16XX_H */

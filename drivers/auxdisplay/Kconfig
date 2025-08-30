@@ -528,12 +528,21 @@ config SEG_LED_GPIO
 
 config TM16XX
 	tristate
+	depends on INPUT
+	select INPUT_MATRIXKMAP
 	select LEDS_CLASS
 	select LEDS_TRIGGERS
 	select LINEDISP
 	select NEW_LEDS
+	select TM16XX_KEYPAD if (INPUT)
 	help
 	  Core TM16XX-compatible 7-segment LED controllers module
+
+config TM16XX_KEYPAD
+	bool
+	depends on TM16XX
+	help
+	  Enable keyscan support for TM16XX driver.
 
 #
 # Character LCD with non-conforming interface section

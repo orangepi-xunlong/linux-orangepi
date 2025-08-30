@@ -408,6 +408,10 @@ int tm16xx_probe(struct tm16xx_display *display)
 		goto unregister_leds;
 	}
 
+	ret = tm16xx_keypad_probe(display);
+	if (ret)
+		dev_warn(dev, "Failed to initialize keypad: %d\n", ret);
+
 	return 0;
 
 unregister_leds:
