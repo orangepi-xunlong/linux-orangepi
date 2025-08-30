@@ -21,6 +21,7 @@
 #include <linux/in.h>
 #include <linux/io.h>
 #include <linux/ip.h>
+#include <linux/of.h>
 #include <linux/tcp.h>
 #include <linux/interrupt.h>
 #include <linux/dma-mapping.h>
@@ -2382,6 +2383,15 @@ void r8169_apply_firmware(struct rtl8169_private *tp)
 	}
 }
 
+static void rtl8168_led_of_init(struct rtl8169_private *tp)
+{
+	struct device *d = tp_to_dev(tp);
+	u32 val;
+
+	if (!of_property_read_u32(d->of_node, "realtek,led-data", &val))
+		RTL_W16(tp, LED_CTRL, val);
+}
+
 static void rtl8168_config_eee_mac(struct rtl8169_private *tp)
 {
 	/* Adjust EEE LED frequency */
@@ -3396,6 +3406,7 @@ static void rtl_hw_start_8168h_1(struct rtl8169_private *tp)
 	rtl_eri_write(tp, 0xb8, ERIAR_MASK_0011, 0x0000);
 
 	rtl8168_config_eee_mac(tp);
+	rtl8168_led_of_init(tp);
 
 	RTL_W8(tp, DLLPR, RTL_R8(tp, DLLPR) & ~PFM_EN);
 	RTL_W8(tp, MISC_1, RTL_R8(tp, MISC_1) & ~PFM_D3COLD_EN);
