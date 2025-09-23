@@ -1,7 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0-only */
-/*
- * Copyright (c) 2023, The Linux Foundation. All rights reserved.
- */
+// SPDX-License-Identifier: GPL-2.0
+// Copyright 2024 Cix Technology Group Co., Ltd.
 
 #ifndef _DP_INFOFRAME_H_
 #define _DP_INFOFRAME_H_

@@ -2,6 +2,7 @@
 //------------------------------------------------------------------------------
 //	Trilinear Technologies DisplayPort DRM Driver
 //	Copyright (C) 2023 Trilinear Technologies
+//	Copyright 2024 Cix Technology Group Co., Ltd.
 //
 //	This program is free software: you can redistribute it and/or modify
 //	it under the terms of the GNU General Public License as published by
@@ -701,7 +702,7 @@ int trilin_dp_train_loop(struct trilin_dp *dp)
 		i = 0;
 		bw_cur = bw;
 		do {
-			if (!(dp->state & DP_STATE_READY)) {
+			if (!(dp->state & DPTX_STATE_READY)) {
 				DP_DEBUG("disconnected, not do training");
 				return 0;
 			}
@@ -1999,15 +2000,15 @@ static int trilin_dp_core_on(struct trilin_dp *dp, bool shallow)
 	int i;
 
 	DP_DEBUG("enter");
-	if (dp->state & DP_STATE_READY) {
+	if (dp->state & DPTX_STATE_READY) {
 		DP_DEBUG("[already ready]");
 		return rc;
 	}
 
-	dp->state |= DP_STATE_READY;
+	dp->state |= DPTX_STATE_READY;
 
 	if (dp->enabled_by_gop) {
-		dp->state |= DP_STATE_INIT_TRAIN;
+		dp->state |= DPTX_STATE_INIT_TRAIN;
 		DP_DEBUG("[enabled_by_gop]");
 		return rc;
 	}
@@ -2076,7 +2077,7 @@ static int trilin_dp_core_on(struct trilin_dp *dp, bool shallow)
 			rc = 0;
 		}
 	}
-	dp->state |= DP_STATE_INIT_TRAIN;
+	dp->state |= DPTX_STATE_INIT_TRAIN;
 	return rc;
 end3:
 	if (phy->phy_ops)
@@ -2085,7 +2086,7 @@ end2:
 	if (phy->phy_ops)
 		phy->phy_ops->exit(dp);
 end1:
-	dp->state &= ~DP_STATE_READY;
+	dp->state &= ~DPTX_STATE_READY;
 	return rc;
 }
 
@@ -2094,7 +2095,7 @@ static int trilin_dp_core_off(struct trilin_dp *dp)
 	int rc = 0;
 	struct trilin_phy_t *phy = &dp->phy;
 
-	if (!(dp->state & DP_STATE_READY))
+	if (!(dp->state & DPTX_STATE_READY))
 		return rc;
 
 	DP_DEBUG("enter\n");
@@ -2115,7 +2116,7 @@ static int trilin_dp_core_off(struct trilin_dp *dp)
 	memset(&(dp->mst_ch_info.slot_info),
 			0, sizeof(struct trilin_dp_mst_ch_slot_info) * dp->max_streams);
 
-	dp->state &= ~DP_STATE_READY;
+	dp->state &= ~DPTX_STATE_READY;
 
 	return rc;
 }
@@ -2215,7 +2216,7 @@ static bool trilin_dp_link_process_link_status_update(struct trilin_dp *dp)
 	bool status_update, clock_recovery_ok, channel_eq_ok;
 	int ret;
 
-	if (!(dp->state & DP_STATE_ENABLED))
+	if (!(dp->state & DPTX_STATE_ENABLED))
 		return false;
 
 	ret = drm_dp_dpcd_read(&dp->aux, DP_SINK_COUNT, status,
@@ -2257,7 +2258,7 @@ static int trilin_dp_link_hdcp_request(struct trilin_dp *dp)
 	u8 status[DP_LINK_STATUS_SIZE + 2];
 	int ret;
 
-	if (!(dp->state & DP_STATE_ENABLED))
+	if (!(dp->state & DPTX_STATE_ENABLED))
 		return false;
 
 	ret = drm_dp_dpcd_read(&dp->aux, DP_SINK_COUNT, status,
@@ -2372,7 +2373,7 @@ int trilin_dp_host_init(struct trilin_dp *dp)
 	struct trilin_phy_t *phy = &dp->phy;
 
 	DP_DEBUG("enter\n");
-	if (dp->state & DP_STATE_INITIALIZED) {
+	if (dp->state & DPTX_STATE_INITIALIZED) {
 		DP_DEBUG("[already initialized]");
 		return rc;
 	}
@@ -2395,7 +2396,7 @@ int trilin_dp_host_init(struct trilin_dp *dp)
 		dp->edp_panel_ready = true;
 	}
 
-	dp->state |= DP_STATE_INITIALIZED;
+	dp->state |= DPTX_STATE_INITIALIZED;
 	/* log this as it results from user action of cable connection */
 	DP_INFO("[OK.]\n");
 	return rc;
@@ -2411,7 +2412,7 @@ static int trilin_dp_host_init_from_bootloader(struct trilin_dp *dp)
 
 	trilin_dp_register_phy(dp);
 
-	dp->state |= DP_STATE_INITIALIZED;
+	dp->state |= DPTX_STATE_INITIALIZED;
 
 	dev_info(dp->dev, "%s reports a plug event\n", __func__);
 
@@ -2430,7 +2431,7 @@ static void trilin_dp_host_deinit(struct trilin_dp *dp)
 		DP_DEBUG("active stream present\n");
 		return;
 	}
-	if (!(dp->state & DP_STATE_INITIALIZED)) {
+	if (!(dp->state & DPTX_STATE_INITIALIZED)) {
 		DP_DEBUG("[not initialized]");
 		return;
 	}
@@ -2448,8 +2449,8 @@ static void trilin_dp_host_deinit(struct trilin_dp *dp)
 			TRILIN_DPTX_INTERRUPT_MASK_ALL);
 	trilin_dp_core_power_deinit(dp);
 
-	dp->state &= ~DP_STATE_INITIALIZED;
-	dp->state &= ~DP_STATE_INIT_TRAIN;
+	dp->state &= ~DPTX_STATE_INITIALIZED;
+	dp->state &= ~DPTX_STATE_INIT_TRAIN;
 	/* log this as it results from user action of cable dis-connection */
 	DP_DEBUG("[OK]\n");
 }
@@ -2516,10 +2517,10 @@ static bool trilin_dp_is_sink_count_zero(struct trilin_dp *dp)
 static bool trilin_dp_is_ready(struct trilin_dp *dp)
 {
 	DP_DEBUG("hpd=%d state=%d sink count:%d is_sink_count_zero=%d\n",
-		trilin_dp_get_hpd_state(dp), (dp->state & DP_STATE_CONNECTED),
+		trilin_dp_get_hpd_state(dp), (dp->state & DPTX_STATE_CONNECTED),
 		drm_dp_read_sink_count(&dp->aux),
 		trilin_dp_is_sink_count_zero(dp));
-	return trilin_dp_get_hpd_state(dp) && (dp->state & DP_STATE_CONNECTED);
+	return trilin_dp_get_hpd_state(dp) && (dp->state & DPTX_STATE_CONNECTED);
 	// && !trilin_dp_is_sink_count_zero(dp);
 }
 
@@ -2530,17 +2531,17 @@ int trilin_dp_handle_connect(struct trilin_dp *dp, bool send_notification)
 
 	DP_DEBUG("enter\n");
 	mutex_lock(&dp->session_lock);
-	if (dp->state & DP_STATE_CONNECTED) {
+	if (dp->state & DPTX_STATE_CONNECTED) {
 		DP_DEBUG("dp already connected, skipping hpd high\n");
 		mutex_unlock(&dp->session_lock);
 		return 0;
 	}
-	if (dp->state & DP_STATE_SUSPENDED) {
-		DP_DEBUG("DP_STATE_SUSPENDED return\n");
+	if (dp->state & DPTX_STATE_SUSPENDED) {
+		DP_DEBUG("DPTX_STATE_SUSPENDED return\n");
 		goto end;
 	}
 
-	dp->state |= DP_STATE_CONNECTED;
+	dp->state |= DPTX_STATE_CONNECTED;
 
 	rc = trinlin_dp_panel_read_sink_caps(dp);
 	/*
@@ -2548,7 +2549,7 @@ int trilin_dp_handle_connect(struct trilin_dp *dp, bool send_notification)
 	 * ENOTCONN --> no downstream device connected
 	 */
 	if (rc == -ETIMEDOUT || rc == -ENOTCONN) {
-		dp->state &= ~DP_STATE_CONNECTED;
+		dp->state &= ~DPTX_STATE_CONNECTED;
 		goto end;
 	}
 
@@ -2571,12 +2572,12 @@ int trilin_dp_handle_disconnect(struct trilin_dp *dp, bool send_notification)
 	DP_DEBUG("enter\n");
 	mutex_lock(&dp->session_lock);
 
-	if (!(dp->state & DP_STATE_CONNECTED)) {
+	if (!(dp->state & DPTX_STATE_CONNECTED)) {
 		DP_DEBUG("already disconnect");
 		goto end;
 	}
 
-	dp->state &= ~DP_STATE_CONNECTED;
+	dp->state &= ~DPTX_STATE_CONNECTED;
 	if (dp->mst.mst_active) {
 		/* user mode should active power off to disable encoder */
 		trilin_dp_set_mst_mgr_state(dp, false);
@@ -2602,7 +2603,7 @@ int trilin_dp_deinit_config(struct trilin_dp *dp)
 	mutex_lock(&dp->session_lock);
 	trilin_dp_aux_cleanup(dp);
 	trilin_dp_host_deinit(dp);
-	dp->state &= ~(DP_STATE_CONFIGURED);
+	dp->state &= ~(DPTX_STATE_CONFIGURED);
 	mutex_unlock(&dp->session_lock);
 	/*final destry session_lock*/
 	mutex_destroy(&dp->session_lock);
@@ -2675,7 +2676,7 @@ static void trilin_dp_hpd_irq_work_func(struct work_struct *work)
 	}
 
 	mutex_lock(&dp->session_lock);
-	if (!(dp->state & DP_STATE_INITIALIZED)) {
+	if (!(dp->state & DPTX_STATE_INITIALIZED)) {
 		mutex_unlock(&dp->session_lock);
 		goto mst_attention;
 	}
@@ -2685,7 +2686,7 @@ static void trilin_dp_hpd_irq_work_func(struct work_struct *work)
 
 	if (dp->link_request & DP_LINK_STATUS_UPDATED) {
 		mutex_lock(&dp->session_lock);
-		if (dp->state & DP_STATE_ENABLED)
+		if (dp->state & DPTX_STATE_ENABLED)
 			trilin_dp_train_loop(dp);
 		mutex_unlock(&dp->session_lock);
 	}
@@ -2744,7 +2745,7 @@ int trilin_dp_pm_prepare(struct trilin_dp *dp)
 	cancel_delayed_work_sync(&dp->hpd_irq_work);
 	cancel_delayed_work_sync(&dp->hpd_event_work);
 	disable_irq(dp->irq);
-	dp->state |= DP_STATE_SUSPENDED;
+	dp->state |= DPTX_STATE_SUSPENDED;
 	if (!dp->active_stream_cnt) {
 		DP_DEBUG("no active stream. just deinit");
 		trilin_dp_host_deinit(dp);
@@ -2759,14 +2760,14 @@ int trilin_dp_pm_complete(struct trilin_dp *dp)
 {
 	mutex_lock(&dp->session_lock);
 	DP_DEBUG("enter");
-	if (!(dp->state & DP_STATE_SUSPENDED))
+	if (!(dp->state & DPTX_STATE_SUSPENDED))
 		goto end;
 	trilin_dp_host_init(dp);
 
 	DP_DEBUG("init hpd: %d", trilin_dp_get_hpd_state(dp));
 	enable_irq(dp->irq);
 	trilin_dp_mst_resume(dp);
-	dp->state &= ~DP_STATE_SUSPENDED;
+	dp->state &= ~DPTX_STATE_SUSPENDED;
 end:
 	mutex_unlock(&dp->session_lock);
 	return 0;
@@ -2865,20 +2866,20 @@ int trilin_dp_prepare(struct trilin_dp *dp)
 	mutex_lock(&dp->session_lock);
 
 	/*
-	 * If DP_STATE_ENABLED, there is nothing left to do.
+	 * If DPTX_STATE_ENABLED, there is nothing left to do.
 	 */
-	if (dp->state & (DP_STATE_ENABLED)) {
+	if (dp->state & (DPTX_STATE_ENABLED)) {
 		DP_DEBUG("[already enabled, mst second stream?]");
 		goto end;
 	}
 
-	if (!(dp->state & DP_STATE_INITIALIZED)) {
+	if (!(dp->state & DPTX_STATE_INITIALIZED)) {
 		rc = trilin_dp_host_init(dp);
 		if (rc) {
 			DP_WARN("Host init Failed");
 			goto end;
 		}
-	} else if (dp->state & DP_STATE_INIT_TRAIN){
+	} else if (dp->state & DPTX_STATE_INIT_TRAIN){
 		reset_dp_and_reinit(dp); //enable dp reset...
 	}
 
@@ -2900,10 +2901,10 @@ int trilin_dp_enable(struct trilin_dp *dp, struct trilin_dp_panel *dp_panel)
 	DP_DEBUG("enter\n");
 	mutex_lock(&dp->session_lock);
 	/*
-	 * If DP_STATE_INITIALIZED is not set, we should not do any HW
+	 * If DPTX_STATE_INITIALIZED is not set, we should not do any HW
 	 * programming.
 	 */
-	if (!(dp->state & DP_STATE_INITIALIZED)) {
+	if (!(dp->state & DPTX_STATE_INITIALIZED)) {
 		DP_ERR("[host not ready]");
 		goto end;
 	}
@@ -2921,7 +2922,7 @@ int trilin_dp_enable(struct trilin_dp *dp, struct trilin_dp_panel *dp_panel)
 	if (rc)
 		goto end;
 
-	dp->state |= DP_STATE_ENABLED;
+	dp->state |= DPTX_STATE_ENABLED;
 end:
 	mutex_unlock(&dp->session_lock);
 	return rc;
@@ -2940,7 +2941,7 @@ int trilin_dp_pre_disable(struct trilin_dp *dp, struct trilin_dp_panel *panel)
 
 	DP_DEBUG("enter\n");
 	mutex_lock(&dp->session_lock);
-	if (!(dp->state & DP_STATE_ENABLED)) {
+	if (!(dp->state & DPTX_STATE_ENABLED)) {
 		DP_DEBUG("[not enabled]");
 		goto end;
 	}
@@ -2958,12 +2959,12 @@ int trilin_dp_disable(struct trilin_dp *dp, struct trilin_dp_panel *panel)
 	DP_DEBUG("enter\n");
 	mutex_lock(&dp->session_lock);
 
-	if (!(dp->state & DP_STATE_ENABLED)) {
+	if (!(dp->state & DPTX_STATE_ENABLED)) {
 		DP_DEBUG("[not enabled]");
 		goto end;
 	}
 
-	if (!(dp->state & DP_STATE_INITIALIZED)) {
+	if (!(dp->state & DPTX_STATE_INITIALIZED)) {
 		DP_DEBUG("[not ready]");
 		goto end;
 	}
@@ -2981,7 +2982,7 @@ int trilin_dp_unprepare(struct trilin_dp *dp)
 	DP_DEBUG("enter\n");
 
 	mutex_lock(&dp->session_lock);
-	if (!(dp->state & DP_STATE_ENABLED)) {
+	if (!(dp->state & DPTX_STATE_ENABLED)) {
 		DP_DEBUG("[not enabled]");
 		goto end;
 	}
@@ -2993,10 +2994,10 @@ int trilin_dp_unprepare(struct trilin_dp *dp)
 
 	trilin_dp_core_off(dp);
 
-	if (dp->state & DP_STATE_SUSPENDED)
+	if (dp->state & DPTX_STATE_SUSPENDED)
 		trilin_dp_host_deinit(dp);
 
-	dp->state &= ~DP_STATE_ENABLED;
+	dp->state &= ~DPTX_STATE_ENABLED;
 	/* log this as it results from user action of cable dis-connection */
 	DP_DEBUG("[OK]\n");
 end:
@@ -3015,7 +3016,7 @@ int trilin_dp_init_config(struct trilin_dp *dp)
 
 	/* config dp state*/
 	mutex_init(&dp->session_lock);
-	dp->state |= (DP_STATE_CONFIGURED);
+	dp->state |= (DPTX_STATE_CONFIGURED);
 
 	rc = trilin_dp_aux_register(dp);
 	if (rc) {
@@ -3056,7 +3057,7 @@ int trilin_dp_init_config(struct trilin_dp *dp)
 end2:
 	trilin_dp_aux_cleanup(dp);
 end1:
-	dp->state &= ~DP_STATE_CONFIGURED;
+	dp->state &= ~DPTX_STATE_CONFIGURED;
 	cancel_delayed_work_sync(&dp->hpd_irq_work);
 	cancel_delayed_work_sync(&dp->hpd_event_work);
 	return rc;
@@ -3195,7 +3196,7 @@ int trilin_dp_probe(struct trilin_dpsub *dpsub, struct drm_device *drm)
 	dp->num_lanes = TRILIN_DPTX_MAX_LANES;
 	dp->max_rate = DP_HIGH_BIT_RATE3;
 	dp->max_streams = 2;
-	dp->state = DP_STATE_DISCONNECTED;
+	dp->state = DPTX_STATE_DISCONNECTED;
 	dp->platform_id = CIX_PLATFORM_SOC;
 #ifdef CONFIG_ARCH_CIX_EMU_FPGA
 	dp->platform_id = CIX_PLATFORM_FPGA;

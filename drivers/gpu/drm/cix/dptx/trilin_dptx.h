@@ -2,6 +2,7 @@
 //------------------------------------------------------------------------------
 //	Trilinear Technologies DisplayPort DRM Driver
 //	Copyright (C) 2023 Trilinear Technologies
+//	Copyright 2024 Cix Technology Group Co., Ltd.
 //
 //	This program is free software: you can redistribute it and/or modify
 //	it under the terms of the GNU General Public License as published by
@@ -333,16 +334,16 @@ struct trilin_dp_link_caps {
 };
 
 enum trilin_dptx_state {
-	DP_STATE_DISCONNECTED = 0,
-	DP_STATE_CONFIGURED = BIT(0),
-	DP_STATE_INITIALIZED = BIT(1),
-	DP_STATE_READY = BIT(2),
-	DP_STATE_CONNECTED = BIT(3),
-	DP_STATE_CONNECT_NOTIFIED = BIT(4),
-	DP_STATE_DISCONNECT_NOTIFIED = BIT(5),
-	DP_STATE_ENABLED = BIT(6),
-	DP_STATE_SUSPENDED = BIT(7),
-	DP_STATE_INIT_TRAIN = BIT(8),
+	DPTX_STATE_DISCONNECTED = 0,
+	DPTX_STATE_CONFIGURED = BIT(0),
+	DPTX_STATE_INITIALIZED = BIT(1),
+	DPTX_STATE_READY = BIT(2),
+	DPTX_STATE_CONNECTED = BIT(3),
+	DPTX_STATE_CONNECT_NOTIFIED = BIT(4),
+	DPTX_STATE_DISCONNECT_NOTIFIED = BIT(5),
+	DPTX_STATE_ENABLED = BIT(6),
+	DPTX_STATE_SUSPENDED = BIT(7),
+	DPTX_STATE_INIT_TRAIN = BIT(8),
 };
 
 struct trilin_dp_panel {

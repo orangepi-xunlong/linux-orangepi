@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
+// Copyright 2024 Cix Technology Group Co., Ltd.
+
 #include <drm/drm_atomic_helper.h>
 #include <drm/drm_connector.h>
 #include <drm/drm_crtc.h>

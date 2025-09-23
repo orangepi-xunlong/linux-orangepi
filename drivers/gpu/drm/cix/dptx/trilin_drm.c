@@ -1,20 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0
-//------------------------------------------------------------------------------
-//	Trilinear Technologies DisplayPort DRM Driver
-//	Copyright (C) 2023 Trilinear Technologies
-//
-//	This program is free software: you can redistribute it and/or modify
-//	it under the terms of the GNU General Public License as published by
-//	the Free Software Foundation, version 2.
-//
-//	This program is distributed in the hope that it will be useful, but
-//	WITHOUT ANY WARRANTY; without even the implied warranty of
-//	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-//	General Public License for more details.
-//
-//	You should have received a copy of the GNU General Public License
-//	along with this program. If not, see <http://www.gnu.org/licenses/>.
-//------------------------------------------------------------------------------
+// Copyright 2024 Cix Technology Group Co., Ltd.
 
 #include <drm/drm_atomic_helper.h>
 #include <drm/drm_crtc.h>
@@ -101,8 +86,8 @@ trilin_dp_connector_detect(struct drm_connector *connector, bool force)
 	DP_DEBUG("enter\n");
 
 	mutex_lock(&dp->session_lock);
-	if (dp->state & DP_STATE_SUSPENDED) {
-		DP_DEBUG("DP_STATE_SUSPENDED return\n");
+	if (dp->state & DPTX_STATE_SUSPENDED) {
+		DP_DEBUG("DPTX_STATE_SUSPENDED return\n");
 		goto end;
 	}
 
@@ -636,7 +621,7 @@ static void trilin_dp_encoder_enable(struct drm_encoder *encoder,
 					TRILIN_DPTX_INTERRUPT_CFG);
 		} else {
 			mutex_lock(&dp->session_lock);
-			dp->state &= ~DP_STATE_INITIALIZED;
+			dp->state &= ~DPTX_STATE_INITIALIZED;
 			dp->enabled_by_gop = 0;
 			mutex_unlock(&dp->session_lock);
 			DP_INFO("reset dp->state for gop\n");
@@ -672,7 +657,7 @@ static void trilin_dp_encoder_disable(struct drm_encoder *encoder,
 	struct drm_crtc *crtc;
 	struct drm_crtc_state *new_crtc_state;
 
-	if (!(dp->state & DP_STATE_INITIALIZED)) {
+	if (!(dp->state & DPTX_STATE_INITIALIZED)) {
 		DP_DEBUG("[not init]");
 		return;
 	}

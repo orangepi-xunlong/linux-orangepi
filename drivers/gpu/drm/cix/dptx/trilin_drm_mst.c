@@ -1,20 +1,6 @@
-// SPDX-License-Identifier: GPL-2.0
-//------------------------------------------------------------------------------
-//	Trilinear Technologies DisplayPort DRM Driver
-//	Copyright (C) 2023 Trilinear Technologies
-//
-//	This program is free software: you can redistribute it and/or modify
-//	it under the terms of the GNU General Public License as published by
-//	the Free Software Foundation, version 2.
-//
-//	This program is distributed in the hope that it will be useful, but
-//	WITHOUT ANY WARRANTY; without even the implied warranty of
-//	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-//	General Public License for more details.
-//
-//	You should have received a copy of the GNU General Public License
-//	along with this program. If not, see <http://www.gnu.org/licenses/>.
-//------------------------------------------------------------------------------
+//	SPDX-License-Identifier: GPL-2.0
+//	Copyright 2024 Cix Technology Group Co., Ltd.
+
 #include <drm/drm_atomic_helper.h>
 #include <drm/drm_crtc.h>
 #include <drm/drm_device.h>
@@ -187,7 +173,7 @@ static void dp_mst_cbs_poll_hdp_irq(struct drm_dp_mst_topology_mgr *mgr)
 	struct trilin_dp *dp = topology_mgr_to_trilin(mgr);
 	struct trilin_dp_mst_private *mst = &dp->mst.private_info;
 
-	if (!mst->mst_session_state) { //(dp->state & DP_STATE_SUSPENDED)
+	if (!mst->mst_session_state) { //(dp->state & DPTX_STATE_SUSPENDED)
 		DP_DEBUG("mst_hpd_irq received before mst session start\n");
 		return;
 	}
@@ -223,7 +209,7 @@ int trilin_dp_mst_resume(struct trilin_dp *dp)
 {
 	int ret = 0;
 
-	if (dp->mst.mst_active && (dp->state & DP_STATE_SUSPENDED)) {
+	if (dp->mst.mst_active && (dp->state & DPTX_STATE_SUSPENDED)) {
 		ret = drm_dp_mst_topology_mgr_resume(dp->mst_mgr, true);
 		if (ret) {
 			DP_WARN("mst resume failed.");
@@ -760,7 +746,7 @@ static void trilin_mst_encoder_disable(struct drm_encoder *encoder)
 	DP_MST_DEBUG("enter\n");
 	mutex_lock(&mst->mst_lock);
 
-	if (!(dp->state & DP_STATE_INITIALIZED)) {
+	if (!(dp->state & DPTX_STATE_INITIALIZED)) {
 		DP_DEBUG("[not init]");
 		return;
 	}

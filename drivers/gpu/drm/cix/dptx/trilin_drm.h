@@ -1,4 +1,6 @@
-/* SPDX-License-Identifier: GPL-2.0*/
+//	SPDX-License-Identifier: GPL-2.0
+//	Copyright 2024 Cix Technology Group Co., Ltd.
+
 #ifndef __TRILIN_DP_DRM_H__
 #define __TRILIN_DP_DRM_H__
 
