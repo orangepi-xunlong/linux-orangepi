@@ -1313,10 +1313,9 @@ static int sky1_pcie_parse_wake_gpio(struct sky1_pcie *pcie)
 {
 	struct device *dev = pcie->dev;
 	struct gpio_desc *gpiodesc;
-	int ret = 0;
 
 	if (pcie->plat == PCIE_PLAT_EMU)
-		return ret;
+		return 0;
 
 	gpiodesc = devm_gpiod_get_optional(dev, "wake", GPIOD_IN);
 	if (IS_ERR(gpiodesc)) {
@@ -1325,7 +1324,13 @@ static int sky1_pcie_parse_wake_gpio(struct sky1_pcie *pcie)
 	}
 	pcie->wake = gpiodesc;
 
-	return ret;
+	if (pcie->wake) {
+		dev_dbg(dev, "wakeup-source\n");
+		device_init_wakeup(dev, true);
+		enable_irq_wake(gpiod_to_irq(pcie->wake));
+	}
+
+	return 0;
 }
 
 static int sky1_pcie_en_ep_power(struct sky1_pcie *pcie, bool en)
