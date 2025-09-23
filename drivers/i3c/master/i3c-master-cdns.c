@@ -700,10 +700,11 @@ static void cdns_i3c_master_end_xfer_locked(struct cdns_i3c_master *master,
 			ret = -EINVAL;
 			break;
 		}
+		if (ret)
+			dev_warn(master->dev, "ccc_id = %x, err = %x\n", ccc_id,
+				err);
 	}
-	if (ret)
-		dev_info(master->dev, "ccc_id = %x, ret = %d\n",
-			 ccc_id, ret);
+
 	xfer->ret = ret;
 	complete(&xfer->comp);
 
@@ -1711,9 +1712,15 @@ static int __maybe_unused cdns_i3c_runtime_resume(struct device *dev)
 static int __maybe_unused cdns_i3c_suspend(struct device *dev)
 {
 	struct cdns_i3c_master *master = dev_get_drvdata(dev);
-	u32 rrx = 0, ret = 0;
+	u32 rrx = 0;
+	int ret = 0;
 
 	ret = pm_runtime_resume_and_get(dev);
+	if (ret < 0) {
+		dev_err(dev, "%s pm_runtime_resume_and_get failed\n", __func__);
+		return ret;
+	}
+
 	/*begin to save register to ram*/
 	master->need_save_reg[CTRL_INDEX].value = readl(master->regs + CTRL);
 	master->need_save_reg[CTRL_INDEX].reg   = CTRL;
@@ -1768,21 +1775,36 @@ static int __maybe_unused cdns_i3c_suspend(struct device *dev)
 static int __maybe_unused cdns_i3c_resume(struct device *dev)
 {
 	struct cdns_i3c_master *master = dev_get_drvdata(dev);
-	u32 reg_num = 0, ret = 0;
+	u32 reg_num = 0;
+	int ret = 0;
+
+	pinctrl_pm_select_default_state(dev);
 
 	pm_runtime_force_resume(dev);
 	ret = pm_runtime_resume_and_get(dev);
-	pinctrl_pm_select_default_state(dev);
+	if (ret) {
+		dev_err(dev, "%s pm_runtime_resume_and_get failed\n", __func__);
+		return ret;
+	}
+
 	/* reset */
 	reset_control_assert(master->i3c_reset);
 	/* release reset */
 	reset_control_deassert(master->i3c_reset);
+
 	while (reg_num < SAVE_MAX_REG_SIZE) {
 		writel(master->need_save_reg[reg_num].value, master->regs + master->need_save_reg[reg_num].reg);
 		reg_num++;
 	}
 
+	ret = i3c_master_do_daa(&master->base);
+	if (ret) {
+		dev_err(dev, "%s do daa failed\n", __func__);
+		return ret;
+	}
+
 	pm_runtime_put(dev);
+
 	return 0;
 }
 
