@@ -512,6 +512,7 @@
 	pinctrl_pcie_x1_1_rc: pinctrl_pcie_x1_1_rc {/*x1_1*/
 		sky1,pins = <
 			CIX_PAD_GPIO006_FUNC_GPIO006 (PULL_DOWN|DS_LEVEL4)
+			CIX_PAD_GPIO030_FUNC_GPIO030 (PULL_DOWN|DS_LEVEL4)
 		>;
 	};
 
@@ -2213,6 +2214,7 @@ pinctrl_gmac1: pinctrl_gmac1 {
 	pinctrl-names = "default";
 	pinctrl-0 = <&pinctrl_pcie_x1_1_rc>;
 	reset-gpios = <&s5_gpio0 5 GPIO_ACTIVE_HIGH>;
+	wake-gpios = <&s5_gpio0 19 GPIO_ACTIVE_HIGH>;
 	status = "okay";
 };
 
