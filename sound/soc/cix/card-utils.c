@@ -150,7 +150,7 @@ static int dai_set_sysclk(struct snd_pcm_substream *substream,
 			mclk_fs = 256;
 			mclk_div = 2;
 		} else if (sample_rate == 192000) {
-			mclk_fs = 128;
+			mclk_fs = 256;
 			mclk_div = 0;
 		}
 
