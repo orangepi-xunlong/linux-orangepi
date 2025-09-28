@@ -1492,7 +1492,8 @@ static void arm_smmu_write_strtab_ent(struct arm_smmu_master *master, u32 sid,
 		val |= FIELD_PREP(STRTAB_STE_0_CFG, STRTAB_STE_0_CFG_S2_TRANS);
 	}
 
-	if (master->ats_enabled)
+	/* sky1 pcie W/A for unexpected translated/untranslated msg */
+	if (master->ats_enabled || dev_is_pci(master->dev))
 		dst[1] |= cpu_to_le64(FIELD_PREP(STRTAB_STE_1_EATS,
 						 STRTAB_STE_1_EATS_TRANS));
 
