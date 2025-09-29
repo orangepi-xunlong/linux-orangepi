@@ -41,6 +41,8 @@
 #define I_CFG_9 (CDNS_PCIE_IP_REG_BANK_BASE + 0x724)
 #define IP_REG_I_DBG_STS_0 (CDNS_PCIE_IP_REG_BANK_BASE + 0x420)
 
+#define I_HAL_CTRL_DEC_TLP_FILTER (CDNS_PCIE_IP_REG_BANK_BASE + 0x100c)
+
 /* local interrupt */
 #define I_LOCAL_ERR_STS_REG0 (CDNS_PCIE_IP_REG_BANK_BASE + 0x1414)
 #define I_LOCAL_ERR_MASK_REG0 (CDNS_PCIE_IP_REG_BANK_BASE + 0x1418)
@@ -1704,6 +1706,16 @@ static void sky1_pcie_set_l0s_disable(struct sky1_pcie *pcie)
 	sky1_pcie_ctrl_writel_reg(pcie, offset + PCI_EXP_LNKCAP, reg);
 }
 
+static void sky1_pcie_filter_msg(struct sky1_pcie *pcie)
+{
+	u32 reg;
+
+	reg = cdns_pcie_readl(pcie->cdns_pcie, I_HAL_CTRL_DEC_TLP_FILTER);
+	/* bit3: LTR, bit6: PTM */
+	reg |= BIT(3) | BIT(6);
+	cdns_pcie_writel(pcie->cdns_pcie, I_HAL_CTRL_DEC_TLP_FILTER, reg);
+}
+
 static void sky1_pcie_init(struct sky1_pcie *pcie)
 {
 	struct device *dev = pcie->dev;
@@ -1711,6 +1723,7 @@ static void sky1_pcie_init(struct sky1_pcie *pcie)
 	dev_dbg(dev, "%s, %i\n", __func__, __LINE__);
 	sky1_pcie_set_devctrl(pcie);
 	sky1_pcie_set_l0s_disable(pcie);
+	sky1_pcie_filter_msg(pcie);
 
 	// if set D3hot，it will hang, power state change set to 0
 	writel(0, pcie->reg_base + POWER_STATE_CHANGE_CTRL);
