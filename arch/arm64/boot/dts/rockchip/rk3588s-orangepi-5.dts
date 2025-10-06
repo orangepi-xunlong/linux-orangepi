@@ -27,6 +27,13 @@
 	status = "okay";
 };
 
+&sata0 {
+	sata-port@0 {
+		target-supply = <&vcc3v3_pcie20>;
+	};
+};
+
+
 &sfc {
 	status = "okay";
 };
