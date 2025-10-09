@@ -498,7 +498,7 @@ static int cdns_i2s_mc_set_fmt(struct snd_soc_dai *cpu_dai, unsigned int fmt)
 	return 0;
 }
 
-static int cdns_i2s_mc_startup(struct snd_pcm_substream *substream,
+static int cdns_i2s_mc_prepare(struct snd_pcm_substream *substream,
 			       struct snd_soc_dai *cpu_dai)
 {
 	struct cdns_i2s_mc_priv *i2s_mc_priv = snd_soc_dai_get_drvdata(cpu_dai);
@@ -740,8 +740,8 @@ static const struct snd_soc_dai_ops cdns_i2s_mc_dai_ops = {
 	.probe = cdns_i2s_mc_dai_probe,
 	.set_fmt = cdns_i2s_mc_set_fmt,
 
-	.startup = cdns_i2s_mc_startup,
 	.hw_params = cdns_i2s_mc_hw_params,
+	.prepare = cdns_i2s_mc_prepare,
 	.trigger = cdns_i2s_mc_trigger,
 };
 
