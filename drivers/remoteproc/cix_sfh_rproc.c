@@ -407,27 +407,26 @@ static void cix_rcsu_remap_sfh(void)
 static void cix_sfh_mbox_clock_enable(struct cix_sfh_rproc *rproc_priv)
 {
 	regmap_update_bits(rproc_priv->regmap, rproc_priv->offset + SFH_CLK_EN,
-				(CLK_MBOX0_EN | CLK_MBOX1_EN | CLK_MBOX2_EN | CLK_MBOX3_EN),
-				(CLK_MBOX0_EN | CLK_MBOX1_EN | CLK_MBOX2_EN | CLK_MBOX3_EN));
+			   0xffffffff, 0xffffffff);
 }
 
 static void cix_sfh_mbox_clock_disable(struct cix_sfh_rproc *rproc_priv)
 {
 	regmap_clear_bits(rproc_priv->regmap, rproc_priv->offset + SFH_CLK_EN,
-				(CLK_MBOX0_EN | CLK_MBOX1_EN | CLK_MBOX2_EN | CLK_MBOX3_EN));
+			  0xffffffff);
 }
 
 static void cix_sfh_mbox_reset(struct cix_sfh_rproc *rproc_priv)
 {
-        regmap_update_bits(rproc_priv->regmap, rproc_priv->offset + SFH_SW_RST_APB,
-                                (SW_RST_APB_MBOX0 | SW_RST_APB_MBOX1 | SW_RST_APB_MBOX2 | SW_RST_APB_MBOX3), 0);
+	regmap_update_bits(rproc_priv->regmap,
+			   rproc_priv->offset + SFH_SW_RST_APB, 0xffffffff, 0);
 }
 
 static void cix_sfh_mbox_release_reset(struct cix_sfh_rproc *rproc_priv)
 {
-	regmap_update_bits(rproc_priv->regmap, rproc_priv->offset + SFH_SW_RST_APB,
-				(SW_RST_APB_MBOX0 | SW_RST_APB_MBOX1 | SW_RST_APB_MBOX2 | SW_RST_APB_MBOX3),
-				(SW_RST_APB_MBOX0 | SW_RST_APB_MBOX1 | SW_RST_APB_MBOX2 | SW_RST_APB_MBOX3));
+	regmap_update_bits(rproc_priv->regmap,
+			   rproc_priv->offset + SFH_SW_RST_APB, 0xffffffff,
+			   0xffffffff);
 }
 
 static void sfh_hub2nic_remap(struct cix_sfh_rproc *rproc_priv)
