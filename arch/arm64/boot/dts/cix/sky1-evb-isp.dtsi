@@ -1,0 +1,123 @@
+&i7_isp {
+	status = "okay";
+};
+
+&armcb_config {
+	status = "okay";
+};
+
+&armcb_ispmem {
+	status = "okay";
+};
+
+&cix_vi_hw {
+	status = "okay";
+};
+
+&cam_power_en_0 {
+	status = "okay";
+};
+
+&cam_power_en_1 {
+	status = "okay";
+};
+
+&cam_power_en_2 {
+	status = "okay";
+};
+
+&cam_power_en_3 {
+	status = "okay";
+};
+
+&i2c0 {
+	imgsensor00: imgsensor00@34 {
+		compatible = "image,sensor0";
+		#address-cells = <1>;
+		#size-cells = <0>;
+		reg = <0x34>;
+		pinctrl-names = "default","gpio";
+		pinctrl-0 = <&pinctrl_cam0_hw>;
+		pinctrl-1 = <&pinctrl_cam0_hw>;
+		power0-supply = <&cam_power_en_0>;
+		power1-supply = <&cam_power_en_1>;
+		reset-gpios = <&fch_gpio1 12 GPIO_ACTIVE_HIGH>;
+		pwdn-gpios = <&fch_gpio1 15 GPIO_ACTIVE_HIGH>;
+		clocks = <&scmi_clk CLK_TREE_CAMERA_MCLK0>;
+		clock-names = "mclk";
+		cix,camera-module-index = <0>;
+		actuator-src = <&isp_motor>;
+		isp-src = <&i7_isp>;
+		status = "okay";
+	};
+
+	isp_motor: motor0@40 {
+		compatible = "motor,ms42919";
+		#address-cells = <1>;
+		#size-cells = <0>;
+		reg = <0x40>;
+		pi-max-frequency = <124999999>;
+		status = "okay";
+	};
+};
+
+&i2c1 {
+	imgsensor02: imgsensor02@38 {
+		compatible = "image,sensor0";
+		#address-cells = <1>;
+		#size-cells = <0>;
+		reg = <0x38>;
+		pinctrl-names = "default","gpio";
+		pinctrl-0 = <&pinctrl_cam2_hw>;
+		pinctrl-1 = <&pinctrl_cam2_hw>;
+		power0-supply = <&cam_power_en_2>;
+		power1-supply = <&cam_power_en_3>;
+		reset-gpios = <&fch_gpio1 10 GPIO_ACTIVE_HIGH>;
+		pwdn-gpios = <&fch_gpio1 7 GPIO_ACTIVE_HIGH>;
+		clocks = <&scmi_clk CLK_TREE_CAMERA_MCLK2>;
+		clock-names = "mclk";
+
+		cix,camera-module-index = <2>;
+		status = "okay";
+	};
+};
+
+&i2c3 {
+	imgsensor01: imgsensor01@36 {
+		compatible = "image,sensor0";
+		#address-cells = <1>;
+		#size-cells = <0>;
+		reg = <0x36>;
+		pinctrl-names = "default","gpio";
+		pinctrl-0 = <&pinctrl_cam1_hw>;
+		pinctrl-1 = <&pinctrl_cam1_hw>;
+		power0-supply = <&cam_power_en_0>;
+		power1-supply = <&cam_power_en_1>;
+		reset-gpios = <&fch_gpio1 17 GPIO_ACTIVE_HIGH>;
+		pwdn-gpios = <&fch_gpio1 19 GPIO_ACTIVE_HIGH>;
+		clocks = <&scmi_clk CLK_TREE_CAMERA_MCLK1>;
+		clock-names = "mclk";
+		cix,camera-module-index = <1>;
+		status = "okay";
+	};
+};
+
+&i2c4 {
+	imgsensor03: imgsensor03@3a {
+		compatible = "image,sensor0";
+		#address-cells = <1>;
+		#size-cells = <0>;
+		reg = <0x3a>;
+		pinctrl-names = "default","gpio";
+		pinctrl-0 = <&pinctrl_cam3_hw>;
+		pinctrl-1 = <&pinctrl_cam3_hw>;
+		power0-supply = <&cam_power_en_2>;
+		power1-supply = <&cam_power_en_3>;
+		reset-gpios = <&fch_gpio1 13 GPIO_ACTIVE_HIGH>;
+		pwdn-gpios = <&fch_gpio1 14 GPIO_ACTIVE_HIGH>;
+		clocks = <&scmi_clk CLK_TREE_CAMERA_MCLK3>;
+		clock-names = "mclk";
+		cix,camera-module-index = <3>;
+		status = "okay";
+	};
+};

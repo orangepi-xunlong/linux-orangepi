@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: GPL-2.0
+config HIEVENT
+	tristate "Enable hievent"
+	help
+	  hievent buffer manager
+
+config BBOX_BUFFER_SIZE
+	int "bbox buffer size"
+	depends on HIEVENT
+	default 2048
+	help
+	  Define the default ring buffer size of BBOX

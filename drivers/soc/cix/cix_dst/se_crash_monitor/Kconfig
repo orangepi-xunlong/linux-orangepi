@@ -1,0 +1,8 @@
+# SPDX-License-Identifier: GPL-2.0-only
+
+config PLAT_SKY1_SE_PM_CRASH
+	bool "Platform sky1 pm se crash monitor"
+	depends on PLAT_BBOX && CIX_AP2SE_IPC
+	default y
+	help
+	  This feature support to detect sky1 se pm error

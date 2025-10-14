@@ -1,0 +1,10 @@
+#ifndef __DSM_ERROR_ID_H__
+#define __DSM_ERROR_ID_H__
+
+/* PM ERROR */
+#define DSM_PM_ERROR_START 920010000
+#define DSM_PM_PMIC_EXCEPTION           (DSM_PM_ERROR_START + 0x0001)
+#define DSM_PM_CHARGER_EXCEPTION        (DSM_PM_ERROR_START + 0x0002)
+#define DSM_PM_EC_EXCEPTION             (DSM_PM_ERROR_START + 0x0003)
+
+#endif /* __DSM_ERROR_ID_H__ */

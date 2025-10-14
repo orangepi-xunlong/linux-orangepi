@@ -1,0 +1,192 @@
+/*
+ * Copyright 2024 Cix Technology Group Co., Ltd.
+ *
+ * SPDX-License-Identifier: BSD-3-Clause
+ */
+
+/dts-v1/;
+
+#include "sky1-evb.dts"
+
+/ {
+	reserved-memory {
+		/delete-node/ dsp_vdev0vring0;
+		/delete-node/ dsp_vdev0vring1;
+		/delete-node/ dsp_vdev0buffer;
+		/delete-node/ dsp_reserved;
+		/delete-node/ dsp_reserved_heap;
+		/delete-node/ audio_alsa;
+		/delete-node/ audio_alsa_hda;
+
+		dsp_reserved0: dsp_reserved0 {
+			reg = <0x0 0xce000000 0x0 0x1000000>;
+			no-map;
+		};
+
+		dsp_reserved1: dsp_reserved1 {
+			compatible = "shared-dma-pool";
+			reg = <0x0 0xcf000000 0x0 0x1000000>;
+			no-map;
+		};
+	};
+
+	alc5682-alc1019-sound {
+		compatible = "simple-audio-card";
+		simple-audio-card,name = "alc5682-alc1019-audio";
+
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		simple-audio-card,dai-link@0 { /* alc1019 pa */
+			reg = <0>;
+			format = "i2s";
+			bitclock-master = <&sndcpu0>;
+			frame-master = <&sndcpu0>;
+
+			sndcpu0: cpu {
+				sound-dai = <&hifi5 1>;
+			};
+			sndcodec0: codec {
+				pd-gpio,pa;
+				pdb0-gpios = <&fch_gpio3 5 GPIO_ACTIVE_HIGH>;
+				pdb1-gpios = <&fch_gpio3 6 GPIO_ACTIVE_HIGH>;
+				pdb2-gpios = <&fch_gpio3 7 GPIO_ACTIVE_HIGH>;
+				pdb3-gpios = <&fch_gpio3 8 GPIO_ACTIVE_HIGH>;
+
+				sound-dai = <&dummy_codec 0>;
+			};
+		};
+
+		simple-audio-card,dai-link@1 { /* alc5682 codec */
+			reg = <1>;
+			format = "i2s";
+			bitclock-master = <&sndcpu1>;
+			frame-master = <&sndcpu1>;
+
+			sndcpu1: cpu {
+				sound-dai = <&hifi5 0>;
+			};
+			sndcodec1: codec {
+				mclk-fs = <512>;
+				jack-det,hs;
+
+				sound-dai = <&alc5682 0>;
+			};
+		};
+	};
+};
+
+&sound {
+	status = "disabled";
+};
+
+&codec_alc5682 {
+	status = "disabled";
+};
+
+&i2s0 {
+	status = "disabled";
+};
+
+&i2s_lp {
+	status = "disabled";
+};
+
+&i2s2 {
+	status = "disabled";
+};
+
+&pa_alc1019 {
+	status = "disabled";
+};
+
+&i2s3 {
+	status = "disabled";
+};
+
+&dptx0_audio {
+	status = "disabled";
+};
+
+&i2s5 {
+	status = "disabled";
+};
+
+&dptx1_audio {
+	status = "disabled";
+};
+
+&i2s6 {
+	status = "disabled";
+};
+
+&dptx2_audio {
+	status = "disabled";
+};
+
+&i2s7 {
+	status = "disabled";
+};
+
+&dptx3_audio {
+	status = "disabled";
+};
+
+&i2s8 {
+	status = "disabled";
+};
+
+&dptx4_audio {
+	status = "disabled";
+};
+
+&i2s9 {
+	status = "disabled";
+};
+
+&audss_dmac {
+	status = "disabled";
+};
+
+&iomuxc {
+	pinctrl_i2s0_i2s3: pinctrl_i2s0_i2s3 {
+		sky1,pins = <
+			CIX_PAD_HDA_BITCLK_FUNC_I2S0_SCK    	(PULL_DOWN|ST|DS_LEVEL12)	/* I2S0_SCK */
+			CIX_PAD_HDA_RST_L_FUNC_I2S0_DATA_IN 	(PULL_DOWN|ST|DS_LEVEL12)	/* I2S0_DATA_IN */
+			CIX_PAD_HDA_SDIN0_FUNC_I2S0_MCLK    	(PULL_DOWN|ST|DS_LEVEL12)	/* I2S0_MCLK */
+			CIX_PAD_HDA_SDOUT0_FUNC_I2S0_DATA_OUT 	(PULL_UP|ST|DS_LEVEL12)		/* I2S0_DATA_OUT */
+			CIX_PAD_HDA_SYNC_FUNC_I2S0_WS 	    	(PULL_UP|ST|DS_LEVEL12)		/* I2S0_WS */
+
+			CIX_PAD_I2S2_MCLK_FUNC_I2S2_MCLK 	   (PULL_DOWN|ST|DS_LEVEL12) 	  /* i2s2_mclk */
+			CIX_PAD_I2S2_RSCK_FUNC_I2S2_RSCK 	   (PULL_DOWN|ST|DS_LEVEL12)	  /* i2s2_rsck */
+			CIX_PAD_I2S2_RWS_FUNC_I2S2_RWS 		   (PULL_UP|ST|DS_LEVEL12)     	  /* i2s2_rws */
+			CIX_PAD_I2S2_TSCK_FUNC_I2S2_TSCK 	   (PULL_DOWN|ST|DS_LEVEL12) 	  /* i2s2_tsck */
+			CIX_PAD_I2S2_TWS_FUNC_I2S2_TWS 		   (PULL_UP|ST|DS_LEVEL12)     	  /* i2s2_tws */
+			CIX_PAD_I2S2_DATA_IN0_FUNC_I2S2_DATA_IN0   (PULL_DOWN|ST|DS_LEVEL12)  	  /* i2s2_data_in0 */
+			CIX_PAD_I2S2_DATA_IN1_FUNC_I2S2_DATA_IN1   (PULL_DOWN|ST|DS_LEVEL12)      /* i2s2_data_in1 */
+			CIX_PAD_I2S2_DATA_OUT0_FUNC_I2S2_DATA_OUT0 (PULL_UP|ST|DS_LEVEL12)        /* i2s2_data_out0 */
+			CIX_PAD_I2S2_DATA_OUT1_FUNC_I2S2_DATA_OUT1 (PULL_UP|ST|DS_LEVEL12)        /* i2s2_data_out1 */
+			CIX_PAD_I2S2_DATA_OUT2_FUNC_I2S2_DATA_OUT2 (PULL_UP|ST|DS_LEVEL12)        /* i2s2_data_out2 */
+			CIX_PAD_I2S2_DATA_OUT3_FUNC_I2S2_DATA_OUT3 (PULL_UP|ST|DS_LEVEL12)        /* i2s2_data_out3 */
+		>;
+	};
+};
+
+&hifi5 {
+	#sound-dai-cells = <1>;
+	compatible = "cix,sky1-dsp";
+
+	/delete-property/interrupts;
+	/delete-property/firmware-name;
+
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_i2s0_i2s3>;
+
+	mbox-names = "txdb", "rxdb";
+	mboxes = <&mbox_ap2dsp 8>, /* index=8: db base channel */
+		 <&mbox_dsp2ap 8>;
+
+	memory-region = <&dsp_reserved1>, <&dsp_reserved0>;
+
+	status = "okay";
+};

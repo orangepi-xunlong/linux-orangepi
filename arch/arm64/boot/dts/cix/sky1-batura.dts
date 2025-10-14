@@ -1,0 +1,104 @@
+/*
+ * Copyright 2024 Cix Technology Group Co., Ltd.
+ *
+ * SPDX-License-Identifier: BSD-3-Clause
+ */
+
+/dts-v1/;
+
+#include "sky1.dtsi"
+
+/ {
+	model = "CIX sky1 BATURA board";
+	compatible = "cix,sky1";
+
+	chosen {
+		stdout-path = "serial2:115200n8";
+	};
+};
+
+&thermal_zones {
+	cpu-m1-thermal {
+		polling-delay-passive = <100>;
+		polling-delay = <1000>;
+		thermal-sensors = <&scmi_sensor CPU_M1_TEMP_SENSOR_ID>;
+
+		trips {
+			m1_trip0: trip-point-0 {
+				temperature = <85000>;
+				hysteresis = <1000>;
+				type = "passive";
+			};
+		};
+
+		cooling-maps {
+			map0 {
+				trip = <&m1_trip0>;
+				cooling-device = <&CPU6 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>;
+			};
+		};
+	};
+
+	cpu-b1-thermal {
+		polling-delay-passive = <100>;
+		polling-delay = <1000>;
+		thermal-sensors = <&scmi_sensor CPU_B1_TEMP_SENSOR_ID>;
+
+		trips {
+			b1_trip0: trip-point-0 {
+				temperature = <85000>;
+				hysteresis = <1000>;
+				type = "passive";
+			};
+		};
+
+		cooling-maps {
+			map0 {
+				trip = <&b1_trip0>;
+				cooling-device = <&CPU10 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>;
+			};
+		};
+	};
+
+	cpu-m0-thermal {
+		polling-delay-passive = <100>;
+		polling-delay = <1000>;
+		thermal-sensors = <&scmi_sensor CPU_M0_TEMP_SENSOR_ID>;
+
+		trips {
+			m0_trip0: trip-point-0 {
+				temperature = <85000>;
+				hysteresis = <1000>;
+				type = "passive";
+			};
+		};
+
+		cooling-maps {
+			map0 {
+				trip = <&m0_trip0>;
+				cooling-device = <&CPU4 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>;
+			};
+		};
+	};
+
+	cpu-b0-thermal {
+		polling-delay-passive = <100>;
+		polling-delay = <1000>;
+		thermal-sensors = <&scmi_sensor CPU_B0_TEMP_SENSOR_ID>;
+
+		trips {
+			b0_trip0: trip-point-0 {
+				temperature = <85000>;
+				hysteresis = <1000>;
+				type = "passive";
+			};
+		};
+
+		cooling-maps {
+			map0 {
+				trip = <&b0_trip0>;
+				cooling-device = <&CPU8 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>;
+			};
+		};
+	};
+};

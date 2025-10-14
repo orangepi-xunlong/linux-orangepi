@@ -1,0 +1,19 @@
+# SPDX-License-Identifier: GPL-2.0-only
+
+config PM_EXCEPTION_PROTOCOL
+	bool "Enable support for PM exception protocol"
+	depends on ARM_SCMI_PROTOCOL
+
+
+config PM_EXCEPTION_DRIVER
+	default n
+	bool "Enable support for PM exception driver"
+	select PM_EXCEPTION_PROTOCOL
+
+config PM_EXCP_DSM_DRIVER
+	default n
+	bool "Enable support for PM dsm driver"
+
+config CIX_EC_EXCEPTION_DRIVER
+	default n
+	bool "Enable support for EC exception driver"

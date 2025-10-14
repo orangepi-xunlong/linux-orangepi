@@ -1,0 +1,68 @@
+# SPDX-License-Identifier: (GPL-2.0 OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: "http://devicetree.org/schemas/mailbox/cix-mailbox.yaml#"
+$schema: "http://devicetree.org/meta-schemas/core.yaml#"
+
+title: Cix mailbox controller bindings
+
+maintainers:
+  - Lihua Liu <Lihua.Liu@cixcomputing.com>
+
+description:
+  CIX mailbox controller is used to exchange message within
+  multiple processors, such as AP, AUDIO DSP, SensorHub MCU,
+  etc. It supports 10 mailbox channels with different operating
+  mode and every channel is unidirectional.
+
+properties:
+  compatible:
+    const: cix,sky1-mbox
+
+  reg:
+    maxItems: 1
+
+  interrupts:
+    maxItems: 1
+
+  "#mbox-cells":
+    description: |
+      <&phandle channel>
+      phandle   : Label name of controller
+      channel   : Channel number
+
+      This controller supports three types of unidirectional channels, they are
+      1 register based channel, 1 fifo based channel and 8 fast channels.
+      A total of 10 channels for each controller. Following types are
+      supported:
+      channel 0_7 - Fast channel with 32bit transmit register and IRQ support.
+      channel 8   - Reg based channel with 32*32bit transsmit register and
+                    Doorbell+transmit acknowledgment IRQ support
+      channel 9   - Fifo based channel with 32*32bit depth fifo and IRQ support.
+    const: 1
+
+  cix,mbox_dir:
+    description: Direction of the mailbox (0:TX or 1:RX)
+    enum: [0, 1]
+
+required:
+  - compatible
+  - reg
+  - interrupts
+  - "#mbox-cells"
+  - cix,mbox_dir
+
+additionalProperties: false
+
+examples:
+  - |
+    #include <dt-bindings/interrupt-controller/arm-gic.h>
+
+    mbox0: mailbox@30000000 {
+        compatible = "cix,sky1-mbox";
+        reg = <0x0 0x30000000 0x0 0x10000>;
+        interrupts = <GIC_SPI 136 IRQ_TYPE_LEVEL_HIGH>;
+        #mbox-cells = <1>;
+        cix,mbox_dir = <0>;
+        status = "okay";
+    };

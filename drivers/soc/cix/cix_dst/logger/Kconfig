@@ -1,0 +1,7 @@
+# SPDX-License-Identifier: GPL-2.0
+
+config PLAT_LOGGER
+	bool "platform log driver"
+	default n
+	help
+	  This adds support for system-wide logging using two log buffers.

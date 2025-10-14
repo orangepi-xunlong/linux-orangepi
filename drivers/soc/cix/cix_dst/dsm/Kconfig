@@ -1,0 +1,17 @@
+# SPDX-License-Identifier: GPL-2.0
+#
+# Platform device state monitor configuration
+#
+
+config PLAT_DSM
+	bool "platform dsm"
+	default n
+	help
+	  If you say yes here you get support for DSM.
+
+config PLAT_DSM_TEST
+	bool "platform dsm test"
+	default n
+	help
+	  If you say yes here you get support for DSM test.
+	  

@@ -1,0 +1,27 @@
+/*
+ * Copyright 2024 Cix Technology Group Co., Ltd.
+ *
+ * SPDX-License-Identifier: BSD-3-Clause
+ */
+#include "sky1-emu.dts"
+
+&gic {
+	#redistributor-regions = <12>;
+	reg = <0x0 0x0e010000 0 0x10000>,	/* GICD */
+	      <0x0 0x0e090000 0 0x40000>,	/* GICR0 */
+	      <0x0 0x0e0d0000 0 0x40000>,	/* GICR1 */
+	      <0x0 0x0e110000 0 0x40000>,	/* GICR2 */
+	      <0x0 0x0e150000 0 0x40000>,	/* GICR3 */
+	      <0x0 0x0e190000 0 0x40000>,	/* GICR4 */
+	      <0x0 0x0e1d0000 0 0x40000>,	/* GICR5 */
+	      <0x0 0x0e210000 0 0x40000>,	/* GICR6 */
+	      <0x0 0x0e250000 0 0x40000>,	/* GICR7 */
+	      <0x0 0x0e290000 0 0x40000>,	/* GICR8 */
+	      <0x0 0x0e2d0000 0 0x40000>,	/* GICR9 */
+	      <0x0 0x0e310000 0 0x40000>,	/* GICR10 */
+	      <0x0 0x0e350000 0 0x40000>;	/* GICR11 */
+};
+
+&smmu_mmhub{
+         status = "disabled";
+};

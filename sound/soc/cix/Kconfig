@@ -1,0 +1,27 @@
+# SPDX-License-Identifier: GPL-2.0-only
+menu "ASoC support for Cixtech"
+
+comment "ASoC options for Cixtech CPUs:"
+
+config SND_SOC_CIX
+	tristate "CIX ASoC"
+	imply SND_SOC_RT5682S
+	default n
+	help
+	  Select Y or M to add support for CIX sound card
+
+
+config SND_SOC_CDNS_I2S_SC
+	tristate "Cadence I2S-SC Controller Driver"
+	select SND_SOC_GENERIC_DMAENGINE_PCM
+	help
+	  Say Y or M if you want to add driver support for Cadence
+	  I2S-SC (SingleChannel) controller.
+
+config SND_SOC_CDNS_I2S_MC
+	tristate "Cadence I2S-MC Controller Driver"
+	select SND_SOC_GENERIC_DMAENGINE_PCM
+	help
+	  Say Y or M if you want to add driver support for Cadence
+	  I2S-MC (MultiChannel) controller.
+endmenu

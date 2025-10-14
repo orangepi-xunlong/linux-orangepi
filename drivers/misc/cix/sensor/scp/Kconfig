@@ -1,0 +1,10 @@
+config CIX_SF_SCP_SUPPORT
+	bool "Specify Interface Support SCP"
+	default n
+	help
+	  SCP is a CIX in-house star-core which can receive
+	  command from IPI interface.
+	  Set Y to enable this feature.
+	  If unsure,
+	  Set N to stay with legancy feature.
+

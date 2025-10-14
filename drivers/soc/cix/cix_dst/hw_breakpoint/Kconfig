@@ -1,0 +1,10 @@
+# SPDX-License-Identifier: GPL-2.0
+
+config PLAT_HW_BREAKPOINT
+	bool "Platform hardware breakpoint support"
+	default y
+	depends on HAVE_HW_BREAKPOINT
+	select KALLSYMS
+	select KALLSYMS_ALL
+	help
+	  This feature support to enable hardware breakpoint

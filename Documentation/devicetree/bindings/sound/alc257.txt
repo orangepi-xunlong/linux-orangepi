@@ -1,0 +1,14 @@
+Alc256 ADC/DAC
+
+Required properties:
+
+  - compatible : "realtek,alc257"
+
+  - "#sound-dai-cells" :
+    const: 0
+
+Example:
+
+alc257_codec {
+        compatible = "realtek,alc257";
+};

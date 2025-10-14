@@ -1,0 +1,80 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/clock/cix,sky1-audss-clock.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Cixtech Sky1 SoC Audio SubSystem Clock Controller Driver
+
+maintainers:
+  - Joakim Zhang <joakim.zhang@cixtech.com>
+
+description: |
+  All available clocks are defined as preprocessor macros in
+  include/dt-bindings/clock/sky1-audss.h header.
+
+properties:
+  compatible:
+    const: cix,sky1-audss-clock
+
+  reg:
+    maxItems: 1
+
+  clocks:
+    description:
+      - audio_pll0 (FRAC) provides "audio_clk0" and "audio_clk1" that generates
+        I2S function clock, such as 8KHz, 16KHz etc, "audio_clk0" is also the clock
+        source of MCLK.
+      - audio_pll1 (FRAC) provides "audio_clk2" and "audio_clk3" that generates
+        I2S function clock, such as 11.025KHz, 22.5KHz etc, "audio_clk2" is also the clock
+        source of MCLK.
+      - mmsys_pll provides "audio_clk4" that generates AXI or APB clock for most devices
+        in audio subsystem (DSP, NOC, SRAM, HDA, DMAC, I2S, Timer and Mailbox).
+      - mmsys_pll provides "audio_clk5" that generates a fixed 48MHz clock for HDA, Timer
+        and Watchdog.
+
+  clock-names:
+    minItems: 6
+    items:
+      - const: audio_clk0
+      - const: audio_clk1
+      - const: audio_clk2
+      - const: audio_clk3
+      - const: audio_clk4
+      - const: audio_clk5
+
+  "#clock-cells":
+    const: 1
+
+  resets:
+    description: signal to reset all modules in audio subsystem except HIFI5 DSP.
+
+  reset-names:
+    const: noc
+
+required:
+  - compatible
+  - reg
+  - clocks
+  - clock-names
+  - "#clock-cells"
+  - resets
+  - reset-names
+
+additionalProperties: false
+
+examples:
+  - |
+    #include <dt-bindings/clock/sky1-audss.h>
+
+    clock-controller@07100000 {
+        compatible = "cix,sky1-audss-clock";
+        reg = <0x0 0x07100000 0x0 0x1000>;
+        clock-names = "audio_clk0", "audio_clk1",
+                      "audio_clk2", "audio_clk3",
+                      "audio_clk4", "audio_clk5";
+        clocks = <&clocks CLK_AUDIO_CLK0>, <&clocks CLK_AUDIO_CLK1>,
+                 <&clocks CLK_AUDIO_CLK2>, <&clocks CLK_AUDIO_CLK3>,
+                 <&clocks CLK_AUDIO_CLK4>, <&clocks CLK_AUDIO_CLK5>;
+        #clock-cells = <1>;
+    };

@@ -1,0 +1,44 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+# Copyright 2025 Cix Technology Group Co., Ltd.
+%YAML 1.2
+---
+$id: ""
+$schema: ""
+
+title: Cix SE & PM Exception Driver
+
+description: |
+  When an Exception occurs for SE or PM, AP will be notified to log this exception event.
+
+maintainers:
+  - Vincent Wu <vincent.wu@cixtech.com>
+  - Vimoon Zheng <vimoon.zheng@cixtech.com>
+
+properties:
+  compatible:
+    enum:
+      - cix,se_pm_crash
+
+  mbox-names:
+    description: mailbox name
+    maxItems: 4
+
+  mboxes:
+    description: Mailbox in use
+    maxItems: 1
+
+required:
+  - compatible
+  - mbox-names
+  - mboxes
+
+additionalProperties: false
+
+examples:
+  - |
+		crash: cix_se_pm_crash {
+			compatible = "cix,se_pm_crash";
+			mbox-names = "rx4";
+			mboxes = <&mbox_se2ap 9>;  /* index=9: fifo base channel */
+			status = "disabled";
+		};

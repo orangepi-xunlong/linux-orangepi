@@ -1,0 +1,40 @@
+config MAX_NR_CPUS
+	int "Maximum number of CPUs (2-32)"
+	range 2 32
+	depends on SMP
+	default "8"
+
+config CIX_SCHED
+	tristate "cix scheduler feature"
+	help
+	  Choose this option to enable mtk schduler feature.
+	  These features include
+		cluster core control
+
+config CIX_CORE_CTL
+	tristate "CIX Core Control with CPU Isolation"
+	default n
+	help
+	  This config is for the core control policy with CPU isolation.
+	  The core control online and offline CPU cores based on task
+	  utilizations from scheduler information automatically.
+	  If you are not sure about whether to enable it or not,
+	  please set n.
+
+config CIX_CORE_PAUSE
+	bool "core pause driver"
+	depends on CIX_SCHED
+	help
+	  Choose this option to provide core pause related API.
+	  core pause intends to have a way to force a CPU to go idle
+	  and to resume as quickly as possible, with as little
+	  disruption as possible on the system.
+
+config CIX_VENDOR_HOOKS
+	bool "Cix Vendor Hooks"
+	depends on TRACEPOINTS
+	help
+	  Enable vendor hooks implemented as tracepoints
+
+	  Allow vendor modules to attach to tracepoint "hooks" defined via
+	  DECLARE_HOOK or DECLARE_RESTRICTED_HOOK.

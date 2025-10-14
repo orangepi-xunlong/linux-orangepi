@@ -1,0 +1,11 @@
+# SPDX-License-Identifier: GPL-2.0-only
+obj-$(CONFIG_CIX_SKY1_SOCINFO) += cix-sky1-socinfo.o
+obj-$(CONFIG_CIX_SE_CONFIG) += cix-se-config.o
+obj-$(CONFIG_CIX_DST) += cix_dst/
+obj-$(CONFIG_CIX_SOC_ACPI) += acpi/
+obj-$(CONFIG_ARCH_CIX) += cix-plat.o
+obj-$(CONFIG_CIX_AP2SE_IPC) += cix_ap2se_ipc.o
+obj-y += cix-hibernate.o
+obj-y += cix-ddr-lp.o
+obj-y += cix-suspend.o
+obj-$(CONFIG_CIX_SCHED) += sched/

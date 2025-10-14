@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: GPL-2.0
+#
+# Sky1 cache exception monitor driver
+#
+
+config PLAT_CACHE_EXCEPTION_MONITOR
+	bool "platform cache exception monitor"
+	default n
+	help
+	  If you say yes here you get support for Cache exception.
+
+config PLAT_CACHE_EXCEPTION_MONITOR_TEST
+	bool "platform cache exception monitor test"
+	default n
+	help
+	  If you say yes here you get support for Cache exception.

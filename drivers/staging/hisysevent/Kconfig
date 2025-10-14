@@ -1,0 +1,6 @@
+# SPDX-License-Identifier: GPL-2.0
+config HISYSEVENT
+	tristate "Enable hisysevent"
+	depends on HIEVENT
+	help
+	  Say Y here to enable hisysevent feature support.

@@ -1,0 +1,54 @@
+# SPDX-License-Identifier: GPL-2.0-only
+menu "Cix Dst drivers"
+
+config SOC_CIX
+	bool "Cix Sky SoC family support"
+	default n
+	help
+	  If you say yes here you get support for the Cix sky family
+	  support, it will provide the SoC info like SoC family,
+	  ID and revision etc.
+
+config CIX_CPU_INSTPIPE_FRESH
+	bool "fresh instpipe in sched_clock"
+	depends on ARCH_CIX
+	help
+	  Say yes will fresh instpipe in sched_clock.
+
+config CIX_SKY1_SOCINFO
+	bool "Cix Sky1 SoC Information driver"
+	depends on ARCH_CIX
+	select SOC_BUS
+	help
+	  Say yes to support decoding of CIX Sky1 SoC family information
+	  about the type and version.
+
+config CIX_SE_CONFIG
+	bool "Cix Sky1 AP config SE interface"
+	depends on ARCH_CIX
+	help
+	  Say yes to support AP config SE settings by AP2SE mailbox
+
+config CIX_SOC_ACPI
+	bool "Cix SoC ACPI drivers"
+	depends on ARCH_CIX && ACPI
+	select SOC_BUS
+	help
+	  Say yes to support CIX SoC ACPI drivers.
+
+config CIX_AP2SE_IPC
+	bool "Cix AP2SE IPC drivers"
+	depends on ARCH_CIX
+	select CIX_MBOX
+	help
+	  Say yes to support Cix SE2AP IPC drivers.
+
+if SOC_CIX
+source "drivers/soc/cix/cix_dst/Kconfig"
+endif #SOC_CIX
+
+menu "Cix Performance"
+source "drivers/soc/cix/sched/Kconfig"
+endmenu # Cix Performance
+
+endmenu

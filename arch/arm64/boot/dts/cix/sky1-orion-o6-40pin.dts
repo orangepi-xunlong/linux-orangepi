@@ -1,0 +1,24 @@
+/*
+ * Copyright 2024 Cix Technology Group Co., Ltd.
+ *
+ * SPDX-License-Identifier: BSD-3-Clause
+ */
+
+/dts-v1/;
+
+#include "sky1-orion-o6.dts"
+
+
+&i2s2 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_substrate_i2s4_lb>;
+	status = "okay";
+};
+
+
+&uart3 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_fch_uart3>;
+	status = "okay";
+};
+

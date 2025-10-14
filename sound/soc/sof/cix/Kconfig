@@ -1,0 +1,34 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-3-Clause)
+
+config SND_SOC_SOF_CIX_TOPLEVEL
+	bool "SOF support for CIX audio DSPs"
+	depends on ARM64 || SOC_CIX
+	depends on SND_SOC_SOF_OF
+	help
+	  This adds support for Sound Open Firmware for CIX platforms.
+	  Say Y if you have such a device.
+	  If unsure select "N".
+
+if SND_SOC_SOF_CIX_TOPLEVEL
+
+config SND_SOC_SOF_CIX_COMMON
+	tristate
+	select SND_SOC_SOF_OF_DEV
+	select SND_SOC_SOF
+	select SND_SOC_SOF_IPC3
+	select SND_SOC_SOF_XTENSA
+	select SND_SOC_SOF_COMPRESS
+	help
+	  This option is not user-selectable but automagically handled by
+	  'select' statements at a higher level.
+
+config SND_SOC_SOF_CIX_SKY1
+	tristate "SOF support for CIX SKY1"
+	depends on CIX_DSP
+	select SND_SOC_SOF_CIX_COMMON
+	help
+	  This adds support for Sound Open Firmware for CIX SKY1 platforms.
+	  Say Y if you have such a device.
+	  If unsure select "N".
+
+endif ## SND_SOC_SOF_CIX_TOPLEVEL

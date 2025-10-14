@@ -1,0 +1,15 @@
+# SPDX-License-Identifier: GPL-2.0-only
+config CIX_THERMAL
+	tristate "Cix thermal IPA driver"
+	depends on ARCH_CIX && THERMAL_GOV_POWER_ALLOCATOR
+	select CIX_SCMI_ENERGY_MODEL
+	help
+	  If you say yes here you get support IPA for CPU
+
+config CIX_SCMI_ENERGY_MODEL
+	tristate "SCMI based Cix Energy Model driver"
+	depends on ENERGY_MODEL
+	depends on CIX_THERMAL
+	help
+	  It uses SCMI Message Protocol driver to register
+	  Energy Model (EM) for Cix platforms.

@@ -1,0 +1,32 @@
+# SPDX-License-Identifier: GPL-2.0-only
+#
+# Phy drivers for Cix PHYs
+#
+
+config PHY_CIX_USBDP
+	tristate "Cix USBDP PHY Driver"
+	depends on OF && HAS_IOMEM
+	select GENERIC_PHY
+	help
+	  Enable this to support the CIX USBDP PHY for TYPEC Connection
+
+config PHY_CIX_USB2
+	tristate "Cix USB2 PHY Driver"
+	depends on OF
+	select GENERIC_PHY
+	help
+	  Enable this to support the CIX USB2 PHY
+
+config PHY_CIX_USB3
+	tristate "Cix USB3 PHY Driver"
+	depends on OF && HAS_IOMEM
+	select GENERIC_PHY
+	help
+	  Enable this to support the CIX USB3 PHY for TYPEA Connection
+
+config PHY_CIX_PCIE
+	tristate "Cix PCIE PHY Driver"
+	depends on OF && HAS_IOMEM
+	select GENERIC_PHY
+	help
+	  Enable this to support the CIX PCIE PHY

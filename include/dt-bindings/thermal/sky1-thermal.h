@@ -1,0 +1,29 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
+/*
+ * Copyright 2024-2025 Cix Technology Group Co., Ltd.
+ */
+
+#ifndef __DT_BINDINGS_SKY1_THERMAL_H__
+#define __DT_BINDINGS_SKY1_THERMAL_H__
+
+/*sensor id pvt0-12*/
+#define VPU_TEMP_SENSOR_ID	0
+#define GPU_BOTTOM_TEMP_SENSOR_ID	1
+#define GPU_TOP_TEMP_SENSOR_ID	2
+#define SOC_BRC_TEMP_SENSOR_ID	3
+#define DDR_BOTTOM4_TEMP_SENSOR_ID	4
+#define DDR_TOP_TEMP_SENSOR_ID	5
+#define CI700_TEMP_SENSOR_ID	6
+#define NPU_TEMP_SENSOR_ID	7
+#define CPU_M1_TEMP_SENSOR_ID	8
+#define CPU_B1_TEMP_SENSOR_ID	9
+#define CPU_M0_TEMP_SENSOR_ID	10
+#define CPU_B0_TEMP_SENSOR_ID	11
+#define SOC_TRC_TEMP_SENSOR_ID	12
+#define GPU_AVERAGE_TEMP_SENSOR_ID	13
+#define NTC0_TEMP_SENSOR_ID	14
+#define NTC1_TEMP_SENSOR_ID	15
+
+#define REG_SENSOR_DEV_COUNT	32
+
+#endif

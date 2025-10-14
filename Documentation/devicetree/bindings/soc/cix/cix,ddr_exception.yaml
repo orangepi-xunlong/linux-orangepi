@@ -1,0 +1,60 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+# Copyright 2025 Cix Technology Group Co., Ltd.
+%YAML 1.2
+---
+$id: ""
+$schema: ""
+
+title: Cix ddr exception driver.
+
+description: |
+  When a DDR exception occurs, it informs the AP through an interrupt, and the AP will parse the interrupt information.
+
+maintainers:
+  - Vincent Wu <vincent.wu@cixtech.com>
+  - Vimoon Zheng <vimoon.zheng@cixtech.com>
+
+properties:
+  compatible:
+    enum:
+      - cadence,ddr_ctrl
+
+  reg:
+    description: DDR interrupt information reg and DDR information reg
+    maxItems: 2
+
+  interrupts:
+    description: DDR interrupt number
+
+  channel_id:
+    description: DDR channel id
+
+  mbox-names:
+    description: mailbox name
+
+  mboxes:
+    description: Mailbox in use
+    maxItems: 1
+
+required:
+  - compatible
+  - reg
+  - interrupts
+  - channel_id
+  - mbox-names
+  - mboxes
+
+additionalProperties: false
+
+examples:
+  - |
+		ddr_ctrl1: ddr_ctrl@0C030000 {
+      compatible = "cadence,ddr_ctrl";
+      reg = <0x0 0x0C030000 0x0 0x20000>,
+        <0x0 0x83c00000 0x0 0x1000>;
+      interrupts = <GIC_SPI 210 IRQ_TYPE_LEVEL_HIGH>;
+      channel_id = <0x1>;
+      mbox-names = "tx4";
+      mboxes = <&mbox_ap2se 10>; /* index=9: fifo base channel */
+      status = "disabled";
+	  };

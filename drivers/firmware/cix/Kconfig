@@ -1,0 +1,9 @@
+# SPDX-License-Identifier: GPL-2.0-only
+config CIX_DSP
+	tristate "CIX DSP Protocol driver"
+	depends on CIX_MBOX
+	help
+	  This enables DSP IPC protocol between host AP (Linux) and
+	  the firmware running on DSP.
+	  It acts like a doorbell. Client might use shared memory to
+	  exchange information with DSP side.

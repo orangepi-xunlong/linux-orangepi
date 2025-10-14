@@ -1,0 +1,93 @@
+/dts-v1/;
+
+#include "sky1-evb.dts"
+#include "sky1-evb-isp.dtsi"
+
+/*disable the csidma all node dts*/
+&cix_csi_rcsu_0 {
+	status = "disabled";
+};
+
+&cix_csi_rcsu_1 {
+	status = "disabled";
+};
+
+&cix_bridge_0 {
+	status = "disabled";
+};
+
+&cix_bridge_1 {
+	status = "disabled";
+};
+
+&cix_bridge_2 {
+	status = "disabled";
+};
+
+&cix_bridge_3 {
+	status = "disabled";
+};
+
+&cix_mipi_csi_0 {
+	status = "disabled";
+};
+
+&cix_mipi_csi_1 {
+	status = "disabled";
+};
+
+&cix_mipi_csi_2 {
+	status = "disabled";
+};
+
+&cix_mipi_csi_3 {
+	status = "disabled";
+};
+
+&cix_dphy_0 {
+	status = "disabled";
+};
+
+&cix_dphy_1 {
+	status = "disabled";
+};
+
+&cix_dphy_2 {
+	status = "disabled";
+};
+
+&cix_dphy_3 {
+	status = "disabled";
+};
+
+&cix_dphy_4 {
+	status = "disabled";
+};
+
+&cix_dphy_5 {
+	status = "disabled";
+};
+
+&cix_dphy_hw_0 {
+	status = "disabled";
+};
+
+&cix_dphy_hw_1 {
+	status = "disabled";
+};
+
+&lt7911uxc {
+	status = "disabled";
+};
+
+&virtual_lt7911uxc_0{
+	status = "disabled";
+};
+
+&virtual_lt7911uxc_1 {
+	status = "disabled";
+};
+
+&virtual_lt7911uxc_2 {
+	status = "disabled";
+};
