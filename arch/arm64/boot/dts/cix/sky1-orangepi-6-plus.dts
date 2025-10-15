@@ -239,12 +239,11 @@
 	gpio-leds {
 		compatible = "gpio-leds";
 		pinctrl-names = "default";
-		status = "okay";
+		status = "disabled";
 
 		power-led {
 			gpios = <&ec_gpio 1 GPIO_ACTIVE_HIGH>;
 			linux,default-trigger = "default-on";
-			//linux,default-trigger = "heartbeat";
 		};
 	};
 };
@@ -301,7 +300,7 @@
 			CIX_PAD_SPI1_CLK_FUNC_GPIO029  (PULL_UP|DS_LEVEL4) /* 40pin - 23 */
 			CIX_PAD_SPI1_CS0_FUNC_GPIO026  (PULL_UP|DS_LEVEL4) /* 40pin - 24 */
 			CIX_PAD_SPI1_CS1_FUNC_GPIO027  (PULL_UP|DS_LEVEL4) /* 40pin - 26 */
-			CIX_PAD_SPI1_CLK_FUNC_GPIO029  (PULL_UP|DS_LEVEL4) /* 40pin - 29 */
+			CIX_PAD_GPIO020_FUNC_GPIO020  (PULL_UP|DS_LEVEL4) /* 40pin - 29 */
 			CIX_PAD_GPIO023_FUNC_GPIO023   (PULL_UP|DS_LEVEL4) /* 40pin - 31 */
 			CIX_PAD_GPIO021_FUNC_GPIO021   (PULL_UP|DS_LEVEL4) /* 40pin - 32 */
 			CIX_PAD_GPIO024_FUNC_GPIO024   (PULL_UP|DS_LEVEL4) /* 40pin - 33 */
@@ -491,6 +490,7 @@
 
 			CIX_PAD_I2C2_SDA_FUNC_GPIO056  (PULL_UP|DS_LEVEL4) /* 40pin - 3  */
 			CIX_PAD_I2C2_SCL_FUNC_GPIO055  (PULL_UP|DS_LEVEL4) /* 40pin - 5  */
+			CIX_PAD_UART0_CTS_FUNC_GPIO097 (PULL_UP|DS_LEVEL4) /* 40pin - 7  */
 			CIX_PAD_UART3_TXD_FUNC_GPIO105 (PULL_UP|DS_LEVEL4) /* 40pin - 8  */
 			CIX_PAD_UART3_RXD_FUNC_GPIO106 (PULL_UP|DS_LEVEL4) /* 40pin - 10 */
 			CIX_PAD_UART1_TXD_FUNC_GPIO099 (PULL_UP|DS_LEVEL4) /* 40pin - 15 */
@@ -525,6 +525,12 @@
 	pinctrl_fch_pwm3: pinctrl_fch_pwm3 {
 		sky1,pins = <
 			CIX_PAD_UART1_TXD_FUNC_FAN_OUT0 (PULL_DOWN|ST|DS_LEVEL7)
+		>;
+	};
+
+	pinctrl_fch_pwm5: pinctrl_fch_pwm5 {
+		sky1,pins = <
+			CIX_PAD_UART0_CTS_FUNC_FAN_OUT2 (PULL_DOWN|ST|DS_LEVEL7)
 		>;
 	};
 
@@ -2213,10 +2219,17 @@
 	};
 };
 
-//40pin 04113000
+//40pin pwm3@04113000
 &pwm3 {
 	pinctrl-names = "default";
 	pinctrl-0 = <&pinctrl_fch_pwm3>;
+	status = "disabled";
+};
+
+//40pin pwm5@04115000
+&pwm5 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_fch_pwm5>;
 	status = "disabled";
 };
 

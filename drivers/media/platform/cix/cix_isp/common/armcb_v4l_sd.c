@@ -116,10 +116,6 @@ int armcb_camera_async_complete(struct v4l2_async_notifier *notifier)
 			    vdev->dev.kobj.name);
 			goto clean_up;
 		}
-		LOG(LOG_INFO,
-		    "register media entity(id %d, name %s) for subdev node %s, sd %s",
-		    sd->entity.graph_obj.id, vdev->entity.name,
-		    vdev->dev.kobj.name, vdev->name);
 	}
 	/* Register the media device */
 	ret = media_device_register(v4l2_dev->mdev);
@@ -147,7 +143,6 @@ static void armcb_add_sd_in_position(struct armcb_sd_subdev *armcb_sdreg,
 {
 	struct armcb_sd_subdev *temp_sd = NULL;
 
-	LOG(LOG_INFO, "+");
 	list_for_each_entry(temp_sd, sd_list, list) {
 		if (temp_sd == armcb_sdreg) {
 			LOG(LOG_ERR, "failed to add the same subdev ");
@@ -159,7 +154,6 @@ static void armcb_add_sd_in_position(struct armcb_sd_subdev *armcb_sdreg,
 			return;
 		}
 	}
-	LOG(LOG_INFO, "-");
 
 	list_add_tail(&armcb_sdreg->list, sd_list);
 }
@@ -170,7 +164,6 @@ int armcb_subdev_register(struct armcb_sd_subdev *armcb_sdreg,
 	armcb_v4l2_dev_t *parmcb_dev = NULL;
 	struct v4l2_device *pvdev = NULL;
 
-	LOG(LOG_INFO, "+   %d", cam_id);
 	parmcb_dev = armcb_v4l2_core_get_dev(cam_id);
 	if (!parmcb_dev) {
 		LOG(LOG_ERR, "Invalid input armcb_sbreg is NULL");

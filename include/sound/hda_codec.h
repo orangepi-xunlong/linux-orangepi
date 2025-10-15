@@ -289,6 +289,9 @@ struct hda_codec {
 
 	/* additional init verbs */
 	struct snd_array verbs;
+
+	unsigned int *init_verbs;
+	int init_verbs_size;
 };
 
 #define dev_to_hda_codec(_dev)	container_of(_dev, struct hda_codec, core.dev)

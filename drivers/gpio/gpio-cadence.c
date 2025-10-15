@@ -206,7 +206,7 @@ static int cdns_gpio_probe(struct platform_device *pdev)
 	int ret, irq;
 	u32 dir_prev;
 	u32 num_gpios = 32;
-	u32 gmask;
+	u32 gmask, temp;
 
 	cgpio = devm_kzalloc(&pdev->dev, sizeof(*cgpio), GFP_KERNEL);
 	if (!cgpio)
@@ -334,7 +334,8 @@ static int cdns_gpio_probe(struct platform_device *pdev)
 	/*
 	 * Enable gpio outputs, ignored for input direction
 	 */
-	iowrite32(GENMASK(num_gpios - 1, 0),
+	temp = ioread32(cgpio->regs + CDNS_GPIO_OUTPUT_EN);
+	iowrite32(GENMASK(num_gpios - 1, 0) | temp,
 		  cgpio->regs + CDNS_GPIO_OUTPUT_EN);
 	iowrite32(0, cgpio->regs + CDNS_GPIO_BYPASS_MODE);
 

@@ -10,20 +10,6 @@
 	chosen {
 		status = "disabled";
 	};
-
-	dp_to_hdmi_ps185: dp_to_hdmi_ps185 {
-		compatible = "regulator-fixed";
-		regulator-name = "DP_TO_HDMI_PS185";
-		pinctrl-names = "default";
-		pinctrl-0 = <&pinctrl_dp_to_hdmi_ps185>;
-		regulator-min-microvolt = <1800000>;
-		regulator-max-microvolt = <1800000>;
-		gpio = <&fch_gpio0 31 GPIO_ACTIVE_LOW>;
-		enable-active-low;
-		regulator-boot-on;
-		regulator-always-on;
-		status = "okay";
-	};
 };
 
 &dp2_backlight {
@@ -32,6 +18,10 @@
 
 &panel_edp0 {
 	status = "disabled";
+};
+
+&fch_gpio0 {
+	ngpios = <31>;
 };
 
 &fch_gpio1 {

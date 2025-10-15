@@ -140,13 +140,6 @@ int armcb_v4l2_stream_try_format(armcb_v4l2_stream_t *pstream,
 	armcb_v4l2_fmt_t *tfmt;
 	int i;
 
-	LOG(LOG_INFO,
-	    "[Stream#%d] try fmt type: %u, pixelformat: 0x%x, planeNum:%u, width: " \
-	    "%u, height: %u, field: %u",
-	    pstream->stream_id, f->type, f->fmt.pix_mp.pixelformat,
-	    f->fmt.pix_mp.num_planes, f->fmt.pix_mp.width, f->fmt.pix_mp.height,
-	    f->fmt.pix_mp.field);
-
 	/* check format and modify */
 	tfmt = armcb_v4l2_stream_find_format(f->fmt.pix_mp.pixelformat);
 	if (!tfmt) {
@@ -166,7 +159,7 @@ int armcb_v4l2_stream_try_format(armcb_v4l2_stream_t *pstream,
 		f->fmt.pix.height = 1;
 	} else if (f->fmt.pix.pixelformat == ISP_V4L2_PIX_FMT_STATIS) {
 		LOG(LOG_INFO,
-		    "[Stream#%d] format is ISP_V4L2_PIX_FMT_STATIS:0x%08x",
+		    "[Stream#%d] format is:0x%08x",
 		    pstream->stream_id, ISP_V4L2_PIX_FMT_STATIS);
 		f->fmt.pix.width = f->fmt.pix_mp.width;
 		f->fmt.pix.height = 1;
@@ -290,8 +283,8 @@ int armcb_v4l2_stream_on(armcb_v4l2_stream_t *pstream)
 		return -EINVAL;
 	}
 
-	LOG(LOG_INFO, "ctx_id:%d [Stream#%d] %p called", pstream->ctx_id,
-	    pstream->stream_id, pstream);
+	LOG(LOG_INFO, "ctx_id:%d [Stream#%d] stream on", pstream->ctx_id,
+	    pstream->stream_id);
 
 	if (pstream->stream_type != V4L2_STREAM_TYPE_META) {
 		/* Resets frame counters */
@@ -313,7 +306,7 @@ void armcb_v4l2_stream_off(armcb_v4l2_stream_t *pstream)
 		return;
 	}
 
-	LOG(LOG_DEBUG, "ctx_id:%d [Stream#%d] called", pstream->ctx_id,
+	LOG(LOG_DEBUG, "ctx_id:%d [Stream#%d] stream off", pstream->ctx_id,
 	    pstream->stream_id);
 
 	// control fields update
@@ -371,13 +364,6 @@ int armcb_v4l2_stream_set_format(armcb_v4l2_stream_t *pstream,
 		return -EINVAL;
 	}
 
-	LOG(LOG_INFO, "[Stream#%d] VIDIOC_S_FMT operation", pstream->stream_id);
-
-	LOG(LOG_NOTICE,
-	    "[Stream#%d]   - SET fmt - width: %4u, height: %4u, format: 0x%x.",
-	    pstream->stream_id, f->fmt.pix_mp.width, f->fmt.pix_mp.height,
-	    f->fmt.pix_mp.pixelformat);
-
 	/* try format first */
 	armcb_v4l2_stream_try_format(pstream, f);
 
@@ -408,7 +394,7 @@ int armcb_v4l2_stream_set_format(armcb_v4l2_stream_t *pstream,
 	pstream->outport = f->fmt.pix_mp.field;
 
 	LOG(LOG_NOTICE,
-	    "[Stream#%d]   - New fmt - width: %4u, height: %4u, format: 0x%x, type: " \
+	    "[Stream#%d] set fmt width: %4u, height: %4u, format: 0x%x, type: " \
 	    "%5u. outport: %u[%u]",
 	    pstream->stream_id, pstream->cur_v4l2_fmt.fmt.pix_mp.width,
 	    pstream->cur_v4l2_fmt.fmt.pix_mp.height,

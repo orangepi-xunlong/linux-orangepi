@@ -64,6 +64,9 @@ typedef struct armcb_v4l2_dev {
 	bool dqbuf_error;
 	bool seq_wrap;
 	bool has_vid_cap;
+	bool ddr_lp_mode;
+	bool is_streaming;
+	pid_t streaming_pid;
 
 	struct v4l2_async_notifier notifier;
 	struct media_entity_enum crashed;

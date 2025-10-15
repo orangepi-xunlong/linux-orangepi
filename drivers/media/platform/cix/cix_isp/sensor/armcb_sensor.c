@@ -36,15 +36,28 @@ static int camera_common_powen(struct armcb_imgsens_subdev *pimgsens_sd)
 	int ret = 0;
 	struct device *dev = pimgsens_sd->pdev;
 
-	if (pimgsens_sd->vsupply_0)
-		ret = regulator_enable(pimgsens_sd->vsupply_0);
-	if (pimgsens_sd->vsupply_1)
-		ret = regulator_enable(pimgsens_sd->vsupply_1);
+	if (!pimgsens_sd->power_on) {
+		if (pimgsens_sd->vsupply_0) {
+			ret = regulator_enable(pimgsens_sd->vsupply_0);
+			if (ret) {
+				dev_err(dev, "fail to enable cam_v regulator0\n");
+				regulator_put(pimgsens_sd->vsupply_0);
+				goto exit;
+			}
+		}
 
-	if (ret)
-		dev_err(dev, "fail to enable cam_v regulator\n");
+		if (pimgsens_sd->vsupply_1) {
+			ret = regulator_enable(pimgsens_sd->vsupply_1);
+			if (ret) {
+				dev_err(dev, "fail to enable cam_v regulator1\n");
+				regulator_put(pimgsens_sd->vsupply_1);
+				goto exit;
+			}
+		}
 
-	pimgsens_sd->power_on = TRUE;
+		pimgsens_sd->power_on = TRUE;
+	}
+exit:
 	return ret;
 }
 
@@ -53,15 +66,26 @@ static int camera_common_powdn(struct armcb_imgsens_subdev *pimgsens_sd)
 	int ret = 0;
 	struct device *dev = pimgsens_sd->pdev;
 
-	if (pimgsens_sd->vsupply_0)
-		ret = regulator_disable(pimgsens_sd->vsupply_0);
-	if (pimgsens_sd->vsupply_1)
-		ret = regulator_disable(pimgsens_sd->vsupply_1);
+	if (pimgsens_sd->power_on) {
+		if (pimgsens_sd->vsupply_0) {
+			ret = regulator_disable(pimgsens_sd->vsupply_0);
+			if (ret) {
+				dev_err(dev, "fail to disable cam_v regulator0\n");
+				goto exit;
+			}
+		}
 
-	if (ret)
-		dev_err(dev, "fail to disable cam_v regulator\n");
+		if (pimgsens_sd->vsupply_1) {
+			ret = regulator_disable(pimgsens_sd->vsupply_1);
+			if (ret) {
+				dev_err(dev, "fail to disable cam_v regulator1\n");
+				goto exit;
+			}
+		}
 
-	pimgsens_sd->power_on = FALSE;
+		pimgsens_sd->power_on = FALSE;
+	}
+exit:
 	return ret;
 }
 
@@ -176,20 +200,14 @@ int armcb_imgsens_hw_apply(struct cmd_buf *cmd,
 			camera_common_powdn(pimgsens_sd);
 		break;
 	case IMGS_POWER_REST:
-		LOG(LOG_INFO, "rst_gpio val is: %d\n",
-			cmd->settings.ahb_power->bit_mask);
 		gpiod_set_value_cansleep(pimgsens_sd->imgs_inst.rst_gpio,
 					 cmd->settings.ahb_power->bit_mask);
 		break;
 	case IMGS_POWER_PWDN:
-		LOG(LOG_INFO, "pwn_gpio val is: %d",
-			cmd->settings.ahb_power->bit_mask);
 		gpiod_set_value_cansleep(pimgsens_sd->imgs_inst.pwn_gpio,
 					 cmd->settings.ahb_power->bit_mask);
 		break;
 	case IMGS_POWER_MCLK:
-		LOG(LOG_INFO, "MCLK val is: %d\n",
-			cmd->settings.ahb_power->bit_mask);
 		if (cmd->settings.ahb_power->bit_mask)
 			ret = clk_prepare_enable(pimgsens_sd->imgs_inst.mclk);
 		else
@@ -360,24 +378,14 @@ static int imgsens_probe(struct i2c_client    *client,
 	int res = 0;
 	unsigned int cam_id = 0;
 
-	LOG(LOG_INFO, "+");
-
 	if (!client) {
 		LOG(LOG_ERR, "armcb imgsens client is NULL");
 		return -EINVAL;
-	} else {
-		LOG(LOG_INFO, "imgsens   client(%p)", client);
-	}
-
-	if (!id) {
-		LOG(LOG_ERR, "armcb imgsens id is NULL");
-		id = armcb_imgsens_id;
 	}
 
 	dev = &client->dev;
 	node = client->dev.fwnode;
-	res = of_property_read_u32(dev->of_node, CIX_CAMERA_MODULE_INDEX,
-				   &cam_id);
+	res = fwnode_property_read_u32(node, CIX_CAMERA_MODULE_INDEX, &cam_id);
 
 	if (WARN_ON(!dev) || WARN_ON(!node)) {
 		LOG(LOG_ERR, "armcb imgsens dev/node is NULL");
@@ -390,7 +398,6 @@ static int imgsens_probe(struct i2c_client    *client,
 		return -ENOMEM;
 	}
 
-	LOG(LOG_INFO, "start configure notifier.");
 #if (KERNEL_VERSION(4, 17, 0) > LINUX_VERSION_CODE)
 	adev->dts_notifier.bound = armcb_camera_async_bound;
 	adev->dts_notifier.complete = armcb_camera_async_complete;
@@ -425,6 +432,7 @@ static int imgsens_probe(struct i2c_client    *client,
 	pimgsens_sd->of_node = client->dev.of_node;
 	pimgsens_sd->pdev = &client->dev;
 	pimgsens_sd->cam_id = cam_id;
+	pimgsens_sd->power_on = FALSE;
 
 	res = armcb_imgsens_configure_subdevs(pimgsens_sd);
 	if (res < 0) {
@@ -460,7 +468,8 @@ static int imgsens_probe(struct i2c_client    *client,
 	if (PTR_ERR(pimgsens_sd->imgs_inst.pwn_gpio) == -EPROBE_DEFER ||
 		PTR_ERR(pimgsens_sd->imgs_inst.pwn_gpio) == -EPROBE_DEFER)
 		LOG(LOG_ERR,
-			"can't get pwn_gpio pinctrl, bus recovery not supported\n");
+		    "can't get pwn_gpio pinctrl, bus recovery not supported\n");
+
 	pimgsens_sd->imgs_inst.rst_gpio =
 		devm_gpiod_get(&client->dev, "reset", GPIOD_OUT_LOW);
 	if (PTR_ERR(pimgsens_sd->imgs_inst.rst_gpio) == -EPROBE_DEFER ||
@@ -482,17 +491,22 @@ static int imgsens_probe(struct i2c_client    *client,
 		pimgsens_sd->vsupply_1 = NULL;
 	}
 
-	pimgsens_sd->imgs_inst.mclk =
-		devm_clk_get_optional(&client->dev, "mclk");
-	if (IS_ERR(pimgsens_sd->imgs_inst.mclk))
+	if (is_acpi_device_node(client->dev.fwnode))
+		pimgsens_sd->imgs_inst.mclk = devm_clk_get_optional(
+			&to_acpi_device_node(client->dev.fwnode)->dev, "mclk");
+	else
+		pimgsens_sd->imgs_inst.mclk =
+			devm_clk_get_optional(&client->dev, "mclk");
+
+	if (IS_ERR_OR_NULL(pimgsens_sd->imgs_inst.mclk))
 		LOG(LOG_ERR, "failed to get cam mclk\n");
 
-	LOG(LOG_INFO, "scuess - ");
+	LOG(LOG_INFO, "sensor probe scuess");
+
 	return res;
 
 EXIT_RET:
 	kfree(pimgsens_sd);
-	LOG(LOG_INFO, "failed - ");
 	return res;
 }
 
@@ -507,7 +521,7 @@ void imgsens_remove(struct i2c_client *client)
 			if (pimgsens_sd->vsupply_1)
 				regulator_disable(pimgsens_sd->vsupply_1);
 			LOG(LOG_INFO, "disable camera power");
-			pimgsens_sd->power_on = 0;
+			pimgsens_sd->power_on = FALSE;
 		}
 
 		list_del_init(&pimgsens_sd->imgsens_sd.sd.async_list);

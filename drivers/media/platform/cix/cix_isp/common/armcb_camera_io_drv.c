@@ -52,11 +52,10 @@
 
 #define DEVICE_NAME "ISP-Mem"
 
+static struct cmamem_dev cmamem_dev;
 struct armcb_ispmem_info *cam_mem_info;
 static struct current_status cmamem_status;
-static struct cmamem_dev cmamem_dev;
-static struct cmamem_block *cmamem_block_head;
-static int mem_block_count;
+static struct cma_mem_ctl cma_buf_ctl;
 static struct cam_buf_table buf_tbl;
 
 DEFINE_MUTEX(phy_mutex);
@@ -242,205 +241,130 @@ static long ispmem_cma_alloc(struct file *file, unsigned long arg)
 	struct cmamem_block *memory_block;
 	struct mem_block cma_info_temp;
 	int size;
-	int ret = 0;
 
 	if (copy_from_user(&cma_info_temp, (void __user *)arg,
-			   sizeof(struct mem_block))) {
-		LOG(LOG_ERR, "copy_from_user error:%d", ret);
+				sizeof(struct mem_block))) {
+		LOG(LOG_ERR, "copy_from_user error");
 		return -1;
 	}
 
-	if (cma_info_temp.name[0] == '\0') {
-		LOG(LOG_ERR, "no set mem name, please set");
-		return -1;
-	}
+	if (cma_info_temp.len > 0) {
 
-	if (cma_info_temp.len) {
 		size = PAGE_ALIGN(cma_info_temp.len);
 		cma_info_temp.len = size;
-#ifdef MEM_DEBUG
-		LOG(LOG_INFO, "len:%u, is_use_buffer:%u.", cma_info_temp.len,
-			cma_info_temp.is_use_buffer);
-		LOG(LOG_INFO, "cmamem_dev.pddev= 0x%p", cmamem_dev.pddev);
-#endif
-		if (cmamem_dev.has_iommu) {
-			cma_info_temp.kernel_addr = dma_alloc_attrs(
-				cmamem_dev.pddev, size,
-				(dma_addr_t *)(&(cma_info_temp.phy_addr)),
-				GFP_KERNEL, DMA_ATTR_FORCE_CONTIGUOUS);
-		} else {
-			cma_info_temp.kernel_addr = dma_alloc_coherent(
+
+		cma_info_temp.kernel_addr = dma_alloc_coherent(
 				cmamem_dev.pddev, size,
 				(dma_addr_t *)(&(cma_info_temp.phy_addr)),
 				GFP_KERNEL);
-		}
+
 		if (!cma_info_temp.phy_addr) {
-			LOG(LOG_ERR, "dma alloc fail!");
 			return -ENOMEM;
 		}
-
-#ifdef MEM_DEBUG
-		LOG(LOG_INFO, "kernel_addr = 0x%lx, phy_addr = 0x%lx",
-			cma_info_temp.kernel_addr,
-			(dma_addr_t)cma_info_temp.phy_addr);
-#endif
-		cma_info_temp.id = ++mem_block_count;
 
 		cmamem_status.vir_addr = cma_info_temp.kernel_addr;
 		cmamem_status.phy_addr = cma_info_temp.phy_addr;
 		cmamem_status.id_count = cma_info_temp.id;
 		cmamem_status.status = HAVE_ALLOCED;
-
 		cma_info_temp.usr_addr = vm_mmap(
 			file, 0, size, PROT_READ | PROT_WRITE, MAP_SHARED, 0);
+
 		if (cma_info_temp.usr_addr < 0) {
-			LOG(LOG_ERR, "do_mmap fail:%d! (%lu)", __LINE__,
-				cma_info_temp.usr_addr);
-			cma_info_temp.id = --mem_block_count;
 			return -ENOMEM;
 		}
+
+		mutex_lock(&cma_buf_ctl.m_lock);
+
+		cma_info_temp.id = cma_buf_ctl.buf_count;
+
+		/* setup the memory block */
+		memory_block = kmalloc(
+				sizeof(struct cmamem_block), GFP_KERNEL);
+		if (memory_block == NULL) {
+			return -1;
+		}
+
+		memory_block->id            =   cma_info_temp.id;
+		memory_block->is_busy       =   1;
+		memory_block->is_use_buffer =   cma_info_temp.is_use_buffer;
+		memory_block->usr_addr      =   cma_info_temp.usr_addr;
+		memory_block->kernel_addr   =   cma_info_temp.kernel_addr;
+		memory_block->phy_addr      =   cma_info_temp.phy_addr;
+		memory_block->len           =   cma_info_temp.len;
+
+		cma_buf_ctl.bitMap[cma_buf_ctl.buf_count] = 1;
+		cma_buf_ctl.bufq[cma_buf_ctl.buf_count] = memory_block;
+		cma_buf_ctl.buf_count++;
+
+		mutex_unlock(&cma_buf_ctl.m_lock);
+
+		if (copy_to_user((void __user *)arg, (void *)(&cma_info_temp),
+					sizeof(struct mem_block))) {
+			return -EFAULT;
+		}
+
 	} else {
-		LOG(LOG_ERR, "the len is NULL");
+
 		return -1;
 	}
-
-	if (copy_to_user((void __user *)arg, (void *)(&cma_info_temp),
-			 sizeof(struct mem_block))) {
-		LOG(LOG_ERR, "fail to copy_to_user cma_info.");
-		return -EFAULT;
-	}
-
-	/* setup the memory block */
-	memory_block = kmalloc(
-		sizeof(struct cmamem_block), GFP_KERNEL);
-	if (memory_block == NULL) {
-		LOG(LOG_ERR, "failed to kmalloc memory");
-		mem_block_count--;
-		return -1;
-	}
-
-	if (cma_info_temp.name[0] != '\0')
-		memcpy(memory_block->name, cma_info_temp.name, 10);
-
-	memory_block->id            =   cma_info_temp.id;
-	memory_block->is_free       =   0;
-	memory_block->is_use_buffer =   cma_info_temp.is_use_buffer;
-	memory_block->usr_addr      =   cma_info_temp.usr_addr;
-	memory_block->kernel_addr   =   cma_info_temp.kernel_addr;
-	memory_block->phy_addr      =   cma_info_temp.phy_addr;
-	memory_block->len           =   cma_info_temp.len;
-
-#ifdef MEM_DEBUG
-	ispmem_cma_dump(memory_block);
-#endif
-
-	/* add to memory block queue */
-	list_add_tail(&memory_block->memqueue_list,
-			  &cmamem_block_head->memqueue_list);
 
 	return 0;
 }
 
 static int ispmem_cma_free(struct file *file, unsigned long arg)
 {
-	int ret = 0;
-	struct cmamem_block *memory_block = NULL;
-	struct cmamem_block *memory_block_next = NULL;
-	struct mem_block cma_info_temp;
+	return 0;
+}
 
-	if (copy_from_user(&cma_info_temp, (void __user *)arg,
-			   sizeof(struct mem_block))) {
-		LOG(LOG_ERR, "ispmem_cma_alloc:copy_from_user error:%d", ret);
+static int ispmem_cma_find_buffer_by_id(int id)
+{
+	if(id > cma_buf_ctl.buf_count)
 		return -1;
-	}
-#ifdef MEM_DEBUG
-	LOG(LOG_INFO, "will delete the mem name:%s", cma_info_temp.name);
-#endif
 
-	/// list_for_each_entry_safe for list_del
-	list_for_each_entry_safe(memory_block, memory_block_next,
-				  &cmamem_block_head->memqueue_list,
-				  memqueue_list) {
-		if (memory_block) {
-			if (cma_info_temp.id == memory_block->id) {
-				if (memory_block->is_free == 0) {
-#ifdef MEM_DEBUG
-					LOG(LOG_INFO,
-						"delete the mem id:%d, name:%s",
-						cma_info_temp.id,
-						cma_info_temp.name);
-#endif
-					vm_munmap(memory_block->usr_addr,
-						  memory_block->len);
-					dma_free_coherent(
-						cmamem_dev.pddev,
-						memory_block->len,
-						memory_block->kernel_addr,
-						memory_block->phy_addr);
+	if(cma_buf_ctl.bitMap[id] != 1)
+		return -1;
 
-					memory_block->is_free = 1;
-
-					list_del(&memory_block->memqueue_list);
-					kfree(memory_block);
-					break;
-				}
-			}
-		}
-	}
+	if(cma_buf_ctl.bufq[id] == NULL)
+		return -1;
 
 	return 0;
 }
+
 static int ispmem_cma_import(struct file *file, unsigned long arg)
 {
-	int ret = 0;
 	struct cmamem_block *memory_block = NULL;
-	struct cmamem_block *memory_block_next = NULL;
 	struct mem_block cma_info_temp;
+	int ret;
 
 	if (copy_from_user(&cma_info_temp, (void __user *)arg,
-			   sizeof(struct mem_block))) {
-		LOG(LOG_ERR, "copy_from_user error:%d", ret);
+				sizeof(struct mem_block))) {
+		LOG(LOG_ERR, "copy_from_user error");
 		return -1;
 	}
 
-	/// list_for_each_entry_safe for list_del
-	list_for_each_entry_safe(memory_block, memory_block_next,
-				  &cmamem_block_head->memqueue_list,
-				  memqueue_list) {
-		if (memory_block) {
-			if (cma_info_temp.id == memory_block->id) {
-				if (memory_block->is_free == 0) {
-					LOG(LOG_DEBUG,
-						"import the mem id:%d, name:%s",
-						cma_info_temp.id,
-						cma_info_temp.name);
-					if (cma_info_temp.name[0] != '\0') {
-						memcpy(memory_block->name,
-							   cma_info_temp.name, 10);
-					}
+	ret = ispmem_cma_find_buffer_by_id(cma_info_temp.id);
+	if(ret == 0) {
 
-					cma_info_temp.is_use_buffer =
-						memory_block->is_use_buffer;
-					cma_info_temp.usr_addr =
-						memory_block->usr_addr;
-					cma_info_temp.kernel_addr =
-						memory_block->kernel_addr;
-					cma_info_temp.phy_addr =
-						memory_block->phy_addr;
-					cma_info_temp.len = memory_block->len;
+		memory_block = cma_buf_ctl.bufq[cma_info_temp.id];
 
-					if (copy_to_user(
-							(void __user *)arg,
-							(void *)(&cma_info_temp),
-							sizeof(struct mem_block))) {
-						LOG(LOG_ERR,
-							"fail to copy_to_user cma_info.");
-						return -EFAULT;
-					}
-				}
-				break;
-			}
+		cma_info_temp.is_use_buffer =
+			memory_block->is_use_buffer;
+		cma_info_temp.usr_addr =
+			memory_block->usr_addr;
+		cma_info_temp.kernel_addr =
+			memory_block->kernel_addr;
+		cma_info_temp.phy_addr =
+			memory_block->phy_addr;
+		cma_info_temp.len = memory_block->len;
+
+		if (copy_to_user(
+					(void __user *)arg,
+					(void *)(&cma_info_temp),
+					sizeof(struct mem_block))) {
+			return -EFAULT;
 		}
+	} else {
+		return -1;
 	}
 
 	return 0;
@@ -449,37 +373,24 @@ static int ispmem_cma_import(struct file *file, unsigned long arg)
 static int ispmem_cma_free_all(void)
 {
 	struct cmamem_block *memory_block = NULL;
-	struct cmamem_block *memory_block_next = NULL;
+	int loop;
 
-#ifdef MEM_DEBUG
-	LOG(LOG_INFO, "will delete all cma mem.");
-#endif
+	for(loop = 0; loop < cma_buf_ctl.buf_count;loop++) {
 
-	/// list_for_each_entry_safe for list_del
-	list_for_each_entry_safe(memory_block, memory_block_next,
-				  &cmamem_block_head->memqueue_list,
-				  memqueue_list) {
-		if (memory_block && memory_block->id > 0) {
-			if (memory_block->is_free == 0) {
-#ifdef MEM_DEBUG
-				LOG(LOG_INFO, "delete the mem id:%d, name:%s",
-					memory_block->id, memory_block->name);
-#endif
-				dma_free_coherent(cmamem_dev.pddev,
-						  memory_block->len,
-						  memory_block->kernel_addr,
-						  memory_block->phy_addr);
+		memory_block = cma_buf_ctl.bufq[loop];
 
-				memory_block->is_free = 1;
-				list_del(&memory_block->memqueue_list);
-				kfree(memory_block);
-			}
-		}
+		dma_free_coherent(cmamem_dev.pddev,
+				memory_block->len,
+				memory_block->kernel_addr,
+				memory_block->phy_addr);
+
+		kfree(memory_block);
+
+		cma_buf_ctl.bitMap[loop] = 0;
+		cma_buf_ctl.bufq[loop] = NULL;
 	}
 
-#ifdef MEM_DEBUG
-	LOG(LOG_INFO, "free memory done");
-#endif
+	cma_buf_ctl.buf_count = 0;
 
 	return 0;
 }
@@ -499,10 +410,30 @@ static int ispmem_cma_mmap(struct file *filp, struct vm_area_struct *vma)
 		return -EIO;
 	}
 
-	vma->vm_flags &= ~VM_IO;
-	vma->vm_flags |= (VM_DONTEXPAND | VM_DONTDUMP);
+      vma->vm_flags &= ~VM_IO;
+      vma->vm_flags |= (VM_DONTEXPAND | VM_DONTDUMP);
+	//vm_flags_clear(vma, VM_IO);
+	//vm_flags_set(vma, VM_DONTEXPAND | VM_DONTDUMP);
 
 	cmamem_status.status = HAVE_MMAPED;
+	return 0;
+}
+
+static int ispmem_cma_mem_init(void)
+{
+	int i = 0;
+
+	mutex_lock(&cma_buf_ctl.m_lock);
+
+	cma_buf_ctl.buf_count = 0;
+
+	for (i = 0; i < CAM_MEM_BUFQ_MAX; i++) {
+		cma_buf_ctl.bitMap[i] = 0;
+		cma_buf_ctl.bufq[i] = NULL;
+	}
+
+	mutex_unlock(&cma_buf_ctl.m_lock);
+
 	return 0;
 }
 
@@ -597,7 +528,6 @@ static int cam_mem_get_avaliable_buf_idx(void)
 {
 	int idx = 0;
 
-	mutex_lock(&buf_tbl.m_lock);
 	for (idx = 0; idx < CAM_MEM_BUFQ_MAX; idx++) {
 		if (!buf_tbl.bitMap[idx]) {
 			buf_tbl.bitMap[idx] = 1;
@@ -610,7 +540,6 @@ static int cam_mem_get_avaliable_buf_idx(void)
 		LOG(LOG_ERR, "Error! No available buffer\n");
 	}
 
-	mutex_unlock(&buf_tbl.m_lock);
 	return idx;
 }
 
@@ -618,7 +547,33 @@ static void cam_mem_put_bux_idx(int idx)
 {
 	mutex_lock(&buf_tbl.m_lock);
 	buf_tbl.bitMap[idx] = 0;
+	buf_tbl.bufq[idx].fd = -1;
+	buf_tbl.bufq[idx].bufIdx = -1;
+	buf_tbl.bufq[idx].flags = 0;
 	mutex_unlock(&buf_tbl.m_lock);
+}
+
+static int cam_mem_get_avaliable_fd_idx(int fd)
+{
+	int loop;
+	int idx = -1;
+
+	mutex_lock(&buf_tbl.m_lock);
+
+	for (loop = 0; loop < CAM_MEM_BUFQ_MAX; loop++) {
+		if (buf_tbl.bufq[loop].fd == fd) {
+			idx = loop;
+			break;
+		}
+	}
+
+	if(loop == CAM_MEM_BUFQ_MAX) {
+		idx = -1;
+	}
+
+	mutex_unlock(&buf_tbl.m_lock);
+
+	return idx;
 }
 
 static int cam_mem_tbl_init(void)
@@ -626,15 +581,34 @@ static int cam_mem_tbl_init(void)
 	int i = 0;
 	int ret = 0;
 
+	mutex_lock(&buf_tbl.m_lock);
+
 	for (i = 0; i < CAM_MEM_BUFQ_MAX; i++) {
 		buf_tbl.bitMap[i] = 0;
 		buf_tbl.bufq[i].fd = -1;
 		buf_tbl.bufq[i].bufIdx = -1;
 		buf_tbl.bufq[i].flags = 0;
-		buf_tbl.bufq[i].flags = 0;
 	}
 
+	mutex_unlock(&buf_tbl.m_lock);
+
 	return ret;
+}
+
+void cam_mem_buf_force_release(int idx)
+{
+	struct iosys_map map;
+
+	map.is_iomem = false;
+	map.vaddr = (void *)buf_tbl.bufq[idx].kvaddr;
+	dma_buf_unmap_attachment(buf_tbl.bufq[idx].attachment,
+			buf_tbl.bufq[idx].table,
+			DMA_BIDIRECTIONAL);
+	dma_buf_detach(buf_tbl.bufq[idx].dma,
+			buf_tbl.bufq[idx].attachment);
+	dma_buf_vunmap(buf_tbl.bufq[idx].dma, &map);
+	dma_buf_put(buf_tbl.bufq[idx].dma);
+	cam_mem_put_bux_idx(idx);
 }
 
 static int cam_mem_release_all(void)
@@ -643,20 +617,11 @@ static int cam_mem_release_all(void)
 	int i = 0;
 
 	for (i = 0; i < CAM_MEM_BUFQ_MAX; i++) {
+
 		if (buf_tbl.bitMap[i]) {
-			LOG(LOG_ERR,
-				"Error! buf idx %d still alive, Possible memory leak\n",
-				i);
-			///@TODO
-			/// unmap and release buffer here
+			cam_mem_buf_force_release(i);
 			ret = -EINVAL;
 		}
-
-		buf_tbl.bitMap[i] = 0;
-		buf_tbl.bufq[i].fd = -1;
-		buf_tbl.bufq[i].bufIdx = -1;
-		buf_tbl.bufq[i].flags = 0;
-		buf_tbl.bufq[i].flags = 0;
 	}
 
 	return ret;
@@ -682,40 +647,53 @@ static int cam_mem_buf_map(unsigned long arg)
 		return -EINVAL;
 	}
 
-	dmabuf = dma_buf_get(map_cmd.fd);
-	attachment = dma_buf_attach(dmabuf, cam_mem_info->pddev);
-	table = dma_buf_map_attachment(attachment, DMA_BIDIRECTIONAL);
-	phy_addr = sg_dma_address(table->sgl);
-	size = sg_dma_len(table->sgl);
-	ret = (unsigned long)dma_buf_vmap(dmabuf, &map);
+	idx = cam_mem_get_avaliable_fd_idx(map_cmd.fd);
+	if (idx == -1) {
+		/*not map*/
+		dmabuf = dma_buf_get(map_cmd.fd);
+		attachment = dma_buf_attach(dmabuf, cam_mem_info->pddev);
+		table = dma_buf_map_attachment(attachment, DMA_BIDIRECTIONAL);
+		phy_addr = sg_dma_address(table->sgl);
+		size = sg_dma_len(table->sgl);
+		ret = (unsigned long)dma_buf_vmap(dmabuf, &map);
 
-	kvaddr = ret ? 0 : (uintptr_t)map.vaddr;
+		kvaddr = ret ? 0 : (uintptr_t)map.vaddr;
 
-	if (kvaddr == 0) {
-		dev_err(dev, "kernel kmap failed");
-		ret = -EINVAL;
-		goto dma_kmap_failed;
+		if (kvaddr == 0) {
+			dev_err(dev, "kernel kmap failed");
+			ret = -EINVAL;
+			goto dma_kmap_failed;
+		}
+
+		mutex_lock(&buf_tbl.m_lock);
+
+		idx = cam_mem_get_avaliable_buf_idx();
+
+		buf_tbl.bufq[idx].dma = dmabuf;
+		buf_tbl.bufq[idx].bufIdx = idx;
+		buf_tbl.bufq[idx].len = size;
+		buf_tbl.bufq[idx].phy_addr = phy_addr;
+		buf_tbl.bufq[idx].kvaddr = kvaddr;
+		buf_tbl.bufq[idx].attachment = attachment;
+		buf_tbl.bufq[idx].table = table;
+		buf_tbl.bufq[idx].fd = map_cmd.fd;
+
+		mutex_unlock(&buf_tbl.m_lock);
+	} else {
+	/*alreay map*/
+		phy_addr = buf_tbl.bufq[idx].phy_addr;
+		kvaddr = buf_tbl.bufq[idx].kvaddr;
 	}
-
-	idx = cam_mem_get_avaliable_buf_idx();
-
-	buf_tbl.bufq[idx].dma = dmabuf;
-	buf_tbl.bufq[idx].bufIdx = idx;
-	buf_tbl.bufq[idx].len = size;
-	buf_tbl.bufq[idx].phy_addr = phy_addr;
-	buf_tbl.bufq[idx].kvaddr = kvaddr;
-	buf_tbl.bufq[idx].attachment = attachment;
-	buf_tbl.bufq[idx].table = table;
 
 	/// copy to user
 	map_cmd.out.phyAddr = phy_addr;
 	map_cmd.out.kvAddr = kvaddr;
 	map_cmd.out.kBufhandle = idx;
+
 	if (copy_to_user((void __user *)arg, &map_cmd,
 			 sizeof(struct hw_mem_map_cmd))) {
 		LOG(LOG_ERR, "CAM_HW_BUFFER_MAP :copy_from_user error !\n");
 		ret = -EINVAL;
-		goto dma_kmap_failed;
 	}
 
 	return ret;
@@ -729,37 +707,10 @@ dma_kmap_failed:
 
 static int cam_mem_buf_release(unsigned long arg)
 {
-	int ret = 0;
-	int idx = 0;
-	struct hw_mem_release_cmd release_cmd;
-	struct iosys_map map;
-
-	if (copy_from_user(&release_cmd, (void __user *)arg,
-			   sizeof(struct hw_mem_release_cmd))) {
-		LOG(LOG_ERR, "CAM_HW_BUFFER_MAP :copy_from_user error !");
-		ret = -EINVAL;
-	}
-
-	idx = release_cmd.kBufhandle;
-	map.is_iomem = false;
-	map.vaddr = (void *)buf_tbl.bufq[idx].kvaddr;
-
-	if (idx >= 0) {
-		dma_buf_unmap_attachment(buf_tbl.bufq[idx].attachment,
-					 buf_tbl.bufq[idx].table,
-					 DMA_BIDIRECTIONAL);
-		dma_buf_detach(buf_tbl.bufq[idx].dma,
-				   buf_tbl.bufq[idx].attachment);
-		dma_buf_vunmap(buf_tbl.bufq[idx].dma, &map);
-		dma_buf_put(buf_tbl.bufq[idx].dma);
-		cam_mem_put_bux_idx(idx);
-	} else {
-		LOG(LOG_ERR, "error buffer idx");
-		ret = -EINVAL;
-	}
-
-	return ret;
+	/*here do nothing,let cam_mem_release_all interface to release*/
+	return 0;
 }
+
 static u32 Global_PowerDone;
 int armcb_isp_power(int enable, unsigned long arg)
 {
@@ -768,13 +719,10 @@ int armcb_isp_power(int enable, unsigned long arg)
 	u64 s_clk_rate;
 	int reg_data;
 
-	LOG(LOG_INFO, " function enter  %d", enable);
 	if (copy_from_user(&freq, (void __user *)arg, sizeof(freq))) {
 		LOG(LOG_ERR, "copy_from_user error !");
 		return -1;
 	}
-	LOG(LOG_INFO, "enable is %d, copy_from_user  %d %d!",
-		enable, freq[0], freq[1]);
 
 	if (enable && (Global_PowerDone == 0)) {
 		if ((freq[0] > ISP_PLL_CLK) || (freq[0] < 0)) {
@@ -924,12 +872,9 @@ exit:
 
 static int ispmem_release(struct inode *node, struct file *file)
 {
-#ifdef CONFIG_ARENA_FPGA_PLATFORM
-	ispmem_clear_disp_buffer();
-#endif
 	ispmem_cma_free_all();
 
-	mem_block_count = 0;
+	cam_mem_release_all();
 
 	return 0;
 }
@@ -1171,13 +1116,9 @@ static int armcb_ispmem_probe(struct platform_device *pdev)
 	mutex_init(&cmamem_dev.cmamem_lock);
 	cmamem_dev.count = 0;
 	cmamem_dev.pddev = &pdev->dev;
-	cmamem_block_head = devm_kzalloc(
-		&pdev->dev, sizeof(struct cmamem_block), GFP_KERNEL);
-	pdev->dev.dma_parms = &cmamem_block_head->dma_parms;
+
 	dma_set_max_seg_size(&pdev->dev, SEG_SIZE);
-	cmamem_block_head->id = -1;
-	mem_block_count = 0;
-	INIT_LIST_HEAD(&cmamem_block_head->memqueue_list);
+
 	if (has_acpi_companion(&pdev->dev)) {
 	/*
 	 * Now no memory has reserved for aeu.
@@ -1210,8 +1151,14 @@ static int armcb_ispmem_probe(struct platform_device *pdev)
 		LOG(LOG_WARN, "dma_set_mask_and_coherent failed (%d)\n", res);
 
 	if (cmamem_dev.has_iommu) {
-		res = of_dma_configure(cmamem_dev.pddev,
-					   cmamem_dev.pddev->of_node, true);
+		if (has_acpi_companion(cmamem_dev.pddev)) {
+			res = acpi_dma_configure(cmamem_dev.pddev,
+						 				DEV_DMA_NON_COHERENT);
+		} else {
+			res = of_dma_configure(cmamem_dev.pddev,
+					       				cmamem_dev.pddev->of_node, true);
+		}
+
 		if (res)
 			LOG(LOG_WARN, "dma configure failed (%d)\n", res);
 	}
@@ -1221,11 +1168,13 @@ static int armcb_ispmem_probe(struct platform_device *pdev)
 	cmamem_status.vir_addr = 0;
 	cmamem_status.phy_addr = 0;
 
+	mutex_init(&cma_buf_ctl.m_lock);
+	ispmem_cma_mem_init();
+
 	mutex_init(&buf_tbl.m_lock);
 	res = cam_mem_tbl_init();
 	pm_runtime_enable(dev);
 
-	LOG(LOG_INFO, "function exit: %d", res);
 	return res;
 }
 
@@ -1280,7 +1229,6 @@ static int armcb_ispmem_dev_rpm_resume(struct device *dev)
 {
 	int ret;
 
-	LOG(LOG_INFO, "function enter");
 	if (!cam_mem_info->isp_sreset || !cam_mem_info->isp_areset ||
 		!cam_mem_info->isp_hreset || !cam_mem_info->isp_gdcreset ||
 		!cam_mem_info->isp_sclk || !cam_mem_info->isp_aclk)
@@ -1307,7 +1255,6 @@ static int armcb_ispmem_dev_rpm_resume(struct device *dev)
 	reset_control_deassert(cam_mem_info->isp_hreset);
 	reset_control_deassert(cam_mem_info->isp_gdcreset);
 
-	LOG(LOG_INFO, "function exit");
 	return 0;
 }
 #endif

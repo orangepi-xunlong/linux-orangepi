@@ -1251,10 +1251,14 @@ int hda_codec_resume(struct device *dev)
 	struct hda_codec *codec = hcp->codec;
 	struct hda_codec_pdata *codec_pdata = hcp->codec_pdata;
 	struct hdac_bus *bus = hcp->bus;
+	int i;
 
 	/* force codec to resume, then to init condec */
 	if (codec && codec->patch_ops.resume) {
 		pm_runtime_get_sync(bus->dev);
+
+		for (i = 0; i < codec->init_verbs_size; i++)
+			bus->ops->command(bus, codec->init_verbs[i]);
 
 		codec->patch_ops.resume(codec);
 

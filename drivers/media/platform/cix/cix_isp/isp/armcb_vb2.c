@@ -38,16 +38,10 @@ static int armcb_vb2_queue_setup(struct vb2_queue *vq, unsigned int *nbuffers,
 				 struct device *alloc_devs[])
 {
 	int i = 0;
-	int rc = -EINVAL;
-	static unsigned long cnt;
 
 	armcb_v4l2_stream_t *pstream = vb2_get_drv_priv(vq);
 	struct v4l2_format vfmt;
 
-	LOG(LOG_INFO, "Enter id:%d, cnt: %lu.", pstream->stream_id, cnt++);
-	LOG(LOG_INFO, "vq: %p, *nplanes: %u.", vq, *nplanes);
-
-	// get current format
 	if (armcb_v4l2_stream_get_format(pstream, &vfmt) < 0) {
 		LOG(LOG_ERR, "fail to get format from stream");
 		return -EBUSY;
@@ -65,13 +59,8 @@ static int armcb_vb2_queue_setup(struct vb2_queue *vq, unsigned int *nbuffers,
 		LOG(LOG_ERR, "Unsupported buf type :%d", vfmt.type);
 		goto done;
 	}
-
-	rc = 0;
-
-	LOG(LOG_INFO, "deivce inst:%d vb2 queue setup, plane size %u %u %u",
-		pstream->ctx_id, sizes[0], sizes[1], sizes[2]);
 done:
-	return rc;
+	return 0;
 }
 
 static void armcb_vb2_buf_finish(struct vb2_buffer *vb)
@@ -86,13 +75,11 @@ static void armcb_vb2_buf_queue(struct vb2_buffer *vb)
 	armcb_v4l2_stream_t *pstream = vb2_get_drv_priv(vb->vb2_queue);
 	struct vb2_v4l2_buffer *vvb = to_vb2_v4l2_buffer(vb);
 	armcb_v4l2_buffer_t *buf = container_of(vvb, armcb_v4l2_buffer_t, vvb);
-	static unsigned long cnt;
+	unsigned long flags;
 
-	LOG(LOG_DEBUG, "Enter id:%d, cnt: %lu.", pstream->stream_id, cnt++);
-
-	spin_lock(&pstream->slock);
+	spin_lock_irqsave(&pstream->slock,flags);
 	list_add_tail(&buf->list, &pstream->stream_buffer_list);
-	spin_unlock(&pstream->slock);
+	spin_unlock_irqrestore(&pstream->slock, flags);
 }
 
 static void *armcb_vb2_cma_get_userptr(struct vb2_buffer *vb,

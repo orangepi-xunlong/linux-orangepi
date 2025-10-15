@@ -32,7 +32,7 @@
 #include <media/videobuf2-v4l2.h>
 
 #define DISP_BUFFER_SIZE_1080P (2200 * 1125 * 4 * 3)
-
+#define CAM_MEM_BUFQ_MAX 1024
 #define ISP_PLL_CLK 1200
 
 enum sys_ispmem_type {
@@ -104,7 +104,7 @@ struct cmamem_dev {
 struct cmamem_block {
 	unsigned char name[10];
 	unsigned char is_use_buffer;
-	unsigned char is_free;
+	unsigned char is_busy;
 	int id;
 	unsigned int offset;
 	unsigned int len;
@@ -115,14 +115,19 @@ struct cmamem_block {
 	struct device_dma_parameters dma_parms;
 };
 
+struct cma_mem_ctl {
+	int buf_count;
+	struct mutex m_lock;
+	unsigned char bitMap[CAM_MEM_BUFQ_MAX];
+	struct cmamem_block *bufq[CAM_MEM_BUFQ_MAX];
+};
+
 struct current_status {
 	int status;
 	int id_count;
 	void *vir_addr;
 	dma_addr_t phy_addr;
 };
-
-#define CAM_MEM_BUFQ_MAX 1024
 
 struct cam_mem_buf {
 	struct dma_buf *dma;

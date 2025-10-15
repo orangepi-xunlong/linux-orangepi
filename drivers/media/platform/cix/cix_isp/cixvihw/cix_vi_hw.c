@@ -615,8 +615,6 @@ static int cix_vi_hw_probe(struct platform_device *pdev)
 	int irq0, irq1;
 	int ret;
 
-	LOG(LOG_INFO, "cix vi hw reg  probe enter\n");
-
 	cix_vi_hw_info =
 		devm_kzalloc(dev, sizeof(struct cix_vi_hw_dev), GFP_KERNEL);
 	if (!cix_vi_hw_info)
@@ -934,8 +932,6 @@ static int cix_vi_hw_probe(struct platform_device *pdev)
 	mutex_init(&cix_vi_hw_info->mutex);
 
 	platform_set_drvdata(pdev, cix_vi_hw_info);
-
-	dev_info(dev, "cix hw reg list probe exit\n");
 
 	return 0;
 }

@@ -57,8 +57,6 @@
 #define ARMCB_MODULE_NAME "armcb_isp_v4l2"
 
 /* if set disable the error injecting controls */
-static bool no_error_inj;
-
 static armcb_v4l2_dev_t *g_isp_v4l2_devs[ARMCB_MAX_DEVS] = { 0 };
 static uint32_t outport_array[ARMCB_MAX_DEVS][V4L2_STREAM_TYPE_MAX];
 static int g_adev_idx;
@@ -91,6 +89,13 @@ struct armcb_isp_v4l2_fh {
 	uint32_t ctx_id;
 	struct vb2_queue vb2_q;
 };
+
+static int armcb_isp_streamoff(struct file *file);
+
+pid_t isp_getpid(void)
+{
+	return current->tgid;
+}
 
 armcb_v4l2_stream_t *armcb_v4l2_get_stream(uint32_t ctx_id, int stream_id)
 {
@@ -210,9 +215,7 @@ void armcb_isp_put_frame(uint32_t ctx_id, int stream_id, isp_output_port_t port)
 	armcb_v4l2_stream_t *pstream = NULL;
 	armcb_v4l2_buffer_t *pbuf = NULL;
 	struct vb2_buffer *vb = NULL;
-
-	static armcb_v4l2_buffer_t *splastbuf;
-	armcb_v4l2_buffer_t *plastbuf = NULL;
+	unsigned long flags;
 
 	if (stream_id < 0 && port < ISP_OUTPUT_PORT_MAX) {
 		pstream = g_outport_map[ctx_id][port];
@@ -220,58 +223,35 @@ void armcb_isp_put_frame(uint32_t ctx_id, int stream_id, isp_output_port_t port)
 		/* find stream pointer */
 		rc = armcb_v4l2_find_stream(&pstream, ctx_id, stream_id);
 		if (rc < 0) {
-			LOG(LOG_WARN,
-				"can't find stream on ctx %d stream_id %d (errno = %d)",
-				ctx_id, stream_id, rc);
 			return;
 		}
 	}
 
-	LOG(LOG_DEBUG,
-		"ctx_id:%d Stream#%d fmt(%d*%d %d %d) outport(%d %s) streamType(%d) "
-		"reserved_buf_addr(0x%x)",
-		ctx_id, pstream->stream_id, pstream->cur_v4l2_fmt.fmt.pix_mp.width,
-		pstream->cur_v4l2_fmt.fmt.pix_mp.height,
-		pstream->cur_v4l2_fmt.fmt.pix_mp.pixelformat,
-		pstream->cur_v4l2_fmt.type, pstream->outport, g_IspPortToken[port],
-		pstream->stream_type, pstream->reserved_buf_addr);
-
 	/* check if stream is on */
 	if (!pstream || !pstream->stream_started) {
-		LOG(LOG_DEBUG, "[Stream#%d] is not started yet on ctx %d",
-			stream_id, ctx_id);
 		return;
 	}
-	LOG(LOG_DEBUG, "ctx_id:%d [Stream#%d] %p", ctx_id, pstream->stream_id,
-		pstream);
 
-	plastbuf = list_last_entry(&(pstream->stream_buffer_list_busy),
-				   armcb_v4l2_buffer_t, list);
+	if (pstream->active_buf_addr != pstream->reserved_buf_addr) {
+		spin_lock_irqsave(&pstream->slock,flags);
+		/* try to get an active buffer from vb2 queue  */
+		if (!list_empty(&pstream->stream_buffer_list_busy)) {
 
-	/* try to get an active buffer from vb2 queue  */
-	if (!list_empty(&pstream->stream_buffer_list_busy)) {
-		if (!list_is_singular(&pstream->stream_buffer_list_busy) ||
-			(plastbuf == splastbuf)) {
 			pbuf = list_entry(pstream->stream_buffer_list_busy.next,
-					  armcb_v4l2_buffer_t, list);
-			list_del(&pbuf->list);
-		}
-	}
-	splastbuf = list_last_entry(&(pstream->stream_buffer_list_busy),
 					armcb_v4l2_buffer_t, list);
+			list_del(&pbuf->list);
 
-	if (!pbuf) {
-		/// @TODO: need to use reserved buffer to hw output.
-		LOG(LOG_DEBUG, "[Stream#%d] type: %d no empty buffers",
-			pstream->stream_id, V4L2_STREAM_TYPE_VIDEO);
-		return;
+			vb = &pbuf->vvb.vb2_buf;
+			vb->timestamp = ktime_get_ns();
+			vb2_buffer_done(vb, VB2_BUF_STATE_DONE);
+
+		}
+
+		spin_unlock_irqrestore(&pstream->slock, flags);
 	}
-	vb = &pbuf->vvb.vb2_buf;
 
-	vb->timestamp = ktime_get_ns();
-	vb2_buffer_done(vb, VB2_BUF_STATE_DONE);
-	LOG(LOG_DEBUG, "%s put frame success ctx_id:%d stream_id:%d",
-		g_IspPortToken[port], ctx_id, stream_id);
+	/*updata vout buffer*/
+	armcb_update_stream_vout_addr(pstream);
 }
 
 static int armcb_v4l2_querycap(struct file *file, void *priv,
@@ -300,24 +280,6 @@ static int armcb_v4l2_log_status(struct file *file, void *fh)
 	return v4l2_ctrl_log_status(file, fh);
 }
 
-static bool armcb_is_in_use(struct video_device *vdev)
-{
-	unsigned long flags;
-	bool res;
-
-	spin_lock_irqsave(&vdev->fh_lock, flags);
-	res = !list_empty(&vdev->fh_list);
-	spin_unlock_irqrestore(&vdev->fh_lock, flags);
-	return res;
-}
-
-static bool armcb_is_last_user(armcb_v4l2_dev_t *dev)
-{
-	unsigned int uses = armcb_is_in_use(&dev->vid_cap_dev);
-
-	return uses == 1;
-}
-
 static int armcb_v4l2_fh_release(struct file *file)
 {
 	struct armcb_isp_v4l2_fh *sp = fh_to_private(file->private_data);
@@ -337,69 +299,22 @@ static int armcb_v4l2_fh_release(struct file *file)
 static int armcb_v4l2_fop_release(struct file *file)
 {
 	armcb_v4l2_dev_t *dev = video_drvdata(file);
-	struct armcb_isp_v4l2_fh *sp = fh_to_private(file->private_data);
-	armcb_v4l2_stream_t *pstream = dev->pstreams[sp->stream_id];
-	int outport_idx = -1;
-	int open_counter;
 
-	struct video_device *vdev = video_devdata(file);
-	struct v4l2_event_subscription sub;
-	int ret = 0;
+	atomic_sub_return(1, &dev->opened);
 
-	dev->stream_mask &= ~(1 << sp->stream_id);
-	open_counter = atomic_sub_return(1, &dev->opened);
+	pid_t pid = isp_getpid();
 
-	/* deinit stream */
-	if (pstream) {
-		outport_idx = armcb_outport_bits_to_idx(pstream->outport);
-		if (outport_idx >= 0 && outport_idx < ISP_OUTPUT_PORT_MAX)
-			g_outport_map[sp->ctx_id][outport_idx] = NULL;
-		if (pstream->stream_type < V4L2_STREAM_TYPE_MAX)
-			dev->stream_id_index[pstream->stream_type] = -1;
-		armcb_v4l2_stream_deinit(pstream);
-		dev->pstreams[sp->stream_id] = NULL;
+	if ((dev->is_streaming) && (pid == dev->streaming_pid)) {
+		armcb_isp_streamoff(file);
+		atomic_set(&dev->stream_on_cnt, 0);
+	} else if (pid == dev->streaming_pid) {
+		atomic_set(&dev->stream_on_cnt, 0);
 	}
-
-	ret = armcb_isp_hw_apply_list(CMD_TYPE_STREAMOFF);
-	if (ret < 0)
-		LOG(LOG_ERR, "armcb_isp_hw_apply_list failed ret(%d)", ret);
-
-	ret = armcb_isp_hw_apply_list(CMD_TYPE_POWERDOWN);
-	if (ret < 0)
-		LOG(LOG_ERR, "armcb_isp_hw_apply_list failed ret(%d)", ret);
-
-	atomic_set(&dev->stream_on_cnt, 0);
-	/// unsubscribe event when close file
-	memset(&sub, 0, sizeof(sub));
-	sub.type = V4L2_EVENT_ALL;
-	ret = v4l2_event_unsubscribe(file->private_data, &sub);
-	LOG(LOG_DEBUG, "v4l2_event_unsubscribe, ret = %d", ret);
-
-	if (!no_error_inj && v4l2_fh_is_singular_file(file) &&
-		!video_is_registered(vdev) && armcb_is_last_user(dev)) {
-		/*
-		 * I am the last user of this driver, and a disconnect
-		 * was forced (since this video_device is unregistered),
-		 * so re-register all video_device's again.
-		 */
-		v4l2_info(&dev->v4l2_dev, "reconnect");
-		set_bit(V4L2_FL_REGISTERED, &dev->vid_cap_dev.flags);
-	}
-
-	/* release vb2 queue */
-	if (sp->vb2_q.lock)
-		mutex_lock(sp->vb2_q.lock);
-
-	isp_vb2_queue_release(&sp->vb2_q);
-
-	if (sp->vb2_q.lock)
-		mutex_unlock(sp->vb2_q.lock);
-
-	if (vdev->queue)
-		return vb2_fop_release(file);
 
 	/* release file handle */
 	armcb_v4l2_fh_release(file);
+
+
 
 	LOG(LOG_DEBUG, "release v4l2 fp success");
 	return 0;
@@ -409,7 +324,6 @@ static int armcb_v4l2_fh_open(struct file *file)
 {
 	armcb_v4l2_dev_t *dev = video_drvdata(file);
 	struct armcb_isp_v4l2_fh *sp = NULL;
-	int i = 0;
 	int stream_opened = 0;
 
 	sp = kzalloc(sizeof(struct armcb_isp_v4l2_fh), GFP_KERNEL);
@@ -426,16 +340,6 @@ static int armcb_v4l2_fh_open(struct file *file)
 	}
 
 	file->private_data = &sp->fh;
-
-	for (i = 0; i < V4L2_STREAM_TYPE_MAX; i++) {
-		if ((dev->stream_mask & (1 << i)) == 0) {
-			dev->stream_mask |= (1 << i);
-			sp->stream_id = i;
-			sp->ctx_id = dev->ctx_id;
-			break;
-		}
-	}
-
 	v4l2_fh_init(&sp->fh, &dev->vid_cap_dev);
 	v4l2_fh_add(&sp->fh);
 
@@ -445,53 +349,20 @@ static int armcb_v4l2_fh_open(struct file *file)
 
 static int armcb_v4l2_fop_open(struct file *filp)
 {
-	int rc = 0;
-	struct armcb_isp_v4l2_fh *sp = NULL;
-	armcb_v4l2_stream_t *pstream = NULL;
 	armcb_v4l2_dev_t *dev = video_drvdata(filp);
+	int ret = -1;
 
-	rc = armcb_v4l2_fh_open(filp);
-	if (rc < 0) {
-		LOG(LOG_ERR, "Error, file handle open fail (rc=%d)", rc);
-		goto fh_open_fail;
-	}
-
-	sp = fh_to_private(filp->private_data);
-	LOG(LOG_DEBUG, "isp_v4l2 open: ctx_id: %d, called for sid:%d.",
-		dev->ctx_id, sp->stream_id);
-	/* init stream */
-	armcb_v4l2_stream_init(&dev->pstreams[sp->stream_id], sp->stream_id,
-				   dev->ctx_id);
-	pstream = dev->pstreams[sp->stream_id];
-	if (pstream == NULL) {
-		LOG(LOG_ERR, "stream alloc failed\n");
-		return -ENOMEM;
-	}
-
-	/* init vb2 queue */
-	rc = isp_vb2_queue_init(&sp->vb2_q, &dev->mutex,
-				dev->pstreams[sp->stream_id],
-				dev->v4l2_dev.dev);
-	if (rc < 0) {
-		LOG(LOG_ERR, "Error, vb2 queue init fail (rc=%d)", rc);
-		goto vb2_q_fail;
+	ret = armcb_v4l2_fh_open(filp);
+	if (ret < 0) {
+		LOG(LOG_ERR, "Error, file handle open fail (rc=%d)", ret);
+		goto open_fail;
 	}
 
 	atomic_add(1, &dev->opened);
+
 	LOG(LOG_DEBUG, "open v4l2 fp success");
-
-	return rc;
-
-vb2_q_fail:
-	armcb_v4l2_stream_deinit(dev->pstreams[sp->stream_id]);
-
-	// too_many_stream:
-	armcb_v4l2_fh_release(filp);
-
-	/* update open counter */
-
-fh_open_fail:
-	return rc;
+open_fail:
+	return ret;
 }
 
 static ssize_t armcb_v4l2_fop_write(struct file *filep, const char __user *buf,
@@ -584,9 +455,6 @@ static int armcb_v4l2_streamon(struct file *file, void *priv,
 	struct armcb_isp_v4l2_fh *sp = fh_to_private(priv);
 	armcb_v4l2_stream_t *pstream = dev->pstreams[sp->stream_id];
 
-	if (armcb_v4l2_is_q_busy(&sp->vb2_q, file))
-		return -EBUSY;
-
 	rc = vb2_streamon(&sp->vb2_q, buf_type);
 	if (rc != 0) {
 		LOG(LOG_ERR, "fail to vb2_streamon. (rc=%d)", rc);
@@ -601,15 +469,25 @@ static int armcb_v4l2_streamon(struct file *file, void *priv,
 			sp->stream_id, rc);
 	}
 
-	rc = armcb_v4l2_config_update_stream_hw_addr(pstream);
+	rc = armcb_update_stream_vout_addr(pstream);
 	if (rc != 0) {
 		LOG(LOG_ERR,
 			"fail to update stream output addr. (stream_id = %d, rc=%d)",
 			sp->stream_id, rc);
 	}
 
+	rc = armcb_v4l2_stream_on(pstream);
+	if (rc != 0) {
+		LOG(LOG_ERR, "fail to isp_stream_on. (stream_id = %d, rc=%d)",
+			sp->stream_id, rc);
+		return rc;
+	}
+
+	atomic_add(1, &dev->stream_on_cnt);
+
 	/* Start hardware */
-	if (atomic_read(&dev->stream_on_cnt) == 0) {
+	if (atomic_read(&dev->stream_on_cnt) == 2) {
+
 		rc = armcb_isp_hw_apply_list(CMD_TYPE_STREAMON);
 		if (rc < 0) {
 			LOG(LOG_ERR, "armcb_isp_hw_apply_list failed ret(%d)",
@@ -617,47 +495,111 @@ static int armcb_v4l2_streamon(struct file *file, void *priv,
 		}
 	}
 
-	atomic_add(1, &dev->stream_on_cnt);
-	LOG(LOG_INFO, "ctx_id:%d, stream_id:%d",
-		dev->ctx_id, sp->stream_id);
+	dev->is_streaming = 1;
+	dev->streaming_pid = isp_getpid();
 
-	rc = armcb_v4l2_stream_on(pstream);
-	if (rc != 0) {
-		LOG(LOG_ERR, "fail to isp_stream_on. (stream_id = %d, rc=%d)",
-			sp->stream_id, rc);
-		armcb_v4l2_stream_off(pstream);
-		return rc;
-	}
 
 	return rc;
+}
+
+static int armcb_isp_streamoff(struct file *file)
+{
+	armcb_v4l2_dev_t *dev = video_drvdata(file);
+	int outport_idx = -1;
+	int loop;
+	int ret = -1;
+
+	armcb_i7_disable_int();
+	/*disbale the stream operate ram,if not smmu error maybe occur */
+	armcb_i7_disable_vin();
+	if (atomic_read(&dev->stream_on_cnt) == 1) {
+
+		ret = armcb_isp_hw_apply_list(CMD_TYPE_STREAMOFF);
+		if (ret < 0) {
+			LOG(LOG_ERR, "armcb_isp_hw_apply_list failed ret(%d)",
+					ret);
+		}
+
+		ret = armcb_isp_hw_apply_list(CMD_TYPE_POWERDOWN);
+		if (ret < 0)
+			LOG(LOG_ERR, "armcb_isp_hw_apply_list failed ret(%d)", ret);
+	}
+
+	/*deinit the stream*/
+	for(loop = 0;loop < V4L2_STREAM_TYPE_MAX;loop++) {
+
+		armcb_v4l2_stream_t *pstream = dev->pstreams[loop];
+		if(pstream != NULL) {
+
+			armcb_v4l2_stream_off(pstream);
+			dev->stream_mask &= ~(1 << loop);
+
+			/* deinit stream */
+			if (pstream) {
+				outport_idx = armcb_outport_bits_to_idx(pstream->outport);
+				if (outport_idx >= 0 && outport_idx < ISP_OUTPUT_PORT_MAX)
+					g_outport_map[dev->ctx_id][outport_idx] = NULL;
+				if (pstream->stream_type < V4L2_STREAM_TYPE_MAX)
+					dev->stream_id_index[pstream->stream_type] = -1;
+				armcb_v4l2_stream_deinit(pstream);
+				dev->pstreams[loop] = NULL;
+			}
+
+			atomic_sub_return(1, &dev->stream_on_cnt);
+		}
+	}
+
+
+	dev->is_streaming = 0;
+
+	return ret;
 }
 
 static int armcb_v4l2_streamoff(struct file *file, void *priv,
 				enum v4l2_buf_type buf_type)
 {
-	int rc = -1;
 	armcb_v4l2_dev_t *dev = video_drvdata(file);
 	struct armcb_isp_v4l2_fh *sp = fh_to_private(priv);
 	armcb_v4l2_stream_t *pstream = dev->pstreams[sp->stream_id];
+	int outport_idx = -1;
+	int ret = 0;
+
+	armcb_i7_disable_int();
+	armcb_i7_disable_vin();
 
 	if (atomic_read(&dev->stream_on_cnt) == 1) {
-		rc = armcb_isp_hw_apply_list(CMD_TYPE_STREAMOFF);
-		if (rc < 0) {
+
+		ret = armcb_isp_hw_apply_list(CMD_TYPE_STREAMOFF);
+		if (ret < 0) {
 			LOG(LOG_ERR, "armcb_isp_hw_apply_list failed ret(%d)",
-				rc);
+					ret);
 		}
+
+		ret = armcb_isp_hw_apply_list(CMD_TYPE_POWERDOWN);
+		if (ret < 0)
+			LOG(LOG_ERR, "armcb_isp_hw_apply_list failed ret(%d)", ret);
 	}
-	LOG(LOG_INFO, "ctx_id:%d, stream_id:%d",
-		dev->ctx_id, sp->stream_id);
+
 	/* Stop hardware */
 	armcb_v4l2_stream_off(pstream);
 
-	/* vb streamoff */
-	rc = vb2_streamoff(&sp->vb2_q, buf_type);
+	dev->stream_mask &= ~(1 << sp->stream_id);
+
+	/* deinit stream */
+	if (pstream) {
+		outport_idx = armcb_outport_bits_to_idx(pstream->outport);
+		if (outport_idx >= 0 && outport_idx < ISP_OUTPUT_PORT_MAX)
+			g_outport_map[sp->ctx_id][outport_idx] = NULL;
+		if (pstream->stream_type < V4L2_STREAM_TYPE_MAX)
+			dev->stream_id_index[pstream->stream_type] = -1;
+		armcb_v4l2_stream_deinit(pstream);
+		dev->pstreams[sp->stream_id] = NULL;
+	}
 
 	atomic_sub_return(1, &dev->stream_on_cnt);
 
-	return rc;
+	dev->is_streaming = 0;
+	return ret;
 }
 
 int armcb_v4l2_g_fmt_vid_cap_mplane(struct file *file, void *priv,
@@ -676,12 +618,39 @@ int armcb_v4l2_s_fmt_vid_cap_mplane(struct file *file, void *priv,
 	armcb_v4l2_stream_t *pstream = dev->pstreams[sp->stream_id];
 	struct vb2_queue *q = &sp->vb2_q;
 	int outport_idx = -1;
+	int i;
 	int rc = 0;
-
-	LOG(LOG_INFO, "ctx_id:%d stream_id:%d", sp->ctx_id, sp->stream_id);
 
 	if (vb2_is_busy(q))
 		return -EBUSY;
+
+	for (i = 0; i < V4L2_STREAM_TYPE_MAX; i++) {
+		if ((dev->stream_mask & (1 << i)) == 0) {
+			dev->stream_mask |= (1 << i);
+			sp->stream_id = i;
+			sp->ctx_id = dev->ctx_id;
+			break;
+		}
+	}
+
+	sp = fh_to_private(file->private_data);
+	/* init stream */
+	armcb_v4l2_stream_init(&dev->pstreams[sp->stream_id], sp->stream_id,
+				   dev->ctx_id);
+	pstream = dev->pstreams[sp->stream_id];
+	if (pstream == NULL) {
+		LOG(LOG_ERR, "stream alloc failed\n");
+		return -ENOMEM;
+	}
+
+	/* init vb2 queue */
+	rc = isp_vb2_queue_init(&sp->vb2_q, &dev->mutex,
+				dev->pstreams[sp->stream_id],
+				dev->v4l2_dev.dev);
+	if (rc < 0) {
+		LOG(LOG_ERR, "Error, vb2 queue init fail (rc=%d)", rc);
+		//goto vb2_q_fail;
+	}
 
 	rc = armcb_v4l2_stream_set_format(pstream, f);
 	if (rc < 0) {
@@ -733,8 +702,6 @@ static int armcb_v4l2_reqbufs(struct file *file, void *priv,
 	struct armcb_isp_v4l2_fh *sp = fh_to_private(file->private_data);
 	int rc = 0;
 
-	LOG(LOG_INFO, "(stream_id = %d, ownermatch=%d)", sp->stream_id,
-		armcb_v4l2_is_q_busy(&sp->vb2_q, file));
 	if (armcb_v4l2_is_q_busy(&sp->vb2_q, file))
 		return -EBUSY;
 
@@ -742,8 +709,6 @@ static int armcb_v4l2_reqbufs(struct file *file, void *priv,
 	if (rc == 0)
 		sp->vb2_q.owner = p->count ? file->private_data : NULL;
 
-	LOG(LOG_INFO, "sid:%d reqbuf p->type:%d p->memory %d p->count %d rc %d",
-		sp->stream_id, p->type, p->memory, p->count, rc);
 	return rc;
 }
 
@@ -767,12 +732,7 @@ static int armcb_v4l2_querybuf(struct file *file, void *priv,
 				   struct v4l2_buffer *p)
 {
 	struct armcb_isp_v4l2_fh *sp = fh_to_private(file->private_data);
-	int rc = 0;
-
-	rc = vb2_querybuf(&sp->vb2_q, p);
-	LOG(LOG_DEBUG, "sid:%d querybuf p->type:%d p->index:%d , rc %d",
-		sp->stream_id, p->type, p->index, rc);
-	return rc;
+	return vb2_querybuf(&sp->vb2_q, p);
 }
 
 static int armcb_v4l2_qbuf(struct file *file, void *priv, struct v4l2_buffer *p)
@@ -789,9 +749,6 @@ static int armcb_v4l2_qbuf(struct file *file, void *priv, struct v4l2_buffer *p)
 	if (pstream) {
 		if (pstream->stream_started == 0) {
 			if (p->reserved) {
-				LOG(LOG_WARN,
-					"set reserved buffer %p userptr:%p", p,
-					p->m.planes->m.userptr);
 				pstream->reserved_buf_addr =
 					(u32)p->m.planes->m.userptr;
 				return 0;
@@ -799,8 +756,6 @@ static int armcb_v4l2_qbuf(struct file *file, void *priv, struct v4l2_buffer *p)
 		}
 	}
 
-	LOG(LOG_DEBUG, "ctx_id:%d stream_id = %d, ownermatch=%d", sp->ctx_id,
-		sp->stream_id, armcb_v4l2_is_q_busy(&sp->vb2_q, file));
 	if (armcb_v4l2_is_q_busy(&sp->vb2_q, file))
 		return -EBUSY;
 #if (KERNEL_VERSION(5, 10, 0) <= LINUX_VERSION_CODE)
@@ -808,9 +763,7 @@ static int armcb_v4l2_qbuf(struct file *file, void *priv, struct v4l2_buffer *p)
 #else
 	rc = vb2_qbuf(&sp->vb2_q, p);
 #endif
-	LOG(LOG_DEBUG,
-		"ctx_id:%d stream_id:%d qbuf p->type:%d p->index:%d, rc %d",
-		sp->ctx_id, sp->stream_id, p->type, p->index, rc);
+
 	return rc;
 }
 
@@ -818,19 +771,11 @@ static int armcb_v4l2_dqbuf(struct file *file, void *priv,
 				struct v4l2_buffer *p)
 {
 	struct armcb_isp_v4l2_fh *sp = fh_to_private(file->private_data);
-	int rc = 0;
 
-	LOG(LOG_DEBUG, "ctx_id:%d stream_id = %d, ownermatch=%d", sp->ctx_id,
-		sp->stream_id, armcb_v4l2_is_q_busy(&sp->vb2_q, file));
 	if (armcb_v4l2_is_q_busy(&sp->vb2_q, file))
 		return -EBUSY;
 
-	rc = vb2_dqbuf(&sp->vb2_q, p, file->f_flags & O_NONBLOCK);
-	LOG_RATELIMITED(
-		LOG_DEBUG,
-		"ctx_id:%d stream_id:%d dqbuf p->type:%d p->index:%d, rc %d",
-		sp->ctx_id, sp->stream_id, p->type, p->index, rc);
-	return rc;
+	return vb2_dqbuf(&sp->vb2_q, p, file->f_flags & O_NONBLOCK);
 }
 
 static const struct v4l2_ioctl_ops armcb_ioctl_ops = {
@@ -901,7 +846,7 @@ armcb_v4l2_create_instance(struct platform_device *pdev, int ctx_id,
 	int ret = 0;
 	int i = 0;
 
-	LOG(LOG_INFO, " ctx_id(%d) +", ctx_id);
+	LOG(LOG_INFO, "register ctx_id(%d)", ctx_id);
 	/* allocate main vivid state structure */
 	dev = kzalloc(sizeof(*dev), GFP_KERNEL);
 	if (!dev) {
@@ -935,7 +880,7 @@ armcb_v4l2_create_instance(struct platform_device *pdev, int ctx_id,
 	/* register v4l2_device */
 	snprintf(dev->v4l2_dev.name, sizeof(dev->v4l2_dev.name), "%s-%02d",
 		 ARMCB_MODULE_NAME, ctx_id);
-	LOG(LOG_INFO, "dev->v4l2_dev.name[%s]", dev->v4l2_dev.name);
+
 	ret = v4l2_device_register(devnode, &dev->v4l2_dev);
 	if (ret) {
 		kfree(dev);
@@ -950,6 +895,7 @@ armcb_v4l2_create_instance(struct platform_device *pdev, int ctx_id,
 	/* initialize locks */
 	spin_lock_init(&dev->slock);
 	spin_lock_init(&dev->v4l2_event_slock);
+
 
 	mutex_init(&dev->mutex);
 	mutex_init(&dev->v4l2_event_mutex);
@@ -995,15 +941,11 @@ armcb_v4l2_create_instance(struct platform_device *pdev, int ctx_id,
 #endif
 		if (ret < 0)
 			goto unreg_dev;
-		LOG(LOG_INFO, "V4L2 capture device registered as %s",
-			video_device_node_name(vfd));
-		LOG(LOG_INFO,
-			"[has_vid_cap] vfd->name[%s] v4l2_dev.name[%s] dev_name[%s]",
-			vfd->name, dev->v4l2_dev.name, video_device_node_name(vfd));
 	}
 
 	/* Now that everything is fine, let's add it to device list */
-	LOG(LOG_INFO, "create video device instance success");
+	LOG(LOG_INFO, "create ctx %d video device success",ctx_id);
+
 	return dev;
 
 unreg_dev:
@@ -1035,7 +977,8 @@ armcb_v4l2_dev_t *armcb_register_instance(struct platform_device *pdev,
 		return NULL;
 	}
 
-	LOG(LOG_INFO, "register v4l2 video instance %d %p", cam_id, adev);
+	LOG(LOG_INFO, "record video instance %d", cam_id);
+
 	g_isp_v4l2_devs[cam_id] = adev;
 	return adev;
 }

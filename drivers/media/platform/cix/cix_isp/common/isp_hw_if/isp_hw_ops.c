@@ -146,10 +146,6 @@ static int armcb_i2c_apply(struct cmd_buf *cmd, void *clinet)
 		} else {
 			LOG(LOG_ERR, "Unsupported direct");
 		}
-
-		if (i2c_settings[i].delay_us > 0)
-			usleep_range(i2c_settings[i].delay_us,
-				     i2c_settings[i].delay_us + 50);
 	}
 
 	return ret;
@@ -234,10 +230,6 @@ static int armcb_spi_apply(struct cmd_buf *cmd, void *clinet)
 		} else {
 			LOG(LOG_ERR, "Unsupported direct");
 		}
-
-		if (spi_settings[i].delay_us > 0)
-			usleep_range(spi_settings[i].delay_us,
-				     spi_settings[i].delay_us + 50);
 	}
 
 	return ret;
@@ -375,9 +367,6 @@ static int armcb_ahb_apply(struct cmd_buf *cmd, void *clinet)
 							    ISP_REG_BASE,
 						    ahb_settings[i].val);
 
-			if (ahb_settings[i].delay_us > 0)
-				usleep_range(ahb_settings[i].delay_us,
-					     ahb_settings[i].delay_us + 50);
 		} else if (ahb_settings[i].direct == DRV_DIRECTION_READ) {
 #ifdef CONFIG_ARENA_FPGA_PLATFORM
 			if (ahb_settings[i].reg_addr >=
@@ -469,9 +458,6 @@ static int armcb_ahb_apply(struct cmd_buf *cmd, void *clinet)
 					ahb_settings[i].reg_addr -
 					ISP_REG_BASE);
 
-			if (ahb_settings[i].delay_us > 0)
-				usleep_range(ahb_settings[i].delay_us,
-					     ahb_settings[i].delay_us + 50);
 		} else if (ahb_settings[i].direct == DRV_DIRECTION_READ_POLL) {
 			expected_val = ahb_settings[i].val;
 			while (1) {
@@ -581,8 +567,6 @@ static int armcb_ahb_apply(struct cmd_buf *cmd, void *clinet)
 					    expected_val, ahb_settings[i].val);
 					break;
 				}
-
-				usleep_range(2000, 2000 + 50);
 				delay_us += 2000;
 			}
 		} else {
@@ -621,11 +605,6 @@ static int armcb_ahb_power_apply(struct cmd_buf *cmd, void *clinet)
 			armcb_apb2_write_reg(ahb_power_settings[i].reg_addr -
 						     APB2_REG_BASE,
 					     tmp);
-
-			if (ahb_power_settings[i].delay_us > 0)
-				usleep_range(ahb_power_settings[i].delay_us,
-					     ahb_power_settings[i].delay_us +
-						     50);
 		} else {
 			LOG(LOG_ERR, "invaild address 0x%x",
 			    ahb_power_settings[i].reg_addr);

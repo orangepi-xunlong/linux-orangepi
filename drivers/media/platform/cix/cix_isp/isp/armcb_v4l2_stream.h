@@ -92,6 +92,7 @@ typedef struct _armcb_v4l2_stream_t {
 
 	int fw_frame_seq_count;
 	u32 reserved_buf_addr;
+	u32 active_buf_addr;
 } armcb_v4l2_stream_t;
 
 int armcb_v4l2_stream_init(armcb_v4l2_stream_t **ppstream, int stream_id,

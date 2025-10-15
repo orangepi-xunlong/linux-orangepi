@@ -116,18 +116,9 @@ static void armcb_spi_config_clock_mode(struct spi_device *spi)
 		new_ctrl_reg |= ARMCB_SPI_CR_CPOL;
 
 	if (new_ctrl_reg != ctrl_reg) {
-<<<<<<< HEAD   (28289f DPTSW-7267: Fix isp driver build warning)
-		/*
-		* toggle the ER/CR register.
-		*/
-=======
 	/*
-	 * Just writing the CR register does not seem to apply the clock
-	 * setting changes. This is problematic when changing the clock
-	 * polarity as it will cause the SPI slave to see spurious clock
-	 * transitions. To workaround the issue toggle the ER register.
+	 * toggle the ER/CR register.
 	 */
->>>>>>> CHANGE (3bd1a5 DPTSW-12398: fix the errors and warnings of code style check)
 		armcb_spi_write(xspi, ARMCB_SPI_ER, ARMCB_SPI_ER_DISABLE);
 		armcb_spi_write(xspi, ARMCB_SPI_CR, new_ctrl_reg);
 		armcb_spi_write(xspi, ARMCB_SPI_ER, ARMCB_SPI_ER_ENABLE);

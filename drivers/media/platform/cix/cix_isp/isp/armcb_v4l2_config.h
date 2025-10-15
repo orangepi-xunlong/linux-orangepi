@@ -78,6 +78,9 @@ static inline unsigned int irqev_pos(const struct armcb_irq_msg_fh *fh,
 
 int armcb_v4l2_config_update_stream_vin_addr(armcb_v4l2_stream_t *pstream);
 int armcb_v4l2_config_update_stream_hw_addr(armcb_v4l2_stream_t *pstream);
+int armcb_update_stream_vout_addr(armcb_v4l2_stream_t *pstream);
+void armcb_i7_disable_int(void);
+void armcb_i7_disable_vin(void);
 
 #ifdef ARMCB_CAM_KO
 void *armcb_get_v4l2_cfg_driver_instance(void);

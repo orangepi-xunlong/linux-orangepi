@@ -95,10 +95,8 @@ static int rdr_writen_num;
  * Description : Dump function of the AP when an exception occurs
  */
 static void cix_isp_rproc_rdr_dump(u32 modid, u32 etype, u64 coreid,
-				   char *log_path, pfn_cb_dump_done pfn_cb)
+				   char *log_path, pfn_cb_dump_done fndone)
 {
-	if (pfn_cb)
-		pfn_cb(modid, coreid);
 }
 
 /*
@@ -302,9 +300,6 @@ int armcb_v4l2_config_update_stream_vin_addr(armcb_v4l2_stream_t *pstream)
 
 	if (armcb_get_vin_addr_by_outport_i7(pstream->outport, &vin_daw_reg,
 					     &vin_dar_reg) < 0) {
-		LOG(LOG_DEBUG,
-		    "ctx_id:%d stream_id:%d failed to get reg for outport:%d",
-		    pstream->ctx_id, pstream->stream_id, pstream->outport);
 		return -EINVAL;
 	}
 
@@ -318,8 +313,6 @@ int armcb_v4l2_config_update_stream_vin_addr(armcb_v4l2_stream_t *pstream)
 	}
 
 	if (!pbuf) {
-		LOG(LOG_DEBUG, "[Stream#%d] no empty buffers",
-		    pstream->stream_id);
 		startaddr = pstream->reserved_buf_addr;
 	} else {
 		startaddr = (unsigned int)(uintptr_t)vb2_plane_vaddr(
@@ -327,10 +320,6 @@ int armcb_v4l2_config_update_stream_vin_addr(armcb_v4l2_stream_t *pstream)
 	}
 
 	if (vin_dar_reg && vin_daw_reg && startaddr) {
-		LOG(LOG_DEBUG,
-		    "[Stream#%d] set daw0(0x%x) & dar0(0x%x) startaddr(0x%x) reserved_buf_addr(0x%x) VIN_BUFFER_LONG_ADDR(0x%x)",
-		    pstream->stream_id, vin_daw_reg, vin_dar_reg, startaddr,
-		    pstream->reserved_buf_addr, VIN_BUFFER_LONG_ADDR);
 		armcb_isp_write_reg(vin_daw_reg, startaddr);
 		armcb_isp_write_reg(vin_dar_reg, startaddr);
 	}
@@ -338,24 +327,23 @@ int armcb_v4l2_config_update_stream_vin_addr(armcb_v4l2_stream_t *pstream)
 	return 0;
 }
 
-int armcb_v4l2_config_update_stream_hw_addr(armcb_v4l2_stream_t *pstream)
+int armcb_update_stream_vout_addr(armcb_v4l2_stream_t *pstream)
 {
 	armcb_v4l2_buffer_t *pbuf = NULL;
 	struct v4l2_format *v4l2_fmt = NULL;
 	unsigned int vout_reg1 = 0;
 	unsigned int vout_reg2 = 0;
 	unsigned int startaddr = 0;
+	unsigned long flags;
 
 	if (armcb_get_output_addr_by_outport_i7(pstream->outport, &vout_reg1,
 						&vout_reg2) < 0) {
-		LOG(LOG_DEBUG,
-		    "ctx_id:%d stream_id:%d failed to get reg for outport:%d",
-		    pstream->ctx_id, pstream->stream_id, pstream->outport);
 		return -EINVAL;
 	}
 
-	v4l2_fmt = &pstream->cur_v4l2_fmt;
 	/* try to get an active buffer from vb2 queue  */
+	spin_lock_irqsave(&pstream->slock,flags);
+
 	if (!list_empty(&pstream->stream_buffer_list)) {
 		pbuf = list_entry(pstream->stream_buffer_list.next,
 				  armcb_v4l2_buffer_t, list);
@@ -363,28 +351,33 @@ int armcb_v4l2_config_update_stream_hw_addr(armcb_v4l2_stream_t *pstream)
 		list_add_tail(&pbuf->list, &pstream->stream_buffer_list_busy);
 	}
 
+	spin_unlock_irqrestore(&pstream->slock, flags);
+
 	if (!pbuf) {
-		LOG(LOG_DEBUG, "[Stream#%d] no empty buffers",
-		    pstream->stream_id);
 		startaddr = pstream->reserved_buf_addr;
 	} else {
 		startaddr = (unsigned int)(uintptr_t)vb2_plane_vaddr(
 			&pbuf->vvb.vb2_buf, 0);
 	}
 
+	pstream->active_buf_addr = startaddr;
+
 	if (vout_reg1 && startaddr) {
-		LOG(LOG_DEBUG, "[Stream#%d] set addr: 0x%x = 0x%x",
-		    pstream->stream_id, vout_reg1, startaddr);
 		armcb_isp_write_reg(vout_reg1, startaddr);
 	}
 
 	if (vout_reg2 && startaddr) {
+		v4l2_fmt = &pstream->cur_v4l2_fmt;
 		startaddr += v4l2_fmt->fmt.pix_mp.plane_fmt[0].sizeimage;
-		LOG(LOG_DEBUG, "[Stream#%d] set addr: 0x%x = 0x%x",
-		    pstream->stream_id, vout_reg2, startaddr);
 		armcb_isp_write_reg(vout_reg2, startaddr);
 	}
 
+	return 0;
+}
+
+int armcb_v4l2_config_update_stream_hw_addr(armcb_v4l2_stream_t *pstream)
+{
+	/*here do nothing move to buffer done updata vout*/
 	return 0;
 }
 
@@ -463,29 +456,19 @@ static void armcb_isp_irq_sol_i7(unsigned int ctx_id)
 	if (pdev && atomic_read(&pdev->opened) == 0)
 		ctx_id = armcb_v4l2_core_find_1st_opened_dev();
 
-	LOG(LOG_DEBUG, "sof ctx_id=%u", ctx_id);
 	for (i = 0; i < V4L2_STREAM_TYPE_MAX; i++) {
 		/* find stream pointer */
 		rc = armcb_v4l2_find_stream(&pstream, ctx_id, i);
 		if (rc < 0) {
-			LOG(LOG_DEBUG,
-			    "can't find stream on ctx %d (errno = %d)", ctx_id,
-			    rc);
 			continue;
 		}
 
-		LOG(LOG_DEBUG, "sol cxt_id:%d, stream_id:%d", pstream->ctx_id,
-		    pstream->stream_id);
-		/* check if stream is on */
 		if (!pstream->stream_started) {
-			LOG(LOG_DEBUG,
-			    "[Stream#%d] stream video is not started yet on ctx %d",
-			    pstream->stream_id, ctx_id);
 			continue;
 		}
 
 		if (armcb_v4l2_config_update_stream_hw_addr(pstream)) {
-			LOG(LOG_DEBUG,
+		       LOG(LOG_DEBUG,
 			    "[Stream#%d] failed to update stream hw addr for cxt_id:%d",
 			    pstream->stream_id, ctx_id);
 		}
@@ -503,20 +486,13 @@ static void armcb_isp_irq_sof_i7(unsigned int ctx_id)
 	if (pdev && atomic_read(&pdev->opened) == 0)
 		ctx_id = armcb_v4l2_core_find_1st_opened_dev();
 
-	LOG(LOG_DEBUG, "sof ctx_id=%u", ctx_id);
 	for (i = 0; i < V4L2_STREAM_TYPE_MAX; i++) {
 		/* find stream pointer */
 		rc = armcb_v4l2_find_stream(&pstream, ctx_id, i);
 		if (rc < 0) {
-			LOG(LOG_DEBUG,
-			    "can't find stream on ctx %d (errno = %d)", ctx_id,
-			    rc);
 			continue;
 		}
 
-		LOG(LOG_DEBUG, "sol cxt_id:%d, stream_id:%d", pstream->ctx_id,
-		    pstream->stream_id);
-		/* check if stream is on */
 		if (!pstream->stream_started) {
 			LOG(LOG_DEBUG,
 			    "[Stream#%d] stream video is not started yet on ctx %d",
@@ -544,7 +520,6 @@ armcb_v4l2_config_queue_event_with_status(struct video_device *pvdev,
 	};
 
 	if (!pvdev || !pirq_info) {
-		LOG(LOG_ERR, "invalid dev is null or pisp_ir is null!");
 		return;
 	}
 
@@ -605,14 +580,6 @@ armcb_v4l2_config_queue_event_with_status(struct video_device *pvdev,
 		pData[10] = 0;
 		pData[11] = 0;
 		pData[12] = 0;
-	}
-
-	if (pData[5] % 30 == 0) {
-		LOG(LOG_DEBUG,
-		    "isp_queue event id(%d) type(%d) mask=0x%x, "
-		    "status=0x%x, id = 0x%x, sen_id = 0x%x, frm_cnt_sof = %u, frm_cnt_sol = %u",
-		    ev.id, ev.type, pData[0], pData[1], pData[2], pData[3],
-		    pData[4], pData[5]);
 	}
 
 	v4l2_event_queue(pvdev, &ev);
@@ -628,7 +595,6 @@ static void armcb_v4l2_config_queue_event(struct video_device *pvdev,
 	};
 
 	if (!pvdev || !pirq_info) {
-		LOG(LOG_ERR, "invalid dev is null or pisp_ir is null!");
 		return;
 	}
 
@@ -689,14 +655,6 @@ static void armcb_v4l2_config_queue_event(struct video_device *pvdev,
 		pData[10] = 0;
 		pData[11] = 0;
 		pData[12] = 0;
-	}
-
-	if (pData[5] % 30 == 0) {
-		LOG(LOG_DEBUG,
-		    "isp_queue event id(%d) type(%d) mask=0x%x, "
-		    "status=0x%x, id = 0x%x, sen_id = 0x%x, frm_cnt_sof = %u, frm_cnt_sol = %u",
-		    ev.id, ev.type, pData[0], pData[1], pData[2], pData[3],
-		    pData[4], pData[5]);
 	}
 
 	v4l2_event_queue(pvdev, &ev);
@@ -916,6 +874,18 @@ static inline void armcb_i7_mask_int(u32 *pnormal_mask, u32 *perror_mask)
 	armcb_isp_write_reg(I7_INT_ERR_MASK_ADDR, 0xFFFFFFFF);
 }
 
+void armcb_i7_disable_int(void)
+{
+	armcb_isp_write_reg(I7_INT_MASK_ADDR, 0xFFFFFFFF);
+	armcb_isp_write_reg(I7_INT_ERR_MASK_ADDR, 0xFFFFFFFF);
+}
+
+void armcb_i7_disable_vin(void)
+{
+#define VIN_VIN_REG_40_ADDR (0x40)
+	/*mask input & output*/
+	armcb_isp_write_reg(I7_VIN_BASE_ADDR + VIN_VIN_REG_40_ADDR, 0x3<<7 | 0x4);
+}
 /**
  * @description: set register mask register to original value
  * @param {u32} normal_mask: original normal mask
@@ -1177,12 +1147,6 @@ static irqreturn_t armcb_I7_isp_isr(s32 irq, void *pdev)
 
 		/*handle afbc error interrupt*/
 		armcb_i7_afbc_err_process(&irq_info);
-
-		LOG(LOG_DEBUG,
-		    "status=0x%x, id=0x%x, sel=0x%x, sof=%d, sol=%d-%d, 3a=%d",
-		    irq_info.status, irq_info.id, frame_cnt_sel.val,
-		    irq_info.frm_cnt_sof, irq_info.frm_cnt_sol,
-		    irq_info.frm_cnt_nxt_sol, irq_info.frm_cnt_3a);
 
 		/*2.4 set vout buffer address*/
 		if (irq_info.status & I7_INT_SOL_MASK) {
@@ -1653,7 +1617,6 @@ armcb_v4l2_config_subscribe_event(struct v4l2_fh *fh,
 {
 	int ret = -1;
 
-	LOG(LOG_INFO, "type:%d id:%d", sub->type, sub->id);
 	ret = v4l2_event_subscribe(fh, sub, CORE_NEVENTS, NULL);
 	if (ret < 0)
 		LOG(LOG_ERR, "armcb_v4l2_subscribe_event failed ret(%d)", ret);
@@ -1666,7 +1629,6 @@ armcb_v4l2_config_unsubscribe_event(struct v4l2_fh *fh,
 {
 	struct v4l2_event ev;
 
-	LOG(LOG_INFO, "+");
 	memset(&ev, 0, sizeof(struct v4l2_event));
 	ev.id = 3;
 	ev.type = V4L2_EVENT_CTRL;
@@ -1679,7 +1641,6 @@ armcb_v4l2_config_unsubscribe_event(struct v4l2_fh *fh,
 	LOG(LOG_INFO, "type:%d id:%d", sub->type, sub->id);
 	v4l2_event_unsubscribe(fh, sub);
 
-	LOG(LOG_INFO, "-");
 	return 0;
 }
 
@@ -1866,17 +1827,13 @@ static int armcb_v4l2_config_probe(struct platform_device *pdev)
 	/* register v4l2_device */
 	snprintf(p_v4l_config_dev->v4l2_dev.name,
 		 V4L2_DEVICE_NAME_SIZE * sizeof(char), "%s", ARMCB_MODULE_NAME);
-	LOG(LOG_INFO, "armcb config dev name:%s",
-	    p_v4l_config_dev->v4l2_dev.name);
+
 	ret = v4l2_device_register(&pdev->dev, &p_v4l_config_dev->v4l2_dev);
 	if (ret) {
 		LOG(LOG_ERR, "failed to register v4l2 device %s",
 		    p_v4l_config_dev->v4l2_dev.name);
 		goto exit_ret;
 	}
-
-	//p_v4l_config_dev->v4l2_dev.release = armcb_v4l2_dev_release;
-	//p_v4l_config_dev->v4l2_dev.notify = armcb_v4l2_subdev_notify;
 
 	/* set up the capabilities of the video capture device */
 	p_v4l_config_dev->vid_cap_caps = V4L2_CAP_VIDEO_CAPTURE_MPLANE |
@@ -1911,10 +1868,6 @@ static int armcb_v4l2_config_probe(struct platform_device *pdev)
 #endif
 	if (ret < 0)
 		goto unreg_dev;
-	LOG(LOG_INFO, "V4L2 capture device registered as %s",
-	    video_device_node_name(vfd));
-	LOG(LOG_INFO, "vfd->name:%s v4l2_dev.name:%s dev_name:%s", vfd->name,
-	    p_v4l_config_dev->v4l2_dev.name, video_device_node_name(vfd));
 
 	/* register isr function*/
 	if (has_acpi_companion(&pdev->dev)) {
@@ -1928,8 +1881,6 @@ static int armcb_v4l2_config_probe(struct platform_device *pdev)
 	if (!hw_info) {
 		LOG(LOG_ERR, "failed to get isp hw info.");
 		goto exit_ret;
-	} else {
-		LOG(LOG_INFO, "hw_info isp_type=%d", hw_info->type);
 	}
 
 #ifdef QEMU_ON_VEXPRESS
@@ -2005,7 +1956,7 @@ static int armcb_v4l2_config_probe(struct platform_device *pdev)
 		goto err_rproc_add;
 	}
 #endif
-
+	LOG(LOG_INFO,"register config %s",ret ? "failed":"success");
 	return ret;
 err_rproc_add:
 unreg_dev:
