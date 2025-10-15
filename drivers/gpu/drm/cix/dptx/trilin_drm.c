@@ -124,6 +124,11 @@ end:
 	return dp->status;
 }
 
+bool trilin_dp_plugged_status(struct trilin_dp *dp)
+{
+	return (dp->status == connector_status_connected);
+}
+
 static int trilin_dp_connector_atomic_check(struct drm_connector *conn,
 					    struct drm_atomic_state *state)
 {
@@ -338,7 +343,6 @@ static int trilin_dp_connector_get_modes(struct drm_connector *connector)
 		ret = drm_add_modes_noedid(connector, 4096, 4096);
 		drm_set_preferred_mode(connector, 640, 480);
 	}
-
 	DP_DEBUG("mode count = %d bpc=%d\n", ret, info->bpc);
 	return ret;
 }
@@ -463,6 +467,9 @@ static int link_rate_show(struct seq_file *m, void *data)
 {
 	struct drm_connector *connector = m->private;
 	struct trilin_connector *conn = connector_to_trilin(connector);
+	struct trilin_dp *dp = connector_to_dp(connector);
+	u8 link_status[DP_LINK_STATUS_SIZE];
+	int ret;
 
 	if (connector->status != connector_status_connected) {
 		seq_puts(m, "not connected\n");
@@ -471,6 +478,20 @@ static int link_rate_show(struct seq_file *m, void *data)
 
 	seq_printf(m, "link rate: %d lanes: %d\n", conn->dp->mode.link_rate,
 		   conn->dp->mode.lane_cnt);
+
+	seq_printf(m, "clock_recovery_ok : %s\nchannel_eq_ok : %s\n",
+			dp->train_cr_done ? "yes" : "no",
+			dp->train_ce_done ? "yes" : "no");
+
+	seq_puts(m, "\n------------ dpcd status ------------\n");
+	ret = drm_dp_dpcd_read_link_status(&dp->aux, link_status);
+	if (ret < 0) {
+		seq_printf(m, "read link status failed\n");
+	} else {
+		seq_printf(m, "DP_LANE0_1_STATUS : %x\nDP_LANE2_3_STATUS: %x\n",
+			    link_status[0], link_status[1]);
+	}
+
 	return 0;
 }
 

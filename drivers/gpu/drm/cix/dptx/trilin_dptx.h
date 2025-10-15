@@ -572,6 +572,7 @@ void trilin_dp_connector_debugfs_init(struct drm_connector *connector,
 				      struct dentry *root);
 
 int trilin_dp_pm_prepare(struct trilin_dp *dp);
+int trilin_dp_pm_resume_early(struct trilin_dp *dp);
 int trilin_dp_pm_complete(struct trilin_dp *dp);
 int trilin_dp_hpd_config_cb(struct trilin_dp *dp);
 int trilin_dp_deinit_config(struct trilin_dp *dp);
@@ -580,5 +581,6 @@ void trilin_dp_psr_enable(struct trilin_dp *dp,
 	struct trilin_dp_panel *dp_panel);
 void trilind_dp_psr_disable(struct trilin_dp *dp,
 	struct trilin_dp_panel *dp_panel);
+bool trilin_dp_plugged_status(struct trilin_dp *dp);
 //---------------------------------------------------------
 #endif /* _TRILIN_DPTX_H_ */

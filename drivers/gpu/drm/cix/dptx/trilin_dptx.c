@@ -29,6 +29,8 @@
 #include <drm/drm_simple_kms_helper.h>
 #include <drm/drm_debugfs.h>
 #include <drm/drm_file.h>
+#include <drm/drm_drv.h>
+#include <drm/drm_atomic_uapi.h>
 
 #include <linux/clk.h>
 #include <linux/delay.h>
@@ -73,6 +75,7 @@ MODULE_PARM_DESC(power_on_delay_ms, "DP power on delay in msec (default: 4)");
 #define MISC0_USE_SYNC_CLOCK 0
 #define TRILIN_AVI_SDP_ENABLE 0
 static int trilin_dpcd_power_up(struct trilin_dp *dp);
+static int trinlin_dp_panel_read_sink_caps(struct trilin_dp *dp);
 
 void trilin_dp_write(struct trilin_dp *dp, int offset, u32 val)
 {
@@ -2064,8 +2067,11 @@ static int trilin_dp_core_on(struct trilin_dp *dp, bool shallow)
 		fast_train_success = !trilin_dp_fast_train(dp);
 	}
 
-	if (!fast_train_success)
+	if (!fast_train_success) {
+		/* update sink caps, before do linktraining */
+		trinlin_dp_panel_read_sink_caps(dp);
 		rc = trilin_dp_train_loop(dp);
+	}
 
 	/*dptx source enable*/
 	trilin_dp_write(dp, TRILIN_DPTX_SOFT_RESET, enable_sources);
@@ -2635,6 +2641,7 @@ static void trilin_dp_hpd_event_work_func(struct work_struct *work)
 	struct trilin_phy_t *phy;
 	int try;
 	bool connected;
+	enum drm_connector_status old_status;
 
 	dp = container_of(work, struct trilin_dp, hpd_event_work.work);
 	phy = &dp->phy;
@@ -2655,15 +2662,16 @@ static void trilin_dp_hpd_event_work_func(struct work_struct *work)
 	}
 
 	/* add force to detect to sync call detect. */
+	old_status = dp->status;
 	drm_helper_probe_detect(&dp->connector.base, NULL, false);
 
-	connected = (dp->status == connector_status_connected);
-	if (dp->plugin == connected)
+	if(old_status == dp->status) {
+		DP_INFO("dp status is same : %d", dp->status);
 		return;
+	}
+	connected = (dp->status == connector_status_connected);
 
-	dp->plugin = connected;
-
-	if (dp->plugin)
+	if (connected)
 		DP_INFO("dp hpd event received: Plugged\n");
 	else
 		DP_INFO("dp hpd event received: Unplugged\n");
@@ -2671,10 +2679,10 @@ static void trilin_dp_hpd_event_work_func(struct work_struct *work)
 	if (dp->drm[0])
 		drm_helper_hpd_irq_event(dp->drm[0]);
 
-	DP_DEBUG("dp audio plugin status = %d\n", dp->plugin);
-	dptx_audio_handle_plugged_change(dp_audio, dp->plugin);
+	DP_DEBUG("dp audio plugin status = %d\n", connected);
+	dptx_audio_handle_plugged_change(dp_audio, connected);
 
-	cix_hdcp_hpd_event_process(&dp->hdcp, dp->plugin);
+	cix_hdcp_hpd_event_process(&dp->hdcp, connected);
 }
 
 /* hdp irq handle other event */
@@ -2752,6 +2760,60 @@ static irqreturn_t trilin_dp_irq_handler(int irq, void *data)
  * Common function for trilin_drm.c and trilin_drm_mst.c
  */
 
+int trilin_dp_pm_resume_early(struct trilin_dp *dp)
+{
+	struct drm_connector *connector = &dp->connector.base;
+	struct drm_device *dev = connector->dev;
+	struct drm_modeset_acquire_ctx ctx;
+	struct drm_atomic_state *old_state = dev->mode_config.suspend_state;
+	struct drm_atomic_state *new_state = NULL;
+	struct drm_connector_state *conn_state;
+	struct drm_connector *conn;
+	int ret, i;
+	DP_INFO("enter");
+
+	if(IS_ERR(old_state)) {
+		DP_ERR("old state err");
+		return PTR_ERR(old_state);
+	}
+
+	if (!old_state) {
+		DP_ERR("old state null");
+		return -EINVAL;
+	}
+
+	/* force status disconnected */
+	DRM_MODESET_LOCK_ALL_BEGIN(dev, ctx, 0, ret);
+	new_state = drm_atomic_helper_duplicate_state(dev, &ctx);
+
+	if (IS_ERR(new_state)) {
+		DP_ERR("state duplication failed");
+		goto unlock;
+	}
+
+	for_each_new_connector_in_state(new_state, conn, conn_state, i) {
+		ret = drm_atomic_set_crtc_for_connector(conn_state, NULL);
+		if (ret) {
+			DP_ERR("set crtc null failed");
+			goto state_put;
+		}
+		conn->status = connector_status_disconnected;
+		drm_connector_update_edid_property(conn, NULL);
+		drm_mode_prune_invalid(dev, &conn->modes, false);
+	}
+
+	drm_atomic_state_put(old_state);
+	dev->mode_config.suspend_state = new_state;
+	new_state = NULL;
+
+state_put:
+	if (new_state)
+		drm_atomic_state_put(new_state);
+unlock:
+	DRM_MODESET_LOCK_ALL_END(dev, ctx, ret);
+	return ret;
+}
+
 int trilin_dp_pm_prepare(struct trilin_dp *dp)
 {
 	mutex_lock(&dp->session_lock);
@@ -2766,7 +2828,7 @@ int trilin_dp_pm_prepare(struct trilin_dp *dp)
 		trilin_dp_host_deinit(dp);
 	}
 	dp->status = connector_status_unknown;
-	dp->plugin = false;
+	dp->state &= ~DPTX_STATE_CONNECTED;
 	mutex_unlock(&dp->session_lock);
 	return 0;
 }
