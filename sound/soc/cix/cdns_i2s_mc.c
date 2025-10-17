@@ -643,9 +643,9 @@ static int cdns_i2s_mc_hw_params(struct snd_pcm_substream *substream,
 
 		pin_tx_num = hweight8(i2s_mc_priv->pin_tx_mask);
 		if (slots > 2 * pin_tx_num) {
-			dev_err(i2s_mc_priv->dev,
-				"Transmit channel number is large than hardware config\n");
-			return -EINVAL;
+			dev_warn(i2s_mc_priv->dev,
+				 "Transmit channel number is large than hardware config\n");
+			return -ENOTSUPP;
 		} else if (slots < 2 * pin_tx_num) {
 			cdns_i2s_mc_adjust_pin_config(i2s_mc_priv->pin_out_num,
 						      &i2s_mc_priv->pin_tx_mask_adjust, slots);
@@ -660,9 +660,9 @@ static int cdns_i2s_mc_hw_params(struct snd_pcm_substream *substream,
 
 		pin_rx_num = hweight8(i2s_mc_priv->pin_rx_mask);
 		if (slots > 2 * pin_rx_num) {
-			dev_err(i2s_mc_priv->dev,
-				"Receive channel number is large than hardware config\n");
-			return -EINVAL;
+			dev_warn(i2s_mc_priv->dev,
+				 "Receive channel number is large than hardware config\n");
+			return -ENOTSUPP;
 		} else if (slots < 2 * pin_rx_num) {
 			cdns_i2s_mc_adjust_pin_config(i2s_mc_priv->pin_out_num,
 						      &i2s_mc_priv->pin_rx_mask_adjust, slots);

@@ -704,9 +704,9 @@ static int cdns_i2s_sc_hw_params(struct snd_pcm_substream *substream,
 	} else {
 		/* I2S mode */
 		if (slots != 2) {
-			dev_err(i2s_sc_priv->dev,
-				"Only support stereo audio in I2S mode\n");
-			return -EINVAL;
+			dev_warn(i2s_sc_priv->dev,
+				 "Only support stereo audio in I2S mode\n");
+			return -ENOTSUPP;
 		}
 
 		slot_width = 32;
