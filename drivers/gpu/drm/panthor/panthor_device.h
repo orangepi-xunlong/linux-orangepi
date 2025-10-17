@@ -12,6 +12,7 @@
 #include <linux/reset.h>
 #include <linux/sched.h>
 #include <linux/spinlock.h>
+#include <linux/acpi.h>
 
 #include <drm/drm_device.h>
 #include <drm/drm_mm.h>

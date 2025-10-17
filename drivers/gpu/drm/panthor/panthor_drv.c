@@ -1581,6 +1581,11 @@ static const struct of_device_id dt_match[] = {
 };
 MODULE_DEVICE_TABLE(of, dt_match);
 
+static const struct acpi_device_id kbase_acpi_ids[] = {
+						{ .id = "CIXH5000", .driver_data = 0 },
+						{ /* sentinel */ } };
+MODULE_DEVICE_TABLE(acpi, kbase_acpi_ids);
+
 static DEFINE_RUNTIME_DEV_PM_OPS(panthor_pm_ops,
 				 panthor_device_suspend,
 				 panthor_device_resume,
@@ -1593,6 +1598,7 @@ static struct platform_driver panthor_driver = {
 		.name = "panthor",
 		.pm = pm_ptr(&panthor_pm_ops),
 		.of_match_table = dt_match,
+		.acpi_match_table = ACPI_PTR(kbase_acpi_ids),
 		.dev_groups = panthor_groups,
 	},
 };

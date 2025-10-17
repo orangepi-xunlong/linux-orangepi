@@ -222,7 +222,11 @@ int panthor_gpu_init(struct panthor_device *ptdev)
 	if (ret)
 		return ret;
 
-	irq = platform_get_irq_byname(to_platform_device(ptdev->base.dev), "GPU");
+	if (has_acpi_companion(ptdev->base.dev))
+		irq = platform_get_irq(to_platform_device(ptdev->base.dev), 2);
+	else
+		irq = platform_get_irq_byname(to_platform_device(ptdev->base.dev), "GPU");
+
 	if (irq < 0)
 		return irq;
 
@@ -378,7 +382,6 @@ int panthor_gpu_l2_power_on(struct panthor_device *ptdev)
 	}
 
 	/* CIX SKY1 needs a special PHBA setup before L2 activation */
-	if (of_device_is_compatible(ptdev->base.dev->of_node, "arm,mali-valhall")) {
 		gpu_write(ptdev, GPU_SYSC_PBHA_OVERRIDE(3), 0x22000000);
 		gpu_write(ptdev, GPU_SYSC_ALLOC(0), 0x00230000);
 		gpu_write(ptdev, GPU_SYSC_ALLOC(1), 0x00000023);
@@ -395,7 +398,6 @@ int panthor_gpu_l2_power_on(struct panthor_device *ptdev)
 		gpu_write(ptdev, 0x307C, 0xFFFFFFFF);
 		gpu_write(ptdev, 0x3074, 0xFFFFFFFF);
 		gpu_write(ptdev, 0x3068, 0x1);
-	}
 
 	return panthor_gpu_power_on(ptdev, L2, 1, 20000);
 }
@@ -460,10 +462,8 @@ int panthor_gpu_soft_reset(struct panthor_device *ptdev)
 		ptdev->gpu->pending_reqs |= GPU_IRQ_RESET_COMPLETED;
 		gpu_write(ptdev, GPU_INT_CLEAR, GPU_IRQ_RESET_COMPLETED);
 
-		if (of_device_is_compatible(ptdev->base.dev->of_node, "arm,mali-valhall")) {
-			gpu_write(ptdev, GPU_PWR_KEY, GPU_PWR_KEY_UNLOCK);
-			gpu_write(ptdev, GPU_PWR_OVERRIDE1, 0xFFFFFF);
-		}
+		gpu_write(ptdev, GPU_PWR_KEY, GPU_PWR_KEY_UNLOCK);
+		gpu_write(ptdev, GPU_PWR_OVERRIDE1, 0xFFFFFF);
 
 		gpu_write(ptdev, GPU_CMD, GPU_SOFT_RESET);
 	}
