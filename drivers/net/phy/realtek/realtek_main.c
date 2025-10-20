@@ -221,6 +221,15 @@ static int rtl821x_modify_ext_page(struct phy_device *phydev, u16 ext_page,
 	return phy_restore_page(phydev, oldpage, ret);
 }
 
+static void rtl821x_led_of_init(struct phy_device *phydev)
+{
+	struct device *dev = &phydev->mdio.dev;
+	u32 val;
+
+	if (!of_property_read_u32(dev->of_node, "realtek,led-data", &val))
+		phy_write_paged(phydev, 0xd04, 0x10, val);
+}
+
 static int rtl821x_probe(struct phy_device *phydev)
 {
 	struct device *dev = &phydev->mdio.dev;
@@ -684,6 +693,8 @@ static int rtl8211f_config_init(struct phy_device *phydev)
 	ret = rtl8211f_config_rgmii_delay(phydev);
 	if (ret)
 		return ret;
+
+	rtl821x_led_of_init(phydev);
 
 	ret = rtl8211f_config_clk_out(phydev);
 	if (ret) {
