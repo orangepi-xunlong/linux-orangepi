@@ -1025,7 +1025,7 @@ static int acpi_thermal_add(struct acpi_device *device)
 
 	result = acpi_thermal_get_info(tz);
 	if (result)
-		goto free_memory;
+		pr_warn("Failed to get thermal info, and please check\n");
 
 	acpi_thermal_guess_offset(tz);
 

@@ -8,6 +8,10 @@
 
 #include "sky1-orangepi-6-plus.dts"
 
+/ {
+	model = "Orange Pi 6 Plus 40pin PWM";
+};
+
 &iomuxc_s5 {
 	pinctrl_hog_s5: pinctrl_hog_s5 {
 		sky1,pins = <
@@ -86,9 +90,16 @@
 	};
 };
 
-//40pin 04113000
+//40pin pwm3@04113000
 &pwm3 {
 	pinctrl-names = "default";
 	pinctrl-0 = <&pinctrl_fch_pwm3>;
+	status = "okay";
+};
+
+//40pin pwm5@04115000
+&pwm5 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_fch_pwm5>;
 	status = "okay";
 };
