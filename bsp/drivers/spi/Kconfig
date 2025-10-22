@@ -1,0 +1,23 @@
+# SPDX-License-Identifier: GPL-2.0-only
+
+menu "SPI Drivers"
+	depends on AW_BSP
+
+config AW_SPI
+	tristate "SPI Support for Allwinner SoCs"
+	depends on AW_BSP && OF
+	default n
+	select SPI
+	help
+	  Enable SPI controllers on Allwinner SoCs.
+
+config AW_SPI_ATOMIC_XFER
+	bool "Support atomic xfer function"
+	depends on AW_SPI
+	default n
+	help
+	  Enable SPI controller atomic xfer function, support transfer under
+	  no-irq/no-dma/no-schedule/no-suspend-resume env. (Such as kernel panic)
+
+endmenu
+

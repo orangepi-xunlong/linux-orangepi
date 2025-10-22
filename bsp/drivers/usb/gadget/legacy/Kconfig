@@ -1,0 +1,22 @@
+# SPDX-License-Identifier: GPL-2.0-only
+
+if USB_GADGET
+
+# put drivers that need isochronous transfer support (for audio
+# or video class gadget drivers), or specific hardware, here.
+config USB_SUNXI_G_WEBCAM_LEGACY
+	tristate "Allwinner USB Webcam Gadget Legacy"
+	depends on USB_SUNXI_GADGET
+	depends on VIDEO_V4L2
+	select USB_LIBCOMPOSITE
+	select VIDEOBUF2_VMALLOC
+	select USB_SUNXI_F_UVC
+	help
+	  The Webcam Gadget acts as a composite USB Audio and Video Class
+	  device. It provides a userspace API to process UVC control requests
+	  and stream video data to the host.
+
+	  Say "y" to link the driver statically, or "m" to build a
+	  dynamically linked module called "g_webcam".
+
+endif # USB_GADGET

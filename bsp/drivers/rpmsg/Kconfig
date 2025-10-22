@@ -1,0 +1,32 @@
+# SPDX-License-Identifier: GPL-2.0-only
+#
+# Allwinner rpmsg driver.
+#
+menu "Rpmsg drivers"
+	depends on AW_BSP
+
+config AW_RPMSG_CTRL
+	tristate "Allwinner rpmsg ctrl driver"
+	depends on AW_BSP
+	select RPMSG
+	default n
+	help
+	  Say Y here to export rpmsg ctrl device files, usually found in /dev.
+	  They make it possible for user-space programs to create rpmsg
+	  endpoints device, it can be found in /dev/rpmsg-%rproc-name.
+
+config AW_RPMSG_NOTIFY
+	tristate "Allwinner rpmsg notify driver"
+	default n
+	select RPMSG
+	help
+	  Say Y here to enable rpmsg notify driver. It provides notification
+	  mechanism base on rpmsg.
+
+config AW_RPMSG_HEARTBEAT
+	tristate "Allwinnertech RPMSG hearbeat driver"
+	default n
+	select RPMSG
+	help
+	  Say y here to enable support for the rpmsg hearbeat.
+endmenu

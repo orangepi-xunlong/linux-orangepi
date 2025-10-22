@@ -1,0 +1,126 @@
+##############################################################################
+#
+#    Copyright (c) 2005 - 2024 by Vivante Corp.  All rights reserved.
+#
+#    The material in this file is confidential and contains trade secrets
+#    of Vivante Corporation. This is proprietary information owned by
+#    Vivante Corporation. No part of this work may be disclosed,
+#    reproduced, copied, transmitted, or used in any way for any purpose,
+#    without the express written permission of Vivante Corporation.
+#
+##############################################################################
+
+#
+# Linux build file for user HAL layer.
+#
+
+################################################################################
+# Include common definitions.
+
+include $(AQROOT)/makefile.linux.def
+
+################################################################################
+# Define target module name.
+
+STATIC              := 1
+TARGET_NAME         := libhalosuser.a
+TARGET_MODULE       := $(OBJ_DIR)/$(TARGET_NAME)
+
+ifeq ($(VIVANTE_ENABLE_TTM), 1)
+  CFLAGS += `pkg-config --cflags libdrm`
+  CFLAGS += -DgcdENABLE_TTM=1
+  LDFLAGS += `pkg-config --libs libdrm`
+else
+  CFLAGS += -DgcdENABLE_TTM=0
+endif
+################################################################################
+# Installation directory.
+
+INSTALL_DIR         := $(SDK_DIR)/drivers
+
+################################################################################
+# Supply additional include directories.
+
+INCLUDE := -I$(AQROOT)/hal/inc \
+           -I$(AQROOT)/hal/user \
+           -I$(AQROOT)/hal/optimizer \
+           -I$(AQROOT)/hal/os/linux/user \
+           -I$(AQROOT)/compiler/libVSC/include \
+           -I$(AQROOT)/hal/os/linux/user/platform/$(soc_vendor)
+
+ifeq ($(VIVANTE_ENABLE_TTM), 1)
+  INCLUDE += -I$(ROOTFS)/usr/include/libdrm
+endif
+
+CFLAGS += $(INCLUDE)
+################################################################################
+# Add extra flags for object files.
+
+ifneq ($(USE_ARMCC),1)
+  CFLAGS += -fPIC -Werror -ansi
+endif
+
+################################################################################
+# Describe object files
+
+platform_option = $(wildcard \
+        platform/$(soc_vendor)/gc_hal_user_platform_$(soc_board).c)
+
+ifeq ($(platform_option),)
+  platform_option = $(wildcard \
+  		platform/default/gc_hal_user_platform_default.c)
+endif
+
+platform_option_obj := $(patsubst %.c,%.o,$(notdir $(platform_option)))
+
+OBJECTS := $(OBJ_DIR)/gc_hal_user_debug.o \
+           $(OBJ_DIR)/gc_hal_user_os.o \
+           $(OBJ_DIR)/gc_hal_user_math.o \
+           $(OBJ_DIR)/$(platform_option_obj)
+
+################################################################################
+# Define targets.
+
+.PHONY: all clean install
+
+all: $(TARGET_MODULE)
+
+clean:
+	@rm -rf $(OBJ_DIR)
+
+install: all
+
+ifeq ($(gcdSTATIC_LINK), 1)
+install:
+	@mkdir -p $(INSTALL_DIR)
+	@-cp $(TARGET_MODULE) $(INSTALL_DIR)
+endif
+
+################################################################################
+# Module rules.
+
+$(TARGET_MODULE): $(OBJECTS)
+	@echo "  ARCHIVE \033[1m$(notdir $@)\033[0m"
+	@$(AR) -r -c $@ $(OBJECTS)
+ifneq ($(USE_ARMCC), 1)
+	@$(RANLIB) $@
+endif
+
+################################################################################
+# Object rules.
+
+$(OBJ_DIR)/%.o: %.c
+	@echo "  COMPILE $(abspath $<)"
+	@mkdir -p $(OBJ_DIR)
+ifeq ($(VIVANTE_ENABLE_TTM), 1)
+	@$(CC) -c $(CFLAGS) $(LDFLAGS) -MMD -o $@ $<
+else
+	@$(CC) -c $(CFLAGS) -MMD -o $@ $<
+endif
+
+vpath %.c platform/default
+vpath %.c platform/$(soc_vendor)
+
+# object dependencies.
+-include $(OBJECTS:.o=.d)
+

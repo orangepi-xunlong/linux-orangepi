@@ -1,0 +1,62 @@
+#
+# SPDX-License-Identifier: GPL-2.0+
+# (C) Copyright 2020 - 2021
+# Allwinner Technology Co., Ltd. <www.allwinnertech.com>
+# cuizhikui <cuizhikui@allwinnertech.com>
+
+menuconfig AW_MTD_RAWNAND
+	tristate "Allwinner MTD RAWNAND Device Support"
+	depends on AW_MTD
+	depends on ARCH_SUNXI
+	depends on !SUNXI_NAND
+	select AW_RAWNAND_SECURE_STORAGE
+	select MTD
+	select MTD_UBI
+	help
+	  Enables support for RAWNAND Flash chips on Allwinner SoCs.
+	  It's different with Allwinner's privately nand driver that it use
+	  ubi system rather than Allwinner's NFTL.
+
+if AW_MTD_RAWNAND
+
+config AW_RAWNAND_PSTORE_MTD_PART
+	bool "create pstore mtd partition for aw ubi rawnand"
+	depends on AW_MTD_RAWNAND
+	select MTD_PSTORE
+	help
+	  Whether create pstore mtd partition, which is need by pstroe-blk.
+	  If you want linux kernel dump log to spinand when oops/panic, you
+	  should create pstreo mtd partition by this configure.
+
+	  If unsure, say no.
+
+config AW_RAWNAND_SIMULATE_MULTIPLANE
+	bool "enable simulate multiplane"
+	default y
+	help
+	  spinand do not support multiplane. In order to adapt to aw nand
+	  we simulate multiplane. If set, the common physical layer should
+	  merge two continuous physical block to 'super block' for logical
+	  layer.
+
+	  Merge pages in two adjacent blocks with the same page num to super
+	  page. Merge adjacent blocks to super block.
+
+	  *   phy-block0   phy-block1    = super block 0
+	  * |------------|------------|
+	  * | phy-page 0 | phy-page 0 |  = super page 0 on super block 0
+	  * | phy-page 1 | phy-page 1 |  = super page 1 on super block 0
+	  * |     ...    |     ...    |
+	  * |------------|------------|
+
+	  If unsure, say Y.
+
+config AW_RAWNAND_BURN_CHECK_BOOT0
+	bool "upload boot0 to check after download boot0 img"
+	depends on AW_MTD_RAWNAND
+
+config AW_RAWNAND_BURN_CHECK_UBOOT
+	bool "upload uboot to check after download uboot img"
+	depends on AW_MTD_RAWNAND
+
+endif

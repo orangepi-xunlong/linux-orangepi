@@ -1,0 +1,10 @@
+# SPDX-License-Identifier: GPL-2.0
+
+config AW_NNA_GALCORE
+	depends on (ARCH_SUNXI)
+	select SYNC_FILE
+	tristate "aw nna galcore driver"
+	default n
+	help
+	 Choose Y to enable aw nna galcore driver
+

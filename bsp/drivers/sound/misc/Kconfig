@@ -1,0 +1,22 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+#
+# Allwinner audio misc driver Kconfig
+#
+# Copyright(c) 2022-2027 Allwinnertech Co., Ltd.
+
+# menu select
+menu "Misc drivers"
+
+# TEST CLK
+config SND_SOC_SUNXI_TEST_CLK
+	tristate "Allwinner test CLK support"
+	help
+	  Select Y or M to support test clk.
+
+# LOOPBACK
+config SND_SOC_SUNXI_LOOPBACK
+	tristate "Allwinner loopback support"
+	help
+	  Select Y or M to support loopback.
+
+endmenu

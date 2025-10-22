@@ -1,0 +1,323 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+/* Copyright(c) 2020 - 2023 Allwinner Technology Co.,Ltd. All rights reserved. */
+/*
+ * Copyright(c) 2017-2018 Allwinnertech Co., Ltd.
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ */
+
+#include <linux/kernel.h>
+#include <linux/types.h>
+#include <linux/module.h>
+#include <linux/init.h>
+#include <linux/gpio.h>
+#include <linux/err.h>
+#include <linux/device.h>
+#include <linux/delay.h>
+#include <linux/of_gpio.h>
+#include <linux/clk.h>
+#include <linux/regulator/consumer.h>
+#include <linux/platform_device.h>
+#include "internal.h"
+#include "sunxi-rfkill.h"
+
+static struct sunxi_gnss_platdata *gnss_data;
+static const struct of_device_id sunxi_gnss_ids[];
+
+static int sunxi_gnss_on(struct sunxi_gnss_platdata *data, bool on_off);
+static DEFINE_MUTEX(sunxi_gnss_mutex);
+
+void sunxi_gnss_set_power(bool on_off)
+{
+	struct platform_device *pdev;
+	int ret = 0;
+
+	if (!gnss_data)
+		return;
+
+	pdev = gnss_data->pdev;
+
+	if (gnss_data->always_on && !on_off) {
+		dev_warn(&pdev->dev, "gnss: always on, cannot be off\n");
+		return;
+	}
+
+	mutex_lock(&sunxi_gnss_mutex);
+	if (on_off != gnss_data->power_state) {
+		ret = sunxi_gnss_on(gnss_data, on_off);
+		if (ret)
+			dev_err(&pdev->dev, "set power failed\n");
+	}
+	mutex_unlock(&sunxi_gnss_mutex);
+}
+EXPORT_SYMBOL_GPL(sunxi_gnss_set_power);
+
+void sunxi_gnss_set_power_boot_state(void)
+{
+	if (!gnss_data)
+		return;
+
+	if (gnss_data->boot_on || gnss_data->always_on)
+		sunxi_gnss_set_power(1);
+}
+
+static int sunxi_gnss_on(struct sunxi_gnss_platdata *data, bool on_off)
+{
+	struct platform_device *pdev = data->pdev;
+	struct device *dev = &pdev->dev;
+	int ret = 0, i;
+
+	if (on_off) {
+		for (i = 0; i < PWR_MAX; i++) {
+			if (!IS_ERR_OR_NULL(data->power[i])) {
+				if (data->power_vol[i]) {
+					ret = regulator_set_voltage(data->power[i],
+							data->power_vol[i], data->power_vol[i]);
+					if (ret < 0) {
+						dev_err(dev, "gnss power[%d] (%s) set voltage failed\n",
+								i, data->power_name[i]);
+						return ret;
+					}
+
+					ret = regulator_get_voltage(data->power[i]);
+					if (ret != data->power_vol[i]) {
+						dev_err(dev, "gnss power[%d] (%s) get voltage failed\n",
+								i, data->power_name[i]);
+						return ret;
+					}
+				}
+
+				ret = regulator_enable(data->power[i]);
+				if (ret < 0) {
+					dev_err(dev, "gnss power[%d] (%s) enable failed\n",
+								i, data->power_name[i]);
+					return ret;
+				}
+			}
+		}
+
+		if (gpio_is_valid(data->gpio_gnss_rst)) {
+			mdelay(10);
+			gpio_set_value(data->gpio_gnss_rst, !data->gpio_gnss_rst_assert);
+		}
+	} else {
+		if (gpio_is_valid(data->gpio_gnss_rst))
+			gpio_set_value(data->gpio_gnss_rst, data->gpio_gnss_rst_assert);
+
+		for (i = 0; i < PWR_MAX; i++) {
+			if (!IS_ERR_OR_NULL(data->power[i])) {
+				ret = regulator_disable(data->power[i]);
+				if (ret < 0) {
+					dev_err(dev, "gnss power[%d] (%s) disable failed\n",
+								i, data->power_name[i]);
+					return ret;
+				}
+			}
+		}
+	}
+
+	data->power_state = on_off;
+	dev_info(dev, "gnss power %s success\n", on_off ? "on" : "off");
+
+	return 0;
+}
+
+static ssize_t state_show(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+	if (!gnss_data)
+		return 0;
+	return sprintf(buf, "%d\n", gnss_data->power_state);
+}
+
+static ssize_t state_store(struct device *dev,
+	struct device_attribute *attr, const char *buf, size_t count)
+{
+	unsigned long state;
+	int err;
+
+	if (!gnss_data)
+		return 0;
+
+	err = kstrtoul(buf, 0, &state);
+	if (err)
+		return err;
+
+	if (state > 1)
+		return -EINVAL;
+
+	if (state != gnss_data->power_state) {
+		sunxi_gnss_set_power(state);
+	}
+
+	return count;
+}
+
+static DEVICE_ATTR(state, S_IRUGO | S_IWUSR,
+		state_show, state_store);
+
+static struct attribute *miscdev_attributes_wlan[] = {
+	&dev_attr_state.attr,
+	NULL,
+};
+
+static struct attribute_group miscdev_attribute_group = {
+	.name  = "gnss",
+	.attrs = miscdev_attributes_wlan,
+};
+
+int sunxi_gnss_init(struct platform_device *pdev)
+{
+	struct device_node *np = of_find_matching_node(pdev->dev.of_node, sunxi_gnss_ids);
+	struct device *dev = &pdev->dev;
+	struct sunxi_gnss_platdata *data;
+	enum of_gpio_flags config;
+	int ret = 0;
+	int count, i;
+
+	if (!dev)
+		return -ENOMEM;
+
+	if (!np)
+		return 0;
+
+	data = devm_kzalloc(dev, sizeof(*data), GFP_KERNEL);
+	data->pdev = pdev;
+
+	count = of_property_count_strings(np, "gnss_power");
+	if (count <= 0) {
+		dev_warn(dev, "Missing gnss_power.\n");
+	} else {
+		if (count > PWR_MAX) {
+			dev_warn(dev, "gnss power count large than max(%d > %d).\n",
+				count, PWR_MAX);
+			count = PWR_MAX;
+		}
+		ret = of_property_read_string_array(np, "gnss_power",
+					(const char **)data->power_name, count);
+		if (ret < 0)
+			return -ENOMEM;
+
+		ret = of_property_read_u32_array(np, "gnss_power_vol",
+					(u32 *)data->power_vol, count);
+		if (ret < 0)
+			dev_warn(dev, "Missing gnss_power_vol config.\n");
+
+		for (i = 0; i < count; i++) {
+			data->power[i] = regulator_get(dev, data->power_name[i]);
+			if (IS_ERR_OR_NULL(data->power[i]))
+				return -ENOMEM;
+
+			dev_info(dev, "gnss power[%d] (%s) voltage: %dmV\n",
+					i, data->power_name[i], data->power_vol[i] / 1000);
+		}
+	}
+
+	for (i = 0; i < count; i++) {
+		data->power[i] = regulator_get(dev, data->power_name[i]);
+		if (IS_ERR_OR_NULL(data->power[i]))
+			return -ENOMEM;
+		dev_info(dev, "gnss power[%d] (%s)\n", i, data->power_name[i]);
+	}
+
+	data->gpio_gnss_regon = of_get_named_gpio_flags(np, "gnss_regon", 0, &config);
+	if (!gpio_is_valid(data->gpio_gnss_regon)) {
+		dev_err(dev, "get gpio gnss_regon failed\n");
+	} else {
+		data->gpio_gnss_regon_assert = (config == OF_GPIO_ACTIVE_LOW) ? 0 : 1;
+		dev_info(dev, "gnss_regon gpio=%d assert=%d\n", data->gpio_gnss_regon, data->gpio_gnss_regon_assert);
+
+		ret = devm_gpio_request(dev, data->gpio_gnss_regon,
+				"gnss_regon");
+		if (ret < 0) {
+			dev_err(dev, "can't request gnss_regon gpio %d\n",
+				data->gpio_gnss_regon);
+			return ret;
+		}
+
+		ret = gpio_direction_output(data->gpio_gnss_regon, !data->gpio_gnss_regon_assert);
+		if (ret < 0) {
+			dev_err(dev, "can't request output direction gnss_regon gpio %d\n",
+				data->gpio_gnss_regon);
+			return ret;
+		}
+	}
+
+	data->gpio_gnss_rst = of_get_named_gpio_flags(np, "gnss_rst", 0, &config);
+	if (!gpio_is_valid(data->gpio_gnss_rst)) {
+		dev_err(dev, "get gpio gnss_rst failed\n");
+	} else {
+		data->gpio_gnss_rst_assert = (config == OF_GPIO_ACTIVE_LOW) ? 0 : 1;
+		dev_info(dev, "gnss_rst gpio=%d assert=%d\n", data->gpio_gnss_rst, data->gpio_gnss_rst_assert);
+
+		ret = devm_gpio_request(dev, data->gpio_gnss_rst, "gnss_rst");
+		if (ret < 0) {
+			dev_err(dev, "can't request gnss_rst gpio %d\n",
+				data->gpio_gnss_rst);
+			return ret;
+		}
+
+		ret = gpio_direction_output(data->gpio_gnss_rst, data->gpio_gnss_rst_assert);
+		if (ret < 0) {
+			dev_err(dev, "can't request output direction gnss_rst gpio %d\n",
+				data->gpio_gnss_rst);
+			return ret;
+		}
+		gpio_set_value(data->gpio_gnss_rst, data->gpio_gnss_rst_assert);
+	}
+
+	data->boot_on = of_property_read_bool(np, "regulator-boot-on") ? 1 : 0;
+	data->always_on = of_property_read_bool(np, "regulator-always-on") ? 1 : 0;
+	dev_info(dev, "gnss power boot-on: %d, always-on: %d\n", data->boot_on, data->always_on);
+
+	ret = sysfs_create_group(&sunxi_rfkill_miscdev.this_device->kobj,
+			&miscdev_attribute_group);
+	if (ret) {
+		dev_err(dev, "sunxi-gnss register rfkill miscdev attr group failed!\n");
+		return ret;
+	}
+
+	data->power_state = 0;
+	gnss_data = data;
+	return 0;
+}
+
+int sunxi_gnss_deinit(struct platform_device *pdev)
+{
+	struct sunxi_gnss_platdata *data = platform_get_drvdata(pdev);
+	int i;
+
+	if (!data)
+		return 0;
+
+	sysfs_remove_group(&(sunxi_rfkill_miscdev.this_device->kobj),
+			&miscdev_attribute_group);
+
+	if (data->power_state)
+		sunxi_gnss_set_power(0);
+
+	for (i = 0; i < PWR_MAX; i++) {
+		if (!IS_ERR_OR_NULL(data->power[i]))
+			regulator_put(data->power[i]);
+	}
+
+	gnss_data = NULL;
+
+	return 0;
+}
+
+static const struct of_device_id sunxi_gnss_ids[] = {
+	{ .compatible = "allwinner,sunxi-gnss" },
+	{ /* Sentinel */ }
+};
+
+MODULE_DESCRIPTION("sunxi gnss rfkill driver");
+MODULE_LICENSE("GPL");

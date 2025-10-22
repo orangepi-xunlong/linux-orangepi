@@ -1,0 +1,63 @@
+# SPDX-License-Identifier: GPL-2.0-only
+
+menu "RTC Drivers"
+	depends on AW_BSP
+
+config AW_RTC
+	tristate "RTC Support for Allwinner SoCs"
+	depends on AW_BSP
+	select RTC_CLASS
+	help
+	  If you say Y here, you will get support for the RTC found on
+	  Allwinner SoCs.
+
+config AW_RTC_REBOOT_FLAG
+	depends on AW_RTC
+	bool "Enable RTC General Registers for Reboot Flag"
+	help
+	  Allow reboot app in userspace (such as Android reboot) to save
+	  a flag in the RTC General Purpose Register. The flag could be read
+	  by u-boot, kernel or user app after rebooting.
+
+config AW_RTC_POWEROFF_ALARM
+	depends on AW_RTC
+	bool "Enable RTC Alarm in Power-Off State"
+	help
+	  Support RTC alarm when the system is Powered-Off.
+
+config AW_TIMER_ALARM
+	tristate "Allwinner timer alarm"
+	help
+	  Use timer1 as an alarm which could wake up CPU from sleeping.
+	  The alarm interval can be set via /sys/class/timer_alarm/interval.
+	  This is useful on the Socs which does not have an RTC alarm.
+
+config RTC_DRV_SD2059
+	tristate "RTC driver for External Chip SD2059"
+	depends on AW_I2C
+	help
+	  If you say yes here you get support for the ZXW Shenzhen whwave SD2059.
+
+	  This driver can also be built as a module. If so, the module
+	  will be called rtc-sd2059
+
+config AW_FAKE_POWEROFF
+	bool "support fake poweroff"
+	depends on AW_RTC && AW_RTC_REBOOT_FLAG
+	default n
+	help
+	  If you say Y here ,the system support entering the fake poweroff state.
+	  all operations will eventually be replaced with the "restart" command and enter
+	  the poweroff process
+
+config RTC_DRV_JXR160
+	tristate "RTC driver for External Chip JXR160"
+	depends on AW_I2C
+	help
+	   If you say yes here you get support for the XJ Beijing juxuan JXR160.
+
+	   This driver can also be built as a module. If so, the module
+	   will be called rtc-jxr160
+
+endmenu
+

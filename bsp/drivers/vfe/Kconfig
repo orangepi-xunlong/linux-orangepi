@@ -1,0 +1,15 @@
+# SPDX-License-Identifier: GPL-2.0-only
+menu "VFE (camera) Drivers"
+	depends on AW_BSP
+
+config CSI_VFE
+	tristate "v4l2 driver for SUNXI"
+	default n
+	select VIDEOBUF2_DMA_CONTIG
+
+config CSI_VFE_SAMPLE
+	bool "vfe driver sample"
+	depends on CSI_VFE
+	default n
+
+endmenu

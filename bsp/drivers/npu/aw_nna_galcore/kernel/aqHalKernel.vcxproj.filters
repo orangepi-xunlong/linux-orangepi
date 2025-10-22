@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="Source Files">
+      <UniqueIdentifier>{4FC737F1-C7A5-4376-A066-2A32D752A2FF}</UniqueIdentifier>
+      <Extensions>cpp;c;cc;cxx;def;odl;idl;hpj;bat;asm;asmx</Extensions>
+    </Filter>
+    <Filter Include="Header Files">
+      <UniqueIdentifier>{93995380-89BD-4b04-88EB-625FBE52EBFB}</UniqueIdentifier>
+      <Extensions>h;hpp;hxx;hm;inl;inc;xsd</Extensions>
+    </Filter>
+    <Filter Include="Linux">
+      <UniqueIdentifier>{05035f6d-8d39-4ad0-b822-8fc4010faf12}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="gc_hal_kernel.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="gc_hal_kernel_command.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="gc_hal_kernel_command_vg.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="gc_hal_kernel_db.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="gc_hal_kernel_event.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="gc_hal_kernel_heap.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="gc_hal_kernel_interrupt_vg.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="gc_hal_kernel_mmu.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="gc_hal_kernel_mmu_vg.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="gc_hal_kernel_preemption.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="gc_hal_kernel_vg.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="gc_hal_kernel_video_memory.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="..\os\linux\kernel\gc_hal_kernel_device.c">
+      <Filter>Linux</Filter>
+    </ClCompile>
+    <ClCompile Include="..\os\linux\kernel\gc_hal_kernel_driver.c">
+      <Filter>Linux</Filter>
+    </ClCompile>
+    <ClCompile Include="..\os\linux\kernel\gc_hal_kernel_linux.c">
+      <Filter>Linux</Filter>
+    </ClCompile>
+    <ClCompile Include="..\os\linux\kernel\gc_hal_kernel_os.c">
+      <Filter>Linux</Filter>
+    </ClCompile>
+    <ClCompile Include="gc_hal_kernel_security_v1.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="..\inc\gc_hal.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="..\inc\gc_hal_driver.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="..\inc\gc_hal_enum.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="gc_hal_kernel.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="..\os\emulator\inc\gc_hal_kernel_debug.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="gc_hal_kernel_precomp.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="..\inc\gc_hal_options.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="..\inc\gc_hal_types.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="..\os\linux\kernel\gc_hal_kernel_debug.h">
+      <Filter>Linux</Filter>
+    </ClInclude>
+    <ClInclude Include="..\os\linux\kernel\gc_hal_kernel_device.h">
+      <Filter>Linux</Filter>
+    </ClInclude>
+    <ClInclude Include="..\os\linux\kernel\gc_hal_kernel_linux.h">
+      <Filter>Linux</Filter>
+    </ClInclude>
+    <ClInclude Include="..\os\linux\kernel\gc_hal_kernel_os.h">
+      <Filter>Linux</Filter>
+    </ClInclude>
+    <ClInclude Include="..\inc\gc_hal_version.h">
+      <Filter>Linux</Filter>
+    </ClInclude>
+    <ClInclude Include="gc_hal_kernel_mmu.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+  </ItemGroup>
+</Project>

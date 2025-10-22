@@ -1,0 +1,33 @@
+# SPDX-License-Identifier: GPL-2.0-only
+#
+# Phy drivers for SUNXI platforms
+#
+menu "PHY Drivers"
+	depends on AW_BSP
+
+config AW_INNO_COMBOPHY
+	tristate "Allwinner INNO COMBO PHY Driver"
+	depends on AW_BSP && OF
+	select GENERIC_PHY
+	help
+	  Enable this to support the Allwinner PCIe/USB3.0 combo PHY
+	  with INNOSILICON IP block.
+
+config AW_CADENCE_COMBOPHY
+	tristate "Allwinner CADENCE COMBO PHY Driver"
+	depends on AW_BSP && OF
+	select GENERIC_PHY
+	select EXTCON
+	help
+	  Enable this to support the Allwinner PCIe/USB3.0/DisplayPort combo PHY
+	  with CADENCE IP block.
+
+config AW_SYNOPSYS_COMBOPHY
+	tristate "Allwinner SYNOPSYS COMBO PHY Driver"
+	depends on AW_BSP && OF
+	select GENERIC_PHY
+	help
+	  Enable this to support the Allwinner PCIe/USB3.0 combo PHY
+	  with SYNOPSYS IP block.
+
+endmenu

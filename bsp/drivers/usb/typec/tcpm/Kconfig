@@ -1,0 +1,20 @@
+# SPDX-License-Identifier: GPL-2.0-only
+
+if TYPEC_TCPM
+
+if TYPEC_TCPCI
+
+config TYPEC_HUSB311
+	tristate "Hynetek HUSB311 Type-C chip driver"
+	depends on USB_SUNXI_TYPEC
+	depends on I2C
+	help
+	  Hynetek HUSB311 Type-C chip driver that works with
+	  Type-C Port Controller Manager to provide USB PD and USB
+	  Type-C functionalities.
+
+	  If unsure, say N.
+
+endif # TYPEC_TCPCI
+
+endif # TYPEC_TCPM

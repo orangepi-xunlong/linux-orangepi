@@ -1,0 +1,465 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="All_Debug|Win32">
+      <Configuration>All_Debug</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="All_Debug|x64">
+      <Configuration>All_Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="All_Release|Win32">
+      <Configuration>All_Release</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="All_Release|x64">
+      <Configuration>All_Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="vivante_debug_no_kernel_static|Win32">
+      <Configuration>vivante_debug_no_kernel_static</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="vivante_debug_no_kernel_static|x64">
+      <Configuration>vivante_debug_no_kernel_static</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="vivante_release_no_kernel_static|Win32">
+      <Configuration>vivante_release_no_kernel_static</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="vivante_release_no_kernel_static|x64">
+      <Configuration>vivante_release_no_kernel_static</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="VSimulator_Debug|Win32">
+      <Configuration>VSimulator_Debug</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="VSimulator_Debug|x64">
+      <Configuration>VSimulator_Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="VSimulator_Release|Win32">
+      <Configuration>VSimulator_Release</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="VSimulator_Release|x64">
+      <Configuration>VSimulator_Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="gc_hal_ta.c" />
+    <ClCompile Include="gc_hal_ta_hardware.c" />
+    <ClCompile Include="gc_hal_ta_mmu.c" />
+    <ClCompile Include="os\emulator\gc_hal_ta_emulator.c" />
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <ProjectGuid>{4B8916DC-F4A9-4B5E-BEC6-952F7C645CF7}</ProjectGuid>
+    <RootNamespace>Project1</RootNamespace>
+    <ProjectName>trust application</ProjectName>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='All_Debug|Win32'" Label="Configuration">
+    <ConfigurationType>StaticLibrary</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v110</PlatformToolset>
+    <CharacterSet>MultiByte</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='VSimulator_Debug|Win32'" Label="Configuration">
+    <ConfigurationType>StaticLibrary</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v110</PlatformToolset>
+    <CharacterSet>MultiByte</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='VSimulator_Release|Win32'" Label="Configuration">
+    <ConfigurationType>StaticLibrary</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v110</PlatformToolset>
+    <CharacterSet>MultiByte</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='All_Debug|x64'" Label="Configuration">
+    <ConfigurationType>StaticLibrary</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v110</PlatformToolset>
+    <CharacterSet>MultiByte</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='VSimulator_Debug|x64'" Label="Configuration">
+    <ConfigurationType>StaticLibrary</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v110</PlatformToolset>
+    <CharacterSet>MultiByte</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='VSimulator_Release|x64'" Label="Configuration">
+    <ConfigurationType>StaticLibrary</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v110</PlatformToolset>
+    <CharacterSet>MultiByte</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='All_Release|Win32'" Label="Configuration">
+    <ConfigurationType>StaticLibrary</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v110</PlatformToolset>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>MultiByte</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='vivante_release_no_kernel_static|Win32'" Label="Configuration">
+    <ConfigurationType>StaticLibrary</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v110</PlatformToolset>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>MultiByte</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='vivante_debug_no_kernel_static|Win32'" Label="Configuration">
+    <ConfigurationType>StaticLibrary</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v110</PlatformToolset>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>MultiByte</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='All_Release|x64'" Label="Configuration">
+    <ConfigurationType>StaticLibrary</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v110</PlatformToolset>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>MultiByte</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='vivante_release_no_kernel_static|x64'" Label="Configuration">
+    <ConfigurationType>StaticLibrary</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v110</PlatformToolset>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>MultiByte</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='vivante_debug_no_kernel_static|x64'" Label="Configuration">
+    <ConfigurationType>StaticLibrary</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v110</PlatformToolset>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>MultiByte</CharacterSet>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="ExtensionSettings">
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='All_Debug|Win32'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='VSimulator_Debug|Win32'" Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='VSimulator_Release|Win32'" Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='All_Debug|x64'" Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='VSimulator_Debug|x64'" Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='VSimulator_Release|x64'" Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='All_Release|Win32'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='vivante_release_no_kernel_static|Win32'" Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='vivante_debug_no_kernel_static|Win32'" Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='All_Release|x64'" Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='vivante_release_no_kernel_static|x64'" Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='vivante_debug_no_kernel_static|x64'" Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <PropertyGroup Label="UserMacros" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='All_Debug|Win32'">
+    <OutDir>$(VIVANTE_SDK_DIR)\lib\</OutDir>
+    <IntDir>$(SolutionDir)output\$(Configuration)\$(ProjectName)\</IntDir>
+    <TargetName>ta</TargetName>
+    <TargetExt>.lib</TargetExt>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='VSimulator_Debug|Win32'">
+    <OutDir>$(VIVANTE_SDK_DIR)\lib\</OutDir>
+    <IntDir>$(SolutionDir)output\$(Configuration)\$(ProjectName)\</IntDir>
+    <TargetName>ta</TargetName>
+    <TargetExt>.lib</TargetExt>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='VSimulator_Release|Win32'">
+    <OutDir>$(VIVANTE_SDK_DIR)\lib\</OutDir>
+    <IntDir>$(SolutionDir)output\$(Configuration)\$(ProjectName)\</IntDir>
+    <TargetName>ta</TargetName>
+    <TargetExt>.lib</TargetExt>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='All_Debug|x64'">
+    <TargetName>ta</TargetName>
+    <TargetExt>.lib</TargetExt>
+    <OutDir>$(VIVANTE_SDK_DIR)\lib\</OutDir>
+    <IntDir>$(SolutionDir)output\$(Configuration)\$(ProjectName)\</IntDir>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='VSimulator_Debug|x64'">
+    <TargetName>ta</TargetName>
+    <TargetExt>.lib</TargetExt>
+    <OutDir>$(VIVANTE_SDK_DIR)\lib\</OutDir>
+    <IntDir>$(SolutionDir)output\$(Configuration)\$(ProjectName)\</IntDir>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='VSimulator_Release|x64'">
+    <TargetName>ta</TargetName>
+    <TargetExt>.lib</TargetExt>
+    <OutDir>$(VIVANTE_SDK_DIR)\lib\</OutDir>
+    <IntDir>$(SolutionDir)output\$(Configuration)\$(ProjectName)\</IntDir>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='All_Release|Win32'">
+    <OutDir>$(VIVANTE_SDK_DIR)\lib\</OutDir>
+    <IntDir>$(SolutionDir)output\$(Configuration)\$(ProjectName)\</IntDir>
+    <TargetName>ta</TargetName>
+    <TargetExt>.lib</TargetExt>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='vivante_release_no_kernel_static|Win32'">
+    <OutDir>$(VIVANTE_SDK_DIR)\lib\</OutDir>
+    <IntDir>$(SolutionDir)output\$(Configuration)\$(ProjectName)\</IntDir>
+    <TargetName>ta</TargetName>
+    <TargetExt>.lib</TargetExt>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='vivante_debug_no_kernel_static|Win32'">
+    <OutDir>$(VIVANTE_SDK_DIR)\lib\</OutDir>
+    <IntDir>$(SolutionDir)output\$(Configuration)\$(ProjectName)\</IntDir>
+    <TargetName>ta</TargetName>
+    <TargetExt>.lib</TargetExt>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='All_Release|x64'">
+    <OutDir>$(VIVANTE_SDK_DIR)\lib\</OutDir>
+    <IntDir>$(SolutionDir)output\$(Configuration)\$(ProjectName)\</IntDir>
+    <TargetName>ta</TargetName>
+    <TargetExt>.lib</TargetExt>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='vivante_release_no_kernel_static|x64'">
+    <OutDir>$(VIVANTE_SDK_DIR)\lib\</OutDir>
+    <IntDir>$(SolutionDir)output\$(Configuration)\$(ProjectName)\</IntDir>
+    <TargetName>ta</TargetName>
+    <TargetExt>.lib</TargetExt>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='vivante_debug_no_kernel_static|x64'">
+    <OutDir>$(VIVANTE_SDK_DIR)\lib\</OutDir>
+    <IntDir>$(SolutionDir)output\$(Configuration)\$(ProjectName)\</IntDir>
+    <TargetName>ta</TargetName>
+    <TargetExt>.lib</TargetExt>
+  </PropertyGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='All_Debug|Win32'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <Optimization>Disabled</Optimization>
+      <SDLCheck>true</SDLCheck>
+      <AdditionalIncludeDirectories>$(AQROOT)\hal\security_v1;$(AQROOT)\hal\inc;$(AQARCH)\cmodel;$(AQARCH)\cmodel\inc;$(AQARCH)\test\common;$(AQROOT)\test\common;$(AQROOT)\hal\kernel\arch;$(AQROOT)\hal\kernel;$(AQROOT)\hal\os\emulator\inc;$(AQROOT)\tools\RenderTarget\Client;$(AQROOT);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <MinimalRebuild>false</MinimalRebuild>
+    </ClCompile>
+    <Link>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='VSimulator_Debug|Win32'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <Optimization>Disabled</Optimization>
+      <SDLCheck>true</SDLCheck>
+      <AdditionalIncludeDirectories>$(AQROOT)\hal\security_v1;$(AQROOT)\hal\inc;$(AQROOT)\vsimulator\common\inc;$(AQROOT)\vsimulator\common\inc\reg;$(AQARCH)\test\common;$(AQROOT)\test\common;$(AQROOT)\hal\kernel\arch;$(AQROOT)\hal\kernel;$(AQROOT)\vsimulator\os\windows\inc;$(AQROOT)\tools\RenderTarget\Client;$(AQROOT);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+      <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
+      <PreprocessorDefinitions>_MBCS;VSIMULATOR_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <Link>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='VSimulator_Release|Win32'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <Optimization>MaxSpeed</Optimization>
+      <SDLCheck>true</SDLCheck>
+      <AdditionalIncludeDirectories>$(AQROOT)\hal\security_v1;$(AQROOT)\hal\inc;$(AQROOT)\vsimulator\common\inc;$(AQROOT)\vsimulator\common\inc\reg;$(AQARCH)\test\common;$(AQROOT)\test\common;$(AQROOT)\hal\kernel\arch;$(AQROOT)\hal\kernel;$(AQROOT)\vsimulator\os\windows\inc;$(AQROOT)\tools\RenderTarget\Client;$(AQROOT);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+      <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
+      <BasicRuntimeChecks>Default</BasicRuntimeChecks>
+      <PreprocessorDefinitions>_MBCS;VSIMULATOR_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <Link>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='All_Debug|x64'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <Optimization>Disabled</Optimization>
+      <SDLCheck>true</SDLCheck>
+      <AdditionalIncludeDirectories>$(AQROOT)\hal\security_v1;$(AQROOT)\hal\inc;$(AQARCH)\cmodel;$(AQARCH)\cmodel\inc;$(AQARCH)\test\common;$(AQROOT)\test\common;$(AQROOT)\hal\kernel\arch;$(AQROOT)\hal\kernel;$(AQROOT)\hal\os\emulator\inc;$(AQROOT)\tools\RenderTarget\Client;$(AQROOT);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+    </ClCompile>
+    <Link>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='VSimulator_Debug|x64'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <Optimization>Disabled</Optimization>
+      <SDLCheck>true</SDLCheck>
+      <AdditionalIncludeDirectories>$(AQROOT)\hal\security_v1;$(AQROOT)\hal\inc;$(AQROOT);$(AQROOT)\vsimulator\common\inc\reg;$(AQROOT)\hal\kernel\arch;$(AQROOT)\hal\kernel;$(AQROOT)\vsimulator\os\windows\inc;$(AQROOT)\tools\RenderTarget\Client;$(AQROOT);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>_MBCS;VSIMULATOR_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <Link>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='VSimulator_Release|x64'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <Optimization>MaxSpeed</Optimization>
+      <SDLCheck>true</SDLCheck>
+      <AdditionalIncludeDirectories>$(AQROOT)\hal\security_v1;$(AQROOT)\hal\inc;$(AQROOT);$(AQROOT)\vsimulator\common\inc\reg;$(AQROOT)\hal\kernel\arch;$(AQROOT)\hal\kernel;$(AQROOT)\vsimulator\os\windows\inc;$(AQROOT)\tools\RenderTarget\Client;$(AQROOT);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>_MBCS;VSIMULATOR_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
+      <BasicRuntimeChecks>Default</BasicRuntimeChecks>
+    </ClCompile>
+    <Link>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='All_Release|Win32'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <Optimization>MaxSpeed</Optimization>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <SDLCheck>true</SDLCheck>
+      <AdditionalIncludeDirectories Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(AQROOT)\hal\security_v1;$(AQROOT)\hal\inc;$(AQARCH)\cmodel;$(AQARCH)\cmodel\inc;$(AQARCH)\test\common;$(AQROOT)\test\common;$(AQROOT)\hal\kernel\arch;$(AQROOT)\hal\kernel;$(AQROOT)\hal\os\emulator\inc;$(AQROOT)\tools\RenderTarget\Client;$(AQROOT);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(AQROOT)\hal\security_v1;$(AQROOT)\hal\inc;$(AQARCH)\cmodel;$(AQARCH)\cmodel\inc;$(AQARCH)\test\common;$(AQROOT)\test\common;$(AQROOT)\hal\kernel\arch;$(AQROOT)\hal\kernel;$(AQROOT)\hal\os\emulator\inc;$(AQROOT)\tools\RenderTarget\Client;$(AQROOT);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(AQROOT)\hal\security_v1;$(AQROOT)\hal\inc;$(AQARCH)\cmodel;$(AQARCH)\cmodel\inc;$(AQARCH)\test\common;$(AQROOT)\test\common;$(AQROOT)\hal\kernel\arch;$(AQROOT)\hal\kernel;$(AQROOT)\hal\os\emulator\inc;$(AQROOT)\tools\RenderTarget\Client;$(AQROOT);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(AQROOT)\hal\security_v1;$(AQROOT)\hal\inc;$(AQARCH)\cmodel;$(AQARCH)\cmodel\inc;$(AQARCH)\test\common;$(AQROOT)\test\common;$(AQROOT)\hal\kernel\arch;$(AQROOT)\hal\kernel;$(AQROOT)\hal\os\emulator\inc;$(AQROOT)\tools\RenderTarget\Client;$(AQROOT);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">121</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(AQROOT)\hal\security_v1;$(AQROOT)\hal\inc;$(AQARCH)\cmodel;$(AQARCH)\cmodel\inc;$(AQARCH)\test\common;$(AQROOT)\test\common;$(AQROOT)\hal\kernel\arch;$(AQROOT)\hal\kernel;$(AQROOT)\hal\os\emulator\inc;$(AQROOT)\tools\RenderTarget\Client;$(AQROOT);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(AQROOT)\hal\security_v1;$(AQROOT)\hal\inc;$(AQARCH)\cmodel;$(AQARCH)\cmodel\inc;$(AQARCH)\test\common;$(AQROOT)\test\common;$(AQROOT)\hal\kernel\arch;$(AQROOT)\hal\kernel;$(AQROOT)\hal\os\emulator\inc;$(AQROOT)\tools\RenderTarget\Client;$(AQROOT);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(AQROOT)\hal\security_v1;$(AQROOT)\hal\inc;$(AQARCH)\cmodel;$(AQARCH)\cmodel\inc;$(AQROOT)\hal\kernel\arch;$(AQROOT)\hal\kernel;$(AQROOT)\hal\os\emulator\inc;$(AQROOT)\tools\RenderTarget\Client;$(AQROOT);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">2fdsfsdfsd</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(AQROOT)\hal\security_v1;$(AQROOT)\hal\inc;$(AQARCH)\cmodel;$(AQARCH)\cmodel\inc;$(AQARCH)\test\common;$(AQROOT)\test\common;$(AQROOT)\hal\kernel\arch;$(AQROOT)\hal\kernel;$(AQROOT)\hal\os\emulator\inc;$(AQROOT)\tools\RenderTarget\Client;$(AQROOT);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <Link>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='vivante_release_no_kernel_static|Win32'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <Optimization>MaxSpeed</Optimization>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <SDLCheck>true</SDLCheck>
+      <AdditionalIncludeDirectories Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(AQROOT)\hal\security_v1;$(AQROOT)\hal\inc;$(AQARCH)\cmodel;$(AQARCH)\cmodel\inc;$(AQARCH)\test\common;$(AQROOT)\test\common;$(AQROOT)\hal\kernel\arch;$(AQROOT)\hal\kernel;$(AQROOT)\hal\os\emulator\inc;$(AQROOT)\tools\RenderTarget\Client;$(AQROOT);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(AQROOT)\hal\security_v1;$(AQROOT)\hal\inc;$(AQARCH)\cmodel;$(AQARCH)\cmodel\inc;$(AQARCH)\test\common;$(AQROOT)\test\common;$(AQROOT)\hal\kernel\arch;$(AQROOT)\hal\kernel;$(AQROOT)\hal\os\emulator\inc;$(AQROOT)\tools\RenderTarget\Client;$(AQROOT);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(AQROOT)\hal\security_v1;$(AQROOT)\hal\inc;$(AQARCH)\cmodel;$(AQARCH)\cmodel\inc;$(AQARCH)\test\common;$(AQROOT)\test\common;$(AQROOT)\hal\kernel\arch;$(AQROOT)\hal\kernel;$(AQROOT)\hal\os\emulator\inc;$(AQROOT)\tools\RenderTarget\Client;$(AQROOT);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(AQROOT)\hal\security_v1;$(AQROOT)\hal\inc;$(AQARCH)\cmodel;$(AQARCH)\cmodel\inc;$(AQARCH)\test\common;$(AQROOT)\test\common;$(AQROOT)\hal\kernel\arch;$(AQROOT)\hal\kernel;$(AQROOT)\hal\os\emulator\inc;$(AQROOT)\tools\RenderTarget\Client;$(AQROOT);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">121</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(AQROOT)\hal\security_v1;$(AQROOT)\hal\inc;$(AQARCH)\cmodel;$(AQARCH)\cmodel\inc;$(AQARCH)\test\common;$(AQROOT)\test\common;$(AQROOT)\hal\kernel\arch;$(AQROOT)\hal\kernel;$(AQROOT)\hal\os\emulator\inc;$(AQROOT)\tools\RenderTarget\Client;$(AQROOT);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(AQROOT)\hal\security_v1;$(AQROOT)\hal\inc;$(AQARCH)\cmodel;$(AQARCH)\cmodel\inc;$(AQARCH)\test\common;$(AQROOT)\test\common;$(AQROOT)\hal\kernel\arch;$(AQROOT)\hal\kernel;$(AQROOT)\hal\os\emulator\inc;$(AQROOT)\tools\RenderTarget\Client;$(AQROOT);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(AQROOT)\hal\security_v1;$(AQROOT)\hal\inc;$(AQARCH)\cmodel;$(AQARCH)\cmodel\inc;$(AQROOT)\hal\kernel\arch;$(AQROOT)\hal\kernel;$(AQROOT)\hal\os\emulator\inc;$(AQROOT)\tools\RenderTarget\Client;$(AQROOT);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">2fdsfsdfsd</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(AQROOT)\hal\security_v1;$(AQROOT)\hal\inc;$(AQARCH)\cmodel;$(AQARCH)\cmodel\inc;$(AQARCH)\test\common;$(AQROOT)\test\common;$(AQROOT)\hal\kernel\arch;$(AQROOT)\hal\kernel;$(AQROOT)\hal\os\emulator\inc;$(AQROOT)\tools\RenderTarget\Client;$(AQROOT);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <Link>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='vivante_debug_no_kernel_static|Win32'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <Optimization>MaxSpeed</Optimization>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <SDLCheck>true</SDLCheck>
+      <AdditionalIncludeDirectories Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(AQROOT)\hal\security_v1;$(AQROOT)\hal\inc;$(AQARCH)\cmodel;$(AQARCH)\cmodel\inc;$(AQARCH)\test\common;$(AQROOT)\test\common;$(AQROOT)\hal\kernel\arch;$(AQROOT)\hal\kernel;$(AQROOT)\hal\os\emulator\inc;$(AQROOT)\tools\RenderTarget\Client;$(AQROOT);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(AQROOT)\hal\security_v1;$(AQROOT)\hal\inc;$(AQARCH)\cmodel;$(AQARCH)\cmodel\inc;$(AQARCH)\test\common;$(AQROOT)\test\common;$(AQROOT)\hal\kernel\arch;$(AQROOT)\hal\kernel;$(AQROOT)\hal\os\emulator\inc;$(AQROOT)\tools\RenderTarget\Client;$(AQROOT);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(AQROOT)\hal\security_v1;$(AQROOT)\hal\inc;$(AQARCH)\cmodel;$(AQARCH)\cmodel\inc;$(AQARCH)\test\common;$(AQROOT)\test\common;$(AQROOT)\hal\kernel\arch;$(AQROOT)\hal\kernel;$(AQROOT)\hal\os\emulator\inc;$(AQROOT)\tools\RenderTarget\Client;$(AQROOT);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(AQROOT)\hal\security_v1;$(AQROOT)\hal\inc;$(AQARCH)\cmodel;$(AQARCH)\cmodel\inc;$(AQARCH)\test\common;$(AQROOT)\test\common;$(AQROOT)\hal\kernel\arch;$(AQROOT)\hal\kernel;$(AQROOT)\hal\os\emulator\inc;$(AQROOT)\tools\RenderTarget\Client;$(AQROOT);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">121</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(AQROOT)\hal\security_v1;$(AQROOT)\hal\inc;$(AQARCH)\cmodel;$(AQARCH)\cmodel\inc;$(AQARCH)\test\common;$(AQROOT)\test\common;$(AQROOT)\hal\kernel\arch;$(AQROOT)\hal\kernel;$(AQROOT)\hal\os\emulator\inc;$(AQROOT)\tools\RenderTarget\Client;$(AQROOT);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(AQROOT)\hal\security_v1;$(AQROOT)\hal\inc;$(AQARCH)\cmodel;$(AQARCH)\cmodel\inc;$(AQARCH)\test\common;$(AQROOT)\test\common;$(AQROOT)\hal\kernel\arch;$(AQROOT)\hal\kernel;$(AQROOT)\hal\os\emulator\inc;$(AQROOT)\tools\RenderTarget\Client;$(AQROOT);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(AQROOT)\hal\security_v1;$(AQROOT)\hal\inc;$(AQARCH)\cmodel;$(AQARCH)\cmodel\inc;$(AQROOT)\hal\kernel\arch;$(AQROOT)\hal\kernel;$(AQROOT)\hal\os\emulator\inc;$(AQROOT)\tools\RenderTarget\Client;$(AQROOT);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">2fdsfsdfsd</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(AQROOT)\hal\security_v1;$(AQROOT)\hal\inc;$(AQARCH)\cmodel;$(AQARCH)\cmodel\inc;$(AQARCH)\test\common;$(AQROOT)\test\common;$(AQROOT)\hal\kernel\arch;$(AQROOT)\hal\kernel;$(AQROOT)\hal\os\emulator\inc;$(AQROOT)\tools\RenderTarget\Client;$(AQROOT);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <Link>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='All_Release|x64'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <Optimization>MaxSpeed</Optimization>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <SDLCheck>true</SDLCheck>
+      <AdditionalIncludeDirectories Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(AQROOT)\hal\security_v1;$(AQROOT)\hal\inc;$(AQARCH)\cmodel;$(AQARCH)\cmodel\inc;$(AQARCH)\test\common;$(AQROOT)\test\common;$(AQROOT)\hal\kernel\arch;$(AQROOT)\hal\kernel;$(AQROOT)\hal\os\emulator\inc;$(AQROOT)\tools\RenderTarget\Client;$(AQROOT);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(AQROOT)\hal\security_v1;$(AQROOT)\hal\inc;$(AQARCH)\cmodel;$(AQARCH)\cmodel\inc;$(AQARCH)\test\common;$(AQROOT)\test\common;$(AQROOT)\hal\kernel\arch;$(AQROOT)\hal\kernel;$(AQROOT)\hal\os\emulator\inc;$(AQROOT)\tools\RenderTarget\Client;$(AQROOT);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(AQROOT)\hal\security_v1;$(AQROOT)\hal\inc;$(AQARCH)\cmodel;$(AQARCH)\cmodel\inc;$(AQROOT)\hal\kernel\arch;$(AQROOT)\hal\kernel;$(AQROOT)\hal\os\emulator\inc;$(AQROOT)\tools\RenderTarget\Client;$(AQROOT);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(AQROOT)\hal\security_v1;$(AQROOT)\hal\inc;$(AQARCH)\cmodel;$(AQARCH)\cmodel\inc;$(AQARCH)\test\common;$(AQROOT)\test\common;$(AQROOT)\hal\kernel\arch;$(AQROOT)\hal\kernel;$(AQROOT)\hal\os\emulator\inc;$(AQROOT)\tools\RenderTarget\Client;$(AQROOT);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <Link>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='vivante_release_no_kernel_static|x64'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <Optimization>MaxSpeed</Optimization>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <SDLCheck>true</SDLCheck>
+      <AdditionalIncludeDirectories Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(AQROOT)\hal\security_v1;$(AQROOT)\hal\inc;$(AQARCH)\cmodel;$(AQARCH)\cmodel\inc;$(AQARCH)\test\common;$(AQROOT)\test\common;$(AQROOT)\hal\kernel\arch;$(AQROOT)\hal\kernel;$(AQROOT)\hal\os\emulator\inc;$(AQROOT)\tools\RenderTarget\Client;$(AQROOT);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(AQROOT)\hal\security_v1;$(AQROOT)\hal\inc;$(AQARCH)\cmodel;$(AQARCH)\cmodel\inc;$(AQARCH)\test\common;$(AQROOT)\test\common;$(AQROOT)\hal\kernel\arch;$(AQROOT)\hal\kernel;$(AQROOT)\hal\os\emulator\inc;$(AQROOT)\tools\RenderTarget\Client;$(AQROOT);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(AQROOT)\hal\security_v1;$(AQROOT)\hal\inc;$(AQARCH)\cmodel;$(AQARCH)\cmodel\inc;$(AQROOT)\hal\kernel\arch;$(AQROOT)\hal\kernel;$(AQROOT)\hal\os\emulator\inc;$(AQROOT)\tools\RenderTarget\Client;$(AQROOT);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(AQROOT)\hal\security_v1;$(AQROOT)\hal\inc;$(AQARCH)\cmodel;$(AQARCH)\cmodel\inc;$(AQARCH)\test\common;$(AQROOT)\test\common;$(AQROOT)\hal\kernel\arch;$(AQROOT)\hal\kernel;$(AQROOT)\hal\os\emulator\inc;$(AQROOT)\tools\RenderTarget\Client;$(AQROOT);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <Link>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='vivante_debug_no_kernel_static|x64'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <Optimization>MaxSpeed</Optimization>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <SDLCheck>true</SDLCheck>
+      <AdditionalIncludeDirectories Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(AQROOT)\hal\security_v1;$(AQROOT)\hal\inc;$(AQARCH)\cmodel;$(AQARCH)\cmodel\inc;$(AQARCH)\test\common;$(AQROOT)\test\common;$(AQROOT)\hal\kernel\arch;$(AQROOT)\hal\kernel;$(AQROOT)\hal\os\emulator\inc;$(AQROOT)\tools\RenderTarget\Client;$(AQROOT);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(AQROOT)\hal\security_v1;$(AQROOT)\hal\inc;$(AQARCH)\cmodel;$(AQARCH)\cmodel\inc;$(AQARCH)\test\common;$(AQROOT)\test\common;$(AQROOT)\hal\kernel\arch;$(AQROOT)\hal\kernel;$(AQROOT)\hal\os\emulator\inc;$(AQROOT)\tools\RenderTarget\Client;$(AQROOT);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(AQROOT)\hal\security_v1;$(AQROOT)\hal\inc;$(AQARCH)\cmodel;$(AQARCH)\cmodel\inc;$(AQROOT)\hal\kernel\arch;$(AQROOT)\hal\kernel;$(AQROOT)\hal\os\emulator\inc;$(AQROOT)\tools\RenderTarget\Client;$(AQROOT);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(AQROOT)\hal\security_v1;$(AQROOT)\hal\inc;$(AQARCH)\cmodel;$(AQARCH)\cmodel\inc;$(AQARCH)\test\common;$(AQROOT)\test\common;$(AQROOT)\hal\kernel\arch;$(AQROOT)\hal\kernel;$(AQROOT)\hal\os\emulator\inc;$(AQROOT)\tools\RenderTarget\Client;$(AQROOT);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <Link>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+    </Link>
+  </ItemDefinitionGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets">
+  </ImportGroup>
+</Project>

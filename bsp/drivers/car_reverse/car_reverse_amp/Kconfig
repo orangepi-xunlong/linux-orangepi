@@ -1,0 +1,19 @@
+#
+# SPDX-License-Identifier: GPL-2.0-only
+#
+# SUNXI FAST CAR REVERSE DRIVER FOR AMP
+#
+menu "Sunxi Fast Car Reverse Drivers For Amp"
+	depends on AW_BSP
+
+config VIDEO_SUNXI_CAR_REVERSE_AMP
+	depends on AW_DISP2
+	tristate "sunxi fast car reverse driver for amp"
+	default n
+
+config SUNXI_CAR_REVERSE_GPIO_DETECT
+	depends on VIDEO_SUNXI_CAR_REVERSE_AMP
+	tristate "sunxi fast car reverse gpio detect"
+	default n
+
+endmenu

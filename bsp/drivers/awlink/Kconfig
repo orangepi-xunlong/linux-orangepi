@@ -1,0 +1,13 @@
+# SPDX-License-Identifier: GPL-2.0-only
+
+menu "AWLINK Drivers"
+	depends on AW_BSP
+
+config AW_AWLINK_SUN55I
+	depends on AW_BSP && CAN
+	tristate "Allwinner SUN55I AWLINK controller"
+	help
+	  if say Y here, you can use AWLINK controller found on Allwinner SoCs.
+
+endmenu
+

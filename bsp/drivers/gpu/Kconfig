@@ -1,0 +1,35 @@
+# SPDX-License-Identifier: GPL-2.0
+
+menu "Open Source GPU Drivers"
+	depends on DRM
+config AW_DRM_PANFROST
+	tristate "Panfrost (AW DRM support for ARM Mali Midgard/Bifrost GPUs)"
+	depends on DRM
+	depends on ARM || ARM64 || COMPILE_TEST
+	depends on !GENERIC_ATOMIC64    # for IOMMU_IO_PGTABLE_LPAE
+	depends on MMU
+	select DRM_SCHED
+	select IOMMU_SUPPORT
+	select IOMMU_IO_PGTABLE_LPAE
+	select DRM_GEM_SHMEM_HELPER
+	select PM_DEVFREQ
+	select DEVFREQ_GOV_SIMPLE_ONDEMAND
+	help
+	  DRM driver for ARM Mali Midgard (T6xx, T7xx, T8xx),
+	  Bifrost (G3x, G5x, G7x) and ARM Mali Valhall (G57) GPUs.
+
+config AW_DRM_LIMA
+	tristate "LIMA (AW DRM support for ARM Mali 400/450 GPU)"
+	depends on DRM
+	depends on ARM || ARM64 || COMPILE_TEST
+	depends on MMU
+	depends on COMMON_CLK
+	depends on OF
+	select DRM_SCHED
+	select DRM_GEM_SHMEM_HELPER
+	select PM_DEVFREQ
+	select DEVFREQ_GOV_SIMPLE_ONDEMAND
+	help
+	 DRM driver for ARM Mali 400/450 GPUs.
+
+endmenu

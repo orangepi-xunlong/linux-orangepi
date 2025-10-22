@@ -1,0 +1,42 @@
+# SPDX-License-Identifier: GPL-2.0
+
+menu "USB Type-C Multiplexer/DeMultiplexer Switch support"
+
+config TYPEC_MUX_PS8743
+	tristate "Parade PS8743 Type-C cross switch driver"
+	depends on USB_SUNXI_TYPEC
+	depends on I2C
+	help
+	  Say Y or M if your system has a Parade PS8743 Type-C cross
+	  switch / mux chip found on some devices with a Type-C port.
+
+          If unsure, say N.
+
+config TYPEC_MUX_FSA4480
+	tristate "ON Semi FSA4480 Analog Audio Switch driver"
+	depends on USB_SUNXI_TYPEC
+	depends on I2C
+	select REGMAP_I2C
+	help
+	  Driver for the ON Semiconductor FSA4480 Analog Audio Switch, which
+	  provides support for muxing analog audio and sideband signals on a
+	  common USB Type-C connector.
+	  If compiled as a module, the module will be named fsa4480.
+
+config TYPEC_MUX_GPIO_GMA340
+	tristate "GPIO GMA340 mux for USB Type-C applications"
+	help
+	  Say Y or M if your system uses a GPIO GMA340 mux for managing the
+	  connected state and the swapping of the tx rx lines in a Type-C port.
+
+		  If unsure, say N.
+
+config TYPEC_MUX_SUNXI_PHY_SWITCHER
+	tristate "Allwinner Mux/Switcher based on external PHY"
+	help
+	  Say Y or M if switch / mux baed on external PHY for hardware design is need,
+	  to manager orientation or mux state for some devices with a Type-C port.
+
+		  If unsure, say N.
+
+endmenu

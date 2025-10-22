@@ -1,0 +1,28 @@
+# SPDX-License-Identifier: GPL-2.0-only
+
+menu "sunxi dsufreq Drivers"
+	depends on AW_BSP
+
+config AW_SUNXI_DSUFREQ
+	tristate "Allwinner dsufreq based sunxi cpufreq driver"
+	depends on AW_CPUFREQ_DT
+	help
+	  This adds the dsufreq based CPUFreq driver for Allwinner SoC.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called sunxi-dsufreq.
+
+config AW_SUNXI_DSUFREQ_TEST
+        tristate "Generic test for dsufreq test driver"
+        help
+          This adds a dsu driver for frequency management.
+
+          If in doubt, say N.
+
+config AW_SUNXI_DSUFREQ_ADJUST
+	bool "trigger dsu frequency scaling"
+	default n
+	help
+	  perform a cpu frequency adjustment.
+
+endmenu

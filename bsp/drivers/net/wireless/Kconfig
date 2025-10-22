@@ -1,0 +1,23 @@
+menu "Wireless LAN"
+	depends on !S390
+	depends on NET
+
+if WLAN
+
+source "bsp/drivers/net/wireless/bcmdhd/Kconfig"
+source "bsp/drivers/net/wireless/rtl8188fu/Kconfig"
+source "bsp/drivers/net/wireless/rtl8723cs/Kconfig"
+source "bsp/drivers/net/wireless/rtl8723ds/Kconfig"
+source "bsp/drivers/net/wireless/rtl8723du/Kconfig"
+source "bsp/drivers/net/wireless/rtl8822bs/Kconfig"
+source "bsp/drivers/net/wireless/rtl8822cu/Kconfig"
+source "bsp/drivers/net/wireless/rtl8852bs/Kconfig"
+source "bsp/drivers/net/wireless/xr819/Kconfig"
+source "bsp/drivers/net/wireless/xr829/Kconfig"
+source "bsp/drivers/net/wireless/uwe5622/Kconfig"
+source "bsp/drivers/net/wireless/aic8800/Kconfig"
+source "bsp/drivers/net/wireless/atbm6023is/Kconfig"
+source "bsp/drivers/net/wireless/ssv6158/Kconfig"
+endif
+
+endmenu

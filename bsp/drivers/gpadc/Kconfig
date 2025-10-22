@@ -1,0 +1,17 @@
+# SPDX-License-Identifier: GPL-2.0-only
+#
+# GPADC drivers configuration
+#
+
+menu "General Purpose ADC Drivers"
+	depends on AW_BSP
+
+config AW_GPADC
+        tristate "GPADC Support for Allwinner SoCs"
+	select INPUT_EVDEV
+        default n
+        help
+          If you say Y here, you'll get support for the GPADC
+	  (General Purpose ADC) on Allwinner SoCs.
+
+endmenu

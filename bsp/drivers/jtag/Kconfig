@@ -1,0 +1,20 @@
+# SPDX-License-Identifier: GPL-2.0-only
+menu "JTAG Drivers"
+	depends on AW_BSP
+
+config AW_SOFT_JTAG_MASTER
+	tristate "Allwinner Soft JTAG Master Drivers"
+	help
+	  Support for Allwinner Soft JTAG Master driver.
+
+	  To compile this driver as a module, choose M here. The module
+	  will be called sunxi-soft-jtag.ko.
+
+config AW_JTAG_MASTER
+	tristate "Allwinner JTAG Master Drivers"
+	help
+	  Support for Allwinner JTAG Master driver.
+
+	  To compile this driver as a module, choose M here. The module
+	  will be called sunxi-jtag.ko.
+endmenu

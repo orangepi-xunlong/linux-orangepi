@@ -1,0 +1,67 @@
+# SPDX-License-Identifier: GPL-2.0-only
+menu "Allwinner's Debugging Options"
+	depends on AW_BSP
+
+config AW_DEBUG_LOCK
+	bool "One-key LOCK DEBUG"
+	select DETECT_HUNG_TASK
+	select DEBUG_RT_MUTEXES
+	select DEBUG_MUTEXES
+	select DEBUG_WW_MUTEX_SLOWPATH
+	select DEBUG_SPINLOCK
+	select DEBUG_LOCK_ALLOC
+	select PROVE_LOCKING
+	select LOCKDEP
+	select LOCK_STAT
+	select DEBUG_LOCKDEP
+	select DEBUG_ATOMIC_SLEEP
+	select DEBUG_PREEMPT
+	select AW_DEBUG_SPINLOCK
+	help
+	  Support one-key lock debug.
+	  Say Y here, you can enable the lock debug functions at one time.
+
+config AW_DEBUG_SPINLOCK
+	bool "Spinlock Debug Tools by Allwinner"
+	help
+	  Support spin_lock debug.
+	  Say Y here, you can enable the lock debug functions.
+
+config AW_DEBUG_MEM
+	bool "One-key MEMORY DEBUG"
+	select DEBUG_PAGEALLOC
+	select DEBUG_PAGEALLOC_ENABLE_DEFAULT
+	select PAGE_OWNER
+	select PAGE_POISONING
+	select DEBUG_WX
+	select SLUB_DEBUG_ON
+	select SLUB_STATS
+	select DEBUG_KMEMLEAK
+	select SCHED_STACK_END_CHECK
+	select DEBUG_VM
+	help
+	  Support one-key memory debug.
+	  Say Y here, you can enable the memory debug functions at one time.
+
+config AW_DEBUG_FTRACE
+	bool "One-key FTRACE"
+	select BOOTTIME_TRACING
+	select FUNCTION_TRACER
+	select FUNCTION_PROFILER
+	select FTRACE_SYSCALLS
+	help
+	  Support one-key ftrace.
+	  Say Y here, you can enable the ftrace functions at one time.
+
+config AW_REG_VERIFY
+	bool "Enable Write-And-Verify When Accessing Registers"
+	default n
+	help
+	  Enable Write-And-Verify operation when accessing registers.
+	  This is useful when debugging on unstable prototype platforms such as FPGA.
+
+config AW_LOG_VERBOSE
+	bool "Verbose AW log"
+	help
+	  Enable verbose logging mode for the Allwinner log system.
+endmenu

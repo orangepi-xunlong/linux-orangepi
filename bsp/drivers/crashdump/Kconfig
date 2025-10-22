@@ -1,0 +1,33 @@
+# SPDX-License-Identifier: GPL-2.0-only
+
+menu "CRASHDUMP Drivers"
+
+menuconfig AW_CRASHDUMP
+	tristate "Allwinner Crash Dump Support"
+	depends on ARCH_SUN8I || ARCH_SUN50I || ARCH_SUN55I || ARCH_SUN60I || ARCH_SUN65I
+	depends on AW_BSP
+	default n
+	help
+	  Say Y here to enable the sunxi crash dump support.
+	  sunxi dump help to dump all dram area for crash tool.
+
+if AW_CRASHDUMP
+config PANIC_DEBUG
+	tristate "Allwinner Panic Debug Support"
+	depends on AW_CRASHDUMP
+	default n
+	help
+	  Say Y here to enable the sunxi panic debug support.
+	  If unsure, say N.
+
+config AW_CRASHDUMP_KEY
+	bool "Allwinner Crash Dump Key Support"
+	depends on AW_CRASHDUMP && AW_LRADC && AW_INPUT_AXP2101_PEK
+	default y
+	help
+	  Say Y here to enable the sunxi panic debug support.
+	  If unsure, say N.
+
+endif
+
+endmenu

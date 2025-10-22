@@ -1,0 +1,44 @@
+# SPDX-License-Identifier: GPL-2.0
+
+config AW_NNA_VIP
+	depends on (ARCH_SUNXI)
+	tristate "aw nna vip driver"
+	default n
+	select DMA_SHARED_BUFFER
+	help
+	 Choose Y to enable aw nna vip driver
+
+choice
+	prompt "Select driver version"
+	depends on (AW_NNA_VIP)
+	config NNA_VIP1
+		bool "vip version 1"
+		help
+		 This is vip version 1
+	config NNA_VIP2
+		bool "vip version 2"
+		help
+		 This is vip version 2
+endchoice
+
+config NPU_USER_IOMMU
+	depends on (AW_NNA_VIP)
+	tristate "NPU Use IOMMU"
+	default n
+	help
+	 Choose M to enable NPU Use IOMMU
+
+config NPU_SET_CLK_VOL
+	depends on (AW_NNA_VIP)
+	tristate "NPU SET CLK VOL"
+	default n
+	help
+	 Choose M to enable NPU Use IOMMU
+
+#if NNA_VIP1
+#source "bsp/drivers/npu/aw_nna_vip/vip1/Kconfig"
+#endif
+
+#if NNA_VIP2
+#source "bsp/drivers/npu/aw_nna_vip/vip2/Kconfig"
+#endif

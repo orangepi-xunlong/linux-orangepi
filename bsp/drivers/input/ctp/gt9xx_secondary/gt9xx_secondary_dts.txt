@@ -1,0 +1,89 @@
+Goodix GT9xx series touch controller
+
+Required properties:
+
+ - compatible		: Should be "goodix,gt9xx", compatible with the
+			  of_match_table defined in driver.
+ - reg			: I2C slave address of the device.
+ - interrupt-parent	: Parent of interrupt.
+ - interrupts		: Configuration of touch panel  interrupt controller.
+ - irq-gpio		: Interrupt gpio which is to provide interrupts to
+			  host, same as "interrupts" node.
+ - rst-gpio		: Reset gpio to control the reset of chip.
+
+ - irq-flags = <2>;	: 1 for rising edge trigger, 2 for failing edge trigger
+
+Optional properties:
+
+ - vdd_ana-supply	: Power supply needed to power up the device, when use
+			  external regulator, do not add this property.
+
+ - vcc_i2c-supply	: Power source required to power up i2c bus.
+			  GT9xx series can provide 1.8V from internal
+			  LDO, add this properties base on hardware design.
+ - pinctrl-names	: Pinctrl related properties, generally this is used
+			  for enable irq-gpio output function.
+ - touchscreen-max-id	: generally no need to change this value keep the default
+			  is OK, if you want support active pen this value must
+			  no less then 11.
+ - touchscreen-key-map	: Specify the touch panel key code if you want support
+			  touch buttons on the device surface.
+ - goodix,int-sync	: Set this with 1 if you use non-fixed I2C address.
+ - goodix,esd-protect	: Start ESD check function when driver installed.
+ - goodix,auto-update-cfg : Update config before firmware update.
+ - goodix,power-off-sleep : Power off when enter sleep mode.
+ - goodix,pen-suppress-finger : Set to 1 if you want suppress finger touch point
+				when there have a pen detected.
+ - goodix,driver-send-cfg : send goodix,cfg-group to touchsrceen when it set to 1
+ - goodix,send-cfg_id	: whitch cfg-groupX to use, if no set, use sensor ID
+ - goodix,cfg-groupX	: Touch screen controller config data group X, where X
+			  for dts goodix,send-cfg_id, if not set,use represent sensor ID.
+		 	  Driver supports maximum six config groups. driver
+			  will select config group depending on sensor id.
+ - goodix,swap-x2y		: swap x y when report input event.
+ - goodix,revert_x		: x = touchscreen-size-x -x when input event.
+ - goodix,revert_y		: y = touchscreen-size-y -y when input event.
+
+Example:
+
+gt9xx@5d {
+	compatible = "goodix,gt9xx";
+	reg = <0x5d>;
+	status = "okay";
+	interrupt-parent = <&msm_gpio>;
+	interrupts = <13 0x2800>;
+	pinctrl-names = "default", "int-output-low","int-output-high", "int-input";
+	pinctrl-0 = <&ts_int_default>;
+	pinctrl-1 = <&ts_int_output_low>;
+	pinctrl-2 = <&ts_int_output_high>;
+	pinctrl-3 = <&ts_int_input>;
+
+	reset-gpios = <&msm_gpio 12 0x0>;
+	irq-gpios = <&msm_gpio 13 0x2800>;
+	irq-flags = <2>;
+
+	touchscreen-max-id = <11>;
+	touchscreen-size-x = <1080>;
+	touchscreen-size-y = <1920>;
+	touchscreen-max-w = <512>;
+	touchscreen-max-p = <512>;
+	touchscreen-key-map = <172>, <158>; /*KEY_HOMEPAGE=172, KEY_BACK=158，KEY_MENU=139*/
+
+	goodix,slide-wakeup = <0>;
+	goodix,type-a-report = <0>;
+	goodix,driver-send-cfg = <0>;
+	goodix,send-cfg-id = <0>;
+	goodix,resume-in-workqueue = <0>;
+	goodix,int-sync = <1>;
+	goodix,swap-x2y = <0>;
+	goodix,revert_x = <0>;
+	goodix,revert_y = <0>;
+	goodix,esd-protect = <1>;
+	goodix,auto-update-cfg = <0>;
+	goodix,power-off-sleep = <0>;
+	goodix,pen-suppress-finger = <0>;
+	goodix,cfg-group0 = [
+		53 D0 02 00 05 05 F5 D5 21 48 2D 0F 5A 41 0E 05 00 00 32 32 20 00 05 14 14 1A 14 8B 2B 00
+	];
+};
+

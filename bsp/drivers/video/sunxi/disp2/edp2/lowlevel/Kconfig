@@ -1,0 +1,15 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+config AW_EDP_PHY_USED
+    def_bool n
+    depends on (EDP2_AW_DISP2)
+    default n
+    help
+        Selected when aw edp phy used.
+
+config DISP_PHY_INNO_EDP_1_3
+    tristate "support innosilicon eDP 1.3 phy"
+    depends on (EDP2_AW_DISP2)
+    select AW_EDP_PHY_USED
+    default n
+    help
+        Innosilicon eDP 1.3 phy for Allwinner eDP module.

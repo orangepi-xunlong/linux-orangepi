@@ -1,0 +1,42 @@
+# SPDX-License-Identifier: GPL-2.0-only
+# Generic Trusted Execution Environment Configuration
+
+menu "AW andes adaption"
+
+config AW_ANDES_DMA_ADAPT
+	bool "andes dma adapter"
+
+if AW_ANDES_DMA_ADAPT
+
+choice
+	prompt "adapter type"
+	default AW_ANDES_DMA_OPS
+
+config AW_ANDES_NO_DIRECT_DMA
+	bool "direct dma api"
+	#prohibit default non-cache alloc
+	select ARCH_HAS_UNCACHED_SEGMENT
+	select ARCH_HAS_DMA_COHERENT_TO_PFN
+
+config AW_ANDES_DMA_OPS
+	bool "overwrite dma ops"
+	depends on DMA_CMA
+	help
+	 "overwrite default andes dummy dma ops for drivers"
+
+
+endchoice
+endif
+
+config AW_ANDES_CMA_NON_CACHE
+	depends on AW_BSP
+	depends on PMA
+	depends on DMA_CMA
+	bool "set cma memory non_cache for devices"
+	default n
+	help
+	  This help non-cache memory using with andes platform
+
+endmenu
+
+

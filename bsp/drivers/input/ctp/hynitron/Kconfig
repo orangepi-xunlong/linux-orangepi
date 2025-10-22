@@ -1,0 +1,11 @@
+#
+# Touchscreen driver configuration
+#
+config TOUCHSCREEN_HYNITRON_TS
+    tristate "hynitorn Ts for TOUCHSCREEN"
+    depends on I2C
+    select AW_INPUT_SENSORINIT
+    default n
+    help
+      Say Y here if you have hynitorn touch panel.
+      If unsure, say N.

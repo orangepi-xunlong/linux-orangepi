@@ -1,0 +1,150 @@
+# SPDX-License-Identifier: GPL-2.0-only
+menu "DRM Drivers"
+	depends on AW_BSP
+
+config AW_DRM
+	tristate "DRM Support for Allwinner SoCs"
+	depends on DRM && AW_BSP
+	select DRM_KMS_HELPER
+	select DRM_KMS_CMA_HELPER
+	select DRM_KMS_DMA_HELPER
+	select DRM_GEM_DMA_HELPER
+	select DRM_DISPLAY_HELPER
+	select VIDEOMODE_HELPERS
+	default n
+
+config AW_DRM_DE
+	bool "Support Sunxi Display_Engine(DE)"
+	depends on AW_DRM
+	default y
+	help
+		If you want use DE of Version 35X, select it.
+
+# remove it after both tcon_lcd/tcon_tv ready?
+config AW_DRM_TCON
+	bool "Support Timing Controller(TCON)"
+	depends on AW_DRM
+	default y
+	help
+		If you want use TCON, select it.
+
+config AW_DRM_BOOT_COLORBAR
+	int "Boot which Colorbar when Kernel Boot."
+	depends on AW_DRM_TCON
+	default 0
+	range 0 7
+	help
+		If you need Colobar in kernel boot, select it.
+
+config AW_DRM_TCON_TV
+	bool "Support Timing Controller(TCON_TV)"
+	depends on AW_DRM
+	default y
+	help
+		If you want use TCON_TV, select it.
+
+config AW_DRM_TCON_TOP
+	bool "Support TCON TOP"
+	depends on AW_DRM
+	default y
+	help
+		If you want use TCON TOP, select it.
+
+config AW_DRM_LVDS
+	bool "Support LVDS Output"
+	depends on AW_DRM
+	select GENERIC_PHY
+	default n
+	help
+		If you want use lvds, select it.
+
+config AW_DRM_RGB
+	bool "Support RGB Output"
+	depends on AW_DRM
+	select GENERIC_PHY
+	default n
+	help
+		If you want use rgb, select it.
+
+config AW_DRM_DSI
+	bool "Support DSI Output"
+	depends on AW_DRM
+	select DRM_MIPI_DSI
+	select GENERIC_PHY
+	select GENERIC_PHY_MIPI_DPHY
+	default n
+	help
+		If you want lcd-dsi output for drm driver, select it.
+
+config AW_DRM_HDMI_TX
+	tristate "Support Hdmi Output"
+	depends on AW_DRM
+	select DRM_DISPLAY_HDCP_HELPER
+	select DRM_DISPLAY_HDMI_HELPER
+	default y
+	help
+		If you want hdmi output for drm driver, select it.
+
+config AW_DRM_HDMI14
+	bool "Support HDMI1.4 Output"
+	depends on AW_DRM_HDMI_TX
+	default n
+	help
+		If you want hdmi1.4 output for drm driver, select it.
+
+config AW_DRM_HDMI20
+	bool "Support HDMI2.0 Output"
+	depends on AW_DRM_HDMI_TX
+	default y
+	select CEC_CORE
+	select CEC_NOTIFIER
+	help
+		If you want hdmi2.0 output for drm driver, select it.
+
+menuconfig AW_DRM_EDP
+	bool "Support eDP Output"
+	depends on AW_DRM
+	select VIDEOMODE_HELPERS
+	default n
+	help
+		If you want edp/dp output for drm driver, select it.
+
+config AW_DRM_EDP_CONTROLLER_USED
+    def_bool n
+    depends on (AW_DRM_EDP)
+    default n
+    help
+        Selected when aw edp phy used.
+
+config AW_DRM_DP_HDCP
+    def_bool n
+	bool "Support HDCP For DisplayPort"
+    depends on (AW_DRM_EDP)
+    default n
+    help
+        Selected when hdcp need authenticate by software.
+
+config AW_DRM_INNO_EDP13
+	bool "Support inno edp 1.3 controller"
+	depends on AW_DRM_EDP
+    select AW_DRM_EDP_CONTROLLER_USED
+    default n
+	help
+		If you want inno edp 1.3 as edp controller, select it.
+
+config AW_DRM_TRILINEAR_EDP14
+	bool "Support trilinear edp 1.4 controller"
+	depends on AW_DRM_EDP
+    select AW_DRM_EDP_CONTROLLER_USED
+    select AW_DRM_DP_HDCP
+	default n
+	help
+		If you want trilinear edp 1.4 as edp controller, select it.
+
+menu "sunxi drm panels select"
+	depends on AW_DRM
+source "bsp/drivers/drm/panel/Kconfig"
+endmenu
+source "bsp/drivers/drm/phy/Kconfig"
+
+endmenu

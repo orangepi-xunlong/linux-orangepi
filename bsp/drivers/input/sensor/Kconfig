@@ -1,0 +1,26 @@
+# SPDX-License-Identifier: GPL-2.0
+#
+# Makefile for the sensor drivers.
+#
+# Each configuration option enables a list of files.
+
+
+menuconfig AW_INPUT_SENSOR
+    bool "Sensor Input Device Support"
+    help
+      Say Y here, and a list of supported sensor will be displayed.
+      This option doesn't affect the kernel.
+
+      If unsure, say Y.
+
+if AW_INPUT_SENSOR
+
+source "bsp/drivers/input/sensor/sc7a20/Kconfig"
+source "bsp/drivers/input/sensor/stk3x1x/Kconfig"
+source "bsp/drivers/input/sensor/mir3da/Kconfig"
+source "bsp/drivers/input/sensor/msa/Kconfig"
+source "bsp/drivers/input/sensor/mmc5603/Kconfig"
+source "bsp/drivers/input/sensor/bmi323/Kconfig"
+source "bsp/drivers/input/sensor/qmi8658/Kconfig"
+
+endif

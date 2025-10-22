@@ -1,0 +1,15 @@
+# SPDX-License-Identifier: GPL-2.0-only
+
+menu "ATA Drivers"
+	depends on AW_BSP
+
+config AW_AHCI
+	tristate "AHCI SATA Support for Allwinner SoCs"
+	depends on AW_BSP && OF
+	select ATA
+	select SATA_AHCI_PLATFORM
+	help
+	  Enable SATA controllers on Allwinner SoCs.
+
+endmenu
+

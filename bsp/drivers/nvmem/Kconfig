@@ -1,0 +1,17 @@
+# SPDX-License-Identifier: GPL-2.0-only
+menu "NVMEM Drivers"
+	depends on AW_BSP
+
+config NVMEM_AW_SID
+	tristate "SID Support for Allwinner SoCs"
+	depends on AW_BSP
+	select NVMEM
+	help
+	  This is a driver for the 'security ID' available on various Allwinner
+	  devices.
+
+	  This driver can also be built as a module. If so, the module
+	  will be called nvmem_sunxi_sid.
+
+endmenu
+

@@ -1,0 +1,58 @@
+# SPDX-License-Identifier: GPL-2.0-only
+
+menu "MBUS Drivers"
+	depends on AW_BSP
+
+config AW_MBUS_SUN50IW9
+	tristate "Mbus Support for Allwinner SoCs SUN50IW9"
+	depends on ARCH_SUN50IW9
+	select HWMON
+	help
+	  Driver supporting the mbus for sunxi platforms of sun50iw9.
+
+config AW_MBUS_SUN8IW11
+	tristate "Mbus Support for Allwinner SoCs SUN8IW11"
+	depends on ARCH_SUN8IW11
+	select HWMON
+	help
+	  Driver supporting the mbus for sunxi platforms of sun8iw11.
+
+config AW_MBUS_SUN8IW18
+	tristate "Mbus Support for Allwinner SoCs SUN8IW18"
+	depends on ARCH_SUN8IW18
+	select HWMON
+	help
+	  Driver supporting the mbus for sunxi platforms of sun8iw18.
+
+config AW_MBUS_SUN8IW20
+	tristate "Mbus Support for Allwinner SoCs SUN8IW20"
+	depends on ARCH_SUN8IW20
+	select HWMON
+	help
+	  Driver supporting the mbus for sunxi platforms of sun8iw20.
+
+config AW_MBUS_SUN8IW21
+	tristate "Mbus Support for Allwinner SoCs SUN8IW21"
+	depends on ARCH_SUN8IW21
+	select HWMON
+	help
+	  Driver supporting the mbus for sunxi platforms of sun8iw21.
+
+menuconfig AW_MBUS_GENERIC
+	bool "Mbus Support for Allwinner SoCs"
+	default n
+
+if AW_MBUS_GENERIC
+
+config AW_MBUS_PRI_IN_ACPR_CFG
+	bool "master priority by ACPR reg"
+	default n
+	help
+	  Some platform implement master access priority
+	  in register MBUS_MAST_CFG0_REG(n)
+	  register: Master Access Priority, 0:low, 1:high
+
+endif
+
+endmenu
+

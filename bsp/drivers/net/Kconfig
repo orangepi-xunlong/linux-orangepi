@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: GPL-2.0
+
+menu "Network Device Drivers"
+	depends on NET
+
+if NETDEVICES
+
+source "bsp/drivers/net/wireless/Kconfig"
+
+endif
+
+endmenu

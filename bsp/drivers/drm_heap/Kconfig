@@ -1,0 +1,13 @@
+# SPDX-License-Identifier: GPL-2.0-only
+# Generic Trusted Execution Environment Configuration
+
+menu "DRM HEAP Drivers"
+	depends on AW_BSP
+config AW_DRM_HEAP
+	tristate "Allwinner drm heap Allwinner"
+	default n
+	select TEE
+	help
+	  This implements a interface for sunxi drm management
+
+endmenu

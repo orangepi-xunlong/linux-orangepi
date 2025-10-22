@@ -1,0 +1,15 @@
+#
+# Goodix GT82x Touchscreen driver
+#
+config TOUCHSCREEN_GT82X
+	tristate "gt82x touchscreen driver"
+	default n
+	depends on I2C
+	select AW_INPUT_SENSORINIT
+	help
+	  gt813, gt827, gt828 touchscreen driver
+	  Say Y here if you have a Goodix GT82x touchscreen
+	  controller.
+
+	  If build module, say M.
+	  If unsure, say N.

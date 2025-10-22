@@ -1,0 +1,24 @@
+&twi2 {
+	clock-frequency = <400000>;
+	pinctrl-0 = <&twi2_pins_default>;
+	pinctrl-1 = <&twi2_pins_sleep>;
+	pinctrl-names = "default", "sleep";
+	/* For stability and backwards compatibility, we recommend setting ‘twi_drv_used’ to 1 */
+	twi_drv_used = <1>;
+	twi-supply = <&reg_bldo2>;
+	status = "okay";
+	focaltech@38{
+		compatible = "focaltech,fts";
+		reg = <0x38>;
+		status = "okay";
+		focaltech,irq-gpio = <&pio PD 18 GPIO_ACTIVE_LOW>;
+		focaltech,reset-gpio = <&pio PD 19 GPIO_ACTIVE_LOW>;
+		focaltech,max-touch-number = <10>;
+		focaltech,display-coords =  <0 0 1200 2000>;
+		focaltech,swap-x2y = <0>;
+		focaltech,revert_x = <0>;
+		focaltech,revert_y = <0>;
+		vcc_i2c-supply = <&reg_dldo2>;
+	};
+};
+

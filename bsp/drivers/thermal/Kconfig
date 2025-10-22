@@ -1,0 +1,47 @@
+# SPDX-License-Identifier: GPL-2.0-only
+menu "Thermal Drivers"
+	depends on AW_BSP
+
+config AW_THERMAL
+	tristate "Allwinner Thermal Driver"
+	depends on AW_BSP
+	depends on HAS_IOMEM
+	depends on NVMEM
+	depends on OF
+	select THERMAL
+	help
+	  Support for the sunxi thermal sensor driver into the Linux thermal
+	  framework.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called sunxi-thermal.
+
+config AW_CPUFREQ_CLAMP
+	tristate "Allwinner Cpufreq Clamp Driver"
+	depends on AW_THERMAL
+	depends on ARM_AW_SUN50I_CPUFREQ_NVMEM
+	help
+	  Support for the sunxi cpufreq clamp driver.
+
+	  If in doubt, say N.
+
+config AW_THERMAL_CRITICAL_HANDLER
+	bool "suspend to handle critical temperature"
+	default n
+	depends on AW_THERMAL
+	depends on PM_SLEEP
+	help
+	  Support critical callback for the thermal zone device ops.
+	  Trigger suspend when the temperature reachs the critical trip.
+
+config AW_THERMAL_REWRITE_CRITICAL_OPS
+	bool "rewrite critical ops"
+	default n
+	depends on AW_THERMAL_CRITICAL_HANDLER
+	help
+	  Say Y here to rewrite the critical member of thermal_zon_device_ops struct.
+
+	  This option is used because the origin kernel does not allow interfaces in thermal_of.c to rewrite critical callback.
+
+endmenu
+

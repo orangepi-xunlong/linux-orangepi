@@ -1,0 +1,10 @@
+menu "GPU Drivers"
+	depends on AW_BSP
+
+config AW_GPU_TYPE
+	string "The GPU Type"
+	default "None"
+	help
+	  The GPU type used on the platform.
+
+endmenu

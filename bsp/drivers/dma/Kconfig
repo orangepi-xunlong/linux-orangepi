@@ -1,0 +1,15 @@
+# SPDX-License-Identifier: GPL-2.0-only
+
+menu "DMA Drivers"
+	depends on AW_BSP
+
+config AW_DMA
+	tristate "DMA Support for Allwinner SoCs"
+	select DMADEVICES
+	select DMA_ENGINE
+	select DMA_VIRTUAL_CHANNELS
+	help
+	  Support for the DMA Controller for Allwinner SoCs.
+
+endmenu
+

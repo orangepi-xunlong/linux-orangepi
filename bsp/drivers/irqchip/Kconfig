@@ -1,0 +1,29 @@
+# SPDX-License-Identifier: GPL-2.0
+#
+# For a description of the syntax of this configuration file,
+# see Documentation/kbuild/kconfig-language.rst.
+
+menu "IRQ-Chip Drivers"
+	depends on AW_BSP
+
+config AW_WAKEUPGEN
+	tristate "sunxi wakeup irq chip"
+	depends on AW_BSP
+	select IRQCHIP
+	select IRQ_DOMAIN_HIERARCHY
+	help
+	   This enables support for sunxi wakeupgen irq domain.
+
+	   If you don't know what to do here, say Y.
+
+config AW_SUN8I_NMI
+	tristate "sun8i nmi irq chip"
+	depends on AW_BSP
+	select IRQCHIP
+	select IRQ_DOMAIN_HIERARCHY
+	help
+	   This enables support for sun8i nmi irq domain.
+
+	   If you don't know what to do here, say Y.
+
+endmenu

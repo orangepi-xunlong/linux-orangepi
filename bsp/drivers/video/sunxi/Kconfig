@@ -1,0 +1,325 @@
+#
+# Video configuration for sunxi platform
+#
+
+menu "Video Drivers"
+	depends on FB
+
+config AW_FB_CONSOLE
+	bool "Framebuffer Console Support(sunxi)"
+	select FB_CFB_FILLRECT
+	select FB_CFB_COPYAREA
+	select FB_CFB_IMAGEBLIT
+	default n
+	help
+	  Frame buffer driver for sunxi based boards.
+
+config AW_DISP2
+	tristate "DISP Driver Support(sunxi-disp2)"
+#	depends on (ARCH_SUNXI)
+	depends on AW_PWM
+	default y
+	select DMA_SHARED_BUFFER
+	help
+	  Display driver for sunxi based boards.
+
+config AW_DISP2_PQ
+	bool "Support PQ driver"
+	depends on (AW_DISP2)
+	default y
+	help
+	  If you want to support PQ driver, select it.
+
+choice
+    prompt "DISP2 Framebuffer rotation support"
+	default AW_DISP2_FB_DISABLE_ROTATE
+
+config AW_DISP2_FB_DISABLE_ROTATE
+	bool "Disable rotation"
+	depends on (AW_DISP2)
+	help
+	  Do not use framebuffer rotation
+
+config AW_DISP2_FB_ROTATION_SUPPORT
+	bool "Software rotation support"
+	depends on (AW_DISP2)
+	help
+	  Framebuffer software rotation on the top of disp2.
+
+config AW_DISP2_FB_HW_ROTATION_SUPPORT
+	bool "Hardware(G2D) rotation support"
+	depends on (AW_DISP2 && AW_G2D)
+	help
+	  Framebuffer hardware(G2D) rotation on the top of disp2.
+
+endchoice
+
+config AW_DISP2_FB_DECOMPRESS_LZMA
+	bool "Framebuffer show bootlogo from lzma file"
+	depends on (AW_DISP2)
+	default n
+	select DECOMPRESS_LZMA
+	help
+	  Show bootlogo from lzma file.
+
+menuconfig AW_HDMI_TX_DISP2
+	tristate "HDMI Tx Driver Support(sunxi-disp2)"
+	depends on (AW_DISP2)
+	default y
+	help
+	  hdmi tx driver for sunxi based boards.
+
+menuconfig AW_HDMI_DISP2
+	tristate "HDMI1.4 Driver Support(sunxi-disp2)"
+	depends on (AW_DISP2 && AW_HDMI_TX_DISP2)
+	default n
+	help
+	  hdmi 1.4 driver for sunxi based boards.
+
+menuconfig AW_HDMI2_DISP2_SUNXI
+	tristate "HDMI2.0 Driver Support(sunxi-disp2)"
+	depends on (AW_DISP2 && AW_HDMI_TX_DISP2)
+	default n
+	help
+	  hdmi 2.0 driver for sunxi based boards.
+
+choice
+	depends on (AW_HDMI2_DISP2_SUNXI)
+	prompt "HDMI2.0 PHY Model"
+config AW_AWPHY
+	bool "Allwinner PHY"
+	depends on AW_HDMI2_DISP2_SUNXI
+	help
+	  Use allwinner phy to show
+config AW_INNOPHY
+	bool "Innosilicon PHY"
+	depends on AW_HDMI2_DISP2_SUNXI
+	help
+	  Use Innosilicon phy to show
+config AW_SYNOPSYSPHY
+	bool "Synopsys PHY"
+	depends on AW_HDMI2_DISP2_SUNXI
+	help
+	  Use Synopsys phy to show
+config AW_INNOPHY_FPGA
+	bool "Innosilicon PHY FPGA"
+	depends on AW_HDMI2_DISP2_SUNXI
+	help
+	  Use Innosilicon phy to show for fpga
+endchoice
+
+menuconfig AW_HDMI2_HDCP_SUNXI
+	bool "HDMI2.0 HDCP"
+	depends on (AW_HDMI2_DISP2_SUNXI)
+	default n
+	help
+	  Say Y here if you want to enable hdcp function.
+	  Say N here if you want to disable hdcp function.
+	  If unsure, say N.
+
+config AW_HDMI2_HDCP22_SUNXI
+	bool "HDMI2.0 HDCP2.2"
+	depends on (AW_HDMI2_HDCP_SUNXI && AW_HDMI2_DISP2_SUNXI)
+	default n
+	help
+	  Say Y here if you want to enable hdcp2.2 function.
+	  Say N here if you want to disable hdcp2.2 function.
+	  If unsure, say N.
+
+menuconfig AW_HDMI2_CEC_SUNXI
+	bool "HDMI2.0 CEC"
+	depends on (AW_HDMI2_DISP2_SUNXI)
+	default n
+	select CEC_CORE
+	select CEC_NOTIFIER
+	help
+	  Say Y here if you want to enable cec function.
+	  Say N here if you want to disable cec function.
+	  If unsure, say N.
+
+menuconfig AW_HDMI2_LOG_BUFFER
+	bool "HDMI2.0 Log Buffer"
+	depends on AW_HDMI2_DISP2_SUNXI
+	default y
+	help
+	  Say Y here if you want to enable hdmi2.0 log buffer.
+	  Say N here if you want to disable hdmi2.0 log buffer.
+	  If unsure, say N
+
+config AW_HDMI2_LOG_BUFFER_SIZE
+	int "HDMI2.0 Log Buffer Size"
+	depends on AW_HDMI2_LOG_BUFFER
+	default 65535
+	help
+	  The size of logbuffer is inherited from uboot.
+	  If uboot is not defined, the currently defined size will be used.
+
+config AW_HDMI_FPGA_INNOPHY_DISP2
+	tristate "HDMI Fpga Innoy Driver Support(sunxi-disp2)"
+	depends on (AW_DISP2)
+	default n
+	help
+	  Hdmi fpga innophy driver for sunxi based boards.
+
+config HDMI_EP952_AW_DISP2
+	tristate "HDMI EP952 Driver Support(sunxi-disp2)"
+	depends on (AW_DISP2)
+	default n
+	help
+	  Hdmi ep952 driver for sunxi based boards.
+
+config HDMI2_FREQ_SPREAD_SPECTRUM
+  bool "new frequency spread spectrum(hershey) of sunxi"
+  depends on AW_HDMI2_DISP2_SUNXI
+  default n
+  help
+  Say Y here if you want to use new frequency spread spectrum(hershey) of sunxi.
+  Say N here if you do NOT want to new frequency spread spectrum of sunxi.
+  If unsure, say N
+
+config TV_AW_DISP2
+	 tristate "TV Driver Support(sunxi-disp2)"
+	 depends on (AW_DISP2)
+	 default n
+	 help
+	  TV driver for sunxi based boards.
+config VDPO_AW_DISP2
+	 tristate "VDPO Driver Support(sunxi-disp2)"
+	 depends on (AW_DISP2)
+	 default n
+	 help
+	  VDPO driver for sunxi based boards.
+config DISP2_TV_GM7121
+	tristate "GM7121 TV module Support(sunxi-disp2)"
+ 	depends on (AW_DISP2 && TV_AW_DISP2)
+	default n
+	help
+	  TV GM7121 support for Allwinner platforms.
+
+config EDP_AW_DISP2
+	tristate "EDP Driver Support(sunxi-disp2)"
+	depends on (AW_DISP2)
+	default n
+	help
+      EDP 1.2 driver for sunxi. Embedded Display Port is
+      a high speed display interface for embedded device.
+      DisplayPort can be used to transmit audio and video
+      simultaneously, but each one is optional and can be
+      transmitted without the other.
+
+config EDP2_AW_DISP2
+	tristate "EDP2 Driver Support(sunxi-disp2)"
+	depends on (AW_DISP2)
+	default n
+	help
+      Extended EDP driver which can support muti EDP IP
+      layout.
+
+menu "eDP panels select"
+	depends on (AW_DISP2 && EDP2_AW_DISP2)
+
+source "bsp/drivers/video/sunxi/disp2/edp2/panels/Kconfig"
+endmenu
+
+menu "eDP phy select"
+	depends on (AW_DISP2 && EDP2_AW_DISP2)
+
+source "bsp/drivers/video/sunxi/disp2/edp2/lowlevel/Kconfig"
+endmenu
+
+config DISP2_TV_AC200
+	tristate "AC200 TV module Support(sunxi-disp2)"
+	depends on (AW_DISP2 && MFD_ACX00)
+	default n
+	help
+	  TV AC200 support for Allwinner platforms.
+
+config EINK_PANEL_USED
+	bool "Eink panel used"
+	depends on (AW_DISP2 && (ARCH_SUN8IW10 || ARCH_SUN8IW15))
+	default n
+	help
+	  EINK panel support for Allwinner platforms.
+
+config EINK200_SUNXI
+	tristate "Eink Driver Version 2.0 Support"
+	depends on (AW_DISP2 && ARCH_SUN50IW10)
+	default n
+	help
+	  EINK200 support for Allwinner platforms.
+
+config AW_DISP2_BOOT_COLORBAR
+	bool "boot colorbar Support for disp driver(sunxi-disp2)"
+	depends on AW_DISP2
+	default n
+	help
+	  If true, the framebuffer will be filled by specified data
+	  to display vertical colorbar.
+
+config AW_DISP2_DEBUG
+	bool "debugfs support for disp driver(sunxi-disp2)"
+	depends on AW_DISP2
+	default n
+	help
+	  This enable debugfs support for display driver. You can
+	  get debug info or debug the driver via debugfs interface.
+
+config AW_DISP2_COMPOSER
+	bool "composer support for disp driver(sunxi-disp2)"
+	depends on AW_DISP2
+	select SYNC_FILE
+	default n
+	help
+	  This enable composer support for display driver. The composer
+	  will serve hwc only.
+config DISP2_LCD_ESD_DETECT
+	bool "ESD detect support for LCD panel"
+	depends on AW_DISP2
+	default n
+	help
+	  This enable lcd  esd detect and panel reset for display driver. User must
+	  define panel_reset and esd_check function.
+
+config LCD_FB
+	tristate "Framebuffer implementaion without display hardware of AW"
+#	depends on (ARCH_SUNXI)
+	select FB_CFB_FILLRECT
+	select FB_CFB_COPYAREA
+	select FB_CFB_IMAGEBLIT
+	select BACKLIGHT_CLASS_DEVICE
+	default n
+	help
+	  Framebuffer implementaion for LCD panel without DE and tcon
+
+config LCD_FB_ENABLE_DEFERRED_IO
+	bool "Enable LCD_FB FB_DEFERRED_IO"
+	select FB_DEFERRED_IO
+	default n
+	help
+	  Enable linux framebuffer FB_DEFERRED_IO for LCD_FB
+
+config TV_DECODER_DISPLAY
+    tristate "Enable driver of decoder display"
+	default n
+	help
+	  Enable driver of decoder display
+
+menu "LCD panels select"
+	depends on AW_DISP2
+
+source "bsp/drivers/video/sunxi/disp2/disp/lcd/Kconfig"
+endmenu
+
+menu "LCD fb panels select"
+	depends on LCD_FB
+
+source "bsp/drivers/video/sunxi/lcd_fb/panels/Kconfig"
+endmenu
+
+menu "Display engine feature select"
+	depends on AW_DISP2
+
+source "bsp/drivers/video/sunxi/disp2/disp/Kconfig"
+endmenu
+
+endmenu

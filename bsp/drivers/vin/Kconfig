@@ -1,0 +1,205 @@
+# SPDX-License-Identifier: GPL-2.0-only
+menu "VIN (camera) Drivers"
+	depends on AW_BSP
+
+config AW_VIDEO_SUNXI_VIN
+       tristate "sunxi video input (camera csi/mipi isp vipp) driver"
+	   select MEDIA_SUPPORT
+       default n
+
+config AW_SENSOR_POWER
+       tristate "sensor power in front of vin"
+       depends on AW_VIDEO_SUNXI_VIN
+       default n
+config CSI_VIN
+	tristate "v4l2 new driver for SUNXI"
+	depends on AW_VIDEO_SUNXI_VIN
+	default m
+	select VIDEOBUF2_DMA_CONTIG
+
+config ENABLE_SENSOR_FLIP_OPTION
+	bool "select sensor flip to replace vipp flip"
+	depends on AW_VIDEO_SUNXI_VIN
+	default n
+	help
+	   you cant flip in vipp when you select LBC format,
+	   so you can enable it to active sensor flip operation.
+
+config VIDEO_SUNXI_VIN_SPECIAL
+	bool "special function for vin"
+	depends on AW_VIDEO_SUNXI_VIN
+	default n
+	help
+	   if say Y, some special function will be support for
+           some scence, such as fast car reverse and so on.
+
+config CSI_CCI
+	tristate "use cci function"
+	depends on AW_VIDEO_SUNXI_VIN
+	default n
+	help
+		CCI is a hardware module in CSI. you can make it to
+		be cci or i2c in the system.
+
+if CSI_CCI
+source "bsp/drivers/vin/vin-cci/Kconfig"
+endif
+
+config FLASH
+	tristate "use flash module"
+	depends on AW_VIDEO_SUNXI_VIN
+	default m
+
+config ACTUATOR
+	tristate "use actuator module"
+	depends on AW_VIDEO_SUNXI_VIN
+	default n
+
+if ACTUATOR
+source "bsp/drivers/vin/modules/actuator/Kconfig"
+endif
+
+config SENSOR_LIST
+	tristate "sensor list for adaptive"
+	depends on AW_VIDEO_SUNXI_VIN
+	default m
+
+config BUF_AUTO_UPDATE
+	bool "buf addr update for hardware"
+	depends on AW_VIDEO_SUNXI_VIN
+	default n
+
+config VIN_LOG
+	bool "use vin log for debug"
+	depends on AW_VIDEO_SUNXI_VIN
+        depends on DYNAMIC_DEBUG
+	default y
+
+config PIPELINE_RESET
+	bool "use pipeline reset when timeout"
+	depends on AW_VIDEO_SUNXI_VIN
+	default n
+
+config MULTI_FRAME
+	bool "multi-frame interrupt mode"
+	depends on AW_VIDEO_SUNXI_VIN
+	default n
+
+config SUPPORT_ISP_TDM
+	bool "use isp for time sharing multiplex"
+	depends on AW_VIDEO_SUNXI_VIN
+	default n
+
+config TDM_LBC_EN
+	bool "tdm reduces buf size by compression"
+	depends on SUPPORT_ISP_TDM
+	default n
+
+config TDM_ONE_BUFFER
+	bool "tdm use one buffer mode"
+	depends on SUPPORT_ISP_TDM
+	default n
+	help
+		need ensure sensor vbland > 20%
+
+choice
+	depends on AW_VIDEO_SUNXI_VIN
+	prompt "select rgb mode"
+	default VIPP_YUV2RGB
+
+config SENSOR_RGB
+	bool "sensor output rgb"
+
+config VIPP_YUV2RGB
+	bool "vipp yuv to rgb"
+
+endchoice
+
+config MULTI_FRM_MERGE_INT
+	bool "multi-frame image merge interrupt"
+	depends on AW_VIDEO_SUNXI_VIN
+	default n
+
+config DISPPLAY_SYNC
+	bool "use one buffer for delay display"
+	depends on AW_VIDEO_SUNXI_VIN
+	default n
+
+config VIN_IOMMU
+	bool "use IOMMU for memery alloc"
+	depends on AW_VIDEO_SUNXI_VIN
+	default y
+
+config D3D
+	bool "ISP 3D denoise module"
+	depends on AW_VIDEO_SUNXI_VIN
+	default n
+
+config D3D_LTF_EN
+	bool "ISP 3D denoise long time frame"
+	depends on D3D
+	depends on AW_VIDEO_SUNXI_VIN
+	default n
+
+config D3D_COMPRESS_EN
+	bool "ISP 3D denoise reduces buf size by compression"
+	depends on AW_VIDEO_SUNXI_VIN
+	depends on D3D
+	default	n
+
+choice
+	depends on D3D
+	prompt "select d3d mode"
+	default D3D_PKG_MODE
+
+config D3D_PKG_MODE
+	bool "use d3d pkg mode"
+
+config D3D_LBC_MODE
+	bool "use d3d lbc mode"
+endchoice
+
+config WDR
+	bool "ISP WDR module"
+	depends on AW_VIDEO_SUNXI_VIN
+	default n
+
+config WDR_COMPRESS_EN
+	bool "ISP WDR reduces buf size by compression"
+	depends on AW_VIDEO_SUNXI_VIN
+	depends on WDR
+	default	n
+
+config SAME_I2C
+	bool "sensor same i2c addr"
+	depends on AW_VIDEO_SUNXI_VIN
+	default y
+
+config VIN_SDRAM_DFS
+	bool "use vin sdram dfs"
+	depends on AW_VIDEO_SUNXI_VIN
+	default n
+
+config CSI_SDRAM_DFS_TEST
+	bool "sensor first debug for sdram dfs"
+	depends on VIN_SDRAM_DFS
+	default n
+
+config ISP_SERVER_MELIS
+	bool "use ISP server from melis"
+	depends on AW_VIDEO_SUNXI_VIN
+	default n
+
+config VIN_INIT_MELIS
+	bool "vin and isp init in melis"
+	depends on AW_VIDEO_SUNXI_VIN
+	default n
+
+config RV_RUN_CAR_REVERSE
+	bool "special function for vin used on rv"
+	depends on VIN_INIT_MELIS && VIDEO_SUNXI_VIN_SPECIAL
+	default n
+
+source "bsp/drivers/vin/modules/sensor/Kconfig"
+
+endmenu

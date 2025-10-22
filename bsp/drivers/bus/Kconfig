@@ -1,0 +1,28 @@
+# SPDX-License-Identifier: GPL-2.0-only
+menu "Bus Drivers"
+	depends on AW_BSP
+
+config AW_NSI
+	tristate "NSI Bus Support for Allwinner SoCs"
+	depends on AW_BSP
+	help
+	  Support the NSI bus driver for Allwinner platforms.
+
+if AW_NSI
+config AW_NSI_DISTRIBUTE
+	bool "NSI is distrubute"
+	default n
+endif
+
+config AW_NPD
+	tristate "NPD Support for Allwinner SoCs"
+	depends on AW_BSP
+	help
+	  Support the NPD(NSI PMU module's register data write to DDR module)
+	  driver for Allwinner platforms.
+
+config AW_NSI_CPU_CHANNEL
+	bool "NSI have direct cpu channel"
+	default n
+
+endmenu

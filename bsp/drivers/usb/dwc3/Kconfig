@@ -1,0 +1,39 @@
+# SPDX-License-Identifier: GPL-2.0-only
+
+menu "USB DWC3 Drivers"
+	depends on AW_BSP
+
+config USB_SUNXI_DWC3
+	tristate "Allwinner USB3.0 Dual Role Controller support"
+	depends on AW_BSP
+	help
+	  Allwinner USB3.0 Dual Role Controller
+
+	  This option is of interest only to developers who need to
+	  develop on AllWinner SoC.
+
+	  If unsure, say N.
+
+config PHY_SUNXI_PLAT
+	tristate "Allwinner SoC USB PHY driver"
+	depends on USB_SUNXI_DWC3
+	depends on ARCH_SUNXI || COMPILE_TEST
+	depends on HAS_IOMEM && OF
+	depends on RESET_CONTROLLER
+	select GENERIC_PHY
+	help
+	  Enable this to support the USB3.0-capable transceiver that is
+	  part of Allwinner Platforms SoC.
+
+	  This driver controls each individual USB 2+3 PHY combo.
+
+config DWC3_SUNXI_PLAT
+	tristate "Allwinner DWC3 Platforms"
+	depends on USB_SUNXI_DWC3
+	depends on OF && COMMON_CLK
+	default USB_DWC3
+	help
+	  Support DWC3 of USB2/3 functionality in Allwinner platforms.
+	  say 'Y' or 'M' if you have one such device.
+
+endmenu

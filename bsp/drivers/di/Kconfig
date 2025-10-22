@@ -1,0 +1,57 @@
+# SPDX-License-Identifier: GPL-2.0
+menu "DI_Drivers"
+	depends on AW_BSP
+
+config AW_DI
+	tristate "DI Support for Allwinner SoCs"
+	default n
+	help
+	  Enable sunxi platform De-Interlace engine
+
+config SUNXI_DI_V1XX
+	bool "Support DI V110/120"
+	depends on (AW_DI)
+	default n
+	help
+	 Say Y here if you want to use DI110/120.
+	 Say N here if you do NOT want to use DI110/120.
+	 If unsure, say N.
+
+config SUNXI_DI_V2X
+	bool "Support DI V200"
+	depends on (AW_DI)
+	default n
+	help
+	 Say Y here if you want to use DI200.
+	 Say N here if you do NOT want to use DI200.
+	 If unsure, say N.
+
+config SUNXI_DI_V3X
+	bool "Support DI V300"
+	depends on (AW_DI) && (PM) && (PM_SLEEP)
+	default n
+	help
+	 Say Y here if you want to use DI300.
+	 Say N here if you do NOT want to use DI300.
+	 If unsure, say N.
+
+config SUNXI_DI_SINGEL_FILE
+	bool "Support Single File"
+	depends on (SUNXI_DI_V3X)
+	default n
+	help
+	 Say Y here if you want to use Single File.
+	 Say N here if you do NOT want to use Single File.
+	 If unsure, say N.
+
+config SUNXI_DI_AMP_SERVER
+	bool "Open amp server"
+	depends on (SUNXI_DI_V3X)
+	select RPMSG
+	default n
+	help
+	 Say Y here if you want to open amp server in DI.
+	 Say N here if you do NOT want to open amp server in DI.
+	 If unsure, say N.
+
+endmenu

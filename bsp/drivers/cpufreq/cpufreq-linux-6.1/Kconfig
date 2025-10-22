@@ -1,0 +1,38 @@
+# SPDX-License-Identifier: GPL-2.0-only
+menu "CPU Frequency Drivers"
+
+config AW_CPUFREQ_DT
+	tristate "Generic DT based cpufreq driver"
+	depends on HAVE_CLK && OF
+	select AW_CPUFREQ_DT_PLATDEV
+	select PM_OPP
+	help
+	  This adds a generic DT based cpufreq driver for frequency management.
+	  It supports both uniprocessor (UP) and symmetric multiprocessor (SMP)
+	  systems.
+
+	  If in doubt, say N.
+
+config AW_CPUFREQ_DT_PLATDEV
+	tristate
+	help
+	  This adds a generic DT based cpufreq platdev driver for frequency
+	  management.  This creates a 'cpufreq-dt' platform device, on the
+	  supported platforms.
+
+	  If in doubt, say N.
+
+config AW_CPUFREQ_TEST
+	tristate "Generic test for cpufreq driver"
+	help
+	  This adds a generic DT based cpufreq driver for frequency management.
+	  It supports both uniprocessor (UP) and symmetric multiprocessor (SMP)
+	  systems.
+
+	  If in doubt, say N.
+
+if ARM || ARM64
+source "bsp/drivers/cpufreq/cpufreq-linux-5.15/Kconfig.arm"
+endif
+
+endmenu

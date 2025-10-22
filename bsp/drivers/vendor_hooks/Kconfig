@@ -1,0 +1,21 @@
+# SPDX-License-Identifier: GPL-2.0-only
+menu "Vendor Hooks Drivers"
+	depends on AW_BSP
+
+config AW_VENDOR_HOOKS
+       tristate "Allwinner Vendor Hooks Register Support"
+       depends on AW_BSP && ANDROID_VENDOR_HOOKS
+       default n
+       help
+         Support Android Vendor Hooks register for system modules.
+         If you can't find the right place for your vendor hooks registration,
+         you can register here.
+
+config AW_RANDOM_INIT
+	bool "Allwinner SPEED UP RANDOM INIT SUPPORT"
+	depends on AW_VENDOR_HOOKS
+	default n
+	help
+	 Use interrupt of pin to speed up random init
+
+endmenu

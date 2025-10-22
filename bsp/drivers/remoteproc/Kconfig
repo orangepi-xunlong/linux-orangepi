@@ -1,0 +1,68 @@
+# SPDX-License-Identifier: GPL-2.0-only
+#
+# Allwinner remoteproc driver.
+#
+menu "Remoteproc drivers"
+	depends on AW_BSP
+
+config AW_REMOTEPROC
+	tristate "Remoteproc Support for Allwinner SoCs"
+	depends on AW_BSP
+	select REMOTEPROC
+	select MAILBOX
+	help
+	  allwinner
+
+config AW_RPROC_FAST_BOOT
+	bool "Allwinner remoteproc fast boot mode support"
+	depends on AW_REMOTEPROC
+	default n
+	help
+	  Say y here to support Allwinner remote processor
+	  fast boot mode.
+	  This mode can speed up init operation.
+
+config AW_RPROC_ENHANCED_TRACE
+	bool "Allwinner remoteproc enhanced trace"
+	depends on AW_REMOTEPROC
+	default y
+	help
+	  Say y here to support Allwinner remote processor
+	  enhanced trace function.
+
+config SUNXI_RPROC_SHARE_IRQ
+	bool "SUNXI remote share irq support"
+	depends on AW_REMOTEPROC
+	default n
+	help
+	  Say y here to support SUNXI remote share irq driver.
+
+config AW_REMOTEPROC_HIFI4_BOOT
+	tristate "Allwinner remoteproc hifi4 boot"
+	depends on AW_REMOTEPROC
+	help
+	  Say y here to support Allwinner SOC processors hifi4 via
+	  remote processor framework.
+
+config AW_REMOTEPROC_E906_BOOT
+	tristate "Allwinner remoteproc e906 boot"
+	depends on AW_REMOTEPROC
+	help
+	  Say y here to support Allwinner SOC processors e906 via
+	  remote processor framework.
+
+config AW_REMOTEPROC_E906_STANDBY
+	bool "Allwinner remoteproc e906 standby"
+	default n
+	depends on AW_REMOTEPROC_E906_BOOT
+	help
+	  Say y here to support Allwinner SOC processors e906 standby
+
+config AW_REMOTEPROC_E907_BOOT
+	tristate "Allwinner remoteproc e907 boot"
+	depends on AW_REMOTEPROC
+	default n
+	help
+	  Say y here to support boot Allwinner SOC processors e907 via
+	  remote processor framework.
+endmenu

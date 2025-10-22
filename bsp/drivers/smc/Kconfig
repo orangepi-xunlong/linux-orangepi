@@ -1,0 +1,20 @@
+# SPDX-License-Identifier: GPL-2.0-only
+
+menu "SMC Drivers"
+	depends on AW_BSP
+config AW_SYS_INFO
+	tristate "Allwinner System Info Driver"
+	default n
+	help
+	  This driver is used for query system information.
+	  If you don't know whether need it, please select y.
+
+config AW_SMC
+	tristate "Allwinner SMC Interfaces"
+	default n
+	help
+	  This driver support smc call interfaces depended on
+	  monitor/aft/SecureOs. If you don't know whether need
+	  it, please select y.
+endmenu
+

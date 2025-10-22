@@ -1,0 +1,39 @@
+# SPDX-License-Identifier: GPL-2.0
+
+# Tests (Based on Linux-5.10.43)
+assert = $(shell,[ "$(1)" = "$(2)" ] && echo "PASS" || echo "Expect $(2) but got $(1)")
+
+$(warning,$(assert,$(ker-ver-lt,4,10,43,"TRUE","FALSE"),"FALSE"))
+$(warning,$(assert,$(ker-ver-lt,5,10,42,"TRUE","FALSE"),"FALSE"))
+$(warning,$(assert,$(ker-ver-lt,5,10,43,"TRUE","FALSE"),"FALSE"))
+$(warning,$(assert,$(ker-ver-lt,5,10,44,"TRUE","FALSE"),"TRUE"))
+$(warning,$(assert,$(ker-ver-lt,5,11,43,"TRUE","FALSE"),"TRUE"))
+$(warning,$(assert,$(ker-ver-lt,6,11,43,"TRUE","FALSE"),"TRUE"))
+
+$(warning,$(assert,$(ker-ver-le,4,10,43,"TRUE","FALSE"),"FALSE"))
+$(warning,$(assert,$(ker-ver-le,5,10,42,"TRUE","FALSE"),"FALSE"))
+$(warning,$(assert,$(ker-ver-le,5,10,43,"TRUE","FALSE"),"TRUE"))
+$(warning,$(assert,$(ker-ver-le,5,10,44,"TRUE","FALSE"),"TRUE"))
+$(warning,$(assert,$(ker-ver-le,5,11,43,"TRUE","FALSE"),"TRUE"))
+$(warning,$(assert,$(ker-ver-le,6,11,43,"TRUE","FALSE"),"TRUE"))
+
+$(warning,$(assert,$(ker-ver-eq,4,10,43,"TRUE","FALSE"),"FALSE"))
+$(warning,$(assert,$(ker-ver-eq,5,10,42,"TRUE","FALSE"),"FALSE"))
+$(warning,$(assert,$(ker-ver-eq,5,10,43,"TRUE","FALSE"),"TRUE"))
+$(warning,$(assert,$(ker-ver-eq,5,10,44,"TRUE","FALSE"),"FALSE"))
+$(warning,$(assert,$(ker-ver-eq,5,11,43,"TRUE","FALSE"),"FALSE"))
+$(warning,$(assert,$(ker-ver-eq,6,11,43,"TRUE","FALSE"),"FALSE"))
+
+$(warning,$(assert,$(ker-ver-gt,4,10,43,"TRUE","FALSE"),"TRUE"))
+$(warning,$(assert,$(ker-ver-gt,5,10,42,"TRUE","FALSE"),"TRUE"))
+$(warning,$(assert,$(ker-ver-gt,5,10,43,"TRUE","FALSE"),"FALSE"))
+$(warning,$(assert,$(ker-ver-gt,5,10,44,"TRUE","FALSE"),"FALSE"))
+$(warning,$(assert,$(ker-ver-gt,5,11,43,"TRUE","FALSE"),"FALSE"))
+$(warning,$(assert,$(ker-ver-gt,6,11,43,"TRUE","FALSE"),"FALSE"))
+
+$(warning,$(assert,$(ker-ver-ge,4,10,43,"TRUE","FALSE"),"TRUE"))
+$(warning,$(assert,$(ker-ver-ge,5,10,42,"TRUE","FALSE"),"TRUE"))
+$(warning,$(assert,$(ker-ver-ge,5,10,43,"TRUE","FALSE"),"TRUE"))
+$(warning,$(assert,$(ker-ver-ge,5,10,44,"TRUE","FALSE"),"FALSE"))
+$(warning,$(assert,$(ker-ver-ge,5,11,43,"TRUE","FALSE"),"FALSE"))
+$(warning,$(assert,$(ker-ver-ge,6,11,43,"TRUE","FALSE"),"FALSE"))

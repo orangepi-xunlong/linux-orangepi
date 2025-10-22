@@ -1,0 +1,52 @@
+# SPDX-License-Identifier: GPL-2.0
+
+menu "Rpbuf drivers"
+
+config AW_RPBUF
+	tristate
+	help
+	  The Rpbuf (Remote Processor Buffer) framework provides mechanisms to
+	  allocate buffers and transmit/receive their references to/from remote
+	  processor. This allows user to exchange large data with the remote
+	  processor.
+
+config AW_RPBUF_DEV
+	tristate "Rpbuf device interface"
+	select AW_RPBUF
+	default n
+	help
+	  Say y here to export rpbuf buffers as device files, usually found in
+	  /dev. They make it possible for user-space programs to use rpbuf
+	  buffers.
+
+comment "Service"
+
+config AW_RPBUF_SERVICE_RPMSG
+	tristate "Rpmsg-based Rpbuf service driver"
+	select AW_RPBUF
+	default n
+	help
+	  Say y here to enable support for the Rpmsg-based Rpbuf service driver.
+	  This is one kind of Rpbuf service backend implemented with Rpmsg.
+
+comment "Controller"
+
+config AW_RPBUF_CONTROLLER_SUNXI
+	tristate "Allwinner Rpbuf controller driver"
+	select AW_RPBUF
+	select AW_RPBUF_DEV
+	default n
+	help
+	  Say y here to enable support for the Allwinner Rpbuf controller driver.
+
+comment "Sample"
+
+config AW_RPBUF_SAMPLE_SUNXI
+	tristate "Allwinner Rpbuf sample driver"
+	select AW_RPBUF
+	default n
+	help
+	  Say y here to enable support for the Allwinner Rpbuf sample driver.
+	  This is a sample driver to introduce how to use Rpbuf framework.
+
+endmenu

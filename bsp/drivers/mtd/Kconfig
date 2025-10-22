@@ -1,0 +1,131 @@
+menuconfig AW_MTD
+	tristate "Memory Technology Device (AW_MTD) support"
+	depends on AW_BSP
+	imply NVMEM
+	help
+	  Memory Technology Devices are flash, RAM and similar chips, often
+	  used for solid state file systems on embedded devices. This option
+	  will provide the generic support for MTD drivers to register
+	  themselves with the kernel and for potential users of MTD devices
+	  to enumerate the devices which are present and obtain a handle on
+	  them. It will also allow you to select individual drivers for
+	  particular hardware and users of MTD devices. If unsure, say N.
+
+if AW_MTD
+
+config AW_MTD_PSTORE
+	tristate "Log panic/oops to an MTD buffer based on pstore"
+	depends on PSTORE
+	select PSTORE_ZONE
+	help
+	  This enables panic and oops messages to be logged to a circular
+	  buffer in a flash partition where it can be read back as files after
+	  mounting pstore filesystem.
+
+	  If unsure, say N.
+
+if AW_MTD_PSTORE
+config AW_MTD_PSTORE_MTDDEV
+	string "mtd device identifier"
+	depends on AW_MTD_PSTORE
+	default ""
+	help
+	  Which mtd device should be used for pstore/sunxi_mtdpstore.
+
+	  <device name> MTD device name. "pstore" is recommended.
+
+config AW_MTD_PSTORE_KMSG_SIZE
+	int "Size in Kbytes of kmsg dump log to store"
+	depends on AW_MTD_PSTORE
+	default 64
+	help
+	  This just sets size of kmsg dump (oops, panic, etc) log for
+	  pstore/sunxi_mtdpstore. The size is in KB and must be a multiple of 4.
+
+	  NOTE that, both Kconfig and module parameters can configure
+	  pstore/sunxi_mtdpstore, but module parameters have priority over Kconfig.
+
+config AW_MTD_PSTORE_MAX_REASON
+	int "Maximum kmsg dump reason to store"
+	depends on AW_MTD_PSTORE
+	default 2
+	help
+	  The maximum reason for kmsg dumps to store. The default is
+	  2 (KMSG_DUMP_OOPS), see include/linux/kmsg_dump.h's
+	  enum kmsg_dump_reason for more details.
+
+	  NOTE that, both Kconfig and module parameters can configure
+	  pstore/sunxi_mtdpstore, but module parameters have priority over Kconfig.
+
+config AW_MTD_PSTORE_PMSG_SIZE
+	int "Size in Kbytes of pmsg to store"
+	depends on AW_MTD_PSTORE
+	depends on PSTORE_PMSG
+	default 0
+	help
+	  This just sets size of pmsg (pmsg_size) for pstore/sunxi_mtdpstore. The size is
+	  in KB and must be a multiple of 4.
+
+	  NOTE that, both Kconfig and module parameters can configure
+	  pstore/sunxi_mtdpstore, but module parameters have priority over Kconfig.
+	  now don't recommend to use it.
+
+config AW_MTD_PSTORE_CONSOLE_SIZE
+	int "Size in Kbytes of console log to store"
+	depends on AW_MTD_PSTORE
+	depends on PSTORE_CONSOLE
+	default 0
+	help
+	  This just sets size of console log (console_size) to store via
+	  pstore/sunxi_mtdpstore. The size is in KB and must be a multiple of 4.
+
+	  NOTE that, both Kconfig and module parameters can configure
+	  pstore/sunxi_mtdpstore, but module parameters have priority over Kconfig.
+	  now don't recommend to use it.
+
+config AW_MTD_PSTORE_FTRACE_SIZE
+	int "Size in Kbytes of ftrace log to store"
+	depends on AW_MTD_PSTORE
+	depends on PSTORE_FTRACE
+	default 0
+	help
+	  This just sets size of ftrace log (ftrace_size) for pstore/blk. The
+	  size is in KB and must be a multiple of 4.
+
+	  NOTE that, both Kconfig and module parameters can configure
+	  pstore/sunxi_mtdpstore, but module parameters have priority over Kconfig.
+	  now don't recommend to use it.
+endif
+
+menu "Partition parsers"
+source "bsp/drivers/mtd/parsers/Kconfig"
+endmenu
+
+choice
+	prompt "SPI NOR Driver Select"
+        optional
+
+	config AW_MTD_SPI_NOR_5_15
+		tristate "SPI NOR device support(5.15)"
+		depends on AW_MTD && SPI_MASTER
+		select SPI_MEM
+		help
+		  This is the framework for the SPI NOR which can be used by the SPI
+		  device drivers and the SPI NOR device driver.
+
+	config AW_MTD_SPI_NOR_6_1
+		tristate "SPI NOR device support(6.1)"
+		depends on AW_MTD && SPI_MASTER
+		select SPI_MEM
+		help
+		  This is the framework for the SPI NOR which can be used by the SPI
+		  device drivers and the SPI NOR device driver.
+endchoice
+
+source "bsp/drivers/mtd/spi-nor-5.15/Kconfig"
+
+source "bsp/drivers/mtd/spi-nor-6.1/Kconfig"
+
+source "bsp/drivers/mtd/awnand/Kconfig"
+
+endif # AW_MTD

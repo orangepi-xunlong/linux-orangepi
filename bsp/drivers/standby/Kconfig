@@ -1,0 +1,16 @@
+#
+# sunxi standby debug config.
+# SPDX-License-Identifier: GPL-2.0-only
+menu "Standby Debugging Drivers"
+	depends on AW_BSP
+
+config AW_STANDBY_DEBUG
+	tristate "Allwinner Standby Debugging Driver"
+	depends on AW_BSP && PM && (ARM || ARM64)
+	default y
+	help
+	  Say y here if you want to support standby debug module.
+	  The standby debug module is used to debug system suspend.
+	  When in doubt, say "Y".
+
+endmenu

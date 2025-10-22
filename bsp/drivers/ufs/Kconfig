@@ -1,0 +1,15 @@
+# SPDX-License-Identifier: GPL-2.0-only
+#
+# ufs host controller drivers
+#
+
+menu "SUNXI UFS Drivers"
+	depends on AW_BSP
+
+config AW_UFS
+	tristate "Allwinner UFS Support"
+	depends on SCSI_UFSHCD_PLATFORM
+	help
+	  This selects allwinner ufs drivers
+
+endmenu

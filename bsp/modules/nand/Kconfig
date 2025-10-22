@@ -1,0 +1,14 @@
+menu "NAND Drivers"
+	depends on AW_BSP
+
+config AW_NAND
+	tristate  "The sunxi nand driver"
+	default n
+	depends on (AW_SID)
+	help
+	  The nand used on the platform. it's nftl nand driver.
+
+	  If unsure, say m.
+source "bsp/modules/nand/common1/Kconfig"
+
+endmenu

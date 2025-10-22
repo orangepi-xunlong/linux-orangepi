@@ -1,0 +1,21 @@
+# SPDX-License-Identifier: GPL-2.0-only
+#
+# IR-TX drivers configuration
+#
+
+menu "IR-TX Drivers"
+	depends on AW_BSP
+
+config AW_IR_TX
+	tristate "IR-TX Support for Allwinner SoCs"
+	select RC_CORE
+	select RC_DEVICES
+	help
+	  Say Y if you want to use sunxi internal IR TX Controller
+
+	  To compile this driver as a module, choose M here: the module will
+	  be called sunxi-ir-tx.
+
+endmenu
+
+

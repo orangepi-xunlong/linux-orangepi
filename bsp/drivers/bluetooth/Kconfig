@@ -1,0 +1,59 @@
+menu "Networking Drivers"
+
+menu "Bluetooth Subsystem Support"
+
+menu "Bluetooth Device Drivers"
+	depends on AW_BSP
+	depends on BT
+
+config BCM_BT_LPM
+	tristate "Broadcom Bluetooth Low Power Manager Support"
+	help
+	  Bluetooth Low Power Manager Driver.
+	  This driver provides the dynamic active power saving mechanism for
+	  bluetooth radio devices special for android4.2.
+
+	  Say Y here to compile support for bt lmp support into the kernel
+	  or say M to compile it as module (btlmp).
+
+config RTL_BT_LPM
+	tristate "Realtek Bluesleep driver support"
+	help
+	  Bluetooth Bluesleep Driver.
+	  This driver provides the dynamic active power saving mechanism for
+	  bluetooth radio devices.
+
+	  Say Y here to compile support for bluesleep support into the kernel
+	  or say M to compile it as module (bluesleep).
+
+config XR_BT_LPM
+	tristate "Xradio Bluetooth sleep driver support"
+	help
+	  Bluetooth Bluetooth sleep Driver.
+	  This driver provides the dynamic active power saving mechanism for
+	  bluetooth radio devices.
+
+	  Say Y here to compile support for bluesleep support into the kernel
+	  or say M to compile it as module (bluesleep).
+
+config BT_RTKBTUSB
+	tristate "RTK HCI USB driver"
+	depends on USB
+	help
+	  RTK Bluetooth HCI USB driver
+
+config BT_RTKH5
+	bool "RTK HCI UART H5 driver"
+	depends on BT_HCIUART
+	help
+	  RTK Bluetooth HCI UART H5 Driver.
+	  The Realtek protocol support enables Bluetooth HCI over 3-Wire
+	  serial port interface for Realtek Bluetooth controllers.
+
+	  Say Y here to compile support for Realtek H5 into the kernel.
+
+endmenu
+
+endmenu
+
+endmenu

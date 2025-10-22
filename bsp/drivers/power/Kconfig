@@ -1,0 +1,280 @@
+# SPDX-License-Identifier: GPL-2.0-only
+#
+# PMIC drivers configuration
+#
+
+menu "PMIC Drivers"
+	depends on AW_BSP
+
+config AW_VIRTUAL_AC_POWER
+	tristate "virtual ac Power Supply Driver"
+	help
+	  This driver provides support for the power supply features of
+	  virtual ac power supply.
+
+config AW_GPIO_VBUS_POWER
+	tristate "gpio charger Power Supply Driver"
+	select POWER_SUPPLY
+	select IIO
+	help
+	  This driver provides support for the power supply features of
+	  virtual ac power supply.
+
+config AW_MFD_AXP2101
+	tristate
+	select MFD_CORE
+	select REGMAP_IRQ
+	select HAS_IOMEM
+
+config AW_MFD_AXP2101_I2C
+	tristate "X-POWERS AXP2101 PMICs with I2C"
+	depends on AW_TWI
+	select AW_MFD_AXP2101
+	select REGMAP_I2C
+	select I2C
+	help
+	  If you say Y here you get support for the X-Powers AXP2101 power
+	  management ICs (PMICs) controlled with I2C.
+	  This driver include only the core APIs. You have to select individual
+	  components like regulators or the PEK (Power Enable Key) under the
+	  corresponding menus.
+
+config AW_MFD_SOC_PMU
+	tristate
+	select MFD_CORE
+	select HAS_IOMEM
+
+config AW_MFD_PMU_SOC_MMIO
+	tristate
+	select AW_MFD_SOC_PMU
+	select REGMAP_MMIO
+
+config AW_MFD_PMU_EXT
+	tristate
+	select MFD_CORE
+	select REGMAP
+	select REGMAP_IRQ
+
+config AW_MFD_PMU_EXT_I2C
+	tristate "PMU_EXT PMICs with I2C"
+	depends on AW_TWI
+	select AW_MFD_PMU_EXT
+	select REGMAP_I2C
+	select I2C
+	help
+	  If you say yes here you get support for the TCS4838 series of
+	  PM chips with I2C interface.
+
+config AW_MFD_BMU_EXT
+	tristate
+	select MFD_CORE
+	select REGMAP
+	select REGMAP_IRQ
+
+config AW_REGULATOR_BMU_EXT
+	tristate
+
+config AW_MFD_BMU_EXT_I2C
+	tristate "BMU_EXT PMICs with I2C"
+	depends on AW_TWI
+	select AW_MFD_BMU_EXT
+	select AW_REGULATOR_BMU_EXT
+	select REGMAP_I2C
+	select I2C
+	help
+	  If you say yes here you get support for the TCS4838 series of
+	  PM chips with I2C interface.
+
+comment "Regulator Drivers"
+
+if AW_MFD_AXP2101
+
+config AW_REGULATOR_AXP2101
+	tristate "X-POWERS AXP2101 PMIC Regulators"
+	depends on AW_MFD_AXP2101
+	select REGULATOR
+	select REGULATOR_VIRTUAL_CONSUMER
+	help
+	  This driver provides support for the voltage regulators on the
+	  AXP2101 PMIC.
+endif
+
+if AW_MFD_PMU_EXT
+
+config AW_REGULATOR_PMU_EXT
+	tristate "PMU_EXT Power regulator"
+	depends on AW_MFD_PMU_EXT
+	select REGULATOR
+	help
+	  This driver provides support for the voltage regulators on the
+	  PMU_EXT PMIC.
+
+endif
+
+config AW_REGULATOR_SOC_PMU
+	tristate "SOC PMICs Power regulator"
+	select AW_MFD_PMU_SOC_MMIO
+	select REGULATOR
+	help
+	  This driver provides support for the voltage regulators on the
+	  SOC PMICs.
+
+config AW_REGULATOR_PWM
+	tristate "SUNXI PWM voltage regulator"
+	depends on PWM
+	help
+	  This driver supports PWM controlled voltage regulators. PWM
+	  duty cycle can increase or decrease the voltage.
+
+config AW_REGULATOR_VIRTUAL_CONSUMER
+	tristate "SUNXI VIRTUAL_CONSUMER"
+	help
+	  This driver supports virtual consumer get the regualtor.
+
+comment "Regulator Functions"
+
+config AW_AXP1530_WORKAROUND_DVM
+	bool "AXP1530 SW DVM"
+	depends on AW_REGULATOR_PMU_EXT || AW_REGULATOR_AXP2101
+	default n
+	help
+	  Say Y here if you want to enable axp1530 DVM function
+
+comment "Powerkey Drivers"
+
+if AW_MFD_AXP2101
+
+config AW_INPUT_AXP2101_PEK
+	tristate "X-POWERS AXP2101 Power Button Driver"
+	depends on !UML
+	depends on AW_MFD_AXP2101
+	select INPUT
+	help
+	  Say Y here if you want to enable power key reporting via the
+	  AXP20X PMIC.
+
+	  To compile this driver as a module, choose M here. The module will
+	  be called axp2101-pek.
+
+endif
+
+comment "Power Supply Drivers"
+
+if AW_MFD_AXP2101
+
+config AW_AXP803_POWER
+	tristate "AXP803 Power Supply Driver"
+	select POWER_SUPPLY
+	help
+	  This driver provides support for the power supply features of
+	  AXP803 PMIC.
+
+config AW_AXP2202_POWER
+	tristate "AXP2202 Power Supply Driver"
+	select POWER_SUPPLY
+	select EXTCON
+	help
+	  This driver provides support for the power supply features of
+	  AXP2202 PMIC.
+
+config AW_AXP2202_GPIO_POWER
+	tristate "AXP2202 Power Virtual ACIN"
+	select POWER_SUPPLY
+	help
+	  This driver provides support for ACIN function in
+	  AXP2202 PMIC.
+
+config AW_AXP22X_POWER
+	tristate "AXP22X Power Supply Driver"
+	select POWER_SUPPLY
+	help
+	  This driver provides support for the power supply features of
+	  AXP221/AXP223 PMIC.
+
+config AW_AXP515_POWER
+	tristate "AXP515 Power Supply Driver"
+	select POWER_SUPPLY
+	select EXTCON
+	help
+	  This driver provides support for the power supply features of
+	  AXP515 PMIC.
+
+config AW_AXP515_ACIN_POWER
+	tristate "AXP515 Power Virtual ACIN"
+	select POWER_SUPPLY
+	help
+	  This driver provides support for ACIN function in
+	  AXP515 PMIC.
+
+config AW_AXP2101_POWER
+	tristate "AXP2101 Power Supply Driver"
+	select POWER_SUPPLY
+	help
+	  This driver provides support for the power supply features of
+	  AXP2101 PMIC.
+
+endif
+
+if AW_MFD_BMU_EXT
+
+config AW_ETA6973_POWER
+	tristate "ETA6973 Power Supply Driver"
+	depends on AW_MFD_BMU_EXT
+	select POWER_SUPPLY
+	help
+	  This driver provides support for the power supply features of
+	  ETA6973 PMIC.
+
+config AW_AXP519_POWER
+	tristate "AXP519 Power Supply Driver"
+	depends on AW_MFD_BMU_EXT
+	select POWER_SUPPLY
+	help
+	  This driver provides support for the power supply features of
+	  AXP519 PMIC.
+
+config AW_AXP2601_POWER
+	tristate "AXP2601 Power Supply Driver"
+	depends on AW_MFD_BMU_EXT
+	select POWER_SUPPLY
+	help
+	  This driver provides support for the power supply features of
+	  AXP2601 PMIC.
+
+config AW_AXP2602_POWER
+	tristate "AXP2602 Power Supply Driver"
+	depends on AW_MFD_BMU_EXT
+	select POWER_SUPPLY
+	help
+	  This driver provides support for the power supply features of
+	  AXP2602 PMIC.
+
+endif
+
+comment "Power Notifier Drivers"
+
+config AW_POWER_NOTIFIER
+	tristate "Allwinner Power Notifier support"
+	depends on AW_BSP
+	help
+	  Allwinner Power Notifier.
+
+	  This option is of interest only to developers who need to
+	  develop on AllWinner SoC.
+
+	  If unsure, say N.
+
+comment "Power Temp Ctrl Drivers"
+
+if AW_MFD_AXP2101
+
+config AW_AXP8191_TEMP_CTRL
+	tristate "AXP8191 Temp Ctrl Drivers"
+	depends on AW_BSP
+	help
+	  This driver provides support for the temp ctrl features of
+	  AXP8191 PMIC.
+
+endif
+
+endmenu

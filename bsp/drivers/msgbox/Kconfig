@@ -1,0 +1,20 @@
+# SPDX-License-Identifier: GPL-2.0-only
+
+menu "MSGBOX Drivers"
+	depends on AW_BSP
+
+config AW_MSGBOX
+	tristate "Msgbox support for Allwinner SoCs"
+	depends on AW_BSP
+	select  MAILBOX
+	help
+	  Say y here to support Allwinner SOC processors via the
+	  msgbox framework.
+
+config AW_MAILBOX_SUPPORT_TXDONE_IRQ
+	bool "Allwinner mailbox support txdone irq"
+	depends on AW_MSGBOX
+	help
+	  Say y here to support Allwinner SOC processors msgbox txdone irq.
+
+endmenu

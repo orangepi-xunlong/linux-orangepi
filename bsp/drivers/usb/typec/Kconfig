@@ -1,0 +1,24 @@
+# SPDX-License-Identifier: GPL-2.0
+menu "USB Type-C Support"
+	depends on AW_BSP
+
+config USB_SUNXI_TYPEC
+	tristate "Allwinner USB Type-C support"
+	depends on AW_BSP
+	help
+          Allwinner USB Type-C Port Controller Drivers.
+
+	  This option is of interest only to developers who need to
+	  develop on AllWinner SoC.
+
+	  If unsure, say N.
+
+if TYPEC
+
+source "bsp/drivers/usb/typec/tcpm/Kconfig"
+
+source "bsp/drivers/usb/typec/mux/Kconfig"
+
+endif # TYPEC
+
+endmenu

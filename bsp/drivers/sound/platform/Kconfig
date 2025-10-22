@@ -1,0 +1,277 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+#
+# Allwinner audio platform driver Kconfig
+#
+# Copyright(c) 2022-2027 Allwinnertech Co., Ltd.
+
+# common
+config SND_SOC_SUNXI_PCM
+	tristate
+
+config SND_SOC_SUNXI_MACH
+	tristate
+
+config SND_SOC_SUNXI_COMMON
+	tristate
+
+# ahub dam
+config SND_SOC_SUNXI_AHUB_DAM
+	tristate
+
+# codec
+config SND_SOC_SUNXI_SUNXI_DUMMYCODEC
+	tristate
+
+config SND_SOC_SUNXI_INTERNALCODEC
+	tristate
+
+config SND_SOC_SUNXI_SUN50IW10_CODEC
+	tristate
+
+config SND_SOC_SUNXI_SUN50IW9_CODEC
+	tristate
+
+config SND_SOC_SUNXI_SUN8IW11_CODEC
+	tristate
+
+config SND_SOC_SUNXI_SUN8IW18_CODEC
+	tristate
+
+config SND_SOC_SUNXI_SUN8IW20_CODEC
+	tristate
+
+config SND_SOC_SUNXI_SUN8IW21_CODEC
+	tristate
+
+config SND_SOC_SUNXI_SUN20IW1_CODEC
+	tristate
+
+config SND_SOC_SUNXI_SUN55IW3_CODEC
+	tristate
+
+config SND_SOC_SUNXI_SUN55IW6_CODEC
+	tristate
+
+config SND_SOC_SUNXI_SUN251IW1_CODEC
+	tristate
+
+config SND_SOC_SUNXI_SUN300IW1_CODEC
+	tristate
+
+config SND_SOC_SUNXI_SUN65IW1_CODEC
+	tristate
+
+# menu select
+menu "Platform drivers"
+
+# aaudio
+config SND_SOC_SUNXI_AAUDIO
+	tristate "Allwinner AAUDIO support"
+	select REGMAP_MMIO
+	select SND_SOC_GENERIC_DMAENGINE_PCM
+	select SND_SOC_SUNXI_PCM
+	select SND_SOC_SUNXI_MACH
+	select SND_SOC_SUNXI_INTERNALCODEC
+	select SND_SOC_SUNXI_COMMON
+	select SND_SOC_SUNXI_SUN50IW10_CODEC if ARCH_SUN50IW10
+	select SND_SOC_SUNXI_SUN50IW9_CODEC if ARCH_SUN50IW9
+	select SND_SOC_SUNXI_SUN8IW11_CODEC if ARCH_SUN8IW11
+	select SND_SOC_SUNXI_SUN8IW18_CODEC if ARCH_SUN8IW18
+	select SND_SOC_SUNXI_SUN8IW20_CODEC if ARCH_SUN8IW20
+	select SND_SOC_SUNXI_SUN8IW21_CODEC if ARCH_SUN8IW21
+	select SND_SOC_SUNXI_SUN20IW1_CODEC if ARCH_SUN20IW1
+	select SND_SOC_SUNXI_SUN55IW3_CODEC if ARCH_SUN55IW3
+	select SND_SOC_SUNXI_SUN55IW6_CODEC if ARCH_SUN55IW6
+	select SND_SOC_SUNXI_SUN251IW1_CODEC if ARCH_SUN251IW1
+	select SND_SOC_SUNXI_SUN300IW1_CODEC if ARCH_SUN300IW1
+	select SND_SOC_SUNXI_SUN65IW1_CODEC if ARCH_SUN65IW1
+	depends on ARCH_SUN50IW10 \
+		|| ARCH_SUN50IW9  \
+		|| ARCH_SUN8IW11  \
+		|| ARCH_SUN8IW18  \
+		|| ARCH_SUN8IW20  \
+		|| ARCH_SUN8IW21  \
+		|| ARCH_SUN20IW1  \
+		|| ARCH_SUN55IW3  \
+		|| ARCH_SUN55IW6  \
+		|| ARCH_SUN251IW1  \
+                || ARCH_SUN300IW1  \
+		|| ARCH_SUN65IW1
+	help
+	  Select Y or M to support analog-audio Module in the Allwinner SoCs.
+
+# owa
+config SND_SOC_SUNXI_OWA
+	tristate "Allwinner OWA support"
+	select REGMAP_MMIO
+	select SND_SOC_GENERIC_DMAENGINE_PCM
+	select SND_SOC_SUNXI_PCM
+	select SND_SOC_SUNXI_MACH
+	select SND_SOC_SUNXI_COMMON
+	depends on ARCH_SUN50IW10 \
+		|| ARCH_SUN50IW9  \
+		|| ARCH_SUN8IW11  \
+		|| ARCH_SUN8IW20  \
+		|| ARCH_SUN20IW1  \
+		|| ARCH_SUN55IW3  \
+		|| ARCH_SUN8IW18  \
+		|| ARCH_SUN55IW6  \
+		|| ARCH_SUN65IW1  \
+		|| ARCH_SUN251IW1 \
+		|| ARCH_SUN60IW2
+	help
+	  Select Y or M to support OWA Module in Allwinner SoCs.
+
+# owa for RX IEC61937
+config SND_SOC_SUNXI_OWA_RXIEC61937
+	tristate "Allwinner OWA RX IEC61937 support"
+	default y
+	depends on SND_SOC_SUNXI_OWA
+	depends on !ARCH_SUN50IW10 && !ARCH_SUN50IW9
+	help
+	  Select Y or M to support OWA RX IEC61937 in Allwinner SoCs.
+
+# dmic
+config SND_SOC_SUNXI_DMIC
+	tristate "Allwinner DMIC support"
+	select REGMAP_MMIO
+	select SND_SOC_GENERIC_DMAENGINE_PCM
+	select SND_SOC_SUNXI_PCM
+	select SND_SOC_SUNXI_MACH
+	select SND_SOC_SUNXI_COMMON
+	depends on ARCH_SUN50IW10 \
+		|| ARCH_SUN50IW9  \
+		|| ARCH_SUN55IW3  \
+		|| ARCH_SUN8IW18  \
+		|| ARCH_SUN8IW20  \
+		|| ARCH_SUN8IW21  \
+		|| ARCH_SUN20IW1  \
+		|| ARCH_SUN55IW6  \
+		|| ARCH_SUN65IW1 \
+		|| ARCH_SUN251IW1 \
+		|| ARCH_SUN60IW2
+	help
+	  Select Y or M to support DMIC Module in Allwinner SoCs.
+
+# i2s
+config SND_SOC_SUNXI_I2S
+	tristate "Allwinner I2S support"
+	select REGMAP_MMIO
+	select SND_SOC_GENERIC_DMAENGINE_PCM
+	select SND_SOC_SUNXI_PCM
+	select SND_SOC_SUNXI_MACH
+	select SND_SOC_SUNXI_COMMON
+	depends on ARCH_SUN50IW10 \
+		|| ARCH_SUN8IW11  \
+		|| ARCH_SUN55IW3  \
+		|| ARCH_SUN8IW18  \
+		|| ARCH_SUN8IW17  \
+		|| ARCH_SUN8IW20  \
+		|| ARCH_SUN8IW21  \
+		|| ARCH_SUN20IW1  \
+		|| ARCH_SUN55IW6  \
+		|| ARCH_SUN251IW1  \
+                || ARCH_SUN300IW1  \
+		|| ARCH_SUN65IW1 \
+		|| ARCH_SUN60IW2
+	help
+	  Select Y or M to support I2S/PCM/TDM Module in Allwinner SoCs.
+
+if SND_SOC_SUNXI_I2S
+# HDMIAUDIO
+config SND_SOC_SUNXI_CODEC_HDMI
+	tristate "Allwinner HDMIAUDIO support"
+	depends on ARCH_SUN55IW3 \
+		|| ARCH_SUN8IW11 \
+		|| ARCH_SUN8IW20  \
+		|| ARCH_SUN20IW1  \
+		|| ARCH_SUN65IW1 \
+		|| ARCH_SUN60IW2
+	help
+	  Select Y or M to support hdmi audio in Allwinner SoCs.
+#EDPAUDIO
+config SND_SOC_SUNXI_CODEC_EDP
+	tristate "Allwinner EDPAUDIO support"
+	depends on ARCH_SUN55IW3 \
+		|| ARCH_SUN65IW1
+	help
+	  Select Y or M to support edp audio in Allwinner SoCs.
+#AVAUDIO
+config SND_SOC_SUNXI_CODEC_AV
+	tristate "Allwinner AVAUDIO support"
+	depends on ARCH_SUN60IW2
+	help
+	  Select Y or M to support av audio in Allwinner SoCs.
+endif
+
+# ahub
+config SND_SOC_SUNXI_AHUB
+	tristate "Allwinner AHUB support"
+	select REGMAP_MMIO
+	select SND_SOC_GENERIC_DMAENGINE_PCM
+	select SND_SOC_SUNXI_PCM
+	select SND_SOC_SUNXI_MACH
+	select SND_SOC_SUNXI_AHUB_DAM
+	select SND_SOC_SUNXI_COMMON
+	depends on ARCH_SUN50IW9
+	help
+	  Select Y or M to support audio-hub Module in Allwinner SoCs.
+
+# HDMIAUDIO
+if SND_SOC_SUNXI_AHUB
+config SND_SOC_SUNXI_CODEC_HDMI
+	tristate "Allwinner HDMIAUDIO support"
+	depends on ARCH_SUN50IW9
+	help
+	  Select Y or M to support hdmi audio in Allwinner SoCs.
+endif
+
+# Components for all
+config SND_SOC_SUNXI_COMPONENTS
+	tristate "Allwinner function components"
+	depends on ARCH_SUN50IW10 \
+		|| ARCH_SUN50IW9  \
+		|| ARCH_SUN8IW11  \
+		|| ARCH_SUN55IW3  \
+		|| ARCH_SUN55IW6  \
+		|| ARCH_SUN8IW18  \
+		|| ARCH_SUN8IW20  \
+		|| ARCH_SUN8IW21  \
+		|| ARCH_SUN20IW1  \
+		|| ARCH_SUN251IW1  \
+                || ARCH_SUN300IW1  \
+		|| ARCH_SUN65IW1 \
+		|| ARCH_SUN60IW2
+	help
+	  Select Y or M to support function components.
+
+config SND_SOC_SUNXI_SFX
+	tristate "Components SFX"
+	depends on SND_SOC_SUNXI_COMPONENTS
+	depends on ARCH_SUN50IW10 \
+		|| ARCH_SUN55IW3 \
+                || ARCH_SUN300IW1  \
+		|| ARCH_SUN65IW1 \
+		|| ARCH_SUN251IW1
+	help
+	  Select Y or M to support sfx components.
+
+config SND_SOC_SUNXI_DEBUG
+	tristate "Components debug"
+	depends on SND_SOC_SUNXI_COMPONENTS
+	help
+	  Select Y or M to support debug components.
+
+config SND_SOC_SUNXI_DYNAMIC_DEBUG
+	bool "Enable audio dynamic debug"
+	default y
+	help
+	  Enable audio dynamic debug
+
+config SND_SOC_SUNXI_PULSEAUDIO
+	bool "Enable pulseaudio dedicated pins"
+	depends on SND_SOC_SUNXI_COMPONENTS
+	help
+	  Enable pulseaudio Headphone Jack and Headset Mic Jack.
+
+endmenu

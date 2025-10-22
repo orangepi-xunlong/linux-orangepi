@@ -1,0 +1,40 @@
+menu "AW_MTD_NAND"
+
+config RAW_KERNEL
+	bool "Kernel images are stored on physical partitions"
+	help
+	  Enables support kernel images are stored on physical partitions.
+
+config KERNEL_SIZE_BYTE
+	int "Kernel image size(Byte)"
+	depends on RAW_KERNEL
+	default 0
+	help
+	  To accurately read the complete kernel image, you need to set
+	  the kernel image size (in bytes) when using the RAW-boot function.
+
+config SIMULATE_MULTIPLANE
+	bool "enable simulate multiplane"
+	default n
+	help
+	  spinand do not support multiplane. In order to adapt to aw nand
+	  we simulate multiplane. If set, the common physical layer should
+	  merge two continuous physical block to 'super block' for logical
+	  layer.
+
+	  Merge pages in two adjacent blocks with the same page num to super
+	  page. Merge adjacent blocks to super block.
+
+	  *   phy-block0   phy-block1    = super block 0
+	  * |------------|------------|
+	  * | phy-page 0 | phy-page 0 |  = super page 0 on super block 0
+	  * | phy-page 1 | phy-page 1 |  = super page 1 on super block 0
+	  * |     ...    |     ...    |
+	  * |------------|------------|
+
+	  If unsure, say Y.
+
+source "bsp/drivers/mtd/awnand/spinand/Kconfig"
+source "bsp/drivers/mtd/awnand/rawnand/Kconfig"
+
+endmenu

@@ -1,0 +1,120 @@
+# SPDX-License-Identifier: GPL-2.0-only
+
+menu "Device Drivers"
+
+# Minimal System
+source "bsp/drivers/clk/Kconfig"
+source "bsp/drivers/pinctrl/Kconfig"
+source "bsp/drivers/uart/Kconfig"
+source "bsp/drivers/timer/Kconfig"
+
+# Basic System
+source "bsp/drivers/dma/Kconfig"
+source "bsp/drivers/rtc/Kconfig"
+source "bsp/drivers/bus/Kconfig"
+source "bsp/drivers/dumpreg/Kconfig"
+source "bsp/drivers/watchdog/Kconfig"
+source "bsp/drivers/iommu/Kconfig"
+source "bsp/drivers/mbus/Kconfig"
+
+# Storage
+source "bsp/drivers/mmc/Kconfig"
+source "bsp/drivers/ufs/Kconfig"
+source "bsp/modules/nand/Kconfig"
+source "bsp/drivers/mtd/Kconfig"
+source "bsp/drivers/redeposit/Kconfig"
+
+# Graphics
+source "bsp/drivers/video/Kconfig"
+source "bsp/drivers/g2d/Kconfig"
+source "bsp/drivers/di/Kconfig"
+source "bsp/drivers/vin/Kconfig"
+source "bsp/drivers/vfe/Kconfig"
+source "bsp/drivers/tvd/Kconfig"
+source "bsp/drivers/drm/Kconfig"
+source "bsp/drivers/gpu/Kconfig"
+source "bsp/drivers/car_reverse/car_reverse_2_0/Kconfig"
+source "bsp/drivers/car_reverse/car_reverse_amp/Kconfig"
+
+# Multi-Media
+source "bsp/drivers/ve/Kconfig"
+source "bsp/drivers/rt-media/Kconfig"
+
+# Audio
+source "bsp/drivers/sound/Kconfig"
+
+# Security
+source "bsp/drivers/ce/Kconfig"
+source "bsp/drivers/smc/Kconfig"
+source "bsp/drivers/sid/Kconfig"
+source "bsp/drivers/secure_storage/Kconfig"
+source "bsp/drivers/drm_heap/Kconfig"
+
+# I/O Connectivity
+source "bsp/drivers/pcie/Kconfig"
+source "bsp/drivers/phy/Kconfig"
+source "bsp/drivers/emac/Kconfig"
+source "bsp/drivers/gmac/Kconfig"
+source "bsp/drivers/stmmac/Kconfig"
+source "bsp/drivers/usb/Kconfig"
+source "bsp/drivers/twi/Kconfig"
+source "bsp/drivers/spi/Kconfig"
+source "bsp/drivers/spi-ng/Kconfig"
+source "bsp/drivers/ledc/Kconfig"
+source "bsp/drivers/pwm/Kconfig"
+source "bsp/drivers/ir-tx/Kconfig"
+source "bsp/drivers/ir-rx/Kconfig"
+source "bsp/drivers/gpadc/Kconfig"
+source "bsp/drivers/lradc/Kconfig"
+source "bsp/drivers/rtp/Kconfig"
+source "bsp/drivers/input/Kconfig"
+source "bsp/drivers/ata/Kconfig"
+source "bsp/drivers/smartcard/Kconfig"
+source "bsp/drivers/wiegand/Kconfig"
+
+# Wireless
+source "bsp/drivers/net/Kconfig"
+source "bsp/drivers/bluetooth/Kconfig"
+
+# Power Management
+source "bsp/drivers/irqchip/Kconfig"
+source "bsp/drivers/standby/Kconfig"
+source "bsp/drivers/thermal/Kconfig"
+source "bsp/drivers/nvmem/Kconfig"
+source "bsp/drivers/pm_domain/Kconfig"
+source "bsp/drivers/power/Kconfig"
+source "bsp/drivers/cpufreq/Kconfig"
+source "bsp/drivers/devfreq/Kconfig"
+source "bsp/drivers/dsufreq/Kconfig"
+
+# AMP/XPU
+source "bsp/drivers/msgbox/Kconfig"
+source "bsp/drivers/hwspinlock/Kconfig"
+source "bsp/drivers/remoteproc/Kconfig"
+source "bsp/drivers/rpmsg/Kconfig"
+source "bsp/drivers/rpbuf/Kconfig"
+source "bsp/drivers/npu/Kconfig"
+
+# Misc
+source "bsp/drivers/misc/Kconfig"
+source "bsp/drivers/vendor_hooks/Kconfig"
+source "bsp/drivers/aw_trace/Kconfig"
+
+# Debugging
+source "bsp/drivers/crashdump/Kconfig"
+source "bsp/drivers/jtag/Kconfig"
+source "bsp/drivers/debug/Kconfig"
+
+# pstore
+source "bsp/drivers/pstore/Kconfig"
+
+# FS
+source "bsp/drivers/fs/Kconfig"
+
+#andes adaptor
+source "bsp/drivers/andes_adaptor/Kconfig"
+
+#awlink
+source "bsp/drivers/awlink/Kconfig"
+
+endmenu

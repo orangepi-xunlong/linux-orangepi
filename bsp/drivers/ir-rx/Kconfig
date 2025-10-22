@@ -1,0 +1,29 @@
+# SPDX-License-Identifier: GPL-2.0-only
+#
+# IR-RX drivers configuration
+#
+
+menu "IR-RX Drivers"
+	depends on AW_BSP
+
+config AW_IR_RX
+	tristate "IR-RX Support for Allwinner SoCs"
+	select RC_CORE
+	select RC_DECODERS
+	select IR_NEC_DECODER
+	select IR_RC5_DECODER
+	select INPUT_EVDEV
+	help
+	  Say Y if you want to use the internal IR-RX Controller on Allwinner SoCs.
+
+config AW_IR_GPIO_RX
+	tristate "Allwinner GPIO IR remote control"
+	select RC_CORE
+	select RC_DECODERS
+	select IR_NEC_DECODER
+	select IR_RC5_DECODER
+	select INPUT_EVDEV
+	help
+	  Say Y if you want to use Allwinner GPIO based IR Receiver.
+
+endmenu

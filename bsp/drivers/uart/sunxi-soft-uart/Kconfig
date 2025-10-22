@@ -1,0 +1,8 @@
+# SPDX-License-Identifier: GPL-3.0
+
+config AW_SOFT_UART
+	tristate "Enable Soft-Uart"
+	depends on AW_BSP
+	default n
+	help
+	  Enabled Soft-Uart(UART based on GPIO)

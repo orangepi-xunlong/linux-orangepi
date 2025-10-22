@@ -1,0 +1,37 @@
+# SPDX-License-Identifier: GPL-2.0-only
+menu "Power Supply Drivers"
+	depends on AW_BSP
+
+config AW_AXP803_POWER
+	tristate "AXP803 Power Supply Driver"
+	depends on AW_MFD_AXP2101
+	select POWER_SUPPLY
+	help
+	  This driver provides support for the power supply features of
+	  AXP803 PMIC.
+
+config AW_AXP2202_POWER
+	tristate "AXP2202 Power Supply Driver"
+	depends on AW_MFD_AXP2101
+	select POWER_SUPPLY
+	select EXTCON
+	help
+	  This driver provides support for the power supply features of
+	  AXP2202 PMIC.
+
+config AW_AXP2202_GPIO_POWER
+	tristate "AXP2202 Power Virtual ACIN"
+	depends on AW_MFD_AXP2101
+	select POWER_SUPPLY
+	help
+	  This driver provides support for ACIN function in
+	  AXP2202 PMIC.
+
+config AW_AXP22X_POWER
+	tristate "AXP221s/AXP223 Power Supply Driver"
+	depends on AW_MFD_AXP2101
+	select POWER_SUPPLY
+	help
+	  This driver provides support for the power supply features of
+	  AXP221s/AXP223 PMIC.
+endmenu

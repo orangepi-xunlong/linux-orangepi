@@ -1,0 +1,37 @@
+# SPDX-License-Identifier: GPL-2.0-only
+
+comment"Choose one according to the actual usage"
+
+menu "CE Drivers"
+	depends on AW_BSP
+
+config AW_CE_SOCKET
+	tristate "Support socket AF_ALG API for CE"
+	help
+	  Allwinner Sunxi SoC provides the CryptoEngine encryption accelerator
+	  with socket AF_ALG API. Select this if you want to use it.
+
+config AW_CE_IOCTL
+	tristate "CE support the systemcall interface for user api"
+	help
+	  Allwinner Sunxi SoC provides the CryptoEngine encryption accelerator
+	  in IOCTL mode. Select this if you want to use it.
+
+config AW_HWRNG_DRIVER
+	tristate "Support for sunxi hwrng driver"
+	depends on HW_RANDOM
+	help
+	 Support for Sunxi hwrng driver, which can Supports hardware random number generation.
+
+config AW_CE_SOCKET_SECURE_KEY
+	tristate "Support socket AF_ALG API for CE secure key(HUK, SSK, ...) crypt/decrypt"
+	help
+	  Allwinner Sunxi SoC provides the AF_ALG API with socket, CryptoEngine crypto
+	  accelerator using the secure key. Select this if you want to use it.
+
+config AW_TRNG
+	tristate "Support for sunxi trng"
+	help
+	  Support for the TRNG Controller for Allwinner SoCs.
+
+endmenu

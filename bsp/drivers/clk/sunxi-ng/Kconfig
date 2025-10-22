@@ -1,0 +1,187 @@
+# SPDX-License-Identifier: GPL-2.0-only
+config AW_CCU
+	tristate "Clock Support for Allwinner SoCs"
+	depends on AW_BSP
+	default y
+	select RESET_CONTROLLER
+	select AW_RTC_CCU
+
+config AW_STANDARD_CCU
+	tristate "Standard clock Support for Allwinner SoCs"
+	depends on AW_CCU
+	default n
+
+config AW_DDR_CCU
+	tristate "DDR_CCU"
+	default AW_CCU
+	depends on AW_CCU
+
+config AW_SUN8IW11_CCU
+	tristate "SUN8IW11 CCU"
+	default ARCH_SUN8IW11
+	depends on AW_CCU
+
+config AW_SUN8IW18_CCU
+	tristate "SUN8IW18 CCU"
+	default ARCH_SUN8IW18
+	depends on AW_CCU
+
+config AW_SUN8IW20_CCU
+	tristate "SUN8IW20 CCU"
+	default ARCH_SUN8IW20
+	depends on AW_CCU
+
+config AW_SUN8IW20_R_CCU
+	tristate "SUN8IW20 PRCM CCU"
+	default ARCH_SUN8IW20
+	depends on AW_CCU
+
+config AW_SUN8IW20_TEST
+	tristate "SUN8IW20 TEST CCU"
+	default n
+	depends on AW_CCU
+
+config AW_SUN50IW12_CCU
+	tristate "SUN50IW12 CCU"
+	default ARCH_SUN50IW12
+	depends on AW_CCU
+
+config AW_SUN50IW12_R_CCU
+	tristate "SUN50IW12 PRCM CCU"
+	default ARCH_SUN50IW12
+	depends on AW_CCU
+
+config AW_SUN50IW10_CCU
+	tristate "SUN50IW10 CCU"
+	default ARCH_SUN50IW10
+	depends on AW_CCU
+
+config AW_SUN50IW10_R_CCU
+	tristate "SUN50IW10 PRCM CCU"
+	default ARCH_SUN50IW10
+	depends on AW_CCU
+
+config AW_SUN50IW10_DISPLL
+	tristate "Support for the Allwinner SUN50IW10 DISPLL"
+	default ARCH_SUN50IW10
+	depends on AW_CCU
+
+config AW_SUN50IW9_CCU
+	tristate "SUN50IW9 CCU"
+	default ARCH_SUN50IW9
+	depends on AW_CCU
+
+config AW_SUN50IW9_R_CCU
+	tristate "SUN50IW9 PRCM CCU"
+	default ARCH_SUN50IW9
+	depends on AW_CCU
+
+config AW_SUN55IW3_CCU
+	tristate "SUN55IW3 CCU"
+	default ARCH_SUN55IW3
+	depends on AW_CCU
+
+config AW_SUN55IW3_R_CCU
+	tristate "SUN55IW3 PRCM CCU"
+	default ARCH_SUN55IW3
+	depends on AW_CCU
+
+config AW_SUN55IW3_MCU_CCU
+	tristate "SUN55IW3_MCU_CCU"
+	default ARCH_SUN55IW3
+	depends on AW_CCU
+
+config AW_SUN55IW3_TEST
+	tristate "SUN55IW3 TEST CCU"
+	default n
+	depends on AW_CCU
+
+config AW_SUN60IW1_CCU
+	tristate "SUN60IW1 CCU"
+	default ARCH_SUN60IW1
+	depends on AW_CCU
+
+config AW_SUN60IW1_DSP_CCU
+	tristate "SUN60IW1_DSP_CCU"
+	default ARCH_SUN60IW1
+	depends on AW_CCU
+
+config AW_SUN60IW1_R_CCU
+	tristate "SUN60IW1 PRCM CCU"
+	default ARCH_SUN60IW1
+	depends on AW_CCU
+
+config AW_SUN60IW2_CCU
+	tristate "SUN60IW2 CCU"
+	default ARCH_SUN60IW2
+	depends on AW_CCU
+	select AW_STANDARD_CCU
+
+config AW_SUN60IW2_R_CCU
+	tristate "SUN60IW2 PRCM CCU"
+	default ARCH_SUN60IW2
+	depends on AW_CCU
+
+config AW_SUN55IW5_CCU
+	tristate "SUN55IW5 CCU"
+	default ARCH_SUN55IW5
+	depends on AW_CCU
+
+config AW_SUN55IW5_R_CCU
+	tristate "SUN55IW5 PRCM CCU"
+	default ARCH_SUN55IW5
+	depends on AW_CCU
+
+config AW_SUN55IW6_CCU
+	tristate "SUN55IW6 CCU"
+	default ARCH_SUN55IW6
+	depends on AW_CCU
+
+config AW_SUN55IW6_R_CCU
+	tristate "SUN55IW6 PRCM CCU"
+	default ARCH_SUN55IW6
+	depends on AW_CCU
+
+config AW_SUN8IW21_CCU
+	tristate "SUN8IW21 CCU"
+	default ARCH_SUN8IW21
+	depends on AW_CCU
+
+config AW_SUN8IW21_R_CCU
+	tristate "SUN8IW21 PRCM CCU"
+	default ARCH_SUN8IW21
+	depends on AW_CCU
+
+config AW_SUN20IW5_AON_CCU
+	tristate "SUN55IW5 AON CCU"
+	default ARCH_SUN20IW5
+	depends on AW_CCU
+	help
+	  This enables support for clock about system on Allwinner SoCs
+
+config AW_SUN20IW5_APP_CCU
+	tristate "SUN55IW6 APP CCU"
+	default ARCH_SUN20IW5
+	depends on AW_CCU
+	help
+	  This enables support clock about module on Allwinner SoCs
+
+config AW_SUN65IW1_CCU
+	tristate "SUN65IW1 CCU"
+	default ARCH_SUN65IW1
+	depends on AW_CCU
+	help
+	  This enables support clock about module on Allwinner SoCs
+
+config AW_SUN65IW1_R_CCU
+	tristate "SUN65IW1 PRCM CCU"
+	default ARCH_SUN65IW1
+	depends on AW_CCU
+
+config AW_RTC_CCU
+	tristate "RTC domain clocks"
+	default y
+	help
+	  sunxi clock provider in RTC domain, which provides clocks such as
+	  dcxo24M-out, iosc, osc32k, osc32k-out and rtc-1k. This module is
+	  mandatory for sunxi SoCs. Say 'Y' here.

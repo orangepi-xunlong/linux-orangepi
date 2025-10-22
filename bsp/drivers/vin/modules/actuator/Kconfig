@@ -1,0 +1,34 @@
+# SPDX-License-Identifier: GPL-2.0-only
+menu "actuator driver select"
+    depends on AW_VIDEO_SUNXI_VIN
+
+config ACTUATOR_AD5820
+	tristate "use ad5820 driver"
+	default n
+
+config ACTUATOR_DW9714
+	tristate "use dw9714 driver"
+	default n
+
+config ACTUATOR_FP5510
+	tristate "use fp5510 driver"
+	default n
+
+config ACTUATOR_OV8825
+	tristate "use ov8825 driver"
+	default n
+
+config ACTUATOR_AN41908A
+	tristate "use an41908a driver"
+    depends on SPI
+	default n
+
+config ACTUATOR_AD5823
+	tristate "use ad5823 driver"
+	default n
+
+config ACTUATOR_CN3927
+	tristate "use cn3927 driver"
+	default n
+
+endmenu

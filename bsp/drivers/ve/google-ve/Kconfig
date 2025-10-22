@@ -1,0 +1,10 @@
+# SPDX-License-Identifier: GPL-2.0
+
+config AW_VIDEO_GOOGLE_DECODER
+	tristate "google video vp9/av1 decoder support"
+	depends on ARCH_SUNXI
+	depends on DMA_SHARED_BUFFER
+	help
+	  This is the driver for google video decoder, including vp9
+	  To compile this driver as a module, choose M here: the
+	  module will be called google_vp9.

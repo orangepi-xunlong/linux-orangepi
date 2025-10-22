@@ -1,0 +1,10 @@
+# SPDX-License-Identifier: GPL-2.0
+#
+# Allwinner rfkill driver.
+#
+config AW_RFKILL
+  tristate "Allwinner rfkill driver"
+  depends on WIRELESS || RFKILL
+  help
+    allwinner rfkill driver
+
