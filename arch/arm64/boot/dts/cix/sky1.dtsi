@@ -393,8 +393,8 @@
 		ramoops: cix_ramoops@83d00000 {
 			compatible = "ramoops";
 			reg = <0x0 0x83d00000 0x0 0x000a0000>;
-			record-size = <0x10000>;
-			console-size = <0x10000>;
+			record-size = <0x60000>;
+			console-size = <0x20000>;
 			pmsg-size = <0x1000>;
 			status = "disabled";
 		};
@@ -3977,8 +3977,8 @@
 			ap_dump_mem_modu_smmu_size = <0x1000>;
 			ap_dump_mem_modu_tfa_size = <0x4000>;
 			ap_dump_mem_modu_gap_size = <256>;
-			ap_log_console_size = <0xc000>;
-			ap_log_dmesg_size = <0xc000>;
+			ap_log_console_size = <0x20000>;
+			ap_log_dmesg_size = <0x80000>;
 			status = "disabled";
 		};
 	};
