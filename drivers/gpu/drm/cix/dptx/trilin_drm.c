@@ -219,14 +219,6 @@ static int trilin_dp_connector_atomic_check(struct drm_connector *conn,
 	return 0;
 }
 
-static void trilin_dp_oob_hotplug_event(struct drm_connector *connector, enum drm_connector_status hpd_state)
-{
-	struct trilin_dp *dp = connector_to_dp(connector);
-	dp->force_hpd = hpd_state;
-	DP_INFO("drm_connector_status: %d ", hpd_state);
-	schedule_delayed_work(&dp->hpd_event_work, 0);
-}
-
 int trilin_connector_update_modes(struct drm_connector *connector,
 				  struct edid *edid)
 {
@@ -520,7 +512,6 @@ static const struct drm_connector_funcs trilin_dp_connector_funcs = {
 	.atomic_destroy_state = drm_atomic_helper_connector_destroy_state,
 	.reset = trilin_dp_connector_reset,
 	.debugfs_init = trilin_dp_connector_debugfs_init,
-	.oob_hotplug_event = trilin_dp_oob_hotplug_event,
 };
 
 static const struct drm_connector_helper_funcs
@@ -1142,7 +1133,6 @@ int trilin_dp_drm_init(struct trilin_dpsub *dpsub)
 	struct trilin_connector *conn = &dp->connector;
 	struct drm_encoder *encoder = &enc->base;
 	struct drm_connector *connector = &conn->base;
-	struct fwnode_handle *fwnode;
 	int ret;
 	int drm_mode_connector = DRM_MODE_CONNECTOR_DisplayPort;
 
@@ -1173,14 +1163,6 @@ int trilin_dp_drm_init(struct trilin_dpsub *dpsub)
 	drm_connector_helper_add(connector, &trilin_dp_connector_helper_funcs);
 	drm_connector_register(connector);
 	drm_connector_attach_encoder(connector, encoder);
-
-	/* Set dp fwnode as the connector's fwnode for oob hotplug enent. */
-	fwnode = dev_fwnode(dp->dev);
-	if (!fwnode) {
-		DP_ERR("dp->dev->fwnode is NULL\n");
-		return -ENODEV;
-	}
-	connector->fwnode = fwnode_handle_get(fwnode);
 
 	trilin_drm_mst_encoder_init(dp, connector->base.id);
 
