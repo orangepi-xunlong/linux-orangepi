@@ -1627,22 +1627,35 @@ done:
 
 static int init_gpio(struct fusb302_chip *chip)
 {
-	struct device *dev = chip->dev;
-	int ret = 0;
+	//struct device *dev = chip->dev;
+	//int ret = 0;
 
-	chip->gpio_int_n = devm_gpiod_get(dev, "fcs,int_n", GPIOD_IN);
-	if (IS_ERR(chip->gpio_int_n)) {
-		dev_err(dev, "failed to request gpio_int_n\n");
-		return PTR_ERR(chip->gpio_int_n);
+	//chip->gpio_int_n = devm_gpiod_get(dev, "fcs,int_n", GPIOD_IN);
+	//if (IS_ERR(chip->gpio_int_n)) {
+	//	dev_err(dev, "failed to request gpio_int_n\n");
+	//	return PTR_ERR(chip->gpio_int_n);
+	//}
+	//ret = gpiod_to_irq(chip->gpio_int_n);
+	//if (ret < 0) {
+	//	dev_err(dev,
+	//		"cannot request IRQ for GPIO Int_N, ret=%d", ret);
+	//	return ret;
+	//}
+	//chip->gpio_int_n_irq = ret;
+	//return 0;
+	struct device *dev = chip->dev;
+	struct gpio_desc *desc;
+	int irq;
+
+        irq = platform_get_irq(to_platform_device(dev), 0);
+	if (irq < 0) {
+		dev_err(dev, "failed to get irq: %d\n", irq);
+		return irq;
 	}
-	ret = gpiod_to_irq(chip->gpio_int_n);
-	if (ret < 0) {
-		dev_err(dev,
-			"cannot request IRQ for GPIO Int_N, ret=%d", ret);
-		return ret;
-	}
-	chip->gpio_int_n_irq = ret;
-	return 0;
+
+        chip->gpio_int_n_irq = irq;
+
+        return 0;
 }
 
 #define PDO_FIXED_FLAGS \
@@ -1691,6 +1704,7 @@ static int fusb302_probe(struct i2c_client *client,
 			"I2C/SMBus block functionality not supported!\n");
 		return -ENODEV;
 	}
+
 	chip = devm_kzalloc(&client->dev, sizeof(*chip), GFP_KERNEL);
 	if (!chip)
 		return -ENOMEM;
@@ -1726,12 +1740,14 @@ static int fusb302_probe(struct i2c_client *client,
 	init_tcpc_dev(&chip->tcpc_dev);
 	fusb302_debugfs_init(chip);
 
-	if (client->irq) {
+	if (0/*client->irq*/) {
 		chip->gpio_int_n_irq = client->irq;
 	} else {
+		printk("========= init_gpio\n");
 		ret = init_gpio(chip);
 		if (ret < 0)
 			goto destroy_workqueue;
+		client->irq = chip->gpio_int_n_irq;
 	}
 
 	chip->tcpc_dev.fwnode = fusb302_fwnode_get(dev);
@@ -1756,6 +1772,7 @@ static int fusb302_probe(struct i2c_client *client,
 		dev_err(dev, "cannot request IRQ for GPIO Int_N, ret=%d", ret);
 		goto tcpm_unregister_port;
 	}
+
 	enable_irq_wake(chip->gpio_int_n_irq);
 	i2c_set_clientdata(client, chip);
 

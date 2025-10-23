@@ -1078,13 +1078,13 @@ static int sunxi_drm_bind(struct device *dev)
 	ret = setup_bootloader_connecting_state(drm);
 	if (ret < 0) {
 		DRM_ERROR("setup bootloader connecting failed.Skip commit_init_connecting.\n");
-		//goto dev_register;
+		goto dev_register;
 	}
-	//commit_init_connecting(drm);
+	commit_init_connecting(drm);
 
-//dev_register:
+dev_register:
 	ret = drm_dev_register(drm, 0);
-	sunxi_drm_fbdev_init(drm);
+	//sunxi_drm_fbdev_init(drm);
 
 #if IS_ENABLED(CONFIG_PROC_FS)
 	ret = sunxi_drm_procfs_init(drm);

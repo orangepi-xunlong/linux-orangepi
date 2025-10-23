@@ -41,5 +41,6 @@ dtb-$(CONFIG_ARCH_SUNXI) += sun55i-t527-orangepi-4a.dtb
 dtb-$(CONFIG_ARCH_SUNXI) += sun60i-t736-ai-pc-lite-b.dtb
 dtb-$(CONFIG_ARCH_SUNXI) += sun60i-t736-ai-pc-lite-c.dtb
 dtb-$(CONFIG_ARCH_SUNXI) += sun60i-a733-orangepi-4-pro.dtb
+dtb-$(CONFIG_ARCH_SUNXI) += sun60i-a733-orangepi-zero3w.dtb
 
 subdir-y := $(dts-dirs) overlay

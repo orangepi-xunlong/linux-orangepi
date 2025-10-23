@@ -6,6 +6,7 @@
  * Hynetek Husb311 Type-C Chip Driver
  */
 
+#define DEBUG
 #include <linux/gpio/consumer.h>
 #include <linux/i2c.h>
 #include <linux/of_gpio.h>
@@ -253,7 +254,7 @@ static int husb311_set_vbus(struct tcpci *tcpci, struct tcpci_data *tdata,
 		power_supply_set_property(chip->usb_psy, POWER_SUPPLY_PROP_ONLINE, &temp);
 	}
 
-	dev_info(chip->dev, "set vbus %s", on ? "On" : "Off");
+	dev_err(chip->dev, "set vbus %s", on ? "On" : "Off");
 
 	if (on)
 		ret = regulator_enable(chip->vbus);
@@ -637,8 +638,8 @@ static void husb311_detect_cable(struct work_struct *work)
 
 	chip->tcpci->tcpc.get_cc(&chip->tcpci->tcpc, &cc1, &cc2);
 
-	//dev_info(chip->dev, "CC1: %d - %s, CC2: %d - %s\n",
-	//	 cc1, typec_cc_status_name[cc1], cc2, typec_cc_status_name[cc2]);
+	dev_info(chip->dev, "CC1: %d - %s, CC2: %d - %s\n",
+		 cc1, typec_cc_status_name[cc1], cc2, typec_cc_status_name[cc2]);
 
 	/**
 	 * FIXME:
