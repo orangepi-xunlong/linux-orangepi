@@ -11,6 +11,7 @@
 #include <linux/mfd/syscon.h>
 #include <linux/regmap.h>
 #include <linux/reset.h>
+#include <linux/spinlock.h>
 #include <sound/dmaengine_pcm.h>
 #include <sound/pcm_params.h>
 #include <sound/soc.h>
@@ -192,6 +193,12 @@ struct cdns_i2s_sc_priv {
 	 */
 	bool rx_start;
 	bool tx_start;
+
+	raw_spinlock_t lock;
+
+	bool i2s_en;
+	bool i2s_en_tx_first_start;
+	bool i2s_en_keep_active;
 };
 
 /* I2S SC index */
@@ -303,6 +310,18 @@ static void cdns_i2s_sc_rxtx_common_config(struct cdns_i2s_sc_priv *i2s_sc_priv,
 					   FIELD_PREP(I2S_TDM_CTRL_CHN_EN,
 						      i2s_sc_priv->tdm_config.rx_mask |
 						      i2s_sc_priv->tdm_config.tx_mask));
+		} else {
+			/* TDM mode enable */
+			regmap_update_bits(i2s_sc_priv->regmap, I2S_TDM_CTRL,
+					   I2S_TDM_CTRL_TDM_EN, I2S_TDM_CTRL_TDM_EN);
+
+			/* Two channels in TDM mode */
+			regmap_update_bits(i2s_sc_priv->regmap, I2S_TDM_CTRL, I2S_TDM_CTRL_CHN_NO,
+					   FIELD_PREP(I2S_TDM_CTRL_CHN_NO, (2 - 1)));
+
+			/* TDM mode channels enable */
+			regmap_update_bits(i2s_sc_priv->regmap, I2S_TDM_CTRL, I2S_TDM_CTRL_CHN_EN,
+					   FIELD_PREP(I2S_TDM_CTRL_CHN_EN, 0x3));
 		}
 
 		/* Transceiver clock enable */
@@ -319,21 +338,20 @@ static void cdns_i2s_sc_rxtx_common_config(struct cdns_i2s_sc_priv *i2s_sc_priv,
 		regmap_update_bits(i2s_sc_priv->regmap, I2S_CTRL,
 				   I2S_CTRL_I2S_STB, I2S_CTRL_I2S_STB);
 
-		if (i2s_sc_priv->is_tdm_mode) {
-			regmap_update_bits(i2s_sc_priv->regmap, I2S_TDM_CTRL,
-					   I2S_TDM_CTRL_TDM_EN, 0);
-
-			regmap_update_bits(i2s_sc_priv->regmap, I2S_TDM_CTRL,
-					   I2S_TDM_CTRL_CHN_NO, 0);
-
-			regmap_update_bits(i2s_sc_priv->regmap, I2S_TDM_CTRL,
-					   I2S_TDM_CTRL_CHN_EN, 0);
-		}
+		regmap_update_bits(i2s_sc_priv->regmap, I2S_TDM_CTRL,
+				   I2S_TDM_CTRL_TDM_EN, 0);
+		regmap_update_bits(i2s_sc_priv->regmap, I2S_TDM_CTRL,
+				   I2S_TDM_CTRL_CHN_NO, 0);
+		regmap_update_bits(i2s_sc_priv->regmap, I2S_TDM_CTRL,
+				   I2S_TDM_CTRL_CHN_EN, 0);
 
 		regmap_update_bits(i2s_sc_priv->regmap, I2S_CTRL_FDX,
 				   I2S_CTRL_FDX_FULL_DUPLEX, 0);
+
 		regmap_update_bits(i2s_sc_priv->regmap, I2S_CTRL,
 				   I2S_CTRL_I2S_EN, 0);
+		i2s_sc_priv->i2s_en = false;
+		i2s_sc_priv->i2s_en_tx_first_start = true;
 	}
 }
 
@@ -350,9 +368,13 @@ static void cdns_i2s_sc_tx_config(struct cdns_i2s_sc_priv *i2s_sc_priv, bool on)
 		regmap_update_bits(i2s_sc_priv->regmap, I2S_CTRL, irq_mask, irq_mask);
 
 		if (i2s_sc_priv->is_tdm_mode)
-			/* TDM mode channels transmit enale */
+			/* TDM mode channels transmit enable */
 			regmap_update_bits(i2s_sc_priv->regmap, I2S_TDM_FD_DIR, I2S_TDM_FD_DIR_CHN_TXEN,
 					   FIELD_PREP(I2S_TDM_FD_DIR_CHN_TXEN, i2s_sc_priv->tdm_config.tx_mask));
+		else
+			/* TDM mode channels transmit enable */
+			regmap_update_bits(i2s_sc_priv->regmap, I2S_TDM_FD_DIR, I2S_TDM_FD_DIR_CHN_TXEN,
+					   FIELD_PREP(I2S_TDM_FD_DIR_CHN_TXEN, 0x3));
 
 		/* Full-duplex mode transmitter enable */
 		regmap_update_bits(i2s_sc_priv->regmap, I2S_CTRL_FDX,
@@ -361,6 +383,7 @@ static void cdns_i2s_sc_tx_config(struct cdns_i2s_sc_priv *i2s_sc_priv, bool on)
 		/* Transceiver enable */
 		regmap_update_bits(i2s_sc_priv->regmap, I2S_CTRL,
 				   I2S_CTRL_I2S_EN, I2S_CTRL_I2S_EN);
+		i2s_sc_priv->i2s_en = true;
 
 		i2s_sc_priv->tx_start = true;
 	} else {
@@ -369,14 +392,18 @@ static void cdns_i2s_sc_tx_config(struct cdns_i2s_sc_priv *i2s_sc_priv, bool on)
 		regmap_update_bits(i2s_sc_priv->regmap, I2S_CTRL_FDX,
 				   I2S_CTRL_FDX_I2S_FTX_EN, 0);
 
-		if (i2s_sc_priv->is_tdm_mode)
-			regmap_update_bits(i2s_sc_priv->regmap, I2S_TDM_FD_DIR,
-					   I2S_TDM_FD_DIR_CHN_TXEN, 0);
+		regmap_update_bits(i2s_sc_priv->regmap, I2S_TDM_FD_DIR,
+				   I2S_TDM_FD_DIR_CHN_TXEN, 0);
 
 		regmap_update_bits(i2s_sc_priv->regmap, I2S_CTRL, irq_mask, 0);
 
 		if (!i2s_sc_priv->rx_start)
 			cdns_i2s_sc_rxtx_common_config(i2s_sc_priv, on);
+
+		if (i2s_sc_priv->i2s_en)
+			i2s_sc_priv->i2s_en_tx_first_start = false;
+
+		i2s_sc_priv->i2s_en_keep_active = false;
 	}
 }
 
@@ -393,9 +420,13 @@ static void cdns_i2s_sc_rx_config(struct cdns_i2s_sc_priv *i2s_sc_priv, bool on)
 		regmap_update_bits(i2s_sc_priv->regmap, I2S_CTRL_FDX, irq_mask, irq_mask);
 
 		if (i2s_sc_priv->is_tdm_mode)
-			/* TDM mode channels receive enale */
+			/* TDM mode channels receive enable */
 			regmap_update_bits(i2s_sc_priv->regmap, I2S_TDM_FD_DIR, I2S_TDM_FD_DIR_CHN_RXEN,
 					   FIELD_PREP(I2S_TDM_FD_DIR_CHN_RXEN, i2s_sc_priv->tdm_config.rx_mask));
+		else
+			/* TDM mode channels receive enable */
+			regmap_update_bits(i2s_sc_priv->regmap, I2S_TDM_FD_DIR, I2S_TDM_FD_DIR_CHN_RXEN,
+					   FIELD_PREP(I2S_TDM_FD_DIR_CHN_RXEN, 0x3));
 
 		/* Full-duplex mode receiver enable */
 		regmap_update_bits(i2s_sc_priv->regmap, I2S_CTRL_FDX,
@@ -404,6 +435,7 @@ static void cdns_i2s_sc_rx_config(struct cdns_i2s_sc_priv *i2s_sc_priv, bool on)
 		/* Transceiver enable */
 		regmap_update_bits(i2s_sc_priv->regmap, I2S_CTRL,
 				   I2S_CTRL_I2S_EN, I2S_CTRL_I2S_EN);
+		i2s_sc_priv->i2s_en = true;
 
 		i2s_sc_priv->rx_start = true;
 	} else {
@@ -412,13 +444,12 @@ static void cdns_i2s_sc_rx_config(struct cdns_i2s_sc_priv *i2s_sc_priv, bool on)
 		regmap_update_bits(i2s_sc_priv->regmap, I2S_CTRL_FDX,
 				   I2S_CTRL_FDX_I2S_FRX_EN, 0);
 
-		if (i2s_sc_priv->is_tdm_mode)
-			regmap_update_bits(i2s_sc_priv->regmap, I2S_TDM_FD_DIR,
-					   I2S_TDM_FD_DIR_CHN_RXEN, 0);
+		regmap_update_bits(i2s_sc_priv->regmap, I2S_TDM_FD_DIR,
+				   I2S_TDM_FD_DIR_CHN_RXEN, 0);
 
 		regmap_update_bits(i2s_sc_priv->regmap, I2S_CTRL_FDX, irq_mask, 0);
 
-		if (!i2s_sc_priv->tx_start)
+		if (!i2s_sc_priv->tx_start && !i2s_sc_priv->i2s_en_keep_active)
 			cdns_i2s_sc_rxtx_common_config(i2s_sc_priv, on);
 	}
 }
@@ -524,22 +555,22 @@ static int cdns_i2s_sc_set_fmt(struct snd_soc_dai *cpu_dai, unsigned int fmt)
 	case SND_SOC_DAIFMT_NB_NF:
 		/* both normal clocks */
 		ctrl |= I2S_CTRL_SCK_POLAR;
-		ctrl &= ~I2S_CTRL_WS_POLAR;
+		ctrl |= I2S_CTRL_WS_POLAR;
 		break;
 	case SND_SOC_DAIFMT_NB_IF:
 		/* invert frame clock */
 		ctrl |= I2S_CTRL_SCK_POLAR;
-		ctrl |= I2S_CTRL_WS_POLAR;
+		ctrl &= ~I2S_CTRL_WS_POLAR;
 		break;
 	case SND_SOC_DAIFMT_IB_NF:
 		/* invet bit clock */
 		ctrl &= ~I2S_CTRL_SCK_POLAR;
-		ctrl &= ~I2S_CTRL_WS_POLAR;
+		ctrl |= I2S_CTRL_WS_POLAR;
 		break;
 	case SND_SOC_DAIFMT_IB_IF:
 		/* invert both clocks */
 		ctrl &= ~I2S_CTRL_SCK_POLAR;
-		ctrl |= I2S_CTRL_WS_POLAR;
+		ctrl &= ~I2S_CTRL_WS_POLAR;
 		break;
 	default:
 		return -EINVAL;
@@ -599,6 +630,23 @@ static int cdns_i2s_sc_startup(struct snd_pcm_substream *substream,
 			     i2s_sc_priv->devtype_data->tx_fifo_aempty_threshold);
 		regmap_write(i2s_sc_priv->regmap, I2S_FIFO_AFULL,
 			     i2s_sc_priv->devtype_data->tx_fifo_afull_threshold);
+
+		raw_spin_lock(&i2s_sc_priv->lock);
+		if (!i2s_sc_priv->i2s_en_tx_first_start) {
+			dev_dbg(i2s_sc_priv->dev, "hit the corner case\n");
+
+			i2s_sc_priv->i2s_en_keep_active = true;
+			if (i2s_sc_priv->is_tdm_mode) {
+				unsigned int i, num;
+
+				num = hweight32(i2s_sc_priv->tdm_config.tx_mask);
+				for (i = 0; i < (num - 1); i++)
+					regmap_write(i2s_sc_priv->regmap, I2S_FIFO_ADDRESS, 0x0);
+			} else {
+				regmap_write(i2s_sc_priv->regmap, I2S_FIFO_ADDRESS, 0x0);
+			}
+		}
+		raw_spin_unlock(&i2s_sc_priv->lock);
 	} else {
 		/*
 		 * Receiver FIFO reset
@@ -744,6 +792,9 @@ static int cdns_i2s_sc_trigger(struct snd_pcm_substream *substream,
 			       int cmd, struct snd_soc_dai *cpu_dai)
 {
 	struct cdns_i2s_sc_priv *i2s_sc_priv = snd_soc_dai_get_drvdata(cpu_dai);
+	int ret = 0;
+
+	raw_spin_lock(&i2s_sc_priv->lock);
 
 	switch (cmd) {
 	case SNDRV_PCM_TRIGGER_START:
@@ -763,10 +814,12 @@ static int cdns_i2s_sc_trigger(struct snd_pcm_substream *substream,
 			cdns_i2s_sc_rx_config(i2s_sc_priv, false);
 		break;
 	default:
-		return -EINVAL;
+		ret = -EINVAL;
 	}
 
-	return 0;
+	raw_spin_unlock(&i2s_sc_priv->lock);
+
+	return ret;
 }
 
 static int cdns_i2s_sc_dai_probe(struct snd_soc_dai *cpu_dai)
@@ -804,9 +857,6 @@ static int cdns_i2s_sc_dai_probe(struct snd_soc_dai *cpu_dai)
 			   I2S_CTRL_FDX_FULL_DUPLEX | I2S_CTRL_FDX_I2S_FTX_EN |
 			   I2S_CTRL_FDX_I2S_FRX_EN,
 			   0);
-
-	/* TDM mode disable, default works in standard stereo I2S mode */
-	regmap_update_bits(i2s_sc_priv->regmap, I2S_TDM_CTRL, I2S_TDM_CTRL_TDM_EN, 0);
 
 	snd_soc_dai_init_dma_data(cpu_dai, &i2s_sc_priv->playback_dma_data,
 				  &i2s_sc_priv->capture_dma_data);
@@ -870,6 +920,7 @@ static const struct reg_default cdns_i2s_sc_reg_defaults[] = {
 	{I2S_FIFO_AFULL_FDR, 0x0000000f},
 	{I2S_TDM_CTRL, 0xffff0000},
 	{I2S_TDM_FD_DIR, 0x0000ffff},
+	{I2S_FIFO_ADDRESS, 0x00000000},
 };
 
 static bool cdns_i2s_sc_readable_reg(struct device *dev, unsigned int reg)
@@ -889,6 +940,7 @@ static bool cdns_i2s_sc_readable_reg(struct device *dev, unsigned int reg)
 	case I2S_FIFO_AFULL_FDR:
 	case I2S_TDM_CTRL:
 	case I2S_TDM_FD_DIR:
+	case I2S_FIFO_ADDRESS:
 		return true;
 	default:
 		return false;
@@ -910,6 +962,7 @@ static bool cdns_i2s_sc_writeable_reg(struct device *dev, unsigned int reg)
 	case I2S_FIFO_AFULL_FDR:
 	case I2S_TDM_CTRL:
 	case I2S_TDM_FD_DIR:
+	case I2S_FIFO_ADDRESS:
 		return true;
 	default:
 		return false;
@@ -933,7 +986,7 @@ static struct regmap_config cdns_i2s_sc_regmap_config = {
 	.reg_stride = 4,
 	.val_bits = 32,
 
-	.max_register = I2S_TDM_FD_DIR,
+	.max_register = I2S_FIFO_ADDRESS,
 	.reg_defaults = cdns_i2s_sc_reg_defaults,
 	.num_reg_defaults = ARRAY_SIZE(cdns_i2s_sc_reg_defaults),
 	.readable_reg = cdns_i2s_sc_readable_reg,
@@ -1017,6 +1070,14 @@ static int cdns_i2s_sc_probe(struct platform_device *pdev)
 	i2s_sc_priv->idx = of_alias_get_id(i2s_sc_priv->dev->of_node, "i2s");
 	if (i2s_sc_priv->idx < 0)
 		device_property_read_u32(&pdev->dev, "id", &i2s_sc_priv->idx);
+
+	i2s_sc_priv->rx_start = false;
+	i2s_sc_priv->tx_start = false;
+	i2s_sc_priv->i2s_en = false;
+	i2s_sc_priv->i2s_en_tx_first_start = true;
+	i2s_sc_priv->i2s_en_keep_active = false;
+
+	raw_spin_lock_init(&i2s_sc_priv->lock);
 
 	i2s_sc_priv->regmap = devm_regmap_init_mmio(&pdev->dev, base,
 						    &cdns_i2s_sc_regmap_config);
