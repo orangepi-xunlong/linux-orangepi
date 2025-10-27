@@ -1361,6 +1361,21 @@ config MFD_RC5T583
 	  Additional drivers must be enabled in order to use the
 	  different functionality of the device.
 
+config MFD_ROCKCHIP_MFPWM
+	tristate "Rockchip multi-function PWM controller"
+	depends on OF
+	depends on HAS_IOMEM
+	depends on COMMON_CLK
+	select MFD_CORE
+	help
+	  Some Rockchip SoCs, such as the RK3576, use a PWM controller that has
+	  several different functions, such as generating PWM waveforms but also
+	  counting waveforms.
+
+	  This driver manages the overall device, and selects between different
+	  functionalities at runtime as needed. Drivers for them are implemented
+	  in their respective subsystems.
+
 config MFD_RK8XX
 	tristate
 	select MFD_CORE
