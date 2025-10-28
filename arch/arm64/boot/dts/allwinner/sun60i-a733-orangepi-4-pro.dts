@@ -1653,8 +1653,8 @@
 };
 
 &pcie_rc {
-	//power-gpios =  <&r_pio PL 3 GPIO_ACTIVE_HIGH>;
-	//reset-gpios = <&pio PD 22 GPIO_ACTIVE_HIGH>;
+	power-gpios =  <&r_pio PL 3 GPIO_ACTIVE_HIGH>;
+	reset-gpios = <&pio PD 22 GPIO_ACTIVE_HIGH>;
 	wake-gpios = <&pio PD 21 GPIO_ACTIVE_HIGH>;
 	pcie1v8-supply = <&reg_bldo1>;
 	pcie3v3-supply = <&reg_dcdc1>;

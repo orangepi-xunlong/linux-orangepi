@@ -168,6 +168,7 @@
 #define LINK_WAIT_USLEEP_MAX		100000
 #define SPEED_CHANGE_USLEEP_MIN		100
 #define SPEED_CHANGE_USLEEP_MAX		1000
+#define WAIT_ATU			1
 
 #define PCIE_MSI_ADDR_LO		0x820
 #define PCIE_MSI_ADDR_HI		0x824
@@ -194,6 +195,21 @@
 #define RDLH_LINK_UP			BIT(1)
 #define SMLH_LINK_UP			BIT(0)
 #define PCIE_LINK_INT_EN		(BIT(0) | BIT(1))
+
+#define SII_INT_MASK0			0x0e00
+#define SII_INT_STAS0			0x0e08
+	#define INTX_TX_DEASSERT_MASK	GENMASK(28, 25)
+	#define INTX_TX_DEASSERT_SHIFT	25
+	#define INTX_TX_DEASSERT(x)		BIT((x) + INTX_TX_DEASSERT_SHIFT)
+	#define INTX_TX_ASSERT_MASK		GENMASK(24, 21)
+	#define INTX_TX_ASSERT_SHIFT	21
+	#define INTX_TX_ASSERT(x)		BIT((x) + INTX_TX_ASSERT_SHIFT)
+	#define INTX_RX_DEASSERT_MASK	GENMASK(12, 9)
+	#define INTX_RX_DEASSERT_SHIFT	9
+	#define INTX_RX_DEASSERT(x)		BIT((x) + INTX_RX_DEASSERT_SHIFT)
+	#define INTX_RX_ASSERT_MASK		GENMASK(8, 5)
+	#define INTX_RX_ASSERT_SHIFT	5
+	#define INTX_RX_ASSERT(x)		BIT((x) + INTX_RX_ASSERT_SHIFT)
 
 #define PCIE_PHY_CFG			0x800
 #define SYS_CLK				0
@@ -264,8 +280,13 @@ struct sunxi_pcie_ep {
 
 struct sunxi_pcie_ep_ops {
 	void	(*ep_init)(struct sunxi_pcie_ep *ep);
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 12, 0)
 	int	(*raise_irq)(struct sunxi_pcie_ep *ep, u8 func_no,
 			     enum pci_epc_irq_type type, u16 interrupt_num);
+#else
+	int	(*raise_irq)(struct sunxi_pcie_ep *ep, u8 func_no,
+			     unsigned int type, u16 interrupt_num);
+#endif
 	const struct pci_epc_features *(*get_features)(struct sunxi_pcie_ep *ep);
 	unsigned int (*func_conf_select)(struct sunxi_pcie_ep *ep, u8 func_no);
 };
@@ -282,6 +303,7 @@ struct sunxi_pcie_port {
 	u32				num_ob_windows;
 	struct sunxi_pcie_host_ops	*ops;
 	int				msi_irq;
+	struct irq_domain		*intx_domain;
 	struct irq_domain		*irq_domain;
 	struct irq_domain		*msi_domain;
 	u16			msi_msg;
@@ -317,7 +339,6 @@ struct sunxi_pcie {
 	struct dma_trx_obj	*dma_obj;
 	const struct sunxi_pcie_of_data *drvdata;
 	struct gpio_desc	*rst_gpio;
-	struct gpio_desc	*pwr_gpio;
 	struct gpio_desc	*wake_gpio;
 	u32			lanes;
 	u32			num_edma;

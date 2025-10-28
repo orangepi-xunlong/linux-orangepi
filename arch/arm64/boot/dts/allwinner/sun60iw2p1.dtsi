@@ -5023,6 +5023,11 @@
 			interrupt-names = "sii", "msi", "edma-w0", "edma-w1", "edma-w2", "edma-w3",
 					  "edma-r0", "edma-r1", "edma-r2", "edma-r3";
 			#interrupt-cells = <1>;
+			interrupt-map-mask = <0 0 0 7>;
+			interrupt-map = <0 0 0 1 &pcie_intc 0>,
+							<0 0 0 2 &pcie_intc 1>,
+							<0 0 0 3 &pcie_intc 2>,
+							<0 0 0 4 &pcie_intc 3>;
 			num-edma = <4>;
 			max-link-speed = <3>;
 			num-ib-windows = <16>;
@@ -5035,6 +5040,12 @@
 			reset-names = "pclk_rst", "pwrup_rst", "its";
 			busno = <0>;
 			status = "disabled";
+
+			pcie_intc: legacy-interrupt-controller {
+				interrupt-controller;
+				#address-cells = <0>;
+				#interrupt-cells = <1>;
+			};
 		};
 	};
 };

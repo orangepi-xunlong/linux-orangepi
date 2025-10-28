@@ -38,7 +38,7 @@
 #include "pcie-sunxi-dma.h"
 #include "pcie-sunxi.h"
 
-#define SUNXI_PCIE_MODULE_VERSION	"1.1.4"
+#define SUNXI_PCIE_MODULE_VERSION	"1.2.4"
 
 void sunxi_pcie_writel(u32 val, struct sunxi_pcie *pcie, u32 offset)
 {
@@ -615,9 +615,31 @@ static void sunxi_pcie_plat_combo_phy_deinit(struct sunxi_pcie *pci)
 	phy_exit(pci->phy);
 }
 
+static void sunxi_pcie_plat_sii_int0_handler(struct sunxi_pcie_port *pp)
+{
+	struct sunxi_pcie *pci = to_sunxi_pcie_from_pp(pp);
+	u32 mask, stas, irq;
+
+	mask = sunxi_pcie_readl(pci, SII_INT_MASK0);
+	stas = sunxi_pcie_readl(pci, SII_INT_STAS0);
+	irq = mask & stas;
+
+	if (irq & INTX_RX_ASSERT_MASK) {
+		unsigned long status = irq & INTX_RX_ASSERT_MASK;
+		u32 bit = INTX_RX_ASSERT_SHIFT;
+		for_each_set_bit_from(bit, &status, PCI_NUM_INTX + INTX_RX_ASSERT_SHIFT) {
+			/* Clear INTx status */
+			sunxi_pcie_writel(BIT(bit), pci, SII_INT_STAS0);
+			generic_handle_domain_irq(pp->intx_domain, bit - INTX_RX_ASSERT_SHIFT);
+		}
+	}
+}
+
 static irqreturn_t sunxi_pcie_plat_sii_handler(int irq, void *arg)
 {
 	struct sunxi_pcie_port *pp = (struct sunxi_pcie_port *)arg;
+
+	sunxi_pcie_plat_sii_int0_handler(pp);
 
 	sunxi_pcie_plat_irqpending(pp);
 
@@ -968,12 +990,6 @@ static int sunxi_pcie_plat_parse_dts_res(struct platform_device *pdev, struct su
 		pci->link_gen = 0x1;
 	}
 
-	pci->pwr_gpio = devm_gpiod_get(&pdev->dev, "power", GPIOD_OUT_HIGH);
-	if (IS_ERR(pci->pwr_gpio))
-		sunxi_warn(&pdev->dev, "Failed to get \"power-gpios\"\n");
-	else
-		gpiod_direction_output(pci->pwr_gpio, 0);
-
 	pci->rst_gpio = devm_gpiod_get(&pdev->dev, "reset", GPIOD_OUT_HIGH);
 	if (IS_ERR(pci->rst_gpio))
 		sunxi_warn(&pdev->dev, "Failed to get \"reset-gpios\"\n");
@@ -1133,7 +1149,11 @@ err0:
 	return ret;
 }
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 12, 0)
 static int sunxi_pcie_plat_remove(struct platform_device *pdev)
+#else
+static void sunxi_pcie_plat_remove(struct platform_device *pdev)
+#endif
 {
 	struct sunxi_pcie *pci = platform_get_drvdata(pdev);
 
@@ -1159,7 +1179,9 @@ static int sunxi_pcie_plat_remove(struct platform_device *pdev)
 
 	sunxi_pcie_plat_ltssm_disable(pci);
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 12, 0)
 	return 0;
+#endif
 }
 
 #if IS_ENABLED(CONFIG_PM)
@@ -1232,7 +1254,11 @@ static struct platform_driver sunxi_pcie_plat_driver = {
 		.pm = &sunxi_pcie_plat_pm_ops,
 	},
 	.probe  = sunxi_pcie_plat_probe,
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 12, 0)
 	.remove = sunxi_pcie_plat_remove,
+#else
+	.remove_new = sunxi_pcie_plat_remove,
+#endif
 };
 
 module_platform_driver(sunxi_pcie_plat_driver);

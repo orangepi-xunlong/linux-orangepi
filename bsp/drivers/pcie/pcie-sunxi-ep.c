@@ -568,15 +568,22 @@ static int sunxi_pcie_ep_send_msi_irq(struct sunxi_pcie_ep *ep, u8 func_no,
 #if LINUX_VERSION_CODE < KERNEL_VERSION(5, 15, 0)
 static int sunxi_pcie_ep_raise_irq(struct pci_epc *epc, u8 fn,
 				      enum pci_epc_irq_type type, u16 interrupt_num)
-#else
+#elif (KERNEL_VERSION(5, 15, 0) <= LINUX_VERSION_CODE) && (LINUX_VERSION_CODE < KERNEL_VERSION(6, 12, 0))
 static int sunxi_pcie_ep_raise_irq(struct pci_epc *epc, u8 fn, u8 vfn,
 				      enum pci_epc_irq_type type, u16 interrupt_num)
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0)
+static int sunxi_pcie_ep_raise_irq(struct pci_epc *epc, u8 fn, u8 vfn,
+				      unsigned int  type, u16 interrupt_num)
 #endif
 {
 	struct sunxi_pcie_ep *ep = epc_get_drvdata(epc);
 
 	switch (type) {
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 12, 0)
 	case PCI_EPC_IRQ_MSI:
+#else
+	case PCI_IRQ_MSI:
+#endif
 		return sunxi_pcie_ep_send_msi_irq(ep, fn, interrupt_num);
 	default:
 		return -EINVAL;
@@ -601,6 +608,7 @@ static void sunxi_pcie_ep_stop(struct pci_epc *epc)
 	sunxi_pcie_stop_link(pci);
 }
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 12, 0)
 static const struct pci_epc_features sunxi_pcie_epc_features = {
 	.linkup_notifier	= false,
 	.msi_capable		= true,
@@ -609,6 +617,17 @@ static const struct pci_epc_features sunxi_pcie_epc_features = {
 	.bar_fixed_64bit	= BIT(BAR_0) | BIT(BAR_4),
 	.align			= SZ_1M,
 };
+#else
+static const struct pci_epc_features sunxi_pcie_epc_features = {
+	.linkup_notifier	= false,
+	.msi_capable		= true,
+	.msix_capable		= false,
+	.bar[BAR_0]		= { .only_64bit = true, },
+	.bar[BAR_2]		= { .type = BAR_RESERVED, },
+	.bar[BAR_4]		= { .only_64bit = true, },
+	.align			= SZ_1M,
+};
+#endif
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(5, 15, 0)
 static const struct pci_epc_features *sunxi_pcie_ep_get_features(struct pci_epc *epc, u8 func_no)
