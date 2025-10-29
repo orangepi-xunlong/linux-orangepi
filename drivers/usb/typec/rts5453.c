@@ -386,10 +386,9 @@ static int rts5453h_typec_get_switch_handles(struct rts5453h *typec,
 	typec->mux = typec->port->mux;
 	typec->ori_sw = typec->port->sw;
 	typec->role_sw = fwnode_usb_role_switch_get(fwnode);
-	if (IS_ERR(typec->role_sw)) {
-		dev_err(dev, "USB role switch handle is error.\n");
-		return PTR_ERR(typec->role_sw);
-	}
+	if (IS_ERR(typec->role_sw))
+		return dev_err_probe(dev, PTR_ERR(typec->role_sw), "USB role switch handle is error\n");
+
 	if (!typec->role_sw || !typec->mux || !typec->ori_sw)
 		dev_warn(dev, "mux or switch or role switch has not found\n");
 
