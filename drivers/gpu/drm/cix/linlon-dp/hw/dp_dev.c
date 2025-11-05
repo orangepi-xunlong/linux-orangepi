@@ -307,6 +307,14 @@ static void dp_flush(struct linlondp_dev *mdev, int master_pipe,
 	linlondp_write32(dp->gcu_addr, reg_offset, GCU_CONFIG_CVAL);
 }
 
+static void dpu_sw_reset(struct linlondp_dev *mdev)
+{
+	struct dp_dev *dp = mdev->chip_data;
+	u32 __iomem *gcu = dp->gcu_addr;
+
+	linlondp_write32_mask(gcu, BLK_CONTROL, GCU_CONTROL_SRST, GCU_CONTROL_SRST);
+}
+
 static int dp_reset(struct dp_dev *dp)
 {
 	u32 __iomem *gcu = dp->gcu_addr;
@@ -663,6 +671,7 @@ static const struct linlondp_dev_funcs dp_chip_funcs = {
 	.dump_register = dp_dump,
 	.close_gop = dp_close_gop,
 	.gop_mode_changed = dp_gop_mode_changed,
+	.dpu_reset = dpu_sw_reset,
 };
 
 const struct linlondp_dev_funcs *dp_identify(u32 __iomem *reg_base,

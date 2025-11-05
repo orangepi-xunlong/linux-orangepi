@@ -467,14 +467,26 @@ void linlondp_crtc_flush_and_wait_for_flip_done(
 		mdev->funcs->flush(mdev, kcrtc->master->id, 0);
 
 	/* wait the flip take affect. wait for a maximum time of 60 frames*/
-	timeout = 60 * vblank->framedur_ns / 1000000;
+	timeout = 3 * vblank->framedur_ns / 1000000;
 	timeout = wait_for_completion_timeout(flip_done, msecs_to_jiffies(timeout));
 	if (timeout == 0) {
 		dev_err(mdev->dev, "wait pipe%d flip done timeout\n",
 			kcrtc->master->id);
+		mdev->funcs->dpu_reset(mdev);
 		if (!input_flip_done) {
 			spin_lock_irqsave(&drm->event_lock, flags);
 			kcrtc->disable_done = NULL;
+			spin_unlock_irqrestore(&drm->event_lock, flags);
+		} else {
+			struct drm_crtc *crtc = &kcrtc->base;
+			struct drm_pending_vblank_event *event;
+			event = crtc->state->event;
+			spin_lock_irqsave(&drm->event_lock, flags);
+			crtc->state->event = NULL;
+			if (event) {
+				drm_crtc_send_vblank_event(crtc, event);
+				dev_info(mdev->dev, "Send vblank event manually\n");
+			}
 			spin_unlock_irqrestore(&drm->event_lock, flags);
 		}
 	}

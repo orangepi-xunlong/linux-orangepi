@@ -156,6 +156,8 @@ struct linlondp_dev_funcs {
 	/** @gop_mode_changed: test if gop mode changed */
 	bool (*gop_mode_changed)(struct linlondp_dev *mdev,
 				 struct drm_display_mode *mode);
+	/** @reset_dpu: sw reset linlon_dp */
+	void (*dpu_reset)(struct linlondp_dev *mdev);
 };
 
 /*
