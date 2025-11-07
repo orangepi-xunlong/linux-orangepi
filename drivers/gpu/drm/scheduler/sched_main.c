@@ -1292,13 +1292,7 @@ int drm_sched_init(struct drm_gpu_scheduler *sched,
 		sched->submit_wq = submit_wq;
 		sched->own_submit_wq = false;
 	} else {
-#ifdef CONFIG_LOCKDEP
-		sched->submit_wq = alloc_ordered_workqueue_lockdep_map(name,
-								       WQ_MEM_RECLAIM,
-								       &drm_sched_lockdep_map);
-#else
 		sched->submit_wq = alloc_ordered_workqueue(name, WQ_MEM_RECLAIM);
-#endif
 		if (!sched->submit_wq)
 			return -ENOMEM;
 
