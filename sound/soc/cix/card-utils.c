@@ -451,6 +451,9 @@ int cix_card_parse_of(struct cix_asoc_card *priv)
 	if (!link_info)
 		return -ENOMEM;
 
+	link->trigger_start = SND_SOC_TRIGGER_ORDER_DEFAULT;
+	link->trigger_stop = SND_SOC_TRIGGER_ORDER_LDC;
+
 	card->num_links = num_links;
 	card->dai_link = link;
 	card->suspend_post = cix_card_suspend_post;
@@ -921,6 +924,9 @@ int cix_card_parse_acpi(struct cix_asoc_card *priv)
 	link_info = devm_kcalloc(dev, num_links, sizeof(*link_info), GFP_KERNEL);
 	if (!link_info)
 		return -ENOMEM;
+
+	link->trigger_start = SND_SOC_TRIGGER_ORDER_DEFAULT;
+	link->trigger_stop = SND_SOC_TRIGGER_ORDER_LDC;
 
 	card->name = "cix,sky1";
 	card->num_links = num_links;

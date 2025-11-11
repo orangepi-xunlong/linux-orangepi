@@ -195,10 +195,6 @@ struct cdns_i2s_sc_priv {
 	bool tx_start;
 
 	raw_spinlock_t lock;
-
-	bool i2s_en;
-	bool i2s_en_tx_first_start;
-	bool i2s_en_keep_active;
 };
 
 /* I2S SC index */
@@ -350,14 +346,14 @@ static void cdns_i2s_sc_rxtx_common_config(struct cdns_i2s_sc_priv *i2s_sc_priv,
 
 		regmap_update_bits(i2s_sc_priv->regmap, I2S_CTRL,
 				   I2S_CTRL_I2S_EN, 0);
-		i2s_sc_priv->i2s_en = false;
-		i2s_sc_priv->i2s_en_tx_first_start = true;
 	}
 }
 
 static void cdns_i2s_sc_tx_config(struct cdns_i2s_sc_priv *i2s_sc_priv, bool on)
 {
-	u32 irq_mask = 0;
+	u32 irq_mask = 0, fifo_level = 0;
+	unsigned int timeout = 16;
+
 
 	irq_mask |= I2S_CTRL_I2S_MASK;
 
@@ -383,10 +379,32 @@ static void cdns_i2s_sc_tx_config(struct cdns_i2s_sc_priv *i2s_sc_priv, bool on)
 		/* Transceiver enable */
 		regmap_update_bits(i2s_sc_priv->regmap, I2S_CTRL,
 				   I2S_CTRL_I2S_EN, I2S_CTRL_I2S_EN);
-		i2s_sc_priv->i2s_en = true;
 
 		i2s_sc_priv->tx_start = true;
 	} else {
+		/*
+		 * In full-duplex mode, transmitter disable when receiver enabled,
+		 * internal register would residue the last data, then trasmit it when
+		 * transmitter enable again, lead to an extra piece of channel data
+		 * being sent, underrun can correct the logic inside.
+		 *
+		 * Maximum tx fifo size is 16, minimum sample rate supported is 8KHz,
+		 * single frame time is 125us, so set timeout to 2000us.
+		 */
+		while (timeout--) {
+			regmap_read(i2s_sc_priv->regmap, I2S_FIFO_LEVEL, &fifo_level);
+			if (!fifo_level)
+				break;
+			udelay(125);
+		}
+		if (!timeout)
+			dev_warn(i2s_sc_priv->dev, "tx fifo transmit timeout\n");
+		else
+			/* Must wait at least single frame time to generate underrun,
+			 * minimum sample rate supported is 8KHz, single frame time is 125us.
+			 */
+			udelay(250);
+
 		i2s_sc_priv->tx_start = false;
 
 		regmap_update_bits(i2s_sc_priv->regmap, I2S_CTRL_FDX,
@@ -399,11 +417,6 @@ static void cdns_i2s_sc_tx_config(struct cdns_i2s_sc_priv *i2s_sc_priv, bool on)
 
 		if (!i2s_sc_priv->rx_start)
 			cdns_i2s_sc_rxtx_common_config(i2s_sc_priv, on);
-
-		if (i2s_sc_priv->i2s_en)
-			i2s_sc_priv->i2s_en_tx_first_start = false;
-
-		i2s_sc_priv->i2s_en_keep_active = false;
 	}
 }
 
@@ -435,7 +448,6 @@ static void cdns_i2s_sc_rx_config(struct cdns_i2s_sc_priv *i2s_sc_priv, bool on)
 		/* Transceiver enable */
 		regmap_update_bits(i2s_sc_priv->regmap, I2S_CTRL,
 				   I2S_CTRL_I2S_EN, I2S_CTRL_I2S_EN);
-		i2s_sc_priv->i2s_en = true;
 
 		i2s_sc_priv->rx_start = true;
 	} else {
@@ -449,7 +461,7 @@ static void cdns_i2s_sc_rx_config(struct cdns_i2s_sc_priv *i2s_sc_priv, bool on)
 
 		regmap_update_bits(i2s_sc_priv->regmap, I2S_CTRL_FDX, irq_mask, 0);
 
-		if (!i2s_sc_priv->tx_start && !i2s_sc_priv->i2s_en_keep_active)
+		if (!i2s_sc_priv->tx_start)
 			cdns_i2s_sc_rxtx_common_config(i2s_sc_priv, on);
 	}
 }
@@ -630,23 +642,6 @@ static int cdns_i2s_sc_prepare(struct snd_pcm_substream *substream,
 			     i2s_sc_priv->devtype_data->tx_fifo_aempty_threshold);
 		regmap_write(i2s_sc_priv->regmap, I2S_FIFO_AFULL,
 			     i2s_sc_priv->devtype_data->tx_fifo_afull_threshold);
-
-		raw_spin_lock(&i2s_sc_priv->lock);
-		if (!i2s_sc_priv->i2s_en_tx_first_start) {
-			dev_dbg(i2s_sc_priv->dev, "hit the corner case\n");
-
-			i2s_sc_priv->i2s_en_keep_active = true;
-			if (i2s_sc_priv->is_tdm_mode) {
-				unsigned int i, num;
-
-				num = hweight32(i2s_sc_priv->tdm_config.tx_mask);
-				for (i = 0; i < (num - 1); i++)
-					regmap_write(i2s_sc_priv->regmap, I2S_FIFO_ADDRESS, 0x0);
-			} else {
-				regmap_write(i2s_sc_priv->regmap, I2S_FIFO_ADDRESS, 0x0);
-			}
-		}
-		raw_spin_unlock(&i2s_sc_priv->lock);
 	} else {
 		/*
 		 * Receiver FIFO reset
@@ -1073,9 +1068,6 @@ static int cdns_i2s_sc_probe(struct platform_device *pdev)
 
 	i2s_sc_priv->rx_start = false;
 	i2s_sc_priv->tx_start = false;
-	i2s_sc_priv->i2s_en = false;
-	i2s_sc_priv->i2s_en_tx_first_start = true;
-	i2s_sc_priv->i2s_en_keep_active = false;
 
 	raw_spin_lock_init(&i2s_sc_priv->lock);
 
