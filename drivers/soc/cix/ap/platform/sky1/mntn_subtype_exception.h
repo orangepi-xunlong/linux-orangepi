@@ -69,11 +69,12 @@
 
 #define SE_REBOOT_SUB_DEF(name, value) SUBTYPE_DEF(SE_REBOOT, name, value)
 #define SE_REBOOT_SUB_LIST                                              \
-	SUBTYPE_DEF_RES(SE_REBOOT), SE_REBOOT_SUB_DEF(SECOND_WDT, 0x1), \
+	SUBTYPE_DEF_RES(SE_REBOOT), SE_REBOOT_SUB_DEF(AP_SECOND_WDT, 0x1), \
 		SE_REBOOT_SUB_DEF(USER_RESET, 0x2),                     \
 		SE_REBOOT_SUB_DEF(PM_WDT, 0x3),                         \
 		SE_REBOOT_SUB_DEF(HARD_FAULT, 0x4),                     \
-		SE_REBOOT_SUB_DEF(FW_ERR, 0x5)
+		SE_REBOOT_SUB_DEF(FW_ERR, 0x5),                         \
+		SE_REBOOT_SUB_DEF(SE_SECOND_WDT, 0x6)
 
 #define NI700_EXCEPTION_SUB_DEF(name, value) \
 	SUBTYPE_DEF(NI700_EXCEPTION, name, value)
