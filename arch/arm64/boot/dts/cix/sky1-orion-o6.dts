@@ -1755,7 +1755,7 @@
 		status = "okay";
 	};
 };
-/*
+
 &i2c1 {
 	imgsensor01: imgsensor01@36 {
 		compatible = "image,sensor0";
@@ -1774,7 +1774,7 @@
 		status = "okay";
 	};
 };
-*/
+
 &i2c2 {
 	status = "okay";
 	pinctrl-names = "default";
