@@ -905,10 +905,12 @@ void linlondp_complete_data_flow_cfg(struct linlondp_layer *layer,
 	struct linlondp_scaler *scaler = layer->base.pipeline->scalers[0];
 	u32 w = dflow->in_w;
 	u32 h = dflow->in_h;
+	struct linlondp_pipeline *pipe = layer->base.pipeline;
 
 	dflow->total_in_w = dflow->in_w;
 	dflow->total_in_h = dflow->in_h;
 	dflow->total_out_w = dflow->out_w;
+	u32 out_w = pipe->pixel_per_cycle == 1 ? dflow->out_w : dflow->out_w / 2;
 
 	/* if format doesn't have alpha, fix blend mode to PIXEL_NONE */
 	if (!fb->format->has_alpha)
@@ -928,7 +930,7 @@ void linlondp_complete_data_flow_cfg(struct linlondp_layer *layer,
 	 */
 	if (dflow->en_scaling && scaler)
 		dflow->en_split = !linlon_in_range(&scaler->hsize, dflow->in_w) ||
-				  !linlon_in_range(&scaler->hsize, dflow->out_w);
+				  !linlon_in_range(&scaler->hsize, out_w);
 }
 
 static bool merger_is_available(struct linlondp_pipeline *pipe,

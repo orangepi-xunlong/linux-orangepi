@@ -262,9 +262,15 @@ static int trilin_dp_add_virtual_modes_noedid(struct drm_connector *connector)
 	struct drm_display_mode *mode;
 	struct drm_display_mode *preferred_mode;
 	struct drm_device *dev = connector->dev;
+	struct trilin_dp *dp = connector_to_dp(connector);
 
 	preferred_mode = list_first_entry(&connector->probed_modes,
 					  struct drm_display_mode, head);
+
+	list_for_each_entry(mode, &connector->probed_modes, head) {
+		dp->my_copied_modes++;
+	}
+	DP_DEBUG("preferred_mode: %s %d\n", preferred_mode->name, preferred_mode->clock);
 
 	count = ARRAY_SIZE(trilin_drm_dmt_modes);
 	for (i = 0; i < count; i++) {
@@ -832,7 +838,8 @@ int trilin_dp_encoder_atomic_adjust_mode(struct trilin_dp *dp,
 		else
 			adjusted_mode->flags |= DRM_MODE_FLAG_PHSYNC;
 
-		DP_DEBUG("adjust_mode flags: 0x%0x", adjusted_mode->flags);
+		DP_DEBUG("adjust_mode flags: 0x%0x adjust_mode: %s-%d mode: %s"
+			, adjusted_mode->flags, adjusted_mode->name, adjusted_mode->clock, mode->name);
 	}
 
 	return 0;
@@ -971,23 +978,47 @@ int trilin_dp_encoder_atomic_check(struct drm_encoder *encoder,
 	struct drm_display_info *info =
 		&connector_state->connector->display_info;
 	struct drm_display_mode *adjusted_mode = &crtc_state->adjusted_mode;
-	struct drm_display_mode *mode = &crtc_state->mode;
+	struct drm_display_mode *crtc_mode = &crtc_state->mode;
+	struct drm_display_mode *mode;
+	struct drm_display_mode *preferred_mode = NULL;
+	int i = 0;
 
 	DP_DEBUG("enter\n");
 
 	if (crtc_state->self_refresh_active && !crtc_state->vrr_enabled)
 		return 0;
 
-	trilin_dp_encoder_atomic_adjust_mode(dp, mode, adjusted_mode);
-
 	if (connector->connector_type == DRM_MODE_CONNECTOR_eDP) {
-		struct drm_display_mode *preferred_mode;
+		list_for_each_entry(mode, &connector->modes, head) {
+			if (mode->hdisplay == adjusted_mode->hdisplay &&
+				mode->vdisplay == adjusted_mode->vdisplay &&
+				drm_mode_vrefresh(mode) == drm_mode_vrefresh(adjusted_mode)) {
+				preferred_mode = mode;
+				DP_DEBUG("same preferred_mode: %s %d", preferred_mode->name, preferred_mode->clock);
+				break;
+			} else if (mode->hdisplay >= adjusted_mode->hdisplay &&
+				mode->vdisplay >= adjusted_mode->vdisplay &&
+				drm_mode_vrefresh(mode) == drm_mode_vrefresh(adjusted_mode)) {
+				preferred_mode = mode;
+				DP_DEBUG("vfresh same preferred_mode: %s %d", preferred_mode->name, preferred_mode->clock);
+				break;
+			}
+			if (++i >= dp->my_copied_modes) {
+				break;
+			}
+		}
 
-		preferred_mode = list_first_entry(
-			&connector->modes, struct drm_display_mode, head);
+		if (preferred_mode == NULL) {
+			preferred_mode = list_first_entry(&connector->modes,
+						struct drm_display_mode, head);
+			DP_DEBUG("use first preferred_mode");
+		}
 
 		drm_mode_copy(adjusted_mode, preferred_mode);
 	}
+
+	trilin_dp_encoder_atomic_adjust_mode(dp, crtc_mode, adjusted_mode);
+
 	return trilin_dp_encoder_compute_config(encoder, crtc_state,
 						connector_state, info->bpc);
 }

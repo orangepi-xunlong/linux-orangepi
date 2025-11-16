@@ -705,7 +705,7 @@ static bool linlondp_crtc_mode_fixup(struct drm_crtc *crtc,
 	if (kcrtc->master->force_pixel_per_cycle != 0)
 		pixel_per_cycle = kcrtc->master->force_pixel_per_cycle;
 
-	if ((m->clock > 600000) && (m->clock < 600000 * 2)) {
+	if ((adjusted_mode->clock > 600000) && (adjusted_mode->clock < 600000 * 2)) {
 		pixel_per_cycle = 2;
 		if (!mdev->side_by_side) {
 			mdev->side_by_side = 1;

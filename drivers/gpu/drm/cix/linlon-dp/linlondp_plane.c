@@ -48,24 +48,22 @@ static int linlondp_plane_init_data_flow(struct drm_plane_state *st,
 	dflow->out_w = st->crtc_w;
 	dflow->out_h = st->crtc_h;
 
-	if (pipe->pixel_per_cycle == 1) {
-		crtc_st = drm_atomic_get_new_crtc_state(st->state, st->crtc);
-		mode = &crtc_st->mode;
-		adjusted_mode = &crtc_st->adjusted_mode;
-		hdisplay = mode->hdisplay;
-		vdisplay = mode->vdisplay;
-		crtc_hdisplay = adjusted_mode->crtc_hdisplay;
-		crtc_vdisplay = adjusted_mode->crtc_vdisplay;
+	crtc_st = drm_atomic_get_new_crtc_state(st->state, st->crtc);
+	mode = &crtc_st->mode;
+	adjusted_mode = &crtc_st->adjusted_mode;
+	hdisplay = mode->hdisplay;
+	vdisplay = mode->vdisplay;
+	crtc_hdisplay = adjusted_mode->crtc_hdisplay * pipe->pixel_per_cycle;
+	crtc_vdisplay = adjusted_mode->crtc_vdisplay;
 
-		if (crtc_hdisplay != hdisplay) {
-			dflow->out_x = dflow->out_x * crtc_hdisplay / hdisplay;
-			dflow->out_w = dflow->out_w * crtc_hdisplay / hdisplay;
-		}
+	if (crtc_hdisplay != hdisplay) {
+		dflow->out_x = dflow->out_x * crtc_hdisplay / hdisplay;
+		dflow->out_w = dflow->out_w * crtc_hdisplay / hdisplay;
+	}
 
-		if (crtc_vdisplay != vdisplay) {
-			dflow->out_y = dflow->out_y * crtc_vdisplay / vdisplay;
-			dflow->out_h = dflow->out_h * crtc_vdisplay / vdisplay;
-		}
+	if (crtc_vdisplay != vdisplay) {
+		dflow->out_y = dflow->out_y * crtc_vdisplay / vdisplay;
+		dflow->out_h = dflow->out_h * crtc_vdisplay / vdisplay;
 	}
 
 	dflow->in_x = st->src_x >> 16;

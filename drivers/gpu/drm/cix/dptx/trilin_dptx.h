@@ -492,6 +492,7 @@ struct trilin_dp {
 	bool support_d3_cmd;
 	struct trilin_dp_psr psr;
 	bool edp_panel_ready;
+	int my_copied_modes;
 };
 
 //------------------------------------------------------------------------------
