@@ -591,10 +591,6 @@
 	status = "disabled";
 };
 
-&pmu {
-	status = "okay";
-};
-
 &uartclk {
 	clock-frequency = <5000000>;
 };

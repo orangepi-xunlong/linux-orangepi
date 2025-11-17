@@ -562,10 +562,19 @@
 		status = "disabled";
 	};
 
-	pmu: pmu {
-		compatible = "arm,armv8-pmuv3";
+	pmu_a520: pmu_a520 {
+		compatible = "arm,cortex-a520-pmu";
 		interrupts = <GIC_PPI 7 IRQ_TYPE_LEVEL_LOW>;
 		interrupt-parent = <&gic>;
+		cpus = <&CPU0 &CPU1 &CPU2 &CPU3>; /* little core */
+		status = "okay";
+	};
+
+	pmu_a720: pmu_a720 {
+		compatible = "arm,cortex-a720-pmu";
+		interrupts = <GIC_PPI 7 IRQ_TYPE_LEVEL_LOW>;
+		interrupt-parent = <&gic>;
+		cpus = <&CPU4 &CPU5 &CPU6 &CPU7 &CPU8 &CPU9 &CPU10 &CPU11>; /* big core */
 		status = "okay";
 	};
 
