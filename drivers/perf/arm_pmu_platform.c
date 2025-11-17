@@ -183,6 +183,32 @@ static void armpmu_free_irqs(struct arm_pmu *armpmu)
 	}
 }
 
+/**
+ * pmu_dt_get_cpus: Get the list of CPUs in the cluster
+ * from device tree.
+ */
+static void pmu_dt_get_cpus(int n , struct device *dev, cpumask_t *mask)
+{
+	int i = 0, cpu;
+	struct device_node *cpu_node;
+	cpumask_clear(mask);
+	for (; i < n; i++) {
+		cpu_node = of_parse_phandle(dev->of_node, "cpus", i);
+		if (!cpu_node)
+			break;
+		cpu = of_cpu_node_to_id(cpu_node);
+		of_node_put(cpu_node);
+		/*
+		 * We have to ignore the failures here and continue scanning
+		 * the list to handle cases where the nr_cpus could be capped
+		 * in the running kernel.
+		 */
+		if (cpu < 0)
+			continue;
+		cpumask_set_cpu(cpu, mask);
+	}
+}
+
 int arm_pmu_device_probe(struct platform_device *pdev,
 			 const struct of_device_id *of_table,
 			 const struct pmu_probe_info *probe_table)
@@ -191,6 +217,7 @@ int arm_pmu_device_probe(struct platform_device *pdev,
 	struct device *dev = &pdev->dev;
 	struct arm_pmu *pmu;
 	int ret = -ENODEV;
+	int pmu_cpu_node_num;
 
 	pmu = armpmu_alloc();
 	if (!pmu)
@@ -201,6 +228,10 @@ int arm_pmu_device_probe(struct platform_device *pdev,
 	ret = pmu_parse_irqs(pmu);
 	if (ret)
 		goto out_free;
+
+	pmu_cpu_node_num = of_count_phandle_with_args(dev->of_node, "cpus", NULL);
+	if (pmu_cpu_node_num > 0)
+		pmu_dt_get_cpus(pmu_cpu_node_num, dev, &pmu->supported_cpus);
 
 	init_fn = of_device_get_match_data(dev);
 	if (init_fn) {
