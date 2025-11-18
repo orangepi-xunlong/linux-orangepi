@@ -2190,7 +2190,6 @@ pinctrl_gmac1: pinctrl_gmac1 {
 	pinctrl-names = "default";
 	pinctrl-0 = <&pinctrl_pcie_x8_rc>;
 	reset-gpios = <&s5_gpio0 1 GPIO_ACTIVE_HIGH>;
-	aspm-no-l0s;
 	status = "okay";
 };
 
@@ -2199,7 +2198,6 @@ pinctrl_gmac1: pinctrl_gmac1 {
 	pinctrl-names = "default";
 	pinctrl-0 = <&pinctrl_pcie_x4_rc>;
 	reset-gpios = <&s5_gpio0 3 GPIO_ACTIVE_HIGH>;
-	aspm-no-l0s;
 	status = "okay";
 };
 
@@ -2208,7 +2206,6 @@ pinctrl_gmac1: pinctrl_gmac1 {
 	pinctrl-names = "default";
 	pinctrl-0 = <&pinctrl_pcie_x2_rc>;
 	reset-gpios = <&s5_gpio0 2 GPIO_ACTIVE_HIGH>;
-	aspm-no-l0s;
 	status = "okay";
 };
 
@@ -2217,7 +2214,6 @@ pinctrl_gmac1: pinctrl_gmac1 {
 	pinctrl-names = "default";
 	pinctrl-0 = <&pinctrl_pcie_x1_1_rc>;
 	reset-gpios = <&s5_gpio0 5 GPIO_ACTIVE_HIGH>;
-	aspm-no-l0s;
 	status = "okay";
 };
 
@@ -2228,7 +2224,6 @@ pinctrl_gmac1: pinctrl_gmac1 {
 	reset-gpios = <&s5_gpio0 4 GPIO_ACTIVE_HIGH>;
 	vcc-pcie-supply = <&vdd_3v3_pcie>;
 	wlan-en-supply = <&wlan_poweren>;
-	aspm-no-l0s;
 	sky1,str-pwron;
 	status = "okay";
 };
