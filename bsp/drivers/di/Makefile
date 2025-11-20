@@ -14,10 +14,13 @@ sub_dir = drv_div3x
 endif
 
 ifneq ($(sub_dir),)
--include $(obj)/$(sub_dir)/Makefile
+-include $(srctree)/$(obj)/$(sub_dir)/Makefile
 
 deinterlace-y += common/di_utils.o
 deinterlace-y += $(sunxi_di)
+
+# $(warning deinterlace-y: $(deinterlace-y))
+
 ccflags-y += -DDYNAMIC_DEBUG_MODULE
 
 endif

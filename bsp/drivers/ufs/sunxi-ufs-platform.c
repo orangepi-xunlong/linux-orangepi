@@ -30,7 +30,7 @@
 #include "sunxi-ufs.h"
 #include "sunxi-sid.h"
 
-#define SUNXI_UFS_DRIVER_VESION "0.0.16 2025.1.20 10:40"
+#define SUNXI_UFS_DRIVER_VESION "0.0.18 2025.5.16 15:16"
 //#define PHY_DEBUG_DUMP
 //#define CCU_DBG
 #define SUNXI_UFS_AXI_CLK		(200*1000*1000)
@@ -842,6 +842,39 @@ out:
 	return ret;
 }
 
+
+/**
+ * ufshcd_print_pwr_info - print power params as saved in hba
+ * power info
+ * @hba: per-adapter instance
+ */
+static void ufshcd_print_pwr_info(struct ufs_hba *hba, struct ufs_pa_layer_attr *pwr_info)
+{
+	static const char * const names[] = {
+		"INVALID MODE",
+		"FAST MODE",
+		"SLOW_MODE",
+		"INVALID MODE",
+		"FASTAUTO_MODE",
+		"SLOWAUTO_MODE",
+		"INVALID MODE",
+	};
+
+	/*
+	 * Using dev_dbg to avoid messages during runtime PM to avoid
+	 * never-ending cycles of messages written back to storage by user space
+	 * causing runtime resume, causing more messages and so on.
+	 */
+	dev_info(hba->dev, "sunxi ufs [RX, TX]: gear=[%d, %d], lane[%d, %d], pwr[%s, %s], rate = %d\n",
+		 pwr_info->gear_rx, pwr_info->gear_tx,
+		 pwr_info->lane_rx, pwr_info->lane_tx,
+		 names[pwr_info->pwr_rx],
+		 names[pwr_info->pwr_tx],
+		 pwr_info->hs_rate);
+}
+
+
+
 static int sunxi_ufs_pwr_change_notify(struct ufs_hba *hba,
 				     enum ufs_notify_change_status stage,
 				     struct ufs_pa_layer_attr *dev_max_params,
@@ -859,6 +892,7 @@ static int sunxi_ufs_pwr_change_notify(struct ufs_hba *hba,
 					     dev_req_params);
 		break;
 	case POST_CHANGE:
+		ufshcd_print_pwr_info(hba, dev_req_params);
 		break;
 	default:
 		ret = -EINVAL;
@@ -910,7 +944,7 @@ static inline struct scsi_device *sunxi_hba_to_wlun(struct ufs_hba *hba)
 	return sdp;
 }
 
-#if defined(CONFIG_AW_KERNEL_ORIGIN)
+#if defined(CONFIG_AW_KERNEL_ORIGIN) && (LINUX_VERSION_CODE < KERNEL_VERSION(6, 6, 98))
 int  sunxi_ufs_suspend(struct ufs_hba *hba, enum ufs_pm_op pm_op)
 {
 	int ret = 0;
@@ -978,7 +1012,7 @@ int  sunxi_ufs_suspend(struct ufs_hba *hba, enum ufs_pm_op pm_op,
 			ret = -EINVAL;
 		}
 	} else {
-		dev_err(hba->dev, "Unsupport pm_op %x status %x\nr", pm_op, status);
+		dev_err(hba->dev, "Unsupport pm_op %x status %x\n", pm_op, status);
 		ret = -EINVAL;
 	}
 
@@ -1058,11 +1092,63 @@ static int sunxi_ufs_device_reset(struct ufs_hba *hba)
 	return 0;
 }
 
+/**
+ * ufshcd_is_hba_active - Get controller state
+ * @hba: per adapter instance
+ *
+ * Returns false if controller is active, true otherwise
+ */
+bool __attribute__((weak)) ufshcd_is_hba_active(struct ufs_hba *hba)
+{
+	return (ufshcd_readl(hba, REG_CONTROLLER_ENABLE) & CONTROLLER_ENABLE)
+		? false : true;
+}
+
 static int sunxi_ufs_hce_enable_notify(struct ufs_hba *hba,
 				enum ufs_notify_change_status status)
 {
+	u32 hce = ufshcd_readl(hba, REG_CONTROLLER_ENABLE);
+	int retry_inner;
+
 	switch (status) {
 	case PRE_CHANGE:
+		/*
+		 * It is necessary to ensure that hce is set to 1 before setting cge,
+		 * otherwise cge cannot be set.
+		 * This is to ensure that cge can be enabled before program_key,
+		 * otherwise program_key cannot be set.
+		 * */
+		if (hba->caps & UFSHCD_CAP_CRYPTO) {
+			hce |= CONTROLLER_ENABLE;
+			ufshcd_writel(hba, hce, REG_CONTROLLER_ENABLE);
+			/*
+			 * To initialize a UFS host controller HCE bit must be set to 1.
+			 * During initialization the HCE bit value changes from 1->0->1.
+			 * When the host controller completes initialization sequence
+			 * it sets the value of HCE bit to 1. The same HCE bit is read back
+			 * to check if the controller has completed initialization sequence.
+			 * So without this delay the value HCE = 1, set in the previous
+			 * instruction might be read back.
+			 * This delay can be changed based on the controller.
+			 */
+			ufshcd_delay_us(hba->vps->hba_enable_delay_us, 100);
+
+			/* wait for the host controller to complete initialization */
+			retry_inner = 50;
+			while (!ufshcd_is_hba_active(hba)) {
+				if (retry_inner) {
+					retry_inner--;
+				} else {
+					dev_err(hba->dev,
+						"Controller enable failed\n");
+					break;
+				}
+				usleep_range(1000, 1100);
+			}
+			hce |= CRYPTO_GENERAL_ENABLE;
+			/*have to sure hce as 1, before set cge as 1*/
+			ufshcd_writel(hba, hce, REG_CONTROLLER_ENABLE);
+		}
 		break;
 	case POST_CHANGE:
 		break;
@@ -1706,6 +1792,14 @@ static int ufs_ufs_parse_dt(struct device *dev, struct ufs_hba *hba)
 	u32 i;
 	struct ufs_sunxi_priv *priv = hba->priv;
 	int ret = 0;
+	struct device_node *np = dev->of_node;
+
+	if (of_property_read_bool(np, "caps-wb-en")) {
+		hba->caps |= UFSHCD_CAP_WB_EN;
+	}
+	if (of_property_read_bool(np, "caps-crypto")) {
+		hba->caps |= UFSHCD_CAP_CRYPTO;
+	}
 
 	/* Parse UFS reset ctrl info */
 	for (i = 0; i < SUNXI_UFS_RST_MAX; i++) {
@@ -1803,6 +1897,101 @@ static int ufs_sunxi_common_init(struct ufs_hba *hba)
 	return ret;
 }
 
+/*
+ * Details of UIC Errors
+ */
+static const char *const ufs_uic_err_str[] = {
+	"PHY Adapter Layer",
+	"Data Link Layer",
+	"Network Link Layer",
+	"Transport Link Layer",
+	"DME"
+};
+
+static const char *const ufs_uic_pa_err_str[] = {
+	"PHY error on Lane 0",
+	"PHY error on Lane 1",
+	"PHY error on Lane 2",
+	"PHY error on Lane 3",
+	"Generic PHY Adapter Error. This should be the LINERESET indication"
+};
+
+static const char *const ufs_uic_dl_err_str[] = {
+	"NAC_RECEIVED",
+	"TCx_REPLAY_TIMER_EXPIRED",
+	"AFCx_REQUEST_TIMER_EXPIRED",
+	"FCx_PROTECTION_TIMER_EXPIRED",
+	"CRC_ERROR",
+	"RX_BUFFER_OVERFLOW",
+	"MAX_FRAME_LENGTH_EXCEEDED",
+	"WRONG_SEQUENCE_NUMBER",
+	"AFC_FRAME_SYNTAX_ERROR",
+	"NAC_FRAME_SYNTAX_ERROR",
+	"EOF_SYNTAX_ERROR",
+	"FRAME_SYNTAX_ERROR",
+	"BAD_CTRL_SYMBOL_TYPE",
+	"PA_INIT_ERROR",
+	"PA_ERROR_IND_RECEIVED",
+	"PA_INIT"
+};
+
+static const char *const ufs_event_type_str[] = {
+	/* uic specific errors */
+	"UFS_EVT_PA_ERR",
+	"UFS_EVT_DL_ERR",
+	"UFS_EVT_NL_ERR",
+	"UFS_EVT_TL_ERR",
+	"UFS_EVT_DME_ERR",
+
+	/* fatal errors */
+	"UFS_EVT_AUTO_HIBERN8_ERR",
+	"UFS_EVT_FATAL_ERR",
+	"UFS_EVT_LINK_STARTUP_FAIL",
+	"UFS_EVT_RESUME_ERR",
+	"UFS_EVT_SUSPEND_ERR",
+	"UFS_EVT_WL_SUSP_ERR",
+	"UFS_EVT_WL_RES_ERR",
+
+	/* abnormal events */
+	"UFS_EVT_DEV_RESET",
+	"UFS_EVT_HOST_RESET",
+	"UFS_EVT_ABORT",
+
+	"UFS_EVT_CNT"
+};
+
+
+static void sunxi_ufs_event_notify(struct ufs_hba *hba,
+				 enum ufs_event_type evt, void *data)
+{
+	unsigned int val = *(u32 *)data;
+	unsigned long reg;
+	u8 bit;
+
+	dev_err(hba->dev, "[ufs]err:evt num %d,%s\n", evt, ufs_event_type_str[evt]);
+
+	/* Print details of UIC Errors */
+	if (evt <= UFS_EVT_DME_ERR) {
+		dev_info(hba->dev,
+			 "Host UIC Error Code (%s): %08x\n",
+			 ufs_uic_err_str[evt], val);
+		reg = val;
+	}
+
+	if (evt == UFS_EVT_PA_ERR) {
+		for_each_set_bit(bit, &reg, ARRAY_SIZE(ufs_uic_pa_err_str))
+			dev_err(hba->dev, "%s\n", ufs_uic_pa_err_str[bit]);
+	}
+
+	if (evt == UFS_EVT_DL_ERR) {
+		for_each_set_bit(bit, &reg, ARRAY_SIZE(ufs_uic_dl_err_str))
+			dev_err(hba->dev, "%s\n", ufs_uic_dl_err_str[bit]);
+	}
+
+
+}
+
+
 
 
 /*
@@ -1817,6 +2006,7 @@ static struct ufs_hba_variant_ops sunxi_ufs_v0_pltfm_hba_vops = {
 	.pwr_change_notify = sunxi_ufs_pwr_change_notify,
 	.phy_initialization = sunxi_ufs_phy_config,
 	.device_reset = sunxi_ufs_device_reset,
+	.event_notify = sunxi_ufs_event_notify,
 	.dbg_register_dump = sunxi_ufs_register_dump,
 	.hibern8_notify = sunxi_ufs_hibern8_notify,
 	.suspend = sunxi_ufs_suspend,

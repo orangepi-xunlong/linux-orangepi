@@ -70,7 +70,7 @@ typedef enum {
 } dw_tmds_mode_t;
 
 typedef enum {
-	DW_HW_COLOR_DEPTH_8    = 4,
+	DW_HW_COLOR_DEPTH_8    = 0,
 	DW_HW_COLOR_DEPTH_10   = 5,
 	DW_HW_COLOR_DEPTH_12   = 6,
 	DW_HW_COLOR_DEPTH_16   = 7
@@ -710,7 +710,7 @@ struct dw_hdmi_dev_s {
  * @index: need get byte index. 0,1,2,3
  * @return: index to byte
  */
-u8 dw_to_byte(u32 data, u8 index);
+u8 dword_to_byte(u32 data, u8 index);
 /**
  * Concatenate two parts of two 8-bit bytes into a new 16-bit word
  * @param bHi first byte
@@ -813,6 +813,11 @@ int dw_hdmi_ctrl_update(void);
  * @return: 0 - success
  */
 int dw_hdmi_scdc_set_scramble(u8 setup);
+/**
+ * @desc: dw hdmi check config
+ * @return: 0: check done or not issue
+ */
+int dw_hdmi_check(void);
 /**
  * @desc: dw hdmi device init
  * @data: point to hdmi data

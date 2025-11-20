@@ -27,7 +27,7 @@ static int axp20x_i2c_probe(struct i2c_client *i2c,
 static int axp20x_i2c_probe(struct i2c_client *i2c)
 #endif
 {
-	struct axp20x_dev *axp20x;
+	struct sunxi_power_dev *axp20x;
 	int ret;
 
 	axp20x = devm_kzalloc(&i2c->dev, sizeof(*axp20x), GFP_KERNEL);
@@ -45,7 +45,7 @@ static int axp20x_i2c_probe(struct i2c_client *i2c)
 	axp20x->regmap = devm_regmap_init_i2c(i2c, axp20x->regmap_cfg);
 	if (IS_ERR(axp20x->regmap)) {
 		ret = PTR_ERR(axp20x->regmap);
-		PMIC_DEV_ERR(&i2c->dev, "regmap init failed: %d\n", ret);
+		PMIC_DEV_ERR_STD(E_PMIC_NORMAL_MFD_SYS_PORBE_ERR, &i2c->dev, "regmap init failed: %d\n", ret);
 		return ret;
 	}
 
@@ -55,13 +55,13 @@ static int axp20x_i2c_probe(struct i2c_client *i2c)
 #if LINUX_VERSION_CODE < KERNEL_VERSION(6, 1, 0)
 static int axp20x_i2c_remove(struct i2c_client *i2c)
 {
-	struct axp20x_dev *axp20x = i2c_get_clientdata(i2c);
+	struct sunxi_power_dev *axp20x = i2c_get_clientdata(i2c);
 	return axp20x_device_remove(axp20x);
 }
 #else
 static void axp20x_i2c_remove(struct i2c_client *i2c)
 {
-	struct axp20x_dev *axp20x = i2c_get_clientdata(i2c);
+	struct sunxi_power_dev *axp20x = i2c_get_clientdata(i2c);
 
 	axp20x_device_remove(axp20x);
 }
@@ -69,7 +69,7 @@ static void axp20x_i2c_remove(struct i2c_client *i2c)
 
 static void axp20x_i2c_shutdown(struct i2c_client *i2c)
 {
-	struct axp20x_dev *axp20x = i2c_get_clientdata(i2c);
+	struct sunxi_power_dev *axp20x = i2c_get_clientdata(i2c);
 
 	axp20x_device_shutdown(axp20x);
 
@@ -90,6 +90,7 @@ static const struct of_device_id axp20x_i2c_of_match[] = {
 	{ .compatible = "x-powers,axp806", .data = (void *)AXP806_ID },
 	{ .compatible = "x-powers,axp8191", .data = (void *)AXP8191_ID },
 	{ .compatible = "x-powers,axp515", .data = (void *)AXP515_ID },
+	{ .compatible = "x-powers,axp517", .data = (void *)AXP517_ID },
 	{ },
 };
 MODULE_DEVICE_TABLE(of, axp20x_i2c_of_match);
@@ -129,7 +130,7 @@ static int __init axp2101_i2c_init(void)
 
 	ret = i2c_add_driver(&axp2101_i2c_driver);
 	if (ret != 0) {
-		PMIC_ERR("axp2101 i2c registration failed %d\n", ret);
+		PMIC_ERR_STD(E_PMIC_NORMAL_MFD_SYS_PORBE_ERR, "axp2101 i2c registration failed %d\n", ret);
 		return ret;
 	}
 

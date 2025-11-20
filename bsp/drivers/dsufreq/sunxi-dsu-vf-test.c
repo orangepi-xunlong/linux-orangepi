@@ -23,14 +23,24 @@ struct sunxi_dsu_vf_dev {
 
 static struct sunxi_dsu_vf_dev *dsu_vf_dev_temp;
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 6, 0)
 static ssize_t freq_show(struct class *class, struct class_attribute *attr,
 			 char *buf)
+#else
+static ssize_t freq_show(const struct class *class, const struct class_attribute *attr,
+			 char *buf)
+#endif
 {
 	return sprintf(buf, "%lu\n", clk_get_rate(dsu_vf_dev_temp->clk));
 }
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 6, 0)
 static ssize_t freq_store(struct class *class, struct class_attribute *attr,
 			  const char *buf, size_t count)
+#else
+static ssize_t freq_store(const struct class *class, const struct class_attribute *attr,
+			  const char *buf, size_t count)
+#endif
 {
 	int freq;
 	int ret;

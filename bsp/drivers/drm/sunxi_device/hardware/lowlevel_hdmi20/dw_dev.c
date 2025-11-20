@@ -36,7 +36,7 @@ static struct dw_hdmi_dev_s *hdmi;
  * @data: double word
  * @index: byte number.0,1,2,3
  */
-u8 dw_to_byte(u32 data, u8 index)
+u8 dword_to_byte(u32 data, u8 index)
 {
 	return (data >> (index * 8)) & 0xFF;
 }
@@ -124,9 +124,6 @@ int dw_hdmi_ctrl_update(void)
 	hdmi->color_bits   = video->mColorResolution;
 	hdmi->pixel_repeat = video->mDtd.mPixelRepetitionInput;
 
-	if (video->mEncodingIn == DW_COLOR_FORMAT_YCC420)
-		hdmi->pixel_clk /= 2;
-
 	pixel_clk = hdmi->pixel_clk * (hdmi->pixel_repeat + 1);
 
 	if (video->mEncodingIn == DW_COLOR_FORMAT_YCC422) {
@@ -166,6 +163,14 @@ int dw_hdmi_scdc_set_scramble(u8 setup)
 	drm_scdc_set_scrambling(dev, setup);
 	drm_scdc_set_high_tmds_clock_ratio(dev, setup);
 	return 0;
+}
+
+int dw_hdmi_check(void)
+{
+	int ret = 0;
+
+	ret = dw_avp_check();
+	return ret = 0;
 }
 
 int dw_hdmi_init(struct dw_hdmi_dev_s *data)

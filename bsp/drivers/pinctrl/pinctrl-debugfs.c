@@ -12,7 +12,6 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  */
-#include <sunxi-log.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/slab.h>
@@ -21,13 +20,13 @@
 #include <linux/pinctrl/consumer.h>
 #include <linux/pinctrl/machine.h>
 #include <linux/pinctrl/pinctrl.h>
+#include <linux/pinctrl/pinconf.h>
 #include <linux/pinctrl/pinconf-generic.h>
 #include <linux/pinctrl/pinmux.h>
 #include <linux/platform_device.h>
 #include <dt-bindings/pinctrl/sun4i-a10.h>
 
 #include "core.h"
-#include "pinconf.h"
 #include "../gpio/gpiolib.h"
 #include "pinctrl-sunxi.h"
 
@@ -947,4 +946,4 @@ module_exit(sunxi_pinctrl_debugfs_exit);
 
 MODULE_LICENSE("GPL v2");
 MODULE_AUTHOR("rengaomin<rengaomin@allwinnertech.com>");
-MODULE_VERSION("1.0.4");
+MODULE_VERSION("1.0.6");

@@ -212,6 +212,8 @@ const static struct afbc_stream_info afbc_stream_infos[] = {
 	{ DRM_FORMAT_NV21,     1, {8, 8, 8, 0}, {1, 5} },
 
 	{ DRM_FORMAT_ABGR2101010, 0, {10, 10, 10, 2}, {0, 3} },
+	{ DRM_FORMAT_P010, 1, {10, 10, 10, 0}, {1, 3} },
+	{ DRM_FORMAT_P210, 2, {10, 10, 10, 0}, {2, 3} },
 };
 
 static const uint64_t format_modifiers_afbc[] = {
@@ -226,6 +228,7 @@ struct de_version_afbd {
 	unsigned int phy_chn_cnt;
 	unsigned int *rotate_limit_height;
 	bool *afbd_exist;
+	bool premul_support;
 };
 
 static bool de350_afbd_exist[] = {
@@ -240,6 +243,7 @@ static struct de_version_afbd de350 = {
 	.version = 0x350,
 	.rotate_support = de350_rotate_support,
 	.phy_chn_cnt = ARRAY_SIZE(de350_afbd_exist),
+	.premul_support = false,
 	.afbd_exist = de350_afbd_exist,
 };
 
@@ -258,6 +262,7 @@ static unsigned int de355_rotate_limit_height[] = {
 static struct de_version_afbd de355 = {
 	.version = 0x355,
 	.rotate_support = de355_rotate_support,
+	.premul_support = true,
 	.rotate_limit_height = de355_rotate_limit_height,
 	.phy_chn_cnt = ARRAY_SIZE(de355_afbd_exist),
 	.afbd_exist = de355_afbd_exist,
@@ -274,12 +279,24 @@ static bool de352_rotate_support[] = {
 static struct de_version_afbd de352 = {
 	.version = 0x352,
 	.rotate_support = de352_rotate_support,
+	.premul_support = false,
 	.phy_chn_cnt = ARRAY_SIZE(de352_afbd_exist),
 	.afbd_exist = de352_afbd_exist,
 };
 
+static bool de330_afbd_exist[] = {
+	true, false, false, false, false, false, false,
+};
+
+static struct de_version_afbd de330 = {
+	.version = 0x330,
+	.phy_chn_cnt = ARRAY_SIZE(de330_afbd_exist),
+	.premul_support = false,
+	.afbd_exist = de330_afbd_exist,
+};
+
 static struct de_version_afbd *de_version[] = {
-	&de350, &de355, &de352,
+	&de350, &de355, &de352, &de330
 };
 
 static bool is_support_rotate(struct module_create_info *info)
@@ -291,6 +308,17 @@ static bool is_support_rotate(struct module_create_info *info)
 				return de_version[i]->rotate_support[info->id];
 			else
 				DRM_WARN("Maybe unsupport rotate.\n");
+		}
+	}
+	return false;
+}
+
+static bool is_support_premul(struct module_create_info *info)
+{
+	int i;
+	for (i = 0; i < ARRAY_SIZE(de_version); i++) {
+		if (de_version[i]->version == info->de_version) {
+			return de_version[i]->premul_support;
 		}
 	}
 	return false;
@@ -356,7 +384,7 @@ static void de_fbd_get_rotate_info(struct de_fbd_info *info, const unsigned int 
 
 	if ((rotation & ((DRM_MODE_ROTATE_MASK & ~DRM_MODE_ROTATE_0) | DRM_MODE_REFLECT_MASK)) &&
 	    (format != DRM_FORMAT_YVU420 && format != DRM_FORMAT_YUV420 &&
-	     format != DRM_FORMAT_NV12 && format != DRM_FORMAT_NV21)) {
+	     format != DRM_FORMAT_NV12 && format != DRM_FORMAT_NV21 && format != DRM_FORMAT_P010)) {
 		info->rot = FBD_ROTATE_0;
 		info->h_flip = 0;
 		info->v_flip = 0;
@@ -691,7 +719,13 @@ int de_afbd_apply_lay(struct de_afbd_handle *handle, struct display_channel_stat
 	priv->debug.ovl_h = cfg->ovl_win.height;
 	priv->debug.format = fb->format->format;
 
-	dwval = 1 | ((cfg->lay_premul & 0x3) << 4);
+	if (handle->premul_support) {
+		dwval = 1 | ((cfg->lay_premul & 0x3) << 4);
+	} else {
+		//clock gate and enable
+		dwval = (1 << 4) | (1 << 0);
+	}
+
 	dwval |= ((state->base.pixel_blend_mode != DRM_MODE_BLEND_PIXEL_NONE ? 2 : 1) << 2);
 	dwval |= (state->base.alpha >> 8 << 24);
 	if (handle->rotate_support) {
@@ -745,6 +779,7 @@ int de_afbd_apply_lay(struct de_afbd_handle *handle, struct display_channel_stat
 	case DRM_FORMAT_YVU420:
 	case DRM_FORMAT_NV12:
 	case DRM_FORMAT_NV21:
+	case DRM_FORMAT_P010:
 //	case DISP_FORMAT_YUV422_P_10BIT:
 //	case DISP_FORMAT_YUV420_P_10BIT: not exist in drm
 		dwval = 0x3210;
@@ -851,6 +886,7 @@ struct de_afbd_handle *de_afbd_create(struct module_create_info *info)
 	hdl->format_modifiers = format_modifiers_afbc;
 	hdl->format_modifiers_num = ARRAY_SIZE(format_modifiers_afbc) - 1;
 	hdl->rotate_support = is_support_rotate(info);
+	hdl->premul_support = is_support_premul(info);
 	hdl->rotate_limit_height = get_afbd_rotate_limit_height(info);
 	hdl->private = kmalloc(sizeof(*hdl->private), GFP_KERNEL | __GFP_ZERO);
 	priv = hdl->private;

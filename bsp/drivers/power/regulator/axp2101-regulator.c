@@ -251,6 +251,31 @@ static int regulator_disable_regmap_axp2202_rbfet(struct regulator_dev *rdev)
 	return 0;
 }
 
+static int regulator_disable_regmap_axp517_rbfet(struct regulator_dev *rdev)
+{
+	int ret = 0;
+	ret = regmap_update_bits(rdev->regmap, AXP517_IRQ_EN1,  0xC0, 0);
+	if (ret)
+		return ret;
+
+	ret = regmap_update_bits(rdev->regmap, AXP517_RBFET_CTRL, BIT(0), 0);
+	if (ret)
+		return ret;
+
+	ret = regmap_update_bits(rdev->regmap, AXP517_IRQ1, 0xC0, 0xC0);
+	if (ret)
+		return ret;
+
+	mdelay(10);
+
+	ret = regmap_update_bits(rdev->regmap, AXP517_IRQ1, 0xC0, 0xC0);
+	if (ret)
+		return ret;
+	ret = regmap_update_bits(rdev->regmap, AXP517_IRQ_EN1, 0xC0, 0xC0);
+
+	return ret;
+}
+
 static int regulator_is_enabled_regmap_axp515_drivevbus(struct regulator_dev *rdev)
 {
 	unsigned int val[2];
@@ -274,8 +299,6 @@ static int regulator_enable_regmap_axp515_drivevbus(struct regulator_dev *rdev)
 		return ret;
 
 	ret = regmap_update_bits(rdev->regmap, AXP515_RBFET_SET, BIT(6), BIT(6));
-	if (ret)
-		return ret;
 
 	return 0;
 }
@@ -567,6 +590,12 @@ static struct regulator_ops axp1530_sw_dvm_ops_range_step_delay = {
 	.is_enabled		= regulator_is_enabled_regmap,
 };
 #endif
+
+static struct regulator_ops axp517_ops_rbfet = {
+	.enable			= regulator_enable_regmap,
+	.disable		= regulator_disable_regmap_axp517_rbfet,
+	.is_enabled		= regulator_is_enabled_regmap,
+};
 
 static const struct linear_range axp152_dcdc1_ranges[] = {
 	REGULATOR_LINEAR_RANGE(1700000, 0x0, 0x4, 100000),
@@ -1482,9 +1511,33 @@ static const struct regulator_desc axp515_drivevbus_regulator = {
 	.ops		= &axp515_ops_drivevbus,
 };
 
+static const struct regulator_desc axp517_vmid_regulator = {
+	.name		= "vmid",
+	.supply_name	= "vin-ps",
+	.of_match	= of_match_ptr("vmid"),
+	.regulators_node = of_match_ptr("regulators"),
+	.type		= REGULATOR_VOLTAGE,
+	.owner		= THIS_MODULE,
+	.enable_reg	= AXP517_MODULE_EN,
+	.enable_mask	= BIT(4),
+	.ops		= &axp20x_ops_sw,
+};
+
+static const struct regulator_desc axp517_drivevbus_regulator = {
+	.name           = "drivevbus",
+	.supply_name    = "drivevbusin",
+	.of_match       = of_match_ptr("drivevbus"),
+	.regulators_node = of_match_ptr("regulators"),
+	.type           = REGULATOR_VOLTAGE,
+	.owner          = THIS_MODULE,
+	.enable_reg	= AXP517_RBFET_CTRL,
+	.enable_mask	= BIT(0),
+	.ops		= &axp517_ops_rbfet,
+};
+
 static int axp20x_set_dcdc_freq(struct platform_device *pdev, u32 dcdcfreq)
 {
-	struct axp20x_dev *axp20x = dev_get_drvdata(pdev->dev.parent);
+	struct sunxi_power_dev *axp20x = dev_get_drvdata(pdev->dev.parent);
 	unsigned int reg = AXP20X_DCDC_FREQ;
 	u32 min, max, def, step;
 
@@ -1568,7 +1621,7 @@ static int axp20x_regulator_parse_dt(struct platform_device *pdev)
 
 static int axp20x_set_dcdc_workmode(struct regulator_dev *rdev, int id, u32 workmode)
 {
-	struct axp20x_dev *axp20x = rdev_get_drvdata(rdev);
+	struct sunxi_power_dev *axp20x = rdev_get_drvdata(rdev);
 	unsigned int reg = AXP20X_DCDC_MODE;
 	unsigned int mask;
 
@@ -1621,7 +1674,7 @@ static int axp20x_set_dcdc_workmode(struct regulator_dev *rdev, int id, u32 work
  * This function checks whether a regulator is part of a poly-phase
  * output setup based on the registers settings. Returns true if it is.
  */
-static bool axp20x_is_polyphase_slave(struct axp20x_dev *axp20x, int id)
+static bool axp20x_is_polyphase_slave(struct sunxi_power_dev *axp20x, int id)
 {
 	u32 reg = 0;
 
@@ -1681,7 +1734,7 @@ static int sunxi_iodomain_notify(struct notifier_block *nb,
 static int axp2101_regulator_probe(struct platform_device *pdev)
 {
 	struct regulator_dev *rdev;
-	struct axp20x_dev *axp20x = dev_get_drvdata(pdev->dev.parent);
+	struct sunxi_power_dev *axp20x = dev_get_drvdata(pdev->dev.parent);
 	const struct regulator_desc *regulators;
 	struct regulator_config config = {
 		.dev = pdev->dev.parent,
@@ -1757,6 +1810,11 @@ static int axp2101_regulator_probe(struct platform_device *pdev)
 		break;
 	case AXP515_ID:
 		nregulators = AXP515_REG_ID_MAX;
+		drivevbus = of_property_read_bool(pdev->dev.parent->of_node,
+						  "x-powers,drive-vbus-en");
+		break;
+	case AXP517_ID:
+		nregulators = AXP517_REG_ID_MAX;
 		drivevbus = of_property_read_bool(pdev->dev.parent->of_node,
 						  "x-powers,drive-vbus-en");
 		break;
@@ -1937,8 +1995,15 @@ static int axp2101_regulator_probe(struct platform_device *pdev)
 			rdev = devm_regulator_register(&pdev->dev,
 						       &axp515_drivevbus_regulator,
 						       &config);
-			drivevbus = of_property_read_bool(pdev->dev.parent->of_node,
-							  "x-powers,drive-vbus-en");
+			break;
+		case AXP517_ID:
+			rdev = devm_regulator_register(&pdev->dev,
+						   &axp517_vmid_regulator,
+						   &config);
+
+			rdev = devm_regulator_register(&pdev->dev,
+						   &axp517_drivevbus_regulator,
+						   &config);
 			break;
 		default:
 			PMIC_DEV_ERR(&pdev->dev, "AXP variant: %ld unsupported drivevbus\n",
@@ -1963,6 +2028,7 @@ static int axp2101_regulator_remove(struct platform_device *pdev)
 static struct of_device_id axp_regulator_id_tab[] = {
 	{ .compatible = "x-powers,axp2202-regulator" },
 	{ .compatible = "x-powers,axp515-regulator" },
+	{ .compatible = "x-powers,axp517-regulator" },
 	{ .compatible = "x-powers,axp1530-regulator" },
 	{ /* sentinel */ },
 };

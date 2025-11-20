@@ -5,7 +5,6 @@
  * Author: huangshuosheng <huangshuosheng@allwinnertech.com>
  */
 
-#include <sunxi-log.h>
 #include <linux/module.h>
 #include <linux/platform_device.h>
 #include <linux/of.h>
@@ -1310,4 +1309,4 @@ postcore_initcall(sun8iw11_pio_init);
 MODULE_AUTHOR("Huangshuosheng<huangshuosheng@allwinnertech.com>");
 MODULE_DESCRIPTION("Allwinner sun8iw11 pio pinctrl driver");
 MODULE_LICENSE("GPL");
-MODULE_VERSION("1.0.5");
+MODULE_VERSION("1.0.6");

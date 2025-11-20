@@ -487,7 +487,7 @@ static struct rpmsg_driver rpmsg_notify_client = {
 	.callback	= rpmsg_notify_cb,
 	.remove		= rpmsg_notify_remove,
 };
-#if IS_ENABLED(CONFIG_SUNXI_RPROC_FASTBOOT)
+#if IS_ENABLED(CONFIG_AW_RPROC_FAST_BOOT)
 fast_rpmsg_driver(rpmsg_notify_client);
 #else
 module_rpmsg_driver(rpmsg_notify_client);

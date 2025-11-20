@@ -89,11 +89,20 @@ struct sunxi_rproc_e907_cfg {
 	void __iomem *rv_cfg_reg_base;
 };
 
+struct sunxi_rproc_arm_cfg {
+	u32 cpu_id;
+	void __iomem *sram_remap;
+	void __iomem *arm_cfg;
+	struct delayed_work dead_work;
+	struct completion complete_dead;
+};
+
 struct sunxi_rproc_priv {
 	const char *name;
 #if IS_ENABLED(CONFIG_SUNXI_RPROC_SHARE_IRQ)
 	const char *share_irq;
 #endif
+	struct rproc *rproc;
 	struct sunxi_rproc_memory_mapping *mem_maps;
 	struct sunxi_rproc_ops *ops;
 	struct device *dev;
@@ -103,6 +112,8 @@ struct sunxi_rproc_priv {
 	u32 pc_entry;
 	void *rproc_cfg;
 	void *priv;
+	struct device_node *np;
+	bool auto_boot;
 };
 
 struct sunxi_rproc_priv *sunxi_rproc_priv_find(const char *name);

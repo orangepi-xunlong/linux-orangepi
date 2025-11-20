@@ -592,7 +592,6 @@ static int ac101b_hw_params(struct snd_pcm_substream *substream,
 			   struct snd_soc_dai *dai)
 {
 	struct snd_soc_component *component = dai->component;
-	struct snd_soc_card *card = component->card;
 	struct ac101b_priv *ac101b = snd_soc_component_get_drvdata(component);
 	struct ac101b_data *pdata = &ac101b->pdata;
 	struct regmap *regmap = ac101b->regmap;
@@ -3100,4 +3099,4 @@ module_i2c_driver(ac101b_i2c_driver);
 MODULE_DESCRIPTION("ASoC ac101b driver");
 MODULE_AUTHOR("lijingpsw@allwinnertech.com");
 MODULE_LICENSE("GPL");
-MODULE_VERSION("1.0.0");
+MODULE_VERSION("1.0.1");

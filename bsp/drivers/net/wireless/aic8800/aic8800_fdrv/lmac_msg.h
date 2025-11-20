@@ -1948,7 +1948,8 @@ struct mm_set_txop_req {
 
 #ifdef CONFIG_APF
 struct mm_set_apf_prog_req {
-	u32_l program_len;
+	u16_l program_len;
+	u16_l apf_version;
 	u32_l offset;
 	u8_l program[LMAC_MSG_MAX_LEN];
 };

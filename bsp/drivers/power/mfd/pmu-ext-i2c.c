@@ -37,7 +37,7 @@ static int pmu_ext_i2c_probe(struct i2c_client *client,
 static int pmu_ext_i2c_probe(struct i2c_client *client)
 #endif
 {
-	struct pmu_ext_dev *ext;
+	struct sunxi_power_dev *ext;
 	int ret;
 
 	ext = devm_kzalloc(&client->dev, sizeof(*ext), GFP_KERNEL);
@@ -53,7 +53,7 @@ static int pmu_ext_i2c_probe(struct i2c_client *client)
 
 	ext->regmap = devm_regmap_init_i2c(client, ext->regmap_cfg);
 	if (IS_ERR(ext->regmap)) {
-		PMIC_DEV_ERR(ext->dev, "Failed to initialize register map\n");
+		PMIC_DEV_ERR_STD(E_PMU_EXT_MFD_SYS_PORBE_ERR, ext->dev, "Failed to initialize register map\n");
 		return PTR_ERR(ext->regmap);
 	}
 
@@ -63,14 +63,14 @@ static int pmu_ext_i2c_probe(struct i2c_client *client)
 #if LINUX_VERSION_CODE < KERNEL_VERSION(6, 1, 0)
 static int pmu_ext_i2c_remove(struct i2c_client *client)
 {
-	struct pmu_ext_dev *ext = i2c_get_clientdata(client);
+	struct sunxi_power_dev *ext = i2c_get_clientdata(client);
 
 	return pmu_ext_device_exit(ext);
 }
 #else
 static void pmu_ext_i2c_remove(struct i2c_client *client)
 {
-	struct pmu_ext_dev *ext = i2c_get_clientdata(client);
+	struct sunxi_power_dev *ext = i2c_get_clientdata(client);
 
 	pmu_ext_device_exit(ext);
 }
@@ -103,7 +103,7 @@ static int __init pmu_ext_i2c_init(void)
 
 	ret = i2c_add_driver(&pmu_ext_i2c_driver);
 	if (ret != 0) {
-		PMIC_ERR("pmu_ext i2c registration failed %d\n", ret);
+		PMIC_ERR_STD(E_PMU_EXT_MFD_SYS_PORBE_ERR, "pmu_ext i2c registration failed %d\n", ret);
 		return ret;
 	}
 

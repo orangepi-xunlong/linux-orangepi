@@ -765,6 +765,7 @@ static int axp515_model_update(struct axp515_bat_power *bat_power)
 	struct axp_config_info *axp_config = &bat_power->dts_info;
 	struct regmap *regmap = bat_power->regmap;
 	unsigned char ocv_cap[AXP515_MAX_PARAM];
+	int ret = 0;
 
 	/* down load battery parameters */
 	ocv_cap[0]  = axp_config->pmu_bat_para1;
@@ -799,8 +800,17 @@ static int axp515_model_update(struct axp515_bat_power *bat_power)
 	ocv_cap[29] = axp_config->pmu_bat_para30;
 	ocv_cap[30] = axp_config->pmu_bat_para31;
 	ocv_cap[31] = axp_config->pmu_bat_para32;
-	regmap_bulk_write(regmap, AXP515_OCV_CURV0, ocv_cap, 32);
-	regmap_update_bits(regmap, AXP515_BATFET_DLY, BIT(3), BIT(3));
+
+	ret = regmap_bulk_write(regmap, AXP515_OCV_CURV0, ocv_cap, 32);
+	if (ret < 0) {
+		PMIC_ERR("Failed to write OCV curve: %d", ret);
+		return ret;
+	}
+	ret = regmap_update_bits(regmap, AXP515_BATFET_DLY, BIT(3), BIT(3));
+	if (ret < 0) {
+		PMIC_ERR("Failed to update BATFET_DLY: %d", ret);
+		return ret;
+	}
 
 	return 0;
 }
@@ -1838,8 +1848,13 @@ static void axp515_temp_process_init(struct work_struct *work)
 
 	charge_cur = axp515_ichg(regmap);
 
-	temp_calib = (vts2 - vts1) / charge_cur;
-	bat_power->bat_temp_calib = clamp_val(temp_calib, axp_config->pmu_bat_temp_comp, axp_config->pmu_battery_rdc);
+	if (!charge_cur) {
+		bat_power->bat_temp_calib = axp_config->pmu_bat_temp_comp;
+	} else {
+		temp_calib = (vts2 - vts1) / charge_cur;
+		bat_power->bat_temp_calib = clamp_val(temp_calib, axp_config->pmu_bat_temp_comp, axp_config->pmu_battery_rdc);
+	}
+
 	axp_config->pmu_bat_temp_enable = 1;
 
 	/* init bat temp check */
@@ -1853,7 +1868,7 @@ static int axp515_battery_probe(struct platform_device *pdev)
 
 	struct axp515_bat_power *bat_power;
 	struct power_supply_config psy_cfg = {};
-	struct axp20x_dev *axp_dev = dev_get_drvdata(pdev->dev.parent);
+	struct sunxi_power_dev *axp_dev = dev_get_drvdata(pdev->dev.parent);
 	struct device_node *node = pdev->dev.of_node;
 
 	if (!of_device_is_available(node)) {
@@ -1902,7 +1917,7 @@ static int axp515_battery_probe(struct platform_device *pdev)
 
 
 	/* add thermal cooling */
-	axp20x_register_cooler(bat_power->bat_supply);
+	sunxi_power_register_cooler(bat_power->bat_supply);
 
 	for (i = 0; i < ARRAY_SIZE(axp_bat_irq); i++) {
 		irq = platform_get_irq_byname(pdev, axp_bat_irq[i].name);
@@ -1956,8 +1971,13 @@ static int axp515_battery_remove(struct platform_device *pdev)
 	PMIC_DEV_DEBUG(&pdev->dev, "==============AXP515 unegister==============\n");
 	if (bat_power->bat_supply) {
 		power_supply_unregister(bat_power->bat_supply);
-		axp20x_unregister_cooler(bat_power->bat_supply);
+		sunxi_power_unregister_cooler(bat_power->bat_supply);
 		mutex_destroy(&bat_power->lock);
+	}
+	cancel_delayed_work_sync(&bat_power->bat_supply_mon);
+	cancel_delayed_work_sync(&bat_power->bat_temp_init);
+	if (bat_power->dts_info.pmu_bat_temp_enable && bat_power->bat_temp_ws) {
+		wakeup_source_unregister(bat_power->bat_temp_ws);
 	}
 	PMIC_DEV_DEBUG(&pdev->dev, "axp515 teardown battery dev\n");
 
@@ -2090,4 +2110,4 @@ module_platform_driver(axp515_bat_power_driver);
 MODULE_AUTHOR("wangxiaoliang <wangxiaoliang@x-powers.com>");
 MODULE_DESCRIPTION("axp515 battery driver");
 MODULE_LICENSE("GPL");
-MODULE_VERSION("1.0.0");
+MODULE_VERSION("1.0.1");

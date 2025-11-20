@@ -290,7 +290,7 @@ static int axp22x_usb_power_dt_parse(struct axp22x_usb_power *usb_power)
 
 static int axp22x_usb_power_probe(struct platform_device *pdev)
 {
-	struct axp20x_dev *axp_dev = dev_get_drvdata(pdev->dev.parent);
+	struct sunxi_power_dev *axp_dev = dev_get_drvdata(pdev->dev.parent);
 	struct power_supply_config psy_cfg = {};
 	struct axp22x_usb_power *usb_power;
 	struct device_node *np = NULL;

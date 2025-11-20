@@ -45,7 +45,7 @@ struct pk_dts {
 };
 
 struct axp20x_pek {
-	struct axp20x_dev *axp20x;
+	struct sunxi_power_dev *axp20x;
 	struct input_dev *input;
 	struct pk_dts pk_dts;
 	int irq_dbr;
@@ -238,7 +238,7 @@ static void axp20x_remove_sysfs_group(void *_data)
 #if AXP2202_CONFIG_SET
 static int axp2202_config_set(struct axp20x_pek *axp20x_pek)
 {
-	struct axp20x_dev *axp20x_dev = axp20x_pek->axp20x;
+	struct sunxi_power_dev *axp20x_dev = axp20x_pek->axp20x;
 	struct regmap *regmap = axp20x_dev->regmap;
 	struct pk_dts *pk_dts = &axp20x_pek->pk_dts;
 	unsigned int val;
@@ -320,7 +320,7 @@ static int axp2202_config_set(struct axp20x_pek *axp20x_pek)
 #endif
 static int axp152_config_set(struct axp20x_pek *axp20x_pek)
 {
-	struct axp20x_dev *axp20x_dev = axp20x_pek->axp20x;
+	struct sunxi_power_dev *axp20x_dev = axp20x_pek->axp20x;
 	struct regmap *regmap = axp20x_dev->regmap;
 	struct pk_dts *pk_dts = &axp20x_pek->pk_dts;
 	unsigned int val;
@@ -389,7 +389,7 @@ static int axp152_config_set(struct axp20x_pek *axp20x_pek)
 
 static int axp803_config_set(struct axp20x_pek *axp20x_pek)
 {
-	struct axp20x_dev *axp20x_dev = axp20x_pek->axp20x;
+	struct sunxi_power_dev *axp20x_dev = axp20x_pek->axp20x;
 	struct regmap *regmap = axp20x_dev->regmap;
 	struct pk_dts *pk_dts = &axp20x_pek->pk_dts;
 	unsigned int val;
@@ -460,7 +460,7 @@ static int axp803_config_set(struct axp20x_pek *axp20x_pek)
 
 static int axp22x_config_set(struct axp20x_pek *axp20x_pek)
 {
-	struct axp20x_dev *axp20x_dev = axp20x_pek->axp20x;
+	struct sunxi_power_dev *axp20x_dev = axp20x_pek->axp20x;
 	struct regmap *regmap = axp20x_dev->regmap;
 	struct pk_dts *pk_dts = &axp20x_pek->pk_dts;
 	unsigned int val;
@@ -531,7 +531,7 @@ static int axp22x_config_set(struct axp20x_pek *axp20x_pek)
 
 static int axp2585_config_set(struct axp20x_pek *axp20x_pek)
 {
-	struct axp20x_dev *axp20x_dev = axp20x_pek->axp20x;
+	struct sunxi_power_dev *axp20x_dev = axp20x_pek->axp20x;
 	struct regmap *regmap = axp20x_dev->regmap;
 	struct pk_dts *pk_dts = &axp20x_pek->pk_dts;
 	unsigned int val;
@@ -582,7 +582,7 @@ static int axp2585_config_set(struct axp20x_pek *axp20x_pek)
 
 static int axp515_config_set(struct axp20x_pek *axp20x_pek)
 {
-	struct axp20x_dev *axp20x_dev = axp20x_pek->axp20x;
+	struct sunxi_power_dev *axp20x_dev = axp20x_pek->axp20x;
 	struct regmap *regmap = axp20x_dev->regmap;
 	struct pk_dts *pk_dts = &axp20x_pek->pk_dts;
 	unsigned int val;
@@ -631,9 +631,47 @@ static int axp515_config_set(struct axp20x_pek *axp20x_pek)
 	return 0;
 }
 
+static int axp517_config_set(struct axp20x_pek *axp20x_pek)
+{
+	struct sunxi_power_dev *axp20x_dev = axp20x_pek->axp20x;
+	struct regmap *regmap = axp20x_dev->regmap;
+	struct pk_dts *pk_dts = &axp20x_pek->pk_dts;
+	unsigned int val;
+
+	/* dafault onlevel setting 1s */
+	regmap_update_bits(regmap, AXP517_POK_SET, GENMASK(1, 0), BIT(1));
+
+	/* pok long time set */
+	if (pk_dts->pmu_powkey_long_time < 1000)
+		pk_dts->pmu_powkey_long_time = 1000;
+
+	if (pk_dts->pmu_powkey_long_time > 2500)
+		pk_dts->pmu_powkey_long_time = 2500;
+
+	regmap_read(regmap, AXP517_POK_SET, &val);
+	val &= GENMASK(5, 4);
+	val |= (((pk_dts->pmu_powkey_long_time - 1000) / 500)
+		<< 6);
+	regmap_write(regmap, AXP517_POK_SET, val);
+
+	/* pek offlevel poweroff time set */
+	if (pk_dts->pmu_powkey_off_time < 4000)
+		pk_dts->pmu_powkey_off_time = 4000;
+
+	if (pk_dts->pmu_powkey_off_time > 20000)
+		pk_dts->pmu_powkey_off_time = 20000;
+
+	regmap_read(regmap, AXP517_POK_SET, &val);
+	val &= GENMASK(3, 2);
+	val |= (((pk_dts->pmu_powkey_off_time - 4000) / 2000) - 2);
+	regmap_write(regmap, AXP517_POK_SET, val);
+
+	return 0;
+}
+
 static int axp2202_config_set(struct axp20x_pek *axp20x_pek)
 {
-	struct axp20x_dev *axp20x_dev = axp20x_pek->axp20x;
+	struct sunxi_power_dev *axp20x_dev = axp20x_pek->axp20x;
 	struct regmap *regmap = axp20x_dev->regmap;
 	struct pk_dts *pk_dts = &axp20x_pek->pk_dts;
 	unsigned int val;
@@ -715,7 +753,7 @@ static int axp2202_config_set(struct axp20x_pek *axp20x_pek)
 
 static int axp8191_config_set(struct axp20x_pek *axp20x_pek)
 {
-	struct axp20x_dev *axp20x_dev = axp20x_pek->axp20x;
+	struct sunxi_power_dev *axp20x_dev = axp20x_pek->axp20x;
 	struct regmap *regmap = axp20x_dev->regmap;
 	struct pk_dts *pk_dts = &axp20x_pek->pk_dts;
 	unsigned int val;
@@ -785,7 +823,7 @@ static int axp8191_config_set(struct axp20x_pek *axp20x_pek)
 
 static int axp2101_config_set(struct axp20x_pek *axp20x_pek)
 {
-	struct axp20x_dev *axp20x_dev = axp20x_pek->axp20x;
+	struct sunxi_power_dev *axp20x_dev = axp20x_pek->axp20x;
 	struct regmap *regmap = axp20x_dev->regmap;
 	struct pk_dts *pk_dts = &axp20x_pek->pk_dts;
 	unsigned int val;
@@ -867,7 +905,7 @@ static int axp2101_config_set(struct axp20x_pek *axp20x_pek)
 
 static int axp806_config_set(struct axp20x_pek *axp20x_pek)
 {
-	struct axp20x_dev *axp20x_dev = axp20x_pek->axp20x;
+	struct sunxi_power_dev *axp20x_dev = axp20x_pek->axp20x;
 	struct regmap *regmap = axp20x_dev->regmap;
 	struct pk_dts *pk_dts = &axp20x_pek->pk_dts;
 	unsigned int val;
@@ -933,7 +971,7 @@ static int axp806_config_set(struct axp20x_pek *axp20x_pek)
 
 static int axp1530_config_set(struct axp20x_pek *axp20x_pek)
 {
-	struct axp20x_dev *axp20x_dev = axp20x_pek->axp20x;
+	struct sunxi_power_dev *axp20x_dev = axp20x_pek->axp20x;
 	struct regmap *regmap = axp20x_dev->regmap;
 	struct pk_dts *pk_dts = &axp20x_pek->pk_dts;
 	unsigned int val;
@@ -973,7 +1011,7 @@ static int axp1530_config_set(struct axp20x_pek *axp20x_pek)
 
 static void axp20x_dts_param_set(struct axp20x_pek *axp20x_pek)
 {
-	struct axp20x_dev *axp20x_dev = axp20x_pek->axp20x;
+	struct sunxi_power_dev *axp20x_dev = axp20x_pek->axp20x;
 
 	if (!axp_powerkey_dt_parse(axp20x_pek->input->dev.parent->of_node,
 				   &axp20x_pek->pk_dts)) {
@@ -993,6 +1031,9 @@ static void axp20x_dts_param_set(struct axp20x_pek *axp20x_pek)
 			break;
 		case AXP515_ID:
 			axp515_config_set(axp20x_pek);
+			break;
+		case AXP517_ID:
+			axp517_config_set(axp20x_pek);
 			break;
 		case AXP803_ID:
 			axp803_config_set(axp20x_pek);
@@ -1018,7 +1059,7 @@ static void axp20x_dts_param_set(struct axp20x_pek *axp20x_pek)
 static int axp20x_pek_probe(struct platform_device *pdev)
 {
 	struct axp20x_pek *axp20x_pek;
-	struct axp20x_dev *axp20x;
+	struct sunxi_power_dev *axp20x;
 	struct input_dev *idev;
 	int error;
 
@@ -1059,6 +1100,9 @@ static int axp20x_pek_probe(struct platform_device *pdev)
 		break;
 	case AXP515_ID:
 		idev->name = "axp515-pek";
+		break;
+	case AXP517_ID:
+		idev->name = "axp517-pek";
 		break;
 	case AXP2202_ID:
 		idev->name = "axp2202-pek";
@@ -1143,7 +1187,7 @@ static int axp20x_pek_probe(struct platform_device *pdev)
 static int axp20x_pek_remove(struct platform_device *pdev)
 {
 	struct axp20x_pek *axp20x_pek = platform_get_drvdata(pdev);
-	struct axp20x_dev *axp20x = axp20x_pek->axp20x;
+	struct sunxi_power_dev *axp20x = axp20x_pek->axp20x;
 
 	if (axp20x->variant == AXP2101_ID) {
 		axp20x_remove_sysfs_group(&pdev->dev);
@@ -1190,7 +1234,7 @@ static int axp2101_powerkey_resume_noirq(struct device *dev)
 {
 	struct platform_device *pdev = to_platform_device(dev);
 	struct axp20x_pek *axp20x_pek = platform_get_drvdata(pdev);
-	struct axp20x_dev *axp20x = axp20x_pek->axp20x;
+	struct sunxi_power_dev *axp20x = axp20x_pek->axp20x;
 	struct input_dev *idev = axp20x_pek->input;
 	struct regmap *regmap = axp20x->regmap;
 	unsigned int reg = 0, reg_mask_n = 0, reg_mask_p = 0, reg_val = 0;
@@ -1229,6 +1273,7 @@ static const struct dev_pm_ops axp2101_powerkey_pm_ops = {
 static struct of_device_id axp_match_table[] = {
 	{ .compatible = "x-powers,axp2585-pek" },
 	{ .compatible = "x-powers,axp515-pek" },
+	{ .compatible = "x-powers,axp517-pek" },
 	{ .compatible = "x-powers,axp2202-pek" },
 	{ .compatible = "x-powers,axp803-pek" },
 	{ .compatible = "x-powers,axp806-pek" },

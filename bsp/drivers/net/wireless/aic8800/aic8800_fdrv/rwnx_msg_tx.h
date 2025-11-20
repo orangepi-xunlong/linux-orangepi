@@ -171,7 +171,7 @@ int rwnx_send_txpwr_ofst_req(struct rwnx_hw *rwnx_hw);
 int rwnx_send_txpwr_ofst2x_req(struct rwnx_hw *rwnx_hw);
 int rwnx_send_vendor_hwconfig_req(struct rwnx_hw *rwnx_hw, uint32_t hwconfig_id, int32_t *param, int32_t *param_out);
 #ifdef CONFIG_APF
-int rwnx_send_set_apf_prog_req(struct rwnx_hw *rwnx_hw, u8_l *program, u32_l program_len);
+int rwnx_send_set_apf_prog_req(struct rwnx_hw *rwnx_hw, u8_l *program, u16_l program_len, u16_l apf_version);
 int rwnx_send_get_apf_prog_req(struct rwnx_hw *rwnx_hw, u8_l *program, u32_l program_len);
 #endif
 

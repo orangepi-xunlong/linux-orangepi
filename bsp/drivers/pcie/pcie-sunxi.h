@@ -339,6 +339,7 @@ struct sunxi_pcie {
 	struct dma_trx_obj	*dma_obj;
 	const struct sunxi_pcie_of_data *drvdata;
 	struct gpio_desc	*rst_gpio;
+	struct gpio_desc	*pwr_gpio;
 	struct gpio_desc	*wake_gpio;
 	u32			lanes;
 	u32			num_edma;

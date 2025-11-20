@@ -31,6 +31,8 @@
 
 static struct sunxi_gnss_platdata *gnss_data;
 static const struct of_device_id sunxi_gnss_ids[];
+static int user_ctrl_state = -1;
+static int pof_when_suspend = -1;
 
 static int sunxi_gnss_on(struct sunxi_gnss_platdata *data, bool on_off);
 static DEFINE_MUTEX(sunxi_gnss_mutex);
@@ -45,11 +47,6 @@ void sunxi_gnss_set_power(bool on_off)
 
 	pdev = gnss_data->pdev;
 
-	if (gnss_data->always_on && !on_off) {
-		dev_warn(&pdev->dev, "gnss: always on, cannot be off\n");
-		return;
-	}
-
 	mutex_lock(&sunxi_gnss_mutex);
 	if (on_off != gnss_data->power_state) {
 		ret = sunxi_gnss_on(gnss_data, on_off);
@@ -59,15 +56,6 @@ void sunxi_gnss_set_power(bool on_off)
 	mutex_unlock(&sunxi_gnss_mutex);
 }
 EXPORT_SYMBOL_GPL(sunxi_gnss_set_power);
-
-void sunxi_gnss_set_power_boot_state(void)
-{
-	if (!gnss_data)
-		return;
-
-	if (gnss_data->boot_on || gnss_data->always_on)
-		sunxi_gnss_set_power(1);
-}
 
 static int sunxi_gnss_on(struct sunxi_gnss_platdata *data, bool on_off)
 {
@@ -104,6 +92,9 @@ static int sunxi_gnss_on(struct sunxi_gnss_platdata *data, bool on_off)
 			}
 		}
 
+		if (gpio_is_valid(data->gpio_gnss_regon))
+			gpio_set_value(data->gpio_gnss_regon, data->gpio_gnss_regon_assert);
+
 		if (gpio_is_valid(data->gpio_gnss_rst)) {
 			mdelay(10);
 			gpio_set_value(data->gpio_gnss_rst, !data->gpio_gnss_rst_assert);
@@ -111,6 +102,9 @@ static int sunxi_gnss_on(struct sunxi_gnss_platdata *data, bool on_off)
 	} else {
 		if (gpio_is_valid(data->gpio_gnss_rst))
 			gpio_set_value(data->gpio_gnss_rst, data->gpio_gnss_rst_assert);
+
+		if (gpio_is_valid(data->gpio_gnss_regon))
+			gpio_set_value(data->gpio_gnss_regon, !data->gpio_gnss_regon_assert);
 
 		for (i = 0; i < PWR_MAX; i++) {
 			if (!IS_ERR_OR_NULL(data->power[i])) {
@@ -158,20 +152,57 @@ static ssize_t state_store(struct device *dev,
 		sunxi_gnss_set_power(state);
 	}
 
+	user_ctrl_state = state;
+
+	return count;
+}
+
+static ssize_t pofops_show(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+	if (!gnss_data)
+		return 0;
+	return sprintf(buf, "%d\n", pof_when_suspend);
+}
+
+static ssize_t pofops_store(struct device *dev,
+	struct device_attribute *attr, const char *buf, size_t count)
+{
+	unsigned long state;
+	int err;
+
+	if (!gnss_data)
+		return 0;
+
+	err = kstrtoul(buf, 0, &state);
+	if (err)
+		return err;
+
+	if (state > 1)
+		return -EINVAL;
+
+	if (state != pof_when_suspend) {
+		pof_when_suspend = state;
+	}
+
 	return count;
 }
 
 static DEVICE_ATTR(state, S_IRUGO | S_IWUSR,
 		state_show, state_store);
 
-static struct attribute *miscdev_attributes_wlan[] = {
+static DEVICE_ATTR(pofops, S_IRUGO | S_IWUSR,
+		pofops_show, pofops_store);
+
+static struct attribute *miscdev_attributes_gnss[] = {
 	&dev_attr_state.attr,
+	&dev_attr_pofops.attr,
 	NULL,
 };
 
 static struct attribute_group miscdev_attribute_group = {
 	.name  = "gnss",
-	.attrs = miscdev_attributes_wlan,
+	.attrs = miscdev_attributes_gnss,
 };
 
 int sunxi_gnss_init(struct platform_device *pdev)
@@ -179,7 +210,11 @@ int sunxi_gnss_init(struct platform_device *pdev)
 	struct device_node *np = of_find_matching_node(pdev->dev.of_node, sunxi_gnss_ids);
 	struct device *dev = &pdev->dev;
 	struct sunxi_gnss_platdata *data;
+#if (LINUX_VERSION_CODE <= KERNEL_VERSION(6, 2, 0))
 	enum of_gpio_flags config;
+#else
+	u32 config = 0;
+#endif
 	int ret = 0;
 	int count, i;
 
@@ -228,11 +263,20 @@ int sunxi_gnss_init(struct platform_device *pdev)
 		dev_info(dev, "gnss power[%d] (%s)\n", i, data->power_name[i]);
 	}
 
+#if (LINUX_VERSION_CODE > KERNEL_VERSION(6, 2, 0))
+	data->gpio_gnss_regon = of_get_named_gpio(np, "gnss_regon", 0);
+#else
 	data->gpio_gnss_regon = of_get_named_gpio_flags(np, "gnss_regon", 0, &config);
+#endif
 	if (!gpio_is_valid(data->gpio_gnss_regon)) {
 		dev_err(dev, "get gpio gnss_regon failed\n");
 	} else {
+#if (LINUX_VERSION_CODE > KERNEL_VERSION(6, 2, 0))
+		of_property_read_u32_index(np, "gnss_regon", 3, &config);
+		data->gpio_gnss_regon_assert = (config == GPIO_ACTIVE_LOW) ? 0 : 1;
+#else
 		data->gpio_gnss_regon_assert = (config == OF_GPIO_ACTIVE_LOW) ? 0 : 1;
+#endif
 		dev_info(dev, "gnss_regon gpio=%d assert=%d\n", data->gpio_gnss_regon, data->gpio_gnss_regon_assert);
 
 		ret = devm_gpio_request(dev, data->gpio_gnss_regon,
@@ -250,12 +294,20 @@ int sunxi_gnss_init(struct platform_device *pdev)
 			return ret;
 		}
 	}
-
+#if (LINUX_VERSION_CODE > KERNEL_VERSION(6, 2, 0))
+	data->gpio_gnss_rst = of_get_named_gpio(np, "gnss_rst", 0);
+#else
 	data->gpio_gnss_rst = of_get_named_gpio_flags(np, "gnss_rst", 0, &config);
+#endif
 	if (!gpio_is_valid(data->gpio_gnss_rst)) {
 		dev_err(dev, "get gpio gnss_rst failed\n");
 	} else {
+#if (LINUX_VERSION_CODE > KERNEL_VERSION(6, 2, 0))
+		of_property_read_u32_index(np, "gnss_rst", 3, &config);
+		data->gpio_gnss_rst_assert = (config == GPIO_ACTIVE_LOW) ? 0 : 1;
+#else
 		data->gpio_gnss_rst_assert = (config == OF_GPIO_ACTIVE_LOW) ? 0 : 1;
+#endif
 		dev_info(dev, "gnss_rst gpio=%d assert=%d\n", data->gpio_gnss_rst, data->gpio_gnss_rst_assert);
 
 		ret = devm_gpio_request(dev, data->gpio_gnss_rst, "gnss_rst");
@@ -273,10 +325,6 @@ int sunxi_gnss_init(struct platform_device *pdev)
 		}
 		gpio_set_value(data->gpio_gnss_rst, data->gpio_gnss_rst_assert);
 	}
-
-	data->boot_on = of_property_read_bool(np, "regulator-boot-on") ? 1 : 0;
-	data->always_on = of_property_read_bool(np, "regulator-always-on") ? 1 : 0;
-	dev_info(dev, "gnss power boot-on: %d, always-on: %d\n", data->boot_on, data->always_on);
 
 	ret = sysfs_create_group(&sunxi_rfkill_miscdev.this_device->kobj,
 			&miscdev_attribute_group);
@@ -313,6 +361,24 @@ int sunxi_gnss_deinit(struct platform_device *pdev)
 
 	return 0;
 }
+
+#if IS_ENABLED(CONFIG_PM)
+int sunxi_gnss_suspend(struct device *dev)
+{
+	if (user_ctrl_state > 0 && pof_when_suspend > 0)
+		sunxi_gnss_set_power(0);
+
+	return 0;
+}
+
+int sunxi_gnss_resume(struct device *dev)
+{
+	if (user_ctrl_state > 0 && pof_when_suspend > 0)
+		sunxi_gnss_set_power(1);
+
+	return 0;
+}
+#endif
 
 static const struct of_device_id sunxi_gnss_ids[] = {
 	{ .compatible = "allwinner,sunxi-gnss" },

@@ -34,4 +34,7 @@ enum sunxi_power_ts_temp_status {
 	AW_TEMP_STATUS_SHUTDOWN,
 };
 
+int sunxi_power_register_cooler(struct power_supply *psy);
+void sunxi_power_unregister_cooler(struct power_supply *psy);
+
 #endif

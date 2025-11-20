@@ -914,6 +914,7 @@ void edp_video_stream_disable(struct sunxi_edp_hw_desc *edp_hw)
 //	TR_SET_BITS(edp_hw, TR_SECOND_STREAM_ENABLE, 0, 1, 0x0);
 }
 
+s32 trilinear_link_soft_reset(struct sunxi_edp_hw_desc *edp_hw);
 void trilinear_set_qual_pattern(struct sunxi_edp_hw_desc *edp_hw, u32 pattern, u32 lane_cnt)
 {
 	switch (lane_cnt) {
@@ -931,6 +932,7 @@ void trilinear_set_qual_pattern(struct sunxi_edp_hw_desc *edp_hw, u32 pattern, u
 		TR_SET_BITS(edp_hw, TR_LINK_QUAL_PATTERN_SET, 24, 3, pattern);
 		break;
 	}
+	trilinear_link_soft_reset(edp_hw);
 }
 
 static void trilinear_timer_enable(struct sunxi_edp_hw_desc *edp_hw, bool enable)

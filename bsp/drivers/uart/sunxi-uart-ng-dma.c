@@ -14,8 +14,6 @@
  * 2013.6.6 Mintow <duanmintao@allwinnertech.com>
  *    Adapt to support sun8i/sun9i of Allwinner.
  */
-
-#include <sunxi-log.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/io.h>
@@ -62,15 +60,16 @@ void sunxi_uart_stop_dma_tx(struct sunxi_uart_port *uart_port)
 {
 	struct sunxi_uart_dma *uart_dma = uart_port->dma;
 
-	if (uart_dma && uart_dma->tx_dma_used) {
+	if (uart_dma && atomic_read(&uart_dma->tx_dma_used) == 1) {
 		dmaengine_terminate_all(uart_dma->dma_chan_tx);
-		uart_dma->tx_dma_used = 0;
+		atomic_set(&uart_dma->tx_dma_used, 0);
 	}
 }
 
 void sunxi_uart_dma_rx_callback(void *arg)
 {
 	int count, flip, total;
+	unsigned int lsr = 0;
 	struct dma_tx_state state;
 	struct sunxi_uart_port *uart_port = arg;
 	struct uart_port *port = &uart_port->port;
@@ -106,13 +105,24 @@ void sunxi_uart_dma_rx_callback(void *arg)
 	}
 
 	if (unlikely(flip != total))
-		sunxi_err(port->dev, "flip data cnt not equel to rev data\n");
+		sunxi_err_std(port->dev, E_UART_NG_SYS_TTY_FLIP,
+				"flip data cnt not equel to rev data\n");
 
 	tty_flip_buffer_push(&port->state->port);
 	uart_dma->rb_tail =
 		(uart_dma->rb_tail + total) & (uart_dma->rb_size - 1);
 
 	port->icount.rx += total;
+
+	lsr = serial_in(port, SUNXI_UART_LSR);
+
+	if (lsr & SUNXI_UART_LSR_PE)
+		uart_port->port.icount.parity++;
+	else if (lsr & SUNXI_UART_LSR_FE)
+		uart_port->port.icount.frame++;
+	if (lsr & SUNXI_UART_LSR_OE)
+		uart_port->port.icount.overrun++;
+
 	return;
 }
 
@@ -138,7 +148,7 @@ int sunxi_uart_init_dma_tx(struct sunxi_uart_port *uart_port)
 	struct sunxi_uart_dma *uart_dma = uart_port->dma;
 	int ret;
 
-	sunxi_info(uart_port->port.dev, "sunxi_uart_init_dma_tx begin\n");
+	SERIAL_DBG(uart_port->port.dev, "sunxi_uart_init_dma_tx begin\n");
 
 	if (!uart_dma) {
 		sunxi_info(uart_port->port.dev, "sunxi_uart_init_dma_tx fail\n");
@@ -146,13 +156,14 @@ int sunxi_uart_init_dma_tx(struct sunxi_uart_port *uart_port)
 	}
 
 	if (uart_dma->tx_dma_inited) {
-		sunxi_info(uart_port->port.dev, "uart_dma->tx_dma_inited\n");
+		SERIAL_DBG(uart_port->port.dev, "uart_dma->tx_dma_inited\n");
 		return 0;
 	}
 
 	uart_dma->dma_chan_tx = dma_request_chan(uart_port->port.dev, "tx");
 	if (!uart_dma->dma_chan_tx) {
-		sunxi_err(port->dev, "cannot get the TX DMA channel!\n");
+		sunxi_err_std(port->dev, E_UART_NG_SW_DEP_DMA_CHAN,
+				"cannot get the TX DMA channel!\n");
 		ret = -EINVAL;
 	}
 
@@ -164,7 +175,8 @@ int sunxi_uart_init_dma_tx(struct sunxi_uart_port *uart_port)
 	slave_config.dst_maxburst = 1;
 	ret = dmaengine_slave_config(uart_dma->dma_chan_tx, &slave_config);
 	if (ret) {
-		sunxi_err(port->dev, "error in TX dma configuration.");
+		sunxi_err_std(port->dev, E_UART_NG_SW_DEP_DMA_CONFIG,
+				"error in TX dma configuration.");
 		return ret;
 	}
 
@@ -183,7 +195,7 @@ void dma_tx_callback(void *data)
 	struct scatterlist *sgl = &uart_dma->tx_sgl;
 	unsigned long flags;
 
-	sunxi_info(port->dev, "dma_tx_callback\n");
+	SERIAL_DBG(port->dev, "dma_tx_callback\n");
 
 	spin_lock_irqsave(&port->lock, flags);
 	dma_unmap_sg(uart_port->port.dev, sgl, 1, DMA_TO_DEVICE);
@@ -194,7 +206,7 @@ void dma_tx_callback(void *data)
 		uart_write_wakeup(port);
 
 	sunxi_uart_enable_ier_thri(port);
-	uart_dma->tx_dma_used = 0;
+	atomic_set(&uart_dma->tx_dma_used, 0);
 	spin_unlock_irqrestore(&port->lock, flags);
 }
 
@@ -214,11 +226,10 @@ int sunxi_uart_start_dma_tx(struct sunxi_uart_port *uart_port)
 	if (-1 == sunxi_uart_init_dma_tx(uart_port))
 		goto err_out;
 
-	if (1 == uart_dma->tx_dma_used)
+	if (1 == atomic_read(&uart_dma->tx_dma_used))
 		return 1;
 
-	uart_dma->tx_dma_used = 1;
-	isb();
+	atomic_set(&uart_dma->tx_dma_used, 1);
 	/**********************************/
 	/* mask the stop now */
 	sunxi_uart_disable_ier_thri(port);
@@ -229,14 +240,16 @@ int sunxi_uart_start_dma_tx(struct sunxi_uart_port *uart_port)
 	ret = dma_map_sg(port->dev, sgl, 1, DMA_TO_DEVICE);
 
 	if (ret == 0) {
-		sunxi_err(port->dev, "DMA mapping error for TX.\n");
+		sunxi_err_std(port->dev, E_UART_NG_SW_DEP_DMA_MAP_SG,
+				"DMA mapping error for TX.\n");
 		return -1;
 	}
 	desc = dmaengine_prep_slave_sg(uart_dma->dma_chan_tx, sgl, 1,
 			DMA_MEM_TO_DEV, DMA_PREP_INTERRUPT);
 
 	if (!desc) {
-		sunxi_err(port->dev, "We cannot prepare for the TX slave dma!\n");
+		sunxi_err_std(port->dev, E_UART_NG_SW_DEP_DMA_PREP_SLAVE_SG,
+				"We cannot prepare for the TX slave dma!\n");
 		return -1;
 	}
 	desc->callback = dma_tx_callback;
@@ -286,7 +299,8 @@ int sunxi_uart_init_dma_rx(struct sunxi_uart_port *uart_port)
 
 	uart_dma->dma_chan_rx = dma_request_chan(uart_port->port.dev, "rx");
 	if (IS_ERR_OR_NULL(uart_dma->dma_chan_rx)) {
-		sunxi_err(port->dev, "cannot get the DMA channel.\n");
+		sunxi_err_std(port->dev, E_UART_NG_SW_DEP_DMA_CHAN,
+				"cannot get the DMA channel.\n");
 		return -1;
 	}
 
@@ -308,7 +322,8 @@ int sunxi_uart_init_dma_rx(struct sunxi_uart_port *uart_port)
 
 	ret = dmaengine_slave_config(uart_dma->dma_chan_rx, &slave_config);
 	if (ret) {
-		sunxi_err(port->dev, "error in RX dma configuration.\n");
+		sunxi_err_std(port->dev, E_UART_NG_SW_DEP_DMA_CONFIG,
+				"error in RX dma configuration.\n");
 		return ret;
 	}
 
@@ -345,7 +360,8 @@ int sunxi_uart_start_dma_rx(struct sunxi_uart_port *uart_port)
 			DMA_DEV_TO_MEM, DMA_PREP_INTERRUPT);
 
 	if (!desc) {
-		sunxi_err(port->dev, "get rx dma descriptor failed!\n");
+		sunxi_err_std(port->dev, E_UART_NG_SW_DEP_DMA_PREP_CYCLIC,
+				"get rx dma descriptor failed!\n");
 		return -EINVAL;
 	}
 
@@ -371,8 +387,9 @@ int sunxi_uart_init_dma(struct sunxi_uart_port *uart_port)
 		uart_port->dma->rb_tail = 0;
 
 		if (!uart_port->dma->rx_buffer) {
-			sunxi_err(uart_port->port.dev,
-				"dmam_alloc_coherent dma_rx_buffer fail\n");
+			sunxi_err_std(uart_port->port.dev,
+					E_UART_NG_SW_DEP_DMA_ALLOC_COHERENT,
+					"dmam_alloc_coherent dma_rx_buffer fail\n");
 			return -ENOMEM;
 		} else {
 			sunxi_info(uart_port->port.dev,

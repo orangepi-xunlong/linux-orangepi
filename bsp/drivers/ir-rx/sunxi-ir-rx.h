@@ -130,6 +130,7 @@ static u32 sunxi_irrx_regs_offset[] = {
 
 struct sunxi_ir_rx {
 	void __iomem *reg_base;
+	void __iomem *rtc_addr;
 	struct platform_device	*pdev;
 	struct clk *bclk;
 	struct clk *pclk;
@@ -139,6 +140,8 @@ struct sunxi_ir_rx {
 	struct regulator *supply;
 	struct pinctrl *pctrl;
 	u32 supply_vol;
+	u32 rtc_reg;
+	u32 rtc_flag;
 	int irq_num;
 	u32 ir_protocols;
 	u32 ir_addr_cnt;

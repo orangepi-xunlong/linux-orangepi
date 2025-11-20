@@ -4,7 +4,6 @@
  * Copyright (c) 2020 wuyan@allwinnertech.com
  */
 
-#include <sunxi-log.h>
 #include <linux/module.h>
 #include <linux/platform_device.h>
 #include <linux/of.h>
@@ -1020,4 +1019,4 @@ fs_initcall(sun8iw20_pio_init);
 MODULE_DESCRIPTION("Allwinner sun8iw20 pio pinctrl driver");
 MODULE_AUTHOR("Martin <wuyan@allwinnertech>");
 MODULE_LICENSE("GPL");
-MODULE_VERSION("1.0.5");
+MODULE_VERSION("1.0.6");

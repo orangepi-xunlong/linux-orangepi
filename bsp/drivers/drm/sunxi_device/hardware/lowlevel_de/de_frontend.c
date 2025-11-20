@@ -143,7 +143,7 @@ static int de_frontend_check_and_reconfig(struct de_frontend_handle *hdl, struct
 	new_inner_info->icsc.color_range = frontend_cfg->color_range;
 	new_inner_info->icsc.eotf = frontend_cfg->eotf;
 
-	new_inner_info->ocsc.px_fmt_space = frontend_cfg->de_out_cfg.px_fmt_space;
+	new_inner_info->ocsc.px_fmt_space = frontend_cfg->rgb_out ? DE_FORMAT_SPACE_RGB : frontend_cfg->de_out_cfg.px_fmt_space;
 	new_inner_info->ocsc.color_space = frontend_cfg->de_out_cfg.color_space;
 	new_inner_info->ocsc.color_range = frontend_cfg->de_out_cfg.color_range;
 	new_inner_info->ocsc.eotf = frontend_cfg->de_out_cfg.eotf;
@@ -243,7 +243,7 @@ static int de_frontend_check_and_reconfig(struct de_frontend_handle *hdl, struct
 	return 0;
 }
 
-static s32 de_frontend_apply_cdc_and_csc(struct de_frontend_handle *hdl, struct display_channel_state *cstate, bool rgb_out)
+static s32 de_frontend_apply_cdc_and_csc(struct de_frontend_handle *hdl, struct display_channel_state *cstate)
 {
 	struct de_csc_info icsc_info;
 	struct de_csc_info ocsc_info;
@@ -291,8 +291,6 @@ static s32 de_frontend_apply_cdc_and_csc(struct de_frontend_handle *hdl, struct 
 	}
 
 	ocsc_info.px_fmt_space = info->ocsc.px_fmt_space;
-	if (rgb_out)
-		ocsc_info.px_fmt_space = DE_FORMAT_SPACE_RGB;
 	ocsc_info.color_range = info->ocsc.color_range;
 	ocsc_info.color_space = info->ocsc.color_space;
 	ocsc_info.eotf = info->ocsc.eotf;
@@ -877,8 +875,20 @@ s32 de_frontend_apply(struct de_frontend_handle *hdl, struct display_channel_sta
 
 	de_frontend_apply_dlc(hdl, cstate);
 
-	de_frontend_apply_cdc_and_csc(hdl, cstate, frontend_cfg->rgb_out);
+	de_frontend_apply_cdc_and_csc(hdl, cstate);
 
+	return 0;
+}
+
+s32 de_frontend_apply_atonce(struct de_frontend_handle *hdl, struct display_channel_state *cstate)
+{
+	de_frontend_apply_fcm(hdl, cstate);
+	de_frontend_apply_sharp(hdl, cstate);
+	de_frontend_apply_asu(hdl, cstate);
+	de_frontend_apply_snr(hdl, cstate);
+	de_frontend_apply_dci(hdl, cstate);
+	de_frontend_apply_dlc(hdl, cstate);
+	de_frontend_apply_cdc_and_csc(hdl, cstate);
 	return 0;
 }
 

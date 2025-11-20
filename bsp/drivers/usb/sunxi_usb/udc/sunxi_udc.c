@@ -58,6 +58,9 @@
 #if IS_ENABLED(CONFIG_POWER_SUPPLY)
 #include <linux/power_supply.h>
 #endif
+#if IS_ENABLED(CONFIG_EXTCON)
+#include <linux/extcon.h>
+#endif
 
 #define DRIVER_DESC	"SoftWinner USB Device Controller"
 #define DRIVER_AUTHOR	"SoftWinner USB Developer"
@@ -71,6 +74,7 @@ static struct sunxi_udc	*the_controller;
 static u32 usbd_port_no;
 static sunxi_udc_io_t g_sunxi_udc_io;
 static u32 usb_connect;
+static u32 usb_set_current;
 static u32 is_controller_alive;
 static u8 is_udc_enable;   /* is udc enable by gadget? */
 
@@ -84,7 +88,6 @@ static __u8 first_enable = 1;
 
 static atomic_t udc_regulator_cnt = ATOMIC_INIT(0);
 
-static int usbpc_current_limit = -1;
 #define	DMA_ADDR_INVALID	(~(dma_addr_t)0)
 
 static u8 crq_bRequest;
@@ -523,34 +526,14 @@ static __u32 is_peripheral_active(void)
 
 static void __maybe_unused sunxi_set_cur_vol_work(struct work_struct *work)
 {
-#if !IS_ENABLED(SUNXI_USB_FPGA) && IS_ENABLED(CONFIG_POWER_SUPPLY)
-	struct power_supply *psy = NULL;
-	union power_supply_propval temp;
-	struct device_node *np = NULL;
+#if !IS_ENABLED(SUNXI_USB_FPGA) && IS_ENABLED(CONFIG_EXTCON)
+	struct sunxi_udc *udc = container_of(work, struct sunxi_udc, set_cur_vol_work.work);
 
-	if (of_find_property(g_udc_pdev->dev.of_node, "det_vbus_supply", NULL))
-		psy = devm_power_supply_get_by_phandle(&g_udc_pdev->dev,
-						     "det_vbus_supply");
-
-	if (!psy || IS_ERR(psy)) {
-		DMSG_WARN("%s()%d WARN: get power supply failed\n",
-			   __func__, __LINE__);
-	} else {
-		temp.intval = 500;
-		/*
-		 * When connect to PC, we will parse dts to get current limit value.
-		 * If get failed, we will set default value 500.
-		 */
-		np = of_parse_phandle(g_udc_pdev->dev.of_node, "det_vbus_supply", 0);
-		if (np)
-			of_property_read_u32(np, "pmu_usbpc_cur", &temp.intval);
-
-		if (usbpc_current_limit > 0)
-			temp.intval = usbpc_current_limit;
-
-		power_supply_set_property(psy,
-					POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT, &temp);
-	}
+	/*
+	 * When connect to PC, we will parse dts to get current limit value.
+	 * If get failed, we will set default value 500.
+	 */
+	extcon_set_state_sync(udc->edev, EXTCON_CHG_USB_SDP, true);
 #endif
 }
 
@@ -674,7 +657,7 @@ __acquires(ep->dev->lock)
 	unsigned halted = ep->halted;
 
 	if (g_queue_debug) {
-		DMSG_INFO("d: (%s, %p, %d, %d)\n\n\n", ep->ep.name,
+		DMSG_INFO("d: (%s, 0x%p, %d, %d)\n\n\n", ep->ep.name,
 				&(req->req), req->req.length, req->req.actual);
 	}
 
@@ -1253,10 +1236,13 @@ static int sunxi_udc_read_fifo(struct sunxi_udc_ep *ep,
 
 	fifo_count = USBC_ReadLenFromFifo(g_sunxi_udc_io.usb_bsp_hdle, USBC_EP_TYPE_RX);
 
-	if ((is_sunxi_udc_dma_capable(req, ep)) && (fifo_count == ep->ep.maxpacket))
+	if ((is_sunxi_udc_dma_capable(req, ep)) && (fifo_count == ep->ep.maxpacket)) {
 		return dma_read_fifo(ep, req);
-	else
+	} else {
+		if (is_buffer_mapped(req, ep))
+			sunxi_udc_unmap_dma_buffer(req, ep->dev, ep);
 		return pio_read_fifo(ep, req);
+	}
 }
 
 static int sunxi_udc_read_fifo_crq(struct usb_ctrlrequest *crq)
@@ -2201,6 +2187,7 @@ static irqreturn_t sunxi_udc_irq(int dummy, void *_dev)
 		clear_all_irq();
 
 		usb_connect = 1;
+		usb_set_current = 1;
 
 		if (!charger_mode) {
 			pr_debug("usb_connecting: hold wake lock.\n");
@@ -2241,10 +2228,6 @@ static irqreturn_t sunxi_udc_irq(int dummy, void *_dev)
 
 		spin_unlock_irqrestore(&dev->lock, flags);
 
-#if !IS_ENABLED(SUNXI_USB_FPGA) && IS_ENABLED(CONFIG_POWER_SUPPLY)
-		schedule_work(&dev->set_cur_vol_work);
-#endif
-
 		return IRQ_HANDLED;
 	}
 
@@ -2263,6 +2246,7 @@ static irqreturn_t sunxi_udc_irq(int dummy, void *_dev)
 			dev->driver->resume(&dev->gadget);
 			spin_lock(&dev->lock);
 			usb_connect = 1;
+			usb_set_current = 1;
 		}
 	}
 
@@ -2275,10 +2259,9 @@ static irqreturn_t sunxi_udc_irq(int dummy, void *_dev)
 					USBC_INTUSB_SUSPEND);
 
 		if (dev->gadget.speed != USB_SPEED_UNKNOWN) {
-			spin_unlock_irqrestore(&dev->lock, flags);
-			schedule_work(&dev->vbus_det_work);
-			spin_lock_irqsave(&dev->lock, flags);
+			mod_delayed_work(system_wq, &dev->vbus_det_work, msecs_to_jiffies(100));
 			usb_connect = 0;
+			usb_set_current = 0;
 			if (!charger_mode) {
 				__pm_relax(dev->ws);
 				pr_debug("usb_connecting: release wake lock\n");
@@ -2309,6 +2292,7 @@ static irqreturn_t sunxi_udc_irq(int dummy, void *_dev)
 		dev->ep0state = EP0_IDLE;
 
 		usb_connect = 0;
+		usb_set_current = 0;
 	}
 
 	/**
@@ -2319,6 +2303,14 @@ static irqreturn_t sunxi_udc_irq(int dummy, void *_dev)
 	 */
 	if (tx_irq & USBC_INTTx_FLAG_EP0) {
 		DMSG_DBG_UDC("USB ep0 irq\n");
+
+#if !IS_ENABLED(SUNXI_USB_FPGA) && IS_ENABLED(CONFIG_POWER_SUPPLY)
+		if (usb_set_current) {
+			mod_delayed_work(system_wq, &dev->set_cur_vol_work, msecs_to_jiffies(100));
+			/*insert device set current only once*/
+			usb_set_current = 0;
+		}
+#endif
 
 		/* Clear the interrupt bit by setting it to 1 */
 		USBC_INT_ClearEpPending(g_sunxi_udc_io.usb_bsp_hdle,
@@ -3709,14 +3701,13 @@ static void sunxi_vbus_det_work(struct work_struct *work)
 	struct power_supply *psy = NULL;
 	union power_supply_propval temp;
 #if !IS_ENABLED(SUNXI_USB_FPGA)
-	struct device_node *np = NULL;
 #endif
 #endif
 
 	/* wait for axp vbus detect ready */
 	msleep(100);
 
-	udc = container_of(work, struct sunxi_udc, vbus_det_work);
+	udc = container_of(work, struct sunxi_udc, vbus_det_work.work);
 
 #if IS_ENABLED(CONFIG_POWER_SUPPLY)
 	if (of_find_property(g_udc_pdev->dev.of_node, "det_vbus_supply", NULL))
@@ -3741,20 +3732,12 @@ static void sunxi_vbus_det_work(struct work_struct *work)
 #endif
 	if (udc->driver && udc->driver->disconnect) {
 		udc->driver->disconnect(&udc->gadget);
-#if !IS_ENABLED(SUNXI_USB_FPGA) && IS_ENABLED(CONFIG_POWER_SUPPLY)
+#if !IS_ENABLED(SUNXI_USB_FPGA) && IS_ENABLED(CONFIG_EXTCON)
 		/*
 		 * When disconnect from PC, we should recover current limit value.
 		 * If get failed, we will set original value.
 		 */
-		if (psy && !IS_ERR(psy)) {
-			power_supply_get_property(psy,
-						  POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT, &temp);
-			np = of_parse_phandle(g_udc_pdev->dev.of_node, "det_vbus_supply", 0);
-			if (np)
-				of_property_read_u32(np, "pmu_usbad_cur", &temp.intval);
-			power_supply_set_property(psy,
-						  POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT, &temp);
-		}
+		extcon_set_state_sync(udc->edev, EXTCON_CHG_USB_SDP, false);
 #endif
 	}
 }
@@ -3875,9 +3858,9 @@ int sunxi_usb_device_enable(void)
 
 	if (first_enable) {
 		first_enable = 0;
-		INIT_WORK(&udc->vbus_det_work, sunxi_vbus_det_work);
+		INIT_DELAYED_WORK(&udc->vbus_det_work, sunxi_vbus_det_work);
 #if !IS_ENABLED(SUNXI_USB_FPGA) && IS_ENABLED(CONFIG_POWER_SUPPLY)
-		INIT_WORK(&udc->set_cur_vol_work, sunxi_set_cur_vol_work);
+		INIT_DELAYED_WORK(&udc->set_cur_vol_work, sunxi_set_cur_vol_work);
 #endif
 		udc->udc_regulator = devm_regulator_get(&(pdev->dev), "udc");
 		if (IS_ERR_OR_NULL(udc->udc_regulator))
@@ -3968,6 +3951,10 @@ __acquires(sunxi_udc.lock)
 	is_controller_alive = 0;
 
 	spin_unlock_irqrestore(&udc->lock, flags);
+
+#if !IS_ENABLED(SUNXI_USB_FPGA) && IS_ENABLED(CONFIG_EXTCON)
+	extcon_set_state_sync(udc->edev, EXTCON_CHG_USB_SDP, false);
+#endif
 
 	udc_regul_cnt = atomic_read(&udc_regulator_cnt);
 	if (!IS_ERR_OR_NULL(udc->udc_regulator) && udc_regul_cnt) {
@@ -4095,66 +4082,7 @@ udc_reg_store(struct class *class, struct class_attribute *attr, const char *buf
 }
 static CLASS_ATTR_RW(udc_reg);
 
-static ssize_t
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0))
-usbpc_current_limit_show(const struct class *class, const struct class_attribute *attr, char *buf)
-#else
-usbpc_current_limit_show(struct class *class, struct class_attribute *attr, char *buf)
-#endif
-{
-	return sprintf(buf, "%d\n", usbpc_current_limit);
-}
-
-static ssize_t
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0))
-usbpc_current_limit_store(const struct class *dev, const struct class_attribute *attr, const char *buf, size_t size)
-#else
-usbpc_current_limit_store(struct class *dev, struct class_attribute *attr, const char *buf, size_t size)
-#endif
-{
-	int current_limit = 0;
-	int ret = 0;
-
-#if !IS_ENABLED(SUNXI_USB_FPGA) && IS_ENABLED(CONFIG_POWER_SUPPLY)
-	struct power_supply *psy = NULL;
-	union power_supply_propval temp;
-	struct device_node *np = NULL;
-#endif
-    ret = kstrtoint(buf, 0, &current_limit);
-	if (ret != 0)
-		return ret;
-	usbpc_current_limit = current_limit;
-#if !IS_ENABLED(SUNXI_USB_FPGA) && IS_ENABLED(CONFIG_POWER_SUPPLY)
-	if (of_find_property(g_udc_pdev->dev.of_node, "det_vbus_supply", NULL))
-		psy = devm_power_supply_get_by_phandle(&g_udc_pdev->dev,
-						     "det_vbus_supply");
-
-	if (!psy || IS_ERR(psy)) {
-		DMSG_WARN("%s()%d WARN: get power supply failed\n",
-			   __func__, __LINE__);
-	} else {
-		temp.intval = 500;
-		/*
-		 * When connect to PC, we will parse dts to get current limit value.
-		 * If get failed, we will set default value 500.
-		 */
-		np = of_parse_phandle(g_udc_pdev->dev.of_node, "det_vbus_supply", 0);
-		if (np)
-			of_property_read_u32(np, "pmu_usbpc_cur", &temp.intval);
-		if (usbpc_current_limit > 0)
-			temp.intval = usbpc_current_limit;
-		DMSG_INFO("usbpc_current_limit was set %d mA\n", temp.intval);
-		power_supply_set_property(psy,
-					POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT, &temp);
-	}
-#endif
-
-	return size;
-}
-static CLASS_ATTR_RW(usbpc_current_limit);
-
 static struct attribute *udc_debug_class_attrs[] = {
-	&class_attr_usbpc_current_limit.attr,
 	&class_attr_udc_reg.attr,
 	NULL,
 };
@@ -4170,6 +4098,32 @@ static const struct of_device_id sunxi_udc_match[] = {
 	{},
 };
 MODULE_DEVICE_TABLE(of, sunxi_udc_match);
+
+#if IS_ENABLED(CONFIG_EXTCON)
+static const unsigned int sunxi_udc_extcon_cable[] = {
+	EXTCON_CHG_USB_SDP,
+	EXTCON_NONE,
+};
+
+static int sunxi_udc_extcon_state_init(struct sunxi_udc *udc)
+{
+	int ret = 0;
+
+	udc->edev = devm_extcon_dev_allocate(udc->gadget.dev.parent, sunxi_udc_extcon_cable);
+	if (IS_ERR_OR_NULL(udc->edev)) {
+		dev_err(udc->gadget.dev.parent, "failed to allocate extcon device\n");
+		return PTR_ERR(udc->edev);
+	}
+
+	ret = devm_extcon_dev_register(udc->gadget.dev.parent, udc->edev);
+	if (ret < 0) {
+		dev_err(udc->gadget.dev.parent, "failed to register extcon device\n");
+		return ret;
+	}
+
+	return ret;
+}
+#endif
 
 static int sunxi_udc_probe_otg(struct platform_device *pdev)
 {
@@ -4226,6 +4180,12 @@ static int sunxi_udc_probe_otg(struct platform_device *pdev)
 		dev_err(&pdev->dev, "register class fialed\n");
 		return retval ;
 	}
+
+#if IS_ENABLED(CONFIG_EXTCON)
+	retval = sunxi_udc_extcon_state_init(udc);
+	if (retval < 0)
+		return retval;
+#endif
 
 	device_create_file(&pdev->dev, &dev_attr_otg_ed_test);
 	device_create_file(&pdev->dev, &dev_attr_otg_phy_range);
@@ -4469,6 +4429,6 @@ module_exit(udc_exit);
 
 MODULE_AUTHOR(DRIVER_AUTHOR);
 MODULE_DESCRIPTION(DRIVER_DESC);
-MODULE_VERSION("1.0.21");
+MODULE_VERSION("1.0.31");
 MODULE_LICENSE("GPL v2");
 MODULE_ALIAS("platform:softwinner-usbgadget");

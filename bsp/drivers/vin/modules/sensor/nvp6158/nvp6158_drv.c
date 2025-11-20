@@ -806,11 +806,11 @@ int nvp6158_init_hardware(int video_mode)
 			nvp6158_set_portmode(chip, 2, NVP6158_OUTMODE_2MUX_FHD, 1); */
 			if (video_mode == AHD20_720P_25P
 				|| video_mode == AHD20_SD_H1440_PAL || video_mode == AHD20_SD_H1440_NT) {
-#if 1 /* BT1120 */
+#if IS_ENABLED(CONFIG_BT1120) /* BT1120 */
 				nvp6158_set_portmode(chip, 1, NVP6158_OUTMODE_4MUX_BT1120S, 0);
 				nvp6158_set_portmode(chip, 2, NVP6158_OUTMODE_4MUX_BT1120S, 1);
 #else /* BT656--NVP6158_OUTMODE_1MUX_HD / NVP6158_OUTMODE_2MUX_HD / NVP6158_OUTMODE_4MUX_HD */
-				nvp6158_set_portmode(chip, 0, NVP6158_OUTMODE_1MUX_HD, 0)
+				nvp6158_set_portmode(chip, 0, NVP6158_OUTMODE_4MUX_HD, 0);
 #endif
 			} else if (video_mode == AHD20_1080P_25P) {
 				nvp6158_set_portmode(chip, 0, NVP6158_OUTMODE_4MUX_MIX, 0);

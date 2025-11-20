@@ -21,6 +21,16 @@ static DECLARE_WAIT_QUEUE_HEAD(top_phy_wq);
 #define PHY_DCXO_19_2M	(19200000)
 #define PHY_DCXO_26M	(26000000)
 
+#define phy_diff(x, y)            ((x > y) ? (x - y) : (y - x))
+#define phy_diff_range(x, y, r)   (phy_diff(x, y) <= r)
+
+struct phy_pll_cal_s {
+	u32 pll_n;
+	u32 pll_m;
+	u32 pll_p;
+	u64 diff;
+};
+
 struct top_phy_pll_s {
 	u32 ref_clk; /* KHZ */
 	u32 pll_value;
@@ -176,15 +186,114 @@ static u32 _top_phy_cal_clk(union REG_0020_t value)
 	return clock / (value.sun60i.pll_p0 + 1);
 }
 
+#define PLLVCO_MIN_HZ   1260000
+#define PLLVCO_MAX_HZ   2250000
+#define MAX_RESULT      5
+static int _top_phy_pll_auto_cal(u32 pixel_clk, struct top_phy_pll_s *pll_cfg)
+{
+	struct phy_pll_cal_s temp_result[MAX_RESULT];
+	struct phy_pll_cal_s result;
+	u64 min_diff = ULLONG_MAX;
+	u64 dcxo_hz = (u64)top_phy.dcxo_khz;
+	u64 target_clk = (u64)pixel_clk;
+	u64 temp_vco = 0, temp_vco_max = 0, temp_clk = 0, temp_diff = 0;
+	u16 temp_m = 0, temp_n = 0, temp_p = 0;
+	u8 has_m1 = 0, has_result = 0, temp_count = 0, i = 0;
+
+	for (temp_m = 1; temp_m <= 2; temp_m++) {
+		for (temp_n = 1; temp_n <= 255; temp_n++) {
+			temp_vco = (dcxo_hz * temp_n) / temp_m;
+			if (temp_vco < PLLVCO_MIN_HZ || temp_vco > PLLVCO_MAX_HZ)
+				continue;
+
+			for (temp_p = 1; temp_p <= 128; temp_p++) {
+				temp_clk = (dcxo_hz * temp_n) / (temp_m * temp_p);
+				temp_diff = phy_diff(temp_clk, target_clk);
+				if (temp_diff < min_diff) {
+					min_diff = temp_diff;
+				}
+			}
+		}
+	}
+
+	for (temp_m = 1; temp_m <= 2; temp_m++) {
+		for (temp_n = 1; temp_n <= 255; temp_n++) {
+			temp_vco = (dcxo_hz * temp_n) / temp_m;
+			if (temp_vco < PLLVCO_MIN_HZ || temp_vco > PLLVCO_MAX_HZ)
+				continue;
+
+			for (temp_p = 1; temp_p <= 128; temp_p++) {
+				temp_clk = (dcxo_hz * temp_n) / (temp_m * temp_p);
+				temp_diff = phy_diff(temp_clk, target_clk);
+				if ((temp_diff == min_diff) && (temp_count < MAX_RESULT)) {
+					temp_result[temp_count].pll_n = temp_n;
+					temp_result[temp_count].pll_m = temp_m;
+					temp_result[temp_count].pll_p = temp_p;
+					temp_result[temp_count].diff  = temp_diff;
+					temp_count++;
+				}
+			}
+		}
+	}
+
+	if (temp_count == 0) {
+		hdmi_wrn("top phy auto mode not found valid result\n");
+		return -1;
+	}
+
+	for (i = 0; i < temp_count; i++) {
+		if (temp_result[i].pll_m == 1) {
+			has_m1 = 1;
+			break;
+		}
+	}
+
+	if (has_m1) {
+		for (i = 0; i < temp_count; i++) {
+			if (temp_result[i].pll_m == 1) {
+				temp_vco = dcxo_hz * temp_result[i].pll_n;
+				if (temp_vco > temp_vco_max) {
+					temp_vco_max = temp_vco;
+					result = temp_result[i];
+					has_result = 1;
+				}
+			}
+		}
+	} else {
+		for (i = 0; i < temp_count; i++) {
+			temp_vco = dcxo_hz * temp_result[i].pll_n;
+			if (temp_vco > temp_vco_max) {
+				temp_vco_max = temp_vco;
+				result = temp_result[i];
+				has_result = 1;
+			}
+		}
+	}
+
+	if (has_result == 0) {
+		hdmi_wrn("top phy auto cal not get max config\n");
+		return -1;
+	}
+
+	pll_cfg->ref_clk = pixel_clk;
+	pll_cfg->pll_value  = 0xE8000000;
+	pll_cfg->pll_value |= (result.pll_m - 1) << 1;
+	pll_cfg->pll_value |= (result.pll_n - 1) << 8;
+	pll_cfg->pll_value |= (result.pll_p - 1) << 16;
+	pll_cfg->ldo_value   = 0x00035000;
+	pll_cfg->pll_patern0 = 0x00000000;
+	pll_cfg->pll_patern1 = 0x30000000;
+	return 0;
+}
+
 int top_phy_config(void)
 {
 	int ret = 0, i = 0;
 	struct dw_hdmi_dev_s *hdmi = dw_get_hdmi();
-	struct top_phy_pll_s *pll_cfg = top_phy.pll_data;
+	struct top_phy_pll_s *pll_table = top_phy.pll_data;
+	struct top_phy_pll_s  pll_cfg;
 	volatile struct top_phy_regs *phy_reg = top_phy.phy_addr;
-	u32 clock = hdmi->pixel_repeat ? hdmi->pixel_clk : hdmi->tmds_clk;
-	u32 size = top_phy.pll_size;
-	u8 index = 0;
+	u32 clock = hdmi->pixel_clk * (hdmi->pixel_repeat + 1);
 
 	top_phy_pll_set_output(0x0);
 
@@ -193,55 +302,45 @@ int top_phy_config(void)
 		return 0;
 	}
 
-	/* check min clock */
-	if (clock < pll_cfg[0].ref_clk) {
-		index = 0;
-		goto cfg_pll;
-	}
+	memset(&pll_cfg, 0x0, sizeof(struct top_phy_pll_s));
 
-	if (clock > pll_cfg[size - 1].ref_clk) {
-		index = size - 1;
-		goto cfg_pll;
-	}
-
-	for (i = 0; i < size; i++) {
-		if (clock == pll_cfg[i].ref_clk) {
-			index = i;
+	/* match clock table, and diff is 0.1% */
+	for (i = 0; i < top_phy.pll_size; i++) {
+		if (phy_diff_range(clock, pll_table[i].ref_clk, (clock / 1000))) {
+			pll_cfg = pll_table[i];
 			goto cfg_pll;
 		}
+	}
 
-		if (clock > pll_cfg[i].ref_clk &&
-				clock < pll_cfg[i + 1].ref_clk) {
-			if ((pll_cfg[i + 1].ref_clk - clock) >
-					(clock - pll_cfg[i].ref_clk))
-				index = i;
+	/* auto calculate pll params */
+	ret = _top_phy_pll_auto_cal(clock, &pll_cfg);
+	if (ret == 0) {
+		hdmi_inf("top phy auto calculate done\n");
+		goto cfg_pll;
+	}
+
+	/* use the closest parameter of the table */
+	for (i = 0; i < top_phy.pll_size; i++) {
+		if (clock > pll_table[i].ref_clk && clock < pll_table[i + 1].ref_clk) {
+			if ((pll_table[i + 1].ref_clk - clock) >
+					(clock - pll_table[i].ref_clk))
+				pll_cfg = pll_table[i];
 			else
-				index = i + 1;
+				pll_cfg = pll_table[i + 1];
 			goto cfg_pll;
 		}
 	}
 
 cfg_pll:
-	phy_reg->reg_0020.sun60i.pll_input_div2 =
-			((pll_cfg[index].pll_value & 0x00000002) >> 1);
+	phy_reg->reg_0020.sun60i.pll_input_div2   = ((pll_cfg.pll_value & 0x00000002) >> 1);
+	phy_reg->reg_0020.sun60i.pll_lock_model   = ((pll_cfg.pll_value & 0x00000020) >> 5);
+	phy_reg->reg_0020.sun60i.pll_unlock_model = ((pll_cfg.pll_value & 0x000000C0) >> 6);
+	phy_reg->reg_0020.sun60i.pll_n  = ((pll_cfg.pll_value & 0x0000FF00) >> 8);
+	phy_reg->reg_0020.sun60i.pll_p0 = ((pll_cfg.pll_value & 0x007F0000) >> 16);
 
-	phy_reg->reg_0020.sun60i.pll_lock_model =
-			((pll_cfg[index].pll_value & 0x00000020) >> 5);
-
-	phy_reg->reg_0020.sun60i.pll_unlock_model =
-			((pll_cfg[index].pll_value & 0x000000C0) >> 6);
-
-	phy_reg->reg_0020.sun60i.pll_n =
-			((pll_cfg[index].pll_value & 0x0000FF00) >> 8);
-
-	phy_reg->reg_0020.sun60i.pll_p0 =
-			((pll_cfg[index].pll_value & 0x007F0000) >> 16);
-
-	phy_reg->reg_0028.dwval = pll_cfg[index].ldo_value;
-
-	phy_reg->reg_002C.dwval = pll_cfg[index].pll_patern0;
-
-	phy_reg->reg_0030.dwval = pll_cfg[index].pll_patern1;
+	phy_reg->reg_0028.dwval = pll_cfg.ldo_value;
+	phy_reg->reg_002C.dwval = pll_cfg.pll_patern0;
+	phy_reg->reg_0030.dwval = pll_cfg.pll_patern1;
 
 	/* check pll open */
 	if (!phy_reg->reg_0020.sun60i.pll_en)
@@ -256,9 +355,9 @@ cfg_pll:
 	phy_reg->reg_0020.sun60i.lock_enable = 0x1;
 
 	hdmi_inf("[top phy]\n");
-	hdmi_inf(" - %dKHz, %s clock\n", clock, hdmi->pixel_repeat ? "pixel" : "tmds");
+	hdmi_inf(" - pixel clock %dKHz\n", clock);
 	hdmi_inf("   - pll: 0x%08X, 0x%08X, 0x%08X, 0x%08X\n",
-		pll_cfg[index].pll_value, pll_cfg[index].ldo_value, pll_cfg[index].pll_patern0, pll_cfg[index].pll_patern1);
+		pll_cfg.pll_value, pll_cfg.ldo_value, pll_cfg.pll_patern0, pll_cfg.pll_patern1);
 
 	/* wait top phy pll lock */
 	ret = wait_event_timeout(top_phy_wq, top_phy_pll_get_lock(), msecs_to_jiffies(20));

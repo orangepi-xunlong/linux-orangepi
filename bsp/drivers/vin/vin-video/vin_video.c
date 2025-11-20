@@ -2336,7 +2336,6 @@ static int vidioc_g_input(struct file *file, void *priv, unsigned int *i)
 
 static int __vin_actuator_set_power(struct v4l2_subdev *sd, int on)
 {
-#if 0 /* need to review */
 	int *use_count;
 	int ret;
 
@@ -2351,22 +2350,6 @@ static int __vin_actuator_set_power(struct v4l2_subdev *sd, int on)
 	ret = v4l2_subdev_call(sd, core, ioctl, ACT_SOFT_PWDN, 0);
 
 	return ret != -ENOIOCTLCMD ? ret : 0;
-#else
-	int use_count;
-	int ret;
-
-	if (sd == NULL)
-		return -ENXIO;
-
-	use_count = &sd->entity.use_count;
-	if (on && (use_count)++ > 0)
-		return 0;
-	else if (!on && (use_count == 0 || --(use_count) > 0))
-		return 0;
-	ret = v4l2_subdev_call(sd, core, ioctl, ACT_SOFT_PWDN, 0);
-
-	return ret != -ENOIOCTLCMD ? ret : 0;
-#endif
 }
 
 static int __vin_s_input(struct vin_core *vinc, unsigned int i)

@@ -290,7 +290,7 @@ static int ddr_clock_probe(struct platform_device *pdev)
 	init.ops = &sunxi_ddrclk_ops;
 	init.parent_names = &parent_name;
 	init.num_parents = 1;
-	init.flags |= CLK_SET_RATE_NO_REPARENT | CLK_GET_RATE_NOCACHE;
+	init.flags = CLK_SET_RATE_NO_REPARENT | CLK_GET_RATE_NOCACHE;
 
 	ddrclk->plat_data = of_device_get_match_data(dev);
 	clk = devm_clk_register(&pdev->dev, &ddrclk->hw);
@@ -330,4 +330,4 @@ MODULE_LICENSE("GPL v2");
 MODULE_DESCRIPTION("Allwinner DDR Clock driver");
 MODULE_ALIAS("platform:" DRIVER_NAME);
 MODULE_AUTHOR("fanqinghua <fanqinghua@allwinnertech.com>");
-MODULE_VERSION("1.0.1");
+MODULE_VERSION("1.0.2");

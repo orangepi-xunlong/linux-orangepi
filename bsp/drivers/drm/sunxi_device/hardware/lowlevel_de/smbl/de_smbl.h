@@ -40,7 +40,8 @@ enum disp_smbl_dirty_flags {
 	SMBL_DIRTY_WINDOW = 0x00000002,
 	SMBL_DIRTY_SIZE = 0x00000004,
 	SMBL_DIRTY_BL = 0x00000008,
-	SMBL_DIRTY_ALL = 0x0000000F,
+	SMBL_DIRTY_DIMMING_BL = 0x00000010,
+	SMBL_DIRTY_ALL = 0x0000001F,
 };
 
 struct disp_smbl_info {
@@ -50,7 +51,9 @@ struct disp_smbl_info {
 	struct drm_rect size;
 	u32 backlight;
 	u32 backlight_after_dimming;
-	u32 backlight_dimming;
+	u32 dimming;
+	bool dimming_changed;
+	bool backlight_changed;
 	enum disp_smbl_dirty_flags flags;
 };
 

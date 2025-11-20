@@ -196,7 +196,7 @@ static int sunxi_ce_hw_init(sunxi_ce_cdev_t *p_cdev)
 	}
 	SS_DBG("The clk freq: %d\n", gen_clkrate);
 #endif
-	p_cdev->reset = of_reset_control_get(p_cdev->pnode, NULL);
+	p_cdev->reset = devm_reset_control_get_optional(p_cdev->pdevice, NULL);
 	if (IS_ERR(p_cdev->reset)) {
 		SS_ERR("Fail to get reset clk\n");
 		return PTR_ERR(p_cdev->reset);
@@ -1007,7 +1007,11 @@ static int sunxi_ce_setup_cdev(void)
 	}
 
 	/* create device note */
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 6, 0)
 	ce_cdev->pclass = class_create(THIS_MODULE, SUNXI_SS_DEV_NAME);
+#else
+	ce_cdev->pclass = class_create(SUNXI_SS_DEV_NAME);
+#endif
 	if (IS_ERR(ce_cdev->pclass)) {
 		SS_ERR("class_create fail\n");
 		ret = -1;
@@ -1047,9 +1051,9 @@ static int sunxi_ce_exit_cdev(void)
 	device_destroy(ce_cdev->pclass, ce_cdev->devid);
 	class_destroy(ce_cdev->pclass);
 
-	unregister_chrdev_region(ce_cdev->devid, 1);
-
 	cdev_del(ce_cdev->pcdev);
+
+	unregister_chrdev_region(ce_cdev->devid, 1);
 
 	kfree(ce_cdev);
 
@@ -1097,15 +1101,15 @@ err0:
 static void __exit sunxi_ce_module_exit(void)
 {
 	SS_DBG("sunxi_ce_module_exit\n");
-	sunxi_ce_exit_cdev();
 	sunxi_ce_hw_exit();
+	sunxi_ce_exit_cdev();
 }
 
 module_init(sunxi_ce_module_init);
 module_exit(sunxi_ce_module_exit);
 
 MODULE_AUTHOR("mintow");
-MODULE_VERSION("1.1.6");
+MODULE_VERSION("1.1.7");
 MODULE_DESCRIPTION("SUNXI CE Controller Driver");
 MODULE_ALIAS("platform:"SUNXI_SS_DEV_NAME);
 MODULE_LICENSE("GPL");

@@ -101,6 +101,12 @@ enum enhance_init_state {
 	ENHANCE_TIGERLCD_OFF = 0x00000003,
 };
 
+enum de_offline_mode_status {
+	OFFLINE_BLD_FINISH = 1 << 24,
+	OFFLINE_BLD_TIMEOUT = 1 << 28,
+	OFFLINE_BLD_MASK = OFFLINE_BLD_FINISH | OFFLINE_BLD_TIMEOUT,
+};
+
 typedef struct _demo_win_percent {
 	u8 hor_start;
 	u8 hor_end;

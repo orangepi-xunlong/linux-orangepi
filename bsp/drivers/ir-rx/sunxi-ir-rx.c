@@ -14,6 +14,8 @@
  */
 
 /* #define DEBUG */
+#define SUNXI_MODNAME "irrx"
+#include <sunxi-log.h>
 #include <linux/kernel.h>
 #include <linux/init.h>
 #include <linux/module.h>
@@ -36,6 +38,7 @@
 #include <rc-core-priv.h>
 #include "sunxi-ir-rx.h"
 #include "sunxi-ir-keymap.h"
+#include <linux/pinctrl/consumer.h>
 
 #define SUNXI_IRRX_TIME_UNIT		0x2
 #define SUNXI_IRRX_DATA_SHIFT		0x7
@@ -83,7 +86,7 @@ static inline u32 ir_get_data(void __iomem *reg_base)
 
 /* Translate OpenFirmware node properties into platform_data */
 static struct of_device_id const sunxi_ir_recv_of_match[] = {
-	{ .compatible = "allwinner,irrx", },
+	{ .compatible = "allwinner,irrx",},
 	{ },
 };
 MODULE_DEVICE_TABLE(of, sunxi_ir_recv_of_match);
@@ -100,7 +103,7 @@ static void sunxi_irrx_recv(u32 reg_data, struct sunxi_ir_rx *chip)
 	if (chip->pulse_pre == pulse_now) {
 		/* the signal sunperposition */
 		chip->rawir.duration += ir_duration;
-		dev_dbg(dev, "raw: polar=%d; dur=%d\n", pulse_now, ir_duration);
+		sunxi_debug(dev, "raw: polar=%d; dur=%d\n", pulse_now, ir_duration);
 		return;
 	}
 	if (!chip->is_receiving) {
@@ -108,8 +111,8 @@ static void sunxi_irrx_recv(u32 reg_data, struct sunxi_ir_rx *chip)
 		chip->rawir.pulse = pulse_now;
 		chip->rawir.duration = ir_duration;
 		chip->is_receiving = 1;
-		dev_dbg(dev, "get frist pulse, add head!\n");
-		dev_dbg(dev, "raw: polar=%d; dur=%d\n", pulse_now, ir_duration);
+		sunxi_debug(dev, "get frist pulse, add head!\n");
+		sunxi_debug(dev, "raw: polar=%d; dur=%d\n", pulse_now, ir_duration);
 		chip->pulse_pre = pulse_now;
 		return;
 	}
@@ -124,7 +127,7 @@ static void sunxi_irrx_recv(u32 reg_data, struct sunxi_ir_rx *chip)
 	chip->rawir.duration = DIV_ROUND_CLOSEST((chip->rawir.duration), SUNXI_IRRX_NS_TO_US_UNIT);
 #endif
 
-	dev_dbg(dev, "pulse: polar=%d, dur: %u ns\n",
+	sunxi_debug(dev, "pulse: polar=%d, dur: %u ns\n",
 		chip->rawir.pulse, chip->rawir.duration);
 	if (chip->boot_code == 0) {
 		chip->boot_code = 1;
@@ -148,7 +151,7 @@ static void sunxi_irrx_recv(u32 reg_data, struct sunxi_ir_rx *chip)
 
 	chip->rawir.pulse = pulse_now;
 	chip->rawir.duration = ir_duration;
-	dev_dbg(dev, "raw: polar=%d; dur=%d\n", pulse_now, ir_duration);
+	sunxi_debug(dev, "raw: polar=%d; dur=%d\n", pulse_now, ir_duration);
 	chip->pulse_pre = pulse_now;
 }
 
@@ -160,7 +163,7 @@ static irqreturn_t sunxi_irrx_irq(int irq, void *dev_id)
 	u32 i = 0;
 	u32 reg_data;
 
-	dev_dbg(dev, "IR RX IRQ Serve\n");
+	sunxi_debug(dev, "IR RX IRQ Serve\n");
 
 	/* Clear the interrupt */
 	intsta = readl(chip->reg_base + IR_RXINTS_REG);
@@ -169,7 +172,7 @@ static irqreturn_t sunxi_irrx_irq(int irq, void *dev_id)
 
 	/* get the count of signal */
 	dcnt = (intsta >> SUNXI_IRRX_SIGNAL_CNT_SHIFT) & SUNXI_IRRX_SIGNAL_CNT_MASK;
-	dev_dbg(dev, "receive cnt: %d\n", dcnt);
+	sunxi_debug(dev, "receive cnt: %d\n", dcnt);
 	/* Read FIFO and fill the raw event */
 	for (i = 0; i < dcnt; i++) {
 		/* get the data from fifo */
@@ -187,11 +190,11 @@ static irqreturn_t sunxi_irrx_irq(int irq, void *dev_id)
 		 */
 		if (chip->rawir.duration) {
 			chip->rawir.duration *= IR_SIMPLE_UNIT;
-			dev_dbg(dev, "pulse: polar=%d, dur: %u ns\n",
+			sunxi_debug(dev, "pulse: polar=%d, dur: %u ns\n",
 				chip->rawir.pulse, chip->rawir.duration);
 			ir_raw_event_store(chip->rcdev, &chip->rawir);
 		}
-		dev_dbg(dev, "handle raw data.\n");
+		sunxi_debug(dev, "handle raw data.\n");
 		/* handle ther decoder thread */
 		ir_raw_event_handle(chip->rcdev);
 		chip->is_receiving = 0;
@@ -204,7 +207,7 @@ static irqreturn_t sunxi_irrx_irq(int irq, void *dev_id)
 
 	if (intsta & IR_RXINTS_RXOF) {
 		/* FIFO Overflow */
-		dev_err(dev, "ir_rx_irq_service: Rx FIFO Overflow!!\n");
+		sunxi_err(dev, "ir_rx_irq_service: Rx FIFO Overflow!!\n");
 		chip->is_receiving = 0;
 		chip->boot_code = 0;
 		chip->pulse_pre = false;
@@ -239,7 +242,7 @@ static void sunxi_ir_mode_set(void __iomem *reg_base, enum ir_mode set_mode)
 		ctrl_reg |= IR_HIGH_PULSE;
 		break;
 	default:
-		pr_err("sunxi_ir_mode_set error!!\n");
+		sunxi_err(NULL, "sunxi_ir_mode_set error!!\n");
 		return;
 	}
 	writel(ctrl_reg, reg_base + IR_CTRL_REG);
@@ -350,40 +353,40 @@ static int sunxi_irrx_clk_cfg(struct sunxi_ir_rx *chip)
 
 	ret = reset_control_reset(chip->reset);
 	if (ret) {
-		dev_err(dev, "ir rx reset failed!\n");
+		sunxi_err(dev, "ir rx reset failed!\n");
 		return ret;
 	}
 
 	rate = clk_get_rate(chip->bclk);
-	dev_dbg(dev, "%s: get ir bus clk rate %dHZ\n", __func__, (__u32)rate);
+	sunxi_debug(dev, "%s: get ir bus clk rate %dHZ\n", __func__, (__u32)rate);
 
 	rate = clk_get_rate(chip->pclk);
-	dev_dbg(dev, "%s: get ir parent clk rate %dHZ\n", __func__, (__u32)rate);
+	sunxi_debug(dev, "%s: get ir parent clk rate %dHZ\n", __func__, (__u32)rate);
 
 	ret = clk_set_parent(chip->mclk, chip->pclk);
 	if (ret) {
-		dev_err(dev, "%s: set ir_clk parent failed!\n", __func__);
+		sunxi_err(dev, "%s: set ir_clk parent failed!\n", __func__);
 		return ret;
 	}
 
 	ret = clk_set_rate(chip->mclk, IR_CLK);
 	if (ret) {
-		dev_err(dev, "set ir clock freq to %d failed!\n", IR_CLK);
+		sunxi_err(dev, "set ir clock freq to %d failed!\n", IR_CLK);
 		return ret;
 	}
 
 	rate = clk_get_rate(chip->mclk);
-	dev_dbg(dev, "%s: get ir_clk rate %dHZ\n", __func__, (__u32)rate);
+	sunxi_debug(dev, "%s: get ir_clk rate %dHZ\n", __func__, (__u32)rate);
 
 	ret = clk_prepare_enable(chip->bclk);
 	if (ret) {
-		dev_err(dev, "try to enable bus clk failed!\n");
+		sunxi_err(dev, "try to enable bus clk failed!\n");
 		goto assert_reset;
 	}
 
 	ret = clk_prepare_enable(chip->mclk);
 	if (ret) {
-		dev_err(dev, "try to enable ir_clk failed!\n");
+		sunxi_err(dev, "try to enable ir_clk failed!\n");
 		goto clk_disable;
 	}
 
@@ -414,14 +417,14 @@ static int sunxi_irrx_select_pinctrl_state(struct pinctrl *pctrl, char *name, st
 
 	pctrl_state = pinctrl_lookup_state(pctrl, name);
 	if (IS_ERR(pctrl_state)) {
-		dev_err(dev, "IR pinctrl_lookup_state(%s) failed! return %p \n",
+		sunxi_err(dev, "IR pinctrl_lookup_state(%s) failed! return %p \n",
 				name, pctrl_state);
 		return -1;
 	}
 
 	ret = pinctrl_select_state(pctrl, pctrl_state);
 	if (ret) {
-		dev_err(dev, "IR pinctrl_select_state(%s) failed! return %d \n",
+		sunxi_err(dev, "IR pinctrl_select_state(%s) failed! return %d \n",
 				name, ret);
 		return ret;
 	}
@@ -438,20 +441,20 @@ static int sunxi_irrx_hw_init(struct sunxi_ir_rx *chip)
 		ret = regulator_set_voltage(chip->supply, chip->supply_vol,
 				chip->supply_vol);
 		if (ret)
-			dev_err(dev, "ir rx set regulator voltage failed!\n");
+			sunxi_err(dev, "ir rx set regulator voltage failed!\n");
 	}
 
 	if (chip->supply) {
 		ret = regulator_enable(chip->supply);
 		if (ret)
-			dev_err(dev, "ir rx regulator enable failed!\n");
+			sunxi_err(dev, "ir rx regulator enable failed!\n");
 	}
 
 	ret = sunxi_irrx_select_pinctrl_state(chip->pctrl, PINCTRL_STATE_DEFAULT, chip);
 
 	ret = sunxi_irrx_clk_cfg(chip);
 	if (ret) {
-		dev_err(dev, "ir rx clk configure failed!\n");
+		sunxi_err(dev, "ir rx clk configure failed!\n");
 		return ret;
 	}
 
@@ -534,55 +537,64 @@ static int sunxi_irrx_resource_get(struct platform_device *pdev,
 
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	if (!res) {
-		dev_err(dev, "fail to get IORESOURCE_MEM\n");
+		sunxi_err(dev, "fail to get IORESOURCE_MEM\n");
 		return -EINVAL;
 	}
 
 	chip->reg_base = devm_ioremap_resource(dev, res);
 	if (IS_ERR(chip->reg_base)) {
-		dev_err(dev, "%s:Failed to ioremap() io memory region.\n", __func__);
+		sunxi_err(dev, "%s:Failed to ioremap() io memory region.\n", __func__);
 		return PTR_ERR(chip->reg_base);
 	}
-	dev_dbg(dev, "ir base: %p !\n", chip->reg_base);
+	sunxi_debug(dev, "ir base: %p !\n", chip->reg_base);
+
+	chip->rtc_flag = of_property_read_u32(np, "rtc_reg", &chip->rtc_reg);
+	if (!chip->rtc_flag) {
+		chip->rtc_addr = ioremap(chip->rtc_reg, 4);
+		if (!chip->rtc_addr) {
+			sunxi_err(dev, "ioremap fail\n");
+			return -EBUSY;
+		}
+	}
 
 	chip->irq_num = platform_get_irq(pdev, 0);
 	if (chip->irq_num < 0)
 		return -EINVAL;
-	dev_dbg(dev, "ir irq num: %d !\n", chip->irq_num);
+	sunxi_debug(dev, "ir irq num: %d !\n", chip->irq_num);
 
 	chip->pctrl = devm_pinctrl_get(&pdev->dev);
 	if (IS_ERR(chip->pctrl)) {
-		dev_err(dev, "IR devm_pinctrl_get() failed!\n");
+		sunxi_err(dev, "IR devm_pinctrl_get() failed!\n");
 		return PTR_ERR(chip->pctrl);
 	}
 
 	chip->reset = devm_reset_control_get(&pdev->dev, NULL);
 	if (IS_ERR(chip->reset)) {
-		dev_err(dev, "Failed to get reset handle!\n");
+		sunxi_err(dev, "Failed to get reset handle!\n");
 		return PTR_ERR(chip->reset);
 	}
 
 	chip->bclk = devm_clk_get(&pdev->dev, "bus");
 	if (!chip->bclk) {
-		dev_err(dev, "%s:Failed to get bus clk.\n", __func__);
+		sunxi_err(dev, "%s:Failed to get bus clk.\n", __func__);
 		return -EBUSY;
 	}
 
 	chip->pclk = devm_clk_get(&pdev->dev, "pclk");
 	if (!chip->pclk) {
-		dev_err(dev, "%s:Failed to get parent clk.\n", __func__);
+		sunxi_err(dev, "%s:Failed to get parent clk.\n", __func__);
 		return -EBUSY;
 	}
 
 	chip->mclk = devm_clk_get(&pdev->dev, "mclk");
 	if (!chip->mclk) {
-		dev_err(dev, "%s:Failed to get ir rx clk.\n", __func__);
+		sunxi_err(dev, "%s:Failed to get ir rx clk.\n", __func__);
 		return -EBUSY;
 	}
 
 	if (of_property_read_u32(np, "ir_protocol_used",
 				&chip->ir_protocols)) {
-		dev_err(dev, "%s: get ir protocol failed", __func__);
+		sunxi_err(dev, "%s: get ir protocol failed", __func__);
 		chip->ir_protocols = 0x0;
 	}
 #ifdef CONFIG_ANDROID
@@ -625,28 +637,28 @@ static int sunxi_irrx_resource_get(struct platform_device *pdev,
 #endif
 
 #ifdef CONFIG_SUNXI_REGULATOR_DT
-	dev_dbg(dev, "%s: cir try dt way to get regulator\n", __func__);
+	sunxi_debug(dev, "%s: cir try dt way to get regulator\n", __func__);
 	snprintf(ir_supply, sizeof(ir_supply), "ir%d", pdev->id);
 	chip->supply = devm_regulator_get(dev, ir_supply);
 	if (IS_ERR(chip->supply)) {
-		dev_err(dev, "%s: cir get supply err\n", __func__);
+		sunxi_err(dev, "%s: cir get supply err\n", __func__);
 		chip->supply = NULL;
 	}
 #else
 	if (of_property_read_u32(np, "supply_vol", &chip->supply_vol))
-		dev_dbg(dev, "%s: get cir supply_vol failed", __func__);
+		sunxi_debug(dev, "%s: get cir supply_vol failed", __func__);
 
 	if (of_property_read_string(np, "supply", &name)) {
-		dev_dbg(dev, "%s: cir have no power supply\n", __func__);
+		sunxi_debug(dev, "%s: cir have no power supply\n", __func__);
 		chip->supply = NULL;
 	} else if (strlen(name)) {
 		chip->supply = devm_regulator_get(NULL, name);
 		if (IS_ERR(chip->supply)) {
-			dev_err(dev, "%s: cir get supply err\n", __func__);
+			sunxi_err(dev, "%s: cir get supply err\n", __func__);
 			chip->supply = NULL;
 		}
 	} else {
-		dev_err(dev, "%s: cir get supply err\n", __func__);
+		sunxi_err(dev, "%s: cir get supply err\n", __func__);
 		chip->supply = NULL;
 	}
 
@@ -654,7 +666,7 @@ static int sunxi_irrx_resource_get(struct platform_device *pdev,
 
 #ifdef CONFIG_ANDROID
 	if (sunxi_get_ir_protocol(chip))
-		dev_err(dev, "%s: get_ir_protocol failed.\n", __func__);
+		sunxi_err(dev, "%s: get_ir_protocol failed.\n", __func__);
 #endif
 
 	chip->wakeup = of_property_read_bool(np, "wakeup-source");
@@ -669,13 +681,12 @@ static int sunxi_irrx_probe(struct platform_device *pdev)
 	struct device *dev = &pdev->dev;
 	struct rc_dev *rcdev;
 	int ret;
-	static char const ir_rx_dev_name[] = "s_cir_rx";
 	struct sunxi_ir_rx *chip;
 
-	dev_dbg(dev, "sunxi-ir probe start !\n");
+	sunxi_debug(dev, "sunxi-ir probe start !\n");
 	chip = devm_kzalloc(dev, sizeof(*chip), GFP_KERNEL);
 	if (!chip) {
-		dev_err(dev, "chip: not enough memory for ir data\n");
+		sunxi_err(dev, "chip: not enough memory for ir data\n");
 		return -ENOMEM;
 	}
 
@@ -684,25 +695,25 @@ static int sunxi_irrx_probe(struct platform_device *pdev)
 
 	pdev->id = of_alias_get_id(pdev->dev.of_node, "ir");
 	if (pdev->id < 0) {
-		dev_err(dev, "sunxi ir failed to get alias id\n");
+		sunxi_err(dev, "sunxi ir failed to get alias id\n");
 		return -EINVAL;
 	}
 
 	/* initialize hardware resource */
 	ret = sunxi_irrx_resource_get(pdev, chip);
 	if (ret) {
-		dev_err(dev, "initialize hardware resource failed!\n");
+		sunxi_err(dev, "initialize hardware resource failed!\n");
 		goto err0;
 	}
-	dev_dbg(dev, "sunxi-ir initialize hardware res success!\n");
+	sunxi_debug(dev, "sunxi-ir initialize hardware res success!\n");
 
 	rcdev = devm_rc_allocate_device(dev, RC_DRIVER_IR_RAW);
 	if (!rcdev) {
-		dev_err(dev, "rc dev allocate fail !\n");
+		sunxi_err(dev, "rc dev allocate fail !\n");
 		ret = -ENOMEM;
 		goto err0;
 	}
-	dev_dbg(dev, "sunxi-ir allocate rc device success!\n");
+	sunxi_debug(dev, "sunxi-ir allocate rc device success!\n");
 
 	/* initialize rcdev */
 	rcdev->priv = chip;
@@ -712,11 +723,15 @@ static int sunxi_irrx_probe(struct platform_device *pdev)
 	rcdev->input_id.vendor = SUNXI_IRRX_VENDOR;
 	rcdev->input_id.product = SUNXI_IRRX_PRODUCT;
 	rcdev->input_id.version = SUNXI_IRRX_VERSION;
-	rcdev->input_dev->dev.init_name = &ir_rx_dev_name[0];
 
 	rcdev->dev.parent = &pdev->dev;
 	rcdev->driver_type = RC_DRIVER_IR_RAW;
 	rcdev->driver_name = SUNXI_IR_DRIVER_NAME;
+	/*
+	 * timeout as an adjustable time in driver/media/rc/rc-main.c, is used to control the time for reporting up events.
+	 * timoout = 0 indicates that the time for reporting up only depends on the specific protocol.
+	 */
+	rcdev->timeout = 0;
 
 	if (chip->ir_protocols == NEC)
 		rcdev->allowed_protocols = (u64)RC_PROTO_BIT_NEC;
@@ -734,31 +749,31 @@ static int sunxi_irrx_probe(struct platform_device *pdev)
 
 	ret = devm_rc_register_device(dev, rcdev);
 	if (ret) {
-		dev_err(dev, "failed to register rc device\n");
+		sunxi_err(dev, "failed to register rc device\n");
 		goto err1;
 	}
-	dev_dbg(dev, "sunxi-ir register rc device success!\n");
+	sunxi_debug(dev, "sunxi-ir register rc device success!\n");
 
 	chip->rcdev = rcdev;
 	chip->pdev = pdev;
 
 	ret = sunxi_irrx_hw_init(chip);
 	if (ret) {
-		dev_err(dev, "%s: sunxi_irrx_hw_init failed.\n", __func__);
+		sunxi_err(dev, "%s: sunxi_irrx_hw_init failed.\n", __func__);
 		goto err1;
 	}
-	dev_dbg(dev, "sunxi-ir hardware setup success!\n");
+	sunxi_debug(dev, "sunxi-ir hardware setup success!\n");
 
 	platform_set_drvdata(pdev, chip);
 	ret = devm_request_irq(dev, chip->irq_num, sunxi_irrx_irq, 0,
 				"RemoteIR_RX", chip);
 	if (ret) {
-		dev_err(dev, "%s: request irq fail.\n", __func__);
+		sunxi_err(dev, "%s: request irq fail.\n", __func__);
 		ret = -EBUSY;
 		goto err2;
 	}
 
-	dev_dbg(dev, "ir probe end!\n");
+	sunxi_debug(dev, "ir probe end!\n");
 
 	return 0;
 
@@ -791,12 +806,12 @@ static int sunxi_irrx_suspend(struct device *dev)
 	struct platform_device *pdev = to_platform_device(dev);
 	struct sunxi_ir_rx *chip = platform_get_drvdata(pdev);
 
-	dev_dbg(dev, "enter: sunxi_ir_rx_suspend.\n");
+	sunxi_debug(dev, "enter: sunxi_ir_rx_suspend.\n");
 
 	if (device_may_wakeup(dev)) {
 		if (chip->wakeup)
 			enable_irq_wake(chip->irq_num);
-		dev_dbg(dev, "enter: sunxi_ir_rx_suspend enable irq wakeup.\n");
+		sunxi_debug(dev, "enter: sunxi_ir_rx_suspend enable irq wakeup.\n");
 	} else {
 
 		disable_irq_nosync(chip->irq_num);
@@ -813,13 +828,27 @@ static int sunxi_irrx_resume(struct device *dev)
 {
 	struct platform_device *pdev = to_platform_device(dev);
 	struct sunxi_ir_rx *chip = platform_get_drvdata(pdev);
+	u32 rtc_val = 0, scancode;
+	u8 not_address, command, not_command;
 
-	dev_dbg(dev, "enter: sunxi_ir_rx_resume.\n");
+	/* Use RTC reg to store atf ir decode value and input this code to android */
+	if (!chip->rtc_flag) {
+		rtc_val = readl(chip->rtc_addr);
+		writel(0, chip->rtc_addr);
+	}
+	sunxi_debug(dev, "enter: sunxi_ir_rx_resume.\n");
 
 	if (device_may_wakeup(dev)) {
 		if (chip->wakeup)
 			disable_irq_wake(chip->irq_num);
-		dev_dbg(dev, "enter: sunxi_ir_rx_suspend disable irq wakeup.\n");
+		if (rtc_val) {
+			not_address = (u8)((rtc_val >> 16) & 0xff);
+			command     = (u8)((rtc_val >>  8) & 0xff);
+			not_command = (u8)((rtc_val >>  0) & 0xff);
+			scancode = not_command << 8 | command << 16 | not_address;
+			rc_keydown(chip->rcdev, RC_PROTO_NEC, scancode, 0);
+		}
+		sunxi_debug(dev, "enter: sunxi_ir_rx_suspend disable irq wakeup.\n");
 	} else {
 
 		sunxi_irrx_hw_init(chip);
@@ -854,4 +883,4 @@ module_platform_driver(sunxi_ir_recv_driver);
 MODULE_DESCRIPTION("SUNXI IR Receiver driver");
 MODULE_AUTHOR("QIn");
 MODULE_LICENSE("GPL v2");
-MODULE_VERSION("1.0.4");
+MODULE_VERSION("1.0.9");

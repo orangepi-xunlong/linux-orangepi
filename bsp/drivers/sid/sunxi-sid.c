@@ -601,11 +601,30 @@ int sunxi_sid_get_ecc_status(void)
 }
 EXPORT_SYMBOL_GPL(sunxi_sid_get_ecc_status);
 
-int sunxi_get_soc_dvfs(u32 *dvfs)
+static unsigned int sunxi_sid_from_dvfs2(u32 *dvfs)
 {
-	u32 dvfs_bak = 0, dvfs_ori = 0;
-	s32 ret;
+	int ret;
+	u32 dvfs2_bak = 0, dvfs2_ori = 0;
+	ret = sunxi_sid_sram_read32("dvfs2_ori", &dvfs2_ori);
+	if (ret) {
+		sunxi_debug(NULL, "get dvfs2_ori sid fail\n");
+		return ret;
+	}
 
+	ret = sunxi_sid_sram_read32("dvfs2_bak", &dvfs2_bak);
+	if (ret) {
+		sunxi_debug(NULL, "get dvfs2_bak sid fail\n");
+		return ret;
+	}
+
+	*dvfs = dvfs2_bak ? dvfs2_bak : dvfs2_ori;
+	return 0;
+}
+
+static unsigned int sunxi_sid_from_dvfs1(u32 *dvfs)
+{
+	int ret;
+	u32 dvfs_bak = 0, dvfs_ori = 0;
 	ret = sunxi_sid_sram_read32("dvfs_ori", &dvfs_ori);
 	if (ret) {
 		sunxi_debug(NULL, "get dvfs_ori sid fail\n");
@@ -619,9 +638,26 @@ int sunxi_get_soc_dvfs(u32 *dvfs)
 	}
 
 	*dvfs = dvfs_bak ? dvfs_bak : dvfs_ori;
-	sunxi_debug(NULL, "get dvfs sid success: 0x%x\n", *dvfs);
-
 	return 0;
+}
+
+int sunxi_get_soc_dvfs(u32 *dvfs)
+{
+	if (!sunxi_sid_from_dvfs2(dvfs)) {
+		/* If dvfs code equals 0, then continue reading the dvfs1 region */
+		if (*dvfs) {
+			sunxi_debug(NULL, "get dvfs sid success from dvfs2 region: 0x%x\n", *dvfs);
+			return 0;
+		}
+	}
+
+	if (!sunxi_sid_from_dvfs1(dvfs)) {
+		sunxi_debug(NULL, "get dvfs sid success from dvfs1 region: 0x%x\n", *dvfs);
+		return 0;
+	}
+
+	sunxi_debug(NULL, "get dvfs sid falied: 0x%x\n", *dvfs);
+	return -EINVAL;
 }
 EXPORT_SYMBOL_GPL(sunxi_get_soc_dvfs);
 
@@ -686,7 +722,8 @@ int sunxi_get_soc_chipid_str(char *serial)
 	sid_chipid_init();
 #if IS_ENABLED(CONFIG_ARCH_SUN50IW9) || IS_ENABLED(CONFIG_ARCH_SUN50IW10) ||   \
 	IS_ENABLED(CONFIG_ARCH_SUN55IW3) || IS_ENABLED(CONFIG_ARCH_SUN8IW21) ||   \
-	IS_ENABLED(CONFIG_ARCH_SUN55IW6) || IS_ENABLED(CONFIG_ARCH_SUN60IW2)
+	IS_ENABLED(CONFIG_ARCH_SUN55IW6) || IS_ENABLED(CONFIG_ARCH_SUN60IW2) || \
+	IS_ENABLED(CONFIG_ARCH_SUN251IW1)
 	size = sprintf(serial, "%08x", sunxi_soc_chipid[0] & 0xffff);
 #else
 	size = sprintf(serial, "%08x", sunxi_soc_chipid[0] & 0xff);
@@ -754,38 +791,39 @@ unsigned int sunxi_get_soc_ver(void)
 }
 EXPORT_SYMBOL(sunxi_get_soc_ver);
 
-unsigned int sunxi_get_sid_ver(void)
+int sunxi_get_sid_ver(u32 *ver)
 {
 	struct device_node *dev_node = NULL;
 	void __iomem *baseaddr = NULL;
 	void __iomem *baseaddr_vir;
 	unsigned int sunxi_sid_ver_offset = 0;
-	unsigned int sunxi_sid_ver;
+	u32 sunxi_sid_ver;
 	ulong baseaddr_phy = 0;
 
 	dev_node = of_find_compatible_node(NULL, NULL, EFUSE_SID_BASE);
 	if (IS_ERR_OR_NULL(dev_node)) {
 		SID_ERR("Failed to find \"%s\" in dts.\n", EFUSE_SID_BASE);
-		return 0;
+		return -1;
 	}
 
 	/* get sid ver register offset */
 	of_property_read_u32(dev_node, "sid-ver-offset", &sunxi_sid_ver_offset);
 	if (!sunxi_sid_ver_offset) {
 		SID_ERR("get sid-ver-offset failed\n");
-		return 0;
+		return -1;
 	}
 	dev_node = NULL;
 	if (sid_get_base(&dev_node, &baseaddr, EFUSE_SID_BASE, 1)) {
 		SID_ERR("sid_get_base fail \n");
-		return 0;
+		return -1;
 	}
 	baseaddr_phy = (ulong)(baseaddr) + sunxi_sid_ver_offset;
 	baseaddr_vir = ioremap(baseaddr_phy, 4);
 
 	sunxi_sid_ver = readl(baseaddr_vir);
+	*ver = sunxi_sid_ver;
 
-	return sunxi_sid_ver;
+	return 0;
 }
 EXPORT_SYMBOL(sunxi_get_sid_ver);
 
@@ -822,7 +860,7 @@ EXPORT_SYMBOL(sunxi_efuse_readn);
 #define SUNXI_EFUSE_WRITE	_IO('V', 2)
 
 static efuse_cry_pt nfcr;
-static sunxi_efuse_key_info_t temp_key;
+static sunxi_efuse_key_info_t *temp_key;
 
 static int sunxi_efuse_open(struct inode *inode, struct file *file)
 {
@@ -901,10 +939,10 @@ static long sunxi_efuse_ioctl(struct file *file, unsigned int ioctl_num,
 			pr_err("copy_from_user: err:%d\n", err);
 			goto _out;
 		}
-		snprintf(temp_key.name, sizeof(temp_key.name), "%s", nfcr->key_store.name);
-		temp_key.len = nfcr->key_store.len;
-		temp_key.offset = nfcr->key_store.offset;
-		temp_key.key_data =
+		snprintf(temp_key->name, sizeof(temp_key->name), "%s", nfcr->key_store.name);
+		temp_key->len = nfcr->key_store.len;
+		temp_key->offset = nfcr->key_store.offset;
+		temp_key->key_data =
 			virt_to_phys((void *)nfcr->temp_data);
 		schedule_work(&nfcr->work);
 		wait_for_completion(&nfcr->work_end);
@@ -973,7 +1011,7 @@ static int sunxi_set_power_to_efuse_write(void)
 	mdelay(20);
 
 	ret = arm_svc_efuse_write(
-		virt_to_phys((const volatile void *)&temp_key));
+		virt_to_phys((const volatile void *)temp_key));
 
 	/* disable power after burn efuse done */
 	mdelay(20);
@@ -1015,6 +1053,12 @@ static void sunxi_efuse_work(struct work_struct *data)
 				break;
 			}
 
+			if (nfcr->key_store.offset & 0x3) {
+				fcpt->ret = -1;
+				SID_ERR("The key offset must be word aligned\n");
+				break;
+			}
+
 			if (sunxi_sid_get_base(&dev_node, &baseaddr, EFUSE_SID_BASE, 0)) {
 				fcpt->ret = -1;
 				break;
@@ -1049,13 +1093,13 @@ static void sunxi_efuse_work(struct work_struct *data)
 		fcpt->ret = sunxi_set_power_to_efuse_write();
 #else
 		fcpt->ret = arm_svc_efuse_write(
-			virt_to_phys((const volatile void *)&temp_key));
+			virt_to_phys((const volatile void *)temp_key));
 #endif
 		break;
 #elif IS_ENABLED(CONFIG_AW_SBI)
 	case SUNXI_EFUSE_WRITE:
 		fcpt->ret = sbi_efuse_write(
-			virt_to_phys((volatile void *)&temp_key));
+			virt_to_phys((volatile void *)temp_key));
 		break;
 #endif /* CONFIG_AW_SMC */
 	default:
@@ -1098,6 +1142,13 @@ static int sunxi_efuse_init(void)
 		return -ENOMEM;
 	}
 
+	temp_key = kzalloc(sizeof(*temp_key), GFP_KERNEL);
+	if (!temp_key) {
+		kfree(nfcr->temp_data);
+		kfree(nfcr);
+		return -ENOMEM;
+	}
+
 	INIT_WORK(&nfcr->work, sunxi_efuse_work);
 	init_completion(&nfcr->work_end);
 	mutex_init(&nfcr->mutex);
@@ -1114,7 +1165,6 @@ static int sunxi_efuse_init(void)
 		ret = of_address_to_resource(dev_node, 0, &efuse_ram_res);
 	}
 
-	pr_err("efuse init success!\n");
 	return 0;
 }
 
@@ -1123,6 +1173,7 @@ static void sunxi_efuse_exit(void)
 	pr_debug("sunxi efuse driver exit\n");
 
 	misc_deregister(&sunxi_efuse_device);
+	kfree(temp_key);
 	kfree(nfcr->temp_data);
 	kfree(nfcr);
 }
@@ -1141,4 +1192,4 @@ module_exit(sunxi_sid_exit);
 MODULE_LICENSE("GPL v2");
 MODULE_AUTHOR("weidonghui <weidonghui@allwinnertech.com>");
 MODULE_DESCRIPTION("sunxi sid driver");
-MODULE_VERSION("1.3.3");
+MODULE_VERSION("1.3.6");

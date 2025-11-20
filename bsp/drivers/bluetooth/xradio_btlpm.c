@@ -32,7 +32,7 @@
 #include <linux/serial_core.h>
 #include <net/bluetooth/bluetooth.h>
 #include <net/bluetooth/hci_core.h>
-
+#include <dt-bindings/gpio/gpio.h>
 
 #define BT_SLEEP_DEBUG
 
@@ -43,7 +43,7 @@
 #endif
 
 #define BT_SLEEP_INF(fmt, arg...) printk(KERN_INFO "[XR_BT_LPM] %s: " fmt "\n", __func__, ## arg)
-#define VERSION					"1.0.10"
+#define VERSION					"1.0.12"
 #define PROC_SLEEP_DIR			"bluetooth/sleep"
 #define PROC_POWER_DIR			"bluetooth/power"
 #define BT_BLUEDROID_SUPPORT 	1
@@ -641,7 +641,11 @@ static int bluesleep_probe(struct platform_device *pdev)
 {
 	struct device_node *np = pdev->dev.of_node;
 	struct device *dev = &pdev->dev;
+#if (LINUX_VERSION_CODE <= KERNEL_VERSION(6, 2, 0))
 	enum of_gpio_flags config;
+#else
+	u32 config = 0;
+#endif
 	int ret;
 	u32 val;
 
@@ -650,13 +654,22 @@ static int bluesleep_probe(struct platform_device *pdev)
 		return -ENOMEM;
 
 	/* get bt_wake & bt_host_wake */
+#if (LINUX_VERSION_CODE > KERNEL_VERSION(6, 2, 0))
+	bsi->ext_wake = of_get_named_gpio(np, "bt_wake", 0);
+#else
 	bsi->ext_wake = of_get_named_gpio_flags(np, "bt_wake", 0, &config);
+#endif
 	if (!gpio_is_valid(bsi->ext_wake)) {
 		BT_ERR("get gpio bt_wake failed");
 		return -EINVAL;
 	}
 
+#if (LINUX_VERSION_CODE > KERNEL_VERSION(6, 2, 0))
+	of_property_read_u32_index(np, "bt_wake", 3, &config);
+	bsi->bt_wake_polarity = (config == GPIO_ACTIVE_LOW) ? 0 : 1;
+#else
 	bsi->bt_wake_polarity = (config == OF_GPIO_ACTIVE_LOW) ? 0 : 1;
+#endif
 	if (assert_level != -1) {
 		bsi->bt_wake_polarity = (assert_level & 0x01) > 0;
 		BT_SLEEP_DBG("override bt_wake polarity to %d", bsi->bt_wake_polarity);
@@ -677,13 +690,22 @@ static int bluesleep_probe(struct platform_device *pdev)
 		goto exit;
 	}
 
+#if (LINUX_VERSION_CODE > KERNEL_VERSION(6, 2, 0))
+	bsi->host_wake = of_get_named_gpio(np, "bt_hostwake", 0);
+#else
 	bsi->host_wake = of_get_named_gpio_flags(np, "bt_hostwake", 0, &config);
+#endif
 	if (!gpio_is_valid(bsi->host_wake)) {
 		BT_ERR("get gpio bt_hostwake failed");
 		return -EINVAL;
 	}
 
+#if (LINUX_VERSION_CODE > KERNEL_VERSION(6, 2, 0))
+	of_property_read_u32_index(np, "bt_hostwake", 3, &config);
+	bsi->host_wake_polarity = (config == GPIO_ACTIVE_LOW) ? 0 : 1;
+#else
 	bsi->host_wake_polarity = (config == OF_GPIO_ACTIVE_LOW) ? 0 : 1;
+#endif
 	if (assert_level != -1) {
 		bsi->host_wake_polarity = (assert_level & 0x02) > 0;
 		BT_SLEEP_DBG("override host_wake polarity to %d", bsi->host_wake_polarity);

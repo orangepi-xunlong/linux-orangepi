@@ -58,6 +58,8 @@ struct fb_create_info {
 	struct fb_output_map map;
 	enum fb_output_mode mode;
 	unsigned int fb_output_cnt;
+
+	void *offline_vaddr;
 };
 
 struct drm_fb_info {

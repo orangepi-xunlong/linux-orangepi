@@ -14,8 +14,8 @@
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 14, 0)
 
 #ifdef CONFIG_APF
-#define AIC_APF_MEM_SIZE      2048
-#define AIC_APF_VERSION       4
+#define AIC_APF_MEM_SIZE      4096
+#define AIC_APF_VERSION       6000
 
 static char apfProgram[AIC_APF_MEM_SIZE];
 #endif
@@ -644,7 +644,8 @@ static int aicwf_vendor_apf_set_filter(struct wiphy *wiphy, struct wireless_dev 
 			}
 
 			memcpy(apfProgram, nla_data(iter), mProgramLen);
-			ret = rwnx_send_set_apf_prog_req(rwnx_hw, apfProgram, mProgramLen);
+			ret = rwnx_send_set_apf_prog_req(rwnx_hw, apfProgram, mProgramLen,
+					AIC_APF_VERSION > 4 ? 6 : 4);
 			break;
 		default:
 			pr_err("%s(%d), Unknown type: %d\n", __func__, __LINE__, type);

@@ -136,8 +136,12 @@ static ssize_t ver_info_show(
 #endif
 		char *buf)
 {
-	return sprintf(buf, "sunxi sid version is:0x%x",
-			sunxi_get_sid_ver());
+	u32 ver = 0;
+
+	if (sunxi_get_sid_ver(&ver))
+		return sprintf(buf, "sid: UNKNOWN\n");
+
+	return sprintf(buf, "sid: 0x%x\n", ver);
 }
 
 static ssize_t sys_info_show(
@@ -302,4 +306,4 @@ module_exit(sunxi_sys_info_exit);
 MODULE_LICENSE("GPL v2");
 MODULE_AUTHOR("xiafeng<xiafeng@allwinnertech.com>");
 MODULE_DESCRIPTION("sunxi sys info.");
-MODULE_VERSION("1.1.0");
+MODULE_VERSION("1.1.1");

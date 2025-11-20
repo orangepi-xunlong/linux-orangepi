@@ -21,7 +21,7 @@
 #include "hwif.h"
 
 #define DRIVER_NAME	"sunxi_uio"
-#define DRIVER_VERSION	"0.0.1"
+#define DRIVER_VERSION	"0.0.2"
 
 #define TC_DEFAULT 64
 static int tc = TC_DEFAULT;
@@ -30,6 +30,8 @@ static int tc = TC_DEFAULT;
 static int buf_sz = DEFAULT_BUFSIZE;
 
 #define STMMAC_RX_COPYBREAK	256
+
+#define STMMAC_DMA_DEFAULT_SIZE 1024
 
 /**
  * sunxi_uio
@@ -88,18 +90,27 @@ static int sunxi_uio_mmap(struct uio_info *info,
 static void sunxi_uio_free_dma_rx_desc_resources(struct stmmac_priv *priv)
 {
 	u32 queue, rx_count = priv->plat->rx_queues_to_use;
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 0, 0))
+	unsigned int dma_rx_size = priv->dma_conf.dma_rx_size;
+#else
+	unsigned int dma_rx_size = priv->dma_rx_size;
+#endif
 
 	/* Free RX queue resources */
 	for (queue = 0; queue < rx_count; queue++) {
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 0, 0))
+		struct stmmac_rx_queue *rx_q = &priv->dma_conf.rx_queue[queue];
+#else
 		struct stmmac_rx_queue *rx_q = &priv->rx_queue[queue];
+#endif
 
 		/* Free DMA regions of consistent memory previously allocated */
 		if (!priv->extend_desc)
-			dma_free_coherent(priv->device, priv->dma_rx_size *
+			dma_free_coherent(priv->device, dma_rx_size *
 					  sizeof(struct dma_desc),
 					  rx_q->dma_rx, rx_q->dma_rx_phy);
 		else
-			dma_free_coherent(priv->device, priv->dma_rx_size *
+			dma_free_coherent(priv->device, dma_rx_size *
 					  sizeof(struct dma_extended_desc),
 					  rx_q->dma_erx, rx_q->dma_rx_phy);
 	}
@@ -112,10 +123,19 @@ static void sunxi_uio_free_dma_rx_desc_resources(struct stmmac_priv *priv)
 static void sunxi_uio_free_dma_tx_desc_resources(struct stmmac_priv *priv)
 {
 	u32 queue, tx_count = priv->plat->tx_queues_to_use;
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 0, 0))
+	unsigned int dma_tx_size = priv->dma_conf.dma_tx_size;
+#else
+	unsigned int dma_tx_size = priv->dma_tx_size;
+#endif
 
 	/* Free TX queue resources */
 	for (queue = 0; queue < tx_count; queue++) {
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 0, 0))
+		struct stmmac_tx_queue *tx_q = &priv->dma_conf.tx_queue[queue];
+#else
 		struct stmmac_tx_queue *tx_q = &priv->tx_queue[queue];
+#endif
 		size_t size;
 		void *addr;
 
@@ -130,7 +150,7 @@ static void sunxi_uio_free_dma_tx_desc_resources(struct stmmac_priv *priv)
 			addr = tx_q->dma_tx;
 		}
 
-		size *= priv->dma_tx_size;
+		size *= dma_tx_size;
 
 		dma_free_coherent(priv->device, size, addr, tx_q->dma_tx_phy);
 	}
@@ -147,15 +167,24 @@ static void sunxi_uio_free_dma_tx_desc_resources(struct stmmac_priv *priv)
 static int sunxi_uio_alloc_dma_rx_desc_resources(struct stmmac_priv *priv)
 {
 	u32 queue, rx_count = priv->plat->rx_queues_to_use;
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 0, 0))
+	unsigned int dma_rx_size = priv->dma_conf.dma_rx_size;
+#else
+	unsigned int dma_rx_size = priv->dma_rx_size;
+#endif
 	int ret = -ENOMEM;
 
 	/* RX queues buffers and DMA */
 	for (queue = 0; queue < rx_count; queue++) {
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 0, 0))
+		struct stmmac_rx_queue *rx_q = &priv->dma_conf.rx_queue[queue];
+#else
 		struct stmmac_rx_queue *rx_q = &priv->rx_queue[queue];
+#endif
 
 		if (priv->extend_desc) {
 			rx_q->dma_erx = dma_alloc_coherent(priv->device,
-							   priv->dma_rx_size *
+							   dma_rx_size *
 							   sizeof(struct dma_extended_desc),
 							   &rx_q->dma_rx_phy,
 							   GFP_KERNEL);
@@ -163,7 +192,7 @@ static int sunxi_uio_alloc_dma_rx_desc_resources(struct stmmac_priv *priv)
 				goto err_dma;
 		} else {
 			rx_q->dma_rx = dma_alloc_coherent(priv->device,
-							  priv->dma_rx_size *
+							  dma_rx_size *
 							  sizeof(struct dma_desc),
 							  &rx_q->dma_rx_phy,
 							  GFP_KERNEL);
@@ -191,11 +220,20 @@ err_dma:
 static int sunxi_uio_alloc_dma_tx_desc_resources(struct stmmac_priv *priv)
 {
 	u32 queue, tx_count = priv->plat->tx_queues_to_use;
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 0, 0))
+	unsigned int dma_tx_size = priv->dma_conf.dma_tx_size;
+#else
+	unsigned int dma_tx_size = priv->dma_tx_size;
+#endif
 	int ret = -ENOMEM;
 
 	/* TX queues buffers and DMA */
 	for (queue = 0; queue < tx_count; queue++) {
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 0, 0))
+		struct stmmac_tx_queue *tx_q = &priv->dma_conf.tx_queue[queue];
+#else
 		struct stmmac_tx_queue *tx_q = &priv->tx_queue[queue];
+#endif
 		size_t size;
 		void *addr;
 
@@ -209,7 +247,7 @@ static int sunxi_uio_alloc_dma_tx_desc_resources(struct stmmac_priv *priv)
 		else
 			size = sizeof(struct dma_desc);
 
-		size *= priv->dma_tx_size;
+		size *= dma_tx_size;
 
 		addr = dma_alloc_coherent(priv->device, size,
 					  &tx_q->dma_tx_phy, GFP_KERNEL);
@@ -276,18 +314,24 @@ static void sunxi_uio_free_dma_desc_resources(struct stmmac_priv *priv)
 static int sunxi_uio_init_phy(struct net_device *dev)
 {
 	struct stmmac_priv *priv = netdev_priv(dev);
-	struct device_node *node;
+	struct device_node *node = NULL;
+	struct fwnode_handle *fwnode = NULL;
 	int ret;
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0))
+	fwnode = priv->plat->port_node;
+	if (fwnode)
+		ret = phylink_fwnode_phy_connect(priv->phylink, fwnode, 0);
+#else
 	node = priv->plat->phylink_node;
-
 	if (node)
 		ret = phylink_of_phy_connect(priv->phylink, node, 0);
+#endif
 
 	/* Some DT bindings do not set-up the PHY handle. Let's try to
 	 * manually parse it
 	 */
-	if (!node || ret) {
+	if ((!fwnode && !node) || ret) {
 		int addr = priv->plat->phy_addr;
 		struct phy_device *phydev;
 
@@ -325,6 +369,11 @@ static int sunxi_uio_init_dma_engine(struct stmmac_priv *priv)
 	u32 dma_csr_ch = max(rx_channels_count, tx_channels_count);
 	struct stmmac_rx_queue *rx_q;
 	struct stmmac_tx_queue *tx_q;
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 0, 0))
+	unsigned int dma_rx_size = priv->dma_conf.dma_rx_size;
+#else
+	unsigned int dma_rx_size = priv->dma_rx_size;
+#endif
 	u32 chan = 0;
 	int atds = 0, ret = 0;
 
@@ -354,13 +403,17 @@ static int sunxi_uio_init_dma_engine(struct stmmac_priv *priv)
 
 	/* DMA RX Channel Configuration */
 	for (chan = 0; chan < rx_channels_count; chan++) {
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 0, 0))
+		rx_q = &priv->dma_conf.rx_queue[chan];
+#else
 		rx_q = &priv->rx_queue[chan];
+#endif
 
 		stmmac_init_rx_chan(priv, priv->ioaddr, priv->plat->dma_cfg,
 				    rx_q->dma_rx_phy, chan);
 
 		rx_q->rx_tail_addr = rx_q->dma_rx_phy +
-				     (priv->dma_rx_size *
+				     (dma_rx_size *
 				      sizeof(struct dma_desc));
 		stmmac_set_rx_tail_ptr(priv, priv->ioaddr,
 				       rx_q->rx_tail_addr, chan);
@@ -368,7 +421,11 @@ static int sunxi_uio_init_dma_engine(struct stmmac_priv *priv)
 
 	/* DMA TX Channel Configuration */
 	for (chan = 0; chan < tx_channels_count; chan++) {
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 0, 0))
+		tx_q = &priv->dma_conf.tx_queue[chan];
+#else
 		tx_q = &priv->tx_queue[chan];
+#endif
 
 		stmmac_init_tx_chan(priv, priv->ioaddr, priv->plat->dma_cfg,
 				    tx_q->dma_tx_phy, chan);
@@ -385,17 +442,24 @@ static void sunxi_uio_set_rings_length(struct stmmac_priv *priv)
 {
 	u32 rx_channels_count = priv->plat->rx_queues_to_use;
 	u32 tx_channels_count = priv->plat->tx_queues_to_use;
+	unsigned int dma_tx_size, dma_rx_size;
 	u32 chan;
+
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 0, 0))
+	dma_tx_size = priv->dma_conf.dma_tx_size;
+	dma_rx_size = priv->dma_conf.dma_rx_size;
+#else
+	dma_tx_size = priv->dma_tx_size;
+	dma_rx_size = priv->dma_rx_size;
+#endif
 
 	/* set TX ring length */
 	for (chan = 0; chan < tx_channels_count; chan++)
-		stmmac_set_tx_ring_len(priv, priv->ioaddr,
-				       (priv->dma_tx_size - 1), chan);
+		stmmac_set_tx_ring_len(priv, priv->ioaddr, (dma_tx_size - 1), chan);
 
 	/* set RX ring length */
 	for (chan = 0; chan < rx_channels_count; chan++)
-		stmmac_set_rx_ring_len(priv, priv->ioaddr,
-				       (priv->dma_rx_size - 1), chan);
+		stmmac_set_rx_ring_len(priv, priv->ioaddr, (dma_rx_size - 1), chan);
 }
 
 /**
@@ -660,8 +724,11 @@ static void sunxi_uio_dma_operation_mode(struct stmmac_priv *priv)
 
 		stmmac_dma_rx_mode(priv, priv->ioaddr, rxmode, chan,
 				   rxfifosz, qmode);
-		stmmac_set_dma_bfsize(priv, priv->ioaddr, priv->dma_buf_sz,
-				      chan);
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 0, 0))
+		stmmac_set_dma_bfsize(priv, priv->ioaddr, priv->dma_conf.dma_buf_sz, chan);
+#else
+		stmmac_set_dma_bfsize(priv, priv->ioaddr, priv->dma_buf_sz, chan);
+#endif
 	}
 
 	for (chan = 0; chan < tx_channels_count; chan++) {
@@ -796,18 +863,26 @@ static int sunxi_uio_init(struct net_device *dev)
 	if (bfsize < 0)
 		bfsize = 0;
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 0, 0))
+	if (bfsize < BUF_SIZE_16KiB)
+		bfsize = sunxi_uio_set_bfsize(dev->mtu, priv->dma_conf.dma_buf_sz);
+	priv->dma_conf.dma_buf_sz = bfsize;
+	if (!priv->dma_conf.dma_tx_size)
+		priv->dma_conf.dma_tx_size = STMMAC_DMA_DEFAULT_SIZE;
+	if (!priv->dma_conf.dma_rx_size)
+		priv->dma_conf.dma_rx_size = STMMAC_DMA_DEFAULT_SIZE;
+#else
 	if (bfsize < BUF_SIZE_16KiB)
 		bfsize = sunxi_uio_set_bfsize(dev->mtu, priv->dma_buf_sz);
-
 	priv->dma_buf_sz = bfsize;
-	buf_sz = bfsize;
-
-	priv->rx_copybreak = STMMAC_RX_COPYBREAK;
-
 	if (!priv->dma_tx_size)
-		priv->dma_tx_size = DMA_DEFAULT_TX_SIZE;
+		priv->dma_tx_size = STMMAC_DMA_DEFAULT_SIZE;
 	if (!priv->dma_rx_size)
-		priv->dma_rx_size = DMA_DEFAULT_RX_SIZE;
+		priv->dma_rx_size = STMMAC_DMA_DEFAULT_SIZE;
+#endif
+
+	buf_sz = bfsize;
+	priv->rx_copybreak = STMMAC_RX_COPYBREAK;
 
 	ret = sunxi_uio_alloc_dma_desc_resources(priv);
 	if (ret < 0) {
@@ -876,6 +951,9 @@ static int sunxi_uio_probe(struct platform_device *pdev)
 	struct stmmac_priv *priv;
 	struct uio_info *uio;
 	struct resource *res;
+	struct stmmac_rx_queue *rx_queue;
+	struct stmmac_tx_queue *tx_queue;
+	unsigned int dma_rx_size, dma_tx_size;
 	int err = 0;
 
 	chip = devm_kzalloc(dev, sizeof(struct sunxi_uio),
@@ -919,6 +997,18 @@ static int sunxi_uio_probe(struct platform_device *pdev)
 	uio->name = chip->name;
 	uio->version = DRIVER_VERSION;
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 0, 0))
+	rx_queue = priv->dma_conf.rx_queue;
+	tx_queue = priv->dma_conf.tx_queue;
+	dma_rx_size = priv->dma_conf.dma_rx_size;
+	dma_tx_size = priv->dma_conf.dma_tx_size;
+#else
+	rx_queue = priv->rx_queue;
+	tx_queue = priv->tx_queue;
+	dma_rx_size = priv->dma_rx_size;
+	dma_tx_size = priv->dma_tx_size;
+#endif
+
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	if (!res)
 		return -ENODEV;
@@ -929,13 +1019,13 @@ static int sunxi_uio_probe(struct platform_device *pdev)
 	uio->mem[0].memtype = UIO_MEM_PHYS;
 
 	uio->mem[1].name = "eth_rx_bd";
-	uio->mem[1].addr = priv->rx_queue[0].dma_rx_phy;
-	uio->mem[1].size = priv->dma_rx_size * sizeof(struct dma_desc);
+	uio->mem[1].addr = rx_queue[0].dma_rx_phy;
+	uio->mem[1].size = dma_rx_size * sizeof(struct dma_desc);
 	uio->mem[1].memtype = UIO_MEM_PHYS;
 
 	uio->mem[2].name = "eth_tx_bd";
-	uio->mem[2].addr = priv->tx_queue[0].dma_tx_phy;
-	uio->mem[2].size = priv->dma_tx_size * sizeof(struct dma_desc);
+	uio->mem[2].addr = tx_queue[0].dma_tx_phy;
+	uio->mem[2].size = dma_tx_size * sizeof(struct dma_desc);
 	uio->mem[2].memtype = UIO_MEM_PHYS;
 
 	uio->open = sunxi_uio_open;

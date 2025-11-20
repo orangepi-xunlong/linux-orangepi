@@ -37,10 +37,6 @@ struct sunxi_phy_switcher {
 	struct phy *usb_phy;
 	struct extcon_dev *extcon;
 
-	/* for external usb power supply current limit */
-	struct power_supply *psy;
-	u32 current_limit_ad;
-
 	/* for pd runtime machine delay */
 	u32 dp_configure_delay;
 
@@ -66,6 +62,7 @@ struct sunxi_phy_switcher {
 static const u32 switcher_cable[] = {
 	EXTCON_DISP_DP,
 	EXTCON_USB,
+	EXTCON_CHG_USB_SDP,
 	EXTCON_NONE,
 };
 
@@ -247,7 +244,6 @@ sunxi_phy_mux_set(struct typec_mux_dev *mux, struct typec_mux_state *state)
 	struct sunxi_phy_switcher *phy_switcher = typec_mux_get_drvdata(mux);
 	bool current_limit_restore = false;
 	bool dp_mode = false;
-	union power_supply_propval val = {0};
 	struct typec_displayport_data *data = state->data;
 
 	mutex_lock(&phy_switcher->lock);
@@ -308,20 +304,14 @@ sunxi_phy_mux_set(struct typec_mux_dev *mux, struct typec_mux_state *state)
 			current_limit_restore = true;
 		}
 
-		if (phy_switcher->psy) {
-			if (dp_mode == true) {
-				/*
-				 * limit input current to 500mA to compatible most panel,
-				 * avoid overload lead to displayport's usb power's drop
-				 */
-				val.intval = 500; /* mA */
-				power_supply_set_property(phy_switcher->psy,
-					POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT, &val);
-			} else if (current_limit_restore == true) {
-				val.intval = phy_switcher->current_limit_ad; /* mA */
-				power_supply_set_property(phy_switcher->psy,
-					POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT, &val);
-			}
+		if (dp_mode == true) {
+			/*
+			 * limit input current to 500mA to compatible most panel,
+			 * avoid overload lead to displayport's usb power's drop
+			 */
+			extcon_set_state_sync(phy_switcher->extcon, EXTCON_CHG_USB_SDP, true);
+		} else if (current_limit_restore == true) {
+			extcon_set_state_sync(phy_switcher->extcon, EXTCON_CHG_USB_SDP, false);
 		}
 
 		/* phy mode is useless because modes are determined in dts already,
@@ -359,8 +349,6 @@ static int sunxi_phy_switcher_probe(struct platform_device *pdev)
 	struct typec_mux_desc mux_desc = { };
 	struct sunxi_phy_switcher *phy_switcher;
 	struct device_node *node = dev->of_node;
-	struct power_supply *psy = NULL;
-	struct device_node *np = NULL;
 	int ret;
 	char gpio_name[20];
 
@@ -404,7 +392,6 @@ static int sunxi_phy_switcher_probe(struct platform_device *pdev)
 		gpio_direction_output(phy_switcher->auxn_gpio, AUX_PULL_UP);
 	}
 
-
 	phy_switcher->dp_phy = devm_phy_get(dev, "dp-phy");
 	if (IS_ERR_OR_NULL(phy_switcher->dp_phy)) {
 		dev_err(dev, "fail to get dp phy for mux, driver probe fail!\n");
@@ -423,21 +410,6 @@ static int sunxi_phy_switcher_probe(struct platform_device *pdev)
 		return PTR_ERR(phy_switcher->extcon);
 	}
 	devm_extcon_dev_register(phy_switcher->dev, phy_switcher->extcon);
-
-	if (of_find_property(node, "usb_psy", NULL)) {
-		psy = devm_power_supply_get_by_phandle(phy_switcher->dev, "usb_psy");
-		if (IS_ERR_OR_NULL(psy)) {
-			phy_switcher->psy = NULL;
-			dev_err(phy_switcher->dev, "usb_psy is not found, maybe useless!\n");
-		} else {
-			phy_switcher->psy = psy;
-			np = of_parse_phandle(node, "usb_psy", 0);
-			if (np)
-				of_property_read_u32(np, "pmu_usbad_cur", &phy_switcher->current_limit_ad);
-			else
-				phy_switcher->current_limit_ad = 1500;
-		}
-	}
 
 	/* parse delay time before DP_CMD_CONFIGURE */
 	ret = of_property_read_u32(node, "dp_configure_delay", &phy_switcher->dp_configure_delay);
@@ -517,4 +489,4 @@ MODULE_ALIAS("platform:sunxi-phy-switch-driver");
 MODULE_DESCRIPTION("Allwinner Type-C switch driver base on phy");
 MODULE_AUTHOR("huangyongxing<huangyongxing@allwinnertech.com>");
 MODULE_LICENSE("GPL v2");
-MODULE_VERSION("1.0.1");
+MODULE_VERSION("1.0.2");

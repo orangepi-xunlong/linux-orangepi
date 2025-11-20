@@ -15,6 +15,8 @@
 #ifndef __MACH_CLK_DEBUGFS_H
 #define __MACH_CLK_DEBUGFS_H
 
+#include <linux/version.h>
+
 struct clk_parent_map {
 	const struct clk_hw	*hw;
 	struct clk_core		*core;
@@ -29,6 +31,9 @@ struct clk_core {
 	struct clk_hw		*hw;
 	struct module		*owner;
 	struct device		*dev;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0)
+	struct hlist_node	rpm_node;
+#endif
 	struct device_node	*of_node;
 	struct clk_core		*parent;
 	struct clk_parent_map	*parents;
@@ -42,8 +47,10 @@ struct clk_core {
 	unsigned long		flags;
 	bool			orphan;
 	bool			rpm_enabled;
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 6, 0)
 	bool			need_sync;
 	bool			boot_enabled;
+#endif
 	unsigned int		enable_count;
 	unsigned int		prepare_count;
 	unsigned int		protect_count;

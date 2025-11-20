@@ -1939,6 +1939,7 @@ int tp2815_sensor_set_fmt(struct v4l2_subdev *sd,
 {
 	struct sensor_info *info = to_state(sd);
 	int ret = 0;
+	unsigned int stream_count;
 
 	if (fmt->format.width == 1440 || fmt->format.width == 720)  // NTSC/PAL
 		info->sensor_field = V4L2_FIELD_INTERLACED;
@@ -1948,7 +1949,12 @@ int tp2815_sensor_set_fmt(struct v4l2_subdev *sd,
 	if (!info->tvin.flag)
 		return sensor_set_fmt(sd, state, fmt);
 
-	if (sd->entity.stream_count == 0) {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0)
+	stream_count = info->stream_count;
+#else
+	stream_count = sd->entity.stream_count;
+#endif
+	if (stream_count == 0) {
 		tp2815_set_input_size(info, fmt, fmt->reserved[0]);
 		ret = sensor_set_fmt(sd, state, fmt);
 		sensor_print("%s befor ch%d %d*%d \n", __func__,
@@ -1999,12 +2005,18 @@ static int sensor_tvin_init(struct v4l2_subdev *sd, struct tvin_init_info *tvin_
 	struct sensor_info *info = to_state(sd);
 	__u32 *sensor_fmt = info->tvin.tvin_info.input_fmt;
 	__u32 ch_id = tvin_info->ch_id;
+	unsigned int stream_count;
 
 	sensor_print("set ch%d fmt as %d\n", ch_id, tvin_info->input_fmt[ch_id]);
 	sensor_fmt[ch_id] = tvin_info->input_fmt[ch_id];
 	info->tvin.tvin_info.ch_id = ch_id;
 
-	if (sd->entity.stream_count != 0) {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0)
+		stream_count = info->stream_count;
+#else
+		stream_count = sd->entity.stream_count;
+#endif
+	if (stream_count != 0) {
 		tp2815_init_ch_hardware(sd, &info->tvin.tvin_info);
 		sensor_print("sensor_tvin_init tp2815_init_ch_hardware\n");
 	}
@@ -2145,11 +2157,22 @@ static int sensor_g_mbus_config(struct v4l2_subdev *sd, unsigned int pad,
 {
 	cfg->type = V4L2_MBUS_CSI2_DPHY;
 	if (!strcmp(sd->name, SENSOR_NAME_2)) {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0)
+		cfg->bus.mipi_csi2.num_data_lanes = 0 | V4L2_MBUS_CSI2_2_LANE | V4L2_MBUS_CSI2_CHANNEL_0 | V4L2_MBUS_CSI2_CHANNEL_1;
+#else
 		cfg->flags = 0 | V4L2_MBUS_CSI2_2_LANE | V4L2_MBUS_CSI2_CHANNEL_0 | V4L2_MBUS_CSI2_CHANNEL_1;
+#endif
 	} else {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0)
+		cfg->bus.mipi_csi2.num_data_lanes = 0 | V4L2_MBUS_CSI2_4_LANE | \
+			V4L2_MBUS_CSI2_CHANNEL_0 | V4L2_MBUS_CSI2_CHANNEL_1 | \
+			V4L2_MBUS_CSI2_CHANNEL_2 | V4L2_MBUS_CSI2_CHANNEL_3;
+
+#else
 		cfg->flags = 0 | V4L2_MBUS_CSI2_4_LANE | \
 			V4L2_MBUS_CSI2_CHANNEL_0 | V4L2_MBUS_CSI2_CHANNEL_1 | \
 			V4L2_MBUS_CSI2_CHANNEL_2 | V4L2_MBUS_CSI2_CHANNEL_3;
+#endif
 	}
 	return 0;
 }
@@ -2351,8 +2374,12 @@ static int sensor_init_controls(struct v4l2_subdev *sd, const struct v4l2_ctrl_o
 }
 
 static int sensor_dev_id;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0)
+static int sensor_probe(struct i2c_client *client)
+#else
 static int sensor_probe(struct i2c_client *client,
 			const struct i2c_device_id *id)
+#endif
 {
 	struct v4l2_subdev *sd;
 	struct sensor_info *info;
@@ -2391,7 +2418,11 @@ static int sensor_probe(struct i2c_client *client,
 	return 0;
 }
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 1, 0)
 static int sensor_remove(struct i2c_client *client)
+#else
+static void sensor_remove(struct i2c_client *client)
+#endif
 {
 	struct v4l2_subdev *sd;
 	int i;
@@ -2407,7 +2438,9 @@ static int sensor_remove(struct i2c_client *client)
 	}
 	kfree(to_state(sd));
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 1, 0)
 	return 0;
+#endif
 }
 
 static const struct i2c_device_id sensor_id[] = {

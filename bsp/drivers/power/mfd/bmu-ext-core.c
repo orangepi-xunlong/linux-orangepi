@@ -298,7 +298,7 @@ static struct mfd_cell axp2602_cells[] = {
 };
 
 
-static void eta6973_dts_parse(struct bmu_ext_dev *ext)
+static void eta6973_dts_parse(struct sunxi_power_dev *ext)
 {
 	struct device_node *node = ext->dev->of_node;
 	struct regmap *map = ext->regmap;
@@ -371,7 +371,7 @@ static void eta6973_dts_parse(struct bmu_ext_dev *ext)
 
 }
 
-int bmu_ext_match_device(struct bmu_ext_dev *ext)
+int bmu_ext_match_device(struct sunxi_power_dev *ext)
 {
 	struct device *dev = ext->dev;
 	const struct acpi_device_id *acpi_id;
@@ -379,14 +379,14 @@ int bmu_ext_match_device(struct bmu_ext_dev *ext)
 	if (dev->of_node) {
 		of_id = of_match_device(dev->driver->of_match_table, dev);
 		if (!of_id) {
-			PMIC_DEV_ERR(dev, "Unable to match OF ID\n");
+			PMIC_DEV_ERR_STD(E_BMU_EXT_MFD_SYS_PORBE_ERR, dev, "Unable to match OF ID\n");
 			return -ENODEV;
 		}
 		ext->variant = (long)of_id->data;
 	} else {
 		acpi_id = acpi_match_device(dev->driver->acpi_match_table, dev);
 		if (!acpi_id || !acpi_id->driver_data) {
-			PMIC_DEV_ERR(dev, "Unable to match ACPI ID and data\n");
+			PMIC_DEV_ERR_STD(E_BMU_EXT_MFD_SYS_PORBE_ERR, dev, "Unable to match ACPI ID and data\n");
 			return -ENODEV;
 		}
 		ext->variant = (long)acpi_id->driver_data;
@@ -426,7 +426,7 @@ int bmu_ext_match_device(struct bmu_ext_dev *ext)
 		break;
 /**************************************/
 	default:
-		PMIC_DEV_ERR(dev, "unsupported ext ID %lu\n", ext->variant);
+		PMIC_DEV_ERR_STD(E_BMU_EXT_MFD_SYS_PORBE_ERR, dev, "unsupported ext ID %lu\n", ext->variant);
 		return -EINVAL;
 	}
 	PMIC_DEV_INFO(dev, "bmu_ext_dev variant %s found\n",
@@ -436,96 +436,7 @@ int bmu_ext_match_device(struct bmu_ext_dev *ext)
 }
 EXPORT_SYMBOL(bmu_ext_match_device);
 
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 99)) && IS_ENABLED(CONFIG_THERMAL)
-/* thermal cooling device callbacks */
-static int ps_get_max_charge_cntl_limit(struct thermal_cooling_device *tcd,
-					unsigned long *state)
-{
-	struct power_supply *psy;
-	union power_supply_propval val;
-	int ret;
-
-	psy = tcd->devdata;
-	ret = power_supply_get_property(psy,
-			POWER_SUPPLY_PROP_CHARGE_CONTROL_LIMIT_MAX, &val);
-	if (ret)
-		return ret;
-
-	*state = val.intval;
-
-	return ret;
-}
-
-static int ps_get_cur_charge_cntl_limit(struct thermal_cooling_device *tcd,
-					unsigned long *state)
-{
-	struct power_supply *psy;
-	union power_supply_propval val;
-	int ret;
-
-	psy = tcd->devdata;
-	ret = power_supply_get_property(psy,
-			POWER_SUPPLY_PROP_CHARGE_CONTROL_LIMIT, &val);
-	if (ret)
-		return ret;
-
-	*state = val.intval;
-
-	return ret;
-}
-
-static int ps_set_cur_charge_cntl_limit(struct thermal_cooling_device *tcd,
-					unsigned long state)
-{
-	struct power_supply *psy;
-	union power_supply_propval val;
-	int ret;
-
-	psy = tcd->devdata;
-	val.intval = state;
-	ret = psy->desc->set_property(psy,
-		POWER_SUPPLY_PROP_CHARGE_CONTROL_LIMIT, &val);
-
-	return ret;
-}
-
-static const struct thermal_cooling_device_ops psy_tcd_ops = {
-	.get_max_state = ps_get_max_charge_cntl_limit,
-	.get_cur_state = ps_get_cur_charge_cntl_limit,
-	.set_cur_state = ps_set_cur_charge_cntl_limit,
-};
-
-int bmu_ext_register_cooler(struct power_supply *psy)
-{
-	psy->tcd = devm_thermal_of_cooling_device_register(&psy->dev,
-		psy->of_node, (char *)psy->desc->name, psy, &psy_tcd_ops);
-
-	return PTR_ERR_OR_ZERO(psy->tcd);
-}
-EXPORT_SYMBOL(bmu_ext_register_cooler);
-
-void bmu_ext_unregister_cooler(struct power_supply *psy)
-{
-	if (IS_ERR_OR_NULL(psy->tcd))
-		return;
-	thermal_cooling_device_unregister(psy->tcd);
-}
-EXPORT_SYMBOL(bmu_ext_unregister_cooler);
-#else
-int bmu_ext_register_cooler(struct power_supply *psy)
-{
-	return 0;
-}
-EXPORT_SYMBOL(bmu_ext_register_cooler);
-
-void bmu_ext_unregister_cooler(struct power_supply *psy)
-{
-	return;
-}
-EXPORT_SYMBOL(bmu_ext_unregister_cooler);
-#endif
-
-int bmu_ext_device_init(struct bmu_ext_dev *ext)
+int bmu_ext_device_init(struct sunxi_power_dev *ext)
 {
 	int ret;
 
@@ -538,14 +449,14 @@ int bmu_ext_device_init(struct bmu_ext_dev *ext)
 					  ext->regmap_irq_chip,
 					  &ext->regmap_irqc);
 		if (ret) {
-			PMIC_DEV_ERR(ext->dev, "failed to add irq chip: %d\n", ret);
+			PMIC_DEV_ERR_STD(E_BMU_EXT_MFD_SYS_PORBE_ERR, ext->dev, "failed to add irq chip: %d\n", ret);
 			return ret;
 		}
 	}
 	ret = mfd_add_devices(ext->dev, 0, ext->cells,
 			      ext->nr_cells, NULL, 0, NULL);
 	if (ret) {
-		PMIC_DEV_ERR(ext->dev, "failed to add MFD devices: %d\n", ret);
+		PMIC_DEV_ERR_STD(E_BMU_EXT_MFD_SYS_PORBE_ERR, ext->dev, "failed to add MFD devices: %d\n", ret);
 
 		if (ext->irq)
 			regmap_del_irq_chip(ext->irq, ext->regmap_irqc);
@@ -559,7 +470,7 @@ int bmu_ext_device_init(struct bmu_ext_dev *ext)
 }
 EXPORT_SYMBOL_GPL(bmu_ext_device_init);
 
-int bmu_ext_device_exit(struct bmu_ext_dev *ext)
+int bmu_ext_device_exit(struct sunxi_power_dev *ext)
 {
 	mfd_remove_devices(ext->dev);
 

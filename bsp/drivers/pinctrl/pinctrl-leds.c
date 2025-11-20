@@ -22,8 +22,10 @@
 #include <linux/io.h>
 #include <linux/of_gpio.h>
 #include <linux/pinctrl/pinconf-generic.h>
+#include <linux/pinctrl/consumer.h>
 #include <linux/regulator/consumer.h>
 #include <linux/power_supply.h>
+#include <linux/version.h>
 
 #if IS_ENABLED(CONFIG_PM)
 #include <linux/pm.h>
@@ -117,12 +119,12 @@ static int sunxi_dirgpio_drv_set(struct sunxi_dirgpio_pin *pin, int drv)
 
 static void sunxi_dirgpio_data_set(struct sunxi_dirgpio_pin *pin, int data)
 {
-	__gpio_set_value(pin->gpio, data);
+	gpio_set_value(pin->gpio, data);
 }
 
 static int sunxi_dirgpio_data_get(struct sunxi_dirgpio_pin *pin)
 {
-	return __gpio_get_value(pin->gpio);
+	return gpio_get_value(pin->gpio);
 }
 
 static ssize_t sunxi_dirgpio_cfg_show(struct device *dev,
@@ -395,7 +397,11 @@ static int sunxi_dirgpio_hw_init(struct sunxi_dirgpio *chip)
 {
 	u32 level;
 	int i, err, gpio;
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 6, 0)
 	enum of_gpio_flags flag;
+#else
+	unsigned int flag;
+#endif
 
 	dev_dbg(chip->dev, "chip->gpio_num is %d\n", chip->gpio_num);
 	chip->pins = devm_kcalloc(chip->dev, chip->gpio_num, sizeof(*chip->pins), GFP_KERNEL);
@@ -403,7 +409,11 @@ static int sunxi_dirgpio_hw_init(struct sunxi_dirgpio *chip)
 		return -ENOMEM;
 
 	for (i = 0; i < chip->gpio_num; i++) {
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 6, 0)
 		gpio = of_get_named_gpio_flags(chip->node, "gpio-pins", i, &flag);
+#else
+		gpio = of_get_named_gpio(chip->node, "gpio-pins", i);
+#endif
 		if (!gpio_is_valid(gpio)) {
 			dev_err(chip->dev, "get gpio error!\n");
 			return gpio;
@@ -467,7 +477,11 @@ static int sunxi_dirgpio_probe(struct platform_device *pdev)
 	}
 
 	/* create debug dir: /sys/class/gpio_sw */
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 6, 0)
 	chip->gpio_class = class_create(THIS_MODULE, "gpio_sw");
+#else
+	chip->gpio_class = class_create("gpio_sw");
+#endif
 	if (IS_ERR(chip->gpio_class)) {
 		dev_err(chip->dev, "sunxi_dirgpio class_create failed\n");
 		err = PTR_ERR(chip->gpio_class);
@@ -569,4 +583,4 @@ module_platform_driver(sunxi_dirgpio_driver);
 MODULE_AUTHOR("shaosidi <shaosidi@allwinnertech.com>");
 MODULE_DESCRIPTION("sunxi direct gpio driver");
 MODULE_LICENSE("GPL v2");
-MODULE_VERSION("1.0.1");
+MODULE_VERSION("1.0.2");

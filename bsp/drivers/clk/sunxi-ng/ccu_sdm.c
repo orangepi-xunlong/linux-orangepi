@@ -10,6 +10,8 @@
 #include <linux/slab.h>
 #include "ccu_sdm.h"
 
+#define SUNXI_CCU_SDM_VERSION        "1.0.1"
+
 struct clk_sdm_info *sdm_info;
 static int len;
 
@@ -42,6 +44,8 @@ int sunxi_parse_sdm_info(struct device_node *node)
 			sunxi_err(NULL, "%s fail to parse sdm-enable, please check dts config!\n", child_node->name);
 			continue;
 		}
+		if (sdm_info[i].sdm_enable != DTS_SDM_ON)
+			continue;
 		if (sdm_info[i].sdm_enable != DTS_SDM_OFF &&
 				sdm_info[i].sdm_enable != DTS_SDM_ON) {
 				sunxi_err(NULL, "clk: %s enable: %d\n",
@@ -61,12 +65,12 @@ int sunxi_parse_sdm_info(struct device_node *node)
 		}
 
 		if (of_property_read_u32(child_node, "freq-mode", &sdm_info[i].freq_mode)) {
-			sdm_info[i].freq_mode = TR_N;
+			sdm_info[i].freq_mode = TR_2;
 		} else {
-			if (sdm_info[i].freq_mode < 0 || sdm_info[i].freq_mode > 1) {
-				sunxi_err(NULL, "clk: %s invaild freq_mod: %d, should be within 0~1, use default TR_N\n",
+			if (sdm_info[i].freq_mode < 0 || sdm_info[i].freq_mode > 3) {
+				sunxi_err(NULL, "clk: %s invaild freq_mod: %d, should be within 0~3, use default TR_2\n",
 						child_node->name, sdm_info[i].freq_mode);
-				sdm_info[i].freq_mode = TR_N;
+				sdm_info[i].freq_mode = TR_2;
 			}
 		}
 
@@ -79,10 +83,19 @@ int sunxi_parse_sdm_info(struct device_node *node)
 			}
 		}
 
+		if (of_property_read_u32(child_node, "sdm-direction", &sdm_info[i].sdm_direction)) {
+			sdm_info[i].sdm_direction = SDM_DIR_NONE;
+		} else {
+			if (sdm_info[i].sdm_direction < 0 || sdm_info[i].sdm_direction > 1) {
+				sunxi_err(NULL, "clk: %s invaild sdm_direction : %d, should be within 0~1\n", child_node->name, sdm_info[i].sdm_direction);
+				sdm_info[i].sdm_direction = SDM_DIR_NONE;
+			}
+		}
+
 		sdm_info[i].clk_name = child_node->name;
 
 		sunxi_info(NULL, "%s: The %s has enabled Spread Spectrum in DTS\n", __func__, child_node->name);
-		sunxi_info(NULL, "%s: sdm-enable: %d sdm-factor: %d freq-mode: %d sdm-freq: %d \n", __func__, sdm_info[i].sdm_enable, sdm_info[i].sdm_factor, sdm_info[i].freq_mode, sdm_info[i].sdm_freq);
+		sunxi_info(NULL, "%s: sdm-enable: %d sdm-factor: %d freq-mode: %d sdm-freq: %d sdm-direction: %d\n", __func__, sdm_info[i].sdm_enable, sdm_info[i].sdm_factor, sdm_info[i].freq_mode, sdm_info[i].sdm_freq, sdm_info[i].sdm_direction);
 		i++;
 	}
 	len = i;
@@ -108,7 +121,7 @@ struct clk_sdm_info *sunxi_clk_get_sdm_info(const char *clk_name)
 }
 EXPORT_SYMBOL_GPL(sunxi_clk_get_sdm_info);
 
-u32 ccu_get_sdmval(unsigned long rate, struct ccu_common *common, u32 m, u32 n)
+u32 ccu_get_sdmval(unsigned long rate, struct ccu_common *common, u32 n)
 {
 	u32 sdm_val, sdm_freq, step_value;
 	u64 x2, wave_step;
@@ -116,23 +129,16 @@ u32 ccu_get_sdmval(unsigned long rate, struct ccu_common *common, u32 m, u32 n)
 
 	sdm_freq = 315 + sdm_info->sdm_freq * 5;
 
-	x2 = sdm_info->sdm_factor * (n + 1);
+	x2 = sdm_info->sdm_factor * n;
 	if (x2 >= 1000) {
 		sunxi_err(NULL, "clk: invalid sdm_factor: %d\n", sdm_info->sdm_factor);
 		return -1;
 	}
 	/*
-	 * 1. m=0
 	 *	SDM_CLK_SEL->24M
 	 *	fix coefficient=2^17*2/24 = 10922.5
-	 * 2. m=1
-	 *	SDM_CLK_SEL->12M
-	 *	fix coefficient=02^17*2/12 = 21845
 	 **/
-	if (m)
-		wave_step = 109225 * x2 * sdm_freq;
-	else
-		wave_step = 218450 * x2 * sdm_freq;
+	wave_step = 109225 * x2 * sdm_freq;
 
 	do_div(wave_step, 100000000);
 	step_value = (u32)wave_step;
@@ -141,13 +147,16 @@ u32 ccu_get_sdmval(unsigned long rate, struct ccu_common *common, u32 m, u32 n)
 	/* enanle SDM */
 	sdm_val = SET_BITS(31, 1, sdm_val, 1);
 	/* choose freq_mode */
-	sdm_val = SET_BITS(29, 2, sdm_val, sdm_info->freq_mode << 1);
+	sdm_val = SET_BITS(29, 2, sdm_val, sdm_info->freq_mode);
 	/* choose sdm_freq */
 	sdm_val = SET_BITS(17, 2, sdm_val, sdm_info->sdm_freq);
-	/* choose sdm_clk */
-	sdm_val = SET_BITS(19, 1, sdm_val, m);
+	/* Some platforms support the configuration of sdm_direction, and sdm_direction and sdm_clk share configuration bit */
+	if (sdm_info->sdm_direction != SDM_DIR_NONE)
+		sdm_val = SET_BITS(19, 1, sdm_val, sdm_info->sdm_direction);
+	else
+		sdm_val = SET_BITS(19, 1, sdm_val, 0);
 
-	sunxi_debug(NULL, "sdm_val: 0x%x wave_stop: %llu, sdm_freq: %d freq_mode: %d\n", sdm_val, wave_step, sdm_info->sdm_freq, sdm_info->freq_mode);
+	sunxi_debug(NULL, "sdm_val: 0x%x wave_step: %llu, sdm_freq: %d freq_mode: %d sdm_dir: %d\n", sdm_val, wave_step, sdm_info->sdm_freq, sdm_info->freq_mode, sdm_info->sdm_direction);
 
 	return sdm_val;
 }

@@ -2286,7 +2286,7 @@
 			interrupts = <GIC_SPI 37 IRQ_TYPE_LEVEL_HIGH>;
 			clocks = <&ccu CLK_LRADC>;
 			resets = <&ccu RST_BUS_LRADC>;
-			status = "disabled";
+			status = "okay";
 		};
 
 		gpadc0: gpadc@2521000 {
@@ -3547,6 +3547,20 @@
 			};
 		};
 
+		uio0: uio@4500000 {
+			compatible = "allwinner,sunxi-uio";
+			reg = <0x0 0x04500000 0x0 0x10000>;
+			sunxi,ethernet = <&gmac0>;
+			status = "disabled";
+		};
+
+		uio1: uio@4510000 {
+			compatible = "allwinner,sunxi-uio";
+			reg = <0x0 0x04510000 0x0 0x10000>;
+			sunxi,ethernet = <&gmac1>;
+			status = "disabled";
+		};
+
 		rfkill: rfkill {
 			compatible = "allwinner,sunxi-rfkill";
 			status = "disabled";
@@ -4067,6 +4081,10 @@
 		};
 		rgb0: rgb0@0001000 {
 			compatible = "allwinner,rgb0";
+			phys = <&dsi0combophy>;
+			phy-names = "combophy0";
+			clocks = <&dsi0combophy CLK_LVDS_OR_RGB>;
+			clock-names = "rgb_pclk";
 			status = "disabled";
 			ports {
 				#address-cells = <1>;
@@ -4621,9 +4639,11 @@
 				opp-microvolt-vf0400 = <800000>;
 				opp-microvolt-vf0500 = <800000>;
 				opp-microvolt-vf0600 = <800000>;
+				opp-microvolt-vf0700 = <800000>;
+				opp-microvolt-vf0800 = <800000>;
 				opp-microvolt-vf1400 = <800000>;
 				opp-microvolt-vf1500 = <800000>;
-			};*/
+			 };*/
 
 			opp@400000000 {
 				opp-hz = /bits/ 64 <400000000>;
@@ -4643,6 +4663,8 @@
 				opp-microvolt-vf0400 = <800000>;
 				opp-microvolt-vf0500 = <800000>;
 				opp-microvolt-vf0600 = <800000>;
+				opp-microvolt-vf0700 = <800000>;
+				opp-microvolt-vf0800 = <800000>;
 				opp-microvolt-vf1400 = <800000>;
 				opp-microvolt-vf1500 = <800000>;
 			};
@@ -4665,6 +4687,8 @@
 				opp-microvolt-vf0400 = <800000>;
 				opp-microvolt-vf0500 = <800000>;
 				opp-microvolt-vf0600 = <800000>;
+				opp-microvolt-vf0800 = <800000>;
+				opp-microvolt-vf0700 = <800000>;
 				opp-microvolt-vf1400 = <800000>;
 				opp-microvolt-vf1500 = <800000>;
 			};
@@ -4687,6 +4711,8 @@
 				opp-microvolt-vf0400 = <800000>;
 				opp-microvolt-vf0500 = <800000>;
 				opp-microvolt-vf0600 = <800000>;
+				opp-microvolt-vf0700 = <800000>;
+				opp-microvolt-vf0800 = <820000>;
 				opp-microvolt-vf1400 = <800000>;
 				opp-microvolt-vf1500 = <800000>;
 			};
@@ -4709,6 +4735,8 @@
 				opp-microvolt-vf0400 = <900000>;
 				opp-microvolt-vf0500 = <880000>;
 				opp-microvolt-vf0600 = <920000>;
+				opp-microvolt-vf0700 = <880000>;
+				opp-microvolt-vf0800 = <940000>;
 				opp-microvolt-vf1400 = <880000>;
 				opp-microvolt-vf1500 = <860000>;
 			};
@@ -5023,6 +5051,11 @@
 			interrupt-names = "sii", "msi", "edma-w0", "edma-w1", "edma-w2", "edma-w3",
 					  "edma-r0", "edma-r1", "edma-r2", "edma-r3";
 			#interrupt-cells = <1>;
+			interrupt-map-mask = <0 0 0 7>;
+			interrupt-map = <0 0 0 1 &pcie_intc 0>,
+							<0 0 0 2 &pcie_intc 1>,
+							<0 0 0 3 &pcie_intc 2>,
+							<0 0 0 4 &pcie_intc 3>;
 			num-edma = <4>;
 			max-link-speed = <3>;
 			num-ib-windows = <16>;
@@ -5035,6 +5068,12 @@
 			reset-names = "pclk_rst", "pwrup_rst", "its";
 			busno = <0>;
 			status = "disabled";
+
+			pcie_intc: legacy-interrupt-controller {
+				interrupt-controller;
+				#address-cells = <0>;
+				#interrupt-cells = <1>;
+			};
 		};
 	};
 };

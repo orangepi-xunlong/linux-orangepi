@@ -2992,6 +2992,11 @@
 			status = "disabled";
 		};
 
+				/*
+		 * channel0~3  : cpux -> dsp
+		 * channel4~7 : cpux -> cpus
+		 * channel8~11 : cpux -> rv
+		 */
 		msgbox: msgbox@3003000 {
 			compatible = "allwinner,sun55iw3-msgbox";
 			#mbox-cells = <1>;
@@ -3008,6 +3013,7 @@
 			resets = <&ccu RST_BUS_MSGBOX0>;
 			reset-names = "rst";
 			local_id = <0>;
+			status = "okay";
 		};
 
 		hwspinlock: hwspinlock@3005000 {
@@ -5079,6 +5085,11 @@
 			interrupt-names = "msi", "sii", "edma-w0", "edma-w1", "edma-w2", "edma-w3",
 					  "edma-r0", "edma-r1", "edma-r2", "edma-r3";
 			#interrupt-cells = <1>;
+			interrupt-map-mask = <0 0 0 7>;
+			interrupt-map = <0 0 0 1 &pcie_intc 0>,
+							<0 0 0 2 &pcie_intc 1>,
+							<0 0 0 3 &pcie_intc 2>,
+							<0 0 0 4 &pcie_intc 3>;
 			num-edma = <4>;
 			max-link-speed = <2>;
 			num-ib-windows = <8>;
@@ -5088,6 +5099,12 @@
 			clocks = <&dcxo24M>, <&ccu CLK_PCIE_AUX>;
 			clock-names = "hosc", "pclk_aux";
 			status = "disabled";
+
+			pcie_intc: legacy-interrupt-controller {
+				interrupt-controller;
+				#address-cells = <0>;
+				#interrupt-cells = <1>;
+			};
 		};
 
 		/* audio dirver module -> audio codec */
@@ -5543,6 +5560,13 @@
 					reset-deassert-us = <150000>;
 				};
 			};
+		};
+
+		uio1: uio@4510000 {
+			compatible = "allwinner,sunxi-uio";
+			reg = <0x0 0x04510000 0x0 0x10000>;
+			sunxi,ethernet = <&gmac1>;
+			status = "disabled";
 		};
 
 		ioserial@0 {

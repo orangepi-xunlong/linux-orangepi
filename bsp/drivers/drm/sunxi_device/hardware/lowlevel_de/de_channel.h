@@ -158,6 +158,7 @@ struct de_channel_output_info {
 
 int channel_apply(struct de_channel_handle *hdl, struct display_channel_state *state,
 		    const struct de_output_info *de_info, struct de_channel_output_info *output, bool rgb_out);
+int de_channel_pq_apply_atonce(struct de_channel_handle *hdl, struct display_channel_state *state);
 void channel_update_regs(struct de_channel_handle *hdl);
 void channel_process_late(struct de_channel_handle *hdl);
 

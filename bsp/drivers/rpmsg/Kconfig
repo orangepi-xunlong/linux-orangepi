@@ -8,25 +8,57 @@ menu "Rpmsg drivers"
 config AW_RPMSG_CTRL
 	tristate "Allwinner rpmsg ctrl driver"
 	depends on AW_BSP
-	select RPMSG
+	select RPMSG_VIRTIO if !AW_RPMSG_VIRTIO
 	default n
 	help
 	  Say Y here to export rpmsg ctrl device files, usually found in /dev.
 	  They make it possible for user-space programs to create rpmsg
 	  endpoints device, it can be found in /dev/rpmsg-%rproc-name.
 
+config AW_RPMSG_CLASS
+	bool "Allwinner rpmsg class"
+	depends on AW_RPMSG_CTRL
+	default y if AW_KERNEL_ORIGIN
+	default n if AW_KERNEL_AOSP
+
 config AW_RPMSG_NOTIFY
 	tristate "Allwinner rpmsg notify driver"
 	default n
-	select RPMSG
+	select RPMSG_VIRTIO if !AW_RPMSG_VIRTIO
 	help
 	  Say Y here to enable rpmsg notify driver. It provides notification
 	  mechanism base on rpmsg.
 
 config AW_RPMSG_HEARTBEAT
-	tristate "Allwinnertech RPMSG hearbeat driver"
+	tristate "Allwinner RPMSG heartbeat driver"
 	default n
-	select RPMSG
+	select RPMSG_VIRTIO if !AW_RPMSG_VIRTIO
 	help
-	  Say y here to enable support for the rpmsg hearbeat.
+	  Say y here to enable support for the rpmsg heartbeat.
+
+config AW_RPMSG_VIRTIO
+	tristate "Allwinner Virtio RPMSG bus driver"
+	depends on HAS_DMA
+	select RPMSG
+	select RPMSG_NS
+	select VIRTIO
+
+config AW_RPMSG_PERF_TRACE
+	bool "Rpmsg performance trace"
+	default n
+	depends on AW_RPMSG_VIRTIO
+	select AW_AMP_TIMESTAMP
+	  help
+	  It will take up part of buffer to record timestamp when send and receive.
+
+if AW_RPMSG_PERF_TRACE
+config RPMSG_AMP_TS_DEV_ID
+	int "AMP timestamp device ID for rpmsg performance trace"
+	default 0
+
+config AW_RPMSG_PERF_DATA_AUTO_DUMP
+	bool "Dump rpmsg performance data automatically after each transmit"
+	default n
+
+endif
 endmenu

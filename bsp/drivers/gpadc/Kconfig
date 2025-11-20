@@ -8,10 +8,17 @@ menu "General Purpose ADC Drivers"
 
 config AW_GPADC
         tristate "GPADC Support for Allwinner SoCs"
+	select INPUT
 	select INPUT_EVDEV
         default n
         help
           If you say Y here, you'll get support for the GPADC
 	  (General Purpose ADC) on Allwinner SoCs.
 
+config AW_GPADC_DYNAMIC_DEBUG
+        bool "Enable gpadc dynamic debug"
+        depends on AW_GPADC
+        default y
+        help
+          Enable gpadc dynamic debug
 endmenu

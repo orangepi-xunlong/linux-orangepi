@@ -10,6 +10,20 @@ config SENSOR_NVP6158C
 	tristate "use nvp6158c driver"
 	default n
 
+menu "select nvp6158c mode"
+	depends on SENSOR_NVP6158C
+
+choice
+	prompt "select bt656 or bt1120"
+	default BT1120
+config BT1120
+	bool "use bt1120 fmt"
+config BT656
+	bool "use bt656 fmt"
+endchoice
+
+endmenu
+
 config SENSOR_GC02M1B
 	tristate "use gc02m1b driver"
 	default n
@@ -267,6 +281,10 @@ config SENSOR_RK628F
 
 config SENSOR_PTN
 	tristate "use ptn driver"
+	default n
+
+config SENSOR_GSV1127E
+	tristate "use gsv1127e driver"
 	default n
 
 endmenu

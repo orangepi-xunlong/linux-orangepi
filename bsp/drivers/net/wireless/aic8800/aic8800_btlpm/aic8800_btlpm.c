@@ -64,7 +64,7 @@
  * Defines
  */
 #define DRV_RELEASE_DATE "20220429"
-#define DRV_PATCH_LEVEL  "010"
+#define DRV_PATCH_LEVEL  "011"
 #define DRV_RELEASE_TAG  "aic-btlpm-" DRV_RELEASE_DATE "-" DRV_PATCH_LEVEL
 #define VERSION          "1.3.3"
 #define PROC_DIR         "bluetooth/sleep"
@@ -1006,17 +1006,16 @@ static int bluesleep_remove(struct platform_device *pdev)
 	/* assert bt wake */
 	gpio_set_value(bsi->ext_wake, bsi->ext_wake_assert);
 	if (test_bit(BT_PROTO, &flags)) {
-#ifndef BT_PAUSE
-		if (disable_irq_wake(bsi->host_wake_irq))
-			BT_ERR("Couldn't disable hostwake IRQ wakeup mode\n");
-#endif
 		free_irq(bsi->host_wake_irq, &bsi->pdev->dev);
 		del_timer(&rx_timer);
 		if (test_bit(BT_ASLEEP, &flags))
 			hsuart_power(1);
 	}
-	gpio_free(bsi->host_wake);
-	gpio_free(bsi->ext_wake);
+
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 19, 0)
+	devm_gpio_free(&pdev->dev, bsi->host_wake);
+	devm_gpio_free(&pdev->dev, bsi->ext_wake);
+#endif
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 14, 0)
 	wakeup_source_unregister(bsi->ws);

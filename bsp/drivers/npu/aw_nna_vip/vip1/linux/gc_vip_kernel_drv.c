@@ -166,6 +166,12 @@ MODULE_PARM_DESC(VIPSramBaseAddress, "the base address of VIP SRAM");
 #endif
 #endif
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION (3, 7, 0)
+#define gcdVM_FLAGS (VM_IO | VM_DONTCOPY | VM_DONTEXPAND | VM_DONTDUMP)
+#else
+#define gcdVM_FLAGS (VM_IO | VM_DONTCOPY | VM_DONTEXPAND | VM_RESERVED)
+#endif
+
 /* default disable internel clock only used for the SOC that power is always online */
 #define DEFAULT_DISABLE_INTERNEL_CLOCK          0
 
@@ -516,7 +522,12 @@ static int drv_mmap(struct file *file, struct vm_area_struct *vma)
     vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
     PRINTK_D("mmap none-cache....\n");
 #endif
-    vma->vm_flags |= (VM_IO | VM_DONTCOPY | VM_DONTEXPAND | VM_DONTDUMP);
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0)
+    vm_flags_set(vma, gcdVM_FLAGS);
+#else
+    vma->vm_flags |= gcdVM_FLAGS;
+#endif
 
     /* map kernel memory to user space.. */
     if (remap_pfn_range(vma, vma->vm_start, device->cpu_physical >> PAGE_SHIFT,
@@ -986,7 +997,12 @@ static vip_int32_t drv_prepare_device(
         kdriver->registered = 1;
 
         /* Create the graphics class. */
-        kdriver->class = class_create(THIS_MODULE, CLASS_NAME);
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 4, 0)
+	kdriver->class = class_create(CLASS_NAME);
+#else
+	kdriver->class = class_create(THIS_MODULE, CLASS_NAME);
+#endif
+
         if (IS_ERR(kdriver->class)) {
             PRINTK_E("vipcore, class_create failed\n");
             return -1;

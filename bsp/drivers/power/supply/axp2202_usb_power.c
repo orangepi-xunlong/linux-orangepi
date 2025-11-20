@@ -11,15 +11,6 @@ struct axp2202_usb_power {
 	struct power_supply       *usb_supply;
 	struct axp_config_info  dts_info;
 	struct delayed_work        usb_supply_mon;
-	struct delayed_work        usb_chg_state;
-	struct delayed_work        usb_det_mon;
-	struct extcon_dev         *edev;
-	struct axp_gpio_para axp_vbus_det;
-	struct axp_gpio_para usbid_drv;
-	int vbus_det_used;
-
-	bool battery_supply_exist;
-	atomic_t set_current_limit;
 };
 
 static enum power_supply_property axp2202_usb_props[] = {
@@ -30,12 +21,6 @@ static enum power_supply_property axp2202_usb_props[] = {
 	POWER_SUPPLY_PROP_ONLINE,
 	POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT,
 	POWER_SUPPLY_PROP_VOLTAGE_MIN_DESIGN,
-	POWER_SUPPLY_PROP_SCOPE,
-};
-
-static const unsigned int axp2202_usb_extcon_cable[] = {
-	EXTCON_JACK_HEADPHONE,
-	EXTCON_NONE,
 };
 
 ATOMIC_NOTIFIER_HEAD(usb_power_notifier_list);
@@ -69,11 +54,6 @@ static int axp2202_get_vbus_online(struct power_supply *ps,
 	unsigned int data;
 	int ret = 0;
 
-	if (usb_power->vbus_det_used) {
-		val->intval = gpio_get_value(usb_power->axp_vbus_det.gpio);
-		return ret;
-	}
-
 	ret = regmap_read(regmap, AXP2202_COMM_STAT0, &data);
 	if (ret < 0)
 		return ret;
@@ -93,11 +73,6 @@ static int axp2202_get_vbus_state(struct power_supply *ps,
 	struct regmap *regmap = usb_power->regmap;
 	unsigned int data;
 	int ret = 0;
-
-	if (usb_power->vbus_det_used) {
-		val->intval = gpio_get_value(usb_power->axp_vbus_det.gpio);
-		return ret;
-	}
 
 	ret = regmap_read(regmap, AXP2202_COMM_STAT0, &data);
 	if (ret < 0)
@@ -144,63 +119,6 @@ static int axp2202_get_vindpm(struct power_supply *ps,
 	return ret;
 }
 
-static int axp2202_get_usb_type(struct power_supply *ps,
-				   union power_supply_propval *val)
-{
-	struct axp2202_usb_power *usb_power = power_supply_get_drvdata(ps);
-	int ret = 0;
-
-	if (atomic_read(&usb_power->set_current_limit)) {
-		val->intval = POWER_SUPPLY_USB_TYPE_SDP;
-	} else {
-		val->intval = POWER_SUPPLY_USB_TYPE_DCP;
-	}
-
-	return ret;
-}
-
-static int axp2202_get_cc_status(struct power_supply *ps,
-				   union power_supply_propval *val)
-{
-	struct axp2202_usb_power *usb_power = power_supply_get_drvdata(ps);
-	struct axp_config_info *dinfo = &usb_power->dts_info;
-	struct regmap *regmap = usb_power->regmap;
-	unsigned int data;
-	int ret = 0;
-
-	if (!dinfo->pmu_usb_typec_used) {
-		val->intval = POWER_SUPPLY_SCOPE_UNKNOWN;
-		return ret;
-	}
-
-	ret = regmap_read(regmap, AXP2202_CC_STAT0, &data);
-	if (ret < 0)
-		return ret;
-
-	data &= 0x0f;
-
-	/* intval bit[1:0]: 0x0 - unknown, 0x1 - source, 0x2 - sink */
-	if (data == 5 || data == 6 || data == 9 || data == 12) {
-		val->intval = POWER_SUPPLY_SCOPE_SYSTEM;//source/host
-	} else if (data == 2 || data == 3 || data == 10 || data == 11) {
-		val->intval = POWER_SUPPLY_SCOPE_DEVICE;//sink/
-	} else {
-		val->intval = POWER_SUPPLY_SCOPE_UNKNOWN;//disable
-	}
-
-	ret = regmap_read(regmap, AXP2202_CC_STAT4, &data);
-	if (ret < 0)
-		return ret;
-
-	data &= BIT(6);
-
-	/* intval bit[2]: 0x0 - cc2, 0x1 - cc1 */
-	val->intval |= (data >> 4);
-
-	return ret;
-}
-
-
 /* read temperature */
 static int axp2202_get_ic_temp(struct power_supply *ps,
 			     union power_supply_propval *val)
@@ -245,7 +163,6 @@ static int axp2202_get_ic_temp(struct power_supply *ps,
 	return 0;
 }
 
-
 static int axp2202_set_iin_limit(struct regmap *regmap, int mA)
 {
 	unsigned int data;
@@ -285,41 +202,6 @@ static int axp2202_set_vindpm(struct regmap *regmap, int mV)
 	return 0;
 }
 
-static int axp2202_set_cc_status(struct power_supply *ps, int type)
-{
-	struct axp2202_usb_power *usb_power = power_supply_get_drvdata(ps);
-	struct axp_config_info *dinfo = &usb_power->dts_info;
-	struct regmap *regmap = usb_power->regmap;
-	unsigned int data = 0x03;
-	int ret = 0;
-
-	if (!dinfo->pmu_usb_typec_used) {
-		return ret;
-	}
-
-	switch (type) {
-	case POWER_SUPPLY_SCOPE_SYSTEM://source/host
-		regmap_update_bits(regmap, AXP2202_CC_MODE_CTRL, BIT(5), BIT(5));
-		regmap_update_bits(regmap, AXP2202_CC_MODE_CTRL, BIT(4), 0);
-		data = 0x02;
-		break;
-	case POWER_SUPPLY_SCOPE_DEVICE://sink/
-		regmap_update_bits(regmap, AXP2202_CC_MODE_CTRL, BIT(4), BIT(4));
-		regmap_update_bits(regmap, AXP2202_CC_MODE_CTRL, BIT(5), 0);
-		data = 0x01;
-		break;
-	case POWER_SUPPLY_SCOPE_UNKNOWN:
-		regmap_update_bits(regmap, AXP2202_CC_MODE_CTRL, BIT(4), BIT(4));
-		regmap_update_bits(regmap, AXP2202_CC_MODE_CTRL, BIT(5), 0);
-		break;
-	default:
-		break;
-	}
-
-	regmap_update_bits(regmap, AXP2202_CC_MODE_CTRL, GENMASK(1, 0), data);
-	return ret;
-}
-
 static int axp2202_usb_get_property(struct power_supply *psy,
 				       enum power_supply_property psp,
 				       union power_supply_propval *val)
@@ -345,12 +227,6 @@ static int axp2202_usb_get_property(struct power_supply *psy,
 	case POWER_SUPPLY_PROP_VOLTAGE_MIN_DESIGN:
 		ret = axp2202_get_vindpm(psy, val);
 		break;
-	case POWER_SUPPLY_PROP_USB_TYPE:
-		ret = axp2202_get_usb_type(psy, val);
-		break;
-	case POWER_SUPPLY_PROP_SCOPE:
-		ret = axp2202_get_cc_status(psy, val);
-		break;
 	case POWER_SUPPLY_PROP_TEMP:
 		ret = axp2202_get_ic_temp(psy, val);
 		if (ret < 0)
@@ -370,41 +246,16 @@ static int axp2202_usb_set_property(struct power_supply *psy,
 	struct axp2202_usb_power *usb_power = power_supply_get_drvdata(psy);
 
 	struct regmap *regmap = usb_power->regmap;
-	struct power_supply *ps = NULL;
-	union power_supply_propval temp;
-	unsigned int reg_val = 0;
-	int ret = 0, usb_cur;
+	int ret = 0;
 
 	switch (psp) {
 	case POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT:
-		usb_cur = val->intval;
-
-		regmap_read(usb_power->regmap, AXP2202_COMM_STAT0, &reg_val);
-		if ((usb_power->battery_supply_exist) && (!(reg_val & AXP2202_MASK_BAT_STAT)))
+		if (!val->intval)
 			break;
-
-		if (usb_cur < usb_power->dts_info.pmu_usbad_cur) {
-			atomic_set(&usb_power->set_current_limit, 1);
-		}
-
-		if (of_find_property(usb_power->dev->of_node, "det_acin_supply", NULL))
-			ps = devm_power_supply_get_by_phandle(usb_power->dev,
-								"det_acin_supply");
-		if (ps && (!IS_ERR(ps))) {
-			if (of_device_is_available(ps->of_node)) {
-				power_supply_get_property(ps, POWER_SUPPLY_PROP_ONLINE, &temp);
-				if (temp.intval) {
-					usb_cur = usb_power->dts_info.pmu_usbad_cur;
-				}
-			}
-		}
-		ret = axp2202_set_iin_limit(regmap, usb_cur);
+		ret = axp2202_set_iin_limit(regmap, val->intval);
 		break;
 	case POWER_SUPPLY_PROP_VOLTAGE_MIN_DESIGN:
 		ret = axp2202_set_vindpm(regmap, val->intval);
-		break;
-	case POWER_SUPPLY_PROP_SCOPE:
-		ret = axp2202_set_cc_status(psy, val->intval);
 		break;
 	default:
 		ret = -EINVAL;
@@ -423,9 +274,6 @@ static int axp2202_usb_power_property_is_writeable(struct power_supply *psy,
 	case POWER_SUPPLY_PROP_VOLTAGE_MIN_DESIGN:
 		ret = 0;
 		break;
-	case POWER_SUPPLY_PROP_SCOPE:
-		ret = 0;
-		break;
 	default:
 		ret = -EINVAL;
 	}
@@ -435,7 +283,7 @@ static int axp2202_usb_power_property_is_writeable(struct power_supply *psy,
 
 static const struct power_supply_desc axp2202_usb_desc = {
 	.name = "axp2202-usb",
-	.type = POWER_SUPPLY_TYPE_USB,
+	.type = POWER_SUPPLY_TYPE_UNKNOWN,
 	.get_property = axp2202_usb_get_property,
 	.properties = axp2202_usb_props,
 	.set_property = axp2202_usb_set_property,
@@ -446,24 +294,9 @@ static const struct power_supply_desc axp2202_usb_desc = {
 static irqreturn_t axp2202_irq_handler_usb_in(int irq, void *data)
 {
 	struct axp2202_usb_power *usb_power = data;
-	struct axp_config_info *axp_config = &usb_power->dts_info;
-	unsigned int reg_val;
 
 	atomic_notifier_call_chain(&usb_power_notifier_list, 1, NULL);
-	if (!usb_power->vbus_det_used) {
-		power_supply_changed(usb_power->usb_supply);
-		regmap_read(usb_power->regmap, AXP2202_COMM_STAT0, &reg_val);
-		if ((usb_power->battery_supply_exist) && (!(reg_val & AXP2202_MASK_BAT_STAT))) {
-			return IRQ_HANDLED;
-		} else {
-			if (!axp_config->pmu_bc12_en) {
-				axp2202_set_iin_limit(usb_power->regmap, axp_config->pmu_usbpc_cur);
-				atomic_set(&usb_power->set_current_limit, 0);
-				cancel_delayed_work_sync(&usb_power->usb_chg_state);
-				schedule_delayed_work(&usb_power->usb_chg_state, msecs_to_jiffies(5 * 1000));
-			}
-		}
-	}
+	power_supply_changed(usb_power->usb_supply);
 
 	return IRQ_HANDLED;
 }
@@ -473,57 +306,7 @@ static irqreturn_t axp2202_irq_handler_usb_out(int irq, void *data)
 	struct axp2202_usb_power *usb_power = data;
 
 	atomic_notifier_call_chain(&usb_power_notifier_list, 1, NULL);
-	if (!usb_power->vbus_det_used) {
-		power_supply_changed(usb_power->usb_supply);
-	}
-
-	return IRQ_HANDLED;
-}
-
-static irqreturn_t axp2202_irq_handler_typec_in(int irq, void *data)
-{
-	struct axp2202_usb_power *usb_power = data;
-	unsigned int reg_val;
-
-	regmap_read(usb_power->regmap, AXP2202_CC_STAT0, &reg_val);
-	atomic_notifier_call_chain(&usb_power_notifier_list, 0, NULL);
-
-	switch (reg_val & 0xf) {
-	case 0x07:
-		extcon_set_state_sync(usb_power->edev, EXTCON_JACK_HEADPHONE, true);
-		break;
-	case 0x5:
-	case 0x6:
-	case 0x9:
-	case 0xc:
-		if (usb_power->vbus_det_used && usb_power->usbid_drv.gpio)
-			gpio_direction_output(usb_power->usbid_drv.gpio, 0);
-		break;
-	default:
-		PMIC_INFO("No operation cc_status\n");
-	}
-
-	return IRQ_HANDLED;
-}
-
-static irqreturn_t axp2202_irq_handler_typec_out(int irq, void *data)
-{
-	struct axp2202_usb_power *usb_power = data;
-
-	atomic_notifier_call_chain(&usb_power_notifier_list, 0, NULL);
-	extcon_set_state_sync(usb_power->edev, EXTCON_JACK_HEADPHONE, false);
-	if (usb_power->vbus_det_used && usb_power->usbid_drv.gpio)
-		gpio_direction_output(usb_power->usbid_drv.gpio, 1);
-
-	return IRQ_HANDLED;
-}
-
-static irqreturn_t axp2202_acin_vbus_det_isr(int irq, void *data)
-{
-	struct axp2202_usb_power *usb_power = data;
-
-	cancel_delayed_work_sync(&usb_power->usb_det_mon);
-	schedule_delayed_work(&usb_power->usb_det_mon, 0);
+	power_supply_changed(usb_power->usb_supply);
 
 	return IRQ_HANDLED;
 }
@@ -531,8 +314,6 @@ static irqreturn_t axp2202_acin_vbus_det_isr(int irq, void *data)
 enum axp2202_usb_virq_index {
 	AXP2202_VIRQ_USB_IN,
 	AXP2202_VIRQ_USB_OUT,
-	AXP2202_VIRQ_TYPEC_IN,
-	AXP2202_VIRQ_TYPEC_OUT,
 
 	AXP2202_USB_VIRQ_MAX_VIRQ,
 };
@@ -540,8 +321,6 @@ enum axp2202_usb_virq_index {
 static struct axp_interrupts axp_usb_irq[] = {
 	[AXP2202_VIRQ_USB_IN] = { "vbus_insert", axp2202_irq_handler_usb_in },
 	[AXP2202_VIRQ_USB_OUT] = { "vbus_remove", axp2202_irq_handler_usb_out },
-	[AXP2202_VIRQ_TYPEC_IN] = { "type-c_insert", axp2202_irq_handler_typec_in },
-	[AXP2202_VIRQ_TYPEC_OUT] = { "type-c_remove", axp2202_irq_handler_typec_out },
 
 };
 
@@ -551,133 +330,6 @@ static void axp2202_usb_power_monitor(struct work_struct *work)
 		container_of(work, typeof(*usb_power), usb_supply_mon.work);
 
 	schedule_delayed_work(&usb_power->usb_supply_mon, msecs_to_jiffies(500));
-}
-
-static void axp2202_usb_set_current_fsm(struct work_struct *work)
-{
-	struct axp2202_usb_power *usb_power =
-		container_of(work, typeof(*usb_power), usb_chg_state.work);
-	struct axp_config_info *axp_config = &usb_power->dts_info;
-
-	if (atomic_read(&usb_power->set_current_limit)) {
-		PMIC_INFO("current limit setted: usb pc type\n");
-	} else {
-		axp2202_set_iin_limit(usb_power->regmap, axp_config->pmu_usbad_cur);
-		PMIC_INFO("current limit not set: usb adapter type\n");
-	}
-}
-
-static void axp2202_usb_det_monitor(struct work_struct *work)
-{
-	struct axp2202_usb_power *usb_power =
-		container_of(work, typeof(*usb_power), usb_det_mon.work);
-	struct axp_config_info *axp_config = &usb_power->dts_info;
-	int vbus_det_gpio_value;
-	unsigned int data;
-
-	if (!usb_power->vbus_det_used) {
-		PMIC_ERR("[usb_det] acin_usb_det not used\n");
-		return;
-	}
-
-	vbus_det_gpio_value = gpio_get_value(usb_power->axp_vbus_det.gpio);
-
-	PMIC_INFO("[usb_det] vbus_dev_flag = %d\n", vbus_det_gpio_value);
-	power_supply_changed(usb_power->usb_supply);
-	if (vbus_det_gpio_value) {
-		if (!axp_config->pmu_bc12_en) {
-			regmap_read(usb_power->regmap, AXP2202_COMM_STAT0, &data);
-			if ((usb_power->battery_supply_exist) && (!(data & AXP2202_MASK_BAT_STAT))) {
-				return;
-			} else {
-				axp2202_set_iin_limit(usb_power->regmap, axp_config->pmu_usbpc_cur);
-				atomic_set(&usb_power->set_current_limit, 0);
-				cancel_delayed_work_sync(&usb_power->usb_chg_state);
-				schedule_delayed_work(&usb_power->usb_chg_state, msecs_to_jiffies(5 * 1000));
-			}
-		}
-	} else {
-		regmap_update_bits(usb_power->regmap, AXP2202_CC_MODE_CTRL, GENMASK(1, 0), 0);
-		mdelay(50);
-		regmap_update_bits(usb_power->regmap, AXP2202_CC_MODE_CTRL, GENMASK(1, 0), 0x3);
-	}
-}
-
-static int axp2202_acin_vbus_det_init(struct axp2202_usb_power *usb_power)
-{
-	int ret = 0;
-	unsigned long irq_flags = 0;
-
-	usb_power->vbus_det_used = 0;
-	usb_power->axp_vbus_det.gpio = 0;
-	usb_power->axp_vbus_det.irq_num = 0;
-
-	usb_power->axp_vbus_det.gpio =
-		of_get_named_gpio(usb_power->dev->of_node,
-				"pmu_vbus_det_gpio", 0);
-	if (!gpio_is_valid(usb_power->axp_vbus_det.gpio)) {
-		PMIC_ERR("get axp_vbus_det_gpio is fail\n");
-		usb_power->axp_vbus_det.gpio = 0;
-		return -EPROBE_DEFER;
-	}
-
-	ret = of_get_named_gpio(usb_power->dev->of_node,
-				"pmu_acin_usbid_drv", 0);
-	if (ret < 0) {
-		PMIC_INFO("no pmu_usbid_drv_gpio\n");
-		usb_power->usbid_drv.gpio = 0;
-	} else {
-		usb_power->usbid_drv.gpio = ret;
-		if (!gpio_is_valid(usb_power->usbid_drv.gpio)) {
-			PMIC_ERR("get pmu_usbid_drv_gpio is fail\n");
-			usb_power->usbid_drv.gpio = 0;
-			return -EPROBE_DEFER;
-		}
-	}
-
-	/* set vbus_det input usbid output */
-	ret = gpio_request(
-			usb_power->axp_vbus_det.gpio,
-			"pmu_vbus_det_gpio");
-	if (ret != 0) {
-		PMIC_ERR("pmu_vbus_det_gpio gpio_request failed\n");
-		return -EINVAL;
-	}
-	gpio_direction_input(usb_power->axp_vbus_det.gpio);
-
-	if (usb_power->usbid_drv.gpio) {
-		ret = gpio_request(
-				usb_power->usbid_drv.gpio,
-				"pmu_acin_usbid_drv");
-		if (ret != 0) {
-			PMIC_ERR("pmu_usbid_drv gpio_request failed\n");
-			return -EINVAL;
-		}
-		gpio_direction_output(usb_power->usbid_drv.gpio, 1);
-	}
-
-	/* init delay work */
-	INIT_DELAYED_WORK(&usb_power->usb_det_mon, axp2202_usb_det_monitor);
-
-	/* irq config setting */
-	irq_flags = IRQF_TRIGGER_FALLING | IRQF_TRIGGER_RISING |
-			IRQF_ONESHOT | IRQF_NO_SUSPEND;
-	usb_power->axp_vbus_det.irq_num = gpio_to_irq(usb_power->axp_vbus_det.gpio);
-
-	usb_power->vbus_det_used = 1;
-	ret = devm_request_threaded_irq(usb_power->dev, usb_power->axp_vbus_det.irq_num, NULL, axp2202_acin_vbus_det_isr, irq_flags,
-				"pmu_vbus_det_gpio", usb_power);
-	if (IS_ERR_VALUE((unsigned long)ret)) {
-		cancel_delayed_work_sync(&usb_power->usb_det_mon);
-		PMIC_ERR("Requested pmu_vbus_det_gpio IRQ failed, err %d\n", ret);
-		usb_power->vbus_det_used = 0;
-		usb_power->axp_vbus_det.gpio = 0;
-		usb_power->axp_vbus_det.irq_num = 0;
-		return -EINVAL;
-	}
-	PMIC_DEV_DEBUG(usb_power->dev, "Requested pmu_vbus_det_gpio IRQ successed: %d\n", ret);
-
-	return 0;
 }
 
 static void axp2202_usb_power_init(struct axp2202_usb_power *usb_power)
@@ -703,31 +355,6 @@ static void axp2202_usb_power_init(struct axp2202_usb_power *usb_power)
 	data = (dinfo->pmu_boost_vol - 4550) / 64;
 	regmap_update_bits(regmap, AXP2202_BST_CFG0, GENMASK(7, 4), data << 4);
 	regmap_write(regmap, AXP2202_BST_CFG1, 0x03);
-
-	/* set type-c en/disable & mode */
-	if (dinfo->pmu_usb_typec_used) {
-		regmap_update_bits(regmap, AXP2202_CLK_EN, BIT(3), BIT(3));
-		regmap_update_bits(regmap, AXP2202_CC_GLB_CTRL, BIT(2), 0);
-		regmap_update_bits(regmap, AXP2202_CC_GLB_CTRL, BIT(5), BIT(5));
-		regmap_update_bits(regmap, AXP2202_CC_MODE_CTRL, BIT(1), BIT(1));
-		regmap_update_bits(regmap, AXP2202_CC_MODE_CTRL, BIT(0), BIT(0));
-	} else {
-		regmap_update_bits(regmap, AXP2202_CLK_EN, BIT(3), 0);
-		regmap_update_bits(regmap, AXP2202_CC_MODE_CTRL, BIT(1), 0);
-		regmap_update_bits(regmap, AXP2202_CC_MODE_CTRL, BIT(0), 0);
-	}
-}
-
-static void axp2202_extcon_state_init(struct axp2202_usb_power *usb_power)
-{
-	unsigned int reg_val;
-
-	regmap_read(usb_power->regmap, AXP2202_CC_STAT0, &reg_val);
-
-	if ((reg_val & 0xf) == 0x7)
-		extcon_set_state_sync(usb_power->edev, EXTCON_JACK_HEADPHONE, true);
-	else
-		extcon_set_state_sync(usb_power->edev, EXTCON_JACK_HEADPHONE, false);
 }
 
 static int axp2202_usb_dt_parse(struct device_node *node,
@@ -747,7 +374,6 @@ static int axp2202_usb_dt_parse(struct device_node *node,
 	AXP_OF_PROP_READ(pmu_cc_logic_en,                     1);
 	AXP_OF_PROP_READ(pmu_boost_en,                        0);
 	AXP_OF_PROP_READ(pmu_boost_vol,                    5126);
-	AXP_OF_PROP_READ(pmu_usb_typec_used,                  0);
 
 	axp_config->wakeup_usb_in =
 		of_property_read_bool(node, "wakeup_usb_in");
@@ -791,9 +417,8 @@ static int axp2202_usb_probe(struct platform_device *pdev)
 
 	struct axp2202_usb_power *usb_power;
 
-	struct axp20x_dev *axp_dev = dev_get_drvdata(pdev->dev.parent);
+	struct sunxi_power_dev *axp_dev = dev_get_drvdata(pdev->dev.parent);
 	struct power_supply_config psy_cfg = {};
-	struct device_node *np = NULL;
 
 	if (!axp_dev->irq) {
 		PMIC_ERR("can not register axp2202-usb without irq\n");
@@ -810,16 +435,6 @@ static int axp2202_usb_probe(struct platform_device *pdev)
 	usb_power->name = "axp2202_usb";
 	usb_power->dev = &pdev->dev;
 	usb_power->regmap = axp_dev->regmap;
-	usb_power->battery_supply_exist = false;
-
-	np = of_parse_phandle(usb_power->dev->of_node, "det_battery_supply", 0);
-	if (of_device_is_available(np)) {
-		usb_power->battery_supply_exist = true;
-		PMIC_INFO("battery device is get\n");
-	} else {
-		usb_power->battery_supply_exist = false;
-		PMIC_INFO("battery device is not get\n");
-	}
 
 	/* parse device tree and set register */
 	axp2202_usb_parse_device_tree(usb_power);
@@ -836,35 +451,7 @@ static int axp2202_usb_probe(struct platform_device *pdev)
 		return ret;
 	}
 
-	usb_power->edev = devm_extcon_dev_allocate(usb_power->dev, axp2202_usb_extcon_cable);
-	if (IS_ERR(usb_power->edev)) {
-		PMIC_DEV_ERR(usb_power->dev, "failed to allocate extcon device\n");
-		return -ENOMEM;
-	}
-
-	ret = devm_extcon_dev_register(usb_power->dev, usb_power->edev);
-	if (ret < 0) {
-		PMIC_DEV_ERR(usb_power->dev, "failed to register extcon device\n");
-		return ret;
-	}
-
-	axp2202_extcon_state_init(usb_power);
-
-	if (!usb_power->dts_info.pmu_bc12_en) {
-		INIT_DELAYED_WORK(&usb_power->usb_supply_mon, axp2202_usb_power_monitor);
-		INIT_DELAYED_WORK(&usb_power->usb_chg_state, axp2202_usb_set_current_fsm);
-	}
-
-	np = of_parse_phandle(usb_power->dev->of_node, "det_acin_supply", 0);
-	if (!of_device_is_available(np)) {
-		PMIC_INFO("axp2202-acin device is not configed, not use vbus-det\n");
-	} else {
-		ret = axp2202_acin_vbus_det_init(usb_power);
-		if (ret < 0) {
-			PMIC_ERR("failed to register axp2202-acin function\n");
-			return ret;
-		}
-	}
+	INIT_DELAYED_WORK(&usb_power->usb_supply_mon, axp2202_usb_power_monitor);
 
 	for (i = 0; i < ARRAY_SIZE(axp_usb_irq); i++) {
 		irq = platform_get_irq_byname(pdev, axp_usb_irq[i].name);
@@ -894,20 +481,14 @@ static int axp2202_usb_probe(struct platform_device *pdev)
 			axp_usb_irq[i].name, irq, ret);
 	}
 
-	if (!usb_power->dts_info.pmu_bc12_en) {
-		schedule_delayed_work(&usb_power->usb_supply_mon, msecs_to_jiffies(500));
-		schedule_delayed_work(&usb_power->usb_chg_state, msecs_to_jiffies(20 * 1000));
-	}
+	schedule_delayed_work(&usb_power->usb_supply_mon, msecs_to_jiffies(500));
 
 	platform_set_drvdata(pdev, usb_power);
 
 	return ret;
 
 cancel_work:
-	if (!usb_power->dts_info.pmu_bc12_en) {
-		cancel_delayed_work_sync(&usb_power->usb_supply_mon);
-		cancel_delayed_work_sync(&usb_power->usb_chg_state);
-	}
+	cancel_delayed_work_sync(&usb_power->usb_supply_mon);
 
 
 err:
@@ -920,12 +501,7 @@ static int axp2202_usb_remove(struct platform_device *pdev)
 {
 	struct axp2202_usb_power *usb_power = platform_get_drvdata(pdev);
 
-	if (!usb_power->dts_info.pmu_bc12_en) {
-		cancel_delayed_work_sync(&usb_power->usb_supply_mon);
-		cancel_delayed_work_sync(&usb_power->usb_chg_state);
-	}
-	if (usb_power->vbus_det_used)
-		cancel_delayed_work_sync(&usb_power->usb_det_mon);
+	cancel_delayed_work_sync(&usb_power->usb_supply_mon);
 
 	PMIC_DEV_DEBUG(&pdev->dev, "==============AXP2202 usb unegister==============\n");
 	if (usb_power->usb_supply)
@@ -954,20 +530,6 @@ static void axp2202_usb_virq_dts_set(struct axp2202_usb_power *usb_power, bool e
 	if (!dts_info->wakeup_usb_out)
 		axp2202_usb_irq_set(axp_usb_irq[AXP2202_VIRQ_USB_OUT].irq,
 				enable);
-
-	if (dts_info->pmu_usb_typec_used) {
-		if (!dts_info->wakeup_typec_in)
-			axp2202_usb_irq_set(axp_usb_irq[AXP2202_VIRQ_TYPEC_IN].irq,
-				enable);
-		if (!dts_info->wakeup_typec_out)
-			axp2202_usb_irq_set(axp_usb_irq[AXP2202_VIRQ_TYPEC_OUT].irq,
-					enable);
-	}
-
-	if (usb_power->vbus_det_used) {
-		axp2202_usb_irq_set(usb_power->axp_vbus_det.irq_num,
-				enable);
-	}
 }
 
 static void axp2202_usb_shutdown(struct platform_device *pdev)
@@ -975,13 +537,6 @@ static void axp2202_usb_shutdown(struct platform_device *pdev)
 	struct axp2202_usb_power *usb_power = platform_get_drvdata(pdev);
 
 	cancel_delayed_work_sync(&usb_power->usb_supply_mon);
-	cancel_delayed_work_sync(&usb_power->usb_chg_state);
-
-	if (usb_power->vbus_det_used) {
-		cancel_delayed_work_sync(&usb_power->usb_det_mon);
-		axp2202_usb_irq_set(usb_power->axp_vbus_det.irq_num,
-				false);
-	}
 }
 
 static int axp2202_usb_suspend(struct platform_device *p, pm_message_t state)
@@ -990,12 +545,7 @@ static int axp2202_usb_suspend(struct platform_device *p, pm_message_t state)
 
 	axp2202_usb_virq_dts_set(usb_power, false);
 
-	if (!usb_power->dts_info.pmu_bc12_en) {
-		cancel_delayed_work_sync(&usb_power->usb_supply_mon);
-		cancel_delayed_work_sync(&usb_power->usb_chg_state);
-	}
-	if (usb_power->vbus_det_used)
-		cancel_delayed_work_sync(&usb_power->usb_det_mon);
+	cancel_delayed_work_sync(&usb_power->usb_supply_mon);
 
 	return 0;
 }
@@ -1004,12 +554,7 @@ static int axp2202_usb_resume(struct platform_device *p)
 {
 	struct axp2202_usb_power *usb_power = platform_get_drvdata(p);
 
-	if (!usb_power->dts_info.pmu_bc12_en) {
-		schedule_delayed_work(&usb_power->usb_supply_mon, 0);
-		schedule_delayed_work(&usb_power->usb_chg_state, 0);
-	}
-	if (usb_power->vbus_det_used)
-		schedule_delayed_work(&usb_power->usb_det_mon, 0);
+	schedule_delayed_work(&usb_power->usb_supply_mon, 0);
 
 	axp2202_usb_virq_dts_set(usb_power, true);
 
@@ -1041,4 +586,4 @@ module_platform_driver(axp2202_usb_power_driver);
 MODULE_AUTHOR("wangxiaoliang <wangxiaoliang@x-powers.com>");
 MODULE_DESCRIPTION("axp2202 usb driver");
 MODULE_LICENSE("GPL");
-MODULE_VERSION("1.0.0");
+MODULE_VERSION("1.0.4");

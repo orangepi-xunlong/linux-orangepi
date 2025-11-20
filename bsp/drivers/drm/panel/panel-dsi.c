@@ -28,9 +28,8 @@
 #include <linux/of.h>
 #include <linux/slab.h>
 #include <video/mipi_display.h>
-#include <drm/drm_mipi_dsi.h>
 #include <drm/drm_crtc.h>
-#include "panels.h"
+#include "panel-dsi.h"
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0)
 #include <drm/display/drm_dsc_helper.h>
@@ -38,60 +37,6 @@
 #include <drm/drm_dsc.h>
 #endif
 
-struct panel_cmd_header {
-	u8 data_type;
-	u8 delay;
-	u8 payload_length;
-} __packed;
-
-struct panel_cmd_desc {
-	struct panel_cmd_header header;
-	u8 *payload;
-};
-
-struct panel_cmd_seq {
-	struct panel_cmd_desc *cmds;
-	unsigned int cmd_cnt;
-};
-
-
-struct gpio_timing {
-	u32 level;
-	u32 delay;
-};
-
-struct reset_sequence {
-	u32 items;
-	struct gpio_timing *timing;
-};
-
-struct panel_desc {
-	const struct display_timings *timings;
-	struct {
-		unsigned int width;
-		unsigned int height;
-	} size;
-
-	unsigned int reset_num;
-	 struct {
-		unsigned int power;
-		unsigned int enable;
-		unsigned int reset;
-	} delay;
-	struct reset_sequence rst_on_seq;
-	struct reset_sequence rst_off_seq;
-
-	struct panel_cmd_seq *init_seq;
-	struct panel_cmd_seq *exit_seq;
-	struct drm_dsc_config *dsc;
-};
-
-struct panel_desc_dsi {
-	struct panel_desc desc;
-	unsigned long flags;
-	enum mipi_dsi_pixel_format format;
-	unsigned int lanes;
-};
 /*
 static const struct drm_display_mode auo_b080uan01_mode = {
 	.clock = 154500,
@@ -120,10 +65,6 @@ static const struct panel_desc_dsi auo_b080uan01 = {
 	.lanes = 4,
 };
 */
-static inline struct panel_dsi *to_panel_dsi(struct drm_panel *panel)
-{
-	return container_of(panel, struct panel_dsi, panel);
-}
 
 static void panel_dsi_sleep(unsigned int msec)
 {
@@ -294,6 +235,20 @@ static int panel_dsi_get_timings(struct drm_panel *panel,
 	return dsi_panel->desc->timings->num_timings;
 }
 */
+
+void panel_dsi_esd_reset(struct panel_dsi *dsi_panel, unsigned int items)
+{
+	struct gpio_timing *timing;
+	int i;
+
+	if (dsi_panel->reset_gpio) {
+		timing = dsi_panel->desc->rst_off_seq.timing;
+		for (i = 0; i < items; i++) {
+			gpiod_set_value_cansleep(dsi_panel->reset_gpio, timing[i].level);
+			panel_dsi_sleep(timing[i].delay);
+		}
+	}
+}
 
 static int panel_dsi_disable(struct drm_panel *panel)
 {
@@ -896,7 +851,7 @@ static int panel_dsi_probe(struct mipi_dsi_device *dsi)
 	struct panel_dsi *dsi_panel;
 	struct device *dev = &dsi->dev, *panel_dev;
 	struct device_driver *panel_drv;
-	const struct panel_desc_dsi *desc;
+	struct panel_desc_dsi *desc;
 	struct panel_desc_dsi *d;
 	const struct of_device_id *id;
 	struct device_node *np = NULL;
@@ -905,6 +860,10 @@ static int panel_dsi_probe(struct mipi_dsi_device *dsi)
 	DRM_WARN("[DSI-PANEL] panel_dsi_probe start\n");
 	dsi_panel = devm_kzalloc(dev, sizeof(*dsi_panel), GFP_KERNEL);
 	if (!dsi_panel)
+		return -ENOMEM;
+
+	dsi_panel->funcs = devm_kzalloc(dev, sizeof(*dsi_panel->funcs), GFP_KERNEL);
+	if (!dsi_panel->funcs)
 		return -ENOMEM;
 
 	id = of_match_node(dsi_of_match, dsi->dev.of_node);
@@ -939,7 +898,15 @@ static int panel_dsi_probe(struct mipi_dsi_device *dsi)
 		}
 	}
 
-	desc = id->data ? id->data : d;
+	if (id->data) {
+		desc = devm_kzalloc(dev, sizeof(*desc), GFP_KERNEL);
+		if (!desc)
+			return -ENOMEM;
+		memcpy(desc, id->data, sizeof(struct panel_desc_dsi));
+	} else {
+		desc = d;
+	}
+
 	dsi_panel->dev = dev;
 	dsi_panel->desc = &desc->desc;
 	dsi_panel->dsi = dsi;
@@ -969,6 +936,7 @@ static int panel_dsi_probe(struct mipi_dsi_device *dsi)
 	if (ret)
 		return ret;
 	dsi_panel->panel.dev = dev;
+	dsi_panel->funcs->esd_reset = panel_dsi_esd_reset;
 
 	drm_panel_add(&dsi_panel->panel);
 
@@ -1058,6 +1026,6 @@ module_exit(panel_dsi_exit);
 //module_mipi_dsi_driver(panel_dsi_driver);
 
 MODULE_AUTHOR("xiaozhineng <xiaozhineng@allwinnertech.com>");
-MODULE_VERSION("1.0.0");
+MODULE_VERSION("1.0.4");
 MODULE_DESCRIPTION("dsi Panel Driver");
 MODULE_LICENSE("GPL");

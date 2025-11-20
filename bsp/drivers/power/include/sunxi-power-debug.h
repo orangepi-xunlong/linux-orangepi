@@ -16,5 +16,7 @@
 #define PMIC_DEV_INFO(dev, format, args...)	sunxi_info(dev, format, ##args)
 #define PMIC_DEV_DEBUG(dev, format, args...)	sunxi_debug(dev, format, ##args)
 
+#define PMIC_ERR_STD(error_id, format, args...)	sunxi_err_std(NULL, error_id, format, ##args)
+#define PMIC_DEV_ERR_STD(error_id, dev, format, args...)	sunxi_err_std(dev, error_id, format, ##args)
 
 #endif /*  _SUNXI_POWER_DEBUG_H_ */

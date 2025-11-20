@@ -68,6 +68,7 @@ obj-y += input/
 obj-y += ata/
 obj-y += smartcard/
 obj-y += wiegand/
+obj-y += dram_info/
 
 # Wireless
 obj-y += net/

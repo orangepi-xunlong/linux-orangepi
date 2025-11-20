@@ -141,10 +141,11 @@ long sunxi_actuator_ioctl(struct v4l2_subdev *sd,
 		    act_ctrl->func_tbl.actuator_move_pos(act_ctrl,
 							 ctrlstep->step,
 							 ctrlstep->dir);
-		ret = -EINVAL;
+		break;
 	}
 	default:
-		return -EINVAL;
+		ret = -EINVAL;
+		break;
 	}
 
 	mutex_unlock(act_ctrl->actuator_mutex);

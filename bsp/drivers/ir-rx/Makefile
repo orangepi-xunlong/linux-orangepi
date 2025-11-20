@@ -6,3 +6,4 @@
 ccflags-y += -I $(srctree)/drivers/media/rc
 obj-$(CONFIG_AW_IR_RX) += sunxi-ir-rx.o
 obj-$(CONFIG_AW_IR_GPIO_RX) += sunxi-gpio-ir-recv.o
+ccflags-$(CONFIG_AW_IRRX_DYNAMIC_DEBUG) += -DDYNAMIC_DEBUG_MODULE

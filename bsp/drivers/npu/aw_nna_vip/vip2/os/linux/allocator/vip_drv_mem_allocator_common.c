@@ -455,12 +455,13 @@ vip_status_e vipdrv_import_pfn_map(
     vipOnError(vipdrv_os_allocate_memory(page_count * sizeof(unsigned long), (void**)&pfns));
 
     for (i = 0; i < page_count; i++) {
-        spinlock_t *ptl;
         pgd_t *pgd;
         pud_t *pud;
         pmd_t *pmd;
-        pte_t *pte;
-
+#if (LINUX_VERSION_CODE < KERNEL_VERSION (6, 6, 0))
+		pte_t *pte;
+		spinlock_t *ptl;
+#endif
         pgd = pgd_offset(current->mm, memory);
         if (pgd_none(*pgd) || pgd_bad(*pgd)) {
             goto onError;
@@ -480,6 +481,7 @@ vip_status_e vipdrv_import_pfn_map(
             goto onError;
         }
 
+#if (LINUX_VERSION_CODE < KERNEL_VERSION (6, 6, 0))
         pte = pte_offset_map_lock(current->mm, pmd, memory, &ptl);
         if (!pte) {
             spin_unlock(ptl);
@@ -495,7 +497,7 @@ vip_status_e vipdrv_import_pfn_map(
         pages[i] = pfn_to_page(pfns[i]); /* get page */
 
         pte_unmap_unlock(pte, ptl);
-
+#endif
         /* Advance to next. */
         memory += PAGE_SIZE;
     }

@@ -46,11 +46,6 @@ void sunxi_bluetooth_set_power(bool on_off)
 
 	pdev = bluetooth_data->pdev;
 
-	if (bluetooth_data->always_on && !on_off) {
-		dev_warn(&pdev->dev, "bluetooth: always on, cannot be off\n");
-		return;
-	}
-
 	mutex_lock(&sunxi_bluetooth_mutex);
 	rfkill_poweren_set(WL_DEV_BLUETOOTH, on_off);
 	if (on_off != bluetooth_data->power_state) {
@@ -62,15 +57,6 @@ void sunxi_bluetooth_set_power(bool on_off)
 	mutex_unlock(&sunxi_bluetooth_mutex);
 }
 EXPORT_SYMBOL_GPL(sunxi_bluetooth_set_power);
-
-void sunxi_bluetooth_set_power_boot_state(void)
-{
-	if (!bluetooth_data)
-		return;
-
-	if (bluetooth_data->boot_on || bluetooth_data->always_on)
-		sunxi_bluetooth_set_power(1);
-}
 
 static int sunxi_bt_on(struct sunxi_bt_platdata *data, bool on_off)
 {
@@ -157,11 +143,6 @@ static int sunxi_bt_set_block(void *data, bool blocked)
 		return 0;
 	}
 
-	if (bluetooth_data->always_on && blocked) {
-		dev_warn(&pdev->dev, "bluetooth: always on, cannot be off\n");
-		return -1;
-	}
-
 	dev_info(&pdev->dev, "set block: %d\n", blocked);
 	rfkill_poweren_set(WL_DEV_BLUETOOTH, !blocked);
 	ret = sunxi_bt_on(platdata, !blocked);
@@ -213,14 +194,14 @@ static ssize_t state_store(struct device *dev,
 static DEVICE_ATTR(state, S_IRUGO | S_IWUSR,
 		state_show, state_store);
 
-static struct attribute *miscdev_attributes_wlan[] = {
+static struct attribute *miscdev_attributes_bluetooth[] = {
 	&dev_attr_state.attr,
 	NULL,
 };
 
 static struct attribute_group miscdev_attribute_group = {
 	.name  = "bluetooth",
-	.attrs = miscdev_attributes_wlan,
+	.attrs = miscdev_attributes_bluetooth,
 };
 
 int sunxi_bt_init(struct platform_device *pdev)
@@ -228,7 +209,11 @@ int sunxi_bt_init(struct platform_device *pdev)
 	struct device_node *np = of_find_matching_node(pdev->dev.of_node, sunxi_bt_ids);
 	struct device *dev = &pdev->dev;
 	struct sunxi_bt_platdata *data;
+#if (LINUX_VERSION_CODE <= KERNEL_VERSION(6, 2, 0))
 	enum of_gpio_flags config;
+#else
+	u32 config = 0;
+#endif
 	int ret = 0;
 	int count, i;
 
@@ -299,11 +284,20 @@ int sunxi_bt_init(struct platform_device *pdev)
 		}
 	}
 
+#if (LINUX_VERSION_CODE > KERNEL_VERSION(6, 2, 0))
+	data->gpio_bt_rst = of_get_named_gpio(np, "bt_rst_n", 0);
+#else
 	data->gpio_bt_rst = of_get_named_gpio_flags(np, "bt_rst_n", 0, &config);
+#endif
 	if (!gpio_is_valid(data->gpio_bt_rst)) {
 		dev_err(dev, "get gpio bt_rst failed\n");
 	} else {
+#if (LINUX_VERSION_CODE > KERNEL_VERSION(6, 2, 0))
+		of_property_read_u32_index(np, "bt_rst_n", 3, &config);
+		data->gpio_bt_rst_assert = (config == GPIO_ACTIVE_LOW) ? 0 : 1;
+#else
 		data->gpio_bt_rst_assert = (config == OF_GPIO_ACTIVE_LOW) ? 0 : 1;
+#endif
 		dev_info(dev, "bt_rst gpio=%d assert=%d\n", data->gpio_bt_rst, data->gpio_bt_rst_assert);
 
 		ret = devm_gpio_request(dev, data->gpio_bt_rst, "bt_rst");
@@ -320,10 +314,6 @@ int sunxi_bt_init(struct platform_device *pdev)
 			return ret;
 		}
 	}
-
-	data->boot_on = of_property_read_bool(np, "regulator-boot-on") ? 1 : 0;
-	data->always_on = of_property_read_bool(np, "regulator-always-on") ? 1 : 0;
-	dev_info(dev, "bluetooth power boot-on: %d, always-on: %d\n", data->boot_on, data->always_on);
 
 	data->rfkill = rfkill_alloc("sunxi-bt", dev, RFKILL_TYPE_BLUETOOTH,
 				&sunxi_bt_rfkill_ops, data);

@@ -32,6 +32,7 @@ static enum power_supply_property axp2602_bat_props[] = {
 	POWER_SUPPLY_PROP_VOLTAGE_NOW,
 	POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT,
 	POWER_SUPPLY_PROP_CHARGE_CONTROL_LIMIT,
+	POWER_SUPPLY_PROP_CHARGE_COUNTER,
 	POWER_SUPPLY_PROP_CYCLE_COUNT,
 	POWER_SUPPLY_PROP_CHARGE_FULL,
 	/* static */
@@ -352,6 +353,24 @@ static int axp2602_get_charger_count(struct power_supply *ps,
 	data -= reduce_cap;
 
 	val->intval = data;
+
+	return 0;
+}
+
+static int axp2602_get_charger_count_current(struct power_supply *ps,
+		union power_supply_propval *val)
+{
+	struct axp2602_bat_power *bat_power = power_supply_get_drvdata(ps);
+	struct bmu_ext_config_info *bmp_ext_config = &bat_power->dts_info;
+	unsigned int data[2];
+
+	data[0] = bmp_ext_config->pmu_battery_cap * 1000;
+
+	axp2602_get_soc(ps, val);
+	data[1] = val->intval;
+	data[1] = data[1] * data[0] / 100;
+
+	val->intval = data[1];
 
 	return 0;
 }
@@ -707,6 +726,9 @@ static int axp2602_bat_get_property(struct power_supply *psy,
 	case POWER_SUPPLY_PROP_MANUFACTURER:
 		val->strval = AXP2602_MANUFACTURER;
 		break;
+	case POWER_SUPPLY_PROP_CHARGE_COUNTER:
+		ret = axp2602_get_charger_count_current(psy, val);
+		break;
 	case POWER_SUPPLY_PROP_ENERGY_FULL_DESIGN:
 		val->intval = bat_power->dts_info.pmu_battery_cap * 1000;
 		break;
@@ -814,7 +836,7 @@ static int axp2602_init_chip(struct axp2602_bat_power *bat_power)
 	if (bat_power == NULL)
 		return -ENODEV;
 
-	/* init bat cycle*/
+	/* init bat cycle */
 	bmp_ext_config->pmu_bat_cycle_cap_reduce *= bmp_ext_config->pmu_battery_cap * 10 / bmp_ext_config->pmu_bat_cycle_life;
 
 	/* default sets */
@@ -1114,7 +1136,7 @@ static int axp2602_battery_probe(struct platform_device *pdev)
 
 	struct axp2602_bat_power *bat_power;
 	struct power_supply_config psy_cfg = {};
-	struct bmu_ext_dev *axp_dev = dev_get_drvdata(pdev->dev.parent);
+	struct sunxi_power_dev *axp_dev = dev_get_drvdata(pdev->dev.parent);
 	struct device_node *node = pdev->dev.of_node;
 	struct device_node *np = NULL;
 
@@ -1128,8 +1150,7 @@ static int axp2602_battery_probe(struct platform_device *pdev)
 	bat_power = devm_kzalloc(&pdev->dev, sizeof(*bat_power), GFP_KERNEL);
 	if (bat_power == NULL) {
 		PMIC_ERR("axp2602_bat_power alloc failed\n");
-		ret = -ENOMEM;
-		goto err;
+		return -ENOMEM;
 	}
 
 	bat_power->name = "axp2602_battery";
@@ -1138,13 +1159,6 @@ static int axp2602_battery_probe(struct platform_device *pdev)
 
 	/* for device tree parse */
 	axp2602_bat_parse_device_tree(bat_power);
-
-	bat_power->writebase = ioremap(AXP2602_FLAGE_REG, 4);
-	if (!bat_power->writebase) {
-		PMIC_DEV_ERR(bat_power->dev, "unable to ioremap flag regs!\n");
-		ret = -ENXIO;
-		goto err;
-	}
 
 	if (of_find_property(bat_power->dev->of_node, "det_qc_supply", NULL)) {
 		np = of_parse_phandle(bat_power->dev->of_node, "det_qc_supply", 0);
@@ -1181,6 +1195,13 @@ static int axp2602_battery_probe(struct platform_device *pdev)
 		}
 	}
 
+	bat_power->writebase = ioremap(AXP2602_FLAGE_REG, 4);
+	if (!bat_power->writebase) {
+		PMIC_DEV_ERR(bat_power->dev, "unable to ioremap flag regs!\n");
+		ret = -ENXIO;
+		goto err;
+	}
+
 	ret = axp2602_init_chip(bat_power);
 	if (ret < 0) {
 		PMIC_DEV_ERR(bat_power->dev, "axp2602 init chip fail!\n");
@@ -1197,10 +1218,10 @@ static int axp2602_battery_probe(struct platform_device *pdev)
 	if (IS_ERR(bat_power->bat_supply)) {
 		PMIC_ERR("axp2602 failed to register bat power\n");
 		ret = PTR_ERR(bat_power->bat_supply);
-		return ret;
+		goto err;
 	}
 
-	bmu_ext_register_cooler(bat_power->bat_supply);
+	sunxi_power_register_cooler(bat_power->bat_supply);
 
 	if (axp_dev->irq) {
 		for (i = 0; i < ARRAY_SIZE(axp_bat_irq); i++) {
@@ -1211,7 +1232,8 @@ static int axp2602_battery_probe(struct platform_device *pdev)
 			irq = regmap_irq_get_virq(axp_dev->regmap_irqc, irq);
 			if (irq < 0) {
 				PMIC_DEV_ERR(&pdev->dev, "can not get irq\n");
-				return irq;
+				ret = irq;
+				goto err;
 			}
 			/* we use this variable to suspend irq */
 			axp_bat_irq[i].irq = irq;
@@ -1223,7 +1245,7 @@ static int axp2602_battery_probe(struct platform_device *pdev)
 			if (ret < 0) {
 				PMIC_DEV_ERR(&pdev->dev, "failed to request %s IRQ %d: %d\n",
 					axp_bat_irq[i].name, irq, ret);
-				return ret;
+				goto err;
 			} else {
 				ret = 0;
 			}
@@ -1247,7 +1269,7 @@ static int axp2602_battery_probe(struct platform_device *pdev)
 
 	reg = readl(bat_power->writebase);
 	if (ret < 0)
-		return ret;
+		goto err;
 
 	reg &= ~(0x100);
 	writel(reg, bat_power->writebase);
@@ -1263,6 +1285,9 @@ static int axp2602_battery_probe(struct platform_device *pdev)
 	return ret;
 
 err:
+	if (bat_power->writebase)
+		iounmap(bat_power->writebase);
+
 	PMIC_ERR("%s,probe fail, ret = %d\n", __func__, ret);
 
 	return ret;
@@ -1275,7 +1300,7 @@ static int axp2602_battery_remove(struct platform_device *pdev)
 	PMIC_DEV_DEBUG(&pdev->dev, "==============AXP2602 unegister==============\n");
 	if (bat_power->bat_supply) {
 		power_supply_unregister(bat_power->bat_supply);
-		bmu_ext_unregister_cooler(bat_power->bat_supply);
+		sunxi_power_unregister_cooler(bat_power->bat_supply);
 	}
 	PMIC_DEV_DEBUG(&pdev->dev, "axp2602 teardown battery dev\n");
 
@@ -1384,4 +1409,4 @@ module_platform_driver(axp2602_bat_power_driver);
 MODULE_AUTHOR("wangxiaoliang <wangxiaoliang@x-powers.com>");
 MODULE_DESCRIPTION("axp2602 battery driver");
 MODULE_LICENSE("GPL");
-MODULE_VERSION("1.0.0");
+MODULE_VERSION("1.0.2");

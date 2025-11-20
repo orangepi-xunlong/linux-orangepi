@@ -314,11 +314,13 @@ typedef struct sunxi_udc {
 	u32				stopped; /* controller stop work */
 	int				irq_no;	/* usb irq no */
 
-	struct work_struct		vbus_det_work;
-	struct work_struct		set_cur_vol_work;
+	struct delayed_work		vbus_det_work;
+	struct delayed_work		set_cur_vol_work;
 
 	struct wakeup_source		*ws;
 	struct regulator		*udc_regulator; /* usbc regulator:vcc-USB */
+
+	struct extcon_dev *edev;
 } sunxi_udc_t;
 
 enum sunxi_udc_cmd_e {

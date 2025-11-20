@@ -1,6 +1,6 @@
 #define RWNX_VERS_REV    "241c091M (master)"
 #define DRV_RELEASE_DATE "20250410"
-#define DRV_PATCH_LEVEL  "008"
+#define DRV_PATCH_LEVEL  "011"
 #define RWNX_VERS_MOD    DRV_RELEASE_DATE "-" DRV_PATCH_LEVEL "-6.4.3.0"
 #define RWNX_VERS_BANNER "rwnx " RWNX_VERS_MOD " - - " RWNX_VERS_REV
 

@@ -703,7 +703,7 @@ static int axp22x_bat_power_dt_parse(struct axp22x_bat_power *bat_power)
 
 static int axp22x_bat_power_probe(struct platform_device *pdev)
 {
-	struct axp20x_dev *axp_dev = dev_get_drvdata(pdev->dev.parent);
+	struct sunxi_power_dev *axp_dev = dev_get_drvdata(pdev->dev.parent);
 	struct power_supply_config psy_cfg = {};
 	struct device_node *node = pdev->dev.of_node;
 	struct axp22x_bat_power *bat_power;

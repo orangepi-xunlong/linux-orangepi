@@ -60,11 +60,6 @@ void sunxi_wlan_set_power(bool on_off)
 
 	pdev = wlan_data->pdev;
 
-	if (wlan_data->always_on && !on_off) {
-		dev_warn(&pdev->dev, "wlan: always on, cannot be off\n");
-		return;
-	}
-
 	mutex_lock(&sunxi_wlan_mutex);
 	rfkill_poweren_set(WL_DEV_WIFI, on_off);
 	if (on_off != wlan_data->power_state) {
@@ -78,15 +73,6 @@ void sunxi_wlan_set_power(bool on_off)
 	mutex_unlock(&sunxi_wlan_mutex);
 }
 EXPORT_SYMBOL_GPL(sunxi_wlan_set_power);
-
-void sunxi_wlan_set_power_boot_state(void)
-{
-	if (!wlan_data)
-		return;
-
-	if (wlan_data->boot_on || wlan_data->always_on)
-		sunxi_wlan_set_power(1);
-}
 
 int sunxi_wlan_get_bus_index(void)
 {
@@ -235,9 +221,6 @@ static ssize_t power_state_store(struct device *dev,
 	return count;
 }
 
-static DEVICE_ATTR(power_state, S_IRUGO | S_IWUSR,
-		power_state_show, power_state_store);
-
 static ssize_t scan_device_store(struct device *dev,
 	struct device_attribute *attr, const char *buf, size_t count)
 {
@@ -263,25 +246,6 @@ static ssize_t scan_device_store(struct device *dev,
 	return count;
 }
 
-static DEVICE_ATTR(scan_device, S_IRUGO | S_IWUSR,
-		NULL, scan_device_store);
-
-static struct attribute *misc_attributes[] = {
-	&dev_attr_power_state.attr,
-	&dev_attr_scan_device.attr,
-	NULL,
-};
-
-static struct attribute_group misc_attribute_group = {
-	.name  = "rf-ctrl",
-	.attrs = misc_attributes,
-};
-
-static struct miscdevice sunxi_wlan_dev = {
-	.minor = MISC_DYNAMIC_MINOR,
-	.name  = "sunxi-wlan",
-};
-
 static DEVICE_ATTR(state, S_IRUGO | S_IWUSR,
 		power_state_show, power_state_store);
 
@@ -304,7 +268,11 @@ int sunxi_wlan_init(struct platform_device *pdev)
 	struct device_node *np = of_find_matching_node(pdev->dev.of_node, sunxi_wlan_ids);
 	struct device *dev = &pdev->dev;
 	struct sunxi_wlan_platdata *data;
+#if (LINUX_VERSION_CODE <= KERNEL_VERSION(6, 2, 0))
 	enum of_gpio_flags config;
+#else
+	u32 config = 0;
+#endif
 	u32 val;
 	int ret = 0;
 	int count, i;
@@ -394,11 +362,20 @@ int sunxi_wlan_init(struct platform_device *pdev)
 		}
 	}
 
+#if (LINUX_VERSION_CODE > KERNEL_VERSION(6, 2, 0))
+	data->gpio_wlan_regon = of_get_named_gpio(np, "wlan_regon", 0);
+#else
 	data->gpio_wlan_regon = of_get_named_gpio_flags(np, "wlan_regon", 0, &config);
+#endif
 	if (!gpio_is_valid(data->gpio_wlan_regon)) {
 		dev_err(dev, "get gpio wlan_regon failed\n");
 	} else {
+#if (LINUX_VERSION_CODE > KERNEL_VERSION(6, 2, 0))
+		of_property_read_u32_index(np, "wlan_regon", 3, &config);
+		data->gpio_wlan_regon_assert = (config == GPIO_ACTIVE_LOW) ? 0 : 1;
+#else
 		data->gpio_wlan_regon_assert = (config == OF_GPIO_ACTIVE_LOW) ? 0 : 1;
+#endif
 		dev_info(dev, "wlan_regon gpio=%d assert=%d\n", data->gpio_wlan_regon, data->gpio_wlan_regon_assert);
 
 		ret = devm_gpio_request(dev, data->gpio_wlan_regon,
@@ -417,11 +394,20 @@ int sunxi_wlan_init(struct platform_device *pdev)
 		}
 	}
 
+#if (LINUX_VERSION_CODE > KERNEL_VERSION(6, 2, 0))
+	data->gpio_wlan_hostwake = of_get_named_gpio(np, "wlan_hostwake", 0);
+#else
 	data->gpio_wlan_hostwake = of_get_named_gpio_flags(np, "wlan_hostwake", 0, &config);
+#endif
 	if (!gpio_is_valid(data->gpio_wlan_hostwake)) {
 		dev_err(dev, "get gpio wlan_hostwake failed\n");
 	} else {
+#if (LINUX_VERSION_CODE > KERNEL_VERSION(6, 2, 0))
+		of_property_read_u32_index(np, "wlan_hostwake", 3, &config);
+		data->gpio_wlan_hostwake_assert = (config == GPIO_ACTIVE_LOW) ? 0 : 1;
+#else
 		data->gpio_wlan_hostwake_assert = (config == OF_GPIO_ACTIVE_LOW) ? 0 : 1;
+#endif
 		dev_info(dev, "wlan_hostwake gpio=%d assert=%d\n", data->gpio_wlan_hostwake, data->gpio_wlan_hostwake_assert);
 
 		ret = devm_gpio_request(dev, data->gpio_wlan_hostwake,
@@ -453,22 +439,6 @@ int sunxi_wlan_init(struct platform_device *pdev)
 		}
 	}
 
-	data->boot_on = of_property_read_bool(np, "regulator-boot-on") ? 1 : 0;
-	data->always_on = of_property_read_bool(np, "regulator-always-on") ? 1 : 0;
-	dev_info(dev, "wlan power boot-on: %d, always-on: %d\n", data->boot_on, data->always_on);
-
-	ret = misc_register(&sunxi_wlan_dev);
-	if (ret) {
-		dev_err(dev, "sunxi-wlan register driver as misc device error!\n");
-		return ret;
-	}
-	ret = sysfs_create_group(&sunxi_wlan_dev.this_device->kobj,
-			&misc_attribute_group);
-	if (ret) {
-		dev_err(dev, "sunxi-wlan register sysfs create group failed!\n");
-		return ret;
-	}
-
 	ret = sysfs_create_group(&sunxi_rfkill_miscdev.this_device->kobj,
 			&miscdev_attribute_group);
 	if (ret) {
@@ -492,11 +462,6 @@ int sunxi_wlan_deinit(struct platform_device *pdev)
 	sysfs_remove_group(&(sunxi_rfkill_miscdev.this_device->kobj),
 			&miscdev_attribute_group);
 
-	sysfs_remove_group(&(sunxi_wlan_dev.this_device->kobj),
-			&misc_attribute_group);
-
-	misc_deregister(&sunxi_wlan_dev);
-
 	if (data->power_state)
 		sunxi_wlan_set_power(0);
 
@@ -516,6 +481,5 @@ static const struct of_device_id sunxi_wlan_ids[] = {
 };
 
 MODULE_AUTHOR("Allwinnertech");
-MODULE_VERSION("1.1.5");
 MODULE_DESCRIPTION("sunxi wlan driver");
 MODULE_LICENSE("GPL");

@@ -37,6 +37,29 @@ static struct de_version_smbl de201 = {
 	.smbls = de201_smbls,
 };
 
+static struct de_smbl_dsc de350_smbls[] = {
+	{
+		.id = 0,
+		.support_csc = false,
+		.reg_offset = SMBL_OFST_V35X,
+		.width_max = 2560,
+		.height_max = 2048,
+	},
+	{
+		.id = 1,
+		.support_csc = false,
+		.reg_offset = SMBL_OFST_V35X,
+		.width_max = 2048,
+		.height_max = 2048,
+	},
+};
+
+static struct de_version_smbl de350 = {
+	.version = 0x350,
+	.smbl_cnt = ARRAY_SIZE(de350_smbls),
+	.smbls = de350_smbls,
+};
+
 static struct de_smbl_dsc de352_smbls[] = {
 	{
 		.id = 0,
@@ -77,7 +100,7 @@ static struct de_version_smbl de355 = {
 };
 
 static struct de_version_smbl *de_version[] = {
-	&de201, &de352, &de355
+	&de201, &de350, &de352, &de355
 };
 
 const struct de_smbl_dsc *get_smbl_dsc(struct module_create_info *info)

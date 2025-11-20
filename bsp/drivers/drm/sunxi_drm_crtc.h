@@ -80,6 +80,12 @@ int sunxi_drm_crtc_get_hw_id(struct drm_crtc *crtc);
 unsigned int sunxi_drm_crtc_get_clk_freq(struct drm_crtc *crtc);
 void sunxi_plane_print_state(struct drm_printer *p,
 				   const struct drm_plane_state *state, bool state_only);
+int sunxi_drm_crtc_get_offline_mode_info(struct drm_crtc *crtc,
+		void **vir_addr, unsigned long *buff_size);
+int sunxi_drm_crtc_offline_mode_pre_init(struct drm_crtc *crtc,
+		unsigned int width, unsigned int height);
+enum de_offline_mode_status sunxi_de_query_clear_offline_mode_status(struct sunxi_de_out *hwde,
+		enum de_offline_mode_status status);
 
 int sunxi_fbdev_plane_update(struct fbdev_config *config);
 
@@ -91,5 +97,6 @@ int sunxi_drm_crtc_get_backlight(struct sunxi_drm_crtc *scrtc);
 void sunxi_drm_crtc_set_backlight_value(struct sunxi_drm_crtc *scrtc, int backlight);
 
 int sunxi_drm_crtc_pq_proc(struct drm_device *dev, int disp, enum sunxi_pq_type, void *data);
+void sunxi_drm_sup_wb_clone(struct drm_device *drm, struct drm_encoder *enc);
 
 #endif

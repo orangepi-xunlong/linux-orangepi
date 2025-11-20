@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: GPL-2.0-only
+#
+# dram_info drivers configuration
+#
+
+menu "Dram_info Drivers"
+	depends on AW_BSP
+
+config SUNXI_DRAM_INFO
+	tristate "dram_info Support for Allwinner SoCs"
+	depends on AW_BSP
+	default n
+	help
+	  This enables support for Dram_info Allwinner SoCs.
+
+endmenu

@@ -1230,8 +1230,8 @@ int nvp6158_set_portmode(const unsigned char chip, const unsigned char portsel, 
 		gpio_i2c_write(chipaddr, 0xC5, 0xFE);
 		gpio_i2c_write(chipaddr, 0xC8, 0x88);
 		gpio_i2c_write(chipaddr, 0xC9, 0x88);
-		gpio_i2c_write(chipaddr, 0xCD, 0x48);
-		gpio_i2c_write(chipaddr, 0xCE, 0x48);
+		gpio_i2c_write(chipaddr, 0xCD, 0x53); /* change 0x48 to 0x53 */
+		gpio_i2c_write(chipaddr, 0xCE, 0x53); /* change 0x48 to 0x53 */
 		gpio_i2c_write(chipaddr, 0xCA, 0x66);
 #endif
 		break;

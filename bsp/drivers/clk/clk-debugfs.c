@@ -51,7 +51,7 @@ static int sunxi_rst_get_names(void)
 	if (testclk_priv.rst_count <= 0)
 		return -ENODATA;
 
-	testclk_priv.reset_name = kzalloc(testclk_priv.rst_count, GFP_KERNEL);
+	testclk_priv.reset_name = kzalloc(testclk_priv.rst_count * sizeof(char *), GFP_KERNEL);
 	if (!testclk_priv.reset_name)
 		return -ENOMEM;
 
@@ -69,6 +69,11 @@ static int sunxi_rst_get_names(void)
 	for (i = 0; i < testclk_priv.rst_count; i++) {
 		strcat(testclk_priv.info, testclk_priv.reset_name[i]);
 		strcat(testclk_priv.info, " ");
+	}
+
+	if (testclk_priv.reset_name) {
+		kfree(testclk_priv.reset_name);
+		testclk_priv.reset_name = NULL;
 	}
 
 	return 0;
@@ -128,7 +133,7 @@ static void clktest_process(void)
 				strcpy(testclk_priv.info, "Error");
 				return;
 			}
-		} else if (command > 9) {
+		} else if (command > 20) {
 			if (!testclk_priv.reset_dev) {
 				sunxi_err(NULL, "not support rst test, please check if SUNXXIWXX_TEST_CCU is enabled\n");
 				return;
@@ -302,30 +307,32 @@ static void clktest_process(void)
 		case 21: /* assert */
 		{
 			ret = reset_control_assert(reset);
-			if (ret) {
+			if (!ret)
+				strcpy(testclk_priv.info, "assert");
+			else
 				sunxi_err(NULL, "assert rst failed!\n");
-				return;
-			}
-			strcpy(testclk_priv.info, "assert");
+
 			break;
 		}
 		case 22: /* deassert */
 		{
 			ret = reset_control_deassert(reset);
-			if (ret) {
+			if (!ret)
+				strcpy(testclk_priv.info, "deassert");
+			else
 				sunxi_err(NULL, "deassert rst failed!\n");
-				return;
-			}
+
 			strcpy(testclk_priv.info, "deassert");
 			break;
 		}
 		case 23: /* reset */
 		{
 			ret = reset_control_reset(reset);
-			if (ret) {
+			if (!ret)
+				strcpy(testclk_priv.info, "reset");
+			else
 				sunxi_err(NULL, "reset rst failed!\n");
-				return;
-			}
+
 			strcpy(testclk_priv.info, "reset");
 			break;
 		}
@@ -647,5 +654,5 @@ Fail:
 late_initcall(debugfs_test_init);
 MODULE_DESCRIPTION("Allwinner clk debug driver");
 MODULE_LICENSE("GPL v2");
-MODULE_VERSION("1.0.5");
+MODULE_VERSION("1.0.6");
 MODULE_AUTHOR("rengaomin<rengaomin@allwinnertech.com>");

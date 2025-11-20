@@ -41,6 +41,7 @@ static struct attribute attr_version = {
 	.mode = S_IRUGO,
 };
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 6, 0)
 static struct attribute *sysfs_attrs[] = {
 	&attr_debug,
 	&attr_arch,
@@ -48,6 +49,7 @@ static struct attribute *sysfs_attrs[] = {
 	&attr_version,
 	NULL,
 };
+#endif
 
 struct aw_spinand_attr {
 	struct attribute *attr;
@@ -82,7 +84,9 @@ static const struct sysfs_ops sysfs_ops = {
 
 static struct kobj_type sysfs_type = {
 	.sysfs_ops = &sysfs_ops,
-	.default_attrs = sysfs_attrs,
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 6, 0)
+    .default_attrs = sysfs_attrs,
+#endif
 };
 
 static struct kobject aw_spinand_debug_kobj;

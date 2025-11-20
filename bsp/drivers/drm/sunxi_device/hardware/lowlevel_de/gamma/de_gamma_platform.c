@@ -40,6 +40,35 @@ static struct de_version_gamma de210 = {
 	.gammas = de210_gammas,
 };
 
+static struct de_gamma_dsc de350_gammas[] = {
+	{
+		.id = 0,
+		.gamma_lut_len = 1024,
+		.cm_bit_width = 10,
+		.support_ctc = false,
+		.support_cm = true,
+		.support_demo_skin = false,
+		.type = DEVICE_GAMMA,
+		.reg_offset = DISP_GAMMA_OFFSET,
+	},
+	{
+		.id = 1,
+		.gamma_lut_len = 1024,
+		.cm_bit_width = 10,
+		.support_ctc = false,
+		.support_cm = true,
+		.support_demo_skin = false,
+		.type = DEVICE_GAMMA,
+		.reg_offset = DISP_GAMMA_OFFSET,
+	},
+};
+
+static struct de_version_gamma de350 = {
+	.version = 0x350,
+	.gamma_cnt = ARRAY_SIZE(de350_gammas),
+	.gammas = de350_gammas,
+};
+
 static struct de_gamma_dsc de352_gammas[] = {
 	{
 		.id = 0,
@@ -119,7 +148,7 @@ static struct de_version_gamma de355 = {
 };
 
 static struct de_version_gamma *de_version[] = {
-	&de210, &de352, &de355
+	&de210, &de350, &de352, &de355
 };
 
 const struct de_gamma_dsc *get_gamma_dsc(struct module_create_info *info)

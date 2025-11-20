@@ -49,6 +49,7 @@ struct clk_sdm_info {
 	int sdm_factor;
 	int freq_mode;
 	int sdm_freq;
+	int sdm_direction;
 };
 
 #define _SUNXI_CCU_SDM_COMPLETE(_table, _enable,	\
@@ -76,19 +77,19 @@ struct clk_sdm_info {
 		.tuning_reg	= _reg,		\
 	}
 
-#define _SUNXI_CCU_SDM_PATTERN1_INFO(_enable, _reg, _enable_1, _reg_1)		\
+#define _SUNXI_CCU_SDM_INFO_PATTERN1(_reg, _reg_enable, _reg_1, _reg_1_enable)		\
 	{						\
-		.enable		= _enable,			\
-		.tuning_reg	= _reg,		\
-		.pattern1_enable	= _enable_1,		\
-		.pattern1_reg	= _reg_1,			\
+		.tuning_enable	= _reg_enable,		\
+		.tuning_reg	= _reg,			\
+		.pattern1_enable	= _reg_1_enable,		\
+		.pattern1_reg	= _reg_1,		\
 	}
 
 #define DTS_SDM_OFF	0
 #define DTS_SDM_ON	1
 
 void ccu_common_set_sdm_value(struct ccu_common *common, struct ccu_sdm_internal *sdm, u32 sdmval);
-u32 ccu_get_sdmval(unsigned long rate, struct ccu_common *common, u32 m, u32 n);
+u32 ccu_get_sdmval(unsigned long rate, struct ccu_common *common, u32 n);
 int sunxi_parse_sdm_info(struct device_node *node);
 struct clk_sdm_info *sunxi_clk_get_sdm_info(const char *clk_name);
 bool ccu_sdm_helper_is_enabled(struct ccu_common *common,

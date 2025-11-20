@@ -11,6 +11,8 @@
  */
 
 /* #define DEBUG */
+#define SUNXI_MODNAME "mdio"
+#include <sunxi-log.h>
 #include <linux/delay.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
@@ -50,7 +52,7 @@
 #define SUNXI_MDIO_RESET		0x4
 #define SUNXI_MDIO_RESET_OFFSET		2
 
-#define SUNXI_MDIO_WR_TIMEOUT		10  /* ms */
+#define SUNXI_MDIO_WR_TIMEOUT		10000 /* us */
 
 struct mii_reg_dump {
 	u32 addr;
@@ -145,18 +147,14 @@ static int sunxi_parse_write_str(char *str, u16 *addr,
  * Read 0 indicate finish in read or write operation
  * Read 1 indicate busy
  * */
-static void sunxi_mdio_busy_wait(struct sunxi_mdio *chip)
+static int sunxi_mdio_busy_wait(struct sunxi_mdio *chip)
 {
-	unsigned long timeout = jiffies + msecs_to_jiffies(SUNXI_MDIO_WR_TIMEOUT);
 	u32 reg;
 
-	do {
-		reg = readl(chip->base + SUNXI_MDIO_CONFIG);
+	if (readl_poll_timeout(chip->base + SUNXI_MDIO_CONFIG, reg, !(reg & SUNXI_MDIO_BUSY), 100, SUNXI_MDIO_WR_TIMEOUT))
+		return -EBUSY;
 
-		if ((reg & SUNXI_MDIO_BUSY) != 1)
-			break;
-
-	} while (time_before(jiffies, timeout));
+	return 0;
 }
 
 /**
@@ -173,6 +171,7 @@ static int sunxi_mdio_read(struct mii_bus *bus, int phyaddr, int phyreg)
 {
 	unsigned int value = 0;
 	struct sunxi_mdio *chip = bus->priv;
+	int ret;
 
 	/* Mask the MDC_DIV_RATIO */
 	value |= ((SUNXI_MDIO_MDC_DIV & SUNXI_MDIO_MDC_DIV_RATIO_M) << SUNXI_MDIO_MDC_DIV_RATIO_M_BIT);
@@ -182,7 +181,11 @@ static int sunxi_mdio_read(struct mii_bus *bus, int phyaddr, int phyreg)
 
 	writel(value, chip->base + SUNXI_MDIO_CONFIG);
 
-	sunxi_mdio_busy_wait(chip);
+	ret = sunxi_mdio_busy_wait(chip);
+	if (ret) {
+		sunxi_err(chip->dev, "mdio read busy %#x\n", readl(chip->base + SUNXI_MDIO_CONFIG));
+		return ret;
+	}
 
 	return (int)readl(chip->base + SUNXI_MDIO_DATA);
 }
@@ -202,6 +205,7 @@ static int sunxi_mdio_write(struct mii_bus *bus, int phyaddr, int phyreg, unsign
 {
 	unsigned int value;
 	struct sunxi_mdio *chip = bus->priv;
+	int ret;
 
 	value = ((SUNXI_MDIO_MDC_DIV_RATIO_M << SUNXI_MDIO_MDC_DIV_RATIO_M_BIT) & readl(chip->base+ SUNXI_MDIO_CONFIG)) |
 		 (SUNXI_MDIO_MDC_DIV << SUNXI_MDIO_MDC_DIV_RATIO_M_BIT);
@@ -209,13 +213,21 @@ static int sunxi_mdio_write(struct mii_bus *bus, int phyaddr, int phyreg, unsign
 		  ((phyreg << SUNXI_MDIO_PHY_REG_OFFSET) & (SUNXI_MDIO_PHY_REG))) |
 		  SUNXI_MDIO_WRITE | SUNXI_MDIO_BUSY;
 
-	sunxi_mdio_busy_wait(chip);
+	ret = sunxi_mdio_busy_wait(chip);
+	if (ret) {
+		sunxi_err(chip->dev, "mdio write wait busy %#x\n", readl(chip->base + SUNXI_MDIO_CONFIG));
+		return ret;
+	}
 
 	/* Set the MII address register to write */
 	writel(data, chip->base + SUNXI_MDIO_DATA);
 	writel(value, chip->base + SUNXI_MDIO_CONFIG);
 
-	sunxi_mdio_busy_wait(chip);
+	ret = sunxi_mdio_busy_wait(chip);
+	if (ret) {
+		sunxi_err(chip->dev, "mdio write busy %#x\n", readl(chip->base + SUNXI_MDIO_CONFIG));
+		return ret;
+	}
 
 	return 0;
 }
@@ -333,15 +345,15 @@ static int sunxi_mdio_probe(struct platform_device *pdev)
 	int addr;
 #endif
 
-	dev_dbg(dev, "%s() BEGIN\n", __func__);
+	sunxi_debug(dev, "%s() BEGIN\n", __func__);
 
 	chip = devm_kzalloc(dev, sizeof(*chip), GFP_KERNEL);
 	if (!chip)
 		return -ENOMEM;
 
-	bus = mdiobus_alloc_size(sizeof(*bus));
+	bus = devm_mdiobus_alloc(dev);
 	if (!bus) {
-		dev_err(dev, "Error: alloc mii bus failed\n");
+		sunxi_err(dev, "Alloc mii bus failed\n");
 		return -ENOMEM;
 	}
 
@@ -360,7 +372,11 @@ static int sunxi_mdio_probe(struct platform_device *pdev)
 		goto iomap_err;
 	}
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 9, 0)
 	ret = of_mdiobus_register(bus, np);
+#else
+	ret = devm_of_mdiobus_register(dev, bus, np);
+#endif
 	if (ret < 0)
 		goto mdio_register_err;
 
@@ -373,19 +389,18 @@ static int sunxi_mdio_probe(struct platform_device *pdev)
 	for (addr = 0; addr < PHY_MAX_ADDR; addr++) {
 		phy = mdiobus_get_phy(bus, addr);
 		if (phy)
-			dev_info(dev, "PHY ID: 0x%08x, ADDR: 0x%x, DEVICE: %s, DRIVER: %s\n",
+			sunxi_info(dev, "PHY ID: 0x%08x, ADDR: 0x%x, DEVICE: %s, DRIVER: %s\n",
 				 phy->phy_id, addr, phydev_name(phy),
 				 phy->drv ? phy->drv->name : "Generic PHY");
 	}
 #endif
 
-	dev_dbg(dev, "%s() SUCCESS\n", __func__);
+	sunxi_debug(dev, "%s() SUCCESS\n", __func__);
 	return 0;
 
 mdio_register_err:
 	iounmap(chip->base);
 iomap_err:
-	mdiobus_free(bus);
 	return ret;
 }
 
@@ -396,9 +411,10 @@ static int sunxi_mdio_remove(struct platform_device *pdev)
 	struct sunxi_mdio *chip = bus->priv;
 
 	sunxi_mdio_sysfs_destroy(dev);
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 9, 0)
 	mdiobus_unregister(bus);
+#endif
 	iounmap(chip->base);
-	mdiobus_free(bus);
 
 	return 0;
 }
@@ -433,4 +449,4 @@ module_exit(sunxi_mdio_exit);
 MODULE_DESCRIPTION("Allwinner GMAC MDIO interface driver");
 MODULE_AUTHOR("xuminghui <xuminghui@allwinnertech.com>");
 MODULE_LICENSE("GPL");
-MODULE_VERSION("1.0.1");
+MODULE_VERSION("1.0.4");

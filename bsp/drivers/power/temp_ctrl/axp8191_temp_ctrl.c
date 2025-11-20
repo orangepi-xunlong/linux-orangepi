@@ -169,7 +169,7 @@ static int axp8191_temp_ctrl_probe(struct platform_device *pdev)
 	int i = 0, irq;
 
 	struct axp8191_temp_ctrl *temp_ctrl;
-	struct axp20x_dev *axp_dev = dev_get_drvdata(pdev->dev.parent);
+	struct sunxi_power_dev *axp_dev = dev_get_drvdata(pdev->dev.parent);
 	struct device_node *node = pdev->dev.of_node;
 
 	if (!of_device_is_available(node)) {

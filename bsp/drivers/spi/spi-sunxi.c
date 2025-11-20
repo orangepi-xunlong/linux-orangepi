@@ -44,6 +44,7 @@
 #include <linux/dma-mapping.h>
 //#include <sunxi-clk.h>
 #include <linux/regulator/consumer.h>
+#include <linux/of.h>
 #include "spi-sunxi.h"
 #include "spi-slave-protocol.h"
 

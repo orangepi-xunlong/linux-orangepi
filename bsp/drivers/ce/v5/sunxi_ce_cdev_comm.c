@@ -369,6 +369,7 @@ static int aes_crypto_start(crypto_aes_req_ctx_t *req, u8 *src_buffer,
 out:
 	ss_irq_disable(channel_id);
 	ce_task_destroy(task);
+	ce_reset();
 
 	/* key */
 	if (req->key_length) {

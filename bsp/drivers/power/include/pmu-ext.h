@@ -78,20 +78,6 @@ enum {
 	AXP1530_LDO2,  /* RTCLDO1 */
 	AXP1530_EXT_REG_ID_MAX,
 };
-/*
- * struct tcs4838 - state holder for the tcs4838 driver
- *
- * Device data may be used to access the tcs4838 chip
- */
-struct pmu_ext_dev {
-	struct device 				*dev;
-	struct regmap				*regmap;
-	long		 				variant;
-	int 						nr_cells;
-	struct mfd_cell				*cells;
-	const struct regmap_config	*regmap_cfg;
-	void (*dts_parse)(struct pmu_ext_dev *);
-};
 
 enum {
 	TCS4838_DCDC0 = 0,
@@ -116,8 +102,8 @@ enum {
 	OCP2131_REG_ID_MAX,
 };
 
-int pmu_ext_match_device(struct pmu_ext_dev *ext);
-int pmu_ext_device_init(struct pmu_ext_dev *ext);
-int pmu_ext_device_exit(struct pmu_ext_dev *ext);
+int pmu_ext_match_device(struct sunxi_power_dev *ext);
+int pmu_ext_device_init(struct sunxi_power_dev *ext);
+int pmu_ext_device_exit(struct sunxi_power_dev *ext);
 
 #endif /*  __LINUX_MFD_TCS4838_H */

@@ -65,4 +65,12 @@ config AW_REMOTEPROC_E907_BOOT
 	help
 	  Say y here to support boot Allwinner SOC processors e907 via
 	  remote processor framework.
+
+config AW_REMOTEPROC_ARM_BOOT
+	tristate "Allwinner remoteproc arm boot"
+	depends on AW_REMOTEPROC
+	default n
+	help
+	  Say y here to support Allwinner SOC processors arm via
+	  remote processor framework.
 endmenu

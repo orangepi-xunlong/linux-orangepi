@@ -230,6 +230,7 @@ int platform_fb_memory_alloc(struct fb_hw_info *hw_info, void **vir_addr, unsign
 	u64 addr;
 	int size;
 	void *tmp;
+	bool delay_umap = false;
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0)
 	int ret;
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 17, 0)
@@ -282,11 +283,39 @@ int platform_fb_memory_alloc(struct fb_hw_info *hw_info, void **vir_addr, unsign
 		tmp = fb_map_kernel_cache(hw_info->create_info.logo_offset, size);
 		if (tmp) {
 			memcpy(*vir_addr, tmp, size);
-			Fb_unmap_kernel(tmp);
+			delay_umap = true;
 		} else {
 			DRM_ERROR("fb_map_kernel/vmap failed, skip logo copy!\n");
 		}
 	}
+
+	/* fill a buf in ping-pong buf for offline mode */
+	if (hw_info->create_info.logo_offset && w == hw_info->create_info.width
+			&& hw_info->create_info.offline_vaddr) {
+		int i;
+		char *fb = tmp;
+		char *vaddr = hw_info->create_info.offline_vaddr;
+
+		if (fmt == ARGB8888) {
+			for (i = 0; i < hw_info->create_info.width * hw_info->create_info.height; ++i) {
+				*(vaddr++) = *(fb++);
+				*(vaddr++) = *(fb++);
+				*(vaddr++) = *(fb++);
+				fb++;
+			}
+		} else if (fmt == RGB888) {
+			for (i = 0; i < hw_info->create_info.width * hw_info->create_info.height; ++i) {
+				*(vaddr++) = *(fb++);
+				*(vaddr++) = *(fb++);
+				*(vaddr++) = *(fb++);
+			}
+		} else {
+			DRM_ERROR("offline mode: maybe not support boot logo fmt!\n");
+		}
+	}
+
+	if (delay_umap)
+		Fb_unmap_kernel(tmp);
 	return 0;
 }
 

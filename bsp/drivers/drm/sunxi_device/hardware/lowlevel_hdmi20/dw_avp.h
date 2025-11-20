@@ -162,6 +162,11 @@ int dw_avp_set_mute(u8 enable);
  */
 int dw_avp_config_scramble(void);
 /**
+ * @desc: dw avp check
+ * @return: 0: check done or not issue
+ */
+int dw_avp_check(void);
+/**
  * @desc: dw avp config flow
  * @return: 0 - success
  *         -1 - failed

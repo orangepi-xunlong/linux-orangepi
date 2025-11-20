@@ -1889,7 +1889,7 @@ static int axp2202_battery_probe(struct platform_device *pdev)
 
 	struct axp2202_bat_power *bat_power;
 	struct power_supply_config psy_cfg = {};
-	struct axp20x_dev *axp_dev = dev_get_drvdata(pdev->dev.parent);
+	struct sunxi_power_dev *axp_dev = dev_get_drvdata(pdev->dev.parent);
 	struct device_node *node = pdev->dev.of_node;
 	union power_supply_propval val;
 
@@ -1948,7 +1948,7 @@ static int axp2202_battery_probe(struct platform_device *pdev)
 		return ret;
 	}
 
-	axp20x_register_cooler(bat_power->bat_supply);
+	sunxi_power_register_cooler(bat_power->bat_supply);
 
 	for (i = 0; i < ARRAY_SIZE(axp_bat_irq); i++) {
 		irq = platform_get_irq_byname(pdev, axp_bat_irq[i].name);
@@ -2013,7 +2013,7 @@ static int axp2202_battery_remove(struct platform_device *pdev)
 	PMIC_DEV_DEBUG(&pdev->dev, "==============AXP2202 unegister==============\n");
 	if (bat_power->bat_supply) {
 		power_supply_unregister(bat_power->bat_supply);
-		axp20x_unregister_cooler(bat_power->bat_supply);
+		sunxi_power_unregister_cooler(bat_power->bat_supply);
 	}
 	PMIC_DEV_DEBUG(&pdev->dev, "axp2202 teardown battery dev\n");
 

@@ -28,23 +28,31 @@
 #include <linux/uaccess.h>
 #include <linux/jiffies.h>
 #include <linux/of.h>
+#include <linux/atomic.h>
+#include <linux/semaphore.h>
 #include <uapi/linux/rpmsg.h>
+#include <linux/aw_rpmsg.h>
 
 #include "rpmsg_internal.h"
 #include "rpmsg_master.h"
 
-#define SUNXI_RPMSG_CTRL_VERSION "1.0.0"
+#define SUNXI_RPMSG_CTRL_VERSION "1.0.9"
 
 #define WAIT_TIMEOUT	(msecs_to_jiffies(500))
 
-static dev_t rpmsg_major;
-#if IS_ENABLED(CONFIG_AW_KERNEL_ORIGIN)
-struct class *aw_rpmsg_class;
-EXPORT_SYMBOL(aw_rpmsg_class);
+#ifdef CONFIG_AW_RPMSG_CLASS
+
+#if IS_ENABLED(CONFIG_RPMSG_CHAR)
+#define AW_RPMSG_CLASS_NAME "aw_rpmsg"
+#else
+#define AW_RPMSG_CLASS_NAME "rpmsg"
 #endif
 
-static DEFINE_MUTEX(g_list_lock);
-static LIST_HEAD(g_rpmsg_ctrldev_list);
+struct class *g_aw_rpmsg_class;
+EXPORT_SYMBOL(g_aw_rpmsg_class);
+#endif
+
+static dev_t rpmsg_major;
 
 /* record all rpmsg_ctrl device id */
 static DEFINE_IDA(rpmsg_ctrl_ida);
@@ -53,6 +61,7 @@ static DEFINE_IDA(rpmsg_ept_ida);
 /* record all rpmsg_ctrl device devt */
 static DEFINE_IDA(rpmsg_minor_ida);
 
+#define dev_to_ctrldev(dev) container_of(dev, struct rpmsg_ctrldev, dev)
 #define cdev_to_ctrldev(i_cdev) container_of(i_cdev, struct rpmsg_ctrldev, cdev)
 
 struct rpmsg_ept_notify {
@@ -73,16 +82,28 @@ struct rpmsg_ept_notify {
  */
 struct rpmsg_ctrldev {
 	struct rpmsg_device *rpdev;
+	atomic_long_t rpdev_refcnt;
+	struct semaphore sem;
 	struct device dev;
 	struct cdev cdev;
-	struct list_head list;
-	u32    alive:1;
 
 	struct mutex lock;
 	struct list_head epts;
 	struct list_head wait;
 
 	struct rpmsg_ept_notify ctrl_notify;
+};
+
+struct rpmsg_ctrldev_file_priv {
+	struct rpmsg_ctrldev *ctrldev;
+	struct mutex epts_lock;
+	struct list_head alloc_epts;
+	bool epts_auto_release;
+};
+
+struct rpmsg_ept_mgr_node {
+	struct list_head list;
+	struct rpmsg_ept_info info;
 };
 
 dev_t rpmsg_ctrldev_get_devt(void)
@@ -100,22 +121,6 @@ void rpmsg_ctrldev_put_devt(dev_t devt)
 	ida_simple_remove(&rpmsg_minor_ida, MINOR(devt));
 }
 EXPORT_SYMBOL(rpmsg_ctrldev_put_devt);
-
-static struct rpmsg_ctrldev *rpmsg_ctrldev_get_ctrl(int id)
-{
-	struct rpmsg_ctrldev *pos, *tmp;
-
-	mutex_lock(&g_list_lock);
-	list_for_each_entry_safe(pos, tmp, &g_rpmsg_ctrldev_list, list) {
-		if (id == pos->dev.id) {
-			mutex_unlock(&g_list_lock);
-			return pos;
-		}
-	}
-	mutex_unlock(&g_list_lock);
-
-	return NULL;
-}
 
 static void rpmsg_print_ack_str(struct device *dev, uint32_t ack)
 {
@@ -135,6 +140,23 @@ static void rpmsg_print_ack_str(struct device *dev, uint32_t ack)
 	case RPMSG_ACK_NOENT:
 		dev_err(dev, "Remote is full\r\n");
 		break;
+	}
+}
+
+static int rpmsg_ctrldev_get_rpdev(struct rpmsg_ctrldev *ctrldev)
+{
+	if (atomic_long_inc_not_zero(&ctrldev->rpdev_refcnt))
+		return 0;
+
+	return -1;
+}
+
+static void rpmsg_ctrldev_put_rpdev(struct rpmsg_ctrldev *ctrldev)
+{
+	if (atomic_long_dec_and_test(&ctrldev->rpdev_refcnt)) {
+		ctrldev->rpdev = NULL;
+		smp_mb();
+		up(&ctrldev->sem);
 	}
 }
 
@@ -197,48 +219,30 @@ static void rpmsg_ctrldev_epts_add(struct rpmsg_ctrldev *ctrldev,
 	mutex_unlock(&ctrldev->lock);
 }
 
+static void rpmsg_ctrldev_epts_del_without_lock(struct rpmsg_ctrldev *ctrldev,
+				struct rpmsg_ept_notify *notify)
+{
+	if (!list_empty(&notify->list))
+		list_del_init(&notify->list);
+}
+
 static void rpmsg_ctrldev_epts_del(struct rpmsg_ctrldev *ctrldev,
 				struct rpmsg_ept_notify *notify)
 {
 	mutex_lock(&ctrldev->lock);
-	if (!list_empty(&notify->list))
-		list_del_init(&notify->list);
+	rpmsg_ctrldev_epts_del_without_lock(ctrldev, notify);
 	mutex_unlock(&ctrldev->lock);
 }
 
-/*
- *	rpmsg_ctrldev_notify will call by rpmsg_client.c
- *	to free ept instance.
- */
-int rpmsg_ctrldev_notify(int ctrl_id, int id)
+int rpmsg_ctrldev_release_id(int ctrl_id, int id)
 {
-	struct rpmsg_ctrldev *ctrldev;
-	struct rpmsg_ept_notify *notify;
-
-	ctrldev = rpmsg_ctrldev_get_ctrl(ctrl_id);
-	if (!ctrldev) {
-		pr_err("/dev/rpmsg_ctrl%d dev not exits \n", ctrl_id);
-		return -ENOENT;
-	}
-
-	notify = rpmsg_ctrldev_epts_find(ctrldev, id);
-	if (!notify) {
-		dev_err(&ctrldev->dev, "/dev/rpmsg%d dev not exits \n", id);
-		return -ENOENT;
-	}
-
-	rpmsg_ctrldev_epts_del(ctrldev, notify);
-
-	devm_kfree(&notify->ctrl->dev, notify);
-
 	ida_simple_remove(&rpmsg_ept_ida, id);
-
 	return 0;
 }
-EXPORT_SYMBOL(rpmsg_ctrldev_notify);
+EXPORT_SYMBOL(rpmsg_ctrldev_release_id);
 
 /* tell remote to free (rpmsg%d, id) ept */
-static int rpmsg_eptdev_release(struct rpmsg_ctrldev *ctrldev, int id)
+static int rpmsg_ctrldev_release_eptdev(struct rpmsg_ctrldev *ctrldev, int id)
 {
 	int ret;
 	struct rpmsg_ctrl_msg msg;
@@ -254,6 +258,12 @@ static int rpmsg_eptdev_release(struct rpmsg_ctrldev *ctrldev, int id)
 		return -ENODEV;
 	}
 
+	if (rpmsg_ctrldev_get_rpdev(ctrldev)) {
+		dev_warn(&ctrldev->dev, "rpdev has been removed, skip notify\n");
+		ret = 0;
+		goto out;
+	}
+
 	reinit_completion(&notify->complete);
 	/* add to notify chain */
 	rpmsg_ctrldev_notify_add(ctrldev, notify);
@@ -261,8 +271,11 @@ static int rpmsg_eptdev_release(struct rpmsg_ctrldev *ctrldev, int id)
 	strncpy(msg.name, notify->name, 32);
 	/* tell remote close this endpoint */
 	ret = rpmsg_send(ctrldev->rpdev->ept, &msg, sizeof(msg));
-	if (ret)
-		goto out;
+	rpmsg_ctrldev_put_rpdev(ctrldev);
+	if (ret) {
+		rpmsg_ctrldev_notify_del(ctrldev, notify);
+		return ret;
+	}
 
 	/* wait endpoint notify */
 	ret = wait_for_completion_timeout(&notify->complete, WAIT_TIMEOUT);
@@ -283,18 +296,29 @@ static int rpmsg_eptdev_release(struct rpmsg_ctrldev *ctrldev, int id)
 
 out:
 	rpmsg_ctrldev_notify_del(ctrldev, notify);
+
+	rpmsg_ctrldev_epts_del(ctrldev, notify);
+	devm_kfree(&notify->ctrl->dev, notify);
+
 	return ret;
 }
 
-static int rpmsg_eptdev_create(struct rpmsg_ctrldev *ctrldev, const char *name, int id)
+static int rpmsg_ctrldev_create_eptdev(struct rpmsg_ctrldev *ctrldev, const char *name, int id)
 {
 	int ret;
 	struct rpmsg_ctrl_msg msg;
 	struct rpmsg_ept_notify *notify = NULL;
 
+	if (rpmsg_ctrldev_get_rpdev(ctrldev)) {
+		dev_warn(&ctrldev->dev, "rpdev has been removed, can not create\n");
+		return -ENODEV;
+	}
+
 	notify = devm_kzalloc(&ctrldev->dev, sizeof(*notify), GFP_KERNEL);
-	if (!notify)
+	if (!notify) {
+		rpmsg_ctrldev_put_rpdev(ctrldev);
 		return -ENOMEM;
+	}
 
 	notify->ctrl = ctrldev;
 	notify->id = id;
@@ -312,6 +336,7 @@ static int rpmsg_eptdev_create(struct rpmsg_ctrldev *ctrldev, const char *name, 
 
 	/* tell remote to create a new endpoint */
 	ret = rpmsg_send(ctrldev->rpdev->ept, &msg, sizeof(msg));
+	rpmsg_ctrldev_put_rpdev(ctrldev);
 	if (ret) {
 		dev_err(&ctrldev->dev, "send data failed\n");
 		ret = -EFAULT;
@@ -348,11 +373,16 @@ del_notify:
 	return ret;
 }
 
-static int rpmsg_eptdev_clear(struct rpmsg_ctrldev *ctrldev, const char *name)
+static int rpmsg_ctrldev_clear_eptdev(struct rpmsg_ctrldev *ctrldev, const char *name)
 {
 	int ret;
 	struct rpmsg_ctrl_msg msg;
-	struct rpmsg_ept_notify *notify;
+	struct rpmsg_ept_notify *notify, *pos, *tmp;
+
+	if (rpmsg_ctrldev_get_rpdev(ctrldev)) {
+		dev_warn(&ctrldev->dev, "rpdev has been removed, can not clear\n");
+		return -ENODEV;
+	}
 
 	msg.ctrl_id = ctrldev->dev.id;
 	msg.id = 0;
@@ -366,8 +396,11 @@ static int rpmsg_eptdev_clear(struct rpmsg_ctrldev *ctrldev, const char *name)
 	reinit_completion(&notify->complete);
 	/* tell remote close this endpoint */
 	ret = rpmsg_trysend(ctrldev->rpdev->ept, &msg, sizeof(msg));
-	if (ret)
-		goto out;
+	rpmsg_ctrldev_put_rpdev(ctrldev);
+	if (ret) {
+		rpmsg_ctrldev_notify_del(ctrldev, notify);
+		return ret;
+	}
 
 	/* wait endpoint notify */
 	ret = wait_for_completion_timeout(&notify->complete, WAIT_TIMEOUT);
@@ -386,14 +419,27 @@ static int rpmsg_eptdev_clear(struct rpmsg_ctrldev *ctrldev, const char *name)
 	ret = 0;
 out:
 	rpmsg_ctrldev_notify_del(ctrldev, notify);
+
+	mutex_lock(&ctrldev->lock);
+	list_for_each_entry_safe(pos, tmp, &ctrldev->epts, list) {
+		rpmsg_ctrldev_epts_del_without_lock(ctrldev, pos);
+		devm_kfree(&ctrldev->dev, pos);
+	}
+	mutex_unlock(&ctrldev->lock);
+
 	return ret;
 }
 
-static int rpmsg_eptdev_reset(struct rpmsg_ctrldev *ctrldev)
+static int rpmsg_ctrldev_reset_eptdev(struct rpmsg_ctrldev *ctrldev)
 {
 	int ret;
 	struct rpmsg_ctrl_msg msg;
 	struct rpmsg_ept_notify *notify;
+
+	if (rpmsg_ctrldev_get_rpdev(ctrldev)) {
+		dev_warn(&ctrldev->dev, "rpdev has been removed, can not reset\n");
+		return -ENODEV;
+	}
 
 	notify = &ctrldev->ctrl_notify;
 
@@ -406,6 +452,7 @@ static int rpmsg_eptdev_reset(struct rpmsg_ctrldev *ctrldev)
 	rpmsg_ctrldev_notify_add(ctrldev, notify);
 	/* tell remote close this endpoint */
 	ret = rpmsg_trysend(ctrldev->rpdev->ept, &msg, sizeof(msg));
+	rpmsg_ctrldev_put_rpdev(ctrldev);
 	if (ret)
 		goto out;
 
@@ -429,30 +476,138 @@ out:
 	return ret;
 }
 
+static inline
+int rpmsg_ctrldev_eptdev_bind(struct rpmsg_ctrldev_file_priv *ctrldev_priv,
+			      struct rpmsg_ept_info *info)
+{
+	struct rpmsg_ctrldev *ctrldev = ctrldev_priv->ctrldev;
+	struct rpmsg_ept_mgr_node *node, *tmp;
+	int ret;
+
+	mutex_lock(&ctrldev_priv->epts_lock);
+
+	ctrldev_priv->epts_auto_release = true;
+	list_for_each_entry_safe(node, tmp, &ctrldev_priv->alloc_epts, list) {
+		if (node->info.id == info->id) {
+			dev_err(&ctrldev->dev, "bind failed, already exists ept: %u(%s)",
+				node->info.id, node->info.name);
+			ret = -EEXIST;
+			goto exit;
+		}
+	}
+
+	node = devm_kzalloc(&ctrldev->dev, sizeof(*node), GFP_KERNEL);
+	if (!node) {
+		dev_err(&ctrldev->dev, "no memory for bind ept: %u(%s)",
+			node->info.id, node->info.name);
+		ret = -ENOMEM;
+		goto exit;
+	}
+
+	memcpy(&node->info, info, sizeof(node->info));
+	INIT_LIST_HEAD(&node->list);
+	list_add_tail(&node->list, &ctrldev_priv->alloc_epts);
+	dev_info(&ctrldev->dev, "bind ept: %u(%s)", node->info.id, node->info.name);
+
+	ret = 0;
+exit:
+	mutex_unlock(&ctrldev_priv->epts_lock);
+	return ret;
+}
+
+static inline
+int rpmsg_ctrldev_eptdev_unbind(struct rpmsg_ctrldev_file_priv *ctrldev_priv,
+				struct rpmsg_ept_info *info)
+{
+	struct rpmsg_ctrldev *ctrldev = ctrldev_priv->ctrldev;
+	struct rpmsg_ept_mgr_node *node, *tmp;
+	int ret = 0;
+
+	mutex_lock(&ctrldev_priv->epts_lock);
+
+	if (!ctrldev_priv->epts_auto_release)
+		goto exit;
+
+	list_for_each_entry_safe(node, tmp, &ctrldev_priv->alloc_epts, list) {
+		if (node->info.id == info->id) {
+			dev_info(&ctrldev->dev, "unbind ept: %u(%s)",
+				 node->info.id, node->info.name);
+			list_del(&node->list);
+			devm_kfree(&ctrldev->dev, node);
+			goto exit;
+		}
+	}
+
+	dev_err(&ctrldev->dev, "unbind failed, not found ept: %u(%s)",
+		node->info.id, node->info.name);
+	ret = -ENODEV;
+exit:
+	mutex_unlock(&ctrldev_priv->epts_lock);
+	return ret;
+}
+
+static inline
+int rpmsg_ctrldev_eptdev_auto_release(struct rpmsg_ctrldev_file_priv *ctrldev_priv)
+{
+	struct rpmsg_ctrldev *ctrldev = ctrldev_priv->ctrldev;
+	struct rpmsg_ept_mgr_node *node, *tmp;
+
+	mutex_lock(&ctrldev_priv->epts_lock);
+
+	if (!ctrldev_priv->epts_auto_release)
+		goto exit;
+
+	list_for_each_entry_safe(node, tmp, &ctrldev_priv->alloc_epts, list) {
+		dev_info(&ctrldev->dev, "release ept: %u(%s)", node->info.id, node->info.name);
+		rpmsg_ctrldev_release_eptdev(ctrldev, node->info.id);
+		devm_kfree(&ctrldev->dev, node);
+	}
+
+exit:
+	mutex_unlock(&ctrldev_priv->epts_lock);
+	return 0;
+}
+
 static int rpmsg_ctrldev_open(struct inode *inode, struct file *filp)
 {
 	struct rpmsg_ctrldev *ctrldev = cdev_to_ctrldev(inode->i_cdev);
+	struct rpmsg_ctrldev_file_priv *ctrldev_priv;
 
 	get_device(&ctrldev->dev);
-	filp->private_data = ctrldev;
 
+	ctrldev_priv = devm_kzalloc(&ctrldev->dev, sizeof(*ctrldev_priv), GFP_KERNEL);
+	if (!ctrldev_priv) {
+		put_device(&ctrldev->dev);
+		return -ENOMEM;
+	}
+
+	ctrldev_priv->ctrldev = ctrldev;
+	INIT_LIST_HEAD(&ctrldev_priv->alloc_epts);
+	mutex_init(&ctrldev_priv->epts_lock);
+	ctrldev_priv->epts_auto_release = false;
+
+	filp->private_data = ctrldev_priv;
 	return 0;
 }
 
 static int rpmsg_ctrldev_release(struct inode *inode, struct file *filp)
 {
 	struct rpmsg_ctrldev *ctrldev = cdev_to_ctrldev(inode->i_cdev);
+	struct rpmsg_ctrldev_file_priv *ctrldev_priv = filp->private_data;
 
+	rpmsg_ctrldev_eptdev_auto_release(ctrldev_priv);
+	devm_kfree(&ctrldev->dev, ctrldev_priv);
 	put_device(&ctrldev->dev);
 
 	return 0;
 }
 
-static long rpmsg_ctrldev_ioctl(struct file *fp, unsigned int cmd,
+static long rpmsg_ctrldev_ioctl(struct file *filp, unsigned int cmd,
 				unsigned long arg)
 {
 	int ret;
-	struct rpmsg_ctrldev *ctrldev = fp->private_data;
+	struct rpmsg_ctrldev_file_priv *ctrldev_priv = filp->private_data;
+	struct rpmsg_ctrldev *ctrldev = ctrldev_priv->ctrldev;
 	void __user *argp = (void __user *)arg;
 	struct rpmsg_ept_info info;
 
@@ -460,6 +615,7 @@ static long rpmsg_ctrldev_ioctl(struct file *fp, unsigned int cmd,
 		return -EFAULT;
 
 	switch (cmd) {
+	case RPMSG_CREATE_AF_EPT_IOCTL:
 	case RPMSG_CREATE_EPT_IOCTL: {
 		if (!argp)
 			return -EINVAL;
@@ -470,9 +626,17 @@ static long rpmsg_ctrldev_ioctl(struct file *fp, unsigned int cmd,
 
 		info.id = ret;
 		/* notify remote create endpoint */
-		ret = rpmsg_eptdev_create(ctrldev, info.name, info.id);
-		if (ret)
+		ret = rpmsg_ctrldev_create_eptdev(ctrldev, info.name, info.id);
+		if (ret) {
+			rpmsg_ctrldev_release_id(ctrldev->dev.id, info.id);
 			return ret;
+		}
+
+		if (cmd == RPMSG_CREATE_AF_EPT_IOCTL) {
+			ret = rpmsg_ctrldev_eptdev_bind(ctrldev_priv, &info);
+			if (ret)
+				return ret;
+		}
 
 		if (copy_to_user(argp, &info, sizeof(info)))
 			return -EFAULT;
@@ -482,8 +646,13 @@ static long rpmsg_ctrldev_ioctl(struct file *fp, unsigned int cmd,
 	case RPMSG_DESTROY_EPT_IOCTL: {
 		if (!argp)
 			return -EINVAL;
+
+		ret = rpmsg_ctrldev_eptdev_unbind(ctrldev_priv, &info);
+		if (ret)
+			return ret;
+
 		dev_info(&ctrldev->dev, "close /dev/rpmsg%d endpoint\r\n", info.id);
-		ret = rpmsg_eptdev_release(ctrldev, info.id);
+		ret = rpmsg_ctrldev_release_eptdev(ctrldev, info.id);
 		if (ret)
 			return ret;
 		return 0;
@@ -493,14 +662,14 @@ static long rpmsg_ctrldev_ioctl(struct file *fp, unsigned int cmd,
 		if (!argp)
 			return -EINVAL;
 		dev_info(&ctrldev->dev, "clear %s group\r\n", info.name);
-		ret = rpmsg_eptdev_clear(ctrldev, info.name);
+		ret = rpmsg_ctrldev_clear_eptdev(ctrldev, info.name);
 		if (ret)
 			return ret;
 		return 0;
 	} break;
 	case RPMSG_DESTROY_ALL_EPT_IOCTL: {
 		dev_info(&ctrldev->dev, "reset %s\r\n", dev_name(&ctrldev->dev));
-		ret = rpmsg_eptdev_reset(ctrldev);
+		ret = rpmsg_ctrldev_reset_eptdev(ctrldev);
 		if (ret)
 			return ret;
 		return 0;
@@ -551,14 +720,23 @@ static int rpmsg_ctrldev_cb(struct rpmsg_device *rpdev, void *data, int len,
 
 static void rpmsg_ctrldev_release_device(struct device *dev)
 {
+	struct rpmsg_ctrldev *ctrldev = dev_to_ctrldev(dev);
+	struct rpmsg_ept_notify *pos, *tmp;
+
+	/* remove all sub rpmsg client */
+	list_for_each_entry_safe(pos, tmp, &ctrldev->epts, list) {
+		rpmsg_ctrldev_epts_del(ctrldev, pos);
+	}
+
 	ida_simple_remove(&rpmsg_ctrl_ida, dev->id);
-	rpmsg_ctrldev_put_devt(MINOR(dev->devt));
+	rpmsg_ctrldev_put_devt(dev->devt);
+	kfree(ctrldev);
 }
 
 static ssize_t open_store(struct device *dev, struct device_attribute *attr,
 			 const char *buf, size_t count)
 {
-	int ret;
+	int ret, id;
 	struct rpmsg_ctrldev *ctrl = dev_get_drvdata(dev);
 	char name[32];
 
@@ -577,11 +755,15 @@ static ssize_t open_store(struct device *dev, struct device_attribute *attr,
 		return -EFAULT;
 
 	dev_dbg(&ctrl->dev, "create /dev/rpmsg%d endpoint\r\n", ret);
+	id = ret;
 
 	/* notify remote create endpoint */
-	ret = rpmsg_eptdev_create(ctrl, name, ret);
-	if (ret)
+	ret = rpmsg_ctrldev_create_eptdev(ctrl, name, ret);
+	if (ret) {
+		rpmsg_ctrldev_release_id(ctrl->dev.id, id);
 		return ret;
+	}
+
 
 	return count;
 }
@@ -608,7 +790,7 @@ static ssize_t close_store(struct device *dev, struct device_attribute *attr,
 	dev_dbg(&ctrl->dev, "close /dev/rpmsg%d endpoint\r\n", id);
 
 	/* notify remote close endpoint */
-	ret = rpmsg_eptdev_release(ctrl, id);
+	ret = rpmsg_ctrldev_release_eptdev(ctrl, id);
 	if (ret)
 		return ret;
 
@@ -635,7 +817,7 @@ static ssize_t clear_store(struct device *dev, struct device_attribute *attr,
 	dev_dbg(&ctrl->dev, "clear %s endpoint\r\n", name);
 
 	/* notify remote create endpoint */
-	ret = rpmsg_eptdev_clear(ctrl, name);
+	ret = rpmsg_ctrldev_clear_eptdev(ctrl, name);
 	if (ret)
 		return ret;
 
@@ -663,7 +845,7 @@ static ssize_t reset_store(struct device *dev, struct device_attribute *attr,
 	dev_dbg(&ctrl->dev, "reset rpmsg_ctrl\r\n");
 
 	/* notify remote create endpoint */
-	ret = rpmsg_eptdev_reset(ctrl);
+	ret = rpmsg_ctrldev_reset_eptdev(ctrl);
 	if (ret)
 		return ret;
 
@@ -679,17 +861,19 @@ static int rpmsg_ctrldev_probe(struct rpmsg_device *rpdev)
 	const char *rproc_name;
 	int ret;
 
-	ctrldev = devm_kzalloc(&rpdev->dev, sizeof(*ctrldev), GFP_KERNEL);
+	ctrldev = kzalloc(sizeof(*ctrldev), GFP_KERNEL);
 	if (!ctrldev)
 		return -ENOMEM;
 
 	ctrldev->rpdev = rpdev;
+	atomic_long_set(&ctrldev->rpdev_refcnt, 1);
+	sema_init(&ctrldev->sem, 0);
 
 	dev = &ctrldev->dev;
 	device_initialize(dev);
 	dev->parent = &rpdev->dev;
-#if IS_ENABLED(CONFIG_AW_KERNEL_ORIGIN)
-	dev->class = aw_rpmsg_class;
+#ifdef CONFIG_AW_RPMSG_CLASS
+	dev->class = g_aw_rpmsg_class;
 #else
 	dev->class = rpmsg_class;
 #endif
@@ -729,18 +913,15 @@ static int rpmsg_ctrldev_probe(struct rpmsg_device *rpdev)
 	dev->id = ret;
 	dev_set_name(&ctrldev->dev, "rpmsg_ctrl-%s", rproc_name);
 
-	ret = cdev_add(&ctrldev->cdev, dev->devt, 1);
-	if (ret)
+	ret = cdev_device_add(&ctrldev->cdev, &ctrldev->dev);
+	if (ret) {
+		dev_err(&rpdev->dev, "cdev_device_add failed: %d\n", ret);
 		goto free_ctrl_ida;
+	}
 
 	/* We can now rely on the release function for cleanup */
 	dev->release = rpmsg_ctrldev_release_device;
 
-	ret = device_add(dev);
-	if (ret) {
-		dev_err(&rpdev->dev, "device_add failed: %d\n", ret);
-		put_device(dev);
-	}
 
 	device_create_file(&ctrldev->dev, &dev_attr_open);
 	device_create_file(&ctrldev->dev, &dev_attr_close);
@@ -749,8 +930,6 @@ static int rpmsg_ctrldev_probe(struct rpmsg_device *rpdev)
 
 	dev_set_drvdata(&rpdev->dev, ctrldev);
 	dev_set_drvdata(&ctrldev->dev, ctrldev);
-
-	list_add(&ctrldev->list, &g_rpmsg_ctrldev_list);
 
 	init_completion(&ctrldev->ctrl_notify.complete);
 	rpmsg_ctrldev_notify_add(ctrldev, &ctrldev->ctrl_notify);
@@ -763,10 +942,10 @@ static int rpmsg_ctrldev_probe(struct rpmsg_device *rpdev)
 free_ctrl_ida:
 	ida_simple_remove(&rpmsg_ctrl_ida, dev->id);
 free_minor_ida:
-	rpmsg_ctrldev_put_devt(MINOR(dev->devt));
+	rpmsg_ctrldev_put_devt(dev->devt);
 free_ctrldev:
 	put_device(dev);
-	devm_kfree(&rpdev->dev, ctrldev);
+	kfree(ctrldev);
 
 	return ret;
 }
@@ -774,24 +953,27 @@ free_ctrldev:
 static void rpmsg_ctrldev_remove(struct rpmsg_device *rpdev)
 {
 	struct rpmsg_ctrldev *ctrldev = dev_get_drvdata(&rpdev->dev);
-	struct rpmsg_ept_notify *pos, *tmp;
+	int ret;
 
 	dev_dbg(&rpdev->dev, "%s is removed\n", dev_name(&rpdev->dev));
 
-	/* remove all sub rpmsg client */
-	list_for_each_entry_safe(pos, tmp, &ctrldev->epts, list) {
-		rpmsg_ctrldev_epts_del(ctrldev, pos);
-		ida_simple_remove(&rpmsg_ept_ida, pos->id);
-		devm_kfree(&ctrldev->dev, pos);
-	}
-
 	rpmsg_ctrldev_notify_del(ctrldev, &ctrldev->ctrl_notify);
-	if (!list_empty(&ctrldev->list))
-		list_del_init(&ctrldev->list);
-	device_del(&ctrldev->dev);
+
+	cdev_device_del(&ctrldev->cdev, &ctrldev->dev);
+
+	// set rpdev = NULL when rpdev not in use
+	rpmsg_ctrldev_put_rpdev(ctrldev);
+	// wait rpdev = NULL
+	while (1) {
+		ret = down_interruptible(&ctrldev->sem);
+		if (ret == 0)
+			break;
+		if (ret != -EINTR) {
+			dev_err(&rpdev->dev, "wait sem return %d! rpdev: %p\n", ret, ctrldev->rpdev);
+			break;
+		}
+	}
 	put_device(&ctrldev->dev);
-	cdev_del(&ctrldev->cdev);
-	devm_kfree(&rpdev->dev, ctrldev);
 }
 
 static struct rpmsg_device_id rpmsg_driver_ctrldev_id_table[] = {
@@ -814,31 +996,44 @@ static int rpmsg_ctrldev_init(void)
 {
 	int ret;
 
-	ret = alloc_chrdev_region(&rpmsg_major, 0, RPMSG_DEV_MAX, "rpmsg");
+	ret = alloc_chrdev_region(&rpmsg_major, 0, RPMSG_DEV_MAX, "aw_rpmsg");
 	if (ret < 0) {
-		pr_err("rpmsg: failed to allocate char dev region\n");
+		pr_err("aw_rpmsg: failed to allocate char dev region\n");
 		return ret;
 	}
-#if IS_ENABLED(CONFIG_AW_KERNEL_ORIGIN)
-	aw_rpmsg_class = class_create(THIS_MODULE, "aw_rpmsg");
-	if (IS_ERR(aw_rpmsg_class)) {
-		pr_err("failed to create aw_rpmsg class\n");
-		return PTR_ERR(aw_rpmsg_class);
+
+#ifdef CONFIG_AW_RPMSG_CLASS
+	g_aw_rpmsg_class = class_create(THIS_MODULE, AW_RPMSG_CLASS_NAME);
+	if (IS_ERR(g_aw_rpmsg_class)) {
+		pr_err("failed to create aw rpmsg class\n");
+		unregister_chrdev_region(rpmsg_major, RPMSG_DEV_MAX);
+		return PTR_ERR(g_aw_rpmsg_class);
 	}
 #endif
+
 	ret = register_rpmsg_driver(&rpmsg_ctrldev_driver);
 	if (ret < 0) {
-		pr_err("rpmsgchr: failed to register rpmsg driver\n");
+		pr_err("aw_rpmsg: failed to register rpmsg driver for rpmsg ctrl\n");
+#ifdef CONFIG_AW_RPMSG_CLASS
+		class_destroy(g_aw_rpmsg_class);
+#endif
 		unregister_chrdev_region(rpmsg_major, RPMSG_DEV_MAX);
 	}
 
 	return ret;
 }
+#if IS_ENABLED(CONFIG_AW_RPROC_FAST_BOOT)
+fast_rpmsg_initcall(rpmsg_ctrldev_init);
+#else
 module_init(rpmsg_ctrldev_init);
+#endif
 
 static void rpmsg_ctrldev_exit(void)
 {
 	unregister_rpmsg_driver(&rpmsg_ctrldev_driver);
+#ifdef CONFIG_AW_RPMSG_CLASS
+	class_destroy(g_aw_rpmsg_class);
+#endif
 	unregister_chrdev_region(rpmsg_major, RPMSG_DEV_MAX);
 }
 module_exit(rpmsg_ctrldev_exit);

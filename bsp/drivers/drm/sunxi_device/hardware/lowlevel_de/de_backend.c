@@ -352,6 +352,21 @@ static inline bool de_backend_is_need_vblank_work(struct de_backend_handle *hdl)
 	return !!hdl->private->smbl;
 }
 
+static void de_backend_update_smbl_user_backlight(struct de_backend_handle *hdl, u32 backlight,
+					struct disp_smbl_info *smbl_info)
+{
+	if (!smbl_info && !smbl_info->enable)
+		return ;
+
+	if (backlight != smbl_info->backlight &&
+		backlight != smbl_info->backlight_after_dimming) {
+
+		smbl_info->backlight = backlight;
+		smbl_info->flags = SMBL_DIRTY_BL;
+		de_smbl_apply(hdl->private->smbl, smbl_info);
+	}
+}
+
 void de_backend_process_late(struct de_backend_handle *hdl, struct de_backend_tasklet_state *btstate)
 {
 	/* don't forget de_backend_is_need_update_work when new work add */
@@ -359,12 +374,7 @@ void de_backend_process_late(struct de_backend_handle *hdl, struct de_backend_ta
 		struct disp_smbl_info smbl_info = {0};
 
 		de_smbl_get_status(hdl->private->smbl, &smbl_info);
-		if (smbl_info.enable && btstate->backlight != smbl_info.backlight &&
-		    btstate->backlight != smbl_info.backlight_after_dimming) {
-			smbl_info.backlight = btstate->backlight;
-			smbl_info.flags = SMBL_DIRTY_BL;
-			de_smbl_apply(hdl->private->smbl, &smbl_info);
-		}
+		de_backend_update_smbl_user_backlight(hdl, btstate->backlight, &smbl_info);
 
 		de_smbl_update_local_param(hdl->private->smbl);
 		if (smbl_info.enable)
@@ -374,19 +384,31 @@ void de_backend_process_late(struct de_backend_handle *hdl, struct de_backend_ta
 
 void de_backend_vblank_work(struct de_backend_handle *hdl, struct de_backend_tasklet_state *btstate)
 {
-	static u32 dimming;
-
 	/* don't forget de_backend_is_need_vblank_work when new work add */
 	if (hdl->private->smbl && btstate && btstate->device_support_bk) {
 		struct disp_smbl_info smbl_info = {0};
 
+		/* sync the user-set value once to prevent the user's value from being overwritten */
 		de_smbl_get_status(hdl->private->smbl, &smbl_info);
-		if (dimming != smbl_info.backlight_dimming) {
-			btstate->dimming_changed = true;
-			btstate->dimming = dimming = smbl_info.backlight_dimming;
-			btstate->backlight_user_set = smbl_info.backlight;
-		} else
-			btstate->dimming_changed = false;
+		de_backend_update_smbl_user_backlight(hdl, btstate->backlight, &smbl_info);
+
+		de_smbl_get_status(hdl->private->smbl, &smbl_info);
+		btstate->dimming_changed = !smbl_info.backlight_changed /* skip flicker */ & smbl_info.dimming_changed;
+		btstate->dimming = smbl_info.dimming;
+		if (btstate->dimming_changed)
+			btstate->backlight_after_dimming = smbl_info.backlight * (smbl_info.dimming + 1) / 256;
+		else if (smbl_info.backlight_changed)
+			btstate->backlight_after_dimming = smbl_info.backlight;
+		else
+			btstate->backlight_after_dimming = smbl_info.backlight_after_dimming;
+
+		DRM_DEBUG_DRIVER("dimming: change(%d %d), backlight %d after_dimming %d\n",
+				smbl_info.dimming_changed, smbl_info.backlight_changed,
+				btstate->backlight, smbl_info.backlight_after_dimming);
+
+		smbl_info.backlight_after_dimming = btstate->backlight_after_dimming; // writeback
+		smbl_info.flags = (btstate->dimming_changed ? SMBL_DIRTY_DIMMING_BL : 0x0) | SMBL_DIRTY_BL /* clear change */;
+		de_smbl_apply(hdl->private->smbl, &smbl_info);
 	}
 }
 

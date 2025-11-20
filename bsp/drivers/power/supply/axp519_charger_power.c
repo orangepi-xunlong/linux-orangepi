@@ -989,7 +989,7 @@ static void axp519_charger_parse_device_tree(struct axp519_power *charger_power)
 static int axp519_charger_probe(struct platform_device *pdev)
 {
 	struct axp519_power *charger_power;
-	struct bmu_ext_dev *ext = dev_get_drvdata(pdev->dev.parent);
+	struct sunxi_power_dev *ext = dev_get_drvdata(pdev->dev.parent);
 	struct power_supply_config psy_cfg = {};
 	int ret = 0, i, irq;
 

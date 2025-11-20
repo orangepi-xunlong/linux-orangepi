@@ -10,6 +10,7 @@
  ******************************************************************************/
 #include <linux/delay.h>
 #include <linux/version.h>
+#include <linux/math64.h>
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(5, 19, 0)
 #include <drm/drm_scdc_helper.h>
@@ -307,6 +308,34 @@ static int _dw_audio_param_reset(struct dw_audio_s *audio)
 	audio->mChannelNum = 2;
 	audio->mSampleSize = 16;
 	audio->mClockFsFactor = 64;
+
+	return 0;
+}
+
+static int _dw_audio_check(void)
+{
+	struct dw_audio_s *audio = dw_get_audio();
+	struct dw_hdmi_dev_s *hdmi = dw_get_hdmi();
+	u64 acr_n = _dw_audio_get_clock_n();
+	u64 acr_cts = _dw_audio_get_clock_cts();
+	u64 tar_val = 128ULL * audio->mSamplingFrequency;
+	u64 cal_val = div64_u64((u64)hdmi->tmds_clk * 1000 * acr_n, acr_cts);
+	u64 diff, threshold;
+
+	if (!hdmi->audio_on)
+		return 0;
+
+	if (tar_val == 0)
+		return (cal_val != 0) ? -EINVAL : 0;
+
+	diff = (cal_val >= tar_val) ? (cal_val - tar_val) : (tar_val - cal_val);
+	threshold = tar_val << 1;
+
+	if (diff > div_u64(threshold, 100)) {
+		dw_write_mask(AUD_CTS1, AUD_CTS1_AUDCTS_MASK, 0x1);
+		hdmi_inf("dw audio check: triger cts re-calculate\n");
+		return -ERANGE;
+	}
 
 	return 0;
 }
@@ -1268,6 +1297,14 @@ int dw_avp_config_scramble(void)
 
 	hdmi_trace("dw avp disable scramble done\n");
 	return 0;
+}
+
+int dw_avp_check(void)
+{
+	int ret = 0;
+
+	ret = _dw_audio_check();
+	return ret;
 }
 
 int dw_avp_config(void)

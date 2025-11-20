@@ -37,6 +37,7 @@ struct sunxi_de_info {
 	unsigned int hw_id;
 	unsigned int plane_cnt;
 	struct sunxi_plane_info *planes;
+	bool support_offline;
 };
 
 struct sunxi_de_wb_info {
@@ -107,5 +108,9 @@ void sunxi_de_set_devfreq_auto(bool en);
 int sunxi_de_set_clk(unsigned long clk);
 int sunxi_de_auto_calc_freq_and_apply(struct sunxi_de_out *hwde);
 int sunxi_de_div_calc_mn(unsigned long freq_in_kHZ, unsigned long freq_out_kHZ, unsigned int *m, unsigned int *n);
+
+int sunxi_de_offline_mode_pre_init(struct sunxi_de_out *hwde, unsigned int width, unsigned int height);
+int sunxi_de_get_offline_mode_info(struct sunxi_de_out *hwde, void **vir_addr, unsigned long *buff_size);
+enum de_offline_mode_status sunxi_de_query_clear_offline_mode_status(struct sunxi_de_out *hwde, enum de_offline_mode_status status);
 
 #endif

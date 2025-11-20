@@ -375,10 +375,10 @@ int nvp6158c_sensor_set_fmt(struct v4l2_subdev *sd,
 static struct sensor_format_struct sensor_formats[] = {
 	{
 	.desc = "BT656 4CH",
-#if 1 /* BT1120 */
+#if IS_ENABLED(CONFIG_BT1120) /* BT1120 */
 	.mbus_code = MEDIA_BUS_FMT_YUYV8_1X16,
 #else /* BT656 */
-	.mbus_code = MEDIA_BUS_FMT_YUYV8_2X8,
+	.mbus_code = MEDIA_BUS_FMT_UYVY8_2X8,
 #endif
 	.regs = NULL,
 	.regs_size = 0,
@@ -400,7 +400,7 @@ static struct sensor_win_size sensor_win_sizes[] = {
 	.fps_fixed = 25,
 	.regs = sensor_regs,
 	.regs_size = ARRAY_SIZE(sensor_regs),
-	.pclk_dly = 0x06, // should not larger than 0x1f
+	.pclk_dly = 0x05, // should not larger than 0x1f, change 0x06 to 0x05
 	.set_size = NULL,
 	},
 	{
@@ -495,13 +495,13 @@ static int sensor_g_mbus_config(struct v4l2_subdev *sd, unsigned int pad,
 	if (info->current_wins->width_input == 1920 && info->current_wins->height_input == 1080)
 		cfg->bus.parallel.flags = DOUBLE_CLK_POL | CSI_CH_0 | CSI_CH_1 | CSI_CH_2 | CSI_CH_3;
 	else
-		cfg->bus.parallel.flags = CLK_POL | CSI_CH_0 | CSI_CH_1 | CSI_CH_2 | CSI_CH_3;
+		cfg->bus.parallel.flags = DOUBLE_CLK_POL | CSI_CH_0 | CSI_CH_1 | CSI_CH_2 | CSI_CH_3;
 		/* cfg->flags = CLK_POL | CSI_CH_0; */
 #else
 	if (info->current_wins->width_input == 1920 && info->current_wins->height_input == 1080)
 		cfg->flags = DOUBLE_CLK_POL | CSI_CH_0 | CSI_CH_1 | CSI_CH_2 | CSI_CH_3;
 	else
-		cfg->flags = CLK_POL | CSI_CH_0 | CSI_CH_1 | CSI_CH_2 | CSI_CH_3;
+		cfg->flags = DOUBLE_CLK_POL | CSI_CH_0 | CSI_CH_1 | CSI_CH_2 | CSI_CH_3;
 		/* cfg->flags = CLK_POL | CSI_CH_0; */
 #endif
 

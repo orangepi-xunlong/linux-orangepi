@@ -263,15 +263,18 @@ static int sunxi_usb_role_switch_set(struct usb_role_switch *sw, enum usb_role r
 	if (current_role == sw_role)
 		return 0;
 
-	cfg->desired_role = role;
+	if (cfg)
+		cfg->desired_role = role;
 	/* Disable usb role switch when suspend. */
 	if (atomic_read(&rolesw_suspend_flag))
 		return 0;
 
-	if (sw_role == SW_USB_ROLE_HOST)
-		extcon_set_state_sync(cfg->edev, EXTCON_USB_HOST, true);
-	else
-		extcon_set_state_sync(cfg->edev, EXTCON_USB_HOST, false);
+	if (cfg && cfg->edev) {
+		if (sw_role == SW_USB_ROLE_HOST)
+			extcon_set_state_sync(cfg->edev, EXTCON_USB_HOST, true);
+		else
+			extcon_set_state_sync(cfg->edev, EXTCON_USB_HOST, false);
+	}
 
 	sunxi_usb_set_mode(sw_role, true);
 
@@ -536,12 +539,12 @@ static void usb_manager_resume_work(struct work_struct *work)
 #if IS_ENABLED(CONFIG_USB_ROLE_SWITCH)
 			enum sw_usb_role current_role = get_usb_role();
 			enum sw_usb_role sw_role = to_sw_usb_role(g_usb_cfg.desired_role);
-
+#if IS_ENABLED(CONFIG_EXTCON)
 			if (sw_role == SW_USB_ROLE_HOST)
 				extcon_set_state_sync(g_usb_cfg.edev, EXTCON_USB_HOST, true);
 			else
 				extcon_set_state_sync(g_usb_cfg.edev, EXTCON_USB_HOST, false);
-
+#endif
 			if (current_role != sw_role)
 				sunxi_usb_set_mode(sw_role, false);
 #endif
@@ -839,8 +842,7 @@ static int sunxi_otg_manager_probe(struct platform_device *pdev)
 #endif
 		} else if (g_usb_cfg.port.detect_type == USB_DETECT_TYPE_ROLE_SW) {
 			atomic_set(&rolesw_suspend_flag, 0);
-			if (ROLE_SWITCH && device_property_read_bool(&pdev->dev, "usb-role-switch"))
-				sunxi_setup_role_switch(&g_usb_cfg);
+#if IS_ENABLED(CONFIG_EXTCON)
 			g_usb_cfg.edev = devm_extcon_dev_allocate(&pdev->dev, usb_extcon_cable);
 			if (IS_ERR(g_usb_cfg.edev)) {
 				dev_err(&pdev->dev, "failed to allocate extcon device\n");
@@ -851,6 +853,9 @@ static int sunxi_otg_manager_probe(struct platform_device *pdev)
 				dev_err(&pdev->dev, "failed to register extcon device\n");
 				return ret;
 			}
+#endif
+			if (ROLE_SWITCH && device_property_read_bool(&pdev->dev, "usb-role-switch"))
+				sunxi_setup_role_switch(&g_usb_cfg);
 		}
 	}
 	INIT_WORK(&g_usb_cfg.resume_work, usb_manager_resume_work);
@@ -1009,4 +1014,4 @@ MODULE_AUTHOR("wangjx<wangjx@allwinnertech.com>");
 MODULE_DESCRIPTION("Driver for Allwinner usb otg manager");
 MODULE_ALIAS("platform: usb manager for host and udc");
 MODULE_LICENSE("GPL v2");
-MODULE_VERSION("1.1.3");
+MODULE_VERSION("1.1.6");

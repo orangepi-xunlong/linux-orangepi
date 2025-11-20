@@ -19,6 +19,7 @@
 struct de_afbd_handle {
 	struct module_create_info cinfo;
 	bool rotate_support;
+	bool premul_support;
 	unsigned int rotate_limit_height;
 	unsigned int format_modifiers_num;
 	const uint64_t *format_modifiers;

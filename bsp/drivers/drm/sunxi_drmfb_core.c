@@ -66,11 +66,13 @@ static int drm_fb_config(struct drm_device *drm, struct fb_create_info *info)
 		info->width = logo.width;
 		info->height = logo.height;
 		info->logo_offset = logo.phy_addr;
+		info->offline_vaddr = logo.offline_vaddr;
 	} else {
 		info->format = ARGB8888;
 		info->width = logo.width;
 		info->height = logo.height;
 		info->logo_offset = 0;
+		info->offline_vaddr = NULL;
 	}
 	info->scn_width = w;
 	info->scn_height = h;

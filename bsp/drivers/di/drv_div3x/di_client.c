@@ -222,7 +222,8 @@ int di_client_check_para(struct di_client *c, void *data)
 		c->tnr_en = false;
 		c->vof_buf_en = false;
 		c->dma_p = c->in_fb0 = &c->fb_pool[0];
-		c->di_w1 = c->out_dit_fb0 = &c->fb_pool[1];
+		c->dma_p_nf = c->in_fb0_nf = &c->fb_pool[1];
+		c->di_w1 = c->out_dit_fb0 = &c->fb_pool[2];
 	} else if ((c->dit_mode.intp_mode == DI_DIT_INTP_MODE_WEAVE)
 		&& (c->dit_mode.out_frame_mode == DI_DIT_OUT_1FRAME)
 		&& (c->tnr_mode.mode == DI_TNR_MODE_INVALID)
@@ -430,6 +431,22 @@ static bool di_client_check_fb_arg(struct di_client *c,
 	fb_arg->out_tnr_fb0.buf.ystride, fb_arg->out_tnr_fb0.buf.cstride,
 	fb_arg->out_tnr_fb0.size.width, fb_arg->out_tnr_fb0.size.height);
 
+	DI_DEBUG("in_fb0 info:format:%s dma_buf_fd:%d "
+	"buf:(y_addr:0x%llx)(cb_addr:0x%llx)(cr_addr:0x%llx)(ystride:%d)(cstride:%d)"
+	"size:(%dx%d)\n",
+	di_format_to_string(fb_arg->in_fb0.format), fb_arg->in_fb0.dma_buf_fd,
+	fb_arg->in_fb0.buf.y_addr, fb_arg->in_fb0.buf.cb_addr, fb_arg->in_fb0.buf.cr_addr,
+	fb_arg->in_fb0.buf.ystride, fb_arg->in_fb0.buf.cstride,
+	fb_arg->in_fb0.size.width, fb_arg->in_fb0.size.height);
+
+	DI_DEBUG("in_fb0_nf info:format:%s dma_buf_fd:%d "
+	"buf:(y_addr:0x%llx)(cb_addr:0x%llx)(cr_addr:0x%llx)(ystride:%d)(cstride:%d)"
+	"size:(%dx%d)\n",
+	di_format_to_string(fb_arg->in_fb0_nf.format), fb_arg->in_fb0_nf.dma_buf_fd,
+	fb_arg->in_fb0_nf.buf.y_addr, fb_arg->in_fb0_nf.buf.cb_addr, fb_arg->in_fb0_nf.buf.cr_addr,
+	fb_arg->in_fb0_nf.buf.ystride, fb_arg->in_fb0_nf.buf.cstride,
+	fb_arg->in_fb0_nf.size.width, fb_arg->in_fb0_nf.size.height);
+
 	/* TODO: add more check ? */
 	return true;
 }
@@ -495,6 +512,7 @@ static int di_client_get_fbs(struct di_client *c)
 		&& di_client_get_fb(c, c->in_fb0,
 			&fb_arg->in_fb0, DMA_TO_DEVICE))
 		return -EINVAL;
+
 #if IS_ENABLED(CONFIG_SUNXI_DI_SINGEL_FILE)
 	if ((c->in_fb0_nf != NULL) && (c->in_fb0 != NULL)
 		&& c->in_fb0->fb
@@ -531,6 +549,7 @@ static int di_client_get_fbs(struct di_client *c)
 		&& di_client_get_fb(c, c->out_dit_fb0,
 			&fb_arg->out_dit_fb0, DMA_FROM_DEVICE))
 		return -EINVAL;
+
 	if ((c->out_dit_fb1 != NULL)
 		&& di_client_get_fb(c, c->out_dit_fb1,
 			&fb_arg->out_dit_fb1, DMA_FROM_DEVICE))

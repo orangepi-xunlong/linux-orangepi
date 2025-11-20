@@ -17,6 +17,7 @@
 #include <linux/interrupt.h>
 #include <linux/init.h>
 #include <linux/delay.h>
+#include <linux/of.h>
 #include <linux/netdevice.h>
 #include <linux/etherdevice.h>
 #include <linux/skbuff.h>
@@ -35,9 +36,18 @@
 #define AC300_DEV		"ac300"
 
 #define EPHY_CALI_BASE		0
+
+#if IS_ENABLED(CONFIG_ARCH_SUN300IW1P1)
+#define EPHY_CALI_BIT		BIT(21)
+#define CALI_FLAG_BIT		BIT(20)
+#define EPHY_BGS_MASK		0x000f0000
+#define EPHY_BGS_OFFSET		16
+#else
 #define EPHY_CALI_BIT		BIT(29)
 #define EPHY_BGS_MASK		0x0f000000
 #define EPHY_BGS_OFFSET		24
+#endif
+
 /*
  * Ephy diagram test
  * This macro will cause all cpu stuck
@@ -49,6 +59,7 @@ struct ephy_res {
 	struct phy_device *ac300;
 	spinlock_t lock;
 	atomic_t ephy_en;
+	bool leds_active_low;
 };
 
 static struct ephy_res ac300_ephy;
@@ -166,20 +177,30 @@ static int ephy_config_init(struct phy_device *phydev)
 		pr_err("ephy cali efuse read fail, use default 0\n");
 	}
 
-	sunxi_ephy_config_cali(ac300_ephy.ac300, ephy_cali);
+#ifdef CALI_FLAG_BIT
+	if (ephy_cali & CALI_FLAG_BIT) {
+#endif
+		sunxi_ephy_config_cali(ac300_ephy.ac300, ephy_cali);
 
-	/*
-	 * EPHY_CALI_BIT: the flag of calibration value
-	 * 0: Normal
-	 * 1: Low level of calibration value
-	 */
-	if (ephy_cali & EPHY_CALI_BIT) {
-		pr_debug("Low level ephy, use new init\n");
-		sunxi_ephy_config_new_init(phydev);
+		/*
+		 * EPHY_CALI_BIT: the flag of calibration value
+		 * 0: Normal
+		 * 1: Low level of calibration value
+		 */
+		if (ephy_cali & EPHY_CALI_BIT) {
+			pr_debug("Low level ephy, use new init\n");
+			sunxi_ephy_config_new_init(phydev);
+		} else {
+			pr_debug("Normal ephy, use old init\n");
+			sunxi_ephy_config_old_init(phydev);
+		}
+
+#ifdef CALI_FLAG_BIT
 	} else {
-		pr_debug("Normal ephy, use old init\n");
+		pr_err("this phy is not Calibrated\n");
 		sunxi_ephy_config_old_init(phydev);
 	}
+#endif
 
 	sunxi_ephy_disable_intelligent_ieee(phydev);	/* Disable Intelligent IEEE */
 	sunxi_ephy_disable_802_3az_ieee(phydev);	/* Disable 802.3az IEEE */
@@ -235,7 +256,10 @@ static void ac300_enable(struct phy_device *phydev)
 	phy_write(phydev, 0x06, 0x0811);
 
 	mdelay(10);
-	phy_write(phydev, 0x06, 0x0810);
+	if (ac300_ephy.leds_active_low)
+		phy_write(phydev, 0x06, 0x0812);
+	else
+		phy_write(phydev, 0x06, 0x0810);
 }
 
 static void ac300_disable(struct phy_device *phydev)
@@ -259,6 +283,12 @@ static int ac300_resume(struct phy_device *phydev)
 
 static int ac300_probe(struct phy_device *phydev)
 {
+	struct device *dev = &phydev->mdio.dev;
+
+	/* save ac300 message */
+	ac300_ephy.ac300 = phydev;
+	ac300_ephy.leds_active_low = of_property_read_bool(dev->of_node, "allwinner,leds-active-low");
+
 	ac300_enable(phydev);
 
 	return 0;
@@ -266,9 +296,6 @@ static int ac300_probe(struct phy_device *phydev)
 
 static int ac300_init(struct phy_device *phydev)
 {
-	/* save ac300 message */
-	ac300_ephy.ac300 = phydev;
-
 	/* ac300 enable */
 	ac300_enable(phydev);
 
@@ -312,4 +339,4 @@ MODULE_DEVICE_TABLE(mdio, ac300_tbl);
 MODULE_DESCRIPTION("Allwinner phy drivers");
 MODULE_AUTHOR("xuminghui <xuminghui@allwinnertech.com>");
 MODULE_LICENSE("GPL");
-MODULE_VERSION("1.1.1");
+MODULE_VERSION("1.1.2");

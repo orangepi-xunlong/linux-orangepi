@@ -4,7 +4,6 @@
  * Copyright (c) 2023 zhaozeyan@allwinnertech.com
  */
 
-#include <sunxi-log.h>
 #include <linux/module.h>
 #include <linux/platform_device.h>
 #include <linux/of.h>
@@ -440,4 +439,4 @@ fs_initcall(sun55iw5_pio_init);
 MODULE_DESCRIPTION("Allwinner sun55iw5 pio pinctrl driver");
 MODULE_AUTHOR("<rengaomin@allwinnertech>");
 MODULE_LICENSE("GPL");
-MODULE_VERSION("0.0.5");
+MODULE_VERSION("0.0.6");

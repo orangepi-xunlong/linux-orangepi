@@ -18,12 +18,22 @@
 #ifndef _SUNXI_UART_NG_H_
 #define _SUNXI_UART_NG_H_
 
+#define SUNXI_MODNAME "uart-ng"
+#include <sunxi-log.h>
 #include <linux/regulator/consumer.h>
 #include <linux/dmaengine.h>
 #include <linux/reset.h>
 #include <sunxi-dma.h>
+#include <linux/ktime.h>
+#include <sunxi-gpio.h>
+#ifdef CONFIG_AW_AMP_SYS_RSC_MANAGER
+#include <linux/sunxi_amp_rsc.h>
+#endif
 
 #define UART_TO_SPORT(port)	((struct sunxi_uart_port *)port)
+
+#define SOFTWARE_CTRL          BIT(0)
+#define HARDWARE_CTRL          BIT(1)
 
 #define SERIAL_CIRC_CNT_TO_END(xmit) \
 	CIRC_CNT_TO_END(xmit->head, xmit->tail, UART_XMIT_SIZE)
@@ -52,13 +62,17 @@ struct sunxi_uart_pdata {
 	struct regulator *regulator;
 };
 
+struct sunxi_uart_data {
+	unsigned int uart_485_mode;
+};
+
 struct sunxi_uart_register {
-	u8 ier;
-	u8 lcr;
-	u8 mcr;
-	u8 fcr;
-	u8 dll;
-	u8 dlh;
+	unsigned int ier;
+	unsigned int lcr;
+	unsigned int mcr;
+	unsigned int fcr;
+	unsigned int dll;
+	unsigned int dlh;
 };
 
 struct sunxi_uart_dma {
@@ -81,7 +95,7 @@ struct sunxi_uart_dma {
 
 	char tx_dma_inited; /* 1:dma tx channel has been init */
 	char rx_dma_inited; /* 1:dma rx channel has been init */
-	char tx_dma_used;   /* 1:dma tx is working */
+	atomic_t tx_dma_used;   /* 1:dma tx is working */
 	char rx_dma_used;   /* 1:dma rx is working */
 
 	/* timer to poll activity on rx dma */
@@ -119,12 +133,19 @@ struct sunxi_uart_port {
 	char *dump_buff;
 	struct proc_dir_entry *proc_root;
 	struct proc_dir_entry *proc_info;
-
+	struct sunxi_uart_data *data;
 	struct pinctrl *pctrl;
 	struct serial_rs485 rs485conf;
 	bool card_print;
 	bool throttled;
 	bool loopback;
+	struct gpio_desc *rs485oe_gpio;
+	unsigned int rs485_fl;
+	unsigned int rs485_pin_auto;
+	unsigned int irq_priority_val;
+#ifdef CONFIG_AW_AMP_SYS_RSC_MANAGER
+	sunxi_amp_rsc_t amp_rsc;
+#endif
 };
 
 /* register offset define */
@@ -210,6 +231,7 @@ struct sunxi_uart_port {
 #define SUNXI_UART_LSR_OE         (BIT(1))
 #define SUNXI_UART_LSR_DR         (BIT(0))
 #define SUNXI_UART_LSR_BRK_ERROR_BITS 0x1E /* BI, FE, PE, OE bits */
+#define SUNXI_UART_LSR_BOTH_EMPTY   (SUNXI_UART_LSR_TEMT | SUNXI_UART_LSR_THRE)
 /* Modem Status Register */
 #define SUNXI_UART_MSR_DCD        (BIT(7))
 #define SUNXI_UART_MSR_RI         (BIT(6))
@@ -233,6 +255,7 @@ struct sunxi_uart_port {
 #define SUNXI_UART_HALT_FORCECFG  (BIT(1))
 #define SUNXI_UART_HALT_HTX       (BIT(0))
 /* RS485 Control and Status Register */
+#define SUNXI_UART_RS485_DUPLEX   (BIT(4))
 #define SUNXI_UART_RS485_RXBFA    (BIT(3))
 #define SUNXI_UART_RS485_RXAFA    (BIT(2))
 
@@ -280,14 +303,24 @@ struct sunxi_uart_port {
 #define RX_DMA          2
 #define DMA_SERIAL_BUFFER_SIZE  (PAGE_SIZE)
 
-static inline unsigned char serial_in(struct uart_port *port, int offs)
+static inline unsigned int serial_in(struct uart_port *port, int offs)
 {
-	return readb_relaxed(port->membase + offs);
+	return readl_relaxed(port->membase + offs);
 }
 
-static inline void serial_out(struct uart_port *port, unsigned char value, int offs)
+static inline void serial_out(struct uart_port *port, unsigned int value, int offs)
 {
-	writeb_relaxed(value, port->membase + offs);
+	writel_relaxed(value, port->membase + offs);
+}
+
+static inline void serial_out_lowbyte(struct uart_port *port, unsigned int value, int offs)
+{
+	unsigned int tmp;
+
+	tmp = serial_in(port, offs);
+	tmp &= ~0xFF;
+	tmp |= (value & 0xFF);
+	writel_relaxed(tmp, port->membase + offs);
 }
 
 extern void sunxi_uart_enable_ier_thri(struct uart_port *port);

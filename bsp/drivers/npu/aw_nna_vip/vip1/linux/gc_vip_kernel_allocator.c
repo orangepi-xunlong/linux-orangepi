@@ -128,7 +128,7 @@ static vip_status_e gckvip_map_user(
 extern gckvip_driver_t *kdriver;
 
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION (3,7,0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION (3, 7, 0)
 #define gcdVM_FLAGS (VM_IO | VM_DONTCOPY | VM_DONTEXPAND | VM_DONTDUMP)
 #else
 #define gcdVM_FLAGS (VM_IO | VM_DONTCOPY | VM_DONTEXPAND | VM_RESERVED)
@@ -363,12 +363,13 @@ static vip_status_e import_pfn_map(
     gcOnError(gckvip_os_allocate_memory(num_pages * sizeof(unsigned long), (void**)&pfns));
 
     for (i = 0; i < num_pages; i++) {
-        spinlock_t *ptl;
         pgd_t *pgd;
         pud_t *pud;
         pmd_t *pmd;
-        pte_t *pte;
-
+#if (LINUX_VERSION_CODE < KERNEL_VERSION (6, 6, 0))
+	pte_t *pte;
+	spinlock_t *ptl;
+#endif
         pgd = pgd_offset(current->mm, memory);
         if (pgd_none(*pgd) || pgd_bad(*pgd)) {
             goto onError;
@@ -383,6 +384,7 @@ static vip_status_e import_pfn_map(
             goto onError;
         }
 
+#if (LINUX_VERSION_CODE < KERNEL_VERSION (6, 6, 0))
         pmd = pmd_offset(pud, memory);
         if (pmd_none(*pmd) || pmd_bad(*pmd)) {
             goto onError;
@@ -403,7 +405,7 @@ static vip_status_e import_pfn_map(
         pages[i] = pfn_to_page(pfns[i]); /* get page */
 
         pte_unmap_unlock(pte, ptl);
-
+#endif
         /* Advance to next. */
         memory += PAGE_SIZE;
     }
@@ -499,8 +501,11 @@ static vip_status_e import_page_map(
 #else
             FOLL_WRITE,
 #endif
-            pages,
-            NULL);
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0)
+		pages);
+#else
+		pages, NULL);
+#endif
 
     up_read(&current_mm_mmap_sem);
 
@@ -596,7 +601,12 @@ static vip_status_e gckvip_allocator_cma_map_userlogical(
 #endif
     node->mem_flag |= GCVIP_MEM_FLAG_NONE_CACHE;
 
-    vma->vm_flags |= (VM_IO | VM_DONTCOPY | VM_DONTEXPAND | VM_DONTDUMP);
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0)
+    vm_flags_set(vma, gcdVM_FLAGS);
+#else
+    vma->vm_flags |= gcdVM_FLAGS;
+#endif
+
     if (dma_mmap_coherent(kdriver->device, vma, node->kerl_logical,
                          cpu_physical, PAGE_ALIGN(node->size))) {
         PRINTK_E("CMA mmap user logical failed, vip_physical=0x%x, size=0x%08x\n",
@@ -1986,7 +1996,11 @@ static vip_status_e map_user_logical(
     unsigned long start = vma->vm_start;
     vip_uint32_t i = 0;
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0)
+    vm_flags_set(vma, gcdVM_FLAGS);
+#else
     vma->vm_flags |= gcdVM_FLAGS;
+#endif
 
     if (alloc_flag & GCVIP_VIDEO_MEM_ALLOC_NONE_CACHE) {
         #if USE_MEM_WRITE_COMOBINE

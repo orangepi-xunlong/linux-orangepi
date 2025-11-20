@@ -19,47 +19,10 @@
 #include <linux/phy/phy.h>
 #include <linux/of_platform.h>
 #include <linux/reset.h>
+#include <linux/delay.h>
 
 #include "sunxi_tcon.h"
 #include "sunxi_tcon_top.h"
-
-enum tcon_type {
-	TCON_LCD = 0,
-	TCON_TV = 1,
-};
-
-struct sunxi_tcon {
-	int id;
-	bool is_enabled;
-	bool pending_enable_vblank;
-	struct device *dev;
-	struct device *tcon_top;
-	struct phy *lvds_combo_phy0;
-	struct phy *lvds_combo_phy1;
-	struct tcon_device tcon_ctrl;
-	struct sunxi_tcon_tv tcon_tv;
-	struct sunxi_tcon_lcd tcon_lcd;
-
-	uintptr_t reg_base;
-	struct resource *res;
-	enum tcon_type type;
-
-	/* clock resource */
-	struct clk *ahb_clk; /* module clk */
-	struct clk *mclk; /* module clk */
-	struct clk *mclk_bus; /* module clk bus */
-	struct clk *ahb_vid_out; /*PPU clk */
-	struct clk *mbus_vo_sys; /* PPU clk */
-	struct reset_control *rst_bus_tcon;
-
-	/* interrupt resource */
-	unsigned int irq_no;
-	unsigned int judge_line;
-	void *output_data;
-
-	void *irq_data;
-	irq_handler_t irq_handler;
-};
 
 static int sunxi_tcon_request_irq(struct sunxi_tcon *hwtcon);
 static int sunxi_tcon_free_irq(struct sunxi_tcon *hwtcon);
@@ -446,12 +409,40 @@ static int sunxi_tcon_device_query_irq(struct sunxi_tcon *hwtcon)
 	return ret;
 }
 
+u64 sunxi_tcon_vblank_cnt_and_time(struct counter *cnt, ktime_t *vblanktime)
+{
+	*vblanktime = cnt->vblank_timestamp;
+	return atomic64_read(&cnt->vblank_cnt);
+}
+
+u64 sunxi_tcon_get_refreshraw_and_vblankcnt(struct device *tcon_dev)
+{
+	struct sunxi_tcon *hwtcon = dev_get_drvdata(tcon_dev);
+	static ktime_t time_us[2];
+	u64 vblank_cnt[2];
+	u64 fps_raw, vblank_delta, time_us_delta;
+
+	vblank_cnt[0] = sunxi_tcon_vblank_cnt_and_time(&hwtcon->cnt, &time_us[0]);
+	msleep(100);
+	vblank_cnt[1] = sunxi_tcon_vblank_cnt_and_time(&hwtcon->cnt, &time_us[1]);
+
+	vblank_delta = vblank_cnt[1] - vblank_cnt[0];
+	time_us_delta = ktime_us_delta(time_us[1], time_us[0]);
+
+	fps_raw = div64_u64(vblank_delta * 1000000 * 1000, time_us_delta); /* For Float */
+
+	return fps_raw;
+}
+
 static irqreturn_t sunxi_tcon_irq_event_proc(int irq, void *parg)
 {
 	struct sunxi_tcon *hwtcon = parg;
 	struct disp_output_config *disp_cfg = &hwtcon->tcon_ctrl.cfg;
 	struct disp_video_timings timing_t;
 	u32 dsi_line, tcon_line;
+
+	/* Increment TCON interrupt counter */
+	atomic64_inc(&hwtcon->cnt.irqcnt);
 
 	if ((hwtcon->type == TCON_LCD) &&
 			tcon_lcd_irq_query(&hwtcon->tcon_lcd, LCD_IRQ_TCON0_LINE)) {
@@ -469,7 +460,12 @@ static irqreturn_t sunxi_tcon_irq_event_proc(int irq, void *parg)
 		return IRQ_HANDLED;
 	}
 
-	sunxi_tcon_device_query_irq(hwtcon);
+	/* Check if this is a vblank interrupt and increment counter */
+	if (sunxi_tcon_device_query_irq(hwtcon)) {
+		atomic64_inc(&hwtcon->cnt.vblank_cnt);
+		hwtcon->cnt.vblank_timestamp = ktime_get();
+	}
+
 	return hwtcon->irq_handler(irq, hwtcon->irq_data);
 }
 

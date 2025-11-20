@@ -41,6 +41,7 @@
 #include <linux/pm_wakeirq.h>
 
 #include <net/bluetooth/bluetooth.h>
+#include <dt-bindings/gpio/gpio.h>
 
 /*
  * #define BT_SLEEP_DBG
@@ -59,7 +60,7 @@
 /*
  * Defines
  */
-#define VERSION	 "1.2.3"
+#define VERSION	 "1.2.5"
 #define PROC_DIR	"bluetooth/sleep"
 
 #define DEFAULT_UART_INDEX   1
@@ -413,7 +414,11 @@ static int __init bluesleep_probe(struct platform_device *pdev)
 {
 	struct device_node *np = pdev->dev.of_node;
 	struct device *dev = &pdev->dev;
+#if (LINUX_VERSION_CODE <= KERNEL_VERSION(6, 2, 0))
 	enum of_gpio_flags config;
+#else
+	u32 config = 0;
+#endif
 	int ret, uart_index;
 	u32 val;
 
@@ -422,14 +427,23 @@ static int __init bluesleep_probe(struct platform_device *pdev)
 	if (!bsi)
 		return -ENOMEM;
 
+#if (LINUX_VERSION_CODE > KERNEL_VERSION(6, 2, 0))
+	bsi->host_wake = of_get_named_gpio(np, "bt_hostwake", 0);
+#else
 	bsi->host_wake = of_get_named_gpio_flags(np, "bt_hostwake", 0, &config);
+#endif
 	if (!gpio_is_valid(bsi->host_wake)) {
 		BT_ERR("get gpio bt_hostwake failed\n");
 		return -EINVAL;
 	}
 
 	/* set host_wake_assert */
+#if (LINUX_VERSION_CODE > KERNEL_VERSION(6, 2, 0))
+	of_property_read_u32_index(np, "bt_hostwake", 3, &config);
+	bsi->host_wake_assert = (config == GPIO_ACTIVE_LOW) ? 0 : 1;
+#else
 	bsi->host_wake_assert = (config == OF_GPIO_ACTIVE_LOW) ? 0 : 1;
+#endif
 	BT_DBG("bt_hostwake gpio=%d assert=%d\n", bsi->host_wake, bsi->host_wake_assert);
 
 	if (assert_level != -1) {
@@ -467,8 +481,13 @@ static int __init bluesleep_probe(struct platform_device *pdev)
 		bsi->wakeup_enable = 1;
 	}
 
+#if (LINUX_VERSION_CODE > KERNEL_VERSION(6, 2, 0))
+	bsi->ext_wake = of_get_named_gpio(np, "bt_wake", 0);
+#else
 	bsi->ext_wake = of_get_named_gpio_flags(np, "bt_wake",
 			0, (enum of_gpio_flags *)&config);
+#endif
+
 	if (!gpio_is_valid(bsi->ext_wake)) {
 		BT_ERR("get gpio bt_wake failed\n");
 		return -EINVAL;
@@ -482,7 +501,12 @@ static int __init bluesleep_probe(struct platform_device *pdev)
 	}
 
 	/* set ext_wake_assert */
+#if (LINUX_VERSION_CODE > KERNEL_VERSION(6, 2, 0))
+	of_property_read_u32_index(np, "bt_wake", 3, &config);
+	bsi->ext_wake_assert = (config == GPIO_ACTIVE_LOW) ? 0 : 1;
+#else
 	bsi->ext_wake_assert = (config == OF_GPIO_ACTIVE_LOW) ? 0 : 1;
+#endif
 	BT_DBG("bt_wake gpio=%d assert=%d\n", bsi->ext_wake, bsi->ext_wake_assert);
 
 	if (assert_level != -1) {

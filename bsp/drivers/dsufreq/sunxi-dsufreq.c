@@ -20,13 +20,15 @@
 #include <sunxi-sid.h>
 #include <linux/version.h>
 
-#define MAX_NAME_LEN                     8
+#define MAX_NAME_LEN                     12
 #define POLICY_NUM                       2
 #define BIG_CORE_THRESHOLD_EXT           1488000000
 #define DSU_MAX_FREQ_BY_MIN_VOLT         (dsufreq_dev_temp->max_f_by_min_v)
 #define CLUS_CTRL_REG0					 0x10
 #define DSU_MIN_FREQ_THRESHOLD           200000000     //200MHz
 #define DSU_MAX_FREQ_THRESHOLD           2000000000    //2GHz
+#define DCXO_CLK_26M     (26000000)
+#define DCXO_CLK_24M     (24000000)
 
 #define CPUL_CORE_NUM			(0)
 #define FREQUENCY_SCALING_TRIGGER_MIN	(1000000)
@@ -47,8 +49,13 @@ struct sunxi_dsufreq_dev {
 	struct device                 *dev;
 	struct clk                    *clk;
 	char                          opp_table_name[MAX_NAME_LEN];
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 1, 0)
 	struct opp_table              *opp_table;
 	struct opp_table              *reg_opp_table;
+#else
+	int                           opp_table;
+	int                           reg_opp_table;
+#endif
 	struct dsu_opp_table          *opp;
 	int                           opp_count;
 	unsigned long                 max_f_by_min_v;
@@ -61,18 +68,25 @@ struct sunxi_dsufreq_dev {
 	dsufreq_scaling_direction_e   scaling_direction;
 	unsigned int                  policy_cnt;
 	struct cpufreq_policy         *policy[POLICY_NUM];
+	unsigned int                  dsu_clock_rate;
 };
 
 static struct sunxi_dsufreq_dev *dsufreq_dev_temp;
 static void __iomem *clus_ctrl_base;
 
 extern u32 sunxi_get_vf_index(void);
+extern u32 determine_dcxo_clk_source(void);
 extern void set_dsufreq_cb(int (*scaling_down_cb)(struct cpufreq_policy *, unsigned long),
 	int (*scaling_up_cb)(struct cpufreq_policy *, unsigned long, int));
 extern const char *__clk_get_name(const struct clk *clk);
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 6, 0)
 static ssize_t scaling_available_frequencies_show(struct class *class, struct class_attribute *attr,
 			 char *buf)
+#else
+static ssize_t scaling_available_frequencies_show(const struct class *class, const struct class_attribute *attr,
+			 char *buf)
+#endif
 {
 	ssize_t count = 0;
 	int i = 0;
@@ -89,16 +103,26 @@ static ssize_t scaling_available_frequencies_show(struct class *class, struct cl
 
 static CLASS_ATTR_RO(scaling_available_frequencies);
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 6, 0)
 static ssize_t scaling_cur_freq_show(struct class *class, struct class_attribute *attr,
 			 char *buf)
+#else
+static ssize_t scaling_cur_freq_show(const struct class *class, const struct class_attribute *attr,
+			 char *buf)
+#endif
 {
 	return sprintf(buf, "%lu\n", dsufreq_dev_temp->cur_freq/1000);
 }
 
 static CLASS_ATTR_RO(scaling_cur_freq);
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 6, 0)
 static ssize_t dsu_cooling_show(struct class *class, struct class_attribute *attr,
 		char *buf)
+#else
+static ssize_t dsu_cooling_show(const struct class *class, const struct class_attribute *attr,
+		char *buf)
+#endif
 {
 	ssize_t size = 0;
 	unsigned int value = 0;
@@ -109,8 +133,13 @@ static ssize_t dsu_cooling_show(struct class *class, struct class_attribute *att
 	return size;
 }
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 6, 0)
 static ssize_t dsu_cooling_store(struct class *class, struct class_attribute *attr,
 		const char *buf, size_t count)
+#else
+static ssize_t dsu_cooling_store(const struct class *class, const struct class_attribute *attr,
+		const char *buf, size_t count)
+#endif
 {
 	unsigned int value = 0, reg = 0;
 	int ret;
@@ -206,8 +235,13 @@ static unsigned long sunxi_get_dsu_next_freq(struct sunxi_dsufreq_dev *dsufreq_d
 
 	*big_core_next_freq = 0;
 	dsu_next_freq = (freq * 3)/4;
-	if (dsu_next_freq % 24000000)
-		dsu_next_freq -= (dsu_next_freq % 24000000);
+	if (dsufreq_dev_temp->dsu_clock_rate == DCXO_CLK_26M) {
+		if (dsu_next_freq % DCXO_CLK_26M)
+			dsu_next_freq -= (dsu_next_freq % DCXO_CLK_26M);
+	} else {
+		if (dsu_next_freq % DCXO_CLK_24M)
+			dsu_next_freq -= (dsu_next_freq % DCXO_CLK_24M);
+	}
 
 	dsu_max_freq = get_dsu_max_freq_by_cur_volt(dsufreq_dev, freq);
 
@@ -248,8 +282,13 @@ static unsigned long sunxi_big_little_get_dsu_next_freq(struct sunxi_dsufreq_dev
 	}
 
 	dsu_next_freq = (max_next_freq * 3)/4;
-	if (dsu_next_freq % 24000000)
-		dsu_next_freq -= (dsu_next_freq % 24000000);
+	if (dsufreq_dev_temp->dsu_clock_rate == DCXO_CLK_26M) {
+		if (dsu_next_freq % DCXO_CLK_26M)
+			dsu_next_freq -= (dsu_next_freq % DCXO_CLK_26M);
+	} else {
+		if (dsu_next_freq % DCXO_CLK_24M)
+			dsu_next_freq -= (dsu_next_freq % DCXO_CLK_24M);
+	}
 
 	dsu_max_freq = get_dsu_max_freq_by_cur_volt(dsufreq_dev, little_core_next_freq);
 
@@ -333,7 +372,14 @@ static void sunxi_dsu_nvmem(char *name)
 	u32 index = 0x0100;
 
 	index = sunxi_get_vf_index();
-	snprintf(name, MAX_NAME_LEN, "vf%04x", index);
+	dsufreq_dev_temp->dsu_clock_rate = determine_dcxo_clk_source();
+
+	/* Determine whether to use 26m or 24m */
+	if (dsufreq_dev_temp->dsu_clock_rate == DCXO_CLK_26M)
+		snprintf(name, MAX_NAME_LEN, "26m-vf%04x", index);
+	else
+		snprintf(name, MAX_NAME_LEN, "vf%04x", index);
+
 	sunxi_warn(NULL, "dsu dvfs: %s\n", name);
 }
 
@@ -345,8 +391,13 @@ static int dsu_init_freq_table(struct sunxi_dsufreq_dev *dsufreq_dev)
 	unsigned long min_volt = 0;
 	unsigned long freq = 0;
 	char *opp_table_name = dsufreq_dev->opp_table_name;
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 1, 0)
 	struct opp_table *opp_table = NULL;
 	struct opp_table *reg_opp_table = NULL;
+#else
+	int opp_table = 0;
+	int reg_opp_table = 0;
+#endif
 	struct dev_pm_opp *opp = NULL;
 	struct cpufreq_policy *policy = dsufreq_dev->policy[0];
 	unsigned long min_freq = policy->cpuinfo.min_freq * 1000;
@@ -364,7 +415,7 @@ static int dsu_init_freq_table(struct sunxi_dsufreq_dev *dsufreq_dev)
 #if LINUX_VERSION_CODE < KERNEL_VERSION(6, 1, 0)
 	ret = devm_pm_opp_set_regulators(dev, (const char *[]){ "dsu" }, 1);
 #else
-	ret = devm_pm_opp_set_regulators(dev, (const char *[]){ "dsu" });
+	ret = devm_pm_opp_set_regulators(dev, (const char *[]){ "dsu", NULL });
 #endif
 #endif
 	if (ret) {
@@ -376,8 +427,13 @@ static int dsu_init_freq_table(struct sunxi_dsufreq_dev *dsufreq_dev)
 
 	if (strlen(opp_table_name)) {
 		opp_table = dev_pm_opp_set_prop_name(dev, opp_table_name);
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 1, 0)
 		if (IS_ERR(opp_table)) {
 			ret = PTR_ERR(opp_table);
+#else
+		if (opp_table < 0) {
+			ret = opp_table;
+#endif
 			sunxi_err(dev, "Failed to set prop name, use default vf\n");
 			goto reg_put;
 		}
@@ -472,6 +528,8 @@ static int sunxi_dsufreq_probe(struct platform_device *pdev)
 	if (!dsufreq_dev)
 		return -ENOMEM;
 
+	dsufreq_dev_temp = dsufreq_dev;
+
 	for_each_possible_cpu(cpu) {
 		policy = cpufreq_cpu_get(cpu);
 		if (!policy) {
@@ -514,7 +572,7 @@ static int sunxi_dsufreq_probe(struct platform_device *pdev)
 
 	dsufreq_dev->cur_freq = clk_get_rate(dsufreq_dev->clk);
 	platform_set_drvdata(pdev, dsufreq_dev);
-	dsufreq_dev_temp = dsufreq_dev;
+
 	set_dsufreq_cb(set_dsufreq_scaling_down, set_dsufreq_scaling_up);
 
 	err = class_register(&dsufreq_class);

@@ -484,9 +484,8 @@ static ssize_t fts_irq_show(
 {
     ssize_t count = 0;
     struct fts_ts_data *ts_data = dev_get_drvdata(dev);
-    struct irq_desc *desc = irq_to_desc(ts_data->irq);
 
-    count = snprintf(buf, PAGE_SIZE, "irq_depth:%d\n", desc->depth);
+	count = snprintf(buf, PAGE_SIZE, "irq_depth:null\n");
 
     return count;
 }

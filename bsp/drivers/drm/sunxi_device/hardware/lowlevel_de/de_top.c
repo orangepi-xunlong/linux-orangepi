@@ -542,38 +542,6 @@ int de_top_set_chn_mux(struct de_top_handle *hdl, u32 disp, u32 port, u32 chn_ty
 	return hdl->private->dsc->set_chn2core_mux(hdl, disp, chn_type_id, is_video);
 }
 
-static bool de_top_check_another_rtmx_enabled(struct de_top_handle *hdl, u32 mdisp)
-{
-	u8 __iomem *de_base = hdl->cinfo.de_reg_base;
-	u8 __iomem *reg_base;
-	u32 offset;
-	bool en = false;
-	int i;
-
-	offset = hdl->private->dsc->glb_ctl_offset;
-	for (i = 0; i < 2; i++) {
-		if (mdisp == i)
-			continue;
-
-		reg_base = de_base + DE_REG_OFFSET(offset, i, 0x40);
-		en |= readl(reg_base) & 0x1;
-	}
-
-	return en;
-}
-
-static bool de_top_rtmx_is_enabled(struct de_top_handle *hdl, u32 mdisp)
-{
-	u8 __iomem *de_base = hdl->cinfo.de_reg_base;
-	u8 __iomem *reg_base;
-	u32 offset;
-
-	offset = hdl->private->dsc->glb_ctl_offset;
-	reg_base = de_base + DE_REG_OFFSET(offset, mdisp, 0x40);
-
-	return readl(reg_base) & 0x1;
-}
-
 static int de_top_set_rtmx_enable(struct de_top_handle *hdl, u32 disp, u8 en)
 {
 	u8 __iomem *de_base = hdl->cinfo.de_reg_base;
@@ -583,13 +551,6 @@ static int de_top_set_rtmx_enable(struct de_top_handle *hdl, u32 disp, u8 en)
 	u32 offset;
 	u32 size;
 	u32 shift;
-
-	u8 __iomem *reg_base2;
-	u32 offset2;
-	bool busy;
-	unsigned long flag;
-	bool is_dual = false, unplug = false;
-	int i, j;
 
 	if (hdl->private->dsc->version == 0x350) {
 		ic_ver = sunxi_get_soc_ver();
@@ -601,77 +562,15 @@ static int de_top_set_rtmx_enable(struct de_top_handle *hdl, u32 disp, u8 en)
 			writel(0x6000, de_base + DE_REG_OFFSET(DE_BUF_DEPTH_OFFSET, disp, 0x4));
 	} else if (hdl->private->dsc->version == 0x352 || hdl->private->dsc->version == 0x355) {
 		/*
-		 * sun60iw2 & sun65iw1 all linebufs have 0x3000, and the maximum size of a single de is 0x3000.
-		 * current policy: single display configuration 0x3000,
-		 * dual display config primary display 0x2000, secondary display 0x1000.
+		 * sun60iw2 & sun65iw1 all linebufs have 0x3000, and the maximum size of a single de is 0x2000.
+		 * primary display 0x2000, secondary display 0x1000.
 		 */
-		if (de_top_check_another_rtmx_enabled(hdl, disp) && en)
-			is_dual = true;
-
-		if (de_top_rtmx_is_enabled(hdl, 0) && de_top_rtmx_is_enabled(hdl, 1) && !en) {
-			/* delay to device disabled */
-			unplug = true;
-			goto set_enable;
-		}
-
-		if (is_dual) {
-			for (j = 0; j < 2; j++) {
-				if (de_top_rtmx_is_enabled(hdl, j)) {
-					/* need wait de not busy signal */
-					offset2 = DE_REG_OFFSET(hdl->private->dsc->busy_offset, j, 0x40);
-					reg_base2 = de_base + offset2;
-					i = 0;
-					do {
-						local_irq_save(flag);
-						busy = !!(readl(reg_base2) & 0x10);
-						if (!busy) {
-							if (j == 0)
-								writel(0x2000, de_base + DE_REG_OFFSET(DE_BUF_DEPTH_OFFSET, j, 0x4));
-							else if (j == 1)
-								writel(0x1000, de_base + DE_REG_OFFSET(DE_BUF_DEPTH_OFFSET, j, 0x4));
-							local_irq_restore(flag);
-							break;
-						}
-						local_irq_restore(flag);
-						usleep_range(5, 10);
-						i++;
-					} while (i < 10000);
-				} else {
-					if (j == 0)
-						writel(0x2000, de_base + DE_REG_OFFSET(DE_BUF_DEPTH_OFFSET, j, 0x4));
-					else if (j == 1)
-						writel(0x1000, de_base + DE_REG_OFFSET(DE_BUF_DEPTH_OFFSET, j, 0x4));
-				}
-			}
-		} else {
-			/* one device has been enabled */
-			for (j = 0; j < 2; j++) {
-				if (de_top_rtmx_is_enabled(hdl, j)) {
-					/* need wait de not busy signal */
-					offset2 = DE_REG_OFFSET(hdl->private->dsc->busy_offset, j, 0x40);
-					reg_base2 = de_base + offset2;
-					i = 0;
-					do {
-						local_irq_save(flag);
-						busy = !!(readl(reg_base2) & 0x10);
-						if (!busy) {
-							writel(0x3000, de_base + DE_REG_OFFSET(DE_BUF_DEPTH_OFFSET, j, 0x4));
-							local_irq_restore(flag);
-							break;
-						}
-						local_irq_restore(flag);
-						usleep_range(5, 10);
-						i++;
-					} while (i < 10000);
-					break;
-				}
-			}
-
-			if (!de_top_rtmx_is_enabled(hdl, 0) && !de_top_rtmx_is_enabled(hdl, 1) && en) {
-				writel(0x3000, de_base + DE_REG_OFFSET(DE_BUF_DEPTH_OFFSET, disp, 0x4));
-			}
-		}
+		if (disp == 0)
+			writel(0x2000, de_base + DE_REG_OFFSET(DE_BUF_DEPTH_OFFSET, disp, 0x4));
+		else if (disp == 1)
+			writel(0x1000, de_base + DE_REG_OFFSET(DE_BUF_DEPTH_OFFSET, disp, 0x4));
 	}
+
 /*
 	if (hdl->private->dsc->reserve_ctl_offset) {
 		reg_base = de_base + DE_RESERVE_CTL_OFFSET;
@@ -679,7 +578,6 @@ static int de_top_set_rtmx_enable(struct de_top_handle *hdl, u32 disp, u8 en)
 		reg_val = SET_BITS(8, 1, reg_val, 1);
 		writel(reg_val, reg_base);
 	}*/
-set_enable:
 
 	offset = hdl->private->dsc->glb_ctl_offset;
 	reg_base = de_base + DE_REG_OFFSET(offset, disp, 0x40);
@@ -700,30 +598,6 @@ set_enable:
 	if (hdl->private->dsc->support_rcq_gate)
 		reg_val = SET_BITS(16, 1, reg_val, en ? 1 : 0);
 	writel(reg_val, reg_base);
-
-	if (unplug) {
-		for (j = 0; j < 2; j++) {
-			if (de_top_rtmx_is_enabled(hdl, j)) {
-				/* need wait de not busy signal */
-				offset2 = DE_REG_OFFSET(hdl->private->dsc->busy_offset, j, 0x40);
-				reg_base2 = de_base + offset2;
-				i = 0;
-				do {
-					local_irq_save(flag);
-					busy = !!(readl(reg_base2) & 0x10);
-					if (!busy) {
-						writel(0x3000, de_base + DE_REG_OFFSET(DE_BUF_DEPTH_OFFSET, j, 0x4));
-						local_irq_restore(flag);
-						break;
-					}
-					local_irq_restore(flag);
-					usleep_range(5, 10);
-					i++;
-				} while (i < 10000);
-				break;
-			}
-		}
-	}
 
 	return 0;
 }
@@ -961,20 +835,19 @@ static s32 de_top_set_offline_enable(struct de_top_handle *hdl, bool enable, enu
 	reg_val = readl(reg_base);
 	reg_val = SET_BITS(0, 1, reg_val, enable);
 	reg_val = SET_BITS(8, 1, reg_val, mode);
-	reg_val = SET_BITS(4, 1, reg_val, 1);
+	reg_val = SET_BITS(4, 1, reg_val, 0);
 	writel(reg_val, reg_base);
 	return 0;
 }
 
-static s32 de_top_offline_mode_status(struct de_top_handle *hdl)
+static bool de_top_offline_is_enable(struct de_top_handle *hdl)
 {
-	u8 __iomem *reg_base;
-	u32 reg_val;
+	u8 __iomem *reg_base = hdl->cinfo.de_reg_base + DE_OFFLINE_CTL_OFFSET;
 
-	reg_base = hdl->cinfo.de_reg_base + DE_OFFLINE_CTL_OFFSET;
-	reg_val = readl(reg_base);
+	if (!hdl->private->dsc->support_offline)
+		return false;
 
-	return reg_val & BIT(0) ? 1 : 0;
+	return readl(reg_base) & 0x1;
 }
 
 s32 de_top_offline_realloc_pingpang_buf(struct de_top_handle *hdl, unsigned int width, unsigned int height)
@@ -999,13 +872,13 @@ s32 de_top_offline_realloc_pingpang_buf(struct de_top_handle *hdl, unsigned int 
 
 s32 de_top_offline_mode_config(struct de_top_handle *hdl, struct offline_cfg *cfg)
 {
-	if (hdl->private->dsc->support_offline) {
+	if (hdl->private->dsc->support_offline && cfg->disp == 0) {
 		if (cfg->enable)
 			de_top_offline_realloc_pingpang_buf(hdl, cfg->w, cfg->h);
 
 		return de_top_set_offline_enable(hdl, cfg->enable, cfg->mode);
 	} else if (cfg->enable) {
-		DRM_ERROR("not support offline mode %d\n", cfg->mode);
+		DRM_ERROR("not support offline disp%d mode %d\n", cfg->disp, cfg->mode);
 		return -1;
 	}
 
@@ -1015,10 +888,44 @@ s32 de_top_offline_mode_config(struct de_top_handle *hdl, struct offline_cfg *cf
 s32 de_top_get_offline_mode_status(struct de_top_handle *hdl)
 {
 	if (hdl->private->dsc->support_offline) {
-		return de_top_offline_mode_status(hdl);
+		return de_top_offline_is_enable(hdl);
 	}
 
 	return -1;
+}
+
+s32 de_top_get_offline_info(struct de_top_handle *hdl, struct de_offline_get_info *offline_info)
+{
+	struct offline_mode_status *st = &hdl->private->offline;
+
+	if (hdl->private->dsc->support_offline) {
+		if (!st->virt_addr || !st->phy_addr) {
+			DRM_ERROR("de offline not cfg, when get info\n");
+			return -1;
+		}
+
+		offline_info->vir_addr = st->virt_addr;
+		offline_info->buff_size = st->buff_size;
+		return 0;
+	}
+
+	return -1;
+}
+
+enum de_offline_mode_status de_top_offline_mode_query_state_with_clear(struct de_top_handle *hdl, enum de_offline_mode_status offline_state)
+{
+	u8 __iomem *reg_base = hdl->cinfo.de_reg_base + DE_OFFLINE_CTL_OFFSET;
+	u32 reg_val;
+	u32 state;
+
+	reg_val = readl(reg_base);
+	state = reg_val & offline_state & OFFLINE_BLD_MASK;
+
+	reg_val &= ~OFFLINE_BLD_MASK;
+	reg_val |= state;
+	writel(reg_val, reg_base); /* w1c */
+
+	return state;
 }
 
 static s32 de_top_set_dfs_divison_enable(struct de_top_handle *hdl, u32 disp, u32 n, u32 m, bool en)
@@ -1181,13 +1088,7 @@ int de_top_set_rcq_update(struct de_top_handle *hdl, u32 disp, bool update)
 	u32 offset = hdl->private->dsc->rcq_ctl_offset;
 	u8 __iomem *de_base = hdl->cinfo.de_reg_base;
 	u8 __iomem *reg_base = de_base + DE_REG_OFFSET(offset, disp, 0x40);
-	u32 offset2 = DE_REG_OFFSET(hdl->private->dsc->busy_offset, disp, 0x40);
-	u8 __iomem *reg_base2 = de_base + offset2;
 	u32 reg_val;
-	u32 offset3 = DE_REG_OFFSET(hdl->private->dsc->de_cur_line, disp, 0x40);
-	u8 __iomem *reg_base3 = de_base + offset3;
-	bool busy;
-	unsigned int cur_line;
 	unsigned long flag;
 	int i = 0;
 
@@ -1202,18 +1103,10 @@ int de_top_set_rcq_update(struct de_top_handle *hdl, u32 disp, bool update)
 	SUNXIDRM_TRACE_BEGIN(__func__);
 	do {
 		local_irq_save(flag);
-		busy = !!(readl(reg_base2) & 0x10);
-		if (busy) {
+		if (de_top_query_de_busy_state(hdl, disp)) {
 			reg_val = readl(reg_base);
 			reg_val = SET_BITS(0, 1, reg_val, update ? 0x1 : 0x0);
 			writel(reg_val, reg_base);
-			local_irq_restore(flag);
-			break;
-		}
-
-		cur_line = (readl(reg_base3) & 0xffff0000) >> 16;
-		if (cur_line > 0) {
-			writel(update ? 1 : 0, reg_base);
 			local_irq_restore(flag);
 			break;
 		}
@@ -1228,10 +1121,27 @@ int de_top_set_rcq_update(struct de_top_handle *hdl, u32 disp, bool update)
 
 bool de_top_query_de_busy_state(struct de_top_handle *hdl, u32 disp)
 {
-	u32 offset = DE_REG_OFFSET(hdl->private->dsc->busy_offset, disp, 0x40);
-	u8 __iomem *de_base = hdl->cinfo.de_reg_base;
-	u8 __iomem *reg_busy = de_base + offset;
-	return !!(readl(reg_busy) & 0x10);
+	u8 __iomem *de_base;
+	u32 reg_val, de_cur_line, de_busy;
+
+	if (!hdl->private->dsc->busy_offset && !hdl->private->dsc->de_cur_line) {
+		DRM_ERROR("not support query de busy, need use tcon cur_line\n");
+		return false;
+	}
+
+	if (de_top_offline_is_enable(hdl) && disp == 0) {
+		de_base = hdl->cinfo.de_reg_base + DE_REG_OFFSET(hdl->private->dsc->de_cur_line, disp, 0x40);
+		reg_val = readl(de_base);
+
+		de_cur_line = (reg_val >> 16) & 0xffff;
+		return de_cur_line > 0 ? true : false;
+	} else {
+		de_base = hdl->cinfo.de_reg_base + DE_REG_OFFSET(hdl->private->dsc->busy_offset, disp, 0x40);
+		reg_val = readl(de_base);
+
+		de_busy = reg_val & 0x10;
+		return !!de_busy;
+	}
 }
 
 int de_top_request_rcq_fifo_update(struct de_top_handle *hdl, u32 disp, unsigned long rcq_header_addr, unsigned int rcq_header_byte)
@@ -1316,8 +1226,10 @@ struct de_top_handle *de_top_create(const struct module_create_info *info)
 	hdl->private = kmalloc(sizeof(*hdl->private), GFP_KERNEL | __GFP_ZERO);
 	priv = hdl->private;
 	hdl->private->dsc = get_de_top_desc(info);
-	if (hdl->private->dsc)
+	if (hdl->private->dsc) {
 		hdl->share_scaler = hdl->private->dsc->share_scaler;
+		hdl->support_offline = hdl->private->dsc->support_offline;
+	}
 
 	reg_base = info->de_reg_base + hdl->private->dsc->rcq_ctl_offset;
 	reg_mem_info = &(hdl->private->reg_mem_info);

@@ -14,6 +14,9 @@
 #define _DISP_INCLUDE_H_
 
 #include <linux/types.h>
+#include <linux/ktime.h>
+
+#define LCD_REG_COUNT 27
 
 enum disp_color_space {
 	DISP_UNDEF = 0x00,
@@ -217,6 +220,18 @@ struct disp_video_timings {
 	unsigned long      dclk_rate_set; /* unit: hz */
 	unsigned long long frame_period; /* unit: ns */
 	int                start_delay; /* unit: line */
+};
+
+struct lcd_timing {
+	int id;
+	unsigned int lcd_node;
+	unsigned int value[LCD_REG_COUNT];
+};
+
+struct counter {
+	atomic64_t irqcnt;		/* TCON Interrupt Counter */
+	atomic64_t vblank_cnt;		/* Vblank Counter */
+	ktime_t vblank_timestamp;	/*  */
 };
 
 enum __lcd_irq_id_t {

@@ -31,10 +31,6 @@ struct axp2202_acin_power {
 	struct extcon_dev         *acin_edev;
 	struct notifier_block	  acin_nb;
 	atomic_t                  acin_online;
-
-	/* usb_power_supply */
-	bool                      usb_supply_exist;
-	struct power_supply       *usb_psy;
 };
 
 
@@ -42,56 +38,6 @@ static enum power_supply_property axp2202_acin_props[] = {
 	POWER_SUPPLY_PROP_MODEL_NAME,
 	POWER_SUPPLY_PROP_ONLINE,
 };
-
-enum axp2202_acin_detect_type {
-	DETEC_UNKNOWN = 0,
-	DETEC_BY_GPIO,
-	DETEC_BY_EXTCON,
-};
-
-static void axp2202_init_usb_para(struct axp2202_acin_power *acin_power)
-{
-	struct device_node *np = NULL;
-	struct axp_config_info *axp_config = &acin_power->dts_info;
-	int paras = -1;
-
-	np = of_parse_phandle(acin_power->dev->of_node, "det_usb_supply", 0);
-	if (!of_device_is_available(np)) {
-		PMIC_ERR("axp2202 acin-sypply need usb power, but is not available\n");
-		return;
-	}
-
-	acin_power->usb_supply_exist = true;
-
-	of_property_read_u32(np, "pmu_usbad_cur", &paras);
-	if (paras > 0)
-		axp_config->pmu_usbad_cur = paras;
-	else
-		axp_config->pmu_usbad_cur = 2500;
-
-	of_property_read_u32(np, "pmu_usbpc_cur", &paras);
-	if (paras > 0)
-		axp_config->pmu_usbpc_cur = paras;
-	else
-		axp_config->pmu_usbpc_cur = 500;
-
-	return;
-}
-
-static int axp2202_check_usb(struct axp2202_acin_power *acin_power)
-{
-	if (!acin_power->usb_supply_exist)
-		return 0;
-
-	if (acin_power->usb_psy == NULL) {
-		acin_power->usb_psy = devm_power_supply_get_by_phandle(acin_power->dev,
-									"det_usb_supply");
-	}
-	if (!(acin_power->usb_psy && (!IS_ERR(acin_power->usb_psy))))
-		return 0;
-
-	return 1;
-}
 
 static int axp2202_acin_get_property(struct power_supply *psy,
 				       enum power_supply_property psp,
@@ -135,40 +81,22 @@ static const struct power_supply_desc axp2202_acin_desc = {
 int axp2202_irq_handler_acin_in(void *data)
 {
 	struct axp2202_acin_power *acin_power = data;
-	struct axp_config_info *axp_config = &acin_power->dts_info;
-	union power_supply_propval temp;
 
-	PMIC_INFO("[acin_irq]axp2202_acin_in\n");
+	PMIC_INFO("[acin_irq] axp2202_acin_in\n");
+
 	power_supply_changed(acin_power->acin_supply);
-	if (axp2202_check_usb(acin_power)) {
-		temp.intval = axp_config->pmu_usbad_cur;
-		PMIC_INFO("[acin_irq] ad_current_limit = %d\n", temp.intval);
-		power_supply_set_property(acin_power->usb_psy,
-						POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT, &temp);
-	}
+
 	return 0;
 }
 
 int axp2202_irq_handler_acin_out(void *data)
 {
 	struct axp2202_acin_power *acin_power = data;
-	struct axp_config_info *axp_config = &acin_power->dts_info;
-	union power_supply_propval temp;
 
-	PMIC_INFO("[acout_irq]axp2202_acin_out\n");
+	PMIC_INFO("[acout_irq] axp2202_acin_out\n");
+
 	power_supply_changed(acin_power->acin_supply);
-	if (axp2202_check_usb(acin_power)) {
-		power_supply_get_property(acin_power->usb_psy, POWER_SUPPLY_PROP_ONLINE, &temp);
-		if (temp.intval) {
-			power_supply_get_property(acin_power->usb_psy, POWER_SUPPLY_PROP_USB_TYPE, &temp);
-			if (temp.intval == POWER_SUPPLY_USB_TYPE_SDP) {
-				temp.intval = axp_config->pmu_usbpc_cur;
-				PMIC_INFO("[acout_irq] pc_current_limit = %d\n", temp.intval);
-				power_supply_set_property(acin_power->usb_psy,
-							POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT, &temp);
-			}
-		}
-	}
+
 	return 0;
 }
 
@@ -203,7 +131,7 @@ static void axp2202_acin_power_set_current_fsm(struct work_struct *work)
 		acin_det_status_value_old = acin_det_status_value;
 	}
 
-	PMIC_INFO("[ac_status] ac_in_flag :%d\n", acin_det_status_value);
+	PMIC_DEBUG("[ac_status] ac_in_flag :%d\n", acin_det_status_value);
 	if (acin_det_status_value == 1) {
 		axp2202_irq_handler_acin_in(acin_power);
 	} else {
@@ -257,7 +185,7 @@ static int axp2202_acin_extcon_notifier(struct notifier_block *nb,
 {
 	struct axp2202_acin_power *acin_power = container_of(nb, struct axp2202_acin_power, acin_nb);
 
-	PMIC_INFO("acin event %lu\n", event);
+	PMIC_DEBUG("acin event %lu\n", event);
 	if (event) {
 		atomic_set(&acin_power->acin_online, 1);
 	} else {
@@ -375,7 +303,7 @@ static int axp2202_acin_probe(struct platform_device *pdev)
 	struct axp2202_acin_power *acin_power;
 
 	struct device_node *node = pdev->dev.of_node;
-	struct axp20x_dev *axp_dev = dev_get_drvdata(pdev->dev.parent);
+	struct sunxi_power_dev *axp_dev = dev_get_drvdata(pdev->dev.parent);
 	struct power_supply_config psy_cfg = {};
 
 	if (!of_device_is_available(node)) {
@@ -412,14 +340,6 @@ static int axp2202_acin_probe(struct platform_device *pdev)
 		PMIC_ERR("axp2202 failed to register acin power-sypply\n");
 		ret = PTR_ERR(acin_power->acin_supply);
 		return ret;
-	}
-
-	acin_power->usb_psy = NULL;
-	acin_power->usb_supply_exist = false;
-	if (of_find_property(acin_power->dev->of_node, "det_usb_supply", NULL)) {
-		axp2202_init_usb_para(acin_power);
-	} else {
-		PMIC_ERR("axp2202 acin-sypply failed to find usb power\n");
 	}
 
 	INIT_DELAYED_WORK(&acin_power->acin_supply_mon, axp2202_acin_power_monitor);
@@ -532,7 +452,7 @@ static struct platform_driver axp2202_acin_power_driver = {
 
 module_platform_driver(axp2202_acin_power_driver);
 
-MODULE_VERSION("1.2.0");
+MODULE_VERSION("1.2.1");
 MODULE_AUTHOR("xinouyang <xinouyang@allwinnertech.com>");
 MODULE_DESCRIPTION("axp2202 acin driver");
 MODULE_LICENSE("GPL");

@@ -8,6 +8,7 @@ menu "IR-RX Drivers"
 
 config AW_IR_RX
 	tristate "IR-RX Support for Allwinner SoCs"
+	select INPUT
 	select RC_CORE
 	select RC_DECODERS
 	select IR_NEC_DECODER
@@ -15,6 +16,13 @@ config AW_IR_RX
 	select INPUT_EVDEV
 	help
 	  Say Y if you want to use the internal IR-RX Controller on Allwinner SoCs.
+
+config AW_IRRX_DYNAMIC_DEBUG
+        bool "Enable irrx dynamic debug"
+        depends on AW_IR_RX
+        default y
+        help
+          Enable irrx dynamic debug
 
 config AW_IR_GPIO_RX
 	tristate "Allwinner GPIO IR remote control"

@@ -96,11 +96,11 @@ int os_gpio_write(u32 gpio, __u32 out_value, int force_value_flag)
 
 	if (force_value_flag == 1) {
 		gpio_direction_output(gpio, out_value);
-		__gpio_set_value(gpio, out_value);
+		gpio_set_value(gpio, out_value);
 	} else {
 		if (out_value == 0) {
 			gpio_direction_output(gpio, out_value);
-			__gpio_set_value(gpio, out_value);
+			gpio_set_value(gpio, out_value);
 		} else {
 			gpio_direction_input(gpio);
 		}

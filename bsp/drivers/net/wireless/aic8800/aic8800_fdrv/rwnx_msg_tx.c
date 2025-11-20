@@ -1525,7 +1525,7 @@ int rwnx_send_vendor_hwconfig_req(struct rwnx_hw *rwnx_hw, uint32_t hwconfig_id,
 }
 
 #ifdef CONFIG_APF
-int rwnx_send_set_apf_prog_req(struct rwnx_hw *rwnx_hw, u8_l *program, u32_l program_len)
+int rwnx_send_set_apf_prog_req(struct rwnx_hw *rwnx_hw, u8_l *program, u16_l program_len, u16_l apf_version)
 {
 	struct mm_set_apf_prog_req *req;
 	int error = 0;
@@ -1551,6 +1551,7 @@ int rwnx_send_set_apf_prog_req(struct rwnx_hw *rwnx_hw, u8_l *program, u32_l pro
 			return -ENOMEM;
 
 		req->program_len = buffer_len;
+		req->apf_version = apf_version;
 		req->offset = page;
 		memcpy(req->program, program + buffer_start, buffer_len);
 		buffer_start = buffer_end;

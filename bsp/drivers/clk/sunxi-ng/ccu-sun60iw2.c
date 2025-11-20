@@ -24,7 +24,7 @@
 
 #include "ccu-sun60iw2.h"
 
-#define SUNXI_CCU_VERSION		"1.0.15"
+#define SUNXI_CCU_VERSION		"1.0.17"
 
 /* ccu_des_start */
 
@@ -66,7 +66,9 @@ static struct ccu_nm pll_ddr_clk = {
 	.m		= _SUNXI_CCU_DIV(20, 3), /* output divider */
 	.min_rate	= 159000000,
 	.max_rate	= 2520000000,
-	.sdm		= _SUNXI_CCU_SDM_PATTERN1_INFO(BIT(31), 0x0028, BIT(31) | BIT(27), 0x002C),
+	.sdm		= _SUNXI_CCU_SDM_INFO_PATTERN1(
+			0x0028, BIT(31), /* pattern0 */
+			0x002C, BIT(27)), /* pattern1 */
 	.common		= {
 		.reg		= 0x0020,
 		.hw.init	= CLK_HW_INIT("pll-ddr", "pll-ref",
@@ -86,7 +88,9 @@ static struct ccu_nm pll_peri0_clk = {
 	.n		= _SUNXI_CCU_MULT_MIN_MAX(8, 8, 53, 105),
 	.min_rate	= 1272000000,
 	.max_rate	= 2520000000,
-	.sdm		= _SUNXI_CCU_SDM_PATTERN1_INFO(BIT(31), 0x00A8, BIT(31) | BIT(27), 0x00AC),
+	.sdm		= _SUNXI_CCU_SDM_INFO_PATTERN1(
+			0x00A8, BIT(31), /* pattern0 */
+			0x00AC, BIT(27)), /* pattern1 */
 	.common		= {
 		.reg		= 0x00A0,
 		.hw.init	= CLK_HW_INIT("pll-peri0", "pll-ref",
@@ -128,7 +132,9 @@ static struct ccu_nm pll_peri1_clk = {
 	.n		= _SUNXI_CCU_MULT_MIN_MAX(8, 8, 53, 105),
 	.min_rate	= 1272000000,
 	.max_rate	= 2520000000,
-	.sdm		= _SUNXI_CCU_SDM_PATTERN1_INFO(BIT(31), 0x00C8, BIT(31) | BIT(27), 0x00CC),
+	.sdm		= _SUNXI_CCU_SDM_INFO_PATTERN1(
+			0x00C8, BIT(31), /* pattern0 */
+			0x00CC, BIT(27)), /* pattern1 */
 	.common		= {
 		.reg		= 0x00C0,
 		.hw.init	= CLK_HW_INIT("pll-peri1", "pll-ref",
@@ -173,7 +179,9 @@ static struct ccu_nm pll_gpu0_clk = {
 	.m		= _SUNXI_CCU_DIV(20, 3), /* output divider */
 	.min_rate	= 159000000,
 	.max_rate	= 2520000000,
-	.sdm		= _SUNXI_CCU_SDM_PATTERN1_INFO(BIT(31), 0x00E8, BIT(31) | BIT(27), 0x00EC),
+	.sdm		= _SUNXI_CCU_SDM_INFO_PATTERN1(
+			0x00E8, BIT(31), /* pattern0 */
+			0x00EC, BIT(27)), /* pattern1 */
 	.common		= {
 		.reg		= 0x00E0,
 		.hw.init	= CLK_HW_INIT("pll-gpu", "pll-ref",
@@ -193,7 +201,9 @@ static struct ccu_nm pll_video0_clk = {
 	.n		= _SUNXI_CCU_MULT_MIN_MAX(8, 8, 53, 105),
 	.min_rate	= 1272000000,
 	.max_rate	= 2520000000,
-	.sdm		= _SUNXI_CCU_SDM_PATTERN1_INFO(BIT(31), 0x0128, BIT(31) | BIT(27), 0x012C),
+	.sdm		= _SUNXI_CCU_SDM_INFO_PATTERN1(
+			0x0128, BIT(31), /* pattern0 */
+			0x012C, BIT(27)), /* pattern1 */
 	.common		= {
 		.reg		= 0x0120,
 		.hw.init	= CLK_HW_INIT("pll-video0", "pll-ref",
@@ -224,7 +234,9 @@ static struct ccu_nm pll_video1_clk = {
 	.n		= _SUNXI_CCU_MULT_MIN_MAX(8, 8, 53, 105),
 	.min_rate	= 1272000000,
 	.max_rate	= 2520000000,
-	.sdm		= _SUNXI_CCU_SDM_PATTERN1_INFO(BIT(31), 0x0148, BIT(31) | BIT(27), 0x014C),
+	.sdm		= _SUNXI_CCU_SDM_INFO_PATTERN1(
+			0x0148, BIT(31), /* pattern0 */
+			0x014C, BIT(27)), /* pattern1 */
 	.common		= {
 		.reg		= 0x0140,
 		.hw.init	= CLK_HW_INIT("pll-video1", "pll-ref",
@@ -254,7 +266,9 @@ static struct ccu_nm pll_video2_clk = {
 	.n		= _SUNXI_CCU_MULT_MIN_MAX(8, 8, 53, 105),
 	.min_rate	= 1272000000,
 	.max_rate	= 2520000000,
-	.sdm		= _SUNXI_CCU_SDM_PATTERN1_INFO(BIT(31), 0x0168, BIT(31) | BIT(27), 0x016C),
+	.sdm		= _SUNXI_CCU_SDM_INFO_PATTERN1(
+			0x0168, BIT(31), /* pattern0 */
+			0x016C, BIT(27)), /* pattern1 */
 	.common		= {
 		.reg		= 0x0160,
 		.hw.init	= CLK_HW_INIT("pll-video2", "pll-ref",
@@ -285,7 +299,9 @@ static struct ccu_nm pll_ve0_clk = {
 	.m		= _SUNXI_CCU_DIV(20, 3), /* output divider */
 	.min_rate	= 159000000,
 	.max_rate	= 2520000000,
-	.sdm		= _SUNXI_CCU_SDM_PATTERN1_INFO(BIT(31), 0x0228, BIT(31) | BIT(27), 0x022C),
+	.sdm		= _SUNXI_CCU_SDM_INFO_PATTERN1(
+			0x0228, BIT(31), /* pattern0 */
+			0x022C, BIT(27)), /* pattern1 */
 	.common		= {
 		.reg		= 0x0220,
 		.hw.init	= CLK_HW_INIT("pll-ve0", "pll-ref",
@@ -306,7 +322,9 @@ static struct ccu_nm pll_ve1_clk = {
 	.m		= _SUNXI_CCU_DIV(20, 3), /* output divider */
 	.min_rate	= 159000000,
 	.max_rate	= 2520000000,
-	.sdm		= _SUNXI_CCU_SDM_PATTERN1_INFO(BIT(31), 0x0248, BIT(31) | BIT(27), 0x024C),
+	.sdm		= _SUNXI_CCU_SDM_INFO_PATTERN1(
+			0x0248, BIT(31), /* pattern0 */
+			0x024C, BIT(27)), /* pattern1 */
 	.common		= {
 		.reg		= 0x0240,
 		.hw.init	= CLK_HW_INIT("pll-ve1", "pll-ref",
@@ -355,7 +373,9 @@ static struct ccu_nm pll_audio1_clk = {
 	.n		= _SUNXI_CCU_MULT_MIN_MAX(8, 8, 75, 129),
 	.min_rate	= 1800000000,
 	.max_rate	= 3096000000,
-	.sdm		= _SUNXI_CCU_SDM_PATTERN1_INFO(BIT(31), 0x0288, BIT(31) | BIT(27), 0x028C),
+	.sdm		= _SUNXI_CCU_SDM_INFO_PATTERN1(
+			0x0288, BIT(31), /* pattern0 */
+			0x028C, BIT(27)), /* pattern1 */
 	.common		= {
 		.reg		= 0x0280,
 		.hw.init	= CLK_HW_INIT("pll-audio1", "pll-ref",
@@ -386,7 +406,9 @@ static struct ccu_nm pll_npu_clk = {
 	.m		= _SUNXI_CCU_DIV(20, 3), /* output divider */
 	.min_rate	= 159000000,
 	.max_rate	= 2520000000,
-	.sdm		= _SUNXI_CCU_SDM_PATTERN1_INFO(BIT(31), 0x02A8, BIT(31) | BIT(27), 0x02AC),
+	.sdm		= _SUNXI_CCU_SDM_INFO_PATTERN1(
+			0x02A8, BIT(31), /* pattern0 */
+			0x02AC, BIT(27)), /* pattern1 */
 	.common		= {
 		.reg		= 0x02A0,
 		.hw.init	= CLK_HW_INIT("pll-npu", "pll-ref",
@@ -406,7 +428,9 @@ static struct ccu_nm pll_de_clk = {
 	.n		= _SUNXI_CCU_MULT_MIN_MAX(8, 8, 53, 105),
 	.min_rate	= 1272000000,
 	.max_rate	= 2520000000,
-	.sdm		= _SUNXI_CCU_SDM_PATTERN1_INFO(BIT(31), 0x02E8, BIT(31) | BIT(27), 0x02EC),
+	.sdm		= _SUNXI_CCU_SDM_INFO_PATTERN1(
+			0x02E8, BIT(31), /* pattern0 */
+			0x02EC, BIT(27)), /* pattern1 */
 	.common		= {
 		.reg		= 0x02E0,
 		.hw.init	= CLK_HW_INIT("pll-de", "pll-ref",

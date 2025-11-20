@@ -2153,8 +2153,6 @@ check_len_update:
 								return 0;
 							}
 
-							dev_kfree_skb(skb);
-
 							skb_tmp = defrag_info->skb;
 							list_del_init(&defrag_info->list);
 							if (timer_pending(&defrag_info->defrag_timer)) {
@@ -2165,6 +2163,8 @@ check_len_update:
 
 							if (!rwnx_rx_data_skb(rwnx_hw, rwnx_vif, skb_tmp, hw_rxhdr))
 								dev_kfree_skb(skb_tmp);
+
+							dev_kfree_skb(skb);
 
 							return 0;
 						}

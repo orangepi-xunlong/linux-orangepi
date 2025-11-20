@@ -45,11 +45,6 @@ void sunxi_modem_set_power(bool on_off)
 
 	pdev = modem_data->pdev;
 
-	if (modem_data->always_on && !on_off) {
-		dev_warn(&pdev->dev, "modem: always on, cannot be off\n");
-		return;
-	}
-
 	mutex_lock(&sunxi_modem_mutex);
 	if (on_off != modem_data->power_state) {
 		ret = sunxi_modem_on(modem_data, on_off);
@@ -59,15 +54,6 @@ void sunxi_modem_set_power(bool on_off)
 	mutex_unlock(&sunxi_modem_mutex);
 }
 EXPORT_SYMBOL_GPL(sunxi_modem_set_power);
-
-void sunxi_modem_set_power_boot_state(void)
-{
-	if (!modem_data)
-		return;
-
-	if (modem_data->boot_on || modem_data->always_on)
-		sunxi_modem_set_power(1);
-}
 
 static int sunxi_modem_on(struct sunxi_modem_platdata *data, bool on_off)
 {
@@ -164,14 +150,14 @@ static ssize_t state_store(struct device *dev,
 static DEVICE_ATTR(state, S_IRUGO | S_IWUSR,
 		state_show, state_store);
 
-static struct attribute *miscdev_attributes_wlan[] = {
+static struct attribute *miscdev_attributes_modem[] = {
 	&dev_attr_state.attr,
 	NULL,
 };
 
 static struct attribute_group miscdev_attribute_group = {
 	.name  = "modem",
-	.attrs = miscdev_attributes_wlan,
+	.attrs = miscdev_attributes_modem,
 };
 
 int sunxi_modem_init(struct platform_device *pdev)
@@ -179,7 +165,11 @@ int sunxi_modem_init(struct platform_device *pdev)
 	struct device_node *np = of_find_matching_node(pdev->dev.of_node, sunxi_modem_ids);
 	struct device *dev = &pdev->dev;
 	struct sunxi_modem_platdata *data;
+#if (LINUX_VERSION_CODE <= KERNEL_VERSION(6, 2, 0))
 	enum of_gpio_flags config;
+#else
+	u32 config = 0;
+#endif
 	int ret = 0;
 	int count, i;
 
@@ -228,11 +218,20 @@ int sunxi_modem_init(struct platform_device *pdev)
 		dev_info(dev, "modem power[%d] (%s)\n", i, data->power_name[i]);
 	}
 
+#if (LINUX_VERSION_CODE > KERNEL_VERSION(6, 2, 0))
+	data->gpio_modem_rst = of_get_named_gpio(np, "modem_rst", 0);
+#else
 	data->gpio_modem_rst = of_get_named_gpio_flags(np, "modem_rst", 0, &config);
+#endif
 	if (!gpio_is_valid(data->gpio_modem_rst)) {
 		dev_err(dev, "get gpio modem_rst failed\n");
 	} else {
+#if (LINUX_VERSION_CODE > KERNEL_VERSION(6, 2, 0))
+		of_property_read_u32_index(np, "modem_rst", 3, &config);
+		data->gpio_modem_rst_assert = (config == GPIO_ACTIVE_LOW) ? 0 : 1;
+#else
 		data->gpio_modem_rst_assert = (config == OF_GPIO_ACTIVE_LOW) ? 0 : 1;
+#endif
 		dev_info(dev, "modem_rst gpio=%d assert=%d\n", data->gpio_modem_rst, data->gpio_modem_rst_assert);
 
 		ret = devm_gpio_request(dev, data->gpio_modem_rst, "modem_rst");
@@ -250,10 +249,6 @@ int sunxi_modem_init(struct platform_device *pdev)
 		}
 		gpio_set_value(data->gpio_modem_rst, data->gpio_modem_rst_assert);
 	}
-
-	data->boot_on = of_property_read_bool(np, "regulator-boot-on") ? 1 : 0;
-	data->always_on = of_property_read_bool(np, "regulator-always-on") ? 1 : 0;
-	dev_info(dev, "modem power boot-on: %d, always-on: %d\n", data->boot_on, data->always_on);
 
 	ret = sysfs_create_group(&sunxi_rfkill_miscdev.this_device->kobj,
 			&miscdev_attribute_group);

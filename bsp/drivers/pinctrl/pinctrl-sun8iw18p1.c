@@ -11,7 +11,6 @@
  * warranty of any kind, whether express or implied.
  * */
 
-#include <sunxi-log.h>
 #include <linux/module.h>
 #include <linux/platform_device.h>
 #include <linux/of.h>
@@ -556,4 +555,4 @@ postcore_initcall(sun8iw18p1_pio_init);
 MODULE_AUTHOR("huangshuosheng<huangshuosheng@allwinnertech.com>");
 MODULE_DESCRIPTION("Allwinner sun8iw18p1 pio pinctrl driver");
 MODULE_LICENSE("GPL");
-MODULE_VERSION("1.0.2");
+MODULE_VERSION("1.0.3");

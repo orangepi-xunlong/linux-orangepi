@@ -88,6 +88,7 @@ static struct fence_timeline *fence_timeline_create(const char *name)
 	timeline->context = dma_fence_context_alloc(1);
 	strlcpy(timeline->name, name, sizeof(timeline->name));
 	INIT_LIST_HEAD(&timeline->pt_list);
+	spin_lock_init(&timeline->lock);
 
 	/* add the new timeline into timeline_list_head */
 	spin_lock_irqsave(&timeline_list_lock, flags);

@@ -15,18 +15,24 @@
 #ifndef _SUNXI_CE_CDEV_H_
 #define _SUNXI_CE_CDEV_H_
 
-#include <crypto/internal/akcipher.h>
-#include <crypto/aes.h>
-#include <crypto/sha1.h>
-#include <crypto/sha2.h>
-#include <crypto/sha3.h>
-#include <crypto/hash.h>
-#include <crypto/rng.h>
-#include <crypto/internal/skcipher.h>
-
 #include <linux/scatterlist.h>
 #include <linux/interrupt.h>
 #include <linux/cdev.h>
+#include <linux/version.h>
+
+#include <crypto/aes.h>
+#include <crypto/hash.h>
+#include <crypto/rng.h>
+#include <crypto/internal/skcipher.h>
+#include <crypto/internal/akcipher.h>
+
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 15, 0)
+#include <crypto/sha.h>
+#else
+#include <crypto/sha1.h>
+#include <crypto/sha2.h>
+#include <crypto/sha3.h>
+#endif
 
 #define SUNXI_SS_DEV_NAME		"ce"
 #define SUNXI_CE_DEV_NODE_NAME		"allwinner,sunxi-ce"

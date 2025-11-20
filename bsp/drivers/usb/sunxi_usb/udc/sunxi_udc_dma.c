@@ -205,6 +205,7 @@ void sunxi_udc_dma_set_config(struct sunxi_udc_ep *ep,
 	dma_channel_t *pchan = NULL;
 	__u32 is_tx = 0;
 	__u32 packet_size = 0;
+	unsigned long flags = 0;
 
 	struct dma_config_t DmaConfig;
 
@@ -213,11 +214,14 @@ void sunxi_udc_dma_set_config(struct sunxi_udc_ep *ep,
 	is_tx = is_tx_ep(ep);
 	packet_size = ep->ep.maxpacket;
 
+	spin_lock_irqsave(&ep->dev->lock, flags);
 	dma_hdl = sunxi_udc_dma_request();
 	if (dma_hdl == NULL) {
 		DMSG_ERR("ERR: sunxi_udc_dma_request failed dma_hdl is NULL\n");
+		spin_unlock_irqrestore(&ep->dev->lock, flags);
 		return;
 	}
+	spin_unlock_irqrestore(&ep->dev->lock, flags);
 
 	ep->dma_hdle = dma_hdl;
 	pchan = (dma_channel_t *)dma_hdl;
@@ -241,12 +245,14 @@ void sunxi_udc_dma_set_config(struct sunxi_udc_ep *ep,
 	DmaConfig.dma_wordaddr_bypass = ep->dma_wordaddr_bypass;
 
 	if (g_dma_ext_debug) {
-		DMSG_INFO("buf: 0x%llx, len: %d, addr: 0x%08x, ext: %d, bypass: %d, en: [%s]\n",
+		DMSG_INFO("buf: 0x%llx, len: %d, addr: 0x%08x, ext: %d, bypass: %d, en: [%s], chan: %d\n",
 			  buff_addr, len, DmaConfig.dma_sdram_str_addr, DmaConfig.dma_sdram_str_addr_ext,
-			  DmaConfig.dma_wordaddr_bypass, DmaConfig.dma_addr_ext_enable ? "Y" : "N");
+			  DmaConfig.dma_wordaddr_bypass, DmaConfig.dma_addr_ext_enable ? "Y" : "N", DmaConfig.dma_num);
 	}
 
+	spin_lock_irqsave(&ep->dev->lock, flags);
 	sunxi_dma_set_config(dma_hdl, &DmaConfig);
+	spin_unlock_irqrestore(&ep->dev->lock, flags);
 }
 EXPORT_TRACEPOINT_SYMBOL_GPL(sunxi_udc_dma_set_config);
 /* start dma transfer */

@@ -25,4 +25,9 @@
 #define MEDIA_BUS_FMT_RGB888_1X7X4_SPWG         0x1011
 #define MEDIA_BUS_FMT_RGB888_1X7X4_JEIDA        0x1012
 
+/* rgb */
+#define MEDIA_BUS_FMT_RGB565_1X16               0x1017
+#define MEDIA_BUS_FMT_RGB666_1X18               0x1009
+#define MEDIA_BUS_FMT_RGB888_1X24               0x100a
+
 #endif

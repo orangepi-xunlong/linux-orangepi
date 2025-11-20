@@ -13,6 +13,8 @@
  *
  */
 /* #define DEBUG */
+#define SUNXI_MODNAME "irtx"
+#include <sunxi-log.h>
 #include <linux/module.h>
 #include <linux/init.h>
 #include <linux/kernel.h>
@@ -76,7 +78,7 @@ static int sunxi_irtx_regulator_request(struct sunxi_irtx *chip)
 
 	chip->regulator = regulator_get(&chip->pdev->dev, "irtx");
 	if (IS_ERR(chip->regulator)) {
-		dev_err(&chip->pdev->dev, "get supply failed!\n");
+		sunxi_err(&chip->pdev->dev, "get supply failed!\n");
 		return -EPROBE_DEFER;
 	}
 
@@ -101,7 +103,7 @@ static int sunxi_irtx_regulator_enable(struct sunxi_irtx *chip)
 		return 0;
 
 	if (regulator_enable(chip->regulator)) {
-		dev_err(&chip->pdev->dev, "enable regulator failed!\n");
+		sunxi_err(&chip->pdev->dev, "enable regulator failed!\n");
 		return -EINVAL;
 	}
 
@@ -147,7 +149,7 @@ static inline bool irtx_fifo_empty(struct sunxi_irtx *chip)
 	struct device *dev = &chip->pdev->dev;
 
 	reg_val = readl(chip->reg_base + IR_TX_TACR);
-	dev_dbg(dev, "%3u bytes fifo available\n", reg_val);
+	sunxi_debug(dev, "%3u bytes fifo available\n", reg_val);
 
 	return (reg_val == IR_TX_FIFO_SIZE);
 }
@@ -158,7 +160,7 @@ static inline bool irtx_fifo_full(struct sunxi_irtx *chip)
 	struct device *dev = &chip->pdev->dev;
 
 	reg_val = readl(chip->reg_base + IR_TX_TACR);
-	dev_dbg(dev, "%3u bytes fifo available\n", reg_val);
+	sunxi_debug(dev, "%3u bytes fifo available\n", reg_val);
 
 	return (reg_val == 0);
 }
@@ -190,7 +192,7 @@ void irtx_packet_handler(unsigned char address, unsigned char command)
 	tx_code[2] = command;
 	tx_code[3] = ~command;
 
-	dev_dbg(chip->pdev->dev, "addr: 0x%x  addr': 0x%x  cmd: 0x%x  cmd': 0x%x\n",
+	sunxi_debug(chip->pdev->dev, "addr: 0x%x  addr': 0x%x  cmd: 0x%x  cmd': 0x%x\n",
 			tx_code[0], tx_code[1], tx_code[2], tx_code[3]);
 
 	if (IR_TX_CLK_Ts == 1) {
@@ -247,7 +249,7 @@ void irtx_packet_handler(unsigned char address, unsigned char command)
 	for (i = 0; i < count; i++)
 		chip->ir_rawbuf.tx_buf[chip->ir_rawbuf.tx_dcnt++] = buffer[i];
 
-	dev_dbg(chip->pdev->dev, "tx_dcnt = %d\n", chip->ir_rawbuf.tx_dcnt);
+	sunxi_debug(chip->pdev->dev, "tx_dcnt = %d\n", chip->ir_rawbuf.tx_dcnt);
 }
 */
 
@@ -257,7 +259,7 @@ static int sunxi_send_ir_code(struct sunxi_irtx *chip)
 	unsigned int reg_val;
 	struct device *dev = &chip->pdev->dev;
 
-	dev_dbg(dev, "enter\n");
+	sunxi_debug(dev, "enter\n");
 
 	/* reset transmit and flush fifo */
 	reg_val = readl(chip->reg_base + IR_TX_GLR);
@@ -267,13 +269,13 @@ static int sunxi_send_ir_code(struct sunxi_irtx *chip)
 	/* get idle threshold */
 	idle_threshold = (readl(chip->reg_base + IR_TX_IDC_H) << 8)
 		| readl(chip->reg_base + IR_TX_IDC_L);
-	dev_dbg(dev, "idle_threshold = %d\n", idle_threshold);
+	sunxi_debug(dev, "idle_threshold = %d\n", idle_threshold);
 
 	/* set transmit threshold */
 	writel((chip->ir_rawbuf.tx_dcnt - 1), chip->reg_base + IR_TX_TR);
 
 	if (chip->ir_rawbuf.tx_dcnt > IR_TX_FIFO_SIZE) {
-		dev_err(dev, "invalid packet\n");
+		sunxi_err(dev, "invalid packet\n");
 		return -1;
 	}
 	for (i = 0; i < chip->ir_rawbuf.tx_dcnt; i++) {
@@ -282,11 +284,11 @@ static int sunxi_send_ir_code(struct sunxi_irtx *chip)
 	}
 
 	reg_val = readl(chip->reg_base + IR_TX_TACR);
-	dev_dbg(dev, "%3u bytes fifo available\n", reg_val);
+	sunxi_debug(dev, "%3u bytes fifo available\n", reg_val);
 
 	if (IR_TX_CYCLE_TYPE) {
 		for (i = 0; i < chip->ir_rawbuf.tx_dcnt; i++)
-			dev_dbg(dev, "%d, ir txbuffer code = 0x%x!\n",
+			sunxi_debug(dev, "%d, ir txbuffer code = 0x%x!\n",
 					i, chip->ir_rawbuf.tx_buf[i]);
 		reg_val = readl(chip->reg_base + IR_TX_CR);
 		reg_val |= (0x01 << 7);
@@ -294,7 +296,7 @@ static int sunxi_send_ir_code(struct sunxi_irtx *chip)
 	} else {
 		while (!irtx_fifo_empty(chip)) {
 			reg_val = readl(chip->reg_base + IR_TX_TACR);
-			dev_dbg(dev, "fifo under run. %3u bytes fifo available\n",
+			sunxi_debug(dev, "fifo under run. %3u bytes fifo available\n",
 				reg_val);
 		}
 	}
@@ -303,9 +305,9 @@ static int sunxi_send_ir_code(struct sunxi_irtx *chip)
 	while ((readl(chip->reg_base + IR_TX_ICR_H) << 8
 				| readl(chip->reg_base + IR_TX_ICR_L))
 				< idle_threshold)
-		dev_dbg(dev, "wait idle\n");
+		sunxi_debug(dev, "wait idle\n");
 
-	dev_dbg(dev, "finish\n");
+	sunxi_debug(dev, "finish\n");
 
 	return 0;
 }
@@ -318,7 +320,7 @@ static irqreturn_t sunxi_irtx_isr(int irqno, void *dev_id)
 
 	/* Clear the interrupt */
 	intsta = readl(chip->reg_base + IR_TX_STAR);
-	dev_dbg(dev, "IR TX IRQ Serve %#x\n", intsta);
+	sunxi_debug(dev, "IR TX IRQ Serve %#x\n", intsta);
 
 	intsta |= intsta & 0xff;
 	writel(intsta, chip->reg_base + IR_TX_STAR);
@@ -363,31 +365,31 @@ static void sunxi_irtx_reg_cfg(struct sunxi_irtx *chip)
 	 * */
 	writel(IR_TX_GL_VALUE, chip->reg_base + IR_TX_GLR);
 
-	dev_dbg(dev, "Offset: 0x%2x IR_TX_GLR   = 0x%2x\n", IR_TX_GLR,
+	sunxi_debug(dev, "Offset: 0x%2x IR_TX_GLR   = 0x%2x\n", IR_TX_GLR,
 			readl(chip->reg_base + IR_TX_GLR));
-	dev_dbg(dev, "Offset: 0x%2x IR_TX_MCR   = 0x%2x\n", IR_TX_MCR,
+	sunxi_debug(dev, "Offset: 0x%2x IR_TX_MCR   = 0x%2x\n", IR_TX_MCR,
 			readl(chip->reg_base + IR_TX_MCR));
-	dev_dbg(dev, "Offset: 0x%2x IR_TX_CR    = 0x%2x\n", IR_TX_CR,
+	sunxi_debug(dev, "Offset: 0x%2x IR_TX_CR    = 0x%2x\n", IR_TX_CR,
 			readl(chip->reg_base + IR_TX_CR));
-	dev_dbg(dev, "Offset: 0x%2x IR_TX_IDC_H = 0x%2x\n", IR_TX_IDC_H,
+	sunxi_debug(dev, "Offset: 0x%2x IR_TX_IDC_H = 0x%2x\n", IR_TX_IDC_H,
 			readl(chip->reg_base + IR_TX_IDC_H));
-	dev_dbg(dev, "Offset: 0x%2x IR_TX_IDC_L = 0x%2x\n", IR_TX_IDC_L,
+	sunxi_debug(dev, "Offset: 0x%2x IR_TX_IDC_L = 0x%2x\n", IR_TX_IDC_L,
 			readl(chip->reg_base + IR_TX_IDC_L));
-	dev_dbg(dev, "Offset: 0x%2x IR_TX_ICR_H = 0x%2x\n", IR_TX_ICR_H,
+	sunxi_debug(dev, "Offset: 0x%2x IR_TX_ICR_H = 0x%2x\n", IR_TX_ICR_H,
 			readl(chip->reg_base + IR_TX_ICR_H));
-	dev_dbg(dev, "Offset: 0x%2x IR_TX_ICR_L = 0x%2x\n", IR_TX_ICR_L,
+	sunxi_debug(dev, "Offset: 0x%2x IR_TX_ICR_L = 0x%2x\n", IR_TX_ICR_L,
 			readl(chip->reg_base + IR_TX_ICR_L));
-	dev_dbg(dev, "Offset: 0x%2x IR_TX_TELR  = 0x%2x\n", IR_TX_TELR,
+	sunxi_debug(dev, "Offset: 0x%2x IR_TX_TELR  = 0x%2x\n", IR_TX_TELR,
 			readl(chip->reg_base + IR_TX_TELR));
-	dev_dbg(dev, "Offset: 0x%2x IR_TX_INTC  = 0x%2x\n", IR_TX_INTC,
+	sunxi_debug(dev, "Offset: 0x%2x IR_TX_INTC  = 0x%2x\n", IR_TX_INTC,
 			readl(chip->reg_base + IR_TX_INTC));
-	dev_dbg(dev, "Offset: 0x%2x IR_TX_TACR  = 0x%2x\n", IR_TX_TACR,
+	sunxi_debug(dev, "Offset: 0x%2x IR_TX_TACR  = 0x%2x\n", IR_TX_TACR,
 			readl(chip->reg_base + IR_TX_TACR));
-	dev_dbg(dev, "Offset: 0x%2x IR_TX_STAR  = 0x%2x\n", IR_TX_STAR,
+	sunxi_debug(dev, "Offset: 0x%2x IR_TX_STAR  = 0x%2x\n", IR_TX_STAR,
 			readl(chip->reg_base + IR_TX_STAR));
-	dev_dbg(dev, "Offset: 0x%2x IR_TX_TR    = 0x%2x\n", IR_TX_TR,
+	sunxi_debug(dev, "Offset: 0x%2x IR_TX_TR    = 0x%2x\n", IR_TX_TR,
 			readl(chip->reg_base + IR_TX_TR));
-	dev_dbg(dev, "Offset: 0x%2x IR_TX_DMAC  = 0x%2x\n", IR_TX_DMAC,
+	sunxi_debug(dev, "Offset: 0x%2x IR_TX_DMAC  = 0x%2x\n", IR_TX_DMAC,
 			readl(chip->reg_base + IR_TX_DMAC));
 
 }
@@ -409,41 +411,41 @@ static int irtx_clk_cfg(struct sunxi_irtx *chip)
 
 	ret = reset_control_deassert(chip->reset);
 	if (ret) {
-		dev_err(dev, "deassert ir tx rst failed!\n");
+		sunxi_err(dev, "deassert ir tx rst failed!\n");
 		return ret;
 	}
 
 	rate = clk_get_rate(chip->bclk);
-	dev_dbg(dev, "get ir bus clk rate %dHZ\n", (__u32)rate);
+	sunxi_debug(dev, "get ir bus clk rate %dHZ\n", (__u32)rate);
 
 	rate = clk_get_rate(chip->pclk);
-	dev_dbg(dev, "get ir parent clk rate %dHZ\n", (__u32)rate);
+	sunxi_debug(dev, "get ir parent clk rate %dHZ\n", (__u32)rate);
 
 	ret = clk_set_parent(chip->mclk, chip->pclk);
 	if (ret) {
-		dev_err(dev, "set ir_clk parent failed!\n");
+		sunxi_err(dev, "set ir_clk parent failed!\n");
 		goto assert_reset;
 	}
 
 	ret = clk_set_rate(chip->mclk, IR_TX_CLK);
 	if (ret) {
-		dev_err(dev, "set ir clock freq to %d failed!\n", IR_TX_CLK);
+		sunxi_err(dev, "set ir clock freq to %d failed!\n", IR_TX_CLK);
 		goto assert_reset;
 	}
-	dev_dbg(dev, "set ir_clk rate %dHZ\n", IR_TX_CLK);
+	sunxi_debug(dev, "set ir_clk rate %dHZ\n", IR_TX_CLK);
 
 	rate = clk_get_rate(chip->mclk);
-	dev_dbg(dev, "get ir_clk rate %dHZ\n", (__u32)rate);
+	sunxi_debug(dev, "get ir_clk rate %dHZ\n", (__u32)rate);
 
 	ret = clk_prepare_enable(chip->bclk);
 	if (ret) {
-		dev_err(dev, "try to enable bus clk failed!\n");
+		sunxi_err(dev, "try to enable bus clk failed!\n");
 		goto assert_reset;
 	}
 
 	ret = clk_prepare_enable(chip->mclk);
 	if (ret) {
-		dev_err(dev, "try to enable ir_clk failed!\n");
+		sunxi_err(dev, "try to enable ir_clk failed!\n");
 		goto clk_unprepare;
 	}
 
@@ -466,14 +468,14 @@ static int sunxi_irtx_select_pinctrl_state(char *name, struct sunxi_irtx *chip)
 
 	pctrl_state = pinctrl_lookup_state(chip->pctrl, name);
 	if (IS_ERR(pctrl_state)) {
-		dev_err(dev, "IR_TX pinctrl_lookup_state(%s) failed! return %p \n",
+		sunxi_err(dev, "IR_TX pinctrl_lookup_state(%s) failed! return %p \n",
 				name, pctrl_state);
 		return -1;
 	}
 
 	ret = pinctrl_select_state(chip->pctrl, pctrl_state);
 	if (ret) {
-		dev_err(dev, "IR_TX pinctrl_select_state(%s) failed! return %d \n",
+		sunxi_err(dev, "IR_TX pinctrl_select_state(%s) failed! return %d \n",
 				name, ret);
 		return ret;
 	}
@@ -488,19 +490,19 @@ static int sunxi_irtx_hw_init(struct sunxi_irtx *chip)
 
 	ret = sunxi_irtx_select_pinctrl_state(PINCTRL_STATE_DEFAULT, chip);
 	if (ret) {
-		dev_err(dev, "request gpio failed!\n");
+		sunxi_err(dev, "request gpio failed!\n");
 		return ret;
 	}
 	ret = sunxi_irtx_regulator_enable(chip);
 	if (ret) {
-		dev_err(dev, "enable regulator failed!\n");
+		sunxi_err(dev, "enable regulator failed!\n");
 		return ret;
 	}
 
 	ret = irtx_clk_cfg(chip);
 	if (ret) {
 		sunxi_irtx_regulator_disable(chip);
-		dev_err(dev, "ir tx clk configure failed!\n");
+		sunxi_err(dev, "ir tx clk configure failed!\n");
 		return ret;
 	}
 
@@ -535,22 +537,22 @@ static int sunxi_irtx_set_carrier(struct rc_dev *rcdev, u32 carrier_freq)
 	struct device *dev = &chip->pdev->dev;
 
 	if ((carrier_freq > 6000000) || (carrier_freq < 15000)) {
-		dev_err(dev, "invalid frequency of carrier: %d\n", carrier_freq);
+		sunxi_err(dev, "invalid frequency of carrier: %d\n", carrier_freq);
 		return -EINVAL;
 	}
 
 	/* First, get the duty cycle of modulated carrier */
 	reg_val = readl(chip->reg_base + IR_TX_GLR);
 	drmc = (reg_val >> 5) & 0x3;
-	dev_dbg(dev, "DRMC is %d\n", drmc);
-	dev_dbg(dev, "0: duty cycle 50%%\n"
+	sunxi_debug(dev, "DRMC is %d\n", drmc);
+	sunxi_debug(dev, "0: duty cycle 50%%\n"
 						"1: duty cycle 33%%\n"
 						"2: duty cycle 25%%\n");
 
 	/* Then, calculate the value of N */
 	reg_val = IR_TX_CLK / ((2 + drmc) * carrier_freq) - 1;
 	reg_val &= 0xff;
-	dev_dbg(dev,  "RFMC is %2x\n", reg_val);
+	sunxi_debug(dev,  "RFMC is %2x\n", reg_val);
 	writel(reg_val, chip->reg_base + IR_TX_MCR);
 
 	return 0;
@@ -563,27 +565,27 @@ static int sunxi_irtx_set_duty_cycle(struct rc_dev *rcdev, u32 duty_cycle)
 	struct device *dev = &chip->pdev->dev;
 
 	if (duty_cycle > 100) {
-		dev_err(dev, "invalid duty_cycle: %d\n", duty_cycle);
+		sunxi_err(dev, "invalid duty_cycle: %d\n", duty_cycle);
 		return -EINVAL;
 	}
 
-	dev_dbg(dev, "set duty cycle to %d\n", duty_cycle);
+	sunxi_debug(dev, "set duty cycle to %d\n", duty_cycle);
 	reg_val = readl(chip->reg_base + IR_TX_GLR);
 
 	/* clear bit5 and bit6 */
 	reg_val &= 0x9f;
 	if (duty_cycle < 30) {
 		reg_val |= 0x40; /* set bit6=1 */
-		dev_dbg(dev, "set duty cycle to 25%%\n");
+		sunxi_debug(dev, "set duty cycle to 25%%\n");
 	} else if (duty_cycle < 40) {
 		reg_val |= 0x20; /* set bit5=1 */
-		dev_dbg(dev, "set duty cycle to 33%%\n");
+		sunxi_debug(dev, "set duty cycle to 33%%\n");
 	} else {
 		/* do nothing, bit5 and bit6 are already cleared to 0 */
-		dev_dbg(dev, "set duty cycle to 50%%\n");
+		sunxi_debug(dev, "set duty cycle to 50%%\n");
 	}
 
-	dev_dbg(dev, "reg_val of IR_TX_GLR: %2x\n", reg_val);
+	sunxi_debug(dev, "reg_val of IR_TX_GLR: %2x\n", reg_val);
 	writel(reg_val, chip->reg_base + IR_TX_GLR);
 
 	return 0;
@@ -607,20 +609,20 @@ static unsigned int run_length_encode(unsigned int *raw_data, unsigned char *buf
 
 	/* output high level or low level */
 	is_high_level = (*raw_data >> 24) & 0x01;
-	dev_dbg(dev, "is high level: %d\n", is_high_level);
+	sunxi_debug(dev, "is high level: %d\n", is_high_level);
 
 	/* calculate the number of pulse cycle */
 	num = ((*raw_data & 0x00FFFFFF) * 3) / three_pulse_cycle;
 	/* check number is over 127 or not */
 	while (num > 0x7f) {
 		buf[count] = (is_high_level << 7) | 0x7f;
-		dev_dbg(dev, "current buffer data is %2x\n", buf[count]);
+		sunxi_debug(dev, "current buffer data is %2x\n", buf[count]);
 		count++;
 		num -= 0x7f;
 	}
 
 	buf[count] = (is_high_level << 7) | num;
-	dev_dbg(dev, "current buffer data is %2x\n", buf[count]);
+	sunxi_debug(dev, "current buffer data is %2x\n", buf[count]);
 	count++;
 
 	return count;
@@ -637,22 +639,22 @@ static int sunxi_irtx_xmit(struct rc_dev *rcdev, unsigned int *txbuf,
 	struct device *dev = &chip->pdev->dev;
 
 	if (unlikely(!rcdev)) {
-		dev_dbg(dev, "device is null\n");
+		sunxi_debug(dev, "device is null\n");
 		return -EINVAL;
 	}
 
 	if (unlikely(count > IR_TX_RAW_BUF_SIZE)) {
-		dev_dbg(dev, "too many raw data\n");
+		sunxi_debug(dev, "too many raw data\n");
 		return -EINVAL;
 	}
 
-	dev_dbg(dev, "transmit %d raw data\n", count);
+	sunxi_debug(dev, "transmit %d raw data\n", count);
 
 	sunxi_irtx_reset_rawbuffer(chip);
 
 	/* encode the guide code */
 	head_p = txbuf;
-	dev_dbg(dev, "head pulse: '%#x', head space: '%#x'\n",
+	sunxi_debug(dev, "head pulse: '%#x', head space: '%#x'\n",
 				*head_p, *(head_p + 1));
 	/* pull the level bit high */
 	*head_p |= (1 << 24);
@@ -662,44 +664,45 @@ static int sunxi_irtx_xmit(struct rc_dev *rcdev, unsigned int *txbuf,
 
 	/* encode the payload: addr, ~addr, cmd, ~cmd */
 	data_p = (++head_p);
-	dev_dbg(dev, "valid raw data is:\n");
+	sunxi_debug(dev, "valid raw data is:\n");
 	/* count = head(2) + payload(num) + end(2) */
-	num = count - 4;
+	/* num = count - 4; */
+	/* addr ~addr cmd ~cmd = 32bit, Each bit consists of two levels */
+	num = 64;
 	for (i = 0; i < num; i++) {
-		dev_dbg(dev, "%#x ", *data_p);
+		sunxi_debug(dev, "%#x ", *data_p);
 
 		/* cycle the level bit up and down  */
 		mark = !mark;
 		*data_p |= (mark << 24);
+		index = run_length_encode(data_p, chip->ir_rawbuf.tx_buf, index, chip);
 
 		data_p++;
 		if ((i + 1) % 8 == 0)
-			dev_dbg(dev, "\n");
+			sunxi_debug(dev, "\n");
 	}
-	dev_dbg(dev, "\n");
+	sunxi_debug(dev, "\n");
 
 	/* encode the end code */
 	stop_p = data_p;
-	dev_dbg(dev, "stop pulse: '%#x', stop space: '%#x'\n",
-				*stop_p, *(stop_p + 1));
-	index = run_length_encode(stop_p, chip->ir_rawbuf.tx_buf, index, chip);
-	stop_p++;
+	sunxi_debug(dev, "stop pulse: '%#x'\n", *stop_p);
+
 	/* pull the stop bit level high  */
-	*stop_p |= (1 << 24);
+	*data_p |= (1 << 24);
 	index = run_length_encode(stop_p, chip->ir_rawbuf.tx_buf, index, chip);
 
 	/* avoid the level being continuously pulled up */
-	stop_p++;
+	*data_p &= ~(1 << 24);
 	index = run_length_encode(stop_p, chip->ir_rawbuf.tx_buf, index, chip);
 
 	/* update ir_rawbuf.tx_dcnt */
 	chip->ir_rawbuf.tx_dcnt = index;
-	dev_dbg(dev, "ir_rawbuf total count is %d\n", chip->ir_rawbuf.tx_dcnt);
+	sunxi_debug(dev, "ir_rawbuf total count is %d\n", chip->ir_rawbuf.tx_dcnt);
 
 	/* send ir code to tx fifo */
 	ret = sunxi_send_ir_code(chip);
 	if (unlikely(ret)) {
-		dev_dbg(dev, "send ir code fail\n");
+		sunxi_debug(dev, "send ir code fail\n");
 		ret = -EINVAL;
 	} else {
 		ret = count;
@@ -716,13 +719,13 @@ static int sunxi_irtx_resource_get(struct sunxi_irtx *chip)
 
 	res = platform_get_resource(chip->pdev, IORESOURCE_MEM, 0);
 	if (!res) {
-		dev_err(dev, "fail to get IORESOURCE_MEM\n");
+		sunxi_err(dev, "fail to get IORESOURCE_MEM\n");
 		return -EINVAL;
 	}
 
 	chip->reg_base = devm_ioremap_resource(&chip->pdev->dev, res);
 	if (IS_ERR(chip->reg_base)) {
-		dev_err(&chip->pdev->dev, "fail to map IO resource\n");
+		sunxi_err(&chip->pdev->dev, "fail to map IO resource\n");
 		return PTR_ERR(chip->reg_base);
 	}
 
@@ -732,37 +735,37 @@ static int sunxi_irtx_resource_get(struct sunxi_irtx *chip)
 
 	chip->pctrl = devm_pinctrl_get(&chip->pdev->dev);
 	if (IS_ERR(chip->pctrl)) {
-		dev_err(&chip->pdev->dev, "devm_pinctrl_get() failed!\n");
+		sunxi_err(&chip->pdev->dev, "devm_pinctrl_get() failed!\n");
 		return PTR_ERR(chip->pctrl);
 	}
 
 	chip->reset = devm_reset_control_get(&chip->pdev->dev, NULL);
 	if (IS_ERR(chip->reset)) {
-		dev_err(&chip->pdev->dev, "Failed to get reset handle\n");
+		sunxi_err(&chip->pdev->dev, "Failed to get reset handle\n");
 		return PTR_ERR(chip->reset);
 	}
 
 	chip->bclk = devm_clk_get(&chip->pdev->dev, "bus");
 	if (!chip->bclk) {
-		dev_err(&chip->pdev->dev, "Failed to get bus clk.\n");
+		sunxi_err(&chip->pdev->dev, "Failed to get bus clk.\n");
 		return -EBUSY;
 	}
 
 	chip->pclk = devm_clk_get(&chip->pdev->dev, "pclk");
 	if (!chip->pclk) {
-		dev_err(&chip->pdev->dev, "Failed to get parent clk.\n");
+		sunxi_err(&chip->pdev->dev, "Failed to get parent clk.\n");
 		return -EBUSY;
 	}
 
 	chip->mclk = devm_clk_get(&chip->pdev->dev, "mclk");
 	if (!chip->mclk) {
-		dev_err(&chip->pdev->dev, "Failed to get ir tx clk.\n");
+		sunxi_err(&chip->pdev->dev, "Failed to get ir tx clk.\n");
 		return -EBUSY;
 	}
 
 	err = sunxi_irtx_regulator_request(chip);
 	if (err) {
-		dev_err(&chip->pdev->dev, "request regulator failed!\n");
+		sunxi_err(&chip->pdev->dev, "request regulator failed!\n");
 		return err;
 	}
 
@@ -777,7 +780,7 @@ static int sunxi_irtx_rc_init(struct sunxi_irtx *chip)
 
 	chip->rcdev = devm_rc_allocate_device(dev, RC_DRIVER_IR_RAW);
 	if (!chip->rcdev) {
-		dev_err(dev, "rc dev allocate fail!\n");
+		sunxi_err(dev, "rc dev allocate fail!\n");
 		return -ENOMEM;
 	}
 
@@ -802,7 +805,7 @@ static int sunxi_irtx_rc_init(struct sunxi_irtx *chip)
 
 	ret = devm_rc_register_device(dev, chip->rcdev);
 	if (ret) {
-		dev_err(dev, "failed to register rc device\n");
+		sunxi_err(dev, "failed to register rc device\n");
 		return ret;
 	}
 
@@ -869,11 +872,11 @@ static int sunxi_irtx_probe(struct platform_device *pdev)
 	struct device *dev = &pdev->dev;
 	struct sunxi_irtx *chip;
 
-	dev_dbg(dev, "%s %s\n", SUNXI_IR_TX_DRIVER_NAME, SUNXI_IR_TX_VERSION);
+	sunxi_debug(dev, "%s %s\n", SUNXI_IR_TX_DRIVER_NAME, SUNXI_IR_TX_VERSION);
 
 	chip = devm_kzalloc(dev, sizeof(*chip), GFP_KERNEL);
 	if (IS_ERR_OR_NULL(chip)) {
-		dev_err(dev, "not enough memory for ir tx data\n");
+		sunxi_err(dev, "not enough memory for ir tx data\n");
 		return -ENOMEM;
 	}
 
@@ -882,35 +885,35 @@ static int sunxi_irtx_probe(struct platform_device *pdev)
 	/* initialize hardware resource */
 	ret = sunxi_irtx_resource_get(chip);
 	if (ret) {
-		dev_err(dev, "ir-tx failed to get resource\n");
+		sunxi_err(dev, "ir-tx failed to get resource\n");
 		goto err_startup;
 	}
 
 	ret = sunxi_irtx_rc_init(chip);
 	if (ret) {
-		dev_err(dev, "sunxi_irtx_rc_init failed.\n");
+		sunxi_err(dev, "sunxi_irtx_rc_init failed.\n");
 		goto err_startup;
 	}
 
 	ret = sunxi_irtx_hw_init(chip);
 	if (ret) {
-		dev_err(dev, "sunxi_irtx_hw_init failed.\n");
+		sunxi_err(dev, "sunxi_irtx_hw_init failed.\n");
 		goto err_register;
 	}
-	dev_dbg(dev, "sunxi_irtx_hw_init success\n");
+	sunxi_debug(dev, "sunxi_irtx_hw_init success\n");
 	platform_set_drvdata(pdev, chip);
 
 	ret = devm_request_irq(dev, chip->irq_num, sunxi_irtx_isr, 0,
 						"RemoteIR_TX", chip);
 	if (ret) {
-		dev_err(dev, "request irq fail.\n");
+		sunxi_err(dev, "request irq fail.\n");
 		goto err_request_irq;
 	}
 
 	/* FIXME: need to fix */
 	/* device_create_file(dev, &dev_attr_irtx_test); */
 
-	dev_dbg(dev, "probe success\n");
+	sunxi_debug(dev, "probe success\n");
 
 	return 0;
 
@@ -946,7 +949,7 @@ static int sunxi_irtx_suspend(struct device *dev)
 	struct platform_device *pdev = to_platform_device(dev);
 	struct sunxi_irtx *chip = platform_get_drvdata(pdev);
 
-	dev_dbg(dev, "%s enter\n", __func__);
+	sunxi_debug(dev, "%s enter\n", __func__);
 
 	disable_irq_nosync(chip->irq_num);
 
@@ -962,7 +965,7 @@ static int sunxi_irtx_resume(struct device *dev)
 	struct platform_device *pdev = to_platform_device(dev);
 	struct sunxi_irtx *chip = platform_get_drvdata(pdev);
 
-	dev_dbg(dev, "%s enter\n", __func__);
+	sunxi_debug(dev, "%s enter\n", __func__);
 
 	sunxi_irtx_hw_init(chip);
 
@@ -996,4 +999,4 @@ module_platform_driver(sunxi_irtx_driver);
 MODULE_AUTHOR("luruixiang <luruixiang@allwinnertech.com>");
 MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION("Remote IR TX driver");
-MODULE_VERSION("2.1.3");
+MODULE_VERSION("2.1.5");

@@ -44,8 +44,6 @@ static int regulator_axp519_enable_regmap(struct regulator_dev *rdev)
 		return ret;
 
 	ret = regmap_update_bits(rdev->regmap, AXP519_WORK_CFG, BIT(0), BIT(0));
-	if (ret)
-		return ret;
 
 	return 0;
 }
@@ -59,8 +57,6 @@ static int regulator_axp519_disable_regmap(struct regulator_dev *rdev)
 		return ret;
 
 	ret = regmap_update_bits(rdev->regmap, AXP519_WORK_CFG, BIT(0), 0);
-	if (ret)
-		return ret;
 
 	return 0;
 }
@@ -102,7 +98,7 @@ static const struct regulator_desc axp519_drivevbus_regulator = {
 static int bmu_ext_regulator_probe(struct platform_device *pdev)
 {
 	struct regulator_dev *rdev;
-	struct bmu_ext_dev *ext = dev_get_drvdata(pdev->dev.parent);
+	struct sunxi_power_dev *ext = dev_get_drvdata(pdev->dev.parent);
 	bool drivevbus = of_property_read_bool(pdev->dev.parent->of_node, "quick-charge,drive-vbus-en");
 	struct regulator_config config = {
 		.dev = pdev->dev.parent,

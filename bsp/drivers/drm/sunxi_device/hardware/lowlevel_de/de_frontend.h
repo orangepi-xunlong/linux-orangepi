@@ -65,6 +65,7 @@ void de_frontend_init(struct de_frontend_handle *hdl);
 s32 de_frontend_disable(struct de_frontend_handle *hdl);
 s32 de_frontend_apply(struct de_frontend_handle *hdl, struct display_channel_state *cstate,
 					 struct de_frontend_apply_cfg *frontend_cfg);
+s32 de_frontend_apply_atonce(struct de_frontend_handle *hdl, struct display_channel_state *cstate);
 void de_frontend_process_late(struct de_frontend_handle *hdl);
 s32 de_frontend_dump_state(struct drm_printer *p, struct de_frontend_handle *hdl);
 

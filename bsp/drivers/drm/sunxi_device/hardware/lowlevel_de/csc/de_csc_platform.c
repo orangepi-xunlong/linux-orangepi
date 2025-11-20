@@ -114,6 +114,22 @@ static struct de_csc_desc de350_cscs[] = {
 		.type = CHANNEL_CSC,
 		.reg_offset = CHN_CCSC_OFFSET,
 	},
+	{
+		.name = "disp0_gamma_csc",
+		.cid.channel_id = 0,
+		.did.device_id = 0,
+		.csc_bit_width = 10,
+		.hue_default_value = 50,
+		.type = GAMMA_CSC,
+	},
+	{
+		.name = "disp1_gamma_csc",
+		.cid.channel_id = 0,
+		.did.device_id = 1,
+		.csc_bit_width = 10,
+		.hue_default_value = 50,
+		.type = GAMMA_CSC,
+	},
 };
 
 static struct de_version_csc de350 = {

@@ -160,8 +160,12 @@ static const struct regmap_range axp1530_writeable_ranges[] = {
 };
 
 static const struct regmap_range axp1530_volatile_ranges[] = {
+#ifdef CONFIG_AW_PMIC_VOLATILE_ENABLED
+	regmap_reg_range(AXP1530_ON_INDICATE, AXP1530_END),
+#else
 	regmap_reg_range(AXP1530_ON_INDICATE, AXP1530_IC_TYPE),
 	regmap_reg_range(AXP1530_POWER_STATUS, AXP1530_END),
+#endif
 };
 
 static const struct regmap_access_table axp1530_writeable_table = {
@@ -175,7 +179,11 @@ static const struct regmap_access_table axp1530_volatile_table = {
 };
 
 static const struct regmap_range tcs4838_volatile_ranges[] = {
+#ifdef CONFIG_AW_PMIC_VOLATILE_ENABLED
+	regmap_reg_range(TCS4838_VSEL0, TCS4838_PGOOD),
+#else
 	regmap_reg_range(TCS4838_CTRL, TCS4838_PGOOD),
+#endif
 };
 
 static const struct regmap_access_table tcs4838_volatile_table = {
@@ -184,7 +192,11 @@ static const struct regmap_access_table tcs4838_volatile_table = {
 };
 
 static const struct regmap_range sy8827g_volatile_ranges[] = {
+#ifdef CONFIG_AW_PMIC_VOLATILE_ENABLED
+	regmap_reg_range(SY8827G_VSEL0, SY8827G_PGOOD),
+#else
 	regmap_reg_range(SY8827G_CTRL, SY8827G_PGOOD),
+#endif
 };
 
 static const struct regmap_access_table sy8827g_volatile_table = {
@@ -262,11 +274,11 @@ static const struct regmap_config ocp2131_regmap_config = {
 	.cache_type     = REGCACHE_RBTREE,
 };
 
-static void axp1530_dts_parse(struct pmu_ext_dev *ext)
+static void axp1530_dts_parse(struct sunxi_power_dev *ext)
 {
 }
 
-static void tcs4838_dts_parse(struct pmu_ext_dev *ext)
+static void tcs4838_dts_parse(struct sunxi_power_dev *ext)
 {
 	struct device_node *node = ext->dev->of_node;
 	struct regmap *map = ext->regmap;
@@ -281,7 +293,7 @@ static void tcs4838_dts_parse(struct pmu_ext_dev *ext)
 	}
 }
 
-static void sy8827g_dts_parse(struct pmu_ext_dev *ext)
+static void sy8827g_dts_parse(struct sunxi_power_dev *ext)
 {
 	struct device_node *node = ext->dev->of_node;
 	struct regmap *map = ext->regmap;
@@ -296,7 +308,7 @@ static void sy8827g_dts_parse(struct pmu_ext_dev *ext)
 	}
 }
 
-int pmu_ext_match_device(struct pmu_ext_dev *ext)
+int pmu_ext_match_device(struct sunxi_power_dev *ext)
 {
 	struct device *dev = ext->dev;
 	const struct acpi_device_id *acpi_id;
@@ -305,14 +317,14 @@ int pmu_ext_match_device(struct pmu_ext_dev *ext)
 	if (dev->of_node) {
 		of_id = of_match_device(dev->driver->of_match_table, dev);
 		if (!of_id) {
-			PMIC_DEV_ERR(dev, "Unable to match OF ID\n");
+			PMIC_DEV_ERR_STD(E_PMU_EXT_MFD_SYS_PORBE_ERR, dev, "Unable to match OF ID\n");
 			return -ENODEV;
 		}
 		ext->variant = (long)of_id->data;
 	} else {
 		acpi_id = acpi_match_device(dev->driver->acpi_match_table, dev);
 		if (!acpi_id || !acpi_id->driver_data) {
-			PMIC_DEV_ERR(dev, "Unable to match ACPI ID and data\n");
+			PMIC_DEV_ERR_STD(E_PMU_EXT_MFD_SYS_PORBE_ERR, dev, "Unable to match ACPI ID and data\n");
 			return -ENODEV;
 		}
 		ext->variant = (long)acpi_id->driver_data;
@@ -353,7 +365,7 @@ int pmu_ext_match_device(struct pmu_ext_dev *ext)
 		ext->regmap_cfg = &ocp2131_regmap_config;
 		break;
 	default:
-		PMIC_DEV_ERR(dev, "unsupported ext ID %lu\n", ext->variant);
+		PMIC_DEV_ERR_STD(E_PMU_EXT_MFD_SYS_PORBE_ERR, dev, "unsupported ext ID %lu\n", ext->variant);
 		return -EINVAL;
 	}
 	PMIC_DEV_INFO(dev, "pmu_ext_dev variant %s found\n",
@@ -363,7 +375,7 @@ int pmu_ext_match_device(struct pmu_ext_dev *ext)
 }
 EXPORT_SYMBOL(pmu_ext_match_device);
 
-int pmu_ext_device_init(struct pmu_ext_dev *ext)
+int pmu_ext_device_init(struct sunxi_power_dev *ext)
 {
 	int ret;
 	if (ext->dts_parse)
@@ -377,7 +389,7 @@ int pmu_ext_device_init(struct pmu_ext_dev *ext)
 }
 EXPORT_SYMBOL_GPL(pmu_ext_device_init);
 
-int pmu_ext_device_exit(struct pmu_ext_dev *ext)
+int pmu_ext_device_exit(struct sunxi_power_dev *ext)
 {
 	mfd_remove_devices(ext->dev);
 	return 0;

@@ -16,6 +16,8 @@
 #define PWM_PISR	(0x0004)
 #define	PWM_CIER	(0x0010)
 #define	PWM_CISR	(0x0014)
+#define PWM_CCCIER	(0x0018)
+#define PWM_CCCISR	(0x001c)
 #define PWM_PCCR01	(0x0020)
 #define PWM_PCCR23	(0x0024)
 #define PWM_PCCR45	(0x0028)
@@ -27,20 +29,35 @@
 
 #define PWM_PCGR	(0x0040)
 
+#define PWM_PDZCR01	(0x0060)
+#define PWM_PDZCR23	(0x0064)
+#define PWM_PDZCR45	(0x0068)
 #define	PWM_PDZCR67	(0x006c)
 #define	PWM_PDZCR89	(0x0070)
 #define	PWM_PDZCRAB	(0x0074)
 #define	PWM_PDZCRCD	(0x0078)
 #define	PWM_PDZCREF	(0x007c)
 
+#define PWM_PER		(0x0080)
 #define PWM_PGR0	(0x0090)
 #define PWM_PGR1	(0x0094)
+#define PWM_PGR2	(0x0098)
+#define PWM_PGR3	(0x009c)
+
+#define PWM_CCCER	(0x00a0)
 
 #define PWM_CER         (0x00c0)
+#define PWM_PCR         (0x0100 + 0x0000)
+#define PWM_PPR         (0x0100 + 0x0004)
+#define PWM_PCNTR       (0x0100 + 0x0008)
 #define PPCNTP_BASE     (0x0100 + 0x000c)
 #define PWM_CCR_BASE    (0x0100 + 0x0010)
 #define PWM_CRLR_BASE   (0x0100 + 0x0014)
 #define PWM_CFLR_BASE   (0x0100 + 0x0018)
+#define PWM_CCCSR       (0x0100 + 0x001c)
+#define PWM_CCCNR       (0x0100 + 0x0020)
+#define PWM_CCCR        (0x0100 + 0x0024)
+#define PWM_CFG         (0x0100 + 0x0028)
 /* #define PWM_PCCR8	(0x0300) */
 
 #define PWMG_CS_SHIFT           0
@@ -76,7 +93,6 @@
 #define PWM_BYPASS_WIDTH	0x1
 #define PWM_CLK_GATING_SHIFT	0x4
 #define PWM_CLK_GATING_WIDTH	0x1
-#define PWM_REG_UNIFORM_OFFSET	0x20 /* multiple registers use uniform offset */
 #define PWM_PERIOD_READY_MASK	(0x1 << 11)
 #define PWM_PERIOD		0xFFFF0000
 #define PWM_DUTY		0xFFFF
@@ -87,12 +103,21 @@
 /* timeout waiting for the controller to respond */
 #define PWM_TIMEOUT (usecs_to_jiffies(50))
 
-#define PWM_CAPTURE_CRLF        (0x1 << 0x4)
-#define PWM_CAPTURE_CRTE        (0x1 << 0x2)
+#define PWM_CAPTURE_CCSR	(0x1 << 0x5)
+#define PWM_CAPTURE_CRLF	(0x1 << 0x4)
+#define PWM_CAPTURE_CFLF	(0x1 << 0x3)
+#define PWM_CAPTURE_CRTE	(0x1 << 0x2)
+#define PWM_CAPTURE_CFTE	(0x1 << 0x1)
+
+#define PWM_CAPTURE_CCCSRR	(0x1 << 1)
+#define PWM_CAPTURE_CCCRFR	(0X1 << 0)
+
+#define PWM_MAX_CAP_NUM	0xFFFFFFFF
+#define PWM_CAPTURE_RETRYS	40
 
 /* clear capture control */
-#define PWM_CAPTURE_CLEAR_ALL	0x1E
-#define PWM_CAPTURE_EXCLUDE_CFTE_EN_CLEAR	0x1C
-#define PWM_CAPTURE_EXCLUDE_CRTE_EN_CLEAR	0x18
+#define PWM_CAPTURE_CLEAR_ALL	0x3E
+#define PWM_CAPTURE_EXCLUDE_CFTE_EN_CLEAR	0x3C
+#define PWM_CAPTURE_EXCLUDE_CRTE_EN_CLEAR	0x38
 
 #endif

@@ -1176,53 +1176,81 @@ long g2d_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		}
 	case G2D_CMD_FILLRECT_H:{
 #if IS_ENABLED(CONFIG_G2D_MIXER)
-		g2d_fillrect_h fill_para;
-		struct mixer_para mixer_fill_para;
+		g2d_fillrect_h *fill_para;
+		struct mixer_para *mixer_fill_para;
 
-		if (copy_from_user(&fill_para, (g2d_fillrect_h *) arg,
+		fill_para = kmalloc(sizeof(g2d_fillrect_h), GFP_KERNEL);
+		if (!fill_para) {
+			G2D_WARN("fill_para kmalloc failed\n");
+			ret = -EFAULT;
+			goto err_noput;
+		}
+		mixer_fill_para = kmalloc(sizeof(struct mixer_para), GFP_KERNEL);
+		if (!mixer_fill_para) {
+			G2D_WARN("mixer_fill_para kmalloc failed\n");
+			ret = -EFAULT;
+			kfree(fill_para);
+			goto err_noput;
+		}
+
+		if (copy_from_user(fill_para, (g2d_fillrect_h *) arg,
 				   sizeof(g2d_fillrect_h))) {
 			ret = -EFAULT;
 			goto err_noput;
 		}
 		if (dbg_info) {
-			dump_g2d_fillrect_h_info(&fill_para);
+			dump_g2d_fillrect_h_info(fill_para);
 		}
-		memset(&mixer_fill_para, 0, sizeof(mixer_fill_para));
-		memcpy(&mixer_fill_para.dst_image_h,
-		       &fill_para.dst_image_h, sizeof(g2d_image_enh));
-		mixer_fill_para.op_flag = OP_FILLRECT;
+		memset(mixer_fill_para, 0, sizeof(struct mixer_para));
+		memcpy(&mixer_fill_para->dst_image_h,
+		       &fill_para->dst_image_h, sizeof(g2d_image_enh));
+		mixer_fill_para->op_flag = OP_FILLRECT;
 
-		ret  = mixer_task_process(&para, &mixer_fill_para, 1);
+		ret  = mixer_task_process(&para, mixer_fill_para, 1);
 #endif
 		break;
 	}
 	case G2D_CMD_MASK_H:{
 #if IS_ENABLED(CONFIG_G2D_MIXER)
-			g2d_maskblt mask_para;
-			struct mixer_para mixer_mask_para;
+			g2d_maskblt *mask_para;
+			struct mixer_para *mixer_mask_para;
 
-			if (copy_from_user(&mask_para, (g2d_maskblt *) arg,
+			mask_para = kmalloc(sizeof(g2d_maskblt), GFP_KERNEL);
+			if (!mask_para) {
+				G2D_WARN("mask_para kmalloc failed\n");
+				ret = -EFAULT;
+				goto err_noput;
+			}
+
+			mixer_mask_para = kmalloc(sizeof(struct mixer_para), GFP_KERNEL);
+			if (!mixer_mask_para) {
+				G2D_WARN("mixer_mask_para kmalloc failed\n");
+				ret = -EFAULT;
+				kfree(mask_para);
+				goto err_noput;
+			}
+			if (copy_from_user(mask_para, (g2d_maskblt *) arg,
 					   sizeof(g2d_maskblt))) {
 				ret = -EFAULT;
 				goto err_noput;
 			}
 			if (dbg_info) {
-				dump_g2d_maskblt_info(&mask_para);
+				dump_g2d_maskblt_info(mask_para);
 			}
-			memset(&mixer_mask_para, 0, sizeof(mixer_mask_para));
-			memcpy(&mixer_mask_para.ptn_image_h,
-			       &mask_para.ptn_image_h, sizeof(g2d_image_enh));
-			memcpy(&mixer_mask_para.mask_image_h,
-			       &mask_para.mask_image_h, sizeof(g2d_image_enh));
-			memcpy(&mixer_mask_para.dst_image_h,
-			       &mask_para.dst_image_h, sizeof(g2d_image_enh));
-			memcpy(&mixer_mask_para.src_image_h,
-			       &mask_para.src_image_h, sizeof(g2d_image_enh));
-			mixer_mask_para.back_flag = mask_para.back_flag;
-			mixer_mask_para.fore_flag = mask_para.fore_flag;
-			mixer_mask_para.op_flag = OP_MASK;
+			memset(mixer_mask_para, 0, sizeof(struct mixer_para));
+			memcpy(&mixer_mask_para->ptn_image_h,
+			       &mask_para->ptn_image_h, sizeof(g2d_image_enh));
+			memcpy(&mixer_mask_para->mask_image_h,
+			       &mask_para->mask_image_h, sizeof(g2d_image_enh));
+			memcpy(&mixer_mask_para->dst_image_h,
+			       &mask_para->dst_image_h, sizeof(g2d_image_enh));
+			memcpy(&mixer_mask_para->src_image_h,
+			       &mask_para->src_image_h, sizeof(g2d_image_enh));
+			mixer_mask_para->back_flag = mask_para->back_flag;
+			mixer_mask_para->fore_flag = mask_para->fore_flag;
+			mixer_mask_para->op_flag = OP_MASK;
 
-			ret  = mixer_task_process(&para, &mixer_mask_para, 1);
+			ret  = mixer_task_process(&para, mixer_mask_para, 1);
 #endif
 			break;
 		}
@@ -1700,6 +1728,6 @@ module_exit(g2d_module_exit);
 
 MODULE_AUTHOR("zxb <zhengxiaobin@allwinnertech.com>");
 MODULE_DESCRIPTION("g2d(rcq) driver");
-MODULE_VERSION("1.0.0");
+MODULE_VERSION("1.0.1");
 MODULE_LICENSE("GPL");
 MODULE_IMPORT_NS(DMA_BUF);

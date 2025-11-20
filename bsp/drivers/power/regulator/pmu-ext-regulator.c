@@ -513,7 +513,7 @@ static int pmu_ext_regulator_probe(struct platform_device *pdev)
 {
 	struct regulator_dev *rdev;
 	struct regulator_delay *rdev_delay;
-	struct pmu_ext_dev *ext = dev_get_drvdata(pdev->dev.parent);
+	struct sunxi_power_dev *ext = dev_get_drvdata(pdev->dev.parent);
 	const struct regulator_desc *regulators;
 	struct regulator_config config = {
 		.dev = pdev->dev.parent,

@@ -24,6 +24,8 @@
 #include <linux/platform_device.h>
 #include <linux/clk.h>
 #include <linux/rfkill.h>
+#include <linux/version.h>
+#include <dt-bindings/gpio/gpio.h>
 
 #define WL_DEV_WIFI            0  /* bit0 */
 #define WL_DEV_BLUETOOTH       1  /* bit1 */
@@ -50,9 +52,6 @@ struct sunxi_gnss_platdata {
 	int gpio_gnss_rst;
 	bool gpio_gnss_rst_assert;
 
-	bool boot_on;
-	bool always_on;
-
 	bool power_state;
 	struct rfkill *rfkill;
 	struct platform_device *pdev;
@@ -65,9 +64,6 @@ struct sunxi_modem_platdata {
 
 	int gpio_modem_rst;
 	bool gpio_modem_rst_assert;
-
-	bool boot_on;
-	bool always_on;
 
 	bool power_state;
 	struct rfkill *rfkill;
@@ -84,9 +80,6 @@ struct sunxi_bt_platdata {
 
 	int gpio_bt_rst;
 	bool gpio_bt_rst_assert;
-
-	bool boot_on;
-	bool always_on;
 
 	int power_state;
 	struct rfkill *rfkill;
@@ -109,9 +102,6 @@ struct sunxi_wlan_platdata {
 	int gpio_wlan_hostwake;
 	bool gpio_wlan_hostwake_assert;
 
-	bool boot_on;
-	bool always_on;
-
 	int power_state;
 	struct platform_device *pdev;
 };
@@ -119,12 +109,8 @@ struct sunxi_wlan_platdata {
 void sunxi_wlan_set_power(bool on_off);
 int  sunxi_wlan_get_bus_index(void);
 int  sunxi_wlan_get_oob_irq(int *irq_flags, int *wakeup_enable);
-void sunxi_wlan_set_power_boot_state(void);
 void sunxi_bluetooth_set_power(bool on_off);
-void sunxi_bluetooth_set_power_boot_state(void);
 void sunxi_modem_set_power(bool on_off);
-void sunxi_modem_set_power_boot_state(void);
 void sunxi_gnss_set_power(bool on_off);
-void sunxi_gnss_set_power_boot_state(void);
 
 #endif /* SUNXI_RFKILL_H */

@@ -11,10 +11,14 @@
 */
 
 /* #define DEBUG */
+/* #define PKT_DEBUG */
+#define SUNXI_MODNAME "gmac"
+#include <sunxi-log.h>
 #include <linux/kernel.h>
 #include <linux/ctype.h>
 #include <linux/printk.h>
 #include <linux/io.h>
+#include <linux/iopoll.h>
 #include <linux/clk.h>
 #include <linux/clk-provider.h>
 #include <linux/reset.h>
@@ -53,12 +57,12 @@
 #define CREATE_TRACE_POINTS
 #include "sunxi-gmac-trace.h"
 
-#define SUNXI_GMAC_MODULE_VERSION	"2.4.3"
+#define SUNXI_GMAC_MODULE_VERSION	"2.5.17"
 
 #define SUNXI_GMAC_DMA_DESC_RX		256
 #define SUNXI_GMAC_DMA_DESC_TX		256
-#define SUNXI_GMAC_BUDGET		(sunxi_gmac_dma_desc_rx / 4)
-#define SUNXI_GMAC_TX_THRESH		(sunxi_gmac_dma_desc_tx / 4)
+#define SUNXI_GMAC_BUDGET			(sunxi_gmac_dma_desc_rx / 4)
+#define SUNXI_GMAC_TX_THRESH		(sunxi_gmac_dma_desc_tx / 8)
 
 #define SUNXI_GMAC_HASH_TABLE_SIZE	64
 #define SUNXI_GMAC_MAX_BUF_SZ		(SZ_2K - 1)
@@ -211,6 +215,11 @@
 #define SUNXI_GMAC_FLOW_TX		2
 #define SUNXI_GMAC_FLOW_AUTO		(SUNXI_GMAC_FLOW_TX | SUNXI_GMAC_FLOW_RX)
 
+/* SYSCFG register */
+/* The real offset is 0x180, but iormap-addr is start with 0x30 */
+#define SUNXI_GMAC_SYSCFG_SIP_MODE_REG	0x150
+#define SUNXI_GMAC_SYSCFG_IO_MODE_EPHY	(BIT(0))
+
 /* Ring buffer caculate method */
 #define circ_cnt(head, tail, size) (((head) > (tail)) ? \
 					((head) - (tail)) : \
@@ -223,6 +232,7 @@
 #define MAC_ADDR_LEN			18
 #define SUNXI_GMAC_MAC_ADDRESS		"00:00:00:00:00:00"
 
+#if !IS_ENABLED(CONFIG_AW_BSP_LOWMEM)
 /* loopback test */
 #define LOOPBACK_PKT_CNT		64
 #define LOOPBACK_PKT_LEN		1514
@@ -237,6 +247,7 @@ static char sunxi_gmac_test_strings[][ETH_GSTRING_LEN] = {
 	"Internal lb test (mac loopback)",
 	"External lb test (phy loopback)",
 };
+#endif
 
 #ifdef MODULE
 extern int get_custom_mac_address(int fmt, char *name, char *addr);
@@ -246,10 +257,18 @@ static char mac_str[MAC_ADDR_LEN] = SUNXI_GMAC_MAC_ADDRESS;
 module_param_string(mac_str, mac_str, MAC_ADDR_LEN, S_IRUGO | S_IWUSR);
 MODULE_PARM_DESC(mac_str, "MAC Address String.(xx:xx:xx:xx:xx:xx)");
 
+/*
+ * 1: stored-forward
+ * 32/64/96/128: cut-through
+ */
 static int rxmode = 1;
 module_param(rxmode, int, S_IRUGO | S_IWUSR);
 MODULE_PARM_DESC(rxmode, "DMA threshold control value");
 
+/*
+ * 1: stored-forward
+ * 64/128/192/256: cut-through
+ */
 static int txmode = 1;
 module_param(txmode, int, S_IRUGO | S_IWUSR);
 MODULE_PARM_DESC(txmode, "DMA threshold control value");
@@ -480,13 +499,15 @@ struct sunxi_gmac {
 
 	struct net_device *ndev;
 	struct device *dev;
-	struct napi_struct napi;
+	struct napi_struct napi_rx;
+	struct napi_struct napi_tx;
 
 	struct sunxi_gmac_extra_stats xstats;	/* Additional network statistics */
 
 	bool link;				/* Phy link status */
 	int speed;				/* NIC network speed */
 	int duplex;				/* NIC network duplex capability */
+	u32 max_mtu;				/* Some mac has small txfifo, eg.sun300iw1 */
 
 	/* suspend error workaround */
 	unsigned int gmac_uevent_suppress;	/* control kobject_uevent_env  */
@@ -504,13 +525,15 @@ struct sunxi_gmac {
 	void __iomem *syscfg_base;
 	struct clk *gmac_clk;
 	struct clk *phy25m_clk;
+	struct clk *hbus_clk;
+	struct clk *mbus_clk;
 	struct reset_control *reset;
+	bool need_pinctrl;
 	struct pinctrl *pinctrl;
 	struct regulator *gmac_supply;
 
 	/* definition spinlock */
 	spinlock_t universal_lock;		/* universal spinlock */
-	spinlock_t tx_lock;			/* tx tramsmit spinlock */
 
 	/* adjust transmit clock delay, value: 0~7 */
 	/* adjust receive clock delay, value: 0~31 */
@@ -520,6 +543,7 @@ struct sunxi_gmac {
 	struct device_node *phy_node;
 
 #if IS_ENABLED(CONFIG_AW_EPHY)
+	struct clk *ephy_clk;
 	struct device_node *ac300_np;
 	struct phy_device *ac300_dev;
 	struct pwm_device *ac300_pwm;
@@ -529,11 +553,13 @@ struct sunxi_gmac {
 	struct sunxi_gmac_ephy_ops *ephy_ops;
 #endif /* CONFIG_AW_EPHY */
 
+#if !IS_ENABLED(CONFIG_AW_BSP_LOWMEM)
 	/* loopback test */
 	int loopback_pkt_len;
 	int loopback_test_rx_idx;
 	bool is_loopback_test;
 	u8 *loopback_test_rx_buf;
+#endif
 
 #if IS_ENABLED(CONFIG_AW_GMAC_METADATA)
 	u8 *metadata_buff;
@@ -546,6 +572,14 @@ struct sunxi_gmac {
 
 	u32 irq_affinity;
 };
+
+#ifdef PKT_DEBUG
+static void print_pkt(unsigned char *buf, int len)
+{
+	pr_info("len = %d byte, buf addr: 0x%p\n", len, buf);
+	print_hex_dump(KERN_INFO, "", DUMP_PREFIX_OFFSET, 16, 1, buf, len, true);
+}
+#endif
 
 /**
  * sunxi_gmac_desc_init_chain - GMAC dma descriptor chain table initialization
@@ -633,6 +667,7 @@ static void sunxi_gmac_loopback(void *iobase, int loopback_enable)
 	writel(reg, iobase + SUNXI_GMAC_BASIC_CTL0);
 }
 
+#if !IS_ENABLED(CONFIG_AW_BSP_LOWMEM)
 static void sunxi_gmac_crc(void *iobase, bool enable)
 {
 	int reg;
@@ -645,6 +680,7 @@ static void sunxi_gmac_crc(void *iobase, bool enable)
 
 	writel(reg, iobase + SUNXI_GMAC_RX_CTL0);
 }
+#endif
 
 /**
  * sunxi_gmac_flow_ctrl - GMAC flow ctrl set func
@@ -688,10 +724,6 @@ static int sunxi_gmac_int_status(void *iobase, struct sunxi_gmac_extra_stats *x)
 	int ret;
 	/* read the status register (CSR5) */
 	unsigned int intr_status;
-
-	intr_status = readl(iobase + SUNXI_GMAC_RGMII_STA);
-	if (intr_status & SUNXI_GMAC_RGMII_IRQ)
-		readl(iobase + SUNXI_GMAC_RGMII_STA);
 
 	intr_status = readl(iobase + SUNXI_GMAC_INT_STA);
 
@@ -844,7 +876,7 @@ static int sunxi_gmac_dma_init(void *iobase)
 	writel(value, iobase + SUNXI_GMAC_BASIC_CTL1);
 
 	/* Mask interrupts by writing to CSR7 */
-	writel(SUNXI_GMAC_RX_INT | SUNXI_GMAC_TX_UNF_INT, iobase + SUNXI_GMAC_INT_EN);
+	writel(SUNXI_GMAC_TX_INT | SUNXI_GMAC_RX_INT | SUNXI_GMAC_TX_UNF_INT, iobase + SUNXI_GMAC_INT_EN);
 
 	return 0;
 }
@@ -937,6 +969,8 @@ static void sunxi_gmac_set_mac_addr_to_reg(void *iobase, unsigned char *addr, in
 
 	/* one char is 8bit, so splice mac address in steps of 8 */
 	data = (addr[5] << 8) | addr[4];
+	if (index > 0)
+		data |= BIT(31); /* set 1~7 macaddr valid */
 	writel(data, iobase + SUNXI_GMAC_ADDR_HI(index));
 	data = (addr[3] << 24) | (addr[2] << 16) | (addr[1] << 8) | addr[0];
 	writel(data, iobase + SUNXI_GMAC_ADDR_LO(index));
@@ -976,14 +1010,32 @@ static void sunxi_gmac_tx_poll(void *iobase)
 	writel(value | (1 << SUNXI_GMAC_TX_DMA_START), iobase + SUNXI_GMAC_TX_CTL1);
 }
 
-static void sunxi_gmac_irq_enable(void *iobase)
+static void sunxi_gmac_irq_enable_tx(void *iobase)
 {
-	writel(SUNXI_GMAC_RX_INT | SUNXI_GMAC_TX_UNF_INT, iobase + SUNXI_GMAC_INT_EN);
+	u32 val = readl(iobase + SUNXI_GMAC_INT_EN);
+	val |= SUNXI_GMAC_TX_INT | SUNXI_GMAC_TX_UNF_INT;
+	writel(val, iobase + SUNXI_GMAC_INT_EN);
 }
 
-static void sunxi_gmac_irq_disable(void *iobase)
+static void sunxi_gmac_irq_enable_rx(void *iobase)
 {
-	writel(0, iobase + SUNXI_GMAC_INT_EN);
+	u32 val = readl(iobase + SUNXI_GMAC_INT_EN);
+	val |= SUNXI_GMAC_RX_INT;
+	writel(val, iobase + SUNXI_GMAC_INT_EN);
+}
+
+static void sunxi_gmac_irq_disable_tx(void *iobase)
+{
+	u32 val = readl(iobase + SUNXI_GMAC_INT_EN);
+	val &= ~(SUNXI_GMAC_TX_INT | SUNXI_GMAC_TX_UNF_INT);
+	writel(val, iobase + SUNXI_GMAC_INT_EN);
+}
+
+static void sunxi_gmac_irq_disable_rx(void *iobase)
+{
+	u32 val = readl(iobase + SUNXI_GMAC_INT_EN);
+	val &= ~SUNXI_GMAC_RX_INT;
+	writel(val, iobase + SUNXI_GMAC_INT_EN);
 }
 
 static void sunxi_gmac_desc_buf_set(struct sunxi_gmac_dma_desc *desc, unsigned long paddr, int size)
@@ -998,19 +1050,17 @@ static void sunxi_gmac_desc_set_own(struct sunxi_gmac_dma_desc *desc)
 	desc->desc0.all |= SUNXI_GMAC_OWN_DMA;
 }
 
-static void sunxi_gmac_desc_tx_close(struct sunxi_gmac_dma_desc *first, struct sunxi_gmac_dma_desc *end, int csum_insert)
+static void sunxi_gmac_desc_csum_insert(struct sunxi_gmac_dma_desc *desc, int csum_insert)
 {
-	struct sunxi_gmac_dma_desc *desc = first;
+	if (csum_insert)
+		desc->desc1.tx.cic = 3;
+}
 
+static void sunxi_gmac_desc_tx_close(struct sunxi_gmac_dma_desc *first, struct sunxi_gmac_dma_desc *end)
+{
 	first->desc1.tx.first_sg = 1;
 	end->desc1.tx.last_seg = 1;
 	end->desc1.tx.interrupt = 1;
-
-	if (csum_insert)
-		do {
-			desc->desc1.tx.cic = 3;
-			desc++;
-		} while (desc <= end);
 }
 
 static void sunxi_gmac_desc_init(struct sunxi_gmac_dma_desc *desc)
@@ -1134,7 +1184,7 @@ static int sunxi_gmac_desc_get_tx_last_seg(struct sunxi_gmac_dma_desc *desc)
 	return desc->desc1.tx.last_seg;
 }
 
-static int sunxi_gmac_reset(void *iobase, int n)
+static int sunxi_gmac_reset(void *iobase)
 {
 	unsigned int value;
 
@@ -1143,9 +1193,9 @@ static int sunxi_gmac_reset(void *iobase, int n)
 	value |= SUNXI_GMAC_SOFT_RST;
 	writel(value, iobase + SUNXI_GMAC_BASIC_CTL1);
 
-	udelay(n);
-
-	return !!(readl(iobase + SUNXI_GMAC_BASIC_CTL1) & SUNXI_GMAC_SOFT_RST);
+	return readl_poll_timeout(iobase + SUNXI_GMAC_BASIC_CTL1, value,
+							!(value & SUNXI_GMAC_SOFT_RST),
+							10000, 1000000);
 }
 
 static int sunxi_gmac_stop(struct net_device *ndev);
@@ -1166,6 +1216,7 @@ static void sunxi_gmac_dump_dma_desc(struct sunxi_gmac_dma_desc *desc, int size)
 #endif
 }
 
+#if !IS_ENABLED(CONFIG_AW_BSP_LOWMEM)
 static ssize_t sunxi_gmac_extra_tx_stats_show(struct device *dev,
 		struct device_attribute *attr, char *buf)
 {
@@ -1243,9 +1294,9 @@ static ssize_t sunxi_gmac_gphy_test_store(struct device *dev,
 				SUNXI_GMAC_GPHY_TEST_OFFSET);
 		phyreg_val |= value << SUNXI_GMAC_GPHY_TEST_OFFSET;
 		phy_write(ndev->phydev, MII_CTRL1000, phyreg_val);
-		netdev_info(ndev, "Set MII_CTRL1000(0x09) Reg: 0x%x\n", phyreg_val);
+		sunxi_info(&ndev->dev, "Set MII_CTRL1000(0x09) Reg: 0x%x\n", phyreg_val);
 	} else {
-		netdev_err(ndev, "Error: Unknown value (%d)\n", value);
+		sunxi_err(&ndev->dev, "Unknown value (%d)\n", value);
 	}
 
 	return count;
@@ -1267,7 +1318,7 @@ static ssize_t sunxi_gmac_mii_read_store(struct device *dev,
 	int ret;
 
 	if (!netif_running(ndev)) {
-		netdev_err(ndev, "Error: Nic is down\n");
+		sunxi_err(&ndev->dev, "Nic is down\n");
 		return count;
 	}
 
@@ -1276,7 +1327,7 @@ static ssize_t sunxi_gmac_mii_read_store(struct device *dev,
 		return ret;
 
 	phyreg_val = phy_read(ndev->phydev, phyreg);
-	netdev_info(ndev, "PHYREG[0x%02x] = 0x%04x\n", phyreg, phyreg_val);
+	sunxi_info(&ndev->dev, "PHYREG[0x%02x] = 0x%04x\n", phyreg, phyreg_val);
 	return count;
 }
 /* eg: echo 0x00 > mii_read; cat mii_read */
@@ -1302,7 +1353,7 @@ static ssize_t sunxi_gmac_mii_write_store(struct device *dev,
 	char *ptr2;
 
 	if (!netif_running(ndev)) {
-		netdev_err(ndev, "Error: Nic is down\n");
+		sunxi_err(dev, "Nic is down\n");
 		return count;
 	}
 
@@ -1322,7 +1373,7 @@ static ssize_t sunxi_gmac_mii_write_store(struct device *dev,
 	phyreg_val_before = phy_read(ndev->phydev, userspace_cmd[0]);
 	phy_write(ndev->phydev, userspace_cmd[0], userspace_cmd[1]);
 	phyreg_val_after = phy_read(ndev->phydev, userspace_cmd[0]);
-	netdev_info(ndev, "before PHYREG[0x%02x] = 0x%04x, after PHYREG[0x%02x] = 0x%04x\n",
+	sunxi_info(dev, "before PHYREG[0x%02x] = 0x%04x, after PHYREG[0x%02x] = 0x%04x\n",
 			userspace_cmd[0], phyreg_val_before, userspace_cmd[0], phyreg_val_after);
 
 	return count;
@@ -1340,15 +1391,15 @@ static ssize_t sunxi_gmac_loopback_show(struct device *dev,
 
 	phyreg_val = phy_read(ndev->phydev, MII_BMCR);
 	if (phyreg_val & BMCR_LOOPBACK)
-		netdev_dbg(ndev, "Phy loopback enabled\n");
+		sunxi_debug(dev, "Phy loopback enabled\n");
 	else
-		netdev_dbg(ndev, "Phy loopback disabled\n");
+		sunxi_debug(dev, "Phy loopback disabled\n");
 
 	macreg_val = readl(chip->base);
 	if (macreg_val & SUNXI_GMAC_LOOPBACK)
-		netdev_dbg(ndev, "Mac loopback enabled\n");
+		sunxi_debug(dev, "Mac loopback enabled\n");
 	else
-		netdev_dbg(ndev, "Mac loopback disabled\n");
+		sunxi_debug(dev, "Mac loopback disabled\n");
 
 	return sprintf(buf, "Usage:\necho [0/1/2] > loopback\n"
 			"0 - Loopback off\n"
@@ -1365,7 +1416,7 @@ static ssize_t sunxi_gmac_loopback_store(struct device *dev,
 	u16 mode;
 
 	if (!netif_running(ndev)) {
-		netdev_err(ndev, "Error: eth is down\n");
+		sunxi_err(dev, "Eth is down\n");
 		return count;
 	}
 
@@ -1390,7 +1441,7 @@ static ssize_t sunxi_gmac_loopback_store(struct device *dev,
 		phy_write(ndev->phydev, MII_BMCR, phyreg_val | BMCR_LOOPBACK);
 		break;
 	default:
-		netdev_err(ndev, "Error: Please echo right value\n");
+		sunxi_err(dev, "Please echo right value\n");
 		break;
 	}
 
@@ -1424,7 +1475,7 @@ static ssize_t sunxi_gmac_tx_delay_store(struct device *dev,
 	u16 tx_delay;
 
 	if (!netif_running(ndev)) {
-		netdev_err(ndev, "Error: eth is down\n");
+		sunxi_err(dev, "Eth is down\n");
 		return count;
 	}
 
@@ -1470,7 +1521,7 @@ static ssize_t sunxi_gmac_rx_delay_store(struct device *dev,
 	u16 rx_delay;
 
 	if (!netif_running(ndev)) {
-		netdev_err(ndev, "Error: eth is down\n");
+		sunxi_err(dev, "Eth is down\n");
 		return count;
 	}
 
@@ -1490,6 +1541,7 @@ static ssize_t sunxi_gmac_rx_delay_store(struct device *dev,
 }
 /* eg: echo 1 > rx_delay */
 static DEVICE_ATTR(rx_delay, 0664, sunxi_gmac_rx_delay_show, sunxi_gmac_rx_delay_store);
+#endif
 
 /* In phy state machine, we use this func to change link status */
 static void sunxi_gmac_adjust_link(struct net_device *ndev)
@@ -1618,13 +1670,13 @@ static int sunxi_gmac_dma_desc_init(struct net_device *ndev)
 	chip->rx_skb = devm_kzalloc(dev, sizeof(chip->rx_skb[0]) * sunxi_gmac_dma_desc_rx,
 				GFP_KERNEL);
 	if (!chip->rx_skb) {
-		netdev_err(ndev, "Error: Alloc rx_skb failed\n");
+		sunxi_err(dev, "Alloc rx_skb failed\n");
 		goto rx_skb_err;
 	}
 	chip->tx_skb = devm_kzalloc(dev, sizeof(chip->tx_skb[0]) * sunxi_gmac_dma_desc_tx,
 				GFP_KERNEL);
 	if (!chip->tx_skb) {
-		netdev_err(ndev, "Error: Alloc tx_skb failed\n");
+		sunxi_err(dev, "Alloc tx_skb failed\n");
 		goto tx_skb_err;
 	}
 
@@ -1634,7 +1686,7 @@ static int sunxi_gmac_dma_desc_init(struct net_device *ndev)
 					&chip->dma_tx_phy,
 					GFP_KERNEL);
 	if (!chip->dma_tx) {
-		netdev_err(ndev, "Error: Alloc dma_tx failed\n");
+		sunxi_err(dev, "Alloc dma_tx failed\n");
 		goto dma_tx_err;
 	}
 
@@ -1644,7 +1696,7 @@ static int sunxi_gmac_dma_desc_init(struct net_device *ndev)
 					&chip->dma_rx_phy,
 					GFP_KERNEL);
 	if (!chip->dma_rx) {
-		netdev_err(ndev, "Error: Alloc dma_rx failed\n");
+		sunxi_err(dev, "Alloc dma_rx failed\n");
 		goto dma_rx_err;
 	}
 
@@ -1656,9 +1708,7 @@ dma_rx_err:
 	dma_free_coherent(chip->dev, sunxi_gmac_dma_desc_rx * sizeof(struct sunxi_gmac_dma_desc),
 			  chip->dma_tx, chip->dma_tx_phy);
 dma_tx_err:
-	kfree(chip->tx_skb);
 tx_skb_err:
-	kfree(chip->rx_skb);
 rx_skb_err:
 	return -ENOMEM;
 }
@@ -1705,9 +1755,6 @@ static void sunxi_gmac_dma_desc_deinit(struct sunxi_gmac *chip)
 			  chip->dma_tx, chip->dma_tx_phy);
 	dma_free_coherent(chip->dev, sunxi_gmac_dma_desc_rx * sizeof(struct sunxi_gmac_dma_desc),
 			  chip->dma_rx, chip->dma_rx_phy);
-
-	kfree(chip->rx_skb);
-	kfree(chip->tx_skb);
 }
 
 static int sunxi_gmac_stop(struct net_device *ndev)
@@ -1715,7 +1762,8 @@ static int sunxi_gmac_stop(struct net_device *ndev)
 	struct sunxi_gmac *chip = netdev_priv(ndev);
 
 	netif_stop_queue(ndev);
-	napi_disable(&chip->napi);
+	napi_disable(&chip->napi_tx);
+	napi_disable(&chip->napi_rx);
 
 	netif_carrier_off(ndev);
 
@@ -1741,13 +1789,13 @@ static int sunxi_gmac_power_on(struct sunxi_gmac *chip)
 
 	ret = regulator_set_voltage(chip->gmac_supply, 3300000, 3300000);
 	if (ret) {
-		dev_err(chip->dev, "gmac-power set voltage error\n");
+		sunxi_err(chip->dev, "Set gmac-power failed\n");
 		return -EINVAL;
 	}
 
 	ret = regulator_enable(chip->gmac_supply);
 	if (ret) {
-		dev_err(chip->dev, "Error: enable gmac-power failed\n");
+		sunxi_err(chip->dev, "Enable gmac-power failed\n");
 		return -EINVAL;
 	}
 
@@ -1775,6 +1823,7 @@ static void sunxi_gmac_power_off(struct sunxi_gmac *chip)
 static int sunxi_gmac_open(struct net_device *ndev)
 {
 	struct sunxi_gmac *chip = netdev_priv(ndev);
+	struct phy_device *phydev = NULL;
 	int ret;
 
 	/*
@@ -1787,7 +1836,7 @@ static int sunxi_gmac_open(struct net_device *ndev)
 	if (chip->ac300_np) {
 		chip->ac300_dev = of_phy_find_device(chip->ac300_np);
 		if (!chip->ac300_dev) {
-			netdev_err(ndev, "Error: Could not find ac300 %s\n",
+			sunxi_err(chip->dev, "Could not find ac300 %s\n",
 				chip->ac300_np->full_name);
 			return -ENODEV;
 		}
@@ -1796,20 +1845,26 @@ static int sunxi_gmac_open(struct net_device *ndev)
 #endif	/* CONFIG_AW_EPHY */
 
 	if (chip->phy_node) {
+		phydev = of_phy_find_device(chip->phy_node);
+		if (!phydev) {
+			netdev_err(ndev, "Error: Could not find phydev\n");
+			return -ENODEV;
+		}
+		phy_device_reset(phydev, 1);
 		ndev->phydev = of_phy_connect(ndev, chip->phy_node,
 					&sunxi_gmac_adjust_link, 0, chip->phy_interface);
 		if (!ndev->phydev) {
-			netdev_err(ndev, "Error: Could not connect to phy %s\n",
+			sunxi_err(chip->dev, "Could not connect to phy %s\n",
 				chip->phy_node->full_name);
 			return -ENODEV;
 		}
-		netdev_info(ndev, "%s: Type(%d) PHY ID %08x at %d IRQ %s (%s)\n",
+		sunxi_info(chip->dev, "%s: Type(%d) PHY ID %08x at %d IRQ %s (%s)\n",
 			ndev->name, ndev->phydev->interface, ndev->phydev->phy_id,
 			ndev->phydev->mdio.addr, "poll", dev_name(&ndev->phydev->mdio.dev));
 	}
-	ret = sunxi_gmac_reset((void *)chip->base, 1000);
+	ret = sunxi_gmac_reset((void *)chip->base);
 	if (ret) {
-		netdev_err(ndev, "Error: Mac reset failed, please check phy and mac clk\n");
+		sunxi_err(chip->dev, "Mac reset failed, please check phy and mac clk\n");
 		goto mac_reset_err;
 	}
 
@@ -1834,12 +1889,11 @@ static int sunxi_gmac_open(struct net_device *ndev)
 	if (ndev->phydev)
 		phy_start(ndev->phydev);
 
-	sunxi_gmac_enable_rx(chip->base, (unsigned long)((struct sunxi_gmac_dma_desc *)
-				chip->dma_rx_phy + chip->rx_dirty));
-	sunxi_gmac_enable_tx(chip->base, (unsigned long)((struct sunxi_gmac_dma_desc *)
-				chip->dma_tx_phy + chip->tx_clean));
+	sunxi_gmac_enable_rx(chip->base, (unsigned long)(chip->dma_rx_phy + chip->rx_dirty));
+	sunxi_gmac_enable_tx(chip->base, (unsigned long)(chip->dma_tx_phy + chip->tx_clean));
 
-	napi_enable(&chip->napi);
+	napi_enable(&chip->napi_rx);
+	napi_enable(&chip->napi_tx);
 	netif_start_queue(ndev);
 
 	/* Start the Rx/Tx */
@@ -1886,18 +1940,20 @@ static int sunxi_gmac_resume(struct device *dev)
 	struct net_device *ndev = dev_get_drvdata(dev);
 	struct sunxi_gmac *chip = netdev_priv(ndev);
 
-	if (!netif_running(ndev))
+	if (!ndev)
 		return 0;
 
 	sunxi_gmac_power_on(chip);
 
 	sunxi_gmac_clk_enable(chip);
 
-	sunxi_gmac_select_gpio_state(chip->pinctrl, PINCTRL_STATE_DEFAULT);
+	if (chip->need_pinctrl)
+		sunxi_gmac_select_gpio_state(chip->pinctrl, PINCTRL_STATE_DEFAULT);
 
-	netif_device_attach(ndev);
-
-	sunxi_gmac_open(ndev);
+	if (netif_running(ndev)) {
+		netif_device_attach(ndev);
+		sunxi_gmac_open(ndev);
+	}
 
 	/* suspend error workaround */
 	if (ndev->phydev)
@@ -1911,7 +1967,7 @@ static int sunxi_gmac_suspend(struct device *dev)
 	struct net_device *ndev = dev_get_drvdata(dev);
 	struct sunxi_gmac *chip = netdev_priv(ndev);
 
-	if (!ndev || !netif_running(ndev))
+	if (!ndev)
 		return 0;
 
 	/* suspend error workaround */
@@ -1920,11 +1976,13 @@ static int sunxi_gmac_suspend(struct device *dev)
 		dev_set_uevent_suppress(&ndev->phydev->mdio.dev, true);
 	}
 
-	netif_device_detach(ndev);
+	if (netif_running(ndev)) {
+		netif_device_detach(ndev);
+		sunxi_gmac_stop(ndev);
+	}
 
-	sunxi_gmac_stop(ndev);
-
-	sunxi_gmac_select_gpio_state(chip->pinctrl, PINCTRL_STATE_SLEEP);
+	if (chip->need_pinctrl)
+		sunxi_gmac_select_gpio_state(chip->pinctrl, PINCTRL_STATE_SLEEP);
 
 	sunxi_gmac_power_off(chip);
 
@@ -1972,33 +2030,54 @@ static void sunxi_gmac_check_addr(struct net_device *ndev, unsigned char *mac)
 
 		if (!is_valid_ether_addr(ndev->dev_addr)) {
 			eth_random_addr((u8 *)ndev->dev_addr);
-			netdev_info(ndev, "Info: Use random mac address\n");
+			sunxi_info(&ndev->dev, "Use random mac address\n");
 		}
 	}
 }
 
 static int sunxi_gmac_clk_enable(struct sunxi_gmac *chip)
 {
-	struct net_device *ndev = chip->ndev;
 	int ret;
 	u32 clk_value;
 
-	ret = reset_control_deassert(chip->reset);
-	if (ret) {
-		netdev_err(ndev, "Error: Try to de-assert gmac rst failed\n");
-		goto gmac_reset_err;
+	if (chip->reset) {
+		ret = reset_control_deassert(chip->reset);
+		if (ret) {
+			sunxi_err(chip->dev, "Try to de-assert gmac rst failed\n");
+			goto gmac_reset_err;
+		}
 	}
 
 	ret = clk_prepare_enable(chip->gmac_clk);
 	if (ret) {
-		netdev_err(ndev, "Error: Try to enable gmac_clk failed\n");
+		sunxi_err(chip->dev, "Try to enable gmac_clk failed\n");
 		goto gmac_clk_err;
 	}
 
+	if (chip->hbus_clk) {
+		ret = clk_prepare_enable(chip->hbus_clk);
+		if (ret) {
+			sunxi_err(chip->dev, "Try to enable hbus clk failed\n");
+			goto hbus_clk_err;
+		}
+	}
+
+	if (chip->mbus_clk) {
+		ret = clk_prepare_enable(chip->mbus_clk);
+		if (ret) {
+			sunxi_err(chip->dev, "Try to enable mbus clk failed\n");
+			goto mbus_clk_err;
+		}
+	}
+
 	if (chip->phy_clk_type == SUNXI_PHY_USE_CLK25M) {
+		clk_set_rate(chip->phy25m_clk, 25000000);
+		if (clk_get_rate(chip->phy25m_clk) != 25000000)
+			sunxi_warn(chip->dev, "phy25M clk maybe not correct\n");
+
 		ret = clk_prepare_enable(chip->phy25m_clk);
 		if (ret) {
-			netdev_err(ndev, "Error: Try to enable phy25m_clk failed\n");
+			sunxi_err(chip->dev, "Try to enable phy25m_clk failed\n");
 			goto phy25m_clk_err;
 		}
 	}
@@ -2037,9 +2116,16 @@ static int sunxi_gmac_clk_enable(struct sunxi_gmac *chip)
 	return 0;
 
 phy25m_clk_err:
+	if (chip->mbus_clk)
+		clk_disable(chip->mbus_clk);
+mbus_clk_err:
+	if (chip->hbus_clk)
+		clk_disable(chip->hbus_clk);
+hbus_clk_err:
 	clk_disable(chip->gmac_clk);
 gmac_clk_err:
-	reset_control_assert(chip->reset);
+	if (chip->reset)
+		reset_control_assert(chip->reset);
 gmac_reset_err:
 	return ret;
 }
@@ -2054,6 +2140,12 @@ static void sunxi_gmac_clk_disable(struct sunxi_gmac *chip)
 	if (chip->gmac_clk)
 		clk_disable_unprepare(chip->gmac_clk);
 
+	if (chip->hbus_clk)
+		clk_disable_unprepare(chip->hbus_clk);
+
+	if (chip->mbus_clk)
+		clk_disable_unprepare(chip->mbus_clk);
+
 	if (chip->reset)
 		reset_control_assert(chip->reset);
 }
@@ -2061,25 +2153,36 @@ static void sunxi_gmac_clk_disable(struct sunxi_gmac *chip)
 static void sunxi_gmac_tx_err(struct sunxi_gmac *chip)
 {
 	netif_stop_queue(chip->ndev);
+	netif_tx_lock_bh(chip->ndev);
 
+	sunxi_gmac_irq_disable_tx(chip->base);
 	sunxi_gmac_disable_tx(chip->base);
-
 	sunxi_gmac_free_tx_skb(chip);
 	memset(chip->dma_tx, 0, sunxi_gmac_dma_desc_tx * sizeof(struct sunxi_gmac_dma_desc));
 	sunxi_gmac_desc_init_chain(chip->dma_tx, (unsigned long)chip->dma_tx_phy, sunxi_gmac_dma_desc_tx);
 	chip->tx_dirty = 0;
 	chip->tx_clean = 0;
 	sunxi_gmac_enable_tx(chip->base, chip->dma_tx_phy);
-
+	sunxi_gmac_irq_enable_tx(chip->base);
 	chip->ndev->stats.tx_errors++;
+
+	netif_tx_unlock_bh(chip->ndev);
 	netif_wake_queue(chip->ndev);
 }
 
-static void sunxi_gmac_schedule(struct sunxi_gmac *chip)
+static void sunxi_gmac_schedule(struct sunxi_gmac *chip, u32 enables)
 {
-	if (likely(napi_schedule_prep(&chip->napi))) {
-		sunxi_gmac_irq_disable(chip->base);
-		__napi_schedule(&chip->napi);
+	if (enables & SUNXI_GMAC_RX_INT) {
+		if (likely(napi_schedule_prep(&chip->napi_rx))) {
+			sunxi_gmac_irq_disable_rx(chip->base);
+			__napi_schedule(&chip->napi_rx);
+		}
+	}
+	if (enables & SUNXI_GMAC_TX_INT) {
+		if (likely(napi_schedule_prep(&chip->napi_tx))) {
+			sunxi_gmac_irq_disable_tx(chip->base);
+			__napi_schedule(&chip->napi_tx);
+		}
 	}
 }
 
@@ -2087,30 +2190,32 @@ static irqreturn_t sunxi_gmac_interrupt(int irq, void *dev_id)
 {
 	struct net_device *ndev = (struct net_device *)dev_id;
 	struct sunxi_gmac *chip = netdev_priv(ndev);
-	int status;
+	int status, enables;
 
 	status = sunxi_gmac_int_status(chip->base, (void *)(&chip->xstats));
+	enables = readl(chip->base + SUNXI_GMAC_INT_EN);
 
-	if (likely(status == handle_tx_rx))
-		sunxi_gmac_schedule(chip);
-	else if (unlikely(status == tx_hard_error_bump_tc))
-		netdev_info(ndev, "Do nothing for bump tc\n");
-	else if (unlikely(status == tx_hard_error))
+	if ((enables & (SUNXI_GMAC_RX_INT | SUNXI_GMAC_TX_INT)) && likely(status == handle_tx_rx))
+		sunxi_gmac_schedule(chip, enables);
+	else if ((enables & SUNXI_GMAC_TX_UNF_INT) && unlikely(status == tx_hard_error_bump_tc))
+		sunxi_info(chip->dev, "Do nothing for bump tc\n");
+	else if ((enables & SUNXI_GMAC_TX_STOP_INT) && unlikely(status == tx_hard_error))
 		sunxi_gmac_tx_err(chip);
 	else
-		netdev_info(ndev, "Do nothing.....\n");
+		sunxi_debug(chip->dev, "Do nothing.....\n");
 
 	return IRQ_HANDLED;
 }
 
-static void sunxi_gmac_tx_complete(struct sunxi_gmac *chip)
+static int sunxi_gmac_tx_complete(struct sunxi_gmac *chip)
 {
-	unsigned int entry = 0;
+	unsigned int count = 0, entry = 0;
 	struct sk_buff *skb = NULL;
 	struct sunxi_gmac_dma_desc *desc = NULL;
 	int tx_stat;
 
-	spin_lock_bh(&chip->tx_lock);
+	netif_tx_lock_bh(chip->ndev);
+
 	while (circ_cnt(chip->tx_dirty, chip->tx_clean, sunxi_gmac_dma_desc_tx) > 0) {
 		entry = chip->tx_clean;
 		desc = chip->dma_tx + entry;
@@ -2142,6 +2247,7 @@ static void sunxi_gmac_tx_complete(struct sunxi_gmac *chip)
 
 		/* Find next dirty desc */
 		chip->tx_clean = circ_inc(entry, sunxi_gmac_dma_desc_tx);
+		count++;
 
 		if (unlikely(skb == NULL))
 			continue;
@@ -2152,9 +2258,13 @@ static void sunxi_gmac_tx_complete(struct sunxi_gmac *chip)
 	if (unlikely(netif_queue_stopped(chip->ndev)) &&
 		circ_space(chip->tx_dirty, chip->tx_clean, sunxi_gmac_dma_desc_tx) >
 		SUNXI_GMAC_TX_THRESH) {
+		sunxi_debug(chip->dev, "restart transmit\n");
 		netif_wake_queue(chip->ndev);
 	}
-	spin_unlock_bh(&chip->tx_lock);
+
+	netif_tx_unlock_bh(chip->ndev);
+
+	return count;
 }
 
 static netdev_tx_t sunxi_gmac_xmit(struct sk_buff *skb, struct net_device *ndev)
@@ -2167,15 +2277,12 @@ static netdev_tx_t sunxi_gmac_xmit(struct sk_buff *skb, struct net_device *ndev)
 	int nfrags = skb_shinfo(skb)->nr_frags;
 	dma_addr_t dma_addr;
 
-	spin_lock_bh(&chip->tx_lock);
 	if (unlikely(circ_space(chip->tx_dirty, chip->tx_clean,
 		sunxi_gmac_dma_desc_tx) < (nfrags + 1))) {
 		if (!netif_queue_stopped(ndev)) {
-			netdev_err(ndev, "Error: Tx Ring full when queue awake\n");
+			sunxi_err(chip->dev, "Tx Ring full when queue awake\n");
 			netif_stop_queue(ndev);
 		}
-		spin_unlock_bh(&chip->tx_lock);
-
 		return NETDEV_TX_BUSY;
 	}
 
@@ -2198,7 +2305,6 @@ static netdev_tx_t sunxi_gmac_xmit(struct sk_buff *skb, struct net_device *ndev)
 		if (dma_mapping_error(chip->dev, dma_addr)) {
 			ndev->stats.tx_dropped++;
 			dev_kfree_skb(skb);
-			spin_unlock_bh(&chip->tx_lock);
 			return -ENOMEM;
 		}
 
@@ -2206,6 +2312,7 @@ static netdev_tx_t sunxi_gmac_xmit(struct sk_buff *skb, struct net_device *ndev)
 				chip->ndev->name);
 
 		sunxi_gmac_desc_buf_set(desc, dma_addr, tmp_len);
+		sunxi_gmac_desc_csum_insert(desc, csum_insert);
 		/* Don't set the first's own bit, here */
 		if (first != desc) {
 			chip->tx_skb[entry] = NULL;
@@ -2226,7 +2333,6 @@ static netdev_tx_t sunxi_gmac_xmit(struct sk_buff *skb, struct net_device *ndev)
 		if (dma_mapping_error(chip->dev, dma_addr)) {
 			ndev->stats.tx_dropped++;
 			dev_kfree_skb(skb);
-			spin_unlock_bh(&chip->tx_lock);
 			return -ENOMEM;
 		}
 
@@ -2235,13 +2341,14 @@ static netdev_tx_t sunxi_gmac_xmit(struct sk_buff *skb, struct net_device *ndev)
 
 		sunxi_gmac_desc_buf_set(desc, dma_addr, len);
 		sunxi_gmac_desc_set_own(desc);
+		sunxi_gmac_desc_csum_insert(desc, csum_insert);
 		chip->tx_skb[entry] = NULL;
 		entry = circ_inc(entry, sunxi_gmac_dma_desc_tx);
 	}
 
 	ndev->stats.tx_bytes += skb->len;
 	chip->tx_dirty = entry;
-	sunxi_gmac_desc_tx_close(first, desc, csum_insert);
+	sunxi_gmac_desc_tx_close(first, desc);
 
 	/*
 	 * When the own bit, for the first frame, has to be set, all
@@ -2251,30 +2358,29 @@ static netdev_tx_t sunxi_gmac_xmit(struct sk_buff *skb, struct net_device *ndev)
 	dma_wmb();
 
 	sunxi_gmac_desc_set_own(first);
-	spin_unlock_bh(&chip->tx_lock);
 
 	if (circ_space(chip->tx_dirty, chip->tx_clean, sunxi_gmac_dma_desc_tx) <=
 			(MAX_SKB_FRAGS + 1)) {
+		sunxi_debug(chip->dev, "stop transmitted packets\n");
 		netif_stop_queue(ndev);
-		if (circ_space(chip->tx_dirty, chip->tx_clean, sunxi_gmac_dma_desc_tx) >
-				SUNXI_GMAC_TX_THRESH)
-			netif_wake_queue(ndev);
 	}
 
-	netdev_dbg(ndev, "TX descripotor DMA: 0x%08x, dirty: %d, clean: %d\n",
-			(unsigned int)chip->dma_tx_phy, chip->tx_dirty, chip->tx_clean);
+	sunxi_debug(chip->dev, "TX descripotor DMA: 0x%08x, dirty: %d, clean: %d, skblen: %d\n",
+			(unsigned int)chip->dma_tx_phy, chip->tx_dirty, chip->tx_clean, skb->len);
 	sunxi_gmac_dump_dma_desc(chip->dma_tx, sunxi_gmac_dma_desc_tx);
-
+#ifdef PKT_DEBUG
+	printk("TX:\n");
+	print_pkt(skb->data, skb->len);
+#endif
 	sunxi_gmac_tx_poll(chip->base);
-	sunxi_gmac_tx_complete(chip);
 
 	return NETDEV_TX_OK;
 }
 
+#if !IS_ENABLED(CONFIG_AW_BSP_LOWMEM)
 static void sunxi_gmac_copy_loopback_data(struct sunxi_gmac *chip,
 					struct sk_buff *skb)
 {
-	struct net_device *ndev = chip->ndev;
 	int loopback_len = chip->loopback_pkt_len;
 	int pkt_offset, frag_len, i;
 	void *frag_data = NULL;
@@ -2282,11 +2388,11 @@ static void sunxi_gmac_copy_loopback_data(struct sunxi_gmac *chip,
 
 	if (chip->loopback_test_rx_idx == LOOPBACK_PKT_CNT) {
 		chip->loopback_test_rx_idx = 0;
-		netdev_warn(ndev, "Warning: Loopback test receive too more test pkts\n");
+		sunxi_warn(chip->dev, "Loopback test receive too more test pkts\n");
 	}
 
 	if (skb->len != chip->loopback_pkt_len) {
-		netdev_warn(ndev, "Warning: Wrong pkt length\n");
+		sunxi_warn(chip->dev, "Wrong pkt length\n");
 		chip->loopback_test_rx_idx++;
 		return;
 	}
@@ -2304,6 +2410,7 @@ static void sunxi_gmac_copy_loopback_data(struct sunxi_gmac *chip,
 
 	chip->loopback_test_rx_idx++;
 }
+#endif
 
 #if IS_ENABLED(CONFIG_AW_GMAC_METADATA)
 static int sunxi_gmac_rx_metadata_cmp(struct sk_buff *skb)
@@ -2338,17 +2445,17 @@ static int sunxi_gmac_rx(struct sunxi_gmac *chip, int limit)
 		frame_len = sunxi_gmac_desc_rx_frame_len(desc);
 		status = sunxi_gmac_desc_get_rx_status(desc, (void *)(&chip->xstats));
 
-		netdev_dbg(chip->ndev, "Rx frame size %d, status: %d\n",
+		sunxi_debug(chip->dev, "Rx frame size %d, status: %d\n",
 			   frame_len, status);
 
 		if (unlikely(!chip->rx_skb[entry])) {
-			netdev_err(chip->ndev, "Skb is null\n");
+			sunxi_err(chip->dev, "Skb is null\n");
 			chip->ndev->stats.rx_dropped++;
 			break;
 		}
 
 		if (status == discard_frame || frame_len > SUNXI_GMAC_MAX_MTU_SZ) {
-			netdev_err(chip->ndev, "Get error pkt\n");
+			sunxi_err(chip->dev, "Get error pkt\n");
 			chip->ndev->stats.rx_errors++;
 			if (chip->rx_skb[entry]) {
 				dev_kfree_skb_any(chip->rx_skb[entry]);
@@ -2371,7 +2478,7 @@ static int sunxi_gmac_rx(struct sunxi_gmac *chip, int limit)
 				chip->skb = netdev_alloc_skb_ip_align(chip->ndev, SUNXI_GMAC_MAX_MTU_SZ);
 
 			if (!chip->skb) {
-				netdev_err(chip->ndev, "Failed to alloc skb\n");
+				sunxi_err(chip->dev, "Failed to alloc skb\n");
 				if (chip->rx_skb[entry]) {
 					dev_kfree_skb_any(chip->rx_skb[entry]);
 					chip->rx_skb[entry] = NULL;
@@ -2410,8 +2517,10 @@ static int sunxi_gmac_rx(struct sunxi_gmac *chip, int limit)
 
 		skb_put(chip->skb, frame_len);
 
+#if !IS_ENABLED(CONFIG_AW_BSP_LOWMEM)
 		if (unlikely(chip->is_loopback_test))
 			sunxi_gmac_copy_loopback_data(chip, chip->skb);
+#endif
 
 #if IS_ENABLED(CONFIG_AW_GMAC_METADATA)
 		if (unlikely(sunxi_gmac_rx_metadata_cmp(chip->skb) == 0)) {
@@ -2426,7 +2535,11 @@ static int sunxi_gmac_rx(struct sunxi_gmac *chip, int limit)
 		chip->skb->protocol = eth_type_trans(chip->skb, chip->ndev);
 		chip->skb->ip_summed = CHECKSUM_UNNECESSARY;
 
-		napi_gro_receive(&chip->napi, chip->skb);
+#ifdef PKT_DEBUG
+		printk("RX:\n");
+		print_pkt(chip->skb->data, chip->skb->len);
+#endif
+		napi_gro_receive(&chip->napi_rx, chip->skb);
 
 		chip->ndev->stats.rx_packets++;
 		chip->ndev->stats.rx_bytes += frame_len;
@@ -2434,7 +2547,7 @@ static int sunxi_gmac_rx(struct sunxi_gmac *chip, int limit)
 	}
 
 	if (rxcount > 0) {
-		netdev_dbg(chip->ndev, "RX descriptor DMA: 0x%08x, dirty: %d, clean: %d\n",
+		sunxi_debug(chip->dev, "RX descriptor DMA: 0x%08x, dirty: %d, clean: %d\n",
 				(unsigned int)chip->dma_rx_phy, chip->rx_dirty, chip->rx_clean);
 		sunxi_gmac_dump_dma_desc(chip->dma_rx, sunxi_gmac_dma_desc_rx);
 	}
@@ -2444,17 +2557,32 @@ static int sunxi_gmac_rx(struct sunxi_gmac *chip, int limit)
 	return rxcount;
 }
 
-static int sunxi_gmac_poll(struct napi_struct *napi, int budget)
+static int sunxi_gmac_napi_rx(struct napi_struct *napi, int budget)
 {
-	struct sunxi_gmac *chip = container_of(napi, struct sunxi_gmac, napi);
+	struct sunxi_gmac *chip = container_of(napi, struct sunxi_gmac, napi_rx);
 	int work_done = 0;
 
-	sunxi_gmac_tx_complete(chip);
 	work_done = sunxi_gmac_rx(chip, budget);
 
 	if (work_done < budget) {
 		napi_complete(napi);
-		sunxi_gmac_irq_enable(chip->base);
+		sunxi_gmac_irq_enable_rx(chip->base);
+	}
+
+	return work_done;
+}
+
+static int sunxi_gmac_napi_tx(struct napi_struct *napi, int budget)
+{
+	struct sunxi_gmac *chip = container_of(napi, struct sunxi_gmac, napi_tx);
+	int work_done = 0;
+
+	work_done = sunxi_gmac_tx_complete(chip);
+	work_done = min(work_done, budget);
+
+	if (work_done < budget) {
+		napi_complete(napi);
+		sunxi_gmac_irq_enable_tx(chip->base);
 	}
 
 	return work_done;
@@ -2463,12 +2591,12 @@ static int sunxi_gmac_poll(struct napi_struct *napi, int budget)
 static int sunxi_gmac_change_mtu(struct net_device *ndev, int new_mtu)
 {
 	if (netif_running(ndev)) {
-		netdev_err(ndev, "Error: Nic must be stopped to change its MTU\n");
+		sunxi_err(&ndev->dev, "Nic must be stopped to change its MTU\n");
 		return -EBUSY;
 	}
 
 	if (new_mtu < 46) {
-		netdev_err(ndev, "Error: Invalid MTU\n");
+		sunxi_err(&ndev->dev, "Invalid MTU\n");
 		return -EINVAL;
 	}
 
@@ -2489,7 +2617,7 @@ static void sunxi_gmac_set_rx_mode(struct net_device *ndev)
 	struct sunxi_gmac *chip = netdev_priv(ndev);
 	unsigned int value = 0;
 
-	netdev_dbg(ndev, "%s: # mcasts %d, # unicast %d\n",
+	sunxi_debug(chip->dev, "%s: # mcasts %d, # unicast %d\n",
 		 __func__, netdev_mc_count(ndev), netdev_uc_count(ndev));
 
 	spin_lock_bh(&chip->universal_lock);
@@ -2543,7 +2671,11 @@ static void sunxi_gmac_set_rx_mode(struct net_device *ndev)
 	spin_unlock_bh(&chip->universal_lock);
 }
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 5, 0)
 static void sunxi_gmac_tx_timeout(struct net_device *ndev, unsigned int txqueue)
+#else
+static void sunxi_gmac_tx_timeout(struct net_device *ndev)
+#endif
 {
 	struct sunxi_gmac *chip = netdev_priv(ndev);
 
@@ -2552,13 +2684,25 @@ static void sunxi_gmac_tx_timeout(struct net_device *ndev, unsigned int txqueue)
 
 static int sunxi_gmac_ioctl(struct net_device *ndev, struct ifreq *rq, int cmd)
 {
+	int ret = -EOPNOTSUPP;
+
 	if (!netif_running(ndev))
 		return -EINVAL;
 
 	if (!ndev->phydev)
 		return -EINVAL;
 
-	return phy_mii_ioctl(ndev->phydev, rq, cmd);
+	switch (cmd) {
+	case SIOCGMIIPHY:
+	case SIOCGMIIREG:
+	case SIOCSMIIREG:
+		ret = phy_mii_ioctl(ndev->phydev, rq, cmd);
+		break;
+	default:
+		break;
+	}
+
+	return ret;
 }
 
 /* Configuration changes (passed on by ifconfig) */
@@ -2569,13 +2713,13 @@ static int sunxi_gmac_config(struct net_device *ndev, struct ifmap *map)
 
 	/* Don't allow changing the I/O address */
 	if (map->base_addr != ndev->base_addr) {
-		netdev_err(ndev, "Error: Can't change I/O address\n");
+		sunxi_err(&ndev->dev, "Can't change I/O address\n");
 		return -EOPNOTSUPP;
 	}
 
 	/* Don't allow changing the IRQ */
 	if (map->irq != ndev->irq) {
-		netdev_err(ndev, "Error: Can't change IRQ number %d\n", ndev->irq);
+		sunxi_err(&ndev->dev, "Can't change IRQ number %d\n", ndev->irq);
 		return -EOPNOTSUPP;
 	}
 
@@ -2588,7 +2732,7 @@ static int sunxi_gmac_set_mac_address(struct net_device *ndev, void *p)
 	struct sockaddr *addr = p;
 
 	if (!is_valid_ether_addr(addr->sa_data)) {
-		netdev_err(ndev, "Error: Set error mac address\n");
+		sunxi_err(chip->dev, "Set error mac address\n");
 		return -EADDRNOTAVAIL;
 	}
 
@@ -2635,7 +2779,11 @@ static const struct net_device_ops sunxi_gmac_netdev_ops = {
 	.ndo_fix_features = sunxi_gmac_fix_features,
 	.ndo_set_rx_mode = sunxi_gmac_set_rx_mode,
 	.ndo_tx_timeout = sunxi_gmac_tx_timeout,
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0)
+	.ndo_eth_ioctl = sunxi_gmac_ioctl,
+#else
 	.ndo_do_ioctl = sunxi_gmac_ioctl,
+#endif
 	.ndo_set_config = sunxi_gmac_config,
 #if IS_ENABLED(CONFIG_NET_POLL_CONTROLLER)
 	.ndo_poll_controller = sunxi_gmac_poll_controller,
@@ -2717,11 +2865,14 @@ static int sunxi_gmac_ethtool_set_pauseparam(struct net_device *ndev,
 {
 	struct sunxi_gmac *chip = netdev_priv(ndev);
 
-	sunxi_gmac_write_tx_flowctl(chip->base, !!epause->tx_pause);
-	netdev_info(ndev, "Tx flowctrl %s\n", epause->tx_pause ? "ON" : "OFF");
+	sunxi_gmac_write_tx_flowctl(chip->base, epause->tx_pause);
+	sunxi_debug(chip->dev, "Tx flowctrl %s\n", epause->tx_pause ? "ON" : "OFF");
 
-	sunxi_gmac_write_rx_flowctl(chip->base, !!epause->rx_pause);
-	netdev_info(ndev, "Rx flowctrl %s\n", epause->rx_pause ? "ON" : "OFF");
+	sunxi_gmac_write_rx_flowctl(chip->base, epause->rx_pause);
+	sunxi_debug(chip->dev, "Rx flowctrl %s\n", epause->rx_pause ? "ON" : "OFF");
+
+	if (ndev->phydev)
+		phy_set_asym_pause(ndev->phydev, epause->rx_pause, epause->tx_pause);
 
 	return 0;
 }
@@ -2745,7 +2896,7 @@ static void sunxi_gmac_ethtool_get_wol(struct net_device *ndev,
 	/* TODO: need to support wol */
 	spin_unlock_irq(&chip->universal_lock);
 
-	netdev_err(ndev, "Error: wakeup-on-lan func is not supported yet\n");
+	sunxi_err(chip->dev, "Not support WOL\n");
 }
 
 /**
@@ -2768,6 +2919,7 @@ static int sunxi_gmac_ethtool_set_wol(struct net_device *ndev,
 	return 0;
 }
 
+#if !IS_ENABLED(CONFIG_AW_BSP_LOWMEM)
 static int __sunxi_gmac_loopback_test(struct net_device *ndev)
 {
 	struct sunxi_gmac *chip = netdev_priv(ndev);
@@ -2802,7 +2954,7 @@ static int __sunxi_gmac_loopback_test(struct net_device *ndev)
 			skb = pskb_copy(skb_tmp, GFP_ATOMIC);
 			if (!skb) {
 				dev_kfree_skb_any(skb_tmp);
-				netdev_err(ndev, "Error: Copy skb failed for loopback test\n");
+				sunxi_err(&ndev->dev, "Copy skb failed for loopback test\n");
 				return -ENOMEM;
 			}
 
@@ -2813,7 +2965,7 @@ static int __sunxi_gmac_loopback_test(struct net_device *ndev)
 			if (sunxi_gmac_xmit(skb, ndev)) {
 				dev_kfree_skb_any(skb);
 				dev_kfree_skb_any(skb_tmp);
-				netdev_err(ndev, "Error: Xmit pkt failed for loopback test\n");
+				sunxi_err(&ndev->dev, "Xmit pkt failed for loopback test\n");
 				return -EBUSY;
 			}
 		}
@@ -2828,7 +2980,7 @@ static int __sunxi_gmac_loopback_test(struct net_device *ndev)
 				(*(loopback_test_rx_buf + j * LOOPBACK_PKT_LEN +
 				LOOPBACK_PKT_LEN - 1) != j)) {
 				dev_kfree_skb_any(skb_tmp);
-				netdev_err(ndev, "Error: Compare pkt failed in loopback test (index=0x%02x, data[%d]=0x%02x)\n",
+				sunxi_err(&ndev->dev, "Compare pkt failed in loopback test (index=0x%02x, data[%d]=0x%02x)\n",
 					j + i * LOOPBACK_PKT_CNT,
 					LOOPBACK_PKT_LEN - 1,
 					*(loopback_test_rx_buf + j * LOOPBACK_PKT_LEN +
@@ -2896,7 +3048,7 @@ static void sunxi_gmac_self_test(struct net_device *ndev,
 	memset(data, 0, SELF_TEST_MAX * sizeof(u64));
 
 	if (!netif_running(ndev)) {
-		netdev_err(ndev, "Error: Do not support selftest when ndev is closed\n");
+		sunxi_err(&ndev->dev, "Do not support selftest when ndev is closed\n");
 		eth_test->flags |= ETH_TEST_FL_FAILED;
 		return;
 	}
@@ -2908,18 +3060,21 @@ static void sunxi_gmac_self_test(struct net_device *ndev,
 	if (err) {
 		eth_test->flags |= ETH_TEST_FL_FAILED;
 		data[test_index] = 1;  /* 0:success, 1:fail */
-		netdev_err(ndev, "Error: Loopback test failed\n");
+		sunxi_err(&ndev->dev, "Loopback test failed\n");
 	}
 
 	netif_tx_wake_all_queues(ndev);
 	netif_carrier_on(ndev);
 }
+#endif
 
 static int sunxi_gmac_get_sset_count(struct net_device *ndev, int sset)
 {
 	switch (sset) {
+#if !IS_ENABLED(CONFIG_AW_BSP_LOWMEM)
 	case ETH_SS_TEST:
 		return ARRAY_SIZE(sunxi_gmac_test_strings);
+#endif
 	case ETH_SS_STATS:
 		return -EOPNOTSUPP;
 	default:
@@ -2931,9 +3086,11 @@ static void sunxi_gmac_get_strings(struct net_device *netdev,
 				u32 stringset, u8 *data)
 {
 	switch (stringset) {
+#if !IS_ENABLED(CONFIG_AW_BSP_LOWMEM)
 	case ETH_SS_TEST:
 		memcpy(data, *sunxi_gmac_test_strings, sizeof(sunxi_gmac_test_strings));
 		return;
+#endif
 	case ETH_SS_STATS:
 		return;
 	default:
@@ -2954,7 +3111,9 @@ static const struct ethtool_ops sunxi_gmac_ethtool_ops = {
 	.set_link_ksettings = phy_ethtool_set_link_ksettings,
 	.get_sset_count = sunxi_gmac_get_sset_count,
 	.get_strings = sunxi_gmac_get_strings,
+#if !IS_ENABLED(CONFIG_AW_BSP_LOWMEM)
 	.self_test = sunxi_gmac_self_test,
+#endif
 };
 
 #if IS_ENABLED(CONFIG_AW_EPHY)
@@ -2964,17 +3123,42 @@ static int sunxi_gmac_ephy_v1_hardware_init(struct sunxi_gmac *chip)
 
 	ret = pwm_config(chip->ac300_pwm, PWM_DUTY_NS, PWM_PERIOD_NS);
 	if (ret) {
-		netdev_err(chip->ndev, "Error: Config ac300 pwm failed\n");
+		sunxi_err(chip->dev, "Config ac300 pwm failed\n");
 		return ret;
 	}
 
 	ret = pwm_enable(chip->ac300_pwm);
 	if (ret) {
-		netdev_err(chip->ndev, "Error: Enable ac300 pwm failed\n");
+		sunxi_err(chip->dev, "Enable ac300 pwm failed\n");
 		ret = -EINVAL;
 	}
 
 	return ret;
+}
+
+static int sunxi_gmac_ephy_v2_hardware_init(struct sunxi_gmac *chip)
+{
+	int reg_val;
+	int ret;
+
+	reg_val = readl(chip->syscfg_base + SUNXI_GMAC_SYSCFG_SIP_MODE_REG);
+	reg_val |= SUNXI_GMAC_SYSCFG_IO_MODE_EPHY;
+	writel(reg_val, chip->syscfg_base + SUNXI_GMAC_SYSCFG_SIP_MODE_REG);
+
+	if (!chip->ephy_clk)
+		return -EINVAL;
+
+	clk_set_rate(chip->ephy_clk, 24000000);
+	if (clk_get_rate(chip->ephy_clk) != 24000000)
+		sunxi_warn(chip->dev, "ephy clk maybe not correct\n");
+
+	ret = clk_prepare_enable(chip->ephy_clk);
+	if (ret) {
+		sunxi_err(chip->dev, "Try to enable ephy failed\n");
+		return ret;
+	}
+
+	return 0;
 }
 #endif /* CONFIG_AW_EPHY */
 
@@ -2986,14 +3170,14 @@ static int sunxi_gmac_hardware_init(struct platform_device *pdev)
 
 	ret = sunxi_gmac_power_on(chip);
 	if (ret) {
-		netdev_err(ndev, "Error: Gmac power on failed\n");
+		sunxi_err(chip->dev, "Gmac power on failed\n");
 		ret = -EINVAL;
 		goto power_on_err;
 	}
 
 	ret = sunxi_gmac_clk_enable(chip);
 	if (ret) {
-		netdev_err(ndev, "Error: Clk enable is failed\n");
+		sunxi_err(chip->dev, "Clk enable is failed\n");
 		ret = -EINVAL;
 		goto clk_enable_err;
 	}
@@ -3001,13 +3185,14 @@ static int sunxi_gmac_hardware_init(struct platform_device *pdev)
 #if IS_ENABLED(CONFIG_AW_EPHY)
 	ret = chip->ephy_ops->hardware_init(chip);
 	if (ret) {
-		netdev_err(ndev, "Error: ephy init failed\n");
+		sunxi_err(chip->dev, "ephy init failed\n");
 		ret = -EINVAL;
 		goto ephy_init_err;
 	}
+#endif /* CONFIG_AW_EPHY */
 
 	return 0;
-
+#if IS_ENABLED(CONFIG_AW_EPHY)
 ephy_init_err:
 	sunxi_gmac_clk_disable(chip);
 #endif /* CONFIG_AW_EPHY */
@@ -3021,6 +3206,12 @@ power_on_err:
 static void sunxi_gmac_ephy_v1_hardware_deinit(struct sunxi_gmac *chip)
 {
 	pwm_disable(chip->ac300_pwm);
+}
+
+static void sunxi_gmac_ephy_v2_hardware_deinit(struct sunxi_gmac *chip)
+{
+	if (chip->ephy_clk)
+		clk_disable_unprepare(chip->ephy_clk);
 }
 #endif /* CONFIG_AW_EPHY */
 
@@ -3049,7 +3240,7 @@ static void sunxi_gmac_parse_delay_maps(struct sunxi_gmac *chip)
 
 	maps_cnt = of_property_count_elems_of_size(np, "delay-maps", sizeof(u32));
 	if (maps_cnt <= 0) {
-		dev_info(&pdev->dev, "Info: not found delay-maps in dts\n");
+		sunxi_info(&pdev->dev, "Not found delay-maps in dts\n");
 		return;
 	}
 
@@ -3059,7 +3250,7 @@ static void sunxi_gmac_parse_delay_maps(struct sunxi_gmac *chip)
 
 	ret = of_property_read_u32_array(np, "delay-maps", maps, maps_cnt);
 	if (ret) {
-		dev_err(&pdev->dev, "Error: failed to parse delay-maps\n");
+		sunxi_err(&pdev->dev, "Failed to parse delay-maps\n");
 		goto err_parse_maps;
 	}
 
@@ -3068,7 +3259,7 @@ static void sunxi_gmac_parse_delay_maps(struct sunxi_gmac *chip)
 		if (soc_ver == maps[i * array_size]) {
 			chip->rx_delay = maps[i * array_size + 1];
 			chip->tx_delay = maps[i * array_size + 2];
-			dev_info(&pdev->dev, "Info: delay-maps overwrite delay parameters, rx-delay:%d, tx-delay:%d\n",
+			sunxi_info(&pdev->dev, "Overwrite delay-maps parameters, rx-delay:%d, tx-delay:%d\n",
 					chip->rx_delay, chip->tx_delay);
 		}
 	}
@@ -3083,22 +3274,59 @@ static int sunxi_gmac_ephy_v1_resource_get(struct platform_device *pdev)
 	struct net_device *ndev = platform_get_drvdata(pdev);
 	struct sunxi_gmac *chip = netdev_priv(ndev);
 	struct device_node *np = pdev->dev.of_node;
-	int ret;
 
-	ret = of_property_read_u32(np, "sunxi,pwm-channel", &chip->pwm_channel);
-	if (ret) {
-		dev_err(&pdev->dev, "Error: Get ac300 pwm failed\n");
+	chip->ac300_np = of_parse_phandle(np, "ac300-phy-handle", 0);
+	if (!chip->ac300_np) {
+		sunxi_err(&pdev->dev, "Get gmac ac300-phy-handle failed\n");
 		return -EINVAL;
 	}
 
-	chip->ac300_pwm = pwm_request(chip->pwm_channel, NULL);
+	chip->ac300_pwm = devm_pwm_get(chip->dev, NULL);
 	if (IS_ERR_OR_NULL(chip->ac300_pwm)) {
-		dev_err(&pdev->dev, "Error: Get ac300 pwm failed\n");
-		return -EINVAL;
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 4, 0)
+		int ret;
+		ret = of_property_read_u32(np, "sunxi,pwm-channel", &chip->pwm_channel);
+		if (ret) {
+			sunxi_err(&pdev->dev, "Get ac300 pwm failed\n");
+			return -EINVAL;
+		}
+
+		chip->ac300_pwm = pwm_request(chip->pwm_channel, NULL);
+#endif
+		if (IS_ERR_OR_NULL(chip->ac300_pwm)) {
+			sunxi_err(&pdev->dev, "Get ac300 pwm failed\n");
+			return -EINVAL;
+		}
 	}
 
 	return 0;
 }
+
+static int sunxi_gmac_ephy_v2_resource_get(struct platform_device *pdev)
+{
+	struct net_device *ndev = platform_get_drvdata(pdev);
+	struct device_node *np = pdev->dev.of_node;
+	struct sunxi_gmac *chip = netdev_priv(ndev);
+
+	chip->ac300_np = of_parse_phandle(np, "ac300-phy-handle", 0);
+	if (!chip->ac300_np) {
+		sunxi_err(&pdev->dev, "Get gmac ac300-phy-handle failed\n");
+		return -EINVAL;
+	}
+
+	chip->ephy_clk = devm_clk_get(&pdev->dev, "phy25m");
+	if (IS_ERR(chip->ephy_clk)) {
+		chip->ephy_clk = NULL;
+		sunxi_err(&pdev->dev, "Get ephy-phy25m clk failed\n");
+		return -EINVAL;
+	}
+
+	/* Some platform use inner gpio, so we do not need config pinmux. eg:sun300iw1 */
+	chip->need_pinctrl = false;
+
+	return 0;
+}
+
 #endif /* CONFIG_AW_EPHY */
 
 static int sunxi_gmac_resource_get(struct platform_device *pdev)
@@ -3109,7 +3337,9 @@ static int sunxi_gmac_resource_get(struct platform_device *pdev)
 	struct resource *res;
 	struct cpumask mask;
 	int cpu;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 5, 0)
 	phy_interface_t phy_mode;
+#endif
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(5, 15, 0)
 	const char *mac_addr;
@@ -3121,145 +3351,175 @@ static int sunxi_gmac_resource_get(struct platform_device *pdev)
 
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	if (!res) {
-		dev_err(&pdev->dev, "Error: Get gmac memory failed\n");
+		sunxi_err(&pdev->dev, "Get gmac memory failed\n");
 		return -ENODEV;
 	}
 
 	chip->base = devm_ioremap_resource(&pdev->dev, res);
 	if (!chip->base) {
-		dev_err(&pdev->dev, "Error: Gmac memory mapping failed\n");
+		sunxi_err(&pdev->dev, "Gmac memory mapping failed\n");
 		return -ENOMEM;
 	}
 
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 1);
 	if (!res) {
-		dev_err(&pdev->dev, "Error: Get phy memory failed\n");
+		sunxi_err(&pdev->dev, "Get phy memory failed\n");
 		return -ENODEV;
 	}
 
 	chip->syscfg_base = devm_ioremap(&pdev->dev, res->start, resource_size(res));
 	if (!chip->syscfg_base) {
-		dev_err(&pdev->dev, "Error: Phy memory mapping failed\n");
+		sunxi_err(&pdev->dev, "Phy memory mapping failed\n");
 		return -ENOMEM;
 	}
 
 	ndev->irq = platform_get_irq_byname(pdev, "gmacirq");
 	if (ndev->irq < 0) {
-		dev_err(&pdev->dev, "Error: Gmac irq not found\n");
+		sunxi_err(&pdev->dev, "Gmac irq not found\n");
 		return -ENXIO;
 	}
 
 	ret = devm_request_irq(&pdev->dev, ndev->irq, sunxi_gmac_interrupt, IRQF_SHARED, dev_name(&pdev->dev), ndev);
 	if (ret) {
-		dev_err(&pdev->dev, "Error: Could not request irq %d\n", ndev->irq);
+		sunxi_err(&pdev->dev, "Could not request irq %d\n", ndev->irq);
 		return -EINVAL;
 	}
 
 	ret = of_property_read_u32(np, "irq-affinity", &chip->irq_affinity);
 	if (ret) {
-		dev_dbg(&pdev->dev, "Info: Get irq-affinity failed, use default\n");
+		sunxi_debug(&pdev->dev, "Get irq-affinity failed, use default\n");
 	} else {
 		for_each_online_cpu(cpu) {
 			if (chip->irq_affinity & BIT(cpu))
 				cpumask_set_cpu(cpu, &mask);
 		}
 		irq_set_affinity(ndev->irq, &mask);
-		dev_info(&pdev->dev, "Info: Set irq affinity to cpu%d\n", cpumask_first(&mask));
+		sunxi_info(&pdev->dev, "Set irq affinity to cpu%d\n", cpumask_first(&mask));
 	}
 
-	chip->reset = devm_reset_control_get(&pdev->dev, NULL);
-	if (IS_ERR(chip->reset)) {
-		dev_err(&pdev->dev, "Error: Get gmac rst failed\n");
-		return -EINVAL;
-	}
+	ret = of_property_read_u32(np, "txmode", &txmode);
+	if (!ret)
+		sunxi_info(&pdev->dev, "Dma use cut-through mode, tx threshold: %d bytes", txmode);
 
-	chip->pinctrl = devm_pinctrl_get(&pdev->dev);
-	if (IS_ERR(chip->pinctrl)) {
-		dev_err(&pdev->dev, "Error: Get Pin failed\n");
-		return -EIO;
-	}
-
-	chip->gmac_clk = devm_clk_get(&pdev->dev, "gmac");
-	if (!chip->gmac_clk) {
-		dev_err(&pdev->dev, "Error: Get gmac clock failed\n");
-		return -EINVAL;
-	}
-
-	ret = of_get_phy_mode(np, &phy_mode);
-	if (!ret) {
-		chip->phy_interface = phy_mode;
-		if (chip->phy_interface != PHY_INTERFACE_MODE_RGMII &&
-		chip->phy_interface != PHY_INTERFACE_MODE_RMII &&
-		chip->phy_interface != PHY_INTERFACE_MODE_MII) {
-			dev_err(&pdev->dev, "Error: Get gmac phy interface failed\n");
-			return -EINVAL;
-		}
-	}
-
-	ret = of_property_read_u32(np, "tx-delay", &chip->tx_delay);
-	if (ret) {
-		dev_warn(&pdev->dev, "Warning: Get gmac tx-delay failed, use default 0\n");
-		chip->tx_delay = 0;
-	}
-
-	if (user_tx_delay >= 0 && user_tx_delay <= 7) {
-		chip->tx_delay = user_tx_delay;
-		dev_info(&pdev->dev, "Info: user tx-delay: %d\n", chip->tx_delay);
-	} else {
-		dev_info(&pdev->dev, "Info: dts tx-delay: %d\n", chip->tx_delay);
-	}
-
-	ret = of_property_read_u32(np, "rx-delay", &chip->rx_delay);
-	if (ret) {
-		dev_warn(&pdev->dev, "Warning: Get gmac rx-delay failed, use default 0\n");
-		chip->rx_delay = 0;
-	}
-
-	if (user_rx_delay >= 0 && user_rx_delay <= 31) {
-		chip->rx_delay = user_rx_delay;
-		dev_info(&pdev->dev, "Info: user rx-delay: %d\n", chip->rx_delay);
-	} else {
-		dev_info(&pdev->dev, "Info: dts rx-delay: %d\n", chip->rx_delay);
-	}
-
-	sunxi_gmac_parse_delay_maps(chip);
+	ret = of_property_read_u32(np, "rxmode", &rxmode);
+	if (!ret)
+		sunxi_info(&pdev->dev, "Dma use cut-through mode, rx threshold: %d bytes", rxmode);
 
 #if IS_ENABLED(CONFIG_AW_EPHY)
-	chip->ac300_np = of_parse_phandle(np, "ac300-phy-handle", 0);
-	if (!chip->ac300_np) {
-		dev_err(&pdev->dev, "Error: Get gmac ac300-phy-handle failed\n");
-		return -EINVAL;
-	}
-
 	ret = chip->ephy_ops->resource_get(pdev);
 	if (ret)
 		return -EINVAL;
 
 #endif /* CONFIG_AW_EPHY */
 
+
+	chip->reset = devm_reset_control_get_optional(&pdev->dev, NULL);
+	if (IS_ERR(chip->reset)) {
+		sunxi_err(&pdev->dev, "Get gmac rst failed\n");
+		return -EINVAL;
+	}
+
+	if (chip->need_pinctrl) {
+		chip->pinctrl = devm_pinctrl_get(&pdev->dev);
+		if (IS_ERR(chip->pinctrl)) {
+			sunxi_err(&pdev->dev, "Get Pin failed\n");
+			return -EIO;
+		}
+	}
+
+	chip->gmac_clk = devm_clk_get(&pdev->dev, "gmac");
+	if (IS_ERR(chip->gmac_clk)) {
+		chip->gmac_clk = NULL;
+		sunxi_err(&pdev->dev, "Get gmac clock failed\n");
+		return -EINVAL;
+	}
+
+	/* Only use in some platform */
+	chip->hbus_clk = devm_clk_get(&pdev->dev, "hbus");
+	if (IS_ERR(chip->hbus_clk)) {
+		chip->hbus_clk = NULL;
+		sunxi_debug(&pdev->dev, "Get gmac hbus clk failed\n");
+	}
+
+	chip->mbus_clk = devm_clk_get(&pdev->dev, "mbus");
+	if (IS_ERR(chip->mbus_clk)) {
+		chip->mbus_clk = NULL;
+		sunxi_debug(&pdev->dev, "Get gmac mbus clk failed\n");
+	}
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 5, 0)
+	ret = of_get_phy_mode(np, &phy_mode);
+	if (!ret) {
+		chip->phy_interface = phy_mode;
+		if (chip->phy_interface != PHY_INTERFACE_MODE_RGMII &&
+		chip->phy_interface != PHY_INTERFACE_MODE_RMII &&
+		chip->phy_interface != PHY_INTERFACE_MODE_MII) {
+			sunxi_err(&pdev->dev, "Get gmac phy interface failed\n");
+			return -EINVAL;
+		}
+	}
+#else
+	chip->phy_interface = of_get_phy_mode(np);
+#endif
+
+	ret = of_property_read_u32(np, "tx-delay", &chip->tx_delay);
+	if (ret) {
+		sunxi_warn(&pdev->dev, "Get gmac tx-delay failed, use default 0\n");
+		chip->tx_delay = 0;
+	}
+
+	if (user_tx_delay >= 0 && user_tx_delay <= 7) {
+		chip->tx_delay = user_tx_delay;
+		sunxi_info(&pdev->dev, "User tx-delay: %d\n", chip->tx_delay);
+	} else {
+		sunxi_info(&pdev->dev, "Dts tx-delay: %d\n", chip->tx_delay);
+	}
+
+	ret = of_property_read_u32(np, "rx-delay", &chip->rx_delay);
+	if (ret) {
+		sunxi_warn(&pdev->dev, "Get gmac rx-delay failed, use default 0\n");
+		chip->rx_delay = 0;
+	}
+
+	if (user_rx_delay >= 0 && user_rx_delay <= 31) {
+		chip->rx_delay = user_rx_delay;
+		sunxi_info(&pdev->dev, "User rx-delay: %d\n", chip->rx_delay);
+	} else {
+		sunxi_info(&pdev->dev, "Dts rx-delay: %d\n", chip->rx_delay);
+	}
+
+	sunxi_gmac_parse_delay_maps(chip);
+
+	ret = of_property_read_u32(np, "max-mtu", &chip->max_mtu);
+	if (ret)
+		chip->max_mtu = SUNXI_GMAC_MAX_MTU_SZ;
+	else
+		sunxi_info(&pdev->dev, "Get max-mtu: %d\n", chip->max_mtu);
+
 	chip->phy_node = of_parse_phandle(np, "phy-handle", 0);
 	if (!chip->phy_node) {
-		dev_err(&pdev->dev, "Error: Get gmac phy-handle failed\n");
+		sunxi_err(&pdev->dev, "Get gmac phy-handle failed\n");
 		return -EINVAL;
 	}
 
 	ret = of_property_read_u32(np, "sunxi,phy-clk-type", &chip->phy_clk_type);
 	if (ret) {
-		dev_warn(&pdev->dev, "Warning: Get gmac phy-clk-type failed, use default OSC or pwm\n");
+		sunxi_warn(&pdev->dev, "Get gmac phy-clk-type failed, use default OSC or pwm\n");
 		chip->phy_clk_type = SUNXI_PHY_USE_EXT_OSC;
 	};
 
 	if (chip->phy_clk_type == SUNXI_PHY_USE_CLK25M) {
 		chip->phy25m_clk = devm_clk_get(&pdev->dev, "phy25m");
-		if (IS_ERR_OR_NULL(chip->phy25m_clk)) {
-			dev_err(&pdev->dev, "Error: Get phy25m clk failed\n");
+		if (IS_ERR(chip->phy25m_clk)) {
+			chip->phy25m_clk = NULL;
+			sunxi_err(&pdev->dev, "Get phy25m clk failed\n");
 			return -EINVAL;
 		}
 	}
 
 	chip->gmac_supply = devm_regulator_get_optional(&pdev->dev, "gmac3v3");
 	if (IS_ERR(chip->gmac_supply))
-		netdev_err(ndev, "Error: Not found gmac3v3-supply\n");
+		sunxi_debug(&pdev->dev, "Not found gmac3v3-supply\n");
 
 	/*
 	 * Read mac-address from dts,
@@ -3281,11 +3541,18 @@ static int sunxi_gmac_resource_get(struct platform_device *pdev)
 #if IS_ENABLED(CONFIG_AW_EPHY)
 static void sunxi_gmac_ephy_v1_resource_put(struct platform_device *pdev)
 {
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 4, 0)
 	struct net_device *ndev = platform_get_drvdata(pdev);
 	struct sunxi_gmac *chip = netdev_priv(ndev);
 
 	pwm_free(chip->ac300_pwm);
+#endif
 }
+
+static void sunxi_gmac_ephy_v2_resource_put(struct platform_device *pdev)
+{
+}
+
 #endif /* CONFIG_AW_EPHY */
 
 static void sunxi_gmac_resource_put(struct platform_device *pdev)
@@ -3300,6 +3567,7 @@ static void sunxi_gmac_resource_put(struct platform_device *pdev)
 
 static void sunxi_gmac_sysfs_create(struct device *dev)
 {
+#if !IS_ENABLED(CONFIG_AW_BSP_LOWMEM)
 	device_create_file(dev, &dev_attr_gphy_test);
 	device_create_file(dev, &dev_attr_mii_read);
 	device_create_file(dev, &dev_attr_mii_write);
@@ -3308,10 +3576,12 @@ static void sunxi_gmac_sysfs_create(struct device *dev)
 	device_create_file(dev, &dev_attr_rx_delay);
 	device_create_file(dev, &dev_attr_extra_tx_stats);
 	device_create_file(dev, &dev_attr_extra_rx_stats);
+#endif
 }
 
 static void sunxi_gmac_sysfs_destroy(struct device *dev)
 {
+#if !IS_ENABLED(CONFIG_AW_BSP_LOWMEM)
 	device_remove_file(dev, &dev_attr_gphy_test);
 	device_remove_file(dev, &dev_attr_mii_read);
 	device_remove_file(dev, &dev_attr_mii_write);
@@ -3320,6 +3590,7 @@ static void sunxi_gmac_sysfs_destroy(struct device *dev)
 	device_remove_file(dev, &dev_attr_rx_delay);
 	device_remove_file(dev, &dev_attr_extra_tx_stats);
 	device_remove_file(dev, &dev_attr_extra_rx_stats);
+#endif
 }
 
 #if IS_ENABLED(CONFIG_AW_GMAC_METADATA)
@@ -3391,7 +3662,7 @@ static long sunxi_gmac_fops_ioctl(struct file *file, unsigned int cmd, unsigned 
 	case GMAC_WRITE:
 		ret = copy_from_user(chip->metadata_buff, (void __user *)arg, chip->metadata_len);
 		if (ret) {
-			dev_err(chip->dev, "metadata copy from user err\n");
+			sunxi_err(chip->dev, "Metadata copy from user err\n");
 			return -EFAULT;
 		}
 
@@ -3408,13 +3679,13 @@ static long sunxi_gmac_fops_ioctl(struct file *file, unsigned int cmd, unsigned 
 
 		ret = copy_to_user((void __user *)arg, chip->metadata_buff, chip->metadata_len);
 		if (ret) {
-			dev_err(chip->dev, "metadata copy to user err\n");
+			sunxi_err(chip->dev, "Metadata copy to user err\n");
 			return -EFAULT;
 		}
 		break;
 	default:
 		ret = -EFAULT;
-		dev_err(chip->dev, "Unspported cmd\n");
+		sunxi_err(chip->dev, "Unspported cmd\n");
 		break;
 	}
 
@@ -3432,7 +3703,7 @@ static int sunxi_gmac_fops_init(struct sunxi_gmac *chip)
 {
 	chip->mdev.parent	= chip->dev;
 	chip->mdev.minor	= MISC_DYNAMIC_MINOR;
-	chip->mdev.name		= "gmac";
+	chip->mdev.name		= chip->ndev->name;
 	chip->mdev.fops		= &sunxi_gmac_fops;
 
 	/* MTU includes 4 bytes of mark, so the maximum metadata is MTU - 4 bytes in length */
@@ -3462,12 +3733,21 @@ static struct sunxi_gmac_ephy_ops sunxi_gmac_ephy_ops_v1 = {
 	.hardware_init = sunxi_gmac_ephy_v1_hardware_init,
 	.hardware_deinit = sunxi_gmac_ephy_v1_hardware_deinit,
 };
+
+static struct sunxi_gmac_ephy_ops sunxi_gmac_ephy_ops_v2 = {
+	.resource_get = sunxi_gmac_ephy_v2_resource_get,
+	.resource_put = sunxi_gmac_ephy_v2_resource_put,
+	.hardware_init = sunxi_gmac_ephy_v2_hardware_init,
+	.hardware_deinit = sunxi_gmac_ephy_v2_hardware_deinit,
+};
+
 #endif /* CONFIG_AW_EPHY */
 
 static const struct of_device_id sunxi_gmac_of_match[] = {
 	{.compatible = "allwinner,sunxi-gmac",},
 #if IS_ENABLED(CONFIG_AW_EPHY)
 	{.compatible = "allwinner,sunxi-gmac-ephy-v1", .data = &sunxi_gmac_ephy_ops_v1, },
+	{.compatible = "allwinner,sunxi-gmac-ephy-v2", .data = &sunxi_gmac_ephy_ops_v2, },
 #endif /* CONFIG_AW_EPHY */
 	{},
 };
@@ -3489,20 +3769,20 @@ static int sunxi_gmac_probe(struct platform_device *pdev)
 	struct sunxi_gmac *chip;
 	const struct of_device_id *match;
 
-	dev_dbg(&pdev->dev, "%s() BEGIN\n", __func__);
+	sunxi_debug(&pdev->dev, "%s() BEGIN\n", __func__);
 
 	match = of_match_device(sunxi_gmac_of_match, &pdev->dev);
 	if (!match) {
-		dev_err(&pdev->dev, "gmac probe match device failed\n");
+		sunxi_err(&pdev->dev, "Gmac probe match device failed\n");
 		return -EINVAL;
 	}
 
 	pdev->dev.coherent_dma_mask = DMA_BIT_MASK(32);
 	pdev->dev.dma_mask = &pdev->dev.coherent_dma_mask;
 
-	ndev = alloc_etherdev(sizeof(*chip));
+	ndev = devm_alloc_etherdev(&pdev->dev, sizeof(*chip));
 	if (!ndev) {
-		dev_err(&pdev->dev, "Error: Allocate network device failed\n");
+		sunxi_err(&pdev->dev, "Allocate network device failed\n");
 		ret = -ENOMEM;
 		goto alloc_etherdev_err;
 	}
@@ -3516,15 +3796,17 @@ static int sunxi_gmac_probe(struct platform_device *pdev)
 #endif /* CONFIG_AW_EPHY */
 	chip->ndev = ndev;
 	chip->dev = &pdev->dev;
+	chip->need_pinctrl = true;
+
 	ret = sunxi_gmac_resource_get(pdev);
 	if (ret) {
-		dev_err(&pdev->dev, "Error: Get gmac hardware resource failed\n");
+		sunxi_err(&pdev->dev, "Get gmac hardware resource failed\n");
 		goto resource_get_err;
 	}
 
 	ret = sunxi_gmac_hardware_init(pdev);
 	if (ret) {
-		dev_err(&pdev->dev, "Error: Init gmac hardware resource failed\n");
+		sunxi_err(&pdev->dev, "Init gmac hardware resource failed\n");
 		goto hardware_init_err;
 	}
 
@@ -3545,21 +3827,28 @@ static int sunxi_gmac_probe(struct platform_device *pdev)
 	ndev->hw_features |= NETIF_F_LOOPBACK;
 	ndev->priv_flags |= IFF_UNICAST_FLT;
 	ndev->watchdog_timeo = msecs_to_jiffies(watchdog);
-	ndev->max_mtu = SUNXI_GMAC_MAX_MTU_SZ;
+	ndev->max_mtu = chip->max_mtu;
+	if (chip->max_mtu < 1500)
+		ndev->mtu = chip->max_mtu;
 
 	/* add napi poll method */
 #if LINUX_VERSION_CODE < KERNEL_VERSION(6, 1, 0)
-	netif_napi_add(ndev, &chip->napi, sunxi_gmac_poll, SUNXI_GMAC_BUDGET);
+	netif_napi_add(ndev, &chip->napi_rx, sunxi_gmac_napi_rx, SUNXI_GMAC_BUDGET);
+	netif_napi_add(ndev, &chip->napi_tx, sunxi_gmac_napi_tx, SUNXI_GMAC_TX_THRESH);
 #else
-	netif_napi_add(ndev, &chip->napi, sunxi_gmac_poll);
+	netif_napi_add_weight(ndev, &chip->napi_rx, sunxi_gmac_napi_rx, SUNXI_GMAC_BUDGET);
+	netif_napi_add_weight(ndev, &chip->napi_tx, sunxi_gmac_napi_tx, SUNXI_GMAC_TX_THRESH);
 #endif
 
 	spin_lock_init(&chip->universal_lock);
-	spin_lock_init(&chip->tx_lock);
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 8, 0)
 	ret = register_netdev(ndev);
+#else
+	ret = devm_register_netdev(&pdev->dev, ndev);
+#endif
 	if (ret) {
-		dev_err(&pdev->dev, "Error: Register %s failed\n", ndev->name);
+		sunxi_err(&pdev->dev, "Register %s failed\n", ndev->name);
 		goto register_err;
 	}
 
@@ -3575,7 +3864,7 @@ static int sunxi_gmac_probe(struct platform_device *pdev)
 
 	ret = sunxi_gmac_dma_desc_init(ndev);
 	if (ret) {
-		dev_err(&pdev->dev, "Error: Init dma descriptor failed\n");
+		sunxi_err(&pdev->dev, "Init dma descriptor failed\n");
 		goto init_dma_desc_err;
 	}
 
@@ -3584,29 +3873,31 @@ static int sunxi_gmac_probe(struct platform_device *pdev)
 #if IS_ENABLED(CONFIG_AW_GMAC_METADATA)
 	ret = sunxi_gmac_fops_init(chip);
 	if (ret) {
-		dev_err(&pdev->dev, "Error: Init gmac class failed\n");
+		sunxi_err(&pdev->dev, "Init gmac class failed\n");
 		goto fops_init_err;
 	}
 #endif
 
-	dev_dbg(&pdev->dev, "%s() SUCCESS\n", __func__);
+	sunxi_debug(&pdev->dev, "%s() SUCCESS\n", __func__);
 
 	return 0;
 
 #if IS_ENABLED(CONFIG_AW_GMAC_METADATA)
 fops_init_err:
 	sunxi_gmac_sysfs_destroy(&pdev->dev);
+	sunxi_gmac_dma_desc_deinit(chip);
 #endif
 init_dma_desc_err:
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 8, 0)
 	unregister_netdev(ndev);
+#endif
 register_err:
-	netif_napi_del(&chip->napi);
+	netif_napi_del(&chip->napi_rx);
+	netif_napi_del(&chip->napi_tx);
 	sunxi_gmac_hardware_deinit(pdev);
 hardware_init_err:
 	sunxi_gmac_resource_put(pdev);
 resource_get_err:
-	platform_set_drvdata(pdev, NULL);
-	free_netdev(ndev);
 alloc_etherdev_err:
 	return ret;
 }
@@ -3621,12 +3912,13 @@ static int sunxi_gmac_remove(struct platform_device *pdev)
 #endif
 	sunxi_gmac_sysfs_destroy(&pdev->dev);
 	sunxi_gmac_dma_desc_deinit(chip);
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 8, 0)
 	unregister_netdev(ndev);
-	netif_napi_del(&chip->napi);
+#endif
+	netif_napi_del(&chip->napi_rx);
+	netif_napi_del(&chip->napi_tx);
 	sunxi_gmac_hardware_deinit(pdev);
 	sunxi_gmac_resource_put(pdev);
-	platform_set_drvdata(pdev, NULL);
-	free_netdev(ndev);
 	return 0;
 }
 

@@ -19,6 +19,7 @@
 struct de_top_handle {
 	struct module_create_info cinfo;
 	bool share_scaler;
+	bool support_offline;
 	struct de_top_private *private;
 	struct de_reg_block **block;
 	unsigned int block_num;
@@ -46,6 +47,11 @@ enum de_rt_wb_pos {
 	FROM_DISP,
 };
 
+struct de_offline_get_info {
+	void *vir_addr;
+	unsigned long buff_size;
+};
+
 struct de_top_wb_cfg {
 	unsigned int disp;
 	bool enable;
@@ -59,6 +65,7 @@ enum de_offline_mode {
 };
 
 struct offline_cfg {
+	unsigned int disp;
 	bool enable;
 	enum de_offline_mode mode;
 	unsigned int w;
@@ -90,7 +97,8 @@ struct de_top_handle *de_top_create(const struct module_create_info *info);
 
 s32 de_top_offline_mode_config(struct de_top_handle *hdl, struct offline_cfg *cfg);
 s32 de_top_get_offline_mode_status(struct de_top_handle *hdl);
-s32 de_top_offline_realloc_pingpang_buf(struct de_top_handle *hdl, unsigned int width, unsigned int height);
+s32 de_top_get_offline_info(struct de_top_handle *hdl, struct de_offline_get_info *offline_info);
+enum de_offline_mode_status de_top_offline_mode_query_state_with_clear(struct de_top_handle *hdl, enum de_offline_mode_status offline_state);
 
 s32 de_top_dfs_config_enable(struct de_top_handle *hdl, struct dfs_cfg *cfg);
 

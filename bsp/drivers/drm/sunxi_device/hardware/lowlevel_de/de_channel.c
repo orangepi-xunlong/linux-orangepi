@@ -452,7 +452,8 @@ static s32 de_rtmx_chn_calc_size(struct de_channel_handle *hdl, struct de_chn_in
 			if ((state->base.fb->format->format == DRM_FORMAT_YVU420 ||
 			     state->base.fb->format->format == DRM_FORMAT_YUV420 ||
 			     state->base.fb->format->format == DRM_FORMAT_NV12 ||
-			     state->base.fb->format->format == DRM_FORMAT_NV21) &&
+			     state->base.fb->format->format == DRM_FORMAT_NV21 ||
+			     state->base.fb->format->format == DRM_FORMAT_P010) &&
 			    ((state->base.rotation & DRM_MODE_ROTATE_90) == DRM_MODE_ROTATE_90 ||
 			     (state->base.rotation & DRM_MODE_ROTATE_270) == DRM_MODE_ROTATE_270)) {
 				crop64.width = (((unsigned long long)state->base.src_h) >> 16) << 32;
@@ -757,6 +758,11 @@ int channel_apply(struct de_channel_handle *hdl, struct display_channel_state *s
 	drm_rect_init(&output->disp_win, hdl->private->info.scn_win.left, hdl->private->info.scn_win.top,
 			    hdl->private->info.scn_win.width, hdl->private->info.scn_win.height);
 	return 0;
+}
+
+int de_channel_pq_apply_atonce(struct de_channel_handle *hdl, struct display_channel_state *state)
+{
+	return de_frontend_apply_atonce(hdl->private->frontend, state);
 }
 
 static void drm_framebuffer_print_info(struct drm_printer *p, unsigned int indent,

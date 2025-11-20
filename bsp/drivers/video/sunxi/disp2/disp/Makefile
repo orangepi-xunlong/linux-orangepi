@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
-include $(obj)/de/Makefile
+include $(srctree)/$(obj)/de/Makefile
 
 # define_trace.h needs to know how to find our header
 CFLAGS_disp_trace.o := -I$(src)

@@ -5323,6 +5323,7 @@ static int rwnx_fill_station_info(struct rwnx_sta *sta, struct rwnx_vif *vif,
 	sinfo->tx_failed = cfm.txfailed;
 	rate_info = (union rwnx_rate_ctrl_info *)&cfm.rate_info;
 
+	/*
 	printk("%s ModTx(%d):%d TxIndex:%d ModRx(%d):%d RxHTIndex:%d RxVHTIndex:%d RxHEIndex:%d RSSI:%d \r\n", __func__,
 		rate_info->bwTx,
 		rate_info->formatModTx,
@@ -5333,6 +5334,7 @@ static int rwnx_fill_station_info(struct rwnx_sta *sta, struct rwnx_vif *vif,
 		rx_vect1->vht.mcs,
 		rx_vect1->he.mcs,
 		(s8)cfm.rssi);
+	*/
 
 	switch (rate_info->formatModTx) {
 	case FORMATMOD_NON_HT:

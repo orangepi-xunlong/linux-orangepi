@@ -17,4 +17,19 @@ config AW_MAILBOX_SUPPORT_TXDONE_IRQ
 	help
 	  Say y here to support Allwinner SOC processors msgbox txdone irq.
 
+
+config AW_SOFT_MSGBOX
+	tristate "Irq msgbox support for Allwinner SoCs"
+	depends on AW_BSP
+	select  MAILBOX
+	help
+	  Say y here to support Allwinner SOC processors via the
+	  msgbox framework with using irq.
+
+config AW_SOFT_MSGBOX_TEST
+	tristate "Test for irq msgbox support"
+	depends on AW_SOFT_MSGBOX
+	help
+	  Say y here to test the msgbox framework with using irq.
+
 endmenu

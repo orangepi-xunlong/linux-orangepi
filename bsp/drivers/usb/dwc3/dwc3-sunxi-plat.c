@@ -222,6 +222,7 @@ void dwc3_enable_susphy(struct dwc3 *dwc, bool enable)
 	dwc3_sunxi_writel(dwc->regs, DWC3_GUSB2PHYCFG(0), reg);
 }
 
+#if LINUX_VERSION_CODE <= KERNEL_VERSION(6, 6, 66)
 void dwc3_set_prtcap(struct dwc3 *dwc, u32 mode)
 {
 	u32 reg;
@@ -233,6 +234,32 @@ void dwc3_set_prtcap(struct dwc3 *dwc, u32 mode)
 
 	dwc->current_dr_role = mode;
 }
+#else
+void dwc3_set_prtcap(struct dwc3 *dwc, u32 mode, bool ignore_susphy)
+{
+	unsigned int hw_mode;
+	u32 reg;
+
+	reg = dwc3_sunxi_readl(dwc->regs, DWC3_GCTL);
+
+	 /*
+	  * For DRD controllers, GUSB3PIPECTL.SUSPENDENABLE and
+	  * GUSB2PHYCFG.SUSPHY should be cleared during mode switching,
+	  * and they can be set after core initialization.
+	  */
+	hw_mode = DWC3_GHWPARAMS0_MODE(dwc->hwparams.hwparams0);
+	if (hw_mode == DWC3_GHWPARAMS0_MODE_DRD && !ignore_susphy) {
+		if (DWC3_GCTL_PRTCAP(reg) != mode)
+			dwc3_enable_susphy(dwc, false);
+	}
+
+	reg &= ~(DWC3_GCTL_PRTCAPDIR(DWC3_GCTL_PRTCAP_OTG));
+	reg |= DWC3_GCTL_PRTCAPDIR(mode);
+	dwc3_sunxi_writel(dwc->regs, DWC3_GCTL, reg);
+
+	dwc->current_dr_role = mode;
+}
+#endif
 #endif
 static void dwc3_set_host(struct dwc3_sunxi_plat *dwc3, bool enable)
 {
@@ -259,7 +286,11 @@ static void dwc3_set_host(struct dwc3_sunxi_plat *dwc3, bool enable)
 				ret = phy_power_on(dwc3->dwc->usb3_generic_phy);
 				if (ret)
 					sunxi_err(dwc3->dev, "failed to set phy power on\n");
+#if LINUX_VERSION_CODE <= KERNEL_VERSION(6, 6, 66)
 				dwc3_set_prtcap(dwc3->dwc, DWC3_GCTL_PRTCAP_HOST);
+#else
+				dwc3_set_prtcap(dwc3->dwc, DWC3_GCTL_PRTCAP_HOST, true);
+#endif
 				phy_set_mode(dwc3->dwc->usb2_generic_phy, PHY_MODE_USB_HOST);
 				phy_set_mode(dwc3->dwc->usb3_generic_phy, PHY_MODE_USB_HOST);
 				ret = dwc3_host_init(dwc3->dwc);

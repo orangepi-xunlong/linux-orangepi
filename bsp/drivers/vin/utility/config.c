@@ -55,9 +55,13 @@ static int get_gpio_info(struct device_node *np, const char *name,
 			 int *gpio)
 {
 	int gnum;
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 6, 0)
 	enum of_gpio_flags gc;
 
 	gnum = of_get_named_gpio_flags(np, name, 0, &gc);
+#else
+	gnum = of_get_named_gpio(np, name, 0);
+#endif
 	if (!gpio_is_valid(gnum)) {
 		vin_log(VIN_LOG_CONFIG, "fetch %s from device_tree failed\n", name);
 		return -ENODEV;

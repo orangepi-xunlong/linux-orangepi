@@ -11,6 +11,7 @@
  */
 #include <linux/kthread.h>
 #include <linux/version.h>
+#include <linux/delay.h>
 #include <drm/drm_blend.h>
 #include <drm/drm_edid.h>
 #include <drm/drm_atomic.h>
@@ -28,6 +29,8 @@
 #include <linux/version.h>
 #include <linux/sort.h>
 #include <linux/completion.h>
+#include <linux/ktime.h>
+#include <linux/math64.h>
 
 #include "sunxi_drm_crtc.h"
 #include "sunxi_drm_drv.h"
@@ -89,6 +92,12 @@ struct sunxi_drm_crtc {
 	unsigned int irqcnt;
 	unsigned int fifo_err;
 	unsigned int vblank_trace;
+
+	bool support_offline;
+	unsigned int offline_composite_timeout;
+	unsigned int last_offline_composite_finish;
+	unsigned int current_offline_composite_finish;
+	unsigned int offline_composite_finish_per_60vsync;
 
 	unsigned int hue_default_value;
 	bool share_scaler;
@@ -299,6 +308,7 @@ static int sunxi_plane_pq_proc_locked(struct drm_plane *plane, enum sunxi_pq_typ
 		DRM_ERROR("pq cmd not support %d\n", type);
 		return -EINVAL;
 	}
+	de_channel_pq_apply_atonce(splane->hdl, cstate);
 	return 0;
 }
 
@@ -1050,7 +1060,7 @@ void sunxi_plane_print_state(struct drm_printer *p,
 static void sunxi_plane_atomic_print_state(struct drm_printer *p,
 				   const struct drm_plane_state *state)
 {
-	sunxi_plane_print_state(p, state, true);
+	sunxi_plane_print_state(p, state, false);
 }
 
 static const struct drm_plane_funcs sunxi_plane_funcs = {
@@ -1542,6 +1552,7 @@ struct sunxi_drm_wb *sunxi_drm_wb_init_one(struct sunxi_de_wb_info *wb_info)
 	wb->hw_wb = wb_info->wb;
 	spin_lock_init(&wb->signal_lock);
 	wb->wb_connector.encoder.possible_crtcs = wb_info->support_disp_mask;
+	wb->wb_connector.encoder.possible_clones = drm_encoder_mask(&wb->wb_connector.encoder);
 	drm_connector_helper_add(&wb->wb_connector.base, &sunxi_wb_connector_helper_funcs);
 
 	ret = drm_writeback_connector_init(drm, &wb->wb_connector,
@@ -1558,6 +1569,33 @@ struct sunxi_drm_wb *sunxi_drm_wb_init_one(struct sunxi_de_wb_info *wb_info)
 		return NULL;
 	} else
 		return wb;
+}
+
+/**
+*	Function: sunxi_drm_sup_wb_clone
+*	Description: set wb possible_clones and intput encoder's possible_clones
+*	Parameter:
+*		Int:
+*			drm: drm device
+*			enc: the encoder that need to set possible clone
+*/
+void sunxi_drm_sup_wb_clone(struct drm_device *drm, struct drm_encoder *enc)
+{
+	struct drm_encoder *wb_enc = NULL;
+
+	if (NULL == drm || NULL == enc) {
+		DRM_ERROR("sunxi_drm_sup_wb_clone param error\n");
+		return;
+	}
+
+	drm_for_each_encoder(wb_enc, drm) {
+		if (wb_enc->encoder_type == DRM_MODE_ENCODER_VIRTUAL) {
+			enc->possible_clones |= drm_encoder_mask(wb_enc);
+			wb_enc->possible_clones |= drm_encoder_mask(enc);
+		}
+	}
+
+	return;
 }
 
 void sunxi_drm_wb_destory(struct sunxi_drm_wb *wb)
@@ -1587,6 +1625,7 @@ irqreturn_t sunxi_crtc_event_proc(int irq, void *crtc)
 	struct sunxi_drm_crtc *scrtc = to_sunxi_crtc(crtc);
 	bool timeout;
 	bool busy = sunxi_de_query_de_busy(scrtc->sunxi_de);
+	int offline_status = 0;
 
 	scrtc->irqcnt++;
 	if (scrtc->check_status(scrtc->output_dev_data)) {
@@ -1596,6 +1635,21 @@ irqreturn_t sunxi_crtc_event_proc(int irq, void *crtc)
 
 	SUNXIDRM_TRACE_INT2("crtc-irq", scrtc->hw_id, scrtc->irqcnt & 1);
 	SUNXIDRM_TRACE_INT2("crtc-busy", scrtc->hw_id, busy);
+
+	if (scrtc->support_offline) {
+		offline_status = sunxi_de_query_clear_offline_mode_status(scrtc->sunxi_de, OFFLINE_BLD_MASK);
+
+		if (offline_status & OFFLINE_BLD_FINISH)
+			scrtc->current_offline_composite_finish++;
+		if (offline_status & OFFLINE_BLD_TIMEOUT)
+			scrtc->offline_composite_timeout++;
+
+		if (!(scrtc->irqcnt % 100)) {
+			scrtc->offline_composite_finish_per_60vsync = scrtc->current_offline_composite_finish - scrtc->last_offline_composite_finish;
+			scrtc->last_offline_composite_finish = scrtc->current_offline_composite_finish;
+		}
+		SUNXIDRM_TRACE_INT2("crtc-offline-timeout", scrtc->hw_id, scrtc->offline_composite_timeout);
+	}
 
 	timeout = !scrtc->is_sync_time_enough(scrtc->output_dev_data);
 	sunxi_de_event_proc(scrtc->sunxi_de, timeout);
@@ -1771,6 +1825,24 @@ static void sunxi_crtc_reset(struct drm_crtc *crtc)
 	__drm_atomic_helper_crtc_reset(crtc, &state->base);
 }
 
+u64 sunxi_get_fpsraw_and_vblankcnt(struct drm_crtc *crtc)
+{
+	static ktime_t time_us[2];
+	u64 vblank_count[2];
+	u64 fps_raw, vblank_delta, time_us_delta;
+
+	vblank_count[0] = drm_crtc_vblank_count_and_time(crtc, &time_us[0]);
+	msleep(100);
+	vblank_count[1] = drm_crtc_vblank_count_and_time(crtc, &time_us[1]);
+
+	vblank_delta = vblank_count[1] - vblank_count[0];
+	time_us_delta = ktime_us_delta(time_us[1], time_us[0]);
+
+	fps_raw = div64_u64(vblank_delta * 1000000 * 1000, time_us_delta); /* For Float */
+
+	return fps_raw;
+}
+
 void sunxi_crtc_atomic_print_state(struct drm_printer *p,
 				   const struct drm_crtc_state *state)
 {
@@ -1778,18 +1850,35 @@ void sunxi_crtc_atomic_print_state(struct drm_printer *p,
 	struct sunxi_drm_wb *wb;
 	struct sunxi_crtc_state *cstate = to_sunxi_crtc_state(state);
 	struct sunxi_drm_crtc *scrtc = (struct sunxi_drm_crtc *)state->crtc;
-	int w = state->mode.hdisplay;
-	int h = state->mode.vdisplay;
-	int fps = drm_mode_vrefresh(&state->mode);
+	int mode_w = state->mode.hdisplay;
+	int mode_h = state->mode.vdisplay;
+	int mode_fps = drm_mode_vrefresh(&state->mode);
+	u64 fps_raw, fps_integer, fps_fractional;
+
+	fps_raw = sunxi_get_fpsraw_and_vblankcnt(state->crtc);
+	fps_integer = div64_u64_rem(fps_raw, 1000, &fps_fractional);
 
 	drm_printf(p, "\t%s", scrtc->enabled ? "on: " : "off\n");
 	if (scrtc->enabled) {
-		drm_printf(p, "%dx%d@%d&%dMhz->tcon%d irqcnt=%d err=%d\n", w, h, fps,
-			    (int)(scrtc->clk_freq / 1000000), cstate->tcon_id, scrtc->irqcnt, scrtc->fifo_err);
-		drm_printf(p, "\t    format_space: %d yuv_sampling: %d eotf:%d cs: %d"
-			    " color_range: %d data_bits: %d\n", cstate->px_fmt_space,
-			    cstate->yuv_sampling, cstate->eotf, cstate->color_space,
-			    cstate->color_range, cstate->data_bits);
+		drm_printf(p, "%dx%d@%d&%dMhz->tcon%d\tirqcnt:%d\terr:%d\tfps:%llu.%llu\n", mode_w, mode_h,
+				mode_fps, (int)(scrtc->clk_freq / 1000000), cstate->tcon_id, scrtc->irqcnt,
+				scrtc->fifo_err, fps_integer, fps_fractional);
+		drm_printf(p, "\t\tformat_space:%d\tyuv_sampling:%d\teotf:%d\tcs:%d"
+				"\tcolor_range:%d\tdata_bits:%d\n", cstate->px_fmt_space,
+				cstate->yuv_sampling, cstate->eotf, cstate->color_space,
+				cstate->color_range, cstate->data_bits);
+		if (scrtc->support_offline) {
+			int fixed_point_8b;
+			int integer_part;
+			int fractional_part;
+
+			fixed_point_8b = scrtc->offline_composite_finish_per_60vsync * 0x100 / 60 * mode_fps;
+			integer_part = fixed_point_8b >> 8;
+			fractional_part = ((fixed_point_8b & 0xFF) * 100) / 256;
+			fractional_part = fractional_part < 0 ? -fractional_part : fractional_part;
+			drm_printf(p, "\toffline composite fps:%d.%02d\ttimeout:%d\n",
+				integer_part, fractional_part, scrtc->offline_composite_timeout);
+		}
 
 		sunxi_de_dump_state(p, scrtc->sunxi_de);
 
@@ -2003,6 +2092,7 @@ static void sunxi_crtc_atomic_flush(struct drm_crtc *crtc,
 	sunxi_wb_commit(scrtc);
 	memset(&cfg, 0, sizeof(cfg));
 	if (all_dirty || crtc->state->color_mgmt_changed) {
+		scrtc->gamma_dirty = false;
 		if (crtc->state->gamma_lut) {
 			cfg.gamma_lut = crtc->state->gamma_lut->data;
 			cfg.gamma_dirty = true;
@@ -2030,7 +2120,6 @@ static void sunxi_crtc_atomic_flush(struct drm_crtc *crtc,
 	sunxi_de_atomic_flush(scrtc->sunxi_de, backend_data, &cfg);
 	if (scrtc_state->atomic_flush)
 		scrtc_state->atomic_flush(scrtc_state->output_dev_data);
-
 
 	/*
 	 * Ideally, the page_flip should be called within the vsync interrupt;
@@ -2146,7 +2235,6 @@ static int sunxi_drm_crtc_atomic_check(struct drm_crtc *crtc,
 		return -EINVAL;
 	}
 	if (scrtc->gamma_dirty == true) {
-		scrtc->gamma_dirty = false;
 		crtc_state->color_mgmt_changed = true;
 	}
 
@@ -2346,6 +2434,40 @@ void sunxi_drm_crtc_set_backlight_value(struct sunxi_drm_crtc *scrtc, int backli
 		scrtc->set_backlight_value(scrtc->output_dev_data, backlight);
 }
 
+int sunxi_drm_crtc_offline_mode_pre_init(struct drm_crtc *crtc, unsigned int width, unsigned int height)
+{
+	struct sunxi_drm_crtc *scrtc = to_sunxi_crtc(crtc);
+
+	if (!crtc || !scrtc) {
+		DRM_ERROR("crtc is NULL\n");
+		return -1;
+	}
+
+	if (!scrtc->sunxi_de) {
+		DRM_ERROR("sunxi_de is NULL\n");
+		return -1;
+	}
+
+	return sunxi_de_offline_mode_pre_init(scrtc->sunxi_de, width, height);
+}
+
+int sunxi_drm_crtc_get_offline_mode_info(struct drm_crtc *crtc, void **vir_addr, unsigned long *buff_size)
+{
+	struct sunxi_drm_crtc *scrtc = to_sunxi_crtc(crtc);
+
+	if (!crtc || !scrtc) {
+		DRM_ERROR("crtc is NULL\n");
+		return -1;
+	}
+
+	if (!scrtc->sunxi_de) {
+		DRM_ERROR("sunxi_de is NULL\n");
+		return -1;
+	}
+
+	return sunxi_de_get_offline_mode_info(scrtc->sunxi_de, vir_addr, buff_size);
+}
+
 struct sunxi_drm_crtc *sunxi_drm_crtc_init_one(struct sunxi_de_info *info)
 {
 	struct sunxi_drm_crtc *scrtc;
@@ -2370,6 +2492,7 @@ struct sunxi_drm_crtc *sunxi_drm_crtc_init_one(struct sunxi_de_info *info)
 	scrtc->clk_freq = info->clk_freq;
 	scrtc->hue_default_value = info->hue_default_value;
 	scrtc->share_scaler = info->feat.feat.share_scaler;
+	scrtc->support_offline = info->support_offline;
 	scrtc->plane =
 		devm_kzalloc(drm->dev,
 			     sizeof(*scrtc->plane) * info->plane_cnt,

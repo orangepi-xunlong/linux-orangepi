@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: GPL-2.0-only
 
 # include
+ccflags-y += -I $(srctree)/drivers/usb/typec/tcpm
 ccflags-y += -I $(srctree)/bsp/drivers/power/include
 
 # version
@@ -22,6 +23,7 @@ obj-$(CONFIG_AW_MFD_BMU_EXT_I2C)	+= mfd/bmu-ext-i2c.o
 obj-$(CONFIG_AW_POWER_NOTIFIER)		+= notifier/sunxi-power-notifier.o
 
 # temp_ctrl
+obj-$(CONFIG_AW_POWER_TEMP_CTRL)	+= temp_ctrl/sunxi_power_temp_ctrl.o
 obj-$(CONFIG_AW_AXP8191_TEMP_CTRL)	+= temp_ctrl/axp8191_temp_ctrl.o
 
 # power_key
@@ -34,6 +36,17 @@ obj-$(CONFIG_AW_REGULATOR_BMU_EXT)	+= regulator/bmu-ext-regulator.o
 obj-$(CONFIG_AW_REGULATOR_PWM) 		+= regulator/sunxi_pwm_regulator.o
 obj-$(CONFIG_AW_REGULATOR_SOC_PMU)	+= regulator/sunxi-soc-regulator.o
 obj-$(CONFIG_AW_REGULATOR_VIRTUAL_CONSUMER) 	+= regulator/sunxi_virtual_consumer.o
+
+# type-c
+obj-$(CONFIG_AW_TYPEC_HUSB311)		+= typec/tcpci_husb311.o
+obj-$(CONFIG_AW_TYPEC_AXP517)		+= typec/sunxi_tcpci/tcpci_axp517.o
+obj-$(CONFIG_AW_TYPEC_AXP517)		+= typec/sunxi_tcpci/tcpci_axp517_core.o
+obj-$(CONFIG_AW_TYPEC_CC_LOGIC)			+= typec/sunxi_cc_logic/sunxi_cc_logic.o
+
+# supply-core
+obj-$(CONFIG_AW_POWER_SUPPLY_CTRL)		+= supply/sunxi_power_supply_core.o
+obj-$(CONFIG_AW_USB_POWER_CTRL)		+= supply/sunxi_usb_power_limit.o
+obj-$(CONFIG_AW_USB_POWER_CTRL)		+= supply/sunxi_usb_power.o
 
 # supply
 obj-$(CONFIG_AW_AXP22X_POWER)		+= supply/axp22x_usb_power.o
@@ -53,12 +66,19 @@ obj-$(CONFIG_AW_AXP2202_GPIO_POWER) += supply/axp2202_gpio_power.o
 
 obj-$(CONFIG_AW_AXP515_POWER)		+= supply/axp515_usb_power.o
 obj-$(CONFIG_AW_AXP515_POWER)		+= supply/axp515_battery.o
-obj-$(CONFIG_AW_AXP515_ACIN_POWER)  += supply/axp515_acin_power.o
+
+obj-$(CONFIG_AW_AXP517_POWER)		+= supply/axp517_usb_power.o
+obj-$(CONFIG_AW_AXP517_POWER)		+= supply/axp517_battery.o
+
+obj-$(CONFIG_AW_AXP517_POWER)		+= supply/axp517_usb_power.o
+obj-$(CONFIG_AW_AXP517_POWER)		+= supply/axp517_battery.o
+obj-$(CONFIG_AW_AXP517_ACIN_POWER)  += supply/axp517_acin_power.o
 
 obj-$(CONFIG_AW_ETA6973_POWER)		+= supply/eta6973_charger_power.o
 obj-$(CONFIG_AW_AXP519_POWER)		+= supply/axp519_charger_power.o
 obj-$(CONFIG_AW_AXP2601_POWER)		+= supply/axp2601_battery.o
 obj-$(CONFIG_AW_AXP2602_POWER)		+= supply/axp2602_battery.o
 
+obj-$(CONFIG_AW_MULTI_CHARGE_POWER)	+= supply/sunxi_multi_charge_power.o
 obj-$(CONFIG_AW_VIRTUAL_AC_POWER)	+= supply/sunxi_ac_virtual_power.o
 obj-$(CONFIG_AW_GPIO_VBUS_POWER)	+= supply/sunxi_gpio_vbus_power.o

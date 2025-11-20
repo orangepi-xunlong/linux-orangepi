@@ -165,7 +165,7 @@ typedef struct {
 /* The interface functions */
 #if IS_ENABLED(CONFIG_AW_SID)
 unsigned int sunxi_get_soc_ver(void);
-unsigned int sunxi_get_sid_ver(void);
+int sunxi_get_sid_ver(u32 *ver);
 unsigned int sunxi_get_soc_ver_from_reg(void);
 unsigned int sunxi_get_platform_id(void);
 int sunxi_get_soc_chipid(unsigned char *chipid);
@@ -186,7 +186,7 @@ int sunxi_sid_get_ecc_status(void);
 int sunxi_get_soc_dvfs(u32 *dvfs);
 #else
 unsigned int __attribute__((weak)) sunxi_get_soc_ver(void) { return -ENOSYS; }
-unsigned int __attribute__((weak)) sunxi_get_sid_ver(void) { return -ENOSYS; }
+int __attribute__((weak)) sunxi_get_sid_ver(u32 *ver) { return -ENOSYS; }
 unsigned int __attribute__((weak)) sunxi_get_soc_ver_from_reg(void) { return -ENOSYS; }
 unsigned int __attribute__((weak)) sunxi_get_platform_id(void) { return -ENOSYS; }
 int __attribute__((weak)) sunxi_get_soc_chipid(unsigned char *chipid) { return -ENOSYS; }

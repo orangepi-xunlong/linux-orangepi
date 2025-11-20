@@ -20,6 +20,7 @@
 #include <linux/clk.h>
 #include <linux/regmap.h>
 #include <linux/mfd/syscon.h>
+#include <linux/timer.h>
 #include <dt-bindings/power/a523-power.h>
 #include <dt-bindings/power/sun60iw2-power.h>
 
@@ -60,10 +61,14 @@ struct sunxi_pmu {
 	const struct sunxi_pmu_info *info;
 	struct mutex mutex; /* mutex lock for pmu */
 	struct genpd_onecell_data genpd_data;
+	struct timer_list delay_timer;
+	bool delay_active;
 	struct generic_pm_domain *domains[];
 };
 
 #define DRIVER_NAME	"pck-600-domain-driver"
+
+#define DELAY_ACTIVE_TIME	(10)
 
 #define to_sunxi_pd(gpd) container_of(gpd, struct sunxi_pm_domain, genpd)
 
@@ -165,6 +170,12 @@ static int sunxi_pd_power_off(struct generic_pm_domain *domain)
 	struct sunxi_pmu *pmu = pd->pmu;
 	struct generic_pm_domain *genpd = &pd->genpd;
 
+	if (pmu->delay_active) {
+		sunxi_debug(pmu->dev, "delay period active, ignore power off for '%s'\n",
+				genpd->name);
+		return -EAGAIN;
+	}
+
 	sunxi_debug(pmu->dev, "set domain '%s' off\n", genpd->name);
 
 	return sunxi_pd_power(pd, false);
@@ -206,6 +217,13 @@ static void sunxi_pd_detach_dev(struct generic_pm_domain *genpd,
 	sunxi_debug(dev, "detaching from power domain '%s'\n", genpd->name);
 
 	pm_clk_destroy(dev);
+}
+
+static void sunxi_pmu_delay_timer_callback(struct timer_list *t)
+{
+	struct sunxi_pmu *pmu = from_timer(pmu, t, delay_timer);
+	pmu->delay_active = false;
+	sunxi_debug(pmu->dev, "10s delay period ended, power off operations now enabled\n");
 }
 
 static int sunxi_pm_add_one_domain(struct sunxi_pmu *pmu,
@@ -466,6 +484,11 @@ static int sunxi_pm_domain_probe(struct platform_device *pdev)
 		goto clk_disable;
 	}
 
+	timer_setup(&pmu->delay_timer, sunxi_pmu_delay_timer_callback, 0);
+	pmu->delay_active = true;
+	mod_timer(&pmu->delay_timer, jiffies + HZ * DELAY_ACTIVE_TIME);
+	sunxi_debug(dev, "started 10s delay period for power off operations\n");
+
 	return 0;
 
 clk_disable:
@@ -488,6 +511,8 @@ static int sunxi_pm_domain_remove(struct platform_device *pdev)
 		of_genpd_del_provider(np);
 		sunxi_pm_domain_cleanup(pmu);
 	}
+
+	del_timer_sync(&pmu->delay_timer);
 
 	clk_disable_unprepare(pmu->clk);
 	reset_control_assert(pmu->reset);
@@ -587,4 +612,4 @@ MODULE_LICENSE("GPL v2");
 MODULE_DESCRIPTION("Allwinner power domain driver");
 MODULE_ALIAS("platform:" DRIVER_NAME);
 MODULE_AUTHOR("fanqinghua <fanqinghua@allwinnertech.com>");
-MODULE_VERSION("1.0.1");
+MODULE_VERSION("1.0.3");

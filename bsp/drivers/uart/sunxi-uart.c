@@ -941,7 +941,13 @@ static void wait_for_xmitr(struct sw_uart_port *sw_uport)
 }
 
 /* Enable or disable the RS485 support */
-static void sw_uart_config_rs485(struct uart_port *port, struct serial_rs485 *rs485conf)
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 0, 0))
+static int sw_uart_config_rs485(struct uart_port *port,
+								struct ktermios *termios,
+								struct serial_rs485 *rs485conf)
+#else
+static int sw_uart_config_rs485(struct uart_port *port, struct serial_rs485 *rs485conf)
+#endif
 {
 	struct sw_uart_port *sw_uport = UART_TO_SPORT(port);
 
@@ -957,6 +963,8 @@ static void sw_uart_config_rs485(struct uart_port *port, struct serial_rs485 *rs
 		 * all the bytes into FIFO before receveing an address byte
 		 */
 		sw_uport->rs485 |= SUNXI_UART_RS485_RXBFA;
+		if (sw_uport->rs485_en)
+			sunxi_info(port->dev, "software 485-fl set success\n");
 	} else {
 		SERIAL_DBG(port->dev, "setting to uart\n");
 		sw_uport->mcr |= SUNXI_UART_MCR_MODE_UART;
@@ -965,6 +973,7 @@ static void sw_uart_config_rs485(struct uart_port *port, struct serial_rs485 *rs
 
 	serial_out(port, sw_uport->mcr, SUNXI_UART_MCR);
 	serial_out(port, sw_uport->rs485, SUNXI_UART_RS485);
+	return 0;
 }
 
 static unsigned int sw_uart_tx_empty(struct uart_port *port)
@@ -1103,8 +1112,11 @@ static int sw_uart_startup(struct uart_port *port)
 		serial_out(port, sw_uport->ier, SUNXI_UART_IER);
 	}
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 0, 0))
+	sw_uart_config_rs485(port, &port->state->port.tty->termios, &sw_uport->rs485conf);
+#else
 	sw_uart_config_rs485(port, &sw_uport->rs485conf);
-
+#endif
 	return 0;
 }
 
@@ -1137,6 +1149,10 @@ static void sw_uart_filter_lsr_err(struct uart_port *port)
 {
 	struct sw_uart_port *sw_uport = UART_TO_SPORT(port);
 	static bool uart_lb[SUNXI_UART_NUM] = {false};
+	unsigned int ier = 0;
+	unsigned int cnt = 0xffff;
+	unsigned int lsr;
+
 	/* note:For some memory fifo, first receive data,LSR will error make data abnormal.
 	 * UART config loopback mode self-receiving data can filter this exception.
 	 * Only need to config loopback mode once.
@@ -1146,12 +1162,30 @@ static void sw_uart_filter_lsr_err(struct uart_port *port)
 		/* set loopback mode */
 		serial_out(port, sw_uport->mcr | SUNXI_UART_MCR_LOOP,
 				SUNXI_UART_MCR);
+
+		/* disable rx interrupt */
+		ier = serial_in(port, SUNXI_UART_IER);
+		sw_uport->ier &= ~SUNXI_UART_IER_RDI;
+		serial_out(port, sw_uport->ier, SUNXI_UART_IER);
+
 		serial_out(&sw_uport->port, 0xff, SUNXI_UART_THR); /* write 0xff */
-		sw_uart_start_tx(port);
+
+		/* wait data clear */
+		do {
+			lsr = serial_in(port, SUNXI_UART_LSR);
+		} while (!(lsr & SUNXI_UART_LSR_DR) && --cnt);
+
+		/* print warning */
+		if (!cnt)
+			sunxi_warn(NULL, "Unsuccessful loopback to rx, may have exception");
+
 		serial_in(&sw_uport->port, SUNXI_UART_RBR); /* read 0xff */
-		sw_uart_stop_tx(port);
 		/* disabled loopback mode */
 		serial_out(port, sw_uport->mcr, SUNXI_UART_MCR);
+
+		/* enable rx interrupt */
+		sw_uport->ier |= SUNXI_UART_IER_RDI;
+		serial_out(port, sw_uport->ier, SUNXI_UART_IER);
 	}
 }
 
@@ -1469,7 +1503,11 @@ static int sw_uart_ioctl(struct uart_port *port, unsigned int cmd,
 			return -EFAULT;
 
 		spin_lock_irqsave(&port->lock, flags);
-		sw_uart_config_rs485(port, &rs485conf);
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 0, 0))
+	sw_uart_config_rs485(port, &port->state->port.tty->termios, &rs485conf);
+#else
+	sw_uart_config_rs485(port, &rs485conf);
+#endif
 		spin_unlock_irqrestore(&port->lock, flags);
 		break;
 
@@ -2018,6 +2056,14 @@ static int __init sunxi_early_console_setup(struct earlycon_device *dev,
 OF_EARLYCON_DECLARE(uart0, "", sunxi_early_console_setup);
 #endif	/* CONFIG_AW_SERIAL_EARLYCON */
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 0, 0))
+static const struct serial_rs485 sw_rs485_supported = {
+	.flags = SER_RS485_ENABLED | SER_RS485_RTS_AFTER_SEND | SER_RS485_RX_DURING_TX,
+	.delay_rts_before_send = 1,
+	.delay_rts_after_send = 1,
+};
+#endif
+
 static int sw_uart_probe(struct platform_device *pdev)
 {
 	struct device_node *np = pdev->dev.of_node;
@@ -2176,6 +2222,7 @@ static int sw_uart_probe(struct platform_device *pdev)
 		sw_uport->rs485oe_gpio = devm_gpiod_get(&pdev->dev, "sunxi,uart-485oe", GPIOD_OUT_HIGH);
 		if (IS_ERR(sw_uport->rs485oe_gpio)) {
 			sunxi_err(&pdev->dev, "Error: request rs485oe_gpio failed\n");
+			sw_uport->rs485_en = 0;
 			return PTR_ERR(sw_uport->rs485oe_gpio);
 		}
 		gpiod_set_value(sw_uport->rs485oe_gpio, sw_uport->rs485_fl);
@@ -2188,6 +2235,10 @@ static int sw_uart_probe(struct platform_device *pdev)
 	port->ops = &sw_uart_ops;
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 10, 0))
 	port->has_sysrq = IS_ENABLED(CONFIG_AW_SERIAL_CONSOLE);
+#endif
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 0, 0))
+	port->rs485_config = sw_uart_config_rs485;
+	port->rs485_supported = sw_rs485_supported;
 #endif
 	ret = of_property_read_u32(np, "sunxi,uart-fifosize", &port->fifosize);
 	if (ret) {
@@ -2375,4 +2426,4 @@ module_exit(sunxi_uart_exit);
 MODULE_AUTHOR("Aaron<leafy.myeh@allwinnertech.com>");
 MODULE_DESCRIPTION("Driver for Allwinner UART controller");
 MODULE_LICENSE("GPL");
-MODULE_VERSION("1.1.7");
+MODULE_VERSION("1.1.9");

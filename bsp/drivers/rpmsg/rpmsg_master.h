@@ -55,9 +55,8 @@ struct rpmsg_ctrl_msg_ack {
 extern dev_t rpmsg_ctrldev_get_devt(void);
 extern void rpmsg_ctrldev_put_devt(dev_t devt);
 extern int rpmsg_ctrldev_notify(int ctrl_id, int id);
-#if IS_ENABLED(CONFIG_AW_KERNEL_ORIGIN)
-extern struct class *aw_rpmsg_class;
-#endif
+extern int rpmsg_ctrldev_release_id(int ctrl_id, int id);
+
 /**
  * RPMSG_CREATE_EPT_IOCTL:
  *     Create the endpoint specified by info.name,
@@ -68,11 +67,18 @@ extern struct class *aw_rpmsg_class;
  *     Destroy all endpoint belonging to info.name
  * RPMSG_DESTROY_ALL_EPT_IOCTL:
  *     Destroy all endpoint
+ * RPMSG_CREATE_AF_EPT_IOCTL:
+ *     Create the endpoint specified by info.name,
+ *     updates info.id.
+ *     It will automatically destroy the endpoint when closing file descriptor.
  */
 #define RPMSG_CREATE_EPT_IOCTL	_IOW(0xb5, 0x1, struct rpmsg_endpoint_info)
 #define RPMSG_DESTROY_EPT_IOCTL	_IO(0xb5, 0x2)
 #define RPMSG_REST_EPT_GRP_IOCTL	_IO(0xb5, 0x3)
 #define RPMSG_DESTROY_ALL_EPT_IOCTL	_IO(0xb5, 0x4)
+#define RPMSG_CREATE_AF_EPT_IOCTL	_IOW(0xb5, 0x5, struct rpmsg_endpoint_info)
+
+#define RPMSG_EPTDEV_DELIVER_PERF_DATA_IOCTL _IOW(0xb6, 0x1, int)
 
 /**
  * struct rpmsg_ctrl_msg - used by rpmsg_master.c
@@ -84,5 +90,9 @@ struct rpmsg_ept_info {
 	char name[32];
 	uint32_t id;
 };
+
+#ifdef CONFIG_AW_RPMSG_CLASS
+extern struct class *g_aw_rpmsg_class;
+#endif
 
 #endif

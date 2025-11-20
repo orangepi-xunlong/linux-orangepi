@@ -38,7 +38,7 @@
 #include "pcie-sunxi-dma.h"
 #include "pcie-sunxi.h"
 
-#define SUNXI_PCIE_MODULE_VERSION	"1.2.4"
+#define SUNXI_PCIE_MODULE_VERSION	"1.2.3"
 
 void sunxi_pcie_writel(u32 val, struct sunxi_pcie *pcie, u32 offset)
 {
@@ -989,6 +989,12 @@ static int sunxi_pcie_plat_parse_dts_res(struct platform_device *pdev, struct su
 		sunxi_warn(&pdev->dev, "get pcie speed Gen failed\n");
 		pci->link_gen = 0x1;
 	}
+
+	pci->pwr_gpio = devm_gpiod_get(&pdev->dev, "power", GPIOD_OUT_HIGH);
+	if (IS_ERR(pci->pwr_gpio))
+		sunxi_warn(&pdev->dev, "Failed to get \"power-gpios\"\n");
+	else
+		gpiod_direction_output(pci->pwr_gpio, 0);
 
 	pci->rst_gpio = devm_gpiod_get(&pdev->dev, "reset", GPIOD_OUT_HIGH);
 	if (IS_ERR(pci->rst_gpio))

@@ -481,18 +481,28 @@ int suxni_hdmi_set_loglevel(u8 level);
  */
 int sunxi_hdmi_disconfig(void);
 /**
+ * @desc: sunxi hdmi check config
+ * @return: 0: check done or not issue.
+ */
+int sunxi_hdmi_check(void);
+/**
  * @desc: sunxi hdmi config
  * @return: 0 - success
  */
 int sunxi_hdmi_config(void);
+/**
+ * @desc: sunxi hdmi smooth boot config
+ * @return: 0: config done
+ */
 int sunxi_hdmi_smooth_config(void);
 /**
  * @desc: sunxi hdmi mode set.
+ * @hdmi: sunxi hdmi point
  * @mode: set mode
  * @return: 0 - success
  *         -1 - failed
  */
-int sunxi_hdmi_set_disp_mode(struct drm_display_mode *mode);
+int sunxi_hdmi_set_disp_mode(struct sunxi_hdmi_s *hdmi, struct drm_display_mode *mode);
 /**
  * @desc: sunxi hdmi init
  * @hdmi: sunxi hdmi point

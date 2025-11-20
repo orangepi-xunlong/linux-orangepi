@@ -28,6 +28,9 @@ struct sunxi_logo_info {
 	unsigned int width;
 	unsigned int height;
 	unsigned int bpp;
+
+	void *offline_vaddr;
+	unsigned int offline_fmt; // offline fmt reserve
 /*	unsigned int stride;
 	unsigned int crop_l;
 	unsigned int crop_t;
@@ -45,6 +48,8 @@ struct sunxi_drm_device {
 	struct device *video_sys_dev;
 	unsigned int tcon_id;
 	unsigned int hw_id;
+	void (*get_disp_para)(struct drm_device *dev, unsigned long *arg);
+	void (*set_disp_para)(struct drm_device *dev, unsigned long *arg);
 };
 
 struct sunxi_drm_private {

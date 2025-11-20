@@ -35,6 +35,7 @@
 #include <linux/atomic.h>
 #include <linux/wait.h>
 #include <uapi/linux/rpbuf.h>
+#include <linux/version.h>
 
 #include "rpbuf_internal.h"
 
@@ -268,7 +269,11 @@ static int rpbuf_buf_dev_mmap_default(struct rpbuf_buf_dev *buf_dev, struct vm_a
 	struct device *dev = &buf_dev->dev;
 	int ret;
 
+#ifdef CONFIG_ARM64
+	vma->vm_page_prot = pgprot_dmacoherent(vma->vm_page_prot);
+#else
 	vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
+#endif
 
 	ret = remap_pfn_range(vma, vma->vm_start,
 			      (unsigned long)(buffer->pa) >> PAGE_SHIFT,
@@ -928,7 +933,11 @@ static int rpbuf_dev_init(void)
 		goto err_out;
 	}
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 4, 0)
 	rpbuf_class = class_create(THIS_MODULE, "rpbuf");
+#else
+	rpbuf_class = class_create("rpbuf");
+#endif
 	if (IS_ERR(rpbuf_class)) {
 		pr_err("failed to create rpbuf class\n");
 		ret = PTR_ERR(rpbuf_class);

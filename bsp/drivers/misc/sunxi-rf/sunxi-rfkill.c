@@ -26,8 +26,9 @@
 #include <linux/capability.h>
 #include "internal.h"
 #include "sunxi-rfkill.h"
+#include <linux/pinctrl/consumer.h>
 
-#define MODULE_CUR_VERSION   "v1.1.4"
+#define MODULE_CUR_VERSION   "v1.1.12"
 
 static struct sunxi_rfkill_platdata *rfkill_data;
 
@@ -93,7 +94,11 @@ static int rfkill_probe(struct platform_device *pdev)
 	struct device_node *np = pdev->dev.of_node;
 	struct device *dev = &pdev->dev;
 	struct sunxi_rfkill_platdata *data;
+#if (LINUX_VERSION_CODE <= KERNEL_VERSION(6, 2, 0))
 	enum of_gpio_flags config;
+#else
+	u32 config = 0;
+#endif
 	char *pctrl_name = PINCTRL_STATE_DEFAULT;
 	struct pinctrl_state *pctrl_state = NULL;
 	int ret = 0;
@@ -110,22 +115,31 @@ static int rfkill_probe(struct platform_device *pdev)
 	} else {
 		pctrl_state = pinctrl_lookup_state(data->pctrl, pctrl_name);
 		if (IS_ERR(pctrl_state)) {
-			dev_warn(dev, "pinctrl_lookup_state(%s) failed! return %p \n",
-					pctrl_name, pctrl_state);
+			dev_warn(dev, "pinctrl_lookup_state(%s) failed! return %ld\n",
+					pctrl_name, PTR_ERR(pctrl_state));
 		} else {
 			ret = pinctrl_select_state(data->pctrl, pctrl_state);
 			if (ret < 0) {
-				dev_warn(dev, "pinctrl_select_state(%s) failed! return %d \n",
+				dev_warn(dev, "pinctrl_select_state(%s) failed! return %d\n",
 						pctrl_name, ret);
 			}
 		}
 	}
 
+#if (LINUX_VERSION_CODE > KERNEL_VERSION(6, 2, 0))
+	data->gpio_chip_en = of_get_named_gpio(np, "chip_en", 0);
+#else
 	data->gpio_chip_en = of_get_named_gpio_flags(np, "chip_en", 0, &config);
+#endif
 	if (!gpio_is_valid(data->gpio_chip_en)) {
 		dev_err(dev, "get gpio chip_en failed\n");
 	} else {
+#if (LINUX_VERSION_CODE > KERNEL_VERSION(6, 2, 0))
+		of_property_read_u32_index(np, "chip_en", 3, &config);
+		data->gpio_chip_en_assert = (config == GPIO_ACTIVE_LOW) ? 0 : 1;
+#else
 		data->gpio_chip_en_assert = (config == OF_GPIO_ACTIVE_LOW) ? 0 : 1;
+#endif
 		dev_info(dev, "chip_en gpio=%d assert=%d\n", data->gpio_chip_en, data->gpio_chip_en_assert);
 
 		ret = devm_gpio_request(dev, data->gpio_chip_en, "chip_en");
@@ -143,11 +157,20 @@ static int rfkill_probe(struct platform_device *pdev)
 		}
 	}
 
+#if (LINUX_VERSION_CODE > KERNEL_VERSION(6, 2, 0))
+	data->gpio_power_en = of_get_named_gpio(np, "power_en", 0);
+#else
 	data->gpio_power_en = of_get_named_gpio_flags(np, "power_en", 0, &config);
+#endif
 	if (!gpio_is_valid(data->gpio_power_en)) {
 		dev_err(dev, "get gpio power_en failed\n");
 	} else {
+#if (LINUX_VERSION_CODE > KERNEL_VERSION(6, 2, 0))
+		of_property_read_u32_index(np, "power_en", 3, &config);
+		data->gpio_power_en_assert = (config == GPIO_ACTIVE_LOW) ? 0 : 1;
+#else
 		data->gpio_power_en_assert = (config == OF_GPIO_ACTIVE_LOW) ? 0 : 1;
+#endif
 		dev_info(dev, "power_en gpio=%d assert=%d\n", data->gpio_power_en, data->gpio_power_en_assert);
 
 		ret = devm_gpio_request(dev, data->gpio_power_en, "power_en");
@@ -188,10 +211,6 @@ static int rfkill_probe(struct platform_device *pdev)
 		goto err_gnss;
 
 	rfkill_data = data;
-	sunxi_wlan_set_power_boot_state();
-	sunxi_bluetooth_set_power_boot_state();
-	sunxi_modem_set_power_boot_state();
-	sunxi_gnss_set_power_boot_state();
 	return 0;
 
 err_gnss:
@@ -221,6 +240,27 @@ static const struct of_device_id rfkill_ids[] = {
 	{ /* Sentinel */ }
 };
 
+#if IS_ENABLED(CONFIG_PM)
+static int sunxi_rfkill_suspend(struct device *dev)
+{
+	dev_info(dev, "suspend entry\n");
+	sunxi_gnss_suspend(dev);
+	return 0;
+}
+
+static int sunxi_rfkill_resume(struct device *dev)
+{
+	dev_info(dev, "resume entry\n");
+	sunxi_gnss_resume(dev);
+	return 0;
+}
+
+static const struct dev_pm_ops sunxi_rfkill_pm_ops = {
+	.suspend = sunxi_rfkill_suspend,
+	.resume = sunxi_rfkill_resume,
+};
+#endif
+
 static struct platform_driver rfkill_driver = {
 	.probe  = rfkill_probe,
 	.remove = rfkill_remove,
@@ -228,10 +268,14 @@ static struct platform_driver rfkill_driver = {
 		.owner = THIS_MODULE,
 		.name  = "sunxi-rfkill",
 		.of_match_table = rfkill_ids,
+#if IS_ENABLED(CONFIG_PM)
+		.pm = &sunxi_rfkill_pm_ops,
+#endif
 	},
 };
 
-module_platform_driver_probe(rfkill_driver, rfkill_probe);
+module_platform_driver(rfkill_driver);
 
+MODULE_VERSION(MODULE_CUR_VERSION);
 MODULE_DESCRIPTION("sunxi rfkill driver");
 MODULE_LICENSE("GPL");

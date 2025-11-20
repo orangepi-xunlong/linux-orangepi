@@ -6,19 +6,7 @@
 menu "PMIC Drivers"
 	depends on AW_BSP
 
-config AW_VIRTUAL_AC_POWER
-	tristate "virtual ac Power Supply Driver"
-	help
-	  This driver provides support for the power supply features of
-	  virtual ac power supply.
-
-config AW_GPIO_VBUS_POWER
-	tristate "gpio charger Power Supply Driver"
-	select POWER_SUPPLY
-	select IIO
-	help
-	  This driver provides support for the power supply features of
-	  virtual ac power supply.
+comment "Base Functions"
 
 config AW_MFD_AXP2101
 	tristate
@@ -84,6 +72,9 @@ config AW_MFD_BMU_EXT_I2C
 	help
 	  If you say yes here you get support for the TCS4838 series of
 	  PM chips with I2C interface.
+
+config AW_PMIC_VOLATILE_ENABLED
+	bool "Select AW PMICs Volatile Enable"
 
 comment "Regulator Drivers"
 
@@ -160,32 +151,57 @@ endif
 
 comment "Power Supply Drivers"
 
+config AW_POWER_SUPPLY_CTRL
+	tristate "Allwinner Power Supply Ctrl"
+	depends on AW_BSP
+	help
+	  Allwinner Power Supply Ctrl.
+
+	  This option is of interest only to developers who need to
+	  develop on AllWinner SoC.
+
+	  If unsure, say N.
+
+config AW_USB_POWER_CTRL
+	tristate "Allwinner Usb Power Ctrl support"
+	select EXTCON
+	select POWER_SUPPLY
+	select AW_POWER_NOTIFIER
+	select AW_POWER_SUPPLY_CTRL
+	help
+	  Allwinner Usb Power Ctrl
+
+	  This option is of interest only to developers who need to
+	  develop on AllWinner SoC.
+
 if AW_MFD_AXP2101
 
 config AW_AXP803_POWER
 	tristate "AXP803 Power Supply Driver"
 	select POWER_SUPPLY
+	select AW_POWER_TEMP_CTRL
 	help
 	  This driver provides support for the power supply features of
 	  AXP803 PMIC.
 
 config AW_AXP2202_POWER
 	tristate "AXP2202 Power Supply Driver"
-	select POWER_SUPPLY
-	select EXTCON
+	select AW_POWER_TEMP_CTRL
+	select AW_USB_POWER_CTRL
 	help
 	  This driver provides support for the power supply features of
 	  AXP2202 PMIC.
 
 config AW_AXP2202_GPIO_POWER
 	tristate "AXP2202 Power Virtual ACIN"
-	select POWER_SUPPLY
+	depends on AW_AXP2202_POWER
 	help
 	  This driver provides support for ACIN function in
 	  AXP2202 PMIC.
 
 config AW_AXP22X_POWER
 	tristate "AXP22X Power Supply Driver"
+	select AW_POWER_TEMP_CTRL
 	select POWER_SUPPLY
 	help
 	  This driver provides support for the power supply features of
@@ -193,14 +209,15 @@ config AW_AXP22X_POWER
 
 config AW_AXP515_POWER
 	tristate "AXP515 Power Supply Driver"
-	select POWER_SUPPLY
-	select EXTCON
+	select AW_POWER_TEMP_CTRL
+	select AW_USB_POWER_CTRL
 	help
 	  This driver provides support for the power supply features of
 	  AXP515 PMIC.
 
 config AW_AXP515_ACIN_POWER
 	tristate "AXP515 Power Virtual ACIN"
+	depends on AW_AXP515_POWER
 	select POWER_SUPPLY
 	help
 	  This driver provides support for ACIN function in
@@ -208,10 +225,19 @@ config AW_AXP515_ACIN_POWER
 
 config AW_AXP2101_POWER
 	tristate "AXP2101 Power Supply Driver"
+	select AW_POWER_TEMP_CTRL
 	select POWER_SUPPLY
 	help
 	  This driver provides support for the power supply features of
 	  AXP2101 PMIC.
+
+config AW_AXP517_POWER
+	tristate "AXP517 Power Supply Driver"
+	select AW_POWER_TEMP_CTRL
+	select AW_USB_POWER_CTRL
+	help
+	  This driver provides support for the power supply features of
+	  AXP517 PMIC.
 
 endif
 
@@ -219,7 +245,6 @@ if AW_MFD_BMU_EXT
 
 config AW_ETA6973_POWER
 	tristate "ETA6973 Power Supply Driver"
-	depends on AW_MFD_BMU_EXT
 	select POWER_SUPPLY
 	help
 	  This driver provides support for the power supply features of
@@ -227,7 +252,6 @@ config AW_ETA6973_POWER
 
 config AW_AXP519_POWER
 	tristate "AXP519 Power Supply Driver"
-	depends on AW_MFD_BMU_EXT
 	select POWER_SUPPLY
 	help
 	  This driver provides support for the power supply features of
@@ -235,7 +259,7 @@ config AW_AXP519_POWER
 
 config AW_AXP2601_POWER
 	tristate "AXP2601 Power Supply Driver"
-	depends on AW_MFD_BMU_EXT
+	select AW_POWER_TEMP_CTRL
 	select POWER_SUPPLY
 	help
 	  This driver provides support for the power supply features of
@@ -243,13 +267,20 @@ config AW_AXP2601_POWER
 
 config AW_AXP2602_POWER
 	tristate "AXP2602 Power Supply Driver"
-	depends on AW_MFD_BMU_EXT
+	select AW_POWER_TEMP_CTRL
 	select POWER_SUPPLY
 	help
 	  This driver provides support for the power supply features of
 	  AXP2602 PMIC.
 
 endif
+
+config AW_MULTI_CHARGE_POWER
+	tristate "sunxi multi charge Power Supply Driver"
+	depends on AW_AXP517_POWER || AW_AXP515_POWER
+	help
+	  This driver provides support for sunxi multi charge such as:
+	  acin & double type-c.
 
 comment "Power Notifier Drivers"
 
@@ -266,6 +297,15 @@ config AW_POWER_NOTIFIER
 
 comment "Power Temp Ctrl Drivers"
 
+config AW_POWER_TEMP_CTRL
+	tristate "Allwinner Power Temp Ctrl support"
+	depends on AW_BSP
+	help
+	  Allwinner Power Temp Ctrl.
+
+	  This option is of interest only to developers who need to
+	  develop on AllWinner SoC.
+
 if AW_MFD_AXP2101
 
 config AW_AXP8191_TEMP_CTRL
@@ -276,5 +316,42 @@ config AW_AXP8191_TEMP_CTRL
 	  AXP8191 PMIC.
 
 endif
+
+comment "TYPE-C Ctrl Drivers"
+
+config AW_TYPEC_HUSB311
+	tristate "Hynetek HUSB311 Type-C chip driver"
+	select I2C
+	select TYPEC_TCPM
+	select TYPEC_TCPCI
+	select USB_SUNXI_TYPEC
+	select AW_POWER_NOTIFIER
+	help
+	  Hynetek HUSB311 Type-C chip driver that works with
+	  Type-C Port Controller Manager to provide USB PD and USB
+	  Type-C functionalities.
+
+	  If unsure, say N.
+
+config AW_TYPEC_AXP517
+	tristate "Allwinner AXP517 Type-C chip driver"
+	depends on AW_MFD_AXP2101
+	select TYPEC_TCPM
+	select USB_SUNXI_TYPEC
+	select AW_POWER_NOTIFIER
+	help
+	  Allwinner AXP517 Type-C chip driver that works with
+	  Type-C Port Controller Manager to provide USB PD and USB
+	  Type-C functionalities.
+
+	  If unsure, say N.
+
+config AW_TYPEC_CC_LOGIC
+	tristate "Allwinner PMIC USB Type-C Port Manager Driver Support"
+	depends on AW_MFD_AXP2101
+	help
+	  Allwinner Type-C Port Manager Driver Based on PMIC.
+	  This Driver Can Conform to the Requirements of USB Type-C Functional Test Specification,
+	  And Test Platform is Teledyne LeCroy - Voyager M310e.
 
 endmenu

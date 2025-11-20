@@ -15,10 +15,28 @@
 #include "sunxi-spinand.h"
 
 struct aw_spinand *g_spinand;
+struct class *spinand_class;
+struct device *spinand_device;
+static int major_number;
+u8 uboot_backup;
 
 static int ubootblks = -1;
 module_param(ubootblks, int, 0400);
 MODULE_PARM_DESC(ubootblks, "block count for uboot");
+
+enum ota_type {
+	BOOT0,
+	UBOOT,
+	SECURE_STORAGE,
+	BOOT,
+	BOOT_BACKUP,
+};
+
+struct burn_param_t {
+	enum ota_type type;
+	size_t length;
+	void *buffer;
+};
 
 #if IS_ENABLED(CONFIG_MTD_CMDLINE_PARTS)
 static int get_para_from_cmdline(const char *cmdline, const char *name)
@@ -1203,6 +1221,134 @@ uint64_t get_sys_part_offset(void)
 	return offset;
 }
 
+static int aw_spinand_ota_open(struct inode *inode, struct file *file)
+{
+	sunxi_debug(NULL, "spinand cdev opened\n");
+	return 0;
+}
+
+static int aw_spinand_ota_release(struct inode *inode, struct file *file)
+{
+	sunxi_debug(NULL, "spinand cdev released\n");
+	return 0;
+}
+
+static ssize_t aw_spinand_ota_boot(struct file *file, const char __user *buffer,
+		size_t length, loff_t *offset)
+{
+	struct burn_param_t burn_param;
+	struct mtd_info *mtd = get_aw_spinand_mtd();
+	char *ota_buf = NULL;
+	ssize_t ret = 0;
+
+	ret = copy_from_user(&burn_param, buffer, length);
+	if (ret) {
+		sunxi_err(NULL, "nand ioctl input buffer err\n");
+		return -EFAULT;
+	}
+
+	ota_buf = vmalloc(burn_param.length);
+	if (IS_ERR_OR_NULL(ota_buf)) {
+		sunxi_err(NULL, "Error: vmalloc failed.\n");
+		return -ENOMEM;
+	}
+
+	ret = copy_from_user(ota_buf, burn_param.buffer, burn_param.length);
+	if (ret) {
+		sunxi_err(NULL, "nand ioctl input uer buffer err\n");
+		vfree(ota_buf);
+		return -EFAULT;
+	}
+
+	switch (burn_param.type) {
+	case BOOT0:
+		aw_spinand_mtd_download_boot0(mtd, burn_param.length, (void *)ota_buf);
+		break;
+	case UBOOT:
+		aw_spinand_mtd_download_uboot(mtd, burn_param.length, (void *)ota_buf);
+		break;
+	case SECURE_STORAGE:
+		sunxi_err(NULL, "OTA SECURE_STORAGE is not implemented\n");
+		break;
+#if IS_ENABLED(CONFIG_AW_MTD_SPINAND_FASTBOOT)
+	case BOOT:
+		aw_spinand_mtd_download_boot_and_backup(mtd, burn_param.length, (void *)ota_buf, 1);
+		break;
+	case BOOT_BACKUP:
+		aw_spinand_mtd_download_boot_and_backup(mtd, burn_param.length, (void *)ota_buf, 0);
+		break;
+#else
+	case BOOT:
+		sunxi_err(NULL, "This is not fastboot environment\n");
+		return -1;
+		break;
+	case BOOT_BACKUP:
+		sunxi_err(NULL, "This is not fastboot environment\n");
+		return -1;
+		break;
+#endif
+	default:
+		sunxi_err(NULL, "Not aware of other ota types\n");
+	}
+
+	vfree(ota_buf);
+
+	return length;
+}
+
+static struct file_operations ota_fops = {
+	.write = aw_spinand_ota_boot,
+	.open = aw_spinand_ota_open,
+	.release = aw_spinand_ota_release,
+};
+
+static int aw_spinand_create_cdev(void)
+{
+	int ret = 0;
+
+
+	major_number = register_chrdev(0, "spinand_cdev", &ota_fops);
+	if (major_number < 0) {
+		sunxi_err(NULL, "Failed to register the device@%d\n", major_number);
+		ret = major_number;
+		goto out;
+	}
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0)
+	spinand_class = class_create("spinand_class");
+#else
+	spinand_class = class_create(THIS_MODULE, "spinand_class");
+#endif
+	if (IS_ERR(spinand_class)) {
+		sunxi_err(NULL, "Failed to create the class\n");
+		ret = PTR_ERR(spinand_class);
+		goto unregister_chrdev;
+	}
+
+	spinand_device = device_create(spinand_class, NULL,
+			MKDEV(major_number, 0), NULL, "spinand_cdev");
+	if (IS_ERR(spinand_device)) {
+		sunxi_err(NULL, "Failed to create the device\n");
+		ret = PTR_ERR(spinand_device);
+		goto class_destroy;
+	}
+
+	return ret;
+
+class_destroy:
+	class_destroy(spinand_class);
+unregister_chrdev:
+	unregister_chrdev(major_number, "spinand_cdev");
+out:
+	return ret;
+}
+
+static void aw_spinand_remove_cdev(void)
+{
+	device_destroy(spinand_class, MKDEV(major_number, 0));
+	class_destroy(spinand_class);
+	unregister_chrdev(major_number, "spinand_cdev");
+}
+
 static int aw_spinand_probe(struct spi_device *spi)
 {
 	struct aw_spinand *spinand;
@@ -1265,6 +1411,7 @@ static int aw_spinand_probe(struct spi_device *spi)
 		goto err_spinand_cleanup;
 
 	g_spinand = spinand;
+	aw_spinand_create_cdev();
 	return 0;
 
 err_spinand_cleanup:
@@ -1272,21 +1419,30 @@ err_spinand_cleanup:
 	return ret;
 }
 
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0)
+static void aw_spinand_remove(struct spi_device *spi)
+#else
 static int aw_spinand_remove(struct spi_device *spi)
+#endif
 {
 	int ret;
 	struct aw_spinand *spinand;
 	struct mtd_info *mtd;
 
 	spinand = spi_to_spinand(spi);
+
 	mtd = spinand_to_mtd(spinand);
 
 	ret = mtd_device_unregister(mtd);
-	if (ret)
-		return ret;
+
+	aw_spinand_remove_cdev();
 
 	aw_spinand_cleanup(spinand);
-	return 0;
+
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 6, 0)
+	return ret;
+#endif
 }
 
 static const struct spi_device_id aw_spinand_ids[] = {

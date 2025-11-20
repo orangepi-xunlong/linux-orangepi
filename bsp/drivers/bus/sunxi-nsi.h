@@ -108,8 +108,6 @@ struct nsi_bus {
 	u32 master_cnt;
 };
 
-extern struct nsi_bus sunxi_nsi;
-
 /* MBUS PMU ids */
 enum nsi_pmu {
 #if IS_ENABLED(CONFIG_ARCH_SUN50IW10)
@@ -322,6 +320,100 @@ extern int notrace nsi_port_set_abs_bwl(enum nsi_pmu port, unsigned int bwl);
 extern int notrace nsi_port_set_abs_bwlen(enum nsi_pmu port, bool en);
 #endif
 
+extern void sunxi_nsi_distribute_mater_get(int mask);
+extern void sunxi_nsi_distribute_mater_put(int mask);
+extern ssize_t nsi_pmu_latency_wr_show(struct device *dev,
+			struct device_attribute *da, char *buf);
+extern ssize_t nsi_pmu_latency_rd_show(struct device *dev,
+			struct device_attribute *da, char *buf);
+extern ssize_t nsi_pmu_bandwidth_wr_show(struct device *dev,
+			struct device_attribute *da, char *buf);
+extern ssize_t nsi_pmu_bandwidth_rd_show(struct device *dev,
+			struct device_attribute *da, char *buf);
+extern ssize_t nsi_pmu_bandwidth_show(struct device *dev,
+			struct device_attribute *da, char *buf);
+extern ssize_t nsi_available_pmu_show(struct device *dev,
+			struct device_attribute *da, char *buf);
+extern ssize_t nsi_pmu_cmd_rd_show(struct device *dev,
+			struct device_attribute *da, char *buf);
+extern ssize_t nsi_pmu_cmd_wr_show(struct device *dev,
+			struct device_attribute *da, char *buf);
+extern struct nsi_bus sunxi_nsi;
+extern struct nsi_pmu_data hw_nsi_pmu;
+
+#define NSI_MAJOR         137
+#define NSI_MINORS        256
+
+#define MBUS_PRI_MAX      0x3
+#define MBUS_QOS_MAX      0x2
+
+#define for_each_ports(port) for (port = 0; port < MBUS_PMU_IAG_MAX; port++)
+
+/* n = 0~32 */
+#define IAG_MODE(n)		   (0x0010 + (0x200 * (n)))
+#define IAG_PRI_CFG(n)		   (0x0014 + (0x200 * (n)))
+#define IAG_INPUT_OUTPUT_CFG(n)	   (0x0018 + (0x200 * (n)))
+#define IAG_BAND_WIDTH(n)	   (0x0028 + (0x200 * (n)))
+#define IAG_BAND_WIDTH_LIMIT_MAX_BITS (12)
+#define IAG_BAND_WIDTH_LIMIT_MAX_VALUE ((1 << IAG_BAND_WIDTH_LIMIT_MAX_BITS) - 1)
+#define IAG_SATURATION(n)	   (0x002c + (0x200 * (n)))
+#define IAG_SATURATION_LIMIT_MAX_BITS (10)
+#define IAG_SATURATION_LIMIT_MAX_VALUE ((1 << IAG_SATURATION_LIMIT_MAX_BITS) - 1)
+
+#if IS_ENABLED(CONFIG_ARCH_SUN55I) || IS_ENABLED(CONFIG_ARCH_SUN60I)
+#define IAG_QOS_CFG(n)		   (0x000C + (0x200 * (n)))
+#else
+#define IAG_QOS_CFG(n)		   (0x0094 + (0x200 * 23) + (0x4 * ((n) / 16)))
+#endif
+
+/* Counter n = 0 ~ 19 */
+#define MBUS_PMU_ENABLE(n)         (0x00c0 + (0x200 * (n)))
+#define MBUS_PMU_CLR(n)            (0x00c4 + (0x200 * (n)))
+#define MBUS_PMU_CYCLE(n)          (0x00c8 + (0x200 * (n)))
+#define MBUS_PMU_RQ_RD(n)          (0x00cc + (0x200 * (n)))
+#define MBUS_PMU_RQ_WR(n)          (0x00d0 + (0x200 * (n)))
+#define MBUS_PMU_DT_RD(n)          (0x00d4 + (0x200 * (n)))
+#define MBUS_PMU_DT_WR(n)          (0x00d8 + (0x200 * (n)))
+#define MBUS_PMU_LA_RD(n)          (0x00dc + (0x200 * (n)))
+#define MBUS_PMU_LA_WR(n)          (0x00e0 + (0x200 * (n)))
+
+#define MBUS_PORT_MODE          (MBUS_PMU_MAX + 0)
+#define MBUS_PORT_PRI           (MBUS_PMU_MAX + 1)
+#define MBUS_INPUT_OUTPUT       (MBUS_PMU_MAX + 2)
+#define MBUS_PORT_QOS           (MBUS_PMU_MAX + 3)
+#define MBUS_PORT_ABS_BWL	(MBUS_PMU_MAX + 4)
+#define MBUS_PORT_ABS_BWLEN	(MBUS_PMU_MAX + 5)
+
+#define CPU_PMU_EN		0x0020
+#define CPU_PMU_CLR		0x0024
+#define CPU_PMU_PER		0x0028
+#if !IS_ENABLED(CONFIG_ARCH_SUN65IW1)
+#define CPU_CHL0_PMU_REQ_R	0x0080
+#define CPU_CHL0_PMU_REQ_W	0x0084
+#define CPU_CHL0_PMU_DATA_R	0x0088
+#define CPU_CHL0_PMU_DATA_W	0x008c
+#define CPU_CHL0_PMU_LAT_R	0x0090
+#define CPU_CHL0_PMU_LAT_W	0x0094
+#else
+#define CPU_CHL0_PMU_REQ_R	0x0098
+#define CPU_CHL0_PMU_REQ_W	0x009c
+#define CPU_CHL0_PMU_DATA_R	0x0100
+#define CPU_CHL0_PMU_DATA_W	0x0104
+#define CPU_CHL0_PMU_LAT_R	0x0090
+#define CPU_CHL0_PMU_LAT_W	0x0094
+#endif
+#define CPU_IAG_MODE		0x0030
+#define CPU_PRI_CFG		   0x0034
+#define CPU_INPUT_OUTPUT_CFG	   0x0038
+#define CPU_BAND_WIDTH_LIMIT(n)	   (0x0048 + ((n) * 8))
+#define CPU_BAND_WIDTH_LIMIT_MAX_BITS (12)
+#define CPU_BAND_WIDTH_LIMIT_MAX_VALUE ((1 << CPU_BAND_WIDTH_LIMIT_MAX_BITS) - 1)
+#define CPU_SATURATION_LIMIT(n)    (0x004c + ((n) * 8))
+#define CPU_SATURATION_LIMIT_MAX_BITS (10)
+#define CPU_SATURATION_LIMIT_MAX_VALUE ((1 << CPU_SATURATION_LIMIT_MAX_BITS) - 1)
+#define CPU_QOS_CFG		   0x002c
+#define CPU_BW_LIMIT_EN_BIT        16
+
 #if IS_ENABLED(CONFIG_ARCH_SUN55IW3)
 #define AW_NSI_CPU_CHANNEL	1
 #define NSI_HARDCODED_PORT_MAPPING 1
@@ -329,6 +421,10 @@ extern int notrace nsi_port_set_abs_bwlen(enum nsi_pmu port, bool en);
 
 #if IS_ENABLED(CONFIG_AW_NSI_CPU_CHANNEL)
 #define AW_NSI_CPU_CHANNEL	1
+#endif
+
+#ifdef AW_NSI_CPU_CHANNEL
+#define CPU_ABS_RW		(MBUS_PMU_MAX + 6)
 #endif
 
 #define nsi_disable_port_by_index(dev) \

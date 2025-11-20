@@ -52,7 +52,7 @@ struct de_backend_tasklet_state {
 	// output
 	u32 dimming_changed;
 	u32 dimming;
-	u32 backlight_user_set; // save in smbl
+	u32 backlight_after_dimming;
 	bool schedule;
 };
 

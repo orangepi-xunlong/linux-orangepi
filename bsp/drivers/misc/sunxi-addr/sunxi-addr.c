@@ -17,13 +17,14 @@
 #include <linux/of.h>
 #include <linux/platform_device.h>
 #include <linux/random.h>
+#include <linux/version.h>
 
 #define ADDR_MGT_DBG(fmt, arg...) printk(KERN_DEBUG "[ADDR_MGT] %s: " fmt "\n",\
 				__func__, ## arg)
 #define ADDR_MGT_ERR(fmt, arg...) printk(KERN_ERR "[ADDR_MGT] %s: " fmt "\n",\
 				__func__, ## arg)
 
-#define MODULE_CUR_VERSION  "v1.0.11"
+#define MODULE_CUR_VERSION  "v1.0.13"
 
 #define MATCH_STR_LEN       20
 #define ADDR_VAL_LEN        6
@@ -42,17 +43,23 @@
 
 #define IS_TYPE_INVALID(x)  ((x < TYPE_ANY) || (x > TYPE_RAND))
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0))
+#define CONST_TYPE_PREFIX const
+#else
+#define CONST_TYPE_PREFIX
+#endif
+
 #define ADDR_CLASS_ATTR_ADD(name) \
-static ssize_t addr_##name##_show(struct class *class, \
-		struct class_attribute *attr, char *buffer) \
+static ssize_t addr_##name##_show(CONST_TYPE_PREFIX struct class *class, \
+		CONST_TYPE_PREFIX struct class_attribute *attr, char *buffer) \
 { \
 	char addr[ADDR_STR_LEN]; \
 	if (IS_TYPE_INVALID(get_addr_by_name(ADDR_FMT_STR, addr, #name))) \
-		return 0; \
+		return sprintf(buffer, "disabled by config\n"); \
 	return sprintf(buffer, "%.17s\n", addr); \
 } \
-static ssize_t addr_##name##_store(struct class *class, \
-		struct class_attribute *attr, \
+static ssize_t addr_##name##_store(CONST_TYPE_PREFIX struct class *class, \
+		CONST_TYPE_PREFIX struct class_attribute *attr, \
 		const char *buffer, size_t count) \
 { \
 	if (count != ADDR_STR_LEN) { \
@@ -156,6 +163,9 @@ static int get_addr_by_name(int fmt, char *addr, char *name)
 				t->addr[3], t->addr[4], t->addr[5]);
 	else
 		memcpy(addr, t->addr, ADDR_VAL_LEN);
+
+	if (IS_TYPE_INVALID(t->type_def))
+		return -1;
 
 	return t->type_cur;
 }
@@ -271,14 +281,14 @@ static int addr_init(struct platform_device *pdev)
 			ADDR_MGT_DBG("Failed to get type_def_%s, use default: %d",
 						info[i].name, info[i].type_def);
 		} else {
-			info[i].type_def = type;
 			info[i].type_cur = type;
+			if (IS_TYPE_INVALID(info[i].type_cur))
+				info[i].type_cur = info[i].type_def;
+			info[i].type_def = type;
 		}
 
-		if (IS_TYPE_INVALID(info[i].type_def))
-			return -1;
-		if (info[i].type_def != TYPE_ANY) {
-			if (addr_factory(np, i, info[i].type_def, addr, info[i].name))
+		if (info[i].type_cur != TYPE_ANY) {
+			if (addr_factory(np, i, info[i].type_cur, addr, info[i].name))
 				return -1;
 		} else {
 			for (j = 0; j < ARRAY_SIZE(type_tab); j++) {
@@ -302,8 +312,8 @@ static int addr_init(struct platform_device *pdev)
 	return 0;
 }
 
-static ssize_t summary_show(struct class *class,
-				struct class_attribute *attr, char *buffer)
+static ssize_t summary_show(CONST_TYPE_PREFIX struct class *class,
+				CONST_TYPE_PREFIX struct class_attribute *attr, char *buffer)
 {
 	int i = 0, ret = 0;
 
@@ -334,7 +344,9 @@ ATTRIBUTE_GROUPS(addr_class);
 
 static struct class addr_class = {
 	.name = "addr_mgt",
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 3, 0))
 	.owner = THIS_MODULE,
+#endif
 	.class_groups = addr_class_groups,
 };
 

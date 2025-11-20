@@ -27,8 +27,13 @@ static u32 debug_dram_crc_en;
 static u32 debug_dram_crc_srcaddr = 0x40000000;
 static u32 debug_dram_crc_len = (1024 * 1024);
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 6, 0)
 static ssize_t time_to_wakeup_ms_show(struct class *class, struct class_attribute *attr,
 		char *buf)
+#else
+static ssize_t time_to_wakeup_ms_show(const struct class *class, const struct class_attribute *attr,
+		char *buf)
+#endif
 {
 	ssize_t size = 0;
 
@@ -37,8 +42,13 @@ static ssize_t time_to_wakeup_ms_show(struct class *class, struct class_attribut
 	return size;
 }
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 6, 0)
 static ssize_t time_to_wakeup_ms_store(struct class *class, struct class_attribute *attr,
 		const char *buf, size_t count)
+#else
+static ssize_t time_to_wakeup_ms_store(const struct class *class, const struct class_attribute *attr,
+		const char *buf, size_t count)
+#endif
 {
 	u32 value = 0;
 	int ret;
@@ -60,8 +70,13 @@ static ssize_t time_to_wakeup_ms_store(struct class *class, struct class_attribu
 }
 static CLASS_ATTR_RW(time_to_wakeup_ms);
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 6, 0)
 static ssize_t dram_crc_paras_show(struct class *class, struct class_attribute *attr,
 			 char *buf)
+#else
+static ssize_t dram_crc_paras_show(const struct class *class, const struct class_attribute *attr,
+			 char *buf)
+#endif
 {
 	ssize_t size = 0;
 
@@ -71,8 +86,13 @@ static ssize_t dram_crc_paras_show(struct class *class, struct class_attribute *
 	return size;
 }
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 6, 0)
 static ssize_t dram_crc_paras_store(struct class *class, struct class_attribute *attr,
 		const char *buf, size_t count)
+#else
+static ssize_t dram_crc_paras_store(const struct class *class, const struct class_attribute *attr,
+		const char *buf, size_t count)
+#endif
 {
 	u32 dram_crc_en      = 0;
 	u32 dram_crc_srcaddr = 0;

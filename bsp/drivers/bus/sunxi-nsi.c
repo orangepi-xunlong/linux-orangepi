@@ -43,96 +43,16 @@
 #include <sunxi-sid.h>
 
 #include <asm/io.h>
-
 #define DRIVER_NAME          "NSI"
 #define DRIVER_NAME_PMU      DRIVER_NAME"_PMU"
-#define NSI_MAJOR         137
-#define NSI_MINORS        256
 
-#define MBUS_PRI_MAX      0x3
-#define MBUS_QOS_MAX      0x2
-
-#define for_each_ports(port) for (port = 0; port < MBUS_PMU_IAG_MAX; port++)
-
-/* n = 0~32 */
-#define IAG_MODE(n)		   (0x0010 + (0x200 * (n)))
-#define IAG_PRI_CFG(n)		   (0x0014 + (0x200 * (n)))
-#define IAG_INPUT_OUTPUT_CFG(n)	   (0x0018 + (0x200 * (n)))
-#define IAG_BAND_WIDTH(n)	   (0x0028 + (0x200 * (n)))
-#define IAG_BAND_WIDTH_LIMIT_MAX_BITS (12)
-#define IAG_BAND_WIDTH_LIMIT_MAX_VALUE ((1 << IAG_BAND_WIDTH_LIMIT_MAX_BITS) - 1)
-#define IAG_SATURATION(n)	   (0x002c + (0x200 * (n)))
-#define IAG_SATURATION_LIMIT_MAX_BITS (10)
-#define IAG_SATURATION_LIMIT_MAX_VALUE ((1 << IAG_SATURATION_LIMIT_MAX_BITS) - 1)
-
-#if IS_ENABLED(CONFIG_ARCH_SUN55I) || IS_ENABLED(CONFIG_ARCH_SUN60I)
-#define IAG_QOS_CFG(n)		   (0x000C + (0x200 * (n)))
-#else
-#define IAG_QOS_CFG(n)		   (0x0094 + (0x200 * 23) + (0x4 * ((n) / 16)))
-#endif
-
-/* Counter n = 0 ~ 19 */
-#define MBUS_PMU_ENABLE(n)         (0x00c0 + (0x200 * (n)))
-#define MBUS_PMU_CLR(n)            (0x00c4 + (0x200 * (n)))
-#define MBUS_PMU_CYCLE(n)          (0x00c8 + (0x200 * (n)))
-#define MBUS_PMU_RQ_RD(n)          (0x00cc + (0x200 * (n)))
-#define MBUS_PMU_RQ_WR(n)          (0x00d0 + (0x200 * (n)))
-#define MBUS_PMU_DT_RD(n)          (0x00d4 + (0x200 * (n)))
-#define MBUS_PMU_DT_WR(n)          (0x00d8 + (0x200 * (n)))
-#define MBUS_PMU_LA_RD(n)          (0x00dc + (0x200 * (n)))
-#define MBUS_PMU_LA_WR(n)          (0x00e0 + (0x200 * (n)))
-
-#define MBUS_PORT_MODE          (MBUS_PMU_MAX + 0)
-#define MBUS_PORT_PRI           (MBUS_PMU_MAX + 1)
-#define MBUS_INPUT_OUTPUT       (MBUS_PMU_MAX + 2)
-#define MBUS_PORT_QOS           (MBUS_PMU_MAX + 3)
-#define MBUS_PORT_ABS_BWL	(MBUS_PMU_MAX + 4)
-#define MBUS_PORT_ABS_BWLEN	(MBUS_PMU_MAX + 5)
-#ifdef AW_NSI_CPU_CHANNEL
-#define CPU_ABS_RW		(MBUS_PMU_MAX + 6)
-#endif
-
-#define CPU_PMU_EN		0x0020
-#define CPU_PMU_CLR		0x0024
-#define CPU_PMU_PER		0x0028
-#if !IS_ENABLED(CONFIG_ARCH_SUN65IW1)
-#define CPU_CHL0_PMU_REQ_R	0x0080
-#define CPU_CHL0_PMU_REQ_W	0x0084
-#define CPU_CHL0_PMU_DATA_R	0x0088
-#define CPU_CHL0_PMU_DATA_W	0x008c
-#define CPU_CHL0_PMU_LAT_R	0x0090
-#define CPU_CHL0_PMU_LAT_W	0x0094
-#else
-#define CPU_CHL0_PMU_REQ_R	0x0098
-#define CPU_CHL0_PMU_REQ_W	0x009c
-#define CPU_CHL0_PMU_DATA_R	0x0100
-#define CPU_CHL0_PMU_DATA_W	0x0104
-#define CPU_CHL0_PMU_LAT_R	0x0090
-#define CPU_CHL0_PMU_LAT_W	0x0094
-#endif
-#define CPU_IAG_MODE		0x0030
-#define CPU_PRI_CFG		   0x0034
-#define CPU_INPUT_OUTPUT_CFG	   0x0038
-#define CPU_BAND_WIDTH_LIMIT(n)	   (0x0048 + ((n) * 8))
-#define CPU_BAND_WIDTH_LIMIT_MAX_BITS (12)
-#define CPU_BAND_WIDTH_LIMIT_MAX_VALUE ((1 << CPU_BAND_WIDTH_LIMIT_MAX_BITS) - 1)
-#define CPU_SATURATION_LIMIT(n)    (0x004c + ((n) * 8))
-#define CPU_SATURATION_LIMIT_MAX_BITS (10)
-#define CPU_SATURATION_LIMIT_MAX_VALUE ((1 << CPU_SATURATION_LIMIT_MAX_BITS) - 1)
-#define CPU_QOS_CFG		   0x002c
-#define CPU_BW_LIMIT_EN_BIT        16
 #ifdef AW_NSI_CPU_CHANNEL
 static int limit_mask_enable;
 static int limit_mask;
 static uint32_t cpu_rw_settings[3];
 #endif
 
-/* extra one element for total */
-unsigned long latency_sum[MBUS_PMU_IAG_MAX + 1];
-unsigned long latency_aver[MBUS_PMU_IAG_MAX + 1];
-unsigned long request_sum[MBUS_PMU_IAG_MAX + 1];
-
-static struct nsi_pmu_data hw_nsi_pmu;
+struct nsi_pmu_data hw_nsi_pmu;
 struct nsi_bus sunxi_nsi;
 static struct class *nsi_pmu_class;
 
@@ -140,8 +60,6 @@ static int nsi_init_status = -EAGAIN;
 static struct class *distribute_master_cs;
 
 static DEFINE_MUTEX(nsi_setting);
-static void sunxi_nsi_distribute_mater_get(int mask);
-static void sunxi_nsi_distribute_mater_put(int mask);
 
 /**
  * nsi_port_setthd() - set a master priority
@@ -807,12 +725,6 @@ ssize_t nsi_pmu_timer_store(struct device *dev,
 
 	sunxi_nsi_distribute_mater_get(0xFFFFFFFF);
 
-	for (port = 0; port < MBUS_PMU_IAG_MAX; port++) {
-		latency_sum[port] = 0;
-		latency_aver[port] = 0;
-		request_sum[port] = 0;
-	}
-
 	if (sunxi_nsi.topo_tpye == NSI_TOPO_V2) {
 		__nsi_pmu_timer_store_v2(period);
 		hw_nsi_pmu.period = period;
@@ -1256,7 +1168,7 @@ static int sunxi_set_nsi_qos_params(struct device *dev)
 }
 #endif /* #if (!IS_ENABLED(CONFIG_ARCH_SUN50IW10) && !IS_ENABLED(CONFIG_ARCH_SUN55IW3)) */
 
-static void sunxi_nsi_distribute_mater_get(int mask)
+void sunxi_nsi_distribute_mater_get(int mask)
 {
 	int i;
 	for (i = 0; i < MBUS_PMU_IAG_MAX; i++) {
@@ -1266,7 +1178,7 @@ static void sunxi_nsi_distribute_mater_get(int mask)
 			pm_runtime_get_sync(sunxi_nsi.master[i].dev);
 	}
 }
-static void sunxi_nsi_distribute_mater_put(int mask)
+void sunxi_nsi_distribute_mater_put(int mask)
 {
 	int i;
 	for (i = 0; i < MBUS_PMU_IAG_MAX; i++) {
@@ -1607,262 +1519,6 @@ static int nsi_init(struct platform_device *pdev)
 #endif
 
 	return nsi_init_status;
-}
-
-/*
-static void nsi_exit(void)
-{
-	mutex_lock(&nsi_proing);
-	nsi_init_status = nsi_remove();
-	mutex_unlock(&nsi_proing);
-
-	nsi_init_status = -EAGAIN;
-}
-*/
-
-static ssize_t nsi_pmu_bandwidth_show(struct device *dev,
-			struct device_attribute *da, char *buf)
-{
-	unsigned long bread, bwrite, bandrw[MBUS_PMU_IAG_MAX];
-	unsigned long bwtotal = 0;
-	unsigned long cpu_bread = 0, cpu_bwrite = 0, cpu_total = 0;
-	unsigned int port, len = 0;
-	unsigned long flags = 0;
-	char bwbuf[16];
-	__maybe_unused u32 cpu_unit = sunxi_nsi.cpu_pmu_data_unit;
-	u32 ia_unit = sunxi_nsi.ia_pmu_data_unit;
-	__maybe_unused u32 ta_unit = sunxi_nsi.ta_pmu_data_unit;
-
-	sunxi_nsi_distribute_mater_get(0xFFFFFFFF);
-	spin_lock_irqsave(&hw_nsi_pmu.bwlock, flags);
-	if (sunxi_nsi.sub_node_id_mapping) {
-		for (port = 0; port < sunxi_nsi.master_cnt; port++) {
-			if (sunxi_nsi.master[port].type == NSI_IA_MASTER) {
-				u32 ia_index = sunxi_nsi.master[port]
-						       .ia_master.ia_index;
-				bread = readl_relaxed(sunxi_nsi.base +
-						      MBUS_PMU_DT_RD(ia_index));
-				bwrite =
-					readl_relaxed(sunxi_nsi.base +
-						      MBUS_PMU_DT_WR(ia_index));
-				bandrw[port] = bread + bwrite;
-				len += sprintf(bwbuf, "%lu  ",
-					       (bandrw[port] * ia_unit) / 1024);
-			} else {
-				cpu_bread = bread = readl_relaxed(
-					sunxi_nsi.master[port].cpu_direct.base +
-					CPU_CHL0_PMU_DATA_R);
-				cpu_bwrite = bwrite = readl_relaxed(
-					sunxi_nsi.master[port].cpu_direct.base +
-					CPU_CHL0_PMU_DATA_W);
-				cpu_total += cpu_bread + cpu_bwrite;
-				bandrw[port] = bread + bwrite;
-				len += sprintf(bwbuf, "%lu  ",
-					       (bandrw[port] * cpu_unit) /
-						       1024);
-			}
-			strcat(buf, bwbuf);
-		}
-		cpu_total *= cpu_unit;
-		goto show_total;
-	}
-
-	/* read the iag pmu bandwidth, which is total master bandwidth */
-#if defined(AW_NSI_CPU_CHANNEL) && defined(NSI_HARDCODED_PORT_MAPPING)
-	cpu_bread = readl_relaxed(sunxi_nsi.cpu_base + CPU_CHL0_PMU_DATA_R);
-	cpu_bwrite = readl_relaxed(sunxi_nsi.cpu_base + CPU_CHL0_PMU_DATA_W);
-
-	cpu_total = cpu_bread + cpu_bwrite;
-	len += sprintf(bwbuf, "%lu  ", (cpu_total* cpu_unit)/1024);
-	strcat(buf, bwbuf);
-	cpu_total *= cpu_unit;
-#endif
-	/* read the iag pmu bandwidth, which is total master bandwidth */
-	for (port = 0; port < MBUS_PMU_IAG_MAX; port++) {
-		bread = readl_relaxed(sunxi_nsi.base + MBUS_PMU_DT_RD(port));
-		bwrite = readl_relaxed(sunxi_nsi.base + MBUS_PMU_DT_WR(port));
-		bandrw[port] = bread + bwrite;
-		len += sprintf(bwbuf, "%lu  ", (bandrw[port] * ia_unit)/1024);
-		strcat(buf, bwbuf);
-	}
-
-show_total:
-#if IS_ENABLED(CONFIG_ARCH_SUN55I)
-	for (port = 0; port < MBUS_PMU_IAG_MAX; port++)
-		bwtotal += bandrw[port];
-	bwtotal *= ia_unit;
-#else
-	/* read the tag pmu bandwidth, which is total ddr bandwidth */
-	bread = readl_relaxed(sunxi_nsi.base + MBUS_PMU_DT_RD(MBUS_PMU_TAG));
-	bwrite = readl_relaxed(sunxi_nsi.base + MBUS_PMU_DT_WR(MBUS_PMU_TAG));
-	bwtotal = bread + bwrite;
-
-	if (sunxi_nsi.channel_type == NSI_DUAL_CHANNEL) {
-		bread = readl_relaxed(sunxi_nsi.base + MBUS_PMU_DT_RD(MBUS_PMU_TAG + 1));
-		bwrite = readl_relaxed(sunxi_nsi.base + MBUS_PMU_DT_WR(MBUS_PMU_TAG + 1));
-		bwtotal += bread + bwrite;
-	}
-	bwtotal *= ta_unit;
-#endif
-
-#if defined(AW_NSI_CPU_CHANNEL) && defined(NSI_HARDCODED_PORT_MAPPING)
-	len += sprintf(bwbuf, "%lu\n", (cpu_total + bwtotal) / 1024);
-#else
-	len += sprintf(bwbuf, "%lu\n", (cpu_total + bwtotal) / 1024);
-#endif
-	strcat(buf, bwbuf);
-
-	spin_unlock_irqrestore(&hw_nsi_pmu.bwlock, flags);
-	sunxi_nsi_distribute_mater_put(0xFFFFFFFF);
-	return len;
-}
-
-static ssize_t nsi_pmu_latency_show(struct device *dev,
-			struct device_attribute *da, char *buf)
-{
-	unsigned long laread, lawrite, larw[MBUS_PMU_IAG_MAX];
-	unsigned long request;
-	unsigned int port, len = 0;
-	unsigned long flags = 0;
-	char labuf[16];
-
-	sunxi_nsi_distribute_mater_get(0xFFFFFFFF);
-	spin_lock_irqsave(&hw_nsi_pmu.bwlock, flags);
-
-	if (sunxi_nsi.sub_node_id_mapping) {
-		for (port = 0; port < sunxi_nsi.master_cnt; port++) {
-			if (sunxi_nsi.master[port].type == NSI_IA_MASTER) {
-				u32 ia_index = sunxi_nsi.master[port]
-						       .ia_master.ia_index;
-				laread =
-					readl_relaxed(sunxi_nsi.base +
-						      MBUS_PMU_LA_RD(ia_index));
-				lawrite =
-					readl_relaxed(sunxi_nsi.base +
-						      MBUS_PMU_LA_WR(ia_index));
-				request = readl_relaxed(
-						  sunxi_nsi.base +
-						  MBUS_PMU_RQ_RD(ia_index)) +
-					  +readl_relaxed(
-						  sunxi_nsi.base +
-						  MBUS_PMU_RQ_WR(ia_index));
-
-			} else {
-				void *base =
-					sunxi_nsi.master[port].cpu_direct.base;
-				laread = readl_relaxed(base +
-						       CPU_CHL0_PMU_LAT_R);
-				lawrite = readl_relaxed(sunxi_nsi.base +
-							CPU_CHL0_PMU_LAT_W);
-				request = readl_relaxed(sunxi_nsi.base +
-							CPU_CHL0_PMU_REQ_R) +
-					  +readl_relaxed(sunxi_nsi.base +
-							 CPU_CHL0_PMU_REQ_W);
-			}
-			if (request == 0) {
-				larw[port] = 0;
-			} else {
-				larw[port] = (laread + lawrite) / request;
-				latency_sum[port] += (laread + lawrite);
-				request_sum[port] += request;
-			}
-			len += sprintf(labuf, "%lu  ", larw[port]);
-			strcat(buf, labuf);
-		}
-		goto show_total;
-	}
-	/* read the iag pmu latency and request */
-	for (port = 0; port < MBUS_PMU_IAG_MAX; port++) {
-		laread = readl_relaxed(sunxi_nsi.base + MBUS_PMU_LA_RD(port));
-		lawrite = readl_relaxed(sunxi_nsi.base + MBUS_PMU_LA_WR(port));
-		request = readl_relaxed(sunxi_nsi.base + MBUS_PMU_RQ_RD(port)) +
-						+ readl_relaxed(sunxi_nsi.base + MBUS_PMU_RQ_WR(port));
-
-		if (request == 0) {
-			larw[port] = 0;
-		} else {
-			larw[port] = (laread + lawrite) / request;
-			latency_sum[port] += (laread + lawrite);
-			request_sum[port] += request;
-		}
-	}
-	for (port = 0; port < MBUS_PMU_IAG_MAX; port++) {
-		len += sprintf(labuf, "%lu  ", larw[port]);
-		strcat(buf, labuf);
-	}
-
-show_total:
-	/* read the tag pmu latency and request, which is total ddr latency and request */
-	laread = readl_relaxed(sunxi_nsi.base + MBUS_PMU_LA_RD(MBUS_PMU_TAG));
-	lawrite = readl_relaxed(sunxi_nsi.base + MBUS_PMU_LA_WR(MBUS_PMU_TAG));
-	request = readl_relaxed(sunxi_nsi.base + MBUS_PMU_RQ_RD(MBUS_PMU_TAG)) +
-						+ readl_relaxed(sunxi_nsi.base + MBUS_PMU_RQ_WR(MBUS_PMU_TAG));
-
-	if (sunxi_nsi.channel_type == NSI_DUAL_CHANNEL) {
-		laread += readl_relaxed(sunxi_nsi.base + MBUS_PMU_LA_RD(MBUS_PMU_TAG + 1));
-		lawrite += readl_relaxed(sunxi_nsi.base + MBUS_PMU_LA_WR(MBUS_PMU_TAG + 1));
-		request += readl_relaxed(sunxi_nsi.base + MBUS_PMU_RQ_RD(MBUS_PMU_TAG + 1)) +
-			   +readl_relaxed(sunxi_nsi.base + MBUS_PMU_RQ_WR(MBUS_PMU_TAG + 1));
-	}
-
-	len += sprintf(labuf, "%lu\n", (laread + lawrite) / request);
-	strcat(buf, labuf);
-	latency_sum[port] += (laread + lawrite);
-	request_sum[port] += request;
-
-	spin_unlock_irqrestore(&hw_nsi_pmu.bwlock, flags);
-	sunxi_nsi_distribute_mater_put(0xFFFFFFFF);
-	return len;
-}
-
-static ssize_t nsi_pmu_latency_aver_show(struct device *dev,
-			struct device_attribute *da, char *buf)
-{
-	unsigned int port, len = 0;
-	unsigned long flags = 0;
-	char labuf[32];
-
-	spin_lock_irqsave(&hw_nsi_pmu.bwlock, flags);
-	if (sunxi_nsi.sub_node_id_mapping) {
-		for (port = 0; port < sunxi_nsi.master_cnt; port++) {
-			len += sprintf(labuf, "%lu  ",
-				       latency_sum[port] / request_sum[port]);
-			strcat(buf, labuf);
-		}
-		goto show_total;
-	}
-
-	for (port = 0; port < MBUS_PMU_IAG_MAX; port++) {
-		len += sprintf(labuf, "%lu  ", latency_sum[port] / request_sum[port]);
-		strcat(buf, labuf);
-	}
-show_total:
-	len += sprintf(labuf, "%lu\n", latency_sum[port] / request_sum[port]);
-	strcat(buf, labuf);
-
-	spin_unlock_irqrestore(&hw_nsi_pmu.bwlock, flags);
-	return len;
-}
-
-
-static ssize_t nsi_available_pmu_show(struct device *dev,
-			struct device_attribute *da, char *buf)
-{
-	ssize_t i, len = 0;
-	if (sunxi_nsi.sub_node_id_mapping) {
-		for (i = 0; i < sunxi_nsi.master_cnt; i++) {
-			len += sprintf(buf + len, "%s  ", sunxi_nsi.master[i].name);
-		}
-		len += sprintf(buf + len, "%s  ", "total");
-		return len;
-	}
-
-	for (i = 0; i < ARRAY_SIZE(pmu_name); i++)
-		len += sprintf(buf + len, "%s  ", get_name(i));
-
-	len += sprintf(buf + len, "\n");
-
-	return len;
 }
 
 static unsigned int nsi_get_value(struct nsi_pmu_data *data,
@@ -2228,18 +1884,30 @@ static struct device_attribute dev_attr_pmu_bandwidth =
 	__ATTR(pmu_bandwidth, 0444, nsi_pmu_bandwidth_show, NULL);
 static struct device_attribute dev_attr_available_pmu =
 	__ATTR(available_pmu, 0444, nsi_available_pmu_show, NULL);
-static struct device_attribute dev_attr_pmu_latency =
-	__ATTR(pmu_latency, 0444, nsi_pmu_latency_show, NULL);
-static struct device_attribute dev_attr_pmu_latency_aver =
-	__ATTR(pmu_latency_aver, 0444, nsi_pmu_latency_aver_show, NULL);
+static struct device_attribute dev_attr_pmu_latency_wr =
+	__ATTR(pmu_latency_wr, 0444, nsi_pmu_latency_wr_show, NULL);
+static struct device_attribute dev_attr_pmu_latency_rd =
+	__ATTR(pmu_latency_rd, 0444, nsi_pmu_latency_rd_show, NULL);
+static struct device_attribute dev_attr_pmu_bandwidth_wr =
+	__ATTR(pmu_bandwidth_wr, 0444, nsi_pmu_bandwidth_wr_show, NULL);
+static struct device_attribute dev_attr_pmu_bandwidth_rd =
+	__ATTR(pmu_bandwidth_rd, 0444, nsi_pmu_bandwidth_rd_show, NULL);
+static struct device_attribute dev_attr_pmu_cmd_wr =
+	__ATTR(pmu_cmd_wr, 0444, nsi_pmu_cmd_wr_show, NULL);
+static struct device_attribute dev_attr_pmu_cmd_rd =
+	__ATTR(pmu_cmd_rd, 0444, nsi_pmu_cmd_rd_show, NULL);
 
 /* pointers to created device attributes */
 static struct attribute *nsi_attributes[] = {
 	&dev_attr_pmu_timer.attr,
 	&dev_attr_pmu_bandwidth.attr,
-	&dev_attr_available_pmu .attr,
-	&dev_attr_pmu_latency.attr,
-	&dev_attr_pmu_latency_aver.attr,
+	&dev_attr_available_pmu.attr,
+	&dev_attr_pmu_latency_wr.attr,
+	&dev_attr_pmu_latency_rd.attr,
+	&dev_attr_pmu_bandwidth_wr.attr,
+	&dev_attr_pmu_bandwidth_rd.attr,
+	&dev_attr_pmu_cmd_wr.attr,
+	&dev_attr_pmu_cmd_rd.attr,
 
 	&sensor_dev_attr_port_mode.dev_attr.attr,
 	&sensor_dev_attr_port_prio.dev_attr.attr,

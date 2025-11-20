@@ -11,7 +11,6 @@
 #include <linux/bitops.h>
 #include <linux/version.h>
 #include <linux/delay.h>
-#include <linux/io.h>
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(5, 19, 0)
 #include <drm/drm_hdcp.h>
@@ -21,7 +20,6 @@
 #include <drm/display/drm_hdmi_helper.h>
 #include <drm/display/drm_scdc_helper.h>
 #endif
-
 #include "sunxi_hdmi.h"
 
 struct sunxi_hdmi_vic_mode {
@@ -867,6 +865,14 @@ disconfig_exit:
 	return 0;
 }
 
+int sunxi_hdmi_check(void)
+{
+	int ret = 0;
+
+	ret = dw_hdmi_check();
+	return ret;
+}
+
 int sunxi_hdmi_config(void)
 {
 	struct dw_phy_ops_s *func = &sunxi_hdmi->plat_data->phy_func;
@@ -937,10 +943,11 @@ int sunxi_hdmi_smooth_config(void)
 	return 0;
 }
 
-int sunxi_hdmi_set_disp_mode(struct drm_display_mode *mode)
+int sunxi_hdmi_set_disp_mode(struct sunxi_hdmi_s *hdmi, struct drm_display_mode *mode)
 {
 	dw_dtd_t video;
 	u32 rate = 0;
+	enum hdmi_picture_aspect picture_aspect_ratio = mode->picture_aspect_ratio;
 
 	memset(&video, 0x0, sizeof(dw_dtd_t));
 
@@ -974,7 +981,13 @@ int sunxi_hdmi_set_disp_mode(struct drm_display_mode *mode)
 		video.mVSyncPulseWidth /= 2;
 	}
 
-	switch (mode->picture_aspect_ratio) {
+	/* cts: fixup picture_aspect_ratio */
+	if (picture_aspect_ratio == HDMI_PICTURE_ASPECT_NONE) {
+		struct hdmi_avi_infoframe frame;
+		if (!drm_hdmi_avi_infoframe_from_display_mode(&frame, hdmi->connect, mode))
+			picture_aspect_ratio = frame.picture_aspect;
+	}
+	switch (picture_aspect_ratio) {
 	case HDMI_PICTURE_ASPECT_4_3:
 		video.mHImageSize = 4;
 		video.mVImageSize = 3;

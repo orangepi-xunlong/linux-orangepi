@@ -37,6 +37,8 @@ int sunxi_modem_deinit(struct platform_device *);
 
 int sunxi_gnss_init(struct platform_device *);
 int sunxi_gnss_deinit(struct platform_device *);
+int sunxi_gnss_suspend(struct device *);
+int sunxi_gnss_resume(struct device *);
 
 extern struct miscdevice sunxi_rfkill_miscdev;
 

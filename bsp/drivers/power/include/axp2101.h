@@ -35,6 +35,7 @@ enum {
 	AXP2585_ID,
 	AXP8191_ID,
 	AXP515_ID,
+	AXP517_ID,
 	NR_AXP20X_VARIANTS,
 };
 
@@ -1220,6 +1221,7 @@ extern int axp_debug_mask;
 #define AXP515_CC_GLOBAL_CTRL      (0x31)
 #define AXP515_CC_LOW_POWER_CTRL   (0x32)
 #define AXP515_CC_MODE_CTRL        (0x33)
+#define AXP515_CC_TOGGLE_CTRL      (0x34)
 #define AXP515_BOOST_EXT6          (0x36)
 #define AXP515_CC_STATUS0          (0x37)
 #define AXP515_CC_STATUS4          (0x3B)
@@ -1272,6 +1274,150 @@ extern int axp_debug_mask;
 #define AXP515_EXT_PARA4           (0xF4)
 #define AXP515_EXT_PARA5           (0xF5)
 #define AXP515_ADDR_EXTENSION      (0xFF)
+
+/* For axp517 */
+#define AXP517_STATUS0				(0x00)
+#define AXP517_STATUS1				(0x01)
+#define AXP517_CHIP_ID				(0x03)
+#define AXP517_DATA_BUFF			(0x04)
+#define AXP517_ILIM_TYPE			(0x06)
+#define AXP517_CLK_EN				(0x0B)
+#define AXP517_CHIP_ID_EXT			(0x0E)
+
+#define AXP517_COMM_CFG				(0x10)
+#define AXP517_BATFET_CTRL			(0x12)
+#define AXP517_RBFET_CTRL			(0x13)
+#define AXP517_DIE_TEMP_CFG			(0x14)
+#define AXP517_VSYS_MIN				(0x15)
+#define AXP517_VINDPM_CFG			(0x16)
+#define AXP517_IIN_LIM				(0x17)
+#define AXP517_RESET_CFG			(0x18)
+#define AXP517_MODULE_EN			(0x19)
+#define AXP517_WATCHDOG_CFG			(0x1a)
+#define AXP517_GAUGE_THLD			(0x1b)
+#define AXP517_POK_SET				(0x1c)
+#define AXP517_BST_CFG0				(0x1e)
+#define AXP517_BST_CFG1				(0x1f)
+
+#define AXP517_CHGLED_CFG			(0x30)
+
+#define AXP517_IRQ_EN0				(0x40)
+#define AXP517_IRQ_EN1				(0x41)
+#define AXP517_IRQ_EN2				(0x42)
+#define AXP517_IRQ_EN3				(0x43)
+#define AXP517_IRQ_EN4				(0x44)
+#define AXP517_IRQ0				(0x48)
+#define AXP517_IRQ1				(0x49)
+#define AXP517_IRQ2				(0x4a)
+#define AXP517_IRQ3				(0x4b)
+#define AXP517_IRQ4				(0x4c)
+
+#define AXP517_TS_CFG				(0x50)
+#define AXP517_TS_HYSL2H			(0x52)
+#define AXP517_TS_HYSH2L			(0x53)
+#define AXP517_VLTF_CHG				(0x54)
+#define AXP517_VHTF_CHG				(0x55)
+#define AXP517_VLTF_WORK			(0x56)
+#define AXP517_VHTF_WORK			(0x57)
+#define AXP517_JEITA_CFG			(0x58)
+#define AXP517_JEITA_CV_CFG			(0x59)
+#define AXP517_JEITA_COOL			(0x5a)
+#define AXP517_JEITA_WARM			(0x5b)
+#define AXP517_TS_CFG_DATA_H			(0x5c)
+#define AXP517_TS_CFG_DATA_L			(0x5d)
+
+#define AXP517_RECHG_CFG			(0x60)
+#define AXP517_IPRECHG_CFG			(0x61)
+#define AXP517_ICC_CFG				(0x62)
+#define AXP517_ITERM_CFG			(0x63)
+#define AXP517_VTERM_CFG			(0x64)
+#define AXP517_TREGU_THLD			(0x65)
+#define AXP517_CHG_FREQ				(0x66)
+#define AXP517_CHG_TMR_CFG			(0x67)
+#define AXP517_BAT_DET				(0x68)
+#define AXP517_IR_COMP				(0x69)
+
+#define AXP517_GAUGE_BROM			(0x70)
+#define AXP517_GAUGE_CONFIG			(0x71)
+#define AXP517_GAUGE_SOC			(0x74)
+#define AXP517_GAUGE_TIME2EMPTY_H		(0x76)
+#define AXP517_GAUGE_TIME2EMPTY_L		(0x77)
+#define AXP517_GAUGE_TIME2FULL_H		(0x78)
+#define AXP517_GAUGE_TIME2FULL_L		(0x79)
+#define AXP517_CYCLE_H				(0x7B)
+#define AXP517_CYCLE_L				(0x7C)
+
+#define AXP517_FG_ADDR				(0x84)
+#define AXP517_FG_DATA_H			(0x85)
+#define AXP517_FG_DATA_L			(0x86)
+
+#define AXP517_ADC_CH_EN0			(0x90)
+#define AXP517_VBAT_H				(0x91)
+#define AXP517_VBAT_L				(0x92)
+#define AXP517_IBAT_H				(0x93)
+#define AXP517_IBAT_L				(0x94)
+#define AXP517_TS_H				(0x95)
+#define AXP517_TS_L				(0x96)
+#define AXP517_IBUS_H				(0x97)
+#define AXP517_IBUS_L				(0x98)
+#define AXP517_VBUS_H				(0x99)
+#define AXP517_VBUS_L				(0x9A)
+#define AXP517_ADC_CONTROL			(0x9B)
+#define AXP517_ADC_RES				(0x9C)
+
+
+#define AXP517_TCPC_VENDOR_ID			(0xA0)
+#define AXP517_TCPC_PRODUCT_ID			(0xA2)
+#define AXP517_TCPC_BCD_DEV			(0xA4)
+#define AXP517_TCPC_TC_REV			(0xA6)
+#define AXP517_TCPC_PD_REV			(0xA8)
+#define AXP517_TCPC_PD_INT_REV			(0xAA)
+
+#define AXP517_IRQ_PD_ALERTL_STATUS		(0xB0)
+#define AXP517_IRQ_PD_ALERTH_STATUS		(0xB1)
+#define AXP517_IRQ_PD_ALERTL_EN			(0xB2)
+#define AXP517_IRQ_PD_ALERTH_EN			(0xB3)
+#define AXP517_TCPC_ALERT_MASK			(0xB2)
+#define AXP517_TCPC_POWER_STATUS_MASK		(0xB4)
+#define AXP517_TCPC_FAULT_STATUS_MASK		(0xB5)
+#define AXP517_TCPC_EXTENDED_STATUS_MASK	(0xB6)
+#define AXP517_TCPC_ALERT_EXTENDED_MASK		(0xB7)
+#define AXP517_TCPC_CONFIG_STD_OUTPUT		(0xB8)
+#define AXP517_TCPC_CTRL			(0xB9)
+#define AXP517_TCPC_ROLE_CTRL			(0xBA)
+#define AXP517_TCPC_FAULT_CTRL			(0xBB)
+#define AXP517_TCPC_POWER_CTRL			(0xBC)
+#define AXP517_TCPC_CC_STATUS			(0xBD)
+#define AXP517_TCPC_POWER_STATUS		(0xBE)
+#define AXP517_TCPC_FAULT_STATUS		(0xBF)
+
+#define AXP517_TCPC_EXTENDED_STATUS		(0xC0)
+#define AXP517_TCPC_ALERT_EXTENDED		(0xC1)
+#define AXP517_TCPC_COMMAND			(0xC3)
+#define AXP517_TCPC_DEV_CAP_1			(0xC4)
+#define AXP517_TCPC_DEV_CAP_2			(0xC6)
+#define AXP517_TCPC_STD_INPUT_CAP		(0xC8)
+#define AXP517_TCPC_STD_OUTPUT_CAP		(0xC9)
+#define AXP517_TCPC_MSG_HDR_INFO		(0xCE)
+#define AXP517_TCPC_RX_DETECT			(0xCF)
+
+#define AXP517_TCPC_VBUS_VOLTAGE		(0xD0)
+#define AXP517_TCPC_VBUS_SINK_DISCONNECT_THRESH	(0xD2)
+#define AXP517_TCPC_VBUS_STOP_DISCHARGE_THRESH	(0xD4)
+#define AXP517_TCPC_VBUS_VOLTAGE_ALARM_HI_CFG	(0xD6)
+#define AXP517_TCPC_VBUS_VOLTAGE_ALARM_LO_CFG	(0xD8)
+#define AXP517_TCPC_RX_BYTE_CNT			(0xDA) /* RX FIFO - 32 byte */
+#define AXP517_TCPC_TRANSMIT			(0xDB)
+#define AXP517_TCPC_TX_BYTE_CNT			(0xDC) /* TX FIFO - 31 byte */
+
+#define AXP517_AWAKE_EN				(0xE0)
+#define AXP517_PD_STATE				(0xE3)
+#define AXP517_CC_CNNT_STA			(0xE6)
+#define AXP517_CC_GENERAL_CONTROL		(0xE8)
+#define AXP517_PHY_BMC_TX_CTRL			(0xE9)
+#define AXP517_VBUS_CC_PERIOD_FREQ		(0xEA)
+#define AXP517_TWI_ADDR_STATIC			(0xEB)
+#define AXP517_TWI_ADDR_EXT			(0xFF)
 
 /* Regulators IDs */
 enum {
@@ -1517,6 +1663,10 @@ enum {
 
 enum {
 	AXP515_REG_ID_MAX = 0,
+};
+
+enum {
+	AXP517_REG_ID_MAX = 0,
 };
 
 /* IRQs */
@@ -2008,8 +2158,64 @@ enum axp515_irqs {
 	AXP515_IRQ_INSERT,
 	AXP515_IRQ_TOGGLE_DONE,
 	AXP515_IRQ_VBUS_SAFE5V,
+	AXP515_IRQ_VBUS_SAFE0V,
 	AXP515_IRQ_ERROR_GEN,
 	AXP515_IRQ_POW_CHNG,
+};
+
+enum axp517_irqs {
+	/* irq0 */
+	AXP517_IRQ_SOCWL2 = 1,
+	AXP517_IRQ_SOCWL1,
+	AXP517_IRQ_GWDT,
+	AXP517_IRQ_NEWSOC,
+	AXP517_IRQ_BST_OV,
+	AXP517_IRQ_VBUS_OV,
+	AXP517_IRQ_VBUS_FAULT,
+	/* irq1 */
+	AXP517_IRQ_VINSERT,
+	AXP517_IRQ_VREMOVE,
+	AXP517_IRQ_BINSERT,
+	AXP517_IRQ_BREMOVE,
+	AXP517_IRQ_PONS,
+	AXP517_IRQ_PONL,
+	AXP517_IRQ_PONN,
+	AXP517_IRQ_PONP,
+	/* irq2 */
+	AXP517_IRQ_WDEXP,
+	AXP517_IRQ_SMOOTH_END,
+	AXP517_IRQ_BOCP,
+	AXP517_IRQ_CHGDN,
+	AXP517_IRQ_CHGST,
+	AXP517_IRQ_DOTL1,
+	AXP517_IRQ_CHGTE,
+	AXP517_IRQ_BOVP,
+	/* irq3 */
+	AXP517_IRQ_BC_DONE,
+	AXP517_IRQ_BC_CHNG,
+	AXP517_IRQ_SOC_ERR,
+	AXP517_IRQ_BCOTQ,
+	AXP517_IRQ_BCOT,
+	AXP517_IRQ_BCUT,
+	AXP517_IRQ_BWOT,
+	AXP517_IRQ_BWUT,
+	/* irq4 */
+	AXP517_IRQ_QC_SUCC,
+	AXP517_IRQ_QC_FAIL,
+	/* alert */
+	AXP517_IRQ_CC_STATUS,
+	AXP517_IRQ_POWER_STATUS,
+	AXP517_IRQ_RX_SOP_MSG_STATUS,
+	AXP517_IRQ_RX_HARD_RESET,
+	AXP517_IRQ_TX_FAIL,
+	AXP517_IRQ_TX_DISCARD,
+	AXP517_IRQ_TX_SUCCESS,
+	AXP517_IRQ_VBUS_VOLTAGE_ALARM_HI,
+	AXP517_IRQ_VBUS_VOLTAGE_ALARM_LO,
+	AXP517_IRQ_FAULT,
+	AXP517_IRQ_RXBUF_OVFLOW,
+	AXP517_IRQ_VBUS_SINK_DIS_DET,
+	AXP517_IRQ_VENDOR,
 };
 #define AXP288_TS_ADC_H		0x58
 #define AXP288_TS_ADC_L		0x59
@@ -2021,11 +2227,13 @@ struct axp20x_dev {
 	int				irq;
 	struct regmap			*regmap;
 	struct regmap_irq_chip_data	*regmap_irqc;
+	struct regmap_irq_chip_data	*regmap_pdirqc;
 	long				variant;
 	int                             nr_cells;
 	struct mfd_cell                 *cells;
 	const struct regmap_config	*regmap_cfg;
 	const struct regmap_irq_chip	*regmap_irq_chip;
+	const struct regmap_irq_chip	*regmap_pdirq_chip;
 	void (*dts_parse)(struct axp20x_dev *);
 };
 
@@ -2094,7 +2302,7 @@ static inline int axp20x_read_variable_width(struct regmap *regmap,
  * This lets the axp20x core configure the mfd cells and register maps
  * for later use.
  */
-int axp20x_match_device(struct axp20x_dev *axp20x);
+int axp20x_match_device(struct sunxi_power_dev *axp20x);
 
 /**
  * axp20x_device_probe(): Probe a configured axp20x device
@@ -2105,7 +2313,7 @@ int axp20x_match_device(struct axp20x_dev *axp20x);
  * and irqchip. The axp20x device passed in must be fully configured
  * with axp20x_match_device, its irq set, and regmap created.
  */
-int axp20x_device_probe(struct axp20x_dev *axp20x);
+int axp20x_device_probe(struct sunxi_power_dev *axp20x);
 
 /**
  * axp20x_device_probe(): Remove a axp20x device
@@ -2114,10 +2322,7 @@ int axp20x_device_probe(struct axp20x_dev *axp20x);
  *
  * This tells the axp20x core to remove the associated mfd devices
  */
-int axp20x_device_remove(struct axp20x_dev *axp20x);
-int axp20x_device_shutdown(struct axp20x_dev *axp20x);
-
-int axp20x_register_cooler(struct power_supply *psy);
-void axp20x_unregister_cooler(struct power_supply *psy);
+int axp20x_device_remove(struct sunxi_power_dev *axp20x);
+int axp20x_device_shutdown(struct sunxi_power_dev *axp20x);
 
 #endif /* __LINUX_MFD_AXP20X_H */

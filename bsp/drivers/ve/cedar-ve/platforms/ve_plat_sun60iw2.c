@@ -52,6 +52,8 @@ static struct ve_dvfs_pair ve_dvfs[] = {
 	{0x04, "opp-vf0400", "opp-hz-0", "opp-microvolt-0"},
 	{0x05, "opp-vf0500", "opp-hz-0", "opp-microvolt-0"},
 	{0x06, "opp-vf0600", "opp-hz-0", "opp-microvolt-0"},
+	{0x07, "opp-vf0700", "opp-hz-0", "opp-microvolt-0"},
+	{0x08, "opp-vf0800", "opp-hz-0", "opp-microvolt-0"},
 	{0x14, "opp-vf0401", "opp-hz-0", "opp-microvolt-0"},
 	{0x15, "opp-vf0501", "opp-hz-0", "opp-microvolt-0"},
 };

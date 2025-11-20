@@ -8,6 +8,7 @@ menu "IR-TX Drivers"
 
 config AW_IR_TX
 	tristate "IR-TX Support for Allwinner SoCs"
+	select INPUT
 	select RC_CORE
 	select RC_DEVICES
 	help
@@ -15,6 +16,13 @@ config AW_IR_TX
 
 	  To compile this driver as a module, choose M here: the module will
 	  be called sunxi-ir-tx.
+
+config AW_IRTX_DYNAMIC_DEBUG
+        bool "Enable irtx dynamic debug"
+        depends on AW_IR_TX
+        default y
+        help
+          Enable irtx dynamic debug
 
 endmenu
 

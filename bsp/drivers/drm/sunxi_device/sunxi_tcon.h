@@ -32,6 +32,22 @@ enum disp_interface_type {
 	INTERFACE_INVALID,
 };
 
+enum tcon_builin_pattern {
+	PATTERN_DE = 0,
+	PATTERN_COLORBAR,
+	PATTERN_GRAYSCALE,
+	PATTERN_BLACK_WHITE,
+	PATTERN_ALL0,
+	PATTERN_ALL1,
+	PATTERN_RESERVED,
+	PATTERN_GRIDDING,
+};
+
+enum tcon_type {
+	TCON_LCD = 0,
+	TCON_TV = 1,
+};
+
 struct disp_output_config {
 	enum disp_interface_type type;
 	unsigned int de_id;
@@ -60,15 +76,39 @@ struct tcon_device {
 	struct disp_output_config cfg;
 };
 
-enum tcon_builin_pattern {
-	PATTERN_DE = 0,
-	PATTERN_COLORBAR,
-	PATTERN_GRAYSCALE,
-	PATTERN_BLACK_WHITE,
-	PATTERN_ALL0,
-	PATTERN_ALL1,
-	PATTERN_RESERVED,
-	PATTERN_GRIDDING,
+struct sunxi_tcon {
+	int id;
+	bool is_enabled;
+	bool pending_enable_vblank;
+	struct device *dev;
+	struct device *tcon_top;
+	struct phy *lvds_combo_phy0;
+	struct phy *lvds_combo_phy1;
+	struct tcon_device tcon_ctrl;
+	struct sunxi_tcon_tv tcon_tv;
+	struct sunxi_tcon_lcd tcon_lcd;
+
+	uintptr_t reg_base;
+	struct resource *res;
+	enum tcon_type type;
+
+	/* clock resource */
+	struct clk *ahb_clk; /* module clk */
+	struct clk *mclk; /* module clk */
+	struct clk *mclk_bus; /* module clk bus */
+	struct clk *ahb_vid_out; /*PPU clk */
+	struct clk *mbus_vo_sys; /* PPU clk */
+	struct reset_control *rst_bus_tcon;
+
+	/* interrupt resource */
+	unsigned int irq_no;
+	unsigned int judge_line;
+	void *output_data;
+
+	void *irq_data;
+	irq_handler_t irq_handler;
+
+	struct counter cnt;
 };
 
 int sunxi_tcon_get_current_line(struct device *tcon_dev);
@@ -91,5 +131,8 @@ int sunxi_tcon_mode_exit(struct device *tcon_dev);
 void sunxi_tcon_vrr_set(struct device *tcon_dev, struct disp_output_config *disp_cfg);
 void sunxi_tcon_vfp_vrr_set(struct device *tcon_dev, struct disp_video_timings *timings);
 struct resource *sunxi_tcon_get_res(struct device *tcon_dev);
+
+u64 sunxi_tcon_vblank_cnt_and_time(struct counter *cnt, ktime_t *vblanktime);
+u64 sunxi_tcon_get_refreshraw_and_vblankcnt(struct device *tcon_dev);
 
 #endif

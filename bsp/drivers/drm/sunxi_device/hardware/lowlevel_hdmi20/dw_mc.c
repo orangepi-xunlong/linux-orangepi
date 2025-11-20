@@ -164,7 +164,6 @@ void dw_mc_clk_all_disable(void)
 	dw_mc_set_clk(DW_MC_CLK_PREP,  DW_HDMI_DISABLE);
 	dw_mc_set_clk(DW_MC_CLK_CSC,   DW_HDMI_DISABLE);
 	dw_mc_set_clk(DW_MC_CLK_AUDIO, DW_HDMI_DISABLE);
-	dw_mc_set_clk(DW_MC_CLK_CEC,   DW_HDMI_DISABLE);
 	dw_mc_set_clk(DW_MC_CLK_HDCP,  DW_HDMI_DISABLE);
 }
 

@@ -323,6 +323,9 @@ static int __csi_set_fmt_hw(struct csi_dev *csi)
 	case 12:
 		csi->ncsi_if.dw = DW_12BIT;
 		break;
+	case 16:
+		csi->ncsi_if.dw = DW_2MULTI8;
+		break;
 	default:
 		csi->ncsi_if.dw = DW_8BIT;
 		break;
@@ -791,13 +794,13 @@ static int sunxi_csi_g_mbus_config(struct v4l2_subdev *sd, unsigned int pad,
 	} else if (cfg->type == V4L2_MBUS_BT656) {
 		csi->bus_info.bus_if = V4L2_MBUS_BT656;
 		csi->bus_info.ch_total_num = 0;
-		if (IS_FLAG(cfg->bus.parallel.data_shift, CSI_CH_0))
+		if (IS_FLAG(cfg->bus.parallel.flags, CSI_CH_0))
 			csi->bus_info.ch_total_num++;
-		if (IS_FLAG(cfg->bus.parallel.data_shift, CSI_CH_1))
+		if (IS_FLAG(cfg->bus.parallel.flags, CSI_CH_1))
 			csi->bus_info.ch_total_num++;
-		if (IS_FLAG(cfg->bus.parallel.data_shift, CSI_CH_2))
+		if (IS_FLAG(cfg->bus.parallel.flags, CSI_CH_2))
 			csi->bus_info.ch_total_num++;
-		if (IS_FLAG(cfg->bus.parallel.data_shift, CSI_CH_3))
+		if (IS_FLAG(cfg->bus.parallel.flags, CSI_CH_3))
 			csi->bus_info.ch_total_num++;
 		if (csi->bus_info.ch_total_num == 4) {
 			csi->arrange.column = 2;

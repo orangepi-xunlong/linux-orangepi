@@ -30,6 +30,7 @@
 MODULE_AUTHOR("lwj");
 MODULE_DESCRIPTION("A low-level driver for IMX278 sensors");
 MODULE_LICENSE("GPL");
+MODULE_VERSION("1.0.0");
 
 #define MCLK              (24*1000*1000)
 #define V4L2_IDENT_SENSOR 0x0278
@@ -894,7 +895,11 @@ static int sensor_g_mbus_config(struct v4l2_subdev *sd, unsigned int pad,
 				struct v4l2_mbus_config *cfg)
 {
 	cfg->type = V4L2_MBUS_CSI2_DPHY;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0)
+	cfg->bus.mipi_csi2.num_data_lanes = 0 | V4L2_MBUS_CSI2_2_LANE | V4L2_MBUS_CSI2_CHANNEL_0;
+#else
 	cfg->flags = 0 | V4L2_MBUS_CSI2_2_LANE | V4L2_MBUS_CSI2_CHANNEL_0;
+#endif
 
 	return 0;
 }
@@ -1082,8 +1087,12 @@ static int sensor_init_controls(struct v4l2_subdev *sd, const struct v4l2_ctrl_o
 
 static int sensor_dev_id;
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0)
+static int sensor_probe(struct i2c_client *client)
+#else
 static int sensor_probe(struct i2c_client *client,
 			const struct i2c_device_id *id)
+#endif
 {
 	struct v4l2_subdev *sd;
 	struct sensor_info *info;
@@ -1126,7 +1135,11 @@ static int sensor_probe(struct i2c_client *client,
 	return 0;
 }
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 1, 0)
 static int sensor_remove(struct i2c_client *client)
+#else
+static void sensor_remove(struct i2c_client *client)
+#endif
 {
 	struct v4l2_subdev *sd;
 	int i;
@@ -1142,7 +1155,9 @@ static int sensor_remove(struct i2c_client *client)
 	}
 
 	kfree(to_state(sd));
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 1, 0)
 	return 0;
+#endif
 }
 
 static const struct i2c_device_id sensor_id[] = {
