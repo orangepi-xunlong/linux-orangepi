@@ -2117,7 +2117,7 @@ static int trilin_dp_core_off(struct trilin_dp *dp)
 			0, sizeof(struct trilin_dp_mst_ch_slot_info) * dp->max_streams);
 
 	dp->state &= ~DPTX_STATE_READY;
-
+	dp->state &= ~DPTX_STATE_INIT_TRAIN;
 	return rc;
 }
 
@@ -2881,6 +2881,7 @@ int trilin_dp_prepare(struct trilin_dp *dp)
 		}
 	} else if (dp->state & DPTX_STATE_INIT_TRAIN){
 		reset_dp_and_reinit(dp); //enable dp reset...
+		usleep_range(100, 200);
 	}
 
 	if (!trilin_dp_is_ready(dp)) {
@@ -2904,8 +2905,8 @@ int trilin_dp_enable(struct trilin_dp *dp, struct trilin_dp_panel *dp_panel)
 	 * If DPTX_STATE_INITIALIZED is not set, we should not do any HW
 	 * programming.
 	 */
-	if (!(dp->state & DPTX_STATE_INITIALIZED)) {
-		DP_ERR("[host not ready]");
+	if (!(dp->state & DPTX_STATE_INITIALIZED) || !(dp->state & DPTX_STATE_READY)) {
+		DP_WARN("[host not ready]");
 		goto end;
 	}
 
