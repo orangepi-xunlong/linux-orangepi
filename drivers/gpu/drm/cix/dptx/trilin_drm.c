@@ -153,9 +153,6 @@ static int trilin_dp_connector_atomic_check(struct drm_connector *conn,
 	if (IS_ERR(new_crtc_state))
 		return PTR_ERR(new_crtc_state);
 
-	if (dp->caps.psr_sink_support && dp->psr_default_on)
-		new_con_state->self_refresh_aware = true;
-
 	if (new_crtc_state->self_refresh_active && !dp->psr.enable) {
 		DP_WARN("self_refresh_active is true but no psr sink support");
 		return -EINVAL;
@@ -859,6 +856,7 @@ static bool compute_available_clock_rate(struct trilin_dp *dp,
 		bpc = trilin_dp_cal_bpc(dp, connector_state, bpc);
 		bpp = trilin_dp_cal_bpp(bpc, color_format);
 		rate = trilin_dp_max_rate(max_rate, max_lanes, bpp);
+
 		if (clock <= rate) {
 			*rt_bpc = bpc;
 			*rt_bpp = bpp;
@@ -1101,6 +1099,19 @@ void trilin_dp_encoder_atomic_mode_set(
 			dp->pixel_per_cycle = 1;
 	}
 	trilin_dp_rcsu_cfg_adapter(dp, connector_state);
+
+	if (dp->pixel_per_cycle == 2
+		&& dp->psr_config_on && dp->caps.psr_sink_support) {
+		dp->psr_config_on = false;
+		DP_INFO("psr disable in 2ppc mode");
+	} else {
+		dp->psr_config_on = dp->psr_default_on;
+		DP_DEBUG("psr_config_on: %d", dp->psr_config_on);
+	}
+	if (dp->caps.psr_sink_support && dp->psr_config_on)
+		connector_state->self_refresh_aware = true;
+	else
+		connector_state->self_refresh_aware = false;
 }
 
 static const struct drm_encoder_helper_funcs trilin_dp_encoder_helper_funcs = {

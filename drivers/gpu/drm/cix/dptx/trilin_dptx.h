@@ -394,6 +394,7 @@ struct trilin_dp_psr {
 	bool singleframeupdate;
 	bool psr2_enabled;
 	bool main_link_keep_active;
+	bool link_retrain;
 };
 
 /**
@@ -448,6 +449,7 @@ struct trilin_dp {
 	enum drm_connector_status status;
 	bool enabled;
 	bool psr_default_on;
+	bool psr_config_on;
 	bool fasttrain_default_on;
 	bool mst_default_on;
 	u32 cfg_adapter_port;

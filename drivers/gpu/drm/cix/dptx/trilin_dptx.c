@@ -1191,6 +1191,7 @@ static void trilin_dp_psr_init_dpcd(struct trilin_dp *dp)
 
 	dp->caps.psr_sink_support = true;
 	dp->psr.main_link_keep_active = false;
+	dp->psr.link_retrain = false;
 
 	if (dp->psr_dpcd[0] == DP_PSR2_WITH_Y_COORD_IS_SUPPORTED) {
 		y_req = dp->psr_dpcd[1] & DP_PSR2_SU_Y_COORDINATE_REQUIRED;
@@ -1202,13 +1203,13 @@ static void trilin_dp_psr_init_dpcd(struct trilin_dp *dp)
 		dp->caps.psr2_sink_support = y_req && alpm;
 	}
 
-	if (!dp->caps.psr2_sink_support) {
-		drm_dp_dpcd_readb(&dp->aux, DP_PSR_CAPS, &psr_caps);
-		if (psr_caps != DP_PSR_NO_TRAIN_ON_EXIT) {
-			DP_INFO("PSR needs TRAIN_ON_EXIT");
-			dp->psr.main_link_keep_active = true;
-		}
-	}
+	/*For edp pannel that not support fast training, keep main link active*/
+	if (!dp->caps.fast_training)
+		dp->psr.main_link_keep_active = true;
+
+	drm_dp_dpcd_readb(&dp->aux, DP_PSR_CAPS, &psr_caps);
+	if (!(psr_caps & DP_PSR_NO_TRAIN_ON_EXIT))
+		dp->psr.link_retrain = true;
 
 	if (drm_dp_dpcd_readb(&dp->aux,
 		DP_SYNCHRONIZATION_LATENCY_IN_SINK, &val) == 1)
@@ -1217,7 +1218,7 @@ static void trilin_dp_psr_init_dpcd(struct trilin_dp *dp)
 		DP_DEBUG("Unable to get sink synchronization latency, assuming 8 frames\n");
 
 	dp->psr.sink_sync_latency = val;
-	DP_INFO("Panel Supports PSR %s", dp->caps.psr2_sink_support ? "and PSR2" : "but not PSR2");
+	DP_INFO("Panel Supports PSR %s: caps:%0x", dp->caps.psr2_sink_support ? "and PSR2" : "but not PSR2", psr_caps);
 }
 
 static void trilin_dp_psr_enable_sink(struct trilin_dp *dp,
@@ -1227,7 +1228,7 @@ static void trilin_dp_psr_enable_sink(struct trilin_dp *dp,
 	int ret;
 	struct trilin_connector *conn = dp_panel ? dp_panel->connector : NULL;
 
-	if (!dp->caps.psr_sink_support || !dp->psr_default_on
+	if (!dp->caps.psr_sink_support || !dp->psr_config_on
 		|| !conn || conn->vrr.enable)
 		return;
 
@@ -1259,7 +1260,7 @@ static void trilin_dp_psr_enable_sink(struct trilin_dp *dp,
 	trilin_dp_write(dp, TRILIN_DPTX_SRC0_PSR_3D_ENABLE, 0x1);
 	usleep_range(100, 200);
 	dp->psr.enable = true;
-	trilin_dp_power_on_delay_ms = DEFUALT_DP_POWER_ON_DELAY_MS / 2;
+	trilin_dp_power_on_delay_ms = 0;
 	DP_DEBUG("end");
 }
 
@@ -1332,11 +1333,17 @@ void trilin_dp_psr_enable(struct trilin_dp *dp,
 
 	trilin_dp_write(dp, TRILIN_DPTX_SRC0_PSR_STATE, 0x1);
 	trilin_dp_wait_psr_status_ready(dp, true);
-	//trilin_dp_write(dp, TRILIN_DPTX_SRC0_PSR_STATE, 0x3); //single frame update
+
+	/*Todo: single frame update support*/
+	// trilin_dp_write(dp, TRILIN_DPTX_SRC0_PSR_STATE, 0x3); //single frame update
+
 	if (!dp->psr.main_link_keep_active) {
 		if (phy->phy_ops)
 			phy->phy_ops->power(dp, trilin_power_a3);
+		/* 5 idle pattens needs TRILIN_DPTX_VIDEO_STREAM_ENABLE 0*/
+		trilin_dp_write(dp, TRILIN_DPTX_VIDEO_STREAM_ENABLE, 0x0);
 	}
+
 	dp->psr.active = true;
 	DP_DEBUG("end");
 }
@@ -1356,8 +1363,19 @@ void trilind_dp_psr_disable(struct trilin_dp *dp,
 			phy->phy_ops->power(dp, trilin_power_a2);
 			phy->phy_ops->power(dp, trilin_power_a0);
 		}
-		/*Note: For PSR, msleep 2ms not 4ms.*/
-		trilin_dpcd_power_up(dp);
+
+		if(dp->psr.link_retrain) {
+			trilin_dp_fast_train(dp);
+			trilin_dpcd_power_up(dp);
+		} else {
+			trilin_dpcd_power_up(dp);
+			/* 5 idle pattens */
+			trilin_dp_write(dp, TRILIN_DPTX_DISABLE_SCRAMBLING, 1);
+			trilin_dp_write(dp, TRILIN_DPTX_TRAINING_PATTERN_SET, 0x1);
+			usleep_range(500, 600);
+			trilin_dp_write(dp, TRILIN_DPTX_TRAINING_PATTERN_SET, DP_TRAINING_PATTERN_DISABLE);
+			trilin_dp_write(dp, TRILIN_DPTX_DISABLE_SCRAMBLING, 0);
+		}
 	}
 
 	ret = drm_dp_dpcd_readb(&dp->aux, DP_PSR_STATUS, &psr_status);
@@ -1368,9 +1386,11 @@ void trilind_dp_psr_disable(struct trilin_dp *dp,
 		DP_INFO("sink inactive, skip disable psr");
 		return;
 	}
+
+	trilin_dp_write(dp, TRILIN_DPTX_VIDEO_STREAM_ENABLE, 0x1);
+	usleep_range(50, 60);
 	trilin_dp_write(dp, TRILIN_DPTX_SRC0_PSR_STATE, 0x0);
 	trilin_dp_wait_psr_status_ready(dp, false);
-
 	dp->psr.active = false;
 	DP_DEBUG("end");
 }
@@ -3028,7 +3048,7 @@ int trilin_dp_init_config(struct trilin_dp *dp)
 	/* first call host init */
 	if (dp->enabled_by_gop) {
 		trinlin_dp_panel_read_sink_caps(dp);
-		if (!dp->caps.mst)
+		if (!dp->caps.mst && !dp->caps.psr_sink_support)
 			rc = trilin_dp_host_init_from_bootloader(dp);
 		else
 			dp->enabled_by_gop = 0; //mst disable gop
@@ -3259,7 +3279,7 @@ int trilin_dp_probe(struct trilin_dpsub *dpsub, struct drm_device *drm)
 		dp->enabled_by_gop = 0;
 
 	device_property_read_u32(dev, "cix,dp-psr-default-on", &psr_default_on);
-	dp->psr_default_on = !!psr_default_on;
+	dp->psr_config_on = dp->psr_default_on = !!psr_default_on;
 
 	dp->fasttrain_default_on =
 			device_property_read_bool(dev, "cix,dp-fasttrain-default-on");
