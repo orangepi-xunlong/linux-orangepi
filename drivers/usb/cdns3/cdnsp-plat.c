@@ -287,6 +287,9 @@ static int cdnsp_plat_runtime_suspend(struct device *dev)
 	if (cdns->role == USB_ROLE_HOST) {
 		xhci_dev = cdns->xhci_device;
 		hcd = dev_get_drvdata(&xhci_dev->dev);
+		if (!hcd)
+			goto controller_suspend; /* hcd is not created */
+
 		xhci = hcd_to_xhci(hcd);
 
 		/* XHCI irq and Wakeup irq are the same interrupt,set Run/Stop bit,
@@ -302,6 +305,8 @@ static int cdnsp_plat_runtime_suspend(struct device *dev)
 			dev_err(dev, "set controller run timeout\n");
 		}
 	}
+
+controller_suspend:
 	ret = cdnsp_controller_suspend(dev, PMSG_AUTO_SUSPEND);
 
 	return ret;
@@ -320,10 +325,17 @@ static int cdnsp_plat_runtime_resume(struct device *dev)
 	if (cdns->role == USB_ROLE_HOST) {
 		xhci_dev = cdns->xhci_device;
 		hcd = dev_get_drvdata(&xhci_dev->dev);
-		xhci = hcd_to_xhci(hcd);
-		set_bit(HCD_FLAG_HW_ACCESSIBLE, &hcd->flags);
-		if (xhci->shared_hcd)
-			set_bit(HCD_FLAG_HW_ACCESSIBLE, &xhci->shared_hcd->flags);
+		if (hcd) {
+			xhci = hcd_to_xhci(hcd);
+			/*
+			 * Somethings the interrupt occurs once the we enable the interrupt,
+			 * So, we need hcd core to handle it at once.
+			 */
+			set_bit(HCD_FLAG_HW_ACCESSIBLE, &hcd->flags);
+			if (xhci->shared_hcd)
+				set_bit(HCD_FLAG_HW_ACCESSIBLE, &xhci->shared_hcd->flags);
+		}
+
 		if (cdns->wakeup_pending) {
 			enable_irq(cdns->wakeup_irq);
 			cdns->wakeup_pending = false;
