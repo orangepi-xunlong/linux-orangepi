@@ -284,21 +284,14 @@ static int cdns_gpio_probe(struct platform_device *pdev)
 		}
 	}
 
-	if (!screen_info.lfb_linelength) {
-		cgpio->apb_reset = devm_reset_control_get_optional_shared(&pdev->dev, "apb_reset");
-		if (IS_ERR(cgpio->apb_reset)) {
-			dev_info(&pdev->dev, "[%s:%d]get reset error\n", __func__, __LINE__);
-			cgpio->apb_reset = NULL;
-		}
-
-		/* reset gpio */
-		if (cgpio->apb_reset) {
-			reset_control_reset(cgpio->apb_reset);
-		}
-	} else {
-		/* disalbe all irq to prevent unpredictable events */
-		iowrite32(BIT(num_gpios) - 1, cgpio->regs + CDNS_GPIO_IRQ_DIS);
+	cgpio->apb_reset = devm_reset_control_get_optional_shared(&pdev->dev, "apb_reset");
+	if (IS_ERR(cgpio->apb_reset)) {
+		dev_info(&pdev->dev, "[%s:%d]get reset error\n", __func__, __LINE__);
+		cgpio->apb_reset = NULL;
 	}
+
+	/* disalbe all irq to prevent unpredictable events */
+	iowrite32(BIT(num_gpios) - 1, cgpio->regs + CDNS_GPIO_IRQ_DIS);
 
 	/*
 	 * Optional irq_chip support
@@ -458,7 +451,8 @@ static int __maybe_unused cdns_gpio_resume(struct device *dev)
 		}
 
 		/* reset cgpio */
-		reset_control_reset(cgpio->apb_reset);
+		if (cgpio->apb_reset)
+			reset_control_reset(cgpio->apb_reset);
 
 		cdns_gpio_restore_regs(cgpio);
 	}
