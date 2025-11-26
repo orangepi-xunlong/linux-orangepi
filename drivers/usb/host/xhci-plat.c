@@ -329,7 +329,10 @@ int xhci_plat_probe(struct platform_device *pdev, struct device *sysdev, const s
 	 * Prevent runtime pm from being on as default, users should enable
 	 * runtime pm using power/control in sysfs.
 	 */
-	pm_runtime_forbid(&pdev->dev);
+	if (xhci->quirks & XHCI_DEFAULT_PM_RUNTIME_ALLOW)
+		pm_runtime_allow(&pdev->dev);
+	else
+		pm_runtime_forbid(&pdev->dev);
 
 	return 0;
 
