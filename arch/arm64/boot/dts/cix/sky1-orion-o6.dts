@@ -1945,6 +1945,11 @@
 		compatible = "cix,cix-ec-sleevekey";
 		status = "okay";
 	};
+
+	cix_ec_fan {
+		compatible = "cix,cix-ec-fan";
+		status = "okay";
+	};
 };
 
 &i2c7 {
