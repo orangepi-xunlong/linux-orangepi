@@ -709,6 +709,7 @@
 			reset-names = "pwr", "pipe";
 			#address-cells = <3>;
 			#size-cells = <2>;
+			dma-coherent;
 			status = "disabled";
 
 			pcie0_intc: legacy-interrupt-controller {
@@ -763,6 +764,7 @@
 			reset-names = "pwr", "pipe";
 			#address-cells = <3>;
 			#size-cells = <2>;
+			dma-coherent;
 			status = "disabled";
 
 			pcie1_intc: legacy-interrupt-controller {
@@ -1770,6 +1772,7 @@
 			snps,mtl-rx-config = <&gmac0_mtl_rx_setup>;
 			snps,mtl-tx-config = <&gmac0_mtl_tx_setup>;
 			snps,tso;
+			dma-coherent;
 			status = "disabled";
 
 			mdio0: mdio {
@@ -1817,6 +1820,7 @@
 			snps,mtl-rx-config = <&gmac1_mtl_rx_setup>;
 			snps,mtl-tx-config = <&gmac1_mtl_tx_setup>;
 			snps,tso;
+			dma-coherent;
 			status = "disabled";
 
 			mdio1: mdio {
