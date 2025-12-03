@@ -1208,7 +1208,7 @@ static void trilin_dp_psr_init_dpcd(struct trilin_dp *dp)
 		dp->psr.main_link_keep_active = true;
 
 	drm_dp_dpcd_readb(&dp->aux, DP_PSR_CAPS, &psr_caps);
-	if (!(psr_caps & DP_PSR_NO_TRAIN_ON_EXIT))
+	if (!(psr_caps & DP_PSR_NO_TRAIN_ON_EXIT) && !dp->caps.psr2_sink_support)
 		dp->psr.link_retrain = true;
 
 	if (drm_dp_dpcd_readb(&dp->aux,
