@@ -1434,6 +1434,24 @@ static int sky1_pcie_parse_aer_irq(struct sky1_pcie *pcie)
 	return 0;
 }
 
+static void sky1_pcie_parse_max_aspm_support(struct sky1_pcie *pcie)
+{
+	struct device *dev = pcie->dev;
+	u32 max_aspm_support;
+	int ret = 0;
+
+	ret = device_property_read_u32(dev, "max-aspm-support", &max_aspm_support);
+	if (ret) {
+		dev_dbg(dev, "Get property max-aspm-support fail:%d\n", ret);
+		max_aspm_support = 0x2;
+	}
+
+	if ((max_aspm_support >= 0) && (max_aspm_support <= 3))
+		pcie->max_aspm_support = max_aspm_support;
+	else
+		pcie->max_aspm_support = 2;
+}
+
 static void devm_phy_release(struct device *dev, void *res)
 {
 	struct phy *phy = *(struct phy **)res;
@@ -1532,6 +1550,7 @@ static int sky1_pcie_parse_property(struct platform_device *pdev,
 		return ret;
 
 	sky1_pcie_parse_aer_irq(pcie);
+	sky1_pcie_parse_max_aspm_support(pcie);
 
 	sky1_pcie_init_bases(pcie);
 
@@ -1685,24 +1704,24 @@ static void sky1_pcie_set_refclk(struct sky1_pcie *pcie, bool en)
 
 static void sky1_pcie_set_l0s_disable(struct sky1_pcie *pcie)
 {
-	struct platform_device *pdev = to_platform_device(pcie->dev);
-	struct device_node *np = pdev->dev.of_node;
 	u8 offset;
 	u32 reg;
-
-	/*
-	 * TODO:
-	 * We found that some devices do not support L0s, and the system
-	 * startup will cause hang. The power consumption benefit is not
-	 * significant. It will be debugged in the future.
-	 */
-	if (!of_property_read_bool(np, "aspm-no-l0s"))
-		return;
 
 	offset = cdns_pcie_find_capability(pcie->reg_base, PCI_CAP_ID_EXP);
 	/* Clear L0s from RC's link cap */
 	reg = sky1_pcie_ctrl_readl_reg(pcie, offset + PCI_EXP_LNKCAP);
 	reg &= ~PCI_EXP_LNKCAP_ASPM_L0S;
+	sky1_pcie_ctrl_writel_reg(pcie, offset + PCI_EXP_LNKCAP, reg);
+}
+
+static void sky1_pcie_set_l1_disable(struct sky1_pcie *pcie)
+{
+	u8 offset;
+	u32 reg;
+
+	offset = cdns_pcie_find_capability(pcie->reg_base, PCI_CAP_ID_EXP);
+	reg = sky1_pcie_ctrl_readl_reg(pcie, offset + PCI_EXP_LNKCAP);
+	reg &= ~PCI_EXP_LNKCAP_ASPM_L1;
 	sky1_pcie_ctrl_writel_reg(pcie, offset + PCI_EXP_LNKCAP, reg);
 }
 
@@ -1722,7 +1741,10 @@ static void sky1_pcie_init(struct sky1_pcie *pcie)
 
 	dev_dbg(dev, "%s, %i\n", __func__, __LINE__);
 	sky1_pcie_set_devctrl(pcie);
-	sky1_pcie_set_l0s_disable(pcie);
+	if (!(pcie->max_aspm_support & BIT(0)))
+		sky1_pcie_set_l0s_disable(pcie);
+	if (!(pcie->max_aspm_support & BIT(1)))
+		sky1_pcie_set_l1_disable(pcie);
 	sky1_pcie_filter_msg(pcie);
 
 	// if set D3hot，it will hang, power state change set to 0

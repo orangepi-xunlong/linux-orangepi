@@ -117,6 +117,7 @@ struct sky1_pcie {
 	u32 link_speed;
 	u32 num_lanes;
 	u32 max_payload;
+	u32 max_aspm_support;			/* bit0: enable L0s, bit1: enable L1 */
 	u32 mode;
 
 	struct clk *pcie_axi_clk;
