@@ -2522,6 +2522,8 @@ DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_MEDIATEK, 0x0616, quirk_disable_aspm_l0s_l
 DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_SAMSUNG, 0xa804, quirk_disable_aspm_l0s_l1);
 DECLARE_PCI_FIXUP_FINAL(0x1e0f, 0x002a, quirk_disable_aspm_l0s_l1);	/* sandisk */
 DECLARE_PCI_FIXUP_FINAL(0x1e0f, 0x0009, quirk_disable_aspm_l0s_l1);	/* sandisk */
+DECLARE_PCI_FIXUP_FINAL(0x1987, 0x5013, quirk_disable_aspm_l0s_l1);	/* tinkplus */
+DECLARE_PCI_FIXUP_FINAL(0x2646, 0x501d, quirk_disable_aspm_l0s_l1);	/* kingston */
 
 /*
  * ASM1083/1085 PCIe-PCI bridge devices cause AER timeout errors on the
