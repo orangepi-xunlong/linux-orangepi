@@ -113,7 +113,6 @@ static atomic_t x211_phy_rst_finish_cnt = ATOMIC_INIT(0);
 
 static LIST_HEAD(sky1_pcie_list);
 static unsigned long linkup_delay;
-static unsigned long aspm_en_l0s;
 
 static const struct sky1_pcie_ctrl_desc sky1_pcie_desc[] = {
 	{
@@ -1686,6 +1685,8 @@ static void sky1_pcie_set_refclk(struct sky1_pcie *pcie, bool en)
 
 static void sky1_pcie_set_l0s_disable(struct sky1_pcie *pcie)
 {
+	struct platform_device *pdev = to_platform_device(pcie->dev);
+	struct device_node *np = pdev->dev.of_node;
 	u8 offset;
 	u32 reg;
 
@@ -1695,9 +1696,8 @@ static void sky1_pcie_set_l0s_disable(struct sky1_pcie *pcie)
 	 * startup will cause hang. The power consumption benefit is not
 	 * significant. It will be debugged in the future.
 	 */
-	if (aspm_en_l0s)
+	if (!of_property_read_bool(np, "aspm-no-l0s"))
 		return;
-
 
 	offset = cdns_pcie_find_capability(pcie->reg_base, PCI_CAP_ID_EXP);
 	/* Clear L0s from RC's link cap */
@@ -2048,18 +2048,6 @@ static int __init sky1_pcie_linkup_delay(char *str)
 	return 1;
 }
 __setup("pcie_linkup_delay=", sky1_pcie_linkup_delay);
-
-static int __init sky1_pcie_aspm_en_l0s(char *str)
-{
-	int tmp;
-
-	tmp = kstrtoul(str, 0, &aspm_en_l0s);
-	if (tmp)
-		return tmp;
-
-	return 1;
-}
-__setup("pcie_aspm_en_l0s=", sky1_pcie_aspm_en_l0s);
 
 bool sky1_pcie_link_up(struct cdns_pcie *cdns_pcie)
 {
