@@ -36,10 +36,17 @@
 		cix-bridge1 = &cix_bridge_1;
 		cix-bridge2 = &cix_bridge_2;
 		cix-bridge3 = &cix_bridge_3;
+		cix-csi-dma0 = &cix_dma_dev_0;
+		cix-csi-dma1 = &cix_dma_dev_1;
+		cix-csi-dma2 = &cix_dma_dev_2;
+		cix-csi-dma3 = &cix_dma_dev_3;
 		cix-csi0 = &cix_mipi_csi_0;
 		cix-csi1 = &cix_mipi_csi_1;
 		cix-csi2 = &cix_mipi_csi_2;
 		cix-csi3 = &cix_mipi_csi_3;
+		cix-csi2-virt0 = &cix_mipi_virt_csi_00;
+		cix-csi2-virt1 = &cix_mipi_virt_csi_01;
+		cix-csi2-virt2 = &cix_mipi_virt_csi_02;
 		cix-dphy0 = &cix_dphy_0;
 		cix-dphy1 = &cix_dphy_1;
 		cix-dphy2 = &cix_dphy_2;
@@ -3200,7 +3207,7 @@
 		};
 
 		cix_bridge_0: cix_bridge@142B0000 {
-			compatible = "cix,cix-bridge";
+			compatible = "cix,cix-bridge-hw";
 			clocks = <&scmi_clk CLK_TREE_CSI_DMA0_PCLK>,
 						<&scmi_clk CLK_TREE_ISP_SCLK>;
 			clock-names = "dma_pclk", "dma_sclk";
@@ -3211,12 +3218,12 @@
 			interrupts = <GIC_SPI 460 IRQ_TYPE_LEVEL_HIGH>;
 			interface = <0 0>;
 			axi-uid = <0x21>;
-			iommus = <&smmu_mmhub 0x21>;
+			//iommus = <&smmu_mmhub 0x21>;
 			status = "disabled";
 		};
 
 		cix_bridge_1: cix_bridge@142C0000 {
-			compatible = "cix,cix-bridge";
+			compatible = "cix,cix-bridge-hw";
 			clocks = <&scmi_clk CLK_TREE_CSI_DMA1_PCLK>,
 						<&scmi_clk CLK_TREE_ISP_SCLK>;
 			clock-names = "dma_pclk", "dma_sclk";
@@ -3231,7 +3238,7 @@
 		};
 
 		cix_bridge_2: cix_bridge@14310000 {
-			compatible = "cix,cix-bridge";
+			compatible = "cix,cix-bridge-hw";
 			clocks = <&scmi_clk CLK_TREE_CSI_DMA2_PCLK>,
 						<&scmi_clk CLK_TREE_ISP_SCLK>;
 			clock-names = "dma_pclk", "dma_sclk";
@@ -3242,12 +3249,12 @@
 			interrupts = <GIC_SPI 462 IRQ_TYPE_LEVEL_HIGH>;
 			interface = <0 0>;
 			axi-uid= <0x22>;
-			iommus = <&smmu_mmhub 0x22>;
+			//iommus = <&smmu_mmhub 0x22>;
 			status = "disabled";
 		};
 
 		cix_bridge_3: cix_bridge@14320000 {
-			compatible = "cix,cix-bridge";
+			compatible = "cix,cix-bridge-hw";
 			clocks = <&scmi_clk CLK_TREE_CSI_DMA3_PCLK>,
 						<&scmi_clk CLK_TREE_ISP_SCLK>;
 			clock-names = "dma_pclk", "dma_sclk";
@@ -3261,8 +3268,28 @@
 			status = "disabled";
 		};
 
+		cix_dma_dev_0:cix_dma_dev_0 {
+			compatible = "cix,cix-csidma";
+			status = "disabled";
+		};
+
+		cix_dma_dev_1:cix_dma_dev_1 {
+			compatible = "cix,cix-csidma";
+			status = "disabled";
+		};
+
+		cix_dma_dev_2:cix_dma_dev_2 {
+			compatible = "cix,cix-csidma";
+			status = "disabled";
+		};
+
+		cix_dma_dev_3:cix_dma_dev_3 {
+			compatible = "cix,cix-csidma";
+			status = "disabled";
+		};
+
 		cix_mipi_csi_0: csi@14280000 {
-			compatible = "cix,cix-mipi-csi2";
+			compatible = "cix,cix-mipi-csi2-hw";
 			#address-cells = <2>;
 			#size-cells = <2>;
 			clocks = <&scmi_clk CLK_TREE_CSI_CTRL0_PCLK>,
@@ -3333,6 +3360,24 @@
 			interrupts = <GIC_SPI 458 IRQ_TYPE_LEVEL_HIGH>,
 							<GIC_SPI 459 IRQ_TYPE_LEVEL_HIGH>;
 			status = "disabled";
+		};
+
+		cix_mipi_virt_csi_00: cix_mipi_virt_csi_00 {
+		      compatible = "cix,cix-mipi-csi2";
+		      cix,hw = <&cix_mipi_csi_0>;
+		      status = "disabled";
+		};
+
+		cix_mipi_virt_csi_01: cix_mipi_virt_csi_01 {
+		      compatible = "cix,cix-mipi-csi2";
+		      cix,hw = <&cix_mipi_csi_0>;
+		      status = "disabled";
+		};
+
+		cix_mipi_virt_csi_02: cix_mipi_virt_csi_02 {
+		      compatible = "cix,cix-mipi-csi2";
+		      cix,hw = <&cix_mipi_csi_0>;
+		      status = "disabled";
 		};
 
 		cix_dphy_0: cix_dph_0 {

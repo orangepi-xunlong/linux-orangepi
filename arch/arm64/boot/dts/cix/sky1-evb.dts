@@ -7,7 +7,6 @@
 /dts-v1/;
 
 #include "sky1.dtsi"
-#include "sky1-evb-csidma.dtsi"
 /delete-node/ &reg_definition;
 / {
 	model = "CIX sky1 EVB board";
@@ -113,7 +112,7 @@
 			};
 
 			lt7911uxc_codec: codec {
-				sound-dai = <&lt7911uxc>;
+			//	sound-dai = <&lt7911uxc>;
 			};
 		};
 
