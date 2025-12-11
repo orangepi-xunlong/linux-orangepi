@@ -81,9 +81,9 @@ int v4l2_async_nf_fwnode_parse_endpoint(struct device *dev,
 	if (ret < 0)
 		goto out_err;
 	asc = __v4l2_async_nf_add_fwnode(notifier, asd->fwnode, sizeof(struct v4l2_async_connection));
-	if (IS_ERR_OR_NULL(asc)) {
+	if (IS_ERR_OR_NULL(asc))
 		return -ENOTCONN;
-	}
+
 	if (ret < 0) {
 		/* not an error if asd already exists */
 		if (ret == -EEXIST)
@@ -145,38 +145,8 @@ static int cix_dphy_rx_get_sensor_data_rate(struct v4l2_subdev *sd)
 {
 	struct dphy_rx *dphy = v4l2_subdev_to_dphy_rx(sd);
 
-	struct v4l2_subdev *sensor_sd = dphy->source_subdev;
-	struct v4l2_ctrl *link_freq;
-	struct v4l2_querymenu qm = {
-		.id = V4L2_CID_LINK_FREQ,
-	};
-	int ret;
-
-	if (!sensor_sd) {
-		v4l2_warn(sd, "sensor subdev not register\n");
-		return -EINVAL;
-	}
-
-	link_freq = v4l2_ctrl_find(sensor_sd->ctrl_handler, V4L2_CID_LINK_FREQ);
-	if (!link_freq) {
-		v4l2_warn(sd, "No pixel rate control in subdev\n");
-		return -EPIPE;
-	}
-
-	qm.index = v4l2_ctrl_g_ctrl(link_freq);
-	ret = v4l2_querymenu(sensor_sd->ctrl_handler, &qm);
-	if (ret < 0) {
-		v4l2_err(sd, "Failed to get menu item\n");
-		return ret;
-	}
-
-	if (!qm.value) {
-		v4l2_err(sd, "Invalid link_freq\n");
-		return -EINVAL;
-	}
-
-	/* Phy data_rate = LT7911 x 2*/
-	dphy->data_rate = qm.value * 2;
+	/*need open to the sys node user space can modify*/
+	dphy->data_rate = 750000000;
 	dphy->data_rate_mbps = dphy->data_rate / 1000 / 1000;
 	v4l2_info(sd, "dphy%d, data_rate_mbps %d\n", dphy->id,
 		  dphy->data_rate_mbps);
@@ -333,6 +303,7 @@ static int mipi_dphy_rx_get_fmt(struct v4l2_subdev *sd,
 	ret = cix_dphy_rx_get_sensor_data_rate(sd);
 	if (ret < 0)
 		return ret;
+
 	mf->reserved[0] = dphy->data_rate_mbps;
 
 	dev_info(dphy->dev, "format.reserved[0]=0x%x, format.reserved[1]=%x,\n",
@@ -414,15 +385,15 @@ static int mipi_dphy_rx_async_bound(struct v4l2_async_notifier *notifier,
 }
 
 static int dphy_parse_endpoint(struct device *dev,
-                               struct v4l2_fwnode_endpoint *vep,
-                               v4l2_async_subdev *asd)
+		struct v4l2_fwnode_endpoint *vep,
+		v4l2_async_subdev *asd)
 {
 	dev_info(dev, "dphy parse the endpoints\n");
 
 	if (vep->base.port != 0) {
 		dev_info(dev,
-			 "dphy do not need remote endpoints port %d id %d\n",
-			 vep->base.port, vep->base.id);
+				"dphy do not need remote endpoints port %d id %d\n",
+				vep->base.port, vep->base.id);
 		return -ENOTCONN;
 	}
 
@@ -536,7 +507,7 @@ static int mipi_dphy_rx_probe(struct platform_device *pdev)
 	dphy_media_init(dphy);
 
 	/*notifier & async subdev init*/
-	v4l2_async_subdev_nf_init(&dphy->notifier,sd);
+	v4l2_async_subdev_nf_init(&dphy->notifier, sd);
 	ret = v4l2_async_nf_parse_fwnode_endpoints(dphy->dev, &dphy->notifier,
 												sizeof(v4l2_async_subdev),
 												dphy_parse_endpoint);
