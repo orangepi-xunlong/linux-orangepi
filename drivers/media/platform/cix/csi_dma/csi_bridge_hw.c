@@ -3,7 +3,6 @@
  *csi_bridge_hw.c - csi_dma register control
  *Copyright 2024 Cix Technology Group Co., Ltd.
  */
-
 #include "csi_bridge_hw.h"
 
 struct csi_dma_store_data {
@@ -19,7 +18,7 @@ struct csi_dma_store_data store_table[] = {
 	{ 0x124, "AXI_ADDR_START1_HIGH" },
 };
 
-void csi_dma_store(struct csi_dma_dev *csi_dma)
+static int csi_bridge_store(struct csi_dma_hw_dev *csi_dma)
 {
 	u32 value;
 	u32 i;
@@ -28,9 +27,11 @@ void csi_dma_store(struct csi_dma_dev *csi_dma)
 		value = readl(csi_dma->regs + store_table[i].offset);
 		store_table[i].value = value;
 	}
+
+	return 0;
 }
 
-void csi_dma_restore(struct csi_dma_dev *csi_dma)
+static int csi_bridge_restore(struct csi_dma_hw_dev *csi_dma)
 {
 	u32 i;
 
@@ -38,10 +39,12 @@ void csi_dma_restore(struct csi_dma_dev *csi_dma)
 		writel(store_table[i].value,
 		       csi_dma->regs + store_table[i].offset);
 	}
+
+	return 0;
 }
 
 #ifdef CSI_DMA_DEBUG
-void dump_csi_bridge_regs(struct csi_dma_dev *csi_dma)
+void dump_csi_bridge_regs(struct csi_dma_hw_dev *csi_dma)
 {
 	struct device *dev = &csi_dma->pdev->dev;
 	struct {
@@ -99,137 +102,61 @@ void dump_csi_bridge_regs(struct csi_dma_dev *csi_dma)
 }
 #endif
 
-static inline u32 csi_dma_read(struct csi_dma_dev *csi_dma, u32 reg)
+static inline u32 csi_dma_read(struct csi_dma_hw_dev *csi_dma, u32 reg)
 {
 	return readl(csi_dma->regs + reg);
 }
 
-static inline void csi_dma_write(struct csi_dma_dev *csi_dma, u32 reg, u32 val)
+static inline void csi_dma_write(struct csi_dma_hw_dev *csi_dma, u32 reg, u32 val)
 {
 	writel(val, csi_dma->regs + reg);
 }
 
-int csi_dma_read_async_fifo_status(struct csi_dma_dev *csi_dma)
+void frame_star(struct csi_dma_hw_dev *csi_dma)
 {
-	u8 val;
-
-	val = csi_dma_read(csi_dma, BRIDGE_STATUS);
-	return (val & ASYNC_FIFO_STATUS_MASK) >> ASYNC_FIFO_STATUS_OFFSET;
 }
 
-int csi_dma_read_dma_engine_status(struct csi_dma_dev *csi_dma)
+void line_count(struct csi_dma_hw_dev *csi_dma)
 {
-	u8 val;
-
-	val = csi_dma_read(csi_dma, BRIDGE_STATUS);
-	return (val & DMA_ENGINE_STATUS_MASK) >> DMA_ENGINE_STATUS_OFFSET;
 }
 
-static void csi_dma_set_line_stride(struct csi_dma_dev *csi_dma, u32 stride)
+void every_n_line(struct csi_dma_hw_dev *csi_dma)
+{
+}
+
+void dma_err_rst_int(struct csi_dma_hw_dev *csi_dma)
+{
+}
+
+static void csi_dma_set_line_stride(struct csi_dma_hw_dev *csi_dma, u32 stride)
 {
 	csi_dma_write(csi_dma, LINE_STRIDE, stride);
 }
 
-struct device *csi_dma_dev_get_parent(struct platform_device *pdev)
+void csi_bridge_set_plane_buffer_addr(struct csi_dma_hw_dev *csi_dma, int plane_no, u64 base_addr, u64 offset_addr)
 {
-	struct device *dev = &pdev->dev;
-	struct device_node *parent;
-	struct platform_device *parent_pdev;
-
-	if (!pdev)
-		return NULL;
-
-	/* Get parent for isi capture device */
-	parent = of_get_parent(dev->of_node);
-	parent_pdev = of_find_device_by_node(parent);
-	if (!parent_pdev) {
-		of_node_put(parent);
-		return NULL;
-	}
-	of_node_put(parent);
-
-	return &parent_pdev->dev;
-}
-EXPORT_SYMBOL_GPL(csi_dma_dev_get_parent);
-
-struct csi_dma_dev *csi_dma_get_hostdata(struct platform_device *pdev)
-{
-	struct csi_dma_dev *csi_dma;
-
-	if (!pdev || !pdev->dev.parent)
-		return NULL;
-
-	csi_dma = (struct csi_dma_dev *)dev_get_drvdata(pdev->dev.parent);
-	if (!csi_dma)
-		return NULL;
-
-	return csi_dma;
-}
-EXPORT_SYMBOL_GPL(csi_dma_get_hostdata);
-
-void csi_dma_channel_set_outbuf(struct csi_dma_dev *csi_dma,
-				struct csi_dma_buffer *buf)
-{
-	struct vb2_buffer *vb2_buf = &buf->v4l2_buf.vb2_buf;
-	struct frame_addr *paddr = &buf->paddr;
-	struct csi_dma_cap_dev *dma_cap;
-	struct v4l2_pix_format_mplane *pix;
+	u64 y_addr = base_addr + offset_addr;
 	u32 val = 0;
 
-	if (buf->discard) {
-		dma_cap = csi_dma->dma_cap;
-		pix = &dma_cap->pix;
-		paddr->y = dma_cap->discard_buffer_dma[0];
-
-		if (pix->num_planes == CSI_DMA_MAX_PLANES)
-			paddr->cb = dma_cap->discard_buffer_dma[1];
-
+	if (plane_no == 0) {
+		val = y_addr & ADDRESS0_LO_MASK;
+		csi_dma_write(csi_dma, AXI_ADDR_START0_LOW, val);
+		val = (y_addr >> 32) & ADDRESS0_HI_MASK;
+		csi_dma_write(csi_dma, AXI_ADDR_START0_HIGH, val);
 	} else {
-		paddr->y = vb2_dma_contig_plane_dma_addr(vb2_buf, 0);
-		if (vb2_buf->num_planes == CSI_DMA_MAX_PLANES)
-			paddr->cb = vb2_dma_contig_plane_dma_addr(vb2_buf, 1);
-	}
-
-	val = paddr->y & ADDRESS0_LO_MASK;
-	csi_dma_write(csi_dma, AXI_ADDR_START0_LOW, val);
-
-	val = (paddr->y >> 32) & ADDRESS0_HI_MASK;
-	csi_dma_write(csi_dma, AXI_ADDR_START0_HIGH, val);
-
-	if (vb2_buf->num_planes == CSI_DMA_MAX_PLANES) {
-		val = paddr->cb & ADDRESS1_LO_MASK;
+		val = y_addr & ADDRESS1_LO_MASK;
 		csi_dma_write(csi_dma, AXI_ADDR_START1_LOW, val);
-
-		val = (paddr->cb >> 32) & ADDRESS1_HI_MASK;
+		val = (y_addr >> 32) & ADDRESS1_HI_MASK;
 		csi_dma_write(csi_dma, AXI_ADDR_START1_HIGH, val);
 	}
 }
-EXPORT_SYMBOL_GPL(csi_dma_channel_set_outbuf);
 
-static void csi_dma_reset(struct csi_dma_dev *csi_dma)
+static void csi_dma_reset(struct csi_dma_hw_dev *csi_dma)
 {
 	// TODO
 }
 
-u32 csi_dma_axi_burst_config(struct csi_dma_dev *csi_dma, u32 burst_len)
-{
-	u32 val;
-
-	if (burst_len > 32) {
-		dev_err(&csi_dma->pdev->dev, "invalid burst length %d\n",
-			burst_len);
-		return -1;
-	}
-
-	val = csi_dma_read(csi_dma, AXI_CTRL);
-	val |= AXI_CTRL_BURST_LEN << BURST_LEN_OFFSET;
-
-	csi_dma_write(csi_dma, AXI_CTRL, val);
-	return 0;
-}
-EXPORT_SYMBOL_GPL(csi_dma_axi_burst_config);
-
-u32 csi_dma_axi_ot_config(struct csi_dma_dev *csi_dma, u32 ot_y, u32 ot_u)
+static u32 csi_dma_axi_ot_config(struct csi_dma_hw_dev *csi_dma, u32 ot_y, u32 ot_u)
 {
 	u32 val;
 
@@ -248,28 +175,8 @@ u32 csi_dma_axi_ot_config(struct csi_dma_dev *csi_dma, u32 ot_y, u32 ot_u)
 	csi_dma_write(csi_dma, OT_INFO_CFG, val);
 	return 0;
 }
-EXPORT_SYMBOL_GPL(csi_dma_axi_ot_config);
 
-u32 csi_dma_axi_pendreq_config(struct csi_dma_dev *csi_dma, u32 pend_y,
-			       u32 pend_u)
-{
-	u32 val;
-
-	if ((pend_y > 64) || (pend_u > 64)) {
-		dev_err(&csi_dma->pdev->dev,
-			"invalid pending y %d pending u %d\n", pend_y, pend_u);
-		return -1;
-	}
-
-	val = csi_dma_read(csi_dma, OT_INFO_CFG);
-	val |= (pend_y << PENDING_REQ_NUM_Y_OFFSET) |
-	       (pend_u << PENDING_REQ_NUM_U_OFFSET);
-	csi_dma_write(csi_dma, OT_INFO_CFG, val);
-	return 0;
-}
-EXPORT_SYMBOL_GPL(csi_dma_axi_pendreq_config);
-
-static void csi_dma_axi_config(struct csi_dma_dev *csi_dma)
+static void csi_dma_axi_config(struct csi_dma_hw_dev *csi_dma)
 {
 	u32 val;
 
@@ -279,7 +186,7 @@ static void csi_dma_axi_config(struct csi_dma_dev *csi_dma)
 	csi_dma_write(csi_dma, OT_INFO_CFG, 0x40);
 }
 
-static void csi_dma_frame_config(struct csi_dma_dev *csi_dma,
+static void csi_dma_frame_config(struct csi_dma_hw_dev *csi_dma,
 				 struct csi_dma_frame *src_f)
 {
 	u32 val;
@@ -324,7 +231,8 @@ static void csi_dma_frame_config(struct csi_dma_dev *csi_dma,
 		break;
 	case MEDIA_BUS_FMT_YVYU8_2X8:
 		mem_layout_fmt = MEM_LAYOUT_FMT_NV12;
-		frame_cfg_dt = IMG_DT_YUV420_8BIT;
+		/*here input is yuyv mipi do not have nv12 data type*/
+		frame_cfg_dt = IMG_DT_YUV422_8BIT;
 		break;
 	case MEDIA_BUS_FMT_YUYV10_2X10:
 		mem_layout_fmt = MEM_LAYOUT_FMT_P010;
@@ -363,7 +271,7 @@ static void csi_dma_frame_config(struct csi_dma_dev *csi_dma,
 	csi_dma_write(csi_dma, OUT_CTRL, val);
 }
 
-static void csi_dma_line_stride_config(struct csi_dma_dev *csi_dma,
+static void csi_dma_line_stride_config(struct csi_dma_hw_dev *csi_dma,
 				       struct csi_dma_frame *src_f)
 {
 	u32 val = 0;
@@ -402,7 +310,7 @@ static void csi_dma_line_stride_config(struct csi_dma_dev *csi_dma,
 	csi_dma_set_line_stride(csi_dma, val);
 }
 
-static void csi_dma_counter_ctrl(struct csi_dma_dev *csi_dma)
+static void csi_dma_counter_ctrl(struct csi_dma_hw_dev *csi_dma)
 {
 	u32 val;
 
@@ -415,39 +323,37 @@ static void csi_dma_counter_ctrl(struct csi_dma_dev *csi_dma)
 	csi_dma_write(csi_dma, CNT_EN_CTRL, val);
 }
 
-void csi_dma_pwr_ctrl(struct csi_dma_dev *csi_dma)
+static u32 csi_dma_get_irq_status(struct csi_dma_hw_dev *csi_dma_hw)
+{
+	return csi_dma_read(csi_dma_hw, INTERRUPT_STATUS);
+}
+
+static void csi_dma_clean_irq_status(struct csi_dma_hw_dev *csi_dma, u32 val)
+{
+	csi_dma_write(csi_dma, INTERRUPT_CLR, val);
+}
+
+static void csi_dma_enable_irq(struct csi_dma_hw_dev *csi_dma)
 {
 	u32 val;
 
-	val = SRAM_SD << SRAM_SD_OFFSET;
+	val = FRAME_END_INT_EN_MASK | LINE_CNT_INT_EN_MASK |
+	      LINE_MODE_INT_EN_MASK | PIXEL_ERR_INT_EN_MAKS |
+	      ASYNC_FIFO_OVF_INT_EN_MASK | ASYNC_FIFO_UNDF_INT_EN_MASK |
+	      DMA_OVF_INT_EN_MASK | FRAME_STOP_INT_EN_MASK |
+	      DMA_ERR_RST_INT_EN_MASK | UNSUPPORT_DT_INT_EN_MASK |
+	      UNSUPPORT_STRIDE_INT_EN_MASK | LINE_MISMATCH_INT_EN_MASK |
+	      PIXEL_MISMATCH_INT_EN_MASK | TIMEOUT_INT_EN_MASK;
 
-	csi_dma_write(csi_dma, PWR_CTRL, val);
+	csi_dma_write(csi_dma, INTERRUTP_EN, val);
 }
-EXPORT_SYMBOL_GPL(csi_dma_pwr_ctrl);
 
-u32 csi_dma_get_pwr_status(struct csi_dma_dev *csi_dma)
+static void csi_dma_disable_irq(struct csi_dma_hw_dev *csi_dma)
 {
-	u32 val;
-
-	val = csi_dma_read(csi_dma, PWR_CTRL);
-	return (val & SRAM_PM_STA_MASK) >> SRAM_PM_STA_OFFSET;
-}
-EXPORT_SYMBOL_GPL(csi_dma_get_pwr_status);
-
-void csi_dma_fifo_start_stream(struct csi_dma_dev *csi_dma)
-{
-	u32 val;
-
-	val = ASYNC_BRIDGE_EN << ASYNC_BRIDGE_EN_OFFSET;
-
-	csi_dma_write(csi_dma, CSI_BRIDGE_CTRL, val);
-
-	val = START << FIFO_START_OFFSET;
-
-	csi_dma_write(csi_dma, DMA_BRIDGE_CTRL, val);
+	csi_dma_write(csi_dma, INTERRUTP_EN, 0);
 }
 
-void csi_dma_dma_start_stream(struct csi_dma_dev *csi_dma)
+void csi_dma_dma_start_stream(struct csi_dma_hw_dev *csi_dma)
 {
 	u32 val;
 
@@ -460,30 +366,12 @@ void csi_dma_dma_start_stream(struct csi_dma_dev *csi_dma)
 	csi_dma_write(csi_dma, DMA_BRIDGE_CTRL, val);
 }
 
-void csi_dma_fifo_stop_stream(struct csi_dma_dev *csi_dma)
+static void csi_dma_clean_registers(struct csi_dma_hw_dev *csi_dma)
 {
-	u32 val;
+	u32 status;
 
-	val = ASYNC_BRIDGE_OFF << ASYNC_BRIDGE_EN_OFFSET;
-
-	csi_dma_write(csi_dma, CSI_BRIDGE_CTRL, val);
-
-	val = STOP << FIFO_START_OFFSET;
-
-	csi_dma_write(csi_dma, DMA_BRIDGE_CTRL, val);
-}
-
-void csi_dma_dma_stop_stream(struct csi_dma_dev *csi_dma)
-{
-	u32 val;
-
-	val = DMA_BRIDGE_OFF << DMA_BRIDGE_EN_OFFSET;
-
-	csi_dma_write(csi_dma, CSI_BRIDGE_CTRL, val);
-
-	val = STOP << DMA_START_OFFSET;
-
-	csi_dma_write(csi_dma, DMA_BRIDGE_CTRL, val);
+	status = csi_dma_get_irq_status(csi_dma);
+	csi_dma_clean_irq_status(csi_dma, status);
 }
 
 /* start DMA Bridge
@@ -494,7 +382,7 @@ void csi_dma_dma_stop_stream(struct csi_dma_dev *csi_dma)
  * 5: enable  interrupt as needed
  * 6: start the stream by configure the register DMA_BRIDGE_CTRL[0] to 1
  */
-void csi_dma_bridge_start(struct csi_dma_dev *csi_dma,
+static void csi_dma_bridge_start(struct csi_dma_hw_dev *csi_dma,
 			  struct csi_dma_frame *src_f)
 {
 	/* step1 */
@@ -513,6 +401,8 @@ void csi_dma_bridge_start(struct csi_dma_dev *csi_dma,
 	/* step5 */
 	csi_dma_enable_irq(csi_dma);
 
+	csi_dma_axi_ot_config(csi_dma, 32, 32);
+
 	/* step6 */
 	csi_dma_dma_start_stream(csi_dma);
 
@@ -521,7 +411,6 @@ void csi_dma_bridge_start(struct csi_dma_dev *csi_dma,
 	dump_csi_bridge_regs(csi_dma);
 #endif
 }
-EXPORT_SYMBOL_GPL(csi_dma_bridge_start);
 
 /* stop DMA Bridge
  * 1: When DMA bridge is working
@@ -530,7 +419,7 @@ EXPORT_SYMBOL_GPL(csi_dma_bridge_start);
  * 4: Wait for stop interrupt
  * 5: Read Status it will be changed to stop status .
  */
-void csi_dma_bridge_stop(struct csi_dma_dev *csi_dma)
+static void csi_dma_bridge_stop(struct csi_dma_hw_dev *csi_dma)
 {
 	u32 val;
 	u32 cnt = 0;
@@ -586,77 +475,108 @@ void csi_dma_bridge_stop(struct csi_dma_dev *csi_dma)
 			 "dma bridge be changed to stop status\n");
 	}
 }
-EXPORT_SYMBOL_GPL(csi_dma_bridge_stop);
 
-void csi_dma_clean_registers(struct csi_dma_dev *csi_dma)
+static int csi_bridge_buffer_done_callback_register(struct csi_dma_hw_dev *hw, void *callback, void *data)
 {
+	if ((hw == NULL) || (callback == NULL))
+		return -1;
+
+	hw->callback = callback;
+	hw->data = data;
+
+	return 0;
+}
+
+static int csi_bridge_hw_enable_irq(struct csi_dma_hw_dev *hw, int enable)
+{
+	if (hw == NULL)
+		return -1;
+
+	if (enable)
+		csi_dma_enable_irq(hw);
+	else
+		csi_dma_disable_irq(hw);
+
+	return 0;
+}
+
+static int csi_bridge_buffer_done(struct csi_dma_hw_dev *hw)
+{
+	if (hw == NULL)
+		return -1;
+
+	if (hw->callback != NULL)
+		hw->callback(hw->data);
+
+	return 0;
+}
+
+static irqreturn_t csi_dma_irq_handler(int irq, void *priv)
+{
+	struct csi_dma_hw_dev *csi_dma_hw = priv;
+	unsigned long flags;
 	u32 status;
 
-	status = csi_dma_get_irq_status(csi_dma);
-	csi_dma_clean_irq_status(csi_dma, status);
+	spin_lock_irqsave(&csi_dma_hw->slock, flags);
+	status = csi_dma_get_irq_status(csi_dma_hw);
+	csi_dma_hw->status = status;
+	csi_dma_clean_irq_status(csi_dma_hw, status);
+
+	/* frame start interrupt */
+	if (status & FRAME_START_INT_EN_MASK)
+		frame_star(csi_dma_hw);
+
+	/* frame end interrupt */
+	if (status & FRAME_END_INT_EN_MASK)
+		csi_bridge_buffer_done(csi_dma_hw);
+
+	/* specific line number interrupt */
+	if (status & LINE_CNT_INT_EN_MASK)
+		line_count(csi_dma_hw);
+
+	/* every N lines interrupt */
+	if (status & LINE_MODE_INT_EN_MASK)
+		every_n_line(csi_dma_hw);
+
+	if (status & PIXEL_ERR_INT_EN_MAKS)
+		dev_err(csi_dma_hw->dev, "csi_dma pixsel err\n");
+
+	if (status & ASYNC_FIFO_OVF_INT_EN_MASK)
+		dev_err(csi_dma_hw->dev, "csi_dma async FIFO overflow\n");
+
+	if (status & ASYNC_FIFO_UNDF_INT_EN_MASK)
+		dev_err(csi_dma_hw->dev, "csi_dma async FIFO underrun\n");
+
+	if (status & DMA_OVF_INT_EN_MASK)
+		dev_err(csi_dma_hw->dev, "csi_dma overflow\n");
+
+	if (status & DMA_UNDF_INT_EN_MASK)
+		dev_err(csi_dma_hw->dev, "csi_dma underrun\n");
+
+	if (status & DMA_ERR_RST_INT_EN_MASK)
+		dma_err_rst_int(csi_dma_hw);
+
+	if (status & UNSUPPORT_DT_INT_EN_MASK)
+		dev_err(csi_dma_hw->dev, "csi_dma unsupport date type\n");
+
+	if (status & UNSUPPORT_STRIDE_INT_EN_MASK)
+		dev_err(csi_dma_hw->dev, "csi_dma unsupport stride\n");
+
+	if (status & LINE_MISMATCH_INT_EN_MASK)
+		dev_err(csi_dma_hw->dev, "csi_dma line mismatch\n");
+
+	if (status & PIXEL_MISMATCH_INT_EN_MASK)
+		dev_err(csi_dma_hw->dev, "csi_dma pixsel mismatch\n");
+
+	if (status & TIMEOUT_INT_EN_MASK)
+		dev_err(csi_dma_hw->dev, "csi_dma timeout\n");
+
+	spin_unlock_irqrestore(&csi_dma_hw->slock, flags);
+
+	return IRQ_HANDLED;
 }
-EXPORT_SYMBOL_GPL(csi_dma_clean_registers);
 
-void csi_dma_set_timeout(struct csi_dma_dev *csi_dma, u32 val)
-{
-	csi_dma_write(csi_dma, TIMEOUT_CTRL, val);
-}
-EXPORT_SYMBOL_GPL(csi_dma_set_timeout);
-
-void csi_dma_channel_enable(struct csi_dma_dev *csi_dma)
-{
-	csi_dma_clean_registers(csi_dma);
-	csi_dma_enable_irq(csi_dma);
-#ifdef CSI_DMA_DEBUG
-	dump_csi_bridge_regs(csi_dma);
-#endif
-#ifndef CSIDMA_DEBUG
-	msleep(300);
-#endif
-}
-EXPORT_SYMBOL_GPL(csi_dma_channel_enable);
-
-void csi_dma_channel_disable(struct csi_dma_dev *csi_dma)
-{
-	csi_dma_disable_irq(csi_dma);
-}
-EXPORT_SYMBOL_GPL(csi_dma_channel_disable);
-
-void csi_dma_enable_irq(struct csi_dma_dev *csi_dma)
-{
-	u32 val;
-
-	val = FRAME_END_INT_EN_MASK | LINE_CNT_INT_EN_MASK |
-	      LINE_MODE_INT_EN_MASK | PIXEL_ERR_INT_EN_MAKS |
-	      ASYNC_FIFO_OVF_INT_EN_MASK | ASYNC_FIFO_UNDF_INT_EN_MASK |
-	      DMA_OVF_INT_EN_MASK | FRAME_STOP_INT_EN_MASK |
-	      DMA_ERR_RST_INT_EN_MASK | UNSUPPORT_DT_INT_EN_MASK |
-	      UNSUPPORT_STRIDE_INT_EN_MASK | LINE_MISMATCH_INT_EN_MASK |
-	      PIXEL_MISMATCH_INT_EN_MASK | TIMEOUT_INT_EN_MASK;
-
-	csi_dma_write(csi_dma, INTERRUTP_EN, val);
-}
-EXPORT_SYMBOL_GPL(csi_dma_enable_irq);
-
-void csi_dma_disable_irq(struct csi_dma_dev *csi_dma)
-{
-	csi_dma_write(csi_dma, INTERRUTP_EN, 0);
-}
-EXPORT_SYMBOL_GPL(csi_dma_disable_irq);
-
-u32 csi_dma_get_irq_status(struct csi_dma_dev *csi_dma)
-{
-	return csi_dma_read(csi_dma, INTERRUPT_STATUS);
-}
-EXPORT_SYMBOL_GPL(csi_dma_get_irq_status);
-
-void csi_dma_clean_irq_status(struct csi_dma_dev *csi_dma, u32 val)
-{
-	csi_dma_write(csi_dma, INTERRUPT_CLR, val);
-}
-EXPORT_SYMBOL_GPL(csi_dma_clean_irq_status);
-
-int csi_dma_clk_enable(struct csi_dma_dev *csi_dma)
+int csi_dma_clk_enable(struct csi_dma_hw_dev *csi_dma)
 {
 	struct device *dev = &csi_dma->pdev->dev;
 	int ret;
@@ -666,6 +586,7 @@ int csi_dma_clk_enable(struct csi_dma_dev *csi_dma)
 		dev_err(dev, "%s, enable clk error\n", __func__);
 		return ret;
 	}
+
 	ret = clk_prepare_enable(csi_dma->sclk);
 	if (ret < 0) {
 		dev_err(dev, "%s, enable clk error\n", __func__);
@@ -674,16 +595,14 @@ int csi_dma_clk_enable(struct csi_dma_dev *csi_dma)
 
 	return 0;
 }
-EXPORT_SYMBOL_GPL(csi_dma_clk_enable);
 
-void csi_dma_clk_disable(struct csi_dma_dev *csi_dma)
+static void csi_dma_clk_disable(struct csi_dma_hw_dev *csi_dma)
 {
 	clk_disable_unprepare(csi_dma->apbclk);
 	clk_disable_unprepare(csi_dma->sclk);
 }
-EXPORT_SYMBOL_GPL(csi_dma_clk_disable);
 
-int csi_dma_resets_assert(struct csi_dma_dev *csi_dma)
+int csi_dma_resets_assert(struct csi_dma_hw_dev *csi_dma)
 {
 	struct device *dev = &csi_dma->pdev->dev;
 	int ret;
@@ -701,7 +620,7 @@ int csi_dma_resets_assert(struct csi_dma_dev *csi_dma)
 }
 EXPORT_SYMBOL_GPL(csi_dma_resets_assert);
 
-int csi_dma_resets_deassert(struct csi_dma_dev *csi_dma)
+int csi_dma_resets_deassert(struct csi_dma_hw_dev *csi_dma)
 {
 	if (!csi_dma->csibridge_reset)
 		return -EINVAL;
@@ -710,6 +629,205 @@ int csi_dma_resets_deassert(struct csi_dma_dev *csi_dma)
 	return 0;
 }
 EXPORT_SYMBOL_GPL(csi_dma_resets_deassert);
+
+#ifdef CONFIG_PM
+
+static int csi_bridge_suspend(struct csi_dma_hw_dev *hw)
+{
+	struct csi_dma_hw_dev *csi_bridge_hw = hw;
+
+	dev_info(csi_bridge_hw->dev, "csi bridge suspend enter\n");
+
+	csi_dma_clk_disable(csi_bridge_hw);
+	csi_dma_resets_assert(csi_bridge_hw);
+
+	return 0;
+}
+
+static int csi_bridge_resume(struct csi_dma_hw_dev *hw)
+{
+	struct csi_dma_hw_dev *csi_bridge_hw = hw;
+	int ret;
+	u64 freq;
+
+	dev_info(csi_bridge_hw->dev, "csi bridge resume enter\n");
+
+	ret = csi_dma_clk_enable(csi_bridge_hw);
+	if (ret < 0) {
+		dev_err(csi_bridge_hw->dev, "CSI_DMA_%d enable clocks fail\n", csi_bridge_hw->id);
+		return ret;
+	}
+
+	ret = csi_dma_resets_deassert(csi_bridge_hw);
+	if (ret < 0) {
+		dev_err(csi_bridge_hw->dev, "CSI_DMA_%d deassert resets fail\n", csi_bridge_hw->id);
+		return ret;
+	}
+
+	/*Convert frequency to HZ*/
+	freq = csi_bridge_hw->sys_clk_freq * 1000 * 1000;
+#ifdef CIX_VI_SET_RATE
+	clk_set_rate(csi_bridge_hw->sclk, freq);
+#endif
+	dev_info(csi_bridge_hw->dev, "CSI_DMA sckl is %lld\n", freq);
+
+	return 0;
+}
+#endif
+
+static const struct csi_bridge_hw_drv_data csi_bridge_drv_data = {
+	.csi_bridge_hw_start = csi_dma_bridge_start,
+	.csi_bridge_hw_stop = csi_dma_bridge_stop,
+	.csi_bridge_updata_plane_addr = csi_bridge_set_plane_buffer_addr,
+	.csi_bridge_hw_resume = csi_bridge_resume,
+	.csi_bridge_hw_suspend = csi_bridge_suspend,
+	.csi_bridge_callback_register = csi_bridge_buffer_done_callback_register,
+	.csi_bridge_enable_irq = csi_bridge_hw_enable_irq,
+	.csi_bridge_store = csi_bridge_store,
+	.csi_bridge_restore = csi_bridge_restore,
+};
+
+static const struct of_device_id csi_dma_hw_of_match[] = {
+	{ .compatible = "cix,cix-bridge-hw", .data = &csi_bridge_drv_data},
+	{ /* sentinel */ },
+};
+MODULE_DEVICE_TABLE(of, csi_dma_hw_of_match);
+
+static const struct acpi_device_id csi_dma_hw_acpi_match[] = {
+	{ .id = "CIXH3028", .driver_data = (unsigned long)&csi_bridge_drv_data},
+	{ /* sentinel */ },
+};
+MODULE_DEVICE_TABLE(acpi, csi_dma_hw_acpi_match);
+
+static int csi_dma_hw_parse(struct csi_dma_hw_dev *csi_dma_hw)
+{
+	struct device *dev = &csi_dma_hw->pdev->dev;
+	struct device_node *node = dev->of_node;
+	struct resource *res;
+	struct reset_control *reset;
+	int irq = 0;
+	int ret = 0;
+
+	if (has_acpi_companion(dev)) {
+		ret = device_property_read_u32(dev, "csi-bridge-id", &csi_dma_hw->id);
+	} else {
+		ret = csi_dma_hw->id =
+			of_alias_get_id(node, CIX_BRIDGE_OF_NODE_NAME);
+	}
+
+	if ((ret < 0) || (csi_dma_hw->id >= CIX_BRIDGE_MAX_DEVS)) {
+		dev_err(dev, "Invalid driver data or device id (%d)\n",
+			csi_dma_hw->id);
+		return -EINVAL;
+	}
+
+	dev_info(dev, "csi bridge hw id %d\n", csi_dma_hw->id);
+
+	res = platform_get_resource(csi_dma_hw->pdev, IORESOURCE_MEM, 0);
+	csi_dma_hw->regs = devm_ioremap_resource(dev, res);
+	if (IS_ERR(csi_dma_hw->regs)) {
+		dev_err(dev, "Failed to get csi-bridge register map\n");
+		return PTR_ERR(csi_dma_hw->regs);
+	}
+
+	ret = device_property_read_u32(dev, "axi-uid", &csi_dma_hw->axi_uid);
+	if (ret < 0) {
+		dev_err(dev, "%s failed to get axi user id property\n",
+			__func__);
+		return ret;
+	}
+
+	/*clk & reset*/
+	csi_dma_hw->sclk = devm_clk_get(dev, "dma_sclk");
+	if (IS_ERR(csi_dma_hw->sclk)) {
+		dev_err(dev, "failed to get csi bridge dma_sclk\n");
+		return PTR_ERR(csi_dma_hw->sclk);
+	}
+
+	csi_dma_hw->apbclk = devm_clk_get(dev, "dma_pclk");
+	if (IS_ERR(csi_dma_hw->apbclk)) {
+		dev_err(dev, "failed to get csi bridge dma_pclk\n");
+		return PTR_ERR(csi_dma_hw->apbclk);
+	}
+
+	reset = devm_reset_control_get(dev, "csibridge_reset");
+	if (IS_ERR(reset)) {
+		if (PTR_ERR(reset) != -EPROBE_DEFER)
+			dev_err(dev, "Failed to get sky1  reset control\n");
+		return PTR_ERR(reset);
+	}
+
+	csi_dma_hw->csibridge_reset = reset;
+	irq = platform_get_irq(csi_dma_hw->pdev, 0);
+	if (irq < 0) {
+		dev_err(dev, ":irq = %d failed to get IRQ resource\n", irq);
+		return -1;
+	}
+
+	ret = devm_request_irq(dev, irq, csi_dma_irq_handler,
+			       IRQF_ONESHOT | IRQF_SHARED, dev_name(dev),
+			       csi_dma_hw);
+	if (ret) {
+		dev_err(dev, "failed to install irq (%d)\n", ret);
+		return -1;
+	}
+
+	return 0;
+}
+
+static int csi_dma_hw_probe(struct platform_device *pdev)
+{
+	struct device *dev = &pdev->dev;
+	struct csi_dma_hw_dev *csi_dma_hw;
+	int ret = 0;
+
+	csi_dma_hw = devm_kzalloc(dev, sizeof(*csi_dma_hw), GFP_KERNEL);
+	if (!csi_dma_hw)
+		return -ENOMEM;
+
+	csi_dma_hw->pdev = pdev;
+	csi_dma_hw->dev = dev;
+	ret = csi_dma_hw_parse(csi_dma_hw);
+	if (ret < 0)
+		return ret;
+
+	csi_dma_hw->drv_data = device_get_match_data(dev);
+
+	if (csi_dma_hw->drv_data == NULL)
+		return -1;
+
+	spin_lock_init(&csi_dma_hw->slock);
+	mutex_init(&csi_dma_hw->lock);
+
+	platform_set_drvdata(pdev, csi_dma_hw);
+
+	pm_runtime_enable(dev);
+	dev_info(dev, "csi bridge_hw %d probe success\n", csi_dma_hw->id);
+
+	return 0;
+}
+
+static int csi_dma_hw_remove(struct platform_device *pdev)
+{
+	struct csi_dma_hw_dev *csi_dma_hw = platform_get_drvdata(pdev);
+
+	pm_runtime_disable(&csi_dma_hw->pdev->dev);
+	dev_info(csi_dma_hw->dev, "csi_dma remove\n");
+
+	return 0;
+}
+
+static struct platform_driver csi_dma_hw_driver = {
+	.probe = csi_dma_hw_probe,
+	.remove = csi_dma_hw_remove,
+	.driver = {
+		.of_match_table = csi_dma_hw_of_match,
+		.acpi_match_table =
+			   ACPI_PTR(csi_dma_hw_acpi_match),
+		.name = CSI_DMA_HW_DRIVER_NAME,
+	}
+};
+module_platform_driver(csi_dma_hw_driver);
 
 MODULE_AUTHOR("Cixtech, Inc.");
 MODULE_DESCRIPTION("SKY CSI Bridge Hardware driver");
