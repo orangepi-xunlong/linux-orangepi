@@ -365,6 +365,7 @@ enum SUNXI_JACK_IRQ_STA {
 	JACK_IRQ_OUT	= 0,
 	JACK_IRQ_IN,
 	JACK_IRQ_KEYDOWN,
+	JACK_IRQ_SDBP,
 };
 
 /* jack */
@@ -390,11 +391,12 @@ struct sunxi_jack_adv_priv {
 	enum SUNXI_JACK_IRQ_TIME irq_time;
 
 	// gpio get irq
+	int irq_gpio;
+	struct gpio_desc *irq_desc;
+
 	int det_gpio;
 	struct gpio_desc *det_desc;
-
-	int plug_gpio;
-	struct gpio_desc *plug_desc;
+	unsigned int det_gpio_level;
 
 	enum snd_jack_types jack_type;
 

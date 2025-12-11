@@ -13,6 +13,7 @@
 #define _SUNXI_DE_H_
 
 #include "de_channel.h"
+#include "sunxi_drm_intf.h"
 
 struct sunxi_plane_info {
 	const char *name;
@@ -102,15 +103,21 @@ int sunxi_de_write_back(struct sunxi_de_out *hwde, struct sunxi_de_wb *wb, struc
 void sunxi_de_dump_channel_state(struct drm_printer *p, struct sunxi_de_out *hwde, struct de_channel_handle *hdl, const struct display_channel_state *state, bool state_only);
 void sunxi_de_dump_state(struct drm_printer *p, struct sunxi_de_out *hwde);
 
-bool sunxi_de_query_de_busy(struct sunxi_de_out *hwde);
+bool sunxi_de_query_de_busy(struct sunxi_de_out *hwde, struct disp_video_timings *timings);
 unsigned long sunxi_de_get_clk(void);
 void sunxi_de_set_devfreq_auto(bool en);
 int sunxi_de_set_clk(unsigned long clk);
 int sunxi_de_auto_calc_freq_and_apply(struct sunxi_de_out *hwde);
 int sunxi_de_div_calc_mn(unsigned long freq_in_kHZ, unsigned long freq_out_kHZ, unsigned int *m, unsigned int *n);
 
+#if IS_ENABLED(CONFIG_AW_DRM_DE_OFFLINE_MODE)
 int sunxi_de_offline_mode_pre_init(struct sunxi_de_out *hwde, unsigned int width, unsigned int height);
 int sunxi_de_get_offline_mode_info(struct sunxi_de_out *hwde, void **vir_addr, unsigned long *buff_size);
 enum de_offline_mode_status sunxi_de_query_clear_offline_mode_status(struct sunxi_de_out *hwde, enum de_offline_mode_status status);
+#else
+static inline int sunxi_de_offline_mode_pre_init(struct sunxi_de_out *hwde, unsigned int width, unsigned int height) { return -EPERM; };
+static inline int sunxi_de_get_offline_mode_info(struct sunxi_de_out *hwde, void **vir_addr, unsigned long *buff_size) { return -EPERM; };
+static inline enum de_offline_mode_status sunxi_de_query_clear_offline_mode_status(struct sunxi_de_out *hwde, enum de_offline_mode_status status) { return -EPERM; };
+#endif
 
 #endif

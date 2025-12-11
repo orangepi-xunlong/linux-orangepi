@@ -7,7 +7,7 @@
 #include <linux/completion.h>
 
 #include <linux/version.h>
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0))
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0)) && (LINUX_VERSION_CODE < KERNEL_VERSION(6, 6, 0))
 #include <linux/dma-buf-map.h>
 #endif
 
@@ -78,7 +78,10 @@ static int panfrost_perfcnt_enable_locked(struct panfrost_device *pfdev,
 {
 	struct panfrost_file_priv *user = file_priv->driver_priv;
 	struct panfrost_perfcnt *perfcnt = pfdev->perfcnt;
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0))
+
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0))
+	struct iosys_map map;
+#elif (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0))
 	struct dma_buf_map map;
 #endif
 	struct drm_gem_shmem_object *bo;
@@ -112,22 +115,19 @@ static int panfrost_perfcnt_enable_locked(struct panfrost_device *pfdev,
 		goto err_close_bo;
 	}
 
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0))
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0))
+	ret = drm_gem_vmap_unlocked(&bo->base, &map);
+#elif (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0))
 #if (LINUX_VERSION_SUBLEVEL >= 147)
 	ret = drm_gem_shmem_vmap(bo, &map);
 #else
 	ret = drm_gem_shmem_vmap(&bo->base, &map);
 #endif
+#endif
 	if (ret)
 		goto err_put_mapping;
 	perfcnt->buf = map.vaddr;
-#elif (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 10, 0))
-	perfcnt->buf = drm_gem_shmem_vmap(&bo->base);
-	if (IS_ERR(perfcnt->buf)) {
-		ret = PTR_ERR(perfcnt->buf);
-		goto err_put_mapping;
-	}
-#endif
+
 	/*
 	 * Invalidate the cache and clear the counters to start from a fresh
 	 * state.
@@ -182,7 +182,9 @@ static int panfrost_perfcnt_enable_locked(struct panfrost_device *pfdev,
 	return 0;
 
 err_vunmap:
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0))
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0))
+	drm_gem_vunmap_unlocked(&bo->base, &map);
+#elif (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0))
 #if (LINUX_VERSION_SUBLEVEL >= 147)
 	drm_gem_shmem_vunmap(bo, &map);
 #else
@@ -207,7 +209,10 @@ static int panfrost_perfcnt_disable_locked(struct panfrost_device *pfdev,
 {
 	struct panfrost_file_priv *user = file_priv->driver_priv;
 	struct panfrost_perfcnt *perfcnt = pfdev->perfcnt;
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0))
+
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0))
+	struct iosys_map map = IOSYS_MAP_INIT_VADDR(perfcnt->buf);
+#elif (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0))
 	struct dma_buf_map map = DMA_BUF_MAP_INIT_VADDR(perfcnt->buf);
 #endif
 
@@ -223,7 +228,9 @@ static int panfrost_perfcnt_disable_locked(struct panfrost_device *pfdev,
 
 	perfcnt->user = NULL;
 
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0))
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0))
+	drm_gem_vunmap_unlocked(&perfcnt->mapping->obj->base.base, &map);
+#elif (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0))
 #if (LINUX_VERSION_SUBLEVEL >= 147)
 	drm_gem_shmem_vunmap(&perfcnt->mapping->obj->base, &map);
 #else

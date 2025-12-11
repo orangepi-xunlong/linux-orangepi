@@ -558,6 +558,8 @@ struct isp_cfg_attr_data {
 	_IOWR('V', BASE_VIDIOC_PRIVATE + 27, struct bk_buffer_align)
 #define VIDIOC_SET_BK_SET_WSTRIDE \
 	_IOWR('V', BASE_VIDIOC_PRIVATE + 28, unsigned char)
+#define VIDIOC_SET_BK_CACHE_INVALID \
+	_IOWR('V', BASE_VIDIOC_PRIVATE + 29, unsigned char)
 
 /*
  * Events

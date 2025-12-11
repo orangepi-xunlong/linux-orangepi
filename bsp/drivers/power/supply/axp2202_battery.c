@@ -28,6 +28,9 @@ struct axp2202_bat_power {
 
 	/* charge_cycle_count */
 	atomic_t	 	charge_cycle_count;
+
+	/* power debugfs */
+	struct sunxi_power_debug_data	*debug;
 };
 
 static enum power_supply_property axp2202_bat_props[] = {
@@ -1219,6 +1222,7 @@ static int axp2202_bat_set_property(struct power_supply *psy,
 			break;
 		}
 		ret = axp2202_set_ichg(regmap, val->intval);
+		SUNXI_POWER_LOG_INFO(bat_power->debug, "set ichg:%d", val->intval);
 		break;
 	case POWER_SUPPLY_PROP_CHARGE_CONTROL_LIMIT:
 		if (!bat_power->charger_cooler_type) {
@@ -1248,6 +1252,7 @@ static int axp2202_bat_set_property(struct power_supply *psy,
 			break;
 		}
 		ret = axp2202_set_ichg(regmap, lim_cur);
+		SUNXI_POWER_LOG_INFO(bat_power->debug, "set ichg:%d", val->intval);
 		break;
 	case POWER_SUPPLY_PROP_VOLTAGE_MAX_DESIGN:
 		ret = axp2202_set_bat_max_voltage(regmap, val->intval);
@@ -1566,6 +1571,7 @@ static irqreturn_t axp2202_irq_handler_bat_stat_change(int irq, void *data)
 {
 	struct irq_desc *id = irq_to_desc(irq);
 	struct axp2202_bat_power *bat_power = data;
+	union power_supply_propval propval;
 
 	PMIC_DEBUG("%s: enter interrupt %d\n", __func__, irq);
 
@@ -1593,11 +1599,12 @@ static irqreturn_t axp2202_irq_handler_bat_stat_change(int irq, void *data)
 	case AXP2202_IRQ_NEWSOC:
 		if (bat_power->qc_supply_exist) {
 			if (bat_power->dts_info.pmu_bat_temp_enable) {
-				union power_supply_propval qc_val;
-				qc_val.intval = 1;
-				power_supply_set_property(bat_power->qc_psy, POWER_SUPPLY_PROP_TEMP, &qc_val);
+				propval.intval = 1;
+				power_supply_set_property(bat_power->qc_psy, POWER_SUPPLY_PROP_TEMP, &propval);
 			}
 		}
+		axp2202_get_soc(bat_power->bat_supply, &propval);
+		SUNXI_POWER_LOG_INFO(bat_power->debug, "BAT radio:%d%%", propval.intval);
 		PMIC_DEBUG("interrupt:battery new soc");
 		break;
 	default:
@@ -1853,6 +1860,7 @@ static void axp2202_bat_power_curve_monitor(struct work_struct *work)
 	if (reg_value & 0x80) {
 		blance_vol = axp2202_blance_vol(regmap);
 		PMIC_DEBUG("blance_vol = %d\n", blance_vol);
+		SUNXI_POWER_LOG_INFO(bat_power->debug, "[curve_monitor] blance_vol = %d\n", blance_vol);
 
 		rest_vol = reg_value & 0x7F;
 		if (blance_vol >= 1) {
@@ -1868,15 +1876,18 @@ static void axp2202_bat_power_curve_monitor(struct work_struct *work)
 				rest_vol++;
 
 			PMIC_DEBUG("%s:rest_vol:%d\n", __func__, rest_vol);
+			SUNXI_POWER_LOG_INFO(bat_power->debug, "[curve_monitor] rest_vol:%d\n", rest_vol);
 			ret = regmap_update_bits(regmap, AXP2202_CURVE_CHECK, GENMASK(6, 0), rest_vol);
 			schedule_delayed_work(&bat_power->bat_power_curve, msecs_to_jiffies(30 * 1000));
 		} else {
 			PMIC_DEBUG("release wake lock:rest_vol:%d\n", rest_vol);
+			SUNXI_POWER_LOG_INFO(bat_power->debug, "[curve_monitor] release wake lock:rest_vol:%d\n", rest_vol);
 			__pm_relax(bat_power->ws);
 			ret = regmap_write(regmap, AXP2202_CURVE_CHECK, 0);
 		}
 	} else {
 		PMIC_DEBUG("release wake lock:rest_vol:%d\n", rest_vol);
+		SUNXI_POWER_LOG_INFO(bat_power->debug, "[curve_monitor] release wake lock:rest_vol:%d\n", rest_vol);
 		__pm_relax(bat_power->ws);
 		ret = regmap_write(regmap, AXP2202_CURVE_CHECK, 0);
 	}
@@ -1988,6 +1999,7 @@ static int axp2202_battery_probe(struct platform_device *pdev)
 	if (reg_value & 0x80) {
 		reg_value = axp2202_blance_vol(bat_power->regmap);
 		PMIC_DEBUG("bat curve smoothing: hold wake lock,blance_vol = %d\n", reg_value);
+		SUNXI_POWER_LOG_INFO(bat_power->debug, "[curve_monitor] bat curve smoothing: hold wake lock,blance_vol = %d\n", reg_value);
 		bat_power->ws = wakeup_source_register(&pdev->dev, "bat_curve_smooth");
 		__pm_stay_awake(bat_power->ws);
 		INIT_DELAYED_WORK(&bat_power->bat_power_curve, axp2202_bat_power_curve_monitor);
@@ -1998,6 +2010,13 @@ static int axp2202_battery_probe(struct platform_device *pdev)
 		val.intval = 1;
 		power_supply_set_property(bat_power->qc_psy, POWER_SUPPLY_PROP_CALIBRATE, &val);
 	}
+
+	bat_power->debug = sunxi_power_debugfs_init(&pdev->dev);
+	if (IS_ERR_OR_NULL(bat_power->debug))
+		dev_warn(&pdev->dev, "Failed to init debugfs\n");
+
+	SUNXI_POWER_LOG_INFO(bat_power->debug, "BAT power driver initialized");
+
 	return ret;
 
 err:
@@ -2015,6 +2034,7 @@ static int axp2202_battery_remove(struct platform_device *pdev)
 		power_supply_unregister(bat_power->bat_supply);
 		sunxi_power_unregister_cooler(bat_power->bat_supply);
 	}
+	sunxi_power_debugfs_exit(bat_power->debug);
 	PMIC_DEV_DEBUG(&pdev->dev, "axp2202 teardown battery dev\n");
 
 	return 0;
@@ -2022,7 +2042,7 @@ static int axp2202_battery_remove(struct platform_device *pdev)
 
 static void axp2202_charger_ichg_set(struct axp2202_bat_power *bat_power, int mA)
 {
-
+	SUNXI_POWER_LOG_INFO(bat_power->debug, "set ichg:%d", mA);
 	mA = clamp_val(mA, 0, 3072);
 	mA = mA / 64;
 	/* bit 5:0 is the ctrl bit */
@@ -2166,4 +2186,4 @@ module_platform_driver(axp2202_bat_power_driver);
 MODULE_AUTHOR("wangxiaoliang <wangxiaoliang@x-powers.com>");
 MODULE_DESCRIPTION("axp2202 battery driver");
 MODULE_LICENSE("GPL");
-MODULE_VERSION("1.0.0");
+MODULE_VERSION("1.0.1");

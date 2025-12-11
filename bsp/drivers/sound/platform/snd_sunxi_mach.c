@@ -16,7 +16,6 @@
 #define SUNXI_MODNAME		"sound-mach"
 #include "snd_sunxi_log.h"
 #include <linux/module.h>
-#include <linux/time.h>
 #include <sound/soc.h>
 #include <sound/jack.h>
 
@@ -40,7 +39,7 @@ static int asoc_simple_startup(struct snd_pcm_substream *substream)
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
 	struct asoc_simple_priv *priv = snd_soc_card_get_drvdata(rtd->card);
 	if (priv->wait_time)
-		substream->wait_time = msecs_to_jiffies(priv->wait_time);
+		sunxi_adpt_wait_time_conv(substream, priv->wait_time);
 	return 0;
 }
 

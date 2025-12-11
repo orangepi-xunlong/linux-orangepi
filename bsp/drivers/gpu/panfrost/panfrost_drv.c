@@ -226,6 +226,12 @@ panfrost_copy_in_sync(struct drm_device *dev,
 	}
 
 	for (i = 0; i < in_fence_count; i++) {
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0))
+		ret = drm_sched_job_add_syncobj_dependency(&job->base, file_priv,
+							   handles[i], 0);
+		if (ret)
+			goto fail;
+#else
 		struct dma_fence *fence;
 
 		ret = drm_syncobj_find_fence(file_priv, handles[i], 0, 0,
@@ -237,6 +243,7 @@ panfrost_copy_in_sync(struct drm_device *dev,
 
 		if (ret)
 			goto fail;
+#endif
 	}
 
 fail:
@@ -244,6 +251,80 @@ fail:
 	return ret;
 }
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0))
+static int panfrost_ioctl_submit(struct drm_device *dev, void *data,
+		struct drm_file *file)
+{
+	struct panfrost_device *pfdev = dev->dev_private;
+	struct panfrost_file_priv *file_priv = file->driver_priv;
+	struct drm_panfrost_submit *args = data;
+	struct drm_syncobj *sync_out = NULL;
+	struct panfrost_job *job;
+	int ret = 0, slot;
+
+	if (!args->jc)
+		return -EINVAL;
+
+	if (args->requirements && args->requirements != PANFROST_JD_REQ_FS)
+		return -EINVAL;
+
+	if (args->out_sync > 0) {
+		sync_out = drm_syncobj_find(file, args->out_sync);
+		if (!sync_out)
+			return -ENODEV;
+	}
+
+	job = kzalloc(sizeof(*job), GFP_KERNEL);
+	if (!job) {
+		ret = -ENOMEM;
+		goto out_put_syncout;
+	}
+
+	kref_init(&job->refcount);
+
+	job->pfdev = pfdev;
+	job->jc = args->jc;
+	job->requirements = args->requirements;
+	job->flush_id = panfrost_gpu_get_latest_flush_id(pfdev);
+	job->mmu = file_priv->mmu;
+
+	slot = panfrost_job_get_slot(job);
+
+	ret = drm_sched_job_init(&job->base,
+				 &file_priv->sched_entity[slot],
+				 NULL);
+	if (ret)
+		goto out_put_job;
+
+	ret = panfrost_copy_in_sync(dev, file, args, job);
+	if (ret)
+		goto out_cleanup_job;
+
+	ret = panfrost_lookup_bos(dev, file, args, job);
+	if (ret)
+		goto out_cleanup_job;
+
+	ret = panfrost_job_push(job);
+	if (ret)
+		goto out_cleanup_job;
+
+	/* Update the return sync object for the job */
+	if (sync_out)
+		drm_syncobj_replace_fence(sync_out, job->render_done_fence);
+
+out_cleanup_job:
+	if (ret)
+		drm_sched_job_cleanup(&job->base);
+out_put_job:
+	panfrost_job_put(job);
+out_put_syncout:
+	if (sync_out)
+		drm_syncobj_put(sync_out);
+
+	return ret;
+}
+
+#else
 static int panfrost_ioctl_submit(struct drm_device *dev, void *data,
 		struct drm_file *file)
 {
@@ -305,6 +386,7 @@ fail_out_sync:
 
 	return ret;
 }
+#endif
 
 static int
 panfrost_ioctl_wait_bo(struct drm_device *dev, void *data,
@@ -322,7 +404,12 @@ panfrost_ioctl_wait_bo(struct drm_device *dev, void *data,
 	if (!gem_obj)
 		return -ENOENT;
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0))
+	ret = dma_resv_wait_timeout(gem_obj->resv, DMA_RESV_USAGE_READ,
+				    true, timeout);
+#else
 	ret = dma_resv_wait_timeout(gem_obj->resv, true, true, timeout);
+#endif
 	if (!ret)
 		ret = timeout ? -ETIMEDOUT : -EBUSY;
 
@@ -408,6 +495,12 @@ static int panfrost_ioctl_madvise(struct drm_device *dev, void *data,
 	}
 
 	bo = to_panfrost_bo(gem_obj);
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0))
+	ret = dma_resv_lock_interruptible(bo->base.base.resv, NULL);
+	if (ret)
+		goto out_put_object;
+#endif
+
 
 	mutex_lock(&pfdev->shrinker_lock);
 	mutex_lock(&bo->mappings.lock);
@@ -449,6 +542,8 @@ out_unlock_mappings:
 	mutex_unlock(&bo->mappings.lock);
 	mutex_unlock(&pfdev->shrinker_lock);
 
+	dma_resv_unlock(bo->base.base.resv);
+out_put_object:
 	drm_gem_object_put(gem_obj);
 	return ret;
 }
@@ -550,7 +645,9 @@ static struct drm_driver panfrost_drm_driver = {
 	.prime_handle_to_fd	= drm_gem_prime_handle_to_fd,
 	.prime_fd_to_handle	= drm_gem_prime_fd_to_handle,
 	.gem_prime_import_sg_table = panfrost_gem_prime_import_sg_table,
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 6, 0))
 	.gem_prime_mmap		= drm_gem_prime_mmap,
+#endif
 };
 
 static int panfrost_probe(struct platform_device *pdev)

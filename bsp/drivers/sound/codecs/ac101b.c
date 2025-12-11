@@ -24,8 +24,10 @@
 #define ADC2_OUTPUT	1
 #define ADC3_OUTPUT	2
 
-static atomic_t clk_cnt = ATOMIC_INIT(0);
+#define HEADPHONE_HEADSET_TH	10
 
+static atomic_t adc_a_cnt = ATOMIC_INIT(3);
+static atomic_t clk_cnt = ATOMIC_INIT(0);
 static struct audio_reg_label sunxi_reg_labels[] = {
 	REG_LABEL(POWER_REG1),
 	REG_LABEL(POWER_REG2),
@@ -34,6 +36,7 @@ static struct audio_reg_label sunxi_reg_labels[] = {
 	REG_LABEL(POWER_REG5),
 	REG_LABEL(POWER_REG6),
 	REG_LABEL(MBIAS_REG),
+	REG_LABEL(HBIAS_REG),
 
 
 	REG_LABEL(DAC_REG1),
@@ -69,12 +72,14 @@ static struct audio_reg_label sunxi_reg_labels[] = {
 	REG_LABEL(I2S_RX_CTRL1),
 	REG_LABEL(ADDA_FS_CTRL),
 
+	REG_LABEL(HMIC_DET_CTRL),
 	REG_LABEL(HMIC_DET_DBC),
 	REG_LABEL(HMIC_DET_TH1),
 	REG_LABEL(HMIC_DET_TH2),
 	REG_LABEL(HP_DET_CTRL),
 	REG_LABEL(HP_DET_DBC),
 	REG_LABEL(HP_DET_IRQ),
+	REG_LABEL(HP_LOUT_CTRL),
 };
 static struct audio_reg_group sunxi_reg_group = REG_GROUP(sunxi_reg_labels);
 
@@ -202,7 +207,11 @@ static void sunxi_jack_adv_irq_clean(void *data, int irq);
 static void sunxi_jack_adv_irq_enable(void *data);
 static void sunxi_jack_adv_irq_disable(void *data);
 static void sunxi_jack_adv_det_irq_work(void *data, enum snd_jack_types *jack_type);
+static void sunxi_jack_adv_det_pre_scan_work(void *data, enum snd_jack_types *jack_type);
 static void sunxi_jack_adv_det_scan_work(void *data, enum snd_jack_types *jack_type);
+
+/* for jack slow plug in */
+static void sunxi_jack_sdbp_scan_work(void *data, enum snd_jack_types *jack_type);
 
 struct sunxi_jack_adv sunxi_jack_adv = {
 	.jack_init	= sunxi_jack_adv_init,
@@ -216,8 +225,62 @@ struct sunxi_jack_adv sunxi_jack_adv = {
 	.jack_irq_enable	= sunxi_jack_adv_irq_enable,
 	.jack_irq_disable	= sunxi_jack_adv_irq_disable,
 	.jack_det_irq_work	= sunxi_jack_adv_det_irq_work,
+	.jack_det_pre_scan_work	= sunxi_jack_adv_det_pre_scan_work,
 	.jack_det_scan_work	= sunxi_jack_adv_det_scan_work,
+
+	.jack_sdbp.jack_sdbp_irq_init	= NULL,
+	.jack_sdbp.jack_sdbp_irq_exit	= NULL,
+	.jack_sdbp.jack_sdbp_irq_clean	= NULL,
+	.jack_sdbp.jack_sdbp_irq_work	= NULL,
+
+	.jack_sdbp.jack_sdbp_scan_init	= NULL,
+	.jack_sdbp.jack_sdbp_scan_exit	= NULL,
+	.jack_sdbp.jack_sdbp_scan_work	= sunxi_jack_sdbp_scan_work,
+
+	.jack_sdbp.is_working = false,
 };
+
+static int ac101b_bg_hdata_cal(struct ac101b_priv *ac101b)
+{
+	struct ac101b_data *pdata = &ac101b->pdata;
+	struct regmap *regmap = ac101b->regmap;
+	struct sunxi_jack_adv_priv *jack_adv_priv = &pdata->jack_adv_priv;
+	unsigned int reg_val;
+	int bg_vol_sel;
+	int ret;
+
+	ret = regmap_write(regmap, EFUSE_RD_CTRL, 0x01);
+	if (ret) {
+		SND_LOG_ERR("Failed to write to 54H register\n");
+		return ret;
+	}
+
+	ret = regmap_read(regmap, EFUSE_RD_CTRL, &reg_val);
+	if (ret) {
+		SND_LOG_ERR("Failed to read from 54H register\n");
+		return ret;
+	}
+
+	bg_vol_sel = (reg_val >> 4) & 0x1;
+	if (bg_vol_sel) {
+		regmap_update_bits(regmap, POWER_REG1,
+				   0xf << BG_VOLT_TRIM,
+				   0xe << BG_VOLT_TRIM);
+		SND_LOG_INFO("BG voltage set to 1.48V\n");
+	} else {
+		regmap_update_bits(regmap, POWER_REG1,
+				   0xf << BG_VOLT_TRIM,
+				   0x2 << BG_VOLT_TRIM);
+		SND_LOG_INFO("BG voltage set to 1.52V\n");
+	}
+
+	jack_adv_priv->hdata_offset = ((reg_val >> 7) & 0x1) ? \
+				      (~(((~reg_val >> 5) & 0x7) + 1) + 1) : \
+				      ((reg_val >> 5) & 0x7);
+
+	SND_LOG_INFO("codec adc offset: %d\033[0m\n", jack_adv_priv->hdata_offset);
+	return 0;
+}
 
 static int sunxi_jack_adv_init(void *data)
 {
@@ -225,7 +288,7 @@ static int sunxi_jack_adv_init(void *data)
 	struct regmap *regmap = jack_adv_priv->regmap;
 
 	regmap_update_bits(regmap, HMIC_DET_TH1, 0x1f << HMIC_TH1,
-			   jack_adv_priv->det_threshold << HMIC_TH2);
+			   jack_adv_priv->det_threshold << HMIC_TH1);
 	regmap_update_bits(regmap, HMIC_DET_DBC, 0xf << HMIC_N,
 			   jack_adv_priv->det_debounce << HMIC_N);
 
@@ -234,18 +297,60 @@ static int sunxi_jack_adv_init(void *data)
 	regmap_update_bits(regmap, HMIC_DET_DBC, 0xf << HMIC_M,
 			   jack_adv_priv->key_debounce << HMIC_M);
 
-	/* hp_det */
-	regmap_update_bits(regmap, HP_DET_CTRL, 0x1 << HP_DET_EN, 0x1 << HP_DET_EN);
-	regmap_update_bits(regmap, HBIAS_REG, 0x1 << HBIAS_MODE, 0x1 << HBIAS_MODE);
 
-	regmap_update_bits(regmap, HP_DET_IRQ, 0x1 << HP_PLUGIN_IRQ,
-			   0x1 << HP_PLUGIN_IRQ);
+	/* enable hp adaptive vol regulation */
+	regmap_update_bits(regmap, HP_AVR_CTRL,
+			   0x1 << HP_AVR_DEN,
+			   0x1 << HP_AVR_DEN);
+	regmap_update_bits(regmap, HP_AVR_CTRL,
+			   0x7 << HPLDO_HVOLT,
+			   0x7 << HPLDO_HVOLT);
+	regmap_update_bits(regmap, HP_AVR_CTRL,
+			   0x1 << HPLDO_LVOLT,
+			   0x7 << HPLDO_LVOLT);
+
+	regmap_update_bits(regmap, HP_AVR_THH,
+			   0x1f << THRESHLOD_H,
+			   0xff << THRESHLOD_H);
+	regmap_update_bits(regmap, HP_AVR_THM,
+			   0xff << THRESHLOD_M,
+			   0xff << THRESHLOD_M);
+	regmap_update_bits(regmap, HP_AVR_THL,
+			   0xff << THRESHLOD_L,
+			   0xff << THRESHLOD_L);
 
 	if (of_property_read_bool(jack_adv_priv->dev->of_node, "extcon")) {
 		jack_adv_priv->typec = true;
 	}
 
+	/* hp-det-gpio is low in jack_out */
+	if (!jack_adv_priv->det_gpio_level) {
+		regmap_update_bits(regmap, HP_DET_CTRL, 0x1 << DET_POLY,
+				   0x1 << DET_POLY);
+	}
+
+	if (!jack_adv_priv->typec) {
+		regmap_update_bits(regmap, HP_DET_CTRL, 0x1 << HP_DET_EN,
+				   0x1 << HP_DET_EN);
+		regmap_update_bits(regmap, HP_DET_IRQ, 0x1 << HP_PLUGIN_IRQ,
+				   0x1 << HP_PLUGIN_IRQ);
+	}
+
+	regmap_update_bits(regmap, HBIAS_REG, 0x3 << HBIAS_VOL_SEL, 0x3 << HBIAS_VOL_SEL);
+
+	regmap_update_bits(regmap, HMIC_DET_CTRL,
+			   0x1 << HMIC_DATA_IRQ_MODE,
+			   0x1 << HMIC_DATA_IRQ_MODE);
+
+	regmap_update_bits(regmap, HMIC_DET_CTRL,
+			   0x3 << HMIC_SAMPLE_SEL,
+			   0x2 << HMIC_SAMPLE_SEL);
+
 	jack_adv_priv->irq_sta = JACK_IRQ_NULL;
+
+	regmap_update_bits(regmap, DAC_LOUT_CTRL,
+			   0x3 << ATT_STEP,
+			   0x3 << ATT_STEP);
 
 	SND_LOG_DEBUG("\n");
 
@@ -278,6 +383,9 @@ static int sunxi_jack_adv_suspend(void *data)
 
 	regmap_update_bits(regmap, HP_DET_IRQ, 0x1 << HP_PLUGIN_IRQ,
 			   0x0 << HP_PLUGIN_IRQ);
+
+	regmap_update_bits(regmap, HP_DET_IRQ, 0x1 << HMIC_DATA_IRQ,
+			   0x0 << HMIC_DATA_IRQ);
 	return 0;
 }
 
@@ -293,9 +401,11 @@ static int sunxi_jack_adv_resume(void *data)
 
 	regmap_update_bits(regmap, HP_DET_CTRL, 0x1 << HP_DET_EN, 0x1 << HP_DET_EN);
 
+
 	regmap_update_bits(regmap, HP_DET_IRQ, 0x1 << HP_PLUGIN_IRQ,
 			   0x1 << HP_PLUGIN_IRQ);
-
+	regmap_update_bits(regmap, HP_DET_IRQ, 0x1 << HMIC_DATA_IRQ,
+			   0x1 << HMIC_DATA_IRQ);
 	return 0;
 }
 
@@ -367,26 +477,46 @@ static void sunxi_adv_headset_heasphone_det(struct sunxi_jack_adv_priv *jack_adv
 {
 	struct regmap *regmap = jack_adv_priv->regmap;
 	unsigned int reg_val;
-	unsigned int headset_basedata;
+	unsigned int hdata_old, hdata_new;
 	unsigned int i;
-	int count = 50;
-	int interval_ms = 10;
+	int count = 5;
+	int interval_ms = 100;
+
+	SND_LOG_DEBUG("\n");
+
+	regmap_read(regmap, HMIC_DET_DATA, &reg_val);
+	hdata_old = (reg_val >> HMIC_DATA) & 0x1f;
+
+	if (hdata_old > 0x1f)
+		hdata_old = 0x1f;
+	if (hdata_old < 0)
+		hdata_old = 0;
 
 	for (i = 0; i < count; i++) {
+		msleep(interval_ms);
 		regmap_read(regmap, HMIC_DET_DATA, &reg_val);
-		headset_basedata = (reg_val >> HMIC_DATA) & 0x1f;
-		if (headset_basedata > 0 && headset_basedata < jack_adv_priv->key_threshold) {
-			SND_LOG_INFO("\033[31m headset_basedata:%d key_threshold:%d\033[0m\n",
-				     headset_basedata, jack_adv_priv->key_threshold);
+
+		hdata_new = (reg_val >> HMIC_DATA) & 0x1f;
+
+		if (hdata_new > 0x1f)
+			hdata_new = 0x1f;
+		if (hdata_new < 0)
+			hdata_new = 0;
+
+		if (hdata_new == hdata_old && 2 < hdata_new
+			&& hdata_new < HEADPHONE_HEADSET_TH) {
+			SND_LOG_INFO("\033[31m h_data:%d\033[0m\n", hdata_new);
 			goto headset;
 		}
-		msleep(interval_ms);
+
+		hdata_old = hdata_new;
 	}
-	SND_LOG_INFO("\033[31m headset_basedata:%d key_threshold:%d\033[0m\n",
-		     headset_basedata, jack_adv_priv->key_threshold);
 
 	/* for special jack */
-	if (headset_basedata == 0) {
+	regmap_read(regmap, HP_DET_CTRL, &reg_val);
+	if ((hdata_new == 0)
+		&& (((reg_val & (1 << HP_DET)) != (jack_adv_priv->det_gpio_level << HP_DET)))
+		&& (!jack_adv_priv->typec)) {
 		goto headset;
 	}
 
@@ -418,7 +548,8 @@ headset:
 				jack_adv_priv->key_threshold << HMIC_TH2);
 
 	regmap_update_bits(regmap, HP_DET_IRQ,
-				0x1 << HMIC_KEYDOWN_IRQ, 0x1 << HMIC_KEYDOWN_IRQ);
+				0x1 << HMIC_DATA_IRQ, 0x1 << HMIC_DATA_IRQ);
+
 	regmap_update_bits(regmap, HP_DET_IRQ,
 				0x1 << HP_PLUGOUT_IRQ, 0x1 << HP_PLUGOUT_IRQ);
 	regmap_update_bits(regmap, HP_DET_IRQ,
@@ -433,20 +564,28 @@ static void sunxi_jack_adv_det_irq_work(void *data, enum snd_jack_types *jack_ty
 {
 	struct sunxi_jack_adv_priv *jack_adv_priv = data;
 	struct regmap *regmap = jack_adv_priv->regmap;
-	unsigned int reg_val, irqen_val, hp_det_val, hmic_data, reg_val_tmp;
+	unsigned int reg_val, irqen_val, hp_det_val, hmic_data;
+	unsigned int reg_val_tmp;
+	bool key_up, key_down, key_hook;
 
 	regmap_read(regmap, HP_DET_IRQ, &irqen_val);
 	regmap_read(regmap, HP_DET_STA, &reg_val);
 	regmap_read(regmap, HP_DET_CTRL, &hp_det_val);
 	regmap_read(regmap, HMIC_DET_DATA, &hmic_data);
 
-	if (hp_det_val & (1 << HP_DET)) {
+	SND_LOG_DEBUG("0x7a:0x%x, 0x7b:0x%x, 0x78:0x%x, 0x77:0x%x\n",
+		      irqen_val, reg_val, hp_det_val, hmic_data);
+
+	disable_irq(gpiod_to_irq(jack_adv_priv->desc));
+
+	if (((hp_det_val & (1 << HP_DET)) == (jack_adv_priv->det_gpio_level << HP_DET))
+	    && (!jack_adv_priv->typec)) {
 		reg_val |= (0x1 << HP_PLUGOUT_PENDING);
-		reg_val |= (0x1 << HMIC_PLUGOUT_PENDING);
 		regmap_write(regmap, HP_DET_STA, reg_val);
 		jack_adv_priv->irq_sta = JACK_IRQ_OUT;
 	} else if ((irqen_val & (0x1 << HP_PLUGIN_IRQ))
-		   && (reg_val & (0x1 << HP_PLUGIN_PENDING))) {
+		   && (reg_val & (0x1 << HP_PLUGIN_PENDING))
+		   && ((hp_det_val & (1 << HP_DET)) != (jack_adv_priv->det_gpio_level << HP_DET))) {
 		reg_val |= (0x1 << HP_PLUGIN_PENDING);
 		regmap_write(regmap, HP_DET_STA, reg_val);
 
@@ -454,19 +593,27 @@ static void sunxi_jack_adv_det_irq_work(void *data, enum snd_jack_types *jack_ty
 				   0x1 << HP_PLUGIN_IRQ,
 				   0x0 << HP_PLUGIN_IRQ);
 		regmap_update_bits(regmap, HP_DET_IRQ,
-				   0x1 << HMIC_KEYDOWN_IRQ,
-				   0x1 << HMIC_KEYDOWN_IRQ);
+				   0x1 << HMIC_DATA_IRQ,
+				   0x1 << HMIC_DATA_IRQ);
 		jack_adv_priv->irq_sta = JACK_IRQ_IN;
-	} else if ((irqen_val & (0x1 << HMIC_KEYDOWN_IRQ))
-		   && (reg_val & (0x1 << HMIC_KEYDOWN_PENDING))) {
-		reg_val |= (0x1 << HMIC_KEYDOWN_PENDING);
+	} else if ((irqen_val & (0x1 << HMIC_DATA_IRQ))
+		   && (reg_val & (0x1 << HMIC_DATA_PENDING))
+		   && ((hp_det_val & (1 << HP_DET)) != (jack_adv_priv->det_gpio_level << HP_DET))) {
+		reg_val |= (0x1 << HMIC_DATA_PENDING);
 		regmap_write(regmap, HP_DET_STA, reg_val);
-		jack_adv_priv->irq_sta = JACK_IRQ_KEYDOWN;
+		jack_adv_priv->irq_sta = JACK_IRQ_KEYDATA;
+
+		if (reg_val & (0x1 << HMIC_KEYDOWN_PENDING)) {
+			reg_val |= (0x1 << HMIC_KEYDOWN_PENDING);
+			regmap_write(regmap, HP_DET_STA, reg_val);
+			jack_adv_priv->key_data = 0;
+		}
 	}
 
 	switch (jack_adv_priv->irq_sta) {
 	case JACK_IRQ_OUT:
 		SND_LOG_INFO("jack out\n");
+		/* close hbias */
 		regmap_update_bits(regmap, HBIAS_REG,
 				   0x1 << HBIAS_EN, 0x0 << HBIAS_EN);
 		regmap_update_bits(regmap, HBIAS_REG,
@@ -480,79 +627,299 @@ static void sunxi_jack_adv_det_irq_work(void *data, enum snd_jack_types *jack_ty
 
 	case JACK_IRQ_IN:
 		SND_LOG_INFO("jack in\n");
+		if (jack_adv_priv->typec)
+			goto det_irq;
+
+		/* open hbias */
+		regmap_update_bits(regmap, HBIAS_REG,
+				   0x1 << HBIAS_EN, 0x1 << HBIAS_EN);
+		regmap_update_bits(regmap, HBIAS_REG,
+				   0x1 << HBIASADC_EN, 0x1 << HBIASADC_EN);
+
+		msleep(500);
+		sunxi_adv_headset_heasphone_det(jack_adv_priv, jack_type);
+	break;
+
+	case JACK_IRQ_KEYDATA:
+		regmap_read(regmap, HMIC_DET_DATA, &reg_val);
+		reg_val_tmp = (reg_val >> HMIC_DATA) & 0x1f;
+		reg_val_tmp += jack_adv_priv->hdata_offset;
+		if ((reg_val_tmp < jack_adv_priv->key_threshold) || (*jack_type < 1)) {
+			goto det_irq;
+		}
+
+		SND_LOG_INFO("jack button\n");
+
+		key_hook = (reg_val_tmp >= jack_adv_priv->key_det_vol[0][0] &&
+			    reg_val_tmp <= jack_adv_priv->key_det_vol[0][1])
+			    && (jack_adv_priv->key_data >= jack_adv_priv->key_det_vol[0][0] &&
+			    jack_adv_priv->key_data <= jack_adv_priv->key_det_vol[0][1]);
+
+		key_up = (reg_val_tmp >= jack_adv_priv->key_det_vol[1][0] &&
+			    reg_val_tmp <= jack_adv_priv->key_det_vol[1][1])
+			    && (jack_adv_priv->key_data >= jack_adv_priv->key_det_vol[1][0] &&
+			    jack_adv_priv->key_data <= jack_adv_priv->key_det_vol[1][1]);
+
+		key_down = (reg_val_tmp >= jack_adv_priv->key_det_vol[2][0] &&
+			    reg_val_tmp <= jack_adv_priv->key_det_vol[2][1])
+			    && (jack_adv_priv->key_data >= jack_adv_priv->key_det_vol[2][0] &&
+			    jack_adv_priv->key_data <= jack_adv_priv->key_det_vol[2][1]);
+
+		if ((!key_hook) && (!key_up) && (!key_down)) {
+			SND_LOG_INFO("old_data :%d, new_data: %d\n", jack_adv_priv->key_data, reg_val_tmp);
+			jack_adv_priv->key_data = reg_val_tmp;
+			goto det_irq;
+		}
+
+		SND_LOG_INFO("\033[31m HMIC_DATA:%u, vol-:[%d %d], vol+:[%d, %d], hook:[%d %d]\033[0m \n",
+			     reg_val_tmp,
+			     jack_adv_priv->key_det_vol[2][0], jack_adv_priv->key_det_vol[2][1],
+			     jack_adv_priv->key_det_vol[1][0], jack_adv_priv->key_det_vol[1][1],
+			     jack_adv_priv->key_det_vol[0][0], jack_adv_priv->key_det_vol[0][1]);
+
+		/* SND_JACK_BTN_0 - key-hook
+		 * SND_JACK_BTN_1 - key-up
+		 * SND_JACK_BTN_2 - key-down
+		 */
+		regmap_read(regmap, HP_DET_STA, &reg_val);
+		if (reg_val_tmp >= jack_adv_priv->key_det_vol[0][0] &&
+		    reg_val_tmp <= jack_adv_priv->key_det_vol[0][1]) {
+			*jack_type |= SND_JACK_BTN_0;
+		} else if (reg_val_tmp >= jack_adv_priv->key_det_vol[1][0] &&
+			   reg_val_tmp <= jack_adv_priv->key_det_vol[1][1]) {
+			*jack_type |= SND_JACK_BTN_1;
+		} else if (reg_val_tmp >= jack_adv_priv->key_det_vol[2][0] &&
+			   reg_val_tmp <= jack_adv_priv->key_det_vol[2][1]) {
+			*jack_type |= SND_JACK_BTN_2;
+		} else {
+			SND_LOG_DEBUG("unsupport jack button\n");
+		}
+
+		jack_adv_priv->key_data = reg_val_tmp;
+
+	break;
+
+	default:
+		regmap_write(regmap, HP_DET_STA, 0xff);
+		SND_LOG_DEBUG("irq status is invaild\n");
+		goto det_irq;
+	break;
+	}
+
+	jack_adv_priv->jack_type = *jack_type;
+
+det_irq:
+	enable_irq(gpiod_to_irq(jack_adv_priv->desc));
+
+	return;
+}
+
+static void sunxi_jack_adv_det_pre_scan_work(void *data, enum snd_jack_types *jack_type)
+{
+	struct sunxi_jack_adv *jack_adv = &sunxi_jack_adv;
+	struct sunxi_jack_adv_priv *jack_adv_priv = data;
+	struct regmap *regmap = jack_adv_priv->regmap;
+
+	SND_LOG_DEBUG("\n");
+
+	if (jack_adv_priv->typec) {
+		if (!jack_adv->jack_plug_sta) {
+			regmap_update_bits(regmap, HBIAS_REG,
+					0x1 << HBIAS_EN, 0x0 << HBIAS_EN);
+			regmap_update_bits(regmap, HBIAS_REG,
+					0x1 << HBIASADC_EN, 0x0 << HBIASADC_EN);
+
+			*jack_type = 0;
+			jack_adv_priv->jack_type = *jack_type;
+
+			jack_adv->jack_plug_sta = JACK_PLUG_STA_OUT;
+
+			regmap_update_bits(regmap, HBIAS_REG,
+					0x1 << HBIAS_EN, 0x0 << HBIAS_EN);
+			regmap_update_bits(regmap, HBIAS_REG,
+					0x1 << HBIASADC_EN, 0x0 << HBIASADC_EN);
+
+			regmap_update_bits(regmap, HP_DET_IRQ,
+					0x1 << HP_PLUGIN_IRQ, 0x1 << HP_PLUGIN_IRQ);
+			regmap_update_bits(regmap, HP_DET_IRQ,
+					0x1 << HMIC_KEYDOWN_IRQ, 0x0 << HMIC_KEYDOWN_IRQ);
+
+			return;
+		}
+	}
+
+	*jack_type = SND_JACK_HEADPHONE;
+}
+
+static void sunxi_jack_adv_det_scan_work(void *data, enum snd_jack_types *jack_type)
+{
+	struct sunxi_jack_adv *jack_adv = &sunxi_jack_adv;
+	struct sunxi_jack_adv_priv *jack_adv_priv = data;
+	struct regmap *regmap = jack_adv_priv->regmap;
+	unsigned int headset_basedata_i, headset_basedata_n;
+	unsigned int reg_val;
+
+	SND_LOG_DEBUG("\n");
+
+	if (jack_adv_priv->typec) {
+		if (!jack_adv->jack_plug_sta) {
+			regmap_update_bits(regmap, HBIAS_REG,
+					0x1 << HBIAS_EN, 0x0 << HBIAS_EN);
+			regmap_update_bits(regmap, HBIAS_REG,
+					0x1 << HBIASADC_EN, 0x0 << HBIASADC_EN);
+
+			*jack_type = 0;
+			jack_adv_priv->jack_type = *jack_type;
+
+			jack_adv->jack_plug_sta = JACK_PLUG_STA_OUT;
+
+			goto jack_out;
+		}
+
+		jack_adv->jack_plug_sta = JACK_PLUG_STA_IN;
 
 		regmap_update_bits(regmap, HBIAS_REG,
 				   0x1 << HBIAS_EN, 0x1 << HBIAS_EN);
 		regmap_update_bits(regmap, HBIAS_REG,
 				   0x1 << HBIASADC_EN, 0x1 << HBIASADC_EN);
 
-		msleep(100);
-		sunxi_adv_headset_heasphone_det(jack_adv_priv, jack_type);
-	break;
-
-	case JACK_IRQ_KEYDOWN:
-		SND_LOG_INFO("jack button\n");
-
+		sunxi_jack_typec_mode_set(&jack_adv->jack_typec_cfg, SND_JACK_MODE_MICI);
+		msleep(500);
 		regmap_read(regmap, HMIC_DET_DATA, &reg_val);
-		reg_val_tmp = (reg_val >> HMIC_DATA) & 0x1f;
-		SND_LOG_INFO("\033[31m reg_val: 0x%x, HMIC_DATA:%u, vol+:[%d, %d], vol-:[%d %d], hook:[%d %d]\033[0m \n",
-			     reg_val,
-			     reg_val_tmp,
-			     jack_adv_priv->key_det_vol[1][0], jack_adv_priv->key_det_vol[1][1],
-			     jack_adv_priv->key_det_vol[2][0], jack_adv_priv->key_det_vol[2][1],
-			     jack_adv_priv->key_det_vol[0][0], jack_adv_priv->key_det_vol[0][1]);
-
-		/* SND_JACK_BTN_0 - key-hook
-		 * SND_JACK_BTN_1 - key-up
-		 * SND_JACK_BTN_2 - key-down
-		 * SND_JACK_BTN_3 - key-voice
-		 */
-		if (reg_val >= jack_adv_priv->key_det_vol[0][0] &&
-		    reg_val <= jack_adv_priv->key_det_vol[0][1]) {
-			*jack_type |= SND_JACK_BTN_0;
-		} else if (reg_val >= jack_adv_priv->key_det_vol[1][0] &&
-			   reg_val <= jack_adv_priv->key_det_vol[1][1]) {
-			*jack_type |= SND_JACK_BTN_1;
-		} else if (reg_val >= jack_adv_priv->key_det_vol[2][0] &&
-			   reg_val <= jack_adv_priv->key_det_vol[2][1]) {
-			*jack_type |= SND_JACK_BTN_2;
-		} else {
-			SND_LOG_DEBUG("unsupport jack button\n");
+		headset_basedata_i = (reg_val >> HMIC_DATA) & 0x1f;
+		if (headset_basedata_i > 0
+		    && headset_basedata_i < HEADPHONE_HEADSET_TH) {
+			*jack_type = SND_JACK_HEADSET;
+			SND_LOG_INFO("headset_basedata_i:%d\n", headset_basedata_i);
+			goto jack_type;
 		}
-	break;
 
-	default:
-		SND_LOG_DEBUG("irq status is invaild\n");
-	break;
+		SND_LOG_INFO("headset_basedata_i:%d\n",  headset_basedata_i);
+
+		sunxi_jack_typec_mode_set(&jack_adv->jack_typec_cfg, SND_JACK_MODE_MICN);
+		msleep(500);
+		regmap_read(regmap, HMIC_DET_DATA, &reg_val);
+		headset_basedata_n = (reg_val >> HMIC_DATA) & 0x1f;
+		if (headset_basedata_n > 0
+			&& headset_basedata_n < HEADPHONE_HEADSET_TH) {
+			*jack_type = SND_JACK_HEADSET;
+			SND_LOG_INFO("headset_basedata_n:%d\n", headset_basedata_n);
+			goto jack_type;
+		}
+
+		SND_LOG_INFO("headset_basedata_n:%d\n", headset_basedata_n);
+
+		/* abnormal jack */
+		if (!headset_basedata_i && headset_basedata_n) {
+			sunxi_jack_typec_mode_set(&jack_adv->jack_typec_cfg, SND_JACK_MODE_MICI);
+			*jack_type = SND_JACK_HEADSET;
+			goto jack_type;
+		}
+
+		if (headset_basedata_i && !headset_basedata_n) {
+			sunxi_jack_typec_mode_set(&jack_adv->jack_typec_cfg, SND_JACK_MODE_MICN);
+			*jack_type = SND_JACK_HEADSET;
+			goto jack_type;
+		}
+
+		if (!headset_basedata_i && !headset_basedata_n) {
+			SND_LOG_ERR("switch may not work\n");
+			*jack_type = SND_JACK_HEADSET;
+			goto jack_type;
+		}
+
+		*jack_type = SND_JACK_HEADPHONE;
+
+	} else {
+		msleep(500);
+		sunxi_adv_headset_heasphone_det(jack_adv_priv, jack_type);
+
 	}
 
 	jack_adv_priv->jack_type = *jack_type;
+	return;
 
+jack_type:
+	if (*jack_type == SND_JACK_HEADSET) {
+		regmap_update_bits(regmap, HMIC_DET_TH2, 0x1f << HMIC_TH2,
+					jack_adv_priv->key_threshold << HMIC_TH2);
+
+		/* clear pending */
+		regmap_write(regmap, HP_DET_STA, 0xff);
+
+		regmap_update_bits(regmap, HP_DET_IRQ,
+					0x1 << HMIC_DATA_IRQ, 0x1 << HMIC_DATA_IRQ);
+		regmap_update_bits(regmap, HP_DET_IRQ,
+					0x1 << HP_PLUGOUT_IRQ, 0x1 << HP_PLUGOUT_IRQ);
+		regmap_update_bits(regmap, HP_DET_IRQ,
+					0x1 << HMIC_PLUGOUT_IRQ, 0x0 << HMIC_PLUGOUT_IRQ);
+		regmap_update_bits(regmap, HP_DET_IRQ,
+				0x1 << HP_PLUGIN_IRQ, 0x0 << HP_PLUGIN_IRQ);
+	}
+
+	if (*jack_type == SND_JACK_HEADPHONE) {
+		regmap_update_bits(regmap, HP_DET_IRQ,
+				0x1 << HP_PLUGOUT_IRQ, 0x1 << HP_PLUGOUT_IRQ);
+		regmap_update_bits(regmap, HP_DET_IRQ,
+				0x1 << HP_PLUGIN_IRQ, 0x0 << HP_PLUGIN_IRQ);
+		regmap_update_bits(regmap, HP_DET_IRQ,
+				0x1 << HMIC_KEYUP_IRQ, 0x0 << HMIC_KEYUP_IRQ);
+		regmap_update_bits(regmap, HP_DET_IRQ,
+				0x1 << HMIC_KEYDOWN_IRQ, 0x0 << HMIC_KEYDOWN_IRQ);
+		regmap_update_bits(regmap, HP_DET_IRQ,
+				0x1 << HMIC_DATA_IRQ, 0x0 << HMIC_DATA_IRQ);
+
+		/* close hbias */
+		regmap_update_bits(regmap, HBIAS_REG,
+					0x1 << HBIAS_EN, 0x0 << HBIAS_EN);
+		regmap_update_bits(regmap, HBIAS_REG,
+					0x1 << HBIASADC_EN, 0x0 << HBIASADC_EN);
+	}
+
+jack_out:
+	if (*jack_type == 0) {
+		regmap_update_bits(regmap, HBIAS_REG,
+				   0x1 << HBIAS_EN, 0x0 << HBIAS_EN);
+		regmap_update_bits(regmap, HBIAS_REG,
+				   0x1 << HBIASADC_EN, 0x0 << HBIASADC_EN);
+
+		regmap_update_bits(regmap, HP_DET_IRQ,
+				   0x1 << HP_PLUGIN_IRQ, 0x1 << HP_PLUGIN_IRQ);
+		regmap_update_bits(regmap, HP_DET_IRQ,
+				   0x1 << HMIC_KEYDOWN_IRQ, 0x0 << HMIC_KEYDOWN_IRQ);
+		regmap_update_bits(regmap, HP_DET_IRQ,
+				   0x1 << HMIC_DATA_IRQ, 0x0 << HMIC_DATA_IRQ);
+	}
+
+	jack_adv_priv->jack_type = *jack_type;
 	return;
 }
 
-static void sunxi_jack_adv_det_scan_work(void *data, enum snd_jack_types *jack_type)
+static void sunxi_jack_sdbp_scan_work(void *data, enum snd_jack_types *jack_type)
 {
 	struct sunxi_jack_adv_priv *jack_adv_priv = data;
 	struct regmap *regmap = jack_adv_priv->regmap;
-	unsigned int hp_det_val;
 
-	regmap_read(regmap, HP_DET_CTRL, &hp_det_val);
-	if (!(hp_det_val & (1 << HP_DET))) {
-		sunxi_adv_headset_heasphone_det(jack_adv_priv, jack_type);
-	} else {
-		*jack_type = 0;
-		jack_adv_priv->irq_sta = JACK_IRQ_OUT;
-		regmap_write(regmap, HP_DET_STA, 0x7f);
-		regmap_update_bits(regmap, HP_DET_IRQ,
-				   0x1 << HP_PLUGIN_IRQ, 0x1 << HP_PLUGIN_IRQ);
+	SND_LOG_DEBUG("jack_codec_priv->jack_type:%d\n", jack_adv_priv->jack_type);
 
+	if (jack_adv_priv->jack_type != SND_JACK_HEADPHONE)
+		return;
+
+	regmap_update_bits(regmap, HBIAS_REG,
+				0x1 << HBIAS_EN, 0x1 << HBIAS_EN);
+	regmap_update_bits(regmap, HBIAS_REG,
+				0x1 << HBIASADC_EN, 0x1 << HBIASADC_EN);
+
+	sunxi_adv_headset_heasphone_det(jack_adv_priv, jack_type);
+
+	if (*jack_type != SND_JACK_HEADSET) {
+		regmap_update_bits(regmap, HBIAS_REG,
+				   0x1 << HBIAS_EN,
+				   0x0 << HBIAS_EN);
+		regmap_update_bits(regmap, HBIAS_REG,
+				   0x1 << HBIASADC_EN,
+				   0x0 << HBIASADC_EN);
 	}
-
-	jack_adv_priv->jack_type = *jack_type;
-
-	return;
-
 }
 
 static struct sunxi_jack_port sunxi_jack_port = {
@@ -568,23 +935,9 @@ static int ac101b_startup(struct snd_pcm_substream *substream, struct snd_soc_da
 
 static void ac101b_shutdown(struct snd_pcm_substream *substream, struct snd_soc_dai *dai)
 {
-	struct snd_soc_component *component = dai->component;
-	struct ac101b_priv *ac101b = snd_soc_component_get_drvdata(component);
-	struct regmap *regmap = ac101b->regmap;
-
 	SND_LOG_DEBUG("\n");
 
-	/* fix pop when playback stop, need close pa firstly */
-	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
-		regmap_update_bits(regmap, DAC_DIG_EN, 0x1 << DAC_EN, 0x0 << DAC_EN);
-		regmap_update_bits(regmap, DAC_DIG_EN, 0x1 << DACL_DIG_EN, 0x0 << DACL_DIG_EN);
-		regmap_update_bits(regmap, DAC_DIG_EN, 0x1 << DACR_DIG_EN, 0x0 << DACR_DIG_EN);
-
-		regmap_update_bits(regmap, DAC_REG1, 0x1 << DACL_EN, 0x0 << DACL_EN);
-		regmap_update_bits(regmap, DAC_REG1, 0x1 << DACR_EN, 0x0 << DACR_EN);
-		regmap_update_bits(regmap, DAC_REG3, 0x1 << SPKL_EN, 0x0 << SPKL_EN);
-		regmap_update_bits(regmap, DAC_REG3, 0x1 << SPKR_EN, 0x0 << SPKR_EN);
-	}
+	return;
 }
 
 static int ac101b_hw_params(struct snd_pcm_substream *substream,
@@ -678,8 +1031,11 @@ static int ac101b_hw_params(struct snd_pcm_substream *substream,
 	}
 
 	/* slot */
-	for (i = 0; i < channels; i++)
-		channels_en_reg |= (1 << i);
+	if (channels % 2)
+		channels_en_reg = 0x1 << (pdata->codec_id * 2);
+	else
+		channels_en_reg = 0x3 << (pdata->codec_id * 2);
+
 	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
 		regmap_update_bits(regmap, I2S_RX_CTRL1, 0xf << RX_CHSEL, (channels - 1) << RX_CHSEL);
 		/* rx_chan_low, ch0~ch8*/
@@ -729,6 +1085,11 @@ static int ac101b_hw_params(struct snd_pcm_substream *substream,
 
 	atomic_add(1, &clk_cnt);
 
+	/* close hp auto mute */
+	regmap_update_bits(regmap, HP_LOUT_CTRL,
+			   0x1 << HP_LOUT_AUTO_ATT,
+			   0x0 << HP_LOUT_AUTO_ATT);
+
 	return 0;
 }
 
@@ -754,6 +1115,11 @@ static int ac101b_hw_free(struct snd_pcm_substream *substream, struct snd_soc_da
 		regmap_update_bits(regmap, I2S_CTRL, 0x1 << SDO_EN, 0x0 << SDO_EN);
 		regmap_update_bits(regmap, I2S_CTRL, 0x1 << TX_EN, 0x0 << TX_EN);
 	}
+
+	/* open hp auto mute */
+	regmap_update_bits(regmap, HP_LOUT_CTRL,
+			   0x1 << HP_LOUT_AUTO_ATT,
+			   0x1 << HP_LOUT_AUTO_ATT);
 
 	return 0;
 }
@@ -1236,6 +1602,58 @@ static int sunxi_put_smooth_filter_mode(struct snd_kcontrol *kcontrol,
 	return 0;
 }
 
+static int sunxi_get_vthr_mode(struct snd_kcontrol *kcontrol,
+			       struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_component *component = snd_kcontrol_chip(kcontrol);
+	struct ac101b_priv *ac101b = snd_soc_component_get_drvdata(component);
+	struct regmap *regmap = ac101b->regmap;
+	unsigned int reg_val_h, reg_val_m, reg_val_l;
+	unsigned int reg_val;
+
+	regmap_read(regmap, HP_AVR_THH, &reg_val_h);
+	regmap_read(regmap, HP_AVR_THM, &reg_val_m);
+	regmap_read(regmap, HP_AVR_THL, &reg_val_l);
+
+	reg_val = (reg_val_h << 16) + (reg_val_m << 8) + reg_val_l;
+
+	ucontrol->value.integer.value[0] = reg_val;
+
+	return 0;
+}
+
+static int sunxi_put_vthr_mode(struct snd_kcontrol *kcontrol,
+			       struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_component *component = snd_kcontrol_chip(kcontrol);
+	struct ac101b_priv *ac101b = snd_soc_component_get_drvdata(component);
+	struct regmap *regmap = ac101b->regmap;
+	unsigned int reg_val, reg_val_tmp;
+	unsigned int reg_val_h, reg_val_m, reg_val_l;
+
+	reg_val = ucontrol->value.integer.value[0];
+
+	reg_val_tmp = reg_val;
+	reg_val_l = reg_val_tmp & 0xff;
+	regmap_update_bits(regmap, HP_AVR_THL,
+			   0xff << THRESHLOD_L,
+			   reg_val_l << THRESHLOD_L);
+
+	reg_val_tmp = reg_val;
+	reg_val_m = (reg_val_tmp >> 8) & 0xff;
+	regmap_update_bits(regmap, HP_AVR_THM,
+			   0xff << THRESHLOD_M,
+			   reg_val_m << THRESHLOD_M);
+
+	reg_val_tmp = reg_val;
+	reg_val_h = (reg_val_tmp >> 16) & 0xff;
+	regmap_update_bits(regmap, HP_AVR_THH,
+			   0xff << THRESHLOD_H,
+			   reg_val_h << THRESHLOD_H);
+
+	return 0;
+}
+
 static const struct snd_kcontrol_new ac101b_jack_controls[] = {
 	/* hmic sample sel*/
 	SOC_SINGLE_EXT("hmic sample sel", HMIC_DET_CTRL, HMIC_SAMPLE_SEL, 3, 0,
@@ -1260,6 +1678,12 @@ static const struct snd_kcontrol_new ac101b_jack_controls[] = {
 	SOC_SINGLE_EXT("key det threshold", HMIC_DET_TH2, HMIC_TH2, 31, 0,
 		       sunxi_get_key_det_thr_mode,
 		       sunxi_put_key_det_thr_mode),
+
+	/* hp adaptive voltage regulation */
+	SOC_SINGLE_EXT("hp avr threshold", 0x0, 0x0, 0x7fffff, 0,
+		       sunxi_get_vthr_mode,
+		       sunxi_put_vthr_mode),
+
 };
 
 static int ac101b_probe(struct snd_soc_component *component)
@@ -1268,12 +1692,28 @@ static int ac101b_probe(struct snd_soc_component *component)
 	struct ac101b_data *pdata = &ac101b->pdata;
 	struct regmap *regmap = ac101b->regmap;
 	struct sunxi_jack_adv_priv *jack_adv_priv = &pdata->jack_adv_priv;
-	int ret;
+	int ret = -1;
+	unsigned int i, reg_val;
+	unsigned int try_num = 5;
 
 	SND_LOG_DEBUG("\n");
 
-	regmap_write(regmap, CHIP_SOFT_RST, 0x34);
+	gpio_set_value(jack_adv_priv->rst_gpio, 1);
+	msleep(2);
 
+	for (i = 0; (i < try_num) && (ret < 0); i++) {
+		ret = regmap_read(regmap, CHIP_SOFT_RST, &reg_val);
+	}
+	if (ret) {
+		SND_LOG_ERR("try read ac101b 5 times but failed, ac101b probe failed\n");
+		return -1;
+	}
+
+	ret = ac101b_bg_hdata_cal(ac101b);
+	if (ret) {
+		SND_LOG_ERR("ac101b_bg_hdata_cal failed\n");
+
+	}
 	mutex_init(&pdata->ac101b_sta.dac_chp_mutex);
 	mutex_init(&pdata->ac101b_sta.spk_chp_mutex);
 	mutex_init(&pdata->ac101b_sta.mic_mutex);
@@ -1381,6 +1821,9 @@ static int ac101b_suspend(struct snd_soc_component *component)
 
 	snd_sunxi_regulator_disable(ac101b->rglt);
 
+	/* for hardware rst */
+	gpio_set_value(jack_adv_priv->rst_gpio, 0);
+
 	return 0;
 }
 
@@ -1401,10 +1844,32 @@ static int ac101b_resume(struct snd_soc_component *component)
 	snd_sunxi_pa_pin_disable(jack_adv_priv->pa_cfg,
 				 jack_adv_priv->pa_pin_max);
 
-	/* software reset */
-	regmap_write(regmap, CHIP_SOFT_RST, 0x34);
+	/* hardware reset */
+	gpio_set_value(jack_adv_priv->rst_gpio, 1);
+	msleep(2);
 
 	snd_sunxi_echo_reg(regmap, &sunxi_reg_group);
+
+	return 0;
+}
+
+static int ac101b_capture_event(struct snd_soc_dapm_widget *w, struct snd_kcontrol *k, int event)
+{
+	SND_LOG_DEBUG("\n");
+
+	switch (event) {
+	case SND_SOC_DAPM_PRE_PMU:
+		atomic_sub(1, &adc_a_cnt);
+		if ((!atomic_read(&adc_a_cnt))) {
+			msleep(200);
+		}
+		break;
+	case SND_SOC_DAPM_POST_PMD:
+		atomic_add(1, &adc_a_cnt);
+		break;
+	default:
+		break;
+	}
 
 	return 0;
 }
@@ -1430,8 +1895,10 @@ static int ac101b_mic1_event(struct snd_soc_dapm_widget *w, struct snd_kcontrol 
 			regmap_update_bits(regmap, ADC_DIG_EN, 0x1 << ADC_EN, 0x1 << ADC_EN);
 		mutex_unlock(&pdata->ac101b_sta.mic_mutex);
 		regmap_update_bits(regmap, ADC_DIG_EN, 0x1 << ADC1_DIG_EN, 0x1 << ADC1_DIG_EN);
+		regmap_update_bits(regmap, I2S_TX_CHMP_CTRL1,
+					   0x3 << TX_CH1_MAP,
+					   ADC1_OUTPUT << TX_CH1_MAP);
 
-		regmap_update_bits(regmap, I2S_TX_CHMP_CTRL1, 0x3 << TX_CH1_MAP, ADC1_OUTPUT << TX_CH1_MAP);
 		break;
 	case SND_SOC_DAPM_POST_PMD:
 		regmap_update_bits(regmap, ADC1_REG1, 0x1 << ADC1_EN, 0x0 << ADC1_EN);
@@ -1477,9 +1944,13 @@ static int ac101b_mic24_event(struct snd_soc_dapm_widget *w, struct snd_kcontrol
 		regmap_update_bits(regmap, ADC_DIG_EN, 0x1 << ADC2_DIG_EN, 0x1 << ADC2_DIG_EN);
 
 		if (pdata->ac101b_sta.mic1)
-			regmap_update_bits(regmap, I2S_TX_CHMP_CTRL1, 0x3 << TX_CH2_MAP, ADC2_OUTPUT << TX_CH2_MAP);
+			regmap_update_bits(regmap, I2S_TX_CHMP_CTRL1,
+					   0x3 << TX_CH2_MAP,
+					   ADC2_OUTPUT << TX_CH2_MAP);
 		else
-			regmap_update_bits(regmap, I2S_TX_CHMP_CTRL1, 0x3 << TX_CH1_MAP, ADC2_OUTPUT << TX_CH1_MAP);
+			regmap_update_bits(regmap, I2S_TX_CHMP_CTRL1,
+					   0x3 << TX_CH1_MAP,
+					   ADC2_OUTPUT << TX_CH1_MAP);
 		break;
 	case SND_SOC_DAPM_POST_PMD:
 		regmap_update_bits(regmap, ADC2_REG1, 0x1 << ADC2_EN, 0x0 << ADC2_EN);
@@ -1524,11 +1995,17 @@ static int ac101b_mic3_event(struct snd_soc_dapm_widget *w, struct snd_kcontrol 
 		regmap_update_bits(regmap, ADC_DIG_EN, 0x1 << ADC3_DIG_EN, 0x1 << ADC3_DIG_EN);
 
 		if (pdata->ac101b_sta.mic1 && pdata->ac101b_sta.mic2)
-			regmap_update_bits(regmap, I2S_TX_CHMP_CTRL1, 0x3 << TX_CH3_MAP, ADC3_OUTPUT << TX_CH3_MAP);
+			regmap_update_bits(regmap, I2S_TX_CHMP_CTRL1,
+					   0x3 << TX_CH3_MAP,
+					   ADC3_OUTPUT << TX_CH3_MAP);
 		else if (pdata->ac101b_sta.mic1 || pdata->ac101b_sta.mic2)
-			regmap_update_bits(regmap, I2S_TX_CHMP_CTRL1, 0x3 << TX_CH2_MAP, ADC3_OUTPUT << TX_CH2_MAP);
+			regmap_update_bits(regmap, I2S_TX_CHMP_CTRL1,
+					   0x3 << TX_CH2_MAP,
+					   ADC3_OUTPUT << TX_CH2_MAP);
 		else
-			regmap_update_bits(regmap, I2S_TX_CHMP_CTRL1, 0x3 << TX_CH1_MAP, ADC3_OUTPUT << TX_CH1_MAP);
+			regmap_update_bits(regmap, I2S_TX_CHMP_CTRL1,
+						   0x3 << TX_CH1_MAP,
+						   ADC3_OUTPUT << TX_CH1_MAP);
 		break;
 	case SND_SOC_DAPM_POST_PMD:
 		regmap_update_bits(regmap, ADC3_REG1, 0x1 << ADC3_EN, 0x0 << ADC3_EN);
@@ -1549,11 +2026,10 @@ static int ac101b_mic3_event(struct snd_soc_dapm_widget *w, struct snd_kcontrol 
 	return 0;
 }
 
-static int ac101b_lineoutl_event(struct snd_soc_dapm_widget *w, struct snd_kcontrol *k, int event)
+static int ac101b_dacl_event(struct snd_soc_dapm_widget *w, struct snd_kcontrol *k, int event)
 {
 	struct snd_soc_component *component = snd_soc_dapm_to_component(w->dapm);
 	struct ac101b_priv *ac101b = snd_soc_component_get_drvdata(component);
-	struct ac101b_data *pdata = &ac101b->pdata;
 	struct regmap *regmap = ac101b->regmap;
 
 	SND_LOG_DEBUG("\n");
@@ -1561,20 +2037,57 @@ static int ac101b_lineoutl_event(struct snd_soc_dapm_widget *w, struct snd_kcont
 	switch (event) {
 	case SND_SOC_DAPM_POST_PMU:
 		regmap_update_bits(regmap, DAC_REG1, 0x1 << DACL_EN, 0x1 << DACL_EN);
-		regmap_update_bits(regmap, DAC_REG3, 0x1 << SPKL_EN, 0x1 << SPKL_EN);
-
-		mutex_lock(&pdata->ac101b_sta.dac_chp_mutex);
-		pdata->ac101b_sta.dacl = true;
-		if (pdata->ac101b_sta.dacr == false)
-			regmap_update_bits(regmap, DAC_DIG_EN, 0x1 << DAC_EN, 0x1 << DAC_EN);
-		mutex_unlock(&pdata->ac101b_sta.dac_chp_mutex);
-
 		regmap_update_bits(regmap, DAC_DIG_EN, 0x1 << DACL_DIG_EN, 0x1 << DACL_DIG_EN);
-
 		break;
 	case SND_SOC_DAPM_PRE_PMD:
-		/* DAC digital and analog part need close after pa closed */
-		pdata->ac101b_sta.dacl = false;
+		regmap_update_bits(regmap, DAC_DIG_EN, 0x1 << DACL_DIG_EN, 0x0 << DACL_DIG_EN);
+		regmap_update_bits(regmap, DAC_REG1, 0x1 << DACL_EN, 0x0 << DACL_EN);
+		break;
+	default:
+		break;
+	}
+	return 0;
+}
+
+static int ac101b_dacr_event(struct snd_soc_dapm_widget *w, struct snd_kcontrol *k, int event)
+{
+	struct snd_soc_component *component = snd_soc_dapm_to_component(w->dapm);
+	struct ac101b_priv *ac101b = snd_soc_component_get_drvdata(component);
+	struct regmap *regmap = ac101b->regmap;
+
+	SND_LOG_DEBUG("\n");
+
+	switch (event) {
+	case SND_SOC_DAPM_POST_PMU:
+		regmap_update_bits(regmap, DAC_REG1, 0x1 << DACR_EN, 0x1 << DACR_EN);
+		regmap_update_bits(regmap, DAC_DIG_EN, 0x1 << DACR_DIG_EN, 0x1 << DACR_DIG_EN);
+		break;
+	case SND_SOC_DAPM_PRE_PMD:
+		regmap_update_bits(regmap, DAC_DIG_EN, 0x1 << DACR_DIG_EN, 0x0 << DACR_DIG_EN);
+		regmap_update_bits(regmap, DAC_REG1, 0x1 << DACR_EN, 0x0 << DACR_EN);
+		break;
+	default:
+		break;
+	}
+
+	return 0;
+}
+
+
+static int ac101b_lineoutl_event(struct snd_soc_dapm_widget *w, struct snd_kcontrol *k, int event)
+{
+	struct snd_soc_component *component = snd_soc_dapm_to_component(w->dapm);
+	struct ac101b_priv *ac101b = snd_soc_component_get_drvdata(component);
+	struct regmap *regmap = ac101b->regmap;
+
+	SND_LOG_DEBUG("\n");
+
+	switch (event) {
+	case SND_SOC_DAPM_POST_PMU:
+		regmap_update_bits(regmap, DAC_REG3, 0x1 << SPKL_EN, 0x1 << SPKL_EN);
+		break;
+	case SND_SOC_DAPM_PRE_PMD:
+		regmap_update_bits(regmap, DAC_REG3, 0x1 << SPKL_EN, 0x0 << SPKL_EN);
 		break;
 	default:
 		break;
@@ -1587,25 +2100,16 @@ static int ac101b_lineoutr_event(struct snd_soc_dapm_widget *w, struct snd_kcont
 {
 	struct snd_soc_component *component = snd_soc_dapm_to_component(w->dapm);
 	struct ac101b_priv *ac101b = snd_soc_component_get_drvdata(component);
-	struct ac101b_data *pdata = &ac101b->pdata;
 	struct regmap *regmap = ac101b->regmap;
 
 	SND_LOG_DEBUG("\n");
 
 	switch (event) {
 	case SND_SOC_DAPM_POST_PMU:
-		regmap_update_bits(regmap, DAC_REG1, 0x1 << DACR_EN, 0x1 << DACR_EN);
 		regmap_update_bits(regmap, DAC_REG3, 0x1 << SPKR_EN, 0x1 << SPKR_EN);
-
-		mutex_lock(&pdata->ac101b_sta.dac_chp_mutex);
-		pdata->ac101b_sta.dacr = true;
-		if (pdata->ac101b_sta.dacl == false)
-			regmap_update_bits(regmap, DAC_DIG_EN, 0x1 << DAC_EN, 0x1 << DAC_EN);
-		mutex_unlock(&pdata->ac101b_sta.dac_chp_mutex);
-		regmap_update_bits(regmap, DAC_DIG_EN, 0x1 << DACR_DIG_EN, 0x1 << DACR_DIG_EN);
 		break;
 	case SND_SOC_DAPM_PRE_PMD:
-		pdata->ac101b_sta.dacr = false;
+		regmap_update_bits(regmap, DAC_REG3, 0x1 << SPKR_EN, 0x0 << SPKR_EN);
 		break;
 	default:
 		break;
@@ -1625,7 +2129,6 @@ static int ac101b_hpout_event(struct snd_soc_dapm_widget *w, struct snd_kcontrol
 	switch (event) {
 	case SND_SOC_DAPM_POST_PMU:
 		regmap_update_bits(regmap, POWER_REG5, 0x1 << HPLDO_EN, 0x1 << HPLDO_EN);
-
 		regmap_update_bits(regmap, DAC_REG1, 0x1 << DACL_EN, 0x1 << DACL_EN);
 		regmap_update_bits(regmap, DAC_REG1, 0x1 << DACR_EN, 0x1 << DACR_EN);
 
@@ -1634,20 +2137,8 @@ static int ac101b_hpout_event(struct snd_soc_dapm_widget *w, struct snd_kcontrol
 		regmap_update_bits(regmap, DAC_DIG_EN, 0x1 << DACR_DIG_EN, 0x1 << DACR_DIG_EN);
 
 		regmap_update_bits(regmap, HP_REG1, 0x1 << CP_EN, 0x1 << CP_EN);
-
-		regmap_update_bits(regmap, HP_REG2,
-					   0x1 << HP_CHOPPER_EN,
-					   0x1 << HP_CHOPPER_EN);
-		regmap_update_bits(regmap, HP_REG2,
-					   0x1 << HP_CHOPPER_NOL_EN,
-					   0x1 << HP_CHOPPER_NOL_EN);
-		regmap_update_bits(regmap, HP_REG2,
-					   0x1 << HP_CHOPPER_CKSET,
-					   0x3 << HP_CHOPPER_CKSET);
-
 		regmap_update_bits(regmap, HP_REG1, 0x1 << HPPA_EN, 0x1 << HPPA_EN);
 		regmap_update_bits(regmap, HP_REG1, 0x1 << HPOUT_EN, 0x1 << HPOUT_EN);
-
 		break;
 	case SND_SOC_DAPM_PRE_PMD:
 		regmap_update_bits(regmap, HP_REG1, 0x1 << HPOUT_EN, 0x0 << HPOUT_EN);
@@ -1660,7 +2151,6 @@ static int ac101b_hpout_event(struct snd_soc_dapm_widget *w, struct snd_kcontrol
 
 		regmap_update_bits(regmap, DAC_REG1, 0x1 << DACL_EN, 0x0 << DACL_EN);
 		regmap_update_bits(regmap, DAC_REG1, 0x1 << DACR_EN, 0x0 << DACR_EN);
-
 		regmap_update_bits(regmap, POWER_REG5, 0x1 << HPLDO_EN, 0x0 << HPLDO_EN);
 		break;
 	default:
@@ -2373,26 +2863,26 @@ static const char *sunxi_switch_text[] = {"Off", "On"};
 
 /* adc dig*/
 static const char * const adc1_data_src_mux_text[] = {
-	"DEBUG_DAT", "MIC1", "DACL_DAT", "DACR_DAT", "RXM1"
+	"Debug_Data", "MIC1", "DACL_Data", "DACR_Data", "RXM1"
 };
 static const char * const adc2_data_src_mux_text[] = {
-	"DEBUG_DAT", "ADC2_PAG_MUX", "DACL_DAT", "DACR_DAT", "RXM1"
+	"Debug_Data", "ADC2_Input", "DACL_Data", "DACR_Data", "RXM1"
 };
 static const char * const adc3_data_src_mux_text[] = {
-	"DEBUG_DAT", "ADC3_PAG_MUX", "DACL_DAT", "DACR_DAT", "RXM1"
+	"Debug_Data", "ADC3_Input", "DACL_Data", "DACR_Data", "RXM1"
 };
 
 /* I2S_TX_MIX_CTRL */
 static const char * const txm1_data_src_mux_text[] = {
-	"ADC1_DATA_MUX", "PLAY1_DAT", "ADC1_PLAY1_DAT", "ADC1_PLAY1_DAT_AVG"
+	"ADC1_Data", "DACL_Data", "ADC1_DACL_Data", "ADC1_DACL_Data_AVG"
 };
 
 static const char * const txm2_data_src_mux_text[] = {
-	"ADC2_DATA_MUX", "PLAY2_DAT", "ADC2_PLAY2_DAT", "ADC2_PLAY2_DAT_AVG"
+	"ADC2_Data", "DACR_Data", "ADC2_DACR_Data", "ADC2_DACR_Data_AVG"
 };
 
 static const char * const txm3_data_src_mux_text[] = {
-	"ADC3_DATA_MUX", "RXM1", "ADC3_DAT_RXM1", "ADC3_DAT_RXM1_AVG"
+	"ADC3_Data", "RXM1", "ADC3_RXM1_Data", "ADC3_RXM1_Data_AVG"
 };
 
 static const char * const adc2_input_src_mux_text[] = {
@@ -2404,15 +2894,15 @@ static const char * const adc3_input_src_mux_text[] = {
 };
 
 static const char * const rxm1_data_src_mux_text[] = {
-	"RXL", "RXR", "RXR_RXL", "RXL_RXR_AVG"
+	"AIF_RXL", "AIF_RXR", "AIF_RXL_RXR", "AIF_RXL_RXR_AVG"
 };
 
 static const char * const rxm2_data_src_mux_text[] = {
-	"RXM1", "ADC1_DAT", "RXM1_ADC1", "RXM1_ADC1_AVG"
+	"RXM1", "ADC1_Data", "RXM1_ADC1", "RXM1_ADC1_AVG"
 };
 
 static const char * const rxm3_data_src_mux_text[] = {
-	"RXR", "ADC2_DAT", "RXR_ADC2", "RXR_ADC2_AVG"
+	"AIF_RXR", "ADC2_Data", "AIFRXR_ADC2", "AIFRXR_ADC2_AVG"
 };
 
 static const char * const dac1_data_src_mux_text[] = {
@@ -2491,59 +2981,59 @@ static const struct soc_enum dac2_src_mux_enum =
 			dac2_data_src_mux_text);
 
 static const struct snd_kcontrol_new adc1_src_mux =
-	SOC_DAPM_ENUM_EXT("ADC1 DATA MUX", adc1_src_mux_enum,
+	SOC_DAPM_ENUM_EXT("ADC1 Data Select Mux", adc1_src_mux_enum,
 			  ac101b_get_adc1_src,
 			  ac101b_set_adc1_src);
 static const struct snd_kcontrol_new adc2_src_mux =
-	SOC_DAPM_ENUM_EXT("ADC2 DATA MUX", adc2_src_mux_enum,
+	SOC_DAPM_ENUM_EXT("ADC2 Data Select Mux", adc2_src_mux_enum,
 			  ac101b_get_adc2_src,
 			  ac101b_set_adc2_src);
 static const struct snd_kcontrol_new adc3_src_mux =
-	SOC_DAPM_ENUM_EXT("ADC3 DATA MUX", adc3_src_mux_enum,
+	SOC_DAPM_ENUM_EXT("ADC3 Data Select Mux", adc3_src_mux_enum,
 			  ac101b_get_adc3_src,
 			  ac101b_set_adc3_src);
 
 static const struct snd_kcontrol_new adc2_input_src_mux =
-	SOC_DAPM_ENUM_EXT("ADC2 PAG MUX", adc2_input_mux_enum,
+	SOC_DAPM_ENUM_EXT("ADC2 Input Src Mux", adc2_input_mux_enum,
 			  ac101b_get_adc2_input_src,
 			  ac101b_set_adc2_input_src);
 static const struct snd_kcontrol_new adc3_input_src_mux =
-	SOC_DAPM_ENUM_EXT("ADC3 PAG MUX", adc3_input_mux_enum,
+	SOC_DAPM_ENUM_EXT("ADC3 Input Src Mux", adc3_input_mux_enum,
 			  ac101b_get_adc3_input_src,
 			  ac101b_set_adc3_input_src);
 
 static const struct snd_kcontrol_new rxm1_src_mux =
-	SOC_DAPM_ENUM_EXT("RXM1", rxm1_src_mux_enum,
+	SOC_DAPM_ENUM_EXT("RX1 Mux", rxm1_src_mux_enum,
 			  ac101b_get_rxm1_src,
 			  ac101b_set_rxm1_src);
 static const struct snd_kcontrol_new rxm2_src_mux =
-	SOC_DAPM_ENUM_EXT("RXM2", rxm2_src_mux_enum,
+	SOC_DAPM_ENUM_EXT("RX2 Mux", rxm2_src_mux_enum,
 			  ac101b_get_rxm2_src,
 			  ac101b_set_rxm2_src);
 static const struct snd_kcontrol_new rxm3_src_mux =
-	SOC_DAPM_ENUM_EXT("RXM3", rxm3_src_mux_enum,
+	SOC_DAPM_ENUM_EXT("RX3 Mux", rxm3_src_mux_enum,
 			  ac101b_get_rxm3_src,
 			  ac101b_set_rxm3_src);
 
 static const struct snd_kcontrol_new txm1_src_mux =
-	SOC_DAPM_ENUM_EXT("ADC1 MUX", txm1_src_mux_enum,
+	SOC_DAPM_ENUM_EXT("AIF TX1 Mux", txm1_src_mux_enum,
 			  ac101b_get_txm1_src,
 			  ac101b_set_txm1_src);
 static const struct snd_kcontrol_new txm2_src_mux =
-	SOC_DAPM_ENUM_EXT("ADC2 MUX", txm2_src_mux_enum,
+	SOC_DAPM_ENUM_EXT("AIF TX2 Mux", txm2_src_mux_enum,
 			  ac101b_get_txm2_src,
 			  ac101b_set_txm2_src);
 static const struct snd_kcontrol_new txm3_src_mux =
-	SOC_DAPM_ENUM_EXT("ADC3 MUX", txm3_src_mux_enum,
+	SOC_DAPM_ENUM_EXT("AIF TX3 Mux", txm3_src_mux_enum,
 			  ac101b_get_txm3_src,
 			  ac101b_set_txm3_src);
 
 static const struct snd_kcontrol_new dacl_src_mux =
-	SOC_DAPM_ENUM_EXT("DACL MUX", dac1_src_mux_enum,
+	SOC_DAPM_ENUM_EXT("DACL Data Select Mux", dac1_src_mux_enum,
 			  ac101b_get_dacl_src,
 			  ac101b_set_dacl_src);
 static const struct snd_kcontrol_new dacr_src_mux =
-	SOC_DAPM_ENUM_EXT("DACR MUX", dac2_src_mux_enum,
+	SOC_DAPM_ENUM_EXT("DACR Data Select Mux", dac2_src_mux_enum,
 			  ac101b_get_dacr_src,
 			  ac101b_set_dacr_src);
 
@@ -2584,7 +3074,7 @@ static const struct snd_soc_dapm_widget ac101b_dapm_widgets[] = {
 	SND_SOC_DAPM_INPUT("MIC4N_PIN"),
 
 	// SND_SOC_DAPM_INPUT("DMIC"),
-	SND_SOC_DAPM_INPUT("DEBUG_DAT"),
+	SND_SOC_DAPM_INPUT("Debug_Data"),
 
 	SND_SOC_DAPM_OUTPUT("LINEOUTLP_PIN"),
 	SND_SOC_DAPM_OUTPUT("LINEOUTLN_PIN"),
@@ -2592,44 +3082,53 @@ static const struct snd_soc_dapm_widget ac101b_dapm_widgets[] = {
 	SND_SOC_DAPM_OUTPUT("LINEOUTRN_PIN"),
 	SND_SOC_DAPM_OUTPUT("HPOUT_PIN"),
 
-	SND_SOC_DAPM_AIF_IN("RXL", "AIF Playback", 0, SND_SOC_NOPM, 0, 0),
-	SND_SOC_DAPM_AIF_IN("RXR", "AIF Playback", 0, SND_SOC_NOPM, 0, 0),
+	SND_SOC_DAPM_AIF_IN("AIF RXL", "AIF1 Playback", 0, SND_SOC_NOPM, 0, 0),
+	SND_SOC_DAPM_AIF_IN("AIF RXR", "AIF2 Playback", 0, SND_SOC_NOPM, 0, 0),
 
-	SND_SOC_DAPM_AIF_OUT("TX1", "AIF Capture", 0, SND_SOC_NOPM, 0, 0),
-	SND_SOC_DAPM_AIF_OUT("TX2", "AIF Capture", 0, SND_SOC_NOPM, 0, 0),
-	SND_SOC_DAPM_AIF_OUT("TX3", "AIF Capture", 0, SND_SOC_NOPM, 0, 0),
+	SND_SOC_DAPM_AIF_OUT("AIF TX1", "AIF Capture", 0, SND_SOC_NOPM, 0, 0),
+	SND_SOC_DAPM_AIF_OUT("AIF TX2", "AIF Capture", 0, SND_SOC_NOPM, 0, 0),
+	SND_SOC_DAPM_AIF_OUT("AIF TX3", "AIF Capture", 0, SND_SOC_NOPM, 0, 0),
 
-	SND_SOC_DAPM_ADC("ADC1", NULL, SND_SOC_NOPM, 0, 0),
-	SND_SOC_DAPM_ADC("ADC2", NULL, SND_SOC_NOPM, 0, 0),
-	SND_SOC_DAPM_ADC("ADC3", NULL, SND_SOC_NOPM, 0, 0),
+	SND_SOC_DAPM_ADC_E("ADC1", NULL, SND_SOC_NOPM, 0, 0,
+			   ac101b_capture_event,
+			   SND_SOC_DAPM_PRE_PMU | SND_SOC_DAPM_POST_PMD),
+	SND_SOC_DAPM_ADC_E("ADC2", NULL, SND_SOC_NOPM, 0, 0,
+			   ac101b_capture_event,
+			   SND_SOC_DAPM_PRE_PMU | SND_SOC_DAPM_POST_PMD),
+	SND_SOC_DAPM_ADC_E("ADC3", NULL, SND_SOC_NOPM, 0, 0,
+			   ac101b_capture_event,
+			   SND_SOC_DAPM_PRE_PMU | SND_SOC_DAPM_POST_PMD),
 
-	SND_SOC_DAPM_DAC("DACL", NULL, SND_SOC_NOPM, 0, 0),
-	SND_SOC_DAPM_DAC("DACR", NULL, SND_SOC_NOPM, 0, 0),
+	SND_SOC_DAPM_DAC_E("DACL", NULL, DAC_DIG_EN, DAC_EN, 0, ac101b_dacl_event,
+			   SND_SOC_DAPM_POST_PMU | SND_SOC_DAPM_PRE_PMD),
+
+	SND_SOC_DAPM_DAC_E("DACR", NULL, DAC_DIG_EN, DAC_EN, 0, ac101b_dacr_event,
+			   SND_SOC_DAPM_POST_PMU | SND_SOC_DAPM_PRE_PMD),
 
 	SND_SOC_DAPM_MICBIAS("MICBIAS", MBIAS_REG, MBIAS_EN, 0),
 	SND_SOC_DAPM_MICBIAS("MICBIAS CHOP", MBIAS_REG, MBIAS_CHOPPER_EN, 0),
 
-	SND_SOC_DAPM_MUX("ADC2 PAG MUX", SND_SOC_NOPM, 0, 0, &adc2_input_src_mux),
-	SND_SOC_DAPM_MUX("ADC3 PAG MUX", SND_SOC_NOPM, 0, 0, &adc3_input_src_mux),
+	SND_SOC_DAPM_MUX("ADC2 Input Src Mux", SND_SOC_NOPM, 0, 0, &adc2_input_src_mux),
+	SND_SOC_DAPM_MUX("ADC3 Input Src Mux", SND_SOC_NOPM, 0, 0, &adc3_input_src_mux),
 
-	SND_SOC_DAPM_MUX("ADC1 DATA MUX", SND_SOC_NOPM, 0, 0, &adc1_src_mux),
-	SND_SOC_DAPM_MUX("ADC2 DATA MUX", SND_SOC_NOPM, 0, 0, &adc2_src_mux),
-	SND_SOC_DAPM_MUX("ADC3 DATA MUX", SND_SOC_NOPM, 0, 0, &adc3_src_mux),
+	SND_SOC_DAPM_MUX("ADC1 Data Select Mux", SND_SOC_NOPM, 0, 0, &adc1_src_mux),
+	SND_SOC_DAPM_MUX("ADC2 Data Select Mux", SND_SOC_NOPM, 0, 0, &adc2_src_mux),
+	SND_SOC_DAPM_MUX("ADC3 Data Select Mux", SND_SOC_NOPM, 0, 0, &adc3_src_mux),
 
-	// //i2s
-	SND_SOC_DAPM_MUX("ADC1 MUX", SND_SOC_NOPM, 0, 0, &txm1_src_mux),
-	SND_SOC_DAPM_MUX("ADC2 MUX", SND_SOC_NOPM, 0, 0, &txm2_src_mux),
-	SND_SOC_DAPM_MUX("ADC3 MUX", SND_SOC_NOPM, 0, 0, &txm3_src_mux),
+	//i2s
+	SND_SOC_DAPM_MUX("AIF TX1 Mux", SND_SOC_NOPM, 0, 0, &txm1_src_mux),
+	SND_SOC_DAPM_MUX("AIF TX2 Mux", SND_SOC_NOPM, 0, 0, &txm2_src_mux),
+	SND_SOC_DAPM_MUX("AIF TX3 Mux", SND_SOC_NOPM, 0, 0, &txm3_src_mux),
 
-	SND_SOC_DAPM_MUX("RX1 MUX", SND_SOC_NOPM, 0, 0, &rxm1_src_mux),
-	SND_SOC_DAPM_MUX("RX2 MUX", SND_SOC_NOPM, 0, 0, &rxm2_src_mux),
-	SND_SOC_DAPM_MUX("RX3 MUX", SND_SOC_NOPM, 0, 0, &rxm3_src_mux),
+	SND_SOC_DAPM_MUX("RX1 Mux", SND_SOC_NOPM, 0, 0, &rxm1_src_mux),
+	SND_SOC_DAPM_MUX("RX2 Mux", SND_SOC_NOPM, 0, 0, &rxm2_src_mux),
+	SND_SOC_DAPM_MUX("RX3 Mux", SND_SOC_NOPM, 0, 0, &rxm3_src_mux),
 
-	SND_SOC_DAPM_MUX("DACL MUX", SND_SOC_NOPM, 0, 0, &dacl_src_mux),
-	SND_SOC_DAPM_MUX("DACR MUX", SND_SOC_NOPM, 0, 0, &dacr_src_mux),
+	SND_SOC_DAPM_MUX("DACL Data Select Mux", SND_SOC_NOPM, 0, 0, &dacl_src_mux),
+	SND_SOC_DAPM_MUX("DACR Data Select Mux", SND_SOC_NOPM, 0, 0, &dacr_src_mux),
 
-	SND_SOC_DAPM_SPK("LINEOUTL", ac101b_lineoutl_event),
-	SND_SOC_DAPM_SPK("LINEOUTR", ac101b_lineoutr_event),
+	SND_SOC_DAPM_LINE("LINEOUTL", ac101b_lineoutl_event),
+	SND_SOC_DAPM_LINE("LINEOUTR", ac101b_lineoutr_event),
 
 	/* for pa */
 	SND_SOC_DAPM_SPK("SPK", ac101b_spk_event),
@@ -2654,96 +3153,96 @@ static const struct snd_soc_dapm_route ac101b_dapm_routes[] = {
 
 	{"MICBIAS CHOP", NULL, "MICBIAS"},
 
-	{"ADC2 PAG MUX", "MIC2", "MICBIAS CHOP"},
-	{"ADC2 PAG MUX", "MIC4", "MICBIAS CHOP"},
-	{"ADC2 PAG MUX", "LINEOUTL", "LINEOUTLP_PIN"},
-	{"ADC2 PAG MUX", "LINEOUTL", "LINEOUTLN_PIN"},
+	{"ADC2 Input Src Mux", "MIC2", "MICBIAS CHOP"},
+	{"ADC2 Input Src Mux", "MIC4", "MICBIAS CHOP"},
+	{"ADC2 Input Src Mux", "LINEOUTL", "LINEOUTLP_PIN"},
+	{"ADC2 Input Src Mux", "LINEOUTL", "LINEOUTLN_PIN"},
 
-	{"ADC3 PAG MUX", "MIC3", "MICBIAS CHOP"},
-	{"ADC3 PAG MUX", "LINEOUTR", "LINEOUTRP_PIN"},
-	{"ADC3 PAG MUX", "LINEOUTR", "LINEOUTRN_PIN"},
+	{"ADC3 Input Src Mux", "MIC3", "MICBIAS CHOP"},
+	{"ADC3 Input Src Mux", "LINEOUTR", "LINEOUTRP_PIN"},
+	{"ADC3 Input Src Mux", "LINEOUTR", "LINEOUTRN_PIN"},
 
-	{"ADC1 DATA MUX", "DEBUG_DAT", "DEBUG_DAT"},
-	{"ADC1 DATA MUX", "MIC1", "MICBIAS CHOP"},
-	{"ADC1 DATA MUX", "DACL_DAT", "DACL MUX"},
-	{"ADC1 DATA MUX", "DACR_DAT", "DACR MUX"},
-	{"ADC1 DATA MUX", "RXM1", "RX1 MUX"},
+	{"ADC1 Data Select Mux", "Debug_Data", "Debug_Data"},
+	{"ADC1 Data Select Mux", "MIC1", "MICBIAS CHOP"},
+	{"ADC1 Data Select Mux", "DACL_Data", "DACL Data Select Mux"},
+	{"ADC1 Data Select Mux", "DACR_Data", "DACR Data Select Mux"},
+	{"ADC1 Data Select Mux", "RXM1", "RX1 Mux"},
 
-	{"ADC2 DATA MUX", "DEBUG_DAT", "DEBUG_DAT"},
-	{"ADC2 DATA MUX", "ADC2_PAG_MUX", "ADC2 PAG MUX"},
-	{"ADC2 DATA MUX", "DACL_DAT", "DACL MUX"},
-	{"ADC2 DATA MUX", "DACR_DAT", "DACR MUX"},
-	{"ADC2 DATA MUX", "RXM1", "RX1 MUX"},
+	{"ADC2 Data Select Mux", "Debug_Data", "Debug_Data"},
+	{"ADC2 Data Select Mux", "ADC2_Input", "ADC2 Input Src Mux"},
+	{"ADC2 Data Select Mux", "DACL_Data", "DACL Data Select Mux"},
+	{"ADC2 Data Select Mux", "DACR_Data", "DACR Data Select Mux"},
+	{"ADC2 Data Select Mux", "RXM1", "RX1 Mux"},
 
-	{"ADC3 DATA MUX", "DEBUG_DAT", "DEBUG_DAT"},
-	{"ADC3 DATA MUX", "ADC3_PAG_MUX", "ADC3 PAG MUX"},
-	{"ADC3 DATA MUX", "DACL_DAT", "DACL MUX"},
-	{"ADC3 DATA MUX", "DACR_DAT", "DACR MUX"},
-	{"ADC3 DATA MUX", "RXM1", "RX1 MUX"},
+	{"ADC3 Data Select Mux", "Debug_Data", "Debug_Data"},
+	{"ADC3 Data Select Mux", "ADC3_Input", "ADC3 Input Src Mux"},
+	{"ADC3 Data Select Mux", "DACL_Data", "DACL Data Select Mux"},
+	{"ADC3 Data Select Mux", "DACR_Data", "DACR Data Select Mux"},
+	{"ADC3 Data Select Mux", "RXM1", "RX1 Mux"},
 
-	{"ADC1 MUX", "ADC1_DATA_MUX", "ADC1 DATA MUX"},
-	{"ADC1 MUX", "PLAY1_DAT", "DACL"},
-	{"ADC1 MUX", "ADC1_PLAY1_DAT", "ADC1 DATA MUX"},
-	{"ADC1 MUX", "ADC1_PLAY1_DAT", "DACL"},
-	{"ADC1 MUX", "ADC1_PLAY1_DAT_AVG", "ADC1 DATA MUX"},
-	{"ADC1 MUX", "ADC1_PLAY1_DAT_AVG", "DACL"},
+	{"ADC1", NULL, "ADC1 Data Select Mux"},
+	{"ADC2", NULL, "ADC2 Data Select Mux"},
+	{"ADC3", NULL, "ADC3 Data Select Mux"},
 
-	{"ADC2 MUX", "ADC2_DATA_MUX", "ADC2 DATA MUX"},
-	{"ADC2 MUX", "PLAY2_DAT", "DACR"},
-	{"ADC2 MUX", "ADC2_PLAY2_DAT", "ADC2 DATA MUX"},
-	{"ADC2 MUX", "ADC2_PLAY2_DAT", "DACR"},
-	{"ADC2 MUX", "ADC2_PLAY2_DAT_AVG", "ADC2 DATA MUX"},
-	{"ADC2 MUX", "ADC2_PLAY2_DAT_AVG", "DACR"},
+	{"AIF TX1 Mux", "ADC1_Data", "ADC1"},
+	{"AIF TX1 Mux", "DACL_Data", "DACL"},
+	{"AIF TX1 Mux", "ADC1_DACL_Data", "ADC1"},
+	{"AIF TX1 Mux", "ADC1_DACL_Data", "DACL"},
+	{"AIF TX1 Mux", "ADC1_DACL_Data_AVG", "ADC1"},
+	{"AIF TX1 Mux", "ADC1_DACL_Data_AVG", "DACL"},
 
-	{"ADC3 MUX", "ADC3_DATA_MUX", "ADC3 DATA MUX"},
-	{"ADC3 MUX", "RXM1", "RX1 MUX"},
-	{"ADC3 MUX", "ADC3_DAT_RXM1", "ADC3 DATA MUX"},
-	{"ADC3 MUX", "ADC3_DAT_RXM1", "RX1 MUX"},
-	{"ADC3 MUX", "ADC3_DAT_RXM1_AVG", "ADC3 DATA MUX"},
-	{"ADC3 MUX", "ADC3_DAT_RXM1_AVG", "RX1 MUX"},
+	{"AIF TX2 Mux", "ADC2_Data", "ADC2"},
+	{"AIF TX2 Mux", "DACR_Data", "DACR"},
+	{"AIF TX2 Mux", "ADC2_DACR_Data", "ADC2"},
+	{"AIF TX2 Mux", "ADC2_DACR_Data", "DACR"},
+	{"AIF TX2 Mux", "ADC2_DACR_Data_AVG", "ADC2"},
+	{"AIF TX2 Mux", "ADC2_DACR_Data_AVG", "DACR"},
 
-	{"ADC1", NULL, "ADC1 MUX"},
-	{"ADC2", NULL, "ADC2 MUX"},
-	{"ADC3", NULL, "ADC3 MUX"},
+	{"AIF TX3 Mux", "ADC3_Data", "ADC3"},
+	{"AIF TX3 Mux", "RXM1", "RX1 Mux"},
+	{"AIF TX3 Mux", "ADC3_RXM1_Data", "ADC3"},
+	{"AIF TX3 Mux", "ADC3_RXM1_Data", "RX1 Mux"},
+	{"AIF TX3 Mux", "ADC3_RXM1_Data_AVG", "ADC3"},
+	{"AIF TX3 Mux", "ADC3_RXM1_Data_AVG", "RX1 Mux"},
 
-	{"TX1", NULL, "ADC1"},
-	{"TX2", NULL, "ADC2"},
-	{"TX3", NULL, "ADC3"},
+	{"AIF TX1", NULL, "AIF TX1 Mux"},
+	{"AIF TX2", NULL, "AIF TX2 Mux"},
+	{"AIF TX3", NULL, "AIF TX3 Mux"},
 
 	/* dac route */
-	{"RX1 MUX", "RXL", "RXL"},
-	{"RX1 MUX", "RXR", "RXR"},
-	{"RX1 MUX", "RXR_RXL", "RXL"},
-	{"RX1 MUX", "RXR_RXL", "RXR"},
-	{"RX1 MUX", "RXL_RXR_AVG", "RXL"},
-	{"RX1 MUX", "RXL_RXR_AVG", "RXR"},
+	{"RX1 Mux", "AIF_RXL", "AIF RXL"},
+	{"RX1 Mux", "AIF_RXR", "AIF RXR"},
+	{"RX1 Mux", "AIF_RXL_RXR", "AIF RXL"},
+	{"RX1 Mux", "AIF_RXL_RXR", "AIF RXR"},
+	{"RX1 Mux", "AIF_RXL_RXR_AVG", "AIF RXL"},
+	{"RX1 Mux", "AIF_RXL_RXR_AVG", "AIF RXR"},
 
-	{"RX2 MUX", "RXM1", "RX1 MUX"},
-	{"RX2 MUX", "ADC1_DAT", "ADC1"},
-	{"RX2 MUX", "RXM1_ADC1", "RX1 MUX"},
-	{"RX2 MUX", "RXM1_ADC1", "ADC1"},
-	{"RX2 MUX", "RXM1_ADC1_AVG", "RX1 MUX"},
-	{"RX2 MUX", "RXM1_ADC1_AVG", "ADC1"},
+	{"RX2 Mux", "RXM1", "RX1 Mux"},
+	{"RX2 Mux", "ADC1_Data", "ADC1"},
+	{"RX2 Mux", "RXM1_ADC1", "RX1 Mux"},
+	{"RX2 Mux", "RXM1_ADC1", "ADC1"},
+	{"RX2 Mux", "RXM1_ADC1_AVG", "RX1 Mux"},
+	{"RX2 Mux", "RXM1_ADC1_AVG", "ADC1"},
 
-	{"RX3 MUX", "RXR", "RXR"},
-	{"RX3 MUX", "ADC2_DAT", "ADC2"},
-	{"RX3 MUX", "RXR_ADC2", "RXR"},
-	{"RX3 MUX", "RXR_ADC2", "ADC2"},
-	{"RX3 MUX", "RXR_ADC2_AVG", "RXR"},
-	{"RX3 MUX", "RXR_ADC2_AVG", "ADC2"},
+	{"RX3 Mux", "AIF_RXR", "AIF RXR"},
+	{"RX3 Mux", "ADC2_Data", "ADC2"},
+	{"RX3 Mux", "AIFRXR_ADC2", "AIF RXR"},
+	{"RX3 Mux", "AIFRXR_ADC2", "ADC2"},
+	{"RX3 Mux", "AIFRXR_ADC2_AVG", "AIF RXR"},
+	{"RX3 Mux", "AIFRXR_ADC2_AVG", "ADC2"},
 
-	{"DACL MUX", "RXM2", "RX2 MUX"},
-	{"DACL MUX", "-6dB_Sine", "DEBUG_DAT"},
-	{"DACL MUX", "-60dB_Sine", "DEBUG_DAT"},
-	{"DACL MUX", "Zero", "DEBUG_DAT"},
+	{"DACL Data Select Mux", "RXM2", "RX2 Mux"},
+	{"DACL Data Select Mux", "-6dB_Sine", "Debug_Data"},
+	{"DACL Data Select Mux", "-60dB_Sine", "Debug_Data"},
+	{"DACL Data Select Mux", "Zero", "Debug_Data"},
 
-	{"DACR MUX", "RXM3", "RX3 MUX"},
-	{"DACR MUX", "-6dB_Sine", "DEBUG_DAT"},
-	{"DACR MUX", "-60dB_Sine", "DEBUG_DAT"},
-	{"DACR MUX", "Zero", "DEBUG_DAT"},
+	{"DACR Data Select Mux", "RXM3", "RX3 Mux"},
+	{"DACR Data Select Mux", "-6dB_Sine", "Debug_Data"},
+	{"DACR Data Select Mux", "-60dB_Sine", "Debug_Data"},
+	{"DACR Data Select Mux", "Zero", "Debug_Data"},
 
-	{"DACL", NULL, "DACL MUX"},
-	{"DACR", NULL, "DACR MUX"},
+	{"DACL", NULL, "DACL Data Select Mux"},
+	{"DACR", NULL, "DACR Data Select Mux"},
 
 	{"LINEOUTLP_PIN", NULL, "DACL"},
 	{"LINEOUTLN_PIN", NULL, "DACL"},
@@ -2885,13 +3384,36 @@ static int ac101b_set_params_from_of(struct i2c_client *i2c, struct ac101b_data 
 		pdata->ecdn_mode = 0;
 	}
 
+	jack_adv_priv->rst_gpio = of_get_named_gpio(np, "rst-gpio", 0);
+	if (jack_adv_priv->rst_gpio == -EPROBE_DEFER) {
+		SND_LOG_ERR("get rst-gpio failed\n");
+	}
+
+	if (!gpio_is_valid(jack_adv_priv->rst_gpio)) {
+		SND_LOG_ERR("rst-gpio (%d) is invalid\n", jack_adv_priv->rst_gpio);
+	}
+
+	/* default low */
+	ret = gpio_direction_output(jack_adv_priv->rst_gpio, 0);
+	if (ret) {
+		SND_LOG_WARN("cannot set rst-gpio(%d) output\n", jack_adv_priv->rst_gpio);
+	}
+
 	jack_adv_priv->irq_gpio = of_get_named_gpio(np, "irq-gpio", 0);
 	if (jack_adv_priv->irq_gpio == -EPROBE_DEFER) {
-		SND_LOG_ERR("get hp-det-gpio failed\n");
+		SND_LOG_ERR("get irq-gpio failed\n");
 	}
 
 	if (!gpio_is_valid(jack_adv_priv->irq_gpio)) {
-		SND_LOG_ERR("jack-detgpio (%d) is invalid\n", jack_adv_priv->irq_gpio);
+		SND_LOG_ERR("irq-gpio (%d) is invalid\n", jack_adv_priv->irq_gpio);
+	}
+
+	ret = of_property_read_u32(np, "jack-det-gpio-level", &temp_val);
+	if (ret < 0) {
+		jack_adv_priv->det_gpio_level = 1;
+		SND_LOG_INFO("jack-det-gpio-level miss, default 1\n");
+	} else {
+		jack_adv_priv->det_gpio_level = temp_val;
 	}
 
 	ret = of_property_read_u32(np, "jack-det-threshold", &temp_val);
@@ -3099,4 +3621,4 @@ module_i2c_driver(ac101b_i2c_driver);
 MODULE_DESCRIPTION("ASoC ac101b driver");
 MODULE_AUTHOR("lijingpsw@allwinnertech.com");
 MODULE_LICENSE("GPL");
-MODULE_VERSION("1.0.1");
+MODULE_VERSION("1.0.5");

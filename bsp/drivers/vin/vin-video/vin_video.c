@@ -3542,6 +3542,28 @@ static int vidioc_set_dma_merge(struct file *file, struct v4l2_fh *fh,
 	return 0;
 }
 
+static int vidioc_set_bk_cache_invalid(struct file *file, struct v4l2_fh *fh,
+			unsigned char *index)
+{
+	struct vin_core *vinc = video_drvdata(file);
+	struct vin_vid_cap *cap = &vinc->vid_cap;
+	struct vb2_queue *q = cap->vdev.queue;
+	struct vb2_buffer *vb;
+	dma_addr_t dma_addr;
+
+	if (*index >= q->num_buffers) {
+		vin_err("buffer index out of range\n");
+		return -EINVAL;
+	}
+	//vin_print("vidioc_set_bk_cache_invalid: index: %d\n", *index);
+
+	vb = q->bufs[*index];
+	dma_addr = vb2_dma_contig_plane_dma_addr(vb, 0);
+	dma_sync_single_for_cpu(cap->dev, dma_addr, cap->buf_byte_size, DMA_FROM_DEVICE);
+
+	return 0;
+}
+
 static long vin_param_handler(struct file *file, void *priv,
 			      bool valid_prio, unsigned int cmd, void *param)
 {
@@ -3609,6 +3631,9 @@ static long vin_param_handler(struct file *file, void *priv,
 		break;
 	case VIDIOC_SET_DMA_MERGE:
 		ret = vidioc_set_dma_merge(file, fh, param);
+		break;
+	case VIDIOC_SET_BK_CACHE_INVALID:
+		ret = vidioc_set_bk_cache_invalid(file, fh, param);
 		break;
 	default:
 		ret = -ENOTTY;

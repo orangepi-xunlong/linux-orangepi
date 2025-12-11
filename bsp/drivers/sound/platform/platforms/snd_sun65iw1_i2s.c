@@ -32,6 +32,8 @@ struct sunxi_i2s_clk {
 
 	struct clk *clk_bus;
 	struct reset_control *clk_rst;
+	/* record current clk */
+	struct clk *clk_pll_cur;
 };
 
 sunxi_i2s_clk_t *snd_i2s_clk_init(struct platform_device *pdev)
@@ -148,15 +150,10 @@ int snd_i2s_clk_enable(void *clk_orig)
 
 	SND_LOG_DEBUG("\n");
 
-	if (clk_prepare_enable(clk->clk_pll_audio0)) {
-		SND_LOG_ERR_STD(E_I2S_SWDEP_CLK_EN, "clk_pll_audio0 enable failed\n");
+	if (clk_prepare_enable(clk->clk_pll_cur)) {
+		SND_LOG_ERR_STD(E_I2S_SWDEP_CLK_EN, "clk_pll_cur enable failed\n");
 		ret = -EINVAL;
-		goto err_enable_clk_pll_audio0;
-	}
-	if (clk_prepare_enable(clk->clk_pll_audio1_5x)) {
-		SND_LOG_ERR_STD(E_I2S_SWDEP_CLK_EN, "clk_pll_audio1_5x enable failed\n");
-		ret = -EINVAL;
-		goto err_enable_clk_pll_audio1_5x;
+		goto err_enable_clk_pll_cur;
 	}
 
 	if (clk_prepare_enable(clk->clk_i2s)) {
@@ -168,10 +165,8 @@ int snd_i2s_clk_enable(void *clk_orig)
 	return 0;
 
 err_enable_clk_i2s:
-	clk_disable_unprepare(clk->clk_pll_audio1_5x);
-err_enable_clk_pll_audio1_5x:
-	clk_disable_unprepare(clk->clk_pll_audio0);
-err_enable_clk_pll_audio0:
+	clk_disable_unprepare(clk->clk_pll_cur);
+err_enable_clk_pll_cur:
 	return ret;
 }
 
@@ -192,8 +187,7 @@ void snd_i2s_clk_disable(void *clk_orig)
 	SND_LOG_DEBUG("\n");
 
 	clk_disable_unprepare(clk->clk_i2s);
-	clk_disable_unprepare(clk->clk_pll_audio0);
-	clk_disable_unprepare(clk->clk_pll_audio1_5x);
+	clk_disable_unprepare(clk->clk_pll_cur);
 }
 
 int snd_i2s_clk_rate(void *clk_orig, unsigned int freq_in, unsigned int freq_out)
@@ -207,11 +201,13 @@ int snd_i2s_clk_rate(void *clk_orig, unsigned int freq_in, unsigned int freq_out
 			SND_LOG_ERR_STD(E_I2S_SWDEP_CLK_SET, "set i2s parent clk failed\n");
 			return -EINVAL;
 		}
+		clk->clk_pll_cur = clk->clk_pll_audio1_5x;
 	} else {
 		if (clk_set_parent(clk->clk_i2s, clk->clk_pll_audio0)) {
 			SND_LOG_ERR_STD(E_I2S_SWDEP_CLK_SET, "set i2s parent clk failed\n");
 			return -EINVAL;
 		}
+		clk->clk_pll_cur = clk->clk_pll_audio0;
 	}
 
 	if (clk_set_rate(clk->clk_i2s, freq_out)) {

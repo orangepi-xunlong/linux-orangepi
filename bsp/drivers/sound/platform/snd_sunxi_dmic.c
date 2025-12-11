@@ -300,7 +300,7 @@ static int sunxi_dmic_init(struct sunxi_dmic *dmic)
 {
 	struct sunxi_dmic_dts *dts = &dmic->dts;
 	struct regmap *regmap = dmic->mem.regmap;
-	unsigned int rx_dtime_map;
+	unsigned int rx_dtime_map = 0;
 
 	SND_LOG_DEBUG("\n");
 
@@ -325,11 +325,13 @@ static int sunxi_dmic_init(struct sunxi_dmic *dmic)
 	default:
 		break;
 	}
-	regmap_update_bits(regmap, SUNXI_DMIC_CTR, 0x3 << DMICFDT, rx_dtime_map << DMICFDT);
-	if (dts->rx_dtime)
+
+	if (dts->rx_dtime) {
+		regmap_update_bits(regmap, SUNXI_DMIC_CTR, 0x3 << DMICFDT, rx_dtime_map << DMICFDT);
 		regmap_update_bits(regmap, SUNXI_DMIC_CTR, 0x1 << DMICDFEN, 0x1 << DMICDFEN);
-	else
+	} else {
 		regmap_update_bits(regmap, SUNXI_DMIC_CTR, 0x1 << DMICDFEN, 0x0 << DMICDFEN);
+	}
 
 	/* disable rx_sync_en default */
 	regmap_update_bits(regmap, SUNXI_DMIC_EN, 0x1 << RX_SYNC_EN, 0x0 << RX_SYNC_EN);
@@ -1078,5 +1080,5 @@ module_exit(sunxi_dmic_dev_exit);
 
 MODULE_AUTHOR("Dby@allwinnertech.com");
 MODULE_LICENSE("GPL");
-MODULE_VERSION("1.0.10");
+MODULE_VERSION("1.0.11");
 MODULE_DESCRIPTION("sunxi soundcard platform of dmic");

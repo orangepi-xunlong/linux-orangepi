@@ -836,7 +836,7 @@ static vip_int32_t drv_prepare_video_memory(
                   (May allocate contiguous physical from platform allocator)
                3. so alloc page for video memory heap.
             */
-            u32 gfp = GFP_KERNEL | __GFP_HIGHMEM | __GFP_NOWARN;
+			u32 gfp = GFP_KERNEL | __GFP_NOWARN;
     #if !vpmdENABLE_MMU
             gfp &= ~__GFP_HIGHMEM;
         #if defined(CONFIG_ZONE_DMA32) && LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,37)

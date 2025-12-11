@@ -308,6 +308,9 @@ struct sunxi_codec_clk {
 	/* bus & reset */
 	struct clk *clk_bus;
 	struct reset_control *clk_rst;
+	/* record current clk */
+	struct clk *clk_pll_play;
+	struct clk *clk_pll_cap;
 };
 
 struct sunxi_codec_dts {
@@ -413,7 +416,8 @@ struct sunxi_codec {
 	struct sunxi_codec_dts dts;
 	struct snd_sunxi_rglt *rglt;
 	struct sunxi_audio_status audio_sta;
-	enum SND_SUNXI_CLK_STATUS clk_sta;
+	enum SND_SUNXI_CLK_STATUS clk_play_sta;
+	enum SND_SUNXI_CLK_STATUS clk_cap_sta;
 
 	struct sunxi_jack_codec_priv jack_codec_priv;
 	struct sunxi_jack_extcon_priv jack_extcon_priv;

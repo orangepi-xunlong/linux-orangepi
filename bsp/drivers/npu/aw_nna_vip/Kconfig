@@ -33,7 +33,7 @@ config NPU_SET_CLK_VOL
 	tristate "NPU SET CLK VOL"
 	default n
 	help
-	 Choose M to enable NPU Use IOMMU
+	 Choose M to enable NPU Set Clk Vol
 
 #if NNA_VIP1
 #source "bsp/drivers/npu/aw_nna_vip/vip1/Kconfig"

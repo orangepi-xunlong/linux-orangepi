@@ -33,9 +33,13 @@ struct axp517_bat_power {
 	atomic_t	 	pmu_limit_status;
 
 	/* fake bat soc */
-	struct delayed_work        bat_power_curve;
-	struct wakeup_source       *ws;
-	atomic_t	 	bat_radio_check;
+	struct delayed_work	bat_power_curve;
+	struct wakeup_source	*ws;
+	atomic_t		bat_radio_check;
+	int			axp517_suspend_flag;
+
+	/* power debugfs */
+	struct			sunxi_power_debug_data *debug;
 };
 
 static enum power_supply_property axp517_bat_props[] = {
@@ -659,6 +663,7 @@ static int axp517_set_ichg(struct axp517_bat_power *bat_power, int mA)
 	struct regmap *regmap = bat_power->regmap;
 
 	_axp517_set_ichg(regmap, mA);
+	SUNXI_POWER_LOG_INFO(bat_power->debug, "set ichg:%d", mA);
 
 	return 0;
 }
@@ -1350,6 +1355,22 @@ static irqreturn_t axp517_irq_handler_bat_stat_change(int irq, void *data)
 	return IRQ_HANDLED;
 }
 
+static irqreturn_t axp517_irq_handler_bat_soc_change(int irq, void *data)
+{
+	struct axp517_bat_power *bat_power = data;
+	int radio;
+
+	radio = axp517_get_soc(bat_power);
+
+	SUNXI_POWER_LOG_INFO(bat_power->debug, "BAT radio:%d%%", radio);
+
+	PMIC_DEBUG("%s: enter interrupt %d\n", __func__, irq);
+
+	power_supply_changed(bat_power->bat_supply);
+
+	return IRQ_HANDLED;
+}
+
 static irqreturn_t axp517_irq_handler_bat_temp_change(int irq, void *data)
 {
 	struct axp517_bat_power *bat_power = data;
@@ -1404,7 +1425,7 @@ static struct axp_interrupts axp_bat_irq[] = {
 	[AXP517_VIRQ_BAT_OV] = { "battery_over_voltage",
 					  axp517_irq_handler_bat_stat_change },
 	[AXP517_VIRQ_BAT_NEW_SOC] = { "gauge_new_soc",
-					  axp517_irq_handler_bat_stat_change },
+					  axp517_irq_handler_bat_soc_change },
 };
 
 static int axp517_bat_dt_parse(struct device_node *node,
@@ -1758,6 +1779,12 @@ static int axp517_battery_probe(struct platform_device *pdev)
 		schedule_delayed_work(&bat_power->bat_temp_init, 0);
 	}
 
+	bat_power->debug = sunxi_power_debugfs_init(&pdev->dev);
+	if (IS_ERR_OR_NULL(bat_power->debug))
+		dev_warn(&pdev->dev, "Failed to init debugfs\n");
+
+	SUNXI_POWER_LOG_INFO(bat_power->debug, "BAT power driver initialized");
+
 	return ret;
 
 err:
@@ -1776,6 +1803,7 @@ static int axp517_battery_remove(struct platform_device *pdev)
 		sunxi_power_unregister_cooler(bat_power->bat_supply);
 		mutex_destroy(&bat_power->lock);
 	}
+	sunxi_power_debugfs_exit(bat_power->debug);
 	PMIC_DEV_DEBUG(&pdev->dev, "axp517 teardown battery dev\n");
 
 	return 0;
@@ -1921,4 +1949,4 @@ module_platform_driver(axp517_bat_power_driver);
 MODULE_AUTHOR("wangxiaoliang <wangxiaoliang@x-powers.com>");
 MODULE_DESCRIPTION("axp517 battery driver");
 MODULE_LICENSE("GPL");
-MODULE_VERSION("1.0.4");
+MODULE_VERSION("1.0.9");

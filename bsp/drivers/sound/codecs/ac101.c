@@ -21,6 +21,8 @@
 
 #include "ac101.h"
 
+#define HEADPHONE_HEADSET_TH 10
+
 static atomic_t clk_cnt = ATOMIC_INIT(0);
 static atomic_t i2s_mod_cnt = ATOMIC_INIT(0);
 
@@ -173,7 +175,11 @@ static void sunxi_jack_adv_irq_clean(void *data, int irq);
 static void sunxi_jack_adv_irq_enable(void *data);
 static void sunxi_jack_adv_irq_disable(void *data);
 static void sunxi_jack_adv_det_irq_work(void *data, enum snd_jack_types *jack_type);
+static void sunxi_jack_adv_det_pre_scan_work(void *data, enum snd_jack_types *jack_type);
 static void sunxi_jack_adv_det_scan_work(void *data, enum snd_jack_types *jack_type);
+
+/* for jack slow plug in */
+static void sunxi_jack_sdbp_scan_work(void *data, enum snd_jack_types *jack_type);
 
 struct sunxi_jack_adv sunxi_jack_adv = {
 	.jack_init	= sunxi_jack_adv_init,
@@ -187,7 +193,19 @@ struct sunxi_jack_adv sunxi_jack_adv = {
 	.jack_irq_enable	= sunxi_jack_adv_irq_enable,
 	.jack_irq_disable	= sunxi_jack_adv_irq_disable,
 	.jack_det_irq_work	= sunxi_jack_adv_det_irq_work,
+	.jack_det_pre_scan_work	= sunxi_jack_adv_det_pre_scan_work,
 	.jack_det_scan_work	= sunxi_jack_adv_det_scan_work,
+
+	.jack_sdbp.jack_sdbp_irq_init	= NULL,
+	.jack_sdbp.jack_sdbp_irq_exit	= NULL,
+	.jack_sdbp.jack_sdbp_irq_clean	= NULL,
+	.jack_sdbp.jack_sdbp_irq_work	= NULL,
+
+	.jack_sdbp.jack_sdbp_scan_init	= NULL,
+	.jack_sdbp.jack_sdbp_scan_exit	= NULL,
+	.jack_sdbp.jack_sdbp_scan_work	= sunxi_jack_sdbp_scan_work,
+
+	.jack_sdbp.is_working = false,
 };
 
 static int sunxi_jack_adv_init(void *data)
@@ -207,13 +225,6 @@ static int sunxi_jack_adv_init(void *data)
 			   jack_adv_priv->det_debounce << HMIC_N);
 	regmap_update_bits(regmap, HMIC_CTRL1, 0xf << HMIC_M,
 			   jack_adv_priv->key_debounce << HMIC_M);
-
-	regmap_update_bits(regmap, ADC_APC_CTRL,
-			   0x1 << HBIASMOD, 0x1 << HBIASMOD);
-	regmap_update_bits(regmap, ADC_APC_CTRL,
-			   0x1 << HBIAS_EN, 0x1 << HBIAS_EN);
-	regmap_update_bits(regmap, ADC_APC_CTRL,
-			   0x1 << HBIAS_ADC_EN, 0x1 << HBIAS_ADC_EN);
 
 	if (of_property_read_bool(jack_adv_priv->dev->of_node, "extcon")) {
 		jack_adv_priv->typec = true;
@@ -265,40 +276,40 @@ static int sunxi_jack_adv_irq_request(void *data, jack_irq_work jack_interrupt)
 
 	SND_LOG_DEBUG("\n");
 
-	/* det_gpio irq */
-	ret = gpio_request_one(jack_adv_priv->det_gpio, GPIOF_IN, "Headphone detection");
+	/* irq_gpio irq */
+	ret = gpio_request_one(jack_adv_priv->irq_gpio, GPIOF_IN, "Headphone detection");
 	if (ret) {
-		SND_LOG_ERR("jack-detgpio (%d) request failed, err:%d\n", jack_adv_priv->det_gpio, ret);
+		SND_LOG_ERR("jack-detgpio (%d) request failed, err:%d\n", jack_adv_priv->irq_gpio, ret);
 		return ret;
 	}
 
-	jack_adv_priv->det_desc = gpio_to_desc(jack_adv_priv->det_gpio);
-	ret = request_irq(gpiod_to_irq(jack_adv_priv->det_desc),
+	jack_adv_priv->irq_desc = gpio_to_desc(jack_adv_priv->irq_gpio);
+	ret = request_irq(gpiod_to_irq(jack_adv_priv->irq_desc),
 				      (void *)jack_interrupt,
 				      IRQF_TRIGGER_FALLING,
 				      "Headphone detection",
 				      jack_adv_priv);
 	if (ret) {
-		SND_LOG_ERR("jack-detgpio (%d) request irq failed\n", jack_adv_priv->det_gpio);
+		SND_LOG_ERR("jack-detgpio (%d) request irq failed\n", jack_adv_priv->irq_gpio);
 		return ret;
 	}
 
-	/* plug_gpio irq for 3.5mm */
-	if (jack_adv_priv->plug_gpio) {
-		ret = gpio_request_one(jack_adv_priv->plug_gpio, GPIOF_IN, "Headphone plug");
+	/* det_gpio irq for 3.5mm */
+	if (jack_adv_priv->det_gpio) {
+		ret = gpio_request_one(jack_adv_priv->det_gpio, GPIOF_IN, "Headphone plug");
 		if (ret) {
-			SND_LOG_ERR("jack-detgpio (%d) request failed, err:%d\n", jack_adv_priv->plug_gpio, ret);
+			SND_LOG_ERR("jack-detgpio (%d) request failed, err:%d\n", jack_adv_priv->det_gpio, ret);
 			return ret;
 		}
 
-		jack_adv_priv->plug_desc = gpio_to_desc(jack_adv_priv->plug_gpio);
-		ret = request_irq(gpiod_to_irq(jack_adv_priv->plug_desc),
+		jack_adv_priv->det_desc = gpio_to_desc(jack_adv_priv->det_gpio);
+		ret = request_irq(gpiod_to_irq(jack_adv_priv->det_desc),
 					(void *)jack_interrupt,
 					IRQF_TRIGGER_RISING | IRQF_TRIGGER_FALLING,
 					"Headphone plug",
 					jack_adv_priv);
 		if (ret) {
-			SND_LOG_ERR("plug-gpio (%d) request irq failed\n", jack_adv_priv->plug_gpio);
+			SND_LOG_ERR("plug-gpio (%d) request irq failed\n", jack_adv_priv->det_gpio);
 			return ret;
 		}
 	}
@@ -312,18 +323,18 @@ static void sunxi_jack_adv_irq_free(void *data)
 
 	SND_LOG_DEBUG("\n");
 
-	/* det_gpio */
-	gpio_free(jack_adv_priv->det_gpio);
-	gpiod_unexport(jack_adv_priv->det_desc);
-	free_irq(gpiod_to_irq(jack_adv_priv->det_desc), jack_adv_priv);
-	gpiod_put(jack_adv_priv->det_desc);
+	/* irq_gpio */
+	gpio_free(jack_adv_priv->irq_gpio);
+	gpiod_unexport(jack_adv_priv->irq_desc);
+	free_irq(gpiod_to_irq(jack_adv_priv->irq_desc), jack_adv_priv);
+	gpiod_put(jack_adv_priv->irq_desc);
 
-	/* plug_gpio */
-	if (jack_adv_priv->plug_gpio) {
-		gpio_free(jack_adv_priv->plug_gpio);
-		gpiod_unexport(jack_adv_priv->plug_desc);
-		free_irq(gpiod_to_irq(jack_adv_priv->plug_desc), jack_adv_priv);
-		gpiod_put(jack_adv_priv->plug_desc);
+	/* det_gpio */
+	if (jack_adv_priv->det_gpio) {
+		gpio_free(jack_adv_priv->det_gpio);
+		gpiod_unexport(jack_adv_priv->det_desc);
+		free_irq(gpiod_to_irq(jack_adv_priv->det_desc), jack_adv_priv);
+		gpiod_put(jack_adv_priv->det_desc);
 	}
 }
 
@@ -342,10 +353,10 @@ static void sunxi_jack_adv_irq_enable(void *data)
 
 	SND_LOG_DEBUG("\n");
 
-	enable_irq(gpiod_to_irq(jack_adv_priv->det_desc));
+	enable_irq(gpiod_to_irq(jack_adv_priv->irq_desc));
 
-	if (jack_adv_priv->plug_gpio)
-		enable_irq(gpiod_to_irq(jack_adv_priv->plug_desc));
+	if (jack_adv_priv->det_gpio)
+		enable_irq(gpiod_to_irq(jack_adv_priv->det_desc));
 }
 
 static void sunxi_jack_adv_irq_disable(void *data)
@@ -354,10 +365,10 @@ static void sunxi_jack_adv_irq_disable(void *data)
 
 	SND_LOG_DEBUG("\n");
 
-	disable_irq(gpiod_to_irq(jack_adv_priv->det_desc));
+	disable_irq(gpiod_to_irq(jack_adv_priv->irq_desc));
 
-	if (jack_adv_priv->plug_gpio)
-		disable_irq(gpiod_to_irq(jack_adv_priv->plug_desc));
+	if (jack_adv_priv->det_gpio)
+		disable_irq(gpiod_to_irq(jack_adv_priv->det_desc));
 }
 
 
@@ -366,21 +377,37 @@ static void sunxi_adv_headset_heasphone_det(struct sunxi_jack_adv_priv *jack_adv
 {
 	struct regmap *regmap = jack_adv_priv->regmap;
 	unsigned int reg_val;
-	unsigned int headset_basedata;
+	unsigned int hdata_old, hdata_new;
 	unsigned int i;
-	int count = 10;
-	int interval_ms = 10;
+	unsigned int gpio_level;
+	int count = 5;
+	int interval_ms = 100;
 
-	msleep(100);
+	SND_LOG_DEBUG("\n");
+
+	regmap_read(regmap, HMIC_STS, &reg_val);
+	hdata_old = (reg_val >> HMIC_DATA) & 0x1f;
+
 	for (i = 0; i < count; i++) {
+		msleep(interval_ms);
 		regmap_read(regmap, HMIC_STS, &reg_val);
-		headset_basedata = (reg_val >> HMIC_DATA) & 0x1f;
-		SND_LOG_INFO("\033[31m headset_basedata:%d key_threshold:%d\033[0m\n",
-				headset_basedata, jack_adv_priv->key_threshold);
-		if (headset_basedata < jack_adv_priv->key_threshold) {
+		hdata_new = (reg_val >> HMIC_DATA) & 0x1f;
+
+		if (hdata_new == hdata_old && 2 < hdata_new
+		    && hdata_new < HEADPHONE_HEADSET_TH) {
+			SND_LOG_INFO("\033[31m h_data:%d \033[0m\n", hdata_new);
 			goto headset;
 		}
-		msleep(interval_ms);
+
+		hdata_old = hdata_new;
+	}
+
+	SND_LOG_INFO("\033[31m h_data:%d\033[0m\n", hdata_new);
+
+	/* fake headset */
+	gpio_level = gpio_get_value(jack_adv_priv->det_gpio);
+	if ((hdata_new == 0) && (gpio_level != jack_adv_priv->det_gpio_level)) {
+		goto headset;
 	}
 
 	*jack_type = SND_JACK_HEADPHONE;
@@ -413,11 +440,28 @@ static void sunxi_jack_adv_det_irq_work(void *data, enum snd_jack_types *jack_ty
 {
 	struct sunxi_jack_adv_priv *jack_adv_priv = data;
 	struct regmap *regmap = jack_adv_priv->regmap;
+	int codec_irq = gpiod_to_irq(jack_adv_priv->irq_desc);
 	int det_irq = gpiod_to_irq(jack_adv_priv->det_desc);
-	int plug_irq = gpiod_to_irq(jack_adv_priv->plug_desc);
 	unsigned int reg_val, irqen_val, reg_val_tmp;
+	unsigned int gpio_level;
 
-	if (jack_adv_priv->irq == det_irq) {
+	if (jack_adv_priv->det_gpio) {
+		gpio_level = gpio_get_value(jack_adv_priv->det_gpio);
+		if (gpio_level == jack_adv_priv->det_gpio_level) {
+			regmap_read(regmap, HMIC_STS, &reg_val_tmp);
+			reg_val_tmp |= 0x1 << KEYDOWN_PEND;
+			reg_val_tmp |= 0x1 << KEYUP_PEND;
+			reg_val_tmp |= 0x1 << PLUGIN_PEND;
+			reg_val_tmp |= 0x1 << PLUGOUT_PEND;
+			reg_val_tmp |= 0x1 << DATA_PEND;
+			regmap_write(regmap, HMIC_STS, reg_val_tmp);
+			jack_adv_priv->irq_sta = JACK_IRQ_OUT;
+
+			goto jack_irq_sts;
+		}
+	}
+
+	if (jack_adv_priv->irq == codec_irq) {
 		regmap_read(regmap, HMIC_CTRL1, &irqen_val);
 		regmap_read(regmap, HMIC_STS, &reg_val);
 		if ((reg_val & (1 << KEYDOWN_PEND)) && (irqen_val & (1 << KEYDOWN_IRQ_EN))) {
@@ -434,8 +478,9 @@ static void sunxi_jack_adv_det_irq_work(void *data, enum snd_jack_types *jack_ty
 		} else {
 			return;
 		}
-	} else if (jack_adv_priv->irq == plug_irq) {
-		if (gpio_get_value(jack_adv_priv->plug_gpio)) {
+	} else if (jack_adv_priv->irq == det_irq) {
+		gpio_level = gpio_get_value(jack_adv_priv->det_gpio);
+		if (gpio_level == jack_adv_priv->det_gpio_level) {
 			regmap_read(regmap, HMIC_STS, &reg_val_tmp);
 			reg_val_tmp |= 0x1 << KEYDOWN_PEND;
 			reg_val_tmp |= 0x1 << KEYUP_PEND;
@@ -446,6 +491,13 @@ static void sunxi_jack_adv_det_irq_work(void *data, enum snd_jack_types *jack_ty
 
 			jack_adv_priv->irq_sta = JACK_IRQ_OUT;
 		} else {
+			regmap_update_bits(regmap, ADC_APC_CTRL,
+					0x1 << HBIASMOD, 0x1 << HBIASMOD);
+			regmap_update_bits(regmap, ADC_APC_CTRL,
+					0x1 << HBIAS_EN, 0x1 << HBIAS_EN);
+			regmap_update_bits(regmap, ADC_APC_CTRL,
+					0x1 << HBIAS_ADC_EN, 0x1 << HBIAS_ADC_EN);
+
 			regmap_read(regmap, HMIC_STS, &reg_val_tmp);
 			reg_val_tmp |= 0x1 << PLUGIN_PEND;
 			reg_val_tmp |= 0x1 << PLUGOUT_PEND;
@@ -461,6 +513,7 @@ static void sunxi_jack_adv_det_irq_work(void *data, enum snd_jack_types *jack_ty
 		return;
 	}
 
+jack_irq_sts:
 	switch (jack_adv_priv->irq_sta) {
 	case JACK_IRQ_OUT:
 		SND_LOG_INFO("jack out\n");
@@ -469,18 +522,33 @@ static void sunxi_jack_adv_det_irq_work(void *data, enum snd_jack_types *jack_ty
 		regmap_update_bits(regmap, HMIC_CTRL1,
 				   0x1 << KEYDOWN_IRQ_EN, 0x0 << KEYDOWN_IRQ_EN);
 
+		regmap_update_bits(regmap, ADC_APC_CTRL,
+				0x1 << HBIASMOD, 0x0 << HBIASMOD);
+		regmap_update_bits(regmap, ADC_APC_CTRL,
+				0x1 << HBIAS_EN, 0x0 << HBIAS_EN);
+		regmap_update_bits(regmap, ADC_APC_CTRL,
+				0x1 << HBIAS_ADC_EN, 0x0 << HBIAS_ADC_EN);
+
 		*jack_type = 0;
 	break;
 
 	case JACK_IRQ_IN:
 		SND_LOG_INFO("jack in\n");
 
+		msleep(500);
 		sunxi_adv_headset_heasphone_det(jack_adv_priv, jack_type);
 	break;
 	case JACK_IRQ_KEYDOWN:
+		regmap_read(regmap, HMIC_STS, &reg_val);
+		reg_val = (reg_val >> HMIC_DATA) & 0x1f;
+		if (reg_val < jack_adv_priv->key_threshold) {
+			regmap_update_bits(regmap, HMIC_CTRL1,
+					   0x1 << KEYDOWN_IRQ_EN, 0x1 << KEYDOWN_IRQ_EN);
+			return;
+		}
+
 		SND_LOG_INFO("jack button\n");
 
-		msleep(100);
 		regmap_read(regmap, HMIC_STS, &reg_val);
 		reg_val = (reg_val >> HMIC_DATA) & 0x1f;
 		SND_LOG_INFO("\033[31m HMIC_DATA:%u, vol+:[%d, %d], vol-:[%d %d], hook:[%d %d]\033[0m \n",
@@ -520,78 +588,149 @@ static void sunxi_jack_adv_det_irq_work(void *data, enum snd_jack_types *jack_ty
 	return;
 }
 
+static void sunxi_jack_adv_det_pre_scan_work(void *data, enum snd_jack_types *jack_type)
+{
+	struct sunxi_jack_adv *jack_adv = &sunxi_jack_adv;
+	struct sunxi_jack_adv_priv *jack_adv_priv = data;
+	struct regmap *regmap = jack_adv_priv->regmap;
+	unsigned int gpio_level;
+
+	SND_LOG_DEBUG("\n");
+
+	if (jack_adv_priv->typec) {
+		if (!jack_adv->jack_plug_sta) {
+			*jack_type = 0;
+			jack_adv_priv->jack_type = *jack_type;
+
+			regmap_update_bits(regmap, HMIC_CTRL1,
+					0x1 << KEYUP_IRQ_EN, 0x0 << KEYUP_IRQ_EN);
+			regmap_update_bits(regmap, HMIC_CTRL1,
+					0x1 << KEYDOWN_IRQ_EN, 0x0 << KEYDOWN_IRQ_EN);
+			regmap_update_bits(regmap, HMIC_CTRL1,
+					0x1 << DATA_IRQ_EN, 0x0 << DATA_IRQ_EN);
+
+			regmap_update_bits(regmap, ADC_APC_CTRL,
+						0x1 << HBIASMOD, 0x0 << HBIASMOD);
+			regmap_update_bits(regmap, ADC_APC_CTRL,
+						0x1 << HBIAS_EN, 0x0 << HBIAS_EN);
+			regmap_update_bits(regmap, ADC_APC_CTRL,
+						0x1 << HBIAS_ADC_EN, 0x0 << HBIAS_ADC_EN);
+
+			return;
+		}
+	}
+
+	if (jack_adv_priv->det_gpio) {
+		gpio_level = gpio_get_value(jack_adv_priv->det_gpio);
+		if (gpio_level == jack_adv_priv->det_gpio_level) {
+			*jack_type = 0;
+			jack_adv_priv->jack_type = *jack_type;
+		}
+	}
+
+	*jack_type = SND_JACK_HEADPHONE;
+}
+
 static void sunxi_jack_adv_det_scan_work(void *data, enum snd_jack_types *jack_type)
 {
 	struct sunxi_jack_adv *jack_adv = &sunxi_jack_adv;
 	struct sunxi_jack_adv_priv *jack_adv_priv = data;
 	struct regmap *regmap = jack_adv_priv->regmap;
 	unsigned int reg_val;
-	unsigned int headset_basedata, headset_basedata_i, headset_basedata_n;
+	unsigned int headset_basedata_i, headset_basedata_n;
+	unsigned int gpio_level;
 
 	SND_LOG_INFO("\n");
 
 	if (jack_adv_priv->typec) {
 		if (!jack_adv->jack_plug_sta) {
 			*jack_type = 0;
-			goto jack_type;
+			goto out;
 		}
 
+		regmap_update_bits(regmap, ADC_APC_CTRL,
+				0x1 << HBIASMOD, 0x1 << HBIASMOD);
+		regmap_update_bits(regmap, ADC_APC_CTRL,
+				0x1 << HBIAS_EN, 0x1 << HBIAS_EN);
+		regmap_update_bits(regmap, ADC_APC_CTRL,
+				0x1 << HBIAS_ADC_EN, 0x1 << HBIAS_ADC_EN);
+
 		sunxi_jack_typec_mode_set(&jack_adv->jack_typec_cfg, SND_JACK_MODE_MICI);
-		msleep(100);
+
+		msleep(500);
 		regmap_read(regmap, HMIC_STS, &reg_val);
 		headset_basedata_i = (reg_val >> HMIC_DATA) & 0x1f;
+		if (headset_basedata_i > 0
+			&& headset_basedata_i < HEADPHONE_HEADSET_TH) {
+			*jack_type = SND_JACK_HEADSET;
+			SND_LOG_INFO("[%s %d] headset_basedata_i:%d\n",
+				     __func__, __LINE__, headset_basedata_i);
+			goto headset;
+		}
+
+		SND_LOG_INFO("[%s %d] headset_basedata_i:%d\n", __func__, __LINE__, headset_basedata_i);
 
 		sunxi_jack_typec_mode_set(&jack_adv->jack_typec_cfg, SND_JACK_MODE_MICN);
-		msleep(100);
+		msleep(500);
 		regmap_read(regmap, HMIC_STS, &reg_val);
 		headset_basedata_n = (reg_val >> HMIC_DATA) & 0x1f;
+		if (headset_basedata_n > 0
+			&& headset_basedata_n < HEADPHONE_HEADSET_TH) {
+			*jack_type = SND_JACK_HEADSET;
+			SND_LOG_INFO("[%s %d] headset_basedata_n:%d\n",
+				     __func__, __LINE__, headset_basedata_n);
+			goto headset;
+		}
+
+		SND_LOG_INFO("[%s %d] headset_basedata_n:%d\n",
+			     __func__, __LINE__, headset_basedata_n);
 
 		/* abnormal jack */
 		if (!headset_basedata_i && headset_basedata_n) {
 			sunxi_jack_typec_mode_set(&jack_adv->jack_typec_cfg, SND_JACK_MODE_MICI);
 			*jack_type = SND_JACK_HEADSET;
-			goto jack_type;
+			goto headset;
 		}
 
 		if (headset_basedata_i && !headset_basedata_n) {
 			sunxi_jack_typec_mode_set(&jack_adv->jack_typec_cfg, SND_JACK_MODE_MICN);
 			*jack_type = SND_JACK_HEADSET;
-			goto jack_type;
+			goto headset;
 		}
 
-		if (headset_basedata_i > 0
-		    && headset_basedata_i < jack_adv_priv->key_threshold) {
-			sunxi_jack_typec_mode_set(&jack_adv->jack_typec_cfg, SND_JACK_MODE_MICI);
+		if (!headset_basedata_i && !headset_basedata_n) {
+			SND_LOG_ERR("switch may not work\n");
 			*jack_type = SND_JACK_HEADSET;
-			goto jack_type;
+			goto headset;
 		}
 
-		if (headset_basedata_n > 0
-		    && headset_basedata_n < jack_adv_priv->key_threshold) {
-			sunxi_jack_typec_mode_set(&jack_adv->jack_typec_cfg, SND_JACK_MODE_MICN);
-			*jack_type = SND_JACK_HEADSET;
-			goto jack_type;
-		}
 
-		regmap_read(regmap, HMIC_STS, &reg_val);
-		headset_basedata = (reg_val >> HMIC_DATA) & 0x1f;
-		if (headset_basedata) {
-			*jack_type = SND_JACK_HEADPHONE;
-			goto jack_type;
-		}
+		*jack_type = SND_JACK_HEADPHONE;
+		jack_adv_priv->jack_type = *jack_type;
+
+		return;
 	}
 
-	if (jack_adv_priv->plug_gpio) {
-		if (gpio_get_value(jack_adv_priv->plug_gpio)) {
+	if (jack_adv_priv->det_gpio) {
+		gpio_level = gpio_get_value(jack_adv_priv->det_gpio);
+		if (gpio_level == jack_adv_priv->det_gpio_level) {
 			*jack_type = 0;
 			jack_adv_priv->jack_type = *jack_type;
 		} else {
+			regmap_update_bits(regmap, ADC_APC_CTRL,
+					   0x1 << HBIASMOD, 0x1 << HBIASMOD);
+			regmap_update_bits(regmap, ADC_APC_CTRL,
+					   0x1 << HBIAS_EN, 0x1 << HBIAS_EN);
+			regmap_update_bits(regmap, ADC_APC_CTRL,
+					   0x1 << HBIAS_ADC_EN, 0x1 << HBIAS_ADC_EN);
+
+			msleep(500);
 			sunxi_adv_headset_heasphone_det(jack_adv_priv, jack_type);
 		}
 		return;
 	}
 
-jack_type:
+headset:
 	if (*jack_type == SND_JACK_HEADSET) {
 		msleep(500);
 		regmap_update_bits(regmap, HMIC_CTRL2, 0x1f << HMIC_TH2,
@@ -613,6 +752,7 @@ jack_type:
 				0x1 << KEYUP_IRQ_EN, 0x0 << KEYUP_IRQ_EN);
 	}
 
+out:
 	if (*jack_type == 0) {
 		regmap_update_bits(regmap, HMIC_CTRL1,
 				   0x1 << KEYUP_IRQ_EN, 0x0 << KEYUP_IRQ_EN);
@@ -620,11 +760,47 @@ jack_type:
 				   0x1 << KEYDOWN_IRQ_EN, 0x0 << KEYDOWN_IRQ_EN);
 		regmap_update_bits(regmap, HMIC_CTRL1,
 				   0x1 << DATA_IRQ_EN, 0x0 << DATA_IRQ_EN);
+
+		regmap_update_bits(regmap, ADC_APC_CTRL,
+					0x1 << HBIASMOD, 0x0 << HBIASMOD);
+		regmap_update_bits(regmap, ADC_APC_CTRL,
+					0x1 << HBIAS_EN, 0x0 << HBIAS_EN);
+		regmap_update_bits(regmap, ADC_APC_CTRL,
+					0x1 << HBIAS_ADC_EN, 0x0 << HBIAS_ADC_EN);
 	}
 
 	jack_adv_priv->jack_type = *jack_type;
 
 	return;
+}
+
+static void sunxi_jack_sdbp_scan_work(void *data, enum snd_jack_types *jack_type)
+{
+	struct sunxi_jack_adv_priv *jack_adv_priv = data;
+	struct regmap *regmap = jack_adv_priv->regmap;
+
+	SND_LOG_DEBUG("jack_codec_priv->jack_type:%d\n", jack_adv_priv->jack_type);
+
+	if (jack_adv_priv->jack_type != SND_JACK_HEADPHONE)
+		return;
+
+	regmap_update_bits(regmap, ADC_APC_CTRL,
+			   0x1 << HBIASMOD, 0x1 << HBIASMOD);
+	regmap_update_bits(regmap, ADC_APC_CTRL,
+			   0x1 << HBIAS_EN, 0x1 << HBIAS_EN);
+	regmap_update_bits(regmap, ADC_APC_CTRL,
+			   0x1 << HBIAS_ADC_EN, 0x1 << HBIAS_ADC_EN);
+
+	sunxi_adv_headset_heasphone_det(jack_adv_priv, jack_type);
+
+	if (*jack_type != SND_JACK_HEADSET) {
+		regmap_update_bits(regmap, ADC_APC_CTRL,
+				   0x1 << HBIASMOD, 0x0 << HBIASMOD);
+		regmap_update_bits(regmap, ADC_APC_CTRL,
+				   0x1 << HBIAS_EN, 0x0 << HBIAS_EN);
+		regmap_update_bits(regmap, ADC_APC_CTRL,
+				   0x1 << HBIAS_ADC_EN, 0x0 << HBIAS_ADC_EN);
+	}
 }
 
 struct sunxi_jack_port sunxi_jack_port = {
@@ -650,7 +826,7 @@ static int ac101_startup(struct snd_pcm_substream *substream, struct snd_soc_dai
 
 		do {
 			regmap_read(regmap, CHIP_SOFT_RST, &reg_val);
-			SND_LOG_INFO("wait ac101 reset successfully, need 0x101/%d\n", reg_val);
+			SND_LOG_INFO("wait ac101 reset successfully, need 0x101/0x%x\n", reg_val);
 		} while (reg_val != 0x101);
 
 		/* recover reg */
@@ -1512,12 +1688,22 @@ static int ac101_probe(struct snd_soc_component *component)
 	struct regmap *regmap = ac101->regmap;
 	struct sunxi_jack_adv_priv *jack_adv_priv = &pdata->jack_adv_priv;
 	unsigned int reg_val;
-	int ret;
+	int ret = -1;
+	unsigned int i;
+	unsigned int try_num = 5;
 
 	SND_LOG_DEBUG("\n");
 
 	/* wait ac101 stable */
 	msleep(50);
+
+	for (i = 0; (i < try_num) && (ret < 0); i++) {
+		ret = regmap_read(regmap, CHIP_SOFT_RST, &reg_val);
+	}
+	if (ret) {
+		SND_LOG_ERR("try read ac101 5 times but failed, ac101 probe failed\n");
+		return -1;
+	}
 
 	/* software reset to wait ac101 stable,
 	 * write 0x123 to reset ac101,
@@ -1527,7 +1713,7 @@ static int ac101_probe(struct snd_soc_component *component)
 
 	do {
 		regmap_read(regmap, CHIP_SOFT_RST, &reg_val);
-		SND_LOG_INFO("wait ac101 reset successfully, need 0x101/%d\n", reg_val);
+		SND_LOG_INFO("wait ac101 reset successfully, need 0x101/0x%x\n", reg_val);
 	} while (reg_val != 0x101);
 
 	pdata->working = (atomic_t)ATOMIC_INIT(0);
@@ -1980,12 +2166,12 @@ static int ac101_hpoutl_event(struct snd_soc_dapm_widget *w, struct snd_kcontrol
 		msleep(4);
 		break;
 	case SND_SOC_DAPM_PRE_PMD:
+		/* hpl disable */
+		regmap_update_bits(regmap, HPOUT_CTRL, 0x1 << MUTE_L, 0x0 << MUTE_L);
 		/* hp dc offset, 0x0 before hp pa disable */
 		regmap_update_bits(regmap, OMIXER_DACA_CTRL, 0xf << HP_DCRM_EN, 0x0 << HP_DCRM_EN);
 		/* hp pa */
 		regmap_update_bits(regmap, HPOUT_CTRL, 0x1 << HPPA_EN, 0x0 << HPPA_EN);
-		/* hpl disable */
-		regmap_update_bits(regmap, HPOUT_CTRL, 0x1 << MUTE_L, 0x0 << MUTE_L);
 
 		break;
 	default:
@@ -2016,12 +2202,12 @@ static int ac101_hpoutr_event(struct snd_soc_dapm_widget *w, struct snd_kcontrol
 		msleep(4);
 		break;
 	case SND_SOC_DAPM_PRE_PMD:
+		/* hpl disable */
+		regmap_update_bits(regmap, HPOUT_CTRL, 0x1 << MUTE_R, 0x0 << MUTE_R);
 		/* hp da offset, 0x0 before hp pa disable */
 		regmap_update_bits(regmap, OMIXER_DACA_CTRL, 0xf << HP_DCRM_EN, 0x0 << HP_DCRM_EN);
 		/* hp pa */
 		regmap_update_bits(regmap, HPOUT_CTRL, 0x1 << HPPA_EN, 0x0 << HPPA_EN);
-		/* hpl disable */
-		regmap_update_bits(regmap, HPOUT_CTRL, 0x1 << MUTE_R, 0x0 << MUTE_R);
 
 		break;
 	default:
@@ -2484,25 +2670,33 @@ static int ac101_set_params_from_of(struct i2c_client *i2c, struct ac101_data *p
 		pdata->ecdn_mode = 0;
 	}
 
-	/* det gpio */
-	jack_adv_priv->det_gpio = of_get_named_gpio(np, "hp-det-gpio", 0);
+	/* irq gpio */
+	jack_adv_priv->irq_gpio = of_get_named_gpio(np, "irq-gpio", 0);
+	if (jack_adv_priv->irq_gpio == -EPROBE_DEFER) {
+		SND_LOG_ERR("get irq-gpio failed\n");
+	}
+
+	if (!gpio_is_valid(jack_adv_priv->irq_gpio)) {
+		SND_LOG_ERR("irq-gpio (%d) is invalid\n", jack_adv_priv->irq_gpio);
+	}
+
+	/* jack det gpio */
+	jack_adv_priv->det_gpio = of_get_named_gpio(np, "jack-det-gpio", 0);
 	if (jack_adv_priv->det_gpio == -EPROBE_DEFER) {
-		SND_LOG_ERR("get hp-det-gpio failed\n");
+		SND_LOG_ERR("get jack-det-gpio failed\n");
 	}
 
 	if (!gpio_is_valid(jack_adv_priv->det_gpio)) {
-		SND_LOG_ERR("jack-detgpio (%d) is invalid\n", jack_adv_priv->det_gpio);
+		jack_adv_priv->det_gpio = 0;
+		SND_LOG_ERR("jack-det-gpio (%d) is invalid\n", jack_adv_priv->det_gpio);
 	}
 
-	/* plug gpio */
-	jack_adv_priv->plug_gpio = of_get_named_gpio(np, "hp-plug-gpio", 0);
-	if (jack_adv_priv->plug_gpio == -EPROBE_DEFER) {
-		SND_LOG_ERR("get hp-plug-gpio failed\n");
-	}
-
-	if (!gpio_is_valid(jack_adv_priv->plug_gpio)) {
-		jack_adv_priv->plug_gpio = 0;
-		SND_LOG_ERR("plug-gpio (%d) is invalid\n", jack_adv_priv->plug_gpio);
+	ret = of_property_read_u32(np, "jack-det-gpio-level", &temp_val);
+	if (ret < 0) {
+		jack_adv_priv->det_gpio_level = 1;
+		SND_LOG_INFO("jack-det-gpio-level miss, default 1\n");
+	} else {
+		jack_adv_priv->det_gpio_level = temp_val;
 	}
 
 	ret = of_property_read_u32(np, "jack-det-threshold", &temp_val);
@@ -2587,8 +2781,8 @@ static int ac101_set_params_from_of(struct i2c_client *i2c, struct ac101_data *p
 		jack_adv_priv->key_det_vol[3][0] = temp_val;
 	}
 
+	SND_LOG_ERR("irq_gpio        -> %u\n", jack_adv_priv->irq_gpio);
 	SND_LOG_ERR("det_gpio        -> %u\n", jack_adv_priv->det_gpio);
-	SND_LOG_ERR("plug_gpio        -> %u\n", jack_adv_priv->plug_gpio);
 	SND_LOG_DEBUG("jack-det-threshold        -> %u\n",
 		      jack_adv_priv->det_threshold);
 	SND_LOG_DEBUG("jack-key-det-threshold    -> %u\n",
@@ -2703,4 +2897,4 @@ module_i2c_driver(ac101_i2c_driver);
 MODULE_DESCRIPTION("ASoC AC101 driver");
 MODULE_AUTHOR("lijingpsw@allwinnertech.com");
 MODULE_LICENSE("GPL");
-MODULE_VERSION("1.0.0");
+MODULE_VERSION("1.0.5");

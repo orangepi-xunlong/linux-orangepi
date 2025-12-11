@@ -549,21 +549,50 @@ static int sunxi_i2s_set_ch_map(struct sunxi_i2s *i2s, unsigned int channels)
 	if (IS_ERR_OR_NULL(i2s))
 		return -EINVAL;
 
-	for (i = 0; i < 4; ++i) {
-		for (j = 0; j < 8; ++j) {
-			reg_val_tx[i << 1] |= (dts->tx_pin_chmap[i][j] << (j << 2));
-			reg_val_tx[(i << 1) + 1] |= (dts->tx_pin_chmap[i][j + 8] << (j << 2));
+	if (dts->dai_type == SUNXI_DAI_HDMI_TYPE) {
+		/* Mapping in hdmi mode */
+		regmap_write(regmap, SUNXI_I2S_TX0CHMAP0, 0);
+		regmap_write(regmap, SUNXI_I2S_TX0CHMAP1, 0x10);
+		if (i2s->playback_dma_param.hdmi_fmt > HDMI_FMT_PCM) {
+			/* Mapping for support HBR and NL-PCM streaming */
+			regmap_write(regmap, SUNXI_I2S_TX1CHMAP0, 0);
+			regmap_write(regmap, SUNXI_I2S_TX1CHMAP1, 0x32);
+			regmap_write(regmap, SUNXI_I2S_TX2CHMAP0, 0);
+			regmap_write(regmap, SUNXI_I2S_TX2CHMAP1, 0x54);
+			regmap_write(regmap, SUNXI_I2S_TX3CHMAP0, 0);
+			regmap_write(regmap, SUNXI_I2S_TX3CHMAP1, 0x76);
+		} else {
+			if (channels > 2) {
+				regmap_write(regmap, SUNXI_I2S_TX1CHMAP0, 0);
+				regmap_write(regmap, SUNXI_I2S_TX1CHMAP1, 0x32);
+			}
+			if (channels > 4) {
+				regmap_write(regmap, SUNXI_I2S_TX2CHMAP0, 0);
+				regmap_write(regmap, SUNXI_I2S_TX2CHMAP1, 0x54);
+			}
+			if (channels > 6) {
+				regmap_write(regmap, SUNXI_I2S_TX3CHMAP0, 0);
+				regmap_write(regmap, SUNXI_I2S_TX3CHMAP1, 0x76);
+			}
 		}
-	}
+	} else {
+		/* Mapping in normal mode */
+		for (i = 0; i < 4; ++i) {
+			for (j = 0; j < 8; ++j) {
+				reg_val_tx[i << 1] |= (dts->tx_pin_chmap[i][j] << (j << 2));
+				reg_val_tx[(i << 1) + 1] |= (dts->tx_pin_chmap[i][j + 8] << (j << 2));
+			}
+		}
 
-	regmap_write(regmap, SUNXI_I2S_TX0CHMAP0, reg_val_tx[1]);
-	regmap_write(regmap, SUNXI_I2S_TX0CHMAP1, reg_val_tx[0]);
-	regmap_write(regmap, SUNXI_I2S_TX1CHMAP0, reg_val_tx[3]);
-	regmap_write(regmap, SUNXI_I2S_TX1CHMAP1, reg_val_tx[2]);
-	regmap_write(regmap, SUNXI_I2S_TX2CHMAP0, reg_val_tx[5]);
-	regmap_write(regmap, SUNXI_I2S_TX2CHMAP1, reg_val_tx[4]);
-	regmap_write(regmap, SUNXI_I2S_TX3CHMAP0, reg_val_tx[7]);
-	regmap_write(regmap, SUNXI_I2S_TX3CHMAP1, reg_val_tx[6]);
+		regmap_write(regmap, SUNXI_I2S_TX0CHMAP0, reg_val_tx[1]);
+		regmap_write(regmap, SUNXI_I2S_TX0CHMAP1, reg_val_tx[0]);
+		regmap_write(regmap, SUNXI_I2S_TX1CHMAP0, reg_val_tx[3]);
+		regmap_write(regmap, SUNXI_I2S_TX1CHMAP1, reg_val_tx[2]);
+		regmap_write(regmap, SUNXI_I2S_TX2CHMAP0, reg_val_tx[5]);
+		regmap_write(regmap, SUNXI_I2S_TX2CHMAP1, reg_val_tx[4]);
+		regmap_write(regmap, SUNXI_I2S_TX3CHMAP0, reg_val_tx[7]);
+		regmap_write(regmap, SUNXI_I2S_TX3CHMAP1, reg_val_tx[6]);
+	}
 
 	j = 0;
 	for (i = 0 ; i < 16; ++i)
@@ -2674,5 +2703,5 @@ module_exit(sunxi_i2s_dev_exit);
 
 MODULE_AUTHOR("Dby@allwinnertech.com");
 MODULE_LICENSE("GPL");
-MODULE_VERSION("1.0.15");
+MODULE_VERSION("1.0.16");
 MODULE_DESCRIPTION("sunxi soundcard platform of i2s");

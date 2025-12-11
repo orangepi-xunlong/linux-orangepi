@@ -29,6 +29,7 @@
 #include <sound/pcm.h>
 #include <sound/pcm_params.h>
 #include <sunxi-sid.h>
+#include <sunxi-chips.h>
 
 #include "snd_sunxi_log.h"
 #include "snd_sunxi_pcm.h"
@@ -377,10 +378,16 @@ static const DECLARE_TLV_DB_SCALE(digital_tlv, -7424, 116, 0);
 static const DECLARE_TLV_DB_SCALE(dac_vol_tlv, -11925, 75, 0);
 static const DECLARE_TLV_DB_SCALE(adc_vol_tlv, -11925, 75, 0);
 static const DECLARE_TLV_DB_SCALE(adc_gain_tlv, 0, 100, 0);
-static const unsigned int lineout_tlv[] = {
+static const unsigned int lineout_tlv_v821[] = {
 	TLV_DB_RANGE_HEAD(2),
 	0, 1, TLV_DB_SCALE_ITEM(0, 0, 1),
 	2, 31, TLV_DB_SCALE_ITEM(-4350, 150, 1),
+};
+
+static const unsigned int lineout_tlv_v821b[] = {
+	TLV_DB_RANGE_HEAD(2),
+	0, 1, TLV_DB_SCALE_ITEM(0, 0, 1),
+	2, 7, TLV_DB_SCALE_ITEM(-4200, 600, 1),
 };
 
 /* RX&TX FUNC */
@@ -685,11 +692,20 @@ static const struct snd_kcontrol_new sunxi_codec_controls[] = {
 	SOC_SINGLE_TLV("DACL Volume", SUNXI_DAC_VOL_CTRL, DAC_VOL_L, 0xFF, 0, dac_vol_tlv),
 	/* ADC1 Volume */
 	SOC_SINGLE_TLV("ADC Volume", SUNXI_ADC_VOL_CTRL, ADC_VOL, 0xFF, 0, adc_vol_tlv),
+};
 
-	/* LINEOUT Volume */
-	SOC_SINGLE_TLV("LINEOUT Gain", SUNXI_DAC_REG, LINEOUT_VOL, 0x1F, 0, lineout_tlv),
+static const struct snd_kcontrol_new sunxi_codec_controls_v821[] = {
 	/* MIC1 Gain */
 	SOC_SINGLE_TLV("MIC Gain", SUNXI_ADC_REG, ADC_PGA_GAIN_CTRL, 0x1F, 0, adc_gain_tlv),
+	/* LINEOUT Volume */
+	SOC_SINGLE_TLV("LINEOUT Gain", SUNXI_DAC_REG, LINEOUT_VOL, 0x1F, 0, lineout_tlv_v821),
+};
+
+static const struct snd_kcontrol_new sunxi_codec_controls_v821b[] = {
+	/* MIC1 Gain */
+	SOC_SINGLE_TLV("MIC Gain", SUNXI_ADC_REG, ADC_PGA_GAIN_CTRL, 0xF, 0, adc_gain_tlv),
+	/* LINEOUT Volume */
+	SOC_SINGLE_TLV("LINEOUT Gain", SUNXI_DAC_REG, LINEOUT_VOL, 0x7, 0, lineout_tlv_v821b),
 };
 
 static int sunxi_playback_event(struct snd_soc_dapm_widget *w, struct snd_kcontrol *k, int event)
@@ -725,12 +741,29 @@ static int sunxi_mic_event(struct snd_soc_dapm_widget *w, struct snd_kcontrol *k
 	switch (event) {
 	case SND_SOC_DAPM_PRE_PMU:
 		/* acceleration of starting for adc */
-		regmap_update_bits(regmap, SUNXI_ADC_REG,
-				   0x1 << ADC_EN | 0x1 << MIC_PGA_EN | 0x1 << ADC_EN_SPEEDUP,
-				   0x1 << ADC_EN | 0x1 << MIC_PGA_EN | 0x1 << ADC_EN_SPEEDUP);
-		msleep(10);
-		regmap_update_bits(regmap, SUNXI_ADC_REG,
-				   0x1 << ADC_EN_SPEEDUP, 0x0 << ADC_EN_SPEEDUP);
+		if (sunxi_chip_alter_version() == SUNXI_CHIP_ALTER_VERSION_V821) {
+			regmap_update_bits(regmap, SUNXI_ADC_REG,
+					   0x1 << ADC_EN |
+					   0x1 << MIC_PGA_EN |
+					   0x1 << ADC_EN_SPEEDUP,
+					   0x1 << ADC_EN |
+					   0x1 << MIC_PGA_EN |
+					   0x1 << ADC_EN_SPEEDUP);
+			msleep(10);
+			regmap_update_bits(regmap, SUNXI_ADC_REG,
+					   0x1 << ADC_EN_SPEEDUP, 0x0 << ADC_EN_SPEEDUP);
+		} else {
+			regmap_update_bits(regmap, SUNXI_ADC_REG,
+					   0x1 << ADC_EN |
+					   0x1 << MIC_PGA_EN |
+					   0x1 << PGA_STARTUP_MANUAL,
+					   0x1 << ADC_EN |
+					   0x1 << MIC_PGA_EN |
+					   0x1 << PGA_STARTUP_MANUAL);
+			msleep(10);
+			regmap_update_bits(regmap, SUNXI_ADC_REG,
+					   0x1 << PGA_STARTUP_MANUAL, 0x0 << PGA_STARTUP_MANUAL);
+		}
 
 		regmap_update_bits(regmap, SUNXI_MICBIAS_REG,
 				   0x1 << MMICBIASEN, 0x1 << MMICBIASEN);
@@ -938,6 +971,18 @@ static int sunxi_codec_component_probe(struct snd_soc_component *component)
 					     ARRAY_SIZE(sunxi_codec_controls));
 	if (ret)
 		SND_LOG_ERR("register codec kcontrols failed\n");
+
+	if (sunxi_chip_alter_version() == SUNXI_CHIP_ALTER_VERSION_V821) {
+		ret = snd_soc_add_component_controls(component, sunxi_codec_controls_v821,
+					     ARRAY_SIZE(sunxi_codec_controls_v821));
+	if (ret)
+		SND_LOG_ERR("register v821 codec kcontrols failed\n");
+	} else {
+		ret = snd_soc_add_component_controls(component, sunxi_codec_controls_v821b,
+					     ARRAY_SIZE(sunxi_codec_controls_v821b));
+		if (ret)
+			SND_LOG_ERR("register v821b codec kcontrols failed\n");
+	}
 
 	/* component kcontrols -> pa */
 	ret = snd_sunxi_pa_pin_probe(codec->pa_cfg, codec->pa_pin_max, component);

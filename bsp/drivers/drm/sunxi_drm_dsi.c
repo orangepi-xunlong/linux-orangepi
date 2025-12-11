@@ -1667,8 +1667,6 @@ static int sunxi_drm_dsi_bind(struct device *dev, struct device *master, void *d
 
 	sdrm->encoder.possible_crtcs =
 			drm_of_find_possible_crtcs(drm, tcon_lcd_dev->of_node);
-	sdrm->encoder.possible_clones = drm_encoder_mask(&sdrm->encoder);
-	sunxi_drm_sup_wb_clone(drm, &sdrm->encoder);
 
 	drm_connector_helper_add(&sdrm->connector,
 			&sunxi_dsi_connector_helper_funcs);

@@ -17,10 +17,20 @@
 #include <linux/of_irq.h>
 #include <linux/arm-smccc.h>
 
+#define SUNXI_AWLINK_ASM_SECURE
+
+#if IS_ENABLED(CONFIG_ARM64)
+typedef unsigned long optee_type_t;
+#else
+typedef int optee_type_t;
+#endif
+
+
 #define SUNXI_REG_MSEL_ADDR	0x0000
 #define SUNXI_REG_STA_ADDR	0x0008
 #define SUNXI_REG_INT_ADDR	0x000c
 #define SUNXI_REG_INTEN_ADDR	0x0010
+#define SUNXI_REG_RMCNT_ADDR 0x0020
 
 #define SUNXI_REG_RBUF_RBACK_START_ADDR	0x0180
 #define SUNXI_MSEL_RESET_MODE		BIT(0)
@@ -28,6 +38,7 @@
 #define SUNXI_CMD_SELF_RCV_REQ	BIT(4)
 #define SUNXI_CMD_CLEAR_OR_FLAG	BIT(3)
 #define SUNXI_CMD_RELEASE_RBUF	BIT(2)
+#define SUNXI_CMD_ABORT_REQ	BIT(1)
 #define SUNXI_CMD_TRANS_REQ	BIT(0)
 
 #define SUNXI_STA_BIT_ERR	(0x00 << 22)
@@ -57,18 +68,18 @@
 #define SUNXI_MODE_MAX_RETRIES	100
 
 void awlink_asm_write_cmdreg(u32 mod_reg_val, volatile void __iomem *mod_reg_addr, volatile void __iomem *reg_addr);
-void awlink_asm_start(volatile void __iomem *mod_reg_addr, unsigned long ctrlmode, unsigned long num);
+void awlink_asm_start(volatile void __iomem *mod_reg_addr, optee_type_t ctrlmode, optee_type_t num);
 void awlink_asm_set_bittiming(volatile void __iomem *mod_reg_addr, u32 mod_reg_val, u32 *cfg, volatile void __iomem *reg_addr);
 void awlink_asm_clean_transfer_err(volatile void __iomem *addr, u16 *t_err, u16 *r_err);
 void awlink_asm_rx(volatile void __iomem *addr, u8 *r_fi, u32 *dreg, u32 *id);
 
 void awlink_asm_start_xmit(volatile void __iomem *mod_reg_addr, volatile void __iomem *addr, u32 id, u32 *flag, u32 *mod_reg_val, u8 *pdata);
-int awlink_asm_probe(struct device_node *node, unsigned long num);
-void awlink_asm_fun0(unsigned long num, unsigned long pin_id);
-void awlink_asm_fun1(unsigned long num);
-void awlink_asm_fun2(unsigned long num);
-void awlink_asm_fun3(unsigned long num);
-void awlink_asm_fun4(unsigned long num);
-void __iomem *awlink_asm_fun5(unsigned long num);
+int awlink_asm_probe(struct device_node *node, optee_type_t num);
+void awlink_asm_fun0(optee_type_t num, optee_type_t pin_id);
+void awlink_asm_fun1(optee_type_t num);
+void awlink_asm_fun2(optee_type_t num);
+void awlink_asm_fun3(optee_type_t num);
+void awlink_asm_fun4(optee_type_t num);
+void __iomem *awlink_asm_fun5(optee_type_t num);
 
 #endif

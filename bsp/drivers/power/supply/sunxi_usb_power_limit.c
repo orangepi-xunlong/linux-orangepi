@@ -384,6 +384,8 @@ static void _sunxi_usb_power_limit_input_limit_process(struct sunxi_usb_power_li
 
 	PMIC_INFO("current limit setted : %s, limit_cur: %d mA\n",
 			SUNXI_SUPPLY_INPUT_LIMIT_TYPE_TEXT[input_limit_type], limit_cur);
+	SUNXI_POWER_LOG_INFO(power_limit->debug, "current limit setted : %s, limit_cur: %d mA",
+			SUNXI_SUPPLY_INPUT_LIMIT_TYPE_TEXT[input_limit_type], limit_cur);
 }
 
 /**
@@ -423,6 +425,8 @@ static void sunxi_usb_power_limit_input_limit_process(struct sunxi_usb_power_lim
 	limit_staus = atomic_read(&power_limit->input_limit_type);
 
 	PMIC_DEBUG("current limit staus old : 0x%x, limit staus : 0x%x\n",
+			limit_staus_old, limit_staus);
+	SUNXI_POWER_LOG_INFO(power_limit->debug, "current limit staus old : 0x%x, limit staus : 0x%x",
 			limit_staus_old, limit_staus);
 
 	limit_type = _sunxi_usb_power_limit_get_input_limit_type(limit_staus);
@@ -993,6 +997,12 @@ static int sunxi_usb_power_limit_probe(struct platform_device *pdev)
 		goto err;
 	}
 
+	power_limit->debug = sunxi_power_debugfs_init(&pdev->dev);
+	if (IS_ERR_OR_NULL(power_limit->debug))
+		dev_warn(&pdev->dev, "Failed to init debugfs\n");
+
+	SUNXI_POWER_LOG_INFO(power_limit->debug, "sunxi-usb-power-limit driver initialized");
+
 	return ret;
 err:
 	PMIC_ERR("%s,probe fail, ret = %d\n", __func__, ret);
@@ -1022,6 +1032,7 @@ static int sunxi_usb_power_limit_remove(struct platform_device *pdev)
 		sunxi_usb_power_limit_delayed_work_set(power_limit, false);
 		power_supply_unregister(power_limit->power_limit_psy);
 	}
+	sunxi_power_debugfs_exit(power_limit->debug);
 	PMIC_DEV_DEBUG(&pdev->dev, "teardown sunxi power limit dev\n");
 
 	return 0;
@@ -1073,7 +1084,7 @@ static struct platform_driver sunxi_usb_power_limit_driver = {
 
 module_platform_driver(sunxi_usb_power_limit_driver);
 
-MODULE_VERSION("1.0.2");
+MODULE_VERSION("1.0.3");
 MODULE_AUTHOR("xinouyang <xinouyang@allwinnertech.com>");
 MODULE_DESCRIPTION("sunxi power limit driver");
 MODULE_LICENSE("GPL");

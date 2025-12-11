@@ -300,7 +300,8 @@
 #define PGA_CH_DLYSET			18
 #define PGA_CH_NOLDLYSET		16
 #define IOPADC				14
-#define ADC_EN_SPEEDUP			13
+#define ADC_EN_SPEEDUP			13 /* V821 */
+#define PGA_STARTUP_MANUAL		13 /* V821B */
 #define ADC_PGA_GAIN_CTRL		8
 #define ADC_IOPAAF			6
 #define ADC_IOPSDM1			4
@@ -350,7 +351,8 @@
 #define I_AVCC_POR			16
 #define BG_BUFFER_DISABLE		15
 #define ALDO_OUTPUT_VOLTAGE		12
-#define BG_ROUGH_TRIM			8
+#define BG_ROUGH_TRIM			8  /* V821 */
+#define OPVR_CHOPPER_EN			8  /* V821B */
 #define BG_FINE_TRIM			0
 
 /* efuse */

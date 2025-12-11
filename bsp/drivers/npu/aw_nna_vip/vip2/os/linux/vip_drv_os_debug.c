@@ -67,6 +67,7 @@
 #include <vip_drv_task_common.h>
 #include <vip_drv_task_descriptor.h>
 #include <vip_lite_version.h>
+#include <asm/div64.h>
 
 #ifndef vpmdUSE_DEBUG_FS
 #ifdef CONFIG_DEBUG_FS
@@ -89,7 +90,7 @@
 #if vpmdENABLE_DEBUGFS
 struct dentry    *debugfs_parent;
 vipdrv_video_mem_profile_t video_mem_data;
-vip_uint32_t debugfs_core_cnt = 0;
+vip_uint32_t debugfs_core_cnt = 1;
 vipdrv_core_loading_profile_t *core_loading = VIP_NULL;
 #endif
 
@@ -676,8 +677,8 @@ static loff_t vipdrv_core_loading_get(
     )
 {
     loff_t len = 0, offset = 0;
-    vip_uint32_t ratio = 0, i = 0;
-    vip_uint64_t total_time = 0;
+    vip_uint32_t i = 0;
+    vip_uint64_t total_time = 0, cur_time = 0, total_time_ms = 0;
 #if vpmdTASK_QUEUE_USED
     vipdrv_context_t* context = (vipdrv_context_t*)vipdrv_get_context(VIPDRV_CONTEXT_PROP_ALL);
 #endif
@@ -693,25 +694,36 @@ static loff_t vipdrv_core_loading_get(
         return 0;
     }
 
+    cur_time = vipdrv_os_get_time();
     if (0 == core_loading[0].destory_time) {
-        total_time = vipdrv_os_get_time() - core_loading[0].init_time;
+		total_time = cur_time - core_loading[0].init_time;
     }
     else {
-        total_time = core_loading[0].destory_time - core_loading[0].init_time;
+		core_loading[0].infer_time = 0;
+		core_loading[0].last_infer_time = 0;
+		core_loading[0].last_record_time = 0;
+		core_loading[0].latest_sbumit_time = 0;
     }
 
-    FS_PRINTF(ptr, len, offset, "VIP Total Time=%" PRId64" ms\n", total_time / 1000);
+    total_time_ms = total_time;
+	do_div(total_time_ms, 1000);
+
     for (i = 0; i < debugfs_core_cnt; i++) {
-        ratio = (vip_uint32_t)((core_loading[i].infer_time * 100) / total_time);
-        if (0 == i) {
-            FS_PRINTF(ptr, len, offset, "History Loading -----> Core%d: Inference Time=%"PRId64" ms (%2d%%)\n",
-                i, core_loading[i].infer_time / 1000, ratio);
-        }
-        else {
-            FS_PRINTF(ptr, len, offset, "                       Core%d: Inference Time=%"PRId64" ms (%2d%%)\n",
-                i, core_loading[i].infer_time / 1000, ratio);
-        }
+		vip_uint64_t step_infer_us = core_loading[i].infer_time - core_loading[0].last_infer_time;
+		vip_uint64_t step_total_us = 0, ratio = 0;
+		cur_time = vipdrv_os_get_time();
+		step_total_us = cur_time - core_loading[0].last_record_time;
+		ratio = step_infer_us * 100;
+		do_div(ratio, step_total_us);
+		if (0 == i) {
+			FS_PRINTF(ptr, len, offset, "NPU Loading -----> Core%d: %2d%% \n", i, ratio);
+		} else {
+			FS_PRINTF(ptr, len, offset, "                   Core%d: %2d%%\n", i, ratio);
+		}
     }
+
+    core_loading[0].last_record_time = core_loading[0].latest_sbumit_time;/*cur_time;*/
+	core_loading[0].last_infer_time = core_loading[0].infer_time;
 
 #if vpmdTASK_QUEUE_USED
     if (context->initialize) {
@@ -784,7 +796,10 @@ static ssize_t vipdrv_core_loading_set(
             core_loading[i].init_time = vipdrv_os_get_time();
             core_loading[i].submit_time = 0;
             core_loading[i].infer_time = 0;
-            core_loading[i].destory_time = 0;
+		    core_loading[i].destory_time = 0;
+		    core_loading[i].last_record_time = core_loading[i].init_time;
+		    core_loading[i].last_infer_time = 0;
+		    core_loading[i].latest_sbumit_time = 0;
         }
     }
     else {
@@ -1487,18 +1502,19 @@ vip_status_e vipdrv_debug_core_loading_profile_set(
     switch (dtype) {
     case PROFILE_START:
     {
-        VIPDRV_LOOP_HARDWARE_IN_TASK_START(task)
-        core_loading[hw->core_id].submit_time = time;
-        VIPDRV_LOOP_HARDWARE_IN_TASK_END
+		VIPDRV_LOOP_HARDWARE_IN_TASK_START(task)
+		core_loading[hw->core_id].submit_time = time;
+		core_loading[hw->core_id].latest_sbumit_time  = time;
+		VIPDRV_LOOP_HARDWARE_IN_TASK_END
     }
     break;
 
     case PROFILE_END:
     {
-        VIPDRV_LOOP_HARDWARE_IN_TASK_START(task)
-        cur_infer = time - core_loading[hw->core_id].submit_time;
-        core_loading[hw->core_id].infer_time += cur_infer;
-        VIPDRV_LOOP_HARDWARE_IN_TASK_END
+		VIPDRV_LOOP_HARDWARE_IN_TASK_START(task)
+		cur_infer = time - core_loading[hw->core_id].submit_time;
+		core_loading[hw->core_id].infer_time += cur_infer;
+		VIPDRV_LOOP_HARDWARE_IN_TASK_END
     }
     break;
 
@@ -3310,8 +3326,11 @@ vip_status_e vipdrv_debug_profile_start(void)
     for (i = 0; i < debugfs_core_cnt; i++) {
         core_loading[i].init_time = time;
         core_loading[i].destory_time = 0;
-        core_loading[i].submit_time = 0;
-        core_loading[i].infer_time = 0;
+	    core_loading[i].submit_time = 0;
+	    core_loading[i].infer_time = 0;
+	    core_loading[i].last_record_time = time;
+	    core_loading[i].last_infer_time = 0;
+	    core_loading[i].latest_sbumit_time = 0;
     }
 
     video_mem_data.video_memory = 0;

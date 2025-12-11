@@ -15,9 +15,12 @@
 #include <sound/pcm_params.h>
 
 #include "ac107.h"
+#include "snd_sunxi_log.h"
 #include "snd_sunxi_common.h"
 
 static unsigned int ac107_ecdb_ch_nums;
+
+static atomic_t g_codec_count = ATOMIC_INIT(0);
 
 struct ac107_real_to_reg {
 	unsigned int real;
@@ -698,7 +701,17 @@ static int ac107_probe(struct snd_soc_component *component)
 	struct ac107_priv *ac107 = snd_soc_component_get_drvdata(component);
 	struct ac107_data *pdata = &ac107->pdata;
 	struct regmap *regmap = ac107->regmap;
-	int i;
+	int ret = -1;
+	unsigned int i, reg_val;
+	unsigned int try_num = 5;
+
+	for (i = 0; (i < try_num) && (ret < 0); i++) {
+		ret = regmap_read(regmap, CHIP_AUDIO_RST, &reg_val);
+	}
+	if (ret) {
+		SND_LOG_ERR("try read ac107 5 times but failed, ac107 probe failed\n");
+		return -1;
+	}
 
 	/* adc digita volume set */
 	regmap_write(regmap, ADC1_DVOL_CTRL, pdata->ch1_dig_vol);
@@ -840,13 +853,13 @@ static const DECLARE_TLV_DB_SCALE(adc_pga_gain_tlv, 0, 100, 0);
 
 #define CREATE_SND_KCONTROLS(n, m) \
 	static const struct snd_kcontrol_new ac107_snd_controls##n[] = { \
-		SOC_SINGLE_TLV("ADC" #n " Digital Volume", ADC1_DVOL_CTRL, DIG_ADCL1_VOL, \
+		SOC_SINGLE_TLV("AC107 ADC" #n " Digital Volume", ADC1_DVOL_CTRL, DIG_ADCL1_VOL, \
 			       0xff, 0, digital_vol_tlv), \
-		SOC_SINGLE_TLV("ADC" #m " Digital Volume", ADC2_DVOL_CTRL, DIG_ADCL2_VOL, \
+		SOC_SINGLE_TLV("AC107 ADC" #m " Digital Volume", ADC2_DVOL_CTRL, DIG_ADCL2_VOL, \
 			       0xff, 0, digital_vol_tlv), \
-		SOC_SINGLE_TLV("ADC" #n " PGA Gain", ANA_ADC1_CTRL3, RX1_PGA_GAIN_CTRL, \
+		SOC_SINGLE_TLV("AC107 ADC" #n " PGA Gain", ANA_ADC1_CTRL3, RX1_PGA_GAIN_CTRL, \
 			       0x1f, 0, adc_pga_gain_tlv), \
-		SOC_SINGLE_TLV("ADC" #m " PGA Gain", ANA_ADC2_CTRL3, RX2_PGA_GAIN_CTRL, \
+		SOC_SINGLE_TLV("AC107 ADC" #m " PGA Gain", ANA_ADC2_CTRL3, RX2_PGA_GAIN_CTRL, \
 			       0x1f, 0, adc_pga_gain_tlv), \
 	}; \
 	static const struct snd_kcontrol_new adc##n##_digital_src_mixer[] = { \
@@ -868,9 +881,9 @@ static const DECLARE_TLV_DB_SCALE(adc_pga_gain_tlv, 0, 100, 0);
 				   ac107_mic2_event, SND_SOC_DAPM_PRE_PMU | SND_SOC_DAPM_POST_PMD), \
 		SND_SOC_DAPM_PGA("ADC" #n " PGA", ADC_DIG_EN, ENAD1, 0, NULL, 0), \
 		SND_SOC_DAPM_PGA("ADC" #m " PGA", ADC_DIG_EN, ENAD2, 0, NULL, 0), \
-		SND_SOC_DAPM_MIXER("ADC" #n " MIXER", SND_SOC_NOPM, 0, 0, \
+		SND_SOC_DAPM_MIXER("AC107 ADC" #n " MIXER", SND_SOC_NOPM, 0, 0, \
 				   adc##n##_digital_src_mixer, ARRAY_SIZE(adc##n##_digital_src_mixer)), \
-		SND_SOC_DAPM_MIXER("ADC" #m " MIXER", SND_SOC_NOPM, 0, 0, \
+		SND_SOC_DAPM_MIXER("AC107 ADC" #m " MIXER", SND_SOC_NOPM, 0, 0, \
 				   adc##m##_digital_src_mixer, ARRAY_SIZE(adc##m##_digital_src_mixer)), \
 		SND_SOC_DAPM_AIF_OUT("ADC" #n, "Capture", 0, SND_SOC_NOPM, 0, 0), \
 		SND_SOC_DAPM_AIF_OUT("ADC" #m, "Capture", 0, SND_SOC_NOPM, 0, 0), \
@@ -882,12 +895,12 @@ static const DECLARE_TLV_DB_SCALE(adc_pga_gain_tlv, 0, 100, 0);
 		{"MIC" #m " PGA", NULL, "MIC" #m "N"}, \
 		{"ADC" #n " PGA", NULL, "MIC" #n " PGA"}, \
 		{"ADC" #m " PGA", NULL, "MIC" #m " PGA"}, \
-		{"ADC" #n " MIXER", "ADC" #n " Switch", "ADC" #n " PGA"}, \
-		{"ADC" #n " MIXER", "ADC" #m " Switch", "ADC" #m " PGA"}, \
-		{"ADC" #m " MIXER", "ADC" #n " Switch", "ADC" #n " PGA"}, \
-		{"ADC" #m " MIXER", "ADC" #m " Switch", "ADC" #m " PGA"}, \
-		{"ADC" #n, NULL, "ADC" #n " MIXER"}, \
-		{"ADC" #m, NULL, "ADC" #m " MIXER"}, \
+		{"AC107 ADC" #n " MIXER", "ADC" #n " Switch", "ADC" #n " PGA"}, \
+		{"AC107 ADC" #n " MIXER", "ADC" #m " Switch", "ADC" #m " PGA"}, \
+		{"AC107 ADC" #m " MIXER", "ADC" #n " Switch", "ADC" #n " PGA"}, \
+		{"AC107 ADC" #m " MIXER", "ADC" #m " Switch", "ADC" #m " PGA"}, \
+		{"ADC" #n, NULL, "AC107 ADC" #n " MIXER"}, \
+		{"ADC" #m, NULL, "AC107 ADC" #m " MIXER"}, \
 	}; \
 	static const struct snd_soc_component_driver soc_component_dev_ac107_##n = { \
 		.probe			= ac107_probe, \
@@ -1043,6 +1056,7 @@ static int ac107_i2c_probe(struct i2c_client *i2c, const struct i2c_device_id *i
 	struct ac107_data *pdata = dev_get_platdata(&i2c->dev);
 	struct ac107_priv *ac107;
 	int ret;
+	unsigned int codec_num;
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(6, 6, 0)
 	(void)id;
@@ -1069,13 +1083,17 @@ static int ac107_i2c_probe(struct i2c_client *i2c, const struct i2c_device_id *i
 
 	i2c_set_clientdata(i2c, ac107);
 
+	codec_num = atomic_read(&g_codec_count);
+
 	ret = devm_snd_soc_register_component(&i2c->dev,
-					      soc_component_dev_ac107[ac107->pdata.codec_id],
-					      ac107_dai[ac107->pdata.codec_id], 1);
+					      soc_component_dev_ac107[codec_num],
+					      ac107_dai[codec_num], 1);
 	if (ret < 0)
 		dev_err(&i2c->dev, "register ac107 codec failed: %d\n", ret);
 	else
 		ac107_ecdb_ch_nums += 2;
+
+	atomic_add(1, &g_codec_count);
 
 	return ret;
 }
@@ -1094,6 +1112,7 @@ static int ac107_i2c_remove(struct i2c_client *i2c)
 
 	devm_kfree(dev, ac107);
 	of_node_put(np);
+	atomic_sub(1, &g_codec_count);;
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0)
 	return;
 #else
@@ -1121,4 +1140,4 @@ module_i2c_driver(ac107_i2c_driver);
 MODULE_DESCRIPTION("ASoC AC107 driver");
 MODULE_AUTHOR("Dby@allwinnertech.com");
 MODULE_LICENSE("GPL");
-MODULE_VERSION("1.0.2");
+MODULE_VERSION("1.0.3");

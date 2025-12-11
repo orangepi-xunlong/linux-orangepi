@@ -143,6 +143,7 @@ struct sunxi_pmic_cc_logic {
 	unsigned int cc_default_cur;
 
 	atomic_t current_limit_ma;
+	struct sunxi_power_debug_data *debug;
 };
 
 #endif	/* _SUNXI_CC_LOGIC_H */

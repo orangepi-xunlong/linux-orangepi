@@ -53,7 +53,7 @@ struct sunxi_awlink_quirks {
 #endif
 
 #define DRV_NAME "sunxi-awlink"
-#define DRV_VER		"V1.6"
+#define DRV_VER		"V1.7"
 #define COMMIT_ID	"157"
 
 struct sunxi_awlink_priv {
@@ -285,6 +285,7 @@ static netdev_tx_t sunxi_awlink_start_xmit(struct sk_buff *skb, struct net_devic
 	u8 dlc;
 	u32 dreg, msg_flag_n, status;
 	canid_t id;
+	uint32_t cmd_val = 0;
 	int time_out = 0;
 	do {
 		status = readl(priv->base + SUNXI_REG_STA_ADDR);
@@ -328,12 +329,15 @@ static netdev_tx_t sunxi_awlink_start_xmit(struct sk_buff *skb, struct net_devic
 #endif
 
 	wmb();
+	if (priv->awlink.ctrlmode & CAN_CTRLMODE_ONE_SHOT)
+		cmd_val |= SUNXI_CMD_ABORT_REQ;
 
 	if (priv->awlink.ctrlmode & CAN_CTRLMODE_LOOPBACK)
-		sunxi_awlink_write_cmdreg(priv, SUNXI_CMD_SELF_RCV_REQ);
+		cmd_val |= SUNXI_CMD_SELF_RCV_REQ;
 	else
-		sunxi_awlink_write_cmdreg(priv, SUNXI_CMD_TRANS_REQ);
+		cmd_val |= SUNXI_CMD_TRANS_REQ;
 
+	sunxi_awlink_write_cmdreg(priv, cmd_val);
 	priv->tx_trigger++;
 
 	return NETDEV_TX_OK;
@@ -780,6 +784,7 @@ static int sunxi_awlink_probe(struct platform_device *pdev)
 	priv->awlink.ctrlmode_supported = CAN_CTRLMODE_BERR_REPORTING |
 									CAN_CTRLMODE_LISTENONLY |
 									CAN_CTRLMODE_LOOPBACK |
+									CAN_CTRLMODE_ONE_SHOT |
 									CAN_CTRLMODE_3_SAMPLES;
 	priv->base = addr;
 

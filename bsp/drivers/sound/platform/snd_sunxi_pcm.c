@@ -578,11 +578,17 @@ int sunxi_pcm_hw_free(struct snd_soc_component *component, struct snd_pcm_substr
 {
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
 	struct device *dev = rtd->dev;
+	struct snd_pcm_runtime *runtime = substream->runtime;
 	struct sunxi_dma_params *dma_params = snd_soc_dai_get_dma_data(sunxi_adpt_rtd_cpu_dai(rtd),
 								       substream);
 
 	SND_LOG_DEBUG("\n");
 	if (snd_pcm_lib_buffer_bytes(substream) && dma_params->hdmi_fmt > HDMI_FMT_PCM) {
+		if (dma_params->change_size_flag) {
+			dma_params->change_size_flag = false;
+			runtime->buffer_size = dma_params->buffer_size / 2;
+			runtime->period_size = dma_params->period_size / 2;
+		}
 		dma_free_coherent(dev, (snd_pcm_lib_buffer_bytes(substream) * 2),
 				  dma_params->raw_dma_area, dma_params->raw_dma_addr);
 		substream->dma_buffer.addr = dma_params->pcm_dma_addr;

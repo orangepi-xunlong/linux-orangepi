@@ -30,6 +30,7 @@
 #include "snd_sunxi_jack.h"
 
 #define DETWORK_DTIME	10
+static unsigned int scan_count;
 
 static struct sunxi_jack sunxi_jack;
 
@@ -46,9 +47,103 @@ static irqreturn_t jack_interrupt(int irq, void *dev_id)
 	return IRQ_HANDLED;
 }
 
+static void sunxi_jack_sdbp_start(void)
+{
+	struct sunxi_jack_adv *jack_adv = sunxi_jack.jack_adv;
+	struct sunxi_jack_sdbp *jack_sdbp = &jack_adv->jack_sdbp;
+
+	SND_LOG_DEBUG("\n");
+
+	if (jack_sdbp->jack_sdbp_method == SDBP_SCAN) {
+		if (jack_sdbp->jack_sdbp_scan_init)
+			jack_sdbp->jack_sdbp_scan_init(jack_adv->data);
+
+		jack_sdbp->jack_sdbp_scan_num = scan_count;
+
+		jack_sdbp->sdbp_scan_hrt.kt = ktime_set(0, jack_sdbp->jack_sdbp_scan_single_time
+							* 1000000);
+		hrtimer_start(&jack_sdbp->sdbp_scan_hrt.timer,
+			      jack_sdbp->sdbp_scan_hrt.kt, HRTIMER_MODE_REL);
+	}
+
+	jack_sdbp->is_working = true;
+}
+
+static void sunxi_jack_sdbp_stop(void)
+{
+	struct sunxi_jack_adv *jack_adv = sunxi_jack.jack_adv;
+	struct sunxi_jack_sdbp *jack_sdbp = &jack_adv->jack_sdbp;
+
+	SND_LOG_DEBUG("\n");
+
+	if (jack_sdbp->jack_sdbp_method == SDBP_SCAN) {
+		if (jack_sdbp->jack_sdbp_scan_exit)
+			jack_sdbp->jack_sdbp_scan_exit(jack_adv->data);
+	}
+
+	jack_sdbp->is_working = false;
+}
+
+static enum hrtimer_restart sunxi_jack_sdbp_scan_handler(struct hrtimer *timer)
+{
+	struct sunxi_jack_adv *jack_adv = sunxi_jack.jack_adv;
+	struct sunxi_jack_sdbp *jack_sdbp = &jack_adv->jack_sdbp;
+
+	SND_LOG_DEBUG("\n");
+
+	if (!jack_sdbp->is_working) {
+		sunxi_jack_sdbp_stop();
+		return HRTIMER_NORESTART;
+	}
+
+	if (!jack_sdbp->jack_sdbp_scan_num) {
+		sunxi_jack_sdbp_stop();
+		return HRTIMER_NORESTART;
+	}
+
+	if (sunxi_jack.type == 0) {
+		sunxi_jack_sdbp_stop();
+		return HRTIMER_NORESTART;
+	}
+
+	jack_sdbp->jack_sdbp_scan_num--;
+
+	schedule_work(&jack_sdbp->sdbp_scan_work);
+	hrtimer_forward_now(&jack_sdbp->sdbp_scan_hrt.timer, jack_sdbp->sdbp_scan_hrt.kt);
+
+	return HRTIMER_RESTART;
+}
+
+static void sunxi_jack_sdbp_scan_work(struct work_struct *work)
+{
+	struct sunxi_jack_adv *jack_adv = sunxi_jack.jack_adv;
+	struct sunxi_jack_sdbp *jack_sdbp = &jack_adv->jack_sdbp;
+	unsigned long flags;
+
+	SND_LOG_DEBUG("\n");
+
+	if (sunxi_jack.type == SND_JACK_HEADPHONE && jack_sdbp->jack_sdbp_scan_work) {
+		jack_sdbp->jack_sdbp_scan_work(jack_adv->data, &sunxi_jack.type);
+		if (sunxi_jack.type == SND_JACK_HEADSET) {
+			SND_LOG_INFO("[sound] jack update -> HEADSET\n");
+			snd_jack_report(sunxi_jack.jack.jack, 0);
+			snd_jack_report(sunxi_jack.jack.jack, SND_JACK_HEADSET);
+
+			spin_lock_irqsave(&jack_sdbp->sdbp_lock, flags);
+			sunxi_jack_sdbp_stop();
+			spin_unlock_irqrestore(&jack_sdbp->sdbp_lock, flags);
+
+			sunxi_jack.type_old = sunxi_jack.type;
+		}
+		/* "report-OUT" is performed in sunxi_jack_det_irq_work() */
+	}
+}
+
 static void sunxi_jack_det_work(struct sunxi_jack_adv *jack_adv)
 {
+	struct sunxi_jack_sdbp *jack_sdbp = &jack_adv->jack_sdbp;
 	bool report_out = false;
+	unsigned long flags;
 
 	SND_LOG_DEBUG("\n");
 
@@ -88,32 +183,40 @@ static void sunxi_jack_det_work(struct sunxi_jack_adv *jack_adv)
 	snd_jack_report(sunxi_jack.jack.jack, sunxi_jack.type);
 
 	if (sunxi_jack.type == 0) {
-		printk("[sound] jack report -> OUT\n");
+		SND_LOG_INFO("[sound] jack report -> OUT\n");
 	} else if (sunxi_jack.type == SND_JACK_HEADSET) {
-		printk("[sound] jack report -> HEADSET\n");
+		SND_LOG_INFO("[sound] jack report -> HEADSET\n");
 	} else if (sunxi_jack.type == SND_JACK_HEADPHONE) {
-		printk("[sound] jack report -> HEADPHONE\n");
+		SND_LOG_INFO("[sound] jack report -> HEADPHONE\n");
 	} else if (sunxi_jack.type == (SND_JACK_HEADSET | SND_JACK_BTN_0)) {
 		sunxi_jack.type &= ~SND_JACK_BTN_0;
 		snd_jack_report(sunxi_jack.jack.jack, sunxi_jack.type);
-		printk("[sound] jack report -> Hook\n");
+		SND_LOG_INFO("[sound] jack report -> Hook\n");
 	} else if (sunxi_jack.type == (SND_JACK_HEADSET | SND_JACK_BTN_1)) {
 		sunxi_jack.type &= ~SND_JACK_BTN_1;
 		snd_jack_report(sunxi_jack.jack.jack, sunxi_jack.type);
-		printk("[sound] jack report -> Volume ++\n");
+		SND_LOG_INFO("[sound] jack report -> Volume ++\n");
 	} else if (sunxi_jack.type == (SND_JACK_HEADSET | SND_JACK_BTN_2)) {
 		sunxi_jack.type &= ~SND_JACK_BTN_2;
 		snd_jack_report(sunxi_jack.jack.jack, sunxi_jack.type);
-		printk("[sound] jack report -> Volume --\n");
+		SND_LOG_INFO("[sound] jack report -> Volume --\n");
 	} else if (sunxi_jack.type == (SND_JACK_HEADSET | SND_JACK_BTN_3)) {
 		sunxi_jack.type &= ~SND_JACK_BTN_3;
 		snd_jack_report(sunxi_jack.jack.jack, sunxi_jack.type);
-		printk("[sound] jack report -> Voice Assistant\n");
+		SND_LOG_INFO("[sound] jack report -> Voice Assistant\n");
 	} else {
-		printk("[sound] jack report -> others 0x%x\n", sunxi_jack.type);
+		SND_LOG_INFO("[sound] jack report -> others 0x%x\n", sunxi_jack.type);
 	}
 
 	sunxi_jack.type_old = sunxi_jack.type;
+
+	spin_lock_irqsave(&jack_sdbp->sdbp_lock, flags);
+	if (sunxi_jack.type == SND_JACK_HEADPHONE && jack_sdbp->jack_sdbp_method != SDBP_NONE)
+		sunxi_jack_sdbp_start();
+	/* when jack_sdbp_method == SDBP_SCAN will execute it */
+	if (sunxi_jack.type == 0 && jack_sdbp->is_working)
+		sunxi_jack_sdbp_stop();
+	spin_unlock_irqrestore(&jack_sdbp->sdbp_lock, flags);
 }
 
 static void sunxi_jack_det_irq_work(struct work_struct *work)
@@ -130,22 +233,44 @@ static void sunxi_jack_det_scan_work(struct work_struct *work)
 {
 	struct sunxi_jack_adv *jack_adv = sunxi_jack.jack_adv;
 	struct sunxi_jack_typec_cfg *jack_typec_cfg = &jack_adv->jack_typec_cfg;
-	union power_supply_propval temp;
+	int ret;
 
 	SND_LOG_DEBUG("\n");
-	if (jack_adv->typec && jack_adv->jack_plug_sta != JACK_PLUG_STA_IN) {
-		if (!IS_ERR_OR_NULL(jack_adv->pmu_psy))
-			power_supply_get_property(jack_adv->pmu_psy,
-						  POWER_SUPPLY_PROP_SCOPE, &temp);
-		if (temp.intval & (0x1 << 3)) {
-			jack_adv->jack_plug_sta = JACK_PLUG_STA_IN;
+
+	if ((IS_ERR_OR_NULL(jack_adv)) || (IS_ERR_OR_NULL(jack_adv->extdev))) {
+		SND_LOG_ERR("jack_adv or extdev is null\n");
+		return;
+	}
+	ret = extcon_get_state(jack_adv->extdev, EXTCON_JACK_HEADPHONE);
+	SND_LOG_DEBUG("jack adv state %d\n", ret);
+	if (ret)
+		jack_adv->jack_plug_sta = JACK_PLUG_STA_IN;
+	else
+		jack_adv->jack_plug_sta = JACK_PLUG_STA_OUT;
+
+	if (jack_adv->pre_scan && jack_adv->jack_det_pre_scan_work) {
+		jack_adv->jack_det_pre_scan_work(jack_adv->data, &sunxi_jack.type);
+		jack_adv->pre_scan = false;
+		if (!sunxi_jack.type) {
+			goto report;
+		} else {
+			snd_sunxi_jack_state_upto_modparam(sunxi_jack.type);
+			sunxi_jack.type = 0;
+		}
+	}
+
+	if (jack_adv->jack_det_scan_work) {
+		jack_adv->jack_det_scan_work(jack_adv->data, &sunxi_jack.type);
+		if (!sunxi_jack.type) {
+			sunxi_jack_typec_mode_set(jack_typec_cfg, SND_JACK_MODE_USB);
+			SND_LOG_INFO("typec mode set to usb\n");
+		} else {
 			sunxi_jack_typec_mode_set(jack_typec_cfg, SND_JACK_MODE_HP);
 			SND_LOG_INFO("typec mode set to hp\n");
 		}
 	}
 
-	if (jack_adv->jack_det_scan_work)
-		jack_adv->jack_det_scan_work(jack_adv->data, &sunxi_jack.type);
+report:
 	sunxi_jack_det_work(jack_adv);
 }
 
@@ -199,8 +324,6 @@ static int sunxi_jack_plugin_notifier(struct notifier_block *nb, unsigned long e
 
 	if (event) {
 		jack_adv->jack_plug_sta = JACK_PLUG_STA_IN;
-		sunxi_jack_typec_mode_set(jack_typec_cfg, SND_JACK_MODE_HP);
-		SND_LOG_INFO("typec mode set to hp\n");
 	} else {
 		jack_adv->jack_plug_sta = JACK_PLUG_STA_OUT;
 		sunxi_jack_typec_mode_set(jack_typec_cfg, SND_JACK_MODE_USB);
@@ -210,6 +333,73 @@ static int sunxi_jack_plugin_notifier(struct notifier_block *nb, unsigned long e
 	schedule_delayed_work(&sunxi_jack.det_sacn_work, msecs_to_jiffies(DETWORK_DTIME));
 
 	return NOTIFY_DONE;
+}
+
+static void sunxi_jack_dts_params_init(struct sunxi_jack_adv *jack_adv)
+{
+	struct sunxi_jack_sdbp *jack_sdbp = &jack_adv->jack_sdbp;
+	struct device_node *np = jack_adv->dev->of_node;
+	unsigned int temp_val;
+	int ret = 0;
+
+	SND_LOG_DEBUG("\n");
+
+	ret = of_property_read_u32(np, "jack-sdbp-method", &temp_val);
+	if (ret < 0) {
+		SND_LOG_DEBUG("jack-sdbp-method default SDBP_NONE\n");
+		jack_sdbp->jack_sdbp_method = SDBP_NONE;
+	} else {
+		if (temp_val >= SDBP_METHOD_CNT) {
+			SND_LOG_DEBUG("jack-sdbp-method invalid\n");
+			jack_sdbp->jack_sdbp_method = SDBP_NONE;
+		}
+		jack_sdbp->jack_sdbp_method = temp_val;
+	}
+
+	if (jack_sdbp->jack_sdbp_method == SDBP_IRQ) {
+		SND_LOG_DEBUG("adv not support sdbp_irq, using sdbp_scan\n");
+		jack_sdbp->jack_sdbp_method = SDBP_SCAN;
+	}
+
+	if (jack_sdbp->jack_sdbp_method == SDBP_SCAN) {
+		ret = of_property_read_u32(np, "jack-sdbp-scan-single-time", &temp_val);
+		if (ret < 0) {
+			SND_LOG_DEBUG("jack-sdbp-scan-single-time get failed\n");
+			jack_sdbp->jack_sdbp_method = SDBP_NONE;
+		} else {
+			jack_sdbp->jack_sdbp_scan_single_time = temp_val;
+		}
+
+		ret = of_property_read_u32(np, "jack-sdbp-scan-max-time", &temp_val);
+		if (ret < 0) {
+			SND_LOG_DEBUG("jack-sdbp-scan-max-time is miss, default 5s\n");
+			jack_sdbp->jack_sdbp_scan_max_time = 5000;
+		} else {
+			jack_sdbp->jack_sdbp_scan_max_time = temp_val;
+		}
+
+		if (jack_sdbp->jack_sdbp_scan_max_time < jack_sdbp->jack_sdbp_scan_single_time) {
+			jack_sdbp->jack_sdbp_scan_max_time = jack_sdbp->jack_sdbp_scan_single_time;
+		}
+
+		jack_sdbp->jack_sdbp_scan_num = jack_sdbp->jack_sdbp_scan_max_time
+						/ jack_sdbp->jack_sdbp_scan_single_time;
+
+
+		scan_count = jack_sdbp->jack_sdbp_scan_num;
+	}
+
+	if (jack_sdbp->jack_sdbp_method != SDBP_NONE) {
+		SND_LOG_DEBUG("jack-sdbp-method            -> %u\n",
+			      jack_sdbp->jack_sdbp_method);
+		if (jack_sdbp->jack_sdbp_method == SDBP_SCAN)
+			SND_LOG_DEBUG("jack-sdbp-scan-single-time  -> %u\n",
+				      jack_sdbp->jack_sdbp_scan_single_time);
+			SND_LOG_DEBUG("jack-sdbp-scan-max-time  -> %u\n",
+				      jack_sdbp->jack_sdbp_scan_max_time);
+			SND_LOG_DEBUG("jack_sdbp_scan_num  -> %u\n",
+				      jack_sdbp->jack_sdbp_scan_num);
+	}
 }
 
 static int snd_sunxi_jack_adv_typec_init(struct sunxi_jack_adv *jack_adv)
@@ -328,6 +518,7 @@ static void snd_sunxi_jack_adv_typec_exit(struct sunxi_jack_adv *jack_adv)
 int snd_sunxi_jack_adv_init(void *jack_data)
 {
 	struct sunxi_jack_adv *jack_adv;
+	struct sunxi_jack_sdbp *jack_sdbp;
 	struct device_node *np;
 	int ret;
 
@@ -339,6 +530,9 @@ int snd_sunxi_jack_adv_init(void *jack_data)
 	}
 	jack_adv = jack_data;
 	sunxi_jack.jack_adv = jack_adv;
+	jack_sdbp = &jack_adv->jack_sdbp;
+
+	sunxi_jack_dts_params_init(jack_adv);
 
 	if (jack_adv->jack_init) {
 		ret = jack_adv->jack_init(jack_adv->data);
@@ -351,7 +545,18 @@ int snd_sunxi_jack_adv_init(void *jack_data)
 	INIT_WORK(&sunxi_jack.det_irq_work, sunxi_jack_det_irq_work);
 	INIT_DELAYED_WORK(&sunxi_jack.det_sacn_work, sunxi_jack_det_scan_work);
 
+	if (jack_sdbp->jack_sdbp_method == SDBP_SCAN) {
+		spin_lock_init(&jack_sdbp->sdbp_lock);
+		INIT_WORK(&jack_sdbp->sdbp_scan_work, sunxi_jack_sdbp_scan_work);
+		hrtimer_init(&jack_sdbp->sdbp_scan_hrt.timer, CLOCK_MONOTONIC,
+			     HRTIMER_MODE_REL);
+		jack_sdbp->sdbp_scan_hrt.timer.function = sunxi_jack_sdbp_scan_handler;
+	}
+
 	np = jack_adv->dev->of_node;
+	if (of_property_read_bool(np, "jack-use-prescan"))
+		jack_adv->pre_scan = true;
+
 	if (of_property_read_bool(np, "extcon")) {
 		jack_adv->typec = true;
 
@@ -369,8 +574,6 @@ int snd_sunxi_jack_adv_init(void *jack_data)
 			SND_LOG_ERR("register jack notifier failed\n");
 			return -1;
 		}
-
-		jack_adv->pmu_psy = devm_power_supply_get_by_phandle(jack_adv->dev, "extcon");
 
 		ret = snd_sunxi_jack_adv_typec_init(jack_adv);
 		if (ret < 0) {
@@ -396,6 +599,7 @@ int snd_sunxi_jack_adv_init(void *jack_data)
 void snd_sunxi_jack_adv_exit(void *jack_data)
 {
 	struct sunxi_jack_adv *jack_adv;
+	struct sunxi_jack_sdbp *jack_sdbp;
 	struct device_node *np;
 
 	SND_LOG_DEBUG("\n");
@@ -405,12 +609,18 @@ void snd_sunxi_jack_adv_exit(void *jack_data)
 		return;
 	}
 	jack_adv = jack_data;
+	jack_sdbp = &jack_adv->jack_sdbp;
 
 	if (jack_adv->jack_irq_free)
 		jack_adv->jack_irq_free(jack_adv->data);
 
 	cancel_work_sync(&sunxi_jack.det_irq_work);
 	cancel_delayed_work_sync(&sunxi_jack.det_sacn_work);
+
+	if (jack_sdbp->jack_sdbp_method == SDBP_SCAN) {
+		cancel_work_sync(&jack_sdbp->sdbp_scan_work);
+		hrtimer_cancel(&jack_sdbp->sdbp_scan_hrt.timer);
+	}
 
 	np = jack_adv->dev->of_node;
 	if (of_property_read_bool(np, "extcon")) {

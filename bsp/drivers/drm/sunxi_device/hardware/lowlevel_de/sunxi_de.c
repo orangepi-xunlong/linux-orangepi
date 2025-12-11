@@ -728,7 +728,7 @@ void sunxi_de_atomic_flush(struct sunxi_de_out *hwde, struct de_backend_data *da
 
 		if (engine->de_devfreq_auto)
 			sunxi_de_auto_calc_freq_and_apply(engine->display_out);
-		de_top_update_force_by_ahb(engine->top_hdl);
+		// de_top_update_force_by_ahb(engine->top_hdl);
 
 		if (engine->match_data->rcq_wait_line)
 			rcq_update_timer_start(hwde);
@@ -830,7 +830,8 @@ static int rtmx_start(struct sunxi_display_engine *engine, unsigned int id, unsi
 	de_top_offline_mode_config(engine->top_hdl, &offline);
 
 	memset(&dfs_cfg, 0, sizeof(dfs_cfg));
-	dfs_cfg.enable = true;
+	if (!engine->de_devfreq_auto) // software/hardware dfs choose one
+		dfs_cfg.enable = true;
 	dfs_cfg.display_id = id;
 	dfs_cfg.de_clk = hwde->output_info.de_clk_freq;
 	dfs_cfg.dclk = hwde->kHZ_pixelclk * 1000;
@@ -1827,10 +1828,22 @@ int sunxi_de_write_back(struct sunxi_de_out *hwde, struct sunxi_de_wb *wb, struc
 	return de_wb_apply(wb_hdl, &in_info, fb);
 }
 
-bool sunxi_de_query_de_busy(struct sunxi_de_out *hwde)
+bool sunxi_de_query_de_busy(struct sunxi_de_out *hwde, struct disp_video_timings *timings)
 {
 	struct sunxi_display_engine *engine = dev_get_drvdata(hwde->dev);
-	return de_top_query_de_busy_state(engine->top_hdl, hwde->id);
+	unsigned int cur_line;
+
+	if (engine->match_data->update_mode == RCQ_MODE) {
+		if (engine->match_data->rcq_wait_line) {
+			cur_line = sunxi_drm_crtc_get_output_current_line(hwde->scrtc);
+			return !(cur_line <= timings->ver_front_porch);
+		} else {
+			return de_top_query_de_busy_state(engine->top_hdl, hwde->id);
+		}
+	} else {
+		// TODO
+		return false;
+	}
 }
 
 int sunxi_de_div_calc_mn(unsigned long freq_in_kHZ, unsigned long freq_out_kHZ, unsigned int *m, unsigned int *n)
@@ -1911,6 +1924,7 @@ int sunxi_de_auto_calc_freq_and_apply(struct sunxi_de_out *hwde)
 	return 0;
 }
 
+#if IS_ENABLED(CONFIG_AW_DRM_DE_OFFLINE_MODE)
 int sunxi_de_get_offline_mode_info(struct sunxi_de_out *hwde, void **vir_addr, unsigned long *buff_size)
 {
 	struct sunxi_display_engine *engine;
@@ -1949,3 +1963,4 @@ enum de_offline_mode_status sunxi_de_query_clear_offline_mode_status(struct sunx
 	struct sunxi_display_engine *engine = dev_get_drvdata(hwde->dev);
 	return de_top_offline_mode_query_state_with_clear(engine->top_hdl, status);
 }
+#endif

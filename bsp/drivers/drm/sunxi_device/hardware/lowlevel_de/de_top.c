@@ -182,6 +182,10 @@ struct de_top_private {
 	const struct de_top_desc *dsc;
 	struct offline_mode_status offline;
 
+	bool dfs_en;
+	u16 dfs_m;
+	u16 dfs_n;
+
 	struct de_reg_mem_info reg_mem_info;
 	u32 reg_blk_num;
 	struct de_reg_block reg_blks[DE_TOP_REG_BLK_NUM];
@@ -787,7 +791,7 @@ int de_top_wb_config(struct de_top_handle *hdl, const struct de_top_wb_cfg *cfg)
 	return 0;
 }
 
-static s32 de_top_pingpang_buf_free(struct de_top_handle *hdl)
+static s32 __maybe_unused de_top_pingpang_buf_free(struct de_top_handle *hdl)
 {
 	struct offline_mode_status *st = &hdl->private->offline;
 	if (st->virt_addr && st->phy_addr) {
@@ -802,7 +806,7 @@ static s32 de_top_pingpang_buf_free(struct de_top_handle *hdl)
 	return 0;
 }
 
-static s32 de_top_pingpang_buf_alloc(struct de_top_handle *hdl, unsigned int width, unsigned int height)
+static s32 __maybe_unused de_top_pingpang_buf_alloc(struct de_top_handle *hdl, unsigned int width, unsigned int height)
 {
 	struct offline_mode_status *st = &hdl->private->offline;
 
@@ -820,6 +824,17 @@ static s32 de_top_pingpang_buf_alloc(struct de_top_handle *hdl, unsigned int wid
 	return 0;
 }
 
+static bool de_top_offline_is_enable(struct de_top_handle *hdl)
+{
+	u8 __iomem *reg_base = hdl->cinfo.de_reg_base + DE_OFFLINE_CTL_OFFSET;
+
+	if (!hdl->private->dsc->support_offline)
+		return false;
+
+	return readl(reg_base) & 0x1;
+}
+
+#if IS_ENABLED(CONFIG_AW_DRM_DE_OFFLINE_MODE)
 static s32 de_top_set_offline_enable(struct de_top_handle *hdl, bool enable, enum de_offline_mode mode)
 {
 	struct offline_mode_status *st = &hdl->private->offline;
@@ -840,15 +855,6 @@ static s32 de_top_set_offline_enable(struct de_top_handle *hdl, bool enable, enu
 	return 0;
 }
 
-static bool de_top_offline_is_enable(struct de_top_handle *hdl)
-{
-	u8 __iomem *reg_base = hdl->cinfo.de_reg_base + DE_OFFLINE_CTL_OFFSET;
-
-	if (!hdl->private->dsc->support_offline)
-		return false;
-
-	return readl(reg_base) & 0x1;
-}
 
 s32 de_top_offline_realloc_pingpang_buf(struct de_top_handle *hdl, unsigned int width, unsigned int height)
 {
@@ -927,6 +933,7 @@ enum de_offline_mode_status de_top_offline_mode_query_state_with_clear(struct de
 
 	return state;
 }
+#endif
 
 static s32 de_top_set_dfs_divison_enable(struct de_top_handle *hdl, u32 disp, u32 n, u32 m, bool en)
 {
@@ -968,6 +975,9 @@ s32 de_top_dfs_config_enable(struct de_top_handle *hdl, struct dfs_cfg *cfg)
 	u32 divisor;
 	u32 remaind;
 
+	if (!hdl->private->dsc->support_dfs)
+		return 0;
+
 	if (cfg->dclk == 0 || cfg->de_clk == 0) {
 		DRM_ERROR("clk is zero de_clk(%d) dclk(%d)\n", cfg->de_clk, cfg->dclk);
 		return -1;
@@ -991,7 +1001,7 @@ s32 de_top_dfs_config_enable(struct de_top_handle *hdl, struct dfs_cfg *cfg)
 	 * in some scenarios due to insufficient performance
 	 */
 	m = m > 0 ? m - 1 : m;
-	return de_top_set_dfs_divison_enable(hdl, cfg->display_id, n, m, 0);
+	return de_top_set_dfs_divison_enable(hdl, cfg->display_id, n, m, cfg->enable);
 }
 
 int de_top_enable_irq(struct de_top_handle *hdl, u32 disp, u32 irq_flag, u32 en)
@@ -1096,6 +1106,10 @@ int de_top_set_rcq_update(struct de_top_handle *hdl, u32 disp, bool update)
 	if (!hdl->private->dsc->busy_offset || in_interrupt()) {
 		reg_val = readl(reg_base);
 		reg_val = SET_BITS(0, 1, reg_val, update ? 0x1 : 0x0);
+		if (hdl->private->dfs_en) {
+			reg_val = SET_BITS(8, 4, reg_val, hdl->private->dfs_m);
+			reg_val = SET_BITS(12, 4, reg_val, hdl->private->dfs_n);
+		}
 		writel(reg_val, reg_base);
 		return 0;
 	}
@@ -1106,6 +1120,10 @@ int de_top_set_rcq_update(struct de_top_handle *hdl, u32 disp, bool update)
 		if (de_top_query_de_busy_state(hdl, disp)) {
 			reg_val = readl(reg_base);
 			reg_val = SET_BITS(0, 1, reg_val, update ? 0x1 : 0x0);
+			if (hdl->private->dfs_en) {
+				reg_val = SET_BITS(8, 4, reg_val, hdl->private->dfs_m);
+				reg_val = SET_BITS(12, 4, reg_val, hdl->private->dfs_n);
+			}
 			writel(reg_val, reg_base);
 			local_irq_restore(flag);
 			break;
@@ -1171,6 +1189,7 @@ int de_top_request_rcq_fifo_update(struct de_top_handle *hdl, u32 disp, unsigned
 		return -1;
 }
 
+__attribute__((unused))
 static void de_top_set_block_dirty(struct de_top_private *priv, int blk_id, u32 dirty)
 {
 	priv->reg_blks[blk_id].dirty = dirty;
@@ -1181,22 +1200,38 @@ static void de_top_set_block_dirty(struct de_top_private *priv, int blk_id, u32 
 
 int de_top_freq_div_get(struct de_top_handle *hdl, unsigned int *m, unsigned int *n)
 {
+	u8 __iomem *reg_base = hdl->cinfo.de_reg_base + hdl->private->dsc->rcq_ctl_offset;
+	u32 reg_val;
 
-	struct de_top_private *priv = hdl->private;
-	union de_top_rcq_ctl_reg *reg = get_de_top_reg(priv);
-	*m = reg->bits.m;
-	*n = reg->bits.n;
+	if (!hdl->private->dsc->support_dfs) {
+		*m = *n = 0;
+		return 0;
+	}
+
+	reg_val = readl(reg_base);
+	*m = (reg_val >> 8) & 0xf;
+	*n = (reg_val >> 12) & 0xf;
 	return 0;
 }
 
+/* use ahb direct update, the hardware automatically refreshes to the real register at the next vsync */
 int de_top_freq_div_apply(struct de_top_handle *hdl, unsigned int m, unsigned int n)
 {
+	// u8 __iomem *reg_base = hdl->cinfo.de_reg_base + hdl->private->dsc->rcq_ctl_offset;
+	// u32 reg_val;
 
-	struct de_top_private *priv = hdl->private;
-	union de_top_rcq_ctl_reg *reg = get_de_top_reg(priv);
-	reg->bits.m = m;
-	reg->bits.n = n;
-	de_top_set_block_dirty(priv, DE_RCQ_CTL_REG_BLK, 1);
+	if (!hdl->private->dsc->support_dfs)
+		return 0;
+
+	// stash dfs status
+	hdl->private->dfs_en = true;
+	hdl->private->dfs_n = n;
+	hdl->private->dfs_m = m;
+
+	// reg_val = readl(reg_base);
+	// reg_val = SET_BITS(8, 4, reg_val, m);
+	// reg_val = SET_BITS(12, 4, reg_val, n);
+	// writel(reg_val, reg_base);
 	return 0;
 }
 

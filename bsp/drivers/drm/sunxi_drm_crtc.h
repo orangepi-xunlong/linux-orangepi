@@ -97,6 +97,5 @@ int sunxi_drm_crtc_get_backlight(struct sunxi_drm_crtc *scrtc);
 void sunxi_drm_crtc_set_backlight_value(struct sunxi_drm_crtc *scrtc, int backlight);
 
 int sunxi_drm_crtc_pq_proc(struct drm_device *dev, int disp, enum sunxi_pq_type, void *data);
-void sunxi_drm_sup_wb_clone(struct drm_device *drm, struct drm_encoder *enc);
 
 #endif

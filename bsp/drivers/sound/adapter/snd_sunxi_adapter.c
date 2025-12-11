@@ -79,11 +79,11 @@ int snd_sunxi_card_jack_new(struct snd_soc_card *card, const char *id, int type,
 #if IS_ENABLED(CONFIG_SND_SOC_SUNXI_PULSEAUDIO)
 	struct snd_soc_jack_pin sunxi_jack_pin_switchs[] = {
 		{
-			.pin = "HP",
+			.pin = "HP Jack",
 			.mask = SND_JACK_HEADPHONE,
 		},
 		{
-			.pin = "HS MIC",
+			.pin = "HS MIC Jack",
 			.mask = SND_JACK_MICROPHONE,
 		},
 	};

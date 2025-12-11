@@ -102,7 +102,7 @@ static struct dma_fence *panfrost_fence_create(struct panfrost_device *pfdev, in
 	return &fence->base;
 }
 
-static int panfrost_job_get_slot(struct panfrost_job *job)
+int panfrost_job_get_slot(struct panfrost_job *job)
 {
 	/* JS0: fragment jobs.
 	 * JS1: vertex/tiler jobs
@@ -201,7 +201,11 @@ static void panfrost_job_hw_submit(struct panfrost_job *job, int js)
 		return;
 	}
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0))
+    cfg = panfrost_mmu_as_get(pfdev, job->mmu);
+#else
 	cfg = panfrost_mmu_as_get(pfdev, job->file_priv->mmu);
+#endif
 
 	job_write(pfdev, JS_HEAD_NEXT_LO(js), jc_head & 0xFFFFFFFF);
 	job_write(pfdev, JS_HEAD_NEXT_HI(js), jc_head >> 32);
@@ -240,6 +244,29 @@ static void panfrost_job_hw_submit(struct panfrost_job *job, int js)
 	spin_unlock(&pfdev->js->job_lock);
 }
 
+
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0))
+static int panfrost_acquire_object_fences(struct drm_gem_object **bos,
+					  int bo_count,
+					  struct drm_sched_job *job)
+{
+	int i, ret;
+
+	for (i = 0; i < bo_count; i++) {
+		ret = dma_resv_reserve_fences(bos[i]->resv, 1);
+		if (ret)
+			return ret;
+
+		/* panfrost always uses write mode in its current uapi */
+		ret = drm_sched_job_add_implicit_dependencies(job, bos[i],
+							      true);
+		if (ret)
+			return ret;
+	}
+
+	return 0;
+}
+#else
 static int panfrost_acquire_object_fences(struct drm_gem_object **bos,
 					  int bo_count,
 					  struct xarray *deps)
@@ -255,6 +282,7 @@ static int panfrost_acquire_object_fences(struct drm_gem_object **bos,
 
 	return 0;
 }
+#endif
 
 static void panfrost_attach_object_fences(struct drm_gem_object **bos,
 					  int bo_count,
@@ -262,10 +290,85 @@ static void panfrost_attach_object_fences(struct drm_gem_object **bos,
 {
 	int i;
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0))
+	for (i = 0; i < bo_count; i++)
+		dma_resv_add_fence(bos[i]->resv, fence, DMA_RESV_USAGE_WRITE);
+#else
 	for (i = 0; i < bo_count; i++)
 		dma_resv_add_excl_fence(bos[i]->resv, fence);
+#endif
 }
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0))
+int panfrost_job_push(struct panfrost_job *job)
+{
+	struct panfrost_device *pfdev = job->pfdev;
+	struct ww_acquire_ctx acquire_ctx;
+	int ret = 0;
+
+	ret = drm_gem_lock_reservations(job->bos, job->bo_count,
+					    &acquire_ctx);
+	if (ret)
+		return ret;
+
+	mutex_lock(&pfdev->sched_lock);
+	drm_sched_job_arm(&job->base);
+
+	job->render_done_fence = dma_fence_get(&job->base.s_fence->finished);
+
+	ret = panfrost_acquire_object_fences(job->bos, job->bo_count,
+					     &job->base);
+	if (ret) {
+		mutex_unlock(&pfdev->sched_lock);
+		goto unlock;
+	}
+
+	kref_get(&job->refcount); /* put by scheduler job completion */
+
+	drm_sched_entity_push_job(&job->base);
+
+	mutex_unlock(&pfdev->sched_lock);
+
+	panfrost_attach_object_fences(job->bos, job->bo_count,
+				      job->render_done_fence);
+
+unlock:
+	drm_gem_unlock_reservations(job->bos, job->bo_count, &acquire_ctx);
+
+	return ret;
+}
+
+static void panfrost_job_cleanup(struct kref *ref)
+{
+	struct panfrost_job *job = container_of(ref, struct panfrost_job,
+						refcount);
+	unsigned int i;
+
+	dma_fence_put(job->done_fence);
+	dma_fence_put(job->render_done_fence);
+
+	if (job->mappings) {
+		for (i = 0; i < job->bo_count; i++) {
+			if (!job->mappings[i])
+				break;
+
+			atomic_dec(&job->mappings[i]->obj->gpu_usecount);
+			panfrost_gem_mapping_put(job->mappings[i]);
+		}
+		kvfree(job->mappings);
+	}
+
+	if (job->bos) {
+		for (i = 0; i < job->bo_count; i++)
+			drm_gem_object_put(job->bos[i]);
+
+		kvfree(job->bos);
+	}
+
+	kfree(job);
+}
+
+#else
 int panfrost_job_push(struct panfrost_job *job)
 {
 	struct panfrost_device *pfdev = job->pfdev;
@@ -348,6 +451,7 @@ static void panfrost_job_cleanup(struct kref *ref)
 
 	kfree(job);
 }
+#endif
 
 void panfrost_job_put(struct panfrost_job *job)
 {
@@ -363,6 +467,7 @@ static void panfrost_job_free(struct drm_sched_job *sched_job)
 	panfrost_job_put(job);
 }
 
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 6, 0))
 static struct dma_fence *panfrost_job_dependency(struct drm_sched_job *sched_job,
 						 struct drm_sched_entity *s_entity)
 {
@@ -373,6 +478,7 @@ static struct dma_fence *panfrost_job_dependency(struct drm_sched_job *sched_job
 
 	return NULL;
 }
+#endif
 
 static struct dma_fence *panfrost_job_run(struct drm_sched_job *sched_job)
 {
@@ -456,7 +562,11 @@ static void panfrost_job_handle_err(struct panfrost_device *pfdev,
 		job->jc = 0;
 	}
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0))
+    panfrost_mmu_as_put(pfdev, job->mmu);
+#else
 	panfrost_mmu_as_put(pfdev, job->file_priv->mmu);
+#endif
 	panfrost_devfreq_record_idle(&pfdev->pfdevfreq);
 
 	if (signal_fence)
@@ -477,7 +587,11 @@ static void panfrost_job_handle_done(struct panfrost_device *pfdev,
 	 * happen when we receive the DONE interrupt while doing a GPU reset).
 	 */
 	job->jc = 0;
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0))
+    panfrost_mmu_as_put(pfdev, job->mmu);
+#else
 	panfrost_mmu_as_put(pfdev, job->file_priv->mmu);
+#endif
 	panfrost_devfreq_record_idle(&pfdev->pfdevfreq);
 
 	dma_fence_signal_locked(job->done_fence);
@@ -748,6 +862,23 @@ static void panfrost_job_timedout(struct drm_sched_job *sched_job)
 		return;
 #endif
 
+	/*
+	 * Panfrost IRQ handler may take a long time to process an interrupt
+	 * if there is another IRQ handler hogging the processing.
+	 * For example, the HDMI encoder driver might be stuck in the IRQ
+	 * handler for a significant time in a case of bad cable connection.
+	 * In order to catch such cases and not report spurious Panfrost
+	 * job timeouts, synchronize the IRQ handler and re-check the fence
+	 * status.
+	 */
+	synchronize_irq(pfdev->js->irq);
+
+	if (dma_fence_is_signaled(job->done_fence)) {
+		dev_warn(pfdev->dev, "unexpectedly high interrupt latency\n");
+		return DRM_GPU_SCHED_STAT_NOMINAL;
+	}
+
+
 	dev_err(pfdev->dev, "gpu sched timeout, js=%d, config=0x%x, status=0x%x, head=0x%x, tail=0x%x, sched_job=%p",
 		js,
 		job_read(pfdev, JS_CONFIG(js)),
@@ -773,7 +904,9 @@ static void panfrost_reset_work(struct work_struct *work)
 }
 
 static const struct drm_sched_backend_ops panfrost_sched_ops = {
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 6, 0))
 	.dependency = panfrost_job_dependency,
+#endif
 	.run_job = panfrost_job_run,
 	.timedout_job = panfrost_job_timedout,
 	.free_job = panfrost_job_free
@@ -847,7 +980,10 @@ int panfrost_job_init(struct panfrost_device *pfdev)
 				     &panfrost_sched_ops,
 				     nentries, 0,
 				     msecs_to_jiffies(JOB_TIMEOUT_MS),
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0))
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0))
+				     pfdev->reset.wq,
+				     NULL, "pan_js", pfdev->dev);
+#elif (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0))
 				     pfdev->reset.wq,
 				     NULL, "pan_js");
 #elif (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 10, 0))

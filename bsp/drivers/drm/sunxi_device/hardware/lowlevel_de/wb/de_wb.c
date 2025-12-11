@@ -132,7 +132,7 @@ static s32 de_wb_set_base_para(struct de_wb_handle *handle, unsigned int in_w, u
 	u32 step_h, step_v;
 	u32 v_intg, v_frac, h_intg, h_frac;
 	u32 down_scale_y, down_scale_c;
-	u32 pitch[2] = {0};
+	u32 pitch[3] = {0};
 
 	out_fmt = out_fb->format->format;
 	out_window_w = out_fb->width;
@@ -149,64 +149,32 @@ static s32 de_wb_set_base_para(struct de_wb_handle *handle, unsigned int in_w, u
 	reg->sftm.bits.sftm_vs = 0x20; /*default*/
 
 #if LINUX_VERSION_CODE <= KERNEL_VERSION(6, 1, 0)
-	gem = drm_fb_cma_get_gem_obj(out_fb, 0);
-	if (gem) {
-		out_addr[0] = (unsigned long)(gem->paddr) + out_fb->offsets[0];
-		pitch[0] = out_fb->pitches[0];
-		// change sunxi_gem_object 's direction, ensure cache coherence
-		// for data that might be read from ddr by cpu
-		sgem_obj = to_sunxi_gem_obj(gem);
-		sgem_obj->dir = DMA_FROM_DEVICE;
-	}
-
-	gem = drm_fb_cma_get_gem_obj(out_fb, 1);
-	if (gem) {
-		out_addr[1] = (u64)(gem->paddr) + out_fb->offsets[1];
-		pitch[1] = out_fb->pitches[1];
-		// change sunxi_gem_object 's direction, ensure cache coherence
-		// for data that might be read from ddr by cpu
-		sgem_obj = to_sunxi_gem_obj(gem);
-		sgem_obj->dir = DMA_FROM_DEVICE;
-	}
-
-	gem = drm_fb_cma_get_gem_obj(out_fb, 2);
-	if (gem) {
-		out_addr[2] = (u64)(gem->paddr) + out_fb->offsets[2];
-		// change sunxi_gem_object 's direction, ensure cache coherence
-		// for data that might be read from ddr by cpu
-		sgem_obj = to_sunxi_gem_obj(gem);
-		sgem_obj->dir = DMA_FROM_DEVICE;
+	for (i = 0; i < out_fb->format->num_planes; ++i) {
+		gem = drm_fb_cma_get_gem_obj(out_fb, i);
+		if (gem) {
+			out_addr[i] = (unsigned long)(gem->paddr) + out_fb->offsets[i];
+			pitch[i] = out_fb->pitches[i];
+			// change sunxi_gem_object 's direction, ensure cache coherence
+			// for data that might be read from ddr by cpu
+			sgem_obj = to_sunxi_gem_obj(gem);
+			sgem_obj->dir = DMA_FROM_DEVICE;
+		}
 	}
 #else
-	gem = drm_fb_dma_get_gem_obj(out_fb, 0);
-	if (gem) {
-		out_addr[0] = (unsigned long)(gem->dma_addr) + out_fb->offsets[0];
-		pitch[0] = out_fb->pitches[0];
-		// change sunxi_gem_object 's direction, ensure cache coherence
-		// for data that might be read from ddr by cpu
-		sgem_obj = to_sunxi_gem_obj(gem);
-		sgem_obj->dir = DMA_FROM_DEVICE;
+	for (i = 0; i < out_fb->format->num_planes; ++i) {
+		gem = drm_fb_dma_get_gem_obj(out_fb, i);
+		if (gem) {
+			out_addr[i] = (unsigned long)(gem->dma_addr) + out_fb->offsets[i];
+			pitch[i] = out_fb->pitches[i];
+			// change sunxi_gem_object 's direction, ensure cache coherence
+			// for data that might be read from ddr by cpu
+			sgem_obj = to_sunxi_gem_obj(gem);
+			sgem_obj->dir = DMA_FROM_DEVICE;
+		}
 	}
 
-	gem = drm_fb_dma_get_gem_obj(out_fb, 1);
-	if (gem) {
-		out_addr[1] = (u64)(gem->dma_addr) + out_fb->offsets[1];
-		pitch[1] = out_fb->pitches[1];
-		// change sunxi_gem_object 's direction, ensure cache coherence
-		// for data that might be read from ddr by cpu
-		sgem_obj = to_sunxi_gem_obj(gem);
-		sgem_obj->dir = DMA_FROM_DEVICE;
-	}
-
-	gem = drm_fb_dma_get_gem_obj(out_fb, 2);
-	if (gem) {
-		out_addr[2] = (u64)(gem->dma_addr) + out_fb->offsets[2];
-		// change sunxi_gem_object 's direction, ensure cache coherence
-		// for data that might be read from ddr by cpu
-		sgem_obj = to_sunxi_gem_obj(gem);
-		sgem_obj->dir = DMA_FROM_DEVICE;
-	}
 #endif
+
 
 	switch (out_fmt) {
 	case DRM_FORMAT_ARGB8888:
@@ -246,6 +214,7 @@ static s32 de_wb_set_base_para(struct de_wb_handle *handle, unsigned int in_w, u
 		DRM_ERROR("unknow out fmt %d\n", out_fmt);
 		return -1;
 	}
+
 
 	reg->wb_pitch0.dwval = pitch[0];
 	reg->wb_pitch1.dwval = pitch[1];
@@ -548,4 +517,3 @@ struct de_wb_handle *de_wb_create(struct module_create_info *info)
 
 	return hdl;
 }
-

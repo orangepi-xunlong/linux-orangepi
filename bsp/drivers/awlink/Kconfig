@@ -9,5 +9,23 @@ config AW_AWLINK_SUN55I
 	help
 	  if say Y here, you can use AWLINK controller found on Allwinner SoCs.
 
+if AW_AWLINK_SUN55I
+choice
+	prompt "select awlink support kernel version"
+	default AWLINK_SUPPORT_KERNEL_5_15
+
+ config AWLINK_SUPPORT_KERNEL_5_15
+	bool "select awlink support with linux 5.15"
+	help
+		Support awlink with linux 5.15
+
+ config AWLINK_SUPPORT_KERNEL_6_6
+	bool "select awlink support with linux 6.6"
+	help
+		Support awlink with linux 6.6
+
+endchoice
+endif
+
 endmenu
 

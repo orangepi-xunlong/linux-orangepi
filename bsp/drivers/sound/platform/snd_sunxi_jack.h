@@ -39,13 +39,19 @@ struct sunxi_jack_sdbp {
 	 * 1.1 1 - Keep detecting by enable hmbias to trigger interupt.
 	 * 1.2 2 - Keep detecting by delayed work queue to read mic-pin voltage.
 	 *
-	 * 2. dst attribute - "jack-sdbp-scan-single-time".(if "jack-sdbp-method" == SDBP_SCAN).
+	 * the following param only for "jack-sdbp-method" == SDBP_SCAN
+	 * 2. dst attribute - "jack-sdbp-scan-single-time".
 	 * 2.1 The unit is ms.
 	 * 2.2 The length of time between each detection.
-	 * 2.3 The value must greater than 1000.
+	 *
+	 * 3. dst attribute - "jack-sdbp-scan-max-time".
+	 * 3.1 The unit is ms.
+	 * 3.2 The max time for sdbp working.
 	 */
-	enum SDBP_METHOD jack_sdbp_method;
-	unsigned int jack_sdbp_scan_single_time;
+	enum SDBP_METHOD jack_sdbp_method;		/* from dts */
+	unsigned int jack_sdbp_scan_single_time;	/* from dts */
+	unsigned int jack_sdbp_scan_max_time;		/* from dts */
+	unsigned int jack_sdbp_scan_num;
 
 	int (*jack_sdbp_irq_init)(void *);
 	void (*jack_sdbp_irq_exit)(void *);
@@ -206,8 +212,8 @@ struct sunxi_jack_adv {
 	struct extcon_dev *extdev;
 	struct notifier_block hp_nb;
 	struct sunxi_jack_typec_cfg jack_typec_cfg;
-	struct power_supply *pmu_psy;
 	bool typec;
+	bool pre_scan;
 
 	void *data;
 	int (*jack_init)(void *);
@@ -222,9 +228,12 @@ struct sunxi_jack_adv {
 	void (*jack_irq_clean)(void *, int);
 
 	void (*jack_det_irq_work)(void *, enum snd_jack_types *);
+	void (*jack_det_pre_scan_work)(void *, enum snd_jack_types *);
 	void (*jack_det_scan_work)(void *, enum snd_jack_types *);
 
 	int (*jack_status_sync)(void *data, enum snd_jack_types);
+
+	struct sunxi_jack_sdbp jack_sdbp;
 };
 
 struct sunxi_jack_port {

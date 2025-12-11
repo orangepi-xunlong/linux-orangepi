@@ -127,7 +127,11 @@ struct panfrost_device {
 #if IS_ENABLED(CONFIG_ARCH_SUN50IW9)
 	struct clk *bak_clock;
 #endif
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0))
+	int    opp_table;
+#else
 	struct opp_table *opp_table;
+#endif
 };
 
 struct panfrost_mmu {

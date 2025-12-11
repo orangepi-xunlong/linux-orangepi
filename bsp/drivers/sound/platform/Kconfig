@@ -43,6 +43,9 @@ config SND_SOC_SUNXI_SUN8IW20_CODEC
 config SND_SOC_SUNXI_SUN8IW21_CODEC
 	tristate
 
+config SND_SOC_SUNXI_SUN8IW22_CODEC
+	tristate
+
 config SND_SOC_SUNXI_SUN20IW1_CODEC
 	tristate
 
@@ -56,9 +59,6 @@ config SND_SOC_SUNXI_SUN251IW1_CODEC
 	tristate
 
 config SND_SOC_SUNXI_SUN300IW1_CODEC
-	tristate
-
-config SND_SOC_SUNXI_SUN65IW1_CODEC
 	tristate
 
 # menu select
@@ -79,18 +79,19 @@ config SND_SOC_SUNXI_AAUDIO
 	select SND_SOC_SUNXI_SUN8IW18_CODEC if ARCH_SUN8IW18
 	select SND_SOC_SUNXI_SUN8IW20_CODEC if ARCH_SUN8IW20
 	select SND_SOC_SUNXI_SUN8IW21_CODEC if ARCH_SUN8IW21
+	select SND_SOC_SUNXI_SUN8IW22_CODEC if ARCH_SUN8IW22
 	select SND_SOC_SUNXI_SUN20IW1_CODEC if ARCH_SUN20IW1
 	select SND_SOC_SUNXI_SUN55IW3_CODEC if ARCH_SUN55IW3
 	select SND_SOC_SUNXI_SUN55IW6_CODEC if ARCH_SUN55IW6
 	select SND_SOC_SUNXI_SUN251IW1_CODEC if ARCH_SUN251IW1
 	select SND_SOC_SUNXI_SUN300IW1_CODEC if ARCH_SUN300IW1
-	select SND_SOC_SUNXI_SUN65IW1_CODEC if ARCH_SUN65IW1
 	depends on ARCH_SUN50IW10 \
 		|| ARCH_SUN50IW9  \
 		|| ARCH_SUN8IW11  \
 		|| ARCH_SUN8IW18  \
 		|| ARCH_SUN8IW20  \
 		|| ARCH_SUN8IW21  \
+		|| ARCH_SUN8IW22  \
 		|| ARCH_SUN20IW1  \
 		|| ARCH_SUN55IW3  \
 		|| ARCH_SUN55IW6  \
@@ -99,6 +100,18 @@ config SND_SOC_SUNXI_AAUDIO
 		|| ARCH_SUN65IW1
 	help
 	  Select Y or M to support analog-audio Module in the Allwinner SoCs.
+
+choice
+	prompt "ARCH_SUN65IW1 codec select"
+	depends on ARCH_SUN65IW1 && SND_SOC_SUNXI_AAUDIO
+	default SND_SOC_SUNXI_SUN65IW1_CODEC
+
+config SND_SOC_SUNXI_SUN65IW1_CODEC
+	bool "internel codec"
+
+config SND_SOC_SUNXI_SUN65IW1_AC203C_CODEC
+	bool "external ac203c codec"
+endchoice
 
 # owa
 config SND_SOC_SUNXI_OWA
@@ -112,6 +125,7 @@ config SND_SOC_SUNXI_OWA
 		|| ARCH_SUN50IW9  \
 		|| ARCH_SUN8IW11  \
 		|| ARCH_SUN8IW20  \
+		|| ARCH_SUN8IW22  \
 		|| ARCH_SUN20IW1  \
 		|| ARCH_SUN55IW3  \
 		|| ARCH_SUN8IW18  \
@@ -145,6 +159,7 @@ config SND_SOC_SUNXI_DMIC
 		|| ARCH_SUN8IW18  \
 		|| ARCH_SUN8IW20  \
 		|| ARCH_SUN8IW21  \
+		|| ARCH_SUN8IW22  \
 		|| ARCH_SUN20IW1  \
 		|| ARCH_SUN55IW6  \
 		|| ARCH_SUN65IW1 \
@@ -168,6 +183,7 @@ config SND_SOC_SUNXI_I2S
 		|| ARCH_SUN8IW17  \
 		|| ARCH_SUN8IW20  \
 		|| ARCH_SUN8IW21  \
+		|| ARCH_SUN8IW22  \
 		|| ARCH_SUN20IW1  \
 		|| ARCH_SUN55IW6  \
 		|| ARCH_SUN251IW1  \
@@ -199,7 +215,8 @@ config SND_SOC_SUNXI_CODEC_EDP
 #AVAUDIO
 config SND_SOC_SUNXI_CODEC_AV
 	tristate "Allwinner AVAUDIO support"
-	depends on ARCH_SUN60IW2
+	depends on ARCH_SUN60IW2 \
+		|| ARCH_SUN65IW1
 	help
 	  Select Y or M to support av audio in Allwinner SoCs.
 endif
@@ -226,6 +243,19 @@ config SND_SOC_SUNXI_CODEC_HDMI
 	  Select Y or M to support hdmi audio in Allwinner SoCs.
 endif
 
+# SYSCFG
+config SND_SOC_SUNXI_SYSCFG
+	tristate "Allwinner AUDIOSYSCFG support"
+	select REGMAP_MMIO
+	select SND_SOC_GENERIC_DMAENGINE_PCM
+	select SND_SOC_SUNXI_PCM
+	select SND_SOC_SUNXI_MACH
+	select SND_SOC_SUNXI_COMMON
+	depends on ARCH_SUN251IW1 \
+		|| ARCH_SUN60IW2
+	help
+	  Select Y or M to support audio syscfg Module in the Allwinner SoCs.
+
 # Components for all
 config SND_SOC_SUNXI_COMPONENTS
 	tristate "Allwinner function components"
@@ -237,6 +267,7 @@ config SND_SOC_SUNXI_COMPONENTS
 		|| ARCH_SUN8IW18  \
 		|| ARCH_SUN8IW20  \
 		|| ARCH_SUN8IW21  \
+		|| ARCH_SUN8IW22  \
 		|| ARCH_SUN20IW1  \
 		|| ARCH_SUN251IW1  \
                 || ARCH_SUN300IW1  \
@@ -252,7 +283,8 @@ config SND_SOC_SUNXI_SFX
 		|| ARCH_SUN55IW3 \
                 || ARCH_SUN300IW1  \
 		|| ARCH_SUN65IW1 \
-		|| ARCH_SUN251IW1
+		|| ARCH_SUN251IW1 \
+		|| ARCH_SUN8IW22
 	help
 	  Select Y or M to support sfx components.
 

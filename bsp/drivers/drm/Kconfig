@@ -20,6 +20,13 @@ config AW_DRM_DE
 	help
 		If you want use DE of Version 35X, select it.
 
+config AW_DRM_DE_OFFLINE_MODE
+	bool "Support Sunxi Display_Engine(DE) Offline Mode"
+	depends on AW_DRM_DE
+	default n
+	help
+		If you want use DE offline mode and DE support offline mode, select it
+
 # remove it after both tcon_lcd/tcon_tv ready?
 config AW_DRM_TCON
 	bool "Support Timing Controller(TCON)"

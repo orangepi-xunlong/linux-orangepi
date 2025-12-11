@@ -84,7 +84,8 @@
 #define I2S_RX_CTRL3		0x42
 #define I2S_RX_MIX_CTRL		0x43
 #define I2S_RX_CHMP_CTRL	0x44
-
+/* EFUSE_RD_CTRL */
+#define EFUSE_RD_CTRL       	0x54
 /* ADDA sample rate */
 #define ADDA_FS_CTRL		0x60
 
@@ -135,7 +136,6 @@
 
 #define AC101B_MAX_REG		0xff
 
-
 /* POWER_REG1 0x01 */
 #define VRA1_SEPPEDUP		7
 #define BG_BUFEN		6
@@ -180,7 +180,7 @@
 #define MBIAS_CHOPPER_CLK_SEL	2
 
 /* HBIAS_REG 0x08 */
-#define HBIAS_VOLT_SEL		4
+#define HBIAS_VOL_SEL		4
 #define HBIAS_MODE		2
 #define HBIAS_EN		1
 #define HBIASADC_EN		0
@@ -443,7 +443,9 @@
 /* I2S_RX_CHMP_CTRL 0x44 */
 #define RXR_MAP			4
 #define RXL_MAP			0
-
+/* EFUSE_REG 0x54 */
+#define EFUSE_RD_VAL	4
+#define EFUSE_RD_EN		0
 /* ADDA_FS_CTRL 0x60 */
 #define ADDA_FS_DIV		0
 
@@ -597,8 +599,11 @@
 #define HPLDO_LVOLT		0
 
 /* HP_AVR_THH 0x8b */
+#define THRESHLOD_H		0
 /* HP_AVR_THM 0x8c */
+#define THRESHLOD_M		0
 /* HP_AVR_THL 0x8d */
+#define THRESHLOD_L		0
 /* HP_AVR_DBC 0x8e */
 #define	HV_DBC			0
 
@@ -642,13 +647,16 @@ enum SUNXI_JACK_IRQ_STA {
 	JACK_IRQ_NULL	= -1,
 	JACK_IRQ_OUT	= 0,
 	JACK_IRQ_IN,
-	JACK_IRQ_KEYDOWN,
+	JACK_IRQ_KEYDATA,
+	JACK_IRQ_SDBP,
 };
 
 /* jack */
 struct sunxi_jack_adv_priv {
 	struct regmap *regmap;
 	struct device *dev;
+
+	int8_t hdata_offset;
 
 	bool typec;
 
@@ -666,19 +674,24 @@ struct sunxi_jack_adv_priv {
 
 	enum SUNXI_JACK_IRQ_STA irq_sta;
 
-	// gpio get irq
+	int rst_gpio;
+
+	/* gpio get irq */
 	int irq_gpio;
 	struct gpio_desc *desc;
+
+	unsigned int det_gpio_level;
 
 	enum snd_jack_types jack_type;
 
 	/* pa config */
 	unsigned int pa_pin_max;
 	struct snd_sunxi_pacfg *pa_cfg;
+
+	unsigned int key_data;
 };
 
 struct ac101b_data {
-
 	unsigned int adc1_vol;
 	unsigned int adc2_vol;
 	unsigned int adc3_vol;

@@ -865,8 +865,6 @@ static int sunxi_drm_rgb_bind(struct device *dev, struct device *master, void *d
 
 	sdrm->encoder.possible_crtcs =
 			drm_of_find_possible_crtcs(drm, tcon_lcd_dev->of_node);
-	sdrm->encoder.possible_clones = drm_encoder_mask(&sdrm->encoder);
-	sunxi_drm_sup_wb_clone(drm, &sdrm->encoder);
 
 	if (rgb->sdrm.panel) {
 		drm_connector_helper_add(&sdrm->connector,

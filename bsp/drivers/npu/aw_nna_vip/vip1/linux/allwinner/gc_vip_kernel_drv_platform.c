@@ -680,5 +680,5 @@ vip_int32_t gckvip_drv_device_uninit(
 	return ret;
 }
 
-MODULE_VERSION("1.13.0");
+MODULE_VERSION("1.13.2");
 MODULE_AUTHOR("Miujiu <zhangjunjie@allwinnertech.com>");

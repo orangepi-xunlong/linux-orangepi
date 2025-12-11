@@ -98,9 +98,9 @@ static const struct sample_rate sunxi_sample_rate_conv[] = {
 
 static int snd_sunxi_clk_init(struct platform_device *pdev, struct sunxi_codec_clk *clk);
 static void snd_sunxi_clk_exit(struct sunxi_codec_clk *clk);
-static int snd_sunxi_clk_enable(struct sunxi_codec_clk *clk);
+static int snd_sunxi_clk_enable(struct sunxi_codec_clk *clk, int stream);
 static int snd_sunxi_clk_bus_enable(struct sunxi_codec_clk *clk);
-static void snd_sunxi_clk_disable(struct sunxi_codec_clk *clk);
+static void snd_sunxi_clk_disable(struct sunxi_codec_clk *clk, int stream);
 static void snd_sunxi_clk_bus_disable(struct sunxi_codec_clk *clk);
 static int snd_sunxi_clk_rate(struct sunxi_codec_clk *clk, int stream,
 			      unsigned int freq_in, unsigned int freq_out);
@@ -192,11 +192,14 @@ static int sunxi_codec_dai_hw_params(struct snd_pcm_substream *substream,
 	}
 
 	/* enable clk after set clk rate */
-	if (snd_sunxi_clk_enable(&codec->clk)) {
+	if (snd_sunxi_clk_enable(&codec->clk, substream->stream)) {
 		SND_LOG_ERR("clk enable failed\n");
 		return -EINVAL;
 	} else {
-		codec->clk_sta = SND_SUNXI_CLK_OPEN;
+		if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
+			codec->clk_play_sta = SND_SUNXI_CLK_OPEN;
+		else
+			codec->clk_cap_sta = SND_SUNXI_CLK_OPEN;
 	}
 
 	return 0;
@@ -211,9 +214,13 @@ static int sunxi_codec_dai_hw_free(struct snd_pcm_substream *substream, struct s
 	SND_LOG_DEBUG("\n");
 
 	/* prevent the closed clks from being closed again */
-	if (codec->clk_sta == SND_SUNXI_CLK_OPEN) {
-		snd_sunxi_clk_disable(clk);
-		codec->clk_sta = SND_SUNXI_CLK_CLOSE;
+	if (codec->clk_play_sta == SND_SUNXI_CLK_OPEN ||
+	    codec->clk_cap_sta == SND_SUNXI_CLK_OPEN) {
+		snd_sunxi_clk_disable(clk, substream->stream);
+		if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
+			codec->clk_play_sta = SND_SUNXI_CLK_CLOSE;
+		else
+			codec->clk_cap_sta = SND_SUNXI_CLK_CLOSE;
 	}
 
 	return 0;
@@ -833,16 +840,12 @@ static int sunxi_hpout_event(struct snd_soc_dapm_widget *w, struct snd_kcontrol 
 		udelay(320);
 		regmap_update_bits(regmap, SUNXI_HP_AN_CTL, 0x1 << HPPA_EN, 0x1 << HPPA_EN);
 		udelay(320);
-		regmap_update_bits(regmap, SUNXI_HP_AN_CTL, 0x1 << HP_CHOPPER_EN, 0x1 << HP_CHOPPER_EN);
-		udelay(320);
 		regmap_update_bits(regmap, SUNXI_HP_AN_CTL, 0x1 << HP_EN, 0x1 << HP_EN);
 		udelay(320);
 		regmap_update_bits(regmap, SUNXI_AN_DEBUG1, 0x1 << DAC_MUTE_EN, 0x0 << DAC_MUTE_EN);
 		break;
 	case SND_SOC_DAPM_PRE_PMD:
 		regmap_update_bits(regmap, SUNXI_HP_AN_CTL, 0x1 << HP_EN, 0x0 << HP_EN);
-		udelay(320);
-		regmap_update_bits(regmap, SUNXI_HP_AN_CTL, 0x1 << HP_CHOPPER_EN, 0x0 << HP_CHOPPER_EN);
 		udelay(320);
 		regmap_update_bits(regmap, SUNXI_HP_AN_CTL, 0x1 << HPPA_EN, 0x0 << HPPA_EN);
 		udelay(320);
@@ -1484,6 +1487,7 @@ static int sunxi_jack_extcon_resume(void *data);
 static void sunxi_jack_extcon_irq_clean(void *data);
 static void sunxi_jack_extcon_det_irq_work(void *data, enum snd_jack_types *jack_type);
 static void sunxi_jack_extcon_det_scan_work(void *data, enum snd_jack_types *jack_type);
+static int sunxi_jack_extcon_status_sync(void *data, enum snd_jack_types type);
 
 struct sunxi_jack_extcon sunxi_jack_extcon = {
 	.jack_init	= sunxi_jack_extcon_init,
@@ -1494,6 +1498,7 @@ struct sunxi_jack_extcon sunxi_jack_extcon = {
 	.jack_irq_clean		= sunxi_jack_extcon_irq_clean,
 	.jack_det_irq_work	= sunxi_jack_extcon_det_irq_work,
 	.jack_det_scan_work	= sunxi_jack_extcon_det_scan_work,
+	.jack_status_sync	= sunxi_jack_extcon_status_sync,
 };
 
 static int sunxi_jack_extcon_init(void *data)
@@ -1720,6 +1725,25 @@ jack_headset:
 			   headset_basedata << MDATA_THRESHOLD);
 	ktime_get_real_ts64(&jack_extcon_priv->tv_headset_plugin);
 	regmap_update_bits(regmap, SUNXI_HMIC_CTL, 0x1 << MIC_DET_IRQ_EN, 0x1 << MIC_DET_IRQ_EN);
+}
+
+static int sunxi_jack_extcon_status_sync(void *data, enum snd_jack_types type)
+{
+	struct sunxi_jack_extcon_priv *jack_extcon_priv = data;
+	struct regmap *regmap = jack_extcon_priv->regmap;
+
+	SND_LOG_DEBUG("\n");
+
+	if (type == 0) {
+		regmap_update_bits(regmap, SUNXI_MICBIAS_AN_CTL, 0x1 << HMIC_BIAS_EN,
+				   0x0 << HMIC_BIAS_EN);
+		regmap_update_bits(regmap, SUNXI_MICBIAS_AN_CTL, 0x1 << MIC_DET_ADC_EN,
+				   0x0 << MIC_DET_ADC_EN);
+		regmap_update_bits(regmap, SUNXI_HMIC_CTL, 0x1 << MIC_DET_IRQ_EN,
+				   0x0 << MIC_DET_IRQ_EN);
+	}
+
+	return 0;
 }
 
 struct sunxi_jack_port sunxi_jack_port = {
@@ -2110,46 +2134,35 @@ err_deassert_rst:
 	return ret;
 }
 
-static int snd_sunxi_clk_enable(struct sunxi_codec_clk *clk)
+static int snd_sunxi_clk_enable(struct sunxi_codec_clk *clk, int stream)
 {
-	int ret = 0;
-
 	SND_LOG_DEBUG("\n");
 
-	if (clk_prepare_enable(clk->clk_pll_audio0)) {
-		SND_LOG_ERR_STD(E_AUDIOCODEC_SWDEP_CLK_EN, "clk_pll_audio0 enable failed\n");
-		ret = -EINVAL;
-		goto err_enable_clk_pll_audio0;
-	}
+	if (stream == SNDRV_PCM_STREAM_PLAYBACK) {
+		if (clk_prepare_enable(clk->clk_pll_play)) {
+			SND_LOG_ERR_STD(E_AUDIOCODEC_SWDEP_CLK_EN, "clk_pll_play enable failed\n");
+			return -EINVAL;
+		}
 
-	if (clk_prepare_enable(clk->clk_pll_audio1_5x)) {
-		SND_LOG_ERR_STD(E_AUDIOCODEC_SWDEP_CLK_EN, "clk_pll_audio1_5x enable failed\n");
-		ret = -EINVAL;
-		goto err_enable_clk_pll_audio1_5x;
-	}
+		if (clk_prepare_enable(clk->clk_adda_dac)) {
+			SND_LOG_ERR_STD(E_AUDIOCODEC_SWDEP_CLK_EN, "clk_adda_dac enable failed\n");
+			clk_disable_unprepare(clk->clk_pll_play);
+			return -EINVAL;
+		}
+	} else {
+		if (clk_prepare_enable(clk->clk_pll_cap)) {
+			SND_LOG_ERR_STD(E_AUDIOCODEC_SWDEP_CLK_EN, "clk_pll_cap enable failed\n");
+			return -EINVAL;
+		}
 
-	if (clk_prepare_enable(clk->clk_adda_dac)) {
-		SND_LOG_ERR_STD(E_AUDIOCODEC_SWDEP_CLK_EN, "clk_adda_dac enable failed\n");
-		ret = -EINVAL;
-		goto err_enable_clk_adda_dac;
-	}
-
-	if (clk_prepare_enable(clk->clk_adda_adc)) {
-		SND_LOG_ERR_STD(E_AUDIOCODEC_SWDEP_CLK_EN, "clk_adda_adc enable failed\n");
-		ret = -EINVAL;
-		goto err_enable_clk_adda_adc;
+		if (clk_prepare_enable(clk->clk_adda_adc)) {
+			SND_LOG_ERR_STD(E_AUDIOCODEC_SWDEP_CLK_EN, "clk_adda_adc enable failed\n");
+			clk_disable_unprepare(clk->clk_pll_cap);
+			return -EINVAL;
+		}
 	}
 
 	return 0;
-
-err_enable_clk_adda_adc:
-	clk_disable_unprepare(clk->clk_adda_dac);
-err_enable_clk_adda_dac:
-	clk_disable_unprepare(clk->clk_pll_audio1_5x);
-err_enable_clk_pll_audio1_5x:
-	clk_disable_unprepare(clk->clk_pll_audio0);
-err_enable_clk_pll_audio0:
-	return ret;
 }
 
 static void snd_sunxi_clk_bus_disable(struct sunxi_codec_clk *clk)
@@ -2160,14 +2173,17 @@ static void snd_sunxi_clk_bus_disable(struct sunxi_codec_clk *clk)
 	reset_control_assert(clk->clk_rst);
 }
 
-static void snd_sunxi_clk_disable(struct sunxi_codec_clk *clk)
+static void snd_sunxi_clk_disable(struct sunxi_codec_clk *clk, int stream)
 {
 	SND_LOG_DEBUG("\n");
 
-	clk_disable_unprepare(clk->clk_adda_adc);
-	clk_disable_unprepare(clk->clk_adda_dac);
-	clk_disable_unprepare(clk->clk_pll_audio1_5x);
-	clk_disable_unprepare(clk->clk_pll_audio0);
+	if (stream == SNDRV_PCM_STREAM_PLAYBACK) {
+		clk_disable_unprepare(clk->clk_adda_dac);
+		clk_disable_unprepare(clk->clk_pll_play);
+	} else {
+		clk_disable_unprepare(clk->clk_adda_adc);
+		clk_disable_unprepare(clk->clk_pll_cap);
+	}
 }
 
 static int snd_sunxi_clk_rate(struct sunxi_codec_clk *clk, int stream,
@@ -2182,12 +2198,14 @@ static int snd_sunxi_clk_rate(struct sunxi_codec_clk *clk, int stream,
 						"set dac parent clk failed\n");
 				return -EINVAL;
 			}
+			clk->clk_pll_play = clk->clk_pll_audio1_5x;
 		} else {
 			if (clk_set_parent(clk->clk_adda_dac, clk->clk_pll_audio0)) {
 				SND_LOG_ERR_STD(E_AUDIOCODEC_SWDEP_CLK_SET,
 						"set dac parent clk failed\n");
 				return -EINVAL;
 			}
+			clk->clk_pll_play = clk->clk_pll_audio0;
 		}
 		if (clk_set_rate(clk->clk_adda_dac, freq_out)) {
 			SND_LOG_ERR_STD(E_AUDIOCODEC_SWDEP_CLK_SET,
@@ -2201,12 +2219,14 @@ static int snd_sunxi_clk_rate(struct sunxi_codec_clk *clk, int stream,
 						"set adc parent clk failed\n");
 				return -EINVAL;
 			}
+			clk->clk_pll_cap = clk->clk_pll_audio1_5x;
 		} else {
 			if (clk_set_parent(clk->clk_adda_adc, clk->clk_pll_audio0)) {
 				SND_LOG_ERR_STD(E_AUDIOCODEC_SWDEP_CLK_SET,
 						"set adc parent clk failed\n");
 				return -EINVAL;
 			}
+			clk->clk_pll_cap = clk->clk_pll_audio0;
 		}
 		if (clk_set_rate(clk->clk_adda_adc, freq_out)) {
 			SND_LOG_ERR_STD(E_AUDIOCODEC_SWDEP_CLK_SET,
@@ -2804,5 +2824,5 @@ module_exit(sunxi_codec_dev_exit);
 
 MODULE_AUTHOR("huhaoxin@allwinnertech.com");
 MODULE_LICENSE("GPL");
-MODULE_VERSION("1.0.1");
+MODULE_VERSION("1.0.3");
 MODULE_DESCRIPTION("sunxi soundcard codec of internal-codec");

@@ -76,6 +76,17 @@ config AW_MFD_BMU_EXT_I2C
 config AW_PMIC_VOLATILE_ENABLED
 	bool "Select AW PMICs Volatile Enable"
 
+config AW_POWER_DEBUG
+	tristate "Allwinner Power DEBUG support"
+	depends on AW_BSP
+	help
+	  Allwinner Power DEBUG.
+
+	  This option is of interest only to developers who need to
+	  develop on AllWinner SoC.
+
+	  If unsure, say y.
+
 comment "Regulator Drivers"
 
 if AW_MFD_AXP2101
@@ -168,6 +179,7 @@ config AW_USB_POWER_CTRL
 	select POWER_SUPPLY
 	select AW_POWER_NOTIFIER
 	select AW_POWER_SUPPLY_CTRL
+	select AW_POWER_DEBUG
 	help
 	  Allwinner Usb Power Ctrl
 
@@ -188,6 +200,7 @@ config AW_AXP2202_POWER
 	tristate "AXP2202 Power Supply Driver"
 	select AW_POWER_TEMP_CTRL
 	select AW_USB_POWER_CTRL
+	select AW_POWER_DEBUG
 	help
 	  This driver provides support for the power supply features of
 	  AXP2202 PMIC.
@@ -211,6 +224,7 @@ config AW_AXP515_POWER
 	tristate "AXP515 Power Supply Driver"
 	select AW_POWER_TEMP_CTRL
 	select AW_USB_POWER_CTRL
+	select AW_POWER_DEBUG
 	help
 	  This driver provides support for the power supply features of
 	  AXP515 PMIC.
@@ -235,6 +249,7 @@ config AW_AXP517_POWER
 	tristate "AXP517 Power Supply Driver"
 	select AW_POWER_TEMP_CTRL
 	select AW_USB_POWER_CTRL
+	select AW_POWER_DEBUG
 	help
 	  This driver provides support for the power supply features of
 	  AXP517 PMIC.
@@ -278,6 +293,7 @@ endif
 config AW_MULTI_CHARGE_POWER
 	tristate "sunxi multi charge Power Supply Driver"
 	depends on AW_AXP517_POWER || AW_AXP515_POWER
+	select AW_POWER_DEBUG
 	help
 	  This driver provides support for sunxi multi charge such as:
 	  acin & double type-c.
@@ -349,6 +365,7 @@ config AW_TYPEC_AXP517
 config AW_TYPEC_CC_LOGIC
 	tristate "Allwinner PMIC USB Type-C Port Manager Driver Support"
 	depends on AW_MFD_AXP2101
+	select AW_POWER_DEBUG
 	help
 	  Allwinner Type-C Port Manager Driver Based on PMIC.
 	  This Driver Can Conform to the Requirements of USB Type-C Functional Test Specification,

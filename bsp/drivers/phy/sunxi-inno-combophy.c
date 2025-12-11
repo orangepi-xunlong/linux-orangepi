@@ -439,6 +439,7 @@ static void sunxi_combphy_usb3_phy_set(struct sunxi_combphy *combphy, bool enabl
 
 	/* reg_rx_eq_bypass[3]=1, rx_ctle_res_cal_bypass */
 	val = readl(combphy->phy_clk + 0x0674);
+	val = 0x2089;  /* from inno: better compatibility */
 	if (enable)
 		val |= BIT(3);
 	else
@@ -516,16 +517,11 @@ static void sunxi_combphy_usb3_phy_set(struct sunxi_combphy *combphy, bool enabl
 	writel(val, combphy->phy_clk + 0x1034);
 
 	val = readl(combphy->phy_clk + 0x101c);
-	tmp = 0x1 << 27;
-	val = val & (~tmp);
-	val |= ((0x1 << 27) & tmp);              /* choose downspread */
-
-	tmp = 0x1 << 28;
-	val = val & (~tmp);
+	val = 0x1c2aaaab; /* from inno: better compatibility */
 	if (enable)
-		val |= ((0x0 << 28) & tmp);      /* don't disable ssc = 0 */
+		val |= BIT(28);
 	else
-		val |= ((0x1 << 28) & tmp);      /* don't enable ssc = 1 */
+		val &= ~BIT(28);
 	writel(val, combphy->phy_clk + 0x101c);
 
 #ifdef SUNXI_INNO_COMMBOPHY_DEBUG
@@ -568,6 +564,10 @@ static void sunxi_combphy_usb3_phy_set(struct sunxi_combphy *combphy, bool enabl
 		val &= ~BIT(31);
 	writel(val, combphy->phy_clk + 0x0028);
 #endif
+
+	/* from inno: better compatibility */
+	writel(0x49417f93, combphy->phy_clk + 0x0024);
+	writel(0x70000, combphy->phy_clk + 0x0044);
 }
 
 static void sunxi_combphy_usb3_power_set(struct sunxi_combphy *combphy, bool enable)
@@ -1148,5 +1148,5 @@ module_platform_driver(sunxi_combphy_driver);
 
 MODULE_DESCRIPTION("Allwinner INNO COMBOPHY driver");
 MODULE_AUTHOR("songjundong@allwinnertech.com");
-MODULE_VERSION("0.0.20");
+MODULE_VERSION("0.0.21");
 MODULE_LICENSE("GPL v2");

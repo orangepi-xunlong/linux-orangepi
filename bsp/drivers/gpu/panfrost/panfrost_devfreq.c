@@ -114,7 +114,11 @@ static void sunxi_set_gpu_opp_table_name(struct panfrost_device *pfdev)
 	dev_info(pfdev->dev, "mali get opp_table_name is %s\n", opp_table_name);
 
 	pfdev->opp_table = dev_pm_opp_set_prop_name(pfdev->dev, opp_table_name);
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0))
+	if (pfdev->opp_table < 0) {
+#else
 	if (IS_ERR(pfdev->opp_table)) {
+#endif
 		dev_err(pfdev->dev, "Failed to set prop name, use default vf\n");
 	}
 
@@ -213,8 +217,9 @@ int panfrost_devfreq_init(struct panfrost_device *pfdev)
 		DRM_DEV_INFO(dev, "More than 1 supply is not supported yet\n");
 		return 0;
 	}
-
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0))
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0))
+	ret = devm_pm_opp_set_regulators(dev, pfdev->comp->supply_names);
+#elif (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0))
 	ret = devm_pm_opp_set_regulators(dev, pfdev->comp->supply_names,
 					 pfdev->comp->num_supplies);
 	if (ret) {
@@ -357,7 +362,11 @@ void panfrost_devfreq_fini(struct panfrost_device *pfdev)
 		 * dev_pm_opp_set_regulators will be failed.
 		 */
 		dev_pm_opp_put_prop_name(pfdev->opp_table);
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0))
+		pfdev->opp_table = -1;
+#else
 		pfdev->opp_table = NULL;
+#endif
 	}
 #endif
 	if (pfdevfreq->cooling) {

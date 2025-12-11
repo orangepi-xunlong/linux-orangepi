@@ -36,6 +36,34 @@ panfrost_gem_shrinker_count(struct shrinker *shrinker, struct shrink_control *sc
 	return count;
 }
 
+
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0))
+static bool panfrost_gem_purge(struct drm_gem_object *obj)
+{
+	struct drm_gem_shmem_object *shmem = to_drm_gem_shmem_obj(obj);
+	struct panfrost_gem_object *bo = to_panfrost_bo(obj);
+	bool ret = false;
+
+	if (atomic_read(&bo->gpu_usecount))
+		return false;
+
+	if (!mutex_trylock(&bo->mappings.lock))
+		return false;
+
+	if (!dma_resv_trylock(shmem->base.resv))
+		goto unlock_mappings;
+
+	panfrost_gem_teardown_mappings_locked(bo);
+	drm_gem_shmem_purge(&bo->base);
+	ret = true;
+
+	dma_resv_unlock(shmem->base.resv);
+
+unlock_mappings:
+	mutex_unlock(&bo->mappings.lock);
+	return ret;
+}
+#else
 static bool panfrost_gem_purge(struct drm_gem_object *obj)
 {
 	struct drm_gem_shmem_object *shmem = to_drm_gem_shmem_obj(obj);
@@ -65,6 +93,7 @@ unlock_mappings:
 	mutex_unlock(&bo->mappings.lock);
 	return ret;
 }
+#endif
 
 static unsigned long
 panfrost_gem_shrinker_scan(struct shrinker *shrinker, struct shrink_control *sc)
@@ -107,7 +136,11 @@ void panfrost_gem_shrinker_init(struct drm_device *dev)
 	pfdev->shrinker.count_objects = panfrost_gem_shrinker_count;
 	pfdev->shrinker.scan_objects = panfrost_gem_shrinker_scan;
 	pfdev->shrinker.seeks = DEFAULT_SEEKS;
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0))
+	WARN_ON(register_shrinker(&pfdev->shrinker, "drm-panfrost"));
+#else
 	WARN_ON(register_shrinker(&pfdev->shrinker));
+#endif
 }
 
 /**

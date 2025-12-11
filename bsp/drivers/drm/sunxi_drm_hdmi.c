@@ -156,6 +156,8 @@ struct sunxi_hdmi_ctrl_s {
 	unsigned int drv_dts_clk_src;
 	unsigned int drv_dts_ddc_index;
 	unsigned int drv_dts_res_src;
+	unsigned int drv_dts_force_mode;
+	struct drm_display_mode   *drv_dts_mode;
 
 	/* hdcp control state */
 	int drv_hdcp_clock;
@@ -1309,6 +1311,16 @@ static int _sunxi_drv_hdmi_select_output(struct sunxi_drm_hdmi *hdmi)
 	u32 vic = (u32)drm_match_cea_mode(&hdmi->drm_mode_adjust);
 	u32 pixel_clk = hdmi->drm_mode_adjust.clock;
 
+	if (hdmi->hdmi_ctrl.drv_dts_force_mode &&
+			!IS_ERR_OR_NULL(hdmi->hdmi_ctrl.drv_dts_mode)) {
+		info->dvi_hdmi = DISP_HDMI;
+		info->format = DISP_CSC_TYPE_RGB;
+		info->bits   = DISP_DATA_8BITS;
+		info->eotf   = DISP_EOTF_GAMMA22;
+		info->cs     = DISP_BT709;
+		goto select_info;
+	}
+
 	if (!c_info->is_hdmi) {
 		info->dvi_hdmi = DISP_DVI;
 		info->format = DISP_CSC_TYPE_RGB;
@@ -1325,7 +1337,9 @@ static int _sunxi_drv_hdmi_select_output(struct sunxi_drm_hdmi *hdmi)
 	sunxi_hdmi_disp_select_space(info, vic);
 
 format_select:
-	sunxi_hdmi_disp_select_format(info, vic);
+	ret = sunxi_hdmi_disp_select_format(info, vic);
+	if (ret != 0)
+		goto select_info;
 
 check_clock:
 	ret = sunxi_hdmi_video_check_tmds_clock(info->format, info->bits, pixel_clk);
@@ -1349,6 +1363,7 @@ check_clock:
 		return -1;
 	}
 
+select_info:
 	info->range = (info->format == DISP_CSC_TYPE_RGB) ?
 			DISP_COLOR_RANGE_0_255 : DISP_COLOR_RANGE_16_235;
 	info->scan  = DISP_SCANINFO_NO_DATA;
@@ -2045,7 +2060,7 @@ sysfs_show_func(hdmi_source)
 
 	n += sprintf(buf + n, "\n[ver]\n");
 	n += sprintf(buf + n, " - hw: 2.0\n");
-	n += sprintf(buf + n, " - sw: 2.25.1017. I33e4608c6c1e86c597e7aca411c9e1a83c59a986\n");
+	n += sprintf(buf + n, " - sw: 2.25.1023. Ib84e5b7971fa3a5a4e29b55213dad5f13ebb1357\n");
 
 	n += sprintf(buf + n, "\n[drv cfg]\n");
 	n += sprintf(buf + n, "|       |                  dts                        |                  drm                  |\n");
@@ -2062,6 +2077,18 @@ sysfs_show_func(hdmi_source)
 		hdmi->hdmi_ctrl.drm_mode_set ? "yes" : "no",
 		hdmi->drm_mode.hdisplay, hdmi->drm_mode.vdisplay,
 		hdmi->hdmi_ctrl.drm_hpd_force == DRM_FORCE_ON ? "on" : "off");
+
+	if (hdmi->hdmi_ctrl.drv_dts_force_mode) {
+		n += sprintf(buf + n, "\n[dts timing]\n");
+		n += sprintf(buf + n, "|  name |  clock | hactive | hsync_start | hsync_end | htotal | vactive | vsync_start | vsync_end | vtotal |\n");
+		n += sprintf(buf + n, "|-------+--------+---------+-------------+-----------+--------+---------+-------------+-----------+--------|\n");
+		n += sprintf(buf + n, "| state | %-6d |   %-4d  |     %-4d    |    %-4d   |  %-4d  |   %-4d  |     %-4d    |    %-4d   |  %-4d  |\n",
+			hdmi->hdmi_ctrl.drv_dts_mode->clock,
+			hdmi->hdmi_ctrl.drv_dts_mode->hdisplay, hdmi->hdmi_ctrl.drv_dts_mode->hsync_start,
+			hdmi->hdmi_ctrl.drv_dts_mode->hsync_end, hdmi->hdmi_ctrl.drv_dts_mode->htotal,
+			hdmi->hdmi_ctrl.drv_dts_mode->vdisplay, hdmi->hdmi_ctrl.drv_dts_mode->vsync_start,
+			hdmi->hdmi_ctrl.drv_dts_mode->vsync_end, hdmi->hdmi_ctrl.drv_dts_mode->vtotal);
+	}
 
 	n += sprintf(buf + n, "\n[drv state]\n");
 	n += sprintf(buf + n, "|       |     driver     |           hpd         |          hdcp      |  cec  |                |\n");
@@ -2642,6 +2669,13 @@ static int _sunxi_drm_hdmi_get_modes(struct drm_connector *connector)
 
 	ret = _sunxi_drv_hdmi_read_edid(hdmi);
 	if (ret != 0) {
+		if (hdmi->hdmi_ctrl.drv_dts_force_mode &&
+					!IS_ERR_OR_NULL(hdmi->hdmi_ctrl.drv_dts_mode)) {
+			mode = drm_mode_duplicate(connector->dev, hdmi->hdmi_ctrl.drv_dts_mode);
+			drm_mode_probed_add(connector, mode);
+			hdmi_inf("hdmi drv add dts mode when not read edid\n");
+			return 0;
+		}
 		hdmi_err("drm get mode read edid failed\n");
 		goto use_default;
 	}
@@ -2661,6 +2695,13 @@ static int _sunxi_drm_hdmi_get_modes(struct drm_connector *connector)
 
 	if (!IS_ERR_OR_NULL(hdmi->hdmi_cec.notify))
 		cec_notifier_set_phys_addr_from_edid(hdmi->hdmi_cec.notify, raw_edid);
+
+	if (hdmi->hdmi_ctrl.drv_dts_force_mode && !IS_ERR_OR_NULL(hdmi->hdmi_ctrl.drv_dts_mode)) {
+		mode = drm_mode_duplicate(connector->dev, hdmi->hdmi_ctrl.drv_dts_mode);
+		drm_mode_probed_add(connector, mode);
+		hdmi_inf("hdmi drv add dts mode done\n");
+		return 0;
+	}
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(6, 1, 0)
 	ret = drm_add_edid_modes(connector, (struct edid *)raw_edid);
@@ -2696,6 +2737,7 @@ use_default:
 static enum drm_mode_status _sunxi_drm_hdmi_mode_valid(
 		struct drm_connector *connector, struct drm_display_mode *mode)
 {
+	struct sunxi_drm_hdmi *hdmi = drm_connector_to_hdmi(connector);
 	int rate = drm_mode_vrefresh(mode);
 
 	/* check low i-timing */
@@ -2704,6 +2746,9 @@ static enum drm_mode_status _sunxi_drm_hdmi_mode_valid(
 				mode->hdisplay, mode->vdisplay, rate);
 		return MODE_BAD;
 	}
+
+	if (hdmi->hdmi_ctrl.drv_dts_force_mode)
+		return MODE_OK;
 
 	/* check frame rate support */
 	if (rate > 60) {
@@ -2971,6 +3016,9 @@ static int __sunxi_hdmi_init_dts(struct sunxi_drm_hdmi *hdmi)
 	struct device *dev = hdmi->dev;
 	struct device_node	*node = dev->of_node;
 	struct sunxi_hdmi_res_s *pclk = &hdmi->hdmi_res;
+	const char *dts_timming = NULL;
+	char dts_timing_string[128] = {0};
+	struct drm_display_mode *timming = drm_mode_create(hdmi->sdrm.drm_dev);
 
 	if (IS_ERR_OR_NULL(node)) {
 		shdmi_err(node);
@@ -3014,6 +3062,21 @@ static int __sunxi_hdmi_init_dts(struct sunxi_drm_hdmi *hdmi)
 	/* if dts not set, default use 0x1F */
 	ret = of_property_read_u32(node, "hdmi_ddc_index", &value);
 	hdmi->hdmi_ctrl.drv_dts_ddc_index = (ret != 0x0) ? 0x1F : value;
+
+	ret = of_property_read_u32(node, "force-output", &value);
+	if (ret == 0) {
+		ret = of_property_read_string(node, "force-output-timing", &dts_timming);
+		if (ret == 0) {
+			strcpy(dts_timing_string, dts_timming);
+			sscanf(dts_timing_string, "%d-%hu-%hu-%hu-%hu-%hu-%hu-%hu-%hu",
+				&timming->clock,
+				&timming->hdisplay, &timming->hsync_start, &timming->hsync_end, &timming->htotal,
+				&timming->vdisplay, &timming->vsync_start, &timming->vsync_end, &timming->vtotal);
+			timming->type = DRM_MODE_TYPE_ALL;
+			hdmi->hdmi_ctrl.drv_dts_force_mode = value;
+			hdmi->hdmi_ctrl.drv_dts_mode = timming;
+		}
+	}
 
 	/* parse tcon clock */
 	pclk->clk_tcon_tv = devm_clk_get(dev, "clk_tcon_tv");
@@ -3336,8 +3399,6 @@ static int _sunxi_hdmi_init_drm(struct sunxi_drm_hdmi *hdmi)
 		return -1;
 	}
 	encoder->possible_crtcs = drm_of_find_possible_crtcs(drm, node);
-	encoder->possible_clones = drm_encoder_mask(encoder);
-	sunxi_drm_sup_wb_clone(drm, &sdrm->encoder);
 
 	/* drm connector register */
 	connect->polled            = DRM_CONNECTOR_POLL_HPD;

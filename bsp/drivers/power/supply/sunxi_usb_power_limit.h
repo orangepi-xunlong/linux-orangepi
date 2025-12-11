@@ -74,6 +74,7 @@ struct sunxi_usb_power_limit_supply_data {
 	/* atomic_t */
 	atomic_t					input_limit_type;
 	atomic_t					vbus_online_status;
+	struct sunxi_power_debug_data			*debug;
 };
 
 static const char * const SUNXI_SUPPLY_LIST_PHANDLE_NAME[] = {

@@ -14,6 +14,7 @@
 #include <sound/pcm_params.h>
 
 #include "ac108.h"
+#include "snd_sunxi_log.h"
 
 struct ac108_real_to_reg {
 	unsigned int real;
@@ -772,7 +773,17 @@ static int ac108_probe(struct snd_soc_component *component)
 	struct ac108_priv *ac108 = snd_soc_component_get_drvdata(component);
 	struct ac108_data *pdata = &ac108->pdata;
 	struct regmap *regmap = ac108->regmap;
-	int i;
+	int ret = -1;
+	unsigned int i, reg_val;
+	unsigned int try_num = 5;
+
+	for (i = 0; (i < try_num) && (ret < 0); i++) {
+		ret = regmap_read(regmap, CHIP_AUDIO_RST, &reg_val);
+	}
+	if (ret) {
+		SND_LOG_ERR("try read ac108 5 times but failed, ac108 probe failed\n");
+		return -1;
+	}
 
 	/* adc digita volume set */
 	regmap_write(regmap, ADC1_DVOL_CTRL, pdata->ch1_dig_vol);

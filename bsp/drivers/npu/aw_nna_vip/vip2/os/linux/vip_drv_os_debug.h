@@ -77,11 +77,15 @@ typedef struct _vipdrv_video_mem_profile_t {
 } vipdrv_video_mem_profile_t;
 
 typedef struct _vipdrv_core_loading_profile_t {
-    vip_uint64_t init_time; /* the hardwarae init time */
-    vip_uint64_t destory_time; /* the hardwarae end time */
+    vip_uint64_t init_time; /* the hardware init time */
+    vip_uint64_t destory_time; /* the hardware end time */
     vip_uint64_t submit_time; /* the network submit time */
 
     vip_uint64_t infer_time; /* the total time for network inference */
+
+    vip_uint64_t last_record_time; /* the last record time */
+    vip_uint64_t last_infer_time; /* the last record infer time */
+    vip_uint64_t latest_sbumit_time; /* the last submit time */
 } vipdrv_core_loading_profile_t;
 
 

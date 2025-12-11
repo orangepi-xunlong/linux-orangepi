@@ -19,6 +19,9 @@ obj-$(CONFIG_AW_MFD_PMU_EXT_I2C)	+= mfd/pmu-ext-i2c.o
 obj-$(CONFIG_AW_MFD_BMU_EXT)		+= mfd/bmu-ext-core.o
 obj-$(CONFIG_AW_MFD_BMU_EXT_I2C)	+= mfd/bmu-ext-i2c.o
 
+# debug
+obj-$(CONFIG_AW_POWER_DEBUG)		+= debug/sunxi-power-debug.o
+
 # notifier
 obj-$(CONFIG_AW_POWER_NOTIFIER)		+= notifier/sunxi-power-notifier.o
 

@@ -1115,6 +1115,8 @@ static int sunxi_drm_bind(struct device *dev)
 	int ret;
 	struct drm_device *drm;
 	struct sunxi_drm_private *private;
+	struct drm_encoder *encoder;
+	unsigned int clone_mask = 0;
 
 	DRM_INFO("%s start\n", __FUNCTION__);
 //	private = devm_drm_dev_alloc(dev, &sunxi_drm_driver,
@@ -1141,6 +1143,17 @@ static int sunxi_drm_bind(struct device *dev)
 	ret = component_bind_all(dev, drm);
 	if (ret)
 		goto mode_config_clean;
+
+	/*
+	 * We assume that all encoders can clone each other,
+	 * Otherwise writeback will fail in kernels after version 6.6.
+	 */
+	drm_for_each_encoder(encoder, drm) {
+		clone_mask |= BIT(drm_encoder_index(encoder));
+	}
+	drm_for_each_encoder(encoder, drm) {
+		encoder->possible_clones = clone_mask;
+	}
 
 	dev_set_drvdata(dev, drm);
 	drm_mode_config_reset(drm);
@@ -1309,5 +1322,5 @@ module_exit(sunxi_drm_drv_exit);
 MODULE_IMPORT_NS(DMA_BUF);
 MODULE_DESCRIPTION("Allwinnertech SoC DRM Driver");
 MODULE_LICENSE("GPL");
-MODULE_VERSION("V1.0.4");
+MODULE_VERSION("V1.1.6");
 MODULE_AUTHOR("chenqingjia <chenqingjia@allwinnertech.com>");

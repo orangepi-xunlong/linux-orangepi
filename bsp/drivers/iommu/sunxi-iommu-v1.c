@@ -456,6 +456,16 @@ void sunxi_iommu_register_fault_cb(sunxi_iommu_fault_cb cb, unsigned int master_
 }
 EXPORT_SYMBOL_GPL(sunxi_iommu_register_fault_cb);
 
+bool sunxi_iommu_is_support_master(struct device *dev, const char *master, int idx)
+{
+	struct sunxi_iommu_owner *owner = dev_iommu_priv_get(dev);
+
+	if (!owner) /* Not a iommu client device */
+		return ERR_PTR(-ENODEV);
+
+	return strcasecmp(master, owner->data->plat_data->master[idx]);
+}
+
 static inline u32 sunxi_iommu_read(struct sunxi_iommu_dev *iommu,
 				   u32 offset)
 {
@@ -1943,6 +1953,6 @@ subsys_initcall(sunxi_iommu_init);
 module_exit(sunxi_iommu_exit);
 
 MODULE_LICENSE("GPL v2");
-MODULE_VERSION("1.5.1");
+MODULE_VERSION("1.5.4");
 MODULE_AUTHOR("huangshuosheng<huangshuosheng@allwinnertech.com>");
 MODULE_AUTHOR("ouayngkun<ouyangkun@allwinnertech.com>");

@@ -95,10 +95,17 @@ int de_top_wb_config(struct de_top_handle *hdl, const struct de_top_wb_cfg *cfg)
 
 struct de_top_handle *de_top_create(const struct module_create_info *info);
 
+#if IS_ENABLED(CONFIG_AW_DRM_DE_OFFLINE_MODE)
 s32 de_top_offline_mode_config(struct de_top_handle *hdl, struct offline_cfg *cfg);
 s32 de_top_get_offline_mode_status(struct de_top_handle *hdl);
 s32 de_top_get_offline_info(struct de_top_handle *hdl, struct de_offline_get_info *offline_info);
 enum de_offline_mode_status de_top_offline_mode_query_state_with_clear(struct de_top_handle *hdl, enum de_offline_mode_status offline_state);
+#else
+static inline s32 de_top_offline_mode_config(struct de_top_handle *hdl, struct offline_cfg *cfg) { return -EPERM; };
+static inline s32 de_top_get_offline_mode_status(struct de_top_handle *hdl) { return -EPERM; };
+static inline s32 de_top_get_offline_info(struct de_top_handle *hdl, struct de_offline_get_info *offline_info) { return -EPERM; };
+static inline enum de_offline_mode_status de_top_offline_mode_query_state_with_clear(struct de_top_handle *hdl, enum de_offline_mode_status offline_state) { return -EPERM; };
+#endif
 
 s32 de_top_dfs_config_enable(struct de_top_handle *hdl, struct dfs_cfg *cfg);
 

@@ -6,19 +6,22 @@
 
 struct axp517_usb_power {
 	/* base */
-	char                      *name;
-	struct device             *dev;
-	struct regmap             *regmap;
-	struct power_supply       *usb_supply;
-	struct axp_config_info    dts_info;
-	struct delayed_work       usb_supply_mon;
+	char				*name;
+	struct device			*dev;
+	struct regmap			*regmap;
+	struct power_supply		*usb_supply;
+	struct axp_config_info		dts_info;
+	struct delayed_work		usb_supply_mon;
 
 	/* input limit */
-	atomic_t                  vbus_online_status;
-	atomic_t                  set_input_vol;
+	atomic_t			vbus_online_status;
+	atomic_t			set_input_vol;
 
 	/* usb notifier */
-	struct notifier_block	  usb_nb;
+	struct notifier_block		usb_nb;
+
+	/* power debugfs */
+	struct sunxi_power_debug_data	*debug;
 };
 
 static enum power_supply_property axp517_usb_props[] = {
@@ -296,6 +299,7 @@ static int axp517_usb_set_property(struct power_supply *psy,
 
 	switch (psp) {
 	case POWER_SUPPLY_PROP_VOLTAGE_NOW:
+		SUNXI_POWER_LOG_INFO(usb_power->debug, "set input vol: %d mV", val->intval);
 		if (!val->intval)
 			break;
 		atomic_set(&usb_power->set_input_vol, val->intval);
@@ -305,9 +309,11 @@ static int axp517_usb_set_property(struct power_supply *psy,
 			axp517_set_vindpm(regmap, dinfo->pmu_usbad_vol);
 		break;
 	case POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT:
+		SUNXI_POWER_LOG_INFO(usb_power->debug, "set_iin_limit: %d mA", val->intval);
 		ret = axp517_set_iin_limit(regmap, val->intval);
 		break;
 	case POWER_SUPPLY_PROP_VOLTAGE_MIN_DESIGN:
+		SUNXI_POWER_LOG_INFO(usb_power->debug, "set_vindpm: %d mV", val->intval);
 		ret = axp517_set_vindpm(regmap, val->intval);
 		break;
 	default:
@@ -353,6 +359,8 @@ static const struct power_supply_desc axp517_usb_desc = {
 static irqreturn_t axp517_irq_handler_vbus_status(int irq, void *data)
 {
 	struct axp517_usb_power *usb_power = data;
+
+	SUNXI_POWER_LOG_INFO(usb_power->debug, "Vbus status changes");
 
 	power_supply_changed(usb_power->usb_supply);
 
@@ -553,6 +561,12 @@ static int axp517_usb_probe(struct platform_device *pdev)
 
 	platform_set_drvdata(pdev, usb_power);
 
+	usb_power->debug = sunxi_power_debugfs_init(&pdev->dev);
+	if (IS_ERR_OR_NULL(usb_power->debug))
+		dev_warn(&pdev->dev, "Failed to init debugfs\n");
+
+	SUNXI_POWER_LOG_INFO(usb_power->debug, "USB power driver initialized");
+
 	return ret;
 
 cancel_work:
@@ -574,6 +588,7 @@ static int axp517_usb_remove(struct platform_device *pdev)
 	PMIC_DEV_DEBUG(&pdev->dev, "==============AXP517 usb unegister==============\n");
 	if (usb_power->usb_supply)
 		power_supply_unregister(usb_power->usb_supply);
+	sunxi_power_debugfs_exit(usb_power->debug);
 	PMIC_DEV_DEBUG(&pdev->dev, "axp517 teardown usb dev\n");
 
 	return 0;
@@ -654,4 +669,4 @@ module_platform_driver(axp517_usb_power_driver);
 MODULE_AUTHOR("xinouyang <xinouyang@allwinnertech.com>");
 MODULE_DESCRIPTION("axp517 usb driver");
 MODULE_LICENSE("GPL");
-MODULE_VERSION("1.0.11");
+MODULE_VERSION("1.0.12");

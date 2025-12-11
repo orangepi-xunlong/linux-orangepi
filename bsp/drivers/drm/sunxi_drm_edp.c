@@ -4027,8 +4027,6 @@ int sunxi_edp_init_drm(struct sunxi_drm_edp *drm_edp)
 
 	sdrm->encoder.possible_crtcs =
 		drm_of_find_possible_crtcs(sdrm->drm_dev, sdrm->tcon_dev->of_node);
-	sdrm->encoder.possible_clones = drm_encoder_mask(&sdrm->encoder);
-	sunxi_drm_sup_wb_clone(sdrm->drm_dev, &sdrm->encoder);
 
 	drm_connector_helper_add(&sdrm->connector,
 				 &sunxi_edp_connector_helper_funcs);

@@ -35,7 +35,7 @@ static int sunxi_pmic_cc_logic_get_power_status(struct sunxi_pmic_cc_logic *port
 	if (ret < 0)
 		return ret;
 
-	state = FLAG_STATE(data);
+	state = POWER_STATE(data);
 	port->power_state = state;
 	return 0;
 }
@@ -51,7 +51,7 @@ static int sunxi_pmic_cc_logic_get_flag_status(struct sunxi_pmic_cc_logic *port)
 	if (ret < 0)
 		return ret;
 
-	state = POWER_STATE(data);
+	state = FLAG_STATE(data);
 	port->flag_state = state;
 	return 0;
 }
@@ -89,6 +89,8 @@ static int sunxi_pmic_cc_logic_set_scope(struct sunxi_pmic_cc_logic *port, int c
 		break;
 	}
 
+	SUNXI_POWER_LOG_INFO(port->debug, "set_scope to %d", cc_type);
+
 	regmap_update_bits(regmap, port->cc_logic_data.cc_mode_ctrl_reg, GENMASK(1, 0), data);
 	return 0;
 }
@@ -105,6 +107,10 @@ static int sunxi_cc_logic_set_vbus(struct sunxi_pmic_cc_logic *port, bool on)
 		dev_dbg(port->dev, " vbus is already %s", on ? "On" : "Off");
 		goto done;
 	}
+
+	SUNXI_POWER_LOG_INFO(port->debug, "vbus usb on : %d -> %d",
+			port->vbus_on,
+			on);
 
 	if (on)
 		ret = regulator_enable(port->vbus);
@@ -127,6 +133,10 @@ done:
 
 static void sunxi_cc_logic_set_usb_role(struct sunxi_pmic_cc_logic *port, enum usb_role role)
 {
+	SUNXI_POWER_LOG_INFO(port->debug, "set usb role : %d -> %d",
+			port->current_usb_role,
+			role);
+
 	if (port->role_sw)
 		usb_role_switch_set_role(port->role_sw, role);
 	port->current_usb_role = role;
@@ -179,7 +189,7 @@ static void handle_snk_attached_wait(struct sunxi_pmic_cc_logic *port)
 	if (port->sunxi_cc_logic_state == SNK_ATTACH_WAIT) {
 		port->prev_sunxi_cc_logic_state = port->sunxi_cc_logic_state;
 		port->sunxi_cc_logic_state = SNK_ATTACHED;
-		PMIC_INFO(" in %s state for 200ms, set to %s status\n",
+		SUNXI_POWER_LOG_INFO(port->debug, "in %s state for 200ms, set to %s status",
 				sunxi_cc_logic_states[port->prev_sunxi_cc_logic_state],
 				sunxi_cc_logic_states[port->sunxi_cc_logic_state]);
 		handle_snk_attached(port);
@@ -217,7 +227,7 @@ static void run_state_machine(struct sunxi_pmic_cc_logic *port)
 	if (port->prev_sunxi_cc_logic_state == port->sunxi_cc_logic_state && port->sunxi_cc_logic_state != SRC_ATTACHED)
 		return;
 
-	PMIC_INFO(" state change %s -> %s\n",
+	SUNXI_POWER_LOG_INFO(port->debug, " state change %s -> %s",
 			sunxi_cc_logic_states[port->prev_sunxi_cc_logic_state],
 			sunxi_cc_logic_states[port->sunxi_cc_logic_state]);
 
@@ -603,7 +613,7 @@ static int sunxi_pmic_cc_logic_get_scope(struct sunxi_pmic_cc_logic *port, union
 	data |= flag_state << 2;
 	data |= cc_audio << 3;
 
-	PMIC_INFO(" get cc scope 0x%x\n", data);
+	SUNXI_POWER_LOG_INFO(port->debug, "get cc scope 0x%x", data);
 
 	val->intval = data;
 
@@ -942,6 +952,12 @@ static int sunxi_pmic_cc_logic_probe(struct platform_device *pdev)
 	schedule_delayed_work(&port->vbus_online_mon, 0);
 	sunxi_pmic_cc_logic_work_process(port);
 
+	port->debug = sunxi_power_debugfs_init(&pdev->dev);
+	if (IS_ERR_OR_NULL(port->debug))
+		dev_warn(&pdev->dev, "Failed to init debugfs\n");
+
+	SUNXI_POWER_LOG_INFO(port->debug, "sunxi-cc-logic driver initialized");
+
 	return 0;
 
 out_destroy_wq:
@@ -996,6 +1012,7 @@ static int sunxi_pmic_cc_logic_remove(struct platform_device *pdev)
 	usb_role_switch_put(port->role_sw);
 	cancel_delayed_work_sync(&port->vbus_online_mon);
 	power_supply_unregister(port->cc_logic_psy);
+	sunxi_power_debugfs_exit(port->debug);
 
 	return 0;
 }
@@ -1061,4 +1078,4 @@ module_platform_driver(sunxi_pmic_cc_logic_driver);
 MODULE_DESCRIPTION("Allwinner PMIC USB Type-C Port Manager Driver");
 MODULE_AUTHOR("kanghoupeng<kanghoupeng@allwinnertech.com>");
 MODULE_LICENSE("GPL v2");
-MODULE_VERSION("1.0.4");
+MODULE_VERSION("1.0.6");

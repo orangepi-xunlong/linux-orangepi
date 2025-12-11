@@ -1142,7 +1142,7 @@ static const struct file_operations iommu_debug_large_phys_fops = {
 	.release = single_release,
 };
 #endif
-#if defined(CONFIG_AW_IOMMU_V2) || defined(CONFIG_AW_IOMMU_V3)
+#if defined(CONFIG_AW_IOMMU_V2) || defined(CONFIG_AW_IOMMU_V3) || defined(CONFIG_AW_IOMMU_V1)
 #define BYPASS_TEST
 /* we may use other master for test later */
 #define BYPASS_TEST_USE_G2D
@@ -1395,6 +1395,36 @@ static const struct file_operations iommu_debug_prevent_hang_fops = {
 
 #ifdef BYPASS_TEST
 #ifdef BYPASS_TEST_USE_G2D
+
+
+static void *__map_non_cached_addr(uint64_t premap, size_t size)
+{
+	struct page *test_target = phys_to_page(premap);
+	struct page **pgs;
+	void *non_cached_addr;
+	int round, num_pages = PAGE_ALIGN(size) / PAGE_SIZE;
+
+	pgs = kmalloc_array(num_pages, sizeof(struct page *), GFP_KERNEL);
+	if (!pgs) {
+		pr_err("Failed to allocate pgs array for %d pages\n", num_pages);
+		return NULL;
+	}
+
+	for (round = 0; round < num_pages; round++) {
+		pgs[round] = &test_target[round];
+	}
+
+	non_cached_addr = vmap(pgs, num_pages, VM_MAP,
+			       pgprot_noncached(PAGE_KERNEL));
+
+	if (!non_cached_addr) {
+		pr_err("Failed to vmap pgs array for %d pages\n", num_pages);
+		non_cached_addr = NULL;
+	}
+	kfree(pgs);
+	return non_cached_addr;
+}
+
 /* iommu basic test */
 static int iommu_debug_bypass_show(struct seq_file *s, void *ignored)
 {
@@ -1402,12 +1432,14 @@ static int iommu_debug_bypass_show(struct seq_file *s, void *ignored)
 	struct device *dev = ddev->dev;
 	int ret = -EINVAL;
 	union {
-		uint64_t buf[4];
+		uint64_t buf[6];
 		struct {
 			uint64_t premap_1_addr;
 			uint64_t premap_1_size;
 			uint64_t premap_2_addr;
 			uint64_t premap_2_size;
+			uint64_t premap_3_addr;
+			uint64_t premap_3_size;
 		};
 	} test_params;
 	dma_addr_t valid_src_phys;
@@ -1420,15 +1452,24 @@ static int iommu_debug_bypass_show(struct seq_file *s, void *ignored)
 	/* test only for g2d , pass in other device */
 	of_parse_phandle_with_args(dev->of_node, "iommus", "#iommu-cells", 0,
 				   &args);
+
+#if defined(CONFIG_AW_IOMMU_V1)
+	name = "g2d";
+	if (sunxi_iommu_is_support_master(dev, name, args.args[0]) != 0) {
+		pr_err("search iommmu name for maseter %s idx :%dfailed\n",
+		       dev_name(dev), args.args[0]);
+		return 0;
+	}
+#else
 	if (of_property_read_string_index(
 		    to_of_node(dev->iommu->iommu_dev->fwnode), "masters",
 		    args.args[0], &name) ||
-	    (strcasecmp("g2d", name) != 0))
+	    (strcasecmp("g2d", name) != 0)) {
 		pr_err("search iommmu name for maseter %s failed\n",
 		       dev_name(dev));
-	{
 		return 0;
 	}
+#endif
 	/*
 	 * premap range A & B
 	 * then we iommu_map iova A to phy B and set g2d to write addr A.
@@ -1448,10 +1489,11 @@ static int iommu_debug_bypass_show(struct seq_file *s, void *ignored)
 				   ARRAY_SIZE(test_params.buf));
 	size = __prepare_rotate0_param(0, 0, test_params.premap_1_size, NULL);
 	if (size > test_params.premap_1_size ||
-	    size > test_params.premap_2_size) {
-		pr_err("reserve buffer too small (%llu/%llu < %u) for prevent hang test",
+	    size > test_params.premap_2_size ||
+	    size > test_params.premap_3_size) {
+		pr_err("reserve buffer too small (%llu/%llu/%llu < %u) for prevent hang test",
 		       test_params.premap_1_size, test_params.premap_2_size,
-		       size);
+		       test_params.premap_3_size, size);
 	}
 	/* now remap iova A to phy B */
 	iommu_unmap(iommu_get_domain_for_dev(dev), test_params.premap_1_addr,
@@ -1461,14 +1503,16 @@ static int iommu_debug_bypass_show(struct seq_file *s, void *ignored)
 		  IOMMU_READ | IOMMU_WRITE, GFP_KERNEL);
 	/* also phy A to B for cpu to check result later */
 	premap_1 =
-		ioremap(test_params.premap_1_addr, test_params.premap_1_size);
+		__map_non_cached_addr(test_params.premap_1_addr, test_params.premap_1_size);
 	premap_2 =
-		ioremap(test_params.premap_2_addr, test_params.premap_2_size);
+		__map_non_cached_addr(test_params.premap_2_addr, test_params.premap_2_size);
 
+	valid_src_phys = test_params.premap_3_addr;
 	/* valid src & dst buffer, just alloc once */
-	valid_src_virt =
-		dma_alloc_coherent(dev, size, &valid_src_phys, GFP_KERNEL);
+	valid_src_virt = __map_non_cached_addr(valid_src_phys, size);
 
+	if (!premap_1 || !premap_2 || !valid_src_virt)
+		goto err_map_no_cache;
 	/*
 	 * actual test, check if g2d output to phy B with bypass enabled
 	 * bypass disabled is default state and checked in basic test
@@ -1482,18 +1526,23 @@ static int iommu_debug_bypass_show(struct seq_file *s, void *ignored)
 
 	__perform_one_rotate_0(dev, valid_src_phys, test_params.premap_1_addr,
 			       size, ROTATE_FLUSH_DST | ROTATE_FLUSH_SRC);
-	if (memcmp(valid_src_virt, premap_2, size) != 0 ||
-	    memcpy(valid_src_virt, premap_1, size) == 0) {
+	if (memcmp(valid_src_virt, premap_2, size) == 0 ||
+	    memcmp(valid_src_virt, premap_1, size) != 0) {
 		ds_printf(dev, s, "bypass test failed at case 1");
 	} else {
 		ds_printf(dev, s, "bypass test passed at case 1");
 	}
+
 	sunxi_enable_device_iommu(args.args[0], 1);
 	ret = 0;
 
-	iounmap(premap_1);
-	iounmap(premap_2);
-	dma_free_coherent(dev, size, valid_src_virt, valid_src_phys);
+err_map_no_cache:
+	if (valid_src_virt)
+		vunmap(valid_src_virt);
+	if (premap_2)
+		vunmap(premap_2);
+	if (premap_1)
+		vunmap(premap_1);
 	/* incase we want to repeat test later */
 	iommu_unmap(iommu_get_domain_for_dev(dev), test_params.premap_1_addr,
 		    test_params.premap_1_size);

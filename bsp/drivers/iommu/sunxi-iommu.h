@@ -72,6 +72,12 @@ int iova_show_on_irq(void);
 void sunxi_iommu_register_vendorhook(void);
 void sunxi_iommu_init_debugfs(struct sunxi_iommu_dev *sunxi_iommu);
 void sunxi_iommu_release_debugfs(void);
+ssize_t sunxi_iommu_dump_pgtable(char *buf, size_t buf_len,
+					       bool for_sysfs_show);
+
+#if defined(CONFIG_AW_IOMMU_V1)
+bool sunxi_iommu_is_support_master(struct device *dev, const char *master, int idx);
+#endif
 
 #if IS_ENABLED(CONFIG_AW_IOMMU_IOVA_TRACE)
 struct sunxi_iommu_iova_info {

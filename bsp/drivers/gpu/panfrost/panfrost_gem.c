@@ -205,7 +205,22 @@ static int panfrost_gem_pin(struct drm_gem_object *obj)
 #endif
 }
 
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0))
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0))
+static const struct drm_gem_object_funcs panfrost_gem_funcs = {
+	.free = panfrost_gem_free_object,
+	.open = panfrost_gem_open,
+	.close = panfrost_gem_close,
+	.print_info = drm_gem_shmem_object_print_info,
+	.pin = panfrost_gem_pin,
+	.unpin = drm_gem_shmem_object_unpin,
+	.get_sg_table = drm_gem_shmem_object_get_sg_table,
+	.vmap = drm_gem_shmem_object_vmap,
+	.vunmap = drm_gem_shmem_object_vunmap,
+	.mmap = drm_gem_shmem_object_mmap,
+	.vm_ops = &drm_gem_shmem_vm_ops,
+};
+
+#elif (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0))
 static const struct drm_gem_object_funcs panfrost_gem_funcs = {
 	.free = panfrost_gem_free_object,
 	.open = panfrost_gem_open,
