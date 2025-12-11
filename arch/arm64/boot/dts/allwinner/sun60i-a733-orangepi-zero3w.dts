@@ -1559,10 +1559,6 @@
 	status = "okay";
 };
 
-
-
-
-
 &sdc0 {
 	bus-width = <4>;
 	cd-gpios = <&pio PF 6 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
@@ -1652,7 +1648,7 @@
 	//enable-active-high;
 	usb_det_vbus_gpio = "axp_ctrl";
 	//enable-active-high;
-	detvbus_io-supply = <&reg_cldo1>;
+	detvbus_io-supply = <&reg_aldo1>;
 	usb_regulator_io = "nocare";
 	usb_wakeup_suspend = <0>;
 	usb_luns = <3>;
@@ -1751,7 +1747,7 @@
  	/* For stability and backwards compatibility, we recommend setting ‘twi_drv_used’ to 1 */
  	twi_drv_used = <0>;
  	no_suspend = <1>;
- 	twi-supply = <&reg_cldo3>;
+ 	twi-supply = <&reg_aldo1>;
 	status = "disabled";
 
 		//eeprom@50 {
@@ -1830,7 +1826,7 @@
 	/* For stability and backwards compatibility, we recommend setting ‘twi_drv_used’ to 1 */
 	twi_drv_used = <1>;
 	twi-supply = <&reg_bldo2>;
-	status = "okay";
+	status = "disabled";
 
 	es8388: es8388@10{
 		status = "disabled";
@@ -2193,8 +2189,6 @@
 				regulator-min-microvolt = <500000>;
 				regulator-max-microvolt = <3400000>;
 				regulator-enable-ramp-delay = <1000>;
-				regulator-boot-on;
-				regulator-always-on;
 			};
 			reg_bldo5: bldo5 {
 				regulator-name = "axp8191-bldo5";
@@ -2277,8 +2271,6 @@
 				regulator-min-microvolt = <500000>;
 				regulator-max-microvolt = <3400000>;
 				regulator-enable-ramp-delay = <1000>;
-				regulator-boot-on;
-				regulator-always-on;
 			};
 			reg_eldo1: eldo1 {
 				regulator-name = "axp8191-eldo1";
@@ -2293,8 +2285,6 @@
 				regulator-min-microvolt = <500000>;
 				regulator-max-microvolt = <3400000>;
 				regulator-enable-ramp-delay = <1000>;
-				regulator-boot-on;
-				regulator-always-on;
 			};
 			reg_eldo3: eldo3 {
 				regulator-name = "axp8191-eldo3";
@@ -2516,6 +2506,7 @@
 	husb311: husb311@22 {
 		//compatible = "hynetek,husb311";
 		compatible = "fcs,fusb302";
+		//reg = <0x4e>;
 		reg = <0x22>;
 		interrupt-parent = <&r_pio>;
 		interrupts = <PL 9 IRQ_TYPE_LEVEL_LOW>;
@@ -2776,7 +2767,7 @@
 	edp_color_fmt = <0>; /* 0:RGB  1: YUV444  2: YUV422 */
 	fps_limit_60 = <1>;
 
-	vcc-edp-supply = <&reg_dldo2>;
+	//vcc-edp-supply = <&reg_dldo2>;
 	vdd-edp-supply = <&reg_dcdc2>;
 
 	extcon = <&serdes>;
