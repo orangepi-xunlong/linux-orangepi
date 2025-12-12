@@ -701,8 +701,8 @@ This is free software, and you are welcome to redistribute it under certain cond
 
 #define rtl8125_rx_page_size(order) (PAGE_SIZE << order)
 
-#define MAX_NUM_TX_DESC 1024    /* Maximum number of Tx descriptor registers */
-#define MAX_NUM_RX_DESC 1024    /* Maximum number of Rx descriptor registers */
+#define MAX_NUM_TX_DESC 2048    /* Maximum number of Tx descriptor registers */
+#define MAX_NUM_RX_DESC 2048    /* Maximum number of Rx descriptor registers */
 
 #define MIN_NUM_TX_DESC 256    /* Minimum number of Tx descriptor registers */
 #define MIN_NUM_RX_DESC 256    /* Minimum number of Rx descriptor registers */
