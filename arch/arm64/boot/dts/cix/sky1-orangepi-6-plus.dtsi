@@ -2908,7 +2908,7 @@
 				static-coefficient = <2427750>;
 				dynamic-coefficient = <4687>;
 				ts = <20000 2000 (-20) 2>;
-				thermal-zone = "thermal-zone-gpu";
+				thermal-zone = "tz-gpu";
 			};
 			pbha {
 				int_id_override = <2 0x23>, <4 0x23>, <16 0x22>, <17 0x32>,
@@ -3783,7 +3783,7 @@
 
     thermal-zones {
 		/*thermal zone for GPU*/
-		thermal_zone_gpu: thermal-zone-gpu {
+		thermal_zone_gpu: tz-gpu {
 			polling-delay-passive = <250>;
 			polling-delay = <1000>;
 			thermal-sensors = <&scmi_sensor 2>;
@@ -3804,7 +3804,7 @@
 			};
 		};
 		/*thermal zone for CPU_M0*/
-		thermal_zone_cpu: thermal-zone1 {
+		thermal_zone_cpu: tz-cpu-4-5 {
 			polling-delay-passive = <250>;
 			polling-delay = <1000>;
 			thermal-sensors = <&scmi_sensor 10>;
@@ -3825,7 +3825,7 @@
 			};
 		};
 		/*thermal zone for CPU_M1*/
-		thermal_zone_cpu_m1: thermal-zone2 {
+		thermal_zone_cpu_m1: tz-cpu-6-7 {
 			polling-delay-passive = <250>;
 			polling-delay = <1000>;
 			thermal-sensors = <&scmi_sensor 8>;
@@ -3846,7 +3846,7 @@
 			};
 		};
 		/*thermal zone for CPU_B0*/
-		thermal_zone_cpu_b0: thermal-zone3 {
+		thermal_zone_cpu_b0: tz-cpu-8-9 {
 			polling-delay-passive = <250>;
 			polling-delay = <1000>;
 			thermal-sensors = <&scmi_sensor 11>;
@@ -3867,7 +3867,7 @@
 			};
 		};
 		/*thermal zone for CPU_B1*/
-		thermal_zone_cpu_b1: thermal-zone4 {
+		thermal_zone_cpu_b1: tz-cpu-10-11 {
 			polling-delay-passive = <250>;
 			polling-delay = <1000>;
 			thermal-sensors = <&scmi_sensor 9>;
@@ -3889,7 +3889,7 @@
 		};
 
 		/* below thermal zone only used for monitor temp */
-		thermal_zone_vpu: thermal-zone5 {
+		thermal_zone_vpu: tz-vpu {
 			polling-delay-passive = <250>;
 			polling-delay = <1000>;
 			thermal-sensors = <&scmi_sensor 0>;
@@ -3903,7 +3903,7 @@
 			};
 		};
 
-		thermal_zone_gpu1: thermal-zone6 {
+		thermal_zone_gpu1: tz-gpu1 {
 			polling-delay-passive = <250>;
 			polling-delay = <1000>;
 			thermal-sensors = <&scmi_sensor 1>;
@@ -3917,7 +3917,7 @@
 			};
 		};
 
-		thermal_zone_brc: thermal-zone7 {
+		thermal_zone_brc: tz-brc {
 			polling-delay-passive = <250>;
 			polling-delay = <1000>;
 			thermal-sensors = <&scmi_sensor 3>;
@@ -3931,7 +3931,7 @@
 			};
 		};
 
-		thermal_zone_ddr0: thermal-zone8 {
+		thermal_zone_ddr0: tz-ddr0 {
 			polling-delay-passive = <250>;
 			polling-delay = <1000>;
 			thermal-sensors = <&scmi_sensor 4>;
@@ -3945,7 +3945,7 @@
 			};
 		};
 
-		thermal_zone_ddr1: thermal-zone9 {
+		thermal_zone_ddr1: tz-ddr1 {
 			polling-delay-passive = <250>;
 			polling-delay = <1000>;
 			thermal-sensors = <&scmi_sensor 5>;
@@ -3959,7 +3959,7 @@
 			};
 		};
 
-		thermal_zone_ci700: thermal-zone10 {
+		thermal_zone_ci700: tz-ci700 {
 			polling-delay-passive = <250>;
 			polling-delay = <1000>;
 			thermal-sensors = <&scmi_sensor 6>;
@@ -3973,7 +3973,7 @@
 			};
 		};
 
-		thermal_zone_npu: thermal-zone11 {
+		thermal_zone_npu: tz-npu {
 			polling-delay-passive = <250>;
 			polling-delay = <1000>;
 			thermal-sensors = <&scmi_sensor 7>;
@@ -3987,7 +3987,7 @@
 			};
 		};
 
-		thermal_zone_trc: thermal-zone12 {
+		thermal_zone_trc: tz-trc {
 			polling-delay-passive = <250>;
 			polling-delay = <1000>;
 			thermal-sensors = <&scmi_sensor 12>;

@@ -1213,7 +1213,7 @@
 };
 
 &thermal_zones {
-	cpu-m1-thermal {
+	tz-cpu-6-7 {
 		polling-delay-passive = <100>;
 		polling-delay = <1000>;
 		thermal-sensors = <&scmi_sensor CPU_M1_TEMP_SENSOR_ID>;
@@ -1234,7 +1234,7 @@
 		};
 	};
 
-	cpu-b1-thermal {
+	tz-cpu-10-11 {
 		polling-delay-passive = <100>;
 		polling-delay = <1000>;
 		thermal-sensors = <&scmi_sensor CPU_B1_TEMP_SENSOR_ID>;
@@ -1255,7 +1255,7 @@
 		};
 	};
 
-	cpu-m0-thermal {
+	tz-cpu-4-5 {
 		polling-delay-passive = <100>;
 		polling-delay = <1000>;
 		thermal-sensors = <&scmi_sensor CPU_M0_TEMP_SENSOR_ID>;
@@ -1276,7 +1276,7 @@
 		};
 	};
 
-	cpu-b0-thermal {
+	tz-cpu-8-9 {
 		polling-delay-passive = <100>;
 		polling-delay = <1000>;
 		thermal-sensors = <&scmi_sensor CPU_M0_TEMP_SENSOR_ID>;

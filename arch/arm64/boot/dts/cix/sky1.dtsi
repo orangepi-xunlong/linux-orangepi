@@ -2922,7 +2922,7 @@
 				static-coefficient = <2427750>;
 				dynamic-coefficient = <4687>;
 				ts = <20000 2000 (-20) 2>;
-				thermal-zone = "gpu-avg-thermal";
+				thermal-zone = "tz-gpu-avg";
 			};
 			pbha {
 				int_id_override = <2 0x23>, <4 0x23>, <16 0x22>, <17 0x32>,
@@ -3773,7 +3773,7 @@
 	};
 
         thermal_zones:thermal-zones {
-		vpu-thermal {
+		tz-vpu {
 			polling-delay-passive = <250>;
 			polling-delay = <1000>;
 			thermal-sensors = <&scmi_sensor VPU_TEMP_SENSOR_ID>;
@@ -3787,7 +3787,7 @@
 			};
 		};
 
-		gpu0-thermal {
+		tz-gpu0 {
 			polling-delay-passive = <100>;
 			polling-delay = <1000>;
 			thermal-sensors = <&scmi_sensor GPU_BOTTOM_TEMP_SENSOR_ID>;
@@ -3801,7 +3801,7 @@
 			};
 		};
 
-		gpu1-thermal {
+		tz-gpu1 {
 			polling-delay-passive = <100>;
 			polling-delay = <1000>;
 			thermal-sensors = <&scmi_sensor GPU_TOP_TEMP_SENSOR_ID>;
@@ -3815,7 +3815,7 @@
 			};
 		};
 
-		brc-thermal {
+		tz-brc {
 			polling-delay-passive = <250>;
 			polling-delay = <1000>;
 			thermal-sensors = <&scmi_sensor SOC_BRC_TEMP_SENSOR_ID>;
@@ -3829,7 +3829,7 @@
 			};
 		};
 
-		ddr0-thermal {
+		tz-ddr0 {
 			polling-delay-passive = <250>;
 			polling-delay = <1000>;
 			thermal-sensors = <&scmi_sensor DDR_BOTTOM4_TEMP_SENSOR_ID>;
@@ -3843,7 +3843,7 @@
 			};
 		};
 
-		ddr1-thermal {
+		tz-ddr1 {
 			polling-delay-passive = <250>;
 			polling-delay = <1000>;
 			thermal-sensors = <&scmi_sensor DDR_TOP_TEMP_SENSOR_ID>;
@@ -3857,7 +3857,7 @@
 			};
 		};
 
-		ci700-thermal {
+		tz-ci700 {
 			polling-delay-passive = <250>;
 			polling-delay = <1000>;
 			thermal-sensors = <&scmi_sensor CI700_TEMP_SENSOR_ID>;
@@ -3871,7 +3871,7 @@
 			};
 		};
 
-		npu-thermal {
+		tz-npu {
 			polling-delay-passive = <250>;
 			polling-delay = <1000>;
 			thermal-sensors = <&scmi_sensor NPU_TEMP_SENSOR_ID>;
@@ -3885,7 +3885,7 @@
 			};
 		};
 
-		trc-thermal {
+		tz-trc {
 			polling-delay-passive = <250>;
 			polling-delay = <1000>;
 			thermal-sensors = <&scmi_sensor SOC_TRC_TEMP_SENSOR_ID>;
@@ -3899,7 +3899,7 @@
 			};
 		};
 
-		gpu-avg-thermal {
+		tz-gpu-avg {
 			polling-delay-passive = <100>;
 			polling-delay = <1000>;
 			thermal-sensors = <&scmi_sensor GPU_AVERAGE_TEMP_SENSOR_ID>;
