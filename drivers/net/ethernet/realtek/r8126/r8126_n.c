@@ -14832,6 +14832,7 @@ static void rtl8126_free_irq(struct rtl8126_private *tp)
 
                 if (irq->requested) {
                         irq->requested = 0;
+			irq_set_affinity_hint(irq->vector, NULL);
 #if defined(RTL_USE_NEW_INTR_API)
                         pci_free_irq(tp->pci_dev, i, r8126napi);
 #else
@@ -14839,6 +14840,18 @@ static void rtl8126_free_irq(struct rtl8126_private *tp)
 #endif
                 }
         }
+}
+
+static bool is_little_core(int cpu)
+{
+	#define LITTLE_CPU_CAPACITY 500
+	/* Check if the CPU is a little CPU based on its capacity.
+	 * This is a simplified check, assuming that CPUs with
+	 * capacity less than LITTLE_CPU_CAPACITY are considered little.
+	 */
+	unsigned long capacity = topology_get_cpu_scale(cpu);
+
+	return capacity < LITTLE_CPU_CAPACITY;
 }
 
 static int rtl8126_alloc_irq(struct rtl8126_private *tp)
@@ -14849,7 +14862,14 @@ static int rtl8126_alloc_irq(struct rtl8126_private *tp)
         struct r8126_napi *r8126napi;
         int i = 0;
         const int len = sizeof(tp->irq_tbl[0].name);
+	cpumask_t mask;
+	int cpu;
 
+	cpumask_clear(&mask);
+	for_each_online_cpu(cpu) {
+		if (!is_little_core(cpu))
+			cpumask_set_cpu(cpu, &mask);
+	}
 #if defined(RTL_USE_NEW_INTR_API)
         for (i=0; i<tp->irq_nvecs; i++) {
                 irq = &tp->irq_tbl[i];
@@ -14868,6 +14888,7 @@ static int rtl8126_alloc_irq(struct rtl8126_private *tp)
 
                 irq->vector = pci_irq_vector(tp->pci_dev, i);
                 irq->requested = 1;
+		irq_set_affinity_hint(irq->vector, &mask);
         }
 #else
         unsigned long irq_flags = 0;
@@ -14885,7 +14906,7 @@ static int rtl8126_alloc_irq(struct rtl8126_private *tp)
 
                         if (rc)
                                 break;
-
+			irq_set_affinity_hint(irq->vector, &mask);
                         irq->requested = 1;
                 }
         } else {
@@ -14897,7 +14918,7 @@ static int rtl8126_alloc_irq(struct rtl8126_private *tp)
                         irq->vector = dev->irq;
                 irq_flags |= (tp->features & (RTL_FEATURE_MSI | RTL_FEATURE_MSIX)) ? 0 : SA_SHIRQ;
                 rc = request_irq(irq->vector, irq->handler, irq_flags, irq->name, r8126napi);
-
+		irq_set_affinity_hint(irq->vector, &mask);
                 if (rc == 0)
                         irq->requested = 1;
         }
