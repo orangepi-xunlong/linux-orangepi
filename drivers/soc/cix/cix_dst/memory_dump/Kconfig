@@ -1,6 +1,8 @@
 config PLAT_KERNELDUMP
 	bool "Support CIX KERNELDUMP"
 	default n
+	select KEXEC_CORE
+	select CRASH_CORE
 	help
 	  This driver supports Cix SkyX KERNELDUMP,
 	  including kerneldump driver.

@@ -92,10 +92,6 @@ void nmi_trigger_cpumask_backtrace(const cpumask_t *mask,
 static bool backtrace_idle;
 module_param(backtrace_idle, bool, 0644);
 
-#ifdef CONFIG_PLAT_KERNELDUMP
-extern void plat_set_cpu_regs(int coreid, struct pt_regs* reg);
-#endif
-
 bool nmi_cpu_backtrace(struct pt_regs *regs)
 {
 	int cpu = smp_processor_id();
@@ -112,12 +108,9 @@ bool nmi_cpu_backtrace(struct pt_regs *regs)
 				cpu, (void *)instruction_pointer(regs));
 		} else {
 			pr_warn("NMI backtrace for cpu %d\n", cpu);
-			if (regs) {
+			if (regs)
 				dump_backtrace(regs, NULL, KERN_DEFAULT);
-#ifdef CONFIG_PLAT_KERNELDUMP
-				plat_set_cpu_regs(cpu, regs);
-#endif
-			} else
+			else
 				dump_stack();
 		}
 		printk_cpu_sync_put_irqrestore(flags);

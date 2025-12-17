@@ -18,10 +18,10 @@
  *
  */
 
+#include <linux/soc/cix/mntn_dump.h>
 #include <linux/syscalls.h>
 #include <linux/cacheflush.h>
 #include <linux/console.h>
-#include <linux/kexec.h>
 #include <linux/kmsg_dump.h>
 #include <linux/reboot.h>
 #include <mntn_subtype_exception.h>
@@ -197,17 +197,18 @@ static void rdr_ap_reset(u32 modid, u32 etype, u64 coreid)
 	}
 
 	console_flush_on_panic(CONSOLE_FLUSH_PENDING);
+	kmsg_dump(KMSG_DUMP_PANIC);
+#ifdef CONFIG_PLAT_KERNELDUMP
+	kd_save_state_shutdown();
+#endif
+	__flush_dcache_all();
+
 	/* HIMNTN_PANIC_INTO_LOOP will disbale ap reset */
-	if (check_himntn(HIMNTN_PANIC_INTO_LOOP) == 1 &&
-	    !kexec_crash_loaded()) {
+	if (check_himntn(HIMNTN_PANIC_INTO_LOOP) == 1) {
 		do {
 		} while (1);
 	}
-	kmsg_dump(KMSG_DUMP_PANIC);
-	__flush_dcache_all();
-
-	if (!kexec_crash_loaded())
-		machine_restart(NULL);
+	machine_restart(NULL);
 }
 
 /*
@@ -348,8 +349,8 @@ static int rdr_ap_register_core(void)
 	g_eh_ap->mem.size = retinfo.log_len;
 	g_eh_ap->mem.vaddr = vaddr;
 
-	BB_DBG("addr=0x%llx, vaddr=%px, len=0x%llx\n", g_eh_ap->mem.paddr, vaddr,
-	       g_eh_ap->mem.size);
+	BB_DBG("addr=0x%llx, vaddr=%px, len=0x%llx\n", g_eh_ap->mem.paddr,
+	       vaddr, g_eh_ap->mem.size);
 	return ret;
 }
 

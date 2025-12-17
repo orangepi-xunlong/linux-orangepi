@@ -162,10 +162,6 @@ void tzc400_print_info(int index, struct TZC400_ERROR_INFO *info)
 		direction ? "Write access" : "Read access");
 }
 
-#ifdef CONFIG_PLAT_KERNELDUMP
-extern void plat_set_cpu_regs(int coreid, struct pt_regs *reg);
-#endif
-
 int sdei_tzc400_event_callback(u32 event, struct pt_regs *regs, void *arg)
 {
 	int index;
@@ -193,9 +189,6 @@ int sdei_tzc400_event_callback(u32 event, struct pt_regs *regs, void *arg)
 
 	if (has_error != -1) {
 		DST_PN("rdr tzc400 exception triggered...\n");
-#ifdef CONFIG_PLAT_KERNELDUMP
-		plat_set_cpu_regs(raw_smp_processor_id(), regs);
-#endif
 		trigger_allbutcpu_cpu_backtrace(raw_smp_processor_id());
 		rdr_system_error(MODID_TZC400_EXCEPTION_RES,
 				 info[has_error].fail_address >> 32,

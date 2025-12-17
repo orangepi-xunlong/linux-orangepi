@@ -37,9 +37,6 @@ struct EventArgs {
 	struct rdr_exception_info_s einfo;
 };
 
-#ifdef CONFIG_PLAT_KERNELDUMP
-extern void plat_set_cpu_regs(int coreid, struct pt_regs *reg);
-#endif
 static int plat_sdei_tee_event_callback(u32 event, struct pt_regs *regs,
 					void *arg);
 
@@ -135,9 +132,6 @@ int plat_sdei_tee_event_callback(u32 event, struct pt_regs *regs, void *arg)
 	}
 
 	bust_spinlocks(1); /* bust_spinlocks is open */
-#ifdef CONFIG_PLAT_KERNELDUMP
-	plat_set_cpu_regs(raw_smp_processor_id(), regs);
-#endif
 	trigger_allbutcpu_cpu_backtrace(raw_smp_processor_id());
 
 	rdr_system_error(evtargs->einfo.e_modid, 0, 0);

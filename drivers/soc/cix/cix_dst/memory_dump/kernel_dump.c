@@ -4,8 +4,8 @@
  *
  * balong memory/register proc-fs dump implementation
  * Copyright 2024 Cix Technology Group Co., Ltd.
+ * Copyright 2025 Cix Technology Group Co., Ltd.
  *
- * Copyright (c) 2012-2020 Huawei Technologies Co., Ltd.
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -18,6 +18,9 @@
  *
  */
 
+#include <linux/reboot.h>
+#include <linux/kexec.h>
+#include <linux/crash_core.h>
 #include <linux/memblock.h>
 #include <linux/cacheflush.h>
 #include <linux/soc/cix/cix_hibernate.h>
@@ -37,7 +40,8 @@
 
 extern int pcpu_base_size;
 
-struct kernel_dump_cb *g_kdump_cb;
+static struct kernel_dump_cb *g_kdump_cb;
+static u64 g_kdump_reserve_size = { 0 };
 
 struct uefi_mem_desc {
 	u64 reserved_mem_start;
@@ -49,88 +53,6 @@ struct uefi_reserved_desc {
 	u32 reserved_count;
 	struct uefi_mem_desc reserved_desc[0];
 };
-
-static struct table_extra {
-	u64 extra_mem_phy_base;
-	u64 extra_mem_virt_base;
-	u64 extra_mem_size;
-} g_tbl_extra_mem[MAX_EXTRA_MEM] = { { 0, 0, 0 } };
-
-static unsigned int extra_index;
-static DEFINE_RAW_SPINLOCK(g_kdump_lock);
-
-void plat_set_cpu_regs(int coreid, struct pt_regs *src)
-{
-	struct pt_regs *dst;
-
-	if (!g_kdump_cb || coreid >= MNTN_MAX_CPU_CORES) {
-		DST_ERR("input arg [%d], 0x%px\n", coreid, src);
-		return;
-	}
-
-	dst = (struct pt_regs *)(g_kdump_cb + 1);
-	dst += coreid;
-	memcpy(dst, src, sizeof(struct pt_regs));
-}
-EXPORT_SYMBOL_GPL(plat_set_cpu_regs);
-
-static int add_mem2table(u64 va, u64 pa, u64 size, bool need_crc)
-{
-	unsigned int i;
-	bool crc_check = false;
-
-	if ((pa == 0) || (va == 0) || (size == 0) ||
-	    (extra_index >= MAX_EXTRA_MEM)) {
-		return -1;
-	}
-
-	raw_spin_lock(&g_kdump_lock);
-	/* Kernel dump is not inited */
-	if (!g_kdump_cb) {
-		g_tbl_extra_mem[extra_index].extra_mem_phy_base = pa;
-		g_tbl_extra_mem[extra_index].extra_mem_virt_base = va;
-		g_tbl_extra_mem[extra_index].extra_mem_size = size;
-		extra_index++;
-	} else {
-		i = extra_index;
-		if (i < MAX_EXTRA_MEM) {
-			g_kdump_cb->extra_mem_phy_base[i] = pa;
-			g_kdump_cb->extra_mem_virt_base[i] = va;
-			g_kdump_cb->extra_mem_size[i] = size;
-			extra_index += 1;
-
-			crc_check = true;
-		} else {
-			DST_ERR("extra memory(nums:%d) is out of range.\n",
-				extra_index);
-			goto err;
-		}
-	}
-
-	if ((true == need_crc) && (true == crc_check)) {
-		g_kdump_cb->crc = 0;
-		g_kdump_cb->crc = checksum32((u32 *)g_kdump_cb,
-					     sizeof(struct kernel_dump_cb));
-	}
-
-	raw_spin_unlock(&g_kdump_lock);
-	return 0;
-err:
-	raw_spin_unlock(&g_kdump_lock);
-	return -1;
-}
-
-int add_extra_table(u64 pa, u64 size)
-{
-	return add_mem2table((uintptr_t)phys_to_virt(pa), pa, size, true);
-}
-
-static void kernel_dump_printcb(struct memblock_type *print_mb_cb,
-				struct kernel_dump_cb *cb)
-{
-	(void)print_mb_cb;
-	(void)cb;
-}
 
 #ifdef CONFIG_HIBERNATION
 static int kernel_dump_suspend(u64 paddr, u64 size)
@@ -165,104 +87,128 @@ static struct hibernate_rmem_ops kernel_dump_reserve_ops = {
 };
 #endif
 
-static int kernel_dump_panic_notify(struct notifier_block *nb,
-				    unsigned long event, void *buf)
+static int kd_prepare_elf_headers(void **addr, unsigned long *sz)
+{
+	struct crash_mem *cmem;
+	unsigned int nr_ranges;
+	int ret;
+	u64 i;
+	phys_addr_t start, end;
+
+	nr_ranges = 2;
+	for_each_mem_range(i, &start, &end)
+		nr_ranges++;
+
+	cmem = kmalloc(struct_size(cmem, ranges, nr_ranges), GFP_KERNEL);
+	if (!cmem)
+		return -ENOMEM;
+
+	cmem->max_nr_ranges = nr_ranges;
+	cmem->nr_ranges = 0;
+	for_each_mem_range(i, &start, &end) {
+		cmem->ranges[cmem->nr_ranges].start = start;
+		cmem->ranges[cmem->nr_ranges].end = end - 1;
+		cmem->nr_ranges++;
+	}
+
+	ret = crash_prepare_elf64_headers(cmem, true, addr, sz);
+	kfree(cmem);
+	return ret;
+}
+
+static void kd_flush_cache(void)
+{
+	Elf64_Ehdr *ehdr;
+	Elf64_Phdr *phdr;
+	int cpu;
+
+	if (!g_kdump_cb)
+		return;
+
+	dcache_clean_poc((u64)g_kdump_cb,
+			 (u64)g_kdump_cb + g_kdump_reserve_size);
+	ehdr = (Elf64_Ehdr *)g_kdump_cb->buf;
+	phdr = (Elf64_Phdr *)(ehdr + 1);
+
+	/* prepare note vaddr for each possible CPU */
+	for_each_possible_cpu(cpu) {
+		if (phdr->p_vaddr)
+			continue;
+		phdr->p_vaddr = (u64)per_cpu_ptr(crash_notes, cpu);
+		phdr++;
+	}
+	/* prepare note vaddr for vmcoreinfo */
+	if (!phdr->p_vaddr)
+		phdr->p_vaddr = (u64)vmcoreinfo_note;
+
+	phdr = (Elf64_Phdr *)(ehdr + 1);
+	/* flush cache for elf64_phdr */
+	for (int i = 0; i < ehdr->e_phnum; i++) {
+		if (phdr[i].p_type != PT_NOTE)
+			continue;
+		DST_PN("flush cache for pt[%d] type %d, 0x%llx~0x%llx\n", i,
+		       phdr[i].p_type, phdr[i].p_vaddr,
+		       phdr[i].p_vaddr + phdr[i].p_memsz);
+		dcache_clean_poc(phdr[i].p_vaddr,
+				 phdr[i].p_vaddr + phdr[i].p_memsz);
+	}
+}
+
+void kd_save_state_shutdown(void)
 {
 	struct pt_regs regs;
 
-	memset(&regs, 0x00, sizeof(regs));
-	plat_get_pt_regs(&regs);
-	plat_set_cpu_regs(raw_smp_processor_id(), &regs);
-	show_regs(&regs);
+	local_irq_disable();
+	crash_setup_regs(&regs, NULL);
+	crash_save_vmcoreinfo();
 
-	return 0;
+	/* for crashing cpu */
+	crash_save_cpu(&regs, smp_processor_id());
+	kd_flush_cache();
+	__flush_dcache_all();
+
+	/* HIMNTN_PANIC_INTO_LOOP will disbale ap reset */
+	if (check_himntn(HIMNTN_PANIC_INTO_LOOP) == 1) {
+		do {
+		} while (1);
+	}
+	machine_restart(NULL);
 }
-
-static struct notifier_block kernel_dump_panic_block = {
-	.notifier_call = kernel_dump_panic_notify,
-};
+EXPORT_SYMBOL(kd_save_state_shutdown);
 
 int kernel_dump_init(void)
 {
-	unsigned int i, j;
-	phys_addr_t mem_ret;
 	struct kernel_dump_cb *cb = NULL;
-	struct memblock_type *print_mb_cb = NULL;
+	unsigned long sz;
+	void *buf;
+	int ret;
 
-	if (register_mntn_dump(MNTN_DUMP_KERNEL_DUMP,
-			       sizeof(struct kernel_dump_cb), (void **)&cb)) {
+	g_kdump_reserve_size = (KERNELDUMP_CB_MAX_SEC * sizeof(Elf64_Phdr)) +
+			       sizeof(Elf64_Ehdr) + sizeof(*cb);
+	if (register_mntn_dump(MNTN_DUMP_KERNEL_DUMP, g_kdump_reserve_size,
+			       (void **)&cb)) {
 		DST_ERR("fail to get reserve memory\n");
-		goto err;
+		return -1;
 	}
 
-	memset((void *)cb, 0, sizeof(struct kernel_dump_cb));
-
+	/*clear kernel dump info*/
+	cb->checksum = 0;
+	cb->magic = 0;
+	ret = kd_prepare_elf_headers(&buf, &sz);
+	if (ret) {
+		DST_ERR("fail to prepare elf headers\n");
+		return -1;
+	}
+	if (sz + sizeof(*cb) > g_kdump_reserve_size) {
+		DST_ERR("reserve memory is not enough %lu\n", sz);
+		return -1;
+	}
 	cb->magic = KERNELDUMP_CB_MAGIC;
-	cb->size = sizeof(struct kernel_dump_cb);
-	cb->page_shift = PAGE_SHIFT;
-	cb->struct_page_size = sizeof(struct page);
-#ifdef CONFIG_RANDOMIZE_BASE
-	cb->phys_offset = memstart_addr;
-	cb->kernel_offset = kimage_vaddr;
-#else
-	cb->phys_offset = PHYS_OFFSET;
-	cb->kernel_offset = KIMAGE_VADDR; /*lint !e648*/
-#endif
-	cb->page_offset = PAGE_OFFSET; /*lint !e648*/
-	cb->extra_mem_phy_base[0] = virt_to_phys(_text);
-	cb->extra_mem_virt_base[0] = (u64)(uintptr_t)_text;
-	cb->extra_mem_size[0] =
-		ALIGN((u64)(uintptr_t)_end - (u64)(uintptr_t)_text, PAGE_SIZE);
-	cb->extra_mem_phy_base[1] =
-		virt_to_phys(pcpu_base_addr); /* per cpu info*/
-	cb->extra_mem_virt_base[1] =
-		(u64)(uintptr_t)pcpu_base_addr; /* per cpu info*/
-	cb->extra_mem_size[1] =
-		(u64)ALIGN(pcpu_base_size, PAGE_SIZE) * CONFIG_NR_CPUS;
-	for (i = 2, j = 0; i < MAX_EXTRA_MEM && j < extra_index; i++, j++) {
-		cb->extra_mem_phy_base[i] =
-			g_tbl_extra_mem[j].extra_mem_phy_base;
-		cb->extra_mem_virt_base[i] =
-			g_tbl_extra_mem[j].extra_mem_virt_base;
-		cb->extra_mem_size[i] = g_tbl_extra_mem[j].extra_mem_size;
-	}
-	extra_index = i;
-#ifdef CONFIG_SPARSEMEM_VMEMMAP
-	cb->page = vmemmap;
-	cb->pfn_offset = 0;
-	cb->pmd_size = PMD_SIZE;
-	cb->section_size = 1UL << SECTION_SIZE_BITS;
-#else
-#error "Configurations other than CONFIG_PLATMEM and CONFIG_SPARSEMEM_VMEMMAP are not supported"
-#endif
-#ifdef CONFIG_64BIT
-	/*Subtract the base address that TTBR1 maps*/
-	cb->kern_map_offset =
-		(UL(0xffffffffffffffff) << VA_BITS); /*lint !e648*/
-#else
-	cb->kern_map_offset = 0;
-#endif
-	cb->flag = 0xABCDABCDABCDABCD;
-	cb->ttrb1_el1 = read_sysreg(ttbr1_el1);
-	cb->tcr_el1 = read_sysreg(tcr_el1);
-	cb->maid_el1 = read_sysreg(mair_el1);
-	cb->amair_el1 = read_sysreg(amair_el1);
-	cb->sctlr_el1 = read_sysreg(sctlr_el1);
-	cb->mb_cb = (struct memblock_type *)(uintptr_t)virt_to_phys(
-		&memblock.memory);
-	print_mb_cb = &memblock.memory;
-	cb->mbr_size = sizeof(struct memblock_region);
-	mem_ret = memblock_start_of_DRAM();
-	(void)mem_ret;
-	cb->linear_kaslr_offset = kaslr_offset();
-	cb->resize_flag = SKP_DUMP_RESIZE_FAIL; /*init fail status*/
-	cb->skp_flag = SKP_DUMP_SKP_FAIL; /*init fail status*/
-
-	kernel_dump_printcb(print_mb_cb, cb);
+	memcpy(cb->buf, buf, sz);
+	cb->checksum = checksum32((u32 *)cb->buf, sz);
+	vfree(buf);
 	g_kdump_cb = cb;
-
-	cb->crc = 0;
-	cb->crc = checksum32((u32 *)cb, sizeof(struct kernel_dump_cb));
+	kd_flush_cache();
 
 #ifdef CONFIG_HIBERNATION
 	kernel_dump_reserve_ops.paddr =
@@ -272,15 +218,13 @@ int kernel_dump_init(void)
 	register_reserve_mem_ops(&kernel_dump_reserve_ops);
 #endif
 
-	atomic_notifier_chain_register(&panic_notifier_list,
-				       &kernel_dump_panic_block);
 	/*PANIC_PRINT_ALL_CPU_BT*/
 	panic_print |= 0x00000040;
+	/*save other cpu crash_notes*/
+	crash_kexec_post_notifiers = true;
 	return 0;
-err:
-	return -1;
 }
-early_initcall(kernel_dump_init);
+subsys_initcall_sync(kernel_dump_init);
 
 static int kernel_dump_flag;
 void __init kernel_dump_mem_reserve(void)

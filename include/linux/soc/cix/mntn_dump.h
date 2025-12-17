@@ -25,4 +25,10 @@ extern int register_mntn_dump(int mod_id, unsigned int size, void **vaddr);
 static inline int register_mntn_dump(int mod_id, unsigned int size, void **vaddr) { return -1; }
 #endif
 
+#ifdef CONFIG_PLAT_KERNELDUMP
+void kd_save_state_shutdown(void);
+#else
+static inline void kd_save_state_shutdown(void) {}
+#endif
+
 #endif

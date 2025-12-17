@@ -214,10 +214,6 @@ static int __die(const char *str, long err, struct pt_regs *regs)
 
 static DEFINE_RAW_SPINLOCK(die_lock);
 
-#ifdef CONFIG_PLAT_KERNELDUMP
-extern void plat_set_cpu_regs(int coreid, struct pt_regs* reg);
-#endif
-
 /*
  * This function is protected against re-entrancy.
  */
@@ -232,10 +228,6 @@ void die(const char *str, struct pt_regs *regs, long err)
 
 	console_verbose();
 	bust_spinlocks(1);
-
-#ifdef CONFIG_PLAT_KERNELDUMP
-	plat_set_cpu_regs(raw_smp_processor_id(), regs);
-#endif
 
 	ret = __die(str, err, regs);
 
@@ -978,12 +970,8 @@ void __noreturn arm64_serror_panic(struct pt_regs *regs, unsigned long esr)
 
 	pr_crit("SError Interrupt on CPU%d, code 0x%016lx -- %s\n",
 		smp_processor_id(), esr, esr_get_class_string(esr));
-	if (regs) {
+	if (regs)
 		__show_regs(regs);
-#ifdef CONFIG_PLAT_KERNELDUMP
-		plat_set_cpu_regs(raw_smp_processor_id(), regs);
-#endif
-	}
 
 #ifdef CONFIG_PLAT_SKY1_AUDIO_TIMEOUT
 	sky1_check_audio_timeout_error(far, regs);

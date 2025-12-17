@@ -814,45 +814,6 @@ SYM_CODE_START(__bp_harden_el1_vectors)
 SYM_CODE_END(__bp_harden_el1_vectors)
 	.popsection
 
-
-#ifdef CONFIG_CIX_DST
-SYM_FUNC_START(plat_get_pt_regs)
-	stp x29, x30, [SP, #-0x30]!
-	stp x0, x1, [sp, #0x10]
-	stp x2, x3, [sp, #0x20]
-	stp x0, x1, [x0]
-	stp x2, x3, [x0, #0x10]!
-	stp x4, x5, [x0, #0x10]!
-	stp x6, x7, [x0, #0x10]!
-	stp x8, x9, [x0, #0x10]!
-	stp x10, x11, [x0, #0x10]!
-	stp x12, x13, [x0, #0x10]!
-	stp x14, x15, [x0, #0x10]!
-	stp x16, x17, [x0, #0x10]!
-	stp x18, x19, [x0, #0x10]!
-	stp x20, x21, [x0, #0x10]!
-	stp x22, x23, [x0, #0x10]!
-	stp x24, x25, [x0, #0x10]!
-	stp x26, x27, [x0, #0x10]!
-	stp x28, x29, [x0, #0x10]!
-	ldr x1, [sp] 					//get preceding sp
-	ldr x2, [x1, #0x8] 				//get preceding lr
-	str x2, [x0, #0x10]! 			//set lr
-	str x1, [x0, #0x8]! 			//set sp
-	mrs x1, NZCV 					//get pstate flag
-	mrs x2, DAIF
-	mrs x3, CurrentEL
-	orr x1, x1, x2
-	orr x1, x1, x3
-	stp lr, x1, [x0, #0x8]! 		//set pc,pstate
-	ldp x2, x3, [sp, #0x20]
-	ldp x0, x1, [sp, #0x10]
-	ldp x29,x30,[SP],#0x30
-	ret
-SYM_FUNC_END(plat_get_pt_regs)
-NOKPROBE(plat_get_pt_regs)
-#endif
-
 /*
  * Register switch for AArch64. The callee-saved registers need to be saved
  * and restored. On entry:

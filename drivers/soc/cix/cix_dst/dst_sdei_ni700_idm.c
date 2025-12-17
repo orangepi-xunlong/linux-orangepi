@@ -6,6 +6,7 @@
 #include <mntn_subtype_exception.h>
 #include <linux/soc/cix/rdr_platform.h>
 #include <linux/nmi.h>
+#include <linux/soc/cix/mntn_dump.h>
 #include "dst_print.h"
 
 /* define for SDEI idm Intr */
@@ -147,10 +148,6 @@ static void init_idm_sdei_events(void)
 	DST_PR_END();
 }
 
-#ifdef CONFIG_PLAT_KERNELDUMP
-extern void plat_set_cpu_regs(int coreid, struct pt_regs *reg);
-#endif
-
 int idm_sdei_event_callback(u32 event, struct pt_regs *regs, void *arg)
 {
 	int index;
@@ -168,10 +165,6 @@ int idm_sdei_event_callback(u32 event, struct pt_regs *regs, void *arg)
 	dcache_inval_poc((unsigned long)info,
 			 (unsigned long)((char *)info + sizeof(*info)));
 	DST_ERR("%s: Error address: 0x%lx\n", info->name, info->error_address);
-
-#ifdef CONFIG_PLAT_KERNELDUMP
-	plat_set_cpu_regs(raw_smp_processor_id(), regs);
-#endif
 
 	idm_exception_work(info);
 

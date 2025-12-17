@@ -389,13 +389,5 @@ static inline void procedure_link_pointer_set(struct pt_regs *regs,
 
 extern unsigned long profile_pc(struct pt_regs *regs);
 
-#ifdef CONFIG_CIX_DST
-/*
- * Get pt_regs info in handling exception.
- * @regs: where to store pt_regs info
- */
-extern void plat_get_pt_regs(struct pt_regs *regs);
-#endif
-
 #endif /* __ASSEMBLY__ */
 #endif
