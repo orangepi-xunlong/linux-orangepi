@@ -1363,19 +1363,14 @@ void trilind_dp_psr_disable(struct trilin_dp *dp,
 			phy->phy_ops->power(dp, trilin_power_a2);
 			phy->phy_ops->power(dp, trilin_power_a0);
 		}
-
-		if(dp->psr.link_retrain) {
-			trilin_dp_fast_train(dp);
-			trilin_dpcd_power_up(dp);
-		} else {
-			trilin_dpcd_power_up(dp);
-			/* 5 idle pattens */
-			trilin_dp_write(dp, TRILIN_DPTX_DISABLE_SCRAMBLING, 1);
-			trilin_dp_write(dp, TRILIN_DPTX_TRAINING_PATTERN_SET, 0x1);
-			usleep_range(500, 600);
-			trilin_dp_write(dp, TRILIN_DPTX_TRAINING_PATTERN_SET, DP_TRAINING_PATTERN_DISABLE);
-			trilin_dp_write(dp, TRILIN_DPTX_DISABLE_SCRAMBLING, 0);
-		}
+		//remove fast train...
+		trilin_dpcd_power_up(dp);
+		/* 5 idle pattens */
+		trilin_dp_write(dp, TRILIN_DPTX_DISABLE_SCRAMBLING, 1);
+		trilin_dp_write(dp, TRILIN_DPTX_TRAINING_PATTERN_SET, 0x1);
+		usleep_range(500, 600);
+		trilin_dp_write(dp, TRILIN_DPTX_TRAINING_PATTERN_SET, DP_TRAINING_PATTERN_DISABLE);
+		trilin_dp_write(dp, TRILIN_DPTX_DISABLE_SCRAMBLING, 0);
 	}
 
 	ret = drm_dp_dpcd_readb(&dp->aux, DP_PSR_STATUS, &psr_status);
