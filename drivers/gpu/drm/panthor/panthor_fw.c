@@ -1421,4 +1421,4 @@ err_unplug_fw:
 	return ret;
 }
 
-MODULE_FIRMWARE("arm/mali/arch10.8/mali_csffw.bin");
+MODULE_FIRMWARE("mali_csffw.bin");
