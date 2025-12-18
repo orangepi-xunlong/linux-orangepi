@@ -291,10 +291,15 @@ static long ispmem_cma_alloc(struct file *file, unsigned long arg)
 		memory_block->kernel_addr   =   cma_info_temp.kernel_addr;
 		memory_block->phy_addr      =   cma_info_temp.phy_addr;
 		memory_block->len           =   cma_info_temp.len;
+		memcpy(memory_block->name, cma_info_temp.name, sizeof(memory_block->name));
 
 		cma_buf_ctl.bitMap[cma_buf_ctl.buf_count] = 1;
 		cma_buf_ctl.bufq[cma_buf_ctl.buf_count] = memory_block;
 		cma_buf_ctl.buf_count++;
+		if (cma_buf_ctl.buf_count > CAM_MEM_BUFQ_MAX) {
+			LOG(LOG_ERR, "isp cma buf count %d is beyond %d", cma_buf_ctl.buf_count, CAM_MEM_BUFQ_MAX);
+			return -1;
+		}
 
 		mutex_unlock(&cma_buf_ctl.m_lock);
 
@@ -302,9 +307,7 @@ static long ispmem_cma_alloc(struct file *file, unsigned long arg)
 					sizeof(struct mem_block))) {
 			return -EFAULT;
 		}
-
 	} else {
-
 		return -1;
 	}
 
@@ -313,6 +316,32 @@ static long ispmem_cma_alloc(struct file *file, unsigned long arg)
 
 static int ispmem_cma_free(struct file *file, unsigned long arg)
 {
+	struct cmamem_block *memory_block       =  NULL;
+	struct cmamem_block *memory_block_next  =  NULL;
+	struct mem_block     cma_info_temp = {0};
+
+	if (copy_from_user(&cma_info_temp, (void __user *)arg, sizeof(struct mem_block))) {
+		LOG(LOG_ERR, "copy_from_user error");
+		return -1;
+	}
+
+	for(int loop = 0; loop < cma_buf_ctl.buf_count; loop++) {
+		memory_block = cma_buf_ctl.bufq[loop];
+		if (memory_block) {
+			if (memory_block->is_busy == 1
+					&& !strcmp(memory_block->name, cma_info_temp.name)
+					&& memory_block->phy_addr == cma_info_temp.phy_addr
+					&& memory_block->len == cma_info_temp.len) {
+				vm_munmap(memory_block->usr_addr, memory_block->len);
+				dma_free_coherent(cmamem_dev.pddev, memory_block->len, memory_block->kernel_addr, memory_block->phy_addr);
+				memory_block->is_busy = 0;
+				kfree(memory_block);
+				cma_buf_ctl.bitMap[loop] = 0;
+				cma_buf_ctl.bufq[loop] = NULL;
+				return 0;
+			}
+		}
+	}
 	return 0;
 }
 
@@ -375,19 +404,18 @@ static int ispmem_cma_free_all(void)
 	struct cmamem_block *memory_block = NULL;
 	int loop;
 
-	for(loop = 0; loop < cma_buf_ctl.buf_count;loop++) {
-
+	for(loop = 0; loop < cma_buf_ctl.buf_count; loop++) {
 		memory_block = cma_buf_ctl.bufq[loop];
-
-		dma_free_coherent(cmamem_dev.pddev,
-				memory_block->len,
-				memory_block->kernel_addr,
-				memory_block->phy_addr);
-
-		kfree(memory_block);
-
-		cma_buf_ctl.bitMap[loop] = 0;
-		cma_buf_ctl.bufq[loop] = NULL;
+		if (memory_block) {
+			if (memory_block->is_busy == 1) {
+				vm_munmap(memory_block->usr_addr, memory_block->len);
+				dma_free_coherent(cmamem_dev.pddev, memory_block->len, memory_block->kernel_addr, memory_block->phy_addr);
+				memory_block->is_busy = 0;
+				kfree(memory_block);
+				cma_buf_ctl.bitMap[loop] = 0;
+				cma_buf_ctl.bufq[loop] = NULL;
+			}
+		}
 	}
 
 	cma_buf_ctl.buf_count = 0;
