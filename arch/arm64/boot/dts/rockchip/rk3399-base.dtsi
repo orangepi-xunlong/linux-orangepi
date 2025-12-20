@@ -1475,14 +1475,25 @@
 		#iommu-cells = <0>;
 	};
 
+	iep: iep@ff670000 {
+		compatible = "rockchip,rk3399-iep", "rockchip,rk3228-iep";
+		reg = <0x0 0xff670000 0x0 0x800>;
+		interrupts = <GIC_SPI 42 IRQ_TYPE_LEVEL_HIGH 0>;
+		interrupt-names = "iep";
+		clocks = <&cru ACLK_IEP>, <&cru HCLK_IEP>;
+		clock-names = "axi", "ahb";
+		power-domains = <&power RK3399_PD_IEP>;
+		iommus = <&iep_mmu>;
+	};
+
 	iep_mmu: iommu@ff670800 {
 		compatible = "rockchip,iommu";
 		reg = <0x0 0xff670800 0x0 0x40>;
 		interrupts = <GIC_SPI 42 IRQ_TYPE_LEVEL_HIGH 0>;
 		clocks = <&cru ACLK_IEP>, <&cru HCLK_IEP>;
 		clock-names = "aclk", "iface";
+		power-domains = <&power RK3399_PD_IEP>;
 		#iommu-cells = <0>;
-		status = "disabled";
 	};
 
 	rga: rga@ff680000 {
