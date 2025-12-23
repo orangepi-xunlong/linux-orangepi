@@ -382,6 +382,12 @@ static int csi_dma_rpm_suspend(struct device *dev)
 	if (!hw_drv)
 		dev_info(csi_dma->dev, "csi bridge hardware attach failed\n");
 
+	if (csi_dma->stream_on) {
+		csi_dma_cap_enable_irq(csi_dma,0);
+		v4l2_subdev_call(csi_dma->sensor_sd,video,s_stream,0);
+		csi_dma_cap_store(csi_dma);
+	}
+
 	hw_drv->csi_bridge_hw_suspend(csi_dma->bridge_dev);
 
 	return 0;
@@ -397,6 +403,13 @@ static int csi_dma_rpm_resume(struct device *dev)
 		dev_info(csi_dma->dev, "csi bridge hardware attach failed\n");
 
 	hw_drv->csi_bridge_hw_resume(csi_dma->bridge_dev);
+
+	if (csi_dma->stream_on) {
+		csi_dma_cap_restore(csi_dma);
+		csi_dma_cap_stream_start(csi_dma, &csi_dma->dma_cap->src_f);
+		csi_dma_config_rcsu(csi_dma->dma_cap);
+		v4l2_subdev_call(csi_dma->sensor_sd,video,s_stream,1);
+	}
 
 	return 0;
 }
