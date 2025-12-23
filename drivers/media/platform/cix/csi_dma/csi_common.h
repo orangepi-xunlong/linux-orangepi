@@ -368,6 +368,7 @@ struct dphy_rx {
 	struct v4l2_ctrl_handler hdl;
 	struct v4l2_ctrl *pixel_rate;
 	struct v4l2_subdev sd;
+	int stream_on;
 	unsigned int lane_num;
 	u64 data_rate;
 	u16 data_rate_mbps;

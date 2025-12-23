@@ -252,9 +252,11 @@ static int mipi_dphy_rx_s_stream(struct v4l2_subdev *sd, int enable)
 	if (enable) {
 		pm_runtime_get_sync(dphy->dev);
 		hw_drv->stream_on(dphy, dphy->id, dphy->data_rate);
+		dphy->stream_on = 1;
 	} else {
 		hw_drv->stream_off(dphy, dphy->id);
 		pm_runtime_put(dphy->dev);
+		dphy->stream_on = 0;
 	}
 
 	return ret;
@@ -602,7 +604,10 @@ static int mipi_dphy_dev_resume(struct device *dev)
 
 	pm_runtime_force_resume(dev);
 
-	hw_drv->stream_on(dphy, dphy->id, dphy->data_rate);
+	/* check if stream on state,if true stream on again */
+	if (dphy->stream_on)
+		if (hw_drv->stream_on)
+			hw_drv->stream_on(dphy, dphy->id, dphy->data_rate);
 
 	return 0;
 }
@@ -612,7 +617,7 @@ static const struct dev_pm_ops mipi_dphy_dev_pm_ops = {
 	SET_SYSTEM_SLEEP_PM_OPS(mipi_dphy_dev_suspend, mipi_dphy_dev_resume)
 #endif
 #ifdef CONFIG_PM
-		SET_RUNTIME_PM_OPS(mipi_dphy_dev_rpm_suspend,
+	SET_RUNTIME_PM_OPS(mipi_dphy_dev_rpm_suspend,
 				   mipi_dphy_dev_rpm_resume, NULL)
 #endif
 };
