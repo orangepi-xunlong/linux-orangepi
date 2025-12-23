@@ -433,6 +433,7 @@ struct mipi_csi2_hw {
 struct mipi_csi2_hw_drv_data {
 	int (*stream_start)(struct mipi_csi2_hw *mipi_hw, unsigned int stream_id, unsigned int virtual_channel);
 	int (*stream_stop)(struct mipi_csi2_hw *mipi_hw, unsigned int stream_id);
+	int (*mipi_csi2_irq_enable)(struct mipi_csi2_hw *mipi_hw,unsigned int enable);
 	int (*hw_resume)(struct mipi_csi2_hw *mipi_hw);
 	int (*hw_suspend)(struct mipi_csi2_hw *mipi_hw);
 };
@@ -450,6 +451,9 @@ struct csi2rx_priv {
 	v4l2_async_subdev	asd;
 	struct v4l2_subdev		*source_subdev;
 	struct v4l2_mbus_framefmt	format;
+	u8	stream_on;
+	u8	hw_stream_id; /*which hardware stream is request,calculate from id*/
+	u8	virtual_chan_id; /*which virtaul channel hw stream request,get from dts todo*/
 	u8	id;
 	u8	num_lanes;
 	int	source_pad;

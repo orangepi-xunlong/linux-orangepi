@@ -220,21 +220,32 @@ static int mipi_csi2_s_stream(struct v4l2_subdev *sd, int enable)
 	int ret = 0;
 
 	hw_drv = (struct mipi_csi2_hw_drv_data *)csi2rx->mipi_csi2_hw->drv_data;
-	if (!hw_drv)
+	if (!hw_drv) {
 		dev_info(csi2rx->dev, "mipi csi2 hardware handler is NULL\n");
+		return -EINVAL;
+	}
 
 	/*here we just user mipi-csi2 0\2\4\6 stream id 0/1/2/3*/
 	stream_id = csi2rx->id%CSI2RX_STREAMS_MAX;
 
+	csi2rx->hw_stream_id = stream_id;
+
 	if (enable) {
 		/*here fix,stream id equal vc id*/
-		if (stream_id == 2)
+		if (stream_id == 2) {
 			/*force use virtual channel1*/
-			hw_drv->stream_start(csi2rx->mipi_csi2_hw, stream_id, 1);
-		else
-			hw_drv->stream_start(csi2rx->mipi_csi2_hw, stream_id, stream_id);
-	} else
-		hw_drv->stream_stop(csi2rx->mipi_csi2_hw, stream_id);
+			hw_drv->stream_start(csi2rx->mipi_csi2_hw,stream_id,1);
+			csi2rx->virtual_chan_id = 1;
+		} else {
+			hw_drv->stream_start(csi2rx->mipi_csi2_hw,stream_id,stream_id);
+			csi2rx->virtual_chan_id = stream_id;
+		}
+
+		csi2rx->stream_on = 1;
+	} else {
+		hw_drv->stream_stop(csi2rx->mipi_csi2_hw,stream_id);
+		csi2rx->stream_on = 0;
+	}
 
 	return ret;
 }
@@ -352,10 +363,21 @@ static int mipi_csi2_dev_rpm_suspend(struct device *dev)
 	struct mipi_csi2_hw_drv_data *hw_drv;
 
 	hw_drv = (struct mipi_csi2_hw_drv_data *)csi2rx->mipi_csi2_hw->drv_data;
-	if (!hw_drv)
+	if (!hw_drv) {
 		dev_info(dev, "mipi csi2 hardware suspend failed\n");
+		return -EINVAL;
+	}
 
-	hw_drv->hw_suspend(csi2rx->mipi_csi2_hw);
+	if (csi2rx->stream_on == 1) {
+		if (hw_drv->mipi_csi2_irq_enable)
+			hw_drv->mipi_csi2_irq_enable(csi2rx->mipi_csi2_hw,0);
+
+		if (hw_drv->stream_stop)
+			hw_drv->stream_stop(csi2rx->mipi_csi2_hw,csi2rx->hw_stream_id);
+	}
+
+	if (hw_drv->hw_suspend)
+		hw_drv->hw_suspend(csi2rx->mipi_csi2_hw);
 
 	return 0;
 }
@@ -366,10 +388,17 @@ static int mipi_csi2_dev_rpm_resume(struct device *dev)
 	struct mipi_csi2_hw_drv_data *hw_drv;
 
 	hw_drv = (struct mipi_csi2_hw_drv_data *)csi2rx->mipi_csi2_hw->drv_data;
-	if (!hw_drv)
+	if (!hw_drv) {
 		dev_info(dev, "mipi csi2 hardware resume failed\n");
+		return -EINVAL;
+	}
 
 	hw_drv->hw_resume(csi2rx->mipi_csi2_hw);
+
+	if (csi2rx->stream_on == 1)
+		if (hw_drv->stream_start)
+			hw_drv->stream_start(csi2rx->mipi_csi2_hw,
+					csi2rx->hw_stream_id,csi2rx->virtual_chan_id);
 
 	return 0;
 }
@@ -395,7 +424,7 @@ static const struct dev_pm_ops mipi_csi2_dev_pm_ops = {
 	SET_SYSTEM_SLEEP_PM_OPS(mipi_csi2_dev_suspend, mipi_csi2_dev_resume)
 #endif
 #ifdef CONFIG_PM
-		SET_RUNTIME_PM_OPS(mipi_csi2_dev_rpm_suspend,
+	SET_RUNTIME_PM_OPS(mipi_csi2_dev_rpm_suspend,
 				   mipi_csi2_dev_rpm_resume, NULL)
 #endif
 };

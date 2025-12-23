@@ -77,7 +77,7 @@ static void mipi_csi2_enable_err_irq(struct mipi_csi2_hw *mipi_hw)
 	u32 val;
 	u32 status;
 
-	//clean the err status before enable
+	/* clean the err status before enable */
 	status = mipi_csi2_read(mipi_hw, ERROR_IRQS);
 	mipi_csi2_write(mipi_hw, ERROR_IRQS, status);
 
@@ -224,6 +224,27 @@ static int mipi_csi2_stop(struct mipi_csi2_hw *mipi_hw, unsigned int stream_id)
 		mipi_csi2_disable_err_irq(mipi_hw);
 		mipi_csi2_global_stop(mipi_hw);
 	}
+
+	spin_unlock_irqrestore(&mipi_hw->slock, flags);
+
+	return 0;
+}
+
+static int mipi_csi2_hw_irq_enable(struct mipi_csi2_hw *mipi_hw, unsigned int enable)
+{
+	unsigned long flags;
+
+	if (mipi_hw == NULL) {
+		pr_err("mipi_hw handler is NULL");
+		return -EINVAL;
+	}
+
+	spin_lock_irqsave(&mipi_hw->slock, flags);
+
+	if (enable)
+		mipi_csi2_enable_err_irq(mipi_hw);
+	else
+		mipi_csi2_disable_err_irq(mipi_hw);
 
 	spin_unlock_irqrestore(&mipi_hw->slock, flags);
 
@@ -504,6 +525,7 @@ static const struct mipi_csi2_hw_drv_data cix_mipi_hw_drv_data = {
 	.stream_stop = mipi_csi2_stop,
 	.hw_resume = mipi_csi2_hw_resume,
 	.hw_suspend = mipi_csi2_hw_suspend,
+	.mipi_csi2_irq_enable = mipi_csi2_hw_irq_enable,
 };
 
 static const struct of_device_id mipi_csi2_hw_of_match[] = {
