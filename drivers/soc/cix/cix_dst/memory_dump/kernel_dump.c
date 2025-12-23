@@ -21,6 +21,7 @@
 #include <linux/reboot.h>
 #include <linux/kexec.h>
 #include <linux/crash_core.h>
+#include <linux/crash_dump.h>
 #include <linux/memblock.h>
 #include <linux/cacheflush.h>
 #include <linux/soc/cix/cix_hibernate.h>
@@ -42,6 +43,8 @@ extern int pcpu_base_size;
 
 static struct kernel_dump_cb *g_kdump_cb;
 static u64 g_kdump_reserve_size = { 0 };
+static Elf64_Phdr reserved_mem_phdr[KERNELDUMP_CB_MAX_SEC];
+static int cur_reserved_mem;
 
 struct uefi_mem_desc {
 	u64 reserved_mem_start;
@@ -176,6 +179,80 @@ void kd_save_state_shutdown(void)
 }
 EXPORT_SYMBOL(kd_save_state_shutdown);
 
+static int kd_add_reserved_mem_cached(void *vaddr, phys_addr_t paddr, u64 size)
+{
+	Elf64_Phdr *phdr;
+
+	if (cur_reserved_mem >= KERNELDUMP_CB_MAX_SEC)
+		return -1;
+	if (!size)
+		return -1;
+	if (size && size % PAGE_SIZE)
+		return -1;
+
+	phdr = reserved_mem_phdr;
+	phdr[cur_reserved_mem].p_type = PT_LOAD;
+	phdr[cur_reserved_mem].p_flags = PF_R | PF_W | PF_X;
+	phdr[cur_reserved_mem].p_offset = paddr;
+
+	phdr[cur_reserved_mem].p_paddr = paddr;
+	phdr[cur_reserved_mem].p_vaddr = (u64)vaddr;
+	phdr[cur_reserved_mem].p_filesz = phdr[cur_reserved_mem].p_memsz = size;
+	phdr[cur_reserved_mem].p_align = 0;
+	cur_reserved_mem++;
+	return 0;
+}
+
+int kd_add_reserved_mem(void *vaddr, phys_addr_t paddr, u64 size)
+{
+	Elf64_Ehdr *ehdr;
+	Elf64_Phdr *phdr;
+
+	if (!g_kdump_cb)
+		return kd_add_reserved_mem_cached(vaddr, paddr, size);
+
+	if (!size)
+		return -1;
+
+	if (size && size % PAGE_SIZE)
+		return -1;
+
+	ehdr = (Elf64_Ehdr *)g_kdump_cb->buf;
+	if (ehdr->e_phnum >= KERNELDUMP_CB_MAX_SEC) {
+		DST_ERR("too many sections\n");
+		return -1;
+	}
+
+	phdr = (Elf64_Phdr *)(ehdr + 1);
+	phdr[ehdr->e_phnum].p_type = PT_LOAD;
+	phdr[ehdr->e_phnum].p_flags = PF_R | PF_W | PF_X;
+	phdr[ehdr->e_phnum].p_offset = paddr;
+
+	phdr[ehdr->e_phnum].p_paddr = paddr;
+	phdr[ehdr->e_phnum].p_vaddr = (u64)vaddr;
+	phdr[ehdr->e_phnum].p_filesz = phdr[ehdr->e_phnum].p_memsz = size;
+	phdr[ehdr->e_phnum].p_align = 0;
+	ehdr->e_phnum++;
+	g_kdump_cb->checksum =
+		checksum32((u32 *)g_kdump_cb->buf,
+			   sizeof(*ehdr) + (ehdr->e_phnum * sizeof(*phdr)));
+	kd_flush_cache();
+
+	return 0;
+}
+EXPORT_SYMBOL(kd_add_reserved_mem);
+
+static int kd_add_cached_reserved_mem(void)
+{
+	for (int i = 0; i < cur_reserved_mem; i++)
+		if (kd_add_reserved_mem((void *)reserved_mem_phdr[i].p_vaddr,
+					reserved_mem_phdr[i].p_paddr,
+					reserved_mem_phdr[i].p_memsz))
+			return -1;
+	cur_reserved_mem = 0;
+	return 0;
+}
+
 int kernel_dump_init(void)
 {
 	struct kernel_dump_cb *cb = NULL;
@@ -208,6 +285,7 @@ int kernel_dump_init(void)
 	cb->checksum = checksum32((u32 *)cb->buf, sz);
 	vfree(buf);
 	g_kdump_cb = cb;
+	kd_add_cached_reserved_mem();
 	kd_flush_cache();
 
 #ifdef CONFIG_HIBERNATION

@@ -33,6 +33,7 @@
 #include <linux/of_reserved_mem.h>
 #include <linux/acpi.h>
 #include <linux/soc/cix/rdr_pub.h>
+#include <linux/soc/cix/mntn_dump.h>
 #include <mntn_subtype_exception.h>
 #include "rdr_print.h"
 #include "rdr_inner.h"
@@ -376,6 +377,9 @@ int rdr_common_early_init(struct platform_device *pdev)
 		g_rdr_device.ramlog.vaddr = bbox_vmap(g_rdr_device.ramlog.paddr,
 						      g_rdr_device.ramlog.size);
 		BB_DBG("ramlog address=0x%px\n", g_rdr_device.ramlog.vaddr);
+		kd_add_reserved_mem(g_rdr_device.ramlog.vaddr,
+				    g_rdr_device.ramlog.paddr,
+				    g_rdr_device.ramlog.size);
 	}
 
 	if (!has_acpi_companion(dev)) {
@@ -404,6 +408,9 @@ int rdr_common_early_init(struct platform_device *pdev)
 		g_rdr_device.rdr.vaddr = bbox_vmap(g_rdr_device.rdr.paddr,
 						   g_rdr_device.rdr.size);
 		BB_DBG("rdr address=0x%px\n", g_rdr_device.rdr.vaddr);
+		kd_add_reserved_mem(g_rdr_device.rdr.vaddr,
+				    g_rdr_device.rdr.paddr,
+				    g_rdr_device.rdr.size);
 	}
 
 	ret = device_property_read_string(dev, "rdr-dumpctl", &prdr_dumpctrl);

@@ -17,6 +17,7 @@
  */
 #ifndef __MNTN_DUMP_H
 #define __MNTN_DUMP_H
+#include <linux/types.h>
 #include <mntn_public_interface.h>
 
 #ifdef CONFIG_PLAT_MNTNDUMP
@@ -27,8 +28,10 @@ static inline int register_mntn_dump(int mod_id, unsigned int size, void **vaddr
 
 #ifdef CONFIG_PLAT_KERNELDUMP
 void kd_save_state_shutdown(void);
+int kd_add_reserved_mem(void *vaddr, phys_addr_t paddr, u64 size);
 #else
 static inline void kd_save_state_shutdown(void) {}
+static inline int kd_add_reserved_mem(void *vaddr, phys_addr_t paddr, u64 size) {return 0;}
 #endif
 
 #endif
