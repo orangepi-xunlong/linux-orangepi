@@ -144,9 +144,39 @@ struct dphy_rx *v4l2_subdev_to_dphy_rx(struct v4l2_subdev *subdev)
 static int cix_dphy_rx_get_sensor_data_rate(struct v4l2_subdev *sd)
 {
 	struct dphy_rx *dphy = v4l2_subdev_to_dphy_rx(sd);
+	struct v4l2_subdev *sensor_sd = dphy->source_subdev;
+	struct v4l2_ctrl *link_freq;
+	struct v4l2_querymenu qm = {
+		.id = V4L2_CID_LINK_FREQ,
+	};
 
-	/*need open to the sys node user space can modify*/
-	dphy->data_rate = 750000000;
+	int ret;
+
+	if (!sensor_sd) {
+		v4l2_warn(sd, "sensor subdev not register\n");
+		return -EINVAL;
+	}
+
+	link_freq = v4l2_ctrl_find(sensor_sd->ctrl_handler, V4L2_CID_LINK_FREQ);
+	if (!link_freq) {
+		v4l2_warn(sd, "No pixel rate control in subdev\n");
+		return -EPIPE;
+	}
+
+	qm.index = v4l2_ctrl_g_ctrl(link_freq);
+	ret = v4l2_querymenu(sensor_sd->ctrl_handler, &qm);
+	if (ret < 0) {
+		v4l2_err(sd, "Failed to get menu item\n");
+		return ret;
+	}
+
+	if (!qm.value) {
+		v4l2_err(sd, "Invalid link_freq\n");
+		return -EINVAL;
+	}
+
+	/* Phy data_rate = LT7911 x 2*/
+	dphy->data_rate = qm.value * 2;
 	dphy->data_rate_mbps = dphy->data_rate / 1000 / 1000;
 	v4l2_info(sd, "dphy%d, data_rate_mbps %d\n", dphy->id,
 		  dphy->data_rate_mbps);
