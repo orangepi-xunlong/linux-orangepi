@@ -875,6 +875,15 @@ static int csi_dma_cap_try_fmt(struct file *file, void *fh,
 	return 0;
 }
 
+static int csi_dma_request_buffer(struct file *file, void *priv,
+		struct v4l2_requestbuffers *p)
+{
+	if (p)
+		p->flags |= V4L2_MEMORY_FLAG_NON_COHERENT;
+
+	return vb2_ioctl_reqbufs(file,priv,p);
+}
+
 static int csi_dma_cap_try_fmt_mplane(struct file *file, void *fh,
 				      struct v4l2_format *f)
 {
@@ -1488,7 +1497,7 @@ static const struct v4l2_ioctl_ops csi_dma_capture_ioctl_ops = {
 	.vidioc_s_fmt_vid_cap_mplane = csi_dma_cap_s_fmt_mplane,
 	.vidioc_g_fmt_vid_cap_mplane = csi_dma_cap_g_fmt_mplane,
 
-	.vidioc_reqbufs = vb2_ioctl_reqbufs,
+	.vidioc_reqbufs = csi_dma_request_buffer,
 	.vidioc_querybuf = vb2_ioctl_querybuf,
 	.vidioc_qbuf = vb2_ioctl_qbuf,
 	.vidioc_dqbuf = vb2_ioctl_dqbuf,
