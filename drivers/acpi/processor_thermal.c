@@ -176,6 +176,44 @@ static int cpufreq_get_cur_state(unsigned int cpu)
 	return reduction_pctg(cpu);
 }
 
+#ifdef CONFIG_ARCH_CIX
+static unsigned long calculate_current_freq(unsigned int i,
+					const struct cpufreq_policy *policy)
+{
+	const struct cppc_cpudata *cpu_data;
+	const struct em_perf_domain *em;
+	if (policy == NULL)
+		return 0;
+
+	cpu_data = policy->driver_data;
+	if (cpu_data == NULL)
+		return (policy->cpuinfo.max_freq * (100 - i * 5)) / 100;
+
+	if (cpu_data->opp_level_num <= 1)
+		return policy->cpuinfo.max_freq;
+
+	if (i >= cpu_data->opp_level_num)
+		i = cpu_data->opp_level_num - 1;
+
+	em = em_cpu_get(policy->cpu);
+	if (!em) {
+		unsigned int freq_range = policy->cpuinfo.max_freq - policy->cpuinfo.min_freq;
+
+		if (i == 0)
+			return policy->cpuinfo.max_freq;
+		else if (i == cpu_data->opp_level_num - 1)
+			return policy->cpuinfo.min_freq;
+		else {
+			unsigned long long temp = (unsigned long long)i * freq_range;
+			temp /= (cpu_data->opp_level_num - 1);
+			return policy->cpuinfo.max_freq - (unsigned int)temp;
+		}
+	} else {
+		return em->table[cpu_data->opp_level_num - i - 1].frequency;
+	}
+}
+#endif
+
 static int cpufreq_set_cur_state(unsigned int cpu, int state)
 {
 	struct cpufreq_policy *policy;
@@ -211,7 +249,8 @@ static int cpufreq_set_cur_state(unsigned int cpu, int state)
 			cpufreq_cpu_put(policy);
 			continue;
 		}
-		max_freq = (policy->cpuinfo.max_freq * (100 - reduction_pctg(i) * 5)) / 100;
+
+		max_freq = calculate_current_freq(reduction_pctg(i), policy);
 #else
 		max_freq = (policy->cpuinfo.max_freq * (100 - reduction_pctg(i) * 20)) / 100;
 #endif
