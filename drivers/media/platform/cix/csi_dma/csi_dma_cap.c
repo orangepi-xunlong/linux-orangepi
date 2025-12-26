@@ -1008,7 +1008,7 @@ static int csi_dma_cap_s_fmt(struct file *file, void *priv,
 	q->mem_ops = &vb2_dma_contig_memops;
 	q->buf_struct_size = sizeof(struct csi_dma_buffer);
 	q->timestamp_flags = V4L2_BUF_FLAG_TIMESTAMP_MONOTONIC;
-
+	q->allow_cache_hints = 1; /* allow cache hits for cpu sync at buffer done */
 	q->lock = &dma_cap->qlock;
 
 	ret = vb2_queue_init(q);
@@ -1084,6 +1084,7 @@ static int csi_dma_cap_s_fmt_mplane(struct file *file, void *priv,
 	q->mem_ops = &vb2_dma_contig_memops;
 	q->buf_struct_size = sizeof(struct csi_dma_buffer);
 	q->timestamp_flags = V4L2_BUF_FLAG_TIMESTAMP_MONOTONIC;
+	q->allow_cache_hints = 1; /* allow cache hits for cpu sync at buffer done */
 	q->lock = &dma_cap->qlock;
 
 	ret = vb2_queue_init(q);
