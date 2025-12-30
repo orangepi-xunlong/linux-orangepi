@@ -334,6 +334,7 @@ enum aipu_job_execution_flag {
  * @first_task_tcb_pa: [aipu v3 only, must] base address of the first task TCB of this job
  * @last_task_tcb_pa:  [aipu v3 only, must] base address of the last task TCB of this job
  * @tail_tcb_pa:       [aipu v3 only, must] base address of the tail TCB of this job
+ * @is_coredump_en:    [aipu v3 and above only, optional] Coredump is enable or not
  *
  * For fields is_defer_run/do_trigger/enable_prof/enable_asid/enable_poll_opt,
  * set them to be 1/0 to enable/disable the corresponding operations.
@@ -363,6 +364,7 @@ struct aipu_job_desc {
 	__u64 first_task_tcb_pa;
 	__u64 last_task_tcb_pa;
 	__u64 tail_tcb_pa;
+	__u32 is_coredump_en;
 };
 
 /**
@@ -377,6 +379,7 @@ struct aipu_job_status_desc {
 	__u32 thread_id;
 #define AIPU_JOB_STATE_DONE      0x1
 #define AIPU_JOB_STATE_EXCEPTION 0x2
+#define AIPU_JOB_STATE_COREDUMP  0x3
 	__u32 state;
 	struct aipu_ext_profiling_data {
 		__u64 tick_counter;      /* [kmd][aipu v3 only] Value of the tick counter */
@@ -406,13 +409,13 @@ struct aipu_job_status_query {
 
 /**
  * struct aipu_io_req - AIPU core IO operations request.
- * @core_id: [must] Core ID
- * @offset:  [must] Register offset
- * @rw:      [must] Read or write operation
- * @value:   [must]/[kmd] Value to be written/value readback
+ * @partition_id: 	[must] partition ID, 0 in default.
+ * @offset:  		[must] Register offset
+ * @rw:      		[must] Read or write operation
+ * @value:   		[must]/[kmd] Value to be written/value readback
  */
 struct aipu_io_req {
-	__u32 core_id;
+	__u32 partition_id;
 	__u32 offset;
 	enum aipu_rw_attr {
 		AIPU_IO_READ,
