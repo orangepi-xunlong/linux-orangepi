@@ -2746,12 +2746,16 @@ static irqreturn_t trilin_dp_irq_handler(int irq, void *data)
 		u32 delay = 0;
 		if (trilin_dp_get_hpd_state(dp))
 			delay = dp->delay_after_hpd;
-		schedule_delayed_work(&dp->hpd_event_work,
+		// schedule_delayed_work(&dp->hpd_event_work,
+		// 		      msecs_to_jiffies(delay));
+		queue_delayed_work(system_freezable_wq, &dp->hpd_event_work,
 				      msecs_to_jiffies(delay));
 	}
 
 	if (status & TRILIN_DPTX_INTERRUPT_HPD_IRQ)
-		schedule_delayed_work(&dp->hpd_irq_work, 0);
+		//schedule_delayed_work(&dp->hpd_irq_work, 0);
+		queue_delayed_work(system_freezable_wq, &dp->hpd_irq_work,
+				      0);
 
 	return IRQ_HANDLED;
 }
@@ -2819,8 +2823,10 @@ int trilin_dp_pm_prepare(struct trilin_dp *dp)
 	mutex_lock(&dp->session_lock);
 	DP_DEBUG("enter");
 	trilin_dp_mst_suspend(dp);
+	mutex_unlock(&dp->session_lock);
 	cancel_delayed_work_sync(&dp->hpd_irq_work);
 	cancel_delayed_work_sync(&dp->hpd_event_work);
+	mutex_lock(&dp->session_lock);
 	disable_irq(dp->irq);
 	dp->state |= DPTX_STATE_SUSPENDED;
 	if (!dp->active_stream_cnt) {
