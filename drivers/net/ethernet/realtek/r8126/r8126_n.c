@@ -18104,7 +18104,7 @@ rtl8126_resume(struct device *device)
 
         tp->resume_not_chg_speed = 0;
         if (tp->check_keep_link_speed &&
-            //tp->link_ok(dev) &&
+	    tp->link_ok(dev) &&
             rtl8126_hw_d3_not_power_off(dev) &&
             rtl8126_wait_phy_nway_complete_sleep(tp) == 0)
                 tp->resume_not_chg_speed = 1;
