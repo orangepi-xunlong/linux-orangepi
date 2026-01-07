@@ -383,4 +383,15 @@ config SPRD_IOMMU
 
 	  Say Y here if you want to use the multimedia devices listed above.
 
+config VSI_IOMMU
+	bool "Verisilicon IOMMU Support"
+	depends on (ARCH_ROCKCHIP && ARM64) || COMPILE_TEST
+	select IOMMU_API
+	help
+	  Support for IOMMUs used by Verisilicon sub-systems like video
+	  decoders or encoder hardware blocks.
+
+	  Say Y here if you want to use this IOMMU in front of these
+	  hardware blocks.
+
 endif # IOMMU_SUPPORT
