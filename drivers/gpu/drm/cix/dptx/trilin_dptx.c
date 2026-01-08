@@ -1230,7 +1230,6 @@ static void trilin_dp_psr_enable_sink(struct trilin_dp *dp,
 	u8 dpcd_val;
 	int ret;
 	struct trilin_connector *conn = dp_panel ? dp_panel->connector : NULL;
-
 	if (!dp->caps.psr_sink_support || !dp->psr_config_on
 		|| !conn || conn->vrr.enable)
 		return;
@@ -1263,7 +1262,7 @@ static void trilin_dp_psr_enable_sink(struct trilin_dp *dp,
 	trilin_dp_write(dp, TRILIN_DPTX_SRC0_PSR_3D_ENABLE, 0x1);
 	usleep_range(100, 200);
 	dp->psr.enable = true;
-	trilin_dp_power_on_delay_ms = 0;
+	trilin_dp_power_on_delay_ms = 1;
 	DP_DEBUG("end");
 }
 
@@ -1285,7 +1284,7 @@ static void trilin_dp_psr_disable_sink(struct trilin_dp *dp)
 }
 
 static
-void trilin_dp_wait_psr_status_ready(struct trilin_dp *dp, bool psr_enable)
+bool trilin_dp_wait_psr_status_ready(struct trilin_dp *dp, bool psr_enable)
 {
 	int i = 0;
 	u8 psr_status;
@@ -1306,10 +1305,11 @@ void trilin_dp_wait_psr_status_ready(struct trilin_dp *dp, bool psr_enable)
 			usleep_range(1000, 1100);
 			if (i++ == 150) {
 				DP_WARN("psr_status=%d timeout(150ms)", psr_status);
-				break;
+				return false;
 			}
 		}
 	}
+	return true;
 }
 
 void trilin_dp_psr_enable(struct trilin_dp *dp,
@@ -1327,15 +1327,18 @@ void trilin_dp_psr_enable(struct trilin_dp *dp,
 	}
 
 	ret = drm_dp_dpcd_readb(&dp->aux, DP_PSR_STATUS, &psr_status);
-	if (ret != 1)
+	if (ret != 1) {
 		DP_ERR("Failed to read psr status %d\n", ret);
-	else if (psr_status == DP_PSR_SINK_ACTIVE_RFB) {
+		goto err;
+	} else if (psr_status == DP_PSR_SINK_ACTIVE_RFB) {
 		DP_WARN("psr status is ACTIVE_RFB");
-		return;
+		goto err;
 	}
 
 	trilin_dp_write(dp, TRILIN_DPTX_SRC0_PSR_STATE, 0x1);
-	trilin_dp_wait_psr_status_ready(dp, true);
+	if(!trilin_dp_wait_psr_status_ready(dp, true)) {
+		goto err;
+	}
 
 	/*Todo: single frame update support*/
 	// trilin_dp_write(dp, TRILIN_DPTX_SRC0_PSR_STATE, 0x3); //single frame update
@@ -1349,6 +1352,12 @@ void trilin_dp_psr_enable(struct trilin_dp *dp,
 
 	dp->psr.active = true;
 	DP_DEBUG("end");
+	return;
+err:
+	trilin_dp_write(dp, TRILIN_DPTX_SRC0_PSR_STATE, 0x0);
+	dp->psr.active = false;
+	dp->psr_config_on = false;
+	dp->psr_default_on = 0;
 }
 
 void trilind_dp_psr_disable(struct trilin_dp *dp,
@@ -1381,15 +1390,25 @@ void trilind_dp_psr_disable(struct trilin_dp *dp,
 		DP_ERR("Failed to read psr status %d\n", ret);
 		return;
 	} else if (psr_status == DP_PSR_SINK_INACTIVE) {
-		DP_INFO("sink inactive, skip disable psr");
-		return;
+		DP_WARN("sink inactive, skip disable psr");
+		trilin_dp_write(dp, TRILIN_DPTX_VIDEO_STREAM_ENABLE, 0x1);
+		trilin_dp_write(dp, TRILIN_DPTX_SRC0_PSR_STATE, 0x0);
+		goto end;
 	}
 
 	trilin_dp_write(dp, TRILIN_DPTX_VIDEO_STREAM_ENABLE, 0x1);
 	usleep_range(50, 60);
 	trilin_dp_write(dp, TRILIN_DPTX_SRC0_PSR_STATE, 0x0);
-	trilin_dp_wait_psr_status_ready(dp, false);
+	if (!trilin_dp_wait_psr_status_ready(dp, false)) {
+		goto end;
+	}
 	dp->psr.active = false;
+	return;
+end:
+	dp->psr_config_on = false;
+	dp->psr_default_on = 0;
+	dp->psr.active = false;
+
 	DP_DEBUG("end");
 }
 
@@ -1841,8 +1860,8 @@ static int trilin_dp_ctrl_stream_on(struct trilin_dp *dp,
 	trilin_dp_panel_hw_cfg(dp, dp_panel);
 	trilin_dp_ctrl_mst_stream_setup(dp, dp_panel, true);
 end:
-	trilin_dp_psr_enable_sink(dp, dp_panel);
 
+	trilin_dp_psr_enable_sink(dp, dp_panel);
 	trilin_dp_write(dp, TRILIN_DPTX_VIDEO_STREAM_ENABLE + regs_off, 1);
 	trilin_dp_write(dp, TRILIN_DPTX_SECONDARY_STREAM_ENABLE + regs_off, 1);
 

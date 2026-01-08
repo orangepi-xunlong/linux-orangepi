@@ -154,6 +154,11 @@ static int trilin_dp_connector_atomic_check(struct drm_connector *conn,
 	if (!crtc)
 		return 0;
 
+	if (dp->caps.psr_sink_support && dp->psr_config_on)
+		new_con_state->self_refresh_aware = true;
+	else
+		new_con_state->self_refresh_aware = false;
+
 	new_crtc_state = drm_atomic_get_crtc_state(state, crtc);
 	if (IS_ERR(new_crtc_state))
 		return PTR_ERR(new_crtc_state);
@@ -268,7 +273,7 @@ static int trilin_dp_add_virtual_modes_noedid(struct drm_connector *connector)
 
 	preferred_mode = list_first_entry(&connector->probed_modes,
 					  struct drm_display_mode, head);
-
+	dp->my_copied_modes = 0;
 	list_for_each_entry(mode, &connector->probed_modes, head) {
 		dp->my_copied_modes++;
 	}
