@@ -3780,6 +3780,11 @@
 
 			trips {
 				trip-point-0 {
+					temperature = <60000>;
+					hysteresis = <1000>;
+					type = "passive";
+				};
+				trip-point-1 {
 					temperature = <95000>;
 					hysteresis = <1000>;
 					type = "passive";
@@ -3794,6 +3799,11 @@
 
 			trips {
 				trip-point-0 {
+					temperature = <60000>;
+					hysteresis = <1000>;
+					type = "passive";
+				};
+				trip-point-1 {
 					temperature = <95000>;
 					hysteresis = <1000>;
 					type = "passive";
@@ -3808,6 +3818,11 @@
 
 			trips {
 				trip-point-0 {
+					temperature = <60000>;
+					hysteresis = <1000>;
+					type = "passive";
+				};
+				trip-point-1 {
 					temperature = <95000>;
 					hysteresis = <1000>;
 					type = "passive";
@@ -3822,6 +3837,11 @@
 
 			trips {
 				trip-point-0 {
+					temperature = <60000>;
+					hysteresis = <1000>;
+					type = "passive";
+				};
+				trip-point-1 {
 					temperature = <95000>;
 					hysteresis = <1000>;
 					type = "passive";
@@ -3836,6 +3856,11 @@
 
 			trips {
 				trip-point-0 {
+					temperature = <60000>;
+					hysteresis = <1000>;
+					type = "passive";
+				};
+				trip-point-1 {
 					temperature = <95000>;
 					hysteresis = <1000>;
 					type = "passive";
@@ -3850,6 +3875,11 @@
 
 			trips {
 				trip-point-0 {
+					temperature = <60000>;
+					hysteresis = <1000>;
+					type = "passive";
+				};
+				trip-point-1 {
 					temperature = <95000>;
 					hysteresis = <1000>;
 					type = "passive";
@@ -3864,6 +3894,11 @@
 
 			trips {
 				trip-point-0 {
+					temperature = <60000>;
+					hysteresis = <1000>;
+					type = "passive";
+				};
+				trip-point-1 {
 					temperature = <95000>;
 					hysteresis = <1000>;
 					type = "passive";
@@ -3878,6 +3913,11 @@
 
 			trips {
 				trip-point-0 {
+					temperature = <60000>;
+					hysteresis = <1000>;
+					type = "passive";
+				};
+				trip-point-1 {
 					temperature = <95000>;
 					hysteresis = <1000>;
 					type = "passive";
@@ -3892,6 +3932,11 @@
 
 			trips {
 				trip-point-0 {
+					temperature = <60000>;
+					hysteresis = <1000>;
+					type = "passive";
+				};
+				trip-point-1 {
 					temperature = <95000>;
 					hysteresis = <1000>;
 					type = "passive";
