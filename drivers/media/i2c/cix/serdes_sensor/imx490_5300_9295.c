@@ -26,6 +26,13 @@ static const u32 ctrl_cid_list[] = {
 	TEGRA_CAMERA_CID_SENSOR_MODE_ID,
 };
 
+#define IMX490_5300_9295_LINK_FREQ_750M (750000000)
+#define IMX490_5300_9295_LINK_FREQ_375M (375000000)
+
+static const s64 link_freq_menu_items[] = {
+	IMX490_5300_9295_LINK_FREQ_375M,
+};
+
 struct z_imx490_5300_9295 {
 	struct i2c_client	*i2c_client;
 	const struct i2c_device_id *id;
@@ -34,6 +41,8 @@ struct z_imx490_5300_9295 {
 	struct v4l2_fwnode_endpoint ep;
 	struct device		*dser_dev;
 	struct gmsl_link_ctx    g_ctx;
+	struct v4l2_ctrl_handler ctrl_handler;
+	struct v4l2_ctrl *lane_rate;
 	u32 def_addr;
 	u32 act_addr;
 	u32 des_link;
@@ -481,6 +490,31 @@ static const struct v4l2_subdev_ops imx490_5300_9295_ops = {
 	.pad = &imx490_5300_9295_pad_ops,
 };
 
+static int imx490_5300_9295_init_v4l2_ctrls(struct z_imx490_5300_9295 *priv)
+{
+	struct v4l2_subdev *sd;
+	int ret;
+
+	sd = &priv->sd;
+	ret = v4l2_ctrl_handler_init(&priv->ctrl_handler, 1);
+	if (ret)
+		return ret;
+
+	priv->lane_rate = v4l2_ctrl_new_int_menu(
+			&priv->ctrl_handler, NULL, V4L2_CID_LINK_FREQ,
+			ARRAY_SIZE(link_freq_menu_items), 0, link_freq_menu_items);
+
+	if (priv->ctrl_handler.error) {
+		pr_err("cfg v4l2 ctrls failed!\n");
+		return ret;
+	}
+
+	sd->ctrl_handler = &priv->ctrl_handler;
+	__v4l2_ctrl_s_ctrl(priv->lane_rate,0);
+
+	return 0;
+}
+
 static int z_imx490_5300_9295_probe(struct i2c_client *client)
 {
 	struct device *dev = &client->dev;
@@ -608,6 +642,8 @@ static int z_imx490_5300_9295_probe(struct i2c_client *client)
 	if (ret)
 		dev_err(dev, "imx490_5300_9295 subdev registration failed\n");
 }
+
+	imx490_5300_9295_init_v4l2_ctrls(priv);
 
 	return 0;
 }
