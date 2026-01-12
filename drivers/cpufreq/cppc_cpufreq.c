@@ -692,8 +692,11 @@ static int cppc_opp_init(struct cpufreq_policy *policy)
 	union acpi_object *package;
 	u32 level_index = 0;
 	u32 *data;
+	u32 num_returned, num_remaining;
+	u32 total_opps = 0;
+	int i;
 
-	pr_debug("cppc_opp_init: Initializing OPPs for CPU:%d\n", policy->cpu);
+	pr_debug("%s: Initializing OPPs for CPU:%d\n", __func__, policy->cpu);
 	cpu_data = policy->driver_data;
 	if (!cpu_data) {
 		pr_warn("No CPU data for CPU%d\n", policy->cpu);
@@ -702,15 +705,6 @@ static int cppc_opp_init(struct cpufreq_policy *policy)
 	}
 
 	perf_caps = &cpu_data->perf_caps;
-
-	params[0].type = ACPI_TYPE_INTEGER;
-	params[0].integer.value = cpu_data->perf_domain;
-	params[1].type = ACPI_TYPE_INTEGER;
-	params[1].integer.value = level_index;
-
-	input.count = 2;
-	input.pointer = params;
-
 	cpu_dev = get_cpu_device(policy->cpu);
 	handle = ACPI_HANDLE(cpu_dev);
 	if (!handle) {
@@ -718,46 +712,86 @@ static int cppc_opp_init(struct cpufreq_policy *policy)
 		return -EINVAL;
 	}
 
-	status = acpi_evaluate_object(handle, "\\_SB.PMMX.PEFG", &input, &buffer);
-	if (ACPI_FAILURE(status)) {
-		pr_err("Failed to call _PEFG: %s\n", acpi_format_exception(status));
-		goto OUT;
-	}
+	do {
+		params[0].type = ACPI_TYPE_INTEGER;
+		params[0].integer.value = cpu_data->perf_domain;
+		params[1].type = ACPI_TYPE_INTEGER;
+		params[1].integer.value = level_index;
 
-	package = buffer.pointer;
-	if (!package || package->type != ACPI_TYPE_BUFFER) {
-		pr_err("cppc_opp_init: cpu:%d, no buffer returned\n",
-			cpu_dev->id);
-		goto OUT;
-	}
+		input.count = 2;
+		input.pointer = params;
 
-	data = (u32 *)package->buffer.pointer;
+		status = acpi_evaluate_object(handle, "\\_SB.PMMX.PEFG", &input, &buffer);
+		if (ACPI_FAILURE(status)) {
+			pr_err("Failed to call _PEFG: %s\n", acpi_format_exception(status));
+			goto OUT;
+		}
 
-	cpu_data->opp_level_num = data[1] & 0xfff;
+		package = buffer.pointer;
+		if (!package || package->type != ACPI_TYPE_BUFFER) {
+			pr_err("%s: cpu:%d, no buffer returned\n", __func__, cpu_dev->id);
+			goto OUT;
+		}
+
+		data = (u32 *)package->buffer.pointer;
+
+		num_returned = data[1] & 0xfff;
+
+		pr_debug("%s: level_index=%u, returned=%u\n", __func__, level_index, num_returned);
+
+		if (num_returned == 0) {
+			pr_debug("%s: cpu:%d, no performance levels returned\n", __func__, cpu_dev->id);
+			break;
+		}
+
+		if (total_opps + num_returned > MAX_OPP_LEVELS) {
+			pr_warn("%s: cpu:%d, too many performance levels: %d > %d\n", __func__,
+				cpu_dev->id, total_opps + num_returned, MAX_OPP_LEVELS);
+			num_returned = MAX_OPP_LEVELS - total_opps;
+		}
+
+		for (i = 0; i < num_returned; i++) {
+			u32 index = 2 + i * 3;
+
+			if (total_opps >= MAX_OPP_LEVELS) {
+				pr_debug("%s: reached max OPP levels\n", __func__);
+				break;
+			}
+
+			cpu_data->opp[total_opps].perf = data[index];
+			cpu_data->opp[total_opps].power = data[index + 1];
+			cpu_data->opp[total_opps].freq = cppc_perf_to_khz(perf_caps,
+								cpu_data->opp[total_opps].perf);
+
+			pr_debug("%s: cpu:%d, level:%d, idx:%u, perf:%u, power:%u, freq:%u\n", __func__,
+				cpu_dev->id, total_opps, i,
+				cpu_data->opp[total_opps].perf,
+				cpu_data->opp[total_opps].power,
+				cpu_data->opp[total_opps].freq);
+
+			total_opps++;
+		}
+
+		level_index += num_returned;
+		num_remaining = (data[1] >> 16) & 0xffff;
+		pr_debug("%s: num_remaining=%u", __func__, num_remaining);
+	} while (num_remaining > 0);
+
+	cpu_data->opp_level_num = total_opps;
+
+	pr_debug("%s: cpu:%d, total OPP levels found: %d\n", __func__,
+		cpu_dev->id, cpu_data->opp_level_num);
+
 	if (cpu_data->opp_level_num == 0) {
-		pr_warn("cppc_opp_init: cpu:%d, no performance levels found\n",
-			cpu_dev->id);
+		pr_warn("%s: cpu:%d, no performance levels found\n", __func__, cpu_dev->id);
 		goto OUT;
-	}
-	if (cpu_data->opp_level_num > MAX_OPP_LEVELS) {
-		pr_warn("cppc_opp_init: cpu:%d, too many performance levels: %d\n",
-			cpu_dev->id, cpu_data->opp_level_num);
-		goto OUT;
-	}
-	for (int i = 0; i < cpu_data->opp_level_num; i++) {
-		cpu_data->opp[i].perf = data[2 + i * 3];
-		cpu_data->opp[i].power = data[3 + i * 3];
-		cpu_data->opp[i].freq = cppc_perf_to_khz(perf_caps,
-							cpu_data->opp[i].perf);
-		pr_debug("cppc_opp_init: cpu:%d, level:%d, perf:%u, freq:%u\n",
-			cpu_dev->id, i, cpu_data->opp[i].perf, cpu_data->opp[i].freq);
 	}
 
 OUT:
-	/* Free the buffer allocated by acpi_evaluate_object */
 	if (buffer.pointer)
 		kfree(buffer.pointer);
-	return 0;
+
+	return (cpu_data->opp_level_num > 0) ? 0 : -ENODATA;
 }
 
 static int cppc_cpufreq_cpu_init(struct cpufreq_policy *policy)
