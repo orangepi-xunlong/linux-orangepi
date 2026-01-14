@@ -2506,7 +2506,7 @@ static int sky1_pcie_suspend_noirq(struct device *dev)
 	}
 	if (!pcie->str_pwron)
 		sky1_pcie_en_ep_power(pcie, false);
-	sky1_pcie_en_ep_power(pcie, false);
+
 	dev_info(dev, "%s\n", __func__);
 	return ret;
 }
@@ -2552,7 +2552,6 @@ static int sky1_pcie_resume_noirq(struct device *dev)
 	if (ret < 0)
 		return ret;
 
-	sky1_pcie_en_ep_power(pcie, true);
 	sky1_pcie_ctrl_set_axi_clk_en(pcie, true);
 	sky1_pcie_ctrl_set_apb_clk_en(pcie, true);
 	dev_info(dev, "Read STRAP_REG(0) = :0x%x\n",
