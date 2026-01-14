@@ -849,12 +849,6 @@ static int cppc_cpufreq_cpu_exit(struct cpufreq_policy *policy)
 	struct cppc_perf_caps *caps = &cpu_data->perf_caps;
 	unsigned int cpu = policy->cpu;
 	int ret;
-	struct device *dev;
-	struct acpi_device *device;
-	struct acpi_processor *pr = per_cpu(processors, cpu);
-
-	dev = get_cpu_device(pr->id);
-	device = ACPI_COMPANION(dev);
 
 	cppc_cpufreq_cpu_fie_exit(policy);
 
@@ -867,9 +861,6 @@ static int cppc_cpufreq_cpu_exit(struct cpufreq_policy *policy)
 
 	cppc_cpufreq_put_cpu_data(policy);
 
-#ifdef CONFIG_ARM64
-	acpi_processor_thermal_exit(pr, device);
-#endif
 	return 0;
 }
 
