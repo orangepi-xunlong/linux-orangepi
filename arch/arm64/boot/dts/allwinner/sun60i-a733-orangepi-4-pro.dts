@@ -1483,10 +1483,6 @@
 	status = "okay";
 };
 
-
-
-
-
 &sdc0 {
 	bus-width = <4>;
 	cd-gpios = <&pio PF 6 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
@@ -3826,3 +3822,10 @@
 		status = "disabled";
 	};
 };
+&ufs {
+       vcc-supply = <&reg_dldo6>;
+       vccq-supply = <&reg_dcdc8>;
+       vccq2-supply = <&reg_dcdc8>;
+       status = "okay";
+};
+
