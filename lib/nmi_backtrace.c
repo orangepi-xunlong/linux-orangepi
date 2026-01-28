@@ -13,7 +13,6 @@
  *
  *  Bits copied from original nmi.c file
  */
-#include <asm/stacktrace.h>
 #include <linux/cpumask.h>
 #include <linux/delay.h>
 #include <linux/kprobes.h>
@@ -109,7 +108,7 @@ bool nmi_cpu_backtrace(struct pt_regs *regs)
 		} else {
 			pr_warn("NMI backtrace for cpu %d\n", cpu);
 			if (regs)
-				dump_backtrace(regs, NULL, KERN_DEFAULT);
+				show_regs(regs);
 			else
 				dump_stack();
 		}

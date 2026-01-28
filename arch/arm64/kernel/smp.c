@@ -816,19 +816,8 @@ void arch_irq_work_raise(void)
 }
 #endif
 
-/*
- *  Don't need to call show_extra_register_data when cpu handling IPI_STOP.
- *  Declared in <asm/smp.h>
- */
-unsigned int g_cpu_in_ipi_stop;
 static void __noreturn local_cpu_stop(void)
 {
-	unsigned int mask;
-
-	mask = 0x1 << get_cpu();
-	g_cpu_in_ipi_stop |= mask;
-	put_cpu();
-
 	set_cpu_online(smp_processor_id(), false);
 
 	local_daif_mask();

@@ -297,31 +297,6 @@ void hw_bp_perf_handler(struct perf_event *bp, struct perf_sample_data *data,
 	}
 }
 
-static void hw_show_regs(struct pt_regs *regs)
-{
-	int i, top_reg;
-	u64 lr, sp;
-
-	lr = regs->regs[30];
-	sp = regs->sp;
-	top_reg = 29;
-
-	DST_PN("pc : %pS\n", (void *)regs->pc);
-	DST_PN("lr : %pS\n", (void *)ptrauth_strip_kernel_insn_pac(lr));
-	DST_PN("sp : %016llx\n", sp);
-
-	if (system_uses_irq_prio_masking())
-		DST_PN("pmr_save: %08llx\n", regs->pmr_save);
-
-	i = top_reg;
-	while (i >= 0) {
-		DST_PN("x%-2d: %016llx", i, regs->regs[i]);
-		while (i-- % 3)
-			pr_cont(" x%-2d: %016llx", i, regs->regs[i]);
-		pr_cont("\n");
-	}
-}
-
 static void hw_bp_handler_default(const hw_bp_callback_data *info,
 				  const struct pt_regs *regs)
 {
@@ -337,14 +312,13 @@ static void hw_bp_handler_default(const hw_bp_callback_data *info,
 	}
 	DST_PN("times: read=%llu, write=%llu, exec=%llu\n", info->times.read,
 		info->times.write, info->times.exec);
-	DST_PN("CPU: %d PID: %d Comm: %.20s\n", info->cpu, info->pid,
-		info->comm);
-	hw_show_regs((struct pt_regs *)regs);
-	DST_PN("stack trace:\n");
+	__show_regs((struct pt_regs *)regs);
+	pr_info("stack trace:\n");
 	for (i = 0; i < HW_BP_TRACE_DEPTH; i++) {
-		if (info->k_stack[i] == 0)
+		if (info->k_stack[i] == 0) {
 			break;
-		DST_PN("\t %pS\n", (void *)info->k_stack[i]);
+		}
+		pr_info("\t %pS\n", (void *)info->k_stack[i]);
 	}
 }
 
