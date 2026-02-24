@@ -976,8 +976,27 @@ bool arm64_is_fatal_ras_serror(struct pt_regs *regs, unsigned long esr)
 	}
 }
 
+bool rk3399_pcie_ignore_serror_enabled __read_mostly = false;
+EXPORT_SYMBOL(rk3399_pcie_ignore_serror_enabled);
+
+static int __init setup_rk3399_pcie_serror_handling(char *str)
+{
+	rk3399_pcie_ignore_serror_enabled = true;
+	pr_info("HACK: Ignore SError to enable rk3399 PCIe bus enumeration\n");
+	return 1;
+}
+__setup("rk3399_pcie_ignore_serror", setup_rk3399_pcie_serror_handling);
+
 void do_serror(struct pt_regs *regs, unsigned long esr)
 {
+	if(rk3399_pcie_ignore_serror_enabled) {
+		if (esr >> ESR_ELx_EC_SHIFT == ESR_ELx_EC_SERROR) {
+			pr_debug("Ignoring SError Interrupt on CPU%d\n",
+				smp_processor_id());
+			return;
+		}
+	}
+
 	/* non-RAS errors are not containable */
 	if (!arm64_is_ras_serror(esr) || arm64_is_fatal_ras_serror(regs, esr))
 		arm64_serror_panic(regs, esr);

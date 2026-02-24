@@ -923,8 +923,58 @@ err_disable_0v9:
 	return err;
 }
 
+extern bool rk3399_pcie_ignore_serror_enabled;
 static int rockchip_pcie_probe(struct platform_device *pdev)
 {
+	/*
+	 * When a PCIe device sends an unknown message,
+	 * the RK3399 triggers either a synchronous error or an SError.
+	 * If triggered by the A72 (via memory-mapped I/O), it results in an SError,
+	 * whereas the A53 results in a synchronous error.
+	 * To allow the RK3399 to continue PCIe enumeration, we can hijack and ignore these errors.
+	 * Since hijacking SErrors is simpler—requiring only a modification to the do_serror function,
+	 * we should pin the PCIe probe process to CPU4 (A72).
+	 * More detail, see:
+	 * https://forum.pine64.org/showthread.php?tid=6329&pid=65064
+	 * https://lore.kernel.org/linux-pci/CAMdYzYoTwjKz4EN8PtD5pZfu3+SX+68JL+dfvmCrSnLL=K6Few@mail.gmail.com/
+	 * https://lkml.org/lkml/2020/4/27/1041
+	 */
+	if (rk3399_pcie_ignore_serror_enabled) {
+		int try_count = 0;
+		unsigned long start_jiffies = jiffies;
+		int max_retries = 50; // Wait for a maximum of 50 × 10 = 500ms
+
+		dev_info(&pdev->dev, "Checking CPU4 availability...\n");
+
+		while (!cpu_online(4) && try_count < max_retries) {
+			try_count++;
+			dev_info(&pdev->dev,
+				 "Wait CPU4: try=%d, elapsed=%u ms\n",
+				 try_count,
+				 jiffies_to_msecs(jiffies - start_jiffies));
+			msleep(10);
+		}
+
+		if (cpu_online(4)) {
+			struct cpumask mask;
+			cpumask_clear(&mask);
+			cpumask_set_cpu(4, &mask);
+
+			if (set_cpus_allowed_ptr(current, &mask) == 0) {
+				dev_info(
+					&pdev->dev,
+					"Success: Probe migrated to CPU4 at try %d (%u ms)\n",
+					try_count,
+					jiffies_to_msecs(jiffies -
+							 start_jiffies));
+			}
+		} else {
+			dev_err(&pdev->dev,
+				"Fail: CPU4 timeout after %d tries. Probing on CPU%d\n",
+				try_count, smp_processor_id());
+		}
+	}
+
 	struct rockchip_pcie *rockchip;
 	struct device *dev = &pdev->dev;
 	struct pci_host_bridge *bridge;
