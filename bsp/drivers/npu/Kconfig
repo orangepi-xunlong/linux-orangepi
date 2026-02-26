@@ -1,0 +1,8 @@
+# SPDX-License-Identifier: GPL-2.0
+
+menu "NPU Drivers"
+
+source "bsp/drivers/npu/aw_nna_vip/Kconfig"
+source "bsp/drivers/npu/aw_nna_galcore/Kconfig"
+
+endmenu

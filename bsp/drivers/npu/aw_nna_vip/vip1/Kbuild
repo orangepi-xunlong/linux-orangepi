@@ -1,0 +1,194 @@
+# License-Identifier: GPL-2.0
+# Linux build file for viplite kernel space
+#
+
+
+MODULE_NAME ?= vipcore
+
+export PLATFORM_CONFIG=allwinner
+export USE_LINUX_PLATFORM_DEVICE=1
+export AUTO_CORRECT_CONFLICTS=1
+
+EXTRA_CFLAGS += -Werror -Wno-unused-function -Wno-pointer-to-int-cast -Wno-unused-variable -Wno-format
+#EXTRA_CFLAGS += -I$(VIPLITE_ROOT)/hal/kernel
+#EXTRA_CFLAGS += -I$(VIPLITE_ROOT)/hal/kernel/linux
+#EXTRA_CFLAGS += -I$(VIPLITE_ROOT)/hal/inc
+#EXTRA_CFLAGS += -I$(VIPLITE_ROOT)/sdk/inc
+#$(warning pwd:$(PWD) src:$(src) src_tree:$(srctree) obj:$(obj))
+EXTRA_CFLAGS += -I$(srctree)/$(src) \
+				-I$(srctree)/$(src)/linux \
+				-I$(srctree)/$(src)/linux/allwinner \
+				-I$(srctree)/$(src)/inc
+
+EXTRA_CFLAGS += -Wno-unused-variable -Wno-unused-function -Wno-pointer-to-int-cast
+
+OBJS := gc_vip_kernel.o \
+        gc_vip_hardware.o \
+        gc_vip_kernel_command.o \
+        gc_vip_kernel_debug.o \
+        gc_vip_kernel_heap.o \
+        gc_vip_kernel_mmu.o \
+        gc_vip_video_memory.o \
+        gc_vip_kernel_util.o \
+        gc_vip_kernel_pm.o \
+        linux/gc_vip_kernel_drv.o \
+        linux/gc_vip_kernel_os.o \
+        linux/gc_vip_kernel_allocator.o \
+        linux/gc_vip_kernel_os_debug.o
+
+        
+#platform
+#EXTRA_CFLAGS += -I$(VIPLITE_ROOT)/hal/kernel/linux/$(PLATFORM_CONFIG)
+ifeq ($(SOC_CONFIG), )
+OBJS += linux/$(PLATFORM_CONFIG)/gc_vip_kernel_drv_platform.o
+else
+OBJS += linux/$(PLATFORM_CONFIG)/gc_vip_kernel_drv_platform_$(SOC_CONFIG).o
+endif
+#Include platform config if exists.
+#-include $(VIPLITE_ROOT)/hal/kernel/linux/$(PLATFORM_CONFIG)/platform.mk
+
+#NOTE:
+#please configure CONFIG_DEBUG_INFO is not set if want to build vipcore.ko release version.
+
+
+.PHONY: all clean install
+
+# Define targets.
+all:
+	@$(MAKE) V=$(V) ARCH=$(ARCH_TYPE) -C $(KERNEL_DIR) M=`pwd` modules
+
+clean:
+	@rm -rf $(OBJS)
+	@rm -rf modules.order Module.symvers .tmp_versions $(MODULE_NAME).mod.o $(MODULE_NAME).mod.c $(MODULE_NAME).ko $(MODULE_NAME).o
+	#@find $(VIPLITE_ROOT) -name "*.o" | xargs rm -f
+	#@find $(VIPLITE_ROOT) -name "*.d" | xargs rm -f
+	#@find $(VIPLITE_ROOT) -name "*.mod" | xargs rm -f
+	#@find $(VIPLITE_ROOT) -name ".*.cmd" | xargs rm -f
+	@rm -f $(SDK_DIR)/drivers/$(MODULE_NAME).ko
+
+install: all
+	@mkdir -p $(SDK_DIR)/drivers
+	@cp $(MODULE_NAME).ko $(SDK_DIR)/drivers
+
+
+EXTRA_CFLAGS += -DLINUX -DDRIVER
+
+ifeq ($(FLAREON),1)
+EXTRA_CFLAGS += -DFLAREON
+endif
+
+ifeq ($(DEBUG), 1)
+EXTRA_CFLAGS += -DDBG=1 -DDEBUG -D_DEBUG -DvpmdENABLE_DEBUG_LOG=4
+else
+EXTRA_CFLAGS += -DDBG=0
+endif
+
+ifeq ($(USE_LINUX_PCIE_DEVICE), 1)
+EXTRA_CFLAGS += -DUSE_LINUX_PCIE_DEVICE
+else ifeq ($(USE_LINUX_PLATFORM_DEVICE), 1)
+EXTRA_CFLAGS += -DUSE_LINUX_PLATFORM_DEVICE
+endif
+
+ifneq ($(FPGA_BUILD), )
+EXTRA_CFLAGS += -DvpmdFPGA_BUILD=$(FPGA_BUILD)
+endif
+
+ifeq ($(USE_LINUX_RESERVE_MEM), 1)
+EXTRA_CFLAGS += -DUSE_LINUX_RESERVE_MEM
+endif
+
+ifeq ($(USE_LINUX_CMA), 1)
+EXTRA_CFLAGS += -DUSE_LINUX_CMA
+endif
+
+ifneq ($(USE_AGENT), )
+EXTRA_CFLAGS += -DvpmdENABLE_USE_AGENT_TRIGGER=$(USE_AGENT)
+endif
+
+ifneq ($(ENABLE_MMU), )
+EXTRA_CFLAGS += -DvpmdENABLE_MMU=$(ENABLE_MMU)
+endif
+
+ifeq ($(DISABLE_CREATE_BUF_FD),1)
+EXTRA_CFLAGS += -DvpmdENABLE_CREATE_BUF_FD=0
+endif
+
+ifeq ($(DISABLE_SYS_MEM_HEAP),1)
+EXTRA_CFLAGS += -DvpmdENABLE_SYS_MEMORY_HEAP=0
+endif
+
+ifeq ($(DISABLE_VIDEO_MEM_HEAP),1)
+EXTRA_CFLAGS += -DvpmdENABLE_VIDEO_MEMORY_HEAP=0
+endif
+
+ifneq ($(POWER_OFF_TIMEOUT), )
+EXTRA_CFLAGS += -DvpmdPOWER_OFF_TIMEOUT=$(POWER_OFF_TIMEOUT)
+endif
+
+ifneq ($(HARDWARE_RECOVERY), )
+EXTRA_CFLAGS += -DvpmdENABLE_RECOVERY=$(HARDWARE_RECOVERY)
+endif
+
+ifneq ($(NODE_MEMORY_IN_HEAP), )
+EXTRA_CFLAGS += -DvpmdNODE_MEMORY_IN_HEAP=$(NODE_MEMORY_IN_HEAP)
+endif
+
+ifneq ($(AUTO_CORRECT_CONFLICTS), )
+EXTRA_CFLAGS += -DvpmdAUTO_CORRECT_CONFLICTS=$(AUTO_CORRECT_CONFLICTS)
+endif
+
+ifneq ($(ENABLE_MULTIPLE_TASK), )
+EXTRA_CFLAGS += -DvpmdENABLE_MULTIPLE_TASK=$(ENABLE_MULTIPLE_TASK)
+endif
+
+ifneq ($(ENABLE_RESERVE_PHYSICAL), )
+EXTRA_CFLAGS += -DvpmdENABLE_RESERVE_PHYSICAL=$(ENABLE_RESERVE_PHYSICAL)
+endif
+
+ifneq ($(LIUNX_USE_MEM_WRITE_COMBINE), )
+EXTRA_CFLAGS += -DLIUNX_USE_MEM_WRITE_COMBINE
+endif
+
+ifneq ($(ENABLE_SUSPEND_RESUME), )
+EXTRA_CFLAGS += -DvpmdENABLE_SUSPEND_RESUME=$(ENABLE_SUSPEND_RESUME)
+endif
+
+ifneq ($(REGISTER_NETWORK), )
+EXTRA_CFLAGS += -DvpmdREGISTER_NETWORK=$(REGISTER_NETWORK)
+endif
+
+ifneq ($(ENABLE_QUICK_RESET), )
+EXTRA_CFLAGS += -DvpmdENABLE_QUICK_RESET=$(ENABLE_QUICK_RESET)
+endif
+
+ifneq ($(ENABLE_REDUCE_MEMORY), )
+EXTRA_CFLAGS += -DvpmdENABLE_REDUCE_MEMORY=$(ENABLE_REDUCE_MEMORY)
+endif
+
+ifneq ($(ENABLE_POLLING), )
+EXTRA_CFLAGS += -DvpmdENABLE_POLLING=$(ENABLE_POLLING)
+endif
+
+ifneq ($(ENABLE_PREEMPTION), )
+EXTRA_CFLAGS += -DvpmdENABLE_PREEMPTION=$(ENABLE_PREEMPTION)
+endif
+
+ifneq ($(ENABLE_CHECKSUM), )
+EXTRA_CFLAGS += -DvpmdENABLE_CHECKSUM=$(ENABLE_CHECKSUM)
+endif
+
+ifneq ($(HARDWARE_BYPASS_MODE), )
+EXTRA_CFLAGS += -DvpmdHARDWARE_BYPASS_MODE=$(HARDWARE_BYPASS_MODE)
+endif
+
+ifneq ($(PRELOAD_COEFF), )
+EXTRA_CFLAGS += -DvpmdPRELOAD_COEFF=$(PRELOAD_COEFF)
+endif
+
+obj-$(CONFIG_AW_NNA_VIP) = $(MODULE_NAME).o
+
+$(MODULE_NAME)-objs  = $(OBJS)
+
+
+#only for checking driver build option
+-include $(VIPLITE_ROOT)/hal/kernel/check.Kbuild

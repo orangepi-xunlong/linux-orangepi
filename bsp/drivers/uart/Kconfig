@@ -1,0 +1,76 @@
+# SPDX-License-Identifier: GPL-2.0
+#
+# Serial device configuration
+#
+
+menu "UART Drivers"
+	depends on TTY
+	depends on HAS_IOMEM
+	depends on AW_BSP
+
+config AW_UART
+	tristate "UART Support for Allwinner SoCs"
+	depends on AW_BSP
+	select SERIAL_CORE
+	default y
+	help
+	  Enable the UART (Serial Ports) of the SoC
+
+config AW_UART_NG
+	tristate "UART NG Support for Allwinner SoCs"
+	depends on AW_BSP
+	select SERIAL_CORE
+	default n
+	help
+	  Enable the UART NG (Serial Ports) of the SoC
+
+config AW_SERIAL_DMA
+	bool "Enable DMA for UART"
+	depends on AW_UART
+	depends on AW_DMA
+	depends on OF
+	default n
+	help
+	  Allow DMA to be used for UART transmission.
+
+config AW_SERIAL_CONSOLE
+	bool "Enable Console on UART"
+	select SERIAL_CORE_CONSOLE
+	depends on AW_UART || AW_UART_NG
+	default AW_UART
+	help
+	  Allow an UART port to be used as the system console.
+
+config AW_SERIAL_EARLYCON
+	bool "Enable Earlycon"
+	depends on SERIAL_EARLYCON
+	depends on AW_UART || AW_UART_NG
+	default n
+	help
+	  Enable earlycon during boot stage.
+	  If This is enabled, kernel cmdline (earlycon=uart0,<addr>) must be specified.
+
+config AW_EARLY_PRINTK
+	bool "Enable Early-Printk"
+	depends on AW_BSP
+	default y
+	help
+	  Enabled Early-Printk for debugging
+
+config AW_IOSERIAL
+	bool "Enable GPIO based Serial"
+	depends on AW_PINCTRL
+	default n
+	help
+	  Enabled GPIO based Serial for debugging
+
+config AW_UART_DYNAMIC_DEBUG
+	bool "Enable uart dynamic debug"
+	depends on AW_UART || AW_UART_NG
+	default y
+	help
+	  Enable uart dynamic debug
+
+source "bsp/drivers/uart/sunxi-soft-uart/Kconfig"
+
+endmenu

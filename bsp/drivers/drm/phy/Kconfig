@@ -1,0 +1,15 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+
+menuconfig AW_DRM_PHY
+	tristate "Support disp phy for sunxi drm"
+	depends on AW_DRM
+	default n
+	help
+		If you want use phy for disp interface, select it.
+
+config AW_DRM_DSI_COMBOPHY
+	bool "LVDS and MIPI DSI Combophy"
+	depends on (AW_DRM_PHY)
+	default n
+	help
+		If you want to support lvds dsi combophy, select it.

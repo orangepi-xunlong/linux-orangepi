@@ -1,0 +1,26 @@
+# SPDX-License-Identifier: GPL-2.0-only
+#
+# Devfreq device configuration
+#
+
+menu "Devfreq Device Drivers"
+	depends on AW_BSP
+
+config AW_DMC_DEVFREQ
+	tristate "SUNXI DEVFREQ Driver"
+	select DEVFREQ_GOV_SIMPLE_ONDEMAND
+	select DEVFREQ_GOV_USERSPACE
+	select DEVFREQ_GOV_PERFORMANCE
+	select PM_DEVFREQ_EVENT
+	select PM_OPP
+
+	help
+          This adds the DEVFREQ driver for the A100 DMC(Dynamic Memory Controller).
+          It sets the frequency for the memory controller and reads the usage counts
+          from hardware.
+
+	  If in doubt, say N.
+
+source "bsp/drivers/devfreq/event/Kconfig"
+
+endmenu

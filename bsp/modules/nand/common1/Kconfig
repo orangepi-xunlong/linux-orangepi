@@ -1,0 +1,18 @@
+config AW_RAWNAND
+	default y
+	depends on (AW_NAND)
+	tristate "sunxi raw nand driver"
+
+
+config AW_RAWNAND_CD
+	tristate "sunxi rawnand exteral module detect unclean poweroff"
+	depends on AW_RAWNAND
+	help
+	exteral module detect unclean poweroff(e.g. powerdown),then it send a
+	signal to gpio,gpio generate signal to stop ndfc work.
+	this should be support by hardware circuit.
+
+	if you enable it, and you should configure property cd-debounce-delay-ms and
+	pwroff-gpios in dts
+
+	  WARNING: the gpio can't be used by other

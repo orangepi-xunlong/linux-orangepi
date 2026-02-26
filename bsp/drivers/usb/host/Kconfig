@@ -1,0 +1,157 @@
+# SPDX-License-Identifier: GPL-2.0-only
+#
+# USB host drivers configuration
+#
+
+menu "USB Host Controller Drivers"
+
+config USB_EHCI_HCD_SUNXI
+       tristate "Allwinner EHCI HCD"
+       help
+         This driver enables support for the internal USB Host Controllers
+         found in Allwinner SoCs. The controllers are EHCI compliant.
+
+config USB_OHCI_HCD_SUNXI
+       tristate "Allwinner OHCI HCD"
+       help
+         This driver enables support for the internal USB Host Controllers
+         found in Allwinner SoCs. The controllers are OHCI compliant.
+
+config USB_SUNXI_HCD
+    tristate "Allwinner USB Host Controller"
+	depends on USB
+	help
+	  Allwinner USB2.0 Host Controller support.
+
+	  This option is of interest only to developers who need to
+	  develop on AllWinner SoC.
+
+	  If unsure, say N.
+
+config USB_SUNXI_HCD0
+    tristate "Allwinner USB Host Controller0"
+        depends on USB_SUNXI_HCD && ARCH_SUN8IW6
+        help
+          Allwinner USB2.0 Host Controller0.
+	  Enable this option if your board has this chip, and you want
+	  to use it as a host controller.
+
+	  If unsure, say N.
+
+config USB_SUNXI_HCI
+    tristate "Allwinner USB HCI"
+	depends on USB_SUNXI_HCD
+	help
+	  Allwinner USB HCI.
+
+	  This option is of interest only to developers who need to
+	  develop on AllWinner SoC.
+
+	  If unsure, say N.
+
+config USB_SUNXI_EHCI0
+    tristate "Allwinner USB EHCI0"
+	depends on USB_SUNXI_HCI
+	help
+	  Allwinner USB EHCI0.
+
+	  This option is of interest only to developers who need to
+	  develop on AllWinner SoC.
+
+	  If unsure, say N.
+
+config USB_SUNXI_EHCI1
+    tristate "Allwinner USB EHCI1"
+	depends on USB_SUNXI_HCI && !ARCH_SUN50IW6 && !ARCH_SUN8IW5 \
+			&& !ARCH_SUN8IW18
+	help
+	  Allwinner USB EHCI1.
+
+	  This option is of interest only to developers who need to
+	  develop on AllWinner SoC.
+
+	  If unsure, say N.
+
+config USB_SUNXI_EHCI2
+    tristate "Allwinner USB EHCI2"
+	depends on USB_SUNXI_HCI && (ARCH_SUN8IW11 || ARCH_SUN50IW2 \
+			|| ARCH_SUN8IW7 || ARCH_SUN8IW17 || ARCH_SUN50IW9)
+	help
+	  Allwinner USB EHCI2.
+
+	  This option is of interest only to developers who need to
+	  develop on AllWinner SoC.
+
+	  If unsure, say N.
+
+config USB_SUNXI_EHCI3
+    tristate "Allwinner USB EHCI3"
+	depends on USB_SUNXI_HCI && (ARCH_SUN50IW2 || ARCH_SUN8IW7 \
+			|| ARCH_SUN50IW6 || ARCH_SUN8IW17 || ARCH_SUN50IW9)
+	help
+	  Allwinner USB EHCI3.
+
+	  This option is of interest only to developers who need to
+	  develop on AllWinner SoC.
+
+	  If unsure, say N.
+
+config USB_SUNXI_OHCI0
+    tristate "Allwinner USB OHCI0"
+	depends on USB_SUNXI_HCI
+	help
+	  Allwinner USB OHCI0.
+
+	  This option is of interest only to developers who need to
+	  develop on AllWinner SoC.
+
+	  If unsure, say N.
+
+config USB_SUNXI_OHCI1
+    tristate "Allwinner USB OHCI1"
+	depends on USB_SUNXI_HCI && !ARCH_SUN8IW6 && !ARCH_SUN50IW6 \
+			&& !ARCH_SUN8IW5 && !ARCH_SUN8IW18
+	help
+	  Allwinner USB OHCI1.
+
+	  This option is of interest only to developers who need to
+	  develop on AllWinner SoC.
+
+	  If unsure, say N.
+
+config USB_SUNXI_OHCI2
+    tristate "Allwinner USB OHCI2"
+	depends on USB_SUNXI_HCI && (ARCH_SUN8IW11 || ARCH_SUN50IW2 \
+			|| ARCH_SUN8IW7 || ARCH_SUN8IW17 || ARCH_SUN50IW9)
+	help
+	  Allwinner USB OHCI2.
+
+	  This option is of interest only to developers who need to
+	  develop on AllWinner SoC.
+
+	  If unsure, say N.
+
+config USB_SUNXI_OHCI3
+    tristate "Allwinner USB OHCI3"
+	depends on USB_SUNXI_HCI && (ARCH_SUN50IW2 || ARCH_SUN8IW7 \
+			|| ARCH_SUN50IW6 || ARCH_SUN8IW17 || ARCH_SUN50IW9)
+	help
+	  Allwinner USB OHCI3.
+
+	  This option is of interest only to developers who need to
+	  develop on AllWinner SoC.
+
+	  If unsure, say N.
+
+config USB_SUNXI_XHCI
+	tristate "Allwinner USB XHCI"
+	depends on USB_SUNXI_HCI && ARCH_SUN50IW6
+	select USB_XHCI_PLATFORM if USB_SUPPORT && USB_XHCI_HCD
+	help
+	  The Renesas USBSS is a XHCI controller.
+	  Enable this option if your board has this chip, and you want
+	  to use it as a host controller.
+
+	  If unsure, say N.
+
+endmenu

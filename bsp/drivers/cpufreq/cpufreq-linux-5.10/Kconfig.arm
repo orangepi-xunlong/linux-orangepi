@@ -1,0 +1,17 @@
+menu "sunxi cpufreq Drivers"
+	depends on AW_BSP
+
+config ARM_AW_SUN50I_CPUFREQ_NVMEM
+	tristate "Allwinner nvmem based SUN50I CPUFreq driver"
+	depends on AW_BSP
+	depends on NVMEM_AW_SID
+	select PM_OPP
+	help
+	  This adds the nvmem based CPUFreq driver for Allwinner
+	  h6 SoC.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called sun50i-cpufreq-nvmem.
+
+endmenu
+

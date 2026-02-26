@@ -1,0 +1,33 @@
+# SPDX-License-Identifier: GPL-2.0
+
+warning = $(warning-if,y,$(1))
+
+## Kernel-Version Comparing functions
+
+#ver-num = $(shell,{ let n=$(1)*10+$(2); echo ${n}; })  # 'let' is unavailable in 'sh'
+ver-num = $(shell,echo $(1)*100+$(2)*10+$(3) | bc)
+ker-ver-num = $(ver-num,$(VERSION),$(PATCHLEVEL),$(SUBLEVEL))
+#$(warning,"ker-ver-num = $(ker-ver-num)")
+
+# $(ker-ver-lt,<$(version)>,$(patchlevel),$(sublevel),<then>,<else>)
+# Returns <then> if $(VERSION).$(PATCHLEVEL).$(SUBLEVEL) is less than <$(version)>.$(patchlevel).$(sublevel), <else> otherwise.
+ker-ver-lt = $(shell,[ $(ker-ver-num) -lt $(ver-num,$(1),$(2),$(3)) ] && echo "$(4)" || echo "$(5)")
+
+# $(ker-ver-le,<$(version)>,$(patchlevel),$(sublevel),<then>,<else>)
+# Returns <then> if <$(version)>.$(patchlevel).$(sublevel) is less than or equals to $(VERSION).$(PATCHLEVEL).$(SUBLEVEL), <else> otherwise.
+ker-ver-le = $(shell,[ $(ker-ver-num) -le $(ver-num,$(1),$(2),$(3)) ] && echo "$(4)" || echo "$(5)")
+
+# $(ker-ver-eq,<$(version)>,$(patchlevel),$(sublevel),<then>,<else>)
+# Returns <then> if <$(version)>.$(patchlevel).$(sublevel) equals to $(VERSION).$(PATCHLEVEL).$(SUBLEVEL), <else> otherwise.
+ker-ver-eq = $(shell,[ $(ker-ver-num) -eq $(ver-num,$(1),$(2),$(3)) ] && echo "$(4)" || echo "$(5)")
+
+# $(ker-ver-gt,<$(version)>,$(patchlevel),$(sublevel),<then>,<else>)
+# Returns <then> if <$(version)>.$(patchlevel).$(sublevel) is greater than $(VERSION).$(PATCHLEVEL).$(SUBLEVEL), <else> otherwise.
+ker-ver-gt = $(shell,[ $(ker-ver-num) -gt $(ver-num,$(1),$(2),$(3)) ] && echo "$(4)" || echo "$(5)")
+
+# $(ker-ver-ge,<$(version)>,$(patchlevel),$(sublevel),<then>,<else>)
+# Returns <then> if <$(version)>.$(patchlevel).$(sublevel) is greater than or equals to $(VERSION).$(PATCHLEVEL).$(SUBLEVEL), <else> otherwise.
+ker-ver-ge = $(shell,[ $(ker-ver-num) -ge $(ver-num,$(1),$(2),$(3)) ] && echo "$(4)" || echo "$(5)")
+
+## Run Test-Cases
+#source "bsp/platform/Kconfig.test"

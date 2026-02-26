@@ -1,0 +1,21 @@
+# SPDX-License-Identifier: GPL-2.0-only
+
+menu "Clock Drivers"
+	depends on AW_BSP
+
+source "bsp/drivers/clk/sunxi/Kconfig"
+source "bsp/drivers/clk/sunxi-ng/Kconfig"
+
+config AW_CCU_DEBUG
+	tristate "DebugFS representation of clock tree"
+	default AW_CCU || AW_CCU_LEGACY
+	depends on DEBUG_FS
+
+config AW_CCMU_DYNAMIC_DEBUG
+	bool "Enable ccmu dynamic debug"
+	default AW_CCU
+	default y
+	help
+	  Enable ccmu dynamic debug
+
+endmenu

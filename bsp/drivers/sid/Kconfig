@@ -1,0 +1,18 @@
+# SPDX-License-Identifier: GPL-2.0-only
+
+menu "SID Drivers"
+	depends on AW_BSP
+
+config AW_SID
+	tristate "Allwinner SID Support"
+	default n
+	help
+	 Say Y here to enable the sunxi SID support.
+
+config AW_SET_EFUSE_POWER
+	tristate "Allwinner Set Efuse Power"
+	default n
+	help
+	 Say Y here to enable efuse power before burn efuse.
+
+endmenu

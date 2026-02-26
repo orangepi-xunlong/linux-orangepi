@@ -1,0 +1,8 @@
+# SPDX-License-Identifier: GPL-2.0
+
+menu "VE Drivers"
+
+source "bsp/drivers/ve/cedar-ve/Kconfig"
+source "bsp/drivers/ve/google-ve/Kconfig"
+
+endmenu

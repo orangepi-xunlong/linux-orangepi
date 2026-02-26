@@ -1,0 +1,66 @@
+# SPDX-License-Identifier: GPL-2.0
+
+menu "G2D Drivers"
+	depends on AW_BSP
+
+config AW_G2D
+	tristate "G2D Support for Allwinner SoCs"
+	default n
+	help
+	  Enable sunxi platform 2D Graphics engine
+
+choice
+	prompt "G2D driver version"
+	depends on AW_G2D
+
+config G2D_LEGACY
+	depends on AW_G2D
+	bool "legacy version"
+
+config G2D_RCQ
+	depends on AW_G2D
+	bool "RCQ version"
+
+config G2D200
+	depends on AW_G2D
+	bool "sunxi g2d200 version"
+
+endchoice
+
+config G2D_MIXER
+	depends on G2D_RCQ || G2D200
+	bool "sunxi g2d mixer module"
+	default y
+	help
+	  Choose Y to enable mixer module of g2d
+
+config G2D_ROTATE
+	depends on G2D_RCQ || G2D200
+	bool "sunxi g2d rotate module"
+	default y
+	help
+	  Choose Y to enable rotate module of g2d
+
+config G2D_SYNCFENCE
+	depends on AW_G2D
+	select SYNC_FILE
+	bool "sunxi sync fence implement for rotate jobs synchronous"
+	default n
+	help
+	  Choose Y to enable sync fence implement for sunxi G2D
+
+config G2D_USE_HWSPINLOCK
+	depends on AW_G2D && AW_RPROC_FAST_BOOT
+	bool "sunxi g2d use hwspinlock"
+	default n
+	help
+	  Choose Y to use hwspinlock by sunxi G2D
+
+config G2D_BUF_CACHED
+	depends on G2D_RCQ || G2D200
+	bool "Caching dma-buf mapping with LRU cache algorithm"
+	default n
+	help
+	  Choose Y to enable LRU cache for dma-buf mapping
+
+endmenu

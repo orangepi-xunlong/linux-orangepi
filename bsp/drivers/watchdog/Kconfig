@@ -1,0 +1,13 @@
+# SPDX-License-Identifier: GPL-2.0-only
+
+menu "Watchdog Drivers"
+	depends on AW_BSP
+
+config AW_WATCHDOG
+	tristate "Watchdog Support for Allwinner SoCs"
+	select WATCHDOG
+	select WATCHDOG_CORE
+	help
+	  Say Y here to support the watchdog timer in Allwinner SoCs.
+
+endmenu

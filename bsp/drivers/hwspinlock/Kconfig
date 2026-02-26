@@ -1,0 +1,15 @@
+# SPDX-License-Identifier: GPL-2.0
+
+menu "HWSPINLOCK Drivers"
+	depends on AW_BSP
+
+config AW_HWSPINLOCK
+        tristate "Hwspinlock support for Allwinner SoCs"
+        depends on AW_BSP
+        select HWSPINLOCK
+        help
+          If you say y here, you will get support for the  to support
+	  Hardware Spinlock found on Allwinner SoCs.
+
+          If unsure, say N.
+endmenu

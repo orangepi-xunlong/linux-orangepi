@@ -1,0 +1,13 @@
+config XR829_WLAN
+	tristate "XR829 WLAN support"
+	default n
+	depends on CFG80211
+	depends on CRYPTO
+	help
+	  To compile this code as a module, choose M here.
+config XR829_SUSPEND_POWER_OFF
+	bool "XR829 SUSPEND POWER OFF"
+	depends on XR829_WLAN
+	default n
+	help
+	  if susspend power off, choose y here.

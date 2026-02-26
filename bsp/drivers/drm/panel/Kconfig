@@ -1,0 +1,44 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+
+config PANEL_DSI_GENERAL
+	tristate "dsi general panel"
+	depends on (AW_DRM)
+	select VIDEOMODE_HELPERS
+	select BACKLIGHT_CLASS_DEVICE
+	select BACKLIGHT_PWM
+	select DRM_DISPLAY_DP_HELPER
+	select DRM_DISPLAY_HELPER
+	default n
+	help
+		If you want to support general dsi panel, select it.
+
+config PANEL_LVDS_GENERAL
+	tristate "lvds general panel"
+	depends on (AW_DRM)
+	select VIDEOMODE_HELPERS
+	select BACKLIGHT_CLASS_DEVICE
+	select BACKLIGHT_PWM
+	default n
+	help
+		If you want to support general lvds panel, select it.
+
+config PANEL_RGB_GENERAL
+	tristate "rgb general panel"
+	depends on (AW_DRM)
+	select VIDEOMODE_HELPERS
+	select BACKLIGHT_CLASS_DEVICE
+	select BACKLIGHT_PWM
+	default n
+	help
+		If you want to support general rgb panel, select it.
+
+config PANEL_EDP_GENERAL
+    tristate "eDP general drm panel"
+	depends on (AW_DRM)
+	select VIDEOMODE_HELPERS
+	select BACKLIGHT_CLASS_DEVICE
+	select BACKLIGHT_PWM
+    default n
+    help
+        If you want to support general edp panel, select it.
+

@@ -1,0 +1,18 @@
+# SPDX-License-Identifier: GPL-2.0-only
+#
+# LEDC drivers configuration
+#
+
+menu "AW Debugging Extensions"
+	depends on AW_BSP
+
+config AW_SYSCALL_PRINTK
+        bool "Support Syscall printk()"
+	depends on ARM64
+	default n
+	help
+	  This enables support for a new syscall `sys_printk`, which allows user space to call printk() directly.
+	  This could be used for userspace debugging when console is not available.
+	  Only ARM64 is supported so far.
+
+endmenu

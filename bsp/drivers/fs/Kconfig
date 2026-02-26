@@ -1,0 +1,25 @@
+# SPDX-License-Identifier: GPL-2.0-only
+
+
+#depends on !FAT_FS && AW_BSP && LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0) && LINUX_VERSION_CODE < KERNEL_VERSION(5, 16, 0)
+# SPDX-License-Identifier: GPL-2.0
+#menu "AW fs version select"
+#endmenu
+
+menuconfig AW_FS_5_15
+	tristate "aw fs modify for linux(5.15)"
+	depends on !FAT_FS && AW_BSP && $(VERSION) = 5 && $(PATCHLEVEL) = 15
+	default n
+	help
+	  aw fs modify for linux 5.15,such as fat
+
+if AW_FS_5_15
+source "bsp/drivers/fs/linux-5.15/Kconfig"
+endif
+
+#menu "select fs driver for linux 6.1"
+#	depends on !FAT_FS && AW_BSP && $(VERSION) = 6 && $(PATCHLEVEL) = 1
+
+#source "bsp/drivers/fs/linux-$(VERSION).$(PATCHLEVEL)/Kconfig"
+#endmenu
+

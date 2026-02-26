@@ -1,0 +1,18 @@
+# SPDX-License-Identifier: GPL-2.0-only
+
+menu "Aw trace Drivers"
+	depends on AW_BSP
+
+config AW_TRACE
+	tristate "Allwinner Tracers"
+	depends on AW_BSP
+	help
+	  Support for aw tracers for debug.
+
+config AW_HEALTHD
+	tristate "Allwinner healthd"
+	depends on AW_BSP
+	help
+	  Support for aw health domain for debug.
+endmenu
+

@@ -1,0 +1,1 @@
+#define AW_BSP_VERSION "7b992010f2-dirty, 2025-04-29 09:35:36"

@@ -1,0 +1,71 @@
+# SPDX-License-Identifier: GPL-2.0-only
+menu "IOMMU Drivers"
+	depends on AW_BSP
+
+config AW_IOMMU
+       tristate "Allwinner IOMMU Support"
+       depends on AW_BSP
+       select ARM_DMA_USE_IOMMU if ARM
+       select IOMMU_SUPPORT
+       select IOMMU_API
+       select IOMMU_DMA
+       help
+         Support for the Allwinner IOMMU(System MMU) component. This
+         enables H/W multimedia accellerators to see non-linear physical
+         memory chunks as a linear memory in their address spaces.
+
+         If unsure, say N here.
+
+
+if AW_IOMMU
+choice
+       prompt "IOMMU verson"
+       default AW_IOMMU_V1
+
+config AW_IOMMU_V1
+       bool "V1"
+
+config AW_IOMMU_V2
+       bool "V2"
+
+config AW_IOMMU_V3
+       bool "V3"
+endchoice
+
+config AW_IOMMU_DISTRIBUTE
+       bool "IOMMU is distribute"
+       default n
+       default y if AW_IOMMU_V2
+endif
+
+config AW_IOMMU_IOVA_TRACE
+       bool "Allwinner IOMMU IOVA TRACE"
+       depends on AW_IOMMU && ANDROID_VENDOR_HOOKS && DEBUG_FS
+       default n
+       help
+	 Support trace iova alloc/free by using vendor hooks mechanism.
+
+config AW_IOMMU_DEBUG
+       tristate "Allwinner IOMMU Profiling and Debugging"
+       help
+         Makes available some additional IOMMU profiling and debugging
+         enables H/W multimedia accellerators to see non-linear physical
+         memory chunks as a linear memory in their address spaces.
+
+         Say Y here if you want to debug and trace iommu driver.
+         If unsure, say N.
+
+if AW_IOMMU_DEBUG
+
+config AW_IOMMU_TESTS
+       tristate "Allwinner Interactive IOMMU performance/functional tests"
+       depends on AW_IOMMU_DEBUG
+       select IOMMU_API
+       help
+         Enables a suite of IOMMU unit tests.  The tests are runnable
+         through debugfs. The impact of enabling this option to overal
+         system performance should be minimal.
+
+endif # AW_IOMMU_DEBUG
+
+endmenu

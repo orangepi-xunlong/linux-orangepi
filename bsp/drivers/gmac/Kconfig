@@ -1,0 +1,38 @@
+# SPDX-License-Identifier: GPL-2.0-only
+menu "Gmac Drivers"
+	depends on AW_BSP
+
+config AW_GMAC
+	tristate "Allwinner GMAC support"
+	depends on OF
+	select AW_GMAC_MDIO
+	select CRC32
+	help
+	  Support for Allwinner Gigabit ethernet driver.
+
+	  To compile this driver as a module, choose M here.  The module
+	  will be called sunxi-gmac.ko.
+
+config AW_GMAC_MDIO
+	tristate "Allwinner GMAC MDIO support"
+	select MDIO_BUS
+	select MDIO_DEVICE
+	select NETDEVICES
+	select PHYLIB
+	select MII
+	help
+	  This driver supports the GMAC MDIO interface in the network
+
+config AW_GMAC_METADATA
+	bool "Allwinner GMAC metadata support"
+	depends on AW_GMAC
+	help
+	  Support Allwinner GMAC to transmit and receive metadata
+
+config AW_EPHY
+	tristate "Drivers for Allwinnertech EPHY"
+	depends on AW_GMAC
+	help
+	  Support Allwinner EPHY
+
+endmenu

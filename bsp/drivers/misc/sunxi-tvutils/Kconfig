@@ -1,0 +1,16 @@
+#
+# sunxi system information driver.
+#
+#
+config SUNXI_TVUTILS_SCRIPTS
+	bool "enable sunxi tv subsystem utils driver"
+	default n
+	help
+	  Choose Y to enable sunxi tv subsystem utils driver
+
+config SUNXI_AFBD_WORKAROUND
+	bool "workaround for afbd register read error"
+	depends on (ARCH_SUNXI)
+	default n
+	help
+	  Choose Y to enable workaround for sunxi afbd bug

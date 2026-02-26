@@ -1,0 +1,21 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+config EDP_SUPPORT_VVX10T025J00_2560X1600
+    tristate "eDP panel support VVX10T025J00_2560X1600"
+    depends on (EDP2_AW_DISP2)
+    default n
+    help
+        If you want to support VVX10T025J00_2560X1600 panel for edp2 driver, select it.
+
+config EDP_SUPPORT_LM116X001A40_1920X1080
+    tristate "eDP panel support LM116X001A40_1920X1080"
+    depends on (EDP2_AW_DISP2)
+    default n
+    help
+        If you want to support LM116X001A40_1920X1080 panel for edp2 driver, select it.
+
+config EDP_SUPPORT_GENERAL_PANEL
+    tristate "eDP panel support general_panel"
+    depends on (EDP2_AW_DISP2)
+    default n
+    help
+        If you want to support general panel for edp2 driver, select it.

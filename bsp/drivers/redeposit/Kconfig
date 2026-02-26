@@ -1,0 +1,7 @@
+# SPDX-License-Identifier: GPL-2.0-only
+config SUNXI_REDEPOSIT
+	tristate "Sunxi redeposit startup IO data"
+	depends on BLOCK
+	default n
+	help
+	  This is an option for use to redeposit startup io data.

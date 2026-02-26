@@ -1,0 +1,7 @@
+config XR819_WLAN
+	tristate "XR819/XR819S WLAN support"
+	default n
+	depends on CFG80211
+	depends on CRYPTO
+	help
+	  To compile this code as a module, choose M here.

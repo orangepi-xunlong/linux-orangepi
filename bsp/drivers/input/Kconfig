@@ -1,0 +1,21 @@
+# SPDX-License-Identifier: GPL-2.0-only
+#
+# Input device configuration
+#
+
+menu "Input Device Drivers"
+	depends on AW_BSP
+
+config AW_INPUT_SENSORINIT
+    tristate  "sunxi sensor init"
+        depends on INPUT
+        default m
+        help
+            init sunxi Sensors and CTP;
+            If you say yes here you get support for Sensors and CTP init function;
+
+source "bsp/drivers/input/ctp/Kconfig"
+source "bsp/drivers/input/sensor/Kconfig"
+source "bsp/drivers/input/misc/Kconfig"
+
+endmenu # SUNXI_INPUT_DRIVER

@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: GPL-2.0-only
+menu "TVD (cvbs in) Drivers"
+    depends on AW_BSP
+
+config AW_VIDEO_SUNXI_TVD
+    tristate "sunxi tvd driver"
+    depends on ARCH_SUN8IW11 || ARCH_SUN8IW17
+    select MEDIA_SUPPORT
+    select VIDEOBUF2_DMA_CONTIG
+    default n
+
+endmenu

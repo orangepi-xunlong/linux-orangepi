@@ -1,0 +1,14 @@
+#
+# sunxi system information driver.
+#
+#
+config SUNXI_LED_BCT
+	bool "enable sunxi led bct driver"
+	default n
+	help
+	  Choose Y to enable sunxi tv subsystem utils driver
+
+config SUNXI_LED_DM
+	bool "enable sunxi led baffle"
+	depends on SUNXI_LED_BCT
+	default n

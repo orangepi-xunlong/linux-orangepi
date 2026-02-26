@@ -1,0 +1,147 @@
+# SPDX-License-Identifier: GPL-2.0-only
+menu "Pinctrl Drivers"
+	depends on AW_BSP
+
+config AW_PINCTRL
+	tristate "Pinctrl Support for Allwinner SoCs"
+	depends on AW_BSP
+	select PINMUX
+	select GENERIC_PINCONF
+	select IRQ_DOMAIN_HIERARCHY
+	select GPIOLIB
+	default y
+
+config AW_PINCTRL_DEBUGFS
+	tristate "Pinctrl Debugfs Driver"
+	depends on AW_PINCTRL && DEBUG_FS
+	default n
+
+config AW_PINCTRL_SUN8IW11
+	tristate "SUN8IW11 PIO"
+	depends on AW_PINCTRL
+	default ARCH_SUN8IW11
+
+config AW_PINCTRL_SUN8IW18
+	tristate "SUN8IW18 PIO"
+	depends on AW_PINCTRL
+	default ARCH_SUN8IW18
+
+config AW_PINCTRL_SUN8IW15P1
+	tristate "SUN8IW15P1 PIO"
+	depends on AW_PINCTRL
+	default ARCH_SUN8IW15
+
+config AW_PINCTRL_SUN8IW15P1_R
+	tristate "SUN8IW15P1 R_PIO"
+	depends on AW_PINCTRL
+	default ARCH_SUN8IW15
+
+config AW_PINCTRL_SUN8IW20
+	tristate "SUN8IW20 PIO"
+	depends on AW_PINCTRL
+	default ARCH_SUN8IW20 || ARCH_SUN20IW1
+
+config AW_PINCTRL_SUN8IW21
+	tristate "SUN8IW21 PIO"
+	depends on AW_PINCTRL
+	default ARCH_SUN8IW21
+
+config AW_PINCTRL_SUN50IW9
+	tristate "SUN50IW9 PIO"
+	depends on AW_PINCTRL
+	default ARCH_SUN50IW9
+
+config AW_PINCTRL_SUN50IW9_R
+	tristate "SUN50IW9 R_PIO"
+	depends on AW_PINCTRL
+	default ARCH_SUN50IW9
+
+config AW_PINCTRL_SUN50IW10P1
+	tristate "SUN50IW10P1 PIO"
+	depends on AW_PINCTRL
+	default ARCH_SUN50IW10
+
+config AW_PINCTRL_SUN50IW10P1_R
+	tristate "SUN50IW10P1 R_PIO"
+	depends on AW_PINCTRL
+	default ARCH_SUN50IW10
+
+config AW_PINCTRL_SUN50IW12
+	tristate "SUN50IW12 PIO"
+	depends on AW_PINCTRL
+	default ARCH_SUN50IW12
+
+config AW_PINCTRL_SUN50IW12_R
+	tristate "SUN50IW12 R_PIO"
+	depends on AW_PINCTRL
+	default ARCH_SUN50IW12
+
+config AW_PINCTRL_SUN55IW3
+	tristate "SUN55IW3 PIO"
+	depends on AW_PINCTRL
+	default ARCH_SUN55IW3
+
+config AW_PINCTRL_SUN55IW3_R
+	tristate "SUN55IW3 R_PIO"
+	depends on AW_PINCTRL
+	default ARCH_SUN55IW3
+
+config AW_PINCTRL_SUN55IW5
+	tristate "SUN55IW5 PIO"
+	depends on AW_PINCTRL
+	default ARCH_SUN55IW5
+
+config AW_PINCTRL_SUN55IW6
+	tristate "SUN55IW6 PIO"
+	depends on AW_PINCTRL
+	default ARCH_SUN55IW6
+
+config AW_PINCTRL_SUN60IW1
+	tristate "SUN60IW1 PIO"
+	depends on AW_PINCTRL
+	default ARCH_SUN60IW1
+
+config AW_PINCTRL_SUN60IW2
+	tristate "SUN60IW2 PIO"
+	depends on AW_PINCTRL
+	default ARCH_SUN60IW2
+
+config AW_PINCTRL_SUN60IW2_R
+	tristate "SUN60IW2 R_PIO"
+	depends on AW_PINCTRL
+	default ARCH_SUN60IW2
+
+config AW_PINCTRL_SUN20IW5
+	tristate "SUN20IW5 PIO"
+	depends on AW_PINCTRL
+	default ARCH_SUN20IW5
+
+config AW_PINCTRL_SUN65IW1
+	tristate "SUN65IW1 PIO"
+	depends on AW_PINCTRL
+	default ARCH_SUN65IW1
+
+config AW_PINCTRL_AXP22X
+	tristate "X-Powers AXP221s/223 PMIC pinctrl and GPIO Support"
+	depends on AW_PINCTRL
+	depends on AW_MFD_AXP2101
+	help
+	  AXP PMICs provides multiple GPIOs that can be muxed for different
+	  functions. This driver bundles a pinctrl driver to select the function
+	  muxing and a GPIO driver to handle the GPIO when the GPIO function is
+	  selected.
+	  Say yes to enable pinctrl and GPIO support for the AXP221s/223 PMIC
+
+config AW_PINCTRL_LEDS
+        tristate "Support GPIO leds for sunxi socs"
+	help
+	  This enables support for GPIO LEDs on Allwinner SoCs.
+
+config AW_PINCTRL_DYNAMIC_DEBUG
+	bool "Enable pinctrl dynamic debug"
+	depends on AW_PINCTRL
+	default y
+	help
+	  Enable pinctrl dynamic debug
+
+endmenu

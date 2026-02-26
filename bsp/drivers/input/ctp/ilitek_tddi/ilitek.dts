@@ -1,0 +1,19 @@
+&twi0 {
+	ilitek {
+		compatible = "tchip,ilitek";
+		reg = <0x41>;
+		status = "okay";
+		touch,irq-gpio = <&pio PH 9 GPIO_ACTIVE_LOW>;
+		touch,reset-gpio = <&pio PH 10 GPIO_ACTIVE_LOW>;
+		vcc-supply = <&reg_cldo2>;
+	};
+};
+
+lcd:
+	lcd_dclk_freq       = <79>;
+	lcd_hbp             = <16>;
+	lcd_ht              = <840>;
+	lcd_hspw            = <8>;
+	lcd_vbp             = <66>;
+	lcd_vt              = <1566>;
+	lcd_vspw            = <10>;

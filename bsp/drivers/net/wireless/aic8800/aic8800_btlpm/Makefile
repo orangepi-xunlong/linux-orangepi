@@ -1,0 +1,1 @@
+obj-$(CONFIG_AIC8800_BTLPM_SUPPORT) := aic8800_btlpm.o

@@ -1,0 +1,108 @@
+menuconfig AW_MTD_SPINAND
+	tristate "Allwinner MTD SPINAND Device Support"
+	depends on AW_MTD
+	depends on ARCH_SUNXI
+	select AW_SPINAND_PHYSICAL_LAYER
+	select AW_SPINAND_SECURE_STORAGE
+	select MTD
+	select MTD_UBI
+	select AW_SID
+	help
+	  Enables support for SPINAND Flash chips on Allwinner SoCs.
+	  It's different with Allwinner's privately nand driver that it use
+	  ubi system rather than Allwinner's NFTL.
+
+if AW_MTD_SPINAND
+
+config AW_SPINAND_PHYSICAL_LAYER
+	bool
+	help
+	  Enable support for Allwinner's physical layer for spinand.
+	  It's a command physical layer, used by both AW-nand with nftl and
+	  MTD-nand with ubi.
+
+config AW_SPINAND_SECURE_STORAGE
+	bool
+	help
+	  Enable secure storage for Allwinner's spinand.
+
+	  If unsure, say no.
+
+config AW_SPINAND_PSTORE_MTD_PART
+	bool "create pstore mtd partition for aw ubi spinand"
+	depends on AW_MTD_SPINAND
+	select AW_MTD_PSTORE
+	help
+	  Whether create pstore mtd partition, which is need by pstroe-blk.
+	  If you want linux kernel dump log to spinand when oops/panic, you
+	  should create pstreo mtd partition by this configure.
+
+	  If unsure, say no.
+
+config AW_SPINAND_PSTORE_PANIC_WRITE
+	bool "support pstore panic write message"
+	depends on AW_SPINAND_PSTORE_MTD_PART
+	select SPI_SUNXI_ATOMIC_XFER
+	help
+	  In order to ensure that the data is written down in panic context when
+	  use mtdpstore. This need spi controller driver support by select
+	  SPI_SUNXI_ATOMIC_XFER.
+
+	  If unsure, say Y.
+
+config AW_SPINAND_ENABLE_PHY_CRC16
+	bool "check crc16 for each page on spinand physical layer"
+	depends on AW_SPINAND_PHYSICAL_LAYER
+	help
+	  It is experimental.
+	  To check crc16 for each page on spinand physical layer.
+
+	  If unsure, say no.
+
+config AW_SPINAND_SIMULATE_MULTIPLANE
+	bool "enable simulate multiplane"
+	depends on AW_SPINAND_PHYSICAL_LAYER
+	default y
+	help
+	  spinand do not support multiplane. In order to adapt to aw nand
+	  we simulate multiplane. If set, the common physical layer should
+	  merge two continuous physical block to 'super block' for logical
+	  layer.
+
+	  Merge pages in two adjacent blocks with the same page num to super
+	  page. Merge adjacent blocks to super block.
+
+	  *   phy-block0   phy-block1    = super block 0
+	  * |------------|------------|
+	  * | phy-page 0 | phy-page 0 |  = super page 0 on super block 0
+	  * | phy-page 1 | phy-page 1 |  = super page 1 on super block 0
+	  * |     ...    |     ...    |
+	  * |------------|------------|
+
+	  If unsure, say Y.
+
+config AW_MTD_SPINAND_OOB_RAW_SPARE
+	bool "support mtd read oob raw spare data"
+	depends on AW_MTD_SPINAND
+	default n
+	help
+		aw spinand do not support read raw spare data by default, say yes to
+		support mtd read oob raw spare data.
+
+		if enable AW_MTD_SPINAND_OOB_RAW_SPARE, the oob is equivalent to spare area,
+		otherwise oob is the user data spare area in ecc protected.
+
+config AW_MTD_SPINAND_FASTBOOT
+	bool "support fastboot"
+	depends on AW_MTD_SPINAND
+	default n
+	help
+		boot0 to load kernel and jump kernel
+
+config BIMAGE_SIZE
+	int "bimage size"
+	depends on AW_MTD_SPINAND_FASTBOOT
+	default 20
+	help
+		unit is MiByte, it serves as the size of the boot partition
+endif

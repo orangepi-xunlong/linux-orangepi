@@ -1,0 +1,51 @@
+config AIC_WLAN_SUPPORT
+	bool "AIC wireless Support"
+	default n
+	help
+	  This is support for aic wireless chip.
+
+choice
+	prompt "Enable Chip Interface"
+	depends on AIC_WLAN_SUPPORT
+	help
+		Enable Chip Interface.
+config AIC_INTF_SDIO
+		bool "SDIO interface support"
+		depends on AIC_WLAN_SUPPORT && MMC
+config AIC_INTF_USB
+		bool "USB interface support"
+		depends on AIC_WLAN_SUPPORT && USB
+endchoice
+
+choice
+	prompt "Choice host wake IRQ type"
+	default AIC_IRQ_ACTIVE_UNSET
+	help
+		Choice host wake IRQ type.
+config AIC_IRQ_ACTIVE_UNSET
+		bool "UNSET IRQ type use default config"
+config AIC_IRQ_ACTIVE_HIGH
+		bool "host wake High level trigger"
+config AIC_IRQ_ACTIVE_RISING
+		bool "host wake RISING trigger"
+config AIC_IRQ_ACTIVE_LOW
+		bool "host wake Low level trigger"
+config AIC_IRQ_ACTIVE_FALLING
+		bool "host wake FALLING trigger"
+endchoice
+
+config USB_MSG_EP
+	bool "Enable usb message endpoint"
+	default y if AIC_INTF_USB
+	depends on AIC_INTF_USB
+	help
+	  This would enable usb message endpoint
+
+if AIC_WLAN_SUPPORT
+source "bsp/drivers/net/wireless/aic8800/aic8800_fdrv/Kconfig"
+source "bsp/drivers/net/wireless/aic8800/aic8800_btlpm/Kconfig"
+endif
+
+if AIC_INTF_USB
+source "bsp/drivers/net/wireless/aic8800/aic8800_btusb/Kconfig"
+endif

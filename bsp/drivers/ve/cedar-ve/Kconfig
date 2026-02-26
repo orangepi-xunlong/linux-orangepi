@@ -1,0 +1,32 @@
+# SPDX-License-Identifier: GPL-2.0
+
+config AW_VIDEO_ENCODER_DECODER
+	tristate "sunxi video encoder and decoder support"
+	select DMA_SHARED_BUFFER
+	default y
+	help
+	  This is the driver for sunxi video decoder, including h264/
+	  mpeg4/mpeg2/vc1/rmvb.
+	  To compile this driver as a module, choose M here: the
+	  module will be called cedar_dev.
+
+config AW_VIDEO_KERNEL_ENC
+	depends on (AW_VIDEO_ENCODER_DECODER)
+	bool "sunxi video enc kernel module"
+	default n
+	help
+	  Choose Y to enable sunxi video enc kernel module
+
+config AW_VIDEO_KERNEL_DEC
+	depends on (AW_VIDEO_ENCODER_DECODER)
+	bool "sunxi video dec kernel module"
+	default n
+	help
+	  Choose Y to enable sunxi video dec kernel module
+
+config AW_VIDEO_DYNAMIC_DEBUG
+	bool "Enable video dynamic debug"
+	depends on AW_VIDEO_ENCODER_DECODER
+	default y
+	help
+	  Enable video dynamic debug

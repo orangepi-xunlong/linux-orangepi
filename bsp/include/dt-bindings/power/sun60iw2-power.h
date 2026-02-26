@@ -1,0 +1,17 @@
+/* SPDX-License-Identifier: GPL-2.0 */
+#ifndef __DT_BINDINGS_POWER_SUN60IW2_H__
+#define __DT_BINDINGS_POWER_SUN60IW2_H__
+
+#define SUN60IW2_PCK_VI			0
+#define SUN60IW2_PCK_DE_SYS		1
+#define SUN60IW2_PCK_VE_DEC		2
+#define SUN60IW2_PCK_VE_ENC		3
+#define SUN60IW2_PCK_NPU		4
+#define SUN60IW2_PCK_GPU_TOP		5
+#define SUN60IW2_PCK_GPU_CORE		6
+#define SUN60IW2_PCK_PCIE		7
+#define SUN60IW2_PCK_USB2		8
+#define SUN60IW2_PCK_VO			9
+#define SUN60IW2_PCK_VO1		10
+
+#endif

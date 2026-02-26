@@ -1,0 +1,19 @@
+# SPDX-License-Identifier: GPL-2.0-only
+#
+# LEDC drivers configuration
+#
+
+menu "LED Drivers"
+	depends on AW_BSP
+
+config AW_LEDC
+        tristate "LEDC Support for Allwinner SoCs"
+	depends on AW_DMA
+	select NEW_LEDS
+	select LEDS_CLASS
+	select LEDS_TRIGGERS
+	select LEDS_TRIGGER_TIMER
+	help
+	  This enables support for LED Controller on Allwinner SoCs.
+
+endmenu

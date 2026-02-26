@@ -1,0 +1,18 @@
+# SPDX-License-Identifier: GPL-2.0
+
+menu "Misc Devices Drivers"
+
+config SUNXI_DIRECT_GPIO
+	tristate "Sunxi direct gpio support"
+	help
+	  This driver provides a set of interfaces for direct control of gpio,
+	  including setting input/output, pull-up/pull-down, drive capability and
+	  other interfaces (mainly used for control of box lights, buzzers, etc.)
+
+source "bsp/drivers/misc/sunxi-rf/Kconfig"
+source "bsp/drivers/misc/sunxi-addr/Kconfig"
+source "bsp/drivers/misc/sunxi-bootevent/Kconfig"
+source "bsp/drivers/misc/sunxi-tvutils/Kconfig"
+source "bsp/drivers/misc/leds/Kconfig"
+
+endmenu

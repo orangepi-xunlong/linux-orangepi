@@ -1,0 +1,21 @@
+# SPDX-License-Identifier: GPL-2.0-only
+
+menu "SECURE STORAGE Drivers"
+	depends on AW_BSP
+
+config AW_SECURE_STORAGE
+	tristate "secure storage"
+	default n
+	help
+	  say Y here to support secure storage node for used by user
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called sunxi_storage.
+
+config AW_SECURE_STORAGE_BY_CHAR_DEVICE
+	tristate "secure storage by char device"
+	default n
+	depends on AW_SECURE_STORAGE
+	help
+	  say Y here to support secure storage write/read by char device
+endmenu

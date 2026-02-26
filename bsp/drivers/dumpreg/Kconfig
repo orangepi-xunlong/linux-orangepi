@@ -1,0 +1,15 @@
+# SPDX-License-Identifier: GPL-2.0-only
+
+menu "Dump-Reg Drivers"
+	depends on AW_BSP
+
+config AW_DUMP_REG
+	tristate "Dump-Reg Support for Allwinner SoCs"
+	depends on AW_BSP
+	default y
+	help
+	  Say y here if you want to support sunxi dump-reg module.
+	  The dump-reg module is used to dump registers of any device.
+	  When in doubt, say "Y".
+
+endmenu

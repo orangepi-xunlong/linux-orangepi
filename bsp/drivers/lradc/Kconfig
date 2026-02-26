@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: GPL-2.0-only
+#
+# LRADC drivers configuration
+#
+
+menu "Low Rate ADC Drivers"
+	depends on AW_BSP
+
+
+config AW_LRADC
+	tristate "Keyboard Support for Allwinner SoCs"
+	select INPUT_EVDEV
+	help
+	  Say Y here to enable the ADC keyboard, support 7 keys at most.
+
+endmenu

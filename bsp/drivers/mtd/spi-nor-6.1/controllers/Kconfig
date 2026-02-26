@@ -1,0 +1,6 @@
+# SPDX-License-Identifier: GPL-2.0-only
+config SPIF_SUNXI
+	tristate "SUNXI SPIF Controller"
+	depends on AW_BSP && OF
+	help
+	  Allwinner SOC SPIF controller, present on SUNXI chips.

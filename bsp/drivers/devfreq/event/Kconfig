@@ -1,0 +1,23 @@
+# SPDX-License-Identifier: GPL-2.0-only
+#
+# Devfreq device configuration
+#
+
+menu "Devfreq Device Event Drivers"
+	depends on AW_BSP
+
+config AW_EVENT_DFI
+	tristate "ALLWINNER DFI DEVFREQ event Driver"
+	default ARCH_SUN50IW10
+	help
+	  This add the devfreq-event driver for Allwinner SoC. It provides DFI
+	  (DDR Monitor Module) driver to count ddr load.
+
+config AW_EVENT_DDR
+	tristate "ALLWINNER DDR DEVFREQ event Driver"
+	default ARCH_SUN55IW3
+	help
+	  This add the devfreq-event driver for Allwinner SoC. It provides DDR
+	  (DDR Monitor Module) driver to count ddr load.
+
+endmenu

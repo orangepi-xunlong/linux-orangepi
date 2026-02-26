@@ -1,0 +1,9 @@
+config SENSOR_STK3X1X
+    tristate "stl3x1x Light driver support"
+    depends on I2C
+    default n
+    help
+        This driver implements light device driver.
+        It communicates with a back-end in another domain.
+        To compile this driver as a module, choose M here: the
+            module will be called xen-kbdfront.

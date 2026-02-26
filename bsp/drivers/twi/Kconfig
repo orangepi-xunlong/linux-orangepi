@@ -1,0 +1,31 @@
+# SPDX-License-Identifier: GPL-2.0-only
+#
+# TWI drivers configuration
+#
+menu "TWI Drivers"
+	depends on AW_BSP
+
+config AW_TWI
+	tristate "I2C Support for Allwinner SoCs"
+	depends on AW_DMA
+	select HAS_IOMEM
+	select I2C
+	select I2C_CHARDEV
+	help
+	  If you say yes to this option, support will be included for the
+	  TWI interface from Allwinner SoCs.
+
+config AW_TWI_DELAYINIT
+	bool "SUNXI TWI hardware init delay"
+	depends on AW_TWI
+	help
+	  If you need to use twi in the heterogeneous core first and then
+	  notify twi in linux to obtain hardware resources, you can say yes
+	  to this option, twi hardware resource init will be delayed.
+
+config AW_TWI_DYNAMIC_DEBUG
+	bool "SUNXI TWI DYNAMIC DEBUG"
+	depends on AW_TWI
+	help
+	  If you need to print twi information, you can say yes to this option.
+endmenu

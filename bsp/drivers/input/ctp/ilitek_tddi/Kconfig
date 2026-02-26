@@ -1,0 +1,28 @@
+#
+#  Touchscreen driver configuration
+#
+config  TOUCHSCREEN_ILITEK_TDDI
+	tristate  "ilitek touchscreen driver"
+	help
+	  ilitek incell touchscreen driver
+
+if TOUCHSCREEN_ILITEK_TDDI
+
+choice
+	prompt "ilitek tddi transfer interface"
+	default TOUCHSCREEN_ILITEK_TDDI_I2C_TRANSFER
+	help
+	  This option is used to select which transport interface to use.
+
+config TOUCHSCREEN_ILITEK_TDDI_I2C_TRANSFER
+	bool "i2c"
+	help
+	  Transfer using I2C
+
+config TOUCHSCREEN_ILITEK_TDDI_SPI_TRANSFER
+	bool "spi"
+	help
+	  Transfer using SPI
+
+endchoice
+endif

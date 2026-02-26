@@ -1,0 +1,290 @@
+# SPDX-License-Identifier: GPL-2.0-only
+menu "sensor driver select"
+	depends on AW_VIDEO_SUNXI_VIN
+
+config SENSOR_RN6854M
+	tristate "use rn6854m driver"
+	default n
+
+config SENSOR_NVP6158C
+	tristate "use nvp6158c driver"
+	default n
+
+menu "select nvp6158c mode"
+	depends on SENSOR_NVP6158C
+
+choice
+	prompt "select bt656 or bt1120"
+	default BT1120
+config BT1120
+	bool "use bt1120 fmt"
+config BT656
+	bool "use bt656 fmt"
+endchoice
+
+endmenu
+
+config SENSOR_GC02M1B
+	tristate "use gc02m1b driver"
+	default n
+
+config SENSOR_GC02M1
+	tristate "use gc02m1 driver"
+	default n
+
+config SENSOR_GC030A
+	tristate "use gc030a driver"
+	default n
+
+config SENSOR_GC05A2
+	tristate "use gc05a2 driver"
+	default n
+
+config SENSOR_GC2385
+	tristate "use gc2385 driver"
+	default n
+
+config SENSOR_GC5025
+	tristate "use gc5025 driver"
+	default n
+
+config SENSOR_GC6133
+	tristate "use gc6133 driver"
+	default n
+
+config SENSOR_BF30A2
+	tristate "use bf30a2 driver"
+	default n
+
+config SENSOR_IMX278
+	tristate "use imx278 driver"
+	default n
+
+config SENSOR_IMX278_2LANE
+	tristate "use imx278_2lane driver"
+	default n
+
+config SENSOR_IMX386
+	tristate "use imx386 driver"
+	default n
+
+config SENSOR_IMX386_2LANE
+	tristate "use imx386_2lane driver"
+	default n
+
+config SENSOR_OV5640
+	tristate "use ov5640 driver"
+	default n
+
+config SENSOR_OV5648_MIPI
+    tristate "use ov5648_mipi driver"
+    default n
+
+config SENSOR_OV2775
+	tristate "use ov2775 driver"
+	default n
+
+config SENSOR_OV5675
+	tristate "use ov5675 driver"
+	default n
+
+config SENSOR_OV02A10
+	tristate "use ov02a10 driver"
+	default n
+
+config SENSOR_GC2145
+	tristate "use gc2145 driver"
+	default n
+
+config SENSOR_GC0310
+	tristate "use gc0310 driver"
+	default n
+
+config SENSOR_GC2355
+	tristate "use gc2355 driver"
+	default n
+
+config SENSOR_GC5024
+	tristate "use gc5024 driver"
+	default n
+
+config SENSOR_GC5035
+	tristate "use gc5035 driver"
+	default n
+
+config SENSOR_GC2590
+	tristate "use gc2590 driver"
+	default n
+
+config SENSOR_SP5409
+	tristate "use sp5409 driver"
+	default n
+
+config SENSOR_IMX214
+	tristate "use imx214 driver"
+	default n
+
+config SENSOR_IMX219
+	tristate "use imx219 driver"
+	default n
+
+config SENSOR_IMX274_SLVDS
+	tristate "use imx274_slvds driver"
+	default n
+
+config SENSOR_IMX291_DVP
+	tristate "use imx291_dvp driver"
+	default n
+
+config SENSOR_IMX291
+	tristate "use imx291 driver"
+	default n
+
+config SENSOR_IMX317
+	tristate "use imx317 driver"
+	default n
+
+config SENSOR_IMX335
+	tristate "use imx335 driver"
+	default n
+
+config SENSOR_IMX326
+	tristate "use imx326 driver"
+	default n
+
+config SENSOR_IMX477
+	tristate "use imx477 driver"
+	default n
+
+config SENSOR_OV2710
+	tristate "use ov2710 driver"
+	default n
+
+config SENSOR_OV2718
+	tristate "use ov2718 driver"
+	default n
+
+config SENSOR_AR0238
+	tristate "use ar0238 driver"
+	default n
+
+config SENSOR_OV7251
+	tristate "use ov7251 driver"
+	default n
+
+config SENSOR_OV8856
+	tristate "use ov8856 driver"
+	default n
+
+config SENSOR_OV8858_R2A_4LANE
+	tristate "use ov8858_r2a_4lane driver"
+	default n
+
+config SENSOR_OV2680
+	tristate "use ov2680 driver"
+	default n
+
+config SENSOR_S5K3H5XA
+	tristate "use s5k3h5xa driver"
+	default n
+
+config SENSOR_AR0238_HISPI
+	tristate "use ar0238_hispi driver"
+	default n
+
+config SENSOR_NVP6134
+	tristate "use nvp6134 driver"
+	default n
+
+config SENSOR_NVP6324
+	tristate "use nvp6324 driver"
+	default n
+
+config SENSOR_TP9950
+	tristate "use tp9950 driver"
+	default n
+
+config SENSOR_SC2232
+	tristate "use sc2232 driver"
+	default n
+
+config SENSOR_SC035HGS
+	tristate "use sc035hgs driver"
+	default n
+
+config SENSOR_GC02M2
+	tristate "use gc02m2 driver"
+	default n
+
+config SENSOR_C2390A
+	tristate "use c2390a driver"
+	default n
+
+config SENSOR_C2398
+	tristate "use c2398 driver"
+	default n
+
+config SENSOR_C2399
+	tristate "use c2399 driver"
+	default n
+
+config SENSOR_IMX319
+	tristate "use imx319 driver"
+	default n
+
+config SENSOR_S5K5E8
+	tristate "use s5k5e8 driver"
+	default n
+
+config SENSOR_TP9930
+	tristate "use tp9930 driver"
+	default n
+
+config SENSOR_TP2815
+	tristate "use tp2815 driver"
+	default n
+
+config SENSOR_LT7911D
+	tristate "use lt7911d driver"
+
+config SENSOR_OV13850
+	tristate "use ov13850 driver"
+	default n
+
+config SENSOR_LT6911C
+	tristate "use lt6911c driver"
+	default n
+
+config SENSOR_TC358743XBG
+	tristate "use tc358743xbg driver"
+	default n
+
+config SENSOR_RM84_SERDES
+	tristate "use rm84 serdes driver"
+	default n
+
+config SENSOR_THINE244_SERDES
+	tristate "use thine244 serdes driver"
+	default n
+
+config SENSOR_MAX96724_SERDES
+	tristate "use max96724 serdes driver"
+	default n
+
+config SENSOR_TD104
+	tristate "use td104 sensor driver"
+	default n
+
+config SENSOR_RK628F
+	tristate "use rk628f driver"
+	default n
+
+config SENSOR_PTN
+	tristate "use ptn driver"
+	default n
+
+config SENSOR_GSV1127E
+	tristate "use gsv1127e driver"
+	default n
+
+endmenu

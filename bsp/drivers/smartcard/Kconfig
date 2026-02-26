@@ -1,0 +1,14 @@
+# SPDX-License-Identifier: GPL-2.0-only
+#
+# Smart Card Reader(SCR) drivers configuration
+#
+menu "Smart Card Reader Drivers"
+	depends on AW_BSP
+
+config AW_SCR
+	tristate "SCR Support for Allwinner SoCs"
+	default n
+	help
+	  Say Y here to enable the Smart Card Reader driver
+
+endmenu

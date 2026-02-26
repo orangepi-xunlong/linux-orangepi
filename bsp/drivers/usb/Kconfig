@@ -1,0 +1,31 @@
+# SPDX-License-Identifier: GPL-2.0
+#
+# USB configuration
+#
+
+menu "USB Drivers"
+	depends on AW_BSP
+
+if AW_BSP && USB_SUPPORT
+
+source "bsp/drivers/usb/dwc3/Kconfig"
+
+if USB
+
+source "bsp/drivers/usb/host/Kconfig"
+
+endif # USB
+
+source "bsp/drivers/usb/sunxi_usb/Kconfig"
+
+source "bsp/drivers/usb/typec/Kconfig"
+
+source "bsp/drivers/usb/gadget/Kconfig"
+
+source "bsp/drivers/usb/extcon/Kconfig"
+
+source "bsp/drivers/usb/phy/Kconfig"
+
+endif # USB_SUPPORT
+
+endmenu

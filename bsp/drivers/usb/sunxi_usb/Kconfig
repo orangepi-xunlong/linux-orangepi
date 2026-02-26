@@ -1,0 +1,70 @@
+#
+# Allwinner USB2.0 Dual Role Controller Driver.
+#
+
+#---------------------------------------------
+#-
+#- config USB2.0 Dual Role Controller.
+#-
+#---------------------------------------------
+menu "USB Device Drivers"
+	depends on AW_BSP
+
+menuconfig USB_SUNXI_USB
+    tristate "Allwinner USB2.0 Dual Role Controller support"
+    depends on AW_BSP
+    help
+      Allwinner USB2.0 Dual Role Controller
+
+      This option is of interest only to developers who need to
+      develop on AllWinner SoC.
+
+      If unsure, say N.
+
+config USB_SUNXI_USB_MANAGER
+    tristate "Allwinner USB2.0 Manager"
+    depends on USB_SUNXI_USB && USB_SUNXI_UDC0 && USB_SUNXI_HCI
+    help
+      manager all usb controller.
+
+      This option is of interest only to developers who need to
+      develop on AllWinner SoC.
+
+      If unsure, say N.
+
+config USB_SUNXI_USB_DEBUG
+    tristate "Allwinner USB driver debug message"
+    depends on USB_SUNXI_USB
+    help
+      Allwinner USB driver debug message.
+
+      This option is of interest only to developers who need to
+      develop on AllWinner SoC.
+
+      If unsure, say N.
+
+config USB_SUNXI_USB_ADB
+    tristate "Allwinner USB driver use adb source"
+    depends on USB_SUNXI_USB
+    help
+      Allwinner USB driver debug message.
+
+      This option is of interest only to developers who need to
+      develop on AllWinner SoC.
+
+      If unsure, say N.
+
+config USB_SUNXI_UDC0
+	tristate "Allwinner USB Peripheral Controller"
+	depends on USB_GADGET
+	select USB_GADGET_DUALSPEED
+	select USB_GADGET_SELECTED
+	help
+	  Allwinner USB Device Controller.
+
+	  This option is of interest only to developers who need to
+	  develop on AllWinner SoC.
+
+	  If unsure, say N.
+
+endmenu

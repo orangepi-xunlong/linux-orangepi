@@ -1,0 +1,46 @@
+# SPDX-License-Identifier: GPL-2.0-only
+menu "Stmmac Drivers"
+	depends on AW_BSP
+
+config AW_STMMAC_ETH
+	tristate "Allwinner STMMAC driver"
+	depends on OF && (ARCH_SUNXI || COMPILE_TEST)
+	select NETDEVICES
+	select STMMAC_ETH
+	select STMMAC_PLATFORM
+	select AW_DWMAC_SUNXI
+
+	help
+	  Support for Allwinner GMAC-200/GMAC-300 ethernet controllers.
+
+	  This selects Allwinner SoC glue layer support for the
+	  stmmac device driver. This driver is used for
+	  GMAC-200/GMAC-300 ethernet controller.
+
+if AW_STMMAC_ETH
+config AW_DWMAC_SUNXI
+	tristate "Allwinner STMMAC DWMAC support"
+	depends on OF && (ARCH_SUNXI || COMPILE_TEST)
+	help
+	  Support stmmac device driver for Allwinner GMAC-200/GMAC-300.
+
+config AW_STMMAC_SELFTESTS
+	bool "Support for STMMAC Selftests"
+	depends on AW_STMMAC_ETH
+	select STMMAC_SELFTESTS
+	default n
+	help
+	  This adds support for STMMAC Selftests using ethtool. Enable this
+	  feature if you are facing problems with your HW and submit the test
+	  results to the netdev Mailing List.
+
+config AW_STMMAC_UIO
+	tristate "STMMAC UIO ethernet controller"
+	default n
+	select UIO
+	help
+	  Say M here if you want to use the sunxi-uio.ko for DPDK.
+
+endif
+
+endmenu

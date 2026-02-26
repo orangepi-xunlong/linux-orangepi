@@ -1,0 +1,11 @@
+# SPDX-License-Identifier: GPL-2.0-only
+config AW_CCU_LEGACY
+	tristate "Legacy Clock Support for Allwinner SoCs"
+	depends on AW_BSP
+	default n
+	select RESET_CONTROLLER
+
+config AW_SUN8IW21_CCU_LEGACY
+	tristate "SUN8IW21 LEGACY CCU"
+	default ARCH_SUN8IW21
+	depends on AW_CCU_LEGACY

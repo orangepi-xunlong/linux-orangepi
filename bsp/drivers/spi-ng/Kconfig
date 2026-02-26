@@ -1,0 +1,55 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+
+menu "SPI NG Drivers"
+	depends on AW_BSP
+
+config AW_SPI_NG
+	tristate "SPI NG Driver Support for Allwinner SoCs"
+	depends on OF && (ARCH_SUNXI || ARCH_RV32I || COMPILE_TEST)
+	default n
+	select SPI
+	help
+	  Enable SPI Next Generation Driver Support for Allwinner SoCs.
+
+config AW_SPI_NG_BIT
+	bool "Support driver bit-aligned feature"
+	depends on AW_SPI_NG
+	default y
+
+config AW_SPI_NG_DBI
+	bool "Support driver dbi feature"
+	depends on AW_SPI_NG
+	default y
+
+config AW_SPI_NG_CAMERA
+	bool "Support driver camera feature"
+	depends on AW_SPI_NG
+	default y
+
+config AW_SPI_NG_ATOMIC_XFER
+	bool "Support atomic xfer function"
+	depends on AW_SPI_NG
+	default n
+	help
+	  Enable SPI controller atomic xfer function, support transfer under
+	  no-irq/no-dma/no-schedule/no-suspend-resume env. (Such as kernel panic)
+
+if AW_SPI_NG
+config AW_SPI_SLAVETEST
+	tristate "SPI Slave Test Driver"
+	default n
+	select SPI_SLAVE
+	help
+	  Enable SPI Slave Test Driver.
+
+config AW_SPI_CAMERATEST
+	tristate "SPI Camera Test Driver"
+	depends on AW_SPI_NG_CAMERA
+	default n
+	select SPI_SLAVE
+	help
+	  Enable SPI Camera Test Driver.
+endif
+
+endmenu
+

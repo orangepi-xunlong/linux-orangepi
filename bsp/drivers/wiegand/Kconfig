@@ -1,0 +1,15 @@
+# SPDX-License-Identifier: GPL-2.0-only
+#
+# WIEGAND drivers configuration
+#
+menu "Wiegand Drivers"
+	depends on AW_BSP
+
+config SUNXI_WIEGAND
+	tristate "allwinnertech Wiegand driver"
+	select INPUT_EVDEV
+	default n
+	help
+	  Choose Y to enable wiegand driver
+
+endmenu
