@@ -1,0 +1,69 @@
+/dts-v1/;
+/plugin/;
+
+/ {
+	fragment@0 {
+		target = <&dsi1combophy>;
+
+		__overlay__ {
+			status = "okay";
+		};
+	};
+	fragment@1 {
+		target = <&dsi1>;
+
+		__overlay__ {
+			status = "okay";
+		};
+	};
+	fragment@2 {
+		target = <&dlcd1>;
+
+		__overlay__ {
+			status = "okay";
+		};
+	};
+	fragment@3 {
+		target = <&panel>;
+
+		__overlay__ {
+			status = "okay";
+		};
+	};
+	fragment@4 {
+		target = <&ctp>;
+
+		__overlay__ {
+			status = "okay";
+		};
+	};
+	fragment@5 {
+		target = <&backlight0>;
+
+		__overlay__ {
+			status = "okay";
+		};
+	};
+	fragment@6 {
+		target = <&panel_0>;
+
+		__overlay__ {
+			status = "okay";
+		};
+	};
+	//fragment@7 {
+	//	target = <&hdmi>;
+
+	//	__overlay__ {
+	//		status = "disabled";
+	//	};
+	//};
+	//fragment@8 {
+	//	target = <&hdmi_codec>;
+
+	//	__overlay__ {
+	//		status = "disabled";
+	//	};
+	//};
+};
+

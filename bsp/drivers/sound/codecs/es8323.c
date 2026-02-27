@@ -966,8 +966,7 @@ static void es8389_i2c_shutdown(struct i2c_client *i2c)
 	regmap_write(es8389->regmap, ES8389_PULL_DOWN_REGF2, 0x00); 
 }
 
-static int es8389_i2c_probe(struct i2c_client *i2c_client,
-		const struct i2c_device_id *id)
+static int es8389_i2c_probe(struct i2c_client *i2c_client)
 {
 	struct es8389_private *es8389;
 	int ret = -1;

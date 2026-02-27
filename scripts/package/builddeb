@@ -160,8 +160,8 @@ fi
 # path instead
 case $ARCH in
 aarch64|arm64|riscv)
-	image_name=Image
-	installed_image_path="boot/vmlinuz-$version"
+	image_name=uImage
+	installed_image_path="boot/vmlinux-$version"
 
 	;;
 arm*)
@@ -280,7 +280,12 @@ done
 ##
 sed -e "s/exit 0//g" -i $tmpdir/DEBIAN/postinst
 cat >> $tmpdir/DEBIAN/postinst <<EOT
-ln -sf $(basename $installed_image_path) /boot/$image_name 2> /dev/null || cp /$installed_image_path /boot/$image_name
+mkimage -A arm -O linux -T kernel -C none -a "0x41000000" -e "0x41000000" -n "Linux kernel" -d /$installed_image_path /boot/uImage  > /dev/null 2>&1
+#cp /boot/uImage /tmp/uImage
+#sync
+#mountpoint -q /boot || mount /boot
+#cp /tmp/uImage /boot/uImage
+#rm -f /$installed_image_path
 touch /boot/.next
 exit 0
 EOT
@@ -340,7 +345,6 @@ ln -sf "/usr/src/linux-headers-$version" "$kernel_headers_dir/lib/modules/$versi
 rm -f "$objtree/debian/hdrsrcfiles" "$objtree/debian/hdrobjfiles"
 
 if [ "$ARCH" != "um" ]; then
-	echo "start ........................................."
 	create_package "$kernel_headers_packagename" "$kernel_headers_dir" "headers"
 	create_package "$dtb_packagename" "$dtb_dir" "dtb"
 fi
