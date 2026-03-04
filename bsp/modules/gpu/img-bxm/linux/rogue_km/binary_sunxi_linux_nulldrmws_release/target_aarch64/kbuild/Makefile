@@ -1,4 +1,5 @@
 ########################################################################### ###
+#@Title         Root kernel makefile
 #@Copyright     Copyright (c) Imagination Technologies Ltd. All Rights Reserved
 #@License       Dual MIT/GPLv2
 #
@@ -38,74 +39,65 @@
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ### ###########################################################################
 
-# Google removed GCC from Android R prebuilts. Use clang for kbuild.
-# Using set of LLVM tools by default. But they could be commented out
-# depending on platforms.
-#
+# This top-level kbuild makefile builds all the Linux kernel modules in the
+# DDK. To run kbuild, this makefile is copied to $(TARGET_PRIMARY_OUT)/kbuild/Makefile
+# and make is invoked in $(TARGET_PRIMARY_OUT)/kbuild.
 
-ifneq ($(ANDROID_CLANG_PATH),)
-export USE_CLANG:=1
-KERNEL_CC := $(ANDROID_CLANG_PATH)/clang
-KERNEL_LD := $(ANDROID_CLANG_PATH)/ld.lld
-KERNEL_NM := $(ANDROID_CLANG_PATH)/llvm-nm
-KERNEL_OBJCOPY := $(ANDROID_CLANG_PATH)/llvm-objcopy
+# This makefile doesn't define any kbuild special variables apart from
+# ccflags-y and obj-m. The variables for objects are picked up by including
+# the kbuild makefile fragments named in $(INTERNAL_KBUILD_MAKEFILES). The
+# list of objects that these fragments make is collected in
+# $(INTERNAL_KBUILD_OBJECTS) and $(INTERNAL_EXTRA_KBUILD_OBJECTS). These
+# variables are set according to the build's $(KERNEL_COMPONENTS) and
+# $(EXTRA_PVRSRVKM_COMPONENTS). To add a new kernel module to the build, edit
+# these variables in the per-build Makefile.
 
-export HOST_CC:=/usr/bin/clang
-export HOST_CXX:=/usr/bin/clang++
-else
-export USE_CLANG:=0
+include $(OUT)/config_kernel.mk
 
-KERNEL_CC := $(LICHEE_TOOLCHAIN_PATH)/$(LICHEE_CROSS_COMPILER)gcc
-KERNEL_LD := $(LICHEE_TOOLCHAIN_PATH)/$(LICHEE_CROSS_COMPILER)ld
-KERNEL_NM := $(LICHEE_TOOLCHAIN_PATH)/$(LICHEE_CROSS_COMPILER)gcc-nm
-KERNEL_OBJCOPY := $(LICHEE_TOOLCHAIN_PATH)/$(LICHEE_CROSS_COMPILER)objcopy
+.SECONDARY:
 
-export HOST_CC:=/usr/bin/gcc
-export HOST_CXX:=/usr/bin/g++
+define symlink-source-file
+@if [ ! -e $(dir $@) ]; then mkdir -p $(dir $@); fi
+@if [ ! -h $@ ]; then ln -sf $< $@; fi
+endef
 
+bridge_base := $(BRIDGE_SOURCE_ROOT)
+
+$(OUT)/$(TARGET_PRIMARY_ARCH)/kbuild/%.c: $(TOP)/%.c
+	$(symlink-source-file)
+
+$(OUT)/$(TARGET_PRIMARY_ARCH)/kbuild/generated/$(PVR_ARCH)/%.c: $(bridge_base)/%.c
+	$(symlink-source-file)
+
+$(OUT)/$(TARGET_PRIMARY_ARCH)/kbuild/external/%.c: $(abspath $(srctree))/%.c
+	$(symlink-source-file)
+
+ccflags-y += -D__linux__ -include $(OUT)/config_kernel.h \
+ -I$(OUT)/include
+
+ifeq ($(DEFINE_X86_FEATURE_LA57),1)
+ ccflags-$(CONFIG_X86) += -include $(srctree)/arch/x86/include/asm/cpufeatures.h
 endif
 
-WINDOW_SYSTEM := nulldrmws
-RGX_BVNC := 36.56.104.183
-SUPPORT_DMA_FENCE := 1
+include $(INTERNAL_KBUILD_MAKEFILES)
 
-BUILD := $(GPU_BUILD_TYPE)
+define add-file-cflags
+CFLAGS_$(notdir $(1)) := $(CFLAGS_$(1))
+endef
 
-include ../config/preconfig.mk
-include ../config/window_system.mk
+# Define old style CFLAG_ variables for kernels older than 5.4
+$(foreach _m,$(INTERNAL_KBUILD_OBJECTS:.o=-y), \
+ $(foreach _f,$($(_m)), \
+  $(if $(CFLAGS_$(_f)), \
+   $(eval $(call add-file-cflags,$(_f))))))
 
-
-ifeq ($(ARCH_SUPPORTS_INT128), y)
-DEVICE_MEMSETCPY_ALIGN_IN_BYTES := 16
-else
-DEVICE_MEMSETCPY_ALIGN_IN_BYTES := 8
+ifneq ($(KERNEL_DRIVER_DIR),)
+ ccflags-y += \
+   -I$(abspath $(srctree))/$(KERNEL_DRIVER_DIR)/$(PVR_SYSTEM) \
+   -I$(abspath $(srctree))/$(KERNEL_DRIVER_DIR)
 endif
 
-PVR_SYSTEM := rgx_sunxi
+$(if $($(PVRSRV_MODNAME)-y),,$(warning $(PVRSRV_MODNAME)-y was empty, which could mean that srvkm is missing from $$(KERNEL_COMPONENTS)))
+$(PVRSRV_MODNAME)-y += $(foreach _m,$(INTERNAL_EXTRA_KBUILD_OBJECTS:.o=),$($(_m)-y))
 
-KERNEL_COMPONENTS := srvkm
-
-#DISPLAY_CONTROLLER := dc_sunxi
-#KERNEL_COMPONENTS += $(DISPLAY_CONTROLLER)
-
-NO_HARDWARE := 0
-HWR_DEFAULT_ENABLED := 1
-
-
-RGX_FW_SIGNED := 0
-CACHEFLUSH_NO_KMRBF_USING_UMVA := 1
-
-PVR_LDM_PLATFORM_PRE_REGISTERED := 1
-
-PVRSRV_NEED_PVR_DPF := 1
-
-ifeq ($(CONFIG_DEVFREQ_GOV_SIMPLE_ONDEMAND),1)
-SUPPORT_LINUX_DVFS ?= 1
-endif
-
-# Should be last
-include ../config/core.mk
-include ../common/lws.mk
-include ../common/3rdparty.mk
-
-$(eval $(call TunableUserConfigC,SGLTRACE,))
+obj-m += $(INTERNAL_KBUILD_OBJECTS)

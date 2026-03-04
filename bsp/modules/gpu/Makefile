@@ -43,7 +43,8 @@ unexport OUT
 unexport TOP
 
 export KDIR = $(KERNEL_SRC_DIR)
-export KERNELDIR = $(LICHEE_OUT_DIR)/kernel/build
+#export KERNELDIR = $(LICHEE_OUT_DIR)/kernel/build
+export KERNELDIR = $(KERNEL_SRC_DIR)
 
 ifneq ($(KERNEL_OUT_DIR),)
   -include $(KERNEL_OUT_DIR)/.config
