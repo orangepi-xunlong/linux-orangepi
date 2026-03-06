@@ -84,7 +84,7 @@ static ssize_t otg_enable(struct device *dev,
 	}
 	mutex_unlock(&g_usb_cfg.lock);
 
-	return sprintf(buf, "%s\n", "otg_enable finished!");
+	return sysfs_emit(buf, "%s\n", "otg_enable finished!");
 }
 
 static ssize_t device_chose(struct device *dev,
@@ -105,7 +105,7 @@ static ssize_t device_chose(struct device *dev,
 	set_cc_status(POWER_SUPPLY_SCOPE_DEVICE);
 	mutex_unlock(&g_usb_cfg.lock);
 
-	return sprintf(buf, "%s\n", "device_chose finished, otg disabled!");
+	return sysfs_emit(buf, "%s\n", "device_chose finished, otg disabled!");
 }
 
 static ssize_t host_chose(struct device *dev,
@@ -126,7 +126,7 @@ static ssize_t host_chose(struct device *dev,
 	set_cc_status(POWER_SUPPLY_SCOPE_SYSTEM);
 	mutex_unlock(&g_usb_cfg.lock);
 
-	return sprintf(buf, "%s\n", "host_chose finished, otg disabled!");
+	return sysfs_emit(buf, "%s\n", "host_chose finished, otg disabled!");
 }
 
 static ssize_t null_chose(struct device *dev,
@@ -143,7 +143,7 @@ static ssize_t null_chose(struct device *dev,
 	usb_msg_center(&g_usb_cfg);
 	mutex_unlock(&g_usb_cfg.lock);
 
-	return sprintf(buf, "%s\n", "null_chose finished, otg disabled!");
+	return sysfs_emit(buf, "%s\n", "null_chose finished, otg disabled!");
 }
 
 static ssize_t show_otg_role(struct device *dev,
@@ -172,7 +172,7 @@ static ssize_t show_otg_role(struct device *dev,
 		strcpy(buf_role, "unknown");
 	}
 
-	return sprintf(buf, "%s\n", buf_role);
+	return sysfs_emit(buf, "%s\n", buf_role);
 }
 
 static ssize_t set_otg_role(struct device *dev,
@@ -226,7 +226,7 @@ static struct device_attribute chose_attrs[] = {
 static ssize_t show_otg_hw_scan_debug(struct device *dev,
 		struct device_attribute *attr, char *buf)
 {
-	return sprintf(buf, "%d\n", usb_hw_scan_debug);
+	return sysfs_emit(buf, "%d\n", usb_hw_scan_debug);
 }
 
 static ssize_t otg_hw_scan_debug(struct device *dev,
