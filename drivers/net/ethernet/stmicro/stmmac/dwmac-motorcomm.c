@@ -6,6 +6,7 @@
  */
 
 #include <linux/bits.h>
+#include <linux/delay.h>
 #include <linux/dev_printk.h>
 #include <linux/io.h>
 #include <linux/iopoll.h>
@@ -70,9 +71,9 @@ static int motorcomm_efuse_read_byte(struct dwmac_motorcomm_priv *priv,
 	       FIELD_PREP(EFUSE_OP_ADDR, offset)		|
 	       EFUSE_OP_START, priv->base + EFUSE_OP_CTRL_0);
 
-	ret = readl_poll_timeout(priv->base + EFUSE_OP_CTRL_1,
-				 reg, reg & EFUSE_OP_DONE, 2000,
-				 EFUSE_READ_TIMEOUT_US);
+	ret = readl_poll_timeout_atomic(priv->base + EFUSE_OP_CTRL_1,
+					reg, reg & EFUSE_OP_DONE, 2,
+					EFUSE_READ_TIMEOUT_US);
 
 	*byte = FIELD_GET(EFUSE_OP_RD_DATA, reg);
 
@@ -348,6 +349,20 @@ static int motorcomm_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 
 	motorcomm_reset(priv);
 
+	/*
+	 * Initialize Motorcomm-specific registers before reading eFuse.
+	 * OOB WOL must be disabled and interrupt moderation configured
+	 * for the eFuse controller to return valid data.
+	 */
+	motorcomm_init(priv);
+
+	/*
+	 * After system reset, the eFuse controller needs time to load
+	 * its internal data. Without this delay, eFuse reads return
+	 * all zeros, causing MAC address detection to fail.
+	 */
+	usleep_range(15000, 20000);
+
 	ret = motorcomm_efuse_read_mac(&pdev->dev, priv, res.mac);
 	if (ret == -ENOENT) {
 		dev_warn(&pdev->dev, "eFuse contains no valid MAC address\n");
@@ -362,8 +377,6 @@ static int motorcomm_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	ret = motorcomm_setup_irq(pdev, &res, plat);
 	if (ret)
 		return dev_err_probe(&pdev->dev, ret, "failed to setup IRQ\n");
-
-	motorcomm_init(priv);
 
 	res.addr = priv->base + GMAC_OFFSET;
 
