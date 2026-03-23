@@ -878,6 +878,16 @@ int es8328_probe(struct device *dev, struct regmap *regmap)
 
 	dev_set_drvdata(dev, es8328);
 
+	if (device_property_read_bool(dev, "everest,mic-lrck-same")) {
+		ret = regmap_update_bits(regmap, ES8328_DACCONTROL21,
+					 ES8328_DACCONTROL21_LD2MO,
+					 ES8328_DACCONTROL21_LD2MO);
+		if (ret < 0) {
+			dev_err(dev, "Failed to set mic-lrck-same: %d\n", ret);
+			return ret;
+		}
+	}
+
 	return devm_snd_soc_register_component(dev,
 			&es8328_component_driver, &es8328_dai, 1);
 }
