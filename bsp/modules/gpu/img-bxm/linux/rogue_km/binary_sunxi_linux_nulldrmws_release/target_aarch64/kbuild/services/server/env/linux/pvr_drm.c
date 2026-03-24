@@ -485,8 +485,20 @@ static void pvr_show_fdinfo(struct seq_file *seq_file, struct file *file)
 	struct pvr_drm_private *priv;
 	int my_pid;
 
-	/* Grab the PID from the associated drm_file->pid->numbers[0].nr */
-	my_pid = dfile->pid->numbers[0].nr;
+	/* Check if driver_priv is valid. It can be NULL when the process
+	 * is exiting or the GPU file is in an abnormal state.
+	 */
+	if (!pvr_connection)
+		return;
+
+	/* Grab the PID from the associated drm_file->pid.
+	 * Use pid_nr() to safely handle NULL pid pointer which can occur
+	 * when the process is exiting or the file is in an abnormal state.
+	 */
+	if (dfile->pid)
+		my_pid = pid_nr(dfile->pid);
+	else
+		my_pid = 0;
 
 	priv = (struct pvr_drm_private *)dev->dev_private;
 
