@@ -4018,3 +4018,11 @@
 		status = "disabled";
 	};
 };
+
+&ufs {
+	vcc-supply = <&reg_dldo6>;
+	vccq-supply = <&reg_dcdc8>;
+	vccq2-supply = <&reg_dcdc8>;
+	status = "okay";
+};
+
