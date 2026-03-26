@@ -209,7 +209,7 @@ motorcomm_default_plat_data(struct pci_dev *pdev)
 	struct plat_stmmacenet_data *plat;
 	struct device *dev = &pdev->dev;
 
-	plat = stmmac_plat_dat_alloc(dev);
+	plat = devm_kzalloc(dev, sizeof(*plat), GFP_KERNEL);
 	if (!plat)
 		return NULL;
 
@@ -233,11 +233,25 @@ motorcomm_default_plat_data(struct pci_dev *pdev)
 	plat->dma_cfg->eame		= true;
 	plat->dma_cfg->mixed_burst	= true;
 
+	plat->force_sf_dma_mode = 1;
+	plat->multicast_filter_bins = 256; /* HASH_TABLE_SIZE is 256 usually */
+	plat->unicast_filter_entries = 1;
+	plat->maxmtu = JUMBO_LEN;
+
+	plat->tx_queues_to_use = 1;
+	plat->rx_queues_to_use = 1;
+
+	plat->tx_queues_cfg[0].use_prio = false;
+	plat->rx_queues_cfg[0].use_prio = false;
+	plat->rx_queues_cfg[0].pkt_route = 0x0;
+
 	plat->axi->axi_wr_osr_lmt	= 1;
 	plat->axi->axi_rd_osr_lmt	= 1;
 	plat->axi->axi_mb		= true;
-	plat->axi->axi_blen_regval	= DMA_AXI_BLEN4 | DMA_AXI_BLEN8 |
-					  DMA_AXI_BLEN16 | DMA_AXI_BLEN32;
+	plat->axi->axi_blen[0]		= 4;
+	plat->axi->axi_blen[1]		= 8;
+	plat->axi->axi_blen[2]		= 16;
+	plat->axi->axi_blen[3]		= 32;
 
 	plat->bus_id		= pci_dev_id(pdev);
 	plat->phy_interface	= PHY_INTERFACE_MODE_GMII;
