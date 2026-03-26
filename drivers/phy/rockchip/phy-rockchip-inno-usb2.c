@@ -1366,6 +1366,21 @@ out:
 	return ret;
 }
 
+static void rockchip_usb2phy_otg_work_cleanup(void *data)
+{
+	struct rockchip_usb2phy_port *rport = data;
+
+	cancel_delayed_work_sync(&rport->otg_sm_work);
+	cancel_delayed_work_sync(&rport->chg_work);
+}
+
+static void rockchip_usb2phy_host_work_cleanup(void *data)
+{
+	struct rockchip_usb2phy_port *rport = data;
+
+	cancel_delayed_work_sync(&rport->sm_work);
+}
+
 static int rockchip_usb2phy_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
@@ -1499,6 +1514,13 @@ static int rockchip_usb2phy_probe(struct platform_device *pdev)
 			if (ret)
 				goto put_child;
 		}
+		ret = devm_add_action_or_reset(dev,
+			of_node_name_eq(child_np, "host-port") ?
+				rockchip_usb2phy_host_work_cleanup :
+				rockchip_usb2phy_otg_work_cleanup,
+			rport);
+		if (ret)
+			goto put_child;
 
 next_child:
 		/* to prevent out of boundary */
