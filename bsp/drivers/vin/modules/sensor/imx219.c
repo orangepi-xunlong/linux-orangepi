@@ -769,7 +769,7 @@ static int sensor_g_mbus_config(struct v4l2_subdev *sd, unsigned int pad,
 {
 	cfg->type = V4L2_MBUS_CSI2_DPHY;
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0)
-	cfg->bus.mipi_csi2.num_data_lanes = 0 | V4L2_MBUS_CSI2_4_LANE | V4L2_MBUS_CSI2_CHANNEL_0;
+	cfg->bus.mipi_csi2.num_data_lanes = 0 | V4L2_MBUS_CSI2_2_LANE | V4L2_MBUS_CSI2_CHANNEL_0;
 #else
 	cfg->flags = 0 | V4L2_MBUS_CSI2_2_LANE | V4L2_MBUS_CSI2_CHANNEL_0;
 #endif
