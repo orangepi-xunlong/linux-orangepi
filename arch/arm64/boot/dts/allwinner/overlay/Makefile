@@ -37,6 +37,7 @@ dtbo-$(CONFIG_ARCH_SUNXI) += \
 	sun60i-a733-i2c2.dtbo \
 	sun60i-a733-i2c3.dtbo \
 	sun60i-a733-lcd.dtbo \
+	sun60i-a733-opizero3w-lcd.dtbo \
 	sun60i-a733-pwm0.dtbo \
 	sun60i-a733-pwm1.dtbo \
 	sun60i-a733-pwm2.dtbo \
