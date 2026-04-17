@@ -1415,7 +1415,6 @@ static int sunxi_spi_dma_transfer(struct spi_device *spi, struct spi_transfer *t
 	unsigned tx_len = t->len;	/* number of bytes receieved */
 	unsigned rx_len = t->len;	/* number of bytes sent */
 
-	msleep(10);
 	switch (sspi->mode_type) {
 	case SINGLE_HALF_DUPLEX_RX:
 	case DUAL_HALF_DUPLEX_RX:
