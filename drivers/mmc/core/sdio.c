@@ -738,8 +738,14 @@ try_again:
 	 * fails to check rocr & R4_18V_PRESENT,  but we still need to
 	 * try to init uhs card. sdio_read_cccr will take over this task
 	 * to make sure which speed mode should work.
+	 *
+	 * If the host already signals at 1.8V there is nothing to switch.
+	 * Some cards still report S18A=1, so guard CMD11 explicitly to avoid
+	 * a redundant voltage switch that can stall the controller. Mirrors
+	 * mmc_sd_init_card().
 	 */
-	if (rocr & ocr & R4_18V_PRESENT) {
+	if ((rocr & ocr & R4_18V_PRESENT) &&
+	    host->ios.signal_voltage != MMC_SIGNAL_VOLTAGE_180) {
 		err = mmc_set_uhs_voltage(host, ocr_card);
 		if (err == -EAGAIN) {
 			mmc_sdio_pre_init(host, ocr_card, card);
