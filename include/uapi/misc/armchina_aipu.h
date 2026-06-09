@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note */
-/* Copyright (c) 2023-2024 Arm Technology (China) Co. Ltd. */
+/* Copyright (c) 2023-2025 Arm Technology (China) Co. Ltd. */
 
 #ifndef __UAPI_MISC_ARMCHINA_AIPU_H__
 #define __UAPI_MISC_ARMCHINA_AIPU_H__
@@ -40,18 +40,19 @@ enum aipu_arch {
  * @AIPU_ISA_VERSION_ZHOUYI_V2_1: AIPU ISA version is Zhouyi V2 (Z3).
  * @AIPU_ISA_VERSION_ZHOUYI_V2_2: AIPU ISA version is Zhouyi V2 (X1).
  * @AIPU_ISA_VERSION_ZHOUYI_V3:   AIPU ISA version is Zhouyi V3.
- * @AIPU_ISA_VERSION_ZHOUYI_V3_1: AIPU ISA version is Zhouyi V3_1.
+ * @AIPU_ISA_VERSION_ZHOUYI_V3_2: AIPU ISA version is Zhouyi V3_2.
  *
  * Zhouyi architecture has multiple ISA versions released.
  * This enum is used to indicate the ISA version of an AIPU core in the system.
  */
 enum aipu_isa_version {
-	AIPU_ISA_VERSION_ZHOUYI_V1   = 1,
-	AIPU_ISA_VERSION_ZHOUYI_V2_0 = 2,
-	AIPU_ISA_VERSION_ZHOUYI_V2_1 = 3,
-	AIPU_ISA_VERSION_ZHOUYI_V2_2 = 4,
-	AIPU_ISA_VERSION_ZHOUYI_V3   = 5,
-	AIPU_ISA_VERSION_ZHOUYI_V3_1 = 6,
+	AIPU_ISA_VERSION_ZHOUYI_V1	= 1,
+	AIPU_ISA_VERSION_ZHOUYI_V2_0	= 2,
+	AIPU_ISA_VERSION_ZHOUYI_V2_1	= 3,
+	AIPU_ISA_VERSION_ZHOUYI_V2_2	= 4,
+	AIPU_ISA_VERSION_ZHOUYI_V3	= 5,
+	AIPU_ISA_VERSION_ZHOUYI_V3_1	= 6,
+	AIPU_ISA_VERSION_ZHOUYI_V3_2	= 7,
 };
 
 /**
@@ -145,7 +146,7 @@ struct aipu_partition_cap {
 struct aipu_cap {
 	__u32 partition_cnt;
 	__u32 asid_cnt;
-	__u64 asid_base[32];
+	__u64 asid_base[4];
 	__u32 is_homogeneous;
 	__u64 dtcm_base;
 	__u32 dtcm_size;
@@ -172,6 +173,7 @@ enum aipu_mm_data_type {
 	AIPU_MM_DATA_TYPE_STATIC,
 	AIPU_MM_DATA_TYPE_REUSE,
 	AIPU_MM_DATA_TYPE_TCB,
+	AIPU_MM_DATA_TYPE_WEIGHT,
 };
 
 /**
@@ -180,41 +182,12 @@ enum aipu_mm_data_type {
  * @AIPU_BUF_ASID_1: [aipu v2/v3 only] ASID 1 region
  * @AIPU_BUF_ASID_2: [aipu v2/v3 only] ASID 2 region
  * @AIPU_BUF_ASID_3: [aipu v3 only] ASID 3 region
- * @AIPU_BUF_ASID_x: [aipu v3/v3_1 only] ASID 4-31 region
  */
 enum aipu_buf_region {
 	AIPU_BUF_ASID_0 = 0,
 	AIPU_BUF_ASID_1 = 1,
 	AIPU_BUF_ASID_2 = 2,
 	AIPU_BUF_ASID_3 = 3,
-	AIPU_BUF_ASID_4 = 4,
-	AIPU_BUF_ASID_5 = 5,
-	AIPU_BUF_ASID_6 = 6,
-	AIPU_BUF_ASID_7 = 7,
-	AIPU_BUF_ASID_8 = 8,
-	AIPU_BUF_ASID_9 = 9,
-	AIPU_BUF_ASID_10 = 10,
-	AIPU_BUF_ASID_11 = 11,
-	AIPU_BUF_ASID_12 = 12,
-	AIPU_BUF_ASID_13 = 13,
-	AIPU_BUF_ASID_14 = 14,
-	AIPU_BUF_ASID_15 = 15,
-	AIPU_BUF_ASID_16 = 16,
-	AIPU_BUF_ASID_17 = 17,
-	AIPU_BUF_ASID_18 = 18,
-	AIPU_BUF_ASID_19 = 19,
-	AIPU_BUF_ASID_20 = 20,
-	AIPU_BUF_ASID_21 = 21,
-	AIPU_BUF_ASID_22 = 22,
-	AIPU_BUF_ASID_23 = 23,
-	AIPU_BUF_ASID_24 = 24,
-	AIPU_BUF_ASID_25 = 25,
-	AIPU_BUF_ASID_26 = 26,
-	AIPU_BUF_ASID_27 = 27,
-	AIPU_BUF_ASID_28 = 28,
-	AIPU_BUF_ASID_29 = 29,
-	AIPU_BUF_ASID_30 = 30,
-	AIPU_BUF_ASID_31 = 31,
 };
 
 /**
@@ -230,11 +203,36 @@ enum aipu_buf_region_type {
 };
 
 /**
+ * struct aipu_rebind_buf_desc - Buffer description.
+ * KMD unmap pa_unmmaped address and bind physical to job id's new iova buffer
+ * @pa_unmaped: [kmd] unbind and free iova address
+ * @job_id:     [kmd] bind physical memory to job_id's new iova buffer
+ * @pa:   	[kmd] kmd back new iova to userspace
+ */
+struct aipu_rebind_buf_desc {
+	__u64 pa_unmap;
+	__u64 exec_id;
+	__u64 pa;
+};
+/**
+ * struct aipu_bind_buf_desc - Buffer description.
+ *  KMD bind third driver's dma share fd buffer to exec id's reserved iova address
+ * @fd: 	[kmd] bind dma share fd
+ * @job_id:     [kmd] bind physical memory to exec_id's reserved iova buffer
+ * @pa:   	[kmd] kmd back bound iova address to userspace
+ */
+struct aipu_bind_buf_desc {
+	__u32 fd;
+	__u64 exec_id;
+	__u64 pa;
+};
+/**
  * struct aipu_buf_desc - Buffer description.
  *                        KMD returns this info. to the requesting user thread in one ioctl
  * @pa:         [kmd] Buffer physical base address
  * @dev_offset: [kmd] Device offset used in mmap
  * @bytes:      [kmd] Buffer size in bytes
+ * @exec_id:    [kmd] back executive id to userspace from kmd
  * @region:     [kmd] this allocated buffer is in memory/SRAM/DTCM/GM region?
  * @asid:       [kmd] ASID region of this buffer
  */
@@ -242,26 +240,45 @@ struct aipu_buf_desc {
 	__u64 pa;
 	__u64 dev_offset;
 	__u64 bytes;
+	__u64 exec_id;
 	__u8  region;
 	__u8  asid;
 };
 
 /**
+ * enum aipu_dma_buf_malloc_mode - dma buffer allocation mode for smmu scenario
+ * @AIPU_DMA_BUF_MALLOC_DEFAULT:     [aipu v3_2] malloc I/O virtual address and physical memory by standard dma api
+ * @AIPU_DMA_BUF_MALLOC_IOVA:        [aipu v3_2] malloc I/O virtual address only
+ * @AIPU_DMA_BUF_MALLOC_PHY:         [aipu v3_2] malloc physical memory for Allocated I/O virtual address after malloc iova
+ * @AIPU_DMA_BUF_MALLOC_IOVA_PHY:    [aipu v3_2] malloc I/O virtual address and physical memory
+ */
+enum aipu_dma_buf_malloc_mode {
+    AIPU_DMA_BUF_MALLOC_DEFAULT = 0,
+    AIPU_DMA_BUF_MALLOC_IOVA = 1,
+    AIPU_DMA_BUF_MALLOC_PHY = 2,
+    AIPU_DMA_BUF_MALLOC_IOVA_PHY = 3,
+};
+/**
  * struct aipu_buf_request - Buffer allocation request structure.
  * @bytes:         [must] Buffer size to allocate (in bytes)
+ * @exec_id:       [must] current executive id for v3_2 or above only
  * @align_in_page: [must] Buffer address alignment (must be a power of 2)
  * @data_type:     [must] Type of data in this buffer/Type of this buffer
  * @region:        [kmd] set to request a buffer in a default DDR region or a GM region
  * @asid:          [aipu v2/v3 only, optional] from which region (ASID 0/1/2/3) to request
+ * @alloc_mode:    [aipu v3_2 only] dma buffer allocation mode for smmu scenario
  * @desc:          [kmd]  Descriptor of the successfully allocated buffer
  */
 struct aipu_buf_request {
-	__u64 bytes;
-	__u32 align_in_page;
-	__u32 data_type;
-	__u8  region;
-	__u8  asid;
-	struct aipu_buf_desc desc;
+    __u64 bytes;
+    __u64 exec_id;
+    __u64 reserve_iova_size;
+    __u32 align_in_page;
+    __u32 data_type;
+    __u8 region;
+    __u8 asid;
+    __u8 alloc_mode;
+    struct aipu_buf_desc desc;
 };
 
 /**
@@ -272,6 +289,7 @@ struct aipu_buf_request {
 struct aipu_dma_buf_request {
 	int fd;
 	__u64 bytes;
+	__u64 exec_id;
 };
 
 /**
@@ -284,6 +302,7 @@ struct aipu_dma_buf {
 	int fd;
 	__u64 pa;
 	__u64 bytes;
+	__u64 exec_id;
 };
 
 /**
@@ -365,6 +384,7 @@ struct aipu_job_desc {
 	__u64 last_task_tcb_pa;
 	__u64 tail_tcb_pa;
 	__u32 is_coredump_en;
+	__u64 asid0_base;
 };
 
 /**
@@ -409,13 +429,18 @@ struct aipu_job_status_query {
 
 /**
  * struct aipu_io_req - AIPU core IO operations request.
- * @partition_id: 	[must] partition ID, 0 in default.
- * @offset:  		[must] Register offset
- * @rw:      		[must] Read or write operation
- * @value:   		[must]/[kmd] Value to be written/value readback
+ * @partition_id:	[must] partition ID, 0 in default.
+ * @reg_type:		[must] register group type
+ * @offset:		[must] Register offset
+ * @rw:			[must] Read or write operation
+ * @value:		[must]/[kmd] Value to be written/value readback
  */
 struct aipu_io_req {
 	__u32 partition_id;
+	enum aipu_reg_group {
+		AIPU_HOST_REG,
+		AIPU_DBG_REG,
+	} reg_type;
 	__u32 offset;
 	enum aipu_rw_attr {
 		AIPU_IO_READ,
@@ -437,12 +462,34 @@ struct aipu_hw_status {
 };
 
 /**
- * struct aipu_group_id_desc - Group ID descriptor.
- * @group_size: [umd] Size of the group (i.e. number of group IDs)
- * @first_id:   [umd/kmd] The first group ID allocated by KMD or to free
+ * struct aipu_cluster_status - AIPU cluster working status.
+ * @cluster_id:		[must] filled by UMD, the id of the cluster, not used
+ * @cluster_status:	[kmd] filled by KMD,
+ * @core_status:	[kmd] filled by KMD, each bit is the status of one core in the cluster,
+ *			0 for busy, 1 for idle
  */
-struct aipu_group_id_desc {
-	__u16 group_size;
+struct aipu_cluster_status {
+	__u32 cluster_id;
+	__u32 cluster_status;
+	__u32 core_status;
+};
+
+/**
+ * struct aipu_running_job_query - AIPU running job thread id
+ * @thread_id:	[kmd] filled by KMD, the id of the thread running on the cluster,
+ *		0 means no job running on that thread
+ */
+struct aipu_running_job_query {
+	__u32 thread_id[32];
+};
+
+/**
+ * struct aipu_id_desc - ID descriptor.
+ * @size: [umd] Size of the IDs (i.e. number of IDs)
+ * @first_id:   [umd/kmd] The first ID allocated by KMD or to free
+ */
+struct aipu_id_desc {
+	__u16 size;
 	__u16 first_id;
 };
 
@@ -661,23 +708,79 @@ struct aipu_group_id_desc {
  * @Description
  *
  * ioctl to get a group of continuous unique group IDs
- *   aipu_group_id_desc->group_size: filled by UMD
- *   aipu_group_id_desc->first_id:   filled by KMD
+ *   aipu_id_desc->size: filled by UMD
+ *   aipu_id_desc->first_id:   filled by KMD
  */
-#define AIPU_IOCTL_ALLOC_GROUP_ID _IOWR(AIPU_IOCTL_MAGIC, 22, struct aipu_group_id_desc)
+#define AIPU_IOCTL_ALLOC_GROUP_ID _IOWR(AIPU_IOCTL_MAGIC, 22, struct aipu_id_desc)
 /**
  * DOC: AIPU_IOCTL_FREE_GROUP_ID
  *
  * @Description
  *
  * ioctl to free a group of allocated group IDs
- *   aipu_group_id_desc->group_size: filled by UMD
- *   aipu_group_id_desc->first_id:   filled by UMD
+ *   aipu_id_desc->size: filled by UMD
+ *   aipu_id_desc->first_id:   filled by UMD
  */
-#define AIPU_IOCTL_FREE_GROUP_ID _IOW(AIPU_IOCTL_MAGIC, 23, struct aipu_group_id_desc)
+#define AIPU_IOCTL_FREE_GROUP_ID _IOW(AIPU_IOCTL_MAGIC, 23, struct aipu_id_desc)
 
 /**
- * DOC: AIPU_IOCTL_BUF_CACHE_INVALID
+ * DOC: AIPU_IOCTL_GET_CLUSTER_STATUS
+ *
+ * @Description
+ *
+ * ioctl to get the cluster status
+ *   aipu_cluster_status->cluster_id: filled by UMD
+ */
+#define AIPU_IOCTL_GET_CLUSTER_STATUS _IOWR(AIPU_IOCTL_MAGIC, 24, struct aipu_cluster_status)
+
+/**
+ * DOC: AIPU_IOCTL_GET_RUNNING_JOB_THREAD_ID
+ *
+ * @Description
+ *
+ * ioctl to get the running job thread id
+ */
+#define AIPU_IOCTL_GET_RUNNING_JOB_THREAD_ID _IOR(AIPU_IOCTL_MAGIC, 25,\
+						  struct aipu_running_job_query)
+/**
+ * DOC: AIPU_IOCTL_ALLOC_SFLAG_ID
+ *
+ * @Description
+ *
+ * ioctl to get a sync flag of continuous unique sync flag IDs
+ *   aipu_id_desc->size: filled by UMD
+ *   aipu_id_desc->first_id:   filled by KMD
+ */
+#define AIPU_IOCTL_ALLOC_SFLAG_ID _IOWR(AIPU_IOCTL_MAGIC, 26, struct aipu_id_desc)
+/**
+ * DOC: AIPU_IOCTL_FREE_SFLAG_ID
+ *
+ * @Description
+ *
+ * ioctl to free a sync flag of allocated sync flag IDs
+ *   aipu_id_desc->size: filled by UMD
+ *   aipu_id_desc->first_id:   filled by UMD
+ */
+#define AIPU_IOCTL_FREE_SFLAG_ID _IOW(AIPU_IOCTL_MAGIC, 27, struct aipu_id_desc)
+/**
+ * DOC: AIPU_IOCTL_REBIND_DMA_BUF
+ *
+ * @Description
+ *
+ * ioctl to request to bind phy memory to a new iova.
+ */
+#define AIPU_IOCTL_REBIND_DMA_BUF _IOWR(AIPU_IOCTL_MAGIC, 28, struct aipu_rebind_buf_desc)
+/**
+ * DOC: AIPU_IOCTL_BIND_DMA_BUF
+ *
+ * @Description
+ *
+ * ioctl to request to bind dma shared fd memory to a reserved iova.
+ */
+#define AIPU_IOCTL_BIND_DMA_BUF _IOWR(AIPU_IOCTL_MAGIC, 29, struct aipu_bind_buf_desc)
+
+/**
+ * DOC: AIPU_IOCTL_GET_CLUSTER_STATUS
  *
  * @Description
  *
