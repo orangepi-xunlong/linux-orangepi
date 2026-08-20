@@ -665,6 +665,7 @@ static int es8323_set_bias_level(struct snd_soc_component *component,
 		snd_soc_component_write(component, ES8323_CHIPLOPOW2, 0x00);
 		snd_soc_component_write(component, ES8323_CHIPPOWER, 0x00);
 		snd_soc_component_write(component, ES8323_ADCPOWER, 0x59);
+		snd_soc_component_write(component, ES8323_ADCCONTROL4, 0x4c);
 		break;
 	case SND_SOC_BIAS_STANDBY:
 		dev_dbg(component->dev, "%s standby\n", __func__);
