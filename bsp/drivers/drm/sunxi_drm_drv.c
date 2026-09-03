@@ -17,6 +17,7 @@
 #include <drm/drm_crtc_helper.h>
 #include <drm/drm_drv.h>
 #include <drm/drm_fb_helper.h>
+#include <drm/drm_fbdev_generic.h>
 #if LINUX_VERSION_CODE < KERNEL_VERSION(5, 19, 0)
 #include <drm/drm_gem_cma_helper.h>
 #else
@@ -1169,7 +1170,16 @@ static int sunxi_drm_bind(struct device *dev)
 
 dev_register:
 	ret = drm_dev_register(drm, 0);
-	//sunxi_drm_fbdev_init(drm);
+	if (ret)
+		goto mode_config_clean;
+
+	/*
+	 * USB-C DisplayPort becomes available only after Type-C altmode
+	 * negotiation, which normally completes after the DRM device has been
+	 * registered.  The generic fbdev client safely defers its initial setup
+	 * when no connector is ready and retries on the subsequent hotplug.
+	 */
+	drm_fbdev_generic_setup(drm, 32);
 
 #if IS_ENABLED(CONFIG_PROC_FS)
 	ret = sunxi_drm_procfs_init(drm);
