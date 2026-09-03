@@ -280,7 +280,15 @@ sunxi_phy_mux_set(struct typec_mux_dev *mux, struct typec_mux_state *state)
 		}
 
 		/* altmode displayport plugin */
-		if ((data->conf & DP_CONF_SIGNALING_DP) && (data->status & DP_STATUS_HPD_STATE))
+		/*
+		 * The DisplayPort altmode core passes the negotiated configuration
+		 * and HPD status while first putting the connector into SAFE mode.
+		 * Do not publish HPD at that point: the DP PHY has not been selected
+		 * yet and consumers will attempt AUX transfers before the mux is
+		 * ready.  Publish it when the subsequent DP mux state is applied.
+		 */
+		if (dp_mode && (data->conf & DP_CONF_SIGNALING_DP) &&
+		    (data->status & DP_STATUS_HPD_STATE))
 			phy_switcher->hpd_status = true;
 		else
 			phy_switcher->hpd_status = false;
