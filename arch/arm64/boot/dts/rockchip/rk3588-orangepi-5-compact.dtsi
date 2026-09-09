@@ -7,6 +7,11 @@
 #include "rk3588-orangepi-5.dtsi"
 
 / {
+	/* GPIO0_C4 is the hym8563 IRQ on compact boards. */
+	rfkill {
+		status = "disabled";
+	};
+
 	vcc5v0_usb30_otg: vcc5v0-usb30-otg-regulator {
 		compatible = "regulator-fixed";
 		enable-active-high;
@@ -148,6 +153,7 @@
 		interrupt-parent = <&gpio0>;
 		interrupts = <RK_PA0 IRQ_TYPE_EDGE_FALLING>;
 		interrupt-names = "host-wakeup";
+		max-speed = <1500000>;
 		pinctrl-names = "default";
 		pinctrl-0 = <&bt_reg_on>, <&host_wake_bt>, <&bt_wake_host>;
 		shutdown-gpios = <&gpio4 RK_PC4 GPIO_ACTIVE_HIGH>;
