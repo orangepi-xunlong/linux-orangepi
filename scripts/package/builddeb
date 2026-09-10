@@ -199,7 +199,22 @@ else
 	cp System.map "$tmpdir/boot/System.map-$version"
 	cp $KCONFIG_CONFIG "$tmpdir/boot/config-$version"
 fi
-cp "$($MAKE -s -f $srctree/Makefile image_name)" "$tmpdir/$installed_image_path"
+# Orange Pi's u-boot loads the kernel image directly and cannot decompress
+# it. Since 6.18 the arm64 Makefile defaults KBUILD_IMAGE to Image.gz when
+# CONFIG_EFI_ZBOOT is unset, which would put a gzip-compressed kernel into
+# the package. Use the uncompressed image, as the 6.1 tree does: the raw
+# image is always built alongside its compressed variant.
+kernel_image=$($MAKE -s -f $srctree/Makefile image_name)
+case "$kernel_image" in
+	*.gz|*.bz2|*.xz|*.lz4|*.lzo|*.zst)
+		raw_image="${kernel_image%.*}"
+		if [ -f "$raw_image" ]; then
+			echo "info: installing uncompressed ${raw_image} instead of ${kernel_image}" >&2
+			kernel_image="$raw_image"
+		fi
+		;;
+esac
+cp "$kernel_image" "$tmpdir/$installed_image_path"
 
 if is_enabled CONFIG_OF_EARLY_FLATTREE; then
 	# Only some architectures with OF support have this target
