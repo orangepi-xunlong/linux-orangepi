@@ -132,6 +132,12 @@ deb-pkg srcdeb-pkg bindeb-pkg:
 		--no-check-builddeps) \
 	$(DPKG_FLAGS))
 
+# intdeb-pkg - internal target, invoked from debian/rules to build the
+# binary packages directly with scripts/package/builddeb (no debhelper).
+PHONY += intdeb-pkg
+intdeb-pkg:
+	+$(CONFIG_SHELL) $(srctree)/scripts/package/builddeb
+
 # snap-pkg
 # ---------------------------------------------------------------------------
 PHONY += snap-pkg
