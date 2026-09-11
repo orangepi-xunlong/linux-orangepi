@@ -338,31 +338,42 @@
 
 			panel_timing: timing0 {
 				/*
-				 * 60MHz, down from the vendor's 62.1MHz.
+				 * Vendor mode is 62.1MHz with htotal 865
+				 * (800+40+5+20) and vtotal 1327
+				 * (1280+30+5+12), i.e. 54.10 Hz.
 				 *
-				 * The pixel clock is what sets the frame rate
-				 * once htotal/vtotal are fixed, so this is the
-				 * one field that moves. Every porch and both
-				 * totals stay at the panel's own values, which
-				 * keeps the blanking ratios identical and lets
-				 * the whole set scale together:
+				 * The clock is left alone -- 62.1MHz is what
+				 * the panel is specified at and it is not worth
+				 * pushing it higher -- so the frame rate has to
+				 * come out of the blanking instead. Both porches
+				 * are tightened, which is the only direction
+				 * available: 800x1280 already costs 1,024,000
+				 * pixel clocks per frame, so at 62.1MHz the
+				 * absolute ceiling (zero blanking, not usable)
+				 * is 62.1e6 / 1024000 = 60.64 Hz.
 				 *
-				 *   60000000 / (865 * 1327) = 52.28 Hz
-				 *   lane rate 414.0 -> 400.0 Mbps
+				 *   htotal 820 = 800+10+5+5
+				 *   vtotal 1300 = 1280+5+5+10
+				 *   62100000 / (820 * 1300) = 58.26 Hz
 				 *
-				 * Do not be tempted to hold the frame rate by
-				 * stretching vtotal instead -- see the git log
-				 * for the 1096-line vfront-porch that came out
-				 * of that and was rightly thrown away.
+				 * 60.00 Hz is not reachable without raising the
+				 * clock to at least ~62.7MHz; see the git log
+				 * for the 68871300/tighter-porch variants that
+				 * were tried and rejected.
+				 *
+				 * Do not be tempted to reach a frame rate by
+				 * stretching vtotal the other way either -- the
+				 * 1096-line vfront-porch that came out of that
+				 * was rightly thrown away.
 				 */
-				clock-frequency = <60000000>;
+				clock-frequency = <62100000>;
 				hactive = <800>;
-				hfront-porch = <40>;
-				hback-porch = <20>;
+				hfront-porch = <10>;
+				hback-porch = <5>;
 				hsync-len = <5>;
 				vactive = <1280>;
-				vfront-porch = <30>;
-				vback-porch = <12>;
+				vfront-porch = <5>;
+				vback-porch = <10>;
 				vsync-len = <5>;
 				hsync-active = <0>;
 				vsync-active = <0>;

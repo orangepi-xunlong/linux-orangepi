@@ -310,17 +310,18 @@
 			native-mode = <&panel_timing>;
 
 			panel_timing: timing0 {
-				/* 60MHz -- see the note in -lcd-dsi0.dtso.
-				 * 60000000 / (865 * 1327) = 52.28 Hz.
+				/* 58.26 Hz at the vendor's own clock -- see
+				 * the note in -lcd-dsi0.dtso.
+				 * 62100000 / (820 * 1300) = 58.26 Hz.
 				 */
-				clock-frequency = <60000000>;
+				clock-frequency = <62100000>;
 				hactive = <800>;
-				hfront-porch = <40>;
-				hback-porch = <20>;
+				hfront-porch = <10>;
+				hback-porch = <5>;
 				hsync-len = <5>;
 				vactive = <1280>;
-				vfront-porch = <30>;
-				vback-porch = <12>;
+				vfront-porch = <5>;
+				vback-porch = <10>;
 				vsync-len = <5>;
 				hsync-active = <0>;
 				vsync-active = <0>;
