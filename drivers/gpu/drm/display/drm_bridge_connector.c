@@ -201,37 +201,40 @@ static void drm_bridge_connector_disable_hpd(struct drm_connector *connector)
  * Bridge Connector Functions
  */
 
-static enum drm_connector_status
-drm_bridge_connector_detect(struct drm_connector *connector, bool force)
+static int drm_bridge_connector_detect_ctx(struct drm_connector *connector,
+					   struct drm_modeset_acquire_ctx *ctx,
+					   bool force)
 {
 	struct drm_bridge_connector *bridge_connector =
 		to_drm_bridge_connector(connector);
 	struct drm_bridge *detect = bridge_connector->bridge_detect;
 	struct drm_bridge *hdmi = bridge_connector->bridge_hdmi;
-	enum drm_connector_status status;
+	int ret;
 
 	if (detect) {
-		status = detect->funcs->detect(detect, connector);
+		ret = drm_bridge_detect_ctx(detect, connector, ctx);
+		if (ret < 0)
+			return ret;
 
 		if (hdmi)
-			drm_atomic_helper_connector_hdmi_hotplug(connector, status);
+			drm_atomic_helper_connector_hdmi_hotplug(connector, ret);
 
-		drm_bridge_connector_hpd_notify(connector, status);
+		drm_bridge_connector_hpd_notify(connector, ret);
 	} else {
 		switch (connector->connector_type) {
 		case DRM_MODE_CONNECTOR_DPI:
 		case DRM_MODE_CONNECTOR_LVDS:
 		case DRM_MODE_CONNECTOR_DSI:
 		case DRM_MODE_CONNECTOR_eDP:
-			status = connector_status_connected;
+			ret = connector_status_connected;
 			break;
 		default:
-			status = connector_status_unknown;
+			ret = connector_status_unknown;
 			break;
 		}
 	}
 
-	return status;
+	return ret;
 }
 
 static void drm_bridge_connector_force(struct drm_connector *connector)
@@ -271,7 +274,6 @@ static void drm_bridge_connector_reset(struct drm_connector *connector)
 
 static const struct drm_connector_funcs drm_bridge_connector_funcs = {
 	.reset = drm_bridge_connector_reset,
-	.detect = drm_bridge_connector_detect,
 	.force = drm_bridge_connector_force,
 	.fill_modes = drm_helper_probe_single_connector_modes,
 	.atomic_duplicate_state = drm_atomic_helper_connector_duplicate_state,
@@ -291,7 +293,7 @@ static int drm_bridge_connector_get_modes_edid(struct drm_connector *connector,
 	const struct drm_edid *drm_edid;
 	int n;
 
-	status = drm_bridge_connector_detect(connector, false);
+	status = drm_bridge_connector_detect_ctx(connector, NULL, false);
 	if (status != connector_status_connected)
 		goto no_edid;
 
@@ -377,6 +379,7 @@ static int drm_bridge_connector_atomic_check(struct drm_connector *connector,
 
 static const struct drm_connector_helper_funcs drm_bridge_connector_helper_funcs = {
 	.get_modes = drm_bridge_connector_get_modes,
+	.detect_ctx = drm_bridge_connector_detect_ctx,
 	.mode_valid = drm_bridge_connector_mode_valid,
 	.enable_hpd = drm_bridge_connector_enable_hpd,
 	.disable_hpd = drm_bridge_connector_disable_hpd,

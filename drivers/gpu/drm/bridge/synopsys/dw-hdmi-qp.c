@@ -19,9 +19,11 @@
 #include <drm/bridge/dw_hdmi_qp.h>
 #include <drm/display/drm_hdmi_helper.h>
 #include <drm/display/drm_hdmi_state_helper.h>
+#include <drm/display/drm_scdc_helper.h>
 #include <drm/drm_atomic.h>
 #include <drm/drm_atomic_helper.h>
 #include <drm/drm_bridge.h>
+#include <drm/drm_bridge_helper.h>
 #include <drm/drm_connector.h>
 #include <drm/drm_edid.h>
 #include <drm/drm_modes.h>
@@ -34,8 +36,10 @@
 #define DDC_SEGMENT_ADDR	0x30
 
 #define HDMI14_MAX_TMDSCLK	340000000
+#define HDMI20_MAX_TMDSRATE	600000000
 
-#define SCRAMB_POLL_DELAY_MS	3000
+#define SCDC_MIN_SOURCE_VERSION	0x1
+#define SCRAMB_POLL_DELAY_MS	5000
 
 /*
  * Unless otherwise noted, entries in this table are 100% optimization.
@@ -141,6 +145,10 @@ struct dw_hdmi_qp {
 		const struct dw_hdmi_qp_phy_ops *ops;
 		void *data;
 	} phy;
+
+	struct drm_connector *curr_conn;
+	struct delayed_work scramb_work;
+	bool scramb_enabled;
 
 	struct regmap *regm;
 	int main_irq;
@@ -725,6 +733,73 @@ static struct i2c_adapter *dw_hdmi_qp_i2c_adapter(struct dw_hdmi_qp *hdmi)
 	return adap;
 }
 
+static bool dw_hdmi_qp_supports_scrambling(struct drm_display_info *display)
+{
+	if (!display->is_hdmi)
+		return false;
+
+	return display->hdmi.scdc.supported &&
+		display->hdmi.scdc.scrambling.supported;
+}
+
+static void dw_hdmi_qp_set_scramb(struct dw_hdmi_qp *hdmi)
+{
+	dev_dbg(hdmi->dev, "set scrambling\n");
+
+	drm_scdc_set_high_tmds_clock_ratio(hdmi->curr_conn, true);
+	drm_scdc_set_scrambling(hdmi->curr_conn, true);
+
+	schedule_delayed_work(&hdmi->scramb_work,
+			      msecs_to_jiffies(SCRAMB_POLL_DELAY_MS));
+}
+
+static void dw_hdmi_qp_scramb_work(struct work_struct *work)
+{
+	struct dw_hdmi_qp *hdmi = container_of(to_delayed_work(work),
+					       struct dw_hdmi_qp,
+					       scramb_work);
+	if (!drm_scdc_get_scrambling_status(hdmi->curr_conn))
+		dw_hdmi_qp_set_scramb(hdmi);
+}
+
+static void dw_hdmi_qp_enable_scramb(struct dw_hdmi_qp *hdmi)
+{
+	u8 ver;
+
+	if (!dw_hdmi_qp_supports_scrambling(&hdmi->curr_conn->display_info))
+		return;
+
+	drm_scdc_readb(hdmi->bridge.ddc, SCDC_SINK_VERSION, &ver);
+	drm_scdc_writeb(hdmi->bridge.ddc, SCDC_SOURCE_VERSION,
+			min_t(u8, ver, SCDC_MIN_SOURCE_VERSION));
+
+	dw_hdmi_qp_set_scramb(hdmi);
+	dw_hdmi_qp_write(hdmi, 1, SCRAMB_CONFIG0);
+
+	hdmi->scramb_enabled = true;
+
+	/* Wait at least 1 ms before resuming TMDS transmission */
+	usleep_range(1000, 5000);
+}
+
+static void dw_hdmi_qp_disable_scramb(struct dw_hdmi_qp *hdmi)
+{
+	if (!hdmi->scramb_enabled)
+		return;
+
+	dev_dbg(hdmi->dev, "disable scrambling\n");
+
+	hdmi->scramb_enabled = false;
+	cancel_delayed_work_sync(&hdmi->scramb_work);
+
+	dw_hdmi_qp_write(hdmi, 0, SCRAMB_CONFIG0);
+
+	if (hdmi->curr_conn->status == connector_status_connected) {
+		drm_scdc_set_scrambling(hdmi->curr_conn, false);
+		drm_scdc_set_high_tmds_clock_ratio(hdmi->curr_conn, false);
+	}
+}
+
 static int dw_hdmi_qp_config_avi_infoframe(struct dw_hdmi_qp *hdmi,
 					   const u8 *buffer, size_t len)
 {
@@ -844,22 +919,25 @@ static void dw_hdmi_qp_bridge_atomic_enable(struct drm_bridge *bridge,
 {
 	struct dw_hdmi_qp *hdmi = bridge->driver_private;
 	struct drm_connector_state *conn_state;
-	struct drm_connector *connector;
 	unsigned int op_mode;
 
-	connector = drm_atomic_get_new_connector_for_encoder(state, bridge->encoder);
-	if (WARN_ON(!connector))
+	hdmi->curr_conn = drm_atomic_get_new_connector_for_encoder(state,
+								   bridge->encoder);
+	if (WARN_ON(!hdmi->curr_conn))
 		return;
 
-	conn_state = drm_atomic_get_new_connector_state(state, connector);
+	conn_state = drm_atomic_get_new_connector_state(state, hdmi->curr_conn);
 	if (WARN_ON(!conn_state))
 		return;
 
-	if (connector->display_info.is_hdmi) {
+	if (hdmi->curr_conn->display_info.is_hdmi) {
 		dev_dbg(hdmi->dev, "%s mode=HDMI rate=%llu\n",
 			__func__, conn_state->hdmi.tmds_char_rate);
 		op_mode = 0;
 		hdmi->tmds_char_rate = conn_state->hdmi.tmds_char_rate;
+
+		if (conn_state->hdmi.tmds_char_rate > HDMI14_MAX_TMDSCLK)
+			dw_hdmi_qp_enable_scramb(hdmi);
 	} else {
 		dev_dbg(hdmi->dev, "%s mode=DVI\n", __func__);
 		op_mode = OPMODE_DVI;
@@ -870,7 +948,7 @@ static void dw_hdmi_qp_bridge_atomic_enable(struct drm_bridge *bridge,
 	dw_hdmi_qp_mod(hdmi, HDCP2_BYPASS, HDCP2_BYPASS, HDCP2LOGIC_CONFIG0);
 	dw_hdmi_qp_mod(hdmi, op_mode, OPMODE_DVI, LINK_CONFIG0);
 
-	drm_atomic_helper_connector_hdmi_update_infoframes(connector, state);
+	drm_atomic_helper_connector_hdmi_update_infoframes(hdmi->curr_conn, state);
 }
 
 static void dw_hdmi_qp_bridge_atomic_disable(struct drm_bridge *bridge,
@@ -880,15 +958,66 @@ static void dw_hdmi_qp_bridge_atomic_disable(struct drm_bridge *bridge,
 
 	hdmi->tmds_char_rate = 0;
 
+	dw_hdmi_qp_disable_scramb(hdmi);
+
+	hdmi->curr_conn = NULL;
 	hdmi->phy.ops->disable(hdmi, hdmi->phy.data);
 }
 
-static enum drm_connector_status
-dw_hdmi_qp_bridge_detect(struct drm_bridge *bridge, struct drm_connector *connector)
+static int dw_hdmi_qp_reset_crtc(struct dw_hdmi_qp *hdmi,
+				 struct drm_connector *connector,
+				 struct drm_modeset_acquire_ctx *ctx)
+{
+	u8 config;
+	int ret;
+
+	ret = drm_scdc_readb(hdmi->bridge.ddc, SCDC_TMDS_CONFIG, &config);
+	if (ret < 0) {
+		dev_err(hdmi->dev, "Failed to read TMDS config: %d\n", ret);
+		return ret;
+	}
+
+	if (!!(config & SCDC_SCRAMBLING_ENABLE) == hdmi->scramb_enabled)
+		return 0;
+
+	drm_atomic_helper_connector_hdmi_hotplug(connector,
+						 connector_status_connected);
+	/*
+	 * Conform to HDMI 2.0 spec by ensuring scrambled data is not sent
+	 * before configuring the sink scrambling, as well as suspending any
+	 * TMDS transmission while changing the TMDS clock rate in the sink.
+	 */
+
+	dev_dbg(hdmi->dev, "resetting crtc\n");
+
+retry:
+	ret = drm_bridge_helper_reset_crtc(&hdmi->bridge, ctx);
+	if (ret == -EDEADLK) {
+		drm_modeset_backoff(ctx);
+		goto retry;
+	} else if (ret) {
+		dev_err(hdmi->dev, "Failed to reset crtc: %d\n", ret);
+	}
+
+	return ret;
+}
+
+static int dw_hdmi_qp_bridge_detect(struct drm_bridge *bridge,
+				    struct drm_connector *connector,
+				    struct drm_modeset_acquire_ctx *ctx)
 {
 	struct dw_hdmi_qp *hdmi = bridge->driver_private;
+	enum drm_connector_status status;
 
-	return hdmi->phy.ops->read_hpd(hdmi, hdmi->phy.data);
+	status = hdmi->phy.ops->read_hpd(hdmi, hdmi->phy.data);
+
+	dev_dbg(hdmi->dev, "%s status=%d scramb=%d\n", __func__,
+		status, hdmi->scramb_enabled);
+
+	if (status == connector_status_connected && hdmi->scramb_enabled)
+		dw_hdmi_qp_reset_crtc(hdmi, connector, ctx);
+
+	return status;
 }
 
 static const struct drm_edid *
@@ -912,7 +1041,7 @@ dw_hdmi_qp_bridge_tmds_char_rate_valid(const struct drm_bridge *bridge,
 {
 	struct dw_hdmi_qp *hdmi = bridge->driver_private;
 
-	if (rate > HDMI14_MAX_TMDSCLK) {
+	if (rate > HDMI20_MAX_TMDSRATE) {
 		dev_dbg(hdmi->dev, "Unsupported TMDS char rate: %lld\n", rate);
 		return MODE_CLOCK_HIGH;
 	}
@@ -979,7 +1108,7 @@ static const struct drm_bridge_funcs dw_hdmi_qp_bridge_funcs = {
 	.atomic_reset = drm_atomic_helper_bridge_reset,
 	.atomic_enable = dw_hdmi_qp_bridge_atomic_enable,
 	.atomic_disable = dw_hdmi_qp_bridge_atomic_disable,
-	.detect = dw_hdmi_qp_bridge_detect,
+	.detect_ctx = dw_hdmi_qp_bridge_detect,
 	.edid_read = dw_hdmi_qp_bridge_edid_read,
 	.hdmi_tmds_char_rate_valid = dw_hdmi_qp_bridge_tmds_char_rate_valid,
 	.hdmi_clear_infoframe = dw_hdmi_qp_bridge_clear_infoframe,
@@ -1058,6 +1187,8 @@ struct dw_hdmi_qp *dw_hdmi_qp_bind(struct platform_device *pdev,
 				     &dw_hdmi_qp_bridge_funcs);
 	if (IS_ERR(hdmi))
 		return ERR_CAST(hdmi);
+
+	INIT_DELAYED_WORK(&hdmi->scramb_work, dw_hdmi_qp_scramb_work);
 
 	hdmi->dev = dev;
 
