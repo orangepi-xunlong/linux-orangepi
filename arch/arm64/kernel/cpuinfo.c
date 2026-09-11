@@ -10,6 +10,7 @@
 #include <asm/cputype.h>
 #include <asm/cpufeature.h>
 #include <asm/fpsimd.h>
+#include <asm/system_info.h>
 
 #include <linux/bitops.h>
 #include <linux/bug.h>
@@ -32,6 +33,17 @@
  */
 DEFINE_PER_CPU(struct cpuinfo_arm64, cpu_data);
 static struct cpuinfo_arm64 boot_cpu_data;
+
+/*
+ * Filled in by drivers/soc/rockchip/rockchip-cpuinfo.c from the SoC's OTP
+ * unique ID, and reported as the "Serial" line below. Both stay zero on
+ * platforms that never populate them.
+ */
+unsigned int system_serial_low;
+EXPORT_SYMBOL(system_serial_low);
+
+unsigned int system_serial_high;
+EXPORT_SYMBOL(system_serial_high);
 
 static inline const char *icache_policy_str(int l1ip)
 {
@@ -271,6 +283,9 @@ static int c_show(struct seq_file *m, void *v)
 	seq_printf(m, "CPU variant\t: 0x%x\n", MIDR_VARIANT(midr));
 	seq_printf(m, "CPU part\t: 0x%03x\n", MIDR_PARTNUM(midr));
 	seq_printf(m, "CPU revision\t: %d\n\n", MIDR_REVISION(midr));
+
+	seq_printf(m, "Serial\t\t: %08x%08x\n",
+		   system_serial_high, system_serial_low);
 
 	return 0;
 }

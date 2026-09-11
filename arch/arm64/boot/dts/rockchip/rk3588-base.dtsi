@@ -3230,6 +3230,18 @@
 		};
 	};
 
+	/*
+	 * Feeds the SoC unique ID into /proc/cpuinfo's "Serial" line. Only the
+	 * id cell is listed; the vendor tree also wires cpu-version and
+	 * cpu-code, but those feed the CPU type/leakage tables there and are
+	 * unused here.
+	 */
+	cpuinfo {
+		compatible = "rockchip,cpuinfo";
+		nvmem-cells = <&otp_id>;
+		nvmem-cell-names = "id";
+	};
+
 	dmac2: dma-controller@fed10000 {
 		compatible = "arm,pl330", "arm,primecell";
 		reg = <0x0 0xfed10000 0x0 0x4000>;
