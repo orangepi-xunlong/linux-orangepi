@@ -25,6 +25,7 @@
 /plugin/;
 
 #include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/interrupt-controller/irq.h>
 #include <dt-bindings/pinctrl/rockchip.h>
 /* MIPI_DSI_* live in <drm/drm_mipi_dsi.h>, which DT cannot use and which
  * mainline has no dt-bindings copy of. Values from that header:
@@ -35,7 +36,17 @@
 
 / {
 	compatible = "xunlong,orangepi-5", "xunlong,orangepi-5b", "rockchip,rk3588s";
+};
 
+/* &{/}, not a bare node in the / block above. A node declared directly in a
+ * plugin's root stays a root node of the overlay rather than being wrapped in
+ * a fragment, and dtc then emits __symbols__ { backlight = "/backlight" }.
+ * U-Boot's libfdt requires every overlay symbol path to read
+ * /<fragment>/__overlay__/... and fails the entire apply with
+ * FDT_ERR_BADOVERLAY on anything else. Upstream fdtoverlay is laxer and lets
+ * it through, which is how this went unnoticed.
+ */
+&{/} {
 	backlight: backlight {
 		compatible = "pwm-backlight";
 		pwms = <&pwm2 0 25000 0>;
@@ -46,7 +57,14 @@
 
 &pwm2 {
 	status = "okay";
-	pinctrl-names = "active";
+	/* "default", not the vendor's "active". Mainline's pwm-rockchip.c has no
+	 * pinctrl code at all (grep -c pinctrl = 0), so it never calls
+	 * pinctrl_select_state() and the "active" state is simply never applied.
+	 * Only "default" is picked up, by the pinctrl core at probe. With
+	 * "active" the PWM runs but its pin stays unmuxed and the backlight
+	 * stays dark: pin 20 reads "(MUX UNCLAIMED)" in pinmux-pins.
+	 */
+	pinctrl-names = "default";
 	pinctrl-0 = <&pwm2m0_pins>;
 };
 
@@ -77,9 +95,46 @@
 		pinctrl-names = "default";
 		pinctrl-0 = <&lcd0_rst_gpio>;
 
-		dsi,flags = <2563>;   /* VIDEO | VIDEO_BURST | NO_EOT_PACKET | LPM */
+		/*
+		 * 2051 = VIDEO | VIDEO_BURST | LPM, exactly what the vendor
+		 * driver sets:
+		 *   dsi->mode_flags = MIPI_DSI_MODE_VIDEO |
+		 *                     MIPI_DSI_MODE_VIDEO_BURST |
+		 *                     MIPI_DSI_MODE_LPM;
+		 * NO_EOT_PACKET (512) is deliberately NOT set. It was added
+		 * here on the assumption that these panels want it -- the
+		 * vendor tree does use it in 68 other DTS files -- but this
+		 * panel's own driver omits it, and dropping the EOT packet is
+		 * exactly the sort of thing that makes a receiver lose packet
+		 * framing. That would show up as a picture that is present
+		 * but jittering and corrupt rather than absent, which is what
+		 * we are chasing.
+		 */
+		dsi,flags = <2051>;
 		dsi,format = <0>;      /* RGB888 */
 		dsi,lanes = <4>;
+
+		/* These mirror the delays in the vendor driver's prepare():
+		 *   enable -> 1, msleep(25), reset -> 1, msleep(25),
+		 *   reset -> 0, msleep(200), then the init table.
+		 * panel-simple-dsi applies them in that exact order, but only
+		 * if the *-delay-ms properties are present -- its
+		 * of_device_id table carries .data = NULL, so there is no
+		 * built-in panel_desc and every delay defaults to 0. Without
+		 * them the init table goes out the instant reset is released
+		 * and the panel stays grey behind a lit backlight.
+		 */
+		prepare-delay-ms = <25>;
+		reset-delay-ms = <25>;
+		init-delay-ms = <200>;
+		/* vendor enable() sleeps 150 before its extra set_display_on */
+		enable-delay-ms = <150>;
+		/* vendor unprepare() sleeps 200 before asserting reset */
+		unprepare-delay-ms = <200>;
+
+		/* afj101_ba2131_default_mode.width_mm / .height_mm */
+		width-mm = <136>;
+		height-mm = <217>;
 
 		panel-init-sequence = [
 				39 00 04 FF 98 81 03
@@ -282,7 +337,25 @@
 			native-mode = <&panel_timing>;
 
 			panel_timing: timing0 {
-				clock-frequency = <62100000>;
+				/*
+				 * 60MHz, down from the vendor's 62.1MHz.
+				 *
+				 * The pixel clock is what sets the frame rate
+				 * once htotal/vtotal are fixed, so this is the
+				 * one field that moves. Every porch and both
+				 * totals stay at the panel's own values, which
+				 * keeps the blanking ratios identical and lets
+				 * the whole set scale together:
+				 *
+				 *   60000000 / (865 * 1327) = 52.28 Hz
+				 *   lane rate 414.0 -> 400.0 Mbps
+				 *
+				 * Do not be tempted to hold the frame rate by
+				 * stretching vtotal instead -- see the git log
+				 * for the 1096-line vfront-porch that came out
+				 * of that and was rightly thrown away.
+				 */
+				clock-frequency = <60000000>;
 				hactive = <800>;
 				hfront-porch = <40>;
 				hback-porch = <20>;
@@ -326,5 +399,48 @@
 	vp2_out_dsi0: endpoint@ROCKCHIP_VOP2_EP_MIPI0 {
 		reg = <ROCKCHIP_VOP2_EP_MIPI0>;
 		remote-endpoint = <&dsi0_in_vp2>;
+	};
+};
+
+/*
+ * Touch controller for the DSI0 panel: a Goodix GT9271 sitting on i2c7.
+ *
+ * Straight from the vendor tree's rk3588s-orangepi-5-lcd.dtsi, which pairs
+ * the DSI0 panel with i2c7 and the DSI1 panel with i2c2 -- different buses
+ * and different GPIOs for the two connectors, so the two overlays do not
+ * collide.
+ *
+ * mainline already carries the driver (goodix,gt9271 is in goodix_of_match)
+ * and its GPIO names match what is used here: goodix.c asks for "irq" and
+ * "reset", so irq-gpios/reset-gpios line up without translation.
+ *
+ * No pinctrl on i2c7: rk3588-base.dtsi already sets pinctrl-0 = <&i2c7m0_xfer>,
+ * and that group is byte-for-byte the same in both trees
+ * (<1 RK_PD0 9>, <1 RK_PD1 9>).
+ *
+ * The size/swap pair describes a 1280x800 digitizer under an 800x1280
+ * portrait panel: swapped-x-y rotates it, inverted-x then puts the origin
+ * back in the right corner. Vendor's values, kept as-is.
+ */
+&i2c7 {
+	/* restated for dtc, which checks this fragment without the base tree */
+	#address-cells = <1>;
+	#size-cells = <0>;
+	status = "okay";
+
+	gt9xx_1: touchscreen@14 {
+		compatible = "goodix,gt9271";
+		reg = <0x14>;
+		status = "okay";
+
+		interrupt-parent = <&gpio1>;
+		interrupts = <RK_PB5 IRQ_TYPE_LEVEL_LOW>;
+		irq-gpios = <&gpio1 RK_PB5 IRQ_TYPE_LEVEL_LOW>;
+		reset-gpios = <&gpio1 RK_PB4 GPIO_ACTIVE_HIGH>;
+
+		touchscreen-size-x = <1280>;
+		touchscreen-size-y = <800>;
+		touchscreen-swapped-x-y;
+		touchscreen-inverted-x;
 	};
 };

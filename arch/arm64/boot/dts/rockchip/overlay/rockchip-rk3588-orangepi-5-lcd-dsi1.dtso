@@ -29,6 +29,7 @@
 /plugin/;
 
 #include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/interrupt-controller/irq.h>
 #include <dt-bindings/pinctrl/rockchip.h>
 /* MIPI_DSI_* live in <drm/drm_mipi_dsi.h>, which DT cannot use and which
  * mainline has no dt-bindings copy of. Values from that header:
@@ -39,7 +40,13 @@
 
 / {
 	compatible = "xunlong,orangepi-5", "xunlong,orangepi-5b", "rockchip,rk3588s";
+};
 
+/* &{/}, not a bare node in the / block above -- see the matching note in
+ * rockchip-rk3588-orangepi-5-lcd-dsi0.dtso. A root-level node here would put
+ * "/backlight_1" in __symbols__, which U-Boot's libfdt rejects outright.
+ */
+&{/} {
 	backlight_1: backlight_1 {
 		compatible = "pwm-backlight";
 		pwms = <&pwm6 0 25000 0>;
@@ -50,8 +57,14 @@
 
 &pwm6 {
 	status = "okay";
-	pinctrl-names = "active";
-	pinctrl-0 = <&pwm2m0_pins>;
+	/* Same "active" -> "default" change as -lcd-dsi0.dtso. */
+	pinctrl-names = "default";
+	/* pwm6m0, not pwm2m0: the vendor pairs pwm2 with pwm2m0_pins and pwm6
+	 * with pwm6m0_pins (rk3588s-orangepi-5.dtsi:100-108). These are two
+	 * different pads -- GPIO0_C4 vs GPIO0_C7 -- so the old value would have
+	 * driven the wrong pin even once the state started being applied.
+	 */
+	pinctrl-0 = <&pwm6m0_pins>;
 };
 
 &pinctrl {
@@ -81,9 +94,20 @@
 		pinctrl-names = "default";
 		pinctrl-0 = <&lcd1_rst_gpio>;
 
-		dsi,flags = <2563>;   /* VIDEO | VIDEO_BURST | NO_EOT_PACKET | LPM */
+		/* 2051, matching the vendor driver -- see -lcd-dsi0.dtso. */
+		dsi,flags = <2051>;
 		dsi,format = <0>;      /* RGB888 */
 		dsi,lanes = <4>;
+
+		/* Same set as -lcd-dsi0.dtso; see the note there. */
+		prepare-delay-ms = <25>;
+		reset-delay-ms = <25>;
+		init-delay-ms = <200>;
+		enable-delay-ms = <150>;
+		unprepare-delay-ms = <200>;
+
+		width-mm = <136>;
+		height-mm = <217>;
 
 		panel-init-sequence = [
 				39 00 04 FF 98 81 03
@@ -286,7 +310,10 @@
 			native-mode = <&panel_timing>;
 
 			panel_timing: timing0 {
-				clock-frequency = <62100000>;
+				/* 60MHz -- see the note in -lcd-dsi0.dtso.
+				 * 60000000 / (865 * 1327) = 52.28 Hz.
+				 */
+				clock-frequency = <60000000>;
 				hactive = <800>;
 				hfront-porch = <40>;
 				hback-porch = <20>;
@@ -330,5 +357,35 @@
 	vp3_out_dsi1: endpoint@ROCKCHIP_VOP2_EP_MIPI1 {
 		reg = <ROCKCHIP_VOP2_EP_MIPI1>;
 		remote-endpoint = <&dsi1_in_vp3>;
+	};
+};
+
+/*
+ * Touch controller for the DSI1 panel -- same GT9271, but on i2c2 with its
+ * own GPIOs. See -lcd-dsi0.dtso for the full note.
+ *
+ * i2c2 is not new here: rk3588s-orangepi-5.dtsi already marks it okay for
+ * the vdd_npu_s0 regulator, and rk3588-base.dtsi supplies the pins via
+ * i2c2m0_xfer. This only adds a second child on address 0x14.
+ */
+&i2c2 {
+	/* restated for dtc, which checks this fragment without the base tree */
+	#address-cells = <1>;
+	#size-cells = <0>;
+
+	gt9xx_0: touchscreen@14 {
+		compatible = "goodix,gt9271";
+		reg = <0x14>;
+		status = "okay";
+
+		interrupt-parent = <&gpio1>;
+		interrupts = <RK_PA7 IRQ_TYPE_LEVEL_LOW>;
+		irq-gpios = <&gpio1 RK_PA7 IRQ_TYPE_LEVEL_LOW>;
+		reset-gpios = <&gpio1 RK_PA4 GPIO_ACTIVE_HIGH>;
+
+		touchscreen-size-x = <1280>;
+		touchscreen-size-y = <800>;
+		touchscreen-swapped-x-y;
+		touchscreen-inverted-x;
 	};
 };
