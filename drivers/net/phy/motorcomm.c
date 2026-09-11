@@ -1830,6 +1830,20 @@ static int yt8531_config_init(struct phy_device *phydev)
 	if (ret < 0)
 		return ret;
 
+	/* LED configuration, carried over from the vendor 6.1 kernel
+	 * (commit 20e1b91030 "net: phy: motorcomm: Fix led").
+	 *
+	 * 0xa00d (LED1): TX/RX activity blink, link on at 10/100/1000
+	 * 0xa00e (LED2): link-activity indicator, link on at 10/100/1000
+	 * 0xa00f:        LED drive
+	 *
+	 * mainline never programs these, so the port LEDs come up with the
+	 * hardware defaults instead of tracking link and traffic.
+	 */
+	ytphy_write_ext_with_lock(phydev, 0xa00d, 0x670);
+	ytphy_write_ext_with_lock(phydev, 0xa00e, 0x2070);
+	ytphy_write_ext_with_lock(phydev, 0xa00f, 0x7e);
+
 	return 0;
 }
 
