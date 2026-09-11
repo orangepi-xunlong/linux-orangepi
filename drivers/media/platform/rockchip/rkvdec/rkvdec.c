@@ -137,12 +137,31 @@ static void rkvdec_fill_decoded_pixfmt(struct rkvdec_ctx *ctx,
 				       struct v4l2_pix_format_mplane *pix_mp)
 {
 	const struct rkvdec_config *cfg = ctx->dev->config;
+	struct v4l2_plane_pix_format *plane = &pix_mp->plane_fmt[0];
+	u32 aligned_bpl;
 
 	cfg->fill_pixfmt_mp(pix_mp, pix_mp->pixelformat, pix_mp->width, pix_mp->height);
 
-	ctx->colmv_offset = pix_mp->plane_fmt[0].sizeimage;
+	/*
+	 * The decoder expresses the horizontal stride in units of 16 bytes --
+	 * the *_hor_virstride registers hold bytesperline / 16 -- so a stride
+	 * that is not a multiple of 16 would be silently truncated and every
+	 * row written with an offset. The per-variant fill_pixfmt_mp() calls
+	 * already align to 16; go one step further and align to 64, the way the
+	 * vendor MPP library does. That is what 10-bit NV15 needs: its packed
+	 * stride of width * 5 / 4 is not a multiple of 64 for every width.
+	 * sizeimage is an exact multiple of bytesperline for the semi-planar
+	 * layouts here, so scaling it proportionally is lossless.
+	 */
+	aligned_bpl = ALIGN(plane->bytesperline, 64);
+	if (aligned_bpl != plane->bytesperline) {
+		plane->sizeimage = plane->sizeimage / plane->bytesperline * aligned_bpl;
+		plane->bytesperline = aligned_bpl;
+	}
 
-	pix_mp->plane_fmt[0].sizeimage += cfg->colmv_size(pix_mp->width, pix_mp->height);
+	ctx->colmv_offset = plane->sizeimage;
+
+	plane->sizeimage += cfg->colmv_size(pix_mp->width, pix_mp->height);
 }
 
 static void rkvdec_reset_fmt(struct rkvdec_ctx *ctx, struct v4l2_format *f,
@@ -359,6 +378,7 @@ static const struct rkvdec_ctrls vdpu38x_hevc_ctrls = {
 static const struct rkvdec_ctrl_desc vdpu381_vp9_ctrl_descs[] = {
 	{
 		.cfg.id = V4L2_CID_STATELESS_VP9_FRAME,
+		.cfg.ops = &rkvdec_ctrl_ops,
 	},
 	{
 		.cfg.id = V4L2_CID_STATELESS_VP9_COMPRESSED_HDR,
@@ -366,8 +386,10 @@ static const struct rkvdec_ctrl_desc vdpu381_vp9_ctrl_descs[] = {
 	{
 		.cfg.id = V4L2_CID_MPEG_VIDEO_VP9_PROFILE,
 		.cfg.min = V4L2_MPEG_VIDEO_VP9_PROFILE_0,
-		.cfg.max = V4L2_MPEG_VIDEO_VP9_PROFILE_0,
+		.cfg.max = V4L2_MPEG_VIDEO_VP9_PROFILE_2,
 		.cfg.def = V4L2_MPEG_VIDEO_VP9_PROFILE_0,
+		/* profiles 1/3 are 4:2:2/4:4:4 which VDPU381 cannot decode */
+		.cfg.menu_skip_mask = BIT(V4L2_MPEG_VIDEO_VP9_PROFILE_1),
 	},
 	{
 		.cfg.id = V4L2_CID_MPEG_VIDEO_VP9_LEVEL,
@@ -435,6 +457,17 @@ static const struct rkvdec_decoded_fmt_desc rkvdec_vp9_decoded_fmts[] = {
 	{
 		.fourcc = V4L2_PIX_FMT_NV12,
 		.image_fmt = RKVDEC_IMG_FMT_420_8BIT,
+	},
+};
+
+static const struct rkvdec_decoded_fmt_desc vdpu381_vp9_decoded_fmts[] = {
+	{
+		.fourcc = V4L2_PIX_FMT_NV12,
+		.image_fmt = RKVDEC_IMG_FMT_420_8BIT,
+	},
+	{
+		.fourcc = V4L2_PIX_FMT_NV15,
+		.image_fmt = RKVDEC_IMG_FMT_420_10BIT,
 	},
 };
 
@@ -537,8 +570,8 @@ static const struct rkvdec_coded_fmt_desc vdpu381_coded_fmts[] = {
 		},
 		.ctrls = &vdpu381_vp9_ctrls,
 		.ops = &rkvdec_vdpu381_vp9_fmt_ops,
-		.num_decoded_fmts = ARRAY_SIZE(rkvdec_vp9_decoded_fmts),
-		.decoded_fmts = rkvdec_vp9_decoded_fmts,
+		.num_decoded_fmts = ARRAY_SIZE(vdpu381_vp9_decoded_fmts),
+		.decoded_fmts = vdpu381_vp9_decoded_fmts,
 		.subsystem_flags = VB2_V4L2_FL_SUPPORTS_M2M_HOLD_CAPTURE_BUF,
 		.capability = RKVDEC_CAPABILITY_VP9,
 	},
@@ -806,6 +839,19 @@ static int rkvdec_s_output_fmt(struct file *file, void *priv,
 	 * Note that this will propagates any size changes to the decoded format.
 	 */
 	ctx->image_fmt = RKVDEC_IMG_FMT_ANY;
+
+	/*
+	 * VP9 carries the bit depth in the per-frame header, not in an SPS set
+	 * up-front as HEVC does. Leaving image_fmt as ANY makes the CAPTURE
+	 * queue enumerate both NV12 and NV15 before the first frame control is
+	 * seen, which breaks 8-bit zero-copy clients (wrong import layout ->
+	 * green frames). Default VP9 to 8-bit/NV12 so only that format is
+	 * exposed until a 10-bit frame switches image_fmt to NV15 through the
+	 * VP9_FRAME control's get_image_fmt() callback.
+	 */
+	if (desc->fourcc == V4L2_PIX_FMT_VP9_FRAME)
+		ctx->image_fmt = RKVDEC_IMG_FMT_420_8BIT;
+
 	rkvdec_reset_decoded_fmt(ctx);
 
 	/* Propagate colorspace information to capture. */
