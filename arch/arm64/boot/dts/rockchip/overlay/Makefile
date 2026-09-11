@@ -46,8 +46,10 @@ dtbo-$(CONFIG_ARCH_ROCKCHIP) += \
 	rockchip-rk3568-hk-uart1.dtbo \
 	rockchip-rk3588-fanctrl.dtbo \
 	rockchip-rk3588-sata0.dtbo \
+	rockchip-rk3588-ssd-sata0.dtbo \
 	rockchip-rk3588-sata1.dtbo \
 	rockchip-rk3588-sata2.dtbo \
+	rockchip-rk3588-ssd-sata2.dtbo \
 	rockchip-rk3588-hdmirx.dtbo \
 	rockchip-rk3588-can0-m0.dtbo \
 	rockchip-rk3588-can0-m1.dtbo \
@@ -94,6 +96,7 @@ dtbo-$(CONFIG_ARCH_ROCKCHIP) += \
 	rockchip-rk3588-uart8-m1.dtbo \
 	rockchip-rk3588-rkvenc-overlay.dtbo \
 	rockchip-rk3588-orangepi-5-ap6275p.dtbo \
+	rockchip-rk3588-wifi-ap6275p.dtbo \
 	rockchip-rk3588-i2c1-m2.dtbo \
 	rockchip-rk3588-i2c1-m4.dtbo \
 	rockchip-rk3588-i2c2-m0.dtbo \
@@ -122,7 +125,8 @@ dtbo-$(CONFIG_ARCH_ROCKCHIP) += \
 	rockchip-rk3588-uart3-m0.dtbo \
 	rockchip-rk3588-uart3-m2.dtbo \
 	rockchip-rk3588-uart4-m0.dtbo \
-	rockchip-rk3588-uart6-m2.dtbo
+	rockchip-rk3588-uart6-m2.dtbo \
+	rockchip-rk3588-orangepi-5-lcd-dsi0.dtbo
 
 scr-$(CONFIG_ARCH_ROCKCHIP) += \
        rockchip-fixup.scr
