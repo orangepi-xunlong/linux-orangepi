@@ -1,0 +1,22 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * Enable UART2 on m0 pins.
+ *
+ * The vendor 6.1 overlay also carries a fragment disabling &fiq_debugger,
+ * which would otherwise hold the port. There is no fiq_debugger driver in
+ * mainline, so that fragment is dropped here.
+ */
+
+/dts-v1/;
+/plugin/;
+
+/ {
+	fragment@0 {
+		target = <&uart2>;
+
+		__overlay__ {
+			status = "okay";
+			pinctrl-0 = <&uart2m0_xfer>;
+		};
+	};
+};

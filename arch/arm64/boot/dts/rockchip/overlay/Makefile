@@ -93,7 +93,36 @@ dtbo-$(CONFIG_ARCH_ROCKCHIP) += \
 	rockchip-rk3588-uart7-m2.dtbo \
 	rockchip-rk3588-uart8-m1.dtbo \
 	rockchip-rk3588-rkvenc-overlay.dtbo \
-	rockchip-rk3588-orangepi-5-ap6275p.dtbo
+	rockchip-rk3588-orangepi-5-ap6275p.dtbo \
+	rockchip-rk3588-i2c1-m2.dtbo \
+	rockchip-rk3588-i2c1-m4.dtbo \
+	rockchip-rk3588-i2c2-m0.dtbo \
+	rockchip-rk3588-i2c2-m4.dtbo \
+	rockchip-rk3588-i2c3-m0.dtbo \
+	rockchip-rk3588-i2c4-m3.dtbo \
+	rockchip-rk3588-i2c5-m2.dtbo \
+	rockchip-rk3588-i2c5-m3.dtbo \
+	rockchip-rk3588-i2c6-m4.dtbo \
+	rockchip-rk3588-i2c7-m3.dtbo \
+	rockchip-rk3588-i2c8-m3.dtbo \
+	rockchip-rk3588-opi5pro-sfc.dtbo \
+	rockchip-rk3588-pwm6-m1.dtbo \
+	rockchip-rk3588-spi0-m2-cs0-cs1-spidev.dtbo \
+	rockchip-rk3588-spi0-m2-cs0-spidev.dtbo \
+	rockchip-rk3588-spi0-m2-cs1-spidev.dtbo \
+	rockchip-rk3588-spi1-m1-cs0-spidev.dtbo \
+	rockchip-rk3588-spi1-m2-cs0-spidev.dtbo \
+	rockchip-rk3588-spi4-m0-cs1-spidev.dtbo \
+	rockchip-rk3588-spi4-m1-cs0-cs1-spidev.dtbo \
+	rockchip-rk3588-spi4-m1-cs0-spidev.dtbo \
+	rockchip-rk3588-spi4-m1-cs1-spidev.dtbo \
+	rockchip-rk3588-spi4-m2-cs0-spidev.dtbo \
+	rockchip-rk3588-uart0-m2.dtbo \
+	rockchip-rk3588-uart2-m0.dtbo \
+	rockchip-rk3588-uart3-m0.dtbo \
+	rockchip-rk3588-uart3-m2.dtbo \
+	rockchip-rk3588-uart4-m0.dtbo \
+	rockchip-rk3588-uart6-m2.dtbo
 
 scr-$(CONFIG_ARCH_ROCKCHIP) += \
        rockchip-fixup.scr
