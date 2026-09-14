@@ -2140,8 +2140,19 @@
 			};
 			reg_dcdc4: dcdc4 {
 				regulator-name = "axp8191-dcdc4";
-				regulator-min-microvolt = <500000>;
-				regulator-max-microvolt = <1540000>;
+				/* gpu-supply is the ONLY consumer of this rail (checked: no other
+				 * -supply reference to reg_dcdc4 in this file besides gpu-supply
+				 * below). Pinned to exactly 960mV -- the vendor OPP table's
+				 * (sun60iw2p1.dtsi gpu-opp-table) voltage for the 1008MHz step --
+				 * because pvrsrvkm (SUPPORT_LINUX_DVFS compiled out on this
+				 * board) never applies the OPP table's voltage itself; it just
+				 * re-affirms whatever this regulator already reads back as its
+				 * current voltage. min_uV == max_uV makes the regulator core
+				 * apply this voltage at registration (set_machine_constraints(),
+				 * drivers/regulator/core.c), no DVFS needed. Verified: clpeak at
+				 * 1008MHz/960mV scales ~1:1 with the clock ratio, no crashes. */
+				regulator-min-microvolt = <960000>;
+				regulator-max-microvolt = <960000>;
 				regulator-ramp-delay = <250>;
 				regulator-enable-ramp-delay = <1000>;
 				regulator-boot-on;

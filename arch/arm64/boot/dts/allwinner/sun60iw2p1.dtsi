@@ -4613,6 +4613,18 @@
 				"clk_300", "clk_200";
 			resets = <&ccu RST_BUS_GPU0>;
 			reset-names = "reset_bus";
+			/* Vendor OPP table (below) tops out at 1008 MHz with a matching
+			 * voltage entry, but the driver never applies it: pvrsrvkm reads
+			 * this raw clk_rate property directly (sunxi_parse_dts() in
+			 * rgx_sunxi/sunxi_platform.c) and falls back to a hardcoded
+			 * 600 MHz (DEFAULT_GPU_RATE) whenever it is absent -- confirmed
+			 * on this board (Orange Pi Zero 3W): pvrsrvkm.ko prints
+			 * "default clk_rate is NOT set in DTS" on every boot without
+			 * this. Set it to the OPP table's own top step.
+			 * See opp@1008000000 below for the matching voltage this needs
+			 * on gpu-supply (board .dts's dcdc4 regulator, not here).
+			 */
+			clk_rate = <1008000000>;
 			/*power-domains = <&pd SUN60IW2_PCK_GPU_TOP>;*/
 			operating-points-v2 = <&gpu_opp_table>;
 			#cooling-cells = <2>;
