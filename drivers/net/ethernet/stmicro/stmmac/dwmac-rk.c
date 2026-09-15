@@ -21,6 +21,10 @@
 #include <linux/mfd/syscon.h>
 #include <linux/regmap.h>
 #include <linux/pm_runtime.h>
+#include <linux/etherdevice.h>
+#include <linux/jiffies.h>
+
+#include <asm/system_info.h>
 
 #include "stmmac_platform.h"
 
@@ -1734,6 +1738,73 @@ static int rk_gmac_resume(struct device *dev, void *bsp_priv_)
 	return 0;
 }
 
+/*
+ * Mainline dropped the vendor MAC plumbing. dwmac-rk used to install a
+ * get_eth_addr callback that read the LAN MAC out of the IDB and, when that
+ * came up empty, derived one from the SoC serial; nothing fills that role any
+ * more. All that is left is the DT, and failing that stmmac reads back
+ * whatever the GMAC registers happen to hold before falling back to a random
+ * address -- neither is stable from board to board, so a fleet flashed from
+ * one image ends up sharing addresses.
+ *
+ * Derive a stable one from the SoC serial that rockchip-cpuinfo folds into
+ * system_serial_{low,high} (drivers/soc/rockchip/rockchip-cpuinfo.c).
+ *
+ * Only the low word carries the address. system_serial_high is
+ * crc32(system_serial_low, ...), so OR-ing the two together the way the vendor
+ * code did throws most of the entropy away and leaves 24 bits, which collides
+ * fast at volume. Spend the full 32 bits of the low word instead and keep the
+ * last nibble for the port, so a board with two MACs gets two addresses.
+ */
+static int rk_gmac_fallback_mac(struct device *dev, u8 *addr, int id)
+{
+	static unsigned long give_up;
+	u32 low = system_serial_low, high = system_serial_high;
+	struct device_node *np;
+	bool has_cpuinfo;
+
+	if (low || high) {
+		if (id < 0)
+			id = 0;
+
+		addr[0] = 0x02;		/* locally administered, unicast */
+		addr[1] = low >> 24;
+		addr[2] = low >> 16;
+		addr[3] = low >> 8;
+		addr[4] = low;
+		addr[5] = (high & 0xf0) | (id & 0x0f);
+
+		dev_info(dev, "derived MAC %pM from the SoC serial\n", addr);
+		return 0;
+	}
+
+	/*
+	 * The serial is not there yet on the first pass. rockchip-cpuinfo reads
+	 * it out of the OTP, and drivers/nvmem/ links after drivers/net/, so
+	 * the OTP provider does not exist when it first probes and it defers
+	 * until well after we have been here. Wait for it instead of settling
+	 * for a random address.
+	 *
+	 * Bounded, so that a board whose cpuinfo driver is left out of the
+	 * config still gets a working interface rather than deferring forever.
+	 * The compatible string is only present on the SoCs that have this, so
+	 * older GMACs never pay the wait.
+	 */
+	np = of_find_compatible_node(NULL, NULL, "rockchip,cpuinfo");
+	has_cpuinfo = np != NULL;
+	of_node_put(np);
+
+	if (has_cpuinfo) {
+		if (!give_up)
+			give_up = jiffies + msecs_to_jiffies(10000);
+		if (time_before(jiffies, give_up))
+			return -EPROBE_DEFER;
+	}
+
+	dev_warn(dev, "no SoC serial, leaving the MAC to stmmac\n");
+	return 0;
+}
+
 static int rk_gmac_probe(struct platform_device *pdev)
 {
 	struct plat_stmmacenet_data *plat_dat;
@@ -1754,6 +1825,22 @@ static int rk_gmac_probe(struct platform_device *pdev)
 	plat_dat = devm_stmmac_probe_config_dt(pdev, stmmac_res.mac);
 	if (IS_ERR(plat_dat))
 		return PTR_ERR(plat_dat);
+
+	/*
+	 * of_get_mac_address() above only finds something when the DT actually
+	 * carries an address. It usually does not: u-boot's fdt_fixup_ethernet()
+	 * only writes one out when the board's ethaddr is set, so boards flashed
+	 * from a single image arrive here with an all-zero address. Fill that in
+	 * from the SoC serial before stmmac gets a chance to invent a random one.
+	 * Returning early here on -EPROBE_DEFER is what makes the retry work.
+	 */
+	if (!is_valid_ether_addr(stmmac_res.mac)) {
+		ret = rk_gmac_fallback_mac(&pdev->dev, stmmac_res.mac,
+					   of_alias_get_id(pdev->dev.of_node,
+							   "ethernet"));
+		if (ret)
+			return ret;
+	}
 
 	/* If the stmmac is not already selected as gmac4,
 	 * then make sure we fallback to gmac.
