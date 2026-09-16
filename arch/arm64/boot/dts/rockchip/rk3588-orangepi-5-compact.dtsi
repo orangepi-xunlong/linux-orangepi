@@ -38,12 +38,16 @@
 	simple-audio-card,hp-det-gpios = <&gpio3 RK_PD2 GPIO_ACTIVE_HIGH>;
 
 	simple-audio-card,routing =
-		"Headphones", "LOUT1",
-		"Headphones", "ROUT1",
+		"Headphones", "Headphones Amp OUTL",
+		"Headphones", "Headphones Amp OUTR",
+		"Headphones Amp INL", "LOUT1",
+		"Headphones Amp INR", "ROUT1",
 		"LINPUT1", "Microphone Jack",
 		"RINPUT1", "Microphone Jack",
+		"Microphone Jack", "Mic Bias",
 		"LINPUT2", "Onboard Microphone",
-		"RINPUT2", "Onboard Microphone";
+		"RINPUT2", "Onboard Microphone",
+		"Onboard Microphone", "Mic Bias";
 	simple-audio-card,widgets =
 		"Microphone", "Microphone Jack",
 		"Microphone", "Onboard Microphone",

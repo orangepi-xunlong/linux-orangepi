@@ -49,20 +49,22 @@
 			"Headphones", "ROUT1",
 			"LINPUT1", "Microphone Jack",
 			"RINPUT1", "Microphone Jack",
+			"Microphone Jack", "Mic Bias",
 			"LINPUT2", "Onboard Microphone",
-			"RINPUT2", "Onboard Microphone";
+			"RINPUT2", "Onboard Microphone",
+			"Onboard Microphone", "Mic Bias";
 		simple-audio-card,widgets =
 			"Microphone", "Microphone Jack",
 			"Microphone", "Onboard Microphone",
 			"Headphone", "Headphones";
 
-		simple-audio-card,cpu {
+		/* CPU supplies the bit and frame clocks, as on the 5 Pro. */
+		masterdai: simple-audio-card,cpu {
 			sound-dai = <&i2s1_8ch>;
 		};
 
-		masterdai: simple-audio-card,codec {
+		simple-audio-card,codec {
 			sound-dai = <&es8388>;
-			system-clock-frequency = <12288000>;
 		};
 	};
 
@@ -274,6 +276,7 @@
 		compatible = "everest,es8388", "everest,es8328";
 		reg = <0x10>;
 		clocks = <&cru I2S1_8CH_MCLKOUT>;
+		clock-names = "mclk";
 		AVDD-supply = <&vcc_3v3_s0>;
 		DVDD-supply = <&vcc_1v8_s0>;
 		HPVDD-supply = <&vcc_3v3_s0>;
@@ -281,6 +284,7 @@
 		assigned-clocks = <&cru I2S1_8CH_MCLKOUT>;
 		assigned-clock-rates = <12288000>;
 		#sound-dai-cells = <0>;
+		everest,mic-lrck-same;
 	};
 
 	usbc0: usb-typec@22 {

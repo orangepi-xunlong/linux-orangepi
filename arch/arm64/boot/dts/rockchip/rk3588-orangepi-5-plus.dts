@@ -85,11 +85,6 @@
 		"Headphone", "Headphones";
 
 	simple-audio-card,routing =
-		"Headphones", "LOUT1",
-		"Headphones", "ROUT1",
-		"Speaker", "LOUT2",
-		"Speaker", "ROUT2",
-
 		"Headphones", "Headphones Amp OUTL",
 		"Headphones", "Headphones Amp OUTR",
 		"Headphones Amp INL", "LOUT1",
@@ -103,9 +98,12 @@
 		/* single ended signal to LINPUT1 */
 		"LINPUT1", "Microphone Jack",
 		"RINPUT1", "Microphone Jack",
+		"Microphone Jack", "Mic Bias",
 		/* differential signal */
 		"LINPUT2", "Onboard Microphone",
-		"RINPUT2", "Onboard Microphone";
+		"RINPUT2", "Onboard Microphone",
+		"Onboard Microphone", "Mic Bias";
+
 };
 
 &combphy0_ps {

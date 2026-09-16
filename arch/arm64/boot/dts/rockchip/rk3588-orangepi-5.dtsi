@@ -117,12 +117,10 @@
 
 		daicpu: simple-audio-card,cpu {
 			sound-dai = <&i2s0_8ch>;
-			system-clock-frequency = <12288000>;
 		};
 
 		daicodec: simple-audio-card,codec {
 			sound-dai = <&es8388>;
-			system-clock-frequency = <12288000>;
 		};
 	};
 
@@ -301,6 +299,7 @@
 		compatible = "everest,es8388", "everest,es8328";
 		reg = <0x11>;
 		clocks = <&cru I2S0_8CH_MCLKOUT>;
+		clock-names = "mclk";
 		AVDD-supply = <&vcc_3v3_s0>;
 		DVDD-supply = <&vcc_1v8_s0>;
 		HPVDD-supply = <&vcc_3v3_s0>;
@@ -308,6 +307,7 @@
 		assigned-clocks = <&cru I2S0_8CH_MCLKOUT>;
 		assigned-clock-rates = <12288000>;
 		#sound-dai-cells = <0>;
+		everest,mic-lrck-same;
 	};
 };
 
