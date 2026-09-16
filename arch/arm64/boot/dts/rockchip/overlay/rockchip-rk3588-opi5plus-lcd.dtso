@@ -1,30 +1,3 @@
-// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
-/*
- * Orange Pi 5 / 5B second DSI LCD -- Innolux AFJ101-BA2131, 800x1280.
- *
- * The LCD1 header, wired to DSI1 instead of DSI0. The vendor tree splits
- * these as rk3588-lcd1.dts (dsi0) and rk3588-lcd2.dts (dsi1); note that
- * dsi1 is routed through VP3 rather than the VP2 that dsi0 uses.
- *
- * The vendor 6.1 kernel drives this panel with a dedicated driver,
- * panel-innolux-afj101-ba2131.c, which mainline does not carry. Everything
- * that driver does is expressible in DT, so use the generic panel-dsi-simple
- * driver instead:
- *
- *   - the panel's init table becomes panel-init-sequence, which uses the same
- *     dtype/wait/dlen layout the driver's panel_init_cmd did
- *   - afj101_ba2131_default_mode becomes display-timings
- *
- * The driver had no exit sequence, so neither does this.
- *
- * Note the compatible: mainline calls it "panel-dsi-simple", the vendor
- * "simple-panel-dsi". Same driver, words swapped.
- *
- * Board parts mainline lacks and that are therefore declared here: the
- * pwm-backlight, the panel reset pinctrl, and the VOP2 routing endpoints
- * (the vendor kernel had a dedicated &route_dsi0 node for the latter).
- */
-
 /dts-v1/;
 /plugin/;
 
@@ -39,7 +12,7 @@
 #include <dt-bindings/soc/rockchip,vop2.h>
 
 / {
-	compatible = "xunlong,orangepi-5", "xunlong,orangepi-5b", "rockchip,rk3588s";
+	compatible = "xunlong,orangepi-5-plus", "rockchip,rk3588";
 };
 
 /* &{/}, not a bare node in the / block above -- see the matching note in
