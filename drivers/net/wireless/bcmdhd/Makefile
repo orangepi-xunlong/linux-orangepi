@@ -47,11 +47,16 @@ CONFIG_BCMDHD_SDIO := y
 #CONFIG_BCMDHD_USB := y
 
 CONFIG_BCMDHD_PLATFORM := y
-#CONFIG_BCMDHD_DTS := y
+# Take the host-wake GPIO from the "android,bcmdhd_wlan" device tree node.
+# Required by CONFIG_BCMDHD_OOB_INTR below: dhd_gpio.c only fills in
+# gpio_wl_host_wake on the DT path, and a -1 there fails the driver's probe.
+CONFIG_BCMDHD_DTS := y
 
 #CONFIG_BCMDHD_ANDROID_VERSION := 12
 
-#CONFIG_BCMDHD_OOB_INTR := y
+# Out-of-band interrupt: the dongle raises host-wake on its own GPIO and the
+# SDIO DAT1 line goes unused (-DOOB_INTR_ONLY instead of -DSDIO_ISR_THREAD).
+CONFIG_BCMDHD_OOB_INTR := y
 #CONFIG_BCMDHD_STATIC_IF := y
 #CONFIG_BCMDHD_NO_POWER_OFF := y
 
