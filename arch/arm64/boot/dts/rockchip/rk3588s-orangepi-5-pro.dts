@@ -460,6 +460,14 @@
 /delete-node/ &usbc0;
 
 /*
+ * The FUSB302 deleted above was vbus_typec's only consumer. Left in place the
+ * regulator still registers, requests gpio3 RK_PC0 and applies its typec5v_pwren
+ * pinctrl -- but on the Pro that pin is the LCD1 reset, so the panel fails to
+ * apply its own pinctrl with "Error applying setting, reverse things back".
+ */
+/delete-node/ &vbus_typec;
+
+/*
  * The Pro's USB-C port is power delivery only: no FUSB302, no data lines,
  * no alt-mode switching. The parent DTSI enables usbdp_phy0 (status = "okay")
  * and adds FUSB302 alt-mode/orientation properties; delete those here.
