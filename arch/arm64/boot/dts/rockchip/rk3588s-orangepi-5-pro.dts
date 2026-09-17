@@ -198,10 +198,15 @@
 	 * the LT8711UXD, which embeds it into the HDMI stream.  The SoC feeds
 	 * its SPDIF2 transmitter straight into the DP controller, so no pin
 	 * muxing is involved - codec DAI 1 is the S/PDIF input of the DP.
+	 *
+	 * mclk-fs: the DP controller takes its audio clock from SPDIF2 and
+	 * needs it at 512fs; the vendor 6.1 kernel uses the same ratio for
+	 * every DP sound card it has.
 	 */
 	dp0_sound: dp0-sound {
 		compatible = "simple-audio-card";
 		simple-audio-card,name = "rockchip,dp0";
+		simple-audio-card,mclk-fs = <512>;
 
 		simple-audio-card,cpu {
 			sound-dai = <&spdif_tx2>;

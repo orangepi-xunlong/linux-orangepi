@@ -38,6 +38,9 @@ struct rk_spdif_dev {
 	struct snd_dmaengine_dai_dma_data playback_dma_data;
 
 	struct regmap *regmap;
+
+	/* MCLK requested by the machine driver, 0 for the 128fs default */
+	unsigned int sysclk;
 };
 
 static const struct of_device_id rk_spdif_match[] __maybe_unused = {
@@ -114,7 +117,15 @@ static int rk_spdif_hw_params(struct snd_pcm_substream *substream,
 	int ret;
 
 	srate = params_rate(params);
-	mclk = srate * 128;
+
+	/*
+	 * The biphase clock is 128fs either way, so the divider has to follow
+	 * the MCLK.  128fs, i.e. a pass-through divider, is fine for a plain
+	 * S/PDIF receiver, but blocks that take this controller's sample clock
+	 * as their audio clock - the RK3588 DisplayPort controller does - want
+	 * 512fs and ask for that ratio through set_sysclk().
+	 */
+	mclk = spdif->sysclk ? spdif->sysclk : srate * 128;
 
 	switch (params_format(params)) {
 	case SNDRV_PCM_FORMAT_S16_LE:
@@ -137,6 +148,14 @@ static int rk_spdif_hw_params(struct snd_pcm_substream *substream,
 			ret);
 		return ret;
 	}
+
+	/*
+	 * SPDIF_CFGR_CLK_DIV() does not apply the -1 the field wants, so the
+	 * pass-through divider of the default path can be written as a plain 0.
+	 */
+	if (spdif->sysclk)
+		val |= SPDIF_CFGR_CLK_DIV(DIV_ROUND_CLOSEST(clk_get_rate(spdif->mclk),
+							    128 * srate) - 1);
 
 	ret = regmap_update_bits(spdif->regmap, SPDIF_CFGR,
 				 SPDIF_CFGR_CLK_DIV_MASK |
@@ -200,8 +219,19 @@ static int rk_spdif_dai_probe(struct snd_soc_dai *dai)
 	return 0;
 }
 
+static int rk_spdif_set_sysclk(struct snd_soc_dai *dai,
+			       int clk_id, unsigned int freq, int dir)
+{
+	struct rk_spdif_dev *spdif = snd_soc_dai_get_drvdata(dai);
+
+	spdif->sysclk = freq;
+
+	return 0;
+}
+
 static const struct snd_soc_dai_ops rk_spdif_dai_ops = {
 	.probe = rk_spdif_dai_probe,
+	.set_sysclk = rk_spdif_set_sysclk,
 	.hw_params = rk_spdif_hw_params,
 	.trigger = rk_spdif_trigger,
 };
