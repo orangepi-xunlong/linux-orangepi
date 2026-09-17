@@ -1661,7 +1661,7 @@
 		phys = <&usbdp_phy0 PHY_TYPE_DP>;
 		power-domains = <&power RK3588_PD_VO0>;
 		resets = <&cru SRST_DP0>;
-		#sound-dai-cells = <0>;
+		#sound-dai-cells = <1>;
 		status = "disabled";
 
 		ports {

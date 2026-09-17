@@ -192,6 +192,25 @@
 			};
 		};
 	};
+
+	/*
+	 * The DP audio is carried over the DisplayPort link as SDP packets to
+	 * the LT8711UXD, which embeds it into the HDMI stream.  The SoC feeds
+	 * its SPDIF2 transmitter straight into the DP controller, so no pin
+	 * muxing is involved - codec DAI 1 is the S/PDIF input of the DP.
+	 */
+	dp0_sound: dp0-sound {
+		compatible = "simple-audio-card";
+		simple-audio-card,name = "rockchip,dp0";
+
+		simple-audio-card,cpu {
+			sound-dai = <&spdif_tx2>;
+		};
+
+		simple-audio-card,codec {
+			sound-dai = <&dp0 1>;
+		};
+	};
 };
 
 /* Disable gmac1 as the pro has a PCIe attached NIC */
@@ -513,6 +532,11 @@
 
 /* Experimental: Enable DisplayPort 1.4 to HDMI 2.0 */
 &dp0 {
+	status = "okay";
+};
+
+/* SPDIF2 is routed internally to the DP0 audio input (MCLK_SPDIF2_DP0) */
+&spdif_tx2 {
 	status = "okay";
 };
 
