@@ -7,9 +7,29 @@
 #include "rk3588-orangepi-5.dtsi"
 
 / {
+	/*
+	 * Out-of-band host-wake for the AP6611S. bcmdhd's dhd_gpio.c finds this
+	 * by compatible and requests gpio_wl_host_wake as an edge-triggered IRQ;
+	 * it needs no driver to bind. gpio_wl_reg_on is deliberately absent:
+	 * sdio_pwrseq owns WL_REG_ON, and naming it here as well would make
+	 * bcmdhd request a GPIO the pwrseq already holds.
+	 */
+	bcmdhd_wlan {
+		compatible = "android,bcmdhd_wlan";
+		gpio_wl_host_wake = <&gpio0 RK_PB0 GPIO_ACTIVE_HIGH>;
+	};
+
 	/* GPIO0_C4 is the hym8563 IRQ on compact boards. */
 	rfkill {
 		status = "disabled";
+	};
+
+	sdio_pwrseq: sdio-pwrseq {
+		compatible = "mmc-pwrseq-simple";
+		clocks = <&hym8563>;
+		clock-names = "ext_clock";
+		post-power-on-delay-ms = <200>;
+		reset-gpios = <&gpio2 RK_PC5 GPIO_ACTIVE_LOW>;
 	};
 
 	vcc5v0_usb30_otg: vcc5v0-usb30-otg-regulator {
@@ -110,6 +130,12 @@
 			rockchip,pins = <4 RK_PC5 RK_FUNC_GPIO &pcfg_pull_none>;
 		};
 	};
+
+	wireless-wlan {
+		wifi_host_wake_irq: wifi-host-wake-irq {
+			rockchip,pins = <0 RK_PB0 RK_FUNC_GPIO &pcfg_pull_down>;
+		};
+	};
 };
 
 &pwm4 {
@@ -127,6 +153,35 @@
 &pwm9 {
 	pinctrl-names = "default";
 	pinctrl-0 = <&pwm9m2_pins>;
+	status = "okay";
+};
+
+&sdio {
+	/*
+	 * AP6611S (Synaptics SYN43711), driven by the vendor bcmdhd module.
+	 * WL_REG_ON is driven by sdio_pwrseq, so the card comes up through
+	 * ordinary SDIO enumeration, and the host-wake line is an out-of-band
+	 * IRQ described by the bcmdhd_wlan node above.
+	 *
+	 * Note the M0 mux: the reset default is sdiom1_pins, which is not what
+	 * this board routes the card to.
+	 */
+	bus-width = <4>;
+	cap-sd-highspeed;
+	cap-sdio-irq;
+	keep-power-in-suspend;
+	max-frequency = <150000000>;
+	mmc-pwrseq = <&sdio_pwrseq>;
+	no-mmc;
+	no-sd;
+	non-removable;
+	pinctrl-names = "default";
+	/*
+	 * bcmdhd_wlan binds to no driver, so it cannot carry a pinctrl state of
+	 * its own -- the wake line's pull-down is applied here instead.
+	 */
+	pinctrl-0 = <&sdiom0_pins>, <&wifi_host_wake_irq>;
+	sd-uhs-sdr104;
 	status = "okay";
 };
 
