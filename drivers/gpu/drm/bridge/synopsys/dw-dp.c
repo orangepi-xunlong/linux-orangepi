@@ -8,6 +8,7 @@
  */
 #include <linux/bitfield.h>
 #include <linux/clk.h>
+#include <linux/gpio/consumer.h>
 #include <linux/iopoll.h>
 #include <linux/irq.h>
 #include <linux/media-bus-format.h>
@@ -310,6 +311,7 @@ struct dw_dp {
 	struct device *dev;
 	struct regmap *regmap;
 	struct phy *phy;
+	struct gpio_desc *hpd_gpio;
 	struct clk *apb_clk;
 	struct clk *aux_clk;
 	struct clk *i2s_clk;
@@ -480,6 +482,9 @@ static bool dw_dp_bandwidth_ok(struct dw_dp *dp,
 static bool dw_dp_hpd_detect(struct dw_dp *dp)
 {
 	u32 value;
+
+	if (dp->hpd_gpio)
+		return gpiod_get_value_cansleep(dp->hpd_gpio) > 0;
 
 	regmap_read(dp->regmap, DW_DP_HPD_STATUS, &value);
 
@@ -1959,6 +1964,16 @@ static const struct regmap_config dw_dp_regmap_config = {
 	.rd_table = &dw_dp_readable_table,
 };
 
+/* Boards with an external DP bridge may wire HPD to a GPIO instead. */
+static irqreturn_t dw_dp_gpio_hpd_irq(int irq, void *data)
+{
+	struct dw_dp *dp = data;
+
+	drm_helper_hpd_irq_event(dp->bridge.dev);
+
+	return IRQ_HANDLED;
+}
+
 static void dw_dp_phy_exit(void *data)
 {
 	struct dw_dp *dp = data;
@@ -1985,6 +2000,10 @@ struct dw_dp *dw_dp_bind(struct device *dev, struct drm_encoder *encoder,
 
 	dp->dev = dev;
 	dp->pixel_mode = DW_DP_MP_QUAD_PIXEL;
+	dp->hpd_gpio = devm_gpiod_get_optional(dev, "hpd", GPIOD_IN);
+	if (IS_ERR(dp->hpd_gpio))
+		return ERR_PTR(dev_err_probe(dev, PTR_ERR(dp->hpd_gpio),
+					    "failed to get HPD GPIO\n"));
 
 	dp->plat_data.max_link_rate = plat_data->max_link_rate;
 	bridge = &dp->bridge;
@@ -2088,6 +2107,24 @@ struct dw_dp *dw_dp_bind(struct device *dev, struct drm_encoder *encoder,
 	if (ret) {
 		dev_err_probe(dev, ret, "failed to request irq\n");
 		goto unregister_aux;
+	}
+
+	if (dp->hpd_gpio) {
+		int hpd_irq = gpiod_to_irq(dp->hpd_gpio);
+
+		if (hpd_irq < 0) {
+			ret = hpd_irq;
+			goto unregister_aux;
+		}
+		ret = devm_request_threaded_irq(dev, hpd_irq, NULL,
+						dw_dp_gpio_hpd_irq,
+						IRQF_ONESHOT | IRQF_TRIGGER_RISING |
+						IRQF_TRIGGER_FALLING,
+						"dw-dp-hpd", dp);
+		if (ret) {
+			dev_err_probe(dev, ret, "failed to request HPD GPIO IRQ\n");
+			goto unregister_aux;
+		}
 	}
 
 	return dp;

@@ -185,9 +185,6 @@
 	dp0-con {
 		compatible = "dp-connector";
 		type = "full-size";
-		pinctrl-names = "default";
-		pinctrl-0 = <&dp0_hpd>;
-		hpd-gpios = <&gpio4 RK_PB4 GPIO_ACTIVE_LOW>;
 
 		port {
 			dp_con_in: endpoint {
@@ -475,6 +472,14 @@
  */
 &usbdp_phy0 {
 	rockchip,dp-lane-mux = <0 1>;
+	/*
+	 * The sink's HPD reaches the SoC on a GPIO, not through the PHY, so the
+	 * PHY has to inject it into the DP controller -- otherwise the
+	 * controller sees no sink and never runs an AUX transaction.
+	 */
+	pinctrl-names = "default";
+	pinctrl-0 = <&dp0_hpd>;
+	hpd-gpios = <&gpio4 RK_PB4 GPIO_ACTIVE_HIGH>;
 	/delete-property/ mode-switch;
 	/delete-property/ orientation-switch;
 	/delete-property/ sbu1-dc-gpios;

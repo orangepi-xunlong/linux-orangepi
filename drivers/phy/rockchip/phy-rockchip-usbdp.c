@@ -12,6 +12,7 @@
 #include <linux/clk.h>
 #include <linux/delay.h>
 #include <linux/gpio.h>
+#include <linux/interrupt.h>
 #include <linux/mfd/syscon.h>
 #include <linux/mod_devicetable.h>
 #include <linux/module.h>
@@ -181,6 +182,7 @@ struct rk_udphy {
 	/* utilized for DP */
 	struct gpio_desc *sbu1_dc_gpio;
 	struct gpio_desc *sbu2_dc_gpio;
+	struct gpio_desc *hpd_gpio;
 	u32 lane_mux_sel[4];
 	u32 dp_lane_sel[4];
 	u32 dp_aux_dout_sel;
@@ -618,6 +620,51 @@ static void rk_udphy_dp_hpd_event_trigger(struct rk_udphy *udphy, bool hpd)
 	rk_udphy_grfreg_write(udphy->vogrf, &cfg->vogrfcfg[udphy->id].hpd_trigger, hpd);
 }
 
+/*
+ * Boards that take the DP sink's HPD from a GPIO (no Type-C alt-mode) still
+ * have to feed it into the DP controller: rk_udphy_dp_hpd_event_trigger() is
+ * otherwise only driven from the Type-C path, which leaves the controller
+ * seeing no sink and its AUX engine idle.
+ */
+static irqreturn_t rk_udphy_hpd_irq(int irq, void *data)
+{
+	struct rk_udphy *udphy = data;
+	bool hpd;
+
+	if (!udphy->hpd_gpio)
+		return IRQ_NONE;
+
+	hpd = gpiod_get_value_cansleep(udphy->hpd_gpio) > 0;
+
+	mutex_lock(&udphy->mutex);
+	udphy->dp_sink_hpd_cfg = hpd;
+	rk_udphy_dp_hpd_event_trigger(udphy, hpd);
+	mutex_unlock(&udphy->mutex);
+
+	return IRQ_HANDLED;
+}
+
+static int rk_udphy_hpd_irq_init(struct rk_udphy *udphy)
+{
+	struct device *dev = udphy->dev;
+	int irq, ret;
+
+	if (!udphy->hpd_gpio)
+		return 0;
+
+	irq = gpiod_to_irq(udphy->hpd_gpio);
+	if (irq < 0)
+		return dev_err_probe(dev, irq, "failed to get hpd irq\n");
+
+	ret = devm_request_threaded_irq(dev, irq, NULL, rk_udphy_hpd_irq,
+					IRQF_ONESHOT | IRQF_TRIGGER_RISING |
+					IRQF_TRIGGER_FALLING, "usbdp-hpd", udphy);
+	if (ret)
+		return dev_err_probe(dev, ret, "failed to request hpd irq\n");
+
+	return 0;
+}
+
 static void rk_udphy_set_typec_default_mapping(struct rk_udphy *udphy)
 {
 	if (udphy->flip) {
@@ -978,6 +1025,11 @@ static int rk_udphy_parse_dt(struct rk_udphy *udphy)
 	if (IS_ERR(udphy->sbu2_dc_gpio))
 		return PTR_ERR(udphy->sbu2_dc_gpio);
 
+	udphy->hpd_gpio = devm_gpiod_get_optional(dev, "hpd", GPIOD_IN);
+	if (IS_ERR(udphy->hpd_gpio))
+		return dev_err_probe(dev, PTR_ERR(udphy->hpd_gpio),
+				     "failed to get hpd gpio\n");
+
 	if (device_property_present(dev, "maximum-speed")) {
 		maximum_speed = usb_get_maximum_speed(dev);
 		udphy->hs = maximum_speed <= USB_SPEED_HIGH;
@@ -1048,6 +1100,16 @@ static int rk_udphy_dp_phy_init(struct phy *phy)
 
 	udphy->dp_in_use = true;
 
+	/*
+	 * Inject the HPD now that dp_in_use is set: the controller only powers
+	 * the PHY on (and so re-asserts HPD) once it believes a sink is there,
+	 * which it cannot know until this first injection has happened.
+	 */
+	if (udphy->hpd_gpio) {
+		udphy->dp_sink_hpd_cfg = gpiod_get_value_cansleep(udphy->hpd_gpio) > 0;
+		rk_udphy_dp_hpd_event_trigger(udphy, udphy->dp_sink_hpd_cfg);
+	}
+
 	mutex_unlock(&udphy->mutex);
 
 	return 0;
@@ -1080,6 +1142,16 @@ static int rk_udphy_dp_phy_power_on(struct phy *phy)
 	rk_udphy_dplane_enable(udphy, dp_lanes);
 
 	rk_udphy_dplane_select(udphy);
+
+	/*
+	 * Re-assert the HPD we latched from the GPIO: a sink plugged in before
+	 * the DP driver powered the PHY up would otherwise stay invisible to
+	 * the controller.
+	 */
+	if (udphy->hpd_gpio) {
+		udphy->dp_sink_hpd_cfg = gpiod_get_value_cansleep(udphy->hpd_gpio) > 0;
+		rk_udphy_dp_hpd_event_trigger(udphy, udphy->dp_sink_hpd_cfg);
+	}
 
 unlock:
 	mutex_unlock(&udphy->mutex);
@@ -1499,6 +1571,11 @@ static int rk_udphy_probe(struct platform_device *pdev)
 
 	mutex_init(&udphy->mutex);
 	platform_set_drvdata(pdev, udphy);
+
+	/* needs udphy->mutex, so it has to come after mutex_init() */
+	ret = rk_udphy_hpd_irq_init(udphy);
+	if (ret)
+		return ret;
 
 	if (device_property_present(dev, "orientation-switch")) {
 		ret = rk_udphy_setup_orien_switch(udphy);
