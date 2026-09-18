@@ -58,7 +58,15 @@
 	status = "okay";
 };
 
+&hdmi_receiver_sound {
+	status = "okay";
+};
+
 &i2s6_8ch {
+	status = "okay";
+};
+
+&i2s7_8ch {
 	status = "okay";
 };
 
