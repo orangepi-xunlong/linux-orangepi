@@ -2270,6 +2270,12 @@ static int combo0_configure_usb_dp(struct sunxi_cadence_combophy *combo0)
 		phy_writew(combo0->phy_reg + (0x42EA << 1), 0x00F0);
 	}
 
+	/*
+	 * Enable CMN PLL1 clock (PHY_PMA_ISO_PLL_CTRL0 cmn_pll1_clk_en). The
+	 * DP-only path (combo0_dp_set_rate) writes this before the PLL-enable
+	 * poll; without it the DP PLL never locks on the 2-lane DP+USB path.
+	 */
+	phy_writew(combo0->phy_reg + (0xe003 << 1), 0x0003);
 	phy_writew(combo0->phy_reg + (0xE005 << 1), 0x000B);
 	phy_writew(combo0->phy_reg + (0xE006 << 1), 0x2224);
 	if (combo0->orientation == TYPEC_ORIENTATION_REVERSE) {
