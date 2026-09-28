@@ -249,6 +249,7 @@
 
 &led_blue_gpio {
 	gpios = <&gpio3 RK_PA6 GPIO_ACTIVE_HIGH>;
+	linux,default-trigger = "heartbeat";
 	status = "okay";
 };
 
