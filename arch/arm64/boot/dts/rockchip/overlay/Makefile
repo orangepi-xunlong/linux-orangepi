@@ -127,7 +127,8 @@ dtbo-$(CONFIG_ARCH_ROCKCHIP) += \
 	rockchip-rk3588-uart4-m0.dtbo \
 	rockchip-rk3588-uart6-m2.dtbo \
 	rockchip-rk3588-lcd1.dtbo \
-	rockchip-rk3588-lcd2.dtbo
+	rockchip-rk3588-lcd2.dtbo \
+	rockchip-rk3588-opi5plus-lcd.dtbo
 
 scr-$(CONFIG_ARCH_ROCKCHIP) += \
        rockchip-fixup.scr
