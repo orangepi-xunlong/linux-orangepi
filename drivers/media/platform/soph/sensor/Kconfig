@@ -1,0 +1,121 @@
+# SPDX-License-Identifier: GPL-2.0-only
+config VIDEO_SOPHGO_SENSOR
+	bool "Sophgo Sensor Devices"
+	help
+	  If you have sensor device designed by Sophgo, say Y.
+
+	  Note that this option doesn't include new drivers in the kernel:
+	  saying N will just cause Kconfig to skip all the questions about
+	  Sophgo sensor devices.
+
+config SENSOR_V4L2_IMX585
+	depends on VIDEO_V4L2 && I2C
+	tristate "imx585 support"
+	default n
+	help
+	  Support for Sensor on the CV186X SoC.
+
+config SENSOR_V4L2_IMX307
+	depends on VIDEO_V4L2 && I2C
+	tristate "imx307 support"
+	default n
+	help
+	  Support for Sensor on the CV186X SoC.
+
+config SENSOR_V4L2_IMX327
+	depends on VIDEO_V4L2 && I2C
+	tristate "imx327 support"
+	default n
+	help
+	  Support for Sensor on the CV186X SoC.
+
+config SENSOR_V4L2_IMX412
+	depends on VIDEO_V4L2 && I2C
+	tristate "imx412 support"
+	default n
+	help
+	  Support for Sensor on the CV186X SoC.
+
+config SENSOR_V4L2_IMX415
+	depends on VIDEO_V4L2 && I2C
+	tristate "sony_imx415 support"
+	default n
+	help
+	  Support for Sensor on the CV186X SoC.
+
+config SENSOR_V4L2_IMX900
+	depends on VIDEO_V4L2 && I2C
+	tristate "imx900 support"
+	default n
+	help
+	  Support for Sensor on the CV186X SoC.
+
+config SENSOR_V4L2_LT6911
+	depends on VIDEO_V4L2 && I2C
+	tristate "lt6911 support"
+	default n
+	help
+	  Support for Sensor on the CV186X SoC.
+
+config SENSOR_V4L2_OS04A10
+	depends on VIDEO_V4L2 && I2C
+	tristate "os04a10 support"
+	default n
+	help
+	  Support for Sensor on the CV186X SoC.
+
+config SENSOR_V4L2_OS04E10
+	depends on VIDEO_V4L2 && I2C
+	tristate "os04e10 support"
+	default n
+	help
+	  Support for Sensor on the CV186X SoC.
+
+config SENSOR_V4L2_OS08B10
+	depends on VIDEO_V4L2 && I2C
+	tristate "os08b10 support"
+	default n
+	help
+	  Support for Sensor on the Athena2 SoC.
+
+config SENSOR_V4L2_GC4653
+	depends on VIDEO_V4L2 && I2C
+	tristate "gc4653 support"
+	default n
+	help
+	  Support for Sensor on the CV186X SoC.
+
+config SENSOR_V4L2_PR2100
+	depends on VIDEO_V4L2 && I2C
+	tristate "pr2100 support"
+	default n
+	help
+	  Support for Sensor on the CV186X SoC.
+
+config SENSOR_V4L2_AR2020
+	depends on VIDEO_V4L2 && I2C
+	tristate "ar2020 support"
+	default n
+	help
+	  Support for Sensor on the CV186X SoC.
+
+config SENSOR_V4L2_NC021
+	depends on VIDEO_V4L2 && I2C
+	tristate "nc021 support"
+	default n
+	help
+	  Support for Sensor on the CV186X SoC.
+
+config SENSOR_V4L2_OV13855
+	depends on VIDEO_V4L2 && I2C
+	tristate "ov_ov13855 support"
+	default n
+	help
+	  Support for Sensor on the CV186X SoC.
+
+config SENSOR_V4L2_OV13850
+	depends on VIDEO_V4L2 && I2C
+	tristate "ov_ov13850 support"
+	default n
+	help
+	  Support for Sensor on the CV186X SoC.

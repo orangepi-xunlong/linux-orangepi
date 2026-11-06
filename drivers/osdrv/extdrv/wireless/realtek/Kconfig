@@ -1,0 +1,2 @@
+source "osdrv/extdrv/wireless/realtek/rtl8188f/Kconfig"
+source "osdrv/extdrv/wireless/realtek/rtl8189fs/Kconfig"

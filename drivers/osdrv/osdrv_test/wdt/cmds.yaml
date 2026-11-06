@@ -1,0 +1,25 @@
+testcase:
+	- case: ./wdt_fast_check.sh
+	  check_res: PASSED
+          runtime: 6
+
+	- case: ./wdt_test --gtest_filter="Init.check_default_config"
+	  check_res: OK
+          runtime: 1
+
+        - case: ./wdt_test --gtest_filter="Start_Stop.start_stop"
+          check_res: OK
+          runtime: 11
+
+        - case: ./wdt_test --gtest_filter="Feed.check_time_left"
+          check_res: OK
+          runtime: 11
+
+        - case: ./wdt_test --gtest_filter="Timeout.set_after_enable"
+          check_res: OK
+          runtime: 1
+
+        - case: ./wdt_test --gtest_filter="Timeout.stop_set"
+          check_res: OK
+          runtime: 11
+

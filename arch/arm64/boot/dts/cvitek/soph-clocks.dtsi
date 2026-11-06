@@ -1,0 +1,42 @@
+#include <dt-bindings/clock/cv186x-clock.h>
+
+/ {
+	osc: oscillator {
+                #clock-cells = <0>;
+                compatible = "fixed-clock";
+                clock-frequency = <25000000>;
+                clock-output-names = "osc";
+        };
+
+        clk_100k: clk_100k {
+                #clock-cells = <0>;
+                compatible = "fixed-clock";
+                clock-frequency = <100000>;
+                clock-output-names = "clk_100k";
+                clocks = <&osc>;
+        };
+
+        clk_32k: clk_32k {
+                #clock-cells = <0>;
+                compatible = "fixed-clock";
+                clock-frequency = <32808>;
+                clock-output-names = "clk_int32kpll";
+                clocks = <&osc>;
+        };
+
+        clk_xtal_free: clk_xtal_free {
+                #clock-cells = <0>;
+                compatible = "fixed-clock";
+                clock-frequency = <25000000>;
+                clock-output-names = "clk_xtal_free";
+                clocks = <&osc>;
+        };
+
+        clk: clock-controller {
+                status = "okay";
+                compatible = "cvitek,cv186x-clk";
+                reg = <0x0 0x28102000 0x0 0x1000>;
+                clocks = <&osc>;
+                #clock-cells = <1>;
+        };
+};

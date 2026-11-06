@@ -1,0 +1,84 @@
+# SPDX-License-Identifier: GPL-2.0-only
+
+config DRM_CVITEK
+	tristate "DRM Support for cvitek SoCs Platform"
+	depends on DRM && OF
+	select DRM_KMS_HELPER
+	select DRM_GEM_CMA_HELPER
+	select DRM_KMS_CMA_HELPER
+	select VIDEOMODE_HELPERS
+	help
+	  Choose this option if you want to use drm on Cvitek SoC.
+	  If M is selected the module will be called cvitek-drm.
+
+config CVITEK_DW_HDMI
+	bool "Cvitek specific extensions for DW_HDMI"
+	select DRM_DW_HDMI
+	select DRM_DW_HDMI_AHB_AUDIO
+	help
+	If you want to enable HDMI on Cvitek SoC, you should
+	  select this option.
+
+config CVITEK_MIPI_DSI
+	bool "Cvitek specific extensions for MIPI DSI"
+	depends on DRM_CVITEK
+	select DRM_MIPI_DSI
+	select DRM_PANEL
+	help
+	  If you want to enable MIPI DSI on Cvitek SoC, you should
+	  select this option.
+
+config CVITEK_LVDS
+	bool "Cvitek specific extensions for LVDS"
+	help
+	  If you want to enable LVDS on Cvitek SoC, you should
+	  select this option.
+
+choice
+    prompt "Cvitek display0 output"
+	depends on DRM_CVITEK
+    default CVITEK_MIPI_DSI0
+
+	config CVITEK_MIPI_DSI0
+		depends on CVITEK_MIPI_DSI
+		bool "MIPI DSI0"
+		help
+		If you want to enable MIPI DSI on Cvitek SoC, you should
+		select this option.
+
+	config CVITEK_LVDS0
+		depends on CVITEK_LVDS
+		bool "LVDS0"
+		help
+		If you want to enable LVDS0 on Cvitek SoC, you should
+		select this option.
+
+endchoice
+
+choice
+    prompt "Cvitek display1 output"
+	depends on DRM_CVITEK
+    default CVITEK_HDMI
+
+	config CVITEK_MIPI_DSI1
+		depends on CVITEK_MIPI_DSI
+		bool "MIPI DSI1"
+		help
+		If you want to enable MIPI DSI1 on Cvitek SoC, you should
+		select this option.
+
+	config CVITEK_HDMI
+		depends on CVITEK_DW_HDMI
+		bool "HDMI"
+		help
+		If you want to enable HDMI on Cvitek SoC, you should
+		select this option.
+
+	config CVITEK_LVDS1
+		depends on CVITEK_LVDS
+		bool "LVDS1"
+		help
+		If you want to enable LVDS1 on Cvitek SoC, you should
+		select this option.
+
+endchoice

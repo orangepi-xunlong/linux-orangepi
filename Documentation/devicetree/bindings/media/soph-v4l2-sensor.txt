@@ -1,0 +1,87 @@
+* Sophgo V4l2 Sensor
+
+Required Properties:
+- compatible: Must be "cvitek,sensor*"
+- reg: I2C slave address
+- port: link to cif end point
+
+Example:
+
+	&i2c0 {
+		sensor0@1a{
+			status = "okay";
+			compatible = "cvitek,sensor0";
+			reg = <0x1a>;
+			port {
+				sensor0_out: endpoint {
+					remote-endpoint = <&cif_in_ep0>;
+				};
+			};
+		};
+	};
+
+	&i2c1 {
+		sensor1@1a{
+			status = "okay";
+			compatible = "cvitek,sensor1";
+			reg = <0x1a>;
+			port {
+				sensor1_out: endpoint {
+					remote-endpoint = <&cif_in_ep1>;
+				};
+			};
+		};
+	};
+
+
+	&i2c2 {
+		sensor2@1a{
+			status = "okay";
+			compatible = "cvitek,sensor2";
+			reg = <0x1a>;
+			port {
+				sensor2_out: endpoint {
+					remote-endpoint = <&cif_in_ep2>;
+				};
+			};
+		};
+	};
+
+	&i2c4 {
+		sensor3@1a{
+			status = "okay";
+			compatible = "cvitek,sensor3";
+			reg = <0x1a>;
+			port {
+				sensor3_out: endpoint {
+					remote-endpoint = <&cif_in_ep3>;
+				};
+			};
+		};
+	};
+
+	&i2c5 {
+		sensor4@1a{
+			status = "okay";
+			compatible = "cvitek,sensor4";
+			reg = <0x1a>;
+			port {
+				sensor4_out: endpoint {
+					remote-endpoint = <&cif_in_ep4>;
+				};
+			};
+		};
+	};
+
+	&i2c6 {
+		sensor5@1a{
+			status = "okay";
+			compatible = "cvitek,sensor5";
+			reg = <0x1a>;
+			port {
+				sensor5_out: endpoint {
+					remote-endpoint = <&cif_in_ep5>;
+				};
+			};
+		};
+	};

@@ -1,0 +1,18 @@
+# SDVT-License-Identifier: GPL-2.0-only
+
+config CAN_SDVT_CAN
+	tristate "Generic Platform Bus based SDVT_CAN driver"
+	help
+	  This driver adds SDVT IP SDVT_CAN
+
+
+config CAN_SDVT_PLATFORM
+	tristate "Generic Platform Bus based SDVT_CAN driver"
+	help
+	  This driver adds SDVT IP SDVT_CAN
+
+
+config CAN_SDVT_BASIC
+	tristate "Generic Platform Bus based SDVT_CAN driver"
+	help
+	  This driver adds SDVT IP SDVT_CAN

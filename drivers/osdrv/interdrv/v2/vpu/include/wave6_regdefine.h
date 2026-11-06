@@ -1,0 +1,648 @@
+//-----------------------------------------------------------------------------
+// COPYRIGHT (C) 2020   CHIPS&MEDIA INC. ALL RIGHTS RESERVED
+//
+// This file is distributed under BSD 3 clause and LGPL2.1 (dual license)
+// SPDX License Identifier: BSD-3-Clause
+// SPDX License Identifier: LGPL-2.1-only
+//
+// The entire notice above must be reproduced on all authorized copies.
+//
+// Description  :
+//-----------------------------------------------------------------------------
+
+#ifndef __WAVE6_REGISTER_DEFINE_H__
+#define __WAVE6_REGISTER_DEFINE_H__
+
+typedef enum {
+    W6_INIT_VPU         = 0x0001,
+    W6_WAKEUP_VPU       = 0x0002,
+    W6_CREATE_INSTANCE  = 0x0008,
+    W6_FLUSH_INSTANCE   = 0x0010,
+    W6_DESTROY_INSTANCE = 0x0020,
+    W6_INIT_SEQ         = 0x0040,
+    W6_SET_FB           = 0x0080,
+    W6_DEC_PIC          = 0x0100,
+    W6_ENC_PIC          = 0x0100,
+    W6_ENC_SET_PARAM    = 0x0200,
+    W6_GET_VPU_INFO     = 0x4000,
+    W6_QUERY            = 0x4000,
+    W6_UPDATE_BS        = 0x8000,
+} W6_VPU_COMMAND;
+
+typedef enum {
+    W6_SET_PARAM_OPT_COMMON       = 0,
+    W6_SET_PARAM_OPT_CHANGE_PARAM = 1,
+} W6_SET_PARAM_OPT;
+
+typedef enum {
+    W6_QUERY_GET_VPU_INFO   = 0,
+    W6_QUERY_SET_WRITE_PROT = 1,
+    W6_QUERY_GET_RESULT     = 2,
+    W6_QUERY_GET_FW_STATUS  = 3,
+    W6_QUERY_GET_BS_WR_PTR  = 6,
+} W6_QUERY_OPT;
+
+#define W6_REG_BASE     0x00000000
+#define W6_CMD_REG_BASE 0x00000200
+#define W6_CMD_REG_END  0x00000600
+
+/************************************************************************/
+/* VPU HOST REGISTER                                                    */
+/************************************************************************/
+#define W6_VCPU_CUR_PC                                       (W6_REG_BASE + 0x0004)
+#define W6_VCPU_CUR_LR                                       (W6_REG_BASE + 0x0008)
+#define W6_VPU_FIO_CTRL_ADDR                                 (W6_REG_BASE + 0x0020)
+#define W6_VPU_FIO_DATA                                      (W6_REG_BASE + 0x0024)
+#define W6_VPU_VINT_REASON_USR                               (W6_REG_BASE + 0x0030)
+#define W6_VPU_VINT_REASON_CLR                               (W6_REG_BASE + 0x0034)
+#define W6_VPU_HOST_INT_REQ                                  (W6_REG_BASE + 0x0038)
+#define W6_VPU_VINT_CLEAR                                    (W6_REG_BASE + 0x003C)
+#define W6_VPU_HINT_CLEAR                                    (W6_REG_BASE + 0x0040)
+#define W6_VPU_VPU_INT_STS                                   (W6_REG_BASE + 0x0044)
+#define W6_VPU_VINT_ENABLE                                   (W6_REG_BASE + 0x0048)
+#define W6_VPU_VINT_REASON                                   (W6_REG_BASE + 0x004C)
+#define W6_VPU_REMAP_CTRL                                    (W6_REG_BASE + 0x0060)
+#define W6_VPU_REMAP_VADDR                                   (W6_REG_BASE + 0x0064)
+#define W6_VPU_REMAP_PADDR                                   (W6_REG_BASE + 0x0068)
+#define W6_VPU_REMAP_CORE_START                              (W6_REG_BASE + 0x006C)
+#define W6_VPU_CMD_BUSY_STATUS                               (W6_REG_BASE + 0x0070)
+#define W6_VPU_HALT_STATUS                                   (W6_REG_BASE + 0x0074)
+#define W6_VPU_VCPU_STATUS                                   (W6_REG_BASE + 0x0078)
+#define W6_VPU_BUSY_STATUS                                   (W6_REG_BASE + 0x007C)
+#define W6_VPU_RET_PRODUCT_VERSION                           (W6_REG_BASE + 0x0094)
+#define W6_VPU_RET_VPU_CONFIG1                               (W6_REG_BASE + 0x009C)
+
+#define W6_SW_UART_STATUS                                    (W6_REG_BASE + 0x00f0)
+#define W6_SW_UART_TX_DATA                                   (W6_REG_BASE + 0x00f4)
+
+#define W6_VPU_PDBG_CTRL                                     (W6_REG_BASE + 0x0600)
+#define W6_VPU_PDBG_IDX_REG                                  (W6_REG_BASE + 0x0604)
+#define W6_VPU_PDBG_WDATA_REG                                (W6_REG_BASE + 0x0608)
+#define W6_VPU_PDBG_RDATA_REG                                (W6_REG_BASE + 0x060C)
+#define W6_VPU_PDBG_STEP_MASK                                (W6_REG_BASE + 0x0610)
+
+#define W6_VPU_SUB_FRAME_SYNC_CTRL                           (W6_REG_BASE + 0x011C)
+
+/************************************************************************/
+/* BACKBONE REGISTER                                                    */
+/************************************************************************/
+#define W6_BACKBONE_BASE                                     (0x6000)
+#define W6_BACKBONE_BUS_CTRL                                 (W6_BACKBONE_BASE + 0x208)
+#define W6_BACKBONE_BUS_STATUS                               (W6_BACKBONE_BASE + 0x20C)
+
+#define W6_BACKBONE_BASE_VCORE0                              (0x6000)
+#define W6_BACKBONE_BUS_CTRL_VCORE0                          (W6_BACKBONE_BASE_VCORE0 + 0x208)
+#define W6_BACKBONE_BUS_STATUS_VCORE0                        (W6_BACKBONE_BASE_VCORE0 + 0x20C)
+
+#define W6_BACKBONE_BASE_VCORE1                              (0xA000)
+#define W6_BACKBONE_BUS_CTRL_VCORE1                          (W6_BACKBONE_BASE_VCORE1 + 0x208)
+#define W6_BACKBONE_BUS_STATUS_VCORE1                        (W6_BACKBONE_BASE_VCORE1 + 0x20C)
+
+/************************************************************************/
+/* DECODER/ENCODER COMMON                                               */
+/************************************************************************/
+#define W6_COMMAND                                           (W6_REG_BASE + 0x200)
+#define W6_COMMAND_OPTION                                    (W6_REG_BASE + 0x204)
+#define W6_QUERY_OPTION                                      (W6_REG_BASE + 0x204)
+#define W6_RET_SUCCESS                                       (W6_REG_BASE + 0x208)
+#define W6_RET_FAIL_REASON                                   (W6_REG_BASE + 0x20C)
+#define W6_CMD_INSTANCE_INFO                                 (W6_REG_BASE + 0x210)
+#define W6_CMD_QUEUE_FULL_IDC                                (W6_REG_BASE + 0x214)
+#define W6_CMD_QUEUE_EMPTY_IDC                               (W6_REG_BASE + 0x218)
+#define W6_CMD_DONE_INST                                     (W6_REG_BASE + 0x21C)
+#define W6_RET_INSTANCE_ID                                   (W6_REG_BASE + 0x220)
+#define W6_CMD_CQ_IN_TICK                                    (W6_REG_BASE + 0x23C)
+#define W6_CMD_FW_RUN_TICK                                   (W6_REG_BASE + 0x240)
+#define W6_CMD_HW_RUN_TICK                                   (W6_REG_BASE + 0x244)
+#define W6_CMD_HW_DONE_TICK                                  (W6_REG_BASE + 0x248)
+#define W6_CMD_FW_DONE_TICK                                  (W6_REG_BASE + 0x24C)
+#define W6_CMD_RQ_OUT_TICK                                   (W6_REG_BASE + 0x250)
+#define W6_CMD_FW_PRE_RUN_TICK                               (W6_REG_BASE + 0x254)
+#define W6_CMD_HW_PRE_RUN_TICK                               (W6_REG_BASE + 0x258)
+#define W6_CMD_HW_PRE_DONE_TICK                              (W6_REG_BASE + 0x25C)
+#define W6_CMD_FW_PRE_DONE_TICK                              (W6_REG_BASE + 0x260)
+#define W6_RET_CQ_FLAG                                       (W6_REG_BASE + 0x5FC)
+
+/************************************************************************/
+/* COMMON - INIT_VPU                                                    */
+/************************************************************************/
+/************************************************************************/
+/* COMMON - GET_VPU_INFO                                                */
+/************************************************************************/
+#define W6_RET_FW_VERSION                                    (W6_REG_BASE + 0x300)
+#define W6_RET_PRODUCT_NAME                                  (W6_REG_BASE + 0x304)
+#define W6_RET_PRODUCT_VERSION                               (W6_REG_BASE + 0x308)
+#define W6_RET_STD_DEF0                                      (W6_REG_BASE + 0x30C)
+#define W6_RET_STD_DEF1                                      (W6_REG_BASE + 0x310)
+#define W6_RET_CONF_FEATURE                                  (W6_REG_BASE + 0x314)
+#define W6_RET_CONF_DATE                                     (W6_REG_BASE + 0x318)
+#define W6_RET_CONF_REVISION                                 (W6_REG_BASE + 0x31C)
+#define W6_RET_CONF_TYPE                                     (W6_REG_BASE + 0x320)
+
+/************************************************************************/
+/* DECODER - CREATE_INSTANCE                                            */
+/************************************************************************/
+#define W6_CMD_DEC_CREATE_INST_WORK_BASE                     (W6_REG_BASE + 0x300)
+#define W6_CMD_DEC_CREATE_INST_WORK_SIZE                     (W6_REG_BASE + 0x304)
+#define W6_CMD_DEC_CREATE_INST_BS_ADDR                       (W6_REG_BASE + 0x308)
+#define W6_CMD_DEC_CREATE_INST_BS_SIZE                       (W6_REG_BASE + 0x30C)
+#define W6_CMD_DEC_CREATE_INST_BS_PARAM                      (W6_REG_BASE + 0x310)
+#define W6_CMD_DEC_CREATE_INST_ADDR_EXT                      (W6_REG_BASE + 0x318)
+#define W6_CMD_DEC_CREATE_INST_CORE_INFO                     (W6_REG_BASE + 0x330)
+#define W6_CMD_DEC_CREATE_INST_PRIORITY                      (W6_REG_BASE + 0x334)
+#define W6_CMD_DEC_CREATE_INST_TEMP_BASE                     (W6_REG_BASE + 0x348)
+#define W6_CMD_DEC_CREATE_INST_TEMP_SIZE                     (W6_REG_BASE + 0x34C)
+#define W6_CMD_DEC_CREATE_INST_SEC_AXI_BASE                  (W6_REG_BASE + 0x350)
+#define W6_CMD_DEC_CREATE_INST_SEC_AXI_SIZE                  (W6_REG_BASE + 0x354)
+
+/************************************************************************/
+/* DECODER - INIT_SEQ                                                   */
+/************************************************************************/
+#define W6_CMD_DEC_INIT_SEQ_BS_RD_PTR                        (W6_REG_BASE + 0x300)
+#define W6_CMD_DEC_INIT_SEQ_BS_WR_PTR                        (W6_REG_BASE + 0x304)
+#define W6_CMD_DEC_INIT_SEQ_BS_OPTION                        (W6_REG_BASE + 0x308)
+
+/************************************************************************/
+/* DECODER - SET_FB                                                     */
+/************************************************************************/
+#define W6_CMD_DEC_SET_FB_PIC_INFO                           (W6_REG_BASE + 0x300)
+#define W6_CMD_DEC_SET_FB_PIC_SIZE                           (W6_REG_BASE + 0x304)
+#define W6_CMD_DEC_SET_FB_NUM                                (W6_REG_BASE + 0x308)
+#define W6_CMD_DEC_SET_FB_FBC_Y0                             (W6_REG_BASE + 0x310)
+#define W6_CMD_DEC_SET_FB_FBC_C0                             (W6_REG_BASE + 0x314)
+#define W6_CMD_DEC_SET_FB_FBC_Y_OFFSET0                      (W6_REG_BASE + 0x318)
+#define W6_CMD_DEC_SET_FB_FBC_C_OFFSET0                      (W6_REG_BASE + 0x31C)
+#define W6_CMD_DEC_SET_FB_MV_COL0                            (W6_REG_BASE + 0x320)
+#define W6_CMD_DEC_SET_FB_SUB_SAMPLED0                       (W6_REG_BASE + 0x324)
+#define W6_CMD_DEC_SET_FB_FBC_Y1                             (W6_REG_BASE + 0x328)
+#define W6_CMD_DEC_SET_FB_FBC_C1                             (W6_REG_BASE + 0x32C)
+#define W6_CMD_DEC_SET_FB_FBC_Y_OFFSET1                      (W6_REG_BASE + 0x330)
+#define W6_CMD_DEC_SET_FB_FBC_C_OFFSET1                      (W6_REG_BASE + 0x334)
+#define W6_CMD_DEC_SET_FB_MV_COL1                            (W6_REG_BASE + 0x338)
+#define W6_CMD_DEC_SET_FB_SUB_SAMPLED1                       (W6_REG_BASE + 0x33C)
+#define W6_CMD_DEC_SET_FB_FBC_Y2                             (W6_REG_BASE + 0x340)
+#define W6_CMD_DEC_SET_FB_FBC_C2                             (W6_REG_BASE + 0x344)
+#define W6_CMD_DEC_SET_FB_FBC_Y_OFFSET2                      (W6_REG_BASE + 0x348)
+#define W6_CMD_DEC_SET_FB_FBC_C_OFFSET2                      (W6_REG_BASE + 0x34C)
+#define W6_CMD_DEC_SET_FB_MV_COL2                            (W6_REG_BASE + 0x350)
+#define W6_CMD_DEC_SET_FB_SUB_SAMPLED2                       (W6_REG_BASE + 0x354)
+#define W6_CMD_DEC_SET_FB_FBC_Y3                             (W6_REG_BASE + 0x358)
+#define W6_CMD_DEC_SET_FB_FBC_C3                             (W6_REG_BASE + 0x35C)
+#define W6_CMD_DEC_SET_FB_FBC_Y_OFFSET3                      (W6_REG_BASE + 0x360)
+#define W6_CMD_DEC_SET_FB_FBC_C_OFFSET3                      (W6_REG_BASE + 0x364)
+#define W6_CMD_DEC_SET_FB_MV_COL3                            (W6_REG_BASE + 0x368)
+#define W6_CMD_DEC_SET_FB_SUB_SAMPLED3                       (W6_REG_BASE + 0x36C)
+#define W6_CMD_DEC_SET_FB_FBC_Y4                             (W6_REG_BASE + 0x370)
+#define W6_CMD_DEC_SET_FB_FBC_C4                             (W6_REG_BASE + 0x374)
+#define W6_CMD_DEC_SET_FB_FBC_Y_OFFSET4                      (W6_REG_BASE + 0x378)
+#define W6_CMD_DEC_SET_FB_FBC_C_OFFSET4                      (W6_REG_BASE + 0x37C)
+#define W6_CMD_DEC_SET_FB_MV_COL4                            (W6_REG_BASE + 0x380)
+#define W6_CMD_DEC_SET_FB_SUB_SAMPLED4                       (W6_REG_BASE + 0x384)
+#define W6_CMD_DEC_SET_FB_FBC_Y5                             (W6_REG_BASE + 0x388)
+#define W6_CMD_DEC_SET_FB_FBC_C5                             (W6_REG_BASE + 0x38C)
+#define W6_CMD_DEC_SET_FB_FBC_Y_OFFSET5                      (W6_REG_BASE + 0x390)
+#define W6_CMD_DEC_SET_FB_FBC_C_OFFSET5                      (W6_REG_BASE + 0x394)
+#define W6_CMD_DEC_SET_FB_MV_COL5                            (W6_REG_BASE + 0x398)
+#define W6_CMD_DEC_SET_FB_SUB_SAMPLED5                       (W6_REG_BASE + 0x39C)
+#define W6_CMD_DEC_SET_FB_FBC_Y6                             (W6_REG_BASE + 0x3A0)
+#define W6_CMD_DEC_SET_FB_FBC_C6                             (W6_REG_BASE + 0x3A4)
+#define W6_CMD_DEC_SET_FB_FBC_Y_OFFSET6                      (W6_REG_BASE + 0x3A8)
+#define W6_CMD_DEC_SET_FB_FBC_C_OFFSET6                      (W6_REG_BASE + 0x3AC)
+#define W6_CMD_DEC_SET_FB_MV_COL6                            (W6_REG_BASE + 0x3B0)
+#define W6_CMD_DEC_SET_FB_SUB_SAMPLED6                       (W6_REG_BASE + 0x3B4)
+#define W6_CMD_DEC_SET_FB_FBC_Y7                             (W6_REG_BASE + 0x3B8)
+#define W6_CMD_DEC_SET_FB_FBC_C7                             (W6_REG_BASE + 0x3BC)
+#define W6_CMD_DEC_SET_FB_FBC_Y_OFFSET7                      (W6_REG_BASE + 0x3C0)
+#define W6_CMD_DEC_SET_FB_FBC_C_OFFSET7                      (W6_REG_BASE + 0x3C4)
+#define W6_CMD_DEC_SET_FB_MV_COL7                            (W6_REG_BASE + 0x3C8)
+#define W6_CMD_DEC_SET_FB_SUB_SAMPLED7                       (W6_REG_BASE + 0x3CC)
+#define W6_CMD_DEC_SET_FB_FBC_Y8                             (W6_REG_BASE + 0x3D0)
+#define W6_CMD_DEC_SET_FB_FBC_C8                             (W6_REG_BASE + 0x3D4)
+#define W6_CMD_DEC_SET_FB_FBC_Y_OFFSET8                      (W6_REG_BASE + 0x3D8)
+#define W6_CMD_DEC_SET_FB_FBC_C_OFFSET8                      (W6_REG_BASE + 0x3DC)
+#define W6_CMD_DEC_SET_FB_MV_COL8                            (W6_REG_BASE + 0x3E0)
+#define W6_CMD_DEC_SET_FB_SUB_SAMPLED8                       (W6_REG_BASE + 0x3E4)
+#define W6_CMD_DEC_SET_FB_FBC_Y9                             (W6_REG_BASE + 0x3E8)
+#define W6_CMD_DEC_SET_FB_FBC_C9                             (W6_REG_BASE + 0x3EC)
+#define W6_CMD_DEC_SET_FB_FBC_Y_OFFSET9                      (W6_REG_BASE + 0x3F0)
+#define W6_CMD_DEC_SET_FB_FBC_C_OFFSET9                      (W6_REG_BASE + 0x3F4)
+#define W6_CMD_DEC_SET_FB_MV_COL9                            (W6_REG_BASE + 0x3F8)
+#define W6_CMD_DEC_SET_FB_SUB_SAMPLED9                       (W6_REG_BASE + 0x3FC)
+#define W6_CMD_DEC_SET_FB_FBC_Y10                            (W6_REG_BASE + 0x400)
+#define W6_CMD_DEC_SET_FB_FBC_C10                            (W6_REG_BASE + 0x404)
+#define W6_CMD_DEC_SET_FB_FBC_Y_OFFSET10                     (W6_REG_BASE + 0x408)
+#define W6_CMD_DEC_SET_FB_FBC_C_OFFSET10                     (W6_REG_BASE + 0x40C)
+#define W6_CMD_DEC_SET_FB_MV_COL10                           (W6_REG_BASE + 0x410)
+#define W6_CMD_DEC_SET_FB_SUB_SAMPLED10                      (W6_REG_BASE + 0x414)
+#define W6_CMD_DEC_SET_FB_FBC_Y11                            (W6_REG_BASE + 0x418)
+#define W6_CMD_DEC_SET_FB_FBC_C11                            (W6_REG_BASE + 0x41C)
+#define W6_CMD_DEC_SET_FB_FBC_Y_OFFSET11                     (W6_REG_BASE + 0x420)
+#define W6_CMD_DEC_SET_FB_FBC_C_OFFSET11                     (W6_REG_BASE + 0x424)
+#define W6_CMD_DEC_SET_FB_MV_COL11                           (W6_REG_BASE + 0x428)
+#define W6_CMD_DEC_SET_FB_SUB_SAMPLED11                      (W6_REG_BASE + 0x42C)
+#define W6_CMD_DEC_SET_FB_FBC_Y12                            (W6_REG_BASE + 0x430)
+#define W6_CMD_DEC_SET_FB_FBC_C12                            (W6_REG_BASE + 0x434)
+#define W6_CMD_DEC_SET_FB_FBC_Y_OFFSET12                     (W6_REG_BASE + 0x438)
+#define W6_CMD_DEC_SET_FB_FBC_C_OFFSET12                     (W6_REG_BASE + 0x43C)
+#define W6_CMD_DEC_SET_FB_MV_COL12                           (W6_REG_BASE + 0x440)
+#define W6_CMD_DEC_SET_FB_SUB_SAMPLED12                      (W6_REG_BASE + 0x444)
+#define W6_CMD_DEC_SET_FB_FBC_Y13                            (W6_REG_BASE + 0x448)
+#define W6_CMD_DEC_SET_FB_FBC_C13                            (W6_REG_BASE + 0x44C)
+#define W6_CMD_DEC_SET_FB_FBC_Y_OFFSET13                     (W6_REG_BASE + 0x450)
+#define W6_CMD_DEC_SET_FB_FBC_C_OFFSET13                     (W6_REG_BASE + 0x454)
+#define W6_CMD_DEC_SET_FB_MV_COL13                           (W6_REG_BASE + 0x458)
+#define W6_CMD_DEC_SET_FB_SUB_SAMPLED13                      (W6_REG_BASE + 0x45C)
+#define W6_CMD_DEC_SET_FB_FBC_Y14                            (W6_REG_BASE + 0x460)
+#define W6_CMD_DEC_SET_FB_FBC_C14                            (W6_REG_BASE + 0x464)
+#define W6_CMD_DEC_SET_FB_FBC_Y_OFFSET14                     (W6_REG_BASE + 0x468)
+#define W6_CMD_DEC_SET_FB_FBC_C_OFFSET14                     (W6_REG_BASE + 0x46C)
+#define W6_CMD_DEC_SET_FB_MV_COL14                           (W6_REG_BASE + 0x470)
+#define W6_CMD_DEC_SET_FB_SUB_SAMPLED14                      (W6_REG_BASE + 0x474)
+#define W6_CMD_DEC_SET_FB_FBC_Y15                            (W6_REG_BASE + 0x478)
+#define W6_CMD_DEC_SET_FB_FBC_C15                            (W6_REG_BASE + 0x47C)
+#define W6_CMD_DEC_SET_FB_FBC_Y_OFFSET15                     (W6_REG_BASE + 0x480)
+#define W6_CMD_DEC_SET_FB_FBC_C_OFFSET15                     (W6_REG_BASE + 0x484)
+#define W6_CMD_DEC_SET_FB_MV_COL15                           (W6_REG_BASE + 0x488)
+#define W6_CMD_DEC_SET_FB_SUB_SAMPLED15                      (W6_REG_BASE + 0x48C)
+#define W6_CMD_DEC_SET_FB_DEFAULT_CDF                        (W6_REG_BASE + 0x494)
+#define W6_CMD_DEC_SET_FB_SEGMAP                             (W6_REG_BASE + 0x498)
+#define W6_CMD_DEC_SET_FB_SCL_PARAM                          (W6_REG_BASE + 0x4A4)
+#define W6_CMD_DEC_SET_FB_OPTION                             (W6_REG_BASE + 0x4E0)
+
+/************************************************************************/
+/* DECODER - SET_FB (UPDATE_FB)                                         */
+/************************************************************************/
+#define W6_CMD_DEC_UPDATE_FB_PIC_SIZE                        (W6_REG_BASE + 0x0304)
+#define W6_CMD_DEC_UPDATE_FB_STRIDE                          (W6_REG_BASE + 0x030C)
+#define W6_CMD_DEC_UPDATE_FB_INDICE                          (W6_REG_BASE + 0x04A0)
+#define W6_CMD_DEC_UPDATE_FB_FBC_Y                           (W6_REG_BASE + 0x0310)
+#define W6_CMD_DEC_UPDATE_FB_FBC_C                           (W6_REG_BASE + 0x0314)
+#define W6_CMD_DEC_UPDATE_FB_FBC_Y_OFFSET                    (W6_REG_BASE + 0x0318)
+#define W6_CMD_DEC_UPDATE_FB_FBC_C_OFFSET                    (W6_REG_BASE + 0x031C)
+#define W6_CMD_DEC_UPDATE_FB_MV_COL                          (W6_REG_BASE + 0x0320)
+
+/************************************************************************/
+/* DECODER - DEC_PIC                                                    */
+/************************************************************************/
+#define W6_CMD_DEC_PIC_BS_RD_PTR                             (W6_REG_BASE + 0x300)
+#define W6_CMD_DEC_PIC_BS_WR_PTR                             (W6_REG_BASE + 0x304)
+#define W6_CMD_DEC_PIC_BS_OPTION                             (W6_REG_BASE + 0x308)
+#define W6_CMD_DEC_PIC_USE_SEC_AXI                           (W6_REG_BASE + 0x30C)
+#define W6_CMD_DEC_PIC_SEQ_CHANGE_ENABLE_FLAG                (W6_REG_BASE + 0x310)
+#define W6_CMD_DEC_PIC_USERDATA_MASK                         (W6_REG_BASE + 0x314)
+#define W6_CMD_DEC_PIC_TEMPORAL_ID_PLUS1                     (W6_REG_BASE + 0x318)
+#define W6_CMD_DEC_PIC_FORCE_FB_LATENCY_PLUS1                (W6_REG_BASE + 0x31C)
+#define W6_CMD_DEC_PIC_USERDATA_BASE                         (W6_REG_BASE + 0x320)
+#define W6_CMD_DEC_PIC_USERDATA_SIZE                         (W6_REG_BASE + 0x324)
+#define W6_CMD_DEC_PIC_USERDATA_PARAM                        (W6_REG_BASE + 0x328)
+
+/************************************************************************/
+/* DECODER - GET_RESULT                                                 */
+/************************************************************************/
+#define W6_RET_DEC_USERDATA_BASE                             (W6_REG_BASE + 0x300)
+#define W6_RET_DEC_USERDATA_SIZE                             (W6_REG_BASE + 0x304)
+#define W6_RET_DEC_BS_RD_PTR                                 (W6_REG_BASE + 0x30C)
+#define W6_RET_DEC_SEQ_PARAM                                 (W6_REG_BASE + 0x310)
+#define W6_RET_DEC_COLOR_SAMPLE_INFO                         (W6_REG_BASE + 0x314)
+#define W6_RET_DEC_ASPECT_RATIO                              (W6_REG_BASE + 0x318)
+#define W6_RET_DEC_BIT_RATE                                  (W6_REG_BASE + 0x31C)
+#define W6_RET_DEC_FRAME_RATE_NR                             (W6_REG_BASE + 0x320)
+#define W6_RET_DEC_FRAME_RATE_DR                             (W6_REG_BASE + 0x324)
+#define W6_RET_DEC_NUM_REQUIRED_FB                           (W6_REG_BASE + 0x328)
+#define W6_RET_DEC_NUM_REORDER_DELAY                         (W6_REG_BASE + 0x32C)
+#define W6_RET_DEC_SUB_LAYER_INFO                            (W6_REG_BASE + 0x330)
+#define W6_RET_DEC_NOTIFICATION                              (W6_REG_BASE + 0x334)
+#define W6_RET_DEC_USERDATA_IDC                              (W6_REG_BASE + 0x338)
+#define W6_RET_DEC_PIC_SIZE                                  (W6_REG_BASE + 0x33C)
+#define W6_RET_DEC_CROP_TOP_BOTTOM                           (W6_REG_BASE + 0x340)
+#define W6_RET_DEC_CROP_LEFT_RIGHT                           (W6_REG_BASE + 0x344)
+#define W6_RET_DEC_AU_START_POS                              (W6_REG_BASE + 0x348)
+#define W6_RET_DEC_AU_END_POS                                (W6_REG_BASE + 0x34C)
+#define W6_RET_DEC_PIC_TYPE                                  (W6_REG_BASE + 0x350)
+#define W6_RET_DEC_PIC_POC                                   (W6_REG_BASE + 0x354)
+#define W6_RET_DEC_RECOVERY_POINT                            (W6_REG_BASE + 0x358)
+#define W6_RET_DEC_DEBUG_INDEX                               (W6_REG_BASE + 0x35C)
+#define W6_RET_DEC_DECODED_INDEX                             (W6_REG_BASE + 0x360)
+#define W6_RET_DEC_DISPLAY_INDEX                             (W6_REG_BASE + 0x364)
+#define W6_RET_DEC_REALLOC_INDEX                             (W6_REG_BASE + 0x368)
+#define W6_RET_DEC_DISP_IDC                                  (W6_REG_BASE + 0x36C)
+#define W6_RET_DEC_ERR_CTB_NUM                               (W6_REG_BASE + 0x370)
+#define W6_RET_DEC_PIC_PARAM                                 (W6_REG_BASE + 0x3A4)
+#define W6_RET_DEC_WARN_INFO                                 (W6_REG_BASE + 0x3CC)
+#define W6_RET_DEC_ERR_INFO                                  (W6_REG_BASE + 0x3D0)
+#define W6_RET_DEC_DECODING_SUCCESS                          (W6_REG_BASE + 0x3D4)
+
+/************************************************************************/
+/* DECODER - QUERY : UPDATE_DISP_FLAG                                   */
+/************************************************************************/
+#define W6_CMD_DEC_SET_DISP_IDC                              (W6_REG_BASE + 0x0118)
+#define W6_CMD_DEC_CLR_DISP_IDC                              (W6_REG_BASE + 0x011C)
+
+/************************************************************************/
+/* ENCODER - CREATE_INSTANCE                                            */
+/************************************************************************/
+#define W6_CMD_ENC_CREATE_INST_WORK_BASE                     (W6_REG_BASE + 0x300)
+#define W6_CMD_ENC_CREATE_INST_WORK_SIZE                     (W6_REG_BASE + 0x304)
+#define W6_CMD_ENC_CREATE_INST_BS_PARAM                      (W6_REG_BASE + 0x310)
+#define W6_CMD_ENC_CREATE_INST_SRC_OPT                       (W6_REG_BASE + 0x314)
+#define W6_CMD_ENC_CREATE_INST_ADDR_EXT                      (W6_REG_BASE + 0x318)
+#define W6_CMD_ENC_CREATE_INST_CORE_INFO                     (W6_REG_BASE + 0x330)
+#define W6_CMD_ENC_CREATE_INST_PRIORITY                      (W6_REG_BASE + 0x334)
+#define W6_CMD_ENC_CREATE_INST_TEMP_BASE                     (W6_REG_BASE + 0x348)
+#define W6_CMD_ENC_CREATE_INST_TEMP_SIZE                     (W6_REG_BASE + 0x34C)
+#define W6_CMD_ENC_CREATE_INST_SEC_AXI_BASE                  (W6_REG_BASE + 0x350)
+#define W6_CMD_ENC_CREATE_INST_SEC_AXI_SIZE                  (W6_REG_BASE + 0x354)
+#define W6_CMD_ENC_CREATE_INST_AR_TABLE_BASE                 (W6_REG_BASE + 0x358)
+
+/************************************************************************/
+/* ENCODER - SET_PARAM                                                  */
+/************************************************************************/
+#define W6_CMD_ENC_SET_PARAM_OPTION                          (W6_REG_BASE + 0x204)
+#define W6_CMD_ENC_SET_PARAM_ENABLE                          (W6_REG_BASE + 0x300)
+#define W6_CMD_ENC_SET_PARAM_SRC_SIZE                        (W6_REG_BASE + 0x304)
+#define W6_CMD_ENC_SET_PARAM_CUSTOM_MAP_ENDIAN               (W6_REG_BASE + 0x308)
+#define W6_CMD_ENC_SET_PARAM_SPS_PARAM                       (W6_REG_BASE + 0x30C)
+#define W6_CMD_ENC_SET_PARAM_PPS_PARAM                       (W6_REG_BASE + 0x310)
+#define W6_CMD_ENC_SET_PARAM_GOP_PARAM                       (W6_REG_BASE + 0x314)
+#define W6_CMD_ENC_SET_PARAM_INTRA_PARAM                     (W6_REG_BASE + 0x318)
+#define W6_CMD_ENC_SET_PARAM_CONF_WIN_TOP_BOT                (W6_REG_BASE + 0x31C)
+#define W6_CMD_ENC_SET_PARAM_CONF_WIN_LEFT_RIGHT             (W6_REG_BASE + 0x320)
+#define W6_CMD_ENC_SET_PARAM_RDO_PARAM                       (W6_REG_BASE + 0x324)
+#define W6_CMD_ENC_SET_PARAM_SLICE_PARAM                     (W6_REG_BASE + 0x328)
+#define W6_CMD_ENC_SET_PARAM_INTRA_REFRESH                   (W6_REG_BASE + 0x32C)
+#define W6_CMD_ENC_SET_PARAM_INTRA_MIN_MAX_QP                (W6_REG_BASE + 0x330)
+#define W6_CMD_ENC_SET_PARAM_RC_FRAME_RATE                   (W6_REG_BASE + 0x334)
+#define W6_CMD_ENC_SET_PARAM_RC_TARGET_RATE                  (W6_REG_BASE + 0x338)
+#define W6_CMD_ENC_SET_PARAM_RC_PARAM                        (W6_REG_BASE + 0x33C)
+#define W6_CMD_ENC_SET_PARAM_HVS_PARAM                       (W6_REG_BASE + 0x340)
+#define W6_CMD_ENC_SET_PARAM_RC_MAX_BITRATE                  (W6_REG_BASE + 0x344)
+#define W6_CMD_ENC_SET_PARAM_RC_VBV_BUFFER_SIZE              (W6_REG_BASE + 0x348)
+#define W6_CMD_ENC_SET_PARAM_INTER_MIN_MAX_QP                (W6_REG_BASE + 0x34C)
+#define W6_CMD_ENC_SET_PARAM_ROT_PARAM                       (W6_REG_BASE + 0x350)
+#define W6_CMD_ENC_SET_PARAM_NUM_UNITS_IN_TICK               (W6_REG_BASE + 0x354)
+#define W6_CMD_ENC_SET_PARAM_TIME_SCALE                      (W6_REG_BASE + 0x358)
+#define W6_CMD_ENC_SET_PARAM_NUM_TICKS_POC_DIFF_ONE          (W6_REG_BASE + 0x35C)
+#define W6_CMD_ENC_SET_PARAM_BG_PARAM                        (W6_REG_BASE + 0x36C)
+#define W6_CMD_ENC_SET_PARAM_NON_VCL_PARAM                   (W6_REG_BASE + 0x370)
+#define W6_CMD_ENC_SET_PARAM_VUI_RBSP_ADDR                   (W6_REG_BASE + 0x374)
+#define W6_CMD_ENC_SET_PARAM_HRD_RBSP_ADDR                   (W6_REG_BASE + 0x378)
+#define W6_CMD_ENC_SET_PARAM_QROUND_OFFSET                   (W6_REG_BASE + 0x380)
+#define W6_CMD_ENC_SET_PARAM_QUANT_PARAM_1                   (W6_REG_BASE + 0x384)
+#define W6_CMD_ENC_SET_PARAM_QUANT_PARAM_2                   (W6_REG_BASE + 0x388)
+#define W6_CMD_ENC_SET_PARAM_CUSTOM_GOP_PARAM                (W6_REG_BASE + 0x38C)
+#define W6_CMD_ENC_SET_PARAM_CUSTOM_GOP_PIC_PARAM_0          (W6_REG_BASE + 0x390)
+#define W6_CMD_ENC_SET_PARAM_CUSTOM_GOP_PIC_PARAM_1          (W6_REG_BASE + 0x394)
+#define W6_CMD_ENC_SET_PARAM_CUSTOM_GOP_PIC_PARAM_2          (W6_REG_BASE + 0x398)
+#define W6_CMD_ENC_SET_PARAM_CUSTOM_GOP_PIC_PARAM_3          (W6_REG_BASE + 0x39C)
+#define W6_CMD_ENC_SET_PARAM_CUSTOM_GOP_PIC_PARAM_4          (W6_REG_BASE + 0x3A0)
+#define W6_CMD_ENC_SET_PARAM_CUSTOM_GOP_PIC_PARAM_5          (W6_REG_BASE + 0x3A4)
+#define W6_CMD_ENC_SET_PARAM_CUSTOM_GOP_PIC_PARAM_6          (W6_REG_BASE + 0x3A8)
+#define W6_CMD_ENC_SET_PARAM_CUSTOM_GOP_PIC_PARAM_7          (W6_REG_BASE + 0x3AC)
+#define W6_CMD_ENC_SET_PARAM_TILE_PARAM                      (W6_REG_BASE + 0x3D0)
+#define W6_CMD_ENC_SET_PARAM_CUSTOM_LAMBDA_0                 (W6_REG_BASE + 0x3D4)
+#define W6_CMD_ENC_SET_PARAM_CUSTOM_LAMBDA_1                 (W6_REG_BASE + 0x3D8)
+#define W6_CMD_ENC_SET_PARAM_CUSTOM_LAMBDA_2                 (W6_REG_BASE + 0x3DC)
+#define W6_CMD_ENC_SET_PARAM_CUSTOM_LAMBDA_3                 (W6_REG_BASE + 0x3E0)
+#define W6_CMD_ENC_SET_PARAM_CUSTOM_LAMBDA_4                 (W6_REG_BASE + 0x3E4)
+#define W6_CMD_ENC_SET_PARAM_CUSTOM_LAMBDA_5                 (W6_REG_BASE + 0x3E8)
+#define W6_CMD_ENC_SET_PARAM_CUSTOM_LAMBDA_6                 (W6_REG_BASE + 0x3EC)
+#define W6_CMD_ENC_SET_PARAM_CUSTOM_LAMBDA_7                 (W6_REG_BASE + 0x3F0)
+#define W6_CMD_ENC_SET_PARAM_CUSTOM_LAMBDA_8                 (W6_REG_BASE + 0x3F4)
+#define W6_CMD_ENC_SET_PARAM_CUSTOM_LAMBDA_9                 (W6_REG_BASE + 0x3F8)
+#define W6_CMD_ENC_SET_PARAM_CUSTOM_LAMBDA_10                (W6_REG_BASE + 0x3FC)
+#define W6_CMD_ENC_SET_PARAM_CUSTOM_LAMBDA_11                (W6_REG_BASE + 0x400)
+#define W6_CMD_ENC_SET_PARAM_CUSTOM_LAMBDA_12                (W6_REG_BASE + 0x404)
+#define W6_CMD_ENC_SET_PARAM_CUSTOM_LAMBDA_13                (W6_REG_BASE + 0x408)
+#define W6_CMD_ENC_SET_PARAM_CUSTOM_LAMBDA_14                (W6_REG_BASE + 0x40C)
+#define W6_CMD_ENC_SET_PARAM_CUSTOM_LAMBDA_15                (W6_REG_BASE + 0x410)
+#define W6_CMD_ENC_SET_PARAM_CUSTOM_LAMBDA_16                (W6_REG_BASE + 0x414)
+#define W6_CMD_ENC_SET_PARAM_CUSTOM_LAMBDA_17                (W6_REG_BASE + 0x418)
+#define W6_CMD_ENC_SET_PARAM_CUSTOM_LAMBDA_18                (W6_REG_BASE + 0x41C)
+#define W6_CMD_ENC_SET_PARAM_CUSTOM_LAMBDA_19                (W6_REG_BASE + 0x420)
+#define W6_CMD_ENC_SET_PARAM_CUSTOM_LAMBDA_20                (W6_REG_BASE + 0x424)
+#define W6_CMD_ENC_SET_PARAM_CUSTOM_LAMBDA_21                (W6_REG_BASE + 0x428)
+#define W6_CMD_ENC_SET_PARAM_CUSTOM_LAMBDA_22                (W6_REG_BASE + 0x42C)
+#define W6_CMD_ENC_SET_PARAM_CUSTOM_LAMBDA_23                (W6_REG_BASE + 0x430)
+#define W6_CMD_ENC_SET_PARAM_CUSTOM_LAMBDA_24                (W6_REG_BASE + 0x434)
+#define W6_CMD_ENC_SET_PARAM_CUSTOM_LAMBDA_25                (W6_REG_BASE + 0x438)
+#define W6_CMD_ENC_SET_PARAM_CUSTOM_LAMBDA_26                (W6_REG_BASE + 0x43C)
+#define W6_CMD_ENC_SET_PARAM_CUSTOM_LAMBDA_27                (W6_REG_BASE + 0x440)
+#define W6_CMD_ENC_SET_PARAM_CUSTOM_LAMBDA_28                (W6_REG_BASE + 0x444)
+#define W6_CMD_ENC_SET_PARAM_CUSTOM_LAMBDA_29                (W6_REG_BASE + 0x448)
+#define W6_CMD_ENC_SET_PARAM_CUSTOM_LAMBDA_30                (W6_REG_BASE + 0x44C)
+#define W6_CMD_ENC_SET_PARAM_CUSTOM_LAMBDA_31                (W6_REG_BASE + 0x450)
+#define W6_CMD_ENC_SET_PARAM_CUSTOM_LAMBDA_32                (W6_REG_BASE + 0x454)
+#define W6_CMD_ENC_SET_PARAM_CUSTOM_LAMBDA_33                (W6_REG_BASE + 0x458)
+#define W6_CMD_ENC_SET_PARAM_CUSTOM_LAMBDA_34                (W6_REG_BASE + 0x45C)
+#define W6_CMD_ENC_SET_PARAM_CUSTOM_LAMBDA_35                (W6_REG_BASE + 0x460)
+#define W6_CMD_ENC_SET_PARAM_CUSTOM_LAMBDA_36                (W6_REG_BASE + 0x464)
+#define W6_CMD_ENC_SET_PARAM_CUSTOM_LAMBDA_37                (W6_REG_BASE + 0x468)
+#define W6_CMD_ENC_SET_PARAM_CUSTOM_LAMBDA_38                (W6_REG_BASE + 0x46C)
+#define W6_CMD_ENC_SET_PARAM_CUSTOM_LAMBDA_39                (W6_REG_BASE + 0x470)
+#define W6_CMD_ENC_SET_PARAM_CUSTOM_LAMBDA_40                (W6_REG_BASE + 0x474)
+#define W6_CMD_ENC_SET_PARAM_CUSTOM_LAMBDA_41                (W6_REG_BASE + 0x478)
+#define W6_CMD_ENC_SET_PARAM_CUSTOM_LAMBDA_42                (W6_REG_BASE + 0x47C)
+#define W6_CMD_ENC_SET_PARAM_CUSTOM_LAMBDA_43                (W6_REG_BASE + 0x480)
+#define W6_CMD_ENC_SET_PARAM_CUSTOM_LAMBDA_44                (W6_REG_BASE + 0x484)
+#define W6_CMD_ENC_SET_PARAM_CUSTOM_LAMBDA_45                (W6_REG_BASE + 0x488)
+#define W6_CMD_ENC_SET_PARAM_CUSTOM_LAMBDA_46                (W6_REG_BASE + 0x48C)
+#define W6_CMD_ENC_SET_PARAM_CUSTOM_LAMBDA_47                (W6_REG_BASE + 0x490)
+#define W6_CMD_ENC_SET_PARAM_CUSTOM_LAMBDA_48                (W6_REG_BASE + 0x494)
+#define W6_CMD_ENC_SET_PARAM_CUSTOM_LAMBDA_49                (W6_REG_BASE + 0x498)
+#define W6_CMD_ENC_SET_PARAM_CUSTOM_LAMBDA_50                (W6_REG_BASE + 0x49C)
+#define W6_CMD_ENC_SET_PARAM_CUSTOM_LAMBDA_51                (W6_REG_BASE + 0x4A0)
+#define W6_CMD_ENC_SET_PARAM_TEMPORAL_LAYER_0_QP             (W6_REG_BASE + 0x4A4)
+#define W6_CMD_ENC_SET_PARAM_TEMPORAL_LAYER_1_QP             (W6_REG_BASE + 0x4A8)
+#define W6_CMD_ENC_SET_PARAM_TEMPORAL_LAYER_2_QP             (W6_REG_BASE + 0x4AC)
+#define W6_CMD_ENC_SET_PARAM_TEMPORAL_LAYER_3_QP             (W6_REG_BASE + 0x4B0)
+#define W6_CMD_ENC_SET_PARAM_SFS_PARAM                       (W6_REG_BASE + 0x4C4)
+
+/************************************************************************/
+/* ENCODER - SET_FB                                                     */
+/************************************************************************/
+#define W6_CMD_ENC_SET_FB_PIC_INFO                           (W6_REG_BASE + 0x300)
+#define W6_CMD_ENC_SET_FB_PIC_SIZE                           (W6_REG_BASE + 0x304)
+#define W6_CMD_ENC_SET_FB_NUM                                (W6_REG_BASE + 0x308)
+#define W6_CMD_ENC_SET_FB_FBC_STRIDE                         (W6_REG_BASE + 0x30C)
+#define W6_CMD_ENC_SET_FB_FBC_Y0                             (W6_REG_BASE + 0x310)
+#define W6_CMD_ENC_SET_FB_FBC_C0                             (W6_REG_BASE + 0x314)
+#define W6_CMD_ENC_SET_FB_FBC_Y_OFFSET0                      (W6_REG_BASE + 0x318)
+#define W6_CMD_ENC_SET_FB_FBC_C_OFFSET0                      (W6_REG_BASE + 0x31C)
+#define W6_CMD_ENC_SET_FB_MV_COL0                            (W6_REG_BASE + 0x320)
+#define W6_CMD_ENC_SET_FB_SUB_SAMPLED0                       (W6_REG_BASE + 0x324)
+#define W6_CMD_ENC_SET_FB_FBC_Y1                             (W6_REG_BASE + 0x328)
+#define W6_CMD_ENC_SET_FB_FBC_C1                             (W6_REG_BASE + 0x32C)
+#define W6_CMD_ENC_SET_FB_FBC_Y_OFFSET1                      (W6_REG_BASE + 0x330)
+#define W6_CMD_ENC_SET_FB_FBC_C_OFFSET1                      (W6_REG_BASE + 0x334)
+#define W6_CMD_ENC_SET_FB_MV_COL1                            (W6_REG_BASE + 0x338)
+#define W6_CMD_ENC_SET_FB_SUB_SAMPLED1                       (W6_REG_BASE + 0x33C)
+#define W6_CMD_ENC_SET_FB_FBC_Y2                             (W6_REG_BASE + 0x340)
+#define W6_CMD_ENC_SET_FB_FBC_C2                             (W6_REG_BASE + 0x344)
+#define W6_CMD_ENC_SET_FB_FBC_Y_OFFSET2                      (W6_REG_BASE + 0x348)
+#define W6_CMD_ENC_SET_FB_FBC_C_OFFSET2                      (W6_REG_BASE + 0x34C)
+#define W6_CMD_ENC_SET_FB_MV_COL2                            (W6_REG_BASE + 0x350)
+#define W6_CMD_ENC_SET_FB_SUB_SAMPLED2                       (W6_REG_BASE + 0x354)
+#define W6_CMD_ENC_SET_FB_FBC_Y3                             (W6_REG_BASE + 0x358)
+#define W6_CMD_ENC_SET_FB_FBC_C3                             (W6_REG_BASE + 0x35C)
+#define W6_CMD_ENC_SET_FB_FBC_Y_OFFSET3                      (W6_REG_BASE + 0x360)
+#define W6_CMD_ENC_SET_FB_FBC_C_OFFSET3                      (W6_REG_BASE + 0x364)
+#define W6_CMD_ENC_SET_FB_MV_COL3                            (W6_REG_BASE + 0x368)
+#define W6_CMD_ENC_SET_FB_SUB_SAMPLED3                       (W6_REG_BASE + 0x36C)
+#define W6_CMD_ENC_SET_FB_FBC_Y4                             (W6_REG_BASE + 0x370)
+#define W6_CMD_ENC_SET_FB_FBC_C4                             (W6_REG_BASE + 0x374)
+#define W6_CMD_ENC_SET_FB_FBC_Y_OFFSET4                      (W6_REG_BASE + 0x378)
+#define W6_CMD_ENC_SET_FB_FBC_C_OFFSET4                      (W6_REG_BASE + 0x37C)
+#define W6_CMD_ENC_SET_FB_MV_COL4                            (W6_REG_BASE + 0x380)
+#define W6_CMD_ENC_SET_FB_SUB_SAMPLED4                       (W6_REG_BASE + 0x384)
+#define W6_CMD_ENC_SET_FB_FBC_Y5                             (W6_REG_BASE + 0x388)
+#define W6_CMD_ENC_SET_FB_FBC_C5                             (W6_REG_BASE + 0x38C)
+#define W6_CMD_ENC_SET_FB_FBC_Y_OFFSET5                      (W6_REG_BASE + 0x390)
+#define W6_CMD_ENC_SET_FB_FBC_C_OFFSET5                      (W6_REG_BASE + 0x394)
+#define W6_CMD_ENC_SET_FB_MV_COL5                            (W6_REG_BASE + 0x398)
+#define W6_CMD_ENC_SET_FB_SUB_SAMPLED5                       (W6_REG_BASE + 0x39C)
+#define W6_CMD_ENC_SET_FB_FBC_Y6                             (W6_REG_BASE + 0x3A0)
+#define W6_CMD_ENC_SET_FB_FBC_C6                             (W6_REG_BASE + 0x3A4)
+#define W6_CMD_ENC_SET_FB_FBC_Y_OFFSET6                      (W6_REG_BASE + 0x3A8)
+#define W6_CMD_ENC_SET_FB_FBC_C_OFFSET6                      (W6_REG_BASE + 0x3AC)
+#define W6_CMD_ENC_SET_FB_MV_COL6                            (W6_REG_BASE + 0x3B0)
+#define W6_CMD_ENC_SET_FB_SUB_SAMPLED6                       (W6_REG_BASE + 0x3B4)
+#define W6_CMD_ENC_SET_FB_FBC_Y7                             (W6_REG_BASE + 0x3B8)
+#define W6_CMD_ENC_SET_FB_FBC_C7                             (W6_REG_BASE + 0x3BC)
+#define W6_CMD_ENC_SET_FB_FBC_Y_OFFSET7                      (W6_REG_BASE + 0x3C0)
+#define W6_CMD_ENC_SET_FB_FBC_C_OFFSET7                      (W6_REG_BASE + 0x3C4)
+#define W6_CMD_ENC_SET_FB_MV_COL7                            (W6_REG_BASE + 0x3C8)
+#define W6_CMD_ENC_SET_FB_SUB_SAMPLED7                       (W6_REG_BASE + 0x3CC)
+#define W6_CMD_ENC_SET_FB_FBC_Y8                             (W6_REG_BASE + 0x3D0)
+#define W6_CMD_ENC_SET_FB_FBC_C8                             (W6_REG_BASE + 0x3D4)
+#define W6_CMD_ENC_SET_FB_FBC_Y_OFFSET8                      (W6_REG_BASE + 0x3D8)
+#define W6_CMD_ENC_SET_FB_FBC_C_OFFSET8                      (W6_REG_BASE + 0x3DC)
+#define W6_CMD_ENC_SET_FB_MV_COL8                            (W6_REG_BASE + 0x3E0)
+#define W6_CMD_ENC_SET_FB_SUB_SAMPLED8                       (W6_REG_BASE + 0x3E4)
+#define W6_CMD_ENC_SET_FB_FBC_Y9                             (W6_REG_BASE + 0x3E8)
+#define W6_CMD_ENC_SET_FB_FBC_C9                             (W6_REG_BASE + 0x3EC)
+#define W6_CMD_ENC_SET_FB_FBC_Y_OFFSET9                      (W6_REG_BASE + 0x3F0)
+#define W6_CMD_ENC_SET_FB_FBC_C_OFFSET9                      (W6_REG_BASE + 0x3F4)
+#define W6_CMD_ENC_SET_FB_MV_COL9                            (W6_REG_BASE + 0x3F8)
+#define W6_CMD_ENC_SET_FB_SUB_SAMPLED9                       (W6_REG_BASE + 0x3FC)
+#define W6_CMD_ENC_SET_FB_FBC_Y10                            (W6_REG_BASE + 0x400)
+#define W6_CMD_ENC_SET_FB_FBC_C10                            (W6_REG_BASE + 0x404)
+#define W6_CMD_ENC_SET_FB_FBC_Y_OFFSET10                     (W6_REG_BASE + 0x408)
+#define W6_CMD_ENC_SET_FB_FBC_C_OFFSET10                     (W6_REG_BASE + 0x40C)
+#define W6_CMD_ENC_SET_FB_MV_COL10                           (W6_REG_BASE + 0x410)
+#define W6_CMD_ENC_SET_FB_SUB_SAMPLED10                      (W6_REG_BASE + 0x414)
+#define W6_CMD_ENC_SET_FB_FBC_Y11                            (W6_REG_BASE + 0x418)
+#define W6_CMD_ENC_SET_FB_FBC_C11                            (W6_REG_BASE + 0x41C)
+#define W6_CMD_ENC_SET_FB_FBC_Y_OFFSET11                     (W6_REG_BASE + 0x420)
+#define W6_CMD_ENC_SET_FB_FBC_C_OFFSET11                     (W6_REG_BASE + 0x424)
+#define W6_CMD_ENC_SET_FB_MV_COL11                           (W6_REG_BASE + 0x428)
+#define W6_CMD_ENC_SET_FB_SUB_SAMPLED11                      (W6_REG_BASE + 0x42C)
+#define W6_CMD_ENC_SET_FB_FBC_Y12                            (W6_REG_BASE + 0x430)
+#define W6_CMD_ENC_SET_FB_FBC_C12                            (W6_REG_BASE + 0x434)
+#define W6_CMD_ENC_SET_FB_FBC_Y_OFFSET12                     (W6_REG_BASE + 0x438)
+#define W6_CMD_ENC_SET_FB_FBC_C_OFFSET12                     (W6_REG_BASE + 0x43C)
+#define W6_CMD_ENC_SET_FB_MV_COL12                           (W6_REG_BASE + 0x440)
+#define W6_CMD_ENC_SET_FB_SUB_SAMPLED12                      (W6_REG_BASE + 0x444)
+#define W6_CMD_ENC_SET_FB_FBC_Y13                            (W6_REG_BASE + 0x448)
+#define W6_CMD_ENC_SET_FB_FBC_C13                            (W6_REG_BASE + 0x44C)
+#define W6_CMD_ENC_SET_FB_FBC_Y_OFFSET13                     (W6_REG_BASE + 0x450)
+#define W6_CMD_ENC_SET_FB_FBC_C_OFFSET13                     (W6_REG_BASE + 0x454)
+#define W6_CMD_ENC_SET_FB_MV_COL13                           (W6_REG_BASE + 0x458)
+#define W6_CMD_ENC_SET_FB_SUB_SAMPLED13                      (W6_REG_BASE + 0x45C)
+#define W6_CMD_ENC_SET_FB_FBC_Y14                            (W6_REG_BASE + 0x460)
+#define W6_CMD_ENC_SET_FB_FBC_C14                            (W6_REG_BASE + 0x464)
+#define W6_CMD_ENC_SET_FB_FBC_Y_OFFSET14                     (W6_REG_BASE + 0x468)
+#define W6_CMD_ENC_SET_FB_FBC_C_OFFSET14                     (W6_REG_BASE + 0x46C)
+#define W6_CMD_ENC_SET_FB_MV_COL14                           (W6_REG_BASE + 0x470)
+#define W6_CMD_ENC_SET_FB_SUB_SAMPLED14                      (W6_REG_BASE + 0x474)
+#define W6_CMD_ENC_SET_FB_FBC_Y15                            (W6_REG_BASE + 0x478)
+#define W6_CMD_ENC_SET_FB_FBC_C15                            (W6_REG_BASE + 0x47C)
+#define W6_CMD_ENC_SET_FB_FBC_Y_OFFSET15                     (W6_REG_BASE + 0x480)
+#define W6_CMD_ENC_SET_FB_FBC_C_OFFSET15                     (W6_REG_BASE + 0x484)
+#define W6_CMD_ENC_SET_FB_MV_COL15                           (W6_REG_BASE + 0x488)
+#define W6_CMD_ENC_SET_FB_SUB_SAMPLED15                      (W6_REG_BASE + 0x48C)
+#define W6_CMD_ENC_SET_FB_DEFAULT_CDF                        (W6_REG_BASE + 0x494)
+#define W6_CMD_ENC_SET_FB_OPTION                             (W6_REG_BASE + 0x4E0)
+/************************************************************************/
+/* ENCODER - ENC_PIC                                                    */
+/************************************************************************/
+#define W6_CMD_ENC_PIC_BS_START                              (W6_REG_BASE + 0x300)
+#define W6_CMD_ENC_PIC_BS_SIZE                               (W6_REG_BASE + 0x304)
+#define W6_CMD_ENC_PIC_BS_OPTION                             (W6_REG_BASE + 0x308)
+#define W6_CMD_ENC_PIC_USE_SEC_AXI                           (W6_REG_BASE + 0x30C)
+#define W6_CMD_ENC_PIC_REPORT_PARAM                          (W6_REG_BASE + 0x310)
+#define W6_CMD_ENC_PIC_MV_HISTO_CLASS0                       (W6_REG_BASE + 0x318)
+#define W6_CMD_ENC_PIC_MV_HISTO_CLASS1                       (W6_REG_BASE + 0x31C)
+#define W6_CMD_ENC_PIC_CUSTOM_MAP_OPTION_PARAM               (W6_REG_BASE + 0x320)
+#define W6_CMD_ENC_PIC_CUSTOM_MAP_OPTION_ADDR                (W6_REG_BASE + 0x324)
+#define W6_CMD_ENC_PIC_SRC_PIC_IDX                           (W6_REG_BASE + 0x32C)
+#define W6_CMD_ENC_PIC_SRC_ADDR_Y                            (W6_REG_BASE + 0x330)
+#define W6_CMD_ENC_PIC_SRC_ADDR_U                            (W6_REG_BASE + 0x334)
+#define W6_CMD_ENC_PIC_SRC_ADDR_V                            (W6_REG_BASE + 0x338)
+#define W6_CMD_ENC_PIC_SRC_STRIDE                            (W6_REG_BASE + 0x33C)
+#define W6_CMD_ENC_PIC_SRC_FORMAT                            (W6_REG_BASE + 0x340)
+#define W6_CMD_ENC_PIC_SRC_AXI_SEL                           (W6_REG_BASE + 0x348)
+#define W6_CMD_ENC_PIC_CODE_OPTION                           (W6_REG_BASE + 0x34C)
+#define W6_CMD_ENC_PIC_PIC_PARAM                             (W6_REG_BASE + 0x350)
+#define W6_CMD_ENC_PIC_LONGTERM_PIC                          (W6_REG_BASE + 0x354)
+#define W6_CMD_ENC_PIC_PREFIX_SEI_NAL_ADDR                   (W6_REG_BASE + 0x358)
+#define W6_CMD_ENC_PIC_PREFIX_SEI_INFO                       (W6_REG_BASE + 0x35C)
+#define W6_CMD_ENC_PIC_SUFFIX_SEI_NAL_ADDR                   (W6_REG_BASE + 0x360)
+#define W6_CMD_ENC_PIC_SUFFIX_SEI_INFO                       (W6_REG_BASE + 0x364)
+
+/************************************************************************/
+/* ENCODER - UPDATE_BS                                                  */
+/************************************************************************/
+#define W6_CMD_ENC_UPDATE_BS_BS_START                        (W6_REG_BASE + 0x300)
+#define W6_CMD_ENC_UPDATE_BS_BS_SIZE                         (W6_REG_BASE + 0x304)
+
+/************************************************************************/
+/* ENCODER - GET_RESULT                                                 */
+/************************************************************************/
+#define W6_RET_ENC_RD_PTR                                    (W6_REG_BASE + 0x300)
+#define W6_RET_ENC_WR_PTR                                    (W6_REG_BASE + 0x304)
+#define W6_RET_ENC_NUM_REQUIRED_FB                           (W6_REG_BASE + 0x308)
+#define W6_RET_ENC_MIN_SRC_BUF_NUM                           (W6_REG_BASE + 0x30C)
+#define W6_RET_ENC_PIC_TYPE                                  (W6_REG_BASE + 0x310)
+#define W6_RET_ENC_PIC_POC                                   (W6_REG_BASE + 0x314)
+#define W6_RET_ENC_PIC_IDX                                   (W6_REG_BASE + 0x318)
+#define W6_RET_ENC_PIC_SLICE_NUM                             (W6_REG_BASE + 0x31C)
+#define W6_RET_ENC_PIC_SKIP                                  (W6_REG_BASE + 0x320)
+#define W6_RET_ENC_PIC_NUM_INTRA                             (W6_REG_BASE + 0x324)
+#define W6_RET_ENC_PIC_NUM_MERGE                             (W6_REG_BASE + 0x328)
+#define W6_RET_ENC_PIC_NON_REF_PIC_FLAG                      (W6_REG_BASE + 0x32C)
+#define W6_RET_ENC_PIC_NUM_SKIP                              (W6_REG_BASE + 0x330)
+#define W6_RET_ENC_PIC_AVG_CTU_QP                            (W6_REG_BASE + 0x334)
+#define W6_RET_ENC_PIC_BYTE                                  (W6_REG_BASE + 0x338)
+#define W6_RET_ENC_GOP_PIC_IDX                               (W6_REG_BASE + 0x33C)
+#define W6_RET_ENC_USED_SRC_IDX                              (W6_REG_BASE + 0x340)
+#define W6_RET_ENC_PIC_NUM                                   (W6_REG_BASE + 0x344)
+#define W6_RET_ENC_VCL_NUT                                   (W6_REG_BASE + 0x348)
+#define W6_RET_ENC_PIC_AVG_VAR                               (W6_REG_BASE + 0x34C)
+#define W6_RET_ENC_PIC_DIST_LOW                              (W6_REG_BASE + 0x350)
+#define W6_RET_ENC_PIC_DIST_HIGH                             (W6_REG_BASE + 0x354)
+#define W6_RET_ENC_PIC_MAX_LATENCY_PICTURES                  (W6_REG_BASE + 0x358)
+#define W6_RET_ENC_HISTO_CNT_0                               (W6_REG_BASE + 0x360)
+#define W6_RET_ENC_HISTO_CNT_1                               (W6_REG_BASE + 0x364)
+#define W6_RET_ENC_HISTO_CNT_2                               (W6_REG_BASE + 0x368)
+#define W6_RET_ENC_HISTO_CNT_3                               (W6_REG_BASE + 0x36C)
+#define W6_RET_ENC_HISTO_CNT_4                               (W6_REG_BASE + 0x370)
+#define W6_RET_ENC_WARN_INFO                                 (W6_REG_BASE + 0x3AC)
+#define W6_RET_ENC_ERR_INFO                                  (W6_REG_BASE + 0x3B0)
+#define W6_RET_ENC_ENCODING_SUCCESS                          (W6_REG_BASE + 0x3B4)
+#define W6_RET_ENC_SUM_ME0_X_DIR_LOWER                       (W6_REG_BASE + 0x3B8)
+#define W6_RET_ENC_SUM_ME0_X_DIR_HIGHER                      (W6_REG_BASE + 0x3BC)
+#define W6_RET_ENC_SUM_ME0_Y_DIR_LOWER                       (W6_REG_BASE + 0x3C0)
+#define W6_RET_ENC_SUM_ME0_Y_DIR_HIGHER                      (W6_REG_BASE + 0x3C4)
+#define W6_RET_ENC_SUM_ME1_X_DIR_LOWER                       (W6_REG_BASE + 0x3C8)
+#define W6_RET_ENC_SUM_ME1_X_DIR_HIGHER                      (W6_REG_BASE + 0x3CC)
+#define W6_RET_ENC_SUM_ME1_Y_DIR_LOWER                       (W6_REG_BASE + 0x3D0)
+#define W6_RET_ENC_SUM_ME1_Y_DIR_HIGHER                      (W6_REG_BASE + 0x3D4)
+
+/************************************************************************/
+/* ENCODER - QUERY (GET_BS_WR_PTR)                                      */
+/************************************************************************/
+#define W6_RET_ENC_GET_BS_RD_PTR                             (W6_REG_BASE + 0x300)
+#define W6_RET_ENC_GET_BS_WR_PTR                             (W6_REG_BASE + 0x304)
+
+#endif /* __WAVE6_REGISTER_DEFINE_H__ */
+

@@ -1,0 +1,34 @@
+config USB_BM_DRD
+	tristate "Bitmain USB DRD Core Support"
+	depends on USB && HAS_DMA
+	select USB_XHCI_PLATFORM if USB_SUPPORT && USB_XHCI_HCD
+	help
+	  Say Y or M here if your system has a Dual Role SuperSpeed
+	  USB controller based on the Bitmain USB3 IP Core.
+
+	  If you choose to build this driver is a dynamically linked
+	  module, the module will be called bmusb_drd.ko.
+
+if USB_BM_DRD
+
+config USB_BM_MISC
+	bool "Additional miscellaneous device for ioctl"
+	depends on (USB=y || USB=USB_BM_DRD)
+	help
+	  Select this if you want to send commands to driver
+	  using I/O control.
+
+	  The miscellaneous function includes the drd state
+	  configuration and gadget standby mode.
+
+endif
+
+config USB_BM_GADGET
+	tristate "Bitmain device controller"
+	depends on USB_GADGET
+	help
+	  Say 'Y' or 'M' here to enable device controller functionality
+	  of the Bitmain driver.
+
+comment "Platform Glue Driver Support"
+

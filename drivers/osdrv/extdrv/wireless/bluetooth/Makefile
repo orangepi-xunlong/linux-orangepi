@@ -1,0 +1,10 @@
+ifeq ($(CONFIG_BT_HCIUART_RTL3WIRE),y)
+CONFIG_BT_HCIUART_RTL3WIRE = m
+endif
+
+ifeq ($(CONFIG_BT_HCIBTUSB_RTLBTUSB),y)
+CONFIG_BT_HCIBTUSB_RTLBTUSB = m
+endif
+
+obj-$(CONFIG_BT_HCIUART_RTL3WIRE)     	+= rtl_uart_bt/
+obj-$(CONFIG_BT_HCIBTUSB_RTLBTUSB)     	+= rtl_usb_bt/

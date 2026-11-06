@@ -1,0 +1,8 @@
+config SOPHGO_VETH
+	tristate "Sophgon Virtual Ethernet Driver over PCIe"
+	default y
+	help
+		Sophgo virtual network interface card transmit packages though
+		PCIe. This is the EP end driver. It needs support of RC end
+		(host). If RC end donnot load device driver, any packages will
+		lost.

@@ -1,0 +1,17 @@
+Bitmain_Ethernet_Controller_Device_Tree_Binding:
+
+  Required_properties:
+    - compatible: "bitmain,ethernet"
+
+  Optional_properties:
+    - mac-address: "MAC address of the Ethernet controller"
+    - interrupts: "Should specify the interrupt number for the controller"
+    - reg: "Should specify the base address and size of the memory-mapped registers"
+
+
+#Example:
+#  ethernet@0:
+#   compatible: "bitmain,ethernet"
+#   mac-address: [00:11:22:33:44:55]
+#   interrupts: <0>
+#   reg: <0x0 0x1000>

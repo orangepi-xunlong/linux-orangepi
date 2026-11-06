@@ -1,0 +1,48 @@
+/ {
+	model = "Orange Pi O1 16GB";
+
+	memory@100000000 {
+		device_type = "memory";
+		reg = <0x1 0x00000000 0x4 0x00000000>;  //16G
+	};
+
+	reserved-memory {
+		#address-cells = <0x2>;
+		#size-cells = <0x2>;
+		ranges;
+#ifndef __UBOOT__
+		//0x1_02E0_0000 - 0x1_0300_0000 for vo logo (owner: yu.yang@sophgo.com)
+		vo_logo: vo_logo {
+			alloc-ranges = <0x1 0x2E00000 0 0x200000>; // 2M, for vo logo
+			size = <0x0 0x200000>;
+		};
+
+		//0x1_4000_0000 - 0x1_4800_0000 for HDMI (owner: yu.yang@sophgo.com)
+		cma_reserved: linux,cma {
+			compatible = "shared-dma-pool";
+			reusable;
+			size = <0x0 0x8000000>; // 128m for drm
+			alloc-ranges = <0x1 0x40000000 0x0 0x8000000>;   // to fix hdmi audio bug
+			alignment = <0x0 0x100000>; // 1MB
+			linux,cma-default;
+		};
+
+		//0x1_0400_0000 - 0x1_2400_0000 for TPU (owner: zhuolin.li@sophgo.com)
+		//Don't move the TPU address
+		scalar_reserved: scalar_mem {
+			reg = <0x1 0x04000000 0x0 0x20000000>;  //512MB for TPU firmware
+			no-map;
+		};
+
+		ion_for_npu: ion_npu_mem {
+			compatible = "npu-region";
+			reg = <0x2 0x00000000 0x1 0x00000000>; // 4G, for npu
+		};
+		
+		ion_for_vpp: ion_vpp_mem {
+			compatible = "vpp-region";
+			reg = <0x3 0x00000000 0x1 0x00000000>; // 4G, for TPU
+		};
+#endif
+	};
+};

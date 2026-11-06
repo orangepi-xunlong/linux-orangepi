@@ -1,0 +1,28 @@
+# SPDX-License-Identifier: GPL-2.0-only
+config SOPH_ISP_V4L2_SUPPORT
+	tristate "Soph ISP V4L2 Support"
+	depends on VIDEO_V4L2 && VIDEO_DEV
+	select VIDEO_V4L2_SUBDEV_API
+	select VIDEOBUF2_DMA_CONTIG
+	select V4L2_MEM2MEM_DEV
+	select V4L2_FWNODE
+	default n
+	help
+	  If you have a v4l2 device designed by Sophgo, say Y.
+
+	  Note that this option doesn't include new drivers in the kernel:
+	  saying N will just cause Kconfig to skip all the questions about
+	  Sophgo v4l2 devices.
+
+if SOPH_ISP_V4L2_SUPPORT
+menuconfig V4L_SENSOR_DRIVERS
+	tristate "V4L2 Sensor driver"
+	default y
+	help
+	  Say Y here to enable support for V4L sensor drivers.
+
+if V4L_SENSOR_DRIVERS
+	source "drivers/media/platform/soph/sensor/Kconfig"
+endif
+
+endif

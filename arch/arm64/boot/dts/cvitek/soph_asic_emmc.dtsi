@@ -1,0 +1,11 @@
+&dac0{
+	mute-gpio-l = <&porta 6 GPIO_ACTIVE_LOW>;
+};
+
+&dac1{
+	mute-gpio-l = <&porta 7 GPIO_ACTIVE_LOW>;
+};
+/ {
+	/delete-node/ cvi-spif@57000000;
+	/delete-node/ cv-spinf@290d0000;
+};

@@ -1,0 +1,268 @@
+/dts-v1/;
+#include "soph_base_arm64.dtsi"
+//#include "soph_asic_bga.dtsi"
+#include "soph_asic_emmc.dtsi"
+#include "soph_default_memmap.dtsi"
+
+/ {
+	model = "Orange Pi O1 8GB test";
+	aliases {
+		serial0 = &uart0;
+	};
+
+	chosen {
+		stdout-path = "serial0"; // "serial0:115200n8", no arguments means no re-initialization
+	};
+
+	gpio-keys {
+		compatible = "gpio-keys";
+
+		key-power {
+			label = "poweroff";
+			linux,code = <KEY_POWER>;
+
+			gpios = <&portg 7 GPIO_ACTIVE_LOW>;
+		};
+	};
+};
+
+&uart0 {
+	clock-frequency = <200000000>;
+	current-speed = <115200>;
+};
+
+&mipi_dsi0 {
+	clock-lane = <2>;
+	data-lanes = <0 1 3 4>;
+	lanes-swap = <0 0 0 0 0>;
+	status = "disabled";
+};
+
+&backlight {
+	pwms = <&pwm1 0 25000 0>;
+	status = "okay";
+};
+
+&mipi_panel0 {
+	compatible = "innolux,afj101-ba2131";
+	reset-gpio = <&portf 4 GPIO_ACTIVE_LOW>;
+	power-gpio = <&portf 3 GPIO_ACTIVE_HIGH>;
+
+	backlight = <&backlight>;
+
+
+	status = "disabled";
+	//status = "okay";
+};
+
+&usbdrd3_0 {
+        //vbus-gpio = <&portd 2 GPIO_ACTIVE_HIGH>;
+	usbdrd_dwc3_0: usb@39010000 {
+		role-switch-default-mode = "host";
+	};
+};
+
+&i2c3 {
+	status = "okay";
+
+	gt9xx_0: touchscreen@14 {
+		compatible = "goodix,gt9271";
+		reg = <0x14>;
+		interrupt-parent = <&portd>;
+		interrupts = <2 IRQ_TYPE_LEVEL_LOW>;
+		irq-gpios = <&portd 2 IRQ_TYPE_LEVEL_LOW>;
+		reset-gpios = <&portf 1 GPIO_ACTIVE_HIGH>;
+		touchscreen-inverted-x;
+		//touchscreen-inverted-y;
+		touchscreen-swapped-x-y;
+		touchscreen-size-x = <1280>;
+		touchscreen-size-y = <800>;
+		status = "okay";
+	};
+};
+
+&cif_v4l2 {
+    ports {
+    #address-cells = <1>;
+        #size-cells = <0>;
+        cif_in: port@0 {
+            reg = <0>;
+        cif_in_ep0: endpoint@0 {
+                remote-endpoint = <&sensor0_out>;
+        };
+        cif_in_ep1: endpoint@1 {
+                remote-endpoint = <&sensor1_out>;
+        };
+        cif_in_ep2: endpoint@2 {
+                remote-endpoint = <&sensor2_out>;
+        };
+        cif_in_ep3: endpoint@3 {
+                remote-endpoint = <&sensor3_out>;
+        };
+        cif_in_ep4: endpoint@4 {
+                remote-endpoint = <&sensor4_out>;
+        };
+        cif_in_ep5: endpoint@5 {
+                remote-endpoint = <&sensor5_out>;
+        };
+        cif_in_ep6: endpoint@6 {
+                remote-endpoint = <&sensor6_out>;
+        };
+        cif_in_ep7: endpoint@7 {
+                remote-endpoint = <&sensor7_out>;
+        };
+        cif_in_ep8: endpoint@8 {
+            	remote-endpoint = <&sensor8_out>;
+        };
+        cif_in_ep9: endpoint@9 {
+                remote-endpoint = <&sensor9_out>;
+        };
+        cif_in_ep10: endpoint@10 {
+                remote-endpoint = <&sensor10_out>;
+        };
+        cif_in_ep11: endpoint@11 {
+                remote-endpoint = <&sensor11_out>;
+        };
+    };
+    };
+};
+
+&i2c1 {
+    sensor0@1{
+            status = "okay";
+            compatible = "v4l2,sensor0";
+            reg = <0x01>;
+            port {
+                    sensor0_out: endpoint {
+                        remote-endpoint = <&cif_in_ep0>;
+                };
+            };
+       };
+
+    sensor1@2{
+            status = "okay";
+            compatible = "v4l2,sensor1";
+             reg = <0x02>;
+            port {
+                    sensor1_out: endpoint {
+                        remote-endpoint = <&cif_in_ep1>;
+                };
+            };
+       };
+
+    sensor2@3{
+               status = "okay";
+               compatible = "v4l2,sensor2";
+               reg = <0x03>;
+               port {
+                       sensor2_out: endpoint {
+                               remote-endpoint = <&cif_in_ep2>;
+                       };
+               };
+       };
+
+    sensor3@4{
+               status = "okay";
+               compatible = "v4l2,sensor3";
+               reg = <0x04>;
+               port {
+                       sensor3_out: endpoint {
+                               remote-endpoint = <&cif_in_ep3>;
+                       };
+               };
+       };
+
+    sensor4@5{
+               status = "okay";
+               compatible = "v4l2,sensor4";
+               reg = <0x05>;
+               port {
+                       sensor4_out: endpoint {
+                               remote-endpoint = <&cif_in_ep4>;
+                       };
+               };
+       };
+
+    sensor5@6{
+            	status = "okay";
+               compatible = "v4l2,sensor5";
+               reg = <0x06>;
+               port {
+                       sensor5_out: endpoint {
+                               remote-endpoint = <&cif_in_ep5>;
+                       };
+               };
+       };
+
+    sensor6@7{
+               status = "okay";
+               compatible = "v4l2,sensor6";
+               reg = <0x07>;
+               port {
+                       sensor6_out: endpoint {
+                               remote-endpoint = <&cif_in_ep6>;
+                       };
+               };
+       };
+
+    sensor7@8{
+               status = "okay";
+               compatible = "v4l2,sensor7";
+               reg = <0x08>;
+               port {
+                       sensor7_out: endpoint {
+                               remote-endpoint = <&cif_in_ep7>;
+                       };
+               };
+       };
+
+    sensor8@9{
+               status = "okay";
+               compatible = "v4l2,sensor8";
+               reg = <0x09>;
+               port {
+                       sensor8_out: endpoint {
+                               remote-endpoint = <&cif_in_ep8>;
+                       };
+               };
+       };
+
+    sensor9@a{
+               status = "okay";
+               compatible = "v4l2,sensor9";
+               reg = <0x0a>;
+               port {
+                       sensor9_out: endpoint {
+                               remote-endpoint = <&cif_in_ep9>;
+                       };
+               };
+       };
+
+    sensor10@b{
+               status = "okay";
+               compatible = "v4l2,sensor10";
+               reg = <0x0b>;
+               port {
+                       sensor10_out: endpoint {
+                               remote-endpoint = <&cif_in_ep10>;
+                       };
+               };
+       };
+
+    sensor11@c{
+               status = "okay";
+               compatible = "v4l2,sensor11";
+               reg = <0x0c>;
+               port {
+                       sensor11_out: endpoint {
+                               remote-endpoint = <&cif_in_ep11>;
+                       };
+               };
+       };
+};
+
+
+
+&veth {
+	status = "okay";
+};

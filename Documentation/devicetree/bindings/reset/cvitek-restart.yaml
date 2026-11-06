@@ -1,0 +1,18 @@
+# Documentation/devicetree/bindings/power/reset/cvitek-restart.yaml
+
+description: |
+  Cvitek hardware reset controller
+
+properties:
+  compatible:
+    const: cvitek,restart
+
+#examples:
+#  - |
+#    reset-controller@10000000 {
+#        compatible = "cvitek,restart";
+#        #reset-cells = <1>;
+#        ...
+#    };
+
+

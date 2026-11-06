@@ -1,0 +1,8 @@
+#
+# tp device configuration
+#
+
+source "osdrv/extdrv/tp/ts_gsl/Kconfig"
+
+
+
