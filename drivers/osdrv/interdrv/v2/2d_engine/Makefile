@@ -5,8 +5,7 @@ $(CVIARCH_L)_2d_engine-y += vg_lite_hal.o
 $(CVIARCH_L)_2d_engine-y += vg_lite_kernel.o
 $(CVIARCH_L)_2d_engine-y += vg_lite_platform_bm1688.o
 obj-m += $(CVIARCH_L)_2d_engine.o
-%.o: %.c
-	@echo "Skipping compilation of $< (using prebuilt .o files)"
+# Kbuild restores the prebuilt objects from their .o_shipped inputs.
 
 KBUILD_EXTRA_SYMBOLS = $(src)/Module.symvers
 KBUILD_EXTRA_SYMBOLS += $(src)/../sys/Module.symvers
@@ -17,6 +16,6 @@ all:
 
 clean:
 	@rm -f *.ko *.mod* .*.cmd modules.order Module.symvers
-	@rm -f soph_2d_engine.o
+	@rm -f *.o
 	@rm -rf .tmp_versions
 endif

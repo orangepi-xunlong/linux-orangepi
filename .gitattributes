@@ -1,0 +1,2 @@
+# Preserve vendor 2D engine objects without text conversion.
+drivers/osdrv/interdrv/v2/2d_engine/*.o_shipped binary

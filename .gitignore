@@ -11,6 +11,7 @@
 # Normal rules (sorted alphabetically)
 #
 .*
+!.gitattributes
 *.a
 *.asn1.[ch]
 *.bin
